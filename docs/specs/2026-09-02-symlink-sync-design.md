@@ -30,15 +30,18 @@ Core 不依赖 AppKit/SwiftUI，只认文件路径。App 层负责沙盒授权�
 ## 3. 核心模型（SymSyncCore）
 
 ```swift
+struct Location: Codable {
+    var url: URL
+    var bookmark: Data?               // App 层写入，Core 不解释
+}
+
 struct SyncRule: Codable, Identifiable {
     var id: UUID
     var name: String
-    var source: URL
+    var source: Location
     var selection: Selection          // .all | .items([String])  子项名字
-    var targets: [URL]
+    var targets: [Location]
     var lastRunAt: Date?
-    var sourceBookmark: Data?         // App 层写入，Core 不解释
-    var targetBookmarks: [Data?]      // 与 targets 同序
 }
 
 enum ActionKind {
