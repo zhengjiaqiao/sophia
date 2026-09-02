@@ -119,3 +119,34 @@ private func rule(_ src: URL, _ targets: URL..., selection: Selection = .all) ->
   #expect(actions.map(\.kind) == [.alreadyLinked, .create])
   #expect(actions.map(\.target.path) == [dst1.path, dst2.path])
 }
+
+@Test func brokenLinksUnderSourceAreReportedOthersIgnored() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let src = try t.dir("src")
+  let dst = try t.dir("dst")
+  try t.file(src, "keep.md")
+  try t.link(at: dst.appendingPathComponent("gone.md"), to: src.appendingPathComponent("gone.md"))
+  try t.link(
+    at: dst.appendingPathComponent("foreign"), to: t.root.appendingPathComponent("elsewhere/x"))
+
+  let actions = try Planner().plan(rule(src, dst))
+
+  #expect(actions.map(\.kind) == [.create, .brokenLink])
+  #expect(actions[1].itemName == "gone.md")
+  #expect(actions[1].sourcePath.path == src.appendingPathComponent("gone.md").path)
+  #expect(actions[1].targetPath.path == dst.appendingPathComponent("gone.md").path)
+}
+
+@Test func liveLinkUnderSourceIsNotBroken() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let src = try t.dir("src")
+  let dst = try t.dir("dst")
+  let a = try t.file(src, "a.md")
+  try t.link(at: dst.appendingPathComponent("a.md"), to: a)
+
+  let actions = try Planner().plan(rule(src, dst))
+
+  #expect(actions.map(\.kind) == [.alreadyLinked])
+}
