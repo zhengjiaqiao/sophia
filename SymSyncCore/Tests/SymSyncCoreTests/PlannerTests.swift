@@ -77,3 +77,45 @@ private func rule(_ src: URL, _ targets: URL..., selection: Selection = .all) ->
     try Planner().plan(rule(src, dst))
   }
 }
+
+@Test func selectedItemsOnlyPlanNamedEntriesAndReportMissing() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let src = try t.dir("src")
+  let dst = try t.dir("dst")
+  try t.file(src, "a.md")
+  try t.file(src, "b.md")
+
+  let actions = try Planner().plan(rule(src, dst, selection: .items(["a.md", "zzz"])))
+
+  #expect(actions.map(\.itemName) == ["a.md", "zzz"])
+  #expect(actions.map(\.kind) == [.create, .sourceMissing])
+}
+
+@Test func hiddenEntriesAreSkippedInAllMode() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let src = try t.dir("src")
+  let dst = try t.dir("dst")
+  try t.file(src, ".DS_Store")
+  try t.file(src, "a.md")
+
+  let actions = try Planner().plan(rule(src, dst))
+
+  #expect(actions.map(\.itemName) == ["a.md"])
+}
+
+@Test func multipleTargetsArePlannedIndependently() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let src = try t.dir("src")
+  let dst1 = try t.dir("dst1")
+  let dst2 = try t.dir("dst2")
+  let a = try t.file(src, "a.md")
+  try t.link(at: dst1.appendingPathComponent("a.md"), to: a)
+
+  let actions = try Planner().plan(rule(src, dst1, dst2))
+
+  #expect(actions.map(\.kind) == [.alreadyLinked, .create])
+  #expect(actions.map(\.target.path) == [dst1.path, dst2.path])
+}
