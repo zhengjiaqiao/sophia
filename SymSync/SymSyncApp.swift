@@ -1,12 +1,18 @@
 import SwiftUI
+import SymSyncCore
 
 @main
 struct SymSyncApp: App {
+  @State private var model = RuleListModel(
+    store: FileRuleStore(fileURL: AppPaths.rulesFile),
+    grantStore: GrantStore(fileURL: AppPaths.grantsFile)
+  )
+
   var body: some Scene {
     WindowGroup {
       ContentView()
+        .environment(model)
     }
-    .windowResizability(.contentSize)
   }
 }
 
