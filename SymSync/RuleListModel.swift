@@ -17,9 +17,13 @@ final class RuleListModel {
     self.grantStore = grantStore
     do {
       rules = try store.load()
+    } catch {
+      errorMessage = "读取同步记录失败：\(error.localizedDescription)"
+    }
+    do {
       grants = try grantStore.load()
     } catch {
-      errorMessage = "读取数据失败：\(error.localizedDescription)"
+      errorMessage = "读取授权记录失败：\(error.localizedDescription)"
     }
   }
 
