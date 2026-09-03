@@ -73,7 +73,7 @@ struct RuleDetailView: View {
   }
 
   private var previewSection: some View {
-    PreviewView(rule: draft)
+    PreviewView(rule: $draft)
   }
 
   private var itemPicker: some View {

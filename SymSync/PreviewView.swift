@@ -3,7 +3,7 @@ import SymSyncCore
 
 struct PreviewView: View {
   @Environment(RuleListModel.self) private var model
-  let rule: SyncRule
+  @Binding var rule: SyncRule
   @State private var rows: [Row] = []
   @State private var confirmClean = false
 
@@ -13,25 +13,29 @@ struct PreviewView: View {
     var id: String { action.id }
   }
 
-  private var canRun: Bool {
-    model.isConfigured(rule) && !model.needsReauthorization(rule)
+  private var needsReauthorization: Bool { model.needsReauthorization(rule) }
+  private var canRun: Bool { model.isConfigured(rule) && !needsReauthorization }
+  /// 待创建：预览得到、尚未执行的 create
+  private var pendingCreates: [PlannedAction] {
+    rows.filter { $0.action.kind == .create && $0.outcome == nil }.map(\.action)
   }
-  private var hasCreates: Bool { rows.contains { $0.action.kind == .create && $0.outcome == nil } }
-  private var hasBroken: Bool {
-    rows.contains { $0.action.kind == .brokenLink && $0.outcome == nil }
+  /// 待清理：尚未删除的坏链
+  private var pendingBroken: [PlannedAction] {
+    rows.filter { $0.action.kind == .brokenLink && $0.outcome != .removed }.map(\.action)
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if model.needsReauthorization(rule) {
+      if needsReauthorization {
         Label("有目录需要重新授权，请重新选择源或目标", systemImage: "exclamationmark.triangle")
           .foregroundStyle(.orange)
       }
       HStack {
         Button("预览", action: preview).disabled(!canRun)
-        Button("执行") { run(cleanBroken: false) }.disabled(!hasCreates)
-        if hasBroken {
-          Button("清理坏链") { confirmClean = true }
+        Button("执行") { run(pendingCreates, cleanBroken: false) }
+          .disabled(!canRun || pendingCreates.isEmpty)
+        if !pendingBroken.isEmpty {
+          Button("清理坏链") { confirmClean = true }.disabled(!canRun)
         }
         Spacer()
         if let last = rule.lastRunAt {
@@ -50,8 +54,14 @@ struct PreviewView: View {
         .frame(minHeight: 200)
       }
     }
+    .onChange(of: rule) { old, new in
+      // 配置变了，之前的预览作废；lastRunAt 变化不影响
+      if old.source != new.source || old.selection != new.selection || old.targets != new.targets {
+        rows = []
+      }
+    }
     .confirmationDialog("删除这些坏链接？", isPresented: $confirmClean) {
-      Button("删除坏链接", role: .destructive) { run(cleanBroken: true) }
+      Button("删除坏链接", role: .destructive) { run(pendingBroken, cleanBroken: true) }
     } message: {
       Text("只删除指向本源目录且源已不存在的软链接，不会删除任何真实文件。")
     }
@@ -65,10 +75,17 @@ struct PreviewView: View {
     }
   }
 
-  private func run(cleanBroken: Bool) {
+  /// 只把选中的动作交给 Executor，结果按 action.id 合并回表格
+  private func run(_ actions: [PlannedAction], cleanBroken: Bool) {
     do {
-      let report = try model.execute(rule, actions: rows.map(\.action), cleanBroken: cleanBroken)
-      rows = report.entries.map { Row(action: $0.action, outcome: $0.outcome) }
+      let report = try model.execute(rule, actions: actions, cleanBroken: cleanBroken)
+      let outcomes = Dictionary(
+        report.entries.map { ($0.action.id, $0.outcome) }, uniquingKeysWith: { $1 })
+      rows = rows.map { row in
+        guard let outcome = outcomes[row.action.id] else { return row }
+        return Row(action: row.action, outcome: outcome)
+      }
+      rule.lastRunAt = model.rules.first { $0.id == rule.id }?.lastRunAt
     } catch {
       model.errorMessage = "执行失败：\(error.localizedDescription)"
     }
@@ -76,6 +93,7 @@ struct PreviewView: View {
 
   @ViewBuilder
   private func statusLabel(_ row: Row) -> some View {
+    // 先看执行结果，再看规划状态
     switch (row.action.kind, row.outcome) {
     case (_, .created): Text("已创建").foregroundStyle(.green)
     case (_, .removed): Text("已删除").foregroundStyle(.green)
