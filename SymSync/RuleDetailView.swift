@@ -72,10 +72,8 @@ struct RuleDetailView: View {
     .onChange(of: draft) { _, new in model.update(new) }
   }
 
-  /// Task 14 替换为 PreviewView。
-  @ViewBuilder
   private var previewSection: some View {
-    Text("待实现").foregroundStyle(.secondary)
+    PreviewView(rule: draft)
   }
 
   private var itemPicker: some View {
