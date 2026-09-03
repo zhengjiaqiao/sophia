@@ -78,6 +78,17 @@ private func rule(_ src: URL, _ targets: URL..., selection: Selection = .all) ->
   }
 }
 
+@Test func itemsSelectionWithUnreadableSourceThrows() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let dst = try t.dir("dst")
+  let src = t.root.appendingPathComponent("missing")
+
+  #expect(throws: PlannerError.sourceUnreadable(src.path)) {
+    try Planner().plan(rule(src, dst, selection: .items(["a"])))
+  }
+}
+
 @Test func selectedItemsOnlyPlanNamedEntriesAndReportMissing() throws {
   let t = try TempTree()
   defer { t.cleanup() }

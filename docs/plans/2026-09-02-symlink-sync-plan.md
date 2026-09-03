@@ -2258,3 +2258,16 @@ gh pr merge --squash --delete-branch && git checkout main && git pull
 - App Store 上架：开发者账号、`DEVELOPMENT_TEAM`、图标、隐私说明、Archive 与 TestFlight。
 - 菜单栏常驻、源目录监听自动同步。
 - Playbook Stage 4 evals（`CLAUDE.md` / skills 改动触发的回归）与 Stage 6 控制带。
+
+---
+
+## 实施偏差（2026-09-03 记录）
+
+按 playbook 要求，实现与计划不一致处记录如下，计划正文保持原样：
+
+- **Task 12** `RuleListModel.init`：规则与授权改为两个独立的 `do/catch`，避免 rules.json 读取失败后 `grants` 为空、下次授权时覆盖 grants.json。
+- **Task 13** `DirectoryField`：增加 `.onChange(of: location)` 同步 `text` 与 `unauthorizedPath`，修复删除中间目标后文本框显示错位。
+- **Task 13** 侧栏"+"放在工具栏而非列表底部，遵循 macOS 惯例；spec §7 已同步。
+- **Task 14** `PreviewView`：`rule` 改为 `@Binding`；"执行"只提交待创建项、"清理坏链"只提交未删除的坏链，结果按 `action.id` 合并回表格；源/子项/目标变化时清空旧预览；执行后把 `lastRunAt` 写回 draft。
+- **流程**：PR 采用堆叠方式（#1 feat/scaffold → main，#2 feat/core → feat/scaffold，#3 feat/app → feat/core），由人工按顺序合并；Task 15 并入 PR #3，不单开分支。
+- **环境**：全新 Xcode 首次构建前需 `xcodebuild -runFirstLaunch`。
