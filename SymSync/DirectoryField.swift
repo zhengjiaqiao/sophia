@@ -37,6 +37,10 @@ struct DirectoryField: View {
       }
     }
     .onAppear { text = location?.url.path ?? "" }
+    .onChange(of: location) { _, new in
+      text = new?.url.path ?? ""
+      unauthorizedPath = nil
+    }
   }
 
   private func commitTyped() {
