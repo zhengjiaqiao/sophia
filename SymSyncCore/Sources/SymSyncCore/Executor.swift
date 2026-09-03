@@ -18,7 +18,10 @@ public struct Executor {
   private func outcome(for action: PlannedAction, cleanBroken: Bool) -> SyncReport.Outcome {
     switch action.kind {
     case .create:
-      guard fm.entryKind(atPath: action.target.path) == .directory else {
+      var isDirectory: ObjCBool = false
+      guard fm.fileExists(atPath: action.target.path, isDirectory: &isDirectory),
+        isDirectory.boolValue
+      else {
         return .failed("目标目录不存在")
       }
       do {
@@ -29,6 +32,10 @@ public struct Executor {
         return .failed(error.localizedDescription)
       }
     case .brokenLink where cleanBroken:
+      // 预览到确认之间路径可能已被换成真实文件，删除前再确认仍是软链
+      guard case .symlink = fm.entryKind(atPath: action.targetPath.path) else {
+        return .failed("不再是软链接，已跳过")
+      }
       do {
         try fm.removeItem(atPath: action.targetPath.path)
         return .removed

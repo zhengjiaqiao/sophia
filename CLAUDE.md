@@ -33,7 +33,7 @@ macOS SwiftUI 软链接同步工具。核心逻辑在 `SymSyncCore/`（Swift Pac
 
 ## Things Claude gets wrong
 
-- `FileManager.fileExists(atPath:)` 跟随软链，坏链返回 false。判断条目类型用 `FileManager.entryKind(atPath:)`
+- `FileManager.fileExists(atPath:)` 跟随软链，坏链返回 false。判断条目类型用 `FileManager.entryKind(atPath:)`（唯一例外：Executor 判断目标目录是否存在要跟随软链，用 fileExists(atPath:isDirectory:)）
 - `resolvingSymlinksInPath()` 会把 `/var` 变成 `/private/var`，导致路径比较失败。统一用 `normalizedPath`
 - `removeItem(at:)` 删软链时只删链接本身，这是我们要的行为，不要改成先解析再删
 - `URL(fileURLWithPath: "")` 会解析成当前工作目录，不是空路径。"未设置目录"的判断用 `Location.bookmark == nil`

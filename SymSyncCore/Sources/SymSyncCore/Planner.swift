@@ -14,7 +14,10 @@ public struct Planner {
 
   public func plan(_ rule: SyncRule) throws -> [PlannedAction] {
     let source = normalizedPath(rule.source.url.path)
-    let names = try itemNames(for: rule.selection, in: source)
+    guard let entries = try? fm.contentsOfDirectory(atPath: source) else {
+      throw PlannerError.sourceUnreadable(source)
+    }
+    let names = itemNames(for: rule.selection, entries: entries)
     var actions: [PlannedAction] = []
     for target in rule.targets {
       let targetDir = normalizedPath(target.url.path)
@@ -26,12 +29,9 @@ public struct Planner {
     return actions
   }
 
-  private func itemNames(for selection: Selection, in source: String) throws -> [String] {
+  private func itemNames(for selection: Selection, entries: [String]) -> [String] {
     switch selection {
     case .all:
-      guard let entries = try? fm.contentsOfDirectory(atPath: source) else {
-        throw PlannerError.sourceUnreadable(source)
-      }
       return entries.filter { !$0.hasPrefix(".") }.sorted()
     case .items(let items):
       return items

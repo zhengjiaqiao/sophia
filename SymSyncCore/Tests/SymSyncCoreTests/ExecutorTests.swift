@@ -86,3 +86,42 @@ private func rule(_ src: URL, _ dst: URL) -> SyncRule {
   #expect(FileManager.default.entryKind(atPath: gone.path) == .missing)
   #expect(FileManager.default.entryKind(atPath: foreign.path) != .missing)
 }
+
+@Test func brokenLinkReplacedByRealFileIsNotDeleted() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let src = try t.dir("src")
+  let dst = try t.dir("dst")
+  let gone = dst.appendingPathComponent("gone.md")
+  try t.link(at: gone, to: src.appendingPathComponent("gone.md"))
+
+  let actions = try Planner().plan(rule(src, dst))
+  #expect(actions.map(\.kind) == [.brokenLink])
+
+  // 预览之后、执行之前，路径被换成了真实文件
+  try FileManager.default.removeItem(at: gone)
+  try "real".write(to: gone, atomically: true, encoding: .utf8)
+
+  let report = Executor().run(actions, cleanBroken: true)
+
+  #expect(report.entries.map(\.outcome) == [.failed("不再是软链接，已跳过")])
+  #expect(FileManager.default.entryKind(atPath: gone.path) == .file)
+  #expect(try String(contentsOf: gone, encoding: .utf8) == "real")
+}
+
+@Test func createFollowsSymlinkedTargetDirectory() throws {
+  let t = try TempTree()
+  defer { t.cleanup() }
+  let src = try t.dir("src")
+  let real = try t.dir("real")
+  let dst = t.root.appendingPathComponent("dst")
+  try t.link(at: dst, to: real)
+  let a = try t.file(src, "a.md")
+
+  let report = Executor().run(try Planner().plan(rule(src, dst)))
+
+  #expect(report.entries.map(\.outcome) == [.created])
+  let dest = try FileManager.default.destinationOfSymbolicLink(
+    atPath: real.appendingPathComponent("a.md").path)
+  #expect(dest == a.path)
+}
