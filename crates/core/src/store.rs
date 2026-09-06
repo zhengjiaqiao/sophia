@@ -1,14 +1,16 @@
-//! JSON 持久化：rules.json、projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
-use crate::models::SyncRule;
+//! JSON 持久化：rules.json、projects.json、settings.json、syncset.json，整文件原子写（先写 .tmp 再 rename）
+use crate::models::{SyncRule, SyncSet};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// 应用设置；目前只有被用户关掉的 harness id 列表
+/// 应用设置：被用户关掉的 harness id，以及手动添加的本体位置
+/// 容器级 `default` 让旧格式（缺字段）照样能读
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub disabled_harnesses: Vec<String>,
+    pub manual_sources: Vec<PathBuf>,
 }
 
 pub struct Store {
@@ -50,6 +52,15 @@ impl Store {
     pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
         save_json(&self.dir.join("settings.json"), settings)
     }
+
+    /// 两级勾选的同步集；文件缺失 → 空集
+    pub fn load_sync_set(&self) -> io::Result<SyncSet> {
+        load_json(&self.dir.join("syncset.json"))
+    }
+
+    pub fn save_sync_set(&self, sync_set: &SyncSet) -> io::Result<()> {
+        save_json(&self.dir.join("syncset.json"), sync_set)
+    }
 }
 
 /// 文件不存在 → 默认值；存在但损坏 → 报错，不静默清空
@@ -76,8 +87,9 @@ fn save_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Selection, SyncRule};
+    use crate::models::{Selection, SourceSync, SyncRule};
     use crate::test_support::TempTree;
+    use std::collections::BTreeSet;
 
     #[test]
     fn missing_files_load_as_empty() {
@@ -124,10 +136,51 @@ mod tests {
         assert_eq!(s.load_settings().unwrap(), Settings::default());
         let settings = Settings {
             disabled_harnesses: vec!["a".into(), "b".into()],
+            manual_sources: vec![PathBuf::from("/a/skills")],
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
         assert!(!dir.join("settings.json.tmp").exists());
+    }
+
+    #[test]
+    fn sync_set_missing_is_empty_and_round_trips() {
+        let t = TempTree::new();
+        let dir = t.root().join("data/SymSync");
+        let s = Store::new(dir.clone());
+        assert_eq!(s.load_sync_set().unwrap(), SyncSet::default());
+
+        let mut set = SyncSet::default();
+        set.sources.insert(
+            "/a/skills".into(),
+            SourceSync {
+                targets: ["claude-code".to_string(), "codex".to_string()]
+                    .into_iter()
+                    .collect(),
+                disabled_skills: ["noisy".to_string()].into_iter().collect(),
+            },
+        );
+        set.sources.insert(
+            "/b/skills".into(),
+            SourceSync {
+                targets: ["project:/p::claude-code".to_string()]
+                    .into_iter()
+                    .collect(),
+                disabled_skills: BTreeSet::new(),
+            },
+        );
+        s.save_sync_set(&set).unwrap();
+        assert_eq!(s.load_sync_set().unwrap(), set);
+        assert!(!dir.join("syncset.json.tmp").exists());
+    }
+
+    #[test]
+    fn settings_without_manual_sources_still_loads() {
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        std::fs::write(dir.join("settings.json"), r#"{"disabledHarnesses":[]}"#).unwrap();
+        let loaded = Store::new(dir).load_settings().unwrap();
+        assert_eq!(loaded.manual_sources, Vec::<PathBuf>::new());
     }
 
     #[test]
