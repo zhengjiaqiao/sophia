@@ -40,6 +40,7 @@
     { "id": "zencoder", "display_name": "Zencoder", "project_dir": ".zencoder/skills", "global_dir": ["~/.zencoder/skills"], "detect_dir": ["~/.zencoder"], "universal": false },
     { "id": "neovate", "display_name": "Neovate", "project_dir": ".neovate/skills", "global_dir": ["~/.neovate/skills"], "detect_dir": ["~/.neovate"], "universal": false },
     { "id": "pochi", "display_name": "Pochi", "project_dir": ".pochi/skills", "global_dir": ["~/.pochi/skills"], "detect_dir": ["~/.pochi"], "universal": false },
-    { "id": "adal", "display_name": "AdaL", "project_dir": ".adal/skills", "global_dir": ["~/.adal/skills"], "detect_dir": ["~/.adal"], "universal": false }
+    { "id": "adal", "display_name": "AdaL", "project_dir": ".adal/skills", "global_dir": ["~/.adal/skills"], "detect_dir": ["~/.adal"], "universal": false },
+    { "id": "weiboap", "display_name": "WeiboAP", "project_dir": null, "global_dir": ["~/Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom"], "detect_dir": ["~/Library/Application Support/WeiboAP"], "universal": false }
   ]
 }

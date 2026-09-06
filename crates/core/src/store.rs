@@ -1,8 +1,15 @@
-//! JSON 持久化：rules.json、projects.json，整文件原子写（先写 .tmp 再 rename）
+//! JSON 持久化：rules.json、projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
 use crate::models::SyncRule;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
+
+/// 应用设置；目前只有被用户关掉的 harness id 列表
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Settings {
+    pub disabled_harnesses: Vec<String>,
+}
 
 pub struct Store {
     dir: PathBuf,
@@ -34,6 +41,14 @@ impl Store {
 
     pub fn save_projects(&self, projects: &[PathBuf]) -> io::Result<()> {
         save_json(&self.dir.join("projects.json"), &projects)
+    }
+
+    pub fn load_settings(&self) -> io::Result<Settings> {
+        load_json(&self.dir.join("settings.json"))
+    }
+
+    pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
+        save_json(&self.dir.join("settings.json"), settings)
     }
 }
 
@@ -99,6 +114,20 @@ mod tests {
         let p = vec![PathBuf::from("/a"), PathBuf::from("/b")];
         s.save_projects(&p).unwrap();
         assert_eq!(s.load_projects().unwrap(), p);
+    }
+
+    #[test]
+    fn settings_default_when_missing_and_round_trip() {
+        let t = TempTree::new();
+        let dir = t.root().join("data/SymSync");
+        let s = Store::new(dir.clone());
+        assert_eq!(s.load_settings().unwrap(), Settings::default());
+        let settings = Settings {
+            disabled_harnesses: vec!["a".into(), "b".into()],
+        };
+        s.save_settings(&settings).unwrap();
+        assert_eq!(s.load_settings().unwrap(), settings);
+        assert!(!dir.join("settings.json.tmp").exists());
     }
 
     #[test]
