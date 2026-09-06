@@ -127,7 +127,13 @@ export default function SkillsTab({
           <p>没有可用的本体位置。</p>
         )
       ) : (
-        <DomainView overview={overview} domainKey={selectedDomainKey} />
+        <DomainView
+          overview={overview}
+          domainKey={selectedDomainKey}
+          busy={busy}
+          onChange={onRefresh}
+          onError={onError}
+        />
       )}
     </section>
   );
