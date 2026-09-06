@@ -1,5 +1,6 @@
 //! 共享类型。serde 统一 camelCase，前端 `src/types.ts` 与之对应。
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// 同步整目录，或只同步指定名字的子项
@@ -104,4 +105,158 @@ pub struct Harness {
 pub enum Domain {
     Global,
     Project { path: PathBuf },
+}
+
+/// 本体位置的来源类别
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum SourceKind {
+    /// 通用仓库 `~/.agents/skills`
+    Universal,
+    /// 某 harness 的全局 skill 目录
+    HarnessGlobal { harness_id: String },
+    /// 某项目的 `.agents/skills`
+    ProjectStore { project: PathBuf },
+    /// harness 的额外位置（通配展开），label 为通配层匹配到的目录名
+    HarnessExtra { harness_id: String, label: String },
+    /// 用户手工添加
+    Manual,
+}
+
+/// 一处本体位置：真实存放 skill 目录的地方
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Source {
+    /// `normalize(path)` 的字符串
+    pub id: String,
+    pub path: PathBuf,
+    pub kind: SourceKind,
+    pub label: String,
+    /// 真实目录名，排序
+    pub skills: Vec<String>,
+}
+
+/// 目标目录所属的域
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum TargetScope {
+    Global {
+        harness_id: String,
+    },
+    Project {
+        project: PathBuf,
+        harness_id: String,
+    },
+}
+
+/// 一个可写入软链的目标目录
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Target {
+    /// Global → `<harness_id>`；Project → `project:<normalized path>::<harness_id>`
+    pub id: String,
+    pub label: String,
+    pub path: PathBuf,
+    pub scope: TargetScope,
+    /// 目标目录本身是软链且 real_path 等于某本体位置时，为该 Source 的 id
+    pub linked_whole_to: Option<String>,
+}
+
+/// (本体位置, skill, 目标) 交叉点的状态
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CellState {
+    Linked,
+    Missing,
+    /// 链接目标不存在
+    Broken,
+    /// 链接指向别处
+    Foreign,
+    /// 目标处已有真实文件或目录
+    Duplicate,
+    /// 目标整目录链接到别的本体位置
+    Unwritable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cell {
+    pub source_id: String,
+    pub skill: String,
+    pub target_id: String,
+    /// 目标目录下该 skill 的路径
+    pub path: PathBuf,
+    pub state: CellState,
+}
+
+/// 单个本体位置的同步选择
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSync {
+    pub targets: BTreeSet<String>,
+    pub disabled_skills: BTreeSet<String>,
+}
+
+/// 持久化到 `syncset.json` 的两级勾选
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSet {
+    pub sources: BTreeMap<String, SourceSync>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    pub sources: usize,
+    pub pending_missing: usize,
+    pub broken: usize,
+}
+
+/// 一次扫描的完整结果
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Overview {
+    pub sources: Vec<Source>,
+    pub targets: Vec<Target>,
+    pub cells: Vec<Cell>,
+    pub sync_set: SyncSet,
+    pub summary: Summary,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn source_kind_serializes_with_type_tag() {
+        let kind = SourceKind::HarnessExtra {
+            harness_id: "weiboap".into(),
+            label: "agent_1788".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&kind).unwrap(),
+            json!({"type": "harnessExtra", "harnessId": "weiboap", "label": "agent_1788"})
+        );
+    }
+
+    #[test]
+    fn target_scope_serializes_with_type_tag() {
+        let scope = TargetScope::Project {
+            project: PathBuf::from("/Users/me/proj"),
+            harness_id: "claude-code".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&scope).unwrap(),
+            json!({"type": "project", "project": "/Users/me/proj", "harnessId": "claude-code"})
+        );
+    }
+
+    #[test]
+    fn empty_sync_set_serializes_to_empty_map() {
+        assert_eq!(
+            serde_json::to_value(SyncSet::default()).unwrap(),
+            json!({"sources": {}})
+        );
+    }
 }
