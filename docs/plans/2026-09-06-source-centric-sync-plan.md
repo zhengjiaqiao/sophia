@@ -32,7 +32,7 @@
 | `crates/core/src/store.rs`（SyncSet 读写、manual_sources） | A1 |
 | `crates/core/src/discovery.rs`、`crates/core/data/harnesses.json`（sources / targets / 通配） | A2 |
 | `crates/core/src/skills.rs`（重写） | A3 |
-| `src-tauri/src/lib.rs`、`src/types.ts`、`src/api.ts`、`src/App.css`、`src/SkillsTab.tsx`（切换器）、`src/SourceView.tsx`（占位）、`src/DomainView.tsx`（占位） | B1 |
+| `src-tauri/src/lib.rs`、`src/types.ts`、`src/api.ts`、`src/App.css`、`src/App.tsx`（侧栏改为「设置」按钮）、`src/SettingsPanel.tsx`（新）、`src/SkillsTab.tsx`（切换器）、`src/SourceView.tsx`（占位）、`src/DomainView.tsx`（占位） | B1 |
 | `src/SourceView.tsx` | C1 |
 | `src/DomainView.tsx` | C2 |
 | `docs/manual-checks.md`、本计划附录、spec 状态 | D |
@@ -110,7 +110,7 @@ pub fn expand_template_glob(candidates: &[String], env: &Env) -> Vec<PathBuf>  /
 pub fn sources(env: &Env, settings: &Settings, harnesses: &[Harness], projects: &[PathBuf]) -> Vec<Source>
 pub fn targets(env: &Env, harnesses: &[Harness], projects: &[PathBuf], sources: &[Source]) -> Vec<Target>
 ```
-`Harness` 增加字段 `pub extra_source_dirs: Vec<PathBuf>`（已展开）——这是 `models.rs` 的类型，但字段新增由本任务做（唯一允许的跨文件改动，加 `#[serde(default)]`）。`harnesses.json` 的 WeiboAP 条目加 `"extra_source_dirs": ["~/Library/Application Support/WeiboAP/Data/agents/*/.internal-plugins/skills"]`。
+`Harness` 增加字段 `pub extra_source_dirs: Vec<PathBuf>`（已展开）——这是 `models.rs` 的类型，但字段新增由本任务做（唯一允许的跨文件改动，加 `#[serde(default)]`）；同一次改动里给 `CellState` 补上 `Copy` derive（Task 0 遗漏）。`harnesses.json` 的 WeiboAP 条目加 `"extra_source_dirs": ["~/Library/Application Support/WeiboAP/Data/agents/*/.internal-plugins/skills"]`。
 
 规则（spec §3）：
 - `sources`：候选位置按顺序：Universal(`~/.agents/skills`)、每个 harness 的 `global_dir`（HarnessGlobal）、每个 harness 的 `extra_source_dirs`（HarnessExtra，label = 通配层匹配到的目录名）、每个项目的 `.agents/skills`（ProjectStore）、`settings.manual_sources`（Manual）。位置目录存在且含至少一个非隐藏真实目录才产出；按 `real_path` 去重（先到先得）；`skills` 排序。
@@ -146,12 +146,13 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport
 
 ## Task B1: 命令层 + 前端契约与壳（串行）
 
-**Files:** Modify `src-tauri/src/lib.rs`、`src/types.ts`、`src/api.ts`、`src/App.css`、`src/SkillsTab.tsx`；Create `src/SourceView.tsx`、`src/DomainView.tsx`（占位）
+**Files:** Modify `src-tauri/src/lib.rs`、`src/types.ts`、`src/api.ts`、`src/App.css`、`src/App.tsx`、`src/SkillsTab.tsx`；Create `src/SettingsPanel.tsx`、`src/SourceView.tsx`、`src/DomainView.tsx`（后两者占位）
 
 - 命令按 spec §7：`scan_all`（发现 → `skills::scan` → `save_sync_set` → 返回）、`set_source_targets`、`set_skill_enabled`、`propose_all`、`apply_all`（按每条动作找回 source/target 算 `link_style`，分组调用 `sync::execute`，合并报告）、`split_whole_link(target_id)`（找目标与 `linked_whole_to` 的 source）、`add_source`/`remove_source`。删除 `scan_domain`/`propose`/`apply`。
 - `types.ts`：与 §2 一一对应的 TS 类型（`SourceKind`/`TargetScope` 为 `type` 判别联合）。`api.ts` 七个方法。
 - `SkillsTab.tsx`：持有 `overview`、`view: "source" | "domain"`、`busy`、`report`、`confirmClean`；顶部工具栏（视图切换、摘要 `sources` 个本体位置 / `pendingMissing` 处待同步 / `broken` 处坏链、"同步（N）"、"清理坏链（N）"二次确认、"刷新"）；把 `overview` 与回调（`onChange` = 重扫）传给 `<SourceView>` 或 `<DomainView>`。占位组件先渲染"待实现"。
-- `App.css`：卡片 `.source-card`、目标勾选行 `.target-picks`、`.whole-link` 徽标、`tr.disabled` 淡显、域分组标题 `.domain-group`。
+- **设置面板**（作者要求：harness 选择是低频操作，不常驻侧栏）：`App.tsx` 侧栏底部删掉 Harness 勾选区，改为一个「设置」按钮；`SettingsPanel.tsx` 是居中弹层（`.modal-backdrop` + `.modal`），两部分：「Harness」（检测到的 harness 复选框，`api.setHarnessEnabled`）和「本体位置」（`settings.manualSources` 列表，「添加」用 `api.pickDirectory` → `api.addSource`，每项「移除」→ `api.removeSource`；需要新命令 `list_manual_sources() -> Vec<String>`）。关闭面板时触发一次重扫（`scanVersion + 1`）。
+- `App.css`：`.modal-backdrop`、`.modal`、卡片 `.source-card`、目标勾选行 `.target-picks`、`.whole-link` 徽标、`tr.disabled` 淡显、域分组标题 `.domain-group`。
 - [ ] `cargo check --workspace && cargo clippy --workspace --all-targets -- -D warnings && npm run build`
 - [ ] 提交 `feat(app): v3 commands, typed API and skills tab shell with view switch`
 
@@ -161,7 +162,7 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport
 
 **Files:** Modify `src/SourceView.tsx`
 
-props：`{ overview: Overview; busy: boolean; onChange: () => Promise<void>; onError: (m: string) => void }`。每个 `Source` 一张卡片：标题 `label` + 路径；目标勾选行（全部 `targets`，勾选状态来自 `syncSet.sources[source.id].targets`，切换调 `api.setSourceTargets` 后 `onChange`）；矩阵：行首 skill 名 + 行级复选框（`api.setSkillEnabled`），列为该 source 已勾选的目标，格子符号 ✓ Linked、○ Missing、✗ Broken、→ Foreign、⚠ Duplicate、– Unwritable，`title` 显示状态与路径；列头 `linkedWholeTo === source.id` 时显示"整目录链接"徽标与"拆成逐项链接"按钮（二次确认后 `api.splitWholeLink`，然后 `onChange`）；禁用行 `tr.disabled`。底部"添加本体位置"（`api.pickDirectory` → `api.addSource`），Manual 类卡片标题旁"移除"。
+props：`{ overview: Overview; busy: boolean; onChange: () => Promise<void>; onError: (m: string) => void }`。每个 `Source` 一张卡片：标题 `label` + 路径；目标勾选行（全部 `targets`，勾选状态来自 `syncSet.sources[source.id].targets`，切换调 `api.setSourceTargets` 后 `onChange`）；矩阵：行首 skill 名 + 行级复选框（`api.setSkillEnabled`），列为该 source 已勾选的目标，格子符号 ✓ Linked、○ Missing、✗ Broken、→ Foreign、⚠ Duplicate、– Unwritable，`title` 显示状态与路径；列头 `linkedWholeTo === source.id` 时显示"整目录链接"徽标与"拆成逐项链接"按钮（二次确认后 `api.splitWholeLink`，然后 `onChange`）；禁用行 `tr.disabled`。Manual 类卡片标题旁只显示「手动添加」标签；增删本体位置在设置面板里做（B1）。
 - [ ] `npm run build`；提交 `feat(app): source-centric view with two-level sync selection`
 
 ## Task C2: DomainView（并行）
