@@ -8,8 +8,7 @@ export interface DomainInfo {
 export type SourceKind =
   | { type: "universal" }
   | { type: "harnessGlobal"; harnessId: string }
-  | { type: "projectStore"; project: string }
-  | { type: "harnessExtra"; harnessId: string; label: string }
+  | { type: "projectStore"; project: string; projectLabel: string | null }
   | { type: "manual" };
 export interface Source {
   id: string;
@@ -20,7 +19,8 @@ export interface Source {
 }
 
 export type TargetScope =
-  { type: "global"; harnessId: string } | { type: "project"; project: string; harnessId: string };
+  | { type: "global"; harnessId: string }
+  | { type: "project"; project: string; projectLabel: string | null; harnessId: string };
 export interface Target {
   id: string;
   label: string;
