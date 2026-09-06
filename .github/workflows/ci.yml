@@ -4,10 +4,23 @@ on:
   push:
     branches: [main]
 jobs:
-  core-tests:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo test -p symsync-core
+      - run: cargo clippy -p symsync-core --all-targets -- -D warnings
+  app:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: swift --version
-      - run: swift test
-        working-directory: SymSyncCore
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - run: cargo check --workspace

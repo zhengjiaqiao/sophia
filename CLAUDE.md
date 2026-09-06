@@ -1,41 +1,44 @@
 # SymSync
 
-macOS SwiftUI 软链接同步工具。核心逻辑在 `SymSyncCore/`（Swift Package，纯 Foundation），App 壳在 `SymSync/`（xcodegen 从 `project.yml` 生成 `SymSync.xcodeproj`，工程文件不入库）。
+跨平台桌面应用：发现各 AI coding harness 的 skill 目录，展示 skill × harness 矩阵，补缺失软链、清坏链；另有通用"源目录 → 多目标"软链同步。Rust core（`crates/core`，crate 名 `symsync-core`）+ Tauri 2 命令层（`src-tauri`）+ React/TypeScript 前端（`src`）。
 
 ## Commands
 
-- `make test-core`：Core 单元测试。健康输出末尾为 `Test run with N tests passed after X seconds.`
-- `make build`：编译 App（ad-hoc 签名）。健康输出末尾为 `** BUILD SUCCEEDED **`
-- `make test`：以上两者，提交前必跑
-- `make project`：改了 `project.yml` 后重新生成工程
-- `make format`：`swift format` 格式化
-- 全新安装 Xcode 后第一次 `make build` 前先跑一次 `xcodebuild -runFirstLaunch`（无需 sudo）
+- `make test-core`：core 单元测试。健康输出末尾 `test result: ok. N passed; 0 failed`
+- `make lint`：clippy，零警告
+- `make build-web`：前端类型检查与打包
+- `make test`：以上三者，提交前必跑
+- `make dev`：启动开发窗口；`make build`：产出 debug App（`src-tauri/target/debug/bundle/`）
+- `make format`：rustfmt + prettier
 
 ## Conventions
 
-- Swift 语言模式 6.0，公开类型标 `Sendable`；Core 不 import AppKit/SwiftUI
-- 测试用 Swift Testing（`@Test` / `#expect`），文件系统测试用 `TempTree` 夹具在临时目录搭真实文件
-- UI 文案与文档中文，标识符英文；提交信息 Conventional Commits
-- 路径比较一律先过 `normalizedPath(_:)`
+- Rust 2021，`clippy -D warnings`；core 不依赖 tauri
+- 测试用 `tempfile` 在临时目录搭真实文件树（`test_support::TempTree`），不 mock 文件系统
+- 注释与 UI 文案中文，标识符英文；Conventional Commits
+- serde 统一 `rename_all = "camelCase"`，前端 `src/types.ts` 与之对应
 
 ## Architecture
 
-- `SymSyncCore/Sources/SymSyncCore/`：`Models`（SyncRule 等）、`FileSystem`（entryKind / normalizedPath）、`Planner`（只读规划）、`Executor`（建链 / 清坏链）、`RuleStore`、`Grants`
-- `SymSync/`：`BookmarkAccess`（沙盒 bookmark）、`DirectoryPicker`、`RuleListModel`（@Observable 协调层）、视图
-- 数据：`~/Library/Application Support/SymSync/rules.json`、`grants.json`
-- 流程 artifact：`docs/intent/`、`docs/specs/`、`docs/plans/`；评审策略 `REVIEW.md`
+- `crates/core/src/models.rs`：共享类型（SyncRule、PlannedAction、Outcome、Harness、Domain、LinkStyle）
+- `fs.rs`：`entry_kind`（lstat）、`real_path`、`normalize`、`create_link`
+- `sync.rs`：通用同步 `plan` / `execute`
+- `skills.rs`：矩阵 `scan` / `propose`，本体判定
+- `discovery.rs` + `data/harnesses.json`：harness 表、已安装判定、项目候选
+- `store.rs`：`rules.json` / `projects.json`
+- `src-tauri/src/lib.rs`：命令，每个一行调 core
+- `src/`：`App.tsx` 壳、`SkillsTab.tsx`、`CustomSyncTab.tsx`、`api.ts`、`types.ts`
 
 ## Verifying your work
 
-- 改 Core：`make test-core` 全绿
-- 改 App：`make build` 成功，并在运行的 App 里手动走一遍受影响的流程
-- 报告完成前贴出命令输出末尾。测试失败改代码，不改测试；不跳过、不删除失败测试
+- 改 core：`make test-core && make lint` 全绿
+- 改 src-tauri 或 src：`make build-web && cargo check --workspace`，并在 `make dev` 里手动走一遍受影响的流程
+- 报告完成前贴出命令输出末尾。测试失败改代码，不改测试
 
 ## Things Claude gets wrong
 
-- `FileManager.fileExists(atPath:)` 跟随软链，坏链返回 false。判断条目类型用 `FileManager.entryKind(atPath:)`（唯一例外：Executor 判断目标目录是否存在要跟随软链，用 fileExists(atPath:isDirectory:)）
-- `resolvingSymlinksInPath()` 会把 `/var` 变成 `/private/var`，导致路径比较失败。统一用 `normalizedPath`
-- `removeItem(at:)` 删软链时只删链接本身，这是我们要的行为，不要改成先解析再删
-- `URL(fileURLWithPath: "")` 会解析成当前工作目录，不是空路径。"未设置目录"的判断用 `Location.bookmark == nil`
-- 用 index 做 identity 的 ForEach 行里若有自己的 @State，删除中间项后要靠 .onChange(of: binding) 重新同步，onAppear 不会再触发
-- 执行/清理按钮只把各自待处理的动作交给 Executor，再按 action.id 把结果合并回表格；整表重投会让已创建项变成"失败"
+- `Path::exists()` / `is_dir()` 跟随软链，坏链返回 false。判断条目类型用 `fs::entry_kind`（`symlink_metadata`）。唯一例外：判断"目标目录是否存在"要跟随软链，用 `is_dir()`
+- 比较"是否指向同一处"用 `fs::real_path`（canonicalize）；macOS 上 `/var` 会变成 `/private/var`，两侧必须同源
+- Unix 删软链用 `remove_file`，Windows 删 junction 用 `remove_dir`；删前必须重校验仍是软链
+- `Path::starts_with` 按路径分量比较，不要用字符串 `starts_with`
+- 并行任务只碰自己 Files 列表里的文件；`lib.rs`、`Cargo.toml`、`App.tsx` 由前置任务预留

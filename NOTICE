@@ -1,0 +1,5 @@
+SymSync 包含以下 MIT 许可证项目的派生内容：
+
+- vercel-labs/skills (https://github.com/vercel-labs/skills), Copyright (c) Vercel, Inc.
+  crates/core/data/harnesses.json 的 harness 目录表整理自其 src/agents.ts；
+  crates/core/src/fs.rs 的链接策略（Unix 相对软链、Windows junction）参考其 src/installer.ts。

@@ -15,3 +15,9 @@ Package.resolved
 .superpowers/
 .claude/FIXING
 SymSync.xcodeproj/
+
+# Rust / Tauri / Node
+target/
+node_modules/
+dist/
+.worktrees/
