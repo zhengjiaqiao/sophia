@@ -98,9 +98,9 @@ pub struct Harness {
     pub global_dir: Option<PathBuf>,
     /// 项目级直接读 .agents/skills
     pub universal: bool,
-    /// 额外的本体位置，通配已展开
+    /// 每个 agent 一个项目的 skill 目录，通配已展开
     #[serde(default)]
-    pub extra_source_dirs: Vec<PathBuf>,
+    pub agent_dirs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,10 +122,12 @@ pub enum SourceKind {
     Universal,
     /// 某 harness 的全局 skill 目录
     HarnessGlobal { harness_id: String },
-    /// 某项目的 `.agents/skills`
-    ProjectStore { project: PathBuf },
-    /// harness 的额外位置（通配展开），label 为通配层匹配到的目录名
-    HarnessExtra { harness_id: String, label: String },
+    /// 某项目的 skill 仓库；`project_label` 覆盖项目名的显示（harness 的 agent 目录用）
+    ProjectStore {
+        project: PathBuf,
+        #[serde(default)]
+        project_label: Option<String>,
+    },
     /// 用户手工添加
     Manual,
 }
@@ -157,6 +159,8 @@ pub enum TargetScope {
     Project {
         project: PathBuf,
         harness_id: String,
+        #[serde(default)]
+        project_label: Option<String>,
     },
 }
 
@@ -241,13 +245,17 @@ mod tests {
 
     #[test]
     fn source_kind_serializes_with_type_tag() {
-        let kind = SourceKind::HarnessExtra {
-            harness_id: "weiboap".into(),
-            label: "agent_1788".into(),
+        let kind = SourceKind::ProjectStore {
+            project: PathBuf::from("/Users/me/agents/agent_1788"),
+            project_label: Some("WeiboAP · agent_1788".into()),
         };
         assert_eq!(
             serde_json::to_value(&kind).unwrap(),
-            json!({"type": "harnessExtra", "harnessId": "weiboap", "label": "agent_1788"})
+            json!({
+                "type": "projectStore",
+                "project": "/Users/me/agents/agent_1788",
+                "projectLabel": "WeiboAP · agent_1788"
+            })
         );
     }
 
@@ -256,10 +264,16 @@ mod tests {
         let scope = TargetScope::Project {
             project: PathBuf::from("/Users/me/proj"),
             harness_id: "claude-code".into(),
+            project_label: None,
         };
         assert_eq!(
             serde_json::to_value(&scope).unwrap(),
-            json!({"type": "project", "project": "/Users/me/proj", "harnessId": "claude-code"})
+            json!({
+                "type": "project",
+                "project": "/Users/me/proj",
+                "harnessId": "claude-code",
+                "projectLabel": null
+            })
         );
     }
 
