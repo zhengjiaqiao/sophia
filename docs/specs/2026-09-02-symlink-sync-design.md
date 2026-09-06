@@ -2,7 +2,7 @@
 
 - 对应 intent：`docs/intent/2026-09-02-symlink-sync.md`
 - 日期：2026-09-02
-- 状态：待审阅
+- 状态：已实现（v0.1-swift）；2026-09-06 起被 `2026-09-06-skill-sync-design.md` 替代
 
 ## 1. 目标与范围
 
