@@ -69,6 +69,12 @@ export interface SyncRule {
   lastRunAt: string | null;
 }
 
+export interface HarnessStatus {
+  id: string;
+  displayName: string;
+  enabled: boolean;
+}
+
 export const actionId = (a: PlannedAction): string => `${a.kind}|${a.targetPath}`;
 export const domainKey = (d: Domain): string =>
   d.type === "global" ? "global" : `project:${d.path}`;
