@@ -18,9 +18,28 @@ body {
   flex-direction: column;
   box-sizing: border-box;
 }
+.sidebar.collapsed {
+  width: 56px;
+  padding: 12px 6px;
+  justify-content: flex-end;
+}
 .sidebar h1 {
   font-size: 16px;
   margin: 0 0 12px;
+}
+.view-switch {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.view-switch button {
+  flex: 1;
+}
+.view-switch button.active {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+  color: #1a73e8;
+  font-weight: 600;
 }
 .sidebar ul,
 .rules ul {
@@ -42,6 +61,11 @@ body {
 .sidebar li.active,
 .rules li.active {
   background: #e8f0fe;
+}
+.sidebar li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .content {
   flex: 1;

@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { api } from "./api";
-import type { Cell, CellState, Overview } from "./types";
+import type { Cell, CellState, Overview, Source } from "./types";
 
-export interface ViewProps {
+export interface SourceViewProps {
   overview: Overview;
+  source: Source;
   busy: boolean;
   onChange: () => Promise<void>;
   onError: (message: string) => void;
@@ -30,8 +31,8 @@ const STATE_TEXT: Record<CellState, string> = {
 const cellKey = (sourceId: string, skill: string, targetId: string) =>
   `${sourceId}|${skill}|${targetId}`;
 
-/// 按本体位置的卡片视图：一张卡片 = 一个本体位置，两级勾选（目标 / skill）
-export default function SourceView({ overview, busy, onChange, onError }: ViewProps) {
+/// 单个本体位置的卡片：两级勾选（目标 / skill）
+export default function SourceView({ overview, source, busy, onChange, onError }: SourceViewProps) {
   // 待确认拆分的目标 id
   const [confirmSplit, setConfirmSplit] = useState<string | null>(null);
 
@@ -51,118 +52,110 @@ export default function SourceView({ overview, busy, onChange, onError }: ViewPr
     }
   };
 
+  const sync = overview.syncSet.sources[source.id];
+  const picked = new Set(sync?.targets ?? []);
+  const disabledSkills = new Set(sync?.disabledSkills ?? []);
+  const columns = overview.targets.filter((t) => picked.has(t.id));
+
   return (
-    <>
-      {overview.sources.map((source) => {
-        const sync = overview.syncSet.sources[source.id];
-        const picked = new Set(sync?.targets ?? []);
-        const disabledSkills = new Set(sync?.disabledSkills ?? []);
-        const columns = overview.targets.filter((t) => picked.has(t.id));
+    <div className="source-card">
+      <h2>
+        {source.label}
+        {source.kind.type === "manual" && <span className="tag">手动添加</span>}
+      </h2>
+      <div className="path">{source.path}</div>
 
-        return (
-          <div className="source-card" key={source.id}>
-            <h2>
-              {source.label}
-              {source.kind.type === "manual" && <span className="tag">手动添加</span>}
-            </h2>
-            <div className="path">{source.path}</div>
+      <div className="target-picks">
+        {overview.targets.map((target) => (
+          <label key={target.id}>
+            <input
+              type="checkbox"
+              checked={picked.has(target.id)}
+              disabled={busy}
+              onChange={(e) => {
+                const ids = e.target.checked
+                  ? [...picked, target.id]
+                  : [...picked].filter((id) => id !== target.id);
+                void run(() => api.setSourceTargets(source.id, ids));
+              }}
+            />
+            {target.label}
+          </label>
+        ))}
+      </div>
 
-            <div className="target-picks">
-              {overview.targets.map((target) => (
-                <label key={target.id}>
-                  <input
-                    type="checkbox"
-                    checked={picked.has(target.id)}
-                    disabled={busy}
-                    onChange={(e) => {
-                      const ids = e.target.checked
-                        ? [...picked, target.id]
-                        : [...picked].filter((id) => id !== target.id);
-                      void run(() => api.setSourceTargets(source.id, ids));
-                    }}
-                  />
-                  {target.label}
-                </label>
-              ))}
-            </div>
-
-            <table className="matrix">
-              <thead>
-                <tr>
-                  <th>skill</th>
-                  {columns.map((target) => (
-                    <th key={target.id}>
-                      {target.label}
-                      {target.linkedWholeTo === source.id && (
-                        <>
-                          <span className="whole-link">整目录链接</span>
-                          {confirmSplit === target.id ? (
-                            <span className="confirm">
-                              <button
-                                disabled={busy}
-                                onClick={() => {
-                                  setConfirmSplit(null);
-                                  void run(() => api.splitWholeLink(target.id));
-                                }}
-                              >
-                                确认
-                              </button>
-                              <button disabled={busy} onClick={() => setConfirmSplit(null)}>
-                                取消
-                              </button>
-                            </span>
-                          ) : (
-                            <button disabled={busy} onClick={() => setConfirmSplit(target.id)}>
-                              拆成逐项链接
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {source.skills.map((skill) => {
-                  const enabled = !disabledSkills.has(skill);
+      <table className="matrix">
+        <thead>
+          <tr>
+            <th>skill</th>
+            {columns.map((target) => (
+              <th key={target.id}>
+                {target.label}
+                {target.linkedWholeTo === source.id && (
+                  <>
+                    <span className="whole-link">整目录链接</span>
+                    {confirmSplit === target.id ? (
+                      <span className="confirm">
+                        <button
+                          disabled={busy}
+                          onClick={() => {
+                            setConfirmSplit(null);
+                            void run(() => api.splitWholeLink(target.id));
+                          }}
+                        >
+                          确认
+                        </button>
+                        <button disabled={busy} onClick={() => setConfirmSplit(null)}>
+                          取消
+                        </button>
+                      </span>
+                    ) : (
+                      <button disabled={busy} onClick={() => setConfirmSplit(target.id)}>
+                        拆成逐项链接
+                      </button>
+                    )}
+                  </>
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {source.skills.map((skill) => {
+            const enabled = !disabledSkills.has(skill);
+            return (
+              <tr key={skill} className={enabled ? undefined : "disabled"}>
+                <td>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      disabled={busy}
+                      onChange={(e) =>
+                        void run(() => api.setSkillEnabled(source.id, skill, e.target.checked))
+                      }
+                    />
+                    {skill}
+                  </label>
+                </td>
+                {columns.map((target) => {
+                  const cell = cells.get(cellKey(source.id, skill, target.id));
+                  if (!cell) return <td className="cell" key={target.id} />;
                   return (
-                    <tr key={skill} className={enabled ? undefined : "disabled"}>
-                      <td>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={enabled}
-                            disabled={busy}
-                            onChange={(e) =>
-                              void run(() =>
-                                api.setSkillEnabled(source.id, skill, e.target.checked),
-                              )
-                            }
-                          />
-                          {skill}
-                        </label>
-                      </td>
-                      {columns.map((target) => {
-                        const cell = cells.get(cellKey(source.id, skill, target.id));
-                        if (!cell) return <td className="cell" key={target.id} />;
-                        return (
-                          <td
-                            className={`cell ${cell.state}`}
-                            key={target.id}
-                            title={`${STATE_TEXT[cell.state]}：${cell.path}`}
-                          >
-                            {SYMBOL[cell.state]}
-                          </td>
-                        );
-                      })}
-                    </tr>
+                    <td
+                      className={`cell ${cell.state}`}
+                      key={target.id}
+                      title={`${STATE_TEXT[cell.state]}：${cell.path}`}
+                    >
+                      {SYMBOL[cell.state]}
+                    </td>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        );
-      })}
-    </>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

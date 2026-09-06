@@ -23,61 +23,64 @@ function outcomeText(o: Outcome): string {
   }
 }
 
-export default function SkillsTab({ onError }: { onError: (message: string) => void }) {
-  const [overview, setOverview] = useState<Overview | null>(null);
+export interface SkillsTabProps {
+  overview: Overview | null;
+  busy: boolean;
+  onBusy: (busy: boolean) => void;
+  view: "source" | "domain";
+  selectedSourceId: string | null;
+  selectedDomainKey: string;
+  onRefresh: () => Promise<void>;
+  onError: (message: string) => void;
+}
+
+export default function SkillsTab({
+  overview,
+  busy,
+  onBusy,
+  view,
+  selectedSourceId,
+  selectedDomainKey,
+  onRefresh,
+  onError,
+}: SkillsTabProps) {
   const [actions, setActions] = useState<PlannedAction[]>([]);
-  const [view, setView] = useState<"source" | "domain">("source");
   const [report, setReport] = useState<SyncReport | null>(null);
-  const [busy, setBusy] = useState(false);
   const [confirmClean, setConfirmClean] = useState(false);
 
-  // 扫描是纯读操作；任何勾选或动作之后重新扫描，而不是在前端改状态
-  const refresh = async () => {
-    setBusy(true);
-    try {
-      setOverview(await api.scanAll());
-      setActions(await api.proposeAll());
-    } catch (e) {
-      onError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  // 待办动作跟着 overview 走：App 每次重扫后重新提案
   useEffect(() => {
-    void refresh();
-    // App 通过 key 重建本组件，这里只需首次加载
+    if (!overview) return;
+    api
+      .proposeAll()
+      .then(setActions)
+      .catch((e) => onError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [overview]);
 
   const creates = actions.filter((a) => a.kind === "create");
   const broken = actions.filter((a) => a.kind === "brokenLink");
 
   const run = async (subset: PlannedAction[], cleanBroken: boolean) => {
-    setBusy(true);
+    onBusy(true);
     setConfirmClean(false);
     try {
       setReport(await api.applyAll(subset, cleanBroken));
     } catch (e) {
       onError(String(e));
     } finally {
-      setBusy(false);
+      onBusy(false);
     }
-    await refresh();
+    await onRefresh();
   };
 
   if (!overview) return <p>扫描中…</p>;
   const { summary } = overview;
-  const View = view === "source" ? SourceView : DomainView;
+  const source = overview.sources.find((s) => s.id === selectedSourceId) ?? null;
 
   return (
     <section>
       <div className="toolbar">
-        <button className={view === "source" ? "active" : ""} onClick={() => setView("source")}>
-          按本体位置
-        </button>
-        <button className={view === "domain" ? "active" : ""} onClick={() => setView("domain")}>
-          按域
-        </button>
         <span>
           {summary.sources} 个本体位置，{summary.pendingMissing} 处待同步，{summary.broken} 处坏链
         </span>
@@ -98,7 +101,7 @@ export default function SkillsTab({ onError }: { onError: (message: string) => v
             <button onClick={() => setConfirmClean(false)}>取消</button>
           </span>
         )}
-        <button onClick={() => void refresh()} disabled={busy}>
+        <button onClick={() => void onRefresh()} disabled={busy}>
           刷新
         </button>
       </div>
@@ -111,7 +114,21 @@ export default function SkillsTab({ onError }: { onError: (message: string) => v
           ))}
         </ul>
       )}
-      <View overview={overview} busy={busy} onChange={refresh} onError={onError} />
+      {view === "source" ? (
+        source ? (
+          <SourceView
+            overview={overview}
+            source={source}
+            busy={busy}
+            onChange={onRefresh}
+            onError={onError}
+          />
+        ) : (
+          <p>没有可用的本体位置。</p>
+        )
+      ) : (
+        <DomainView overview={overview} domainKey={selectedDomainKey} />
+      )}
     </section>
   );
 }

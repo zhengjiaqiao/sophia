@@ -1,87 +1,112 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { domainKey, type Domain, type DomainInfo } from "./types";
+import type { Overview } from "./types";
 import SkillsTab from "./SkillsTab";
 import CustomSyncTab from "./CustomSyncTab";
 import SettingsPanel from "./SettingsPanel";
+import { domainEntries } from "./DomainView";
 import "./App.css";
 
 export default function App() {
-  const [domains, setDomains] = useState<DomainInfo[]>([]);
-  const [selected, setSelected] = useState<Domain>({ type: "global" });
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<"source" | "domain">("source");
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [selectedDomainKey, setSelectedDomainKey] = useState("global");
   const [tab, setTab] = useState<"skills" | "custom">("skills");
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // 设置改动后自增，作为 SkillsTab 的 key 以触发重扫
-  const [scanVersion, setScanVersion] = useState(0);
 
-  const reload = async () => {
+  // 扫描是纯读操作；任何写动作之后重新扫描，而不是在前端改状态
+  const refresh = async () => {
+    setBusy(true);
     try {
-      setDomains(await api.listDomains());
+      setOverview(await api.scanAll());
     } catch (e) {
       setError(String(e));
+    } finally {
+      setBusy(false);
     }
   };
   useEffect(() => {
-    void reload();
+    void refresh();
+    // 首次加载一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addProject = async () => {
-    const path = await api.pickDirectory("选择项目目录");
-    if (!path) return;
-    try {
-      await api.addProject(path);
-      await reload();
-      setSelected({ type: "project", path });
-    } catch (e) {
-      setError(String(e));
-    }
-  };
+  const sources = overview?.sources ?? [];
+  const domains = useMemo(() => domainEntries(overview?.targets ?? []), [overview]);
 
-  const removeProject = async (path: string) => {
-    try {
-      await api.removeProject(path);
-      await reload();
-      if (selected.type === "project" && selected.path === path) setSelected({ type: "global" });
-    } catch (e) {
-      setError(String(e));
+  // 选中项消失（本体位置被移除、项目不再存在）时回落到第一项
+  useEffect(() => {
+    if (!overview) return;
+    if (!sources.some((s) => s.id === selectedSourceId)) {
+      setSelectedSourceId(sources[0]?.id ?? null);
     }
-  };
+    if (!domains.some((d) => d.key === selectedDomainKey)) setSelectedDomainKey("global");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overview]);
 
   const closeSettings = () => {
     setSettingsOpen(false);
-    void reload();
-    setScanVersion((v) => v + 1);
+    void refresh();
   };
+
+  const collapsed = tab === "custom";
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <h1>SymSync</h1>
-        <ul>
-          {domains.map((d) => (
-            <li
-              key={domainKey(d.domain)}
-              className={domainKey(d.domain) === domainKey(selected) ? "active" : ""}
-              title={d.domain.type === "project" ? d.domain.path : "全局 skill 目录"}
-              onClick={() => setSelected(d.domain)}
-            >
-              <span>{d.label}</span>
-              {d.domain.type === "project" && (
-                <button
-                  className="link"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void removeProject((d.domain as { path: string }).path);
-                  }}
-                >
-                  移除
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-        <button onClick={() => void addProject()}>添加项目</button>
+      <aside className={collapsed ? "sidebar collapsed" : "sidebar"}>
+        {!collapsed && (
+          <>
+            <h1>SymSync</h1>
+            <div className="view-switch">
+              <button
+                className={view === "source" ? "active" : ""}
+                disabled={busy}
+                onClick={() => setView("source")}
+              >
+                本体位置
+              </button>
+              <button
+                className={view === "domain" ? "active" : ""}
+                disabled={busy}
+                onClick={() => setView("domain")}
+              >
+                域
+              </button>
+            </div>
+            {view === "source" ? (
+              <ul>
+                {sources.map((s) => (
+                  <li
+                    key={s.id}
+                    className={s.id === selectedSourceId ? "active" : ""}
+                    title={s.path}
+                    onClick={() => !busy && setSelectedSourceId(s.id)}
+                  >
+                    <span>
+                      {s.label} ({s.skills.length})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul>
+                {domains.map((d) => (
+                  <li
+                    key={d.key}
+                    className={d.key === selectedDomainKey ? "active" : ""}
+                    title={d.path ?? "全局 skill 目录"}
+                    onClick={() => !busy && setSelectedDomainKey(d.key)}
+                  >
+                    <span>{d.label}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
         <button onClick={() => setSettingsOpen(true)}>设置</button>
       </aside>
       <main className="content">
@@ -102,7 +127,16 @@ export default function App() {
           </div>
         )}
         {tab === "skills" ? (
-          <SkillsTab key={scanVersion} onError={setError} />
+          <SkillsTab
+            overview={overview}
+            busy={busy}
+            onBusy={setBusy}
+            view={view}
+            selectedSourceId={selectedSourceId}
+            selectedDomainKey={selectedDomainKey}
+            onRefresh={refresh}
+            onError={setError}
+          />
         ) : (
           <CustomSyncTab onError={setError} />
         )}
