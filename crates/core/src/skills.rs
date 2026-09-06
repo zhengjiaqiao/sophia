@@ -297,6 +297,7 @@ mod tests {
     use super::*;
     use crate::fs::entry_kind;
     use crate::fs::EntryKind;
+    use crate::sync::execute;
     use crate::test_support::TempTree;
     use std::path::{Path, PathBuf};
 
@@ -550,10 +551,8 @@ mod tests {
             vec![UNIVERSAL_ID, "claude-code"]
         );
         assert_eq!(row(&m, "x").cells[1].state, CellState::Missing);
-        let actions = propose(&m);
-        for a in &actions {
-            crate::fs::create_link(&a.source_path, &a.target_path, link_style(&domain)).unwrap();
-        }
+        let report = execute(&propose(&m), false, link_style(&domain));
+        assert_eq!(report.entries[0].outcome, Outcome::Created);
         assert_eq!(
             std::fs::read_link(cl.join("x")).unwrap(),
             PathBuf::from("../../.agents/skills/x")
@@ -563,6 +562,22 @@ mod tests {
             row(&scan(&domain, &harnesses(&home), &home), "x").cells[1].state,
             CellState::Linked
         );
+    }
+
+    #[test]
+    fn broken_cell_in_ambiguous_row_is_not_counted_or_proposed() {
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir(".claude/skills/a");
+        t.dir(".codex/skills/a");
+        let uni = t.dir(".agents/skills");
+        t.link(&uni.join("a"), &t.root().join("gone/a"));
+        let m = scan(&Domain::Global, &harnesses(&home), &home);
+        let r = row(&m, "a");
+        assert!(r.ambiguous);
+        assert_eq!(r.cells[0].state, CellState::Broken);
+        assert_eq!(m.summary.broken, 0);
+        assert!(propose(&m).is_empty());
     }
 
     #[test]
