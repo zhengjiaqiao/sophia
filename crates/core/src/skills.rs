@@ -144,6 +144,7 @@ pub fn scan(domain: &Domain, harnesses: &[Harness], home: &Path) -> Matrix {
         .iter()
         .map(|n| build_row(n, &columns, &inaccessible))
         .collect();
+    // 摘要只统计会产生动作的格子，与 propose 保持一致
     let summary = Summary {
         skills: rows.len(),
         missing: rows
@@ -154,6 +155,7 @@ pub fn scan(domain: &Domain, harnesses: &[Harness], home: &Path) -> Matrix {
             .count(),
         broken: rows
             .iter()
+            .filter(|r| !r.ambiguous)
             .flat_map(|r| &r.cells)
             .filter(|c| c.state == CellState::Broken)
             .count(),
@@ -530,6 +532,7 @@ mod tests {
         assert!(propose(&m).is_empty());
         assert_eq!(m.summary.ambiguous, 1);
         assert_eq!(m.summary.missing, 0);
+        assert_eq!(m.summary.broken, 0);
     }
 
     #[cfg(unix)]
