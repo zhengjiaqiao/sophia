@@ -2893,3 +2893,4 @@ gh pr create --title "feat(app): Tauri app for skill matrix and custom sync" --b
 - **Task 6** 手动添加的项目不按"含 skill 目录"过滤，只要求目录存在且不是主目录/根目录；Claude Code 记录的项目仍需含 skill 目录。计划里的测试夹具与规则原本自相矛盾。
 - **流程** 整个改造只开一个 PR（#4，`feat/rust-pivot` → main），两个里程碑推到同一分支；并行任务用 `.worktrees/` 下的独立 worktree，控制器负责合并。
 - **测试数** core 共 40 个（计划估计 39）。
+- **终审修复（76c9dfa）** 真机探针发现 `npx skills --agent '*'` 为未安装的工具也建了 `~/.kiro/skills` 等空壳目录，"目录存在即已安装"会得到 35 列；改为探测目录里必须有通往 skills 之外的条目。OpenClaw 的裸 `skills` 约定让 `~/.claude` 被当成项目；项目检测忽略不以 `.` 开头的 `project_dir`，并跳过主目录下的隐藏目录。spec §6 已同步。
