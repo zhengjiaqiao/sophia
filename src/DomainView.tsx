@@ -85,7 +85,7 @@ function buildRows(sources: Source[]): Row[] {
 /// 本体位置对本域的参与度：本域全部目标都在它的目标集合里 / 只在一部分 / 一个都不在
 type Participation = "all" | "some" | "none";
 
-/// 单个域的表：行是属于该域的本体位置的 (本体位置, skill)，列是该域下的目标目录；
+/// 单个域的表：行是本域内的 (本体位置, skill)，列是该域下的目标目录；
 /// 表上方每个本体位置一个复选框，控制它是否参与同步进本域；跨域同步在按本体位置视图处理
 export default function DomainView({
   overview,
@@ -96,18 +96,38 @@ export default function DomainView({
 }: DomainViewProps) {
   const targets = overview.targets.filter((t) => targetDomainKey(t) === domainKey);
   if (targets.length === 0) return <p>该域下没有可用的目标目录。</p>;
-  const sources = overview.sources.filter((s) => sourceDomainKey(s) === domainKey);
-  const allRows = buildRows(sources);
-  if (allRows.length === 0) return <p>该域下没有本体位置。</p>;
 
   const cells = new Map<string, Cell>();
   for (const cell of overview.cells) {
     cells.set(cellKey(cell.sourceId, cell.skill, cell.targetId), cell);
   }
-  const entry = domainEntries(overview.targets).find((e) => e.key === domainKey);
 
   const domainTargetIds = targets.map((t) => t.id);
+  const domainTargetIdSet = new Set(domainTargetIds);
   const pickedOf = (source: Source): string[] => overview.syncSet.sources[source.id]?.targets ?? [];
+  // 本域目标里已经落下过东西（非 missing）的本体位置：链上的、坏的、指向别处的都算"在本域里"
+  const presentSourceIds = new Set(
+    overview.cells
+      .filter((c) => c.state !== "missing" && domainTargetIdSet.has(c.targetId))
+      .map((c) => c.sourceId),
+  );
+  // 域视图讲"本域里有什么"：本域自己的本体位置 ∪ 已落在本域里的 ∪ 目标集合含本域目标的
+  const inDomain = overview.sources.filter(
+    (s) =>
+      sourceDomainKey(s) === domainKey ||
+      presentSourceIds.has(s.id) ||
+      pickedOf(s).some((id) => domainTargetIdSet.has(id)),
+  );
+  // 本域自己的排前面，其余按 overview.sources 原序
+  const sources = [
+    ...inDomain.filter((s) => sourceDomainKey(s) === domainKey),
+    ...inDomain.filter((s) => sourceDomainKey(s) !== domainKey),
+  ];
+  const allRows = buildRows(sources);
+  if (allRows.length === 0) return <p>该域下没有本体位置。</p>;
+
+  const entry = domainEntries(overview.targets).find((e) => e.key === domainKey);
+
   const participation = new Map<string, Participation>(
     sources.map((source) => {
       const picked = new Set(pickedOf(source));
@@ -115,8 +135,15 @@ export default function DomainView({
       return [source.id, hit === 0 ? "none" : hit === domainTargetIds.length ? "all" : "some"];
     }),
   );
-  // 取消勾选（一个本域目标都没选）的本体位置，行不再显示；半选仍显示
-  const rows = allRows.filter((row) => participation.get(row.source.id) !== "none");
+  // 只有既没勾选、在本域又一个格子都没落下的行才藏起来；已链接/坏链等一律显示
+  const rows = allRows.filter(
+    (row) =>
+      participation.get(row.source.id) !== "none" ||
+      targets.some(
+        (t) =>
+          (cells.get(cellKey(row.source.id, row.skill, t.id))?.state ?? "missing") !== "missing",
+      ),
+  );
 
   // 勾上 = 把本域全部目标并入该本体位置的目标集合，取消 = 从中去掉本域全部目标
   const toggle = async (source: Source, on: boolean) => {
