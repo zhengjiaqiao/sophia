@@ -79,7 +79,7 @@ fn with_defaults(sync_set: &SyncSet, sources: &[Source], targets: &[Target]) -> 
     out
 }
 
-/// Create：勾选目标 × 启用 skill 的 Missing 格；BrokenLink：目标目录里的所有坏链（不限本体位置）
+/// Create：勾选目标 × 启用 skill 的 Missing 格；BrokenLink：非整目录链接的目标目录里的所有坏链（不限本体位置）
 pub fn propose(overview: &Overview) -> Vec<PlannedAction> {
     let sources: HashMap<&str, &Source> = overview
         .sources
@@ -112,7 +112,10 @@ pub fn propose(overview: &Overview) -> Vec<PlannedAction> {
         })
         .collect();
     for target in &overview.targets {
-        actions.extend(broken_links(&target.path));
+        // 整目录链接的目标读进去就是本体位置，坏链清理不能删到本体位置里
+        if target.linked_whole_to.is_none() {
+            actions.extend(broken_links(&target.path));
+        }
     }
     actions
 }
@@ -442,6 +445,31 @@ mod tests {
         assert_eq!(actions[0].target_path, tgt.join("zzz"));
         assert_eq!(actions[0].target, tgt);
         assert_eq!(o.summary.broken, 1);
+    }
+
+    #[test]
+    fn broken_links_inside_whole_linked_target_are_not_proposed() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/a");
+        // 本体位置内部的坏链，透过整目录链接读得到，但不该被清理
+        t.link(&store.join("rotten"), &t.root().join("gone"));
+        let tgt = t.root().join("tgt");
+        t.link(&tgt, &store);
+        let s = source(&store, &["a"]);
+        let mut g = global("claude-code", &tgt);
+        g.linked_whole_to = Some(s.id.clone());
+        let o = scan(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&g),
+            &SyncSet::default(),
+        );
+        assert!(propose(&o).is_empty());
+        assert_eq!(o.summary.broken, 0);
+        assert!(matches!(
+            entry_kind(&store.join("rotten")),
+            EntryKind::Symlink(_)
+        ));
     }
 
     #[test]
