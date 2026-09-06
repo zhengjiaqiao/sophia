@@ -1,5 +1,6 @@
 //! 内置 harness 表、已安装判定、项目候选
 use crate::models::Harness;
+use crate::store::Settings;
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -102,6 +103,14 @@ pub fn installed(env: &Env) -> Vec<Harness> {
             let probe = detect.or_else(|| h.global_dir.clone())?;
             looks_installed(&probe, h.global_dir.as_deref()).then_some(h)
         })
+        .collect()
+}
+
+/// 去掉被用户关掉的 harness，顺序不变
+pub fn enabled(installed: Vec<Harness>, settings: &Settings) -> Vec<Harness> {
+    installed
+        .into_iter()
+        .filter(|h| !settings.disabled_harnesses.contains(&h.id))
         .collect()
 }
 
@@ -214,7 +223,7 @@ mod tests {
     fn table_loads_and_claude_config_dir_overrides() {
         let e = env(Path::new("/home/u"), &[]);
         let all = all_harnesses(&e);
-        assert!(all.len() >= 40);
+        assert!(all.len() >= 41);
         let claude = all.iter().find(|h| h.id == "claude-code").unwrap();
         assert_eq!(
             claude.global_dir,
@@ -235,6 +244,38 @@ mod tests {
             claude2.global_dir,
             Some(PathBuf::from("/cfg/claude/skills"))
         );
+    }
+
+    #[test]
+    fn weiboap_entry_resolves_on_macos() {
+        let e = env(Path::new("/home/u"), &[]);
+        let h = all_harnesses(&e)
+            .into_iter()
+            .find(|h| h.id == "weiboap")
+            .expect("harness 表里应有 weiboap");
+        assert_eq!(
+            h.global_dir,
+            Some(Path::new("/home/u").join(
+                "Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom"
+            ))
+        );
+        assert_eq!(h.project_dir, None);
+    }
+
+    #[test]
+    fn enabled_filters_disabled_ids_keeping_order() {
+        let e = env(Path::new("/home/u"), &[]);
+        let all = all_harnesses(&e);
+        let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        let installed = vec![pick("claude-code"), pick("codex"), pick("cursor")];
+        let settings = Settings {
+            disabled_harnesses: vec!["codex".into()],
+        };
+        let ids: Vec<String> = enabled(installed, &settings)
+            .into_iter()
+            .map(|h| h.id)
+            .collect();
+        assert_eq!(ids, vec!["claude-code".to_string(), "cursor".to_string()]);
     }
 
     #[test]

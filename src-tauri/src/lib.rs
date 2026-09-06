@@ -18,6 +18,14 @@ struct DomainInfo {
     label: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HarnessStatus {
+    id: String,
+    display_name: String,
+    enabled: bool,
+}
+
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
@@ -44,19 +52,53 @@ fn list_domains(state: tauri::State<'_, AppState>) -> Result<Vec<DomainInfo>, St
     Ok(out)
 }
 
-#[tauri::command]
-fn scan_domain(domain: Domain) -> Result<Matrix, String> {
+/// 已安装且未被用户关掉的 harness 上扫矩阵
+fn scan_with(domain: &Domain, state: &AppState) -> Result<Matrix, String> {
     let env = Env::from_system();
-    Ok(skills::scan(
-        &domain,
-        &discovery::installed(&env),
-        &env.home,
-    ))
+    let settings = state.store.load_settings().map_err(err)?;
+    let harnesses = discovery::enabled(discovery::installed(&env), &settings);
+    Ok(skills::scan(domain, &harnesses, &env.home))
 }
 
 #[tauri::command]
-fn propose(domain: Domain) -> Result<Vec<PlannedAction>, String> {
-    Ok(skills::propose(&scan_domain(domain)?))
+fn scan_domain(domain: Domain, state: tauri::State<'_, AppState>) -> Result<Matrix, String> {
+    scan_with(&domain, &state)
+}
+
+#[tauri::command]
+fn propose(
+    domain: Domain,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<PlannedAction>, String> {
+    Ok(skills::propose(&scan_with(&domain, &state)?))
+}
+
+/// 已安装的 harness 及其启用状态
+#[tauri::command]
+fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<Vec<HarnessStatus>, String> {
+    let settings = state.store.load_settings().map_err(err)?;
+    Ok(discovery::installed(&Env::from_system())
+        .into_iter()
+        .map(|h| HarnessStatus {
+            enabled: !settings.disabled_harnesses.contains(&h.id),
+            id: h.id,
+            display_name: h.display_name,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn set_harness_enabled(
+    id: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut settings = state.store.load_settings().map_err(err)?;
+    settings.disabled_harnesses.retain(|x| x != &id);
+    if !enabled {
+        settings.disabled_harnesses.push(id);
+    }
+    state.store.save_settings(&settings).map_err(err)
 }
 
 #[tauri::command]
@@ -139,7 +181,9 @@ pub fn run() {
             save_rules,
             plan_rule,
             apply_rule,
-            list_source_items
+            list_source_items,
+            list_harnesses,
+            set_harness_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
