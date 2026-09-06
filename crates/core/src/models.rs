@@ -98,6 +98,9 @@ pub struct Harness {
     pub global_dir: Option<PathBuf>,
     /// 项目级直接读 .agents/skills
     pub universal: bool,
+    /// 额外的本体位置，通配已展开
+    #[serde(default)]
+    pub extra_source_dirs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,7 +112,11 @@ pub enum Domain {
 
 /// 本体位置的来源类别
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SourceKind {
     /// 通用仓库 `~/.agents/skills`
     Universal,
@@ -138,7 +145,11 @@ pub struct Source {
 
 /// 目标目录所属的域
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum TargetScope {
     Global {
         harness_id: String,
@@ -163,7 +174,7 @@ pub struct Target {
 }
 
 /// (本体位置, skill, 目标) 交叉点的状态
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CellState {
     Linked,

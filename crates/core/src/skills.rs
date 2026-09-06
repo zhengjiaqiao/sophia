@@ -308,6 +308,7 @@ mod tests {
             project_dir: Some(project.into()),
             global_dir: Some(global),
             universal,
+            extra_source_dirs: Vec::new(),
         };
         vec![
             h(
