@@ -93,7 +93,7 @@ pub struct Overview { pub sources: Vec<Source>, pub targets: Vec<Target>, pub ce
 
 - Skills tab 顶部：视图切换（按本体位置 / 按域）、摘要、"同步（N）"、"清理坏链（N）"（二次确认）、"刷新"。
 - 按本体位置视图：每个 `Source` 一张卡片：标题 `label` + 路径；目标勾选行（每个 `Target` 一个复选框，勾选即 `set_source_targets`）；矩阵行首 skill 名 + 行级复选框（`set_skill_enabled`），列为该本体位置已勾选的目标，格子符号 ✓ ○ ✗ → ⚠ 加 `–` 表示 Unwritable；目标列头若 `linked_whole_to` 等于本卡片本体位置显示"整目录链接"徽标和"拆成逐项链接"按钮（二次确认）。禁用行淡显。
-- 按域视图：按 `TargetScope` 分组（全局一组，每个项目一组），表格行 = (source, skill)，多一列"本体位置"，只读。
+- 按域视图：按 `TargetScope` 分组（全局一组，每个项目一组），表格行 = 属于该域的本体位置的 (source, skill)（全局：通用仓库、harness 全局目录、harness 附加目录、手动；项目：该项目的 `.agents/skills`）；跨域同步在本体位置视图处理，多一列"本体位置"，只读。
 - 任何勾选或动作后重新 `scan_all`。
 
 ## 9. 错误处理

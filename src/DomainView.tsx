@@ -33,6 +33,10 @@ const lastSegment = (path: string): string => path.split("/").filter(Boolean).po
 const targetDomainKey = (target: Target): string =>
   target.scope.type === "global" ? "global" : `project:${target.scope.project}`;
 
+/// 本体位置所属域：项目通用仓库归它自己的项目，其余（通用仓库、harness 全局/附加目录、手动）归全局
+const sourceDomainKey = (source: Source): string =>
+  source.kind.type === "projectStore" ? `project:${source.kind.project}` : "global";
+
 export interface DomainEntry {
   key: string;
   label: string;
@@ -69,18 +73,18 @@ function buildRows(sources: Source[]): Row[] {
   );
 }
 
-/// 单个域的只读表：行是 (本体位置, skill)，列是该域下的目标目录
+/// 单个域的只读表：行是属于该域的本体位置的 (本体位置, skill)，列是该域下的目标目录；
+/// 跨域同步在按本体位置视图处理
 export default function DomainView({ overview, domainKey }: DomainViewProps) {
   const targets = overview.targets.filter((t) => targetDomainKey(t) === domainKey);
   if (targets.length === 0) return <p>该域下没有可用的目标目录。</p>;
+  const rows = buildRows(overview.sources.filter((s) => sourceDomainKey(s) === domainKey));
+  if (rows.length === 0) return <p>该域下没有本体位置。</p>;
 
   const cells = new Map<string, Cell>();
   for (const cell of overview.cells) {
     cells.set(cellKey(cell.sourceId, cell.skill, cell.targetId), cell);
   }
-  const rows = buildRows(overview.sources).filter((row) =>
-    targets.some((target) => cells.has(cellKey(row.source.id, row.skill, target.id))),
-  );
   const entry = domainEntries(overview.targets).find((e) => e.key === domainKey);
 
   return (
