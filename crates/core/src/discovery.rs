@@ -270,6 +270,7 @@ mod tests {
         let installed = vec![pick("claude-code"), pick("codex"), pick("cursor")];
         let settings = Settings {
             disabled_harnesses: vec!["codex".into()],
+            ..Default::default()
         };
         let ids: Vec<String> = enabled(installed, &settings)
             .into_iter()
