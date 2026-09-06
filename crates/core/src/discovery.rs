@@ -23,9 +23,9 @@ struct HarnessSpec {
     detect_dir: Vec<String>,
     #[serde(default)]
     universal: bool,
-    /// 额外的本体位置模板，允许单个路径分量为 `*`
+    /// 每个 agent 一个项目的 skill 目录模板，允许单个路径分量为 `*`
     #[serde(default)]
-    extra_source_dirs: Vec<String>,
+    agent_dirs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,7 +103,7 @@ fn resolve(spec: &HarnessSpec, env: &Env) -> (Harness, Option<PathBuf>) {
         project_dir: spec.project_dir.clone(),
         global_dir: resolve_template(&spec.global_dir, env),
         universal: spec.universal,
-        extra_source_dirs: expand_template_glob(&spec.extra_source_dirs, env),
+        agent_dirs: expand_template_glob(&spec.agent_dirs, env),
     };
     (harness, resolve_template(&spec.detect_dir, env))
 }
@@ -116,27 +116,26 @@ pub fn expand_template_glob(candidates: &[String], env: &Env) -> Vec<PathBuf> {
         .collect()
 }
 
-/// 展开结果配上通配层匹配到的目录名（无通配时取末段目录名），按路径排序
-fn glob_matches(candidates: &[String], env: &Env) -> Vec<(String, PathBuf)> {
-    let mut found: BTreeMap<PathBuf, String> = BTreeMap::new();
+/// 展开结果配上通配层匹配到的目录（无通配时就是目录自身），按目录排序
+fn glob_matches(candidates: &[String], env: &Env) -> Vec<(PathBuf, PathBuf)> {
+    let mut found: BTreeMap<PathBuf, PathBuf> = BTreeMap::new();
     for template in candidates {
         let Some(path) = resolve_one(template, env) else {
             continue;
         };
-        for (label, dir) in expand_one_glob(&path) {
-            found.entry(dir).or_insert(label);
+        for (root, dir) in expand_one_glob(&path) {
+            found.entry(dir).or_insert(root);
         }
     }
-    found.into_iter().map(|(dir, label)| (label, dir)).collect()
+    found.into_iter().map(|(dir, root)| (root, dir)).collect()
 }
 
 /// 只认第一个 `*` 分量：列出该层的目录，拼回剩下的路径，留下确实存在的
-fn expand_one_glob(path: &Path) -> Vec<(String, PathBuf)> {
+fn expand_one_glob(path: &Path) -> Vec<(PathBuf, PathBuf)> {
     let parts: Vec<Component> = path.components().collect();
     let Some(star) = parts.iter().position(|c| c.as_os_str() == "*") else {
-        let label = dir_name(path);
         return if path.is_dir() {
-            vec![(label, path.to_path_buf())]
+            vec![(path.to_path_buf(), path.to_path_buf())]
         } else {
             Vec::new()
         };
@@ -151,12 +150,8 @@ fn expand_one_glob(path: &Path) -> Vec<(String, PathBuf)> {
         .filter(|e| e.path().is_dir())
         .filter_map(|e| {
             let dir = e.path().join(&tail);
-            dir.is_dir().then(|| {
-                (
-                    e.file_name().to_string_lossy().into_owned(),
-                    canonical_if_exists(dir),
-                )
-            })
+            dir.is_dir()
+                .then(|| (canonical_if_exists(e.path()), canonical_if_exists(dir)))
         })
         .collect()
 }
@@ -201,16 +196,45 @@ fn links_count_as_skills(kind: &SourceKind) -> bool {
     )
 }
 
-/// harness 表里配了额外位置的条目：id → 模板
-fn extra_source_templates() -> HashMap<String, Vec<String>> {
+/// harness 表里配了 per-agent 目录的条目：id → 模板
+fn agent_dir_templates() -> HashMap<String, Vec<String>> {
     specs()
         .into_iter()
-        .filter(|s| !s.extra_source_dirs.is_empty())
-        .map(|s| (s.id, s.extra_source_dirs))
+        .filter(|s| !s.agent_dirs.is_empty())
+        .map(|s| (s.id, s.agent_dirs))
         .collect()
 }
 
-/// 所有本体位置：通用仓库、harness 全局目录、harness 额外位置、项目通用仓库、手动添加。
+/// harness 的 per-agent 目录：agent 根当项目，标签为「harness 名 · agent 目录名」。
+/// `Harness.agent_dirs` 已经展开，看不出是哪一层匹配的 `*`，
+/// 只能回表按模板重新展开一次（同样的模板、同样的 env，结果一致）
+fn agent_projects(env: &Env, harnesses: &[Harness]) -> Vec<AgentProject> {
+    let templates = agent_dir_templates();
+    harnesses
+        .iter()
+        .filter_map(|h| Some((h, templates.get(&h.id)?)))
+        .flat_map(|(h, t)| {
+            glob_matches(t, env)
+                .into_iter()
+                .map(move |(root, dir)| AgentProject {
+                    harness_id: h.id.clone(),
+                    label: format!("{} · {}", h.display_name, dir_name(&root)),
+                    root,
+                    dir,
+                })
+        })
+        .collect()
+}
+
+/// 一个 agent 项目：`root` 是通配层匹配到的 agent 目录，`dir` 是它的 skill 目录
+struct AgentProject {
+    harness_id: String,
+    label: String,
+    root: PathBuf,
+    dir: PathBuf,
+}
+
+/// 所有本体位置：通用仓库、harness 全局目录、harness 的 per-agent 项目、项目通用仓库、手动添加。
 /// 一个 skill 都没有的位置不产出；按 `real_path` 去重，先到先得
 pub fn sources(
     env: &Env,
@@ -255,28 +279,23 @@ pub fn sources(
             );
         }
     }
-    // `Harness.extra_source_dirs` 已经展开，看不出是哪一层匹配的 `*`，
-    // 标签只能回表按模板重新展开一次（同样的模板、同样的 env，结果一致）
-    let templates = extra_source_templates();
-    for h in harnesses {
-        let Some(t) = templates.get(&h.id) else {
-            continue;
-        };
-        for (label, dir) in glob_matches(t, env) {
-            push(
-                dir,
-                SourceKind::HarnessExtra {
-                    harness_id: h.id.clone(),
-                    label: label.clone(),
-                },
-                format!("{} · {}", h.display_name, label),
-            );
-        }
+    for a in agent_projects(env, harnesses) {
+        push(
+            a.dir,
+            SourceKind::ProjectStore {
+                project: a.root,
+                project_label: Some(a.label.clone()),
+            },
+            a.label,
+        );
     }
     for p in projects {
         push(
             p.join(".agents").join("skills"),
-            SourceKind::ProjectStore { project: p.clone() },
+            SourceKind::ProjectStore {
+                project: p.clone(),
+                project_label: None,
+            },
             format!("{} · 通用仓库", dir_name(p)),
         );
     }
@@ -334,6 +353,19 @@ pub fn targets(
             );
         }
     }
+    for a in agent_projects(env, harnesses) {
+        let key = normalize(&a.root).to_string_lossy().into_owned();
+        push(
+            format!("project:{key}::{}", a.harness_id),
+            a.label.clone(),
+            a.dir,
+            TargetScope::Project {
+                project: a.root,
+                harness_id: a.harness_id,
+                project_label: Some(a.label),
+            },
+        );
+    }
     for p in projects {
         let name = dir_name(p);
         let key = normalize(p).to_string_lossy().into_owned();
@@ -345,6 +377,7 @@ pub fn targets(
             TargetScope::Project {
                 project: p.clone(),
                 harness_id: UNIVERSAL_ID.to_string(),
+                project_label: None,
             },
         );
         for h in harnesses {
@@ -361,6 +394,7 @@ pub fn targets(
                 TargetScope::Project {
                     project: p.clone(),
                     harness_id: h.id.clone(),
+                    project_label: None,
                 },
             );
         }
@@ -677,6 +711,73 @@ mod tests {
             expand_template_glob(&s(&["~/Data/agents", "~/Data/nope"]), &e),
             vec![agents]
         );
+        // 通配层匹配到的目录就是项目根
+        assert_eq!(
+            glob_matches(&s(&["~/Data/agents/*/.internal-plugins/skills"]), &e),
+            vec![
+                (
+                    home.join("Data/agents/agent_1"),
+                    home.join("Data/agents/agent_1/.internal-plugins/skills"),
+                ),
+                (
+                    home.join("Data/agents/agent_2"),
+                    home.join("Data/agents/agent_2/.internal-plugins/skills"),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn agent_dirs_become_one_project_target_each() {
+        let t = TempTree::new();
+        let home = t.root();
+        let weiboap = "Library/Application Support/WeiboAP";
+        let root1 = t.dir(&format!("{weiboap}/Data/agents/agent_1"));
+        let dir1 = t.dir(&format!(
+            "{weiboap}/Data/agents/agent_1/.internal-plugins/skills"
+        ));
+        let root2 = t.dir(&format!("{weiboap}/Data/agents/agent_2"));
+        let dir2 = t.dir(&format!(
+            "{weiboap}/Data/agents/agent_2/.internal-plugins/skills"
+        ));
+        // agent 根下的 .claude/skills 不该被当成普通项目目标
+        t.dir(&format!("{weiboap}/Data/agents/agent_1/.claude/skills"));
+
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        let hs = vec![pick("claude-code"), pick("weiboap")];
+        assert!(project_candidates(&e, &[], &hs).is_empty());
+
+        let got: Vec<(String, String, PathBuf, TargetScope)> = targets(&e, &hs, &[], &[])
+            .into_iter()
+            .map(|x| (x.id, x.label, x.path, x.scope))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    format!("project:{}::weiboap", root1.display()),
+                    "WeiboAP · agent_1".to_string(),
+                    dir1,
+                    TargetScope::Project {
+                        project: root1,
+                        harness_id: "weiboap".into(),
+                        project_label: Some("WeiboAP · agent_1".to_string()),
+                    },
+                ),
+                (
+                    format!("project:{}::weiboap", root2.display()),
+                    "WeiboAP · agent_2".to_string(),
+                    dir2,
+                    TargetScope::Project {
+                        project: root2,
+                        harness_id: "weiboap".into(),
+                        project_label: Some("WeiboAP · agent_2".to_string()),
+                    },
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -686,7 +787,8 @@ mod tests {
         t.dir(".agents/skills/uni-skill");
         t.dir(".claude/skills/claude-skill");
         t.dir(".codex/skills"); // 没有 skill → 不产出
-        let extra = t.dir(
+        let agent_root = t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1");
+        let agent_dir = t.dir(
             "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
         );
         t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
@@ -732,11 +834,11 @@ mod tests {
                     vec!["claude-skill".to_string()],
                 ),
                 (
-                    extra.display().to_string(),
-                    extra.clone(),
-                    SourceKind::HarnessExtra {
-                        harness_id: "weiboap".into(),
-                        label: "agent_1".into()
+                    agent_dir.display().to_string(),
+                    agent_dir.clone(),
+                    SourceKind::ProjectStore {
+                        project: agent_root.clone(),
+                        project_label: Some("WeiboAP · agent_1".to_string())
                     },
                     "WeiboAP · agent_1".to_string(),
                     vec!["agent-skill".to_string()],
@@ -745,7 +847,8 @@ mod tests {
                     project.join(".agents/skills").display().to_string(),
                     project.join(".agents/skills"),
                     SourceKind::ProjectStore {
-                        project: project.clone()
+                        project: project.clone(),
+                        project_label: None
                     },
                     "app · 通用仓库".to_string(),
                     vec!["proj-skill".to_string()],
@@ -839,7 +942,8 @@ mod tests {
                     project.join(".agents/skills"),
                     TargetScope::Project {
                         project: project.clone(),
-                        harness_id: "universal".into()
+                        harness_id: "universal".into(),
+                        project_label: None
                     },
                 ),
                 (
@@ -848,7 +952,8 @@ mod tests {
                     project.join(".claude/skills"),
                     TargetScope::Project {
                         project: project.clone(),
-                        harness_id: "claude-code".into()
+                        harness_id: "claude-code".into(),
+                        project_label: None
                     },
                 ),
             ]

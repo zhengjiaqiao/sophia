@@ -85,7 +85,7 @@ fn default_targets(source: &Source, targets: &[Target]) -> std::collections::BTr
         .iter()
         .filter(|t| match (&source.kind, &t.scope) {
             // 项目的通用仓库只服务本项目，勾全局目标会把项目 skill 推到全机器
-            (SourceKind::ProjectStore { project }, TargetScope::Project { project: p, .. }) => {
+            (SourceKind::ProjectStore { project, .. }, TargetScope::Project { project: p, .. }) => {
                 normalize(project) == normalize(p)
             }
             (SourceKind::ProjectStore { .. }, _) => false,
@@ -301,6 +301,7 @@ mod tests {
             scope: TargetScope::Project {
                 project,
                 harness_id: harness.to_string(),
+                project_label: None,
             },
             linked_whole_to: None,
         }
@@ -447,6 +448,7 @@ mod tests {
         let mut s = source(&store, &["a"]);
         s.kind = SourceKind::ProjectStore {
             project: normalize(&proj),
+            project_label: None,
         };
         let g = global("claude-code", &t.dir("g"));
         let mine = project(&proj, "claude-code", &t.dir("proj/.claude/skills"));
@@ -454,6 +456,30 @@ mod tests {
         let o = scan(
             std::slice::from_ref(&s),
             &[g, mine.clone(), theirs],
+            &SyncSet::default(),
+        );
+        assert_eq!(o.sync_set.sources[&s.id].targets, ids(&[&mine.id]));
+    }
+
+    #[test]
+    fn agent_source_defaults_to_its_own_agent_target_only() {
+        let t = TempTree::new();
+        // harness 的 per-agent 目录也是项目：agent 根为项目，skills 目录既是本体位置又是目标
+        let mine_root = t.dir("agents/agent_1");
+        let mine_dir = t.dir("agents/agent_1/.internal-plugins/skills");
+        let other_root = t.dir("agents/agent_2");
+        let other_dir = t.dir("agents/agent_2/.internal-plugins/skills");
+        let mut s = source(&mine_dir, &["a"]);
+        s.kind = SourceKind::ProjectStore {
+            project: normalize(&mine_root),
+            project_label: Some("WeiboAP · agent_1".into()),
+        };
+        let g = global("claude-code", &t.dir("g"));
+        let mine = project(&mine_root, "weiboap", &mine_dir);
+        let other = project(&other_root, "weiboap", &other_dir);
+        let o = scan(
+            std::slice::from_ref(&s),
+            &[g, mine.clone(), other],
             &SyncSet::default(),
         );
         assert_eq!(o.sync_set.sources[&s.id].targets, ids(&[&mine.id]));

@@ -14,12 +14,13 @@
 ## 2. 模型（`crates/core/src/skills.rs`，重写）
 
 ```rust
-pub enum SourceKind { Universal, HarnessGlobal { harness_id: String }, ProjectStore { project: PathBuf },
-                      HarnessExtra { harness_id: String, label: String }, Manual }
+pub enum SourceKind { Universal, HarnessGlobal { harness_id: String },
+                      ProjectStore { project: PathBuf, project_label: Option<String> }, Manual }
 pub struct Source { pub id: String /* normalized path */, pub path: PathBuf, pub kind: SourceKind,
                     pub label: String, pub skills: Vec<String> /* 真实目录名，排序 */ }
 
-pub enum TargetScope { Global { harness_id: String }, Project { project: PathBuf, harness_id: String } }
+pub enum TargetScope { Global { harness_id: String },
+                       Project { project: PathBuf, harness_id: String, project_label: Option<String> } }
 pub struct Target { pub id: String /* "claude-code" | "project:<path>::claude-code" */, pub label: String,
                     pub path: PathBuf, pub scope: TargetScope,
                     pub linked_whole_to: Option<String> /* 目标目录本身是软链且 real_path 等于某本体位置 id */ }
@@ -34,17 +35,18 @@ pub struct Overview { pub sources: Vec<Source>, pub targets: Vec<Target>, pub ce
                       pub sync_set: SyncSet, pub summary: Summary /* sources, pending_missing, broken */ }
 ```
 
-所有类型 serde camelCase，`SourceKind`/`TargetScope` 用 `tag = "type"`。
+所有类型 serde camelCase，`SourceKind`/`TargetScope` 用 `tag = "type"`。`project_label`（`#[serde(default)]`，缺省 `null`）覆盖项目名的显示，只有 harness 的 per-agent 项目会填（见 §3）。
 
 ## 3. 发现（`discovery.rs` 新增）
 
 - `sources(env, settings, harnesses, projects) -> Vec<Source>`：
-  - 通用仓库 `~/.agents/skills`；每个已启用 harness 的 `global_dir`；每个 harness 的 `extra_source_dirs`（模板数组，支持单层 `*` 通配，见 §6）；每个项目的 `.agents/skills`；`settings.manual_sources`。
+  - 通用仓库 `~/.agents/skills`；每个已启用 harness 的 `global_dir`；每个 harness 的 `agent_dirs`（模板数组，支持单层 `*` 通配，见 §6）；每个项目的 `.agents/skills`；`settings.manual_sources`。
+  - **harness 的 per-agent 目录当项目看**，不是单独的类别：`.../agents/<id>/.internal-plugins/skills` 里，通配层匹配到的 `.../agents/<id>` 是项目根，产出 `ProjectStore { project: 该根, project_label: "<display_name> · <id>" }`，`Source.label` 同为该串。这类项目根来自 harness 表、不进 `project_candidates`，因此不会再去 agent 根下探测各 harness 的 `project_dir`。
   - 列直接子项，`entry_kind == Dir` 且不以 `.` 开头的才是 skill；没有任何 skill 的位置不产出 `Source`。
-  - 仓库型位置（`Universal`、`ProjectStore`、`Manual`）额外把 `real_path` 解析到目录的软链也算 skill（用户会把外部目录链进仓库，如 `~/.agents/skills/ego-browser -> /Applications/.../ego-skills/ego-browser`）；坏链不算。`HarnessGlobal`、`HarnessExtra` 只认真实目录，否则满是软链的消费目录会反过来被当成本体位置。
+  - 仓库型位置（`Universal`、`ProjectStore`、`Manual`）额外把 `real_path` 解析到目录的软链也算 skill（用户会把外部目录链进仓库，如 `~/.agents/skills/ego-browser -> /Applications/.../ego-skills/ego-browser`）；坏链不算。`HarnessGlobal` 只认真实目录，否则满是软链的消费目录会反过来被当成本体位置。
   - 位置去重按 `real_path`。
-- `targets(env, settings, harnesses, projects, sources) -> Vec<Target>`：已启用 harness 的 `global_dir`（存在即算）+ 每个项目里存在的 harness `project_dir`；按 `real_path` 去重；`real_path(target.path)` 等于某个 `Source.id` 时填 `linked_whole_to`。
-- harness 表模板解析出的路径（`global_dir`、`detect_dir`、`extra_source_dirs`）存在时一律取 `real_path`、不存在则保持原样，这样 `$CODEX_HOME/skills -> ~/.codex/skills` 这类指向软链的环境变量覆盖会与真实目录合并成一处，而不是多出一个整目录软链的目标。
+- `targets(env, settings, harnesses, projects, sources) -> Vec<Target>`：已启用 harness 的 `global_dir`（存在即算）+ 每个 agent 项目的一个目标（`Project { project: agent 根, harness_id: harness 的 id, project_label }`，路径就是那个 skill 目录）+ 每个项目里存在的 harness `project_dir`；按 `real_path` 去重；`real_path(target.path)` 等于某个 `Source.id` 时填 `linked_whole_to`。
+- harness 表模板解析出的路径（`global_dir`、`detect_dir`、`agent_dirs`）存在时一律取 `real_path`、不存在则保持原样，这样 `$CODEX_HOME/skills -> ~/.codex/skills` 这类指向软链的环境变量覆盖会与真实目录合并成一处，而不是多出一个整目录软链的目标。
 - 项目列表沿用 v2 的 `project_candidates`。
 
 ## 4. 扫描与动作（`skills.rs`）
@@ -67,13 +69,13 @@ pub struct Overview { pub sources: Vec<Source>, pub targets: Vec<Target>, pub ce
 
 ## 6. harness 表
 
-新增可选字段 `extra_source_dirs: Vec<String>`（模板，支持路径中单个分量为 `*`，展开为该层所有目录）。WeiboAP 条目：
+新增可选字段 `agent_dirs: Vec<String>`（模板，支持路径中单个分量为 `*`，展开为该层所有目录）。WeiboAP 条目：
 
 ```json
 "global_dir": ["~/Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom"],
-"extra_source_dirs": ["~/Library/Application Support/WeiboAP/Data/agents/*/.internal-plugins/skills"]
+"agent_dirs": ["~/Library/Application Support/WeiboAP/Data/agents/*/.internal-plugins/skills"]
 ```
-`HarnessExtra` 的 `label` 取通配匹配到的目录名（如 `agent_1788…`）。
+通配层匹配到的目录（如 `agent_1788…`）就是项目根，`project_label` 取 `"<display_name> · <目录名>"`。
 
 ## 7. 命令层
 
