@@ -88,13 +88,13 @@ pub fn propose(matrix: &Matrix) -> Vec<PlannedAction>     // Missing → Create�
 
 **格状态**：真实目录且是本体 → Home；真实目录但本体在别处 → DuplicateHome；链接且 real_path == home → Linked；链接且目标不存在 → Broken；链接指向别处 → Foreign；无条目 → Missing；目录不可读 → 整列 Inaccessible。
 
-**动作**：仅 Missing 和 Broken 产生动作；Foreign、DuplicateHome、ambiguous 只报告。全局域建链用 `Absolute`，项目域用 `Relative`。
+**动作**：仅 Missing 和 Broken 产生动作；Foreign、DuplicateHome、ambiguous 只报告。全局域建链用 `Absolute`，项目域用 `Relative`。摘要（`Summary`）只统计非多本体行的 Missing / Broken，与动作一致。
 
 ## 6. core：`discovery` 模块
 
 - `harnesses.json` 字段：`id, display_name, project_dir, global_dir, detect_dir, universal`。`global_dir` 与 `detect_dir` 是模板，支持 `~`、`$VAR`（如 `$CLAUDE_CONFIG_DIR`、`$CODEX_HOME`）、`$XDG_CONFIG_HOME`（未设置时回退 `~/.config`；Windows 回退 `%APPDATA%`）。
 - `installed(harnesses) -> Vec<Harness>`：`detect_dir` 存在即已安装。
-- `project_candidates() -> Vec<PathBuf>`：`~/.claude.json` 的 `projects` 键 ∪ `projects.json` 手动列表；过滤为"目录存在且含至少一个 harness 的 `project_dir` 或 `.agents/skills`"。`~/.claude.json` 缺失或解析失败时只用手动列表。
+- `project_candidates() -> Vec<PathBuf>`：`~/.claude.json` 的 `projects` 键 ∪ `projects.json` 手动列表；记录来源的项目需"目录存在且含至少一个 harness 的 `project_dir` 或 `.agents/skills`"；手动添加的项目只需目录存在；两者都排除主目录与根目录。`~/.claude.json` 缺失或解析失败时只用手动列表。
 
 ## 7. core：`store` 模块
 

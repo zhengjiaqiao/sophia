@@ -2882,3 +2882,14 @@ gh pr create --title "feat(app): Tauri app for skill matrix and custom sync" --b
 - Windows 真机验证 junction 行为，补 `harnesses.json` 的 Windows 专属路径。
 - Codex / Cursor 的项目记录作为项目候选来源。
 - 全局 ↔ 项目复制与分叉比对（已在 spec 范围外）。
+
+---
+
+## 实施偏差（2026-09-06 记录）
+
+- **Task 2** `create-tauri-app --force` 会清空目标目录（已在 Task 2 正文加注）；`[profile.release]` 移到根 `Cargo.toml`（workspace 成员里的 profile 会被忽略）；移除模板自带的 `tauri-plugin-opener`、README、`.vscode`、svg；`index.html` 标题改为 SymSync。
+- **Task 3** `fs::normalize` 的 `ParentDir` 分支改为按 `out` 末尾分量判断，修复相对路径开头多个 `..` 被吞掉的问题（`"../../a"` 曾被算成 `"a"`），补三条断言。
+- **Task 5** 通用仓库本体判定改用 `e.col.id == UNIVERSAL_ID`（`Column.universal` 是合并后的 harness 标志，Codex 自己的列也为 true）；`summary.broken` 与 `summary.missing` 一样排除多本体行，与 `propose` 一致；波次 A 合并后把项目域相对链接测试改回 `sync::execute`，并新增"多本体行里的坏链不计数也不生成动作"回归测试。
+- **Task 6** 手动添加的项目不按"含 skill 目录"过滤，只要求目录存在且不是主目录/根目录；Claude Code 记录的项目仍需含 skill 目录。计划里的测试夹具与规则原本自相矛盾。
+- **流程** 整个改造只开一个 PR（#4，`feat/rust-pivot` → main），两个里程碑推到同一分支；并行任务用 `.worktrees/` 下的独立 worktree，控制器负责合并。
+- **测试数** core 共 40 个（计划估计 39）。

@@ -1,12 +1,5 @@
 # Xcode
-xcuserdata/
-*.xcuserstate
-DerivedData/
 build/
-# SwiftPM
-.build/
-.swiftpm/
-Package.resolved
 # macOS
 .DS_Store
 # Claude Code local
@@ -14,7 +7,6 @@ Package.resolved
 # Superpowers scratch
 .superpowers/
 .claude/FIXING
-SymSync.xcodeproj/
 
 # Rust / Tauri / Node
 target/
