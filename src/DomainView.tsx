@@ -97,8 +97,8 @@ export default function DomainView({
   const targets = overview.targets.filter((t) => targetDomainKey(t) === domainKey);
   if (targets.length === 0) return <p>该域下没有可用的目标目录。</p>;
   const sources = overview.sources.filter((s) => sourceDomainKey(s) === domainKey);
-  const rows = buildRows(sources);
-  if (rows.length === 0) return <p>该域下没有本体位置。</p>;
+  const allRows = buildRows(sources);
+  if (allRows.length === 0) return <p>该域下没有本体位置。</p>;
 
   const cells = new Map<string, Cell>();
   for (const cell of overview.cells) {
@@ -115,6 +115,8 @@ export default function DomainView({
       return [source.id, hit === 0 ? "none" : hit === domainTargetIds.length ? "all" : "some"];
     }),
   );
+  // 取消勾选（一个本域目标都没选）的本体位置，行不再显示；半选仍显示
+  const rows = allRows.filter((row) => participation.get(row.source.id) !== "none");
 
   // 勾上 = 把本域全部目标并入该本体位置的目标集合，取消 = 从中去掉本域全部目标
   const toggle = async (source: Source, on: boolean) => {
@@ -152,42 +154,43 @@ export default function DomainView({
           );
         })}
       </div>
-      <table className="matrix">
-        <thead>
-          <tr>
-            <th>skill</th>
-            <th>本体位置</th>
-            {targets.map((target) => (
-              <th key={target.id}>{target.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={`${row.source.id}|${row.skill}`}
-              className={participation.get(row.source.id) === "none" ? "disabled" : undefined}
-            >
-              <td>{row.skill}</td>
-              <td className="path" title={row.source.path}>
-                {row.source.label}
-              </td>
-              {targets.map((target) => {
-                const cell = cells.get(cellKey(row.source.id, row.skill, target.id)) ?? null;
-                return (
-                  <td
-                    className={cell ? `cell ${cell.state}` : "cell"}
-                    key={target.id}
-                    title={cell ? `${CELL_TEXT[cell.state]}：${cell.path}` : undefined}
-                  >
-                    {cell ? CELL_SYMBOL[cell.state] : ""}
-                  </td>
-                );
-              })}
+      {rows.length === 0 ? (
+        <p>本域没有参与同步的本体位置。</p>
+      ) : (
+        <table className="matrix">
+          <thead>
+            <tr>
+              <th>skill</th>
+              <th>本体位置</th>
+              {targets.map((target) => (
+                <th key={target.id}>{target.label}</th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.source.id}|${row.skill}`}>
+                <td>{row.skill}</td>
+                <td className="path" title={row.source.path}>
+                  {row.source.label}
+                </td>
+                {targets.map((target) => {
+                  const cell = cells.get(cellKey(row.source.id, row.skill, target.id)) ?? null;
+                  return (
+                    <td
+                      className={cell ? `cell ${cell.state}` : "cell"}
+                      key={target.id}
+                      title={cell ? `${CELL_TEXT[cell.state]}：${cell.path}` : undefined}
+                    >
+                      {cell ? CELL_SYMBOL[cell.state] : ""}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
