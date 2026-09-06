@@ -327,7 +327,7 @@ npm install
 npm install --save-dev prettier
 npm install @tauri-apps/plugin-dialog
 ```
-`--force` 允许在非空目录生成。生成后检查根目录出现 `package.json`、`src/`、`src-tauri/`、`index.html`、`vite.config.ts`。若脚手架把项目名写成目录名之外的值，把 `package.json` 的 `name` 改为 `symsync`，`src-tauri/Cargo.toml` 的 `name` 改为 `symsync`、`[lib] name = "symsync_lib"`。
+**注意：`create-tauri-app --force` 会先清空目标目录再生成**（Task 2 实施时确认）。已跟踪文件可用 `git checkout -- .` 恢复，但未跟踪的 `.superpowers/`、`build/`、`.claude/settings.local.json` 会丢失。更稳妥的做法是先在临时目录生成再把文件拷进仓库根。生成后检查根目录出现 `package.json`、`src/`、`src-tauri/`、`index.html`、`vite.config.ts`。若脚手架把项目名写成目录名之外的值，把 `package.json` 的 `name` 改为 `symsync`，`src-tauri/Cargo.toml` 的 `name` 改为 `symsync`、`[lib] name = "symsync_lib"`。
 
 `.prettierrc`：
 ```json
