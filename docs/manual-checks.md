@@ -3,6 +3,8 @@
 启动：`make dev`
 
 ## Skills tab
+- [ ] 左栏底部 Harness 区列出检测到的 harness；取消勾选 Command Code 和 Droid 后矩阵剩通用仓库 / Claude Code / Codex / WeiboAP 四列，坏链计数归零；重启 App 选择仍在
+- [ ] WeiboAP 列存在，`docx` 这类两边都有本体的行：通用仓库 ●、WeiboAP ⚠
 - [ ] 左栏"全局"置顶；项目列表只包含仍存在且含 skill 目录的项目；"添加项目"打开系统选择框
 - [ ] 全局矩阵的列与本机已安装 harness 一致（`ls -d ~/.claude ~/.codex ~/.cursor …`），通用仓库列在最前，Cline 合并进通用仓库列
 - [ ] 每行状态与 `ls -l ~/.agents/skills ~/.claude/skills ~/.codex/skills` 对得上：本体 ●、链接 ✓、缺失 ○、坏链 ✗、指向他处 →、多本体 ⚠

@@ -11,7 +11,7 @@
 
 ## 期望结果（按优先级）
 
-0. **让用户决定哪些 harness 算数**：Orca 会往所有已知 agent 的配置目录写 hook（`~/.commandcode/settings.json`、`~/.factory/settings.json` 等），"目录里有非 skills 的条目"仍会把没用过的 Command Code、Droid 判成已安装。需要在设置里提供按 harness 启用/禁用，并记住选择。
+0. **按行选择同步目标**：WeiboAP 接入后，它的 35 个工作专用 skill 与全局 40 个 skill 会被"同步缺失链接"一键双向互通；需要按 skill 行选择"同步到哪些 harness"，或至少能对某行标记"不同步"。另需真机验证 WeiboAP 是否跟随软链读取 skill。（harness 启用/禁用已于 b461266 实现。）
 1. **未安装 harness 里的坏链不可见**：`installed()` 收紧后，`~/.kiro/skills/ppt-master` 这类 npx 留下的坏链不再出现在矩阵里，用户无法用 App 清理。提供"显示未安装的 harness"开关，或一个"清理 npx 残留"的独立动作（只删软链）。
 2. **Windows 真机验证**：junction 的 `symlink_metadata().is_symlink()`、`read_link`、`remove_dir` 行为，以及 `harnesses.json` 的 `%APPDATA%` 路径；CI 增加 windows job。
 3. **手动清单跑通**：`docs/manual-checks.md` 的 macOS 部分尚未由人工执行。
