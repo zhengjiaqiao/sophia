@@ -46,12 +46,19 @@ pub fn normalize(path: &Path) -> PathBuf {
     for c in path.components() {
         match c {
             Component::CurDir => {}
-            Component::ParentDir => {
-                let popped = out.pop();
-                if !popped && !path.is_absolute() {
-                    out.push("..");
+            Component::ParentDir => match out.components().next_back() {
+                // 空，或末尾已是 ..：相对路径保留 ..；绝对路径不会走到这里
+                None | Some(Component::ParentDir) => {
+                    if !path.is_absolute() {
+                        out.push("..");
+                    }
                 }
-            }
+                // 已在根或盘符：忽略，不能越过根
+                Some(Component::RootDir) | Some(Component::Prefix(_)) => {}
+                _ => {
+                    out.pop();
+                }
+            },
             other => out.push(other.as_os_str()),
         }
     }
@@ -106,6 +113,9 @@ mod tests {
         assert_eq!(normalize(Path::new("/a/b/../c/")), Path::new("/a/c"));
         assert_eq!(normalize(Path::new("/a/./b")), Path::new("/a/b"));
         assert_eq!(normalize(Path::new("/..")), Path::new("/"));
+        assert_eq!(normalize(Path::new("../../a")), Path::new("../../a"));
+        assert_eq!(normalize(Path::new("../..")), Path::new("../.."));
+        assert_eq!(normalize(Path::new("a/../../b")), Path::new("../b"));
     }
 
     #[test]
