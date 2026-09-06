@@ -23,6 +23,7 @@ export const api = {
   listManualSources: () => invoke<string[]>("list_manual_sources"),
   addSource: (path: string) => invoke<void>("add_source", { path }),
   removeSource: (path: string) => invoke<void>("remove_source", { path }),
+  listManualProjects: () => invoke<string[]>("list_manual_projects"),
   addProject: (path: string) => invoke<void>("add_project", { path }),
   removeProject: (path: string) => invoke<void>("remove_project", { path }),
   listRules: () => invoke<SyncRule[]>("list_rules"),

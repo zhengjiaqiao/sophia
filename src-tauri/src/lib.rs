@@ -223,6 +223,12 @@ fn set_harness_enabled(
     state.store.save_settings(&settings).map_err(err)
 }
 
+/// 仅手动添加的项目；自动发现的项目不在其中
+#[tauri::command]
+fn list_manual_projects(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
+    state.store.load_projects().map_err(err)
+}
+
 #[tauri::command]
 fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let mut list = state.store.load_projects().map_err(err)?;
@@ -290,6 +296,7 @@ pub fn run() {
             list_manual_sources,
             add_source,
             remove_source,
+            list_manual_projects,
             add_project,
             remove_project,
             list_rules,
