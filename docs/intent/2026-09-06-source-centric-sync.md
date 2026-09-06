@@ -1,6 +1,6 @@
 # Intent: 以本体为中心组织同步，按需勾选目标
 
-- 状态：待审阅（作者澄清中）
+- 状态：已接受（2026-09-06 作者答复五个问题后）
 - 作者：jiaqiao
 - 日期：2026-09-06
 - 上游：PR #4 的真机验收；替代 `docs/intent/2026-09-06-followup-rust-pivot.md` 的第 0 条
@@ -13,7 +13,7 @@
 2. **skill 列表没有按来源分组**：用户的心智是"这一批来自 WeiboAP、这一批是我自己放在 `~/.agents/skills` 的"。有的来源整组都不想同步出去，也应该能整组全选。
 3. **项目级的真实用法是"从某个本体链进项目"**，而不是"项目内部各 harness 目录互链"：
    - `weibo_mini_program/.claude/skills` 是 10 条指向 `WeiboAP/Data/agents/<agent>/.internal-plugins/skills/` 的绝对路径软链，矩阵显示为"外部本体"。
-   - `weibo_assistant/.claude/skills` 是 43 个从 WeiboAP 复制来的真实目录，矩阵把它们当成项目自己的本体。
+   - `weibo_assistant/.claude/skills` **本身是一条软链**，整个目录指向 `WeiboAP/Data/agents/<另一个 agent>/.internal-plugins/skills`（WeiboAP 把整个 skills 目录登记成软链），矩阵把里面 43 个 skill 当成项目自己的本体。整目录软链不够灵活：项目里放不进别的 skill。
    - 两个项目其实是同一件事：把 WeiboAP 的 skill 同步到项目里。现在的组织方式表达不出来，也没有"把本体同步到项目"的动作（第一版明确排除了跨域动作）。
    - 顺带发现 WeiboAP 有两个 skill 位置：`claude-code-plugins-custom/skills/custom`（用户自装）和 `Data/agents/<agent>/.internal-plugins/skills`（agent 内置），第一版只登记了前者。
 
@@ -43,7 +43,15 @@
 
 - 内容比对与分叉检测、复制或移动本体、marketplace、编辑、预设、CLI、自动更新。
 
-## 待作者确认的问题
+## 作者决定（2026-09-06）
+
+1. 默认全选：新发现的 skill 默认勾选到所有已启用目标。
+2. 勾选粒度到行：一个 skill 要么同步到本组的全部目标，要么不同步。
+3. WeiboAP 每个 agent 的 `.internal-plugins/skills` 各算一个本体位置，可能多个。
+4. 整目录软链（`weibo_assistant/.claude/skills -> WeiboAP agent 目录`）不做特殊处理，按通用模式：识别为"目标目录整体链接到某本体位置"，提供"拆成逐项链接"的动作（删目录级软链、建真实目录、逐项建链，需确认）。
+5. 两种视图可切换：按本体位置分组（默认）和按域 × harness（第一版）。
+
+## 原始待确认问题（已答复）
 
 1. 默认勾选 = "已链接的格子"是否符合预期？还是新 skill 默认全选？
 2. 勾选粒度到格（skill × 目标）还是到行（skill → 所有已启用目标）？格更灵活，行更简单。
