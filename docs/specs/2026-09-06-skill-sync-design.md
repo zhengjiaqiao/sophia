@@ -93,8 +93,8 @@ pub fn propose(matrix: &Matrix) -> Vec<PlannedAction>     // Missing → Create�
 ## 6. core：`discovery` 模块
 
 - `harnesses.json` 字段：`id, display_name, project_dir, global_dir, detect_dir, universal`。`global_dir` 与 `detect_dir` 是模板，支持 `~`、`$VAR`（如 `$CLAUDE_CONFIG_DIR`、`$CODEX_HOME`）、`$XDG_CONFIG_HOME`（未设置时回退 `~/.config`；Windows 回退 `%APPDATA%`）。
-- `installed(harnesses) -> Vec<Harness>`：`detect_dir` 存在即已安装。
-- `project_candidates() -> Vec<PathBuf>`：`~/.claude.json` 的 `projects` 键 ∪ `projects.json` 手动列表；记录来源的项目需"目录存在且含至少一个 harness 的 `project_dir` 或 `.agents/skills`"；手动添加的项目只需目录存在；两者都排除主目录与根目录。`~/.claude.json` 缺失或解析失败时只用手动列表。
+- `installed() -> Vec<Harness>`：探测目录（`detect_dir`，缺省 `global_dir`）存在，且其中至少有一个条目不在通往 `global_dir` 的路径上（只含 `skills/` 空壳的目录不算已安装，因为 `npx skills --agent '*'` 会为未安装的工具也建出该目录）。
+- `project_candidates() -> Vec<PathBuf>`：`~/.claude.json` 的 `projects` 键 ∪ `projects.json` 手动列表；记录来源的项目需"目录存在且含至少一个 harness 的 `project_dir` 或 `.agents/skills`"；手动添加的项目只需目录存在；两者都排除主目录与根目录。`~/.claude.json` 缺失或解析失败时只用手动列表；忽略不以 `.` 开头的 `project_dir`（OpenClaw 的裸 `skills`），并跳过主目录下的隐藏目录。
 
 ## 7. core：`store` 模块
 

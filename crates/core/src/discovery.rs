@@ -93,24 +93,41 @@ pub fn all_harnesses(env: &Env) -> Vec<Harness> {
     specs().iter().map(|s| resolve(s, env).0).collect()
 }
 
-/// detect_dir 存在即已安装；没有 detect_dir 时用 global_dir
+/// 探测目录（detect_dir，缺省 global_dir）存在，且不是只装着通往 skills 的空壳
 pub fn installed(env: &Env) -> Vec<Harness> {
     specs()
         .iter()
         .filter_map(|s| {
             let (h, detect) = resolve(s, env);
             let probe = detect.or_else(|| h.global_dir.clone())?;
-            probe.exists().then_some(h)
+            looks_installed(&probe, h.global_dir.as_deref()).then_some(h)
         })
         .collect()
 }
 
-/// 项目目录里是否有任一 harness 的项目级 skill 目录
+/// 探测目录里至少要有一个条目不在通往 `global_dir` 的路径上。
+/// `npx skills add --agent '*'` 会给未安装的工具也建出 `~/.xxx/skills`，
+/// 这类只含 skills 路径的目录不算已安装。没有 global_dir 时存在即可
+fn looks_installed(probe: &Path, global_dir: Option<&Path>) -> bool {
+    let Some(global) = global_dir else {
+        return probe.exists();
+    };
+    let Ok(entries) = std::fs::read_dir(probe) else {
+        return false;
+    };
+    entries
+        .flatten()
+        .any(|e| !global.starts_with(e.path().as_path()))
+}
+
+/// 项目目录里是否有任一 harness 的项目级 skill 目录。
+/// 只认以 `.` 开头的 project_dir：裸 `skills`（OpenClaw）太常见，不足以判定是项目
 pub fn has_project_skill_dir(project: &Path, harnesses: &[Harness]) -> bool {
     project.join(".agents").join("skills").is_dir()
         || harnesses
             .iter()
             .filter_map(|h| h.project_dir.as_deref())
+            .filter(|d| d.starts_with('.'))
             .any(|d| project.join(d).is_dir())
 }
 
@@ -122,8 +139,16 @@ pub fn project_candidates(env: &Env, manual: &[PathBuf], harnesses: &[Harness]) 
     set.extend(claude_recorded_projects(&env.home));
     set.into_iter()
         .filter(|p| p != &env.home && p.parent().is_some() && p.is_dir())
+        .filter(|p| manual.contains(p) || !is_hidden_home_dir(&env.home, p))
         .filter(|p| manual.contains(p) || has_project_skill_dir(p, harnesses))
         .collect()
+}
+
+/// 主目录下的隐藏目录（如 ~/.claude、~/.agents）是工具配置，不是项目
+fn is_hidden_home_dir(home: &Path, path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with('.') && path == home.join(n))
 }
 
 /// ~/.claude.json 的 projects 键。格式非公开约定，任何解析失败都视为空
@@ -216,13 +241,35 @@ mod tests {
     fn installed_filters_by_detect_dir() {
         let t = TempTree::new();
         let home = t.root();
-        t.dir(".claude");
-        t.dir(".codex/skills");
+        let claude = t.dir(".claude");
+        t.file(&claude, "settings.json");
+        let codex = t.dir(".codex/skills");
+        t.file(codex.parent().unwrap(), "config.toml");
         let e = env(&home, &[]);
         let ids: Vec<String> = installed(&e).into_iter().map(|h| h.id).collect();
         assert!(ids.contains(&"claude-code".to_string()));
         assert!(ids.contains(&"codex".to_string()));
         assert!(!ids.contains(&"cursor".to_string()));
+    }
+
+    #[test]
+    fn installed_ignores_config_dirs_that_only_hold_the_skills_path() {
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir(".kiro/skills"); // 只有 skills，npx 留下的空壳 → 未安装
+        t.dir(".pi/agent/skills"); // 只有通往 skills 的路径 → 未安装
+        t.dir(".cursor/skills");
+        t.file(&home.join(".cursor"), "hooks.json"); // 有真实配置 → 已安装
+        t.dir(".codex/skills");
+        t.file(&home.join(".codex"), "config.toml");
+        t.dir(".claude"); // 空目录（用户刚装、还没 skills）→ 未安装
+        let e = env(&home, &[]);
+        let ids: Vec<String> = installed(&e).into_iter().map(|h| h.id).collect();
+        assert!(ids.contains(&"cursor".to_string()));
+        assert!(ids.contains(&"codex".to_string()));
+        assert!(!ids.contains(&"kiro-cli".to_string()));
+        assert!(!ids.contains(&"pi".to_string()));
+        assert!(!ids.contains(&"claude-code".to_string()));
     }
 
     #[test]
@@ -252,6 +299,26 @@ mod tests {
         let mut want = vec![good, uni, manual];
         want.sort();
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn bare_skills_dir_and_hidden_home_dirs_are_not_projects() {
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir(".claude/skills"); // ~/.claude 有 skills/，不是项目
+        let plain = t.dir("Project/plain");
+        t.dir("Project/plain/skills"); // 只有裸 skills/ → 不是项目
+        let real = t.dir("Project/real");
+        t.dir("Project/real/.agents/skills");
+        let json = format!(
+            "{{\"projects\":{{\"{}\":{{}},\"{}\":{{}},\"{}\":{{}}}}}}",
+            home.join(".claude").display(),
+            plain.display(),
+            real.display()
+        );
+        std::fs::write(home.join(".claude.json"), json).unwrap();
+        let e = env(&home, &[]);
+        assert_eq!(project_candidates(&e, &[], &all_harnesses(&e)), vec![real]);
     }
 
     #[test]
