@@ -19,7 +19,7 @@
 | [skillhub-club/skillhub-desktop](https://github.com/skillhub-club/skillhub-desktop) | 597 | Tauri | — | — | — | 偏 marketplace 客户端，3 月后未更新 |
 | [yibie/skills-manager](https://github.com/yibie/skills-manager) | 439 | **原生 SwiftUI**，Developer ID 公证，非 App Store | Library → Collection → Mount | Collection 可挂到项目 | missing / shared / partially applied / diverged | takeover 保留可恢复备份、拒绝模糊的破坏性修复；durable skill ID；含 TUI |
 | [Harries/skills-desktop](https://github.com/Harries/skills-desktop) | 349 | 桌面 | — | 手动配置项目路径，扫描 `.claude/skills` | 安全扫描 | 只管 Claude Code |
-| [Loadout](https://loadout.migsilva.dev/) | — | **原生 SwiftUI**，公证，Homebrew 分发 | 分享给第二个 harness 时"提升"到 `~/.agents/skills` 再软链 | — | — | 按目录是否存在自动发现 harness；还管 subagent / command / MCP |
+| [Loadout](https://loadout.migsilva.dev/) | 47 | **原生 SwiftUI**，公证，Homebrew 分发 | 分享给第二个 harness 时"提升"到 `~/.agents/skills` 再软链 | — | — | 按目录是否存在自动发现 harness；还管 subagent / command / MCP |
 | [beautyfree/skiller](https://github.com/beautyfree/skiller) | 46 | Electron | 49 个 harness | 有 | dashboard | 读 skills CLI 的 `.skill-lock.json` |
 | [umutbozdag/agent-skills-manager](https://github.com/umutbozdag/agent-skills-manager) | 34 | Web/Node | 就地管理，不设库 | 手动添加 + 全盘扫描 | — | 也管 rules/AGENTS.md；启用/停用靠重命名 SKILL.md |
 | [awesome-skills/agent-skills-manager](https://github.com/awesome-skills/agent-skills-manager) | 6 | Shell 脚本 | `~/.agents_skills` | 无 | — | 中文社区"宝玉方案"，一份原件全软链 |
