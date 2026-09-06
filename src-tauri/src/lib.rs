@@ -1,9 +1,10 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use symsync_core::discovery::{self, Env};
+use symsync_core::fs::normalize;
 use symsync_core::models::*;
-use symsync_core::skills::{self, Matrix};
+use symsync_core::skills;
 use symsync_core::store::Store;
 use symsync_core::sync;
 
@@ -52,25 +53,146 @@ fn list_domains(state: tauri::State<'_, AppState>) -> Result<Vec<DomainInfo>, St
     Ok(out)
 }
 
-/// 已安装且未被用户关掉的 harness 上扫矩阵
-fn scan_with(domain: &Domain, state: &AppState) -> Result<Matrix, String> {
+/// 完整扫描：发现本体位置与目标 → 扫描 → 落盘补齐默认值后的同步集
+fn overview(state: &AppState) -> Result<Overview, String> {
     let env = Env::from_system();
     let settings = state.store.load_settings().map_err(err)?;
     let harnesses = discovery::enabled(discovery::installed(&env), &settings);
-    Ok(skills::scan(domain, &harnesses, &env.home))
+    let manual_projects = state.store.load_projects().map_err(err)?;
+    let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
+    let sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
+    let targets = discovery::targets(&env, &harnesses, &projects, &sources);
+    let sync_set = state.store.load_sync_set().map_err(err)?;
+    let overview = skills::scan(&sources, &targets, &sync_set);
+    state.store.save_sync_set(&overview.sync_set).map_err(err)?;
+    Ok(overview)
 }
 
 #[tauri::command]
-fn scan_domain(domain: Domain, state: tauri::State<'_, AppState>) -> Result<Matrix, String> {
-    scan_with(&domain, &state)
+fn scan_all(state: tauri::State<'_, AppState>) -> Result<Overview, String> {
+    overview(&state)
 }
 
 #[tauri::command]
-fn propose(
-    domain: Domain,
+fn set_source_targets(
+    source_id: String,
+    target_ids: Vec<String>,
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<PlannedAction>, String> {
-    Ok(skills::propose(&scan_with(&domain, &state)?))
+) -> Result<(), String> {
+    let mut set = state.store.load_sync_set().map_err(err)?;
+    set.sources.entry(source_id).or_default().targets = target_ids.into_iter().collect();
+    state.store.save_sync_set(&set).map_err(err)
+}
+
+#[tauri::command]
+fn set_skill_enabled(
+    source_id: String,
+    skill: String,
+    enabled: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut set = state.store.load_sync_set().map_err(err)?;
+    let entry = set.sources.entry(source_id).or_default();
+    if enabled {
+        entry.disabled_skills.remove(&skill);
+    } else {
+        entry.disabled_skills.insert(skill);
+    }
+    state.store.save_sync_set(&set).map_err(err)
+}
+
+#[tauri::command]
+fn propose_all(state: tauri::State<'_, AppState>) -> Result<Vec<PlannedAction>, String> {
+    Ok(skills::propose(&overview(&state)?))
+}
+
+/// 按动作所在的目标目录与本体位置目录回查，算出这条链接该用什么写法
+fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
+    let same = |a: &Path, b: Option<&Path>| b.is_some_and(|b| normalize(a) == normalize(b));
+    let target = overview
+        .targets
+        .iter()
+        .find(|t| same(&t.path, action.target_path.parent()));
+    let source = overview
+        .sources
+        .iter()
+        .find(|s| same(&s.path, action.source_path.parent()));
+    match (source, target) {
+        (Some(s), Some(t)) => skills::link_style(s, t),
+        _ => LinkStyle::Absolute,
+    }
+}
+
+/// 每条动作各自算写法，按写法分组交给 `sync::execute`，报告仍按传入顺序返回
+#[tauri::command]
+fn apply_all(
+    actions: Vec<PlannedAction>,
+    clean_broken: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncReport, String> {
+    let overview = overview(&state)?;
+    let styles: Vec<LinkStyle> = actions.iter().map(|a| style_for(&overview, a)).collect();
+    let mut slots: Vec<Option<ReportEntry>> = vec![None; actions.len()];
+    for style in [LinkStyle::Absolute, LinkStyle::Relative] {
+        let picked: Vec<usize> = (0..actions.len()).filter(|i| styles[*i] == style).collect();
+        if picked.is_empty() {
+            continue;
+        }
+        let subset: Vec<PlannedAction> = picked.iter().map(|i| actions[*i].clone()).collect();
+        let report = sync::execute(&subset, clean_broken, style);
+        for (i, entry) in picked.into_iter().zip(report.entries) {
+            slots[i] = Some(entry);
+        }
+    }
+    Ok(SyncReport {
+        entries: slots.into_iter().flatten().collect(),
+    })
+}
+
+#[tauri::command]
+fn split_whole_link(
+    target_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncReport, String> {
+    let overview = overview(&state)?;
+    let target = overview
+        .targets
+        .iter()
+        .find(|t| t.id == target_id)
+        .ok_or("目标已不存在，请刷新")?;
+    let source_id = target
+        .linked_whole_to
+        .as_deref()
+        .ok_or("该目标不是整目录链接")?;
+    let source = overview
+        .sources
+        .iter()
+        .find(|s| s.id == source_id)
+        .ok_or("整目录链接指向的本体位置已不存在，请刷新")?;
+    Ok(skills::split_whole_link(target, source))
+}
+
+#[tauri::command]
+fn list_manual_sources(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
+    Ok(state.store.load_settings().map_err(err)?.manual_sources)
+}
+
+#[tauri::command]
+fn add_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let path = normalize(&path);
+    let mut settings = state.store.load_settings().map_err(err)?;
+    if !settings.manual_sources.contains(&path) {
+        settings.manual_sources.push(path);
+    }
+    state.store.save_settings(&settings).map_err(err)
+}
+
+#[tauri::command]
+fn remove_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let path = normalize(&path);
+    let mut settings = state.store.load_settings().map_err(err)?;
+    settings.manual_sources.retain(|p| normalize(p) != path);
+    state.store.save_settings(&settings).map_err(err)
 }
 
 /// 已安装的 harness 及其启用状态
@@ -99,19 +221,6 @@ fn set_harness_enabled(
         settings.disabled_harnesses.push(id);
     }
     state.store.save_settings(&settings).map_err(err)
-}
-
-#[tauri::command]
-fn apply(
-    actions: Vec<PlannedAction>,
-    clean_broken: bool,
-    domain: Domain,
-) -> Result<SyncReport, String> {
-    Ok(sync::execute(
-        &actions,
-        clean_broken,
-        skills::link_style(&domain),
-    ))
 }
 
 #[tauri::command]
@@ -172,9 +281,15 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_domains,
-            scan_domain,
-            propose,
-            apply,
+            scan_all,
+            set_source_targets,
+            set_skill_enabled,
+            propose_all,
+            apply_all,
+            split_whole_link,
+            list_manual_sources,
+            add_source,
+            remove_source,
             add_project,
             remove_project,
             list_rules,

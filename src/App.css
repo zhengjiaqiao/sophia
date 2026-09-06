@@ -116,9 +116,6 @@ table.matrix td.cell {
   text-align: center;
   font-size: 16px;
 }
-td.cell.home {
-  color: #1a73e8;
-}
 td.cell.linked {
   color: #188038;
 }
@@ -131,14 +128,14 @@ td.cell.broken {
 td.cell.foreign {
   color: #e37400;
 }
-td.cell.duplicateHome {
+td.cell.duplicate {
   color: #e37400;
 }
-td.cell.inaccessible {
+td.cell.unwritable {
   color: #999;
 }
-tr.ambiguous {
-  opacity: 0.6;
+tr.disabled {
+  opacity: 0.5;
 }
 .tag {
   margin-left: 6px;
@@ -221,4 +218,80 @@ table.preview td {
   align-items: center;
   padding: 2px 0;
   cursor: pointer;
+}
+.harnesses ul {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+.harnesses li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.harnesses li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  width: 420px;
+  max-height: 80vh;
+  overflow: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+.modal .toolbar h2 {
+  font-size: 14px;
+  margin: 0;
+  flex: 1;
+}
+.source-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.source-card .path {
+  color: #666;
+  font-size: 12px;
+}
+.target-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+}
+.target-picks label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  cursor: pointer;
+}
+.whole-link {
+  margin-left: 6px;
+  font-size: 11px;
+  background: #e8f0fe;
+  color: #1a73e8;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.domain-group {
+  margin-bottom: 16px;
+}
+.domain-group h2 {
+  font-size: 14px;
+  margin: 0 0 6px;
 }

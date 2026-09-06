@@ -1,10 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
-  Domain,
   DomainInfo,
   HarnessStatus,
-  Matrix,
+  Overview,
   PlannedAction,
   SyncReport,
   SyncRule,
@@ -12,10 +11,18 @@ import type {
 
 export const api = {
   listDomains: () => invoke<DomainInfo[]>("list_domains"),
-  scanDomain: (domain: Domain) => invoke<Matrix>("scan_domain", { domain }),
-  propose: (domain: Domain) => invoke<PlannedAction[]>("propose", { domain }),
-  apply: (actions: PlannedAction[], cleanBroken: boolean, domain: Domain) =>
-    invoke<SyncReport>("apply", { actions, cleanBroken, domain }),
+  scanAll: () => invoke<Overview>("scan_all"),
+  setSourceTargets: (sourceId: string, targetIds: string[]) =>
+    invoke<void>("set_source_targets", { sourceId, targetIds }),
+  setSkillEnabled: (sourceId: string, skill: string, enabled: boolean) =>
+    invoke<void>("set_skill_enabled", { sourceId, skill, enabled }),
+  proposeAll: () => invoke<PlannedAction[]>("propose_all"),
+  applyAll: (actions: PlannedAction[], cleanBroken: boolean) =>
+    invoke<SyncReport>("apply_all", { actions, cleanBroken }),
+  splitWholeLink: (targetId: string) => invoke<SyncReport>("split_whole_link", { targetId }),
+  listManualSources: () => invoke<string[]>("list_manual_sources"),
+  addSource: (path: string) => invoke<void>("add_source", { path }),
+  removeSource: (path: string) => invoke<void>("remove_source", { path }),
   addProject: (path: string) => invoke<void>("add_project", { path }),
   removeProject: (path: string) => invoke<void>("remove_project", { path }),
   listRules: () => invoke<SyncRule[]>("list_rules"),

@@ -1,40 +1,62 @@
-// 与 crates/core/src/models.rs、skills.rs 的 serde 输出一一对应（camelCase）
+// 与 crates/core/src/models.rs 的 serde 输出一一对应（camelCase）
 export type Domain = { type: "global" } | { type: "project"; path: string };
 export interface DomainInfo {
   domain: Domain;
   label: string;
 }
 
-export type CellState =
-  "home" | "linked" | "missing" | "broken" | "foreign" | "duplicateHome" | "inaccessible";
-export interface Column {
+export type SourceKind =
+  | { type: "universal" }
+  | { type: "harnessGlobal"; harnessId: string }
+  | { type: "projectStore"; project: string }
+  | { type: "harnessExtra"; harnessId: string; label: string }
+  | { type: "manual" };
+export interface Source {
+  id: string;
+  path: string;
+  kind: SourceKind;
+  label: string;
+  skills: string[];
+}
+
+export type TargetScope =
+  { type: "global"; harnessId: string } | { type: "project"; project: string; harnessId: string };
+export interface Target {
   id: string;
   label: string;
   path: string;
-  universal: boolean;
+  scope: TargetScope;
+  linkedWholeTo: string | null;
 }
+
+export type CellState = "linked" | "missing" | "broken" | "foreign" | "duplicate" | "unwritable";
 export interface Cell {
-  columnId: string;
+  sourceId: string;
+  skill: string;
+  targetId: string;
   path: string;
   state: CellState;
 }
-export interface SkillRow {
-  name: string;
-  home: string | null;
-  externalHome: boolean;
-  cells: Cell[];
-  ambiguous: boolean;
+
+export interface SourceSync {
+  targets: string[];
+  disabledSkills: string[];
 }
+export interface SyncSet {
+  sources: Record<string, SourceSync>;
+}
+
 export interface Summary {
-  skills: number;
-  missing: number;
+  sources: number;
+  pendingMissing: number;
   broken: number;
-  ambiguous: number;
 }
-export interface Matrix {
-  domain: Domain;
-  columns: Column[];
-  rows: SkillRow[];
+
+export interface Overview {
+  sources: Source[];
+  targets: Target[];
+  cells: Cell[];
+  syncSet: SyncSet;
   summary: Summary;
 }
 
