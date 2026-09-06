@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Domain, DomainInfo, Matrix, PlannedAction, SyncReport, SyncRule } from "./types";
+import type {
+  Domain,
+  DomainInfo,
+  HarnessStatus,
+  Matrix,
+  PlannedAction,
+  SyncReport,
+  SyncRule,
+} from "./types";
 
 export const api = {
   listDomains: () => invoke<DomainInfo[]>("list_domains"),
@@ -16,6 +24,9 @@ export const api = {
   applyRule: (actions: PlannedAction[], cleanBroken: boolean) =>
     invoke<SyncReport>("apply_rule", { actions, cleanBroken }),
   listSourceItems: (source: string) => invoke<string[]>("list_source_items", { source }),
+  listHarnesses: () => invoke<HarnessStatus[]>("list_harnesses"),
+  setHarnessEnabled: (id: string, enabled: boolean) =>
+    invoke<void>("set_harness_enabled", { id, enabled }),
   /// 系统目录选择框；取消返回 null
   pickDirectory: async (title: string): Promise<string | null> => {
     const picked = await open({ directory: true, multiple: false, title });
