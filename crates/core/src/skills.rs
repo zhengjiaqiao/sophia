@@ -299,7 +299,6 @@ mod tests {
             .find(|c| c.source_id == source.id && c.skill == skill && c.target_id == target.id)
             .expect("cell")
             .state
-            .clone()
     }
 
     #[test]
