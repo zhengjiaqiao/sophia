@@ -44,6 +44,7 @@ pub struct Overview { pub sources: Vec<Source>, pub targets: Vec<Target>, pub ce
   - 仓库型位置（`Universal`、`ProjectStore`、`Manual`）额外把 `real_path` 解析到目录的软链也算 skill（用户会把外部目录链进仓库，如 `~/.agents/skills/ego-browser -> /Applications/.../ego-skills/ego-browser`）；坏链不算。`HarnessGlobal`、`HarnessExtra` 只认真实目录，否则满是软链的消费目录会反过来被当成本体位置。
   - 位置去重按 `real_path`。
 - `targets(env, settings, harnesses, projects, sources) -> Vec<Target>`：已启用 harness 的 `global_dir`（存在即算）+ 每个项目里存在的 harness `project_dir`；按 `real_path` 去重；`real_path(target.path)` 等于某个 `Source.id` 时填 `linked_whole_to`。
+- harness 表模板解析出的路径（`global_dir`、`detect_dir`、`extra_source_dirs`）存在时一律取 `real_path`、不存在则保持原样，这样 `$CODEX_HOME/skills -> ~/.codex/skills` 这类指向软链的环境变量覆盖会与真实目录合并成一处，而不是多出一个整目录软链的目标。
 - 项目列表沿用 v2 的 `project_candidates`。
 
 ## 4. 扫描与动作（`skills.rs`）

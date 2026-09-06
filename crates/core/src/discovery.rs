@@ -53,7 +53,18 @@ pub fn resolve_template(candidates: &[String], env: &Env) -> Option<PathBuf> {
     candidates.iter().find_map(|t| resolve_one(t, env))
 }
 
+/// 解析后的路径存在就换成 `real_path`。环境变量可能指到一层软链
+/// （Orca 的 `$CODEX_HOME/skills -> ~/.codex/skills`），不归一的话同一个目录
+/// 会既当本体位置又当"整目录软链"的目标。不存在的候选保持原样
+fn canonical_if_exists(path: PathBuf) -> PathBuf {
+    real_path(&path).unwrap_or(path)
+}
+
 fn resolve_one(template: &str, env: &Env) -> Option<PathBuf> {
+    substitute_one(template, env).map(canonical_if_exists)
+}
+
+fn substitute_one(template: &str, env: &Env) -> Option<PathBuf> {
     if template == "~" {
         return Some(env.home.clone());
     }
@@ -140,8 +151,12 @@ fn expand_one_glob(path: &Path) -> Vec<(String, PathBuf)> {
         .filter(|e| e.path().is_dir())
         .filter_map(|e| {
             let dir = e.path().join(&tail);
-            dir.is_dir()
-                .then(|| (e.file_name().to_string_lossy().into_owned(), dir))
+            dir.is_dir().then(|| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    canonical_if_exists(dir),
+                )
+            })
         })
         .collect()
 }
@@ -863,6 +878,62 @@ mod tests {
         assert!(got[0].id.ends_with("::universal"));
         assert_eq!(got[0].linked_whole_to, None);
         assert_eq!(got[1].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
+    }
+
+    #[test]
+    fn resolved_harness_dirs_take_the_real_path_when_they_exist() {
+        let t = TempTree::new();
+        let home = t.root();
+        let real = t.dir(".codex/skills");
+        t.file(&home.join(".codex"), "config.toml");
+        // Orca 那样的运行时家目录：$CODEX_HOME/skills 是指向 ~/.codex/skills 的软链
+        let runtime = t.dir("Library/Application Support/orca/codex-runtime-home/home");
+        t.link(&runtime.join("skills"), &real);
+        let e = env(&home, &[("CODEX_HOME", runtime.to_str().unwrap())]);
+        let codex = |hs: Vec<Harness>| hs.into_iter().find(|h| h.id == "codex").unwrap();
+        assert_eq!(codex(all_harnesses(&e)).global_dir, Some(real.clone()));
+        assert_eq!(codex(installed(&e)).global_dir, Some(real.clone()));
+        // 不存在的候选保留原样，不做解析
+        let gone = home.join("nope");
+        let e2 = env(&home, &[("CODEX_HOME", gone.to_str().unwrap())]);
+        assert_eq!(
+            codex(all_harnesses(&e2)).global_dir,
+            Some(gone.join("skills"))
+        );
+    }
+
+    #[test]
+    fn env_override_pointing_at_a_symlink_yields_one_plain_target() {
+        let t = TempTree::new();
+        let home = t.root();
+        let real = t.dir(".codex/skills");
+        t.dir(".codex/skills/a-skill");
+        let runtime = t.dir("orca-home");
+        t.link(&runtime.join("skills"), &real);
+        let e = env(&home, &[("CODEX_HOME", runtime.to_str().unwrap())]);
+        let hs = vec![all_harnesses(&e)
+            .into_iter()
+            .find(|h| h.id == "codex")
+            .unwrap()];
+        let srcs = sources(&e, &hs, &[], &[]);
+        let got = targets(&e, &hs, &[], &srcs);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, real);
+        assert_eq!(got[0].linked_whole_to, None);
+    }
+
+    #[test]
+    fn glob_expanded_dirs_take_the_real_path_too() {
+        let t = TempTree::new();
+        let home = t.root();
+        let real = t.dir("Real/skills");
+        t.dir("Glob");
+        t.link(&home.join("Glob/a"), &home.join("Real"));
+        let e = env(&home, &[]);
+        assert_eq!(
+            expand_template_glob(&s(&["~/Glob/*/skills"]), &e),
+            vec![real]
+        );
     }
 
     #[test]
