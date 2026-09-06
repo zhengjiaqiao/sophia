@@ -3,7 +3,7 @@
 - 对应 intent：`docs/intent/2026-09-06-skill-sync-pivot.md`
 - 替代：`docs/specs/2026-09-02-symlink-sync-design.md`（Swift 版，算法与测试用例继续作为移植规格）
 - 日期：2026-09-06
-- 状态：待审阅
+- 状态：已实现（PR #4）；2026-09-06 起被 `2026-09-06-source-centric-sync-design.md` 替代
 
 ## 1. 目标与范围
 
