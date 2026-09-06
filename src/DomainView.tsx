@@ -37,7 +37,7 @@ const lastSegment = (path: string): string => path.split("/").filter(Boolean).po
 const targetDomainKey = (target: Target): string =>
   target.scope.type === "global" ? "global" : `project:${target.scope.project}`;
 
-/// 本体位置所属域：项目通用仓库归它自己的项目，其余（通用仓库、harness 全局/附加目录、手动）归全局
+/// 本体位置所属域：项目通用仓库归它自己的项目，其余（通用仓库、harness 全局、手动）归全局
 const sourceDomainKey = (source: Source): string =>
   source.kind.type === "projectStore" ? `project:${source.kind.project}` : "global";
 
@@ -54,10 +54,15 @@ export function domainEntries(targets: Target[]): DomainEntry[] {
   const seen = new Set<string>();
   for (const target of targets) {
     if (target.scope.type !== "project") continue;
-    const { project } = target.scope;
+    const { project, projectLabel } = target.scope;
     if (seen.has(project)) continue;
     seen.add(project);
-    entries.push({ key: `project:${project}`, label: lastSegment(project), path: project });
+    entries.push({
+      key: `project:${project}`,
+      // 后端给了标签（如 agent 派生目录）就用它，否则退回路径末段
+      label: projectLabel ?? lastSegment(project),
+      path: project,
+    });
   }
   return entries;
 }
