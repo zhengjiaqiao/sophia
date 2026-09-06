@@ -184,3 +184,13 @@ props 同 C1。按 `TargetScope` 分组：先"全局"，再每个项目（用项
 - 手动清单重写 Skills tab 部分：本体位置卡片数量与真机一致；默认勾选；取消一个项目目标后"同步"不再包含它；行级禁用；拆分 `weibo_assistant · Claude Code` 前先在 WeiboAP 里验证软链识别；按域视图与卡片视图数据一致；坏链清理。
 - 计划末尾追加"实施偏差"；spec 状态改"已实现"。
 - 提交 `docs: manual checks and deviations for source-centric sync`，推送。
+
+## 实施偏差（2026-09-06 记录）
+
+- Task 0：`models.rs` 的枚举光靠 `#[serde(tag = "type", rename_all = "camelCase")]` 不够覆盖各变体字段名，补了 `rename_all_fields = "camelCase"`。
+- A2：`discovery::sources` 的签名是 `sources(env, harnesses, projects, manual: &[PathBuf])`，没有走计划里设想的整个 `Settings`（并行阶段 `Settings.manual_sources` 尚未落地，命令层直接把 `settings.manual_sources` 作为第四个参数传入）；`Harness.extra_source_dirs` 字段只用于展示，通配展开由 `sources()` 内部通过 `extra_source_templates()` 重新查内置 harness 表得到，不读这个字段。
+- A3：坏链扫描（`propose` 的 `BrokenLink`）跳过 `linked_whole_to` 不为空的目标——整目录链接的目标读进去就是本体位置本身，不能把本体位置内部的坏链当成目标坏链清理。
+- A4 合并后按三条真机裁定修了 core：仓库类本体位置（通用仓库 / 项目仓库 / 手动添加）把指向目录的软链条目也认作 skill（harness 消费目录仍只认真实目录）；目标路径就是本体位置本身时（如 WeiboAP custom 目录）该 (source, target) 全部格子直接判 Linked；项目仓库默认只勾选本项目的目标，不再默认勾全部全局目标。
+- 作者要求把 harness 选择与手动添加本体位置从侧栏移进「设置」弹层（低频操作不常驻侧栏），B1 据此新增 `SettingsPanel.tsx` 与 `list_manual_sources` 命令。
+- 控制器在合并波次 A 之后修了一处遗留：`CellState` 补 `Copy` derive 后 `skills.rs` 测试里仍有一处 `.clone()`，删掉以消除 clippy 警告。
+- `cargo test -p symsync-core`：56 个测试全部通过。

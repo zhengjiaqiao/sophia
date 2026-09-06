@@ -3,19 +3,15 @@
 启动：`make dev`
 
 ## Skills tab
-- [ ] 左栏底部 Harness 区列出检测到的 harness；取消勾选 Command Code 和 Droid 后矩阵剩通用仓库 / Claude Code / Codex / WeiboAP 四列，坏链计数归零；重启 App 选择仍在
-- [ ] WeiboAP 列存在，`docx` 这类两边都有本体的行：通用仓库 ●、WeiboAP ⚠
-- [ ] 左栏"全局"置顶；项目列表只包含仍存在且含 skill 目录的项目；"添加项目"打开系统选择框
-- [ ] 全局矩阵的列与本机已安装 harness 一致（`ls -d ~/.claude ~/.codex ~/.cursor …`），通用仓库列在最前，Cline 合并进通用仓库列
-- [ ] 每行状态与 `ls -l ~/.agents/skills ~/.claude/skills ~/.codex/skills` 对得上：本体 ●、链接 ✓、缺失 ○、坏链 ✗、指向他处 →、多本体 ⚠
-- [ ] `hatch-pet`、`codex-primary-runtime` 这类只在 codex 里的真实目录：codex 列 ●，其余列 ○
-- [ ] `ego-browser` 这类通用仓库本身是软链的：标"外部本体"，各列 ✓
-- [ ] "同步缺失链接"按钮计数 = 摘要里的缺失数；执行后缺失格子变 ✓，`ls -l` 能看到绝对路径软链
-- [ ] 重启 Claude Code / Codex 后，`/skills` 能看到新链上的 skill
-- [ ] 手动做一个坏链（`ln -s ~/.agents/skills/nope ~/.claude/skills/nope`）→ 刷新出现 ✗ → "清理坏链"需二次确认 → 删除后消失；期间把它换成真实目录再确认删除，应显示"不再是软链接，已跳过"
-- [ ] 多本体行整行淡显、无动作
-- [ ] 项目域：补链后 `readlink <项目>/.claude/skills/<x>` 是 `../../.agents/skills/<x>`，`git status` 能记录该软链
-- [ ] "移除"项目只影响手动添加的项目；Claude Code 记录的项目刷新后仍在（已知行为）
+- [ ] 侧栏底部「设置」按钮打开居中弹层；Harness 复选框增减矩阵列，本体位置列表能增删；关闭弹层后自动重扫
+- [ ] 本体位置卡片数量与探针一致：通用仓库 21、Codex 2、WeiboAP 37、WeiboAP 四个 agent 目录分别 43/1/2/10、CardBox 44
+- [ ] 卡片的目标勾选默认值：全局仓库 / harness 类本体位置勾选全部全局目标；CardBox 这类项目仓库只勾本项目的目标，不勾其他全局目标
+- [ ] 某行取消勾选后该行整行淡显（`tr.disabled`），顶部工具栏"同步（N）"里的 N 相应减少
+- [ ] `ego-browser` 在 Claude Code 列、Codex 列都显示 ✓
+- [ ] `weibo_assistant · Claude Code` 目标列头显示"整目录链接"徽标——**点"拆成逐项链接"前先在 WeiboAP 里确认它能否识别逐项软链**，确认后再执行拆分
+- [ ] 按域视图与卡片视图对同一批格子给出一致的符号（✓ ○ ✗ → ⚠ –）
+- [ ] "同步"只创建当前已勾选目标下缺失的项，不动未勾选目标
+- [ ] "清理坏链"需二次确认，只删链接本身
 
 ## 自定义同步 tab
 - [ ] 新建、选源、切换整目录/指定子项、添加/移除目标、预览、执行、二次预览全"已链接"

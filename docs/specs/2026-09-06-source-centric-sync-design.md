@@ -3,7 +3,7 @@
 - 对应 intent：`docs/intent/2026-09-06-source-centric-sync.md`
 - 替代：`docs/specs/2026-09-06-skill-sync-design.md`（§3 fs、§4 sync、§7 store、§8 通用同步命令、§9 自定义同步 tab、§10 错误处理 继续有效，本文只写变化的部分）
 - 日期：2026-09-06
-- 状态：待审阅
+- 状态：已实现（PR #4，feat/rust-pivot）
 
 ## 1. 目标与范围
 
