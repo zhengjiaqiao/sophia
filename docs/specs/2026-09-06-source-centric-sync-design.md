@@ -41,6 +41,7 @@ pub struct Overview { pub sources: Vec<Source>, pub targets: Vec<Target>, pub ce
 - `sources(env, settings, harnesses, projects) -> Vec<Source>`：
   - 通用仓库 `~/.agents/skills`；每个已启用 harness 的 `global_dir`；每个 harness 的 `extra_source_dirs`（模板数组，支持单层 `*` 通配，见 §6）；每个项目的 `.agents/skills`；`settings.manual_sources`。
   - 列直接子项，`entry_kind == Dir` 且不以 `.` 开头的才是 skill；没有任何 skill 的位置不产出 `Source`。
+  - 仓库型位置（`Universal`、`ProjectStore`、`Manual`）额外把 `real_path` 解析到目录的软链也算 skill（用户会把外部目录链进仓库，如 `~/.agents/skills/ego-browser -> /Applications/.../ego-skills/ego-browser`）；坏链不算。`HarnessGlobal`、`HarnessExtra` 只认真实目录，否则满是软链的消费目录会反过来被当成本体位置。
   - 位置去重按 `real_path`。
 - `targets(env, settings, harnesses, projects, sources) -> Vec<Target>`：已启用 harness 的 `global_dir`（存在即算）+ 每个项目里存在的 harness `project_dir`；按 `real_path` 去重；`real_path(target.path)` 等于某个 `Source.id` 时填 `linked_whole_to`。
 - 项目列表沿用 v2 的 `project_candidates`。
@@ -49,8 +50,9 @@ pub struct Overview { pub sources: Vec<Source>, pub targets: Vec<Target>, pub ce
 
 - `scan(sources, targets, sync_set) -> Overview`：对每个 (source, skill, target)：
   - `target.linked_whole_to == Some(source.id)` → Linked；`Some(other)` → Unwritable；
+  - `real_path(target.path) == real_path(source.path)`（目标就是这个本体位置本身，如 WeiboAP 的 custom 目录既是本体位置又是目标）→ 该 (source, target) 的每一格都是 Linked，`propose` 不在这里建链；
   - 否则看 `target.path/skill`：Missing → Missing；Dir/File → Duplicate；Symlink 且 `real_path` 等于 `source.path/skill` 的 real_path → Linked；Symlink 无法解析 → Broken；其他 → Foreign。
-- **同步集默认值**：扫描时对未登记的 source 写入 `targets = 所有 Global 目标 id`，`disabled_skills = {}`；已登记的不改。新出现的 Project 目标不会自动加入。`scan` 返回的 `sync_set` 是补默认值后的结果，由命令层负责保存。
+- **同步集默认值**：扫描时对未登记的 source 写入 `targets = 所有 Global 目标 id`，`disabled_skills = {}`；`SourceKind::ProjectStore { project }` 例外，只写 `scope` 为 `Project { project: 同一路径 }` 的目标（项目仓库只服务本项目，不该把项目 skill 推到全机器）。已登记的不改。新出现的 Project 目标不会自动加入。`scan` 返回的 `sync_set` 是补默认值后的结果，由命令层负责保存。
 - `propose(overview) -> Vec<PlannedAction>`：
   - Create：`cell.state == Missing` 且 `target ∈ sync_set[source].targets` 且 `skill ∉ disabled_skills`；`source_path = source.path/skill`，`target_path = cell.path`，`target = target.path`。
   - BrokenLink：每个目标目录里所有坏链（不限本体位置），删前 `Executor` 重校验。

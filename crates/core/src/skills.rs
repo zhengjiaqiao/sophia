@@ -53,6 +53,10 @@ fn cell_state(source: &Source, skill: &str, target: &Target, path: &Path) -> Cel
         Some(_) => return CellState::Unwritable,
         None => {}
     }
+    // 目标就是本体位置本身（如 WeiboAP 的 custom 目录既是本体位置又是目标）：内容天然到位
+    if same_real(&target.path, &source.path) {
+        return CellState::Linked;
+    }
     match entry_kind(path) {
         EntryKind::Missing => CellState::Missing,
         EntryKind::Dir | EntryKind::File => CellState::Duplicate,
@@ -62,21 +66,34 @@ fn cell_state(source: &Source, skill: &str, target: &Target, path: &Path) -> Cel
     }
 }
 
-/// 未登记的本体位置默认勾选全部 Global 目标；已登记的原样保留
+/// 未登记的本体位置默认勾选全部 Global 目标；项目仓库只勾同一项目内的目标。已登记的原样保留
 fn with_defaults(sync_set: &SyncSet, sources: &[Source], targets: &[Target]) -> SyncSet {
-    let globals: std::collections::BTreeSet<String> = targets
-        .iter()
-        .filter(|t| matches!(t.scope, TargetScope::Global { .. }))
-        .map(|t| t.id.clone())
-        .collect();
     let mut out = sync_set.clone();
     for source in sources {
-        out.sources.entry(source.id.clone()).or_insert(SourceSync {
-            targets: globals.clone(),
-            disabled_skills: Default::default(),
-        });
+        out.sources
+            .entry(source.id.clone())
+            .or_insert_with(|| SourceSync {
+                targets: default_targets(source, targets),
+                disabled_skills: Default::default(),
+            });
     }
     out
+}
+
+fn default_targets(source: &Source, targets: &[Target]) -> std::collections::BTreeSet<String> {
+    targets
+        .iter()
+        .filter(|t| match (&source.kind, &t.scope) {
+            // 项目的通用仓库只服务本项目，勾全局目标会把项目 skill 推到全机器
+            (SourceKind::ProjectStore { project }, TargetScope::Project { project: p, .. }) => {
+                normalize(project) == normalize(p)
+            }
+            (SourceKind::ProjectStore { .. }, _) => false,
+            (_, TargetScope::Global { .. }) => true,
+            _ => false,
+        })
+        .map(|t| t.id.clone())
+        .collect()
 }
 
 /// Create：勾选目标 × 启用 skill 的 Missing 格；BrokenLink：非整目录链接的目标目录里的所有坏链（不限本体位置）
@@ -393,6 +410,53 @@ mod tests {
             o.sync_set.sources[&registered.id],
             given.sources[&registered.id]
         );
+    }
+
+    #[test]
+    fn a_target_that_is_the_source_itself_is_all_linked() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/a");
+        t.dir("store/b");
+        let s = source(&store, &["a", "b"]);
+        // 本体位置本身也被列成目标（如 WeiboAP 的 custom 目录）
+        let itself = global("weiboap", &store);
+        let other = global("claude-code", &t.dir("tgt"));
+        let o = scan(
+            std::slice::from_ref(&s),
+            &[itself.clone(), other.clone()],
+            &SyncSet::default(),
+        );
+        assert_eq!(state(&o, &s, "a", &itself), CellState::Linked);
+        assert_eq!(state(&o, &s, "b", &itself), CellState::Linked);
+        assert_eq!(state(&o, &s, "a", &other), CellState::Missing);
+        let actions = propose(&o);
+        assert_eq!(actions.len(), 2);
+        assert!(actions
+            .iter()
+            .all(|a| a.kind == ActionKind::Create && a.target == other.path));
+    }
+
+    #[test]
+    fn project_store_defaults_to_targets_in_its_own_project() {
+        let t = TempTree::new();
+        let proj = t.dir("proj");
+        let store = t.dir("proj/.agents/skills");
+        t.dir("proj/.agents/skills/a");
+        let other_proj = t.dir("other");
+        let mut s = source(&store, &["a"]);
+        s.kind = SourceKind::ProjectStore {
+            project: normalize(&proj),
+        };
+        let g = global("claude-code", &t.dir("g"));
+        let mine = project(&proj, "claude-code", &t.dir("proj/.claude/skills"));
+        let theirs = project(&other_proj, "claude-code", &t.dir("other/.claude/skills"));
+        let o = scan(
+            std::slice::from_ref(&s),
+            &[g, mine.clone(), theirs],
+            &SyncSet::default(),
+        );
+        assert_eq!(o.sync_set.sources[&s.id].targets, ids(&[&mine.id]));
     }
 
     #[test]
