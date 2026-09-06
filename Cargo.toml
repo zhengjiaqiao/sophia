@@ -1,3 +1,12 @@
 [workspace]
-members = ["crates/core"]
+members = ["crates/core", "src-tauri"]
 resolver = "2"
+
+# 发布档配置必须放在 workspace 根，放在成员包里会被 cargo 忽略。
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
