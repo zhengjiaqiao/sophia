@@ -317,19 +317,25 @@ pub fn targets(
     let store = env.home.join(".agents").join("skills");
     let store_key = real_path(&store).unwrap_or_else(|| normalize(&store));
     let mut out: Vec<Target> = Vec::new();
-    let mut keys: Vec<PathBuf> = Vec::new();
+    // 与 out 一一对应；目录本身是软链的目标记 None，不参与去重
+    let mut keys: Vec<Option<PathBuf>> = Vec::new();
     let mut push = |id: String, label: String, path: PathBuf, scope: TargetScope| {
         // is_dir 跟随软链：整目录软链也算目标
         if !path.is_dir() {
             return;
         }
-        let key = real_path(&path).unwrap_or_else(|| normalize(&path));
-        if key == store_key {
+        let real = real_path(&path).unwrap_or_else(|| normalize(&path));
+        if real == store_key {
             return;
         }
-        if let Some(i) = keys.iter().position(|k| k == &key) {
-            out[i].label = format!("{} / {}", out[i].label, label);
-            return;
+        // 目录本身就是软链时，它和它指向的那个目标是两码事：一个是"整目录链接"、
+        // 一个是本体所在。合并进去会让这一列连同"拆成逐项链接"的入口一起消失
+        let key = (!matches!(entry_kind(&path), EntryKind::Symlink(_))).then_some(real);
+        if let Some(k) = &key {
+            if let Some(i) = keys.iter().position(|x| x.as_ref() == Some(k)) {
+                out[i].label = format!("{} / {}", out[i].label, label);
+                return;
+            }
         }
         keys.push(key);
         out.push(Target {
@@ -982,6 +988,51 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert!(got[0].id.ends_with("::universal"));
         assert_eq!(got[0].linked_whole_to, None);
+        assert_eq!(got[1].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
+    }
+
+    #[test]
+    fn symlinked_target_dir_is_never_merged_into_the_dir_it_points_to() {
+        let t = TempTree::new();
+        let home = t.root();
+        let weiboap = "Library/Application Support/WeiboAP";
+        let agent_root = t.dir(&format!("{weiboap}/Data/agents/agent_1"));
+        let agent_dir = t.dir(&format!(
+            "{weiboap}/Data/agents/agent_1/.internal-plugins/skills"
+        ));
+        t.dir(&format!(
+            "{weiboap}/Data/agents/agent_1/.internal-plugins/skills/a-skill"
+        ));
+        // 项目的 .claude/skills 整个是指向那个 agent 目录的软链
+        let project = t.dir("Project/weibo_assistant");
+        t.dir("Project/weibo_assistant/.claude");
+        t.link(&project.join(".claude/skills"), &agent_dir);
+
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        let hs = vec![pick("claude-code"), pick("weiboap")];
+        let srcs = sources(&e, &hs, &[], &[]);
+        assert_eq!(srcs.len(), 1);
+        assert_eq!(srcs[0].path, agent_dir);
+
+        let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
+        assert_eq!(got.len(), 2);
+        // agent 目标不受影响：标签没被合并，也不是整目录链接
+        assert_eq!(
+            got[0].id,
+            format!("project:{}::weiboap", agent_root.display())
+        );
+        assert_eq!(got[0].label, "WeiboAP · agent_1");
+        assert_eq!(got[0].path, agent_dir);
+        assert_eq!(got[0].linked_whole_to, None);
+        // 项目那一列独立留下，指回 agent 本体位置，"拆成逐项链接"才有入口
+        assert_eq!(
+            got[1].id,
+            format!("project:{}::claude-code", project.display())
+        );
+        assert_eq!(got[1].label, "weibo_assistant · Claude Code");
+        assert_eq!(got[1].path, project.join(".claude/skills"));
         assert_eq!(got[1].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
     }
 

@@ -45,7 +45,7 @@ pub struct Overview { pub sources: Vec<Source>, pub targets: Vec<Target>, pub ce
   - 列直接子项，`entry_kind == Dir` 且不以 `.` 开头的才是 skill；没有任何 skill 的位置不产出 `Source`。
   - 仓库型位置（`Universal`、`ProjectStore`、`Manual`）额外把 `real_path` 解析到目录的软链也算 skill（用户会把外部目录链进仓库，如 `~/.agents/skills/ego-browser -> /Applications/.../ego-skills/ego-browser`）；坏链不算。`HarnessGlobal` 只认真实目录，否则满是软链的消费目录会反过来被当成本体位置。
   - 位置去重按 `real_path`。
-- `targets(env, settings, harnesses, projects, sources) -> Vec<Target>`：已启用 harness 的 `global_dir`（存在即算）+ 每个 agent 项目的一个目标（`Project { project: agent 根, harness_id: harness 的 id, project_label }`，路径就是那个 skill 目录）+ 每个项目里存在的 harness `project_dir`；按 `real_path` 去重；`real_path(target.path)` 等于某个 `Source.id` 时填 `linked_whole_to`。
+- `targets(env, settings, harnesses, projects, sources) -> Vec<Target>`：已启用 harness 的 `global_dir`（存在即算）+ 每个 agent 项目的一个目标（`Project { project: agent 根, harness_id: harness 的 id, project_label }`，路径就是那个 skill 目录）+ 每个项目里存在的 harness `project_dir`；按 `real_path` 去重；`real_path(target.path)` 等于某个 `Source.id` 时填 `linked_whole_to`。目录自身是软链（`entry_kind == Symlink`）的目标不参与这轮去重：既不并进它指向的那个目标，也不吸收别的目标，否则整目录链接的那一列会连同"拆成逐项链接"的入口一起消失（如 `weibo_assistant/.claude/skills -> .../agents/<id>/.internal-plugins/skills`，两端都是目标）。
 - harness 表模板解析出的路径（`global_dir`、`detect_dir`、`agent_dirs`）存在时一律取 `real_path`、不存在则保持原样，这样 `$CODEX_HOME/skills -> ~/.codex/skills` 这类指向软链的环境变量覆盖会与真实目录合并成一处，而不是多出一个整目录软链的目标。
 - 项目列表沿用 v2 的 `project_candidates`。
 
