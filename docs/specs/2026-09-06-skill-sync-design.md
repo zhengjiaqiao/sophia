@@ -76,7 +76,7 @@ pub fn scan(domain: &Domain, harnesses: &[Harness]) -> Matrix
 pub fn propose(matrix: &Matrix) -> Vec<PlannedAction>     // Missing → Create；Broken → BrokenLink
 ```
 
-**列**：域内实际存在的 harness 目录，加"通用仓库"列（全局 `~/.agents/skills`，项目 `.agents/skills`）。通用型 harness 在项目域不单独成列。
+**列**：域内实际存在的 harness 目录，加"通用仓库"列（全局 `~/.agents/skills`，项目 `.agents/skills`）。列按解析后的真实路径去重：多个 harness 指向同一目录（如 Cline 的全局目录就是 `~/.agents/skills`）只保留一列，列名合并显示。通用型 harness 在项目域不单独成列。
 
 **行**：各列直接子项按目录名归并，跳过点开头。
 
