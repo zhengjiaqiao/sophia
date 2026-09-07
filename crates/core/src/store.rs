@@ -53,9 +53,21 @@ impl Store {
         save_json(&self.dir.join("settings.json"), settings)
     }
 
-    /// 两级勾选的同步集；文件缺失 → 空集
+    /// 按 (目标, 本体位置) 记录的同步集；文件缺失 → 空集
+    ///
+    /// 旧格式（v3 的 `{"sources":{...}}`）无法迁移：降级为空集并覆盖写回空的 v4 文件，
+    /// 让用户重新引入，而不是每次启动都报错。这里没有 logger，只能静默降级。
+    /// rules/projects 仍保持"损坏即报错"，它们的内容丢不起。
     pub fn load_sync_set(&self) -> io::Result<SyncSet> {
-        load_json(&self.dir.join("syncset.json"))
+        let path = self.dir.join("syncset.json");
+        match load_json(&path) {
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                let empty = SyncSet::default();
+                save_json(&path, &empty)?;
+                Ok(empty)
+            }
+            other => other,
+        }
     }
 
     pub fn save_sync_set(&self, sync_set: &SyncSet) -> io::Result<()> {
@@ -166,6 +178,28 @@ mod tests {
         s.save_sync_set(&set).unwrap();
         assert_eq!(s.load_sync_set().unwrap(), set);
         assert!(!dir.join("syncset.json.tmp").exists());
+    }
+
+    #[test]
+    fn legacy_sync_set_file_loads_empty_and_is_rewritten() {
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        let path = dir.join("syncset.json");
+        std::fs::write(
+            &path,
+            r#"{"sources":{"/a/skills":{"targets":["claude-code"],"disabled":["noisy"]}}}"#,
+        )
+        .unwrap();
+
+        let s = Store::new(dir.clone());
+        assert_eq!(s.load_sync_set().unwrap(), SyncSet::default());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap(),
+            serde_json::json!({ "picks": {} })
+        );
+        assert!(!dir.join("syncset.json.tmp").exists());
+        // 重写后再读一次仍是空集，且不再触发降级
+        assert_eq!(s.load_sync_set().unwrap(), SyncSet::default());
     }
 
     #[test]
