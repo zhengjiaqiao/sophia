@@ -218,7 +218,14 @@ fn set_harness_enabled(
 /// 仅手动添加的项目；自动发现的项目不在其中
 #[tauri::command]
 fn list_manual_projects(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
-    state.store.load_projects().map_err(err)
+    // 历史文件里可能有未归一化的路径，返回前统一，前端才能和域 key 对上
+    Ok(state
+        .store
+        .load_projects()
+        .map_err(err)?
+        .iter()
+        .map(|p| normalize(p))
+        .collect())
 }
 
 #[tauri::command]
