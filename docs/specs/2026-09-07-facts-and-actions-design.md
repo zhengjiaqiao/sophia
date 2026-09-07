@@ -173,7 +173,7 @@ core：`CellRef` 序列化；`propose_links` / `propose_unlinks` 按格（含忽
 
 ## 11. 修订 v5.2（2026-09-08）：列 = 启用的 harness
 
-- 状态：待实现
+- 状态：已实现
 - 规则：**表格的每一列就是设置里启用的一个 harness**，列名是 harness 名。多个 harness 共用同一个目录时各自一列（内容相同），不再合并；`~/.agents/skills` 与项目 `.agents/skills` 不再有独立的"通用仓库"列，只作为通用型 harness（Codex、Cursor 等 `project_dir = .agents/skills`；Cline `global_dir = ~/.agents/skills`）自己的列出现。
 - `discovery::targets`：
   - 每个启用 harness：`global_dir` → 全局列；agent 目录 → 各 agent 域一列；每个项目的 `project_dir` → 项目域一列。目录不存在（`is_dir()` 跟随软链）则不生成。
