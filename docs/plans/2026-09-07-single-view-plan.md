@@ -65,3 +65,13 @@ props `{ overview, domain: DomainPage, initialSourceId?: string, onClose, onChan
 
 ## Task D: 收尾
 `docs/manual-checks.md` Skills 部分重写为单视图；本计划附录「实施偏差」；spec 状态。`make test`。提交并推送。
+
+## 实施偏差（2026-09-07 记录）
+
+- `Pick::Some` 改名为 `Pick::Only`（避免与 `Option` 的 `Some` 撞名混淆），spec §2 已同步。
+- Task A2：`DomainRow` 的排序键定为 `(skill, 源 label, 源 id)`，而不是仅按发现顺序。
+- Task B1：`DomainView.tsx` 在域页的目标列表头上保留了"整目录链接 / 拆成逐项链接"入口（沿用 v3 行为），未挪到别处。
+- Task B1：工具栏文案「全部」页与单域页共用同一套（待同步 N / 坏链 K / 同步 / 清理坏链 / 刷新），不单独区分文案。
+- Task C1：`ImportDialog.tsx` 增加了 `.modal.wide` 样式类以容纳左右两栏；「全部」开关关闭时保留逐项勾选状态（不清空 `names`）。
+- Task A1：同步集旧文件解析失败时静默重建为空集并覆盖写回，不弹错误提示。
+- core 测试共 62 个。

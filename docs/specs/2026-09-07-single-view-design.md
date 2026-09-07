@@ -3,7 +3,7 @@
 - 对应 intent：`docs/intent/2026-09-07-single-view-source-management.md`
 - 替代：`docs/specs/2026-09-06-source-centric-sync-design.md`（v3；§3 发现、§4 扫描格状态、拆分、坏链、§5 store 基础、§6 harness 表、§9 错误处理继续有效，本文只写变化）
 - 日期：2026-09-07
-- 状态：待审阅
+- 状态：已实现（PR #4，feat/rust-pivot）
 
 ## 1. 目标
 
@@ -13,12 +13,12 @@
 
 ```rust
 #[serde(rename_all = "camelCase")]
-pub enum Pick { All, Some(BTreeSet<String>) }               // 该目标从该本体位置引入哪些 skill
+pub enum Pick { All, Only(BTreeSet<String>) }                // 该目标从该本体位置引入哪些 skill；序列化为 "all" / {"only":[...]}
 pub struct SyncSet { pub picks: BTreeMap<String /* target id */, BTreeMap<String /* source id */, Pick>> }
 ```
 - 文件仍是 `syncset.json`；结构变化，旧文件不兼容：`load_sync_set` 解析失败时视为空并写回空集（记一条日志），不报错。
-- 语义：`picks[target][source]` 存在 = 该本体位置已引入该目标；`All` = 全部 skill；`Some(names)` = 只这些。
-- 行首勾选：`All` 状态下取消某个 skill → 转为 `Some(全部 - 它)`；`Some` 状态下勾选/取消 → 增删名单；名单为空 → 删除该条目（等于未引入）。
+- 语义：`picks[target][source]` 存在 = 该本体位置已引入该目标；`All` = 全部 skill；`Only(names)` = 只这些。
+- 行首勾选：`All` 状态下取消某个 skill → 转为 `Only(全部 - 它)`；`Only` 状态下勾选/取消 → 增删名单；名单为空 → 删除该条目（等于未引入）。
 
 ## 3. 域内行（`skills.rs::scan`）
 
