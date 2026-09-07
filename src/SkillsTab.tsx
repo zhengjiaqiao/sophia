@@ -133,8 +133,10 @@ export default function SkillsTab({
         <DomainView
           overview={overview}
           domainKey={selectedDomainKey}
+          actions={actions}
           busy={busy}
           onChange={onRefresh}
+          onApply={run}
           onError={onError}
         />
       )}

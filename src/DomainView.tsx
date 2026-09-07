@@ -1,11 +1,15 @@
+import { useState } from "react";
 import { api } from "./api";
-import type { Cell, CellState, Overview, Source, Target } from "./types";
+import type { Cell, CellState, Overview, PlannedAction, Source, Target } from "./types";
 
 export interface DomainViewProps {
   overview: Overview;
   domainKey: string;
+  /// 全局提案，本视图过滤出落在本域目标里的坏链
+  actions: PlannedAction[];
   busy: boolean;
   onChange: () => Promise<void>;
+  onApply: (subset: PlannedAction[], cleanBroken: boolean) => Promise<void>;
   onError: (message: string) => void;
 }
 
@@ -85,15 +89,25 @@ function buildRows(sources: Source[]): Row[] {
 /// 本体位置对本域的参与度：本域全部目标都在它的目标集合里 / 只在一部分 / 一个都不在
 type Participation = "all" | "some" | "none";
 
+/// 后端路径是「目录 + 分隔符 + 条目名」，两种分隔符都认
+const inDir = (path: string, dir: string): boolean => {
+  const base = dir.replace(/[/\\]+$/, "");
+  return path.startsWith(`${base}/`) || path.startsWith(`${base}\\`);
+};
+
 /// 单个域的表：行是本域内的 (本体位置, skill)，列是该域下的目标目录；
 /// 表上方每个本体位置一个复选框，控制它是否参与同步进本域；跨域同步在按本体位置视图处理
 export default function DomainView({
   overview,
   domainKey,
+  actions,
   busy,
   onChange,
+  onApply,
   onError,
 }: DomainViewProps) {
+  const [confirmClean, setConfirmClean] = useState(false);
+
   const targets = overview.targets.filter((t) => targetDomainKey(t) === domainKey);
   if (targets.length === 0) return <p>该域下没有可用的目标目录。</p>;
 
@@ -123,8 +137,9 @@ export default function DomainView({
     ...inDomain.filter((s) => sourceDomainKey(s) === domainKey),
     ...inDomain.filter((s) => sourceDomainKey(s) !== domainKey),
   ];
-  const allRows = buildRows(sources);
-  if (allRows.length === 0) return <p>该域下没有本体位置。</p>;
+  // 列出的本体位置显示其全部 skill 行，未同步的（○）也在内，新 skill 才看得见
+  const rows = buildRows(sources);
+  if (rows.length === 0) return <p>该域下没有本体位置。</p>;
 
   const entry = domainEntries(overview.targets).find((e) => e.key === domainKey);
 
@@ -135,12 +150,13 @@ export default function DomainView({
       return [source.id, hit === 0 ? "none" : hit === domainTargetIds.length ? "all" : "some"];
     }),
   );
-  // 没勾选的本体位置，只有在本域真链上过的行才显示；勾选（全选/半选）的行一律显示
-  const rows = allRows.filter(
-    (row) =>
-      participation.get(row.source.id) !== "none" ||
-      targets.some((t) => cells.get(cellKey(row.source.id, row.skill, t.id))?.state === "linked"),
-  );
+
+  // 坏链没有对应的 (本体位置, skill) 格子（skill 已不存在于任何本体位置），单独列出来
+  const brokenRows = actions.flatMap((a) => {
+    if (a.kind !== "brokenLink") return [];
+    const target = targets.find((t) => inDir(a.targetPath, t.path));
+    return target ? [{ action: a, target }] : [];
+  });
 
   // 勾上 = 把本域全部目标并入该本体位置的目标集合，取消 = 从中去掉本域全部目标
   const toggle = async (source: Source, on: boolean) => {
@@ -178,42 +194,90 @@ export default function DomainView({
           );
         })}
       </div>
-      {rows.length === 0 ? (
-        <p>本域没有参与同步的本体位置。</p>
-      ) : (
-        <table className="matrix">
-          <thead>
-            <tr>
-              <th>skill</th>
-              <th>本体位置</th>
-              {targets.map((target) => (
-                <th key={target.id}>{target.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.source.id}|${row.skill}`}>
-                <td>{row.skill}</td>
-                <td className="path" title={row.source.path}>
-                  {row.source.label}
-                </td>
-                {targets.map((target) => {
-                  const cell = cells.get(cellKey(row.source.id, row.skill, target.id)) ?? null;
-                  return (
-                    <td
-                      className={cell ? `cell ${cell.state}` : "cell"}
-                      key={target.id}
-                      title={cell ? `${CELL_TEXT[cell.state]}：${cell.path}` : undefined}
-                    >
-                      {cell ? CELL_SYMBOL[cell.state] : ""}
-                    </td>
-                  );
-                })}
-              </tr>
+      <table className="matrix">
+        <thead>
+          <tr>
+            <th>skill</th>
+            <th>本体位置</th>
+            {targets.map((target) => (
+              <th key={target.id}>{target.label}</th>
             ))}
-          </tbody>
-        </table>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.source.id}|${row.skill}`}>
+              <td>{row.skill}</td>
+              <td className="path" title={row.source.path}>
+                {row.source.label}
+              </td>
+              {targets.map((target) => {
+                const cell = cells.get(cellKey(row.source.id, row.skill, target.id)) ?? null;
+                return (
+                  <td
+                    className={cell ? `cell ${cell.state}` : "cell"}
+                    key={target.id}
+                    title={cell ? `${CELL_TEXT[cell.state]}：${cell.path}` : undefined}
+                  >
+                    {cell ? CELL_SYMBOL[cell.state] : ""}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {brokenRows.length > 0 && (
+        <div className="broken-section">
+          <div className="toolbar">
+            <span>坏链</span>
+            {confirmClean ? (
+              <span className="confirm">
+                只删除链接本身，不删除任何真实文件。
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmClean(false);
+                    void onApply(
+                      brokenRows.map((r) => r.action),
+                      true,
+                    );
+                  }}
+                >
+                  确认
+                </button>
+                <button disabled={busy} onClick={() => setConfirmClean(false)}>
+                  取消
+                </button>
+              </span>
+            ) : (
+              <button disabled={busy} onClick={() => setConfirmClean(true)}>
+                清理本域坏链（{brokenRows.length}）
+              </button>
+            )}
+          </div>
+          <table className="matrix">
+            <thead>
+              <tr>
+                <th>链接名</th>
+                <th>目标目录</th>
+                <th>指向</th>
+              </tr>
+            </thead>
+            <tbody>
+              {brokenRows.map(({ action, target }) => (
+                <tr key={action.targetPath}>
+                  <td>{action.itemName}</td>
+                  <td>{target.label}</td>
+                  <td className="path" title={action.sourcePath}>
+                    {action.sourcePath}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

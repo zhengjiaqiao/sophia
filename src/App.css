@@ -119,6 +119,9 @@ button.link {
   padding: 4px 8px;
   border-radius: 6px;
 }
+.broken-section {
+  margin-top: 16px;
+}
 table.matrix {
   border-collapse: collapse;
   width: 100%;
