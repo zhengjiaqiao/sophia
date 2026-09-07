@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { DomainPage, Overview, Source, SourceKind } from "./types";
 
@@ -39,8 +39,6 @@ export default function ImportDialog({
   onError,
 }: ImportDialogProps) {
   const [selected, setSelected] = useState(initialSourceId ?? overview.sources[0]?.id ?? "");
-  // 「全部」开关；开启时逐项复选框全勾且禁用
-  const [all, setAll] = useState(false);
   const [names, setNames] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   // 刚通过「选择文件夹…」加入、等待在新一轮 overview 中出现的路径
@@ -49,20 +47,21 @@ export default function ImportDialog({
   const source: Source | undefined = overview.sources.find((s) => s.id === selected);
   const skills = source?.skills ?? [];
 
+  // 「全部」是纯粹的全选开关：全勾时勾选，全空时不勾，部分勾选时半选
+  const allSelected = skills.length > 0 && skills.every((s) => names.includes(s));
+  const someSelected = names.length > 0 && !allSelected;
+  const allRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (allRef.current) allRef.current.indeterminate = someSelected;
+  }, [someSelected]);
+
   // 切换本体位置时按当前已引入名单预填
   useEffect(() => {
     const current = page.imported.find((im) => im.sourceId === selected);
     const src = overview.sources.find((s) => s.id === selected);
-    if (!current) {
-      setAll(false);
-      setNames([]);
-    } else if (current.pick === "all") {
-      setAll(true);
-      setNames(src?.skills ?? []);
-    } else {
-      setAll(false);
-      setNames(current.pick.only);
-    }
+    if (!current) setNames([]);
+    else if (current.pick === "all") setNames(src?.skills ?? []);
+    else setNames(current.pick.only);
   }, [selected, page, overview]);
 
   // 新来源出现后选中它；没出现就保持弹层原样
@@ -78,7 +77,7 @@ export default function ImportDialog({
   const toggleName = (skill: string, checked: boolean) =>
     setNames((prev) => (checked ? [...prev, skill] : prev.filter((n) => n !== skill)));
 
-  const chosen = all ? skills.length : names.length;
+  const chosen = names.length;
 
   const doImport = async () => {
     setBusy(true);
@@ -86,7 +85,8 @@ export default function ImportDialog({
       await api.importSource(
         page.targets.map((t) => t.id),
         selected,
-        all ? null : names,
+        // 全选等价于「以后新增的 skill 也算」，存为 all
+        allSelected ? null : names,
       );
       await onChange();
       onClose();
@@ -144,13 +144,11 @@ export default function ImportDialog({
               <>
                 <label>
                   <input
+                    ref={allRef}
                     type="checkbox"
-                    checked={all}
+                    checked={allSelected}
                     disabled={busy}
-                    onChange={(e) => {
-                      setAll(e.target.checked);
-                      if (e.target.checked) setNames(skills);
-                    }}
+                    onChange={() => setNames(allSelected ? [] : skills)}
                   />
                   全部
                 </label>
@@ -158,8 +156,8 @@ export default function ImportDialog({
                   <label key={skill}>
                     <input
                       type="checkbox"
-                      checked={all || names.includes(skill)}
-                      disabled={all || busy}
+                      checked={names.includes(skill)}
+                      disabled={busy}
                       onChange={(e) => toggleName(skill, e.target.checked)}
                     />
                     {skill}
