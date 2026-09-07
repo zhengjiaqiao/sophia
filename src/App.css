@@ -48,6 +48,11 @@ body {
 .rules li.active {
   background: #e8f0fe;
 }
+/* 侧栏手动项目的移除按钮：不随标签一起被挤掉 */
+.sidebar li button.remove {
+  flex: none;
+  color: #888;
+}
 .sidebar li span {
   overflow: hidden;
   text-overflow: ellipsis;

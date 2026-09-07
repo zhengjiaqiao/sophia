@@ -74,6 +74,12 @@ export default function ImportDialog({
     setNames([]);
   }, [selected]);
 
+  // 选中项消失（如手动本体位置被移除）时回落到第一项
+  useEffect(() => {
+    if (overview.sources.some((s) => s.id === selected)) return;
+    setSelected(overview.sources[0]?.id ?? "");
+  }, [overview.sources, selected]);
+
   // 新来源出现后选中它；没出现就保持弹层原样
   useEffect(() => {
     if (pendingPath === null) return;
@@ -127,6 +133,17 @@ export default function ImportDialog({
     setBusy(false);
   };
 
+  const removeSource = async (path: string) => {
+    setBusy(true);
+    try {
+      await api.removeManualSource(path);
+      await onChange();
+    } catch (e) {
+      onError(String(e));
+    }
+    setBusy(false);
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
@@ -151,6 +168,18 @@ export default function ImportDialog({
                 <span className="muted">
                   未引入 {s.skills.filter((sk) => notImported(s.id, sk)).length} 个
                 </span>
+                {s.kind.type === "manual" && (
+                  <button
+                    className="link"
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void removeSource(s.path);
+                    }}
+                  >
+                    移除
+                  </button>
+                )}
               </li>
             ))}
           </ul>

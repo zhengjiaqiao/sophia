@@ -223,8 +223,9 @@ fn list_manual_projects(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf
 
 #[tauri::command]
 fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let path = normalize(&path);
     let mut list = state.store.load_projects().map_err(err)?;
-    if !list.contains(&path) {
+    if !list.iter().any(|p| normalize(p) == path) {
         list.push(path);
     }
     state.store.save_projects(&list).map_err(err)
@@ -232,8 +233,9 @@ fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), S
 
 #[tauri::command]
 fn remove_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let path = normalize(&path);
     let mut list = state.store.load_projects().map_err(err)?;
-    list.retain(|p| p != &path);
+    list.retain(|p| normalize(p) != path);
     state.store.save_projects(&list).map_err(err)
 }
 
