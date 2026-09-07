@@ -55,11 +55,12 @@ export default function ImportDialog({
     if (allRef.current) allRef.current.indeterminate = someSelected;
   }, [someSelected]);
 
-  // 切换本体位置时按当前已引入名单预填
+  // 切换本体位置时按当前已引入名单预填；未引入的按本域已有的链接预填
   useEffect(() => {
     const current = page.imported.find((im) => im.sourceId === selected);
     const src = overview.sources.find((s) => s.id === selected);
-    if (!current) setNames([]);
+    if (!current)
+      setNames(page.rows.filter((r) => r.sourceId === selected && r.linked).map((r) => r.skill));
     else if (current.pick === "all") setNames(src?.skills ?? []);
     else setNames(current.pick.only);
   }, [selected, page, overview]);

@@ -60,6 +60,16 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
   const cellOf = (row: DomainRow, targetId: string) =>
     row.cells.find((c) => c.targetId === targetId) ?? null;
 
+  // 只有链接、没有同步集条目的来源：也列进标签行，和已引入的看起来一样
+  const importedIds = new Set(page.imported.map((im) => im.sourceId));
+  const linkedOnly = overview.sources
+    .filter((s) => !importedIds.has(s.id))
+    .map((s) => ({
+      sourceId: s.id,
+      count: page.rows.filter((r) => r.sourceId === s.id && r.linked && !r.imported).length,
+    }))
+    .filter((s) => s.count > 0);
+
   const rows = sort
     ? [...page.rows].sort(
         compareBy((row: DomainRow) => {
@@ -98,6 +108,14 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
               onClick={() => void run(() => api.removeSource(targetIds, im.sourceId))}
             >
               移除
+            </button>
+          </span>
+        ))}
+        {linkedOnly.map((s) => (
+          <span className="tag" key={s.sourceId} title={s.sourceId}>
+            {labelOf(s.sourceId)} · 已链接 {s.count} 个
+            <button className="link" disabled={busy} onClick={() => setImporting(s.sourceId)}>
+              编辑
             </button>
           </span>
         ))}
