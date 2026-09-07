@@ -61,7 +61,7 @@ export default function CustomSyncTab({ onError }: { onError: (message: string) 
 type Row = { action: PlannedAction; outcome: Outcome | null };
 
 const KIND_LABEL: Record<ActionKind, string> = {
-  create: "将创建", alreadyLinked: "已链接", conflict: "冲突", sourceMissing: "源缺失", brokenLink: "坏链",
+  create: "将创建", alreadyLinked: "已链接", conflict: "冲突", sourceMissing: "源缺失", brokenLink: "坏链", unlink: "将删除链接",
 };
 function rowText(r: Row): string {
   if (!r.outcome) return KIND_LABEL[r.action.kind];

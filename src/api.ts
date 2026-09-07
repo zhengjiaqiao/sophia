@@ -5,6 +5,7 @@ import type {
   HarnessStatus,
   Overview,
   PlannedAction,
+  RowRef,
   SyncReport,
   SyncRule,
 } from "./types";
@@ -12,14 +13,10 @@ import type {
 export const api = {
   listDomains: () => invoke<DomainInfo[]>("list_domains"),
   scanAll: () => invoke<Overview>("scan_all"),
-  setPick: (targetIds: string[], sourceId: string, skill: string, enabled: boolean) =>
-    invoke<void>("set_pick", { targetIds, sourceId, skill, enabled }),
-  /// skills 传 null 表示引入全部
-  importSource: (targetIds: string[], sourceId: string, skills: string[] | null) =>
-    invoke<void>("import_source", { targetIds, sourceId, skills }),
-  removeSource: (targetIds: string[], sourceId: string) =>
-    invoke<void>("remove_source", { targetIds, sourceId }),
-  proposeAll: () => invoke<PlannedAction[]>("propose_all"),
+  /// 选中行在各自域的目标上缺失的格 → 建链动作
+  proposeLinks: (rows: RowRef[]) => invoke<PlannedAction[]>("propose_links", { rows }),
+  /// 选中行在各自域的目标上已链接的格 → 删链动作
+  proposeUnlinks: (rows: RowRef[]) => invoke<PlannedAction[]>("propose_unlinks", { rows }),
   applyAll: (actions: PlannedAction[], cleanBroken: boolean) =>
     invoke<SyncReport>("apply_all", { actions, cleanBroken }),
   splitWholeLink: (targetId: string) => invoke<SyncReport>("split_whole_link", { targetId }),

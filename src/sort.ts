@@ -14,6 +14,7 @@ export function toggleSort(prev: SortState | null, key: string): SortState {
 
 /// 目标列按状态排序时的次序：好的在前，越靠后越需要处理
 export const STATE_RANK: Record<CellState, number> = {
+  own: 0,
   linked: 0,
   missing: 1,
   broken: 2,

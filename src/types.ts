@@ -29,7 +29,8 @@ export interface Target {
   linkedWholeTo: string | null;
 }
 
-export type CellState = "linked" | "missing" | "broken" | "foreign" | "duplicate" | "unwritable";
+export type CellState =
+  "own" | "linked" | "missing" | "broken" | "foreign" | "duplicate" | "unwritable";
 export interface Cell {
   sourceId: string;
   skill: string;
@@ -38,26 +39,11 @@ export interface Cell {
   state: CellState;
 }
 
-/// 某目标从某本体位置引入哪些 skill；条目存在即已引入
-export type Pick = "all" | { only: string[] };
-export interface SyncSet {
-  /// 目标 id → 本体位置 id → 选择
-  picks: Record<string, Record<string, Pick>>;
-}
-
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
 export interface DomainRow {
   sourceId: string;
   skill: string;
-  imported: boolean;
-  linked: boolean;
-  enabled: boolean;
   cells: Cell[];
-}
-
-export interface ImportedSource {
-  sourceId: string;
-  pick: Pick;
 }
 
 /// 一个域（全局或某项目）的整页数据
@@ -65,19 +51,24 @@ export interface DomainPage {
   key: string;
   label: string;
   targets: Target[];
-  imported: ImportedSource[];
   rows: DomainRow[];
   broken: PlannedAction[];
-  pendingMissing: number;
 }
 
 export interface Overview {
   domains: DomainPage[];
   sources: Source[];
-  syncSet: SyncSet;
 }
 
-export type ActionKind = "create" | "alreadyLinked" | "conflict" | "sourceMissing" | "brokenLink";
+/// 前端选中的一行：域 key + 本体位置 id + skill。行不必已出现在表里（引入弹层用）
+export interface RowRef {
+  domain: string;
+  sourceId: string;
+  skill: string;
+}
+
+export type ActionKind =
+  "create" | "alreadyLinked" | "conflict" | "sourceMissing" | "brokenLink" | "unlink";
 export interface PlannedAction {
   kind: ActionKind;
   itemName: string;

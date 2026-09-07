@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { DomainPage, Overview, Source, SourceKind } from "./types";
+import type { DomainPage, Overview, RowRef, Source, SourceKind, SyncReport } from "./types";
 
 export interface ImportDialogProps {
   overview: Overview;
@@ -9,6 +9,7 @@ export interface ImportDialogProps {
   initialSourceId?: string;
   onClose: () => void;
   onChange: () => Promise<void>;
+  onReport: (report: SyncReport) => void;
   onError: (message: string) => void;
 }
 
@@ -29,13 +30,14 @@ const kindText = (kind: SourceKind): string => {
 /// 只做尾部分隔符与大小写无关的宽松比较，够用于「刚添加的目录是否已出现」
 const samePath = (a: string, b: string) => a.replace(/[/\\]+$/, "") === b.replace(/[/\\]+$/, "");
 
-/// 引入来源弹层：左栏选本体位置，右栏选 skill
+/// 引入弹层：左栏选本体位置，右栏勾 skill，点「引入」当场建链
 export default function ImportDialog({
   overview,
   page,
   initialSourceId,
   onClose,
   onChange,
+  onReport,
   onError,
 }: ImportDialogProps) {
   const [selected, setSelected] = useState(initialSourceId ?? overview.sources[0]?.id ?? "");
@@ -55,15 +57,10 @@ export default function ImportDialog({
     if (allRef.current) allRef.current.indeterminate = someSelected;
   }, [someSelected]);
 
-  // 切换本体位置时按当前已引入名单预填；未引入的按本域已有的链接预填
+  // 切换本体位置时清空勾选：引入是一次性动作，不预填
   useEffect(() => {
-    const current = page.imported.find((im) => im.sourceId === selected);
-    const src = overview.sources.find((s) => s.id === selected);
-    if (!current)
-      setNames(page.rows.filter((r) => r.sourceId === selected && r.linked).map((r) => r.skill));
-    else if (current.pick === "all") setNames(src?.skills ?? []);
-    else setNames(current.pick.only);
-  }, [selected, page, overview]);
+    setNames([]);
+  }, [selected]);
 
   // 新来源出现后选中它；没出现就保持弹层原样
   useEffect(() => {
@@ -80,15 +77,30 @@ export default function ImportDialog({
 
   const chosen = names.length;
 
+  /// 本域已有该 skill 的链接（或本体就在此）
+  const linkedHere = (skill: string) =>
+    page.rows.some(
+      (r) =>
+        r.sourceId === selected &&
+        r.skill === skill &&
+        r.cells.some((c) => c.state === "linked" || c.state === "own"),
+    );
+
   const doImport = async () => {
     setBusy(true);
     try {
-      await api.importSource(
-        page.targets.map((t) => t.id),
-        selected,
-        // 全选等价于「以后新增的 skill 也算」，存为 all
-        allSelected ? null : names,
-      );
+      const rows: RowRef[] = names.map((skill) => ({
+        domain: page.key,
+        sourceId: selected,
+        skill,
+      }));
+      const acts = await api.proposeLinks(rows);
+      if (acts.length === 0) {
+        onError("所选 skill 都已链接，没有需要建立的链接");
+        setBusy(false);
+        return;
+      }
+      onReport(await api.applyAll(acts, false));
       await onChange();
       onClose();
     } catch (e) {
@@ -115,7 +127,7 @@ export default function ImportDialog({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <div className="toolbar">
-          <h2>引入来源到「{page.label}」</h2>
+          <h2>引入 skill 到「{page.label}」</h2>
           <button onClick={onClose}>关闭</button>
         </div>
 
@@ -129,7 +141,7 @@ export default function ImportDialog({
                 onClick={() => setSelected(s.id)}
               >
                 <span>
-                  {page.imported.some((im) => im.sourceId === s.id) ? "✓ " : ""}
+                  {page.rows.some((r) => r.sourceId === s.id) ? "✓ " : ""}
                   {s.label}
                   <span className="whole-link">{kindText(s.kind)}</span>
                 </span>
@@ -162,6 +174,7 @@ export default function ImportDialog({
                       onChange={(e) => toggleName(skill, e.target.checked)}
                     />
                     {skill}
+                    {linkedHere(skill) && <span className="muted">已链接</span>}
                   </label>
                 ))}
                 {skills.length === 0 && <p className="muted">该本体位置下没有 skill。</p>}
