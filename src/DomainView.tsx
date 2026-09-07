@@ -105,10 +105,10 @@ export default function DomainView({
   const domainTargetIds = targets.map((t) => t.id);
   const domainTargetIdSet = new Set(domainTargetIds);
   const pickedOf = (source: Source): string[] => overview.syncSet.sources[source.id]?.targets ?? [];
-  // 本域目标里已经落下过东西（非 missing）的本体位置：链上的、坏的、指向别处的都算"在本域里"
+  // 只有真链接算"在本域里"：同名 skill 在别处（foreign）、坏链、重复都不算，否则同名 skill 会把每个来源都拉进来
   const presentSourceIds = new Set(
     overview.cells
-      .filter((c) => c.state !== "missing" && domainTargetIdSet.has(c.targetId))
+      .filter((c) => c.state === "linked" && domainTargetIdSet.has(c.targetId))
       .map((c) => c.sourceId),
   );
   // 域视图讲"本域里有什么"：本域自己的本体位置 ∪ 已落在本域里的 ∪ 目标集合含本域目标的
@@ -135,14 +135,11 @@ export default function DomainView({
       return [source.id, hit === 0 ? "none" : hit === domainTargetIds.length ? "all" : "some"];
     }),
   );
-  // 只有既没勾选、在本域又一个格子都没落下的行才藏起来；已链接/坏链等一律显示
+  // 没勾选的本体位置，只有在本域真链上过的行才显示；勾选（全选/半选）的行一律显示
   const rows = allRows.filter(
     (row) =>
       participation.get(row.source.id) !== "none" ||
-      targets.some(
-        (t) =>
-          (cells.get(cellKey(row.source.id, row.skill, t.id))?.state ?? "missing") !== "missing",
-      ),
+      targets.some((t) => cells.get(cellKey(row.source.id, row.skill, t.id))?.state === "linked"),
   );
 
   // 勾上 = 把本域全部目标并入该本体位置的目标集合，取消 = 从中去掉本域全部目标
