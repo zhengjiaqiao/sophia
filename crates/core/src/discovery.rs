@@ -6,9 +6,6 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 
-/// 通用仓库 `.agents/skills` 不属于某个 harness，目标列用这个 id
-pub const UNIVERSAL_ID: &str = "universal";
-
 const HARNESSES_JSON: &str = include_str!("../data/harnesses.json");
 
 #[derive(Debug, Deserialize)]
@@ -309,39 +306,22 @@ pub fn sources(
     out
 }
 
-/// 所有可写目标：存在的 harness 全局目录 + 每个项目里存在的 harness 目录。
-/// 项目的 `.agents/skills` 只出一列；全局通用仓库是本体位置，不是目标。
-/// 按 `real_path` 去重并合并 label；目标目录整个是指向某本体位置的软链时填 `linked_whole_to`
+/// 所有可写目标：每个启用 harness 各自一列——全局目录、per-agent 目录、每个项目的项目目录。
+/// 列名就是 harness 名；多个 harness 共用同一个目录时各自成列，不合并。
+/// 目录不存在（`is_dir()` 跟随软链，整目录软链也算存在）则不成列；
+/// 目标目录整个是指向某本体位置的软链时填 `linked_whole_to`
 pub fn targets(
     env: &Env,
     harnesses: &[Harness],
     projects: &[PathBuf],
     sources: &[Source],
 ) -> Vec<Target> {
-    let store = env.home.join(".agents").join("skills");
-    let store_key = real_path(&store).unwrap_or_else(|| normalize(&store));
     let mut out: Vec<Target> = Vec::new();
-    // 与 out 一一对应；目录本身是软链的目标记 None，不参与去重
-    let mut keys: Vec<Option<PathBuf>> = Vec::new();
     let mut push = |id: String, label: String, path: PathBuf, scope: TargetScope| {
         // is_dir 跟随软链：整目录软链也算目标
         if !path.is_dir() {
             return;
         }
-        let real = real_path(&path).unwrap_or_else(|| normalize(&path));
-        if real == store_key {
-            return;
-        }
-        // 目录本身就是软链时，它和它指向的那个目标是两码事：一个是"整目录链接"、
-        // 一个是本体所在。合并进去会让这一列连同"拆成逐项链接"的入口一起消失
-        let key = (!matches!(entry_kind(&path), EntryKind::Symlink(_))).then_some(real);
-        if let Some(k) = &key {
-            if let Some(i) = keys.iter().position(|x| x.as_ref() == Some(k)) {
-                out[i].label = format!("{} / {}", out[i].label, label);
-                return;
-            }
-        }
-        keys.push(key);
         out.push(Target {
             id,
             label,
@@ -378,24 +358,10 @@ pub fn targets(
     }
     for p in projects {
         let key = normalize(p).to_string_lossy().into_owned();
-        let universal = p.join(".agents").join("skills");
-        push(
-            format!("project:{key}::{UNIVERSAL_ID}"),
-            "通用仓库".to_string(),
-            universal.clone(),
-            TargetScope::Project {
-                project: p.clone(),
-                harness_id: UNIVERSAL_ID.to_string(),
-                project_label: None,
-            },
-        );
         for h in harnesses {
             let Some(dir) = h.project_dir.as_ref().map(|d| p.join(d)) else {
                 continue;
             };
-            if dir == universal {
-                continue;
-            }
             push(
                 format!("project:{key}::{}", h.id),
                 h.display_name.clone(),
@@ -910,18 +876,19 @@ mod tests {
     }
 
     #[test]
-    fn targets_list_globals_projects_and_one_universal_column() {
+    fn targets_give_every_enabled_harness_its_own_column() {
         let t = TempTree::new();
         let home = t.root();
-        t.dir(".agents/skills/uni-skill"); // 全局通用仓库是本体位置，不是目标
+        t.dir(".agents/skills/uni-skill"); // cline 的 global_dir，成一列 Cline
         t.dir(".claude/skills");
+        t.dir(".cursor"); // 只有配置目录，没有 skills → 不成列
         let project = t.dir("Project/app");
         t.dir("Project/app/.claude/skills");
         t.dir("Project/app/.agents/skills");
         let e = env(&home, &[]);
         let all = all_harnesses(&e);
         let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
-        // cline 的 global_dir 就是 ~/.agents/skills；codex、cursor 项目级都读 .agents/skills
+        // cline 的 global_dir 就是 ~/.agents/skills；codex、cursor、cline 项目级都读 .agents/skills
         let hs = vec![
             pick("claude-code"),
             pick("codex"),
@@ -934,6 +901,11 @@ mod tests {
             .into_iter()
             .map(|x| (x.id, x.label, x.path, x.scope))
             .collect();
+        let proj = |harness_id: &str| TargetScope::Project {
+            project: project.clone(),
+            harness_id: harness_id.into(),
+            project_label: None,
+        };
         assert_eq!(
             got,
             vec![
@@ -946,24 +918,36 @@ mod tests {
                     },
                 ),
                 (
-                    format!("project:{key}::universal"),
-                    "通用仓库".to_string(),
-                    project.join(".agents/skills"),
-                    TargetScope::Project {
-                        project: project.clone(),
-                        harness_id: "universal".into(),
-                        project_label: None
+                    "cline".to_string(),
+                    "Cline".to_string(),
+                    home.join(".agents/skills"),
+                    TargetScope::Global {
+                        harness_id: "cline".into()
                     },
                 ),
                 (
                     format!("project:{key}::claude-code"),
                     "Claude Code".to_string(),
                     project.join(".claude/skills"),
-                    TargetScope::Project {
-                        project: project.clone(),
-                        harness_id: "claude-code".into(),
-                        project_label: None
-                    },
+                    proj("claude-code"),
+                ),
+                (
+                    format!("project:{key}::codex"),
+                    "Codex".to_string(),
+                    project.join(".agents/skills"),
+                    proj("codex"),
+                ),
+                (
+                    format!("project:{key}::cursor"),
+                    "Cursor".to_string(),
+                    project.join(".agents/skills"),
+                    proj("cursor"),
+                ),
+                (
+                    format!("project:{key}::cline"),
+                    "Cline".to_string(),
+                    project.join(".agents/skills"),
+                    proj("cline"),
                 ),
             ]
         );
@@ -980,7 +964,10 @@ mod tests {
         t.link(&project.join(".claude/skills"), &store);
         let e = env(&home, &[]);
         let all = all_harnesses(&e);
-        let hs = vec![all.iter().find(|h| h.id == "claude-code").unwrap().clone()];
+        let hs = vec![
+            all.iter().find(|h| h.id == "claude-code").unwrap().clone(),
+            all.iter().find(|h| h.id == "codex").unwrap().clone(),
+        ];
         let srcs = sources(&e, &hs, &[], std::slice::from_ref(&store));
         let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
         assert_eq!(got.len(), 1);
@@ -989,13 +976,46 @@ mod tests {
         t.dir("Project/app/.agents/skills");
         let got = targets(&e, &hs, &[project], &srcs);
         assert_eq!(got.len(), 2);
-        assert!(got[0].id.ends_with("::universal"));
-        assert_eq!(got[0].linked_whole_to, None);
-        assert_eq!(got[1].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
+        assert_eq!(got[0].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
+        assert!(got[1].id.ends_with("::codex"));
+        assert_eq!(got[1].linked_whole_to, None);
     }
 
     #[test]
-    fn symlinked_target_dir_is_never_merged_into_the_dir_it_points_to() {
+    fn two_harnesses_sharing_one_dir_get_one_column_each() {
+        let t = TempTree::new();
+        let home = t.root();
+        let store = t.dir("Store/skills");
+        t.dir("Store/skills/a-skill");
+        // 项目的 .agents/skills 整个是指向 store 的软链，codex 与 cursor 共用它
+        let project = t.dir("Project/app");
+        t.dir("Project/app/.agents");
+        t.link(&project.join(".agents/skills"), &store);
+
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        let hs = vec![pick("codex"), pick("cursor")];
+        let srcs = sources(&e, &hs, &[], std::slice::from_ref(&store));
+        assert_eq!(srcs.len(), 1);
+
+        let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
+        let key = project.display();
+        assert_eq!(got.len(), 2);
+        // 同一个目录两列，id 与列名各自属于自己的 harness，标签不合并
+        assert_eq!(got[0].id, format!("project:{key}::codex"));
+        assert_eq!(got[0].label, "Codex");
+        assert_eq!(got[1].id, format!("project:{key}::cursor"));
+        assert_eq!(got[1].label, "Cursor");
+        // 两列都指向同一个目录，各自都算整目录链接
+        for x in &got {
+            assert_eq!(x.path, project.join(".agents/skills"));
+            assert_eq!(x.linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
+        }
+    }
+
+    #[test]
+    fn agent_dir_and_the_project_symlink_pointing_at_it_stay_two_columns() {
         let t = TempTree::new();
         let home = t.root();
         let weiboap = "Library/Application Support/WeiboAP";
@@ -1021,7 +1041,7 @@ mod tests {
 
         let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
         assert_eq!(got.len(), 2);
-        // agent 目标不受影响：标签没被合并，也不是整目录链接
+        // agent 目标：本体所在，不是整目录链接
         assert_eq!(
             got[0].id,
             format!("project:{}::weiboap", agent_root.display())

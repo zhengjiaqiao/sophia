@@ -172,14 +172,16 @@ export default function SkillsTab({
     page.rows.filter((row) => isSelected(page, row) && !row.own && hasUnlinkable(page, row)),
   );
 
-  // 缺失按格算：一行在多个目标上缺失就算多处
-  let missing = 0;
+  // 缺失按格算：一行在多个目标上缺失就算多处。
+  // 多个 harness 共用一个目录时各自成列，按 cell.path 去重，同一处只算一次
+  const missingPaths = new Set<string>();
   for (const page of pages) {
     for (const row of page.rows) {
       if (!isSelected(page, row)) continue;
-      for (const cell of row.cells) if (cell.state === "missing") missing += 1;
+      for (const cell of row.cells) if (cell.state === "missing") missingPaths.add(cell.path);
     }
   }
+  const missing = missingPaths.size;
 
   return (
     <section>
