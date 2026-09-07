@@ -150,7 +150,15 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
             {rows.map((row) => (
               <tr
                 key={`${row.sourceId}|${row.skill}`}
-                className={row.enabled ? undefined : "disabled"}
+                // 只有已引入又被取消勾选才置灰；未引入的行只是尚未纳入，不是被禁用
+                className={row.imported && !row.enabled ? "disabled" : undefined}
+                title={
+                  row.imported
+                    ? undefined
+                    : row.linked
+                      ? "已链接，未纳入同步集；勾选后纳入"
+                      : "未纳入同步集"
+                }
               >
                 <td>
                   <label>
