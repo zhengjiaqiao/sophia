@@ -1,6 +1,5 @@
 //! 共享类型。serde 统一 camelCase，前端 `src/types.ts` 与之对应。
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// 同步整目录，或只同步指定名字的子项
@@ -35,6 +34,8 @@ pub enum ActionKind {
     SourceMissing,
     /// 目标里指向本源目录下、但源已不存在的软链
     BrokenLink,
+    /// 删除一条指向 `source_path` 的软链，`sync::plan` 不产生
+    Unlink,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +182,8 @@ pub struct Target {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CellState {
+    /// 目标目录就是本体位置本身，内容天然到位，不是链接
+    Own,
     Linked,
     Missing,
     /// 链接目标不存在
@@ -204,44 +207,22 @@ pub struct Cell {
     pub state: CellState,
 }
 
-/// 某目标从某本体位置引入哪些 skill
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Pick {
-    /// 全部 skill，含以后新增的
-    All,
-    /// 只这些
-    Only(BTreeSet<String>),
-}
-
-/// 持久化到 `syncset.json`：目标 id → 本体位置 id → 选择。条目存在即已引入
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSet {
-    pub picks: BTreeMap<String, BTreeMap<String, Pick>>,
-}
-
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DomainRow {
     pub source_id: String,
     pub skill: String,
-    /// 该本体位置已引入本域
-    pub imported: bool,
-    /// 本域已有目标链到它
-    pub linked: bool,
-    /// 已引入且未被取消勾选
-    pub enabled: bool,
     pub cells: Vec<Cell>,
 }
 
-/// 域内一处已引入的本体位置
+/// 前端选中的一行：域 key + 本体位置 id + skill。行不必已出现在表里（引入弹层用）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ImportedSource {
+pub struct RowRef {
+    pub domain: String,
     pub source_id: String,
-    pub pick: Pick,
+    pub skill: String,
 }
 
 /// 一个域（全局或某项目）的整页数据
@@ -252,10 +233,8 @@ pub struct DomainPage {
     pub key: String,
     pub label: String,
     pub targets: Vec<Target>,
-    pub imported: Vec<ImportedSource>,
     pub rows: Vec<DomainRow>,
     pub broken: Vec<PlannedAction>,
-    pub pending_missing: usize,
 }
 
 /// 一次扫描的完整结果
@@ -265,7 +244,6 @@ pub struct Overview {
     pub domains: Vec<DomainPage>,
     /// 供引入弹层列出全部已发现的本体位置
     pub sources: Vec<Source>,
-    pub sync_set: SyncSet,
 }
 
 #[cfg(test)]
@@ -308,19 +286,20 @@ mod tests {
     }
 
     #[test]
-    fn pick_serializes_as_externally_tagged_camel_case() {
-        assert_eq!(serde_json::to_value(Pick::All).unwrap(), json!("all"));
+    fn row_ref_and_new_variants_serialize_as_camel_case() {
+        let row = RowRef {
+            domain: "global".into(),
+            source_id: "/a".into(),
+            skill: "x".into(),
+        };
         assert_eq!(
-            serde_json::to_value(Pick::Only(["a".to_string()].into_iter().collect())).unwrap(),
-            json!({"only": ["a"]})
+            serde_json::to_value(&row).unwrap(),
+            json!({"domain": "global", "sourceId": "/a", "skill": "x"})
         );
-    }
-
-    #[test]
-    fn empty_sync_set_serializes_to_empty_map() {
+        assert_eq!(serde_json::to_value(CellState::Own).unwrap(), json!("own"));
         assert_eq!(
-            serde_json::to_value(SyncSet::default()).unwrap(),
-            json!({"picks": {}})
+            serde_json::to_value(ActionKind::Unlink).unwrap(),
+            json!("unlink")
         );
     }
 }

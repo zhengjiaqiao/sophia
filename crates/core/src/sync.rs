@@ -96,7 +96,8 @@ fn broken_links(target_dir: &Path, source: &Path) -> Vec<PlannedAction> {
         .collect()
 }
 
-/// 只对 Create 建链；BrokenLink 仅在 clean_broken 时删除，删前重校验仍是软链
+/// 只对 Create 建链；BrokenLink 仅在 clean_broken 时删除，删前重校验仍是软链。
+/// Unlink 不受 clean_broken 影响（确认在前端做）
 pub fn execute(actions: &[PlannedAction], clean_broken: bool, style: LinkStyle) -> SyncReport {
     SyncReport {
         entries: actions
@@ -118,6 +119,18 @@ fn outcome_for(action: &PlannedAction, clean_broken: bool, style: LinkStyle) -> 
             }
             match create_link(&action.source_path, &action.target_path, style) {
                 Ok(()) => Outcome::Created,
+                Err(e) => Outcome::Failed(e.to_string()),
+            }
+        }
+        ActionKind::Unlink => {
+            // 预览到确认之间可能已被换掉：必须仍是软链，且仍指向该本体位置
+            if !matches!(entry_kind(&action.target_path), EntryKind::Symlink(_))
+                || !same_real(&action.target_path, &action.source_path)
+            {
+                return Outcome::Failed("不再是指向该本体位置的软链接，已跳过".into());
+            }
+            match remove_link(&action.target_path) {
+                Ok(()) => Outcome::Removed,
                 Err(e) => Outcome::Failed(e.to_string()),
             }
         }
@@ -157,6 +170,42 @@ mod tests {
     }
     fn outcomes(r: &SyncReport) -> Vec<Outcome> {
         r.entries.iter().map(|e| e.outcome.clone()).collect()
+    }
+
+    fn unlink(link: &Path, source: &Path) -> PlannedAction {
+        PlannedAction {
+            kind: ActionKind::Unlink,
+            item_name: "x".into(),
+            source_path: source.to_path_buf(),
+            target_path: link.to_path_buf(),
+            target: link.parent().unwrap().to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn unlink_removes_only_a_link_that_still_points_at_the_source() {
+        let tree = TempTree::new();
+        let src = tree.dir("src/x");
+        let other = tree.dir("other/x");
+        let t = tree.dir("t");
+        tree.link(&t.join("good"), &src);
+        tree.link(&t.join("elsewhere"), &other);
+        tree.dir("t/real");
+        let actions = vec![
+            unlink(&t.join("good"), &src),
+            unlink(&t.join("elsewhere"), &src),
+            unlink(&t.join("real"), &src),
+        ];
+        let report = execute(&actions, false, LinkStyle::Absolute);
+        assert_eq!(report.entries[0].outcome, Outcome::Removed);
+        assert_eq!(entry_kind(&t.join("good")), EntryKind::Missing);
+        assert!(matches!(report.entries[1].outcome, Outcome::Failed(_)));
+        assert!(matches!(
+            entry_kind(&t.join("elsewhere")),
+            EntryKind::Symlink(_)
+        ));
+        assert!(matches!(report.entries[2].outcome, Outcome::Failed(_)));
+        assert_eq!(entry_kind(&t.join("real")), EntryKind::Dir);
     }
 
     #[test]
