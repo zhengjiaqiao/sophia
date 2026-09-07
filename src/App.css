@@ -137,6 +137,17 @@ table.matrix td {
   text-align: left;
   white-space: nowrap;
 }
+th button.sort {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+th button.sort.active {
+  color: #1a73e8;
+}
 table.matrix td.path {
   max-width: 320px;
   overflow: hidden;

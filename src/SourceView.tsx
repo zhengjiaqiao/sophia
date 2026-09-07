@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { api } from "./api";
+import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
 import type { Cell, CellState, Overview, Source } from "./types";
 
 export interface SourceViewProps {
@@ -31,10 +32,15 @@ const STATE_TEXT: Record<CellState, string> = {
 const cellKey = (sourceId: string, skill: string, targetId: string) =>
   `${sourceId}|${skill}|${targetId}`;
 
+/// 没有格子的行排在所有状态之后
+const ABSENT_RANK = STATE_RANK.unwritable + 1;
+
 /// 单个本体位置的卡片：两级勾选（目标 / skill）
 export default function SourceView({ overview, source, busy, onChange, onError }: SourceViewProps) {
   // 待确认拆分的目标 id
   const [confirmSplit, setConfirmSplit] = useState<string | null>(null);
+  // 表头排序；null = 后端原序
+  const [sort, setSort] = useState<SortState | null>(null);
 
   const cells = useMemo(() => {
     const map = new Map<string, Cell>();
@@ -56,6 +62,26 @@ export default function SourceView({ overview, source, busy, onChange, onError }
   const picked = new Set(sync?.targets ?? []);
   const disabledSkills = new Set(sync?.disabledSkills ?? []);
   const columns = overview.targets.filter((t) => picked.has(t.id));
+
+  const skills = sort
+    ? [...source.skills].sort(
+        compareBy((skill) => {
+          if (sort.key === "skill") return skill;
+          const cell = cells.get(cellKey(source.id, skill, sort.key));
+          return cell ? STATE_RANK[cell.state] : ABSENT_RANK;
+        }, sort.dir),
+      )
+    : source.skills;
+
+  const sortHeader = (key: string, label: string) => (
+    <button
+      className={sort?.key === key ? "sort active" : "sort"}
+      onClick={() => setSort((prev) => toggleSort(prev, key))}
+    >
+      {label}
+      {sort?.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
 
   return (
     <div className="source-card">
@@ -87,10 +113,10 @@ export default function SourceView({ overview, source, busy, onChange, onError }
       <table className="matrix">
         <thead>
           <tr>
-            <th>skill</th>
+            <th>{sortHeader("skill", "skill")}</th>
             {columns.map((target) => (
               <th key={target.id}>
-                {target.label}
+                {sortHeader(target.id, target.label)}
                 {target.linkedWholeTo === source.id && (
                   <>
                     <span className="whole-link">整目录链接</span>
@@ -121,7 +147,7 @@ export default function SourceView({ overview, source, busy, onChange, onError }
           </tr>
         </thead>
         <tbody>
-          {source.skills.map((skill) => {
+          {skills.map((skill) => {
             const enabled = !disabledSkills.has(skill);
             return (
               <tr key={skill} className={enabled ? undefined : "disabled"}>

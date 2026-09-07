@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { api } from "./api";
 import { isUnder } from "./paths";
+import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
 import type { Cell, CellState, Overview, PlannedAction, Source, Target } from "./types";
 
 export interface DomainViewProps {
@@ -32,6 +34,9 @@ const CELL_TEXT: Record<CellState, string> = {
 
 const cellKey = (sourceId: string, skill: string, targetId: string) =>
   `${sourceId}|${skill}|${targetId}`;
+
+/// 没有格子的行排在所有状态之后
+const ABSENT_RANK = STATE_RANK.unwritable + 1;
 
 /// 项目路径末段作展示名；末尾斜杠不算一段
 const lastSegment = (path: string): string => path.split("/").filter(Boolean).pop() ?? path;
@@ -112,6 +117,9 @@ export default function DomainView({
   onChange,
   onError,
 }: DomainViewProps) {
+  // 表头排序；null = 默认按 skill 名再按本体位置
+  const [sort, setSort] = useState<SortState | null>(null);
+
   const targets = overview.targets.filter((t) => targetDomainKey(t) === domainKey);
   if (targets.length === 0) return <p>该域下没有可用的目标目录。</p>;
 
@@ -128,6 +136,27 @@ export default function DomainView({
   // 列出的本体位置显示其全部 skill 行，未同步的（○）也在内，新 skill 才看得见
   const rows = buildRows(sources);
   if (rows.length === 0) return <p>该域下没有本体位置。</p>;
+
+  const sortedRows = sort
+    ? [...rows].sort(
+        compareBy((row: Row) => {
+          if (sort.key === "skill") return row.skill;
+          if (sort.key === "source") return row.source.label;
+          const cell = cells.get(cellKey(row.source.id, row.skill, sort.key));
+          return cell ? STATE_RANK[cell.state] : ABSENT_RANK;
+        }, sort.dir),
+      )
+    : rows;
+
+  const sortHeader = (key: string, label: string) => (
+    <button
+      className={sort?.key === key ? "sort active" : "sort"}
+      onClick={() => setSort((prev) => toggleSort(prev, key))}
+    >
+      {label}
+      {sort?.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+    </button>
+  );
 
   const entry = domainEntries(overview.targets).find((e) => e.key === domainKey);
 
@@ -154,15 +183,15 @@ export default function DomainView({
       <table className="matrix">
         <thead>
           <tr>
-            <th>skill</th>
-            <th>本体位置</th>
+            <th>{sortHeader("skill", "skill")}</th>
+            <th>{sortHeader("source", "本体位置")}</th>
             {targets.map((target) => (
-              <th key={target.id}>{target.label}</th>
+              <th key={target.id}>{sortHeader(target.id, target.label)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {sortedRows.map((row) => {
             const enabled = !(
               overview.syncSet.sources[row.source.id]?.disabledSkills ?? []
             ).includes(row.skill);
