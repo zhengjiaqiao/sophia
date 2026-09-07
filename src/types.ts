@@ -38,26 +38,43 @@ export interface Cell {
   state: CellState;
 }
 
-export interface SourceSync {
-  targets: string[];
-  disabledSkills: string[];
-}
+/// 某目标从某本体位置引入哪些 skill；条目存在即已引入
+export type Pick = "all" | { only: string[] };
 export interface SyncSet {
-  sources: Record<string, SourceSync>;
+  /// 目标 id → 本体位置 id → 选择
+  picks: Record<string, Record<string, Pick>>;
 }
 
-export interface Summary {
-  sources: number;
+/// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
+export interface DomainRow {
+  sourceId: string;
+  skill: string;
+  imported: boolean;
+  linked: boolean;
+  enabled: boolean;
+  cells: Cell[];
+}
+
+export interface ImportedSource {
+  sourceId: string;
+  pick: Pick;
+}
+
+/// 一个域（全局或某项目）的整页数据
+export interface DomainPage {
+  key: string;
+  label: string;
+  targets: Target[];
+  imported: ImportedSource[];
+  rows: DomainRow[];
+  broken: PlannedAction[];
   pendingMissing: number;
-  broken: number;
 }
 
 export interface Overview {
+  domains: DomainPage[];
   sources: Source[];
-  targets: Target[];
-  cells: Cell[];
   syncSet: SyncSet;
-  summary: Summary;
 }
 
 export type ActionKind = "create" | "alreadyLinked" | "conflict" | "sourceMissing" | "brokenLink";

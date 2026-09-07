@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import SourceView from "./SourceView";
-import DomainView, { domainSourceIds, targetDomainKey } from "./DomainView";
+import DomainView from "./DomainView";
 import { isUnder } from "./paths";
 import {
   actionId,
@@ -28,20 +27,18 @@ export interface SkillsTabProps {
   overview: Overview | null;
   busy: boolean;
   onBusy: (busy: boolean) => void;
-  view: "source" | "domain";
-  selectedSourceId: string | null;
-  selectedDomainKey: string;
+  /// 侧栏选中：`"all"` 或某个 DomainPage.key
+  selectedKey: string;
   onRefresh: () => Promise<void>;
   onError: (message: string) => void;
 }
 
+/// 域页容器：按侧栏选中渲染一个或全部域，工具栏按渲染出的域聚合
 export default function SkillsTab({
   overview,
   busy,
   onBusy,
-  view,
-  selectedSourceId,
-  selectedDomainKey,
+  selectedKey,
   onRefresh,
   onError,
 }: SkillsTabProps) {
@@ -66,13 +63,11 @@ export default function SkillsTab({
     return () => clearTimeout(timer);
   }, [report]);
 
-  // 结果只属于当次选择：切换视图或侧栏选中项就作废
+  // 结果只属于当次选择：切换侧栏选中项就作废
   useEffect(() => {
     setReport(null);
-  }, [view, selectedSourceId, selectedDomainKey]);
-
-  const creates = actions.filter((a) => a.kind === "create");
-  const broken = actions.filter((a) => a.kind === "brokenLink");
+    setConfirmClean(false);
+  }, [selectedKey]);
 
   const run = async (subset: PlannedAction[], cleanBroken: boolean) => {
     onBusy(true);
@@ -88,48 +83,23 @@ export default function SkillsTab({
   };
 
   if (!overview) return <p>扫描中…</p>;
-  const source = overview.sources.find((s) => s.id === selectedSourceId) ?? null;
-  // 工具条跟着侧栏走：本体位置视图按本体位置路径过滤，域视图按本域目标目录过滤
-  const domainTargets =
-    view === "domain"
-      ? overview.targets.filter((t) => targetDomainKey(t) === selectedDomainKey)
-      : [];
-  const inScope = (path: string): boolean =>
-    view === "source"
-      ? source !== null && isUnder(path, source.path)
-      : domainTargets.some((t) => isUnder(path, t.path));
-  const scopedCreates = creates.filter((a) =>
-    inScope(view === "source" ? a.sourcePath : a.targetPath),
-  );
-  const scopedBroken = view === "domain" ? broken.filter((a) => inScope(a.targetPath)) : [];
 
-  // 域视图里列出的本体位置对本域合法：它们在本域目标下的缺口都算本域待同步，
-  // 哪怕本域目标还不在它们的同步集里（"同步本域"会先补上）
-  const domainSources = view === "domain" ? domainSourceIds(overview, selectedDomainKey) : [];
-  const domainSourceIdSet = new Set(domainSources);
-  const domainTargetIdSet = new Set(domainTargets.map((t) => t.id));
-  const domainPending = overview.cells.filter(
-    (c) =>
-      c.state === "missing" &&
-      domainSourceIdSet.has(c.sourceId) &&
-      domainTargetIdSet.has(c.targetId) &&
-      !(overview.syncSet.sources[c.sourceId]?.disabledSkills ?? []).includes(c.skill),
-  ).length;
+  const pages =
+    selectedKey === "all"
+      ? overview.domains
+      : overview.domains.filter((d) => d.key === selectedKey);
+  const pending = pages.reduce((n, p) => n + p.pendingMissing, 0);
+  const broken = pages.flatMap((p) => p.broken);
 
-  // 先把本域目标并进这些本体位置的同步集，再链接落在本域目标下的缺口；
-  // 这样同步集与刚同步出来的链接一致，按本体位置视图里那些目标就是勾上的
-  const syncDomain = async () => {
+  // 待同步的缺口由后端按域算好，同步时从最新提案里取落在这些域目标下的 Create
+  const targetPaths = pages.flatMap((p) => p.targets.map((t) => t.path));
+  const syncNow = async () => {
     try {
-      for (const id of domainSources) {
-        const picked = overview.syncSet.sources[id]?.targets ?? [];
-        if (domainTargets.every((t) => picked.includes(t.id))) continue;
-        await api.setSourceTargets(id, [
-          ...new Set([...picked, ...domainTargets.map((t) => t.id)]),
-        ]);
-      }
       const acts = await api.proposeAll();
       await run(
-        acts.filter((a) => a.kind === "create" && inScope(a.targetPath)),
+        acts.filter(
+          (a) => a.kind === "create" && targetPaths.some((p) => isUnder(a.targetPath, p)),
+        ),
         false,
       );
     } catch (e) {
@@ -140,41 +110,29 @@ export default function SkillsTab({
   return (
     <section>
       <div className="toolbar">
-        {view === "source" ? (
-          <>
-            <span>此本体位置待同步 {scopedCreates.length} 处</span>
-            <button
-              onClick={() => void run(scopedCreates, false)}
-              disabled={busy || scopedCreates.length === 0}
-            >
-              同步此本体位置（{scopedCreates.length}）
-            </button>
-          </>
-        ) : (
-          <>
-            <span>
-              本域待同步 {domainPending} 处，坏链 {scopedBroken.length} 处
+        <span>
+          待同步 {pending} 处，坏链 {broken.length} 处
+        </span>
+        <button onClick={() => void syncNow()} disabled={busy || pending === 0}>
+          同步（{pending}）
+        </button>
+        {broken.length > 0 &&
+          (confirmClean ? (
+            <span className="confirm">
+              只删除链接本身，不删除任何真实文件。
+              <button onClick={() => void run(broken, true)} disabled={busy}>
+                确认删除
+              </button>
+              <button onClick={() => setConfirmClean(false)}>取消</button>
             </span>
-            <button onClick={() => void syncDomain()} disabled={busy || domainPending === 0}>
-              同步本域（{domainPending}）
+          ) : (
+            <button onClick={() => setConfirmClean(true)} disabled={busy}>
+              清理坏链（{broken.length}）
             </button>
-            {scopedBroken.length > 0 &&
-              (confirmClean ? (
-                <span className="confirm">
-                  只删除链接本身，不删除任何真实文件。
-                  <button onClick={() => void run(scopedBroken, true)} disabled={busy}>
-                    确认删除
-                  </button>
-                  <button onClick={() => setConfirmClean(false)}>取消</button>
-                </span>
-              ) : (
-                <button onClick={() => setConfirmClean(true)} disabled={busy}>
-                  清理本域坏链（{scopedBroken.length}）
-                </button>
-              ))}
-          </>
-        )}
-        <span className="muted">全部 {creates.length} 处待同步</span>
+          ))}
+        <span className="muted">
+          全部 {actions.filter((a) => a.kind === "create").length} 处待同步
+        </span>
         <button onClick={() => void onRefresh()} disabled={busy}>
           刷新
         </button>
@@ -196,27 +154,19 @@ export default function SkillsTab({
           </ul>
         </div>
       )}
-      {view === "source" ? (
-        source ? (
-          <SourceView
+      {pages.length === 0 ? (
+        <p>没有可用的目标目录。</p>
+      ) : (
+        pages.map((page) => (
+          <DomainView
+            key={page.key}
             overview={overview}
-            source={source}
+            page={page}
             busy={busy}
             onChange={onRefresh}
             onError={onError}
           />
-        ) : (
-          <p>没有可用的本体位置。</p>
-        )
-      ) : (
-        <DomainView
-          overview={overview}
-          domainKey={selectedDomainKey}
-          actions={actions}
-          busy={busy}
-          onChange={onRefresh}
-          onError={onError}
-        />
+        ))
       )}
     </section>
   );

@@ -27,20 +27,6 @@ body {
   font-size: 16px;
   margin: 0 0 12px;
 }
-.view-switch {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-.view-switch button {
-  flex: 1;
-}
-.view-switch button.active {
-  background: #e8f0fe;
-  border-color: #1a73e8;
-  color: #1a73e8;
-  font-weight: 600;
-}
 .sidebar ul,
 .rules ul {
   list-style: none;
@@ -179,13 +165,24 @@ td.cell.unwritable {
 tr.disabled {
   opacity: 0.5;
 }
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
 .tag {
-  margin-left: 6px;
-  font-size: 11px;
-  background: #fff4e5;
-  color: #e37400;
-  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  background: #f1f3f4;
+  color: #444;
+  padding: 2px 8px;
   border-radius: 10px;
+}
+.tag button.link {
+  font-size: 12px;
 }
 .report {
   background: #f6f8fa;
@@ -308,32 +305,6 @@ table.preview td {
   font-size: 14px;
   margin: 0;
   flex: 1;
-}
-.source-card {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-.source-card h2 {
-  display: flex;
-  align-items: center;
-}
-.source-card .path {
-  color: #666;
-  font-size: 12px;
-}
-.target-picks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 8px 0;
-}
-.target-picks label {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  cursor: pointer;
 }
 .whole-link {
   margin-left: 6px;

@@ -1,18 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api";
 import type { Overview } from "./types";
 import SkillsTab from "./SkillsTab";
 import CustomSyncTab from "./CustomSyncTab";
 import SettingsPanel from "./SettingsPanel";
-import { domainEntries } from "./DomainView";
 import "./App.css";
+
+/// 侧栏「全部」的选中键；其余为 DomainPage.key
+const ALL_KEY = "all";
 
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [view, setView] = useState<"source" | "domain">("source");
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
-  const [selectedDomainKey, setSelectedDomainKey] = useState("global");
+  const [selectedKey, setSelectedKey] = useState(ALL_KEY);
   const [tab, setTab] = useState<"skills" | "custom">("skills");
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -34,16 +34,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const sources = overview?.sources ?? [];
-  const domains = useMemo(() => domainEntries(overview?.targets ?? []), [overview]);
+  const domains = overview?.domains ?? [];
 
-  // 选中项消失（本体位置被移除、项目不再存在）时回落到第一项
+  // 选中的域消失（项目不再存在）时回落到「全部」
   useEffect(() => {
     if (!overview) return;
-    if (!sources.some((s) => s.id === selectedSourceId)) {
-      setSelectedSourceId(sources[0]?.id ?? null);
+    if (selectedKey !== ALL_KEY && !domains.some((d) => d.key === selectedKey)) {
+      setSelectedKey(ALL_KEY);
     }
-    if (!domains.some((d) => d.key === selectedDomainKey)) setSelectedDomainKey("global");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overview]);
 
@@ -60,51 +58,25 @@ export default function App() {
         {!collapsed && (
           <>
             <h1>SymSync</h1>
-            <div className="view-switch">
-              <button
-                className={view === "source" ? "active" : ""}
-                disabled={busy}
-                onClick={() => setView("source")}
+            <ul>
+              <li
+                className={selectedKey === ALL_KEY ? "active" : ""}
+                title="全局与所有项目"
+                onClick={() => !busy && setSelectedKey(ALL_KEY)}
               >
-                本体位置
-              </button>
-              <button
-                className={view === "domain" ? "active" : ""}
-                disabled={busy}
-                onClick={() => setView("domain")}
-              >
-                域
-              </button>
-            </div>
-            {view === "source" ? (
-              <ul>
-                {sources.map((s) => (
-                  <li
-                    key={s.id}
-                    className={s.id === selectedSourceId ? "active" : ""}
-                    title={s.path}
-                    onClick={() => !busy && setSelectedSourceId(s.id)}
-                  >
-                    <span>
-                      {s.label} ({s.skills.length})
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <ul>
-                {domains.map((d) => (
-                  <li
-                    key={d.key}
-                    className={d.key === selectedDomainKey ? "active" : ""}
-                    title={d.path ?? "全局 skill 目录"}
-                    onClick={() => !busy && setSelectedDomainKey(d.key)}
-                  >
-                    <span>{d.label}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+                <span>全部</span>
+              </li>
+              {domains.map((d) => (
+                <li
+                  key={d.key}
+                  className={d.key === selectedKey ? "active" : ""}
+                  title={d.key}
+                  onClick={() => !busy && setSelectedKey(d.key)}
+                >
+                  <span>{d.label}</span>
+                </li>
+              ))}
+            </ul>
           </>
         )}
         <button onClick={() => setSettingsOpen(true)}>设置</button>
@@ -131,9 +103,7 @@ export default function App() {
             overview={overview}
             busy={busy}
             onBusy={setBusy}
-            view={view}
-            selectedSourceId={selectedSourceId}
-            selectedDomainKey={selectedDomainKey}
+            selectedKey={selectedKey}
             onRefresh={refresh}
             onError={setError}
           />

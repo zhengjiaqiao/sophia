@@ -53,8 +53,8 @@ fn list_domains(state: tauri::State<'_, AppState>) -> Result<Vec<DomainInfo>, St
     Ok(out)
 }
 
-/// 完整扫描：发现本体位置与目标 → 扫描 → 落盘补齐默认值后的同步集
-fn overview(state: &AppState) -> Result<Overview, String> {
+/// 一次发现：本体位置与目标目录，按当前设置解析
+fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = Env::from_system();
     let settings = state.store.load_settings().map_err(err)?;
     let harnesses = discovery::enabled(discovery::installed(&env), &settings);
@@ -62,6 +62,12 @@ fn overview(state: &AppState) -> Result<Overview, String> {
     let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
     let sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
     let targets = discovery::targets(&env, &harnesses, &projects, &sources);
+    Ok((sources, targets))
+}
+
+/// 完整扫描：发现 → 按域扫描 → 落盘补齐默认值后的同步集
+fn overview(state: &AppState) -> Result<Overview, String> {
+    let (sources, targets) = discover(state)?;
     let sync_set = state.store.load_sync_set().map_err(err)?;
     let overview = skills::scan(&sources, &targets, &sync_set);
     state.store.save_sync_set(&overview.sync_set).map_err(err)?;
@@ -73,31 +79,58 @@ fn scan_all(state: tauri::State<'_, AppState>) -> Result<Overview, String> {
     overview(&state)
 }
 
+/// 行首勾选：`All` 转名单需要该本体位置的全部 skill，重新发现一次拿到
 #[tauri::command]
-fn set_source_targets(
-    source_id: String,
+fn set_pick(
     target_ids: Vec<String>,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let mut set = state.store.load_sync_set().map_err(err)?;
-    set.sources.entry(source_id).or_default().targets = target_ids.into_iter().collect();
-    state.store.save_sync_set(&set).map_err(err)
-}
-
-#[tauri::command]
-fn set_skill_enabled(
     source_id: String,
     skill: String,
     enabled: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let (sources, _) = discover(&state)?;
+    let all_skills = sources
+        .iter()
+        .find(|s| s.id == source_id)
+        .map(|s| s.skills.clone())
+        .ok_or("本体位置已不存在，请刷新")?;
     let mut set = state.store.load_sync_set().map_err(err)?;
-    let entry = set.sources.entry(source_id).or_default();
-    if enabled {
-        entry.disabled_skills.remove(&skill);
-    } else {
-        entry.disabled_skills.insert(skill);
-    }
+    skills::set_pick(
+        &mut set,
+        &target_ids,
+        &source_id,
+        &skill,
+        enabled,
+        &all_skills,
+    );
+    state.store.save_sync_set(&set).map_err(err)
+}
+
+/// 引入一处本体位置到本域每个目标；`skills` 为 None 表示全部
+#[tauri::command]
+fn import_source(
+    target_ids: Vec<String>,
+    source_id: String,
+    skills: Option<Vec<String>>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let pick = match skills {
+        None => Pick::All,
+        Some(names) => Pick::Only(names.into_iter().collect()),
+    };
+    let mut set = state.store.load_sync_set().map_err(err)?;
+    symsync_core::skills::import_source(&mut set, &target_ids, &source_id, pick);
+    state.store.save_sync_set(&set).map_err(err)
+}
+
+#[tauri::command]
+fn remove_source(
+    target_ids: Vec<String>,
+    source_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut set = state.store.load_sync_set().map_err(err)?;
+    skills::remove_source(&mut set, &target_ids, &source_id);
     state.store.save_sync_set(&set).map_err(err)
 }
 
@@ -110,8 +143,9 @@ fn propose_all(state: tauri::State<'_, AppState>) -> Result<Vec<PlannedAction>, 
 fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
     let same = |a: &Path, b: Option<&Path>| b.is_some_and(|b| normalize(a) == normalize(b));
     let target = overview
-        .targets
+        .domains
         .iter()
+        .flat_map(|d| &d.targets)
         .find(|t| same(&t.path, action.target_path.parent()));
     let source = overview
         .sources
@@ -156,8 +190,9 @@ fn split_whole_link(
 ) -> Result<SyncReport, String> {
     let overview = overview(&state)?;
     let target = overview
-        .targets
+        .domains
         .iter()
+        .flat_map(|d| &d.targets)
         .find(|t| t.id == target_id)
         .ok_or("目标已不存在，请刷新")?;
     let source_id = target
@@ -178,7 +213,7 @@ fn list_manual_sources(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>
 }
 
 #[tauri::command]
-fn add_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn add_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let path = normalize(&path);
     let mut settings = state.store.load_settings().map_err(err)?;
     if !settings.manual_sources.contains(&path) {
@@ -188,7 +223,7 @@ fn add_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), St
 }
 
 #[tauri::command]
-fn remove_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn remove_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let path = normalize(&path);
     let mut settings = state.store.load_settings().map_err(err)?;
     settings.manual_sources.retain(|p| normalize(p) != path);
@@ -288,14 +323,15 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_domains,
             scan_all,
-            set_source_targets,
-            set_skill_enabled,
+            set_pick,
+            import_source,
+            remove_source,
             propose_all,
             apply_all,
             split_whole_link,
             list_manual_sources,
-            add_source,
-            remove_source,
+            add_manual_source,
+            remove_manual_source,
             list_manual_projects,
             add_project,
             remove_project,

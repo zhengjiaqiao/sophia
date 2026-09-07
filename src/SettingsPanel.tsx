@@ -62,7 +62,7 @@ export default function SettingsPanel({
     const path = await api.pickDirectory("选择本体位置目录");
     if (!path) return;
     try {
-      await api.addSource(path);
+      await api.addManualSource(path);
       await reload();
     } catch (e) {
       onError(String(e));
@@ -71,7 +71,7 @@ export default function SettingsPanel({
 
   const removeSource = async (path: string) => {
     try {
-      await api.removeSource(path);
+      await api.removeManualSource(path);
       await reload();
     } catch (e) {
       onError(String(e));
