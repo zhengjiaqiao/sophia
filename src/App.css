@@ -288,6 +288,18 @@ table.preview td {
   padding: 12px;
   margin-bottom: 12px;
 }
+.source-card h2 {
+  display: flex;
+  align-items: center;
+}
+.card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+}
 .source-card .path {
   color: #666;
   font-size: 12px;

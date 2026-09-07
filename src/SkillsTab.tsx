@@ -82,10 +82,11 @@ export default function SkillsTab({
     <section>
       <div className="toolbar">
         <span>
-          {summary.sources} 个本体位置，{summary.pendingMissing} 处待同步，{summary.broken} 处坏链
+          {summary.sources} 个本体位置，全部待同步 {summary.pendingMissing} 处，{summary.broken}{" "}
+          处坏链
         </span>
         <button onClick={() => void run(creates, false)} disabled={busy || creates.length === 0}>
-          同步（{creates.length}）
+          同步全部（{creates.length}）
         </button>
         {broken.length > 0 && !confirmClean && (
           <button onClick={() => setConfirmClean(true)} disabled={busy}>
@@ -119,8 +120,10 @@ export default function SkillsTab({
           <SourceView
             overview={overview}
             source={source}
+            actions={actions}
             busy={busy}
             onChange={onRefresh}
+            onApply={run}
             onError={onError}
           />
         ) : (

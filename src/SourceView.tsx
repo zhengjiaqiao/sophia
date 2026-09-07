@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
 import { api } from "./api";
-import type { Cell, CellState, Overview, Source } from "./types";
+import type { Cell, CellState, Overview, PlannedAction, Source } from "./types";
 
 export interface SourceViewProps {
   overview: Overview;
   source: Source;
+  /// 全局提案，卡片按本体位置路径过滤出自己那一份
+  actions: PlannedAction[];
   busy: boolean;
   onChange: () => Promise<void>;
+  onApply: (subset: PlannedAction[], cleanBroken: boolean) => Promise<void>;
   onError: (message: string) => void;
 }
 
@@ -32,7 +35,15 @@ const cellKey = (sourceId: string, skill: string, targetId: string) =>
   `${sourceId}|${skill}|${targetId}`;
 
 /// 单个本体位置的卡片：两级勾选（目标 / skill）
-export default function SourceView({ overview, source, busy, onChange, onError }: SourceViewProps) {
+export default function SourceView({
+  overview,
+  source,
+  actions,
+  busy,
+  onChange,
+  onApply,
+  onError,
+}: SourceViewProps) {
   // 待确认拆分的目标 id
   const [confirmSplit, setConfirmSplit] = useState<string | null>(null);
 
@@ -52,6 +63,16 @@ export default function SourceView({ overview, source, busy, onChange, onError }
     }
   };
 
+  // 后端的 sourcePath 是「本体位置路径 + 分隔符 + skill」，两种分隔符都认
+  const pending = useMemo(() => {
+    const base = source.path.replace(/[/\\]+$/, "");
+    return actions.filter(
+      (a) =>
+        a.kind === "create" &&
+        (a.sourcePath.startsWith(`${base}/`) || a.sourcePath.startsWith(`${base}\\`)),
+    );
+  }, [actions, source.path]);
+
   const sync = overview.syncSet.sources[source.id];
   const picked = new Set(sync?.targets ?? []);
   const disabledSkills = new Set(sync?.disabledSkills ?? []);
@@ -62,6 +83,15 @@ export default function SourceView({ overview, source, busy, onChange, onError }
       <h2>
         {source.label}
         {source.kind.type === "manual" && <span className="tag">手动添加</span>}
+        <span className="card-actions">
+          <span>待同步 {pending.length} 处</span>
+          <button
+            disabled={busy || pending.length === 0}
+            onClick={() => void onApply(pending, false)}
+          >
+            同步此本体位置（{pending.length}）
+          </button>
+        </span>
       </h2>
       <div className="path">{source.path}</div>
 
