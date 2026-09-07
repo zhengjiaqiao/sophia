@@ -321,3 +321,50 @@ table.preview td {
   font-size: 14px;
   margin: 0 0 6px;
 }
+.modal.wide {
+  width: auto;
+}
+.import-dialog {
+  display: flex;
+  gap: 16px;
+  min-width: 720px;
+}
+.import-sources {
+  width: 260px;
+  overflow: auto;
+  max-height: 60vh;
+}
+.import-skills {
+  flex: 1;
+  overflow: auto;
+  max-height: 60vh;
+}
+.pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pick-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pick-list li.active {
+  background: #e8f0fe;
+}
+.pick-list li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.import-skills label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+  cursor: pointer;
+}
