@@ -178,9 +178,18 @@ tr.disabled {
 }
 .report {
   background: #f6f8fa;
+  border-left: 3px solid #188038;
   padding: 8px 12px;
   border-radius: 6px;
   margin-bottom: 12px;
+}
+.report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.report ul {
+  margin: 4px 0 0;
   max-height: 160px;
   overflow: auto;
 }

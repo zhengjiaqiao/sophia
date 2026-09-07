@@ -59,6 +59,18 @@ export default function SkillsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overview]);
 
+  // 结果框是暂态的：6 秒后自行消失
+  useEffect(() => {
+    if (!report) return;
+    const timer = setTimeout(() => setReport(null), 6000);
+    return () => clearTimeout(timer);
+  }, [report]);
+
+  // 结果只属于当次选择：切换视图或侧栏选中项就作废
+  useEffect(() => {
+    setReport(null);
+  }, [view, selectedSourceId, selectedDomainKey]);
+
   const creates = actions.filter((a) => a.kind === "create");
   const broken = actions.filter((a) => a.kind === "brokenLink");
 
@@ -168,13 +180,21 @@ export default function SkillsTab({
         </button>
       </div>
       {report && (
-        <ul className="report">
-          {report.entries.map((e) => (
-            <li key={actionId(e.action)}>
-              {outcomeText(e.outcome)} · {e.action.targetPath}
-            </li>
-          ))}
-        </ul>
+        <div className="report">
+          <div className="report-head">
+            <span>本次结果（{report.entries.length} 条）</span>
+            <button className="link" onClick={() => setReport(null)}>
+              关闭
+            </button>
+          </div>
+          <ul>
+            {report.entries.map((e) => (
+              <li key={actionId(e.action)}>
+                {outcomeText(e.outcome)} · {e.action.targetPath}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {view === "source" ? (
         source ? (
