@@ -193,6 +193,7 @@ export default function DomainView({
             </label>
           );
         })}
+        <span className="muted">未勾选的本体位置不参与同步</span>
       </div>
       <table className="matrix">
         <thead>
@@ -209,17 +210,20 @@ export default function DomainView({
             const enabled = !(
               overview.syncSet.sources[row.source.id]?.disabledSkills ?? []
             ).includes(row.skill);
+            // 本体位置没勾选参与本域：整行调暗、行内复选框失效，免得 ○ 看着像"待同步"
+            const joined = participation.get(row.source.id) !== "none";
             return (
               <tr
                 key={`${row.source.id}|${row.skill}`}
-                className={enabled ? undefined : "disabled"}
+                className={enabled && joined ? undefined : "disabled"}
+                title={joined ? undefined : "该本体位置未勾选参与本域同步"}
               >
                 <td>
                   <label>
                     <input
                       type="checkbox"
                       checked={enabled}
-                      disabled={busy}
+                      disabled={busy || !joined}
                       onChange={(e) => void toggleSkill(row.source, row.skill, e.target.checked)}
                     />
                     {row.skill}
