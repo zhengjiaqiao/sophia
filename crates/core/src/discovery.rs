@@ -218,6 +218,7 @@ fn agent_projects(env: &Env, harnesses: &[Harness]) -> Vec<AgentProject> {
                 .into_iter()
                 .map(move |(root, dir)| AgentProject {
                     harness_id: h.id.clone(),
+                    display_name: h.display_name.clone(),
                     label: format!("{} · {}", h.display_name, dir_name(&root)),
                     root,
                     dir,
@@ -229,6 +230,9 @@ fn agent_projects(env: &Env, harnesses: &[Harness]) -> Vec<AgentProject> {
 /// 一个 agent 项目：`root` 是通配层匹配到的 agent 目录，`dir` 是它的 skill 目录
 struct AgentProject {
     harness_id: String,
+    /// harness 名，用作目标列名
+    display_name: String,
+    /// 「harness 名 · agent 目录名」，用作本体位置名与域名
     label: String,
     root: PathBuf,
     dir: PathBuf,
@@ -363,7 +367,7 @@ pub fn targets(
         let key = normalize(&a.root).to_string_lossy().into_owned();
         push(
             format!("project:{key}::{}", a.harness_id),
-            a.label.clone(),
+            a.display_name,
             a.dir,
             TargetScope::Project {
                 project: a.root,
@@ -373,12 +377,11 @@ pub fn targets(
         );
     }
     for p in projects {
-        let name = dir_name(p);
         let key = normalize(p).to_string_lossy().into_owned();
         let universal = p.join(".agents").join("skills");
         push(
             format!("project:{key}::{UNIVERSAL_ID}"),
-            format!("{name} · 通用仓库"),
+            "通用仓库".to_string(),
             universal.clone(),
             TargetScope::Project {
                 project: p.clone(),
@@ -395,7 +398,7 @@ pub fn targets(
             }
             push(
                 format!("project:{key}::{}", h.id),
-                format!("{name} · {}", h.display_name),
+                h.display_name.clone(),
                 dir,
                 TargetScope::Project {
                     project: p.clone(),
@@ -764,7 +767,7 @@ mod tests {
             vec![
                 (
                     format!("project:{}::weiboap", root1.display()),
-                    "WeiboAP · agent_1".to_string(),
+                    "WeiboAP".to_string(),
                     dir1,
                     TargetScope::Project {
                         project: root1,
@@ -774,7 +777,7 @@ mod tests {
                 ),
                 (
                     format!("project:{}::weiboap", root2.display()),
-                    "WeiboAP · agent_2".to_string(),
+                    "WeiboAP".to_string(),
                     dir2,
                     TargetScope::Project {
                         project: root2,
@@ -944,7 +947,7 @@ mod tests {
                 ),
                 (
                     format!("project:{key}::universal"),
-                    "app · 通用仓库".to_string(),
+                    "通用仓库".to_string(),
                     project.join(".agents/skills"),
                     TargetScope::Project {
                         project: project.clone(),
@@ -954,7 +957,7 @@ mod tests {
                 ),
                 (
                     format!("project:{key}::claude-code"),
-                    "app · Claude Code".to_string(),
+                    "Claude Code".to_string(),
                     project.join(".claude/skills"),
                     TargetScope::Project {
                         project: project.clone(),
@@ -1023,7 +1026,7 @@ mod tests {
             got[0].id,
             format!("project:{}::weiboap", agent_root.display())
         );
-        assert_eq!(got[0].label, "WeiboAP · agent_1");
+        assert_eq!(got[0].label, "WeiboAP");
         assert_eq!(got[0].path, agent_dir);
         assert_eq!(got[0].linked_whole_to, None);
         // 项目那一列独立留下，指回 agent 本体位置，"拆成逐项链接"才有入口
@@ -1031,7 +1034,7 @@ mod tests {
             got[1].id,
             format!("project:{}::claude-code", project.display())
         );
-        assert_eq!(got[1].label, "weibo_assistant · Claude Code");
+        assert_eq!(got[1].label, "Claude Code");
         assert_eq!(got[1].path, project.join(".claude/skills"));
         assert_eq!(got[1].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
     }

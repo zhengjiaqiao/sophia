@@ -1,4 +1,4 @@
-//! 按域（全局 / 每个项目）组织的扫描：行的两类来源、格状态、按选中行生成建链 / 删链动作、整目录链接拆分
+//! 按域（全局 / 每个项目）组织的扫描：行的两类来源、格状态、按选中格生成建链 / 删链动作、整目录链接拆分
 use crate::fs::{create_link, entry_kind, normalize, real_path, remove_link, same_real, EntryKind};
 use crate::models::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -104,6 +104,7 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
                     })
                     .collect();
                 Some(DomainRow {
+                    own: source_domain(&source.kind) == key,
                     source_id,
                     skill,
                     cells,
@@ -131,31 +132,31 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
     }
 }
 
-/// 选中行在其域各目标上的 Missing 格 → Create。域 / 本体位置 / skill 对不上的行忽略；按 target_path 去重
+/// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重
 pub fn propose_links(
     sources: &[Source],
     targets: &[Target],
-    rows: &[RowRef],
+    cells: &[CellRef],
 ) -> Vec<PlannedAction> {
     propose_by(
         sources,
         targets,
-        rows,
+        cells,
         |state, _| state == CellState::Missing,
         ActionKind::Create,
     )
 }
 
-/// 选中行在其域各目标上的 Linked 格（目标非整目录链接）→ Unlink。规则同上
+/// 选中格里的 Linked 格（目标非整目录链接）→ Unlink。规则同上
 pub fn propose_unlinks(
     sources: &[Source],
     targets: &[Target],
-    rows: &[RowRef],
+    cells: &[CellRef],
 ) -> Vec<PlannedAction> {
     propose_by(
         sources,
         targets,
-        rows,
+        cells,
         |state, target| state == CellState::Linked && target.linked_whole_to.is_none(),
         ActionKind::Unlink,
     )
@@ -164,39 +165,37 @@ pub fn propose_unlinks(
 fn propose_by(
     sources: &[Source],
     targets: &[Target],
-    rows: &[RowRef],
+    cells: &[CellRef],
     wanted: impl Fn(CellState, &Target) -> bool,
     kind: ActionKind,
 ) -> Vec<PlannedAction> {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
     let mut out = Vec::new();
-    for row in rows {
-        let Some(source) = by_id.get(row.source_id.as_str()) else {
+    for cell in cells {
+        let Some(source) = by_id.get(cell.source_id.as_str()) else {
             continue;
         };
-        if !source.skills.iter().any(|s| s == &row.skill) {
+        if !source.skills.iter().any(|s| s == &cell.skill) {
             continue;
         }
-        for target in targets
-            .iter()
-            .filter(|t| domain_key(&t.scope) == row.domain)
-        {
-            let path = target.path.join(&row.skill);
-            if !wanted(cell_state(source, &row.skill, target, &path), target) {
-                continue;
-            }
-            if !seen.insert(path.clone()) {
-                continue;
-            }
-            out.push(PlannedAction {
-                kind,
-                item_name: row.skill.clone(),
-                source_path: source.path.join(&row.skill),
-                target_path: path,
-                target: target.path.clone(),
-            });
+        let Some(target) = targets.iter().find(|t| t.id == cell.target_id) else {
+            continue;
+        };
+        let path = target.path.join(&cell.skill);
+        if !wanted(cell_state(source, &cell.skill, target, &path), target) {
+            continue;
         }
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        out.push(PlannedAction {
+            kind,
+            item_name: cell.skill.clone(),
+            source_path: source.path.join(&cell.skill),
+            target_path: path,
+            target: target.path.clone(),
+        });
     }
     out
 }
@@ -379,19 +378,19 @@ mod tests {
         )
     }
 
-    /// 行的 (本体位置 id, skill)
-    fn rows(page: &DomainPage) -> Vec<(String, String)> {
+    /// 行的 (本体位置 id, skill, own)
+    fn rows(page: &DomainPage) -> Vec<(String, String, bool)> {
         page.rows
             .iter()
-            .map(|r| (r.source_id.clone(), r.skill.clone()))
+            .map(|r| (r.source_id.clone(), r.skill.clone(), r.own))
             .collect()
     }
 
-    fn row_ref(domain: &str, source: &Source, skill: &str) -> RowRef {
-        RowRef {
-            domain: domain.into(),
+    fn cell(source: &Source, skill: &str, target: &Target) -> CellRef {
+        CellRef {
             source_id: source.id.clone(),
             skill: skill.into(),
+            target_id: target.id.clone(),
         }
     }
 
@@ -451,18 +450,18 @@ mod tests {
         assert_eq!(
             rows(glob),
             vec![
-                (sources[0].id.clone(), "a".into()),
-                (sources[0].id.clone(), "b".into())
+                (sources[0].id.clone(), "a".into(), true),
+                (sources[0].id.clone(), "b".into(), true)
             ]
         );
         let proj = &ov.domains[1];
-        // 项目域：自有 c、d 全部成行；universal 只有被链的 a，不带入 b
+        // 项目域：自有 c、d 全部成行；universal 只有被链的 a，不带入 b（本体位置不属于本域）
         assert_eq!(
             rows(proj),
             vec![
-                (sources[0].id.clone(), "a".into()),
-                (sources[1].id.clone(), "c".into()),
-                (sources[1].id.clone(), "d".into()),
+                (sources[0].id.clone(), "a".into(), false),
+                (sources[1].id.clone(), "c".into(), true),
+                (sources[1].id.clone(), "d".into(), true),
             ]
         );
         assert_eq!(proj.rows[0].cells[0].state, CellState::Linked);
@@ -535,17 +534,22 @@ mod tests {
             global("codex", &codex),
             project(&proj_root, "claude-code", &proj_claude),
         ];
-        let proj_key = project_key(&proj_root);
-        let rows = vec![
-            row_ref("global", &sources[0], "a"),
-            row_ref("global", &sources[0], "b"),
-            row_ref("global", &sources[0], "c"),
-            row_ref("global", &sources[0], "a"),   // 重复行：去重
-            row_ref(&proj_key, &sources[0], "d"),  // 引入场景：universal 的 d 不在项目页里
-            row_ref("global", &sources[0], "zzz"), // skill 不存在：忽略
-            row_ref("nope", &sources[0], "a"),     // 域不存在：忽略
+        let cells = vec![
+            cell(&sources[0], "a", &targets[0]),   // Missing → Create
+            cell(&sources[0], "a", &targets[1]),   // Missing → Create
+            cell(&sources[0], "b", &targets[0]),   // Duplicate：忽略
+            cell(&sources[0], "b", &targets[1]),   // Missing → Create
+            cell(&sources[0], "c", &targets[0]),   // Foreign：忽略
+            cell(&sources[0], "a", &targets[0]),   // 重复格：去重
+            cell(&sources[0], "d", &targets[2]),   // 引入场景：项目页里没有这行
+            cell(&sources[0], "zzz", &targets[0]), // skill 不存在：忽略
+            CellRef {
+                source_id: sources[0].id.clone(),
+                skill: "a".into(),
+                target_id: "nope".into(),
+            }, // 目标不存在：忽略
         ];
-        let mut paths: Vec<PathBuf> = propose_links(&sources, &targets, &rows)
+        let mut paths: Vec<PathBuf> = propose_links(&sources, &targets, &cells)
             .into_iter()
             .inspect(|a| assert_eq!(a.kind, ActionKind::Create))
             .map(|a| a.target_path)
@@ -555,7 +559,6 @@ mod tests {
             claude.join("a"),
             codex.join("a"),
             codex.join("b"),
-            codex.join("c"),
             proj_claude.join("d"),
         ];
         expect.sort();
@@ -579,11 +582,14 @@ mod tests {
         whole_t.linked_whole_to = Some(sources[0].id.clone());
         let own_t = global("weiboap", &universal); // Own
         let targets = vec![global("claude-code", &claude), whole_t, own_t];
-        let rows = vec![
-            row_ref("global", &sources[0], "a"),
-            row_ref("global", &sources[0], "b"),
-        ];
-        let acts = propose_unlinks(&sources, &targets, &rows);
+        // a、b 在三个目标上的全部 6 格
+        let mut cells: Vec<CellRef> = Vec::new();
+        for skill in ["a", "b"] {
+            for t in &targets {
+                cells.push(cell(&sources[0], skill, t));
+            }
+        }
+        let acts = propose_unlinks(&sources, &targets, &cells);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].kind, ActionKind::Unlink);
         assert_eq!(acts[0].target_path, claude.join("a"));
