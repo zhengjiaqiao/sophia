@@ -1,0 +1,127 @@
+# Spec v5: 只展示事实，只做动作
+
+- 对应 intent：`docs/intent/2026-09-07-facts-and-actions.md`
+- 替代：`docs/specs/2026-09-07-single-view-design.md`（v4；其 §3 格状态、坏链、整目录链接拆分继续有效，本文只写变化）
+- 日期：2026-09-07
+- 状态：待实现
+
+## 1. 目标
+
+去掉同步集。扫描只产出事实；建链与删链由前端把用户当场选中的行交给 core 生成动作，再执行。
+
+## 2. 模型（`models.rs`）
+
+删除：`Pick`、`SyncSet`、`ImportedSource`，以及 `models.rs` 里它们的序列化测试。
+
+```rust
+pub enum CellState { Own, Linked, Missing, Broken, Foreign, Duplicate, Unwritable }
+//  Own：目标目录就是本体位置本身（same_real(target.path, source.path)），内容天然到位，不是链接
+
+pub enum ActionKind { Create, AlreadyLinked, Conflict, SourceMissing, BrokenLink, Unlink }
+//  Unlink：删除一条指向 source_path 的软链（target_path）。`sync::plan` 不产生它
+
+pub struct DomainRow { pub source_id: String, pub skill: String, pub cells: Vec<Cell> }
+pub struct DomainPage { pub key: String, pub label: String, pub targets: Vec<Target>, pub rows: Vec<DomainRow>, pub broken: Vec<PlannedAction> }
+pub struct Overview { pub domains: Vec<DomainPage>, pub sources: Vec<Source> }
+
+/// 前端选中的一行：域 key + 本体位置 id + skill。行不必已出现在表里（引入弹层用）
+pub struct RowRef { pub domain: String, pub source_id: String, pub skill: String }
+```
+
+序列化仍 camelCase；`CellState::Own` → `"own"`，`ActionKind::Unlink` → `"unlink"`。
+
+## 3. 扫描（`skills.rs`）
+
+`scan(sources, targets) -> Overview`，无同步集参数。
+
+每个域 D 的行 = 自有本体位置的全部 skill ∪ 已链接的 (s, name)（任一 t ∈ D 下 `t/name` 是解析到 `s/name` 的软链）。排序去重规则不变（skill 名、本体位置 label、id）。
+
+格状态：先判 `linked_whole_to`（同 v4）；再 `same_real(target.path, source.path)` → **`Own`**（v4 是 Linked）；其余不变。
+
+`DomainPage.broken` 不变。删除 `pending_missing`、`imported`。
+
+## 4. 动作（`skills.rs`、`sync.rs`）
+
+```rust
+/// 选中行在其域各目标上的 Missing 格 → Create。行的域不存在、本体位置不存在或 skill 不在本体位置里 → 忽略该行。按 target_path 去重
+pub fn propose_links(sources: &[Source], targets: &[Target], rows: &[RowRef]) -> Vec<PlannedAction>;
+/// 选中行在其域各目标上的 Linked 格（目标非整目录链接）→ Unlink。同样的忽略与去重规则
+pub fn propose_unlinks(sources: &[Source], targets: &[Target], rows: &[RowRef]) -> Vec<PlannedAction>;
+```
+
+两者都直接对 (source, target) 现算 `cell_state`，不依赖 `Overview.rows`，所以引入弹层里尚未成行的 skill 也能用同一函数。`PlannedAction { item_name: skill, source_path: source.path/skill, target_path: target.path/skill, target: target.path }`。
+
+`sync::execute` 新增分支：
+
+```rust
+ActionKind::Unlink => {
+    // 预览到确认之间可能已被换掉：必须仍是软链，且仍指向该本体位置
+    if !matches!(entry_kind(&action.target_path), EntryKind::Symlink(_))
+        || !same_real(&action.target_path, &action.source_path)
+    {
+        return Outcome::Failed("不再是指向该本体位置的软链接，已跳过".into());
+    }
+    match remove_link(&action.target_path) { Ok(()) => Outcome::Removed, Err(e) => Outcome::Failed(e.to_string()) }
+}
+```
+
+`Unlink` 不受 `clean_broken` 影响（确认在前端做）。
+
+删除：`propose`、`merged_pick`、`set_pick`、`import_source`、`remove_source`、`put`。`link_style`、`split_whole_link` 不变。
+
+## 5. 存储（`store.rs`）
+
+删除 `load_sync_set` / `save_sync_set` 及其测试；模块注释去掉 `syncset.json`。磁盘上残留的旧文件不管。
+
+## 6. 命令层（`src-tauri/src/lib.rs`）
+
+- `scan_all() -> Overview`：发现 → `skills::scan`，不再落盘任何东西。
+- 新增 `propose_links(rows: Vec<RowRef>) -> Vec<PlannedAction>`、`propose_unlinks(rows: Vec<RowRef>) -> Vec<PlannedAction>`：各自 `discover` 一次再调 core。
+- `apply_all(actions, clean_broken)`：不变（`style_for` 用 `Overview.sources/targets` 回查，仍成立）。
+- 删除 `set_pick`、`import_source`、`remove_source`、`propose_all`。其余命令不变。
+
+## 7. 前端
+
+`types.ts`：删 `Pick`、`SyncSet`、`ImportedSource`；`DomainRow`、`DomainPage`、`Overview` 同 §2；`CellState` 加 `"own"`；`ActionKind` 加 `"unlink"`；新增 `RowRef`。`api.ts`：删 `setPick`、`importSource`、`removeSource`、`proposeAll`；加 `proposeLinks(rows)`、`proposeUnlinks(rows)`。
+
+**选择状态**（`SkillsTab.tsx`）：`excluded: Set<string>`，键 `${page.key}|${sourceId}|${skill}`；行选中 ⇔ 不在集合里，所以默认全选、新出现的行也默认选中。切换侧栏时清空。选中行的 `RowRef` 列表 = 渲染中各页的行里未被排除的。
+
+**工具栏**（`SkillsTab.tsx`）：
+
+- `补齐缺失（N）`：N = 选中行的 `missing` 格数。点击：`proposeLinks(rows)` → `applyAll(actions, false)` → 结果框 → 刷新。
+- `取消链接（M）`：M = 选中行里、目标 `linkedWholeTo === null` 的 `linked` 格数。点击先出确认条："只删除软链接本身，不删除任何真实文件。确认删除 / 取消"，确认后 `proposeUnlinks(rows)` → `applyAll(actions, false)` → 结果框 → 刷新。
+- `清理坏链（K）`、`刷新`：不变。
+- 删除 "全部 X 处待同步" 与 `proposeAll` 副作用。
+
+**域页**（`DomainView.tsx`）：
+
+- 标签行：按行统计出现过的本体位置，每个标签 `label · n 个`，无按钮；点击标签打开引入弹层并预选它。右侧 `引入…` 按钮。
+- 表格：表头第一列一个全选框（勾 = 本页所有行选中；部分选中显示 indeterminate）；行首勾选框绑定选择状态；不再有 `tr.disabled` 与行 title。新增格符号 `own: "●"`，文案 "本体在此"；`App.css` 加 `td.cell.own` 样式（沿用 linked 的颜色），删 `tr.disabled`、`.tag button.link`。
+- 坏链表、整目录链接拆分不变。
+- 新增 prop `onReport(report)`，把弹层的执行结果交给 `SkillsTab` 的结果框。
+
+**引入弹层**（`ImportDialog.tsx`）：
+
+- 标题 "引入 skill 到「域名」"。左栏列出全部本体位置；本域已有其行的标 ✓。右栏 skill 复选，初始全不勾；本域已链接的 skill 后面标 "已链接"（仍可勾，勾了没有动作）。"全部" 仍是全选开关。
+- 点 "引入"：`proposeLinks(勾选 skill 映射成 RowRef{domain: page.key, sourceId, skill})`；空数组 → `onError("所选 skill 都已链接，没有需要建立的链接")`，弹层不关；否则 `applyAll(actions, false)` → `onReport` → `onChange` → 关闭。
+- "选择文件夹…" 不变。
+
+`App.tsx` 不变。
+
+## 8. 测试
+
+core（`skills.rs`）：
+
+- 行 = 自有 ∪ 已链接，不带入同源其他 skill，无同步集。
+- 目标即本体位置本身 → `Own`。
+- `propose_links`：只对 Missing 建 Create；跳过 Duplicate / Foreign / Unwritable；同一 target_path 去重；行不在表里（引入场景）也能生成；未知域 / 本体位置 / skill 忽略。
+- `propose_unlinks`：只对 Linked 生成 Unlink；整目录链接目标不生成；`Own` 不生成。
+- `sync.rs`：Unlink 对正确软链 → Removed 且文件消失；对真实目录 → Failed 且目录仍在；对指向别处的软链 → Failed 且链接仍在。
+- 删除 picks 相关测试；`store.rs` 删同步集测试。
+
+前端：`make build-web`。真机：`docs/manual-checks.md` 按 §7 重写 Skills 一节。
+
+## 9. 迁移
+
+- `syncset.json` 作废，不读不删。
+- v4 spec 标"已被替代"；`CLAUDE.md` Architecture 行更新（`skills.rs`：`scan` / `propose_links` / `propose_unlinks`；`store.rs` 去掉 syncset）。
