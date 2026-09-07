@@ -65,13 +65,10 @@ fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     Ok((sources, targets))
 }
 
-/// 完整扫描：发现 → 按域扫描 → 落盘补齐默认值后的同步集
+/// 完整扫描：发现 → 按域扫描，只产出事实，不落盘
 fn overview(state: &AppState) -> Result<Overview, String> {
     let (sources, targets) = discover(state)?;
-    let sync_set = state.store.load_sync_set().map_err(err)?;
-    let overview = skills::scan(&sources, &targets, &sync_set);
-    state.store.save_sync_set(&overview.sync_set).map_err(err)?;
-    Ok(overview)
+    Ok(skills::scan(&sources, &targets))
 }
 
 #[tauri::command]
@@ -79,64 +76,24 @@ fn scan_all(state: tauri::State<'_, AppState>) -> Result<Overview, String> {
     overview(&state)
 }
 
-/// 行首勾选：`All` 转名单需要该本体位置的全部 skill，重新发现一次拿到
+/// 选中行在其域各目标上的 Missing 格 → 建链动作
 #[tauri::command]
-fn set_pick(
-    target_ids: Vec<String>,
-    source_id: String,
-    skill: String,
-    enabled: bool,
+fn propose_links(
+    rows: Vec<RowRef>,
     state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let (sources, _) = discover(&state)?;
-    let all_skills = sources
-        .iter()
-        .find(|s| s.id == source_id)
-        .map(|s| s.skills.clone())
-        .ok_or("本体位置已不存在，请刷新")?;
-    let mut set = state.store.load_sync_set().map_err(err)?;
-    skills::set_pick(
-        &mut set,
-        &target_ids,
-        &source_id,
-        &skill,
-        enabled,
-        &all_skills,
-    );
-    state.store.save_sync_set(&set).map_err(err)
+) -> Result<Vec<PlannedAction>, String> {
+    let (sources, targets) = discover(&state)?;
+    Ok(skills::propose_links(&sources, &targets, &rows))
 }
 
-/// 引入一处本体位置到本域每个目标；`skills` 为 None 表示全部
+/// 选中行在其域各目标上的 Linked 格 → 删链动作
 #[tauri::command]
-fn import_source(
-    target_ids: Vec<String>,
-    source_id: String,
-    skills: Option<Vec<String>>,
+fn propose_unlinks(
+    rows: Vec<RowRef>,
     state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let pick = match skills {
-        None => Pick::All,
-        Some(names) => Pick::Only(names.into_iter().collect()),
-    };
-    let mut set = state.store.load_sync_set().map_err(err)?;
-    symsync_core::skills::import_source(&mut set, &target_ids, &source_id, pick);
-    state.store.save_sync_set(&set).map_err(err)
-}
-
-#[tauri::command]
-fn remove_source(
-    target_ids: Vec<String>,
-    source_id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let mut set = state.store.load_sync_set().map_err(err)?;
-    skills::remove_source(&mut set, &target_ids, &source_id);
-    state.store.save_sync_set(&set).map_err(err)
-}
-
-#[tauri::command]
-fn propose_all(state: tauri::State<'_, AppState>) -> Result<Vec<PlannedAction>, String> {
-    Ok(skills::propose(&overview(&state)?))
+) -> Result<Vec<PlannedAction>, String> {
+    let (sources, targets) = discover(&state)?;
+    Ok(skills::propose_unlinks(&sources, &targets, &rows))
 }
 
 /// 按动作所在的目标目录与本体位置目录回查，算出这条链接该用什么写法
@@ -323,10 +280,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_domains,
             scan_all,
-            set_pick,
-            import_source,
-            remove_source,
-            propose_all,
+            propose_links,
+            propose_unlinks,
             apply_all,
             split_whole_link,
             list_manual_sources,

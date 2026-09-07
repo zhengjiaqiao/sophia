@@ -1,4 +1,4 @@
-//! 按域（全局 / 每个项目）组织的扫描：行的三类来源、格状态、同步集选择、动作生成、整目录链接拆分
+//! 按域（全局 / 每个项目）组织的扫描：行的两类来源、格状态、按选中行生成建链 / 删链动作、整目录链接拆分
 use crate::fs::{create_link, entry_kind, normalize, real_path, remove_link, same_real, EntryKind};
 use crate::models::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,7 +30,7 @@ pub fn domain_label(scope: &TargetScope) -> String {
     }
 }
 
-fn project_key(project: &Path) -> String {
+pub(crate) fn project_key(project: &Path) -> String {
     format!("project:{}", normalize(project).display())
 }
 
@@ -69,42 +69,18 @@ fn links_to(target: &Target, source: &Source, skill: &str) -> bool {
     matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &source.path.join(skill))
 }
 
-/// 只读扫描，按域组织。自有本体位置在本域目标上补默认 `All`，
-/// 补过的同步集随 `Overview.sync_set` 返回，由命令层负责保存
-pub fn scan(sources: &[Source], targets: &[Target], sync_set: &SyncSet) -> Overview {
-    let mut sync_set = sync_set.clone();
+/// 只读扫描，按域组织。只产出事实，不作任何选择
+pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut domains = Vec::new();
     for (key, label, d_targets) in group_domains(targets) {
-        let ids: Vec<String> = d_targets.iter().map(|t| t.id.clone()).collect();
-        // 自有本体位置默认已引入：只补本域目标，缺哪个补哪个
-        for s in sources.iter().filter(|s| source_domain(&s.kind) == key) {
-            for id in &ids {
-                sync_set
-                    .picks
-                    .entry(id.clone())
-                    .or_default()
-                    .entry(s.id.clone())
-                    .or_insert(Pick::All);
-            }
-        }
-        let picks: BTreeMap<&str, Option<Pick>> = sources
-            .iter()
-            .map(|s| (s.id.as_str(), merged_pick(&sync_set, &ids, &s.id)))
-            .collect();
-        let picked = |source_id: &str, skill: &str| match picks.get(source_id) {
-            Some(Some(Pick::All)) => true,
-            Some(Some(Pick::Only(names))) => names.contains(skill),
-            _ => false,
-        };
-
-        // 行 = 自有全部 ∪ 已链接的那些 ∪ 已引入的那些；(skill, 本体位置 label, 本体位置 id) 排序去重
+        // 行 = 自有全部 ∪ 已链接的那些；(skill, 本体位置 label, 本体位置 id) 排序去重
         let mut keys: BTreeSet<(String, String, String)> = BTreeSet::new();
         for s in sources {
             let own = source_domain(&s.kind) == key;
             for skill in &s.skills {
                 let linked = || d_targets.iter().any(|t| links_to(t, s, skill));
-                if own || picked(&s.id, skill) || linked() {
+                if own || linked() {
                     keys.insert((skill.clone(), s.label.clone(), s.id.clone()));
                 }
             }
@@ -128,9 +104,6 @@ pub fn scan(sources: &[Source], targets: &[Target], sync_set: &SyncSet) -> Overv
                     })
                     .collect();
                 Some(DomainRow {
-                    imported: matches!(picks.get(source_id.as_str()), Some(Some(_))),
-                    enabled: picked(&source_id, &skill),
-                    linked: cells.iter().any(|c| c.state == CellState::Linked),
                     source_id,
                     skill,
                     cells,
@@ -138,21 +111,6 @@ pub fn scan(sources: &[Source], targets: &[Target], sync_set: &SyncSet) -> Overv
             })
             .collect();
 
-        let pending_missing = rows
-            .iter()
-            .filter(|r| r.imported && r.enabled)
-            .flat_map(|r| &r.cells)
-            .filter(|c| c.state == CellState::Missing)
-            .count();
-        let imported = sources
-            .iter()
-            .filter_map(|s| {
-                Some(ImportedSource {
-                    source_id: s.id.clone(),
-                    pick: picks.get(s.id.as_str())?.clone()?,
-                })
-            })
-            .collect();
         // 整目录链接的目标读进去就是本体位置，坏链清理不能删到本体位置里
         let broken = d_targets
             .iter()
@@ -163,144 +121,84 @@ pub fn scan(sources: &[Source], targets: &[Target], sync_set: &SyncSet) -> Overv
             key,
             label,
             targets: d_targets,
-            imported,
             rows,
             broken,
-            pending_missing,
         });
     }
     Overview {
         domains,
         sources: sources.to_vec(),
-        sync_set,
     }
 }
 
-/// 已引入且启用的行的 Missing → Create，加各域坏链清理。Create 按目标路径去重
-pub fn propose(overview: &Overview) -> Vec<PlannedAction> {
-    let by_id: BTreeMap<&str, &Source> = overview
-        .sources
-        .iter()
-        .map(|s| (s.id.as_str(), s))
-        .collect();
-    let mut seen: BTreeSet<&Path> = BTreeSet::new();
-    let mut actions = Vec::new();
-    for d in &overview.domains {
-        for row in d.rows.iter().filter(|r| r.imported && r.enabled) {
-            let Some(source) = by_id.get(row.source_id.as_str()) else {
-                continue;
-            };
-            for cell in row.cells.iter().filter(|c| c.state == CellState::Missing) {
-                if !seen.insert(cell.path.as_path()) {
-                    continue;
-                }
-                actions.push(PlannedAction {
-                    kind: ActionKind::Create,
-                    item_name: row.skill.clone(),
-                    source_path: source.path.join(&row.skill),
-                    target_path: cell.path.clone(),
-                    target: cell
-                        .path
-                        .parent()
-                        .map(Path::to_path_buf)
-                        .unwrap_or_default(),
-                });
-            }
-        }
-        actions.extend(d.broken.iter().cloned());
-    }
-    actions
+/// 选中行在其域各目标上的 Missing 格 → Create。域 / 本体位置 / skill 对不上的行忽略；按 target_path 去重
+pub fn propose_links(
+    sources: &[Source],
+    targets: &[Target],
+    rows: &[RowRef],
+) -> Vec<PlannedAction> {
+    propose_by(
+        sources,
+        targets,
+        rows,
+        |state, _| state == CellState::Missing,
+        ActionKind::Create,
+    )
 }
 
-/// 本域各目标的选择合并：都没有条目 → 未引入；任一 `All` → `All`；否则名单并集
-pub fn merged_pick(sync_set: &SyncSet, target_ids: &[String], source_id: &str) -> Option<Pick> {
-    let mut names = BTreeSet::new();
-    let mut found = false;
-    for id in target_ids {
-        match sync_set.picks.get(id).and_then(|m| m.get(source_id)) {
-            None => {}
-            Some(Pick::All) => return Some(Pick::All),
-            Some(Pick::Only(only)) => {
-                found = true;
-                names.extend(only.iter().cloned());
-            }
-        }
-    }
-    found.then_some(Pick::Only(names))
+/// 选中行在其域各目标上的 Linked 格（目标非整目录链接）→ Unlink。规则同上
+pub fn propose_unlinks(
+    sources: &[Source],
+    targets: &[Target],
+    rows: &[RowRef],
+) -> Vec<PlannedAction> {
+    propose_by(
+        sources,
+        targets,
+        rows,
+        |state, target| state == CellState::Linked && target.linked_whole_to.is_none(),
+        ActionKind::Unlink,
+    )
 }
 
-/// 行首勾选：`All` 取消某项 → `Only(全部 − 它)`；`Only` 增删名单；未引入时勾选 → `Only({它})`。
-/// 名单空掉等于未引入，删除条目
-pub fn set_pick(
-    sync_set: &mut SyncSet,
-    target_ids: &[String],
-    source_id: &str,
-    skill: &str,
-    enabled: bool,
-    all_skills: &[String],
-) {
-    for id in target_ids {
-        let current = sync_set.picks.get(id).and_then(|m| m.get(source_id));
-        let next = match (current, enabled) {
-            // 已在 All 里；或本来就没引入还要取消：都无事可做
-            (Some(Pick::All), true) | (None, false) => continue,
-            (Some(Pick::All), false) => Pick::Only(
-                all_skills
-                    .iter()
-                    .filter(|s| s.as_str() != skill)
-                    .cloned()
-                    .collect(),
-            ),
-            (Some(Pick::Only(names)), _) => {
-                let mut names = names.clone();
-                if enabled {
-                    names.insert(skill.to_string());
-                } else {
-                    names.remove(skill);
-                }
-                Pick::Only(names)
-            }
-            (None, true) => Pick::Only([skill.to_string()].into_iter().collect()),
+fn propose_by(
+    sources: &[Source],
+    targets: &[Target],
+    rows: &[RowRef],
+    wanted: impl Fn(CellState, &Target) -> bool,
+    kind: ActionKind,
+) -> Vec<PlannedAction> {
+    let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut out = Vec::new();
+    for row in rows {
+        let Some(source) = by_id.get(row.source_id.as_str()) else {
+            continue;
         };
-        put(sync_set, id, source_id, Some(next));
-    }
-}
-
-/// 引入整个本体位置：本域每个目标都记上这个选择
-pub fn import_source(sync_set: &mut SyncSet, target_ids: &[String], source_id: &str, pick: Pick) {
-    for id in target_ids {
-        put(sync_set, id, source_id, Some(pick.clone()));
-    }
-}
-
-/// 移除引入：本域每个目标都删掉条目
-pub fn remove_source(sync_set: &mut SyncSet, target_ids: &[String], source_id: &str) {
-    for id in target_ids {
-        put(sync_set, id, source_id, None);
-    }
-}
-
-/// 写入一个条目；`None` 或空名单表示未引入，删除条目，目标映射空了也一并删掉
-fn put(sync_set: &mut SyncSet, target_id: &str, source_id: &str, pick: Option<Pick>) {
-    let pick = pick.filter(|p| !matches!(p, Pick::Only(names) if names.is_empty()));
-    match pick {
-        Some(pick) => {
-            sync_set
-                .picks
-                .entry(target_id.to_string())
-                .or_default()
-                .insert(source_id.to_string(), pick);
+        if !source.skills.iter().any(|s| s == &row.skill) {
+            continue;
         }
-        None => {
-            let Some(map) = sync_set.picks.get_mut(target_id) else {
-                return;
-            };
-            map.remove(source_id);
-            if map.is_empty() {
-                sync_set.picks.remove(target_id);
+        for target in targets
+            .iter()
+            .filter(|t| domain_key(&t.scope) == row.domain)
+        {
+            let path = target.path.join(&row.skill);
+            if !wanted(cell_state(source, &row.skill, target, &path), target) {
+                continue;
             }
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            out.push(PlannedAction {
+                kind,
+                item_name: row.skill.clone(),
+                source_path: source.path.join(&row.skill),
+                target_path: path,
+                target: target.path.clone(),
+            });
         }
     }
+    out
 }
 
 fn cell_state(source: &Source, skill: &str, target: &Target, path: &Path) -> CellState {
@@ -311,7 +209,7 @@ fn cell_state(source: &Source, skill: &str, target: &Target, path: &Path) -> Cel
     }
     // 目标就是本体位置本身（如 WeiboAP 的 custom 目录既是本体位置又是目标）：内容天然到位
     if same_real(&target.path, &source.path) {
-        return CellState::Linked;
+        return CellState::Own;
     }
     match entry_kind(path) {
         EntryKind::Missing => CellState::Missing,
@@ -481,28 +379,20 @@ mod tests {
         )
     }
 
-    fn only(names: &[&str]) -> Pick {
-        Pick::Only(names.iter().map(|s| s.to_string()).collect())
-    }
-
-    fn ids(targets: &[&Target]) -> Vec<String> {
-        targets.iter().map(|t| t.id.clone()).collect()
-    }
-
-    /// 行的 (本体位置 id, skill, imported, enabled, linked)
-    fn rows(page: &DomainPage) -> Vec<(String, String, bool, bool, bool)> {
+    /// 行的 (本体位置 id, skill)
+    fn rows(page: &DomainPage) -> Vec<(String, String)> {
         page.rows
             .iter()
-            .map(|r| {
-                (
-                    r.source_id.clone(),
-                    r.skill.clone(),
-                    r.imported,
-                    r.enabled,
-                    r.linked,
-                )
-            })
+            .map(|r| (r.source_id.clone(), r.skill.clone()))
             .collect()
+    }
+
+    fn row_ref(domain: &str, source: &Source, skill: &str) -> RowRef {
+        RowRef {
+            domain: domain.into(),
+            source_id: source.id.clone(),
+            skill: skill.into(),
+        }
     }
 
     fn global(harness: &str, path: &Path) -> Target {
@@ -533,172 +423,60 @@ mod tests {
     }
 
     #[test]
-    fn rows_are_the_union_of_own_linked_and_imported() {
-        let t = TempTree::new();
-        let g = t.dir("global");
-        let own = t.dir("own");
-        t.dir("own/a1");
-        t.dir("own/a2");
-        let proj_a = t.dir("projA");
-        let store_a = t.dir("projA/.agents/skills");
-        t.dir("projA/.agents/skills/b1");
-        t.dir("projA/.agents/skills/b2");
-        let proj_b = t.dir("projB");
-        let store_b = t.dir("projB/.agents/skills");
-        t.dir("projB/.agents/skills/c1");
-        t.dir("projB/.agents/skills/c2");
-        // 全局目标里只链了 A 的 b1
-        t.link(&g.join("b1"), &store_a.join("b1"));
-
-        let s_own = make_source(&own, "自有", SourceKind::Universal, &["a1", "a2"]);
-        let s_a = store_source(&store_a, "A", &proj_a, &["b1", "b2"]);
-        let s_b = store_source(&store_b, "B", &proj_b, &["c1", "c2"]);
-        let gt = global("claude-code", &g);
-        let mut sync = SyncSet::default();
-        import_source(&mut sync, &ids(&[&gt]), &s_b.id, only(&["c1"]));
-
-        let o = scan(
-            &[s_own.clone(), s_a.clone(), s_b.clone()],
-            std::slice::from_ref(&gt),
-            &sync,
-        );
-        assert_eq!(o.domains.len(), 1);
-        let page = &o.domains[0];
+    fn rows_are_own_skills_plus_linked_ones_only() {
+        let tree = TempTree::new();
+        let universal = tree.dir("universal"); // 全局自有：a, b
+        let proj_root = tree.dir("proj");
+        let store = tree.dir("proj/.agents/skills"); // 项目自有：c, d
+        for s in ["a", "b"] {
+            tree.dir(&format!("universal/{s}"));
+        }
+        for s in ["c", "d"] {
+            tree.dir(&format!("proj/.agents/skills/{s}"));
+        }
+        let claude_global = tree.dir("home/.claude/skills");
+        let claude_proj = tree.dir("proj/.claude/skills");
+        // 项目目标里只链了 universal 的 a
+        tree.link(&claude_proj.join("a"), &universal.join("a"));
+        let sources = vec![
+            source(&universal, &["a", "b"]),
+            store_source(&store, "proj", &proj_root, &["c", "d"]),
+        ];
+        let targets = vec![
+            global("claude-code", &claude_global),
+            project(&proj_root, "claude-code", &claude_proj),
+        ];
+        let ov = scan(&sources, &targets);
+        let glob = &ov.domains[0];
         assert_eq!(
-            rows(page),
+            rows(glob),
             vec![
-                // 自有：全部 skill，默认已引入
-                (s_own.id.clone(), "a1".into(), true, true, false),
-                (s_own.id.clone(), "a2".into(), true, true, false),
-                // 已链接：只这一个，不带入同源的 b2
-                (s_a.id.clone(), "b1".into(), false, false, true),
-                // 已引入：名单里的 c1，不带入 c2
-                (s_b.id.clone(), "c1".into(), true, true, false),
+                (sources[0].id.clone(), "a".into()),
+                (sources[0].id.clone(), "b".into())
             ]
         );
+        let proj = &ov.domains[1];
+        // 项目域：自有 c、d 全部成行；universal 只有被链的 a，不带入 b
         assert_eq!(
-            page.imported,
+            rows(proj),
             vec![
-                ImportedSource {
-                    source_id: s_own.id.clone(),
-                    pick: Pick::All
-                },
-                ImportedSource {
-                    source_id: s_b.id.clone(),
-                    pick: only(&["c1"])
-                },
+                (sources[0].id.clone(), "a".into()),
+                (sources[1].id.clone(), "c".into()),
+                (sources[1].id.clone(), "d".into()),
             ]
         );
-        // 已链接的行不写同步集
-        assert!(!o.sync_set.picks[&gt.id].contains_key(&s_a.id));
+        assert_eq!(proj.rows[0].cells[0].state, CellState::Linked);
     }
 
     #[test]
-    fn own_sources_default_to_all_only_on_their_own_domain_targets() {
-        let t = TempTree::new();
-        let g = t.dir("global");
-        let proj = t.dir("proj");
-        let proj_target = t.dir("proj/.claude/skills");
-        let store = t.dir("proj/.agents/skills");
-        t.dir("proj/.agents/skills/p1");
-        let own = t.dir("own");
-        t.dir("own/a1");
-
-        let s_own = make_source(&own, "手动", SourceKind::Manual, &["a1"]);
-        let s_p = store_source(&store, "proj 仓库", &proj, &["p1"]);
-        let gt = global("claude-code", &g);
-        let pt = project(&proj, "claude-code", &proj_target);
-        // 项目目标排在前面，域顺序仍是全局在先
-        let o = scan(
-            &[s_own.clone(), s_p.clone()],
-            &[pt.clone(), gt.clone()],
-            &SyncSet::default(),
-        );
-
-        assert_eq!(
-            o.domains
-                .iter()
-                .map(|d| (d.key.clone(), d.label.clone()))
-                .collect::<Vec<_>>(),
-            vec![
-                ("global".to_string(), "全局".to_string()),
-                (project_key(&proj), "proj".to_string()),
-            ]
-        );
-        assert_eq!(
-            o.sync_set.picks[&gt.id],
-            [(s_own.id.clone(), Pick::All)].into_iter().collect()
-        );
-        assert_eq!(
-            o.sync_set.picks[&pt.id],
-            [(s_p.id.clone(), Pick::All)].into_iter().collect()
-        );
-    }
-
-    #[test]
-    fn propose_creates_only_for_imported_and_enabled_rows() {
-        let t = TempTree::new();
-        let g = t.dir("global");
-        let own = t.dir("own");
-        t.dir("own/a1");
-        t.dir("own/a2");
-        let proj = t.dir("proj");
-        let store = t.dir("proj/.agents/skills");
-        t.dir("proj/.agents/skills/b1");
-        t.link(&g.join("b1"), &store.join("b1"));
-
-        let s_own = make_source(&own, "自有", SourceKind::Universal, &["a1", "a2"]);
-        let s_p = store_source(&store, "P", &proj, &["b1"]);
-        let gt = global("claude-code", &g);
-        let mut sync = SyncSet::default();
-        // 自有位置被取消了 a2
-        import_source(&mut sync, &ids(&[&gt]), &s_own.id, only(&["a1"]));
-
-        let o = scan(
-            &[s_own.clone(), s_p.clone()],
-            std::slice::from_ref(&gt),
-            &sync,
-        );
-        let page = &o.domains[0];
-        assert_eq!(
-            rows(page),
-            vec![
-                (s_own.id.clone(), "a1".into(), true, true, false),
-                (s_own.id.clone(), "a2".into(), true, false, false),
-                (s_p.id.clone(), "b1".into(), false, false, true),
-            ]
-        );
-        assert_eq!(page.pending_missing, 1);
-
-        let actions = propose(&o);
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].kind, ActionKind::Create);
-        assert_eq!(actions[0].item_name, "a1");
-        assert_eq!(actions[0].source_path, own.join("a1"));
-        assert_eq!(actions[0].target_path, g.join("a1"));
-        assert_eq!(actions[0].target, g);
-    }
-
-    #[test]
-    fn pending_missing_counts_every_missing_cell_of_enabled_rows() {
-        let t = TempTree::new();
-        let g1 = t.dir("g1");
-        let g2 = t.dir("g2");
-        let own = t.dir("own");
-        t.dir("own/a1");
-        t.dir("own/a2");
-        t.link(&g1.join("a1"), &own.join("a1"));
-
-        let s = make_source(&own, "自有", SourceKind::Universal, &["a1", "a2"]);
-        let t1 = global("h1", &g1);
-        let t2 = global("h2", &g2);
-        let o = scan(std::slice::from_ref(&s), &[t1, t2], &SyncSet::default());
-        let page = &o.domains[0];
-        // 两个全局目标同属一个域：a1 缺 g2，a2 两处都缺
-        assert_eq!(page.targets.len(), 2);
-        assert!(page.rows[0].linked);
-        assert_eq!(page.pending_missing, 3);
-        assert_eq!(propose(&o).len(), 3);
+    fn target_that_is_the_source_itself_is_own() {
+        let tree = TempTree::new();
+        let custom = tree.dir("ap/custom");
+        tree.dir("ap/custom/x");
+        let sources = vec![source(&custom, &["x"])];
+        let targets = vec![global("weiboap", &custom)];
+        let ov = scan(&sources, &targets);
+        assert_eq!(ov.domains[0].rows[0].cells[0].state, CellState::Own);
     }
 
     #[test]
@@ -719,7 +497,7 @@ mod tests {
         let gt = global("claude-code", &g);
         let mut pt = project(&proj, "claude-code", &proj_target);
         pt.linked_whole_to = Some(s.id.clone());
-        let o = scan(std::slice::from_ref(&s), &[gt, pt], &SyncSet::default());
+        let o = scan(std::slice::from_ref(&s), &[gt, pt]);
 
         assert_eq!(
             o.domains[0]
@@ -731,74 +509,85 @@ mod tests {
         );
         // 整目录链接的目标读进去就是本体位置，清理会删到本体位置里
         assert!(o.domains[1].broken.is_empty());
-        let names: Vec<String> = propose(&o).into_iter().map(|a| a.item_name).collect();
-        assert!(names.contains(&"dead".to_string()));
-        assert!(!names.contains(&"rotten".to_string()));
     }
 
     #[test]
-    fn merged_pick_takes_any_all_then_unions_the_lists() {
-        let one = |i: usize| vec![format!("t{i}")];
-        let all: Vec<String> = (1..=3).map(|i| format!("t{i}")).collect();
-        let mut sync = SyncSet::default();
-        assert_eq!(merged_pick(&sync, &all, "s"), None);
-        import_source(&mut sync, &one(1), "s", only(&["a"]));
-        import_source(&mut sync, &one(2), "s", only(&["b"]));
-        // t3 没有条目，不影响并集
-        assert_eq!(merged_pick(&sync, &all, "s"), Some(only(&["a", "b"])));
-        import_source(&mut sync, &one(3), "s", Pick::All);
-        assert_eq!(merged_pick(&sync, &all, "s"), Some(Pick::All));
-        assert_eq!(merged_pick(&sync, &all, "other"), None);
+    fn propose_links_creates_only_missing_cells_even_for_rows_not_in_the_page() {
+        let tree = TempTree::new();
+        let universal = tree.dir("universal");
+        for s in ["a", "b", "c", "d"] {
+            tree.dir(&format!("universal/{s}"));
+        }
+        let claude = tree.dir("home/.claude/skills");
+        let codex = tree.dir("home/.codex/skills");
+        tree.dir("home/.claude/skills/b"); // Duplicate
+        tree.link(&claude.join("c"), &tree.dir("elsewhere")); // Foreign
+        let proj_root = tree.dir("proj");
+        let proj_store = tree.dir("proj/.agents/skills");
+        tree.dir("proj/.agents/skills/p");
+        let proj_claude = tree.dir("proj/.claude/skills");
+        let sources = vec![
+            source(&universal, &["a", "b", "c", "d"]),
+            store_source(&proj_store, "proj", &proj_root, &["p"]),
+        ];
+        let targets = vec![
+            global("claude-code", &claude),
+            global("codex", &codex),
+            project(&proj_root, "claude-code", &proj_claude),
+        ];
+        let proj_key = project_key(&proj_root);
+        let rows = vec![
+            row_ref("global", &sources[0], "a"),
+            row_ref("global", &sources[0], "b"),
+            row_ref("global", &sources[0], "c"),
+            row_ref("global", &sources[0], "a"),   // 重复行：去重
+            row_ref(&proj_key, &sources[0], "d"),  // 引入场景：universal 的 d 不在项目页里
+            row_ref("global", &sources[0], "zzz"), // skill 不存在：忽略
+            row_ref("nope", &sources[0], "a"),     // 域不存在：忽略
+        ];
+        let mut paths: Vec<PathBuf> = propose_links(&sources, &targets, &rows)
+            .into_iter()
+            .inspect(|a| assert_eq!(a.kind, ActionKind::Create))
+            .map(|a| a.target_path)
+            .collect();
+        paths.sort();
+        let mut expect = vec![
+            claude.join("a"),
+            codex.join("a"),
+            codex.join("b"),
+            codex.join("c"),
+            proj_claude.join("d"),
+        ];
+        expect.sort();
+        assert_eq!(paths, expect);
     }
 
     #[test]
-    fn set_pick_converts_all_to_a_list_and_drops_empty_ones() {
-        let both = vec!["t1".to_string(), "t2".to_string()];
-        let all: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
-        let mut sync = SyncSet::default();
-
-        // 未引入时取消：不留空壳
-        set_pick(&mut sync, &both, "s", "a", false, &all);
-        assert_eq!(sync, SyncSet::default());
-        // 未引入时勾选 → 只这一个，两个目标都写
-        set_pick(&mut sync, &both, "s", "a", true, &all);
-        assert_eq!(sync.picks["t1"]["s"], only(&["a"]));
-        assert_eq!(sync.picks["t2"]["s"], only(&["a"]));
-        set_pick(&mut sync, &both, "s", "b", true, &all);
-        assert_eq!(sync.picks["t1"]["s"], only(&["a", "b"]));
-        // 名单删空 → 条目与目标映射一起消失
-        set_pick(&mut sync, &both, "s", "a", false, &all);
-        set_pick(&mut sync, &both, "s", "b", false, &all);
-        assert_eq!(sync, SyncSet::default());
-
-        import_source(&mut sync, &both, "s", Pick::All);
-        set_pick(&mut sync, &both, "s", "a", true, &all);
-        assert_eq!(sync.picks["t1"]["s"], Pick::All);
-        set_pick(&mut sync, &both, "s", "a", false, &all);
-        assert_eq!(sync.picks["t1"]["s"], only(&["b"]));
-        assert_eq!(sync.picks["t2"]["s"], only(&["b"]));
-    }
-
-    #[test]
-    fn import_and_remove_source_apply_to_every_target() {
-        let both = vec!["t1".to_string(), "t2".to_string()];
-        let mut sync = SyncSet::default();
-        import_source(&mut sync, &both, "s", only(&["a"]));
-        assert_eq!(sync.picks.len(), 2);
-        assert_eq!(merged_pick(&sync, &both, "s"), Some(only(&["a"])));
-        import_source(&mut sync, &both, "s", Pick::All);
-        assert_eq!(merged_pick(&sync, &both, "s"), Some(Pick::All));
-        // 空名单等于未引入
-        import_source(&mut sync, &both, "s", Pick::Only(BTreeSet::new()));
-        assert_eq!(sync, SyncSet::default());
-
-        import_source(&mut sync, &both, "s", Pick::All);
-        import_source(&mut sync, &both, "other", Pick::All);
-        remove_source(&mut sync, &both, "s");
-        assert_eq!(merged_pick(&sync, &both, "s"), None);
-        assert_eq!(merged_pick(&sync, &both, "other"), Some(Pick::All));
-        remove_source(&mut sync, &both, "other");
-        assert_eq!(sync, SyncSet::default());
+    fn propose_unlinks_targets_only_real_links_outside_whole_linked_dirs() {
+        let tree = TempTree::new();
+        let universal = tree.dir("universal");
+        for s in ["a", "b"] {
+            tree.dir(&format!("universal/{s}"));
+        }
+        let claude = tree.dir("home/.claude/skills");
+        tree.link(&claude.join("a"), &universal.join("a")); // Linked
+                                                            // b 缺失
+        let whole = tree.dir("home/.cursor").join("skills");
+        tree.link(&whole, &universal); // 整目录链接
+        let sources = vec![source(&universal, &["a", "b"])];
+        let mut whole_t = global("cursor", &whole);
+        whole_t.linked_whole_to = Some(sources[0].id.clone());
+        let own_t = global("weiboap", &universal); // Own
+        let targets = vec![global("claude-code", &claude), whole_t, own_t];
+        let rows = vec![
+            row_ref("global", &sources[0], "a"),
+            row_ref("global", &sources[0], "b"),
+        ];
+        let acts = propose_unlinks(&sources, &targets, &rows);
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].kind, ActionKind::Unlink);
+        assert_eq!(acts[0].target_path, claude.join("a"));
+        assert_eq!(acts[0].source_path, universal.join("a"));
     }
 
     #[test]
