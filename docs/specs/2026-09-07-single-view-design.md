@@ -3,7 +3,7 @@
 - 对应 intent：`docs/intent/2026-09-07-single-view-source-management.md`
 - 替代：`docs/specs/2026-09-06-source-centric-sync-design.md`（v3；§3 发现、§4 扫描格状态、拆分、坏链、§5 store 基础、§6 harness 表、§9 错误处理继续有效，本文只写变化）
 - 日期：2026-09-07
-- 状态：已实现（PR #4，feat/rust-pivot）
+- 状态：已被 v5 替代（`docs/specs/2026-09-07-facts-and-actions-design.md`）
 
 ## 1. 目标
 

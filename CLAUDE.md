@@ -23,9 +23,9 @@
 - `crates/core/src/models.rs`：共享类型（SyncRule、PlannedAction、Outcome、Harness、Domain、LinkStyle）
 - `fs.rs`：`entry_kind`（lstat）、`real_path`、`normalize`、`create_link`
 - `sync.rs`：通用同步 `plan` / `execute`
-- `skills.rs`：矩阵 `scan` / `propose`，本体判定
+- `skills.rs`：矩阵 `scan`（只读事实）/ `propose_links` / `propose_unlinks`（按选中行生成动作），本体判定
 - `discovery.rs` + `data/harnesses.json`：harness 表、已安装判定、项目候选
-- `store.rs`：`rules.json` / `projects.json`
+- `store.rs`：`rules.json` / `projects.json` / `settings.json`
 - `src-tauri/src/lib.rs`：命令，每个一行调 core
 - `src/`：`App.tsx` 壳、`SkillsTab.tsx`、`CustomSyncTab.tsx`、`api.ts`、`types.ts`
 
