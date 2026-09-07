@@ -43,6 +43,8 @@ export interface Cell {
 export interface DomainRow {
   sourceId: string;
   skill: string;
+  /// 该行的本体位置属于本域（本域里的 skill 本体，不能整个删除）
+  own: boolean;
   cells: Cell[];
 }
 
@@ -60,11 +62,11 @@ export interface Overview {
   sources: Source[];
 }
 
-/// 前端选中的一行：域 key + 本体位置 id + skill。行不必已出现在表里（引入弹层用）
-export interface RowRef {
-  domain: string;
+/// 一个格：本体位置 id + skill + 目标 id。目标 id 决定域；格不必已出现在表里（引入弹层用）
+export interface CellRef {
   sourceId: string;
   skill: string;
+  targetId: string;
 }
 
 export type ActionKind =

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { DomainPage, Overview, RowRef, Source, SourceKind, SyncReport } from "./types";
+import type { CellRef, DomainPage, Overview, Source, SourceKind, SyncReport } from "./types";
 
 export interface ImportDialogProps {
   overview: Overview;
@@ -11,6 +11,7 @@ export interface ImportDialogProps {
   onChange: () => Promise<void>;
   onReport: (report: SyncReport) => void;
   onError: (message: string) => void;
+  onNotice: (text: string) => void;
 }
 
 /// 左栏标签：本体位置的来源类别
@@ -30,7 +31,7 @@ const kindText = (kind: SourceKind): string => {
 /// 只做尾部分隔符与大小写无关的宽松比较，够用于「刚添加的目录是否已出现」
 const samePath = (a: string, b: string) => a.replace(/[/\\]+$/, "") === b.replace(/[/\\]+$/, "");
 
-/// 引入弹层：左栏选本体位置，右栏勾 skill，点「引入」当场建链
+/// 引入弹层：左栏选本体位置，中栏勾 skill，右栏勾 harness，点「引入」当场建链
 export default function ImportDialog({
   overview,
   page,
@@ -39,18 +40,29 @@ export default function ImportDialog({
   onChange,
   onReport,
   onError,
+  onNotice,
 }: ImportDialogProps) {
   const [selected, setSelected] = useState(initialSourceId ?? overview.sources[0]?.id ?? "");
   const [names, setNames] = useState<string[]>([]);
+  // 目标默认全勾；整目录链接的目标不能逐项建链，不在其中
+  const [targetIds, setTargetIds] = useState<string[]>(
+    page.targets.filter((t) => t.linkedWholeTo === null).map((t) => t.id),
+  );
   const [busy, setBusy] = useState(false);
   // 刚通过「选择文件夹…」加入、等待在新一轮 overview 中出现的路径
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
   const source: Source | undefined = overview.sources.find((s) => s.id === selected);
-  const skills = source?.skills ?? [];
 
-  // 「全部」是纯粹的全选开关：全勾时勾选，全空时不勾，部分勾选时半选
-  const allSelected = skills.length > 0 && skills.every((s) => names.includes(s));
+  /// 该本体位置的 skill 在本域尚无行 = 还没引入
+  const notImported = (sourceId: string, skill: string) =>
+    !page.rows.some((r) => r.sourceId === sourceId && r.skill === skill);
+
+  const fresh = (source?.skills ?? []).filter((sk) => notImported(selected, sk));
+  const present = (source?.skills ?? []).filter((sk) => !notImported(selected, sk));
+
+  // 「全部」是纯粹的全选开关，只作用于还没引入的那些
+  const allSelected = fresh.length > 0 && fresh.every((s) => names.includes(s));
   const someSelected = names.length > 0 && !allSelected;
   const allRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -75,28 +87,20 @@ export default function ImportDialog({
   const toggleName = (skill: string, checked: boolean) =>
     setNames((prev) => (checked ? [...prev, skill] : prev.filter((n) => n !== skill)));
 
-  const chosen = names.length;
+  const toggleTarget = (id: string, checked: boolean) =>
+    setTargetIds((prev) => (checked ? [...prev, id] : prev.filter((t) => t !== id)));
 
-  /// 本域已有该 skill 的链接（或本体就在此）
-  const linkedHere = (skill: string) =>
-    page.rows.some(
-      (r) =>
-        r.sourceId === selected &&
-        r.skill === skill &&
-        r.cells.some((c) => c.state === "linked" || c.state === "own"),
-    );
+  const chosen = names.length;
 
   const doImport = async () => {
     setBusy(true);
     try {
-      const rows: RowRef[] = names.map((skill) => ({
-        domain: page.key,
-        sourceId: selected,
-        skill,
-      }));
-      const acts = await api.proposeLinks(rows);
+      const cells: CellRef[] = names.flatMap((skill) =>
+        targetIds.map((targetId) => ({ sourceId: selected, skill, targetId })),
+      );
+      const acts = await api.proposeLinks(cells);
       if (acts.length === 0) {
-        onError("所选 skill 都已链接，没有需要建立的链接");
+        onNotice("所选 skill 在所选 harness 下都已链接");
         setBusy(false);
         return;
       }
@@ -145,7 +149,9 @@ export default function ImportDialog({
                   {s.label}
                   <span className="whole-link">{kindText(s.kind)}</span>
                 </span>
-                <span className="muted">{s.skills.length}</span>
+                <span className="muted">
+                  未引入 {s.skills.filter((sk) => notImported(s.id, sk)).length} 个
+                </span>
               </li>
             ))}
           </ul>
@@ -160,12 +166,12 @@ export default function ImportDialog({
                     ref={allRef}
                     type="checkbox"
                     checked={allSelected}
-                    disabled={busy}
-                    onChange={() => setNames(allSelected ? [] : skills)}
+                    disabled={busy || fresh.length === 0}
+                    onChange={() => setNames(allSelected ? [] : fresh)}
                   />
                   全部
                 </label>
-                {skills.map((skill) => (
+                {fresh.map((skill) => (
                   <label key={skill}>
                     <input
                       type="checkbox"
@@ -174,11 +180,40 @@ export default function ImportDialog({
                       onChange={(e) => toggleName(skill, e.target.checked)}
                     />
                     {skill}
-                    {linkedHere(skill) && <span className="muted">已链接</span>}
                   </label>
                 ))}
-                {skills.length === 0 && <p className="muted">该本体位置下没有 skill。</p>}
+                {fresh.length === 0 && <p className="muted">该本体位置没有可引入的 skill。</p>}
+                {present.length > 0 && (
+                  <div className="import-present">
+                    {present.map((skill) => (
+                      <div className="muted" key={skill}>
+                        {skill} · 已引入
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
+            )}
+          </div>
+
+          <div className="import-targets">
+            {page.targets.length === 0 ? (
+              <p className="muted">该域下没有可用的目标目录。</p>
+            ) : (
+              page.targets.map((target) => (
+                <label
+                  key={target.id}
+                  title={target.linkedWholeTo !== null ? "整目录链接，先拆成逐项链接" : target.path}
+                >
+                  <input
+                    type="checkbox"
+                    checked={targetIds.includes(target.id)}
+                    disabled={busy || target.linkedWholeTo !== null}
+                    onChange={(e) => toggleTarget(target.id, e.target.checked)}
+                  />
+                  {target.label}
+                </label>
+              ))
             )}
           </div>
         </div>
@@ -188,10 +223,13 @@ export default function ImportDialog({
             选择文件夹…
           </button>
           <span className="muted">
-            已选 {chosen} / {skills.length}
+            已选 {chosen} / {fresh.length}
           </span>
           <span style={{ flex: 1 }} />
-          <button disabled={busy || chosen === 0} onClick={() => void doImport()}>
+          <button
+            disabled={busy || chosen === 0 || targetIds.length === 0}
+            onClick={() => void doImport()}
+          >
             引入
           </button>
           <button disabled={busy} onClick={onClose}>

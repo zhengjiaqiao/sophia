@@ -144,6 +144,26 @@ table.matrix td.cell {
   text-align: center;
   font-size: 16px;
 }
+/* 格本身是按钮，但看上去仍是一个格：颜色由 td.cell.<state> 继承下来 */
+button.cell {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 16px;
+  color: inherit;
+  cursor: pointer;
+}
+td.row-actions {
+  text-align: right;
+}
+.row-actions button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.row-actions button + button {
+  margin-left: 4px;
+}
 td.cell.own,
 td.cell.linked {
   color: #188038;
@@ -325,7 +345,7 @@ table.preview td {
 .import-dialog {
   display: flex;
   gap: 16px;
-  min-width: 720px;
+  min-width: 880px;
 }
 .import-sources {
   width: 260px;
@@ -359,7 +379,21 @@ table.preview td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.import-skills label {
+.import-targets {
+  width: 200px;
+  overflow: auto;
+  max-height: 60vh;
+  border-left: 1px solid #eee;
+  padding-left: 16px;
+}
+/* 已引入的 skill 单独一段，和可勾选的那段隔开 */
+.import-present {
+  border-top: 1px solid #eee;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.import-skills label,
+.import-targets label {
   display: flex;
   gap: 6px;
   align-items: center;
