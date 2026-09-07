@@ -125,3 +125,48 @@ core（`skills.rs`）：
 
 - `syncset.json` 作废，不读不删。
 - v4 spec 标"已被替代"；`CLAUDE.md` Architecture 行更新（`skills.rs`：`scan` / `propose_links` / `propose_unlinks`；`store.rs` 去掉 syncset）。
+
+## 10. 修订 v5.1（2026-09-08，真机反馈）
+
+- 状态：待实现
+- 概念收口：**引入 skill / 删除 skill 是对 skill 的操作；补齐链接 / 取消链接是对软链的操作**。删除 skill = 删掉它在本域所有 harness 下的软链（行随之消失）。本体在本域的 skill 不能删除，但可以逐个取消它在某个 harness 下的链接。
+- 所有动作按钮始终显示；不合法时禁用并用 `title` 说明原因，不隐藏。
+
+### 10.1 模型
+
+- `RowRef` 换成 `CellRef { source_id, skill, target_id }`（camelCase：`sourceId`、`skill`、`targetId`）。目标 id 决定域，不再传 `domain`。
+- `DomainRow` 加 `own: bool`：该行本体位置属于本域（`source_domain(kind) == page.key`）。
+- `Target.label` 只放 harness 名：全局 `display_name`；项目 harness 列 `display_name`；项目 `.agents/skills` 列 `通用仓库`；agent 目录列 `display_name`（不再 `WeiboAP · agent_1`）。`real_path` 合并后仍是 `A / B`。域名已在页标题里，列名不再重复项目。
+
+### 10.2 core
+
+```rust
+pub fn propose_links(sources: &[Source], targets: &[Target], cells: &[CellRef]) -> Vec<PlannedAction>;   // 该格 Missing → Create
+pub fn propose_unlinks(sources: &[Source], targets: &[Target], cells: &[CellRef]) -> Vec<PlannedAction>; // 该格 Linked 且目标非整目录链接 → Unlink
+```
+本体位置 / skill / 目标 id 对不上的格忽略；按 `target_path` 去重。命令 `propose_links(cells)`、`propose_unlinks(cells)` 参数名改 `cells`。
+
+### 10.3 前端
+
+`SkillsTab`（容器）持有：
+- 选择集合（不变）。
+- `pendingUnlink: PlannedAction[] | null`：确认条 "将删除 N 条软链接，只删链接本身，不删任何真实文件。确认删除 / 取消"。行、格、批量三条路径都先 `proposeUnlinks` 再进这个确认条；N = 0 时不进确认条，改显示提示。
+- `notice: string | null`：暂态提示（与结果框同样式、6 秒消失），用于"没有需要建立的链接""本体在本域，不能删除"这类说明。
+- 建链不确认：`proposeLinks` → `applyAll` → 结果框 → 刷新。
+- 工具栏：`补齐缺失（N 处）`（N = 勾选行的 missing 格数）、`删除 skill（M 个）`（M = 勾选行里 `!own` 且至少一个可取消格的行数；`own` 行被勾选时跳过，按钮 title 说明"本体在本域的 skill 不会被删除"）、`清理坏链（K）`、`刷新`。
+- 传给 `DomainView`：`onLink(cells)`、`onUnlink(cells)`、`onNotice(text)`。
+
+`DomainView`：
+- 表头最后加一列 `操作`。每行两个按钮：`补齐`（无 missing 格时禁用，title "没有缺失的链接"）；`删除`（`own` 时禁用，title "本体在本域，不能删除；可逐个取消某个 harness 下的链接"；无可取消格时禁用，title "没有可删除的链接"）。点击分别把该行全部格交给 `onLink` / `onUnlink`。
+- 格改为按钮（`<button className="cell …">`）：`missing` 点击 `onLink([格])`，title "点击建链"；`linked` 且目标非整目录链接 点击 `onUnlink([格])`，title "点击取消此链接"；其余状态点击 `onNotice(原因)`，title 为原因（`own`："本体在此，不是链接"；`unwritable`："整目录链接，先拆成逐项链接"；`broken`："坏链，请用清理坏链"；`foreign`："指向别处的软链，不归本工具管理"；`duplicate`："已有同名真实条目，不会覆盖"）。
+- 行末按钮与格按钮 `busy` 时禁用。
+
+`ImportDialog`：三栏。
+- 左栏本体位置：显示 `label` 与 `未引入 n 个`（n = 该位置 skill 里本域尚无行的数量）。
+- 中栏 skill：上段本域没有的（复选，"全部"是它们的全选开关）；下段本域已有的（无复选，灰字，后缀"已引入"）。
+- 右栏 harness：本域各目标复选，默认全勾；`linkedWholeTo !== null` 的禁用，title "整目录链接，先拆成逐项链接"。
+- `引入`：`cells = 勾选 skill × 勾选目标` → `proposeLinks` → 空则 `onNotice("所选 skill 在所选 harness 下都已链接")`，弹层不关；否则 `applyAll` → `onReport` → 刷新 → 关闭。skill 或目标为空时按钮禁用。
+
+### 10.4 测试
+
+core：`CellRef` 序列化；`propose_links` / `propose_unlinks` 按格（含忽略与去重）；`DomainRow.own` 在全局与项目域各一例；`discovery::targets` 标签（全局、项目 harness、通用仓库、agent 目录）。前端 `make build-web`；`docs/manual-checks.md` Skills 一节按 §10.3 更新。
