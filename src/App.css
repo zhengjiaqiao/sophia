@@ -154,6 +154,9 @@ button.cell {
   color: inherit;
   cursor: pointer;
 }
+button.cell:disabled {
+  cursor: default;
+}
 td.row-actions {
   text-align: right;
 }
