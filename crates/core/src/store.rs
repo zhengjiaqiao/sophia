@@ -87,9 +87,8 @@ fn save_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Selection, SourceSync, SyncRule};
+    use crate::models::{Pick, Selection, SyncRule};
     use crate::test_support::TempTree;
-    use std::collections::BTreeSet;
 
     #[test]
     fn missing_files_load_as_empty() {
@@ -151,23 +150,18 @@ mod tests {
         assert_eq!(s.load_sync_set().unwrap(), SyncSet::default());
 
         let mut set = SyncSet::default();
-        set.sources.insert(
-            "/a/skills".into(),
-            SourceSync {
-                targets: ["claude-code".to_string(), "codex".to_string()]
-                    .into_iter()
-                    .collect(),
-                disabled_skills: ["noisy".to_string()].into_iter().collect(),
-            },
+        set.picks.insert(
+            "claude-code".into(),
+            [("/a/skills".to_string(), Pick::All)].into_iter().collect(),
         );
-        set.sources.insert(
-            "/b/skills".into(),
-            SourceSync {
-                targets: ["project:/p::claude-code".to_string()]
-                    .into_iter()
-                    .collect(),
-                disabled_skills: BTreeSet::new(),
-            },
+        set.picks.insert(
+            "project:/p::claude-code".into(),
+            [(
+                "/b/skills".to_string(),
+                Pick::Only(["noisy".to_string()].into_iter().collect()),
+            )]
+            .into_iter()
+            .collect(),
         );
         s.save_sync_set(&set).unwrap();
         assert_eq!(s.load_sync_set().unwrap(), set);
