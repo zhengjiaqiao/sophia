@@ -185,7 +185,7 @@ core：`CellRef` 序列化；`propose_links` / `propose_unlinks` 按格（含忽
 
 ## 12. 修订 v5.3（2026-09-08）：设置只剩 harness，项目在侧栏增删
 
-- 状态：待实现
+- 状态：已实现
 - 设置弹层只保留 Harness 一节；「项目」「本体位置」两节删除。
 - 侧栏：域列表下方一个 `添加项目…` 按钮（系统目录选择框 → `add_project` → 重扫）。手动添加的项目条目右侧有 `×`（title "移除项目"，点击 `remove_project` → 重扫；当前选中的被移除时回落到「全部」）。自动发现的项目与 WeiboAP agent 域没有 `×`。
 - `App.tsx` 在每次重扫时同时取 `list_manual_projects`，用 `"project:" + path === d.key` 判断是否手动项目。为此 `lib.rs` 的 `add_project` 保存前 `normalize`，`remove_project` 按 `normalize` 比较，`list_manual_projects` 原样返回（已归一化）。
