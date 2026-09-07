@@ -114,6 +114,10 @@ button.link {
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
+.muted {
+  color: #666;
+  font-size: 12px;
+}
 .confirm {
   background: #fff4e5;
   padding: 4px 8px;
@@ -294,14 +298,6 @@ table.preview td {
 .source-card h2 {
   display: flex;
   align-items: center;
-}
-.card-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 400;
 }
 .source-card .path {
   color: #666;

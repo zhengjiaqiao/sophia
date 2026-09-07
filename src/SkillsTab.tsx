@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import SourceView from "./SourceView";
-import DomainView from "./DomainView";
+import DomainView, { targetDomainKey } from "./DomainView";
+import { isUnder } from "./paths";
 import {
   actionId,
   type Outcome,
@@ -75,33 +76,62 @@ export default function SkillsTab({
   };
 
   if (!overview) return <p>扫描中…</p>;
-  const { summary } = overview;
   const source = overview.sources.find((s) => s.id === selectedSourceId) ?? null;
+  // 工具条跟着侧栏走：本体位置视图按本体位置路径过滤，域视图按本域目标目录过滤
+  const domainTargets =
+    view === "domain"
+      ? overview.targets.filter((t) => targetDomainKey(t) === selectedDomainKey)
+      : [];
+  const inScope = (path: string): boolean =>
+    view === "source"
+      ? source !== null && isUnder(path, source.path)
+      : domainTargets.some((t) => isUnder(path, t.path));
+  const scopedCreates = creates.filter((a) =>
+    inScope(view === "source" ? a.sourcePath : a.targetPath),
+  );
+  const scopedBroken = view === "domain" ? broken.filter((a) => inScope(a.targetPath)) : [];
 
   return (
     <section>
       <div className="toolbar">
-        <span>
-          {summary.sources} 个本体位置，全部待同步 {summary.pendingMissing} 处，{summary.broken}{" "}
-          处坏链
-        </span>
-        <button onClick={() => void run(creates, false)} disabled={busy || creates.length === 0}>
-          同步全部（{creates.length}）
-        </button>
-        {broken.length > 0 && !confirmClean && (
-          <button onClick={() => setConfirmClean(true)} disabled={busy}>
-            清理坏链（{broken.length}）
-          </button>
-        )}
-        {confirmClean && (
-          <span className="confirm">
-            只删除链接本身，不删除任何真实文件。
-            <button onClick={() => void run(broken, true)} disabled={busy}>
-              确认删除
+        {view === "source" ? (
+          <>
+            <span>此本体位置待同步 {scopedCreates.length} 处</span>
+            <button
+              onClick={() => void run(scopedCreates, false)}
+              disabled={busy || scopedCreates.length === 0}
+            >
+              同步此本体位置（{scopedCreates.length}）
             </button>
-            <button onClick={() => setConfirmClean(false)}>取消</button>
-          </span>
+          </>
+        ) : (
+          <>
+            <span>
+              本域待同步 {scopedCreates.length} 处，坏链 {scopedBroken.length} 处
+            </span>
+            <button
+              onClick={() => void run(scopedCreates, false)}
+              disabled={busy || scopedCreates.length === 0}
+            >
+              同步本域（{scopedCreates.length}）
+            </button>
+            {scopedBroken.length > 0 &&
+              (confirmClean ? (
+                <span className="confirm">
+                  只删除链接本身，不删除任何真实文件。
+                  <button onClick={() => void run(scopedBroken, true)} disabled={busy}>
+                    确认删除
+                  </button>
+                  <button onClick={() => setConfirmClean(false)}>取消</button>
+                </span>
+              ) : (
+                <button onClick={() => setConfirmClean(true)} disabled={busy}>
+                  清理本域坏链（{scopedBroken.length}）
+                </button>
+              ))}
+          </>
         )}
+        <span className="muted">全部 {creates.length} 处待同步</span>
         <button onClick={() => void onRefresh()} disabled={busy}>
           刷新
         </button>
@@ -120,10 +150,8 @@ export default function SkillsTab({
           <SourceView
             overview={overview}
             source={source}
-            actions={actions}
             busy={busy}
             onChange={onRefresh}
-            onApply={run}
             onError={onError}
           />
         ) : (
@@ -136,7 +164,6 @@ export default function SkillsTab({
           actions={actions}
           busy={busy}
           onChange={onRefresh}
-          onApply={run}
           onError={onError}
         />
       )}
