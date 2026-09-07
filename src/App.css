@@ -144,6 +144,7 @@ table.matrix td.cell {
   text-align: center;
   font-size: 16px;
 }
+td.cell.own,
 td.cell.linked {
   color: #188038;
 }
@@ -162,9 +163,6 @@ td.cell.duplicate {
 td.cell.unwritable {
   color: #999;
 }
-tr.disabled {
-  opacity: 0.5;
-}
 .tags {
   display: flex;
   flex-wrap: wrap;
@@ -180,9 +178,7 @@ tr.disabled {
   color: #444;
   padding: 2px 8px;
   border-radius: 10px;
-}
-.tag button.link {
-  font-size: 12px;
+  cursor: pointer;
 }
 .report {
   background: #f6f8fa;

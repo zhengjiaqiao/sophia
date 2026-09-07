@@ -1,18 +1,23 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import ImportDialog from "./ImportDialog";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
-import type { CellState, DomainPage, DomainRow, Overview, Pick } from "./types";
+import type { CellState, DomainPage, DomainRow, Overview, SyncReport } from "./types";
 
 export interface DomainViewProps {
   overview: Overview;
   page: DomainPage;
   busy: boolean;
+  isSelected: (row: DomainRow) => boolean;
+  onToggle: (row: DomainRow) => void;
+  onSelectAll: (selected: boolean) => void;
   onChange: () => Promise<void>;
+  onReport: (report: SyncReport) => void;
   onError: (message: string) => void;
 }
 
 const CELL_SYMBOL: Record<CellState, string> = {
+  own: "●",
   linked: "✓",
   missing: "○",
   broken: "✗",
@@ -21,6 +26,7 @@ const CELL_SYMBOL: Record<CellState, string> = {
   unwritable: "–",
 };
 const CELL_TEXT: Record<CellState, string> = {
+  own: "本体在此",
   linked: "已链接",
   missing: "未同步",
   broken: "坏链",
@@ -32,10 +38,18 @@ const CELL_TEXT: Record<CellState, string> = {
 /// 没有格子的行排在所有状态之后
 const ABSENT_RANK = STATE_RANK.unwritable + 1;
 
-const pickText = (pick: Pick): string => (pick === "all" ? "全部" : `${pick.only.length} 个`);
-
-/// 一个域的整页：已引入来源标签行、行×目标的表格、坏链表
-export default function DomainView({ overview, page, busy, onChange, onError }: DomainViewProps) {
+/// 一个域的整页：来源标签行、行×目标的表格、坏链表
+export default function DomainView({
+  overview,
+  page,
+  busy,
+  isSelected,
+  onToggle,
+  onSelectAll,
+  onChange,
+  onReport,
+  onError,
+}: DomainViewProps) {
   // 表头排序；null = 后端原序（skill 名再本体位置）
   const [sort, setSort] = useState<SortState | null>(null);
   // 引入弹层：null = 关闭；string 为预选的本体位置 id，"" 为不预选
@@ -43,7 +57,6 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
   // 待确认拆分整目录链接的目标 id
   const [confirmSplit, setConfirmSplit] = useState<string | null>(null);
 
-  const targetIds = page.targets.map((t) => t.id);
   const labelOf = (sourceId: string) =>
     overview.sources.find((s) => s.id === sourceId)?.label ?? sourceId;
 
@@ -60,15 +73,17 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
   const cellOf = (row: DomainRow, targetId: string) =>
     row.cells.find((c) => c.targetId === targetId) ?? null;
 
-  // 只有链接、没有同步集条目的来源：也列进标签行，和已引入的看起来一样
-  const importedIds = new Set(page.imported.map((im) => im.sourceId));
-  const linkedOnly = overview.sources
-    .filter((s) => !importedIds.has(s.id))
-    .map((s) => ({
-      sourceId: s.id,
-      count: page.rows.filter((r) => r.sourceId === s.id && r.linked && !r.imported).length,
-    }))
-    .filter((s) => s.count > 0);
+  // 标签行按行统计本域出现过的本体位置
+  const counts = new Map<string, number>();
+  for (const row of page.rows) counts.set(row.sourceId, (counts.get(row.sourceId) ?? 0) + 1);
+
+  // 表头全选框：全勾则勾，部分勾则半选
+  const allSelected = page.rows.length > 0 && page.rows.every((r) => isSelected(r));
+  const someSelected = !allSelected && page.rows.some((r) => isSelected(r));
+  const allRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (allRef.current) allRef.current.indeterminate = someSelected;
+  }, [someSelected]);
 
   const rows = sort
     ? [...page.rows].sort(
@@ -96,31 +111,18 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
       <h2>{page.label}</h2>
 
       <div className="tags">
-        {page.imported.map((im) => (
-          <span className="tag" key={im.sourceId} title={im.sourceId}>
-            {labelOf(im.sourceId)} · {pickText(im.pick)}
-            <button className="link" disabled={busy} onClick={() => setImporting(im.sourceId)}>
-              编辑
-            </button>
-            <button
-              className="link"
-              disabled={busy}
-              onClick={() => void run(() => api.removeSource(targetIds, im.sourceId))}
-            >
-              移除
-            </button>
-          </span>
-        ))}
-        {linkedOnly.map((s) => (
-          <span className="tag" key={s.sourceId} title={s.sourceId}>
-            {labelOf(s.sourceId)} · 已链接 {s.count} 个
-            <button className="link" disabled={busy} onClick={() => setImporting(s.sourceId)}>
-              编辑
-            </button>
+        {[...counts].map(([sourceId, n]) => (
+          <span
+            className="tag"
+            key={sourceId}
+            title={sourceId}
+            onClick={() => setImporting(sourceId)}
+          >
+            {labelOf(sourceId)} · {n} 个
           </span>
         ))}
         <button disabled={busy} onClick={() => setImporting("")}>
-          引入来源…
+          引入…
         </button>
       </div>
 
@@ -130,7 +132,16 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
         <table className="matrix">
           <thead>
             <tr>
-              <th>{sortHeader("skill", "skill")}</th>
+              <th>
+                <input
+                  ref={allRef}
+                  type="checkbox"
+                  checked={allSelected}
+                  disabled={busy}
+                  onChange={() => onSelectAll(!allSelected)}
+                />
+                {sortHeader("skill", "skill")}
+              </th>
               <th>{sortHeader("source", "本体位置")}</th>
               {page.targets.map((target) => (
                 <th key={target.id}>
@@ -166,29 +177,14 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr
-                key={`${row.sourceId}|${row.skill}`}
-                // 只有已引入又被取消勾选才置灰；未引入的行只是尚未纳入，不是被禁用
-                className={row.imported && !row.enabled ? "disabled" : undefined}
-                title={
-                  row.imported
-                    ? undefined
-                    : row.linked
-                      ? "已链接，未纳入同步集；勾选后纳入"
-                      : "未纳入同步集"
-                }
-              >
+              <tr key={`${row.sourceId}|${row.skill}`}>
                 <td>
                   <label>
                     <input
                       type="checkbox"
-                      checked={row.enabled}
+                      checked={isSelected(row)}
                       disabled={busy}
-                      onChange={(e) =>
-                        void run(() =>
-                          api.setPick(targetIds, row.sourceId, row.skill, e.target.checked),
-                        )
-                      }
+                      onChange={() => onToggle(row)}
                     />
                     {row.skill}
                   </label>
@@ -251,6 +247,7 @@ export default function DomainView({ overview, page, busy, onChange, onError }: 
           initialSourceId={importing || undefined}
           onClose={() => setImporting(null)}
           onChange={onChange}
+          onReport={onReport}
           onError={onError}
         />
       )}
