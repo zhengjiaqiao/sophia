@@ -173,6 +173,8 @@ td.cell.unwritable {
 .tag {
   display: inline-flex;
   align-items: center;
+  border: none;
+  font: inherit;
   font-size: 12px;
   background: #f1f3f4;
   color: #444;

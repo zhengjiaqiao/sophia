@@ -112,14 +112,15 @@ export default function DomainView({
 
       <div className="tags">
         {[...counts].map(([sourceId, n]) => (
-          <span
+          <button
             className="tag"
             key={sourceId}
             title={sourceId}
+            disabled={busy}
             onClick={() => setImporting(sourceId)}
           >
             {labelOf(sourceId)} · {n} 个
-          </span>
+          </button>
         ))}
         <button disabled={busy} onClick={() => setImporting("")}>
           引入…
