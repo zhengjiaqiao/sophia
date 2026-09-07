@@ -76,24 +76,24 @@ fn scan_all(state: tauri::State<'_, AppState>) -> Result<Overview, String> {
     overview(&state)
 }
 
-/// 选中行在其域各目标上的 Missing 格 → 建链动作
+/// 选中格里的 Missing 格 → 建链动作
 #[tauri::command]
 fn propose_links(
-    rows: Vec<RowRef>,
+    cells: Vec<CellRef>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<PlannedAction>, String> {
     let (sources, targets) = discover(&state)?;
-    Ok(skills::propose_links(&sources, &targets, &rows))
+    Ok(skills::propose_links(&sources, &targets, &cells))
 }
 
-/// 选中行在其域各目标上的 Linked 格 → 删链动作
+/// 选中格里的 Linked 格 → 删链动作
 #[tauri::command]
 fn propose_unlinks(
-    rows: Vec<RowRef>,
+    cells: Vec<CellRef>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<PlannedAction>, String> {
     let (sources, targets) = discover(&state)?;
-    Ok(skills::propose_unlinks(&sources, &targets, &rows))
+    Ok(skills::propose_unlinks(&sources, &targets, &cells))
 }
 
 /// 按动作所在的目标目录与本体位置目录回查，算出这条链接该用什么写法

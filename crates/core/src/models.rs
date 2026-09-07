@@ -213,16 +213,18 @@ pub struct Cell {
 pub struct DomainRow {
     pub source_id: String,
     pub skill: String,
+    /// 该行的本体位置属于本域
+    pub own: bool,
     pub cells: Vec<Cell>,
 }
 
-/// 前端选中的一行：域 key + 本体位置 id + skill。行不必已出现在表里（引入弹层用）
+/// 前端选中的一格：本体位置 id + skill + 目标 id。目标决定域；格不必已出现在表里（引入弹层用）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RowRef {
-    pub domain: String,
+pub struct CellRef {
     pub source_id: String,
     pub skill: String,
+    pub target_id: String,
 }
 
 /// 一个域（全局或某项目）的整页数据
@@ -286,15 +288,15 @@ mod tests {
     }
 
     #[test]
-    fn row_ref_and_new_variants_serialize_as_camel_case() {
-        let row = RowRef {
-            domain: "global".into(),
+    fn cell_ref_and_new_variants_serialize_as_camel_case() {
+        let cell = CellRef {
             source_id: "/a".into(),
             skill: "x".into(),
+            target_id: "claude-code".into(),
         };
         assert_eq!(
-            serde_json::to_value(&row).unwrap(),
-            json!({"domain": "global", "sourceId": "/a", "skill": "x"})
+            serde_json::to_value(&cell).unwrap(),
+            json!({"sourceId": "/a", "skill": "x", "targetId": "claude-code"})
         );
         assert_eq!(serde_json::to_value(CellState::Own).unwrap(), json!("own"));
         assert_eq!(
