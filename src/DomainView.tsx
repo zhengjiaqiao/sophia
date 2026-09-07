@@ -85,11 +85,25 @@ function buildRows(sources: Source[]): Row[] {
   );
 }
 
-/// 本体位置对本域的参与度：本域全部目标都在它的目标集合里 / 只在一部分 / 一个都不在
-type Participation = "all" | "some" | "none";
+/// 本域列出的本体位置 id：本域自己的 ∪ 在本域目标里有真链接的；本域自己的排前面，其余按 sources 原序。
+/// 只有真链接算"落在本域里"：同名 skill 在别处（foreign）、坏链、重复都不算，否则同名 skill 会把每个来源都拉进来。
+/// 列出即视为对本域合法——它的缺口算本域待同步
+export function domainSourceIds(overview: Overview, domainKey: string): string[] {
+  const domainTargetIds = new Set(
+    overview.targets.filter((t) => targetDomainKey(t) === domainKey).map((t) => t.id),
+  );
+  const linked = new Set(
+    overview.cells
+      .filter((c) => c.state === "linked" && domainTargetIds.has(c.targetId))
+      .map((c) => c.sourceId),
+  );
+  const own = (s: Source) => sourceDomainKey(s) === domainKey;
+  const listed = overview.sources.filter((s) => own(s) || linked.has(s.id));
+  return [...listed.filter(own), ...listed.filter((s) => !own(s))].map((s) => s.id);
+}
 
-/// 单个域的表：行是本域内的 (本体位置, skill)，列是该域下的目标目录；
-/// 表上方每个本体位置一个复选框，控制它是否参与同步进本域；跨域同步在按本体位置视图处理
+/// 单个域的表：行是本域列出的 (本体位置, skill)，列是该域下的目标目录；
+/// 跨域取舍（不想同步进某个域）在按本体位置视图处理
 export default function DomainView({
   overview,
   domainKey,
@@ -106,40 +120,16 @@ export default function DomainView({
     cells.set(cellKey(cell.sourceId, cell.skill, cell.targetId), cell);
   }
 
-  const domainTargetIds = targets.map((t) => t.id);
-  const domainTargetIdSet = new Set(domainTargetIds);
-  const pickedOf = (source: Source): string[] => overview.syncSet.sources[source.id]?.targets ?? [];
-  // 只有真链接算"在本域里"：同名 skill 在别处（foreign）、坏链、重复都不算，否则同名 skill 会把每个来源都拉进来
-  const presentSourceIds = new Set(
-    overview.cells
-      .filter((c) => c.state === "linked" && domainTargetIdSet.has(c.targetId))
-      .map((c) => c.sourceId),
-  );
-  // 域视图讲"本域里有什么"：本域自己的本体位置 ∪ 已落在本域里的 ∪ 目标集合含本域目标的
-  const inDomain = overview.sources.filter(
-    (s) =>
-      sourceDomainKey(s) === domainKey ||
-      presentSourceIds.has(s.id) ||
-      pickedOf(s).some((id) => domainTargetIdSet.has(id)),
-  );
-  // 本域自己的排前面，其余按 overview.sources 原序
-  const sources = [
-    ...inDomain.filter((s) => sourceDomainKey(s) === domainKey),
-    ...inDomain.filter((s) => sourceDomainKey(s) !== domainKey),
-  ];
+  const byId = new Map(overview.sources.map((s) => [s.id, s]));
+  const sources = domainSourceIds(overview, domainKey).flatMap((id) => {
+    const source = byId.get(id);
+    return source ? [source] : [];
+  });
   // 列出的本体位置显示其全部 skill 行，未同步的（○）也在内，新 skill 才看得见
   const rows = buildRows(sources);
   if (rows.length === 0) return <p>该域下没有本体位置。</p>;
 
   const entry = domainEntries(overview.targets).find((e) => e.key === domainKey);
-
-  const participation = new Map<string, Participation>(
-    sources.map((source) => {
-      const picked = new Set(pickedOf(source));
-      const hit = domainTargetIds.filter((id) => picked.has(id)).length;
-      return [source.id, hit === 0 ? "none" : hit === domainTargetIds.length ? "all" : "some"];
-    }),
-  );
 
   // 坏链没有对应的 (本体位置, skill) 格子（skill 已不存在于任何本体位置），单独列出来
   const brokenRows = actions.flatMap((a) => {
@@ -147,20 +137,6 @@ export default function DomainView({
     const target = targets.find((t) => isUnder(a.targetPath, t.path));
     return target ? [{ action: a, target }] : [];
   });
-
-  // 勾上 = 把本域全部目标并入该本体位置的目标集合，取消 = 从中去掉本域全部目标
-  const toggle = async (source: Source, on: boolean) => {
-    const picked = pickedOf(source);
-    const ids = on
-      ? [...new Set([...picked, ...domainTargetIds])]
-      : picked.filter((id) => !domainTargetIds.includes(id));
-    try {
-      await api.setSourceTargets(source.id, ids);
-      await onChange();
-    } catch (e) {
-      onError(String(e));
-    }
-  };
 
   // 行级复选框与按本体位置视图共用同步集：关掉的 skill 不再同步到任何目标
   const toggleSkill = async (source: Source, skill: string, enabled: boolean) => {
@@ -175,26 +151,6 @@ export default function DomainView({
   return (
     <div className="domain-group">
       <h2 title={entry?.path ?? undefined}>{entry?.label ?? domainKey}</h2>
-      <div className="target-picks">
-        {sources.map((source) => {
-          const state = participation.get(source.id);
-          return (
-            <label key={source.id} title={source.path}>
-              <input
-                type="checkbox"
-                checked={state === "all"}
-                ref={(el) => {
-                  if (el) el.indeterminate = state === "some";
-                }}
-                disabled={busy}
-                onChange={(e) => void toggle(source, e.target.checked)}
-              />
-              {source.label} ({source.skills.length})
-            </label>
-          );
-        })}
-        <span className="muted">未勾选的本体位置不参与同步</span>
-      </div>
       <table className="matrix">
         <thead>
           <tr>
@@ -210,20 +166,17 @@ export default function DomainView({
             const enabled = !(
               overview.syncSet.sources[row.source.id]?.disabledSkills ?? []
             ).includes(row.skill);
-            // 本体位置没勾选参与本域：整行调暗、行内复选框失效，免得 ○ 看着像"待同步"
-            const joined = participation.get(row.source.id) !== "none";
             return (
               <tr
                 key={`${row.source.id}|${row.skill}`}
-                className={enabled && joined ? undefined : "disabled"}
-                title={joined ? undefined : "该本体位置未勾选参与本域同步"}
+                className={enabled ? undefined : "disabled"}
               >
                 <td>
                   <label>
                     <input
                       type="checkbox"
                       checked={enabled}
-                      disabled={busy || !joined}
+                      disabled={busy}
                       onChange={(e) => void toggleSkill(row.source, row.skill, e.target.checked)}
                     />
                     {row.skill}

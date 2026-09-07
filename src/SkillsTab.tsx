@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import SourceView from "./SourceView";
-import DomainView, { targetDomainKey } from "./DomainView";
+import DomainView, { domainSourceIds, targetDomainKey } from "./DomainView";
 import { isUnder } from "./paths";
 import {
   actionId,
@@ -91,6 +91,40 @@ export default function SkillsTab({
   );
   const scopedBroken = view === "domain" ? broken.filter((a) => inScope(a.targetPath)) : [];
 
+  // 域视图里列出的本体位置对本域合法：它们在本域目标下的缺口都算本域待同步，
+  // 哪怕本域目标还不在它们的同步集里（"同步本域"会先补上）
+  const domainSources = view === "domain" ? domainSourceIds(overview, selectedDomainKey) : [];
+  const domainSourceIdSet = new Set(domainSources);
+  const domainTargetIdSet = new Set(domainTargets.map((t) => t.id));
+  const domainPending = overview.cells.filter(
+    (c) =>
+      c.state === "missing" &&
+      domainSourceIdSet.has(c.sourceId) &&
+      domainTargetIdSet.has(c.targetId) &&
+      !(overview.syncSet.sources[c.sourceId]?.disabledSkills ?? []).includes(c.skill),
+  ).length;
+
+  // 先把本域目标并进这些本体位置的同步集，再链接落在本域目标下的缺口；
+  // 这样同步集与刚同步出来的链接一致，按本体位置视图里那些目标就是勾上的
+  const syncDomain = async () => {
+    try {
+      for (const id of domainSources) {
+        const picked = overview.syncSet.sources[id]?.targets ?? [];
+        if (domainTargets.every((t) => picked.includes(t.id))) continue;
+        await api.setSourceTargets(id, [
+          ...new Set([...picked, ...domainTargets.map((t) => t.id)]),
+        ]);
+      }
+      const acts = await api.proposeAll();
+      await run(
+        acts.filter((a) => a.kind === "create" && inScope(a.targetPath)),
+        false,
+      );
+    } catch (e) {
+      onError(String(e));
+    }
+  };
+
   return (
     <section>
       <div className="toolbar">
@@ -107,13 +141,10 @@ export default function SkillsTab({
         ) : (
           <>
             <span>
-              本域待同步 {scopedCreates.length} 处，坏链 {scopedBroken.length} 处
+              本域待同步 {domainPending} 处，坏链 {scopedBroken.length} 处
             </span>
-            <button
-              onClick={() => void run(scopedCreates, false)}
-              disabled={busy || scopedCreates.length === 0}
-            >
-              同步本域（{scopedCreates.length}）
+            <button onClick={() => void syncDomain()} disabled={busy || domainPending === 0}>
+              同步本域（{domainPending}）
             </button>
             {scopedBroken.length > 0 &&
               (confirmClean ? (
