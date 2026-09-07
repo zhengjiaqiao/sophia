@@ -182,3 +182,12 @@ core：`CellRef` 序列化；`propose_links` / `propose_unlinks` 按格（含忽
   - 目标 id 不变（全局 `<harness_id>`，项目 `project:<path>::<harness_id>`）；`project:<path>::universal` 不再存在。
 - 前端 `SkillsTab`：`补齐缺失（N 处）` 与可取消格计数按 `cell.path` 去重（两列同目录只算一处）；`propose_*` 已按 `target_path` 去重，执行不受影响。
 - 测试：`targets_list_globals_projects_and_one_universal_column` 改为"通用型 harness 各自一列指向 `.agents/skills`，非通用型指向自己的目录，无通用列"；`symlinked_target_dir_is_never_merged_into_the_dir_it_points_to` 改为"两个 harness 同目录各自一列"；其余按新规则调整。
+
+## 12. 修订 v5.3（2026-09-08）：设置只剩 harness，项目在侧栏增删
+
+- 状态：待实现
+- 设置弹层只保留 Harness 一节；「项目」「本体位置」两节删除。
+- 侧栏：域列表下方一个 `添加项目…` 按钮（系统目录选择框 → `add_project` → 重扫）。手动添加的项目条目右侧有 `×`（title "移除项目"，点击 `remove_project` → 重扫；当前选中的被移除时回落到「全部」）。自动发现的项目与 WeiboAP agent 域没有 `×`。
+- `App.tsx` 在每次重扫时同时取 `list_manual_projects`，用 `"project:" + path === d.key` 判断是否手动项目。为此 `lib.rs` 的 `add_project` 保存前 `normalize`，`remove_project` 按 `normalize` 比较，`list_manual_projects` 原样返回（已归一化）。
+- 手动本体位置：只保留引入弹层里的 `选择文件夹…` 添加；弹层左栏 `kind = manual` 的条目多一个 `移除` 链接（`remove_manual_source` → 重扫；若它是当前选中项则选中列表第一项）。
+- `docs/manual-checks.md`：设置一节改为只验 harness 开关；新增侧栏添加 / 移除项目、弹层移除手动本体位置。
