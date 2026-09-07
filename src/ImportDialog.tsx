@@ -145,7 +145,6 @@ export default function ImportDialog({
                 onClick={() => setSelected(s.id)}
               >
                 <span>
-                  {page.rows.some((r) => r.sourceId === s.id) ? "✓ " : ""}
                   {s.label}
                   <span className="whole-link">{kindText(s.kind)}</span>
                 </span>
