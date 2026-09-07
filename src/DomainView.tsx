@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import ImportDialog from "./ImportDialog";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
-import type { CellState, DomainPage, DomainRow, Overview, SyncReport } from "./types";
+import type { CellRef, CellState, DomainPage, DomainRow, Overview, SyncReport } from "./types";
 
 export interface DomainViewProps {
   overview: Overview;
@@ -14,6 +14,10 @@ export interface DomainViewProps {
   onChange: () => Promise<void>;
   onReport: (report: SyncReport) => void;
   onError: (message: string) => void;
+  /// 把格交给容器：建链、删链（走确认条）、只说明原因
+  onLink: (cells: CellRef[]) => Promise<void>;
+  onUnlink: (cells: CellRef[]) => Promise<void>;
+  onNotice: (text: string) => void;
 }
 
 const CELL_SYMBOL: Record<CellState, string> = {
@@ -25,15 +29,20 @@ const CELL_SYMBOL: Record<CellState, string> = {
   duplicate: "⚠",
   unwritable: "–",
 };
+/// 不能点的格：title 与点击提示都用这段原因
 const CELL_TEXT: Record<CellState, string> = {
-  own: "本体在此",
-  linked: "已链接",
+  own: "本体在此，不是链接",
+  linked: "整目录链接，先拆成逐项链接",
   missing: "未同步",
-  broken: "坏链",
-  foreign: "指向别处",
-  duplicate: "已存在同名条目",
-  unwritable: "整目录链接到其他本体位置",
+  broken: "坏链，请用清理坏链",
+  foreign: "指向别处的软链，不归本工具管理",
+  duplicate: "已有同名真实条目，不会覆盖",
+  unwritable: "整目录链接，先拆成逐项链接",
 };
+
+/// 一行展开成它在本域各目标上的格
+const cellsOf = (row: DomainRow): CellRef[] =>
+  row.cells.map((c) => ({ sourceId: row.sourceId, skill: row.skill, targetId: c.targetId }));
 
 /// 没有格子的行排在所有状态之后
 const ABSENT_RANK = STATE_RANK.unwritable + 1;
@@ -49,6 +58,9 @@ export default function DomainView({
   onChange,
   onReport,
   onError,
+  onLink,
+  onUnlink,
+  onNotice,
 }: DomainViewProps) {
   // 表头排序；null = 后端原序（skill 名再本体位置）
   const [sort, setSort] = useState<SortState | null>(null);
@@ -72,6 +84,16 @@ export default function DomainView({
 
   const cellOf = (row: DomainRow, targetId: string) =>
     row.cells.find((c) => c.targetId === targetId) ?? null;
+
+  const hasMissing = (row: DomainRow) => row.cells.some((c) => c.state === "missing");
+
+  /// 有已链接的格，且它的目标不是整目录链接
+  const hasUnlinkable = (row: DomainRow) =>
+    row.cells.some(
+      (c) =>
+        c.state === "linked" &&
+        page.targets.find((t) => t.id === c.targetId)?.linkedWholeTo === null,
+    );
 
   // 标签行按行统计本域出现过的本体位置
   const counts = new Map<string, number>();
@@ -174,6 +196,7 @@ export default function DomainView({
                   )}
                 </th>
               ))}
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -195,16 +218,55 @@ export default function DomainView({
                 </td>
                 {page.targets.map((target) => {
                   const cell = cellOf(row, target.id);
+                  if (!cell) return <td className="cell" key={target.id} />;
+                  const ref: CellRef = {
+                    sourceId: row.sourceId,
+                    skill: row.skill,
+                    targetId: target.id,
+                  };
+                  const linkable = cell.state === "missing";
+                  const unlinkable = cell.state === "linked" && target.linkedWholeTo === null;
+                  const reason = CELL_TEXT[cell.state];
+                  const title = linkable ? "点击建链" : unlinkable ? "点击取消此链接" : reason;
                   return (
-                    <td
-                      className={cell ? `cell ${cell.state}` : "cell"}
-                      key={target.id}
-                      title={cell ? `${CELL_TEXT[cell.state]}：${cell.path}` : undefined}
-                    >
-                      {cell ? CELL_SYMBOL[cell.state] : ""}
+                    <td className={`cell ${cell.state}`} key={target.id}>
+                      <button
+                        className={`cell ${cell.state}`}
+                        disabled={busy}
+                        title={title}
+                        onClick={() => {
+                          if (linkable) void onLink([ref]);
+                          else if (unlinkable) void onUnlink([ref]);
+                          else onNotice(reason);
+                        }}
+                      >
+                        {CELL_SYMBOL[cell.state]}
+                      </button>
                     </td>
                   );
                 })}
+                <td className="row-actions">
+                  <button
+                    disabled={busy || !hasMissing(row)}
+                    title={hasMissing(row) ? "给缺失的 harness 建链" : "没有缺失的链接"}
+                    onClick={() => void onLink(cellsOf(row))}
+                  >
+                    补齐
+                  </button>
+                  <button
+                    disabled={busy || row.own || !hasUnlinkable(row)}
+                    title={
+                      row.own
+                        ? "本体在本域，不能删除；可逐个取消某个 harness 下的链接"
+                        : hasUnlinkable(row)
+                          ? "删除它在本域所有 harness 下的链接"
+                          : "没有可删除的链接"
+                    }
+                    onClick={() => void onUnlink(cellsOf(row))}
+                  >
+                    删除
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -250,6 +312,7 @@ export default function DomainView({
           onChange={onChange}
           onReport={onReport}
           onError={onError}
+          onNotice={onNotice}
         />
       )}
     </div>

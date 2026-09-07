@@ -3,12 +3,12 @@ import { api } from "./api";
 import DomainView from "./DomainView";
 import {
   actionId,
+  type CellRef,
   type DomainPage,
   type DomainRow,
   type Outcome,
   type Overview,
   type PlannedAction,
-  type RowRef,
   type SyncReport,
 } from "./types";
 
@@ -27,6 +27,10 @@ function outcomeText(o: Outcome): string {
 
 /// 选择状态的键：域 + 本体位置 + skill
 const rowKey = (page: DomainPage, row: DomainRow) => `${page.key}|${row.sourceId}|${row.skill}`;
+
+/// 一行展开成它在本域各目标上的格
+const cellsOf = (row: DomainRow): CellRef[] =>
+  row.cells.map((c) => ({ sourceId: row.sourceId, skill: row.skill, targetId: c.targetId }));
 
 export interface SkillsTabProps {
   overview: Overview | null;
@@ -48,8 +52,11 @@ export default function SkillsTab({
   onError,
 }: SkillsTabProps) {
   const [report, setReport] = useState<SyncReport | null>(null);
+  // 暂态提示：说明为什么没动作、某个格为什么不能点
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmClean, setConfirmClean] = useState(false);
-  const [confirmUnlink, setConfirmUnlink] = useState(false);
+  // 待确认的删链动作；行、格、批量三条路径都汇到这里
+  const [pendingUnlink, setPendingUnlink] = useState<PlannedAction[] | null>(null);
   // 被取消勾选的行；不在集合里即选中，所以默认全选、新出现的行也默认选中
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
 
@@ -60,11 +67,19 @@ export default function SkillsTab({
     return () => clearTimeout(timer);
   }, [report]);
 
-  // 结果与选择都只属于当次选择：切换侧栏选中项就作废
+  // 提示同样是暂态的
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // 结果、提示与选择都只属于当次选择：切换侧栏选中项就作废
   useEffect(() => {
     setReport(null);
+    setNotice(null);
     setConfirmClean(false);
-    setConfirmUnlink(false);
+    setPendingUnlink(null);
     setExcluded(new Set());
   }, [selectedKey]);
 
@@ -92,7 +107,7 @@ export default function SkillsTab({
   const run = async (subset: PlannedAction[], cleanBroken: boolean) => {
     onBusy(true);
     setConfirmClean(false);
-    setConfirmUnlink(false);
+    setPendingUnlink(null);
     try {
       setReport(await api.applyAll(subset, cleanBroken));
     } catch (e) {
@@ -103,6 +118,35 @@ export default function SkillsTab({
     await onRefresh();
   };
 
+  // 建链不需要确认
+  const link = async (cells: CellRef[]) => {
+    try {
+      const acts = await api.proposeLinks(cells);
+      if (acts.length === 0) {
+        setNotice("没有需要建立的链接");
+        return;
+      }
+      await run(acts, false);
+    } catch (e) {
+      onError(String(e));
+    }
+  };
+
+  // 删链先算动作再进确认条
+  const askUnlink = async (cells: CellRef[]) => {
+    try {
+      const acts = await api.proposeUnlinks(cells);
+      if (acts.length === 0) {
+        setNotice("没有可删除的链接");
+        return;
+      }
+      setConfirmClean(false);
+      setPendingUnlink(acts);
+    } catch (e) {
+      onError(String(e));
+    }
+  };
+
   if (!overview) return <p>扫描中…</p>;
 
   const pages =
@@ -111,82 +155,50 @@ export default function SkillsTab({
       : overview.domains.filter((d) => d.key === selectedKey);
   const broken = pages.flatMap((p) => p.broken);
 
-  // 勾选的行；建链与删链都只作用于它们
-  const selectedRows: RowRef[] = pages.flatMap((page) =>
-    page.rows
-      .filter((row) => isSelected(page, row))
-      .map((row) => ({ domain: page.key, sourceId: row.sourceId, skill: row.skill })),
+  /// 该行在本域是否有可取消的链接（已链接且目标不是整目录链接）
+  const hasUnlinkable = (page: DomainPage, row: DomainRow) =>
+    row.cells.some(
+      (c) =>
+        c.state === "linked" &&
+        page.targets.find((t) => t.id === c.targetId)?.linkedWholeTo === null,
+    );
+
+  // 勾选行的全部格；建链按它算
+  const selectedCells: CellRef[] = pages.flatMap((page) =>
+    page.rows.filter((row) => isSelected(page, row)).flatMap(cellsOf),
+  );
+  // 可删除的 skill 行：勾选、本体不在本域、且有可取消的链接
+  const deletableRows = pages.flatMap((page) =>
+    page.rows.filter((row) => isSelected(page, row) && !row.own && hasUnlinkable(page, row)),
   );
 
-  // 计数按格算：一行在多个目标上缺失就算多处
+  // 缺失按格算：一行在多个目标上缺失就算多处
   let missing = 0;
-  let unlinkable = 0;
   for (const page of pages) {
     for (const row of page.rows) {
       if (!isSelected(page, row)) continue;
-      for (const cell of row.cells) {
-        if (cell.state === "missing") missing += 1;
-        if (cell.state === "linked") {
-          const target = page.targets.find((t) => t.id === cell.targetId);
-          if (target && target.linkedWholeTo === null) unlinkable += 1;
-        }
-      }
+      for (const cell of row.cells) if (cell.state === "missing") missing += 1;
     }
   }
-
-  const linkNow = async () => {
-    try {
-      const acts = await api.proposeLinks(selectedRows);
-      if (acts.length === 0) {
-        onError("没有需要处理的链接");
-        return;
-      }
-      await run(acts, false);
-    } catch (e) {
-      onError(String(e));
-    }
-  };
-
-  const unlinkNow = async () => {
-    try {
-      const acts = await api.proposeUnlinks(selectedRows);
-      if (acts.length === 0) {
-        setConfirmUnlink(false);
-        onError("没有需要处理的链接");
-        return;
-      }
-      await run(acts, false);
-    } catch (e) {
-      onError(String(e));
-    }
-  };
 
   return (
     <section>
       <div className="toolbar">
         <span>坏链 {broken.length} 处</span>
-        <button onClick={() => void linkNow()} disabled={busy || missing === 0}>
-          补齐缺失（{missing}）
+        <button
+          onClick={() => void link(selectedCells)}
+          disabled={busy || missing === 0}
+          title={missing === 0 ? "勾选的行里没有缺失的链接" : "给勾选行缺失的 harness 建链"}
+        >
+          补齐缺失（{missing} 处）
         </button>
-        {confirmUnlink ? (
-          <span className="confirm">
-            只删除软链接本身，不删除任何真实文件。
-            <button onClick={() => void unlinkNow()} disabled={busy}>
-              确认删除
-            </button>
-            <button onClick={() => setConfirmUnlink(false)}>取消</button>
-          </span>
-        ) : (
-          <button
-            onClick={() => {
-              setConfirmClean(false);
-              setConfirmUnlink(true);
-            }}
-            disabled={busy || unlinkable === 0}
-          >
-            取消链接（{unlinkable}）
-          </button>
-        )}
+        <button
+          onClick={() => void askUnlink(deletableRows.flatMap(cellsOf))}
+          disabled={busy || deletableRows.length === 0}
+          title="本体在本域的 skill 不会被删除"
+        >
+          删除 skill（{deletableRows.length} 个）
+        </button>
         {broken.length > 0 &&
           (confirmClean ? (
             <span className="confirm">
@@ -199,7 +211,7 @@ export default function SkillsTab({
           ) : (
             <button
               onClick={() => {
-                setConfirmUnlink(false);
+                setPendingUnlink(null);
                 setConfirmClean(true);
               }}
               disabled={busy}
@@ -211,6 +223,27 @@ export default function SkillsTab({
           刷新
         </button>
       </div>
+      {pendingUnlink !== null && (
+        <div className="toolbar">
+          <span className="confirm">
+            将删除 {pendingUnlink.length} 条软链接，只删链接本身，不删任何真实文件。
+            <button onClick={() => void run(pendingUnlink, false)} disabled={busy}>
+              确认删除
+            </button>
+            <button onClick={() => setPendingUnlink(null)}>取消</button>
+          </span>
+        </div>
+      )}
+      {notice && (
+        <div className="report">
+          <div className="report-head">
+            <span>{notice}</span>
+            <button className="link" onClick={() => setNotice(null)}>
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
       {report && (
         <div className="report">
           <div className="report-head">
@@ -243,6 +276,9 @@ export default function SkillsTab({
             onChange={onRefresh}
             onReport={setReport}
             onError={onError}
+            onLink={link}
+            onUnlink={askUnlink}
+            onNotice={setNotice}
           />
         ))
       )}

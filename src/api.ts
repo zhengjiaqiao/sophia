@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  CellRef,
   DomainInfo,
   HarnessStatus,
   Overview,
   PlannedAction,
-  RowRef,
   SyncReport,
   SyncRule,
 } from "./types";
@@ -13,10 +13,10 @@ import type {
 export const api = {
   listDomains: () => invoke<DomainInfo[]>("list_domains"),
   scanAll: () => invoke<Overview>("scan_all"),
-  /// 选中行在各自域的目标上缺失的格 → 建链动作
-  proposeLinks: (rows: RowRef[]) => invoke<PlannedAction[]>("propose_links", { rows }),
-  /// 选中行在各自域的目标上已链接的格 → 删链动作
-  proposeUnlinks: (rows: RowRef[]) => invoke<PlannedAction[]>("propose_unlinks", { rows }),
+  /// 这些格里缺失的 → 建链动作
+  proposeLinks: (cells: CellRef[]) => invoke<PlannedAction[]>("propose_links", { cells }),
+  /// 这些格里已链接且目标非整目录链接的 → 删链动作
+  proposeUnlinks: (cells: CellRef[]) => invoke<PlannedAction[]>("propose_unlinks", { cells }),
   applyAll: (actions: PlannedAction[], cleanBroken: boolean) =>
     invoke<SyncReport>("apply_all", { actions, cleanBroken }),
   splitWholeLink: (targetId: string) => invoke<SyncReport>("split_whole_link", { targetId }),
