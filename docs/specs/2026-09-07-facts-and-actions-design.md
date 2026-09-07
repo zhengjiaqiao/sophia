@@ -3,7 +3,7 @@
 - 对应 intent：`docs/intent/2026-09-07-facts-and-actions.md`
 - 替代：`docs/specs/2026-09-07-single-view-design.md`（v4；其 §3 格状态、坏链、整目录链接拆分继续有效，本文只写变化）
 - 日期：2026-09-07
-- 状态：待实现
+- 状态：已实现（feat/rust-pivot，PR #4）
 
 ## 1. 目标
 
