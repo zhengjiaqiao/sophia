@@ -31,15 +31,18 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
-/// 一次发现：本体位置与目标目录，按当前设置解析
+/// 一次发现：本体位置与目标目录，按当前设置解析。
+/// 目标目录里指向已知位置之外的软链再合成出外部本体位置
 fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = Env::from_system();
     let settings = state.store.load_settings().map_err(err)?;
     let harnesses = discovery::enabled(discovery::installed(&env), &settings);
     let manual_projects = state.store.load_projects().map_err(err)?;
     let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
-    let sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
+    let mut sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
     let targets = discovery::targets(&env, &harnesses, &projects, &sources);
+    let external = discovery::external_sources(&env, &targets, &sources);
+    sources.extend(external);
     Ok((sources, targets))
 }
 
@@ -115,21 +118,17 @@ fn propose_unlinks(
     Ok(skills::propose_unlinks(&sources, &targets, &cells))
 }
 
-/// 按动作所在的目标目录与本体位置目录回查，算出这条链接该用什么写法
+/// 按动作所在的目标目录回查，算出这条链接该用什么写法
 fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
     let same = |a: &Path, b: Option<&Path>| b.is_some_and(|b| normalize(a) == normalize(b));
-    let target = overview
+    match overview
         .domains
         .iter()
         .flat_map(|d| &d.targets)
-        .find(|t| same(&t.path, action.target_path.parent()));
-    let source = overview
-        .sources
-        .iter()
-        .find(|s| same(&s.path, action.source_path.parent()));
-    match (source, target) {
-        (Some(s), Some(t)) => skills::link_style(s, t),
-        _ => LinkStyle::Absolute,
+        .find(|t| same(&t.path, action.target_path.parent()))
+    {
+        Some(t) => skills::link_style(&action.source_path, t),
+        None => LinkStyle::Absolute,
     }
 }
 

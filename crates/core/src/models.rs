@@ -1,7 +1,7 @@
 //! 共享类型。serde 统一 camelCase，前端 `src/types.ts` 与之对应。
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,6 +93,17 @@ pub enum SourceKind {
     },
     /// 用户手工添加
     Manual,
+    /// harness 目录里指向"任何已知本体位置之外"的软链合成出来的位置
+    External,
+}
+
+/// 一个 skill 的本体：名字与它真实所在的路径
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Skill {
+    pub name: String,
+    /// 本体真实路径；常规位置就是 `本体位置/name`
+    pub path: PathBuf,
 }
 
 /// 一处本体位置：真实存放 skill 目录的地方
@@ -104,8 +115,18 @@ pub struct Source {
     pub path: PathBuf,
     pub kind: SourceKind,
     pub label: String,
-    /// 真实目录名，排序
-    pub skills: Vec<String>,
+    /// 按名排序
+    pub skills: Vec<Skill>,
+}
+
+impl Source {
+    /// 该 skill 在本位置里的本体路径；不在这里则 None
+    pub fn skill_path(&self, name: &str) -> Option<&Path> {
+        self.skills
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.path.as_path())
+    }
 }
 
 /// 目标目录所属的域
@@ -278,6 +299,34 @@ mod tests {
             serde_json::to_value(ActionKind::Unlink).unwrap(),
             json!("unlink")
         );
+    }
+
+    #[test]
+    fn skill_and_external_kind_serialize_as_camel_case() {
+        let skill = Skill {
+            name: "ego-browser".into(),
+            path: PathBuf::from("/opt/ego-skills/ego-browser"),
+        };
+        assert_eq!(
+            serde_json::to_value(&skill).unwrap(),
+            json!({"name": "ego-browser", "path": "/opt/ego-skills/ego-browser"})
+        );
+        assert_eq!(
+            serde_json::to_value(SourceKind::External).unwrap(),
+            json!({"type": "external"})
+        );
+        let source = Source {
+            id: "/opt/ego-skills".into(),
+            path: PathBuf::from("/opt/ego-skills"),
+            kind: SourceKind::External,
+            label: "/opt/ego-skills".into(),
+            skills: vec![skill],
+        };
+        assert_eq!(
+            source.skill_path("ego-browser"),
+            Some(Path::new("/opt/ego-skills/ego-browser"))
+        );
+        assert_eq!(source.skill_path("nope"), None);
     }
 
     #[test]

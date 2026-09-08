@@ -1,6 +1,6 @@
 //! 内置 harness 表、已安装判定、项目候选、本体位置与目标发现
 use crate::fs::{entry_kind, normalize, real_path, EntryKind};
-use crate::models::{Harness, Source, SourceKind, Target, TargetScope};
+use crate::models::{Harness, Skill, Source, SourceKind, Target, TargetScope};
 use crate::store::Settings;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -159,38 +159,26 @@ fn dir_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// 位置里的 skill：直接子项中非隐藏的真实目录，排序。
-/// `link_through` 为真时，`real_path` 解析到目录的软链也算（坏链始终不算）
-fn skills_in(dir: &Path, link_through: bool) -> Vec<String> {
+/// 位置里的 skill：直接子项中非隐藏的真实目录，按名排序。
+/// 软链一律不算——它是指向别处本体的链接，不是这个位置自己的 skill
+fn skills_in(dir: &Path) -> Vec<Skill> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut names = BTreeSet::new();
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if !name.starts_with('.') && is_skill(&e.path(), link_through) {
+        if !name.starts_with('.') && entry_kind(&e.path()) == EntryKind::Dir {
             names.insert(name);
         }
     }
-    names.into_iter().collect()
-}
-
-fn is_skill(path: &Path, link_through: bool) -> bool {
-    match entry_kind(path) {
-        EntryKind::Dir => true,
-        EntryKind::Symlink(_) => link_through && real_path(path).is_some_and(|r| r.is_dir()),
-        _ => false,
-    }
-}
-
-/// 仓库型位置（通用仓库、项目仓库、手动添加）里软链到目录的条目也算 skill：
-/// 用户会把外部目录链进仓库。harness 目录只认真实目录，
-/// 否则满是软链的消费目录会反过来被当成本体位置
-fn links_count_as_skills(kind: &SourceKind) -> bool {
-    matches!(
-        kind,
-        SourceKind::Universal | SourceKind::ProjectStore { .. } | SourceKind::Manual
-    )
+    names
+        .into_iter()
+        .map(|name| Skill {
+            path: dir.join(&name),
+            name,
+        })
+        .collect()
 }
 
 /// harness 表里配了 per-agent 目录的条目：id → 模板
@@ -246,7 +234,7 @@ pub fn sources(
     let mut out: Vec<Source> = Vec::new();
     let mut keys: Vec<PathBuf> = Vec::new();
     let mut push = |path: PathBuf, kind: SourceKind, label: String| {
-        let skills = skills_in(&path, links_count_as_skills(&kind));
+        let skills = skills_in(&path);
         if skills.is_empty() {
             return;
         }
@@ -304,30 +292,70 @@ pub fn sources(
         push(p.clone(), SourceKind::Manual, dir_name(p));
     }
 
-    // 第二遍：仓库型位置里解析到别的本体位置之内的软链是「链接」，不是这个仓库自己的 skill；
-    // 那个 skill 由它所属本体位置的行在本列上以 ✓ 表示
-    for (i, s) in out.iter_mut().enumerate() {
-        if !links_count_as_skills(&s.kind) {
-            continue;
-        }
-        let dir = &s.path;
-        s.skills.retain(|name| {
-            let path = dir.join(name);
-            if !matches!(entry_kind(&path), EntryKind::Symlink(_)) {
-                return true;
-            }
-            let Some(real) = real_path(&path) else {
-                return true;
-            };
-            !keys
-                .iter()
-                .enumerate()
-                .any(|(j, key)| j != i && real.starts_with(key))
-        });
-    }
-    // 过滤后一个 skill 都不剩的位置（整个仓库全是指向别处的链接）不算本体位置
-    out.retain(|s| !s.skills.is_empty());
     out
+}
+
+/// 目标目录里指向"任何已知本体位置之外"的软链，按真实父目录合成为外部本体位置。
+/// 整目录链接的目标读进去就是本体位置，跳过。
+/// 同一父目录下同名不同真实路径的取首个
+pub fn external_sources(env: &Env, targets: &[Target], known: &[Source]) -> Vec<Source> {
+    let inside: Vec<PathBuf> = known.iter().filter_map(|s| real_path(&s.path)).collect();
+    let mut groups: BTreeMap<PathBuf, BTreeMap<String, PathBuf>> = BTreeMap::new();
+    for t in targets.iter().filter(|t| t.linked_whole_to.is_none()) {
+        let Ok(entries) = std::fs::read_dir(&t.path) else {
+            continue;
+        };
+        let mut names: Vec<String> = entries
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| !n.starts_with('.'))
+            .collect();
+        names.sort();
+        for name in names {
+            let path = t.path.join(&name);
+            if !matches!(entry_kind(&path), EntryKind::Symlink(_)) {
+                continue;
+            }
+            // 坏链解析不出真实路径，指向文件的也不是 skill
+            let Some(real) = real_path(&path).filter(|r| r.is_dir()) else {
+                continue;
+            };
+            if inside.iter().any(|k| real.starts_with(k)) {
+                continue;
+            }
+            let Some(parent) = real.parent().map(Path::to_path_buf) else {
+                continue;
+            };
+            groups
+                .entry(parent)
+                .or_default()
+                .entry(name)
+                .or_insert(real);
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(path, skills)| Source {
+            id: normalize(&path).to_string_lossy().into_owned(),
+            label: abbreviate(&path, &env.home),
+            kind: SourceKind::External,
+            skills: skills
+                .into_iter()
+                .map(|(name, path)| Skill { name, path })
+                .collect(),
+            path,
+        })
+        .collect()
+}
+
+/// 主目录下的路径显示成 `~/…`，其余原样
+fn abbreviate(path: &Path, home: &Path) -> String {
+    let home = real_path(home).unwrap_or_else(|| home.to_path_buf());
+    match path.strip_prefix(&home) {
+        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 /// 所有可写目标：每个启用 harness 各自一列——全局目录、per-agent 目录、每个项目的项目目录。
@@ -809,9 +837,24 @@ mod tests {
             std::slice::from_ref(&manual),
         );
 
+        let names = |s: &Source| s.skills.iter().map(|k| k.name.clone()).collect::<Vec<_>>();
+        // 每个 skill 的 path 就是 位置/名字
+        for s in &got {
+            for k in &s.skills {
+                assert_eq!(k.path, s.path.join(&k.name));
+            }
+        }
         let got: Vec<(String, PathBuf, SourceKind, String, Vec<String>)> = got
-            .into_iter()
-            .map(|s| (s.id, s.path, s.kind, s.label, s.skills))
+            .iter()
+            .map(|s| {
+                (
+                    s.id.clone(),
+                    s.path.clone(),
+                    s.kind.clone(),
+                    s.label.clone(),
+                    names(s),
+                )
+            })
             .collect();
         assert_eq!(
             got,
@@ -864,14 +907,15 @@ mod tests {
     }
 
     #[test]
-    fn store_sources_link_through_but_harness_dirs_only_count_real_dirs() {
+    fn sources_count_only_real_directories_as_skills() {
         let t = TempTree::new();
         let home = t.root();
         let outside = t.dir("Applications/ego-skills/ego-browser");
+        let store = t.dir(".agents/skills");
         t.dir(".agents/skills/real-skill");
-        t.link(&home.join(".agents/skills/ego-browser"), &outside);
-        t.link(&home.join(".agents/skills/rotten"), &home.join("gone")); // 坏链不算
-                                                                         // harness 全局目录满是软链（消费目录），一个真实目录都没有 → 不是本体位置
+        t.link(&store.join("ego-browser"), &outside); // 软链不是自己的 skill
+        t.link(&store.join("rotten"), &home.join("gone"));
+        // harness 全局目录满是软链（消费目录），一个真实目录都没有 → 不是本体位置
         t.dir(".claude/skills");
         t.link(&home.join(".claude/skills/ego-browser"), &outside);
         let e = env(&home, &[]);
@@ -882,12 +926,15 @@ mod tests {
         assert_eq!(got[0].kind, SourceKind::Universal);
         assert_eq!(
             got[0].skills,
-            vec!["ego-browser".to_string(), "real-skill".to_string()]
+            vec![Skill {
+                name: "real-skill".into(),
+                path: store.join("real-skill"),
+            }]
         );
     }
 
     #[test]
-    fn store_sources_drop_links_into_other_sources_but_keep_links_to_outside() {
+    fn store_sources_never_count_links_as_their_own_skills() {
         let t = TempTree::new();
         let home = t.root();
         let agent_dir = t.dir(
@@ -898,24 +945,120 @@ mod tests {
         let project = t.dir("Project/app");
         let store = t.dir("Project/app/.agents/skills");
         t.dir("Project/app/.agents/skills/own");
-        t.link(&store.join("from-agent"), &agent_skill); // 指向 WeiboAP 本体位置 → 是链接，不是自己的 skill
-        t.link(&store.join("external"), &outside); // 指向外部目录 → 仍算自己的 skill
+        t.link(&store.join("from-agent"), &agent_skill); // 指向别的本体位置
+        t.link(&store.join("external"), &outside); // 指向外部目录
 
         let e = env(&home, &[]);
         let all = all_harnesses(&e);
         let hs = vec![all.iter().find(|h| h.id == "weiboap").unwrap().clone()];
         let got = sources(&e, &hs, std::slice::from_ref(&project), &[]);
 
-        let by_path = |p: &Path| {
+        let names = |p: &Path| {
             got.iter()
                 .find(|s| s.path == p)
                 .unwrap_or_else(|| panic!("没发现本体位置 {}", p.display()))
+                .skills
+                .iter()
+                .map(|k| k.name.clone())
+                .collect::<Vec<_>>()
         };
-        assert_eq!(by_path(&agent_dir).skills, vec!["agent-skill".to_string()]);
+        assert_eq!(names(&agent_dir), vec!["agent-skill".to_string()]);
+        // 两条软链都不算，只剩真实目录 own
+        assert_eq!(names(&store), vec!["own".to_string()]);
+    }
+
+    #[test]
+    fn external_sources_group_outside_links_by_their_real_parent() {
+        let t = TempTree::new();
+        let home = t.dir("h");
+        // 不在 home 下 → label 用完整路径；两条链接同父目录 → 合并成一处
+        let ego = t.dir("opt/ego-skills");
+        let browser = t.dir("opt/ego-skills/ego-browser");
+        let writer = t.dir("opt/ego-skills/ego-writer");
+        // home 下 → label 用 ~ 缩写
+        let pack = t.dir("h/Applications/pack");
+        let far = t.dir("h/Applications/pack/far-skill");
+        let store = t.dir("h/.agents/skills");
+        let own = t.dir("h/.agents/skills/own");
+
+        let claude = t.dir("h/.claude/skills");
+        t.link(&claude.join("ego-browser"), &browser);
+        t.link(&claude.join("ego-writer"), &writer);
+        t.link(&claude.join("far-skill"), &far);
+        t.link(&claude.join("own"), &own); // 指向已知本体位置 → 不合成
+        t.link(&claude.join("rotten"), &home.join("gone")); // 坏链 → 不合成
+        t.file(&claude, "notes.md"); // 真实文件 → 不合成
+
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let hs = vec![all.iter().find(|h| h.id == "claude-code").unwrap().clone()];
+        let known = sources(&e, &hs, &[], &[]);
+        assert_eq!(known.len(), 1);
+        assert_eq!(known[0].path, store);
+        let tgts = targets(&e, &hs, &[], &known);
+        let got = external_sources(&e, &tgts, &known);
+
         assert_eq!(
-            by_path(&store).skills,
-            vec!["external".to_string(), "own".to_string()]
+            got,
+            vec![
+                Source {
+                    id: pack.display().to_string(),
+                    path: pack.clone(),
+                    kind: SourceKind::External,
+                    label: "~/Applications/pack".to_string(),
+                    skills: vec![Skill {
+                        name: "far-skill".into(),
+                        path: far,
+                    }],
+                },
+                Source {
+                    id: ego.display().to_string(),
+                    path: ego.clone(),
+                    kind: SourceKind::External,
+                    label: ego.display().to_string(),
+                    skills: vec![
+                        Skill {
+                            name: "ego-browser".into(),
+                            path: browser,
+                        },
+                        Skill {
+                            name: "ego-writer".into(),
+                            path: writer,
+                        },
+                    ],
+                },
+            ]
         );
+    }
+
+    #[test]
+    fn external_sources_skip_whole_linked_targets() {
+        let t = TempTree::new();
+        let home = t.dir("h");
+        let ego = t.dir("opt/ego-skills");
+        t.dir("opt/ego-skills/ego-browser");
+        let outside = t.dir("opt/other/far-skill");
+        t.link(&ego.join("far-skill"), &outside); // ego 里还链着更外面的目录
+                                                  // 项目的 .claude/skills 整个是指向 ego 的软链：读进去就是本体位置
+        let proj = t.dir("h/proj");
+        t.dir("h/proj/.claude");
+        t.link(&proj.join(".claude/skills"), &ego);
+
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let hs = vec![all.iter().find(|h| h.id == "claude-code").unwrap().clone()];
+        let known = sources(
+            &e,
+            &hs,
+            std::slice::from_ref(&proj),
+            std::slice::from_ref(&ego),
+        );
+        let tgts = targets(&e, &hs, std::slice::from_ref(&proj), &known);
+        assert_eq!(tgts.len(), 1);
+        assert!(tgts[0].linked_whole_to.is_some());
+        // 整目录链接的目标不扫，far-skill 不会被合成
+        assert!(external_sources(&e, &tgts, &known).is_empty());
+        assert_eq!(known[0].path, ego);
     }
 
     #[test]

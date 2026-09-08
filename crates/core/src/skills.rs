@@ -10,6 +10,9 @@ const WHOLE_LINK_ITEM: &str = "<整目录链接>";
 /// 全局域的 key
 const GLOBAL_KEY: &str = "global";
 
+/// 外部位置不属于任何域，用一个不会与域 key 相等的值占位
+const EXTERNAL_KEY: &str = "external";
+
 /// 域 key：全局固定，项目为 `"project:<归一化路径>"`
 pub fn domain_key(scope: &TargetScope) -> String {
     match scope {
@@ -40,10 +43,12 @@ fn dir_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// 本体位置属于哪个域：项目仓库归它自己的项目，其余（通用仓库、harness 全局、手动）归全局
+/// 本体位置属于哪个域：项目仓库归它自己的项目，通用仓库 / harness 全局 / 手动归全局。
+/// 外部位置不属于任何域，返回一个不会等于任何域 key 的值
 fn source_domain(kind: &SourceKind) -> String {
     match kind {
         SourceKind::ProjectStore { project, .. } => project_key(project),
+        SourceKind::External => EXTERNAL_KEY.to_string(),
         _ => GLOBAL_KEY.to_string(),
     }
 }
@@ -63,10 +68,10 @@ fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
     out
 }
 
-/// `t/name` 是解析到 `s/name` 的软链
-fn links_to(target: &Target, source: &Source, skill: &str) -> bool {
-    let path = target.path.join(skill);
-    matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &source.path.join(skill))
+/// `t/name` 是解析到该 skill 本体路径的软链
+fn links_to(target: &Target, skill: &Skill) -> bool {
+    let path = target.path.join(&skill.name);
+    matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &skill.path)
 }
 
 /// 只读扫描，按域组织。只产出事实，不作任何选择
@@ -79,9 +84,9 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
         for s in sources {
             let own = source_domain(&s.kind) == key;
             for skill in &s.skills {
-                let linked = || d_targets.iter().any(|t| links_to(t, s, skill));
+                let linked = || d_targets.iter().any(|t| links_to(t, skill));
                 if own || linked() {
-                    keys.insert((skill.clone(), s.label.clone(), s.id.clone()));
+                    keys.insert((skill.name.clone(), s.label.clone(), s.id.clone()));
                 }
             }
         }
@@ -90,6 +95,7 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
             .into_iter()
             .filter_map(|(skill, _, source_id)| {
                 let source = by_id.get(source_id.as_str())?;
+                let skill_path = source.skill_path(&skill)?.to_path_buf();
                 let cells: Vec<Cell> = d_targets
                     .iter()
                     .map(|t| {
@@ -98,7 +104,7 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
                             source_id: source_id.clone(),
                             skill: skill.clone(),
                             target_id: t.id.clone(),
-                            state: cell_state(source, &skill, t, &path),
+                            state: cell_state(source, &skill_path, t, &path),
                             path,
                         }
                     })
@@ -176,14 +182,14 @@ fn propose_by(
         let Some(source) = by_id.get(cell.source_id.as_str()) else {
             continue;
         };
-        if !source.skills.iter().any(|s| s == &cell.skill) {
+        let Some(skill_path) = source.skill_path(&cell.skill) else {
             continue;
-        }
+        };
         let Some(target) = targets.iter().find(|t| t.id == cell.target_id) else {
             continue;
         };
         let path = target.path.join(&cell.skill);
-        if !wanted(cell_state(source, &cell.skill, target, &path), target) {
+        if !wanted(cell_state(source, skill_path, target, &path), target) {
             continue;
         }
         if !seen.insert(path.clone()) {
@@ -192,7 +198,7 @@ fn propose_by(
         out.push(PlannedAction {
             kind,
             item_name: cell.skill.clone(),
-            source_path: source.path.join(&cell.skill),
+            source_path: skill_path.to_path_buf(),
             target_path: path,
             target: target.path.clone(),
         });
@@ -208,17 +214,21 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
         let Some(source) = find_source(sources, &rule.source) else {
             continue;
         };
+        // 外部位置由 harness 目录里的软链合成，规则不该指向它
+        if source.kind == SourceKind::External {
+            continue;
+        }
         for target_id in &rule.targets {
             if !targets.iter().any(|t| &t.id == target_id) {
                 continue;
             }
             for skill in &source.skills {
-                if rule.excluded.contains(skill) {
+                if rule.excluded.contains(&skill.name) {
                     continue;
                 }
                 out.push(CellRef {
                     source_id: source.id.clone(),
-                    skill: skill.clone(),
+                    skill: skill.name.clone(),
                     target_id: target_id.clone(),
                 });
             }
@@ -297,7 +307,8 @@ fn find_rule_mut<'a>(rules: &'a mut [AutoLink], source: &Path) -> Option<&'a mut
     rules.iter_mut().find(|r| r.source == source)
 }
 
-fn cell_state(source: &Source, skill: &str, target: &Target, path: &Path) -> CellState {
+/// `skill_path` 是该 skill 在本体位置里的真实路径，`path` 是它在目标目录下的位置
+fn cell_state(source: &Source, skill_path: &Path, target: &Target, path: &Path) -> CellState {
     match target.linked_whole_to.as_deref() {
         Some(id) if id == source.id => return CellState::Linked,
         Some(_) => return CellState::Unwritable,
@@ -311,7 +322,7 @@ fn cell_state(source: &Source, skill: &str, target: &Target, path: &Path) -> Cel
         EntryKind::Missing => CellState::Missing,
         EntryKind::Dir | EntryKind::File => CellState::Duplicate,
         EntryKind::Symlink(_) if real_path(path).is_none() => CellState::Broken,
-        EntryKind::Symlink(_) if same_real(path, &source.path.join(skill)) => CellState::Linked,
+        EntryKind::Symlink(_) if same_real(path, skill_path) => CellState::Linked,
         EntryKind::Symlink(_) => CellState::Foreign,
     }
 }
@@ -347,11 +358,11 @@ fn broken_links(dir: &Path) -> Vec<PlannedAction> {
         .collect()
 }
 
-/// 目标属于某项目且本体位置在该项目内 → 相对路径（随 git 走），否则绝对路径
-pub fn link_style(source: &Source, target: &Target) -> LinkStyle {
+/// 目标属于某项目且 skill 本体在该项目内 → 相对路径（随 git 走），否则绝对路径
+pub fn link_style(skill_path: &Path, target: &Target) -> LinkStyle {
     match &target.scope {
         TargetScope::Project { project, .. }
-            if normalize(&source.path).starts_with(normalize(project)) =>
+            if normalize(skill_path).starts_with(normalize(project)) =>
         {
             LinkStyle::Relative
         }
@@ -412,10 +423,10 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
         });
         return report(entries);
     }
-    let style = link_style(source, target);
     for skill in &source.skills {
-        let source_path = source.path.join(skill);
-        let target_path = target.path.join(skill);
+        let source_path = skill.path.clone();
+        let target_path = target.path.join(&skill.name);
+        let style = link_style(&source_path, target);
         let outcome = match create_link(&source_path, &target_path, style) {
             Ok(()) => Outcome::Created,
             Err(e) => Outcome::Failed(e.to_string()),
@@ -424,7 +435,7 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
         entries.push(ReportEntry {
             action: PlannedAction {
                 kind: ActionKind::Create,
-                item_name: skill.clone(),
+                item_name: skill.name.clone(),
                 source_path,
                 target_path,
                 target: target.path.clone(),
@@ -453,13 +464,24 @@ mod tests {
             id: path.to_string_lossy().into_owned(),
             label: label.into(),
             kind,
-            skills: skills.iter().map(|s| s.to_string()).collect(),
+            skills: skills
+                .iter()
+                .map(|s| Skill {
+                    name: s.to_string(),
+                    path: path.join(s),
+                })
+                .collect(),
             path,
         }
     }
 
     fn source(path: &Path, skills: &[&str]) -> Source {
         make_source(path, "本体", SourceKind::Universal, skills)
+    }
+
+    /// 外部位置：由 harness 目录里指向它的软链合成
+    fn external_source(path: &Path, skills: &[&str]) -> Source {
+        make_source(path, "外部", SourceKind::External, skills)
     }
 
     /// 某项目的本体仓库（属于该项目的域）
@@ -798,17 +820,55 @@ mod tests {
     }
 
     #[test]
-    fn link_style_is_relative_only_inside_the_target_project() {
+    fn link_style_is_relative_only_for_skills_inside_the_target_project() {
         let t = TempTree::new();
         let proj = t.dir("proj");
-        let inside = source(&t.dir("proj/.agents/skills"), &[]);
-        let outside = source(&t.dir("store"), &[]);
+        let inside = source(&t.dir("proj/.agents/skills"), &["a"]);
+        let outside = source(&t.dir("store"), &["a"]);
         let p = project(&proj, "claude-code", &t.dir("proj/.claude/skills"));
         let g = global("claude-code", &t.dir("g"));
-        assert_eq!(link_style(&inside, &p), LinkStyle::Relative);
-        assert_eq!(link_style(&outside, &p), LinkStyle::Absolute);
-        assert_eq!(link_style(&inside, &g), LinkStyle::Absolute);
-        assert_eq!(link_style(&outside, &g), LinkStyle::Absolute);
+        let at = |s: &Source| s.skill_path("a").unwrap().to_path_buf();
+        assert_eq!(link_style(&at(&inside), &p), LinkStyle::Relative);
+        assert_eq!(link_style(&at(&outside), &p), LinkStyle::Absolute);
+        assert_eq!(link_style(&at(&inside), &g), LinkStyle::Absolute);
+        assert_eq!(link_style(&at(&outside), &g), LinkStyle::Absolute);
+    }
+
+    #[test]
+    fn external_sources_link_from_their_real_path_and_own_no_domain() {
+        let t = TempTree::new();
+        let ego = t.dir("opt/ego-skills");
+        let browser = t.dir("opt/ego-skills/ego-browser");
+        let writer = t.dir("opt/ego-skills/ego-writer");
+        let claude = t.dir("home/.claude/skills");
+        t.link(&claude.join("ego-browser"), &browser); // Linked
+                                                       // ego-writer 目标里没有 → Missing
+        let s = external_source(&ego, &["ego-browser", "ego-writer"]);
+        let tg = global("claude-code", &claude);
+        let sources = vec![s.clone()];
+        let targets = vec![tg.clone()];
+
+        let ov = scan(&sources, &targets);
+        // 外部位置不属于任何域：只有被链接的那行成行，own 恒为 false
+        assert_eq!(
+            rows(&ov.domains[0]),
+            vec![(s.id.clone(), "ego-browser".into(), false)]
+        );
+        assert_eq!(ov.domains[0].rows[0].cells[0].state, CellState::Linked);
+
+        // 未成行的 ego-writer 也能建链，链接指向真实路径而非 位置/名字 的拼接
+        let acts = propose_links(&sources, &targets, &[cell(&s, "ego-writer", &tg)]);
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].source_path, writer);
+        assert_eq!(acts[0].target_path, claude.join("ego-writer"));
+
+        // 自动同步不接受外部位置
+        let rules = vec![AutoLink {
+            source: normalize(&ego),
+            targets: vec![tg.id.clone()],
+            excluded: BTreeSet::new(),
+        }];
+        assert!(auto_link_cells(&sources, &targets, &rules).is_empty());
     }
 
     #[cfg(unix)]
