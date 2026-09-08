@@ -1,6 +1,10 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
+mod watch;
+
 use serde::Serialize;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use symsync_core::discovery::{self, Env};
 use symsync_core::fs::normalize;
 use symsync_core::models::*;
@@ -10,6 +14,8 @@ use symsync_core::sync;
 
 struct AppState {
     store: Store,
+    /// 当前的文件系统监视，随每次扫描的目录集合重建
+    watcher: Mutex<Option<watch::Watcher>>,
 }
 
 #[derive(Serialize)]
@@ -43,8 +49,25 @@ fn overview(state: &AppState) -> Result<Overview, String> {
 }
 
 #[tauri::command]
-fn scan_all(state: tauri::State<'_, AppState>) -> Result<Overview, String> {
-    overview(&state)
+fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<Overview, String> {
+    let overview = overview(&state)?;
+    // 本体位置与目标目录都要盯：删本体、手工建/删软链都会改到它们的直接子项
+    let paths: BTreeSet<PathBuf> = overview
+        .sources
+        .iter()
+        .map(|s| s.path.clone())
+        .chain(
+            overview
+                .domains
+                .iter()
+                .flat_map(|d| &d.targets)
+                .map(|t| t.path.clone()),
+        )
+        .collect();
+    if let Ok(mut slot) = state.watcher.lock() {
+        watch::resync(&mut slot, &app, paths);
+    }
+    Ok(overview)
 }
 
 /// 选中格里的 Missing 格 → 建链动作
@@ -224,6 +247,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             store: Store::new(Store::default_dir()),
+            watcher: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             scan_all,

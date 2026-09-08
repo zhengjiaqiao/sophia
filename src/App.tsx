@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import type { Overview } from "./types";
 import SkillsTab from "./SkillsTab";
@@ -7,6 +9,8 @@ import "./App.css";
 
 /// 侧栏「全部」的选中键；其余为 DomainPage.key
 const ALL_KEY = "all";
+/// 文件系统事件与窗口获得焦点后的重扫去抖
+const REFRESH_DELAY = 300;
 
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -16,9 +20,15 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 手动添加的项目路径，用来判断侧栏哪些域可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
+  // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
+  const busyRef = useRef(false);
+  const pendingRef = useRef(false);
+  const timerRef = useRef<number | null>(null);
+  busyRef.current = busy;
 
   // 扫描是纯读操作；任何写动作之后重新扫描，而不是在前端改状态
   const refresh = async () => {
+    busyRef.current = true;
     setBusy(true);
     try {
       const [next, projects] = await Promise.all([api.scanAll(), api.listManualProjects()]);
@@ -27,14 +37,54 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
+    // 扫描期间到达的事件只记一个标记，扫完再补一次
+    if (pendingRef.current) {
+      pendingRef.current = false;
+      await refresh();
+    }
   };
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  // 文件系统变化与窗口获得焦点都走这里：忙则排队，闲则去抖后重扫
+  const requestRefresh = useCallback(() => {
+    if (busyRef.current) {
+      pendingRef.current = true;
+      return;
+    }
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      void refreshRef.current();
+    }, REFRESH_DELAY);
+  }, []);
+
   useEffect(() => {
     void refresh();
     // 首次加载一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const unlistens: Array<() => void> = [];
+    const collect = (pending: Promise<() => void>) => {
+      void pending.then((un) => (disposed ? un() : unlistens.push(un)));
+    };
+    collect(listen("fs-changed", () => requestRefresh()));
+    // 兜底：在 Finder 里改了不在监视集合内的东西，切回窗口时也能发现
+    collect(
+      getCurrentWindow().onFocusChanged(({ payload: focused }) => focused && requestRefresh()),
+    );
+    return () => {
+      disposed = true;
+      unlistens.forEach((un) => un());
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, [requestRefresh]);
 
   const domains = overview?.domains ?? [];
   // 域 key → 手动项目路径；自动发现的项目与 agent 域不在其中，因此没有移除按钮

@@ -304,9 +304,6 @@ export default function SkillsTab({
         >
           清理坏链（{broken.length}）
         </button>
-        <button onClick={() => void onRefresh()} disabled={busy}>
-          刷新
-        </button>
       </div>
 
       <div className="toolbar filters">
