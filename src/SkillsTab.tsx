@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import DomainView from "./DomainView";
+import DomainView, { join, type UnlinkTarget } from "./DomainView";
 import ImportDialog from "./ImportDialog";
 import {
   actionId,
@@ -55,9 +55,14 @@ export default function SkillsTab({
   const [report, setReport] = useState<SyncReport | null>(null);
   // 暂态提示：说明为什么没动作、某个格为什么不能点
   const [notice, setNotice] = useState<string | null>(null);
+  // 结果框里按 skill 的说明：本体去向、失败条数
+  const [notes, setNotes] = useState<string[]>([]);
   const [confirmClean, setConfirmClean] = useState(false);
-  // 待确认的删链动作；行、格、批量三条路径都汇到这里
-  const [pendingUnlink, setPendingUnlink] = useState<PlannedAction[] | null>(null);
+  // 待确认的清链动作与它们所属的行；行、格、批量三条路径都汇到这里
+  const [pendingUnlink, setPendingUnlink] = useState<{
+    actions: PlannedAction[];
+    rows: { page: DomainPage; row: DomainRow }[];
+  } | null>(null);
   // 选中的行，默认为空；键见 rowKey
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Shift 区间选择的锚点：域 key → 上次点击的行键
@@ -67,12 +72,18 @@ export default function SkillsTab({
   const [filterSources, setFilterSources] = useState<Map<string, Set<string>>>(new Map());
   const [importOpen, setImportOpen] = useState(false);
 
-  // 结果框是暂态的：6 秒后自行消失
+  // 结果框是暂态的：6 秒后自行消失；带 skill 说明时留久一点
   useEffect(() => {
     if (!report) return;
-    const timer = setTimeout(() => setReport(null), 6000);
+    const timer = setTimeout(
+      () => {
+        setReport(null);
+        setNotes([]);
+      },
+      notes.length > 0 ? 15000 : 6000,
+    );
     return () => clearTimeout(timer);
-  }, [report]);
+  }, [report, notes]);
 
   // 提示同样是暂态的
   useEffect(() => {
@@ -84,6 +95,7 @@ export default function SkillsTab({
   // 结果、确认与弹层只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
     setReport(null);
+    setNotes([]);
     setNotice(null);
     setConfirmClean(false);
     setPendingUnlink(null);
@@ -147,12 +159,40 @@ export default function SkillsTab({
       return next;
     });
 
-  const run = async (subset: PlannedAction[], cleanBroken: boolean) => {
+  /// 把清链结果按行归拢：全成功时说明本体去向，有失败时指回上面的逐条结果
+  const unlinkNote = (report: SyncReport, row: DomainRow): string | null => {
+    const entries = report.entries.filter(
+      (e) =>
+        e.action.itemName === row.skill && row.cells.some((c) => c.path === e.action.targetPath),
+    );
+    if (entries.length === 0) return null;
+    const failed = entries.filter((e) => e.outcome.status !== "removed").length;
+    if (failed > 0) return `「${row.skill}」有 ${failed} 条软链未能删除，见上方。`;
+    if (row.own) {
+      const dir = overview?.sources.find((s) => s.id === row.sourceId)?.path ?? row.sourceId;
+      return `「${row.skill}」的软链已清除；本体仍在 ${join(dir, row.skill)}，点击表格里的本体位置可在 Finder 中定位，删掉本体后它才会从列表消失。`;
+    }
+    // 单格清除时行里可能还留着别的链接，行不会消失
+    const linked = row.cells.filter((c) => c.state === "linked").length;
+    return entries.length === linked
+      ? `「${row.skill}」的软链已清除，已从列表移除。`
+      : `「${row.skill}」的软链已清除，它在其他 harness 下的链接还在。`;
+  };
+
+  const run = async (
+    subset: PlannedAction[],
+    cleanBroken: boolean,
+    rows: { page: DomainPage; row: DomainRow }[] = [],
+  ) => {
     onBusy(true);
     setConfirmClean(false);
     setPendingUnlink(null);
     try {
-      setReport(await api.applyAll(subset, cleanBroken));
+      const result = await api.applyAll(subset, cleanBroken);
+      setReport(result);
+      setNotes(
+        rows.map(({ row }) => unlinkNote(result, row)).filter((t): t is string => t !== null),
+      );
     } catch (e) {
       onError(String(e));
     } finally {
@@ -175,16 +215,16 @@ export default function SkillsTab({
     }
   };
 
-  // 删链先算动作再进确认条
-  const askUnlink = async (cells: CellRef[]) => {
+  // 清链先算动作再进确认条；行一起带上，执行后据此写说明
+  const askUnlink = async (targets: UnlinkTarget[]) => {
     try {
-      const acts = await api.proposeUnlinks(cells);
+      const acts = await api.proposeUnlinks(targets.flatMap((t) => t.cells ?? cellsOf(t.row)));
       if (acts.length === 0) {
-        setNotice("没有可删除的链接");
+        setNotice("没有可清除的软链接");
         return;
       }
       setConfirmClean(false);
-      setPendingUnlink(acts);
+      setPendingUnlink({ actions: acts, rows: targets.map(({ page, row }) => ({ page, row })) });
     } catch (e) {
       onError(String(e));
     }
@@ -217,9 +257,9 @@ export default function SkillsTab({
 
   // 选中行的全部格；建链按它算
   const chosenCells: CellRef[] = chosen.flatMap(({ rows }) => rows.flatMap(cellsOf));
-  // 可删除的 skill 行：选中、本体不在本域、且有可取消的链接
-  const deletableRows = chosen.flatMap(({ page, rows }) =>
-    rows.filter((row) => !row.own && hasUnlinkable(page, row)),
+  // 可清链的行：选中、且有可清除的格。本体在本域的行也算，只清它在其他 harness 下的链接
+  const clearableRows: UnlinkTarget[] = chosen.flatMap(({ page, rows }) =>
+    rows.filter((row) => hasUnlinkable(page, row)).map((row) => ({ page, row })),
   );
 
   // 缺失按格算：一行在多个目标上缺失就算多处。
@@ -287,11 +327,15 @@ export default function SkillsTab({
             补齐缺失（{missing} 处）
           </button>
           <button
-            onClick={() => void askUnlink(deletableRows.flatMap(cellsOf))}
-            disabled={busy || deletableRows.length === 0}
-            title="本体在本域的 skill 不会被删除"
+            onClick={() => void askUnlink(clearableRows)}
+            disabled={busy || clearableRows.length === 0}
+            title={
+              clearableRows.length === 0
+                ? "选中的行里没有可清除的软链接"
+                : "清除选中行在本域各 harness 下的软链接"
+            }
           >
-            删除（{deletableRows.length} 个）
+            清除软链（{clearableRows.length} 个）
           </button>
           <button className="link" onClick={() => setSelected(new Set())}>
             取消选择
@@ -302,8 +346,12 @@ export default function SkillsTab({
       {pendingUnlink !== null && (
         <div className="toolbar">
           <span className="confirm">
-            将删除 {pendingUnlink.length} 条软链接，只删链接本身，不删任何真实文件。
-            <button onClick={() => void run(pendingUnlink, false)} disabled={busy}>
+            将删除 {pendingUnlink.actions.length}{" "}
+            条软链接，只删链接本身，不删任何真实文件。本体在本域的 skill 只清链接，本体目录不动。
+            <button
+              onClick={() => void run(pendingUnlink.actions, false, pendingUnlink.rows)}
+              disabled={busy}
+            >
               确认删除
             </button>
             <button onClick={() => setPendingUnlink(null)}>取消</button>
@@ -324,7 +372,13 @@ export default function SkillsTab({
         <div className="report">
           <div className="report-head">
             <span>本次结果（{report.entries.length} 条）</span>
-            <button className="link" onClick={() => setReport(null)}>
+            <button
+              className="link"
+              onClick={() => {
+                setReport(null);
+                setNotes([]);
+              }}
+            >
               关闭
             </button>
           </div>
@@ -335,6 +389,13 @@ export default function SkillsTab({
               </li>
             ))}
           </ul>
+          {notes.length > 0 && (
+            <ul className="notes">
+              {notes.map((text) => (
+                <li key={text}>{text}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {pages.length === 0 ? (
@@ -366,7 +427,10 @@ export default function SkillsTab({
           page={importPage}
           onClose={() => setImportOpen(false)}
           onChange={onRefresh}
-          onReport={setReport}
+          onReport={(r) => {
+            setNotes([]);
+            setReport(r);
+          }}
           onError={onError}
           onNotice={setNotice}
         />

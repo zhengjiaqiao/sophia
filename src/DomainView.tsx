@@ -3,6 +3,13 @@ import { api } from "./api";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
+/// 交给容器去清除的一批软链：行（用于结果说明）+ 要清的格，省略 cells = 整行
+export interface UnlinkTarget {
+  page: DomainPage;
+  row: DomainRow;
+  cells?: CellRef[];
+}
+
 export interface DomainViewProps {
   overview: Overview;
   page: DomainPage;
@@ -18,9 +25,9 @@ export interface DomainViewProps {
   onSelectAll: (selected: boolean) => void;
   onChange: () => Promise<void>;
   onError: (message: string) => void;
-  /// 把格交给容器：建链、删链（走确认条）、只说明原因
+  /// 把格交给容器：建链、清链（走确认条）、只说明原因
   onLink: (cells: CellRef[]) => Promise<void>;
-  onUnlink: (cells: CellRef[]) => Promise<void>;
+  onUnlink: (targets: UnlinkTarget[]) => Promise<void>;
   onNotice: (text: string) => void;
 }
 
@@ -53,7 +60,8 @@ const cellsOf = (row: DomainRow): CellRef[] =>
 const ABSENT_RANK = STATE_RANK.unwritable + 1;
 
 /// 拼路径：Windows 路径用反斜杠，其余用斜杠
-const join = (dir: string, name: string) => `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
+export const join = (dir: string, name: string) =>
+  `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
 
 /// 一个域的整页：筛选片、行×目标的表格、坏链表
 export default function DomainView({
@@ -265,7 +273,7 @@ export default function DomainView({
                         title={title}
                         onClick={() => {
                           if (linkable) void onLink([ref]);
-                          else if (unlinkable) void onUnlink([ref]);
+                          else if (unlinkable) void onUnlink([{ page, row, cells: [ref] }]);
                           else onNotice(reason);
                         }}
                       >
@@ -283,17 +291,15 @@ export default function DomainView({
                     补齐
                   </button>
                   <button
-                    disabled={busy || row.own || !hasUnlinkable(row)}
+                    disabled={busy || !hasUnlinkable(row)}
                     title={
-                      row.own
-                        ? "本体在本域，不能删除；可逐个取消某个 harness 下的链接"
-                        : hasUnlinkable(row)
-                          ? "删除它在本域所有 harness 下的链接"
-                          : "没有可删除的链接"
+                      hasUnlinkable(row)
+                        ? "清除它在本域所有 harness 下的软链接"
+                        : "没有可清除的软链接"
                     }
-                    onClick={() => void onUnlink(cellsOf(row))}
+                    onClick={() => void onUnlink([{ page, row }])}
                   >
-                    删除
+                    清除软链
                   </button>
                 </td>
               </tr>
