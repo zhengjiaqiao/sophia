@@ -269,3 +269,54 @@ core：`make test-core`（删除相关测试随功能移除）。前端 `make bu
 - 自己写操作触发的 fs 事件会导致多扫一次，可接受。
 - 监视失败（目录不可读等）只记日志，不报错到界面。
 - `docs/manual-checks.md`：去掉刷新按钮相关，加"在 Finder 删掉一个本体目录 / 手工建一条软链后，1 秒内表格自动更新"。
+
+## 19. 修订 v6.0（2026-09-08）：自动同步规则（只增不删）
+
+- 状态：待实现
+
+### 19.1 模型与存储
+
+```rust
+/// 一条自动同步规则：本体位置下的全部 skill（排除名单除外）持续补齐到这些目标
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoLink {
+    pub source: PathBuf,           // normalize 后的本体位置路径
+    pub targets: Vec<String>,      // 目标 id（同一域内）
+    #[serde(default)]
+    pub excluded: BTreeSet<String>, // 手动清除过、不再自动链接的 skill
+}
+```
+`Settings` 加 `#[serde(default)] pub auto_links: Vec<AutoLink>`（`models.rs` 放 `AutoLink`，`store.rs` 的 `Settings` 引用）。旧 `settings.json` 无此字段 → 空。
+
+### 19.2 core（`skills.rs`）
+
+```rust
+/// 规则展开成格：source 找不到 / 目标找不到 → 跳过；skill 在 excluded 里 → 跳过
+pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink]) -> Vec<CellRef>;
+```
+随后复用 `propose_links`（只对 Missing 建 Create；Duplicate / Foreign / Unwritable 自然跳过）。
+
+规则维护函数（纯函数，作用于 `Vec<AutoLink>`）：
+- `upsert_auto_link(rules, source, targets)`：同 source 已有规则 → 目标并集、并把本次 targets 涉及的 skill 从 excluded 里去掉的事交给 `include`；没有 → 新建。
+- `remove_auto_link(rules, source)`。
+- `exclude(rules, source, skill)` / `include(rules, source, skill)`。
+- `covering(rules, source_id, skill) -> Option<&AutoLink>`：该 skill 是否在某条规则（未排除）范围内。
+
+### 19.3 命令层
+
+- `scan_all`：扫描后 `auto_link_cells` → `propose_links` → 非空则 `apply_all` 同样的执行路径（按 `style_for` 分组 `sync::execute`）→ **再扫一次**返回；执行结果通过 `app.emit("auto-linked", SyncReport)` 发给前端。只做一轮，不循环。
+- 新增：`list_auto_links() -> Vec<AutoLink>`、`set_auto_link(source: PathBuf, targets: Vec<String>)`（upsert）、`remove_auto_link(source)`、`exclude_auto_link(source, skill)`、`include_auto_link(source, skill)`。
+- 前端每次 `scanAll` 后顺带 `listAutoLinks`（并行）。
+
+### 19.4 前端
+
+- **引入弹层**底部（`引入` 按钮左侧）加复选框："以后此本体位置新增的 skill 也自动链接到所选 harness"。勾选时点 `引入` = 先 `setAutoLink(source.path, targetIds)` 再走现有建链流程（若勾选的 skill 里有被排除的，先 `includeAutoLink`）。弹层打开时若该位置已有规则，复选框默认勾上、右栏目标默认为规则的 targets；被排除的 skill 在中栏名字后标 `已排除自动同步`。
+- **域页**筛选行下方：`自动同步：<label> → <harness 名, …>（排除 n）　×`，每条规则一行（只列 targets 落在本域的规则）；× 直接 `removeAutoLink` 并重扫，不需确认。
+- **清除软链确认弹窗**：若本次涉及的行有被规则覆盖的，弹窗多一段："以下 skill 在自动同步范围内，清除后将不再自动链接：a、b"。确认后先对这些 (source, skill) 调 `excludeAutoLink`，再执行删除。
+- **浮层**：监听 `auto-linked` 事件，用结果框展示（标题 "自动同步"）。
+- 后端字段用 `AutoLink { source; targets; excluded: string[] }` 对应到 `types.ts`。
+
+### 19.5 测试
+
+core：`auto_link_cells`（排除、缺目标、缺位置）；规则维护四个函数；`Settings` 旧文件无 `auto_links` 可读。前端 `make build-web`。`docs/manual-checks.md`：建规则 → 在 Finder 往本体位置新建一个 skill 目录 → 1 秒内自动出现链接并弹浮层；清除该 skill → 弹窗提示排除 → 不再补回；弹层重新勾选 → 解除排除。
