@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import ImportDialog from "./ImportDialog";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
-import type { CellRef, CellState, DomainPage, DomainRow, Overview, SyncReport } from "./types";
+import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
 export interface DomainViewProps {
   overview: Overview;
   page: DomainPage;
+  /// 经过筛选、要显示的行；排序在本组件里做
+  rows: DomainRow[];
   busy: boolean;
+  /// 高亮的本体位置筛选片（空 = 不筛）
+  activeSources: Set<string>;
+  onToggleSource: (sourceId: string) => void;
   isSelected: (row: DomainRow) => boolean;
-  onToggle: (row: DomainRow) => void;
+  /// 行首复选框：交回当前显示顺序的行，供 Shift 区间选择算区间
+  onToggle: (row: DomainRow, shiftKey: boolean, ordered: DomainRow[]) => void;
   onSelectAll: (selected: boolean) => void;
   onChange: () => Promise<void>;
-  onReport: (report: SyncReport) => void;
   onError: (message: string) => void;
   /// 把格交给容器：建链、删链（走确认条）、只说明原因
   onLink: (cells: CellRef[]) => Promise<void>;
@@ -48,16 +52,18 @@ const cellsOf = (row: DomainRow): CellRef[] =>
 /// 没有格子的行排在所有状态之后
 const ABSENT_RANK = STATE_RANK.unwritable + 1;
 
-/// 一个域的整页：来源标签行、行×目标的表格、坏链表
+/// 一个域的整页：筛选片、行×目标的表格、坏链表
 export default function DomainView({
   overview,
   page,
+  rows: visible,
   busy,
+  activeSources,
+  onToggleSource,
   isSelected,
   onToggle,
   onSelectAll,
   onChange,
-  onReport,
   onError,
   onLink,
   onUnlink,
@@ -65,8 +71,6 @@ export default function DomainView({
 }: DomainViewProps) {
   // 表头排序；null = 后端原序（skill 名再本体位置）
   const [sort, setSort] = useState<SortState | null>(null);
-  // 引入弹层：null = 关闭；string 为预选的本体位置 id，"" 为不预选
-  const [importing, setImporting] = useState<string | null>(null);
   // 待确认拆分整目录链接的目标 id
   const [confirmSplit, setConfirmSplit] = useState<string | null>(null);
 
@@ -96,20 +100,20 @@ export default function DomainView({
         page.targets.find((t) => t.id === c.targetId)?.linkedWholeTo === null,
     );
 
-  // 标签行按行统计本域出现过的本体位置
+  // 筛选片按本域全部行统计本体位置，筛选不改变片上的计数
   const counts = new Map<string, number>();
   for (const row of page.rows) counts.set(row.sourceId, (counts.get(row.sourceId) ?? 0) + 1);
 
-  // 表头全选框：全勾则勾，部分勾则半选
-  const allSelected = page.rows.length > 0 && page.rows.every((r) => isSelected(r));
-  const someSelected = !allSelected && page.rows.some((r) => isSelected(r));
+  // 表头全选框只看可见行：全选则勾，部分选中则半选
+  const allSelected = visible.length > 0 && visible.every((r) => isSelected(r));
+  const someSelected = !allSelected && visible.some((r) => isSelected(r));
   const allRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (allRef.current) allRef.current.indeterminate = someSelected;
   }, [someSelected]);
 
   const rows = sort
-    ? [...page.rows].sort(
+    ? [...visible].sort(
         compareBy((row: DomainRow) => {
           if (sort.key === "skill") return row.skill;
           if (sort.key === "source") return labelOf(row.sourceId);
@@ -117,7 +121,7 @@ export default function DomainView({
           return cell ? STATE_RANK[cell.state] : ABSENT_RANK;
         }, sort.dir),
       )
-    : page.rows;
+    : visible;
 
   const sortHeader = (key: string, label: string) => (
     <button
@@ -133,22 +137,21 @@ export default function DomainView({
     <div className="domain-group">
       <h2>{page.label}</h2>
 
-      <div className="tags">
-        {[...counts].map(([sourceId, n]) => (
-          <button
-            className="tag"
-            key={sourceId}
-            title={sourceId}
-            disabled={busy}
-            onClick={() => setImporting(sourceId)}
-          >
-            {labelOf(sourceId)} · {n} 个
-          </button>
-        ))}
-        <button disabled={busy} onClick={() => setImporting("")}>
-          引入…
-        </button>
-      </div>
+      {counts.size > 0 && (
+        <div className="tags">
+          {[...counts].map(([sourceId, n]) => (
+            <button
+              className={activeSources.has(sourceId) ? "tag active" : "tag"}
+              key={sourceId}
+              title={sourceId}
+              disabled={busy}
+              onClick={() => onToggleSource(sourceId)}
+            >
+              {labelOf(sourceId)} · {n}
+            </button>
+          ))}
+        </div>
+      )}
 
       {page.targets.length === 0 ? (
         <p>该域下没有可用的目标目录。</p>
@@ -161,7 +164,7 @@ export default function DomainView({
                   ref={allRef}
                   type="checkbox"
                   checked={allSelected}
-                  disabled={busy}
+                  disabled={busy || visible.length === 0}
                   onChange={() => onSelectAll(!allSelected)}
                 />
                 {sortHeader("skill", "skill")}
@@ -205,11 +208,13 @@ export default function DomainView({
               <tr key={`${row.sourceId}|${row.skill}`}>
                 <td>
                   <label>
+                    {/* 用 onClick 是为了拿到 shiftKey；选中态仍由上层状态决定 */}
                     <input
                       type="checkbox"
                       checked={isSelected(row)}
                       disabled={busy}
-                      onChange={() => onToggle(row)}
+                      readOnly
+                      onClick={(e) => onToggle(row, e.shiftKey, rows)}
                     />
                     {row.skill}
                   </label>
@@ -302,19 +307,6 @@ export default function DomainView({
             </tbody>
           </table>
         </div>
-      )}
-
-      {importing !== null && (
-        <ImportDialog
-          overview={overview}
-          page={page}
-          initialSourceId={importing || undefined}
-          onClose={() => setImporting(null)}
-          onChange={onChange}
-          onReport={onReport}
-          onError={onError}
-          onNotice={onNotice}
-        />
       )}
     </div>
   );

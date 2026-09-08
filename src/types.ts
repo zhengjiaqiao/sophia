@@ -1,10 +1,4 @@
 // 与 crates/core/src/models.rs 的 serde 输出一一对应（camelCase）
-export type Domain = { type: "global" } | { type: "project"; path: string };
-export interface DomainInfo {
-  domain: Domain;
-  label: string;
-}
-
 export type SourceKind =
   | { type: "universal" }
   | { type: "harnessGlobal"; harnessId: string }
@@ -69,8 +63,7 @@ export interface CellRef {
   targetId: string;
 }
 
-export type ActionKind =
-  "create" | "alreadyLinked" | "conflict" | "sourceMissing" | "brokenLink" | "unlink";
+export type ActionKind = "create" | "brokenLink" | "unlink";
 export interface PlannedAction {
   kind: ActionKind;
   itemName: string;
@@ -91,16 +84,6 @@ export interface SyncReport {
   entries: ReportEntry[];
 }
 
-export type Selection = "all" | { items: string[] };
-export interface SyncRule {
-  id: string;
-  name: string;
-  source: string;
-  selection: Selection;
-  targets: string[];
-  lastRunAt: string | null;
-}
-
 export interface HarnessStatus {
   id: string;
   displayName: string;
@@ -108,5 +91,3 @@ export interface HarnessStatus {
 }
 
 export const actionId = (a: PlannedAction): string => `${a.kind}|${a.targetPath}`;
-export const domainKey = (d: Domain): string =>
-  d.type === "global" ? "global" : `project:${d.path}`;
