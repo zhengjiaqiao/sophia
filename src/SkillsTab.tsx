@@ -92,6 +92,24 @@ export default function SkillsTab({
     return () => clearTimeout(timer);
   }, [report, notes]);
 
+  // 重扫后高亮的本体位置在该域已没有行（比如它的软链刚被清光）→ 自动取消这个筛选，
+  // 否则表格会莫名其妙地空着
+  useEffect(() => {
+    if (!overview) return;
+    setFilterSources((prev) => {
+      let changed = false;
+      const next = new Map<string, Set<string>>();
+      for (const [key, ids] of prev) {
+        const page = overview.domains.find((d) => d.key === key);
+        const present = new Set(page?.rows.map((r) => r.sourceId) ?? []);
+        const kept = new Set([...ids].filter((id) => present.has(id)));
+        if (kept.size !== ids.size) changed = true;
+        if (kept.size > 0) next.set(key, kept);
+      }
+      return changed ? next : prev;
+    });
+  }, [overview]);
+
   // 提示同样是暂态的
   useEffect(() => {
     if (!notice) return;
