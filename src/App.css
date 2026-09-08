@@ -18,25 +18,18 @@ body {
   flex-direction: column;
   box-sizing: border-box;
 }
-.sidebar.collapsed {
-  width: 56px;
-  padding: 12px 6px;
-  justify-content: flex-end;
-}
 .sidebar h1 {
   font-size: 16px;
   margin: 0 0 12px;
 }
-.sidebar ul,
-.rules ul {
+.sidebar ul {
   list-style: none;
   margin: 0;
   padding: 0;
   flex: 1;
   overflow: auto;
 }
-.sidebar li,
-.rules li {
+.sidebar li {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -44,8 +37,7 @@ body {
   border-radius: 6px;
   cursor: pointer;
 }
-.sidebar li.active,
-.rules li.active {
+.sidebar li.active {
   background: #e8f0fe;
 }
 /* 侧栏手动项目的移除按钮：不随标签一起被挤掉 */
@@ -63,15 +55,6 @@ body {
   padding: 12px 16px;
   overflow: auto;
   box-sizing: border-box;
-}
-.tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.tabs button.active {
-  font-weight: 600;
-  border-bottom: 2px solid #1a73e8;
 }
 button {
   font: inherit;
@@ -208,6 +191,25 @@ td.cell.unwritable {
   border-radius: 10px;
   cursor: pointer;
 }
+/* 高亮的筛选片 */
+.tag.active {
+  background: #e8f0fe;
+  color: #1a73e8;
+  font-weight: 600;
+}
+.filters input {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  width: 220px;
+}
+/* 选择操作条：有选中行时才出现，和普通工具栏区分开 */
+.toolbar.selection {
+  background: #e8f0fe;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
 .report {
   background: #f6f8fa;
   border-left: 3px solid #188038;
@@ -224,52 +226,6 @@ td.cell.unwritable {
   margin: 4px 0 0;
   max-height: 160px;
   overflow: auto;
-}
-.custom {
-  display: flex;
-  gap: 16px;
-  height: 100%;
-}
-.rules {
-  width: 200px;
-  border-right: 1px solid #eee;
-  padding-right: 12px;
-  display: flex;
-  flex-direction: column;
-}
-.editor {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.editor fieldset {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 8px 12px;
-}
-.editor .row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin: 4px 0;
-}
-.editor input[type="text"] {
-  flex: 1;
-  font: inherit;
-  padding: 4px 8px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-}
-table.preview {
-  border-collapse: collapse;
-  width: 100%;
-}
-table.preview th,
-table.preview td {
-  border-bottom: 1px solid #eee;
-  padding: 4px 8px;
-  text-align: left;
 }
 .harnesses {
   border-top: 1px solid #ddd;

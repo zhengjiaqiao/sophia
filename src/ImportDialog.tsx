@@ -5,8 +5,6 @@ import type { CellRef, DomainPage, Overview, Source, SourceKind, SyncReport } fr
 export interface ImportDialogProps {
   overview: Overview;
   page: DomainPage;
-  /// 从「编辑」进来时预选的本体位置 id
-  initialSourceId?: string;
   onClose: () => void;
   onChange: () => Promise<void>;
   onReport: (report: SyncReport) => void;
@@ -35,14 +33,13 @@ const samePath = (a: string, b: string) => a.replace(/[/\\]+$/, "") === b.replac
 export default function ImportDialog({
   overview,
   page,
-  initialSourceId,
   onClose,
   onChange,
   onReport,
   onError,
   onNotice,
 }: ImportDialogProps) {
-  const [selected, setSelected] = useState(initialSourceId ?? overview.sources[0]?.id ?? "");
+  const [selected, setSelected] = useState(overview.sources[0]?.id ?? "");
   const [names, setNames] = useState<string[]>([]);
   // 目标默认全勾；整目录链接的目标不能逐项建链，不在其中
   const [targetIds, setTargetIds] = useState<string[]>(

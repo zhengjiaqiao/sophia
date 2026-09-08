@@ -1,17 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type {
-  CellRef,
-  DomainInfo,
-  HarnessStatus,
-  Overview,
-  PlannedAction,
-  SyncReport,
-  SyncRule,
-} from "./types";
+import type { CellRef, HarnessStatus, Overview, PlannedAction, SyncReport } from "./types";
 
 export const api = {
-  listDomains: () => invoke<DomainInfo[]>("list_domains"),
   scanAll: () => invoke<Overview>("scan_all"),
   /// 这些格里缺失的 → 建链动作
   proposeLinks: (cells: CellRef[]) => invoke<PlannedAction[]>("propose_links", { cells }),
@@ -26,12 +17,6 @@ export const api = {
   listManualProjects: () => invoke<string[]>("list_manual_projects"),
   addProject: (path: string) => invoke<void>("add_project", { path }),
   removeProject: (path: string) => invoke<void>("remove_project", { path }),
-  listRules: () => invoke<SyncRule[]>("list_rules"),
-  saveRules: (rules: SyncRule[]) => invoke<void>("save_rules", { rules }),
-  planRule: (rule: SyncRule) => invoke<PlannedAction[]>("plan_rule", { rule }),
-  applyRule: (actions: PlannedAction[], cleanBroken: boolean) =>
-    invoke<SyncReport>("apply_rule", { actions, cleanBroken }),
-  listSourceItems: (source: string) => invoke<string[]>("list_source_items", { source }),
   listHarnesses: () => invoke<HarnessStatus[]>("list_harnesses"),
   setHarnessEnabled: (id: string, enabled: boolean) =>
     invoke<void>("set_harness_enabled", { id, enabled }),
