@@ -92,6 +92,18 @@ export default function SkillsTab({
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // 确认弹窗开着时按 Esc 关闭，等同取消
+  useEffect(() => {
+    if (!confirmClean && pendingUnlink === null) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setConfirmClean(false);
+      setPendingUnlink(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmClean, pendingUnlink]);
+
   // 结果、确认与弹层只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
     setReport(null);
@@ -215,7 +227,7 @@ export default function SkillsTab({
     }
   };
 
-  // 清链先算动作再进确认条；行一起带上，执行后据此写说明
+  // 清链先算动作再进确认弹窗；行一起带上，执行后据此写说明
   const askUnlink = async (targets: UnlinkTarget[]) => {
     try {
       const acts = await api.proposeUnlinks(targets.flatMap((t) => t.cells ?? cellsOf(t.row)));
@@ -282,26 +294,16 @@ export default function SkillsTab({
         >
           引入…
         </button>
-        {confirmClean ? (
-          <span className="confirm">
-            只删除链接本身，不删除任何真实文件。
-            <button onClick={() => void run(broken, true)} disabled={busy}>
-              确认删除
-            </button>
-            <button onClick={() => setConfirmClean(false)}>取消</button>
-          </span>
-        ) : (
-          <button
-            onClick={() => {
-              setPendingUnlink(null);
-              setConfirmClean(true);
-            }}
-            disabled={busy || broken.length === 0}
-            title={broken.length === 0 ? "没有坏链" : "删除指向已不存在位置的软链接"}
-          >
-            清理坏链（{broken.length}）
-          </button>
-        )}
+        <button
+          onClick={() => {
+            setPendingUnlink(null);
+            setConfirmClean(true);
+          }}
+          disabled={busy || broken.length === 0}
+          title={broken.length === 0 ? "没有坏链" : "删除指向已不存在位置的软链接"}
+        >
+          清理坏链（{broken.length}）
+        </button>
         <button onClick={() => void onRefresh()} disabled={busy}>
           刷新
         </button>
@@ -343,61 +345,49 @@ export default function SkillsTab({
         </div>
       )}
 
-      {pendingUnlink !== null && (
-        <div className="toolbar">
-          <span className="confirm">
-            将删除 {pendingUnlink.actions.length}{" "}
-            条软链接，只删链接本身，不删任何真实文件。本体在本域的 skill 只清链接，本体目录不动。
-            <button
-              onClick={() => void run(pendingUnlink.actions, false, pendingUnlink.rows)}
-              disabled={busy}
-            >
-              确认删除
-            </button>
-            <button onClick={() => setPendingUnlink(null)}>取消</button>
-          </span>
-        </div>
-      )}
-      {notice && (
-        <div className="report">
-          <div className="report-head">
-            <span>{notice}</span>
-            <button className="link" onClick={() => setNotice(null)}>
-              关闭
-            </button>
+      {/* 结果框与提示浮在窗口右下角，同时出现时上下排开 */}
+      <div className="floating">
+        {notice && (
+          <div className="report">
+            <div className="report-head">
+              <span>{notice}</span>
+              <button className="link" onClick={() => setNotice(null)}>
+                关闭
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-      {report && (
-        <div className="report">
-          <div className="report-head">
-            <span>本次结果（{report.entries.length} 条）</span>
-            <button
-              className="link"
-              onClick={() => {
-                setReport(null);
-                setNotes([]);
-              }}
-            >
-              关闭
-            </button>
-          </div>
-          <ul>
-            {report.entries.map((e) => (
-              <li key={actionId(e.action)}>
-                {outcomeText(e.outcome)} · {e.action.targetPath}
-              </li>
-            ))}
-          </ul>
-          {notes.length > 0 && (
-            <ul className="notes">
-              {notes.map((text) => (
-                <li key={text}>{text}</li>
+        )}
+        {report && (
+          <div className="report">
+            <div className="report-head">
+              <span>本次结果（{report.entries.length} 条）</span>
+              <button
+                className="link"
+                onClick={() => {
+                  setReport(null);
+                  setNotes([]);
+                }}
+              >
+                关闭
+              </button>
+            </div>
+            <ul>
+              {report.entries.map((e) => (
+                <li key={actionId(e.action)}>
+                  {outcomeText(e.outcome)} · {e.action.targetPath}
+                </li>
               ))}
             </ul>
-          )}
-        </div>
-      )}
+            {notes.length > 0 && (
+              <ul className="notes">
+                {notes.map((text) => (
+                  <li key={text}>{text}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
       {pages.length === 0 ? (
         <p>没有可用的目标目录。</p>
       ) : (
@@ -420,6 +410,44 @@ export default function SkillsTab({
             onNotice={setNotice}
           />
         ))
+      )}
+      {confirmClean && (
+        <div className="modal-backdrop" onClick={() => setConfirmClean(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="toolbar">
+              <h2>清理坏链</h2>
+            </div>
+            <p>只删除链接本身，不删除任何真实文件。</p>
+            <div className="toolbar">
+              <button onClick={() => void run(broken, true)} disabled={busy}>
+                确认删除
+              </button>
+              <button onClick={() => setConfirmClean(false)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pendingUnlink !== null && (
+        <div className="modal-backdrop" onClick={() => setPendingUnlink(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="toolbar">
+              <h2>清除软链</h2>
+            </div>
+            <p>
+              将删除 {pendingUnlink.actions.length}{" "}
+              条软链接，只删链接本身，不删任何真实文件。本体在本域的 skill 只清链接，本体目录不动。
+            </p>
+            <div className="toolbar">
+              <button
+                onClick={() => void run(pendingUnlink.actions, false, pendingUnlink.rows)}
+                disabled={busy}
+              >
+                确认删除
+              </button>
+              <button onClick={() => setPendingUnlink(null)}>取消</button>
+            </div>
+          </div>
+        </div>
       )}
       {importOpen && importPage !== null && (
         <ImportDialog

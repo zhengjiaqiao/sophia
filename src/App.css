@@ -204,18 +204,37 @@ td.cell.unwritable {
   border-radius: 6px;
   width: 220px;
 }
-/* 选择操作条：有选中行时才出现，和普通工具栏区分开 */
+/* 选择操作条：有选中行时才出现，和普通工具栏区分开；滚动时吸顶 */
 .toolbar.selection {
   background: #e8f0fe;
   padding: 6px 8px;
   border-radius: 6px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* 吸顶时四周的留白会透出下面的表格，用页面底色垫住 */
+  box-shadow: 0 0 0 12px #fff;
+}
+/* 结果框与暂态提示：固定在窗口右下角的浮层，不随内容滚动；z-index 低于弹窗 */
+.floating {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 480px;
 }
 .report {
   background: #f6f8fa;
   border-left: 3px solid #188038;
   padding: 8px 12px;
   border-radius: 6px;
-  margin-bottom: 12px;
+  max-height: 60vh;
+  overflow: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 .report-head {
   display: flex;
@@ -273,6 +292,7 @@ td.cell.unwritable {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 20;
   background: rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
