@@ -252,10 +252,10 @@ core：`make test-core`（删除相关测试随功能移除）。前端 `make bu
 
 ## 17. 修订 v5.8（2026-09-08）：仓库里指向其他本体位置的软链不算自己的 skill
 
-- 状态：待实现
+- 状态：已实现
 - 现象：项目 `.agents/skills`（Codex 列）里由本工具建的、指向 WeiboAP agent 的软链，被当成 CardBox 仓库自己的 skill，同一 skill 出现两行（CardBox ● / WeiboAP ✓），且"本体位置"定位到了 WeiboAP。
 - 规则：仓库型本体位置（通用仓库、项目仓库、手动）里的软链条目，只有当它解析到的真实目录**不在任何已知本体位置之内**时才算该仓库的 skill（用户把外部目录链进仓库的场景，如 `/Applications/ego-skills/ego-browser`）。解析到另一个已知本体位置里的软链是"链接"，由那个本体位置的行在本列上以 ✓ 表示。harness 目录仍只认真实目录。
-- 实现：`discovery::sources` 两遍：先按现规则收集全部本体位置（含软链条目）；再对每个仓库型位置过滤其软链条目——`real_path(entry)` 以任一**其他**本体位置的 `real_path` 为前缀（`Path::starts_with`，按分量）则剔除。位置本身按 `real_path` 去重的逻辑不变。
+- 实现：`discovery::sources` 两遍：先按现规则收集全部本体位置（含软链条目）；再对每个仓库型位置过滤其软链条目——`real_path(entry)` 以任一**其他**本体位置的 `real_path` 为前缀（`Path::starts_with`，按分量）则剔除。位置本身按 `real_path` 去重的逻辑不变。过滤后没有 skill 的位置不算本体位置。
 - 测试：新增"项目仓库里指向 agent 本体位置的软链不算项目的 skill，指向外部目录的仍算"；`store_sources_link_through_but_harness_dirs_only_count_real_dirs` 保持通过。
 
 ## 18. 修订 v5.9（2026-09-08）：去掉刷新按钮，文件系统变化自动重扫
