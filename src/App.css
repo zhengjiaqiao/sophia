@@ -327,23 +327,27 @@ td.cell.unwritable {
   font-size: 14px;
   margin: 0 0 6px;
 }
+/* 引入弹层尺寸固定，切换本体位置或筛选时不随内容长短跳动；三栏各自内部滚动 */
 .modal.wide {
-  width: auto;
+  width: min(960px, 92vw);
+  height: 72vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .import-dialog {
   display: flex;
   gap: 16px;
-  min-width: 880px;
+  flex: 1;
+  min-height: 0;
 }
 .import-sources {
   width: 260px;
   overflow: auto;
-  max-height: 60vh;
 }
 .import-skills {
   flex: 1;
   overflow: auto;
-  max-height: 60vh;
 }
 .pick-list {
   list-style: none;
@@ -370,7 +374,6 @@ td.cell.unwritable {
 .import-targets {
   width: 200px;
   overflow: auto;
-  max-height: 60vh;
   border-left: 1px solid #eee;
   padding-left: 16px;
 }
