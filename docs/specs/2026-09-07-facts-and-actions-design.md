@@ -221,3 +221,10 @@ core：`CellRef` 序列化；`propose_links` / `propose_unlinks` 按格（含忽
 ### 13.4 测试
 
 core：`make test-core`（删除相关测试随功能移除）。前端 `make build-web`。`docs/manual-checks.md` Skills 一节补：筛选片 + 表头全选两步选出"通用仓库"的行；Shift 区间选择；操作条随选择出现与消失；「全部」页引入禁用。
+
+## 14. 修订 v5.5（2026-09-08）：本体位置可点击，在 Finder 中显示
+
+- 状态：待实现
+- 表格 `本体位置` 格改为链接样式按钮：点击调用 tauri-plugin-opener 的 `revealItemInDir(<本体位置路径>/<skill>)`，在系统文件管理器里定位并选中该 skill 目录；title 显示完整路径。
+- 依赖：`src-tauri/Cargo.toml` 加 `tauri-plugin-opener`，`package.json` 加 `@tauri-apps/plugin-opener`，`lib.rs` 注册插件，capabilities 加 `opener:allow-reveal-item-in-dir`。
+- `api.ts` 加 `revealInDir(path)`；失败走 `onError`。
