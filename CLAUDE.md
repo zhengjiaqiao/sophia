@@ -27,7 +27,7 @@
 - `discovery.rs` + `data/harnesses.json`：harness 表、已安装判定、项目候选
 - `store.rs`：`projects.json` / `settings.json`
 - `src-tauri/src/lib.rs`：命令，每个一行调 core
-- `src/`：`App.tsx` 壳、`SkillsTab.tsx`、`CustomSyncTab.tsx`、`api.ts`、`types.ts`
+- `src/`：`App.tsx` 壳、`SkillsTab.tsx`、`DomainView.tsx`、`ImportDialog.tsx`、`SettingsPanel.tsx`、`api.ts`、`types.ts`
 
 ## Verifying your work
 
