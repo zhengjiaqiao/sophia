@@ -391,3 +391,26 @@ td.cell.unwritable {
   padding: 2px 0;
   cursor: pointer;
 }
+/* 域页的自动同步规则行：跟在筛选片下方 */
+.auto-rules {
+  margin-bottom: 8px;
+}
+.auto-rule {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+}
+/* 引入弹层底部的自动同步开关：和「引入」按钮同一行 */
+.auto-toggle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  cursor: pointer;
+}
+/* 中栏 skill 名后的「已排除自动同步」标记 */
+.import-skills label .muted {
+  margin-left: 6px;
+}

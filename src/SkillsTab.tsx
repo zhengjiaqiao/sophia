@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { join, type UnlinkTarget } from "./DomainView";
 import ImportDialog from "./ImportDialog";
 import {
   actionId,
+  type AutoLink,
   type CellRef,
   type DomainPage,
   type DomainRow,
@@ -35,6 +37,8 @@ const cellsOf = (row: DomainRow): CellRef[] =>
 
 export interface SkillsTabProps {
   overview: Overview | null;
+  /// 自动同步规则；域页列出、清链前据此提示排除
+  autoLinks: AutoLink[];
   busy: boolean;
   onBusy: (busy: boolean) => void;
   /// 侧栏选中：`"all"` 或某个 DomainPage.key
@@ -46,6 +50,7 @@ export interface SkillsTabProps {
 /// 域页容器：常驻工具栏 + 筛选行 + 选择操作条，下面按侧栏选中渲染一个或全部域
 export default function SkillsTab({
   overview,
+  autoLinks,
   busy,
   onBusy,
   selectedKey,
@@ -53,6 +58,8 @@ export default function SkillsTab({
   onError,
 }: SkillsTabProps) {
   const [report, setReport] = useState<SyncReport | null>(null);
+  // 结果来自自动同步规则（而非本次手动操作），标题区分开
+  const [reportAuto, setReportAuto] = useState(false);
   // 暂态提示：说明为什么没动作、某个格为什么不能点
   const [notice, setNotice] = useState<string | null>(null);
   // 结果框里按 skill 的说明：本体去向、失败条数
@@ -91,6 +98,21 @@ export default function SkillsTab({
     const timer = setTimeout(() => setNotice(null), 6000);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  // 后端扫描后按规则自动补的链，用同一个结果浮层展示
+  useEffect(() => {
+    let disposed = false;
+    const unlistens: Array<() => void> = [];
+    void listen<SyncReport>("auto-linked", ({ payload }) => {
+      setNotes([]);
+      setReportAuto(true);
+      setReport(payload);
+    }).then((un) => (disposed ? un() : unlistens.push(un)));
+    return () => {
+      disposed = true;
+      unlistens.forEach((un) => un());
+    };
+  }, []);
 
   // 确认弹窗开着时按 Esc 关闭，等同取消
   useEffect(() => {
@@ -191,16 +213,39 @@ export default function SkillsTab({
       : `「${row.skill}」的软链已清除，它在其他 harness 下的链接还在。`;
   };
 
+  /// 本次要删的格里，仍在某条自动同步规则范围内的行：清除后必须先排除，否则立刻被补回
+  const coveredRows = (
+    actions: PlannedAction[],
+    rows: { page: DomainPage; row: DomainRow }[],
+  ): DomainRow[] =>
+    rows
+      .map(({ row }) => row)
+      .filter((row) => {
+        const targetIds = row.cells
+          .filter((c) => actions.some((a) => a.itemName === row.skill && a.targetPath === c.path))
+          .map((c) => c.targetId);
+        return autoLinks.some(
+          (r) =>
+            r.source === row.sourceId &&
+            !r.excluded.includes(row.skill) &&
+            r.targets.some((t) => targetIds.includes(t)),
+        );
+      });
+
   const run = async (
     subset: PlannedAction[],
     cleanBroken: boolean,
     rows: { page: DomainPage; row: DomainRow }[] = [],
+    exclude: DomainRow[] = [],
   ) => {
     onBusy(true);
     setConfirmClean(false);
     setPendingUnlink(null);
     try {
+      // 先退出自动同步范围，再删链接，否则下一轮扫描会把它补回来
+      for (const row of exclude) await api.excludeAutoLink(row.sourceId, row.skill);
       const result = await api.applyAll(subset, cleanBroken);
+      setReportAuto(false);
       setReport(result);
       setNotes(
         rows.map(({ row }) => unlinkNote(result, row)).filter((t): t is string => t !== null),
@@ -284,6 +329,10 @@ export default function SkillsTab({
   }
   const missing = missingPaths.size;
 
+  // 待确认清除的行里被自动同步规则覆盖的，确认时先排除它们
+  const coveredUnlink =
+    pendingUnlink === null ? [] : coveredRows(pendingUnlink.actions, pendingUnlink.rows);
+
   return (
     <section>
       <div className="toolbar">
@@ -357,7 +406,9 @@ export default function SkillsTab({
         {report && (
           <div className="report">
             <div className="report-head">
-              <span>本次结果（{report.entries.length} 条）</span>
+              <span>
+                {reportAuto ? "自动同步" : "本次结果"}（{report.entries.length} 条）
+              </span>
               <button
                 className="link"
                 onClick={() => {
@@ -393,6 +444,7 @@ export default function SkillsTab({
             key={page.key}
             overview={overview}
             page={page}
+            autoLinks={autoLinks}
             rows={visibleRows(page)}
             busy={busy}
             activeSources={filterSources.get(page.key) ?? new Set()}
@@ -434,9 +486,17 @@ export default function SkillsTab({
               将删除 {pendingUnlink.actions.length}{" "}
               条软链接，只删链接本身，不删任何真实文件。本体在本域的 skill 只清链接，本体目录不动。
             </p>
+            {coveredUnlink.length > 0 && (
+              <p>
+                以下 skill 在自动同步范围内，清除后将不再自动链接：
+                {coveredUnlink.map((row) => row.skill).join("、")}
+              </p>
+            )}
             <div className="toolbar">
               <button
-                onClick={() => void run(pendingUnlink.actions, false, pendingUnlink.rows)}
+                onClick={() =>
+                  void run(pendingUnlink.actions, false, pendingUnlink.rows, coveredUnlink)
+                }
                 disabled={busy}
               >
                 确认删除
@@ -450,10 +510,12 @@ export default function SkillsTab({
         <ImportDialog
           overview={overview}
           page={importPage}
+          autoLinks={autoLinks}
           onClose={() => setImportOpen(false)}
           onChange={onRefresh}
           onReport={(r) => {
             setNotes([]);
+            setReportAuto(false);
             setReport(r);
           }}
           onError={onError}

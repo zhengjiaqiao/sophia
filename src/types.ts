@@ -84,6 +84,15 @@ export interface SyncReport {
   entries: ReportEntry[];
 }
 
+/// 一条自动同步规则：该本体位置下的全部 skill（排除名单除外）持续补齐到这些目标
+export interface AutoLink {
+  /// 归一化后的本体位置路径，与 Source.id / Source.path 可直接比较
+  source: string;
+  targets: string[];
+  /// 手动清除过、不再自动链接的 skill
+  excluded: string[];
+}
+
 export interface HarnessStatus {
   id: string;
   displayName: string;

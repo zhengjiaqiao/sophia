@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
-import type { Overview } from "./types";
+import type { AutoLink, Overview } from "./types";
 import SkillsTab from "./SkillsTab";
 import SettingsPanel from "./SettingsPanel";
 import "./App.css";
@@ -20,6 +20,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 手动添加的项目路径，用来判断侧栏哪些域可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
+  // 自动同步规则；扫描时顺带取回，域页与引入弹层都用它
+  const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
   // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
   const busyRef = useRef(false);
   const pendingRef = useRef(false);
@@ -31,9 +33,14 @@ export default function App() {
     busyRef.current = true;
     setBusy(true);
     try {
-      const [next, projects] = await Promise.all([api.scanAll(), api.listManualProjects()]);
+      const [next, projects, rules] = await Promise.all([
+        api.scanAll(),
+        api.listManualProjects(),
+        api.listAutoLinks(),
+      ]);
       setOverview(next);
       setManualProjects(projects);
+      setAutoLinks(rules);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -179,6 +186,7 @@ export default function App() {
         )}
         <SkillsTab
           overview={overview}
+          autoLinks={autoLinks}
           busy={busy}
           onBusy={setBusy}
           selectedKey={selectedKey}
