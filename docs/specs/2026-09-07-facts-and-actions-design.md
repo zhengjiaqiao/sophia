@@ -241,3 +241,11 @@ core：`make test-core`（删除相关测试随功能移除）。前端 `make bu
   - 单格清除（该行还有别的链接）：`「<skill>」的软链已清除，它在其他 harness 下的链接还在。`
 - 实现：`SkillsTab.pendingUnlink` 改为 `{ actions: PlannedAction[]; rows: { page: DomainPage; row: DomainRow }[] }`；执行后按 `action.item_name` 与 `target_path` 所属目标把结果归到行，生成说明。结果框仍 6 秒后消失，但有 skill 说明时延长到 15 秒。
 - `docs/manual-checks.md` Skills 一节相应更新。
+
+## 16. 修订 v5.7（2026-09-08）：确认改弹窗，结果改浮层，操作条吸顶
+
+- 状态：待实现
+- 两个确认（清除软链、清理坏链）改为居中模态弹窗（复用 `.modal-backdrop` / `.modal` 样式）：标题、说明文案（沿用现有）、`确认删除` / `取消`；Esc 与点击遮罩等同取消。不再在工具栏里出现内联确认条。
+- 结果框与暂态提示改为**固定在窗口右下角的浮层**（`position: fixed`），不随内容滚动；可关闭；自动消失时间不变（6 秒，有 skill 说明时 15 秒）。
+- 选择操作条改为 **sticky 吸顶**（`position: sticky; top: 0`），滚动时仍可见；页面工具栏保持在顶部不吸。
+- 行末 `清除软链` / 单格 ✓ / 操作条清除都打开同一个弹窗。
