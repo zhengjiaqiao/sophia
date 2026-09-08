@@ -182,9 +182,7 @@ td.cell.missing {
 td.cell.broken {
   color: #b3261e;
 }
-td.cell.foreign {
-  color: #e37400;
-}
+td.cell.foreign,
 td.cell.duplicate {
   color: #e37400;
 }

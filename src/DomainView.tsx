@@ -25,7 +25,7 @@ const CELL_SYMBOL: Record<CellState, string> = {
   linked: "✓",
   missing: "○",
   broken: "✗",
-  foreign: "→",
+  foreign: "⚠",
   duplicate: "⚠",
   unwritable: "–",
 };
@@ -35,8 +35,9 @@ const CELL_TEXT: Record<CellState, string> = {
   linked: "整目录链接，先拆成逐项链接",
   missing: "未同步",
   broken: "坏链，请用清理坏链",
-  foreign: "指向别处的软链，不归本工具管理",
-  duplicate: "已有同名真实条目，不会覆盖",
+  // 两种状态对用户是一回事：这里已有同名的东西（本体或指向别处的软链），不会覆盖
+  foreign: "已有同名条目（本体或指向别处的软链接），不会覆盖",
+  duplicate: "已有同名条目（本体或指向别处的软链接），不会覆盖",
   unwritable: "整目录链接，先拆成逐项链接",
 };
 
