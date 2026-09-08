@@ -200,6 +200,91 @@ fn propose_by(
     out
 }
 
+/// 自动同步规则展开成格：本体位置找不到 / 目标找不到 → 跳过；skill 在排除名单里 → 跳过。
+/// 随后交给 `propose_links`，只对 Missing 建链
+pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink]) -> Vec<CellRef> {
+    let mut out = Vec::new();
+    for rule in rules {
+        let Some(source) = find_source(sources, &rule.source) else {
+            continue;
+        };
+        for target_id in &rule.targets {
+            if !targets.iter().any(|t| &t.id == target_id) {
+                continue;
+            }
+            for skill in &source.skills {
+                if rule.excluded.contains(skill) {
+                    continue;
+                }
+                out.push(CellRef {
+                    source_id: source.id.clone(),
+                    skill: skill.clone(),
+                    target_id: target_id.clone(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// 新建或合并一条规则：同一本体位置已有规则则并入目标（排除名单不动，解除排除走 `include`）
+pub fn upsert_auto_link(rules: &mut Vec<AutoLink>, source: &Path, targets: &[String]) {
+    let source = normalize(source);
+    let rule = match rules.iter().position(|r| r.source == source) {
+        Some(i) => &mut rules[i],
+        None => {
+            rules.push(AutoLink {
+                source,
+                targets: Vec::new(),
+                excluded: BTreeSet::new(),
+            });
+            rules.last_mut().expect("刚 push 过")
+        }
+    };
+    for t in targets {
+        if !rule.targets.contains(t) {
+            rule.targets.push(t.clone());
+        }
+    }
+}
+
+pub fn remove_auto_link(rules: &mut Vec<AutoLink>, source: &Path) {
+    let source = normalize(source);
+    rules.retain(|r| r.source != source);
+}
+
+/// 该 skill 不再自动链接（手动清除软链时调用）
+pub fn exclude(rules: &mut [AutoLink], source: &Path, skill: &str) {
+    if let Some(rule) = find_rule_mut(rules, source) {
+        rule.excluded.insert(skill.to_string());
+    }
+}
+
+/// 解除排除，该 skill 重新纳入自动链接
+pub fn include(rules: &mut [AutoLink], source: &Path, skill: &str) {
+    if let Some(rule) = find_rule_mut(rules, source) {
+        rule.excluded.remove(skill);
+    }
+}
+
+/// 该 (本体位置, skill) 是否在某条规则的范围内（被排除的不算）
+pub fn covering<'a>(rules: &'a [AutoLink], source_id: &str, skill: &str) -> Option<&'a AutoLink> {
+    rules
+        .iter()
+        .find(|r| r.source.to_string_lossy() == source_id && !r.excluded.contains(skill))
+}
+
+/// 规则里的 source 与 `Source.path` 都是 normalize 过的绝对路径
+fn find_source<'a>(sources: &'a [Source], source: &Path) -> Option<&'a Source> {
+    let source = normalize(source);
+    sources.iter().find(|s| s.path == source)
+}
+
+fn find_rule_mut<'a>(rules: &'a mut [AutoLink], source: &Path) -> Option<&'a mut AutoLink> {
+    let source = normalize(source);
+    rules.iter_mut().find(|r| r.source == source)
+}
+
 fn cell_state(source: &Source, skill: &str, target: &Target, path: &Path) -> CellState {
     match target.linked_whole_to.as_deref() {
         Some(id) if id == source.id => return CellState::Linked,
@@ -594,6 +679,81 @@ mod tests {
         assert_eq!(acts[0].kind, ActionKind::Unlink);
         assert_eq!(acts[0].target_path, claude.join("a"));
         assert_eq!(acts[0].source_path, universal.join("a"));
+    }
+
+    #[test]
+    fn auto_link_cells_expands_rules_and_skips_excluded_missing_source_or_target() {
+        let tree = TempTree::new();
+        let universal = tree.dir("universal");
+        for s in ["a", "b", "c"] {
+            tree.dir(&format!("universal/{s}"));
+        }
+        let claude = tree.dir("home/.claude/skills");
+        let codex = tree.dir("home/.codex/skills");
+        let sources = vec![source(&universal, &["a", "b", "c"])];
+        let targets = vec![global("claude-code", &claude), global("codex", &codex)];
+        let rules = vec![
+            AutoLink {
+                source: normalize(&universal),
+                // "nope" 目标不存在：跳过
+                targets: vec!["claude-code".into(), "nope".into()],
+                excluded: ["b".to_string()].into_iter().collect(),
+            },
+            // 本体位置不存在：整条跳过
+            AutoLink {
+                source: tree.root().join("gone"),
+                targets: vec!["codex".into()],
+                excluded: BTreeSet::new(),
+            },
+        ];
+        let cells = auto_link_cells(&sources, &targets, &rules);
+        assert_eq!(
+            cells,
+            vec![
+                cell(&sources[0], "a", &targets[0]),
+                cell(&sources[0], "c", &targets[0]),
+            ]
+        );
+        // 只对缺失的格建链
+        tree.link(&claude.join("a"), &universal.join("a"));
+        let acts = propose_links(&sources, &targets, &cells);
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].target_path, claude.join("c"));
+    }
+
+    #[test]
+    fn rule_maintenance_upserts_removes_and_toggles_exclusions() {
+        let mut rules: Vec<AutoLink> = Vec::new();
+        let source = PathBuf::from("/a/skills");
+        let dotted = PathBuf::from("/a/./skills/"); // 同一处的非归一化写法
+        upsert_auto_link(&mut rules, &source, &["claude-code".into()]);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].source, source);
+        // 同 source 合并目标，不重复
+        upsert_auto_link(&mut rules, &dotted, &["claude-code".into(), "codex".into()]);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].targets, vec!["claude-code", "codex"]);
+
+        exclude(&mut rules, &dotted, "x");
+        assert!(rules[0].excluded.contains("x"));
+        // upsert 不动排除名单
+        upsert_auto_link(&mut rules, &source, &["cursor".into()]);
+        assert!(rules[0].excluded.contains("x"));
+        assert!(covering(&rules, "/a/skills", "x").is_none());
+        assert!(covering(&rules, "/a/skills", "y").is_some());
+        assert!(covering(&rules, "/other", "y").is_none());
+
+        include(&mut rules, &dotted, "x");
+        assert!(rules[0].excluded.is_empty());
+        assert!(covering(&rules, "/a/skills", "x").is_some());
+
+        // 别的 source 不受影响
+        exclude(&mut rules, Path::new("/other"), "x");
+        assert!(rules[0].excluded.is_empty());
+        remove_auto_link(&mut rules, Path::new("/other"));
+        assert_eq!(rules.len(), 1);
+        remove_auto_link(&mut rules, &dotted);
+        assert!(rules.is_empty());
     }
 
     #[test]

@@ -11,6 +11,7 @@ use symsync_core::models::*;
 use symsync_core::skills;
 use symsync_core::store::Store;
 use symsync_core::sync;
+use tauri::Emitter;
 
 struct AppState {
     store: Store,
@@ -48,9 +49,33 @@ fn overview(state: &AppState) -> Result<Overview, String> {
     Ok(skills::scan(&sources, &targets))
 }
 
+/// 自动同步规则展开成建链动作并执行；无规则或没有缺口时返回 None
+fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>, String> {
+    let rules = state.store.load_settings().map_err(err)?.auto_links;
+    if rules.is_empty() {
+        return Ok(None);
+    }
+    let targets: Vec<Target> = scanned
+        .domains
+        .iter()
+        .flat_map(|d| d.targets.iter().cloned())
+        .collect();
+    let cells = skills::auto_link_cells(&scanned.sources, &targets, &rules);
+    let actions = skills::propose_links(&scanned.sources, &targets, &cells);
+    if actions.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(execute_grouped(scanned, &actions, false)))
+}
+
+/// 扫描 → 跑一轮自动同步（只做一轮，不循环）→ 建过链就再扫一次 → 按最终目录集合重建监视
 #[tauri::command]
 fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<Overview, String> {
-    let overview = overview(&state)?;
+    let mut overview = overview(&state)?;
+    if let Some(report) = auto_link(&state, &overview)? {
+        let _ = app.emit("auto-linked", &report);
+        overview = self::overview(&state)?;
+    }
     // 本体位置与目标目录都要盯：删本体、手工建/删软链都会改到它们的直接子项
     let paths: BTreeSet<PathBuf> = overview
         .sources
@@ -109,14 +134,12 @@ fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
 }
 
 /// 每条动作各自算写法，按写法分组交给 `sync::execute`，报告仍按传入顺序返回
-#[tauri::command]
-fn apply_all(
-    actions: Vec<PlannedAction>,
+fn execute_grouped(
+    overview: &Overview,
+    actions: &[PlannedAction],
     clean_broken: bool,
-    state: tauri::State<'_, AppState>,
-) -> Result<SyncReport, String> {
-    let overview = overview(&state)?;
-    let styles: Vec<LinkStyle> = actions.iter().map(|a| style_for(&overview, a)).collect();
+) -> SyncReport {
+    let styles: Vec<LinkStyle> = actions.iter().map(|a| style_for(overview, a)).collect();
     let mut slots: Vec<Option<ReportEntry>> = vec![None; actions.len()];
     for style in [LinkStyle::Absolute, LinkStyle::Relative] {
         let picked: Vec<usize> = (0..actions.len()).filter(|i| styles[*i] == style).collect();
@@ -129,9 +152,19 @@ fn apply_all(
             slots[i] = Some(entry);
         }
     }
-    Ok(SyncReport {
+    SyncReport {
         entries: slots.into_iter().flatten().collect(),
-    })
+    }
+}
+
+#[tauri::command]
+fn apply_all(
+    actions: Vec<PlannedAction>,
+    clean_broken: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncReport, String> {
+    let overview = overview(&state)?;
+    Ok(execute_grouped(&overview, &actions, clean_broken))
 }
 
 #[tauri::command]
@@ -178,6 +211,55 @@ fn remove_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Res
     let path = normalize(&path);
     let mut settings = state.store.load_settings().map_err(err)?;
     settings.manual_sources.retain(|p| normalize(p) != path);
+    state.store.save_settings(&settings).map_err(err)
+}
+
+#[tauri::command]
+fn list_auto_links(state: tauri::State<'_, AppState>) -> Result<Vec<AutoLink>, String> {
+    Ok(state.store.load_settings().map_err(err)?.auto_links)
+}
+
+/// 新建或合并一条规则；解除排除由 `include_auto_link` 单独做
+#[tauri::command]
+fn set_auto_link(
+    source: PathBuf,
+    targets: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    update_auto_links(&state, |rules| {
+        skills::upsert_auto_link(rules, &source, &targets)
+    })
+}
+
+#[tauri::command]
+fn remove_auto_link(source: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    update_auto_links(&state, |rules| skills::remove_auto_link(rules, &source))
+}
+
+#[tauri::command]
+fn exclude_auto_link(
+    source: PathBuf,
+    skill: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    update_auto_links(&state, |rules| skills::exclude(rules, &source, &skill))
+}
+
+#[tauri::command]
+fn include_auto_link(
+    source: PathBuf,
+    skill: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    update_auto_links(&state, |rules| skills::include(rules, &source, &skill))
+}
+
+fn update_auto_links(
+    state: &AppState,
+    edit: impl FnOnce(&mut Vec<AutoLink>),
+) -> Result<(), String> {
+    let mut settings = state.store.load_settings().map_err(err)?;
+    edit(&mut settings.auto_links);
     state.store.save_settings(&settings).map_err(err)
 }
 
@@ -261,6 +343,11 @@ pub fn run() {
             list_manual_projects,
             add_project,
             remove_project,
+            list_auto_links,
+            set_auto_link,
+            remove_auto_link,
+            exclude_auto_link,
+            include_auto_link,
             list_harnesses,
             set_harness_enabled
         ])

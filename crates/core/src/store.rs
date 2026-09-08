@@ -1,15 +1,17 @@
 //! JSON 持久化：projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
+use crate::models::AutoLink;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// 应用设置：被用户关掉的 harness id，以及手动添加的本体位置
+/// 应用设置：被用户关掉的 harness id、手动添加的本体位置、自动同步规则
 /// 容器级 `default` 让旧格式（缺字段）照样能读
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub disabled_harnesses: Vec<String>,
     pub manual_sources: Vec<PathBuf>,
+    pub auto_links: Vec<AutoLink>,
 }
 
 pub struct Store {
@@ -100,6 +102,11 @@ mod tests {
         let settings = Settings {
             disabled_harnesses: vec!["a".into(), "b".into()],
             manual_sources: vec![PathBuf::from("/a/skills")],
+            auto_links: vec![AutoLink {
+                source: PathBuf::from("/a/skills"),
+                targets: vec!["claude-code".into()],
+                excluded: ["x".to_string()].into_iter().collect(),
+            }],
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
@@ -107,12 +114,13 @@ mod tests {
     }
 
     #[test]
-    fn settings_without_manual_sources_still_loads() {
+    fn settings_without_manual_sources_or_auto_links_still_loads() {
         let t = TempTree::new();
         let dir = t.dir("data/SymSync");
         std::fs::write(dir.join("settings.json"), r#"{"disabledHarnesses":[]}"#).unwrap();
         let loaded = Store::new(dir).load_settings().unwrap();
         assert_eq!(loaded.manual_sources, Vec::<PathBuf>::new());
+        assert_eq!(loaded.auto_links, Vec::<AutoLink>::new());
     }
 
     #[test]

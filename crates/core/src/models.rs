@@ -1,5 +1,6 @@
 //! 共享类型。serde 统一 camelCase，前端 `src/types.ts` 与之对应。
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,6 +201,19 @@ pub struct DomainPage {
     pub broken: Vec<PlannedAction>,
 }
 
+/// 一条自动同步规则：本体位置下的全部 skill（排除名单除外）持续补齐到这些目标
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoLink {
+    /// `normalize` 后的本体位置路径
+    pub source: PathBuf,
+    /// 目标 id（同一域内）
+    pub targets: Vec<String>,
+    /// 手动清除过、不再自动链接的 skill
+    #[serde(default)]
+    pub excluded: BTreeSet<String>,
+}
+
 /// 一次扫描的完整结果
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -264,5 +278,21 @@ mod tests {
             serde_json::to_value(ActionKind::Unlink).unwrap(),
             json!("unlink")
         );
+    }
+
+    #[test]
+    fn auto_link_serializes_as_camel_case_and_excluded_defaults() {
+        let rule = AutoLink {
+            source: PathBuf::from("/a/skills"),
+            targets: vec!["claude-code".into()],
+            excluded: BTreeSet::from(["x".to_string()]),
+        };
+        assert_eq!(
+            serde_json::to_value(&rule).unwrap(),
+            json!({"source": "/a/skills", "targets": ["claude-code"], "excluded": ["x"]})
+        );
+        let old: AutoLink =
+            serde_json::from_value(json!({"source": "/a/skills", "targets": []})).unwrap();
+        assert!(old.excluded.is_empty());
     }
 }
