@@ -333,3 +333,46 @@ core：`auto_link_cells`（排除、缺目标、缺位置）；规则维护四�
 - 中栏：规则开启时，"该本体位置没有可引入的 skill" 改为 "已自动同步，新增的 skill 会自动链接"；被排除的 skill 仍标 `已排除自动同步`，勾选它并点"引入"即解除排除（现状）。
 - 底部只剩 `选择文件夹…`、`已选 n / m`、`引入`、`取消`；"引入"仍是对勾选 skill 的一次性建链。
 - `docs/manual-checks.md` 相应改：勾开关即保存，关闭弹层再打开仍是勾选态，取消即移除规则。
+
+## 21. 修订 v6.2（2026-09-08）：skill 自带本体路径；外部本体位置
+
+- 状态：待实现
+- 现象：`ego-browser` 的本体在 `~/.local/share/ego/ego-skills`，各 harness 目录里都是指向它的软链；现有模型只能把它挂在"通用仓库"名下，本体位置显示与定位都不对。
+
+### 21.1 模型
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Skill { pub name: String, pub path: PathBuf }   // path = 本体真实路径（常规位置为 目录/name）
+
+pub struct Source { …, pub skills: Vec<Skill> }             // 原 Vec<String>
+pub enum SourceKind { Universal, HarnessGlobal{..}, ProjectStore{..}, Manual, External }
+//  External：由 harness 目录里指向"任何已知本体位置之外"的软链合成；path = 真实路径的父目录，label = 该目录（home 用 ~ 缩写）
+```
+`DomainRow` / `Cell` / `CellRef` 不变（仍按 `source_id` + `skill` 名寻址）。所有 `source.path.join(skill)` 改为查 `Skill.path`（`Source::skill_path(name) -> Option<&Path>`）。
+
+### 21.2 发现（`discovery.rs`）
+
+- 仓库型与 harness 型位置一律只把**真实目录**当 skill（删除 `links_count_as_skills`、§17 的软链过滤）。
+- 新增 `external_sources(targets, known: &[Source]) -> Vec<Source>`：遍历每个目标目录的直接子项，是软链且 `real_path` 解析到目录、且该真实路径不以任何已知位置的 `real_path` 为前缀（按分量）→ 记 `(real.parent(), 链接名, real)`。按父目录合成 `Source { kind: External, path: parent, id: normalize(parent), label: 缩写路径, skills }`；同一父目录下同名不同真实路径的取首个。`sources()` 的调用方（`lib.rs::discover`）在算出 targets 后追加外部位置：`sources.extend(external_sources(&targets, &sources))`。
+- 位置去重规则不变。
+
+### 21.3 skills.rs
+
+- `links_to` / `cell_state` / `propose_by` / `split_whole_link` / `auto_link_cells` 改用 `Skill.path`。
+- `source_domain`：`External` 归全局？——**不**，外部位置不属于任何域（`own` 永远 false），`source_domain` 返回一个不会等于任何域 key 的值（如 `"external"`）。
+- `link_style`：本体路径在项目内才相对，用 `Skill.path` 判断。
+- 自动同步：`auto_link_cells` 遇到 `External` 位置跳过（规则也不该指向它）。
+
+### 21.4 命令层与前端
+
+- `lib.rs::discover` 按 §21.2 追加外部位置；其余不变。
+- `types.ts`：`Skill { name; path }`、`Source.skills: Skill[]`、`SourceKind` 加 `{ type: "external" }`。
+- `DomainView`：本体位置格显示 `source.label`；定位用 `skill.path`（查 `source.skills`）；外部位置 label 前加 `外部` 小标签（复用 `.whole-link` 样式）。
+- `ImportDialog`：skill 名取 `s.name`；左栏 kind 文案加 `external → "外部"`；`External` 位置不显示自动同步复选框。
+- `docs/manual-checks.md`：加"ego-browser 显示本体位置为 `~/.local/share/ego`（外部），定位到真实目录；通用仓库列（若 Cline 启用）与各 harness 列为 ✓；清除软链后 ego 目录不动"。
+
+### 21.5 测试
+
+core：`Skill` 序列化；外部位置合成（同父目录合并、已知位置内的不合成、坏链不合成）；`cell_state` 对外部 skill 的 Linked/Missing；`propose_links` 用 `Skill.path` 建链（链接目标是真实路径）；`own` 对外部行为 false；`link_style` 按 `Skill.path`。前端 `make build-web`。
