@@ -228,3 +228,15 @@ core：`make test-core`（删除相关测试随功能移除）。前端 `make bu
 - 表格 `本体位置` 格改为链接样式按钮：点击调用 tauri-plugin-opener 的 `revealItemInDir(<本体位置路径>/<skill>)`，在系统文件管理器里定位并选中该 skill 目录；title 显示完整路径。
 - 依赖：`src-tauri/Cargo.toml` 加 `tauri-plugin-opener`，`package.json` 加 `@tauri-apps/plugin-opener`，`lib.rs` 注册插件，capabilities 加 `opener:allow-reveal-item-in-dir`。
 - `api.ts` 加 `revealInDir(path)`；失败走 `onError`。
+
+## 15. 修订 v5.6（2026-09-08）："删除"改为"清除软链"，结果里说明本体去向
+
+- 状态：待实现
+- 行末按钮与操作条按钮都改名 **`清除软链`**（操作条：`清除软链（P 个）`，P = 选中且可见、有可清除格的行数）。本体在本域的行也可以点：只清它在其他 harness 下的链接。仅当该行没有可清除的格时禁用，title "没有可清除的软链接"。
+- 确认条文案："将删除 N 条软链接，只删链接本身，不删任何真实文件。本体在本域的 skill 只清链接，本体目录不动。确认删除 / 取消"。
+- 执行后的结果框在逐条结果之后增加一段 **按 skill 的说明**（只对本次所有 Unlink 都成功的行）：
+  - 本体不在本域的行：`「<skill>」的软链已清除，已从列表移除。`
+  - 本体在本域的行：`「<skill>」的软链已清除；本体仍在 <本体位置路径/skill>，点击表格里的本体位置可在 Finder 中定位，删掉本体后它才会从列表消失。`
+  - 有失败的行：`「<skill>」有 n 条软链未能删除，见上方。`
+- 实现：`SkillsTab.pendingUnlink` 改为 `{ actions: PlannedAction[]; rows: { page: DomainPage; row: DomainRow }[] }`；执行后按 `action.item_name` 与 `target_path` 所属目标把结果归到行，生成说明。结果框仍 6 秒后消失，但有 skill 说明时延长到 15 秒。
+- `docs/manual-checks.md` Skills 一节相应更新。
