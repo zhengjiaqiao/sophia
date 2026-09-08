@@ -336,7 +336,7 @@ core：`auto_link_cells`（排除、缺目标、缺位置）；规则维护四�
 
 ## 21. 修订 v6.2（2026-09-08）：skill 自带本体路径；外部本体位置
 
-- 状态：待实现
+- 状态：已实现
 - 现象：`ego-browser` 的本体在 `~/.local/share/ego/ego-skills`，各 harness 目录里都是指向它的软链；现有模型只能把它挂在"通用仓库"名下，本体位置显示与定位都不对。
 
 ### 21.1 模型
@@ -357,6 +357,7 @@ pub enum SourceKind { Universal, HarnessGlobal{..}, ProjectStore{..}, Manual, Ex
 - 仓库型与 harness 型位置一律只把**真实目录**当 skill（删除 `links_count_as_skills`、§17 的软链过滤）。
 - 新增 `external_sources(targets, known: &[Source]) -> Vec<Source>`：遍历每个目标目录的直接子项，是软链且 `real_path` 解析到目录、且该真实路径不以任何已知位置的 `real_path` 为前缀（按分量）→ 记 `(real.parent(), 链接名, real)`。按父目录合成 `Source { kind: External, path: parent, id: normalize(parent), label: 缩写路径, skills }`；同一父目录下同名不同真实路径的取首个。`sources()` 的调用方（`lib.rs::discover`）在算出 targets 后追加外部位置：`sources.extend(external_sources(&targets, &sources))`。
 - 位置去重规则不变。
+- 有意为之：仓库目录里指向外部的软链，只有当该仓库目录本身是某个启用 harness 的列时才会显示——没有 harness 读它，这条链接对任何 agent 都不生效，矩阵不展示。
 
 ### 21.3 skills.rs
 
