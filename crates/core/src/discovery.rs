@@ -303,6 +303,28 @@ pub fn sources(
     for p in manual {
         push(p.clone(), SourceKind::Manual, dir_name(p));
     }
+
+    // 第二遍：仓库型位置里解析到别的本体位置之内的软链是「链接」，不是这个仓库自己的 skill；
+    // 那个 skill 由它所属本体位置的行在本列上以 ✓ 表示
+    for (i, s) in out.iter_mut().enumerate() {
+        if !links_count_as_skills(&s.kind) {
+            continue;
+        }
+        let dir = &s.path;
+        s.skills.retain(|name| {
+            let path = dir.join(name);
+            if !matches!(entry_kind(&path), EntryKind::Symlink(_)) {
+                return true;
+            }
+            let Some(real) = real_path(&path) else {
+                return true;
+            };
+            !keys
+                .iter()
+                .enumerate()
+                .any(|(j, key)| j != i && real.starts_with(key))
+        });
+    }
     out
 }
 
@@ -859,6 +881,38 @@ mod tests {
         assert_eq!(
             got[0].skills,
             vec!["ego-browser".to_string(), "real-skill".to_string()]
+        );
+    }
+
+    #[test]
+    fn store_sources_drop_links_into_other_sources_but_keep_links_to_outside() {
+        let t = TempTree::new();
+        let home = t.root();
+        let agent_dir = t.dir(
+            "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
+        );
+        let agent_skill = t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
+        let outside = t.dir("Applications/ego-skills/ego-browser");
+        let project = t.dir("Project/app");
+        let store = t.dir("Project/app/.agents/skills");
+        t.dir("Project/app/.agents/skills/own");
+        t.link(&store.join("from-agent"), &agent_skill); // 指向 WeiboAP 本体位置 → 是链接，不是自己的 skill
+        t.link(&store.join("external"), &outside); // 指向外部目录 → 仍算自己的 skill
+
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let hs = vec![all.iter().find(|h| h.id == "weiboap").unwrap().clone()];
+        let got = sources(&e, &hs, std::slice::from_ref(&project), &[]);
+
+        let by_path = |p: &Path| {
+            got.iter()
+                .find(|s| s.path == p)
+                .unwrap_or_else(|| panic!("没发现本体位置 {}", p.display()))
+        };
+        assert_eq!(by_path(&agent_dir).skills, vec!["agent-skill".to_string()]);
+        assert_eq!(
+            by_path(&store).skills,
+            vec!["external".to_string(), "own".to_string()]
         );
     }
 
