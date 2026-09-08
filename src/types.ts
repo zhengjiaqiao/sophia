@@ -3,13 +3,21 @@ export type SourceKind =
   | { type: "universal" }
   | { type: "harnessGlobal"; harnessId: string }
   | { type: "projectStore"; project: string; projectLabel: string | null }
-  | { type: "manual" };
+  | { type: "manual" }
+  | { type: "external" };
+
+/// 一个 skill 本体：名字 + 本体真实路径（常规位置为 目录/名字）
+export interface Skill {
+  name: string;
+  path: string;
+}
+
 export interface Source {
   id: string;
   path: string;
   kind: SourceKind;
   label: string;
-  skills: string[];
+  skills: Skill[];
 }
 
 export type TargetScope =
