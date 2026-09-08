@@ -289,7 +289,7 @@ pub fn covering<'a>(rules: &'a [AutoLink], source_id: &str, skill: &str) -> Opti
 /// 规则里的 source 与 `Source.path` 都是 normalize 过的绝对路径
 fn find_source<'a>(sources: &'a [Source], source: &Path) -> Option<&'a Source> {
     let source = normalize(source);
-    sources.iter().find(|s| s.path == source)
+    sources.iter().find(|s| normalize(&s.path) == source)
 }
 
 fn find_rule_mut<'a>(rules: &'a mut [AutoLink], source: &Path) -> Option<&'a mut AutoLink> {
