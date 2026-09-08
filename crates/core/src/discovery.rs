@@ -325,6 +325,8 @@ pub fn sources(
                 .any(|(j, key)| j != i && real.starts_with(key))
         });
     }
+    // 过滤后一个 skill 都不剩的位置（整个仓库全是指向别处的链接）不算本体位置
+    out.retain(|s| !s.skills.is_empty());
     out
 }
 
