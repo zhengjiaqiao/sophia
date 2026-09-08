@@ -1,5 +1,4 @@
-//! JSON 持久化：rules.json、projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
-use crate::models::SyncRule;
+//! JSON 持久化：projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -27,14 +26,6 @@ impl Store {
         dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("SymSync")
-    }
-
-    pub fn load_rules(&self) -> io::Result<Vec<SyncRule>> {
-        load_json(&self.dir.join("rules.json"))
-    }
-
-    pub fn save_rules(&self, rules: &[SyncRule]) -> io::Result<()> {
-        save_json(&self.dir.join("rules.json"), &rules)
     }
 
     pub fn load_projects(&self) -> io::Result<Vec<PathBuf>> {
@@ -78,44 +69,26 @@ fn save_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Selection, SyncRule};
     use crate::test_support::TempTree;
 
     #[test]
     fn missing_files_load_as_empty() {
         let t = TempTree::new();
         let s = Store::new(t.root().join("data/SymSync"));
-        assert_eq!(s.load_rules().unwrap(), Vec::<SyncRule>::new());
         assert_eq!(s.load_projects().unwrap(), Vec::<PathBuf>::new());
     }
 
     #[test]
-    fn rules_round_trip_and_overwrite_atomically() {
+    fn projects_round_trip_and_overwrite_atomically() {
         let t = TempTree::new();
         let dir = t.root().join("data/SymSync");
         let s = Store::new(dir.clone());
-        let rule = SyncRule {
-            id: uuid::Uuid::new_v4(),
-            name: "r".into(),
-            source: PathBuf::from("/tmp/src"),
-            selection: Selection::Items(vec!["a".into()]),
-            targets: vec![PathBuf::from("/tmp/dst")],
-            last_run_at: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
-        };
-        s.save_rules(std::slice::from_ref(&rule)).unwrap();
-        assert_eq!(s.load_rules().unwrap(), vec![rule.clone()]);
-        s.save_rules(&[]).unwrap();
-        assert_eq!(s.load_rules().unwrap(), vec![]);
-        assert!(!dir.join("rules.json.tmp").exists());
-    }
-
-    #[test]
-    fn projects_round_trip() {
-        let t = TempTree::new();
-        let s = Store::new(t.root().join("data/SymSync"));
         let p = vec![PathBuf::from("/a"), PathBuf::from("/b")];
         s.save_projects(&p).unwrap();
         assert_eq!(s.load_projects().unwrap(), p);
+        s.save_projects(&[]).unwrap();
+        assert_eq!(s.load_projects().unwrap(), Vec::<PathBuf>::new());
+        assert!(!dir.join("projects.json.tmp").exists());
     }
 
     #[test]
@@ -146,7 +119,7 @@ mod tests {
     fn corrupt_file_is_an_error_not_silent_reset() {
         let t = TempTree::new();
         let dir = t.dir("data/SymSync");
-        std::fs::write(dir.join("rules.json"), "{oops").unwrap();
-        assert!(Store::new(dir).load_rules().is_err());
+        std::fs::write(dir.join("projects.json"), "{oops").unwrap();
+        assert!(Store::new(dir).load_projects().is_err());
     }
 }

@@ -1,6 +1,6 @@
 # SymSync
 
-跨平台桌面应用：发现各 AI coding harness 的 skill 目录，展示 skill × harness 矩阵，补缺失软链、清坏链；另有通用"源目录 → 多目标"软链同步。Rust core（`crates/core`，crate 名 `symsync-core`）+ Tauri 2 命令层（`src-tauri`）+ React/TypeScript 前端（`src`）。
+跨平台桌面应用：发现各 AI coding harness 的 skill 目录，展示 skill × harness 矩阵，补缺失软链、清坏链。Rust core（`crates/core`，crate 名 `symsync-core`）+ Tauri 2 命令层（`src-tauri`）+ React/TypeScript 前端（`src`）。
 
 ## Commands
 
@@ -20,12 +20,12 @@
 
 ## Architecture
 
-- `crates/core/src/models.rs`：共享类型（SyncRule、PlannedAction、Outcome、Harness、Domain、LinkStyle）
+- `crates/core/src/models.rs`：共享类型（PlannedAction、Outcome、Harness、LinkStyle）
 - `fs.rs`：`entry_kind`（lstat）、`real_path`、`normalize`、`create_link`
-- `sync.rs`：通用同步 `plan` / `execute`
+- `sync.rs`：`execute` 执行动作
 - `skills.rs`：矩阵 `scan`（只读事实）/ `propose_links` / `propose_unlinks`（按选中格生成动作），本体判定
 - `discovery.rs` + `data/harnesses.json`：harness 表、已安装判定、项目候选
-- `store.rs`：`rules.json` / `projects.json` / `settings.json`
+- `store.rs`：`projects.json` / `settings.json`
 - `src-tauri/src/lib.rs`：命令，每个一行调 core
 - `src/`：`App.tsx` 壳、`SkillsTab.tsx`、`CustomSyncTab.tsx`、`api.ts`、`types.ts`
 

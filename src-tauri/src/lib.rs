@@ -14,13 +14,6 @@ struct AppState {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DomainInfo {
-    domain: Domain,
-    label: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct HarnessStatus {
     id: String,
     display_name: String,
@@ -29,28 +22,6 @@ struct HarnessStatus {
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
-}
-
-#[tauri::command]
-fn list_domains(state: tauri::State<'_, AppState>) -> Result<Vec<DomainInfo>, String> {
-    let env = Env::from_system();
-    let harnesses = discovery::all_harnesses(&env);
-    let manual = state.store.load_projects().map_err(err)?;
-    let mut out = vec![DomainInfo {
-        domain: Domain::Global,
-        label: "全局".into(),
-    }];
-    for p in discovery::project_candidates(&env, &manual, &harnesses) {
-        let label = p
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| p.display().to_string());
-        out.push(DomainInfo {
-            domain: Domain::Project { path: p },
-            label,
-        });
-    }
-    Ok(out)
 }
 
 /// 一次发现：本体位置与目标目录，按当前设置解析
@@ -246,39 +217,6 @@ fn remove_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<()
     state.store.save_projects(&list).map_err(err)
 }
 
-#[tauri::command]
-fn list_rules(state: tauri::State<'_, AppState>) -> Result<Vec<SyncRule>, String> {
-    state.store.load_rules().map_err(err)
-}
-
-#[tauri::command]
-fn save_rules(rules: Vec<SyncRule>, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.store.save_rules(&rules).map_err(err)
-}
-
-#[tauri::command]
-fn plan_rule(rule: SyncRule) -> Result<Vec<PlannedAction>, String> {
-    sync::plan(&rule).map_err(err)
-}
-
-#[tauri::command]
-fn apply_rule(actions: Vec<PlannedAction>, clean_broken: bool) -> Result<SyncReport, String> {
-    Ok(sync::execute(&actions, clean_broken, LinkStyle::Absolute))
-}
-
-/// 自定义同步的子项勾选列表：源目录直接子项，跳过点开头，排序
-#[tauri::command]
-fn list_source_items(source: PathBuf) -> Result<Vec<String>, String> {
-    let rd = std::fs::read_dir(&source).map_err(err)?;
-    let mut items: Vec<String> = rd
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| !n.starts_with('.'))
-        .collect();
-    items.sort();
-    Ok(items)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -287,7 +225,6 @@ pub fn run() {
             store: Store::new(Store::default_dir()),
         })
         .invoke_handler(tauri::generate_handler![
-            list_domains,
             scan_all,
             propose_links,
             propose_unlinks,
@@ -299,11 +236,6 @@ pub fn run() {
             list_manual_projects,
             add_project,
             remove_project,
-            list_rules,
-            save_rules,
-            plan_rule,
-            apply_rule,
-            list_source_items,
             list_harnesses,
             set_harness_enabled
         ])

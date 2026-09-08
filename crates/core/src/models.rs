@@ -2,39 +2,14 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// 同步整目录，或只同步指定名字的子项
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Selection {
-    All,
-    Items(Vec<String>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncRule {
-    pub id: uuid::Uuid,
-    pub name: String,
-    pub source: PathBuf,
-    pub selection: Selection,
-    pub targets: Vec<PathBuf>,
-    pub last_run_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ActionKind {
     /// 目标不存在，将建链
     Create,
-    /// 已是指向正确源的软链，跳过
-    AlreadyLinked,
-    /// 目标存在真实文件/目录或指向他处的软链，跳过并报告
-    Conflict,
-    /// 指定子项在源里不存在
-    SourceMissing,
-    /// 目标里指向本源目录下、但源已不存在的软链
+    /// 目标里指向某本体位置之下、但本体已不存在的软链
     BrokenLink,
-    /// 删除一条指向 `source_path` 的软链，`sync::plan` 不产生
+    /// 删除一条指向 `source_path` 的软链
     Unlink,
 }
 
@@ -49,13 +24,6 @@ pub struct PlannedAction {
     pub target_path: PathBuf,
     /// 所属目标目录
     pub target: PathBuf,
-}
-
-impl PlannedAction {
-    /// 同一 kind 与 target_path 唯一，前端表格与结果合并用
-    pub fn id(&self) -> String {
-        format!("{:?}|{}", self.kind, self.target_path.display())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,13 +70,6 @@ pub struct Harness {
     /// 每个 agent 一个项目的 skill 目录，通配已展开
     #[serde(default)]
     pub agent_dirs: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum Domain {
-    Global,
-    Project { path: PathBuf },
 }
 
 /// 本体位置的来源类别
