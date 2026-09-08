@@ -1,0 +1,298 @@
+//! 共享类型。serde 统一 camelCase，前端 `src/types.ts` 与之对应。
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionKind {
+    /// 目标不存在，将建链
+    Create,
+    /// 目标里指向某本体位置之下、但本体已不存在的软链
+    BrokenLink,
+    /// 删除一条指向 `source_path` 的软链
+    Unlink,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedAction {
+    pub kind: ActionKind,
+    pub item_name: String,
+    /// 链接应指向的绝对路径
+    pub source_path: PathBuf,
+    /// 目标目录下的链接路径
+    pub target_path: PathBuf,
+    /// 所属目标目录
+    pub target: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "status", content = "reason")]
+pub enum Outcome {
+    Created,
+    Skipped,
+    Removed,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportEntry {
+    pub action: PlannedAction,
+    pub outcome: Outcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncReport {
+    pub entries: Vec<ReportEntry>,
+}
+
+/// 新建软链的写法。Windows 忽略此项，一律 junction + 绝对路径
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LinkStyle {
+    Absolute,
+    Relative,
+}
+
+/// 一个 harness 的目录约定。路径已按当前机器解析
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Harness {
+    pub id: String,
+    pub display_name: String,
+    /// 相对项目根，如 ".claude/skills"
+    pub project_dir: Option<String>,
+    pub global_dir: Option<PathBuf>,
+    /// 项目级直接读 .agents/skills
+    pub universal: bool,
+    /// 每个 agent 一个项目的 skill 目录，通配已展开
+    #[serde(default)]
+    pub agent_dirs: Vec<PathBuf>,
+}
+
+/// 本体位置的来源类别
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum SourceKind {
+    /// 通用仓库 `~/.agents/skills`
+    Universal,
+    /// 某 harness 的全局 skill 目录
+    HarnessGlobal { harness_id: String },
+    /// 某项目的 skill 仓库；`project_label` 覆盖项目名的显示（harness 的 agent 目录用）
+    ProjectStore {
+        project: PathBuf,
+        #[serde(default)]
+        project_label: Option<String>,
+    },
+    /// 用户手工添加
+    Manual,
+}
+
+/// 一处本体位置：真实存放 skill 目录的地方
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Source {
+    /// `normalize(path)` 的字符串
+    pub id: String,
+    pub path: PathBuf,
+    pub kind: SourceKind,
+    pub label: String,
+    /// 真实目录名，排序
+    pub skills: Vec<String>,
+}
+
+/// 目标目录所属的域
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TargetScope {
+    Global {
+        harness_id: String,
+    },
+    Project {
+        project: PathBuf,
+        harness_id: String,
+        #[serde(default)]
+        project_label: Option<String>,
+    },
+}
+
+/// 一个可写入软链的目标目录
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Target {
+    /// Global → `<harness_id>`；Project → `project:<normalized path>::<harness_id>`
+    pub id: String,
+    pub label: String,
+    pub path: PathBuf,
+    pub scope: TargetScope,
+    /// 目标目录本身是软链且 real_path 等于某本体位置时，为该 Source 的 id
+    pub linked_whole_to: Option<String>,
+}
+
+/// (本体位置, skill, 目标) 交叉点的状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CellState {
+    /// 目标目录就是本体位置本身，内容天然到位，不是链接
+    Own,
+    Linked,
+    Missing,
+    /// 链接目标不存在
+    Broken,
+    /// 链接指向别处
+    Foreign,
+    /// 目标处已有真实文件或目录
+    Duplicate,
+    /// 目标整目录链接到别的本体位置
+    Unwritable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cell {
+    pub source_id: String,
+    pub skill: String,
+    pub target_id: String,
+    /// 目标目录下该 skill 的路径
+    pub path: PathBuf,
+    pub state: CellState,
+}
+
+/// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainRow {
+    pub source_id: String,
+    pub skill: String,
+    /// 该行的本体位置属于本域
+    pub own: bool,
+    pub cells: Vec<Cell>,
+}
+
+/// 前端选中的一格：本体位置 id + skill + 目标 id。目标决定域；格不必已出现在表里（引入弹层用）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellRef {
+    pub source_id: String,
+    pub skill: String,
+    pub target_id: String,
+}
+
+/// 一个域（全局或某项目）的整页数据
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainPage {
+    /// `"global"` 或 `"project:<normalized path>"`
+    pub key: String,
+    pub label: String,
+    pub targets: Vec<Target>,
+    pub rows: Vec<DomainRow>,
+    pub broken: Vec<PlannedAction>,
+}
+
+/// 一条自动同步规则：本体位置下的全部 skill（排除名单除外）持续补齐到这些目标
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoLink {
+    /// `normalize` 后的本体位置路径
+    pub source: PathBuf,
+    /// 目标 id（同一域内）
+    pub targets: Vec<String>,
+    /// 手动清除过、不再自动链接的 skill
+    #[serde(default)]
+    pub excluded: BTreeSet<String>,
+}
+
+/// 一次扫描的完整结果
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Overview {
+    pub domains: Vec<DomainPage>,
+    /// 供引入弹层列出全部已发现的本体位置
+    pub sources: Vec<Source>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn source_kind_serializes_with_type_tag() {
+        let kind = SourceKind::ProjectStore {
+            project: PathBuf::from("/Users/me/agents/agent_1788"),
+            project_label: Some("WeiboAP · agent_1788".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(&kind).unwrap(),
+            json!({
+                "type": "projectStore",
+                "project": "/Users/me/agents/agent_1788",
+                "projectLabel": "WeiboAP · agent_1788"
+            })
+        );
+    }
+
+    #[test]
+    fn target_scope_serializes_with_type_tag() {
+        let scope = TargetScope::Project {
+            project: PathBuf::from("/Users/me/proj"),
+            harness_id: "claude-code".into(),
+            project_label: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&scope).unwrap(),
+            json!({
+                "type": "project",
+                "project": "/Users/me/proj",
+                "harnessId": "claude-code",
+                "projectLabel": null
+            })
+        );
+    }
+
+    #[test]
+    fn cell_ref_and_new_variants_serialize_as_camel_case() {
+        let cell = CellRef {
+            source_id: "/a".into(),
+            skill: "x".into(),
+            target_id: "claude-code".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&cell).unwrap(),
+            json!({"sourceId": "/a", "skill": "x", "targetId": "claude-code"})
+        );
+        assert_eq!(serde_json::to_value(CellState::Own).unwrap(), json!("own"));
+        assert_eq!(
+            serde_json::to_value(ActionKind::Unlink).unwrap(),
+            json!("unlink")
+        );
+    }
+
+    #[test]
+    fn auto_link_serializes_as_camel_case_and_excluded_defaults() {
+        let rule = AutoLink {
+            source: PathBuf::from("/a/skills"),
+            targets: vec!["claude-code".into()],
+            excluded: BTreeSet::from(["x".to_string()]),
+        };
+        assert_eq!(
+            serde_json::to_value(&rule).unwrap(),
+            json!({"source": "/a/skills", "targets": ["claude-code"], "excluded": ["x"]})
+        );
+        let old: AutoLink =
+            serde_json::from_value(json!({"source": "/a/skills", "targets": []})).unwrap();
+        assert!(old.excluded.is_empty());
+    }
+}

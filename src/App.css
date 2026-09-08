@@ -1,0 +1,415 @@
+:root {
+  font-family: -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+  font-size: 14px;
+  color: #222;
+}
+body {
+  margin: 0;
+}
+.app {
+  display: flex;
+  height: 100vh;
+}
+.sidebar {
+  width: 220px;
+  border-right: 1px solid #ddd;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.sidebar h1 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+.sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  overflow: auto;
+}
+.sidebar li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.sidebar li.active {
+  background: #e8f0fe;
+}
+/* 侧栏手动项目的移除按钮：不随标签一起被挤掉 */
+.sidebar li button.remove {
+  flex: none;
+  color: #888;
+}
+.sidebar li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content {
+  flex: 1;
+  padding: 12px 16px;
+  overflow: auto;
+  box-sizing: border-box;
+}
+button {
+  font: inherit;
+  padding: 4px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fafafa;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.link {
+  border: none;
+  background: none;
+  color: #1a73e8;
+  padding: 0 4px;
+}
+.error {
+  background: #fdecea;
+  color: #b3261e;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.muted {
+  color: #666;
+  font-size: 12px;
+}
+.confirm {
+  background: #fff4e5;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.broken-section {
+  margin-top: 16px;
+}
+table.matrix {
+  border-collapse: collapse;
+  width: 100%;
+}
+table.matrix th,
+table.matrix td {
+  border-bottom: 1px solid #eee;
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+th button.sort {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+th button.sort.active {
+  color: #1a73e8;
+}
+table.matrix td.path {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #666;
+}
+table.matrix td.cell {
+  text-align: center;
+  font-size: 16px;
+}
+/* 格本身是按钮，但看上去仍是一个格：颜色由 td.cell.<state> 继承下来 */
+button.cell {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 16px;
+  color: inherit;
+  cursor: pointer;
+}
+button.cell:disabled {
+  cursor: default;
+}
+td.row-actions {
+  text-align: right;
+}
+.row-actions button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.row-actions button + button {
+  margin-left: 4px;
+}
+td.cell.own,
+td.cell.linked {
+  color: #188038;
+}
+td.cell.missing {
+  color: #999;
+}
+td.cell.broken {
+  color: #b3261e;
+}
+td.cell.foreign,
+td.cell.duplicate {
+  color: #e37400;
+}
+td.cell.unwritable {
+  color: #999;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  font: inherit;
+  font-size: 12px;
+  background: #f1f3f4;
+  color: #444;
+  padding: 2px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+/* 高亮的筛选片 */
+.tag.active {
+  background: #e8f0fe;
+  color: #1a73e8;
+  font-weight: 600;
+}
+.filters input {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  width: 220px;
+}
+/* 选择操作条：有选中行时才出现，和普通工具栏区分开；滚动时吸顶 */
+.toolbar.selection {
+  background: #e8f0fe;
+  padding: 6px 8px;
+  border-radius: 6px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* 吸顶时四周的留白会透出下面的表格，用页面底色垫住 */
+  box-shadow: 0 0 0 12px #fff;
+}
+/* 结果框与暂态提示：固定在窗口右下角的浮层，不随内容滚动；z-index 低于弹窗 */
+.floating {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 480px;
+}
+.report {
+  background: #f6f8fa;
+  border-left: 3px solid #188038;
+  padding: 8px 12px;
+  border-radius: 6px;
+  max-height: 60vh;
+  overflow: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+.report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.report ul {
+  margin: 4px 0 0;
+  max-height: 160px;
+  overflow: auto;
+}
+/* 按 skill 的说明与上面的逐条结果分开 */
+.report .notes {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #dfe3e8;
+}
+.harnesses {
+  border-top: 1px solid #ddd;
+  margin-top: 12px;
+  padding-top: 8px;
+  font-size: 12px;
+  max-height: 40vh;
+  overflow: auto;
+}
+.harnesses h2 {
+  font-size: 12px;
+  margin: 0 0 6px;
+  color: #666;
+}
+.harnesses label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.harnesses ul {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+.harnesses li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.harnesses li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  width: 420px;
+  max-height: 80vh;
+  overflow: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+.modal .toolbar h2 {
+  font-size: 14px;
+  margin: 0;
+  flex: 1;
+}
+.whole-link {
+  margin-left: 6px;
+  font-size: 11px;
+  background: #e8f0fe;
+  color: #1a73e8;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.domain-group {
+  margin-bottom: 16px;
+}
+.domain-group h2 {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+/* 引入弹层尺寸固定，切换本体位置或筛选时不随内容长短跳动；三栏各自内部滚动 */
+.modal.wide {
+  width: min(960px, 92vw);
+  height: 72vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.import-dialog {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.import-sources {
+  width: 260px;
+  overflow: auto;
+}
+.import-skills {
+  flex: 1;
+  overflow: auto;
+}
+.pick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pick-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pick-list li.active {
+  background: #e8f0fe;
+}
+.pick-list li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.import-targets {
+  width: 200px;
+  overflow: auto;
+  border-left: 1px solid #eee;
+  padding-left: 16px;
+}
+/* 已引入的 skill 单独一段，和可勾选的那段隔开 */
+.import-present {
+  border-top: 1px solid #eee;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.import-skills label,
+.import-targets label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+  cursor: pointer;
+}
+/* 域页的自动同步规则行：跟在筛选片下方 */
+.auto-rules {
+  margin-bottom: 8px;
+}
+.auto-rule {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+}
+/* 引入弹层中栏顶部的自动同步开关：跟在本体位置名后，与下方 skill 列表隔开 */
+.import-skills .auto-toggle {
+  font-size: 12px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #eee;
+}
+/* 中栏 skill 名后的「已排除自动同步」标记 */
+.import-skills label .muted {
+  margin-left: 6px;
+}

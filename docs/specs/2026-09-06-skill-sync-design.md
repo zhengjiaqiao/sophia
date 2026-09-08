@@ -3,7 +3,7 @@
 - 对应 intent：`docs/intent/2026-09-06-skill-sync-pivot.md`
 - 替代：`docs/specs/2026-09-02-symlink-sync-design.md`（Swift 版，算法与测试用例继续作为移植规格）
 - 日期：2026-09-06
-- 状态：待审阅
+- 状态：已实现（PR #4）；2026-09-06 起被 `2026-09-06-source-centric-sync-design.md` 替代
 
 ## 1. 目标与范围
 
@@ -88,13 +88,13 @@ pub fn propose(matrix: &Matrix) -> Vec<PlannedAction>     // Missing → Create�
 
 **格状态**：真实目录且是本体 → Home；真实目录但本体在别处 → DuplicateHome；链接且 real_path == home → Linked；链接且目标不存在 → Broken；链接指向别处 → Foreign；无条目 → Missing；目录不可读 → 整列 Inaccessible。
 
-**动作**：仅 Missing 和 Broken 产生动作；Foreign、DuplicateHome、ambiguous 只报告。全局域建链用 `Absolute`，项目域用 `Relative`。
+**动作**：仅 Missing 和 Broken 产生动作；Foreign、DuplicateHome、ambiguous 只报告。全局域建链用 `Absolute`，项目域用 `Relative`。摘要（`Summary`）只统计非多本体行的 Missing / Broken，与动作一致。
 
 ## 6. core：`discovery` 模块
 
 - `harnesses.json` 字段：`id, display_name, project_dir, global_dir, detect_dir, universal`。`global_dir` 与 `detect_dir` 是模板，支持 `~`、`$VAR`（如 `$CLAUDE_CONFIG_DIR`、`$CODEX_HOME`）、`$XDG_CONFIG_HOME`（未设置时回退 `~/.config`；Windows 回退 `%APPDATA%`）。
-- `installed(harnesses) -> Vec<Harness>`：`detect_dir` 存在即已安装。
-- `project_candidates() -> Vec<PathBuf>`：`~/.claude.json` 的 `projects` 键 ∪ `projects.json` 手动列表；过滤为"目录存在且含至少一个 harness 的 `project_dir` 或 `.agents/skills`"。`~/.claude.json` 缺失或解析失败时只用手动列表。
+- `installed() -> Vec<Harness>`：探测目录（`detect_dir`，缺省 `global_dir`）存在，且其中至少有一个条目不在通往 `global_dir` 的路径上（只含 `skills/` 空壳的目录不算已安装，因为 `npx skills --agent '*'` 会为未安装的工具也建出该目录）。
+- `project_candidates() -> Vec<PathBuf>`：`~/.claude.json` 的 `projects` 键 ∪ `projects.json` 手动列表；记录来源的项目需"目录存在且含至少一个 harness 的 `project_dir` 或 `.agents/skills`"；手动添加的项目只需目录存在；两者都排除主目录与根目录。`~/.claude.json` 缺失或解析失败时只用手动列表；忽略不以 `.` 开头的 `project_dir`（OpenClaw 的裸 `skills`），并跳过主目录下的隐藏目录。
 
 ## 7. core：`store` 模块
 

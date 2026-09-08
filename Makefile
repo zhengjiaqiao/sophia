@@ -1,20 +1,23 @@
 SHELL := /bin/bash
-.PHONY: test test-core build project format
+.PHONY: test test-core lint build-web dev build format
 
-test: test-core build
+test: test-core lint build-web
 
 test-core:
-	cd SymSyncCore && swift test
+	cargo test -p symsync-core
 
-build: SymSync.xcodeproj
-	set -o pipefail; xcodebuild -project SymSync.xcodeproj -scheme SymSync -configuration Debug \
-	  -derivedDataPath build CODE_SIGN_IDENTITY=- build | tail -20
+lint:
+	cargo clippy --workspace --all-targets -- -D warnings
 
-SymSync.xcodeproj: project.yml
-	xcodegen generate
+build-web:
+	npm run build
 
-project:
-	xcodegen generate
+dev:
+	npm run tauri dev
+
+build:
+	npm run tauri build -- --debug
 
 format:
-	swift format -i -r SymSyncCore/Sources SymSyncCore/Tests SymSync
+	cargo fmt --all
+	npx --no-install prettier --write "src/**/*.{ts,tsx,css}"
