@@ -191,3 +191,33 @@ core：`CellRef` 序列化；`propose_links` / `propose_unlinks` 按格（含忽
 - `App.tsx` 在每次重扫时同时取 `list_manual_projects`，用 `"project:" + path === d.key` 判断是否手动项目。为此 `lib.rs` 的 `add_project` 保存前 `normalize`，`remove_project` 按 `normalize` 比较，`list_manual_projects` 原样返回（已归一化）。
 - 手动本体位置：只保留引入弹层里的 `选择文件夹…` 添加；弹层左栏 `kind = manual` 的条目多一个 `移除` 链接（`remove_manual_source` → 重扫；若它是当前选中项则选中列表第一项）。
 - `docs/manual-checks.md`：设置一节改为只验 harness 开关；新增侧栏添加 / 移除项目、弹层移除手动本体位置。
+
+## 13. 修订 v5.4（2026-09-08）：删自定义同步；选择成为一等交互
+
+- 状态：待实现
+
+### 13.1 删除自定义同步
+
+- core：删 `Selection`、`SyncRule`、`sync::plan`、`PlanError` 及只为它服务的私有函数与测试；`ActionKind` 只剩 `Create`、`BrokenLink`、`Unlink`；`store.rs` 删 `load_rules` / `save_rules` 及测试（`rules.json` 不再读写，残留文件不管）；`Cargo.toml` 去掉因此无用的依赖（`uuid`、`chrono` 若无他用）。`sync::execute` 与其测试保留。
+- 命令层：删 `list_rules`、`save_rules`、`plan_rule`、`apply_rule`、`list_source_items`、`list_domains`（前端已不用）。
+- 前端：删 `CustomSyncTab.tsx`、tab 导航与 `.tabs` / `.custom` 样式、`api` 里对应方法、`types.ts` 里 `Selection` / `SyncRule` / `Domain` / `DomainInfo` / `domainKey` 与已删的 `ActionKind` 变体；侧栏不再折叠。
+- `CLAUDE.md` 首段与 Architecture 去掉"通用同步"相关描述；`docs/manual-checks.md` 删"自定义同步 tab"一节。
+
+### 13.2 页面布局（`SkillsTab` / `DomainView`）
+
+- **页面工具栏**（常驻）：`引入…`（当前页为「全部」时禁用，title "请先在侧栏选一个域"）、`清理坏链（K）`（K = 渲染中各域坏链数；确认条文案不变）、`刷新`。坏链数为 0 时按钮禁用。
+- **筛选行**：搜索框（placeholder "筛选 skill"，大小写不敏感的子串匹配）+ 本体位置筛选片（每个域一排，来自该域的行按 `source_id` 计数，片上 `label · n`；点击切换高亮，可多选；无高亮 = 不筛）。筛选只影响显示与"可见"判定。
+- **选择操作条**：选中且可见的行 ≥ 1 时出现在表格上方：`已选 N 个 skill`、`补齐缺失（M 处）`（M = 这些行 missing 格数，按 `cell.path` 去重）、`删除（P 个）`（P = 这些行里 `!own` 且有可取消格的行数）、`取消选择`。删除仍走确认条。
+- 现在的来源标签行删除（被筛选片替代）；`SkillsTab` 里旧的 `补齐缺失 / 删除 skill` 工具栏按钮删除。
+
+### 13.3 选择
+
+- 选择状态改为 `selected: Set<string>`（键 `${page.key}|${sourceId}|${skill}`），**默认为空**。
+- 表头复选框 = 全选 / 全不选**当前可见行**，部分选中时 `indeterminate`。
+- 行首复选框点击时按住 Shift：以上一次点击的行为锚点，把两者之间（按当前显示顺序）的可见行都设为与本次相同的选中状态；锚点按域记录。
+- 切换侧栏、筛选变化都不清空选择；操作只作用于"选中且可见"的行；`刷新` 后不存在的行自然失效。
+- 行末 `补齐` / `删除` 单行按钮、格点击行为、排序保留。
+
+### 13.4 测试
+
+core：`make test-core`（删除相关测试随功能移除）。前端 `make build-web`。`docs/manual-checks.md` Skills 一节补：筛选片 + 表头全选两步选出"通用仓库"的行；Shift 区间选择；操作条随选择出现与消失；「全部」页引入禁用。
