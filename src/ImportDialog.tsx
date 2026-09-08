@@ -57,7 +57,7 @@ export default function ImportDialog({
     page.targets.filter((t) => t.linkedWholeTo === null).map((t) => t.id),
   );
   const [busy, setBusy] = useState(false);
-  // 以后新增的 skill 也自动链接；打开时按该本体位置已有的规则预置
+  // 当前本体位置在本域有没有自动同步规则；切换位置时随之变化
   const [auto, setAuto] = useState(false);
   // 刚通过「选择文件夹…」加入、等待在新一轮 overview 中出现的路径
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -79,29 +79,32 @@ export default function ImportDialog({
     if (allRef.current) allRef.current.indeterminate = someSelected;
   }, [someSelected]);
 
-  /// 该本体位置已有规则里落在本域的目标
-  const ruleTargets = (sourceId: string) => {
-    const targets = autoLinks.find((r) => r.source === sourceId)?.targets ?? [];
-    return page.targets.filter((t) => targets.includes(t.id)).map((t) => t.id);
-  };
+  /// 该本体位置的规则；source 是归一化路径，与 Source.id 同形
+  const rule = autoLinks.find((r) => r.source === selected);
+  /// 规则里落在本域的目标；非空 = 本域已开启自动同步
+  const ruleTargets = page.targets
+    .filter((t) => (rule?.targets ?? []).includes(t.id))
+    .map((t) => t.id);
+  const ruleOn = ruleTargets.length > 0;
+  /// 本域可逐项建链的目标（整目录链接的不能）
+  const openTargets = page.targets.filter((t) => t.linkedWholeTo === null).map((t) => t.id);
+  /// 撤规则时要撤掉的本域目标：本域全部
+  const domainTargets = page.targets.map((t) => t.id);
 
   /// 该本体位置里被排除、不再自动链接的 skill
-  const excluded = autoLinks.find((r) => r.source === selected)?.excluded ?? [];
+  const excluded = rule?.excluded ?? [];
 
-  // 切换本体位置时清空勾选（引入是一次性动作，不预填）；
-  // 自动同步复选框与目标栏按该位置已有的规则预置
+  // 切换本体位置时清空勾选（引入是一次性动作，不预填）
+  useEffect(() => setNames([]), [selected]);
+
+  // 开关与右栏初值跟着当前本体位置的规则走；用字符串做依赖，
+  // 内容没变的重扫不会覆盖用户当场的勾选
+  const initKey = `${selected}|${ruleTargets.join(",")}|${openTargets.join(",")}`;
   useEffect(() => {
-    setNames([]);
-    const inDomain = ruleTargets(selected);
-    setAuto(inDomain.length > 0);
-    setTargetIds(
-      inDomain.length > 0
-        ? inDomain
-        : page.targets.filter((t) => t.linkedWholeTo === null).map((t) => t.id),
-    );
-    // 规则与域只用来取初值，重扫后不该覆盖用户当场的勾选
+    setAuto(ruleOn);
+    setTargetIds(ruleOn ? ruleTargets : openTargets);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected]);
+  }, [initKey]);
 
   // 选中项消失（如手动本体位置被移除）时回落到第一项
   useEffect(() => {
@@ -122,20 +125,55 @@ export default function ImportDialog({
   const toggleName = (skill: string, checked: boolean) =>
     setNames((prev) => (checked ? [...prev, skill] : prev.filter((n) => n !== skill)));
 
-  const toggleTarget = (id: string, checked: boolean) =>
-    setTargetIds((prev) => (checked ? [...prev, id] : prev.filter((t) => t !== id)));
+  // 写操作后统一重扫（重扫会自动补齐并弹浮层）；失败只报错，不改本地状态
+  const run = async (act: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await act();
+      await onChange();
+    } catch (e) {
+      onError(String(e));
+    }
+    setBusy(false);
+  };
+
+  /// 切换开关即保存：勾上按右栏当前勾选建规则，取消则撤掉本域全部目标
+  const toggleAuto = (checked: boolean) => {
+    if (source === undefined) return;
+    const path = source.path;
+    void run(async () => {
+      if (checked) await api.setAutoLink(path, targetIds);
+      else await api.removeAutoLinkTargets(path, domainTargets);
+      setAuto(checked);
+    });
+  };
+
+  /// 右栏勾选；规则已开启时同时改写规则（全取消 = 取消规则）
+  const toggleTarget = (id: string, checked: boolean) => {
+    const next = checked ? [...targetIds, id] : targetIds.filter((t) => t !== id);
+    if (!auto || source === undefined) {
+      setTargetIds(next);
+      return;
+    }
+    const path = source.path;
+    void run(async () => {
+      await api.removeAutoLinkTargets(path, domainTargets);
+      if (next.length > 0) await api.setAutoLink(path, next);
+      setTargetIds(next);
+      setAuto(next.length > 0);
+    });
+  };
 
   const chosen = names.length;
 
   const doImport = async () => {
+    if (source === undefined) return;
     setBusy(true);
     try {
-      if (auto && source) {
-        await api.setAutoLink(source.path, targetIds);
-        // 这次又勾上的 skill 重新纳入自动同步
-        for (const skill of names.filter((n) => excluded.includes(n))) {
-          await api.includeAutoLink(source.path, skill);
-        }
+      // 这次又勾上的 skill 重新纳入自动同步
+      const reincluded = names.filter((n) => excluded.includes(n));
+      for (const skill of reincluded) {
+        await api.includeAutoLink(source.path, skill);
       }
       const cells: CellRef[] = names.flatMap((skill) =>
         targetIds.map((targetId) => ({ sourceId: selected, skill, targetId })),
@@ -143,7 +181,7 @@ export default function ImportDialog({
       const acts = await api.proposeLinks(cells);
       if (acts.length === 0) {
         onNotice("所选 skill 在所选 harness 下都已链接");
-        if (auto) await onChange();
+        if (reincluded.length > 0) await onChange();
         setBusy(false);
         return;
       }
@@ -226,6 +264,15 @@ export default function ImportDialog({
               <p>没有可用的本体位置。</p>
             ) : (
               <>
+                <label className="auto-toggle">
+                  <input
+                    type="checkbox"
+                    checked={auto}
+                    disabled={busy || targetIds.length === 0}
+                    onChange={(e) => toggleAuto(e.target.checked)}
+                  />
+                  自动同步「{source.label}」：新增的 skill 自动链接到右侧勾选的 harness
+                </label>
                 <label>
                   <input
                     ref={allRef}
@@ -248,7 +295,13 @@ export default function ImportDialog({
                     {excluded.includes(skill) && <span className="muted">已排除自动同步</span>}
                   </label>
                 ))}
-                {fresh.length === 0 && <p className="muted">该本体位置没有可引入的 skill。</p>}
+                {fresh.length === 0 && (
+                  <p className="muted">
+                    {auto
+                      ? "已自动同步，新增的 skill 会自动链接。"
+                      : "该本体位置没有可引入的 skill。"}
+                  </p>
+                )}
                 {present.length > 0 && (
                   <div className="import-present">
                     {present.map((skill) => (
@@ -292,15 +345,6 @@ export default function ImportDialog({
             已选 {chosen} / {fresh.length}
           </span>
           <span style={{ flex: 1 }} />
-          <label className="auto-toggle">
-            <input
-              type="checkbox"
-              checked={auto}
-              disabled={busy || targetIds.length === 0}
-              onChange={(e) => setAuto(e.target.checked)}
-            />
-            以后此本体位置新增的 skill 也自动链接到所选 harness
-          </label>
           <button
             disabled={busy || chosen === 0 || targetIds.length === 0}
             onClick={() => void doImport()}

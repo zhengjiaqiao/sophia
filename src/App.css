@@ -402,13 +402,12 @@ td.cell.unwritable {
   font-size: 12px;
   color: #666;
 }
-/* 引入弹层底部的自动同步开关：和「引入」按钮同一行 */
-.auto-toggle {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+/* 引入弹层中栏顶部的自动同步开关：跟在本体位置名后，与下方 skill 列表隔开 */
+.import-skills .auto-toggle {
   font-size: 12px;
-  cursor: pointer;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #eee;
 }
 /* 中栏 skill 名后的「已排除自动同步」标记 */
 .import-skills label .muted {
