@@ -91,9 +91,16 @@ export default function DomainView({
   const labelOf = (sourceId: string) =>
     overview.sources.find((s) => s.id === sourceId)?.label ?? sourceId;
 
-  // 本体位置 id 就是归一化后的路径，找不到时直接拿它当路径
-  const pathOf = (sourceId: string) =>
-    overview.sources.find((s) => s.id === sourceId)?.path ?? sourceId;
+  // skill 自带本体真实路径；查不到时回退到「本体位置目录 + 名字」
+  const skillPathOf = (sourceId: string, skill: string) => {
+    const source = overview.sources.find((s) => s.id === sourceId);
+    return (
+      source?.skills.find((sk) => sk.name === skill)?.path ?? join(source?.path ?? sourceId, skill)
+    );
+  };
+
+  const isExternal = (sourceId: string) =>
+    overview.sources.find((s) => s.id === sourceId)?.kind.type === "external";
 
   const targetLabelOf = (targetId: string) =>
     page.targets.find((t) => t.id === targetId)?.label ?? targetId;
@@ -281,10 +288,11 @@ export default function DomainView({
                 <td className="path">
                   <button
                     className="link"
-                    title={join(pathOf(row.sourceId), row.skill)}
+                    title={skillPathOf(row.sourceId, row.skill)}
                     disabled={busy}
-                    onClick={() => void reveal(join(pathOf(row.sourceId), row.skill))}
+                    onClick={() => void reveal(skillPathOf(row.sourceId, row.skill))}
                   >
+                    {isExternal(row.sourceId) && <span className="whole-link">外部</span>}
                     {labelOf(row.sourceId)}
                   </button>
                 </td>

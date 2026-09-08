@@ -33,6 +33,8 @@ const kindText = (kind: SourceKind): string => {
       return "项目";
     case "manual":
       return "手动";
+    case "external":
+      return "外部";
   }
 };
 
@@ -65,16 +67,18 @@ export default function ImportDialog({
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
   const source: Source | undefined = overview.sources.find((s) => s.id === selected);
+  /// 外部本体位置不参与自动同步（规则也不该指向它）
+  const autoable = source !== undefined && source.kind.type !== "external";
 
   /// 该本体位置的 skill 在本域尚无行 = 还没引入
   const notImported = (sourceId: string, skill: string) =>
     !page.rows.some((r) => r.sourceId === sourceId && r.skill === skill);
 
-  const fresh = (source?.skills ?? []).filter((sk) => notImported(selected, sk));
-  const present = (source?.skills ?? []).filter((sk) => !notImported(selected, sk));
+  const fresh = (source?.skills ?? []).filter((sk) => notImported(selected, sk.name));
+  const present = (source?.skills ?? []).filter((sk) => !notImported(selected, sk.name));
 
   // 「全部」是纯粹的全选开关，只作用于还没引入的那些
-  const allSelected = fresh.length > 0 && fresh.every((s) => names.includes(s));
+  const allSelected = fresh.length > 0 && fresh.every((s) => names.includes(s.name));
   const someSelected = names.length > 0 && !allSelected;
   const allRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -165,7 +169,7 @@ export default function ImportDialog({
   };
 
   // 开启自动同步时会立刻建链的 skill 数：未引入且未被排除的
-  const autoCount = fresh.filter((sk) => !excluded.includes(sk)).length;
+  const autoCount = fresh.filter((sk) => !excluded.includes(sk.name)).length;
   const targetLabels = page.targets
     .filter((t) => targetIds.includes(t.id))
     .map((t) => t.label)
@@ -264,7 +268,7 @@ export default function ImportDialog({
                   <span className="whole-link">{kindText(s.kind)}</span>
                 </span>
                 <span className="muted">
-                  未引入 {s.skills.filter((sk) => notImported(s.id, sk)).length} 个
+                  未引入 {s.skills.filter((sk) => notImported(s.id, sk.name)).length} 个
                 </span>
                 {s.kind.type === "manual" && (
                   <button
@@ -287,40 +291,42 @@ export default function ImportDialog({
               <p>没有可用的本体位置。</p>
             ) : (
               <>
-                <label className="auto-toggle">
-                  <input
-                    type="checkbox"
-                    checked={auto}
-                    disabled={busy || targetIds.length === 0}
-                    onChange={(e) => toggleAuto(e.target.checked)}
-                  />
-                  自动同步「{source.label}」：新增的 skill 自动链接到右侧勾选的 harness
-                </label>
+                {autoable && (
+                  <label className="auto-toggle">
+                    <input
+                      type="checkbox"
+                      checked={auto}
+                      disabled={busy || targetIds.length === 0}
+                      onChange={(e) => toggleAuto(e.target.checked)}
+                    />
+                    自动同步「{source.label}」：新增的 skill 自动链接到右侧勾选的 harness
+                  </label>
+                )}
                 <label>
                   <input
                     ref={allRef}
                     type="checkbox"
                     checked={allSelected}
                     disabled={busy || fresh.length === 0}
-                    onChange={() => setNames(allSelected ? [] : fresh)}
+                    onChange={() => setNames(allSelected ? [] : fresh.map((sk) => sk.name))}
                   />
                   全部
                 </label>
                 {fresh.map((skill) => (
-                  <label key={skill}>
+                  <label key={skill.name}>
                     <input
                       type="checkbox"
-                      checked={names.includes(skill)}
+                      checked={names.includes(skill.name)}
                       disabled={busy}
-                      onChange={(e) => toggleName(skill, e.target.checked)}
+                      onChange={(e) => toggleName(skill.name, e.target.checked)}
                     />
-                    {skill}
-                    {excluded.includes(skill) && <span className="muted">已排除自动同步</span>}
+                    {skill.name}
+                    {excluded.includes(skill.name) && <span className="muted">已排除自动同步</span>}
                   </label>
                 ))}
                 {fresh.length === 0 && (
                   <p className="muted">
-                    {auto
+                    {auto && autoable
                       ? "已自动同步，新增的 skill 会自动链接。"
                       : "该本体位置没有可引入的 skill。"}
                   </p>
@@ -328,8 +334,8 @@ export default function ImportDialog({
                 {present.length > 0 && (
                   <div className="import-present">
                     {present.map((skill) => (
-                      <div className="muted" key={skill}>
-                        {skill} · 已引入
+                      <div className="muted" key={skill.name}>
+                        {skill.name} · 已引入
                       </div>
                     ))}
                   </div>

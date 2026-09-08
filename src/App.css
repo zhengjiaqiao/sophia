@@ -320,6 +320,11 @@ td.cell.unwritable {
   padding: 1px 6px;
   border-radius: 10px;
 }
+/* 本体位置格里的「外部」标签在名字前面，间距挪到右侧 */
+.path .whole-link {
+  margin-left: 0;
+  margin-right: 6px;
+}
 .domain-group {
   margin-bottom: 16px;
 }
