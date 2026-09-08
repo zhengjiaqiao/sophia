@@ -30,6 +30,9 @@ export const api = {
   setAutoLink: (source: string, targets: string[]) =>
     invoke<void>("set_auto_link", { source, targets }),
   removeAutoLink: (source: string) => invoke<void>("remove_auto_link", { source }),
+  /// 只撤该规则的部分目标；目标去空则整条规则删除
+  removeAutoLinkTargets: (source: string, targets: string[]) =>
+    invoke<void>("remove_auto_link_targets", { source, targets }),
   /// 该 skill 不再自动链接（手动清除过）
   excludeAutoLink: (source: string, skill: string) =>
     invoke<void>("exclude_auto_link", { source, skill }),

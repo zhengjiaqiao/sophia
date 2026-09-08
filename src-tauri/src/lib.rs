@@ -236,6 +236,18 @@ fn remove_auto_link(source: PathBuf, state: tauri::State<'_, AppState>) -> Resul
     update_auto_links(&state, |rules| skills::remove_auto_link(rules, &source))
 }
 
+/// 只撤该本体位置的部分目标；目标去空则整条规则删除
+#[tauri::command]
+fn remove_auto_link_targets(
+    source: PathBuf,
+    targets: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    update_auto_links(&state, |rules| {
+        skills::remove_auto_link_targets(rules, &source, &targets)
+    })
+}
+
 #[tauri::command]
 fn exclude_auto_link(
     source: PathBuf,
@@ -346,6 +358,7 @@ pub fn run() {
             list_auto_links,
             set_auto_link,
             remove_auto_link,
+            remove_auto_link_targets,
             exclude_auto_link,
             include_auto_link,
             list_harnesses,

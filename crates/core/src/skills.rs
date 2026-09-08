@@ -253,6 +253,18 @@ pub fn remove_auto_link(rules: &mut Vec<AutoLink>, source: &Path) {
     rules.retain(|r| r.source != source);
 }
 
+/// 从该本体位置的规则里去掉这些目标（域页的 × 只撤本域的部分）；目标去空则整条删除
+pub fn remove_auto_link_targets(rules: &mut Vec<AutoLink>, source: &Path, targets: &[String]) {
+    let source = normalize(source);
+    let Some(i) = rules.iter().position(|r| r.source == source) else {
+        return;
+    };
+    rules[i].targets.retain(|t| !targets.contains(t));
+    if rules[i].targets.is_empty() {
+        rules.remove(i);
+    }
+}
+
 /// 该 skill 不再自动链接（手动清除软链时调用）
 pub fn exclude(rules: &mut [AutoLink], source: &Path, skill: &str) {
     if let Some(rule) = find_rule_mut(rules, source) {
@@ -753,6 +765,35 @@ mod tests {
         remove_auto_link(&mut rules, Path::new("/other"));
         assert_eq!(rules.len(), 1);
         remove_auto_link(&mut rules, &dotted);
+        assert!(rules.is_empty());
+    }
+
+    #[test]
+    fn remove_auto_link_targets_trims_and_drops_the_emptied_rule() {
+        let mut rules: Vec<AutoLink> = Vec::new();
+        let source = PathBuf::from("/a/skills");
+        let dotted = PathBuf::from("/a/./skills/"); // 同一处的非归一化写法
+        upsert_auto_link(
+            &mut rules,
+            &source,
+            &["claude-code".into(), "codex".into(), "cursor".into()],
+        );
+
+        // source 不匹配：无事发生
+        remove_auto_link_targets(&mut rules, Path::new("/other"), &["codex".into()]);
+        assert_eq!(rules[0].targets, vec!["claude-code", "codex", "cursor"]);
+
+        // 只去掉本次给的目标，其余保留
+        remove_auto_link_targets(&mut rules, &dotted, &["codex".into(), "none".into()]);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].targets, vec!["claude-code", "cursor"]);
+
+        // 去空 → 整条规则删除
+        remove_auto_link_targets(
+            &mut rules,
+            &source,
+            &["claude-code".into(), "cursor".into()],
+        );
         assert!(rules.is_empty());
     }
 

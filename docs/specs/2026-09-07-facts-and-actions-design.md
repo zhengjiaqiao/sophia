@@ -299,20 +299,20 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
 
 规则维护函数（纯函数，作用于 `Vec<AutoLink>`）：
 - `upsert_auto_link(rules, source, targets)`：同 source 已有规则 → 目标并集、并把本次 targets 涉及的 skill 从 excluded 里去掉的事交给 `include`；没有 → 新建。
-- `remove_auto_link(rules, source)`。
+- `remove_auto_link(rules, source)`；`remove_auto_link_targets(rules, source, targets)`：只去掉这些目标，去空则整条删除。
 - `exclude(rules, source, skill)` / `include(rules, source, skill)`。
 - `covering(rules, source_id, skill) -> Option<&AutoLink>`：该 skill 是否在某条规则（未排除）范围内。
 
 ### 19.3 命令层
 
 - `scan_all`：扫描后 `auto_link_cells` → `propose_links` → 非空则 `apply_all` 同样的执行路径（按 `style_for` 分组 `sync::execute`）→ **再扫一次**返回；执行结果通过 `app.emit("auto-linked", SyncReport)` 发给前端。只做一轮，不循环。
-- 新增：`list_auto_links() -> Vec<AutoLink>`、`set_auto_link(source: PathBuf, targets: Vec<String>)`（upsert）、`remove_auto_link(source)`、`exclude_auto_link(source, skill)`、`include_auto_link(source, skill)`。
+- 新增：`list_auto_links() -> Vec<AutoLink>`、`set_auto_link(source: PathBuf, targets: Vec<String>)`（upsert）、`remove_auto_link(source)`、`remove_auto_link_targets(source, targets)`（只撤这些目标，去空则整条删）、`exclude_auto_link(source, skill)`、`include_auto_link(source, skill)`。
 - 前端每次 `scanAll` 后顺带 `listAutoLinks`（并行）。
 
 ### 19.4 前端
 
 - **引入弹层**底部（`引入` 按钮左侧）加复选框："以后此本体位置新增的 skill 也自动链接到所选 harness"。勾选时点 `引入` = 先 `setAutoLink(source.path, targetIds)` 再走现有建链流程（若勾选的 skill 里有被排除的，先 `includeAutoLink`）。弹层打开时若该位置已有规则，复选框默认勾上、右栏目标默认为规则的 targets；被排除的 skill 在中栏名字后标 `已排除自动同步`。
-- **域页**筛选行下方：`自动同步：<label> → <harness 名, …>（排除 n）　×`，每条规则一行（只列 targets 落在本域的规则）；× 直接 `removeAutoLink` 并重扫，不需确认。
+- **域页**筛选行下方：`自动同步：<label> → <harness 名, …>（排除 n）　×`，每条规则一行（只列 targets 落在本域的规则，且只显示本域的那部分 targets）；× 只移除本域的 targets（`removeAutoLinkTargets(rule.source, 本域交集)`，规则没有 targets 了才整条删除）并重扫，不需确认。
 - **清除软链确认弹窗**：若本次涉及的行有被规则覆盖的，弹窗多一段："以下 skill 在自动同步范围内，清除后将不再自动链接：a、b"。确认后先对这些 (source, skill) 调 `excludeAutoLink`，再执行删除。
 - **浮层**：监听 `auto-linked` 事件，用结果框展示（标题 "自动同步"）。
 - 后端字段用 `AutoLink { source; targets; excluded: string[] }` 对应到 `types.ts`。

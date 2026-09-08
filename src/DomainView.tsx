@@ -98,10 +98,13 @@ export default function DomainView({
   const targetLabelOf = (targetId: string) =>
     page.targets.find((t) => t.id === targetId)?.label ?? targetId;
 
-  // 只列目标落在本域的规则
-  const rules = autoLinks.filter((r) =>
-    r.targets.some((id) => page.targets.some((t) => t.id === id)),
-  );
+  // 只列目标落在本域的规则，且每条只保留本域的那部分目标
+  const rules = autoLinks
+    .map((rule) => ({
+      rule,
+      local: rule.targets.filter((id) => page.targets.some((t) => t.id === id)),
+    }))
+    .filter((r) => r.local.length > 0);
 
   /// 在系统文件管理器里定位并选中该 skill 的本体目录
   const reveal = async (path: string) => {
@@ -190,18 +193,17 @@ export default function DomainView({
 
       {rules.length > 0 && (
         <div className="auto-rules">
-          {rules.map((rule) => (
+          {rules.map(({ rule, local }) => (
             <div className="auto-rule" key={rule.source}>
               <span>
-                自动同步：{labelOf(rule.source)} →{" "}
-                {rule.targets.map((id) => targetLabelOf(id)).join("、")}
+                自动同步：{labelOf(rule.source)} → {local.map((id) => targetLabelOf(id)).join("、")}
                 {rule.excluded.length > 0 && `（排除 ${rule.excluded.length}）`}
               </span>
               <button
                 className="link"
-                title="不再自动同步该本体位置"
+                title="不再自动同步到本域的这些目标"
                 disabled={busy}
-                onClick={() => void run(() => api.removeAutoLink(rule.source))}
+                onClick={() => void run(() => api.removeAutoLinkTargets(rule.source, local))}
               >
                 ×
               </button>
