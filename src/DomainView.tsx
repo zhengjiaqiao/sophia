@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
-import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
+import type { AutoLink, CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
 /// 交给容器去清除的一批软链：行（用于结果说明）+ 要清的格，省略 cells = 整行
 export interface UnlinkTarget {
@@ -13,6 +13,8 @@ export interface UnlinkTarget {
 export interface DomainViewProps {
   overview: Overview;
   page: DomainPage;
+  /// 全部自动同步规则；本组件只列目标落在本域的那些
+  autoLinks: AutoLink[];
   /// 经过筛选、要显示的行；排序在本组件里做
   rows: DomainRow[];
   busy: boolean;
@@ -67,6 +69,7 @@ export const join = (dir: string, name: string) =>
 export default function DomainView({
   overview,
   page,
+  autoLinks,
   rows: visible,
   busy,
   activeSources,
@@ -91,6 +94,14 @@ export default function DomainView({
   // 本体位置 id 就是归一化后的路径，找不到时直接拿它当路径
   const pathOf = (sourceId: string) =>
     overview.sources.find((s) => s.id === sourceId)?.path ?? sourceId;
+
+  const targetLabelOf = (targetId: string) =>
+    page.targets.find((t) => t.id === targetId)?.label ?? targetId;
+
+  // 只列目标落在本域的规则
+  const rules = autoLinks.filter((r) =>
+    r.targets.some((id) => page.targets.some((t) => t.id === id)),
+  );
 
   /// 在系统文件管理器里定位并选中该 skill 的本体目录
   const reveal = async (path: string) => {
@@ -173,6 +184,28 @@ export default function DomainView({
             >
               {labelOf(sourceId)} · {n}
             </button>
+          ))}
+        </div>
+      )}
+
+      {rules.length > 0 && (
+        <div className="auto-rules">
+          {rules.map((rule) => (
+            <div className="auto-rule" key={rule.source}>
+              <span>
+                自动同步：{labelOf(rule.source)} →{" "}
+                {rule.targets.map((id) => targetLabelOf(id)).join("、")}
+                {rule.excluded.length > 0 && `（排除 ${rule.excluded.length}）`}
+              </span>
+              <button
+                className="link"
+                title="不再自动同步该本体位置"
+                disabled={busy}
+                onClick={() => void run(() => api.removeAutoLink(rule.source))}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
       )}
