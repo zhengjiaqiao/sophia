@@ -257,3 +257,15 @@ core：`make test-core`（删除相关测试随功能移除）。前端 `make bu
 - 规则：仓库型本体位置（通用仓库、项目仓库、手动）里的软链条目，只有当它解析到的真实目录**不在任何已知本体位置之内**时才算该仓库的 skill（用户把外部目录链进仓库的场景，如 `/Applications/ego-skills/ego-browser`）。解析到另一个已知本体位置里的软链是"链接"，由那个本体位置的行在本列上以 ✓ 表示。harness 目录仍只认真实目录。
 - 实现：`discovery::sources` 两遍：先按现规则收集全部本体位置（含软链条目）；再对每个仓库型位置过滤其软链条目——`real_path(entry)` 以任一**其他**本体位置的 `real_path` 为前缀（`Path::starts_with`，按分量）则剔除。位置本身按 `real_path` 去重的逻辑不变。
 - 测试：新增"项目仓库里指向 agent 本体位置的软链不算项目的 skill，指向外部目录的仍算"；`store_sources_link_through_but_harness_dirs_only_count_real_dirs` 保持通过。
+
+## 18. 修订 v5.9（2026-09-08）：去掉刷新按钮，文件系统变化自动重扫
+
+- 状态：待实现
+- 去掉工具栏 `刷新` 按钮。以下任一情况自动重扫：
+  1. **文件系统变化**：后端用 `notify`（`notify-debouncer-mini`，去抖 500ms）监视每次扫描得到的全部本体位置目录与目标目录（非递归；skill 是它们的直接子项，删本体目录、建/删软链都会触发父目录事件）。事件到达后向前端 emit `fs-changed`。每次 `scan_all` 后用新的目录集合重建监视（集合未变则不重建）。
+  2. **窗口获得焦点**：前端监听 Tauri 窗口 `focus` 事件后重扫（兜底，例如在 Finder 里删了不在监视集合内的东西）。
+  3. 本工具自己的写操作之后（现有逻辑）。
+- 前端：`App.tsx` 用 `@tauri-apps/api/event` 的 `listen("fs-changed")` 与 `getCurrentWindow().onFocusChanged`；重扫合并：正在扫描时收到事件则记一个"待重扫"标记，扫完再扫一次；连续事件去抖 300ms。
+- 自己写操作触发的 fs 事件会导致多扫一次，可接受。
+- 监视失败（目录不可读等）只记日志，不报错到界面。
+- `docs/manual-checks.md`：去掉刷新按钮相关，加"在 Finder 删掉一个本体目录 / 手工建一条软链后，1 秒内表格自动更新"。
