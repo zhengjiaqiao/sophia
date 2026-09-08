@@ -320,3 +320,16 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
 ### 19.5 测试
 
 core：`auto_link_cells`（排除、缺目标、缺位置）；规则维护四个函数；`Settings` 旧文件无 `auto_links` 可读。前端 `make build-web`。`docs/manual-checks.md`：建规则 → 在 Finder 往本体位置新建一个 skill 目录 → 1 秒内自动出现链接并弹浮层；清除该 skill → 弹窗提示排除 → 不再补回；弹层重新勾选 → 解除排除。
+
+## 20. 修订 v6.1（2026-09-08）：自动同步开关跟随本体位置，即时保存
+
+- 状态：待实现
+- 引入弹层的自动同步复选框从底部移到**中栏顶部**，紧贴当前选中的本体位置名：`☐ 自动同步「<label>」：新增的 skill 自动链接到右侧勾选的 harness`。它表达的是"这个本体位置在本域有没有规则"，切换本体位置时随之变化。
+- **即时生效，不依赖"引入"按钮**：
+  - 勾上 → `setAutoLink(source.path, 右栏勾选的 targetIds)`，然后重扫（重扫会自动补齐并弹浮层）。
+  - 取消 → `removeAutoLinkTargets(source.path, 本域全部 targetIds)`，然后重扫。
+  - 规则已开启时改动右栏 harness → 先 `removeAutoLinkTargets(source.path, 本域全部 targetIds)` 再 `setAutoLink(source.path, 新勾选)`，然后重扫。
+- 右栏 harness 复选在规则开启时的初值 = 规则 targets ∩ 本域目标；未开启时 = 本域全部可用目标（现状）。
+- 中栏：规则开启时，"该本体位置没有可引入的 skill" 改为 "已自动同步，新增的 skill 会自动链接"；被排除的 skill 仍标 `已排除自动同步`，勾选它并点"引入"即解除排除（现状）。
+- 底部只剩 `选择文件夹…`、`已选 n / m`、`引入`、`取消`；"引入"仍是对勾选 skill 的一次性建链。
+- `docs/manual-checks.md` 相应改：勾开关即保存，关闭弹层再打开仍是勾选态，取消即移除规则。
