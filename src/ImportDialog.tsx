@@ -59,6 +59,8 @@ export default function ImportDialog({
   const [busy, setBusy] = useState(false);
   // 当前本体位置在本域有没有自动同步规则；切换位置时随之变化
   const [auto, setAuto] = useState(false);
+  // 待确认的"开启自动同步"
+  const [confirmAuto, setConfirmAuto] = useState(false);
   // 刚通过「选择文件夹…」加入、等待在新一轮 overview 中出现的路径
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
@@ -140,13 +142,34 @@ export default function ImportDialog({
   /// 切换开关即保存：勾上按右栏当前勾选建规则，取消则撤掉本域全部目标
   const toggleAuto = (checked: boolean) => {
     if (source === undefined) return;
+    // 勾上会把这个位置下所有未引入的 skill 一次链过去，影响面大，先确认
+    if (checked) {
+      setConfirmAuto(true);
+      return;
+    }
     const path = source.path;
     void run(async () => {
-      if (checked) await api.setAutoLink(path, targetIds);
-      else await api.removeAutoLinkTargets(path, domainTargets);
-      setAuto(checked);
+      await api.removeAutoLinkTargets(path, domainTargets);
+      setAuto(false);
     });
   };
+
+  const enableAuto = () => {
+    if (source === undefined) return;
+    const path = source.path;
+    setConfirmAuto(false);
+    void run(async () => {
+      await api.setAutoLink(path, targetIds);
+      setAuto(true);
+    });
+  };
+
+  // 开启自动同步时会立刻建链的 skill 数：未引入且未被排除的
+  const autoCount = fresh.filter((sk) => !excluded.includes(sk)).length;
+  const targetLabels = page.targets
+    .filter((t) => targetIds.includes(t.id))
+    .map((t) => t.label)
+    .join("、");
 
   /// 右栏勾选；规则已开启时同时改写规则（全取消 = 取消规则）
   const toggleTarget = (id: string, checked: boolean) => {
@@ -356,6 +379,29 @@ export default function ImportDialog({
           </button>
         </div>
       </div>
+      {confirmAuto && source !== undefined && (
+        <div className="modal-backdrop" onClick={() => setConfirmAuto(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="toolbar">
+              <h2>开启自动同步</h2>
+            </div>
+            <p>
+              将立即把「{source.label}」下 {autoCount} 个未引入的 skill 链接到
+              {targetLabels || "（未选 harness）"}，以后该位置新增的 skill
+              也会自动链接。只建软链接，不复制、不删除任何文件。
+            </p>
+            <div className="toolbar">
+              <span style={{ flex: 1 }} />
+              <button disabled={busy || targetIds.length === 0} onClick={enableAuto}>
+                确认开启
+              </button>
+              <button disabled={busy} onClick={() => setConfirmAuto(false)}>
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

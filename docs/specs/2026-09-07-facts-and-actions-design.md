@@ -326,7 +326,7 @@ core：`auto_link_cells`（排除、缺目标、缺位置）；规则维护四�
 - 状态：已实现
 - 引入弹层的自动同步复选框从底部移到**中栏顶部**，紧贴当前选中的本体位置名：`☐ 自动同步「<label>」：新增的 skill 自动链接到右侧勾选的 harness`。它表达的是"这个本体位置在本域有没有规则"，切换本体位置时随之变化。
 - **即时生效，不依赖"引入"按钮**：
-  - 勾上 → `setAutoLink(source.path, 右栏勾选的 targetIds)`，然后重扫（重扫会自动补齐并弹浮层）。
+  - 勾上 → 先弹确认（"将立即把「label」下 n 个未引入的 skill 链接到 <harness…>，以后新增的也会自动链接。只建软链接，不复制、不删除任何文件。"），确认后 `setAutoLink(source.path, 右栏勾选的 targetIds)`，然后重扫（重扫会自动补齐并弹浮层）。取消则复选框保持未勾。
   - 取消 → `removeAutoLinkTargets(source.path, 本域全部 targetIds)`，然后重扫。
   - 规则已开启时改动右栏 harness → 先 `removeAutoLinkTargets(source.path, 本域全部 targetIds)` 再 `setAutoLink(source.path, 新勾选)`，然后重扫。
 - 右栏 harness 复选在规则开启时的初值 = 规则 targets ∩ 本域目标；未开启时 = 本域全部可用目标（现状）。
