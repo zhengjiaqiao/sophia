@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { CellRef, HarnessStatus, Overview, PlannedAction, SyncReport } from "./types";
 
 export const api = {
@@ -25,4 +26,6 @@ export const api = {
     const picked = await open({ directory: true, multiple: false, title });
     return typeof picked === "string" ? picked : null;
   },
+  /// 在系统文件管理器里定位并选中该路径
+  revealInDir: (path: string) => revealItemInDir(path),
 };

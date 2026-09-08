@@ -221,6 +221,7 @@ fn remove_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<()
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             store: Store::new(Store::default_dir()),
         })

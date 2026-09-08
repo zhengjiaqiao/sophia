@@ -52,6 +52,9 @@ const cellsOf = (row: DomainRow): CellRef[] =>
 /// 没有格子的行排在所有状态之后
 const ABSENT_RANK = STATE_RANK.unwritable + 1;
 
+/// 拼路径：Windows 路径用反斜杠，其余用斜杠
+const join = (dir: string, name: string) => `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
+
 /// 一个域的整页：筛选片、行×目标的表格、坏链表
 export default function DomainView({
   overview,
@@ -76,6 +79,19 @@ export default function DomainView({
 
   const labelOf = (sourceId: string) =>
     overview.sources.find((s) => s.id === sourceId)?.label ?? sourceId;
+
+  // 本体位置 id 就是归一化后的路径，找不到时直接拿它当路径
+  const pathOf = (sourceId: string) =>
+    overview.sources.find((s) => s.id === sourceId)?.path ?? sourceId;
+
+  /// 在系统文件管理器里定位并选中该 skill 的本体目录
+  const reveal = async (path: string) => {
+    try {
+      await api.revealInDir(path);
+    } catch (e) {
+      onError(String(e));
+    }
+  };
 
   // 写操作后统一重扫；失败只报错，不改本地状态
   const run = async (act: () => Promise<unknown>) => {
@@ -219,8 +235,15 @@ export default function DomainView({
                     {row.skill}
                   </label>
                 </td>
-                <td className="path" title={row.sourceId}>
-                  {labelOf(row.sourceId)}
+                <td className="path">
+                  <button
+                    className="link"
+                    title={join(pathOf(row.sourceId), row.skill)}
+                    disabled={busy}
+                    onClick={() => void reveal(join(pathOf(row.sourceId), row.skill))}
+                  >
+                    {labelOf(row.sourceId)}
+                  </button>
                 </td>
                 {page.targets.map((target) => {
                   const cell = cellOf(row, target.id);
