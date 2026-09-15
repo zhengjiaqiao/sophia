@@ -57,6 +57,17 @@ pub enum LinkStyle {
     Relative,
 }
 
+/// 从 harness 自己的数据库里取 agent 显示名
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLabels {
+    /// 未展开的模板，含 `~` 与 `$VAR`
+    pub path: String,
+    pub table: String,
+    pub id_column: String,
+    pub name_column: String,
+}
+
 /// 一个 harness 的目录约定。路径已按当前机器解析
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +82,12 @@ pub struct Harness {
     /// 每个 agent 一个项目的 skill 目录，通配已展开
     #[serde(default)]
     pub agent_dirs: Vec<PathBuf>,
+    /// `global_dir` 由 harness 自己装配：仍是本体位置，但不生成可写列
+    #[serde(default)]
+    pub managed_global_dir: bool,
+    /// agent 目录名 → 显示名的查表方式
+    #[serde(default)]
+    pub agent_labels: Option<AgentLabels>,
 }
 
 /// 本体位置的来源类别
@@ -155,10 +172,18 @@ pub struct Target {
     /// Global → `<harness_id>`；Project → `project:<normalized path>::<harness_id>`
     pub id: String,
     pub label: String,
-    pub path: PathBuf,
+    /// 这一列写入的全部目录。绝大多数列只有一个；WeiboAP 全局列扇出到各助手目录
+    pub dirs: Vec<PathBuf>,
     pub scope: TargetScope,
-    /// 目标目录本身是软链且 real_path 等于某本体位置时，为该 Source 的 id
+    /// 目标目录本身是软链且 real_path 等于某本体位置时，为该 Source 的 id。多目录列恒为 None
     pub linked_whole_to: Option<String>,
+}
+
+impl Target {
+    /// 代表目录：列的主路径。`dirs` 由构造方保证非空
+    pub fn main_dir(&self) -> &Path {
+        &self.dirs[0]
+    }
 }
 
 /// (本体位置, skill, 目标) 交叉点的状态
@@ -169,6 +194,8 @@ pub enum CellState {
     Own,
     Linked,
     Missing,
+    /// 多目录列上只有部分目录已到位
+    Partial,
     /// 链接目标不存在
     Broken,
     /// 链接指向别处
@@ -185,9 +212,12 @@ pub struct Cell {
     pub source_id: String,
     pub skill: String,
     pub target_id: String,
-    /// 目标目录下该 skill 的路径
+    /// 代表路径：`main_dir` 下该 skill 的路径
     pub path: PathBuf,
     pub state: CellState,
+    /// 已到位的目录数 / 总目录数；单目录列为 1/1 或 0/1
+    pub linked: usize,
+    pub total: usize,
 }
 
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
@@ -298,6 +328,84 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ActionKind::Unlink).unwrap(),
             json!("unlink")
+        );
+    }
+
+    #[test]
+    fn partial_state_and_multi_dir_target_serialize_for_the_front_end() {
+        assert_eq!(
+            serde_json::to_value(CellState::Partial).unwrap(),
+            json!("partial")
+        );
+        let target = Target {
+            id: "weiboap".into(),
+            label: "WeiboAP".into(),
+            dirs: vec![PathBuf::from("/a/skills"), PathBuf::from("/b/skills")],
+            scope: TargetScope::Global {
+                harness_id: "weiboap".into(),
+            },
+            linked_whole_to: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&target).unwrap(),
+            json!({
+                "id": "weiboap",
+                "label": "WeiboAP",
+                "dirs": ["/a/skills", "/b/skills"],
+                "scope": {"type": "global", "harnessId": "weiboap"},
+                "linkedWholeTo": null
+            })
+        );
+        assert_eq!(target.main_dir(), Path::new("/a/skills"));
+        let cell = Cell {
+            source_id: "/a".into(),
+            skill: "x".into(),
+            target_id: "weiboap".into(),
+            path: PathBuf::from("/a/skills/x"),
+            state: CellState::Partial,
+            linked: 1,
+            total: 2,
+        };
+        assert_eq!(
+            serde_json::to_value(&cell).unwrap(),
+            json!({
+                "sourceId": "/a",
+                "skill": "x",
+                "targetId": "weiboap",
+                "path": "/a/skills/x",
+                "state": "partial",
+                "linked": 1,
+                "total": 2
+            })
+        );
+    }
+
+    #[test]
+    fn harness_agent_labels_use_camel_case_and_default_to_absent() {
+        let harness: Harness = serde_json::from_value(json!({
+            "id": "weiboap",
+            "displayName": "WeiboAP",
+            "projectDir": null,
+            "globalDir": "/g",
+            "universal": false
+        }))
+        .unwrap();
+        assert!(!harness.managed_global_dir);
+        assert_eq!(harness.agent_labels, None);
+        let labels = AgentLabels {
+            path: "~/Library/Application Support/WeiboAP/agents.db".into(),
+            table: "agents".into(),
+            id_column: "id".into(),
+            name_column: "name".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&labels).unwrap(),
+            json!({
+                "path": "~/Library/Application Support/WeiboAP/agents.db",
+                "table": "agents",
+                "idColumn": "id",
+                "nameColumn": "name"
+            })
         );
     }
 

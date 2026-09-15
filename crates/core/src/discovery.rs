@@ -1,6 +1,6 @@
 //! 内置 harness 表、已安装判定、项目候选、本体位置与目标发现
 use crate::fs::{entry_kind, normalize, real_path, EntryKind};
-use crate::models::{Harness, Skill, Source, SourceKind, Target, TargetScope};
+use crate::models::{AgentLabels, Harness, Skill, Source, SourceKind, Target, TargetScope};
 use crate::store::Settings;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -23,6 +23,12 @@ struct HarnessSpec {
     /// 每个 agent 一个项目的 skill 目录模板，允许单个路径分量为 `*`
     #[serde(default)]
     agent_dirs: Vec<String>,
+    /// `global_dir` 由 harness 自己装配：仍是本体位置，但不生成可写列
+    #[serde(default)]
+    managed_global_dir: bool,
+    /// agent 目录名 → 显示名的查表方式
+    #[serde(default)]
+    agent_labels: Option<AgentLabels>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,6 +107,8 @@ fn resolve(spec: &HarnessSpec, env: &Env) -> (Harness, Option<PathBuf>) {
         global_dir: resolve_template(&spec.global_dir, env),
         universal: spec.universal,
         agent_dirs: expand_template_glob(&spec.agent_dirs, env),
+        managed_global_dir: spec.managed_global_dir,
+        agent_labels: spec.agent_labels.clone(),
     };
     (harness, resolve_template(&spec.detect_dir, env))
 }
@@ -190,7 +198,55 @@ fn agent_dir_templates() -> HashMap<String, Vec<String>> {
         .collect()
 }
 
-/// harness 的 per-agent 目录：agent 根当项目，标签为「harness 名 · agent 目录名」。
+/// 标识符必须是 `[A-Za-z_][A-Za-z0-9_]*`，否则不拼进 SQL
+fn safe_identifier(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// 只读打开 harness 自己的数据库，取 agent id → 显示名。任何失败都返回空表
+fn agent_label_map(spec: &AgentLabels, env: &Env) -> HashMap<String, String> {
+    if !(safe_identifier(&spec.table)
+        && safe_identifier(&spec.id_column)
+        && safe_identifier(&spec.name_column))
+    {
+        return HashMap::new();
+    }
+    let Some(path) = resolve_template(std::slice::from_ref(&spec.path), env) else {
+        return HashMap::new();
+    };
+    // immutable=1：不加锁、不碰 WAL，与运行中的宿主应用互不干扰
+    let uri = format!("file:{}?mode=ro&immutable=1", path.display());
+    let conn = match rusqlite::Connection::open_with_flags(
+        &uri,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("打不开 {}：{e}", path.display());
+            return HashMap::new();
+        }
+    };
+    let sql = format!(
+        "SELECT {}, {} FROM {}",
+        spec.id_column, spec.name_column, spec.table
+    );
+    let mut out = HashMap::new();
+    match conn.prepare(&sql).and_then(|mut st| {
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.flatten().collect::<Vec<_>>())
+    }) {
+        Ok(pairs) => out.extend(pairs),
+        Err(e) => eprintln!("读 {} 失败：{e}", spec.table),
+    }
+    out
+}
+
+/// harness 的 per-agent 目录：agent 根当项目，标签为「harness 名 · 助手名」，
+/// 助手名取自 harness 自己的数据库，查不到时降级为 agent 目录名。
 /// `Harness.agent_dirs` 已经展开，看不出是哪一层匹配的 `*`，
 /// 只能回表按模板重新展开一次（同样的模板、同样的 env，结果一致）
 fn agent_projects(env: &Env, harnesses: &[Harness]) -> Vec<AgentProject> {
@@ -199,15 +255,26 @@ fn agent_projects(env: &Env, harnesses: &[Harness]) -> Vec<AgentProject> {
         .iter()
         .filter_map(|h| Some((h, templates.get(&h.id)?)))
         .flat_map(|(h, t)| {
+            // 每个 harness 只查一次数据库
+            let names = h
+                .agent_labels
+                .as_ref()
+                .map(|spec| agent_label_map(spec, env))
+                .unwrap_or_default();
             glob_matches(t, env)
                 .into_iter()
-                .map(move |(root, dir)| AgentProject {
-                    harness_id: h.id.clone(),
-                    display_name: h.display_name.clone(),
-                    label: format!("{} · {}", h.display_name, dir_name(&root)),
-                    root,
-                    dir,
+                .map(move |(root, dir)| {
+                    let key = dir_name(&root);
+                    let name = names.get(&key).cloned().unwrap_or(key);
+                    AgentProject {
+                        harness_id: h.id.clone(),
+                        display_name: h.display_name.clone(),
+                        label: format!("{} · {}", h.display_name, name),
+                        root,
+                        dir,
+                    }
                 })
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -301,8 +368,12 @@ pub fn sources(
 pub fn external_sources(env: &Env, targets: &[Target], known: &[Source]) -> Vec<Source> {
     let inside: Vec<PathBuf> = known.iter().filter_map(|s| real_path(&s.path)).collect();
     let mut groups: BTreeMap<PathBuf, BTreeMap<String, PathBuf>> = BTreeMap::new();
-    for t in targets.iter().filter(|t| t.linked_whole_to.is_none()) {
-        let Ok(entries) = std::fs::read_dir(&t.path) else {
+    for dir in targets
+        .iter()
+        .filter(|t| t.linked_whole_to.is_none())
+        .flat_map(|t| t.dirs.iter())
+    {
+        let Ok(entries) = std::fs::read_dir(dir) else {
             continue;
         };
         let mut names: Vec<String> = entries
@@ -312,7 +383,7 @@ pub fn external_sources(env: &Env, targets: &[Target], known: &[Source]) -> Vec<
             .collect();
         names.sort();
         for name in names {
-            let path = t.path.join(&name);
+            let path = dir.join(&name);
             if !matches!(entry_kind(&path), EntryKind::Symlink(_)) {
                 continue;
             }
@@ -369,42 +440,67 @@ pub fn targets(
     sources: &[Source],
 ) -> Vec<Target> {
     let mut out: Vec<Target> = Vec::new();
-    let mut push = |id: String, label: String, path: PathBuf, scope: TargetScope| {
-        // is_dir 跟随软链：整目录软链也算目标
-        if !path.is_dir() {
+    // is_dir 跟随软链：整目录软链也算目标。一个目录都不存在的列不产出
+    let mut push = |id: String, label: String, dirs: Vec<PathBuf>, scope: TargetScope| {
+        let dirs: Vec<PathBuf> = dirs.into_iter().filter(|d| d.is_dir()).collect();
+        if dirs.is_empty() {
             return;
         }
         out.push(Target {
             id,
             label,
-            path,
+            dirs,
             scope,
             linked_whole_to: None,
         });
     };
 
     for h in harnesses {
+        // 托管目录由 harness 自己装配，不给可写列
+        if h.managed_global_dir {
+            continue;
+        }
         if let Some(dir) = h.global_dir.clone() {
             push(
                 h.id.clone(),
                 h.display_name.clone(),
-                dir,
+                vec![dir],
                 TargetScope::Global {
                     harness_id: h.id.clone(),
                 },
             );
         }
     }
-    for a in agent_projects(env, harnesses) {
+    let agents = agent_projects(env, harnesses);
+    for a in &agents {
         let key = normalize(&a.root).to_string_lossy().into_owned();
         push(
             format!("project:{key}::{}", a.harness_id),
-            a.display_name,
-            a.dir,
+            a.display_name.clone(),
+            vec![a.dir.clone()],
             TargetScope::Project {
-                project: a.root,
-                harness_id: a.harness_id,
-                project_label: Some(a.label),
+                project: a.root.clone(),
+                harness_id: a.harness_id.clone(),
+                project_label: Some(a.label.clone()),
+            },
+        );
+    }
+    // 全局域里每个 harness 一列，扇出到它展开出的全部 agent 目录
+    for h in harnesses {
+        let dirs: Vec<PathBuf> = agents
+            .iter()
+            .filter(|a| a.harness_id == h.id)
+            .map(|a| a.dir.clone())
+            .collect();
+        if dirs.is_empty() {
+            continue;
+        }
+        push(
+            h.id.clone(),
+            h.display_name.clone(),
+            dirs,
+            TargetScope::Global {
+                harness_id: h.id.clone(),
             },
         );
     }
@@ -417,7 +513,7 @@ pub fn targets(
             push(
                 format!("project:{key}::{}", h.id),
                 h.display_name.clone(),
-                dir,
+                vec![dir],
                 TargetScope::Project {
                     project: p.clone(),
                     harness_id: h.id.clone(),
@@ -428,10 +524,15 @@ pub fn targets(
     }
 
     for t in &mut out {
-        if !matches!(entry_kind(&t.path), EntryKind::Symlink(_)) {
+        // 多目录列由 harness 自己创建各目录，不会是整目录软链
+        if t.dirs.len() != 1 {
             continue;
         }
-        let Some(real) = real_path(&t.path) else {
+        let dir = t.main_dir().to_path_buf();
+        if !matches!(entry_kind(&dir), EntryKind::Symlink(_)) {
+            continue;
+        }
+        let Some(real) = real_path(&dir) else {
             continue;
         };
         t.linked_whole_to = sources
@@ -776,9 +877,9 @@ mod tests {
         let hs = vec![pick("claude-code"), pick("weiboap")];
         assert!(project_candidates(&e, &[], &hs).is_empty());
 
-        let got: Vec<(String, String, PathBuf, TargetScope)> = targets(&e, &hs, &[], &[])
+        let got: Vec<(String, String, Vec<PathBuf>, TargetScope)> = targets(&e, &hs, &[], &[])
             .into_iter()
-            .map(|x| (x.id, x.label, x.path, x.scope))
+            .map(|x| (x.id, x.label, x.dirs, x.scope))
             .collect();
         assert_eq!(
             got,
@@ -786,7 +887,7 @@ mod tests {
                 (
                     format!("project:{}::weiboap", root1.display()),
                     "WeiboAP".to_string(),
-                    dir1,
+                    vec![dir1.clone()],
                     TargetScope::Project {
                         project: root1,
                         harness_id: "weiboap".into(),
@@ -796,15 +897,182 @@ mod tests {
                 (
                     format!("project:{}::weiboap", root2.display()),
                     "WeiboAP".to_string(),
-                    dir2,
+                    vec![dir2.clone()],
                     TargetScope::Project {
                         project: root2,
                         harness_id: "weiboap".into(),
                         project_label: Some("WeiboAP · agent_2".to_string()),
                     },
                 ),
+                // 全局域的扇出列：两个助手目录合成一列
+                (
+                    "weiboap".to_string(),
+                    "WeiboAP".to_string(),
+                    vec![dir1, dir2],
+                    TargetScope::Global {
+                        harness_id: "weiboap".into()
+                    },
+                ),
             ]
         );
+    }
+
+    #[test]
+    fn managed_global_dir_is_a_source_but_never_a_target() {
+        let t = TempTree::new();
+        let home = t.root();
+        // weiboap 的托管目录：有真实 skill
+        let custom =
+            t.dir("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom");
+        t.dir("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom/official-a");
+        let e = env(&home, &[]);
+        let hs = vec![all_harnesses(&e)
+            .into_iter()
+            .find(|h| h.id == "weiboap")
+            .unwrap()];
+        let srcs = sources(&e, &hs, &[], &[]);
+        assert!(
+            srcs.iter().any(|s| s.path == custom),
+            "托管目录仍是本体位置"
+        );
+        let tgts = targets(&e, &hs, &[], &srcs);
+        assert!(
+            tgts.iter().all(|x| !x.dirs.contains(&custom)),
+            "托管目录不得成为目标"
+        );
+    }
+
+    #[test]
+    fn agent_dirs_fan_out_into_one_global_column_and_stay_per_agent_domains() {
+        let t = TempTree::new();
+        let home = t.root();
+        let a1 = t.dir(
+            "Library/Application Support/WeiboAP/Data/agents/agent_a/.internal-plugins/skills",
+        );
+        let a2 = t.dir(
+            "Library/Application Support/WeiboAP/Data/agents/agent_b/.internal-plugins/skills",
+        );
+        let e = env(&home, &[]);
+        let hs = vec![all_harnesses(&e)
+            .into_iter()
+            .find(|h| h.id == "weiboap")
+            .unwrap()];
+        let tgts = targets(&e, &hs, &[], &sources(&e, &hs, &[], &[]));
+        let global = tgts.iter().find(|x| x.id == "weiboap").expect("全局扇出列");
+        assert_eq!(global.label, "WeiboAP");
+        assert_eq!(global.dirs, vec![a1.clone(), a2.clone()]);
+        assert!(matches!(global.scope, TargetScope::Global { .. }));
+        // 每个助手仍有自己的域
+        let per_agent: Vec<&Target> = tgts
+            .iter()
+            .filter(|x| x.id.starts_with("project:"))
+            .collect();
+        assert_eq!(per_agent.len(), 2);
+        assert!(per_agent.iter().all(|x| x.dirs.len() == 1));
+    }
+
+    /// AC12：能读到 agents.db 时域名与本体位置名用助手名
+    #[test]
+    fn agent_names_come_from_the_harness_own_database() {
+        let t = TempTree::new();
+        let home = t.root();
+        let wap = t.dir("Library/Application Support/WeiboAP");
+        let dir = t.dir(
+            "Library/Application Support/WeiboAP/Data/agents/agent_1776/.internal-plugins/skills",
+        );
+        t.dir(
+            "Library/Application Support/WeiboAP/Data/agents/agent_1776/.internal-plugins/skills/x",
+        );
+        // 另一个助手不在库里 → 降级为目录名
+        t.dir("Library/Application Support/WeiboAP/Data/agents/agent_zzz/.internal-plugins/skills");
+        let db = rusqlite::Connection::open(wap.join("agents.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE agents (id TEXT PRIMARY KEY, name TEXT);
+             INSERT INTO agents VALUES ('agent_1776', '办公助手');",
+        )
+        .unwrap();
+        drop(db);
+
+        let e = env(&home, &[]);
+        let hs = vec![all_harnesses(&e)
+            .into_iter()
+            .find(|h| h.id == "weiboap")
+            .unwrap()];
+        let srcs = sources(&e, &hs, &[], &[]);
+        assert_eq!(srcs.len(), 1);
+        assert_eq!(srcs[0].path, dir);
+        assert_eq!(srcs[0].label, "WeiboAP · 办公助手");
+        let labels: Vec<Option<String>> = targets(&e, &hs, &[], &srcs)
+            .into_iter()
+            .filter_map(|x| match x.scope {
+                TargetScope::Project { project_label, .. } => Some(project_label),
+                TargetScope::Global { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            labels,
+            vec![
+                Some("WeiboAP · 办公助手".to_string()),
+                Some("WeiboAP · agent_zzz".to_string()),
+            ]
+        );
+    }
+
+    /// AC13：库不存在 / 表名不符 / 文件损坏都降级为目录名，不报错
+    #[test]
+    fn missing_or_broken_agent_database_falls_back_to_the_directory_name() {
+        let t = TempTree::new();
+        let home = t.root();
+        let wap = t.dir("Library/Application Support/WeiboAP");
+        t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills");
+        t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/x");
+        let e = env(&home, &[]);
+        let hs = vec![all_harnesses(&e)
+            .into_iter()
+            .find(|h| h.id == "weiboap")
+            .unwrap()];
+        let label = |e: &Env| sources(e, &hs, &[], &[])[0].label.clone();
+        // 库不存在
+        assert_eq!(label(&e), "WeiboAP · agent_1");
+        // 文件存在但不是 SQLite
+        std::fs::write(wap.join("agents.db"), b"not a database").unwrap();
+        assert_eq!(label(&e), "WeiboAP · agent_1");
+        // 是库但没有 agents 表
+        std::fs::remove_file(wap.join("agents.db")).unwrap();
+        let db = rusqlite::Connection::open(wap.join("agents.db")).unwrap();
+        db.execute_batch("CREATE TABLE other (id TEXT);").unwrap();
+        drop(db);
+        assert_eq!(label(&e), "WeiboAP · agent_1");
+    }
+
+    #[test]
+    fn unsafe_identifiers_never_reach_the_sql_string() {
+        assert!(safe_identifier("agents") && safe_identifier("_id2"));
+        assert!(!safe_identifier("") && !safe_identifier("2id"));
+        assert!(!safe_identifier("agents; DROP TABLE x") && !safe_identifier("a-b"));
+        let t = TempTree::new();
+        let e = env(&t.root(), &[]);
+        let spec = AgentLabels {
+            path: "~/agents.db".into(),
+            table: "agents; DROP TABLE agents".into(),
+            id_column: "id".into(),
+            name_column: "name".into(),
+        };
+        assert!(agent_label_map(&spec, &e).is_empty());
+    }
+
+    #[test]
+    fn no_agent_dirs_means_no_global_fan_out_column() {
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir("Library/Application Support/WeiboAP"); // 只有 detect_dir
+        let e = env(&home, &[]);
+        let hs = vec![all_harnesses(&e)
+            .into_iter()
+            .find(|h| h.id == "weiboap")
+            .unwrap()];
+        let tgts = targets(&e, &hs, &[], &[]);
+        assert!(tgts.iter().all(|x| x.id != "weiboap"));
     }
 
     #[test]
@@ -1096,9 +1364,9 @@ mod tests {
         ];
         let got = targets(&e, &hs, std::slice::from_ref(&project), &[]);
         let key = project.display();
-        let got: Vec<(String, String, PathBuf, TargetScope)> = got
+        let got: Vec<(String, String, Vec<PathBuf>, TargetScope)> = got
             .into_iter()
-            .map(|x| (x.id, x.label, x.path, x.scope))
+            .map(|x| (x.id, x.label, x.dirs, x.scope))
             .collect();
         let proj = |harness_id: &str| TargetScope::Project {
             project: project.clone(),
@@ -1111,7 +1379,7 @@ mod tests {
                 (
                     "claude-code".to_string(),
                     "Claude Code".to_string(),
-                    home.join(".claude/skills"),
+                    vec![home.join(".claude/skills")],
                     TargetScope::Global {
                         harness_id: "claude-code".into()
                     },
@@ -1119,7 +1387,7 @@ mod tests {
                 (
                     "cline".to_string(),
                     "Cline".to_string(),
-                    home.join(".agents/skills"),
+                    vec![home.join(".agents/skills")],
                     TargetScope::Global {
                         harness_id: "cline".into()
                     },
@@ -1127,25 +1395,25 @@ mod tests {
                 (
                     format!("project:{key}::claude-code"),
                     "Claude Code".to_string(),
-                    project.join(".claude/skills"),
+                    vec![project.join(".claude/skills")],
                     proj("claude-code"),
                 ),
                 (
                     format!("project:{key}::codex"),
                     "Codex".to_string(),
-                    project.join(".agents/skills"),
+                    vec![project.join(".agents/skills")],
                     proj("codex"),
                 ),
                 (
                     format!("project:{key}::cursor"),
                     "Cursor".to_string(),
-                    project.join(".agents/skills"),
+                    vec![project.join(".agents/skills")],
                     proj("cursor"),
                 ),
                 (
                     format!("project:{key}::cline"),
                     "Cline".to_string(),
-                    project.join(".agents/skills"),
+                    vec![project.join(".agents/skills")],
                     proj("cline"),
                 ),
             ]
@@ -1208,7 +1476,7 @@ mod tests {
         assert_eq!(got[1].label, "Cursor");
         // 两列都指向同一个目录，各自都算整目录链接
         for x in &got {
-            assert_eq!(x.path, project.join(".agents/skills"));
+            assert_eq!(x.dirs, vec![project.join(".agents/skills")]);
             assert_eq!(x.linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
         }
     }
@@ -1239,23 +1507,27 @@ mod tests {
         assert_eq!(srcs[0].path, agent_dir);
 
         let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
-        assert_eq!(got.len(), 2);
+        assert_eq!(got.len(), 3);
         // agent 目标：本体所在，不是整目录链接
         assert_eq!(
             got[0].id,
             format!("project:{}::weiboap", agent_root.display())
         );
         assert_eq!(got[0].label, "WeiboAP");
-        assert_eq!(got[0].path, agent_dir);
+        assert_eq!(got[0].dirs, vec![agent_dir.clone()]);
         assert_eq!(got[0].linked_whole_to, None);
+        // 全局扇出列：同一个 agent 目录，独立成列
+        assert_eq!(got[1].id, "weiboap");
+        assert_eq!(got[1].dirs, vec![agent_dir.clone()]);
+        assert_eq!(got[1].linked_whole_to, None);
         // 项目那一列独立留下，指回 agent 本体位置，"拆成逐项链接"才有入口
         assert_eq!(
-            got[1].id,
+            got[2].id,
             format!("project:{}::claude-code", project.display())
         );
-        assert_eq!(got[1].label, "Claude Code");
-        assert_eq!(got[1].path, project.join(".claude/skills"));
-        assert_eq!(got[1].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
+        assert_eq!(got[2].label, "Claude Code");
+        assert_eq!(got[2].dirs, vec![project.join(".claude/skills")]);
+        assert_eq!(got[2].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
     }
 
     #[test]
@@ -1296,7 +1568,7 @@ mod tests {
         let srcs = sources(&e, &hs, &[], &[]);
         let got = targets(&e, &hs, &[], &srcs);
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].path, real);
+        assert_eq!(got[0].dirs, vec![real]);
         assert_eq!(got[0].linked_whole_to, None);
     }
 

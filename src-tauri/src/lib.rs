@@ -160,7 +160,7 @@ fn resync_watchers(app: &tauri::AppHandle, state: &AppState, skills_overview: &O
                 .domains
                 .iter()
                 .flat_map(|d| &d.targets)
-                .map(|t| t.path.clone()),
+                .flat_map(|t| t.dirs.iter().cloned()),
         )
         .collect();
     if let Ok(mcp_paths) = mcp_auto_watch_paths(state) {
@@ -238,18 +238,21 @@ fn apply_mcp(
     Ok(symsync_core::mcp::execute(plan, allow_cross_domain))
 }
 
-/// 自动同步规则展开成建链动作并执行；无规则或没有缺口时返回 None
+/// 自动同步规则与新助手自动补齐一起展开成建链动作并执行；没有缺口时返回 None
 fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>, String> {
     let rules = state.store.load_settings().map_err(err)?.auto_links;
-    if rules.is_empty() {
-        return Ok(None);
-    }
     let targets: Vec<Target> = scanned
         .domains
         .iter()
         .flat_map(|d| d.targets.iter().cloned())
         .collect();
-    let cells = skills::auto_link_cells(&scanned.sources, &targets, &rules);
+    let mut cells = skills::auto_link_cells(&scanned.sources, &targets, &rules);
+    cells.extend(skills::fan_out_cells(&scanned.sources, &targets));
+    let mut seen: BTreeSet<(String, String, String)> = BTreeSet::new();
+    cells.retain(|c| seen.insert((c.source_id.clone(), c.skill.clone(), c.target_id.clone())));
+    if cells.is_empty() {
+        return Ok(None);
+    }
     let actions = skills::propose_links(&scanned.sources, &targets, &cells);
     if actions.is_empty() {
         return Ok(None);
@@ -308,7 +311,7 @@ fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
         .domains
         .iter()
         .flat_map(|d| &d.targets)
-        .find(|t| same(&t.path, action.target_path.parent()))
+        .find(|t| t.dirs.iter().any(|d| same(d, action.target_path.parent())))
     {
         Some(t) => skills::link_style(&action.source_path, t),
         None => LinkStyle::Absolute,
