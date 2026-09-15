@@ -36,6 +36,8 @@ export interface DomainViewProps {
 const CELL_SYMBOL: Record<CellState, string> = {
   own: "●",
   linked: "✓",
+  // 部分覆盖不用图标，渲染时显示 linked/total
+  partial: "",
   missing: "○",
   broken: "✗",
   foreign: "⚠",
@@ -46,6 +48,7 @@ const CELL_SYMBOL: Record<CellState, string> = {
 const CELL_TEXT: Record<CellState, string> = {
   own: "本体在此，不是链接",
   linked: "整目录链接，先拆成逐项链接",
+  partial: "部分已链接",
   missing: "未同步",
   broken: "坏链，请用清理坏链",
   // 两种状态对用户是一回事：这里已有同名的东西（本体或指向别处的软链），不会覆盖
@@ -135,13 +138,16 @@ export default function DomainView({
   const cellOf = (row: DomainRow, targetId: string) =>
     row.cells.find((c) => c.targetId === targetId) ?? null;
 
-  const hasMissing = (row: DomainRow) => row.cells.some((c) => c.state === "missing");
+  /// 有缺口的格：整格缺失，或多目录列上只覆盖了一部分
+  const hasMissing = (row: DomainRow) =>
+    row.cells.some((c) => c.state === "missing" || c.state === "partial");
 
-  /// 有已链接的格，且它的目标不是整目录链接
+  /// 有链接已到位的格（本体不算），且它的目标不是整目录链接
   const hasUnlinkable = (row: DomainRow) =>
     row.cells.some(
       (c) =>
-        c.state === "linked" &&
+        c.linked > 0 &&
+        c.state !== "own" &&
         page.targets.find((t) => t.id === c.targetId)?.linkedWholeTo === null,
     );
 
@@ -304,10 +310,18 @@ export default function DomainView({
                     skill: row.skill,
                     targetId: target.id,
                   };
-                  const linkable = cell.state === "missing";
-                  const unlinkable = cell.state === "linked" && target.linkedWholeTo === null;
+                  const linkable = cell.state === "missing" || cell.state === "partial";
+                  const unlinkable =
+                    cell.linked > 0 && cell.state !== "own" && target.linkedWholeTo === null;
                   const reason = CELL_TEXT[cell.state];
-                  const title = linkable ? "点击建链" : unlinkable ? "点击取消此链接" : reason;
+                  const base = linkable ? "点击建链" : unlinkable ? "点击取消此链接" : reason;
+                  // 部分覆盖单说；其余状态在多目录列上标明这一格代表几处
+                  const title =
+                    cell.state === "partial"
+                      ? `${cell.total} 个目录中 ${cell.linked} 个已链接，点补齐补上其余`
+                      : cell.total > 1
+                        ? `${base}（共 ${cell.total} 处）`
+                        : base;
                   return (
                     <td className={`cell ${cell.state}`} key={target.id}>
                       <button
@@ -320,7 +334,9 @@ export default function DomainView({
                           else onNotice(reason);
                         }}
                       >
-                        {CELL_SYMBOL[cell.state]}
+                        {cell.state === "partial"
+                          ? `${cell.linked}/${cell.total}`
+                          : CELL_SYMBOL[cell.state]}
                       </button>
                     </td>
                   );
@@ -369,7 +385,8 @@ export default function DomainView({
                 <tr key={action.targetPath}>
                   <td>{action.itemName}</td>
                   <td className="path" title={action.target}>
-                    {page.targets.find((t) => t.path === action.target)?.label ?? action.target}
+                    {page.targets.find((t) => t.dirs.includes(action.target))?.label ??
+                      action.target}
                   </td>
                   <td className="path" title={action.sourcePath}>
                     {action.sourcePath}

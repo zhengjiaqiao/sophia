@@ -26,19 +26,24 @@ export type TargetScope =
 export interface Target {
   id: string;
   label: string;
-  path: string;
+  /// 该列对应的目录；绝大多数列只有 1 个，全局域的扇出列有多个（如 WeiboAP 的各助手目录）
+  dirs: string[];
   scope: TargetScope;
   linkedWholeTo: string | null;
 }
 
 export type CellState =
-  "own" | "linked" | "missing" | "broken" | "foreign" | "duplicate" | "unwritable";
+  "own" | "linked" | "partial" | "missing" | "broken" | "foreign" | "duplicate" | "unwritable";
 export interface Cell {
   sourceId: string;
   skill: string;
   targetId: string;
+  /// 代表路径：第一个目录下该 skill 的路径
   path: string;
   state: CellState;
+  /// 已到位的目录数 / 总目录数；单目录列为 1/1 或 0/1
+  linked: number;
+  total: number;
 }
 
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
