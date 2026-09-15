@@ -68,12 +68,10 @@ fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
     out
 }
 
-/// 该列的任一目录下都有一条解析到该 skill 本体路径的软链
+/// `t/name` 是解析到该 skill 本体路径的软链
 fn links_to(target: &Target, skill: &Skill) -> bool {
-    target.dirs.iter().any(|dir| {
-        let path = dir.join(&skill.name);
-        matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &skill.path)
-    })
+    let path = target.path.join(&skill.name);
+    matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &skill.path)
 }
 
 /// 只读扫描，按域组织。只产出事实，不作任何选择
@@ -100,7 +98,16 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
                 let skill_path = source.skill_path(&skill)?.to_path_buf();
                 let cells: Vec<Cell> = d_targets
                     .iter()
-                    .map(|t| cell_for(source, &skill, &skill_path, t))
+                    .map(|t| {
+                        let path = t.path.join(&skill);
+                        Cell {
+                            source_id: source_id.clone(),
+                            skill: skill.clone(),
+                            target_id: t.id.clone(),
+                            state: cell_state(source, &skill_path, t, &path),
+                            path,
+                        }
+                    })
                     .collect();
                 Some(DomainRow {
                     own: source_domain(&source.kind) == key,
@@ -115,8 +122,7 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
         let broken = d_targets
             .iter()
             .filter(|t| t.linked_whole_to.is_none())
-            .flat_map(|t| t.dirs.iter())
-            .flat_map(|dir| broken_links(dir))
+            .flat_map(|t| broken_links(&t.path))
             .collect();
         domains.push(DomainPage {
             key,
@@ -182,23 +188,20 @@ fn propose_by(
         let Some(target) = targets.iter().find(|t| t.id == cell.target_id) else {
             continue;
         };
-        // 多目录列逐个目录判定，只对命中谓词的目录生成动作
-        for dir in &target.dirs {
-            let path = dir.join(&cell.skill);
-            if !wanted(slot_state(source, skill_path, target, dir, &path), target) {
-                continue;
-            }
-            if !seen.insert(path.clone()) {
-                continue;
-            }
-            out.push(PlannedAction {
-                kind,
-                item_name: cell.skill.clone(),
-                source_path: skill_path.to_path_buf(),
-                target_path: path,
-                target: dir.clone(),
-            });
+        let path = target.path.join(&cell.skill);
+        if !wanted(cell_state(source, skill_path, target, &path), target) {
+            continue;
         }
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        out.push(PlannedAction {
+            kind,
+            item_name: cell.skill.clone(),
+            source_path: skill_path.to_path_buf(),
+            target_path: path,
+            target: target.path.clone(),
+        });
     }
     out
 }
@@ -274,8 +277,8 @@ pub fn remove_auto_link_targets(rules: &mut Vec<AutoLink>, source: &Path, target
 }
 
 /// 该 skill 不再自动链接（手动清除软链时调用）。
-/// 该本体位置还没有规则时新建一条只有排除名单的规则：多目录列的自动扇出
-/// 不靠规则驱动，排除也必须能独立于规则存在
+/// 该本体位置还没有规则时新建一条只有排除名单的规则：排除要能独立于规则存在，
+/// 否则手动清除过的软链会被之后新建的规则补回来
 pub fn exclude(rules: &mut Vec<AutoLink>, source: &Path, skill: &str) {
     let source = normalize(source);
     match rules.iter().position(|r| r.source == source) {
@@ -304,15 +307,6 @@ pub fn covering<'a>(rules: &'a [AutoLink], source_id: &str, skill: &str) -> Opti
         .find(|r| r.source.to_string_lossy() == source_id && !r.excluded.contains(skill))
 }
 
-/// 该 (本体位置, skill) 是否被某条规则明确排除过。
-/// 与 `covering` 不同：这里问的是"是否被排除"，不要求该规则真的覆盖到某个目标
-fn is_excluded(rules: &[AutoLink], source: &Path, skill: &str) -> bool {
-    let source = normalize(source);
-    rules
-        .iter()
-        .any(|r| r.source == source && r.excluded.contains(skill))
-}
-
 /// 规则里的 source 与 `Source.path` 都是 normalize 过的绝对路径
 fn find_source<'a>(sources: &'a [Source], source: &Path) -> Option<&'a Source> {
     let source = normalize(source);
@@ -324,22 +318,15 @@ fn find_rule_mut<'a>(rules: &'a mut [AutoLink], source: &Path) -> Option<&'a mut
     rules.iter_mut().find(|r| r.source == source)
 }
 
-/// 列上单个目录的状态。`skill_path` 是该 skill 在本体位置里的真实路径，
-/// `dir` 是这一个目标目录，`path` 是它在该目录下的位置
-fn slot_state(
-    source: &Source,
-    skill_path: &Path,
-    target: &Target,
-    dir: &Path,
-    path: &Path,
-) -> CellState {
+/// `skill_path` 是该 skill 在本体位置里的真实路径，`path` 是它在目标目录下的位置
+fn cell_state(source: &Source, skill_path: &Path, target: &Target, path: &Path) -> CellState {
     match target.linked_whole_to.as_deref() {
         Some(id) if id == source.id => return CellState::Linked,
         Some(_) => return CellState::Unwritable,
         None => {}
     }
     // 目标就是本体位置本身（如 WeiboAP 的 custom 目录既是本体位置又是目标）：内容天然到位
-    if same_real(dir, &source.path) {
+    if same_real(&target.path, &source.path) {
         return CellState::Own;
     }
     match entry_kind(path) {
@@ -349,116 +336,6 @@ fn slot_state(
         EntryKind::Symlink(_) if same_real(path, skill_path) => CellState::Linked,
         EntryKind::Symlink(_) => CellState::Foreign,
     }
-}
-
-/// 列上每个目录各自求状态，再聚合成一格。异常优先，不被"部分成功"掩盖
-fn cell_for(source: &Source, skill: &str, skill_path: &Path, target: &Target) -> Cell {
-    let slots = slot_states(source, skill, skill_path, target);
-    let total = slots.len();
-    let linked = slots
-        .iter()
-        .filter(|(_, s)| matches!(s, CellState::Own | CellState::Linked))
-        .count();
-    let abnormal = |want: &[CellState]| {
-        slots
-            .iter()
-            .find(|(_, s)| want.contains(s))
-            .map(|(_, s)| *s)
-    };
-    let state = if let Some(bad) = abnormal(&[CellState::Broken]) {
-        bad
-    } else if let Some(bad) = abnormal(&[
-        CellState::Foreign,
-        CellState::Duplicate,
-        CellState::Unwritable,
-    ]) {
-        bad
-    } else if linked == total {
-        if slots.iter().all(|(_, s)| *s == CellState::Own) {
-            CellState::Own
-        } else {
-            CellState::Linked
-        }
-    } else if linked == 0 {
-        CellState::Missing
-    } else {
-        CellState::Partial
-    };
-    Cell {
-        source_id: source.id.clone(),
-        skill: skill.to_string(),
-        target_id: target.id.clone(),
-        path: target.main_dir().join(skill),
-        state,
-        linked,
-        total,
-    }
-}
-
-fn slot_states(
-    source: &Source,
-    skill: &str,
-    skill_path: &Path,
-    target: &Target,
-) -> Vec<(PathBuf, CellState)> {
-    target
-        .dirs
-        .iter()
-        .map(|dir| {
-            let path = dir.join(skill);
-            let state = slot_state(source, skill_path, target, dir, &path);
-            (path, state)
-        })
-        .collect()
-}
-
-/// 多目录列上，缺失的目录全是空目录（新建助手）且已有目录全部到位 → 自动补齐。
-/// 空目录判据无需任何持久状态：新建助手的 skills 目录初始为空，
-/// 用户单独同步过的助手目录非空，不会被误补。
-/// 被任一规则排除的 (本体位置, skill) 一律跳过：用户手动清除过的软链不能被下一轮扫描补回
-pub fn fan_out_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink]) -> Vec<CellRef> {
-    let mut out = Vec::new();
-    for target in targets.iter().filter(|t| t.dirs.len() > 1) {
-        for source in sources {
-            // 外部位置由 harness 目录里的软链合成，与 auto_link_cells 一致不做扇出
-            if source.kind == SourceKind::External {
-                continue;
-            }
-            for skill in &source.skills {
-                if is_excluded(rules, &source.path, &skill.name) {
-                    continue;
-                }
-                let slots = slot_states(source, &skill.name, &skill.path, target);
-                let present = slots
-                    .iter()
-                    .filter(|(_, s)| matches!(s, CellState::Own | CellState::Linked))
-                    .count();
-                if present == 0 {
-                    continue;
-                }
-                let fillable = slots.iter().all(|(path, state)| match state {
-                    CellState::Own | CellState::Linked => true,
-                    CellState::Missing => path.parent().is_some_and(is_empty_dir),
-                    _ => false,
-                });
-                if !fillable {
-                    continue;
-                }
-                out.push(CellRef {
-                    source_id: source.id.clone(),
-                    skill: skill.name.clone(),
-                    target_id: target.id.clone(),
-                });
-            }
-        }
-    }
-    out
-}
-
-fn is_empty_dir(dir: &Path) -> bool {
-    std::fs::read_dir(dir)
-        .map(|mut it| it.next().is_none())
-        .unwrap_or(false)
 }
 
 /// 目标目录里所有解析不到的软链
@@ -507,8 +384,11 @@ pub fn link_style(skill_path: &Path, target: &Target) -> LinkStyle {
 /// 把"目标目录整体是一条指向本体位置的软链"拆成逐项链接：删软链 → 建真实目录 → 逐个 skill 建链。
 /// 前置检查不过或任一步失败即停止，已建的链接保留
 pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
-    let dir = target.dirs.first().cloned().unwrap_or_default();
-    let parent = dir.parent().map(Path::to_path_buf).unwrap_or_default();
+    let parent = target
+        .path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     let action =
         |kind: ActionKind, item: &str, source_path: PathBuf, target_path: PathBuf| PlannedAction {
             kind,
@@ -521,25 +401,18 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
         ActionKind::BrokenLink,
         WHOLE_LINK_ITEM,
         source.path.clone(),
-        dir.clone(),
+        target.path.clone(),
     );
-    // 扇出列的目录由 harness 自己创建，没有"整目录链接"可拆
-    if target.dirs.len() != 1 {
-        return report(vec![ReportEntry {
-            action: remove,
-            outcome: Outcome::Failed("多目录列不支持拆分".into()),
-        }]);
-    }
     let mut entries = Vec::new();
-    let is_whole_link =
-        matches!(entry_kind(&dir), EntryKind::Symlink(_)) && same_real(&dir, &source.path);
+    let is_whole_link = matches!(entry_kind(&target.path), EntryKind::Symlink(_))
+        && same_real(&target.path, &source.path);
     if !is_whole_link {
         return report(vec![ReportEntry {
             action: remove,
             outcome: Outcome::Failed("目标不是指向该本体位置的整目录链接".into()),
         }]);
     }
-    if let Err(e) = remove_link(&dir) {
+    if let Err(e) = remove_link(&target.path) {
         return report(vec![ReportEntry {
             action: remove,
             outcome: Outcome::Failed(e.to_string()),
@@ -549,13 +422,13 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
         action: remove,
         outcome: Outcome::Removed,
     });
-    if let Err(e) = std::fs::create_dir(&dir) {
+    if let Err(e) = std::fs::create_dir(&target.path) {
         entries.push(ReportEntry {
             action: action(
                 ActionKind::Create,
                 WHOLE_LINK_ITEM,
                 source.path.clone(),
-                dir.clone(),
+                target.path.clone(),
             ),
             outcome: Outcome::Failed(e.to_string()),
         });
@@ -563,7 +436,7 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
     }
     for skill in &source.skills {
         let source_path = skill.path.clone();
-        let target_path = dir.join(&skill.name);
+        let target_path = target.path.join(&skill.name);
         let style = link_style(&source_path, target);
         let outcome = match create_link(&source_path, &target_path, style) {
             Ok(()) => Outcome::Created,
@@ -576,7 +449,7 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
                 item_name: skill.name.clone(),
                 source_path,
                 target_path,
-                target: dir.clone(),
+                target: target.path.clone(),
             },
             outcome,
         });
@@ -652,15 +525,10 @@ mod tests {
     }
 
     fn global(harness: &str, path: &Path) -> Target {
-        multi(harness, &[path])
-    }
-
-    /// 多目录的全局列（WeiboAP 扇出列）
-    fn multi(harness: &str, dirs: &[&Path]) -> Target {
         Target {
             id: harness.to_string(),
             label: harness.to_string(),
-            dirs: dirs.iter().map(|d| normalize(d)).collect(),
+            path: normalize(path),
             scope: TargetScope::Global {
                 harness_id: harness.to_string(),
             },
@@ -673,7 +541,7 @@ mod tests {
         Target {
             id: format!("project:{}::{}", project.display(), harness),
             label: harness.to_string(),
-            dirs: vec![normalize(path)],
+            path: normalize(path),
             scope: TargetScope::Project {
                 project,
                 harness_id: harness.to_string(),
@@ -740,237 +608,7 @@ mod tests {
         assert_eq!(ov.domains[0].rows[0].cells[0].state, CellState::Own);
     }
 
-    /// 多目录列：a 已链接、b 缺失 → partial 1/2
-    #[test]
-    fn partial_cell_counts_linked_dirs() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let a = t.dir("a");
-        let b = t.dir("b");
-        t.link(&a.join("x"), &store.join("x"));
-        let s = source(&store, &["x"]);
-        let tgt = multi("weiboap", &[&a, &b]);
-        let o = scan(std::slice::from_ref(&s), std::slice::from_ref(&tgt));
-        let c = &o.domains[0].rows[0].cells[0];
-        assert_eq!(c.state, CellState::Partial);
-        assert_eq!((c.linked, c.total), (1, 2));
-        assert_eq!(c.path, a.join("x")); // 代表路径取 main_dir
-                                         // 补齐只针对缺失的那个目录
-        let acts = propose_links(
-            std::slice::from_ref(&s),
-            std::slice::from_ref(&tgt),
-            &[cell(&s, "x", &tgt)],
-        );
-        assert_eq!(acts.len(), 1);
-        assert_eq!(acts[0].target_path, b.join("x"));
-        assert_eq!(acts[0].target, b);
-    }
-
-    /// 全缺失的多目录列：一格补齐生成每个目录一条 Create
-    #[test]
-    fn missing_cell_fans_out_one_action_per_dir() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let dirs: Vec<PathBuf> = ["a", "b", "c", "d"].iter().map(|d| t.dir(d)).collect();
-        let s = source(&store, &["x"]);
-        let tgt = multi(
-            "weiboap",
-            &dirs.iter().map(|d| d.as_path()).collect::<Vec<_>>(),
-        );
-        let o = scan(std::slice::from_ref(&s), std::slice::from_ref(&tgt));
-        let c = &o.domains[0].rows[0].cells[0];
-        assert_eq!(c.state, CellState::Missing);
-        assert_eq!((c.linked, c.total), (0, 4));
-        let paths: Vec<PathBuf> = propose_links(
-            std::slice::from_ref(&s),
-            std::slice::from_ref(&tgt),
-            &[cell(&s, "x", &tgt)],
-        )
-        .into_iter()
-        .map(|a| a.target_path)
-        .collect();
-        assert_eq!(
-            paths,
-            dirs.iter().map(|d| d.join("x")).collect::<Vec<PathBuf>>()
-        );
-    }
-
-    /// Own 与 Linked 混合 → 全部到位
-    #[test]
-    fn own_dir_counts_as_linked_in_aggregate() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let b = t.dir("b");
-        t.link(&b.join("x"), &store.join("x"));
-        let s = source(&store, &["x"]);
-        let tgt = multi("weiboap", &[&store, &b]); // 第一个目录就是本体位置本身
-        let o = scan(std::slice::from_ref(&s), std::slice::from_ref(&tgt));
-        let c = &o.domains[0].rows[0].cells[0];
-        assert_eq!(c.state, CellState::Linked);
-        assert_eq!((c.linked, c.total), (2, 2));
-        assert!(propose_links(
-            std::slice::from_ref(&s),
-            std::slice::from_ref(&tgt),
-            &[cell(&s, "x", &tgt)]
-        )
-        .is_empty());
-    }
-
-    /// 异常不被部分成功掩盖
-    #[test]
-    fn broken_dir_wins_over_partial() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let a = t.dir("a");
-        let b = t.dir("b");
-        let c = t.dir("c");
-        t.link(&a.join("x"), &store.join("x"));
-        t.link(&b.join("x"), &t.root().join("gone")); // 坏链
-        let s = source(&store, &["x"]);
-        let tgt = multi("weiboap", &[&a, &b, &c]);
-        let o = scan(std::slice::from_ref(&s), std::slice::from_ref(&tgt));
-        assert_eq!(o.domains[0].rows[0].cells[0].state, CellState::Broken);
-    }
-
-    /// 无 Broken 时 Foreign / Duplicate 同样优先于 Partial
-    #[test]
-    fn foreign_dir_wins_over_partial() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let a = t.dir("a");
-        let b = t.dir("b");
-        t.link(&a.join("x"), &store.join("x"));
-        t.link(&b.join("x"), &t.dir("elsewhere")); // 指向别处
-        let s = source(&store, &["x"]);
-        let tgt = multi("weiboap", &[&a, &b]);
-        let o = scan(std::slice::from_ref(&s), std::slice::from_ref(&tgt));
-        assert_eq!(o.domains[0].rows[0].cells[0].state, CellState::Foreign);
-    }
-
-    /// AC10：已有目录全部到位、新目录为空 → 自动补齐
-    #[test]
-    fn fan_out_fills_a_brand_new_empty_agent_dir() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        t.dir("store/y");
-        let dirs: Vec<PathBuf> = ["a", "b", "c", "d"].iter().map(|d| t.dir(d)).collect();
-        for d in &dirs[..3] {
-            t.link(&d.join("x"), &store.join("x"));
-        }
-        // y 只在 a 上有 → 不自动补齐；同时让 a 非空
-        t.link(&dirs[0].join("y"), &store.join("y"));
-        let s = source(&store, &["x", "y"]);
-        let tgt = multi(
-            "weiboap",
-            &dirs.iter().map(|d| d.as_path()).collect::<Vec<_>>(),
-        );
-        let sources = [s.clone()];
-        let targets = [tgt.clone()];
-        assert_eq!(
-            fan_out_cells(&sources, &targets, &[]),
-            vec![cell(&s, "x", &tgt)]
-        );
-        let acts = propose_links(&sources, &targets, &fan_out_cells(&sources, &targets, &[]));
-        assert_eq!(acts.len(), 1);
-        assert_eq!(acts[0].target_path, dirs[3].join("x"));
-    }
-
-    /// AC11：缺失目录非空（用户自己维护过）→ 不自动补齐，仍是 partial
-    #[test]
-    fn fan_out_skips_dirs_that_are_not_empty() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let dirs: Vec<PathBuf> = ["a", "b", "c", "d"].iter().map(|d| t.dir(d)).collect();
-        t.link(&dirs[0].join("x"), &store.join("x"));
-        for d in &dirs[1..] {
-            t.file(d, "keep.md"); // 非空但缺 x
-        }
-        let s = source(&store, &["x"]);
-        let tgt = multi(
-            "weiboap",
-            &dirs.iter().map(|d| d.as_path()).collect::<Vec<_>>(),
-        );
-        assert!(
-            fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&tgt), &[]).is_empty()
-        );
-        let o = scan(std::slice::from_ref(&s), std::slice::from_ref(&tgt));
-        assert_eq!(o.domains[0].rows[0].cells[0].state, CellState::Partial);
-    }
-
-    /// 单目录列与一个都没到位的多目录列都不自动补齐
-    #[test]
-    fn fan_out_needs_a_multi_dir_column_with_something_already_in_place() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let a = t.dir("a");
-        let b = t.dir("b");
-        let s = source(&store, &["x"]);
-        // 单目录列：空目录也不补
-        let single = global("claude-code", &a);
-        assert!(
-            fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&single), &[]).is_empty()
-        );
-        // 多目录列但一处都没有：不是"新助手"，不补
-        let tgt = multi("weiboap", &[&a, &b]);
-        assert!(
-            fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&tgt), &[]).is_empty()
-        );
-    }
-
-    /// 手动清除过的 skill 不能被下一轮扇出补回，即使缺失目录全是空目录；
-    /// 外部本体位置也不做扇出（与 auto_link_cells 一致）
-    #[test]
-    fn fan_out_skips_excluded_skills_and_external_sources() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/x");
-        let a = t.dir("a");
-        let b = t.dir("b"); // 空目录，本来会被自动补齐
-        t.link(&a.join("x"), &store.join("x"));
-        let s = source(&store, &["x"]);
-        let tgt = multi("weiboap", &[&a, &b]);
-        let sources = [s.clone()];
-        let targets = [tgt.clone()];
-        assert_eq!(
-            fan_out_cells(&sources, &targets, &[]),
-            vec![cell(&s, "x", &tgt)]
-        );
-
-        // 只有排除名单、没有任何目标的规则同样能挡住扇出
-        let mut rules: Vec<AutoLink> = Vec::new();
-        exclude(&mut rules, &store, "x");
-        assert!(rules[0].targets.is_empty());
-        assert!(fan_out_cells(&sources, &targets, &rules).is_empty());
-
-        // 解除排除后恢复自动补齐
-        include(&mut rules, &store, "x");
-        assert_eq!(
-            fan_out_cells(&sources, &targets, &rules),
-            vec![cell(&s, "x", &tgt)]
-        );
-
-        // 别的本体位置的排除名单管不着这一处
-        let mut other: Vec<AutoLink> = Vec::new();
-        exclude(&mut other, Path::new("/elsewhere"), "x");
-        assert_eq!(
-            fan_out_cells(&sources, &targets, &other),
-            vec![cell(&s, "x", &tgt)]
-        );
-
-        // 外部本体位置不做扇出
-        let ext = [external_source(&store, &["x"])];
-        assert!(fan_out_cells(&ext, &targets, &[]).is_empty());
-    }
-
-    /// AC9：助手自己的域是单目录列，补齐只写它自己
+    /// AC9：在助手自己的域里补齐，只写它自己的目录
     #[test]
     fn per_agent_column_writes_only_its_own_dir() {
         let t = TempTree::new();
@@ -989,23 +627,6 @@ mod tests {
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].target_path, a.join("x"));
         assert!(!b.join("x").exists());
-    }
-
-    /// 多目录列没有整目录链接可拆
-    #[test]
-    fn split_whole_link_refuses_multi_dir_columns() {
-        let t = TempTree::new();
-        let store = t.dir("store");
-        t.dir("store/a");
-        let x = t.dir("x");
-        let y = t.dir("y");
-        let r = split_whole_link(&multi("weiboap", &[&x, &y]), &source(&store, &["a"]));
-        assert_eq!(r.entries.len(), 1);
-        assert_eq!(
-            r.entries[0].outcome,
-            Outcome::Failed("多目录列不支持拆分".into())
-        );
-        assert_eq!(entry_kind(&x), EntryKind::Dir);
     }
 
     #[test]
@@ -1233,7 +854,7 @@ mod tests {
         assert!(rules.is_empty());
     }
 
-    /// 排除名单非空时，目标去空也要保住整条规则，否则扇出会把清除过的软链补回来
+    /// 排除名单非空时，目标去空也要保住整条规则，否则排除记录会一起丢掉
     #[test]
     fn remove_auto_link_targets_keeps_a_rule_that_still_excludes_something() {
         let mut rules: Vec<AutoLink> = Vec::new();

@@ -162,15 +162,6 @@ td.cell.linked {
 td.cell.missing {
   color: #999;
 }
-/* 部分覆盖和未同步同属待办，用同一种灰；橙色留给冲突类状态。
-   显示的是 2/4 这样的文本，字号要比图标小才放得下 */
-td.cell.partial {
-  color: #999;
-}
-table.matrix td.cell.partial,
-button.cell.partial {
-  font-size: 12px;
-}
 td.cell.broken {
   color: #b3261e;
 }

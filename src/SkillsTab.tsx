@@ -6,7 +6,6 @@ import ImportDialog from "./ImportDialog";
 import {
   actionId,
   type AutoLink,
-  type Cell,
   type CellRef,
   type DomainPage,
   type DomainRow,
@@ -35,12 +34,6 @@ const rowKey = (page: DomainPage, row: DomainRow) => `${page.key}|${row.sourceId
 /// 一行展开成它在本域各目标上的格
 const cellsOf = (row: DomainRow): CellRef[] =>
   row.cells.map((c) => ({ sourceId: row.sourceId, skill: row.skill, targetId: c.targetId }));
-
-/// 一个格实际覆盖的全部路径：单目录列就是它的代表路径，多目录列在每个目录下各有一条
-const cellPathsOf = (page: DomainPage, cell: Cell): string[] => {
-  const dirs = page.targets.find((t) => t.id === cell.targetId)?.dirs ?? [];
-  return dirs.length > 1 ? dirs.map((dir) => join(dir, cell.skill)) : [cell.path];
-};
 
 export interface SkillsTabProps {
   overview: Overview | null;
@@ -219,10 +212,10 @@ export default function SkillsTab({
     });
 
   /// 把清链结果按行归拢：全成功时说明本体去向，有失败时指回上面的逐条结果
-  const unlinkNote = (report: SyncReport, page: DomainPage, row: DomainRow): string | null => {
-    const paths = new Set(row.cells.flatMap((c) => cellPathsOf(page, c)));
+  const unlinkNote = (report: SyncReport, row: DomainRow): string | null => {
     const entries = report.entries.filter(
-      (e) => e.action.itemName === row.skill && paths.has(e.action.targetPath),
+      (e) =>
+        e.action.itemName === row.skill && row.cells.some((c) => c.path === e.action.targetPath),
     );
     if (entries.length === 0) return null;
     const failed = entries.filter((e) => e.outcome.status !== "removed").length;
@@ -231,36 +224,31 @@ export default function SkillsTab({
       const dir = overview?.sources.find((s) => s.id === row.sourceId)?.path ?? row.sourceId;
       return `「${row.skill}」的软链已清除；本体仍在 ${join(dir, row.skill)}，点击表格里的本体位置可在 Finder 中定位，删掉本体后它才会从列表消失。`;
     }
-    // 单格清除时行里可能还留着别的链接，行不会消失；多目录列按它已到位的目录数算
-    const linked = row.cells.reduce((n, c) => n + (c.state === "own" ? 0 : c.linked), 0);
+    // 单格清除时行里可能还留着别的链接，行不会消失
+    const linked = row.cells.filter((c) => c.state === "linked").length;
     return entries.length === linked
       ? `「${row.skill}」的软链已清除，已从列表移除。`
       : `「${row.skill}」的软链已清除，它在其他 harness 下的链接还在。`;
   };
 
-  /// 本次要删的格里，仍会被自动补回的行：清除后必须先排除，否则立刻被补回。
-  /// 两类——落在某条自动同步规则范围内的，以及落在多目录列上（会被扇出补齐）的
+  /// 本次要删的格里，仍在某条自动同步规则范围内的行：清除后必须先排除，否则立刻被补回
   const coveredRows = (
     actions: PlannedAction[],
     rows: { page: DomainPage; row: DomainRow }[],
   ): DomainRow[] =>
     rows
-      .filter(({ page, row }) => {
-        // 已经排除过的不用再提示
-        if (autoLinks.some((r) => r.source === row.sourceId && r.excluded.includes(row.skill)))
-          return false;
-        const touched = row.cells.filter((c) => {
-          const paths = cellPathsOf(page, c);
-          return actions.some((a) => a.itemName === row.skill && paths.includes(a.targetPath));
-        });
-        // 多目录列不靠规则驱动，缺失目录变空后会被 fan_out_cells 补回
-        if (touched.some((c) => c.total > 1)) return true;
-        const targetIds = touched.map((c) => c.targetId);
+      .map(({ row }) => row)
+      .filter((row) => {
+        const targetIds = row.cells
+          .filter((c) => actions.some((a) => a.itemName === row.skill && a.targetPath === c.path))
+          .map((c) => c.targetId);
         return autoLinks.some(
-          (r) => r.source === row.sourceId && r.targets.some((t) => targetIds.includes(t)),
+          (r) =>
+            r.source === row.sourceId &&
+            !r.excluded.includes(row.skill) &&
+            r.targets.some((t) => targetIds.includes(t)),
         );
-      })
-      .map(({ row }) => row);
+      });
 
   const run = async (
     subset: PlannedAction[],
@@ -278,9 +266,7 @@ export default function SkillsTab({
       setReportAuto(false);
       setReport(result);
       setNotes(
-        rows
-          .map(({ page, row }) => unlinkNote(result, page, row))
-          .filter((t): t is string => t !== null),
+        rows.map(({ row }) => unlinkNote(result, row)).filter((t): t is string => t !== null),
       );
     } catch (e) {
       onError(String(e));
@@ -329,12 +315,11 @@ export default function SkillsTab({
   // 引入只对单个域有意义：「全部」页没有确定的目标域
   const importPage = selectedKey === "all" ? null : (pages[0] ?? null);
 
-  /// 该行在本域是否有可取消的链接（有链接已到位、不是本体，且目标不是整目录链接）
+  /// 该行在本域是否有可取消的链接（已链接且目标不是整目录链接）
   const hasUnlinkable = (page: DomainPage, row: DomainRow) =>
     row.cells.some(
       (c) =>
-        c.linked > 0 &&
-        c.state !== "own" &&
+        c.state === "linked" &&
         page.targets.find((t) => t.id === c.targetId)?.linkedWholeTo === null,
     );
 
@@ -352,21 +337,15 @@ export default function SkillsTab({
     rows.filter((row) => hasUnlinkable(page, row)).map((row) => ({ page, row })),
   );
 
-  // 缺口按目录算：一行在多个目标上缺失就算多处，多目录列按它自己还差几个目录算。
-  // 多个 harness 共用一个目录时各自成列，单目录列按 cell.path 去重，同一处只算一次；
-  // 多目录列的缺口本来就落在各自不同的目录里，直接累加
+  // 缺失按格算：一行在多个目标上缺失就算多处。
+  // 多个 harness 共用一个目录时各自成列，按 cell.path 去重，同一处只算一次
   const missingPaths = new Set<string>();
-  let missingFanout = 0;
   for (const { rows } of chosen) {
     for (const row of rows) {
-      for (const cell of row.cells) {
-        if (cell.state !== "missing" && cell.state !== "partial") continue;
-        if (cell.total > 1) missingFanout += cell.total - cell.linked;
-        else missingPaths.add(cell.path);
-      }
+      for (const cell of row.cells) if (cell.state === "missing") missingPaths.add(cell.path);
     }
   }
-  const missing = missingPaths.size + missingFanout;
+  const missing = missingPaths.size;
 
   // 待确认清除的行里被自动同步规则覆盖的，确认时先排除它们
   const coveredUnlink =

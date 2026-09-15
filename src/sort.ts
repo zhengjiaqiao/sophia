@@ -16,8 +16,6 @@ export function toggleSort(prev: SortState | null, key: string): SortState {
 export const STATE_RANK: Record<CellState, number> = {
   own: 0,
   linked: 0,
-  // 部分覆盖与缺失一样等着补齐，排在一起
-  partial: 1,
   missing: 1,
   broken: 2,
   foreign: 3,
