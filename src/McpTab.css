@@ -1,0 +1,202 @@
+.mcp-tab h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.mcp-domain-group {
+  margin-top: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+table.mcp-matrix {
+  /* 目标位置较多时只让 MCP 域组横向滚动，保持每列可读。 */
+  width: max(100%, 760px);
+  min-width: 760px;
+  table-layout: fixed;
+}
+table.matrix.mcp-matrix th,
+table.matrix.mcp-matrix td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
+table.mcp-matrix th:nth-child(1),
+table.mcp-matrix td:nth-child(1) {
+  width: 180px;
+}
+table.mcp-matrix th:nth-child(2),
+table.mcp-matrix td:nth-child(2) {
+  width: 55px;
+}
+table.mcp-matrix th:nth-child(3),
+table.mcp-matrix td:nth-child(3) {
+  width: 150px;
+}
+table.matrix.mcp-matrix td:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+table.mcp-matrix th:nth-child(n + 4),
+table.mcp-matrix td:nth-child(n + 4) {
+  width: 150px;
+  min-width: 150px;
+}
+table.mcp-matrix td.cell {
+  min-width: 0;
+  text-align: center;
+  padding: 6px 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.mcp-cell-summary {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.mcp-cell-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.mcp-cell-action span {
+  min-width: 0;
+}
+.mcp-cell-action input {
+  margin: 0;
+  cursor: pointer;
+}
+.mcp-cell-action input:disabled {
+  cursor: default;
+}
+.mcp-cell-summary.conflict {
+  color: #b3261e;
+}
+.mcp-cell-summary.same-endpoint {
+  color: #8a5a00;
+}
+.mcp-cell-summary.invalid,
+.mcp-cell-summary.unsupported {
+  color: #6b5f00;
+}
+.mcp-actions {
+  margin-top: 12px;
+}
+.mcp-issues {
+  background: #fff4e5;
+  border-left: 3px solid #e37400;
+  padding: 8px 12px;
+  margin-top: 12px;
+  border-radius: 6px;
+}
+.mcp-issues ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+.mcp-modal {
+  width: min(680px, 92vw);
+}
+.mcp-preview-list {
+  max-height: 240px;
+  overflow: auto;
+  padding-left: 22px;
+}
+.mcp-cross-domain {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  background: #fff4e5;
+  padding: 8px;
+  border-radius: 6px;
+  margin: 12px 0;
+}
+.mcp-import-modal {
+  width: min(960px, 92vw);
+  height: 72vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mcp-import-dialog {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.mcp-import-sources {
+  width: 280px;
+  overflow: auto;
+}
+.mcp-source-button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.mcp-source-button span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-import-services {
+  flex: 1;
+  overflow: auto;
+}
+.mcp-import-services label,
+.mcp-import-targets label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+.mcp-auto-toggle {
+  margin: 10px 0 4px;
+  font-weight: 600;
+}
+.mcp-auto-hint {
+  margin: 0 0 8px;
+}
+.mcp-auto-rules {
+  margin-top: 16px;
+  padding: 8px 12px;
+  border-left: 3px solid #2d7d46;
+  background: #f3faf5;
+  border-radius: 6px;
+}
+.mcp-auto-rule {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 5px;
+}
+.mcp-auto-rule span {
+  overflow-wrap: anywhere;
+}
+.mcp-auto-rules p {
+  margin: 6px 0 0;
+}
+.mcp-auto-confirm-targets {
+  max-height: 160px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  margin: 8px 0 12px;
+  padding-left: 22px;
+}
+.mcp-import-targets {
+  width: 200px;
+  overflow: auto;
+  border-left: 1px solid #eee;
+  padding-left: 16px;
+}
+.mcp-import-present,
+.mcp-import-target-note {
+  border-top: 1px solid #eee;
+  margin-top: 8px;
+  padding-top: 8px;
+}

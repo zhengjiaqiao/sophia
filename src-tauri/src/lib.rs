@@ -3,7 +3,10 @@ mod watch;
 
 use serde::Serialize;
 use std::collections::BTreeSet;
+#[cfg(debug_assertions)]
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use symsync_core::discovery::{self, Env};
 use symsync_core::fs::normalize;
@@ -17,6 +20,8 @@ struct AppState {
     store: Store,
     /// 当前的文件系统监视，随每次扫描的目录集合重建
     watcher: Mutex<Option<watch::Watcher>>,
+    mcp_plan: Mutex<Option<(String, symsync_core::mcp::PreparedPlan)>>,
+    next_mcp_plan: AtomicU64,
 }
 
 #[derive(Serialize)]
@@ -31,10 +36,68 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
+/// 仅供 Debug 原生 MCP UI 验收使用的临时根目录；生产环境始终使用系统环境。
+fn runtime_env() -> Result<Env, String> {
+    #[cfg(debug_assertions)]
+    if let Some(root) = std::env::var_os("SYMSYNC_TEST_HOME") {
+        let root = PathBuf::from(root);
+        if !root.is_absolute() || !root.is_dir() {
+            return Err("SYMSYNC_TEST_HOME 必须是已存在的绝对目录".into());
+        }
+        let root = std::fs::canonicalize(root).map_err(err)?;
+        return Ok(Env {
+            home: normalize(&root),
+            vars: HashMap::new(),
+        });
+    }
+    Ok(Env::from_system())
+}
+
+fn runtime_store_dir() -> Result<PathBuf, String> {
+    #[cfg(debug_assertions)]
+    if let Some(root) = std::env::var_os("SYMSYNC_TEST_HOME") {
+        let root = PathBuf::from(root);
+        if !root.is_absolute() || !root.is_dir() {
+            return Err("SYMSYNC_TEST_HOME 必须是已存在的绝对目录".into());
+        }
+        let root = std::fs::canonicalize(root).map_err(err)?;
+        return Ok(root.join("AppData").join("SymSync"));
+    }
+    Ok(Store::default_dir())
+}
+
+fn discover_mcp(state: &AppState) -> Result<symsync_core::mcp::McpDiscovery, String> {
+    let env = runtime_env()?;
+    let settings = state.store.load_settings().map_err(err)?;
+    let mut candidates = discovery::installed(&env);
+    if !candidates.iter().any(|h| h.id == "weiboap") {
+        if let Some(weiboap) = discovery::all_harnesses(&env)
+            .into_iter()
+            .find(|h| h.id == "weiboap")
+        {
+            candidates.push(weiboap);
+        }
+    }
+    let harnesses = discovery::enabled(candidates, &settings);
+    let manual_projects = state.store.load_projects().map_err(err)?;
+    let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
+    Ok(symsync_core::mcp::discover_locations(
+        &env, &harnesses, &projects,
+    ))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpPreview {
+    plan_id: String,
+    actions: Vec<symsync_core::mcp::McpAction>,
+    issues: Vec<symsync_core::mcp::McpIssue>,
+}
+
 /// 一次发现：本体位置与目标目录，按当前设置解析。
 /// 目标目录里指向已知位置之外的软链再合成出外部本体位置
 fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
-    let env = Env::from_system();
+    let env = runtime_env()?;
     let settings = state.store.load_settings().map_err(err)?;
     let harnesses = discovery::enabled(discovery::installed(&env), &settings);
     let manual_projects = state.store.load_projects().map_err(err)?;
@@ -50,6 +113,129 @@ fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
 fn overview(state: &AppState) -> Result<Overview, String> {
     let (sources, targets) = discover(state)?;
     Ok(skills::scan(&sources, &targets))
+}
+
+/// 所有仍生效的自动引入规则只保存位置身份；扫描时才把它们展开为当前缺失项。
+/// `auto_selections` 只返回规则授权的跨域项，故自动执行不会借用手动预览的确认。
+fn auto_import_mcp(
+    state: &AppState,
+    overview: &symsync_core::mcp::McpOverview,
+    rules: &[symsync_core::mcp::McpAutoImportRule],
+) -> Result<Option<symsync_core::mcp::McpReport>, String> {
+    if rules.is_empty() {
+        return Ok(None);
+    }
+    let selections = symsync_core::mcp::auto_selections(overview, rules);
+    if selections.is_empty() {
+        return Ok(None);
+    }
+    let discovery = discover_mcp(state)?;
+    let plan = symsync_core::mcp::prepare(&discovery.locations, &selections);
+    if plan.actions.is_empty() {
+        return Ok(None);
+    }
+    // 自动选择已由规则逐条授予跨域权限；这里不接受未经过该筛选的手动选择。
+    Ok(Some(symsync_core::mcp::execute(plan, true)))
+}
+
+/// 规则引用的是配置文件，原子写会替换文件本身，故只监视其父目录。
+fn mcp_auto_watch_paths(state: &AppState) -> Result<BTreeSet<PathBuf>, String> {
+    let settings = state.store.load_settings().map_err(err)?;
+    Ok(settings
+        .mcp_auto_imports
+        .iter()
+        .flat_map(|rule| std::iter::once(&rule.source).chain(rule.targets.iter()))
+        .filter_map(|location| location.path.parent().map(Path::to_path_buf))
+        .collect())
+}
+
+fn resync_watchers(app: &tauri::AppHandle, state: &AppState, skills_overview: &Overview) {
+    // skill 目录与 MCP 文件父目录共用同一个去抖器，切换 MCP/Skills 页不会丢掉另一方监视。
+    let mut paths: BTreeSet<PathBuf> = skills_overview
+        .sources
+        .iter()
+        .map(|s| s.path.clone())
+        .chain(
+            skills_overview
+                .domains
+                .iter()
+                .flat_map(|d| &d.targets)
+                .map(|t| t.path.clone()),
+        )
+        .collect();
+    if let Ok(mcp_paths) = mcp_auto_watch_paths(state) {
+        paths.extend(mcp_paths);
+    }
+    if let Ok(mut slot) = state.watcher.lock() {
+        watch::resync(&mut slot, app, paths);
+    }
+}
+
+#[tauri::command]
+fn scan_mcp(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<symsync_core::mcp::McpOverview, String> {
+    let discovery = discover_mcp(&state)?;
+    let mut overview = symsync_core::mcp::scan(&discovery.locations);
+    overview.issues.extend(discovery.issues);
+    let rules = state.store.load_settings().map_err(err)?.mcp_auto_imports;
+    if let Some(report) = auto_import_mcp(&state, &overview, &rules)? {
+        let _ = app.emit("mcp-auto-imported", &report);
+        let discovery = discover_mcp(&state)?;
+        overview = symsync_core::mcp::scan(&discovery.locations);
+        overview.issues.extend(discovery.issues);
+    }
+    // `scan_mcp` 也可能是用户最后一次扫描，故重建为包含两类位置的并集。
+    if let Ok(skills_overview) = self::overview(&state) {
+        resync_watchers(&app, &state, &skills_overview);
+    }
+    Ok(overview)
+}
+
+#[tauri::command]
+fn propose_mcp_sync(
+    selections: Vec<symsync_core::mcp::McpSelection>,
+    state: tauri::State<'_, AppState>,
+) -> Result<McpPreview, String> {
+    let discovery = discover_mcp(&state)?;
+    let plan = symsync_core::mcp::prepare(&discovery.locations, &selections);
+    let id = state
+        .next_mcp_plan
+        .fetch_add(1, Ordering::Relaxed)
+        .to_string();
+    let preview = McpPreview {
+        plan_id: id.clone(),
+        actions: plan.actions.clone(),
+        issues: plan.issues.clone(),
+    };
+    *state
+        .mcp_plan
+        .lock()
+        .map_err(|_| "MCP 计划缓存已损坏".to_string())? = Some((id, plan));
+    Ok(preview)
+}
+
+#[tauri::command]
+fn apply_mcp(
+    plan_id: String,
+    allow_cross_domain: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<symsync_core::mcp::McpReport, String> {
+    let plan = {
+        let mut cache = state
+            .mcp_plan
+            .lock()
+            .map_err(|_| "MCP 计划缓存已损坏".to_string())?;
+        let Some((cached_id, _)) = cache.as_ref() else {
+            return Err("MCP 计划不存在或已过期，请重新预览".into());
+        };
+        if cached_id != &plan_id {
+            return Err("MCP 计划不存在或已过期，请重新预览".into());
+        }
+        cache.take().expect("checked above").1
+    };
+    Ok(symsync_core::mcp::execute(plan, allow_cross_domain))
 }
 
 /// 自动同步规则展开成建链动作并执行；无规则或没有缺口时返回 None
@@ -79,22 +265,19 @@ fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<
         let _ = app.emit("auto-linked", &report);
         overview = self::overview(&state)?;
     }
-    // 本体位置与目标目录都要盯：删本体、手工建/删软链都会改到它们的直接子项
-    let paths: BTreeSet<PathBuf> = overview
-        .sources
-        .iter()
-        .map(|s| s.path.clone())
-        .chain(
-            overview
-                .domains
-                .iter()
-                .flat_map(|d| &d.targets)
-                .map(|t| t.path.clone()),
-        )
-        .collect();
-    if let Ok(mut slot) = state.watcher.lock() {
-        watch::resync(&mut slot, &app, paths);
+    // Skills 页收到文件变更时同样会走这里。没有自动规则便不读取任何 MCP 配置；
+    // 有规则时只执行一轮，结果不会改变 Skills 主扫描结果。
+    let mcp_rules = state.store.load_settings().map_err(err)?.mcp_auto_imports;
+    if !mcp_rules.is_empty() {
+        let discovery = discover_mcp(&state)?;
+        let mut mcp_overview = symsync_core::mcp::scan(&discovery.locations);
+        mcp_overview.issues.extend(discovery.issues);
+        if let Some(report) = auto_import_mcp(&state, &mcp_overview, &mcp_rules)? {
+            let _ = app.emit("mcp-auto-imported", &report);
+        }
     }
+    // 本体位置、目标目录与自动引入配置父目录都要盯。
+    resync_watchers(&app, &state, &overview);
     Ok(overview)
 }
 
@@ -218,6 +401,83 @@ fn list_auto_links(state: tauri::State<'_, AppState>) -> Result<Vec<AutoLink>, S
     Ok(state.store.load_settings().map_err(err)?.auto_links)
 }
 
+#[tauri::command]
+fn list_mcp_auto_imports(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<symsync_core::mcp::McpAutoImportRule>, String> {
+    Ok(state.store.load_settings().map_err(err)?.mcp_auto_imports)
+}
+
+/// 保存的是已发现位置的精确身份，不保存任何 MCP 定义或凭据。
+#[tauri::command]
+fn set_mcp_auto_import(
+    source_id: String,
+    target_domain: String,
+    target_ids: Vec<String>,
+    allow_cross_domain: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if target_domain.trim().is_empty() {
+        return Err("目标域不能为空".into());
+    }
+    if target_ids.is_empty() {
+        return Err("至少选择一个目标位置".into());
+    }
+    let discovery = discover_mcp(&state)?;
+    let source = discovery
+        .locations
+        .iter()
+        .find(|location| location.id == source_id)
+        .ok_or("来源位置已不存在，请刷新")?;
+    let mut seen = BTreeSet::new();
+    let mut targets = Vec::with_capacity(target_ids.len());
+    for target_id in target_ids {
+        if !seen.insert(target_id.clone()) {
+            return Err("目标位置不能重复".into());
+        }
+        let target = discovery
+            .locations
+            .iter()
+            .find(|location| location.id == target_id)
+            .ok_or("目标位置已不存在，请刷新")?;
+        if target.domain != target_domain {
+            return Err("所有目标位置必须属于所选目标域".into());
+        }
+        targets.push(symsync_core::mcp::location_ref(target));
+    }
+    if source.domain != target_domain && !allow_cross_domain {
+        return Err("跨域自动引入需要明确允许".into());
+    }
+    let mut settings = state.store.load_settings().map_err(err)?;
+    // 重新设置同一来源+目标域即完整替换，避免旧规则的选择状态泄漏到新目标集合。
+    settings
+        .mcp_auto_imports
+        .retain(|rule| rule.source.id != source_id || rule.target_domain != target_domain);
+    settings
+        .mcp_auto_imports
+        .push(symsync_core::mcp::McpAutoImportRule {
+            source: symsync_core::mcp::location_ref(source),
+            target_domain,
+            targets,
+            excluded: Default::default(),
+            allow_cross_domain,
+        });
+    state.store.save_settings(&settings).map_err(err)
+}
+
+#[tauri::command]
+fn remove_mcp_auto_import(
+    source_id: String,
+    target_domain: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut settings = state.store.load_settings().map_err(err)?;
+    settings
+        .mcp_auto_imports
+        .retain(|rule| rule.source.id != source_id || rule.target_domain != target_domain);
+    state.store.save_settings(&settings).map_err(err)
+}
+
 /// 新建或合并一条规则；解除排除由 `include_auto_link` 单独做
 #[tauri::command]
 fn set_auto_link(
@@ -278,7 +538,7 @@ fn update_auto_links(
 #[tauri::command]
 fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<Vec<HarnessStatus>, String> {
     let settings = state.store.load_settings().map_err(err)?;
-    Ok(discovery::installed(&Env::from_system())
+    Ok(discovery::installed(&runtime_env()?)
         .into_iter()
         .map(|h| HarnessStatus {
             enabled: !settings.disabled_harnesses.contains(&h.id),
@@ -339,11 +599,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
-            store: Store::new(Store::default_dir()),
+            store: Store::new(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
             watcher: Mutex::new(None),
+            mcp_plan: Mutex::new(None),
+            next_mcp_plan: AtomicU64::new(1),
         })
         .invoke_handler(tauri::generate_handler![
             scan_all,
+            scan_mcp,
+            propose_mcp_sync,
+            apply_mcp,
             propose_links,
             propose_unlinks,
             apply_all,
@@ -360,6 +625,9 @@ pub fn run() {
             remove_auto_link_targets,
             exclude_auto_link,
             include_auto_link,
+            list_mcp_auto_imports,
+            set_mcp_auto_import,
+            remove_mcp_auto_import,
             list_harnesses,
             set_harness_enabled
         ])

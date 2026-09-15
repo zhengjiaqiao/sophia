@@ -1,5 +1,5 @@
 //! JSON 持久化：projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
-use crate::models::AutoLink;
+use crate::{mcp::McpAutoImportRule, models::AutoLink};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ pub struct Settings {
     pub disabled_harnesses: Vec<String>,
     pub manual_sources: Vec<PathBuf>,
     pub auto_links: Vec<AutoLink>,
+    pub mcp_auto_imports: Vec<McpAutoImportRule>,
 }
 
 pub struct Store {
@@ -107,6 +108,25 @@ mod tests {
                 targets: vec!["claude-code".into()],
                 excluded: ["x".to_string()].into_iter().collect(),
             }],
+            mcp_auto_imports: vec![McpAutoImportRule {
+                source: crate::mcp::McpLocationRef {
+                    id: "source".into(),
+                    harness_id: "claude-code".into(),
+                    domain: "global".into(),
+                    path: PathBuf::from("/a/source.json"),
+                    selector: None,
+                },
+                target_domain: "project:/a".into(),
+                targets: vec![crate::mcp::McpLocationRef {
+                    id: "target".into(),
+                    harness_id: "codex".into(),
+                    domain: "project:/a".into(),
+                    path: PathBuf::from("/a/.codex/config.toml"),
+                    selector: None,
+                }],
+                excluded: ["private".to_string()].into_iter().collect(),
+                allow_cross_domain: true,
+            }],
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
@@ -121,6 +141,7 @@ mod tests {
         let loaded = Store::new(dir).load_settings().unwrap();
         assert_eq!(loaded.manual_sources, Vec::<PathBuf>::new());
         assert_eq!(loaded.auto_links, Vec::<AutoLink>::new());
+        assert_eq!(loaded.mcp_auto_imports, Vec::<McpAutoImportRule>::new());
     }
 
     #[test]

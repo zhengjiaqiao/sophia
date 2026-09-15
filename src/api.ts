@@ -8,6 +8,11 @@ import type {
   Overview,
   PlannedAction,
   SyncReport,
+  McpOverview,
+  McpPreview,
+  McpReport,
+  McpSelection,
+  McpAutoImportRule,
 } from "./types";
 
 export const api = {
@@ -48,4 +53,24 @@ export const api = {
   },
   /// 在系统文件管理器里定位并选中该路径
   revealInDir: (path: string) => revealItemInDir(path),
+  scanMcp: () => invoke<McpOverview>("scan_mcp"),
+  proposeMcpSync: (selections: McpSelection[]) =>
+    invoke<McpPreview>("propose_mcp_sync", { selections }),
+  applyMcp: (planId: string, allowCrossDomain: boolean) =>
+    invoke<McpReport>("apply_mcp", { planId, allowCrossDomain }),
+  listMcpAutoImports: () => invoke<McpAutoImportRule[]>("list_mcp_auto_imports"),
+  setMcpAutoImport: (
+    sourceId: string,
+    targetDomain: string,
+    targetIds: string[],
+    allowCrossDomain: boolean,
+  ) =>
+    invoke<void>("set_mcp_auto_import", {
+      sourceId,
+      targetDomain,
+      targetIds,
+      allowCrossDomain,
+    }),
+  removeMcpAutoImport: (sourceId: string, targetDomain: string) =>
+    invoke<void>("remove_mcp_auto_import", { sourceId, targetDomain }),
 };

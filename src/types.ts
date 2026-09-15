@@ -107,4 +107,86 @@ export interface HarnessStatus {
   enabled: boolean;
 }
 
+export interface McpLocation {
+  id: string;
+  label: string;
+  harnessId: string;
+  domain: string;
+  path: string;
+  selector?: string;
+  /** 发现了配置位置，但不参与普通矩阵；引入时仍可作为目标。 */
+  matrixHidden?: boolean;
+}
+
+export type McpCellState =
+  "own" | "equal" | "sameEndpoint" | "missing" | "conflict" | "invalid" | "unsupported";
+export interface McpCell {
+  targetId: string;
+  state: McpCellState;
+  reason: string | null;
+}
+export interface McpEntry {
+  sourceId: string;
+  name: string;
+  transport: "stdio" | "http" | "unsupported";
+  reason: string | null;
+  cells: McpCell[];
+}
+export interface McpIssue {
+  locationId: string;
+  name: string | null;
+  message: string;
+}
+export interface McpOverview {
+  locations: McpLocation[];
+  entries: McpEntry[];
+  issues: McpIssue[];
+}
+export interface McpSelection {
+  sourceId: string;
+  name: string;
+  targetId: string;
+}
+export interface McpAction {
+  sourceId: string;
+  targetId: string;
+  name: string;
+  sourcePath: string;
+  targetPath: string;
+  crossDomain: boolean;
+}
+export interface McpPreview {
+  planId: string;
+  actions: McpAction[];
+  issues: McpIssue[];
+}
+export interface McpReportEntry {
+  name: string;
+  targetId: string;
+  outcome: "created" | "skipped" | "failed";
+  message: string;
+  backupPath: string | null;
+}
+export interface McpReport {
+  entries: McpReportEntry[];
+}
+
+/** 自动引入 MCP 的来源/目标位置引用；位置消失后仍保留足够信息以撤销规则。 */
+export interface McpLocationRef {
+  id: string;
+  harnessId: string;
+  domain: string;
+  path: string;
+  selector?: string;
+}
+
+/** 一条来源位置到同一域目标位置的 MCP 自动引入规则。 */
+export interface McpAutoImportRule {
+  source: McpLocationRef;
+  targetDomain: string;
+  targets: McpLocationRef[];
+  excluded: string[];
+  allowCrossDomain: boolean;
+}
+
 export const actionId = (a: PlannedAction): string => `${a.kind}|${a.targetPath}`;

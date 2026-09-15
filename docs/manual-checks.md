@@ -45,8 +45,76 @@
 - [ ] 执行结果框显示本次每条 outcome，6 秒后自动消失（带 skill 说明时 15 秒；也可手动关闭）
 - [ ] 设置弹层只有 Harness 一节（勾选增减 harness）；关闭弹层后自动重扫
 - [ ] 在 Finder 里删掉一个本体目录 / 手工建一条软链后，1 秒内表格自动更新
-- [ ] 切到别的应用改完再切回窗口，表格自动重扫（监视集合外的改动兜底）
+
+## MCP 页（临时配置 fixture；本次域列表/引入专项已完成）
+
+本轮自动化通过 Rust core 112 项及 make test；WeiboAP 项目原有原生专项 QA 已完成。自动引入的原生窗口操作仍待复验，按下列分项记录。
+
+本次 sameEndpoint 原生专项使用仅含 `weibo_assistant`、`weibo_mini_program` 的隔离 fixture，最新 Debug App 成功启动；窗口 AX 两次超时且截图未显示 QA 窗口，因此未取得新状态文案、tooltip 或复选框的视觉证据。相关手动项保持未勾；未运行 helper 或真实 MCP，也未写真实配置。
+
+- [x] 仅使用 /private/tmp 下的临时 HOME/config 目录；不得读取或写入真实用户 MCP 配置
+- [x] Debug 启动使用 SYMSYNC_TEST_HOME=/private/tmp/symsync-mcp-domain-fixture make dev；不设置或覆盖 HOME、CODEX_HOME 等系统环境变量
+- [x] 侧栏可切换 Skills / MCP；全局、每个已登记项目和全部页的域选择与 Skills 对齐，即使项目没有 skill 源目录也可进入
+- [ ] Claude Code MCP 文件范围为 User `~/.claude.json.mcpServers`、Local `~/.claude.json.projects[绝对项目路径].mcpServers`、Project `<project>/.mcp.json`，优先级 Local > Project > User；不显示 `claude.ai` 运行时内置 MCP
+- [ ] Claude Local 缺失或空 `mcpServers` 时从普通矩阵和批量补缺隐藏，但在“引入…”中显示“将写入 Claude Local 配置”且默认不勾选；Local 含有定义时保持可见
+- [ ] Claude Project `<project>/.mcp.json` 即使尚未创建也保留为引入目标；仅当 Local 含有定义时该目标从普通矩阵和批量补缺隐藏，在“引入…”中显示“将创建 .mcp.json”且默认不勾选
+- [x] 默认列表只显示当前域已有服务；全部页按 global、project-a、project-b 分组，外域尚未引入的服务不混入默认行
+- [ ] 当前域同名服务只显示一行，各 harness 保留已有/连接等价/同一服务（端点一致）/配置差异/缺失/明确异常事实；own/equal/sameEndpoint 主显示均为“● 已配置”并在 tooltip 说明细节；冲突不算已引入
+- [x] 单域“引入…”可用且弹层三栏为“来源 / 本域未引入服务 / 本域目标”；全部页“引入…”禁用
+- [ ] 来源标签包含域和工具，来源可选外域位置，目标只列当前域；引入弹层已配置来源显示“已配置（详细原因）”，当前域任一 own/equal/sameEndpoint 标为已引入，剩余目标可继续通过本域来源补齐
+- [x] 引入后刷新，新增目标定义作为本域真实来源出现；已引入且仍有目标缺失时可标为“已引入，可补齐”，全无缺失时才禁用
+- [x] 本域同名不同配置可见为冲突
+- [ ] 选择来源和目标后只执行缺失定义；同名一致与冲突跳过且不覆盖（UI 未单测；自动化覆盖）
+- [x] 跨域动作的“允许携带凭据”默认不勾且确认写入按钮禁用；勾选只影响本次确认
+- [x] 既有配置写入前生成完整原字节备份；结果显示备份路径且不自动清理
+- [ ] 备份失败时阻止写入（本轮未模拟）
+- [x] project-a 三工具 docs 定义等价且取消 remote 后未写入；原 TOML 的 profile 注释保留，备份原字节与权限符合预期
+- [x] 全局与 project-b fixture 写入后的完整预期字节符合预期；未做预先 hash 对比
+- [x] 预览弹层 Shift+Tab 可达取消，Escape 可取消预览且不产生 remote 行；Tab 正向循环未单测
+- [x] 1100×720 下三工具列完整可见；来源显示工具名
+- [ ] 完整路径与详细 reason 的 tooltip 视觉证据（本轮未记录预览截图）
+- [ ] 预览后外部修改目标配置，执行按 plan id 拒绝/跳过，不覆盖新内容；未知或过期 plan id 不会消费新 plan
+- [ ] 仅接受 stdio/http；解析失败、未知字段、非法引用或不可安全转换不显示为缺失；secret 不出现在 UI、日志或报告
+- [ ] 只有没有任何定义的目标显示“缺失”；解析失败、未知字段、非法引用或其他异常显示明确的“配置无效/格式不支持”等诊断
+- [ ] 不出现逐条导入登记表、删除或任意文件安装入口；skill 页现有扫描、自动同步和软链动作不受 MCP 页操作影响
+- [ ] 同域同名保持一行；连接一致、同一服务（端点一致）与客户端设置分开保留，Codex enabled 不改变连接一致性
+- [ ] 仅 unsupported-only 显示“格式不支持”，仅 invalid-only 显示“配置无效”，own 与异常聚合时显示“已配置”，不误显示为未安装或缺失
+- [ ] 来源歧义时不默认第一来源补缺；同一字面 URL 的 http_headers_helper 等动态请求头在 tooltip 显示“同一服务（端点一致）”，矩阵主显示为“● 已配置”，并说明认证/请求头等价仍未证明；不执行 helper、不判 equal
+- [ ] 客户端设置仅含 enabled、startup_timeout_sec、tool_timeout_sec；跨工具来源带设置时按字段拒绝，同工具 Codex 新增保留，目标已有连接相同不改配置
+
+## MCP 自动引入（隔离 fixture；不得使用真实用户配置）
+
+- [ ] “引入…”选定来源和当前域目标后，可开启“自动引入新增 MCP”；确认内容明确包括当前及以后新增的完整定义、可能包含的凭据、确切来源与目标；跨域须单独明确勾选确认
+- [ ] 开启即保存规则，并在当前目标真正缺失时执行一轮只新增补齐；关闭弹层再开仍显示规则和目标，域页显示来源→目标并可移除
+- [ ] 在来源配置新增一个受支持的 stdio/http 定义，保持应用与 Skills 页打开；文件变动后目标自动新增、显示结果与备份；反复刷新不会再次写入或生成新备份
+- [ ] 已启用规则时修改目标要重新确认；取消规则后继续新增来源定义，目标不再自动写入；以后新增的目标位置不自动落入旧规则
+- [ ] 两个来源对同一目标同名但连接不同，或目标已存在/无效/不支持/端点已配置时，不擅选来源且不覆盖；跨域未经规则确认不得自动写入
+- [ ] 规则仅保存位置身份，不含命令参数、环境变量、请求头和凭据；自动执行仍先备份并在来源或目标外部变化时拒绝写入
+- [ ] WeiboAP 目标在隔离 fixture 下只补对应 agent 的 mcp_config；mcps 与其他列不变，WAL online backup 可还原写前状态
+
+## WeiboAP MCP 页（adapter 已实现；macOS fixture QA 已完成）
+
+静态证据来源为 2026-09-14 从本机安装包提取的 /private/tmp/weiboap-static-evidence/index.js 及 renderer agent-Ba027E8R.js；未读取用户真实配置、数据库、凭据或实际 MCP 连接。以下仅勾选最新 /private/tmp/symsync-weibo-mcp-fixture 隔离 fixture 已实测项目。
+
+- [x] 每个 Data/agents/<agent.id> 目录作为独立 project:<normalized> 域发现；没有 skill 目录也能发现；多 agent 不混行
+- [x] UI 展示 WeiboAP 项目/agent 身份；目标显示共享 agents.db 路径与 agent id，不误显示为 .mcp.json
+- [x] 隔离 App 侧栏仅出现本次 fixture 项目；weibo_assistant/.codex/config.toml 新增 weibo-search，原 Claude .mcp.json 不变
+- [x] weibo_mini_program/.cursor/mcp.json 新增来自 Claude 的静态 weibo-comments；Codex http_headers_helper、enabled=true 与原 Claude .mcp.json 保持不变
+- [ ] WeiboAP 只列本地 project/agent 目标；不读写 Electron localStorage persist:cherry-studio 的全局 mcp.servers、global profile 或 LevelDB
+- [x] 事务只补 agents.mcp_config 缺失项；mcps 和其他列字节不变；写入后提示需在 WeiboAP 内启用，已有会话可能需重开
+- [x] WAL 活动数据库使用 SQLite online backup；不裸 copy+rename；备份保持原权限
+- [x] fixture 中 pgEnabled=true 后刷新，两个项目均明确拒绝读取/写入；恢复 false
+- [ ] 执行前 source/target row 与 pgEnabled_* 原生专项（自动化已有部分）
+- [ ] appDataPath 有效默认值、绝对字符串或唯一精确 exe 匹配数组时支持；无效、相对、歧义或无法定位的 portable 路径显示 unsupported 并拒绝
+- [ ] WeiboAP sse 定义显示 unsupported；SymSync WeiboAP 仍仅接受 stdio/http
+- [ ] 最新 fixture 中三行 search 连接一致；同一字面 URL 的 helper 两行在 tooltip 显示“同一服务（端点一致）”、矩阵主显示为“● 已配置”且补缺禁用；search 到 Cursor 补齐成功且无覆盖
+- [ ] “同一服务（端点一致）”说明 Claude headers 与 Codex http_headers_helper 的认证/请求头等价仍无法静态确认，同时明确目标已配置；不同 URL 仍显示差异；缺失格可直接点击/勾选发起单目标预览并执行备份、只新增、跨域确认
+- [ ] 唯一安全来源可用时不被动态同名副本连带阻断；多个非等价可迁移来源要求显式选源
+- [ ] 1100×720 下三 harness 列完整无溢出；own/equal/sameEndpoint 每格显示“● 已配置”，具体状态在 tooltip 中说明，其他状态保持各自主文案
+- [ ] 来源和详细 reason 的 tooltip 视觉证据（本轮未记录预览截图）
+- [x] 已引入但仍有目标缺失时显示“已引入，可补齐”并可显式选源；全无缺失时才禁用
 
 ## 平台
+
 - [ ] macOS：以上全部
-- [ ] Windows：junction 建链、`readlink` 判定、删除（待有 Windows 机器时验证）
+- [ ] Windows：junction 建链、`readlink` 判定、删除及 MCP 配置位置（待有 Windows 机器时验证）

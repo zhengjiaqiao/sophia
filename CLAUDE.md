@@ -20,14 +20,15 @@
 
 ## Architecture
 
-- `crates/core/src/models.rs`：共享类型（PlannedAction、Outcome、Harness、LinkStyle）
+- `crates/core/src/models.rs`：共享 skill 类型（PlannedAction、Outcome、Harness、LinkStyle）
+- `crates/core/src/mcp.rs`：MCP 配置位置发现、扫描、补缺计划与安全执行（独立于 skill 软链）
 - `fs.rs`：`entry_kind`（lstat）、`real_path`、`normalize`、`create_link`
 - `sync.rs`：`execute` 执行动作
 - `skills.rs`：矩阵 `scan`（只读事实）/ `propose_links` / `propose_unlinks`（按选中格生成动作），本体判定
 - `discovery.rs` + `data/harnesses.json`：harness 表、已安装判定、项目候选
 - `store.rs`：`projects.json` / `settings.json`
 - `src-tauri/src/lib.rs`：命令，每个一行调 core
-- `src/`：`App.tsx` 壳、`SkillsTab.tsx`、`DomainView.tsx`、`ImportDialog.tsx`、`SettingsPanel.tsx`、`api.ts`、`types.ts`
+- `src/`：`App.tsx` 壳、`SkillsTab.tsx`、`McpTab.tsx`、`DomainView.tsx`、`ImportDialog.tsx`、`SettingsPanel.tsx`、`api.ts`、`types.ts`
 
 ## Verifying your work
 
