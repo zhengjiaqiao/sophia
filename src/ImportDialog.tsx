@@ -351,7 +351,11 @@ export default function ImportDialog({
               page.targets.map((target) => (
                 <label
                   key={target.id}
-                  title={target.linkedWholeTo !== null ? "整目录链接，先拆成逐项链接" : target.path}
+                  title={
+                    target.linkedWholeTo !== null
+                      ? "整目录链接，先拆成逐项链接"
+                      : target.dirs.join("\n")
+                  }
                 >
                   <input
                     type="checkbox"
