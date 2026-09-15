@@ -238,24 +238,26 @@ export default function SkillsTab({
       : `「${row.skill}」的软链已清除，它在其他 harness 下的链接还在。`;
   };
 
-  /// 本次要删的格里，仍在某条自动同步规则范围内的行：清除后必须先排除，否则立刻被补回
+  /// 本次要删的格里，仍会被自动补回的行：清除后必须先排除，否则立刻被补回。
+  /// 两类——落在某条自动同步规则范围内的，以及落在多目录列上（会被扇出补齐）的
   const coveredRows = (
     actions: PlannedAction[],
     rows: { page: DomainPage; row: DomainRow }[],
   ): DomainRow[] =>
     rows
       .filter(({ page, row }) => {
-        const targetIds = row.cells
-          .filter((c) => {
-            const paths = cellPathsOf(page, c);
-            return actions.some((a) => a.itemName === row.skill && paths.includes(a.targetPath));
-          })
-          .map((c) => c.targetId);
+        // 已经排除过的不用再提示
+        if (autoLinks.some((r) => r.source === row.sourceId && r.excluded.includes(row.skill)))
+          return false;
+        const touched = row.cells.filter((c) => {
+          const paths = cellPathsOf(page, c);
+          return actions.some((a) => a.itemName === row.skill && paths.includes(a.targetPath));
+        });
+        // 多目录列不靠规则驱动，缺失目录变空后会被 fan_out_cells 补回
+        if (touched.some((c) => c.total > 1)) return true;
+        const targetIds = touched.map((c) => c.targetId);
         return autoLinks.some(
-          (r) =>
-            r.source === row.sourceId &&
-            !r.excluded.includes(row.skill) &&
-            r.targets.some((t) => targetIds.includes(t)),
+          (r) => r.source === row.sourceId && r.targets.some((t) => targetIds.includes(t)),
         );
       })
       .map(({ row }) => row);

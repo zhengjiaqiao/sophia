@@ -260,22 +260,33 @@ pub fn remove_auto_link(rules: &mut Vec<AutoLink>, source: &Path) {
     rules.retain(|r| r.source != source);
 }
 
-/// 从该本体位置的规则里去掉这些目标（域页的 × 只撤本域的部分）；目标去空则整条删除
+/// 从该本体位置的规则里去掉这些目标（域页的 × 只撤本域的部分）；
+/// 目标与排除名单都空了才整条删除——只剩排除名单的规则仍要保住排除效果
 pub fn remove_auto_link_targets(rules: &mut Vec<AutoLink>, source: &Path, targets: &[String]) {
     let source = normalize(source);
     let Some(i) = rules.iter().position(|r| r.source == source) else {
         return;
     };
     rules[i].targets.retain(|t| !targets.contains(t));
-    if rules[i].targets.is_empty() {
+    if rules[i].targets.is_empty() && rules[i].excluded.is_empty() {
         rules.remove(i);
     }
 }
 
-/// 该 skill 不再自动链接（手动清除软链时调用）
-pub fn exclude(rules: &mut [AutoLink], source: &Path, skill: &str) {
-    if let Some(rule) = find_rule_mut(rules, source) {
-        rule.excluded.insert(skill.to_string());
+/// 该 skill 不再自动链接（手动清除软链时调用）。
+/// 该本体位置还没有规则时新建一条只有排除名单的规则：多目录列的自动扇出
+/// 不靠规则驱动，排除也必须能独立于规则存在
+pub fn exclude(rules: &mut Vec<AutoLink>, source: &Path, skill: &str) {
+    let source = normalize(source);
+    match rules.iter().position(|r| r.source == source) {
+        Some(i) => {
+            rules[i].excluded.insert(skill.to_string());
+        }
+        None => rules.push(AutoLink {
+            source,
+            targets: Vec::new(),
+            excluded: BTreeSet::from([skill.to_string()]),
+        }),
     }
 }
 
@@ -291,6 +302,15 @@ pub fn covering<'a>(rules: &'a [AutoLink], source_id: &str, skill: &str) -> Opti
     rules
         .iter()
         .find(|r| r.source.to_string_lossy() == source_id && !r.excluded.contains(skill))
+}
+
+/// 该 (本体位置, skill) 是否被某条规则明确排除过。
+/// 与 `covering` 不同：这里问的是"是否被排除"，不要求该规则真的覆盖到某个目标
+fn is_excluded(rules: &[AutoLink], source: &Path, skill: &str) -> bool {
+    let source = normalize(source);
+    rules
+        .iter()
+        .any(|r| r.source == source && r.excluded.contains(skill))
 }
 
 /// 规则里的 source 与 `Source.path` 都是 normalize 过的绝对路径
@@ -394,12 +414,20 @@ fn slot_states(
 
 /// 多目录列上，缺失的目录全是空目录（新建助手）且已有目录全部到位 → 自动补齐。
 /// 空目录判据无需任何持久状态：新建助手的 skills 目录初始为空，
-/// 用户单独同步过的助手目录非空，不会被误补
-pub fn fan_out_cells(sources: &[Source], targets: &[Target]) -> Vec<CellRef> {
+/// 用户单独同步过的助手目录非空，不会被误补。
+/// 被任一规则排除的 (本体位置, skill) 一律跳过：用户手动清除过的软链不能被下一轮扫描补回
+pub fn fan_out_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink]) -> Vec<CellRef> {
     let mut out = Vec::new();
     for target in targets.iter().filter(|t| t.dirs.len() > 1) {
         for source in sources {
+            // 外部位置由 harness 目录里的软链合成，与 auto_link_cells 一致不做扇出
+            if source.kind == SourceKind::External {
+                continue;
+            }
             for skill in &source.skills {
+                if is_excluded(rules, &source.path, &skill.name) {
+                    continue;
+                }
                 let slots = slot_states(source, &skill.name, &skill.path, target);
                 let present = slots
                     .iter()
@@ -844,8 +872,11 @@ mod tests {
         );
         let sources = [s.clone()];
         let targets = [tgt.clone()];
-        assert_eq!(fan_out_cells(&sources, &targets), vec![cell(&s, "x", &tgt)]);
-        let acts = propose_links(&sources, &targets, &fan_out_cells(&sources, &targets));
+        assert_eq!(
+            fan_out_cells(&sources, &targets, &[]),
+            vec![cell(&s, "x", &tgt)]
+        );
+        let acts = propose_links(&sources, &targets, &fan_out_cells(&sources, &targets, &[]));
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].target_path, dirs[3].join("x"));
     }
@@ -866,7 +897,9 @@ mod tests {
             "weiboap",
             &dirs.iter().map(|d| d.as_path()).collect::<Vec<_>>(),
         );
-        assert!(fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&tgt)).is_empty());
+        assert!(
+            fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&tgt), &[]).is_empty()
+        );
         let o = scan(std::slice::from_ref(&s), std::slice::from_ref(&tgt));
         assert_eq!(o.domains[0].rows[0].cells[0].state, CellState::Partial);
     }
@@ -882,10 +915,59 @@ mod tests {
         let s = source(&store, &["x"]);
         // 单目录列：空目录也不补
         let single = global("claude-code", &a);
-        assert!(fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&single)).is_empty());
+        assert!(
+            fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&single), &[]).is_empty()
+        );
         // 多目录列但一处都没有：不是"新助手"，不补
         let tgt = multi("weiboap", &[&a, &b]);
-        assert!(fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&tgt)).is_empty());
+        assert!(
+            fan_out_cells(std::slice::from_ref(&s), std::slice::from_ref(&tgt), &[]).is_empty()
+        );
+    }
+
+    /// 手动清除过的 skill 不能被下一轮扇出补回，即使缺失目录全是空目录；
+    /// 外部本体位置也不做扇出（与 auto_link_cells 一致）
+    #[test]
+    fn fan_out_skips_excluded_skills_and_external_sources() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/x");
+        let a = t.dir("a");
+        let b = t.dir("b"); // 空目录，本来会被自动补齐
+        t.link(&a.join("x"), &store.join("x"));
+        let s = source(&store, &["x"]);
+        let tgt = multi("weiboap", &[&a, &b]);
+        let sources = [s.clone()];
+        let targets = [tgt.clone()];
+        assert_eq!(
+            fan_out_cells(&sources, &targets, &[]),
+            vec![cell(&s, "x", &tgt)]
+        );
+
+        // 只有排除名单、没有任何目标的规则同样能挡住扇出
+        let mut rules: Vec<AutoLink> = Vec::new();
+        exclude(&mut rules, &store, "x");
+        assert!(rules[0].targets.is_empty());
+        assert!(fan_out_cells(&sources, &targets, &rules).is_empty());
+
+        // 解除排除后恢复自动补齐
+        include(&mut rules, &store, "x");
+        assert_eq!(
+            fan_out_cells(&sources, &targets, &rules),
+            vec![cell(&s, "x", &tgt)]
+        );
+
+        // 别的本体位置的排除名单管不着这一处
+        let mut other: Vec<AutoLink> = Vec::new();
+        exclude(&mut other, Path::new("/elsewhere"), "x");
+        assert_eq!(
+            fan_out_cells(&sources, &targets, &other),
+            vec![cell(&s, "x", &tgt)]
+        );
+
+        // 外部本体位置不做扇出
+        let ext = [external_source(&store, &["x"])];
+        assert!(fan_out_cells(&ext, &targets, &[]).is_empty());
     }
 
     /// AC9：助手自己的域是单目录列，补齐只写它自己
@@ -1110,9 +1192,12 @@ mod tests {
         assert!(rules[0].excluded.is_empty());
         assert!(covering(&rules, "/a/skills", "x").is_some());
 
-        // 别的 source 不受影响
+        // 别的 source 不受影响；它没有规则，exclude 会新建一条只有排除名单的
         exclude(&mut rules, Path::new("/other"), "x");
         assert!(rules[0].excluded.is_empty());
+        assert_eq!(rules.len(), 2);
+        assert!(rules[1].targets.is_empty());
+        assert!(rules[1].excluded.contains("x"));
         remove_auto_link(&mut rules, Path::new("/other"));
         assert_eq!(rules.len(), 1);
         remove_auto_link(&mut rules, &dotted);
@@ -1145,6 +1230,25 @@ mod tests {
             &source,
             &["claude-code".into(), "cursor".into()],
         );
+        assert!(rules.is_empty());
+    }
+
+    /// 排除名单非空时，目标去空也要保住整条规则，否则扇出会把清除过的软链补回来
+    #[test]
+    fn remove_auto_link_targets_keeps_a_rule_that_still_excludes_something() {
+        let mut rules: Vec<AutoLink> = Vec::new();
+        let source = PathBuf::from("/a/skills");
+        upsert_auto_link(&mut rules, &source, &["codex".into()]);
+        exclude(&mut rules, &source, "x");
+
+        remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
+        assert_eq!(rules.len(), 1);
+        assert!(rules[0].targets.is_empty());
+        assert!(rules[0].excluded.contains("x"));
+
+        // 排除名单也清空后才真正删除
+        include(&mut rules, &source, "x");
+        remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
         assert!(rules.is_empty());
     }
 

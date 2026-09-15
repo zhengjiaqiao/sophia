@@ -314,7 +314,15 @@ export default function DomainView({
                   const unlinkable =
                     cell.linked > 0 && cell.state !== "own" && target.linkedWholeTo === null;
                   const reason = CELL_TEXT[cell.state];
-                  const base = linkable ? "点击建链" : unlinkable ? "点击取消此链接" : reason;
+                  // 多目录列可能聚合出「有异常也有链接」的格：异常原因优先，别被"可清除"盖掉
+                  const abnormal = !linkable && cell.state !== "own" && cell.state !== "linked";
+                  const base = linkable
+                    ? "点击建链"
+                    : !unlinkable
+                      ? reason
+                      : abnormal
+                        ? `${reason}；其中 ${cell.linked} 处是链接，点击可清除`
+                        : "点击取消此链接";
                   // 部分覆盖单说；其余状态在多目录列上标明这一格代表几处
                   const title =
                     cell.state === "partial"

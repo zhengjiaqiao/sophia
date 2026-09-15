@@ -485,7 +485,9 @@ pub fn targets(
             },
         );
     }
-    // 全局域里每个 harness 一列，扇出到它展开出的全部 agent 目录
+    // 全局域里每个 harness 一列，扇出到它展开出的全部 agent 目录。
+    // 这里与上面的 global_dir 列共用 `h.id` 作 target id，两者不能同时出现，
+    // 由 `no_harness_combines_a_writable_global_dir_with_agent_dirs` 锁住
     for h in harnesses {
         let dirs: Vec<PathBuf> = agents
             .iter()
@@ -1073,6 +1075,24 @@ mod tests {
             .unwrap()];
         let tgts = targets(&e, &hs, &[], &[]);
         assert!(tgts.iter().all(|x| x.id != "weiboap"));
+    }
+
+    /// `targets()` 里非托管 `global_dir` 列与 agent 扇出列都拿 `h.id` 当 target id，
+    /// 一个 harness 两者兼有就会产出两个同 id 的列，`find(|t| t.id == ..)` 会取错目录。
+    /// 锁住数据表这条不变式，比按目录造树断言更稳、也不会随 harness 增减过时
+    #[test]
+    fn no_harness_combines_a_writable_global_dir_with_agent_dirs() {
+        let file: HarnessFile =
+            serde_json::from_str(HARNESSES_JSON).expect("内置 harness 表应当可解析");
+        for spec in &file.harnesses {
+            assert!(
+                spec.managed_global_dir || spec.global_dir.is_empty() || spec.agent_dirs.is_empty(),
+                "harness {} 同时配了非托管 global_dir 与 agent_dirs，\
+                 targets() 会产出两个 id 都是 {} 的全局列",
+                spec.id,
+                spec.id
+            );
+        }
     }
 
     #[test]

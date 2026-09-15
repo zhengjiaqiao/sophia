@@ -247,7 +247,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
         .flat_map(|d| d.targets.iter().cloned())
         .collect();
     let mut cells = skills::auto_link_cells(&scanned.sources, &targets, &rules);
-    cells.extend(skills::fan_out_cells(&scanned.sources, &targets));
+    cells.extend(skills::fan_out_cells(&scanned.sources, &targets, &rules));
     let mut seen: BTreeSet<(String, String, String)> = BTreeSet::new();
     cells.retain(|c| seen.insert((c.source_id.clone(), c.skill.clone(), c.target_id.clone())));
     if cells.is_empty() {
