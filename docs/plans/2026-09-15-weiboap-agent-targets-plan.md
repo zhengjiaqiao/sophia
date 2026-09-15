@@ -10,6 +10,8 @@
 
 **Spec:** `docs/specs/2026-09-15-weiboap-agent-targets.md`
 
+> **本计划已部分作废（2026-09-15）。** Task 1 的「一列多目录」「格聚合 Partial」「新助手自动补齐」与 Task 2 的全部前端改动，在实现并审查后被产品决策否掉并回退——理由见 spec 末尾「修订 v2」。仍然生效的只有：托管目录（`managed_global_dir`）、助手名（`agent_labels` + 只读 SQLite）、Task 3 的一次性清理。照此计划实施前请先读 spec 修订 v2。
+
 ## Global Constraints
 
 - `clippy -D warnings` 零警告；core 不依赖 tauri。
