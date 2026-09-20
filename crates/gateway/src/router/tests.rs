@@ -1251,3 +1251,20 @@ async fn ac30_proxy_overhead_p95_under_50ms() {
         durations[47]
     );
 }
+
+/// 密钥兜底不能只在协议转换那条路上：原样转发的第三方路径同样可能回显密钥
+#[tokio::test]
+async fn responses_error_body_does_not_relay_the_third_party_key() {
+    let h = Harness::new(Some(Arc::new(|req: &Captured| {
+        let echoed = req.header("authorization").unwrap_or("").to_owned();
+        (
+            401,
+            vec![("content-type".into(), "application/json".into())],
+            format!(r#"{{"error":{{"message":"bad credentials: {echoed}"}}}}"#).into_bytes(),
+        )
+    })))
+    .await;
+    let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
+    assert_eq!(res.status, 401);
+    assert!(!res.text().contains(THIRD_PARTY_KEY), "{}", res.text());
+}

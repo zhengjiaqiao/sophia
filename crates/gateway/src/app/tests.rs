@@ -810,3 +810,28 @@ fn takeover_carries_added_newline_and_model_capabilities() {
     assert_eq!(settings.models[0].model.context_window, Some(200000));
     assert!(settings.models[0].model.vision);
 }
+
+/// 终审发现：接管在写设置之前失败（例如设置被别人改了），此时密钥已经覆盖、
+/// 本功能的服务已在跑、目录文件已落盘，却没有清理。
+#[test]
+fn takeover_failing_after_the_key_was_written_still_cleans_up() {
+    let f = fixture();
+    agents_manager_setup(&f);
+    f.world.lock().unwrap().key = Some("sk-existing-symsync-key".into());
+    // 路由确认健康之后、写设置之前，别人把设置换掉
+    let config = f.config();
+    f.world.lock().unwrap().on_health = Some(Box::new(move || {
+        std::fs::write(&config, "model = \"gpt-5.6-sol\"\n").unwrap();
+    }));
+    assert!(f.app.takeover().is_err());
+    let world = f.world.lock().unwrap();
+    assert!(world.installed.is_none(), "失败后不该留下本功能的后台服务");
+    drop(world);
+    let ours: Vec<_> = std::fs::read_dir(f.codex())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("symsync-"))
+        .collect();
+    assert!(ours.is_empty(), "失败后不该留下本功能的文件: {ours:?}");
+}

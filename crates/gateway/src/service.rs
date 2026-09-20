@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// launchctl 的绝对路径：后台进程的 PATH 由 launchd 决定，不能靠 PATH 查找
+const LAUNCHCTL: &str = "/bin/launchctl";
+
 /// 描述要安装的 LaunchAgent。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Spec {
@@ -198,14 +201,14 @@ impl Manager {
     /// launchd 当前是否已加载这个服务，经 `launchctl print`。
     fn is_loaded(&self, label: &str) -> io::Result<bool> {
         let target = self.service_target(label);
-        let (_, code) = (self.run)("launchctl", &["print", &target])?;
+        let (_, code) = (self.run)(LAUNCHCTL, &["print", &target])?;
         Ok(code == 0)
     }
 
     /// 卸载服务；服务本来就没加载时容忍失败。
     fn bootout(&self, label: &str) -> io::Result<()> {
         let target = self.service_target(label);
-        let (stdout, code) = (self.run)("launchctl", &["bootout", &target])?;
+        let (stdout, code) = (self.run)(LAUNCHCTL, &["bootout", &target])?;
         if code != 0 && !looks_not_loaded(&stdout) {
             return Err(io::Error::other(format!(
                 "launchctl bootout {label} failed with exit code {code}: {stdout}"
@@ -241,7 +244,7 @@ impl Manager {
 
         let domain = self.domain_target();
         let path_str = path.to_string_lossy().into_owned();
-        let (stdout, code) = (self.run)("launchctl", &["bootstrap", &domain, &path_str])?;
+        let (stdout, code) = (self.run)(LAUNCHCTL, &["bootstrap", &domain, &path_str])?;
         if code != 0 {
             return Err(io::Error::other(format!(
                 "launchctl bootstrap {} failed with exit code {code}: {stdout}",
@@ -272,7 +275,7 @@ impl Manager {
         }
 
         let target = self.service_target(label);
-        let (stdout, code) = (self.run)("launchctl", &["print", &target])?;
+        let (stdout, code) = (self.run)(LAUNCHCTL, &["print", &target])?;
         if code != 0 {
             return Ok(status);
         }
@@ -285,7 +288,7 @@ impl Manager {
     /// 让 launchd 立即重启这个服务（`launchctl kickstart -k`）。
     pub fn restart(&self, label: &str) -> io::Result<()> {
         let target = self.service_target(label);
-        let (stdout, code) = (self.run)("launchctl", &["kickstart", "-k", &target])?;
+        let (stdout, code) = (self.run)(LAUNCHCTL, &["kickstart", "-k", &target])?;
         if code != 0 {
             return Err(io::Error::other(format!(
                 "launchctl kickstart -k {label} failed with exit code {code}: {stdout}"
@@ -584,7 +587,7 @@ mod tests {
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].name, "launchctl");
+        assert_eq!(calls[0].name, LAUNCHCTL);
         assert_eq!(calls[0].args[0], "print");
         assert_eq!(calls[1].args[0], "bootstrap");
 
@@ -792,5 +795,35 @@ mod tests {
         let runner2 = std::sync::Arc::new(FakeRunner::new(vec![RunResponse::ok("boom", 1)]));
         let m2 = test_manager(dir.path(), runner2);
         assert!(m2.restart("com.example.foo").is_err());
+    }
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+
+    /// 终审提醒：`launchctl` 不能靠 PATH 找——后台进程的 PATH 由 launchd 决定，
+    /// 而且 PATH 上的同名程序会被当成它来执行
+    #[test]
+    fn launchctl_is_invoked_by_absolute_path() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorder = std::sync::Arc::clone(&calls);
+        let manager = Manager {
+            launch_agents_dir: std::env::temp_dir(),
+            uid: 501,
+            run: Box::new(move |program, _args| {
+                recorder.lock().unwrap().push(program.to_owned());
+                Ok((String::new(), 0))
+            }),
+        };
+        let _ = manager.status("com.example.x");
+        let _ = manager.uninstall("com.example.x");
+        let _ = manager.restart("com.example.x");
+        let calls = calls.lock().unwrap();
+        assert!(!calls.is_empty());
+        assert!(
+            calls.iter().all(|program| program == "/bin/launchctl"),
+            "{calls:?}"
+        );
     }
 }

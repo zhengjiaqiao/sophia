@@ -564,6 +564,16 @@ impl Router {
                 "third-party gateway answered with a redirect, which is not followed".to_owned(),
             ));
         }
+        let status = response.status();
+        if !status.is_success() {
+            // 网关常在错误信息里把收到的 Authorization 原样吐回来，不能转给本机客户端
+            let body = read_limited(response, 1 << 20).await;
+            let scrubbed = String::from_utf8_lossy(&body).replace(key, "***");
+            return Ok((
+                route,
+                fixed_response(status, "application/json", scrubbed.into_bytes()),
+            ));
+        }
         Ok((route, passthrough(response, true)))
     }
 

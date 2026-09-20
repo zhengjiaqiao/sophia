@@ -309,67 +309,89 @@ impl ProxyResolver {
         }
 
         let now = (self.now)();
-        let mut guard = self.cache.lock().unwrap();
-        let stale = match guard.as_ref() {
-            Some(cache) => now.duration_since(cache.loaded_at) >= self.ttl,
-            None => true,
-        };
-        if stale {
-            match (self.load)() {
-                Ok(output) => {
-                    *guard = Some(Cache {
-                        settings: parse(&output),
-                        loaded_at: now,
-                    });
+        // 先看缓存，取完就放锁：取系统代理设置要起子进程，最长 3 秒，
+        // 不能占着锁让并发的请求排队（路由跑在 tokio 工作线程上）。
+        let cached = {
+            let guard = self.cache.lock().unwrap();
+            match guard.as_ref() {
+                Some(cache) if now.duration_since(cache.loaded_at) < self.ttl => {
+                    Some(cache.settings.clone())
                 }
-                Err(_) => {
-                    // 加载失败：本次直连，不缓存失败，下次重试。
-                    return None;
-                }
+                _ => None,
             }
+        };
+        if let Some(settings) = cached {
+            return settings.proxy_for(url);
         }
-        guard
+
+        let settings = match (self.load)() {
+            Ok(output) => parse(&output),
+            // 加载失败：本次直连，不缓存失败，下次重试。
+            Err(_) => return None,
+        };
+        let mut guard = self.cache.lock().unwrap();
+        // 期间别人可能已经填过缓存，用更新的那份
+        let fresher = guard
             .as_ref()
-            .and_then(|cache| cache.settings.proxy_for(url))
+            .is_some_and(|cache| now.duration_since(cache.loaded_at) < self.ttl);
+        if !fresher {
+            *guard = Some(Cache {
+                settings: settings.clone(),
+                loaded_at: now,
+            });
+        }
+        settings.proxy_for(url)
+    }
+}
+
+/// 起一个子进程，最多等 `timeout`，超时就杀掉它。
+///
+/// 关键：`Child` 留在本线程，只把 `stdout` 交给读线程。曾经的写法把 `Child` 放进
+/// `Mutex` 共享，读线程持锁调 `wait()` 等子进程退出，子进程一旦不退出，超时分支就
+/// 永远拿不到锁——超时形同虚设，整个进程挂死。
+#[cfg(target_os = "macos")]
+fn run_with_timeout(program: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("启动 {program} 失败：{e}"))?;
+    let mut stdout = child.stdout.take();
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(out) = stdout.as_mut() {
+            let _ = out.read_to_string(&mut buf);
+        }
+        // 管道读到头就发结果；即使接收端已经超时离开也无妨
+        let _ = tx.send(buf);
+    });
+
+    match rx.recv_timeout(timeout) {
+        // stdout 已经关闭，子进程必然即将退出，这里的 wait 不会久等
+        Ok(buf) => match child.wait() {
+            Ok(status) if status.success() => Ok(buf),
+            Ok(status) => Err(format!("{program} 退出码 {:?}", status.code())),
+            Err(e) => Err(e.to_string()),
+        },
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(format!("{program} 超时"))
+        }
     }
 }
 
 /// 运行 `/usr/sbin/scutil --proxy`，3 秒超时。
 #[cfg(target_os = "macos")]
 pub fn load_scutil() -> Result<String, String> {
-    use std::io::Read;
-    use std::process::{Command, Stdio};
-    use std::sync::{mpsc, Arc};
-
-    let mut child = Command::new("/usr/sbin/scutil")
-        .arg("--proxy")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("启动 scutil 失败：{e}"))?;
-    let stdout = child.stdout.take();
-    let child = Arc::new(Mutex::new(child));
-    let waiter = Arc::clone(&child);
-
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = String::new();
-        if let Some(mut out) = stdout {
-            let _ = out.read_to_string(&mut buf);
-        }
-        let status = waiter.lock().unwrap().wait();
-        let _ = tx.send((status, buf));
-    });
-
-    match rx.recv_timeout(Duration::from_secs(3)) {
-        Ok((Ok(status), buf)) if status.success() => Ok(buf),
-        Ok((Ok(status), _)) => Err(format!("scutil 退出码 {:?}", status.code())),
-        Ok((Err(e), _)) => Err(e.to_string()),
-        Err(_) => {
-            let _ = child.lock().unwrap().kill();
-            Err("scutil 超时".to_string())
-        }
-    }
+    run_with_timeout("/usr/sbin/scutil", &["--proxy"], Duration::from_secs(3))
 }
 
 /// 非 macOS 平台上不支持读取系统代理设置。
@@ -667,5 +689,61 @@ mod tests {
     fn load_scutil_real_output_has_expected_shape() {
         let out = load_scutil().expect("scutil --proxy 应当成功");
         assert!(out.contains("HTTPEnable"));
+    }
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// 终审发现：子进程不退出时，读线程持锁等它，超时分支拿不到锁，于是永久挂起。
+    /// 挂在常驻进程里，官方和第三方模型会同时不可用。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_hanging_child_process_still_times_out() {
+        let started = Instant::now();
+        // 一个永不退出、也不关闭 stdout 的子进程
+        let result = run_with_timeout("/bin/sh", &["-c", "sleep 60"], Duration::from_millis(300));
+        assert!(result.is_err(), "应当超时返回错误");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "超时没有生效，耗时 {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// 取系统代理设置不能长时间占着锁：否则并发的请求都被串在一起等
+    #[test]
+    fn slow_loads_do_not_serialize_callers() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&calls);
+        let resolver = Arc::new(ProxyResolver::new(
+            move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(300));
+                Ok("<dictionary> {\n  HTTPSEnable : 1\n  HTTPSProxy : 127.0.0.1\n  HTTPSPort : 7897\n}".to_owned())
+            },
+            Duration::from_secs(60),
+            Instant::now,
+        ));
+        let started = Instant::now();
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let resolver = Arc::clone(&resolver);
+                std::thread::spawn(move || {
+                    let url = Url::parse("https://chatgpt.com/").unwrap();
+                    resolver.resolve(&url)
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(results.iter().all(|r| r.is_some()), "都应当拿到代理");
+        assert!(
+            started.elapsed() < Duration::from_millis(900),
+            "四个调用被串行化了，耗时 {:?}",
+            started.elapsed()
+        );
     }
 }

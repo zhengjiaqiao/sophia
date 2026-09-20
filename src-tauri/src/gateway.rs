@@ -72,13 +72,16 @@ pub async fn gateway_save_provider(
     };
     // 这把锁会跨 .await 持有，必须是 tokio::sync::Mutex（std 的 guard 不是 Send，还会阻塞运行时线程）。
     // 后面新增的异步命令只要会写 ~/.codex/config.toml，都照此办理。
-    let _guard = state.config_lock.lock().await;
-    let worker = app.clone();
-    match verified {
-        None => blocking(move || worker.save_provider(&base_url)).await?,
-        Some((ids, api_base)) => {
-            blocking(move || worker.commit_verified_provider(&base_url, &key, ids, &api_base))
-                .await?
+    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        match verified {
+            None => blocking(move || worker.save_provider(&base_url)).await?,
+            Some((ids, api_base)) => {
+                blocking(move || worker.commit_verified_provider(&base_url, &key, ids, &api_base))
+                    .await?
+            }
         }
     }
     current_state(app).await
@@ -94,9 +97,12 @@ pub async fn gateway_fetch_models(
     let (ids, api_base) = runtime::fetch_models(&base_url, &key)
         .await
         .map_err(|e| e.to_string())?;
-    let _guard = state.config_lock.lock().await;
-    let worker = app.clone();
-    blocking(move || worker.merge_fetched_models(ids, &api_base)).await?;
+    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        blocking(move || worker.merge_fetched_models(ids, &api_base)).await?;
+    }
     current_state(app).await
 }
 
@@ -114,43 +120,55 @@ pub async fn gateway_select_models(
     state: tauri::State<'_, AppState>,
 ) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    let _guard = state.config_lock.lock().await;
-    let models = selected
-        .into_iter()
-        .map(|m| Model {
-            id: m.id,
-            display_name: Some(m.display_name).filter(|n| !n.trim().is_empty()),
-            ..Default::default()
-        })
-        .collect();
-    let worker = app.clone();
-    blocking(move || worker.set_models(models)).await?;
+    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
+    {
+        let _guard = state.config_lock.lock().await;
+        let models = selected
+            .into_iter()
+            .map(|m| Model {
+                id: m.id,
+                display_name: Some(m.display_name).filter(|n| !n.trim().is_empty()),
+                ..Default::default()
+            })
+            .collect();
+        let worker = app.clone();
+        blocking(move || worker.set_models(models)).await?;
+    }
     current_state(app).await
 }
 
 #[tauri::command]
 pub async fn gateway_enable(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    let _guard = state.config_lock.lock().await;
-    let worker = app.clone();
-    blocking(move || worker.enable()).await?;
+    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        blocking(move || worker.enable()).await?;
+    }
     current_state(app).await
 }
 
 #[tauri::command]
 pub async fn gateway_restore(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    let _guard = state.config_lock.lock().await;
-    let worker = app.clone();
-    blocking(move || worker.restore().map(|_| ())).await?;
+    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        blocking(move || worker.restore().map(|_| ())).await?;
+    }
     current_state(app).await
 }
 
 #[tauri::command]
 pub async fn gateway_takeover(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    let _guard = state.config_lock.lock().await;
-    let worker = app.clone();
-    blocking(move || worker.takeover()).await?;
+    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        blocking(move || worker.takeover()).await?;
+    }
     current_state(app).await
 }

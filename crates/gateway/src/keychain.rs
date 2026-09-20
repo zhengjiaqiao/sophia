@@ -118,10 +118,12 @@ pub fn set_key(run: &Runner, service: &str, account: &str, value: &str) -> Resul
         shell_quote(&encoded)
     );
 
-    let (stdout, code) = run(&["-i"], Some(&command))?;
+    let (_stdout, code) = run(&["-i"], Some(&command))?;
     if code != 0 {
+        // 不回传它的输出：我们喂给它的标准输入里含 base64(密钥)，它常把出错的那行原样吐回来，
+        // 而这条消息会进界面横幅和后台服务日志。
         return Err(KeyError::Command(format!(
-            "security -i failed with exit code {code}: {stdout}"
+            "写入钥匙串失败（security 退出码 {code}）"
         )));
     }
     Ok(())
@@ -529,5 +531,28 @@ mod tests {
         *fail.lock().unwrap() = false;
         // 错误不缓存：下一次立刻重试并成功，不必等 TTL。
         assert_eq!(cached.get().unwrap(), "k2");
+    }
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+
+    /// 终审发现：`security -i` 失败时把它的 stdout 回传进错误信息，而我们喂给它的
+    /// 标准输入里含 base64(密钥)。这条消息会进界面横幅和后台服务日志。
+    #[test]
+    fn a_failing_write_never_echoes_the_secret() {
+        let secret = "sk-super-secret-value-123456";
+        let encoded = encode_value(secret);
+        let leaked = format!("security: error at line 1: add-generic-password -w {encoded}");
+        let runner: Runner = Box::new(move |_args, _stdin| Ok((leaked.clone(), 1)));
+        let error = set_key(&runner, "svc", "acct", secret)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !error.contains(secret) && !error.contains(&encode_value(secret)),
+            "错误信息泄漏了密钥: {error}"
+        );
+        assert!(error.contains('1'), "仍要说明失败原因: {error}");
     }
 }

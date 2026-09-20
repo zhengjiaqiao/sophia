@@ -144,8 +144,9 @@ fn auto_import_mcp(
         return Ok(None);
     }
     // 自动选择已由规则逐条授予跨域权限；这里不接受未经过该筛选的手动选择。
-    // blocking_lock 不能在 tokio 运行时线程上调用（会 panic）。Tauri 的同步命令和文件监视回调都跑在
-    // 独立线程上，所以这里没问题；哪天把这段改成从异步上下文里调，要换成 `.lock().await`。
+    // Tauri 2 的同步命令内联跑在 IPC 线程上，这里 blocking_lock 不会 panic，
+    // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
+    // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
     Ok(Some(symsync_core::mcp::execute(plan, true)))
 }
@@ -249,8 +250,9 @@ fn apply_mcp(
         }
         cache.take().expect("checked above").1
     };
-    // blocking_lock 不能在 tokio 运行时线程上调用（会 panic）。Tauri 的同步命令和文件监视回调都跑在
-    // 独立线程上，所以这里没问题；哪天把这段改成从异步上下文里调，要换成 `.lock().await`。
+    // Tauri 2 的同步命令内联跑在 IPC 线程上，这里 blocking_lock 不会 panic，
+    // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
+    // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
     Ok(symsync_core::mcp::execute(plan, allow_cross_domain))
 }

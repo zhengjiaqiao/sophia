@@ -82,7 +82,8 @@ pub struct Deps {
 
 pub struct App {
     deps: Deps,
-    /// 同一进程里的动作串行执行
+    /// 同一进程里的动作串行执行。某个动作 panic 之后锁会被标记为中毒，
+    /// 但它保护的是磁盘上的文件、不是内存里的不变量，所以继续用，不让整个功能瘫掉。
     lock: Mutex<()>,
 }
 
@@ -274,7 +275,10 @@ impl App {
 
     /// 保存网关地址。密钥由 `commit_verified_provider` 或调用方另行写入钥匙串
     pub fn save_provider(&self, base_url: &str) -> Result<(), AppError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.save_provider_locked(base_url)
     }
 
@@ -303,7 +307,10 @@ impl App {
         ids: Vec<String>,
         api_base: &str,
     ) -> Result<(), AppError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let key = key.trim();
         if key.is_empty() {
             return Err(AppError::new("invalid", "密钥为空"));
@@ -327,7 +334,10 @@ impl App {
 
     /// 把网关返回的模型列表并入已保存的列表，保留原有的勾选和显示名
     pub fn merge_fetched_models(&self, ids: Vec<String>, api_base: &str) -> Result<(), AppError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.merge_locked(ids, api_base)
     }
 
@@ -372,7 +382,10 @@ impl App {
 
     /// 保存勾选的模型；已启用时同时重写合并目录和路由清单
     pub fn set_models(&self, selected: Vec<Model>) -> Result<(), AppError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut settings = self.load()?;
         let mut chosen: Vec<Model> = Vec::new();
         for mut model in selected {
@@ -439,7 +452,10 @@ impl App {
 
     /// 先让路由常驻并确认健康，再写 Codex 设置
     pub fn enable(&self) -> Result<(), AppError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut settings = self.load()?;
         if settings.base_url.is_empty() {
             return Err(AppError::new("invalid", "还没有填写网关地址"));
@@ -580,7 +596,10 @@ impl App {
 
     /// 从 Codex 设置里移除本功能的两项，清理本功能文件并卸载后台服务。路由不通时也可用
     pub fn restore(&self) -> Result<Vec<String>, AppError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut settings = self.load()?;
         let managed = self.managed(&settings);
         let snapshot = self.read_config()?;
@@ -623,7 +642,10 @@ impl App {
 
     /// 接管 agents-manager 的现有配置：地址、模型、显示名、密钥、启用前默认模型原样带过来
     pub fn takeover(&self) -> Result<(), AppError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let first = self.read_config()?;
         let detected = self
             .detect_agents_manager(&first.text)
@@ -675,9 +697,43 @@ impl App {
             return Err(error);
         }
         // 路由确认健康之后才动密钥：失败的接管不能覆盖本功能原有的密钥
-        (self.deps.set_key)(key.trim()).map_err(|e| AppError::new("invalid", e))?;
+        if let Err(error) = (self.deps.set_key)(key.trim()) {
+            self.remove_own_traces();
+            return Err(AppError::new("invalid", error));
+        }
 
-        // 一次原子写：移除对方的两个键，写入本功能的两个键
+        // 从这里往后，密钥已经被覆盖、服务在跑、目录文件已落盘：任何失败都要把这些撤掉，
+        // 否则会留下“两边都半开着”的状态。
+        match self.finish_takeover(&mut settings, &detected, old.added_newline) {
+            Ok(()) => {}
+            Err(error) => {
+                self.remove_own_traces();
+                return Err(error);
+            }
+        }
+
+        // 设置已经指向本功能之后，才撤下对方的后台服务和它放在 Codex 目录下的文件；它的数据目录和钥匙串条目保留
+        let _ = (self.deps.service_uninstall)(takeover::LAUNCH_AGENT_LABEL);
+        if let Ok(entries) = std::fs::read_dir(&self.deps.codex_home) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if entry.file_type().is_ok_and(|t| t.is_file())
+                    && takeover::is_owned_file_name(&name)
+                {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 接管的收尾：一次原子写把两个键从对方改指向本功能
+    fn finish_takeover(
+        &self,
+        settings: &mut GatewaySettings,
+        detected: &takeover::Detected,
+        old_added_newline: bool,
+    ) -> Result<(), AppError> {
         let latest = self.read_config()?;
         let old_catalog = config::root_string(&latest.text, config::KEY_CATALOG)
             .filter(|path| path.ends_with(&detected.catalog_file_name))
@@ -702,26 +758,12 @@ impl App {
             ));
         }
         let applied =
-            config::apply(&removed.text, &self.managed(&settings)).map_err(config_error)?;
+            config::apply(&removed.text, &self.managed(settings)).map_err(config_error)?;
         self.write_config(&latest, &applied.text)?;
         // 对方当初给末行补过的换行还在文件里，恢复时同样要还原
-        settings.added_newline = applied.added_newline || old.added_newline;
+        settings.added_newline = applied.added_newline || old_added_newline;
         settings.changed_at = Some((self.deps.now)());
-        self.save(&settings)?;
-
-        // 设置已经指向本功能之后，才撤下对方的后台服务和它放在 Codex 目录下的文件；它的数据目录和钥匙串条目保留
-        let _ = (self.deps.service_uninstall)(takeover::LAUNCH_AGENT_LABEL);
-        if let Ok(entries) = std::fs::read_dir(&self.deps.codex_home) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if entry.file_type().is_ok_and(|t| t.is_file())
-                    && takeover::is_owned_file_name(&name)
-                {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
-        Ok(())
+        self.save(settings)
     }
 
     /// 卸载本功能的后台服务并删掉 Codex 目录下本功能前缀的文件（只删普通文件）
@@ -739,7 +781,10 @@ impl App {
     }
 
     pub fn state(&self) -> GatewayState {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let settings = self.load().unwrap_or_default();
         let mut view = GatewayState {
             supported: true,
