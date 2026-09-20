@@ -1,10 +1,13 @@
 use rusqlite::Connection;
 use serde_json::{json, Value};
+#[cfg(target_os = "macos")]
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
 use symsync_core::discovery::Env;
 use symsync_core::mcp::{execute, prepare, scan, McpLocation, McpSelection};
+#[cfg(target_os = "macos")]
 use symsync_core::models::Harness;
 use tempfile::tempdir;
 
@@ -91,6 +94,8 @@ fn selection(source: &str, name: &str, target: &str) -> McpSelection {
     }
 }
 
+// 只被下面两个 macOS 专属的测试用到；不加门控的话，非 macOS 上会因“未使用”让 clippy 报错
+#[cfg(target_os = "macos")]
 fn weibo_harness() -> Harness {
     Harness {
         id: "weiboap".into(),
