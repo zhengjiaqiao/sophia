@@ -1,14 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import {
-  canRestore,
   enableDisabledReason,
+  factsLine,
   parseBackendError,
+  restartDisabledReason,
   routerUnavailable,
   sortAndFilterModels,
+  statusSentence,
   takeoverOfferText,
 } from "./modelsView";
-import type { GatewayProviderModel, GatewayState } from "./types";
+import type { GatewayProviderModel, GatewayState, GatewaySelectedModel } from "./types";
+import { AgentIcon, Busy, Button, Empty, ErrorBanner, RowNotice, Toast } from "./ui";
+import type { ToastKind } from "./ui";
+import { GatewayPage } from "./pages/GatewayPage";
+import "./ModelsTab.css";
+
+/// 模型页（spec `docs/specs/2026-09-21-ui-rebuild-models.md`）。
+///
+/// 一行一个 agent，当前选的模型就在行里；页面没有域的概念，所以不渲染侧栏内容，
+/// 顶栏之下直接通栏。按「可以有多个 agent」搭，尽管现在只有 Codex。
+///
+/// 四条形上的定死选择，改之前先回去看 spec：
+/// - 开关是 ghost pill 两态（`启用` / 反色 `已启用`），不是滑动开关也不是复选框（R4）
+/// - 模型列表的「已选」用 12px 方形复选框：**圆＝状态（只读事实），方＝选择（我选的）**（R3）
+/// - 三组状态词合成一句人话 + 一行等宽事实，不并排三个徽标（R2）
+/// - 按钮叫 `重启路由`，不叫「重启 Codex」——Codex 是用户的编辑器 / CLI，
+///   我们无权重启它；能重启的只有自己装的那个 launchd 服务（R6）
+///
+/// 四条提示各有各的位置（R7）：`drift` 与 `takeover` 是挂在这一行上的常驻待办，
+/// 走行内待办条；`needsCodexRestart` 并进副行；`routerUnavailable` 是应用级故障，
+/// 走顶栏之下的反色横幅；某次操作的结果走右下角提示条。
+
+/// 已知限制：这段是事实，不是某次操作的结果，所以常驻在页面上不随操作消失（R8）
+const LIMITATIONS =
+  "Codex 仍会用官方模型生成会话标题，第一条消息会发给官方；自动审阅在第三方会话里用不了；网页搜索这类工具在第三方模型上也用不了。";
+
+const describeError = (error: unknown): string => parseBackendError(String(error)).message;
+
+/// 列表里显示的名字：用户改过的显示名 > 网关给的 slug > 原始 id
+const modelLabel = (model: GatewayProviderModel): string =>
+  model.displayName || model.slug || model.id;
+
+const selectedPayload = (models: GatewayProviderModel[]): GatewaySelectedModel[] =>
+  models.filter((m) => m.selected).map(({ id, displayName }) => ({ id, displayName }));
 
 export interface ModelsTabProps {
   onError: (message: string) => void;
@@ -16,27 +51,30 @@ export interface ModelsTabProps {
   onBusy: (busy: boolean) => void;
 }
 
-/// 已知限制：私有目录与协议转换带来的边界情况，页面底部固定展示一句
-const LIMITATIONS =
-  "使用第三方模型时，Codex 仍会用官方模型生成会话标题（第一条消息会发给官方）；自动审阅在第三方会话里不可用；网页搜索等工具在第三方模型上不可用。";
-
-const describeError = (error: unknown): string => parseBackendError(String(error)).message;
-
 export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
+  /// 可编辑的模型副本：浮层里的勾选与改名先落在这儿，`保存选择` 才写盘
   const [models, setModels] = useState<GatewayProviderModel[]>([]);
   const [query, setQuery] = useState("");
-  const [restoreOpen, setRestoreOpen] = useState(false);
-  const [takeoverOpen, setTakeoverOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  /// 二级页面（§4.6）：null＝主视图
+  const [subPage, setSubPage] = useState<null | "gateway">(null);
+  const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
+  /// 行内待办条按「稍后」只在这一程里收起来，下次打开还会再提一次
+  const [later, setLater] = useState<{ drift: boolean; takeover: boolean }>({
+    drift: false,
+    takeover: false,
+  });
+  /// 错误横幅不自动消失，只有用户自己关掉；路由恢复了就重新亮起来
+  const [bannerClosed, setBannerClosed] = useState(false);
   const mounted = useRef(true);
 
-  // 网关地址与模型列表跟随最近一次读到的状态；正在编辑密钥输入框不受影响（密钥从不回显）。
+  // 模型列表跟随最近一次读到的状态；密钥从不回显，网关地址由配置页自己持有。
   const applyState = (next: GatewayState) => {
     setState(next);
-    setBaseUrl(next.provider.baseUrl);
     setModels(next.provider.models);
+    if (!routerUnavailable(next)) setBannerClosed(false);
   };
 
   const refresh = async () => {
@@ -61,30 +99,40 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /// 大多数操作都是“调命令 → 用返回的最新状态刷新页面”；失败时保留当前输入，交给用户重试。
-  const runAction = async (action: () => Promise<GatewayState>) => {
+  // 浮层按 Esc 关掉，和二级页面一个手势
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePicker();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+    // closePicker 只读 state.provider.models，随 state 变化重新绑定即可
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerOpen, state]);
+
+  /// 大多数操作都是「调命令 → 用返回的最新状态刷新页面」。
+  /// 成功汇总成一句话，做不成就把后端的原话摆出来——那是用户要拿去查的信息（§4.1）。
+  const runAction = async (action: () => Promise<GatewayState>, success: string) => {
     onBusy(true);
     try {
       const next = await action();
-      if (mounted.current) applyState(next);
+      if (!mounted.current) return;
+      applyState(next);
+      setToast({ kind: "success", message: success });
     } catch (error) {
-      onError(describeError(error));
+      if (mounted.current) setToast({ kind: "cannot", message: describeError(error) });
     } finally {
       onBusy(false);
     }
   };
 
-  const saveProvider = async () => {
+  /// 配置页要自己就地说明失败，所以这一支把错误原样抛回去
+  const runOrThrow = async (action: () => Promise<GatewayState>) => {
     onBusy(true);
     try {
-      const next = await api.gatewaySaveProvider(baseUrl, apiKey);
-      if (mounted.current) {
-        applyState(next);
-        setApiKey("");
-      }
-    } catch (error) {
-      // 保存失败：地址与密钥输入原样保留，不清空
-      onError(describeError(error));
+      const next = await action();
+      if (mounted.current) applyState(next);
     } finally {
       onBusy(false);
     }
@@ -96,222 +144,374 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const renameModel = (id: string, displayName: string) => {
     setModels((current) => current.map((m) => (m.id === id ? { ...m, displayName } : m)));
   };
-  const saveModels = () =>
-    runAction(() =>
-      api.gatewaySelectModels(
-        models.filter((m) => m.selected).map(({ id, displayName }) => ({ id, displayName })),
-      ),
+
+  const closePicker = () => {
+    // 没保存的勾选与改名在关闭时作废，行上的片始终等于已经写进 Codex 的那一份
+    setModels(state?.provider.models ?? []);
+    setRenamingId(null);
+    setQuery("");
+    setPickerOpen(false);
+  };
+
+  const saveModels = async (next: GatewayProviderModel[], success: string) => {
+    await runAction(() => api.gatewaySelectModels(selectedPayload(next)), success);
+    if (mounted.current) {
+      setRenamingId(null);
+      setPickerOpen(false);
+      setQuery("");
+    }
+  };
+
+  if (subPage === "gateway" && state !== null) {
+    return (
+      <GatewayPage
+        state={state}
+        busy={busy}
+        onBack={() => setSubPage(null)}
+        onSaveProvider={(baseUrl, key) => runOrThrow(() => api.gatewaySaveProvider(baseUrl, key))}
+        onFetchModels={() => runOrThrow(() => api.gatewayFetchModels())}
+        onRestore={() => runOrThrow(() => api.gatewayRestore())}
+      />
     );
+  }
 
-  const confirmRestore = () => {
-    setRestoreOpen(false);
-    void runAction(() => api.gatewayRestore());
-  };
-  const confirmTakeover = () => {
-    setTakeoverOpen(false);
-    void runAction(() => api.gatewayTakeover());
-  };
+  if (!state) return <Empty kind="scanning" description="读取中…" />;
 
-  if (!state) return <p>正在读取模型页状态…</p>;
-
-  const selectedCount = models.filter((m) => m.selected).length;
+  const selected = models.filter((m) => m.selected);
+  const selectedCount = selected.length;
   const visibleModels = sortAndFilterModels(models, query);
   const disabledReason = enableDisabledReason(state, selectedCount);
+  const restartReason = restartDisabledReason(state);
+  const showBanner = routerUnavailable(state) && !bannerClosed;
 
   return (
-    <section className="models-tab">
-      <div className="models-notices">
-        {routerUnavailable(state) && (
-          <div className="notice warning">
-            <span>
-              本机路由不可用{state.router.error ? `：${state.router.error}` : ""}
-              ，官方模型也可能无法使用。
-            </span>
-            <button disabled={busy} onClick={() => setRestoreOpen(true)}>
-              恢复
-            </button>
+    <section className="models-page">
+      {/* 应用级故障：已启用但路由没在跑，官方模型也会受影响（R7、§4.2） */}
+      {showBanner ? (
+        <ErrorBanner
+          message={state.router.error || "本机路由没在跑，这会儿连官方模型也用不了。"}
+          onClose={() => setBannerClosed(true)}
+        />
+      ) : null}
+
+      <div className="models-page__body">
+        <div className="models-page__head">
+          <span className="models-page__label">支持第三方模型的 agent</span>
+          <span className="models-page__note">选中的模型会出现在这个 agent 自己的模型列表里</span>
+        </div>
+
+        <div className="models-row">
+          <div className="models-row__main">
+            {/* 左：图标 + 名字（不大写，agent 名是被谈论的对象）+ 一句人话 + 一行等宽事实 */}
+            <div className="models-row__identity">
+              <div className="models-row__name">
+                <AgentIcon id="codex" name="Codex" />
+                <span className="models-row__title">Codex</span>
+              </div>
+              <div className="models-row__status">{statusSentence(state, selectedCount)}</div>
+              <div className="models-row__facts">{factsLine(state)}</div>
+            </div>
+
+            {/* 中：已选模型用反色片列出，每片带 × */}
+            <div className="models-row__models">
+              {selectedCount === 0 ? (
+                <span className="models-row__empty">还没选模型</span>
+              ) : (
+                selected.map((m) => (
+                  <span key={m.id} className="models-chip">
+                    <span className="models-chip__label">{modelLabel(m)}</span>
+                    <button
+                      type="button"
+                      className="models-chip__remove"
+                      title={`把 ${modelLabel(m)} 从 Codex 的模型列表里去掉`}
+                      disabled={busy}
+                      onClick={() =>
+                        void saveModels(
+                          models.map((x) => (x.id === m.id ? { ...x, selected: false } : x)),
+                          `Codex 的模型列表里去掉了 ${modelLabel(m)}`,
+                        )
+                      }
+                    >
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 12 12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 3l6 6M9 3l-6 6" />
+                      </svg>
+                    </button>
+                  </span>
+                ))
+              )}
+              <Button variant="link" onClick={() => setPickerOpen(true)}>
+                {selectedCount === 0 ? "选模型" : "改选模型"}
+              </Button>
+
+              {pickerOpen ? (
+                <>
+                  {/* 点浮层外面等于关闭；罩子透明，不遮挡下面那一行 */}
+                  <button
+                    type="button"
+                    className="models-picker__veil"
+                    aria-label="关闭模型选择"
+                    onClick={closePicker}
+                  />
+                  <div className="models-picker" role="dialog" aria-label="选模型">
+                    {/* 筛选输入框不受 busy 约束（§6） */}
+                    <div className="models-picker__search">
+                      <input
+                        type="search"
+                        className="models-picker__input"
+                        placeholder="筛选模型（可能有 100+ 个）"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                      />
+                    </div>
+
+                    <Busy busy={busy} className="models-picker__list">
+                      {models.length === 0 ? (
+                        <Empty
+                          kind="noSkills"
+                          description="还没有可以选的模型——先到「配置」里存好网关和密钥，再拉一次模型列表。"
+                          primary={{
+                            label: "去配置",
+                            onClick: () => {
+                              setPickerOpen(false);
+                              setSubPage("gateway");
+                            },
+                          }}
+                        />
+                      ) : visibleModels.length === 0 ? (
+                        <Empty
+                          kind="noMatch"
+                          description="没有匹配的模型。"
+                          secondary={{ label: "清除筛选", onClick: () => setQuery("") }}
+                        />
+                      ) : (
+                        <ul className="models-list">
+                          {visibleModels.map((m) => (
+                            <li
+                              key={m.id}
+                              className={
+                                renamingId === m.id ? "models-item is-renaming" : "models-item"
+                              }
+                            >
+                              {/* 12px 方形复选框：方＝选择，与状态点的圆分得开（R3） */}
+                              <button
+                                type="button"
+                                role="checkbox"
+                                aria-checked={m.selected}
+                                className="models-item__check"
+                                title={
+                                  m.selected
+                                    ? `点一下，不再把 ${modelLabel(m)} 放进 Codex 的列表`
+                                    : `点一下，把 ${modelLabel(m)} 放进 Codex 的列表`
+                                }
+                                onClick={() => toggleModel(m.id)}
+                              >
+                                {m.selected ? (
+                                  <svg
+                                    width="8"
+                                    height="8"
+                                    viewBox="0 0 10 10"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    aria-hidden="true"
+                                  >
+                                    <path d="M2 5.2l2 2 4-4.4" />
+                                  </svg>
+                                ) : null}
+                              </button>
+
+                              <div className="models-item__text">
+                                {renamingId === m.id ? (
+                                  <input
+                                    type="text"
+                                    className="models-item__rename"
+                                    value={m.displayName}
+                                    autoFocus
+                                    onChange={(e) => renameModel(m.id, e.target.value)}
+                                    onBlur={() => setRenamingId(null)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === "Escape") {
+                                        // Esc 先被输入框吃掉，不要顺带把浮层也关了
+                                        e.stopPropagation();
+                                        setRenamingId(null);
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="models-item__name">{modelLabel(m)}</div>
+                                )}
+                                {/* 模型 id 是标识符，走等宽（§1.2） */}
+                                <div className="models-item__id">{m.slug || m.id}</div>
+                              </div>
+
+                              {m.selected ? (
+                                renamingId === m.id ? (
+                                  <span className="models-item__hint">
+                                    Codex 列表里显示这个名字
+                                  </span>
+                                ) : (
+                                  <Button variant="link" onClick={() => setRenamingId(m.id)}>
+                                    改名
+                                  </Button>
+                                )
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </Busy>
+
+                    <div className="models-picker__foot">
+                      <span className="models-picker__count">已选 {selectedCount} 个模型</span>
+                      <div className="models-picker__foot-actions">
+                        <Button variant="link" onClick={closePicker}>
+                          关闭
+                        </Button>
+                        <Busy busy={busy}>
+                          <Button
+                            size="compact"
+                            onClick={() =>
+                              void saveModels(
+                                models,
+                                selectedCount === 0
+                                  ? "Codex 的模型列表里只剩官方模型了"
+                                  : `${selectedCount} 个模型已经写进 Codex 的模型列表`,
+                              )
+                            }
+                          >
+                            保存选择
+                          </Button>
+                        </Busy>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            {/* 右：配置 · 开关 · 重启路由 */}
+            <Busy busy={busy} className="models-row__actions">
+              <Button size="compact" onClick={() => setSubPage("gateway")}>
+                配置
+              </Button>
+
+              {state.enabled ? (
+                // 已启用＝反色 pill，点一下停用（§3 只有 ghost pill 一种形，反色是它的选中态）
+                <button
+                  type="button"
+                  className="ss-btn ss-btn--compact models-pill--on"
+                  title="点一下停用：Codex 的模型列表只保留官方模型"
+                  onClick={() =>
+                    void runAction(
+                      () => api.gatewayRestore(),
+                      "已经停用，Codex 的模型列表只剩官方模型；要重启 Codex 才看得到",
+                    )
+                  }
+                >
+                  已启用
+                </button>
+              ) : disabledReason !== null ? (
+                <Button size="compact" disabled disabledReason={disabledReason}>
+                  启用
+                </Button>
+              ) : (
+                <Button
+                  size="compact"
+                  onClick={() =>
+                    void runAction(
+                      () => api.gatewayEnable(),
+                      `${selectedCount} 个模型进了 Codex 的模型列表，要重启 Codex 才看得到`,
+                    )
+                  }
+                >
+                  启用
+                </Button>
+              )}
+
+              {restartReason !== null ? (
+                <Button size="compact" disabled disabledReason={restartReason}>
+                  重启路由
+                </Button>
+              ) : (
+                <Button
+                  size="compact"
+                  title="重启本机这条路由；Codex 我们无权重启"
+                  onClick={() => void runAction(() => api.gatewayRestart(), "本机路由重启完了")}
+                >
+                  重启路由
+                </Button>
+              )}
+            </Busy>
           </div>
-        )}
-        {state.conflict && (
-          <div className="notice warning">
-            <span>{state.conflict}</span>
-          </div>
-        )}
-        {state.takeover && (
-          <div className="notice info">
-            <span>{takeoverOfferText(state.takeover)}</span>
-            <button disabled={busy} onClick={() => setTakeoverOpen(true)}>
-              接管
-            </button>
-          </div>
-        )}
-        {state.codex.drift && (
-          <div className="notice info">
-            <span>Codex 版本已更新，合并模型目录需要重新生成。</span>
-            <button disabled={busy} onClick={() => void runAction(() => api.gatewayEnable())}>
-              重新生成
-            </button>
-          </div>
-        )}
-        {state.needsCodexRestart && (
-          <div className="notice info">
-            <span>需要重启 Codex 才生效</span>
-          </div>
-        )}
+
+          {/* 常驻待办挂在这一行下面，动作就在右边（R7、§4.4） */}
+          {state.codex.drift && !later.drift ? (
+            <div className="models-row__notice">
+              <RowNotice
+                message={
+                  <>
+                    Codex 升到 <span className="models-row__mono">{state.codex.version}</span>{" "}
+                    之后，模型列表要重新生成一次才对得上。
+                  </>
+                }
+                actions={[
+                  {
+                    label: "重新生成",
+                    onClick: () =>
+                      void runAction(
+                        () => api.gatewayEnable(),
+                        "模型列表重新生成好了，要重启 Codex 才看得到",
+                      ),
+                  },
+                ]}
+                onLater={() => setLater((c) => ({ ...c, drift: true }))}
+              />
+            </div>
+          ) : null}
+
+          {state.takeover !== null && !later.takeover ? (
+            <div className="models-row__notice">
+              <RowNotice
+                message={`${takeoverOfferText(state.takeover)}。接过来会把网关地址、已选模型和密钥原样带过来，并撤下 agents-manager 的后台服务与文件。`}
+                actions={[
+                  {
+                    label: "接管",
+                    onClick: () =>
+                      void runAction(
+                        () => api.gatewayTakeover(),
+                        "接过来了，网关地址、已选模型和密钥都在；要重启 Codex 才看得到",
+                      ),
+                  },
+                ]}
+                onLater={() => setLater((c) => ({ ...c, takeover: true }))}
+              />
+            </div>
+          ) : null}
+        </div>
+
+        {/* 限制说明是事实，不是某次操作的结果，常驻（R8） */}
+        <div className="models-page__limits">
+          <span className="models-page__label">用第三方模型要知道的</span>
+          <p className="models-page__limits-text">{LIMITATIONS}</p>
+        </div>
       </div>
 
-      <div className="models-section">
-        <h2>网关</h2>
-        <label className="models-field">
-          网关地址
-          <input
-            type="text"
-            disabled={busy}
-            value={baseUrl}
-            placeholder="https://example.com/openai/v1"
-            onChange={(e) => setBaseUrl(e.target.value)}
-          />
-        </label>
-        <label className="models-field">
-          API 密钥
-          <input
-            type="password"
-            disabled={busy}
-            value={apiKey}
-            autoComplete="off"
-            placeholder={state.provider.hasKey ? "已保存，留空则不修改" : "输入密钥"}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </label>
-        <div className="toolbar">
-          <button disabled={busy || baseUrl.trim() === ""} onClick={() => void saveProvider()}>
-            保存
-          </button>
-          <button
-            disabled={busy || !state.provider.hasKey}
-            onClick={() => void runAction(() => api.gatewayFetchModels())}
-          >
-            拉取模型
-          </button>
-        </div>
-      </div>
-
-      <div className="models-section">
-        <h2>模型</h2>
-        <div className="toolbar filters">
-          <input
-            type="search"
-            disabled={busy}
-            placeholder="筛选模型（可能有 100+ 个）"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        {models.length === 0 ? (
-          <p className="muted">还没有可选模型，请先在上方保存网关并拉取模型列表。</p>
-        ) : visibleModels.length === 0 ? (
-          <p className="muted">没有匹配的模型。</p>
-        ) : (
-          <ul className="models-list">
-            {visibleModels.map((m) => (
-              <li key={m.id}>
-                <input
-                  type="checkbox"
-                  disabled={busy}
-                  checked={m.selected}
-                  onChange={() => toggleModel(m.id)}
-                />
-                <span className="muted" title={m.id}>
-                  {m.slug || m.id}
-                </span>
-                <input
-                  type="text"
-                  disabled={busy}
-                  value={m.displayName}
-                  onChange={(e) => renameModel(m.id, e.target.value)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-        {models.length > 0 && (
-          <div className="toolbar">
-            <span>已选 {selectedCount} 个模型</span>
-            <button disabled={busy} onClick={() => void saveModels()}>
-              保存选择
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="models-section">
-        <h2>Codex</h2>
-        <p>
-          {state.enabled ? "已启用" : "未启用"} · 后台服务
-          {state.router.installed ? "已安装" : "未安装"}
-          {state.router.installed &&
-            `（${state.router.running ? "运行中" : "未运行"}，端口 ${state.router.port}）`}
-          {state.codex.version && ` · Codex ${state.codex.version}`}
-        </p>
-        <div className="toolbar">
-          <button
-            disabled={busy || disabledReason !== null}
-            onClick={() => void runAction(() => api.gatewayEnable())}
-          >
-            启用
-          </button>
-          <button disabled={busy || !canRestore(state)} onClick={() => setRestoreOpen(true)}>
-            恢复
-          </button>
-          {disabledReason && <span className="muted">{disabledReason}</span>}
-        </div>
-      </div>
-
-      <p className="muted">{LIMITATIONS}</p>
-
-      {restoreOpen && (
-        <div className="modal-backdrop" onClick={() => setRestoreOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="toolbar">
-              <h2>确认恢复？</h2>
-            </div>
-            <p className="muted">
-              恢复后 Codex 设置里将不再有本功能写入的内容，模型选择器只保留官方模型；需要重启 Codex
-              才生效。
-            </p>
-            <div className="toolbar">
-              <button disabled={busy} onClick={confirmRestore}>
-                确认恢复
-              </button>
-              <button disabled={busy} onClick={() => setRestoreOpen(false)}>
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {takeoverOpen && (
-        <div className="modal-backdrop" onClick={() => setTakeoverOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="toolbar">
-              <h2>确认接管？</h2>
-            </div>
-            <p className="muted">
-              接管会把网关地址、已选模型与密钥原样带到 SymSync，并撤下 agents-manager
-              的后台服务与文件；接管后需要重启一次 Codex 才生效。
-            </p>
-            <div className="toolbar">
-              <button disabled={busy} onClick={confirmTakeover}>
-                确认接管
-              </button>
-              <button disabled={busy} onClick={() => setTakeoverOpen(false)}>
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {toast ? (
+        <Toast
+          kind={toast.kind}
+          message={toast.message}
+          onDismiss={() => setToast(null)}
+          onClose={() => setToast(null)}
+        />
+      ) : null}
     </section>
   );
 }

@@ -10,6 +10,10 @@ const NATIVE_CACHE: &str = r#"{"client_version":"0.154.0","models":[{"slug":"gpt
 struct World {
     settings: GatewaySettings,
     service_calls: Vec<String>,
+    /// 每次 restart 传进来的 label，用来确认我们只重启自己那个服务
+    restart_labels: Vec<String>,
+    /// 非空时 restart 失败，内容就是 launchctl 的原话
+    restart_error: Option<String>,
     installed: Option<service::Spec>,
     old_service_installed: bool,
     healthy: bool,
@@ -132,9 +136,14 @@ fn fixture() -> Fixture {
         }),
         service_restart: Box::new({
             let w = w.clone();
-            move |_| {
-                w.lock().unwrap().service_calls.push("restart".into());
-                Ok(())
+            move |label| {
+                let mut w = w.lock().unwrap();
+                w.service_calls.push("restart".into());
+                w.restart_labels.push(label.to_owned());
+                match w.restart_error.clone() {
+                    Some(message) => Err(std::io::Error::other(message)),
+                    None => Ok(()),
+                }
             }
         }),
         router_healthy: Box::new({
@@ -635,6 +644,22 @@ fn ac28_changed_binary_restarts_the_service() {
         .unwrap()
         .service_calls
         .contains(&"restart".to_owned()));
+}
+
+/// R6：`重启路由` 只 kickstart 我们自己装的那个 launchd 服务，不碰 Codex 设置；
+/// 失败时把 launchctl 的原话原样带出去（代码 router_down），不改写成「操作没成功」这类空话
+#[test]
+fn restart_router_kickstarts_our_service_and_relays_launchctl_errors() {
+    let f = fixture();
+    f.app.restart_router().unwrap();
+    assert_eq!(f.world.lock().unwrap().restart_labels, [SERVICE_LABEL]);
+    assert_eq!(f.read_config(), ORIGINAL, "重启不写 Codex 设置");
+
+    let raw = "launchctl kickstart -k gui/501/com.zhengjiaqiao.symsync.gateway failed with exit code 3: Could not find service";
+    f.world.lock().unwrap().restart_error = Some(raw.to_owned());
+    let err = f.app.restart_router().unwrap_err();
+    assert_eq!(err.code, "router_down");
+    assert_eq!(err.message, raw);
 }
 
 fn agents_manager_setup(f: &Fixture) -> String {

@@ -18,12 +18,7 @@ const TOKEN_FILE = "src/tokens.css";
 /// 旧代码的豁免名单。每个任务改完自己的文件就从这里划掉；
 /// T10 收口时这个数组必须是空的。不许用通配符——必须逐个文件列出，
 /// 否则新写的文件会悄悄落进豁免里。
-const LEGACY = [
-  "src/McpImportDialog.tsx",
-  "src/McpTab.css",
-  "src/McpTab.tsx",
-  "src/ModelsTab.tsx",
-];
+const LEGACY = [];
 
 const rules = [
   {
@@ -118,6 +113,18 @@ const rules = [
       return bad.filter((w) => text.includes(w));
     },
   },
+  {
+    id: "mcp-no-sync",
+    // 「同步」是双向词。MCP 页只新增、从不覆盖也不删除，用它会骗人
+    // （docs/specs/2026-09-21-ui-rebuild-mcp.md 的 R3 / AC7）。
+    // 只管 MCP 那几个文件：skill 页的「自动同步」是名副其实的双向维护，不受此限
+    desc: "MCP 页的文案不出现「同步」（R3）",
+    run(src, path) {
+      const mcp = /^src\/[Mm]cp[A-Za-z]*\.(tsx|ts|css)$/.test(path) || /^src\/pages\/McpImportPage\./.test(path);
+      if (!mcp) return [];
+      return visibleText(src).includes("同步") ? ["MCP 页的可见文案里出现了「同步」"] : [];
+    },
+  },
 ];
 
 /// 取可见文案：JSX 文本节点与字符串字面量，**只留含中文的**。
@@ -130,7 +137,11 @@ function visibleText(src) {
   const noComments = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
   const strings = [...noComments.matchAll(/"([^"\\\n]{2,})"|'([^'\\\n]{2,})'|`([^`\\]{2,})`/g)]
     .map((m) => m[1] ?? m[2] ?? m[3]);
-  const jsxText = [...noComments.matchAll(/>([^<>{}\n]{2,})</g)].map((m) => m[1]);
+  // JSX 文本节点：`[^<>{}]` 不排除换行，所以跨行的整块也能取到。
+  // 曾经这里带着 \n，于是 `>\n  操作失败\n<` 这种被整段漏掉——
+  // 三条文案规则（term / mechanism-words / mcp-no-sync）一起失效，
+  // 而漏检是静默的：lint 报零违规，人就以为过了。
+  const jsxText = [...noComments.matchAll(/>([^<>{}]{2,}?)</gs)].map((m) => m[1]);
   return [...strings, ...jsxText].filter((t) => /[一-鿿]/.test(t)).join("\n");
 }
 

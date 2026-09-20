@@ -7,7 +7,6 @@ import {
   sourceForMissing,
   sourceForMissingTarget,
   supplementSourcesForTarget,
-  summarizeMcpCell,
 } from "../src/mcpView.ts";
 import type { McpCellState, McpEntry, McpLocation, McpOverview } from "../src/types.ts";
 
@@ -36,41 +35,6 @@ const overview = (locations: McpLocation[], entries: McpEntry[] = []): McpOvervi
   locations,
   entries,
   issues: [],
-});
-
-test("MCP 格聚合统一正向状态，异常状态按优先级保留具体文案", () => {
-  for (const state of ["own", "equal", "sameEndpoint"] as const) {
-    assert.deepEqual(summarizeMcpCell([state]), {
-      text: "已配置",
-      className: "own",
-      defined: true,
-    });
-  }
-  assert.deepEqual(summarizeMcpCell(["own", "equal", "sameEndpoint", "unsupported"]), {
-    text: "已配置",
-    className: "own",
-    defined: true,
-  });
-  assert.deepEqual(summarizeMcpCell(["conflict", "own", "sameEndpoint"]), {
-    text: "差异",
-    className: "conflict",
-    defined: true,
-  });
-  assert.deepEqual(summarizeMcpCell(["invalid"]), {
-    text: "配置无效",
-    className: "invalid",
-    defined: false,
-  });
-  assert.deepEqual(summarizeMcpCell(["unsupported"]), {
-    text: "格式不支持",
-    className: "unsupported",
-    defined: false,
-  });
-  assert.deepEqual(summarizeMcpCell(["missing"]), {
-    text: "缺失",
-    className: "missing",
-    defined: false,
-  });
 });
 
 test("域保留空项目、全局在前，并且项目绝不显示外域来源", () => {

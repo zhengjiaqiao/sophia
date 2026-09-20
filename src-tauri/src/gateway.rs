@@ -161,6 +161,16 @@ pub async fn gateway_restore(state: tauri::State<'_, AppState>) -> Result<Gatewa
     current_state(app).await
 }
 
+/// 重启我们自己装的 launchd 路由服务。**不重启 Codex**——那是用户的编辑器 / CLI。
+/// 它不写 `~/.codex/config.toml`，所以不取 `config_lock`（拿了只会让 MCP 的同步白等）。
+#[tauri::command]
+pub async fn gateway_restart(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
+    let app = app(&state)?;
+    let worker = app.clone();
+    blocking(move || worker.restart_router()).await?;
+    current_state(app).await
+}
+
 #[tauri::command]
 pub async fn gateway_takeover(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
     let app = app(&state)?;

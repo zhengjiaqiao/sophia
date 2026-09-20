@@ -13,6 +13,8 @@ import type { ReactNode } from "react";
 /// agent 灯说的是目录，不是 skill（§9）
 export type LampState = "writable" | "missing" | "unwritable";
 
+/// 默认口径是 skill 页的「目录」。MCP 页的列是**文件**不是目录，
+/// 借用这套说法会串味，所以调用方可以用 `title` 覆盖整句。
 const LAMP_TITLE: Record<LampState, string> = {
   writable: "目录存在，而且写得进去",
   missing: "目录还不存在——开启任一 skill 时会顺手建出来",
@@ -98,12 +100,16 @@ export function AgentIcon({ id, name, size = 16 }: AgentIconProps) {
 export interface AgentLampProps {
   state: LampState;
   className?: string;
+  /// 覆盖默认说明。默认口径说的是 skill 页的「目录」；MCP 页的列是**文件**，
+  /// 不覆盖的话鼠标停在灯上会看到「开启任一 skill 时会顺手建出来」，串味
+  title?: string;
 }
 
 /// 列头 agent 名左侧那盏灯：实心＝目录在且可写，空心＝目录还不存在，
 /// 空心加一道斜杠＝目录在但写不进去。
-export function AgentLamp({ state, className }: AgentLampProps) {
+export function AgentLamp({ state, className, title }: AgentLampProps) {
   const classes = `ss-lamp ss-lamp--${state}${className ? ` ${className}` : ""}`;
+  const label = title ?? LAMP_TITLE[state];
   if (state === "unwritable") {
     return (
       <svg
@@ -115,16 +121,16 @@ export function AgentLamp({ state, className }: AgentLampProps) {
         stroke="currentColor"
         strokeWidth="1"
         role="img"
-        aria-label={LAMP_TITLE[state]}
+        aria-label={label}
       >
-        <title>{LAMP_TITLE[state]}</title>
+        <title>{label}</title>
         <circle cx="4" cy="4" r="3.4" />
         <path d="M1.7 6.3L6.3 1.7" />
       </svg>
     );
   }
   return (
-    <span className={classes} title={LAMP_TITLE[state]} role="img" aria-label={LAMP_TITLE[state]} />
+    <span className={classes} title={label} role="img" aria-label={label} />
   );
 }
 

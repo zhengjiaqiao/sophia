@@ -101,5 +101,7 @@ export const api = {
     invoke<GatewayState>("gateway_select_models", { selected }),
   gatewayEnable: () => invoke<GatewayState>("gateway_enable"),
   gatewayRestore: () => invoke<GatewayState>("gateway_restore"),
+  /// 重启我们自己装的 launchd 路由服务；不重启 Codex
+  gatewayRestart: () => invoke<GatewayState>("gateway_restart"),
   gatewayTakeover: () => invoke<GatewayState>("gateway_takeover"),
 };

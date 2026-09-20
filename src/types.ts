@@ -271,6 +271,8 @@ export interface GatewayRouter {
   installed: boolean;
   running: boolean;
   port: number;
+  /// "chat" 或 "responses"。配置页只读展示，不给改
+  protocol: string;
   error: string;
 }
 export interface GatewayCodex {

@@ -1,0 +1,331 @@
+/* 模型页的排版（spec docs/specs/2026-09-21-ui-rebuild-models.md）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影，
+   圆角只有输入框 4px 与 pill 32px（§1.3）。 */
+@import "./tokens.css";
+
+.models-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.models-page__body {
+  box-sizing: border-box;
+  padding: 10px 24px 16px;
+}
+
+/* 区域标签是我们自己写的结构词，大写；后面那句是说明，不大写（§1.2） */
+.models-page__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.models-page__label {
+  font-family: var(--font-cond);
+  font-size: var(--size-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.models-page__note {
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-faint);
+}
+
+/* ===== agent 行 ===== */
+.models-row {
+  border-top: 1px solid var(--ink);
+  padding-top: 7px;
+}
+
+.models-row__main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.models-row__identity {
+  width: 286px;
+  flex-shrink: 0;
+}
+
+.models-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* agent 名不大写：被谈论的对象一律不大写（§1.2） */
+.models-row__title {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  font-weight: 600;
+}
+
+/* 三组状态词合成的那一句人话（R2） */
+.models-row__status {
+  margin-top: 3px;
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-mute);
+  line-height: 1.45;
+}
+
+/* 版本号与端口是计数类事实，走等宽（§1.2） */
+.models-row__facts {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+  color: var(--ink-faint);
+}
+
+.models-row__mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+}
+
+.models-row__models {
+  position: relative;
+  display: flex;
+  flex-grow: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+}
+
+.models-row__empty {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  color: var(--ink-faint);
+}
+
+.models-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.models-row__notice {
+  margin: 8px 0 0 22px;
+}
+
+/* 开关的已启用态：反色 pill。形与 .ss-btn--compact 完全一致，只换底色（R4、§3） */
+.models-pill--on {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+/* ===== 已选模型片：反色 pill + × ===== */
+.models-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.models-chip__label {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: 1.1;
+}
+
+.models-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--canvas);
+  cursor: pointer;
+}
+
+.models-chip__remove:disabled {
+  color: var(--ink-faint-inverse);
+  cursor: default;
+}
+
+/* ===== 模型选择浮层 ===== */
+.models-picker__veil {
+  position: fixed;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  cursor: default;
+}
+
+.models-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  max-height: 420px;
+  border: 1px solid var(--ink);
+  background: var(--canvas);
+}
+
+.models-picker__search {
+  padding: 8px 12px 7px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.models-picker__input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+.models-picker__input:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+
+.models-picker__list {
+  flex-grow: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 12px 0;
+}
+
+.models-picker__foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+/* 计数走等宽（§1.2、§11） */
+.models-picker__count {
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+}
+
+.models-picker__foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* ===== 模型列表 ===== */
+.models-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.models-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--surface);
+}
+
+.models-item.is-renaming {
+  background: var(--surface);
+}
+
+/* 12px 方形复选框：方＝选择（我选的），圆＝状态（只读事实）（R3） */
+.models-item__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--ink-faint);
+  border-radius: 0;
+  background: var(--canvas);
+  color: var(--canvas);
+  cursor: pointer;
+}
+
+.models-item__check[aria-checked="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.models-item__text {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.models-item__name {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+/* 模型 id 是标识符，走等宽（§1.2） */
+.models-item__id {
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+  color: var(--ink-faint);
+}
+
+.models-item__rename {
+  box-sizing: border-box;
+  width: 168px;
+  padding: 3px 8px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-input);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+.models-item__rename:focus {
+  outline: none;
+}
+
+.models-item__hint {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* ===== 限制说明：常驻，不随操作消失（R8） ===== */
+.models-page__limits {
+  max-width: 560px;
+  margin-top: 24px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.models-page__limits-text {
+  margin: 6px 0 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-mute);
+  line-height: 1.55;
+}

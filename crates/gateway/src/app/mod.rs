@@ -112,6 +112,8 @@ pub struct RouterView {
     pub installed: bool,
     pub running: bool,
     pub port: u16,
+    /// 网关支持的协议："chat" 或 "responses"。界面只读展示，不给改
+    pub protocol: String,
     pub error: String,
 }
 
@@ -640,6 +642,16 @@ impl App {
         Ok(warnings)
     }
 
+    /// 重启我们自己装的 launchd 路由服务（`launchctl kickstart -k`）。
+    ///
+    /// **只重启路由，不碰 Codex**：Codex 是用户的编辑器 / CLI，我们无权重启它。
+    /// 不读写 `~/.codex/config.toml`，也不改 settings.json，所以不取 `self.lock`。
+    /// 失败时把 `launchctl` 的原话原样带出去——那是运维信息，用户要拿它去查。
+    pub fn restart_router(&self) -> Result<(), AppError> {
+        (self.deps.service_restart)(SERVICE_LABEL)
+            .map_err(|e| AppError::new("router_down", e.to_string()))
+    }
+
     /// 接管 agents-manager 的现有配置：地址、模型、显示名、密钥、启用前默认模型原样带过来
     pub fn takeover(&self) -> Result<(), AppError> {
         let _guard = self
@@ -832,13 +844,14 @@ impl App {
         }
 
         view.router.port = settings.port;
+        view.router.protocol = settings.protocol().to_owned();
         view.router.installed =
             (self.deps.service_status)(SERVICE_LABEL).is_ok_and(|s| s.installed);
         if view.enabled || view.router.installed {
             match (self.deps.router_healthy)(settings.port) {
                 Ok(()) => view.router.running = true,
                 Err(e) if view.enabled => {
-                    view.router.error = format!("Codex 设置指向本机路由，但路由在端口 {} 上没有响应：{e}。此时官方模型也无法使用，可以点「恢复」。", settings.port)
+                    view.router.error = format!("Codex 设置指向本机路由，但路由在端口 {} 上没有响应：{e}。此时官方模型也无法使用，可以点「重启路由」，或者停用本功能。", settings.port)
                 }
                 Err(_) => {}
             }

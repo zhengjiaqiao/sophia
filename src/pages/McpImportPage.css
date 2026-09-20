@@ -1,0 +1,41 @@
+/* MCP 引入页的布局。**整套骨架直接用 skill 导入页那一份**——两页是同一个界面，
+   用户换个 tab 不该重新学一套（spec 核心判断）。这里只补 MCP 多出来的两样东西：
+   来源位置要标出它属于哪个域（来源可以跨域），服务行要写传输方式。 */
+@import "./ImportPage.css";
+
+/* 来源位置的域名：跟在位置名后面的一句次要说明，左边那列窄，所以它会被挤掉省略号 */
+.ss-mcp__srcdomain {
+  min-width: 0;
+  overflow: hidden;
+  flex-shrink: 1;
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ss-import__source.is-active .ss-mcp__srcdomain {
+  color: var(--ink-mute);
+}
+
+/* 传输方式：标准输入输出 / HTTP / 不支持。靠右推，后面还有标签时标签再往右 */
+.ss-mcp__transport {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-faint);
+}
+
+/* 位置选择区与 skill 导入页同形，只是不需要那条上边界之外的额外留白 */
+.ss-mcp__targets {
+  padding: 14px 24px 16px 24px;
+  border-top: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+/* 传输方式已经把行推满了，标签不再抢 margin-left: auto */
+.ss-import__row .ss-mcp__transport + .ss-import__tag {
+  margin-left: 8px;
+}
