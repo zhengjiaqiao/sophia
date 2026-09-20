@@ -1,4 +1,5 @@
 //! MCP 配置同步核心。私有计划保存定义和值，DTO 从不包含凭据。
+use crate::atomicfile::{self, unsafe_parent, FileState, ReadError, Snapshot};
 use crate::discovery::Env;
 use crate::fs::normalize;
 use crate::models::Harness;
@@ -7,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Component, Path, PathBuf};
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 
 mod weiboap;
 
@@ -276,25 +277,9 @@ pub(super) fn has_duplicate_header_names(headers: &BTreeMap<String, String>) -> 
         .any(|name| !names.insert(name.to_ascii_lowercase()))
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Snap {
-    bytes: Vec<u8>,
-    fp: Fingerprint,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Fingerprint {
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-    #[cfg(unix)]
-    dev: u64,
-    #[cfg(unix)]
-    ino: u64,
-    #[cfg(unix)]
-    mode: u32,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum State {
     Missing,
-    Present(Snap),
+    Present(Snapshot),
     Weibo(weiboap::Snapshot),
     Bad(String),
 }
@@ -833,21 +818,12 @@ fn same_location(path: &Path, expected: &State) -> bool {
     }
 }
 fn read(path: &Path) -> State {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return State::Bad("配置文件是软链接，已拒绝读取".into())
-        }
-        Ok(metadata) if !metadata.is_file() => return State::Bad("配置路径不是普通文件".into()),
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return State::Missing,
-        Err(_) => return State::Bad("配置不可读".into()),
-    };
-    match fs::read(path) {
-        Ok(bytes) => State::Present(Snap {
-            bytes,
-            fp: fingerprint(&metadata),
-        }),
-        Err(_) => State::Bad("配置不可读".into()),
+    match atomicfile::read_state(path) {
+        Ok(FileState::Missing) => State::Missing,
+        Ok(FileState::Present(snap)) => State::Present(snap),
+        Err(ReadError::Symlink) => State::Bad("配置文件是软链接，已拒绝读取".into()),
+        Err(ReadError::NotRegularFile) => State::Bad("配置路径不是普通文件".into()),
+        Err(ReadError::Io(_)) => State::Bad("配置不可读".into()),
     }
 }
 /// Claude Local 作用域的状态。这里只以项目精确 key 作为 selector，不把顶层
@@ -896,26 +872,6 @@ fn claude_local_status(path: &Path, project: &str) -> ClaudeLocalStatus {
         },
         Some(_) => ClaudeLocalStatus::Invalid,
         None => ClaudeLocalStatus::Absent,
-    }
-}
-fn fingerprint(metadata: &fs::Metadata) -> Fingerprint {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        Fingerprint {
-            len: metadata.len(),
-            modified: metadata.modified().ok(),
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-            mode: metadata.mode(),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        Fingerprint {
-            len: metadata.len(),
-            modified: metadata.modified().ok(),
-        }
     }
 }
 fn same(path: &Path, expected: &State) -> bool {
@@ -1689,125 +1645,20 @@ fn toml(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str()) == Some("toml")
 }
 
-fn backup(path: &Path, snap: &Snap) -> io::Result<PathBuf> {
-    safe_parent(path)?;
-    for n in 0..1000 {
-        let candidate = if n == 0 {
-            path.with_extension("mcp.bak")
-        } else {
-            path.with_extension(format!("mcp.{n}.bak"))
-        };
-        let mut opt = OpenOptions::new();
-        opt.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opt.mode(snap.fp.mode & 0o777);
-        }
-        match opt.open(&candidate) {
-            Ok(mut file) => {
-                file.write_all(&snap.bytes)?;
-                file.sync_all()?;
-                return Ok(candidate);
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-    Err(io::Error::new(io::ErrorKind::AlreadyExists, "backup"))
+/// MCP 的备份固定用 `mcp` 后缀：`config.mcp.bak`、`config.mcp.1.bak`……
+fn backup(path: &Path, snap: &Snapshot) -> io::Result<PathBuf> {
+    atomicfile::backup(path, snap, "mcp")
 }
+/// 只有 Missing / Present 可写；Bad 与 Weibo 在这里拒绝，不进入共享的原子写。
 fn atomic_write(path: &Path, bytes: &[u8], expected: &State) -> io::Result<()> {
-    safe_parent(path)?;
-    if !same(path, expected) {
-        return Err(io::Error::other("changed"));
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "parent"))?;
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    #[cfg(unix)]
-    if let State::Present(snap) = expected {
-        use std::os::unix::fs::PermissionsExt;
-        file.as_file()
-            .set_permissions(fs::Permissions::from_mode(snap.fp.mode & 0o777))?;
-    }
-    file.write_all(bytes)?;
-    file.as_file().sync_all()?;
-    if !same(path, expected) {
-        return Err(io::Error::other("changed"));
-    }
     match expected {
-        State::Missing => file
-            .persist_noclobber(path)
-            .map(|_| ())
-            .map_err(|error| error.error),
-        State::Present(_) => file.persist(path).map(|_| ()).map_err(|error| error.error),
+        State::Missing => atomicfile::atomic_write(path, bytes, &FileState::Missing),
+        State::Present(snap) => {
+            atomicfile::atomic_write(path, bytes, &FileState::Present(snap.clone()))
+        }
         State::Bad(_) => Err(io::Error::new(io::ErrorKind::PermissionDenied, "bad")),
         State::Weibo(_) => Err(io::Error::new(io::ErrorKind::PermissionDenied, "weibo")),
     }
-}
-fn safe_parent(path: &Path) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "parent"))?;
-    let mut current = PathBuf::new();
-    for part in parent.components() {
-        match part {
-            Component::RootDir | Component::Prefix(_) => current.push(part.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "parent traversal",
-                ))
-            }
-            Component::Normal(part) => {
-                current.push(part);
-                match fs::symlink_metadata(&current) {
-                    Ok(meta) if meta.file_type().is_symlink() => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::PermissionDenied,
-                            "symlink parent",
-                        ))
-                    }
-                    Ok(meta) if !meta.is_dir() => {
-                        return Err(io::Error::new(io::ErrorKind::NotADirectory, "parent"))
-                    }
-                    Ok(_) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        fs::create_dir(&current)?
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-/// 预览只检查，不创建目标目录；执行前的 `safe_parent` 会再次检查并创建缺失目录。
-fn unsafe_parent(path: &Path) -> bool {
-    let Some(parent) = path.parent() else {
-        return true;
-    };
-    let mut current = PathBuf::new();
-    for part in parent.components() {
-        match part {
-            Component::RootDir | Component::Prefix(_) => current.push(part.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => return true,
-            Component::Normal(part) => {
-                current.push(part);
-                match fs::symlink_metadata(&current) {
-                    Ok(meta) if meta.file_type().is_symlink() => return true,
-                    Ok(_) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => return false,
-                    Err(_) => return true,
-                }
-            }
-        }
-    }
-    false
 }
 
 pub(super) struct NoDuplicates;
