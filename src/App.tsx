@@ -6,7 +6,8 @@ import type { AutoLink, McpReport, Overview } from "./types";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
-import SettingsPanel from "./SettingsPanel";
+import { SettingsPage } from "./pages/SettingsPage";
+import { PendingPage } from "./pages/PendingPage";
 import "./App.css";
 
 /// 侧栏「全部」的选中键；其余为 DomainPage.key
@@ -20,7 +21,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [selectedKey, setSelectedKey] = useState(ALL_KEY);
   const [error, setError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  /// 二级页面（§4.6）：占满整窗、不渲染侧栏。null＝主视图
+  const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
   const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("skills");
   // 「模型」标签页只在后端确认支持（当前只有 macOS）时才出现；读取失败时静默隐藏
   const [modelsSupported, setModelsSupported] = useState(false);
@@ -204,10 +206,25 @@ export default function App() {
     }
   };
 
-  const closeSettings = () => {
-    setSettingsOpen(false);
+  /// 从二级页面返回：重扫一次，因为设置改了 agent 的启用、待处理页改了磁盘
+  const closeSubPage = () => {
+    setSubPage(null);
     void refresh();
   };
+
+  if (subPage === "settings") {
+    return <SettingsPage onBack={closeSubPage} onError={setError} />;
+  }
+  if (subPage === "pending") {
+    return (
+      <PendingPage
+        overview={overview}
+        onBack={closeSubPage}
+        onRefresh={refresh}
+        onError={setError}
+      />
+    );
+  }
 
   return (
     <div className="app">
@@ -317,7 +334,7 @@ export default function App() {
         <button disabled={busy} onClick={() => void addProject()}>
           添加项目…
         </button>
-        <button onClick={() => setSettingsOpen(true)}>设置</button>
+        <button onClick={() => setSubPage("settings")}>设置</button>
       </aside>
       <main className="content">
         {error && (
@@ -337,6 +354,7 @@ export default function App() {
             selectedKey={selectedKey}
             onRefresh={refresh}
             onError={setError}
+            onOpenPending={() => setSubPage("pending")}
           />
         ) : activeTab === "mcp" ? (
           <McpTab
@@ -371,7 +389,6 @@ export default function App() {
           </div>
         </div>
       )}
-      {settingsOpen && <SettingsPanel onClose={closeSettings} onError={setError} />}
     </div>
   );
 }

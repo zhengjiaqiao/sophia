@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { ActionButton, dim, type UnlinkTarget } from "./DomainView";
-import ImportDialog from "./ImportDialog";
+import ImportPage from "./pages/ImportPage";
 import { viewOf } from "./cellState";
 import { issueKey } from "./pages/pendingIssues";
 import { Empty, Toast, type ToastKind } from "./ui";
@@ -803,8 +803,8 @@ export default function SkillsTab({
         />
       )}
 
-      {importOpen && importPage !== null && (
-        <ImportDialog
+      {importOpen && importPage !== null && overview !== null && (
+        <ImportPage
           overview={overview}
           page={importPage}
           autoLinks={autoLinks}
