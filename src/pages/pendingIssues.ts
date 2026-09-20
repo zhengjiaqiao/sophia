@@ -3,8 +3,8 @@
 ///
 /// 数据来源是 `viewOf` 的 `issue` 字段（组件规范 §8）：四种异常态画出来都是空心，
 /// 但点击行为与要拿的主意完全不同，所以先判状态、再决定这一条给什么动作。
-import { viewOf } from "../cellState";
-import type { CellRef, DomainPage, IssueKind, Overview, PlannedAction, Source } from "../types";
+import { viewOf } from "../cellState.ts";
+import type { CellRef, DomainPage, IssueKind, Overview, PlannedAction, Source } from "../types.ts";
 
 /// key 里的分隔符，与 `store.rs` 的 `KEY_SEP` 是同一个 Unit Separator：路径里不会出现它
 const KEY_SEP = "\u001f";

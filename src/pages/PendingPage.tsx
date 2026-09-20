@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api, type IgnoredIssue } from "../api";
-import type { DeleteSourcePlan, Overview, SyncReport } from "../types";
-import { Busy, Button, Confirm, Empty, SubPage, Toast, type ToastKind } from "../ui";
+import { api, type IgnoredIssue } from "../api.ts";
+import type { DeleteSourcePlan, Overview, SyncReport } from "../types.ts";
+import { Busy, Button, Confirm, Empty, SubPage, Toast, type ToastKind } from "../ui/index.ts";
 import {
   KIND_LABEL,
   collectIssues,
@@ -10,7 +10,7 @@ import {
   pathsOfKey,
   type DeleteChoice,
   type PendingIssue,
-} from "./pendingIssues";
+} from "./pendingIssues.ts";
 import "./PendingPage.css";
 
 /// 待处理页（组件规范 §4.3、§4.6）：**还要你拿主意的事全在这儿**。
@@ -323,7 +323,8 @@ export function PendingPage({ overview, onBack, onRefresh, onError }: PendingPag
 
   const mainOf = (issue: PendingIssue) => (
     <>
-      {issue.subject !== null ? <span className="pending-page__mono">{issue.subject}</span> : null}
+      {/* skill 名用正文档、原样渲染：等宽只给路径与计数（§1.2） */}
+      {issue.subject !== null ? <span className="pending-page__name">{issue.subject}</span> : null}
       {issue.text}
     </>
   );
@@ -396,11 +397,11 @@ export function PendingPage({ overview, onBack, onRefresh, onError }: PendingPag
 
       {asking !== null ? (
         <Confirm
-          // 标题里嵌了 skill 名：整个标题不做大小写转换，名字本身等宽（§1.2）
+          // 标题里嵌了 skill 名：整个标题不做大小写转换，名字本身走正文档（§1.2）
           title={
             <>
               删掉 {asking.choice.label} 里的{" "}
-              <span className="pending-page__mono">{asking.choice.skill}</span>
+              <span className="pending-page__name">{asking.choice.skill}</span>
             </>
           }
           body="本体目录会移到系统废纸篓，不是彻底删除。"

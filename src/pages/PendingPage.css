@@ -88,7 +88,17 @@
   overflow-wrap: anywhere;
 }
 
-/* 文件系统来的名字一律原样、等宽，不做大小写转换（§1.2） */
+/* skill 名：正文档，原样渲染、不做大小写转换。**不用等宽**——等宽的理由是路径要
+   对齐、要分得清 l 与 1，skill 名在列表里是当词读的（§1.2）。
+   写出来是因为它也出现在确认弹窗的标题里，那一档是 Condensed，得掰回正文档 */
+.pending-page__name {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+/* 路径与计数：等宽，要对齐、要分得清 l 与 1（§1.2） */
 .pending-page__mono {
   font-family: var(--font-mono);
   font-size: var(--size-mono);
