@@ -418,3 +418,84 @@ td.cell.unwritable {
 .import-skills label .muted {
   margin-left: 6px;
 }
+
+/* ===================== 模型页（ModelsTab）新增样式，以下为追加，未改动前面的规则 ===================== */
+.models-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.models-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.notice.warning {
+  background: #fff4e5;
+  color: #8a4b00;
+}
+.notice.info {
+  background: #e8f0fe;
+  color: #1a4fa0;
+}
+.notice span {
+  flex: 1;
+}
+.models-section {
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+}
+.models-section h2 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+.models-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #666;
+  max-width: 420px;
+}
+.models-field input {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+.models-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 50vh;
+  overflow: auto;
+}
+.models-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f1f3f4;
+}
+.models-list li span {
+  width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.models-list li input[type="text"] {
+  flex: 1;
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+/* ===================== 模型页样式结束 ===================== */

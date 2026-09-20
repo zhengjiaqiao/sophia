@@ -4,6 +4,8 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   AutoLink,
   CellRef,
+  GatewaySelectedModel,
+  GatewayState,
   HarnessStatus,
   Overview,
   PlannedAction,
@@ -73,4 +75,14 @@ export const api = {
     }),
   removeMcpAutoImport: (sourceId: string, targetDomain: string) =>
     invoke<void>("remove_mcp_auto_import", { sourceId, targetDomain }),
+  gatewayState: () => invoke<GatewayState>("gateway_state"),
+  /// key 为空表示不改密钥；带新密钥时后端先向网关校验
+  gatewaySaveProvider: (baseUrl: string, key: string) =>
+    invoke<GatewayState>("gateway_save_provider", { baseUrl, key }),
+  gatewayFetchModels: () => invoke<GatewayState>("gateway_fetch_models"),
+  gatewaySelectModels: (selected: GatewaySelectedModel[]) =>
+    invoke<GatewayState>("gateway_select_models", { selected }),
+  gatewayEnable: () => invoke<GatewayState>("gateway_enable"),
+  gatewayRestore: () => invoke<GatewayState>("gateway_restore"),
+  gatewayTakeover: () => invoke<GatewayState>("gateway_takeover"),
 };
