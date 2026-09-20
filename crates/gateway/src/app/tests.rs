@@ -733,3 +733,80 @@ fn takeover_failure_leaves_the_old_tool_in_charge() {
     assert!(f.world.lock().unwrap().old_service_installed);
     assert!(f.codex().join("agents-manager-models.json").exists());
 }
+
+/// 独立验证发现：恢复会清掉“曾经发布过的模型”，再启用时停用名单就空了；
+/// 而一直没重启的 Codex 选择器里旧模型还在，它的请求会被当成官方模型放行。
+#[test]
+fn retired_models_survive_restore_and_reenable() {
+    let f = fixture();
+    f.app.save_provider("https://gw.example/openai").unwrap();
+    f.app
+        .set_models(vec![
+            Model {
+                id: "weibo/glm-5".into(),
+                ..Default::default()
+            },
+            Model {
+                id: "kimi-k3".into(),
+                ..Default::default()
+            },
+        ])
+        .unwrap();
+    f.app.enable().unwrap();
+    f.app.restore().unwrap();
+    f.app
+        .set_models(vec![Model {
+            id: "kimi-k3".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+    f.app.enable().unwrap();
+    let routing: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(f.codex().join("symsync-routing.json")).unwrap())
+            .unwrap();
+    assert_eq!(routing["retired"], serde_json::json!(["weibo-glm-5"]));
+    // 恢复仍然逐字节还原
+    f.app.restore().unwrap();
+    assert_eq!(f.read_config(), ORIGINAL);
+}
+
+/// 接管途中路由起不来：不能覆盖本功能原有的密钥，也不能留下自己的后台服务和文件
+#[test]
+fn failed_takeover_leaves_no_residue_of_ours() {
+    let f = fixture();
+    agents_manager_setup(&f);
+    f.world.lock().unwrap().key = Some("sk-existing-symsync-key".into());
+    f.world.lock().unwrap().healthy = false;
+    assert_eq!(code(f.app.takeover()), "router_down");
+    let world = f.world.lock().unwrap();
+    assert_eq!(
+        world.key.as_deref(),
+        Some("sk-existing-symsync-key"),
+        "路由没确认健康之前不该动密钥"
+    );
+    assert!(world.installed.is_none(), "失败后不该留下本功能的后台服务");
+    drop(world);
+    let ours: Vec<_> = std::fs::read_dir(f.codex())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("symsync-"))
+        .collect();
+    assert!(ours.is_empty(), "{ours:?}");
+}
+
+/// 接管时把对方记录的“末行补过换行”和模型的上下文长度、图片能力一起带过来
+#[test]
+fn takeover_carries_added_newline_and_model_capabilities() {
+    let f = fixture();
+    agents_manager_setup(&f);
+    let am = f.root.join("agents-manager");
+    std::fs::write(am.join("state.json"), r#"{"base_url":"https://gw.example/openai","protocol":"chat","added_newline":true,
+      "models":[{"id":"thudm/glm-5.2","display_name":"GLM-5.2","selected":true,"context_window":200000,"vision":true}],
+      "prev_model":"gpt-5.6-sol","had_prev_model":true,"published_slugs":["thudm-glm-5.2"]}"#).unwrap();
+    f.app.takeover().unwrap();
+    let settings = f.world.lock().unwrap().settings.clone();
+    assert!(settings.added_newline);
+    assert_eq!(settings.models[0].model.context_window, Some(200000));
+    assert!(settings.models[0].model.vision);
+}

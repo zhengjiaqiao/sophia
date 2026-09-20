@@ -108,6 +108,9 @@ struct PendingCall {
 /// 用法：[`start`](Self::start) → 反复 [`feed_bytes`](Self::feed_bytes)（或按行
 /// [`feed_line`](Self::feed_line)）→ 上游结束（含中途断流）时 [`finish`](Self::finish)。
 /// 收到 `data: [DONE]` 或上游报错后状态机即告结束，之后的输入被忽略，`finish` 不再产出事件。
+/// 单行 SSE 的上限；正常的数据块远小于它
+const MAX_LINE_BYTES: usize = 8 << 20;
+
 pub struct StreamConverter {
     model: String,
     tools: ToolNames,
@@ -174,13 +177,28 @@ impl StreamConverter {
     /// 喂一段上游字节。行（以及多字节字符）可以被切在任意位置，内部按换行重新拼。
     pub fn feed_bytes(&mut self, chunk: &[u8]) -> Vec<SseEvent> {
         let mut events = Vec::new();
-        self.line_buffer.extend_from_slice(chunk);
-        while let Some(end) = self.line_buffer.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = self.line_buffer.drain(..=end).collect();
-            events.extend(self.feed_line(&String::from_utf8_lossy(&line)));
-        }
         if self.finished {
-            self.line_buffer.clear();
+            return events;
+        }
+        // 只在新到的这一段里找换行，已经找过的部分不重复扫描：整体线性
+        let mut rest = chunk;
+        while let Some(end) = rest.iter().position(|byte| *byte == b'\n') {
+            self.line_buffer.extend_from_slice(&rest[..=end]);
+            rest = &rest[end + 1..];
+            let line = std::mem::take(&mut self.line_buffer);
+            events.extend(self.feed_line(&String::from_utf8_lossy(&line)));
+            if self.finished {
+                return events;
+            }
+        }
+        self.line_buffer.extend_from_slice(rest);
+        if self.line_buffer.len() > MAX_LINE_BYTES {
+            // 上游不给换行地一直发：不能无限缓冲
+            self.line_buffer = Vec::new();
+            self.fail(
+                &mut events,
+                "the third-party stream sent a line that is too long",
+            );
         }
         events
     }
@@ -1025,5 +1043,38 @@ mod tests {
             300
         );
         assert_eq!(error_message(br#"{"code":500}"#), r#"{"code":500}"#);
+    }
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+
+    /// 独立验证发现：逐块喂入一条很长的、没有换行的行时，缓冲处理是平方复杂度且没有上限
+    #[test]
+    fn long_line_is_handled_in_linear_time_and_capped() {
+        let mut converter = StreamConverter::new("m", ToolNames::new());
+        converter.start();
+        let chunk = vec![b'x'; 16 << 10];
+        let started = std::time::Instant::now();
+        let mut failed = false;
+        for _ in 0..1024 {
+            // 16 MiB，没有换行
+            let events = converter.feed_bytes(&chunk);
+            if events.iter().any(|e| e.name == "response.failed") {
+                failed = true;
+                break;
+            }
+        }
+        assert!(
+            failed,
+            "超长的单行应当以 response.failed 结束，而不是无限缓冲"
+        );
+        assert!(converter.is_finished());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "耗时 {:?}",
+            started.elapsed()
+        );
     }
 }

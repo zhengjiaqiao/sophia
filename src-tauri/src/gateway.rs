@@ -58,20 +58,28 @@ pub async fn gateway_save_provider(
     state: tauri::State<'_, AppState>,
 ) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    // 这把锁会跨 .await 持有，必须是 tokio::sync::Mutex（std 的 guard 不是 Send，还会阻塞运行时线程）。
-    // 后面新增的异步命令只要会写 ~/.codex/config.toml，都照此办理。
-    let _guard = state.config_lock.lock().await;
-    if key.trim().is_empty() {
-        let worker = app.clone();
-        blocking(move || worker.save_provider(&base_url)).await?;
+    // 联网校验放在拿锁之前：锁只保护写文件的那一小段，否则 MCP 的同步命令会被一次网络请求卡住十秒
+    let verified = if key.trim().is_empty() {
+        None
     } else {
         // 先用新密钥向网关校验；失败就什么都不保存，错误的密钥不会覆盖钥匙串里原本好用的那个
         let cleaned = symsync_gateway::app::clean_base_url(&base_url).map_err(|e| e.to_string())?;
-        let (ids, api_base) = runtime::fetch_models(&cleaned, key.trim())
-            .await
-            .map_err(|e| e.to_string())?;
-        let worker = app.clone();
-        blocking(move || worker.commit_verified_provider(&base_url, &key, ids, &api_base)).await?;
+        Some(
+            runtime::fetch_models(&cleaned, key.trim())
+                .await
+                .map_err(|e| e.to_string())?,
+        )
+    };
+    // 这把锁会跨 .await 持有，必须是 tokio::sync::Mutex（std 的 guard 不是 Send，还会阻塞运行时线程）。
+    // 后面新增的异步命令只要会写 ~/.codex/config.toml，都照此办理。
+    let _guard = state.config_lock.lock().await;
+    let worker = app.clone();
+    match verified {
+        None => blocking(move || worker.save_provider(&base_url)).await?,
+        Some((ids, api_base)) => {
+            blocking(move || worker.commit_verified_provider(&base_url, &key, ids, &api_base))
+                .await?
+        }
     }
     current_state(app).await
 }
@@ -81,12 +89,12 @@ pub async fn gateway_fetch_models(
     state: tauri::State<'_, AppState>,
 ) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    let _guard = state.config_lock.lock().await;
     let worker = app.clone();
     let (base_url, key) = blocking(move || worker.provider_for_fetch()).await?;
     let (ids, api_base) = runtime::fetch_models(&base_url, &key)
         .await
         .map_err(|e| e.to_string())?;
+    let _guard = state.config_lock.lock().await;
     let worker = app.clone();
     blocking(move || worker.merge_fetched_models(ids, &api_base)).await?;
     current_state(app).await

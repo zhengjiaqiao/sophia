@@ -6,6 +6,7 @@ mod parse;
 mod tests;
 
 pub use parse::{log_safe, model_key, top_level_model};
+use parse::{looks_like_json, path_is_safe};
 
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -190,7 +191,11 @@ impl Router {
             third_party_requests: self.counters.third_party.load(Ordering::Relaxed),
             native_requests: self.counters.native.load(Ordering::Relaxed),
             upstream_errors: self.counters.upstream_errors.load(Ordering::Relaxed),
-            last_model: last.0,
+            last_model: if last.0.is_empty() {
+                String::new()
+            } else {
+                log_safe(&last.0)
+            },
             last_route: last.1,
             last_upstream_status: last.2,
         }
@@ -203,21 +208,8 @@ impl Router {
         remote: SocketAddr,
     ) -> Response<Body> {
         let (parts, raw_body) = req.into_parts();
-        let host = parts
-            .headers
-            .get(hyper::header::HOST)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if !remote.ip().is_loopback()
-            || !is_loopback_host(host)
-            || is_browser_request(&parts.headers)
-        {
-            // Codex 自己的请求来自回环地址、Host 是回环地址、不带 Origin。
-            // 其余一律拒绝：否则浏览器里的任意网页都能借路由用上第三方密钥，或用 DNS 重绑定读状态。
-            return json_error(
-                StatusCode::FORBIDDEN,
-                "router only accepts requests from local Codex",
-            );
+        if let Some(rejection) = guard(&parts.headers, remote) {
+            return rejection;
         }
         let path = parts.uri.path().to_owned();
         match path.as_str() {
@@ -263,9 +255,24 @@ impl Router {
                 "router uses the HTTP Responses transport",
             );
         }
-        let encoding = header_str(&parts.headers, "content-encoding")
-            .trim()
-            .to_ascii_lowercase();
+        if !path_is_safe(&path) {
+            return reject(
+                "",
+                Route::None,
+                StatusCode::BAD_REQUEST,
+                "request_error",
+                "unsupported request path",
+            );
+        }
+        // 头的值不是合法 ASCII、或者给了好几个值，都按“不认识的压缩方式”处理，不能当成没压缩
+        let encodings: Vec<_> = parts.headers.get_all("content-encoding").iter().collect();
+        let encoding = match encodings.as_slice() {
+            [] => String::new(),
+            [single] => single
+                .to_str()
+                .map_or_else(|_| "?".to_owned(), |v| v.trim().to_ascii_lowercase()),
+            _ => "?".to_owned(),
+        };
         if !matches!(encoding.as_str(), "" | "identity" | "zstd") {
             // 解不开的压缩体读不到模型名，宁可拒绝也不能盲目放行
             return reject(
@@ -303,8 +310,12 @@ impl Router {
         };
 
         let suffix = path.strip_prefix("/v1").unwrap_or(&path).to_owned();
-        let strict = method == Method::POST
-            && (suffix.starts_with("/responses")
+        // 解析失败不能成为放行到官方上游的理由：只要请求体声明为 JSON、看起来是 JSON，
+        // 或者发往对话类接口，读不懂就拒绝，不看方法和路径。
+        let strict = !decoded.iter().all(|b| b.is_ascii_whitespace())
+            && (looks_like_json(&decoded)
+                || suffix.starts_with("/responses")
+                || suffix.starts_with("/chat/completions")
                 || header_str(&parts.headers, "content-type")
                     .to_ascii_lowercase()
                     .contains("json"));
@@ -345,17 +356,21 @@ impl Router {
                 return reject(model, Route::None, StatusCode::CONFLICT, "retired_model",
                     "this third-party model was removed in SymSync; restart Codex to refresh the model list");
             }
-            let session = session_key(&parts.headers);
+            let sessions = session_keys(&parts.headers);
             if target.is_none()
                 && key == AUTO_REVIEW_MODEL_KEY
-                && self.session_used_third_party(&session)
+                && sessions
+                    .iter()
+                    .any(|key| self.session_used_third_party(key))
             {
                 // 自动审阅请求带着这一轮的上下文；会话用的是内网模型时不能静默发给官方上游
                 return reject(model, Route::None, StatusCode::CONFLICT, "auto_review_blocked",
                     "Codex Auto-review is not available while this session uses a third-party model");
             }
             if key != AUTO_REVIEW_MODEL_KEY {
-                self.record_session(session, target.is_some());
+                for session in sessions {
+                    self.record_session(session, target.is_some());
+                }
             }
         }
 
@@ -627,7 +642,8 @@ impl Router {
             // 网关的错误体各有各的格式；统一成 Codex 能读出文字的样子，状态码保留
             let body = read_limited(response, 1 << 20).await;
             let payload = serde_json::json!({"error": {
-                "message": crate::translate::error_message(&body),
+                // 网关若在错误信息里回显了密钥，不能原样转给本机客户端
+                "message": crate::translate::error_message(&body).replace(key, "***"),
                 "type": "upstream_error",
                 "code": status.as_u16(),
             }});
@@ -760,6 +776,10 @@ impl Router {
                         let router = router.clone();
                         async move {
                             let (parts, body) = req.into_parts();
+                            // 来源校验先于读请求体：不给跨站请求让路由白白缓冲几十兆的机会
+                            if let Some(rejection) = guard(&parts.headers, remote) {
+                                return Ok::<_, std::convert::Infallible>(rejection);
+                            }
                             let limit = router.max_body_bytes;
                             let body =
                                 match http_body_util::Limited::new(body, limit.saturating_add(1))
@@ -780,6 +800,9 @@ impl Router {
                         }
                     });
                 let _ = hyper::server::conn::http1::Builder::new()
+                    // 请求头迟迟不来的连接不能一直占着
+                    .timer(hyper_util::rt::TokioTimer::new())
+                    .header_read_timeout(Duration::from_secs(10))
                     .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
                     .await;
             });
@@ -895,6 +918,28 @@ fn is_hop_by_hop(name: &HeaderName) -> bool {
     )
 }
 
+/// 来源校验：Codex 自己的请求来自回环地址、Host 是回环地址、不带 Origin。
+/// 其余一律拒绝：否则浏览器里的任意网页都能借路由用上第三方密钥，或用 DNS 重绑定读状态。
+/// 必须在读请求体之前调用。
+fn guard(headers: &HeaderMap, remote: SocketAddr) -> Option<Response<Body>> {
+    let host = headers
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let single_host = headers.get_all(hyper::header::HOST).iter().count() == 1;
+    if !remote.ip().is_loopback()
+        || !single_host
+        || !is_loopback_host(host)
+        || is_browser_request(headers)
+    {
+        return Some(json_error(
+            StatusCode::FORBIDDEN,
+            "router only accepts requests from local Codex",
+        ));
+    }
+    None
+}
+
 /// 校验 Host 头：DNS 重绑定时 Host 是攻击者的域名
 fn is_loopback_host(host_port: &str) -> bool {
     let host = host_port.trim();
@@ -935,25 +980,34 @@ fn is_websocket_upgrade(headers: &HeaderMap) -> bool {
         })
 }
 
-fn session_key(headers: &HeaderMap) -> String {
+/// 三个会话头里出现的每个值都算这个会话的标识：审阅请求不一定带全
+fn session_keys(headers: &HeaderMap) -> Vec<String> {
     ["session-id", "thread-id", "x-codex-window-id"]
         .iter()
-        .map(|name| header_str(headers, name).trim())
-        .find(|value| !value.is_empty())
-        .unwrap_or("")
-        .to_owned()
+        .map(|name| header_str(headers, name).trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 fn decode_zstd(raw: &[u8], limit: usize) -> Result<Vec<u8>, String> {
-    let mut decoder = ruzstd::decoding::StreamingDecoder::new(raw).map_err(|e| e.to_string())?;
+    let mut source = raw;
     let mut out = Vec::new();
-    decoder
-        .by_ref()
-        .take(limit as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|e| e.to_string())?;
+    {
+        let mut decoder =
+            ruzstd::decoding::StreamingDecoder::new(&mut source).map_err(|e| e.to_string())?;
+        decoder
+            .by_ref()
+            .take(limit as u64 + 1)
+            .read_to_end(&mut out)
+            .map_err(|e| e.to_string())?;
+    }
     if out.len() > limit {
         return Err("decompressed request body too large".to_owned());
+    }
+    // 解码器只解第一帧。后面还有内容（第二帧或残片）就拒绝：
+    // 否则第一帧写官方模型、后面藏内网请求，就能骗过分流，而官方路径是按原始字节整体转发的。
+    if !source.is_empty() {
+        return Err("unexpected data after the first zstd frame".to_owned());
     }
     Ok(out)
 }

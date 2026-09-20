@@ -37,6 +37,10 @@ pub fn is_owned_file_name(name: &str) -> bool {
 pub struct StateModel {
     pub id: String,
     #[serde(default)]
+    pub context_window: Option<u32>,
+    #[serde(default)]
+    pub vision: bool,
+    #[serde(default)]
     pub display_name: String,
     #[serde(default)]
     pub selected: bool,
@@ -61,6 +65,9 @@ pub struct State {
     pub had_prev_model: bool,
     #[serde(default)]
     pub published_slugs: Vec<String>,
+    /// 对方写入时是否给原文件末行补过换行；接管后恢复要据此还原
+    #[serde(default)]
+    pub added_newline: bool,
 }
 
 /// 读取 agents-manager 状态文件失败的原因。

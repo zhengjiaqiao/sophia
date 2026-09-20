@@ -128,6 +128,10 @@ pub fn log_safe(value: &str) -> String {
     }
     value
         .chars()
+        // 零宽字符、方向控制符这类“格式字符”也去掉：它们能让日志看起来和实际内容不一样
+        .filter(
+            |c| !matches!(*c as u32, 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x206F | 0xFEFF),
+        )
         .map(|c| {
             if c.is_whitespace() || c.is_control() {
                 '_'
@@ -137,4 +141,28 @@ pub fn log_safe(value: &str) -> String {
         })
         .take(120)
         .collect()
+}
+
+/// 请求体看起来是 JSON（第一个非空白字节是 `{` 或 `[`）
+pub fn looks_like_json(body: &[u8]) -> bool {
+    body.iter()
+        .find(|b| !b.is_ascii_whitespace())
+        .is_some_and(|b| matches!(b, b'{' | b'['))
+}
+
+/// 路径里不允许 `..`、`.`、空段和百分号编码的点：否则能带着凭据访问上游同主机的其他路径
+pub fn path_is_safe(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    if lower.contains("%2e")
+        || lower.contains("%2f")
+        || lower.contains("%5c")
+        || path.contains('\\')
+    {
+        return false;
+    }
+    path.starts_with('/')
+        && path
+            .split('/')
+            .skip(1)
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }

@@ -222,28 +222,55 @@ pub fn install_binary_from(source: &Path, dest: &Path) -> io::Result<bool> {
     let meta_path = dest.with_extension("meta");
     let recorded = std::fs::read_to_string(&meta_path).unwrap_or_default();
     let (recorded_stamp, recorded_hash) = recorded.trim().split_once(' ').unwrap_or(("", ""));
-    if dest.is_file() && recorded_stamp == stamp {
+    // 副本必须是普通文件且长度与源一致，记录才可信；副本被截断或被换成别的东西时要重新复制
+    let dest_intact = std::fs::symlink_metadata(dest)
+        .is_ok_and(|m| m.file_type().is_file() && m.len() == metadata.len());
+    if dest_intact && recorded_stamp == stamp {
         return Ok(false);
     }
     let hash = sha256_file(source)?;
-    if dest.is_file() && recorded_hash == hash {
+    if dest_intact && recorded_hash == hash && sha256_file(dest)? == hash {
         std::fs::write(&meta_path, format!("{stamp} {hash}\n"))?;
         return Ok(false);
     }
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
+    let parent = dest
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "dest has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    // 临时文件名不固定，且用 create_new：不会顺着别人预先放好的软链写出去，界面和命令行同时运行也不会互相踩
+    let temp = parent.join(format!(
+        ".symsync-{}-{:x}.tmp",
+        std::process::id(),
+        unix_now_nanos()
+    ));
+    let result = (|| -> io::Result<()> {
+        let mut input = std::fs::File::open(source)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o755);
+        }
+        let mut output = options.open(&temp)?;
+        io::copy(&mut input, &mut output)?;
+        output.sync_all()?;
+        // 原子替换：正在运行的旧路由继续用旧文件，直到被重启。rename 会替换掉目标位置上的软链本身
+        std::fs::rename(&temp, dest)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
     }
-    // 原子替换：正在运行的旧路由继续用旧文件，直到被重启
-    let temp = dest.with_extension("tmp");
-    std::fs::copy(source, &temp)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))?;
-    }
-    std::fs::rename(&temp, dest)?;
+    result?;
     std::fs::write(&meta_path, format!("{stamp} {hash}\n"))?;
     Ok(true)
+}
+
+fn unix_now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
 }
 
 fn key_error(e: keychain::KeyError) -> String {
@@ -546,6 +573,43 @@ mod tests {
                 std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
                 0o755
             );
+        }
+    }
+
+    /// 独立验证发现：记录的指纹对得上时完全信任副本，副本被截断也不会修；固定的临时文件名还可能被人预先放一个软链
+    #[test]
+    fn install_binary_repairs_a_damaged_copy_and_ignores_planted_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let (source, dest) = (
+            dir.path().join("source"),
+            dir.path().join("bin").join("symsync"),
+        );
+        std::fs::write(&source, b"version-1").unwrap();
+        assert!(install_binary_from(&source, &dest).unwrap());
+        std::fs::write(&dest, b"").unwrap(); // 副本被截断
+        assert!(
+            install_binary_from(&source, &dest).unwrap(),
+            "损坏的副本应当被修复"
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), b"version-1");
+
+        #[cfg(unix)]
+        {
+            let victim = dir.path().join("victim");
+            std::fs::write(&victim, b"do not touch").unwrap();
+            std::os::unix::fs::symlink(&victim, dest.with_extension("tmp")).unwrap();
+            std::fs::write(&source, b"version-2").unwrap();
+            assert!(install_binary_from(&source, &dest).unwrap());
+            assert_eq!(
+                std::fs::read(&victim).unwrap(),
+                b"do not touch",
+                "不能顺着别人放的软链写出去"
+            );
+            assert!(!std::fs::symlink_metadata(&dest)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert_eq!(std::fs::read(&dest).unwrap(), b"version-2");
         }
     }
 

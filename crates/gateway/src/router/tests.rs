@@ -1077,3 +1077,177 @@ async fn connect_failure_is_retried_once() {
     let response = router.handle(request, "127.0.0.1:5".parse().unwrap()).await;
     assert_eq!(response.status(), 200);
 }
+
+// ---------- 独立验证（2026-09-20）发现的问题的回归测试 ----------
+
+/// 解析失败不能成为放行到官方上游的理由：不管什么方法、什么路径，只要请求体看起来是 JSON 或声明为 JSON，读不懂就拒绝
+#[tokio::test]
+async fn unreadable_json_fails_closed_on_any_method_and_path() {
+    let secret = SECRET_CONTENT;
+    let cases: Vec<(&str, &str, &str, String)> = vec![
+        (
+            "PUT",
+            "/v1/responses",
+            "application/json",
+            format!(r#"{{"model":"weibo-glm-5","input":"{secret}"}} x"#),
+        ),
+        (
+            "PATCH",
+            "/v1/responses",
+            "application/json",
+            format!(r#"{{"model":"weibo-glm-5","input":"{secret}""#),
+        ),
+        (
+            "POST",
+            "/v1/chat/completions",
+            "text/plain",
+            format!(r#"{{"model":"weibo-glm-5","input":"{secret}"}} trailing"#),
+        ),
+        (
+            "POST",
+            "/v1/other",
+            "text/plain",
+            format!(r#"  {{"model":"weibo-glm-5","input":"{secret}""#),
+        ),
+    ];
+    for (method, path, content_type, body) in cases {
+        let h = Harness::new(None).await;
+        let mut req = post(&body);
+        req.method = method.into();
+        req.path = path.into();
+        req.headers.retain(|(k, _)| k != "content-type");
+        req.headers
+            .push(("content-type".into(), content_type.into()));
+        let res = h.send(req).await;
+        assert_eq!(res.status, 400, "{method} {path}");
+        assert_eq!(
+            h.official_reached() + h.third_party.all().len(),
+            0,
+            "{method} {path}: 不应转发"
+        );
+    }
+}
+
+/// zstd 请求体里第一帧之后还有内容（第二帧或残片）：拒绝。否则第一帧写官方模型、后面藏内网请求就能骗过分流
+#[tokio::test]
+async fn zstd_body_with_anything_after_the_first_frame_is_rejected() {
+    let first = zstd_frame(br#"{"model":"gpt-5.6-sol"}"#);
+    let second =
+        zstd_frame(format!(r#"{{"model":"weibo-glm-5","input":"{SECRET_CONTENT}"}}"#).as_bytes());
+    for tail in [second, vec![0x28, 0xB5, 0x2F]] {
+        let h = Harness::new(None).await;
+        let mut req = post("");
+        req.body = [first.clone(), tail].concat();
+        req.headers.push(("content-encoding".into(), "zstd".into()));
+        assert_eq!(h.send(req).await.status, 400);
+        assert_eq!(h.official_reached(), 0);
+    }
+}
+
+/// 路径里的 `..` 和空段不转发：否则能带着凭据访问上游同主机的其他路径
+#[tokio::test]
+async fn path_traversal_is_rejected() {
+    for path in ["/v1/../../etc", "/v1/responses/../../x", "/v1//responses"] {
+        let h = Harness::new(None).await;
+        let mut req = post(r#"{"model":"gpt-5.6-sol"}"#);
+        req.path = path.into();
+        assert_eq!(h.send(req).await.status, 400, "{path}");
+        assert_eq!(h.official_reached(), 0, "{path}");
+    }
+}
+
+/// 自动审阅的会话识别：三个会话头里任何一个对得上都算同一会话
+#[tokio::test]
+async fn auto_review_block_matches_any_session_header() {
+    let h = Harness::new(None).await;
+    let mut first = post(r#"{"model":"weibo-glm-5","input":"hi"}"#);
+    first.headers.push(("thread-id".into(), "t-1".into()));
+    first
+        .headers
+        .push(("x-codex-window-id".into(), "w-1".into()));
+    h.send(first).await;
+    let mut review = post(&format!(
+        r#"{{"model":"codex-auto-review","input":"{SECRET_CONTENT}"}}"#
+    ));
+    review
+        .headers
+        .push(("x-codex-window-id".into(), "w-1".into()));
+    assert_eq!(h.send(review).await.status, 409);
+    h.nothing_secret_reached_official();
+}
+
+/// 状态接口里的模型名同样要清洗和截断
+#[tokio::test]
+async fn status_does_not_echo_raw_model_names() {
+    let h = Harness::new(None).await;
+    let bidi = char::from_u32(0x202e).unwrap();
+    let zero_width = char::from_u32(0x200b).unwrap();
+    let model = format!("{}{bidi}", "x".repeat(5000));
+    h.send(post(&serde_json::json!({ "model": model }).to_string()))
+        .await;
+    let status = h.router.status();
+    assert!(status.last_model.chars().count() <= 120 && !status.last_model.contains(bidi));
+    let cleaned = log_safe(&format!("a{bidi}b{zero_width}c"));
+    assert!(!cleaned.contains(bidi) && !cleaned.contains(zero_width));
+}
+
+/// 网关的错误体里若回显了第三方密钥，不能原样转给本机客户端
+#[tokio::test]
+async fn chat_error_body_does_not_relay_the_third_party_key() {
+    let h = Harness::chat(Some(Arc::new(|req: &Captured| {
+        let echoed = req.header("authorization").unwrap_or("").to_owned();
+        (
+            401,
+            vec![],
+            format!(r#"{{"error":{{"message":"bad credentials: {echoed}"}}}}"#).into_bytes(),
+        )
+    })))
+    .await;
+    let res = h.send(post(RESPONSES_BODY)).await;
+    assert_eq!(res.status, 401);
+    assert!(!res.text().contains(THIRD_PARTY_KEY), "{}", res.text());
+}
+
+/// 来源校验必须先于读请求体：带 Origin 的请求不该等它把几十兆请求体发完才被拒绝；请求头迟迟不来也不能一直占着连接
+#[tokio::test]
+async fn origin_is_checked_before_the_body_is_read() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let h = Harness::new(None).await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(h.router.clone().serve(listener));
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    // 声明 50MB 的请求体，但只发请求头
+    stream
+        .write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {address}\r\nOrigin: http://evil.example\r\nContent-Length: 52428800\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut buffer = vec![0u8; 256];
+    let read = tokio::time::timeout(std::time::Duration::from_secs(2), stream.read(&mut buffer))
+        .await
+        .expect("应当立刻拒绝，而不是等请求体")
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&buffer[..read]).starts_with("HTTP/1.1 403"),
+        "{}",
+        String::from_utf8_lossy(&buffer[..read])
+    );
+}
+
+/// AC30（代理验证）：本机转发引入的额外延迟 P95 < 50ms
+#[tokio::test]
+async fn ac30_proxy_overhead_p95_under_50ms() {
+    let h = Harness::new(None).await;
+    let mut durations = Vec::new();
+    for _ in 0..50 {
+        let started = std::time::Instant::now();
+        assert_eq!(h.send(post(r#"{"model":"gpt-5.6-sol"}"#)).await.status, 200);
+        durations.push(started.elapsed());
+    }
+    durations.sort();
+    assert!(
+        durations[47] < std::time::Duration::from_millis(50),
+        "P95 = {:?}",
+        durations[47]
+    );
+}

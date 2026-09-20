@@ -613,7 +613,7 @@ impl App {
         }
         settings.added_newline = false;
         settings.catalog_client_version.clear();
-        settings.published_slugs.clear();
+        // published_slugs 不清：没重启过的 Codex 选择器里旧模型还在，下次启用时它们仍要进停用名单
         settings.prev_model = None;
         settings.had_prev_model = false;
         settings.changed_at = Some((self.deps.now)());
@@ -650,7 +650,8 @@ impl App {
                 model: Model {
                     id: m.id.clone(),
                     display_name: Some(m.display_name.trim().to_owned()).filter(|n| !n.is_empty()),
-                    ..Default::default()
+                    context_window: m.context_window,
+                    vision: m.vision,
                 },
                 selected: m.selected,
             })
@@ -664,11 +665,17 @@ impl App {
                 "agents-manager 里没有选中的模型，无法接管",
             ));
         }
-        (self.deps.set_key)(key.trim()).map_err(|e| AppError::new("invalid", e))?;
-
         // 先把本功能的目录和路由准备好并确认健康；这一步失败时对方仍然完好
-        self.write_catalogs(&mut settings)?;
-        self.install_router(&settings)?;
+        if let Err(error) = self
+            .write_catalogs(&mut settings)
+            .and_then(|()| self.install_router(&settings))
+        {
+            // 没成：对方仍然完好，本功能不留下后台服务和文件
+            self.remove_own_traces();
+            return Err(error);
+        }
+        // 路由确认健康之后才动密钥：失败的接管不能覆盖本功能原有的密钥
+        (self.deps.set_key)(key.trim()).map_err(|e| AppError::new("invalid", e))?;
 
         // 一次原子写：移除对方的两个键，写入本功能的两个键
         let latest = self.read_config()?;
@@ -697,7 +704,8 @@ impl App {
         let applied =
             config::apply(&removed.text, &self.managed(&settings)).map_err(config_error)?;
         self.write_config(&latest, &applied.text)?;
-        settings.added_newline = applied.added_newline;
+        // 对方当初给末行补过的换行还在文件里，恢复时同样要还原
+        settings.added_newline = applied.added_newline || old.added_newline;
         settings.changed_at = Some((self.deps.now)());
         self.save(&settings)?;
 
@@ -714,6 +722,20 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// 卸载本功能的后台服务并删掉 Codex 目录下本功能前缀的文件（只删普通文件）
+    fn remove_own_traces(&self) {
+        let _ = (self.deps.service_uninstall)(SERVICE_LABEL);
+        if let Ok(entries) = std::fs::read_dir(&self.deps.codex_home) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if entry.file_type().is_ok_and(|t| t.is_file()) && name.starts_with(OWN_FILE_PREFIX)
+                {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
     }
 
     pub fn state(&self) -> GatewayState {
