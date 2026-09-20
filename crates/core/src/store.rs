@@ -403,4 +403,22 @@ mod tests {
         std::fs::write(dir.join("projects.json"), "{oops").unwrap();
         assert!(Store::new(dir).load_projects().is_err());
     }
+
+    /// 跨语言契约：前端 `src/pages/pendingIssues.ts` 的 `issueKey` 必须算出同一个串。
+    /// 两边各钉一条同输入同期望的测试——任一边改了格式，另一边立刻红。
+    /// 改这条时必须同步改 `tests/issue-key-contract.test.ts` 里的同名期望值。
+    #[test]
+    fn key_format_is_pinned_for_the_frontend() {
+        let key = IgnoredIssue::key_for(
+            IssueKind::DuplicateSource,
+            &[
+                PathBuf::from("/b/skills/defuddle"),
+                PathBuf::from("/a/skills/defuddle"),
+            ],
+        );
+        assert_eq!(
+            key, "duplicateSource\u{1f}/a/skills/defuddle\u{1f}/b/skills/defuddle",
+            "key 格式变了就要同步改前端的 issueKey 和它那条契约测试"
+        );
+    }
 }

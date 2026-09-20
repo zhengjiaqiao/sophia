@@ -5,6 +5,7 @@ import { api } from "./api";
 import DomainView, { ActionButton, dim, type UnlinkTarget } from "./DomainView";
 import ImportDialog from "./ImportDialog";
 import { viewOf } from "./cellState";
+import { issueKey } from "./pages/pendingIssues";
 import { Empty, Toast, type ToastKind } from "./ui";
 import type {
   AutoLink,
@@ -30,8 +31,6 @@ const cellsOf = (row: DomainRow): CellRef[] =>
 /// 与 crates/core/src/store.rs 的 `IgnoredIssue::key_for` 同构：类别 + 全部路径排序后
 /// 用 Unit Separator 拼起来。core 那边**不取摘要、直接留可读路径串**，所以前端算得出
 /// 同一个 key，`list_ignored` 返回的记录才对得上具体某一条状况
-const KEY_SEP = "\u001f";
-const issueKey = (kind: IssueKind, paths: string[]) => [kind, ...[...paths].sort()].join(KEY_SEP);
 
 /// 写不进去的典型原因。命中时说人话（§8 的语料），否则原样转述 core 给的那句
 const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
