@@ -28,7 +28,7 @@ export interface Target {
   label: string;
   path: string;
   scope: TargetScope;
-  /// 目录是否已存在；false 的目标只在引入弹层可选，建链时自动创建目录
+  /// 目录是否已存在；false 的目标照常成列，列头标「将新建目录」，建链时自动创建
   exists: boolean;
   linkedWholeTo: string | null;
 }
@@ -56,10 +56,8 @@ export interface DomainRow {
 export interface DomainPage {
   key: string;
   label: string;
-  /// 目录已存在的目标：表格的列、坏链表、自动同步规则行都只认这批
+  /// 本域全部目标，即表格的列；目录尚不存在的也在其中（列头标「将新建目录」）
   targets: Target[];
-  /// 目录尚不存在的目标：只出现在引入弹层，建链时自动创建目录
-  creatable: Target[];
   rows: DomainRow[];
   broken: PlannedAction[];
 }

@@ -236,10 +236,8 @@ pub struct DomainPage {
     /// `"global"` 或 `"project:<normalized path>"`
     pub key: String,
     pub label: String,
-    /// 目录已存在的目标：表格的列，行、格与坏链都只看这批
+    /// 本域全部目标，即表格的列；目录尚不存在的也在其中（列头标「将新建目录」）
     pub targets: Vec<Target>,
-    /// 目录尚不存在的目标：只在引入弹层可选，建链时就地创建目录
-    pub creatable: Vec<Target>,
     pub rows: Vec<DomainRow>,
     pub broken: Vec<PlannedAction>,
 }

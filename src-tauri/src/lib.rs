@@ -95,7 +95,7 @@ struct McpPreview {
 }
 
 /// 一次发现：本体位置与目标目录，按当前设置解析。返回的目标含目录尚不存在的那批
-/// （`Target.exists == false`），`propose_links` 才能对引入弹层里选中的它们生成 Create。
+/// （`Target.exists == false`），它们照常成列，补齐时目录就地创建。
 /// 目标目录里指向已知位置之外的软链再合成出外部本体位置
 fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = runtime_env()?;
@@ -152,7 +152,7 @@ fn mcp_auto_watch_paths(state: &AppState) -> Result<BTreeSet<PathBuf>, String> {
 
 fn resync_watchers(app: &tauri::AppHandle, state: &AppState, skills_overview: &Overview) {
     // skill 目录与 MCP 文件父目录共用同一个去抖器，切换 MCP/Skills 页不会丢掉另一方监视。
-    // 只盯已存在的目标目录（`d.targets`）；还没建出来的目录没有东西可监视。
+    // 只盯已存在的目标目录；还没建出来的目录没有东西可监视，watch 只会失败刷日志。
     let mut paths: BTreeSet<PathBuf> = skills_overview
         .sources
         .iter()
@@ -162,6 +162,7 @@ fn resync_watchers(app: &tauri::AppHandle, state: &AppState, skills_overview: &O
                 .domains
                 .iter()
                 .flat_map(|d| &d.targets)
+                .filter(|t| t.exists)
                 .map(|t| t.path.clone()),
         )
         .collect();
@@ -250,7 +251,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     let targets: Vec<Target> = scanned
         .domains
         .iter()
-        .flat_map(|d| d.targets.iter().chain(&d.creatable).cloned())
+        .flat_map(|d| d.targets.iter().cloned())
         .collect();
     let cells = skills::auto_link_cells(&scanned.sources, &targets, &rules);
     let actions = skills::propose_links(&scanned.sources, &targets, &cells);
@@ -311,7 +312,7 @@ fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
     match overview
         .domains
         .iter()
-        .flat_map(|d| d.targets.iter().chain(&d.creatable))
+        .flat_map(|d| &d.targets)
         .find(|t| same(&t.path, action.target_path.parent()))
     {
         Some(t) => skills::link_style(&action.source_path, t),

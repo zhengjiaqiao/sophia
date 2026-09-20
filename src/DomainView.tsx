@@ -239,6 +239,12 @@ export default function DomainView({
               {page.targets.map((target) => (
                 <th key={target.id}>
                   {sortHeader(target.id, target.label)}
+                  {/* 目录还没建出来的列：整列必然是 ○，补齐时目录就地创建 */}
+                  {!target.exists && (
+                    <span className="whole-link" title={target.path}>
+                      将新建目录
+                    </span>
+                  )}
                   {target.linkedWholeTo !== null && (
                     <>
                       <span className="whole-link">整目录链接</span>

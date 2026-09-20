@@ -78,10 +78,8 @@ fn links_to(target: &Target, skill: &Skill) -> bool {
 pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut domains = Vec::new();
-    for (key, label, all_targets) in group_domains(targets) {
-        // 目录还不存在的目标只在引入弹层可选：不成列，也不参与下面任何一处 IO
-        let (d_targets, creatable): (Vec<Target>, Vec<Target>) =
-            all_targets.into_iter().partition(|t| t.exists);
+    // 目录尚不存在的目标照常成列：格状态自然全是 Missing，补齐时由 `sync::execute` 建目录
+    for (key, label, d_targets) in group_domains(targets) {
         // 行 = 自有全部 ∪ 已链接的那些；(skill, 本体位置 label, 本体位置 id) 排序去重
         let mut keys: BTreeSet<(String, String, String)> = BTreeSet::new();
         for s in sources {
@@ -121,17 +119,17 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
             })
             .collect();
 
-        // 整目录链接的目标读进去就是本体位置，坏链清理不能删到本体位置里
+        // 整目录链接的目标读进去就是本体位置，坏链清理不能删到本体位置里；
+        // 目录还不存在的目标里没有东西可读，`read_dir` 是无谓 IO
         let broken = d_targets
             .iter()
-            .filter(|t| t.linked_whole_to.is_none())
+            .filter(|t| t.exists && t.linked_whole_to.is_none())
             .flat_map(|t| broken_links(&t.path))
             .collect();
         domains.push(DomainPage {
             key,
             label,
             targets: d_targets,
-            creatable,
             rows,
             broken,
         });
@@ -143,7 +141,7 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
 }
 
 /// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重。
-/// `targets` 要带上目录尚不存在的那批（引入弹层里选中的），它们的目录由 `sync::execute` 就地创建
+/// 目录尚不存在的目标照常产出 Create，目录由 `sync::execute` 就地创建
 pub fn propose_links(
     sources: &[Source],
     targets: &[Target],
@@ -561,8 +559,8 @@ mod tests {
         }
     }
 
-    /// 目录尚不存在的项目目标（引入弹层里的「将新建目录」）
-    fn creatable(project_root: &Path, harness: &str, path: &Path) -> Target {
+    /// 目录尚不存在的项目目标（列头标「将新建目录」的那种）
+    fn absent_target(project_root: &Path, harness: &str, path: &Path) -> Target {
         Target {
             exists: false,
             ..project(project_root, harness, path)
@@ -679,9 +677,10 @@ mod tests {
         assert!(o.domains[1].broken.is_empty());
     }
 
-    /// AC1 / AC6：目录不存在的目标只进 `creatable`，不参与行、格与坏链；目录建出来后正常成列
+    /// AC1 / AC6：目录不存在的目标照常成列，其格为 Missing；坏链只扫已存在的目标；
+    /// 目录建出来后同一列的链接状态照常
     #[test]
-    fn scan_splits_targets_by_existence_and_only_touches_the_existing_ones() {
+    fn scan_lists_targets_whose_dir_is_absent_as_missing_columns() {
         let t = TempTree::new();
         let store = t.dir("store");
         t.dir("store/a");
@@ -692,15 +691,17 @@ mod tests {
 
         let s = store_source(&store, "proj", &proj, &["a"]);
         let here = project(&proj, "claude-code", &claude);
-        let not_yet = creatable(&proj, "codex", &absent);
+        let not_yet = absent_target(&proj, "codex", &absent);
         let ids = |ts: &[Target]| ts.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
 
         let ov = scan(std::slice::from_ref(&s), &[here.clone(), not_yet.clone()]);
         assert_eq!(ov.domains.len(), 1);
         let page = &ov.domains[0];
-        assert_eq!(ids(&page.targets), vec![here.id.clone()]);
-        assert_eq!(ids(&page.creatable), vec![not_yet.id.clone()]);
-        // 行只在已存在的目标上算格
+        // 两个目标都成列
+        assert_eq!(
+            ids(&page.targets),
+            vec![here.id.clone(), not_yet.id.clone()]
+        );
         assert_eq!(page.rows.len(), 1);
         assert_eq!(
             page.rows[0]
@@ -708,9 +709,11 @@ mod tests {
                 .iter()
                 .map(|c| c.target_id.clone())
                 .collect::<Vec<_>>(),
-            vec![here.id.clone()]
+            vec![here.id.clone(), not_yet.id.clone()]
         );
+        // 目录不存在的那格自然是 Missing
         assert_eq!(page.rows[0].cells[0].state, CellState::Missing);
+        assert_eq!(page.rows[0].cells[1].state, CellState::Missing);
         // 坏链只扫已存在的目标
         assert_eq!(
             page.broken
@@ -722,7 +725,7 @@ mod tests {
         // 扫描不许把目录建出来
         assert_eq!(entry_kind(&absent), EntryKind::Missing);
 
-        // 引入后目录已建：下一轮它就是普通的列，链接状态照常
+        // 补齐后目录已建：下一轮同一列的链接状态照常
         std::fs::create_dir_all(&absent).unwrap();
         t.link(&absent.join("a"), &store.join("a"));
         let ov = scan(
@@ -734,22 +737,21 @@ mod tests {
             ids(&page.targets),
             vec![here.id.clone(), not_yet.id.clone()]
         );
-        assert!(page.creatable.is_empty());
         assert_eq!(page.rows[0].cells[1].state, CellState::Linked);
     }
 
-    /// R3 / 设计 §1：creatable 的目标也能生成 Create；`exists == false` 的目标不产出 Unlink
+    /// R3 / 设计 §1：目录不存在的目标也能生成 Create；`exists == false` 的目标不产出 Unlink
     #[test]
-    fn propose_links_covers_creatable_targets_while_unlinks_skip_them() {
+    fn propose_links_covers_absent_dirs_while_unlinks_skip_them() {
         let t = TempTree::new();
         let store = t.dir("store");
         t.dir("store/a");
         let proj = t.dir("proj");
         let absent = proj.join(".agents/skills");
         let s = store_source(&store, "proj", &proj, &["a"]);
-        let not_yet = creatable(&proj, "codex", &absent);
+        let not_yet = absent_target(&proj, "codex", &absent);
 
-        // 引入弹层选中一个尚不存在的目录 → 照常生成 Create
+        // 选中一个目录尚不存在的格 → 照常生成 Create
         let acts = propose_links(
             std::slice::from_ref(&s),
             std::slice::from_ref(&not_yet),
