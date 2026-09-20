@@ -1,5 +1,5 @@
 //! JSON 持久化：projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
-use crate::{mcp::McpAutoImportRule, models::AutoLink};
+use crate::{codex_models::settings::GatewaySettings, mcp::McpAutoImportRule, models::AutoLink};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,7 @@ pub struct Settings {
     pub manual_sources: Vec<PathBuf>,
     pub auto_links: Vec<AutoLink>,
     pub mcp_auto_imports: Vec<McpAutoImportRule>,
+    pub codex_gateway: GatewaySettings,
 }
 
 pub struct Store {
@@ -127,6 +128,7 @@ mod tests {
                 excluded: ["private".to_string()].into_iter().collect(),
                 allow_cross_domain: true,
             }],
+            codex_gateway: GatewaySettings::default(),
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
