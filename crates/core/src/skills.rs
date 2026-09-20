@@ -101,11 +101,13 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
                     .iter()
                     .map(|t| {
                         let path = t.path.join(&skill);
+                        let (state, points_to) = cell_facts(source, &skill_path, t, &path);
                         Cell {
                             source_id: source_id.clone(),
                             skill: skill.clone(),
                             target_id: t.id.clone(),
-                            state: cell_state(source, &skill_path, t, &path),
+                            state,
+                            points_to,
                             path,
                         }
                     })
@@ -326,21 +328,44 @@ fn find_rule_mut<'a>(rules: &'a mut [AutoLink], source: &Path) -> Option<&'a mut
 
 /// `skill_path` 是该 skill 在本体位置里的真实路径，`path` 是它在目标目录下的位置
 fn cell_state(source: &Source, skill_path: &Path, target: &Target, path: &Path) -> CellState {
+    cell_facts(source, skill_path, target, path).0
+}
+
+/// 一格的两件事实：状态，以及这一格上的软链解析后落在哪。
+/// 落点在判 Foreign 的同一刻就现成，丢掉的话前端只能把提示条写成含糊的「指向别处」
+fn cell_facts(
+    source: &Source,
+    skill_path: &Path,
+    target: &Target,
+    path: &Path,
+) -> (CellState, Option<PathBuf>) {
     match target.linked_whole_to.as_deref() {
-        Some(id) if id == source.id => return CellState::Linked,
-        Some(_) => return CellState::WholeLinked,
+        // 整目录链到本体位置自己：内容经由那条目录级软链落到本体上
+        Some(id) if id == source.id => return (CellState::Linked, real_path(path)),
+        Some(_) => return (CellState::WholeLinked, None),
         None => {}
     }
     // 目标就是本体位置本身（如 WeiboAP 的 custom 目录既是本体位置又是目标）：内容天然到位
     if same_real(&target.path, &source.path) {
-        return CellState::Own;
+        return (CellState::Own, None);
     }
     match entry_kind(path) {
-        EntryKind::Missing => CellState::Missing,
-        EntryKind::Dir | EntryKind::File => CellState::Duplicate,
-        EntryKind::Symlink(_) if real_path(path).is_none() => CellState::Broken,
-        EntryKind::Symlink(_) if same_real(path, skill_path) => CellState::Linked,
-        EntryKind::Symlink(_) => CellState::Foreign,
+        EntryKind::Missing => (CellState::Missing, None),
+        EntryKind::Dir | EntryKind::File => (CellState::Duplicate, None),
+        // 断链：real_path 解析不到，本来也没有落点
+        EntryKind::Symlink(_) => match real_path(path) {
+            None => (CellState::Broken, None),
+            // 比较是否同一处两侧都走 real_path：macOS 上 /var 会变成 /private/var
+            Some(dest) => {
+                let same = real_path(skill_path).is_some_and(|body| body == dest);
+                let state = if same {
+                    CellState::Linked
+                } else {
+                    CellState::Foreign
+                };
+                (state, Some(dest))
+            }
+        },
     }
 }
 
@@ -1167,13 +1192,55 @@ mod tests {
         let ov = scan(std::slice::from_ref(&s), &[mine_t, theirs_t]);
         let cells = &ov.domains[0].rows[0].cells;
         assert_eq!(cells[0].state, CellState::Linked);
+        // 内容经由目录级软链落到本体上
+        assert_eq!(cells[0].points_to, Some(store.join("a")));
         assert_eq!(cells[1].state, CellState::WholeLinked);
+        // 链到别处的整目录：这一格根本没有指向本体的链接
+        assert_eq!(cells[1].points_to, None);
         // 扫描永远不产出 ReadOnly：判定它要实际试写
         assert!(ov.domains[0]
             .rows
             .iter()
             .flat_map(|r| &r.cells)
             .all(|c| c.state != CellState::ReadOnly));
+    }
+
+    /// 提示条要说出「指向哪个本体」：Linked / Foreign 带出落点，其余状态没有落点。
+    /// Broken 特别注意——`real_path` 对断链返回 None，正好没有落点可言
+    #[test]
+    fn cells_carry_where_the_link_resolves_to_for_linked_and_foreign_only() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        let names = ["broken", "dup", "foreign", "linked", "missing"];
+        for n in names {
+            t.dir(&format!("store/{n}"));
+        }
+        let other_body = t.dir("other/foreign"); // 别的本体位置里的同名 skill
+        let claude = t.dir("home/.claude/skills");
+        t.link(&claude.join("linked"), &store.join("linked"));
+        t.link(&claude.join("foreign"), &other_body); // 指向别的本体
+        t.link(&claude.join("broken"), &t.root().join("gone"));
+        t.dir("home/.claude/skills/dup"); // 真实目录
+                                          // missing 目标里没有
+
+        let s = source(&store, &names);
+        let ov = scan(std::slice::from_ref(&s), &[global("claude-code", &claude)]);
+        let at = |skill: &str| {
+            let row = ov.domains[0]
+                .rows
+                .iter()
+                .find(|r| r.skill == skill)
+                .expect("行应当在");
+            (row.cells[0].state, row.cells[0].points_to.clone())
+        };
+        assert_eq!(
+            at("linked"),
+            (CellState::Linked, Some(store.join("linked")))
+        );
+        assert_eq!(at("foreign"), (CellState::Foreign, Some(other_body)));
+        assert_eq!(at("broken"), (CellState::Broken, None));
+        assert_eq!(at("dup"), (CellState::Duplicate, None));
+        assert_eq!(at("missing"), (CellState::Missing, None));
     }
 
     /// 体检只报事实：体量、指向它的链接、别处的同名本体

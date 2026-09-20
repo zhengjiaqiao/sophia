@@ -20,16 +20,18 @@ pub struct Settings {
     pub ignored: Vec<IgnoredIssue>,
 }
 
-/// 待处理栏里三类需要用户拿主意的问题
+/// 待处理栏里四类需要用户拿主意的问题；待处理页按它分动作，一类一种动作
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum IssueKind {
-    /// 同名本体出现在多处
+    /// 同名本体出现在多处，目标指向了另一处
     DuplicateSource,
     /// 链接指向不存在的位置
     BrokenLink,
-    /// 目标位置写不进去
+    /// 目标位置写不进去 → 再试一次
     ReadOnlyTarget,
+    /// 目标整个目录链到了别的本体 → 拆开
+    WholeLinkedTarget,
 }
 
 impl IssueKind {
@@ -39,6 +41,7 @@ impl IssueKind {
             IssueKind::DuplicateSource => "duplicateSource",
             IssueKind::BrokenLink => "brokenLink",
             IssueKind::ReadOnlyTarget => "readOnlyTarget",
+            IssueKind::WholeLinkedTarget => "wholeLinkedTarget",
         }
     }
 }
@@ -316,10 +319,18 @@ mod tests {
     #[test]
     fn key_separates_kinds_and_normalizes_paths() {
         let paths = [PathBuf::from("/a/skills/x")];
-        assert_ne!(
-            IgnoredIssue::key_for(IssueKind::BrokenLink, &paths),
-            IgnoredIssue::key_for(IssueKind::ReadOnlyTarget, &paths)
-        );
+        // 路径完全相同时，四个 kind 必须给出四个互不相同的 key
+        let kinds = [
+            IssueKind::DuplicateSource,
+            IssueKind::BrokenLink,
+            IssueKind::ReadOnlyTarget,
+            IssueKind::WholeLinkedTarget,
+        ];
+        let keys: std::collections::BTreeSet<String> = kinds
+            .iter()
+            .map(|k| IgnoredIssue::key_for(*k, &paths))
+            .collect();
+        assert_eq!(keys.len(), kinds.len(), "{keys:?}");
         // ./ 与 .. 只是写法差异，不该算成另一条状况
         assert_eq!(
             IgnoredIssue::key_for(IssueKind::BrokenLink, &paths),

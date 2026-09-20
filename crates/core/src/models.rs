@@ -212,6 +212,10 @@ pub struct Cell {
     /// 目标目录下该 skill 的路径
     pub path: PathBuf,
     pub state: CellState,
+    /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 Linked / Foreign 有值，
+    /// 其余状态是 None——Broken 的链接解析不到，本来也没有落点。
+    /// Foreign 的提示条要靠它说出「指向哪个本体」，不带出来就只能写成含糊的「指向别处」
+    pub points_to: Option<PathBuf>,
 }
 
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
@@ -348,6 +352,26 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&cell).unwrap(),
             json!({"sourceId": "/a", "skill": "x", "targetId": "claude-code"})
+        );
+        // 前端 `src/types.ts` 的 Cell 接口要有 pointsTo
+        assert_eq!(
+            serde_json::to_value(Cell {
+                source_id: "/a".into(),
+                skill: "x".into(),
+                target_id: "claude-code".into(),
+                path: PathBuf::from("/h/.claude/skills/x"),
+                state: CellState::Foreign,
+                points_to: Some(PathBuf::from("/b/skills/x")),
+            })
+            .unwrap(),
+            json!({
+                "sourceId": "/a",
+                "skill": "x",
+                "targetId": "claude-code",
+                "path": "/h/.claude/skills/x",
+                "state": "foreign",
+                "pointsTo": "/b/skills/x"
+            })
         );
         assert_eq!(serde_json::to_value(CellState::Own).unwrap(), json!("own"));
         assert_eq!(
