@@ -1,0 +1,65 @@
+/* 设置页的排版（组件规范 §4.6 二级页面、§13.1 agent 选择）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零圆角。 */
+@import "../tokens.css";
+
+.settings-page {
+  box-sizing: border-box;
+  max-width: 760px;
+  padding: 16px 24px 24px;
+}
+
+/* 区域标签是我们自己写的结构词，大写；后面那句是说明，不大写（§1.2） */
+.settings-page__head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-page__label {
+  font-family: var(--font-cond);
+  font-size: var(--size-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.settings-page__note {
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-mute);
+}
+
+/* 一行放得下 4–5 片，已安装的 9 个两行完事（§13.1） */
+.settings-page__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 选中片是反色，首字母方块的描边跟着转白，否则黑底上一圈浅灰很脏 */
+.settings-page .ss-chip.is-selected .ss-mark__box {
+  border-color: var(--canvas);
+}
+
+/* 没装的那些：形状不变、字色更轻。它们仍然可以预先开启，所以不是禁用态 */
+.settings-page__grid--absent {
+  margin-top: 8px;
+}
+
+.settings-page__grid--absent .ss-chip:not(.is-selected) {
+  color: var(--ink-faint);
+}
+
+.settings-page__more {
+  margin-top: 12px;
+}
+
+.settings-page__foot {
+  max-width: 560px;
+  margin-top: 16px;
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-mute);
+  line-height: 1.5;
+}

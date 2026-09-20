@@ -1,0 +1,121 @@
+/* 待处理页的排版（组件规范 §4.3 待处理页、§4.6 二级页面）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变。
+   圆角只在 Button 自己身上（pill），这一页不引入任何新的圆角。 */
+@import "../tokens.css";
+
+.pending-page {
+  box-sizing: border-box;
+  padding: 20px 28px 24px;
+}
+
+/* 两张表是同一张列表的两个视图，所以是标签页而不是两个页面 */
+.pending-page__tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+  border-bottom: 1px solid var(--ink);
+}
+
+/* 不是 pill：标签页不是按钮形，圆角只给可点的 pill（§3.1）。
+   这里靠下边框的黑线表示「正在看这一张」 */
+.pending-page__tab {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 0 7px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+
+.pending-page__tab.is-active {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 列头档：Condensed 14/600/1.1px 大写（§1.2）。中文不受大写影响 */
+.pending-page__tab-name {
+  font-family: var(--font-cond);
+  font-size: var(--size-head);
+  font-weight: 600;
+  letter-spacing: var(--track-head);
+  text-transform: uppercase;
+}
+
+.pending-page__tab-count {
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+}
+
+/* 一行三段：类别 · 说什么 · 动作。类别列定宽，四类标签才能上下对齐 */
+.pending-page__row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--surface);
+}
+
+/* 区域标签档：我们自己写的结构词（§1.2） */
+.pending-page__kind {
+  font-family: var(--font-cond);
+  font-size: var(--size-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.pending-page__what {
+  min-width: 0;
+}
+
+.pending-page__line {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: 1.4;
+}
+
+/* 副行：涉及的位置。路径要对齐、要分得清 l 与 1，等宽（§1.2） */
+.pending-page__detail {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* 文件系统来的名字一律原样、等宽，不做大小写转换（§1.2） */
+.pending-page__mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-mono);
+}
+
+.pending-page__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.pending-page__foot {
+  max-width: 560px;
+  margin-top: 16px;
+  font-family: var(--font-ui);
+  font-size: var(--size-minor);
+  color: var(--ink-mute);
+  line-height: 1.5;
+}
+
+/* 确认弹窗的警告段：一行一句——路径、体积、受影响的链接、git 状态（§10 第 2 条）。
+   弹窗不在 .pending-page 里面（它是整窗的兄弟层），所以自带一个类名做作用域 */
+.pending-page__facts > div + div {
+  margin-top: 4px;
+}
+
+.pending-page__facts .pending-page__mono {
+  overflow-wrap: anywhere;
+}
