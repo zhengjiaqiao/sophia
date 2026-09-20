@@ -1032,3 +1032,48 @@ async fn ac7_native_request_is_cleaned_of_our_items() {
     );
     assert_eq!(got.header("authorization"), Some(OFFICIAL_TOKEN));
 }
+
+/// 真实环境里见过一次：进程刚重启后的第一个上游连接瞬时失败。
+/// 连接没建立成功时一个字节都还没发出去，重试一次是安全的。
+#[tokio::test]
+async fn connect_failure_is_retried_once() {
+    // 先占一个端口再放掉，得到一个此刻没人监听的地址
+    let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = probe.local_addr().unwrap();
+    drop(probe);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        let listener = TcpListener::bind(address).await.unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
+        let service = service_fn(|_req: hyper::Request<hyper::body::Incoming>| async {
+            Ok::<_, std::convert::Infallible>(hyper::Response::new(Full::new(Bytes::from_static(
+                b"{\"late\":true}",
+            ))))
+        });
+        let _ = hyper::server::conn::http1::Builder::new()
+            .serve_connection(TokioIo::new(stream), service)
+            .await;
+    });
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("routing.json"), r#"{"models":[]}"#).unwrap();
+    let router = Router::new(Config {
+        third_party_url: "http://127.0.0.1:9".into(),
+        third_party_protocol: Protocol::Responses,
+        chatgpt_url: format!("http://{address}"),
+        openai_url: format!("http://{address}"),
+        routing_catalog_path: dir.path().join("routing.json"),
+        activity_log_path: None,
+        third_party_key: Arc::new(|| Ok("k".into())),
+        max_body_bytes: 0,
+        proxy: None,
+    })
+    .unwrap();
+    let request = hyper::Request::builder()
+        .method("POST")
+        .uri("/v1/responses")
+        .header("host", "127.0.0.1:1")
+        .body(Bytes::from_static(br#"{"model":"gpt-5.6-sol"}"#))
+        .unwrap();
+    let response = router.handle(request, "127.0.0.1:5".parse().unwrap()).await;
+    assert_eq!(response.status(), 200);
+}

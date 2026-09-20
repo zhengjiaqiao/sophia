@@ -473,7 +473,7 @@ impl Router {
         if !raw_body.is_empty() {
             request = request.body(raw_body);
         }
-        let response = request.send().await.map_err(|e| {
+        let response = send_with_connect_retry(request).await.map_err(|e| {
             (
                 route,
                 StatusCode::BAD_GATEWAY,
@@ -534,7 +534,7 @@ impl Router {
         if !body.is_empty() {
             request = request.body(body);
         }
-        let response = request.send().await.map_err(|e| {
+        let response = send_with_connect_retry(request).await.map_err(|e| {
             (
                 route,
                 StatusCode::BAD_GATEWAY,
@@ -603,20 +603,18 @@ impl Router {
         } else {
             "text/event-stream"
         };
-        let response = request
+        let request = request
             .header("content-type", "application/json")
             .header("accept", accept)
             .header("authorization", format!("Bearer {key}"))
-            .body(translated.chat_body)
-            .send()
-            .await
-            .map_err(|e| {
-                (
-                    route,
-                    StatusCode::BAD_GATEWAY,
-                    format!("upstream unreachable: {}", describe(&e)),
-                )
-            })?;
+            .body(translated.chat_body);
+        let response = send_with_connect_retry(request).await.map_err(|e| {
+            (
+                route,
+                StatusCode::BAD_GATEWAY,
+                format!("upstream unreachable: {}", describe(&e)),
+            )
+        })?;
         let status = response.status();
         if status.is_redirection() {
             return Err((
@@ -834,6 +832,22 @@ fn passthrough(response: reqwest::Response, third_party: bool) -> Response<Upstr
     builder
         .body(stream)
         .expect("status and headers come from a valid response")
+}
+
+/// 连接没建立成功时一个字节都还没发出去，重试一次是安全的；其他错误不重试
+async fn send_with_connect_retry(
+    request: reqwest::RequestBuilder,
+) -> reqwest::Result<reqwest::Response> {
+    let Some(retry) = request.try_clone() else {
+        return request.send().await;
+    };
+    match request.send().await {
+        Err(error) if error.is_connect() => {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            retry.send().await
+        }
+        other => other,
+    }
 }
 
 fn describe(error: &reqwest::Error) -> String {
