@@ -86,3 +86,25 @@ ActionKind::Create => {
 ## 待决问题
 
 - 引入弹层里 `creatable` 的 harness 是否也该出现在「自动同步」的目标候选里？—— 默认假设：出现，与已存在的目标同等对待；首次自动补齐时一并建目录。
+
+---
+
+## 修订 v2（2026-09-20，真机反馈后纠正）
+
+**R1 作废：目录不存在的目标也直接成列，不再藏进引入弹层。**
+
+起因：真机上 `weibo_mini_program` 项目页仍看不到 Codex，用户指出「设置里勾了的 harness 就该在表格里看得见」。
+
+R1 当初的理由是「避免每个项目铺满几十列」，这个理由建立在一个**错误估算**上：初次估算说已安装且未启用的 harness 有 30 个，但那是用「`detect_dir` 目录是否存在」做的粗近似。准确复现 `installed()`（含 `looks_installed` 的启发式）后，本机实际是 **installed = 10、未禁用 = 4**（Claude Code、Codex、Cline、WeiboAP）。那 30 个里绝大多数是 `npx skills add --agent '*'` 给未安装工具建出的空目录，判定本来就会滤掉。
+
+列数既然是个位数，就没有任何理由把「这个项目还没给某个 harness 同步过」这个事实藏起来。
+
+修改：
+
+- `DomainPage.creatable` 删除；`scan` 把全部目标（无论 `exists`）都放进 `targets`，照常成列、参与行与格的计算。
+- 目录不存在的列，其格自然全是 `Missing`（`entry_kind` 对不存在的路径返回 Missing），点补齐时由 §2 的 `create_dir_all` 建出目录。
+- 坏链扫描、`linked_whole_to`、`real_path` 去重仍只对 `exists == true` 的目标做，避免对不存在的目录做无谓 IO。
+- `Target.exists` 保留：它是上述守卫的依据，也是前端给列头加提示的依据。
+- 引入弹层的 harness 栏回到 `page.targets`，不再拼接 creatable；「将新建目录」的标注改挂在**列头**（`exists == false` 时列名后加提示）。
+
+保留不变：§2 建链时 `create_dir_all`（R3）、R4。AC1 与 AC2 按上述改写，AC3–AC7 不变。
