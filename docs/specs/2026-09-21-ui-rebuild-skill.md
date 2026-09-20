@@ -150,6 +150,8 @@ core 新增 `sync::trash(path) -> Result<()>`，用 `trash` crate（跨平台废
 | AC20 | R12 | Given 全部前端源码，When 跑风格检查，Then 零违规 | — | `lint-artboards.mjs` 的 src 版本，接进 `make lint` |
 | AC21 | R12 | Given 界面任意位置，When 搜索可见文案，Then 不出现「harness」「软链接」「操作失败」 | 真机逐页翻 | 静态检查 |
 
+**真机走查的清单**在 `docs/manual-checks-ui-rebuild.md`——19 条人工项逐条写了怎么造场景、看什么。AC20 / AC21 已由 `make lint` 自动覆盖。
+
 **AC20 的前置任务**：现在的检查器只认 `.dc.html` 画稿。要在实现期间持续起作用，必须先写一个针对 `src/**/*.tsx` 与 CSS 的版本并接进 `make lint`——否则规范只在画稿上成立，代码里会立刻漂移。这条排在第一个任务。
 
 ---
