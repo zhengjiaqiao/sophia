@@ -70,19 +70,26 @@ scripts/lint-ui.mjs   规范的可执行版本，接进 make lint
 
 1. `CellState::Unwritable` → `WholeLinked`（含全部引用与测试）。新增 `CellState::ReadOnly`，**扫描时不产出**，只在写失败时由上层构造。
 2. `sync::trash(path) -> Result<()>`，内部 `trash::delete`。删前用 `entry_kind` 重校验是真实目录而非软链。
-3. `skills::plan_delete_source(source, all_sources, targets) -> DeleteSourcePlan`：
+3. `skills::plan_delete_source(skill, sources, targets) -> DeleteSourcePlan`：
    ```rust
    pub struct DeleteSourcePlan {
        pub path: PathBuf,
        pub entries: usize,
        pub bytes: u64,
-       pub affected: Vec<PathBuf>,   // 指向它的链接
+       pub affected: Vec<AffectedLink>,
        pub in_git: Option<PathBuf>,  // 仓库根，None = 不在仓库里
        pub relink_to: Option<PathBuf>, // 同名的另一个本体，删完把链接改指到它
    }
+   pub struct AffectedLink { pub path: PathBuf, pub style: LinkStyle }
    ```
+
+   **`style` 必须在 plan 阶段算好。** `link_style()` 规定「本体在目标所属项目内 → 相对路径」，这条性质的全部价值是软链能随 git 走到别的机器上。`delete_source` 拿不到 `Target`，事后补算不出来，改指就会一律写绝对——链接仍然有效、仍然指对，只是不再可移植，**没有任何常规测试会发现**。
+
+   第一版取 `&Source` 返 `Option`；改成取 `&Skill` 让它成为全函数——本体就是「某个位置里的某个 skill 目录」，`Skill{name, path}` 正好是这两样。
    `in_git` 向上找 `.git`（用 `Path::starts_with` 按分量，不用字符串）。
-4. `sync::delete_source(plan) -> SyncReport`：`in_git.is_some()` 时直接返回错误，**不删**。否则 trash → 对 `affected` 逐条 `remove_link` + `create_link(relink_to)`。
+4. `ActionKind::DeleteSource`（serde `"deleteSource"`）。`SyncReport` 每条 entry 都要一个 `PlannedAction`，复用 `BrokenLink` / `Unlink` 表示「移入废纸篓」会让前端把它当断链处理。
+
+5. `sync::delete_source(plan) -> SyncReport`：`in_git.is_some()` 时直接返回错误，**不删**。否则 trash → 对 `affected` 逐条 `remove_link` + `create_link(relink_to)`。
 
 **测试**（`TempTree` 搭真实文件树，不 mock）：改名后全部旧测试仍绿；`plan_delete_source` 的 `in_git` 命中与不命中；`delete_source` 在 git 里拒绝；删完 `affected` 全部指向 `relink_to` 且 `entry_kind` 是软链。
 
@@ -140,7 +147,9 @@ pub enum IssueKind { DuplicateSource, BrokenLink, ReadOnlyTarget }
 
 ## T4 状态映射
 
-**Files**：新建 `src/cellState.ts`；改 `src/types.ts`（跟 T1 的改名）
+**Files**：新建 `src/cellState.ts`；改 `src/types.ts`
+
+`types.ts` 要跟的不止改名：`CellState` 的 `unwritable` → `wholeLinked`、新增 `readOnly`；`ActionKind` 新增 `deleteSource`；新增 `DeleteSourcePlan` 与 `AffectedLink` 两个接口。
 
 ```ts
 export type Dot = "own" | "linked" | "missing" | "none";
@@ -188,6 +197,8 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
 **Files**：各自 `src/pages/SettingsPage.tsx` / `ImportPage.tsx` / `PendingPage.tsx`；`src/SettingsPanel.tsx` 与 `src/ImportDialog.tsx` 删除
 
 三个都用 `SubPage`。要点分别是：
+
+**T6 顺带**：全仓库还剩 `unwritable` 的引用要改成 `wholeLinked`（`src/DomainView.tsx`、`src/sort.ts`）——T4 只改 `types.ts`，这两个文件归 T6。
 
 - **设置页**：选择片网格、无路径、默认只列已安装的（`discovery::installed()`，本机 9/41）、`显示未安装的 M 个`。
 - **导入页**：三栏铺开、skill 列表不截断、agent 选择用选择片、逐字保留用户改过的五句文案。
