@@ -1,221 +1,342 @@
-:root {
-  font-family: -apple-system, "Segoe UI", "PingFang SC", sans-serif;
-  font-size: 14px;
-  color: #222;
-}
+/* 外壳（顶栏 · 侧栏 · 内容区）与 skill 矩阵的版式。
+   组件本身在 src/ui/，这里只管整窗怎么摆，以及还没组件化的旧结构（弹层、结果框、模型页）。
+
+   色值一律 var(--…)，唯一来源是 tokens.css（§1.1）；零色彩、零阴影、零渐变（§1.3）；
+   圆角只有输入框 4px、pill 32px、圆点 50%，其余一律 0。scripts/lint-ui.mjs 逐条拦。 */
+@import "./tokens.css";
+
+/* ===== 基础 ===== */
 body {
   margin: 0;
 }
+
+/* 勾选框是系统控件，没法零色彩：把强调色拉回主文字色，别让系统蓝闯进来 */
+input[type="checkbox"] {
+  accent-color: var(--ink);
+}
+
+/* 还没换成 <Button> 的旧按钮（MCP 页、模型页、弹层的关闭）：ghost pill 的紧凑版。
+   这里**不写**字重、字距与大写——那会串到 .ss-chip 这类同样是 <button> 的组件上，
+   而选择片按 §3.0 是 Barlow 15 且不大写。真正的按钮档在 .ss-btn 自己身上。 */
+button {
+  padding: 4px 14px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  cursor: pointer;
+}
+
+/* 禁用不靠半透明，靠描边与字色降档（§3）：opacity 只留给 busy（§6） */
+button:disabled {
+  border-color: var(--disabled);
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+/* 文字链：取消、关闭这类次级动作 */
+button.link {
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink-mute);
+  font-size: var(--size-minor);
+  text-decoration: underline;
+}
+
+/* ===== 外壳 =====
+   顶栏 52px + 一条分隔线，侧栏与内容区之间也是一条。
+   wordmark 与 tab 在 App.tsx 里还是 .sidebar 的子元素（类名归 .tsx 管），
+   所以这里把它们定位到顶栏上，而不是另起一个顶栏盒子。 */
 .app {
+  position: relative;
+  box-sizing: border-box;
   display: flex;
   height: 100vh;
+  padding-top: 52px;
 }
+
+.app::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  border-bottom: 1px solid var(--hairline);
+}
+
 .sidebar {
-  width: 220px;
-  border-right: 1px solid #ddd;
-  padding: 12px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
+  width: 186px;
+  flex-shrink: 0;
+  padding: 12px 0;
+  border-right: 1px solid var(--hairline);
 }
+
+/* wordmark：标题档（Condensed 20/700/1.9px/大写） */
 .sidebar h1 {
-  font-size: 16px;
-  margin: 0 0 12px;
+  position: absolute;
+  top: 0;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  height: 52px;
+  margin: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-title);
+  font-weight: 700;
+  letter-spacing: var(--track-title);
+  text-transform: uppercase;
 }
+
+/* tab 与内容区左缘对齐：wordmark 的实际宽度随字体回退浮动，不拿它当基准。
+   绝对定位后，App.tsx 内联的 margin-bottom 自然失效（top + height 已定死）。 */
+.sidebar nav {
+  position: absolute;
+  top: 0;
+  left: 210px;
+  align-items: center;
+  height: 52px;
+}
+
+/* 列头档（Condensed 14/600/1.1px/大写）。内联的 gap: 4px 改不动，
+   差的那段用 margin 补到画稿的 26px */
+.sidebar nav button {
+  margin-right: 22px;
+  padding: 0 0 3px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-cond);
+  font-size: var(--size-head);
+  font-weight: 600;
+  letter-spacing: var(--track-head);
+  text-transform: uppercase;
+}
+
+.sidebar nav button:last-child {
+  margin-right: 0;
+}
+
+.sidebar nav button.active {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
 .sidebar ul {
-  list-style: none;
+  flex: 1;
   margin: 0;
   padding: 0;
-  flex: 1;
+  list-style: none;
   overflow: auto;
 }
+
 .sidebar li {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 8px;
-  border-radius: 6px;
+  gap: 8px;
+  padding: 7px 16px;
+  color: var(--ink-mute);
+  font-size: var(--size-body);
   cursor: pointer;
 }
+
+/* 选中项是次级面的浅底，不是色块（§1.1） */
 .sidebar li.active {
-  background: #e8f0fe;
+  background: var(--surface);
+  color: var(--ink);
 }
-/* 侧栏手动项目的移除按钮：不随标签一起被挤掉 */
-.sidebar li button.remove {
-  flex: none;
-  color: #888;
-}
+
 .sidebar li span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 侧栏手动项目的移除按钮：不随标签一起被挤掉 */
+.sidebar li button.remove {
+  flex: none;
+  color: var(--ink-faint);
+}
+
+/* 侧栏底部的两条动作：区域标签档，不是按钮形——它们不是 pill（§3.1） */
+.sidebar > button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-cond);
+  font-size: var(--size-label);
+  letter-spacing: var(--track-label);
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.sidebar > ul + button {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+}
+
+.sidebar > button:last-child {
+  padding-top: 9px;
+  padding-bottom: 12px;
+}
+
 .content {
   flex: 1;
-  padding: 12px 16px;
-  overflow: auto;
+  min-width: 0;
   box-sizing: border-box;
+  padding: 12px 20px;
+  overflow: auto;
 }
-button {
-  font: inherit;
-  padding: 4px 10px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background: #fafafa;
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-button.link {
-  border: none;
-  background: none;
-  color: #1a73e8;
-  padding: 0 4px;
-}
+
+/* ===== 4.2 错误横幅：反色通栏，不自动消失 ===== */
 .error {
-  background: #fdecea;
-  color: #b3261e;
-  padding: 8px 12px;
-  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin-bottom: 12px;
+  padding: 12px 16px;
+  background: var(--ink);
+  color: var(--canvas);
 }
+
+.error button.link {
+  margin-left: auto;
+  color: var(--canvas);
+}
+
+/* ===== 工具栏与筛选 ===== */
 .toolbar {
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.muted {
-  color: #666;
-  font-size: 12px;
-}
-.confirm {
-  background: #fff4e5;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-.broken-section {
-  margin-top: 16px;
-}
-table.matrix {
-  border-collapse: collapse;
-  width: 100%;
-}
-table.matrix th,
-table.matrix td {
-  border-bottom: 1px solid #eee;
-  padding: 6px 8px;
-  text-align: left;
-  white-space: nowrap;
-}
-th button.sort {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-th button.sort.active {
-  color: #1a73e8;
-}
-table.matrix td.path {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #666;
-}
-table.matrix td.cell {
-  text-align: center;
-  font-size: 16px;
-}
-/* 格本身是按钮，但看上去仍是一个格：颜色由 td.cell.<state> 继承下来 */
-button.cell {
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-size: 16px;
-  color: inherit;
-  cursor: pointer;
-}
-button.cell:disabled {
-  cursor: default;
-}
-td.row-actions {
-  text-align: right;
-}
-.row-actions button {
-  padding: 2px 8px;
-  font-size: 12px;
-}
-.row-actions button + button {
-  margin-left: 4px;
-}
-td.cell.own,
-td.cell.linked {
-  color: #188038;
-}
-td.cell.missing {
-  color: #999;
-}
-td.cell.broken {
-  color: #b3261e;
-}
-td.cell.foreign,
-td.cell.duplicate {
-  color: #e37400;
-}
-td.cell.unwritable {
-  color: #999;
-}
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 8px;
-}
-.tag {
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  font: inherit;
-  font-size: 12px;
-  background: #f1f3f4;
-  color: #444;
-  padding: 2px 8px;
-  border-radius: 10px;
-  cursor: pointer;
-}
-/* 高亮的筛选片 */
-.tag.active {
-  background: #e8f0fe;
-  color: #1a73e8;
-  font-weight: 600;
-}
-.filters input {
-  font: inherit;
-  padding: 4px 8px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  width: 220px;
-}
-/* 选择操作条：有选中行时才出现，和普通工具栏区分开；滚动时吸顶 */
+
+/* 选择操作条：有选中行时才出现，上下黑线＝此刻正在操作它（§3.2）；滚动时吸顶。
+   左右用负边距铺满内容区，吸顶时下面的表格不会从缝里透出来——不用阴影垫（§1.3） */
 .toolbar.selection {
-  background: #e8f0fe;
-  padding: 6px 8px;
-  border-radius: 6px;
   position: sticky;
   top: 0;
   z-index: 1;
-  /* 吸顶时四周的留白会透出下面的表格，用页面底色垫住 */
-  box-shadow: 0 0 0 12px #fff;
+  margin: 0 -20px 12px;
+  padding: 9px 20px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  background: var(--canvas);
 }
-/* 结果框与暂态提示：固定在窗口右下角的浮层，不随内容滚动；z-index 低于弹窗 */
+
+.filters input {
+  box-sizing: border-box;
+  width: 210px;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+.filters input::placeholder {
+  color: var(--ink-faint);
+}
+
+.muted {
+  color: var(--ink-mute);
+  font-size: var(--size-minor);
+}
+
+/* 筛选片一行：片本身是 <Chip> */
+.tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* ===== 域与矩阵 ===== */
+.domain-group {
+  margin-bottom: 16px;
+}
+
+/* 域名是内容不是结构词，所以不大写（§1.2） */
+.domain-group h2 {
+  margin: 0 0 8px;
+  font-family: var(--font-cond);
+  font-size: var(--size-head);
+  font-weight: 600;
+  letter-spacing: var(--track-head);
+}
+
+table.matrix {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table.matrix th,
+table.matrix td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* 表头底下那条黑线由 DomainView 逐格给（内联），这里只管对齐与留白。
+   列头堆叠（图标在上、名字在下），所以贴着底边排 */
+table.matrix th {
+  padding: 0 8px 6px;
+  vertical-align: bottom;
+}
+
+/* 表头「看起来是读的」：没有按钮态，箭头由 DomainView 控制显隐（§7） */
+th button.sort {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+/* 本体位置：名字或路径，一行放不下就截断，完整值在 title 上 */
+table.matrix td.path {
+  width: 190px;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-mute);
+}
+
+/* 圆点列：列宽照画稿的 62px，格里只有一个点 */
+table.matrix td.cell {
+  width: 62px;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+/* MCP 页的格还在用状态类名；「缺失」降一档，其余交给主文字色（§1.1 零色彩） */
+td.cell.missing {
+  color: var(--ink-faint);
+}
+
+/* ===== 结果框：固定在窗口右下角的浮层，不随内容滚动；z-index 低于弹层 ===== */
 .floating {
   position: fixed;
   right: 16px;
@@ -227,275 +348,190 @@ td.cell.unwritable {
   gap: 8px;
   max-width: 480px;
 }
+
 .report {
-  background: #f6f8fa;
-  border-left: 3px solid #188038;
-  padding: 8px 12px;
-  border-radius: 6px;
+  box-sizing: border-box;
   max-height: 60vh;
+  padding: 14px 16px;
+  border: 1px solid var(--ink);
+  background: var(--canvas);
   overflow: auto;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
+
 .report-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 14px;
 }
+
 .report ul {
-  margin: 4px 0 0;
+  margin: 6px 0 0;
+  padding-left: 20px;
   max-height: 160px;
   overflow: auto;
 }
+
 /* 按 skill 的说明与上面的逐条结果分开 */
 .report .notes {
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid #dfe3e8;
+  border-top: 1px solid var(--hairline);
 }
-.harnesses {
-  border-top: 1px solid #ddd;
-  margin-top: 12px;
-  padding-top: 8px;
-  font-size: 12px;
-  max-height: 40vh;
-  overflow: auto;
-}
-.harnesses h2 {
-  font-size: 12px;
-  margin: 0 0 6px;
-  color: #666;
-}
-.harnesses label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 2px 0;
-  cursor: pointer;
-}
-.harnesses ul {
-  list-style: none;
-  margin: 0 0 6px;
-  padding: 0;
-}
-.harnesses li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 0;
-}
-.harnesses li span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
+/* ===== 弹层（MCP 页与模型页还在用；skill 侧已经换成二级页面，§4.6） ===== */
 .modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 20;
-  background: rgba(0, 0, 0, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
 }
+
+/* 罩子是白的：零色彩系统里没有半透明黑。罩画在伪元素上，弹窗本身不跟着变淡 */
+.modal-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--canvas);
+  opacity: 0.72;
+}
+
 .modal {
-  background: #fff;
-  border-radius: 8px;
-  padding: 16px;
+  position: relative;
+  box-sizing: border-box;
   width: 420px;
   max-height: 80vh;
+  padding: 16px;
+  border: 1px solid var(--ink);
+  background: var(--canvas);
   overflow: auto;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
+
 .modal .toolbar h2 {
-  font-size: 14px;
+  flex: 1;
   margin: 0;
-  flex: 1;
+  font-family: var(--font-cond);
+  font-size: var(--size-button);
+  font-weight: 700;
+  letter-spacing: var(--track-head);
 }
-.whole-link {
-  margin-left: 6px;
-  font-size: 11px;
-  background: #e8f0fe;
-  color: #1a73e8;
-  padding: 1px 6px;
-  border-radius: 10px;
-}
-/* 本体位置格里的「外部」标签在名字前面，间距挪到右侧 */
-.path .whole-link {
-  margin-left: 0;
-  margin-right: 6px;
-}
-.domain-group {
-  margin-bottom: 16px;
-}
-.domain-group h2 {
-  font-size: 14px;
-  margin: 0 0 6px;
-}
-/* 引入弹层尺寸固定，切换本体位置或筛选时不随内容长短跳动；三栏各自内部滚动 */
-.modal.wide {
-  width: min(960px, 92vw);
-  height: 72vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.import-dialog {
-  display: flex;
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
-}
-.import-sources {
-  width: 260px;
-  overflow: auto;
-}
-.import-skills {
-  flex: 1;
-  overflow: auto;
-}
+
+/* 可选列表：选中项与侧栏同一档浅底 */
 .pick-list {
-  list-style: none;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
+
 .pick-list li {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 6px;
   cursor: pointer;
 }
+
 .pick-list li.active {
-  background: #e8f0fe;
+  background: var(--surface);
 }
+
 .pick-list li span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.import-targets {
-  width: 200px;
-  overflow: auto;
-  border-left: 1px solid #eee;
-  padding-left: 16px;
-}
-/* 已引入的 skill 单独一段，和可勾选的那段隔开 */
-.import-present {
-  border-top: 1px solid #eee;
-  margin-top: 8px;
-  padding-top: 8px;
-}
-.import-skills label,
-.import-targets label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 2px 0;
-  cursor: pointer;
-}
-/* 域页的自动同步规则行：跟在筛选片下方 */
-.auto-rules {
-  margin-bottom: 8px;
-}
-.auto-rule {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: #666;
-}
-/* 引入弹层中栏顶部的自动同步开关：跟在本体位置名后，与下方 skill 列表隔开 */
-.import-skills .auto-toggle {
-  font-size: 12px;
-  padding-bottom: 6px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid #eee;
-}
-/* 中栏 skill 名后的「已排除自动同步」标记 */
-.import-skills label .muted {
-  margin-left: 6px;
-}
 
-/* ===================== 模型页（ModelsTab）新增样式，以下为追加，未改动前面的规则 ===================== */
+/* ===================== 模型页（ModelsTab） ===================== */
 .models-tab {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
+
 .models-notices {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
+
+/* 行内待办条的旧形态：一句话 + 动作，靠描边分层，不靠底色（§4.4） */
 .notice {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border: 1px solid var(--hairline);
 }
+
 .notice.warning {
-  background: #fff4e5;
-  color: #8a4b00;
+  border-color: var(--ink);
 }
-.notice.info {
-  background: #e8f0fe;
-  color: #1a4fa0;
-}
+
 .notice span {
   flex: 1;
 }
+
 .models-section {
-  border-top: 1px solid #eee;
   padding-top: 12px;
+  border-top: 1px solid var(--hairline);
 }
+
 .models-section h2 {
-  font-size: 14px;
   margin: 0 0 8px;
+  font-family: var(--font-cond);
+  font-size: var(--size-head);
+  font-weight: 600;
+  letter-spacing: var(--track-head);
 }
+
 .models-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: #666;
   max-width: 420px;
+  margin-bottom: 8px;
+  color: var(--ink-mute);
+  font-size: var(--size-minor);
 }
-.models-field input {
-  font: inherit;
+
+.models-field input,
+.models-list li input[type="text"] {
+  box-sizing: border-box;
   padding: 4px 8px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
 }
+
 .models-list {
-  list-style: none;
   margin: 0 0 8px;
   padding: 0;
   max-height: 50vh;
+  list-style: none;
   overflow: auto;
 }
+
 .models-list li {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 0;
-  border-bottom: 1px solid #f1f3f4;
+  border-bottom: 1px solid var(--hairline);
 }
+
 .models-list li span {
   width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .models-list li input[type="text"] {
   flex: 1;
-  font: inherit;
-  padding: 4px 8px;
-  border: 1px solid #ccc;
-  border-radius: 6px;
 }
-/* ===================== 模型页样式结束 ===================== */

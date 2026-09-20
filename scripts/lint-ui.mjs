@@ -19,8 +19,6 @@ const TOKEN_FILE = "src/tokens.css";
 /// T10 收口时这个数组必须是空的。不许用通配符——必须逐个文件列出，
 /// 否则新写的文件会悄悄落进豁免里。
 const LEGACY = [
-  // 本期最后一项：矩阵与外壳的版式，正在重写
-  "src/App.css",
   "src/McpImportDialog.tsx",
   "src/McpTab.css",
   "src/McpTab.tsx",
