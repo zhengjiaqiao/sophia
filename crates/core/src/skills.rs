@@ -78,7 +78,10 @@ fn links_to(target: &Target, skill: &Skill) -> bool {
 pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut domains = Vec::new();
-    for (key, label, d_targets) in group_domains(targets) {
+    for (key, label, all_targets) in group_domains(targets) {
+        // 目录还不存在的目标只在引入弹层可选：不成列，也不参与下面任何一处 IO
+        let (d_targets, creatable): (Vec<Target>, Vec<Target>) =
+            all_targets.into_iter().partition(|t| t.exists);
         // 行 = 自有全部 ∪ 已链接的那些；(skill, 本体位置 label, 本体位置 id) 排序去重
         let mut keys: BTreeSet<(String, String, String)> = BTreeSet::new();
         for s in sources {
@@ -128,6 +131,7 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
             key,
             label,
             targets: d_targets,
+            creatable,
             rows,
             broken,
         });
@@ -138,7 +142,8 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
     }
 }
 
-/// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重
+/// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重。
+/// `targets` 要带上目录尚不存在的那批（引入弹层里选中的），它们的目录由 `sync::execute` 就地创建
 pub fn propose_links(
     sources: &[Source],
     targets: &[Target],
@@ -153,7 +158,8 @@ pub fn propose_links(
     )
 }
 
-/// 选中格里的 Linked 格（目标非整目录链接）→ Unlink。规则同上
+/// 选中格里的 Linked 格（目标非整目录链接）→ Unlink。规则同上。
+/// 目录还不存在的目标里没有可删的东西，一律不产出动作
 pub fn propose_unlinks(
     sources: &[Source],
     targets: &[Target],
@@ -163,7 +169,9 @@ pub fn propose_unlinks(
         sources,
         targets,
         cells,
-        |state, target| state == CellState::Linked && target.linked_whole_to.is_none(),
+        |state, target| {
+            target.exists && state == CellState::Linked && target.linked_whole_to.is_none()
+        },
         ActionKind::Unlink,
     )
 }
@@ -532,6 +540,7 @@ mod tests {
             scope: TargetScope::Global {
                 harness_id: harness.to_string(),
             },
+            exists: true,
             linked_whole_to: None,
         }
     }
@@ -547,7 +556,16 @@ mod tests {
                 harness_id: harness.to_string(),
                 project_label: None,
             },
+            exists: true,
             linked_whole_to: None,
+        }
+    }
+
+    /// 目录尚不存在的项目目标（引入弹层里的「将新建目录」）
+    fn creatable(project_root: &Path, harness: &str, path: &Path) -> Target {
+        Target {
+            exists: false,
+            ..project(project_root, harness, path)
         }
     }
 
@@ -659,6 +677,108 @@ mod tests {
         );
         // 整目录链接的目标读进去就是本体位置，清理会删到本体位置里
         assert!(o.domains[1].broken.is_empty());
+    }
+
+    /// AC1 / AC6：目录不存在的目标只进 `creatable`，不参与行、格与坏链；目录建出来后正常成列
+    #[test]
+    fn scan_splits_targets_by_existence_and_only_touches_the_existing_ones() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/a");
+        let proj = t.dir("proj");
+        let claude = t.dir("proj/.claude/skills");
+        t.link(&claude.join("rotten"), &t.root().join("gone"));
+        let absent = proj.join(".agents/skills");
+
+        let s = store_source(&store, "proj", &proj, &["a"]);
+        let here = project(&proj, "claude-code", &claude);
+        let not_yet = creatable(&proj, "codex", &absent);
+        let ids = |ts: &[Target]| ts.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
+
+        let ov = scan(std::slice::from_ref(&s), &[here.clone(), not_yet.clone()]);
+        assert_eq!(ov.domains.len(), 1);
+        let page = &ov.domains[0];
+        assert_eq!(ids(&page.targets), vec![here.id.clone()]);
+        assert_eq!(ids(&page.creatable), vec![not_yet.id.clone()]);
+        // 行只在已存在的目标上算格
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(
+            page.rows[0]
+                .cells
+                .iter()
+                .map(|c| c.target_id.clone())
+                .collect::<Vec<_>>(),
+            vec![here.id.clone()]
+        );
+        assert_eq!(page.rows[0].cells[0].state, CellState::Missing);
+        // 坏链只扫已存在的目标
+        assert_eq!(
+            page.broken
+                .iter()
+                .map(|a| a.item_name.clone())
+                .collect::<Vec<_>>(),
+            vec!["rotten".to_string()]
+        );
+        // 扫描不许把目录建出来
+        assert_eq!(entry_kind(&absent), EntryKind::Missing);
+
+        // 引入后目录已建：下一轮它就是普通的列，链接状态照常
+        std::fs::create_dir_all(&absent).unwrap();
+        t.link(&absent.join("a"), &store.join("a"));
+        let ov = scan(
+            std::slice::from_ref(&s),
+            &[here.clone(), project(&proj, "codex", &absent)],
+        );
+        let page = &ov.domains[0];
+        assert_eq!(
+            ids(&page.targets),
+            vec![here.id.clone(), not_yet.id.clone()]
+        );
+        assert!(page.creatable.is_empty());
+        assert_eq!(page.rows[0].cells[1].state, CellState::Linked);
+    }
+
+    /// R3 / 设计 §1：creatable 的目标也能生成 Create；`exists == false` 的目标不产出 Unlink
+    #[test]
+    fn propose_links_covers_creatable_targets_while_unlinks_skip_them() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/a");
+        let proj = t.dir("proj");
+        let absent = proj.join(".agents/skills");
+        let s = store_source(&store, "proj", &proj, &["a"]);
+        let not_yet = creatable(&proj, "codex", &absent);
+
+        // 引入弹层选中一个尚不存在的目录 → 照常生成 Create
+        let acts = propose_links(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&not_yet),
+            &[cell(&s, "a", &not_yet)],
+        );
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].kind, ActionKind::Create);
+        assert_eq!(acts[0].target, absent);
+        assert_eq!(acts[0].target_path, absent.join("a"));
+        assert_eq!(entry_kind(&absent), EntryKind::Missing);
+
+        // 目录在两次扫描之间被建了出来、里面已有链接：过期的 exists == false 仍不产出删链动作
+        std::fs::create_dir_all(&absent).unwrap();
+        t.link(&absent.join("a"), &store.join("a"));
+        assert!(propose_unlinks(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&not_yet),
+            &[cell(&s, "a", &not_yet)],
+        )
+        .is_empty());
+        // 同一个目标标成已存在就照常产出
+        let now = project(&proj, "codex", &absent);
+        let acts = propose_unlinks(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&now),
+            &[cell(&s, "a", &now)],
+        );
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].kind, ActionKind::Unlink);
     }
 
     #[test]

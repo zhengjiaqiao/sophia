@@ -2,7 +2,8 @@
 use crate::fs::{create_link, entry_kind, remove_link, same_real, EntryKind};
 use crate::models::*;
 
-/// 只对 Create 建链；BrokenLink 仅在 clean_broken 时删除，删前重校验仍是软链。
+/// 只对 Create 建链（目标目录不存在就先建出来）；BrokenLink 仅在 clean_broken 时删除，
+/// 删前重校验仍是软链。Unlink 与 BrokenLink 都不创建任何目录。
 /// Unlink 不受 clean_broken 影响（确认在前端做）
 pub fn execute(actions: &[PlannedAction], clean_broken: bool, style: LinkStyle) -> SyncReport {
     SyncReport {
@@ -19,9 +20,12 @@ pub fn execute(actions: &[PlannedAction], clean_broken: bool, style: LinkStyle) 
 fn outcome_for(action: &PlannedAction, clean_broken: bool, style: LinkStyle) -> Outcome {
     match action.kind {
         ActionKind::Create => {
-            // 目标目录是否存在要跟随软链判断（目标目录本身可能是软链）
+            // 目标目录不存在就地创建：从零开辟一个 harness 的 skill 目录是正常路径，不是错误。
+            // 是否存在要跟随软链判断（is_dir），整目录软链也算已存在
             if !action.target.is_dir() {
-                return Outcome::Failed("目标目录不存在".into());
+                if let Err(e) = std::fs::create_dir_all(&action.target) {
+                    return Outcome::Failed(format!("建不出目标目录：{e}"));
+                }
             }
             match create_link(&action.source_path, &action.target_path, style) {
                 Ok(()) => Outcome::Created,
@@ -136,19 +140,25 @@ mod tests {
         assert_eq!(entry_kind(&src.join("x")), EntryKind::Dir);
     }
 
+    /// AC3：目标目录不存在就地创建（含多级父目录）；整目录软链算已存在，不重复创建
     #[test]
-    fn missing_target_dir_fails_without_creating_it_but_symlinked_dir_works() {
+    fn create_makes_the_missing_target_dir_including_parents() {
         let t = TempTree::new();
         let src = t.dir("src");
         let a = t.file(&src, "a.md");
-        let missing = t.root().join("nope");
+        let missing = t.root().join("proj/.agents/skills");
         let r = execute(
             &[action(ActionKind::Create, &a, &missing.join("a.md"))],
             false,
             LinkStyle::Absolute,
         );
-        assert_eq!(outcomes(&r), vec![Outcome::Failed("目标目录不存在".into())]);
-        assert_eq!(entry_kind(&missing), EntryKind::Missing);
+        assert_eq!(outcomes(&r), vec![Outcome::Created]);
+        assert_eq!(entry_kind(&missing), EntryKind::Dir);
+        assert!(matches!(
+            entry_kind(&missing.join("a.md")),
+            EntryKind::Symlink(_)
+        ));
+
         let real = t.dir("real");
         let via = t.root().join("via");
         t.link(&via, &real);
@@ -162,6 +172,58 @@ mod tests {
             entry_kind(&real.join("a.md")),
             EntryKind::Symlink(_)
         ));
+        // 软链没有被换成真实目录
+        assert!(matches!(entry_kind(&via), EntryKind::Symlink(_)));
+    }
+
+    /// AC4：建不出目标目录按失败上报，同批其他动作不受影响。
+    /// 这里用"父路径是一个普通文件"构造必然失败：只读父目录在 root（CI 常见）下仍可写入，结果不确定
+    #[test]
+    fn create_reports_failure_when_the_target_dir_cannot_be_made() {
+        let t = TempTree::new();
+        let src = t.dir("src");
+        let a = t.file(&src, "a.md");
+        let blocker = t.file(&t.root(), "blocker");
+        let ok = t.root().join("ok/skills");
+        let r = execute(
+            &[
+                action(ActionKind::Create, &a, &blocker.join("skills/a.md")),
+                action(ActionKind::Create, &a, &ok.join("a.md")),
+            ],
+            false,
+            LinkStyle::Absolute,
+        );
+        match &r.entries[0].outcome {
+            Outcome::Failed(msg) => assert!(
+                msg.starts_with("建不出目标目录：") && msg.len() > "建不出目标目录：".len(),
+                "失败消息要带上原因：{msg}"
+            ),
+            other => panic!("应当失败，实际 {other:?}"),
+        }
+        assert_eq!(entry_kind(&blocker), EntryKind::File);
+        // 同批的另一条照常成功
+        assert_eq!(r.entries[1].outcome, Outcome::Created);
+        assert_eq!(entry_kind(&ok), EntryKind::Dir);
+    }
+
+    /// AC5：Unlink 与 BrokenLink 一律不创建目录
+    #[test]
+    fn unlink_and_broken_link_never_create_directories() {
+        let t = TempTree::new();
+        let gone = t.root().join("gone/skills");
+        let src = t.root().join("src/x");
+        let r = execute(
+            &[
+                action(ActionKind::Unlink, &src, &gone.join("x")),
+                action(ActionKind::BrokenLink, &src, &gone.join("y")),
+            ],
+            true,
+            LinkStyle::Absolute,
+        );
+        assert!(matches!(r.entries[0].outcome, Outcome::Failed(_)));
+        assert!(matches!(r.entries[1].outcome, Outcome::Failed(_)));
+        assert_eq!(entry_kind(&gone), EntryKind::Missing);
+        assert_eq!(entry_kind(&t.root().join("gone")), EntryKind::Missing);
     }
 
     #[test]

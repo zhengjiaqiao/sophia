@@ -174,6 +174,8 @@ pub struct Target {
     pub label: String,
     pub path: PathBuf,
     pub scope: TargetScope,
+    /// 目录是否已存在（`is_dir()`，跟随软链）。false 的目标只在引入弹层可选，建链时就地创建
+    pub exists: bool,
     /// 目标目录本身是软链且 real_path 等于某本体位置时，为该 Source 的 id
     pub linked_whole_to: Option<String>,
 }
@@ -234,7 +236,10 @@ pub struct DomainPage {
     /// `"global"` 或 `"project:<normalized path>"`
     pub key: String,
     pub label: String,
+    /// 目录已存在的目标：表格的列，行、格与坏链都只看这批
     pub targets: Vec<Target>,
+    /// 目录尚不存在的目标：只在引入弹层可选，建链时就地创建目录
+    pub creatable: Vec<Target>,
     pub rows: Vec<DomainRow>,
     pub broken: Vec<PlannedAction>,
 }

@@ -363,12 +363,15 @@ pub fn sources(
 }
 
 /// 目标目录里指向"任何已知本体位置之外"的软链，按真实父目录合成为外部本体位置。
-/// 整目录链接的目标读进去就是本体位置，跳过。
+/// 目录还不存在的目标没什么可读，跳过；整目录链接的目标读进去就是本体位置，也跳过。
 /// 同一父目录下同名不同真实路径的取首个
 pub fn external_sources(env: &Env, targets: &[Target], known: &[Source]) -> Vec<Source> {
     let inside: Vec<PathBuf> = known.iter().filter_map(|s| real_path(&s.path)).collect();
     let mut groups: BTreeMap<PathBuf, BTreeMap<String, PathBuf>> = BTreeMap::new();
-    for t in targets.iter().filter(|t| t.linked_whole_to.is_none()) {
+    for t in targets
+        .iter()
+        .filter(|t| t.exists && t.linked_whole_to.is_none())
+    {
         let Ok(entries) = std::fs::read_dir(&t.path) else {
             continue;
         };
@@ -427,8 +430,8 @@ fn abbreviate(path: &Path, home: &Path) -> String {
 
 /// 所有可写目标：每个启用 harness 各自一列——全局目录、per-agent 目录、每个项目的项目目录。
 /// 列名就是 harness 名；多个 harness 共用同一个目录时各自成列，不合并。
-/// 目录不存在（`is_dir()` 跟随软链，整目录软链也算存在）则不成列；
-/// 目标目录整个是指向某本体位置的软链时填 `linked_whole_to`
+/// 目录不存在的目标照常产出，只标 `exists == false`：它不成列，但引入弹层可选，建链时就地创建。
+/// 目标目录整个是指向某本体位置的软链时填 `linked_whole_to`，这只对已存在的目录求值
 pub fn targets(
     env: &Env,
     harnesses: &[Harness],
@@ -437,15 +440,14 @@ pub fn targets(
 ) -> Vec<Target> {
     let mut out: Vec<Target> = Vec::new();
     let mut push = |id: String, label: String, path: PathBuf, scope: TargetScope| {
-        // is_dir 跟随软链：整目录软链也算目标
-        if !path.is_dir() {
-            return;
-        }
+        // 判断"目标目录是否存在"要跟随软链：整目录软链也算已存在
+        let exists = path.is_dir();
         out.push(Target {
             id,
             label,
             path,
             scope,
+            exists,
             linked_whole_to: None,
         });
     };
@@ -498,7 +500,8 @@ pub fn targets(
         }
     }
 
-    for t in &mut out {
+    // 目录不存在的目标不做任何 IO
+    for t in out.iter_mut().filter(|t| t.exists) {
         if !matches!(entry_kind(&t.path), EntryKind::Symlink(_)) {
             continue;
         }
@@ -616,6 +619,10 @@ mod tests {
     }
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+    /// 目录已存在的那批目标（表格的列）
+    fn existing(ts: Vec<Target>) -> Vec<Target> {
+        ts.into_iter().filter(|t| t.exists).collect()
     }
 
     #[test]
@@ -847,7 +854,7 @@ mod tests {
         let hs = vec![pick("claude-code"), pick("weiboap")];
         assert!(project_candidates(&e, &[], &hs).is_empty());
 
-        let got: Vec<(String, String, PathBuf, TargetScope)> = targets(&e, &hs, &[], &[])
+        let got: Vec<(String, String, PathBuf, TargetScope)> = existing(targets(&e, &hs, &[], &[]))
             .into_iter()
             .map(|x| (x.id, x.label, x.path, x.scope))
             .collect();
@@ -896,7 +903,7 @@ mod tests {
             srcs.iter().any(|s| s.path == custom),
             "托管目录仍是本体位置"
         );
-        let tgts = targets(&e, &hs, &[], &srcs);
+        let tgts = existing(targets(&e, &hs, &[], &srcs));
         assert!(
             tgts.iter().all(|x| x.path != custom),
             "托管目录不得成为目标"
@@ -934,7 +941,7 @@ mod tests {
         assert_eq!(srcs.len(), 1);
         assert_eq!(srcs[0].path, dir);
         assert_eq!(srcs[0].label, "WeiboAP · 办公助手");
-        let labels: Vec<Option<String>> = targets(&e, &hs, &[], &srcs)
+        let labels: Vec<Option<String>> = existing(targets(&e, &hs, &[], &srcs))
             .into_iter()
             .filter_map(|x| match x.scope {
                 TargetScope::Project { project_label, .. } => Some(project_label),
@@ -1239,7 +1246,7 @@ mod tests {
             std::slice::from_ref(&proj),
             std::slice::from_ref(&ego),
         );
-        let tgts = targets(&e, &hs, std::slice::from_ref(&proj), &known);
+        let tgts = existing(targets(&e, &hs, std::slice::from_ref(&proj), &known));
         assert_eq!(tgts.len(), 1);
         assert!(tgts[0].linked_whole_to.is_some());
         // 整目录链接的目标不扫，far-skill 不会被合成
@@ -1280,9 +1287,13 @@ mod tests {
             pick("cursor"),
             pick("cline"),
         ];
-        let got = targets(&e, &hs, std::slice::from_ref(&project), &[]);
+        let all_targets = targets(&e, &hs, std::slice::from_ref(&project), &[]);
+        // Cursor 的全局目录不存在：仍在返回集合里，只是 exists == false，不成列
+        assert!(all_targets
+            .iter()
+            .any(|x| x.id == "cursor" && !x.exists && x.path == home.join(".cursor/skills")));
         let key = project.display();
-        let got: Vec<(String, String, PathBuf, TargetScope)> = got
+        let got: Vec<(String, String, PathBuf, TargetScope)> = existing(all_targets)
             .into_iter()
             .map(|x| (x.id, x.label, x.path, x.scope))
             .collect();
@@ -1338,6 +1349,49 @@ mod tests {
         );
     }
 
+    /// AC1 / AC6：目录不存在的目标照常产出，只标 `exists == false`；目录建出来后下一轮正常成列
+    #[test]
+    fn targets_keep_dirs_that_do_not_exist_yet_and_pick_them_up_once_created() {
+        let t = TempTree::new();
+        let home = t.root();
+        let project = t.dir("Project/app");
+        t.dir("Project/app/.claude/skills"); // 只有 Claude Code 的项目目录
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        let hs = vec![pick("claude-code"), pick("codex")];
+        let key = project.display();
+        let find = |ts: &[Target], id: &str| {
+            ts.iter()
+                .find(|x| x.id == id)
+                .unwrap_or_else(|| panic!("没有目标 {id}"))
+                .clone()
+        };
+
+        let got = targets(&e, &hs, std::slice::from_ref(&project), &[]);
+        assert!(find(&got, &format!("project:{key}::claude-code")).exists);
+        let codex = find(&got, &format!("project:{key}::codex"));
+        assert!(!codex.exists, "项目里没有 .agents/skills");
+        assert_eq!(codex.path, project.join(".agents/skills"));
+        assert_eq!(codex.linked_whole_to, None);
+        // 全局目录不存在同理
+        assert!(!find(&got, "claude-code").exists);
+        assert!(!find(&got, "codex").exists);
+        // 判存不许把目录建出来
+        assert_eq!(
+            entry_kind(&project.join(".agents/skills")),
+            EntryKind::Missing
+        );
+
+        // 目录建出来 → 下一轮成为正常的列
+        t.dir("Project/app/.agents/skills");
+        let got = targets(&e, &hs, std::slice::from_ref(&project), &[]);
+        assert!(find(&got, &format!("project:{key}::codex")).exists);
+        assert!(existing(got)
+            .iter()
+            .any(|x| x.path == project.join(".agents/skills")));
+    }
+
     #[test]
     fn target_that_is_a_whole_dir_symlink_points_back_at_the_source() {
         let t = TempTree::new();
@@ -1354,12 +1408,12 @@ mod tests {
             all.iter().find(|h| h.id == "codex").unwrap().clone(),
         ];
         let srcs = sources(&e, &hs, &[], std::slice::from_ref(&store));
-        let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
+        let got = existing(targets(&e, &hs, std::slice::from_ref(&project), &srcs));
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
         // 普通目录目标不带整目录链接标记
         t.dir("Project/app/.agents/skills");
-        let got = targets(&e, &hs, &[project], &srcs);
+        let got = existing(targets(&e, &hs, &[project], &srcs));
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
         assert!(got[1].id.ends_with("::codex"));
@@ -1384,7 +1438,7 @@ mod tests {
         let srcs = sources(&e, &hs, &[], std::slice::from_ref(&store));
         assert_eq!(srcs.len(), 1);
 
-        let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
+        let got = existing(targets(&e, &hs, std::slice::from_ref(&project), &srcs));
         let key = project.display();
         assert_eq!(got.len(), 2);
         // 同一个目录两列，id 与列名各自属于自己的 harness，标签不合并
@@ -1424,7 +1478,7 @@ mod tests {
         assert_eq!(srcs.len(), 1);
         assert_eq!(srcs[0].path, agent_dir);
 
-        let got = targets(&e, &hs, std::slice::from_ref(&project), &srcs);
+        let got = existing(targets(&e, &hs, std::slice::from_ref(&project), &srcs));
         assert_eq!(got.len(), 2);
         // agent 目标：本体所在，不是整目录链接
         assert_eq!(
@@ -1480,7 +1534,7 @@ mod tests {
             .find(|h| h.id == "codex")
             .unwrap()];
         let srcs = sources(&e, &hs, &[], &[]);
-        let got = targets(&e, &hs, &[], &srcs);
+        let got = existing(targets(&e, &hs, &[], &srcs));
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].path, real);
         assert_eq!(got[0].linked_whole_to, None);

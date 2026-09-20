@@ -85,17 +85,18 @@ export default function ImportDialog({
     if (allRef.current) allRef.current.indeterminate = someSelected;
   }, [someSelected]);
 
+  /// 引入弹层的 harness 一栏：已成列的目标，后接目录尚不存在、将被新建的目标
+  const pickable = [...page.targets, ...page.creatable];
+
   /// 该本体位置的规则；source 是归一化路径，与 Source.id 同形
   const rule = autoLinks.find((r) => r.source === selected);
   /// 规则里落在本域的目标；非空 = 本域已开启自动同步
-  const ruleTargets = page.targets
-    .filter((t) => (rule?.targets ?? []).includes(t.id))
-    .map((t) => t.id);
+  const ruleTargets = pickable.filter((t) => (rule?.targets ?? []).includes(t.id)).map((t) => t.id);
   const ruleOn = ruleTargets.length > 0;
-  /// 本域可逐项建链的目标（整目录链接的不能）
+  /// 默认勾选的目标：只勾已存在且可逐项建链的，避免一打开弹层就顺手建出一堆目录
   const openTargets = page.targets.filter((t) => t.linkedWholeTo === null).map((t) => t.id);
-  /// 撤规则时要撤掉的本域目标：本域全部
-  const domainTargets = page.targets.map((t) => t.id);
+  /// 撤规则时要撤掉的本域目标：本域全部（含待新建的）
+  const domainTargets = pickable.map((t) => t.id);
 
   /// 该本体位置里被排除、不再自动链接的 skill
   const excluded = rule?.excluded ?? [];
@@ -170,7 +171,7 @@ export default function ImportDialog({
 
   // 开启自动同步时会立刻建链的 skill 数：未引入且未被排除的
   const autoCount = fresh.filter((sk) => !excluded.includes(sk.name)).length;
-  const targetLabels = page.targets
+  const targetLabels = pickable
     .filter((t) => targetIds.includes(t.id))
     .map((t) => t.label)
     .join("、");
@@ -345,10 +346,10 @@ export default function ImportDialog({
           </div>
 
           <div className="import-targets">
-            {page.targets.length === 0 ? (
+            {pickable.length === 0 ? (
               <p className="muted">该域下没有可用的目标目录。</p>
             ) : (
-              page.targets.map((target) => (
+              pickable.map((target) => (
                 <label
                   key={target.id}
                   title={target.linkedWholeTo !== null ? "整目录链接，先拆成逐项链接" : target.path}
@@ -360,6 +361,7 @@ export default function ImportDialog({
                     onChange={(e) => toggleTarget(target.id, e.target.checked)}
                   />
                   {target.label}
+                  {!target.exists && <span className="muted">将新建目录</span>}
                 </label>
               ))
             )}
