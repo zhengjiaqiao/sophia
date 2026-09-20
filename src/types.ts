@@ -166,6 +166,9 @@ export interface HarnessStatus {
   id: string;
   displayName: string;
   enabled: boolean;
+  /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」
+  /// 后面——没装的也能预先开启，所以后端返回全部 41 个而不只是已安装的
+  installed: boolean;
 }
 
 export interface McpLocation {

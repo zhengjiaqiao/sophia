@@ -42,6 +42,9 @@ struct HarnessStatus {
     id: String,
     display_name: String,
     enabled: bool,
+    /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」后面——
+    /// 没装的也能预先开启，所以要带出来，不能只返回已安装的那些
+    installed: bool,
 }
 
 fn err<E: std::fmt::Display>(e: E) -> String {
@@ -637,14 +640,21 @@ fn update_auto_links(
     state.store.save_settings(&settings).map_err(err)
 }
 
-/// 已安装的 harness 及其启用状态
+/// 全部 harness 及其启用、安装状态。返回全部而不只是已安装的：
+/// 设置页要给出「显示未安装的 N 个」的入口，没装的也能预先开启
 #[tauri::command]
 fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<Vec<HarnessStatus>, String> {
     let settings = state.store.load_settings().map_err(err)?;
-    Ok(discovery::installed(&runtime_env()?)
+    let env = runtime_env()?;
+    let installed: std::collections::HashSet<String> = discovery::installed(&env)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    Ok(discovery::all_harnesses(&env)
         .into_iter()
         .map(|h| HarnessStatus {
             enabled: !settings.disabled_harnesses.contains(&h.id),
+            installed: installed.contains(&h.id),
             id: h.id,
             display_name: h.display_name,
         })

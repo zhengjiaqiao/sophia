@@ -16,11 +16,9 @@ import "./SettingsPage.css";
 /// - 不给「链接方式（相对 / 绝对）」开关：它按「本体是否在目标项目内」自动判，
 ///   是正确性判断不是口味问题（§14）。
 
-/// `list_harnesses` 今天只返回**已安装的**那几个（`src-tauri/src/lib.rs` 里调的是
-/// `discovery::installed`），返回项里没有 installed 字段，也带不出没装的那 32 个。
-/// 所以这里按「缺这个字段＝已安装」读：等命令把全部 41 个连同 installed 一起带出来，
-/// 「显示未安装的 M 个」那一行自动就有了，这个文件不用再动。
-type AgentOption = HarnessStatus & { installed?: boolean };
+/// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
+/// 其余收在「显示未安装的 N 个」后面——没装的也能预先开启，所以要给入口。
+type AgentOption = HarnessStatus;
 
 export interface SettingsPageProps {
   onBack: () => void;
@@ -71,8 +69,8 @@ export function SettingsPage({ onBack, onError }: SettingsPageProps) {
     </Chip>
   );
 
-  const present = (agents ?? []).filter((a) => a.installed !== false);
-  const absent = (agents ?? []).filter((a) => a.installed === false);
+  const present = (agents ?? []).filter((a) => a.installed);
+  const absent = (agents ?? []).filter((a) => !a.installed);
 
   return (
     <SubPage title="设置" onBack={onBack}>
