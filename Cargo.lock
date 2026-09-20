@@ -3804,10 +3804,13 @@ dependencies = [
  "serde",
  "serde_json",
  "symsync-core",
+ "symsync-gateway",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tokio",
+ "url",
 ]
 
 [[package]]

@@ -1,5 +1,8 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
+mod gateway;
 mod watch;
+
+pub use gateway::cli as gateway_cli;
 
 use serde::Serialize;
 use std::collections::BTreeSet;
