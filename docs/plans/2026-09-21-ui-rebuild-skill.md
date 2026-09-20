@@ -187,6 +187,7 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
 - **点圆点开启时调 `includeAutoLink`**（修 AC13 那处不一致）。
 - 待处理栏（底部快捷版，一次一条）。
 - busy 的五个豁免控件。
+- **改掉残留的 `unwritable`**：`src/DomainView.tsx`、`src/sort.ts` 里还是旧名，T4 只改了 `types.ts`。
 
 **验证**：`make build-web`；`make dev` 里走 AC1–AC5、AC13、AC18、AC19。
 
@@ -197,8 +198,6 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
 **Files**：各自 `src/pages/SettingsPage.tsx` / `ImportPage.tsx` / `PendingPage.tsx`；`src/SettingsPanel.tsx` 与 `src/ImportDialog.tsx` 删除
 
 三个都用 `SubPage`。要点分别是：
-
-**T6 顺带**：全仓库还剩 `unwritable` 的引用要改成 `wholeLinked`（`src/DomainView.tsx`、`src/sort.ts`）——T4 只改 `types.ts`，这两个文件归 T6。
 
 - **设置页**：选择片网格、无路径、默认只列已安装的（`discovery::installed()`，本机 9/41）、`显示未安装的 M 个`。
 - **导入页**：三栏铺开、skill 列表不截断、agent 选择用选择片、逐字保留用户改过的五句文案。
