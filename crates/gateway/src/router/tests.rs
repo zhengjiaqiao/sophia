@@ -445,7 +445,8 @@ async fn bodyless_request_goes_to_native_upstream_without_a_body() {
 /// AC10：非本机来源、浏览器发起的请求、DNS 重绑定一律拒绝
 #[tokio::test]
 async fn ac10_non_loopback_browser_and_rebound_requests_are_rejected() {
-    let cases: Vec<(&str, Box<dyn Fn(&mut TestRequest)>)> = vec![
+    type Mutation = Box<dyn Fn(&mut TestRequest)>;
+    let cases: Vec<(&str, Mutation)> = vec![
         (
             "non loopback",
             Box::new(|r| r.remote = "192.168.1.20:40000".into()),
@@ -853,4 +854,181 @@ async fn native_streaming_response_is_forwarded_incrementally() {
         started.elapsed() < std::time::Duration::from_millis(500),
         "第一块被缓冲到了上游结束之后"
     );
+}
+
+// ---------- 协议转换（wecode 只支持 Chat Completions 的实测情况） ----------
+
+impl Harness {
+    async fn chat(third_party: Option<Responder>) -> Self {
+        let mut h = Self::new(third_party).await;
+        h.router = Router::new(Config {
+            third_party_url: format!("{}/openai/v1", h.third_party.url),
+            third_party_protocol: Protocol::Chat,
+            chatgpt_url: format!("{}/backend-api/codex", h.chatgpt.url),
+            openai_url: format!("{}/v1", h.openai.url),
+            routing_catalog_path: h.dir.path().join("routing.json"),
+            activity_log_path: Some(h.dir.path().join("router.log")),
+            third_party_key: Arc::new(|| Ok(THIRD_PARTY_KEY.to_owned())),
+            max_body_bytes: 0,
+            proxy: None,
+        })
+        .unwrap();
+        h
+    }
+}
+
+fn chat_sse(chunks: &[&str]) -> Responder {
+    let mut body = String::new();
+    for chunk in chunks {
+        body.push_str(&format!("data: {chunk}\n\n"));
+    }
+    body.push_str("data: [DONE]\n\n");
+    Arc::new(move |_| {
+        (
+            200,
+            vec![("content-type".into(), "text/event-stream".into())],
+            body.clone().into_bytes(),
+        )
+    })
+}
+
+const RESPONSES_BODY: &str = r#"{"model":"weibo-glm-5","stream":true,"store":false,"instructions":"You are Codex.",
+  "include":["reasoning.encrypted_content"],"prompt_cache_key":"k",
+  "tools":[{"type":"function","name":"exec_command","parameters":{"type":"object"}},{"type":"web_search"}],
+  "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}"#;
+
+/// AC4：路由把 Codex 的 Responses 请求转成 Chat Completions，再把流转回来
+#[tokio::test]
+async fn ac4_chat_protocol_translates_both_directions() {
+    let h = Harness::chat(Some(chat_sse(&[
+        r#"{"choices":[{"index":0,"delta":{"content":"你好"}}]}"#,
+        r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1,"total_tokens":10}}"#,
+    ])))
+    .await;
+    let res = h.send(post(RESPONSES_BODY)).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert!(res
+        .header("content-type")
+        .unwrap_or("")
+        .contains("text/event-stream"));
+    let out = res.text();
+    for want in [
+        "event: response.created",
+        "event: response.output_text.delta",
+        "你好",
+        "event: response.completed",
+        "\"input_tokens\":9",
+    ] {
+        assert!(out.contains(want), "客户端流里缺少 {want}:\n{out}");
+    }
+    let got = h.third_party.only();
+    assert_eq!(got.path, "/openai/v1/chat/completions");
+    assert_eq!(
+        got.header("authorization"),
+        Some(&*format!("Bearer {THIRD_PARTY_KEY}"))
+    );
+    assert!(!got.dump().contains("official"));
+    let chat = json(&got.body);
+    assert_eq!(chat["model"], "weibo/glm-5");
+    assert_eq!(chat["stream"], true);
+    assert_eq!(chat["messages"].as_array().unwrap().len(), 2);
+    assert_eq!(chat["tools"].as_array().unwrap().len(), 1);
+    let raw = String::from_utf8_lossy(&got.body);
+    for leaked in ["prompt_cache_key", "encrypted_content", "web_search"] {
+        assert!(!raw.contains(leaked), "{leaked} 漏进了 chat 请求");
+    }
+}
+
+/// AC6：上游的工具调用转成 Codex 的 function_call 条目
+#[tokio::test]
+async fn ac6_chat_protocol_tool_call() {
+    let h = Harness::chat(Some(chat_sse(&[
+        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"cat hello.txt\"}"}}]}}]}"#,
+        r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+    ])))
+    .await;
+    let out = h.send(post(RESPONSES_BODY)).await.text();
+    assert!(
+        out.contains("\"type\":\"function_call\"")
+            && out.contains("\"call_id\":\"call_1\"")
+            && out.contains("cat hello.txt"),
+        "{out}"
+    );
+}
+
+/// 网关报错时 Codex 要拿到状态码和能读的错误文字（wecode 的错误体不是 OpenAI 的格式）
+#[tokio::test]
+async fn chat_protocol_upstream_error_is_readable() {
+    let h = Harness::chat(Some(Arc::new(|_| {
+        (429, vec![("content-type".into(), "application/json".into())],
+         r#"{"type":"error","error":{"type":"error","message":"当月商业模型 token 额度已用尽"}}"#.as_bytes().to_vec())
+    })))
+    .await;
+    let res = h.send(post(RESPONSES_BODY)).await;
+    assert_eq!(res.status, 429);
+    assert!(json(&res.body)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("额度已用尽"));
+}
+
+/// AC8：远程压缩对上游是一次非流式“请总结”，回给 Codex 恰好一个压缩条目
+#[tokio::test]
+async fn ac8_chat_protocol_compaction() {
+    let h = Harness::chat(Some(Arc::new(|_| {
+        (200, vec![("content-type".into(), "application/json".into())],
+         br#"{"choices":[{"message":{"role":"assistant","content":"SUMMARY TEXT"}}],"usage":{"prompt_tokens":50,"completion_tokens":5,"total_tokens":55}}"#.to_vec())
+    })))
+    .await;
+    let body = r#"{"model":"weibo-glm-5","stream":true,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"long"}]},{"type":"compaction_trigger"}]}"#;
+    let res = h.send(post(body)).await;
+    assert_eq!(json(&h.third_party.only().body)["stream"], false);
+    let out = res.text();
+    assert_eq!(
+        out.matches("event: response.output_item.done").count(),
+        1,
+        "{out}"
+    );
+    assert!(out.contains("\"type\":\"compaction\"") && out.contains("event: response.completed"));
+    assert!(
+        !out.contains("SUMMARY TEXT"),
+        "摘要应当被编码进压缩条目，而不是明文出现"
+    );
+}
+
+/// 不要流式的客户端拿到的是一个完整的 Responses 对象
+#[tokio::test]
+async fn chat_protocol_non_streaming_client() {
+    let h = Harness::chat(Some(chat_sse(&[
+        r#"{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}"#,
+    ])))
+    .await;
+    let res = h
+        .send(post(
+            r#"{"model":"weibo-glm-5","stream":false,"input":"hi"}"#,
+        ))
+        .await;
+    let response = json(&res.body);
+    assert_eq!(response["object"], "response");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["content"][0]["text"], "ok");
+}
+
+/// AC7：从第三方模型切回官方模型时，历史里本功能产生的推理条目要剔除，否则官方上游会拒绝整个请求
+#[tokio::test]
+async fn ac7_native_request_is_cleaned_of_our_items() {
+    let h = Harness::chat(None).await;
+    let body = format!(
+        r#"{{"model":"gpt-5.6-sol","input":[{{"type":"reasoning","id":"{}1","summary":[]}},{{"type":"message","role":"user","content":[{{"type":"input_text","text":"go on"}}]}}]}}"#,
+        crate::translate::REASONING_ID_PREFIX
+    );
+    h.send(post(&body)).await;
+    let got = h.chatgpt.only();
+    let raw = String::from_utf8_lossy(&got.body);
+    assert!(
+        !raw.contains(crate::translate::REASONING_ID_PREFIX) && raw.contains("go on"),
+        "{raw}"
+    );
+    assert_eq!(got.header("authorization"), Some(OFFICIAL_TOKEN));
 }

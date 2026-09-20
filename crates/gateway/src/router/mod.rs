@@ -388,7 +388,10 @@ impl Router {
                 )
                 .await
             }
-            None => self.forward_native(&parts, raw_body, &suffix, &query).await,
+            None => {
+                self.forward_native(&parts, raw_body, &decoded, &suffix, &query)
+                    .await
+            }
         };
         let (route, result) = match outcome {
             Ok(pair) => pair,
@@ -434,6 +437,7 @@ impl Router {
         &self,
         parts: &hyper::http::request::Parts,
         raw_body: Bytes,
+        decoded: &Bytes,
         suffix: &str,
         query: &str,
     ) -> Result<(Route, Response<UpstreamBody>), (Route, StatusCode, String)> {
@@ -446,6 +450,11 @@ impl Router {
         } else {
             (Route::ChatGpt, &self.chatgpt_url)
         };
+        // 历史里混有本功能产生的推理条目或压缩条目时才清理（否则官方上游会拒绝整个请求）；
+        // 其余情况仍按原始字节透传。清理后的请求体是明文 JSON，所以不能再带 Content-Encoding。
+        let cleaned = crate::translate::normalize_for_native(decoded);
+        let drop_encoding = cleaned.is_some();
+        let raw_body = cleaned.map(Bytes::from).unwrap_or(raw_body);
         // 官方路径：请求头原样保留（逐跳头除外），请求体按原始字节透传（含 zstd 压缩体）
         let mut request = self
             .native
@@ -454,6 +463,7 @@ impl Router {
             if !is_hop_by_hop(name)
                 && name != hyper::header::HOST
                 && name != hyper::header::CONTENT_LENGTH
+                && !(drop_encoding && name == hyper::header::CONTENT_ENCODING)
             {
                 request = request.header(name, value);
             }
@@ -490,12 +500,14 @@ impl Router {
         } else {
             target.upstream_model.trim()
         };
-        if self.protocol == Protocol::Chat {
-            return Err((
-                route,
-                StatusCode::NOT_IMPLEMENTED,
-                "chat protocol translation is not wired in yet".to_owned(),
-            ));
+        if self.protocol == Protocol::Chat
+            && parts.method == Method::POST
+            && matches!(suffix, "/responses" | "/responses/compact")
+        {
+            let legacy_compact = suffix == "/responses/compact";
+            return self
+                .forward_chat(parts, decoded, model, upstream_model, legacy_compact, key)
+                .await;
         }
         let body = if upstream_model != model {
             replace_request_model(decoded, upstream_model).map_err(|e| {
@@ -538,6 +550,180 @@ impl Router {
             ));
         }
         Ok((route, passthrough(response, true)))
+    }
+
+    /// 第三方网关只支持 Chat Completions：请求转过去，回复转回 Codex 期望的 Responses 形式
+    async fn forward_chat(
+        &self,
+        parts: &hyper::http::request::Parts,
+        decoded: &Bytes,
+        model: &str,
+        upstream_model: &str,
+        legacy_compact: bool,
+        key: &str,
+    ) -> Result<(Route, Response<UpstreamBody>), (Route, StatusCode, String)> {
+        let route = Route::ThirdParty;
+        let bad_request = |e: String| {
+            (
+                route,
+                StatusCode::BAD_REQUEST,
+                format!("translate request for third party: {e}"),
+            )
+        };
+        let mut source = decoded.to_vec();
+        if legacy_compact {
+            // 旧的 /responses/compact 接口：等价于在输入末尾放一个压缩触发条目
+            let mut doc: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_slice(&source).map_err(|e| bad_request(e.to_string()))?;
+            let mut input = match doc.remove("input") {
+                Some(serde_json::Value::Array(items)) => items,
+                Some(serde_json::Value::String(text)) => {
+                    vec![serde_json::json!({"type": "message", "role": "user", "content": text})]
+                }
+                _ => Vec::new(),
+            };
+            input.push(serde_json::json!({"type": "compaction_trigger"}));
+            doc.insert("input".to_owned(), serde_json::Value::Array(input));
+            source = serde_json::to_vec(&doc).map_err(|e| bad_request(e.to_string()))?;
+        }
+        let translated = crate::translate::to_chat(&source, upstream_model)
+            .map_err(|e| bad_request(e.to_string()))?;
+        let client_streams = translated.stream && !legacy_compact;
+
+        let mut request = self.third_party.post(resolve_target(
+            &self.third_party_url,
+            "/chat/completions",
+            "",
+        ));
+        for value in parts.headers.get_all("user-agent") {
+            request = request.header("user-agent", value);
+        }
+        let accept = if translated.compaction {
+            "application/json"
+        } else {
+            "text/event-stream"
+        };
+        let response = request
+            .header("content-type", "application/json")
+            .header("accept", accept)
+            .header("authorization", format!("Bearer {key}"))
+            .body(translated.chat_body)
+            .send()
+            .await
+            .map_err(|e| {
+                (
+                    route,
+                    StatusCode::BAD_GATEWAY,
+                    format!("upstream unreachable: {}", describe(&e)),
+                )
+            })?;
+        let status = response.status();
+        if status.is_redirection() {
+            return Err((
+                route,
+                StatusCode::BAD_GATEWAY,
+                "third-party gateway answered with a redirect, which is not followed".to_owned(),
+            ));
+        }
+        if !status.is_success() {
+            // 网关的错误体各有各的格式；统一成 Codex 能读出文字的样子，状态码保留
+            let body = read_limited(response, 1 << 20).await;
+            let payload = serde_json::json!({"error": {
+                "message": crate::translate::error_message(&body),
+                "type": "upstream_error",
+                "code": status.as_u16(),
+            }});
+            return Ok((
+                route,
+                fixed_response(status, "application/json", payload.to_string().into_bytes()),
+            ));
+        }
+
+        let model = model.to_owned();
+        if translated.compaction || !client_streams {
+            // 压缩请求，或不要流式的客户端：先收齐再一次性给出
+            let body = read_limited(response, 16 << 20).await;
+            let events = if translated.compaction {
+                crate::translate::convert_compaction(&body, &model)
+            } else {
+                let mut converter =
+                    crate::translate::StreamConverter::new(&model, translated.tools);
+                let mut events = converter.start();
+                events.extend(converter.feed_bytes(&body));
+                events.extend(converter.finish());
+                events
+            };
+            let response = if client_streams {
+                let text: String = events.iter().map(|e| e.to_sse_string()).collect();
+                fixed_response(StatusCode::OK, "text/event-stream", text.into_bytes())
+            } else {
+                let last = events
+                    .last()
+                    .and_then(|e| e.data.get("response"))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        serde_json::json!({"error": {
+                            "message": "the third-party model returned nothing",
+                            "type": "upstream_error",
+                        }})
+                    });
+                fixed_response(
+                    StatusCode::OK,
+                    "application/json",
+                    last.to_string().into_bytes(),
+                )
+            };
+            return Ok((route, response));
+        }
+
+        // 流式：上游每到一块就转换并立刻发给 Codex
+        struct State {
+            upstream: Pin<Box<dyn Stream<Item = reqwest::Result<Bytes>> + Send>>,
+            converter: crate::translate::StreamConverter,
+            started: bool,
+            done: bool,
+        }
+        let state = State {
+            upstream: Box::pin(response.bytes_stream()),
+            converter: crate::translate::StreamConverter::new(&model, translated.tools),
+            started: false,
+            done: false,
+        };
+        let stream = futures_util::stream::unfold(state, |mut state| async move {
+            loop {
+                if state.done {
+                    return None;
+                }
+                let events = if !state.started {
+                    state.started = true;
+                    state.converter.start()
+                } else {
+                    match state.upstream.next().await {
+                        Some(Ok(chunk)) => state.converter.feed_bytes(&chunk),
+                        // 上游断流或结束：把已收到的内容正常收尾，让 Codex 拿到完整的事件序列
+                        Some(Err(_)) | None => {
+                            state.done = true;
+                            state.converter.finish()
+                        }
+                    }
+                };
+                if state.converter.is_finished() {
+                    state.done = true;
+                }
+                if !events.is_empty() {
+                    let text: String = events.iter().map(|e| e.to_sse_string()).collect();
+                    return Some((Ok::<_, BoxError>(Bytes::from(text)), state));
+                }
+            }
+        });
+        let body: UpstreamBody = Box::pin(stream);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .header("cache-control", "no-cache")
+            .body(body)
+            .expect("static headers");
+        Ok((route, response))
     }
 
     fn session_used_third_party(&self, key: &str) -> bool {
@@ -604,6 +790,29 @@ impl Router {
 }
 
 type UpstreamBody = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>;
+
+fn fixed_response(status: StatusCode, content_type: &str, body: Vec<u8>) -> Response<UpstreamBody> {
+    let stream: UpstreamBody = Box::pin(futures_util::stream::once(async move {
+        Ok::<_, BoxError>(Bytes::from(body))
+    }));
+    Response::builder()
+        .status(status)
+        .header("content-type", content_type)
+        .body(stream)
+        .expect("static headers")
+}
+
+async fn read_limited(response: reqwest::Response, limit: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(Ok(chunk)) = stream.next().await {
+        if out.len() + chunk.len() > limit {
+            break;
+        }
+        out.extend_from_slice(&chunk);
+    }
+    out
+}
 
 /// 把上游响应搬过来：状态码、响应头（逐跳头除外）、流式响应体
 fn passthrough(response: reqwest::Response, third_party: bool) -> Response<UpstreamBody> {
