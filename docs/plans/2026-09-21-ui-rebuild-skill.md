@@ -179,7 +179,7 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
 
 ## T6 主视图
 
-**Files**：`src/SkillsTab.tsx`、`src/DomainView.tsx`
+**Files**：`src/SkillsTab.tsx`、`src/DomainView.tsx`、`src/sort.ts`
 
 - 格用 `StateDot`，点击走 `viewOf` 的 `clickable` 与 `reason`。**删掉 `acts.length === 0` 那条统一文案。**
 - 表头排序：默认无箭头、hover 淡箭头、激活转黑；busy 期间不禁用。
