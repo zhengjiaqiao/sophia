@@ -13,8 +13,9 @@ export interface CellView {
   dot: Dot;
   /// 点下去会真的建链或删链；false 表示点击只说明情况
   clickable: boolean;
-  /// 给提示条用的**完整句子**，不是错误码。不可点时必填；
-  /// 可点的两种（`linked` / `missing`）里，它是点完之后提示条要说的话
+  /// 给提示条用的**完整句子**，不是错误码。**只在 `clickable === false` 时有值**：
+  /// 为什么不能点。成功句不在这里——按 §4.1，一次批量操作只汇总成一句，
+  /// 「每个格自己的成功文案」从构造上就是错的，由调用方在操作结果处聚合（§8.1）
   reason?: string;
   /// 非空表示这条要进待处理栏
   issue?: IssueKind;
@@ -27,15 +28,12 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
     case "own":
       // 本体就摆在这个目录里，没有链接可关，点击只说明这件事
       return { dot: "own", clickable: false, reason: "本体就在这儿，不是链接" };
+    // 可点的两种不给 reason：关掉/开启之后要说的那句由调用方汇总，见 CellView.reason
     case "linked":
-      return {
-        dot: "linked",
-        clickable: true,
-        reason: `关掉了 ${skill} 在 ${agentLabel} 下的链接`,
-      };
+      return { dot: "linked", clickable: true };
     case "missing":
       // 目录还不存在也照样可点：建链接时顺手把目录建出来
-      return { dot: "missing", clickable: true, reason: `在 ${agentLabel} 下开启了 ${skill}` };
+      return { dot: "missing", clickable: true };
     case "broken":
       return {
         dot: "missing",
@@ -44,12 +42,14 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
         issue: "brokenLink",
       };
     case "foreign":
-      // §8 的原句是「指向 <另一个本体>」，但 Cell 里没有那条链接的落点，
-      // 这个签名也拿不到，所以只说「别处」。要补准，得后端在 Cell 上带出落点
       return {
         dot: "missing",
         clickable: false,
-        reason: `${agentLabel} 下同名的 ${skill} 指向别处，没有覆盖它`,
+        // pointsTo 为空是不该发生的分支：判 foreign 的那一刻 core 手里正好是 real_path
+        // 的结果，一定填得上。真为空就退回含糊的说法，总比说半句话强
+        reason: cell.pointsTo
+          ? `${agentLabel} 下同名的 ${skill} 指向 ${cell.pointsTo}，没有覆盖它`
+          : `${agentLabel} 下同名的 ${skill} 指向别处，没有覆盖它`,
         issue: "duplicateSource",
       };
     case "duplicate":
@@ -68,7 +68,8 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
         reason: `${agentLabel} 的 skills 目录整个链到了${
           target.linkedWholeTo ? ` ${target.linkedWholeTo}` : "别的本体位置"
         }，要逐条开关得先拆开`,
-        issue: "readOnlyTarget",
+        // 与 readOnlyTarget 分开：这一条的动作是拆开，不是再试一次
+        issue: "wholeLinkedTarget",
       };
     case "readOnly":
       // 扫描不产出这个状态，只有真的写失败之后上层才会构造出来

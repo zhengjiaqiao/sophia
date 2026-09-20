@@ -51,6 +51,9 @@ export interface Cell {
   targetId: string;
   path: string;
   state: CellState;
+  /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 linked / foreign 有值，
+  /// 其余状态是 null。foreign 的提示条要靠它说出「指向哪个本体」
+  pointsTo: string | null;
 }
 
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
@@ -118,8 +121,9 @@ export interface DeleteSourcePlan {
   relinkTo: string | null;
 }
 
-/// 待处理栏里三类需要用户拿主意的问题，与 store.rs 的 IssueKind 一一对应
-export type IssueKind = "duplicateSource" | "brokenLink" | "readOnlyTarget";
+/// 待处理栏里四类需要用户拿主意的问题，与 store.rs 的 IssueKind 一一对应。
+/// 「整目录链到别处」与「目录只读」必须分开：前者的动作是拆开，后者是再试一次
+export type IssueKind = "duplicateSource" | "brokenLink" | "readOnlyTarget" | "wholeLinkedTarget";
 export type Outcome =
   | { status: "created" }
   | { status: "skipped" }
