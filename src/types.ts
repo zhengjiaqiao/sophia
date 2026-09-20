@@ -34,7 +34,17 @@ export interface Target {
 }
 
 export type CellState =
-  "own" | "linked" | "missing" | "broken" | "foreign" | "duplicate" | "unwritable";
+  | "own"
+  | "linked"
+  | "missing"
+  | "broken"
+  | "foreign"
+  | "duplicate"
+  /// 目标整个目录链接到别的本体位置，逐项写不进去。**不是**「目录只读」
+  | "wholeLinked"
+  /// 目标目录存在但写不进去。**扫描永远不产出这个状态**：判定它要实际试写一次，
+  /// 每轮扫描都试写代价太大。只在上层真的写失败之后由上层构造
+  | "readOnly";
 export interface Cell {
   sourceId: string;
   skill: string;
@@ -74,7 +84,7 @@ export interface CellRef {
   targetId: string;
 }
 
-export type ActionKind = "create" | "brokenLink" | "unlink";
+export type ActionKind = "create" | "brokenLink" | "unlink" | "deleteSource";
 export interface PlannedAction {
   kind: ActionKind;
   itemName: string;
@@ -82,6 +92,34 @@ export interface PlannedAction {
   targetPath: string;
   target: string;
 }
+
+/// 链接写成绝对路径还是相对路径
+export type LinkStyle = "absolute" | "relative";
+
+/// 一条指向某本体的链接，以及改指时该怎么写
+export interface AffectedLink {
+  path: string;
+  style: LinkStyle;
+}
+
+/// 删一个 skill 本体之前的全部事实，够渲染确认弹窗做决定
+export interface DeleteSourcePlan {
+  /// 要删的本体目录
+  path: string;
+  /// 目录里的条目总数（递归，不含目录自身）
+  entries: number;
+  /// 目录里普通文件的字节数之和（软链不跟随）
+  bytes: number;
+  /// 各目标目录里指向它（或它内部）的软链，连同改指时要写的形式
+  affected: AffectedLink[];
+  /// 所在 git 仓库的根；null 表示不在仓库里。非 null 时一律不代删
+  inGit: string | null;
+  /// 别处同名的另一个本体；删完把 affected 改指到它。null 表示没有别处可指
+  relinkTo: string | null;
+}
+
+/// 待处理栏里三类需要用户拿主意的问题，与 store.rs 的 IssueKind 一一对应
+export type IssueKind = "duplicateSource" | "brokenLink" | "readOnlyTarget";
 export type Outcome =
   | { status: "created" }
   | { status: "skipped" }

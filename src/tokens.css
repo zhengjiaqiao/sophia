@@ -1,0 +1,53 @@
+/* 界面 token：色与字的唯一来源（组件规范 §1）。
+   全项目只有这个文件可以写字面色值，别处一律 var(--…)——scripts/lint-ui.mjs 强制这一条。
+
+   字体只引用到的 latin 子集与字重：Barlow 400、Barlow Condensed 600/700、IBM Plex Mono 400。
+   整包各约 2MB（含全字重与西里尔/越南语等子集），桌面应用不该为没用上的字形付体积。
+   字体文件打进应用，不走 CDN（§1.2.1）。 */
+@import "@fontsource/barlow/latin-400.css";
+@import "@fontsource/barlow-condensed/latin-600.css";
+@import "@fontsource/barlow-condensed/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+
+:root {
+  /* ---- 色（§1.1）：整个界面零色彩，强调只有「次要文字 → 加粗 → 反色」三档 ---- */
+  --canvas: #ffffff; /* 画布 */
+  --surface: #f0f0fa; /* 次级面：选中、悬停 */
+  --hairline: #e0e0e8; /* 分隔线 */
+  --ink: #000000; /* 主文字 */
+  --ink-mute: #5a5a5f; /* 次要文字 */
+  --ink-faint: #9a9aa2; /* 弱文字与空心描边 */
+  --disabled: #c8c8d0; /* 禁用描边 */
+  --ink-faint-inverse: #6a6a72; /* 反色（选中行、错误横幅）里的空心描边 */
+
+  /* ---- 字（§1.2）：三个字族都没有中文字形，CJK 回退栈显式写全（§1.2.1） ---- */
+  --font-ui: Barlow, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-cond: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "PingFang SC", monospace;
+
+  /* 六档字号：相邻至少差一档才读得出层级 */
+  --size-title: 20px; /* 标题 / 二级页面名 */
+  --size-head: 14px; /* 列头 · agent 名 */
+  --size-button: 15px; /* 按钮 */
+  --size-body: 15px; /* 正文 */
+  --size-minor: 13px; /* 次要 */
+  --size-label: 12px; /* 区域标签与堆叠列头 */
+  --size-mono: 12px; /* 等宽：路径、计数、skill 名 */
+
+  --track-title: 1.9px;
+  --track-head: 1.1px;
+  --track-button: 1.17px;
+  --track-label: 0.96px;
+
+  /* ---- 形（§1.3）：圆角只有输入框 4px、pill 32px、圆点 50%，其余 0 ---- */
+  --radius-input: 4px;
+  --radius-pill: 32px;
+
+  /* busy 时受影响控件的不透明度（§6） */
+  --busy-dim: 0.45;
+
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  color: var(--ink);
+  background: var(--canvas);
+}

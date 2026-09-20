@@ -91,8 +91,11 @@ const rules = [
     desc: "§1.2 只用三个字族，且 CJK 回退栈要写全",
     run(src, path) {
       const out = [];
-      for (const m of src.matchAll(/font-?[Ff]amily\s*[:=]\s*["']?([^;"'}\n]+)/g)) {
-        const decl = m[1].trim();
+      // 两处曾经让这条规则空转：①只认 font-family，而 token 写作 --font-ui
+      // ②捕获组在第一个引号处截断，`Barlow, "PingFang SC"` 只捕到 `Barlow, `，
+      // 于是正确写法反而被判违规、缺 CJK 回退的反而放过。
+      for (const m of src.matchAll(/(?:font-?[Ff]amily|--font-[a-z-]+)\s*[:=]\s*([^;}\n]+)/g)) {
+        const decl = m[1].trim().replace(/^["']|["']$/g, "");
         if (decl.startsWith("var(")) continue;
         const head = decl.split(",")[0].trim().replace(/^['"]|['"]$/g, "");
         if (!FONTS.includes(head) && !["monospace", "inherit", "ui-monospace"].includes(head)) {
