@@ -12,7 +12,8 @@ jobs:
         with:
           components: clippy
       - run: cargo test -p symsync-core
-      - run: cargo clippy -p symsync-core --all-targets -- -D warnings
+      - run: cargo test -p symsync-gateway
+      - run: cargo clippy -p symsync-core -p symsync-gateway --all-targets -- -D warnings
   app:
     runs-on: macos-latest
     steps:
