@@ -28,6 +28,8 @@ export interface Target {
   label: string;
   path: string;
   scope: TargetScope;
+  /// 目录是否已存在；false 的目标照常成列，列头标「将新建目录」，建链时自动创建
+  exists: boolean;
   linkedWholeTo: string | null;
 }
 
@@ -54,6 +56,7 @@ export interface DomainRow {
 export interface DomainPage {
   key: string;
   label: string;
+  /// 本域全部目标，即表格的列；目录尚不存在的也在其中（列头标「将新建目录」）
   targets: Target[];
   rows: DomainRow[];
   broken: PlannedAction[];

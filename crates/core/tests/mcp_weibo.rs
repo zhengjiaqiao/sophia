@@ -99,6 +99,8 @@ fn weibo_harness() -> Harness {
         global_dir: None,
         universal: false,
         agent_dirs: Vec::new(),
+        managed_global_dir: false,
+        agent_labels: None,
     }
 }
 

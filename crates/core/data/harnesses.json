@@ -41,6 +41,6 @@
     { "id": "neovate", "display_name": "Neovate", "project_dir": ".neovate/skills", "global_dir": ["~/.neovate/skills"], "detect_dir": ["~/.neovate"], "universal": false },
     { "id": "pochi", "display_name": "Pochi", "project_dir": ".pochi/skills", "global_dir": ["~/.pochi/skills"], "detect_dir": ["~/.pochi"], "universal": false },
     { "id": "adal", "display_name": "AdaL", "project_dir": ".adal/skills", "global_dir": ["~/.adal/skills"], "detect_dir": ["~/.adal"], "universal": false },
-    { "id": "weiboap", "display_name": "WeiboAP", "project_dir": null, "global_dir": ["~/Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom"], "detect_dir": ["~/Library/Application Support/WeiboAP"], "universal": false, "agent_dirs": ["~/Library/Application Support/WeiboAP/Data/agents/*/.internal-plugins/skills"] }
+    { "id": "weiboap", "display_name": "WeiboAP", "project_dir": null, "global_dir": ["~/Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom"], "detect_dir": ["~/Library/Application Support/WeiboAP"], "universal": false, "agent_dirs": ["~/Library/Application Support/WeiboAP/Data/agents/*/.internal-plugins/skills"], "managed_global_dir": true, "agent_labels": { "path": "~/Library/Application Support/WeiboAP/agents.db", "table": "agents", "idColumn": "id", "nameColumn": "name" } }
   ]
 }

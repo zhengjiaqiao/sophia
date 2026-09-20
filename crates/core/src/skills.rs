@@ -78,6 +78,7 @@ fn links_to(target: &Target, skill: &Skill) -> bool {
 pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut domains = Vec::new();
+    // 目录尚不存在的目标照常成列：格状态自然全是 Missing，补齐时由 `sync::execute` 建目录
     for (key, label, d_targets) in group_domains(targets) {
         // 行 = 自有全部 ∪ 已链接的那些；(skill, 本体位置 label, 本体位置 id) 排序去重
         let mut keys: BTreeSet<(String, String, String)> = BTreeSet::new();
@@ -118,10 +119,11 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
             })
             .collect();
 
-        // 整目录链接的目标读进去就是本体位置，坏链清理不能删到本体位置里
+        // 整目录链接的目标读进去就是本体位置，坏链清理不能删到本体位置里；
+        // 目录还不存在的目标里没有东西可读，`read_dir` 是无谓 IO
         let broken = d_targets
             .iter()
-            .filter(|t| t.linked_whole_to.is_none())
+            .filter(|t| t.exists && t.linked_whole_to.is_none())
             .flat_map(|t| broken_links(&t.path))
             .collect();
         domains.push(DomainPage {
@@ -138,7 +140,8 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
     }
 }
 
-/// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重
+/// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重。
+/// 目录尚不存在的目标照常产出 Create，目录由 `sync::execute` 就地创建
 pub fn propose_links(
     sources: &[Source],
     targets: &[Target],
@@ -153,7 +156,8 @@ pub fn propose_links(
     )
 }
 
-/// 选中格里的 Linked 格（目标非整目录链接）→ Unlink。规则同上
+/// 选中格里的 Linked 格（目标非整目录链接）→ Unlink。规则同上。
+/// 目录还不存在的目标里没有可删的东西，一律不产出动作
 pub fn propose_unlinks(
     sources: &[Source],
     targets: &[Target],
@@ -163,7 +167,9 @@ pub fn propose_unlinks(
         sources,
         targets,
         cells,
-        |state, target| state == CellState::Linked && target.linked_whole_to.is_none(),
+        |state, target| {
+            target.exists && state == CellState::Linked && target.linked_whole_to.is_none()
+        },
         ActionKind::Unlink,
     )
 }
@@ -263,22 +269,33 @@ pub fn remove_auto_link(rules: &mut Vec<AutoLink>, source: &Path) {
     rules.retain(|r| r.source != source);
 }
 
-/// 从该本体位置的规则里去掉这些目标（域页的 × 只撤本域的部分）；目标去空则整条删除
+/// 从该本体位置的规则里去掉这些目标（域页的 × 只撤本域的部分）；
+/// 目标与排除名单都空了才整条删除——只剩排除名单的规则仍要保住排除效果
 pub fn remove_auto_link_targets(rules: &mut Vec<AutoLink>, source: &Path, targets: &[String]) {
     let source = normalize(source);
     let Some(i) = rules.iter().position(|r| r.source == source) else {
         return;
     };
     rules[i].targets.retain(|t| !targets.contains(t));
-    if rules[i].targets.is_empty() {
+    if rules[i].targets.is_empty() && rules[i].excluded.is_empty() {
         rules.remove(i);
     }
 }
 
-/// 该 skill 不再自动链接（手动清除软链时调用）
-pub fn exclude(rules: &mut [AutoLink], source: &Path, skill: &str) {
-    if let Some(rule) = find_rule_mut(rules, source) {
-        rule.excluded.insert(skill.to_string());
+/// 该 skill 不再自动链接（手动清除软链时调用）。
+/// 该本体位置还没有规则时新建一条只有排除名单的规则：排除要能独立于规则存在，
+/// 否则手动清除过的软链会被之后新建的规则补回来
+pub fn exclude(rules: &mut Vec<AutoLink>, source: &Path, skill: &str) {
+    let source = normalize(source);
+    match rules.iter().position(|r| r.source == source) {
+        Some(i) => {
+            rules[i].excluded.insert(skill.to_string());
+        }
+        None => rules.push(AutoLink {
+            source,
+            targets: Vec::new(),
+            excluded: BTreeSet::from([skill.to_string()]),
+        }),
     }
 }
 
@@ -521,6 +538,7 @@ mod tests {
             scope: TargetScope::Global {
                 harness_id: harness.to_string(),
             },
+            exists: true,
             linked_whole_to: None,
         }
     }
@@ -536,7 +554,16 @@ mod tests {
                 harness_id: harness.to_string(),
                 project_label: None,
             },
+            exists: true,
             linked_whole_to: None,
+        }
+    }
+
+    /// 目录尚不存在的项目目标（列头标「将新建目录」的那种）
+    fn absent_target(project_root: &Path, harness: &str, path: &Path) -> Target {
+        Target {
+            exists: false,
+            ..project(project_root, harness, path)
         }
     }
 
@@ -597,6 +624,27 @@ mod tests {
         assert_eq!(ov.domains[0].rows[0].cells[0].state, CellState::Own);
     }
 
+    /// AC9：在助手自己的域里补齐，只写它自己的目录
+    #[test]
+    fn per_agent_column_writes_only_its_own_dir() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/x");
+        let root_a = t.dir("agents/a");
+        let a = t.dir("agents/a/skills");
+        let b = t.dir("agents/b/skills");
+        let s = source(&store, &["x"]);
+        let only_a = project(&root_a, "weiboap", &a);
+        let acts = propose_links(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&only_a),
+            &[cell(&s, "x", &only_a)],
+        );
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].target_path, a.join("x"));
+        assert!(!b.join("x").exists());
+    }
+
     #[test]
     fn broken_links_are_skipped_inside_whole_linked_targets() {
         let t = TempTree::new();
@@ -627,6 +675,112 @@ mod tests {
         );
         // 整目录链接的目标读进去就是本体位置，清理会删到本体位置里
         assert!(o.domains[1].broken.is_empty());
+    }
+
+    /// AC1 / AC6：目录不存在的目标照常成列，其格为 Missing；坏链只扫已存在的目标；
+    /// 目录建出来后同一列的链接状态照常
+    #[test]
+    fn scan_lists_targets_whose_dir_is_absent_as_missing_columns() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/a");
+        let proj = t.dir("proj");
+        let claude = t.dir("proj/.claude/skills");
+        t.link(&claude.join("rotten"), &t.root().join("gone"));
+        let absent = proj.join(".agents/skills");
+
+        let s = store_source(&store, "proj", &proj, &["a"]);
+        let here = project(&proj, "claude-code", &claude);
+        let not_yet = absent_target(&proj, "codex", &absent);
+        let ids = |ts: &[Target]| ts.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
+
+        let ov = scan(std::slice::from_ref(&s), &[here.clone(), not_yet.clone()]);
+        assert_eq!(ov.domains.len(), 1);
+        let page = &ov.domains[0];
+        // 两个目标都成列
+        assert_eq!(
+            ids(&page.targets),
+            vec![here.id.clone(), not_yet.id.clone()]
+        );
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(
+            page.rows[0]
+                .cells
+                .iter()
+                .map(|c| c.target_id.clone())
+                .collect::<Vec<_>>(),
+            vec![here.id.clone(), not_yet.id.clone()]
+        );
+        // 目录不存在的那格自然是 Missing
+        assert_eq!(page.rows[0].cells[0].state, CellState::Missing);
+        assert_eq!(page.rows[0].cells[1].state, CellState::Missing);
+        // 坏链只扫已存在的目标
+        assert_eq!(
+            page.broken
+                .iter()
+                .map(|a| a.item_name.clone())
+                .collect::<Vec<_>>(),
+            vec!["rotten".to_string()]
+        );
+        // 扫描不许把目录建出来
+        assert_eq!(entry_kind(&absent), EntryKind::Missing);
+
+        // 补齐后目录已建：下一轮同一列的链接状态照常
+        std::fs::create_dir_all(&absent).unwrap();
+        t.link(&absent.join("a"), &store.join("a"));
+        let ov = scan(
+            std::slice::from_ref(&s),
+            &[here.clone(), project(&proj, "codex", &absent)],
+        );
+        let page = &ov.domains[0];
+        assert_eq!(
+            ids(&page.targets),
+            vec![here.id.clone(), not_yet.id.clone()]
+        );
+        assert_eq!(page.rows[0].cells[1].state, CellState::Linked);
+    }
+
+    /// R3 / 设计 §1：目录不存在的目标也能生成 Create；`exists == false` 的目标不产出 Unlink
+    #[test]
+    fn propose_links_covers_absent_dirs_while_unlinks_skip_them() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/a");
+        let proj = t.dir("proj");
+        let absent = proj.join(".agents/skills");
+        let s = store_source(&store, "proj", &proj, &["a"]);
+        let not_yet = absent_target(&proj, "codex", &absent);
+
+        // 选中一个目录尚不存在的格 → 照常生成 Create
+        let acts = propose_links(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&not_yet),
+            &[cell(&s, "a", &not_yet)],
+        );
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].kind, ActionKind::Create);
+        assert_eq!(acts[0].target, absent);
+        assert_eq!(acts[0].target_path, absent.join("a"));
+        assert_eq!(entry_kind(&absent), EntryKind::Missing);
+
+        // 目录在两次扫描之间被建了出来、里面已有链接：过期的 exists == false 仍不产出删链动作
+        std::fs::create_dir_all(&absent).unwrap();
+        t.link(&absent.join("a"), &store.join("a"));
+        assert!(propose_unlinks(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&not_yet),
+            &[cell(&s, "a", &not_yet)],
+        )
+        .is_empty());
+        // 同一个目标标成已存在就照常产出
+        let now = project(&proj, "codex", &absent);
+        let acts = propose_unlinks(
+            std::slice::from_ref(&s),
+            std::slice::from_ref(&now),
+            &[cell(&s, "a", &now)],
+        );
+        assert_eq!(acts.len(), 1);
+        assert_eq!(acts[0].kind, ActionKind::Unlink);
     }
 
     #[test]
@@ -781,9 +935,12 @@ mod tests {
         assert!(rules[0].excluded.is_empty());
         assert!(covering(&rules, "/a/skills", "x").is_some());
 
-        // 别的 source 不受影响
+        // 别的 source 不受影响；它没有规则，exclude 会新建一条只有排除名单的
         exclude(&mut rules, Path::new("/other"), "x");
         assert!(rules[0].excluded.is_empty());
+        assert_eq!(rules.len(), 2);
+        assert!(rules[1].targets.is_empty());
+        assert!(rules[1].excluded.contains("x"));
         remove_auto_link(&mut rules, Path::new("/other"));
         assert_eq!(rules.len(), 1);
         remove_auto_link(&mut rules, &dotted);
@@ -816,6 +973,25 @@ mod tests {
             &source,
             &["claude-code".into(), "cursor".into()],
         );
+        assert!(rules.is_empty());
+    }
+
+    /// 排除名单非空时，目标去空也要保住整条规则，否则排除记录会一起丢掉
+    #[test]
+    fn remove_auto_link_targets_keeps_a_rule_that_still_excludes_something() {
+        let mut rules: Vec<AutoLink> = Vec::new();
+        let source = PathBuf::from("/a/skills");
+        upsert_auto_link(&mut rules, &source, &["codex".into()]);
+        exclude(&mut rules, &source, "x");
+
+        remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
+        assert_eq!(rules.len(), 1);
+        assert!(rules[0].targets.is_empty());
+        assert!(rules[0].excluded.contains("x"));
+
+        // 排除名单也清空后才真正删除
+        include(&mut rules, &source, "x");
+        remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
         assert!(rules.is_empty());
     }
 

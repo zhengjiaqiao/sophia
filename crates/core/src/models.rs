@@ -57,6 +57,17 @@ pub enum LinkStyle {
     Relative,
 }
 
+/// 从 harness 自己的数据库里取 agent 显示名
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentLabels {
+    /// 未展开的模板，含 `~` 与 `$VAR`
+    pub path: String,
+    pub table: String,
+    pub id_column: String,
+    pub name_column: String,
+}
+
 /// 一个 harness 的目录约定。路径已按当前机器解析
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +82,12 @@ pub struct Harness {
     /// 每个 agent 一个项目的 skill 目录，通配已展开
     #[serde(default)]
     pub agent_dirs: Vec<PathBuf>,
+    /// `global_dir` 由 harness 自己装配：仍是本体位置，但不生成可写列
+    #[serde(default)]
+    pub managed_global_dir: bool,
+    /// agent 目录名 → 显示名的查表方式
+    #[serde(default)]
+    pub agent_labels: Option<AgentLabels>,
 }
 
 /// 本体位置的来源类别
@@ -157,6 +174,8 @@ pub struct Target {
     pub label: String,
     pub path: PathBuf,
     pub scope: TargetScope,
+    /// 目录是否已存在（`is_dir()`，跟随软链）。false 的目标只在引入弹层可选，建链时就地创建
+    pub exists: bool,
     /// 目标目录本身是软链且 real_path 等于某本体位置时，为该 Source 的 id
     pub linked_whole_to: Option<String>,
 }
@@ -217,6 +236,7 @@ pub struct DomainPage {
     /// `"global"` 或 `"project:<normalized path>"`
     pub key: String,
     pub label: String,
+    /// 本域全部目标，即表格的列；目录尚不存在的也在其中（列头标「将新建目录」）
     pub targets: Vec<Target>,
     pub rows: Vec<DomainRow>,
     pub broken: Vec<PlannedAction>,
@@ -298,6 +318,35 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ActionKind::Unlink).unwrap(),
             json!("unlink")
+        );
+    }
+
+    #[test]
+    fn harness_agent_labels_use_camel_case_and_default_to_absent() {
+        let harness: Harness = serde_json::from_value(json!({
+            "id": "weiboap",
+            "displayName": "WeiboAP",
+            "projectDir": null,
+            "globalDir": "/g",
+            "universal": false
+        }))
+        .unwrap();
+        assert!(!harness.managed_global_dir);
+        assert_eq!(harness.agent_labels, None);
+        let labels = AgentLabels {
+            path: "~/Library/Application Support/WeiboAP/agents.db".into(),
+            table: "agents".into(),
+            id_column: "id".into(),
+            name_column: "name".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&labels).unwrap(),
+            json!({
+                "path": "~/Library/Application Support/WeiboAP/agents.db",
+                "table": "agents",
+                "idColumn": "id",
+                "nameColumn": "name"
+            })
         );
     }
 

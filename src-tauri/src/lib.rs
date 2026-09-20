@@ -94,7 +94,8 @@ struct McpPreview {
     issues: Vec<symsync_core::mcp::McpIssue>,
 }
 
-/// 一次发现：本体位置与目标目录，按当前设置解析。
+/// 一次发现：本体位置与目标目录，按当前设置解析。返回的目标含目录尚不存在的那批
+/// （`Target.exists == false`），它们照常成列，补齐时目录就地创建。
 /// 目标目录里指向已知位置之外的软链再合成出外部本体位置
 fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = runtime_env()?;
@@ -151,6 +152,7 @@ fn mcp_auto_watch_paths(state: &AppState) -> Result<BTreeSet<PathBuf>, String> {
 
 fn resync_watchers(app: &tauri::AppHandle, state: &AppState, skills_overview: &Overview) {
     // skill 目录与 MCP 文件父目录共用同一个去抖器，切换 MCP/Skills 页不会丢掉另一方监视。
+    // 只盯已存在的目标目录；还没建出来的目录没有东西可监视，watch 只会失败刷日志。
     let mut paths: BTreeSet<PathBuf> = skills_overview
         .sources
         .iter()
@@ -160,6 +162,7 @@ fn resync_watchers(app: &tauri::AppHandle, state: &AppState, skills_overview: &O
                 .domains
                 .iter()
                 .flat_map(|d| &d.targets)
+                .filter(|t| t.exists)
                 .map(|t| t.path.clone()),
         )
         .collect();
@@ -244,6 +247,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     if rules.is_empty() {
         return Ok(None);
     }
+    // 规则可以指向目录尚不存在的目标，首次补齐时一并把目录建出来
     let targets: Vec<Target> = scanned
         .domains
         .iter()
@@ -304,6 +308,7 @@ fn propose_unlinks(
 /// 按动作所在的目标目录回查，算出这条链接该用什么写法
 fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
     let same = |a: &Path, b: Option<&Path>| b.is_some_and(|b| normalize(a) == normalize(b));
+    // 目录待创建的目标同样要按它所属的项目决定写法
     match overview
         .domains
         .iter()
