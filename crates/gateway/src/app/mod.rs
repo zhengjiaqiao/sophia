@@ -678,7 +678,7 @@ impl App {
                 selected: m.selected,
             })
             .collect();
-        settings.prev_model = Some(old.prev_model.clone()).filter(|_| old.had_prev_model);
+        settings.prev_model = old.had_prev_model.then_some(old.prev_model.clone());
         settings.had_prev_model = old.had_prev_model;
         settings.published_slugs = old.published_slugs.clone();
         if settings.selected().is_empty() {

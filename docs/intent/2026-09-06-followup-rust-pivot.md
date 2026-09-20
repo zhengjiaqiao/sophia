@@ -17,7 +17,7 @@
 3. **手动清单跑通**：`docs/manual-checks.md` 的 macOS 部分尚未由人工执行。
 4. **前端小项**：Skills tab 刷新后清空上一轮结果；`outcomeText`/`rowText` 加 `never` 兜底；自定义同步的 `listSourceItems` 失败时提示而非静默为空；目标行用稳定 key。
 5. **core 小项**：`propose` 把坏链目标存进 `Cell` 而不是二次读盘；`EntryKind::File` 单独状态或在 UI 标注；`list_dir` 逐项错误不再静默丢弃；`store` 写入前 fsync；serde 快照测试锁定 `Outcome`/`Domain`/`Selection` 形状。
-6. **工程**：`package-lock.json` 的 npmmirror 源改回官方源或在文档说明；`src-tauri/Cargo.toml` 的 description/authors 占位；CSP 从 null 收紧；CI 固定 Rust 版本。
+6. **工程**：`package-lock.json` 的 npmmirror 源改回官方源或在文档说明；`src-tauri/Cargo.toml` 的 description/authors 占位；CSP 从 null 收紧；~~CI 固定 Rust 版本~~（2026-09-20 已做：固定到 1.98.0。起因是本机 clippy 0.1.94 与 CI 的 stable 版本不同，一条新 lint 让 PR #7 的 Linux 任务变红）。
 
 ## 不在范围内
 
