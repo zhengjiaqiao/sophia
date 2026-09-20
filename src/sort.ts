@@ -12,7 +12,9 @@ export function toggleSort(prev: SortState | null, key: string): SortState {
   return { key, dir: "asc" };
 }
 
-/// 目标列按状态排序时的次序：好的在前，越靠后越需要处理
+/// 目标列按状态排序时的次序：好的在前，越靠后越需要处理。
+/// `wholeLinked` 是旧名 `unwritable` 改的；`readOnly` 是新增的第八种状态，
+/// 扫描不产出，只有真的写失败之后由上层构造（见 types.ts 的 CellState）
 export const STATE_RANK: Record<CellState, number> = {
   own: 0,
   linked: 0,
@@ -20,7 +22,8 @@ export const STATE_RANK: Record<CellState, number> = {
   broken: 2,
   foreign: 3,
   duplicate: 4,
-  unwritable: 5,
+  wholeLinked: 5,
+  readOnly: 6,
 };
 
 /// 取值比较器：字符串走 localeCompare，数字按大小。Array.sort 本身稳定，同值保持原序

@@ -21,14 +21,12 @@ const TOKEN_FILE = "src/tokens.css";
 const LEGACY = [
   "src/App.css",
   "src/App.tsx",
-  "src/DomainView.tsx",
   "src/ImportDialog.tsx",
   "src/McpImportDialog.tsx",
   "src/McpTab.css",
   "src/McpTab.tsx",
   "src/ModelsTab.tsx",
   "src/SettingsPanel.tsx",
-  "src/SkillsTab.tsx",
 ];
 
 const rules = [
