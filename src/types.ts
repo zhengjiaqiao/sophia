@@ -124,6 +124,22 @@ export interface DeleteSourcePlan {
 /// 待处理栏里四类需要用户拿主意的问题，与 store.rs 的 IssueKind 一一对应。
 /// 「整目录链到别处」与「目录只读」必须分开：前者的动作是拆开，后者是再试一次
 export type IssueKind = "duplicateSource" | "brokenLink" | "readOnlyTarget" | "wholeLinkedTarget";
+
+/// 服务端存着的删除计划：plan 只用来渲染确认弹窗，执行凭 planId。
+/// 计划不经前端往返——in_git（仓库里的不代删）是道安全闸门，
+/// 让它在前端转一圈就等于可以被改掉
+export interface PlannedDeletion {
+  planId: string;
+  plan: DeleteSourcePlan;
+}
+
+/// 与 store.rs 的 IgnoredIssue 对应
+export interface IgnoredIssue {
+  kind: IssueKind;
+  key: string;
+  /// 忽略时间，RFC 3339 的 UTC 写法，可直接按字典序排
+  at: string;
+}
 export type Outcome =
   | { status: "created" }
   | { status: "skipped" }
