@@ -47,6 +47,10 @@ impl std::error::Error for AppError {}
 
 type Op<A, R> = Box<dyn Fn(A) -> R + Send + Sync>;
 type Get<R> = Box<dyn Fn() -> R + Send + Sync>;
+/// 参数按引用传入的操作
+type RefOp<A, R> = Box<dyn for<'a> Fn(&'a A) -> R + Send + Sync>;
+type StrOp<R> = Box<dyn Fn(&str) -> R + Send + Sync>;
+type PathOp<R> = Box<dyn Fn(&Path) -> R + Send + Sync>;
 
 /// 对外部世界的全部依赖，测试里全部替换成假的
 pub struct Deps {
@@ -56,20 +60,20 @@ pub struct Deps {
     /// agents-manager 的数据目录（`~/.agents-manager`），只读
     pub agents_manager_dir: PathBuf,
     pub load_settings: Get<io::Result<GatewaySettings>>,
-    pub save_settings: Box<dyn Fn(&GatewaySettings) -> io::Result<()> + Send + Sync>,
-    pub service_install: Box<dyn Fn(&service::Spec) -> io::Result<()> + Send + Sync>,
-    pub service_uninstall: Box<dyn Fn(&str) -> io::Result<()> + Send + Sync>,
-    pub service_status: Box<dyn Fn(&str) -> io::Result<service::Status> + Send + Sync>,
-    pub service_restart: Box<dyn Fn(&str) -> io::Result<()> + Send + Sync>,
+    pub save_settings: RefOp<GatewaySettings, io::Result<()>>,
+    pub service_install: RefOp<service::Spec, io::Result<()>>,
+    pub service_uninstall: StrOp<io::Result<()>>,
+    pub service_status: StrOp<io::Result<service::Status>>,
+    pub service_restart: StrOp<io::Result<()>>,
     /// 在端口上确认本功能的路由已就绪（内部自带等待）
     pub router_healthy: Op<u16, Result<(), String>>,
     /// 运行 `codex debug models --bundled`
     pub bundled: Get<io::Result<Vec<u8>>>,
     pub get_key: Get<Result<String, String>>,
-    pub set_key: Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
+    pub set_key: StrOp<Result<(), String>>,
     pub get_agents_manager_key: Get<Result<String, String>>,
     /// 把当前可执行文件复制到稳定路径；返回副本是否被更新
-    pub install_binary: Box<dyn Fn(&Path) -> io::Result<bool> + Send + Sync>,
+    pub install_binary: PathOp<io::Result<bool>>,
     /// Codex 桌面应用主进程的启动时间（unix 秒）；没在运行为 None
     pub codex_started_at: Get<Option<u64>>,
     pub codex_version: Get<String>,
@@ -310,6 +314,17 @@ impl App {
         self.merge_locked(ids, api_base)
     }
 
+    /// 拉取模型列表要用的地址和密钥；任一缺失则报错，不联网
+    pub fn provider_for_fetch(&self) -> Result<(String, String), AppError> {
+        let settings = self.load()?;
+        if settings.base_url.is_empty() {
+            return Err(AppError::new("invalid", "还没有填写网关地址"));
+        }
+        let key = (self.deps.get_key)().ok().filter(|k| !k.trim().is_empty());
+        let key = key.ok_or_else(|| AppError::new("invalid", "还没有保存密钥"))?;
+        Ok((settings.base_url, key))
+    }
+
     /// 把网关返回的模型列表并入已保存的列表，保留原有的勾选和显示名
     pub fn merge_fetched_models(&self, ids: Vec<String>, api_base: &str) -> Result<(), AppError> {
         let _guard = self.lock.lock().unwrap();
@@ -374,7 +389,7 @@ impl App {
                     if pick
                         .display_name
                         .as_deref()
-                        .map_or(true, |n| n.trim().is_empty())
+                        .is_none_or(|n| n.trim().is_empty())
                     {
                         pick.display_name = existing.model.display_name.clone();
                     }

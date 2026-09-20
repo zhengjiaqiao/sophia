@@ -4,6 +4,7 @@ pub mod app;
 pub mod keychain;
 pub mod provider;
 pub mod router;
+pub mod runtime;
 pub mod service;
 pub mod sysproxy;
 pub mod takeover;

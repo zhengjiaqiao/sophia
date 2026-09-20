@@ -25,6 +25,11 @@ struct AppState {
     watcher: Mutex<Option<watch::Watcher>>,
     mcp_plan: Mutex<Option<(String, symsync_core::mcp::PreparedPlan)>>,
     next_mcp_plan: AtomicU64,
+    /// 同一进程里写 ~/.codex/config.toml 的路径（MCP 同步、模型页）共用这把锁，避免互相撞出“配置已变化”。
+    /// 跨进程仍靠 atomicfile 的写前写后校验兜底。
+    config_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// 模型网关；仅 macOS 上有
+    gateway: Option<std::sync::Arc<symsync_gateway::app::App>>,
 }
 
 #[derive(Serialize)]
@@ -56,7 +61,7 @@ fn runtime_env() -> Result<Env, String> {
     Ok(Env::from_system())
 }
 
-fn runtime_store_dir() -> Result<PathBuf, String> {
+pub(crate) fn runtime_store_dir() -> Result<PathBuf, String> {
     #[cfg(debug_assertions)]
     if let Some(root) = std::env::var_os("SYMSYNC_TEST_HOME") {
         let root = PathBuf::from(root);
@@ -139,6 +144,9 @@ fn auto_import_mcp(
         return Ok(None);
     }
     // 自动选择已由规则逐条授予跨域权限；这里不接受未经过该筛选的手动选择。
+    // blocking_lock 不能在 tokio 运行时线程上调用（会 panic）。Tauri 的同步命令和文件监视回调都跑在
+    // 独立线程上，所以这里没问题；哪天把这段改成从异步上下文里调，要换成 `.lock().await`。
+    let _config_guard = state.config_lock.blocking_lock();
     Ok(Some(symsync_core::mcp::execute(plan, true)))
 }
 
@@ -241,6 +249,9 @@ fn apply_mcp(
         }
         cache.take().expect("checked above").1
     };
+    // blocking_lock 不能在 tokio 运行时线程上调用（会 panic）。Tauri 的同步命令和文件监视回调都跑在
+    // 独立线程上，所以这里没问题；哪天把这段改成从异步上下文里调，要换成 `.lock().await`。
+    let _config_guard = state.config_lock.blocking_lock();
     Ok(symsync_core::mcp::execute(plan, allow_cross_domain))
 }
 
@@ -607,6 +618,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
+            config_lock: Default::default(),
+            gateway: gateway::build(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
             store: Store::new(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
             watcher: Mutex::new(None),
             mcp_plan: Mutex::new(None),
@@ -637,7 +650,14 @@ pub fn run() {
             set_mcp_auto_import,
             remove_mcp_auto_import,
             list_harnesses,
-            set_harness_enabled
+            set_harness_enabled,
+            gateway::gateway_state,
+            gateway::gateway_save_provider,
+            gateway::gateway_fetch_models,
+            gateway::gateway_select_models,
+            gateway::gateway_enable,
+            gateway::gateway_restore,
+            gateway::gateway_takeover
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
