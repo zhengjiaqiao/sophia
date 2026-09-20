@@ -1,5 +1,8 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
+mod gateway;
 mod watch;
+
+pub use gateway::cli as gateway_cli;
 
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -22,6 +25,11 @@ struct AppState {
     watcher: Mutex<Option<watch::Watcher>>,
     mcp_plan: Mutex<Option<(String, symsync_core::mcp::PreparedPlan)>>,
     next_mcp_plan: AtomicU64,
+    /// 同一进程里写 ~/.codex/config.toml 的路径（MCP 同步、模型页）共用这把锁，避免互相撞出“配置已变化”。
+    /// 跨进程仍靠 atomicfile 的写前写后校验兜底。
+    config_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// 模型网关；仅 macOS 上有
+    gateway: Option<std::sync::Arc<symsync_gateway::app::App>>,
 }
 
 #[derive(Serialize)]
@@ -53,7 +61,7 @@ fn runtime_env() -> Result<Env, String> {
     Ok(Env::from_system())
 }
 
-fn runtime_store_dir() -> Result<PathBuf, String> {
+pub(crate) fn runtime_store_dir() -> Result<PathBuf, String> {
     #[cfg(debug_assertions)]
     if let Some(root) = std::env::var_os("SYMSYNC_TEST_HOME") {
         let root = PathBuf::from(root);
@@ -136,6 +144,10 @@ fn auto_import_mcp(
         return Ok(None);
     }
     // 自动选择已由规则逐条授予跨域权限；这里不接受未经过该筛选的手动选择。
+    // Tauri 2 的同步命令内联跑在 IPC 线程上，这里 blocking_lock 不会 panic，
+    // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
+    // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
+    let _config_guard = state.config_lock.blocking_lock();
     Ok(Some(symsync_core::mcp::execute(plan, true)))
 }
 
@@ -238,6 +250,10 @@ fn apply_mcp(
         }
         cache.take().expect("checked above").1
     };
+    // Tauri 2 的同步命令内联跑在 IPC 线程上，这里 blocking_lock 不会 panic，
+    // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
+    // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
+    let _config_guard = state.config_lock.blocking_lock();
     Ok(symsync_core::mcp::execute(plan, allow_cross_domain))
 }
 
@@ -604,6 +620,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
+            config_lock: Default::default(),
+            gateway: gateway::build(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
             store: Store::new(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
             watcher: Mutex::new(None),
             mcp_plan: Mutex::new(None),
@@ -634,7 +652,14 @@ pub fn run() {
             set_mcp_auto_import,
             remove_mcp_auto_import,
             list_harnesses,
-            set_harness_enabled
+            set_harness_enabled,
+            gateway::gateway_state,
+            gateway::gateway_save_provider,
+            gateway::gateway_fetch_models,
+            gateway::gateway_select_models,
+            gateway::gateway_enable,
+            gateway::gateway_restore,
+            gateway::gateway_takeover
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

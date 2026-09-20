@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "src-tauri"]
+members = ["crates/core", "crates/gateway", "src-tauri"]
 resolver = "2"
 
 # 发布档配置必须放在 workspace 根，放在成员包里会被 cargo 忽略。

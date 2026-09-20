@@ -8,16 +8,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # 固定版本：@stable 会随上游前进，新版 clippy 新增的 lint 会让本来绿的 CI 突然变红；
+      # 开发机上的 clippy 往往更旧，本地零警告不代表 CI 通过。升级时一起改两处并本地复跑。
+      - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: clippy
       - run: cargo test -p symsync-core
-      - run: cargo clippy -p symsync-core --all-targets -- -D warnings
+      - run: cargo test -p symsync-gateway
+      - run: cargo clippy -p symsync-core -p symsync-gateway --all-targets -- -D warnings
   app:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
       - uses: actions/setup-node@v4
         with:
           node-version: 22

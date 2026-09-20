@@ -1,4 +1,6 @@
 //! symsync-core：软链接同步与 skill 矩阵的核心逻辑。无 UI、无 Tauri 依赖。
+pub mod atomicfile;
+pub mod codex_models;
 pub mod discovery;
 pub mod fs;
 pub mod mcp;

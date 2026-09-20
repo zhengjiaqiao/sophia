@@ -1,0 +1,25 @@
+[package]
+name = "symsync-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "Codex 模型网关：本机路由、协议转换、launchd 常驻。不依赖 tauri。"
+
+[dependencies]
+symsync-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value", "preserve_order"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "stream", "http2"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "io-util"] }
+hyper = { version = "1.11.1", features = ["server", "http1"] }
+hyper-util = { version = "0.1.20", features = ["tokio", "server", "http1"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
+futures-util = "0.3.34"
+ruzstd = "0.9.0"
+sha2 = "0.11.0"
+base64 = "0.23.1"
+url = "2.5.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"

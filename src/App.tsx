@@ -5,6 +5,7 @@ import { api } from "./api";
 import type { AutoLink, McpReport, Overview } from "./types";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
+import ModelsTab from "./ModelsTab";
 import SettingsPanel from "./SettingsPanel";
 import "./App.css";
 
@@ -20,7 +21,9 @@ export default function App() {
   const [selectedKey, setSelectedKey] = useState(ALL_KEY);
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"skills" | "mcp">("skills");
+  const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("skills");
+  // 「模型」标签页只在后端确认支持（当前只有 macOS）时才出现；读取失败时静默隐藏
+  const [modelsSupported, setModelsSupported] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   // 手动添加的项目路径，用来判断侧栏哪些域可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
@@ -116,8 +119,25 @@ export default function App() {
     };
   }, [requestRefresh]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .gatewayState()
+      .then((state) => {
+        if (!cancelled) setModelsSupported(state.supported);
+      })
+      .catch(() => {
+        // 读不到就当作不支持，标签页保持隐藏
+        if (!cancelled) setModelsSupported(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const domains = overview?.domains ?? [];
-  const sidebarDomains = activeTab === "mcp" ? mcpSidebarDomains : domains;
+  const sidebarDomains =
+    activeTab === "mcp" ? mcpSidebarDomains : activeTab === "models" ? [] : domains;
   // 域 key → 手动项目路径；自动发现的项目与 agent 域不在其中，因此没有移除按钮
   const manualByKey = new Map(manualProjects.map((p) => [`project:${p}`, p]));
 
@@ -145,6 +165,7 @@ export default function App() {
       }
       return;
     }
+    if (activeTab === "models") return;
     if (!overview) return;
     const manualProjectKeys = new Set(manualProjects.map((p) => `project:${p}`));
     if (
@@ -212,6 +233,15 @@ export default function App() {
           >
             MCP
           </button>
+          {modelsSupported && (
+            <button
+              className={activeTab === "models" ? "active" : ""}
+              disabled={busy}
+              onClick={() => setActiveTab("models")}
+            >
+              模型
+            </button>
+          )}
         </nav>
         <ul>
           <li
@@ -308,7 +338,7 @@ export default function App() {
             onRefresh={refresh}
             onError={setError}
           />
-        ) : (
+        ) : activeTab === "mcp" ? (
           <McpTab
             selectedKey={selectedKey}
             onError={setError}
@@ -317,6 +347,8 @@ export default function App() {
             refreshKey={refreshKey}
             onDomains={updateMcpSidebarDomains}
           />
+        ) : (
+          <ModelsTab onError={setError} busy={busy} onBusy={setBusyState} />
         )}
       </main>
       {backgroundMcpReport && (

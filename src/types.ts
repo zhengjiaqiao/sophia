@@ -193,3 +193,49 @@ export interface McpAutoImportRule {
 }
 
 export const actionId = (a: PlannedAction): string => `${a.kind}|${a.targetPath}`;
+
+/// 与 gateway_* 命令的返回类型一一对应（camelCase），见 docs/gateway-commands.md
+export interface GatewayProviderModel {
+  id: string;
+  slug: string;
+  displayName: string;
+  selected: boolean;
+}
+export interface GatewayProvider {
+  baseUrl: string;
+  hasKey: boolean;
+  models: GatewayProviderModel[];
+}
+export interface GatewayRouter {
+  installed: boolean;
+  running: boolean;
+  port: number;
+  error: string;
+}
+export interface GatewayCodex {
+  version: string;
+  running: boolean;
+  catalogVersion: string;
+  drift: boolean;
+}
+/// 非空：本机当前由 agents-manager 启用，可以接管
+export interface GatewayTakeover {
+  baseUrl: string;
+  selectedCount: number;
+}
+export interface GatewayState {
+  supported: boolean;
+  provider: GatewayProvider;
+  enabled: boolean;
+  needsCodexRestart: boolean;
+  router: GatewayRouter;
+  codex: GatewayCodex;
+  /** 非空：Codex 设置里有别的工具写的同名项或 provider，启用不可用 */
+  conflict: string;
+  takeover: GatewayTakeover | null;
+}
+/// gateway_select_models 的入参：只带 id 与用户可编辑的显示名
+export interface GatewaySelectedModel {
+  id: string;
+  displayName: string;
+}

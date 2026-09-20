@@ -1,10 +1,16 @@
 SHELL := /bin/bash
-.PHONY: test test-core lint build-web dev build format
+.PHONY: test test-core test-gateway test-web lint build-web dev build format
 
-test: test-core lint build-web
+test: test-core test-gateway lint build-web test-web
 
 test-core:
 	cargo test -p symsync-core
+
+test-gateway:
+	cargo test -p symsync-gateway
+
+test-web:
+	node --test tests/*.test.ts
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
