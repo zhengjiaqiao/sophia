@@ -50,6 +50,24 @@ created: 2026-09-21
 
 **偏离**：规范写「No mono」。路径要对齐、要分得清 `l` 与 `1`，保留等宽。
 
+### 1.2.1 这三个字族都没有中文字形
+
+界面绝大部分文字是中文，会落到系统 CJK 字体。所以上表的字族选择**只对西文生效**——skill 名、路径、数字、agent 名。三条推论，实现时必须知道：
+
+1. **`text-transform: uppercase` 对中文完全无效。**「自动同步」「本体位置」不会有任何变化。它只在 `SKILL` `CLAUDE CODE` 这类西文标签上起作用。
+2. **`letter-spacing` 对中文有效**，但那是字间距不是字母间距。区域标签的 0.96px 用在中文上读起来是「疏排」，这是想要的效果，保留。
+3. **字重要靠字族提供。** 中文落到苹方后，`font-weight: 600` 取的是苹方的中黑，与 Barlow Condensed 的 600 不是同一个视觉重量。中西文混排的一行里两边粗细会略有差异，这是可接受的代价，不要为此改成 700。
+
+字体栈写全，CJK 回退显式指定：
+
+```css
+--font-ui:   Barlow, "PingFang SC", "Microsoft YaHei", sans-serif;
+--font-cond: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", sans-serif;
+--font-mono: "IBM Plex Mono", ui-monospace, "PingFang SC", monospace;
+```
+
+**字体文件打进应用，不走 CDN。** 桌面应用不该联网取字体。用 `@fontsource/*`，**只引用到的 latin 子集与字重**（Barlow 400、Barlow Condensed 600/700、IBM Plex Mono 400），不要整包引入——整包含全部字重与西里尔/越南语等子集，各约 1.5MB。
+
 ### 1.3 间距与形状
 
 - 基准 8px，子单位 4 / 12 / 16 / 18 / 24（`DESIGN-spacex.md` §Layout）。

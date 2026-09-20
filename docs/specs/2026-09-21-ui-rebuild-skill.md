@@ -158,17 +158,17 @@ core 新增 `sync::trash(path) -> Result<()>`，用 `trash` crate（跨平台废
 
 | 名称 | 来源 | 用到什么 | 确认状态 |
 |---|---|---|---|
-| `trash` crate | crates.io | `trash::delete(path)`，macOS / Windows / Linux 三平台 | **未验证**——还没引入、没跑过。是本次最高风险项，见下 |
+| `trash` crate | crates.io | `trash::delete(path)` | **已验证**——v5.2.9 已加入 `symsync-core`，本机实跑：造一个带子目录和文件的目录，`delete` 返回 `Ok(())`，原路径消失，`~/.Trash/` 下出现同名目录 |
 | `discovery::installed()` | 本仓库 `crates/core/src/discovery.rs:525` | 已安装 agent 列表 | **已验证**——本机实跑，41 中 9 |
 | `CellState` 七种取值 | 本仓库 `crates/core/src/models.rs:186` | 状态映射的输入 | **已验证**——读源码确认 |
-| Google Fonts（Barlow / Barlow Condensed / IBM Plex Mono） | fonts.googleapis.com | 三个字族 | **未验证**——桌面应用离线可用性未确认，见风险 |
+| Barlow / Barlow Condensed / IBM Plex Mono | `@fontsource/*` v5.3.0（npm） | 只引 latin 子集的 Barlow 400、Condensed 600/700、Mono 400 | **已验证**——三个包都在 npm 上，整包各约 1.5MB（含全字重与多子集），按子集引入即可。**不走 CDN** |
 
 ---
 
 ## 风险
 
-1. **`trash` crate 未验证**（最高）。它是 AC14 唯一的实现手段，但还没在本项目里跑过：macOS 上是否需要额外权限、Tauri 打包后能否正常调用、失败时的错误类型，三者都未知。**进入实现前必须先真实调用一次**——在 `crates/core` 里写一个临时测试，在临时目录造个目录删掉，确认它真的进了废纸篓。
-2. **字体离线可用性未验证**。桌面应用不该依赖网络取字体，但现在画稿走的是 Google Fonts CDN。实现时要么把字体文件打进应用，要么确认回退栈（`Arial Narrow` 之于 Barlow Condensed）可接受。这会影响全部排版尺寸——Arial Narrow 比 Barlow Condensed 宽，堆叠列头那个 84px 的算账会不成立。
+1. **`trash` 在 Tauri 打包后的行为仍未验证**。本机 `cargo test` 里可用已确认，但打包成 .app、带上沙箱与签名之后能否调用系统废纸篓，只能在 `make build` 产物上验证。AC14 的真实验证必须在打包产物上做，不能只在 `make dev` 里做。
+2. **三个字族都没有中文字形**（组件规范 §1.2.1）。界面绝大部分文字是中文，会落到系统苹方。后果：`text-transform: uppercase` 对中文完全无效，中西文混排一行里字重会略有差异。**实现时第一件事是把真实文案放进真实字体里看一眼**——画稿用的是英文 agent 名和少量中文，比例与真实界面不同。
 3. **`Unwritable` 改名是破坏性的**，涉及 core、Tauri 层、前端三处。好在不落盘，一次改干净即可。
 4. **删本体是不可逆操作**（即便进废纸篓）。AC14–AC16 的真实验证必须在真机上做，代理验证全绿不足以放行。
 

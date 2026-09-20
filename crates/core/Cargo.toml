@@ -12,6 +12,7 @@ toml_edit = "0.25"
 dirs = "7"
 pathdiff = "0.2"
 rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
+trash = { version = "5", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 junction = "2"
