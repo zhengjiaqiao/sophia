@@ -29,6 +29,10 @@ export const KIND_LABEL: Record<IssueKind, string> = {
   brokenLink: "链接失效",
   wholeLinkedTarget: "整目录链接",
   readOnlyTarget: "目录不可写",
+  // MCP 页自己渲染待处理，这两类不会走到 skill 的待处理页；
+  // 但 Record<IssueKind, …> 要穷尽，留着也让以后合并两页时有现成的
+  differentCopies: "几份不一样",
+  invalidLocation: "配置读不出",
 };
 
 /// 列表里的先后：同名本体最需要拿主意，排最前；目录不可写多半是一过性的，排最后
@@ -37,6 +41,8 @@ const KIND_RANK: Record<IssueKind, number> = {
   brokenLink: 1,
   wholeLinkedTarget: 2,
   readOnlyTarget: 3,
+  differentCopies: 4,
+  invalidLocation: 5,
 };
 
 /// 「删 X 的」的一个选项：删哪一处的本体

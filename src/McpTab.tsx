@@ -20,6 +20,7 @@ import {
   viewOf,
   type McpIssueKind,
 } from "./mcpCellState";
+import { issueKey } from "./pages/pendingIssues";
 import {
   AgentIcon,
   AgentMark,
@@ -156,8 +157,9 @@ export default function McpTab({
   const [importTargetIds, setImportTargetIds] = useState<string[] | null>(null);
   const [importPageOverride, setImportPageOverride] = useState<McpDomain | null>(null);
   const [pane, setPane] = useState<Pane | null>(null);
-  // 忽略过的状况。**只在本次会话里有效**：`ignore_issue` 的四个类别是 skill 的软链问题，
-  // MCP 这两类不在其中，落盘要先给 core 加类别
+  // 忽略过的状况，落盘在 settings.json。key 由 core 的 IgnoredIssue::key_for 算，
+  // 前端这份走同一个公式（tests/issue-key-contract.test.ts 两边钉死）——
+  // 涉及的位置有变化，key 就变，自然重新提示
   const [ignored, setIgnored] = useState<Set<string>>(new Set());
   // 待处理栏当前停在第几条
   const [cursor, setCursor] = useState(0);
@@ -168,10 +170,15 @@ export default function McpTab({
     const version = ++refreshVersion.current;
     onBusy(true);
     try {
-      const [next, rules] = await Promise.all([api.scanMcp(), api.listMcpAutoImports()]);
+      const [next, rules, ignoredList] = await Promise.all([
+        api.scanMcp(),
+        api.listMcpAutoImports(),
+        api.listIgnored(),
+      ]);
       if (mounted.current && version === refreshVersion.current) {
         setOverview(next);
         setAutoImports(rules);
+        setIgnored(new Set(ignoredList.map((i) => i.key)));
       }
     } catch (error) {
       onError(String(error));
@@ -481,14 +488,19 @@ export default function McpTab({
   for (const issue of overview?.issues ?? []) {
     const location = locationOf(issue.locationId);
     if (location === undefined || !pageKeys.has(location.domain)) continue;
+    // key 必须和 core 的 IgnoredIssue::key_for 同源，否则写进 settings.json 的
+    // 那个和下次算出来的对不上——忽略会看起来生效、重启后失效。
+    // 条目名并进标识里：同一个文件里两条不同名的问题，光靠路径会算出同一个 key，
+    // 忽略一条就把另一条也吞了
+    const ident = issue.name === null ? location.path : `${location.path}#${issue.name}`;
     pending.push({
-      key: `invalidLocation|${location.path}|${issue.name ?? ""}`,
+      key: issueKey("invalidLocation", [ident]),
       kind: "invalidLocation",
       message:
         issue.name === null
           ? (viewOf("invalid", { service: "", location: location.label, source: "" }).reason ?? "")
           : `${location.label} 里的 ${issue.name} 这次读不出来：${issue.message}`,
-      paths: [location.path],
+      paths: [ident],
     });
   }
   for (const page of pages) {
@@ -497,11 +509,13 @@ export default function McpTab({
     for (const row of page.rows) {
       const ids = differingSourceIds(row, targetIds);
       if (ids.length === 0) continue;
+      // 同上：与 core 同源。服务名并进去，否则同一组位置上的两个服务会撞 key
+      const paths = [...ids.map((id) => locationOf(id)?.path ?? id), `#${row.name}`];
       pending.push({
-        key: `differentCopies|${page.key}|${row.name}`,
+        key: issueKey("differentCopies", paths),
         kind: "differentCopies",
         message: differentCopiesMessage(row.name, ids.map(labelOf)),
-        paths: ids.map((id) => locationOf(id)?.path ?? id),
+        paths,
       });
     }
   }
@@ -697,8 +711,10 @@ export default function McpTab({
               variant="link"
               title="这一条先别提示了；位置有变化时会重新提示"
               onClick={() => {
+                // 先乐观更新再写盘：这一条马上从栏里消失，用户不用等 IPC
                 setIgnored((prev) => new Set(prev).add(current.key));
                 setCursor(0);
+                void api.ignoreIssue(current.kind, current.paths).catch(onError);
               }}
             >
               忽略

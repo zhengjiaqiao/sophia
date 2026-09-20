@@ -46,3 +46,19 @@ test("kind 不同、路径相同，key 也不同", () => {
 test("pathsOfKey 能把位置取回来", () => {
   assert.deepEqual(pathsOfKey(PINNED), ["/a/skills/defuddle", "/b/skills/defuddle"]);
 });
+
+test("MCP 那两类的 key 也走同一个公式", () => {
+  // 忽略要能跨重启生效，前端算的 key 必须和 core 写盘那个一致。
+  // 这两类的标识里带了 # 后缀（条目名 / 服务名）——光靠路径会让同一个文件、
+  // 同一组位置上的不同条目撞成一个 key，忽略一条就把另一条也吞了
+  const a = issueKey("invalidLocation", ["/p/mcp.json#notion"]);
+  const b = issueKey("invalidLocation", ["/p/mcp.json#figma"]);
+  assert.notEqual(a, b, "同一个文件里两条不同名的问题必须是两个 key");
+
+  const c = issueKey("differentCopies", ["/a/mcp.json", "/b/mcp.json", "#notion"]);
+  const d = issueKey("differentCopies", ["/b/mcp.json", "/a/mcp.json", "#notion"]);
+  assert.equal(c, d, "位置顺序不该影响 key");
+
+  const e = issueKey("differentCopies", ["/a/mcp.json", "/b/mcp.json", "#figma"]);
+  assert.notEqual(c, e, "同一组位置上的两个服务必须是两个 key");
+});

@@ -32,6 +32,10 @@ pub enum IssueKind {
     ReadOnlyTarget,
     /// 目标整个目录链到了别的本体 → 拆开
     WholeLinkedTarget,
+    /// MCP：几个位置各有一份同名配置、连的地址不一样 → 看两边差在哪
+    DifferentCopies,
+    /// MCP：某个位置的配置文件这次读不出来 → 去看看
+    InvalidLocation,
 }
 
 impl IssueKind {
@@ -42,6 +46,8 @@ impl IssueKind {
             IssueKind::BrokenLink => "brokenLink",
             IssueKind::ReadOnlyTarget => "readOnlyTarget",
             IssueKind::WholeLinkedTarget => "wholeLinkedTarget",
+            IssueKind::DifferentCopies => "differentCopies",
+            IssueKind::InvalidLocation => "invalidLocation",
         }
     }
 }
@@ -319,12 +325,14 @@ mod tests {
     #[test]
     fn key_separates_kinds_and_normalizes_paths() {
         let paths = [PathBuf::from("/a/skills/x")];
-        // 路径完全相同时，四个 kind 必须给出四个互不相同的 key
+        // 路径完全相同时，每个 kind 都必须给出互不相同的 key
         let kinds = [
             IssueKind::DuplicateSource,
             IssueKind::BrokenLink,
             IssueKind::ReadOnlyTarget,
             IssueKind::WholeLinkedTarget,
+            IssueKind::DifferentCopies,
+            IssueKind::InvalidLocation,
         ];
         let keys: std::collections::BTreeSet<String> = kinds
             .iter()
