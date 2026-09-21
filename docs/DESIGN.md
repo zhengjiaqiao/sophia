@@ -65,6 +65,11 @@ typography:
     fontWeight: 400
     lineHeight: 1.6
 
+borders:
+  hairline: "1px solid {colors.hairline}"
+  strong: "1px solid {colors.ink}"
+  disabled: "1px solid {colors.disabled}"
+
 rounded:
   none: 0
   input: 4px
@@ -88,28 +93,32 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 9px 24px
+    height: 34px
+    padding: 0 24px
   button-ghost-compact:
     backgroundColor: "transparent"
     borderColor: "{colors.ink}"
     textColor: "{colors.ink}"
     typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 5px 16px
+    height: 26px
+    padding: 0 16px
   button-inverse:
     backgroundColor: "{colors.ink}"
     borderColor: "{colors.ink}"
     textColor: "{colors.canvas}"
     typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 9px 24px
+    height: 34px
+    padding: 0 24px
   button-disabled:
     backgroundColor: "transparent"
     borderColor: "{colors.disabled}"
     textColor: "{colors.ink-faint}"
     typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 9px 24px
+    height: 34px
+    padding: 0 24px
   button-link:
     backgroundColor: "transparent"
     textColor: "{colors.ink-mute}"
@@ -121,21 +130,24 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.pill}"
-    padding: 7px 16px
+    height: 34px
+    padding: 0 16px
   chip-selected:
     backgroundColor: "{colors.ink}"
     borderColor: "{colors.ink}"
     textColor: "{colors.canvas}"
     typography: "{typography.body}"
     rounded: "{rounded.pill}"
-    padding: 7px 16px
+    height: 34px
+    padding: 0 16px
   chip-disabled:
     backgroundColor: "{colors.canvas}"
     borderColor: "{colors.hairline}"
     textColor: "{colors.ink-faint}"
     typography: "{typography.body}"
     rounded: "{rounded.pill}"
-    padding: 7px 16px
+    height: 34px
+    padding: 0 16px
   chip-compact:
     backgroundColor: "{colors.canvas}"
     borderColor: "{colors.hairline}"
@@ -252,10 +264,16 @@ components:
 |---|---|---|
 | `display` | 28 / 1.1 | 二级页面名、区域大标题 |
 | `wordmark` | 20 / 1.0 | 顶栏 wordmark |
-| `nav-cap` | 15 / 1.6 | **顶栏页签**——一级导航，比普通按钮高半档；可点高度撑到 36px |
-| `body` | 15 / 1.6 | 表格、说明、**skill 名**、选择片文字 |
+| `body` | 15 / 1.6 | 表格、说明、条目名、选择片文字 |
 | `button-cap` / `caption` | 13 | 按钮；副行、文字链、提示条副行 |
 | `micro-cap` / `mono` | 12 / **2.0** | 区域标签、列头、方标签；路径与计数 |
+
+**五档之外有两个 `body` 档的变体，它们不是第六档**——字号行高与 `body` 完全一致，变的是字族、字重、字距与大小写：
+
+| 变体 | 写法 | 用在哪 |
+|---|---|---|
+| `nav-cap` | Condensed 15 / 700 / +1.17 / 大写 | 顶栏页签（一级导航），可点高度 36 |
+| `head-cap` | Condensed 15 / 600 / +1.1（`--track-head`） | 区域小标题、弹窗标题 |
 
 **第一版的错**：20 / 15 / 14 / 13 / 12 五档挤在 8px 里，14 与 15、13 与 12 眼睛分不出来，整页读起来像一张密排的表。参照 `DESIGN-spacex.md`：display 到 body 是三倍以上的跳跃，小字靠**行高 2.0** 撑出呼吸感而不是靠字号。所以：页面名拉到 28；砍掉 14 这一档；12px 的标签行高 2.0（占 24px 高，与 SpaceX 的 `micro-cap` 一致）。
 
@@ -294,7 +312,7 @@ components:
 
 ## Shapes
 
-**圆角只有三个值，且形状承担语义**：
+**圆角只有四个值，且形状承担语义**（`none` 是其中之一，也是绝大多数元素的取值）：
 
 | 值 | 给谁 | 语义 |
 |---|---|---|
@@ -311,32 +329,16 @@ components:
 
 只有一种形：ghost pill。四个变体：默认、禁用（**必须同时给 `title` 说明原因**，类型上强制）、反色（表示"现在开着"的开关态）、文字链（次级动作）。两档尺寸按所在容器的高度选，不按重要性选。
 
-### 命中区与视觉尺寸是两回事
+### 状态与动效
 
-**视觉可以小，命中区不能小于 24×24。** 12px 的方形复选框、片上 9px 的 `×`、6px 的圆点——它们的**视觉**尺寸由层级决定，但点击目标要用透明内边距撑到 24px 以上；列表行里的选择记号更进一步：**整行可点**，记号只是告诉你点了会发生什么。
-
-### 可点的面：hover 怎么表示
-
-零色彩系统里能用的只有描边和反色，按面的形态分两种：
-
-| 面 | 静息 | hover / focus-visible |
-|---|---|---|
-| 有描边的块（模型区、输入框、选择片） | `hairline` 描边 | 描边转 `ink`，**底色不变**——换底色会把里面 canvas 底的片糊掉 |
-| 列表行（侧栏项、表格行） | 无描边 | 底色转 `surface` |
-
-### 什么时候才有按钮
-
-**界面里的改动默认当场生效。** 勾选、开关、改名、删片、筛选——点了就是结果，不需要第二步去确认它。这条原则曾散在四处注释里（「返回即保存」「改一个生效一个」「切换开关即保存」「不给拉取模型单独按钮」），从没被正面写出来，于是新写的浮层又长出一对「保存 / 关闭」。
-
-只有三种情况配得上一个按钮：
-
-1. **要离开当前语境去做一件外部的事**：`配置`、`启用` / `撤下`、`重启 Codex`、`导入 skill`
-2. **多个输入必须一次提交、中途状态没有意义**：网关地址 + 密钥 → `保存`（且保存即拉取）
-3. **真会丢东西、需要确认一道**：删本体、开启自动同步 / 自动引入、MCP 的批量或跨域写入、重启 Codex——与「页面还是弹层」那四处确认同源
-
-**「关闭」「取消」「确定」不是动作。** 浮层点外面或 Esc 关；二级页面 `←` 或 Esc 回；离开即提交。唯一例外是确认弹窗里的 `取消`——那是在回答一个问题，不是在关一个面。
-
-一句判据：**操作本身已经说明了结果，就不要再放一个按钮教用户怎么完成它。**
+| 项 | 取值 |
+|---|---|
+| 可点元素高度 | `--control-h: 34px` / `--control-h-compact: 26px`，**一律偶数**——奇数高会让 pill 端帽只有 75% 覆盖，同一圈描边一半实一半虚，读起来就是「锯齿」 |
+| 命中区下限 | `--hit-min: 24px` |
+| 焦点 | 只认 `:focus-visible`：1px `ink` 外框、偏移 2px；反色面上转 `canvas`。**不要系统默认的蓝色焦点环**——那是零色彩界面里唯一闯进来的彩色 |
+| 过渡 | 只有一档 `--motion-fast: 120ms`，且 `prefers-reduced-motion` 下全部关掉 |
+| 数字 | `font-variant-numeric: tabular-nums`，计数跳动时不抖 |
+| 字形渲染 | `-webkit-font-smoothing: antialiased`，关掉 macOS 次像素渲染的彩边（零色彩系统里它是真能看出来的） |
 
 ### 选择片 `Chip`
 
@@ -353,7 +355,7 @@ components:
 | `own` 已开启 · 本体 | 13px 外环 + 6px 内实心 |
 | 无格 | 8px `hairline` 短横，不可点 |
 
-只有这三种常驻。异常态（链接失效、指向别处、同名被占、整目录链走、写不进去）**画成空心**，但点击行为与文案分叉——由提示条说原因，需要拿主意的进待处理栏。
+**前三行是状态，第四行不是**：「无格」说的是这儿根本没有这一格，不是某种状态。常驻的状态只有那三种。异常态（链接失效、指向别处、同名被占、整目录链走、写不进去）**画成空心**，但点击行为与文案分叉——由提示条说原因，需要拿主意的进待处理栏。
 
 选中行反色时：实心与外环转 `canvas`，空心描边转 `ink-faint-inverse`。
 
@@ -380,6 +382,59 @@ components:
 | 灰描边不可选 | 已选的都是本体、或这个 agent 整目录链走 | — |
 
 「全部」片对所有 agent 做同一件事。**不要**把它退化成只有「开启（N）」「关掉（M）」两个按钮——那丢掉了"针对某个 agent"这一维。
+
+### 空态与忙碌态
+
+四种空态（扫描中、这个域没有目录、筛选无结果、一个都没有）各自说明现状与下一步；两个动作时**只有一个是 pill**，另一个降文字链。busy 期间受影响控件 `opacity: .45`，**五个豁免**：设置、筛选输入框、取消选择、提示条关闭、表头排序——保持 `opacity: 1`，不加聚焦态，对比本身就说明它还能用。
+
+### 表头排序
+
+默认无箭头（`visibility: hidden` 占位，hover 时行不跳）、hover 出 `ink-faint` 箭头、激活转 `ink`。busy 期间不禁用。
+
+## Patterns
+
+**这一节只放与产品无关的组织法**——换一个产品、换一批对象，这些规则照样成立。
+凡是「本产品叫什么、算什么、显示几个」的裁决，一律去 `## 产品裁决`。
+
+### 说结果，不说机制
+
+软链是我们的实现手段，不是用户的目的。**只在用户需要据此判断时才提软链**——删本体的弹窗要说「2 条链接会因此失效」，因为那正是他要权衡的；其余时候说他能看见的结果。
+
+| 别写 | 写 |
+|---|---|
+| 导入＝在选中的 agent 下建软链接 | 让这些 skill 出现在「全局」的列表里 |
+| 没有需要建立的链接 | `<agent>` 下已经有同名的 `<skill>`，没有覆盖它 |
+| 操作失败，请重试 | `<agent>` 的 skills 目录写不进去 |
+
+### 命中区与视觉尺寸是两回事
+
+**视觉可以小，命中区不能小于 24×24。** 12px 的方形复选框、片上 9px 的 `×`、6px 的圆点——它们的**视觉**尺寸由层级决定，但点击目标要用透明内边距撑到 24px 以上；列表行里的选择记号更进一步：**整行可点**，记号只是告诉你点了会发生什么。
+
+### 可点的面：hover 怎么表示
+
+零色彩系统里能用的只有描边和反色，按面的形态分两种：
+
+| 面 | 静息 | hover |
+|---|---|---|
+| 有 `hairline` 描边的块（区块、输入框、未选中的片） | `hairline` 描边 | 描边转 `ink`，**底色不变**——换底色会把里面 canvas 底的片糊掉 |
+| 无描边的列表行（侧栏项、表格行） | 无描边 | 底色转 `surface` |
+| **静息就已经是 `ink` 描边的面**（按钮、选中的片） | `ink` 描边或反色 | 描边已经到顶，**改底**：ghost pill 铺 `surface`、按下转 `hairline`；反色面退到 `ink-mute` |
+
+第三行是前两条规则的盲区：描边只有 hairline → ink 一档可升，升满了就没有下一档，所以只能改底。
+
+### 什么时候才有按钮
+
+**界面里的改动默认当场生效。** 勾选、开关、改名、删片、筛选——点了就是结果，不需要第二步去确认它。这条原则曾散在四处注释里（「返回即保存」「改一个生效一个」「切换开关即保存」「不给拉取模型单独按钮」），从没被正面写出来，于是新写的浮层又长出一对「保存 / 关闭」。
+
+只有三种情况配得上一个按钮：
+
+1. **要离开当前语境去做一件外部的事**：`配置`、`启用` / `撤下`、`重启 Codex`、`导入 skill`
+2. **多个输入必须一次提交、中途状态没有意义**：网关地址 + 密钥 → `保存`（且保存即拉取）
+3. **真会丢东西、需要确认一道**：删本体、开启自动同步 / 自动引入、MCP 的批量或跨域写入、重启 Codex——与「页面还是弹层」那四处确认同源
+
+**「关闭」「取消」「确定」不是动作。** 浮层点外面或 Esc 关；二级页面 `←` 或 Esc 回；离开即提交。唯一例外是确认弹窗里的 `取消`——那是在回答一个问题，不是在关一个面。
+
+一句判据：**操作本身已经说明了结果，就不要再放一个按钮教用户怎么完成它。**
 
 ### 反馈：四个地方会说话，一件事只在一个地方说
 
@@ -413,25 +468,10 @@ components:
 
 **确认只给这四件事，且只确认一道**：删本体（真会丢内容）、开启自动同步 / 自动引入（一次批量建几十条，规模用户看不见）、MCP 的**批量或跨域**写入（跨域会把请求头和令牌一并复制过去）、**重启 Codex**（会结束正在运行的进程）。开关链接、清除失效链接、**MCP 同域的单格写入**都不确认。
 
-### 空态与忙碌态
+## 产品裁决
 
-五种空态各自说明现状与下一步；两个动作时**只有一个是 pill**，另一个降文字链。busy 期间受影响控件 `opacity: .45`，**五个豁免**：设置、筛选输入框、取消选择、提示条关闭、表头排序——保持 `opacity: 1`，不加聚焦态，对比本身就说明它还能用。
-
-### 表头排序
-
-默认无箭头（`visibility: hidden` 占位，hover 时行不跳）、hover 出 `ink-faint` 箭头、激活转 `ink`。busy 期间不禁用。
-
-## Patterns
-
-### 说结果，不说机制
-
-软链是我们的实现手段，不是用户的目的。**只在用户需要据此判断时才提软链**——删本体的弹窗要说「2 条链接会因此失效」，因为那正是他要权衡的；其余时候说他能看见的结果。
-
-| 别写 | 写 |
-|---|---|
-| 导入＝在选中的 agent 下建软链接 | 让这些 skill 出现在「全局」的列表里 |
-| 没有需要建立的链接 | `<agent>` 下已经有同名的 `<skill>`，没有覆盖它 |
-| 操作失败，请重试 | `<agent>` 的 skills 目录写不进去 |
+下面几节是 Sophia 自己的决定，**不是设计系统的一部分**。做别的产品时照搬这里的结论没有意义，
+该照搬的是上面的 Foundations / Components / Patterns。
 
 ### 术语
 
@@ -495,6 +535,9 @@ components:
 - 不说「同步」（MCP 页）——它只新增、从不覆盖也不删除
 
 ## Decisions
+
+- **2026-09-21 · 规范自检**：新画布「Sophia 设计系统」按组件重排时，逐条核出这份规范自己的毛病，一次改掉——① 数字对不上四处：「五档」下面列六行（`nav-cap` 与 `body` 同字号同行高，它是 body 的变体不是第六档，另立一小表，同时补上一直在用却从未写进规范的 `head-cap` 与 `--track-head: 1.1px`）、「圆角三个值」实为四个、StateDot「三种常驻」表里四行（第四行「无格」不是状态）、「五种空态」实为四种；② 「可点的面」原来只有两行，漏掉**静息就已经是 ink 描边的面**——描边升满了没有下一档，只能改底，PR #19 实现时只好自己发明，现在补成规范；③ 新增「状态与动效」一节，把 PR #19 落地但规范里查不到的一整组写回来（定高 34/26 且一律偶数、命中区 24、`:focus-visible` 的 1px ink 焦点环、120ms 单档过渡与 `prefers-reduced-motion`、`tabular-nums`、关次像素渲染）；④ front-matter 的 `button-ghost.padding: 9px 24px` 已与实现不符，改成 `height + padding`；⑤ 新增 `borders` 一组——零阴影零渐变，层级几乎全靠描边承担，它却从来没被 token 化。
+- **2026-09-21 · 分层**：`## Patterns` 原来五节没有一条是可复用的模式（术语、来源的名字、计数口径、列的存废、模型页全是 Sophia 的裁决），而真正跨产品的规则反倒躺在 `## Components` 里。现在：跨产品的五节（命中区、可点的面、什么时候才有按钮、四个地方会说话、页面还是弹层）移进 `Patterns`，产品裁决另起 `## 产品裁决`。**这份规范要拿去做别的设计，分层不清就等于过拟合。**
 
 日期为准，后者覆盖前者。完整推理见 `docs/specs/2026-09-21-ui-decisions-log.md`。
 
