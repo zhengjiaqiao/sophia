@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use symsync_core::atomicfile::{self, FileState};
 use symsync_core::codex_models::catalog::{self, Model};
 use symsync_core::codex_models::config::{self, ConfigError, Managed};
-use symsync_core::codex_models::settings::{GatewaySettings, SavedModel};
+use symsync_core::codex_models::settings::{self, GatewaySettings, ProviderSettings, SavedModel};
 
 pub const SERVICE_LABEL: &str = "com.zhengjiaqiao.symsync.gateway";
 /// 本功能放在 Codex 目录下的文件统一用这个前缀，恢复时据此精确清理
@@ -21,6 +21,9 @@ const CATALOG_FILE: &str = "symsync-models.json";
 const ROUTING_FILE: &str = "symsync-routing.json";
 /// 备份后缀：`config.models.bak`，与 MCP 的 `config.mcp.bak` 不撞名
 const BACKUP_SUFFIX: &str = "models";
+/// 接管 agents-manager 时生成的那一家网关的首选 id 与名字（对方只接了 wecode 这一家）；
+/// 实际 id 见 `takeover_provider_id`
+pub const TAKEOVER_PROVIDER_ID: &str = "wecode";
 
 /// 带错误码的错误，显示为 `[代码] 说明`，代码取值见 docs/gateway-commands.md
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +55,7 @@ type Get<R> = Box<dyn Fn() -> R + Send + Sync>;
 type RefOp<A, R> = Box<dyn for<'a> Fn(&'a A) -> R + Send + Sync>;
 type StrOp<R> = Box<dyn Fn(&str) -> R + Send + Sync>;
 type PathOp<R> = Box<dyn Fn(&Path) -> R + Send + Sync>;
+type KeyWrite = Box<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync>;
 
 /// 对外部世界的全部依赖，测试里全部替换成假的
 pub struct Deps {
@@ -70,8 +74,12 @@ pub struct Deps {
     pub router_healthy: Op<u16, Result<(), String>>,
     /// 运行 `codex debug models --bundled`
     pub bundled: Get<io::Result<Vec<u8>>>,
-    pub get_key: Get<Result<String, String>>,
-    pub set_key: StrOp<Result<(), String>>,
+    /// 按网关 id 读密钥
+    pub get_key: StrOp<Result<String, String>>,
+    /// 按网关 id 写密钥：`(id, key)`
+    pub set_key: KeyWrite,
+    /// 按网关 id 删密钥；本来就没有不算错
+    pub delete_key: StrOp<Result<(), String>>,
     pub get_agents_manager_key: Get<Result<String, String>>,
     /// 把当前可执行文件复制到稳定路径；返回副本是否被更新
     pub install_binary: PathOp<io::Result<bool>>,
@@ -106,7 +114,12 @@ pub struct ModelView {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderView {
+    /// 创建后不变；新命令用它指明操作哪一家
+    pub id: String,
+    pub name: String,
     pub base_url: String,
+    /// "chat" 或 "responses"
+    pub protocol: String,
     pub has_key: bool,
     pub models: Vec<ModelView>,
 }
@@ -142,7 +155,10 @@ pub struct TakeoverOffer {
 #[serde(rename_all = "camelCase")]
 pub struct GatewayState {
     pub supported: bool,
+    /// 第一家网关，给还没迁到 `providers` 的旧界面用；一家都没有时是空的
     pub provider: ProviderView,
+    /// 全部网关，按用户添加的顺序
+    pub providers: Vec<ProviderView>,
     pub enabled: bool,
     pub needs_codex_restart: bool,
     pub router: RouterView,
@@ -289,30 +305,85 @@ impl App {
     }
 
     // ----- 动作 -----
+    //
+    // 每个动作都有按网关 id 操作的版本；不带 id 的旧版本作用在第一家上（没有就新建一家），
+    // 给还没迁到多网关的界面用。
+
+    fn guard(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 旧命令作用的那一家：第一家；一家都没有时返回 None，由调用方决定要不要新建
+    fn first_provider_id(&self) -> Result<Option<String>, AppError> {
+        Ok(self.load()?.providers.first().map(|p| p.id.clone()))
+    }
 
     /// 保存网关地址。密钥由 `commit_verified_provider` 或调用方另行写入钥匙串
     pub fn save_provider(&self, base_url: &str) -> Result<(), AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.save_provider_locked(base_url)
+        let _guard = self.guard();
+        let id = self.first_provider_id()?;
+        self.upsert_locked(id.as_deref(), None, base_url)
+            .map(|_| ())
     }
 
-    fn save_provider_locked(&self, base_url: &str) -> Result<(), AppError> {
+    /// 新建或修改一家网关，返回它的 id。`id` 为 None 是新建：id 由名称生成，之后不变。
+    /// `name` 为 None 表示不改名（新建时用地址里的主机名）。
+    pub fn upsert_provider(
+        &self,
+        id: Option<&str>,
+        name: Option<&str>,
+        base_url: &str,
+    ) -> Result<String, AppError> {
+        let _guard = self.guard();
+        self.upsert_locked(id, name, base_url)
+    }
+
+    fn upsert_locked(
+        &self,
+        id: Option<&str>,
+        name: Option<&str>,
+        base_url: &str,
+    ) -> Result<String, AppError> {
         let cleaned = clean_base_url(base_url)?;
+        let name = name.map(str::trim).filter(|name| !name.is_empty());
         let mut settings = self.load()?;
-        let changed = settings.base_url != cleaned;
-        settings.base_url = cleaned;
-        if changed {
-            settings.api_base = None; // 旧地址探明的接口基址作废
+        let (id, changed) = match id {
+            Some(id) => {
+                let provider = settings
+                    .provider_mut(id)
+                    .ok_or_else(|| unknown_provider(id))?;
+                let changed = provider.base_url != cleaned;
+                provider.base_url = cleaned;
+                if changed {
+                    provider.api_base = None; // 旧地址探明的接口基址作废
+                }
+                if let Some(name) = name {
+                    provider.name = name.to_owned();
+                }
+                (id.to_owned(), changed)
+            }
+            None => {
+                let name = name.map(str::to_owned).unwrap_or_else(|| host_of(&cleaned));
+                let taken: Vec<&str> = settings.providers.iter().map(|p| p.id.as_str()).collect();
+                let id = settings::new_provider_id(&name, &taken);
+                settings.providers.push(ProviderSettings {
+                    id: id.clone(),
+                    name,
+                    base_url: cleaned,
+                    ..ProviderSettings::default()
+                });
+                (id, false)
+            }
+        };
+        let publishes = settings.published().iter().any(|p| p.provider == id);
+        if changed && publishes && self.enabled(&settings) {
+            // 上游地址写在路由清单里：地址变了，重写清单即可，路由每个请求都会重读
+            self.republish(&mut settings)?;
         }
         self.save(&settings)?;
-        if changed && self.enabled(&settings) {
-            // 后台服务的启动参数里带着网关地址，地址变了要重装服务
-            self.install_router(&settings)?;
-        }
-        Ok(())
+        Ok(id)
     }
 
     /// 调用方已经用这个密钥向网关校验通过：保存地址、密钥和模型列表。
@@ -324,47 +395,116 @@ impl App {
         ids: Vec<String>,
         api_base: &str,
     ) -> Result<(), AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.guard();
+        let id = self.first_provider_id()?;
+        self.commit_locked(id.as_deref(), None, base_url, key, ids, api_base)
+            .map(|_| ())
+    }
+
+    /// `commit_verified_provider` 的多网关版本，返回这一家的 id
+    pub fn commit_verified_provider_for(
+        &self,
+        id: Option<&str>,
+        name: Option<&str>,
+        base_url: &str,
+        key: &str,
+        ids: Vec<String>,
+        api_base: &str,
+    ) -> Result<String, AppError> {
+        let _guard = self.guard();
+        self.commit_locked(id, name, base_url, key, ids, api_base)
+    }
+
+    fn commit_locked(
+        &self,
+        id: Option<&str>,
+        name: Option<&str>,
+        base_url: &str,
+        key: &str,
+        ids: Vec<String>,
+        api_base: &str,
+    ) -> Result<String, AppError> {
         let key = key.trim();
         if key.is_empty() {
             return Err(AppError::new("invalid", "密钥为空"));
         }
         clean_base_url(base_url)?;
-        (self.deps.set_key)(key).map_err(|e| AppError::new("invalid", e))?;
-        self.save_provider_locked(base_url)?;
-        self.merge_locked(ids, api_base)
+        let id = match id {
+            Some(id) => {
+                // 已有的网关：先确认它存在，再写密钥，最后才改地址——密钥没存成时地址保持原样
+                self.load()?
+                    .provider(id)
+                    .ok_or_else(|| unknown_provider(id))?;
+                (self.deps.set_key)(id, key).map_err(|e| AppError::new("invalid", e))?;
+                self.upsert_locked(Some(id), name, base_url)?
+            }
+            None => {
+                // 新建的网关要先有 id 才有钥匙串账户；密钥没存成就把刚建的这一家撤掉，
+                // 免得界面上多出一张没法用的卡片
+                let id = self.upsert_locked(None, name, base_url)?;
+                if let Err(error) = (self.deps.set_key)(&id, key) {
+                    let mut settings = self.load()?;
+                    settings.providers.retain(|p| p.id != id);
+                    self.save(&settings)?;
+                    return Err(AppError::new("invalid", error));
+                }
+                id
+            }
+        };
+        self.merge_locked(&id, ids, api_base)?;
+        Ok(id)
     }
 
     /// 拉取模型列表要用的地址和密钥；任一缺失则报错，不联网
     pub fn provider_for_fetch(&self) -> Result<(String, String), AppError> {
+        let id = self
+            .first_provider_id()?
+            .ok_or_else(|| AppError::new("invalid", "还没有填写网关地址"))?;
+        self.provider_for_fetch_of(&id)
+    }
+
+    pub fn provider_for_fetch_of(&self, id: &str) -> Result<(String, String), AppError> {
         let settings = self.load()?;
-        if settings.base_url.is_empty() {
+        let provider = settings.provider(id).ok_or_else(|| unknown_provider(id))?;
+        if provider.base_url.is_empty() {
             return Err(AppError::new("invalid", "还没有填写网关地址"));
         }
-        let key = (self.deps.get_key)().ok().filter(|k| !k.trim().is_empty());
+        let key = (self.deps.get_key)(id)
+            .ok()
+            .filter(|k| !k.trim().is_empty());
         let key = key.ok_or_else(|| AppError::new("invalid", "还没有保存密钥"))?;
-        Ok((settings.base_url, key))
+        Ok((provider.base_url.clone(), key))
     }
 
     /// 把网关返回的模型列表并入已保存的列表，保留原有的勾选和显示名
     pub fn merge_fetched_models(&self, ids: Vec<String>, api_base: &str) -> Result<(), AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.merge_locked(ids, api_base)
+        let _guard = self.guard();
+        let id = self
+            .first_provider_id()?
+            .ok_or_else(|| AppError::new("invalid", "还没有填写网关地址"))?;
+        self.merge_locked(&id, ids, api_base)
     }
 
-    fn merge_locked(&self, ids: Vec<String>, api_base: &str) -> Result<(), AppError> {
+    pub fn merge_fetched_models_for(
+        &self,
+        id: &str,
+        ids: Vec<String>,
+        api_base: &str,
+    ) -> Result<(), AppError> {
+        let _guard = self.guard();
+        self.merge_locked(id, ids, api_base)
+    }
+
+    fn merge_locked(&self, id: &str, ids: Vec<String>, api_base: &str) -> Result<(), AppError> {
         let mut settings = self.load()?;
+        let provider = settings
+            .provider_mut(id)
+            .ok_or_else(|| unknown_provider(id))?;
         let api_base = api_base.trim().trim_end_matches('/');
         let api_base_changed =
-            !api_base.is_empty() && settings.api_base.as_deref() != Some(api_base);
+            !api_base.is_empty() && provider.api_base.as_deref() != Some(api_base);
         if api_base_changed {
-            settings.api_base = Some(api_base.to_owned());
+            provider.api_base = Some(api_base.to_owned());
         }
         let mut merged: Vec<SavedModel> = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -372,7 +512,7 @@ impl App {
             if !seen.insert(id.to_owned()) {
                 continue;
             }
-            match settings.models.iter().find(|m| m.model.id == id) {
+            match provider.models.iter().find(|m| m.model.id == id) {
                 Some(existing) => merged.push(existing.clone()),
                 None => merged.push(SavedModel {
                     model: Model {
@@ -384,26 +524,38 @@ impl App {
             }
         }
         // 已勾选但网关这次没返回的模型保留，避免一次网络抖动丢掉选择
-        for model in &settings.models {
+        for model in &provider.models {
             if model.selected && !seen.contains(&model.model.id) {
                 merged.push(model.clone());
             }
         }
-        settings.models = merged;
-        self.save(&settings)?;
-        if api_base_changed && self.enabled(&settings) {
-            self.install_router(&settings)?;
+        provider.models = merged;
+        let publishes = settings.published().iter().any(|p| p.provider == id);
+        if api_base_changed && publishes && self.enabled(&settings) {
+            self.republish(&mut settings)?;
         }
-        Ok(())
+        self.save(&settings)
     }
 
     /// 保存勾选的模型；已启用时同时重写合并目录和路由清单
     pub fn set_models(&self, selected: Vec<Model>) -> Result<(), AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.guard();
+        let id = self
+            .first_provider_id()?
+            .ok_or_else(|| AppError::new("invalid", "还没有填写网关地址"))?;
+        self.set_models_locked(&id, selected)
+    }
+
+    pub fn set_models_for(&self, id: &str, selected: Vec<Model>) -> Result<(), AppError> {
+        let _guard = self.guard();
+        self.set_models_locked(id, selected)
+    }
+
+    fn set_models_locked(&self, id: &str, selected: Vec<Model>) -> Result<(), AppError> {
         let mut settings = self.load()?;
+        let provider = settings
+            .provider_mut(id)
+            .ok_or_else(|| unknown_provider(id))?;
         let mut chosen: Vec<Model> = Vec::new();
         for mut model in selected {
             model.id = model.id.trim().to_owned();
@@ -412,7 +564,7 @@ impl App {
             }
         }
         let mut next: Vec<SavedModel> = Vec::new();
-        for existing in &settings.models {
+        for existing in &provider.models {
             match chosen.iter().find(|m| m.id == existing.model.id) {
                 Some(pick) => {
                     let mut pick = pick.clone();
@@ -435,53 +587,89 @@ impl App {
             }
         }
         for pick in &chosen {
-            if !settings.models.iter().any(|m| m.model.id == pick.id) {
+            if !provider.models.iter().any(|m| m.model.id == pick.id) {
                 next.push(SavedModel {
                     model: pick.clone(),
                     selected: true,
                 });
             }
         }
-        settings.models = next;
-        if !self.enabled(&settings) {
-            return self.save(&settings);
+        provider.models = next;
+        if self.enabled(&settings) {
+            self.republish(&mut settings)?;
         }
-        if settings.selected().is_empty() {
+        self.save(&settings)
+    }
+
+    /// 删掉一家网关：它的模型、地址和钥匙串里的密钥。已启用时同步重写目录。
+    /// 钥匙串条目删了就回不来，界面负责在调用前向用户确认。
+    pub fn remove_provider(&self, id: &str) -> Result<(), AppError> {
+        let _guard = self.guard();
+        let mut settings = self.load()?;
+        if settings.provider(id).is_none() {
+            return Err(unknown_provider(id));
+        }
+        let published_here = settings.published().iter().any(|p| p.provider == id);
+        settings.providers.retain(|p| p.id != id);
+        if published_here && self.enabled(&settings) {
+            self.republish(&mut settings)?;
+        }
+        self.save(&settings)?;
+        // 设置已经不再引用这一家之后才删密钥：中途失败时，留下一个没人用的密钥好过留下一家没密钥的网关
+        (self.deps.delete_key)(id)
+            .map_err(|e| AppError::new("internal", format!("网关已删除，但清除它的密钥失败: {e}")))
+    }
+
+    /// 已启用时，勾选或上游变了：让 Codex 目录下的两份清单跟上。
+    /// 先确保后台的路由程序是当前版本，再写清单——旧版路由不认清单里的归属，
+    /// 会把所有第三方模型都发给启动参数里的那一家，第二家的请求内容就发错了地方。
+    fn republish(&self, settings: &mut GatewaySettings) -> Result<(), AppError> {
+        if settings.published().is_empty() {
             return Err(AppError::new(
                 "invalid",
                 "已启用时至少要保留一个模型；如需全部移除请先恢复",
             ));
         }
-        self.write_catalogs(&mut settings)?;
+        self.install_router(settings)?;
+        self.write_catalogs(settings)?;
         // 被取消的模型若正是 Codex 当前的默认模型，改回启用前的值
-        let active: Vec<String> = settings.selected().iter().map(Model::slug).collect();
-        let retired: Vec<String> = settings
-            .published_slugs
-            .iter()
-            .filter(|s| !active.contains(s))
-            .cloned()
-            .collect();
+        let retired = retired_slugs(settings);
         let snapshot = self.read_config()?;
-        let updated = reset_default_model(&snapshot.text, &settings, &retired);
-        self.write_config(&snapshot, &updated)?;
-        self.save(&settings)
+        let updated = reset_default_model(&snapshot.text, settings, &retired);
+        self.write_config(&snapshot, &updated)
     }
 
     /// 先让路由常驻并确认健康，再写 Codex 设置
     pub fn enable(&self) -> Result<(), AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.guard();
         let mut settings = self.load()?;
-        if settings.base_url.is_empty() {
+        if settings.providers.iter().all(|p| p.base_url.is_empty()) {
             return Err(AppError::new("invalid", "还没有填写网关地址"));
         }
-        if (self.deps.get_key)().map_or(true, |k| k.trim().is_empty()) {
-            return Err(AppError::new("invalid", "还没有保存密钥"));
-        }
-        if settings.selected().is_empty() {
+        if settings.published().is_empty() {
             return Err(AppError::new("invalid", "还没有勾选任何模型"));
+        }
+        // 只检查有模型要发布的网关：没勾选任何模型的那几家不影响启用
+        for provider in &settings.providers {
+            if provider.selected().is_empty() {
+                continue;
+            }
+            if provider.base_url.is_empty() {
+                return Err(AppError::new(
+                    "invalid",
+                    format!("网关「{}」还没有填写地址", provider.name),
+                ));
+            }
+            if (self.deps.get_key)(&provider.id).map_or(true, |k| k.trim().is_empty()) {
+                return Err(AppError::new(
+                    "invalid",
+                    if settings.providers.len() == 1 {
+                        "还没有保存密钥".to_owned()
+                    } else {
+                        format!("网关「{}」还没有保存密钥", provider.name)
+                    },
+                ));
+            }
         }
         let first = self.read_config()?;
         if self.detect_agents_manager(&first.text).is_some() {
@@ -507,13 +695,19 @@ impl App {
                 settings.prev_model = current;
             }
         }
-        self.write_catalogs(&mut settings)?;
+        // 先确保后台路由是当前版本，再写清单，理由同 `republish`：升级后第一次点启用时旧版路由还在跑
         self.install_router(&settings)?;
+        self.write_catalogs(&mut settings)?;
         // 装服务、等路由就绪要花几秒，这期间别人可能改过设置：基于最新内容重新生成，绝不拿旧内容覆盖
         let latest = self.read_config()?;
         let applied = config::apply(&latest.text, &managed).map_err(config_error)?;
+        // 已启用时再点启用也会走到这里：默认模型若指向一个已经不在目录里的标识
+        // （比如旧的单网关格式迁移后标识带上了前缀），一并改回启用前的值
+        let text = reset_default_model(&applied.text, &settings, &retired_slugs(&settings));
+        if text != latest.text {
+            self.write_config(&latest, &text)?;
+        }
         if applied.changed {
-            self.write_config(&latest, &applied.text)?;
             settings.added_newline = applied.added_newline;
             settings.changed_at = Some((self.deps.now)());
         }
@@ -564,14 +758,12 @@ impl App {
                 "run",
                 "--port",
                 &settings.port.to_string(),
-                "--third-party-url",
-                settings.upstream_base(),
+                // 上游地址和协议不在启动参数里：它们写在路由清单里，路由每个请求重读，
+                // 增删网关、改地址都不用重装后台服务
                 "--routing-catalog",
                 &self.routing_path().to_string_lossy(),
                 "--log",
                 &log_dir.join("router.log").to_string_lossy(),
-                "--protocol",
-                settings.protocol(),
             ]
             .iter()
             .map(|s| s.to_string())
@@ -604,16 +796,20 @@ impl App {
         let before = std::fs::read(self.catalog_path()).ok();
         let native = catalog::load_native(&self.deps.codex_home, || (self.deps.bundled)())
             .map_err(internal)?;
-        let models = settings.selected();
-        for slug in models.iter().map(Model::slug) {
-            if !settings.published_slugs.contains(&slug) {
-                settings.published_slugs.push(slug);
+        let models = settings.published();
+        for published in &models {
+            if !settings.published_slugs.contains(&published.slug) {
+                settings.published_slugs.push(published.slug.clone());
             }
         }
         let combined = catalog::build_combined(&native.models, &models)
             .map_err(|e| AppError::new("invalid", e))?;
-        let routing = catalog::build_routing(&models, &settings.published_slugs)
-            .map_err(|e| AppError::new("invalid", e))?;
+        let routing = catalog::build_routing(
+            &models,
+            &settings.routing_providers(),
+            &settings.published_slugs,
+        )
+        .map_err(|e| AppError::new("invalid", e))?;
         // 先写路由清单再写合并目录：选择器里出现的模型必须已经能被路由识别
         self.write_own_file(&self.routing_path(), &routing)?;
         self.write_own_file(&self.catalog_path(), &combined)?;
@@ -647,10 +843,7 @@ impl App {
 
     /// 从 Codex 设置里移除本功能的两项，清理本功能文件并卸载后台服务。路由不通时也可用
     pub fn restore(&self) -> Result<Vec<String>, AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.guard();
         let mut settings = self.load()?;
         let managed = self.managed(&settings);
         let snapshot = self.read_config()?;
@@ -729,10 +922,7 @@ impl App {
 
     /// 接管 agents-manager 的现有配置：地址、模型、显示名、密钥、启用前默认模型原样带过来
     pub fn takeover(&self) -> Result<(), AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.guard();
         let first = self.read_config()?;
         let detected = self
             .detect_agents_manager(&first.text)
@@ -745,30 +935,51 @@ impl App {
         })?;
 
         let mut settings = self.load()?;
-        settings.base_url = clean_base_url(&old.base_url)?;
-        settings.api_base = Some(old.api_base.trim().to_owned()).filter(|b| !b.is_empty());
-        settings.protocol = if old.protocol == "responses" {
-            "responses".into()
-        } else {
-            "chat".into()
+        // 对方只有一家网关。同一家（地址相同）重复接管时覆盖原来那一家；
+        // 用户自己建的网关即使 id 相同，只要地址不同就绝不覆盖——另起一家
+        let base_url = clean_base_url(&old.base_url)?;
+        let target = takeover_provider_id(&settings, &base_url);
+        let provider = ProviderSettings {
+            id: target.clone(),
+            name: TAKEOVER_PROVIDER_ID.to_owned(),
+            base_url,
+            api_base: Some(old.api_base.trim().to_owned()).filter(|b| !b.is_empty()),
+            protocol: if old.protocol == "responses" {
+                "responses".into()
+            } else {
+                "chat".into()
+            },
+            models: old
+                .models
+                .iter()
+                .map(|m| SavedModel {
+                    model: Model {
+                        id: m.id.clone(),
+                        display_name: Some(m.display_name.trim().to_owned())
+                            .filter(|n| !n.is_empty()),
+                        context_window: m.context_window,
+                        vision: m.vision,
+                    },
+                    selected: m.selected,
+                })
+                .collect(),
         };
-        settings.models = old
-            .models
-            .iter()
-            .map(|m| SavedModel {
-                model: Model {
-                    id: m.id.clone(),
-                    display_name: Some(m.display_name.trim().to_owned()).filter(|n| !n.is_empty()),
-                    context_window: m.context_window,
-                    vision: m.vision,
-                },
-                selected: m.selected,
-            })
-            .collect();
+        match settings.provider_mut(&target) {
+            Some(existing) => *existing = provider,
+            None => settings.providers.push(provider),
+        }
         settings.prev_model = old.had_prev_model.then_some(old.prev_model.clone());
         settings.had_prev_model = old.had_prev_model;
-        settings.published_slugs = old.published_slugs.clone();
-        if settings.selected().is_empty() {
+        // 对方的标识不带网关前缀，接管后全部换成带前缀的：旧标识留在这里，会进停用名单
+        for slug in &old.published_slugs {
+            if !settings.published_slugs.contains(slug) {
+                settings.published_slugs.push(slug.clone());
+            }
+        }
+        if settings
+            .provider(&target)
+            .is_none_or(|p| p.selected().is_empty())
+        {
             return Err(AppError::new(
                 "invalid",
                 "agents-manager 里没有选中的模型，无法接管",
@@ -784,7 +995,7 @@ impl App {
             return Err(error);
         }
         // 路由确认健康之后才动密钥：失败的接管不能覆盖本功能原有的密钥
-        if let Err(error) = (self.deps.set_key)(key.trim()) {
+        if let Err(error) = (self.deps.set_key)(&target, key.trim()) {
             self.remove_own_traces();
             return Err(AppError::new("invalid", error));
         }
@@ -812,6 +1023,21 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// 只把 agents-manager 的密钥复制过来（命令行的 adopt-key）。放进接管会用的那一家的账户，
+    /// 规则与 `takeover` 相同，所以不会覆盖用户自己那家同名网关的密钥。返回用的网关 id
+    pub fn adopt_agents_manager_key(&self) -> Result<String, AppError> {
+        let _guard = self.guard();
+        let old = takeover::read_state(&self.deps.agents_manager_dir).map_err(|e| {
+            AppError::new("invalid", format!("读取 agents-manager 的状态失败: {e}"))
+        })?;
+        let key = (self.deps.get_agents_manager_key)().map_err(|e| {
+            AppError::new("invalid", format!("读取 agents-manager 的密钥失败: {e}"))
+        })?;
+        let target = takeover_provider_id(&self.load()?, &clean_base_url(&old.base_url)?);
+        (self.deps.set_key)(&target, key.trim()).map_err(|e| AppError::new("invalid", e))?;
+        Ok(target)
     }
 
     /// 接管的收尾：一次原子写把两个键从对方改指向本功能
@@ -846,7 +1072,9 @@ impl App {
         }
         let applied =
             config::apply(&removed.text, &self.managed(settings)).map_err(config_error)?;
-        self.write_config(&latest, &applied.text)?;
+        // 对方的标识不带网关前缀，接管后都进了停用名单；Codex 的默认模型若正是其中之一，改回启用前的值
+        let text = reset_default_model(&applied.text, settings, &retired_slugs(settings));
+        self.write_config(&latest, &text)?;
         // 对方当初给末行补过的换行还在文件里，恢复时同样要还原
         settings.added_newline = applied.added_newline || old_added_newline;
         settings.changed_at = Some((self.deps.now)());
@@ -869,32 +1097,39 @@ impl App {
     }
 
     pub fn state(&self) -> GatewayState {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = self.guard();
         let settings = self.load().unwrap_or_default();
         let mut view = GatewayState {
             supported: true,
             ..Default::default()
         };
-        view.provider.base_url = settings.base_url.clone();
-        view.provider.has_key = (self.deps.get_key)().is_ok_and(|k| !k.trim().is_empty());
-        view.provider.models = settings
-            .models
+        view.providers = settings
+            .providers
             .iter()
-            .map(|m| ModelView {
-                id: m.model.id.clone(),
-                slug: m.model.slug(),
-                display_name: m
-                    .model
-                    .display_name
-                    .clone()
-                    .filter(|n| !n.trim().is_empty())
-                    .unwrap_or_else(|| m.model.id.clone()),
-                selected: m.selected,
+            .map(|provider| ProviderView {
+                id: provider.id.clone(),
+                name: provider.name.clone(),
+                base_url: provider.base_url.clone(),
+                protocol: provider.protocol().to_owned(),
+                has_key: (self.deps.get_key)(&provider.id).is_ok_and(|k| !k.trim().is_empty()),
+                models: provider
+                    .models
+                    .iter()
+                    .map(|m| ModelView {
+                        id: m.model.id.clone(),
+                        slug: provider.slug_of(&m.model.id),
+                        display_name: m
+                            .model
+                            .display_name
+                            .clone()
+                            .filter(|n| !n.trim().is_empty())
+                            .unwrap_or_else(|| m.model.id.clone()),
+                        selected: m.selected,
+                    })
+                    .collect(),
             })
             .collect();
+        view.provider = view.providers.first().cloned().unwrap_or_default();
 
         match self.read_config() {
             Ok(snapshot) => {
@@ -920,7 +1155,9 @@ impl App {
         }
 
         view.router.port = settings.port;
-        view.router.protocol = settings.protocol().to_owned();
+        // 协议已经挪到每家网关各自身上（多网关）。`router.protocol` 只留给还没迁过去的旧界面，
+        // 取兼容字段那一家（＝第一家）的值；一家都没有时为空，旧界面自己退回 "chat"
+        view.router.protocol = view.provider.protocol.clone();
         view.router.installed =
             (self.deps.service_status)(SERVICE_LABEL).is_ok_and(|s| s.installed);
         if view.enabled || view.router.installed {
@@ -954,6 +1191,39 @@ impl App {
         }
         view
     }
+}
+
+/// 接管来的配置该落到哪一家：地址相同的那家（重复接管）；否则新起一个 id，
+/// 首选 `wecode`，已被用户自己的网关占用就顺延
+fn takeover_provider_id(settings: &GatewaySettings, base_url: &str) -> String {
+    if let Some(same) = settings.providers.iter().find(|p| p.base_url == base_url) {
+        return same.id.clone();
+    }
+    let taken: Vec<&str> = settings.providers.iter().map(|p| p.id.as_str()).collect();
+    settings::new_provider_id(TAKEOVER_PROVIDER_ID, &taken)
+}
+
+fn unknown_provider(id: &str) -> AppError {
+    AppError::new("invalid", format!("没有这个网关：{id}"))
+}
+
+/// 曾经发布过、现在已不在目录里的标识
+fn retired_slugs(settings: &GatewaySettings) -> Vec<String> {
+    let active: Vec<String> = settings.published().into_iter().map(|p| p.slug).collect();
+    settings
+        .published_slugs
+        .iter()
+        .filter(|slug| !active.contains(slug))
+        .cloned()
+        .collect()
+}
+
+/// 新建网关时没给名字，用地址里的主机名
+fn host_of(base_url: &str) -> String {
+    url::Url::parse(base_url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        .unwrap_or_else(|| base_url.to_owned())
 }
 
 /// Codex 的默认模型若是 `invalid` 里的某个第三方标识，改回启用前的值（原来没有就删掉这一行）

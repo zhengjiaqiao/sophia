@@ -35,10 +35,23 @@ pub struct Model {
     pub vision: bool,
 }
 
-impl Model {
-    pub fn slug(&self) -> String {
-        slug_for(&self.id)
-    }
+/// 一个已勾选、要写进目录的第三方模型：带上它在 Codex 里的标识，以及属于哪一家网关。
+/// 标识由调用方给定（`settings::provider_slug`），这里不再自己从模型名推。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Published {
+    pub slug: String,
+    /// 所属 provider 的 id；路由据此取上游地址和密钥
+    pub provider: String,
+    pub model: Model,
+}
+
+/// 写进路由清单的一家上游
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoutingProvider {
+    pub id: String,
+    pub base_url: String,
+    /// "chat" 或 "responses"
+    pub protocol: String,
 }
 
 /// 把网关模型名变成 Codex 里用的标识：小写，斜杠等分隔符换成连字符。
@@ -150,7 +163,7 @@ enum CombinedEntry<'a> {
 }
 
 /// 生成合并目录：官方条目原样在前，第三方条目按选择顺序排在其后。
-pub fn build_combined(native: &[Box<RawValue>], models: &[Model]) -> Result<Vec<u8>, String> {
+pub fn build_combined(native: &[Box<RawValue>], models: &[Published]) -> Result<Vec<u8>, String> {
     #[derive(Deserialize)]
     struct Head {
         #[serde(default)]
@@ -185,10 +198,10 @@ pub fn build_combined(native: &[Box<RawValue>], models: &[Model]) -> Result<Vec<
         .iter()
         .map(|raw| CombinedEntry::Native(raw))
         .collect();
-    for (index, model) in models.iter().enumerate() {
-        let slug = model.slug();
+    for (index, published) in models.iter().enumerate() {
+        let slug = published.slug.trim().to_lowercase();
         if slug.is_empty() {
-            return Err(format!("模型名 {:?} 无法生成标识", model.id));
+            return Err(format!("模型名 {:?} 无法生成标识", published.model.id));
         }
         if !seen.insert(slug.clone()) {
             return Err(format!(
@@ -197,7 +210,7 @@ pub fn build_combined(native: &[Box<RawValue>], models: &[Model]) -> Result<Vec<
         }
         let priority = max_priority as i64 + 1 + index as i64;
         entries.push(CombinedEntry::Own(entry(
-            model,
+            &published.model,
             slug,
             priority,
             &base_instructions,
@@ -206,31 +219,47 @@ pub fn build_combined(native: &[Box<RawValue>], models: &[Model]) -> Result<Vec<
     serde_json::to_vec_pretty(&Doc { models: entries }).map_err(|error| error.to_string())
 }
 
-/// 生成路由清单：`models` 是当前所选的第三方模型；`retired` 是曾经出现在 Codex 选择器里、
+/// 生成路由清单：`models` 是当前所选的第三方模型，`providers` 是它们的上游；`retired` 是曾经出现在 Codex 选择器里、
 /// 现已取消的模型标识。Codex 的模型目录只在启动时加载，运行中的 Codex 仍可能请求已取消的模型，
 /// 路由据停用名单拒绝它们，而不是当成官方模型放行。
-pub fn build_routing(models: &[Model], retired: &[String]) -> Result<Vec<u8>, String> {
+pub fn build_routing(
+    models: &[Published],
+    providers: &[RoutingProvider],
+    retired: &[String],
+) -> Result<Vec<u8>, String> {
     #[derive(Serialize)]
     struct Route {
         slug: String,
         upstream_model: String,
+        provider: String,
     }
     #[derive(Serialize)]
-    struct Doc {
+    struct Doc<'a> {
+        providers: Vec<&'a RoutingProvider>,
         models: Vec<Route>,
         retired: Vec<String>,
     }
     let mut active = BTreeSet::new();
+    let mut used = BTreeSet::new();
     let mut list = Vec::with_capacity(models.len());
-    for model in models {
-        let slug = model.slug();
+    for published in models {
+        let slug = published.slug.trim().to_lowercase();
         if slug.is_empty() {
-            return Err(format!("模型名 {:?} 无法生成标识", model.id));
+            return Err(format!("模型名 {:?} 无法生成标识", published.model.id));
+        }
+        if !providers.iter().any(|p| p.id == published.provider) {
+            // 清单里有模型却没有它的上游，路由只能拒绝请求；在生成时就拦下
+            return Err(format!(
+                "模型 {:?} 所属的网关 {:?} 不存在",
+                published.model.id, published.provider
+            ));
         }
         active.insert(slug.clone());
+        used.insert(published.provider.as_str());
         list.push(Route {
             slug,
-            upstream_model: model.id.trim().to_string(),
+            upstream_model: published.model.id.trim().to_string(),
+            provider: published.provider.clone(),
         });
     }
     let retired = retired
@@ -241,6 +270,11 @@ pub fn build_routing(models: &[Model], retired: &[String]) -> Result<Vec<u8>, St
         .map(str::to_string)
         .collect();
     serde_json::to_vec_pretty(&Doc {
+        // 只写出确有模型在用的上游：没勾选任何模型的网关地址不必落到 Codex 目录下
+        providers: providers
+            .iter()
+            .filter(|p| used.contains(p.id.as_str()))
+            .collect(),
         models: list,
         retired,
     })
@@ -319,12 +353,30 @@ mod tests {
  {"slug":"gpt-reserve","display_name":"Reserve","priority":7,"visibility":"hide","supported_in_api":false,"base_instructions":""}
 ]}"#;
 
-    fn model(id: &str) -> Model {
-        Model {
+    /// 测试里统一挂在一家叫 "p" 的网关下，标识不带前缀，沿用原有用例的期望值
+    fn model(id: &str) -> Published {
+        Published {
+            slug: slug_for(id),
+            provider: "p".into(),
+            model: Model {
+                id: id.into(),
+                display_name: None,
+                context_window: None,
+                vision: false,
+            },
+        }
+    }
+
+    fn with(mut published: Published, edit: impl FnOnce(&mut Model)) -> Published {
+        edit(&mut published.model);
+        published
+    }
+
+    fn upstream(id: &str) -> RoutingProvider {
+        RoutingProvider {
             id: id.into(),
-            display_name: None,
-            context_window: None,
-            vision: false,
+            base_url: format!("https://{id}.example/v1"),
+            protocol: "chat".into(),
         }
     }
 
@@ -357,10 +409,9 @@ mod tests {
         let data = build_combined(
             &native,
             &[
-                Model {
-                    display_name: Some("Weibo GLM-5".into()),
-                    ..model("weibo/glm-5")
-                },
+                with(model("weibo/glm-5"), |m| {
+                    m.display_name = Some("Weibo GLM-5".into())
+                }),
                 model("kimi-k3"),
             ],
         )
@@ -404,12 +455,11 @@ mod tests {
     fn own_entry_field_set_matches_go() {
         let data = build_combined(
             &[],
-            &[Model {
-                id: " weibo/glm-5 ".into(),
-                display_name: Some("  ".into()),
-                context_window: Some(200_000),
-                vision: true,
-            }],
+            &[with(model(" weibo/glm-5 "), |m| {
+                m.display_name = Some("  ".into());
+                m.context_window = Some(200_000);
+                m.vision = true;
+            })],
         )
         .expect("build_combined");
         let models = decode(&data);
@@ -465,10 +515,7 @@ mod tests {
     fn own_entry_defaults_context_window_and_text_only() {
         let data = build_combined(
             &[],
-            &[Model {
-                context_window: Some(0),
-                ..model("kimi-k3")
-            }],
+            &[with(model("kimi-k3"), |m| m.context_window = Some(0))],
         )
         .expect("build_combined");
         let entry = &decode(&data)[0];
@@ -499,13 +546,15 @@ mod tests {
     #[test]
     fn model_without_usable_slug_is_rejected() {
         assert!(build_combined(&[], &[model("///")]).is_err());
-        assert!(build_routing(&[model("///")], &[]).is_err());
+        assert!(build_routing(&[model("///")], &[upstream("p")], &[]).is_err());
     }
 
     #[test]
     fn routing_catalog_lists_only_third_party() {
         let data = build_routing(
             &[model("weibo/glm-5"), model(" kimi-k3 ")],
+            // 没有模型在用的那一家（unused）不写进清单
+            &[upstream("p"), upstream("unused")],
             &[
                 "old-model".into(),
                 "kimi-k3".into(),
@@ -518,9 +567,12 @@ mod tests {
         assert_eq!(
             doc,
             json!({
+                "providers": [
+                    {"id": "p", "base_url": "https://p.example/v1", "protocol": "chat"}
+                ],
                 "models": [
-                    {"slug": "weibo-glm-5", "upstream_model": "weibo/glm-5"},
-                    {"slug": "kimi-k3", "upstream_model": "kimi-k3"}
+                    {"slug": "weibo-glm-5", "upstream_model": "weibo/glm-5", "provider": "p"},
+                    {"slug": "kimi-k3", "upstream_model": "kimi-k3", "provider": "p"}
                 ],
                 // 停用名单：曾经出现在选择器里、现在已取消的模型；仍在用的不算停用，且去重
                 "retired": ["old-model"]
@@ -530,9 +582,51 @@ mod tests {
 
     #[test]
     fn routing_catalog_emits_empty_arrays_not_null() {
-        let doc: Value =
-            serde_json::from_slice(&build_routing(&[], &[]).expect("build_routing")).expect("json");
-        assert_eq!(doc, json!({"models": [], "retired": []}));
+        let doc: Value = serde_json::from_slice(
+            &build_routing(&[], &[upstream("p")], &[]).expect("build_routing"),
+        )
+        .expect("json");
+        assert_eq!(doc, json!({"providers": [], "models": [], "retired": []}));
+    }
+
+    /// 两家各出一个模型：每条路由带归属，两家上游都写进清单
+    #[test]
+    fn routing_catalog_records_which_provider_serves_each_model() {
+        let mut second = model("deepseek/v4");
+        second.provider = "other".into();
+        second.slug = "other-deepseek-v4".into();
+        let data = build_routing(
+            &[model("deepseek/v4"), second],
+            &[upstream("p"), upstream("other")],
+            &[],
+        )
+        .expect("build_routing");
+        let doc: Value = serde_json::from_slice(&data).expect("json");
+        assert_eq!(doc["models"][0]["provider"], "p");
+        assert_eq!(doc["models"][1]["provider"], "other");
+        assert_eq!(doc["models"][1]["slug"], "other-deepseek-v4");
+        assert_eq!(doc["providers"][1]["base_url"], "https://other.example/v1");
+    }
+
+    /// 清单里有模型却没有它的上游，路由只能拒绝请求：生成时就拦下
+    #[test]
+    fn routing_catalog_rejects_a_model_whose_provider_is_missing() {
+        let error = build_routing(&[model("a")], &[upstream("someone-else")], &[])
+            .expect_err("missing provider");
+        assert!(error.contains("不存在"), "{error}");
+    }
+
+    /// 标识由调用方给定：同一个模型名、不同前缀，可以同时写进合并目录
+    #[test]
+    fn combined_catalog_accepts_the_same_model_under_two_prefixes() {
+        let mut second = model("deepseek/v4");
+        second.slug = "other-deepseek-v4".into();
+        let data = build_combined(&[], &[model("deepseek/v4"), second]).expect("build_combined");
+        let slugs: Vec<String> = decode(&data)
+            .iter()
+            .map(|entry| entry["slug"].as_str().unwrap_or_default().to_owned())
+            .collect();
+        assert_eq!(slugs, ["deepseek-v4", "other-deepseek-v4"]);
     }
 
     /// 官方目录来源：先读 Codex 的模型缓存，读不到再退回内置目录；从不读取登录凭据。
@@ -620,6 +714,6 @@ mod tests {
             json!({"id": "weibo/glm-5", "displayName": "GLM", "contextWindow": 1, "vision": true})
         );
         let parsed: Model = serde_json::from_str(r#"{"id":"x"}"#).expect("json");
-        assert_eq!(parsed, model("x"));
+        assert_eq!(parsed, model("x").model);
     }
 }

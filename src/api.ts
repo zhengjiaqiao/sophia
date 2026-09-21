@@ -4,6 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type {
   AutoLink,
   CellRef,
+  GatewayProviderSaved,
   GatewaySelectedModel,
   GatewayState,
   HarnessStatus,
@@ -102,6 +103,21 @@ export const api = {
   gatewayFetchModels: () => invoke<GatewayState>("gateway_fetch_models"),
   gatewaySelectModels: (selected: GatewaySelectedModel[]) =>
     invoke<GatewayState>("gateway_select_models", { selected }),
+  // ----- 多家网关：带 providerId 的版本。上面不带 id 的三个作用在第一家上，界面迁完后删 -----
+  /** id 省略是新建；key 省略表示不动已存的密钥，带了就先向网关校验 */
+  gatewayUpsertProvider: (input: {
+    id?: string;
+    name?: string;
+    baseUrl: string;
+    key?: string;
+  }) => invoke<GatewayProviderSaved>("gateway_upsert_provider", input),
+  /** 连同钥匙串里的密钥一起删，删了回不来：调用前先向用户确认 */
+  gatewayRemoveProvider: (id: string) =>
+    invoke<GatewayState>("gateway_remove_provider", { id }),
+  gatewayFetchModelsOf: (providerId: string) =>
+    invoke<GatewayState>("gateway_fetch_models", { providerId }),
+  gatewaySelectModelsOf: (providerId: string, selected: GatewaySelectedModel[]) =>
+    invoke<GatewayState>("gateway_select_models", { providerId, selected }),
   gatewayEnable: () => invoke<GatewayState>("gateway_enable"),
   gatewayRestore: () => invoke<GatewayState>("gateway_restore"),
   /// 重启我们自己装的 launchd 路由服务；不重启 Codex。界面上不给按钮，命令留着

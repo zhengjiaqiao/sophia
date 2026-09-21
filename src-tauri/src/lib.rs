@@ -755,6 +755,8 @@ pub fn run() {
             set_harness_enabled,
             gateway::gateway_state,
             gateway::gateway_save_provider,
+            gateway::gateway_upsert_provider,
+            gateway::gateway_remove_provider,
             gateway::gateway_fetch_models,
             gateway::gateway_select_models,
             gateway::gateway_enable,

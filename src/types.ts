@@ -271,7 +271,13 @@ export interface GatewayProviderModel {
   selected: boolean;
 }
 export interface GatewayProvider {
+  /** 创建后不变；带 providerId 的命令用它指明操作哪一家。一家都没有时为空串 */
+  id: string;
+  /** 显示名，可以改 */
+  name: string;
   baseUrl: string;
+  /** 这家网关的协议："chat" 或 "responses" */
+  protocol: string;
   hasKey: boolean;
   models: GatewayProviderModel[];
 }
@@ -296,7 +302,10 @@ export interface GatewayTakeover {
 }
 export interface GatewayState {
   supported: boolean;
+  /** 第一家网关，给还没迁到 providers 的界面用 */
   provider: GatewayProvider;
+  /** 全部网关，按添加顺序。模型标识是「网关 id-模型名」，两家有同名模型也不相撞 */
+  providers: GatewayProvider[];
   enabled: boolean;
   needsCodexRestart: boolean;
   router: GatewayRouter;
@@ -304,6 +313,11 @@ export interface GatewayState {
   /** 非空：Codex 设置里有别的工具写的同名项或 provider，启用不可用 */
   conflict: string;
   takeover: GatewayTakeover | null;
+}
+/// gateway_upsert_provider 的返回值
+export interface GatewayProviderSaved {
+  providerId: string;
+  state: GatewayState;
 }
 /// gateway_select_models 的入参：只带 id 与用户可编辑的显示名
 export interface GatewaySelectedModel {

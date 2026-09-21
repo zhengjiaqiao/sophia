@@ -36,8 +36,8 @@ const MAX_TRACKED_SESSIONS: usize = 2000;
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 /// 响应体只需要 `Send`：上游的字节流不是 `Sync`
 pub type Body = UnsyncBoxBody<Bytes, BoxError>;
-/// 每次第三方请求时取密钥；密钥不落入配置和日志
-pub type KeySource = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+/// 每次第三方请求时按网关 id 取密钥；密钥不落入配置和日志
+pub type KeySource = Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
 /// 给定目标地址，返回要用的代理；`None` 表示直连
 pub type ProxyFn = Arc<dyn Fn(&url::Url) -> Option<url::Url> + Send + Sync>;
 
@@ -50,7 +50,8 @@ pub enum Protocol {
 }
 
 pub struct Config {
-    /// 第三方网关接口基址；Codex 请求路径去掉 `/v1` 前缀后接在它后面
+    /// 旧格式路由清单（路由不带归属）用的唯一上游，留空表示没有。
+    /// 新清单里每家上游的地址和协议写在清单里，每个请求重读，增删网关不用重启路由。
     pub third_party_url: String,
     pub third_party_protocol: Protocol,
     pub chatgpt_url: String,
@@ -75,9 +76,17 @@ pub struct Status {
     pub last_upstream_status: u16,
 }
 
-pub struct Router {
-    third_party_url: url::Url,
+/// 一次第三方请求要发往的上游
+struct Upstream {
+    /// 取密钥用的网关 id
+    provider: String,
+    /// 接口基址；Codex 请求路径去掉 `/v1` 前缀后接在它后面
+    url: url::Url,
     protocol: Protocol,
+}
+
+pub struct Router {
+    legacy_upstream: Option<(url::Url, Protocol)>,
     chatgpt_url: url::Url,
     openai_url: url::Url,
     routing_catalog_path: PathBuf,
@@ -126,6 +135,25 @@ fn parse_base(name: &str, raw: &str) -> Result<url::Url, String> {
     Ok(parsed)
 }
 
+/// 路由清单里的上游地址：密钥会随每个请求发过去，只允许 https（本机回环除外），不能带用户名密码。
+/// 保存网关地址时界面已经按同样的规则拦过一次；清单是磁盘上的文件，这里再拦一次。
+fn parse_provider_base(raw: &str) -> Result<url::Url, String> {
+    let parsed = parse_base("third-party", raw)?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("third-party URL must not contain credentials".to_owned());
+    }
+    let host = parsed.host_str().unwrap_or_default();
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    if parsed.scheme() == "http" && !loopback {
+        return Err("third-party URL must be https".to_owned());
+    }
+    Ok(parsed)
+}
+
 fn build_client(
     proxy: &Option<ProxyFn>,
     connect_timeout: Option<Duration>,
@@ -155,8 +183,14 @@ impl Router {
             }
         };
         Ok(Arc::new(Self {
-            third_party_url: parse_base("third-party", &config.third_party_url)?,
-            protocol: config.third_party_protocol,
+            legacy_upstream: if config.third_party_url.trim().is_empty() {
+                None
+            } else {
+                Some((
+                    parse_base("third-party", &config.third_party_url)?,
+                    config.third_party_protocol,
+                ))
+            },
             chatgpt_url: parse_base(
                 "ChatGPT",
                 &default_if_empty(&config.chatgpt_url, DEFAULT_CHATGPT_URL),
@@ -335,6 +369,7 @@ impl Router {
         let model_name = model.clone().unwrap_or_default();
 
         let mut target: Option<RoutingModel> = None;
+        let mut upstream: Option<Result<Upstream, String>> = None;
         if let Some(model) = &model {
             let catalog = match load_routing_catalog(&self.routing_catalog_path) {
                 Ok(catalog) => catalog,
@@ -351,6 +386,9 @@ impl Router {
             };
             let key = model_key(model);
             target = catalog.active.get(&key).cloned();
+            upstream = target
+                .as_ref()
+                .map(|target| self.upstream_for(target, &catalog));
             if target.is_none() && catalog.retired.contains(&key) {
                 // Codex 的模型目录只在启动时加载：取消勾选后，运行中的 Codex 仍可能发这个模型名
                 return reject(model, Route::None, StatusCode::CONFLICT, "retired_model",
@@ -381,8 +419,22 @@ impl Router {
             .unwrap_or_default();
         let outcome = match target {
             Some(target) => {
+                // 第三方模型的上游必须明确可用：归属不明、地址不安全都拒绝，绝不回落到官方或别家
+                let upstream = match upstream {
+                    Some(Ok(upstream)) => upstream,
+                    Some(Err(why)) => {
+                        return reject(
+                            &model_name,
+                            Route::ThirdParty,
+                            StatusCode::BAD_GATEWAY,
+                            "provider_error",
+                            &format!("third-party gateway for this model is not usable: {why}"),
+                        )
+                    }
+                    None => unreachable!("upstream is resolved whenever a target is found"),
+                };
                 let key =
-                    match (self.third_party_key)() {
+                    match (self.third_party_key)(&upstream.provider) {
                         Ok(key) if !key.trim().is_empty() => key,
                         _ => return reject(
                             &model_name,
@@ -397,6 +449,7 @@ impl Router {
                     &decoded,
                     &model_name,
                     &target,
+                    &upstream,
                     &suffix,
                     &query,
                     &key,
@@ -498,6 +551,41 @@ impl Router {
         Ok((route, passthrough(response, false)))
     }
 
+    /// 一条路由该发往哪家上游。带归属的从清单里取；不带归属的是旧格式清单，走启动参数给的那个上游。
+    fn upstream_for(
+        &self,
+        target: &RoutingModel,
+        catalog: &parse::RoutingCatalog,
+    ) -> Result<Upstream, String> {
+        let provider = target.provider.trim();
+        if provider.is_empty() {
+            let (url, protocol) = self
+                .legacy_upstream
+                .clone()
+                .ok_or("the routing catalog does not say which gateway serves it")?;
+            return Ok(Upstream {
+                provider: symsync_core::codex_models::settings::LEGACY_PROVIDER_ID.to_owned(),
+                url,
+                protocol,
+            });
+        }
+        let entry = catalog.providers.get(provider).ok_or_else(|| {
+            format!(
+                "gateway {:?} is not in the routing catalog",
+                log_safe(provider)
+            )
+        })?;
+        Ok(Upstream {
+            provider: provider.to_owned(),
+            url: parse_provider_base(&entry.base_url)?,
+            protocol: if entry.protocol == "responses" {
+                Protocol::Responses
+            } else {
+                Protocol::Chat
+            },
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn forward_third_party(
         &self,
@@ -505,6 +593,7 @@ impl Router {
         decoded: &Bytes,
         model: &str,
         target: &RoutingModel,
+        upstream: &Upstream,
         suffix: &str,
         query: &str,
         key: &str,
@@ -515,13 +604,21 @@ impl Router {
         } else {
             target.upstream_model.trim()
         };
-        if self.protocol == Protocol::Chat
+        if upstream.protocol == Protocol::Chat
             && parts.method == Method::POST
             && matches!(suffix, "/responses" | "/responses/compact")
         {
             let legacy_compact = suffix == "/responses/compact";
             return self
-                .forward_chat(parts, decoded, model, upstream_model, legacy_compact, key)
+                .forward_chat(
+                    parts,
+                    decoded,
+                    model,
+                    upstream_model,
+                    &upstream.url,
+                    legacy_compact,
+                    key,
+                )
                 .await;
         }
         let body = if upstream_model != model {
@@ -538,7 +635,7 @@ impl Router {
         // 第三方路径：从空请求头开始，绝不转发任何官方凭据
         let mut request = self.third_party.request(
             parts.method.clone(),
-            resolve_target(&self.third_party_url, suffix, query),
+            resolve_target(&upstream.url, suffix, query),
         );
         for name in ["accept", "content-type", "openai-beta", "user-agent"] {
             for value in parts.headers.get_all(name) {
@@ -578,12 +675,14 @@ impl Router {
     }
 
     /// 第三方网关只支持 Chat Completions：请求转过去，回复转回 Codex 期望的 Responses 形式
+    #[allow(clippy::too_many_arguments)]
     async fn forward_chat(
         &self,
         parts: &hyper::http::request::Parts,
         decoded: &Bytes,
         model: &str,
         upstream_model: &str,
+        base: &url::Url,
         legacy_compact: bool,
         key: &str,
     ) -> Result<(Route, Response<UpstreamBody>), (Route, StatusCode, String)> {
@@ -615,11 +714,9 @@ impl Router {
             .map_err(|e| bad_request(e.to_string()))?;
         let client_streams = translated.stream && !legacy_compact;
 
-        let mut request = self.third_party.post(resolve_target(
-            &self.third_party_url,
-            "/chat/completions",
-            "",
-        ));
+        let mut request = self
+            .third_party
+            .post(resolve_target(base, "/chat/completions", ""));
         for value in parts.headers.get_all("user-agent") {
             request = request.header("user-agent", value);
         }
