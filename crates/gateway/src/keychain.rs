@@ -160,6 +160,115 @@ pub fn delete_key(run: &Runner, service: &str, account: &str) -> Result<(), KeyE
     Ok(())
 }
 
+// ----- 按网关区分的密钥 -----
+
+/// 旧的单网关设置迁移成的那一家；它的密钥还在不带后缀的旧账户里
+const LEGACY_PROVIDER_ID: &str = symsync_core::codex_models::settings::LEGACY_PROVIDER_ID;
+const MAX_PROVIDER_ID_LEN: usize = 64;
+
+/// 某一家网关的密钥可能在的账户，按优先顺序。id 既来自设置也来自磁盘上的路由清单，
+/// 只接受生成规则允许的字符（小写字母、数字、点、下划线、连字符，且不以连字符开头），其余一律拒绝。
+fn provider_accounts(base_account: &str, provider_id: &str) -> Result<Vec<String>, KeyError> {
+    let allowed = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c);
+    if provider_id.is_empty()
+        || provider_id.len() > MAX_PROVIDER_ID_LEN
+        || provider_id.starts_with('-')
+        || !provider_id.chars().all(allowed)
+    {
+        return Err(KeyError::Command("网关 id 不合法".to_owned()));
+    }
+    let mut accounts = vec![format!("{base_account}.{provider_id}")];
+    if provider_id == LEGACY_PROVIDER_ID {
+        accounts.push(base_account.to_owned());
+    }
+    Ok(accounts)
+}
+
+pub fn get_provider_key(
+    run: &Runner,
+    service: &str,
+    base_account: &str,
+    provider_id: &str,
+) -> Result<String, KeyError> {
+    for account in provider_accounts(base_account, provider_id)? {
+        match get_key(run, service, &account) {
+            Err(KeyError::NotSet) => continue,
+            other => return other,
+        }
+    }
+    Err(KeyError::NotSet)
+}
+
+/// 总是写进这一家自己的账户；迁移来的那一家从此不再依赖旧账户
+pub fn set_provider_key(
+    run: &Runner,
+    service: &str,
+    base_account: &str,
+    provider_id: &str,
+    value: &str,
+) -> Result<(), KeyError> {
+    let accounts = provider_accounts(base_account, provider_id)?;
+    set_key(run, service, &accounts[0], value)
+}
+
+pub fn delete_provider_key(
+    run: &Runner,
+    service: &str,
+    base_account: &str,
+    provider_id: &str,
+) -> Result<(), KeyError> {
+    for account in provider_accounts(base_account, provider_id)? {
+        delete_key(run, service, &account)?;
+    }
+    Ok(())
+}
+
+type FetchById = Box<dyn Fn(&str) -> Result<String, KeyError> + Send + Sync>;
+
+/// `CachedKey` 的多网关版本：每家各自缓存，错误从不缓存
+pub struct CachedKeys {
+    fetch: FetchById,
+    ttl: Duration,
+    now: Box<dyn Fn() -> Instant + Send + Sync>,
+    state: Mutex<std::collections::HashMap<String, (String, Instant)>>,
+}
+
+impl CachedKeys {
+    pub fn new(
+        fetch: impl Fn(&str) -> Result<String, KeyError> + Send + Sync + 'static,
+        ttl: Duration,
+        now: impl Fn() -> Instant + Send + Sync + 'static,
+    ) -> Self {
+        CachedKeys {
+            fetch: Box::new(fetch),
+            ttl,
+            now: Box::new(now),
+            state: Mutex::new(Default::default()),
+        }
+    }
+
+    pub fn get(&self, provider_id: &str) -> Result<String, KeyError> {
+        let now = (self.now)();
+        if let Some((value, expires_at)) = self.state.lock().unwrap().get(provider_id) {
+            if now < *expires_at {
+                return Ok(value.clone());
+            }
+        }
+        // 取密钥要起子进程，不占着锁：一家慢不拖住别家
+        let fetched = (self.fetch)(provider_id);
+        let mut state = self.state.lock().unwrap();
+        match &fetched {
+            Ok(value) => {
+                state.insert(provider_id.to_owned(), (value.clone(), now + self.ttl));
+            }
+            Err(_) => {
+                state.remove(provider_id);
+            }
+        }
+        fetched
+    }
+}
+
 /// 生产环境下真正调用 `/usr/bin/security` 的 runner。测试永远不用它——统一走假 runner。
 #[cfg(target_os = "macos")]
 pub fn security_runner() -> Runner {
@@ -554,5 +663,142 @@ mod hardening_tests {
             "错误信息泄漏了密钥: {error}"
         );
         assert!(error.contains('1'), "仍要说明失败原因: {error}");
+    }
+}
+
+#[cfg(test)]
+mod provider_key_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+
+    const NOT_FOUND: &str =
+        "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.";
+
+    /// 假钥匙串：账户名 -> 明文；记录每次被问到的账户
+    fn fake(entries: &[(&str, &str)]) -> (Runner, Arc<StdMutex<Vec<String>>>) {
+        let entries: Vec<(String, String)> = entries
+            .iter()
+            .map(|(a, v)| (a.to_string(), v.to_string()))
+            .collect();
+        let asked = Arc::new(StdMutex::new(Vec::new()));
+        let log = asked.clone();
+        let runner: Runner = Box::new(move |args, _stdin| {
+            let account = args.last().copied().unwrap_or_default().to_owned();
+            log.lock().unwrap().push(format!("{} {account}", args[0]));
+            Ok(match entries.iter().find(|(a, _)| *a == account) {
+                Some((_, value)) => (format!("{value}\n"), 0),
+                None => (NOT_FOUND.to_owned(), 44),
+            })
+        });
+        (runner, asked)
+    }
+
+    #[test]
+    fn each_provider_has_its_own_account() {
+        let (runner, _) = fake(&[
+            ("codex-gateway.wecode", "sk-wecode-key"),
+            ("codex-gateway.other", "sk-other-key"),
+        ]);
+        let get = |id: &str| get_provider_key(&runner, "symsync", "codex-gateway", id);
+        assert_eq!(get("wecode").unwrap(), "sk-wecode-key");
+        assert_eq!(get("other").unwrap(), "sk-other-key");
+        assert!(matches!(get("third"), Err(KeyError::NotSet)));
+    }
+
+    /// 旧的单网关设置迁移成 id 为 default 的一家，它的密钥还在旧账户里：读得到，且新账户优先
+    #[test]
+    fn the_migrated_provider_falls_back_to_the_old_account() {
+        let (runner, asked) = fake(&[("codex-gateway", "sk-old-key")]);
+        assert_eq!(
+            get_provider_key(&runner, "symsync", "codex-gateway", "default").unwrap(),
+            "sk-old-key"
+        );
+        assert_eq!(
+            *asked.lock().unwrap(),
+            [
+                "find-generic-password codex-gateway.default",
+                "find-generic-password codex-gateway"
+            ]
+        );
+        let (runner, _) = fake(&[
+            ("codex-gateway", "sk-old-key"),
+            ("codex-gateway.default", "sk-new-key"),
+        ]);
+        assert_eq!(
+            get_provider_key(&runner, "symsync", "codex-gateway", "default").unwrap(),
+            "sk-new-key"
+        );
+        // 别的网关绝不回退到旧账户：那是另一家的密钥
+        let (runner, _) = fake(&[("codex-gateway", "sk-old-key")]);
+        assert!(matches!(
+            get_provider_key(&runner, "symsync", "codex-gateway", "wecode"),
+            Err(KeyError::NotSet)
+        ));
+    }
+
+    /// 路由里的网关 id 来自磁盘上的清单：只接受生成规则允许的字符，别的一律不去碰钥匙串
+    #[test]
+    fn ids_outside_the_allowed_alphabet_never_reach_the_keychain() {
+        let (runner, asked) = fake(&[("codex-gateway", "sk-old-key")]);
+        for id in [
+            "",
+            "a b",
+            "A",
+            "../x",
+            "a/b",
+            "-s",
+            "wecode\n",
+            &"x".repeat(65),
+        ] {
+            assert!(
+                get_provider_key(&runner, "symsync", "codex-gateway", id).is_err(),
+                "{id:?}"
+            );
+            assert!(delete_provider_key(&runner, "symsync", "codex-gateway", id).is_err());
+            assert!(
+                set_provider_key(&runner, "symsync", "codex-gateway", id, "sk-12345678").is_err()
+            );
+        }
+        assert!(asked.lock().unwrap().is_empty());
+    }
+
+    /// 删掉迁移来的那一家时，旧账户里的密钥也要删，否则它永远留在钥匙串里
+    #[test]
+    fn deleting_the_migrated_provider_also_clears_the_old_account() {
+        let (runner, asked) = fake(&[]);
+        delete_provider_key(&runner, "symsync", "codex-gateway", "default").unwrap();
+        delete_provider_key(&runner, "symsync", "codex-gateway", "wecode").unwrap();
+        assert_eq!(
+            *asked.lock().unwrap(),
+            [
+                "delete-generic-password codex-gateway.default",
+                "delete-generic-password codex-gateway",
+                "delete-generic-password codex-gateway.wecode"
+            ]
+        );
+    }
+
+    #[test]
+    fn cached_keys_are_kept_per_provider_and_errors_are_not_cached() {
+        let calls = Arc::new(StdMutex::new(Vec::<String>::new()));
+        let log = calls.clone();
+        let cache = CachedKeys::new(
+            move |id: &str| {
+                log.lock().unwrap().push(id.to_owned());
+                match id {
+                    "bad" => Err(KeyError::NotSet),
+                    other => Ok(format!("key-of-{other}")),
+                }
+            },
+            Duration::from_secs(30),
+            Instant::now,
+        );
+        assert_eq!(cache.get("a").unwrap(), "key-of-a");
+        assert_eq!(cache.get("b").unwrap(), "key-of-b");
+        assert_eq!(cache.get("a").unwrap(), "key-of-a");
+        assert!(cache.get("bad").is_err());
+        assert!(cache.get("bad").is_err());
+        assert_eq!(*calls.lock().unwrap(), ["a", "b", "bad", "bad"]);
     }
 }

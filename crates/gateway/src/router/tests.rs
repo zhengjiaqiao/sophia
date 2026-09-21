@@ -143,7 +143,7 @@ const DEFAULT_CATALOG: &str =
 
 impl Harness {
     async fn new(third_party: Option<Responder>) -> Self {
-        Self::with_key(third_party, Arc::new(|| Ok(THIRD_PARTY_KEY.to_owned()))).await
+        Self::with_key(third_party, Arc::new(|_| Ok(THIRD_PARTY_KEY.to_owned()))).await
     }
     async fn with_key(third_party: Option<Responder>, key: KeySource) -> Self {
         let dir = tempfile::tempdir().unwrap();
@@ -538,7 +538,7 @@ async fn routing_catalog_is_reloaded_per_request() {
 
 #[tokio::test]
 async fn third_party_key_unavailable_does_not_forward() {
-    let h = Harness::with_key(None, Arc::new(|| Err("not set".to_owned()))).await;
+    let h = Harness::with_key(None, Arc::new(|_| Err("not set".to_owned()))).await;
     let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
     assert_eq!(res.status, 502);
     assert!(res.text().contains("key") || res.text().contains("密钥"));
@@ -834,7 +834,7 @@ async fn native_streaming_response_is_forwarded_incrementally() {
         openai_url: upstream,
         routing_catalog_path: dir.path().join("routing.json"),
         activity_log_path: None,
-        third_party_key: Arc::new(|| Ok("k".into())),
+        third_party_key: Arc::new(|_| Ok("k".into())),
         max_body_bytes: 0,
         proxy: None,
     })
@@ -868,7 +868,7 @@ impl Harness {
             openai_url: format!("{}/v1", h.openai.url),
             routing_catalog_path: h.dir.path().join("routing.json"),
             activity_log_path: Some(h.dir.path().join("router.log")),
-            third_party_key: Arc::new(|| Ok(THIRD_PARTY_KEY.to_owned())),
+            third_party_key: Arc::new(|_| Ok(THIRD_PARTY_KEY.to_owned())),
             max_body_bytes: 0,
             proxy: None,
         })
@@ -1063,7 +1063,7 @@ async fn connect_failure_is_retried_once() {
         openai_url: format!("http://{address}"),
         routing_catalog_path: dir.path().join("routing.json"),
         activity_log_path: None,
-        third_party_key: Arc::new(|| Ok("k".into())),
+        third_party_key: Arc::new(|_| Ok("k".into())),
         max_body_bytes: 0,
         proxy: None,
     })
@@ -1267,4 +1267,217 @@ async fn responses_error_body_does_not_relay_the_third_party_key() {
     let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
     assert_eq!(res.status, 401);
     assert!(!res.text().contains(THIRD_PARTY_KEY), "{}", res.text());
+}
+
+// ---------------------------------------------------------------------------
+// 多家第三方网关：每条路由带归属，上游地址、协议、密钥都按归属取
+// ---------------------------------------------------------------------------
+
+const KEY_A: &str = "sk-provider-a-secret";
+const KEY_B: &str = "sk-provider-b-secret";
+
+/// 两家网关各一个假上游；路由清单在创建之后写入，顺带验证“加一家不用重启路由”
+struct TwoProviders {
+    h: Harness,
+    a: FakeUpstream,
+    b: FakeUpstream,
+}
+
+impl TwoProviders {
+    async fn new(protocol_b: &str, respond_b: Option<Responder>) -> Self {
+        let h = Harness::with_key(
+            None,
+            Arc::new(|provider: &str| match provider {
+                "a" => Ok(KEY_A.to_owned()),
+                "b" => Ok(KEY_B.to_owned()),
+                other => Err(format!("no key for {other}")),
+            }),
+        )
+        .await;
+        let a = FakeUpstream::start(None).await;
+        let b = FakeUpstream::start(respond_b).await;
+        h.catalog(&format!(
+            r#"{{"providers":[
+                 {{"id":"a","base_url":"{}/openai/v1","protocol":"responses"}},
+                 {{"id":"b","base_url":"{}/api/v1","protocol":"{protocol_b}"}}],
+               "models":[
+                 {{"slug":"a-deepseek-v4","upstream_model":"deepseek/v4","provider":"a"}},
+                 {{"slug":"b-deepseek-v4","upstream_model":"deepseek-v4","provider":"b"}}]}}"#,
+            a.url, b.url
+        ));
+        Self { h, a, b }
+    }
+}
+
+#[tokio::test]
+async fn each_provider_gets_only_its_own_requests_and_key() {
+    let t = TwoProviders::new("responses", None).await;
+
+    let res =
+        t.h.send(post(r#"{"model":"a-deepseek-v4","input":"hi"}"#))
+            .await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let got = t.a.only();
+    assert_eq!(got.path, "/openai/v1/responses");
+    assert_eq!(
+        got.header("authorization"),
+        Some(&*format!("Bearer {KEY_A}"))
+    );
+    assert!(String::from_utf8_lossy(&got.body).contains(r#""model":"deepseek/v4""#));
+    assert!(t.b.all().is_empty(), "b 不该收到 a 的请求");
+
+    let res =
+        t.h.send(post(r#"{"model":"b-deepseek-v4","input":"hi"}"#))
+            .await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let got = t.b.only();
+    assert_eq!(got.path, "/api/v1/responses");
+    assert_eq!(
+        got.header("authorization"),
+        Some(&*format!("Bearer {KEY_B}"))
+    );
+    assert!(String::from_utf8_lossy(&got.body).contains(r#""model":"deepseek-v4""#));
+
+    // 密钥不串：每家只见过自己的；旧的单上游和官方上游什么都没收到
+    assert_eq!(t.a.all().len(), 1);
+    assert!(!t.a.only().dump().contains(KEY_B));
+    assert!(!t.b.only().dump().contains(KEY_A));
+    assert!(t.h.third_party.all().is_empty());
+    assert!(t.h.chatgpt.all().is_empty() && t.h.openai.all().is_empty());
+}
+
+#[tokio::test]
+async fn protocol_is_per_provider() {
+    let chat_reply: Responder = Arc::new(|_req: &Captured| {
+        (
+            200,
+            vec![("content-type".into(), "text/event-stream".into())],
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n".to_vec(),
+        )
+    });
+    let t = TwoProviders::new("chat", Some(chat_reply)).await;
+
+    // a 原生支持 Responses：原样转发到 /responses
+    t.h.send(post(
+        r#"{"model":"a-deepseek-v4","input":"hi","stream":true}"#,
+    ))
+    .await;
+    assert_eq!(t.a.only().path, "/openai/v1/responses");
+
+    // b 只支持 Chat Completions：同样的请求被转换后发到 /chat/completions
+    let res =
+        t.h.send(post(
+            r#"{"model":"b-deepseek-v4","input":"hi","stream":true}"#,
+        ))
+        .await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let got = t.b.only();
+    assert_eq!(got.path, "/api/v1/chat/completions");
+    let body: serde_json::Value = serde_json::from_slice(&got.body).unwrap();
+    assert_eq!(body["model"], "deepseek-v4");
+    assert!(body["messages"].is_array(), "{body}");
+}
+
+#[tokio::test]
+async fn one_providers_missing_key_does_not_affect_the_other() {
+    let h = Harness::with_key(
+        None,
+        Arc::new(|provider: &str| match provider {
+            "a" => Ok(KEY_A.to_owned()),
+            _ => Err("not set".to_owned()),
+        }),
+    )
+    .await;
+    let a = FakeUpstream::start(None).await;
+    let b = FakeUpstream::start(None).await;
+    h.catalog(&format!(
+        r#"{{"providers":[{{"id":"a","base_url":"{}/v1","protocol":"responses"}},
+                          {{"id":"b","base_url":"{}/v1","protocol":"responses"}}],
+            "models":[{{"slug":"a-m","provider":"a"}},{{"slug":"b-m","provider":"b"}}]}}"#,
+        a.url, b.url
+    ));
+    assert_eq!(h.send(post(r#"{"model":"a-m"}"#)).await.status, 200);
+    let res = h.send(post(r#"{"model":"b-m"}"#)).await;
+    assert_eq!(res.status, 502, "{}", res.text());
+    assert!(b.all().is_empty(), "没有密钥就不该发出请求");
+}
+
+/// 归属不明、上游缺失或上游地址不安全：一律拒绝，绝不回落到官方或别家
+#[tokio::test]
+async fn a_route_without_a_usable_provider_fails_closed() {
+    let h = Harness::new(None).await;
+    let elsewhere = FakeUpstream::start(None).await;
+    for (why, catalog) in [
+        (
+            "归属指向不存在的上游",
+            r#"{"providers":[],"models":[{"slug":"x-m","provider":"ghost"}]}"#.to_owned(),
+        ),
+        (
+            "明文 http 且不是本机：密钥会走明文",
+            r#"{"providers":[{"id":"x","base_url":"http://gateway.example/v1","protocol":"chat"}],
+                "models":[{"slug":"x-m","provider":"x"}]}"#
+                .to_owned(),
+        ),
+        (
+            "地址里带用户名密码",
+            format!(
+                r#"{{"providers":[{{"id":"x","base_url":"http://u:p@{}/v1","protocol":"chat"}}],
+                    "models":[{{"slug":"x-m","provider":"x"}}]}}"#,
+                elsewhere.url.trim_start_matches("http://")
+            ),
+        ),
+        (
+            "不是 http(s)",
+            r#"{"providers":[{"id":"x","base_url":"file:///etc/passwd","protocol":"chat"}],
+                "models":[{"slug":"x-m","provider":"x"}]}"#
+                .to_owned(),
+        ),
+    ] {
+        h.catalog(&catalog);
+        let res = h.send(post(r#"{"model":"x-m","input":"secret"}"#)).await;
+        assert_eq!(res.status, 502, "{why}: {}", res.text());
+        assert!(elsewhere.all().is_empty(), "{why}");
+        assert!(
+            h.third_party.all().is_empty(),
+            "{why}: 不能回落到旧的单上游"
+        );
+        assert!(
+            h.chatgpt.all().is_empty() && h.openai.all().is_empty(),
+            "{why}: 不能回落到官方"
+        );
+    }
+}
+
+/// 一家的上游写坏了，不能连累清单里的另一家
+#[tokio::test]
+async fn a_broken_provider_entry_does_not_take_down_the_others() {
+    let h = Harness::new(None).await;
+    let good = FakeUpstream::start(None).await;
+    h.catalog(&format!(
+        r#"{{"providers":[{{"id":"bad","base_url":"not a url","protocol":"chat"}},
+                          {{"id":"good","base_url":"{}/v1","protocol":"responses"}}],
+            "models":[{{"slug":"bad-m","provider":"bad"}},{{"slug":"good-m","provider":"good"}}]}}"#,
+        good.url
+    ));
+    assert_eq!(h.send(post(r#"{"model":"good-m"}"#)).await.status, 200);
+    assert_eq!(good.all().len(), 1);
+    assert_eq!(h.send(post(r#"{"model":"bad-m"}"#)).await.status, 502);
+}
+
+/// 旧格式的清单（路由不带归属）仍走启动参数给的那个上游，密钥按迁移来的那一家取
+#[tokio::test]
+async fn routes_without_a_provider_use_the_startup_upstream_and_the_legacy_key() {
+    let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = asked.clone();
+    let h = Harness::with_key(
+        None,
+        Arc::new(move |provider: &str| {
+            seen.lock().unwrap().push(provider.to_owned());
+            Ok(THIRD_PARTY_KEY.to_owned())
+        }),
+    )
+    .await;
+    assert_eq!(h.send(post(r#"{"model":"kimi-k3"}"#)).await.status, 200);
+    assert_eq!(h.third_party.all().len(), 1);
+    assert_eq!(*asked.lock().unwrap(), ["default"]);
 }
