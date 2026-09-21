@@ -759,6 +759,7 @@ pub fn run() {
             gateway::gateway_enable,
             gateway::gateway_restore,
             gateway::gateway_restart,
+            gateway::gateway_restart_codex,
             gateway::gateway_takeover
         ])
         .run(tauri::generate_context!())

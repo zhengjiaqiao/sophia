@@ -4,6 +4,7 @@ use crate::AppState;
 use std::sync::Arc;
 use symsync_core::codex_models::catalog::Model;
 use symsync_gateway::app::{App, AppError, GatewayState};
+use symsync_gateway::process::RestartReport;
 use symsync_gateway::runtime;
 
 /// `symsync gateway …`：launchd 拉起的就是这个可执行文件的副本，参数为 `gateway run …`
@@ -169,6 +170,18 @@ pub async fn gateway_restart(state: tauri::State<'_, AppState>) -> Result<Gatewa
     let worker = app.clone();
     blocking(move || worker.restart_router()).await?;
     current_state(app).await
+}
+
+/// 结束 Codex 的后台进程（`codex app-server` / `codex-code-mode-host`），
+/// 下次任何工具拉起 Codex 时才带着新配置起来。**不碰用户在终端里的交互式会话**。
+/// 一个都没找到不算失败，返回 `terminated: 0`。
+/// 它不写 `~/.codex/config.toml`，所以不取 `config_lock`
+#[tauri::command]
+pub async fn gateway_restart_codex(
+    state: tauri::State<'_, AppState>,
+) -> Result<RestartReport, String> {
+    let app = app(&state)?;
+    blocking(move || app.restart_codex()).await
 }
 
 #[tauri::command]

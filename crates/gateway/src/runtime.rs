@@ -2,7 +2,7 @@
 //! 以及无界面入口 `symsync gateway run|status|doctor|restore`。
 use crate::app::{App, AppError, Deps};
 use crate::router::{Config, Protocol, ProxyFn, Router, HEALTH_SERVICE_NAME};
-use crate::{keychain, provider, service, sysproxy};
+use crate::{keychain, process, provider, service, sysproxy};
 use sha2::{Digest, Sha256};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -338,6 +338,8 @@ pub fn build_app(store_dir: PathBuf) -> App {
             let source = std::env::current_exe().and_then(|p| p.canonicalize())?;
             install_binary_from(&source, dest)
         }),
+        list_processes: Box::new(process::list_processes),
+        terminate: Box::new(process::terminate),
         codex_started_at: Box::new(codex_started_at),
         codex_version: Box::new(codex_version_cached()),
         now: Box::new(unix_now),

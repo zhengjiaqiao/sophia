@@ -24,6 +24,9 @@ import type {
 // 这里再导出一次，调用方从 api.ts 或 types.ts 引都行
 export type { PlannedDeletion, IgnoredIssue } from "./types";
 
+/// 结束了几个 Codex 后台进程（与 Rust 的 RestartReport 一一对应）
+export type GatewayRestartReport = { terminated: number; pids: number[] };
+
 export const api = {
   scanAll: () => invoke<Overview>("scan_all"),
   /// 这些格里缺失的 → 建链动作
@@ -101,7 +104,9 @@ export const api = {
     invoke<GatewayState>("gateway_select_models", { selected }),
   gatewayEnable: () => invoke<GatewayState>("gateway_enable"),
   gatewayRestore: () => invoke<GatewayState>("gateway_restore"),
-  /// 重启我们自己装的 launchd 路由服务；不重启 Codex
+  /// 重启我们自己装的 launchd 路由服务；不重启 Codex。界面上不给按钮，命令留着
   gatewayRestart: () => invoke<GatewayState>("gateway_restart"),
+  /// 结束 Codex 的后台进程，下次启动才读到新配置；terminated 为 0 表示 Codex 当时没在跑
+  gatewayRestartCodex: () => invoke<GatewayRestartReport>("gateway_restart_codex"),
   gatewayTakeover: () => invoke<GatewayState>("gateway_takeover"),
 };
