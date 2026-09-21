@@ -1,6 +1,6 @@
 ---
 version: 1
-name: SymSync
+name: Sophia
 description: 一个管理多 AI 编码工具 skill / MCP / 模型配置的桌面工具。零色彩、零阴影、零渐变；强调只有三档——次要文字、加粗、反色。界面回答两个问题：这东西在这个 agent 下现在能不能用；点了没成的话，是什么挡住了。
 
 colors:
@@ -203,9 +203,9 @@ components:
     padding: 8px 12px
 ---
 
-# SymSync 设计系统
+# Sophia 设计系统
 
-**本文件是实现的唯一依据。** 画布「SymSync 界面重构」是视觉参照，两者不一致时以本文件为准；改组件先改这里，再改代码，再同步画布。`scripts/lint-ui.mjs` 把本文件的硬性约束变成了可执行断言，接在 `make lint` 里。
+**本文件是实现的唯一依据。** 画布「Sophia 界面重构」是视觉参照，两者不一致时以本文件为准；改组件先改这里，再改代码，再同步画布。`scripts/lint-ui.mjs` 把本文件的硬性约束变成了可执行断言，接在 `make lint` 里。
 
 历史裁决与每条规则背后的推理在 `docs/specs/2026-09-21-ui-decisions-log.md`，本文件只写结论。
 
