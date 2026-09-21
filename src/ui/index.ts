@@ -33,6 +33,7 @@ export {
   IconClose,
   IconRefresh,
   IconReveal,
+  IconSettings,
   IconTrash,
   IconUndo,
 } from "./icons.tsx";
