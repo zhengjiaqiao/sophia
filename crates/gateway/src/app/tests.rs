@@ -1019,3 +1019,21 @@ fn changing_the_models_while_codex_runs_with_the_injection_needs_a_restart() {
     f.world.lock().unwrap().codex_started_at = Some(2_000_000_700);
     assert!(!f.app.state().needs_codex_restart);
 }
+
+/// 旧版本留下的设置没有变更记录。这时说不清 Codex 加载过什么，只在当前确实开着时才提示：
+/// 没开着还提示重启，就是真机上那次误报。
+#[test]
+fn settings_without_history_only_ask_for_a_restart_while_enabled() {
+    let f = fixture();
+    f.configure();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_000 - 86_400);
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().settings.history.clear(); // 模拟旧版本写下的设置
+    assert!(
+        f.app.state().needs_codex_restart,
+        "开着、Codex 更早启动：照旧提示"
+    );
+    f.app.restore().unwrap();
+    f.world.lock().unwrap().settings.history.clear();
+    assert!(!f.app.state().needs_codex_restart, "没开着就不提示");
+}

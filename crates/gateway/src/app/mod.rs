@@ -913,12 +913,14 @@ impl App {
         if let Some(started_at) = (self.deps.codex_started_at)() {
             view.codex.running = true;
             // 比的是状态，不是时间：Codex 启动时加载到的和现在一样，就不用重启。
-            // 旧版本留下的设置没有变更记录，退回到只比时间的旧规则
+            // 旧版本留下的设置没有变更记录，说不清它加载过什么：只在当前确实开着时按时间提示
+            let enabled = view.enabled;
             view.needs_codex_restart =
                 settings.needs_codex_restart(started_at).unwrap_or_else(|| {
-                    settings
-                        .changed_at
-                        .is_some_and(|changed_at| started_at < changed_at)
+                    enabled
+                        && settings
+                            .changed_at
+                            .is_some_and(|changed_at| started_at < changed_at)
                 });
         }
         view
