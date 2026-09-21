@@ -2,6 +2,33 @@
    零色彩、零阴影、零渐变；圆角只有输入框 4px、pill 32px、圆点 50%（§1.3）。 */
 @import "../tokens.css";
 
+/* ===== 0. 键盘焦点 =====
+   系统默认的聚焦环是强调色（macOS 上是蓝的），零色彩界面里它是唯一闯进来的彩色。
+   换成一圈 ink 描边，偏移 2px 让它和 pill 自己的描边分得开。
+   只认 :focus-visible——鼠标点一下不该留下框。 */
+.ss-btn:focus-visible,
+.ss-chip:focus-visible,
+.ss-dot-btn:focus-visible,
+.ss-subpage__back:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 反色面（错误横幅、选中行）上的焦点环要反过来，否则黑框压在黑底上看不见 */
+.ss-banner .ss-btn:focus-visible,
+.ss-btn--inverse:focus-visible,
+.is-inverse:focus-visible {
+  outline-color: var(--canvas);
+}
+
+/* 系统偏好里关掉了动效就别做过渡；状态变化本身不依赖动画 */
+@media (prefers-reduced-motion: reduce) {
+  .ss-btn,
+  .ss-chip {
+    transition: none;
+  }
+}
+
 /* ===== 2. 状态点 StateDot =====
    填充＝这个 agent 能不能用它，外环＝它在这儿是本体还是一条软链。 */
 .ss-dot {
@@ -68,10 +95,14 @@
   background: var(--ink-faint-inverse);
 }
 
+/* 点是 9/13px，命中区不跟着缩（§3「命中区与视觉尺寸是两回事」）：
+   透明内边距把目标撑到 24×24。格宽 62、行高 40，撑开不挤到别的格 */
 .ss-dot-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: var(--hit-min);
+  min-height: var(--hit-min);
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -83,13 +114,17 @@
   cursor: default;
 }
 
-/* ===== 3. 按钮 Button：只有一种，ghost pill ===== */
+/* ===== 3. 按钮 Button：只有一种，ghost pill =====
+   高度定死、内边距只管左右：原先 9px 上下凑出 33px 的奇数高，
+   在 1x 屏上整枚按钮在定高容器里偏心一个设备像素，端帽也只有 75% 覆盖（见 tokens.css 的注释）。 */
 .ss-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   box-sizing: border-box;
-  padding: 9px 24px;
+  height: var(--control-h);
+  padding: 0 24px;
   border: 1px solid var(--ink);
   border-radius: var(--radius-pill);
   background: none;
@@ -102,11 +137,29 @@
   text-transform: uppercase;
   white-space: nowrap;
   cursor: pointer;
+  /* 按钮上的文字是标签不是内容，拖选它没有意义，选中反白还会晃一下 */
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    border-color var(--motion-fast) linear,
+    background-color var(--motion-fast) linear,
+    color var(--motion-fast) linear;
 }
 
-/* 紧凑档只换内边距：两档尺寸按所在容器的高度选，字号同属 button-cap（§3） */
+/* 紧凑档只换高度与左右内边距：字号同属 button-cap（§3） */
 .ss-btn--compact {
-  padding: 5px 16px;
+  height: var(--control-h-compact);
+  padding: 0 16px;
+}
+
+/* 悬停：ghost pill 的描边本来就是 ink，没有可升的档，改用次级面做底
+   （DESIGN「可点的面」对列表行的那一档）。按下再深一格。 */
+.ss-btn:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.ss-btn:active:not(:disabled) {
+  background: var(--hairline);
 }
 
 .ss-btn:disabled {
@@ -129,9 +182,17 @@
   color: var(--canvas);
 }
 
+/* 反色档已经在阶梯顶端，悬停只能往回退一格，不能再往上 */
+.ss-btn--inverse:hover:not(:disabled),
+.ss-btn--inverse:active:not(:disabled) {
+  border-color: var(--ink-mute);
+  background: var(--ink-mute);
+}
+
 /* 文字链：取消、关闭、稍后这类次级动作 */
 .ss-btn--link,
 .ss-btn--link.ss-btn--compact {
+  height: auto;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -145,6 +206,13 @@
   text-decoration: underline;
 }
 
+/* 文字链没有描边可换，悬停就把字色推到主文字色 */
+.ss-btn--link:hover:not(:disabled),
+.ss-btn--link:active:not(:disabled) {
+  background: none;
+  color: var(--ink);
+}
+
 .ss-btn--link:disabled {
   color: var(--ink-faint);
 }
@@ -153,13 +221,44 @@
   color: var(--canvas);
 }
 
+.ss-btn--link.is-inverse:hover:not(:disabled) {
+  color: var(--canvas);
+}
+
+/* 纯图标按钮：正方形，命中区不小于 24（§3）。
+   文案不是省掉，是挪到了 aria-label 与 title 上——Button 的类型强制给。 */
+.ss-btn--icon {
+  width: var(--control-h);
+  padding: 0;
+}
+
+.ss-btn--icon.ss-btn--compact {
+  width: var(--control-h-compact);
+}
+
+.ss-btn--link.ss-btn--icon {
+  width: var(--hit-min);
+  height: var(--hit-min);
+  text-decoration: none;
+}
+
+.ss-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
 /* ===== 3.0 选择片 Chip：pill，因为它可点（§3.1） ===== */
 .ss-chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  padding: 7px 16px;
+  height: var(--control-h);
+  padding: 0 16px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-pill);
   background: var(--canvas);
@@ -169,6 +268,17 @@
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    border-color var(--motion-fast) linear,
+    background-color var(--motion-fast) linear,
+    color var(--motion-fast) linear;
+}
+
+/* 描边的块：悬停把 hairline 推到 ink，底色不动（DESIGN「可点的面」） */
+.ss-chip:hover:not(:disabled) {
+  border-color: var(--ink);
 }
 
 /* 选中用反色，不用填充色——界面零色彩，反色是强调阶梯最高档（§3.0） */
@@ -176,6 +286,11 @@
   border-color: var(--ink);
   background: var(--ink);
   color: var(--canvas);
+}
+
+.ss-chip.is-selected:hover:not(:disabled) {
+  border-color: var(--ink-mute);
+  background: var(--ink-mute);
 }
 
 .ss-chip:disabled {
@@ -218,6 +333,11 @@
   align-items: center;
   gap: var(--space-sm);
   margin-top: var(--space-xs);
+}
+
+/* 关闭的 × 靠右，和「撤销 · 统计」那组分开——它不是这行里的一个动作 */
+.ss-toast__foot .ss-btn--icon {
+  margin-left: auto;
 }
 
 .ss-toast__stats {
@@ -349,10 +469,15 @@
   flex-shrink: 0;
 }
 
+/* 返回箭头：图标仍是 24px，命中区撑到 32×32。
+   左右各 -4px 的负边距把撑出来的部分吃回去——箭头的位置与页面名的位置都不动 */
 .ss-subpage__back {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: 0 -4px;
   padding: 0;
   border: 0;
   border-radius: 0;

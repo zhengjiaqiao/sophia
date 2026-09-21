@@ -29,11 +29,31 @@ button {
   cursor: pointer;
 }
 
+/* 这里**不写**悬停：`button` 这个选择器同时罩着侧栏页签、侧栏底部两条动作、表头排序
+   这些无描边的按钮，给它们铺一块 surface 底会糊出一个贴着字的方块。
+   悬停态写在 .ss-btn / .ss-chip 上（src/ui/ui.css），还没换成 <Button> 的那几处
+   跟着换过去就有了。 */
+
 /* 禁用不靠半透明，靠描边与字色降档（§3）：opacity 只留给 busy（§6） */
 button:disabled {
   border-color: var(--disabled);
   color: var(--ink-faint);
   cursor: default;
+}
+
+/* 键盘焦点：系统默认的聚焦环是强调色（macOS 上是蓝的），
+   那是零色彩界面里唯一闯进来的彩色。统一换成一圈 ink，偏移 2px 和控件自己的描边分开。
+   只认 :focus-visible——鼠标点一下不该留下框 */
+:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 输入框的焦点：描边从 hairline 升到 ink（DESIGN「可点的面」），
+   再叠一圈外框就重了，所以这里把外框收掉 */
+input:focus-visible {
+  outline: none;
+  border-color: var(--ink);
 }
 
 /* 文字链：取消、关闭这类次级动作 */

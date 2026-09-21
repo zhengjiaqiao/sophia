@@ -62,6 +62,22 @@
   --radius-input: 4px;
   --radius-pill: 32px;
 
+  /* ---- 可点元素的定高：一律偶数 ----
+     实测（Chrome 无头渲染 + 逐像素比对，见 PR 说明）：按钮原先靠 9px/5px 内边距
+     凑出 33 / 25 的奇数高，在 1x 屏上有两处代价——
+     ① 在 56px 定高的顶栏里 align-items:center，盒子被吸附后上 12 下 11，整枚按钮偏心一个设备像素；
+     ② pill 端帽最外侧那一列像素只有 75% 覆盖（灰度 64），而上下直边是纯黑 0，
+        一圈轮廓忽深忽浅，看着就是「毛边」。
+     钉成偶数高后：偏心 0，端帽覆盖 95%（灰度 12）。定高也让同一行里的控件天然对齐，
+     不再靠各自的内边距凑。 */
+  --control-h: 34px;
+  --control-h-compact: 26px;
+  /* 命中区下限（§3「命中区与视觉尺寸是两回事」） */
+  --hit-min: 24px;
+
+  /* 状态切换的过渡时长：一档就够，快到不拖沓、慢到看得见 */
+  --motion-fast: 120ms;
+
   /* busy 时受影响控件的不透明度（§6） */
   --busy-dim: 0.45;
 
@@ -71,4 +87,13 @@
   line-height: var(--leading-body);
   color: var(--ink);
   background: var(--canvas);
+
+  /* 数字等宽：计数（「已选 3 个」「12 条待建」）跳动时字面宽度不变，一列数字也能对齐。
+     Barlow 是比例字体，不加这条时 1 比 0 窄一截。 */
+  font-variant-numeric: tabular-nums;
+
+  /* macOS 默认的次像素渲染会给黑字加一圈彩边（零色彩界面里尤其扎眼），
+     且让 Barlow Condensed 700 在 13px 上显得糊。改灰度抗锯齿，笔画更干净。 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }

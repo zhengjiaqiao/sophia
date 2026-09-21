@@ -26,6 +26,8 @@ const DEFAULT_DESCRIPTION: Record<EmptyKind, string> = {
 export interface EmptyAction {
   label: string;
   onClick: () => void;
+  /// 可选的 16px 图标（`导入 skill` 这类动作可以带一个）。空态里文字是主角，图标只作陪
+  icon?: ReactNode;
 }
 
 export interface EmptyProps {
@@ -47,9 +49,13 @@ export function Empty({ kind, description, hint, primary, secondary }: EmptyProp
       {hint ? <div className="ss-empty__hint">{hint}</div> : null}
       {primary || secondary ? (
         <div className="ss-empty__actions">
-          {primary ? <Button onClick={primary.onClick}>{primary.label}</Button> : null}
+          {primary ? (
+            <Button icon={primary.icon} onClick={primary.onClick}>
+              {primary.label}
+            </Button>
+          ) : null}
           {secondary ? (
-            <Button variant="link" onClick={secondary.onClick}>
+            <Button variant="link" icon={secondary.icon} onClick={secondary.onClick}>
               {secondary.label}
             </Button>
           ) : null}
