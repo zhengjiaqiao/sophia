@@ -33,6 +33,10 @@ symsync-gateway = { path = "../crates/gateway" }
 tokio = { version = "1", features = ["sync"] }
 notify = "6"
 notify-debouncer-mini = "0.4"
+# 应用内更新：updater 查清单、下载、装；process 负责装完重启自己。
+# 两个都只有桌面端有实现——这个应用本来就只有桌面端（托盘、launchd、软链）。
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 tempfile = "3"

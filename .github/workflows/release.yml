@@ -1,0 +1,179 @@
+name: Release
+
+# 打 tag 就发布：v0.2.0 → 构建两个架构的 macOS 包、生成更新清单、挂上 GitHub Release。
+# workflow_dispatch 是排练：一样地构建、一样地签名，但不建 Release，产物落在 workflow artifacts 里。
+# 排练能验掉除了「Release 资产名和 latest.json 内容」之外的全部环节。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  # CI 里的 Rust 版本与 ci.yml 钉在一起，升级时两个文件一起改
+  RUST_VERSION: "1.98.0"
+
+jobs:
+  # 先把会让发布半途而废的事全部问清楚，再去花二十分钟编译。
+  # 这里每一条失败都直接说缺什么、去哪儿补，不静默跳过。
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 版本号只有一个来源（src-tauri/tauri.conf.json）。tag 与它对不上就停，
+      # 否则安装包叫一个版本、更新清单叫另一个版本，更新器会一直认为有新版。
+      - name: 版本号三处一致，且与 tag 对齐
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            node packaging/check-version.mjs --tag "${{ github.ref_name }}"
+          else
+            node packaging/check-version.mjs
+          fi
+
+      # 公钥是编进应用里的，用来验下载回来的包是不是我们签的。
+      # 它空着的话应用装得上，但永远更新不了——而且是静默失效，所以在这里拦。
+      - name: 更新用的公钥已经填进配置
+        run: |
+          pubkey=$(node -e 'process.stdout.write(require("./src-tauri/tauri.conf.json").plugins?.updater?.pubkey ?? "")')
+          if [ -z "$pubkey" ]; then
+            echo "::error::src-tauri/tauri.conf.json 的 plugins.updater.pubkey 是空的。"
+            echo "::error::先在本机跑 npm run tauri signer generate -- -w ~/.tauri/sophia.key，"
+            echo "::error::把 ~/.tauri/sophia.key.pub 的内容（不是路径）填进 pubkey，提交后再打 tag。"
+            exit 1
+          fi
+
+      # 私钥不在仓库里，只能来自 secret。没有它就签不出 .sig，
+      # 更新器会拒绝安装——所以这里宁可红，也不出一个悄悄不能更新的包。
+      - name: 更新用的私钥已经配成 secret
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::缺少 secret TAURI_SIGNING_PRIVATE_KEY。"
+            echo "::error::本机 npm run tauri signer generate -- -w ~/.tauri/sophia.key 生成密钥对，"
+            echo "::error::把 ~/.tauri/sophia.key（私钥）整个内容存成仓库 secret TAURI_SIGNING_PRIVATE_KEY，"
+            echo "::error::生成时设的密码存成 secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD（没设密码就存空值）。"
+            echo "::error::私钥不要提交进仓库。"
+            exit 1
+          fi
+
+  # 先建一个草稿 Release 拿到 id，两个架构的构建往同一个 id 上挂产物，
+  # tauri-action 会把各自的 latest.json 合并进同一份清单。
+  # 排练（workflow_dispatch）不建 Release，这一步整个跳过，输出为空。
+  draft:
+    needs: guard
+    runs-on: ubuntu-latest
+    outputs:
+      releaseId: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: create
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sed "s/__VERSION__/${version}/g" packaging/release-body.md > /tmp/body.md
+          id=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="${GITHUB_REF_NAME}" \
+            -f name="Sophia ${version}" \
+            -F draft=true \
+            -F prerelease=false \
+            --field body=@/tmp/body.md \
+            --jq .id)
+          echo "id=${id}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    runs-on: macos-latest
+    strategy:
+      # 两个架构串行跑。并行时两边都要改同一份 latest.json，后写的会盖掉先写的，
+      # 于是清单里只剩一个架构——发布一次才看得出来的那种错，不值得为省十分钟冒。
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        # 不做 universal 包：更新清单本来就按 darwin-aarch64 / darwin-x86_64 分开列，
+        # 分架构出包让每台机器只下自己那一半，universal 会让所有人下双份。
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        variant:
+          - name: public
+            features: ""
+            publish: true
+          # 内部版的口子：Cargo feature 名定下来之后，把下面四行的注释去掉即可。
+          # publish: false ⇒ 不往公开 Release 上挂，只落在 workflow artifacts 里。
+          # - name: weibo
+          #   features: weiboap
+          #   publish: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-${{ matrix.variant.name }}
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # 更新包的签名。没有它 tauri build 会直接失败——这正是我们要的。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # 下面七个是 Apple 签名 + 公证的接线位。买了开发者账号（99 美元/年）之后
+          # 把它们配成 secret，这里不用改一个字，产物就从「临时签名」变成「签名并公证」，
+          # 用户不再需要动 Gatekeeper。
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # 没有证书时退到 "-"：codesign 的临时（ad-hoc）签名。
+          # 这一步不能省——完全不签的包在新版 macOS 上会被直接判成「已损坏」，
+          # 用户连「仍要打开」都没得点，只剩死胡同。临时签名保住了那条路。
+          # 用环境变量给默认值、而不是把 "-" 写进 tauri.conf.json：
+          # 写进配置的话，以后真买了证书，配置和 secret 谁压谁说不准，容易悄悄退回临时签名。
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          # 空字符串＝不往 Release 上挂，只构建（排练，以及内部版）
+          releaseId: ${{ (matrix.variant.publish && needs.draft.outputs.releaseId) || '' }}
+          uploadUpdaterJson: ${{ matrix.variant.publish }}
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: sophia-${{ matrix.variant.name }}-${{ matrix.target }}
+          retryAttempts: 2
+          # createUpdaterArtifacts 只在发布这条路上打开（packaging/updater.conf.json 合并进配置）：
+          # 它会要求签名私钥，而本机 make build 不该为了出一个 debug 包去配密钥。
+          # 用绝对路径，不用内联 JSON —— 内联 JSON 要穿过 YAML 和 action 的参数切分两道引号规则。
+          args: >-
+            --target ${{ matrix.target }}
+            --config ${{ github.workspace }}/packaging/updater.conf.json
+            ${{ matrix.variant.features && format('--features {0}', matrix.variant.features) || '' }}
+
+  # 两个架构都挂上去了，latest.json 也合并完了，才把草稿转正。
+  # 中途失败就把草稿留在那儿：它不可见，改完重打同一个 tag 之前先手工删掉。
+  publish:
+    needs: [draft, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${{ needs.draft.outputs.releaseId }}" \
+            -F draft=false

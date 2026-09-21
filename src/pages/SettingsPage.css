@@ -32,6 +32,19 @@
   color: var(--ink-mute);
 }
 
+/* 版本号是标识符不是句子，走等宽（§排版：mono 只给路径与计数） */
+.settings-page__version {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink-mute);
+}
+
+/* 「版本」和「Agent」是两个区，按区距分开（§留白）。
+   中间那个 __update 盒子没有提示条时高度为零，这条外距照样把两区拉开 */
+.settings-page__head--later {
+  margin-top: var(--space-huge);
+}
+
 /* 一行放得下 4–5 片，已安装的 9 个两行完事（§13.1） */
 .settings-page__grid {
   display: flex;
