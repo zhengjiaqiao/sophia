@@ -456,10 +456,10 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
               </Button>
 
               {state.enabled ? (
-                // 已启用＝反色 pill，点一下停用（§3 只有 ghost pill 一种形，反色是它的选中态）
-                <button
-                  type="button"
-                  className="ss-btn ss-btn--compact models-pill--on"
+                // 已启用＝反色 pill，点一下停用（DESIGN components.button-inverse）
+                <Button
+                  size="compact"
+                  variant="inverse"
                   title="点一下停用：Codex 的模型列表只保留官方模型"
                   onClick={() =>
                     void runAction(
@@ -469,7 +469,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                   }
                 >
                   已启用
-                </button>
+                </Button>
               ) : disabledReason !== null ? (
                 <Button size="compact" disabled disabledReason={disabledReason}>
                   启用

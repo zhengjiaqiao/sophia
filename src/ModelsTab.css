@@ -133,12 +133,6 @@
   margin: 8px 0 0 22px;
 }
 
-/* 开关的已启用态：反色 pill。形与 .ss-btn--compact 完全一致，只换底色（R4、§3） */
-.models-pill--on {
-  background: var(--ink);
-  color: var(--canvas);
-}
-
 /* ===== 已选模型片：chip-compact + ×（DESIGN.md components.chip-compact） =====
    hairline 描边、caption 字号、padding 2px 10px，**不反色**——它们是事实，
    不是正在选的东西。组件库里还没有这个尺寸的 Chip，先在这儿按 token 写一份。 */

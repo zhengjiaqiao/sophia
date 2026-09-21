@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 /// 按钮（组件规范 §3）：只有一种形——ghost pill。没有填充按钮。
 /// 破坏性操作不用红：分量由弹窗里的信息和按钮文案承担（§1.1）。
 
-export type ButtonVariant = "default" | "destructive" | "link";
+/// inverse：反色，表示「现在开着」的开关态（DESIGN components.button-inverse）
+export type ButtonVariant = "default" | "destructive" | "link" | "inverse";
 /// 两种尺寸按所在容器的高度选，不按重要性选
 export type ButtonSize = "regular" | "compact";
 
@@ -39,6 +40,7 @@ export function Button(props: ButtonProps) {
   if (size === "compact") classes.push("ss-btn--compact");
   if (variant === "destructive") classes.push("ss-btn--destructive");
   if (variant === "link") classes.push("ss-btn--link");
+  if (variant === "inverse") classes.push("ss-btn--inverse");
   if (inverse) classes.push("is-inverse");
 
   return (

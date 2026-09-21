@@ -472,3 +472,9 @@ test("Busy 操作进行中：受影响的部分置灰，不忙时不加类", () 
   assert.doesNotMatch(idle, /ss-busy/);
   assert.doesNotMatch(idle, /aria-busy/);
 });
+
+test("Button inverse：反色表示「现在开着」，模型页与托盘共用一份", async () => {
+  const { Button } = await import("../src/ui/Button.tsx");
+  const html = render(Button, { variant: "inverse", children: "已启用", onClick: () => {} });
+  assert.match(html, /ss-btn--inverse/);
+});

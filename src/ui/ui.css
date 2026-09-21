@@ -121,6 +121,14 @@
   color: var(--ink);
 }
 
+/* 反色：「现在开着」的开关态。零色彩系统里强调阶梯的最高档，
+   模型页的「已启用」、托盘面板的开关都用它，不要各自再写一份 */
+.ss-btn--inverse {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
 /* 文字链：取消、关闭、稍后这类次级动作 */
 .ss-btn--link,
 .ss-btn--link.ss-btn--compact {
