@@ -437,22 +437,25 @@ mod tests {
     /// AC16：删完之后，原本指向被删本体的链接全部改指到留下的那个，且都不是断链。
     /// 这条测试会真的往系统废纸篓里放一个目录
     #[test]
+    // 这几条测试会真的往系统废纸篓放目录（AC14 的语义就是这个）。
+    // 名字必须各不相同：整套并行跑时两条同时往废纸篓扔同名目录，废纸篓要改名去重，
+    // 曾在 make test 里偶发挂掉一条，单独跑或串行跑都过
     fn delete_source_trashes_the_body_and_repoints_links_to_the_remaining_one() {
         let t = TempTree::new();
         let store = t.dir("store");
-        let body = t.dir("store/symsync-test-skill");
+        let body = t.dir("store/symsync-test-repoint");
         t.file(&body, "SKILL.md");
         let other = t.dir("other");
-        let kept = t.dir("other/symsync-test-skill");
+        let kept = t.dir("other/symsync-test-repoint");
         let claude = t.dir("home/.claude/skills");
         let codex = t.dir("home/.codex/skills");
-        t.link(&claude.join("symsync-test-skill"), &body);
-        t.link(&codex.join("symsync-test-skill"), &body);
+        t.link(&claude.join("symsync-test-repoint"), &body);
+        t.link(&codex.join("symsync-test-repoint"), &body);
         t.link(&claude.join("untouched"), &kept);
 
         let sources = vec![
-            source_at(&store, &["symsync-test-skill"]),
-            source_at(&other, &["symsync-test-skill"]),
+            source_at(&store, &["symsync-test-repoint"]),
+            source_at(&other, &["symsync-test-repoint"]),
         ];
         let targets = vec![
             target_at("claude-code", &claude),
@@ -464,8 +467,8 @@ mod tests {
         assert_eq!(
             plan.affected,
             vec![
-                absolute(&claude.join("symsync-test-skill")),
-                absolute(&codex.join("symsync-test-skill")),
+                absolute(&claude.join("symsync-test-repoint")),
+                absolute(&codex.join("symsync-test-repoint")),
             ]
         );
 
@@ -496,21 +499,21 @@ mod tests {
         let t = TempTree::new();
         let proj = t.dir("proj");
         let store = t.dir("proj/.agents/skills"); // 项目内、要删的本体位置
-        let body = t.dir("proj/.agents/skills/symsync-test-skill");
+        let body = t.dir("proj/.agents/skills/symsync-test-relative");
         let vendor = t.dir("proj/vendor/skills"); // 项目内、留下的同名本体
-        let kept = t.dir("proj/vendor/skills/symsync-test-skill");
+        let kept = t.dir("proj/vendor/skills/symsync-test-relative");
         let claude = t.dir("proj/.claude/skills"); // 项目目标
         let home = t.dir("home/.claude/skills"); // 全局目标
-        let in_proj = claude.join("symsync-test-skill");
-        let global_link = home.join("symsync-test-skill");
+        let in_proj = claude.join("symsync-test-relative");
+        let global_link = home.join("symsync-test-relative");
         // 项目内的链接按 link_style 本来就是相对的
         create_link(&body, &in_proj, LinkStyle::Relative).unwrap();
         t.link(&global_link, &body);
         assert!(std::fs::read_link(&in_proj).unwrap().is_relative());
 
         let sources = vec![
-            source_at(&store, &["symsync-test-skill"]),
-            source_at(&vendor, &["symsync-test-skill"]),
+            source_at(&store, &["symsync-test-relative"]),
+            source_at(&vendor, &["symsync-test-relative"]),
         ];
         let targets = vec![
             project_target_at("claude-code", &proj, &claude),
@@ -537,7 +540,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_link(&in_proj).unwrap(),
-            PathBuf::from("../../vendor/skills/symsync-test-skill"),
+            PathBuf::from("../../vendor/skills/symsync-test-relative"),
             "项目内的链接改指后仍要是相对写法"
         );
         assert_eq!(std::fs::read_link(&global_link).unwrap(), kept);
@@ -550,12 +553,12 @@ mod tests {
     fn delete_source_leaves_links_broken_when_no_other_body_remains() {
         let t = TempTree::new();
         let store = t.dir("store");
-        let body = t.dir("store/symsync-test-skill");
+        let body = t.dir("store/symsync-test-broken");
         let claude = t.dir("home/.claude/skills");
-        let link = claude.join("symsync-test-skill");
+        let link = claude.join("symsync-test-broken");
         t.link(&link, &body);
 
-        let sources = vec![source_at(&store, &["symsync-test-skill"])];
+        let sources = vec![source_at(&store, &["symsync-test-broken"])];
         let targets = vec![target_at("claude-code", &claude)];
         let plan =
             crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
