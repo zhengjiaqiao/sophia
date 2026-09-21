@@ -770,7 +770,14 @@ pub fn run() {
         .setup(|_app| {
             // 菜单栏入口只在 macOS 上有：模型注入本身只支持 macOS
             #[cfg(target_os = "macos")]
-            tray::setup(_app)?;
+            {
+                tray::setup(_app)?;
+                // 后台线程里预热：复制程序、让系统做完首次校验，启用时就不用等这几秒
+                use tauri::Manager;
+                if let Some(gateway) = _app.state::<AppState>().gateway.clone() {
+                    std::thread::spawn(move || symsync_gateway::runtime::prewarm(&gateway));
+                }
+            }
             Ok(())
         })
         .on_window_event(|_window, _event| {

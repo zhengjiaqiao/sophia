@@ -1037,3 +1037,49 @@ fn settings_without_history_only_ask_for_a_restart_while_enabled() {
     f.world.lock().unwrap().settings.history.clear();
     assert!(!f.app.state().needs_codex_restart, "没开着就不提示");
 }
+
+// ----- 预热：把「复制程序、让后台服务用上新版本」从启用路径上挪走 -----
+// 真机实测：新程序文件第一次运行要过系统校验，放在启用里会让它卡上好几秒，甚至撞上就绪等待的上限而失败。
+
+/// 应用更新后启动：程序文件变了、后台服务正开着 → 预热时就让它换上新版本
+#[test]
+fn prewarm_restarts_a_running_service_when_the_binary_changed() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    {
+        let mut world = f.world.lock().unwrap();
+        world.binary_changed = true;
+        world.restart_labels.clear();
+    }
+    assert!(f.app.prewarm().unwrap(), "报告程序文件被更新过");
+    assert_eq!(f.world.lock().unwrap().restart_labels, [SERVICE_LABEL]);
+}
+
+/// 后台服务没开着：只复制，不去启动什么
+#[test]
+fn prewarm_only_copies_when_the_service_is_not_loaded() {
+    let f = fixture();
+    f.world.lock().unwrap().binary_changed = true;
+    assert!(f.app.prewarm().unwrap());
+    let world = f.world.lock().unwrap();
+    assert!(world.restart_labels.is_empty());
+    assert!(world.installed.is_none(), "预热不安装后台服务");
+}
+
+/// 程序文件没变：什么都不做，也不动 Codex 的设置
+#[test]
+fn prewarm_is_a_no_op_when_nothing_changed() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    let before = f.read_config();
+    {
+        let mut world = f.world.lock().unwrap();
+        world.binary_changed = false;
+        world.restart_labels.clear();
+    }
+    assert!(!f.app.prewarm().unwrap());
+    assert!(f.world.lock().unwrap().restart_labels.is_empty());
+    assert_eq!(f.read_config(), before);
+}

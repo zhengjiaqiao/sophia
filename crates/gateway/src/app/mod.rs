@@ -521,6 +521,33 @@ impl App {
         self.save(&settings)
     }
 
+    /// 预热：把程序副本更新到位；后台服务正开着且程序变了，就让它换上新版本。返回副本是否被更新过。
+    ///
+    /// 这一步原本只在启用时做。但新程序文件第一次运行要过系统校验，实测会让启用卡上好几秒，
+    /// 甚至撞上就绪等待的上限而失败。所以应用启动时在后台先做掉；启用时只剩「装服务、等就绪」。
+    /// 不碰 Codex 的设置，也不安装后台服务。
+    pub fn prewarm(&self) -> Result<bool, AppError> {
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let changed = (self.deps.install_binary)(&self.binary_path())
+            .map_err(|e| internal(format!("安装后台程序失败: {e}")))?;
+        let loaded = (self.deps.service_status)(SERVICE_LABEL)
+            .map(|s| s.loaded)
+            .unwrap_or(false);
+        if changed && loaded {
+            (self.deps.service_restart)(SERVICE_LABEL)
+                .map_err(|e| AppError::new("router_down", format!("重启路由后台服务失败: {e}")))?;
+        }
+        Ok(changed)
+    }
+
+    /// 程序副本的路径；预热之后调用方拿它空跑一次，让系统把首次校验做掉
+    pub fn router_binary(&self) -> PathBuf {
+        self.binary_path()
+    }
+
     fn install_router(&self, settings: &GatewaySettings) -> Result<(), AppError> {
         let binary = self.binary_path();
         let binary_changed = (self.deps.install_binary)(&binary)

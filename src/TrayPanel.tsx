@@ -21,7 +21,8 @@ const failOver = (error: unknown) =>
 
 export default function TrayPanel() {
   const [state, setState] = useState<GatewayState | null>(null);
-  const [busy, setBusy] = useState(false);
+  /// 正在做的事，顶替现状句：只把按钮变淡不说话，那几百毫秒到几秒里看起来就是卡住了
+  const [busy, setBusy] = useState<null | string>(null);
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   /// 重启 Codex 的结果就一句，顶替现状句；面板下次弹出时清掉
   const [restartNote, setRestartNote] = useState<string | null>(null);
@@ -53,7 +54,7 @@ export default function TrayPanel() {
   }, [refresh]);
 
   const toggle = async (on: boolean) => {
-    setBusy(true);
+    setBusy(on ? "正在停用…" : "正在启用…");
     try {
       const next = on ? await api.gatewayRestore() : await api.gatewayEnable();
       if (mounted.current) setState(next);
@@ -61,13 +62,13 @@ export default function TrayPanel() {
     } catch (error) {
       void failOver(error);
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current) setBusy(null);
     }
   };
 
   const restartCodex = async () => {
     setConfirmingRestart(false);
-    setBusy(true);
+    setBusy("正在结束 Codex 的后台进程…");
     try {
       const result = await api.gatewayRestartCodex();
       if (!mounted.current) return;
@@ -81,7 +82,7 @@ export default function TrayPanel() {
     } catch (error) {
       void failOver(error);
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current) setBusy(null);
     }
   };
 
@@ -119,7 +120,7 @@ export default function TrayPanel() {
               <AgentIcon id="codex" name="Codex" />
               <span>Codex</span>
             </div>
-            <Busy busy={busy} className="tray__switch">
+            <Busy busy={busy !== null} className="tray__switch">
               {row.toggle.disabledReason !== null ? (
                 <Button size="compact" disabled disabledReason={row.toggle.disabledReason}>
                   {row.toggle.label}
@@ -142,7 +143,7 @@ export default function TrayPanel() {
             </Busy>
           </div>
           {/* 重启完那一行就没了，结果说在这里；面板下次弹出时清掉 */}
-          <p className="tray__status">{restartNote ?? row.status}</p>
+          <p className="tray__status">{busy ?? restartNote ?? row.status}</p>
           <p className="tray__facts">{factsLine(state)}</p>
           {row.needsSetup ? (
             <Button variant="link" onClick={() => void api.trayOpenMain("models", null)}>
@@ -172,7 +173,7 @@ export default function TrayPanel() {
               <button
                 type="button"
                 className="tray__item"
-                disabled={busy}
+                disabled={busy !== null}
                 onClick={() => {
                   setRestartNote(null);
                   setConfirmingRestart(true);
