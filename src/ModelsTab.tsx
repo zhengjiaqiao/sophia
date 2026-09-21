@@ -362,6 +362,8 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                               className={
                                 renamingId === m.id ? "models-item is-renaming" : "models-item"
                               }
+                              // 整行可点：12px 的记号只告诉你点了会发生什么，命中区是整行（DESIGN「命中区」）
+                              onClick={() => renamingId !== m.id && toggleModel(m.id)}
                             >
                               {/* 12px 方形复选框：方＝选择，与状态点的圆分得开（R3） */}
                               <button
@@ -374,7 +376,6 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                                     ? `点一下，不再把 ${modelLabel(m)} 放进 Codex 的列表`
                                     : `点一下，把 ${modelLabel(m)} 放进 Codex 的列表`
                                 }
-                                onClick={() => toggleModel(m.id)}
                               >
                                 {m.selected ? (
                                   <svg
@@ -398,6 +399,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                                     className="models-item__rename"
                                     value={m.displayName}
                                     autoFocus
+                                    onClick={(e) => e.stopPropagation()}
                                     onChange={(e) => renameModel(m.id, e.target.value)}
                                     onBlur={commitRename}
                                     onKeyDown={(e) => {
@@ -425,9 +427,12 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                                     Codex 列表里显示这个名字
                                   </span>
                                 ) : (
-                                  <Button variant="link" onClick={() => setRenamingId(m.id)}>
-                                    改名
-                                  </Button>
+                                  // Button 的 onClick 不带事件；用外层挡住冒泡，别让「改名」顺带切换勾选
+                                  <span onClick={(e) => e.stopPropagation()}>
+                                    <Button variant="link" onClick={() => setRenamingId(m.id)}>
+                                      改名
+                                    </Button>
+                                  </span>
                                 )
                               ) : null}
                             </li>

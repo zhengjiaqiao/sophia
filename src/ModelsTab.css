@@ -164,7 +164,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  /* 图标 9px，命中区撑到 24px；负外边距抵消，片的视觉尺寸不变 */
+  padding: 7px;
+  margin: -7px -7px -7px -2px;
   border: 0;
   border-radius: 0;
   background: none;
@@ -259,8 +261,13 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-xs) 0;
+  padding: var(--space-xs) var(--space-sm);
   border-bottom: 1px solid var(--surface);
+  /* 整行是点击目标（DESIGN「命中区与视觉尺寸是两回事」）；列表行 hover 转底色 */
+  cursor: pointer;
+}
+.models-item:hover {
+  background: var(--surface);
 }
 
 .models-item.is-renaming {
@@ -272,11 +279,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-sizing: border-box;
+  box-sizing: content-box;
   width: 12px;
   height: 12px;
   flex-shrink: 0;
-  padding: 0;
+  /* 视觉 12px，命中区用透明内边距撑到 24px；背景只画在 content-box 上 */
+  padding: 6px;
+  background-clip: content-box;
   border: 1px solid var(--ink-faint);
   border-radius: 0;
   background: var(--canvas);
