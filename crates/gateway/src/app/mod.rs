@@ -536,6 +536,8 @@ impl App {
         let loaded = (self.deps.service_status)(SERVICE_LABEL)
             .map(|s| s.loaded)
             .unwrap_or(false);
+        // 已知的、可接受的窗口：此刻正好在走路由的那一个请求会断（重启是几百毫秒的事，
+        // 只在应用更新后的第一次启动出现一次）。不为此加活跃连接计数，见 docs/specs/2026-09-21-tray.md「修订」
         if changed && loaded {
             (self.deps.service_restart)(SERVICE_LABEL)
                 .map_err(|e| AppError::new("router_down", format!("重启路由后台服务失败: {e}")))?;
