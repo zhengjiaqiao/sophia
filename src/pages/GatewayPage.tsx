@@ -6,9 +6,10 @@ import "./GatewayPage.css";
 
 /// Codex 网关的配置页（spec R5、组件规范 §4.6）：占满整窗的二级页面，不渲染侧栏。
 ///
-/// 只装四样东西：网关地址、API 密钥、`保存` + `拉取模型`、以及两条只读事实
-/// （本机路由与协议）。**返回即保存**——地址或密钥改过还没保存时，点 `←` / Esc
-/// 会先保存再走；保存没成功就留在这一页，把网关的原话摆出来，不把用户的输入丢掉。
+/// 只装四样东西：网关地址、API 密钥、一个 `保存`、以及两条只读事实（本机路由与协议）。
+/// **保存即拉取**——`保存` 先存网关地址和密钥，紧接着去拉模型列表，不另给一个
+/// 「拉取模型」按钮（R5 修订 v2）。**返回即保存**——地址或密钥改过还没保存时，
+/// 点 `←` / Esc 会先保存再走；这一页还留着要读的消息就先不走，不把用户的输入丢掉。
 ///
 /// 三件故意不做的事：
 /// - **端口与协议只读**。它们是正确性配置不是口味选项，改错了整条链路不通，
@@ -23,6 +24,7 @@ export interface GatewayPageProps {
   onBack: () => void;
   /// 保存网关地址与密钥（密钥为空表示不改）。失败时抛出，由本页就地说明
   onSaveProvider: (baseUrl: string, key: string) => Promise<void>;
+  /// 保存之后紧接着拉一次模型列表（保存即拉取，R5）。失败时抛出
   onFetchModels: () => Promise<void>;
   /// 彻底撤下：卸载后台服务，清掉本功能写进 Codex 设置的一切
   onRestore: () => Promise<void>;
@@ -55,14 +57,30 @@ export function GatewayPage({
     }
   };
 
+  /// 保存即拉取（R5 修订 v2）：先存网关地址和密钥，再去拉模型列表，两步串行。
+  ///
+  /// 第二步失败**不否定第一步已经成功**这个事实，所以那一句话要把两件事都说了。
+  /// 返回 false 表示这一页留下了要读的消息，`back` 据此先不走。
   const save = async (): Promise<boolean> => {
-    const ok = await run(() => onSaveProvider(baseUrl, apiKey));
-    // 密钥保存成功就不再留在输入框里；失败时原样保留，用户可以改了再试
-    if (ok) setApiKey("");
-    return ok;
+    try {
+      await onSaveProvider(baseUrl, apiKey);
+    } catch (e) {
+      // 保存没成，密钥原样留在输入框里，用户可以改了再试
+      setError(parseBackendError(String(e)).message);
+      return false;
+    }
+    setApiKey("");
+    try {
+      await onFetchModels();
+    } catch (e) {
+      setError(`已保存，但模型列表没拉下来——${parseBackendError(String(e)).message}`);
+      return false;
+    }
+    setError(null);
+    return true;
   };
 
-  /// 返回即保存：有没保存的改动就先存，存不下就留在这一页
+  /// 返回即保存：有没保存的改动就先存，这一页还留着要读的消息就先不走
   const back = async () => {
     if (dirty && baseUrl.trim() !== "" && !(await save())) return;
     onBack();
@@ -95,7 +113,7 @@ export function GatewayPage({
           />
         </label>
 
-        {/* 两个动作只有一个是 pill，另一个降为文字链（§6） */}
+        {/* 只有一个动作：保存即拉取，不另给「拉取模型」（R5 修订 v2） */}
         <div className="gateway-page__actions">
           {baseUrl.trim() === "" ? (
             <Button disabled disabledReason="先填上网关地址">
@@ -104,15 +122,7 @@ export function GatewayPage({
           ) : (
             <Button onClick={() => void save()}>保存</Button>
           )}
-          {state.provider.hasKey ? (
-            <Button variant="link" onClick={() => void run(onFetchModels)}>
-              拉取模型
-            </Button>
-          ) : (
-            <Button variant="link" disabled disabledReason="先保存密钥，才能去网关取模型列表">
-              拉取模型
-            </Button>
-          )}
+          <span className="gateway-page__note">存好就顺手去网关拉一次模型列表。</span>
         </div>
 
         {/* 只读事实：端口与协议不做成可改（spec 设计一节） */}

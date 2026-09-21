@@ -4,14 +4,13 @@ import {
   enableDisabledReason,
   factsLine,
   parseBackendError,
-  restartDisabledReason,
   routerUnavailable,
   sortAndFilterModels,
   statusSentence,
   takeoverOfferText,
 } from "./modelsView";
 import type { GatewayProviderModel, GatewayState, GatewaySelectedModel } from "./types";
-import { AgentIcon, Busy, Button, Empty, ErrorBanner, RowNotice, Toast } from "./ui";
+import { AgentIcon, Busy, Button, Confirm, Empty, ErrorBanner, RowNotice, Toast } from "./ui";
 import type { ToastKind } from "./ui";
 import { GatewayPage } from "./pages/GatewayPage";
 import "./ModelsTab.css";
@@ -21,12 +20,14 @@ import "./ModelsTab.css";
 /// 一行一个 agent，当前选的模型就在行里；页面没有域的概念，所以不渲染侧栏内容，
 /// 顶栏之下直接通栏。按「可以有多个 agent」搭，尽管现在只有 Codex。
 ///
-/// 四条形上的定死选择，改之前先回去看 spec：
+/// 五条形上的定死选择，改之前先回去看 spec：
 /// - 开关是 ghost pill 两态（`启用` / 反色 `已启用`），不是滑动开关也不是复选框（R4）
 /// - 模型列表的「已选」用 12px 方形复选框：**圆＝状态（只读事实），方＝选择（我选的）**（R3）
 /// - 三组状态词合成一句人话 + 一行等宽事实，不并排三个徽标（R2）
-/// - 按钮叫 `重启路由`，不叫「重启 Codex」——Codex 是用户的编辑器 / CLI，
-///   我们无权重启它；能重启的只有自己装的那个 launchd 服务（R6）
+/// - 已选模型区是**一整块可点的区域**，点哪儿都打开选择器；片是紧凑片、不反色——
+///   它们是事实不是正在选的东西。不给「改选模型」单独一个链接（R1 修订 v2）
+/// - 按钮叫 `重启 Codex`：实测 Codex 以 `codex app-server` 常驻进程跑着，启动时读一次
+///   config.toml 之后不重读，所以改完配置确实要结束它。会中断进行中的对话，确认一道（R6 修订 v2）
 ///
 /// 四条提示各有各的位置（R7）：`drift` 与 `takeover` 是挂在这一行上的常驻待办，
 /// 走行内待办条；`needsCodexRestart` 并进副行；`routerUnavailable` 是应用级故障，
@@ -60,6 +61,8 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   /// 二级页面（§4.6）：null＝主视图
   const [subPage, setSubPage] = useState<null | "gateway">(null);
+  /// 结束 Codex 进程会中断进行中的对话，确认一道（R6、§5）
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
   /// 行内待办条按「稍后」只在这一程里收起来，下次打开还会再提一次
   const [later, setLater] = useState<{ drift: boolean; takeover: boolean }>({
@@ -138,6 +141,32 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
     }
   };
 
+  /// 结束 Codex 的后台进程。一个都没找到**不是失败**——下次启动照样带着新配置起来，
+  /// 所以那一支也走 success 形态（R6、AC7′）。
+  const restartCodex = async () => {
+    setConfirmRestart(false);
+    onBusy(true);
+    let done = false;
+    try {
+      const result = await api.gatewayRestartCodex();
+      if (!mounted.current) return;
+      done = true;
+      setToast({
+        kind: "success",
+        message:
+          result.terminated > 0
+            ? `结束了 ${result.terminated} 个 Codex 进程，下次启动就是新配置`
+            : "Codex 现在没在跑，下次启动就是新配置",
+      });
+    } catch (error) {
+      if (mounted.current) setToast({ kind: "cannot", message: describeError(error) });
+    } finally {
+      onBusy(false);
+    }
+    // 进程没了之后 codex.running 与 needsCodexRestart 都会变，重读一次让副行跟上
+    if (done && mounted.current) await refresh();
+  };
+
   const toggleModel = (id: string) => {
     setModels((current) => current.map((m) => (m.id === id ? { ...m, selected: !m.selected } : m)));
   };
@@ -181,7 +210,6 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const selectedCount = selected.length;
   const visibleModels = sortAndFilterModels(models, query);
   const disabledReason = enableDisabledReason(state, selectedCount);
-  const restartReason = restartDisabledReason(state);
   const showBanner = routerUnavailable(state) && !bannerClosed;
 
   return (
@@ -212,44 +240,57 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
               <div className="models-row__facts">{factsLine(state)}</div>
             </div>
 
-            {/* 中：已选模型用反色片列出，每片带 × */}
-            <div className="models-row__models">
-              {selectedCount === 0 ? (
-                <span className="models-row__empty">还没选模型</span>
-              ) : (
-                selected.map((m) => (
-                  <span key={m.id} className="models-chip">
-                    <span className="models-chip__label">{modelLabel(m)}</span>
-                    <button
-                      type="button"
-                      className="models-chip__remove"
-                      title={`把 ${modelLabel(m)} 从 Codex 的模型列表里去掉`}
-                      disabled={busy}
-                      onClick={() =>
-                        void saveModels(
-                          models.map((x) => (x.id === m.id ? { ...x, selected: false } : x)),
-                          `Codex 的模型列表里去掉了 ${modelLabel(m)}`,
-                        )
-                      }
-                    >
-                      <svg
-                        width="10"
-                        height="10"
-                        viewBox="0 0 12 12"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        aria-hidden="true"
+            {/* 中：已选模型是一整块可点的区域，里面是紧凑片、不反色（R1 修订 v2） */}
+            <div className="models-row__pick">
+              <div
+                className="models-row__models"
+                role="button"
+                tabIndex={0}
+                title="点一下改选模型"
+                onClick={() => setPickerOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setPickerOpen(true);
+                  }
+                }}
+              >
+                {selectedCount === 0 ? (
+                  <span className="models-row__empty">还没选模型</span>
+                ) : (
+                  selected.map((m) => (
+                    <span key={m.id} className="ss-model-chip">
+                      <span className="ss-model-chip__label">{modelLabel(m)}</span>
+                      <button
+                        type="button"
+                        className="ss-model-chip__remove"
+                        title={`把 ${modelLabel(m)} 从 Codex 的模型列表里去掉`}
+                        disabled={busy}
+                        onClick={(e) => {
+                          // 去掉这一个就是去掉这一个，别顺带把选择器也打开了
+                          e.stopPropagation();
+                          void saveModels(
+                            models.map((x) => (x.id === m.id ? { ...x, selected: false } : x)),
+                            `Codex 的模型列表里去掉了 ${modelLabel(m)}`,
+                          );
+                        }}
                       >
-                        <path d="M3 3l6 6M9 3l-6 6" />
-                      </svg>
-                    </button>
-                  </span>
-                ))
-              )}
-              <Button variant="link" onClick={() => setPickerOpen(true)}>
-                {selectedCount === 0 ? "选模型" : "改选模型"}
-              </Button>
+                        <svg
+                          width="9"
+                          height="9"
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          aria-hidden="true"
+                        >
+                          <path d="M3 3l6 6M9 3l-6 6" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
 
               {pickerOpen ? (
                 <>
@@ -397,7 +438,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
               ) : null}
             </div>
 
-            {/* 右：配置 · 开关 · 重启路由 */}
+            {/* 右：配置 · 开关 · 重启 Codex */}
             <Busy busy={busy} className="models-row__actions">
               <Button size="compact" onClick={() => setSubPage("gateway")}>
                 配置
@@ -436,19 +477,14 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                 </Button>
               )}
 
-              {restartReason !== null ? (
-                <Button size="compact" disabled disabledReason={restartReason}>
-                  重启路由
-                </Button>
-              ) : (
-                <Button
-                  size="compact"
-                  title="重启本机这条路由；Codex 我们无权重启"
-                  onClick={() => void runAction(() => api.gatewayRestart(), "本机路由重启完了")}
-                >
-                  重启路由
-                </Button>
-              )}
+              {/* 副行里那句「改动要重启 Codex 才生效」的动作就是它（R7） */}
+              <Button
+                size="compact"
+                title="结束 Codex 的后台进程，下次启动就带着新配置"
+                onClick={() => setConfirmRestart(true)}
+              >
+                重启 Codex
+              </Button>
             </Busy>
           </div>
 
@@ -503,6 +539,17 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
           <p className="models-page__limits-text">{LIMITATIONS}</p>
         </div>
       </div>
+
+      {/* 会中断进行中的对话，所以确认一道（R6、§5 三处确认之一） */}
+      {confirmRestart ? (
+        <Confirm
+          title="重启 Codex"
+          body="会结束正在运行的 Codex 后台进程，进行中的对话会中断。下次用 Codex 时会带着新配置起来。"
+          confirmLabel="重启"
+          onConfirm={() => void restartCodex()}
+          onCancel={() => setConfirmRestart(false)}
+        />
+      ) : null}
 
       {toast ? (
         <Toast

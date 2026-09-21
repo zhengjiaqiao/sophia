@@ -5,7 +5,6 @@ import {
   enableDisabledReason,
   factsLine,
   parseBackendError,
-  restartDisabledReason,
   routerUnavailable,
   sortAndFilterModels,
   statusSentence,
@@ -151,17 +150,20 @@ test("sortAndFilterModels 空筛选词返回全部；无匹配返回空数组", 
 
 test("statusSentence 把三组正交的状态词合成一句人话，不并排三个徽标", () => {
   // 已启用：说清有几个模型在 Codex 的列表里；needsCodexRestart 并进同一句
-  assert.equal(
-    statusSentence(state({ enabled: true }), 3),
-    "3 个模型已经在 Codex 的模型列表里",
-  );
+  assert.equal(statusSentence(state({ enabled: true }), 3), "3 个模型已经在 Codex 的模型列表里");
   assert.equal(
     statusSentence(state({ enabled: true, needsCodexRestart: true }), 3),
     "3 个模型已经在 Codex 的模型列表里，改动要重启 Codex 才生效",
   );
   // 未启用：按「为什么还不能启用」的优先级给出下一步
-  assert.match(statusSentence(state({ takeover: { baseUrl: "x", selectedCount: 2 } }), 0), /接过来/);
-  assert.equal(statusSentence(state({ conflict: "已有 model_provider" }), 1), "还没启用：已有 model_provider");
+  assert.match(
+    statusSentence(state({ takeover: { baseUrl: "x", selectedCount: 2 } }), 0),
+    /接过来/,
+  );
+  assert.equal(
+    statusSentence(state({ conflict: "已有 model_provider" }), 1),
+    "还没启用：已有 model_provider",
+  );
   assert.match(
     statusSentence(state({ provider: { baseUrl: "u", hasKey: false, models: [] } }), 0),
     /配置/,
@@ -175,23 +177,24 @@ test("statusSentence 把三组正交的状态词合成一句人话，不并排�
 
 test("factsLine 只说查得到的事实：读不出 Codex 版本就不编一个", () => {
   assert.equal(
-    factsLine(state({ codex: { version: "0.43.0", running: true, catalogVersion: "0.43.0", drift: false }, router: { installed: true, running: true, port: 8765, protocol: "chat", error: "" } })),
+    factsLine(
+      state({
+        codex: { version: "0.43.0", running: true, catalogVersion: "0.43.0", drift: false },
+        router: { installed: true, running: true, port: 8765, protocol: "chat", error: "" },
+      }),
+    ),
     "Codex 0.43.0 · 路由 127.0.0.1:8765 运行中",
   );
   assert.equal(
-    factsLine(state({ router: { installed: true, running: false, port: 8765, protocol: "chat", error: "" } })),
+    factsLine(
+      state({
+        router: { installed: true, running: false, port: 8765, protocol: "chat", error: "" },
+      }),
+    ),
     "Codex 26.0 · 路由 127.0.0.1:8765 没在跑",
   );
   assert.equal(
     factsLine(state({ codex: { version: "", running: false, catalogVersion: "", drift: false } })),
     "路由未安装",
-  );
-});
-
-test("restartDisabledReason：后台服务没装就没有东西可重启", () => {
-  assert.equal(restartDisabledReason(state()), "后台路由还没装上，启用之后才有得重启");
-  assert.equal(
-    restartDisabledReason(state({ router: { installed: true, running: true, port: 1, protocol: "chat", error: "" } })),
-    null,
   );
 });

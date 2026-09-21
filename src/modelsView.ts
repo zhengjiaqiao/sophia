@@ -49,8 +49,8 @@ export function canRestore(state: GatewayState): boolean {
  * 副行那句人话（spec R2）。
  *
  * `enabled`、`router.running`、`codex.version` 是正交的三件事，**不并排三个徽标**——
- * 合成一句话说清「现在是什么样」。`needsCodexRestart` 也并进来，右边那个「重启路由」
- * 不是它的动作，但这句话本身就是它要说的全部（R7）。
+ * 合成一句话说清「现在是什么样」。`needsCodexRestart` 也并进来，右边那个「重启 Codex」
+ * 就是它的动作，所以不再单起一条（R7）。
  */
 export function statusSentence(state: GatewayState, selectedCount: number): string {
   if (state.enabled) {
@@ -82,10 +82,8 @@ export function factsLine(state: GatewayState): string {
   return state.codex.version ? `Codex ${state.codex.version} · ${router}` : router;
 }
 
-/// 「重启路由」不可用时的原因；可用则返回 null。服务还没装就没有东西可重启
-export function restartDisabledReason(state: GatewayState): string | null {
-  return state.router.installed ? null : "后台路由还没装上，启用之后才有得重启";
-}
+/// 「重启 Codex」不设禁用态：结束进程不依赖我们的路由装没装上，
+/// 一个进程都没找到也不算失败（R6 修订 v2、AC7′），所以这里没有对应的 reason 函数。
 
 /**
  * 按筛选词过滤（大小写不敏感，匹配 id / slug / displayName），已选模型排在前面，
