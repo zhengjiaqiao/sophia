@@ -25,6 +25,8 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # 版本号三处一致。发布那天才发现对不上，就已经是打了 tag 之后的事了
+      - run: node packaging/check-version.mjs
       - run: npm run build
       - run: cargo check --workspace
       - run: cargo test -p symsync --lib

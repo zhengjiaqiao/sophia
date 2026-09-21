@@ -712,6 +712,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // 应用内更新：查清单、下载、验签、装都在插件里，前端只负责问与决定。
+        // 重启交给 process 插件——装完不重启，用户还在跑旧的那一份。
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(AppState {
             config_lock: Default::default(),
             gateway: gateway::build(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
