@@ -14,50 +14,49 @@ colors:
   ink-faint-inverse: "#6a6a72"
 
 typography:
+  display:
+    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
+    fontSize: 28px
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: 1.4px
+    textTransform: uppercase
   wordmark:
     fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
     fontSize: 20px
     fontWeight: 700
+    lineHeight: 1.0
     letterSpacing: 1.9px
-    textTransform: uppercase
-  head-cap:
-    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
-    fontSize: 14px
-    fontWeight: 600
-    letterSpacing: 1.1px
-    textTransform: uppercase
-  button-cap:
-    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
-    fontSize: 15px
-    fontWeight: 700
-    letterSpacing: 1.17px
-    textTransform: uppercase
-  button-cap-compact:
-    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
-    fontSize: 12px
-    fontWeight: 700
-    letterSpacing: 1.17px
-    textTransform: uppercase
-  eyebrow:
-    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
-    fontSize: 12px
-    fontWeight: 600
-    letterSpacing: 0.96px
     textTransform: uppercase
   body:
     fontFamily: "Barlow, PingFang SC, Microsoft YaHei, sans-serif"
     fontSize: 15px
     fontWeight: 400
-    lineHeight: 1.5
+    lineHeight: 1.6
+  button-cap:
+    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
+    fontSize: 13px
+    fontWeight: 700
+    lineHeight: 1.0
+    letterSpacing: 1.17px
+    textTransform: uppercase
   caption:
     fontFamily: "Barlow, PingFang SC, Microsoft YaHei, sans-serif"
     fontSize: 13px
     fontWeight: 400
     lineHeight: 1.5
+  micro-cap:
+    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
+    fontSize: 12px
+    fontWeight: 600
+    lineHeight: 2.0
+    letterSpacing: 0.96px
+    textTransform: uppercase
   mono:
     fontFamily: "IBM Plex Mono, ui-monospace, PingFang SC, monospace"
     fontSize: 12px
     fontWeight: 400
+    lineHeight: 1.6
 
 rounded:
   none: 0
@@ -73,6 +72,7 @@ spacing:
   lg: 18px
   xl: 24px
   xxl: 32px
+  huge: 48px
 
 components:
   button-ghost:
@@ -81,28 +81,28 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 7px 20px
+    padding: 9px 24px
   button-ghost-compact:
     backgroundColor: "transparent"
     borderColor: "{colors.ink}"
     textColor: "{colors.ink}"
-    typography: "{typography.button-cap-compact}"
+    typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 4px 14px
+    padding: 5px 16px
   button-inverse:
     backgroundColor: "{colors.ink}"
     borderColor: "{colors.ink}"
     textColor: "{colors.canvas}"
     typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 7px 20px
+    padding: 9px 24px
   button-disabled:
     backgroundColor: "transparent"
     borderColor: "{colors.disabled}"
     textColor: "{colors.ink-faint}"
     typography: "{typography.button-cap}"
     rounded: "{rounded.pill}"
-    padding: 7px 20px
+    padding: 9px 24px
   button-link:
     backgroundColor: "transparent"
     textColor: "{colors.ink-mute}"
@@ -114,21 +114,21 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.pill}"
-    padding: 6px 14px
+    padding: 7px 16px
   chip-selected:
     backgroundColor: "{colors.ink}"
     borderColor: "{colors.ink}"
     textColor: "{colors.canvas}"
     typography: "{typography.body}"
     rounded: "{rounded.pill}"
-    padding: 6px 14px
+    padding: 7px 16px
   chip-disabled:
     backgroundColor: "{colors.canvas}"
     borderColor: "{colors.hairline}"
     textColor: "{colors.ink-faint}"
     typography: "{typography.body}"
     rounded: "{rounded.pill}"
-    padding: 6px 14px
+    padding: 7px 16px
   chip-compact:
     backgroundColor: "{colors.canvas}"
     borderColor: "{colors.hairline}"
@@ -140,14 +140,14 @@ components:
     backgroundColor: "{colors.canvas}"
     borderColor: "{colors.ink}"
     textColor: "{colors.ink}"
-    typography: "{typography.eyebrow}"
+    typography: "{typography.micro-cap}"
     rounded: "{rounded.none}"
     padding: 1px 6px
   tag-square-weak:
     backgroundColor: "{colors.canvas}"
     borderColor: "{colors.hairline}"
     textColor: "{colors.ink-faint}"
-    typography: "{typography.eyebrow}"
+    typography: "{typography.micro-cap}"
     rounded: "{rounded.none}"
     padding: 1px 6px
   text-input:
@@ -156,14 +156,14 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.input}"
-    padding: 8px 12px
+    padding: 10px 14px
   toast:
     backgroundColor: "{colors.canvas}"
     borderColor: "{colors.ink}"
     textColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.none}"
-    padding: 14px 16px
+    padding: 16px 20px
     maxWidth: 480px
   banner-error:
     backgroundColor: "{colors.ink}"
@@ -177,7 +177,7 @@ components:
     textColor: "{colors.ink}"
     typography: "{typography.body}"
     rounded: "{rounded.none}"
-    padding: 20px 24px
+    padding: 24px 28px
     width: 460px
   pending-bar:
     backgroundColor: "{colors.canvas}"
@@ -238,17 +238,17 @@ components:
 
 字体文件打进应用，只引 latin 子集的 Barlow 400、Barlow Condensed 600/700、IBM Plex Mono 400。不走 CDN，不整包引入。
 
-### 层级
+### 层级：五档，相邻至少差一倍的视觉重量
 
-| Token | 用在哪 |
-|---|---|
-| `wordmark` | 顶栏 wordmark、二级页面名 |
-| `head-cap` | 顶栏 tab、矩阵列头（agent 名在列头是列标签，随列头大写） |
-| `button-cap` / `button-cap-compact` | 所有按钮；紧凑档给挤在一行里的内联动作 |
-| `eyebrow` | 区域标签、方标签、堆叠列头的名字。**按钮和链接不用它**，否则大写小字从点题变成底噪 |
-| `body` | 表格、说明、**skill 名**、选择片文字 |
-| `caption` | 副行、文字链、提示条副行 |
-| `mono` | **只给路径与计数** |
+| Token | 字号 / 行高 | 用在哪 |
+|---|---|---|
+| `display` | 28 / 1.1 | 二级页面名、区域大标题 |
+| `wordmark` | 20 / 1.0 | 顶栏 wordmark |
+| `body` | 15 / 1.6 | 表格、说明、**skill 名**、选择片文字 |
+| `button-cap` / `caption` | 13 | 按钮；副行、文字链、提示条副行 |
+| `micro-cap` / `mono` | 12 / **2.0** | 区域标签、列头、方标签；路径与计数 |
+
+**第一版的错**：20 / 15 / 14 / 13 / 12 五档挤在 8px 里，14 与 15、13 与 12 眼睛分不出来，整页读起来像一张密排的表。参照 `DESIGN-spacex.md`：display 到 body 是三倍以上的跳跃，小字靠**行高 2.0** 撑出呼吸感而不是靠字号。所以：页面名拉到 28；砍掉 14 这一档；12px 的标签行高 2.0（占 24px 高，与 SpaceX 的 `micro-cap` 一致）。
 
 ### 大写是结构的语言，不大写是内容的语言
 
@@ -260,9 +260,20 @@ components:
 
 ## Layout
 
-基准 8px，子单位 4 / 12 / 16 / 18 / 24 / 32。
+基准 8px，子单位 4 / 12 / 16 / 18 / 24 / 32 / **48**。
 
-**壳**：顶栏 52px + hairline；侧栏与内容区之间 hairline。**二级页面**占满整窗、不渲染侧栏、顶栏换成 `←` + 页面名。
+### 留白：往大了给
+
+| 尺度 | 值 | 用在哪 |
+|---|---|---|
+| 区域之间 | `huge` 48 | 页面里的大区块（模型页的「agent 行区」与「限制说明」之间） |
+| 组之间 | `xl` 24 | 筛选行与表格、表格与待处理栏、表单字段之间 |
+| 行内 | `sm` 12 | 同一行里元素之间 |
+| 页边 | `xxl` 32 | 内容区左右内边距（SpaceX 的 grid gutter） |
+
+**矩阵行高 40px**，不是 30。密排的表格是"文字很密集"这个观感的主要来源——skill 名、位置名、圆点之间要有空气。
+
+**壳**：顶栏 56px + hairline；侧栏与内容区之间 hairline；侧栏项高 36px。**二级页面**占满整窗、不渲染侧栏，顶栏换成 `←` + 页面名（`display` 28px）。
 
 **待处理栏贴底**：`position: sticky; bottom: 0`，与内容区底边之间**没有缝隙**，上边一条 `ink` 描边。
 
@@ -312,7 +323,7 @@ components:
 
 ### 矩阵列头
 
-**16px 图标在上、名字 `eyebrow` 在下，堆叠。** 列宽约 84px，`CLAUDE CODE` 在 `head-cap` 下约 85px 放不进去。
+**16px 图标在上、名字 `micro-cap` 在下，堆叠。** 列宽约 84px。
 
 **列头没有灯。** 曾经在图标右上角放一盏 6px 的灯表示目录状态，用户看不懂。目录不存在这件事在点击那一刻由提示条说（「已经建出来」），写不进去的进待处理栏——列头不需要再说一遍。
 
@@ -447,6 +458,7 @@ components:
 
 日期为准，后者覆盖前者。完整推理见 `docs/specs/2026-09-21-ui-decisions-log.md`。
 
+- **2026-09-21 · 留白与层级**：字号从 20/15/14/13/12 改成 28/20/15/13/12，砍掉 14；12px 标签行高 2.0；按钮内边距 7/20 → 9/24；矩阵行高 30 → 40；间距加 `huge` 48；页边 32。原因：整页读起来像密排的表，SpaceX 的层级靠三倍跳跃和行高撑开，不靠字号密集分档。
 - **2026-09-21 · 真机反馈七条**：列头灯移除；选择操作条改为按 agent 的片；外部来源标签取应用名；待处理栏贴底、同名本体用行视角文案并给「删 X 的」；「重启路由」改为「重启 Codex」（它是常驻进程，可以结束）并确认一道；「拉取模型」并进「保存」；「改选模型」链接去掉、整块区域可点、已选模型改紧凑片。
 - **2026-09-21 · 排版**：skill 名用 `body` 不用 `mono`；`mono` 只给路径与计数。
 - **2026-09-21 · 反馈归属**：四处会说话，一件事只在一处说；行内待办条是第四处，边界是"处理它的动作就在那一行上"。
