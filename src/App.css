@@ -68,8 +68,8 @@ button.link {
 
 /* ===== 外壳 =====
    顶栏 56px + 一条分隔线，侧栏与内容区之间也是一条。
-   wordmark 与 tab 在 App.tsx 里还是 .sidebar 的子元素（类名归 .tsx 管），
-   所以这里把它们定位到顶栏上，而不是另起一个顶栏盒子。 */
+   顶栏是自己的盒子（`.topbar`），不再挂在侧栏下面：模型页不要侧栏，
+   字标与页签不能跟着一起消失。 */
 .app {
   position: relative;
   box-sizing: border-box;
@@ -78,12 +78,14 @@ button.link {
   padding-top: 56px;
 }
 
-.app::before {
-  content: "";
+.topbar {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
   height: 56px;
   border-bottom: 1px solid var(--hairline);
 }
@@ -99,14 +101,11 @@ button.link {
 }
 
 /* wordmark 档（Condensed 20/700/1.9px/大写） */
-.sidebar h1 {
-  position: absolute;
-  top: 0;
-  left: var(--space-xxl);
+.topbar h1 {
   display: flex;
   align-items: center;
   height: 56px;
-  margin: 0;
+  margin: 0 0 0 var(--space-xxl);
   font-family: var(--font-cond);
   font-size: var(--size-wordmark);
   font-weight: 700;
@@ -116,12 +115,12 @@ button.link {
 }
 
 /* tab 与内容区左缘对齐：wordmark 的实际宽度随字体回退浮动，不拿它当基准。
-   侧栏 186px + 内容区 32px 页边＝218。
-   绝对定位后，App.tsx 内联的 margin-bottom 自然失效（top + height 已定死）。 */
-.sidebar nav {
+   侧栏 186px + 内容区 32px 页边＝218，所以字标之后补到 218 为止。
+   模型页没有侧栏，页签照样停在这个位置——对齐的是内容区左缘，不是侧栏边界。 */
+.topbar nav {
   position: absolute;
-  top: 0;
   left: 218px;
+  top: 0;
   align-items: center;
   height: 56px;
 }
@@ -131,7 +130,7 @@ button.link {
 /* 顶栏页签是一级导航，走 nav-cap（DESIGN「层级」）：比普通按钮高半档。
    留白那轮漏改、一直停在 12px 的标签档，挨着 20px 的 wordmark 显得极小。
    可点高度撑到 36px，下划线仍贴文字底部 */
-.sidebar nav button {
+.topbar nav button {
   margin-right: 22px;
   padding: 6px 0 4px;
   border: 0;
@@ -147,11 +146,11 @@ button.link {
   text-transform: uppercase;
 }
 
-.sidebar nav button:last-child {
+.topbar nav button:last-child {
   margin-right: 0;
 }
 
-.sidebar nav button.active {
+.topbar nav button.active {
   border-bottom-color: var(--ink);
   color: var(--ink);
 }
@@ -236,6 +235,11 @@ button.link {
   box-sizing: border-box;
   padding: var(--space-md) var(--space-xxl) 0;
   overflow: auto;
+}
+
+/* 模型页自己出页边（48/32），内容区再叠一层左右就成了 64 */
+.content--bleed {
+  padding: 0;
 }
 
 /* Skill 页整页（MCP 页的 section 也挂这个类）：待处理栏要和窗口底边严丝合缝
