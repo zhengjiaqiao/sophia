@@ -11,17 +11,34 @@ pub struct RoutingModel {
     pub slug: String,
     #[serde(default)]
     pub upstream_model: String,
+    /// 所属网关的 id；旧格式的清单没有这个字段，走启动参数给的那个上游
+    #[serde(default)]
+    pub provider: String,
+}
+
+/// 清单里的一家上游，原样读入；地址是否可用由路由在用到时校验，
+/// 这样一家写坏了不会连累整份清单
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct RoutingProvider {
+    pub id: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub protocol: String,
 }
 
 #[derive(Debug, Default)]
 pub struct RoutingCatalog {
     pub active: HashMap<String, RoutingModel>,
     pub retired: HashSet<String>,
+    pub providers: HashMap<String, RoutingProvider>,
 }
 
 pub fn load_routing_catalog(path: &Path) -> Result<RoutingCatalog, String> {
     #[derive(serde::Deserialize)]
     struct Doc {
+        #[serde(default)]
+        providers: Vec<RoutingProvider>,
         #[serde(default)]
         models: Vec<RoutingModel>,
         #[serde(default)]
@@ -30,6 +47,13 @@ pub fn load_routing_catalog(path: &Path) -> Result<RoutingCatalog, String> {
     let data = std::fs::read(path).map_err(|e| e.to_string())?;
     let doc: Doc = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
     let mut catalog = RoutingCatalog::default();
+    for provider in doc.providers {
+        // 同一个 id 出现两次时以先出现的为准，避免后面的条目悄悄改写上游
+        catalog
+            .providers
+            .entry(provider.id.clone())
+            .or_insert(provider);
+    }
     for model in doc.models {
         let key = model_key(&model.slug);
         if !key.is_empty() {

@@ -309,20 +309,31 @@ pub fn build_app(store_dir: PathBuf) -> App {
         service_restart: Box::new(move |label| m4.restart(label)),
         router_healthy: Box::new(router_healthy),
         bundled: Box::new(|| run_codex(&["debug", "models", "--bundled"])),
-        get_key: Box::new(|| {
-            keychain::get_key(
+        get_key: Box::new(|provider| {
+            keychain::get_provider_key(
                 &keychain::security_runner(),
                 KEYCHAIN_SERVICE,
                 KEYCHAIN_ACCOUNT,
+                provider,
             )
             .map_err(key_error)
         }),
-        set_key: Box::new(|key| {
-            keychain::set_key(
+        set_key: Box::new(|provider, key| {
+            keychain::set_provider_key(
                 &keychain::security_runner(),
                 KEYCHAIN_SERVICE,
                 KEYCHAIN_ACCOUNT,
+                provider,
                 key,
+            )
+            .map_err(key_error)
+        }),
+        delete_key: Box::new(|provider| {
+            keychain::delete_provider_key(
+                &keychain::security_runner(),
+                KEYCHAIN_SERVICE,
+                KEYCHAIN_ACCOUNT,
+                provider,
             )
             .map_err(key_error)
         }),
@@ -407,17 +418,10 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf) -> i32 {
                     "已启用。重启 Codex 后，模型选择器里会同时出现官方模型和所选的第三方模型。"
                 );
             }),
-        Some("adopt-key") => {
-            let runner = keychain::security_runner();
-            keychain::get_key(
-                &runner,
-                crate::takeover::KEYCHAIN_SERVICE,
-                crate::takeover::KEYCHAIN_ACCOUNT,
-            )
-            .and_then(|key| keychain::set_key(&runner, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, &key))
-            .map_err(key_error)
-            .map(|()| eprintln!("已把 agents-manager 的密钥复制到本功能的钥匙串条目。"))
-        }
+        Some("adopt-key") => build_app(store_dir)
+            .adopt_agents_manager_key()
+            .map_err(|e| e.to_string())
+            .map(|id| eprintln!("已把 agents-manager 的密钥复制到网关 {id} 的钥匙串条目。")),
         _ => Err(USAGE.to_owned()),
     };
     match outcome {
@@ -434,8 +438,9 @@ fn run_router(args: &[String]) -> Result<(), String> {
         .unwrap_or("47328")
         .parse()
         .map_err(|_| "端口不合法".to_owned())?;
+    // 旧版本装的后台服务启动参数里带着唯一的上游；新清单里上游写在清单里，这两个参数可以没有
     let third_party_url = flag(args, "--third-party-url")
-        .ok_or("需要 --third-party-url")?
+        .unwrap_or_default()
         .to_owned();
     let routing_catalog_path =
         PathBuf::from(flag(args, "--routing-catalog").ok_or("需要 --routing-catalog")?);
@@ -445,12 +450,13 @@ fn run_router(args: &[String]) -> Result<(), String> {
         Protocol::Chat
     };
     // 密钥按请求取并短时缓存：改密钥不用重启路由，错误不缓存
-    let cached = keychain::CachedKey::new(
-        || {
-            keychain::get_key(
+    let cached = keychain::CachedKeys::new(
+        |provider: &str| {
+            keychain::get_provider_key(
                 &keychain::security_runner(),
                 KEYCHAIN_SERVICE,
                 KEYCHAIN_ACCOUNT,
+                provider,
             )
         },
         Duration::from_secs(30),
@@ -463,7 +469,7 @@ fn run_router(args: &[String]) -> Result<(), String> {
         openai_url: String::new(),
         routing_catalog_path,
         activity_log_path: flag(args, "--log").map(PathBuf::from),
-        third_party_key: Arc::new(move || cached.get().map_err(key_error)),
+        third_party_key: Arc::new(move |provider| cached.get(provider).map_err(key_error)),
         max_body_bytes: 0,
         proxy: Some(system_proxy()),
     })?;
@@ -514,19 +520,26 @@ fn doctor(app: &App, store_dir: &Path) {
         yes_no(state.codex.running),
         yes_no(state.needs_codex_restart)
     );
-    let selected: Vec<&str> = state
-        .provider
-        .models
-        .iter()
-        .filter(|m| m.selected)
-        .map(|m| m.id.as_str())
-        .collect();
-    println!(
-        "网关: {}；密钥已保存: {}；已选模型: {}",
-        state.provider.base_url,
-        yes_no(state.provider.has_key),
-        selected.join(", ")
-    );
+    if state.providers.is_empty() {
+        println!("网关: 还没有添加");
+    }
+    for provider in &state.providers {
+        let selected: Vec<&str> = provider
+            .models
+            .iter()
+            .filter(|m| m.selected)
+            .map(|m| m.id.as_str())
+            .collect();
+        println!(
+            "网关 {}（{}）: {}；协议: {}；密钥已保存: {}；已选模型: {}",
+            provider.name,
+            provider.id,
+            provider.base_url,
+            provider.protocol,
+            yes_no(provider.has_key),
+            selected.join(", ")
+        );
+    }
     let log = store_dir.join("gateway-logs").join("router.log");
     if let Ok(text) = std::fs::read_to_string(&log) {
         let lines: Vec<&str> = text.lines().rev().take(5).collect();
