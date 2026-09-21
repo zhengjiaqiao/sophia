@@ -50,3 +50,4 @@
 - 异步命令里会写 `~/.codex/config.toml` 的，先拿 `AppState.config_lock`（`tokio::sync::Mutex`，锁要跨 `.await`）；同步命令用 `blocking_lock()`，它不能在 tokio 运行时线程上调用
 - 测试里的临时目录先 `canonicalize`：macOS 上 `/var` 是软链，`atomicfile::safe_parent` 会拒绝父路径里的软链
 - 并行任务只碰自己 Files 列表里的文件；`lib.rs`、`Cargo.toml`、`App.tsx` 由前置任务预留
+- 给自己写了 `display` 的元素上，HTML 的 `hidden` 属性是个装饰：它靠 UA 样式表的 `display: none` 起作用，作者样式的 `display: flex` 压得过它。要藏就条件不渲染，或者 CSS 里显式 `[hidden] { display: none !important }`
