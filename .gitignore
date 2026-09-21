@@ -7,6 +7,8 @@ build/
 # Superpowers scratch
 .superpowers/
 .claude/FIXING
+# 并行 agent 的 git worktree 落在这儿，是独立仓库，绝不能提交
+.claude/worktrees/
 
 # Rust / Tauri / Node
 target/
