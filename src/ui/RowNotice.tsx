@@ -10,6 +10,9 @@ import { Button } from "./Button.tsx";
 export interface RowNoticeAction {
   label: string;
   onClick: () => void;
+  /// 可选的 16px 图标（`再试一次` 配 `IconRefresh`、`清除` 配 `IconTrash`）。
+  /// 文字照留：待办条上的动作各不相同，只剩图标就得猜
+  icon?: ReactNode;
   /// 给了就禁用，并作为鼠标悬停的原因（§3）
   disabledReason?: string;
 }
@@ -32,13 +35,14 @@ export function RowNotice({ message, actions, onLater, laterLabel = "稍后" }: 
             <Button
               key={action.label}
               size="compact"
+              icon={action.icon}
               disabled
               disabledReason={action.disabledReason}
             >
               {action.label}
             </Button>
           ) : (
-            <Button key={action.label} size="compact" onClick={action.onClick}>
+            <Button key={action.label} size="compact" icon={action.icon} onClick={action.onClick}>
               {action.label}
             </Button>
           ),

@@ -276,7 +276,12 @@ test("ErrorBanner：反色通栏 + 关闭，不自动消失", () => {
   });
   assert.match(html, /class="ss-banner"/);
   assert.match(html, /role="alert"/);
-  assert.match(html, /class="ss-btn ss-btn--link is-inverse"/);
+  // 关闭是一枚纯图标的 ×：它关的是这条横幅，不是一个动作，写成字会和故障说明抢读。
+  // 仍是反色文字链的档，只是多了 --icon；**文案没丢**，挪到了 aria-label 与 title 上，
+  // 读屏念得出、鼠标停住看得见——纯图标按钮不给盲点，这三条一起断言才算数。
+  assert.match(html, /class="ss-btn ss-btn--link is-inverse ss-btn--icon"/);
+  assert.match(html, /aria-label="关闭"/);
+  assert.match(html, /title="关闭"/);
   assert.match(html, /关闭/);
 });
 

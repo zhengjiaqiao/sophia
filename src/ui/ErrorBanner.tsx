@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
+import { IconClose } from "./icons.tsx";
 
 /// 错误横幅（组件规范 §4.2）：顶栏之下通栏，反色。
 /// 与提示条的区别——提示条是某次操作的结果，横幅是应用级故障（扫描失败、
@@ -16,9 +17,17 @@ export function ErrorBanner({ message, onClose }: ErrorBannerProps) {
   return (
     <div className="ss-banner" role="alert">
       <div className="ss-banner__message">{message}</div>
-      <Button variant="link" inverse onClick={onClose}>
-        关闭
-      </Button>
+      {/* 关闭用 ×：这一处的「关闭」是关掉这条横幅，不是一个动作，
+          写成字反而和横幅里那句故障说明抢读（§「关闭不是动作」）。
+          文案没丢，挪到 aria-label 与 title 上 */}
+      <Button
+        variant="link"
+        inverse
+        icon={<IconClose />}
+        ariaLabel="关闭"
+        title="关闭"
+        onClick={onClose}
+      />
     </div>
   );
 }

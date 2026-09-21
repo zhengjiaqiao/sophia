@@ -27,6 +27,17 @@ export type { SubPageProps } from "./SubPage.tsx";
 export { RowNotice } from "./RowNotice.tsx";
 export type { RowNoticeAction, RowNoticeProps } from "./RowNotice.tsx";
 
+export {
+  IconArrowLeft,
+  IconChevronRight,
+  IconClose,
+  IconRefresh,
+  IconReveal,
+  IconTrash,
+  IconUndo,
+} from "./icons.tsx";
+export type { IconProps } from "./icons.tsx";
+
 export { AgentIcon, AgentMark, agentInitial, hasAgentIcon } from "./AgentMark.tsx";
 export type { AgentIconProps, AgentMarkProps } from "./AgentMark.tsx";
 

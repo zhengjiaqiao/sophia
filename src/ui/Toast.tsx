@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
+import { IconClose } from "./icons.tsx";
 
 /// 提示条（组件规范 §4.1）：右下角浮层，说「刚做完了什么」。
 /// 不排队——一次操作只汇总成一句，新的替换旧的，由上层保证。
@@ -18,6 +19,9 @@ export const TOAST_DWELL_MS: Record<ToastKind, number> = {
 export interface ToastAction {
   label: string;
   onClick: () => void;
+  /// 可选的 16px 图标（`撤销` 配 `IconUndo`）。**文字不省**：
+  /// 「撤销」「查看」是两件完全不同的事，只留图标认不出来
+  icon?: ReactNode;
 }
 
 export interface ToastProps {
@@ -49,15 +53,20 @@ export function Toast({ kind, message, stats, action, onDismiss, onClose }: Toas
       {hasFoot ? (
         <div className="ss-toast__foot">
           {action ? (
-            <Button variant="link" onClick={action.onClick}>
+            <Button variant="link" icon={action.icon} onClick={action.onClick}>
               {action.label}
             </Button>
           ) : null}
           {stats ? <span className="ss-toast__stats">{stats}</span> : null}
           {onClose ? (
-            <Button variant="link" onClick={onClose}>
-              关闭
-            </Button>
+            // 同错误横幅：关掉这条浮层不是一个动作，用 ×，文案挪到 aria-label 与 title
+            <Button
+              variant="link"
+              icon={<IconClose />}
+              ariaLabel="关闭"
+              title="关闭"
+              onClick={onClose}
+            />
           ) : null}
         </div>
       ) : null}

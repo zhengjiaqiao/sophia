@@ -67,7 +67,9 @@ export function AgentIcon({ id, name, size = 16 }: AgentIconProps) {
         viewBox="0 0 16 16"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.3"
+        // 与 icons.tsx 同一笔宽：两套图标挨着出现（列头的 agent 标 + 行上的动作图标），
+        // 差 0.1 看不出来，但同一份数值省得以后各调各的
+        strokeWidth="1.4"
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
