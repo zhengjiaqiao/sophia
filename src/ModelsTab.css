@@ -41,38 +41,74 @@
   font-size: var(--size-micro);
 }
 
-.models-page__notice {
-  margin-top: var(--space-md);
+.models-page__intro {
+  margin: 0;
+  max-width: 560px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
 }
 
-/* ===== 第一眼：28px 的结论 ===== */
-.models-hero__line {
+/* ===== 一个工具一块 =====
+   块与块之间隔 48 并压一条 ink：这是页面里的大区块（DESIGN「Layout」）。
+   今天只有一块，看不见这条线，但版面不假设只有一块。 */
+.models-tools {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.models-tool {
+  margin-top: var(--space-huge);
+}
+
+.models-tool + .models-tool {
+  padding-top: var(--space-huge);
+  border-top: 1px solid var(--ink);
+}
+
+.models-tool__head {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  margin-top: var(--space-xxs);
 }
 
-.models-hero__mark {
+.models-tool__mark {
   display: inline-flex;
   color: var(--ink);
 }
 
-/* display：28 / 1.1 / 1.4px。与下面 15px 的那句人话差近一倍，层级一眼读得出（§1.2） */
-.models-hero__state {
+/* 工具名走 display 档：28 / 1.1 / 1.4px，与下面 15px 的那句人话差近一倍（§1.2）。
+   **唯独关掉 uppercase**——display token 自带大写，但工具名是被谈论的对象，
+   `Codex` 不能变成 `CODEX`（§1.2「大写是结构的语言」）。这是本页唯一一处偏离
+   token 默认值的地方，图标在它左边，两者永远一起出现（§9.1）。 */
+.models-tool__name {
   margin: 0;
   font-family: var(--font-cond);
   font-size: var(--size-display);
   font-weight: 700;
   line-height: var(--leading-display);
   letter-spacing: var(--track-display);
-  text-transform: uppercase;
+  text-transform: none;
   color: var(--ink);
 }
 
-/* 三组状态词合成的那一句人话（R2）。它是主文字，不退到次要色——
-   第一屏要读的就是它 */
-.models-hero__sentence {
+/* 大写档（按钮、区域标签）里嵌进来的专名：原样，不做大小写转换（§1.2）。
+   `defuddle` 被转成 `DEFUDDLE` 后跟表格里的名字就对不上了，工具名同理 */
+.models-plain {
+  text-transform: none;
+}
+
+.models-tool__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-left: auto;
+}
+
+/* 三组状态词合成的那一句人话（R2）。它是主文字，不退到次要色——要读的就是它 */
+.models-tool__sentence {
   margin: var(--space-sm) 0 0;
   max-width: 560px;
   font-family: var(--font-ui);
@@ -82,18 +118,15 @@
 }
 
 /* 版本号与端口是计数类事实，走等宽（§1.2） */
-.models-hero__facts {
+.models-tool__facts {
   margin: var(--space-xxs) 0 0;
   font-family: var(--font-mono);
   font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
-.models-hero__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-top: var(--space-xl);
+.models-tool__notice {
+  margin-top: var(--space-md);
 }
 
 /* ===== 网关区 =====
@@ -154,33 +187,25 @@
   margin-left: auto;
 }
 
-/* 圆点 9px + 间距 12，下面两块缩进 21px 对齐到网关名。
-   模型区用 margin 不用 padding：浮层是相对它绝对定位的，而绝对定位的包含块是
-   **内边距盒**——写成 padding 的话浮层会比模型区向左探出 21px。 */
-.models-card__facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  margin-top: 2px;
-  padding-left: 21px;
+/* 地址跟在网关名后面、同一行，占掉中间的空当；长了省略，全文在 title 上。
+   flex 项要 min-width: 0 才收得住，否则长地址会把这一行撑出去而不是省略。 */
+.models-card__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
-.models-card__url {
-  /* flex 项要 min-width: 0 才收得住，否则长地址会把这一行撑出去而不是省略 */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-/* 选择器浮层挂在这一层上，不挂在可点区里：浮层里的点击不能冒泡出去再把它打开 */
+/* 圆点 9px + 间距 12，模型区缩进 21px 对齐到网关名。
+   用 margin 不用 padding：浮层是相对它绝对定位的，而绝对定位的包含块是
+   **内边距盒**——写成 padding 的话浮层会比模型区向左探出 21px。 */
 .models-card__pick {
   position: relative;
-  margin-top: var(--space-sm);
+  margin-top: var(--space-xs);
   margin-left: 21px;
 }
 
@@ -207,6 +232,15 @@
 .models-card__empty {
   font-family: var(--font-ui);
   font-size: var(--size-caption);
+  color: var(--ink-faint);
+}
+
+/* 「还有多少可挑」靠右，等宽（§1.2）。它是那块区域可点的由头 */
+.models-card__catalog {
+  margin-left: auto;
+  padding-left: var(--space-sm);
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
@@ -429,16 +463,16 @@
   white-space: nowrap;
 }
 
-/* ===== 限制说明：常驻，不随操作消失（R8） ===== */
-/* 与网关区之间 48：页面里的大区块之间（DESIGN「Layout」） */
-.models-page__limits {
+/* ===== 限制说明：这个工具的事实，常驻、不随操作消失（R8） ===== */
+/* 与网关区之间 48：块里的大段落之间（DESIGN「Layout」） */
+.models-tool__limits {
   max-width: 560px;
   margin-top: var(--space-huge);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--hairline);
 }
 
-.models-page__limits-text {
+.models-tool__limits-text {
   margin: var(--space-xs) 0 0;
   font-family: var(--font-ui);
   font-size: var(--size-caption);
