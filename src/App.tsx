@@ -24,7 +24,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   /// 二级页面（§4.6）：占满整窗、不渲染侧栏。null＝主视图
   const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
-  const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("skills");
+  /// 模型路由比 skill、MCP 都高频，所以它排第一个 tab，也是启动默认页。
+  /// 后端说不支持（非 macOS）时这一页根本不存在，届时退回 Skills，见 applyModelsSupported
+  const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("models");
   // 「模型」标签页只在后端确认支持（当前只有 macOS）时才出现；读取失败时静默隐藏
   const [modelsSupported, setModelsSupported] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -136,20 +138,28 @@ export default function App() {
     };
   }, [requestRefresh]);
 
+  /// 模型页是默认页，可它在非 macOS 上并不存在：一问出「不支持」就把默认页退回 Skills，
+  /// 否则主视图会停在一个既没有标签页也没有内容的空壳上
+  const applyModelsSupported = (supported: boolean) => {
+    setModelsSupported(supported);
+    if (!supported) setActiveTab((tab) => (tab === "models" ? "skills" : tab));
+  };
+
   useEffect(() => {
     let cancelled = false;
     void api
       .gatewayState()
       .then((state) => {
-        if (!cancelled) setModelsSupported(state.supported);
+        if (!cancelled) applyModelsSupported(state.supported);
       })
       .catch(() => {
         // 读不到就当作不支持，标签页保持隐藏
-        if (!cancelled) setModelsSupported(false);
+        if (!cancelled) applyModelsSupported(false);
       });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const domains = overview?.domains ?? [];
@@ -243,7 +253,18 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <h1>Sophia</h1>
+        {/* 顺序即高频程度：模型路由天天用，排第一个；MCP 那条线叫「导入 MCP」，
+            与 skill 的二级页「导入 skill」成对，一级 tab 与二级页不重名 */}
         <nav aria-label="功能" style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+          {modelsSupported && (
+            <button
+              className={activeTab === "models" ? "active" : ""}
+              disabled={busy}
+              onClick={() => setActiveTab("models")}
+            >
+              模型
+            </button>
+          )}
           <button
             className={activeTab === "skills" ? "active" : ""}
             disabled={busy}
@@ -261,17 +282,8 @@ export default function App() {
               setActiveTab("mcp");
             }}
           >
-            MCP
+            导入 MCP
           </button>
-          {modelsSupported && (
-            <button
-              className={activeTab === "models" ? "active" : ""}
-              disabled={busy}
-              onClick={() => setActiveTab("models")}
-            >
-              模型
-            </button>
-          )}
         </nav>
         <ul>
           {!sidebarDomains.some((d) => d.key === "global") && (
@@ -351,17 +363,9 @@ export default function App() {
             </button>
           </div>
         )}
-        {activeTab === "skills" ? (
-          <SkillsTab
-            overview={overview}
-            autoLinks={autoLinks}
-            busy={busy}
-            onBusy={setBusyState}
-            selectedKey={selectedKey}
-            onRefresh={refresh}
-            onError={setError}
-            onOpenPending={() => setSubPage("pending")}
-          />
+        {/* 还没问出模型页支不支持的那一瞬间也落在 Skills 上：宁可闪一下扫描中，不能白屏 */}
+        {activeTab === "models" && modelsSupported ? (
+          <ModelsTab onError={setError} busy={busy} onBusy={setBusyState} />
         ) : activeTab === "mcp" ? (
           <McpTab
             selectedKey={selectedKey}
@@ -372,7 +376,16 @@ export default function App() {
             onDomains={updateMcpSidebarDomains}
           />
         ) : (
-          <ModelsTab onError={setError} busy={busy} onBusy={setBusyState} />
+          <SkillsTab
+            overview={overview}
+            autoLinks={autoLinks}
+            busy={busy}
+            onBusy={setBusyState}
+            selectedKey={selectedKey}
+            onRefresh={refresh}
+            onError={setError}
+            onOpenPending={() => setSubPage("pending")}
+          />
         )}
       </main>
       {backgroundMcpReport && (
