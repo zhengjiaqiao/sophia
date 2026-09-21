@@ -85,6 +85,17 @@ export default function TrayPanel() {
     }
   };
 
+  // 浮层点外面或 Esc 关（DESIGN「什么时候才有按钮」）。确认行开着时 Esc 先收回那一问
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (confirmingRestart) setConfirmingRestart(false);
+      else void api.trayHide();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [confirmingRestart]);
+
   // 面板高度跟着内容走：不同状态下行数不一样（要不要「去配置」、确认行高一点）
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -114,9 +125,10 @@ export default function TrayPanel() {
                   {row.toggle.label}
                 </Button>
               ) : (
-                <button
-                  type="button"
-                  className={`ss-btn ss-btn--compact${row.toggle.on ? " tray-pill--on" : ""}`}
+                <Button
+                  size="compact"
+                  // 反色＝现在开着（DESIGN「Do」）
+                  variant={row.toggle.on ? "inverse" : "default"}
                   title={
                     row.toggle.on
                       ? "点一下停用：Codex 的模型列表只保留官方模型"
@@ -125,7 +137,7 @@ export default function TrayPanel() {
                   onClick={() => void toggle(row.toggle.on)}
                 >
                   {row.toggle.label}
-                </button>
+                </Button>
               )}
             </Busy>
           </div>

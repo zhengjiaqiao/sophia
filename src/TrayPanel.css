@@ -35,12 +35,6 @@
   font-weight: 700;
 }
 
-/* 反色＝现在开着（DESIGN「Do」）。不用滑动开关 */
-.tray-pill--on {
-  background: var(--ink);
-  color: var(--canvas);
-}
-
 .tray__status {
   margin: 8px 0 0;
   font-size: var(--size-caption);

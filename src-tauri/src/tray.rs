@@ -270,6 +270,14 @@ pub fn tray_set_height(app: tauri::AppHandle, height: f64) {
 }
 
 #[tauri::command]
+pub fn tray_hide(app: tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    hide_panel(&app);
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+#[tauri::command]
 pub fn tray_quit(app: tauri::AppHandle) {
     app.exit(0);
 }

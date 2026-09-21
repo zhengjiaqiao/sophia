@@ -764,6 +764,7 @@ pub fn run() {
             gateway::gateway_takeover,
             tray::tray_open_main,
             tray::tray_set_height,
+            tray::tray_hide,
             tray::tray_quit
         ])
         .setup(|_app| {

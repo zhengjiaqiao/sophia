@@ -113,6 +113,7 @@ export const api = {
     invoke<void>("tray_open_main", { page, error }),
   /// 面板高度由内容决定：量好了报给后端去调窗口
   traySetHeight: (height: number) => invoke<void>("tray_set_height", { height }),
+  trayHide: () => invoke<void>("tray_hide"),
   trayQuit: () => invoke<void>("tray_quit"),
   gatewayTakeover: () => invoke<GatewayState>("gateway_takeover"),
 };
