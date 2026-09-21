@@ -1,5 +1,6 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
 mod gateway;
+mod tray;
 mod watch;
 
 pub use gateway::cli as gateway_cli;
@@ -760,8 +761,31 @@ pub fn run() {
             gateway::gateway_restore,
             gateway::gateway_restart,
             gateway::gateway_restart_codex,
-            gateway::gateway_takeover
+            gateway::gateway_takeover,
+            tray::tray_open_main,
+            tray::tray_set_height,
+            tray::tray_quit
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .setup(|_app| {
+            // 菜单栏入口只在 macOS 上有：模型注入本身只支持 macOS
+            #[cfg(target_os = "macos")]
+            tray::setup(_app)?;
+            Ok(())
+        })
+        .on_window_event(|_window, _event| {
+            // 关主窗口＝藏到菜单栏，不退出；别的系统上没有菜单栏入口，关窗照旧退出
+            #[cfg(target_os = "macos")]
+            if let Ok(dir) = runtime_store_dir() {
+                tray::intercept_close(_window, _event, &dir);
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // 窗口藏起来之后点 Dock 图标：把它带回来
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                tray::show_main(_app);
+            }
+        });
 }

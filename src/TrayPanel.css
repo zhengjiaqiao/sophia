@@ -1,0 +1,118 @@
+/* 菜单栏面板（docs/specs/2026-09-21-tray.md）。
+   零圆角、1px ink 描边、无阴影（DESIGN「Elevation」）；层级只靠描边与反色。 */
+@import "./tokens.css";
+.tray {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ink);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+  user-select: none;
+  cursor: default;
+}
+
+.tray__agent {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tray__identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* agent 名是被谈论的对象，不大写（DESIGN「大写是结构的语言」） */
+.tray__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+/* 反色＝现在开着（DESIGN「Do」）。不用滑动开关 */
+.tray-pill--on {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.tray__status {
+  margin: 8px 0 0;
+  font-size: var(--size-caption);
+  line-height: 1.5;
+  color: var(--ink-mute);
+}
+
+/* 版本与端口是计数类事实，走等宽 */
+.tray__facts {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+.tray__agent .ss-btn--link {
+  margin-top: 8px;
+}
+
+.tray__menu {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tray__menu--last {
+  border-bottom: 0;
+}
+
+/* 列表行：无描边，hover 底色转 surface（DESIGN「可点的面」） */
+.tray__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.tray__item:hover:not(:disabled),
+.tray__item:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+.tray__item:disabled {
+  opacity: 0.45;
+}
+
+.tray__confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 6px 16px;
+  font-size: var(--size-caption);
+}
+
+.tray__confirm-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}

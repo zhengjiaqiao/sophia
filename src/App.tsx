@@ -111,6 +111,20 @@ export default function App() {
         if (activeTabRef.current === "skills") setBackgroundMcpReport(payload);
       }),
     );
+    // 菜单栏面板要求切页；它那边做不成的事也带到这里来说——面板放不下一段解释
+    collect(
+      listen<{ page: "models" | "settings" | null; error: string | null }>(
+        "tray-navigate",
+        ({ payload }) => {
+          if (payload.page === "settings") setSubPage("settings");
+          if (payload.page === "models") {
+            setSubPage(null);
+            setActiveTab("models");
+          }
+          if (payload.error) setError(payload.error);
+        },
+      ),
+    );
     // 兜底：在 Finder 里改了不在监视集合内的东西，切回窗口时也能发现
     collect(
       getCurrentWindow().onFocusChanged(({ payload: focused }) => focused && requestRefresh()),

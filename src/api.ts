@@ -108,5 +108,11 @@ export const api = {
   gatewayRestart: () => invoke<GatewayState>("gateway_restart"),
   /// 结束 Codex 的后台进程，下次启动才读到新配置；terminated 为 0 表示 Codex 当时没在跑
   gatewayRestartCodex: () => invoke<GatewayRestartReport>("gateway_restart_codex"),
+  /// 菜单栏面板用：把主窗口带到前面；`page` 给了就切过去，`error` 给了就在那一页上说
+  trayOpenMain: (page: "models" | "settings" | null, error: string | null) =>
+    invoke<void>("tray_open_main", { page, error }),
+  /// 面板高度由内容决定：量好了报给后端去调窗口
+  traySetHeight: (height: number) => invoke<void>("tray_set_height", { height }),
+  trayQuit: () => invoke<void>("tray_quit"),
   gatewayTakeover: () => invoke<GatewayState>("gateway_takeover"),
 };
