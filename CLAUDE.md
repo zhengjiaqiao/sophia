@@ -1,4 +1,4 @@
-# SymSync
+# Sophia
 
 跨平台桌面应用：发现各 AI coding harness 的 skill 目录，展示 skill × harness 矩阵，补缺失软链、清坏链。Rust core（`crates/core`，crate 名 `symsync-core`）+ Tauri 2 命令层（`src-tauri`）+ React/TypeScript 前端（`src`）。
 
