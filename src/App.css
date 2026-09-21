@@ -203,6 +203,31 @@ button.link {
   overflow: auto;
 }
 
+/* Skill 页整页：待处理栏要和窗口底边严丝合缝（DESIGN「Layout」），
+   所以这一页得先把内容区铺满，否则贴底的栏最多停在内容结束的地方。
+   +12px 与负边距成对：把 .content 那 12px 下内边距吃掉，不补这一段就会留一道缝；
+   补了又不减回去，内容区会平白多出 12px 可滚动的空白。 */
+.skills-tab {
+  min-height: calc(100% + 12px);
+  margin-bottom: -12px;
+}
+
+/* 待处理栏：主视图底部常驻一条，一次一条（§4.3）。
+   左右负边距铺满内容区，上边一条实线——和选择操作条同一套手法，不用阴影垫（§1.3） */
+.pending-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px -20px 0;
+  padding: 9px 20px;
+  border-top: 1px solid var(--ink);
+  background: var(--canvas);
+}
+
 /* ===== 4.2 错误横幅：反色通栏，不自动消失 ===== */
 .error {
   display: flex;

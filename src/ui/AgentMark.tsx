@@ -10,7 +10,9 @@ import type { ReactNode } from "react";
 /// （claude-code / codex / cursor）和 2 个 G（gemini-cli / github-copilot），
 /// 所以方块**永远和名字一起出现，不单独用**。
 
-/// agent 灯说的是目录，不是 skill（§9）
+/// agent 灯说的是目录，不是 skill（§9）。
+/// **skill 矩阵的列头已经不放灯了**（DESIGN「矩阵列头」/ 不在列头放灯），
+/// 这一套现在只有 MCP 页在用
 export type LampState = "writable" | "missing" | "unwritable";
 
 /// 默认口径是 skill 页的「目录」。MCP 页的列是**文件**不是目录，
@@ -129,9 +131,7 @@ export function AgentLamp({ state, className, title }: AgentLampProps) {
       </svg>
     );
   }
-  return (
-    <span className={classes} title={label} role="img" aria-label={label} />
-  );
+  return <span className={classes} title={label} role="img" aria-label={label} />;
 }
 
 export interface AgentMarkProps {
@@ -141,7 +141,9 @@ export interface AgentMarkProps {
   /// inline：设置页与导入页的横排；stacked：矩阵列头，图标在上名字在下。
   /// 列头是 agent 名大写的唯一例外——那里它承担的是列标签的职能
   layout?: "inline" | "stacked";
-  /// 列头堆叠时灯压在图标右上角
+  /// 灯压在图标右上角。**skill 矩阵的列头不给这个 prop**——DESIGN「矩阵列头」定死
+  /// 列头＝图标 + 名字，那盏 6px 的灯用户看不懂，已经撤掉。只剩 MCP 页还在用，
+  /// 那边收口时这个 prop 连同 `AgentLamp` 一起删
   lamp?: LampState;
   /// 没装这个 agent、或整行禁用：图标跟着文字一起退到弱文字色，形状不变
   dim?: boolean;

@@ -11,9 +11,8 @@ import {
   StateDot,
   type ButtonSize,
   type ButtonVariant,
-  type LampState,
 } from "./ui";
-import type { AutoLink, CellRef, DomainPage, DomainRow, Overview, Target } from "./types";
+import type { AutoLink, CellRef, DomainPage, DomainRow, Overview } from "./types";
 
 /// 交给容器去清除的一批链接：行（用于结果说明）+ 要清的格，省略 cells = 整行
 export interface UnlinkTarget {
@@ -109,12 +108,6 @@ export function ActionButton({
     <Button {...rest} />
   );
 }
-
-/// 列头那盏灯说的是目录，不是 skill（§9）
-const lampOf = (target: Target): LampState => {
-  if (!target.exists) return "missing";
-  return target.linkedWholeTo === null ? "writable" : "unwritable";
-};
 
 /// 一个域的整页：筛选片、自动同步行、行×目标的矩阵
 export default function DomainView({
@@ -268,7 +261,7 @@ export default function DomainView({
     </button>
   );
 
-  /// 一个 agent 目录都还不存在：列照常在，灯全是空心（§6 / AC17）
+  /// 一个 agent 目录都还不存在：列照常在（§6 / AC17），用户才有入口把目录建出来
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
 
   const tableBody = (
@@ -297,12 +290,13 @@ export default function DomainView({
             >
               {sortHeader(
                 target.id,
+                // 列头＝图标 + 名字，**没有灯**（DESIGN「矩阵列头」）：目录不存在这件事
+                // 由点格那一刻的提示条说，写不进去的进待处理栏，列头不再说第二遍
                 <AgentMark
                   id={target.scope.harnessId}
                   name={target.label}
-                  layout="stacked"
-                  lamp={lampOf(target)}
                   title={target.path}
+                  layout="stacked"
                 />,
                 true,
               )}
@@ -453,7 +447,7 @@ export default function DomainView({
         </div>
       ))}
 
-      {/* 表头照常渲染，即使一行都没有——agent 列在、灯空心，用户才有入口把目录建出来（§8） */}
+      {/* 表头照常渲染，即使一行都没有——agent 列在，用户才有入口把目录建出来（§8） */}
       {page.targets.length > 0 && tableBody}
       {rows.length === 0 &&
         (filtered ? (

@@ -4,16 +4,21 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { ActionButton, dim, type UnlinkTarget } from "./DomainView";
 import ImportPage from "./pages/ImportPage";
-import { viewOf } from "./cellState";
-import { issueKey } from "./pages/pendingIssues";
-import { Empty, Toast, type ToastKind } from "./ui";
+import {
+  collectIssues,
+  formatBytes,
+  readOnlyIssue,
+  type DeleteChoice,
+  type PendingIssue,
+} from "./pages/pendingIssues";
+import { AgentIcon, Chip, Confirm, Empty, Toast, type ToastKind } from "./ui";
 import type {
   AutoLink,
   Cell,
   CellRef,
+  DeleteSourcePlan,
   DomainPage,
   DomainRow,
-  IssueKind,
   Overview,
   PlannedAction,
   ReportEntry,
@@ -45,20 +50,6 @@ const LABEL: CSSProperties = {
 };
 const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "var(--size-mono)" };
 
-/// 待处理栏：主视图底部常驻一条，一次一条，处理完跳下一条（§4.3）
-const PENDING_BAR: CSSProperties = {
-  position: "sticky",
-  bottom: 0,
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-  marginTop: 16,
-  padding: "9px 0",
-  borderTop: "1px solid var(--ink)",
-  background: "var(--canvas)",
-};
-
 /// 提示条的内容；一次操作只汇总成一句，新的替换旧的（§4.1）
 interface Notice {
   kind: ToastKind;
@@ -69,20 +60,81 @@ interface Notice {
   action?: { label: string; onClick: () => void };
 }
 
-/// 待处理栏里的一条：要用户拿主意，且带得出自己的动作
-interface Pending {
-  key: string;
-  kind: IssueKind;
-  /// 一句完整的话，来自 cellState.viewOf，不在这里另写一份
-  message: string;
-  /// 组 key 的路径，忽略时原样交给后端
-  paths: string[];
-  /// 链接失效：要清掉的那条
-  broken?: PlannedAction;
-  /// 整目录链到别处：拆开哪一列
-  splitTargetId?: string;
-  /// 目录写不进去：再试一次要用的格
-  retry?: CellRef;
+/// 已经体检过、正等用户确认的一次删除。体检与真删是两次调用，中间隔着确认（§5）
+interface Asking {
+  planId: string;
+  plan: DeleteSourcePlan;
+  choice: DeleteChoice;
+}
+
+/// 选择操作条上的一片：**已选的 skill × 这个 agent**（DESIGN「选择操作条」）
+interface AgentChip {
+  target: Target;
+  /// 可以关掉的格
+  linked: CellRef[];
+  /// 还没开的格
+  missing: CellRef[];
+  /// 非空即灰描边不可选，同时是鼠标悬停的原因
+  disabledReason?: string;
+}
+
+/// 报告里第一条失败的原因；全成功时为 null
+const firstFailure = (report: SyncReport): string | null => {
+  for (const entry of report.entries) {
+    if (entry.outcome.status === "failed") return entry.outcome.reason;
+  }
+  return null;
+};
+
+/// 删本体确认弹窗里那句「有多少条链接会因此失效」（§10 第 2 条）
+const affectedLine = (plan: DeleteSourcePlan): string => {
+  const n = plan.affected.length;
+  if (n === 0) return "没有链接指向它。";
+  if (plan.relinkTo !== null) return `${n} 条链接指向它，删完自动改指到留下的那一处。`;
+  return `${n} 条链接指向它，删完这些链接就指不到东西了。`;
+};
+
+/// 选择操作条上的一片。`Chip` 的「不可选必须同时给原因」在类型上是个联合，
+/// 条件禁用得分两支写，这一层只做那件事
+function SelectionChip({
+  icon,
+  name,
+  open,
+  selected,
+  title,
+  disabledReason,
+  onClick,
+}: {
+  icon?: ReactNode;
+  name: string;
+  /// 还没开的格数；大于 0 时片上写「开启 N」，点一下就是开它们
+  open: number;
+  selected: boolean;
+  title: string;
+  disabledReason?: string;
+  onClick: () => void;
+}) {
+  // 计数走等宽，「开启」两个字是正文——等宽只给路径与计数（§1.2）
+  const label = (
+    <>
+      {name}
+      {open > 0 ? (
+        <>
+          {" "}
+          开启 <span style={MONO}>{open}</span>
+        </>
+      ) : null}
+    </>
+  );
+  return disabledReason === undefined ? (
+    <Chip icon={icon} selected={selected} title={title} onClick={onClick}>
+      {label}
+    </Chip>
+  ) : (
+    <Chip icon={icon} disabled disabledReason={disabledReason}>
+      {label}
+    </Chip>
+  );
 }
 
 export interface SkillsTabProps {
@@ -128,6 +180,8 @@ export default function SkillsTab({
   // 目录写不进去：扫描永远不产出这个状态，只有真的写失败之后才由这里构造（§8）。
   // 存的是格本身，「再试一次」要原样把它再交给 propose_links
   const [writeFails, setWriteFails] = useState<CellRef[]>([]);
+  // 同名本体选了「删 X 的」之后、确认之前停在这里
+  const [asking, setAsking] = useState<Asking | null>(null);
 
   // 后端扫描后按规则自动补的链，用同一条提示条汇总
   useEffect(() => {
@@ -176,6 +230,7 @@ export default function SkillsTab({
   useEffect(() => {
     setNotice(null);
     setImportOpen(false);
+    setAsking(null);
     setFocusPath(null);
     setCursor(0);
   }, [selectedKey]);
@@ -494,70 +549,20 @@ export default function SkillsTab({
 
   // ===== 待处理栏 =====
 
-  /// 文案一律取自 cellState.viewOf：这里造一个只用来问它的格，不另写一份映射
-  const askView = (target: Target, skill: string, state: Cell["state"], path: string) =>
-    viewOf(
-      { sourceId: "", skill, targetId: target.id, path, state, pointsTo: null },
-      target,
-      target.label,
-      skill,
-    );
-
-  const pending: Pending[] = [];
-  for (const page of pages) {
-    // 链接失效：以 page.broken 为准——本体已经被删掉的断链没有行，只出现在这张表里
-    for (const act of page.broken) {
-      const target = targetByPath(act.target);
-      const message = target
-        ? (askView(target, act.itemName, "broken", act.targetPath).reason ?? "")
-        : `${act.target} 下这条链接指向一个不存在的地方，先清掉它`;
-      pending.push({
-        key: issueKey("brokenLink", [act.targetPath]),
-        kind: "brokenLink",
-        message: `${act.itemName} · ${message}`,
-        paths: [act.targetPath],
-        broken: act,
-      });
-    }
-    // 整目录链到别处：一列一条，不是一格一条——同一列上几十行说的是同一件事
-    for (const target of page.targets) {
-      if (target.linkedWholeTo === null) continue;
-      pending.push({
-        key: issueKey("wholeLinkedTarget", [target.path, target.linkedWholeTo]),
-        kind: "wholeLinkedTarget",
-        message: askView(target, "", "wholeLinked", target.path).reason ?? "",
-        paths: [target.path, target.linkedWholeTo],
-        splitTargetId: target.id,
-      });
-    }
-    // 同名本体指向别处：一格一条，用户要在两个本体之间拿主意
-    for (const row of page.rows) {
-      for (const cell of row.cells) {
-        const target = page.targets.find((t) => t.id === cell.targetId);
-        if (!target) continue;
-        const view = viewOf(cell, target, target.label, row.skill);
-        if (view.issue !== "duplicateSource") continue;
-        const paths = [cell.path, cell.pointsTo].filter((p): p is string => p !== null);
-        pending.push({
-          key: issueKey("duplicateSource", paths),
-          kind: "duplicateSource",
-          message: view.reason ?? "",
-          paths,
-        });
-      }
-    }
-  }
-  // 目录写不进去：上一批操作里真的写失败了才有
+  /// 收集与文案都取自 pendingIssues：待处理页与这条栏说的必须是同一句**行视角**的话，
+  /// 不在这里另写一份（DESIGN「反馈」）
+  const pending: PendingIssue[] = collectIssues(overview, pages);
+  // 目录写不进去：扫描永远不产出这个状态，只有上一批操作真的写失败了才有。
+  // 同一个目录下几个 skill 都写不进去说的是同一件事，按目标并成一条
+  const failedTargets = new Map<string, CellRef[]>();
   for (const ref of writeFails) {
-    const target = targetOf(ref.targetId);
-    if (!target) continue;
-    pending.push({
-      key: issueKey("readOnlyTarget", [target.path]),
-      kind: "readOnlyTarget",
-      message: askView(target, ref.skill, "readOnly", target.path).reason ?? "",
-      paths: [target.path],
-      retry: ref,
-    });
+    const refs = failedTargets.get(ref.targetId);
+    if (refs) refs.push(ref);
+    else failedTargets.set(ref.targetId, [ref]);
+  }
+  for (const [targetId, refs] of failedTargets) {
+    const target = targetOf(targetId);
+    if (target) pending.push(readOnlyIssue(target, refs));
   }
 
   const open = pending.filter((p) => !ignored.has(p.key));
@@ -565,7 +570,7 @@ export default function SkillsTab({
   const index = focusIndex >= 0 ? focusIndex : Math.min(cursor, Math.max(open.length - 1, 0));
   const current = open[index] ?? null;
 
-  const ignore = async (issue: Pending) => {
+  const ignore = async (issue: PendingIssue) => {
     try {
       const key = await api.ignoreIssue(issue.kind, issue.paths);
       // 本地算的和后端落盘的都记上：路径规范化真有出入时，界面也不会继续提示
@@ -577,34 +582,88 @@ export default function SkillsTab({
     }
   };
 
-  /// 待处理栏里这一条自己的动作（§4.3：三类问题各自带动作）
-  const actionsOf = (issue: Pending): ReactNode => {
-    if (issue.broken) {
-      return (
-        <ActionButton
-          size="compact"
-          onClick={() => void clearBroken([issue.broken as PlannedAction])}
-        >
-          清除
-        </ActionButton>
-      );
+  /// 删本体第一步：只读体检，什么都不动，结果摆进确认弹窗（§10 第 2 条）
+  const askDelete = async (choice: DeleteChoice) => {
+    onBusy(true);
+    try {
+      const planned = await api.planDeleteSource(choice.sourceId, choice.skill);
+      setAsking({ planId: planned.planId, plan: planned.plan, choice });
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      onBusy(false);
     }
-    if (issue.splitTargetId) {
-      // 「拆开」是 split_whole_link 唯一的入口（§8 约束 4）
-      return (
-        <ActionButton size="compact" onClick={() => void split(issue.splitTargetId as string)}>
-          拆开
-        </ActionButton>
+  };
+
+  /// 删本体第二步：用户确认之后才真的删。与体检分成两次调用，合并就等于无确认删除
+  const confirmDelete = async () => {
+    if (asking === null) return;
+    const { planId, plan, choice } = asking;
+    setAsking(null);
+    onBusy(true);
+    try {
+      const report = await api.deleteSource(planId);
+      const reason = firstFailure(report);
+      const affected = plan.affected.length;
+      setNotice(
+        reason === null
+          ? {
+              // 不给撤销：后端没有恢复命令，只能告诉他去哪儿找（DESIGN「删本体」）
+              kind: "success",
+              message: `把 ${choice.label} 里的 ${choice.skill} 移到了废纸篓，可以在访达里恢复`,
+              stats:
+                affected === 0
+                  ? undefined
+                  : plan.relinkTo !== null
+                    ? `${affected} 条链接已改指到留下的那一处`
+                    : `${affected} 条链接现在指不到东西了`,
+            }
+          : { kind: "cannot", message: reason },
       );
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      onBusy(false);
     }
-    if (issue.retry) {
-      return (
-        <ActionButton size="compact" onClick={() => void link([issue.retry as CellRef])}>
-          再试一次
-        </ActionButton>
-      );
+    await onRefresh();
+  };
+
+  /// 待处理栏里这一条自己的动作（DESIGN「反馈」：四类问题各自带动作，与待处理页一致）
+  const actionsOf = (issue: PendingIssue): ReactNode => {
+    switch (issue.kind) {
+      case "duplicateSource":
+        // 两个本体各自仍在列表里成行，这条栏只负责问删哪一个
+        return issue.deletes.map((choice) => (
+          <ActionButton key={choice.sourceId} size="compact" onClick={() => void askDelete(choice)}>
+            删 {choice.label} 的
+          </ActionButton>
+        ));
+      case "brokenLink":
+        return issue.clear === null ? null : (
+          <ActionButton
+            size="compact"
+            onClick={() => void clearBroken([issue.clear as PlannedAction])}
+          >
+            清除
+          </ActionButton>
+        );
+      case "wholeLinkedTarget":
+        // 「拆开」是 split_whole_link 唯一的入口（§8 约束 4）
+        return issue.splitTargetId === null ? null : (
+          <ActionButton size="compact" onClick={() => void split(issue.splitTargetId as string)}>
+            拆开
+          </ActionButton>
+        );
+      case "readOnlyTarget":
+        return (
+          <ActionButton size="compact" onClick={() => void link(issue.retry)}>
+            再试一次
+          </ActionButton>
+        );
+      default:
+        // MCP 的两类不会走到 skill 的待处理栏
+        return null;
     }
-    return null;
   };
 
   // ===== 渲染 =====
@@ -615,38 +674,54 @@ export default function SkillsTab({
   const importPage = selectedKey === "all" ? null : (pages[0] ?? null);
   const broken = pages.flatMap((p) => p.broken);
 
-  /// 该行在本域是否有可关掉的链接（已链接且目标不是整目录链到别处）
-  const hasUnlinkable = (page: DomainPage, row: DomainRow) =>
-    row.cells.some(
-      (c) =>
-        c.state === "linked" &&
-        page.targets.find((t) => t.id === c.targetId)?.linkedWholeTo === null,
-    );
-
   // 操作只作用于"选中且可见"的行
   const chosen = pages.map((page) => ({
     page,
     rows: visibleRows(page).filter((row) => isSelected(page, row)),
   }));
   const chosenCount = chosen.reduce((n, { rows }) => n + rows.length, 0);
-  const chosenCells: CellRef[] = chosen.flatMap(({ rows }) => rows.flatMap(cellsOf));
-  // 可关掉的行：选中、且有可关掉的格。本体在本域的行也算，只关它在别的 agent 下的链接
-  const clearableRows: UnlinkTarget[] = chosen.flatMap(({ page, rows }) =>
-    rows.filter((row) => hasUnlinkable(page, row)).map((row) => ({ page, row })),
-  );
 
-  // 缺失按格算：一行在多个目标上缺失就算多处。
-  // 多个 agent 共用一个目录时各自成列，按 cell.path 去重，同一处只算一次
-  const missingPaths = new Set<string>();
-  for (const { rows } of chosen) {
-    for (const row of rows) {
-      for (const cell of row.cells) if (cell.state === "missing") missingPaths.add(cell.path);
+  // 选择操作条的一排片：本域每个 agent 一片，状态由「已选的 skill 在这个 agent 下的格」
+  // 决定（DESIGN「选择操作条」）。**不要退化成两个总按钮**——那丢掉了"针对某个 agent"这一维
+  const agentChips: AgentChip[] = [];
+  for (const { page, rows } of chosen) {
+    if (rows.length === 0) continue;
+    for (const target of page.targets) {
+      const linked: CellRef[] = [];
+      const missing: CellRef[] = [];
+      // 本体就在这儿，以及四种异常态：开关都不碰它们，只影响这片可不可选
+      let own = 0;
+      let blocked = 0;
+      for (const row of rows) {
+        const cell = row.cells.find((c) => c.targetId === target.id);
+        if (!cell) continue;
+        const ref: CellRef = { sourceId: row.sourceId, skill: row.skill, targetId: target.id };
+        if (cell.state === "linked") linked.push(ref);
+        else if (cell.state === "missing") missing.push(ref);
+        else if (cell.state === "own") own += 1;
+        else blocked += 1;
+      }
+      const disabledReason =
+        target.linkedWholeTo !== null
+          ? `${target.label} 的 skills 目录整个链到了别处，要逐条开关得先拆开`
+          : linked.length + missing.length > 0
+            ? undefined
+            : own > 0
+              ? `选中的 skill 本体就在 ${target.label} 下，没有链接可开关`
+              : blocked > 0
+                ? `选中的 skill 在 ${target.label} 下另有情况挡着，点那一格看是什么`
+                : `选中的 skill 在 ${target.label} 下没有格`;
+      agentChips.push({ target, linked, missing, disabledReason });
     }
   }
-  const missing = missingPaths.size;
+  // 「全部」片对所有可点的片做同一件事：全开着就全关，有没开的就把没开的都开了
+  const usableChips = agentChips.filter((c) => c.disabledReason === undefined);
+  const allMissing = usableChips.flatMap((c) => c.missing);
+  const allLinked = usableChips.flatMap((c) => c.linked);
 
   return (
-    <section>
+    // 这一页自己铺满内容区，底部的待处理栏才贴得住窗口底边（App.css 的 .skills-tab）
+    <section className="skills-tab">
       <div className="toolbar" style={dim(busy)}>
         <ActionButton
           onClick={() => setImportOpen(true)}
@@ -683,25 +758,38 @@ export default function SkillsTab({
           <ActionButton variant="link" onClick={() => setSelected(new Set())}>
             取消选择
           </ActionButton>
-          <span style={{ display: "flex", gap: 8, ...dim(busy) }}>
-            <ActionButton
-              size="compact"
-              onClick={() => void link(chosenCells)}
-              disabled={missing === 0}
-              disabledReason="选中的行在这些 agent 下都已经开着了"
-              title="在选中行还没开启的 agent 下开启"
-            >
-              开启（{missing}）
-            </ActionButton>
-            <ActionButton
-              size="compact"
-              onClick={() => void unlinkTargets(clearableRows)}
-              disabled={clearableRows.length === 0}
-              disabledReason="选中的行上没有可以关掉的链接"
-              title="关掉选中行在本域各 agent 下的链接"
-            >
-              关掉（{clearableRows.length}）
-            </ActionButton>
+          {/* 一排片，每片＝已选的 skill × 这个 agent；反色＝全开着，点一下全关 */}
+          <span style={{ display: "flex", alignItems: "center", gap: 8, ...dim(busy) }}>
+            <SelectionChip
+              name="全部"
+              open={allMissing.length}
+              selected={usableChips.length > 0 && allMissing.length === 0}
+              title={
+                allMissing.length > 0
+                  ? "在还没开启的 agent 下一次全开"
+                  : "关掉选中的 skill 在各 agent 下的链接"
+              }
+              disabledReason={
+                usableChips.length > 0 ? undefined : "选中的 skill 在这些 agent 下都没有可开关的格"
+              }
+              onClick={() => void (allMissing.length > 0 ? link(allMissing) : unlink(allLinked))}
+            />
+            {agentChips.map(({ target, linked, missing, disabledReason }) => (
+              <SelectionChip
+                key={target.id}
+                icon={<AgentIcon id={target.scope.harnessId} name={target.label} />}
+                name={target.label}
+                open={missing.length}
+                selected={disabledReason === undefined && missing.length === 0}
+                title={
+                  missing.length > 0
+                    ? `在 ${target.label} 下开启还没开的那几个`
+                    : `关掉选中的 skill 在 ${target.label} 下的链接`
+                }
+                disabledReason={disabledReason}
+                onClick={() => void (missing.length > 0 ? link(missing) : unlink(linked))}
+              />
+            ))}
           </span>
         </div>
       )}
@@ -745,10 +833,14 @@ export default function SkillsTab({
         ))
       )}
 
-      {/* 待处理栏：一次一条，处理完跳下一条；完整列表在「待处理」页（§4.3） */}
+      {/* 待处理栏：贴着窗口底边（DESIGN「Layout」），一次一条，处理完跳下一条；
+          完整列表在「待处理」页（§4.3） */}
       {current !== null && (
-        <div style={PENDING_BAR}>
-          <span style={{ fontSize: "var(--size-body)" }}>{current.message}</span>
+        <div className="pending-bar">
+          <span style={{ fontSize: "var(--size-body)" }}>
+            {current.subject}
+            {current.text}
+          </span>
           <span style={{ display: "flex", alignItems: "center", gap: 8, ...dim(busy) }}>
             {actionsOf(current)}
             <ActionButton variant="link" onClick={() => void ignore(current)}>
@@ -790,6 +882,40 @@ export default function SkillsTab({
             )}
           </span>
         </div>
+      )}
+
+      {/* 删本体是唯一会真丢内容的动作，确认一道，且弹窗要摆出做决定所需的全部事实（§5、§10） */}
+      {asking !== null && (
+        <Confirm
+          title={`删掉 ${asking.choice.label} 里的 ${asking.choice.skill}`}
+          body="本体目录会移到系统废纸篓，不是彻底删除。"
+          warning={
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {/* 唯一会显示绝对路径的地方：用户正要据此判断删的是不是这一处（§4.5） */}
+              <div style={MONO}>{asking.plan.path}</div>
+              <div>
+                {asking.plan.entries} 个条目 · {formatBytes(asking.plan.bytes)}
+              </div>
+              <div>{affectedLine(asking.plan)}</div>
+              {asking.plan.inGit !== null && (
+                <div>
+                  它在 git 仓库 <span style={MONO}>{asking.plan.inGit}</span> 里。仓库里的东西交给
+                  git 处理更稳妥，这里不代删。
+                </div>
+              )}
+            </div>
+          }
+          confirmLabel="删到废纸篓"
+          destructive
+          onConfirm={() => void confirmDelete()}
+          confirmDisabledReason={
+            asking.plan.inGit === null
+              ? undefined
+              : `它在 git 仓库 ${asking.plan.inGit} 里，这里不代删`
+          }
+          cancelLabel={asking.plan.inGit === null ? "取消" : "知道了"}
+          onCancel={() => setAsking(null)}
+        />
       )}
 
       {notice && (

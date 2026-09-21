@@ -4,7 +4,15 @@
 /// 数据来源是 `viewOf` 的 `issue` 字段（组件规范 §8）：四种异常态画出来都是空心，
 /// 但点击行为与要拿的主意完全不同，所以先判状态、再决定这一条给什么动作。
 import { viewOf } from "../cellState.ts";
-import type { CellRef, DomainPage, IssueKind, Overview, PlannedAction, Source } from "../types.ts";
+import type {
+  CellRef,
+  DomainPage,
+  IssueKind,
+  Overview,
+  PlannedAction,
+  Source,
+  Target,
+} from "../types.ts";
 
 /// key 里的分隔符，与 `store.rs` 的 `KEY_SEP` 是同一个 Unit Separator：路径里不会出现它
 const KEY_SEP = "\u001f";
@@ -98,11 +106,25 @@ const blank = (kind: IssueKind, paths: string[]): PendingIssue => ({
   retry: [],
 });
 
+/// 目录写不进去这一条。**扫描永远不产出 `readOnly`**（判定它要实际试写一次），
+/// 所以它不在 `collectIssues` 的产出里，由真的写失败的那一方构造——
+/// 文案与动作仍走这一份，主视图的待处理栏与待处理页说的是同一句话
+export function readOnlyIssue(target: Target, retry: CellRef[]): PendingIssue {
+  const issue = blank("readOnlyTarget", [target.path]);
+  issue.text = `${target.label} 的 skills 目录写不进去，开不了 skill`;
+  issue.agent = target.label;
+  issue.retry.push(...retry);
+  return issue;
+}
+
 /// 遍历当前 overview 的所有格，收出需要用户拿主意的事。
 ///
 /// **去重按 key 做**（类别 + 位置排序后拼接），和后端的忽略判断对得上：同名本体会在
 /// 每个 agent 下各命中一次，目录写不进去会在每个 skill 上各命中一次，摆给用户看只该有一条。
-export function collectIssues(overview: Overview | null): PendingIssue[] {
+///
+/// `domains` 用来只看其中几个域：主视图的待处理栏只说侧栏当前选中那个位置的事，
+/// 待处理页不传，看全部。
+export function collectIssues(overview: Overview | null, domains?: DomainPage[]): PendingIssue[] {
   if (overview === null) return [];
 
   // 本体真实路径 → 它属于哪个本体位置。用来认出「另一处同名本体」在哪，好给出第二个删除选项
@@ -119,7 +141,7 @@ export function collectIssues(overview: Overview | null): PendingIssue[] {
     else prev.retry.push(...issue.retry);
   };
 
-  for (const page of overview.domains) {
+  for (const page of domains ?? overview.domains) {
     collectPage(page, overview, ownerOf, add);
   }
 
@@ -204,11 +226,11 @@ function collectPage(
           break;
         }
         case "readOnlyTarget": {
-          const issue = blank(kind, [target.path]);
-          issue.text = `${target.label} 的 skills 目录写不进去，开不了 skill`;
-          issue.agent = target.label;
-          issue.retry.push({ sourceId: row.sourceId, skill: row.skill, targetId: target.id });
-          add(issue);
+          add(
+            readOnlyIssue(target, [
+              { sourceId: row.sourceId, skill: row.skill, targetId: target.id },
+            ]),
+          );
           break;
         }
       }

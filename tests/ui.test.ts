@@ -176,6 +176,47 @@ test("Chip 带 16px 图标", () => {
   assert.match(html, /<svg/);
 });
 
+// ===== 选择操作条：每片＝「已选的 skill × 这个 agent」（AC23）=====
+// SkillsTab 里的聚合算法进不来（src/ 用的是无扩展名 import，node:test 的解析器认不了），
+// 这三条钉的是三种片态各自该长什么样、说什么话
+
+test("选择片 全开着：反色，点一下把这些链接全关掉", () => {
+  const html = render(Chip, {
+    children: "Claude Code",
+    icon: AgentIcon({ id: "claude-code", name: "Claude Code" }),
+    selected: true,
+    title: "关掉选中的 skill 在 Claude Code 下的链接",
+    onClick: noop,
+  });
+  assert.match(html, /class="ss-chip is-selected"/);
+  assert.match(html, /class="ss-chip__icon"/);
+  assert.match(html, /title="关掉选中的 skill 在 Claude Code 下的链接"/);
+});
+
+test("选择片 有没开的：hairline 描边，片上写「开启 N」", () => {
+  const html = render(Chip, {
+    children: "Codex 开启 2",
+    icon: AgentIcon({ id: "codex", name: "Codex" }),
+    title: "在 Codex 下开启还没开的那几个",
+    onClick: noop,
+  });
+  assert.match(html, /class="ss-chip"/);
+  assert.match(html, /aria-pressed="false"/);
+  assert.match(html, /开启 2/);
+});
+
+test("选择片 整目录链走：灰描边不可选，并说清为什么", () => {
+  const html = render(Chip, {
+    children: "Cursor",
+    icon: AgentIcon({ id: "cursor", name: "Cursor" }),
+    disabled: true,
+    disabledReason: "Cursor 的 skills 目录整个链到了别处，要逐条开关得先拆开",
+  });
+  assert.match(html, /disabled=""/);
+  assert.match(html, /要逐条开关得先拆开/);
+  assert.doesNotMatch(html, /is-selected/);
+});
+
 // ===== §4.1 提示条 =====
 
 test("Toast 成功：一句话 + 副行等宽统计 + 撤销，停 6 秒", () => {
@@ -364,15 +405,16 @@ test("AgentMark inline：agent 名不大写，原样渲染", () => {
   assert.match(html, /Claude Code/);
 });
 
-test("AgentMark stacked：矩阵列头，图标在上名字在下，灯压在右上角", () => {
+/// AC22：列头＝图标 + 名字，**没有灯**。那盏 6px 的灯用户看不懂，已经撤掉
+test("AgentMark stacked：矩阵列头只有图标和名字，没有灯", () => {
   const html = render(AgentMark, {
     id: "claude-code",
     name: "Claude Code",
     layout: "stacked",
-    lamp: "writable",
   });
   assert.match(html, /class="ss-mark ss-mark--stacked"/);
-  assert.match(html, /class="ss-lamp ss-lamp--writable ss-mark__lamp"/);
+  assert.match(html, /class="ss-mark__name">Claude Code</);
+  assert.doesNotMatch(html, /ss-lamp/);
 });
 
 test("AgentMark 禁用取色：形状不变，整体退到弱文字色", () => {
@@ -380,7 +422,9 @@ test("AgentMark 禁用取色：形状不变，整体退到弱文字色", () => {
   assert.match(html, /class="ss-mark ss-mark--inline is-dim"/);
 });
 
-test("AgentLamp：三种灯说的都是目录，不是 skill", () => {
+/// skill 矩阵的列头已经不放灯了（AC22），这一套现在只剩 MCP 页在用；
+/// MCP 页收口时这个组件连同断言一起删
+test("AgentLamp：三种灯说的都是目录，不是 skill（只剩 MCP 页在用）", () => {
   const writable = render(AgentLamp, { state: "writable" });
   assert.match(writable, /class="ss-lamp ss-lamp--writable"/);
   assert.match(writable, /目录存在，而且写得进去/);
