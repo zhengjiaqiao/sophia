@@ -950,3 +950,72 @@ fn takeover_failing_after_the_key_was_written_still_cleans_up() {
         .collect();
     assert!(ours.is_empty(), "失败后不该留下本功能的文件: {ours:?}");
 }
+
+// ----- 「要不要重启 Codex」比的是状态，不是时间 -----
+// Codex 只在启动时读一次设置。要不要重启，取决于它启动那一刻加载到的状态和现在是不是一回事；
+// 只比「启动时间早于最近一次变更」会误报。
+
+/// 真机上遇到的误报：Codex 很早就开着，之后启用又停用，中间没重启过。
+/// 它从头到尾没加载过注入的配置，停用之后和现状完全一致，不需要重启。
+#[test]
+fn enabling_then_disabling_without_a_codex_restart_in_between_needs_no_restart() {
+    let f = fixture();
+    f.configure();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_000 - 86_400);
+    f.app.enable().unwrap();
+    assert!(f.app.state().needs_codex_restart, "启用之后它还开着旧配置");
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app.restore().unwrap();
+    assert!(
+        !f.app.state().needs_codex_restart,
+        "它从没加载过注入的配置，停用之后不需要重启"
+    );
+}
+
+/// 反过来这种必须提示：Codex 已经在用注入的配置，这时停用，路由随之卸载，
+/// 那个 Codex 连官方模型都连不上，得重启。
+#[test]
+fn disabling_while_codex_runs_with_the_injected_config_needs_a_restart() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_060); // 启用之后才启动：加载的是注入的配置
+    assert!(!f.app.state().needs_codex_restart);
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app.restore().unwrap();
+    assert!(f.app.state().needs_codex_restart);
+}
+
+/// 停用再原样启用回来：Codex 加载的目录和现在的一模一样，不需要重启
+#[test]
+fn toggling_off_and_back_on_with_the_same_models_needs_no_restart() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_060);
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app.restore().unwrap();
+    f.world.lock().unwrap().now = 2_000_001_200;
+    f.app.enable().unwrap();
+    assert!(!f.app.state().needs_codex_restart);
+}
+
+/// 同样开着，但模型改过：选择器里的列表要重启才会变
+#[test]
+fn changing_the_models_while_codex_runs_with_the_injection_needs_a_restart() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_060);
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app
+        .set_models(vec![Model {
+            id: "kimi-k3".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+    assert!(f.app.state().needs_codex_restart);
+    // 重启之后就不再提示
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_700);
+    assert!(!f.app.state().needs_codex_restart);
+}

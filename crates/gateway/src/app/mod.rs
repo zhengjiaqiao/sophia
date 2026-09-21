@@ -151,6 +151,16 @@ pub struct GatewayState {
     pub takeover: Option<TakeoverOffer>,
 }
 
+/// 合并目录内容的指纹：只用来判断「Codex 加载到的目录和现在的是不是同一份」
+fn fingerprint(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 fn internal(e: impl fmt::Display) -> AppError {
     AppError::new("internal", e.to_string())
 }
@@ -507,6 +517,7 @@ impl App {
             settings.added_newline = applied.added_newline;
             settings.changed_at = Some((self.deps.now)());
         }
+        settings.record_change((self.deps.now)(), true);
         self.save(&settings)
     }
 
@@ -581,6 +592,10 @@ impl App {
         if before.as_deref() != Some(combined.as_slice()) {
             settings.changed_at = Some((self.deps.now)());
         }
+        settings.catalog_fingerprint = fingerprint(&combined);
+        if self.enabled(settings) {
+            settings.record_change((self.deps.now)(), true);
+        }
         // 记录的版本必须和状态里比较用的是同一个来源，否则会误报漂移
         let version = (self.deps.codex_version)();
         settings.catalog_client_version = if version.is_empty() {
@@ -643,6 +658,7 @@ impl App {
         settings.prev_model = None;
         settings.had_prev_model = false;
         settings.changed_at = Some((self.deps.now)());
+        settings.record_change((self.deps.now)(), false);
         self.save(&settings)?;
         Ok(warnings)
     }
@@ -805,6 +821,7 @@ impl App {
         // 对方当初给末行补过的换行还在文件里，恢复时同样要还原
         settings.added_newline = applied.added_newline || old_added_newline;
         settings.changed_at = Some((self.deps.now)());
+        settings.record_change((self.deps.now)(), true);
         self.save(settings)
     }
 
@@ -895,9 +912,14 @@ impl App {
             && settings.catalog_client_version != view.codex.version;
         if let Some(started_at) = (self.deps.codex_started_at)() {
             view.codex.running = true;
-            view.needs_codex_restart = settings
-                .changed_at
-                .is_some_and(|changed_at| started_at < changed_at);
+            // 比的是状态，不是时间：Codex 启动时加载到的和现在一样，就不用重启。
+            // 旧版本留下的设置没有变更记录，退回到只比时间的旧规则
+            view.needs_codex_restart =
+                settings.needs_codex_restart(started_at).unwrap_or_else(|| {
+                    settings
+                        .changed_at
+                        .is_some_and(|changed_at| started_at < changed_at)
+                });
         }
         view
     }
