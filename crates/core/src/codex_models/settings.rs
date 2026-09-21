@@ -141,7 +141,39 @@ pub struct GatewaySettings {
     /// 最近一次变更时间，Unix 秒
     #[serde(skip_serializing_if = "Option::is_none")]
     pub changed_at: Option<u64>,
+    /// 当前合并目录内容的指纹
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub catalog_fingerprint: String,
+    /// Codex 能看到的状态的变更记录，由旧到新。用来回答「Codex 启动那一刻加载到的是什么」
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<Change>,
 }
+
+/// 一次会被 Codex 看到的变更：从 `at` 起，注入是否开着、目录内容是什么
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Change {
+    /// Unix 秒
+    pub at: u64,
+    pub enabled: bool,
+    /// 目录内容的指纹；没开着时无意义，留空
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub catalog: String,
+}
+
+impl Change {
+    /// Codex 眼里是不是同一个状态：都没开着就是同一个，不管目录
+    fn same_for_codex(&self, other: &Change) -> bool {
+        match (self.enabled, other.enabled) {
+            (false, false) => true,
+            (true, true) => self.catalog == other.catalog,
+            _ => false,
+        }
+    }
+}
+
+/// 变更记录最多留这么多条；再早的丢掉
+const HISTORY_LIMIT: usize = 32;
 
 impl Default for GatewaySettings {
     fn default() -> Self {
@@ -154,7 +186,50 @@ impl Default for GatewaySettings {
             had_prev_model: false,
             published_slugs: Vec::new(),
             changed_at: None,
+            catalog_fingerprint: String::new(),
+            history: Vec::new(),
         }
+    }
+}
+
+impl GatewaySettings {
+    /// 记一笔 Codex 能看到的变更。和上一笔是同一个状态就不记——要留住这个状态最早出现的时刻。
+    pub fn record_change(&mut self, at: u64, enabled: bool) {
+        let change = Change {
+            at,
+            enabled,
+            catalog: if enabled {
+                self.catalog_fingerprint.clone()
+            } else {
+                String::new()
+            },
+        };
+        if self
+            .history
+            .last()
+            .is_some_and(|last| last.same_for_codex(&change))
+        {
+            return;
+        }
+        self.history.push(change);
+        if self.history.len() > HISTORY_LIMIT {
+            let excess = self.history.len() - HISTORY_LIMIT;
+            self.history.drain(..excess);
+        }
+    }
+
+    /// Codex 只在启动时读一次设置：它在 `started_at` 启动，加载到的状态和现在不是一回事才需要重启。
+    /// 只比「启动早于最近一次变更」会误报——比如启用又停用、中间没重启过，它其实和现状一致。
+    /// 没有变更记录（旧版本留下的设置）时返回 None，由调用方按旧规则判断。
+    pub fn needs_codex_restart(&self, started_at: u64) -> Option<bool> {
+        let current = self.history.last()?;
+        let loaded = self.history.iter().rev().find(|c| c.at <= started_at);
+        Some(match loaded {
+            Some(loaded) => !loaded.same_for_codex(current),
+            // 比最早一笔记录还早：记录没被截断过，那时就是没开着；截断过就说不清，宁可提示
+            None if self.history.len() < HISTORY_LIMIT => current.enabled,
+            None => true,
+        })
     }
 }
 
@@ -177,6 +252,8 @@ impl<'de> Deserialize<'de> for GatewaySettings {
             had_prev_model: bool,
             published_slugs: Vec<String>,
             changed_at: Option<u64>,
+            catalog_fingerprint: String,
+            history: Vec<Change>,
         }
         let raw = Raw::deserialize(deserializer)?;
         let mut providers = raw.providers;
@@ -208,6 +285,8 @@ impl<'de> Deserialize<'de> for GatewaySettings {
             had_prev_model: raw.had_prev_model,
             published_slugs: raw.published_slugs,
             changed_at: raw.changed_at,
+            catalog_fingerprint: raw.catalog_fingerprint,
+            history: raw.history,
         })
     }
 }
@@ -567,6 +646,12 @@ mod tests {
             had_prev_model: true,
             published_slugs: vec!["wecode-weibo-glm-5".into()],
             changed_at: Some(1_790_000_000),
+            catalog_fingerprint: "abc".into(),
+            history: vec![Change {
+                at: 1_790_000_000,
+                enabled: true,
+                catalog: "abc".into(),
+            }],
         };
         let value = serde_json::to_value(&settings).expect("json");
         assert_eq!(
@@ -592,11 +677,65 @@ mod tests {
                 "prevModel": "gpt-6-astra",
                 "hadPrevModel": true,
                 "publishedSlugs": ["wecode-weibo-glm-5"],
-                "changedAt": 1790000000
+                "changedAt": 1790000000,
+                "catalogFingerprint": "abc",
+                "history": [{"at": 1790000000, "enabled": true, "catalog": "abc"}]
             })
         );
         let back: GatewaySettings = serde_json::from_value(value).expect("json");
         assert_eq!(back, settings);
+    }
+
+    fn with_history(changes: &[(u64, bool, &str)]) -> GatewaySettings {
+        let mut settings = GatewaySettings::default();
+        for (at, enabled, catalog) in changes {
+            settings.catalog_fingerprint = (*catalog).into();
+            settings.record_change(*at, *enabled);
+        }
+        settings
+    }
+
+    #[test]
+    fn restart_is_needed_only_when_codex_loaded_a_different_state() {
+        // 没有记录：说不了，交给调用方
+        assert_eq!(GatewaySettings::default().needs_codex_restart(100), None);
+        // 启用之前就开着 → 要；启用之后才开 → 不要
+        let enabled = with_history(&[(100, true, "a")]);
+        assert_eq!(enabled.needs_codex_restart(50), Some(true));
+        assert_eq!(enabled.needs_codex_restart(100), Some(false));
+        assert_eq!(enabled.needs_codex_restart(150), Some(false));
+        // 启用又停用、中间没重启：它从没加载过注入的配置
+        let toggled = with_history(&[(100, true, "a"), (200, false, "")]);
+        assert_eq!(toggled.needs_codex_restart(50), Some(false));
+        // 开着的时候启动、之后停用：它指向的路由已经没了
+        assert_eq!(toggled.needs_codex_restart(150), Some(true));
+        assert_eq!(toggled.needs_codex_restart(250), Some(false));
+        // 停用再原样开回来：目录一样，不要；目录变了，要
+        let same = with_history(&[(100, true, "a"), (200, false, ""), (300, true, "a")]);
+        assert_eq!(same.needs_codex_restart(150), Some(false));
+        let changed = with_history(&[(100, true, "a"), (300, true, "b")]);
+        assert_eq!(changed.needs_codex_restart(150), Some(true));
+        assert_eq!(changed.needs_codex_restart(350), Some(false));
+    }
+
+    #[test]
+    fn history_keeps_the_earliest_time_of_a_state_and_is_capped() {
+        let settings = with_history(&[(100, true, "a"), (150, true, "a"), (180, true, "a")]);
+        assert_eq!(settings.history.len(), 1);
+        assert_eq!(settings.history[0].at, 100, "同一个状态只记最早那一刻");
+        // 没开着时目录无所谓：连着两次停用是同一个状态
+        let off = with_history(&[(100, false, "x"), (200, false, "y")]);
+        assert_eq!(off.history.len(), 1);
+
+        let mut many = GatewaySettings::default();
+        for i in 0..100u64 {
+            many.catalog_fingerprint = format!("c{i}");
+            many.record_change(1000 + i, true);
+        }
+        assert_eq!(many.history.len(), HISTORY_LIMIT);
+        assert_eq!(many.history.last().map(|c| c.at), Some(1099));
+        // 记录被截断过，比最早一笔还早的启动说不清是什么状态：宁可提示
+        assert_eq!(many.needs_codex_restart(10), Some(true));
     }
 
     /// 旧的单网关格式：平铺字段迁移成第一家，旧的已发布标识原样保留（它们会进停用名单）

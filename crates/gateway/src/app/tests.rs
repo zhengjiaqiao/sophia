@@ -994,6 +994,139 @@ fn takeover_failing_after_the_key_was_written_still_cleans_up() {
     assert!(ours.is_empty(), "失败后不该留下本功能的文件: {ours:?}");
 }
 
+// ----- 「要不要重启 Codex」比的是状态，不是时间 -----
+// Codex 只在启动时读一次设置。要不要重启，取决于它启动那一刻加载到的状态和现在是不是一回事；
+// 只比「启动时间早于最近一次变更」会误报。
+
+/// 真机上遇到的误报：Codex 很早就开着，之后启用又停用，中间没重启过。
+/// 它从头到尾没加载过注入的配置，停用之后和现状完全一致，不需要重启。
+#[test]
+fn enabling_then_disabling_without_a_codex_restart_in_between_needs_no_restart() {
+    let f = fixture();
+    f.configure();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_000 - 86_400);
+    f.app.enable().unwrap();
+    assert!(f.app.state().needs_codex_restart, "启用之后它还开着旧配置");
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app.restore().unwrap();
+    assert!(
+        !f.app.state().needs_codex_restart,
+        "它从没加载过注入的配置，停用之后不需要重启"
+    );
+}
+
+/// 反过来这种必须提示：Codex 已经在用注入的配置，这时停用，路由随之卸载，
+/// 那个 Codex 连官方模型都连不上，得重启。
+#[test]
+fn disabling_while_codex_runs_with_the_injected_config_needs_a_restart() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_060); // 启用之后才启动：加载的是注入的配置
+    assert!(!f.app.state().needs_codex_restart);
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app.restore().unwrap();
+    assert!(f.app.state().needs_codex_restart);
+}
+
+/// 停用再原样启用回来：Codex 加载的目录和现在的一模一样，不需要重启
+#[test]
+fn toggling_off_and_back_on_with_the_same_models_needs_no_restart() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_060);
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app.restore().unwrap();
+    f.world.lock().unwrap().now = 2_000_001_200;
+    f.app.enable().unwrap();
+    assert!(!f.app.state().needs_codex_restart);
+}
+
+/// 同样开着，但模型改过：选择器里的列表要重启才会变
+#[test]
+fn changing_the_models_while_codex_runs_with_the_injection_needs_a_restart() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_060);
+    f.world.lock().unwrap().now = 2_000_000_600;
+    f.app
+        .set_models(vec![Model {
+            id: "kimi-k3".into(),
+            ..Default::default()
+        }])
+        .unwrap();
+    assert!(f.app.state().needs_codex_restart);
+    // 重启之后就不再提示
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_700);
+    assert!(!f.app.state().needs_codex_restart);
+}
+
+/// 旧版本留下的设置没有变更记录。这时说不清 Codex 加载过什么，只在当前确实开着时才提示：
+/// 没开着还提示重启，就是真机上那次误报。
+#[test]
+fn settings_without_history_only_ask_for_a_restart_while_enabled() {
+    let f = fixture();
+    f.configure();
+    f.world.lock().unwrap().codex_started_at = Some(2_000_000_000 - 86_400);
+    f.app.enable().unwrap();
+    f.world.lock().unwrap().settings.history.clear(); // 模拟旧版本写下的设置
+    assert!(
+        f.app.state().needs_codex_restart,
+        "开着、Codex 更早启动：照旧提示"
+    );
+    f.app.restore().unwrap();
+    f.world.lock().unwrap().settings.history.clear();
+    assert!(!f.app.state().needs_codex_restart, "没开着就不提示");
+}
+
+// ----- 预热：把「复制程序、让后台服务用上新版本」从启用路径上挪走 -----
+// 真机实测：新程序文件第一次运行要过系统校验，放在启用里会让它卡上好几秒，甚至撞上就绪等待的上限而失败。
+
+/// 应用更新后启动：程序文件变了、后台服务正开着 → 预热时就让它换上新版本
+#[test]
+fn prewarm_restarts_a_running_service_when_the_binary_changed() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    {
+        let mut world = f.world.lock().unwrap();
+        world.binary_changed = true;
+        world.restart_labels.clear();
+    }
+    assert!(f.app.prewarm().unwrap(), "报告程序文件被更新过");
+    assert_eq!(f.world.lock().unwrap().restart_labels, [SERVICE_LABEL]);
+}
+
+/// 后台服务没开着：只复制，不去启动什么
+#[test]
+fn prewarm_only_copies_when_the_service_is_not_loaded() {
+    let f = fixture();
+    f.world.lock().unwrap().binary_changed = true;
+    assert!(f.app.prewarm().unwrap());
+    let world = f.world.lock().unwrap();
+    assert!(world.restart_labels.is_empty());
+    assert!(world.installed.is_none(), "预热不安装后台服务");
+}
+
+/// 程序文件没变：什么都不做，也不动 Codex 的设置
+#[test]
+fn prewarm_is_a_no_op_when_nothing_changed() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    let before = f.read_config();
+    {
+        let mut world = f.world.lock().unwrap();
+        world.binary_changed = false;
+        world.restart_labels.clear();
+    }
+    assert!(!f.app.prewarm().unwrap());
+    assert!(f.world.lock().unwrap().restart_labels.is_empty());
+    assert_eq!(f.read_config(), before);
+}
+
 // ---------------------------------------------------------------------------
 // 多家第三方网关
 // ---------------------------------------------------------------------------

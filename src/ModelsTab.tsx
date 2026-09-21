@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import {
   enableDisabledReason,
@@ -100,6 +101,16 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
       mounted.current = false;
     };
     // 只在挂载时加载一次；后续操作各自刷新状态。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 菜单栏面板也能开关注入、重启 Codex：它改完会广播一声，这一页跟着重读
+  useEffect(() => {
+    const pending = listen("gateway-changed", () => void refresh());
+    return () => {
+      void pending.then((un) => un());
+    };
+    // refresh 只依赖稳定的回调与 ref
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -64,7 +64,12 @@ fn service_manager() -> service::Manager {
 
 /// 在端口上确认响应的是本功能的路由；最多等 5 秒
 pub fn router_healthy(port: u16) -> Result<(), String> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // 上限 10 秒：系统对新程序文件的首次校验实测就可能占去好几秒，5 秒会把「只是慢」误判成「没起来」
+    router_healthy_within(port, Duration::from_secs(10))
+}
+
+fn router_healthy_within(port: u16, patience: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + patience;
     loop {
         let attempt = (|| -> Result<(), String> {
             let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
@@ -88,7 +93,8 @@ pub fn router_healthy(port: u16) -> Result<(), String> {
         match attempt {
             Ok(()) => return Ok(()),
             Err(e) if Instant::now() >= deadline => return Err(e),
-            Err(_) => std::thread::sleep(Duration::from_millis(200)),
+            // 路由通常在一两百毫秒内就绪，轮询密一点，启用就少等一截
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
         }
     }
 }
@@ -358,6 +364,22 @@ pub fn build_app(store_dir: PathBuf) -> App {
 }
 
 /// 向网关拉取模型列表，并把网关客户端的错误翻译成带错误码的错误
+/// 应用启动后在后台线程里调用：更新程序副本，并空跑它一次，让系统把首次校验提前做掉。
+/// 失败不影响应用——启用时还会照常再做一遍。
+pub fn prewarm(app: &App) {
+    match app.prewarm() {
+        Ok(_) => {
+            let _ = std::process::Command::new(app.router_binary())
+                .args(["gateway", "warm"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+        Err(error) => eprintln!("预热后台程序失败：{error}"),
+    }
+}
+
 pub async fn fetch_models(base_url: &str, key: &str) -> Result<(Vec<String>, String), AppError> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let resolve = system_proxy();
@@ -418,6 +440,8 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf) -> i32 {
                     "已启用。重启 Codex 后，模型选择器里会同时出现官方模型和所选的第三方模型。"
                 );
             }),
+        // 预热用：什么都不做就退出，只为让系统对这份程序文件做完首次校验
+        Some("warm") => Ok(()),
         Some("adopt-key") => build_app(store_dir)
             .adopt_agents_manager_key()
             .map_err(|e| e.to_string())
@@ -641,6 +665,6 @@ mod tests {
                 let _ = stream.write_all(b"HTTP/1.0 200 OK\r\n\r\n{\"ok\":true}");
             }
         });
-        assert!(router_healthy(port).is_err());
+        assert!(router_healthy_within(port, Duration::from_millis(600)).is_err());
     }
 }

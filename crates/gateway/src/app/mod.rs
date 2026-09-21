@@ -167,6 +167,16 @@ pub struct GatewayState {
     pub takeover: Option<TakeoverOffer>,
 }
 
+/// 合并目录内容的指纹：只用来判断「Codex 加载到的目录和现在的是不是同一份」
+fn fingerprint(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 fn internal(e: impl fmt::Display) -> AppError {
     AppError::new("internal", e.to_string())
 }
@@ -701,7 +711,37 @@ impl App {
             settings.added_newline = applied.added_newline;
             settings.changed_at = Some((self.deps.now)());
         }
+        settings.record_change((self.deps.now)(), true);
         self.save(&settings)
+    }
+
+    /// 预热：把程序副本更新到位；后台服务正开着且程序变了，就让它换上新版本。返回副本是否被更新过。
+    ///
+    /// 这一步原本只在启用时做。但新程序文件第一次运行要过系统校验，实测会让启用卡上好几秒，
+    /// 甚至撞上就绪等待的上限而失败。所以应用启动时在后台先做掉；启用时只剩「装服务、等就绪」。
+    /// 不碰 Codex 的设置，也不安装后台服务。
+    pub fn prewarm(&self) -> Result<bool, AppError> {
+        let _guard = self
+            .lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let changed = (self.deps.install_binary)(&self.binary_path())
+            .map_err(|e| internal(format!("安装后台程序失败: {e}")))?;
+        let loaded = (self.deps.service_status)(SERVICE_LABEL)
+            .map(|s| s.loaded)
+            .unwrap_or(false);
+        // 已知的、可接受的窗口：此刻正好在走路由的那一个请求会断（重启是几百毫秒的事，
+        // 只在应用更新后的第一次启动出现一次）。不为此加活跃连接计数，见 docs/specs/2026-09-21-tray.md「修订」
+        if changed && loaded {
+            (self.deps.service_restart)(SERVICE_LABEL)
+                .map_err(|e| AppError::new("router_down", format!("重启路由后台服务失败: {e}")))?;
+        }
+        Ok(changed)
+    }
+
+    /// 程序副本的路径；预热之后调用方拿它空跑一次，让系统把首次校验做掉
+    pub fn router_binary(&self) -> PathBuf {
+        self.binary_path()
     }
 
     fn install_router(&self, settings: &GatewaySettings) -> Result<(), AppError> {
@@ -777,6 +817,10 @@ impl App {
         if before.as_deref() != Some(combined.as_slice()) {
             settings.changed_at = Some((self.deps.now)());
         }
+        settings.catalog_fingerprint = fingerprint(&combined);
+        if self.enabled(settings) {
+            settings.record_change((self.deps.now)(), true);
+        }
         // 记录的版本必须和状态里比较用的是同一个来源，否则会误报漂移
         let version = (self.deps.codex_version)();
         settings.catalog_client_version = if version.is_empty() {
@@ -836,6 +880,7 @@ impl App {
         settings.prev_model = None;
         settings.had_prev_model = false;
         settings.changed_at = Some((self.deps.now)());
+        settings.record_change((self.deps.now)(), false);
         self.save(&settings)?;
         Ok(warnings)
     }
@@ -1033,6 +1078,7 @@ impl App {
         // 对方当初给末行补过的换行还在文件里，恢复时同样要还原
         settings.added_newline = applied.added_newline || old_added_newline;
         settings.changed_at = Some((self.deps.now)());
+        settings.record_change((self.deps.now)(), true);
         self.save(settings)
     }
 
@@ -1132,9 +1178,16 @@ impl App {
             && settings.catalog_client_version != view.codex.version;
         if let Some(started_at) = (self.deps.codex_started_at)() {
             view.codex.running = true;
-            view.needs_codex_restart = settings
-                .changed_at
-                .is_some_and(|changed_at| started_at < changed_at);
+            // 比的是状态，不是时间：Codex 启动时加载到的和现在一样，就不用重启。
+            // 旧版本留下的设置没有变更记录，说不清它加载过什么：只在当前确实开着时按时间提示
+            let enabled = view.enabled;
+            view.needs_codex_restart =
+                settings.needs_codex_restart(started_at).unwrap_or_else(|| {
+                    enabled
+                        && settings
+                            .changed_at
+                            .is_some_and(|changed_at| started_at < changed_at)
+                });
         }
         view
     }
