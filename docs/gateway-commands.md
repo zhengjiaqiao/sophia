@@ -28,7 +28,8 @@ interface GatewayState {
   provider: GatewayProvider;
   enabled: boolean;
   needsCodexRestart: boolean;
-  router: { installed: boolean; running: boolean; port: number; error: string };
+  /** protocol 是 "chat" 或 "responses"，界面只读展示，不给改 */
+  router: { installed: boolean; running: boolean; port: number; protocol: string; error: string };
   codex: { version: string; running: boolean; catalogVersion: string; drift: boolean };
   /** 非空：Codex 设置里有别的工具写的同名项或 provider，启用不可用 */
   conflict: string;
@@ -46,6 +47,8 @@ interface GatewayState {
 | `gateway_select_models` | `selected: { id: string; displayName: string }[], providerId?: string` | `selected` 是**这一家**的完整勾选，不影响别家。已启用时同时重写目录和路由清单 |
 | `gateway_enable` | — | 先让路由常驻并确认健康，再写 Codex 设置。有模型要发布的每一家都必须有地址和密钥，缺的那家会在错误信息里点名；没勾选模型的网关不挡路 |
 | `gateway_restore` | — | 移除本功能写入的一切；各家的地址、模型和密钥保留 |
+| `gateway_restart` | — | `launchctl kickstart -k` 重启本机路由服务。**只重启我们自己装的 launchd 服务，不碰 Codex**；不写 `~/.codex/config.toml`，所以不取 `config_lock`。失败时原样转述 `launchctl` 的话，代码 `router_down`。界面上不给按钮，保留为内部能力 |
+| `gateway_restart_codex` | — | 返回 `{ terminated: number; pids: number[] }`，不是 `GatewayState`。结束 Codex 的后台进程（`codex app-server` 与 `codex-code-mode-host`，SIGTERM），下次任何工具拉起 Codex 时才读到新配置。**不碰用户在终端里的交互式 `codex` 会话**；一个都没找到不算失败，返回 `terminated: 0`。不写 `~/.codex/config.toml`，所以不取 `config_lock` |
 | `gateway_takeover` | — | 接管 agents-manager 的现有配置，生成 id 为 `wecode` 的一家；不动用户自己加的网关 |
 
 `providerId` 省略时作用在第一家上。旧命令 `gateway_save_provider(baseUrl, key)` 仍在：有网关时改第一家，没有时新建一家。

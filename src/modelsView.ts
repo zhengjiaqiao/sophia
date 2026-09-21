@@ -46,6 +46,46 @@ export function canRestore(state: GatewayState): boolean {
 }
 
 /**
+ * 副行那句人话（spec R2）。
+ *
+ * `enabled`、`router.running`、`codex.version` 是正交的三件事，**不并排三个徽标**——
+ * 合成一句话说清「现在是什么样」。`needsCodexRestart` 也并进来，右边那个「重启 Codex」
+ * 就是它的动作，所以不再单起一条（R7）。
+ */
+export function statusSentence(state: GatewayState, selectedCount: number): string {
+  if (state.enabled) {
+    const head =
+      selectedCount > 0
+        ? `${selectedCount} 个模型已经在 Codex 的模型列表里`
+        : "已经启用，但一个模型都没选，Codex 的列表里还是只有官方模型";
+    return state.needsCodexRestart ? `${head}，改动要重启 Codex 才生效` : head;
+  }
+  if (state.takeover !== null) {
+    return "还没启用，Codex 现在只有官方模型——这台机器由 agents-manager 在管，接过来才能启用";
+  }
+  if (state.conflict) return `还没启用：${state.conflict}`;
+  if (!state.provider.hasKey) return "还没启用，先到「配置」里填上网关地址和密钥";
+  if (selectedCount === 0) return "还没启用，先选几个模型";
+  return `还没启用，选好的 ${selectedCount} 个模型点「启用」就会进 Codex 的模型列表`;
+}
+
+/**
+ * 事实行（等宽）：版本号与端口是计数类事实，走等宽（spec R2、组件规范 §1.2）。
+ * 读不出 Codex 版本时不编一个，只说路由。
+ */
+export function factsLine(state: GatewayState): string {
+  const router = state.router.running
+    ? `路由 127.0.0.1:${state.router.port} 运行中`
+    : state.router.installed
+      ? `路由 127.0.0.1:${state.router.port} 没在跑`
+      : "路由未安装";
+  return state.codex.version ? `Codex ${state.codex.version} · ${router}` : router;
+}
+
+/// 「重启 Codex」不设禁用态：结束进程不依赖我们的路由装没装上，
+/// 一个进程都没找到也不算失败（R6 修订 v2、AC7′），所以这里没有对应的 reason 函数。
+
+/**
  * 按筛选词过滤（大小写不敏感，匹配 id / slug / displayName），已选模型排在前面，
  * 其余保持原有相对顺序不变。
  */

@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { MICRO_CAP, MONO, TAG_SQUARE } from "./ui/text";
 import { api } from "./api";
+import { viewOf } from "./cellState";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
-import type { AutoLink, CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
+import {
+  AgentMark,
+  Button,
+  Chip,
+  Empty,
+  StateDot,
+  type ButtonSize,
+  type ButtonVariant,
+} from "./ui";
+import type { AutoLink, CellRef, DomainPage, DomainRow, Overview } from "./types";
 
-/// 交给容器去清除的一批软链：行（用于结果说明）+ 要清的格，省略 cells = 整行
+/// 交给容器去清除的一批链接：行（用于结果说明）+ 要清的格，省略 cells = 整行
 export interface UnlinkTarget {
   page: DomainPage;
   row: DomainRow;
@@ -21,51 +33,69 @@ export interface DomainViewProps {
   /// 高亮的本体位置筛选片（空 = 不筛）
   activeSources: Set<string>;
   onToggleSource: (sourceId: string) => void;
+  /// 「全部」片：清掉本域的本体位置筛选
+  onClearSources: () => void;
+  /// 当前是否有筛选条件（文字或本体位置）——决定空表格该说哪一句
+  filtered: boolean;
+  /// 空态里的「清除筛选」：文字与本体位置一起清掉
+  onClearFilter: () => void;
+  /// 空态里的「导入 skill」
+  onImport: () => void;
   isSelected: (row: DomainRow) => boolean;
   /// 行首复选框：交回当前显示顺序的行，供 Shift 区间选择算区间
   onToggle: (row: DomainRow, shiftKey: boolean, ordered: DomainRow[]) => void;
   onSelectAll: (selected: boolean) => void;
   onChange: () => Promise<void>;
   onError: (message: string) => void;
-  /// 把格交给容器：建链、清链（走确认条）、只说明原因
+  /// 把格交给容器：开启、关闭、只说明原因
   onLink: (cells: CellRef[]) => Promise<void>;
   onUnlink: (targets: UnlinkTarget[]) => Promise<void>;
   onNotice: (text: string) => void;
 }
 
-const CELL_SYMBOL: Record<CellState, string> = {
-  own: "●",
-  linked: "✓",
-  missing: "○",
-  broken: "✗",
-  foreign: "⚠",
-  duplicate: "⚠",
-  unwritable: "–",
-};
-/// 不能点的格：title 与点击提示都用这段原因
-const CELL_TEXT: Record<CellState, string> = {
-  own: "本体在此，不是链接",
-  linked: "整目录链接，先拆成逐项链接",
-  missing: "未同步",
-  broken: "坏链，请用清理坏链",
-  // 两种状态对用户是一回事：这里已有同名的东西（本体或指向别处的软链），不会覆盖
-  foreign: "已有同名条目（本体或指向别处的软链接），不会覆盖",
-  duplicate: "已有同名条目（本体或指向别处的软链接），不会覆盖",
-  unwritable: "整目录链接，先拆成逐项链接",
-};
-
-/// 一行展开成它在本域各目标上的格
-const cellsOf = (row: DomainRow): CellRef[] =>
-  row.cells.map((c) => ({ sourceId: row.sourceId, skill: row.skill, targetId: c.targetId }));
-
 /// 没有格子的行排在所有状态之后
-const ABSENT_RANK = STATE_RANK.unwritable + 1;
+const ABSENT_RANK = STATE_RANK.readOnly + 1;
 
 /// 拼路径：Windows 路径用反斜杠，其余用斜杠
 export const join = (dir: string, name: string) =>
   `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
 
-/// 一个域的整页：筛选片、行×目标的表格、坏链表
+/// 区域标签与列头（组件规范 §1.2 的「区域标签」档）
+/// 等宽只给**路径与计数**（§1.2）。skill 名是当词读的，用正文档；
+/// 「本体位置」显示的是位置名时同样用正文档，显示的是路径时才随路径走等宽
+
+/// 这个位置名看着是不是一条路径
+const looksLikePath = (label: string) => /[\\/]/.test(label);
+/// 不可点的方标签：零圆角，因为圆角只给可点的东西（§3.1）
+
+/// busy 期间受影响控件的样子（§6）：置灰且点不动。
+/// **豁免的五处不要套它**：设置、筛选输入框、取消选择、提示条关闭、表头排序
+export const dim = (busy: boolean): CSSProperties | undefined =>
+  busy ? { opacity: "var(--busy-dim)", pointerEvents: "none" } : undefined;
+
+/// `Button` / `Chip` 的「禁用必须同时给出原因」在类型上是个联合，条件禁用得分两支写。
+/// 这一层只做那件事，省得每个调用点都展开成三元
+export function ActionButton({
+  disabled,
+  disabledReason,
+  ...rest
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  title?: string;
+  size?: ButtonSize;
+  variant?: ButtonVariant;
+  disabled?: boolean;
+  disabledReason?: string;
+}) {
+  return disabled ? (
+    <Button {...rest} disabled disabledReason={disabledReason ?? "正在执行上一步操作"} />
+  ) : (
+    <Button {...rest} />
+  );
+}
+
+/// 一个域的整页：筛选片、自动同步行、行×目标的矩阵
 export default function DomainView({
   overview,
   page,
@@ -74,6 +104,10 @@ export default function DomainView({
   busy,
   activeSources,
   onToggleSource,
+  onClearSources,
+  filtered,
+  onClearFilter,
+  onImport,
   isSelected,
   onToggle,
   onSelectAll,
@@ -85,8 +119,8 @@ export default function DomainView({
 }: DomainViewProps) {
   // 表头排序；null = 后端原序（skill 名再本体位置）
   const [sort, setSort] = useState<SortState | null>(null);
-  // 待确认拆分整目录链接的目标 id
-  const [confirmSplit, setConfirmSplit] = useState<string | null>(null);
+  // 表头是「看起来是读的」：默认无箭头，鼠标停在哪一列才浮出淡箭头（§7）
+  const [hovered, setHovered] = useState<string | null>(null);
 
   const labelOf = (sourceId: string) =>
     overview.sources.find((s) => s.id === sourceId)?.label ?? sourceId;
@@ -104,6 +138,16 @@ export default function DomainView({
 
   const targetLabelOf = (targetId: string) =>
     page.targets.find((t) => t.id === targetId)?.label ?? targetId;
+
+  /// 这条规则下一轮会**新建**的链接条数，不含已存在的（§11 的口径）
+  const pendingOf = (rule: AutoLink, local: string[]) =>
+    page.rows
+      .filter((row) => row.sourceId === rule.source && !rule.excluded.includes(row.skill))
+      .reduce(
+        (n, row) =>
+          n + row.cells.filter((c) => local.includes(c.targetId) && c.state === "missing").length,
+        0,
+      );
 
   // 只列目标落在本域的规则，且每条只保留本域的那部分目标
   const rules = autoLinks
@@ -135,17 +179,7 @@ export default function DomainView({
   const cellOf = (row: DomainRow, targetId: string) =>
     row.cells.find((c) => c.targetId === targetId) ?? null;
 
-  const hasMissing = (row: DomainRow) => row.cells.some((c) => c.state === "missing");
-
-  /// 有已链接的格，且它的目标不是整目录链接
-  const hasUnlinkable = (row: DomainRow) =>
-    row.cells.some(
-      (c) =>
-        c.state === "linked" &&
-        page.targets.find((t) => t.id === c.targetId)?.linkedWholeTo === null,
-    );
-
-  // 筛选片按本域全部行统计本体位置，筛选不改变片上的计数
+  // 筛选片按本域全部行统计本体位置，筛选不改变片上的计数（§11）
   const counts = new Map<string, number>();
   for (const row of page.rows) counts.set(row.sourceId, (counts.get(row.sourceId) ?? 0) + 1);
 
@@ -168,14 +202,174 @@ export default function DomainView({
       )
     : visible;
 
-  const sortHeader = (key: string, label: string) => (
+  /// 排序箭头：默认不占眼、hover 才淡淡浮出、激活转黑（§7）。
+  /// 位置留着不抽走，否则 hover 时整行会跳一下
+  const arrow = (column: string) => {
+    const active = sort?.key === column;
+    const down = active && sort?.dir === "desc";
+    return (
+      <svg
+        width="8"
+        height="8"
+        viewBox="0 0 8 8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        aria-hidden="true"
+        style={{
+          flexShrink: 0,
+          visibility: active || hovered === column ? "visible" : "hidden",
+          color: active ? "var(--ink)" : "var(--ink-faint)",
+        }}
+      >
+        <path d={down ? "M1.4 2.8L4 5.4l2.6-2.6" : "M1.4 5.2L4 2.6l2.6 2.6"} />
+      </svg>
+    );
+  };
+
+  /// 表头一列。**busy 期间照常可点**——排序不写磁盘（§6 第三条细节）
+  const sortHeader = (column: string, content: ReactNode, stacked = false) => (
     <button
-      className={sort?.key === key ? "sort active" : "sort"}
-      onClick={() => setSort((prev) => toggleSort(prev, key))}
+      type="button"
+      className="sort"
+      style={{
+        display: "inline-flex",
+        alignItems: stacked ? "flex-start" : "center",
+        gap: 5,
+        opacity: 1,
+      }}
+      onMouseEnter={() => setHovered(column)}
+      onMouseLeave={() => setHovered((prev) => (prev === column ? null : prev))}
+      onClick={() => setSort((prev) => toggleSort(prev, column))}
     >
-      {label}
-      {sort?.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
+      {content}
+      {arrow(column)}
     </button>
+  );
+
+  /// 一个 agent 目录都还不存在：列照常在（§6 / AC17），用户才有入口把目录建出来
+  const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
+
+  const tableBody = (
+    <table className="matrix">
+      <thead>
+        <tr>
+          <th style={{ borderBottom: "1px solid var(--ink)" }}>
+            {/* 表头整行不置灰，只灰这个全选框（§6 第二条细节） */}
+            <input
+              ref={allRef}
+              type="checkbox"
+              checked={allSelected}
+              style={dim(busy)}
+              disabled={busy || visible.length === 0}
+              onChange={() => onSelectAll(!allSelected)}
+            />
+            {sortHeader("skill", <span style={MICRO_CAP}>skill</span>)}
+          </th>
+          <th style={{ borderBottom: "1px solid var(--ink)" }}>
+            {sortHeader("source", <span style={MICRO_CAP}>本体位置</span>)}
+          </th>
+          {page.targets.map((target) => (
+            <th
+              key={target.id}
+              style={{ borderBottom: "1px solid var(--ink)", textAlign: "center" }}
+            >
+              {sortHeader(
+                target.id,
+                // 列头＝图标 + 名字，**没有灯**（DESIGN「矩阵列头」）：目录不存在这件事
+                // 由点格那一刻的提示条说，写不进去的进待处理栏，列头不再说第二遍
+                <AgentMark
+                  id={target.scope.harnessId}
+                  name={target.label}
+                  title={target.path}
+                  layout="stacked"
+                />,
+                true,
+              )}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody style={dim(busy)}>
+        {rows.map((row) => {
+          const selected = isSelected(row);
+          return (
+            <tr
+              key={`${row.sourceId}|${row.skill}`}
+              style={selected ? { background: "var(--surface)" } : undefined}
+            >
+              <td>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {/* 用 onClick 是为了拿到 shiftKey；选中态仍由上层状态决定 */}
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    disabled={busy}
+                    readOnly
+                    onClick={(e) => onToggle(row, e.shiftKey, rows)}
+                  />
+                  <span style={{ fontSize: "var(--size-body)" }}>{row.skill}</span>
+                </label>
+              </td>
+              <td className="path">
+                {isExternal(row.sourceId) && <span style={TAG_SQUARE}>外部</span>}
+                <Button
+                  variant="link"
+                  title={skillPathOf(row.sourceId, row.skill)}
+                  onClick={() => void reveal(skillPathOf(row.sourceId, row.skill))}
+                >
+                  <span style={looksLikePath(labelOf(row.sourceId)) ? MONO : undefined}>
+                    {labelOf(row.sourceId)}
+                  </span>
+                </Button>
+              </td>
+              {page.targets.map((target) => {
+                const cell = cellOf(row, target.id);
+                // 无格态：该 target 在这一行没有格，例如本体属于另一个域（§8）
+                if (!cell) {
+                  return (
+                    <td className="cell" key={target.id}>
+                      <StateDot dot="none" title="这个 agent 不在当前域" />
+                    </td>
+                  );
+                }
+                const view = viewOf(cell, target, target.label, row.skill);
+                const ref: CellRef = {
+                  sourceId: row.sourceId,
+                  skill: row.skill,
+                  targetId: target.id,
+                };
+                // 先判状态再决定做什么：不能点的四种画得和「未开启」一样，
+                // 凭动作数组为空统一说一句话对它们全是错的（§8）
+                const click = () => {
+                  if (!view.clickable) {
+                    if (view.reason) onNotice(view.reason);
+                    return;
+                  }
+                  if (view.dot === "linked") void onUnlink([{ page, row, cells: [ref] }]);
+                  else void onLink([ref]);
+                };
+                const title = view.clickable
+                  ? view.dot === "linked"
+                    ? `关掉 ${row.skill} 在 ${target.label} 下的链接`
+                    : `在 ${target.label} 下开启 ${row.skill}`
+                  : view.reason;
+                return (
+                  <td className="cell" key={target.id}>
+                    <StateDot
+                      dot={view.dot}
+                      title={title}
+                      onClick={busy ? undefined : click}
+                      label={`${row.skill} · ${target.label}`}
+                    />
+                  </td>
+                );
+              })}
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 
   return (
@@ -183,209 +377,81 @@ export default function DomainView({
       <h2>{page.label}</h2>
 
       {counts.size > 0 && (
-        <div className="tags">
+        <div className="tags" style={dim(busy)}>
+          {/* 「全部 N」与侧栏、与各片同源：本域的 skill 行数（§11） */}
+          <Chip selected={activeSources.size === 0} onClick={onClearSources}>
+            全部 <span style={MONO}>{page.rows.length}</span>
+          </Chip>
           {[...counts].map(([sourceId, n]) => (
-            <button
-              className={activeSources.has(sourceId) ? "tag active" : "tag"}
+            <Chip
               key={sourceId}
+              selected={activeSources.has(sourceId)}
               title={sourceId}
-              disabled={busy}
               onClick={() => onToggleSource(sourceId)}
             >
-              {labelOf(sourceId)} · {n}
-            </button>
+              <span style={looksLikePath(labelOf(sourceId)) ? MONO : undefined}>
+                {labelOf(sourceId)}
+              </span>{" "}
+              <span style={MONO}>{n}</span>
+            </Chip>
           ))}
         </div>
       )}
 
-      {rules.length > 0 && (
-        <div className="auto-rules">
-          {rules.map(({ rule, local }) => (
-            <div className="auto-rule" key={rule.source}>
-              <span>
-                自动同步：{labelOf(rule.source)} → {local.map((id) => targetLabelOf(id)).join("、")}
-                {rule.excluded.length > 0 && `（排除 ${rule.excluded.length}）`}
-              </span>
-              <button
-                className="link"
-                title="不再自动同步到本域的这些目标"
-                disabled={busy}
-                onClick={() => void run(() => api.removeAutoLinkTargets(rule.source, local))}
-              >
-                ×
-              </button>
-            </div>
-          ))}
+      {/* 自动同步行：只读一行，顶多关掉。不展开、没有展开箭头（§12） */}
+      {rules.map(({ rule, local }) => (
+        <div
+          key={rule.source}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            border: "1px solid var(--hairline)",
+            padding: "7px 12px",
+            marginBottom: 10,
+          }}
+        >
+          <span style={MICRO_CAP}>自动同步</span>
+          <span style={{ fontSize: "var(--size-body)" }}>
+            {labelOf(rule.source)} <span style={{ color: "var(--ink-faint)" }}>→</span>{" "}
+            {local.map((id) => targetLabelOf(id)).join(" · ")}
+          </span>
+          {/* 计数带单位：裸的「+2」紧跟在 agent 列表后面会被读成「还有 2 个 agent」（§11） */}
+          <span style={{ ...MONO, color: "var(--ink-mute)" }}>
+            {pendingOf(rule, local)} 条待建
+            {rule.excluded.length > 0 && `（排除 ${rule.excluded.length}）`}
+          </span>
+          <span style={{ marginLeft: "auto", ...dim(busy) }}>
+            <Button
+              size="compact"
+              title="不再自动同步到本域的这些 agent"
+              onClick={() => void run(() => api.removeAutoLinkTargets(rule.source, local))}
+            >
+              关掉
+            </Button>
+          </span>
         </div>
-      )}
+      ))}
 
-      {page.targets.length === 0 ? (
-        <p>该域下没有可用的目标目录。</p>
-      ) : (
-        <table className="matrix">
-          <thead>
-            <tr>
-              <th>
-                <input
-                  ref={allRef}
-                  type="checkbox"
-                  checked={allSelected}
-                  disabled={busy || visible.length === 0}
-                  onChange={() => onSelectAll(!allSelected)}
-                />
-                {sortHeader("skill", "skill")}
-              </th>
-              <th>{sortHeader("source", "本体位置")}</th>
-              {page.targets.map((target) => (
-                <th key={target.id}>
-                  {sortHeader(target.id, target.label)}
-                  {/* 目录还没建出来的列：整列必然是 ○，补齐时目录就地创建 */}
-                  {!target.exists && (
-                    <span className="whole-link" title={target.path}>
-                      将新建目录
-                    </span>
-                  )}
-                  {target.linkedWholeTo !== null && (
-                    <>
-                      <span className="whole-link">整目录链接</span>
-                      {confirmSplit === target.id ? (
-                        <span className="confirm">
-                          <button
-                            disabled={busy}
-                            onClick={() => {
-                              setConfirmSplit(null);
-                              void run(() => api.splitWholeLink(target.id));
-                            }}
-                          >
-                            确认
-                          </button>
-                          <button disabled={busy} onClick={() => setConfirmSplit(null)}>
-                            取消
-                          </button>
-                        </span>
-                      ) : (
-                        <button disabled={busy} onClick={() => setConfirmSplit(target.id)}>
-                          拆成逐项链接
-                        </button>
-                      )}
-                    </>
-                  )}
-                </th>
-              ))}
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={`${row.sourceId}|${row.skill}`}>
-                <td>
-                  <label>
-                    {/* 用 onClick 是为了拿到 shiftKey；选中态仍由上层状态决定 */}
-                    <input
-                      type="checkbox"
-                      checked={isSelected(row)}
-                      disabled={busy}
-                      readOnly
-                      onClick={(e) => onToggle(row, e.shiftKey, rows)}
-                    />
-                    {row.skill}
-                  </label>
-                </td>
-                <td className="path">
-                  <button
-                    className="link"
-                    title={skillPathOf(row.sourceId, row.skill)}
-                    disabled={busy}
-                    onClick={() => void reveal(skillPathOf(row.sourceId, row.skill))}
-                  >
-                    {isExternal(row.sourceId) && <span className="whole-link">外部</span>}
-                    {labelOf(row.sourceId)}
-                  </button>
-                </td>
-                {page.targets.map((target) => {
-                  const cell = cellOf(row, target.id);
-                  if (!cell) return <td className="cell" key={target.id} />;
-                  const ref: CellRef = {
-                    sourceId: row.sourceId,
-                    skill: row.skill,
-                    targetId: target.id,
-                  };
-                  const linkable = cell.state === "missing";
-                  const unlinkable = cell.state === "linked" && target.linkedWholeTo === null;
-                  const reason = CELL_TEXT[cell.state];
-                  const title = linkable ? "点击建链" : unlinkable ? "点击取消此链接" : reason;
-                  return (
-                    <td className={`cell ${cell.state}`} key={target.id}>
-                      <button
-                        className={`cell ${cell.state}`}
-                        disabled={busy}
-                        title={title}
-                        onClick={() => {
-                          if (linkable) void onLink([ref]);
-                          else if (unlinkable) void onUnlink([{ page, row, cells: [ref] }]);
-                          else onNotice(reason);
-                        }}
-                      >
-                        {CELL_SYMBOL[cell.state]}
-                      </button>
-                    </td>
-                  );
-                })}
-                <td className="row-actions">
-                  <button
-                    disabled={busy || !hasMissing(row)}
-                    title={hasMissing(row) ? "给缺失的 harness 建链" : "没有缺失的链接"}
-                    onClick={() => void onLink(cellsOf(row))}
-                  >
-                    补齐
-                  </button>
-                  <button
-                    disabled={busy || !hasUnlinkable(row)}
-                    title={
-                      hasUnlinkable(row)
-                        ? "清除它在本域所有 harness 下的软链接"
-                        : "没有可清除的软链接"
-                    }
-                    onClick={() => void onUnlink([{ page, row }])}
-                  >
-                    清除软链
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {page.broken.length > 0 && (
-        <div className="broken-section">
-          <div className="toolbar">
-            <span>坏链（{page.broken.length}）</span>
-          </div>
-          <table className="matrix">
-            <thead>
-              <tr>
-                <th>链接名</th>
-                <th>目标目录</th>
-                <th>指向</th>
-              </tr>
-            </thead>
-            <tbody>
-              {page.broken.map((action) => (
-                <tr key={action.targetPath}>
-                  <td>{action.itemName}</td>
-                  <td className="path" title={action.target}>
-                    {page.targets.find((t) => t.path === action.target)?.label ?? action.target}
-                  </td>
-                  <td className="path" title={action.sourcePath}>
-                    {action.sourcePath}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* 表头照常渲染，即使一行都没有——agent 列在，用户才有入口把目录建出来（§8） */}
+      {page.targets.length > 0 && tableBody}
+      {rows.length === 0 &&
+        (filtered ? (
+          <Empty kind="noMatch" secondary={{ label: "清除筛选", onClick: onClearFilter }} />
+        ) : noAgentDirs ? (
+          <Empty
+            kind="noAgentDirs"
+            description="这个位置下还没有任何 agent 的 skill 目录。开启任一 skill 时会顺手建出来。"
+            primary={{ label: "导入 skill", onClick: onImport }}
+          />
+        ) : (
+          <Empty
+            kind="noSkills"
+            description={`${page.label} 里还没有 skill。`}
+            hint="导入之后它会出现在这张表里，再逐个 agent 开启。"
+            primary={{ label: "导入 skill", onClick: onImport }}
+          />
+        ))}
     </div>
   );
 }

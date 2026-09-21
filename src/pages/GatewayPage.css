@@ -1,0 +1,100 @@
+/* Codex 网关配置页的排版（组件规范 §4.6 二级页面）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影，圆角只有输入框那 4px。 */
+@import "../tokens.css";
+
+.gateway-page {
+  box-sizing: border-box;
+  max-width: 560px;
+  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
+}
+
+.gateway-page__field {
+  display: block;
+  margin-bottom: var(--space-xl);
+}
+
+/* 区域标签是我们自己写的结构词，大写（§1.2） */
+.gateway-page__label {
+  display: block;
+  margin-bottom: var(--space-xs);
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.gateway-page__input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+/* 网关地址是路径类事实，走等宽（§1.2） */
+.gateway-page__input--mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+}
+
+.gateway-page__input:focus {
+  border-color: var(--ink);
+  outline: none;
+}
+
+.gateway-page__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
+}
+
+.gateway-page__facts {
+  margin-top: var(--space-huge);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--hairline);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  line-height: var(--leading-caption);
+}
+
+/* 端口与协议是计数类事实，走等宽（§1.2） */
+.gateway-page__mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink);
+}
+
+.gateway-page__note {
+  margin-top: var(--space-xxs);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-faint);
+  line-height: var(--leading-caption);
+}
+
+.gateway-page__leftover {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--hairline);
+}
+
+.gateway-page__leftover-text {
+  flex-grow: 1;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  line-height: var(--leading-caption);
+}

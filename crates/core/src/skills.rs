@@ -101,11 +101,13 @@ pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
                     .iter()
                     .map(|t| {
                         let path = t.path.join(&skill);
+                        let (state, points_to) = cell_facts(source, &skill_path, t, &path);
                         Cell {
                             source_id: source_id.clone(),
                             skill: skill.clone(),
                             target_id: t.id.clone(),
-                            state: cell_state(source, &skill_path, t, &path),
+                            state,
+                            points_to,
                             path,
                         }
                     })
@@ -326,21 +328,44 @@ fn find_rule_mut<'a>(rules: &'a mut [AutoLink], source: &Path) -> Option<&'a mut
 
 /// `skill_path` 是该 skill 在本体位置里的真实路径，`path` 是它在目标目录下的位置
 fn cell_state(source: &Source, skill_path: &Path, target: &Target, path: &Path) -> CellState {
+    cell_facts(source, skill_path, target, path).0
+}
+
+/// 一格的两件事实：状态，以及这一格上的软链解析后落在哪。
+/// 落点在判 Foreign 的同一刻就现成，丢掉的话前端只能把提示条写成含糊的「指向别处」
+fn cell_facts(
+    source: &Source,
+    skill_path: &Path,
+    target: &Target,
+    path: &Path,
+) -> (CellState, Option<PathBuf>) {
     match target.linked_whole_to.as_deref() {
-        Some(id) if id == source.id => return CellState::Linked,
-        Some(_) => return CellState::Unwritable,
+        // 整目录链到本体位置自己：内容经由那条目录级软链落到本体上
+        Some(id) if id == source.id => return (CellState::Linked, real_path(path)),
+        Some(_) => return (CellState::WholeLinked, None),
         None => {}
     }
     // 目标就是本体位置本身（如 WeiboAP 的 custom 目录既是本体位置又是目标）：内容天然到位
     if same_real(&target.path, &source.path) {
-        return CellState::Own;
+        return (CellState::Own, None);
     }
     match entry_kind(path) {
-        EntryKind::Missing => CellState::Missing,
-        EntryKind::Dir | EntryKind::File => CellState::Duplicate,
-        EntryKind::Symlink(_) if real_path(path).is_none() => CellState::Broken,
-        EntryKind::Symlink(_) if same_real(path, skill_path) => CellState::Linked,
-        EntryKind::Symlink(_) => CellState::Foreign,
+        EntryKind::Missing => (CellState::Missing, None),
+        EntryKind::Dir | EntryKind::File => (CellState::Duplicate, None),
+        // 断链：real_path 解析不到，本来也没有落点
+        EntryKind::Symlink(_) => match real_path(path) {
+            None => (CellState::Broken, None),
+            // 比较是否同一处两侧都走 real_path：macOS 上 /var 会变成 /private/var
+            Some(dest) => {
+                let same = real_path(skill_path).is_some_and(|body| body == dest);
+                let state = if same {
+                    CellState::Linked
+                } else {
+                    CellState::Foreign
+                };
+                (state, Some(dest))
+            }
+        },
     }
 }
 
@@ -468,6 +493,104 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
 
 fn report(entries: Vec<ReportEntry>) -> SyncReport {
     SyncReport { entries }
+}
+
+/// 删一个 skill 本体前的只读体检：体量、受影响的链接、是否在 git 仓库内、删完改指到哪。
+/// 只产出事实，不动文件系统；`sources` 给全部已知本体位置，`relink_to` 从里面找同名的另一处
+pub fn plan_delete_source(
+    skill: &Skill,
+    sources: &[Source],
+    targets: &[Target],
+) -> DeleteSourcePlan {
+    let path = normalize(&skill.path);
+    let (entries, bytes) = dir_size(&path);
+    let relink_to = same_name_elsewhere(&skill.name, sources, &path);
+    // 比较"是否同一处"两侧都要走 real_path：macOS 上 /var 会变成 /private/var
+    let real = real_path(&path);
+    DeleteSourcePlan {
+        entries,
+        bytes,
+        affected: match &real {
+            // 改指后链接指向的是 relink_to，写法按它算；没有可改指的地方时链接不会被重写，
+            // 拿本体自己的写法占位
+            Some(real) => links_into(real, targets, relink_to.as_deref().unwrap_or(&path)),
+            None => Vec::new(),
+        },
+        in_git: git_root(&path),
+        relink_to,
+        path,
+    }
+}
+
+/// 递归统计条目数（不含自身）与普通文件字节数。软链只当作一个条目，不跟随、不计字节
+fn dir_size(path: &Path) -> (usize, u64) {
+    let Ok(rd) = std::fs::read_dir(path) else {
+        return (0, 0);
+    };
+    let mut entries = 0usize;
+    let mut bytes = 0u64;
+    for e in rd.flatten() {
+        entries += 1;
+        let child = e.path();
+        match entry_kind(&child) {
+            EntryKind::Dir => {
+                let (n, b) = dir_size(&child);
+                entries += n;
+                bytes += b;
+            }
+            EntryKind::File => {
+                bytes += std::fs::symlink_metadata(&child)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+            }
+            _ => {}
+        }
+    }
+    (entries, bytes)
+}
+
+/// 各目标目录里解析后落在 `real`（本体的真实路径）之内、含它自身的软链。
+/// 整目录链接的目标读进去就是本体位置本身，里面没有指向它的链接可改，跳过。
+/// 每条链接的写法按「改指后要指向的本体 `dest` 与该链接所属目标」当场算：
+/// 项目内的链接要保住相对写法，它随 git 走到别的机器上才仍然成立
+fn links_into(real: &Path, targets: &[Target], dest: &Path) -> Vec<AffectedLink> {
+    let mut out: BTreeMap<PathBuf, LinkStyle> = BTreeMap::new();
+    for t in targets.iter().filter(|t| t.linked_whole_to.is_none()) {
+        let Ok(rd) = std::fs::read_dir(&t.path) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let link = e.path();
+            if !matches!(entry_kind(&link), EntryKind::Symlink(_)) {
+                continue;
+            }
+            // starts_with 按路径分量比较；两侧都是 real_path 的结果，同源
+            if real_path(&link).is_some_and(|d| d.starts_with(real)) {
+                out.insert(link, link_style(dest, t));
+            }
+        }
+    }
+    out.into_iter()
+        .map(|(path, style)| AffectedLink { path, style })
+        .collect()
+}
+
+/// 自下而上找 `.git`（工作树与子模块里它是文件，不是目录）。
+/// `ancestors` 按路径分量逐级上走，不做字符串前缀比较
+fn git_root(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|dir| !matches!(entry_kind(&dir.join(".git")), EntryKind::Missing))
+        .map(Path::to_path_buf)
+}
+
+/// 别处同名、且真实存在的另一个本体；多处时取 `sources` 里的第一处
+fn same_name_elsewhere(name: &str, sources: &[Source], path: &Path) -> Option<PathBuf> {
+    sources
+        .iter()
+        .flat_map(|s| &s.skills)
+        .filter(|s| s.name == name)
+        .map(|s| normalize(&s.path))
+        .find(|p| real_path(p).is_some() && !same_real(p, path))
 }
 
 #[cfg(test)]
@@ -1045,6 +1168,168 @@ mod tests {
             excluded: BTreeSet::new(),
         }];
         assert!(auto_link_cells(&sources, &targets, &rules).is_empty());
+    }
+
+    /// 整目录链到别的本体位置的目标，格是 WholeLinked（原 Unwritable，不是"目录只读"）；
+    /// 链到本体位置自己的那个目标照常算 Linked
+    #[test]
+    fn cells_of_a_whole_linked_target_are_whole_linked() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        t.dir("store/a");
+        let other = t.dir("other");
+        t.dir("other/a");
+        let mine = t.root().join("mine");
+        t.link(&mine, &store);
+        let theirs = t.root().join("theirs");
+        t.link(&theirs, &other);
+
+        let s = source(&store, &["a"]);
+        let mut mine_t = global("cursor", &mine);
+        mine_t.linked_whole_to = Some(s.id.clone());
+        let mut theirs_t = global("codex", &theirs);
+        theirs_t.linked_whole_to = Some(normalize(&other).to_string_lossy().into_owned());
+        let ov = scan(std::slice::from_ref(&s), &[mine_t, theirs_t]);
+        let cells = &ov.domains[0].rows[0].cells;
+        assert_eq!(cells[0].state, CellState::Linked);
+        // 内容经由目录级软链落到本体上
+        assert_eq!(cells[0].points_to, Some(store.join("a")));
+        assert_eq!(cells[1].state, CellState::WholeLinked);
+        // 链到别处的整目录：这一格根本没有指向本体的链接
+        assert_eq!(cells[1].points_to, None);
+        // 扫描永远不产出 ReadOnly：判定它要实际试写
+        assert!(ov.domains[0]
+            .rows
+            .iter()
+            .flat_map(|r| &r.cells)
+            .all(|c| c.state != CellState::ReadOnly));
+    }
+
+    /// 提示条要说出「指向哪个本体」：Linked / Foreign 带出落点，其余状态没有落点。
+    /// Broken 特别注意——`real_path` 对断链返回 None，正好没有落点可言
+    #[test]
+    fn cells_carry_where_the_link_resolves_to_for_linked_and_foreign_only() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        let names = ["broken", "dup", "foreign", "linked", "missing"];
+        for n in names {
+            t.dir(&format!("store/{n}"));
+        }
+        let other_body = t.dir("other/foreign"); // 别的本体位置里的同名 skill
+        let claude = t.dir("home/.claude/skills");
+        t.link(&claude.join("linked"), &store.join("linked"));
+        t.link(&claude.join("foreign"), &other_body); // 指向别的本体
+        t.link(&claude.join("broken"), &t.root().join("gone"));
+        t.dir("home/.claude/skills/dup"); // 真实目录
+                                          // missing 目标里没有
+
+        let s = source(&store, &names);
+        let ov = scan(std::slice::from_ref(&s), &[global("claude-code", &claude)]);
+        let at = |skill: &str| {
+            let row = ov.domains[0]
+                .rows
+                .iter()
+                .find(|r| r.skill == skill)
+                .expect("行应当在");
+            (row.cells[0].state, row.cells[0].points_to.clone())
+        };
+        assert_eq!(
+            at("linked"),
+            (CellState::Linked, Some(store.join("linked")))
+        );
+        assert_eq!(at("foreign"), (CellState::Foreign, Some(other_body)));
+        assert_eq!(at("broken"), (CellState::Broken, None));
+        assert_eq!(at("dup"), (CellState::Duplicate, None));
+        assert_eq!(at("missing"), (CellState::Missing, None));
+    }
+
+    /// 体检只报事实：体量、指向它的链接、别处的同名本体
+    #[test]
+    fn plan_delete_source_counts_the_body_and_collects_links_pointing_into_it() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        let body = t.dir("store/a");
+        t.file(&body, "SKILL.md"); // 1 字节
+        let sub = t.dir("store/a/refs");
+        t.file(&sub, "note.md"); // 1 字节
+        let other = t.dir("other");
+        let other_body = t.dir("other/a");
+        let claude = t.dir("home/.claude/skills");
+        let codex = t.dir("home/.codex/skills");
+        t.link(&claude.join("a"), &body); // 指向本体
+        t.link(&claude.join("a-copy"), &body); // 换了名字，仍指向本体
+        t.link(&claude.join("deep"), &sub); // 指向本体内部
+        t.link(&claude.join("elsewhere"), &other_body); // 指向别处：不算
+        t.dir("home/.codex/skills/a"); // 真实目录：不算
+
+        let sources = vec![source(&store, &["a"]), source(&other, &["a"])];
+        let targets = vec![global("claude-code", &claude), global("codex", &codex)];
+        let skill = sources[0].skills[0].clone();
+        let plan = plan_delete_source(&skill, &sources, &targets);
+
+        assert_eq!(plan.path, body);
+        // SKILL.md + refs + refs/note.md
+        assert_eq!(plan.entries, 3);
+        assert_eq!(plan.bytes, 2);
+        assert_eq!(
+            plan.affected,
+            vec![claude.join("a"), claude.join("a-copy"), claude.join("deep")]
+                .into_iter()
+                .map(|path| AffectedLink {
+                    path,
+                    // 全局目标：改指后写绝对路径
+                    style: LinkStyle::Absolute,
+                })
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(plan.in_git, None);
+        assert_eq!(plan.relink_to, Some(other_body));
+    }
+
+    /// 只有一处本体时没有可改指的目标，如实为 None
+    #[test]
+    fn plan_delete_source_has_no_relink_target_when_the_name_exists_nowhere_else() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        let body = t.dir("store/a");
+        let other = t.dir("other");
+        t.dir("other/b"); // 同一位置里的别的名字不算
+        let gone = t.dir("gone");
+        let sources = vec![
+            source(&store, &["a"]),
+            source(&other, &["b"]),
+            // 同名但本体已不在磁盘上：不能改指过去
+            source(&gone, &["a"]),
+        ];
+        std::fs::remove_dir_all(&gone).unwrap();
+        let plan = plan_delete_source(&sources[0].skills[0].clone(), &sources, &[]);
+        assert_eq!(plan.path, body);
+        assert_eq!(plan.relink_to, None);
+        assert!(plan.affected.is_empty());
+    }
+
+    /// git 仓库内的本体要报出仓库根：`.git` 是目录（常规仓库）或文件（工作树 / 子模块）都算
+    #[test]
+    fn plan_delete_source_finds_the_git_root_above_the_body() {
+        let t = TempTree::new();
+        let repo = t.dir("repo");
+        t.dir("repo/.git");
+        let store = t.dir("repo/.agents/skills");
+        t.dir("repo/.agents/skills/a");
+        let wt = t.dir("wt");
+        t.file(&wt, ".git"); // 工作树里 .git 是文件
+        let wt_store = t.dir("wt/skills");
+        t.dir("wt/skills/a");
+        let loose = t.dir("loose");
+        t.dir("loose/a");
+
+        let inside = source(&store, &["a"]);
+        let worktree = source(&wt_store, &["a"]);
+        let outside = source(&loose, &["a"]);
+        let plan = |s: &Source| plan_delete_source(&s.skills[0].clone(), &[], &[]);
+        assert_eq!(plan(&inside).in_git, Some(repo));
+        assert_eq!(plan(&worktree).in_git, Some(wt));
+        assert_eq!(plan(&outside).in_git, None);
     }
 
     #[cfg(unix)]

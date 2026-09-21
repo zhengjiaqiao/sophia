@@ -1,0 +1,341 @@
+/* 导入页的布局。色值一律 var(--…)，唯一来源是 tokens.css（§1.1）。
+   组件本身在 src/ui/，这里只管这一页怎么摆——两栏铺开、skill 列表不截断。 */
+@import "../tokens.css";
+
+.ss-import {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ss-import__cols {
+  display: flex;
+  flex-grow: 1;
+  min-height: 0;
+}
+
+/* ===== 左：来源 ===== */
+.ss-import__sources {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 280px;
+  flex-shrink: 0;
+  min-height: 0;
+  border-right: 1px solid var(--hairline);
+}
+
+/* 区域标签行：左边是「来源」，右边是这一列数的是什么（§11 口径要写在列头上） */
+.ss-import__caption {
+  display: flex;
+  align-items: baseline;
+  padding: var(--space-xl) var(--space-xl) var(--space-xs);
+  flex-shrink: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.ss-import__caption span {
+  margin-left: auto;
+  color: var(--ink-faint);
+}
+
+.ss-import__srclist {
+  flex-grow: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ss-import__source {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 0 var(--space-xl);
+}
+
+.ss-import__source.is-active {
+  background: var(--surface);
+}
+
+/* 整行可点：名字、标签、计数都在按钮里 */
+.ss-import__pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-grow: 1;
+  min-width: 0;
+  padding: var(--space-xs) 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ss-import__source.is-active .ss-import__pick {
+  color: var(--ink);
+}
+
+.ss-import__srcname {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 外部来源的名字就是一条路径，路径要对齐、要分得清 l 与 1（§1.2） */
+.ss-import__srcname.is-path {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+}
+
+.ss-import__count {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.ss-import__source.is-active .ss-import__count {
+  color: var(--ink);
+}
+
+.ss-import__add {
+  padding: var(--space-xl);
+  flex-shrink: 0;
+}
+
+/* ===== 右：自动同步行 + skill 列表 + agent 选择 ===== */
+.ss-import__main {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 自动同步规则的唯一创建入口（§12） */
+.ss-import__auto {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-sm) var(--space-xxl);
+  border: 0;
+  border-bottom: 1px solid var(--surface);
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  text-align: left;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.ss-import__auto:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.ss-import__listhead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: var(--space-xl) var(--space-xxl) var(--space-sm);
+  flex-shrink: 0;
+}
+
+.ss-import__headline {
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
+  text-transform: uppercase;
+}
+
+.ss-import__note {
+  margin-left: auto;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-faint);
+}
+
+/* 列表铺开成几竖列，全部列出、不截断——改成页面的意义就在这儿 */
+.ss-import__grid {
+  display: flex;
+  gap: var(--space-xl);
+  flex-grow: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--space-xxl) var(--space-sm);
+}
+
+.ss-import__col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.ss-import__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-xs) 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ss-import__row:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+/* skill 名原样写、不做大小写转换（§1.2），但用正文档而不是等宽：
+   等宽是给路径与计数的——那里要对齐、要分得清 l 与 1；
+   列表里的 skill 名是当词读的，等宽反而更难读，还会跟同一行的标签字号打架 */
+.ss-import__name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 不可点的标识一律零圆角方标签（§3.1） */
+.ss-import__tag {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ss-import__tag.is-quiet {
+  border-color: var(--hairline);
+  color: var(--ink-faint);
+}
+
+/* 同一行上两个标签时，只有第一个靠右推 */
+.ss-import__tag + .ss-import__tag {
+  margin-left: 6px;
+}
+
+/* ===== 复选方块：列表行与自动同步行共用 ===== */
+.ss-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 1px solid var(--ink-faint);
+  border-radius: 0;
+}
+
+.ss-check.is-on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.ss-check.is-dim {
+  border-color: var(--disabled);
+}
+
+/* ===== agent 选择：选择片（§3.0） ===== */
+.ss-import__agents {
+  padding: var(--space-xl) var(--space-xxl);
+  border-top: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.ss-import__label {
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+.ss-import__chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.ss-import__hint {
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-faint);
+}
+
+.ss-import__chips .ss-import__hint {
+  margin-left: 6px;
+}
+
+/* ===== 底部动作条 ===== */
+.ss-import__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-xxl);
+  border-top: 1px solid var(--ink);
+  flex-shrink: 0;
+}
+
+.ss-import__foot .ss-import__hint {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ss-import__path {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+}
+
+.ss-import__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Busy 包出来的那层不能吃掉 flex 布局 */
+.ss-import__fixed {
+  flex-shrink: 0;
+}

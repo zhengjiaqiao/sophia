@@ -1,0 +1,74 @@
+/* 界面 token：色与字的唯一来源（组件规范 §1）。
+   全项目只有这个文件可以写字面色值，别处一律 var(--…)——scripts/lint-ui.mjs 强制这一条。
+
+   字体只引用到的 latin 子集与字重：Barlow 400、Barlow Condensed 600/700、IBM Plex Mono 400。
+   整包各约 2MB（含全字重与西里尔/越南语等子集），桌面应用不该为没用上的字形付体积。
+   字体文件打进应用，不走 CDN（§1.2.1）。 */
+@import "@fontsource/barlow/latin-400.css";
+@import "@fontsource/barlow-condensed/latin-600.css";
+@import "@fontsource/barlow-condensed/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+
+:root {
+  /* ---- 色（§1.1）：整个界面零色彩，强调只有「次要文字 → 加粗 → 反色」三档 ---- */
+  --canvas: #ffffff; /* 画布 */
+  --surface: #f0f0fa; /* 次级面：选中、悬停 */
+  --hairline: #e0e0e8; /* 分隔线 */
+  --ink: #000000; /* 主文字 */
+  --ink-mute: #5a5a5f; /* 次要文字 */
+  --ink-faint: #9a9aa2; /* 弱文字与空心描边 */
+  --disabled: #c8c8d0; /* 禁用描边 */
+  --ink-faint-inverse: #6a6a72; /* 反色（选中行、错误横幅）里的空心描边 */
+
+  /* ---- 字（§1.2）：三个字族都没有中文字形，CJK 回退栈显式写全（§1.2.1） ---- */
+  --font-ui: Barlow, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-cond: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "PingFang SC", monospace;
+
+  /* 五档字号（DESIGN「Typography → 层级」）：相邻至少差一倍的视觉重量。
+     第一版把 20/15/14/13/12 挤在 8px 里，14 与 15、13 与 12 眼睛分不出来，
+     整页读起来像一张密排的表。所以砍掉 14，页面名拉到 28。 */
+  --size-display: 28px; /* 二级页面名、区域大标题 */
+  --size-wordmark: 20px;
+  --size-nav: 15px; /* 顶栏页签：一级导航，比按钮高半档 */ /* 顶栏 wordmark */
+  --size-body: 15px; /* 表格、说明、skill 名、选择片文字 */
+  --size-caption: 13px; /* 按钮；副行、文字链、提示条副行 */
+  --size-micro: 12px; /* 区域标签、列头、方标签；路径与计数 */
+
+  /* 行高：小字靠行高撑出呼吸感，不靠字号。
+     12px 的标签占 24px 高（--leading-micro: 2），这是层级读得出来的关键。 */
+  --leading-display: 1.1;
+  --leading-body: 1.6;
+  --leading-caption: 1.5;
+  --leading-micro: 2;
+
+  --track-display: 1.4px;
+  --track-title: 1.9px;
+  --track-head: 1.1px;
+  --track-button: 1.17px;
+  --track-label: 0.96px;
+
+  /* ---- 间距（DESIGN「Layout」）：基准 8px，留白往大了给 ---- */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px; /* 行内：同一行里元素之间 */
+  --space-md: 16px;
+  --space-lg: 18px;
+  --space-xl: 24px; /* 组之间：筛选行与表格、表格与待处理栏、表单字段之间 */
+  --space-xxl: 32px; /* 页边：内容区左右内边距 */
+  --space-huge: 48px; /* 区域之间：页面里的大区块 */
+
+  /* ---- 形（§1.3）：圆角只有输入框 4px、pill 32px、圆点 50%，其余 0 ---- */
+  --radius-input: 4px;
+  --radius-pill: 32px;
+
+  /* busy 时受影响控件的不透明度（§6） */
+  --busy-dim: 0.45;
+
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  /* 正文行高 1.6：整页「文字很密集」的观感，一半是行高压出来的 */
+  line-height: var(--leading-body);
+  color: var(--ink);
+  background: var(--canvas);
+}

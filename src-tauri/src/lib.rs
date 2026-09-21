@@ -15,7 +15,7 @@ use symsync_core::discovery::{self, Env};
 use symsync_core::fs::normalize;
 use symsync_core::models::*;
 use symsync_core::skills;
-use symsync_core::store::Store;
+use symsync_core::store::{IgnoredIssue, IssueKind, Store};
 use symsync_core::sync;
 use tauri::Emitter;
 
@@ -25,6 +25,10 @@ struct AppState {
     watcher: Mutex<Option<watch::Watcher>>,
     mcp_plan: Mutex<Option<(String, symsync_core::mcp::PreparedPlan)>>,
     next_mcp_plan: AtomicU64,
+    /// 待确认的删本体计划。计划必须留在服务端：`in_git`（仓库里的不代删）是道安全闸门，
+    /// 让它在前端转一圈就等于可以被改掉
+    delete_plan: Mutex<Option<(String, DeleteSourcePlan)>>,
+    next_delete_plan: AtomicU64,
     /// 同一进程里写 ~/.codex/config.toml 的路径（MCP 同步、模型页）共用这把锁，避免互相撞出“配置已变化”。
     /// 跨进程仍靠 atomicfile 的写前写后校验兜底。
     config_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
@@ -38,6 +42,9 @@ struct HarnessStatus {
     id: String,
     display_name: String,
     enabled: bool,
+    /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」后面——
+    /// 没装的也能预先开启，所以要带出来，不能只返回已安装的那些
+    installed: bool,
 }
 
 fn err<E: std::fmt::Display>(e: E) -> String {
@@ -394,6 +401,84 @@ fn split_whole_link(
     Ok(skills::split_whole_link(target, source))
 }
 
+/// 删本体的计划：`plan` 给确认弹窗渲染，`plan_id` 给 `delete_source` 取回服务端那份
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlannedDeletion {
+    plan_id: String,
+    plan: DeleteSourcePlan,
+}
+
+/// 删本体前的只读体检，什么都不动。计划留在服务端，前端拿到的那份只用来摆给用户看；
+/// 确认之后凭 `plan_id` 调 `delete_source`
+#[tauri::command]
+fn plan_delete_source(
+    source_id: String,
+    skill: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<PlannedDeletion, String> {
+    let (sources, targets) = discover(&state)?;
+    let skill = sources
+        .iter()
+        .find(|s| s.id == source_id)
+        .ok_or("本体位置已不存在，请刷新")?
+        .skills
+        .iter()
+        .find(|s| s.name == skill)
+        .ok_or("该本体已不存在，请刷新")?;
+    let plan = skills::plan_delete_source(skill, &sources, &targets);
+    let plan_id = state
+        .next_delete_plan
+        .fetch_add(1, Ordering::Relaxed)
+        .to_string();
+    *state
+        .delete_plan
+        .lock()
+        .map_err(|_| "删除计划缓存已损坏".to_string())? = Some((plan_id.clone(), plan.clone()));
+    Ok(PlannedDeletion { plan_id, plan })
+}
+
+/// 执行服务端存着的那份删除计划。单独成命令，是为了把用户确认卡在两次调用之间；
+/// 计划用后即弃，同一个 `plan_id` 不能重放
+#[tauri::command]
+fn delete_source(plan_id: String, state: tauri::State<'_, AppState>) -> Result<SyncReport, String> {
+    let plan = {
+        let mut cache = state
+            .delete_plan
+            .lock()
+            .map_err(|_| "删除计划缓存已损坏".to_string())?;
+        match cache.as_ref() {
+            Some((cached_id, _)) if cached_id == &plan_id => cache.take().expect("刚判过是 Some").1,
+            _ => return Err("删除计划不存在或已过期，请重新确认".into()),
+        }
+    };
+    Ok(sync::delete_source(&plan))
+}
+
+/// 忽略一条待处理问题；`at` 由 core 生成。返回落盘的 key，撤销时原样传给 `unignore_issue`
+#[tauri::command]
+fn ignore_issue(
+    kind: IssueKind,
+    paths: Vec<PathBuf>,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let issue = IgnoredIssue::new(kind, &paths);
+    let key = issue.key.clone();
+    state.store.ignore(issue).map_err(err)?;
+    Ok(key)
+}
+
+#[tauri::command]
+fn unignore_issue(key: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.store.unignore(&key).map_err(err)
+}
+
+/// 已忽略的问题全表；待处理页据此判断哪条要隐藏、哪条能恢复
+#[tauri::command]
+fn list_ignored(state: tauri::State<'_, AppState>) -> Result<Vec<IgnoredIssue>, String> {
+    Ok(state.store.load_settings().map_err(err)?.ignored)
+}
+
 #[tauri::command]
 fn list_manual_sources(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
     Ok(state.store.load_settings().map_err(err)?.manual_sources)
@@ -555,14 +640,21 @@ fn update_auto_links(
     state.store.save_settings(&settings).map_err(err)
 }
 
-/// 已安装的 harness 及其启用状态
+/// 全部 harness 及其启用、安装状态。返回全部而不只是已安装的：
+/// 设置页要给出「显示未安装的 N 个」的入口，没装的也能预先开启
 #[tauri::command]
 fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<Vec<HarnessStatus>, String> {
     let settings = state.store.load_settings().map_err(err)?;
-    Ok(discovery::installed(&runtime_env()?)
+    let env = runtime_env()?;
+    let installed: std::collections::HashSet<String> = discovery::installed(&env)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    Ok(discovery::all_harnesses(&env)
         .into_iter()
         .map(|h| HarnessStatus {
             enabled: !settings.disabled_harnesses.contains(&h.id),
+            installed: installed.contains(&h.id),
             id: h.id,
             display_name: h.display_name,
         })
@@ -626,6 +718,8 @@ pub fn run() {
             watcher: Mutex::new(None),
             mcp_plan: Mutex::new(None),
             next_mcp_plan: AtomicU64::new(1),
+            delete_plan: Mutex::new(None),
+            next_delete_plan: AtomicU64::new(1),
         })
         .invoke_handler(tauri::generate_handler![
             scan_all,
@@ -636,6 +730,11 @@ pub fn run() {
             propose_unlinks,
             apply_all,
             split_whole_link,
+            plan_delete_source,
+            delete_source,
+            ignore_issue,
+            unignore_issue,
+            list_ignored,
             list_manual_sources,
             add_manual_source,
             remove_manual_source,
@@ -661,6 +760,8 @@ pub fn run() {
             gateway::gateway_select_models,
             gateway::gateway_enable,
             gateway::gateway_restore,
+            gateway::gateway_restart,
+            gateway::gateway_restart_codex,
             gateway::gateway_takeover
         ])
         .run(tauri::generate_context!())

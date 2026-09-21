@@ -1,4 +1,5 @@
-import type { McpCellState, McpEntry, McpLocation, McpOverview } from "./types.ts";
+import { viewOf, type McpCellView, type McpDotState } from "./mcpCellState.ts";
+import type { McpEntry, McpLocation, McpOverview } from "./types.ts";
 
 export interface McpDomainRow {
   name: string;
@@ -13,26 +14,74 @@ export interface McpDomain {
   rows: McpDomainRow[];
 }
 
-export type McpCellSummary = {
-  text: string;
-  className: "own" | "equal" | "same-endpoint" | "conflict" | "invalid" | "unsupported" | "missing";
-  defined: boolean;
-};
-
-/** 将同名来源在一个目标上的状态聚合为可读摘要；已确认的定义优先于不可比较的副本。 */
-export function summarizeMcpCell(states: McpCellState[]): McpCellSummary {
-  if (states.includes("conflict")) return { text: "差异", className: "conflict", defined: true };
-  if (states.includes("sameEndpoint") || states.includes("equal") || states.includes("own")) {
-    return { text: "已配置", className: "own", defined: true };
+/**
+ * 一行在一列上的圆点。同名服务合并成一行后，这一列上每个来源各有一个格，
+ * 要合成一个圆点：先看「来源就是这一列」，再看「这儿也有一份一样的」，
+ * 再看「这儿还没有」，最后才是两种不可点的异常。
+ *
+ * `conflict` 不参与（spec R2）：它说的是「这一列自己也持有同名条目」，
+ * 而那一列自己的条目就在同一行里、带着 `own`，圆点由它画。差异是行级事实，
+ * 交给 `differingSourceIds` 做成方标签。
+ */
+export function cellViewOf(
+  row: McpDomainRow,
+  targetId: string,
+  labelOf: (locationId: string) => string,
+): McpCellView | null {
+  const cells = row.entries.flatMap((entry) => {
+    const cell = entry.cells.find((candidate) => candidate.targetId === targetId);
+    return cell === undefined ? [] : [{ sourceId: entry.sourceId, state: cell.state }];
+  });
+  // 无格态：这一行在这一列没有格，例如来源属于另一个域
+  if (cells.length === 0) return null;
+  // conflict 在这里就被摘掉，类型上也进不了 viewOf
+  const dots = cells.filter(
+    (cell): cell is { sourceId: string; state: McpDotState } => cell.state !== "conflict",
+  );
+  const pick = (...states: McpDotState[]) => dots.find((cell) => states.includes(cell.state));
+  const found =
+    pick("own") ??
+    pick("equal", "sameEndpoint") ??
+    pick("missing") ??
+    pick("invalid", "unsupported");
+  if (found === undefined) {
+    // 只剩 conflict：说明这一列自己持有一份不一样的定义。扫描保证它自己那条
+    // 带 own 的条目也在同一行里，走不到这儿；真走到了也照 own 画，别画成「还没有」
+    return {
+      dot: "own",
+      clickable: false,
+      reason: `${labelOf(targetId)} 里也有一份 ${row.name}，只是和别处那份不一样`,
+      issue: "differentCopies",
+    };
   }
-  if (states.includes("invalid")) return { text: "配置无效", className: "invalid", defined: false };
-  if (states.includes("unsupported")) {
-    return { text: "格式不支持", className: "unsupported", defined: false };
-  }
-  return { text: "缺失", className: "missing", defined: false };
+  return viewOf(found.state, {
+    service: row.name,
+    location: labelOf(targetId),
+    source: labelOf(found.sourceId),
+  });
 }
 
-const domainLabel = (key: string): string => {
+/**
+ * 本行在本域里互不一致的那几处副本（spec R2）。返回位置 id，顺序按行内出现的先后。
+ * 非空即在服务名后挂「N 份不一样」的方标签，并进待处理栏。
+ */
+export function differingSourceIds(row: McpDomainRow, targetIds: Set<string>): string[] {
+  const ids: string[] = [];
+  const add = (id: string) => {
+    if (!ids.includes(id)) ids.push(id);
+  };
+  for (const entry of row.entries) {
+    for (const cell of entry.cells) {
+      if (cell.state !== "conflict" || !targetIds.has(cell.targetId)) continue;
+      add(entry.sourceId);
+      add(cell.targetId);
+    }
+  }
+  return ids;
+}
+
+/// 域名：全局 / 项目 · <目录名>。侧栏、引入页、跨域说明共用这一份
+export const mcpDomainLabel = (key: string): string => {
   if (key === "global") return "全局";
   const path = key.startsWith("project:") ? key.slice("project:".length) : key;
   return `项目 · ${path.split(/[\\/]/).filter(Boolean).pop() ?? path}`;
@@ -121,7 +170,7 @@ export function mcpDomains(overview: McpOverview): McpDomain[] {
       key,
       label: targets.some((target) => target.harnessId === "weiboap")
         ? weiboAgentLabel(key)
-        : domainLabel(key),
+        : mcpDomainLabel(key),
       targets,
       rows: domainRows(
         overview.entries

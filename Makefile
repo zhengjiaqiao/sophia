@@ -14,6 +14,7 @@ test-web:
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
+	node scripts/lint-ui.mjs
 
 build-web:
 	npm run build

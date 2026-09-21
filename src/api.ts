@@ -8,8 +8,11 @@ import type {
   GatewaySelectedModel,
   GatewayState,
   HarnessStatus,
+  IgnoredIssue,
+  IssueKind,
   Overview,
   PlannedAction,
+  PlannedDeletion,
   SyncReport,
   McpOverview,
   McpPreview,
@@ -17,6 +20,13 @@ import type {
   McpSelection,
   McpAutoImportRule,
 } from "./types";
+
+// PlannedDeletion 与 IgnoredIssue 定义在 types.ts（与 serde 一一对应）；
+// 这里再导出一次，调用方从 api.ts 或 types.ts 引都行
+export type { PlannedDeletion, IgnoredIssue } from "./types";
+
+/// 结束了几个 Codex 后台进程（与 Rust 的 RestartReport 一一对应）
+export type GatewayRestartReport = { terminated: number; pids: number[] };
 
 export const api = {
   scanAll: () => invoke<Overview>("scan_all"),
@@ -27,6 +37,16 @@ export const api = {
   applyAll: (actions: PlannedAction[], cleanBroken: boolean) =>
     invoke<SyncReport>("apply_all", { actions, cleanBroken }),
   splitWholeLink: (targetId: string) => invoke<SyncReport>("split_whole_link", { targetId }),
+  /// 删本体前的只读体检；计划留在后端，前端拿到的只用来摆给用户确认
+  planDeleteSource: (sourceId: string, skill: string) =>
+    invoke<PlannedDeletion>("plan_delete_source", { sourceId, skill }),
+  /// 执行用户已确认的删除计划；planId 用后即弃，不能重放
+  deleteSource: (planId: string) => invoke<SyncReport>("delete_source", { planId }),
+  /// 忽略一条待处理问题，返回撤销用的 key
+  ignoreIssue: (kind: IssueKind, paths: string[]) =>
+    invoke<string>("ignore_issue", { kind, paths }),
+  unignoreIssue: (key: string) => invoke<void>("unignore_issue", { key }),
+  listIgnored: () => invoke<IgnoredIssue[]>("list_ignored"),
   listManualSources: () => invoke<string[]>("list_manual_sources"),
   addManualSource: (path: string) => invoke<void>("add_manual_source", { path }),
   removeManualSource: (path: string) => invoke<void>("remove_manual_source", { path }),
@@ -100,5 +120,9 @@ export const api = {
     invoke<GatewayState>("gateway_select_models", { providerId, selected }),
   gatewayEnable: () => invoke<GatewayState>("gateway_enable"),
   gatewayRestore: () => invoke<GatewayState>("gateway_restore"),
+  /// 重启我们自己装的 launchd 路由服务；不重启 Codex。界面上不给按钮，命令留着
+  gatewayRestart: () => invoke<GatewayState>("gateway_restart"),
+  /// 结束 Codex 的后台进程，下次启动才读到新配置；terminated 为 0 表示 Codex 当时没在跑
+  gatewayRestartCodex: () => invoke<GatewayRestartReport>("gateway_restart_codex"),
   gatewayTakeover: () => invoke<GatewayState>("gateway_takeover"),
 };
