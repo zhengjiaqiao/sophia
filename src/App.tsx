@@ -242,7 +242,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <h1>SymSync</h1>
+        <h1>Sophia</h1>
         <nav aria-label="功能" style={{ display: "flex", gap: 4, marginBottom: 8 }}>
           <button
             className={activeTab === "skills" ? "active" : ""}

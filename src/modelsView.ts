@@ -25,7 +25,7 @@ export function routerUnavailable(state: GatewayState): boolean {
 
 /// 接管提议的文案
 export function takeoverOfferText(takeover: GatewayTakeover): string {
-  return `本机当前由 agents-manager 启用（网关 ${takeover.baseUrl}，已选 ${takeover.selectedCount} 个模型），可以由 SymSync 接管`;
+  return `本机当前由 agents-manager 启用（网关 ${takeover.baseUrl}，已选 ${takeover.selectedCount} 个模型），可以由 Sophia 接管`;
 }
 
 /**
