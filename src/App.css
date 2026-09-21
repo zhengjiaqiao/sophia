@@ -117,6 +117,28 @@ button.link {
 /* tab 与内容区左缘对齐：wordmark 的实际宽度随字体回退浮动，不拿它当基准。
    侧栏 186px + 内容区 32px 页边＝218，所以字标之后补到 218 为止。
    模型页没有侧栏，页签照样停在这个位置——对齐的是内容区左缘，不是侧栏边界。 */
+/* 设置：顶栏右端。全局入口，每一页都够得着；命中区 32×32（>= --hit-min），
+   静息只有图标、没有描边——顶栏上再摆一枚 pill 会和页签抢 */
+.topbar__settings {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  margin-right: var(--space-xxl);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  transition: color var(--motion-fast) ease;
+}
+
+.topbar__settings:hover {
+  color: var(--ink);
+}
+
 .topbar nav {
   position: absolute;
   left: 218px;

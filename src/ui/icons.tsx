@@ -101,3 +101,14 @@ export function IconArrowLeft(props: IconProps) {
     </Glyph>
   );
 }
+
+/// 设置：顶栏右端那个入口。齿轮是少数不会被误读的图形之一，
+/// 但它仍然要带 `aria-label` 与 `title`——图标不替代文案的职责
+export function IconSettings(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 1.4v1.8M8 12.8v1.8M14.6 8h-1.8M3.2 8H1.4M12.67 3.33l-1.27 1.27M4.6 11.4l-1.27 1.27M12.67 12.67 11.4 11.4M4.6 4.6 3.33 3.33" />
+    </Glyph>
+  );
+}

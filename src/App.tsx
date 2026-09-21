@@ -8,6 +8,7 @@ import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PendingPage } from "./pages/PendingPage";
+import { IconSettings } from "./ui";
 import "./App.css";
 
 /// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
@@ -289,6 +290,18 @@ export default function App() {
             导入 MCP
           </button>
         </nav>
+        {/* 设置是**全局**的：它管哪些 agent 参与，skill 与 MCP 两页都受它影响，
+            以后还会往里加别的。所以它挂在顶栏、每一页都够得着，
+            而不是挂在只有部分页面才有的侧栏底部。
+            busy 期间照常可用（§「空态与忙碌态」的五个豁免之一） */}
+        <button
+          className="topbar__settings"
+          aria-label="设置"
+          title="设置"
+          onClick={() => setSubPage("settings")}
+        >
+          <IconSettings size={18} />
+        </button>
       </header>
       {/* 模型页是全局的，没有域也没有项目，侧栏对它没有意义（MODELS_TAB_FULL_BLEED）。
           **必须整个不渲染**：`.sidebar` 有 `display: flex`，它压得过 `hidden` 属性的
@@ -362,7 +375,6 @@ export default function App() {
           <button disabled={busy} onClick={() => void addProject()}>
             添加项目…
           </button>
-          <button onClick={() => setSubPage("settings")}>设置</button>
         </aside>
       )}
       <main className={showModels ? "content content--bleed" : "content"}>
