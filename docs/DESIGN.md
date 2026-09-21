@@ -33,6 +33,13 @@ typography:
     fontSize: 15px
     fontWeight: 400
     lineHeight: 1.6
+  nav-cap:
+    fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
+    fontSize: 15px
+    fontWeight: 700
+    lineHeight: 1.6
+    letterSpacing: 1.17px
+    textTransform: uppercase
   button-cap:
     fontFamily: "Barlow Condensed, PingFang SC, Microsoft YaHei, sans-serif"
     fontSize: 13px
@@ -245,6 +252,7 @@ components:
 |---|---|---|
 | `display` | 28 / 1.1 | 二级页面名、区域大标题 |
 | `wordmark` | 20 / 1.0 | 顶栏 wordmark |
+| `nav-cap` | 15 / 1.6 | **顶栏页签**——一级导航，比普通按钮高半档；可点高度撑到 36px |
 | `body` | 15 / 1.6 | 表格、说明、**skill 名**、选择片文字 |
 | `button-cap` / `caption` | 13 | 按钮；副行、文字链、提示条副行 |
 | `micro-cap` / `mono` | 12 / **2.0** | 区域标签、列头、方标签；路径与计数 |
@@ -490,6 +498,7 @@ components:
 
 日期为准，后者覆盖前者。完整推理见 `docs/specs/2026-09-21-ui-decisions-log.md`。
 
+- **2026-09-21 · 顶栏页签有自己的档**：`nav-cap` 15/700。留白那轮把全局字号拉开时，顶栏页签漏改、还留在 12px 的标签档——挨着 20px 的 wordmark 显得极小，中文的「模型」又吃不到大写和字距。一级导航值得比普通按钮高半档。
 - **2026-09-21 · 什么时候才有按钮**：改动默认当场生效；按钮只给「离开语境做外部的事」「多输入一次提交」「要确认的破坏性操作」三种。起因是真机反馈「过度设计」——模型选择浮层长出了「保存 / 关闭」，而点外面本来就关、勾选本来就该当场生效。
 - **2026-09-21 · 侧栏没有「全部」**：默认落在「全局」。多域并排时同名 agent 出现多列、选择操作条的片重复；跨域批量的事走待处理页。（早在裁决日志里定了，这次才实现。）
 - **2026-09-21 · 留白与层级**：字号从 20/15/14/13/12 改成 28/20/15/13/12，砍掉 14；12px 标签行高 2.0；按钮内边距 7/20 → 9/24；矩阵行高 30 → 40；间距加 `huge` 48；页边 32。原因：整页读起来像密排的表，SpaceX 的层级靠三倍跳跃和行高撑开，不靠字号密集分档。

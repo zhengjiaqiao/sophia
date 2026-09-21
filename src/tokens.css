@@ -29,7 +29,8 @@
      第一版把 20/15/14/13/12 挤在 8px 里，14 与 15、13 与 12 眼睛分不出来，
      整页读起来像一张密排的表。所以砍掉 14，页面名拉到 28。 */
   --size-display: 28px; /* 二级页面名、区域大标题 */
-  --size-wordmark: 20px; /* 顶栏 wordmark */
+  --size-wordmark: 20px;
+  --size-nav: 15px; /* 顶栏页签：一级导航，比按钮高半档 */ /* 顶栏 wordmark */
   --size-body: 15px; /* 表格、说明、skill 名、选择片文字 */
   --size-caption: 13px; /* 按钮；副行、文字链、提示条副行 */
   --size-micro: 12px; /* 区域标签、列头、方标签；路径与计数 */

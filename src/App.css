@@ -108,19 +108,22 @@ button.link {
 
 /* micro-cap 档（Condensed 12/600/0.96px/大写，行高 2.0）。内联的 gap: 4px 改不动，
    差的那段用 margin 补到画稿的 26px */
+/* 顶栏页签是一级导航，走 nav-cap（DESIGN「层级」）：比普通按钮高半档。
+   留白那轮漏改、一直停在 12px 的标签档，挨着 20px 的 wordmark 显得极小。
+   可点高度撑到 36px，下划线仍贴文字底部 */
 .sidebar nav button {
   margin-right: 22px;
-  padding: 0 0 3px;
+  padding: 6px 0 4px;
   border: 0;
   border-bottom: 1px solid transparent;
   border-radius: 0;
   background: none;
   color: var(--ink-mute);
   font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
+  font-size: var(--size-nav);
+  font-weight: 700;
+  letter-spacing: var(--track-button);
+  line-height: var(--leading-body);
   text-transform: uppercase;
 }
 
