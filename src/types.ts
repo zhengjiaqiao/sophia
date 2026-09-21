@@ -34,13 +34,26 @@ export interface Target {
 }
 
 export type CellState =
-  "own" | "linked" | "missing" | "broken" | "foreign" | "duplicate" | "unwritable";
+  | "own"
+  | "linked"
+  | "missing"
+  | "broken"
+  | "foreign"
+  | "duplicate"
+  /// 目标整个目录链接到别的本体位置，逐项写不进去。**不是**「目录只读」
+  | "wholeLinked"
+  /// 目标目录存在但写不进去。**扫描永远不产出这个状态**：判定它要实际试写一次，
+  /// 每轮扫描都试写代价太大。只在上层真的写失败之后由上层构造
+  | "readOnly";
 export interface Cell {
   sourceId: string;
   skill: string;
   targetId: string;
   path: string;
   state: CellState;
+  /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 linked / foreign 有值，
+  /// 其余状态是 null。foreign 的提示条要靠它说出「指向哪个本体」
+  pointsTo: string | null;
 }
 
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
@@ -74,13 +87,66 @@ export interface CellRef {
   targetId: string;
 }
 
-export type ActionKind = "create" | "brokenLink" | "unlink";
+export type ActionKind = "create" | "brokenLink" | "unlink" | "deleteSource";
 export interface PlannedAction {
   kind: ActionKind;
   itemName: string;
   sourcePath: string;
   targetPath: string;
   target: string;
+}
+
+/// 链接写成绝对路径还是相对路径
+export type LinkStyle = "absolute" | "relative";
+
+/// 一条指向某本体的链接，以及改指时该怎么写
+export interface AffectedLink {
+  path: string;
+  style: LinkStyle;
+}
+
+/// 删一个 skill 本体之前的全部事实，够渲染确认弹窗做决定
+export interface DeleteSourcePlan {
+  /// 要删的本体目录
+  path: string;
+  /// 目录里的条目总数（递归，不含目录自身）
+  entries: number;
+  /// 目录里普通文件的字节数之和（软链不跟随）
+  bytes: number;
+  /// 各目标目录里指向它（或它内部）的软链，连同改指时要写的形式
+  affected: AffectedLink[];
+  /// 所在 git 仓库的根；null 表示不在仓库里。非 null 时一律不代删
+  inGit: string | null;
+  /// 别处同名的另一个本体；删完把 affected 改指到它。null 表示没有别处可指
+  relinkTo: string | null;
+}
+
+/// 待处理栏里四类需要用户拿主意的问题，与 store.rs 的 IssueKind 一一对应。
+/// 「整目录链到别处」与「目录只读」必须分开：前者的动作是拆开，后者是再试一次
+export type IssueKind =
+  | "duplicateSource"
+  | "brokenLink"
+  | "readOnlyTarget"
+  | "wholeLinkedTarget"
+  /// MCP：几个位置各有一份同名配置、连的地址不一样 → 看两边差在哪
+  | "differentCopies"
+  /// MCP：某个位置的配置文件这次读不出来 → 去看看
+  | "invalidLocation";
+
+/// 服务端存着的删除计划：plan 只用来渲染确认弹窗，执行凭 planId。
+/// 计划不经前端往返——in_git（仓库里的不代删）是道安全闸门，
+/// 让它在前端转一圈就等于可以被改掉
+export interface PlannedDeletion {
+  planId: string;
+  plan: DeleteSourcePlan;
+}
+
+/// 与 store.rs 的 IgnoredIssue 对应
+export interface IgnoredIssue {
+  kind: IssueKind;
+  key: string;
+  /// 忽略时间，RFC 3339 的 UTC 写法，可直接按字典序排
+  at: string;
 }
 export type Outcome =
   | { status: "created" }
@@ -108,6 +174,9 @@ export interface HarnessStatus {
   id: string;
   displayName: string;
   enabled: boolean;
+  /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」
+  /// 后面——没装的也能预先开启，所以后端返回全部 41 个而不只是已安装的
+  installed: boolean;
 }
 
 export interface McpLocation {
@@ -210,6 +279,8 @@ export interface GatewayRouter {
   installed: boolean;
   running: boolean;
   port: number;
+  /// "chat" 或 "responses"。配置页只读展示，不给改
+  protocol: string;
   error: string;
 }
 export interface GatewayCodex {

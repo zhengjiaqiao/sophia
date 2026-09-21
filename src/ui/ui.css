@@ -1,0 +1,489 @@
+/* 展示组件的样式。色值一律 var(--…)，唯一来源是 tokens.css（§1.1）。
+   零色彩、零阴影、零渐变；圆角只有输入框 4px、pill 32px、圆点 50%（§1.3）。 */
+@import "../tokens.css";
+
+/* ===== 2. 状态点 StateDot =====
+   填充＝这个 agent 能不能用它，外环＝它在这儿是本体还是一条软链。 */
+.ss-dot {
+  display: inline-block;
+  box-sizing: border-box;
+  border-radius: 50%;
+}
+
+.ss-dot--linked {
+  width: 9px;
+  height: 9px;
+  background: var(--ink);
+}
+
+.ss-dot--missing {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--ink-faint);
+}
+
+.ss-dot--own {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--ink);
+}
+
+.ss-dot--own::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+/* 无格态：8px 短横，不可点（§8） */
+.ss-dot--none {
+  width: 8px;
+  height: 1px;
+  border-radius: 0;
+  background: var(--hairline);
+}
+
+/* 选中行反色：实心与外环转白，空心描边转反色底上的弱色（§2） */
+.ss-dot.is-inverse.ss-dot--linked {
+  background: var(--canvas);
+}
+
+.ss-dot.is-inverse.ss-dot--missing {
+  border-color: var(--ink-faint-inverse);
+}
+
+.ss-dot.is-inverse.ss-dot--own {
+  border-color: var(--canvas);
+}
+
+.ss-dot.is-inverse.ss-dot--own::after {
+  background: var(--canvas);
+}
+
+.ss-dot.is-inverse.ss-dot--none {
+  background: var(--ink-faint-inverse);
+}
+
+.ss-dot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.ss-dot-btn:disabled {
+  cursor: default;
+}
+
+/* ===== 3. 按钮 Button：只有一种，ghost pill ===== */
+.ss-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 9px 24px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-cond);
+  font-size: var(--size-caption);
+  font-weight: 700;
+  letter-spacing: var(--track-button);
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 紧凑档只换内边距：两档尺寸按所在容器的高度选，字号同属 button-cap（§3） */
+.ss-btn--compact {
+  padding: 5px 16px;
+}
+
+.ss-btn:disabled {
+  border-color: var(--disabled);
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+/* 破坏性：边框同默认，分量由弹窗信息与按钮文案承担，不用红（§1.1） */
+.ss-btn--destructive {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 反色：「现在开着」的开关态。零色彩系统里强调阶梯的最高档，
+   模型页的「已启用」、托盘面板的开关都用它，不要各自再写一份 */
+.ss-btn--inverse {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+/* 文字链：取消、关闭、稍后这类次级动作 */
+.ss-btn--link,
+.ss-btn--link.ss-btn--compact {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: var(--leading-caption);
+  text-transform: none;
+  text-decoration: underline;
+}
+
+.ss-btn--link:disabled {
+  color: var(--ink-faint);
+}
+
+.ss-btn--link.is-inverse {
+  color: var(--canvas);
+}
+
+/* ===== 3.0 选择片 Chip：pill，因为它可点（§3.1） ===== */
+.ss-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 7px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 选中用反色，不用填充色——界面零色彩，反色是强调阶梯最高档（§3.0） */
+.ss-chip.is-selected {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.ss-chip:disabled {
+  border-color: var(--hairline);
+  background: var(--canvas);
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.ss-chip__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* ===== 4.1 提示条 Toast ===== */
+.ss-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  box-sizing: border-box;
+  max-width: 480px;
+  padding: 16px 20px;
+  border: 1px solid var(--ink);
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.ss-toast__message {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+}
+
+.ss-toast__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.ss-toast__stats {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+/* ===== 4.2 错误横幅 ErrorBanner：反色通栏，不自动消失 ===== */
+.ss-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.ss-banner__message {
+  flex-grow: 1;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+/* ===== 4.4 行内待办条 RowNotice ===== */
+.ss-rownotice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--hairline);
+}
+
+.ss-rownotice__message {
+  flex-grow: 1;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+.ss-rownotice__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ===== 5. 确认弹窗 Confirm ===== */
+.ss-confirm-layer {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* 罩子是白的：界面零色彩，没有半透明黑可用 */
+.ss-confirm-veil {
+  position: absolute;
+  inset: 0;
+  background: var(--canvas);
+  opacity: 0.72;
+}
+
+.ss-confirm {
+  position: relative;
+  box-sizing: border-box;
+  width: 460px;
+  max-width: 100%;
+  padding: 24px 28px;
+  border: 1px solid var(--ink);
+  background: var(--canvas);
+}
+
+/* 弹窗标题：Condensed 走正文档——14 那一档已经砍掉（DESIGN「Typography → 层级」） */
+.ss-confirm__title {
+  font-family: var(--font-cond);
+  font-size: var(--size-body);
+  font-weight: 700;
+  letter-spacing: var(--track-head);
+}
+
+.ss-confirm__body {
+  margin-top: var(--space-sm);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+}
+
+/* 条件性警告段：有才出现 */
+.ss-confirm__warning {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid var(--hairline);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+}
+
+.ss-confirm__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
+}
+
+/* ===== 4.6 二级页面 SubPage：占满整窗，不保留侧栏 ===== */
+.ss-subpage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+.ss-subpage__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  box-sizing: border-box;
+  height: 56px;
+  padding: 0 var(--space-xxl);
+  border-bottom: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.ss-subpage__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* 二级页面名走 display 28：display 到 body 是三倍以上的跳跃（DESIGN「Layout」） */
+.ss-subpage__title {
+  font-family: var(--font-cond);
+  font-size: var(--size-display);
+  font-weight: 700;
+  letter-spacing: var(--track-display);
+  line-height: var(--leading-display);
+  text-transform: uppercase;
+}
+
+.ss-subpage__aside {
+  margin-left: auto;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.ss-subpage__body {
+  flex-grow: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ss-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.ss-mark--stacked {
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ss-mark.is-dim {
+  color: var(--ink-faint);
+}
+
+.ss-mark__icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* 首字母方块：图标缺席时的占位，永远和名字一起出现（§9.1） */
+.ss-mark__box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  /* 方块是 14px 定高、居中排的，这里的行高不撑高度，保持 1 */
+  line-height: 1;
+}
+
+/* 名字不大写——大写是结构的语言（§1.2）…… */
+.ss-mark__name {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+}
+
+/* ……唯一的例外是矩阵列头：那里 agent 名承担列标签的职能。
+   micro-cap＝12 / 600 / 0.96px / 行高 2.0——呼吸感靠行高，不靠字号 */
+.ss-mark--stacked .ss-mark__name {
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* ===== 6. 空态与忙碌态 ===== */
+.ss-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-huge) var(--space-xl);
+  text-align: center;
+}
+
+.ss-empty__description {
+  max-width: 420px;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+}
+
+.ss-empty--scanning .ss-empty__description {
+  color: var(--ink-mute);
+  font-size: var(--size-caption);
+}
+
+.ss-empty__hint {
+  max-width: 420px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  line-height: var(--leading-caption);
+}
+
+.ss-empty__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+/* 操作进行中：受影响控件置灰（§6） */
+.ss-busy {
+  opacity: var(--busy-dim);
+  pointer-events: none;
+}

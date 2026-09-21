@@ -365,7 +365,7 @@ pub fn sources(
 /// 目标目录里指向"任何已知本体位置之外"的软链，按真实父目录合成为外部本体位置。
 /// 目录还不存在的目标没什么可读，跳过；整目录链接的目标读进去就是本体位置，也跳过。
 /// 同一父目录下同名不同真实路径的取首个
-pub fn external_sources(env: &Env, targets: &[Target], known: &[Source]) -> Vec<Source> {
+pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec<Source> {
     let inside: Vec<PathBuf> = known.iter().filter_map(|s| real_path(&s.path)).collect();
     let mut groups: BTreeMap<PathBuf, BTreeMap<String, PathBuf>> = BTreeMap::new();
     for t in targets
@@ -407,7 +407,7 @@ pub fn external_sources(env: &Env, targets: &[Target], known: &[Source]) -> Vec<
         .into_iter()
         .map(|(path, skills)| Source {
             id: normalize(&path).to_string_lossy().into_owned(),
-            label: abbreviate(&path, &env.home),
+            label: external_label(&path),
             kind: SourceKind::External,
             skills: skills
                 .into_iter()
@@ -418,14 +418,22 @@ pub fn external_sources(env: &Env, targets: &[Target], known: &[Source]) -> Vec<
         .collect()
 }
 
-/// 主目录下的路径显示成 `~/…`，其余原样
-fn abbreviate(path: &Path, home: &Path) -> String {
-    let home = real_path(home).unwrap_or_else(|| home.to_path_buf());
-    match path.strip_prefix(&home) {
-        Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
-        Ok(rest) => format!("~/{}", rest.display()),
-        Err(_) => path.display().to_string(),
+/// 外部本体位置的标签是**用户认得的名字**，不是路径（DESIGN.md「来源的名字」）：
+/// 路径里任一祖先是应用包（`.app`）→ 取那一级去掉后缀的应用名，其余取最后一级目录名。
+/// 逐路径分量判断：字符串 `contains(".app")` 会被 `my.application` 骗到。
+/// 路径本身留在 `id` 和 `path` 字段里，界面放 `title`
+fn external_label(path: &Path) -> String {
+    for component in path.components() {
+        let Component::Normal(name) = component else {
+            continue;
+        };
+        let name = name.to_string_lossy();
+        // 嵌套应用包取最外层那个：它才是用户装的那个应用
+        if let Some(app) = name.strip_suffix(".app").filter(|a| !a.is_empty()) {
+            return app.to_owned();
+        }
     }
+    dir_name(path)
 }
 
 /// 所有可写目标：每个启用 harness 各自一列——全局目录、per-agent 目录、每个项目的项目目录。
@@ -1160,15 +1168,33 @@ mod tests {
         assert_eq!(names(&store), vec!["own".to_string()]);
     }
 
+    /// 外部来源的标签是用户认得的名字：应用包取应用名，其余取最后一级目录名
+    #[test]
+    fn external_label_prefers_the_app_bundle_name() {
+        let cases = [
+            (
+                "/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/0.5.0.32/Resources/ego-skills",
+                "ego lite",
+            ),
+            ("/Applications/Foo.app/Contents/Resources/skills", "Foo"),
+            ("/Users/me/.local/share/ego/ego-skills", "ego-skills"),
+            // `.application` 不是应用包，不能被字符串匹配骗到
+            ("/x/my.application/skills", "skills"),
+        ];
+        for (path, want) in cases {
+            assert_eq!(external_label(Path::new(path)), want, "{path}");
+        }
+    }
+
     #[test]
     fn external_sources_group_outside_links_by_their_real_parent() {
         let t = TempTree::new();
         let home = t.dir("h");
-        // 不在 home 下 → label 用完整路径；两条链接同父目录 → 合并成一处
+        // 不在应用包里 → label 用最后一级目录名；两条链接同父目录 → 合并成一处
         let ego = t.dir("opt/ego-skills");
         let browser = t.dir("opt/ego-skills/ego-browser");
         let writer = t.dir("opt/ego-skills/ego-writer");
-        // home 下 → label 用 ~ 缩写
+        // home 下也一样取目录名，不用 ~ 缩写
         let pack = t.dir("h/Applications/pack");
         let far = t.dir("h/Applications/pack/far-skill");
         let store = t.dir("h/.agents/skills");
@@ -1198,7 +1224,7 @@ mod tests {
                     id: pack.display().to_string(),
                     path: pack.clone(),
                     kind: SourceKind::External,
-                    label: "~/Applications/pack".to_string(),
+                    label: "pack".to_string(),
                     skills: vec![Skill {
                         name: "far-skill".into(),
                         path: far,
@@ -1208,7 +1234,7 @@ mod tests {
                     id: ego.display().to_string(),
                     path: ego.clone(),
                     kind: SourceKind::External,
-                    label: ego.display().to_string(),
+                    label: "ego-skills".to_string(),
                     skills: vec![
                         Skill {
                             name: "ego-browser".into(),

@@ -10,11 +10,21 @@ const NATIVE_CACHE: &str = r#"{"client_version":"0.154.0","models":[{"slug":"gpt
 struct World {
     settings: GatewaySettings,
     service_calls: Vec<String>,
+    /// 每次 restart 传进来的 label，用来确认我们只重启自己那个服务
+    restart_labels: Vec<String>,
+    /// 非空时 restart 失败，内容就是 launchctl 的原话
+    restart_error: Option<String>,
     installed: Option<service::Spec>,
     old_service_installed: bool,
     healthy: bool,
     key: Option<String>,
     old_key: Option<String>,
+    /// 假进程表：结束进程的测试不真杀进程
+    processes: Vec<process::ProcessInfo>,
+    /// 实际被发过 SIGTERM 的 pid
+    terminated: Vec<u32>,
+    /// 非空时发信号失败，内容就是系统的原话
+    terminate_error: Option<String>,
     codex_started_at: Option<u64>,
     codex_version: String,
     now: u64,
@@ -132,9 +142,14 @@ fn fixture() -> Fixture {
         }),
         service_restart: Box::new({
             let w = w.clone();
-            move |_| {
-                w.lock().unwrap().service_calls.push("restart".into());
-                Ok(())
+            move |label| {
+                let mut w = w.lock().unwrap();
+                w.service_calls.push("restart".into());
+                w.restart_labels.push(label.to_owned());
+                match w.restart_error.clone() {
+                    Some(message) => Err(std::io::Error::other(message)),
+                    None => Ok(()),
+                }
             }
         }),
         router_healthy: Box::new({
@@ -181,6 +196,23 @@ fn fixture() -> Fixture {
         install_binary: Box::new({
             let w = w.clone();
             move |_| Ok(w.lock().unwrap().binary_changed)
+        }),
+        list_processes: Box::new({
+            let w = w.clone();
+            move || Ok(w.lock().unwrap().processes.clone())
+        }),
+        terminate: Box::new({
+            let w = w.clone();
+            move |pid| {
+                let mut w = w.lock().unwrap();
+                match w.terminate_error.clone() {
+                    Some(message) => Err(std::io::Error::other(message)),
+                    None => {
+                        w.terminated.push(pid);
+                        Ok(())
+                    }
+                }
+            }
         }),
         codex_started_at: Box::new({
             let w = w.clone();
@@ -635,6 +667,89 @@ fn ac28_changed_binary_restarts_the_service() {
         .unwrap()
         .service_calls
         .contains(&"restart".to_owned()));
+}
+
+/// R6：`重启路由` 只 kickstart 我们自己装的那个 launchd 服务，不碰 Codex 设置；
+/// 失败时把 launchctl 的原话原样带出去（代码 router_down），不改写成「操作没成功」这类空话
+#[test]
+fn restart_router_kickstarts_our_service_and_relays_launchctl_errors() {
+    let f = fixture();
+    f.app.restart_router().unwrap();
+    assert_eq!(f.world.lock().unwrap().restart_labels, [SERVICE_LABEL]);
+    assert_eq!(f.read_config(), ORIGINAL, "重启不写 Codex 设置");
+
+    let raw = "launchctl kickstart -k gui/501/com.zhengjiaqiao.symsync.gateway failed with exit code 3: Could not find service";
+    f.world.lock().unwrap().restart_error = Some(raw.to_owned());
+    let err = f.app.restart_router().unwrap_err();
+    assert_eq!(err.code, "router_down");
+    assert_eq!(err.message, raw);
+}
+
+fn fake_processes() -> Vec<process::ProcessInfo> {
+    [
+        (7503u32, "codex app-server"),
+        // 桌面应用拉起的那个：子命令前面还有选项
+        (
+            8225,
+            "/Applications/ChatGPT.app/Contents/Resources/codex -c features.code_mode_host=true app-server --analytics-default-enabled",
+        ),
+        (
+            8224,
+            "/Users/me/.codex/packages/standalone/releases/0.154.0-aarch64-apple-darwin/bin/codex-code-mode-host",
+        ),
+        // Claude 插件的壳进程：命令行里有 codex 字样，可执行名是 node
+        (
+            9001,
+            "node /Users/me/.claude/plugins/codex/app-server-broker.mjs",
+        ),
+        // 用户自己在终端里的交互式会话
+        (9002, "codex"),
+    ]
+    .into_iter()
+    .map(|(pid, command)| process::ProcessInfo {
+        pid,
+        command: command.to_owned(),
+    })
+    .collect()
+}
+
+/// AC7：`重启 Codex` 只结束两种后台形态，不碰交互式会话和 node 壳进程；不写 Codex 设置
+#[test]
+fn restart_codex_terminates_only_the_background_forms() {
+    let f = fixture();
+    f.world.lock().unwrap().processes = fake_processes();
+    let report = f.app.restart_codex().unwrap();
+    assert_eq!(report.terminated, 3);
+    assert_eq!(report.pids, [7503, 8225, 8224]);
+    assert_eq!(f.world.lock().unwrap().terminated, [7503, 8225, 8224]);
+    assert_eq!(f.read_config(), ORIGINAL, "结束进程不写 Codex 设置");
+}
+
+/// AC7′：Codex 没在跑不算失败，报 0 个，界面据此说「下次启动就是新配置」
+#[test]
+fn restart_codex_with_nothing_running_is_not_a_failure() {
+    let f = fixture();
+    let report = f.app.restart_codex().unwrap();
+    assert_eq!(report.terminated, 0);
+    assert!(report.pids.is_empty());
+    assert!(f.world.lock().unwrap().terminated.is_empty());
+}
+
+/// 发信号失败时原样转述系统的话，不编
+#[test]
+fn restart_codex_relays_the_signal_error_verbatim() {
+    let f = fixture();
+    {
+        let mut w = f.world.lock().unwrap();
+        w.processes = fake_processes();
+        w.terminate_error = Some("kill: 7503: Operation not permitted".to_owned());
+    }
+    let err = f.app.restart_codex().unwrap_err();
+    assert_eq!(err.code, "internal");
+    assert_eq!(
+        err.message,
+        "结束进程 7503 失败: kill: 7503: Operation not permitted"
+    );
 }
 
 fn agents_manager_setup(f: &Fixture) -> String {

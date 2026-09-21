@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::process::{self, RestartReport};
 use crate::{service, takeover};
 use std::fmt;
 use std::io;
@@ -74,6 +75,10 @@ pub struct Deps {
     pub get_agents_manager_key: Get<Result<String, String>>,
     /// 把当前可执行文件复制到稳定路径；返回副本是否被更新
     pub install_binary: PathOp<io::Result<bool>>,
+    /// 当前进程表（pid + 完整命令行）
+    pub list_processes: Get<io::Result<Vec<process::ProcessInfo>>>,
+    /// 向进程发 SIGTERM
+    pub terminate: Op<u32, io::Result<()>>,
     /// Codex 桌面应用主进程的启动时间（unix 秒）；没在运行为 None
     pub codex_started_at: Get<Option<u64>>,
     pub codex_version: Get<String>,
@@ -112,6 +117,8 @@ pub struct RouterView {
     pub installed: bool,
     pub running: bool,
     pub port: u16,
+    /// 网关支持的协议："chat" 或 "responses"。界面只读展示，不给改
+    pub protocol: String,
     pub error: String,
 }
 
@@ -640,6 +647,41 @@ impl App {
         Ok(warnings)
     }
 
+    /// 重启我们自己装的 launchd 路由服务（`launchctl kickstart -k`）。
+    ///
+    /// **只重启路由，不碰 Codex**：Codex 是用户的编辑器 / CLI，我们无权重启它。
+    /// 不读写 `~/.codex/config.toml`，也不改 settings.json，所以不取 `self.lock`。
+    /// 失败时把 `launchctl` 的原话原样带出去——那是运维信息，用户要拿它去查。
+    pub fn restart_router(&self) -> Result<(), AppError> {
+        (self.deps.service_restart)(SERVICE_LABEL)
+            .map_err(|e| AppError::new("router_down", e.to_string()))
+    }
+
+    /// 结束 Codex 的后台进程（SIGTERM）：`codex app-server` 与 `codex-code-mode-host`。
+    /// 它们启动时读一次 `~/.codex/config.toml`，之后不重读，所以改完配置要让它们重起。
+    /// 下次任何工具拉起 Codex 时会带着新配置起来，这里不负责拉起。
+    ///
+    /// **不碰用户在终端里的交互式 `codex` 会话**，匹配规则见 `process::is_codex_background`。
+    /// 一个都没找到不算失败，返回 `terminated: 0`。
+    /// 不读写 `~/.codex/config.toml`，所以不取 `self.lock`
+    pub fn restart_codex(&self) -> Result<RestartReport, AppError> {
+        let processes = (self.deps.list_processes)()
+            .map_err(|e| AppError::new("internal", format!("列出进程失败: {e}")))?;
+        let mut report = RestartReport::default();
+        for target in processes
+            .iter()
+            .filter(|p| process::is_codex_background(&p.command))
+        {
+            // 失败时原样转述系统的话，不编，也不把它当成「结束成功」
+            (self.deps.terminate)(target.pid).map_err(|e| {
+                AppError::new("internal", format!("结束进程 {} 失败: {e}", target.pid))
+            })?;
+            report.pids.push(target.pid);
+        }
+        report.terminated = report.pids.len() as u32;
+        Ok(report)
+    }
+
     /// 接管 agents-manager 的现有配置：地址、模型、显示名、密钥、启用前默认模型原样带过来
     pub fn takeover(&self) -> Result<(), AppError> {
         let _guard = self
@@ -832,13 +874,14 @@ impl App {
         }
 
         view.router.port = settings.port;
+        view.router.protocol = settings.protocol().to_owned();
         view.router.installed =
             (self.deps.service_status)(SERVICE_LABEL).is_ok_and(|s| s.installed);
         if view.enabled || view.router.installed {
             match (self.deps.router_healthy)(settings.port) {
                 Ok(()) => view.router.running = true,
                 Err(e) if view.enabled => {
-                    view.router.error = format!("Codex 设置指向本机路由，但路由在端口 {} 上没有响应：{e}。此时官方模型也无法使用，可以点「恢复」。", settings.port)
+                    view.router.error = format!("Codex 设置指向本机路由，但路由在端口 {} 上没有响应：{e}。此时官方模型也无法使用，可以点「重启路由」，或者停用本功能。", settings.port)
                 }
                 Err(_) => {}
             }

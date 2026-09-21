@@ -2,6 +2,7 @@
 //! 不依赖 tauri；macOS 专属部分用 `cfg(target_os = "macos")` 门控，其余在 Linux 上可编译可测。
 pub mod app;
 pub mod keychain;
+pub mod process;
 pub mod provider;
 pub mod router;
 pub mod runtime;

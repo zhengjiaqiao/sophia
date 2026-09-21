@@ -14,7 +14,8 @@ interface GatewayState {
   };
   enabled: boolean;
   needsCodexRestart: boolean;
-  router: { installed: boolean; running: boolean; port: number; error: string };
+  /** protocol 是 "chat" 或 "responses"，界面只读展示，不给改 */
+  router: { installed: boolean; running: boolean; port: number; protocol: string; error: string };
   codex: { version: string; running: boolean; catalogVersion: string; drift: boolean };
   /** 非空：Codex 设置里有别的工具写的同名项或 provider，启用不可用 */
   conflict: string;
@@ -31,6 +32,7 @@ interface GatewayState {
 | `gateway_select_models` | `selected: { id: string; displayName: string }[]` | 已启用时同时重写目录和路由清单 |
 | `gateway_enable` | — | 先让路由常驻并确认健康，再写 Codex 设置 |
 | `gateway_restore` | — | 移除本功能写入的一切 |
+| `gateway_restart` | — | `launchctl kickstart -k` 重启本机路由服务。**只重启我们自己装的 launchd 服务，不碰 Codex**；不写 `~/.codex/config.toml`，所以不取 `config_lock`。失败时原样转述 `launchctl` 的话，代码 `router_down` |
 | `gateway_takeover` | — | 接管 agents-manager 的现有配置 |
 
 页面任何时候都不显示、不回显密钥。

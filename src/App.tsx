@@ -6,11 +6,13 @@ import type { AutoLink, McpReport, Overview } from "./types";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
-import SettingsPanel from "./SettingsPanel";
+import { SettingsPage } from "./pages/SettingsPage";
+import { PendingPage } from "./pages/PendingPage";
 import "./App.css";
 
-/// 侧栏「全部」的选中键；其余为 DomainPage.key
-const ALL_KEY = "all";
+/// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
+/// 选择操作条的片也会重复；跨域批量的事走待处理页
+const DEFAULT_KEY = "global";
 /// 文件系统事件与窗口获得焦点后的重扫去抖
 const REFRESH_DELAY = 300;
 type SidebarDomain = { key: string; label: string };
@@ -18,9 +20,10 @@ type SidebarDomain = { key: string; label: string };
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [selectedKey, setSelectedKey] = useState(ALL_KEY);
+  const [selectedKey, setSelectedKey] = useState(DEFAULT_KEY);
   const [error, setError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  /// 二级页面（§4.6）：占满整窗、不渲染侧栏。null＝主视图
+  const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
   const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("skills");
   // 「模型」标签页只在后端确认支持（当前只有 macOS）时才出现；读取失败时静默隐藏
   const [modelsSupported, setModelsSupported] = useState(false);
@@ -158,10 +161,9 @@ export default function App() {
     if (activeTab === "mcp") {
       if (
         mcpSidebarDomains.length > 0 &&
-        selectedKey !== ALL_KEY &&
         !mcpSidebarDomains.some((domain) => domain.key === selectedKey)
       ) {
-        setSelectedKey(ALL_KEY);
+        setSelectedKey(mcpSidebarDomains[0].key);
       }
       return;
     }
@@ -169,12 +171,11 @@ export default function App() {
     if (!overview) return;
     const manualProjectKeys = new Set(manualProjects.map((p) => `project:${p}`));
     if (
-      selectedKey !== ALL_KEY &&
-      selectedKey !== "global" &&
+      selectedKey !== DEFAULT_KEY &&
       !domains.some((d) => d.key === selectedKey) &&
       !manualProjectKeys.has(selectedKey)
     ) {
-      setSelectedKey(ALL_KEY);
+      setSelectedKey(DEFAULT_KEY);
     }
   }, [activeTab, overview, manualProjects, selectedKey, domains, mcpSidebarDomains]);
 
@@ -204,10 +205,25 @@ export default function App() {
     }
   };
 
-  const closeSettings = () => {
-    setSettingsOpen(false);
+  /// 从二级页面返回：重扫一次，因为设置改了 agent 的启用、待处理页改了磁盘
+  const closeSubPage = () => {
+    setSubPage(null);
     void refresh();
   };
+
+  if (subPage === "settings") {
+    return <SettingsPage onBack={closeSubPage} onError={setError} />;
+  }
+  if (subPage === "pending") {
+    return (
+      <PendingPage
+        overview={overview}
+        onBack={closeSubPage}
+        onRefresh={refresh}
+        onError={setError}
+      />
+    );
+  }
 
   return (
     <div className="app">
@@ -244,13 +260,6 @@ export default function App() {
           )}
         </nav>
         <ul>
-          <li
-            className={selectedKey === ALL_KEY ? "active" : ""}
-            title="全局与所有项目"
-            onClick={() => !busy && setSelectedKey(ALL_KEY)}
-          >
-            <span>全部</span>
-          </li>
           {!sidebarDomains.some((d) => d.key === "global") && (
             <li
               className={selectedKey === "global" ? "active" : ""}
@@ -317,7 +326,7 @@ export default function App() {
         <button disabled={busy} onClick={() => void addProject()}>
           添加项目…
         </button>
-        <button onClick={() => setSettingsOpen(true)}>设置</button>
+        <button onClick={() => setSubPage("settings")}>设置</button>
       </aside>
       <main className="content">
         {error && (
@@ -337,6 +346,7 @@ export default function App() {
             selectedKey={selectedKey}
             onRefresh={refresh}
             onError={setError}
+            onOpenPending={() => setSubPage("pending")}
           />
         ) : activeTab === "mcp" ? (
           <McpTab
@@ -371,7 +381,6 @@ export default function App() {
           </div>
         </div>
       )}
-      {settingsOpen && <SettingsPanel onClose={closeSettings} onError={setError} />}
     </div>
   );
 }

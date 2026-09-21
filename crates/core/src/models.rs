@@ -12,6 +12,8 @@ pub enum ActionKind {
     BrokenLink,
     /// 删除一条指向 `source_path` 的软链
     Unlink,
+    /// 把一个 skill 本体目录移入废纸篓
+    DeleteSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,8 +196,11 @@ pub enum CellState {
     Foreign,
     /// 目标处已有真实文件或目录
     Duplicate,
-    /// 目标整目录链接到别的本体位置
-    Unwritable,
+    /// 目标整个目录链接到别的本体位置，逐项写不进去
+    WholeLinked,
+    /// 目标目录存在但写不进去。**扫描不产出这个状态**：判定它要实际试写一次，
+    /// 每轮扫描都试写代价太大。只在上层真的写失败之后由上层构造
+    ReadOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,6 +212,10 @@ pub struct Cell {
     /// 目标目录下该 skill 的路径
     pub path: PathBuf,
     pub state: CellState,
+    /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 Linked / Foreign 有值，
+    /// 其余状态是 None——Broken 的链接解析不到，本来也没有落点。
+    /// Foreign 的提示条要靠它说出「指向哪个本体」，不带出来就只能写成含糊的「指向别处」
+    pub points_to: Option<PathBuf>,
 }
 
 /// 域页表格的一行：一个 (本体位置, skill) 在本域各目标上的状态
@@ -253,6 +262,36 @@ pub struct AutoLink {
     /// 手动清除过、不再自动链接的 skill
     #[serde(default)]
     pub excluded: BTreeSet<String>,
+}
+
+/// 一条指向某本体的链接，以及改指时该怎么写。
+/// style 在体检阶段就按 `skills::link_style` 算好：`sync::delete_source` 手里只有路径、
+/// 拿不到 `Target`，事后补算不出来——算不出来就只能一律写绝对，项目内跟着 git 走的
+/// 相对链接会被悄悄改成不可移植的绝对路径
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AffectedLink {
+    pub path: PathBuf,
+    pub style: LinkStyle,
+}
+
+/// 删一个 skill 本体之前的全部事实，够 UI 渲染确认弹窗做决定。
+/// 由 `skills::plan_delete_source` 产出，交给 `sync::delete_source` 执行
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSourcePlan {
+    /// 要删的本体目录
+    pub path: PathBuf,
+    /// 目录里的条目总数（递归，不含目录自身）
+    pub entries: usize,
+    /// 目录里普通文件的字节数之和（软链不跟随）
+    pub bytes: u64,
+    /// 各目标目录里指向它（或它内部）的软链，连同改指时要写的形式
+    pub affected: Vec<AffectedLink>,
+    /// 所在 git 仓库的根；None 表示不在仓库里。非 None 时一律不代删
+    pub in_git: Option<PathBuf>,
+    /// 别处同名的另一个本体；删完把 `affected` 改指到它。None 表示没有别处可指
+    pub relink_to: Option<PathBuf>,
 }
 
 /// 一次扫描的完整结果
@@ -314,10 +353,78 @@ mod tests {
             serde_json::to_value(&cell).unwrap(),
             json!({"sourceId": "/a", "skill": "x", "targetId": "claude-code"})
         );
+        // 前端 `src/types.ts` 的 Cell 接口要有 pointsTo
+        assert_eq!(
+            serde_json::to_value(Cell {
+                source_id: "/a".into(),
+                skill: "x".into(),
+                target_id: "claude-code".into(),
+                path: PathBuf::from("/h/.claude/skills/x"),
+                state: CellState::Foreign,
+                points_to: Some(PathBuf::from("/b/skills/x")),
+            })
+            .unwrap(),
+            json!({
+                "sourceId": "/a",
+                "skill": "x",
+                "targetId": "claude-code",
+                "path": "/h/.claude/skills/x",
+                "state": "foreign",
+                "pointsTo": "/b/skills/x"
+            })
+        );
         assert_eq!(serde_json::to_value(CellState::Own).unwrap(), json!("own"));
         assert_eq!(
             serde_json::to_value(ActionKind::Unlink).unwrap(),
             json!("unlink")
+        );
+    }
+
+    /// 前端 `src/types.ts` 按这些字面量写，改名必须同步过去
+    #[test]
+    fn whole_linked_read_only_and_delete_plan_serialize_as_camel_case() {
+        assert_eq!(
+            serde_json::to_value(CellState::WholeLinked).unwrap(),
+            json!("wholeLinked")
+        );
+        assert_eq!(
+            serde_json::to_value(CellState::ReadOnly).unwrap(),
+            json!("readOnly")
+        );
+        assert_eq!(
+            serde_json::to_value(ActionKind::DeleteSource).unwrap(),
+            json!("deleteSource")
+        );
+        let plan = DeleteSourcePlan {
+            path: PathBuf::from("/a/skills/x"),
+            entries: 3,
+            bytes: 17,
+            affected: vec![
+                AffectedLink {
+                    path: PathBuf::from("/h/.claude/skills/x"),
+                    style: LinkStyle::Absolute,
+                },
+                AffectedLink {
+                    path: PathBuf::from("/p/.claude/skills/x"),
+                    style: LinkStyle::Relative,
+                },
+            ],
+            in_git: None,
+            relink_to: Some(PathBuf::from("/b/skills/x")),
+        };
+        assert_eq!(
+            serde_json::to_value(&plan).unwrap(),
+            json!({
+                "path": "/a/skills/x",
+                "entries": 3,
+                "bytes": 17,
+                "affected": [
+                    {"path": "/h/.claude/skills/x", "style": "absolute"},
+                    {"path": "/p/.claude/skills/x", "style": "relative"}
+                ],
+                "inGit": null,
+                "relinkTo": "/b/skills/x"
+            })
         );
     }
 
