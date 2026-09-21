@@ -2,6 +2,7 @@
 /// 渲染方式见 ui-render.ts（node:test + typescript 转 JSX + react-dom/server）。
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { render } from "./ui-render.ts";
 
 const noop = () => {};
@@ -482,4 +483,50 @@ test("Button inverse：反色表示「现在开着」，模型页与托盘共用
   const { Button } = await import("../src/ui/Button.tsx");
   const html = render(Button, { variant: "inverse", children: "已启用", onClick: () => {} });
   assert.match(html, /ss-btn--inverse/);
+});
+
+// ===== 待处理栏贴底（DESIGN「Layout」）=====
+//
+// 这条不是渲染断言而是样式断言：栏贴不贴底全由 App.css 三条规则决定，组件层看不见。
+// 在 WebKit（Tauri 在 macOS 用的就是它）里量过两件事，是这三条规则的由来：
+// ① sticky 的落点按滚动容器的**内容盒**算——.content 的 padding-bottom 是多少，
+//    栏就离窗口底边多少（量到 12px 缝，滚过去的内容正好从缝里漏出来）；
+// ② 页面不滚动时 sticky 不产生任何位移，栏会停在内容末尾，得靠弹性列的 auto 上边距顶到底。
+// 之前修过一次没修对，改的是滚动高度（min-height + 负下边距），落点一点没动，所以钉在这里。
+
+const appCss = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+
+/// 取一条规则的声明块；找不到就让断言失败，别静默放过
+function ruleOf(selector: string): string {
+  const match = appCss.match(
+    new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+  );
+  assert.ok(match, `App.css 里找不到规则 ${selector}`);
+  return match[1];
+}
+
+test("待处理栏贴底：滚动容器不留下内边距，否则 sticky 的落点被顶高，内容从缝里漏出来", () => {
+  const content = ruleOf(".content");
+  assert.match(content, /overflow:\s*auto/);
+  const padding = content.match(/\bpadding:\s*([^;]+);/);
+  assert.ok(padding, ".content 要显式写 padding");
+  const sides = padding[1].trim().split(/\s+(?![^(]*\))/);
+  assert.equal(sides.length, 3, ".content 的 padding 写成「上 左右 下」三段，好看出下边是 0");
+  assert.equal(sides[2], "0", ".content 的下内边距必须是 0");
+  // 旧的抵消手法不能再回来：它改的是滚动高度，改不动 sticky 的落点
+  const tab = ruleOf(".skills-tab");
+  assert.doesNotMatch(tab, /margin-bottom/);
+});
+
+test("待处理栏贴底：整页铺满 + 弹性列 auto 上边距，页面不滚动时也贴得住底边", () => {
+  const tab = ruleOf(".skills-tab");
+  assert.match(tab, /display:\s*flex/);
+  assert.match(tab, /flex-direction:\s*column/);
+  assert.match(tab, /min-height:\s*100%/);
+
+  const bar = ruleOf(".pending-bar");
+  assert.match(bar, /position:\s*sticky/);
+  assert.match(bar, /bottom:\s*0/);
+  // 上边距 auto 把栏顶到弹性列底部；左右仍是负页边，铺满内容区
+  assert.match(bar, /margin:\s*auto\s+calc\(-1 \* var\(--space-xxl\)\)\s+0/);
 });
