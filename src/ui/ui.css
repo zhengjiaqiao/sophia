@@ -463,8 +463,11 @@
   align-items: center;
   gap: var(--space-md);
   box-sizing: border-box;
-  height: 56px;
+  /* 红绿灯那 28px 留空（tokens.css --titlestrip），和主视图顶栏同一条规矩。
+     padding-top 必须写在 padding 简写之后，否则被它归零 */
+  height: calc(var(--titlestrip) + var(--topbar));
   padding: 0 var(--space-xxl);
+  padding-top: var(--titlestrip);
   border-bottom: 1px solid var(--hairline);
   flex-shrink: 0;
 }

@@ -41,15 +41,6 @@
   font-size: var(--size-micro);
 }
 
-.models-page__intro {
-  margin: 0;
-  max-width: 560px;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-}
-
 /* ===== 一个工具一块 =====
    块与块之间隔 48 并压一条 ink：这是页面里的大区块（DESIGN「Layout」）。
    今天只有一块，看不见这条线，但版面不假设只有一块。 */
@@ -59,13 +50,21 @@
   list-style: none;
 }
 
+/* 一个 agent 一张卡（DESIGN「模型页」）：hairline 描边、零圆角，卡片之间 16。
+   第一版是「区域标题 + 介绍 + 分隔线 + 说明段」的文档式排版，用户反馈"很乱" */
 .models-tool {
-  margin-top: var(--space-huge);
+  box-sizing: border-box;
+  padding: var(--space-md) var(--space-xl);
+  border: 1px solid var(--hairline);
 }
 
 .models-tool + .models-tool {
-  padding-top: var(--space-huge);
-  border-top: 1px solid var(--ink);
+  margin-top: var(--space-md);
+}
+
+/* 卡片第二行：生效的模型，与第一行之间 12 */
+.models-tool__models {
+  margin-top: var(--space-sm);
 }
 
 /* 一行一个 agent：名字 | 生效的模型（弹性占满中间）| 动作（DESIGN「模型页」） */
@@ -73,10 +72,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-md);
-}
-.models-tool__models {
-  flex: 1;
-  min-width: 0;
 }
 
 .models-tool__mark {
@@ -409,18 +404,3 @@
 }
 
 /* ===== 限制说明：这个工具的事实，常驻、不随操作消失（R8） ===== */
-/* 与网关区之间 48：块里的大段落之间（DESIGN「Layout」） */
-.models-tool__limits {
-  max-width: 560px;
-  margin-top: var(--space-huge);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--hairline);
-}
-
-.models-tool__limits-text {
-  margin: var(--space-xs) 0 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-  line-height: var(--leading-caption);
-}

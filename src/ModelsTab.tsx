@@ -143,8 +143,6 @@ export function ToolIntro({
         </span>
         <h2 className="models-tool__name">{tool.name}</h2>
 
-        {models ? <div className="models-tool__models">{models}</div> : null}
-
         <Busy busy={busy} className="models-tool__actions">
           {state.enabled ? (
             // 已启用＝反色 pill，点一下停用（DESIGN components.button-inverse）
@@ -179,7 +177,10 @@ export function ToolIntro({
         </Busy>
       </div>
 
-      {/* 状态句 + 等宽事实 + 网关摘要合成一行：一个 agent 只占一行加一行说明（DESIGN「模型页」） */}
+      {/* 卡片第二行：生效的模型（DESIGN「模型页」） */}
+      {models ? <div className="models-tool__models">{models}</div> : null}
+
+      {/* 卡片第三行：状态 + 等宽事实合成一句 */}
       <p className="models-tool__line">
         <span className="models-tool__sentence">{statusSentence(state, selectedCount, tool)}</span>
         <span className="models-tool__facts">
@@ -762,13 +763,6 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
       ) : null}
 
       <div className="models-page__body">
-        <div className="models-page__head">
-          <span className="models-page__label">第三方模型</span>
-          <p className="models-page__intro">
-            接上自建或第三方网关，把它们的模型放进下面这些工具自己的模型列表。
-          </p>
-        </div>
-
         {/* 一个工具一块。今天 MODELS_TOOLS 里只有一个，但版面不假设只有一个：
             后端那侧现在也只支持 Codex，所以每一块共用同一份 state；等后端按工具
             分开，改的是这里传什么 state，块里的东西一个都不用动 */}
@@ -859,14 +853,6 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
 
               {/* 主页面上只剩「生效的模型」这一块：网关的增删改搬去配置页了（第三轮反馈）。
                   改选仍然在这一页完成，整块可点——不许退化成「进二级页选」 */}
-
-              {/* 限制说明是**这个工具**的事实，不是某次操作的结果，常驻（R8） */}
-              <div className="models-tool__limits">
-                {/* 标签里不嵌工具名：micro-cap 是大写档，`Codex` 会变成 `CODEX`（§1.2）。
-                    这一块本来就在这个工具底下，不点名也不会误会 */}
-                <span className="models-page__label">用第三方模型要知道的</span>
-                <p className="models-tool__limits-text">{tool.limitations}</p>
-              </div>
             </li>
           ))}
         </ul>

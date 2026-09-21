@@ -72,11 +72,6 @@ button.link {
    同一排太靠上（真机反馈）。所以顶栏总高 84 = 28 空 + 56 内容。
    顶栏是自己的盒子（`.topbar`），不挂在侧栏下面：模型页不要侧栏，字标与页签
    不能跟着一起消失。 */
-:root {
-  --titlestrip: 28px; /* 红绿灯那一排，留空 */
-  --topbar: 56px; /* 字标与页签 */
-}
-
 .app {
   position: relative;
   box-sizing: border-box;

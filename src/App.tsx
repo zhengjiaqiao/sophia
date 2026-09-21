@@ -38,7 +38,7 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   // 手动添加的项目路径，用来判断侧栏哪些域可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
-  // 自动同步规则；扫描时顺带取回，域页与引入弹层都用它
+  // 自动同步规则；扫描时顺带取回，域页与导入弹层都用它
   const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
   // MCP 扫描到的域独立于 skills；例如没有 skill 的 WeiboAP agent 也能在 MCP 页选择。
   const [mcpSidebarDomains, setMcpSidebarDomains] = useState<SidebarDomain[]>([]);
@@ -122,7 +122,7 @@ export default function App() {
     collect(listen("fs-changed", () => requestRefresh()));
     collect(
       listen<McpReport>("mcp-auto-imported", ({ payload }) => {
-        // MCP 页有自己的结果框；停留在 Skills 页时也不能丢掉自动引入结果。
+        // MCP 页有自己的结果框；停留在 Skills 页时也不能丢掉自动导入结果。
         if (activeTabRef.current === "skills") setBackgroundMcpReport(payload);
       }),
     );
@@ -431,7 +431,7 @@ export default function App() {
         <div className="floating">
           <div className="report">
             <div className="report-head">
-              <strong>MCP 自动引入结果</strong>
+              <strong>MCP 自动导入结果</strong>
               <button className="link" onClick={() => setBackgroundMcpReport(null)}>
                 关闭
               </button>

@@ -5,7 +5,7 @@ import type { McpAutoImportRule, McpEntry, McpLocation, McpOverview, McpPreview 
 import { AgentIcon, Busy, Button, Chip, Confirm, Empty, SubPage } from "../ui";
 import "./McpImportPage.css";
 
-/// 引入页（组件规范 §4.6、spec R4）：占满整窗的二级页面，不是弹层。
+/// 导入页（组件规范 §4.6、spec R4）：占满整窗的二级页面，不是弹层。
 ///
 /// 结构与 skill 的导入页完全一致——左边挑来源位置，右边把那个位置里的服务**全部列出**，
 /// 底下横排选要写进哪些位置。弹层里三栏挤在 960px 内、列表要滚，改成页面就是为了铺开。
@@ -13,7 +13,7 @@ import "./McpImportPage.css";
 /// 与 skill 导入页的两处不同：
 /// ①来源可以是**别的域**的位置（跨域会在确认那一步单独说清）；
 /// ②目标里包含矩阵藏起来的那些位置（`matrixHidden`）——藏它们是为了不在每一行上
-/// 报一堆缺失，但它们仍然是引入的显式目标，入口只在这一页。
+/// 报一堆缺失，但它们仍然是导入的显式目标，入口只在这一页。
 
 export interface McpImportPageProps {
   overview: McpOverview;
@@ -22,9 +22,9 @@ export interface McpImportPageProps {
   initialTargetIds?: string[];
   autoImports: McpAutoImportRule[];
   onClose: () => void;
-  /// 规则改完要重扫：后端会在扫描里执行自动引入
+  /// 规则改完要重扫：后端会在扫描里执行自动导入
   onChange: () => Promise<void>;
-  /// 选好了要引入哪些服务：把预览交回主视图去确认、执行
+  /// 选好了要导入哪些服务：把预览交回主视图去确认、执行
   onPreview: (preview: McpPreview) => void;
   onError: (message: string) => void;
   onNotice: (text: string) => void;
@@ -103,7 +103,7 @@ export default function McpImportPage({
   const [names, setNames] = useState<string[]>([]);
   const [targetIds, setTargetIds] = useState<string[]>(defaultTargetIds);
   const [busy, setBusy] = useState(false);
-  // 待确认的「开启自动引入」
+  // 待确认的「开启自动导入」
   const [confirmAuto, setConfirmAuto] = useState(false);
 
   const source = overview.locations.find((location) => location.id === sourceId);
@@ -119,7 +119,7 @@ export default function McpImportPage({
   const canPick = (entry: McpEntry) => canSupplement(entry, targetIdSet);
   const pickable = sourceEntries.filter(canPick);
 
-  // 切换来源时清空勾选（引入是一次性动作，不预填）
+  // 切换来源时清空勾选（导入是一次性动作，不预填）
   useEffect(() => setNames([]), [sourceId]);
 
   // 规则里的目标就是规则说了算；没有规则时回到默认全选。
@@ -168,7 +168,7 @@ export default function McpImportPage({
       : `${target.label}（写进 Claude 的 Local 配置）`;
   };
 
-  /// 开关自动引入。勾上会把这个位置现有和以后新增的完整定义都写过去，影响面大，先确认
+  /// 开关自动导入。勾上会把这个位置现有和以后新增的完整定义都写过去，影响面大，先确认
   const toggleAuto = () => {
     if (source === undefined) return;
     if (!auto) {
@@ -261,13 +261,13 @@ export default function McpImportPage({
   const blocked = busy
     ? "正在处理，等这一下"
     : names.length === 0
-      ? "先在列表里勾上要引入的服务"
+      ? "先在列表里勾上要导入的服务"
       : targetIds.length === 0
         ? "先选至少一个位置"
         : null;
 
   return (
-    <SubPage title="引入 MCP" onBack={onClose} aside={`把这些服务加进「${page.label}」`}>
+    <SubPage title="导入 MCP" onBack={onClose} aside={`把这些服务加进「${page.label}」`}>
       <div className="ss-import">
         <div className="ss-import__cols">
           <Busy busy={busy} className="ss-import__sources">
@@ -383,7 +383,7 @@ export default function McpImportPage({
                   <div className="ss-import__chips">
                     {domainTargets.length === 0 ? (
                       <span className="ss-import__hint">
-                        这个位置下还没有任何 MCP 配置文件，引入第一个服务时会建出来
+                        这个位置下还没有任何 MCP 配置文件，导入第一个服务时会建出来
                       </span>
                     ) : (
                       domainTargets.map((target) => (
@@ -424,10 +424,10 @@ export default function McpImportPage({
             </Button>
             {blocked ? (
               <Button disabled disabledReason={blocked}>
-                引入
+                导入
               </Button>
             ) : (
-              <Button onClick={() => void doImport()}>引入 {names.length} 个</Button>
+              <Button onClick={() => void doImport()}>导入 {names.length} 个</Button>
             )}
           </div>
         </div>
@@ -435,14 +435,14 @@ export default function McpImportPage({
 
       {confirmAuto && source !== undefined ? (
         <Confirm
-          title="开启自动引入"
+          title="开启自动导入"
           body={`「${source.label}」里现在和以后新增的完整定义，都会写进 ${targetLabels}。已经存在的同名配置不会被覆盖。`}
           warning={
             isCrossDomain
               ? `来源在「${mcpDomainLabel(source.domain)}」、目标在「${page.label}」，是两个域。完整定义里可能带着请求头或令牌，会一并复制过去；写进已有文件前会先备份。`
               : "完整定义里可能带着请求头或令牌，会一并复制过去；写进已有文件前会先备份。"
           }
-          confirmLabel="开启自动引入"
+          confirmLabel="开启自动导入"
           onConfirm={enableAuto}
           onCancel={() => setConfirmAuto(false)}
         />

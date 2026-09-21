@@ -81,6 +81,11 @@
   /* busy 时受影响控件的不透明度（§6） */
   --busy-dim: 0.45;
 
+  /* ---- 壳：系统标题栏隐藏（Overlay），红绿灯浮在左上那 28px 里。那一排留空只当
+     拖动区，内容在下面的 56px 里。主视图顶栏与二级页面的头都要让出这 28px ---- */
+  --titlestrip: 28px;
+  --topbar: 56px;
+
   font-family: var(--font-ui);
   font-size: var(--size-body);
   /* 正文行高 1.6：整页「文字很密集」的观感，一半是行高压出来的 */

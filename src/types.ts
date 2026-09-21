@@ -80,7 +80,7 @@ export interface Overview {
   sources: Source[];
 }
 
-/// 一个格：本体位置 id + skill + 目标 id。目标 id 决定域；格不必已出现在表里（引入弹层用）
+/// 一个格：本体位置 id + skill + 目标 id。目标 id 决定域；格不必已出现在表里（导入弹层用）
 export interface CellRef {
   sourceId: string;
   skill: string;
@@ -186,7 +186,7 @@ export interface McpLocation {
   domain: string;
   path: string;
   selector?: string;
-  /** 发现了配置位置，但不参与普通矩阵；引入时仍可作为目标。 */
+  /** 发现了配置位置，但不参与普通矩阵；导入时仍可作为目标。 */
   matrixHidden?: boolean;
 }
 
@@ -243,7 +243,7 @@ export interface McpReport {
   entries: McpReportEntry[];
 }
 
-/** 自动引入 MCP 的来源/目标位置引用；位置消失后仍保留足够信息以撤销规则。 */
+/** 自动导入 MCP 的来源/目标位置引用；位置消失后仍保留足够信息以撤销规则。 */
 export interface McpLocationRef {
   id: string;
   harnessId: string;
@@ -252,7 +252,7 @@ export interface McpLocationRef {
   selector?: string;
 }
 
-/** 一条来源位置到同一域目标位置的 MCP 自动引入规则。 */
+/** 一条来源位置到同一域目标位置的 MCP 自动导入规则。 */
 export interface McpAutoImportRule {
   source: McpLocationRef;
   targetDomain: string;

@@ -27,7 +27,7 @@ export function SubPage({ title, onBack, aside, children }: SubPageProps) {
 
   return (
     <div className="ss-subpage">
-      <div className="ss-subpage__bar">
+      <div className="ss-subpage__bar" data-tauri-drag-region>
         {/* 箭头出自 icons.tsx：24px 上仍画 1.4 的线，与界面里别处的图标同一笔 */}
         <button
           type="button"
