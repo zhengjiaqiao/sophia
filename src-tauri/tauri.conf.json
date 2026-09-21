@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SymSync",
+  "productName": "Sophia",
   "version": "0.1.0",
   "identifier": "com.zhengjiaqiao.symsync",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "SymSync",
+        "title": "Sophia",
         "width": 1100,
         "height": 720
       }

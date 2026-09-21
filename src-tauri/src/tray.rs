@@ -158,7 +158,7 @@ mod imp {
 
         // 面板窗口：启动时就建好、藏着，弹出时不用等前端加载
         let panel = WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("index.html".into()))
-            .title("SymSync")
+            .title("Sophia")
             .inner_size(PANEL_WIDTH, 260.0)
             .decorations(false)
             .resizable(false)
@@ -181,7 +181,7 @@ mod imp {
         });
 
         // 右键的原生菜单只做兜底：面板万一出不来，也总有办法打开和退出
-        let open = MenuItem::with_id(app, "open", "打开 SymSync", true, None::<&str>)?;
+        let open = MenuItem::with_id(app, "open", "打开 Sophia", true, None::<&str>)?;
         let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
         let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
 
@@ -190,7 +190,7 @@ mod imp {
                 "../icons/tray.png"
             ))?)
             .icon_as_template(true) // 单色模板图，系统按深浅色着色：零色彩
-            .tooltip("SymSync")
+            .tooltip("Sophia")
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
@@ -229,7 +229,7 @@ mod imp {
                 .app_handle()
                 .dialog()
                 .message("要退出，点菜单栏图标里的「退出」。模型注入由系统后台服务维持，退出应用也不受影响。")
-                .title("SymSync 还在菜单栏里")
+                .title("Sophia 还在菜单栏里")
                 .show(|_| {});
         }
         true

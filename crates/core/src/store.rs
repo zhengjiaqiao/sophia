@@ -128,7 +128,9 @@ impl Store {
         Self { dir }
     }
 
-    /// 系统应用数据目录下的 SymSync
+    /// 系统应用数据目录下的 `SymSync`。**产品改名叫 Sophia 之后这个目录名不动**：
+    /// 已经装着的那些用户的 projects.json / settings.json 和后台程序副本都在里面，
+    /// 改名等于把它们丢掉。同理不动的还有 bundle identifier、launchd 服务名和钥匙串条目
     pub fn default_dir() -> PathBuf {
         dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))

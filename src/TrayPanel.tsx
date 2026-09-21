@@ -190,7 +190,7 @@ export default function TrayPanel() {
             className="tray__item"
             onClick={() => void api.trayOpenMain(null, null)}
           >
-            打开 SymSync
+            打开 Sophia
           </button>
         </li>
         <li>

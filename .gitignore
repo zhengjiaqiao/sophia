@@ -10,6 +10,8 @@ build/
 
 # Rust / Tauri / Node
 target/
-node_modules/
+# 不带斜杠：它也可能是一条指向别处的软链（在临时工作树里跑 npm 时会这么接），
+# `node_modules/` 只挡目录，挡不住软链，`git add -A` 就会把那条链提交进来
+node_modules
 dist/
 .worktrees/

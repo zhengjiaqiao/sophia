@@ -77,7 +77,7 @@ test("routerUnavailable 只在已启用且路由没跑时为真", () => {
 test("takeoverOfferText 带上网关地址与已选模型数", () => {
   assert.equal(
     takeoverOfferText({ baseUrl: "https://gw.example.com", selectedCount: 3 }),
-    "本机当前由 agents-manager 启用（网关 https://gw.example.com，已选 3 个模型），可以由 SymSync 接管",
+    "本机当前由 agents-manager 启用（网关 https://gw.example.com，已选 3 个模型），可以由 Sophia 接管",
   );
 });
 
