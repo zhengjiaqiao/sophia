@@ -290,77 +290,81 @@ export default function App() {
           </button>
         </nav>
       </header>
-      {/* 模型页是全局的，没有域也没有项目，侧栏对它没有意义（MODELS_TAB_FULL_BLEED） */}
-      <aside className="sidebar" hidden={showModels}>
-        <ul>
-          {!sidebarDomains.some((d) => d.key === "global") && (
-            <li
-              className={selectedKey === "global" ? "active" : ""}
-              title="全局"
-              onClick={() => !busy && setSelectedKey("global")}
-            >
-              <span>全局</span>
-            </li>
-          )}
-          {sidebarDomains.map((d) => {
-            const manualPath = manualByKey.get(d.key);
-            return (
+      {/* 模型页是全局的，没有域也没有项目，侧栏对它没有意义（MODELS_TAB_FULL_BLEED）。
+          **必须整个不渲染**：`.sidebar` 有 `display: flex`，它压得过 `hidden` 属性的
+          UA 样式，写成 `hidden={…}` 侧栏照样显示——上一版就是这么漏出去的 */}
+      {!showModels && (
+        <aside className="sidebar">
+          <ul>
+            {!sidebarDomains.some((d) => d.key === "global") && (
               <li
-                key={d.key}
-                className={d.key === selectedKey ? "active" : ""}
-                title={d.key}
-                onClick={() => !busy && setSelectedKey(d.key)}
+                className={selectedKey === "global" ? "active" : ""}
+                title="全局"
+                onClick={() => !busy && setSelectedKey("global")}
               >
-                <span>{d.label}</span>
-                {manualPath !== undefined && (
-                  <button
-                    className="link remove"
-                    title="移除项目"
-                    disabled={busy}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void removeProject(manualPath);
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
+                <span>全局</span>
               </li>
-            );
-          })}
-          {activeTab === "skills" &&
-            manualProjects
-              .filter((path) => !domains.some((d) => d.key === `project:${path}`))
-              .map((path) => {
-                const key = `project:${path}`;
-                return (
-                  <li
-                    key={key}
-                    className={key === selectedKey ? "active" : ""}
-                    title={key}
-                    onClick={() => !busy && setSelectedKey(key)}
-                  >
-                    <span>{path.split(/[\\/]/).filter(Boolean).pop() ?? path}</span>
+            )}
+            {sidebarDomains.map((d) => {
+              const manualPath = manualByKey.get(d.key);
+              return (
+                <li
+                  key={d.key}
+                  className={d.key === selectedKey ? "active" : ""}
+                  title={d.key}
+                  onClick={() => !busy && setSelectedKey(d.key)}
+                >
+                  <span>{d.label}</span>
+                  {manualPath !== undefined && (
                     <button
                       className="link remove"
                       title="移除项目"
                       disabled={busy}
                       onClick={(e) => {
                         e.stopPropagation();
-                        void removeProject(path);
+                        void removeProject(manualPath);
                       }}
                     >
                       ×
                     </button>
-                  </li>
-                );
-              })}
-        </ul>
-        <button disabled={busy} onClick={() => void addProject()}>
-          添加项目…
-        </button>
-        <button onClick={() => setSubPage("settings")}>设置</button>
-      </aside>
+                  )}
+                </li>
+              );
+            })}
+            {activeTab === "skills" &&
+              manualProjects
+                .filter((path) => !domains.some((d) => d.key === `project:${path}`))
+                .map((path) => {
+                  const key = `project:${path}`;
+                  return (
+                    <li
+                      key={key}
+                      className={key === selectedKey ? "active" : ""}
+                      title={key}
+                      onClick={() => !busy && setSelectedKey(key)}
+                    >
+                      <span>{path.split(/[\\/]/).filter(Boolean).pop() ?? path}</span>
+                      <button
+                        className="link remove"
+                        title="移除项目"
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void removeProject(path);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  );
+                })}
+          </ul>
+          <button disabled={busy} onClick={() => void addProject()}>
+            添加项目…
+          </button>
+          <button onClick={() => setSubPage("settings")}>设置</button>
+        </aside>
+      )}
       <main className={showModels ? "content content--bleed" : "content"}>
         {error && (
           <div className="error">
