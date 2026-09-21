@@ -1,3 +1,6 @@
+//! 内部版（`weiboap` feature）专用：关掉 feature 时整份文件不编译。
+#![cfg(feature = "weiboap")]
+
 use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 use std::fs;

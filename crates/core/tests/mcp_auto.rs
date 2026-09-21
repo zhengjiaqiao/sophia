@@ -1,3 +1,4 @@
+#[cfg(feature = "weiboap")]
 use rusqlite::Connection;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -161,6 +162,7 @@ fn auto_imports_execute_once_then_pick_up_later_source_additions() {
     assert_eq!(written["mcpServers"]["search"]["command"], "search");
 }
 
+#[cfg(feature = "weiboap")]
 fn weibo_location(id: &str, database: &Path, agent_root: &Path) -> McpLocation {
     let root = fs::canonicalize(agent_root).unwrap();
     McpLocation {
@@ -174,6 +176,7 @@ fn weibo_location(id: &str, database: &Path, agent_root: &Path) -> McpLocation {
     }
 }
 
+#[cfg(feature = "weiboap")]
 #[test]
 fn weibo_agents_in_the_same_database_remain_distinct_rule_locations() {
     let temp = tempdir().unwrap();

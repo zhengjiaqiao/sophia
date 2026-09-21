@@ -12,6 +12,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "weiboap")]
 mod weiboap;
 
 const SUPPORTED: [&str; 3] = ["claude-code", "codex", "cursor"];
@@ -280,6 +281,7 @@ pub(super) fn has_duplicate_header_names(headers: &BTreeMap<String, String>) -> 
 pub(super) enum State {
     Missing,
     Present(Snapshot),
+    #[cfg(feature = "weiboap")]
     Weibo(weiboap::Snapshot),
     Bad(String),
 }
@@ -396,11 +398,17 @@ pub fn discover_locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]
             }
         }
     }
-    let (weibo_locations, mut issues) = weiboap::discover(env, harnesses);
-    out.extend(weibo_locations);
+    #[cfg(feature = "weiboap")]
+    let issues = {
+        let (weibo_locations, issues) = weiboap::discover(env, harnesses);
+        out.extend(weibo_locations);
+        issues
+    };
+    #[cfg(not(feature = "weiboap"))]
+    let issues = Vec::new();
     McpDiscovery {
         locations: out,
-        issues: std::mem::take(&mut issues),
+        issues,
     }
 }
 
@@ -634,6 +642,7 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
         fail(report, "跨域同步未获允许");
         return;
     }
+    #[cfg(feature = "weiboap")]
     if matches!(group[0].target, State::Weibo(_)) {
         execute_weibo_group(group, report);
         return;
@@ -653,6 +662,7 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
             fail(report, "目标配置不可写");
             return;
         }
+        #[cfg(feature = "weiboap")]
         State::Weibo(_) => unreachable!("WeiboAP groups are handled above"),
     };
     let bytes = match merge_group(old, &group) {
@@ -672,6 +682,7 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
         },
         State::Missing => None,
         State::Bad(_) => unreachable!(),
+        #[cfg(feature = "weiboap")]
         State::Weibo(_) => unreachable!("WeiboAP groups are handled above"),
     };
     if atomic_write(path, &bytes, &group[0].target).is_err() {
@@ -695,6 +706,7 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
     }
 }
 
+#[cfg(feature = "weiboap")]
 fn execute_weibo_group(group: Vec<Pending>, report: &mut McpReport) {
     if group.iter().any(|pending| {
         !same_location(&pending.action.source_path, &pending.source)
@@ -753,6 +765,7 @@ fn entry(
 }
 
 fn parse(location: &McpLocation) -> Parsed {
+    #[cfg(feature = "weiboap")]
     if location.harness_id == "weiboap" {
         return match weiboap::parse(location) {
             Ok(value) => Parsed {
@@ -781,18 +794,30 @@ fn parse(location: &McpLocation) -> Parsed {
         },
         State::Present(snap) if toml(&location.path) => parse_toml(&snap.bytes, state),
         State::Present(snap) => parse_json(&snap.bytes, state, location.selector.as_deref()),
+        #[cfg(feature = "weiboap")]
         State::Weibo(_) => unreachable!("WeiboAP is handled before generic parsing"),
     }
 }
 
 impl State {
     fn readable(&self) -> bool {
-        matches!(self, Self::Present(_) | Self::Weibo(_))
+        matches!(self, Self::Present(_)) || self.is_weibo()
+    }
+
+    #[cfg(feature = "weiboap")]
+    fn is_weibo(&self) -> bool {
+        matches!(self, Self::Weibo(_))
+    }
+
+    #[cfg(not(feature = "weiboap"))]
+    fn is_weibo(&self) -> bool {
+        false
     }
 }
 
 fn target_key(location: &McpLocation, state: &State) -> String {
     match state {
+        #[cfg(feature = "weiboap")]
         State::Weibo(snapshot) => weiboap::entry_key(snapshot),
         _ => format!(
             "file:{}:{}",
@@ -804,6 +829,7 @@ fn target_key(location: &McpLocation, state: &State) -> String {
 
 fn group_key(pending: &Pending) -> String {
     match &pending.target {
+        #[cfg(feature = "weiboap")]
         State::Weibo(snapshot) => weiboap::database_key(snapshot),
         // 同一 .claude.json 的 User/Local（或多个 Local）必须在一次备份、一次
         // 原子写中完成；selector 只用于合并时定位对应的嵌套容器。
@@ -813,6 +839,7 @@ fn group_key(pending: &Pending) -> String {
 
 fn same_location(path: &Path, expected: &State) -> bool {
     match expected {
+        #[cfg(feature = "weiboap")]
         State::Weibo(snapshot) => weiboap::same(path, snapshot),
         _ => same(path, expected),
     }
@@ -1657,6 +1684,7 @@ fn atomic_write(path: &Path, bytes: &[u8], expected: &State) -> io::Result<()> {
             atomicfile::atomic_write(path, bytes, &FileState::Present(snap.clone()))
         }
         State::Bad(_) => Err(io::Error::new(io::ErrorKind::PermissionDenied, "bad")),
+        #[cfg(feature = "weiboap")]
         State::Weibo(_) => Err(io::Error::new(io::ErrorKind::PermissionDenied, "weibo")),
     }
 }
