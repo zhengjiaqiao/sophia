@@ -34,10 +34,13 @@ type UpdateState =
 
 export interface SettingsPageProps {
   onBack: () => void;
+  /// 应用启动时查到的新版；`undefined` 表示壳没查过（比如测试里），页面自己再查一次。
+  /// 查在启动时做而不是打开设置时做——用户不进设置也该有机会知道有新版
+  initialUpdate?: Update | null;
   onError: (message: string) => void;
 }
 
-export function SettingsPage({ onBack, onError }: SettingsPageProps) {
+export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPageProps) {
   /// null＝还没读回来，与「一个 agent 都没有」是两回事
   const [agents, setAgents] = useState<AgentOption[] | null>(null);
   const [showAbsent, setShowAbsent] = useState(false);
@@ -63,15 +66,20 @@ export function SettingsPage({ onBack, onError }: SettingsPageProps) {
 
   useEffect(() => {
     void getVersion().then(setCurrent, () => setCurrent(null));
-    // 后台查一次，不打断任何事。查不到（离线、还没配公钥、开发模式下跑）就当没新版：
-    // 没查成不是用户此刻要处理的事，说了只是噪音（§4.1「一件事只在一个地方说」）。
+    // 壳在启动时已经查过就直接用（见 App.tsx）；没查过才自己查一次。
+    // 查不到（离线、还没配公钥、开发模式下跑）就当没新版：没查成不是用户此刻要
+    // 处理的事，说了只是噪音（§4.1「一件事只在一个地方说」）。
+    if (initialUpdate !== undefined) {
+      if (initialUpdate) setUpdate({ kind: "ready", update: initialUpdate });
+      return;
+    }
     void check().then(
       (found) => {
         if (found) setUpdate({ kind: "ready", update: found });
       },
       () => {},
     );
-  }, []);
+  }, [initialUpdate]);
 
   /// 下载＋安装。用户点了才走到这里——不自动下载，流量和磁盘是他的
   const install = async (found: Update) => {

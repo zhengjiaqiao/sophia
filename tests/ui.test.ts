@@ -513,6 +513,8 @@ test("待处理栏贴底：滚动容器不留下内边距，否则 sticky 的落
   const sides = padding[1].trim().split(/\s+(?![^(]*\))/);
   assert.equal(sides.length, 3, ".content 的 padding 写成「上 左右 下」三段，好看出下边是 0");
   assert.equal(sides[2], "0", ".content 的下内边距必须是 0");
+  // 顶部同理：吸顶的选择操作条落点也按内容盒算，上内边距多少就露多少缝
+  assert.equal(sides[0], "0", ".content 的上内边距必须是 0，留白交给 .skills-tab 自己给");
   // 旧的抵消手法不能再回来：它改的是滚动高度，改不动 sticky 的落点
   const tab = ruleOf(".skills-tab");
   assert.doesNotMatch(tab, /margin-bottom/);
@@ -529,4 +531,18 @@ test("待处理栏贴底：整页铺满 + 弹性列 auto 上边距，页面不�
   assert.match(bar, /bottom:\s*0/);
   // 上边距 auto 把栏顶到弹性列底部；左右仍是负页边，铺满内容区
   assert.match(bar, /margin:\s*auto\s+calc\(-1 \* var\(--space-xxl\)\)\s+0/);
+});
+
+test("TagSquare：零圆角方标签，弱的一档换 hairline 描边", async () => {
+  const { TagSquare } = await import("../src/ui/TagSquare.tsx");
+  assert.match(render(TagSquare, { children: "外部" }), /class="ss-tag"/);
+  assert.match(render(TagSquare, { children: "已导入", weak: true }), /ss-tag--weak/);
+});
+
+test("Plain：大写档里嵌专名的正式出口，关掉整段的 text-transform", async () => {
+  const { Plain } = await import("../src/ui/Plain.tsx");
+  assert.match(render(Plain, { children: "Codex" }), /class="ss-plain"/);
+  // 规范：任何按钮或标签里出现 agent 名，都得包这一层——否则 button-cap 会把它渲染成 CODEX
+  const css = await import("node:fs").then((fs) => fs.readFileSync("src/ui/ui.css", "utf8"));
+  assert.match(css, /\.ss-plain\s*\{[^}]*text-transform:\s*none/);
 });

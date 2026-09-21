@@ -7,6 +7,7 @@ import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
+import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { PendingPage } from "./pages/PendingPage";
 import { IconSettings } from "./ui";
 import "./App.css";
@@ -25,6 +26,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   /// 二级页面（§4.6）：占满整窗、不渲染侧栏。null＝主视图
   const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
+  /// 启动时后台查一次新版。**必须静默失败**：`plugins.updater.pubkey` 没填之前
+  /// check() 一定报错，进横幅的话每次开应用先看见一条错。null＝查过没有 / 没查成
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   /// 模型路由比 skill、MCP 都高频，所以它排第一个 tab，也是启动默认页。
   /// 后端说不支持（非 macOS）时这一页根本不存在，届时退回 Skills，见 applyModelsSupported
   const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("models");
@@ -99,6 +103,13 @@ export default function App() {
       timerRef.current = null;
       void refreshRef.current();
     }, REFRESH_DELAY);
+  }, []);
+
+  useEffect(() => {
+    void checkUpdate().then(
+      (found) => setPendingUpdate(found ?? null),
+      () => setPendingUpdate(null),
+    );
   }, []);
 
   useEffect(() => {
@@ -239,7 +250,7 @@ export default function App() {
   };
 
   if (subPage === "settings") {
-    return <SettingsPage onBack={closeSubPage} onError={setError} />;
+    return <SettingsPage onBack={closeSubPage} onError={setError} initialUpdate={pendingUpdate} />;
   }
   if (subPage === "pending") {
     return (

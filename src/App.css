@@ -248,14 +248,15 @@ button.link {
 }
 
 /* 页边 32＝SpaceX 的 grid gutter（DESIGN「Layout」）。
-   **下内边距必须是 0**：sticky 的落点是按滚动容器的**内容盒**算的，滚动容器有多少
-   下内边距，贴底的待处理栏就被顶高多少——量过，padding-bottom 12px 时栏离窗口底边
-   正好 12px，滚过去的内容从这道缝里漏出来。底部留白归页面自己给，不由滚动容器给。 */
+   **上下内边距都必须是 0**：sticky 的落点是按滚动容器的**内容盒**算的，滚动容器有多少
+   内边距，贴边的栏就被顶开多少——量过，padding-bottom 12px 时待处理栏离窗口底边正好
+   12px；padding-top 16px 时吸顶的选择操作条离顶正好 16px，滚过去的内容从这道缝里漏
+   出来。上下留白归页面自己给，不由滚动容器给。 */
 .content {
   flex: 1;
   min-width: 0;
   box-sizing: border-box;
-  padding: var(--space-md) var(--space-xxl) 0;
+  padding: 0 var(--space-xxl) 0;
   overflow: auto;
 }
 
@@ -275,6 +276,8 @@ button.link {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+  /* 上留白由页面自己给（.content 的内边距必须为 0，见上） */
+  padding-top: var(--space-md);
 }
 
 /* 待处理栏：主视图底部常驻一条，一次一条（§4.3）。
