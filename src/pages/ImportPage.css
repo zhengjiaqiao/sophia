@@ -29,11 +29,13 @@
 .ss-import__caption {
   display: flex;
   align-items: baseline;
-  padding: 14px 20px 7px 20px;
+  padding: var(--space-xl) var(--space-xl) var(--space-xs);
   flex-shrink: 0;
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
+  font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
   color: var(--ink-mute);
 }
@@ -52,8 +54,8 @@
 .ss-import__source {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 20px;
+  gap: var(--space-xs);
+  padding: 0 var(--space-xl);
 }
 
 .ss-import__source.is-active {
@@ -67,7 +69,7 @@
   gap: 8px;
   flex-grow: 1;
   min-width: 0;
-  padding: 8px 0;
+  padding: var(--space-xs) 0;
   border: 0;
   border-radius: 0;
   background: none;
@@ -93,14 +95,14 @@
 /* 外部来源的名字就是一条路径，路径要对齐、要分得清 l 与 1（§1.2） */
 .ss-import__srcname.is-path {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
 }
 
 .ss-import__count {
   margin-left: auto;
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
@@ -109,7 +111,7 @@
 }
 
 .ss-import__add {
-  padding: 16px 20px;
+  padding: var(--space-xl);
   flex-shrink: 0;
 }
 
@@ -126,10 +128,10 @@
 .ss-import__auto {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-sm);
   width: 100%;
   box-sizing: border-box;
-  padding: 12px 24px;
+  padding: var(--space-sm) var(--space-xxl);
   border: 0;
   border-bottom: 1px solid var(--surface);
   border-radius: 0;
@@ -150,33 +152,35 @@
 .ss-import__listhead {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  padding: 13px 24px 9px 24px;
+  gap: var(--space-sm);
+  padding: var(--space-xl) var(--space-xxl) var(--space-sm);
   flex-shrink: 0;
 }
 
 .ss-import__headline {
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
+  font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
 }
 
 .ss-import__note {
   margin-left: auto;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-faint);
 }
 
 /* 列表铺开成几竖列，全部列出、不截断——改成页面的意义就在这儿 */
 .ss-import__grid {
   display: flex;
-  gap: 24px;
+  gap: var(--space-xl);
   flex-grow: 1;
   min-height: 0;
   overflow: auto;
-  padding: 2px 24px 8px 24px;
+  padding: 0 var(--space-xxl) var(--space-sm);
 }
 
 .ss-import__col {
@@ -187,10 +191,10 @@
 .ss-import__row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-sm);
   width: 100%;
   box-sizing: border-box;
-  padding: 5px 0;
+  padding: var(--space-xs) 0;
   border: 0;
   border-radius: 0;
   background: none;
@@ -221,13 +225,14 @@
 .ss-import__tag {
   margin-left: auto;
   flex-shrink: 0;
-  padding: 0 5px;
+  padding: 1px 6px;
   border: 1px solid var(--ink);
   border-radius: 0;
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
   font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -267,15 +272,17 @@
 
 /* ===== agent 选择：选择片（§3.0） ===== */
 .ss-import__agents {
-  padding: 14px 24px 16px 24px;
+  padding: var(--space-xl) var(--space-xxl);
   border-top: 1px solid var(--hairline);
   flex-shrink: 0;
 }
 
 .ss-import__label {
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
+  font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
   color: var(--ink-mute);
 }
@@ -284,13 +291,13 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 9px;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
 }
 
 .ss-import__hint {
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-faint);
 }
 
@@ -302,8 +309,8 @@
 .ss-import__foot {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px 24px;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-xxl);
   border-top: 1px solid var(--ink);
   flex-shrink: 0;
 }
@@ -317,13 +324,13 @@
 
 .ss-import__path {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
 }
 
 .ss-import__actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-md);
   margin-left: auto;
   flex-shrink: 0;
 }

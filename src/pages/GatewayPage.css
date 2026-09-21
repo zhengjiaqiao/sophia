@@ -5,21 +5,23 @@
 .gateway-page {
   box-sizing: border-box;
   max-width: 560px;
-  padding: 16px 24px 24px;
+  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
 }
 
 .gateway-page__field {
   display: block;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-xl);
 }
 
 /* 区域标签是我们自己写的结构词，大写（§1.2） */
 .gateway-page__label {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-xs);
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
+  font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
   color: var(--ink-mute);
 }
@@ -27,7 +29,7 @@
 .gateway-page__input {
   box-sizing: border-box;
   width: 100%;
-  padding: 6px 10px;
+  padding: 10px 14px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-input);
   background: var(--canvas);
@@ -39,7 +41,7 @@
 /* 网关地址是路径类事实，走等宽（§1.2） */
 .gateway-page__input--mono {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
 }
 
 .gateway-page__input:focus {
@@ -50,41 +52,41 @@
 .gateway-page__actions {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-top: 16px;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
 }
 
 .gateway-page__facts {
-  margin-top: 16px;
-  padding-top: 12px;
+  margin-top: var(--space-huge);
+  padding-top: var(--space-sm);
   border-top: 1px solid var(--hairline);
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
-  line-height: 1.5;
+  line-height: var(--leading-caption);
 }
 
 /* 端口与协议是计数类事实，走等宽（§1.2） */
 .gateway-page__mono {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
   color: var(--ink);
 }
 
 .gateway-page__note {
-  margin-top: 4px;
+  margin-top: var(--space-xxs);
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-faint);
-  line-height: 1.5;
+  line-height: var(--leading-caption);
 }
 
 .gateway-page__leftover {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 12px;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
+  padding-top: var(--space-sm);
   border-top: 1px solid var(--hairline);
 }
 
@@ -92,7 +94,7 @@
   flex-grow: 1;
   min-width: 0;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
-  line-height: 1.4;
+  line-height: var(--leading-caption);
 }

@@ -24,7 +24,7 @@ table.mcp-matrix td:nth-child(1) {
 /* 传输：标准输入输出 / HTTP / 不支持。次要文字，不抢服务名 */
 table.mcp-matrix td.mcp-transport {
   width: 104px;
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
 }
 

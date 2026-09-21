@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
+import { MICRO_CAP, MONO } from "./ui/text";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { ActionButton, dim, type UnlinkTarget } from "./DomainView";
@@ -41,14 +42,6 @@ const cellsOf = (row: DomainRow): CellRef[] =>
 const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
 
 /// 区域标签档（§1.2）
-const LABEL: CSSProperties = {
-  fontFamily: "var(--font-cond)",
-  fontSize: "var(--size-label)",
-  fontWeight: 600,
-  letterSpacing: "var(--track-label)",
-  textTransform: "uppercase",
-};
-const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "var(--size-mono)" };
 
 /// 提示条的内容；一次操作只汇总成一句，新的替换旧的（§4.1）
 interface Notice {
@@ -748,7 +741,7 @@ export default function SkillsTab({
 
       {chosenCount > 0 && (
         <div className="toolbar selection">
-          <span style={LABEL}>已选 {chosenCount} 个 skill</span>
+          <span style={MICRO_CAP}>已选 {chosenCount} 个 skill</span>
           {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
           <ActionButton variant="link" onClick={() => setSelected(new Set())}>
             取消选择

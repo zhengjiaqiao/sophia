@@ -19,7 +19,7 @@ input[type="checkbox"] {
    这里**不写**字重、字距与大写——那会串到 .ss-chip 这类同样是 <button> 的组件上，
    而选择片按 §3.0 是 Barlow 15 且不大写。真正的按钮档在 .ss-btn 自己身上。 */
 button {
-  padding: 4px 14px;
+  padding: 5px 16px;
   border: 1px solid var(--ink);
   border-radius: var(--radius-pill);
   background: none;
@@ -42,12 +42,12 @@ button.link {
   border: 0;
   border-radius: 0;
   color: var(--ink-mute);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   text-decoration: underline;
 }
 
 /* ===== 外壳 =====
-   顶栏 52px + 一条分隔线，侧栏与内容区之间也是一条。
+   顶栏 56px + 一条分隔线，侧栏与内容区之间也是一条。
    wordmark 与 tab 在 App.tsx 里还是 .sidebar 的子元素（类名归 .tsx 管），
    所以这里把它们定位到顶栏上，而不是另起一个顶栏盒子。 */
 .app {
@@ -55,7 +55,7 @@ button.link {
   box-sizing: border-box;
   display: flex;
   height: 100vh;
-  padding-top: 52px;
+  padding-top: 56px;
 }
 
 .app::before {
@@ -64,7 +64,7 @@ button.link {
   top: 0;
   left: 0;
   right: 0;
-  height: 52px;
+  height: 56px;
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -74,37 +74,39 @@ button.link {
   flex-direction: column;
   width: 186px;
   flex-shrink: 0;
-  padding: 12px 0;
+  padding: var(--space-sm) 0;
   border-right: 1px solid var(--hairline);
 }
 
-/* wordmark：标题档（Condensed 20/700/1.9px/大写） */
+/* wordmark 档（Condensed 20/700/1.9px/大写） */
 .sidebar h1 {
   position: absolute;
   top: 0;
-  left: 24px;
+  left: var(--space-xxl);
   display: flex;
   align-items: center;
-  height: 52px;
+  height: 56px;
   margin: 0;
   font-family: var(--font-cond);
-  font-size: var(--size-title);
+  font-size: var(--size-wordmark);
   font-weight: 700;
   letter-spacing: var(--track-title);
+  line-height: 1;
   text-transform: uppercase;
 }
 
 /* tab 与内容区左缘对齐：wordmark 的实际宽度随字体回退浮动，不拿它当基准。
+   侧栏 186px + 内容区 32px 页边＝218。
    绝对定位后，App.tsx 内联的 margin-bottom 自然失效（top + height 已定死）。 */
 .sidebar nav {
   position: absolute;
   top: 0;
-  left: 210px;
+  left: 218px;
   align-items: center;
-  height: 52px;
+  height: 56px;
 }
 
-/* 列头档（Condensed 14/600/1.1px/大写）。内联的 gap: 4px 改不动，
+/* micro-cap 档（Condensed 12/600/0.96px/大写，行高 2.0）。内联的 gap: 4px 改不动，
    差的那段用 margin 补到画稿的 26px */
 .sidebar nav button {
   margin-right: 22px;
@@ -115,9 +117,10 @@ button.link {
   background: none;
   color: var(--ink-mute);
   font-family: var(--font-cond);
-  font-size: var(--size-head);
+  font-size: var(--size-micro);
   font-weight: 600;
-  letter-spacing: var(--track-head);
+  letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
 }
 
@@ -138,12 +141,15 @@ button.link {
   overflow: auto;
 }
 
+/* 侧栏项高 36（DESIGN「Layout」）：定高，不靠内边距凑 */
 .sidebar li {
+  box-sizing: border-box;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 7px 16px;
+  gap: var(--space-xs);
+  min-height: 36px;
+  padding: 0 var(--space-md);
   color: var(--ink-mute);
   font-size: var(--size-body);
   cursor: pointer;
@@ -171,35 +177,39 @@ button.link {
 .sidebar > button {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 16px;
+  gap: var(--space-xs);
+  padding: 0 var(--space-md);
   border: 0;
   border-radius: 0;
   background: none;
   color: var(--ink-mute);
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
+  font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-align: left;
   text-transform: uppercase;
 }
 
 .sidebar > ul + button {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
   border-top: 1px solid var(--hairline);
 }
 
 .sidebar > button:last-child {
-  padding-top: 9px;
-  padding-bottom: 12px;
+  padding-top: var(--space-xxs);
+  padding-bottom: var(--space-sm);
 }
 
+/* 页边 32＝SpaceX 的 grid gutter（DESIGN「Layout」）。
+   底部那 12px 与 .skills-tab 的负边距成对，改一处要改两处 */
 .content {
   flex: 1;
   min-width: 0;
   box-sizing: border-box;
-  padding: 12px 20px;
+  padding: var(--space-md) var(--space-xxl) var(--space-sm);
   overflow: auto;
 }
 
@@ -207,9 +217,10 @@ button.link {
    所以这一页得先把内容区铺满，否则贴底的栏最多停在内容结束的地方。
    +12px 与负边距成对：把 .content 那 12px 下内边距吃掉，不补这一段就会留一道缝；
    补了又不减回去，内容区会平白多出 12px 可滚动的空白。 */
+/* MCP 页的 section 也挂这个类：两页的待处理栏贴底靠的是同一个抵消 */
 .skills-tab {
-  min-height: calc(100% + 12px);
-  margin-bottom: -12px;
+  min-height: calc(100% + var(--space-sm));
+  margin-bottom: calc(-1 * var(--space-sm));
 }
 
 /* 待处理栏：主视图底部常驻一条，一次一条（§4.3）。
@@ -220,10 +231,10 @@ button.link {
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-sm);
   flex-wrap: wrap;
-  margin: 16px -20px 0;
-  padding: 9px 20px;
+  margin: var(--space-xl) calc(-1 * var(--space-xxl)) 0;
+  padding: 9px var(--space-xxl);
   border-top: 1px solid var(--ink);
   background: var(--canvas);
 }
@@ -232,9 +243,9 @@ button.link {
 .error {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
-  padding: 12px 16px;
+  gap: var(--space-md);
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
   background: var(--ink);
   color: var(--canvas);
 }
@@ -248,9 +259,14 @@ button.link {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-sm);
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-sm);
+}
+
+/* 筛选行是「组」的末尾，与下面的表格之间留 24（DESIGN「Layout」） */
+.toolbar.filters {
+  margin-bottom: var(--space-xl);
 }
 
 /* 选择操作条：有选中行时才出现，上下黑线＝此刻正在操作它（§3.2）；滚动时吸顶。
@@ -259,8 +275,8 @@ button.link {
   position: sticky;
   top: 0;
   z-index: 1;
-  margin: 0 -20px 12px;
-  padding: 9px 20px;
+  margin: 0 calc(-1 * var(--space-xxl)) var(--space-xl);
+  padding: 9px var(--space-xxl);
   border-top: 1px solid var(--ink);
   border-bottom: 1px solid var(--ink);
   background: var(--canvas);
@@ -268,8 +284,8 @@ button.link {
 
 .filters input {
   box-sizing: border-box;
-  width: 210px;
-  padding: 6px 10px;
+  width: 240px;
+  padding: 10px 14px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-input);
   background: var(--canvas);
@@ -284,28 +300,29 @@ button.link {
 
 .muted {
   color: var(--ink-mute);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
 }
 
 /* 筛选片一行：片本身是 <Chip> */
 .tags {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-xs);
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-xl);
 }
 
 /* ===== 域与矩阵 ===== */
 .domain-group {
-  margin-bottom: 16px;
+  margin-bottom: var(--space-huge);
 }
 
-/* 域名是内容不是结构词，所以不大写（§1.2） */
+/* 域名是内容不是结构词，所以不大写（§1.2）。
+   14 那一档已经砍掉，Condensed 走正文档，靠字重与字距和表格里的名字分开 */
 .domain-group h2 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-md);
   font-family: var(--font-cond);
-  font-size: var(--size-head);
+  font-size: var(--size-body);
   font-weight: 600;
   letter-spacing: var(--track-head);
 }
@@ -315,9 +332,12 @@ table.matrix {
   border-collapse: collapse;
 }
 
+/* 行高 40（DESIGN「Layout」）：密排的表格是「文字很密集」这个观感的主要来源——
+   skill 名、位置名、圆点之间要有空气。定高交给 height，内边距只管左右 */
 table.matrix th,
 table.matrix td {
-  padding: 6px 8px;
+  height: 40px;
+  padding: 0 var(--space-xs);
   border-bottom: 1px solid var(--hairline);
   text-align: left;
   white-space: nowrap;
@@ -326,7 +346,8 @@ table.matrix td {
 /* 表头底下那条黑线由 DomainView 逐格给（内联），这里只管对齐与留白。
    列头堆叠（图标在上、名字在下），所以贴着底边排 */
 table.matrix th {
-  padding: 0 8px 6px;
+  height: auto;
+  padding: 0 var(--space-xs) var(--space-xs);
   vertical-align: bottom;
 }
 
@@ -352,7 +373,7 @@ table.matrix td.path {
 /* 圆点列：列宽照画稿的 62px，格里只有一个点 */
 table.matrix td.cell {
   width: 62px;
-  padding: 6px 4px;
+  padding: 0 var(--space-xxs);
   text-align: center;
 }
 
@@ -377,7 +398,7 @@ td.cell.missing {
 .report {
   box-sizing: border-box;
   max-height: 60vh;
-  padding: 14px 16px;
+  padding: var(--space-md) 20px;
   border: 1px solid var(--ink);
   background: var(--canvas);
   overflow: auto;
@@ -426,9 +447,9 @@ td.cell.missing {
 .modal {
   position: relative;
   box-sizing: border-box;
-  width: 420px;
+  width: 460px;
   max-height: 80vh;
-  padding: 16px;
+  padding: var(--space-xl) 28px;
   border: 1px solid var(--ink);
   background: var(--canvas);
   overflow: auto;
@@ -438,7 +459,7 @@ td.cell.missing {
   flex: 1;
   margin: 0;
   font-family: var(--font-cond);
-  font-size: var(--size-button);
+  font-size: var(--size-body);
   font-weight: 700;
   letter-spacing: var(--track-head);
 }
@@ -454,8 +475,8 @@ td.cell.missing {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
   cursor: pointer;
 }
 
@@ -473,21 +494,21 @@ td.cell.missing {
 .models-tab {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-xl);
 }
 
 .models-notices {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-xs);
 }
 
 /* 行内待办条的旧形态：一句话 + 动作，靠描边分层，不靠底色（§4.4） */
 .notice {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
   border: 1px solid var(--hairline);
 }
 
@@ -500,32 +521,33 @@ td.cell.missing {
 }
 
 .models-section {
-  padding-top: 12px;
+  padding-top: var(--space-xl);
   border-top: 1px solid var(--hairline);
 }
 
 .models-section h2 {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-md);
   font-family: var(--font-cond);
-  font-size: var(--size-head);
+  font-size: var(--size-body);
   font-weight: 600;
   letter-spacing: var(--track-head);
 }
 
+/* 表单字段之间 24（DESIGN「Layout」组之间） */
 .models-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-xxs);
   max-width: 420px;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-xl);
   color: var(--ink-mute);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
 }
 
 .models-field input,
 .models-list li input[type="text"] {
   box-sizing: border-box;
-  padding: 4px 8px;
+  padding: 10px 14px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-input);
   background: var(--canvas);
@@ -545,8 +567,8 @@ td.cell.missing {
 .models-list li {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
   border-bottom: 1px solid var(--hairline);
 }
 

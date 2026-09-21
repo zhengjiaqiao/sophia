@@ -89,24 +89,24 @@
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  padding: 7px 20px;
+  padding: 9px 24px;
   border: 1px solid var(--ink);
   border-radius: var(--radius-pill);
   background: none;
   color: var(--ink);
   font-family: var(--font-cond);
-  font-size: var(--size-button);
+  font-size: var(--size-caption);
   font-weight: 700;
   letter-spacing: var(--track-button);
-  line-height: 1.1;
+  line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
   cursor: pointer;
 }
 
+/* 紧凑档只换内边距：两档尺寸按所在容器的高度选，字号同属 button-cap（§3） */
 .ss-btn--compact {
-  padding: 4px 14px;
-  font-size: var(--size-label);
+  padding: 5px 16px;
 }
 
 .ss-btn:disabled {
@@ -129,9 +129,10 @@
   border-radius: 0;
   color: var(--ink-mute);
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   font-weight: 400;
   letter-spacing: normal;
+  line-height: var(--leading-caption);
   text-transform: none;
   text-decoration: underline;
 }
@@ -150,7 +151,7 @@
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  padding: 6px 14px;
+  padding: 7px 16px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-pill);
   background: var(--canvas);
@@ -192,7 +193,7 @@
   bottom: 16px;
   box-sizing: border-box;
   max-width: 480px;
-  padding: 14px 16px;
+  padding: 16px 20px;
   border: 1px solid var(--ink);
   background: var(--canvas);
   color: var(--ink);
@@ -201,19 +202,19 @@
 .ss-toast__message {
   font-family: var(--font-ui);
   font-size: var(--size-body);
-  line-height: 1.5;
+  line-height: var(--leading-body);
 }
 
 .ss-toast__foot {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-top: 7px;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
 }
 
 .ss-toast__stats {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
@@ -239,9 +240,9 @@
 .ss-rownotice {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-sm);
   box-sizing: border-box;
-  padding: 6px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--hairline);
 }
 
@@ -282,41 +283,42 @@
   box-sizing: border-box;
   width: 460px;
   max-width: 100%;
-  padding: 14px 16px;
+  padding: 24px 28px;
   border: 1px solid var(--ink);
   background: var(--canvas);
 }
 
+/* 弹窗标题：Condensed 走正文档——14 那一档已经砍掉（DESIGN「Typography → 层级」） */
 .ss-confirm__title {
   font-family: var(--font-cond);
-  font-size: var(--size-button);
+  font-size: var(--size-body);
   font-weight: 700;
   letter-spacing: var(--track-head);
 }
 
 .ss-confirm__body {
-  margin-top: 8px;
+  margin-top: var(--space-sm);
   font-family: var(--font-ui);
   font-size: var(--size-body);
-  line-height: 1.5;
+  line-height: var(--leading-body);
 }
 
 /* 条件性警告段：有才出现 */
 .ss-confirm__warning {
-  margin-top: 8px;
-  padding: 9px 11px;
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
   border: 1px solid var(--hairline);
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
-  line-height: 1.45;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
 }
 
 .ss-confirm__foot {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 16px;
-  margin-top: 12px;
+  gap: var(--space-md);
+  margin-top: var(--space-xl);
 }
 
 /* ===== 4.6 二级页面 SubPage：占满整窗，不保留侧栏 ===== */
@@ -331,10 +333,10 @@
 .ss-subpage__bar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-md);
   box-sizing: border-box;
   height: 56px;
-  padding: 0 24px;
+  padding: 0 var(--space-xxl);
   border-bottom: 1px solid var(--hairline);
   flex-shrink: 0;
 }
@@ -351,18 +353,20 @@
   cursor: pointer;
 }
 
+/* 二级页面名走 display 28：display 到 body 是三倍以上的跳跃（DESIGN「Layout」） */
 .ss-subpage__title {
   font-family: var(--font-cond);
-  font-size: var(--size-title);
+  font-size: var(--size-display);
   font-weight: 700;
-  letter-spacing: var(--track-title);
+  letter-spacing: var(--track-display);
+  line-height: var(--leading-display);
   text-transform: uppercase;
 }
 
 .ss-subpage__aside {
   margin-left: auto;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
 }
 
@@ -409,8 +413,9 @@
   border: 1px solid var(--hairline);
   border-radius: 0;
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
   font-weight: 600;
+  /* 方块是 14px 定高、居中排的，这里的行高不撑高度，保持 1 */
   line-height: 1;
 }
 
@@ -420,13 +425,14 @@
   font-size: var(--size-body);
 }
 
-/* ……唯一的例外是矩阵列头：那里 agent 名承担列标签的职能 */
+/* ……唯一的例外是矩阵列头：那里 agent 名承担列标签的职能。
+   micro-cap＝12 / 600 / 0.96px / 行高 2.0——呼吸感靠行高，不靠字号 */
 .ss-mark--stacked .ss-mark__name {
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
   font-weight: 600;
   letter-spacing: var(--track-label);
-  line-height: 1.1;
+  line-height: var(--leading-micro);
   text-align: center;
   text-transform: uppercase;
 }
@@ -437,8 +443,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  padding: 24px;
+  gap: var(--space-sm);
+  padding: var(--space-huge) var(--space-xl);
   text-align: center;
 }
 
@@ -446,26 +452,26 @@
   max-width: 420px;
   font-family: var(--font-ui);
   font-size: var(--size-body);
-  line-height: 1.45;
+  line-height: var(--leading-body);
 }
 
 .ss-empty--scanning .ss-empty__description {
   color: var(--ink-mute);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
 }
 
 .ss-empty__hint {
   max-width: 420px;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
-  line-height: 1.35;
+  line-height: var(--leading-caption);
 }
 
 .ss-empty__actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-md);
 }
 
 /* 操作进行中：受影响控件置灰（§6） */

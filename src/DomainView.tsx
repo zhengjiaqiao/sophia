@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { MICRO_CAP, MONO, TAG_SQUARE } from "./ui/text";
 import { api } from "./api";
 import { viewOf } from "./cellState";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
@@ -60,27 +61,12 @@ export const join = (dir: string, name: string) =>
   `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
 
 /// 区域标签与列头（组件规范 §1.2 的「区域标签」档）
-const LABEL: CSSProperties = {
-  fontFamily: "var(--font-cond)",
-  fontSize: "var(--size-label)",
-  letterSpacing: "var(--track-label)",
-  textTransform: "uppercase",
-  color: "var(--ink-mute)",
-};
 /// 等宽只给**路径与计数**（§1.2）。skill 名是当词读的，用正文档；
 /// 「本体位置」显示的是位置名时同样用正文档，显示的是路径时才随路径走等宽
-const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "var(--size-mono)" };
 
 /// 这个位置名看着是不是一条路径
 const looksLikePath = (label: string) => /[\\/]/.test(label);
 /// 不可点的方标签：零圆角，因为圆角只给可点的东西（§3.1）
-const TAG: CSSProperties = {
-  ...LABEL,
-  color: "var(--ink)",
-  border: "1px solid var(--ink)",
-  padding: "1px 5px",
-  marginRight: 6,
-};
 
 /// busy 期间受影响控件的样子（§6）：置灰且点不动。
 /// **豁免的五处不要套它**：设置、筛选输入框、取消选择、提示条关闭、表头排序
@@ -278,10 +264,10 @@ export default function DomainView({
               disabled={busy || visible.length === 0}
               onChange={() => onSelectAll(!allSelected)}
             />
-            {sortHeader("skill", <span style={LABEL}>skill</span>)}
+            {sortHeader("skill", <span style={MICRO_CAP}>skill</span>)}
           </th>
           <th style={{ borderBottom: "1px solid var(--ink)" }}>
-            {sortHeader("source", <span style={LABEL}>本体位置</span>)}
+            {sortHeader("source", <span style={MICRO_CAP}>本体位置</span>)}
           </th>
           {page.targets.map((target) => (
             <th
@@ -326,7 +312,7 @@ export default function DomainView({
                 </label>
               </td>
               <td className="path">
-                {isExternal(row.sourceId) && <span style={TAG}>外部</span>}
+                {isExternal(row.sourceId) && <span style={TAG_SQUARE}>外部</span>}
                 <Button
                   variant="link"
                   title={skillPathOf(row.sourceId, row.skill)}
@@ -425,7 +411,7 @@ export default function DomainView({
             marginBottom: 10,
           }}
         >
-          <span style={LABEL}>自动同步</span>
+          <span style={MICRO_CAP}>自动同步</span>
           <span style={{ fontSize: "var(--size-body)" }}>
             {labelOf(rule.source)} <span style={{ color: "var(--ink-faint)" }}>→</span>{" "}
             {local.map((id) => targetLabelOf(id)).join(" · ")}

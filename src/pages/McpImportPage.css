@@ -9,7 +9,7 @@
   overflow: hidden;
   flex-shrink: 1;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-faint);
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -24,13 +24,13 @@
   margin-left: auto;
   flex-shrink: 0;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-faint);
 }
 
 /* 位置选择区与 skill 导入页同形，只是不需要那条上边界之外的额外留白 */
 .ss-mcp__targets {
-  padding: 14px 24px 16px 24px;
+  padding: var(--space-xl) var(--space-xxl);
   border-top: 1px solid var(--hairline);
   flex-shrink: 0;
 }

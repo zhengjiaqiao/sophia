@@ -5,28 +5,30 @@
 .settings-page {
   box-sizing: border-box;
   max-width: 760px;
-  padding: 16px 24px 24px;
+  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
 }
 
 /* 区域标签是我们自己写的结构词，大写；后面那句是说明，不大写（§1.2） */
 .settings-page__head {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
 }
 
 .settings-page__label {
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
+  font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
   color: var(--ink-mute);
 }
 
 .settings-page__note {
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
 }
 
@@ -34,7 +36,7 @@
 .settings-page__grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-sm);
 }
 
 /* 选中片是反色，首字母方块的描边跟着转白，否则黑底上一圈浅灰很脏 */
@@ -44,7 +46,7 @@
 
 /* 没装的那些：形状不变、字色更轻。它们仍然可以预先开启，所以不是禁用态 */
 .settings-page__grid--absent {
-  margin-top: 8px;
+  margin-top: var(--space-sm);
 }
 
 .settings-page__grid--absent .ss-chip:not(.is-selected) {
@@ -52,14 +54,14 @@
 }
 
 .settings-page__more {
-  margin-top: 12px;
+  margin-top: var(--space-md);
 }
 
 .settings-page__foot {
   max-width: 560px;
-  margin-top: 16px;
+  margin-top: var(--space-huge);
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
-  line-height: 1.5;
+  line-height: var(--leading-caption);
 }

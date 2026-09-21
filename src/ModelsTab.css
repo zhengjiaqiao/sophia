@@ -11,41 +11,44 @@
 
 .models-page__body {
   box-sizing: border-box;
-  padding: 10px 24px 16px;
+  padding: var(--space-md) var(--space-xxl) var(--space-xl);
 }
 
 /* 区域标签是我们自己写的结构词，大写；后面那句是说明，不大写（§1.2） */
 .models-page__head {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  margin-bottom: 5px;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
 }
 
+/* micro-cap：12 / 600 / 0.96px / 行高 2.0 */
 .models-page__label {
   font-family: var(--font-cond);
-  font-size: var(--size-label);
+  font-size: var(--size-micro);
+  font-weight: 600;
   letter-spacing: var(--track-label);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
   color: var(--ink-mute);
 }
 
 .models-page__note {
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-faint);
 }
 
 /* ===== agent 行 ===== */
 .models-row {
   border-top: 1px solid var(--ink);
-  padding-top: 7px;
+  padding: var(--space-md) 0;
 }
 
 .models-row__main {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-md);
 }
 
 .models-row__identity {
@@ -68,24 +71,24 @@
 
 /* 三组状态词合成的那一句人话（R2） */
 .models-row__status {
-  margin-top: 3px;
+  margin-top: var(--space-xxs);
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
-  line-height: 1.45;
+  line-height: var(--leading-caption);
 }
 
 /* 版本号与端口是计数类事实，走等宽（§1.2） */
 .models-row__facts {
   margin-top: 2px;
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
 .models-row__mono {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
 }
 
 /* 选择器浮层挂在这一层上，不挂在可点区里：浮层里的点击不能冒泡出去再把它打开 */
@@ -100,9 +103,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: var(--space-xxs) 6px;
   box-sizing: border-box;
-  padding: 6px 8px;
+  padding: var(--space-xs) var(--space-sm);
   border: 1px solid var(--hairline);
   cursor: pointer;
 }
@@ -115,7 +118,7 @@
 
 .models-row__empty {
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-faint);
 }
 
@@ -153,8 +156,8 @@
 
 .ss-model-chip__label {
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
-  line-height: 1.4;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
 }
 
 .ss-model-chip__remove {
@@ -210,7 +213,7 @@
 .models-picker__input {
   box-sizing: border-box;
   width: 100%;
-  padding: 6px 10px;
+  padding: 10px 14px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-input);
   background: var(--canvas);
@@ -242,7 +245,7 @@
 /* 计数走等宽（§1.2、§11） */
 .models-picker__count {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
 }
 
 .models-picker__foot-actions {
@@ -262,8 +265,8 @@
 .models-item {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 4px 0;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0;
   border-bottom: 1px solid var(--surface);
 }
 
@@ -306,7 +309,7 @@
 /* 模型 id 是标识符，走等宽（§1.2） */
 .models-item__id {
   font-family: var(--font-mono);
-  font-size: var(--size-mono);
+  font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
@@ -329,23 +332,24 @@
 .models-item__hint {
   flex-shrink: 0;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
   white-space: nowrap;
 }
 
 /* ===== 限制说明：常驻，不随操作消失（R8） ===== */
+/* 与上面的 agent 行区之间 48：页面里的大区块之间（DESIGN「Layout」） */
 .models-page__limits {
   max-width: 560px;
-  margin-top: 24px;
-  padding-top: 8px;
+  margin-top: var(--space-huge);
+  padding-top: var(--space-sm);
   border-top: 1px solid var(--hairline);
 }
 
 .models-page__limits-text {
-  margin: 6px 0 0;
+  margin: var(--space-xs) 0 0;
   font-family: var(--font-ui);
-  font-size: var(--size-minor);
+  font-size: var(--size-caption);
   color: var(--ink-mute);
-  line-height: 1.55;
+  line-height: var(--leading-caption);
 }

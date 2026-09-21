@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
+import { MICRO_CAP, MONO, TAG_SQUARE } from "./ui/text";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import { ActionButton, dim } from "./DomainView";
@@ -68,37 +69,10 @@ export interface McpTabProps {
 const rowKey = (page: McpDomain, row: McpDomainRow) => `${page.key}|${row.name}`;
 
 /// 区域标签档（§1.2）
-const LABEL: CSSProperties = {
-  fontFamily: "var(--font-cond)",
-  fontSize: "var(--size-label)",
-  fontWeight: 600,
-  letterSpacing: "var(--track-label)",
-  textTransform: "uppercase",
-};
-const MONO: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "var(--size-mono)" };
 
 /// 不可点的方标签：零圆角，因为圆角只给可点的东西（§3.1）
-const TAG: CSSProperties = {
-  ...LABEL,
-  color: "var(--ink)",
-  border: "1px solid var(--ink)",
-  padding: "1px 5px",
-  marginLeft: 8,
-};
 
 /// 待处理栏：主视图底部常驻一条，一次一条，处理完跳下一条（§4.3）
-const PENDING_BAR: CSSProperties = {
-  position: "sticky",
-  bottom: 0,
-  display: "flex",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-  marginTop: 16,
-  padding: "9px 0",
-  borderTop: "1px solid var(--ink)",
-  background: "var(--canvas)",
-};
 
 /// 传输方式：一行里几个来源可能不同，去重后并排写
 const transportText = (entry: McpEntry) =>
@@ -559,7 +533,7 @@ export default function McpTab({
   const importPage = importPageOverride ?? sidebarImportPage;
 
   return (
-    <section>
+    <section className="skills-tab">
       <div className="toolbar" style={dim(busy)}>
         <ActionButton
           onClick={() => {
@@ -587,7 +561,7 @@ export default function McpTab({
 
       {chosenCount > 0 && (
         <div className="toolbar selection">
-          <span style={LABEL}>已选 {chosenCount} 个服务</span>
+          <span style={MICRO_CAP}>已选 {chosenCount} 个服务</span>
           {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
           <ActionButton variant="link" onClick={() => setSelected(new Set())}>
             取消选择
@@ -701,7 +675,7 @@ export default function McpTab({
 
       {/* 待处理栏：一次一条，处理完跳下一条（§4.3） */}
       {current !== null && (
-        <div style={PENDING_BAR}>
+        <div className="pending-bar">
           <span style={{ fontSize: "var(--size-body)" }}>{current.message}</span>
           <span style={{ display: "flex", alignItems: "center", gap: 8, ...dim(busy) }}>
             {actionsOf(current)}
@@ -953,13 +927,13 @@ function McpDomainView({
               disabled={busy || selectable.length === 0}
               onChange={() => onSelectAll(!allSelected)}
             />
-            <span style={LABEL}>服务</span>
+            <span style={MICRO_CAP}>服务</span>
           </th>
           <th style={{ borderBottom: "1px solid var(--ink)" }}>
-            <span style={LABEL}>传输</span>
+            <span style={MICRO_CAP}>传输</span>
           </th>
           <th style={{ borderBottom: "1px solid var(--ink)" }}>
-            <span style={LABEL}>来源位置</span>
+            <span style={MICRO_CAP}>来源位置</span>
           </th>
           {page.targets.map((target) => (
             <th
@@ -1002,7 +976,7 @@ function McpDomainView({
                 </label>
                 {/* 差异是行级事实，不进格（R2）：两处各有一份、连的地址不一样 */}
                 {differing.length > 0 && (
-                  <span style={TAG} title={differentCopiesTitle(differing.map(labelOf))}>
+                  <span style={TAG_SQUARE} title={differentCopiesTitle(differing.map(labelOf))}>
                     {differentCopiesTag(differing.length)}
                   </span>
                 )}
@@ -1086,7 +1060,7 @@ function McpDomainView({
             marginBottom: 10,
           }}
         >
-          <span style={LABEL}>自动引入</span>
+          <span style={MICRO_CAP}>自动引入</span>
           <span style={{ fontSize: "var(--size-body)" }}>
             {nameOfRef(rule.source)} <span style={{ color: "var(--ink-faint)" }}>→</span>{" "}
             {rule.targets.map(nameOfRef).join(" · ")}
