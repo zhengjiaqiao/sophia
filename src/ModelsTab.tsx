@@ -4,9 +4,11 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api.ts";
 import {
   MODELS_TOOLS,
-  emptyModelsText,
+  effectiveModels,
+  emptyEffectiveText,
   enableDisabledReason,
   factsLine,
+  gatewaySummary,
   modelLabel,
   parseBackendError,
   providerCatalogHint,
@@ -34,7 +36,6 @@ import {
   Empty,
   ErrorBanner,
   RowNotice,
-  StateDot,
   Toast,
 } from "./ui/index.ts";
 import type { ToastKind } from "./ui/index.ts";
@@ -46,22 +47,27 @@ import "./ModelsTab.css";
 /// 它是应用的**启动页**，版面按 DESIGN.md「Layout」的大留白排，不是一张密排的表。
 ///
 /// **按工具分块**（第二轮反馈）：一个工具一块，块里从上到下是
-/// 「它是谁 → 它现在怎么样 → 它的网关和已选模型 → 用它要知道的限制」，
+/// 「它是谁 → 它现在怎么样 → 它生效的模型 → 用它要知道的限制」，
 /// 动作也归块——`重启 <工具>` 是那个工具的动作，不是页面的动作。
 /// 今天 `MODELS_TOOLS` 里只有 Codex，但**版面、文案、空态都不写死一个工具**：
 /// 名字一律从 `tool.name` 取。后端那侧现在确实只支持 Codex，这一轮只为多工具留位置。
 ///
+/// **网关整个搬去配置页**（第三轮反馈）：一家一块的卡片、地址、有没有密钥、
+/// 添加、删除、改名，全在 `pages/GatewayPage.tsx`。主页面只剩一句极简的网关事实
+/// （`gatewaySummary`）当进配置页的由头。
+///
 /// 一屏要回答三件事：**这是什么工具**（图标 + 名字，display 28）、
-/// **它现在用的是哪几个模型**（网关块里的紧凑片）、
-/// **哪里出了问题**（横幅 / 行内待办条 / 缺密钥的方标签）。
+/// **它现在生效的是哪几个模型**（紧凑片，就地可改）、
+/// **哪里出了问题**（横幅 / 行内待办条 / 那句人话）。
 ///
 /// 页面没有域的概念，所以壳在这一页不要渲染侧栏，见 `MODELS_TAB_FULL_BLEED`。
 ///
 /// 六条形上的定死选择，改之前先回去看 spec：
 /// - **图标永远和名字一起出现**（DESIGN §9.1）。第一轮只画了图标、把 `Codex`
 ///   这个名字吃掉了，是错的——图标是补充，不是替代
-/// - **已选模型在主页面直接可见，改选也在当前页完成**。这是我们和 cc-switch
-///   那类工具的差异点：它必须进二级页才能挑模型，我们不进。二级页只放网关地址和密钥
+/// - **生效的模型在主页面直接可见，改选也在当前页完成**。这是我们和 cc-switch
+///   那类工具的差异点：它必须进二级页才能挑模型，我们不进。二级页只管网关本身。
+///   选择器横跨这个工具的全部网关，归属靠分组抬头 + 每条那行 `网关id-模型名` 的标识
 /// - 开关是 ghost pill 两态（`启用` / 反色 `已启用`），不是滑动开关也不是复选框（R4）
 /// - 模型列表的「已选」用 12px 方形复选框：**圆＝状态（只读事实），方＝选择（我选的）**（R3）
 /// - 三组状态词合成一句人话 + 一行等宽事实，不并排三个徽标（R2）
@@ -85,9 +91,6 @@ const describeError = (error: unknown): string => parseBackendError(String(error
 const selectedPayload = (models: GatewayProviderModel[]): GatewaySelectedModel[] =>
   models.filter((m) => m.selected).map(({ id, displayName }) => ({ id, displayName }));
 
-/// 二级页面：`providerId` 为 null 表示新加一家网关
-type SubPage = { providerId: string | null };
-
 // ===== 一个工具的抬头：它是谁，它现在怎么样 =====
 
 export interface ToolIntroProps {
@@ -98,6 +101,8 @@ export interface ToolIntroProps {
   onEnable: () => void;
   onDisable: () => void;
   onRestart: () => void;
+  /// 进网关配置页。网关的增删改都在那儿，主页面上不摊开（第三轮反馈）
+  onConfigure: () => void;
 }
 
 /**
@@ -121,6 +126,7 @@ export function ToolIntro({
   onEnable,
   onDisable,
   onRestart,
+  onConfigure,
 }: ToolIntroProps) {
   const disabledReason = enableDisabledReason(state, selectedCount);
 
@@ -158,6 +164,11 @@ export function ToolIntro({
                 裹一层把大写关掉 */}
             重启 <span className="models-plain">{tool.name}</span>
           </Button>
+
+          {/* 网关的地址、密钥、增删改全在配置页；主页面只展示生效的模型（第三轮反馈） */}
+          <Button title="添加、修改、删除网关" onClick={onConfigure}>
+            配置网关
+          </Button>
         </Busy>
       </div>
 
@@ -168,124 +179,107 @@ export function ToolIntro({
   );
 }
 
-// ===== 一家网关一块 =====
+// ===== 生效的模型 =====
 
-export interface GatewayCardProps {
-  provider: GatewayProvider;
-  /// 片上的 × 要说清「从谁的模型列表里去掉」
+export interface EffectiveModelsProps {
   tool: ModelsTool;
+  state: GatewayState;
   busy: boolean;
-  /// 点已选模型区：打开这一家的选择器
+  /// 点这块区域：打开选择器（**留在当前页**，不进二级页）
   onOpenPicker: () => void;
-  onRemoveModel: (model: GatewayProviderModel) => void;
+  onRemoveModel: (provider: GatewayProvider, model: GatewayProviderModel) => void;
+  /// 一家网关都没有时，把人送去配置页
   onConfigure: () => void;
-  onRemove: () => void;
-  /// 选择器浮层。挂在这一层上，浮层里的点击不会冒泡回去再把它打开
+  /// 选择器浮层。挂在外层，浮层里的点击不会冒泡回去再把它打开
   children?: ReactNode;
 }
 
 /**
- * 一家网关：一行身份（状态点 + 名字 + 地址 + 两个动作）+ 一块已选模型。
+ * 主页面上唯一和模型有关的东西：**这个工具现在真正在用的那几个**。
  *
- * 圆点是**只读状态**（钥匙串里有没有这家的密钥），和模型列表里方形复选框的
- * 「我的选择」分得开（DESIGN §2 / R3）。缺密钥另给一个零圆角方标签——
- * 方标签不可点，圆角只留给可点的东西（§1.3）。
+ * 网关本身（一家一块、地址、密钥、增删）第三轮搬去配置页了，主页面只剩
+ * 身份 / 生效的模型 / 动作三样。但**改选仍然在这一页完成**——整块可点，
+ * 点哪儿都开选择器。这是和 cc-switch 那类工具的差异点，不许退化成「进二级页选」。
  *
- * 密度上做了减法（第二轮反馈：工具块 → 网关 → 模型已经三层，别再厚）：
- * 地址并进身份行，原来单独一行的「已选 N 个 · 共 M 个」去掉了——已选的就摆在
- * 片上，数第二遍没有意义；剩下的「还有多少可挑」挪到模型区右端一句等宽提示。
+ * 片上的名字用 `effectiveModels` 算出来的 `label`：两家网关撞名时后端会加
+ * 「 · 网关名」，这一块叫「生效的模型」，写的就得和工具里看到的一致。
  */
-export function GatewayCard({
-  provider,
+export function EffectiveModels({
   tool,
+  state,
   busy,
   onOpenPicker,
   onRemoveModel,
   onConfigure,
-  onRemove,
   children,
-}: GatewayCardProps) {
-  const picked = selectedModels(provider);
-  const catalog = providerCatalogHint(provider);
+}: EffectiveModelsProps) {
+  // 一家网关都没有：这块区域点开也是空的，不如直接把人送去配置页
+  if (state.providers.length === 0) {
+    return (
+      <div className="models-effective__empty">
+        <Empty
+          kind="noSkills"
+          description={`还没有网关。到「配置网关」里加一家，它的模型才能进 ${tool.name} 的模型列表。`}
+          primary={{ label: "配置网关", onClick: onConfigure }}
+        />
+      </div>
+    );
+  }
+
+  const rows = effectiveModels(state);
 
   return (
-    <div className="models-card">
-      <div className="models-card__head">
-        <StateDot
-          dot={provider.hasKey ? "linked" : "missing"}
-          title={
-            provider.hasKey ? "密钥已经存在钥匙串里" : "还没有密钥，到「配置」里填上才能拉模型"
+    <div className="models-effective">
+      <div
+        className="models-effective__box"
+        role="button"
+        tabIndex={0}
+        title="点一下改选模型"
+        onClick={onOpenPicker}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpenPicker();
           }
-        />
-        <span className="models-card__name">{providerLabel(provider)}</span>
-        {provider.hasKey ? null : <span className="models-tag">还没有密钥</span>}
-        {/* 地址是事实，走等宽；长了省略，全文在 title 上（§1.2） */}
-        <span className="models-card__url" title={provider.baseUrl}>
-          {provider.baseUrl || "还没填地址"}
-        </span>
-        <Busy busy={busy} className="models-card__actions">
-          <Button size="compact" onClick={onConfigure}>
-            配置
-          </Button>
-          <Button size="compact" onClick={onRemove}>
-            删掉
-          </Button>
-        </Busy>
-      </div>
-
-      <div className="models-card__pick">
-        {/* 已选模型是一整块可点的区域，点哪儿都打开选择器（R1 修订 v2） */}
-        <div
-          className="models-card__models"
-          role="button"
-          tabIndex={0}
-          title="点一下改选模型"
-          onClick={onOpenPicker}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onOpenPicker();
-            }
-          }}
-        >
-          {picked.length === 0 ? (
-            // 空着的三种原因是三件不同的事，各说各的下一步
-            <span className="models-card__empty">{emptyModelsText(provider)}</span>
-          ) : (
-            picked.map((m) => (
-              <span key={m.id} className="ss-model-chip">
-                <span className="ss-model-chip__label">{modelLabel(m)}</span>
-                <button
-                  type="button"
-                  className="ss-model-chip__remove"
-                  title={`把 ${modelLabel(m)} 从 ${tool.name} 的模型列表里去掉`}
-                  disabled={busy}
-                  onClick={(e) => {
-                    // 去掉这一个就是去掉这一个，别顺带把选择器也打开了
-                    e.stopPropagation();
-                    onRemoveModel(m);
-                  }}
-                >
-                  <svg
-                    width="9"
-                    height="9"
-                    viewBox="0 0 12 12"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    aria-hidden="true"
-                  >
-                    <path d="M3 3l6 6M9 3l-6 6" />
-                  </svg>
-                </button>
+        }}
+      >
+        {rows.length === 0 ? (
+          // 空着的几种原因是几件不同的事，各说各的下一步
+          <span className="models-effective__hint">{emptyEffectiveText(state)}</span>
+        ) : (
+          rows.map(({ provider, model, label }) => (
+            <span key={`${provider.id}|${model.id}`} className="ss-model-chip">
+              <span className="ss-model-chip__label" title={`来自网关 ${providerLabel(provider)}`}>
+                {label}
               </span>
-            ))
-          )}
-          {/* 「还有多少可挑」——点进去才看得到全部，这句是那块区域可点的由头 */}
-          {catalog === "" ? null : <span className="models-card__catalog">{catalog}</span>}
-        </div>
-        {children}
+              <button
+                type="button"
+                className="ss-model-chip__remove"
+                title={`把 ${label} 从 ${tool.name} 的模型列表里去掉`}
+                disabled={busy}
+                onClick={(e) => {
+                  // 去掉这一个就是去掉这一个，别顺带把选择器也打开了
+                  e.stopPropagation();
+                  onRemoveModel(provider, model);
+                }}
+              >
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  aria-hidden="true"
+                >
+                  <path d="M3 3l6 6M9 3l-6 6" />
+                </svg>
+              </button>
+            </span>
+          ))
+        )}
       </div>
+      {children}
     </div>
   );
 }
@@ -300,13 +294,13 @@ export interface ModelsTabProps {
 
 export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
-  /// 打开着选择器的那一家网关的 id；null＝没开
-  const [pickerId, setPickerId] = useState<string | null>(null);
+  /// 选择器开着的那个工具；null＝没开。一个工具一份，横跨它的全部网关
+  const [pickerTool, setPickerTool] = useState<ModelsTool | null>(null);
   const [query, setQuery] = useState("");
   /// 改名在输入框里过渡，Enter / 失焦时提交；勾选当场写盘，所以只有改名需要本地镜像
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
-  /// 二级页面（§4.6）：null＝主视图
-  const [subPage, setSubPage] = useState<SubPage | null>(null);
+  /// 网关配置页（二级页面，§4.6）：网关的增删改都在那儿，主页面不摊开
+  const [gatewayOpen, setGatewayOpen] = useState(false);
   /// 结束工具的后台进程会中断进行中的对话，确认一道（R6、§5）。存的是要重启哪个工具
   const [confirmRestart, setConfirmRestart] = useState<ModelsTool | null>(null);
   /// 删网关会连钥匙串里的密钥一起删，回不来，确认一道。带上是哪个工具的，文案要点名
@@ -364,7 +358,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
 
   // 浮层按 Esc 关掉，和二级页面一个手势
   useEffect(() => {
-    if (pickerId === null) return;
+    if (pickerTool === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closePicker();
     };
@@ -372,7 +366,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
     return () => document.removeEventListener("keydown", onKeyDown);
     // closePicker 只写本地状态，不依赖别的东西
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickerId]);
+  }, [pickerTool]);
 
   /// 大多数操作都是「调命令 → 用返回的最新状态刷新页面」。
   /// 成功汇总成一句话，做不成就把后端的原话摆出来——那是用户要拿去查的信息（§4.1）。
@@ -482,7 +476,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const closePicker = () => {
     setRenaming(null);
     setQuery("");
-    setPickerId(null);
+    setPickerTool(null);
   };
 
   /// 片上的 × ：当场移除，这一次有成功提示条（它是块上的一次明确操作）
@@ -505,33 +499,74 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
 
   const removeProvider = (provider: GatewayProvider) => {
     setConfirmRemove(null);
-    setSubPage(null);
-    setPickerId(null);
+    setPickerTool(null);
     void runAction(
       () => api.gatewayRemoveProvider(provider.id),
       `${providerLabel(provider)} 删掉了，它的模型和密钥一起清掉了`,
     );
   };
 
-  if (subPage !== null && state !== null) {
-    const editing =
-      subPage.providerId === null
-        ? null
-        : (state.providers.find((p) => p.id === subPage.providerId) ?? null);
-    // 要改的那一家还在，或者本来就是新建，才渲染配置页；被别处删掉了就落回主视图
-    if (editing !== null || subPage.providerId === null) {
-      return (
+  // 网关配置页：一整页管全部网关（列表 + 添加 + 每家可改可删）。
+  // 删网关的确认弹窗留在这一层渲染——它是页面级的浮层，和配置页并排出现
+  /// 删网关的确认弹窗。主视图和配置页都要能弹它（删的入口在配置页的列表上），
+  /// 所以抽出来，两处各渲染一次。连钥匙串里的密钥一起删、回不来，
+  /// 分量由信息承担，不涂红（§1.1）
+  const removeConfirm = (current: GatewayState) => {
+    if (confirmRemove === null) return null;
+    const { tool, provider } = confirmRemove;
+    const blocked = removeProviderBlockedReason(current, provider, tool);
+    return (
+      <Confirm
+        title={`删掉 ${providerLabel(provider)}`}
+        body="这家网关的地址、拉到的模型列表，以及钥匙串里的密钥会一起删掉。密钥删了取不回来，要用得重新填一次。"
+        warning={
+          <>
+            <span className="models-page__mono">{provider.baseUrl}</span>
+            <br />
+            已选的 {selectedModels(provider).length} 个模型会从 {tool.name} 的模型列表里去掉
+            {current.enabled ? `，${tool.name} 重启后生效` : ""}。
+            {/* 后端会拒的那一种：把原因和下一步摆在眼前，不让用户按完才撞上 */}
+            {blocked !== null ? (
+              <>
+                <br />
+                {blocked}。
+              </>
+            ) : null}
+          </>
+        }
+        confirmLabel="连密钥一起删掉"
+        destructive
+        confirmDisabledReason={blocked ?? undefined}
+        onConfirm={() => removeProvider(provider)}
+        onCancel={() => setConfirmRemove(null)}
+      />
+    );
+  };
+
+  if (gatewayOpen && state !== null) {
+    return (
+      <>
         <GatewayPage
           state={state}
-          provider={editing}
+          tool={MODELS_TOOLS[0]}
           busy={busy}
-          onBack={() => setSubPage(null)}
+          onBack={() => setGatewayOpen(false)}
           onSave={saveProvider}
           onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
+          onRemove={(provider) => setConfirmRemove({ tool: MODELS_TOOLS[0], provider })}
           onRestore={() => runOrThrow(() => api.gatewayRestore())}
         />
-      );
-    }
+        {removeConfirm(state)}
+        {toast ? (
+          <Toast
+            kind={toast.kind}
+            message={toast.message}
+            onDismiss={() => setToast(null)}
+            onClose={() => setToast(null)}
+          />
+        ) : null}
+      </>
+    );
   }
 
   if (!state) return <Empty kind="scanning" description="读取中…" />;
@@ -539,9 +574,22 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const selectedCount = totalSelected(state);
   const showBanner = routerUnavailable(state) && !bannerClosed;
 
-  /// 选择器浮层：一家一份，挂在那一家的已选模型区下面
-  const picker = (provider: GatewayProvider) => {
-    const visibleModels = sortAndFilterModels(provider.models, query);
+  /**
+   * 选择器浮层：**一个工具一份，横跨它的全部网关**。
+   *
+   * 网关卡片搬去配置页之后，原来「从某一家的模型区点开」这个入口没了，
+   * 所以这里要能同时看到几家的模型，并且分得清归属（第三轮反馈）。归属靠两样：
+   * 多于一家时每家一个分组抬头；每条模型下面那行等宽的标识本来就是
+   * `网关id-模型名`（后端的 slug 规则），两家同名模型也不会看混。
+   */
+  const picker = (tool: ModelsTool) => {
+    const groups = state.providers
+      .map((provider) => ({ provider, models: sortAndFilterModels(provider.models, query) }))
+      .filter((group) => group.models.length > 0);
+    const anyModel = state.providers.some((provider) => provider.models.length > 0);
+    // 只有一家时不画分组抬头——那行字在只有一家的时候纯属噪音
+    const grouped = state.providers.length > 1;
+
     return (
       <>
         {/* 点浮层外面等于关闭；罩子透明，不遮挡下面那一块 */}
@@ -564,19 +612,19 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
           </div>
 
           <Busy busy={busy} className="models-picker__list">
-            {provider.models.length === 0 ? (
+            {!anyModel ? (
               <Empty
                 kind="noSkills"
-                description="还没有可以选的模型——先到「配置」里存好网关和密钥，再拉一次模型列表。"
+                description="还没有可以选的模型——先到「配置网关」里存好地址和密钥，模型列表会跟着拉回来。"
                 primary={{
-                  label: "去配置",
+                  label: "配置网关",
                   onClick: () => {
                     closePicker();
-                    setSubPage({ providerId: provider.id });
+                    setGatewayOpen(true);
                   },
                 }}
               />
-            ) : visibleModels.length === 0 ? (
+            ) : groups.length === 0 ? (
               <Empty
                 kind="noMatch"
                 description="没有匹配的模型。"
@@ -584,83 +632,100 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
               />
             ) : (
               <ul className="models-list">
-                {visibleModels.map((m) => (
-                  <li
-                    key={m.id}
-                    className={renaming?.id === m.id ? "models-item is-renaming" : "models-item"}
-                    // 整行可点：12px 的记号只告诉你点了会发生什么，命中区是整行（DESIGN「命中区」）
-                    onClick={() => renaming?.id !== m.id && toggleModel(provider, m.id)}
-                  >
-                    {/* 12px 方形复选框：方＝选择，与状态点的圆分得开（R3） */}
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={m.selected}
-                      className="models-item__check"
-                      title={
-                        m.selected
-                          ? `点一下，不再把 ${modelLabel(m)} 放进 Codex 的列表`
-                          : `点一下，把 ${modelLabel(m)} 放进 Codex 的列表`
-                      }
-                    >
-                      {m.selected ? (
-                        <svg
-                          width="8"
-                          height="8"
-                          viewBox="0 0 10 10"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          aria-hidden="true"
-                        >
-                          <path d="M2 5.2l2 2 4-4.4" />
-                        </svg>
-                      ) : null}
-                    </button>
-
-                    <div className="models-item__text">
-                      {renaming?.id === m.id ? (
-                        <input
-                          type="text"
-                          className="models-item__rename"
-                          value={renaming.value}
-                          autoFocus
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => setRenaming({ id: m.id, value: e.target.value })}
-                          onBlur={() => commitRename(provider)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.stopPropagation();
-                              commitRename(provider);
-                            } else if (e.key === "Escape") {
-                              // Esc 先被输入框吃掉，不要顺带把浮层也关了；改名作废
-                              e.stopPropagation();
-                              setRenaming(null);
-                            }
-                          }}
-                        />
-                      ) : (
-                        <div className="models-item__name">{modelLabel(m)}</div>
-                      )}
-                      {/* 模型标识带网关前缀，是标识符，走等宽（§1.2） */}
-                      <div className="models-item__id">{m.slug || m.id}</div>
-                    </div>
-
-                    {m.selected ? (
-                      renaming?.id === m.id ? (
-                        <span className="models-item__hint">Codex 列表里显示这个名字</span>
-                      ) : (
-                        // Button 的 onClick 不带事件；用外层挡住冒泡，别让「改名」顺带切换勾选
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <Button
-                            variant="link"
-                            onClick={() => setRenaming({ id: m.id, value: modelLabel(m) })}
-                          >
-                            改名
-                          </Button>
-                        </span>
-                      )
+                {groups.map(({ provider, models }) => (
+                  <li key={provider.id}>
+                    {grouped ? (
+                      <div className="models-group">
+                        {/* 网关名是被谈论的对象，不大写（§1.2） */}
+                        <span className="models-group__name">{providerLabel(provider)}</span>
+                        <span className="models-group__count">{providerCatalogHint(provider)}</span>
+                      </div>
                     ) : null}
+                    <ul className="models-list">
+                      {models.map((m) => (
+                        <li
+                          key={m.id}
+                          className={
+                            renaming?.id === m.id ? "models-item is-renaming" : "models-item"
+                          }
+                          // 整行可点：12px 的记号只告诉你点了会发生什么，命中区是整行（DESIGN「命中区」）
+                          onClick={() => renaming?.id !== m.id && toggleModel(provider, m.id)}
+                        >
+                          {/* 12px 方形复选框：方＝选择，与状态点的圆分得开（R3） */}
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={m.selected}
+                            className="models-item__check"
+                            title={
+                              m.selected
+                                ? `点一下，不再把 ${modelLabel(m)} 放进 ${tool.name} 的列表`
+                                : `点一下，把 ${modelLabel(m)} 放进 ${tool.name} 的列表`
+                            }
+                          >
+                            {m.selected ? (
+                              <svg
+                                width="8"
+                                height="8"
+                                viewBox="0 0 10 10"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                                aria-hidden="true"
+                              >
+                                <path d="M2 5.2l2 2 4-4.4" />
+                              </svg>
+                            ) : null}
+                          </button>
+
+                          <div className="models-item__text">
+                            {renaming?.id === m.id ? (
+                              <input
+                                type="text"
+                                className="models-item__rename"
+                                value={renaming.value}
+                                autoFocus
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => setRenaming({ id: m.id, value: e.target.value })}
+                                onBlur={() => commitRename(provider)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.stopPropagation();
+                                    commitRename(provider);
+                                  } else if (e.key === "Escape") {
+                                    // Esc 先被输入框吃掉，不要顺带把浮层也关了；改名作废
+                                    e.stopPropagation();
+                                    setRenaming(null);
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <div className="models-item__name">{modelLabel(m)}</div>
+                            )}
+                            {/* 标识是 `网关id-模型名`，既是标识符也是归属，走等宽（§1.2） */}
+                            <div className="models-item__id">{m.slug || m.id}</div>
+                          </div>
+
+                          {m.selected ? (
+                            renaming?.id === m.id ? (
+                              <span className="models-item__hint">
+                                {tool.name} 列表里显示这个名字
+                              </span>
+                            ) : (
+                              // Button 的 onClick 不带事件；用外层挡住冒泡，别让「改名」顺带切换勾选
+                              <span onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="link"
+                                  onClick={() => setRenaming({ id: m.id, value: modelLabel(m) })}
+                                >
+                                  改名
+                                </Button>
+                              </span>
+                            )
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
                   </li>
                 ))}
               </ul>
@@ -668,9 +733,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
           </Busy>
 
           <div className="models-picker__foot">
-            <span className="models-picker__count">
-              已选 {selectedModels(provider).length} 个模型
-            </span>
+            <span className="models-picker__count">已选 {selectedCount} 个模型</span>
           </div>
         </div>
       </>
@@ -719,6 +782,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                   )
                 }
                 onRestart={() => setConfirmRestart(tool)}
+                onConfigure={() => setGatewayOpen(true)}
               />
 
               {/* 常驻待办挂在这个工具上，动作就在右边（R7、§4.4） */}
@@ -766,52 +830,29 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                 </div>
               ) : null}
 
-              {/* 网关区：一家一块，上面一条 ink 分隔（DESIGN 靠分隔线分区，不靠嵌套的框）。
-                  已选模型就在这儿改，不进二级页——那是我们和 cc-switch 那类工具的差异点 */}
+              {/* 主页面上只剩「生效的模型」这一块：网关的增删改搬去配置页了（第三轮反馈）。
+                  改选仍然在这一页完成，整块可点——不许退化成「进二级页选」 */}
               <section className="models-section">
                 <div className="models-section__head">
-                  <span className="models-page__label">网关</span>
-                  <Busy busy={busy} className="models-section__action">
-                    <Button size="compact" onClick={() => setSubPage({ providerId: null })}>
-                      添加网关
-                    </Button>
-                  </Busy>
+                  <span className="models-page__label">生效的模型</span>
+                  {/* 极简一句网关事实，当进配置页的由头；网关内容本身不摊在这儿 */}
+                  <span className="models-section__summary">{gatewaySummary(state)}</span>
                 </div>
 
-                {state.providers.length === 0 ? (
-                  <div className="models-section__empty">
-                    <Empty
-                      kind="noSkills"
-                      description={`还没有网关。填上地址和密钥，它的模型就能进 ${tool.name} 的模型列表。`}
-                      primary={{
-                        label: "添加网关",
-                        onClick: () => setSubPage({ providerId: null }),
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <ul className="models-cards">
-                    {state.providers.map((provider) => (
-                      <li key={provider.id}>
-                        <GatewayCard
-                          provider={provider}
-                          tool={tool}
-                          busy={busy}
-                          onOpenPicker={() => {
-                            setQuery("");
-                            setRenaming(null);
-                            setPickerId(provider.id);
-                          }}
-                          onRemoveModel={(model) => removeModel(tool, provider, model)}
-                          onConfigure={() => setSubPage({ providerId: provider.id })}
-                          onRemove={() => setConfirmRemove({ tool, provider })}
-                        >
-                          {pickerId === provider.id ? picker(provider) : null}
-                        </GatewayCard>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <EffectiveModels
+                  tool={tool}
+                  state={state}
+                  busy={busy}
+                  onOpenPicker={() => {
+                    setQuery("");
+                    setRenaming(null);
+                    setPickerTool(tool);
+                  }}
+                  onRemoveModel={(provider, model) => removeModel(tool, provider, model)}
+                  onConfigure={() => setGatewayOpen(true)}
+                >
+                  {pickerTool?.id === tool.id ? picker(tool) : null}
+                </EffectiveModels>
               </section>
 
               {/* 限制说明是**这个工具**的事实，不是某次操作的结果，常驻（R8） */}
@@ -837,38 +878,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
         />
       ) : null}
 
-      {/* 删网关连钥匙串里的密钥一起删，回不来。分量由信息承担，不涂红（§1.1） */}
-      {confirmRemove !== null ? (
-        <Confirm
-          title={`删掉 ${providerLabel(confirmRemove.provider)}`}
-          body="这家网关的地址、拉到的模型列表，以及钥匙串里的密钥会一起删掉。密钥删了取不回来，要用得重新填一次。"
-          warning={
-            <>
-              <span className="models-page__mono">{confirmRemove.provider.baseUrl}</span>
-              <br />
-              已选的 {selectedModels(confirmRemove.provider).length} 个模型会从{" "}
-              {confirmRemove.tool.name} 的模型列表里去掉
-              {state.enabled ? `，${confirmRemove.tool.name} 重启后生效` : ""}。
-              {/* 后端会拒的那一种：把原因和下一步摆在眼前，不让用户按完才撞上 */}
-              {removeProviderBlockedReason(state, confirmRemove.provider, confirmRemove.tool) !==
-              null ? (
-                <>
-                  <br />
-                  {removeProviderBlockedReason(state, confirmRemove.provider, confirmRemove.tool)}。
-                </>
-              ) : null}
-            </>
-          }
-          confirmLabel="连密钥一起删掉"
-          destructive
-          confirmDisabledReason={
-            removeProviderBlockedReason(state, confirmRemove.provider, confirmRemove.tool) ??
-            undefined
-          }
-          onConfirm={() => removeProvider(confirmRemove.provider)}
-          onCancel={() => setConfirmRemove(null)}
-        />
-      ) : null}
+      {removeConfirm(state)}
 
       {toast ? (
         <Toast

@@ -4,9 +4,11 @@ import { render } from "./ui-render.ts";
 import {
   MODELS_TOOLS,
   canRestore,
-  emptyModelsText,
+  effectiveModels,
+  emptyEffectiveText,
   enableDisabledReason,
   factsLine,
+  gatewaySummary,
   modelLabel,
   parseBackendError,
   providerCatalogHint,
@@ -58,7 +60,7 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
   };
 };
 
-const { ToolIntro, GatewayCard, MODELS_TAB_FULL_BLEED } = await import("../src/ModelsTab.tsx");
+const { ToolIntro, EffectiveModels, MODELS_TAB_FULL_BLEED } = await import("../src/ModelsTab.tsx");
 
 const noop = () => {};
 
@@ -303,10 +305,59 @@ test("providerCatalogHint 只说「还有多少可挑」，不重复数已选的
   );
 });
 
-test("emptyModelsText：三种空是三件事，各说各的下一步", () => {
-  assert.match(emptyModelsText(provider({ hasKey: false })), /还没有密钥/);
-  assert.match(emptyModelsText(provider({ hasKey: true })), /还没拉到模型列表/);
-  assert.equal(emptyModelsText(provider({ models: [model({ id: "m1" })] })), "还没选模型");
+test("emptyEffectiveText：三种空是三件事，各说各的下一步", () => {
+  assert.match(emptyEffectiveText(state({ providers: [provider({ hasKey: false })] })), /密钥/);
+  assert.match(
+    emptyEffectiveText(state({ providers: [provider({ hasKey: true })] })),
+    /还没拉到模型列表/,
+  );
+  assert.equal(
+    emptyEffectiveText(state({ providers: [provider({ models: [model({ id: "m1" })] })] })),
+    "还没选模型",
+  );
+});
+
+test("effectiveModels 摊平全部网关的已选模型；两家撞名时照抄后端的「 · 网关名」", () => {
+  const one = provider({
+    id: "a",
+    name: "甲",
+    models: [model({ id: "m1", displayName: "GPT-5", selected: true })],
+  });
+  const two = provider({
+    id: "b",
+    name: "乙",
+    models: [
+      model({ id: "m2", displayName: "GPT-5", selected: true }),
+      model({ id: "m3", displayName: "只此一家", selected: true }),
+    ],
+  });
+  const rows = effectiveModels(state({ providers: [one, two] }));
+  assert.deepEqual(
+    rows.map((r) => r.label),
+    ["GPT-5 · 甲", "GPT-5 · 乙", "只此一家"],
+  );
+  // 归属不能丢：片上的 title 和去掉某一个时都要知道它是哪家的
+  assert.deepEqual(
+    rows.map((r) => r.provider.id),
+    ["a", "b", "b"],
+  );
+  assert.deepEqual(effectiveModels(state({ providers: [] })), []);
+});
+
+test("gatewaySummary：主页面上那句极简事实，数字带单位", () => {
+  assert.equal(gatewaySummary(state({ providers: [] })), "还没有网关");
+  assert.equal(gatewaySummary(state()), "1 家网关 · 还没拉到模型");
+  assert.equal(
+    gatewaySummary(
+      state({
+        providers: [
+          provider({ id: "a", models: [model({ id: "m1" }), model({ id: "m2" })] }),
+          provider({ id: "b", models: [model({ id: "m3" })] }),
+        ],
+      }),
+    ),
+    "2 家网关 · 共 3 个模型可挑",
+  );
 });
 
 test("removeProviderBlockedReason：已启用时删不掉最后一家还在发布模型的网关", () => {
@@ -366,6 +417,7 @@ const introProps = (overrides: Partial<GatewayState> = {}, selectedCount = 0) =>
   onEnable: noop,
   onDisable: noop,
   onRestart: noop,
+  onConfigure: noop,
 });
 
 test("ToolIntro：图标和名字一起出现，名字走 28px display 档且不大写", () => {
@@ -410,61 +462,82 @@ test("ToolIntro 未启用且没网关：启用按钮禁用，并把原因挂在 
   assert.match(html, /先添加一个网关——填上地址和密钥就能拉到它的模型列表/);
 });
 
-// ===== 渲染：一家网关一块 =====
+// ===== 渲染：生效的模型 =====
 
-const cardProps = (p: GatewayProvider) => ({
-  provider: p,
+const effectiveProps = (overrides: Partial<GatewayState> = {}) => ({
   tool: MODELS_TOOLS[0],
+  state: state(overrides),
   busy: false,
   onOpenPicker: noop,
   onRemoveModel: noop,
   onConfigure: noop,
-  onRemove: noop,
 });
 
-test("GatewayCard 有密钥：实心圆点、地址并进身份行、已选模型是带 × 的紧凑片", () => {
+test("EffectiveModels：生效的模型摆在主页面上，整块可点，改选不进二级页", () => {
   const html = render(
-    GatewayCard,
-    cardProps(
-      provider({
-        models: [
-          model({ id: "m1", displayName: "GPT 5", selected: true }),
-          model({ id: "m2", displayName: "Claude", selected: true }),
-          model({ id: "m3" }),
-        ],
-      }),
-    ),
+    EffectiveModels,
+    effectiveProps({
+      providers: [
+        provider({
+          models: [
+            model({ id: "m1", displayName: "GPT 5", selected: true }),
+            model({ id: "m2", displayName: "Claude", selected: true }),
+            model({ id: "m3" }),
+          ],
+        }),
+      ],
+    }),
   );
-  // 圆＝只读状态（钥匙串里有没有这家的密钥）
-  assert.match(html, /class="ss-dot ss-dot--linked"/);
-  assert.doesNotMatch(html, /models-tag/);
-  assert.match(html, /class="models-card__name">wecode</);
-  assert.match(html, /class="models-card__url"[^>]*>https:\/\/example\.com\/openai</);
-  // 已选的摆在片上，就不再数第二遍；右端只说还有多少可挑
-  assert.doesNotMatch(html, /已选 2 个/);
-  assert.match(html, /class="models-card__catalog">3 个可选</);
   // 片不反色：它们是事实，不是正在选的东西
-  assert.match(html, /class="ss-model-chip"><span class="ss-model-chip__label">GPT 5</);
+  assert.match(html, /class="ss-model-chip"><span class="ss-model-chip__label"[^>]*>GPT 5</);
   assert.match(html, /title="把 Claude 从 Codex 的模型列表里去掉"/);
-  // 已选模型就在主页面上改，整块区域可点，不另给链接、也不进二级页（与 cc-switch 的差异点）
+  // 整块可点（差异点：不退化成「进二级页选」）
   assert.match(
     html,
-    /class="models-card__models" role="button" tabindex="0" title="点一下改选模型"/,
+    /class="models-effective__box" role="button" tabindex="0" title="点一下改选模型"/,
   );
   assert.doesNotMatch(html, /改选模型<\/button>/);
+  // 网关本身（地址、密钥、增删）搬去配置页了，主页面上不出现
+  assert.doesNotMatch(html, /https:\/\/example\.com/);
+  assert.doesNotMatch(html, /还没有密钥/);
+  assert.doesNotMatch(html, /添加网关/);
 });
 
-test("GatewayCard 没密钥：空心圆点 + 零圆角方标签，空态说清为什么空", () => {
-  const html = render(GatewayCard, cardProps(provider({ hasKey: false })));
-  assert.match(html, /class="ss-dot ss-dot--missing"/);
-  assert.match(html, /class="models-tag">还没有密钥</);
-  assert.match(html, /class="models-card__empty">还没有密钥——到「配置」里填上就能拉到模型列表</);
-  // 一个都没拉到时右端那句不出现，左边的空态已经把话说了
-  assert.doesNotMatch(html, /models-card__catalog/);
+test("EffectiveModels 两家网关撞名：片上照抄后端会加的「 · 网关名」", () => {
+  const html = render(
+    EffectiveModels,
+    effectiveProps({
+      providers: [
+        provider({
+          id: "a",
+          name: "甲",
+          models: [model({ id: "m1", displayName: "GPT-5", selected: true })],
+        }),
+        provider({
+          id: "b",
+          name: "乙",
+          models: [model({ id: "m2", displayName: "GPT-5", selected: true })],
+        }),
+      ],
+    }),
+  );
+  assert.match(html, /GPT-5 · 甲/);
+  assert.match(html, /GPT-5 · 乙/);
+  // 归属也挂在片的 title 上
+  assert.match(html, /title="来自网关 甲"/);
 });
 
-test("GatewayCard 拉到了模型但一个都没选：空态说的是「还没选模型」", () => {
-  const html = render(GatewayCard, cardProps(provider({ models: [model({ id: "m1" })] })));
-  assert.match(html, /class="models-card__empty">还没选模型</);
-  assert.match(html, /class="models-card__catalog">1 个可选</);
+test("EffectiveModels 一家网关都没有：整块换成空态，把人送去配置页", () => {
+  const html = render(EffectiveModels, effectiveProps({ providers: [] }));
+  assert.doesNotMatch(html, /models-effective__box/);
+  assert.match(html, /还没有网关。到「配置网关」里加一家，它的模型才能进 Codex 的模型列表。/);
+  assert.match(html, />配置网关</);
+});
+
+test("EffectiveModels 有网关但还没选：空态说清为什么空", () => {
+  const html = render(
+    EffectiveModels,
+    effectiveProps({ providers: [provider({ models: [model({ id: "m1" })] })] }),
+  );
+  assert.match(html, /class="models-effective__hint">还没选模型</);
 });
