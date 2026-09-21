@@ -450,8 +450,8 @@ test("ToolIntro 已启用：一句人话、一行等宽事实，开关是反色 
   // 反色＝现在开着（DESIGN components.button-inverse）
   assert.match(html, /class="ss-btn ss-btn--inverse"[^>]*>已启用</);
   // 重启是这个工具的动作，按钮上带着它的名字；button-cap 是大写档，
-  // 但专名原样不转大写（§1.2），所以名字裹在 .models-plain 里
-  assert.match(html, /重启 <span class="models-plain">Codex<\/span>/);
+  // 但专名原样不转大写（§1.2），所以名字裹在 <Plain>（.ss-plain）里
+  assert.match(html, /重启 <span class="ss-plain">Codex<\/span>/);
   // 三组状态词合成一句，不并排三个徽标（AC2）
   assert.doesNotMatch(html, /models-tool__badge/);
 });

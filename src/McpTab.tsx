@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { MICRO_CAP, MONO, TAG_SQUARE } from "./ui/text";
+import { MICRO_CAP, MONO } from "./ui/text";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import { ActionButton, dim } from "./DomainView";
@@ -32,6 +32,7 @@ import {
   StateDot,
   Toast,
   type ToastKind,
+  TagSquare,
 } from "./ui";
 import type {
   McpAutoImportRule,
@@ -976,9 +977,9 @@ function McpDomainView({
                 </label>
                 {/* 差异是行级事实，不进格（R2）：两处各有一份、连的地址不一样 */}
                 {differing.length > 0 && (
-                  <span style={TAG_SQUARE} title={differentCopiesTitle(differing.map(labelOf))}>
+                  <TagSquare title={differentCopiesTitle(differing.map(labelOf))}>
                     {differentCopiesTag(differing.length)}
-                  </span>
+                  </TagSquare>
                 )}
               </td>
               <td className="mcp-transport">{transports.join(" / ")}</td>

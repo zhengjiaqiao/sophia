@@ -612,3 +612,29 @@
   opacity: var(--busy-dim);
   pointer-events: none;
 }
+
+/* ===== 零圆角方标签（DESIGN tag-square）：不可点的标识 ===== */
+.ss-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: 1.4;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ss-tag--weak {
+  border-color: var(--hairline);
+  color: var(--ink-faint);
+}
+
+/* 大写档里嵌专名：关掉整段的 text-transform（见 Plain.tsx） */
+.ss-plain {
+  text-transform: none;
+}

@@ -37,6 +37,7 @@ import {
   ErrorBanner,
   RowNotice,
   Toast,
+  Plain,
 } from "./ui/index.ts";
 import type { ToastKind } from "./ui/index.ts";
 import { GatewayPage } from "./pages/GatewayPage.tsx";
@@ -162,7 +163,7 @@ export function ToolIntro({
             {/* button-cap 自带 uppercase，会把 Codex 变成 CODEX。「重启」是我们写的
                 结构词该大写，工具名是被谈论的对象不该大写（§1.2），所以名字单独
                 裹一层把大写关掉 */}
-            重启 <span className="models-plain">{tool.name}</span>
+            重启 <Plain>{tool.name}</Plain>
           </Button>
 
           {/* 网关的地址、密钥、增删改全在配置页；主页面只展示生效的模型（第三轮反馈） */}

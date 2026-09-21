@@ -96,10 +96,6 @@
 
 /* 大写档（按钮、区域标签）里嵌进来的专名：原样，不做大小写转换（§1.2）。
    `defuddle` 被转成 `DEFUDDLE` 后跟表格里的名字就对不上了，工具名同理 */
-.models-plain {
-  text-transform: none;
-}
-
 .models-tool__actions {
   display: flex;
   align-items: center;
