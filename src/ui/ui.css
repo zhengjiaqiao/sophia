@@ -463,8 +463,11 @@
   align-items: center;
   gap: var(--space-md);
   box-sizing: border-box;
-  height: 56px;
+  /* 红绿灯那 28px 留空（tokens.css --titlestrip），和主视图顶栏同一条规矩。
+     padding-top 必须写在 padding 简写之后，否则被它归零 */
+  height: calc(var(--titlestrip) + var(--topbar));
   padding: 0 var(--space-xxl);
+  padding-top: var(--titlestrip);
   border-bottom: 1px solid var(--hairline);
   flex-shrink: 0;
 }
@@ -611,4 +614,30 @@
 .ss-busy {
   opacity: var(--busy-dim);
   pointer-events: none;
+}
+
+/* ===== 零圆角方标签（DESIGN tag-square）：不可点的标识 ===== */
+.ss-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  line-height: 1.4;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ss-tag--weak {
+  border-color: var(--hairline);
+  color: var(--ink-faint);
+}
+
+/* 大写档里嵌专名：关掉整段的 text-transform（见 Plain.tsx） */
+.ss-plain {
+  text-transform: none;
 }

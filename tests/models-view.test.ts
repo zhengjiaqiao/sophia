@@ -208,14 +208,15 @@ test("sortAndFilterModels 空筛选词返回全部；无匹配返回空数组", 
   assert.deepEqual(sortAndFilterModels(models, "找不到"), []);
 });
 
-test("statusSentence 把三组正交的状态词合成一句人话，不并排三个徽标", () => {
-  // 已启用：说清有几个模型在 Codex 的列表里；needsCodexRestart 并进同一句
-  assert.equal(statusSentence(state({ enabled: true }), 3), "3 个模型已经在 Codex 的模型列表里");
+test("statusSentence 把三组正交的状态词合成一句人话，只说状态不教操作", () => {
+  // 已启用：几个模型；needsCodexRestart 并进同一句
+  assert.equal(statusSentence(state({ enabled: true }), 3), "已启用 · 3 个模型");
   assert.equal(
     statusSentence(state({ enabled: true, needsCodexRestart: true }), 3),
-    "3 个模型已经在 Codex 的模型列表里，改动要重启 Codex 才生效",
+    "已启用 · 3 个模型 · 改动要重启 Codex 才生效",
   );
-  // 未启用：按「为什么还不能启用」的优先级给出下一步
+  // 未启用：按「为什么还不能启用」的优先级说状态。**不写「点「启用」就会…」这种
+  // 教操作的话**——按钮就在旁边（DESIGN「模型页」第三行，用户反馈说明文字太多）
   assert.match(
     statusSentence(state({ takeover: { baseUrl: "x", selectedCount: 2 } }), 0),
     /接过来/,
@@ -224,13 +225,13 @@ test("statusSentence 把三组正交的状态词合成一句人话，不并排�
     statusSentence(state({ conflict: "已有 model_provider" }), 1),
     "还没启用：已有 model_provider",
   );
-  assert.match(statusSentence(state({ providers: [] }), 0), /先添加一个网关/);
+  assert.equal(statusSentence(state({ providers: [] }), 0), "还没有网关");
   assert.match(statusSentence(state({ providers: [provider({ hasKey: false })] }), 0), /密钥/);
-  assert.equal(statusSentence(state(), 0), "还没启用，先选几个模型");
-  assert.equal(
-    statusSentence(state(), 2),
-    "还没启用，选好的 2 个模型点「启用」就会进 Codex 的模型列表",
-  );
+  assert.equal(statusSentence(state(), 0), "还没选模型");
+  assert.equal(statusSentence(state(), 2), "还没启用");
+  for (const s of [statusSentence(state(), 2), statusSentence(state({ providers: [] }), 0)]) {
+    assert.doesNotMatch(s, /点「|就会|先到|先添加|先选/, "状态句不教操作");
+  }
 });
 
 test("factsLine 只说查得到的事实：读不出 Codex 版本就不编一个", () => {
@@ -393,8 +394,8 @@ test("MODELS_TOOLS：版面按工具分块；今天只有 Codex，但名字一�
 test("工具名可换：statusSentence / factsLine 不把工具写死在句子里", () => {
   const other: ModelsTool = { id: "other", name: "别的工具", limitations: "…" };
   assert.equal(
-    statusSentence(state({ enabled: true }), 2, other),
-    "2 个模型已经在 别的工具 的模型列表里",
+    statusSentence(state({ enabled: true, needsCodexRestart: true }), 2, other),
+    "已启用 · 2 个模型 · 改动要重启 别的工具 才生效",
   );
   assert.equal(
     factsLine(
@@ -404,7 +405,7 @@ test("工具名可换：statusSentence / factsLine 不把工具写死在句子�
     "别的工具 1.2 · 路由未安装",
   );
   // 菜单栏面板调的是两参数的老形，仍然说 Codex，两边一句话
-  assert.equal(statusSentence(state({ enabled: true }), 2), "2 个模型已经在 Codex 的模型列表里");
+  assert.equal(statusSentence(state({ enabled: true }), 2), "已启用 · 2 个模型");
 });
 
 // ===== 渲染：一个工具的抬头 =====
@@ -442,16 +443,17 @@ test("ToolIntro 已启用：一句人话、一行等宽事实，开关是反色 
       3,
     ),
   );
+  assert.match(html, /class="models-tool__sentence">已启用 · 3 个模型 · 改动要重启 Codex 才生效</);
+  // 事实与网关摘要合成一行（DESIGN「模型页」：一个 agent 占一行加一行说明）
   assert.match(
     html,
-    /class="models-tool__sentence">3 个模型已经在 Codex 的模型列表里，改动要重启 Codex 才生效</,
+    /class="models-tool__facts">Codex 0\.43\.0 · 路由 127\.0\.0\.1:8765 运行中 · /,
   );
-  assert.match(html, /class="models-tool__facts">Codex 0\.43\.0 · 路由 127\.0\.0\.1:8765 运行中</);
   // 反色＝现在开着（DESIGN components.button-inverse）
   assert.match(html, /class="ss-btn ss-btn--inverse"[^>]*>已启用</);
   // 重启是这个工具的动作，按钮上带着它的名字；button-cap 是大写档，
-  // 但专名原样不转大写（§1.2），所以名字裹在 .models-plain 里
-  assert.match(html, /重启 <span class="models-plain">Codex<\/span>/);
+  // 但专名原样不转大写（§1.2），所以名字裹在 <Plain>（.ss-plain）里
+  assert.match(html, /重启 <span class="ss-plain">Codex<\/span>/);
   // 三组状态词合成一句，不并排三个徽标（AC2）
   assert.doesNotMatch(html, /models-tool__badge/);
 });
@@ -459,7 +461,7 @@ test("ToolIntro 已启用：一句人话、一行等宽事实，开关是反色 
 test("ToolIntro 未启用且没网关：启用按钮禁用，并把原因挂在 title 上", () => {
   const html = render(ToolIntro, introProps({ providers: [] }, 0));
   assert.match(html, /title="先添加一个网关" disabled=""/);
-  assert.match(html, /先添加一个网关——填上地址和密钥就能拉到它的模型列表/);
+  assert.match(html, /先添加一个网关/);
 });
 
 // ===== 渲染：生效的模型 =====
@@ -540,4 +542,16 @@ test("EffectiveModels 有网关但还没选：空态说清为什么空", () => {
     effectiveProps({ providers: [provider({ models: [model({ id: "m1" })] })] }),
   );
   assert.match(html, /class="models-effective__hint">还没选模型</);
+});
+
+test("ToolIntro：一张卡三行——身份与动作、生效的模型、状态句（DESIGN「模型页」）", () => {
+  const html = render(ToolIntro, { ...introProps({ enabled: true }, 3), models: "MODELS-SLOT" });
+  // 卡片三行（DESIGN「模型页」）：第一行名字与动作，第二行模型区，第三行状态句；
+  // 没有独立的「生效的模型」区块标题
+  const name = html.indexOf('class="models-tool__name"');
+  const actions = html.indexOf('class="models-tool__actions"');
+  const slot = html.indexOf("MODELS-SLOT");
+  const line = html.indexOf('class="models-tool__line"');
+  assert.ok(name < actions && actions < slot && slot < line, "名字与动作 → 模型区 → 状态句");
+  assert.doesNotMatch(html, /生效的模型/);
 });

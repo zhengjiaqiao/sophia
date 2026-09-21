@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { MICRO_CAP, MONO, TAG_SQUARE } from "./ui/text";
+import { MICRO_CAP, MONO } from "./ui/text";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import { ActionButton, dim } from "./DomainView";
@@ -32,6 +32,7 @@ import {
   StateDot,
   Toast,
   type ToastKind,
+  TagSquare,
 } from "./ui";
 import type {
   McpAutoImportRule,
@@ -46,7 +47,7 @@ import type {
 import "./McpTab.css";
 
 /// MCP 页。**和 Skill 页是同一个界面，只是内容不同**（spec 核心判断）：
-/// 一批东西 × 一批位置的矩阵、自动规则行、引入页、待处理栏，骨架整套复用 SkillsTab。
+/// 一批东西 × 一批位置的矩阵、自动规则行、导入页、待处理栏，骨架整套复用 SkillsTab。
 ///
 /// MCP 特有的四处差异（spec §设计）：
 /// 1. **格是单向的**——只有「写进去」，没有「拿掉」（core 只新增、不删条目）。
@@ -180,7 +181,7 @@ export default function McpTab({
     void listen<McpReport>("mcp-auto-imported", ({ payload }) => {
       const n = payload.entries.filter((entry) => entry.outcome === "created").length;
       if (n === 0) return;
-      setNotice({ kind: "success", message: `自动引入写进了 ${n} 处`, stats: `${n} 处新增` });
+      setNotice({ kind: "success", message: `自动导入写进了 ${n} 处`, stats: `${n} 处新增` });
     }).then((un) => (disposed ? un() : unlistens.push(un)));
     return () => {
       disposed = true;
@@ -249,7 +250,7 @@ export default function McpTab({
     if (row.entries.every((entry) => entry.transport === "unsupported" || entry.reason !== null)) {
       return `${row.name} 用了只有 ${labelOf(row.entries[0].sourceId)} 认得的写法，搬到别处就不是原来那个了`;
     }
-    return `有好几份不一样的同名 ${row.name}，用「引入 MCP」指定用哪一份`;
+    return `有好几份不一样的同名 ${row.name}，用「导入 MCP」指定用哪一份`;
   };
 
   /// 点行首复选框：Shift 时把锚点到本行之间（按当前显示顺序）的行都设成本次的状态
@@ -410,7 +411,7 @@ export default function McpTab({
     }
     const source = sourceForMissingTarget(row, target.id);
     if (source === null) {
-      // 有好几份不等价的同名来源，必须指定用哪一份 → 交给引入页
+      // 有好几份不等价的同名来源，必须指定用哪一份 → 交给导入页
       setImportPageOverride(page);
       setImportTargetIds([target.id]);
       setImportOpen(true);
@@ -528,7 +529,7 @@ export default function McpTab({
     pane !== null &&
     pane.preview.actions.some((action) => locationOf(action.targetId)?.harnessId === "weiboap");
 
-  // 引入只对单个域有意义：「全部」页没有确定的目标域
+  // 导入只对单个域有意义：「全部」页没有确定的目标域
   const sidebarImportPage = pages[0] ?? null;
   const importPage = importPageOverride ?? sidebarImportPage;
 
@@ -545,7 +546,7 @@ export default function McpTab({
           disabledReason="请先在侧栏选一个位置"
           title="从别处搬一份完整定义过来"
         >
-          引入 MCP
+          导入 MCP
         </ActionButton>
       </div>
 
@@ -611,7 +612,7 @@ export default function McpTab({
         <Empty
           kind="noAgentDirs"
           description="这个位置下还没有可用的 MCP 配置位置。"
-          hint="引入第一个服务时会把配置文件建出来。"
+          hint="导入第一个服务时会把配置文件建出来。"
         />
       ) : (
         pages.map((page) => (
@@ -810,7 +811,7 @@ export default function McpTab({
   );
 }
 
-/// 一个域的整页：筛选片、自动引入行、行×位置的矩阵
+/// 一个域的整页：筛选片、自动导入行、行×位置的矩阵
 function McpDomainView({
   page,
   rows: visible,
@@ -976,9 +977,9 @@ function McpDomainView({
                 </label>
                 {/* 差异是行级事实，不进格（R2）：两处各有一份、连的地址不一样 */}
                 {differing.length > 0 && (
-                  <span style={TAG_SQUARE} title={differentCopiesTitle(differing.map(labelOf))}>
+                  <TagSquare title={differentCopiesTitle(differing.map(labelOf))}>
                     {differentCopiesTag(differing.length)}
-                  </span>
+                  </TagSquare>
                 )}
               </td>
               <td className="mcp-transport">{transports.join(" / ")}</td>
@@ -1047,7 +1048,7 @@ function McpDomainView({
         </div>
       )}
 
-      {/* 自动引入行：只读一行，顶多关掉。不展开、没有展开箭头（R5、§12） */}
+      {/* 自动导入行：只读一行，顶多关掉。不展开、没有展开箭头（R5、§12） */}
       {localRules.map(({ rule, local }) => (
         <div
           key={`${rule.source.id}|${rule.targetDomain}`}
@@ -1060,7 +1061,7 @@ function McpDomainView({
             marginBottom: 10,
           }}
         >
-          <span style={MICRO_CAP}>自动引入</span>
+          <span style={MICRO_CAP}>自动导入</span>
           <span style={{ fontSize: "var(--size-body)" }}>
             {nameOfRef(rule.source)} <span style={{ color: "var(--ink-faint)" }}>→</span>{" "}
             {rule.targets.map(nameOfRef).join(" · ")}
@@ -1096,14 +1097,14 @@ function McpDomainView({
             kind="noSkills"
             description="这里没有能复制的完整定义。"
             hint="WeiboAP 里启用的只是服务名，不是可搬运的定义；从别处引一份过来。"
-            primary={{ label: "引入 MCP", onClick: onImport }}
+            primary={{ label: "导入 MCP", onClick: onImport }}
           />
         ) : (
           <Empty
             kind="noSkills"
             description={`${page.label} 还没有自己的 MCP 配置。`}
-            hint="引入第一个服务时会把配置文件建出来。"
-            primary={{ label: "引入 MCP", onClick: onImport }}
+            hint="导入第一个服务时会把配置文件建出来。"
+            primary={{ label: "导入 MCP", onClick: onImport }}
           />
         ))}
     </div>

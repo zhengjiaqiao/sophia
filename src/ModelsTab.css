@@ -41,15 +41,6 @@
   font-size: var(--size-micro);
 }
 
-.models-page__intro {
-  margin: 0;
-  max-width: 560px;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-}
-
 /* ===== 一个工具一块 =====
    块与块之间隔 48 并压一条 ink：这是页面里的大区块（DESIGN「Layout」）。
    今天只有一块，看不见这条线，但版面不假设只有一块。 */
@@ -59,19 +50,28 @@
   list-style: none;
 }
 
+/* 一个 agent 一张卡（DESIGN「模型页」）：hairline 描边、零圆角，卡片之间 16。
+   第一版是「区域标题 + 介绍 + 分隔线 + 说明段」的文档式排版，用户反馈"很乱" */
 .models-tool {
-  margin-top: var(--space-huge);
+  box-sizing: border-box;
+  padding: var(--space-md) var(--space-xl);
+  border: 1px solid var(--hairline);
 }
 
 .models-tool + .models-tool {
-  padding-top: var(--space-huge);
-  border-top: 1px solid var(--ink);
+  margin-top: var(--space-md);
 }
 
+/* 卡片第二行：生效的模型，与第一行之间 12 */
+.models-tool__models {
+  margin-top: var(--space-sm);
+}
+
+/* 一行一个 agent：名字 | 生效的模型（弹性占满中间）| 动作（DESIGN「模型页」） */
 .models-tool__head {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-md);
 }
 
 .models-tool__mark {
@@ -96,10 +96,6 @@
 
 /* 大写档（按钮、区域标签）里嵌进来的专名：原样，不做大小写转换（§1.2）。
    `defuddle` 被转成 `DEFUDDLE` 后跟表格里的名字就对不上了，工具名同理 */
-.models-plain {
-  text-transform: none;
-}
-
 .models-tool__actions {
   display: flex;
   align-items: center;
@@ -107,19 +103,23 @@
   margin-left: auto;
 }
 
+/* 行下一行说明：状态句 + 等宽事实 + 网关摘要合成一行，一个 agent 占一行加一行 */
+.models-tool__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xxs) var(--space-md);
+  margin: var(--space-sm) 0 0;
+}
 /* 三组状态词合成的那一句人话（R2）。它是主文字，不退到次要色——要读的就是它 */
 .models-tool__sentence {
-  margin: var(--space-sm) 0 0;
-  max-width: 560px;
   font-family: var(--font-ui);
-  font-size: var(--size-body);
-  line-height: var(--leading-body);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
   color: var(--ink);
 }
-
 /* 版本号与端口是计数类事实，走等宽（§1.2） */
 .models-tool__facts {
-  margin: var(--space-xxs) 0 0;
   font-family: var(--font-mono);
   font-size: var(--size-micro);
   color: var(--ink-faint);
@@ -127,32 +127,6 @@
 
 .models-tool__notice {
   margin-top: var(--space-md);
-}
-
-/* ===== 网关区 =====
-   区块之间 48（DESIGN「Layout」）。分区靠分隔线，不靠再套一层框。 */
-.models-section {
-  margin-top: var(--space-huge);
-}
-
-.models-section__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-xs);
-}
-
-.models-section__action {
-  margin-left: auto;
-}
-
-/* 那句极简的网关事实，靠右、等宽（§1.2）。它是进配置页的由头，本身不可点——
-   动作是抬头那颗「配置网关」按钮，一件事不给两个入口 */
-.models-section__summary {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
 }
 
 /* ===== 生效的模型 =====
@@ -163,8 +137,7 @@
 }
 
 .models-effective__empty {
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--ink);
+  padding: 0;
 }
 
 /* 整块可点，点哪儿都开选择器。hairline 描边的块 hover 转 ink 描边、**底色不变**
@@ -431,18 +404,3 @@
 }
 
 /* ===== 限制说明：这个工具的事实，常驻、不随操作消失（R8） ===== */
-/* 与网关区之间 48：块里的大段落之间（DESIGN「Layout」） */
-.models-tool__limits {
-  max-width: 560px;
-  margin-top: var(--space-huge);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--hairline);
-}
-
-.models-tool__limits-text {
-  margin: var(--space-xs) 0 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-  line-height: var(--leading-caption);
-}

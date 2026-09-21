@@ -7,8 +7,10 @@ import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
+import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { PendingPage } from "./pages/PendingPage";
 import { IconSettings } from "./ui";
+import wordmark from "../assets/logo/wordmark.svg";
 import "./App.css";
 
 /// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
@@ -25,6 +27,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   /// 二级页面（§4.6）：占满整窗、不渲染侧栏。null＝主视图
   const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
+  /// 启动时后台查一次新版。**必须静默失败**：`plugins.updater.pubkey` 没填之前
+  /// check() 一定报错，进横幅的话每次开应用先看见一条错。null＝查过没有 / 没查成
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   /// 模型路由比 skill、MCP 都高频，所以它排第一个 tab，也是启动默认页。
   /// 后端说不支持（非 macOS）时这一页根本不存在，届时退回 Skills，见 applyModelsSupported
   const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("models");
@@ -33,7 +38,7 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   // 手动添加的项目路径，用来判断侧栏哪些域可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
-  // 自动同步规则；扫描时顺带取回，域页与引入弹层都用它
+  // 自动同步规则；扫描时顺带取回，域页与导入弹层都用它
   const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
   // MCP 扫描到的域独立于 skills；例如没有 skill 的 WeiboAP agent 也能在 MCP 页选择。
   const [mcpSidebarDomains, setMcpSidebarDomains] = useState<SidebarDomain[]>([]);
@@ -102,6 +107,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    void checkUpdate().then(
+      (found) => setPendingUpdate(found ?? null),
+      () => setPendingUpdate(null),
+    );
+  }, []);
+
+  useEffect(() => {
     let disposed = false;
     const unlistens: Array<() => void> = [];
     const collect = (pending: Promise<() => void>) => {
@@ -110,7 +122,7 @@ export default function App() {
     collect(listen("fs-changed", () => requestRefresh()));
     collect(
       listen<McpReport>("mcp-auto-imported", ({ payload }) => {
-        // MCP 页有自己的结果框；停留在 Skills 页时也不能丢掉自动引入结果。
+        // MCP 页有自己的结果框；停留在 Skills 页时也不能丢掉自动导入结果。
         if (activeTabRef.current === "skills") setBackgroundMcpReport(payload);
       }),
     );
@@ -239,7 +251,7 @@ export default function App() {
   };
 
   if (subPage === "settings") {
-    return <SettingsPage onBack={closeSubPage} onError={setError} />;
+    return <SettingsPage onBack={closeSubPage} onError={setError} initialUpdate={pendingUpdate} />;
   }
   if (subPage === "pending") {
     return (
@@ -256,8 +268,12 @@ export default function App() {
     <div className="app">
       {/* 顶栏独立于侧栏：模型页不要侧栏（它不分项目、不分域），
           而字标与页签不能跟着侧栏一起消失 */}
-      <header className="topbar">
-        <h1>Sophia</h1>
+      {/* 系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，左边给红绿灯让位 */}
+      <header className="topbar" data-tauri-drag-region>
+        {/* 字标用资产不用纯文本：首字母的重影是这个标志的识别点（DESIGN「壳」） */}
+        <h1>
+          <img src={wordmark} alt="Sophia" className="wordmark" />
+        </h1>
         {/* 顺序即高频程度：模型路由天天用，排第一个；MCP 那条线叫「导入 MCP」，
             与 skill 的二级页「导入 skill」成对，一级 tab 与二级页不重名 */}
         <nav aria-label="功能" style={{ display: "flex", gap: 4 }}>
@@ -415,7 +431,7 @@ export default function App() {
         <div className="floating">
           <div className="report">
             <div className="report-head">
-              <strong>MCP 自动引入结果</strong>
+              <strong>MCP 自动导入结果</strong>
               <button className="link" onClick={() => setBackgroundMcpReport(null)}>
                 关闭
               </button>

@@ -44,3 +44,7 @@ export type { AgentIconProps, AgentMarkProps } from "./AgentMark.tsx";
 
 export { Busy, Empty } from "./Empty.tsx";
 export type { BusyProps, EmptyAction, EmptyKind, EmptyProps } from "./Empty.tsx";
+
+export { TagSquare } from "./TagSquare.tsx";
+export type { TagSquareProps } from "./TagSquare.tsx";
+export { Plain } from "./Plain.tsx";

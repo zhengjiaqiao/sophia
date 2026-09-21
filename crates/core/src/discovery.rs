@@ -444,17 +444,42 @@ pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec
 /// 逐路径分量判断：字符串 `contains(".app")` 会被 `my.application` 骗到。
 /// 路径本身留在 `id` 和 `path` 字段里，界面放 `title`
 fn external_label(path: &Path) -> String {
-    for component in path.components() {
-        let Component::Normal(name) = component else {
-            continue;
-        };
-        let name = name.to_string_lossy();
-        // 嵌套应用包取最外层那个：它才是用户装的那个应用
-        if let Some(app) = name.strip_suffix(".app").filter(|a| !a.is_empty()) {
-            return app.to_owned();
+    let names: Vec<String> = path
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(n) => Some(n.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    // 应用包：取最外层那个 .app（嵌套时它才是用户装的那个应用）
+    if let Some(app) = names
+        .iter()
+        .find_map(|n| n.strip_suffix(".app").filter(|a| !a.is_empty()))
+    {
+        return app.to_owned();
+    }
+    // macOS 应用数据目录：`~/Library/Application Support/<应用>/…` 里的东西归那个应用
+    if let Some(i) = names.iter().position(|n| n == "Application Support") {
+        if let Some(app) = names.get(i + 1) {
+            return app.clone();
         }
     }
-    dir_name(path)
+    // 其余：从末尾往上找第一个不是「skills」这类泛称的分量。`~/.local/share/ego/skills`
+    // 该叫 ego 不该叫 skills——末尾一级几乎总是泛称，光取它三个来源会撞成一个名字
+    names
+        .iter()
+        .rev()
+        .find(|n| !is_generic_dir_name(n))
+        .cloned()
+        .unwrap_or_else(|| dir_name(path))
+}
+
+/// 目录名里没有信息量的那几个：标签跳过它们往上取
+fn is_generic_dir_name(name: &str) -> bool {
+    matches!(
+        name.trim_start_matches('.').to_ascii_lowercase().as_str(),
+        "skills" | "skill" | "plugins" | "internal-plugins" | "resources" | "share" | "data"
+    )
 }
 
 /// 所有可写目标：每个启用 harness 各自一列——全局目录、per-agent 目录、每个项目的项目目录。
@@ -1209,8 +1234,14 @@ mod tests {
             ),
             ("/Applications/Foo.app/Contents/Resources/skills", "Foo"),
             ("/Users/me/.local/share/ego/ego-skills", "ego-skills"),
-            // `.application` 不是应用包，不能被字符串匹配骗到
-            ("/x/my.application/skills", "skills"),
+            // 末尾是「skills」这类泛称时往上取：三个外部目录都叫 skills 就分不清了
+            ("/Users/me/.local/share/ego/skills", "ego"),
+            (
+                "/Users/me/Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
+                "WeiboAP",
+            ),
+            // `.application` 不是应用包，不能被字符串匹配骗到；末尾泛称往上取到 my.application
+            ("/x/my.application/skills", "my.application"),
         ];
         for (path, want) in cases {
             assert_eq!(external_label(Path::new(path)), want, "{path}");

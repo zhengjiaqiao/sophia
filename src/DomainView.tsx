@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { MICRO_CAP, MONO, TAG_SQUARE } from "./ui/text";
+import { MICRO_CAP, MONO } from "./ui/text";
 import { api } from "./api";
 import { viewOf } from "./cellState";
 import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
@@ -132,9 +132,6 @@ export default function DomainView({
       source?.skills.find((sk) => sk.name === skill)?.path ?? join(source?.path ?? sourceId, skill)
     );
   };
-
-  const isExternal = (sourceId: string) =>
-    overview.sources.find((s) => s.id === sourceId)?.kind.type === "external";
 
   const targetLabelOf = (targetId: string) =>
     page.targets.find((t) => t.id === targetId)?.label ?? targetId;
@@ -312,7 +309,6 @@ export default function DomainView({
                 </label>
               </td>
               <td className="path">
-                {isExternal(row.sourceId) && <span style={TAG_SQUARE}>外部</span>}
                 <Button
                   variant="link"
                   title={skillPathOf(row.sourceId, row.skill)}

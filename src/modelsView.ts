@@ -215,25 +215,19 @@ export function statusSentence(
   selectedCount: number,
   tool: ModelsTool = CODEX,
 ): string {
+  // 只说状态，不教操作——按钮就在旁边（DESIGN「模型页」第三行）。
+  // 第一版写「选好的 N 个模型点「启用」就会进 Codex 的模型列表」，用户反馈说明文字太多
   if (state.enabled) {
     const head =
-      selectedCount > 0
-        ? `${selectedCount} 个模型已经在 ${tool.name} 的模型列表里`
-        : `已经启用，但一个模型都没选，${tool.name} 的列表里还是只有官方模型`;
-    return state.needsCodexRestart ? `${head}，改动要重启 ${tool.name} 才生效` : head;
+      selectedCount > 0 ? `已启用 · ${selectedCount} 个模型` : "已启用，但一个模型都没选";
+    return state.needsCodexRestart ? `${head} · 改动要重启 ${tool.name} 才生效` : head;
   }
-  if (state.takeover !== null) {
-    return `还没启用，${tool.name} 现在只有官方模型——这台机器由 agents-manager 在管，接过来才能启用`;
-  }
+  if (state.takeover !== null) return "由 agents-manager 在管，接过来才能启用";
   if (state.conflict) return `还没启用：${state.conflict}`;
-  if (state.providers.length === 0) {
-    return "还没启用，先添加一个网关——填上地址和密钥就能拉到它的模型列表";
-  }
-  if (!state.providers.some((provider) => provider.hasKey)) {
-    return "还没启用，先到网关的「配置」里填上密钥";
-  }
-  if (selectedCount === 0) return "还没启用，先选几个模型";
-  return `还没启用，选好的 ${selectedCount} 个模型点「启用」就会进 ${tool.name} 的模型列表`;
+  if (state.providers.length === 0) return "还没有网关";
+  if (!state.providers.some((provider) => provider.hasKey)) return "网关还没有密钥";
+  if (selectedCount === 0) return "还没选模型";
+  return "还没启用";
 }
 
 /**

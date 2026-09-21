@@ -80,7 +80,7 @@ export function differingSourceIds(row: McpDomainRow, targetIds: Set<string>): s
   return ids;
 }
 
-/// 域名：全局 / 项目 · <目录名>。侧栏、引入页、跨域说明共用这一份
+/// 域名：全局 / 项目 · <目录名>。侧栏、导入页、跨域说明共用这一份
 export const mcpDomainLabel = (key: string): string => {
   if (key === "global") return "全局";
   const path = key.startsWith("project:") ? key.slice("project:".length) : key;
@@ -95,7 +95,7 @@ const weiboAgentLabel = (key: string): string => {
 const hasMissingTarget = (entry: McpEntry, targetIds: Set<string>) =>
   entry.cells.some((cell) => targetIds.has(cell.targetId) && cell.state === "missing");
 
-/** 已在本域部分引入的来源，仍可向选中的缺失目标补齐。 */
+/** 已在本域部分导入的来源，仍可向选中的缺失目标补齐。 */
 export const canSupplement = (entry: McpEntry, targetIds: Set<string>) =>
   entry.reason === null && entry.transport !== "unsupported" && hasMissingTarget(entry, targetIds);
 
@@ -112,7 +112,7 @@ const equivalent = (a: McpEntry, b: McpEntry): boolean => {
 
 /**
  * 为主表“补齐”选择安全的明确来源。
- * 多个能补齐的来源只有在扫描已证明完全等价时才自动使用；否则要求从引入弹窗选来源。
+ * 多个能补齐的来源只有在扫描已证明完全等价时才自动使用；否则要求从导入弹窗选来源。
  */
 export function sourceForMissing(row: McpDomainRow, targets: McpLocation[]): McpEntry | null {
   const targetIds = new Set(targets.map((target) => target.id));
@@ -184,7 +184,7 @@ export function mcpDomains(overview: McpOverview): McpDomain[] {
   });
 }
 
-/// 本域任一配置位置已有相同定义时，服务已被引入该域。
+/// 本域任一配置位置已有相同定义时，服务已被导入该域。
 export function importedInDomain(entry: McpEntry, page: McpDomain): boolean {
   const targetIds = new Set(page.targets.map((target) => target.id));
   return entry.cells.some(

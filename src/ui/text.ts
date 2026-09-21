@@ -18,13 +18,3 @@ export const MONO: CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "var(--size-micro)",
 };
-
-/// 零圆角方标签，与 DESIGN.md `tag-square` 对应：不可点的标识用它，
-/// 圆角 pill 只给可点的东西
-export const TAG_SQUARE: CSSProperties = {
-  ...MICRO_CAP,
-  display: "inline-block",
-  padding: "1px 6px",
-  border: "1px solid var(--ink)",
-  lineHeight: 1.4,
-};

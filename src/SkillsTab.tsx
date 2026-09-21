@@ -658,7 +658,7 @@ export default function SkillsTab({
 
   if (!overview) return <Empty kind="scanning" />;
 
-  // 引入只对单个域有意义：「全部」页没有确定的目标域
+  // 导入只对单个域有意义：「全部」页没有确定的目标域
   const importPage = pages[0] ?? null;
   const broken = pages.flatMap((p) => p.broken);
 
@@ -715,7 +715,7 @@ export default function SkillsTab({
           onClick={() => setImportOpen(true)}
           disabled={importPage === null}
           disabledReason="请先在侧栏选一个位置"
-          title="把 skill 引入这个位置"
+          title="把 skill 导入这个位置"
         >
           导入 skill
         </ActionButton>
