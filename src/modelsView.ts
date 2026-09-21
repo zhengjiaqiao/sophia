@@ -85,25 +85,69 @@ export function totalSelected(state: GatewayState): number {
 }
 
 /**
- * 模型区右端那句（等宽）：这一家一共拉到多少个可以选的模型。
- *
- * **不再写「已选 N 个」**——已选的那几个就摆在左边的片上，再数一遍是同一件事说两遍；
- * 这句要回答的是另一件事：点进去还有多少可挑（DESIGN「计数口径：两个数不共用位置」）。
- * 一个都没拉到时返回空串，那时候左边的空态已经把话说了。
+ * 网关管理页上每一家右端那句（等宽）：这一家一共拉到多少个可以选的模型。
+ * 一个都没拉到时返回空串，那时候旁边的方标签已经把话说了。
  */
 export function providerCatalogHint(provider: GatewayProvider): string {
   return provider.models.length === 0 ? "" : `${provider.models.length} 个可选`;
 }
 
+/// 主页面「生效的模型」里的一条：这个模型、它属于哪一家网关、以及它在工具里显示成什么
+export interface EffectiveModel {
+  provider: GatewayProvider;
+  model: GatewayProviderModel;
+  /**
+   * 工具的模型选择器里**实际**显示的名字。
+   * 两家网关的已选模型显示名相同时，后端会自动加上「 · 网关名」
+   * （docs/gateway-commands.md）；这一页叫「生效的模型」，那就得照抄那条规则，
+   * 否则页面上写的和 Codex 里看到的对不上。
+   */
+  label: string;
+}
+
 /**
- * 模型区空着时说清**为什么空、下一步做什么**，而不是一律「还没选模型」。
- * 三种空是三件不同的事，混成一句用户就不知道该去哪儿（DESIGN「说结果，不说机制」）。
+ * 全部网关里已选的模型，按网关顺序摊平。主页面只展示它——
+ * 网关本身（地址、密钥、增删）搬去配置页了（第三轮反馈）。
  */
-export function emptyModelsText(provider: GatewayProvider): string {
-  if (provider.models.length > 0) return "还没选模型";
-  return provider.hasKey
-    ? "还没拉到模型列表——到「配置」里再存一次就会拉"
-    : "还没有密钥——到「配置」里填上就能拉到模型列表";
+export function effectiveModels(state: GatewayState): EffectiveModel[] {
+  const rows = state.providers.flatMap((provider) =>
+    selectedModels(provider).map((model) => ({ provider, model })),
+  );
+  const times = new Map<string, number>();
+  for (const row of rows) {
+    const name = modelLabel(row.model);
+    times.set(name, (times.get(name) ?? 0) + 1);
+  }
+  return rows.map((row) => {
+    const name = modelLabel(row.model);
+    const collides = (times.get(name) ?? 0) > 1;
+    return { ...row, label: collides ? `${name} · ${providerLabel(row.provider)}` : name };
+  });
+}
+
+/**
+ * 主页面上那句极简的网关事实，当进配置页的由头（第三轮反馈：网关内容不摊在主页面上）。
+ * 数字带单位，家数与模型数各占各的位置（DESIGN「计数口径」）。
+ */
+export function gatewaySummary(state: GatewayState): string {
+  if (state.providers.length === 0) return "还没有网关";
+  const total = state.providers.reduce((sum, provider) => sum + provider.models.length, 0);
+  return total === 0
+    ? `${state.providers.length} 家网关 · 还没拉到模型`
+    : `${state.providers.length} 家网关 · 共 ${total} 个模型可挑`;
+}
+
+/**
+ * 「生效的模型」那块空着时说清**为什么空、下一步做什么**，而不是一律「还没选模型」。
+ * 三种空是三件不同的事，混成一句用户就不知道该去哪儿（DESIGN「说结果，不说机制」）。
+ * 一家网关都没有那一种不走这里——那时整块换成空态，直接把人送去配置页。
+ */
+export function emptyEffectiveText(state: GatewayState): string {
+  const pulled = state.providers.some((provider) => provider.models.length > 0);
+  if (pulled) return "还没选模型";
+  return state.providers.some((provider) => provider.hasKey)
+    ? "还没拉到模型列表——到「配置网关」里再存一次就会拉"
+    : "网关还没有密钥——到「配置网关」里填上就能拉到模型列表";
 }
 
 /**
