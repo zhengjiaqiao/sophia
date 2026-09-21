@@ -54,7 +54,8 @@ export interface ModelsTabProps {
 
 export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
-  /// 可编辑的模型副本：浮层里的勾选与改名先落在这儿，`保存选择` 才写盘
+  /// 浮层里正在显示的那份模型列表。勾选当场写盘（DESIGN「什么时候才有按钮」），
+  /// 这里只是写盘前后的本地镜像；改名在输入框里过渡，Enter / 失焦时提交
   const [models, setModels] = useState<GatewayProviderModel[]>([]);
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -167,28 +168,49 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
     if (done && mounted.current) await refresh();
   };
 
-  const toggleModel = (id: string) => {
-    setModels((current) => current.map((m) => (m.id === id ? { ...m, selected: !m.selected } : m)));
+  /// 写盘但不出成功提示条：浮层里每点一下就是一次操作，逐次弹提示条是噪音，
+  /// 行上片的增减本身就是反馈；只有失败才说话
+  const commit = async (next: GatewayProviderModel[]) => {
+    onBusy(true);
+    try {
+      const fresh = await api.gatewaySelectModels(selectedPayload(next));
+      if (mounted.current) applyState(fresh);
+    } catch (error) {
+      if (mounted.current) {
+        setToast({ kind: "cannot", message: describeError(error) });
+        // 写盘失败就把本地镜像退回已落盘的那份，别让界面和文件对不上
+        setModels(state?.provider.models ?? []);
+      }
+    } finally {
+      onBusy(false);
+    }
   };
+
+  /// 勾选当场生效
+  const toggleModel = (id: string) => {
+    const next = models.map((m) => (m.id === id ? { ...m, selected: !m.selected } : m));
+    setModels(next);
+    void commit(next);
+  };
+  /// 改名只改本地镜像，Enter / 失焦时提交
   const renameModel = (id: string, displayName: string) => {
     setModels((current) => current.map((m) => (m.id === id ? { ...m, displayName } : m)));
   };
+  const commitRename = () => {
+    setRenamingId(null);
+    void commit(models);
+  };
 
+  /// 关就是关，没有「未保存」这个状态——每一下都已经落盘了
   const closePicker = () => {
-    // 没保存的勾选与改名在关闭时作废，行上的片始终等于已经写进 Codex 的那一份
-    setModels(state?.provider.models ?? []);
     setRenamingId(null);
     setQuery("");
     setPickerOpen(false);
   };
 
+  /// 行上片的 × ：当场移除
   const saveModels = async (next: GatewayProviderModel[], success: string) => {
     await runAction(() => api.gatewaySelectModels(selectedPayload(next)), success);
-    if (mounted.current) {
-      setRenamingId(null);
-      setPickerOpen(false);
-      setQuery("");
-    }
   };
 
   if (subPage === "gateway" && state !== null) {
@@ -377,11 +399,15 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                                     value={m.displayName}
                                     autoFocus
                                     onChange={(e) => renameModel(m.id, e.target.value)}
-                                    onBlur={() => setRenamingId(null)}
+                                    onBlur={commitRename}
                                     onKeyDown={(e) => {
-                                      if (e.key === "Enter" || e.key === "Escape") {
-                                        // Esc 先被输入框吃掉，不要顺带把浮层也关了
+                                      if (e.key === "Enter") {
                                         e.stopPropagation();
+                                        commitRename();
+                                      } else if (e.key === "Escape") {
+                                        // Esc 先被输入框吃掉，不要顺带把浮层也关了；改名作废
+                                        e.stopPropagation();
+                                        setModels(state?.provider.models ?? []);
                                         setRenamingId(null);
                                       }
                                     }}
@@ -412,26 +438,6 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
 
                     <div className="models-picker__foot">
                       <span className="models-picker__count">已选 {selectedCount} 个模型</span>
-                      <div className="models-picker__foot-actions">
-                        <Button variant="link" onClick={closePicker}>
-                          关闭
-                        </Button>
-                        <Busy busy={busy}>
-                          <Button
-                            size="compact"
-                            onClick={() =>
-                              void saveModels(
-                                models,
-                                selectedCount === 0
-                                  ? "Codex 的模型列表里只剩官方模型了"
-                                  : `${selectedCount} 个模型已经写进 Codex 的模型列表`,
-                              )
-                            }
-                          >
-                            保存选择
-                          </Button>
-                        </Busy>
-                      </div>
                     </div>
                   </div>
                 </>

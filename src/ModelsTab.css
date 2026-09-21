@@ -248,13 +248,6 @@
   font-size: var(--size-micro);
 }
 
-.models-picker__foot-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-left: auto;
-}
-
 /* ===== 模型列表 ===== */
 .models-list {
   margin: 0;
