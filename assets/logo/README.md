@@ -11,7 +11,7 @@ S 的字形取自 Barlow Condensed 700（界面 wordmark 用的同一款字，SI
 | `app-icon.svg` | 应用图标的源文件：1024 画布，824 的圆角方形黑底板，四周留透明边 |
 | `mark.svg` / `mark-inverse.svg` | 纯标志，透明底；白底用前者，黑底用后者 |
 | `wordmark.svg` / `wordmark-inverse.svg` | 整条 SOPHIA 字标，首字母带同样的重影，字距按规范的 0.095em |
-| `tray.svg` | 菜单栏托盘图标的源文件：**只有主体 S，不带重影**，纯黑透明底 |
+| `tray.svg` | 菜单栏托盘图标的源文件：主体 S + 重影，靠一圈透明缝隙分开，纯黑透明底 |
 
 构图：错位是字高的 (0.25, 0.093)，重影在左下；主体与重影的整体外框在底板上居中。
 
@@ -30,8 +30,9 @@ npx tauri icon assets/logo/app-icon.svg
 ## 重新生成托盘图标
 
 托盘图标是 macOS 的**模板图**（`icon_as_template(true)`）：系统只看 alpha，自己按菜单栏深浅着色，
-所以源文件里只能有纯黑与透明，重影那三档灰在这儿没有意义——22pt 下两个 S 叠着也会糊成一团，
-因此 `tray.svg` 只取主体 S。改了它之后：
+所以源文件里只能有纯黑与透明——重影那三档灰在这儿没有意义。重影改用**一圈透明缝隙**与主体分开
+（`tray.svg` 里那个 mask：把主体 S 加粗一圈从重影上挖掉），缝隙宽度按 44px 成品约 1.5px 取。
+改了它之后：
 
 ```bash
 npx tauri icon assets/logo/tray.svg -o /tmp/tray-icons
