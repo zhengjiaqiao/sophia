@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 界面规范检查：把 docs/specs/2026-09-21-ui-components.md 的硬性约束变成可执行的断言。
+// 界面规范检查：把 docs/DESIGN.md 的硬性约束变成可执行的断言。
 // 画稿版在 .superpowers/design/lint-artboards.mjs，规则同源。
 // 用法：node scripts/lint-ui.mjs [文件或目录...]，不传则检查 src/。
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";

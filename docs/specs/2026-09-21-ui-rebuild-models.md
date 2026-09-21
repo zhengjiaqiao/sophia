@@ -8,7 +8,7 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 # 界面重构 · 模型页
 
 **输入**：`docs/intent/2026-09-21-ui-rebuild.md`、`docs/specs/2026-09-21-ui-rebuild-models-notes.md`
-**组件规范**：`docs/specs/2026-09-21-ui-components.md`（**实现以它为准**）
+**组件规范**：`docs/DESIGN.md`（**实现以它为准**）
 **设计稿**：画布「SymSync 界面重构」的 `Models.dc.html`
 **前置**：第一份已完成，组件库与二级页面就位。这一份是三份里最小的——**几乎全是现有能力换皮**。
 
@@ -19,8 +19,10 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 ### R1 一行一个 agent，当前选的模型就在行里
 
 左：16px 图标 + 名字（**不大写**，agent 名是被谈论的对象）+ 一句人话副行 + 一行等宽事实。
-中：已选模型用**反色片**列出，每片带 `×`。
-右：三个动作——`配置`（跳二级页面）、开关、`重启路由`。
+中：已选模型区——hairline 描边的一块，里面是**紧凑片**（hairline 不反色，它们是事实不是正在选的东西），每片带 `×`。**整块区域可点**，点任何地方都打开选择器，不设单独的「改选模型」链接。空时写 `还没选模型`。
+右：三个动作——`配置`（跳二级页面）、开关、`重启 Codex`。
+
+> 修订 v2（真机反馈）：原来是大号反色片 + 一个「改选模型」链接，用户反馈屏效低、多一个按钮多余。
 
 按「可以有多个 agent」设计，尽管现在只有 Codex。
 
@@ -49,23 +51,27 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 
 ### R5 `配置` 是二级页面
 
-`SubPage`（`←` + `Codex 网关`）。装：网关地址、API 密钥（placeholder 原样 `已保存，留空则不修改`）、`保存` + `拉取模型`、只读的 `本机路由 127.0.0.1:8765 · 协议 chat`、以及 `canRestore` 的边界态（未启用但服务还装着 → `后台服务还装着` + `彻底撤下`）。
+`SubPage`（`←` + `Codex 网关`）。装：网关地址、API 密钥（placeholder 原样 `已保存，留空则不修改`）、一个 `保存`——**保存即拉取模型**，不设单独的「拉取模型」（修订 v2：用户反馈多余）、只读的 `本机路由 127.0.0.1:8765 · 协议 chat`、以及 `canRestore` 的边界态（未启用但服务还装着 → `后台服务还装着` + `彻底撤下`）。
 
 返回即保存，没有第二道确认。
 
-### R6 `重启路由`——按钮只做我们能做的事
+### R6 `重启 Codex`
 
-**这是模型页唯一需要新增的后端出口。**
+**修订 v2（真机反馈）**：第一版按钮叫「重启路由」，理由是"Codex 是用户的编辑器、我们无权重启"。**那个理由是没查实际形态就下的断言。** 本机 `pgrep` 实测：Codex 以 `codex app-server` 常驻进程运行（另有 `codex-code-mode-host`），它们启动时读 `~/.codex/config.toml`，之后不重读——所以改完配置确实要重启它们才生效，这正是用户反馈的现象。
 
-`crates/gateway/src/service.rs:289` 已经有 `restart(label)`（`launchctl kickstart -k`），只是没有 Tauri 命令暴露它。新增 `gateway_restart`。
+**按钮叫 `重启 Codex`，做的事是结束 `codex app-server` 与 `codex-code-mode-host` 进程**（SIGTERM）。下次任何工具拉起 Codex 时会带着新配置起来。**不碰**用户自己在终端里跑的交互式 `codex` 会话——只结束 app-server 这类后台形态。
 
-**按钮叫 `重启路由`，不叫 `重启 Codex`。** Codex 是用户的编辑器 / CLI，我们没有权限重启它；把「改动要重启 Codex 才生效」这句说明和一个叫 `重启` 的按钮并排放，会让用户以为按了就替他重启了。说明归说明（副行文字），动作归动作（重启我们自己装的 launchd 服务）。
+**会中断进行中的对话，所以确认一道**（DESIGN.md「只有三处需要确认」之一）：`会结束正在运行的 Codex 后台进程，进行中的对话会中断。`
+
+后端新增 `gateway_restart_codex`：core 无异步无网络，进程操作放 `crates/gateway`（它管系统副作用）。找进程按可执行名匹配，不按 PID 猜；一个都没找到时不算失败，提示条说「Codex 现在没在跑，下次启动就是新配置」。
+
+路由本身的重启（`service::restart`）保留为内部能力，UI 上不单独给按钮——用户关心的是 Codex 用不用得上新模型，不是我们的路由进程。
 
 ### R7 两条常驻待办用行内条
 
 `drift`（版本升了要重新生成目录）与 `takeover`（可以接过来）既不是某次操作的结果、也不是应用级故障，而是**挂在某一行上的常驻待办**——用 `RowNotice`（§4.4），动作就在右边。
 
-`needsCodexRestart` **并进副行**，右边的 `重启路由` 就是它的动作，不单起一条。
+`needsCodexRestart` **并进副行**，右边的 `重启 Codex` 就是它的动作，不单起一条。
 
 `routerUnavailable`（已启用但路由没跑）走**错误横幅**（§4.2）——官方模型也会受影响，是应用级故障。
 
@@ -91,14 +97,15 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 
 | # | 需求 | Given / When / Then | 真实验证 | 代理验证 |
 |---|---|---|---|---|
-| AC1 | R1 | Given Codex 已启用且选了 3 个模型，When 打开模型页，Then 行里有 3 个反色片、各带 `×`，右侧三个动作齐全 | `make dev` 目视 | 快照测试 |
+| AC1 | R1 | Given Codex 已启用且选了 3 个模型，When 打开模型页，Then 行里有 3 个紧凑片、各带 `×`，右侧三个动作齐全；**点片区任意空白处**打开选择器 | `make dev` 目视 + 点击 | 快照测试 |
 | AC2 | R2 | Given 任意状态组合，When 看那一行，Then **没有三个并排的徽标**，只有一句人话副行 + 一行等宽事实 | 真机翻几种状态 | 快照测试 |
 | AC3 | R3 | Given 模型列表有 100+ 条，When 在搜索框输入，Then 实时过滤；已选的排在前面 | 真机输入 | `sortAndFilterModels` 已有测试 |
 | AC4 | R3 | Given 搜索无结果，When 看列表，Then `没有匹配的模型。` + `清除筛选` | 真机输入一个不存在的名字 | 快照测试 |
 | AC5 | R4 | Given 未启用，When 看开关，Then 是默认 ghost pill `启用`；启用后变**反色** `已启用`，再点一下恢复 | 真机点两次，确认 `~/.codex/config.toml` 前后一致 | `gateway_enable`/`restore` 已有测试 |
-| AC6 | R5 | Given 点 `配置`，When 页面渲染，Then 二级页面、左上 `←`、密钥框 placeholder 是 `已保存，留空则不修改`、端口与协议**只读** | 真机目视 | 快照测试 |
-| AC7 | R6 | Given 路由正在运行，When 点 `重启路由`，Then launchd 服务确实重启（`launchctl print` 的 PID 变了），提示条说重启完成 | **真机必做**：点前点后各 `launchctl print gui/$UID/<label>` 比对 PID | `service::restart` 已有测试（假 run） |
-| AC8 | R6 | Given 界面任意位置，When 搜索可见文案，Then **没有任何按钮叫「重启 Codex」**——我们无权重启用户的编辑器 | 真机逐页翻 | 静态检查 |
+| AC6 | R5 | Given 点 `配置`，When 页面渲染，Then 二级页面、左上 `←`、密钥框 placeholder 是 `已保存，留空则不修改`、端口与协议**只读**、**没有「拉取模型」按钮**；点 `保存` 后模型列表随之更新 | 真机改地址保存，看模型列表 | 快照测试 + 断言保存后调了 fetch |
+| AC7 | R6 | Given `codex app-server` 正在运行，When 点 `重启 Codex` 并确认，Then 该进程结束（`pgrep -f "codex app-server"` 为空），提示条说明下次启动会带新配置 | **真机必做**：点前 `pgrep` 记 PID，确认后再 `pgrep` | 进程匹配逻辑的单测（假进程表） |
+| AC7′ | R6 | Given Codex 没在跑，When 点 `重启 Codex` 并确认，Then **不报错**，提示条说「Codex 现在没在跑，下次启动就是新配置」 | 真机先退出 Codex 再点 | 单测 |
+| AC8 | R6 | Given 点 `重启 Codex`，When 弹窗出现，Then 正文写明会结束后台进程、进行中的对话会中断；取消后什么都不发生 | 真机点取消后 `pgrep` 仍在 | 快照测试 |
 | AC9 | R7 | Given `drift` 为真，When 看那一行，Then 下面挂一条行内待办条 + `重新生成` / `稍后`，**不是提示条也不是横幅** | 真机造一次版本漂移 | 快照测试 |
 | AC10 | R7 | Given 已启用但路由没跑，When 打开页面，Then 顶栏之下出现**反色错误横幅**，不自动消失 | 真机 `launchctl bootout` 之后打开 | 快照测试 |
 | AC11 | R9 | Given `ModelsTab` 相关源码，When 跑 `make lint`，Then 零违规且它已从豁免名单划掉 | — | `make lint` |
@@ -109,15 +116,17 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 
 | 名称 | 来源 | 用到什么 | 确认状态 |
 |---|---|---|---|
-| `service::restart` | 本仓库 `crates/gateway/src/service.rs:289` | `launchctl kickstart -k gui/<uid>/<label>` | **已验证**——代码已在，有测试（注入假 `run`）。但 `gateway_restart` 这个 Tauri 出口是新增的，AC7 必须真机验 |
+| Codex 的进程形态 | 本机 `pgrep -fl codex` | `codex app-server`、`codex-code-mode-host` 两个后台进程；交互式 `codex` 是另一回事 | **已验证**——本机实查（2026-09-21）。但这是 0.154 的形态，Codex 升级后进程名可能变，匹配逻辑要宽容 |
+| `service::restart` | 本仓库 `crates/gateway/src/service.rs:289` | 路由的 `launchctl kickstart -k` | **已验证**——保留为内部能力，UI 不再单独给按钮 |
 | `sortAndFilterModels` | 本仓库 `src/modelsView.ts` | 筛选与已选置顶 | **已验证**——有测试 |
 
 ## 风险
 
-1. **`重启路由` 的真实行为只能真机验。** `service::restart` 的测试注入的是假 `run`，从不调用真的 `launchctl`——这是对的（单测不该动系统服务），但也意味着「`kickstart -k` 在这台机器上真的能重启」这件事没有任何自动化覆盖。AC7 必须点前点后比对 PID。
+1. **结束 Codex 进程是本期最敏感的操作。** 匹配错了会结束用户不想结束的东西。所以：①只按可执行名匹配 `app-server` / `code-mode-host` 这两种后台形态，不碰交互式 `codex`；②确认一道；③AC7 必须真机验，`pgrep` 前后比对。
+2. **进程名依赖 Codex 版本。** 本机是 0.154 / 0.155，升级后 `app-server` 可能改名。匹配失败的表现是「没在跑」而不是误杀，方向是安全的。
 2. **模型页无法在没有 Codex 的机器上验。** 本机装了 Codex，但 CI 上这一页的真实行为完全没有覆盖。
 
 ## 待决问题
 
 - **`protocol` / `port` 要不要做成可改**。默认假设：只读。
-- **`重启路由` 失败时说什么**。默认假设：原样转述 `launchctl` 的错误，不编——那是运维信息，用户要拿它去查。
+- **结束进程失败时说什么**。默认假设：原样转述系统错误，不编。

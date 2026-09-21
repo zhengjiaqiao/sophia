@@ -8,7 +8,7 @@ spec: docs/specs/2026-09-21-ui-rebuild-skill.md
 # 实施计划 · 界面重构 Skill 管理
 
 **Spec**：`docs/specs/2026-09-21-ui-rebuild-skill.md`（21 条 AC）
-**组件规范**：`docs/specs/2026-09-21-ui-components.md`（**实现以它为准**，与画稿不一致时以它为准）
+**组件规范**：`docs/DESIGN.md`（**实现以它为准**，与画稿不一致时以它为准）
 **设计稿**：画布「SymSync 界面重构」page-1
 
 ## 全局约束

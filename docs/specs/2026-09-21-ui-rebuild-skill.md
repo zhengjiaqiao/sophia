@@ -8,7 +8,7 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 # 界面重构 · Skill 管理
 
 **输入**：`docs/intent/2026-09-21-ui-rebuild.md`
-**组件规范**：`docs/specs/2026-09-21-ui-components.md`（token、组件全状态，**实现以它为准**）
+**组件规范**：`docs/DESIGN.md`（token、组件全状态，**实现以它为准**）
 **设计稿**：画布「SymSync 界面重构」page-1
 **风格检查**：`.superpowers/design/lint-artboards.mjs`
 
@@ -80,6 +80,13 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 
 默认无箭头，hover 出淡箭头，激活转黑。
 
+### R13 修订 v2（真机反馈四条）
+
+1. **列头不放灯。** 图标右上角那盏 6px 的灯（目录状态三态）用户看不懂。目录不存在这件事在点击那一刻由提示条说，写不进去的进待处理栏，列头不需要再说一遍。**列头＝图标 + 名字，没有别的。**
+2. **选择操作条按 agent 给片。** 第一版退化成「开启（N）」「关掉（M）」两个总按钮，丢掉了设计稿里"已选的 skill × 某个 agent"这一维。改回：一排 agent 片（每个本域 agent 一片 + 「全部」），每片是一个开关——反色＝已选的在这个 agent 下全开着，点一下全关；hairline + `开启 N`＝有 N 个没开，点一下开了；灰描边＝都是本体或整目录链走，不可点。
+3. **来源标签是用户认得的名字，不是路径。** `/Applications/ego lite.app/…/ego-skills` 显示成 `ego lite`——从 `.app` 那一级取、去掉后缀；其余外部目录取最后一级目录名。路径放 `title`。core 的 `SourceKind::External` 标签生成改成这个规则。
+4. **待处理栏贴底、同名本体用行视角的话。** ①栏与内容区底边之间有缝隙，`position: sticky; bottom: 0` 修掉；②「Claude Code 下同名的 docx 指向 /Users/…/docx，没有覆盖它」是点格时的格视角文案，放在待处理栏里让人看不懂——**两个本体各自仍在列表里成行**，待处理栏该说的是 `docx 有两个本体，删掉哪个？` + `删 通用仓库 的` / `删 Cline 的` / `忽略`，与待处理页一致。第一版底部栏对同名本体只给了「忽略」，是漏做。
+
 ### R12 视觉与文案规范落地
 
 零色彩、三个字族、圆角白名单、术语统一 agent、文案说结果不说机制、计数口径一致、agent 图标单色。
@@ -148,6 +155,10 @@ core 新增 `sync::trash(path) -> Result<()>`，用 `trash` crate（跨平台废
 | AC18 | R10 | Given 正在执行一批操作，When busy 期间，Then 设置、筛选输入框、取消选择、提示条关闭、表头排序五者仍可用 | 真机在长操作中逐个点 | 组件测试 |
 | AC19 | R11 | Given 表头未 hover，When 目视，Then 无排序箭头；Given hover，Then 出 `#9a9aa2` 箭头；Given 已激活，Then 箭头 `#000` | 真机 hover | 组件测试 |
 | AC20 | R12 | Given 全部前端源码，When 跑风格检查，Then 零违规 | — | `lint-artboards.mjs` 的 src 版本，接进 `make lint` |
+| AC22 | R13 | Given 打开矩阵，When 看列头，Then 只有图标和名字，**没有任何圆点或灯** | 真机目视 | 快照测试 |
+| AC23 | R13 | Given 勾选 2 个 skill，When 看选择操作条，Then 出现每个 agent 一片 + 「全部」；某 agent 下两个都开着时该片反色，点一下两个都关；有没开的时片上写 `开启 N` | 真机操作 | 组件测试 |
+| AC24 | R13 | Given 一个来源在 `/Applications/xxx.app/…` 里，When 看筛选片与本体位置列，Then 显示 `xxx`（应用名），**不显示路径**；hover 有路径 | 真机用 ego lite 核对 | `external_label` 单测 |
+| AC25 | R13 | Given 有一条同名本体，When 看底部待处理栏，Then 文案是 `<skill> 有两个本体，删掉哪个？`，动作有 `删 X 的` / `删 Y 的` / `忽略`，且栏底边**与窗口底边贴合无缝** | 真机目视 + 截图量 | 快照测试 |
 | AC21 | R12 | Given 界面任意位置，When 搜索可见文案，Then 不出现「harness」「软链接」「操作失败」 | 真机逐页翻 | 静态检查 |
 
 **真机走查的清单**在 `docs/manual-checks-ui-rebuild.md`——19 条人工项逐条写了怎么造场景、看什么。AC20 / AC21 已由 `make lint` 自动覆盖。

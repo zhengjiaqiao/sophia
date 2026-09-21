@@ -1,5 +1,5 @@
 /// 展示组件库：只吃 props，不碰 api，不含业务逻辑。
-/// 实现依据是 docs/specs/2026-09-21-ui-components.md，与画稿不一致时以它为准。
+/// 实现依据是 docs/DESIGN.md，与画稿不一致时以它为准。
 /// 样式与 token 在这里一次性引进来，用组件的页面不必自己 import css。
 import "./ui.css";
 

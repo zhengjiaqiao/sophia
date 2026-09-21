@@ -1,12 +1,14 @@
 ---
-type: spec
-description: SymSync 界面重构的组件规范——token 与复用组件的全部状态，开发以此为准
+type: log
+description: 界面规范的裁决日志——每条规则背后的推理与演变。结论以 docs/DESIGN.md 为准
 created: 2026-09-21
 ---
 
-# 界面组件规范
+# 界面规范 · 裁决日志
 
-设计稿（画布 `SymSync 界面重构`）是视觉参照，**本文件是实现依据**。两者不一致时以本文件为准；改动组件先改这里，再同步画布。
+**本文件不再是实现依据。** 实现依据是 `docs/DESIGN.md`（getdesign.md 格式，token 在头部、规则在正文）。这里保留每条规则是怎么来的、改过几版、为什么——DESIGN.md 只写结论，推理在这。
+
+两者若有出入，以 DESIGN.md 为准；发现出入时在这里补一条说明为什么改。
 
 视觉源自 `docs/DESIGN-spacex.md` 的 **shop 面**（`canvas-light` 那一组）。marketing 面那套（纯黑、全幅照片、80px 大写标题、一个 band 一个 CTA）对工具界面不成立，不采用。
 

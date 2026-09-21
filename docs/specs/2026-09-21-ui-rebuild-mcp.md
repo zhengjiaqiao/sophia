@@ -8,7 +8,7 @@ intent: docs/intent/2026-09-21-ui-rebuild.md
 # 界面重构 · MCP 页
 
 **输入**：`docs/intent/2026-09-21-ui-rebuild.md`、`docs/specs/2026-09-21-ui-rebuild-mcp-notes.md`（画稿阶段查证的事实）
-**组件规范**：`docs/specs/2026-09-21-ui-components.md`（**实现以它为准**）
+**组件规范**：`docs/DESIGN.md`（**实现以它为准**）
 **设计稿**：画布「SymSync 界面重构」的 `Mcp.dc.html`
 **前置**：第一份（Skill 管理）已完成，组件库、二级页面、待处理栏都已就位，这一份只是把同一套语言套到 MCP 上。
 
