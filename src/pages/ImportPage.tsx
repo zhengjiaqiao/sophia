@@ -9,7 +9,7 @@ import type {
   SourceKind,
   SyncReport,
 } from "../types";
-import { AgentIcon, Busy, Button, Chip, Confirm, Empty, SubPage } from "../ui";
+import { AgentIcon, Busy, Button, Chip, Confirm, Empty, SubPage, Plain } from "../ui";
 import "./ImportPage.css";
 
 /// 导入页（组件规范 §4.6）：占满整窗的二级页面，不是弹层。
@@ -306,9 +306,14 @@ export default function ImportPage({
 
   return (
     <SubPage
-      title="导入 skill"
+      // 导入到哪，在标题里就要看得见，不放右边的副标题里。目的地名是内容，
+      // 标题是大写档，得用 Plain 包住，否则项目名 CardBox 会变 CARDBOX
+      title={
+        <>
+          导入 skill 到「<Plain>{page.label}</Plain>」
+        </>
+      }
       onBack={onClose}
-      aside={`让这些 skill 出现在「${page.label}」的列表里`}
     >
       <div className="ss-import">
         <div className="ss-import__cols">
@@ -388,7 +393,7 @@ export default function ImportPage({
                       onClick={toggleAuto}
                     >
                       <CheckBox on={auto} dim={targetIds.length === 0} />
-                      这个来源以后新增的 skill，自动在以下 agent 中开启
+                      此来源新增 skill 自动导入
                     </button>
                   </Busy>
                 ) : null}
@@ -453,7 +458,7 @@ export default function ImportPage({
                 </Busy>
 
                 <Busy busy={busy} className="ss-import__agents">
-                  <div className="ss-import__label">在以下 agent 中开启</div>
+                  <div className="ss-import__label">新导入的 skill 自动在以下 agent 开启</div>
                   <div className="ss-import__chips">
                     {page.targets.length === 0 ? (
                       <span className="ss-import__hint">

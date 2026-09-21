@@ -12,7 +12,6 @@ import {
   StateDot,
   type ButtonSize,
   type ButtonVariant,
-  TagSquare,
 } from "./ui";
 import type { AutoLink, CellRef, DomainPage, DomainRow, Overview } from "./types";
 
@@ -133,9 +132,6 @@ export default function DomainView({
       source?.skills.find((sk) => sk.name === skill)?.path ?? join(source?.path ?? sourceId, skill)
     );
   };
-
-  const isExternal = (sourceId: string) =>
-    overview.sources.find((s) => s.id === sourceId)?.kind.type === "external";
 
   const targetLabelOf = (targetId: string) =>
     page.targets.find((t) => t.id === targetId)?.label ?? targetId;
@@ -313,7 +309,6 @@ export default function DomainView({
                 </label>
               </td>
               <td className="path">
-                {isExternal(row.sourceId) && <TagSquare>外部</TagSquare>}
                 <Button
                   variant="link"
                   title={skillPathOf(row.sourceId, row.skill)}

@@ -68,10 +68,15 @@
   border-top: 1px solid var(--ink);
 }
 
+/* 一行一个 agent：名字 | 生效的模型（弹性占满中间）| 动作（DESIGN「模型页」） */
 .models-tool__head {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-md);
+}
+.models-tool__models {
+  flex: 1;
+  min-width: 0;
 }
 
 .models-tool__mark {
@@ -103,19 +108,23 @@
   margin-left: auto;
 }
 
+/* 行下一行说明：状态句 + 等宽事实 + 网关摘要合成一行，一个 agent 占一行加一行 */
+.models-tool__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xxs) var(--space-md);
+  margin: var(--space-sm) 0 0;
+}
 /* 三组状态词合成的那一句人话（R2）。它是主文字，不退到次要色——要读的就是它 */
 .models-tool__sentence {
-  margin: var(--space-sm) 0 0;
-  max-width: 560px;
   font-family: var(--font-ui);
-  font-size: var(--size-body);
-  line-height: var(--leading-body);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
   color: var(--ink);
 }
-
 /* 版本号与端口是计数类事实，走等宽（§1.2） */
 .models-tool__facts {
-  margin: var(--space-xxs) 0 0;
   font-family: var(--font-mono);
   font-size: var(--size-micro);
   color: var(--ink-faint);
@@ -123,32 +132,6 @@
 
 .models-tool__notice {
   margin-top: var(--space-md);
-}
-
-/* ===== 网关区 =====
-   区块之间 48（DESIGN「Layout」）。分区靠分隔线，不靠再套一层框。 */
-.models-section {
-  margin-top: var(--space-huge);
-}
-
-.models-section__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-xs);
-}
-
-.models-section__action {
-  margin-left: auto;
-}
-
-/* 那句极简的网关事实，靠右、等宽（§1.2）。它是进配置页的由头，本身不可点——
-   动作是抬头那颗「配置网关」按钮，一件事不给两个入口 */
-.models-section__summary {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
 }
 
 /* ===== 生效的模型 =====
@@ -159,8 +142,7 @@
 }
 
 .models-effective__empty {
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--ink);
+  padding: 0;
 }
 
 /* 整块可点，点哪儿都开选择器。hairline 描边的块 hover 转 ink 描边、**底色不变**

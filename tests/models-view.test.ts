@@ -446,7 +446,11 @@ test("ToolIntro 已启用：一句人话、一行等宽事实，开关是反色 
     html,
     /class="models-tool__sentence">3 个模型已经在 Codex 的模型列表里，改动要重启 Codex 才生效</,
   );
-  assert.match(html, /class="models-tool__facts">Codex 0\.43\.0 · 路由 127\.0\.0\.1:8765 运行中</);
+  // 事实与网关摘要合成一行（DESIGN「模型页」：一个 agent 占一行加一行说明）
+  assert.match(
+    html,
+    /class="models-tool__facts">Codex 0\.43\.0 · 路由 127\.0\.0\.1:8765 运行中 · /,
+  );
   // 反色＝现在开着（DESIGN components.button-inverse）
   assert.match(html, /class="ss-btn ss-btn--inverse"[^>]*>已启用</);
   // 重启是这个工具的动作，按钮上带着它的名字；button-cap 是大写档，
@@ -540,4 +544,14 @@ test("EffectiveModels 有网关但还没选：空态说清为什么空", () => {
     effectiveProps({ providers: [provider({ models: [model({ id: "m1" })] })] }),
   );
   assert.match(html, /class="models-effective__hint">还没选模型</);
+});
+
+test("ToolIntro：生效的模型插在名字和动作之间，一行一个 agent（DESIGN「模型页」）", () => {
+  const html = render(ToolIntro, { ...introProps({ enabled: true }, 3), models: "MODELS-SLOT" });
+  // 顺序：名字 → 模型区 → 动作；没有独立的「生效的模型」区块标题
+  const name = html.indexOf('class="models-tool__name"');
+  const slot = html.indexOf("MODELS-SLOT");
+  const actions = html.indexOf('class="models-tool__actions"');
+  assert.ok(name < slot && slot < actions, "模型区要在名字和动作之间");
+  assert.doesNotMatch(html, /生效的模型/);
 });

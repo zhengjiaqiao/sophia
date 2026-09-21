@@ -104,6 +104,9 @@ export interface ToolIntroProps {
   onRestart: () => void;
   /// 进网关配置页。网关的增删改都在那儿，主页面上不摊开（第三轮反馈）
   onConfigure: () => void;
+  /// 生效的模型那一块，放在名字和动作之间——一行一个 agent（DESIGN「模型页」），
+  /// 以后多 agent 时每个只能占一行，不能摊成「身份一块、模型一块」两段
+  models?: ReactNode;
 }
 
 /**
@@ -128,6 +131,7 @@ export function ToolIntro({
   onDisable,
   onRestart,
   onConfigure,
+  models,
 }: ToolIntroProps) {
   const disabledReason = enableDisabledReason(state, selectedCount);
 
@@ -138,6 +142,8 @@ export function ToolIntro({
           <AgentIcon id={tool.id} name={tool.name} size={24} />
         </span>
         <h2 className="models-tool__name">{tool.name}</h2>
+
+        {models ? <div className="models-tool__models">{models}</div> : null}
 
         <Busy busy={busy} className="models-tool__actions">
           {state.enabled ? (
@@ -173,9 +179,13 @@ export function ToolIntro({
         </Busy>
       </div>
 
-      <p className="models-tool__sentence">{statusSentence(state, selectedCount, tool)}</p>
-      {/* 版本号与端口是计数类事实，走等宽（§1.2） */}
-      <p className="models-tool__facts">{factsLine(state, tool)}</p>
+      {/* 状态句 + 等宽事实 + 网关摘要合成一行：一个 agent 只占一行加一行说明（DESIGN「模型页」） */}
+      <p className="models-tool__line">
+        <span className="models-tool__sentence">{statusSentence(state, selectedCount, tool)}</span>
+        <span className="models-tool__facts">
+          {factsLine(state, tool)} · {gatewaySummary(state)}
+        </span>
+      </p>
     </header>
   );
 }
@@ -770,6 +780,22 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
                 state={state}
                 selectedCount={selectedCount}
                 busy={busy}
+                models={
+                  <EffectiveModels
+                    tool={tool}
+                    state={state}
+                    busy={busy}
+                    onOpenPicker={() => {
+                      setQuery("");
+                      setRenaming(null);
+                      setPickerTool(tool);
+                    }}
+                    onRemoveModel={(provider, model) => removeModel(tool, provider, model)}
+                    onConfigure={() => setGatewayOpen(true)}
+                  >
+                    {pickerTool?.id === tool.id ? picker(tool) : null}
+                  </EffectiveModels>
+                }
                 onEnable={() =>
                   void runAction(
                     () => api.gatewayEnable(),
@@ -833,28 +859,6 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
 
               {/* 主页面上只剩「生效的模型」这一块：网关的增删改搬去配置页了（第三轮反馈）。
                   改选仍然在这一页完成，整块可点——不许退化成「进二级页选」 */}
-              <section className="models-section">
-                <div className="models-section__head">
-                  <span className="models-page__label">生效的模型</span>
-                  {/* 极简一句网关事实，当进配置页的由头；网关内容本身不摊在这儿 */}
-                  <span className="models-section__summary">{gatewaySummary(state)}</span>
-                </div>
-
-                <EffectiveModels
-                  tool={tool}
-                  state={state}
-                  busy={busy}
-                  onOpenPicker={() => {
-                    setQuery("");
-                    setRenaming(null);
-                    setPickerTool(tool);
-                  }}
-                  onRemoveModel={(provider, model) => removeModel(tool, provider, model)}
-                  onConfigure={() => setGatewayOpen(true)}
-                >
-                  {pickerTool?.id === tool.id ? picker(tool) : null}
-                </EffectiveModels>
-              </section>
 
               {/* 限制说明是**这个工具**的事实，不是某次操作的结果，常驻（R8） */}
               <div className="models-tool__limits">

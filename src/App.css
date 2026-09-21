@@ -67,15 +67,22 @@ button.link {
 }
 
 /* ===== 外壳 =====
-   顶栏 56px + 一条分隔线，侧栏与内容区之间也是一条。
-   顶栏是自己的盒子（`.topbar`），不再挂在侧栏下面：模型页不要侧栏，
-   字标与页签不能跟着一起消失。 */
+   系统标题栏隐藏了（titleBarStyle: Overlay），红绿灯浮在窗口左上角那 28px 里。
+   那一排**留空**，只当拖动区；字标与页签在它下面的 56px 里——和红绿灯挤在
+   同一排太靠上（真机反馈）。所以顶栏总高 84 = 28 空 + 56 内容。
+   顶栏是自己的盒子（`.topbar`），不挂在侧栏下面：模型页不要侧栏，字标与页签
+   不能跟着一起消失。 */
+:root {
+  --titlestrip: 28px; /* 红绿灯那一排，留空 */
+  --topbar: 56px; /* 字标与页签 */
+}
+
 .app {
   position: relative;
   box-sizing: border-box;
   display: flex;
   height: 100vh;
-  padding-top: 56px;
+  padding-top: calc(var(--titlestrip) + var(--topbar));
 }
 
 .topbar {
@@ -86,7 +93,8 @@ button.link {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  height: 56px;
+  height: calc(var(--titlestrip) + var(--topbar));
+  padding-top: var(--titlestrip);
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -104,7 +112,7 @@ button.link {
 .topbar h1 {
   display: flex;
   align-items: center;
-  height: 56px;
+  height: var(--topbar);
   margin: 0 0 0 var(--space-xxl);
   font-family: var(--font-cond);
   font-size: var(--size-wordmark);
@@ -112,6 +120,14 @@ button.link {
   letter-spacing: var(--track-title);
   line-height: 1;
   text-transform: uppercase;
+}
+
+/* 字标：高 20（wordmark 档），宽随 3304:916 的比例；重影的三档灰在 SVG 里，
+   不进 src 的色值检查 */
+.topbar h1 .wordmark {
+  display: block;
+  height: 20px;
+  width: auto;
 }
 
 /* tab 与内容区左缘对齐：wordmark 的实际宽度随字体回退浮动，不拿它当基准。
@@ -142,9 +158,9 @@ button.link {
 .topbar nav {
   position: absolute;
   left: 218px;
-  top: 0;
+  top: var(--titlestrip);
   align-items: center;
-  height: 56px;
+  height: var(--topbar);
 }
 
 /* micro-cap 档（Condensed 12/600/0.96px/大写，行高 2.0）。内联的 gap: 4px 改不动，

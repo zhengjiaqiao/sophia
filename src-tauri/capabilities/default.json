@@ -2,12 +2,16 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window and the menu bar panel",
-  "windows": ["main", "tray"],
+  "windows": [
+    "main",
+    "tray"
+  ],
   "permissions": [
     "core:default",
     "dialog:default",
     "opener:allow-reveal-item-in-dir",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "core:window:allow-start-dragging"
   ]
 }

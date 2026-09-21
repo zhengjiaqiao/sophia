@@ -7,7 +7,8 @@ import { IconArrowLeft } from "./icons.tsx";
 
 export interface SubPageProps {
   /// 页面名，Condensed 20/700/1.9px 大写，与 wordmark 同档
-  title: string;
+  /// 页面名。可以是节点：标题走大写档，里面嵌的专名（目的地、agent 名）要用 <Plain> 包住
+  title: ReactNode;
   onBack: () => void;
   /// 顶栏右侧的一句副标题，可选
   aside?: ReactNode;

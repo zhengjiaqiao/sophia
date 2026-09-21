@@ -10,6 +10,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { PendingPage } from "./pages/PendingPage";
 import { IconSettings } from "./ui";
+import wordmark from "../assets/logo/wordmark.svg";
 import "./App.css";
 
 /// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
@@ -267,8 +268,12 @@ export default function App() {
     <div className="app">
       {/* 顶栏独立于侧栏：模型页不要侧栏（它不分项目、不分域），
           而字标与页签不能跟着侧栏一起消失 */}
-      <header className="topbar">
-        <h1>Sophia</h1>
+      {/* 系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，左边给红绿灯让位 */}
+      <header className="topbar" data-tauri-drag-region>
+        {/* 字标用资产不用纯文本：首字母的重影是这个标志的识别点（DESIGN「壳」） */}
+        <h1>
+          <img src={wordmark} alt="Sophia" className="wordmark" />
+        </h1>
         {/* 顺序即高频程度：模型路由天天用，排第一个；MCP 那条线叫「导入 MCP」，
             与 skill 的二级页「导入 skill」成对，一级 tab 与二级页不重名 */}
         <nav aria-label="功能" style={{ display: "flex", gap: 4 }}>
