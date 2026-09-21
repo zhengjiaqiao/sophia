@@ -302,7 +302,11 @@ export interface GatewayTakeover {
 }
 export interface GatewayState {
   supported: boolean;
-  /** 第一家网关，给还没迁到 providers 的界面用 */
+  /**
+   * 第一家网关，等于 `providers[0]`。**兼容字段，新代码不要读**——
+   * 模型页已经迁到 `providers`，只剩菜单栏面板的 `trayView.ts` 还在读它；
+   * 那一处迁完，这个字段连同后端的兼容命令一起删（docs/gateway-commands.md）。
+   */
   provider: GatewayProvider;
   /** 全部网关，按添加顺序。模型标识是「网关 id-模型名」，两家有同名模型也不相撞 */
   providers: GatewayProvider[];

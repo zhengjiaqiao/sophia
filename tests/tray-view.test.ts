@@ -10,17 +10,27 @@ const model = (id: string, selected: boolean): GatewayProviderModel => ({
   selected,
 });
 
-const state = (overrides: Partial<GatewayState> = {}): GatewayState => ({
-  supported: true,
-  provider: { baseUrl: "https://example.com/openai", hasKey: true, models: [] },
-  enabled: false,
-  needsCodexRestart: false,
-  router: { installed: false, running: false, port: 47328, protocol: "chat", error: "" },
-  codex: { version: "26.0", running: false, catalogVersion: "1", drift: false },
-  conflict: "",
-  takeover: null,
-  ...overrides,
-});
+// `providers` 是权威来源（PR #9），这里跟着 `provider` 走：面板自己还在读兼容字段，
+// 但它调的 modelsView 已经按 providers 判断了，一份夹具里两处事实不能对不上
+const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
+  const provider = overrides.provider ?? {
+    baseUrl: "https://example.com/openai",
+    hasKey: true,
+    models: [],
+  };
+  return {
+    supported: true,
+    provider,
+    providers: overrides.providers ?? [provider],
+    enabled: false,
+    needsCodexRestart: false,
+    router: { installed: false, running: false, port: 47328, protocol: "chat", error: "" },
+    codex: { version: "26.0", running: false, catalogVersion: "1", drift: false },
+    conflict: "",
+    takeover: null,
+    ...overrides,
+  };
+};
 
 const withModels = (n: number, overrides: Partial<GatewayState> = {}) =>
   state({

@@ -1,6 +1,9 @@
 /* 模型页的排版（spec docs/specs/2026-09-21-ui-rebuild-models.md）。
    色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影，
-   圆角只有输入框 4px 与 pill 32px（§1.3）。 */
+   圆角只有输入框 4px 与 pill 32px（§1.3）。
+
+   这一页是启动页，所以留白按 DESIGN「Layout → 留白：往大了给」的上限给：
+   页边 32、区块之间 48。宽度收在 880px——大窗口上不把 15px 的正文拉成一条长带子。 */
 @import "./tokens.css";
 
 .models-page {
@@ -11,19 +14,13 @@
 
 .models-page__body {
   box-sizing: border-box;
-  padding: var(--space-md) var(--space-xxl) var(--space-xl);
+  max-width: 880px;
+  padding: var(--space-huge) var(--space-xxl);
 }
 
-/* 区域标签是我们自己写的结构词，大写；后面那句是说明，不大写（§1.2） */
-.models-page__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
-}
-
-/* micro-cap：12 / 600 / 0.96px / 行高 2.0 */
+/* micro-cap：12 / 600 / 0.96px / 行高 2.0。区域标签是我们自己写的结构词，大写（§1.2） */
 .models-page__label {
+  display: block;
   font-family: var(--font-cond);
   font-size: var(--size-micro);
   font-weight: 600;
@@ -39,98 +36,197 @@
   color: var(--ink-faint);
 }
 
-/* ===== agent 行 ===== */
-.models-row {
+.models-page__mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+}
+
+.models-page__notice {
+  margin-top: var(--space-md);
+}
+
+/* ===== 第一眼：28px 的结论 ===== */
+.models-hero__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xxs);
+}
+
+.models-hero__mark {
+  display: inline-flex;
+  color: var(--ink);
+}
+
+/* display：28 / 1.1 / 1.4px。与下面 15px 的那句人话差近一倍，层级一眼读得出（§1.2） */
+.models-hero__state {
+  margin: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-display);
+  font-weight: 700;
+  line-height: var(--leading-display);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* 三组状态词合成的那一句人话（R2）。它是主文字，不退到次要色——
+   第一屏要读的就是它 */
+.models-hero__sentence {
+  margin: var(--space-sm) 0 0;
+  max-width: 560px;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+  color: var(--ink);
+}
+
+/* 版本号与端口是计数类事实，走等宽（§1.2） */
+.models-hero__facts {
+  margin: var(--space-xxs) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.models-hero__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
+}
+
+/* ===== 网关区 =====
+   区块之间 48（DESIGN「Layout」）。分区靠分隔线，不靠再套一层框。 */
+.models-section {
+  margin-top: var(--space-huge);
+}
+
+.models-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.models-section__action {
+  margin-left: auto;
+}
+
+.models-section__empty {
+  padding-top: var(--space-md);
   border-top: 1px solid var(--ink);
-  padding: var(--space-md) 0;
 }
 
-.models-row__main {
+.models-cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--ink);
+}
+
+.models-cards > li + li {
+  border-top: 1px solid var(--hairline);
+}
+
+/* ===== 一家网关一块 ===== */
+.models-card {
+  padding: var(--space-md) 0 var(--space-lg);
+}
+
+.models-card__head {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
+  gap: var(--space-sm);
 }
 
-.models-row__identity {
-  width: 286px;
-  flex-shrink: 0;
-}
-
-.models-row__name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* agent 名不大写：被谈论的对象一律不大写（§1.2） */
-.models-row__title {
+/* 网关名是被谈论的对象，不大写（§1.2） */
+.models-card__name {
   font-family: var(--font-ui);
   font-size: var(--size-body);
   font-weight: 600;
 }
 
-/* 三组状态词合成的那一句人话（R2） */
-.models-row__status {
-  margin-top: var(--space-xxs);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-  line-height: var(--leading-caption);
+.models-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
 }
 
-/* 版本号与端口是计数类事实，走等宽（§1.2） */
-.models-row__facts {
+/* 圆点 9px + 间距 12，下面两块缩进 21px 对齐到网关名。
+   模型区用 margin 不用 padding：浮层是相对它绝对定位的，而绝对定位的包含块是
+   **内边距盒**——写成 padding 的话浮层会比模型区向左探出 21px。 */
+.models-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
   margin-top: 2px;
+  padding-left: 21px;
   font-family: var(--font-mono);
   font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
-.models-row__mono {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
+.models-card__url {
+  /* flex 项要 min-width: 0 才收得住，否则长地址会把这一行撑出去而不是省略 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 /* 选择器浮层挂在这一层上，不挂在可点区里：浮层里的点击不能冒泡出去再把它打开 */
-.models-row__pick {
+.models-card__pick {
   position: relative;
-  flex-grow: 1;
-  min-width: 0;
+  margin-top: var(--space-sm);
+  margin-left: 21px;
 }
 
-/* 已选模型区是一整块可点的区域，点哪儿都打开选择器（R1 修订 v2） */
-.models-row__models {
+/* 已选模型区是一整块可点的区域，点哪儿都打开选择器（R1 修订 v2）。
+   有描边的块 hover 转 ink 描边、底色不变——换底色会把里面 canvas 底的片糊掉 */
+.models-card__models {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-xxs) 6px;
   box-sizing: border-box;
+  min-height: 40px;
   padding: var(--space-xs) var(--space-sm);
   border: 1px solid var(--hairline);
   cursor: pointer;
 }
 
-.models-row__models:hover,
-.models-row__models:focus-visible {
+.models-card__models:hover,
+.models-card__models:focus-visible {
   border-color: var(--ink);
   outline: none;
 }
 
-.models-row__empty {
+.models-card__empty {
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   color: var(--ink-faint);
 }
 
-.models-row__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.models-row__notice {
-  margin: 8px 0 0 22px;
+/* ===== 方标签 tag-square（DESIGN components.tag-square）=====
+   零圆角、micro-cap、ink 描边。**不可点**——圆角只留给可点的东西（§1.3）。
+   组件库里还没有这个组件，先在这儿按 token 写一份。 */
+.models-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: var(--leading-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 /* ===== 已选模型片：chip-compact + ×（DESIGN.md components.chip-compact） =====
@@ -302,7 +398,7 @@
   font-size: var(--size-body);
 }
 
-/* 模型 id 是标识符，走等宽（§1.2） */
+/* 模型标识是标识符，走等宽（§1.2） */
 .models-item__id {
   font-family: var(--font-mono);
   font-size: var(--size-micro);
@@ -334,7 +430,7 @@
 }
 
 /* ===== 限制说明：常驻，不随操作消失（R8） ===== */
-/* 与上面的 agent 行区之间 48：页面里的大区块之间（DESIGN「Layout」） */
+/* 与网关区之间 48：页面里的大区块之间（DESIGN「Layout」） */
 .models-page__limits {
   max-width: 560px;
   margin-top: var(--space-huge);
