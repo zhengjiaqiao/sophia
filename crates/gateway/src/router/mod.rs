@@ -392,7 +392,7 @@ impl Router {
             if target.is_none() && catalog.retired.contains(&key) {
                 // Codex 的模型目录只在启动时加载：取消勾选后，运行中的 Codex 仍可能发这个模型名
                 return reject(model, Route::None, StatusCode::CONFLICT, "retired_model",
-                    "this third-party model was removed in SymSync; restart Codex to refresh the model list");
+                    "this third-party model was removed in Sophia; restart Codex to refresh the model list");
             }
             let sessions = session_keys(&parts.headers);
             if target.is_none()
@@ -441,7 +441,7 @@ impl Router {
                             Route::ThirdParty,
                             StatusCode::BAD_GATEWAY,
                             "key_error",
-                            "third-party API key is not available; set it in SymSync（密钥未保存）",
+                            "third-party API key is not available; set it in Sophia（密钥未保存）",
                         ),
                     };
                 self.forward_third_party(
