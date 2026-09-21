@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { render } from "./ui-render.ts";
 import {
+  MODELS_TOOLS,
   canRestore,
+  emptyModelsText,
   enableDisabledReason,
   factsLine,
-  headline,
   modelLabel,
   parseBackendError,
-  providerFacts,
+  providerCatalogHint,
   providerLabel,
   removeProviderBlockedReason,
   routerUnavailable,
@@ -18,6 +19,7 @@ import {
   takeoverOfferText,
   totalSelected,
 } from "../src/modelsView.ts";
+import type { ModelsTool } from "../src/modelsView.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
 
 const model = (overrides: Partial<GatewayProviderModel> = {}): GatewayProviderModel => ({
@@ -56,7 +58,7 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
   };
 };
 
-const { ModelsHero, GatewayCard, MODELS_TAB_FULL_BLEED } = await import("../src/ModelsTab.tsx");
+const { ToolIntro, GatewayCard, MODELS_TAB_FULL_BLEED } = await import("../src/ModelsTab.tsx");
 
 const noop = () => {};
 
@@ -291,12 +293,20 @@ test("totalSelected 把几家网关的已选数加起来，selectedModels 保持
   );
 });
 
-test("providerFacts：数字带单位，已选与共有各占各的位置；一个都没拉到时直说", () => {
-  assert.equal(providerFacts(provider()), "还没拉到模型列表");
+test("providerCatalogHint 只说「还有多少可挑」，不重复数已选的那几个", () => {
+  assert.equal(providerCatalogHint(provider()), "");
   assert.equal(
-    providerFacts(provider({ models: [model({ id: "m1", selected: true }), model({ id: "m2" })] })),
-    "已选 1 个 · 共 2 个",
+    providerCatalogHint(
+      provider({ models: [model({ id: "m1", selected: true }), model({ id: "m2" })] }),
+    ),
+    "2 个可选",
   );
+});
+
+test("emptyModelsText：三种空是三件事，各说各的下一步", () => {
+  assert.match(emptyModelsText(provider({ hasKey: false })), /还没有密钥/);
+  assert.match(emptyModelsText(provider({ hasKey: true })), /还没拉到模型列表/);
+  assert.equal(emptyModelsText(provider({ models: [model({ id: "m1" })] })), "还没选模型");
 });
 
 test("removeProviderBlockedReason：已启用时删不掉最后一家还在发布模型的网关", () => {
@@ -317,30 +327,60 @@ test("removeProviderBlockedReason：已启用时删不掉最后一家还在发�
   );
 });
 
-test("headline 一行大字只给结论", () => {
-  assert.equal(headline(state({ enabled: true })), "已经在用");
-  assert.equal(headline(state()), "还没启用");
-});
-
 test("MODELS_TAB_FULL_BLEED：模型页不分域，壳在这一页不渲染侧栏", () => {
   assert.equal(MODELS_TAB_FULL_BLEED, true);
 });
 
-// ===== 渲染：启动页那一屏（AC1 / AC2 的代理验证）=====
+test("MODELS_TOOLS：版面按工具分块；今天只有 Codex，但名字一律从表里取", () => {
+  assert.ok(MODELS_TOOLS.length >= 1);
+  const codex = MODELS_TOOLS[0];
+  assert.equal(codex.id, "codex");
+  assert.equal(codex.name, "Codex");
+  assert.match(codex.limitations, /会话标题/);
+});
 
-const heroProps = (overrides: Partial<GatewayState> = {}, selectedCount = 0) => ({
+test("工具名可换：statusSentence / factsLine 不把工具写死在句子里", () => {
+  const other: ModelsTool = { id: "other", name: "别的工具", limitations: "…" };
+  assert.equal(
+    statusSentence(state({ enabled: true }), 2, other),
+    "2 个模型已经在 别的工具 的模型列表里",
+  );
+  assert.equal(
+    factsLine(
+      state({ codex: { version: "1.2", running: true, catalogVersion: "1.2", drift: false } }),
+      other,
+    ),
+    "别的工具 1.2 · 路由未安装",
+  );
+  // 菜单栏面板调的是两参数的老形，仍然说 Codex，两边一句话
+  assert.equal(statusSentence(state({ enabled: true }), 2), "2 个模型已经在 Codex 的模型列表里");
+});
+
+// ===== 渲染：一个工具的抬头 =====
+
+const introProps = (overrides: Partial<GatewayState> = {}, selectedCount = 0) => ({
+  tool: MODELS_TOOLS[0],
   state: state(overrides),
   selectedCount,
   busy: false,
   onEnable: noop,
   onDisable: noop,
-  onRestartCodex: noop,
+  onRestart: noop,
 });
 
-test("ModelsHero 已启用：28px 大字给结论、一句人话、一行等宽事实，开关是反色 pill", () => {
+test("ToolIntro：图标和名字一起出现，名字走 28px display 档且不大写", () => {
+  const html = render(ToolIntro, introProps({ enabled: true }, 3));
+  // 图标是补充不是替代——名字必须在（DESIGN §9.1）
+  assert.match(html, /<svg width="24" height="24"/);
+  assert.match(html, /class="models-tool__name">Codex</);
+  // 名字原样，不做大小写转换
+  assert.doesNotMatch(html, /CODEX/);
+});
+
+test("ToolIntro 已启用：一句人话、一行等宽事实，开关是反色 pill，重启按钮带工具名", () => {
   const html = render(
-    ModelsHero,
-    heroProps(
+    ToolIntro,
+    introProps(
       {
         enabled: true,
         needsCodexRestart: true,
@@ -350,22 +390,22 @@ test("ModelsHero 已启用：28px 大字给结论、一句人话、一行等宽�
       3,
     ),
   );
-  assert.match(html, /class="models-hero__state">已经在用</);
   assert.match(
     html,
-    /class="models-hero__sentence">3 个模型已经在 Codex 的模型列表里，改动要重启 Codex 才生效</,
+    /class="models-tool__sentence">3 个模型已经在 Codex 的模型列表里，改动要重启 Codex 才生效</,
   );
-  assert.match(html, /class="models-hero__facts">Codex 0\.43\.0 · 路由 127\.0\.0\.1:8765 运行中</);
+  assert.match(html, /class="models-tool__facts">Codex 0\.43\.0 · 路由 127\.0\.0\.1:8765 运行中</);
   // 反色＝现在开着（DESIGN components.button-inverse）
   assert.match(html, /class="ss-btn ss-btn--inverse"[^>]*>已启用</);
-  assert.match(html, />重启 Codex</);
+  // 重启是这个工具的动作，按钮上带着它的名字；button-cap 是大写档，
+  // 但专名原样不转大写（§1.2），所以名字裹在 .models-plain 里
+  assert.match(html, /重启 <span class="models-plain">Codex<\/span>/);
   // 三组状态词合成一句，不并排三个徽标（AC2）
-  assert.doesNotMatch(html, /models-hero__badge/);
+  assert.doesNotMatch(html, /models-tool__badge/);
 });
 
-test("ModelsHero 未启用且没网关：启用按钮禁用，并把原因挂在 title 上", () => {
-  const html = render(ModelsHero, heroProps({ providers: [] }, 0));
-  assert.match(html, /class="models-hero__state">还没启用</);
+test("ToolIntro 未启用且没网关：启用按钮禁用，并把原因挂在 title 上", () => {
+  const html = render(ToolIntro, introProps({ providers: [] }, 0));
   assert.match(html, /title="先添加一个网关" disabled=""/);
   assert.match(html, /先添加一个网关——填上地址和密钥就能拉到它的模型列表/);
 });
@@ -374,6 +414,7 @@ test("ModelsHero 未启用且没网关：启用按钮禁用，并把原因挂在
 
 const cardProps = (p: GatewayProvider) => ({
   provider: p,
+  tool: MODELS_TOOLS[0],
   busy: false,
   onOpenPicker: noop,
   onRemoveModel: noop,
@@ -381,7 +422,7 @@ const cardProps = (p: GatewayProvider) => ({
   onRemove: noop,
 });
 
-test("GatewayCard 有密钥：实心圆点、已选模型是带 × 的紧凑片、计数走等宽", () => {
+test("GatewayCard 有密钥：实心圆点、地址并进身份行、已选模型是带 × 的紧凑片", () => {
   const html = render(
     GatewayCard,
     cardProps(
@@ -398,11 +439,14 @@ test("GatewayCard 有密钥：实心圆点、已选模型是带 × 的紧凑片�
   assert.match(html, /class="ss-dot ss-dot--linked"/);
   assert.doesNotMatch(html, /models-tag/);
   assert.match(html, /class="models-card__name">wecode</);
-  assert.match(html, /class="models-card__count">已选 2 个 · 共 3 个</);
+  assert.match(html, /class="models-card__url"[^>]*>https:\/\/example\.com\/openai</);
+  // 已选的摆在片上，就不再数第二遍；右端只说还有多少可挑
+  assert.doesNotMatch(html, /已选 2 个/);
+  assert.match(html, /class="models-card__catalog">3 个可选</);
   // 片不反色：它们是事实，不是正在选的东西
   assert.match(html, /class="ss-model-chip"><span class="ss-model-chip__label">GPT 5</);
   assert.match(html, /title="把 Claude 从 Codex 的模型列表里去掉"/);
-  // 整块区域可点，不另给「改选模型」链接（R1 修订 v2）
+  // 已选模型就在主页面上改，整块区域可点，不另给链接、也不进二级页（与 cc-switch 的差异点）
   assert.match(
     html,
     /class="models-card__models" role="button" tabindex="0" title="点一下改选模型"/,
@@ -410,10 +454,17 @@ test("GatewayCard 有密钥：实心圆点、已选模型是带 × 的紧凑片�
   assert.doesNotMatch(html, /改选模型<\/button>/);
 });
 
-test("GatewayCard 没密钥：空心圆点 + 零圆角方标签，模型区写「还没选模型」", () => {
+test("GatewayCard 没密钥：空心圆点 + 零圆角方标签，空态说清为什么空", () => {
   const html = render(GatewayCard, cardProps(provider({ hasKey: false })));
   assert.match(html, /class="ss-dot ss-dot--missing"/);
   assert.match(html, /class="models-tag">还没有密钥</);
-  assert.match(html, /class="models-card__count">还没拉到模型列表</);
+  assert.match(html, /class="models-card__empty">还没有密钥——到「配置」里填上就能拉到模型列表</);
+  // 一个都没拉到时右端那句不出现，左边的空态已经把话说了
+  assert.doesNotMatch(html, /models-card__catalog/);
+});
+
+test("GatewayCard 拉到了模型但一个都没选：空态说的是「还没选模型」", () => {
+  const html = render(GatewayCard, cardProps(provider({ models: [model({ id: "m1" })] })));
   assert.match(html, /class="models-card__empty">还没选模型</);
+  assert.match(html, /class="models-card__catalog">1 个可选</);
 });

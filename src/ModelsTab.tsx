@@ -3,12 +3,13 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api.ts";
 import {
+  MODELS_TOOLS,
+  emptyModelsText,
   enableDisabledReason,
   factsLine,
-  headline,
   modelLabel,
   parseBackendError,
-  providerFacts,
+  providerCatalogHint,
   providerLabel,
   removeProviderBlockedReason,
   routerUnavailable,
@@ -18,6 +19,7 @@ import {
   takeoverOfferText,
   totalSelected,
 } from "./modelsView.ts";
+import type { ModelsTool } from "./modelsView.ts";
 import type {
   GatewayProvider,
   GatewayProviderModel,
@@ -41,25 +43,32 @@ import "./ModelsTab.css";
 
 /// 模型页（spec `docs/specs/2026-09-21-ui-rebuild-models.md`）。
 ///
-/// 它是应用的**启动页**：打开应用第一眼看到的就是这一屏，所以版面按
-/// DESIGN.md「Layout」的大留白来排，而不是一张密排的表——
-/// 28px display 的结论 → 一句人话 → 一行等宽事实 → 48px 之后才是网关清单。
+/// 它是应用的**启动页**，版面按 DESIGN.md「Layout」的大留白排，不是一张密排的表。
 ///
-/// 一屏要回答三件事：**第三方模型现在开着没有**（大字）、**Codex 现在用的是哪几个模型**
-/// （网关块里的紧凑片）、**哪里出了问题**（横幅 / 行内待办条 / 缺密钥的方标签）。
+/// **按工具分块**（第二轮反馈）：一个工具一块，块里从上到下是
+/// 「它是谁 → 它现在怎么样 → 它的网关和已选模型 → 用它要知道的限制」，
+/// 动作也归块——`重启 <工具>` 是那个工具的动作，不是页面的动作。
+/// 今天 `MODELS_TOOLS` 里只有 Codex，但**版面、文案、空态都不写死一个工具**：
+/// 名字一律从 `tool.name` 取。后端那侧现在确实只支持 Codex，这一轮只为多工具留位置。
+///
+/// 一屏要回答三件事：**这是什么工具**（图标 + 名字，display 28）、
+/// **它现在用的是哪几个模型**（网关块里的紧凑片）、
+/// **哪里出了问题**（横幅 / 行内待办条 / 缺密钥的方标签）。
 ///
 /// 页面没有域的概念，所以壳在这一页不要渲染侧栏，见 `MODELS_TAB_FULL_BLEED`。
 ///
-/// 五条形上的定死选择，改之前先回去看 spec：
+/// 六条形上的定死选择，改之前先回去看 spec：
+/// - **图标永远和名字一起出现**（DESIGN §9.1）。第一轮只画了图标、把 `Codex`
+///   这个名字吃掉了，是错的——图标是补充，不是替代
+/// - **已选模型在主页面直接可见，改选也在当前页完成**。这是我们和 cc-switch
+///   那类工具的差异点：它必须进二级页才能挑模型，我们不进。二级页只放网关地址和密钥
 /// - 开关是 ghost pill 两态（`启用` / 反色 `已启用`），不是滑动开关也不是复选框（R4）
 /// - 模型列表的「已选」用 12px 方形复选框：**圆＝状态（只读事实），方＝选择（我选的）**（R3）
 /// - 三组状态词合成一句人话 + 一行等宽事实，不并排三个徽标（R2）
-/// - 已选模型区是**一整块可点的区域**，点哪儿都打开选择器；片是紧凑片、不反色——
-///   它们是事实不是正在选的东西。不给「改选模型」单独一个链接（R1 修订 v2）
-/// - 按钮叫 `重启 Codex`：实测 Codex 以 `codex app-server` 常驻进程跑着，启动时读一次
+/// - 按钮叫 `重启 <工具>`：实测 Codex 以 `codex app-server` 常驻进程跑着，启动时读一次
 ///   config.toml 之后不重读，所以改完配置确实要结束它。会中断进行中的对话，确认一道（R6 修订 v2）
 ///
-/// 四条提示各有各的位置（R7）：`drift` 与 `takeover` 是挂在这一页上的常驻待办，
+/// 四条提示各有各的位置（R7）：`drift` 与 `takeover` 是挂在那个工具上的常驻待办，
 /// 走行内待办条；`needsCodexRestart` 并进那句人话；`routerUnavailable` 是应用级故障，
 /// 走顶栏之下的反色横幅；某次操作的结果走右下角提示条。
 ///
@@ -71,10 +80,6 @@ import "./ModelsTab.css";
 /// 页边 32px 由本页自己给（`.models-page` 的内边距）。App.tsx 用这个常量做条件。
 export const MODELS_TAB_FULL_BLEED = true;
 
-/// 已知限制：这段是事实，不是某次操作的结果，所以常驻在页面上不随操作消失（R8）
-const LIMITATIONS =
-  "Codex 仍会用官方模型生成会话标题，第一条消息会发给官方；自动审阅在第三方会话里用不了；网页搜索这类工具在第三方模型上也用不了。";
-
 const describeError = (error: unknown): string => parseBackendError(String(error)).message;
 
 const selectedPayload = (models: GatewayProviderModel[]): GatewaySelectedModel[] =>
@@ -83,69 +88,82 @@ const selectedPayload = (models: GatewayProviderModel[]): GatewaySelectedModel[]
 /// 二级页面：`providerId` 为 null 表示新加一家网关
 type SubPage = { providerId: string | null };
 
-// ===== 启动页的那一屏大字 =====
+// ===== 一个工具的抬头：它是谁，它现在怎么样 =====
 
-export interface ModelsHeroProps {
+export interface ToolIntroProps {
+  tool: ModelsTool;
   state: GatewayState;
   selectedCount: number;
   busy: boolean;
   onEnable: () => void;
   onDisable: () => void;
-  onRestartCodex: () => void;
+  onRestart: () => void;
 }
 
 /**
- * 第一眼的层级跳跃（DESIGN「Typography → 层级」）：12px 的区域标签、28px 的结论、
- * 15px 的一句人话、12px 等宽的事实。四行之间靠字号和行高拉开，不靠分隔线。
+ * 工具身份先出场，再谈状态。
+ *
+ * **图标永远和名字一起出现**（DESIGN §9.1，`tests/ui.test.ts` 也钉着这条）：
+ * 图标 24px 在左，名字走 display 档在右。名字**不做大写转换**——display token 自带
+ * `uppercase`，但「被谈论的对象一律不大写」（§1.2），`Codex` 不能变成 `CODEX`，
+ * 所以这一处显式关掉它。这是这一页唯一一处偏离 token 默认值的地方。
+ *
+ * 「开着没有」由反色 pill 回答（DESIGN「用反色表示现在开着」）＋ 那句人话，
+ * 不再另起一行 28px 的状态词——那会和开关说同一件事。
+ *
+ * 层级：28px 名字 → 15px 一句人话 → 12px 等宽事实，靠字号和行高拉开，不靠分隔线。
  */
-export function ModelsHero({
+export function ToolIntro({
+  tool,
   state,
   selectedCount,
   busy,
   onEnable,
   onDisable,
-  onRestartCodex,
-}: ModelsHeroProps) {
+  onRestart,
+}: ToolIntroProps) {
   const disabledReason = enableDisabledReason(state, selectedCount);
 
   return (
-    <header className="models-hero">
-      <span className="models-page__label">第三方模型</span>
-      <div className="models-hero__line">
-        <span className="models-hero__mark">
-          <AgentIcon id="codex" name="Codex" size={24} />
+    <header className="models-tool__intro">
+      <div className="models-tool__head">
+        <span className="models-tool__mark">
+          <AgentIcon id={tool.id} name={tool.name} size={24} />
         </span>
-        {/* 一眼回答「开着没有」。agent 是谁由图标、那句人话和等宽事实行一起说，
-            不在这行大字上重复——display 是大写档，而 agent 名不该大写（§1.2） */}
-        <h2 className="models-hero__state">{headline(state)}</h2>
+        <h2 className="models-tool__name">{tool.name}</h2>
+
+        <Busy busy={busy} className="models-tool__actions">
+          {state.enabled ? (
+            // 已启用＝反色 pill，点一下停用（DESIGN components.button-inverse）
+            <Button
+              variant="inverse"
+              title={`点一下停用：${tool.name} 的模型列表只保留官方模型`}
+              onClick={onDisable}
+            >
+              已启用
+            </Button>
+          ) : disabledReason !== null ? (
+            <Button disabled disabledReason={disabledReason}>
+              启用
+            </Button>
+          ) : (
+            <Button onClick={onEnable}>启用</Button>
+          )}
+
+          {/* 那句人话里「改动要重启 <工具> 才生效」的动作就是它。它是**这个工具**
+              的动作，所以归在这一块里，不放在页面级的位置上（R7、第二轮反馈） */}
+          <Button title={`结束 ${tool.name} 的后台进程，下次启动就带着新配置`} onClick={onRestart}>
+            {/* button-cap 自带 uppercase，会把 Codex 变成 CODEX。「重启」是我们写的
+                结构词该大写，工具名是被谈论的对象不该大写（§1.2），所以名字单独
+                裹一层把大写关掉 */}
+            重启 <span className="models-plain">{tool.name}</span>
+          </Button>
+        </Busy>
       </div>
-      <p className="models-hero__sentence">{statusSentence(state, selectedCount)}</p>
+
+      <p className="models-tool__sentence">{statusSentence(state, selectedCount, tool)}</p>
       {/* 版本号与端口是计数类事实，走等宽（§1.2） */}
-      <p className="models-hero__facts">{factsLine(state)}</p>
-
-      <Busy busy={busy} className="models-hero__actions">
-        {state.enabled ? (
-          // 已启用＝反色 pill，点一下停用（DESIGN components.button-inverse）
-          <Button
-            variant="inverse"
-            title="点一下停用：Codex 的模型列表只保留官方模型"
-            onClick={onDisable}
-          >
-            已启用
-          </Button>
-        ) : disabledReason !== null ? (
-          <Button disabled disabledReason={disabledReason}>
-            启用
-          </Button>
-        ) : (
-          <Button onClick={onEnable}>启用</Button>
-        )}
-
-        {/* 那句人话里「改动要重启 Codex 才生效」的动作就是它（R7） */}
-        <Button title="结束 Codex 的后台进程，下次启动就带着新配置" onClick={onRestartCodex}>
-          重启 Codex
-        </Button>
-      </Busy>
+      <p className="models-tool__facts">{factsLine(state, tool)}</p>
     </header>
   );
 }
@@ -154,6 +172,8 @@ export function ModelsHero({
 
 export interface GatewayCardProps {
   provider: GatewayProvider;
+  /// 片上的 × 要说清「从谁的模型列表里去掉」
+  tool: ModelsTool;
   busy: boolean;
   /// 点已选模型区：打开这一家的选择器
   onOpenPicker: () => void;
@@ -165,14 +185,19 @@ export interface GatewayCardProps {
 }
 
 /**
- * 一家网关：状态点 + 名字 + 地址与计数 + 已选模型区 + 两个动作。
+ * 一家网关：一行身份（状态点 + 名字 + 地址 + 两个动作）+ 一块已选模型。
  *
  * 圆点是**只读状态**（钥匙串里有没有这家的密钥），和模型列表里方形复选框的
  * 「我的选择」分得开（DESIGN §2 / R3）。缺密钥另给一个零圆角方标签——
  * 方标签不可点，圆角只留给可点的东西（§1.3）。
+ *
+ * 密度上做了减法（第二轮反馈：工具块 → 网关 → 模型已经三层，别再厚）：
+ * 地址并进身份行，原来单独一行的「已选 N 个 · 共 M 个」去掉了——已选的就摆在
+ * 片上，数第二遍没有意义；剩下的「还有多少可挑」挪到模型区右端一句等宽提示。
  */
 export function GatewayCard({
   provider,
+  tool,
   busy,
   onOpenPicker,
   onRemoveModel,
@@ -181,6 +206,7 @@ export function GatewayCard({
   children,
 }: GatewayCardProps) {
   const picked = selectedModels(provider);
+  const catalog = providerCatalogHint(provider);
 
   return (
     <div className="models-card">
@@ -193,6 +219,10 @@ export function GatewayCard({
         />
         <span className="models-card__name">{providerLabel(provider)}</span>
         {provider.hasKey ? null : <span className="models-tag">还没有密钥</span>}
+        {/* 地址是事实，走等宽；长了省略，全文在 title 上（§1.2） */}
+        <span className="models-card__url" title={provider.baseUrl}>
+          {provider.baseUrl || "还没填地址"}
+        </span>
         <Busy busy={busy} className="models-card__actions">
           <Button size="compact" onClick={onConfigure}>
             配置
@@ -201,14 +231,6 @@ export function GatewayCard({
             删掉
           </Button>
         </Busy>
-      </div>
-
-      {/* 地址与计数都是事实，同一行等宽（§1.2） */}
-      <div className="models-card__facts">
-        <span className="models-card__url" title={provider.baseUrl}>
-          {provider.baseUrl || "还没填地址"}
-        </span>
-        <span className="models-card__count">{providerFacts(provider)}</span>
       </div>
 
       <div className="models-card__pick">
@@ -227,7 +249,8 @@ export function GatewayCard({
           }}
         >
           {picked.length === 0 ? (
-            <span className="models-card__empty">还没选模型</span>
+            // 空着的三种原因是三件不同的事，各说各的下一步
+            <span className="models-card__empty">{emptyModelsText(provider)}</span>
           ) : (
             picked.map((m) => (
               <span key={m.id} className="ss-model-chip">
@@ -235,7 +258,7 @@ export function GatewayCard({
                 <button
                   type="button"
                   className="ss-model-chip__remove"
-                  title={`把 ${modelLabel(m)} 从 Codex 的模型列表里去掉`}
+                  title={`把 ${modelLabel(m)} 从 ${tool.name} 的模型列表里去掉`}
                   disabled={busy}
                   onClick={(e) => {
                     // 去掉这一个就是去掉这一个，别顺带把选择器也打开了
@@ -258,6 +281,8 @@ export function GatewayCard({
               </span>
             ))
           )}
+          {/* 「还有多少可挑」——点进去才看得到全部，这句是那块区域可点的由头 */}
+          {catalog === "" ? null : <span className="models-card__catalog">{catalog}</span>}
         </div>
         {children}
       </div>
@@ -282,10 +307,13 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   /// 二级页面（§4.6）：null＝主视图
   const [subPage, setSubPage] = useState<SubPage | null>(null);
-  /// 结束 Codex 进程会中断进行中的对话，确认一道（R6、§5）
-  const [confirmRestart, setConfirmRestart] = useState(false);
-  /// 删网关会连钥匙串里的密钥一起删，回不来，确认一道
-  const [confirmRemove, setConfirmRemove] = useState<GatewayProvider | null>(null);
+  /// 结束工具的后台进程会中断进行中的对话，确认一道（R6、§5）。存的是要重启哪个工具
+  const [confirmRestart, setConfirmRestart] = useState<ModelsTool | null>(null);
+  /// 删网关会连钥匙串里的密钥一起删，回不来，确认一道。带上是哪个工具的，文案要点名
+  const [confirmRemove, setConfirmRemove] = useState<{
+    tool: ModelsTool;
+    provider: GatewayProvider;
+  } | null>(null);
   const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
   /// 行内待办条按「稍后」只在这一程里收起来，下次打开还会再提一次
   const [later, setLater] = useState<{ drift: boolean; takeover: boolean }>({
@@ -389,10 +417,10 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
     }
   };
 
-  /// 结束 Codex 的后台进程。一个都没找到**不是失败**——下次启动照样带着新配置起来，
+  /// 结束这个工具的后台进程。一个都没找到**不是失败**——下次启动照样带着新配置起来，
   /// 所以那一支也走 success 形态（R6、AC7′）。
-  const restartCodex = async () => {
-    setConfirmRestart(false);
+  const restartTool = async (tool: ModelsTool) => {
+    setConfirmRestart(null);
     onBusy(true);
     let done = false;
     try {
@@ -403,8 +431,8 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
         kind: "success",
         message:
           result.terminated > 0
-            ? `结束了 ${result.terminated} 个 Codex 进程，下次启动就是新配置`
-            : "Codex 现在没在跑，下次启动就是新配置",
+            ? `结束了 ${result.terminated} 个 ${tool.name} 进程，下次启动就是新配置`
+            : `${tool.name} 现在没在跑，下次启动就是新配置`,
       });
     } catch (error) {
       if (mounted.current) setToast({ kind: "cannot", message: describeError(error) });
@@ -457,8 +485,12 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
     setPickerId(null);
   };
 
-  /// 片上的 × ：当场移除，这一次有成功提示条（它是行上的一次明确操作）
-  const removeModel = (provider: GatewayProvider, model: GatewayProviderModel) => {
+  /// 片上的 × ：当场移除，这一次有成功提示条（它是块上的一次明确操作）
+  const removeModel = (
+    tool: ModelsTool,
+    provider: GatewayProvider,
+    model: GatewayProviderModel,
+  ) => {
     void runAction(
       () =>
         api.gatewaySelectModelsOf(
@@ -467,7 +499,7 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
             provider.models.map((m) => (m.id === model.id ? { ...m, selected: false } : m)),
           ),
         ),
-      `Codex 的模型列表里去掉了 ${modelLabel(model)}`,
+      `${tool.name} 的模型列表里去掉了 ${modelLabel(model)}`,
     );
   };
 
@@ -656,155 +688,184 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
       ) : null}
 
       <div className="models-page__body">
-        <ModelsHero
-          state={state}
-          selectedCount={selectedCount}
-          busy={busy}
-          onEnable={() =>
-            void runAction(
-              () => api.gatewayEnable(),
-              `${selectedCount} 个模型进了 Codex 的模型列表，要重启 Codex 才看得到`,
-            )
-          }
-          onDisable={() =>
-            void runAction(
-              () => api.gatewayRestore(),
-              "已经停用，Codex 的模型列表只剩官方模型；要重启 Codex 才看得到",
-            )
-          }
-          onRestartCodex={() => setConfirmRestart(true)}
-        />
-
-        {/* 常驻待办挂在这一屏上，动作就在右边（R7、§4.4） */}
-        {state.codex.drift && !later.drift ? (
-          <div className="models-page__notice">
-            <RowNotice
-              message={
-                <>
-                  Codex 升到 <span className="models-page__mono">{state.codex.version}</span>{" "}
-                  之后，模型列表要重新生成一次才对得上。
-                </>
-              }
-              actions={[
-                {
-                  label: "重新生成",
-                  onClick: () =>
-                    void runAction(
-                      () => api.gatewayEnable(),
-                      "模型列表重新生成好了，要重启 Codex 才看得到",
-                    ),
-                },
-              ]}
-              onLater={() => setLater((c) => ({ ...c, drift: true }))}
-            />
-          </div>
-        ) : null}
-
-        {state.takeover !== null && !later.takeover ? (
-          <div className="models-page__notice">
-            <RowNotice
-              message={`${takeoverOfferText(state.takeover)}。接过来会把网关地址、已选模型和密钥原样带过来，并撤下 agents-manager 的后台服务与文件。`}
-              actions={[
-                {
-                  label: "接管",
-                  onClick: () =>
-                    void runAction(
-                      () => api.gatewayTakeover(),
-                      "接过来了，网关地址、已选模型和密钥都在；要重启 Codex 才看得到",
-                    ),
-                },
-              ]}
-              onLater={() => setLater((c) => ({ ...c, takeover: true }))}
-            />
-          </div>
-        ) : null}
-
-        {/* 网关区：一家一块，上面一条 ink 分隔（DESIGN 靠分隔线分区，不靠嵌套的框） */}
-        <section className="models-section">
-          <div className="models-section__head">
-            <span className="models-page__label">网关</span>
-            <span className="models-page__note">勾选的模型会出现在 Codex 自己的模型列表里</span>
-            <Busy busy={busy} className="models-section__action">
-              <Button size="compact" onClick={() => setSubPage({ providerId: null })}>
-                添加网关
-              </Button>
-            </Busy>
-          </div>
-
-          {state.providers.length === 0 ? (
-            <div className="models-section__empty">
-              <Empty
-                kind="noSkills"
-                description="还没有网关。填上地址和密钥，它的模型就能进 Codex 的模型列表。"
-                primary={{ label: "添加网关", onClick: () => setSubPage({ providerId: null }) }}
-              />
-            </div>
-          ) : (
-            <ul className="models-cards">
-              {state.providers.map((provider) => (
-                <li key={provider.id}>
-                  <GatewayCard
-                    provider={provider}
-                    busy={busy}
-                    onOpenPicker={() => {
-                      setQuery("");
-                      setRenaming(null);
-                      setPickerId(provider.id);
-                    }}
-                    onRemoveModel={(model) => removeModel(provider, model)}
-                    onConfigure={() => setSubPage({ providerId: provider.id })}
-                    onRemove={() => setConfirmRemove(provider)}
-                  >
-                    {pickerId === provider.id ? picker(provider) : null}
-                  </GatewayCard>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* 限制说明是事实，不是某次操作的结果，常驻（R8） */}
-        <div className="models-page__limits">
-          <span className="models-page__label">用第三方模型要知道的</span>
-          <p className="models-page__limits-text">{LIMITATIONS}</p>
+        <div className="models-page__head">
+          <span className="models-page__label">第三方模型</span>
+          <p className="models-page__intro">
+            接上自建或第三方网关，把它们的模型放进下面这些工具自己的模型列表。
+          </p>
         </div>
+
+        {/* 一个工具一块。今天 MODELS_TOOLS 里只有一个，但版面不假设只有一个：
+            后端那侧现在也只支持 Codex，所以每一块共用同一份 state；等后端按工具
+            分开，改的是这里传什么 state，块里的东西一个都不用动 */}
+        <ul className="models-tools">
+          {MODELS_TOOLS.map((tool) => (
+            <li key={tool.id} className="models-tool">
+              <ToolIntro
+                tool={tool}
+                state={state}
+                selectedCount={selectedCount}
+                busy={busy}
+                onEnable={() =>
+                  void runAction(
+                    () => api.gatewayEnable(),
+                    `${selectedCount} 个模型进了 ${tool.name} 的模型列表，要重启 ${tool.name} 才看得到`,
+                  )
+                }
+                onDisable={() =>
+                  void runAction(
+                    () => api.gatewayRestore(),
+                    `已经停用，${tool.name} 的模型列表只剩官方模型；要重启 ${tool.name} 才看得到`,
+                  )
+                }
+                onRestart={() => setConfirmRestart(tool)}
+              />
+
+              {/* 常驻待办挂在这个工具上，动作就在右边（R7、§4.4） */}
+              {state.codex.drift && !later.drift ? (
+                <div className="models-tool__notice">
+                  <RowNotice
+                    message={
+                      <>
+                        {tool.name} 升到{" "}
+                        <span className="models-page__mono">{state.codex.version}</span>{" "}
+                        之后，模型列表要重新生成一次才对得上。
+                      </>
+                    }
+                    actions={[
+                      {
+                        label: "重新生成",
+                        onClick: () =>
+                          void runAction(
+                            () => api.gatewayEnable(),
+                            `模型列表重新生成好了，要重启 ${tool.name} 才看得到`,
+                          ),
+                      },
+                    ]}
+                    onLater={() => setLater((c) => ({ ...c, drift: true }))}
+                  />
+                </div>
+              ) : null}
+
+              {state.takeover !== null && !later.takeover ? (
+                <div className="models-tool__notice">
+                  <RowNotice
+                    message={`${takeoverOfferText(state.takeover)}。接过来会把网关地址、已选模型和密钥原样带过来，并撤下 agents-manager 的后台服务与文件。`}
+                    actions={[
+                      {
+                        label: "接管",
+                        onClick: () =>
+                          void runAction(
+                            () => api.gatewayTakeover(),
+                            `接过来了，网关地址、已选模型和密钥都在；要重启 ${tool.name} 才看得到`,
+                          ),
+                      },
+                    ]}
+                    onLater={() => setLater((c) => ({ ...c, takeover: true }))}
+                  />
+                </div>
+              ) : null}
+
+              {/* 网关区：一家一块，上面一条 ink 分隔（DESIGN 靠分隔线分区，不靠嵌套的框）。
+                  已选模型就在这儿改，不进二级页——那是我们和 cc-switch 那类工具的差异点 */}
+              <section className="models-section">
+                <div className="models-section__head">
+                  <span className="models-page__label">网关</span>
+                  <Busy busy={busy} className="models-section__action">
+                    <Button size="compact" onClick={() => setSubPage({ providerId: null })}>
+                      添加网关
+                    </Button>
+                  </Busy>
+                </div>
+
+                {state.providers.length === 0 ? (
+                  <div className="models-section__empty">
+                    <Empty
+                      kind="noSkills"
+                      description={`还没有网关。填上地址和密钥，它的模型就能进 ${tool.name} 的模型列表。`}
+                      primary={{
+                        label: "添加网关",
+                        onClick: () => setSubPage({ providerId: null }),
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <ul className="models-cards">
+                    {state.providers.map((provider) => (
+                      <li key={provider.id}>
+                        <GatewayCard
+                          provider={provider}
+                          tool={tool}
+                          busy={busy}
+                          onOpenPicker={() => {
+                            setQuery("");
+                            setRenaming(null);
+                            setPickerId(provider.id);
+                          }}
+                          onRemoveModel={(model) => removeModel(tool, provider, model)}
+                          onConfigure={() => setSubPage({ providerId: provider.id })}
+                          onRemove={() => setConfirmRemove({ tool, provider })}
+                        >
+                          {pickerId === provider.id ? picker(provider) : null}
+                        </GatewayCard>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              {/* 限制说明是**这个工具**的事实，不是某次操作的结果，常驻（R8） */}
+              <div className="models-tool__limits">
+                {/* 标签里不嵌工具名：micro-cap 是大写档，`Codex` 会变成 `CODEX`（§1.2）。
+                    这一块本来就在这个工具底下，不点名也不会误会 */}
+                <span className="models-page__label">用第三方模型要知道的</span>
+                <p className="models-tool__limits-text">{tool.limitations}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
 
       {/* 会中断进行中的对话，所以确认一道（R6、§5 四处确认之一） */}
-      {confirmRestart ? (
+      {confirmRestart !== null ? (
         <Confirm
-          title="重启 Codex"
-          body="会结束正在运行的 Codex 后台进程，进行中的对话会中断。下次用 Codex 时会带着新配置起来。"
+          title={`重启 ${confirmRestart.name}`}
+          body={`会结束正在运行的 ${confirmRestart.name} 后台进程，进行中的对话会中断。下次用 ${confirmRestart.name} 时会带着新配置起来。`}
           confirmLabel="重启"
-          onConfirm={() => void restartCodex()}
-          onCancel={() => setConfirmRestart(false)}
+          onConfirm={() => void restartTool(confirmRestart)}
+          onCancel={() => setConfirmRestart(null)}
         />
       ) : null}
 
       {/* 删网关连钥匙串里的密钥一起删，回不来。分量由信息承担，不涂红（§1.1） */}
       {confirmRemove !== null ? (
         <Confirm
-          title={`删掉 ${providerLabel(confirmRemove)}`}
+          title={`删掉 ${providerLabel(confirmRemove.provider)}`}
           body="这家网关的地址、拉到的模型列表，以及钥匙串里的密钥会一起删掉。密钥删了取不回来，要用得重新填一次。"
           warning={
             <>
-              <span className="models-page__mono">{confirmRemove.baseUrl}</span>
+              <span className="models-page__mono">{confirmRemove.provider.baseUrl}</span>
               <br />
-              已选的 {selectedModels(confirmRemove).length} 个模型会从 Codex 的模型列表里去掉
-              {state.enabled ? "，Codex 重启后生效" : ""}。
+              已选的 {selectedModels(confirmRemove.provider).length} 个模型会从{" "}
+              {confirmRemove.tool.name} 的模型列表里去掉
+              {state.enabled ? `，${confirmRemove.tool.name} 重启后生效` : ""}。
               {/* 后端会拒的那一种：把原因和下一步摆在眼前，不让用户按完才撞上 */}
-              {removeProviderBlockedReason(state, confirmRemove) !== null ? (
+              {removeProviderBlockedReason(state, confirmRemove.provider, confirmRemove.tool) !==
+              null ? (
                 <>
                   <br />
-                  {removeProviderBlockedReason(state, confirmRemove)}。
+                  {removeProviderBlockedReason(state, confirmRemove.provider, confirmRemove.tool)}。
                 </>
               ) : null}
             </>
           }
           confirmLabel="连密钥一起删掉"
           destructive
-          confirmDisabledReason={removeProviderBlockedReason(state, confirmRemove) ?? undefined}
-          onConfirm={() => removeProvider(confirmRemove)}
+          confirmDisabledReason={
+            removeProviderBlockedReason(state, confirmRemove.provider, confirmRemove.tool) ??
+            undefined
+          }
+          onConfirm={() => removeProvider(confirmRemove.provider)}
           onCancel={() => setConfirmRemove(null)}
         />
       ) : null}

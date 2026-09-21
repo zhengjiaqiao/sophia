@@ -5,6 +5,32 @@ import type {
   GatewayTakeover,
 } from "./types.ts";
 
+/**
+ * 页面上的一个**工具**（Codex、以后可能还有别的）。
+ *
+ * 后端今天只支持 Codex，这一层不是为了现在就多支持一个，而是**别让版面和文案
+ * 写死一个工具**：标题、空态、提示条、限制说明都从这里取名字，加第二个工具时
+ * 只改这张表，不用回去翻每一句话。
+ */
+export interface ModelsTool {
+  /// `AgentIcon` 的 id
+  id: string;
+  /// 显示名，**不大写**——它是被谈论的对象（DESIGN §1.2）
+  name: string;
+  /// 用这个工具的第三方模型要知道的事。是事实不是某次操作的结果，常驻在它自己那一块里
+  limitations: string;
+}
+
+export const CODEX: ModelsTool = {
+  id: "codex",
+  name: "Codex",
+  limitations:
+    "Codex 仍会用官方模型生成会话标题，第一条消息会发给官方；自动审阅在第三方会话里用不了；网页搜索这类工具在第三方模型上也用不了。",
+};
+
+/// 页面按这张表一个工具一块。今天只有一个，但版面不假设只有一个
+export const MODELS_TOOLS: ModelsTool[] = [CODEX];
+
 export interface ParsedBackendError {
   code: string;
   message: string;
@@ -59,12 +85,25 @@ export function totalSelected(state: GatewayState): number {
 }
 
 /**
- * 一家网关的计数行（等宽）。
- * 数字带单位，「已选」与「共有」各占各的位置，不共用一个数（DESIGN「计数口径」）。
+ * 模型区右端那句（等宽）：这一家一共拉到多少个可以选的模型。
+ *
+ * **不再写「已选 N 个」**——已选的那几个就摆在左边的片上，再数一遍是同一件事说两遍；
+ * 这句要回答的是另一件事：点进去还有多少可挑（DESIGN「计数口径：两个数不共用位置」）。
+ * 一个都没拉到时返回空串，那时候左边的空态已经把话说了。
  */
-export function providerFacts(provider: GatewayProvider): string {
-  if (provider.models.length === 0) return "还没拉到模型列表";
-  return `已选 ${selectedModels(provider).length} 个 · 共 ${provider.models.length} 个`;
+export function providerCatalogHint(provider: GatewayProvider): string {
+  return provider.models.length === 0 ? "" : `${provider.models.length} 个可选`;
+}
+
+/**
+ * 模型区空着时说清**为什么空、下一步做什么**，而不是一律「还没选模型」。
+ * 三种空是三件不同的事，混成一句用户就不知道该去哪儿（DESIGN「说结果，不说机制」）。
+ */
+export function emptyModelsText(provider: GatewayProvider): string {
+  if (provider.models.length > 0) return "还没选模型";
+  return provider.hasKey
+    ? "还没拉到模型列表——到「配置」里再存一次就会拉"
+    : "还没有密钥——到「配置」里填上就能拉到模型列表";
 }
 
 /**
@@ -77,21 +116,16 @@ export function providerFacts(provider: GatewayProvider): string {
 export function removeProviderBlockedReason(
   state: GatewayState,
   provider: GatewayProvider,
+  tool: ModelsTool = CODEX,
 ): string | null {
   if (!state.enabled) return null;
   if (selectedModels(provider).length === 0) return null;
   const others = state.providers.some(
     (other) => other.id !== provider.id && selectedModels(other).length > 0,
   );
-  return others ? null : "它是最后一家还在给 Codex 发模型的网关；先点「已启用」停用，再回来删";
-}
-
-/**
- * 启动页那行大字（display 28）：一眼回答「第三方模型现在开着没有」。
- * 细节让下面那句人话说，这一行只给结论。
- */
-export function headline(state: GatewayState): string {
-  return state.enabled ? "已经在用" : "还没启用";
+  return others
+    ? null
+    : `它是最后一家还在给 ${tool.name} 发模型的网关；先点「已启用」停用，再回来删`;
 }
 
 /**
@@ -126,19 +160,26 @@ export function canRestore(state: GatewayState): boolean {
  * 副行那句人话（spec R2）。
  *
  * `enabled`、`router.running`、`codex.version` 是正交的三件事，**不并排三个徽标**——
- * 合成一句话说清「现在是什么样」。`needsCodexRestart` 也并进来，右边那个「重启 Codex」
- * 就是它的动作，所以不再单起一条（R7）。
+ * 合成一句话说清「现在是什么样」。`needsCodexRestart` 也并进来，那一块右边的
+ * 「重启 <工具>」就是它的动作，所以不再单起一条（R7）。
+ *
+ * 工具名从 `tool` 来，不写死在句子里。默认是 Codex：菜单栏面板（`trayView.ts`）
+ * 调的是两参数的老形，两边仍然说同一句话。
  */
-export function statusSentence(state: GatewayState, selectedCount: number): string {
+export function statusSentence(
+  state: GatewayState,
+  selectedCount: number,
+  tool: ModelsTool = CODEX,
+): string {
   if (state.enabled) {
     const head =
       selectedCount > 0
-        ? `${selectedCount} 个模型已经在 Codex 的模型列表里`
-        : "已经启用，但一个模型都没选，Codex 的列表里还是只有官方模型";
-    return state.needsCodexRestart ? `${head}，改动要重启 Codex 才生效` : head;
+        ? `${selectedCount} 个模型已经在 ${tool.name} 的模型列表里`
+        : `已经启用，但一个模型都没选，${tool.name} 的列表里还是只有官方模型`;
+    return state.needsCodexRestart ? `${head}，改动要重启 ${tool.name} 才生效` : head;
   }
   if (state.takeover !== null) {
-    return "还没启用，Codex 现在只有官方模型——这台机器由 agents-manager 在管，接过来才能启用";
+    return `还没启用，${tool.name} 现在只有官方模型——这台机器由 agents-manager 在管，接过来才能启用`;
   }
   if (state.conflict) return `还没启用：${state.conflict}`;
   if (state.providers.length === 0) {
@@ -148,20 +189,20 @@ export function statusSentence(state: GatewayState, selectedCount: number): stri
     return "还没启用，先到网关的「配置」里填上密钥";
   }
   if (selectedCount === 0) return "还没启用，先选几个模型";
-  return `还没启用，选好的 ${selectedCount} 个模型点「启用」就会进 Codex 的模型列表`;
+  return `还没启用，选好的 ${selectedCount} 个模型点「启用」就会进 ${tool.name} 的模型列表`;
 }
 
 /**
  * 事实行（等宽）：版本号与端口是计数类事实，走等宽（spec R2、组件规范 §1.2）。
- * 读不出 Codex 版本时不编一个，只说路由。
+ * 读不出工具版本时不编一个，只说路由。
  */
-export function factsLine(state: GatewayState): string {
+export function factsLine(state: GatewayState, tool: ModelsTool = CODEX): string {
   const router = state.router.running
     ? `路由 127.0.0.1:${state.router.port} 运行中`
     : state.router.installed
       ? `路由 127.0.0.1:${state.router.port} 没在跑`
       : "路由未安装";
-  return state.codex.version ? `Codex ${state.codex.version} · ${router}` : router;
+  return state.codex.version ? `${tool.name} ${state.codex.version} · ${router}` : router;
 }
 
 /// 「重启 Codex」不设禁用态：结束进程不依赖我们的路由装没装上，
