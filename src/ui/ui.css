@@ -372,28 +372,6 @@
   overflow: auto;
 }
 
-/* ===== 9 / 9.1 agent 灯与 agent 图标 ===== */
-.ss-lamp {
-  display: inline-block;
-  box-sizing: border-box;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.ss-lamp--writable {
-  background: var(--ink);
-}
-
-.ss-lamp--missing {
-  border: 1px solid var(--ink-faint);
-  background: var(--canvas);
-}
-
-.ss-lamp--unwritable {
-  color: var(--ink-faint);
-}
-
 .ss-mark {
   display: inline-flex;
   align-items: center;
@@ -418,12 +396,6 @@
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-}
-
-.ss-mark__lamp {
-  position: absolute;
-  top: -3px;
-  right: -5px;
 }
 
 /* 首字母方块：图标缺席时的占位，永远和名字一起出现（§9.1） */

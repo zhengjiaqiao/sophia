@@ -14,7 +14,7 @@ const { ErrorBanner } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
 const { SubPage } = await import("../src/ui/SubPage.tsx");
 const { RowNotice } = await import("../src/ui/RowNotice.tsx");
-const { AgentIcon, AgentLamp, AgentMark, agentInitial, hasAgentIcon } =
+const { AgentIcon, AgentMark, agentInitial, hasAgentIcon } =
   await import("../src/ui/AgentMark.tsx");
 const { Busy, Empty } = await import("../src/ui/Empty.tsx");
 
@@ -31,7 +31,6 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "RowNotice",
     "AgentMark",
     "AgentIcon",
-    "AgentLamp",
     "Empty",
     "Busy",
   ];
@@ -424,19 +423,6 @@ test("AgentMark 禁用取色：形状不变，整体退到弱文字色", () => {
 
 /// skill 矩阵的列头已经不放灯了（AC22），这一套现在只剩 MCP 页在用；
 /// MCP 页收口时这个组件连同断言一起删
-test("AgentLamp：三种灯说的都是目录，不是 skill（只剩 MCP 页在用）", () => {
-  const writable = render(AgentLamp, { state: "writable" });
-  assert.match(writable, /class="ss-lamp ss-lamp--writable"/);
-  assert.match(writable, /目录存在，而且写得进去/);
-
-  const missing = render(AgentLamp, { state: "missing" });
-  assert.match(missing, /class="ss-lamp ss-lamp--missing"/);
-  assert.match(missing, /目录还不存在/);
-
-  const unwritable = render(AgentLamp, { state: "unwritable" });
-  assert.match(unwritable, /<svg class="ss-lamp ss-lamp--unwritable"/);
-  assert.match(unwritable, /写不进去/);
-});
 
 // ===== §6 空态与忙碌态 =====
 

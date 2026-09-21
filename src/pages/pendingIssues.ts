@@ -201,7 +201,8 @@ function collectPage(
         case "brokenLink": {
           const issue = blank(kind, [cell.path]);
           issue.subject = row.skill;
-          issue.text = " 的链接指向的位置没了";
+          // 主语是 skill，但待处理栏一次只显示一条，不点名 agent 就不知道是哪一列的
+          issue.text = ` 在 ${target.label} 下的链接指向的位置没了`;
           issue.agent = target.label;
           // 扫描已经把这个目录里解析不到的链接都算成动作了；万一对不上就现搭一条，
           // 执行前后端还会重校验它仍是一条链接
@@ -242,8 +243,8 @@ function collectPage(
   for (const action of page.broken) {
     const issue = blank("brokenLink", [action.targetPath]);
     issue.subject = action.itemName;
-    issue.text = " 的链接指向的位置没了";
     issue.agent = page.targets.find((t) => t.path === action.target)?.label ?? null;
+    issue.text = ` 在 ${issue.agent ?? "这个 agent"} 下的链接指向的位置没了`;
     issue.clear = action;
     add(issue);
   }

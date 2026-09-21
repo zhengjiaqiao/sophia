@@ -10,8 +10,9 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { PendingPage } from "./pages/PendingPage";
 import "./App.css";
 
-/// 侧栏「全部」的选中键；其余为 DomainPage.key
-const ALL_KEY = "all";
+/// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
+/// 选择操作条的片也会重复；跨域批量的事走待处理页
+const DEFAULT_KEY = "global";
 /// 文件系统事件与窗口获得焦点后的重扫去抖
 const REFRESH_DELAY = 300;
 type SidebarDomain = { key: string; label: string };
@@ -19,7 +20,7 @@ type SidebarDomain = { key: string; label: string };
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
-  const [selectedKey, setSelectedKey] = useState(ALL_KEY);
+  const [selectedKey, setSelectedKey] = useState(DEFAULT_KEY);
   const [error, setError] = useState<string | null>(null);
   /// 二级页面（§4.6）：占满整窗、不渲染侧栏。null＝主视图
   const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
@@ -160,10 +161,9 @@ export default function App() {
     if (activeTab === "mcp") {
       if (
         mcpSidebarDomains.length > 0 &&
-        selectedKey !== ALL_KEY &&
         !mcpSidebarDomains.some((domain) => domain.key === selectedKey)
       ) {
-        setSelectedKey(ALL_KEY);
+        setSelectedKey(mcpSidebarDomains[0].key);
       }
       return;
     }
@@ -171,12 +171,11 @@ export default function App() {
     if (!overview) return;
     const manualProjectKeys = new Set(manualProjects.map((p) => `project:${p}`));
     if (
-      selectedKey !== ALL_KEY &&
-      selectedKey !== "global" &&
+      selectedKey !== DEFAULT_KEY &&
       !domains.some((d) => d.key === selectedKey) &&
       !manualProjectKeys.has(selectedKey)
     ) {
-      setSelectedKey(ALL_KEY);
+      setSelectedKey(DEFAULT_KEY);
     }
   }, [activeTab, overview, manualProjects, selectedKey, domains, mcpSidebarDomains]);
 
@@ -261,13 +260,6 @@ export default function App() {
           )}
         </nav>
         <ul>
-          <li
-            className={selectedKey === ALL_KEY ? "active" : ""}
-            title="全局与所有项目"
-            onClick={() => !busy && setSelectedKey(ALL_KEY)}
-          >
-            <span>全部</span>
-          </li>
           {!sidebarDomains.some((d) => d.key === "global") && (
             <li
               className={selectedKey === "global" ? "active" : ""}

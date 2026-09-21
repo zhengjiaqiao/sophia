@@ -143,7 +143,7 @@ export interface SkillsTabProps {
   autoLinks: AutoLink[];
   busy: boolean;
   onBusy: (busy: boolean) => void;
-  /// 侧栏选中：`"all"` 或某个 DomainPage.key
+  /// 侧栏选中的 DomainPage.key
   selectedKey: string;
   onRefresh: () => Promise<void>;
   onError: (message: string) => void;
@@ -235,12 +235,7 @@ export default function SkillsTab({
     setCursor(0);
   }, [selectedKey]);
 
-  const pages =
-    overview === null
-      ? []
-      : selectedKey === "all"
-        ? overview.domains
-        : overview.domains.filter((d) => d.key === selectedKey);
+  const pages = overview === null ? [] : overview.domains.filter((d) => d.key === selectedKey);
 
   const targetOf = (targetId: string): Target | null =>
     pages.flatMap((p) => p.targets).find((t) => t.id === targetId) ?? null;
@@ -671,7 +666,7 @@ export default function SkillsTab({
   if (!overview) return <Empty kind="scanning" />;
 
   // 引入只对单个域有意义：「全部」页没有确定的目标域
-  const importPage = selectedKey === "all" ? null : (pages[0] ?? null);
+  const importPage = pages[0] ?? null;
   const broken = pages.flatMap((p) => p.broken);
 
   // 操作只作用于"选中且可见"的行

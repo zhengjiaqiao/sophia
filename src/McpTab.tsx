@@ -30,7 +30,6 @@ import {
   Empty,
   StateDot,
   Toast,
-  type LampState,
   type ToastKind,
 } from "./ui";
 import type {
@@ -231,8 +230,7 @@ export default function McpTab({
     setCursor(0);
   }, [selectedKey]);
 
-  const pages =
-    selectedKey === "all" ? domains : domains.filter((page) => page.key === selectedKey);
+  const pages = domains.filter((page) => page.key === selectedKey);
 
   const locationOf = (id: string): McpLocation | undefined =>
     overview?.locations.find((location) => location.id === id);
@@ -557,7 +555,7 @@ export default function McpTab({
     pane.preview.actions.some((action) => locationOf(action.targetId)?.harnessId === "weiboap");
 
   // 引入只对单个域有意义：「全部」页没有确定的目标域
-  const sidebarImportPage = selectedKey === "all" ? null : (pages[0] ?? null);
+  const sidebarImportPage = pages[0] ?? null;
   const importPage = importPageOverride ?? sidebarImportPage;
 
   return (
@@ -885,13 +883,8 @@ function McpDomainView({
 }) {
   const targetIds = new Set(page.targets.map((target) => target.id));
 
-  /// 列头那盏灯说的是**文件**，不是服务（§9）：实心＝在、能写；空心＝还没有这个文件；
-  /// 加一道斜杠＝这次读不出来，整列都写不进
-  const lampOf = (target: McpLocation): LampState => {
-    if (invalidIds.has(target.id)) return "unwritable";
-    return hasEntries(target.id) ? "writable" : "missing";
-  };
-  const lampTitle = (target: McpLocation) => {
+  /// 列头 hover 时的说明：路径，读不出来 / 还没这个文件时追加一句
+  const headTitle = (target: McpLocation) => {
     const note = invalidIds.has(target.id)
       ? "这次读不出来，整列都写不进去"
       : hasEntries(target.id)
@@ -978,8 +971,7 @@ function McpDomainView({
                 id={target.harnessId}
                 name={target.label}
                 layout="stacked"
-                lamp={lampOf(target)}
-                title={lampTitle(target)}
+                title={headTitle(target)}
               />
             </th>
           ))}
