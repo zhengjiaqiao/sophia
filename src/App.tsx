@@ -163,6 +163,8 @@ export default function App() {
   }, []);
 
   const domains = overview?.domains ?? [];
+  // 模型页当前是否真的在显示：还没问出支不支持时按不支持算，落回 Skills（见下方主视图分支）
+  const showModels = activeTab === "models" && modelsSupported;
   const sidebarDomains =
     activeTab === "mcp" ? mcpSidebarDomains : activeTab === "models" ? [] : domains;
   // 域 key → 手动项目路径；自动发现的项目与 agent 域不在其中，因此没有移除按钮
@@ -251,11 +253,13 @@ export default function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      {/* 顶栏独立于侧栏：模型页不要侧栏（它不分项目、不分域），
+          而字标与页签不能跟着侧栏一起消失 */}
+      <header className="topbar">
         <h1>Sophia</h1>
         {/* 顺序即高频程度：模型路由天天用，排第一个；MCP 那条线叫「导入 MCP」，
             与 skill 的二级页「导入 skill」成对，一级 tab 与二级页不重名 */}
-        <nav aria-label="功能" style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+        <nav aria-label="功能" style={{ display: "flex", gap: 4 }}>
           {modelsSupported && (
             <button
               className={activeTab === "models" ? "active" : ""}
@@ -285,6 +289,9 @@ export default function App() {
             导入 MCP
           </button>
         </nav>
+      </header>
+      {/* 模型页是全局的，没有域也没有项目，侧栏对它没有意义（MODELS_TAB_FULL_BLEED） */}
+      <aside className="sidebar" hidden={showModels}>
         <ul>
           {!sidebarDomains.some((d) => d.key === "global") && (
             <li
@@ -354,7 +361,7 @@ export default function App() {
         </button>
         <button onClick={() => setSubPage("settings")}>设置</button>
       </aside>
-      <main className="content">
+      <main className={showModels ? "content content--bleed" : "content"}>
         {error && (
           <div className="error">
             {error}
@@ -364,7 +371,7 @@ export default function App() {
           </div>
         )}
         {/* 还没问出模型页支不支持的那一瞬间也落在 Skills 上：宁可闪一下扫描中，不能白屏 */}
-        {activeTab === "models" && modelsSupported ? (
+        {showModels ? (
           <ModelsTab onError={setError} busy={busy} onBusy={setBusyState} />
         ) : activeTab === "mcp" ? (
           <McpTab
