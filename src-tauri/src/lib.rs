@@ -85,7 +85,9 @@ pub(crate) fn runtime_store_dir() -> Result<PathBuf, String> {
 fn discover_mcp(state: &AppState) -> Result<symsync_core::mcp::McpDiscovery, String> {
     let env = runtime_env()?;
     let settings = state.store.load_settings().map_err(err)?;
+    #[cfg_attr(not(feature = "weiboap"), allow(unused_mut))]
     let mut candidates = discovery::installed(&env);
+    #[cfg(feature = "weiboap")]
     if !candidates.iter().any(|h| h.id == "weiboap") {
         if let Some(weiboap) = discovery::all_harnesses(&env)
             .into_iter()

@@ -8,6 +8,11 @@ use std::path::{Component, Path, PathBuf};
 
 const HARNESSES_JSON: &str = include_str!("../data/harnesses.json");
 
+/// 内部版增量表。`include_str!` 会把整份 JSON 原样嵌进二进制，运行时过滤删不掉
+/// 字符串常量，所以内部条目必须单独成文件、由 cfg 决定要不要 include。
+#[cfg(feature = "weiboap")]
+const WEIBOAP_HARNESSES_JSON: &str = include_str!("../data/harnesses.weiboap.json");
+
 #[derive(Debug, Deserialize)]
 struct HarnessSpec {
     id: String,
@@ -94,9 +99,25 @@ fn substitute_one(template: &str, env: &Env) -> Option<PathBuf> {
 }
 
 fn specs() -> Vec<HarnessSpec> {
-    serde_json::from_str::<HarnessFile>(HARNESSES_JSON)
+    let mut specs = parse_specs(HARNESSES_JSON);
+    specs.extend(extra_specs());
+    specs
+}
+
+fn parse_specs(json: &str) -> Vec<HarnessSpec> {
+    serde_json::from_str::<HarnessFile>(json)
         .expect("harnesses.json 内置数据必须合法")
         .harnesses
+}
+
+#[cfg(feature = "weiboap")]
+fn extra_specs() -> Vec<HarnessSpec> {
+    parse_specs(WEIBOAP_HARNESSES_JSON)
+}
+
+#[cfg(not(feature = "weiboap"))]
+fn extra_specs() -> Vec<HarnessSpec> {
+    Vec::new()
 }
 
 fn resolve(spec: &HarnessSpec, env: &Env) -> (Harness, Option<PathBuf>) {
@@ -662,7 +683,8 @@ mod tests {
     fn table_loads_and_claude_config_dir_overrides() {
         let e = env(Path::new("/home/u"), &[]);
         let all = all_harnesses(&e);
-        assert!(all.len() >= 41);
+        // 公开表的条数；内部版还会多出增量表里的条目
+        assert!(all.len() >= 40);
         let claude = all.iter().find(|h| h.id == "claude-code").unwrap();
         assert_eq!(
             claude.global_dir,
@@ -685,6 +707,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "weiboap")]
     #[test]
     fn weiboap_entry_resolves_on_macos() {
         let e = env(Path::new("/home/u"), &[]);
@@ -840,6 +863,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "weiboap")]
     #[test]
     fn agent_dirs_become_one_project_target_each() {
         let t = TempTree::new();
@@ -893,6 +917,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "weiboap")]
     #[test]
     fn managed_global_dir_is_a_source_but_never_a_target() {
         let t = TempTree::new();
@@ -919,6 +944,7 @@ mod tests {
     }
 
     /// AC12：能读到 agents.db 时域名与本体位置名用助手名
+    #[cfg(feature = "weiboap")]
     #[test]
     fn agent_names_come_from_the_harness_own_database() {
         let t = TempTree::new();
@@ -966,6 +992,7 @@ mod tests {
     }
 
     /// AC13：库不存在 / 表名不符 / 文件损坏都降级为目录名，不报错
+    #[cfg(feature = "weiboap")]
     #[test]
     fn missing_or_broken_agent_database_falls_back_to_the_directory_name() {
         let t = TempTree::new();
@@ -1008,6 +1035,8 @@ mod tests {
         assert!(agent_label_map(&spec, &e).is_empty());
     }
 
+    // 用 weiboap 的 agent_dirs 做夹具，跟着内部版 feature 走
+    #[cfg(feature = "weiboap")]
     #[test]
     fn sources_cover_every_kind_and_skip_empty_locations() {
         let t = TempTree::new();
@@ -1134,6 +1163,8 @@ mod tests {
         );
     }
 
+    // 用 weiboap 的 agent_dirs 做夹具，跟着内部版 feature 走
+    #[cfg(feature = "weiboap")]
     #[test]
     fn store_sources_never_count_links_as_their_own_skills() {
         let t = TempTree::new();
@@ -1479,6 +1510,8 @@ mod tests {
         }
     }
 
+    // 用 weiboap 的 agent_dirs 做夹具，跟着内部版 feature 走
+    #[cfg(feature = "weiboap")]
     #[test]
     fn agent_dir_and_the_project_symlink_pointing_at_it_stay_two_columns() {
         let t = TempTree::new();

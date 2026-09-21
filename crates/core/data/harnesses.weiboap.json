@@ -1,0 +1,6 @@
+{
+  "_notice": "微博内部版专用的 harness 增量表。只有开启 `weiboap` feature 时才被 include_str! 进二进制；公开版构建里这份文件的任何字节都不会出现在产物中。",
+  "harnesses": [
+    { "id": "weiboap", "display_name": "WeiboAP", "project_dir": null, "global_dir": ["~/Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom"], "detect_dir": ["~/Library/Application Support/WeiboAP"], "universal": false, "agent_dirs": ["~/Library/Application Support/WeiboAP/Data/agents/*/.internal-plugins/skills"], "managed_global_dir": true, "agent_labels": { "path": "~/Library/Application Support/WeiboAP/agents.db", "table": "agents", "idColumn": "id", "nameColumn": "name" } }
+  ]
+}

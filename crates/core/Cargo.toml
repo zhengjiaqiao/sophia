@@ -4,6 +4,12 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 
+[features]
+# 微博内部版：WeiboAP harness 及其 MCP 适配。默认关闭，公开版构建什么都不用加；
+# 内部版显式 `--features weiboap`。关掉时内部目录结构、数据库表名列名
+# 在编译期就不会进入产物（harness 表分两份 `include_str!`）。
+weiboap = ["rusqlite/backup"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
@@ -11,7 +17,7 @@ tempfile = "3"
 toml_edit = "0.25"
 dirs = "7"
 pathdiff = "0.2"
-rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 trash = { version = "5", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
