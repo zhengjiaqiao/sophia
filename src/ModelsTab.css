@@ -2,7 +2,7 @@
    色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变。
    圆角只有 0 / 2px / 32px / 50%：模型框与键是 2px（动作）、模型片是胶囊（片）、面板直角（容器）。
 
-   一张面板表：agent 324 ｜ 24 ｜ 生效模型（填满到 MCP 面板右沿，最少 360），横线止于最后一列 + 24。
+   一张面板表：agent 324 ｜ 24 ｜ 生效模型（随内容区弹性，360–640）｜ 24，横线止于框右沿 + 24。
    页边 24 上、32 左右，与 Skills / MCP 的内容区同一起点。 */
 @import "./tokens.css";
 
@@ -28,20 +28,26 @@
 
 /* ===== 面板 ===== */
 .models-panel {
-  /* 模型页取自身宽度：agent 324 + 24 + 生效模型 360 + 24（DESIGN「三个主视图怎么对齐」：
-     第 5 轮的「右沿对齐 MCP」已放弃——真实数据下 MCP 只有两列，对齐就放不下模型框） */
+  /* 表宽 = agent 324 + 24 + 生效模型框 + 24（真机反馈：框太窄、右边留白太多）。
+     框随内容区弹性，最小 360、最大 640；再窄就不再缩，交给内容区横向滚动 */
   --models-agent-w: 324px;
-  --models-box-w: 360px;
+  --models-box-min: 360px;
+  --models-box-max: 640px;
   box-sizing: border-box;
-  width: calc(var(--models-agent-w) + var(--space-xl) + var(--models-box-w) + var(--space-xl));
-  max-width: 100%;
+  width: clamp(
+    calc(var(--models-agent-w) + var(--space-xl) * 2 + var(--models-box-min)),
+    100%,
+    calc(var(--models-agent-w) + var(--space-xl) * 2 + var(--models-box-max))
+  );
 }
 
+/* 行与表头：agent 列定宽，框占余下的宽度；右内边距 24 让行底线 / 表头线止于框右沿 + 24 */
 .models-panel__head,
 .models-row {
   display: grid;
-  grid-template-columns: var(--models-agent-w) minmax(0, var(--models-box-w));
+  grid-template-columns: var(--models-agent-w) minmax(0, 1fr);
   column-gap: var(--space-xl);
+  padding-right: var(--space-xl);
 }
 
 /* 表头：12/600 ink-mute，不大写（`agent` 是列头的内容词）；底 2px ink——全页唯一一处结构线 */
@@ -60,7 +66,8 @@
   position: relative;
   row-gap: var(--space-xs);
   align-items: center;
-  padding: var(--space-sm) 0;
+  /* 右内边距 24：行底线止于框右沿 + 24（与表头同一条边） */
+  padding: var(--space-sm) var(--space-xl) var(--space-sm) 0;
   border-bottom: 1px solid var(--hairline);
 }
 

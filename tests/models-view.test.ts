@@ -1010,3 +1010,19 @@ test("ModelList 已选组：「已选 · N」在各服务商分组之前；超�
   const none = render(ModelList, { entries: [pe("azure/a")], busy: false, onToggle: noop });
   assert.doesNotMatch(none, />已选</);
 });
+
+test("模型页表宽 = 324 + 24 + 框 + 24：框随内容区弹性 360–640（CSS 实现），行线止于框右沿 + 24", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
+  const panel = /\.models-panel \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(panel, /--models-agent-w:\s*324px/);
+  assert.match(panel, /--models-box-min:\s*360px/);
+  assert.match(panel, /--models-box-max:\s*640px/);
+  assert.match(
+    panel.replace(/\s+/g, " "),
+    /width: clamp\( calc\(var\(--models-agent-w\) \+ var\(--space-xl\) \* 2 \+ var\(--models-box-min\)\), 100%, calc\(var\(--models-agent-w\) \+ var\(--space-xl\) \* 2 \+ var\(--models-box-max\)\) \)/,
+  );
+  const row = /\.models-panel__head,\s*\.models-row \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(row, /grid-template-columns:\s*var\(--models-agent-w\) minmax\(0, 1fr\)/);
+  assert.match(row, /padding-right:\s*var\(--space-xl\)/);
+});
