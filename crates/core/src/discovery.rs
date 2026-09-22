@@ -1,6 +1,7 @@
 //! 内置 harness 表、已安装判定、项目候选、本体位置与目标发现
 use crate::fs::{entry_kind, normalize, real_path, EntryKind};
 use crate::models::{AgentLabels, Harness, Skill, Source, SourceKind, Target, TargetScope};
+use crate::skills::read_description;
 use crate::store::Settings;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -204,6 +205,7 @@ fn skills_in(dir: &Path) -> Vec<Skill> {
     names
         .into_iter()
         .map(|name| Skill {
+            description: read_description(&dir.join(&name)),
             path: dir.join(&name),
             name,
         })
@@ -432,7 +434,11 @@ pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec
             kind: SourceKind::External,
             skills: skills
                 .into_iter()
-                .map(|(name, path)| Skill { name, path })
+                .map(|(name, path)| Skill {
+                    description: read_description(&path),
+                    name,
+                    path,
+                })
                 .collect(),
             path,
         })
@@ -1184,6 +1190,7 @@ mod tests {
             vec![Skill {
                 name: "real-skill".into(),
                 path: store.join("real-skill"),
+                description: None,
             }]
         );
     }
@@ -1290,6 +1297,7 @@ mod tests {
                     skills: vec![Skill {
                         name: "far-skill".into(),
                         path: far,
+                        description: None,
                     }],
                 },
                 Source {
@@ -1301,10 +1309,12 @@ mod tests {
                         Skill {
                             name: "ego-browser".into(),
                             path: browser,
+                            description: None,
                         },
                         Skill {
                             name: "ego-writer".into(),
                             path: writer,
+                            description: None,
                         },
                     ],
                 },

@@ -561,6 +561,92 @@ pub fn plan_delete_source(
     }
 }
 
+/// 读原件目录下 `SKILL.md` 的 YAML frontmatter 里的 `description`，只读。
+///
+/// 不引 yaml 依赖，逐行解析够用：frontmatter 是开头 `---` 与下一个 `---` 之间；
+/// 顶格的 `description:` 一行，值支持单行（可带引号）、`|` 字面块（保留换行）、
+/// `>` 折叠块（换行折成空格，空行成段）以及缩进续行的朴素多行。
+/// 没有文件、没有 frontmatter、没有这个键或值为空时返回 None
+pub fn read_description(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("SKILL.md")).ok()?;
+    parse_description(&text)
+}
+
+fn parse_description(text: &str) -> Option<String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut lines = text.lines();
+    if lines.next()?.trim_end() != "---" {
+        return None;
+    }
+    let front: Vec<&str> = lines.take_while(|l| l.trim_end() != "---").collect();
+    let at = front.iter().position(|l| l.starts_with("description:"))?;
+    let head = front[at]["description:".len()..].trim();
+    // 这个键之后、下一个顶格键之前的缩进行（空行也算进块里）
+    let body: Vec<&str> = front[at + 1..]
+        .iter()
+        .take_while(|l| l.trim().is_empty() || l.starts_with([' ', '\t']))
+        .copied()
+        .collect();
+    let indent = body
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    let body: Vec<&str> = body
+        .iter()
+        .map(|l| {
+            if l.trim().is_empty() {
+                ""
+            } else {
+                &l[indent..]
+            }
+        })
+        .collect();
+    let value = if head.starts_with('|') {
+        body.join("\n")
+    } else if head.starts_with('>') || head.is_empty() {
+        fold(&body)
+    } else {
+        let first = unquote(head);
+        let rest = fold(&body);
+        if rest.is_empty() {
+            first.to_string()
+        } else {
+            format!("{first} {rest}")
+        }
+    };
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+/// 折叠：相邻非空行用空格接，空行成段
+fn fold(lines: &[&str]) -> String {
+    let mut out = String::new();
+    let mut blank = false;
+    for line in lines {
+        if line.trim().is_empty() {
+            blank = true;
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(if blank { "\n" } else { " " });
+        }
+        out.push_str(line.trim());
+        blank = false;
+    }
+    out
+}
+
+fn unquote(s: &str) -> &str {
+    for q in ['"', '\''] {
+        if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s
+}
+
 /// 递归统计条目数（不含自身）、普通文件字节数，以及普通文件最新的修改时间（Unix 毫秒）。
 /// 软链只当作一个条目，不跟随、不计字节、不计时间；目录自身的 mtime 不算（增删条目就会变，
 /// 说的不是「内容改于何时」）。一个文件都没有、或时间读不出来时为 None
@@ -658,6 +744,7 @@ mod tests {
                 .map(|s| Skill {
                     name: s.to_string(),
                     path: path.join(s),
+                    description: None,
                 })
                 .collect(),
             path,
@@ -1483,6 +1570,73 @@ mod tests {
         );
         assert_eq!(plan.in_git, None);
         assert_eq!(plan.relink_to, Some(other_body));
+    }
+
+    #[test]
+    fn read_description_takes_the_frontmatter_field_in_single_and_block_forms() {
+        let t = TempTree::new();
+        let write = |name: &str, body: &str| {
+            let dir = t.dir(name);
+            std::fs::write(dir.join("SKILL.md"), body).unwrap();
+            dir
+        };
+        let single = write(
+            "single",
+            "---\nname: a\ndescription: Turns a codebase into an HTML course.\n---\n# body\n",
+        );
+        assert_eq!(
+            read_description(&single).as_deref(),
+            Some("Turns a codebase into an HTML course.")
+        );
+        let quoted = write("quoted", "---\ndescription: \"Say: hi\"\n---\n");
+        assert_eq!(read_description(&quoted).as_deref(), Some("Say: hi"));
+        let folded = write(
+            "folded",
+            "---\nname: b\ndescription: >\n  first line\n  second line\n\n  new para\nlicense: MIT\n---\n",
+        );
+        assert_eq!(
+            read_description(&folded).as_deref(),
+            Some("first line second line\nnew para")
+        );
+        let literal = write(
+            "literal",
+            "---\ndescription: |\n  line one\n  line two\n---\n",
+        );
+        assert_eq!(
+            read_description(&literal).as_deref(),
+            Some("line one\nline two")
+        );
+        let continued = write(
+            "continued",
+            "---\ndescription: starts here\n  and goes on\n---\n",
+        );
+        assert_eq!(
+            read_description(&continued).as_deref(),
+            Some("starts here and goes on")
+        );
+    }
+
+    #[test]
+    fn read_description_is_none_without_file_frontmatter_or_field() {
+        let t = TempTree::new();
+        assert_eq!(read_description(&t.dir("missing")), None);
+        let no_front = t.dir("nofront");
+        std::fs::write(
+            no_front.join("SKILL.md"),
+            "description: not in frontmatter\n",
+        )
+        .unwrap();
+        assert_eq!(read_description(&no_front), None);
+        let no_field = t.dir("nofield");
+        std::fs::write(
+            no_field.join("SKILL.md"),
+            "---\nname: x\n---\ndescription: body\n",
+        )
+        .unwrap();
+        assert_eq!(read_description(&no_field), None);
+        let empty = t.dir("empty");
+        std::fs::write(empty.join("SKILL.md"), "---\ndescription:\n---\n").unwrap();
+        assert_eq!(read_description(&empty), None);
     }
 
     #[test]

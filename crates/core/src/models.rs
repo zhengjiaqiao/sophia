@@ -123,6 +123,10 @@ pub struct Skill {
     pub name: String,
     /// 本体真实路径；常规位置就是 `本体位置/name`
     pub path: PathBuf,
+    /// `SKILL.md` frontmatter 里的 `description`，只读；读不到为 None（序列化时省略，
+    /// 前端按缺省处理），行内展开详情用
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// 一处本体位置：真实存放 skill 目录的地方
@@ -473,6 +477,7 @@ mod tests {
         let skill = Skill {
             name: "ego-browser".into(),
             path: PathBuf::from("/opt/ego-skills/ego-browser"),
+            description: None,
         };
         assert_eq!(
             serde_json::to_value(&skill).unwrap(),

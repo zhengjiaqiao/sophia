@@ -188,6 +188,7 @@ mod tests {
                 .map(|n| Skill {
                     name: n.to_string(),
                     path: path.join(n),
+                    description: None,
                 })
                 .collect(),
         }

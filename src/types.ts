@@ -10,6 +10,8 @@ export type SourceKind =
 export interface Skill {
   name: string;
   path: string;
+  /// SKILL.md frontmatter 里的 description；读不到时缺省（core 序列化时省略）
+  description?: string;
 }
 
 export interface Source {
