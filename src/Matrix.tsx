@@ -28,6 +28,7 @@ import {
   Spinner,
   StateDot,
   TIP_DELAY_MS,
+  tipCeiling,
   Tooltip,
 } from "./ui/index.ts";
 import { displayPath } from "./pathText.ts";
@@ -346,6 +347,8 @@ export default function Matrix(props: MatrixProps) {
   const [focusWithin, setFocusWithin] = useState(false);
   // 提示框：停够 700ms 的那一格
   const [tip, setTip] = useState<string | null>(null);
+  // 这一格的提示框因上方被吸顶区盖住而翻到了下方
+  const [tipFlip, setTipFlip] = useState<string | null>(null);
   const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 正在闪的格
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
@@ -356,6 +359,7 @@ export default function Matrix(props: MatrixProps) {
   const [toastRight, setToastRight] = useState(32);
   // 吸顶：工具行（勾选时是选择条）在最上面，列头紧贴它下面
   const barRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(0);
   // 就地展开详情的那一行（一次只展开一行）
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -452,14 +456,55 @@ export default function Matrix(props: MatrixProps) {
   const armTip = (key: string) => {
     if (tipTimer.current) clearTimeout(tipTimer.current);
     setTip(null);
+    setTipFlip(null);
     tipTimer.current = setTimeout(() => setTip(key), TIP_DELAY_MS.table);
   };
   const dropTip = () => {
     if (tipTimer.current) clearTimeout(tipTimer.current);
     tipTimer.current = null;
     setTip(null);
+    setTipFlip(null);
   };
   useEffect(() => () => dropTip(), []);
+
+  // 格子提示框默认向上（第一行向下）；上方被吸顶区盖住时翻到格子下方
+  useLayoutEffect(() => {
+    if (tip === null) return;
+    const el = document.getElementById(`${tipId}-tip`);
+    if (el?.classList.contains("ss-tip--top") && el.getBoundingClientRect().top < tipCeiling(el)) {
+      setTipFlip(tip);
+    }
+  }, [tip, tipId]);
+
+  // 吸顶区底边相对滚动容器顶的距离写进 `--tip-ceiling`，所有往上弹的提示框据此决定要不要翻到下方
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let scroller: HTMLElement | null = null;
+    for (let p = root.parentElement; p; p = p.parentElement) {
+      if (getComputedStyle(p).overflowY !== "visible") {
+        scroller = p;
+        break;
+      }
+    }
+    const update = () => {
+      const head = headRef.current;
+      if (!head) return;
+      const top = Math.max(0, scroller ? scroller.getBoundingClientRect().top : 0);
+      const inset = Math.max(0, head.getBoundingClientRect().bottom - top);
+      root.style.setProperty("--tip-ceiling", `${inset}px`);
+    };
+    update();
+    // 文档级滚动（html / body）的 scroll 事件派发在 window 上
+    if (scroller === document.documentElement || scroller === document.body) scroller = null;
+    const target: HTMLElement | Window = scroller ?? window;
+    target.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      target.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [barH, width, columns.length]);
 
   // ---- 吸顶的列头高度、面板右侧余量 ----
   useLayoutEffect(() => {
@@ -933,7 +978,7 @@ export default function Matrix(props: MatrixProps) {
                   <span
                     id={`${tipId}-tip`}
                     role="tooltip"
-                    className={`ss-tip ${r === 0 ? "ss-tip--bottom" : "ss-tip--top"} ss-tip--center is-open`}
+                    className={`ss-tip ${r === 0 || tipFlip === key ? "ss-tip--bottom" : "ss-tip--top"} ss-tip--center is-open`}
                   >
                     {view.tip}
                     {view.clickable ? (
@@ -982,7 +1027,7 @@ export default function Matrix(props: MatrixProps) {
       </div>
       <div className="mx-panel" ref={panelRef} style={{ width }}>
         {/* 列头吸顶（连同选择态的键行），紧贴两行工具行下面 */}
-        <div className="mx-headwrap" style={{ top: barH }}>
+        <div className="mx-headwrap" ref={headRef} style={{ top: barH }}>
           {header}
         </div>
         <div

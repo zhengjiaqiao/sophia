@@ -72,12 +72,11 @@ export function Tooltip({
   useEffect(() => clear, []);
 
   // 出现那一刻量一次：上方出界就翻到下方，左右出窗就对齐外侧边。
-  // 上界取窗口顶与最近的裁切祖先（滚动容器）顶中更低的那个：顶栏在滚动容器外面，
-  // 吸顶元素上往上弹的提示框会被容器裁掉、看起来像被顶栏盖住
+  // 上界见 tipCeiling：顶栏在滚动容器外，往上弹会被容器裁掉；吸顶区也会盖住紧挨它的一行
   useLayoutEffect(() => {
     if (!open || !bubble.current) return;
     const r = bubble.current.getBoundingClientRect();
-    if (side === "top" && r.top < clipTop(bubble.current)) setSide("bottom");
+    if (side === "top" && r.top < tipCeiling(bubble.current)) setSide("bottom");
     if (align === "center") {
       if (r.left < 0) setAlign("start");
       else if (r.right > window.innerWidth) setAlign("end");
@@ -116,11 +115,15 @@ export function Tooltip({
   );
 }
 
-/// 提示框可见区域的上界：窗口顶，或最近一个会裁切内容的祖先（overflow 非 visible）的顶
-function clipTop(el: HTMLElement): number {
+/// 提示框可见区域的上界（视口坐标）：窗口顶，或最近一个会裁切内容的祖先（overflow 非 visible）的顶，
+/// 再加上继承来的 CSS 变量 `--tip-ceiling`（px）——吸顶区（工具行、列头）的底边相对滚动容器顶的距离，
+/// 由拥有吸顶区的组件写在自己根节点上。往上弹的提示框顶边高过它就翻到下方
+export function tipCeiling(el: HTMLElement): number {
+  const inset = parseFloat(getComputedStyle(el).getPropertyValue("--tip-ceiling")) || 0;
   for (let p = el.parentElement; p; p = p.parentElement) {
-    const { overflowY } = getComputedStyle(p);
-    if (overflowY !== "visible") return Math.max(0, p.getBoundingClientRect().top);
+    if (getComputedStyle(p).overflowY !== "visible") {
+      return Math.max(0, p.getBoundingClientRect().top + inset);
+    }
   }
-  return 0;
+  return Math.max(0, inset);
 }
