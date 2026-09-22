@@ -22,7 +22,6 @@ import {
   AgentMark,
   Checkbox,
   DOT_LABEL,
-  IconButton,
   IconCannot,
   IconClose,
   IconSearch,
@@ -529,20 +528,20 @@ export default function Matrix(props: MatrixProps) {
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
   const selRef = useRef<HTMLDivElement>(null);
-  // 0：完整；1：「已选 N 个」缩成「N 个」；2：再让出添加键。列数变了从头量
-  const [fit, setFit] = useState(0);
-  useLayoutEffect(() => setFit(0), [columns.length, width]);
+  // 放不下时的最后一级退让：「已选 N 个」缩成「N 个」。列数变了从头量
+  const [short, setShort] = useState(false);
+  useLayoutEffect(() => setShort(false), [columns.length, width]);
   useLayoutEffect(() => {
     const el = selRef.current;
-    if (!selecting || !el || fit >= 2) return;
-    if (el.scrollWidth > el.clientWidth + 1) setFit((f) => f + 1);
+    if (!selecting || !el || short) return;
+    if (el.scrollWidth > el.clientWidth + 1) setShort(true);
   });
   const toolbar = selecting ? (
-    // 选择操作条收在面板右沿之内：紧凑键、取消选择是 Esc 图标键；
-    // 还放不下就把「已选 N 个」缩成「N 个」，再放不下才让出右端的添加键（fit 逐级退）
+    // 选择操作条「顶替工具行」（DESIGN「选择操作条」「主视图」）：`+ skill` / `+ MCP` 不出现，
+    // 收在面板右沿之内；紧凑键，取消选择是文字链。还放不下才把「已选 N 个」缩成「N 个」
     <div className="mx-toolbar mx-toolbar--select" ref={selRef} style={{ width }}>
       <span className="mx-selcount">
-        {fit === 0 ? "已选 " : null}
+        {short ? null : "已选 "}
         <span className="mx-mono">{selectedVisible.length}</span> 个
       </span>
       <span className={`mx-keys${busy ? " ss-busy" : ""}`}>
@@ -562,14 +561,13 @@ export default function Matrix(props: MatrixProps) {
         ) : null}
       </span>
       {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
-      <IconButton
-        icon={<IconClose />}
-        title="取消选择 Esc"
+      <button
+        type="button"
+        className="ss-btn ss-btn--link mx-clear"
         onClick={() => onSelectionChange(new Set())}
-      />
-      {addButton && fit < 2 ? (
-        <span className={`mx-toolbar__end${busy ? " ss-busy" : ""}`}>{addButton}</span>
-      ) : null}
+      >
+        取消选择
+      </button>
     </div>
   ) : (
     <div className="mx-toolbar" style={{ minWidth: width, width: "max-content" }}>
