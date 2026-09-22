@@ -42,6 +42,8 @@ export interface ConfirmProps {
   onCancel: () => void;
   /// 触发行。不给就居中（没有触发行的场合）
   anchor?: ConfirmAnchor;
+  /// 对话框与触发行怎么对齐：start 左沿对齐（默认）；end 右沿对齐——触发控件在行尾时（删网关的垃圾桶）
+  align?: "start" | "end";
 }
 
 const GAP = 6;
@@ -68,6 +70,7 @@ export function Confirm({
   cancelLabel = "取消",
   onCancel,
   anchor,
+  align = "start",
 }: ConfirmProps) {
   // Esc 等同取消
   useEffect(() => {
@@ -83,8 +86,11 @@ export function Confirm({
     ? {
         position: "absolute",
         top: anchor.bottom + GAP,
-        // 左对齐触发行；窗口不够宽时贴右边留 16
-        left: `min(${anchor.left}px, calc(100vw - ${WIDTH + 16}px))`,
+        // 左对齐触发行（end 时右沿对齐触发行）；窗口不够宽时贴右边留 16
+        left:
+          align === "end"
+            ? `max(16px, min(${anchor.right - WIDTH}px, calc(100vw - ${WIDTH + 16}px)))`
+            : `min(${anchor.left}px, calc(100vw - ${WIDTH + 16}px))`,
       }
     : undefined;
 

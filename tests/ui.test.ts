@@ -927,3 +927,23 @@ test("返回时找回触发它的那颗键：主视图重挂过也按读屏名�
   assert.equal(pickTrigger(fresh, triggerKey(btn(null, " + skill "))), 2);
   assert.equal(pickTrigger(fresh, triggerKey(btn(null, "配置网关"))), -1);
 });
+
+test("Confirm align=end：触发控件在行尾时对话框右沿对齐触发行（删网关的垃圾桶），默认仍左沿对齐", async () => {
+  const { Confirm } = await import("../src/ui/Confirm.tsx");
+  const anchor = { top: 100, bottom: 130, left: 32, right: 776 };
+  const end = render(Confirm, {
+    title: "删掉 x？",
+    confirmLabel: "删掉",
+    onCancel: noop,
+    anchor,
+    align: "end",
+  });
+  assert.match(end, /left:max\(16px, min\(316px, calc\(100vw - 476px\)\)\)/);
+  const start = render(Confirm, {
+    title: "删掉 x？",
+    confirmLabel: "删掉",
+    onCancel: noop,
+    anchor,
+  });
+  assert.match(start, /left:min\(32px, calc\(100vw - 476px\)\)/);
+});

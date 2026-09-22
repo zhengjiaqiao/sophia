@@ -16,14 +16,15 @@ import {
   BlackNotice,
   Button,
   Chip,
+  Confirm,
   IconButton,
   IconPlus,
   IconTrash,
   Spinner,
   SubPage,
-  Toast,
   Tooltip,
 } from "../ui/index.ts";
+import type { ConfirmAnchor } from "../ui/index.ts";
 import { ModelList } from "../ModelList.tsx";
 import "./GatewayPage.css";
 
@@ -72,7 +73,8 @@ export function GatewayPage({
 
   /// 点 ← 或 Esc：连接区有没保存的改动就拦下，段内就地问一句（⑪⑫）
   const back = () => {
-    if (modalOpen || leaving) return;
+    // 确认框开着（重启确认、删网关确认）：Esc 归确认框，不当返回
+    if (modalOpen || leaving || document.querySelector(".ss-confirm")) return;
     if (dirty) setAskDiscard(true);
     else onLeave();
   };
@@ -106,9 +108,6 @@ export function GatewayPage({
   );
 }
 
-/// 删网关的撤销窗口：提示条停留这么久，到期才真正删
-const REMOVE_UNDO_MS = 8000;
-
 /// 协议的只读读法：本机路由收 Responses，转给网关时说它的协议
 function protocolText(protocol: string | undefined): string {
   if (protocol === "chat") return "Responses → Chat Completions";
@@ -132,11 +131,8 @@ export interface GatewayBodyProps {
   onFetchModels: (providerId: string) => Promise<void>;
   /// 「再试一次」：按 id 重拉（拉取失败不抛错，原因记在 unreachable 上）
   onRetry: (providerId: string) => Promise<void>;
-  /// 删网关第一步：只标记，这一家从 state 里消失；配置与密钥都还在
-  onMarkRemove: (provider: GatewayProvider) => Promise<void>;
-  onUndoRemove: (providerId: string) => Promise<void>;
-  /// 真正删掉这一家（提示条到期或关掉）
-  onCommitRemoval: (providerId: string) => Promise<void>;
+  /// 删掉这一家（地址与钥匙串里的密钥一起删，找不回）：确认之后才调。失败时抛出原话
+  onRemove: (provider: GatewayProvider) => Promise<void>;
   onToggleModel: (provider: GatewayProvider, modelId: string) => void;
   /// 连接区有没有没保存的改动：离开时要先问
   onDirtyChange: (dirty: boolean) => void;
@@ -148,8 +144,10 @@ export interface GatewayBodyProps {
   flashProviderId?: string | null;
 }
 
-interface Removing {
+/// 删网关的确认：删的是哪一家、锚在哪（垃圾桶所在的那一行）
+interface ConfirmingRemove {
   provider: GatewayProvider;
+  anchor: ConfirmAnchor;
 }
 
 /**
@@ -157,7 +155,8 @@ interface Removing {
  * - 网关切换：分段片 `ap-gateway 103 · openrouter 连不上 · + 网关`，选中反色
  * - 连接：已连上的只一行摘要 `https://… · 已连 · 编辑` + 垃圾桶；点 `编辑` 才出地址 / 密钥表单，
  *   保存才生效、保存即拉取，保存中原位细弧 +「正在拉模型」；新加网关直接出表单；
- *   连不上：`连不上` + 8 `再试一次`；删网关：就地提示条 `删掉 X · 撤销`（延迟提交）
+ *   连不上：`连不上` + 8 `再试一次`；删网关：锚在垃圾桶旁的确认「删掉 X？」，确认后直接删
+ *   （地址与钥匙串里的密钥一起删、找不回，按 ⑪ 要确认；不再有撤销提示条）
  * - 从这个网关选模型：段头下是限制说明，与模型下拉同一组件，只列本网关的模型；
  *   首次在这里选：新加网关保存成功拉到模型后这一段原地出现，新模型各闪一次
  */
@@ -169,9 +168,7 @@ export function GatewayBody({
   onSave,
   onFetchModels,
   onRetry,
-  onMarkRemove,
-  onUndoRemove,
-  onCommitRemoval,
+  onRemove,
   onToggleModel,
   onDirtyChange,
   askDiscard,
@@ -182,14 +179,13 @@ export function GatewayBody({
   const [selected, setSelected] = useState<GatewaySelection>(initial ?? first);
   const [editing, setEditing] = useState(initial === "new" || first === "new");
   const [retrying, setRetrying] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<Removing | null>(null);
+  const [confirming, setConfirming] = useState<ConfirmingRemove | null>(null);
   const [error, setError] = useState<string | null>(null);
   /// 新拉到的模型各闪一次：保存 / 再试之前记下已有的，state 更新后差出来
   const [pendingFlash, setPendingFlash] = useState<{ id: string; before: Set<string> } | null>(
     null,
   );
   const [flashKeys, setFlashKeys] = useState<string[]>([]);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /// 点 `+ 网关` 之前选中的那一家：取消草稿时回到它
   const [previous, setPrevious] = useState<GatewaySelection | null>(null);
   /// 连接区有没保存的改动（这一层也要知道：换一家之前先问）
@@ -205,18 +201,18 @@ export function GatewayBody({
     [onDirtyChange],
   );
 
-  // 选中的那一家消失了（被删、被撤销之外的外部变化）：退到第一家
+  // 选中的那一家消失了（被删、外部变化）：退到第一家
   const current = selected === "new" ? null : state.providers.find((p) => p.id === selected);
   /// 刚保存成功的那一家：父层的新状态可能晚一拍才到，这期间不当它「消失了」
   const justSaved = useRef<string | null>(null);
   useEffect(() => {
     if (current !== undefined && current !== null) justSaved.current = null;
     if (selected === justSaved.current) return;
-    if (selected !== "new" && current === undefined && removing?.provider.id !== selected) {
+    if (selected !== "new" && current === undefined) {
       setSelected(state.providers[0]?.id ?? "new");
       setEditing(state.providers.length === 0);
     }
-  }, [selected, current, removing, state.providers]);
+  }, [selected, current, state.providers]);
 
   useEffect(() => {
     if (pendingFlash === null) return;
@@ -230,57 +226,32 @@ export function GatewayBody({
     setPendingFlash(null);
   }, [state, pendingFlash]);
 
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
   const report = (e: unknown) => setError(parseBackendError(String(e)).message);
 
-  const clearTimer = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
+  /// 点垃圾桶：先问一句。垃圾桶所在的那一行整行抬到遮罩之上（⑦），确认框右沿对齐垃圾桶
+  const askRemove = (provider: GatewayProvider, trash: HTMLElement) => {
+    const row = trash.closest(".gw-panel__summary") ?? trash;
+    const r = row.getBoundingClientRect();
+    const t = trash.getBoundingClientRect();
+    setConfirming({
+      provider,
+      anchor: { top: r.top, bottom: r.bottom, left: r.left, right: Math.max(r.right, t.right) },
+    });
   };
 
-  const commitRemoving = (id: string) => {
-    clearTimer();
-    setRemoving((prev) => (prev?.provider.id === id ? null : prev));
-    void onCommitRemoval(id).catch(report);
-  };
-
+  /// 确认之后直接删；这一家从分段片里消失，选中落到剩下的第一家
   const remove = (provider: GatewayProvider) =>
     void (async () => {
-      // 上一家还在撤销窗口里：它让位，先真正删掉
-      if (removing !== null) commitRemoving(removing.provider.id);
+      setConfirming(null);
       try {
-        await onMarkRemove(provider);
+        await onRemove(provider);
       } catch (e) {
         report(e);
         return;
       }
-      setRemoving({ provider });
       const next = state.providers.find((p) => p.id !== provider.id);
       setSelected(next?.id ?? "new");
       setEditing(next === undefined);
-      clearTimer();
-      timer.current = setTimeout(() => commitRemoving(provider.id), REMOVE_UNDO_MS);
-    })();
-
-  const undoRemove = () =>
-    void (async () => {
-      if (removing === null) return;
-      clearTimer();
-      const id = removing.provider.id;
-      setRemoving(null);
-      try {
-        await onUndoRemove(id);
-        setSelected(id);
-        setEditing(false);
-      } catch (e) {
-        report(e);
-      }
     })();
 
   const retry = (id: string) =>
@@ -363,18 +334,6 @@ export function GatewayBody({
           })}
         </div>
 
-        {removing !== null ? (
-          <div className="gw-panel__notice">
-            <Toast
-              kind="success"
-              verb="删掉"
-              names={[providerLabel(removing.provider)]}
-              action={{ label: "撤销", onClick: undoRemove }}
-              onClose={() => commitRemoving(removing.provider.id)}
-            />
-          </div>
-        ) : null}
-
         {editing || selected === "new" ? (
           <GatewayForm
             key={selected}
@@ -450,7 +409,11 @@ export function GatewayBody({
                 <IconButton
                   icon={<IconTrash />}
                   title={`删掉 ${providerLabel(current)}`}
-                  onClick={() => remove(current)}
+                  onClick={() => {
+                    // 摘要行只有一个垃圾桶（当前这一家）
+                    const el = document.querySelector<HTMLElement>(".gw-panel__trash");
+                    if (el) askRemove(current, el);
+                  }}
                 />
               ) : (
                 // 最后一家还在供模型：后端会拒，键上就说清下一步。禁用的键接不到悬停，
@@ -474,6 +437,20 @@ export function GatewayBody({
           <div className="gw-panel__error">
             <BlackNotice message={error} />
           </div>
+        ) : null}
+
+        {/* 删网关：地址与钥匙串里的密钥一起删、找不回——二次确认（⑪） */}
+        {confirming !== null ? (
+          <Confirm
+            title={`删掉 ${providerLabel(confirming.provider)}？`}
+            confirmLabel="删掉"
+            anchor={confirming.anchor}
+            align="end"
+            onConfirm={() => remove(confirming.provider)}
+            onCancel={() => setConfirming(null)}
+          >
+            地址和钥匙串里的密钥一起删掉，删了找不回来
+          </Confirm>
         ) : null}
       </div>
 

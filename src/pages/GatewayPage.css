@@ -179,10 +179,6 @@
   margin-left: auto;
 }
 
-.gw-panel__notice .ss-toast--notice {
-  max-width: 100%;
-}
-
 /* 第三段：从这个网关选模型。段头 13/600，限制说明 12 ink-faint（不截断） */
 .gw-panel__models {
   min-width: 0;

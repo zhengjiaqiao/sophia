@@ -692,15 +692,8 @@ export default function ModelsTab({
     setGateway({ initial, leaving: false });
   };
 
-  /// 离开网关页：滑回 200ms 再卸掉（reduced-motion 即时）。删网关是延迟提交的（T4c），
-  /// 离开时把还挂着撤销窗口的全部提交
-  const leaveGateway = () => {
-    setGateway((g) => (g ? { ...g, leaving: true } : g));
-    void api
-      .gatewayCommitRemovals()
-      .then((next) => mounted.current && applyState(next))
-      .catch((error) => mounted.current && onError(describeError(error)));
-  };
+  /// 离开网关页：滑回 200ms 再卸掉（reduced-motion 即时）
+  const leaveGateway = () => setGateway((g) => (g ? { ...g, leaving: true } : g));
 
   const gatewayLeaving = gateway?.leaving ?? false;
   useEffect(() => {
@@ -868,9 +861,7 @@ export default function ModelsTab({
           onSave={saveProvider}
           onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
           onRetry={(id) => runOrThrow(() => api.gatewayRetryProvider(id))}
-          onMarkRemove={(p) => runOrThrow(() => api.gatewayMarkRemoveProvider(p.id))}
-          onUndoRemove={(id) => runOrThrow(() => api.gatewayUndoRemoveProvider(id))}
-          onCommitRemoval={(id) => runOrThrow(() => api.gatewayCommitRemovals(id))}
+          onRemove={(p) => runOrThrow(() => api.gatewayRemoveProvider(p.id))}
           onToggleModel={toggleModel}
           flashProviderId={flashProvider}
         />

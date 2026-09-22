@@ -755,9 +755,7 @@ const panelProps = (
   onSave: async () => "x",
   onFetchModels: async () => {},
   onRetry: async () => {},
-  onMarkRemove: async () => {},
-  onUndoRemove: async () => {},
-  onCommitRemoval: async () => {},
+  onRemove: async () => {},
   onToggleModel: noop,
   onDirtyChange: noop,
   askDiscard: false,
@@ -1025,4 +1023,19 @@ test("模型页表宽 = 324 + 24 + 框 + 24：框随内容区弹性 360–640（
   const row = /\.models-panel__head,\s*\.models-row \{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(row, /grid-template-columns:\s*var\(--models-agent-w\) minmax\(0, 1fr\)/);
   assert.match(row, /padding-right:\s*var\(--space-xl\)/);
+});
+
+test("删网关改为二次确认：页面上不再有「删掉 X · 撤销」提示条，垃圾桶可点时带读屏名", () => {
+  const html = render(
+    GatewayPanel,
+    panelProps({
+      providers: [
+        provider({ id: "ap", name: "ap-gateway" }),
+        provider({ id: "or", name: "openrouter.ai" }),
+      ],
+    }),
+  );
+  assert.doesNotMatch(html, /撤销/);
+  assert.doesNotMatch(html, /ss-toast/);
+  assert.match(html, /aria-label="删掉 ap-gateway"/);
 });
