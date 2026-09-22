@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api.ts";
-import { canRestore, parseBackendError, providerLabel } from "../modelsView.ts";
+import {
+  canRestore,
+  parseBackendError,
+  providerLabel,
+  removeProviderBlockedReason,
+} from "../modelsView.ts";
 import type { ModelsTool } from "../modelsView.ts";
 import type { GatewayProvider, GatewayState } from "../types.ts";
 import {
@@ -277,7 +282,18 @@ export function GatewayPage({
           title="改"
           onClick={() => setEditing({ providerId: item.id })}
         />
-        <IconButton icon={<IconTrash />} title="删掉" onClick={() => remove(item, index)} />
+        <IconButton
+          icon={<IconTrash />}
+          title="删掉"
+          onClick={() => remove(item, index)}
+          disabledReason={
+            // 延迟删除下后端照样拒绝「已启用时删掉最后一家还在发模型的网关」：与其按下去再报错，
+            // 不如键上就说清下一步（原因文案按现在的开关写，不用 modelsView 里旧的「已启用」按钮说法）
+            removeProviderBlockedReason(live, item, tool) === null
+              ? undefined
+              : `它是最后一家还在给 ${tool.name} 发模型的网关，先在模型页关掉 ${tool.name} 再删`
+          }
+        />
       </div>
     </li>
   );

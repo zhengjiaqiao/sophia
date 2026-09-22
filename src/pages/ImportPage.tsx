@@ -9,7 +9,8 @@ import type {
   SourceKind,
   SyncReport,
 } from "../types";
-import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag } from "../ui";
+import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag, Toast } from "../ui";
+import { defer, type Deferred } from "../deferredCommit.ts";
 import { CheckMark } from "./CheckMark.tsx";
 import { joinWords } from "./pendingIssues.ts";
 import {
@@ -211,6 +212,33 @@ export default function ImportPage({
     void run(() => (on ? api.removeAutoLinkTargets(path, [id]) : api.setAutoLink(path, [id])));
   };
 
+  /// 挂起的替换：提示条还在时可撤销；到期、关掉、离开页面时提交
+  const [replacing, setReplacing] = useState<{
+    names: string[];
+    commit: () => void;
+    undo: () => void;
+  } | null>(null);
+  const pendingReplace = useRef<Deferred | null>(null);
+  // 离开页面：挂着的替换就此提交（窗口关闭另有 App 的 flushAll 兜底）
+  useEffect(
+    () => () => {
+      const d = pendingReplace.current;
+      if (d?.isPending()) void d.commit().then(onChange, (e) => onError(String(e)));
+    },
+    // 只在卸载时跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  /// 建链：这些 skill × 点亮的目标里缺的
+  const link = async (skills: string[]): Promise<SyncReport | null> => {
+    const cells: CellRef[] = skills.flatMap((skill) =>
+      targetIds.map((targetId) => ({ sourceId: selected, skill, targetId })),
+    );
+    const acts = await api.proposeLinks(cells);
+    return acts.length === 0 ? null : api.applyAll(acts, false);
+  };
+
   const doAdd = async () => {
     if (source === undefined) return;
     setBusy(true);
@@ -219,7 +247,8 @@ export default function ImportPage({
       for (const skill of names.filter((n) => excluded.includes(n))) {
         await api.includeAutoLink(source.path, skill);
       }
-      // 同名选了替换的：先把现有的那份移到废纸篓（链到它的会改指到这一份），再建链
+      // 同名选了替换的：先体检一次，在 git 仓库里的不代删、这一行照常跳过
+      const replaced: { skill: string; holder: { sourceId: string; label: string } }[] = [];
       for (const skill of replace.filter((n) => names.includes(n))) {
         const holder = holders.get(skill);
         if (!holder) continue;
@@ -228,27 +257,73 @@ export default function ImportPage({
           onNotice(`没替换 ${skill}：${holder.label} 那份在 git 仓库里，交给 git 处理更稳妥`);
           continue;
         }
-        await api.deleteSource(planned.planId);
+        replaced.push({ skill, holder });
       }
-      const cells: CellRef[] = names.flatMap((skill) =>
-        targetIds.map((targetId) => ({ sourceId: selected, skill, targetId })),
-      );
-      const acts = await api.proposeLinks(cells);
-      if (acts.length === 0) {
-        // 动作为空不等于「都已经开着了」：同名被占、链接失效、整个文件夹是链接都产出空动作
-        onNotice("一个都没添加：选中的 skill 在这些 agent 下的位置已经被占着了");
-        await onChange();
-        setBusy(false);
-        return;
-      }
-      onReport(await api.applyAll(acts, false));
+      const direct = names.filter((n) => !replaced.some((r) => r.skill === n));
       const memory = loadImportMemory(memoryKey);
       saveImportMemory(memoryKey, {
         last: targetIds,
         streak: memory && sameSet(memory.last, targetIds) ? memory.streak + 1 : 1,
       });
+
+      if (direct.length > 0) {
+        const report = await link(direct);
+        if (report === null && replaced.length === 0) {
+          // 动作为空不等于「都已经开着了」：同名被占、链接失效、整个文件夹是链接都产出空动作
+          onNotice("一个都没添加：选中的 skill 在这些 agent 下的位置已经被占着了");
+          await onChange();
+          setBusy(false);
+          return;
+        }
+        if (report !== null) onReport(report);
+      }
+
+      if (replaced.length === 0) {
+        await onChange();
+        onClose();
+        return;
+      }
+
+      // 替换整体挂起：现有那份进废纸篓 + 这一份建链，一起在提交时做；撤销就相当于这几行没做。
+      // 提交时再体检一次（后端只存一份删除计划，挂起期间可能被顶掉，也可能磁盘变了）
+      const d = defer(`replace:${page.key}:${selected}`, async () => {
+        for (const { skill, holder } of replaced) {
+          const planned = await api.planDeleteSource(holder.sourceId, skill);
+          if (planned.plan.inGit !== null)
+            throw new Error(`没替换 ${skill}：${holder.label} 那份在 git 仓库里`);
+          const failed = (await api.deleteSource(planned.planId)).entries.find(
+            (e) => e.outcome.status === "failed",
+          );
+          if (failed && failed.outcome.status === "failed") throw new Error(failed.outcome.reason);
+        }
+        const report = await link(replaced.map((r) => r.skill));
+        if (report !== null) onReport(report);
+      });
+      pendingReplace.current = d;
+      // 直接添加的那些已经做完，勾选里只留挂着的替换
+      setNames(replaced.map((r) => r.skill));
+      const done = () => {
+        setReplacing(null);
+        setNames([]);
+        setReplace([]);
+      };
+      setReplacing({
+        names: replaced.map((r) => r.skill),
+        commit: () => {
+          done();
+          void d.commit().then(onChange, (e) => {
+            onError(String(e));
+            void onChange();
+          });
+        },
+        undo: () => {
+          d.undo();
+          done();
+          void onChange();
+        },
+      });
       await onChange();
-      onClose();
+      setBusy(false);
     } catch (e) {
       onError(String(e));
       setBusy(false);
@@ -450,9 +525,9 @@ export default function ImportPage({
                                 )}
                                 <span
                                   className="ss-import__clashnote"
-                                  title="现有的那份进废纸篓，可以从访达恢复；链到它的会改指到这一份"
+                                  title="现有的那份进废纸篓、链到它的改指到这一份；添加后提示条上可以撤销"
                                 >
-                                  {joinWords("替换后", entry.holder.label, "那份进废纸篓")}
+                                  {joinWords("替换后", entry.holder.label, "那份进废纸篓，可撤销")}
                                 </span>
                                 <Button variant="link" onClick={() => toggleName(entry.name)}>
                                   跳过
@@ -471,6 +546,19 @@ export default function ImportPage({
         </div>
 
         <Busy busy={busy} className="ss-import__foot">
+          {replacing !== null ? (
+            // 挂起的替换：黑窗贴在 `添加 N 个` 上方、右沿对齐它（提示锚在触发它的控件上）
+            <div className="ss-import__toast">
+              <Toast
+                kind="success"
+                verb="替换"
+                names={replacing.names}
+                action={{ label: "撤销", onClick: replacing.undo }}
+                onDismiss={replacing.commit}
+                onClose={replacing.commit}
+              />
+            </div>
+          ) : null}
           <div className="ss-import__keys">
             {page.targets.length === 0 ? (
               <span className="ss-import__hint">还没有启用任何 agent，先去设置里开一个</span>

@@ -13,7 +13,10 @@
 
 .pending-page__grid {
   display: inline-grid;
-  grid-template-columns: 40px max-content max-content 24px;
+  /* 句子列与动作列只增不减（宽度由页面量好后冻结在这两个变量里，离开页面才重置） */
+  grid-template-columns:
+    40px minmax(var(--pending-sentence-w, 0px), max-content)
+    minmax(var(--pending-actions-w, 0px), max-content) 24px;
   min-width: 480px;
 }
 

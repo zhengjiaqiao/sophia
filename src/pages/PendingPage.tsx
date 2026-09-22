@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { api, type IgnoredIssue } from "../api.ts";
 import type { IssueKind, McpDiff, McpFieldValue, Overview, SyncReport } from "../types.ts";
 import {
@@ -26,6 +26,7 @@ import {
   type SentencePart,
 } from "./pendingIssues.ts";
 import type { ModelIssue } from "../modelsView.ts";
+import { defer, type Deferred } from "../deferredCommit.ts";
 import "./PendingPage.css";
 
 /// 待处理页＝**全局收件箱**（DESIGN「材料与工艺 › 全局收件箱」）：一个页面，顶部分段片
@@ -109,6 +110,10 @@ interface Done {
   reason?: string;
   stats?: string;
   undo?: () => void;
+  /// 提示条到期或被关掉时要做的事（挂起的删除在这时真正提交）
+  onExpire?: () => void;
+  /// 收起这条提示并执行 onExpire；由 settle 一次建好
+  expire: () => void;
 }
 
 /// 模型段在本机记下的忽略
@@ -446,6 +451,19 @@ export function PendingPage({
   const [done, setDone] = useState<Done[]>([]);
   /// MCP 两份不一样：展开着的那几条与各自的比对结果
   const [diffs, setDiffs] = useState<Record<string, McpDiff | "loading" | Error>>({});
+  /// 挂起的删除（只留 X 的）：提示条到期 / 关掉 / 换段 / 离开页面时提交，撤销则丢掉
+  const deferred = useRef(new Map<string, Deferred>());
+  const commitAll = () => {
+    for (const d of deferred.current.values()) void d.commit().catch(() => {});
+    deferred.current.clear();
+  };
+  // 离开页面：挂着的删除全部提交（窗口关闭另有 App 的 flushAll 兜底）
+  useEffect(() => () => commitAll(), []);
+
+  /// 句子列与动作列的宽度**只增不减，冻结到离开页面**：处理完一行后那一行换成提示条，
+  /// 列宽若按剩下的行重算，整列会跳一下。每段各记各的
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [frozen, setFrozen] = useState<Record<string, [number, number]>>({});
 
   const skills = useMemo(
     () => segments?.skills ?? collectIssues(overview),
@@ -466,11 +484,29 @@ export function PendingPage({
     void reloadIgnored();
   }, [reloadIgnored]);
 
-  // 换段时收起已忽略、清掉上一段留下的提示条
+  // 换段时收起已忽略、清掉上一段留下的提示条；上一段挂着的删除就此提交
   useEffect(() => {
     setShowIgnored(false);
     setDone([]);
+    commitAll();
   }, [segment]);
+
+  // 量出这一段当前的句子列 / 动作列宽度，只在变宽时更新（setState 后再量结果不变，不会循环）
+  useLayoutEffect(() => {
+    const grid = pageRef.current?.querySelector(".pending-page__grid");
+    if (!grid) return;
+    const tracks = getComputedStyle(grid).gridTemplateColumns.split(" ").map(parseFloat);
+    if (tracks.length < 4 || tracks.some(Number.isNaN)) return;
+    const [, sentence, actions] = tracks;
+    const key = `${segment}${showIgnored ? ":ignored" : ""}`;
+    const prev = frozen[key] ?? [0, 0];
+    if (sentence > prev[0] + 0.5 || actions > prev[1] + 0.5) {
+      setFrozen((f) => ({
+        ...f,
+        [key]: [Math.max(sentence, prev[0]), Math.max(actions, prev[1])],
+      }));
+    }
+  });
 
   const ignoredKeys = new Set([
     ...(ignored ?? []).map((i) => i.key),
@@ -499,8 +535,14 @@ export function PendingPage({
   };
 
   /// 这一行处理完：提示条插回它原来的位置
-  const settle = (key: string, index: number, toast: Omit<Done, "key" | "index">) =>
-    setDone((prev) => [...prev.filter((d) => d.key !== key), { key, index, ...toast }]);
+  /// 到期 / 关掉的回调在这里一次建好：传给提示条的函数身份不变，它的计时器才不会每次重渲染都重来
+  const settle = (key: string, index: number, toast: Omit<Done, "key" | "index" | "expire">) => {
+    const expire = () => {
+      setDone((prev) => prev.filter((d) => d.key !== key));
+      toast.onExpire?.();
+    };
+    setDone((prev) => [...prev.filter((d) => d.key !== key), { key, index, ...toast, expire }]);
+  };
 
   const dismiss = (key: string) => setDone((prev) => prev.filter((d) => d.key !== key));
 
@@ -646,14 +688,13 @@ export function PendingPage({
       await onRefresh();
     });
 
-  /// 同名两份：只留 `keep` 的，另外几份进废纸篓。**不确认**（进废纸篓可恢复，⑪）；
-  /// 后端没有从废纸篓还原的命令，所以提示条说去访达恢复，不给假的撤销（⑫）。
-  /// 在 git 仓库里的不代删——那道闸门在 core 的删除计划里，这里只把原因说出来
+  /// 同名两份：只留 `keep` 的，另外几份进废纸篓。**不确认，给撤销**（⑪）：删除先挂起
+  /// （deferredCommit），界面上当它已经发生；提示条到期、被关掉、换段或离开页面时才真正删，
+  /// 撤销就是什么都没发生。在 git 仓库里的不代删——先体检一次，挡住就不挂起；
+  /// 提交时再体检一次（计划只在后端存一份，挂起期间可能被别的删除顶掉，也可能磁盘变了）
   const keepOnly = (issue: SkillIssue, keep: DeleteChoice | null, index: number) =>
     void run(async () => {
       const drop = issue.deletes.filter((d) => d !== keep);
-      const names: string[] = [];
-      let relinked = 0;
       for (const choice of drop) {
         const planned = await api.planDeleteSource(choice.sourceId, choice.skill);
         if (planned.plan.inGit !== null) {
@@ -665,34 +706,51 @@ export function PendingPage({
             reason: "它在 git 仓库里，交给 git 处理更稳妥",
             stats: planned.plan.inGit,
           });
-          await onRefresh();
           return;
         }
-        const report = await api.deleteSource(planned.planId);
-        const reason = failureReason(report);
-        if (reason !== null) {
-          settle(issue.key, index, {
-            tier: "notice",
-            kind: "cannot",
-            verb: "没删掉",
-            names: [`${choice.label} 的 ${choice.skill}`],
-            reason,
-          });
-          await onRefresh();
-          return;
-        }
-        names.push(`${choice.label} 的 ${choice.skill}`);
-        if (planned.plan.relinkTo !== null) relinked += planned.plan.affected.length;
       }
+      const d = defer(`keep:${issue.key}`, async () => {
+        for (const choice of drop) {
+          const planned = await api.planDeleteSource(choice.sourceId, choice.skill);
+          if (planned.plan.inGit !== null) throw new Error("它在 git 仓库里，交给 git 处理更稳妥");
+          const reason = failureReason(await api.deleteSource(planned.planId));
+          if (reason !== null) throw new Error(reason);
+        }
+      });
+      deferred.current.set(issue.key, d);
+      const kept = keep ?? null;
+      const commit = () => {
+        deferred.current.delete(issue.key);
+        void d
+          .commit()
+          .then(onRefresh)
+          .catch((e) => {
+            settle(issue.key, index, {
+              tier: "notice",
+              kind: "cannot",
+              verb: "没删掉",
+              names: drop.map((c) => `${c.label} 的 ${c.skill}`),
+              reason: e instanceof Error ? e.message : String(e),
+            });
+            void onRefresh();
+          });
+      };
       settle(issue.key, index, {
         tier: "notice",
         kind: "success",
-        verb: "删到废纸篓",
-        names,
-        stats:
-          relinked > 0 ? `${relinked} 条链接改指到留下的那份 · 可以从访达恢复` : "可以从访达恢复",
+        verb: kept === null ? "删到废纸篓" : "只留",
+        names: [
+          kept === null
+            ? `${drop[0]?.label ?? ""} 的 ${issue.subject ?? ""}`
+            : `${kept.label} 的 ${issue.subject ?? kept.skill}`,
+        ],
+        undo: () => {
+          d.undo();
+          deferred.current.delete(issue.key);
+          dismiss(issue.key);
+        },
+        onExpire: commit,
       });
-      await onRefresh();
     });
 
   // ----- MCP 段的动作 -----
@@ -793,8 +851,8 @@ export function PendingPage({
         reason={d.reason}
         stats={d.tier === "notice" ? d.stats : undefined}
         action={d.undo ? { label: "撤销", onClick: d.undo } : undefined}
-        onDismiss={() => dismiss(d.key)}
-        onClose={d.tier === "notice" ? () => dismiss(d.key) : undefined}
+        onDismiss={d.expire}
+        onClose={d.tier === "notice" ? d.expire : undefined}
       />
     </div>
   );
@@ -1039,7 +1097,16 @@ export function PendingPage({
 
   return (
     <SubPage title="待处理" onBack={onBack}>
-      <div className="pending-page">
+      <div
+        className="pending-page"
+        ref={pageRef}
+        style={
+          {
+            "--pending-sentence-w": `${frozen[`${segment}${showIgnored ? ":ignored" : ""}`]?.[0] ?? 0}px`,
+            "--pending-actions-w": `${frozen[`${segment}${showIgnored ? ":ignored" : ""}`]?.[1] ?? 0}px`,
+          } as CSSProperties
+        }
+      >
         <Busy busy={busy} className="pending-page__grid">
           <div className="pending-page__segments">
             {(["skills", "mcp", "models"] as const).map((id) => (

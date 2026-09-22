@@ -285,6 +285,7 @@
 
 /* ---- 底部一行：一组目标 + 规则开关 + 安全小字 + 添加 N 个 ---- */
 .ss-import__foot {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-xs);
@@ -341,6 +342,14 @@
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   color: var(--ink-mute);
+}
+
+/* 挂起的替换：贴在底部一行上方 8，右沿对齐 `添加 N 个` */
+.ss-import__toast {
+  position: absolute;
+  right: var(--space-xxl);
+  bottom: calc(100% + var(--space-xs));
+  z-index: 1;
 }
 
 /* ---- 0 个来源：不分栏，内容区居中三行（间距 8 / 16） ---- */
