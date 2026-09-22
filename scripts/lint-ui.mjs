@@ -7,11 +7,11 @@ import { join, extname, relative } from "node:path";
 
 /// 唯一的色值来源；tokens.css 之外的地方不许出现字面色值
 const TOKENS = new Set([
-  "#ffffff", "#000000", "#e0e0e8", "#f0f0fa", "#5a5a5f", "#9a9aa2", "#c8c8d0", "#6a6a72",
+  "#ffffff", "#000000", "#f2f2f2", "#e2e2e2", "#c8c8c8", "#9a9a9a", "#5a5a5a",
 ]);
 const FONTS = ["Barlow Condensed", "Barlow", "IBM Plex Mono"];
-/// 输入框 4px、pill 32px、圆点 50%，其余 0
-const RADII = new Set(["0", "0px", "4px", "32px", "50%"]);
+/// 动作与输入 2px、片与开关 32px、圆点 50%，其余 0（DESIGN「Shapes」）
+const RADII = new Set(["0", "0px", "2px", "32px", "50%"]);
 /// 只有这个文件可以写字面色值
 const TOKEN_FILE = "src/tokens.css";
 

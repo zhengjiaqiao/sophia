@@ -1,50 +1,83 @@
 /// 展示组件库：只吃 props，不碰 api，不含业务逻辑。
-/// 实现依据是 docs/DESIGN.md，与画稿不一致时以它为准。
+/// 实现依据是 docs/DESIGN.md，视觉对照是 .superpowers/design 的 States / Marks / Feedback 画板。
 /// 样式与 token 在这里一次性引进来，用组件的页面不必自己 import css。
 import "./ui.css";
 
-export { StateDot } from "./StateDot.tsx";
-export type { Dot, StateDotProps } from "./StateDot.tsx";
+export { StateDot, DupMark, DOT_LABEL } from "./StateDot.tsx";
+export type { Dot, StateDotProps, DupMarkProps } from "./StateDot.tsx";
 
-export { Button } from "./Button.tsx";
-export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button.tsx";
+export { Button, IconButton, AddButton } from "./Button.tsx";
+export type {
+  ButtonProps,
+  ButtonSize,
+  ButtonVariant,
+  IconButtonProps,
+  AddButtonProps,
+} from "./Button.tsx";
 
-export { Chip } from "./Chip.tsx";
-export type { ChipProps } from "./Chip.tsx";
+export { Switch, Checkbox } from "./Switch.tsx";
+export type { SwitchProps, CheckboxProps } from "./Switch.tsx";
+
+export { Chip, ModelChip } from "./Chip.tsx";
+export type { ChipProps, ModelChipProps } from "./Chip.tsx";
+
+export { Tag } from "./Tag.tsx";
+export type { TagProps } from "./Tag.tsx";
+
+export { Tooltip, TIP_DELAY_MS } from "./Tooltip.tsx";
+export type { TooltipProps } from "./Tooltip.tsx";
+
+export { Rotor } from "./Rotor.tsx";
+export type { RotorProps } from "./Rotor.tsx";
 
 export { Toast, TOAST_DWELL_MS } from "./Toast.tsx";
-export type { ToastAction, ToastKind, ToastProps } from "./Toast.tsx";
+export type { ToastAction, ToastAgent, ToastKind, ToastProps } from "./Toast.tsx";
 
-export { ErrorBanner } from "./ErrorBanner.tsx";
-export type { ErrorBannerProps } from "./ErrorBanner.tsx";
+export { ErrorBanner, BlackNotice } from "./ErrorBanner.tsx";
+export type { ErrorBannerProps, BlackNoticeAction, BlackNoticeProps } from "./ErrorBanner.tsx";
 
 export { Confirm } from "./Confirm.tsx";
-export type { ConfirmProps } from "./Confirm.tsx";
+export type { ConfirmAnchor, ConfirmProps } from "./Confirm.tsx";
 
 export { SubPage } from "./SubPage.tsx";
 export type { SubPageProps } from "./SubPage.tsx";
 
-export { RowNotice } from "./RowNotice.tsx";
-export type { RowNoticeAction, RowNoticeProps } from "./RowNotice.tsx";
+export { Cap, capRuns } from "./Cap.tsx";
+export type { CapProps } from "./Cap.tsx";
+
+export { AgentIcon, AgentKey, AgentMark, agentInitial, hasAgentIcon } from "./AgentMark.tsx";
+export type { AgentIconProps, AgentKeyProps, AgentMarkProps } from "./AgentMark.tsx";
 
 export {
   IconArrowLeft,
+  IconAttention,
+  IconCannot,
+  IconCheck,
   IconChevronRight,
   IconClose,
+  IconEdit,
+  IconInbox,
+  IconPlus,
   IconRefresh,
   IconReveal,
+  IconSearch,
   IconSettings,
   IconTrash,
   IconUndo,
 } from "./icons.tsx";
 export type { IconProps } from "./icons.tsx";
 
-export { AgentIcon, AgentMark, agentInitial, hasAgentIcon } from "./AgentMark.tsx";
-export type { AgentIconProps, AgentMarkProps } from "./AgentMark.tsx";
-
 export { Busy, Empty } from "./Empty.tsx";
 export type { BusyProps, EmptyAction, EmptyKind, EmptyProps } from "./Empty.tsx";
 
-export { TagSquare } from "./TagSquare.tsx";
-export type { TagSquareProps } from "./TagSquare.tsx";
 export { Plain } from "./Plain.tsx";
+
+// ---- 兼容别名：T0 期间页面还按旧 props 写，T1–T3 改完调用点就删 ----
+
+/** @deprecated 旧的「一句话」提示条（没有动词）。用 `Toast`，`verb` 必填 */
+export { LegacyToast } from "./Toast.tsx";
+export type { LegacyToastProps } from "./Toast.tsx";
+
+/** @deprecated 用 `BlackNotice`（行内黑窗） */
+export { RowNotice } from "./ErrorBanner.tsx";
+export type { RowNoticeAction, RowNoticeProps } from "./ErrorBanner.tsx";

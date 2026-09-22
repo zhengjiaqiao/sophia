@@ -1,38 +1,54 @@
 import type { ReactNode } from "react";
+import { Cap } from "./Cap.tsx";
 
-/// agent 图标与 agent 灯（组件规范 §9、§9.1）。
+/// agent 图标（DESIGN「agent 图标 AgentMark」，画板 Marks「agent 图标」）。
 ///
-/// 一律单色 inline SVG，`currentColor` 取色：常态主文字色，未启用/禁用退到弱文字色。
-/// **不用品牌色**——用了零色彩（§1.1）就破了。
+/// 一律单色 inline SVG，`currentColor` 取色：常态主文字色，未启用 / 禁用退到弱文字色。
+/// **不用品牌色**。实现时用各项目官方 SVG 转单色，不手画；**所有出现处走这一个定义**。
 ///
-/// 41 个 agent 里只有少数几个的标志能在 16px 上认出来，其余降级成**首字母方块**。
-/// 方块不是图标的平替，是它缺席时的占位：已安装的 9 个里首字母就撞了 3 个 C
-/// （claude-code / codex / cursor）和 2 个 G（gemini-cli / github-copilot），
-/// 所以方块**永远和名字一起出现，不单独用**。
+/// - Claude Code：放射星形。光学补偿——放射实线比同尺寸线性图标重，描边降到 1.2、视觉小 1px
+/// - Codex：OpenAI 绳结（simple-icons 官方 path，单色填充）。识别特征是中心六边形空洞 +
+///   六段逐段旋转 60° 的交织；第一版六瓣软轮廓在 16px 下读成云 / 齿轮，已换
+/// - Cursor：立方体线稿；Gemini CLI：实心四角星
+///
+/// 其余降级成**首字母方块**（14px，hairline 描边）。它是图标缺席时的占位，
+/// **永远和名字一起出现**：已安装的 9 个里首字母就撞了 3 个 C、2 个 G。
 
-/// 画得出、且 16px 上认得出的那几个。缺哪个就去取官方 SVG 转成单色路径，
-/// 取不到就保持首字母方块——认不出的图标比没有图标更糟。
-const ICONS: Record<string, ReactNode> = {
-  "claude-code": (
-    <path d="M8 1.3v13.4M4.3 13.1L11.7 2.9M2.5 9.8l11-3.6M2.5 6.2l11 3.6M4.3 2.9l7.4 10.2" />
-  ),
-  codex: (
-    <path d="M8 3.7A2.25 2.25 0 0 1 11.72 5.85A2.25 2.25 0 0 1 11.72 10.15A2.25 2.25 0 0 1 8 12.3A2.25 2.25 0 0 1 4.28 10.15A2.25 2.25 0 0 1 4.28 5.85A2.25 2.25 0 0 1 8 3.7Z" />
-  ),
-  cursor: (
-    <>
-      <path d="M8 1.6l5.5 3.2v6.4L8 14.4 2.5 11.2V4.8Z" />
-      <path d="M8 8v6.4M8 8l5.5-3.2M8 8L2.5 4.8" />
-    </>
-  ),
+const OPENAI_KNOT =
+  "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z";
+
+type Drawn = { kind: "stroke" | "fill"; viewBox: string; body: ReactNode; star?: boolean };
+
+const ICONS: Record<string, Drawn> = {
+  "claude-code": {
+    kind: "stroke",
+    viewBox: "0 0 16 16",
+    star: true,
+    body: <path d="M8 1.3v13.4M4.3 13.1L11.7 2.9M2.5 9.8l11-3.6M2.5 6.2l11 3.6M4.3 2.9l7.4 10.2" />,
+  },
+  codex: { kind: "fill", viewBox: "0 0 24 24", body: <path d={OPENAI_KNOT} /> },
+  cursor: {
+    kind: "stroke",
+    viewBox: "0 0 16 16",
+    body: (
+      <>
+        <path d="M8 1.6l5.5 3.2v6.4L8 14.4 2.5 11.2V4.8Z" />
+        <path d="M8 8v6.4M8 8l5.5-3.2M8 8L2.5 4.8" />
+      </>
+    ),
+  },
+  "gemini-cli": {
+    kind: "fill",
+    viewBox: "0 0 16 16",
+    body: (
+      <path d="M8 1.1C8.5 5.1 10.9 7.5 14.9 8C10.9 8.5 8.5 10.9 8 14.9C7.5 10.9 5.1 8.5 1.1 8C5.1 7.5 7.5 5.1 8 1.1Z" />
+    ),
+  },
 };
-
-/// 描边式的三个用 stroke，gemini 的四角星是实心的，单独走 fill
-const FILLED = new Set(["gemini-cli"]);
 
 /// 这个 agent 有没有画得出的图标
 export function hasAgentIcon(id: string): boolean {
-  return id in ICONS || FILLED.has(id);
+  return id in ICONS;
 }
 
 /// 名字的首字母，取不到就用问号占位
@@ -43,73 +59,124 @@ export function agentInitial(name: string): string {
 
 export interface AgentIconProps {
   id: string;
-  /// 降级成首字母方块时要用它的首字母；调用方必须把名字也显示在旁边
+  /// 降级成首字母方块时要用它的首字母；读屏名也是它
   name: string;
+  /// 格子尺寸（默认 16；图标键 14、模型页 24）。Claude 星形在格子里小 1px 居中
   size?: number;
+  /// 旁边**没有**名字时给 true：图标自己带 `title` 与 `aria-label`（提示条里的图标组）
+  labelled?: boolean;
 }
 
-/// 只有图标本身。**旁边必须有名字**，否则用 AgentMark。
-export function AgentIcon({ id, name, size = 16 }: AgentIconProps) {
-  if (FILLED.has(id)) {
+/// 只有图标本身。旁边有名字时读屏跳过它（名字已说）；没有名字时给 `labelled`
+export function AgentIcon({ id, name, size = 16, labelled }: AgentIconProps) {
+  const a11y = labelled
+    ? { role: "img" as const, "aria-label": name }
+    : { "aria-hidden": true as const };
+  const drawn = ICONS[id];
+
+  if (!drawn) {
+    // 降级：14px 零圆角方框 + 大写首字母
     return (
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-        <path d="M8 1.1C8.5 5.1 10.9 7.5 14.9 8C10.9 8.5 8.5 10.9 8 14.9C7.5 10.9 5.1 8.5 1.1 8C5.1 7.5 7.5 5.1 8 1.1Z" />
-      </svg>
+      <span className="ss-mark__box" title={labelled ? name : undefined} {...a11y}>
+        {agentInitial(name)}
+      </span>
     );
   }
 
-  const path = ICONS[id];
-  if (path) {
-    return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        // 与 icons.tsx 同一笔宽：两套图标挨着出现（列头的 agent 标 + 行上的动作图标），
-        // 差 0.1 看不出来，但同一份数值省得以后各调各的
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        {path}
-      </svg>
-    );
-  }
-
-  // 降级：14px 零圆角方框 + 大写首字母。禁用时只有字母变灰，边框不动——
-  // 再退就跟背景糊在一起了。
+  // 星形光学补偿：画在小 1px 的 svg 里，外层格子仍是 size，居中
+  const drawSize = drawn.star ? size - 1 : size;
+  const svg = (
+    <svg
+      width={drawSize}
+      height={drawSize}
+      viewBox={drawn.viewBox}
+      fill={drawn.kind === "fill" ? "currentColor" : "none"}
+      stroke={drawn.kind === "stroke" ? "currentColor" : undefined}
+      strokeWidth={drawn.kind === "stroke" ? (drawn.star ? 1.2 : 1.4) * (16 / size) : undefined}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      focusable="false"
+      {...(labelled ? {} : { "aria-hidden": true as const })}
+    >
+      {labelled ? <title>{name}</title> : null}
+      {drawn.body}
+    </svg>
+  );
   return (
-    <span className="ss-mark__box" aria-hidden="true">
-      {agentInitial(name)}
+    <span
+      className="ss-mark__glyph"
+      style={{ width: size, height: size }}
+      {...(labelled ? { role: "img" as const, "aria-label": name } : {})}
+    >
+      {svg}
     </span>
   );
 }
 
 export interface AgentMarkProps {
   id: string;
-  /// 显示名，原样写。**不大写**——大写是结构的语言，不大写是内容的语言（§1.2）
+  /// 显示名，原样写
   name: string;
-  /// inline：设置页与导入页的横排；stacked：矩阵列头，图标在上名字在下。
-  /// 列头是 agent 名大写的唯一例外——那里它承担的是列标签的职能
-  layout?: "inline" | "stacked";
+  /// inline：图标 + 名字横排（设置页、句子里，名字不大写）；
+  /// stacked：图标在上名字在下（旧列头）；
+  /// header：表格列头三层——16px 图标 / Condensed 大写名 / 等宽计数（`ink-faint`）
+  layout?: "inline" | "stacked" | "header";
+  /// header 的第三层：这个 agent 下开着几个（只写分子、不零填充）
+  count?: number;
   /// 没装这个 agent、或整行禁用：图标跟着文字一起退到弱文字色，形状不变
   dim?: boolean;
   title?: string;
 }
 
-export function AgentMark({ id, name, layout = "inline", dim, title }: AgentMarkProps) {
+export function AgentMark({ id, name, layout = "inline", count, dim, title }: AgentMarkProps) {
   const classes = ["ss-mark", `ss-mark--${layout}`];
   if (dim) classes.push("is-dim");
+  const upper = layout !== "inline";
 
   return (
     <span className={classes.join(" ")} title={title}>
       <span className="ss-mark__icon">
         <AgentIcon id={id} name={name} />
       </span>
-      <span className="ss-mark__name">{name}</span>
+      <span className="ss-mark__name">{upper ? <Cap>{name}</Cap> : name}</span>
+      {layout === "header" && count !== undefined ? (
+        <span className="ss-mark__count">{count}</span>
+      ) : null}
     </span>
+  );
+}
+
+export interface AgentKeyProps {
+  id: string;
+  name: string;
+  /// 点亮＝选中（反色）
+  pressed: boolean;
+  onToggle?: (next: boolean) => void;
+  /// 给了就禁用（MCP 添加页：来源自己那个键「这就是来源」）
+  disabledReason?: string;
+}
+
+/// agent 图标键（DESIGN「添加页」，画板 States「agent 图标键」）：高 32，图标 14 +
+/// Condensed 大写名字同一行，宽随内容，2px 圆角。未选 1px `hairline` 描边、`ink-mute`；
+/// **点亮 `ink` 底白字**（黑色小键＝已按下）。一排横放，就是这次添加的一组目标
+export function AgentKey({ id, name, pressed, onToggle, disabledReason }: AgentKeyProps) {
+  const disabled = Boolean(disabledReason);
+  const classes = ["ss-agentkey"];
+  if (pressed) classes.push("is-pressed");
+  return (
+    <button
+      type="button"
+      className={classes.join(" ")}
+      aria-pressed={pressed}
+      aria-label={name}
+      title={disabled ? disabledReason : name}
+      disabled={disabled}
+      onClick={disabled ? undefined : () => onToggle?.(!pressed)}
+    >
+      <AgentIcon id={id} name={name} size={14} />
+      <span className="ss-agentkey__name">
+        <Cap>{name}</Cap>
+      </span>
+    </button>
   );
 }

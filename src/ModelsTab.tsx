@@ -36,7 +36,7 @@ import {
   Empty,
   ErrorBanner,
   RowNotice,
-  Toast,
+  LegacyToast as Toast,
   Plain,
 } from "./ui/index.ts";
 import type { ToastKind } from "./ui/index.ts";

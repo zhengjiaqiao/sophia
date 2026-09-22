@@ -1,41 +1,81 @@
 import { useEffect } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Button } from "./Button.tsx";
 
-/// 确认弹窗（组件规范 §5）：只有会造成不可逆或难以察觉后果的操作才确认，
-/// 且只确认一道。弹窗必须给出做决定所需的信息，而不只是问「确定吗」。
-/// 背景点击与 Esc 等同取消。
+/// 确认弹窗（DESIGN「页面还是弹层」「材料与工艺 › 对话框」，画板 Feedback「确认」）。
+///
+/// **只给两件真正不可逆的事**：MCP 的批量或跨域写入、重启 Codex（⑪ 能撤销就不弹确认）。
+///
+/// - 无外框白板，内边距 24 28，宽 460；标题 15/600（head-cap 档，汉字字距 0）
+/// - 遮罩：`canvas` 80%（opacity 层，不用 rgba）
+/// - **锚在触发它的那一行下方 6px**，且**那一行不被遮罩盖住**——用户始终看得见自己
+///   正在决定的那一行（⑦）。实现：遮罩按 `anchor` 挖出那一行的矩形（四块拼成），
+///   行本身不用调用方抬 z-index；行上叠一层透明接收层，点它与点遮罩一样是取消
+/// - 主动作反色、只写动词（`重启` `写进去`）；`取消` 是文字链
+/// - **承载后果与安全信息的句子必须留**（`safetyNote`）——那是功能
+/// - 背景点击与 Esc 等同取消
+
+export interface ConfirmAnchor {
+  /// 触发行在视口里的矩形（`getBoundingClientRect()` 的结果即可）
+  top: number;
+  left: number;
+  right: number;
+  bottom: number;
+}
 
 export interface ConfirmProps {
-  /// 标题。嵌了 skill 名时整个标题不做大小写转换（§1.2）
+  /// 标题：`重启 Codex？` `把 notion 写进 Codex · User？`
   title: ReactNode;
-  /// 说明正文
-  body?: ReactNode;
-  /// 条件性警告段：有才出现。路径、目录大小、受影响的链接数、git 状态放这儿
-  warning?: ReactNode;
-  /// 主动作文案要说清会发生什么，如「删到废纸篓」，不写「确定」
+  /// 正文插槽：一句后果、或后果示意图
+  children?: ReactNode;
+  /// 路径铭牌：`ink` 底、等宽 12 白字、内边距 10 12；`meta` 是第二行 `ink-faint`
+  nameplate?: { path: string; meta?: ReactNode };
+  /// 一句安全信息（13 `ink-mute`）：`会把请求头和令牌一并复制过去`
+  safetyNote?: ReactNode;
+  /// 主动作：只写动词，说清会发生什么，不写「确定」
   confirmLabel: string;
   onConfirm?: () => void;
-  /// 非空即禁用主动作，并作为鼠标悬停的原因（§3）。
-  /// 本体在 git 仓库里时就是这条：不代删，只告诉你该去哪儿删
+  /// 非空即禁用主动作，并作为悬停说明
   confirmDisabledReason?: string;
-  /// 破坏性：边框同默认，分量由信息和文案承担，不涂红（§1.1）
-  destructive?: boolean;
-  /// 默认「取消」；不代删那个变体里是「知道了」
+  /// 默认「取消」
   cancelLabel?: string;
   onCancel: () => void;
+  /// 触发行。不给就居中（没有触发行的场合）
+  anchor?: ConfirmAnchor;
+  /** @deprecated 用 children */
+  body?: ReactNode;
+  /** @deprecated 用 nameplate / safetyNote */
+  warning?: ReactNode;
+  /** @deprecated 破坏性不再有单独的样子，忽略 */
+  destructive?: boolean;
+}
+
+const GAP = 6;
+const WIDTH = 460;
+
+/// 遮罩挖掉触发行：上、下、左、右四块
+function veilPieces(a: ConfirmAnchor): CSSProperties[] {
+  return [
+    { top: 0, left: 0, right: 0, height: Math.max(0, a.top) },
+    { top: a.bottom, left: 0, right: 0, bottom: 0 },
+    { top: a.top, left: 0, width: Math.max(0, a.left), height: a.bottom - a.top },
+    { top: a.top, left: a.right, right: 0, height: a.bottom - a.top },
+  ];
 }
 
 export function Confirm({
   title,
-  body,
-  warning,
+  children,
+  nameplate,
+  safetyNote,
   confirmLabel,
   onConfirm,
   confirmDisabledReason,
-  destructive,
   cancelLabel = "取消",
   onCancel,
+  anchor,
+  body,
+  warning,
 }: ConfirmProps) {
   // Esc 等同取消
   useEffect(() => {
@@ -47,34 +87,57 @@ export function Confirm({
   }, [onCancel]);
 
   const disabled = Boolean(confirmDisabledReason);
+  const dialogStyle: CSSProperties | undefined = anchor
+    ? {
+        position: "absolute",
+        top: anchor.bottom + GAP,
+        // 左对齐触发行；窗口不够宽时贴右边留 16
+        left: `min(${anchor.left}px, calc(100vw - ${WIDTH + 16}px))`,
+      }
+    : undefined;
 
   return (
-    // 背景点击等同取消；点在弹窗里不冒泡出去
-    <div className="ss-confirm-layer" onClick={onCancel} role="presentation">
-      <div className="ss-confirm-veil" />
-      <div
-        className="ss-confirm"
-        role="dialog"
-        aria-modal="true"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <div className={`ss-confirm-layer${anchor ? " is-anchored" : ""}`} role="presentation">
+      {anchor ? (
+        <>
+          {veilPieces(anchor).map((style, i) => (
+            <div key={i} className="ss-confirm-veil" style={style} onClick={onCancel} />
+          ))}
+          <div
+            className="ss-confirm-hole"
+            style={{
+              top: anchor.top,
+              left: anchor.left,
+              width: anchor.right - anchor.left,
+              height: anchor.bottom - anchor.top,
+            }}
+            onClick={onCancel}
+          />
+        </>
+      ) : (
+        <div className="ss-confirm-veil ss-confirm-veil--full" onClick={onCancel} />
+      )}
+      <div className="ss-confirm" role="dialog" aria-modal="true" style={dialogStyle}>
         <div className="ss-confirm__title">{title}</div>
-        {body ? <div className="ss-confirm__body">{body}</div> : null}
-        {warning ? <div className="ss-confirm__warning">{warning}</div> : null}
+        {children || body ? <div className="ss-confirm__body">{children ?? body}</div> : null}
+        {warning ? <div className="ss-confirm__body">{warning}</div> : null}
+        {nameplate ? (
+          <div className="ss-confirm__nameplate">
+            <div className="ss-confirm__path">{nameplate.path}</div>
+            {nameplate.meta ? <div className="ss-confirm__meta">{nameplate.meta}</div> : null}
+          </div>
+        ) : null}
+        {safetyNote ? <div className="ss-confirm__safety">{safetyNote}</div> : null}
         <div className="ss-confirm__foot">
           <Button variant="link" onClick={onCancel}>
             {cancelLabel}
           </Button>
           {disabled ? (
-            <Button
-              variant={destructive ? "destructive" : "default"}
-              disabled
-              disabledReason={confirmDisabledReason as string}
-            >
+            <Button variant="primary" disabled disabledReason={confirmDisabledReason as string}>
               {confirmLabel}
             </Button>
           ) : (
-            <Button variant={destructive ? "destructive" : "default"} onClick={onConfirm}>
+            <Button variant="primary" onClick={onConfirm}>
               {confirmLabel}
             </Button>
           )}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { api, type IgnoredIssue } from "../api.ts";
 import type { DeleteSourcePlan, Overview, SyncReport } from "../types.ts";
-import { Busy, Button, Confirm, Empty, SubPage, Toast, type ToastKind } from "../ui/index.ts";
+import { Busy, Button, Confirm, Empty, SubPage, LegacyToast as Toast, type ToastKind } from "../ui/index.ts";
 import {
   KIND_LABEL,
   collectIssues,

@@ -449,8 +449,9 @@ test("ToolIntro 已启用：一句人话、一行等宽事实，开关是反色 
     html,
     /class="models-tool__facts">Codex 0\.43\.0 · 路由 127\.0\.0\.1:8765 运行中 · /,
   );
-  // 反色＝现在开着（DESIGN components.button-inverse）
-  assert.match(html, /class="ss-btn ss-btn--inverse"[^>]*>已启用</);
+  // 「反色按钮当开关」已被 UI v4 推翻（布尔状态走 Switch，T2 改）；T0 期间旧 variant
+  // 落到主动作的外观，这里只钉「仍是一枚实心键」，不再钉 inverse 这个类名
+  assert.match(html, /class="ss-btn ss-btn--primary"[^>]*>已启用</);
   // 重启是这个工具的动作，按钮上带着它的名字；button-cap 是大写档，
   // 但专名原样不转大写（§1.2），所以名字裹在 <Plain>（.ss-plain）里
   assert.match(html, /重启 <span class="ss-plain">Codex<\/span>/);

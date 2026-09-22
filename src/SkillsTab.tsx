@@ -12,7 +12,7 @@ import {
   type DeleteChoice,
   type PendingIssue,
 } from "./pages/pendingIssues";
-import { AgentIcon, Chip, Confirm, Empty, Toast, type ToastKind } from "./ui";
+import { AgentIcon, Chip, Confirm, Empty, LegacyToast as Toast, type ToastKind } from "./ui";
 import type {
   AutoLink,
   Cell,

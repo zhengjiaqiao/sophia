@@ -1,12 +1,24 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
-import { Button } from "./Button.tsx";
-import { IconClose } from "./icons.tsx";
+import { AgentIcon } from "./AgentMark.tsx";
+import { Button, IconButton } from "./Button.tsx";
+import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 
-/// 提示条（组件规范 §4.1）：右下角浮层，说「刚做完了什么」。
-/// 不排队——一次操作只汇总成一句，新的替换旧的，由上层保证。
+/// 提示条（DESIGN「提示条分两档」「提示条的位置」，画板 Feedback「提示条」）。
+///
+/// 两档，严重程度决定打断程度（①）：
+/// - `notice` 需要注意：**黑显示窗**。0 圆角无外框，左侧 40px 指示窗（右边 1px `ink-mute`）
+///   放 16px 白线稿 ✓ / ⊘ / !。给做不成、部分失败、自动开启、可撤销的删除、错误
+/// - `routine` 例行成功：一行墨字直接落在白底上，无框无底：`✓ 写进 [图标] 名字 · 撤销`。
+///   结果已由格子闪烁表达，这行只提供撤销入口
+///
+/// 主行 = **动词（600）+ agent 图标 + 名字（400）**。**动词必填**，且与触发它的动作一致；
+/// 失败态动词带否定（`没开启`）——失败里写「开启」会被一眼读成已开启。名字至多两个，
+/// 超过写 `+N`（等宽 15/500）。
+///
+/// **位置由调用方定**：锚在触发控件上（批量贴被按下的键下 4、右对齐该键；二级页贴被
+/// 处理那一行；无关位置的全局事右下、右沿对齐面板右沿）。组件只负责形制，不写 position。
 
-/// 三类语气，四种形态：成功（带副行统计）、成功·多项（不带）、做不成、部分失败。
 export type ToastKind = "success" | "cannot" | "partial";
 
 /// 停留时长：成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿
@@ -16,60 +28,231 @@ export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   partial: 8000,
 };
 
+export interface ToastAgent {
+  id: string;
+  name: string;
+}
+
 export interface ToastAction {
   label: string;
   onClick: () => void;
-  /// 可选的 16px 图标（`撤销` 配 `IconUndo`）。**文字不省**：
-  /// 「撤销」「查看」是两件完全不同的事，只留图标认不出来
-  icon?: ReactNode;
 }
 
 export interface ToastProps {
+  /// 默认 notice（黑显示窗）
+  tier?: "notice" | "routine";
+  /// routine 只有 success
   kind: ToastKind;
-  /// 一句话总结。做不成时说原因，不说失败（§4.5）
-  message: ReactNode;
-  /// 副行等宽统计，如「新建了 1 个目录 · 1 条链接」
+  /// **必填**：`写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`
+  verb: string;
+  /// agent 图标组（白 / 墨，随档）。图标自带读屏名
+  agents?: ToastAgent[];
+  /// 动词与名字之间的其他记号（删原件那个白色小方块）
+  icons?: ReactNode;
+  /// 名字：至多两个逐个写（顿号分隔），超过两个写 `+N`
+  names?: string[];
+  /// 名字之外的读数：`3 个`、部分失败的 `2 ✓ · 1 ⊘`（用 `tally`）
+  reading?: ReactNode;
+  /// 部分失败的读数：成功几个、没成几个
+  tally?: { done: number; failed: number };
+  /// 做不成 / 部分失败的一句能行动的原因，接在主行 ` · ` 后
+  reason?: string;
+  /// 副行：等宽 12 `ink-faint` 读数（路径、条数）
   stats?: string;
-  /// 「撤销」只在该操作可逆时给；部分失败给「查看」跳待处理栏
+  /// 副行之下的展开内容（删原件的后果示意图与铭牌）；只给 notice
+  detail?: ReactNode;
+  /// notice：白描边紧凑键；routine：文字链。`撤销` `查看`
   action?: ToastAction;
   /// 给了就到点自动消失
   onDismiss?: () => void;
-  /// 手动关闭。busy 期间它照常可用（§6）
+  /// notice 右端的 ×。busy 期间照常可用
   onClose?: () => void;
 }
 
-export function Toast({ kind, message, stats, action, onDismiss, onClose }: ToastProps) {
+const INDICATOR: Record<ToastKind, { title: string; glyph: ReactNode }> = {
+  success: { title: "成功", glyph: <IconCheck /> },
+  cannot: { title: "做不成", glyph: <IconCannot /> },
+  partial: { title: "部分失败", glyph: <IconAttention /> },
+};
+
+function Names({ names }: { names: string[] }) {
+  if (names.length <= 2) return <span className="ss-toast__names">{names.join("、")}</span>;
+  return (
+    <span className="ss-toast__more" title={names.join("、")} aria-label={names.join("、")}>
+      +{names.length}
+    </span>
+  );
+}
+
+function Tally({ done, failed }: { done: number; failed: number }) {
+  return (
+    <span className="ss-toast__tally" aria-label={`${done} 个成功，${failed} 个没成`}>
+      <span className="ss-toast__num">{done}</span>
+      <IconCheck size={12} />
+      <span className="ss-toast__sep">·</span>
+      <span className="ss-toast__num">{failed}</span>
+      <IconCannot size={12} />
+    </span>
+  );
+}
+
+export function Toast(props: ToastProps) {
+  const {
+    tier = "notice",
+    kind,
+    verb,
+    agents,
+    icons,
+    names,
+    reading,
+    tally,
+    reason,
+    stats,
+    detail,
+    action,
+    onDismiss,
+    onClose,
+  } = props;
+
   useEffect(() => {
     if (!onDismiss) return;
     const timer = setTimeout(onDismiss, TOAST_DWELL_MS[kind]);
     return () => clearTimeout(timer);
   }, [kind, onDismiss]);
 
-  const hasFoot = Boolean(action || stats || onClose);
+  const main = (
+    <>
+      <span className="ss-toast__verb">{verb}</span>
+      {agents && agents.length ? (
+        <span className="ss-toast__agents">
+          {agents.map((a) => (
+            <AgentIcon key={a.id} id={a.id} name={a.name} labelled />
+          ))}
+        </span>
+      ) : null}
+      {icons}
+      {names && names.length ? <Names names={names} /> : null}
+      {reading ? <span className="ss-toast__reading">{reading}</span> : null}
+      {tally ? <Tally {...tally} /> : null}
+      {reason ? (
+        <>
+          <span className="ss-toast__sep">·</span>
+          <span className="ss-toast__reason">{reason}</span>
+        </>
+      ) : null}
+    </>
+  );
 
-  return (
-    <div className="ss-toast" data-kind={kind} role="status">
-      <div className="ss-toast__message">{message}</div>
-      {hasFoot ? (
-        <div className="ss-toast__foot">
-          {action ? (
-            <Button variant="link" icon={action.icon} onClick={action.onClick}>
+  if (tier === "routine") {
+    return (
+      <div className="ss-toast ss-toast--routine" data-kind={kind} role="status">
+        <span className="ss-toast__mark" title="成功" aria-hidden="true">
+          <IconCheck />
+        </span>
+        {main}
+        {action ? (
+          <>
+            <span className="ss-toast__sep">·</span>
+            <Button variant="link" onClick={action.onClick}>
               {action.label}
             </Button>
-          ) : null}
-          {stats ? <span className="ss-toast__stats">{stats}</span> : null}
-          {onClose ? (
-            // 同错误横幅：关掉这条浮层不是一个动作，用 ×，文案挪到 aria-label 与 title
-            <Button
-              variant="link"
-              icon={<IconClose />}
-              ariaLabel="关闭"
-              title="关闭"
-              onClick={onClose}
-            />
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
+  const indicator = INDICATOR[kind];
+  return (
+    <div
+      className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}`}
+      data-kind={kind}
+      role={kind === "success" ? "status" : "alert"}
+    >
+      <div
+        className="ss-toast__indicator"
+        title={indicator.title}
+        role="img"
+        aria-label={indicator.title}
+      >
+        {indicator.glyph}
+      </div>
+      <div className="ss-toast__body">
+        <div className="ss-toast__main">
+          {main}
+          {action || onClose ? (
+            <span className="ss-toast__actions">
+              {action ? (
+                <Button size="compact" onDark onClick={action.onClick}>
+                  {action.label}
+                </Button>
+              ) : null}
+              {onClose ? (
+                <IconButton icon={<IconClose />} title="关闭" onDark onClick={onClose} />
+              ) : null}
+            </span>
           ) : null}
         </div>
-      ) : null}
+        {stats ? <div className="ss-toast__stats">{stats}</div> : null}
+        {detail ? <div className="ss-toast__detail">{detail}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+export interface LegacyToastProps {
+  kind: ToastKind;
+  message: ReactNode;
+  stats?: string;
+  action?: ToastAction & { icon?: ReactNode };
+  onDismiss?: () => void;
+  onClose?: () => void;
+}
+
+/// @deprecated 旧的「一句话」提示条：没有动词、没有档。只为 T1–T3 改完之前页面还能编译，
+/// 外观已换成黑显示窗。新代码用 `Toast`（`verb` 必填）
+export function LegacyToast({
+  kind,
+  message,
+  stats,
+  action,
+  onDismiss,
+  onClose,
+}: LegacyToastProps) {
+  useEffect(() => {
+    if (!onDismiss) return;
+    const timer = setTimeout(onDismiss, TOAST_DWELL_MS[kind]);
+    return () => clearTimeout(timer);
+  }, [kind, onDismiss]);
+  const indicator = INDICATOR[kind];
+  return (
+    <div className="ss-toast ss-toast--notice ss-toast--legacy" data-kind={kind} role="status">
+      <div
+        className="ss-toast__indicator"
+        title={indicator.title}
+        role="img"
+        aria-label={indicator.title}
+      >
+        {indicator.glyph}
+      </div>
+      <div className="ss-toast__body">
+        <div className="ss-toast__main">
+          <span className="ss-toast__message">{message}</span>
+          {action || onClose ? (
+            <span className="ss-toast__actions">
+              {action ? (
+                <Button size="compact" onDark onClick={action.onClick}>
+                  {action.label}
+                </Button>
+              ) : null}
+              {onClose ? (
+                <IconButton icon={<IconClose />} title="关闭" onDark onClick={onClose} />
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+        {stats ? <div className="ss-toast__stats">{stats}</div> : null}
+      </div>
     </div>
   );
 }

@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
+import { Rotor } from "./Rotor.tsx";
 
-/// 空态与忙碌态（组件规范 §6）。
+/// 空态与忙碌态（DESIGN「空态与忙碌态」「转盘」）。
 ///
-/// **空态里若有两个动作，只有一个是 pill**，另一个降为文字链——按钮只有一种变体，
-/// 两个 pill 并排就分不出主次。
+/// **空态里若有两个动作，只有一个是按钮**，另一个降为文字链。
+/// 首次扫描：64px 转盘居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
 
 export type EmptyKind =
-  /// 首次扫描中：居中一行次要文字，不用 spinner
+  /// 首次扫描中：64px 转盘 + 一句忙什么
   | "scanning"
   /// 这个域没有 agent 目录：agent 列照常显示，灯全为空心
   | "noAgentDirs"
@@ -17,8 +18,8 @@ export type EmptyKind =
   | "noSkills";
 
 const DEFAULT_DESCRIPTION: Record<EmptyKind, string> = {
-  scanning: "扫描中…",
-  noAgentDirs: "这个项目下还没有任何 agent 的 skill 目录。导入时会顺手建出来。",
+  scanning: "正在读 skill 目录…",
+  noAgentDirs: "这个项目下还没有任何 agent 的 skill 目录。添加时会顺手建出来。",
   noMatch: "没有匹配的 skill",
   noSkills: "这个来源里还没有 skill。",
 };
@@ -26,7 +27,7 @@ const DEFAULT_DESCRIPTION: Record<EmptyKind, string> = {
 export interface EmptyAction {
   label: string;
   onClick: () => void;
-  /// 可选的 16px 图标（`导入 skill` 这类动作可以带一个）。空态里文字是主角，图标只作陪
+  /// 可选的图标。空态里文字是主角，图标只作陪
   icon?: ReactNode;
 }
 
@@ -36,7 +37,7 @@ export interface EmptyProps {
   description?: ReactNode;
   /// 第二行次要说明
   hint?: ReactNode;
-  /// pill 动作，一个就够
+  /// 按钮动作，一个就够
   primary?: EmptyAction;
   /// 文字链动作
   secondary?: EmptyAction;
@@ -45,6 +46,7 @@ export interface EmptyProps {
 export function Empty({ kind, description, hint, primary, secondary }: EmptyProps) {
   return (
     <div className={`ss-empty ss-empty--${kind}`} data-kind={kind}>
+      {kind === "scanning" ? <Rotor size={64} spinning label="正在扫描" /> : null}
       <div className="ss-empty__description">{description ?? DEFAULT_DESCRIPTION[kind]}</div>
       {hint ? <div className="ss-empty__hint">{hint}</div> : null}
       {primary || secondary ? (

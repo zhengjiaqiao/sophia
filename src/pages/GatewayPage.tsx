@@ -7,7 +7,7 @@ import {
 } from "../modelsView.ts";
 import type { ModelsTool } from "../modelsView.ts";
 import type { GatewayProvider, GatewayState } from "../types.ts";
-import { Busy, Button, Empty, ErrorBanner, StateDot, SubPage, TagSquare } from "../ui/index.ts";
+import { Busy, Button, Empty, ErrorBanner, StateDot, SubPage, Tag } from "../ui/index.ts";
 import "./GatewayPage.css";
 
 /// 网关配置页（spec R5、组件规范 §4.6）：占满整窗的二级页面，不渲染侧栏。
@@ -143,8 +143,8 @@ export function GatewayPage({
                   title={row.hasKey ? "密钥已经存在钥匙串里" : "还没有密钥，填上才能拉模型"}
                 />
                 <span className="gateway-row__name">{providerLabel(row)}</span>
-                {/* 缺密钥给一个零圆角方标签——方标签不可点，圆角只留给可点的东西（§1.3） */}
-                {row.hasKey ? null : <TagSquare>还没有密钥</TagSquare>}
+                {/* 缺密钥给一个无框强标签：不可点的标识没有框（DESIGN「Shapes」） */}
+                {row.hasKey ? null : <Tag>还没有密钥</Tag>}
                 <span className="gateway-row__url" title={row.baseUrl}>
                   {row.baseUrl || "还没填地址"}
                 </span>

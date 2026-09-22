@@ -30,9 +30,9 @@ import {
   Confirm,
   Empty,
   StateDot,
-  Toast,
+  LegacyToast as Toast,
   type ToastKind,
-  TagSquare,
+  Tag,
 } from "./ui";
 import type {
   McpAutoImportRule,
@@ -977,9 +977,9 @@ function McpDomainView({
                 </label>
                 {/* 差异是行级事实，不进格（R2）：两处各有一份、连的地址不一样 */}
                 {differing.length > 0 && (
-                  <TagSquare title={differentCopiesTitle(differing.map(labelOf))}>
+                  <Tag tip={differentCopiesTitle(differing.map(labelOf))}>
                     {differentCopiesTag(differing.length)}
-                  </TagSquare>
+                  </Tag>
                 )}
               </td>
               <td className="mcp-transport">{transports.join(" / ")}</td>
