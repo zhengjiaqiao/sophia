@@ -56,19 +56,19 @@ test("missing：空心，可点，不自带成功文案", () => {
   assert.equal(view.reason, undefined);
 });
 
-test("invalid：整份文件读不出来，不写，进待处理栏", () => {
+test("invalid：整份文件读不出来，画斜杠环，不写，进待处理栏", () => {
   assert.deepEqual(viewOf("invalid", ctx), {
-    dot: "missing",
+    dot: "readOnly",
     clickable: false,
     reason: "Codex 的配置这次读不出来，什么都没往里写",
     issue: "invalidLocation",
   });
 });
 
-test("unsupported：搬过去就不是原来那个了，不写，也不进待处理栏", () => {
+test("unsupported：搬过去就不是原来那个了，画无此格短横，不写，也不进待处理栏", () => {
   const view = viewOf("unsupported", ctx);
   assert.deepEqual(view, {
-    dot: "missing",
+    dot: "none",
     clickable: false,
     reason: "notion 用了只有 Claude Code 认得的写法，搬到别处就不是原来那个了",
   });

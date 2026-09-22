@@ -69,17 +69,18 @@ export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
       // 可点的唯一一种，所以没有 reason：写进去之后要说的那句由调用方汇总
       return { dot: "missing", clickable: true };
     case "invalid":
-      // 整份文件读不出来，这一列都写不进去；列头灯同时加一道斜杠
+      // 整份文件读不出来，这一列都写不进去：画斜杠环（与 skill 的「写不进」同形）
       return {
-        dot: "missing",
+        dot: "readOnly",
         clickable: false,
         reason: `${ctx.location} 的配置这次读不出来，什么都没往里写`,
         issue: "invalidLocation",
       };
     case "unsupported":
-      // 搬过去就不是原来那个了，所以整行都不给点——给点的机会等于给犯错的机会
+      // 搬过去就不是原来那个了，所以整行都不给点——给点的机会等于给犯错的机会。
+      // 画成无此格的短横（画板 Mcp.dc.html「Codex 不支持这个服务」）：这里根本放不进这一格
       return {
-        dot: "missing",
+        dot: "none",
         clickable: false,
         reason: `${ctx.service} 用了只有 ${ctx.source} 认得的写法，搬到别处就不是原来那个了`,
       };
