@@ -103,7 +103,8 @@
      prefers-reduced-motion 下全部退化为即时状态变化（ui.css 末尾） ---- */
   --motion-fast: 120ms; /* 一切状态变化：开关位移、刚点亮反色、悬停 */
   --ease-mech: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --motion-spinner: 0.9s; /* 细弧匀速一圈 */
+  --motion-spinner: 1.2s; /* 地球绕太阳匀速一圈 */
+  --motion-dots: 500ms; /* 减少动效时文字后的 `…` 每步增减一点 */
 
   /* busy 时受影响控件的不透明度（§6） */
   --busy-dim: 0.45;

@@ -458,7 +458,7 @@ export const RESTART_STILL_STALE = "Codex 还在用旧配置，稍后再试一�
 /**
  * 「重启生效」那一格（DESIGN「点了重启生效之后」）：
  * - idle：`needsCodexRestart` 为真时显示键，否则什么都没有
- * - restarting：键位原地换成 14px 细弧（Spinner）+ 「正在重启 Codex」——用户正在等，就地带文字
+ * - restarting：键位原地换成 14px 忙碌指示（Spinner）+ 「正在重启 Codex」——用户正在等，就地带文字
  * - done：一行例行成功 `✓ 已生效`，约 4 秒后淡出
  *
  * 失败不是这一格的状态：黑块「没重启 Codex」+ 原因 + `再试一次` 挂在整行下面，格子回到 idle

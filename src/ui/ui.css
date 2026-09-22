@@ -717,14 +717,31 @@
   color: var(--ink-faint);
 }
 
-/* ===== 6. 旋转关键帧：细弧 Spinner 用 ===== */
+/* ===== 6. 旋转关键帧：忙碌指示 Spinner 用 ===== */
 @keyframes ss-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-/* ===== 6b. 细弧 Spinner：1 圈 / 0.9s 线性（Spinner.tsx）；只在用户等的地方、带文字 ===== */
+/* 减少动效时文字后的三点：按三等分裁掉右侧，露 1 → 2 → 3 → 2 点 */
+@keyframes ss-dots {
+  0% {
+    clip-path: inset(0 66.67% 0 0);
+  }
+  25% {
+    clip-path: inset(0 33.33% 0 0);
+  }
+  50% {
+    clip-path: inset(0 0 0 0);
+  }
+  75% {
+    clip-path: inset(0 33.33% 0 0);
+  }
+}
+
+/* ===== 6b. 忙碌指示「地球绕太阳」：1 圈 / 1.2s 线性（Spinner.tsx）；只在用户等的地方、带文字。
+   整颗 svg 绕中心转：太阳居中、转了也不变，看上去只有地球在走；不画轨道线 ===== */
 .ss-spinner {
   display: block;
   flex-shrink: 0;
@@ -1288,7 +1305,7 @@
   margin-top: var(--space-md);
 }
 
-/* 有图时首次扫描：细弧跟在那句话前面 */
+/* 有图时首次扫描：忙碌指示跟在那句话前面 */
 .ss-empty__busy {
   display: flex;
   align-items: center;
@@ -1336,7 +1353,7 @@
 }
 
 /* ===== 14. 减少动效：状态变化即时发生，信息不减 =====
-   细弧不转（静止的弧 + 文字照常） */
+   忙碌指示不转（地球停在 12 点钟），改由文字后的 `…` 每 500ms 增减一点表示还在忙 */
 @media (prefers-reduced-motion: reduce) {
   .ss-btn,
   .ss-iconbtn,
@@ -1361,6 +1378,26 @@
 
   .ss-spinner {
     animation: none;
+  }
+
+  /* 文字后跟三点，一次只露 1 / 2 / 3 / 2 点（每 500ms 一步）。框宽固定，文字不跟着抖。
+     调用方的文字有两种写法：紧跟的元素（<span>正在重启 Codex</span>）挂在那个元素后面；
+     裸文本（<Spinner/>正在比对）时 Spinner 是父元素里最后一个元素，挂在父元素末尾 */
+  .ss-spinner + *::after,
+  :has(> .ss-spinner:last-child)::after {
+    content: "...";
+    display: inline-block;
+    animation: ss-dots calc(var(--motion-dots) * 4) step-end infinite;
+  }
+
+  /* 裸文本那种父元素多是 flex + gap：三点成了单独一项，会和文字隔开一个 gap。
+     去掉父元素的 gap，间距改由 Spinner 自己的右外边距给 */
+  :has(> .ss-spinner:last-child) {
+    gap: 0;
+  }
+
+  :has(> .ss-spinner:last-child) > .ss-spinner {
+    margin-inline-end: var(--space-xs);
   }
 
   /* 反色闪退化为无：变化本身（点亮 / 熄灭）已即时可见 */

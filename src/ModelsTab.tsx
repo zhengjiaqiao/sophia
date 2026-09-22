@@ -141,7 +141,7 @@ export interface AgentRowProps {
   onCloseNotice?: () => void;
   /// 生效模型那一格
   models: ReactNode;
-  /// 停用后服务仍在时的 `卸下后台服务`（按钮即状态）；正在卸下时原位细弧 + 文字
+  /// 停用后服务仍在时的 `卸下后台服务`（按钮即状态）；正在卸下时原位忙碌指示 + 文字
   uninstalling?: boolean;
   onUninstall?: () => void;
 }
@@ -246,7 +246,7 @@ export function AgentRow({
   );
 }
 
-/// 「重启生效」那一格：键 / 细弧 + 正在重启 / ✓ 已生效（例行成功，约 4 秒淡出）。
+/// 「重启生效」那一格：键 / 忙碌指示 + 正在重启 / ✓ 已生效（例行成功，约 4 秒淡出）。
 /// 失败的黑块不在这里——它挂在整行下面（`notice`），键照常留着可以再点
 function RestartSlot({
   tool,
@@ -634,7 +634,7 @@ export default function ModelsTab({
     }
   };
 
-  /// 重启 Codex：确认之后键位原地换成细弧 + 「正在重启 Codex」；结束了进程再重读一次，键消失才算生效。
+  /// 重启 Codex：确认之后键位原地换成忙碌指示 + 「正在重启 Codex」；结束了进程再重读一次，键消失才算生效。
   /// 键还在（Codex 还揣着旧配置）就如实说没成，不假装成功（⑫）
   const restart = async (tool: ModelsTool) => {
     setConfirmRestart(null);

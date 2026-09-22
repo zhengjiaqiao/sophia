@@ -108,7 +108,8 @@ test("tokens：七个中性灰、2px 控件圆角、28/24/32 控件高、行高 
   assert.match(tokensCss, /--row-h:\s*34px;/);
   assert.match(tokensCss, /--motion-fast:\s*120ms;/);
   assert.match(tokensCss, /--ease-mech:\s*cubic-bezier\(0\.2, 0\.8, 0\.2, 1\);/);
-  assert.match(tokensCss, /--motion-spinner:\s*0\.9s;/);
+  assert.match(tokensCss, /--motion-spinner:\s*1\.2s;/);
+  assert.match(tokensCss, /--motion-dots:\s*500ms;/);
   // 自创转盘已删，它的时长 token 不该回来
   assert.doesNotMatch(tokensCss, /--motion-rotor/);
 });
@@ -127,8 +128,16 @@ test("动效：状态变化走 120ms 机械缓动，不退化成默认 transitio
     }
   }
   assert.match(uiCss, /@media \(prefers-reduced-motion: reduce\)/);
-  // 细弧：0.9s 线性匀速（关键帧 ss-spin）；自创转盘的样式已删
+  // 地球绕太阳：1.2s 线性匀速（关键帧 ss-spin，整颗 svg 绕中心转）；自创转盘的样式已删
   assert.match(cssRule(uiCss, ".ss-spinner"), /ss-spin var\(--motion-spinner\) linear infinite/);
+  // 减少动效：不转（地球停在 12 点钟），文字后的三点每 500ms 增减一点
+  const reduced = uiCss.slice(uiCss.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.match(reduced, /\.ss-spinner \{\s*animation: none;/);
+  assert.match(
+    reduced,
+    /\.ss-spinner \+ \*::after,\s*:has\(> \.ss-spinner:last-child\)::after \{[^}]*content: "\.\.\.";[^}]*ss-dots calc\(var\(--motion-dots\) \* 4\) step-end infinite/,
+  );
+  assert.match(uiCss, /@keyframes ss-dots/);
   assert.doesNotMatch(uiCss, /\.ss-rotor/);
 });
 
@@ -474,13 +483,21 @@ test("Tooltip 时机：表格内 700ms、表格外 400ms", () => {
   assert.equal(TIP_DELAY_MS.default, 400);
 });
 
-test("Spinner：270° 细弧、1.5 线宽、必带读屏文本；14 / 24 两档", () => {
+test("Spinner：地球绕太阳，太阳大地球小、不画轨道、必带读屏文本；14 / 24 两档", () => {
   const small = render(Spinner, { label: "正在重启 Codex" });
   assert.match(small, /class="ss-spinner"/);
   assert.match(small, /width="14"/);
-  assert.match(small, /stroke-width="1.5"/);
   assert.match(small, /aria-label="正在重启 Codex"/);
-  assert.match(render(Spinner, { size: 24, label: "正在读 3 个位置" }), /width="24"/);
+  // 14：太阳直径 5.5 居中，地球直径 2.5 在 12 点钟贴上沿
+  assert.match(small, /class="ss-spinner__sun" cx="7" cy="7" r="2.75" fill="currentColor"/);
+  assert.match(small, /class="ss-spinner__earth" cx="7" cy="1.25" r="1.25" fill="currentColor"/);
+  // 不画轨道线：没有描边（环 + 中心点会撞原件记号 ⦿）
+  assert.doesNotMatch(small, /stroke/);
+  const large = render(Spinner, { size: 24, label: "正在读 3 个位置" });
+  assert.match(large, /width="24"/);
+  assert.match(large, /class="ss-spinner__sun" cx="12" cy="12" r="4.5"/);
+  assert.match(large, /class="ss-spinner__earth" cx="12" cy="2" r="2"/);
+  assert.doesNotMatch(large, /stroke/);
 });
 
 // ===== 提示条 =====
@@ -804,7 +821,7 @@ test("AgentKey：高 32，图标 14 + 大写名同一行；未选 / 点亮反色
 
 // ===== 空态与忙碌态 =====
 
-test("Empty 首次扫描：24px 细弧 + 一句忙什么（自创转盘已删）", () => {
+test("Empty 首次扫描：24px 忙碌指示 + 一句忙什么（自创转盘已删）", () => {
   const html = render(Empty, { kind: "scanning" });
   assert.match(html, /class="ss-empty ss-empty--scanning"/);
   assert.match(html, /class="ss-spinner" width="24" height="24"/);

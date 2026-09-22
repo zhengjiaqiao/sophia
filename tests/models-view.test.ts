@@ -472,7 +472,7 @@ test("AgentRow 重启中：键位原地换成 14px 细弧 +「正在重启 Codex
     ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
     phase: { kind: "restarting" },
   });
-  // 重启中用细弧 Spinner（UI v4 第四轮删掉了自创转盘，原来钉 ss-rotor 的断言随之改写）
+  // 重启中用忙碌指示 Spinner（UI v4 第四轮删掉了自创转盘，原来钉 ss-rotor 的断言随之改写）
   assert.match(busyHtml, /class="ss-spinner" width="14"/);
   assert.match(busyHtml, /正在重启 Codex/);
   assert.doesNotMatch(busyHtml, /重启生效<\/button>/);
