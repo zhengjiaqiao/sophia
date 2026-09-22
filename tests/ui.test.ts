@@ -858,14 +858,12 @@ test("刚变化的格子闪一下：120ms 反色再回落，减少动效时退�
   );
 });
 
-// ===== 待处理栏贴底（DESIGN「Layout」）=====
+// ===== 内容区的滚动容器（DESIGN「Layout」）=====
 //
-// 这条不是渲染断言而是样式断言：栏贴不贴底全由 App.css 三条规则决定，组件层看不见。
-// 在 WebKit（Tauri 在 macOS 用的就是它）里量过两件事，是这三条规则的由来：
-// ① sticky 的落点按滚动容器的**内容盒**算——.content 的 padding-bottom 是多少，
-//    栏就离窗口底边多少（量到 12px 缝，滚过去的内容正好从缝里漏出来）；
-// ② 页面不滚动时 sticky 不产生任何位移，栏会停在内容末尾，得靠弹性列的 auto 上边距顶到底。
-// 之前修过一次没修对，改的是滚动高度（min-height + 负下边距），落点一点没动，所以钉在这里。
+// 样式断言：吸顶的选择操作条落点全由 App.css 的 .content 决定，组件层看不见。
+// 在 WebKit 里量过：sticky 的落点按滚动容器的**内容盒**算，.content 上下内边距是多少，
+// 吸顶的条就离边多少，滚过去的内容从缝里漏出来。
+// （UI v4 删掉了贴底待处理窗，原来钉 .skills-tab / .pending-bar 贴底的两条断言随之退役）
 
 const appCss = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
 
@@ -878,32 +876,17 @@ function ruleOf(selector: string): string {
   return match[1];
 }
 
-test("待处理栏贴底：滚动容器不留下内边距，否则 sticky 的落点被顶高，内容从缝里漏出来", () => {
+test("内容区：滚动容器上下不留内边距，否则吸顶条的落点被顶开，内容从缝里漏出来", () => {
   const content = ruleOf(".content");
   assert.match(content, /overflow:\s*auto/);
   const padding = content.match(/\bpadding:\s*([^;]+);/);
   assert.ok(padding, ".content 要显式写 padding");
   const sides = padding[1].trim().split(/\s+(?![^(]*\))/);
-  assert.equal(sides.length, 3, ".content 的 padding 写成「上 左右 下」三段，好看出下边是 0");
+  assert.equal(sides.length, 3, ".content 的 padding 写成「上 左右 下」三段，好看出上下是 0");
+  assert.equal(sides[0], "0", ".content 的上内边距必须是 0");
   assert.equal(sides[2], "0", ".content 的下内边距必须是 0");
-  // 顶部同理：吸顶的选择操作条落点也按内容盒算，上内边距多少就露多少缝
-  assert.equal(sides[0], "0", ".content 的上内边距必须是 0，留白交给 .skills-tab 自己给");
-  // 旧的抵消手法不能再回来：它改的是滚动高度，改不动 sticky 的落点
-  const tab = ruleOf(".skills-tab");
-  assert.doesNotMatch(tab, /margin-bottom/);
-});
-
-test("待处理栏贴底：整页铺满 + 弹性列 auto 上边距，页面不滚动时也贴得住底边", () => {
-  const tab = ruleOf(".skills-tab");
-  assert.match(tab, /display:\s*flex/);
-  assert.match(tab, /flex-direction:\s*column/);
-  assert.match(tab, /min-height:\s*100%/);
-
-  const bar = ruleOf(".pending-bar");
-  assert.match(bar, /position:\s*sticky/);
-  assert.match(bar, /bottom:\s*0/);
-  // 上边距 auto 把栏顶到弹性列底部；左右仍是负页边，铺满内容区
-  assert.match(bar, /margin:\s*auto\s+calc\(-1 \* var\(--space-xxl\)\)\s+0/);
+  // 贴底待处理窗已取消，它的样式不该回来
+  assert.doesNotMatch(appCss, /\.pending-bar\b/);
 });
 
 test("Plain：旧大写档里嵌专名的出口，关掉整段的 text-transform（v4 起只剩兼容用途）", async () => {

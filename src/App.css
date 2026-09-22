@@ -1,8 +1,7 @@
-/* 外壳（顶栏 · 侧栏 · 内容区）与 skill 矩阵的版式。
-   组件本身在 src/ui/，这里只管整窗怎么摆，以及还没组件化的旧结构（弹层、结果框、模型页）。
+/* 外壳（顶栏 · 侧栏 · 内容区）的版式。组件在 src/ui/，表格在 Matrix.css，这里只管整窗怎么摆。
 
-   色值一律 var(--…)，唯一来源是 tokens.css（§1.1）；零色彩、零阴影、零渐变（§1.3）；
-   圆角只有输入框 4px、pill 32px、圆点 50%，其余一律 0。scripts/lint-ui.mjs 逐条拦。 */
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变；
+   圆角只有 0 / 2px / 32px / 50%。scripts/lint-ui.mjs 逐条拦。 */
 @import "./tokens.css";
 
 /* ===== 基础 ===== */
@@ -15,30 +14,12 @@ input[type="checkbox"] {
   accent-color: var(--ink);
 }
 
-/* 还没换成 <Button> 的旧按钮（MCP 页、模型页、弹层的关闭）：ghost pill 的紧凑版。
-   这里**不写**字重、字距与大写——那会串到 .ss-chip 这类同样是 <button> 的组件上，
-   而选择片按 §3.0 是 Barlow 15 且不大写。真正的按钮档在 .ss-btn 自己身上。 */
+/* 裸 <button>（表格列头、添加页的行、格子）的字承接所在的那一行，不落到系统按钮字体；
+   外形一律由各自的类给，这里不画描边与圆角 */
 button {
-  padding: 5px 16px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius-pill);
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-  cursor: pointer;
-}
-
-/* 这里**不写**悬停：`button` 这个选择器同时罩着侧栏页签、侧栏底部两条动作、表头排序
-   这些无描边的按钮，给它们铺一块 surface 底会糊出一个贴着字的方块。
-   悬停态写在 .ss-btn / .ss-chip 上（src/ui/ui.css），还没换成 <Button> 的那几处
-   跟着换过去就有了。 */
-
-/* 禁用不靠半透明，靠描边与字色降档（§3）：opacity 只留给 busy（§6） */
-button:disabled {
-  border-color: var(--disabled);
-  color: var(--ink-faint);
-  cursor: default;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
 }
 
 /* 键盘焦点：系统默认的聚焦环是强调色（macOS 上是蓝的），
@@ -54,16 +35,6 @@ button:disabled {
 input:focus-visible {
   outline: none;
   border-color: var(--ink);
-}
-
-/* 文字链：取消、关闭这类次级动作 */
-button.link {
-  padding: 0 4px;
-  border: 0;
-  border-radius: 0;
-  color: var(--ink-mute);
-  font-size: var(--size-caption);
-  text-decoration: underline;
 }
 
 /* ===== 外壳（DESIGN「壳」，画板 Main 顶栏与侧栏） =====
@@ -278,11 +249,9 @@ button.link {
   }
 }
 
-/* 页边 32＝SpaceX 的 grid gutter（DESIGN「Layout」）。
-   **上下内边距都必须是 0**：sticky 的落点是按滚动容器的**内容盒**算的，滚动容器有多少
-   内边距，贴边的栏就被顶开多少——量过，padding-bottom 12px 时待处理栏离窗口底边正好
-   12px；padding-top 16px 时吸顶的选择操作条离顶正好 16px，滚过去的内容从这道缝里漏
-   出来。上下留白归页面自己给，不由滚动容器给。 */
+/* 页边 32（DESIGN「Layout」）。**上下内边距必须是 0**：sticky 的落点按滚动容器的内容盒算，
+   padding-top 16px 时吸顶的选择操作条离顶正好 16px，滚过去的内容从这道缝里漏出来。
+   上下留白归页面自己给，不由滚动容器给。 */
 .content {
   flex: 1;
   min-width: 0;
@@ -294,322 +263,4 @@ button.link {
 /* 模型页自己出页边（48/32），内容区再叠一层左右就成了 64 */
 .content--bleed {
   padding: 0;
-}
-
-/* Skill 页整页（MCP 页的 section 也挂这个类）：待处理栏要和窗口底边严丝合缝
-   （DESIGN「Layout」），靠两件事，缺一不可——
-   ① min-height: 100% 把内容区铺满，栏才有地方落到底边；
-   ② 弹性列 + 栏上的 margin-top: auto，内容不够长、容器压根不滚动时也把栏推到底：
-      量过，不滚动的页面不会给 sticky 任何位移，只靠 position: sticky 栏会停在内容末尾。
-   旧写法（min-height: 100% + 12px 配负下边距）是冲着 .content 的下内边距去的，
-   可它只改得动滚动高度、改不动 sticky 的落点，所以那道缝一直在。 */
-.skills-tab {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  /* 上留白由页面自己给（.content 的内边距必须为 0，见上） */
-  padding-top: var(--space-md);
-}
-
-/* 待处理栏：主视图底部常驻一条，一次一条（§4.3）。
-   左右负边距铺满内容区，上边一条实线——和选择操作条同一套手法，不用阴影垫（§1.3）。
-   上边距 auto：在 .skills-tab 这根弹性列里把栏顶到底边，页面不滚动时也贴得住；
-   页面滚起来时 auto 归零，与上面内容的间距由内容自己的下边距给（域块 48）。 */
-.pending-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-  margin: auto calc(-1 * var(--space-xxl)) 0;
-  padding: 9px var(--space-xxl);
-  border-top: 1px solid var(--ink);
-  background: var(--canvas);
-}
-
-/* ===== 工具栏与筛选 ===== */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-sm);
-}
-
-/* 筛选行是「组」的末尾，与下面的表格之间留 24（DESIGN「Layout」） */
-.toolbar.filters {
-  margin-bottom: var(--space-xl);
-}
-
-/* 选择操作条：有选中行时才出现，上下黑线＝此刻正在操作它（§3.2）；滚动时吸顶。
-   左右用负边距铺满内容区，吸顶时下面的表格不会从缝里透出来——不用阴影垫（§1.3） */
-.toolbar.selection {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  margin: 0 calc(-1 * var(--space-xxl)) var(--space-xl);
-  padding: 9px var(--space-xxl);
-  border-top: 1px solid var(--ink);
-  border-bottom: 1px solid var(--ink);
-  background: var(--canvas);
-}
-
-.filters input {
-  box-sizing: border-box;
-  width: 240px;
-  padding: 10px 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-input);
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-.filters input::placeholder {
-  color: var(--ink-faint);
-}
-
-.muted {
-  color: var(--ink-mute);
-  font-size: var(--size-caption);
-}
-
-/* 筛选片一行：片本身是 <Chip> */
-.tags {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-xl);
-}
-
-/* ===== 域与矩阵 ===== */
-.domain-group {
-  margin-bottom: var(--space-huge);
-}
-
-/* 域名是内容不是结构词，所以不大写（§1.2）。
-   14 那一档已经砍掉，Condensed 走正文档，靠字重与字距和表格里的名字分开 */
-.domain-group h2 {
-  margin: 0 0 var(--space-md);
-  font-family: var(--font-cond);
-  font-size: var(--size-body);
-  font-weight: 600;
-  letter-spacing: var(--track-head);
-}
-
-table.matrix {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-/* 行高 40（DESIGN「Layout」）：密排的表格是「文字很密集」这个观感的主要来源——
-   skill 名、位置名、圆点之间要有空气。定高交给 height，内边距只管左右 */
-table.matrix th,
-table.matrix td {
-  height: 40px;
-  padding: 0 var(--space-xs);
-  border-bottom: 1px solid var(--hairline);
-  text-align: left;
-  white-space: nowrap;
-}
-
-/* 表头底下那条黑线由 DomainView 逐格给（内联），这里只管对齐与留白。
-   列头堆叠（图标在上、名字在下），所以贴着底边排 */
-table.matrix th {
-  height: auto;
-  padding: 0 var(--space-xs) var(--space-xs);
-  vertical-align: bottom;
-}
-
-/* 表头「看起来是读的」：没有按钮态，箭头由 DomainView 控制显隐（§7） */
-th button.sort {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-}
-
-/* 本体位置：名字或路径，一行放不下就截断，完整值在 title 上 */
-table.matrix td.path {
-  width: 190px;
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--ink-mute);
-}
-
-/* 圆点列：列宽照画稿的 62px，格里只有一个点 */
-table.matrix td.cell {
-  width: 62px;
-  padding: 0 var(--space-xxs);
-  text-align: center;
-}
-
-/* MCP 页的格还在用状态类名；「缺失」降一档，其余交给主文字色（§1.1 零色彩） */
-td.cell.missing {
-  color: var(--ink-faint);
-}
-
-/* ===== 弹层（MCP 页与模型页还在用；skill 侧已经换成二级页面，§4.6） ===== */
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 罩子是白的：零色彩系统里没有半透明黑。罩画在伪元素上，弹窗本身不跟着变淡 */
-.modal-backdrop::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: var(--canvas);
-  opacity: 0.72;
-}
-
-.modal {
-  position: relative;
-  box-sizing: border-box;
-  width: 460px;
-  max-height: 80vh;
-  padding: var(--space-xl) 28px;
-  border: 1px solid var(--ink);
-  background: var(--canvas);
-  overflow: auto;
-}
-
-.modal .toolbar h2 {
-  flex: 1;
-  margin: 0;
-  font-family: var(--font-cond);
-  font-size: var(--size-body);
-  font-weight: 700;
-  letter-spacing: var(--track-head);
-}
-
-/* 可选列表：选中项与侧栏同一档浅底 */
-.pick-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.pick-list li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-sm);
-  cursor: pointer;
-}
-
-.pick-list li.active {
-  background: var(--surface);
-}
-
-.pick-list li span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ===================== 模型页（ModelsTab） ===================== */
-.models-tab {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xl);
-}
-
-.models-notices {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-/* 行内待办条的旧形态：一句话 + 动作，靠描边分层，不靠底色（§4.4） */
-.notice {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--hairline);
-}
-
-.notice.warning {
-  border-color: var(--ink);
-}
-
-.notice span {
-  flex: 1;
-}
-
-.models-section {
-  padding-top: var(--space-xl);
-  border-top: 1px solid var(--hairline);
-}
-
-.models-section h2 {
-  margin: 0 0 var(--space-md);
-  font-family: var(--font-cond);
-  font-size: var(--size-body);
-  font-weight: 600;
-  letter-spacing: var(--track-head);
-}
-
-/* 表单字段之间 24（DESIGN「Layout」组之间） */
-.models-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xxs);
-  max-width: 420px;
-  margin-bottom: var(--space-xl);
-  color: var(--ink-mute);
-  font-size: var(--size-caption);
-}
-
-.models-field input,
-.models-list li input[type="text"] {
-  box-sizing: border-box;
-  padding: 10px 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-input);
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-.models-list {
-  margin: 0 0 8px;
-  padding: 0;
-  max-height: 50vh;
-  list-style: none;
-  overflow: auto;
-}
-
-.models-list li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-xs) 0;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.models-list li span {
-  width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.models-list li input[type="text"] {
-  flex: 1;
 }
