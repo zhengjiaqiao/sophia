@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { Tooltip } from "./Tooltip.tsx";
 /// 状态点（DESIGN「表格 = 面板 › 指示灯」「视觉优先」，画板 States / Marks）。
 ///
 /// 格回答两件事：**填充＝这个 agent 能不能用它，外环＝它在这儿是原件还是一条软链。**
@@ -246,12 +248,29 @@ export interface DupMarkProps {
   count?: number;
   /// row：表格名字后，等宽 12 `ink-faint`；strong：待处理页记号列，墨色 13/600
   tone?: "row" | "strong";
+  /// 给了就挂提示框（点状下划线，不可点），并去掉原生 title——主视图放不下越界读数时，
+  /// 在这里同时列两份的读数
+  tip?: ReactNode;
 }
 
 /// 同名的记号：名字后 `×2`（惯例写法，零学习）。**不再有「[」括线**——
 /// 自创记号没有足够理由（DESIGN 已裁决的冲突「同名怎么标」）
-export function DupMark({ count = 2, tone = "row" }: DupMarkProps) {
+export function DupMark({ count = 2, tone = "row", tip }: DupMarkProps) {
   const text = `同名：有 ${count} 份`;
+  if (tip !== undefined && tip !== null) {
+    return (
+      <Tooltip content={tip}>
+        <span
+          className={`ss-dup ss-dup--${tone} has-tip`}
+          role="img"
+          aria-label={text}
+          tabIndex={0}
+        >
+          ×{count}
+        </span>
+      </Tooltip>
+    );
+  }
   return (
     <span className={`ss-dup ss-dup--${tone}`} title={text} role="img" aria-label={text}>
       ×{count}

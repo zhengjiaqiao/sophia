@@ -1,14 +1,14 @@
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
-import { Rotor } from "./Rotor.tsx";
+import { Spinner } from "./Spinner.tsx";
 
 /// 空态与忙碌态（DESIGN「空态与忙碌态」「转盘」）。
 ///
 /// **空态里若有两个动作，只有一个是按钮**，另一个降为文字链。
-/// 首次扫描：64px 转盘居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
+/// 首次扫描：24px 细弧居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
 
 export type EmptyKind =
-  /// 首次扫描中：64px 转盘 + 一句忙什么
+  /// 首次扫描中：24px 细弧 + 一句忙什么
   | "scanning"
   /// 这个域没有 agent 目录：agent 列照常显示，灯全为空心
   | "noAgentDirs"
@@ -46,7 +46,12 @@ export interface EmptyProps {
 export function Empty({ kind, description, hint, primary, secondary }: EmptyProps) {
   return (
     <div className={`ss-empty ss-empty--${kind}`} data-kind={kind}>
-      {kind === "scanning" ? <Rotor size={64} spinning label="正在扫描" /> : null}
+      {kind === "scanning" ? (
+        <Spinner
+          size={24}
+          label={typeof description === "string" ? description : DEFAULT_DESCRIPTION.scanning}
+        />
+      ) : null}
       <div className="ss-empty__description">{description ?? DEFAULT_DESCRIPTION[kind]}</div>
       {hint ? <div className="ss-empty__hint">{hint}</div> : null}
       {primary || secondary ? (

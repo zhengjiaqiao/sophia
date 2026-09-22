@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AgentIcon } from "./AgentMark.tsx";
 import { Button, IconButton } from "./Button.tsx";
 import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
+import { Tooltip } from "./Tooltip.tsx";
 
 /// 提示条（DESIGN「提示条分两档」「提示条的位置」，画板 Feedback「提示条」）。
 ///
@@ -36,6 +37,8 @@ export interface ToastAgent {
 export interface ToastAction {
   label: string;
   onClick: () => void;
+  /// 给了就禁用，原因进提示框（MCP 撤销：写入之后文件又被改过）
+  disabledReason?: string;
 }
 
 export interface ToastProps {
@@ -63,6 +66,8 @@ export interface ToastProps {
   detail?: ReactNode;
   /// notice：白描边紧凑键；routine：文字链。`撤销` `查看`
   action?: ToastAction;
+  /// 次要的离开 Sophia 的文字链（带 ↗）：`在访达中显示备份 ↗`
+  secondary?: ToastAction;
   /// 给了就到点自动消失
   onDismiss?: () => void;
   /// notice 右端的 ×。busy 期间照常可用
@@ -110,6 +115,7 @@ export function Toast(props: ToastProps) {
     stats,
     detail,
     action,
+    secondary,
     onDismiss,
     onClose,
   } = props;
@@ -153,10 +159,25 @@ export function Toast(props: ToastProps) {
         {action ? (
           <>
             <span className="ss-toast__sep">·</span>
-            <Button variant="link" onClick={action.onClick}>
-              {action.label}
-            </Button>
+            {action.disabledReason ? (
+              <Tooltip content={action.disabledReason}>
+                <span className="ss-toast__disabled" tabIndex={0}>
+                  <Button variant="link" disabled disabledReason={action.disabledReason}>
+                    {action.label}
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : (
+              <Button variant="link" onClick={action.onClick}>
+                {action.label}
+              </Button>
+            )}
           </>
+        ) : null}
+        {secondary ? (
+          <Button variant="external" onClick={secondary.onClick}>
+            {secondary.label}
+          </Button>
         ) : null}
       </div>
     );

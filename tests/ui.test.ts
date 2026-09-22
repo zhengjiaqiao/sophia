@@ -792,10 +792,10 @@ test("AgentKey：高 32，图标 14 + 大写名同一行；未选 / 点亮反色
 
 // ===== 空态与忙碌态 =====
 
-test("Empty 首次扫描：64px 转盘 + 一句忙什么", () => {
+test("Empty 首次扫描：24px 细弧 + 一句忙什么（自创转盘已删）", () => {
   const html = render(Empty, { kind: "scanning" });
   assert.match(html, /class="ss-empty ss-empty--scanning"/);
-  assert.match(html, /width="64" height="64"/);
+  assert.match(html, /class="ss-spinner" width="24" height="24"/);
   assert.match(html, /正在读 skill 目录…/);
   assert.doesNotMatch(html, /ss-empty__actions/);
 });
