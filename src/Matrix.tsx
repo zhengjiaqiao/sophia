@@ -1,16 +1,16 @@
-/// 表格 = 面板（DESIGN「材料与工艺 › 表格 = 面板」「列头与组头的悬停」「格子悬停预览」
+/// 表格 = 面板（DESIGN「材料与工艺 › 表格 = 面板」「列头的悬停」「格子悬停预览」
 /// 「提示框」「键盘」「选择操作条」，画板 Main / Mcp / Empty）。
 ///
 /// Skills 与 MCP **共用这一张表**：两边只是内容不同——行是 skill 或 MCP 服务，列是 agent，
-/// 格是同一套状态点。本组件只管形制与交互（通道条表头、按来源分组、十字带、提示框、
-/// 键盘、选择操作条、就地提示的锚点），不碰 api、不认后端状态：调用方把一切折算成
+/// 格是同一套状态点。本组件只管形制与交互（两行工具行与来源筛选片、通道条表头、原件位置列、
+/// 十字带、提示框、行内展开、键盘、选择操作条、就地提示的锚点），不碰 api、不认后端状态：调用方把一切折算成
 /// 「记号 + 能不能点 + 一句话」交进来，点了什么再原样交回去。
 ///
 /// 版式（画板的写法直接当 CSS 抄，见 Matrix.css）：
-/// - 名称列定宽 280（勾选 34 + 名字 246），agent 列各 88，MCP 另有 72 的 `传输` 列；
+/// - 名称列定宽 280（勾选 34 + 名字 246），原件位置 120，agent 列各 88，MCP 另有 72 的 `传输` 列；
 ///   所有横线止于最后一列右沿 + 24，工具行的 `+ skill` 右对齐到同一条边
-/// - 表头底 2px 结构线；分组之间 1px `ink`；行 1px `hairline`；行高 34
-/// - 悬停十字带：行带 + 列带（列带跳过组头——组头不是数据行）
+/// - 表头底 2px 结构线；行 1px `hairline`；行高 34
+/// - 悬停十字带：行带 + 列带
 /// - 格子提示框：一行「动词 · 快捷键」，格子正上方 6，停留 700ms；格间移动每格重新计时，
 ///   所以不追着鼠标；键盘焦点到达同样计时
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -54,7 +54,7 @@ export interface MatrixColumn {
   name: string;
   /// 列头第三层：这个 agent 下能用的格数（只写分子）
   count: number;
-  /// 列头提示框：`Claude Code · 41 个已开启`
+  /// 列头提示框：`Claude Code · 41 个已加上`
   tip: string;
   /// 这一列的目录还不存在：虚线列头（添加时顺手建出来）
   missing?: boolean;
@@ -64,7 +64,7 @@ export interface MatrixCellView {
   dot: Dot;
   /// 点下去会做事（开关、写进、重新链接）；false 时点击无动作，只由提示框说原因
   clickable: boolean;
-  /// 提示框一行：可点时是「动词」（`点一下开启`），不可点时是原因
+  /// 提示框一行：可点时是「动词」（`加到 Claude Code`），不可点时是原因
   tip: string;
   /// 操作进行中：画成灰色的将来状态（进度就是格子依次点亮）
   pending?: boolean;
@@ -95,21 +95,23 @@ export interface MatrixRowView {
 }
 
 /// 选择操作条上的一颗**动词键**：对已选的，在这一列做这件事（DESIGN「选择操作条」）。
-/// `关闭 ✳ CLAUDE CODE` / `开启 ⎔ CODEX · 2 个`；「全部」键没有 agent：`全部开启`
+/// 动词带方向：`加到 ⎔ CODEX · 2 个` / `从 ✳ CLAUDE CODE 移除`；「全部」键没有 agent：`全部加上`
 export interface SelectionKey {
   id: string;
   /// harness id，画列头同一枚图标；没有就是「全部」键
   agentId?: string;
   /// agent 名（Condensed 大写，跟随列头）；「全部」键不给
   name?: string;
-  /// 中文动词：`开启` `关闭` `写进` `全部开启` `全部关闭`
+  /// 中文动词（写在图标前）：`加到` `从` `写进` `全部加上`
   verb: string;
+  /// 动词后半截（写在 agent 名之后）：`从 ✳ CLAUDE CODE 移除` 的「移除」
+  verbTail?: string;
   /// 受影响数 ≠ 已选数时才给，写成 `· N 个`
   count?: number;
   /// 没有能做的动作：禁用，提示框说原因
   disabledReason?: string;
-  /// 提示框：按下会怎样
-  tip?: string;
+  /// 提示框：按下会怎样（受影响的名字）
+  tip?: ReactNode;
   onPress: () => void;
 }
 
@@ -168,6 +170,14 @@ export interface MatrixProps {
   /// 从待处理页跳回来：滚到这几行（或这一列的列头）并闪一下（⑦）。`nonce` 变了才重做
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
+
+/// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着），其余沿用 DOT_LABEL
+const DOT_TEXT: Record<Dot, string> = {
+  ...DOT_LABEL,
+  linked: "已加上 · 软链",
+  missing: "未加上",
+  own: "已加上 · 原件",
+};
 
 /// 一格的身份（行的来源 + 名字 + 列）
 type CellLike = { sourceId: string; skill: string; targetId: string };
@@ -286,7 +296,7 @@ function SortArrow({ active, desc }: { active: boolean; desc: boolean }) {
 function KeyButton({ k, iconOnly }: { k: SelectionKey; iconOnly: boolean }) {
   const disabled = k.disabledReason !== undefined;
   const count = k.count !== undefined ? ` · ${k.count} 个` : "";
-  const label = `${k.verb}${k.name ? ` ${k.name}` : ""}${count}`;
+  const label = `${k.verb}${k.name ? ` ${k.name}` : ""}${k.verbTail ? ` ${k.verbTail}` : ""}${count}`;
   const button = (
     <button
       type="button"
@@ -302,11 +312,20 @@ function KeyButton({ k, iconOnly }: { k: SelectionKey; iconOnly: boolean }) {
           <Cap>{k.name}</Cap>
         </span>
       ) : null}
+      {k.verbTail ? <span>{k.verbTail}</span> : null}
       {count ? <span className="mx-keycount">{count}</span> : null}
     </button>
   );
   const tipText = disabled ? k.disabledReason : k.tip;
-  const tip = iconOnly && k.name ? (tipText ? `${k.name} · ${tipText}` : k.name) : tipText;
+  const tip =
+    iconOnly && k.name ? (
+      <>
+        <div>{k.name}</div>
+        {tipText ? <div>{tipText}</div> : null}
+      </>
+    ) : (
+      tipText
+    );
   // 提示框默认在上方，放不下时 Tooltip 自己翻到下方
   return tip ? <Tooltip content={tip}>{button}</Tooltip> : button;
 }
@@ -351,7 +370,7 @@ export default function Matrix(props: MatrixProps) {
   // null＝默认（名称升序），表头不画箭头；点过才画（DESIGN「表头排序」）
   const [sortState, setSort] = useState<SortState | null>(null);
   const sort: SortState = sortState ?? { key: "name", dir: "asc" };
-  // 悬停的格（十字带）/ 列头（列带）/ 下拉里规则行（作用列轻亮）/ 同名组
+  // 悬停的格（十字带）/ 列头（列带）/ 同名组
   const [hover, setHover] = useState<{ row: string; col: string | null } | null>(null);
   const [headHover, setHeadHover] = useState<string | null>(null);
   // 键盘焦点所在格（行序号、列序号），以及焦点此刻在不在表身里
@@ -570,7 +589,7 @@ export default function Matrix(props: MatrixProps) {
       }
       // ⌘A 只在焦点就在表里时接管：在页面别处按 ⌘A 不该悄悄勾上一整组
       if (mod && e.key.toLowerCase() === "a" && rootRef.current?.contains(document.activeElement)) {
-        // 没有分组了：全选当前可见的行
+        // 全选当前可见的行
         if (s.flat.length === 0) return;
         e.preventDefault();
         const next = new Set(s.selected);
@@ -608,6 +627,21 @@ export default function Matrix(props: MatrixProps) {
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
   const selRef = useRef<HTMLDivElement>(null);
+  // 批量提示条右对齐被按下的键、向左展开；向左会越出面板左沿时改为贴面板左沿
+  const keyToastRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const t = keyToastRef.current;
+    const wrap = t?.parentElement;
+    const root = rootRef.current;
+    if (!t || !wrap || !root) return;
+    t.style.left = "";
+    t.style.right = "";
+    const rootLeft = root.getBoundingClientRect().left;
+    if (t.getBoundingClientRect().left < rootLeft) {
+      t.style.right = "auto";
+      t.style.left = `${rootLeft - wrap.getBoundingClientRect().left}px`;
+    }
+  }, [keyToast]);
   // 放不下时的降级（「全部」与某颗键重复时由调用方直接不给）：
   // 1 键距收到 4 → 2「已选 N 个」缩成「N 个」→ 3 agent 名只留图标。列数变了从头量
   const [fit, setFit] = useState(0);
@@ -632,7 +666,11 @@ export default function Matrix(props: MatrixProps) {
         {[...selectionKeys, ...(selectionAll ? [selectionAll] : [])].map((k) => (
           <span key={k.id} className="mx-keywrap">
             <KeyButton k={k} iconOnly={fit >= 3} />
-            {keyToast?.keyId === k.id ? <div className="mx-keytoast">{keyToast.node}</div> : null}
+            {keyToast?.keyId === k.id ? (
+              <div className="mx-keytoast" ref={keyToastRef}>
+                {keyToast.node}
+              </div>
+            ) : null}
           </span>
         ))}
       </span>
@@ -646,8 +684,7 @@ export default function Matrix(props: MatrixProps) {
       </button>
     </div>
   ) : (
-    // 工具行只有筛选框（弹性，最小 200）+ 右端添加键；来源筛选片已删——表格按来源分组，
-    // 片与组头重复表达同一信息，按来源看靠组头折叠
+    // 工具行第一行：筛选框（弹性，最小 200）+ 右端添加键；来源筛选片在第二行（SourceChips）
     <div className="mx-toolbar" style={{ width }}>
       {/* 筛选输入框不受 busy 约束（§6）；✕ 在框内 8px 以内 */}
       <label className="mx-filter">
@@ -899,7 +936,7 @@ export default function Matrix(props: MatrixProps) {
                     className={`ss-dot-btn mx-cellbtn${view.clickable ? "" : " is-inert"}`}
                     data-cell={`${r}:${c}`}
                     tabIndex={focused ? 0 : -1}
-                    aria-label={`${row.name} · ${col.name}：${DOT_LABEL[view.dot]}。${view.tip}`}
+                    aria-label={`${row.name} · ${col.name}：${DOT_TEXT[view.dot]}。${view.tip}`}
                     aria-describedby={tip === key ? `${tipId}-tip` : undefined}
                     onFocus={() => {
                       setFocus({ r, c });
@@ -916,7 +953,7 @@ export default function Matrix(props: MatrixProps) {
                       preview={view.clickable && !view.pending}
                       muted={view.pending}
                       title=""
-                      label={DOT_LABEL[view.dot]}
+                      label={DOT_TEXT[view.dot]}
                     />
                   </button>
                 )}

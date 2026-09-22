@@ -1,6 +1,6 @@
 /* 表格 = 面板（Matrix.tsx）。写法照画板 Main / Mcp / Empty 抄：
    名称列 280（勾选 34 + 名字 246）、agent 列 88、MCP 传输列 72、尾 24；行高 34；
-   表头底 2px ink、分组 1px ink、行 1px hairline。色值一律 var(--…)，唯一来源是 tokens.css。 */
+   表头底 2px ink、行 1px hairline。色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
 .mx {

@@ -81,13 +81,32 @@ export interface DomainViewProps {
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
-/// 提示框里的动词：格子只写「动词 · 快捷键」，agent 由列头与列带说明（DESIGN「提示框」）
-const VERB: Partial<Record<CellState, string>> = {
-  linked: "点一下关闭",
-  missing: "点一下开启",
-  broken: "点一下重新链接",
-  readOnly: "点一下再试一次",
-};
+/// 提示框里的动词：格子只写「动词 · 快捷键」，动词带方向（`加到 Claude Code` / `从 Claude Code 移除`）——
+/// 「开启 Claude Code」会读成操作应用本身（DESIGN 冲突表）
+const verbOf = (state: CellState, agent: string): string | undefined =>
+  state === "linked"
+    ? `从 ${agent} 移除`
+    : state === "missing"
+      ? `加到 ${agent}`
+      : state === "broken"
+        ? "点一下重新链接"
+        : state === "readOnly"
+          ? "点一下再试一次"
+          : undefined;
+
+/// 键的提示框：受影响的名字（前 5 个 +「等 N 个」）；移除时原件不在其中，末尾注明
+export function affectedTip(names: string[], own: string[] = []): ReactNode {
+  const shown = names.slice(0, 5).join("、");
+  const more = names.length > 5 ? ` 等 ${names.length} 个` : "";
+  return (
+    <>
+      <div>{`${shown}${more}`}</div>
+      {own.length > 0 ? (
+        <div>{`${own.slice(0, 5).join("、")}${own.length > 5 ? ` 等 ${own.length} 个` : ""} 是原件，不受影响`}</div>
+      ) : null}
+    </>
+  );
+}
 
 export default function DomainView(props: DomainViewProps) {
   const { overview, page, rows: visible, stateOf } = props;
@@ -103,7 +122,7 @@ export default function DomainView(props: DomainViewProps) {
     );
   };
 
-  // 来源顺序 = 行里第一次出现的先后；筛选片与分组共用，计数按本域全部行（筛选不改计数）
+  // 来源顺序 = 行里第一次出现的先后；来源筛选片与原件位置列共用，计数按本域全部行（筛选不改计数）
   const counts = new Map<string, number>();
   for (const row of page.rows) counts.set(row.sourceId, (counts.get(row.sourceId) ?? 0) + 1);
 
@@ -133,7 +152,7 @@ export default function DomainView(props: DomainViewProps) {
       agentId: target.scope.harnessId,
       name: target.label,
       count: n,
-      tip: `${target.label} · ${n} 个已开启`,
+      tip: `${target.label} · ${n} 个已加上`,
       missing: !target.exists,
     };
   });
@@ -169,7 +188,7 @@ export default function DomainView(props: DomainViewProps) {
         const ref = { sourceId: row.sourceId, skill: row.skill, targetId: target.id };
         const state = stateOf(ref, cell.state);
         const view = viewOf({ ...cell, state }, target, target.label, row.skill);
-        const verb = VERB[state];
+        const verb = verbOf(state, target.label);
         cells[target.id] = {
           dot: view.dot,
           clickable: verb !== undefined,
@@ -243,25 +262,25 @@ export default function DomainView(props: DomainViewProps) {
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
-  // 动词键：`开启 ⎔ CODEX` / `关闭 ✳ CLAUDE CODE`；受影响数 ≠ 已选数时才写「· N 个」
+  // 动词键：`加到 ⎔ CODEX` / `从 ✳ CLAUDE CODE 移除`；受影响数 ≠ 已选数时才写「· N 个」
   const countIf = (n: number, total: number) => (n !== total ? n : undefined);
   const pressOf = new Map<string, BatchPress>();
   const keys: SelectionKey[] = page.targets.map((target) => {
     const linked: CellRef[] = [];
     const missing: CellRef[] = [];
-    let own = 0;
+    const own: string[] = [];
     for (const row of chosen) {
       const s = stateAt(row, target.id);
       const ref = { sourceId: row.sourceId, skill: row.skill, targetId: target.id };
       if (s === "linked") linked.push(ref);
       else if (s === "missing") missing.push(ref);
-      else if (s === "own") own += 1;
+      else if (s === "own") own.push(row.skill);
     }
     const base = { id: target.id, agentId: target.scope.harnessId, name: target.label };
     if (target.linkedWholeTo !== null) {
       return {
         ...base,
-        verb: "开启",
+        verb: "加到",
         disabledReason: `${target.label} 的 skills 整个文件夹是链接`,
         onPress: () => undefined,
       };
@@ -271,9 +290,9 @@ export default function DomainView(props: DomainViewProps) {
       pressOf.set(target.id, press);
       return {
         ...base,
-        verb: "开启",
+        verb: "加到",
         count: countIf(missing.length, chosen.length),
-        tip: `在 ${target.label} 下开启没开的 ${missing.length} 个`,
+        tip: affectedTip(missing.map((c) => c.skill)),
         onPress: () => props.onBatch(press),
       };
     }
@@ -282,43 +301,44 @@ export default function DomainView(props: DomainViewProps) {
       pressOf.set(target.id, press);
       return {
         ...base,
-        verb: "关闭",
+        verb: "从",
+        verbTail: "移除",
         count: countIf(linked.length, chosen.length),
-        tip: `关掉已选的在 ${target.label} 下的 ${linked.length} 个`,
+        tip: affectedTip(
+          linked.map((c) => c.skill),
+          own,
+        ),
         onPress: () => props.onBatch(press),
       };
     }
     return {
       ...base,
-      verb: "开启",
-      disabledReason: own > 0 ? "已选的都是原件" : `已选的在 ${target.label} 下没有能开关的格`,
+      verb: "加到",
+      disabledReason:
+        own.length > 0 ? "已选的都是原件" : `已选的在 ${target.label} 下没有能加上或移除的`,
       onPress: () => undefined,
     };
   });
-  // 全部：已选的在所有 agent 下都开着 → 全部关闭；否则全部开启（补齐缺的）
-  const allOp: "link" | "unlink" = [...pressOf.values()].some((p) => p.op === "link")
-    ? "link"
-    : "unlink";
+  // 全部加上：把已选的在所有 agent 下补齐。没有「全部移除」（误触代价高、低频，逐个 agent 移除）
   const allTargets = page.targets.flatMap((target) =>
     target.linkedWholeTo !== null
       ? []
-      : chosen.flatMap((row) => {
-          const s = stateAt(row, target.id);
-          return (allOp === "link" ? s === "missing" : s === "linked")
+      : chosen.flatMap((row) =>
+          stateAt(row, target.id) === "missing"
             ? [{ sourceId: row.sourceId, skill: row.skill, targetId: target.id }]
-            : [];
-        }),
+            : [],
+        ),
   );
-  const allPress: BatchPress = { keyId: "all", op: allOp, cells: allTargets };
-  // 「全部」与某颗 agent 键做同一件事时隐藏（DESIGN「选择操作条」）
+  const allPress: BatchPress = { keyId: "all", op: "link", cells: allTargets };
+  // 「全部加上」与某颗 agent 键做同一件事时隐藏（DESIGN「选择操作条」）
   const selectionAll: SelectionKey | undefined =
     allTargets.length === 0 || duplicatesAKey(allPress, [...pressOf.values()])
       ? undefined
       : {
           id: "all",
-          verb: allOp === "link" ? "全部开启" : "全部关闭",
+          verb: "全部加上",
           count: countIf(allTargets.length, chosen.length * page.targets.length),
-          tip: allOp === "link" ? "在所有 agent 下开启没开的" : "在所有 agent 下关掉已选的",
+          tip: affectedTip([...new Set(allTargets.map((c) => c.skill))]),
           onPress: () => props.onBatch(allPress),
         };
 

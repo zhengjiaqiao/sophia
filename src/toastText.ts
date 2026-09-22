@@ -16,7 +16,7 @@
 /// }
 /// interface ToastText {
 ///   tier: "notice" | "routine"; kind: "success" | "cannot" | "partial";
-///   verb: string; names: string[]; agents: { id: string; name: string }[];
+///   verb: string; verbTail?: string; names: string[]; agents: { id: string; name: string }[];
 ///   reason?: string; tally?: { done: number; failed: number };
 /// }
 /// ```
@@ -24,17 +24,19 @@
 /// 返回值可以直接展开给 `<Toast {...text} />`（再补 `action` / `onClose` / `onDismiss`）。
 ///
 /// 规则：
-/// - **动词必填且与触发动作一致**：开启 / 关闭 / 写进 / 清除 / 拆开 / 只留 / 自动开启 / 自动写进；
-///   全部没成时用**否定动词**（`没开启`）——失败里写「开启」会被一眼读成已开启
+/// - **动词必填且与触发动作一致，带方向**：`加到 [图标] 名字` / `从 [图标] 移除 名字`（后半截动词
+///   在 `verbTail`，Toast 写在图标之后）/ 写进 / 清除 / 拆开 / 只留 / 自动加到 / 自动写进。
+///   「开启 Claude Code」读成操作应用本身，所以 skill 与 agent 的关系一律带方向（DESIGN 冲突表）；
+///   全部没成时用**否定动词**（`没加上` `没移除`）——失败里写「加到」会被一眼读成已加上
 /// - 档位（① 严重程度决定打断程度）：例行成功 `routine`（结果已由格子闪烁表达，这行只给撤销）；
 ///   做不成、部分失败、可撤销的删除（只留这份）、自动发生的事一律 `notice` 黑窗
 /// - 名字去重、保序；多于两个由 `Toast` 自己写成 `+N`，这里不截
 /// - agent 图标按 id 去重、保序
 
 export type ToastOp =
-  /// skill：在某个 agent 下开启（建链）
+  /// skill：加到某个 agent（建链）
   | "link"
-  /// skill：关掉某个 agent 下的链接
+  /// skill：从某个 agent 移除（删链）
   | "unlink"
   /// MCP：把一份定义写进某个位置（只新增）
   | "write"
@@ -44,7 +46,7 @@ export type ToastOp =
   | "split"
   /// 同名两份：只留这份，另一份进废纸篓（可撤销）
   | "keepThis"
-  /// 自动规则在背后开启了几个（⑨⑬ 自动发生的事要交代）
+  /// 自动规则在背后加上了几个（⑨⑬ 自动发生的事要交代）
   | "autoLink"
   /// MCP 自动规则在背后写进了几个
   | "autoWrite";
@@ -81,6 +83,8 @@ export interface ToastText {
   tier: ToastTier;
   kind: ToastTextKind;
   verb: string;
+  /// 动词后半截（写在 agent 图标之后）：`从 [图标] 移除`
+  verbTail?: string;
   names: string[];
   agents: ToastAgentRef[];
   reason?: string;
@@ -88,27 +92,37 @@ export interface ToastText {
 }
 
 const VERB: Record<ToastOp, string> = {
-  link: "开启",
-  unlink: "关闭",
+  link: "加到",
+  unlink: "从",
   write: "写进",
   clear: "清除",
   split: "拆开",
   keepThis: "只留",
-  autoLink: "自动开启",
+  autoLink: "自动加到",
   autoWrite: "自动写进",
 };
 
 /// 全部没成时的否定动词
 const NOT_VERB: Record<ToastOp, string> = {
-  link: "没开启",
-  unlink: "没关闭",
+  link: "没加上",
+  unlink: "没移除",
   write: "没写进",
   clear: "没清除",
   split: "没拆开",
   keepThis: "没删掉",
-  autoLink: "没自动开启",
+  autoLink: "没自动加上",
   autoWrite: "没自动写进",
 };
+
+/// 部分失败的汇总：`加上 2 ✓ · 1 ⊘` / `移除 2 ✓ · 1 ⊘`（没有名字跟着，用不带方向的动词）
+const PARTIAL_VERB: Partial<Record<ToastOp, string>> = {
+  link: "加上",
+  unlink: "移除",
+  autoLink: "自动加上",
+};
+
+/// 带方向的动词后半截：`从 [图标] 移除`
+const VERB_TAIL: Partial<Record<ToastOp, string>> = { unlink: "移除" };
 
 /// 成功时用黑窗的几种：可撤销的删除、自动发生的事（DESIGN「提示条分两档」）
 const NOTICE_ON_SUCCESS = new Set<ToastOp>(["keepThis", "autoLink", "autoWrite"]);
@@ -147,7 +161,7 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
     return {
       tier: "notice",
       kind: "partial",
-      verb: VERB[op],
+      verb: PARTIAL_VERB[op] ?? VERB[op],
       names: namesOf(done),
       agents: agentsOf(done),
       reason: failed[0].reason,
@@ -158,6 +172,7 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
     tier: NOTICE_ON_SUCCESS.has(op) ? "notice" : "routine",
     kind: "success",
     verb: VERB[op],
+    verbTail: VERB_TAIL[op],
     names: namesOf(done),
     agents: agentsOf(done),
   };

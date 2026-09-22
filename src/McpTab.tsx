@@ -99,6 +99,8 @@ interface Pane {
   crossDomain: boolean;
   anchor?: ConfirmAnchor;
   keyId?: string;
+  /// 从「+ MCP」添加页来的：没有键可锚，结果走右下的全局提示条
+  fromImport?: boolean;
 }
 
 /// 触发控件此刻的位置：点下去的那颗键 / 那一格还拿着焦点
@@ -142,7 +144,6 @@ export default function McpTab({
   } | null>(null);
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
-  // 本次会话里关掉的规则：来源位置 → 当时的目标，组头留一段灰的规则与开关好重开
   const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
@@ -339,7 +340,12 @@ export default function McpTab({
     });
 
   /// 写一批（已经确认过或不需要确认）。keyId 给了就把提示条贴在那颗键下
-  const apply = async (preview: McpPreview, allowCrossDomain: boolean, keyId?: string) => {
+  const apply = async (
+    preview: McpPreview,
+    allowCrossDomain: boolean,
+    keyId?: string,
+    fromImport = false,
+  ) => {
     const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
     const rows = [...new Set(preview.actions.map((a) => a.name))];
     setPane(null);
@@ -387,6 +393,16 @@ export default function McpTab({
             />
           ),
         });
+      } else if (fromImport) {
+        // 从添加页来的批量 / 跨域写入：没有键可锚，右下出全局提示条（例行、可撤销；失败说原因）
+        setGlobalToast(
+          <Toast
+            {...text}
+            action={undo ? { label: "撤销", onClick: undo } : undefined}
+            onDismiss={dismissGlobal}
+            onClose={text.tier === "notice" ? dismissGlobal : undefined}
+          />,
+        );
       } else if (failed.length > 0) {
         // 单格：不出提示条，失败时格下小黑窗说原因
         const f = failed[0];
@@ -414,6 +430,7 @@ export default function McpTab({
     }
     if (report.outcome === "undone") {
       setKeyToast(null);
+      setGlobalToast(null);
       await refresh();
       return;
     }
@@ -507,8 +524,6 @@ export default function McpTab({
     void write([{ sourceId: source.sourceId, name: row.name, targetId: target.id }]);
   };
 
-  // ===== 组头规则：只管以后新出现的 =====
-
   // ===== 渲染 =====
 
   if (!overview) return <Empty kind="scanning" description="正在读 MCP 配置" art="horizon" />;
@@ -571,7 +586,7 @@ export default function McpTab({
       agentId: target.harnessId,
       name,
       count: n,
-      tip: `${target.label} · ${n} 个已开启`,
+      tip: `${target.label} · ${n} 个已加上`,
     };
   });
 
@@ -772,7 +787,7 @@ export default function McpTab({
               : "已经存在的同名配置不会被覆盖；写进已有文件前会先备份"
           }
           confirmLabel="写进去"
-          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId)}
+          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId, pane.fromImport)}
           onCancel={() => setPane(null)}
         >
           <ul className="mcp-confirm-list">
@@ -827,6 +842,7 @@ export default function McpTab({
             setPane({
               preview,
               crossDomain: preview.actions.some((action) => action.crossDomain),
+              fromImport: true,
             });
           }}
           onError={onError}

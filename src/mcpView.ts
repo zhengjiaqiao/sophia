@@ -223,7 +223,7 @@ export function differingFields(row: McpDomainRow, targetIds: Set<string>): stri
   return unknown ? [] : [...fields];
 }
 
-/// 行归哪个来源分组：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）
+/// 行的来源位置（来源位置列写它）：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）
 export const mcpGroupOf = (row: McpDomainRow): string => row.entries[0]?.sourceId ?? "";
 
 /**

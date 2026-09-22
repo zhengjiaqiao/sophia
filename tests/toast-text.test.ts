@@ -21,18 +21,27 @@ test("例行成功：动词与键一致，走 routine 一行字，名字与图�
     t.agents.map((a) => a.id),
     ["codex", "claude-code"],
   );
-  assert.equal(toastFor("unlink", { done: [{ name: "x" }] }).verb, "关闭");
-  assert.equal(toastFor("link", { done: [{ name: "x" }] }).verb, "开启");
+  // 动词带方向：加到 [图标] 名字 / 从 [图标] 移除 名字（后半截在 verbTail）
+  const off = toastFor("unlink", { done: [{ name: "x" }] });
+  assert.equal(off.verb, "从");
+  assert.equal(off.verbTail, "移除");
+  const on = toastFor("link", { done: [{ name: "x" }] });
+  assert.equal(on.verb, "加到");
+  assert.equal(on.verbTail, undefined);
 });
 
-test("全部没成：黑窗 + 否定动词 + 一句原因（失败里写「开启」会被读成已开启）", () => {
+test("全部没成：黑窗 + 否定动词 + 一句原因（失败里写「加到」会被读成已加上）", () => {
   const t = toastFor("link", {
     done: [],
     failed: [{ name: "defuddle", agent: codex, reason: "Codex 的 skills 目录写不进去" }],
   });
   assert.equal(t.tier, "notice");
   assert.equal(t.kind, "cannot");
-  assert.equal(t.verb, "没开启");
+  assert.equal(t.verb, "没加上");
+  assert.equal(
+    toastFor("unlink", { done: [], failed: [{ name: "x", reason: "r" }] }).verb,
+    "没移除",
+  );
   assert.equal(t.reason, "Codex 的 skills 目录写不进去");
   assert.deepEqual(t.names, ["defuddle"]);
 });
@@ -47,6 +56,13 @@ test("部分失败：黑窗 + 肯定动词 + 读数 + 第一条原因", () => {
   assert.equal(t.verb, "写进");
   assert.deepEqual(t.tally, { done: 2, failed: 1 });
   assert.equal(t.reason, "读不出来");
+  // skill 的部分失败汇总用不带方向的动词：加上 2 ✓ · 1 ⊘
+  const mixed = toastFor("link", {
+    done: [{ name: "a" }, { name: "b" }],
+    failed: [{ name: "c", reason: "r" }],
+  });
+  assert.equal(mixed.verb, "加上");
+  assert.equal(mixed.verbTail, undefined);
 });
 
 test("可撤销的删除与自动发生的事成功时也走黑窗；只留这份把来源拼进名字", () => {
@@ -55,5 +71,6 @@ test("可撤销的删除与自动发生的事成功时也走黑窗；只留这�
   assert.equal(keep.verb, "只留");
   assert.deepEqual(keep.names, ["通用仓库 的 defuddle"]);
   assert.equal(toastFor("autoLink", { done: [{ name: "x" }] }).tier, "notice");
+  assert.equal(toastFor("autoLink", { done: [{ name: "x" }] }).verb, "自动加到");
   assert.equal(toastFor("autoWrite", { done: [{ name: "x" }] }).verb, "自动写进");
 });

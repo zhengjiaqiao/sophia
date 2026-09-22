@@ -43,7 +43,7 @@ export interface SkillsTabProps {
   onFocused?: () => void;
 }
 
-/// Skills 页：工具行 + 按来源分组的表格（DomainView → Matrix）。
+/// Skills 页：两行工具行（筛选框 + 来源筛选片）+ 表格（DomainView → Matrix）。
 ///
 /// 反馈的位置（DESIGN「提示条的位置」）：
 /// - 单格：乐观更新 + 格子闪一下，**不出提示条**；失败弹回 + 格下小黑窗说原因；撤销用 ⌘Z
@@ -191,11 +191,12 @@ export default function SkillsTab({
   };
 
   /// 这条没做成的原因，一句人话：说原因，不说「失败」
-  const reasonOf = (target: string, reason: string, what: "开启" | "关掉" | "清除"): string => {
+  /// 动词带方向：没能加到 X / 没能从 X 移除（「开启 X」会读成操作应用本身）
+  const reasonOf = (target: string, reason: string, what: "link" | "unlink"): string => {
     const agent = targetByPath(target)?.label ?? target;
     return NO_WRITE.test(reason)
       ? `${agent} 的 skills 目录写不进去`
-      : `${agent} 下没能${what}：${reason}`;
+      : `${what === "link" ? `没能加到 ${agent}` : `没能从 ${agent} 移除`}：${reason}`;
   };
 
   /// 执行一次开 / 关：返回每一格做成没做成。排除 / 恢复在动作之前写，顺序不能反
@@ -220,11 +221,7 @@ export default function SkillsTab({
       } else if (entry.outcome.status === "failed") {
         failed.push({
           ref,
-          reason: reasonOf(
-            entry.action.target,
-            entry.outcome.reason,
-            op === "link" ? "开启" : "关掉",
-          ),
+          reason: reasonOf(entry.action.target, entry.outcome.reason, op),
         });
       } else {
         done.push(ref);
@@ -328,7 +325,7 @@ export default function SkillsTab({
     setCellNotice(null);
     const keys = cells.map(skillCellKey);
     const rows = [...new Set(cells.map(skillRowKey))];
-    const sentence = `正在${op === "link" ? "开启" : "关闭"} ${cells.length} 个`;
+    const sentence = `正在${op === "link" ? "加上" : "移除"} ${cells.length} 个`;
     setOptimisticFor(cells, op === "link" ? "linked" : "missing");
     setPendingCells(new Set(keys));
     setBusyRows(new Map(rows.map((r) => [r, sentence])));
@@ -691,7 +688,7 @@ export default function SkillsTab({
                 ...item(e.action),
                 reason:
                   e.outcome.status === "failed"
-                    ? reasonOf(e.action.target, e.outcome.reason, "开启")
+                    ? reasonOf(e.action.target, e.outcome.reason, "link")
                     : "",
               })),
             });

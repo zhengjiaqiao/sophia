@@ -11,14 +11,14 @@ const base = {
       agentId: "claude-code",
       name: "Claude Code",
       count: 2,
-      tip: "Claude Code · 2 个已开启",
+      tip: "Claude Code · 2 个已加上",
     },
     {
       id: "cx",
       agentId: "codex",
       name: "Codex",
       count: 1,
-      tip: "Codex · 1 个已开启",
+      tip: "Codex · 1 个已加上",
       missing: true,
     },
   ],
@@ -33,8 +33,8 @@ const base = {
         onReveal: () => undefined,
       },
       cells: {
-        cc: { dot: "linked" as const, clickable: true, tip: "点一下关闭" },
-        cx: { dot: "missing" as const, clickable: true, tip: "点一下开启" },
+        cc: { dot: "linked" as const, clickable: true, tip: "从 Claude Code 移除" },
+        cx: { dot: "missing" as const, clickable: true, tip: "加到 Codex" },
       },
     },
     {
@@ -98,7 +98,7 @@ test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具
         id: "cx",
         agentId: "codex",
         name: "Codex",
-        verb: "开启",
+        verb: "加到",
         count: 2,
         onPress: () => undefined,
       },
@@ -106,7 +106,8 @@ test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具
         id: "cc",
         agentId: "claude-code",
         name: "Claude Code",
-        verb: "关闭",
+        verb: "从",
+        verbTail: "移除",
         disabledReason: "已选的都是原件",
         onPress: () => undefined,
       },
@@ -116,12 +117,13 @@ test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
   // 动词键：动词 + 列头同一枚图标 + Condensed 大写名 + 受影响数 ≠ 已选数时的「· N 个」；
   // 不画圆点、不写 ±N（第 5 轮「状态点 + 增量」已撤回）
-  assert.match(html, /aria-label="开启 Codex · 2 个"/);
+  // 动词带方向（「开启 Codex」会读成操作应用本身）
+  assert.match(html, /aria-label="加到 Codex · 2 个"/);
   assert.match(html, /class="mx-keycount"> · 2 个</);
   assert.doesNotMatch(html, /mx-keydot|ss-dot--own is-muted|\+1/);
   assert.match(html, /取消选择/);
   // 没有能做的动作：禁用，原因进提示框
-  assert.match(html, /disabled=""[^>]*aria-label="关闭 Claude Code：已选的都是原件"/);
+  assert.match(html, /disabled=""[^>]*aria-label="从 Claude Code 移除：已选的都是原件"/);
   // 工具行（筛选框）让位
   assert.doesNotMatch(html, /placeholder="筛选"/);
 });

@@ -48,6 +48,8 @@ export interface ToastProps {
   kind: ToastKind;
   /// **必填**：`写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`
   verb: string;
+  /// 动词后半截，写在 agent 图标之后（带方向的「从 [图标] 移除 名字」）；只有一截动词时不给
+  verbTail?: string;
   /// agent 图标组（白 / 墨，随档）。图标自带读屏名
   agents?: ToastAgent[];
   /// 动词与名字之间的其他记号（删原件那个白色小方块）
@@ -106,6 +108,7 @@ export function Toast(props: ToastProps) {
     tier = "notice",
     kind,
     verb,
+    verbTail,
     agents,
     icons,
     names,
@@ -137,6 +140,7 @@ export function Toast(props: ToastProps) {
         </span>
       ) : null}
       {icons}
+      {verbTail ? <span className="ss-toast__verb">{verbTail}</span> : null}
       {names && names.length ? <Names names={names} /> : null}
       {reading ? <span className="ss-toast__reading">{reading}</span> : null}
       {tally ? <Tally {...tally} /> : null}
