@@ -32,7 +32,7 @@ const { Spinner } = await import("../src/ui/Spinner.tsx");
 const { Toast, TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
 const { ErrorBanner, BlackNotice } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
-const { SubPage } = await import("../src/ui/SubPage.tsx");
+const { SubPage, holdInert, pickTrigger, triggerKey } = await import("../src/ui/SubPage.tsx");
 const { Cap, capRuns } = await import("../src/ui/Cap.tsx");
 const { AgentIcon, AgentKey, AgentMark, agentInitial, hasAgentIcon } =
   await import("../src/ui/AgentMark.tsx");
@@ -657,7 +657,8 @@ test("SubPage：← 图标按钮 + 页面名 28/700 不大写字距 0，头 84 =
   const html = render(SubPage, { title: "添加 skill 到「全局」", onBack: noop, children: "内容" });
   assert.match(html, /class="ss-subpage"/);
   assert.match(html, /class="ss-iconbtn" title="返回" aria-label="返回"/);
-  assert.match(html, /class="ss-subpage__title">添加 skill 到「全局」</);
+  // 页标题可被程序聚焦（打开时焦点移过去），但不进 Tab 序列
+  assert.match(html, /class="ss-subpage__title" tabindex="-1">添加 skill 到「全局」</);
   assert.match(html, /class="ss-subpage__body">内容</);
   const title = cssRule(uiCss, ".ss-subpage__title");
   assert.match(title, /font-size:\s*var\(--size-display\)/);
@@ -881,4 +882,48 @@ test("Plain：旧大写档里嵌专名的出口，关掉整段的 text-transform
   const { Plain } = await import("../src/ui/Plain.tsx");
   assert.match(render(Plain, { children: "Codex" }), /class="ss-plain"/);
   assert.match(uiCss, /\.ss-plain\s*\{[^}]*text-transform:\s*none/);
+});
+
+// ===== 二级页盖住主视图（真窗口走查：添加 skill 页上叠着主视图的吸顶工具行与列头） =====
+
+test("二级页的层级高过主视图里所有吸顶元素（Matrix.css 最高的 z-index），确认框与提示框仍在它上面", () => {
+  const matrixCss = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  const zs = [...matrixCss.matchAll(/z-index:\s*(\d+)/g)].map((m) => Number(m[1]));
+  const sub = Number(/z-index:\s*(\d+)/.exec(cssRule(uiCss, ".ss-subpage"))?.[1]);
+  assert.ok(
+    sub > Math.max(...zs),
+    `.ss-subpage 的 z-index ${sub} 要高过 Matrix 的 ${Math.max(...zs)}`,
+  );
+  const confirm = Number(/z-index:\s*(\d+)/.exec(cssRule(uiCss, ".ss-confirm-layer"))?.[1]);
+  assert.ok(confirm > sub, "确认框要在二级页上面");
+});
+
+test("holdInert：打开二级页时主视图根节点加 inert，多个同时持有时最后一个释放才摘掉", () => {
+  const attrs = new Map<string, string>();
+  const root = {
+    setAttribute: (n: string, v: string) => void attrs.set(n, v),
+    removeAttribute: (n: string) => void attrs.delete(n),
+  };
+  const a = holdInert(root);
+  assert.equal(attrs.get("inert"), "");
+  const b = holdInert(root);
+  a();
+  assert.equal(attrs.has("inert"), true, "还有一个二级页开着");
+  a();
+  assert.equal(attrs.has("inert"), true, "同一个释放函数调两次只算一次");
+  b();
+  assert.equal(attrs.has("inert"), false);
+});
+
+test("返回时找回触发它的那颗键：主视图重挂过也按读屏名、再按文字认回", () => {
+  const btn = (label: string | null, text: string) => ({
+    getAttribute: (n: string) => (n === "aria-label" ? label : null),
+    textContent: text,
+  });
+  const gear = btn("设置", "");
+  const key = triggerKey(gear);
+  const fresh = [btn("待处理（3）", "3"), btn("设置", ""), btn(null, "+ skill")];
+  assert.equal(pickTrigger(fresh, key), 1);
+  assert.equal(pickTrigger(fresh, triggerKey(btn(null, " + skill "))), 2);
+  assert.equal(pickTrigger(fresh, triggerKey(btn(null, "配置网关"))), -1);
 });

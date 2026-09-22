@@ -51,6 +51,8 @@ export interface GatewayPageProps extends Omit<
   onLeave: () => void;
   /// 页面里有确认框开着时，Esc 归确认框，不当返回
   modalOpen?: boolean;
+  /// 页面上的浮层（重启确认框）：必须渲染在二级页里面，主视图此时 inert
+  overlay?: ReactNode;
 }
 
 export function GatewayPage({
@@ -58,6 +60,7 @@ export function GatewayPage({
   leaving,
   onLeave,
   modalOpen,
+  overlay,
   ...body
 }: GatewayPageProps) {
   const [dirty, setDirty] = useState(false);
@@ -75,30 +78,31 @@ export function GatewayPage({
   };
 
   return (
-    <div className={`gw-page-shell${leaving ? " is-leaving" : ""}`}>
-      <SubPage
-        title={
-          <span className="gw-page__title">
-            {body.tool.name} 的网关
-            {headerAction}
-          </span>
-        }
-        onBack={back}
-      >
-        <div className="gw-page">
-          <GatewayBody
-            {...body}
-            onDirtyChange={onDirtyChange}
-            askDiscard={askDiscard}
-            onCollapse={() => {
-              setAskDiscard(false);
-              setDirty(false);
-              onLeave();
-            }}
-          />
-        </div>
-      </SubPage>
-    </div>
+    <SubPage
+      className={`gw-page-sub${leaving ? " is-leaving" : ""}`}
+      title={
+        <span className="gw-page__title">
+          {body.tool.name} 的网关
+          {headerAction}
+        </span>
+      }
+      onBack={back}
+    >
+      <div className="gw-page">
+        <GatewayBody
+          {...body}
+          onDirtyChange={onDirtyChange}
+          askDiscard={askDiscard}
+          onCollapse={() => {
+            setAskDiscard(false);
+            setDirty(false);
+            onLeave();
+          }}
+        />
+      </div>
+      {/* 页面里的浮层（重启确认）也要在二级页里：主视图打开二级页期间是 inert 的 */}
+      {overlay}
+    </SubPage>
   );
 }
 

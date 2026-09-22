@@ -1040,6 +1040,8 @@
 .ss-subpage {
   position: fixed;
   inset: 0;
+  /* 盖过主视图里所有吸顶元素（Matrix 最高 20）；确认框 40、提示框 50 仍在它上面 */
+  z-index: 30;
   display: flex;
   flex-direction: column;
   background: var(--canvas);

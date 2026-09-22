@@ -860,13 +860,14 @@ test("GatewayPage：二级页「← Codex 的网关」，标题后放页头动�
     leaving: false,
     onLeave: noop,
   });
-  assert.match(html, /class="gw-page-shell"/);
+  // 二级页挂在 body 上，转场做在 SubPage 自己身上
+  assert.match(html, /class="ss-subpage gw-page-sub"/);
   assert.match(html, /gw-page__title">Codex 的网关(<!-- -->)?RESTART-SLOT/);
   assert.match(html, /aria-label="返回"/);
   assert.doesNotMatch(html, /gw-panel__right|gw-panel__left/);
   assert.match(
     render(GatewayPage, { ...panelProps({}), leaving: true, onLeave: noop }),
-    /class="gw-page-shell is-leaving"/,
+    /class="ss-subpage gw-page-sub is-leaving"/,
   );
 });
 

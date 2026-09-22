@@ -755,6 +755,21 @@ export default function ModelsTab({
     );
   }
 
+  /// 重启确认：会中断进行中的对话，确认一道（⑪ 确认只剩两件之一）；锚在触发它的那一行下面、
+  /// 那一行不被遮罩盖住。网关页开着时它渲染在网关页里——主视图那时是 inert 的
+  const restartConfirm =
+    confirmRestart !== null ? (
+      <Confirm
+        title={`重启 ${MODELS_TOOLS[0].name}？`}
+        confirmLabel="重启"
+        anchor={confirmRestart}
+        onConfirm={() => void restart(MODELS_TOOLS[0])}
+        onCancel={() => setConfirmRestart(null)}
+      >
+        {RESTART_CONSEQUENCE}
+      </Confirm>
+    ) : null;
+
   return (
     <section className="models-page">
       {showRouterBanner(state, healed) ? (
@@ -836,6 +851,7 @@ export default function ModelsTab({
           leaving={gateway.leaving}
           onLeave={leaveGateway}
           modalOpen={confirmRestart !== null}
+          overlay={restartConfirm}
           headerAction={
             <RestartSlot
               tool={MODELS_TOOLS[0]}
@@ -843,7 +859,7 @@ export default function ModelsTab({
               phase={phase}
               busy={busy}
               onRestart={() => {
-                const bar = document.querySelector(".gw-page-shell .ss-subpage__bar");
+                const bar = document.querySelector(".gw-page-sub .ss-subpage__bar");
                 if (!bar) return;
                 const r = bar.getBoundingClientRect();
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
@@ -861,18 +877,7 @@ export default function ModelsTab({
         />
       ) : null}
 
-      {/* 会中断进行中的对话，确认一道（⑪ 确认只剩两件之一）；锚在那一行下面、那一行不被遮罩盖住 */}
-      {confirmRestart !== null ? (
-        <Confirm
-          title={`重启 ${MODELS_TOOLS[0].name}？`}
-          confirmLabel="重启"
-          anchor={confirmRestart}
-          onConfirm={() => void restart(MODELS_TOOLS[0])}
-          onCancel={() => setConfirmRestart(null)}
-        >
-          {RESTART_CONSEQUENCE}
-        </Confirm>
-      ) : null}
+      {gateway === null ? restartConfirm : null}
     </section>
   );
 }

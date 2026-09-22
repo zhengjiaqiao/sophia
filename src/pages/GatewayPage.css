@@ -3,15 +3,12 @@
 @import "../tokens.css";
 
 /* 转场：从右侧推入、返回滑回，200ms 机械缓动；reduced-motion 下直接切换。
-   外壳铺满整窗做位移，里面的 SubPage 仍是 fixed（相对这个带 transform 的外壳） */
-.gw-page-shell {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
+   二级页本身挂在 body 上（SubPage 的 portal），动画直接做在它身上 */
+.ss-subpage.gw-page-sub {
   animation: gw-page-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.gw-page-shell.is-leaving {
+.ss-subpage.gw-page-sub.is-leaving {
   animation: gw-page-out 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
@@ -299,8 +296,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gw-page-shell,
-  .gw-page-shell.is-leaving {
+  .ss-subpage.gw-page-sub,
+  .ss-subpage.gw-page-sub.is-leaving {
     animation: none;
   }
   .gw-panel__chipwrap.is-jump {
