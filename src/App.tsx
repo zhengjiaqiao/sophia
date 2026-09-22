@@ -16,7 +16,7 @@ import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import * as pendingPage from "./pages/PendingPage";
-import { PendingPage } from "./pages/PendingPage";
+import { PendingPage, type McpIssue, type PendingSegment } from "./pages/PendingPage";
 import { collectIssues } from "./pages/pendingIssues";
 import * as mcpView from "./mcpView";
 import { modelIssues, parseBackendError } from "./modelsView";
@@ -44,11 +44,10 @@ type SidebarDomain = { key: string; label: string };
 type Tab = "skills" | "mcp" | "models";
 
 /// MCP 段的待处理由 T1 的 `collectMcpIssues`（src/mcpView.ts）收集；它落地之前按空算。
-/// 只读它的 `key` 来扣掉已忽略的，形状交给待处理页
-type McpPendingLike = { key?: string };
+/// 形状与待处理页的 `McpIssue` 结构一致（T3 按 T1 的 McpPendingItem 写的）
 const collectMcpIssues = (
   mcpView as unknown as {
-    collectMcpIssues?: (overview: McpOverview | null) => McpPendingLike[];
+    collectMcpIssues?: (overview: McpOverview | null) => McpIssue[];
   }
 ).collectMcpIssues;
 
@@ -280,7 +279,7 @@ export default function App() {
   );
   const inboxCount =
     skillIssues.filter((i) => !ignoredKeys.has(i.key)).length +
-    mcpIssues.filter((i) => i.key === undefined || !ignoredKeys.has(i.key)).length +
+    mcpIssues.filter((i) => !ignoredKeys.has(i.key)).length +
     modelIssueList.filter((i) => !modelIgnoredKeys.has(i.key)).length;
 
   const updateMcpSidebarDomains = useCallback((next: SidebarDomain[]) => {
@@ -361,7 +360,7 @@ export default function App() {
   };
 
   /// 待处理页「跳回」：回到那一段对应的页签（行内闪一下由各页自己做）
-  const jumpToRow = (segment: Tab) => {
+  const jumpToRow = (segment: PendingSegment) => {
     setSubPage(null);
     if (segment === "models" && !modelsSupported) return;
     switchTab(segment);
@@ -388,22 +387,15 @@ export default function App() {
     return <SettingsPage onBack={closeSubPage} onError={setError} initialUpdate={pendingUpdate} />;
   }
   if (subPage === "pending") {
-    // 与待处理页（T3）的契约：`segments` 三段、`initialSegment` 落点、`onResolveModelIssue`
-    // 执行模型段的动作、`onJumpToRow` 跳回对应页签。T3 的 props 落地之前按无类型展开传入，
-    // 落地后换成带类型的写法
-    const inbox: object = {
-      segments: { skills: skillIssues, mcp: mcpIssues, models: modelIssueList },
-      initialSegment: pendingSegment,
-      onResolveModelIssue: resolveModelIssue,
-      onJumpToRow: jumpToRow,
-    };
     return (
       <PendingPage
-        overview={overview}
+        segments={{ skills: skillIssues, mcp: mcpIssues, models: modelIssueList }}
+        initialSegment={pendingSegment}
         onBack={closeSubPage}
         onRefresh={refresh}
         onError={setError}
-        {...inbox}
+        onJumpToRow={jumpToRow}
+        onResolveModelIssue={resolveModelIssue}
       />
     );
   }
