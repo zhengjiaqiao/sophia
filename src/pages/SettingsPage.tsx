@@ -5,7 +5,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { GatewayState, HarnessStatus } from "../types";
-import { canRestore, parseBackendError } from "../modelsView.ts";
+import { parseBackendError, serviceLeftover } from "../modelsView.ts";
 import { AgentIcon, BlackNotice, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
 import { CheckMark } from "./CheckMark.tsx";
 import "./SettingsPage.css";
@@ -186,9 +186,8 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
       () => setGateway(null),
     );
   }, []);
-  /// 停用了但服务还在（自动卸下失败或旧版遗留）。与 Codex 行「卸下后台服务」同一条件；
-  /// T2 的 `serviceLeftover` 合入后换成它（等价于 !enabled && router.installed）
-  const leftover = gateway !== null && !gateway.enabled && canRestore(gateway);
+  /// 停用了但服务还在（自动卸下失败或旧版遗留）。与 Codex 行「卸下后台服务」同一个判断
+  const leftover = gateway !== null && serviceLeftover(gateway);
   const inUse = gateway !== null && gateway.enabled;
 
   /// 卸下：恢复 Codex 设置、卸载后台服务。完成后这一行随状态消失；失败就在这一行说原因
