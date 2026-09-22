@@ -119,6 +119,8 @@ export interface DeleteSourcePlan {
   inGit: string | null;
   /// 别处同名的另一个本体；删完把 affected 改指到它。null 表示没有别处可指
   relinkTo: string | null;
+  /// 目录里普通文件最新的修改时间（Unix 毫秒）；没有文件或读不到时为 null
+  modified?: number | null;
 }
 
 /// 待处理栏里四类需要用户拿主意的问题，与 store.rs 的 IssueKind 一一对应。
@@ -244,6 +246,23 @@ export interface McpReportEntry {
 }
 export interface McpReport {
   entries: McpReportEntry[];
+  /** 撤销这次写入用的 id（交给 `api.mcpUndoWrite`）；没有可撤销的写入时为 null。
+   *  下一次写到同一文件、撤销过一次或应用退出后失效 */
+  undoId: string | null;
+}
+/** 撤销单个文件的结果 */
+export interface McpUndoFileResult {
+  targetPath: string;
+  /** 写入时留下的 `.mcp.bak`；新建文件的写入没有备份 */
+  backupPath: string | null;
+  outcome: "restored" | "removed" | "changed" | "unchanged" | "failed" | "skipped";
+  message: string;
+}
+/** 撤销结果。`changed`：有文件写后又被改过，整体拒绝、没动任何文件 */
+export interface McpUndoReport {
+  outcome: "undone" | "changed" | "failed";
+  message: string;
+  files: McpUndoFileResult[];
 }
 
 /** 自动导入 MCP 的来源/目标位置引用；位置消失后仍保留足够信息以撤销规则。 */

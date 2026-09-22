@@ -297,6 +297,151 @@ pub struct McpAction {
 #[serde(rename_all = "camelCase")]
 pub struct McpReport {
     pub entries: Vec<McpReportEntry>,
+    /// 命令层把 `undo` 登记进内存后填的撤销 id；core 从不填。没有可撤销的写入时为 `None`。
+    #[serde(default)]
+    pub undo_id: Option<String>,
+    /// 撤销记录含写前内容与写后指纹，不出进程：命令层用 `take_undo` 取走后只把 id 交给前端。
+    #[serde(skip)]
+    undo: McpUndo,
+}
+
+impl McpReport {
+    /// 取走本次写入的撤销记录。没有写入任何文件，或有写入无法撤销（如 WeiboAP 数据库、
+    /// 写后读回对不上）时返回 `None`：宁可不给撤销，也不给只撤一半的撤销。
+    pub fn take_undo(&mut self) -> Option<McpUndo> {
+        let undo = std::mem::take(&mut self.undo);
+        (!undo.blocked && !undo.files.is_empty()).then_some(undo)
+    }
+}
+
+/// 一次 MCP 写入（可能跨多个文件）的撤销记录。只能由 `execute` 产生，调用方无法伪造路径。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct McpUndo {
+    files: Vec<UndoFile>,
+    blocked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UndoFile {
+    target: PathBuf,
+    /// 写前状态：`Missing` 表示这次写入新建了文件，撤销即删掉它
+    before: FileState,
+    backup_path: Option<PathBuf>,
+    /// 写后立刻读回的状态；撤销前磁盘必须仍与它一致
+    written: FileState,
+}
+
+impl McpUndo {
+    /// 这次写入涉及的目标文件；命令层据此让同一文件的旧撤销记录失效。
+    pub fn target_paths(&self) -> impl Iterator<Item = &Path> {
+        self.files.iter().map(|file| file.target.as_path())
+    }
+}
+
+/// 撤销的整体结果。`changed` 时一个文件都没动。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpUndoReport {
+    /// `undone`：全部还原；`changed`：有文件写后又被改过，整体拒绝、未动任何文件；
+    /// `failed`：校验通过但还原途中出错，可能只还原了一部分，逐文件看 `files`
+    pub outcome: String,
+    pub message: String,
+    pub files: Vec<McpUndoFileResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpUndoFileResult {
+    pub target_path: PathBuf,
+    /// 写入时留下的 `.mcp.bak`；新建文件的写入没有备份。撤不了时前端据此「在访达中显示备份」
+    pub backup_path: Option<PathBuf>,
+    /// `restored` / `removed` / `changed`（写后被改过）/ `unchanged`（没被改过，但因别的文件被改过而未动）
+    /// / `failed` / `skipped`（前面的文件失败后未尝试）
+    pub outcome: String,
+    pub message: String,
+}
+
+pub const UNDO_CHANGED_MESSAGE: &str = "写入之后文件又被改过，没法安全撤销";
+
+/// 撤销一次 MCP 写入：先逐个确认所有目标仍是写后的样子，任何一个对不上就整体拒绝；
+/// 全部对得上再逐个还原（原有文件经 `atomicfile::atomic_write` 写回写前内容，新建的文件删掉，
+/// 不删父目录）。多文件无法原子地一起还原，途中失败会停下并逐文件报告。
+pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
+    let result = |file: &UndoFile, outcome: &str, message: &str| McpUndoFileResult {
+        target_path: file.target.clone(),
+        backup_path: file.backup_path.clone(),
+        outcome: outcome.into(),
+        message: message.into(),
+    };
+    let unchanged: Vec<bool> = undo
+        .files
+        .iter()
+        .map(|file| atomicfile::same(&file.target, &file.written))
+        .collect();
+    if unchanged.iter().any(|ok| !ok) {
+        return McpUndoReport {
+            outcome: "changed".into(),
+            message: UNDO_CHANGED_MESSAGE.into(),
+            files: undo
+                .files
+                .iter()
+                .zip(&unchanged)
+                .map(|(file, ok)| {
+                    if *ok {
+                        result(file, "unchanged", "未改动，因其他文件被改过而未撤销")
+                    } else {
+                        result(file, "changed", UNDO_CHANGED_MESSAGE)
+                    }
+                })
+                .collect(),
+        };
+    }
+    let mut files = Vec::new();
+    let mut failed = false;
+    for file in &undo.files {
+        if failed {
+            files.push(result(file, "skipped", "前面的文件撤销失败，未尝试"));
+            continue;
+        }
+        let restored = match &file.before {
+            FileState::Present(snap) => {
+                atomicfile::atomic_write(&file.target, &snap.bytes, &file.written)
+                    .map(|_| ("restored", "已还原为写入前的内容"))
+            }
+            FileState::Missing => remove_created(&file.target, &file.written)
+                .map(|_| ("removed", "已删除这次写入新建的文件")),
+        };
+        match restored {
+            Ok((outcome, message)) => files.push(result(file, outcome, message)),
+            Err(error) if error.to_string() == "changed" => {
+                failed = true;
+                files.push(result(file, "changed", UNDO_CHANGED_MESSAGE));
+            }
+            Err(_) => {
+                failed = true;
+                files.push(result(file, "failed", "撤销失败，文件保持原样"));
+            }
+        }
+    }
+    McpUndoReport {
+        outcome: if failed { "failed" } else { "undone" }.into(),
+        message: if failed {
+            "撤销没有全部完成，请逐个查看"
+        } else {
+            "已撤销这次写入"
+        }
+        .into(),
+        files,
+    }
+}
+
+/// 删掉这次写入新建的文件：删前紧挨着再校验一次仍是写后的样子（`read_state` 拒绝软链接）。
+fn remove_created(path: &Path, written: &FileState) -> io::Result<()> {
+    atomicfile::safe_parent(path)?;
+    if !atomicfile::same(path, written) {
+        return Err(io::Error::other("changed"));
+    }
+    fs::remove_file(path)
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1145,6 +1290,7 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
         }
         return;
     }
+    record_undo(report, path, &group[0].target, backup.clone(), &bytes);
     for (index, pending) in group.iter().enumerate() {
         report.entries.push(entry(
             &pending.action,
@@ -1152,6 +1298,34 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
             "已创建 MCP 定义",
             (index == 0).then(|| backup.clone()).flatten(),
         ));
+    }
+}
+
+/// 写成功后立刻读回，记下写后指纹。读回的内容不是我们刚写的（写后瞬间又被别人改了），
+/// 就不给这次写入撤销：记下别人的指纹会让撤销覆盖别人的改动。
+fn record_undo(
+    report: &mut McpReport,
+    path: &Path,
+    before: &State,
+    backup_path: Option<PathBuf>,
+    bytes: &[u8],
+) {
+    let before = match before {
+        State::Missing => FileState::Missing,
+        State::Present(snap) => FileState::Present(snap.clone()),
+        _ => {
+            report.undo.blocked = true;
+            return;
+        }
+    };
+    match atomicfile::read_state(path) {
+        Ok(FileState::Present(snap)) if snap.bytes == bytes => report.undo.files.push(UndoFile {
+            target: path.to_path_buf(),
+            before,
+            backup_path,
+            written: FileState::Present(snap),
+        }),
+        _ => report.undo.blocked = true,
     }
 }
 
@@ -1173,6 +1347,8 @@ fn execute_weibo_group(group: Vec<Pending>, report: &mut McpReport) {
     }
     match weiboap::write(&group) {
         Ok(backup) => {
+            // WeiboAP 写的是数据库，不走 atomicfile 快照，这一批不提供撤销
+            report.undo.blocked = true;
             for (index, pending) in group.iter().enumerate() {
                 report.entries.push(entry(
                     &pending.action,
@@ -2360,5 +2536,173 @@ mod tests {
             locations(&env, &[harness], &[])[0].path,
             PathBuf::from("/tmp/home/.codex/config.toml")
         );
+    }
+}
+
+#[cfg(test)]
+mod undo_tests {
+    use super::*;
+    use crate::test_support::TempTree;
+
+    fn loc(id: &str, path: &Path) -> McpLocation {
+        McpLocation {
+            id: id.into(),
+            label: id.into(),
+            harness_id: "claude-code".into(),
+            domain: "global".into(),
+            path: path.to_path_buf(),
+            selector: None,
+            matrix_hidden: false,
+        }
+    }
+
+    fn sel(target_id: &str) -> McpSelection {
+        McpSelection {
+            source_id: "source".into(),
+            name: "docs".into(),
+            target_id: target_id.into(),
+        }
+    }
+
+    /// source 里有一个 `docs`，写进各个 target；返回报告与取走的撤销记录
+    fn write(tree: &TempTree, targets: &[&Path]) -> (McpReport, McpUndo) {
+        let source = tree.root().join("source.json");
+        fs::write(&source, br#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        let mut locations = vec![loc("source", &source)];
+        let mut selections = Vec::new();
+        for (index, target) in targets.iter().enumerate() {
+            let id = format!("t{index}");
+            locations.push(loc(&id, target));
+            selections.push(sel(&id));
+        }
+        let mut report = execute(prepare(&locations, &selections), false);
+        assert!(report
+            .entries
+            .iter()
+            .all(|entry| entry.outcome == "created"));
+        let undo = report.take_undo().expect("有可撤销的写入");
+        (report, undo)
+    }
+
+    const ORIGINAL: &[u8] = b"{\n  \"mcpServers\": {},\n  \"keep\": 1\n}\n";
+
+    #[test]
+    fn untouched_write_restores_original_bytes() {
+        let tree = TempTree::new();
+        let target = tree.root().join("target.json");
+        fs::write(&target, ORIGINAL).unwrap();
+        let (report, undo) = write(&tree, &[&target]);
+        assert_ne!(fs::read(&target).unwrap(), ORIGINAL);
+
+        let result = undo_write(&undo);
+        assert_eq!(result.outcome, "undone");
+        assert_eq!(result.files[0].outcome, "restored");
+        assert_eq!(result.files[0].backup_path, report.entries[0].backup_path);
+        assert_eq!(fs::read(&target).unwrap(), ORIGINAL);
+    }
+
+    #[test]
+    fn undo_is_refused_after_external_modification() {
+        let tree = TempTree::new();
+        let target = tree.root().join("target.json");
+        fs::write(&target, ORIGINAL).unwrap();
+        let (_, undo) = write(&tree, &[&target]);
+        fs::write(&target, b"{\"mcpServers\":{},\"edited\":true}").unwrap();
+
+        let result = undo_write(&undo);
+        assert_eq!(result.outcome, "changed");
+        assert_eq!(result.message, UNDO_CHANGED_MESSAGE);
+        assert_eq!(result.files[0].outcome, "changed");
+        let backup = result.files[0].backup_path.clone().expect("有备份可显示");
+        assert_eq!(fs::read(backup).unwrap(), ORIGINAL);
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            b"{\"mcpServers\":{},\"edited\":true}"
+        );
+    }
+
+    #[test]
+    fn undo_of_created_file_removes_only_the_file() {
+        let tree = TempTree::new();
+        let dir = tree.root().join("new-dir");
+        let target = dir.join("target.json");
+        let (report, undo) = write(&tree, &[&target]);
+        assert!(target.is_file());
+        assert_eq!(report.entries[0].backup_path, None);
+
+        let result = undo_write(&undo);
+        assert_eq!(result.outcome, "undone");
+        assert_eq!(result.files[0].outcome, "removed");
+        assert!(fs::symlink_metadata(&target).is_err());
+        assert!(dir.is_dir(), "父目录保留");
+    }
+
+    #[test]
+    fn created_file_edited_afterwards_is_not_removed() {
+        let tree = TempTree::new();
+        let target = tree.root().join("target.json");
+        let (_, undo) = write(&tree, &[&target]);
+        fs::write(&target, b"{\"mcpServers\":{}}").unwrap();
+
+        assert_eq!(undo_write(&undo).outcome, "changed");
+        assert_eq!(fs::read(&target).unwrap(), b"{\"mcpServers\":{}}");
+    }
+
+    #[test]
+    fn batch_is_refused_whole_if_any_file_changed() {
+        let tree = TempTree::new();
+        let first = tree.root().join("first.json");
+        let second = tree.root().join("second.json");
+        fs::write(&first, ORIGINAL).unwrap();
+        fs::write(&second, ORIGINAL).unwrap();
+        let (_, undo) = write(&tree, &[&first, &second]);
+        let first_written = fs::read(&first).unwrap();
+        fs::write(&second, b"{}").unwrap();
+
+        let result = undo_write(&undo);
+        assert_eq!(result.outcome, "changed");
+        let outcome = |path: &Path| {
+            result
+                .files
+                .iter()
+                .find(|file| file.target_path == path)
+                .unwrap()
+                .outcome
+                .clone()
+        };
+        assert_eq!(outcome(&first), "unchanged");
+        assert_eq!(outcome(&second), "changed");
+        assert_eq!(fs::read(&first).unwrap(), first_written, "未改动的也不动");
+        assert_eq!(fs::read(&second).unwrap(), b"{}");
+    }
+
+    #[test]
+    fn batch_undo_restores_every_file() {
+        let tree = TempTree::new();
+        let first = tree.root().join("first.json");
+        let second = tree.root().join("second.json");
+        fs::write(&first, ORIGINAL).unwrap();
+        let (_, undo) = write(&tree, &[&first, &second]);
+        assert_eq!(undo.target_paths().count(), 2);
+
+        let result = undo_write(&undo);
+        assert_eq!(result.outcome, "undone");
+        assert_eq!(fs::read(&first).unwrap(), ORIGINAL);
+        assert!(fs::symlink_metadata(&second).is_err());
+    }
+
+    #[test]
+    fn failed_write_has_no_undo() {
+        let tree = TempTree::new();
+        let source = tree.root().join("source.json");
+        let target = tree.root().join("target.json");
+        fs::write(&source, br#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        fs::write(&target, ORIGINAL).unwrap();
+        let locations = vec![loc("source", &source), loc("t0", &target)];
+        let plan = prepare(&locations, &[sel("t0")]);
+        fs::write(&target, b"{\"mcpServers\":{}}").unwrap();
+        let mut report = execute(plan, false);
+        assert_eq!(report.entries[0].outcome, "failed");
+        assert!(report.take_undo().is_none());
     }
 }

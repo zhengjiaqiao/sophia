@@ -26,6 +26,10 @@ struct AppState {
     watcher: Mutex<Option<watch::Watcher>>,
     mcp_plan: Mutex<Option<(String, symsync_core::mcp::PreparedPlan)>>,
     next_mcp_plan: AtomicU64,
+    /// MCP 写入的撤销记录，按随机 id 存在内存里：前端只拿 id，碰不到路径和快照。
+    /// 下一次写到同一文件时旧记录失效（那次写会留新备份、换新指纹），用过一次即删，退出即丢
+    mcp_undo: Mutex<Vec<(String, symsync_core::mcp::McpUndo)>>,
+    next_mcp_undo: AtomicU64,
     /// 待确认的删本体计划。计划必须留在服务端：`in_git`（仓库里的不代删）是道安全闸门，
     /// 让它在前端转一圈就等于可以被改掉
     delete_plan: Mutex<Option<(String, DeleteSourcePlan)>>,
@@ -158,7 +162,46 @@ fn auto_import_mcp(
     // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
     // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
-    Ok(Some(symsync_core::mcp::execute(plan, true)))
+    let mut report = symsync_core::mcp::execute(plan, true);
+    register_mcp_undo(state, &mut report)?;
+    Ok(Some(report))
+}
+
+/// 最多保留的撤销记录数；前端提示条同一时刻只有几条，多出的最旧记录直接丢
+const MCP_UNDO_LIMIT: usize = 16;
+
+/// 把这次写入的撤销记录登记进内存，id 写回报告。同一文件的旧记录一并作废。
+fn register_mcp_undo(
+    state: &AppState,
+    report: &mut symsync_core::mcp::McpReport,
+) -> Result<(), String> {
+    let Some(undo) = report.take_undo() else {
+        return Ok(());
+    };
+    let mut records = state
+        .mcp_undo
+        .lock()
+        .map_err(|_| "MCP 撤销记录已损坏".to_string())?;
+    let targets: BTreeSet<PathBuf> = undo.target_paths().map(normalize).collect();
+    records.retain(|(_, old)| {
+        !old.target_paths()
+            .any(|path| targets.contains(&normalize(path)))
+    });
+    if records.len() >= MCP_UNDO_LIMIT {
+        records.remove(0);
+    }
+    let id = mcp_undo_id(state.next_mcp_undo.fetch_add(1, Ordering::Relaxed));
+    records.push((id.clone(), undo));
+    report.undo_id = Some(id);
+    Ok(())
+}
+
+/// 进程内随机种子 + 序号，不可预测也不重复；安全性不靠它（记录只能由 core 的写入产生）
+fn mcp_undo_id(sequence: u64) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u64(sequence);
+    format!("{:016x}-{sequence}", hasher.finish())
 }
 
 /// 规则引用的是配置文件，原子写会替换文件本身，故只监视其父目录。
@@ -283,7 +326,30 @@ fn apply_mcp(
     // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
     // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
-    Ok(symsync_core::mcp::execute(plan, allow_cross_domain))
+    let mut report = symsync_core::mcp::execute(plan, allow_cross_domain);
+    register_mcp_undo(&state, &mut report)?;
+    Ok(report)
+}
+
+/// 撤销一次 MCP 写入。记录用过即删；写后文件被改过时 core 整体拒绝，返回里带备份路径
+#[tauri::command]
+fn mcp_undo_write(
+    undo_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<symsync_core::mcp::McpUndoReport, String> {
+    let undo = {
+        let mut records = state
+            .mcp_undo
+            .lock()
+            .map_err(|_| "MCP 撤销记录已损坏".to_string())?;
+        let index = records
+            .iter()
+            .position(|(id, _)| id == &undo_id)
+            .ok_or("撤销记录不存在或已过期")?;
+        records.remove(index).1
+    };
+    let _config_guard = state.config_lock.blocking_lock();
+    Ok(symsync_core::mcp::undo_write(&undo))
 }
 
 /// 自动同步规则展开成建链动作并执行；无规则或没有缺口时返回 None
@@ -753,6 +819,8 @@ pub fn run() {
             watcher: Mutex::new(None),
             mcp_plan: Mutex::new(None),
             next_mcp_plan: AtomicU64::new(1),
+            mcp_undo: Mutex::new(Vec::new()),
+            next_mcp_undo: AtomicU64::new(1),
             delete_plan: Mutex::new(None),
             next_delete_plan: AtomicU64::new(1),
         })
@@ -762,6 +830,7 @@ pub fn run() {
             mcp_field_diff,
             propose_mcp_sync,
             apply_mcp,
+            mcp_undo_write,
             propose_links,
             propose_unlinks,
             apply_all,

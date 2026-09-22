@@ -17,6 +17,7 @@ import type {
   McpOverview,
   McpPreview,
   McpReport,
+  McpUndoReport,
   McpSelection,
   McpAutoImportRule,
   McpDiff,
@@ -85,6 +86,8 @@ export const api = {
     invoke<McpPreview>("propose_mcp_sync", { selections }),
   applyMcp: (planId: string, allowCrossDomain: boolean) =>
     invoke<McpReport>("apply_mcp", { planId, allowCrossDomain }),
+  /// 撤销一次 MCP 写入；id 不存在或已过期时 reject「撤销记录不存在或已过期」
+  mcpUndoWrite: (undoId: string) => invoke<McpUndoReport>("mcp_undo_write", { undoId }),
   listMcpAutoImports: () => invoke<McpAutoImportRule[]>("list_mcp_auto_imports"),
   setMcpAutoImport: (
     sourceId: string,
