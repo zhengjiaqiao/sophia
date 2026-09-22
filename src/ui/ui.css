@@ -51,6 +51,9 @@
 
 .ss-dot--own {
   display: inline-flex;
+  /* 按钮里嵌 <Plain> 包专名时，文字被拆成几个匿名 flex item，item 间的空白会被
+     flex 吃掉——「重启 Codex」渲染成「重启Codex」。pre 让那个空格留下（按钮本来就不换行） */
+  white-space: pre;
   align-items: center;
   justify-content: center;
   width: 13px;
