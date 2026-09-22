@@ -1109,6 +1109,25 @@ test("网关短名：显示名优先；否则主机名去掉 api. / www. 与顶�
   assert.equal(gatewayShortName(gw("  ", "")), "x", "什么都取不到时退到 id");
 });
 
+test("网关短名：显示名像主机名时也走短名规则；多级子域取去掉 api. / www. 后的第一段", () => {
+  const gw = (name: string, baseUrl = "") => provider({ id: "x", name, baseUrl });
+  // core 迁移来的网关被命名为完整主机名（settings.rs legacy_name）
+  assert.equal(gatewayShortName(gw("openrouter.ai")), "openrouter");
+  assert.equal(gatewayShortName(gw("api.deepseek.com")), "deepseek");
+  assert.equal(gatewayShortName(gw("ap-gateway.internal.example.com")), "ap-gateway");
+  assert.equal(gatewayShortName(gw("127.0.0.1:8080")), "127.0.0.1");
+  assert.equal(
+    gatewayShortName(gw("", "https://ap-gateway.internal.example.com/v1")),
+    "ap-gateway",
+  );
+  assert.equal(gatewayShortName(gw("", "https://api.deepseek.com")), "deepseek");
+  assert.equal(gatewayShortName(gw("", "http://localhost:4000")), "localhost");
+  assert.equal(gatewayShortName(gw("", "http://10.0.0.2:4000")), "10.0.0.2");
+  // 不像主机名的显示名原样：含空格、不含点
+  assert.equal(gatewayShortName(gw("My Gateway v1.2")), "My Gateway v1.2");
+  assert.equal(gatewayShortName(gw("ap-gateway")), "ap-gateway");
+});
+
 test("行尾网关短名：entries 跨 ≥2 个网关才写，id 在前、网关名在后；单网关不写", () => {
   const a = provider({ id: "a", name: "", baseUrl: "https://openrouter.ai/api/v1" });
   const b = provider({ id: "b", name: "ap-gateway", baseUrl: "https://x.example.com" });

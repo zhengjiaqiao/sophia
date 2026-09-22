@@ -320,20 +320,23 @@ export function showGatewayNames(entries: ModelEntry[]): boolean {
 
 const IP_HOST = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])$/i;
 
+/// 显示名本身像主机名（迁移来的网关被 core 命名为完整主机名，`openrouter.ai`）：不含空格、含点、能按主机名解析
+const HOST_LIKE = /^[a-z0-9.-]+(:\d+)?$/i;
+
 /**
- * 行尾的网关短名：显示名优先；没有时取地址主机名的主体——去掉 `api.` `www.` 前缀和顶级域
- * （`https://openrouter.ai/api/v1` → `openrouter`，`localhost:4000` → `localhost`），IP 原样
+ * 行尾的网关短名：显示名优先；显示名本身像主机名、或没有显示名时，按主机名取短名——
+ * 去掉开头的 `api.` / `www.` 后取第一段（`ap-gateway.internal.example.com` → `ap-gateway`，
+ * `https://openrouter.ai/api/v1` → `openrouter`，`localhost:4000` → `localhost`），IP 原样
  */
 export function gatewayShortName(provider: GatewayProvider): string {
   const name = provider.name.trim();
-  if (name) return name;
-  const host = hostOf(provider.baseUrl);
+  if (name && !(name.includes(".") && HOST_LIKE.test(name) && hostOf(name))) return name;
+  const host = hostOf(name || provider.baseUrl);
   if (!host) return provider.id;
   if (IP_HOST.test(host)) return host;
   const labels = host.split(".").filter(Boolean);
   while (labels.length > 1 && (labels[0] === "api" || labels[0] === "www")) labels.shift();
-  if (labels.length > 1) labels.pop();
-  return labels.join(".") || provider.id;
+  return labels[0] || provider.id;
 }
 
 /// 地址里的主机名（小写）；没写协议的（`localhost:4000`）补上再解析
