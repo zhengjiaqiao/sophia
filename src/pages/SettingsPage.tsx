@@ -1,14 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { HarnessStatus } from "../types";
-import { AgentIcon, Button, Chip, Empty, RowNotice, SubPage } from "../ui";
+import { AgentIcon, BlackNotice, Button, Empty, SubPage } from "../ui";
+import { CheckMark } from "./CheckMark.tsx";
 import "./SettingsPage.css";
 
-/// 设置页（组件规范 §4.6、§13.1）：占满整窗的二级页面，不渲染侧栏。
-/// 它只回答一个问题——**这个 agent 出不出现在矩阵里**。
+/// 设置页（DESIGN「产品裁决 › 设置页」，画板 Settings）：占满整窗的二级页面，不渲染侧栏。
+/// 它只回答一个问题——**这个 agent 出不出现在列表里**。
+///
+/// 复选框列表，三列「复选框 + 图标 + 名字」，行高 34；默认只列已安装的，其余收在
+/// `显示未安装的 N 个` 后面。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
+/// **取消勾选那一刻在该行旁出现**，4 秒后淡出（① 信息在对的时间出现）。
+/// 再往下 48：`关于`——版本（等宽）+ `检查更新 ↗`。
 ///
 /// 改一个生效一个，返回即走，**没有「保存」按钮**；Esc 与 ← 都回主视图（SubPage 负责）。
 ///
@@ -23,7 +30,13 @@ import "./SettingsPage.css";
 /// 其余收在「显示未安装的 N 个」后面——没装的也能预先开启，所以要给入口。
 type AgentOption = HarnessStatus;
 
-/// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内待办条（§4.4）：
+/// 取消勾选时行旁那句话停留多久
+const UNCHECK_NOTE_MS = 4000;
+
+/// 发布页：`检查更新 ↗` 去这里（离开 Sophia 的文字链）
+const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
+
+/// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内黑窗：
 /// 有新版、装好了等重开、没装上。查的过程和下载的过程都不要用户决定什么。
 type UpdateState =
   | { kind: "quiet" }
@@ -106,7 +119,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     if (later) return null;
     switch (update.kind) {
       case "quiet":
-        return null;
+        return latest ? <div className="settings-page__note">已经是最新版本</div> : null;
       case "downloading":
         return (
           <div className="settings-page__note">
@@ -116,74 +129,124 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         );
       case "ready":
         return (
-          <RowNotice
+          <BlackNotice
             message={
               <>
                 Sophia <span className="settings-page__version">{update.update.version}</span>{" "}
-                出来了。
+                出来了
               </>
             }
-            actions={[{ label: "取回来装上", onClick: () => void install(update.update) }]}
-            onLater={() => setLater(true)}
+            action={{ label: "取回来装上", onClick: () => void install(update.update) }}
+            link={{ label: "稍后", onClick: () => setLater(true) }}
           />
         );
       case "installed":
         return (
-          <RowNotice
+          <BlackNotice
             message={
               <>
                 <span className="settings-page__version">{update.version}</span>{" "}
-                装好了，重开一次就用上它。
+                装好了，重开一次就用上它
               </>
             }
-            actions={[{ label: "重开", onClick: () => void relaunch() }]}
-            onLater={() => setLater(true)}
+            action={{ label: "重开", onClick: () => void relaunch() }}
+            link={{ label: "稍后", onClick: () => setLater(true) }}
           />
         );
       case "failed":
         return (
-          <RowNotice
-            message={`${update.version} 没装上——${update.reason}`}
-            actions={[
-              {
-                label: "再试一次",
-                onClick: () =>
-                  void check().then(
-                    (found) => found && install(found),
-                    () => {},
-                  ),
-              },
-            ]}
-            onLater={() => setLater(true)}
+          <BlackNotice
+            message={`${update.version} 没装上：${update.reason}`}
+            action={{
+              label: "再试一次",
+              onClick: () =>
+                void check().then(
+                  (found) => found && install(found),
+                  () => {},
+                ),
+            }}
+            link={{ label: "稍后", onClick: () => setLater(true) }}
           />
         );
     }
   };
 
-  /// 点一下切换。写盘成功后重读一次，界面始终以落盘结果为准
+  /// 退回应用内检查且没有新版时，版本旁说一句
+  const [latest, setLatest] = useState(false);
+
+  /// 刚取消勾选的那一行：行旁出一句说明，4 秒后淡出
+  const [unchecked, setUnchecked] = useState<string | null>(null);
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (noteTimer.current) clearTimeout(noteTimer.current);
+    },
+    [],
+  );
+
+  /// 点一下切换，当场生效。写盘成功后重读一次，界面始终以落盘结果为准
   const toggle = async (id: string, enabled: boolean) => {
     try {
       await api.setHarnessEnabled(id, enabled);
+      if (noteTimer.current) clearTimeout(noteTimer.current);
+      if (enabled) setUnchecked(null);
+      else {
+        setUnchecked(id);
+        noteTimer.current = setTimeout(() => setUnchecked(null), UNCHECK_NOTE_MS);
+      }
       await reload();
     } catch (e) {
       onError(String(e));
     }
   };
 
-  const chip = (agent: AgentOption) => (
-    <Chip
-      key={agent.id}
-      icon={<AgentIcon id={agent.id} name={agent.displayName} />}
-      selected={agent.enabled}
-      title={
-        agent.enabled
-          ? `点一下，矩阵里不再显示 ${agent.displayName}`
-          : `点一下，让 ${agent.displayName} 出现在矩阵里`
+  /// `检查更新 ↗`：去发布页。打不开网页（权限没放行、没有浏览器）就退回在应用里查一次，
+  /// 查到新版照常出黑窗——用户要的是「有没有新版」，不是那个网页本身
+  const checkUpdate = async () => {
+    try {
+      await openUrl(RELEASES_URL);
+    } catch {
+      setLater(false);
+      try {
+        const found = await check();
+        if (found) setUpdate({ kind: "ready", update: found });
+        else setLatest(true);
+      } catch (e) {
+        onError(`查不到新版本：${String(e)}`);
       }
-      onClick={() => void toggle(agent.id, !agent.enabled)}
+    }
+  };
+
+  /// 整行是按钮：命中区是整行，方框只是记号
+  const row = (agent: AgentOption) => (
+    <div key={agent.id} className="settings-page__cell">
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={agent.enabled}
+        className={`settings-page__row${unchecked === agent.id ? " is-noted" : ""}`}
+        onClick={() => void toggle(agent.id, !agent.enabled)}
+      >
+        <CheckMark on={agent.enabled} />
+        <AgentIcon id={agent.id} name={agent.displayName} />
+        <span className="settings-page__name">{agent.displayName}</span>
+      </button>
+      {unchecked === agent.id ? (
+        <span className="settings-page__rownote" role="status">
+          不在列表里显示了，已建好的链接原样留着
+        </span>
+      ) : null}
+    </div>
+  );
+
+  /// 三列、按列读（字母序竖着看）：行数取总数的三分之一向上取整
+  const grid = (list: AgentOption[]) => (
+    <div
+      className="settings-page__grid"
+      style={{ gridTemplateRows: `repeat(${Math.max(1, Math.ceil(list.length / 3))}, auto)` }}
     >
-      {agent.displayName}
-    </Chip>
+      {list.map(row)}
+    </div>
   );
 
   const present = (agents ?? []).filter((a) => a.installed);
@@ -192,19 +255,8 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   return (
     <SubPage title="设置" onBack={onBack}>
       <div className="settings-page">
-        {/* 版本一行摆在最前面：没有新版时它就是全部，有新版时提示条挂在它下面（§4.4）。
-            不给「检查更新」按钮——进来就已经查过了，按钮只会让人怀疑它没在查。 */}
-        <div className="settings-page__head">
-          <span className="settings-page__label">版本</span>
-          <span className="settings-page__version">{current ?? "…"}</span>
-        </div>
-        <div className="settings-page__update">{updateNotice()}</div>
-
-        <div className="settings-page__head settings-page__head--later">
-          <span className="settings-page__label">Agent</span>
-          {/* 说明句不大写：被谈论的对象一律不大写（§1.2） */}
-          <span className="settings-page__note">哪些 agent 出现在矩阵里</span>
-        </div>
+        {/* 区块小标：贴 1px ink 分组线下沿 6（DESIGN「刻字」）；句子里的 agent 不大写 */}
+        <div className="settings-page__section">哪些 agent 出现在列表里</div>
 
         {agents === null ? (
           <Empty kind="scanning" description="读取中…" />
@@ -212,11 +264,9 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           <div className="settings-page__note">本机上还没有发现任何 agent。</div>
         ) : (
           <>
-            {/* 选择片网格，不是一行一个复选框（§13.1） */}
-            <div className="settings-page__grid">{present.map(chip)}</div>
-
+            {grid(present)}
             {/* 没装的收在一行文字链后面：列出来只是噪音，但要留入口——
-                用户可能想预先开启，装上之后就直接在矩阵里了 */}
+                用户可能想预先开启，装上之后就直接在列表里了 */}
             {absent.length > 0 ? (
               <>
                 <div className="settings-page__more">
@@ -226,19 +276,23 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
                       : `显示未安装的 ${absent.length} 个`}
                   </Button>
                 </div>
-                {showAbsent ? (
-                  <div className="settings-page__grid settings-page__grid--absent">
-                    {absent.map(chip)}
-                  </div>
-                ) : null}
+                {showAbsent ? <div className="settings-page__absent">{grid(absent)}</div> : null}
               </>
             ) : null}
           </>
         )}
 
-        <div className="settings-page__foot">
-          关掉一个 agent 只是不在矩阵里显示它，已经建好的链接原样留在磁盘上，不删，再打开就回来。
+        <div className="settings-page__section settings-page__section--later">关于</div>
+        <div className="settings-page__about">
+          <span className="settings-page__name">版本</span>
+          <span className="settings-page__version">{current ?? "…"}</span>
+          <span className="settings-page__check">
+            <Button variant="external" onClick={() => void checkUpdate()}>
+              检查更新
+            </Button>
+          </span>
         </div>
+        <div className="settings-page__update">{updateNotice()}</div>
       </div>
     </SubPage>
   );

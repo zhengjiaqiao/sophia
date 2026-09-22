@@ -1,80 +1,147 @@
-/* 设置页的排版（组件规范 §4.6 二级页面、§13.1 agent 选择）。
-   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零圆角。 */
+/* 设置页（DESIGN「产品裁决 › 设置页」，画板 Settings）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影。 */
 @import "../tokens.css";
 
 .settings-page {
-  box-sizing: border-box;
-  max-width: 760px;
-  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
+  width: 744px;
+  max-width: 100%;
+  padding: var(--space-xxl) var(--space-xxl) var(--space-xxl);
+  box-sizing: content-box;
 }
 
-/* 区域标签是我们自己写的结构词，大写；后面那句是说明，不大写（§1.2） */
-.settings-page__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
-}
-
-.settings-page__label {
-  font-family: var(--font-cond);
+/* 区块小标：贴 1px ink 分组线下沿 6；汉字 600 字距 0，ink-mute（DESIGN「刻字」） */
+.settings-page__section {
+  padding: 6px 0 0 var(--space-xs);
+  border-top: 1px solid var(--ink);
+  font-family: var(--font-ui);
   font-size: var(--size-micro);
   font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-transform: uppercase;
+  line-height: var(--leading-caption);
   color: var(--ink-mute);
+}
+
+.settings-page__section--later {
+  margin-top: var(--space-huge);
+}
+
+/* 三列按列读，列宽 240、列距 12 */
+.settings-page__grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: repeat(3, 240px);
+  column-gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.settings-page__cell {
+  position: relative;
+}
+
+/* 一行 = 复选框 12 + 图标 16 + 名字；整行是命中区，悬停 surface 底 */
+.settings-page__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--space-xs);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.settings-page__row:hover,
+.settings-page__row.is-noted {
+  background: var(--surface);
+}
+
+.settings-page__row:hover .ss-checkbox {
+  border-color: var(--ink);
+}
+
+.settings-page__row:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.settings-page__name {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  white-space: nowrap;
+}
+
+/* 取消勾选那一刻行旁出的一句：12 ink-mute，4 秒后淡出（淡出只在最后 120ms） */
+.settings-page__rownote {
+  position: absolute;
+  top: 0;
+  left: calc(100% + var(--space-sm));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: var(--row-h);
+  padding-right: var(--space-xs);
+  background: var(--canvas);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  color: var(--ink-mute);
+  white-space: nowrap;
+  animation: settings-note-out var(--motion-fast) var(--ease-mech) 3880ms forwards;
+}
+
+@keyframes settings-note-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page__rownote {
+    animation: none;
+  }
+}
+
+.settings-page__more {
+  margin-top: var(--space-sm);
+  padding-left: var(--space-xs);
+}
+
+.settings-page__absent .settings-page__row:not([aria-checked="true"]) .settings-page__name {
+  color: var(--ink-faint);
+}
+
+.settings-page__about {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: var(--row-h);
+  margin-top: var(--space-xs);
+  padding-left: var(--space-xs);
+}
+
+/* 版本号是标识符，等宽 */
+.settings-page__version {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.settings-page__check {
+  margin-left: var(--space-sm);
+}
+
+.settings-page__update {
+  margin-top: var(--space-xs);
+  padding-left: var(--space-xs);
 }
 
 .settings-page__note {
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   color: var(--ink-mute);
-}
-
-/* 版本号是标识符不是句子，走等宽（§排版：mono 只给路径与计数） */
-.settings-page__version {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-mute);
-}
-
-/* 「版本」和「Agent」是两个区，按区距分开（§留白）。
-   中间那个 __update 盒子没有提示条时高度为零，这条外距照样把两区拉开 */
-.settings-page__head--later {
-  margin-top: var(--space-huge);
-}
-
-/* 一行放得下 4–5 片，已安装的 9 个两行完事（§13.1） */
-.settings-page__grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-}
-
-/* 选中片是反色，首字母方块的描边跟着转白，否则黑底上一圈浅灰很脏 */
-.settings-page .ss-chip.is-selected .ss-mark__box {
-  border-color: var(--canvas);
-}
-
-/* 没装的那些：形状不变、字色更轻。它们仍然可以预先开启，所以不是禁用态 */
-.settings-page__grid--absent {
-  margin-top: var(--space-sm);
-}
-
-.settings-page__grid--absent .ss-chip:not(.is-selected) {
-  color: var(--ink-faint);
-}
-
-.settings-page__more {
-  margin-top: var(--space-md);
-}
-
-.settings-page__foot {
-  max-width: 560px;
-  margin-top: var(--space-huge);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-  line-height: var(--leading-caption);
 }
