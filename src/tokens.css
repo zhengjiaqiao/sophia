@@ -50,9 +50,6 @@
   --track-title: 1.9px;
   --track-head: 1.1px;
   --track-nav: 1.17px; /* 顶栏拉丁页签 */
-  /* @deprecated 按钮不再走 Condensed 大写（DESIGN「Typography」第 2 条），字距归零。
-     App.css 还有一处引用，T2 改壳时删 */
-  --track-button: 0;
   --track-label: 0.96px;
 
   /* ---- 间距（DESIGN「Layout」）：基准 8px，留白往大了给 ---- */

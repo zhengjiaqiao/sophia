@@ -66,12 +66,11 @@ button.link {
   text-decoration: underline;
 }
 
-/* ===== 外壳 =====
+/* ===== 外壳（DESIGN「壳」，画板 Main 顶栏与侧栏） =====
    系统标题栏隐藏了（titleBarStyle: Overlay），红绿灯浮在窗口左上角那 28px 里。
-   那一排**留空**，只当拖动区；字标与页签在它下面的 56px 里——和红绿灯挤在
-   同一排太靠上（真机反馈）。所以顶栏总高 84 = 28 空 + 56 内容。
-   顶栏是自己的盒子（`.topbar`），不挂在侧栏下面：模型页不要侧栏，字标与页签
-   不能跟着一起消失。 */
+   那一排**留空**，只当拖动区；字标与页签在它下面的 56px 里。顶栏总高 84 = 28 空 + 56 内容，
+   底边 hairline（顶栏不是面板）。顶栏是自己的盒子，不挂在侧栏下面：模型页不要侧栏，
+   字标与页签不能跟着一起消失。 */
 .app {
   position: relative;
   box-sizing: border-box;
@@ -89,173 +88,194 @@ button.link {
   display: flex;
   align-items: center;
   height: calc(var(--titlestrip) + var(--topbar));
-  padding-top: var(--titlestrip);
+  padding: var(--titlestrip) var(--space-xxl) 0;
   border-bottom: 1px solid var(--hairline);
 }
 
+.topbar__mark {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+/* 字标高 26：20px 时首字母后面那层灰影只有 1px 位移，读起来像套印错位（DESIGN「壳」）。
+   宽随 3304:916 的比例；重影的三档灰在 SVG 里，不进 src 的色值检查 */
+.topbar__mark .wordmark {
+  display: block;
+  height: 26px;
+  width: auto;
+}
+
+/* 页签：字标后 32，彼此 24。拉丁 run 由 <Cap tone="nav"> 套 Condensed 大写 + 字距，
+   汉字 Barlow / 苹方 15/700、字距 0（DESIGN「三个字族都没有中文字形」） */
+.topbar__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  margin-left: var(--space-xxl);
+}
+
+.topbar__tab {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-nav);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-mech),
+    border-color var(--motion-fast) var(--ease-mech);
+}
+
+.topbar__tab:hover:not(:disabled),
+.topbar__tab.is-active {
+  color: var(--ink);
+}
+
+.topbar__tab.is-active {
+  border-bottom-color: var(--ink);
+}
+
+/* 忙时页签不能切（切页会丢掉进行中的那一轮），但字色不降档：它们只是暂时按不动 */
+.topbar__tab:disabled {
+  border-color: transparent;
+  color: var(--ink-mute);
+  cursor: default;
+}
+
+.topbar__tab.is-active:disabled {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 右端：[转盘 18] 收件箱 设置，间距 4 */
+.topbar__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  margin-left: auto;
+}
+
+/* 侧栏：白，186 宽 + 1px hairline 分隔；顶部区块小标「位置」，项高 36，
+   选中 surface 底 + ink 字、其余 ink-mute；底部 48 一格放 `+ 项目` */
 .sidebar {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   width: 186px;
   flex-shrink: 0;
-  padding: var(--space-sm) 0;
+  min-height: 0;
   border-right: 1px solid var(--hairline);
 }
 
-/* wordmark 档（Condensed 20/700/1.9px/大写） */
-.topbar h1 {
-  display: flex;
-  align-items: center;
-  height: var(--topbar);
-  margin: 0 0 0 var(--space-xxl);
-  font-family: var(--font-cond);
-  font-size: var(--size-wordmark);
-  font-weight: 700;
-  letter-spacing: var(--track-title);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-/* 字标：高 20（wordmark 档），宽随 3304:916 的比例；重影的三档灰在 SVG 里，
-   不进 src 的色值检查 */
-.topbar h1 .wordmark {
-  display: block;
-  height: 20px;
-  width: auto;
-}
-
-/* tab 与内容区左缘对齐：wordmark 的实际宽度随字体回退浮动，不拿它当基准。
-   侧栏 186px + 内容区 32px 页边＝218，所以字标之后补到 218 为止。
-   模型页没有侧栏，页签照样停在这个位置——对齐的是内容区左缘，不是侧栏边界。 */
-/* 设置：顶栏右端。全局入口，每一页都够得着；命中区 32×32（>= --hit-min），
-   静息只有图标、没有描边——顶栏上再摆一枚 pill 会和页签抢 */
-.topbar__settings {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin-left: auto;
-  margin-right: var(--space-xxl);
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
+.sidebar__label {
+  padding: var(--space-md) var(--space-md) 0;
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: var(--leading-micro);
   color: var(--ink-mute);
-  transition: color var(--motion-fast) ease;
 }
 
-.topbar__settings:hover {
-  color: var(--ink);
-}
-
-.topbar nav {
-  position: absolute;
-  left: 218px;
-  top: var(--titlestrip);
-  align-items: center;
-  height: var(--topbar);
-}
-
-/* micro-cap 档（Condensed 12/600/0.96px/大写，行高 2.0）。内联的 gap: 4px 改不动，
-   差的那段用 margin 补到画稿的 26px */
-/* 顶栏页签是一级导航，走 nav-cap（DESIGN「层级」）：比普通按钮高半档。
-   留白那轮漏改、一直停在 12px 的标签档，挨着 20px 的 wordmark 显得极小。
-   可点高度撑到 36px，下划线仍贴文字底部 */
-.topbar nav button {
-  margin-right: 22px;
-  padding: 6px 0 4px;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  border-radius: 0;
-  background: none;
-  color: var(--ink-mute);
-  font-family: var(--font-cond);
-  font-size: var(--size-nav);
-  font-weight: 700;
-  letter-spacing: var(--track-button);
-  line-height: var(--leading-body);
-  text-transform: uppercase;
-}
-
-.topbar nav button:last-child {
-  margin-right: 0;
-}
-
-.topbar nav button.active {
-  border-bottom-color: var(--ink);
-  color: var(--ink);
-}
-
-.sidebar ul {
+.sidebar__list {
   flex: 1;
+  min-height: 0;
   margin: 0;
   padding: 0;
   list-style: none;
   overflow: auto;
 }
 
-/* 侧栏项高 36（DESIGN「Layout」）：定高，不靠内边距凑 */
-.sidebar li {
+.sidebar__list li {
   box-sizing: border-box;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: var(--space-xs);
-  min-height: 36px;
-  padding: 0 var(--space-md);
+  gap: var(--space-xxs);
+  height: 36px;
+  padding: 0 var(--space-xs) 0 var(--space-md);
   color: var(--ink-mute);
   font-size: var(--size-body);
+  line-height: var(--leading-caption);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-mech),
+    color var(--motion-fast) var(--ease-mech);
 }
 
-/* 选中项是次级面的浅底，不是色块（§1.1） */
-.sidebar li.active {
+.sidebar__list li:hover {
+  color: var(--ink);
+}
+
+.sidebar__list li.is-active {
   background: var(--surface);
   color: var(--ink);
 }
 
-.sidebar li span {
+.sidebar__name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 侧栏手动项目的移除按钮：不随标签一起被挤掉 */
-.sidebar li button.remove {
-  flex: none;
-  color: var(--ink-faint);
+/* 手动项目的移除键只在悬停 / 选中 / 键盘聚焦时出现：静止时不和名字抢（① 回应只由用户唤起） */
+.sidebar__remove {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
 }
 
-/* 侧栏底部的两条动作：区域标签档，不是按钮形——它们不是 pill（§3.1） */
-.sidebar > button {
+.sidebar__list li:hover .sidebar__remove,
+.sidebar__list li.is-active .sidebar__remove,
+.sidebar__remove:focus-within {
+  opacity: 1;
+}
+
+.sidebar__foot {
   display: flex;
   align-items: center;
-  gap: var(--space-xs);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: 48px;
   padding: 0 var(--space-md);
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--ink-mute);
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-align: left;
-  text-transform: uppercase;
-}
-
-.sidebar > ul + button {
-  margin-top: var(--space-sm);
-  padding-top: var(--space-sm);
   border-top: 1px solid var(--hairline);
 }
 
-.sidebar > button:last-child {
-  padding-top: var(--space-xxs);
-  padding-bottom: var(--space-sm);
+/* 应用级故障：内容区顶上通栏黑窗，不自动消失 */
+.content__banner {
+  margin: 0 calc(-1 * var(--space-xxl));
+}
+
+.content--bleed .content__banner {
+  margin: 0;
+}
+
+/* 无关位置的全局事（背后自动添加了 MCP）：右下，底 16 */
+.app__toast {
+  position: fixed;
+  right: var(--space-xxl);
+  bottom: var(--space-md);
+  z-index: 10;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar__tab,
+  .sidebar__list li,
+  .sidebar__remove {
+    transition: none;
+  }
 }
 
 /* 页边 32＝SpaceX 的 grid gutter（DESIGN「Layout」）。
@@ -307,22 +327,6 @@ button.link {
   padding: 9px var(--space-xxl);
   border-top: 1px solid var(--ink);
   background: var(--canvas);
-}
-
-/* ===== 4.2 错误横幅：反色通栏，不自动消失 ===== */
-.error {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-  padding: var(--space-sm) var(--space-md);
-  background: var(--ink);
-  color: var(--canvas);
-}
-
-.error button.link {
-  margin-left: auto;
-  color: var(--canvas);
 }
 
 /* ===== 工具栏与筛选 ===== */
@@ -450,49 +454,6 @@ table.matrix td.cell {
 /* MCP 页的格还在用状态类名；「缺失」降一档，其余交给主文字色（§1.1 零色彩） */
 td.cell.missing {
   color: var(--ink-faint);
-}
-
-/* ===== 结果框：固定在窗口右下角的浮层，不随内容滚动；z-index 低于弹层 ===== */
-.floating {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  max-width: 480px;
-}
-
-.report {
-  box-sizing: border-box;
-  max-height: 60vh;
-  padding: var(--space-md) 20px;
-  border: 1px solid var(--ink);
-  background: var(--canvas);
-  overflow: auto;
-}
-
-.report-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 14px;
-}
-
-.report ul {
-  margin: 6px 0 0;
-  padding-left: 20px;
-  max-height: 160px;
-  overflow: auto;
-}
-
-/* 按 skill 的说明与上面的逐条结果分开 */
-.report .notes {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--hairline);
 }
 
 /* ===== 弹层（MCP 页与模型页还在用；skill 侧已经换成二级页面，§4.6） ===== */

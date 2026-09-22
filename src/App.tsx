@@ -1,15 +1,37 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
-import type { AutoLink, McpReport, Overview } from "./types";
+import type {
+  AutoLink,
+  GatewayState,
+  IgnoredIssue,
+  McpOverview,
+  McpReport,
+  Overview,
+} from "./types";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
+import * as pendingPage from "./pages/PendingPage";
 import { PendingPage } from "./pages/PendingPage";
-import { IconSettings } from "./ui";
+import { collectIssues } from "./pages/pendingIssues";
+import * as mcpView from "./mcpView";
+import { modelIssues, parseBackendError } from "./modelsView";
+import type { ModelIssue } from "./modelsView";
+import {
+  AddButton,
+  Cap,
+  ErrorBanner,
+  IconButton,
+  IconClose,
+  IconInbox,
+  IconSettings,
+  Rotor,
+  Toast,
+} from "./ui";
 import wordmark from "../assets/logo/wordmark.svg";
 import "./App.css";
 
@@ -19,30 +41,61 @@ const DEFAULT_KEY = "global";
 /// 文件系统事件与窗口获得焦点后的重扫去抖
 const REFRESH_DELAY = 300;
 type SidebarDomain = { key: string; label: string };
+type Tab = "skills" | "mcp" | "models";
+
+/// MCP 段的待处理由 T1 的 `collectMcpIssues`（src/mcpView.ts）收集；它落地之前按空算。
+/// 只读它的 `key` 来扣掉已忽略的，形状交给待处理页
+type McpPendingLike = { key?: string };
+const collectMcpIssues = (
+  mcpView as unknown as {
+    collectMcpIssues?: (overview: McpOverview | null) => McpPendingLike[];
+  }
+).collectMcpIssues;
+
+/// 模型段已忽略的 key：待处理页（T3）记在本机，导出 `loadModelIgnoredKeys` 之前按没忽略过算
+const loadModelIgnoredKeys = (pendingPage as unknown as { loadModelIgnoredKeys?: () => string[] })
+  .loadModelIgnoredKeys;
+
+/// 顶栏页签：顺序即高频程度。`Cap` 只给拉丁 run 套 Condensed 大写 + 字距，汉字原样
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "models", label: "模型" },
+  { id: "skills", label: "Skills" },
+  { id: "mcp", label: "MCP" },
+];
 
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
+  /// 顶栏转盘：忙时出现；忙完带阻尼停转，停稳后才卸掉（DESIGN「转盘」）
+  const [rotorShown, setRotorShown] = useState(false);
   const [selectedKey, setSelectedKey] = useState(DEFAULT_KEY);
   const [error, setError] = useState<string | null>(null);
-  /// 二级页面（§4.6）：占满整窗、不渲染侧栏。null＝主视图
+  /// 二级页面：占满整窗、不渲染侧栏。null＝主视图
   const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
+  /// 待处理页打开时落在哪一段：从哪个页签进就落在哪段（全局收件箱，DESIGN「材料与工艺」）
+  const [pendingSegment, setPendingSegment] = useState<Tab>("skills");
   /// 启动时后台查一次新版。**必须静默失败**：`plugins.updater.pubkey` 没填之前
   /// check() 一定报错，进横幅的话每次开应用先看见一条错。null＝查过没有 / 没查成
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   /// 模型路由比 skill、MCP 都高频，所以它排第一个 tab，也是启动默认页。
   /// 后端说不支持（非 macOS）时这一页根本不存在，届时退回 Skills，见 applyModelsSupported
-  const [activeTab, setActiveTab] = useState<"skills" | "mcp" | "models">("models");
+  const [activeTab, setActiveTab] = useState<Tab>("models");
   // 「模型」标签页只在后端确认支持（当前只有 macOS）时才出现；读取失败时静默隐藏
   const [modelsSupported, setModelsSupported] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   // 手动添加的项目路径，用来判断侧栏哪些域可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
-  // 自动同步规则；扫描时顺带取回，域页与导入弹层都用它
+  // 自动同步规则；扫描时顺带取回，域页与添加页都用它
   const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
   // MCP 扫描到的域独立于 skills；例如没有 skill 的 WeiboAP agent 也能在 MCP 页选择。
   const [mcpSidebarDomains, setMcpSidebarDomains] = useState<SidebarDomain[]>([]);
   const [backgroundMcpReport, setBackgroundMcpReport] = useState<McpReport | null>(null);
+  /// 收件箱计数的三份原料：skill 扫描（overview）、MCP 扫描、模型状态；外加已忽略的 key
+  const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
+  const [gatewayState, setGatewayState] = useState<GatewayState | null>(null);
+  const [ignored, setIgnored] = useState<IgnoredIssue[]>([]);
+  /// 提示条的到点消失按回调身份计时：必须稳定，否则每次重渲染都重新计时
+  const closeMcpToast = useCallback(() => setBackgroundMcpReport(null), []);
   // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
   const busyRef = useRef(false);
   const pendingRef = useRef(false);
@@ -50,6 +103,9 @@ export default function App() {
   const activeTabRef = useRef(activeTab);
   busyRef.current = busy;
   activeTabRef.current = activeTab;
+
+  // 转盘出现就挂上；停转回弹结束（onStopped）才卸掉
+  if (busy && !rotorShown) setRotorShown(true);
 
   const setBusyState = (next: boolean) => {
     busyRef.current = next;
@@ -64,19 +120,25 @@ export default function App() {
     }
   };
 
-  // 扫描可能触发已授权的自动规则；界面始终以重新扫描的实际结果为准。
+  /// 顶栏收件箱是**全局**入口：不论停在哪个页签，三段都要数得出来，所以 skill 与 MCP
+  /// 每次都扫。扫描可能触发已授权的自动规则；界面始终以重新扫描的实际结果为准
   const refresh = async () => {
     busyRef.current = true;
     setBusy(true);
     try {
-      const [next, projects, rules] = await Promise.all([
-        activeTab === "skills" ? api.scanAll() : Promise.resolve(overview),
+      const [next, projects, rules, ignoredList, mcp] = await Promise.all([
+        api.scanAll(),
         api.listManualProjects(),
-        activeTab === "skills" ? api.listAutoLinks() : Promise.resolve(autoLinks),
+        api.listAutoLinks(),
+        // 计数的原料读不到不挡主流程：少数一个数字，好过整页报错
+        api.listIgnored().catch(() => null),
+        api.scanMcp().catch(() => null),
       ]);
-      if (next !== null) setOverview(next);
+      setOverview(next);
       setManualProjects(projects);
       setAutoLinks(rules);
+      if (ignoredList !== null) setIgnored(ignoredList);
+      if (mcp !== null) setMcpOverview(mcp);
       setRefreshKey((key) => key + 1);
     } catch (e) {
       setError(String(e));
@@ -92,6 +154,14 @@ export default function App() {
   };
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
+
+  /// 模型状态只为数「模型」段：轻查，不点亮转盘
+  const refreshGateway = useCallback(() => {
+    void api.gatewayState().then(
+      (state) => setGatewayState(state),
+      () => undefined,
+    );
+  }, []);
 
   // 文件系统变化与窗口获得焦点都走这里：忙则排队，闲则去抖后重扫
   const requestRefresh = useCallback(() => {
@@ -122,10 +192,12 @@ export default function App() {
     collect(listen("fs-changed", () => requestRefresh()));
     collect(
       listen<McpReport>("mcp-auto-imported", ({ payload }) => {
-        // MCP 页有自己的结果框；停留在 Skills 页时也不能丢掉自动导入结果。
-        if (activeTabRef.current === "skills") setBackgroundMcpReport(payload);
+        // MCP 页有自己的结果；停留在别的页签时也不能丢掉自动添加的结果（⑬ 自动发生的事要交代）
+        if (activeTabRef.current !== "mcp") setBackgroundMcpReport(payload);
       }),
     );
+    // 菜单栏面板改了模型状态，收件箱的「模型」段跟着重数
+    collect(listen("gateway-changed", () => refreshGateway()));
     // 菜单栏面板要求切页；它那边做不成的事也带到这里来说——面板放不下一段解释
     collect(
       listen<{ page: "models" | "settings" | null; error: string | null }>(
@@ -142,14 +214,18 @@ export default function App() {
     );
     // 兜底：在 Finder 里改了不在监视集合内的东西，切回窗口时也能发现
     collect(
-      getCurrentWindow().onFocusChanged(({ payload: focused }) => focused && requestRefresh()),
+      getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        if (!focused) return;
+        requestRefresh();
+        refreshGateway();
+      }),
     );
     return () => {
       disposed = true;
       unlistens.forEach((un) => un());
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
-  }, [requestRefresh]);
+  }, [requestRefresh, refreshGateway]);
 
   /// 模型页是默认页，可它在非 macOS 上并不存在：一问出「不支持」就把默认页退回 Skills，
   /// 否则主视图会停在一个既没有标签页也没有内容的空壳上
@@ -163,12 +239,16 @@ export default function App() {
     void api
       .gatewayState()
       .then((state) => {
-        if (!cancelled) applyModelsSupported(state.supported);
+        if (cancelled) return;
+        setGatewayState(state);
+        applyModelsSupported(state.supported);
       })
       .catch(() => {
         // 读不到就当作不支持，标签页保持隐藏
         if (!cancelled) applyModelsSupported(false);
       });
+    // 启动时扫一次：停在模型页也要数得出 Skills 与 MCP 两段
+    void refresh();
     return () => {
       cancelled = true;
     };
@@ -182,6 +262,26 @@ export default function App() {
     activeTab === "mcp" ? mcpSidebarDomains : activeTab === "models" ? [] : domains;
   // 域 key → 手动项目路径；自动发现的项目与 agent 域不在其中，因此没有移除按钮
   const manualByKey = new Map(manualProjects.map((p) => [`project:${p}`, p]));
+
+  // ===== 全局收件箱：三段未处理之和 =====
+  // 三段原样交给待处理页（含已忽略的，页面自己按忽略表滤）；顶栏数字扣掉已忽略的
+  const ignoredKeys = useMemo(() => new Set(ignored.map((i) => i.key)), [ignored]);
+  const skillIssues = useMemo(() => collectIssues(overview), [overview]);
+  const mcpIssues = useMemo(() => collectMcpIssues?.(mcpOverview) ?? [], [mcpOverview]);
+  const modelIssueList: ModelIssue[] = useMemo(
+    () => (modelsSupported ? modelIssues(gatewayState) : []),
+    [gatewayState, modelsSupported],
+  );
+  // 模型段的忽略不进 core，由待处理页记在本机；回到主视图时（subPage 变了）重读一次
+  const modelIgnoredKeys = useMemo(
+    () => new Set(loadModelIgnoredKeys?.() ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [subPage],
+  );
+  const inboxCount =
+    skillIssues.filter((i) => !ignoredKeys.has(i.key)).length +
+    mcpIssues.filter((i) => i.key === undefined || !ignoredKeys.has(i.key)).length +
+    modelIssueList.filter((i) => !modelIgnoredKeys.has(i.key)).length;
 
   const updateMcpSidebarDomains = useCallback((next: SidebarDomain[]) => {
     setMcpSidebarDomains((previous) =>
@@ -218,11 +318,14 @@ export default function App() {
     }
   }, [activeTab, overview, manualProjects, selectedKey, domains, mcpSidebarDomains]);
 
-  useEffect(() => {
-    if (activeTab === "skills") void refresh();
-    // 切回 Skills 时显式重扫；MCP 页由自身 refreshKey 驱动扫描。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  const switchTab = (tab: Tab) => {
+    if (tab === activeTab) return;
+    // 新一轮 MCP 扫描返回前，不用上次的域去重置当前选择
+    if (tab === "mcp") setMcpSidebarDomains([]);
+    setActiveTab(tab);
+    // 切回 Skills 时显式重扫；MCP 页由自身 refreshKey 驱动扫描
+    if (tab === "skills") void refresh();
+  };
 
   const addProject = async () => {
     const path = await api.pickDirectory("选择项目目录");
@@ -248,90 +351,117 @@ export default function App() {
   const closeSubPage = () => {
     setSubPage(null);
     void refresh();
+    refreshGateway();
+  };
+
+  /// 收件箱：全局一个入口，打开时落在当前页签那一段
+  const openInbox = () => {
+    setPendingSegment(showModels ? "models" : activeTab === "mcp" ? "mcp" : "skills");
+    setSubPage("pending");
+  };
+
+  /// 待处理页「跳回」：回到那一段对应的页签（行内闪一下由各页自己做）
+  const jumpToRow = (segment: Tab) => {
+    setSubPage(null);
+    if (segment === "models" && !modelsSupported) return;
+    switchTab(segment);
+    refreshGateway();
+  };
+
+  /// 待处理页「模型」段的动作：照 `ModelIssue.action.kind` 调对应命令，做完重数。
+  /// 失败原样抛给页面，由它贴在那一行上说
+  const resolveModelIssue = async (issue: ModelIssue): Promise<void> => {
+    try {
+      const next =
+        issue.action.kind === "takeover"
+          ? await api.gatewayTakeover()
+          : issue.action.kind === "rewrite"
+            ? await api.gatewayEnable()
+            : await api.gatewayRetryProvider(issue.providerId ?? "");
+      setGatewayState(next);
+    } catch (e) {
+      throw new Error(parseBackendError(String(e)).message);
+    }
   };
 
   if (subPage === "settings") {
     return <SettingsPage onBack={closeSubPage} onError={setError} initialUpdate={pendingUpdate} />;
   }
   if (subPage === "pending") {
+    // 与待处理页（T3）的契约：`segments` 三段、`initialSegment` 落点、`onResolveModelIssue`
+    // 执行模型段的动作、`onJumpToRow` 跳回对应页签。T3 的 props 落地之前按无类型展开传入，
+    // 落地后换成带类型的写法
+    const inbox: object = {
+      segments: { skills: skillIssues, mcp: mcpIssues, models: modelIssueList },
+      initialSegment: pendingSegment,
+      onResolveModelIssue: resolveModelIssue,
+      onJumpToRow: jumpToRow,
+    };
     return (
       <PendingPage
         overview={overview}
         onBack={closeSubPage}
         onRefresh={refresh}
         onError={setError}
+        {...inbox}
       />
     );
   }
 
   return (
     <div className="app">
-      {/* 顶栏独立于侧栏：模型页不要侧栏（它不分项目、不分域），
-          而字标与页签不能跟着侧栏一起消失 */}
-      {/* 系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，左边给红绿灯让位 */}
+      {/* 顶栏独立于侧栏：模型页不要侧栏，字标与页签不能跟着一起消失。
+          系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，上面 28 给红绿灯 */}
       <header className="topbar" data-tauri-drag-region>
         {/* 字标用资产不用纯文本：首字母的重影是这个标志的识别点（DESIGN「壳」） */}
-        <h1>
+        <h1 className="topbar__mark">
           <img src={wordmark} alt="Sophia" className="wordmark" />
         </h1>
-        {/* 顺序即高频程度：模型路由天天用，排第一个；MCP 那条线叫「导入 MCP」，
-            与 skill 的二级页「导入 skill」成对，一级 tab 与二级页不重名 */}
-        <nav aria-label="功能" style={{ display: "flex", gap: 4 }}>
-          {modelsSupported && (
-            <button
-              className={activeTab === "models" ? "active" : ""}
-              disabled={busy}
-              onClick={() => setActiveTab("models")}
-            >
-              模型
-            </button>
-          )}
-          <button
-            className={activeTab === "skills" ? "active" : ""}
-            disabled={busy}
-            onClick={() => setActiveTab("skills")}
-          >
-            Skills
-          </button>
-          <button
-            className={activeTab === "mcp" ? "active" : ""}
-            disabled={busy}
-            onClick={() => {
-              if (activeTab === "mcp") return;
-              // 新一轮 MCP 扫描返回前，不用上次的域去重置当前选择。
-              setMcpSidebarDomains([]);
-              setActiveTab("mcp");
-            }}
-          >
-            导入 MCP
-          </button>
+        <nav className="topbar__tabs" aria-label="功能">
+          {TABS.filter((tab) => tab.id !== "models" || modelsSupported).map((tab) => {
+            const active = tab.id === "models" ? showModels : activeTab === tab.id && !showModels;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className={`topbar__tab${active ? " is-active" : ""}`}
+                aria-current={active ? "page" : undefined}
+                disabled={busy}
+                onClick={() => switchTab(tab.id)}
+              >
+                <Cap tone="nav">{tab.label}</Cap>
+              </button>
+            );
+          })}
         </nav>
-        {/* 设置是**全局**的：它管哪些 agent 参与，skill 与 MCP 两页都受它影响，
-            以后还会往里加别的。所以它挂在顶栏、每一页都够得着，
-            而不是挂在只有部分页面才有的侧栏底部。
-            busy 期间照常可用（§「空态与忙碌态」的五个豁免之一） */}
-        <button
-          className="topbar__settings"
-          aria-label="设置"
-          title="设置"
-          onClick={() => setSubPage("settings")}
-        >
-          <IconSettings size={18} />
-        </button>
+        {/* 右端：全局忙碌转盘（只在有活干时）+ 收件箱（三段未处理之和，0 时无数字、图标常驻）+ 设置。
+            设置是全局的，busy 期间照常可用 */}
+        <div className="topbar__end">
+          {rotorShown ? (
+            <Rotor
+              size={18}
+              spinning={busy}
+              label="正在读取"
+              onStopped={() => setRotorShown(false)}
+            />
+          ) : null}
+          <IconButton icon={<IconInbox />} title="待处理" count={inboxCount} onClick={openInbox} />
+          <IconButton icon={<IconSettings />} title="设置" onClick={() => setSubPage("settings")} />
+        </div>
       </header>
       {/* 模型页是全局的，没有域也没有项目，侧栏对它没有意义（MODELS_TAB_FULL_BLEED）。
           **必须整个不渲染**：`.sidebar` 有 `display: flex`，它压得过 `hidden` 属性的
-          UA 样式，写成 `hidden={…}` 侧栏照样显示——上一版就是这么漏出去的 */}
+          UA 样式，写成 `hidden={…}` 侧栏照样显示 */}
       {!showModels && (
         <aside className="sidebar">
-          <ul>
+          <div className="sidebar__label">位置</div>
+          <ul className="sidebar__list">
             {!sidebarDomains.some((d) => d.key === "global") && (
               <li
-                className={selectedKey === "global" ? "active" : ""}
-                title="全局"
+                className={selectedKey === "global" ? "is-active" : ""}
                 onClick={() => !busy && setSelectedKey("global")}
               >
-                <span>全局</span>
+                <span className="sidebar__name">全局</span>
               </li>
             )}
             {sidebarDomains.map((d) => {
@@ -339,23 +469,16 @@ export default function App() {
               return (
                 <li
                   key={d.key}
-                  className={d.key === selectedKey ? "active" : ""}
-                  title={d.key}
+                  className={d.key === selectedKey ? "is-active" : ""}
                   onClick={() => !busy && setSelectedKey(d.key)}
                 >
-                  <span>{d.label}</span>
+                  <span className="sidebar__name">{d.label}</span>
                   {manualPath !== undefined && (
-                    <button
-                      className="link remove"
-                      title="移除项目"
-                      disabled={busy}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void removeProject(manualPath);
-                      }}
-                    >
-                      ×
-                    </button>
+                    <RemoveProject
+                      busy={busy}
+                      name={d.label}
+                      onRemove={() => void removeProject(manualPath)}
+                    />
                   )}
                 </li>
               );
@@ -365,46 +488,46 @@ export default function App() {
                 .filter((path) => !domains.some((d) => d.key === `project:${path}`))
                 .map((path) => {
                   const key = `project:${path}`;
+                  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
                   return (
                     <li
                       key={key}
-                      className={key === selectedKey ? "active" : ""}
-                      title={key}
+                      className={key === selectedKey ? "is-active" : ""}
                       onClick={() => !busy && setSelectedKey(key)}
                     >
-                      <span>{path.split(/[\\/]/).filter(Boolean).pop() ?? path}</span>
-                      <button
-                        className="link remove"
-                        title="移除项目"
-                        disabled={busy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void removeProject(path);
-                        }}
-                      >
-                        ×
-                      </button>
+                      <span className="sidebar__name">{name}</span>
+                      <RemoveProject
+                        busy={busy}
+                        name={name}
+                        onRemove={() => void removeProject(path)}
+                      />
                     </li>
                   );
                 })}
           </ul>
-          <button disabled={busy} onClick={() => void addProject()}>
-            添加项目…
-          </button>
+          <div className="sidebar__foot">
+            <AddButton
+              noun="项目"
+              disabledReason={busy ? "正在读取，稍等" : undefined}
+              onClick={() => void addProject()}
+            />
+          </div>
         </aside>
       )}
       <main className={showModels ? "content content--bleed" : "content"}>
         {error && (
-          <div className="error">
-            {error}
-            <button className="link" onClick={() => setError(null)}>
-              关闭
-            </button>
+          <div className="content__banner">
+            <ErrorBanner message={error} onClose={() => setError(null)} />
           </div>
         )}
         {/* 还没问出模型页支不支持的那一瞬间也落在 Skills 上：宁可闪一下扫描中，不能白屏 */}
         {showModels ? (
-          <ModelsTab onError={setError} busy={busy} onBusy={setBusyState} />
+          <ModelsTab
+            onError={setError}
+            busy={busy}
+            onBusy={setBusyState}
+            onGatewayState={setGatewayState}
+          />
         ) : activeTab === "mcp" ? (
           <McpTab
             selectedKey={selectedKey}
@@ -423,30 +546,67 @@ export default function App() {
             selectedKey={selectedKey}
             onRefresh={refresh}
             onError={setError}
-            onOpenPending={() => setSubPage("pending")}
+            onOpenPending={openInbox}
           />
         )}
       </main>
       {backgroundMcpReport && (
-        <div className="floating">
-          <div className="report">
-            <div className="report-head">
-              <strong>MCP 自动导入结果</strong>
-              <button className="link" onClick={() => setBackgroundMcpReport(null)}>
-                关闭
-              </button>
-            </div>
-            <ul>
-              {backgroundMcpReport.entries.map((entry, index) => (
-                <li key={`${entry.targetId}|${entry.name}|${index}`}>
-                  {entry.name}：{entry.message}
-                  {entry.backupPath && `（备份：${entry.backupPath}）`}
-                </li>
-              ))}
-            </ul>
-          </div>
+        <div className="app__toast">
+          <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />
         </div>
       )}
     </div>
+  );
+}
+
+/// 侧栏里手动添加的项目才有移除键：16px ×，行内右端
+function RemoveProject({
+  busy,
+  name,
+  onRemove,
+}: {
+  busy: boolean;
+  name: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="sidebar__remove" onClick={(e) => e.stopPropagation()}>
+      <IconButton
+        icon={<IconClose />}
+        title={`从侧栏移除 ${name}（不动磁盘上的文件）`}
+        disabledReason={busy ? "正在读取，稍等" : undefined}
+        onClick={onRemove}
+      />
+    </span>
+  );
+}
+
+/// 停在别的页签时规则在背后添加了 MCP：黑窗提示条交代一声（⑨⑬ 自动发生的事要交代）
+function BackgroundMcpToast({ report, onClose }: { report: McpReport; onClose: () => void }) {
+  const created = report.entries.filter((e) => e.outcome === "created");
+  const failed = report.entries.filter((e) => e.outcome === "failed");
+  const names = [...new Set(created.map((e) => e.name))];
+  if (failed.length > 0) {
+    return (
+      <Toast
+        kind="partial"
+        verb="自动添加"
+        names={names}
+        tally={{ done: created.length, failed: failed.length }}
+        reason={failed[0].message}
+        onDismiss={onClose}
+        onClose={onClose}
+      />
+    );
+  }
+  return (
+    <Toast
+      kind="success"
+      verb="自动添加"
+      names={names}
+      reading={names.length === 0 ? `${created.length} 个` : undefined}
+      onDismiss={onClose}
+      onClose={onClose}
+    />
   );
 }
