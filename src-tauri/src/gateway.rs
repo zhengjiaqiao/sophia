@@ -159,6 +159,55 @@ pub async fn gateway_remove_provider(
     current_state(app).await
 }
 
+/// 删网关第一步：只标记，状态里立刻看不到这一家，配置和密钥都还在，可撤销。
+/// 不写文件，所以不取 `config_lock`
+#[tauri::command]
+pub async fn gateway_mark_remove_provider(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<GatewayState, String> {
+    let app = app(&state)?;
+    let worker = app.clone();
+    blocking(move || worker.mark_removal(&id)).await?;
+    current_state(app).await
+}
+
+/// 撤销标记删除：这一家原样回来
+#[tauri::command]
+pub async fn gateway_undo_remove_provider(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<GatewayState, String> {
+    let app = app(&state)?;
+    app.undo_removal(&id);
+    current_state(app).await
+}
+
+/// 真正删掉标记过的网关，连同钥匙串里的密钥。`id` 省略时提交全部（离开网关页）
+#[tauri::command]
+pub async fn gateway_commit_removals(
+    id: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<GatewayState, String> {
+    let app = app(&state)?;
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        blocking(move || worker.commit_removals(id.as_deref())).await?;
+    }
+    current_state(app).await
+}
+
+/// 应用退出时立即提交全部标记删除。在主线程（不在异步运行时里）同步执行，所以用 `blocking_lock`
+pub fn commit_removals_on_exit(state: &AppState) {
+    if let Some(app) = state.gateway.clone() {
+        let _guard = state.config_lock.blocking_lock();
+        if let Err(e) = app.commit_removals(None) {
+            eprintln!("退出时删除网关失败：{e}");
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn gateway_fetch_models(
     provider_id: Option<String>,

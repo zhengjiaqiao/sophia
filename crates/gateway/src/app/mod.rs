@@ -98,6 +98,9 @@ pub struct App {
     /// 同一进程里的动作串行执行。某个动作 panic 之后锁会被标记为中毒，
     /// 但它保护的是磁盘上的文件、不是内存里的不变量，所以继续用，不让整个功能瘫掉。
     lock: Mutex<()>,
+    /// 标记删除、还没提交的网关 id（按标记顺序）。只在内存里：进程意外退出时它们没被删，
+    /// 下次启动原样还在——宁可留下，不可误删
+    pending_removals: Mutex<Vec<String>>,
 }
 
 // ----- 状态视图（字段与 docs/gateway-commands.md 一致） -----
@@ -229,6 +232,7 @@ impl App {
         Self {
             deps,
             lock: Mutex::new(()),
+            pending_removals: Mutex::new(Vec::new()),
         }
     }
 
@@ -632,6 +636,74 @@ impl App {
     /// 钥匙串条目删了就回不来，界面负责在调用前向用户确认。
     pub fn remove_provider(&self, id: &str) -> Result<(), AppError> {
         let _guard = self.guard();
+        self.remove_locked(id)
+    }
+
+    fn pending(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
+        self.pending_removals
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// 删网关第一步：只做标记。状态里立刻看不到这一家，配置和钥匙串密钥都还在，
+    /// 可以 `undo_removal` 原样恢复；`commit_removals` 时才真正删。
+    /// 真删时会被拒绝的（已启用且它是最后一家还在发布模型的）现在就拒绝，不等到提交时才报错
+    pub fn mark_removal(&self, id: &str) -> Result<(), AppError> {
+        let _guard = self.guard();
+        let mut settings = self.load()?;
+        if settings.provider(id).is_none() {
+            return Err(unknown_provider(id));
+        }
+        let mut pending = self.pending();
+        if pending.iter().any(|p| p == id) {
+            return Ok(());
+        }
+        let published_here = settings.published().iter().any(|p| p.provider == id);
+        settings
+            .providers
+            .retain(|p| p.id != id && !pending.contains(&p.id));
+        if published_here && settings.published().is_empty() && self.enabled(&settings) {
+            return Err(AppError::new(
+                "invalid",
+                "已启用时至少要保留一个模型；如需全部移除请先恢复",
+            ));
+        }
+        pending.push(id.to_owned());
+        Ok(())
+    }
+
+    /// 撤销标记删除；本来就没标记不算错
+    pub fn undo_removal(&self, id: &str) {
+        self.pending().retain(|p| p != id);
+    }
+
+    /// 真正删掉标记过的网关（连同钥匙串密钥）。`id` 为 None 时提交全部（离开网关页、应用退出）。
+    /// 某一家删不成时撤掉它的标记让它重新出现，其余照删，返回第一个错误
+    pub fn commit_removals(&self, id: Option<&str>) -> Result<(), AppError> {
+        let _guard = self.guard();
+        let targets: Vec<String> = {
+            let mut pending = self.pending();
+            let (taken, kept) = pending
+                .drain(..)
+                .partition(|p| id.is_none_or(|id| p == id));
+            *pending = kept;
+            taken
+        };
+        let mut first_error = None;
+        for target in targets {
+            match self.remove_locked(&target) {
+                Ok(()) => {}
+                // 已经不在了（例如被别处删了）：目的已达成
+                Err(e) if e == unknown_provider(&target) => {}
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn remove_locked(&self, id: &str) -> Result<(), AppError> {
         let mut settings = self.load()?;
         if settings.provider(id).is_none() {
             return Err(unknown_provider(id));
@@ -1131,9 +1203,11 @@ impl App {
             supported: true,
             ..Default::default()
         };
+        let pending = self.pending().clone();
         view.providers = settings
             .providers
             .iter()
+            .filter(|provider| !pending.contains(&provider.id))
             .map(|provider| ProviderView {
                 id: provider.id.clone(),
                 name: provider.name.clone(),
