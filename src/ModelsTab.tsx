@@ -315,6 +315,7 @@ export function ModelBox({
     <div className="models-box-wrap">
       <div
         className={`models-box${open ? " is-open" : ""}`}
+        data-tool={tool.id}
         role="button"
         tabIndex={0}
         aria-expanded={open}
@@ -376,7 +377,6 @@ export interface ModelPickerProps {
   focusProviderId?: string | null;
   /// 这几个模型各闪一次（刚拉到的）
   flashIds?: string[];
-  onClose: () => void;
 }
 
 /**
@@ -396,7 +396,6 @@ export function ModelPicker({
   onManageGateways,
   focusProviderId,
   flashIds,
-  onClose,
 }: ModelPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const groups = state.providers
@@ -419,13 +418,7 @@ export function ModelPicker({
 
   return (
     <>
-      {/* 点浮层外面等于关闭；罩子透明，不遮挡下面 */}
-      <button
-        type="button"
-        className="models-picker__veil"
-        aria-label="关闭模型选择"
-        onClick={onClose}
-      />
+      {/* 点浮层外面关闭由 ModelsTab 在 pointerdown 捕获阶段做：不铺透明罩，外面那一下点击照常生效 */}
       <div className="models-picker" role="dialog" aria-label={`选 ${tool.name} 的模型`}>
         <div className="models-picker__search">
           <svg
@@ -442,7 +435,8 @@ export function ModelPicker({
             <path d="M10.4 10.4L14 14" />
           </svg>
           <input
-            type="search"
+            // 不用 type="search"：WebKit 的搜索框会自己吃掉 Esc（清空 / 取消），浮层就关不掉
+            type="text"
             className="models-picker__input"
             placeholder="筛选"
             aria-label="筛选模型"
@@ -683,15 +677,30 @@ export default function ModelsTab({
     return () => clearTimeout(timer);
   }, [phase]);
 
-  // 浮层按 Esc 关
+  // 浮层开着时：Esc 关闭并把焦点还给模型框；在框与浮层之外按下指针也关闭。
+  // 两个都在捕获阶段听：Esc 不被输入框先吃掉；外面那一下只顺手关浮层，不拦截——
+  // 点齿轮、点页签照常生效（不铺透明罩，罩子会把这一下点击吞掉）
+  const pickerOpen = picker?.toolId ?? null;
   useEffect(() => {
-    if (picker === null) return;
+    if (pickerOpen === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closePicker();
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closePicker();
+      document.querySelector<HTMLElement>(`.models-box[data-tool="${pickerOpen}"]`)?.focus();
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [picker]);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".models-box-wrap")) return;
+      closePicker();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, [pickerOpen]);
 
   /// 调命令 → 用返回的最新状态刷新；做不成就在 agent 行下就地说（① 就近）
   const run = async (verb: string, action: () => Promise<GatewayState>) => {
@@ -950,7 +959,6 @@ export default function ModelsTab({
                       onManageGateways={() => openGateway(true)}
                       focusProviderId={picker.focusProviderId}
                       flashIds={picker.flashIds}
-                      onClose={closePicker}
                     />
                   ) : null}
                 </ModelBox>

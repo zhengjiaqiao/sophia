@@ -204,17 +204,6 @@
 }
 
 /* ===== 选择器浮层：与框同宽左对齐，框下 4 ===== */
-.models-picker__veil {
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  cursor: default;
-}
-
 .models-picker {
   position: absolute;
   top: calc(100% + 4px);

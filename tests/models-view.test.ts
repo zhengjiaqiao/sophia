@@ -581,7 +581,6 @@ const pickerProps = (overrides: Partial<GatewayState> = {}) => ({
   onQuery: noop,
   onToggleModel: noop,
   onManageGateways: noop,
-  onClose: noop,
 });
 
 test("ModelPicker：第三方分组头带限制说明与「管理网关 ›」；已选置顶；底部「已选 N 个」", () => {
