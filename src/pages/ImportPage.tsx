@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type {
   AutoLink,
@@ -9,19 +9,36 @@ import type {
   SourceKind,
   SyncReport,
 } from "../types";
-import { AgentIcon, Busy, Button, Chip, Confirm, Empty, SubPage, Plain } from "../ui";
+import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag } from "../ui";
+import { CheckMark } from "./CheckMark.tsx";
+import { joinWords } from "./pendingIssues.ts";
+import {
+  columnsOf,
+  defaultTargets,
+  loadImportMemory,
+  saveImportMemory,
+  sameSet,
+} from "./importDefaults.ts";
 import "./ImportPage.css";
 
-/// 导入页（组件规范 §4.6）：占满整窗的二级页面，不是弹层。
+/// 添加 skill 页（DESIGN「产品裁决 › 添加页」，画板 Import / ImportEmpty）：占满整窗的二级页面。
 ///
-/// 左边挑来源，右边把这个来源里的 skill **全部列出**——铺开的意义就在这儿：
-/// 弹层里 720px 塞三栏，26 个本体只能列 15 个再加一行「…还有 11 个」；
-/// 整窗两竖列一屏看全，不截断。agent 选择挪到右区底部横排，腾出的宽度全给列表。
+/// **两列 + 底部一行**：左栏挑来源（`+ 来源` 固定在栏底，列表在其上独立滚动，可滚时出 hairline）；
+/// 右栏把这个来源里的 skill 全部列出（两竖列，已添加的整行灰 + 弱标签，同名强标签）。
+/// 底部一行 = **一组目标**：agent 图标键一排 + 16 + 行内开关「以后新出现的也加」+ 安全小字 +
+/// `添加 N 个`（row 32 主动作；一个目标都没点亮时禁用带原因）。规则目标 = 本次目标，不另画一排。
+///
+/// - **同名在添加时就地解决**（⑩）：同名的行勾上时就地展开 `替换现有的 · 说明 · 跳过`；
+///   不点替换就是跳过（core 不覆盖已有的同名）。能在源头消掉的冲突不留到待处理
+/// - **规则只管以后新出现的**（core 建规则时拍 baseline），所以开关不确认；开着时点亮 / 熄灭
+///   目标键就是给规则加 / 减目标（加目标不重拍 baseline）
+/// - 默认目标（③）：这个来源上次用的目标；没有上次则已安装的前两个
+/// - 0 个来源时不分栏：内容区居中三行「还没有来源 / 先添加一个放 skill 的文件夹 / + 来源」
 
 export interface ImportPageProps {
   overview: Overview;
   page: DomainPage;
-  /// 全部自动同步规则；决定复选框与 agent 选择的默认值、哪些 skill 已被排除
+  /// 全部自动同步规则；决定开关状态、哪些 skill 被排除过
   autoLinks: AutoLink[];
   onClose: () => void;
   onChange: () => Promise<void>;
@@ -30,59 +47,22 @@ export interface ImportPageProps {
   onNotice: (text: string) => void;
 }
 
-/// 来源行右侧的小方标签：只在名字本身说不清来路时才给。
-/// 通用仓库与 agent 全局目录的名字已经把来路说尽了，再挂个标签就是噪音
-const kindTag = (kind: SourceKind): string | null => {
+/// 来源行第二行的灰字：范围（在挑来源时分类有用）
+const scopeOf = (kind: SourceKind): string => {
   switch (kind.type) {
     case "universal":
     case "harnessGlobal":
-      return null;
+      return "全局";
     case "projectStore":
       return "项目";
     case "manual":
-      return "手动";
     case "external":
       return "外部";
   }
 };
 
-/// 只做尾部分隔符与大小写无关的宽松比较，够用于「刚添加的目录是否已出现」
+/// 只做尾部分隔符无关的宽松比较，够用于「刚添加的目录是否已出现」
 const samePath = (a: string, b: string) => a.replace(/[/\\]+$/, "") === b.replace(/[/\\]+$/, "");
-
-/// 切成若干竖排的列，按列读（字母序竖着看比横着跳舒服）。
-/// 列数随数量涨：本机最大的来源有 39 个 skill，两列要 20 行、一屏放不下，三列 13 行正好
-function columnsOf<T>(list: T[], count: number): T[][] {
-  const per = Math.ceil(list.length / count);
-  return Array.from({ length: count }, (_, i) => list.slice(i * per, (i + 1) * per)).filter(
-    (col) => col.length > 0,
-  );
-}
-
-const CHECK_GLYPH = (
-  <svg
-    width="8"
-    height="8"
-    viewBox="0 0 10 10"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.7"
-    aria-hidden="true"
-  >
-    <path d="M2 5.2l2 2 4-4.4" />
-  </svg>
-);
-
-/// 12px 复选方块。整行是按钮，方块本身只是画出来的记号
-function CheckBox({ on, dim }: { on: boolean; dim?: boolean }) {
-  const classes = ["ss-check"];
-  if (on) classes.push("is-on");
-  if (dim) classes.push("is-dim");
-  return (
-    <span className={classes.join(" ")} aria-hidden="true">
-      {on ? CHECK_GLYPH : null}
-    </span>
-  );
-}
 
 export default function ImportPage({
   overview,
@@ -96,58 +76,49 @@ export default function ImportPage({
 }: ImportPageProps) {
   const [selected, setSelected] = useState(overview.sources[0]?.id ?? "");
   const [names, setNames] = useState<string[]>([]);
-  // 目标默认全勾；整目录链接的目标不能逐项建链，不在其中
-  const [targetIds, setTargetIds] = useState<string[]>(
-    page.targets.filter((t) => t.linkedWholeTo === null).map((t) => t.id),
-  );
+  /// 同名的行里选了「替换现有的」的那些
+  const [replace, setReplace] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  // 当前来源在本域有没有自动同步规则；切换来源时随之变化
-  const [auto, setAuto] = useState(false);
-  // 待确认的「开启自动同步」
-  const [confirmAuto, setConfirmAuto] = useState(false);
-  // 刚通过「添加来源…」加入、等待在新一轮 overview 中出现的路径
+  // 刚通过「+ 来源」加入、等待在新一轮 overview 中出现的路径
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
   const source: Source | undefined = overview.sources.find((s) => s.id === selected);
-  /// 外部来源不参与自动同步（规则也不该指向它）
+  /// 外部来源不参与自动规则（规则不该指向随时可能消失的目录）
   const autoable = source !== undefined && source.kind.type !== "external";
 
-  /// 该来源的 skill 在本域尚无行 = 还没导入
-  const notImported = (sourceId: string, skill: string) =>
-    !page.rows.some((r) => r.sourceId === sourceId && r.skill === skill);
-
-  const fresh = (source?.skills ?? []).filter((sk) => notImported(selected, sk.name));
-
-  /// 本域别的来源已经占着的名字：导入后会撞名，进待处理
-  const taken = new Set(page.rows.filter((r) => r.sourceId !== selected).map((r) => r.skill));
-  const clashes = fresh.filter((sk) => taken.has(sk.name)).length;
+  /// 本域可逐项建链的目标（整个文件夹是链接的不能）
+  const openTargets = page.targets.filter((t) => t.linkedWholeTo === null);
+  const memoryKey = `skill|${page.key}|${selected}`;
 
   /// 该来源的规则；source 是归一化路径，与 Source.id 同形
   const rule = autoLinks.find((r) => r.source === selected);
-  /// 规则里落在本域的目标；非空 = 本域已开启自动同步
-  const ruleTargets = page.targets
+  const ruleTargets = openTargets
     .filter((t) => (rule?.targets ?? []).includes(t.id))
     .map((t) => t.id);
   const ruleOn = ruleTargets.length > 0;
-  /// 本域可逐项建链的目标（整目录链接的不能）
-  const openTargets = page.targets.filter((t) => t.linkedWholeTo === null).map((t) => t.id);
-  /// 撤规则时要撤掉的本域目标：本域全部
-  const domainTargets = page.targets.map((t) => t.id);
-
-  /// 该来源里被排除、不再自动开启的 skill
   const excluded = rule?.excluded ?? [];
 
-  // 切换来源时清空勾选（导入是一次性动作，不预填）
-  useEffect(() => setNames([]), [selected]);
-
-  // 开关与 agent 选择的初值跟着当前来源的规则走；用字符串做依赖，
-  // 内容没变的重扫不会覆盖用户当场的勾选
-  const initKey = `${selected}|${ruleTargets.join(",")}|${openTargets.join(",")}`;
+  const [targetIds, setTargetIds] = useState<string[]>([]);
+  // 目标键的初值：规则开着就是规则的目标；否则这个来源上次用的；再没有就已安装的前两个。
+  // 用字符串做依赖，内容没变的重扫不会覆盖用户当场的点选
+  const initKey = `${selected}|${ruleTargets.join(",")}|${openTargets.map((t) => t.id).join(",")}`;
   useEffect(() => {
-    setAuto(ruleOn);
-    setTargetIds(ruleOn ? ruleTargets : openTargets);
+    setTargetIds(
+      ruleOn
+        ? ruleTargets
+        : defaultTargets(
+            openTargets.map((t) => t.id),
+            loadImportMemory(memoryKey)?.last,
+          ),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initKey]);
+
+  // 切换来源时清空勾选（添加是一次性动作，不预填）
+  useEffect(() => {
+    setNames([]);
+    setReplace([]);
+  }, [selected]);
 
   // 选中项消失（如手动来源被移除）时回落到第一项
   useEffect(() => {
@@ -155,7 +126,7 @@ export default function ImportPage({
     setSelected(overview.sources[0]?.id ?? "");
   }, [overview.sources, selected]);
 
-  // 新来源出现后选中它；没出现就保持原样
+  // 新来源出现后选中它
   useEffect(() => {
     if (pendingPath === null) return;
     const found = overview.sources.find(
@@ -165,11 +136,46 @@ export default function ImportPage({
     setPendingPath(null);
   }, [overview, pendingPath]);
 
-  const allSelected = fresh.length > 0 && fresh.every((sk) => names.includes(sk.name));
-  const toggleName = (skill: string) =>
-    setNames((prev) => (prev.includes(skill) ? prev.filter((n) => n !== skill) : [...prev, skill]));
+  // 来源列表可滚时，列表与 `+ 来源` 之间出 1px hairline；不滚时不显示
+  const listRef = useRef<HTMLDivElement>(null);
+  const [scrollable, setScrollable] = useState(false);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => setScrollable(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [overview.sources.length]);
 
-  // 写操作后统一重扫（重扫会自动补齐并弹提示条）；做不成只报原因，不改本地状态
+  /// 该来源的 skill 在本域尚无行 = 还没添加
+  const notAdded = (sourceId: string, skill: string) =>
+    !page.rows.some((r) => r.sourceId === sourceId && r.skill === skill);
+
+  /// 本域里别的来源已经有的同名 skill：名字 → 那一份在哪
+  const holders = new Map<string, { sourceId: string; label: string }>();
+  for (const row of page.rows) {
+    if (row.sourceId === selected || holders.has(row.skill)) continue;
+    const label = overview.sources.find((s) => s.id === row.sourceId)?.label ?? row.sourceId;
+    holders.set(row.skill, { sourceId: row.sourceId, label });
+  }
+
+  const entries = (source?.skills ?? []).map((sk) => ({
+    name: sk.name,
+    added: !notAdded(selected, sk.name),
+    holder: holders.get(sk.name) ?? null,
+  }));
+  const fresh = entries.filter((e) => !e.added);
+  const columns = columnsOf(entries, entries.length > 28 ? 3 : 2);
+  const allSelected = fresh.length > 0 && fresh.every((e) => names.includes(e.name));
+  const someSelected = fresh.some((e) => names.includes(e.name));
+
+  const toggleName = (skill: string) => {
+    setNames((prev) => (prev.includes(skill) ? prev.filter((n) => n !== skill) : [...prev, skill]));
+    setReplace((prev) => prev.filter((n) => n !== skill));
+  };
+
   const run = async (act: () => Promise<unknown>) => {
     setBusy(true);
     try {
@@ -181,78 +187,66 @@ export default function ImportPage({
     setBusy(false);
   };
 
-  /// 切换开关即保存：勾上按当前选中的 agent 建规则，取消则撤掉本域全部目标
-  const toggleAuto = () => {
-    if (source === undefined) return;
-    // 勾上会把这个来源下所有还没导入的 skill 一次开过去，影响面大，先确认
-    if (!auto) {
-      setConfirmAuto(true);
-      return;
-    }
-    const path = source.path;
-    void run(async () => {
-      await api.removeAutoLinkTargets(path, domainTargets);
-      setAuto(false);
-    });
-  };
-
-  const enableAuto = () => {
+  /// 行内开关：拨开 = 以本次目标建规则（core 拍 baseline，只管以后新出现的）；拨关 = 撤掉本域目标
+  const toggleRule = (next: boolean) => {
     if (source === undefined) return;
     const path = source.path;
-    setConfirmAuto(false);
-    void run(async () => {
-      await api.setAutoLink(path, targetIds);
-      setAuto(true);
-    });
+    void run(() =>
+      next
+        ? api.setAutoLink(path, targetIds)
+        : api.removeAutoLinkTargets(
+            path,
+            page.targets.map((t) => t.id),
+          ),
+    );
   };
 
-  // 开启自动同步时会立刻开启的 skill 数：还没导入且未被排除的
-  const autoCount = fresh.filter((sk) => !excluded.includes(sk.name)).length;
-  const targetLabels = page.targets
-    .filter((t) => targetIds.includes(t.id))
-    .map((t) => t.label)
-    .join("、");
-
-  /// agent 选择；规则已开启时同时改写规则（全取消 = 取消规则）
+  /// 目标键；规则开着时同时给规则加 / 减这一个目标（加目标是合并，不重拍 baseline）
   const toggleTarget = (id: string) => {
-    const next = targetIds.includes(id) ? targetIds.filter((t) => t !== id) : [...targetIds, id];
-    if (!auto || source === undefined) {
-      setTargetIds(next);
-      return;
-    }
+    const on = targetIds.includes(id);
+    const next = on ? targetIds.filter((t) => t !== id) : [...targetIds, id];
+    setTargetIds(next);
+    if (!ruleOn || source === undefined) return;
     const path = source.path;
-    void run(async () => {
-      await api.removeAutoLinkTargets(path, domainTargets);
-      if (next.length > 0) await api.setAutoLink(path, next);
-      setTargetIds(next);
-      setAuto(next.length > 0);
-    });
+    void run(() => (on ? api.removeAutoLinkTargets(path, [id]) : api.setAutoLink(path, [id])));
   };
 
-  const chosen = names.length;
-
-  const doImport = async () => {
+  const doAdd = async () => {
     if (source === undefined) return;
     setBusy(true);
     try {
-      // 这次又勾上的 skill 重新纳入自动同步
-      const reincluded = names.filter((n) => excluded.includes(n));
-      for (const skill of reincluded) {
+      // 这次又勾上的、之前被排除在规则外的 skill 重新纳入
+      for (const skill of names.filter((n) => excluded.includes(n))) {
         await api.includeAutoLink(source.path, skill);
+      }
+      // 同名选了替换的：先把现有的那份移到废纸篓（链到它的会改指到这一份），再建链
+      for (const skill of replace.filter((n) => names.includes(n))) {
+        const holder = holders.get(skill);
+        if (!holder) continue;
+        const planned = await api.planDeleteSource(holder.sourceId, skill);
+        if (planned.plan.inGit !== null) {
+          onNotice(`没替换 ${skill}：${holder.label} 那份在 git 仓库里，交给 git 处理更稳妥`);
+          continue;
+        }
+        await api.deleteSource(planned.planId);
       }
       const cells: CellRef[] = names.flatMap((skill) =>
         targetIds.map((targetId) => ({ sourceId: selected, skill, targetId })),
       );
       const acts = await api.proposeLinks(cells);
       if (acts.length === 0) {
-        // 动作为空不等于「都已经开着了」：同名被占、链接失效、整目录链到别处
-        // 也都产出空动作（§8 约束 1）。所以这里说的是位置被占，不是没事可做
-        onNotice("一个都没开成：选中的 skill 在这些 agent 下的位置已经被占着了");
-        if (reincluded.length > 0) await onChange();
+        // 动作为空不等于「都已经开着了」：同名被占、链接失效、整个文件夹是链接都产出空动作
+        onNotice("一个都没添加：选中的 skill 在这些 agent 下的位置已经被占着了");
+        await onChange();
         setBusy(false);
         return;
       }
       onReport(await api.applyAll(acts, false));
+      const memory = loadImportMemory(memoryKey);
+      saveImportMemory(memoryKey, {
+        last: targetIds,
+        streak: memory && sameSet(memory.last, targetIds) ? memory.streak + 1 : 1,
+      });
       await onChange();
       onClose();
     } catch (e) {
@@ -277,55 +271,59 @@ export default function ImportPage({
 
   const removeSource = (path: string) => void run(() => api.removeManualSource(path));
 
-  // 一行一个 skill，已导入的也列出来（灰着、点不动）——26 个全在眼前，不用猜漏了谁
-  const entries = (source?.skills ?? []).map((sk) => ({
-    name: sk.name,
-    imported: !notImported(selected, sk.name),
-    clash: taken.has(sk.name),
-    excluded: excluded.includes(sk.name),
-  }));
-  const columns = columnsOf(entries, entries.length > 28 ? 3 : 2);
+  const title = <>添加 skill 到「{page.label}」</>;
 
-  /// 列表头右侧那句：先说这个来源现在的状况，再说撞名
-  const note =
-    fresh.length === 0
-      ? auto && autoable
-        ? "这里以后新增的 skill 会自动出现，不用再来挑"
-        : "这里的 skill 都已经在列表里了"
-      : clashes > 0
-        ? `${clashes} 个与已有同名，导入后进待处理`
-        : null;
+  // 0 个来源：不分栏，居中三行
+  if (overview.sources.length === 0) {
+    return (
+      <SubPage title={title} onBack={onClose}>
+        <div className="ss-import__nothing">
+          <div className="ss-import__nothing-title">还没有来源</div>
+          <div className="ss-import__nothing-hint">先添加一个放 skill 的文件夹</div>
+          <Button variant="primary" icon={<PlusGlyph />} onClick={() => void addFolder()}>
+            来源
+          </Button>
+        </div>
+      </SubPage>
+    );
+  }
 
+  const chosen = names.length;
   const blocked = busy
     ? "正在处理，等这一下"
-    : chosen === 0
-      ? "先在列表里勾上要导入的 skill"
-      : targetIds.length === 0
-        ? "先选至少一个 agent"
+    : targetIds.length === 0
+      ? "先点亮至少一个 agent"
+      : chosen === 0
+        ? "先在列表里勾上要添加的 skill"
         : null;
 
+  const memory = loadImportMemory(memoryKey);
+  const suggestRule =
+    autoable &&
+    !ruleOn &&
+    memory !== null &&
+    memory.streak >= 2 &&
+    targetIds.length > 0 &&
+    sameSet(memory.last, targetIds);
+
+  const ruleReason = !autoable
+    ? "外部来源随时可能不在，不给它建规则"
+    : targetIds.length === 0
+      ? "先点亮至少一个 agent"
+      : undefined;
+
   return (
-    <SubPage
-      // 导入到哪，在标题里就要看得见，不放右边的副标题里。目的地名是内容，
-      // 标题是大写档，得用 Plain 包住，否则项目名 CardBox 会变 CARDBOX
-      title={
-        <>
-          导入 skill 到「<Plain>{page.label}</Plain>」
-        </>
-      }
-      onBack={onClose}
-    >
+    <SubPage title={title} onBack={onClose}>
       <div className="ss-import">
         <div className="ss-import__cols">
           <Busy busy={busy} className="ss-import__sources">
             <div className="ss-import__caption">
-              来源
-              <span>未导入</span>
+              <span>来源</span>
+              <span>未添加</span>
             </div>
-            <div className="ss-import__srclist">
+            <div className="ss-import__srclist" ref={listRef}>
               {overview.sources.map((s) => {
-                const tag = kindTag(s.kind);
-                const count = s.skills.filter((sk) => notImported(s.id, sk.name)).length;
+                const count = s.skills.filter((sk) => notAdded(s.id, sk.name)).length;
                 return (
                   <div
                     key={s.id}
@@ -340,78 +338,52 @@ export default function ImportPage({
                       aria-current={s.id === selected}
                       onClick={() => setSelected(s.id)}
                     >
-                      <span
-                        className={
-                          s.kind.type === "external"
-                            ? "ss-import__srcname is-path"
-                            : "ss-import__srcname"
-                        }
-                      >
-                        {s.label}
+                      <span className="ss-import__srctext">
+                        <span className="ss-import__srcname">{s.label}</span>
+                        <span className="ss-import__srcscope">{scopeOf(s.kind)}</span>
                       </span>
-                      {tag ? <span className="ss-import__tag is-quiet">{tag}</span> : null}
-                      <span className="ss-import__count" title="还没出现在这个域里的 skill 数">
+                      <span
+                        className={`ss-import__count${count === 0 ? " is-zero" : ""}`}
+                        title="还没出现在这个位置的 skill 数"
+                      >
                         {count}
                       </span>
                     </button>
                     {s.kind.type === "manual" ? (
-                      <Button variant="link" size="compact" onClick={() => removeSource(s.path)}>
-                        移除
-                      </Button>
+                      <span className="ss-import__remove">
+                        <Button variant="link" onClick={() => removeSource(s.path)}>
+                          移除
+                        </Button>
+                      </span>
                     ) : null}
                   </div>
                 );
               })}
             </div>
-            {/* 一个来源都没有时这个按钮不出现：那种情况下右边的空态已经把它摆在正中间了 */}
-            {overview.sources.length > 0 ? (
-              <div className="ss-import__add">
-                <Button onClick={() => void addFolder()}>添加来源…</Button>
-              </div>
-            ) : null}
+            <div className={`ss-import__add${scrollable ? " is-scrollable" : ""}`}>
+              <AddButton noun="来源" onClick={() => void addFolder()} />
+            </div>
           </Busy>
 
           <div className="ss-import__main">
-            {source === undefined ? (
-              <Empty
-                kind="noSkills"
-                description="还没有找到放着 skill 的目录。"
-                hint="常见的位置是 ~/.agents/skills，也可以自己指一个。"
-                primary={{ label: "添加来源…", onClick: () => void addFolder() }}
-              />
-            ) : (
+            {source !== undefined ? (
               <>
-                {autoable ? (
-                  <Busy busy={busy} className="ss-import__fixed">
-                    <button
-                      type="button"
-                      className="ss-import__auto"
-                      role="checkbox"
-                      aria-checked={auto}
-                      disabled={targetIds.length === 0}
-                      title={targetIds.length === 0 ? "先选至少一个 agent" : `来源：${source.path}`}
-                      onClick={toggleAuto}
-                    >
-                      <CheckBox on={auto} dim={targetIds.length === 0} />
-                      此来源新增 skill 自动导入
-                    </button>
-                  </Busy>
-                ) : null}
-
                 <div className="ss-import__listhead">
                   <span className="ss-import__headline">
-                    {source.label} · {source.skills.length} 个本体
+                    {source.label} · <span className="ss-import__num">{source.skills.length}</span>
                   </span>
                   {fresh.length > 0 ? (
-                    <Button
-                      variant="link"
-                      size="compact"
-                      onClick={() => setNames(allSelected ? [] : fresh.map((sk) => sk.name))}
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={allSelected ? true : someSelected ? "mixed" : false}
+                      className="ss-import__all"
+                      onClick={() => setNames(allSelected ? [] : fresh.map((e) => e.name))}
                     >
-                      {allSelected ? "取消全选" : "全选"}
-                    </Button>
+                      <CheckMark on={allSelected} />
+                      全选
+                    </button>
                   ) : null}
-                  {note ? <span className="ss-import__note">{note}</span> : null}
                 </div>
 
                 <Busy busy={busy} className="ss-import__grid">
@@ -419,120 +391,152 @@ export default function ImportPage({
                     <div className="ss-import__col" key={col[0].name}>
                       {col.map((entry) => {
                         const on = names.includes(entry.name);
+                        const replacing = replace.includes(entry.name);
                         return (
-                          <button
-                            key={entry.name}
-                            type="button"
-                            className="ss-import__row"
-                            role="checkbox"
-                            aria-checked={on}
-                            disabled={entry.imported}
-                            title={
-                              entry.imported
-                                ? `${entry.name} 已经在这个域的列表里了`
-                                : `${source.path}/${entry.name}`
-                            }
-                            onClick={() => toggleName(entry.name)}
-                          >
-                            <CheckBox on={on} dim={entry.imported} />
-                            <span className="ss-import__name">{entry.name}</span>
-                            {entry.imported ? (
-                              <span className="ss-import__tag is-quiet">已导入</span>
+                          <div key={entry.name}>
+                            <button
+                              type="button"
+                              className={`ss-import__row${entry.added ? " is-added" : ""}`}
+                              role="checkbox"
+                              aria-checked={on}
+                              disabled={entry.added}
+                              title={
+                                entry.added
+                                  ? `${entry.name} 已经在这个位置的列表里了`
+                                  : `${source.path}/${entry.name}`
+                              }
+                              onClick={() => toggleName(entry.name)}
+                            >
+                              <CheckMark on={on} dim={entry.added} />
+                              <span className="ss-import__name">{entry.name}</span>
+                              {entry.added ? (
+                                <span className="ss-import__tag">
+                                  <Tag tone="weak">已添加</Tag>
+                                </span>
+                              ) : entry.holder !== null ? (
+                                <span className="ss-import__tag">
+                                  <Tag
+                                    tip={
+                                      <>
+                                        <b>同名</b>：{entry.holder.label} 里已有一份
+                                      </>
+                                    }
+                                  >
+                                    同名
+                                  </Tag>
+                                </span>
+                              ) : null}
+                            </button>
+                            {on && entry.holder !== null && !entry.added ? (
+                              <div className="ss-import__clash">
+                                {replacing ? (
+                                  <Button
+                                    size="compact"
+                                    variant="primary"
+                                    title="不替换了，添加时跳过它"
+                                    onClick={() =>
+                                      setReplace((prev) => prev.filter((n) => n !== entry.name))
+                                    }
+                                  >
+                                    替换现有的
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="compact"
+                                    onClick={() => setReplace((prev) => [...prev, entry.name])}
+                                  >
+                                    替换现有的
+                                  </Button>
+                                )}
+                                <span
+                                  className="ss-import__clashnote"
+                                  title="现有的那份进废纸篓，可以从访达恢复；链到它的会改指到这一份"
+                                >
+                                  {joinWords("替换后", entry.holder.label, "那份进废纸篓")}
+                                </span>
+                                <Button variant="link" onClick={() => toggleName(entry.name)}>
+                                  跳过
+                                </Button>
+                              </div>
                             ) : null}
-                            {!entry.imported && entry.clash ? (
-                              <span className="ss-import__tag">同名</span>
-                            ) : null}
-                            {entry.excluded ? (
-                              <span
-                                className="ss-import__tag is-quiet"
-                                title="之前被排除在自动同步外，这次选上就重新纳入"
-                              >
-                                已排除
-                              </span>
-                            ) : null}
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
                   ))}
                 </Busy>
-
-                <Busy busy={busy} className="ss-import__agents">
-                  <div className="ss-import__label">新导入的 skill 自动在以下 agent 开启</div>
-                  <div className="ss-import__chips">
-                    {page.targets.length === 0 ? (
-                      <span className="ss-import__hint">
-                        还没有启用任何 agent，先去设置里开一个
-                      </span>
-                    ) : (
-                      page.targets.map((target) =>
-                        target.linkedWholeTo === null ? (
-                          <Chip
-                            key={target.id}
-                            icon={<AgentIcon id={target.scope.harnessId} name={target.label} />}
-                            selected={targetIds.includes(target.id)}
-                            title={target.path}
-                            onClick={() => toggleTarget(target.id)}
-                          >
-                            {target.label}
-                          </Chip>
-                        ) : (
-                          <Chip
-                            key={target.id}
-                            icon={<AgentIcon id={target.scope.harnessId} name={target.label} />}
-                            disabled
-                            disabledReason={`${target.label} 的目录整个链到了别处，要逐条开关得先拆开`}
-                          >
-                            {target.label}
-                          </Chip>
-                        ),
-                      )
-                    )}
-                    <span className="ss-import__hint">
-                      至少选一个：有软链或本体，才会出现在列表里
-                    </span>
-                  </div>
-                </Busy>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="ss-import__foot">
-          <span className="ss-import__hint">
-            只建链接，不动源文件
-            {source ? (
-              <>
-                {" · 源文件在 "}
-                <span className="ss-import__path">{source.path}</span>
               </>
             ) : null}
-          </span>
-          <div className="ss-import__actions">
-            <Button variant="link" onClick={onClose}>
-              取消
-            </Button>
-            {blocked ? (
-              <Button disabled disabledReason={blocked}>
-                导入
-              </Button>
-            ) : (
-              <Button onClick={() => void doImport()}>导入 {chosen} 个</Button>
-            )}
           </div>
         </div>
-      </div>
 
-      {confirmAuto && source !== undefined ? (
-        <Confirm
-          title="开启自动同步"
-          body={`「${source.label}」里还没开启的 ${autoCount} 个 skill 会立刻在 ${targetLabels} 下出现。`}
-          warning="以后这个来源里新增的 skill，也会自动在这些 agent 中开启。"
-          confirmLabel="开启自动同步"
-          onConfirm={enableAuto}
-          onCancel={() => setConfirmAuto(false)}
-        />
-      ) : null}
+        <Busy busy={busy} className="ss-import__foot">
+          <div className="ss-import__keys">
+            {page.targets.length === 0 ? (
+              <span className="ss-import__hint">还没有启用任何 agent，先去设置里开一个</span>
+            ) : (
+              page.targets.map((target) => (
+                <AgentKey
+                  key={target.id}
+                  id={target.scope.harnessId}
+                  name={target.label}
+                  pressed={targetIds.includes(target.id)}
+                  onToggle={() => toggleTarget(target.id)}
+                  disabledReason={
+                    target.linkedWholeTo === null
+                      ? undefined
+                      : `${target.label} 的 skills 文件夹整个是链接，拆开后才能逐个开关`
+                  }
+                />
+              ))
+            )}
+          </div>
+          <span className="ss-import__rule" title="只管以后新出现的，现有的不变">
+            <Switch
+              size="inline"
+              checked={ruleOn}
+              onChange={toggleRule}
+              label={`${source?.label ?? "这个来源"} 以后新出现的也加`}
+              title={
+                source ? `${source.label} 以后新出现的 skill 也自动添加到点亮的 agent` : undefined
+              }
+              disabledReason={ruleOn ? undefined : ruleReason}
+            />
+            <span className="ss-import__rulelabel">以后新出现的也加</span>
+            {suggestRule ? (
+              <span className="ss-import__suggest">每次都选这几个？可以打开</span>
+            ) : null}
+          </span>
+          <span className="ss-import__safety">只建链接，不动源文件</span>
+          {blocked ? (
+            <Button size="row" variant="primary" disabled disabledReason={blocked}>
+              {`添加 ${chosen} 个`}
+            </Button>
+          ) : (
+            <Button size="row" variant="primary" onClick={() => void doAdd()}>
+              {`添加 ${chosen} 个`}
+            </Button>
+          )}
+        </Busy>
+      </div>
     </SubPage>
+  );
+}
+
+/// 反色 `+ 来源` 里的 12px 加号（与 AddButton 同一个图形）
+function PlusGlyph() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M6 1.5v9M1.5 6h9" />
+    </svg>
   );
 }
