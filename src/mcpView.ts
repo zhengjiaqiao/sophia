@@ -1,4 +1,11 @@
-import { viewOf, type McpCellView, type McpDotState } from "./mcpCellState.ts";
+import {
+  differentCopiesMessage,
+  viewOf,
+  type McpCellView,
+  type McpDotState,
+  type McpIssueKind,
+} from "./mcpCellState.ts";
+import { issueKey } from "./pages/pendingIssues.ts";
 import type { McpEntry, McpLocation, McpOverview } from "./types.ts";
 
 export interface McpDomainRow {
@@ -192,4 +199,121 @@ export function importedInDomain(entry: McpEntry, page: McpDomain): boolean {
       targetIds.has(cell.targetId) &&
       (cell.state === "own" || cell.state === "equal" || cell.state === "sameEndpoint"),
   );
+}
+
+/**
+ * 本行几份副本在**哪些字段**上不一样，给主视图 `2 份不一样` 的提示框用（DESIGN「材料与工艺」
+ * MCP 两份不一样：提示框给差异字段名，`url 不同`）。
+ *
+ * 数据只来自现有扫描：core 在 conflict 格上给的 reason 只分两种——`URL 不同`（能确定是 url）
+ * 和 `同名配置不同`（不知道是哪个字段）。后者返回空数组，调用方写「配置不一样」。
+ * TODO(T3b)：core 给出字段级差异后，这里换成真实字段名列表。
+ */
+export function differingFields(row: McpDomainRow, targetIds: Set<string>): string[] {
+  const fields = new Set<string>();
+  let unknown = false;
+  for (const entry of row.entries) {
+    for (const cell of entry.cells) {
+      if (cell.state !== "conflict" || !targetIds.has(cell.targetId)) continue;
+      if (cell.reason === "URL 不同") fields.add("url");
+      else unknown = true;
+    }
+  }
+  // 有一处说不清是哪个字段，就不能只报 url——那等于说其余都一样
+  return unknown ? [] : [...fields];
+}
+
+/// 行归哪个来源分组：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）
+export const mcpGroupOf = (row: McpDomainRow): string => row.entries[0]?.sourceId ?? "";
+
+/**
+ * MCP 的一条待处理（主视图不再有贴底待处理窗；T3 在全局待处理页渲染它，T2 数它给顶栏收件箱）。
+ *
+ * 形状是稳定契约：
+ * - `kind`：`differentCopies`（几个位置各有一份同名定义、内容不一样）/ `invalidLocation`
+ *   （某个位置的配置文件、或其中一条这次读不出来）
+ * - `key`：与 core `IgnoredIssue::key_for` 同公式（`issueKey(kind, paths)`），拿它比对已忽略列表
+ * - `title`：一句完整的话（行视角），直接显示
+ * - `detailFields?`：只给 differentCopies——已知不一样的字段名（`["url"]`）；缺省＝说不清是哪个字段
+ * - `locations`：涉及的位置（id / 位置名 / 配置文件路径），顺序即行内出现的先后
+ * - `name`：服务名；位置整份读不出来时为 null
+ * - `domain`：所在域的 key（`global` / `project:<路径>`），跳回对应页用
+ * - `paths`：原样传给 `api.ignoreIssue(kind, paths)`；key 就是由它算的
+ */
+export interface McpPendingItem {
+  kind: McpIssueKind;
+  key: string;
+  title: string;
+  detailFields?: string[];
+  locations: { id: string; label: string; path: string }[];
+  name: string | null;
+  domain: string;
+  paths: string[];
+}
+
+/**
+ * 收出 MCP 页要用户拿主意的事：读不出来的位置 / 条目，以及两份不一样的同名服务。
+ *
+ * `opts.domains` 只看这几个域（主视图当前域）；不给看全部。`opts.ignored` 给了就滤掉已忽略的 key。
+ */
+export function collectMcpIssues(
+  overview: McpOverview | null,
+  opts: { domains?: string[]; ignored?: Set<string> } = {},
+): McpPendingItem[] {
+  if (overview === null) return [];
+  const want = (domain: string) => opts.domains === undefined || opts.domains.includes(domain);
+  const locationOf = (id: string) => overview.locations.find((l) => l.id === id);
+  const refOf = (id: string) => {
+    const l = locationOf(id);
+    return { id, label: l?.label ?? id, path: l?.path ?? id };
+  };
+  const out: McpPendingItem[] = [];
+
+  for (const issue of overview.issues) {
+    const location = locationOf(issue.locationId);
+    if (location === undefined || !want(location.domain)) continue;
+    // key 必须和 core 的 IgnoredIssue::key_for 同源；条目名并进标识里，否则同一个文件里
+    // 两条不同名的问题会算出同一个 key，忽略一条就把另一条也吞了
+    // 用加号拼而不是模板串：上面两处带反斜杠的模板串会让 lint-ui 的取文案正则配错对
+    const ident = issue.name === null ? location.path : location.path + "#" + issue.name;
+    out.push({
+      kind: "invalidLocation",
+      key: issueKey("invalidLocation", [ident]),
+      title:
+        issue.name === null
+          ? (viewOf("invalid", { service: "", location: location.label, source: "" }).reason ?? "")
+          : location.label + " 里的 " + issue.name + " 这次读不出来：" + issue.message,
+      locations: [refOf(location.id)],
+      name: issue.name,
+      domain: location.domain,
+      paths: [ident],
+    });
+  }
+
+  for (const page of mcpDomains(overview)) {
+    if (!want(page.key)) continue;
+    const targetIds = new Set(page.targets.map((target) => target.id));
+    for (const row of page.rows) {
+      const ids = differingSourceIds(row, targetIds);
+      if (ids.length === 0) continue;
+      // 同上：与 core 同源。服务名并进去，否则同一组位置上的两个服务会撞 key
+      const paths = [...ids.map((id) => locationOf(id)?.path ?? id), "#" + row.name];
+      const fields = differingFields(row, targetIds);
+      out.push({
+        kind: "differentCopies",
+        key: issueKey("differentCopies", paths),
+        title: differentCopiesMessage(
+          row.name,
+          ids.map((id) => refOf(id).label),
+        ),
+        detailFields: fields.length > 0 ? fields : undefined,
+        locations: ids.map(refOf),
+        name: row.name,
+        domain: page.key,
+        paths,
+      });
+    }
+  }
+
+  return opts.ignored ? out.filter((item) => !opts.ignored?.has(item.key)) : out;
 }

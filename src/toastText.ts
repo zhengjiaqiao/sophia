@@ -1,0 +1,164 @@
+/// 提示条文案：一次操作的结果 → `Toast` 要的「动词 + 图标 + 名字」（DESIGN「提示条分两档」
+/// 「视觉优先：文字只负责名字和动词」）。纯逻辑，不产 JSX、不碰 api；T1 的两张表、
+/// T2 的壳、T3 的二级页共用这一份，别处不另写一套造句。
+///
+/// 签名（T2 / T3 照这个调）：
+///
+/// ```ts
+/// toastFor(op: ToastOp, input: ToastInput): ToastText
+///
+/// type ToastOp = "link" | "unlink" | "write" | "clear" | "split" | "keepThis"
+///              | "autoLink" | "autoWrite"
+/// interface ToastInput {
+///   done: ToastItem[];      // 做成了的：每项一个名字 + 可选 agent
+///   failed?: FailedItem[];  // 没做成的：同上 + 一句能行动的原因
+///   keepLabel?: string;     // keepThis 专用：留下的那份在哪（「通用仓库」）
+/// }
+/// interface ToastText {
+///   tier: "notice" | "routine"; kind: "success" | "cannot" | "partial";
+///   verb: string; names: string[]; agents: { id: string; name: string }[];
+///   reason?: string; tally?: { done: number; failed: number };
+/// }
+/// ```
+///
+/// 返回值可以直接展开给 `<Toast {...text} />`（再补 `action` / `onClose` / `onDismiss`）。
+///
+/// 规则：
+/// - **动词必填且与触发动作一致**：开启 / 关闭 / 写进 / 清除 / 拆开 / 只留 / 自动开启 / 自动写进；
+///   全部没成时用**否定动词**（`没开启`）——失败里写「开启」会被一眼读成已开启
+/// - 档位（① 严重程度决定打断程度）：例行成功 `routine`（结果已由格子闪烁表达，这行只给撤销）；
+///   做不成、部分失败、可撤销的删除（只留这份）、自动发生的事一律 `notice` 黑窗
+/// - 名字去重、保序；多于两个由 `Toast` 自己写成 `+N`，这里不截
+/// - agent 图标按 id 去重、保序
+
+export type ToastOp =
+  /// skill：在某个 agent 下开启（建链）
+  | "link"
+  /// skill：关掉某个 agent 下的链接
+  | "unlink"
+  /// MCP：把一份定义写进某个位置（只新增）
+  | "write"
+  /// 清掉失效的链接
+  | "clear"
+  /// 把整个文件夹是链接的目录拆开
+  | "split"
+  /// 同名两份：只留这份，另一份进废纸篓（可撤销）
+  | "keepThis"
+  /// 自动规则在背后开启了几个（⑨⑬ 自动发生的事要交代）
+  | "autoLink"
+  /// MCP 自动规则在背后写进了几个
+  | "autoWrite";
+
+export interface ToastAgentRef {
+  /// harness id，决定图标
+  id: string;
+  /// 显示名，读屏用
+  name: string;
+}
+
+export interface ToastItem {
+  /// skill 名 / MCP 服务名 / 目录名
+  name: string;
+  agent?: ToastAgentRef;
+}
+
+export interface FailedItem extends ToastItem {
+  /// 一句能行动的原因（「Codex 的 skills 目录写不进去」），不是错误码
+  reason: string;
+}
+
+export interface ToastInput {
+  done: ToastItem[];
+  failed?: FailedItem[];
+  /// keepThis：留下的那份所在的来源名，拼进名字里（`通用仓库 的 defuddle`）
+  keepLabel?: string;
+}
+
+export type ToastTier = "notice" | "routine";
+export type ToastTextKind = "success" | "cannot" | "partial";
+
+export interface ToastText {
+  tier: ToastTier;
+  kind: ToastTextKind;
+  verb: string;
+  names: string[];
+  agents: ToastAgentRef[];
+  reason?: string;
+  tally?: { done: number; failed: number };
+}
+
+const VERB: Record<ToastOp, string> = {
+  link: "开启",
+  unlink: "关闭",
+  write: "写进",
+  clear: "清除",
+  split: "拆开",
+  keepThis: "只留",
+  autoLink: "自动开启",
+  autoWrite: "自动写进",
+};
+
+/// 全部没成时的否定动词
+const NOT_VERB: Record<ToastOp, string> = {
+  link: "没开启",
+  unlink: "没关闭",
+  write: "没写进",
+  clear: "没清除",
+  split: "没拆开",
+  keepThis: "没删掉",
+  autoLink: "没自动开启",
+  autoWrite: "没自动写进",
+};
+
+/// 成功时用黑窗的几种：可撤销的删除、自动发生的事（DESIGN「提示条分两档」）
+const NOTICE_ON_SUCCESS = new Set<ToastOp>(["keepThis", "autoLink", "autoWrite"]);
+
+const uniq = (xs: string[]) => [...new Set(xs)];
+
+const agentsOf = (items: ToastItem[]): ToastAgentRef[] => {
+  const out: ToastAgentRef[] = [];
+  for (const item of items) {
+    if (item.agent && !out.some((a) => a.id === item.agent?.id)) out.push(item.agent);
+  }
+  return out;
+};
+
+export function toastFor(op: ToastOp, input: ToastInput): ToastText {
+  const done = input.done;
+  const failed = input.failed ?? [];
+  const namesOf = (items: ToastItem[]) =>
+    uniq(
+      items.map((i) =>
+        op === "keepThis" && input.keepLabel ? `${input.keepLabel} 的 ${i.name}` : i.name,
+      ),
+    );
+
+  if (done.length === 0 && failed.length > 0) {
+    return {
+      tier: "notice",
+      kind: "cannot",
+      verb: NOT_VERB[op],
+      names: namesOf(failed),
+      agents: agentsOf(failed),
+      reason: failed[0].reason,
+    };
+  }
+  if (failed.length > 0) {
+    return {
+      tier: "notice",
+      kind: "partial",
+      verb: VERB[op],
+      names: namesOf(done),
+      agents: agentsOf(done),
+      reason: failed[0].reason,
+      tally: { done: done.length, failed: failed.length },
+    };
+  }
+  return {
+    tier: NOTICE_ON_SUCCESS.has(op) ? "notice" : "routine",
+    kind: "success",
+    verb: VERB[op],
+    names: namesOf(done),
+    agents: agentsOf(done),
+  };
+}
