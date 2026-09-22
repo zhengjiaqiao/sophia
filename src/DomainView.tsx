@@ -59,6 +59,9 @@ export interface DomainViewProps {
   filterText: string;
   onFilterText: (text: string) => void;
   onClearFilter: () => void;
+  /// 按来源筛选中的来源（工具行第二行的片）；null＝全部
+  originFilter: string | null;
+  onOriginFilter: (sourceId: string | null) => void;
   /// 行悬停「打开 ↗」：在访达中显示原件
   onReveal: (path: string) => void;
   onImport: () => void;
@@ -340,6 +343,17 @@ export default function DomainView(props: DomainViewProps) {
       columns={columns}
       rows={matrixRows}
       originLabel="原件位置"
+      sources={{
+        total: page.rows.length - props.hiddenRows.size,
+        selected: props.originFilter,
+        onSelect: props.onOriginFilter,
+        items: [...counts].map(([id, count]) => ({
+          id,
+          label: originOf(id),
+          full: `${originOf(id)} · ${displayPath(sourceOf(id)?.path ?? id)}`,
+          count,
+        })),
+      }}
       nameLabel="名称"
       nameTip="列表里只出现两种 skill：原件就在这个位置下的，和在某个 agent 下有链接的"
       nameCount={matrixRows.length}

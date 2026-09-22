@@ -618,3 +618,43 @@
 .mx-detail__desc {
   white-space: pre-line;
 }
+
+/* 工具行第二行：来源筛选片平铺，上 8；放不下折行，不超出面板宽 */
+.mx-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mx-sourcechip {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 片名太长（同名来源的区分片段也放不下）时截断，完整值在同一行右侧的提示框里 */
+.mx-sourcechip .ss-chip {
+  max-width: 100%;
+}
+
+.mx-sourcechip .ss-chip__label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 提示框放在同一行右侧，不放到上一行 */
+.mx-rowtip {
+  top: 50%;
+  left: calc(100% + 8px);
+  overflow-wrap: anywhere;
+  transform: translateY(-50%);
+}
+
+.mx-rowtip--left {
+  right: calc(100% + 8px);
+  left: auto;
+}

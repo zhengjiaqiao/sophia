@@ -65,6 +65,8 @@ export default function SkillsTab({
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
+  // 按来源筛选（工具行第二行的来源片）；null＝全部
+  const [originFilter, setOriginFilter] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
@@ -141,6 +143,7 @@ export default function SkillsTab({
     setRowToast(null);
     setCellNotice(null);
     setSelected(new Set());
+    setOriginFilter(null);
     undoRef.current = null;
   }, [selectedKey]);
 
@@ -594,7 +597,10 @@ export default function SkillsTab({
     }
     if (rowKeys.length === 0) columnId = page.targets.find((t) => paths.has(t.path))?.id;
     // 要跳的行被筛掉了：先清筛选，不然跳过去是空的
-    if (rowKeys.length > 0) setFilterText("");
+    if (rowKeys.length > 0) {
+      setFilterText("");
+      setOriginFilter(null);
+    }
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -617,7 +623,9 @@ export default function SkillsTab({
 
   const query = filterText.trim().toLowerCase();
   const visible = page.rows.filter(
-    (row) => query === "" || row.skill.toLowerCase().includes(query),
+    (row) =>
+      (query === "" || row.skill.toLowerCase().includes(query)) &&
+      (originFilter === null || row.sourceId === originFilter),
   );
   const hiddenRows = hidden;
 
@@ -637,7 +645,12 @@ export default function SkillsTab({
         busy={busy}
         filterText={filterText}
         onFilterText={setFilterText}
-        onClearFilter={() => setFilterText("")}
+        onClearFilter={() => {
+          setFilterText("");
+          setOriginFilter(null);
+        }}
+        originFilter={originFilter}
+        onOriginFilter={setOriginFilter}
         onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}
         onImport={() => setImportOpen(true)}
         selected={selected}

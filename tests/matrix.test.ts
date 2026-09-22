@@ -171,3 +171,27 @@ test("Matrix：名称列头带总数，没有来源筛选片", () => {
   // 没有来源筛选片
   assert.doesNotMatch(html, /ss-chip/);
 });
+
+test("Matrix：工具行第二行来源筛选片——全部 N 在最前默认选中；选择条只顶替第一行，来源片仍在", () => {
+  const sources = {
+    total: 2,
+    selected: null,
+    onSelect: () => undefined,
+    items: [
+      { id: "u", label: "通用仓库", count: 1 },
+      { id: "w", label: "WeiboAP", count: 1 },
+    ],
+  };
+  const idle = render(Matrix, { ...base, sources });
+  assert.match(idle, /class="mx-sources"/);
+  assert.match(
+    idle,
+    /aria-pressed="true"><span class="ss-chip__label">全部<\/span><span class="ss-chip__count">2</,
+  );
+  assert.match(idle, /placeholder="筛选"/);
+  const picking = render(Matrix, { ...base, sources, selected: new Set(["u|docx"]) });
+  // 第一行换成选择条，第二行来源片保留
+  assert.doesNotMatch(picking, /placeholder="筛选"/);
+  assert.match(picking, /已选/);
+  assert.match(picking, /class="mx-sources"/);
+});

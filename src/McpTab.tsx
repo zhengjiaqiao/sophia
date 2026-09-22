@@ -11,6 +11,7 @@ import Matrix, {
 } from "./Matrix";
 import { Empty as TableEmpty, PlusGlyph } from "./DomainView";
 import McpImportPage from "./pages/McpImportPage";
+import { displayPath } from "./pathText";
 import { pathsOfKey } from "./pages/pendingIssues";
 import {
   cellViewOf,
@@ -124,6 +125,8 @@ export default function McpTab({
   // 选中的行：域 key → 行键集合
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
+  // 按来源位置筛选（工具行第二行的来源片）；null＝全部
+  const [originFilter, setOriginFilter] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   // 单格歧义跳过来时预选的那个位置
   const [importTargetIds, setImportTargetIds] = useState<string[] | null>(null);
@@ -234,6 +237,7 @@ export default function McpTab({
     setCellNotice(null);
     // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
     setSelected(new Set());
+    setOriginFilter(null);
     undoRef.current = null;
   }, [selectedKey]);
 
@@ -291,7 +295,10 @@ export default function McpTab({
       .map(rowKeyOf);
     const columnId =
       rowKeys.length === 0 ? page.targets.find((t) => paths.includes(t.path))?.id : undefined;
-    if (rowKeys.length > 0) setFilterText("");
+    if (rowKeys.length > 0) {
+      setFilterText("");
+      setOriginFilter(null);
+    }
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -529,7 +536,18 @@ export default function McpTab({
   const targetIds = new Set(page.targets.map((t) => t.id));
   const names = columnNames(page.targets);
   const query = filterText.trim().toLowerCase();
-  const visible = page.rows.filter((row) => query === "" || row.name.toLowerCase().includes(query));
+  const visible = page.rows.filter(
+    (row) =>
+      (query === "" || row.name.toLowerCase().includes(query)) &&
+      (originFilter === null || row.entries.some((e) => e.sourceId === originFilter)),
+  );
+  // 来源片：每个位置 · 这里有它的一份定义的行数（一行几份定义各算一次）
+  const sourceCounts = new Map<string, number>();
+  for (const row of page.rows) {
+    for (const id of new Set(row.entries.map((e) => e.sourceId))) {
+      sourceCounts.set(id, (sourceCounts.get(id) ?? 0) + 1);
+    }
+  }
 
   /// 格此刻画成什么：乐观点亮的画实心
   const viewAt = (row: McpDomainRow, targetId: string) => {
@@ -677,7 +695,10 @@ export default function McpTab({
         text={`没有名字里带「${filterText.trim()}」的服务`}
         action={{
           label: "清除筛选",
-          onClick: () => setFilterText(""),
+          onClick: () => {
+            setFilterText("");
+            setOriginFilter(null);
+          },
         }}
       />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
@@ -696,6 +717,17 @@ export default function McpTab({
       <Matrix
         columns={columns}
         originLabel="来源位置"
+        sources={{
+          total: page.rows.length,
+          selected: originFilter,
+          onSelect: setOriginFilter,
+          items: [...sourceCounts].map(([id, count]) => ({
+            id,
+            label: groupLabel(locationOf(id), id),
+            full: `${groupLabel(locationOf(id), id)} · ${displayPath(locationOf(id)?.path ?? id)}`,
+            count,
+          })),
+        }}
         rows={rows}
         nameLabel="服务"
         nameTip="定义住在哪一格由原件环表示"

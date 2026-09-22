@@ -21,6 +21,7 @@ import {
   AgentIcon,
   AgentMark,
   Checkbox,
+  Chip,
   DOT_LABEL,
   Cap,
   IconCannot,
@@ -116,6 +117,14 @@ export interface MatrixProps {
   columns: MatrixColumn[];
   /// 原件位置列：列头文字（`原件位置` / `来源位置`）
   originLabel: string;
+  /// 工具行第二行的来源筛选片：`全部 N` 在最前、默认选中；每片 `来源名 N`，选中反色。
+  /// 放不下折行（不超出面板宽）；片名放不下截断，完整值用同一行右侧的提示框给
+  sources?: {
+    total: number;
+    selected: string | null;
+    onSelect: (id: string | null) => void;
+    items: { id: string; label: string; full?: string; count: number }[];
+  };
   rows: MatrixRowView[];
   /// 名称列头：`名称` / `服务`
   nameLabel: string;
@@ -306,6 +315,7 @@ export default function Matrix(props: MatrixProps) {
   const {
     columns,
     originLabel,
+    sources,
     rows,
     nameLabel,
     nameTip,
@@ -955,8 +965,11 @@ export default function Matrix(props: MatrixProps) {
   return (
     <div className="mx" ref={rootRef}>
       {/* 工具行 / 选择条吸顶：共用一个槽位，滚动之后也要点得到 */}
+      {/* 工具行两行一起吸顶：第一行（勾选时是选择条）+ 第二行来源筛选片，列头紧贴其下。
+          选择条只顶替第一行，来源片保持可见——选择常发生在某个筛选之内 */}
       <div className="mx-bar" ref={barRef}>
         {toolbar}
+        {sources ? <SourceChips {...sources} width={width} /> : null}
       </div>
       <div className="mx-panel" ref={panelRef} style={{ width }}>
         {header}
@@ -985,6 +998,70 @@ export default function Matrix(props: MatrixProps) {
           {globalToast}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/// 工具行第二行：来源筛选片平铺（DESIGN「主视图」）。点片＝筛选，再点「全部」恢复
+function SourceChips({
+  total,
+  selected,
+  onSelect,
+  items,
+  width,
+}: NonNullable<MatrixProps["sources"]> & { width: number }) {
+  const [tipFor, setTipFor] = useState<string | null>(null);
+  // 窗口右边放不下时提示框改放同一行左侧，不出窗
+  const [tipLeft, setTipLeft] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipId = useId();
+  // 只有片名真被截断时才给完整值；提示框放在同一行右侧
+  const arm = (id: string, el: HTMLElement) => {
+    if (timer.current) clearTimeout(timer.current);
+    const label = el.querySelector<HTMLElement>(".ss-chip__label");
+    if (label === null || label.scrollWidth <= label.clientWidth + 1) return;
+    setTipLeft(window.innerWidth - el.getBoundingClientRect().right < 260);
+    timer.current = setTimeout(() => setTipFor(id), TIP_DELAY_MS.default);
+  };
+  const drop = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    setTipFor(null);
+  };
+  useEffect(() => drop, []);
+  return (
+    <div className="mx-sources" style={{ maxWidth: width }} role="group" aria-label="按来源筛选">
+      <Chip selected={selected === null} count={total} onClick={() => onSelect(null)}>
+        全部
+      </Chip>
+      {items.map((item) => (
+        <span
+          key={item.id}
+          className="mx-sourcechip"
+          onMouseEnter={(e) => arm(item.id, e.currentTarget)}
+          onMouseLeave={drop}
+          onFocus={(e) => arm(item.id, e.currentTarget)}
+          onBlur={drop}
+          aria-describedby={tipFor === item.id ? `${tipId}-${item.id}` : undefined}
+        >
+          <Chip
+            selected={selected === item.id}
+            count={item.count}
+            onClick={() => onSelect(selected === item.id ? null : item.id)}
+          >
+            {item.label}
+          </Chip>
+          {tipFor === item.id ? (
+            <span
+              id={`${tipId}-${item.id}`}
+              role="tooltip"
+              className={`ss-tip mx-rowtip${tipLeft ? " mx-rowtip--left" : ""} is-open`}
+            >
+              {item.full ?? item.label}
+            </span>
+          ) : null}
+        </span>
+      ))}
     </div>
   );
 }
