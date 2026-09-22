@@ -48,6 +48,11 @@
   box-sizing: content-box;
 }
 
+/* 地址为空的「保存」同理：禁用键不吃指针，提示框「先填地址」挂在包层上 */
+.gw-form__save .ss-btn:disabled {
+  pointer-events: none;
+}
+
 /* 最后一家的垃圾桶是禁用的：禁用键接不到悬停，让指针落到包层上，提示框才出得来 */
 .gw-panel__trash .ss-iconbtn:disabled {
   pointer-events: none;

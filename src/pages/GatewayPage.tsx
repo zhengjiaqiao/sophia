@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  choiceAfterCancel,
+  gatewayChips,
   parseBackendError,
   providerLabel,
   removeProviderBlockedReason,
   selectedModels,
+  switchNeedsConfirm,
+  unsavedText,
 } from "../modelsView.ts";
 import type { ModelsTool } from "../modelsView.ts";
 import type { GatewayProvider, GatewayState } from "../types.ts";
@@ -109,7 +113,8 @@ function protocolText(protocol: string | undefined): string {
 }
 
 /// 选中的是哪一家；"new" 是新加的那一家（直接出表单）
-export type GatewaySelection = string | "new";
+export type { GatewayChoice as GatewaySelection } from "../modelsView.ts";
+import type { GatewayChoice as GatewaySelection } from "../modelsView.ts";
 
 export interface GatewayBodyProps {
   tool: ModelsTool;
@@ -181,10 +186,28 @@ export function GatewayBody({
   );
   const [flashKeys, setFlashKeys] = useState<string[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /// 点 `+ 网关` 之前选中的那一家：取消草稿时回到它
+  const [previous, setPrevious] = useState<GatewaySelection | null>(null);
+  /// 连接区有没保存的改动（这一层也要知道：换一家之前先问）
+  const [formDirty, setFormDirty] = useState(false);
+  /// 草稿 / 改动没保存时点了别的分段片：就地问「保存 / 丢弃」，问完换到这一家
+  const [switchTo, setSwitchTo] = useState<GatewaySelection | null>(null);
+  const trackDirty = useCallback(
+    (dirty: boolean) => {
+      setFormDirty(dirty);
+      if (!dirty) setSwitchTo(null);
+      onDirtyChange(dirty);
+    },
+    [onDirtyChange],
+  );
 
   // 选中的那一家消失了（被删、被撤销之外的外部变化）：退到第一家
   const current = selected === "new" ? null : state.providers.find((p) => p.id === selected);
+  /// 刚保存成功的那一家：父层的新状态可能晚一拍才到，这期间不当它「消失了」
+  const justSaved = useRef<string | null>(null);
   useEffect(() => {
+    if (current !== undefined && current !== null) justSaved.current = null;
+    if (selected === justSaved.current) return;
     if (selected !== "new" && current === undefined && removing?.provider.id !== selected) {
       setSelected(state.providers[0]?.id ?? "new");
       setEditing(state.providers.length === 0);
@@ -271,40 +294,69 @@ export function GatewayBody({
       }
     })();
 
-  const choose = (next: GatewaySelection) => {
+  /// 真正换过去（已确认没有要丢的改动）
+  const switchTo_ = (next: GatewaySelection) => {
     setError(null);
+    setSwitchTo(null);
+    if (next === "new" && selected !== "new") setPrevious(selected);
     setSelected(next);
     setEditing(next === "new");
   };
+
+  /// 点分段片：有没保存的改动就拦下就地问，不静默丢掉
+  const choose = (next: GatewaySelection) => {
+    if (switchNeedsConfirm(selected, next, formDirty)) setSwitchTo(next);
+    else switchTo_(next);
+  };
+
+  const chips = gatewayChips(
+    state.providers.map((p) => p.id),
+    selected,
+  );
 
   return (
     <div className="gw-panel">
       <div className="gw-panel__top">
         <div className="gw-panel__chips" role="tablist" aria-label={`${tool.name} 的网关`}>
-          {state.providers.map((p) => (
-            // 包一层给跳回定位的闪烁用：surface 带围在片外，选中反色的片上也看得见
-            <span
-              key={p.id}
-              className={`gw-panel__chipwrap${flashProviderId === p.id ? " is-jump" : ""}`}
-            >
-              <Chip selected={selected === p.id} onClick={() => choose(p.id)}>
-                <span className="gw-panel__chip-name">{providerLabel(p)}</span>
-                {p.unreachable ? (
-                  <span className="gw-panel__chip-down">连不上</span>
-                ) : p.models.length > 0 ? (
-                  <span className="gw-panel__chip-count">{p.models.length}</span>
-                ) : null}
-              </Chip>
-            </span>
-          ))}
-          {selected === "new" ? (
-            <Chip selected onClick={() => undefined}>
-              新网关
-            </Chip>
-          ) : null}
-          <Chip icon={<IconPlus size={12} />} onClick={() => choose("new")} title="添加网关">
-            网关
-          </Chip>
+          {chips.map((chip) => {
+            if (chip.kind === "draft") {
+              // `+ 网关` 原位变成的草稿片：选中反色；草稿在时不再有 `+ 网关`
+              return (
+                <Chip key="draft" selected onClick={() => undefined}>
+                  新网关
+                </Chip>
+              );
+            }
+            if (chip.kind === "add") {
+              return (
+                <Chip
+                  key="add"
+                  icon={<IconPlus size={12} />}
+                  onClick={() => choose("new")}
+                  title="添加网关"
+                >
+                  网关
+                </Chip>
+              );
+            }
+            const p = state.providers.find((x) => x.id === chip.id) as GatewayProvider;
+            return (
+              // 包一层给跳回定位的闪烁用：surface 带围在片外，选中反色的片上也看得见
+              <span
+                key={p.id}
+                className={`gw-panel__chipwrap${flashProviderId === p.id ? " is-jump" : ""}`}
+              >
+                <Chip selected={selected === p.id} onClick={() => choose(p.id)}>
+                  <span className="gw-panel__chip-name">{providerLabel(p)}</span>
+                  {p.unreachable ? (
+                    <span className="gw-panel__chip-down">连不上</span>
+                  ) : p.models.length > 0 ? (
+                    <span className="gw-panel__chip-count">{p.models.length}</span>
+                  ) : null}
+                </Chip>
+              </span>
+            );
+          })}
         </div>
 
         {removing !== null ? (
@@ -333,17 +385,31 @@ export function GatewayBody({
             }}
             onFetchModels={onFetchModels}
             onSaved={(id) => {
+              // 草稿片换成真实那一家（名称 + 模型数），`+ 网关` 重新出现；选模型段原地出现
+              justSaved.current = id;
               setSelected(id);
               setEditing(false);
             }}
             onCancel={() => {
-              if (selected === "new") choose(state.providers[0]?.id ?? "new");
-              else setEditing(false);
-              onDirtyChange(false);
+              trackDirty(false);
+              // 取消草稿：「新网关」变回「+ 网关」，回到之前选中的那一家
+              if (selected === "new") {
+                switchTo_(
+                  choiceAfterCancel(
+                    previous,
+                    state.providers.map((p) => p.id),
+                  ),
+                );
+              } else setEditing(false);
             }}
-            onDirtyChange={onDirtyChange}
-            askDiscard={askDiscard}
-            onCollapse={onCollapse}
+            onDirtyChange={trackDirty}
+            ask={
+              switchTo !== null
+                ? { text: unsavedText(selected), onDone: () => switchTo_(switchTo) }
+                : askDiscard
+                  ? { text: unsavedText(selected), onDone: onCollapse }
+                  : null
+            }
             canCancel={selected !== "new" || state.providers.length > 0}
           />
         ) : current ? (
@@ -437,10 +503,23 @@ interface GatewayFormProps {
   onSaved: (providerId: string) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
-  askDiscard: boolean;
-  onCollapse: () => void;
+  /// 离开页面或换一家时连接区还有改动：就地一句 + 保存 / 丢弃，问完做 `onDone`
+  ask: { text: string; onDone: () => void } | null;
   /// 一家都没有时新网关的表单没有「取消」可退
   canCancel: boolean;
+}
+
+/// 地址为空时的「保存」：禁用，提示框「先填地址」（禁用键接不到悬停，提示框挂在包层上）
+function BlankSave() {
+  return (
+    <span className="gw-form__save">
+      <Tooltip content="先填地址" focusable>
+        <Button variant="primary" disabled disabledReason="先填地址">
+          保存
+        </Button>
+      </Tooltip>
+    </span>
+  );
 }
 
 /// 连接表单：地址与密钥。保存才生效、保存即拉取；保存中原位细弧 +「正在拉模型」
@@ -453,8 +532,7 @@ function GatewayForm({
   onSaved,
   onCancel,
   onDirtyChange,
-  askDiscard,
-  onCollapse,
+  ask,
   canCancel,
 }: GatewayFormProps) {
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
@@ -533,18 +611,16 @@ function GatewayForm({
         />
       </label>
       <div className="gw-form__actions">
-        {askDiscard ? (
-          // 收起时连接区有未保存的改动：不收起，就地问一句（⑪⑫）
+        {ask !== null ? (
+          // 离开 / 换一家时连接区有未保存的改动：不走，就地问一句（⑪⑫）；同一个组件
           <>
-            <span className="gw-form__ask">地址改动没保存</span>
+            <span className="gw-form__ask">{ask.text}</span>
             {blank ? (
-              <Button variant="primary" disabled disabledReason="先填上网关地址">
-                保存
-              </Button>
+              <BlankSave />
             ) : (
               <Button
                 variant="primary"
-                onClick={() => void save().then((ok) => ok && onCollapse())}
+                onClick={() => void save().then((ok) => ok && ask.onDone())}
               >
                 保存
               </Button>
@@ -553,7 +629,7 @@ function GatewayForm({
               variant="link"
               onClick={() => {
                 onDirtyChange(false);
-                onCollapse();
+                ask.onDone();
               }}
             >
               丢弃
@@ -565,9 +641,7 @@ function GatewayForm({
             正在拉模型
           </span>
         ) : blank ? (
-          <Button variant="primary" disabled disabledReason="先填上网关地址">
-            保存
-          </Button>
+          <BlankSave />
         ) : busy ? (
           <Button variant="primary" disabled disabledReason="正在处理上一步">
             保存
@@ -579,7 +653,7 @@ function GatewayForm({
             </Button>
           </Tooltip>
         )}
-        {!askDiscard && canCancel ? (
+        {ask === null && canCancel ? (
           <Button variant="link" onClick={onCancel}>
             取消
           </Button>

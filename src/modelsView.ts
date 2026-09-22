@@ -305,6 +305,50 @@ export function serviceLeftover(state: GatewayState): boolean {
 /// 「卸下后台服务」键的提示框：只写点下去的结果
 export const UNINSTALL_TIP = "停用后后台服务还在运行，卸下后不再占用资源";
 
+// ===== 网关页的分段片（DESIGN「网关配置是二级页 › 网关切换」） =====
+
+/// 选中的是哪一家；"new" 是正在加的那一家草稿（下方直接出表单）
+export type GatewayChoice = string | "new";
+
+export type GatewayChip = { kind: "provider"; id: string } | { kind: "draft" } | { kind: "add" };
+
+/**
+ * 分段片：已有网关各一片；末尾是 `+ 网关`。点了 `+ 网关` 它**原位变成**选中反色的 `新网关` 草稿片，
+ * 草稿存在期间不再渲染 `+ 网关`——看着能点、其实点不了的键不许出现（真机反馈）。
+ * 保存成功后草稿片换成真实那一家，`+ 网关` 重新出现
+ */
+export function gatewayChips(providerIds: string[], selected: GatewayChoice): GatewayChip[] {
+  const chips: GatewayChip[] = providerIds.map((id) => ({ kind: "provider", id }));
+  chips.push(selected === "new" ? { kind: "draft" } : { kind: "add" });
+  return chips;
+}
+
+/// 取消草稿：回到点 `+ 网关` 之前选中的那一家；它已经不在了就退到第一家；一家都没有就仍是草稿
+export function choiceAfterCancel(
+  previous: GatewayChoice | null,
+  providerIds: string[],
+): GatewayChoice {
+  if (previous !== null && previous !== "new" && providerIds.includes(previous)) return previous;
+  return providerIds[0] ?? "new";
+}
+
+/**
+ * 换一家（点别的分段片）前要不要先问：连接区有没保存的改动（新网关草稿填了东西，或改了地址 / 密钥）
+ * 就不能静默丢掉，就地问「保存 / 丢弃」；点的是当前这一家不算换
+ */
+export function switchNeedsConfirm(
+  current: GatewayChoice,
+  next: GatewayChoice,
+  dirty: boolean,
+): boolean {
+  return dirty && next !== current;
+}
+
+/// 就地拦截那一句：草稿没保存与改动没保存说法不同
+export function unsavedText(current: GatewayChoice): string {
+  return current === "new" ? "新网关没保存" : "地址改动没保存";
+}
+
 /// 「重启 Codex」不设禁用态：结束进程不依赖我们的路由装没装上，
 /// 一个进程都没找到也不算失败（R6 修订 v2、AC7′），所以这里没有对应的 reason 函数。
 

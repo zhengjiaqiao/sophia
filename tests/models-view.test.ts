@@ -27,6 +27,10 @@ import {
   showRestartKey,
   shouldPollRestart,
   showRouterBanner,
+  gatewayChips,
+  choiceAfterCancel,
+  switchNeedsConfirm,
+  unsavedText,
   serviceLeftover,
   UNINSTALL_TIP,
   RESTART_TIP,
@@ -792,7 +796,8 @@ test("GatewayPanel 连不上：`连不上` + 再试一次；新加网关直接�
   assert.match(fresh, /新网关/);
   assert.doesNotMatch(fresh, />取消</, "一家都没有时没有可退的");
   const ask = render(GatewayPanel, panelProps({ providers: [] }, { askDiscard: true }));
-  assert.match(ask, /地址改动没保存/);
+  // 草稿没保存与改动没保存说法不同（v84 第八轮）
+  assert.match(ask, /新网关没保存/);
   assert.match(ask, />丢弃</);
 });
 
@@ -863,4 +868,51 @@ test("GatewayPage：二级页「← Codex 的网关」，标题后放页头动�
     render(GatewayPage, { ...panelProps({}), leaving: true, onLeave: noop }),
     /class="gw-page-shell is-leaving"/,
   );
+});
+
+test("网关分段片：点「+ 网关」原位变成「新网关」草稿片，草稿在时不渲染「+ 网关」；保存后换成真实那一家、「+ 网关」回来", () => {
+  assert.deepEqual(gatewayChips(["ap", "or"], "ap"), [
+    { kind: "provider", id: "ap" },
+    { kind: "provider", id: "or" },
+    { kind: "add" },
+  ]);
+  assert.deepEqual(gatewayChips(["ap"], "new"), [
+    { kind: "provider", id: "ap" },
+    { kind: "draft" },
+  ]);
+  // 保存成功：新的一家进了列表、选中它，末尾又是「+ 网关」
+  assert.deepEqual(gatewayChips(["ap", "ds"], "ds"), [
+    { kind: "provider", id: "ap" },
+    { kind: "provider", id: "ds" },
+    { kind: "add" },
+  ]);
+});
+
+test("取消草稿回到之前选中的那一家；它不在了退到第一家；一家都没有仍是草稿", () => {
+  assert.equal(choiceAfterCancel("or", ["ap", "or"]), "or");
+  assert.equal(choiceAfterCancel("gone", ["ap", "or"]), "ap");
+  assert.equal(choiceAfterCancel(null, ["ap"]), "ap");
+  assert.equal(choiceAfterCancel("ap", []), "new");
+});
+
+test("换一家前：有没保存的改动才拦下问；点当前这一家不算换；拦截句草稿与改动说法不同", () => {
+  assert.equal(switchNeedsConfirm("new", "ap", true), true);
+  assert.equal(switchNeedsConfirm("new", "ap", false), false, "空草稿没东西可丢");
+  assert.equal(switchNeedsConfirm("ap", "ap", true), false);
+  assert.equal(switchNeedsConfirm("ap", "or", true), true, "改了地址也不能静默丢掉");
+  assert.equal(unsavedText("new"), "新网关没保存");
+  assert.equal(unsavedText("ap"), "地址改动没保存");
+});
+
+test("GatewayBody 草稿态：「新网关」选中反色、没有「+ 网关」；地址为空时保存禁用，提示框「先填地址」", () => {
+  const html = render(
+    GatewayPanel,
+    panelProps({ providers: [provider({ id: "ap", name: "ap-gateway" })] }, { initial: "new" }),
+  );
+  assert.match(html, /class="ss-chip is-selected"[^>]*><span class="ss-chip__label">新网关</);
+  assert.doesNotMatch(html, />网关<\/span><\/button>/);
+  assert.match(html, /role="tooltip"[^>]*>先填地址</);
+  assert.match(html, /title="先填地址" disabled=""/);
+  assert.match(html, />取消</);
+  assert.match(html, /拉模型时探明/);
 });
