@@ -173,7 +173,7 @@ test("StateDot 可点：渲染成按钮；只有开 / 关两种画悬停预览",
   assert.doesNotMatch(render(StateDot, { dot: "missing" }), /data-preview/);
 });
 
-test("StateDot 悬停预览：未开启环内 40% 实心，已开启实心褪去只剩环——两者相反", () => {
+test("StateDot 悬停预览：未加上环内 40% 实心，已加上实心褪去只剩环——两者相反", () => {
   assert.match(
     uiCss,
     /\.ss-dot-btn:hover \.ss-dot\[data-preview\] \.ss-dot__preview[^{]*\{\s*opacity:\s*0\.4;/,

@@ -11,7 +11,7 @@ import { Tooltip } from "./Tooltip.tsx";
 /// 16px 版给待处理页左列：与格内同形，类别名进 title，三处只学一次。
 ///
 /// 悬停预览（DESIGN「格子悬停预览」）：可点的格画出**点下去会变成什么**——
-/// 未开启：环内填 40% 实心；已开启：实心褪去只剩环。两者必须长得相反。
+/// 未加上：环内填 40% 实心；已加上：实心褪去只剩环。两者必须长得相反。
 /// 原件 / 无此格 / 异常格点了不是开关，不预览。
 
 export type Dot =
@@ -20,8 +20,8 @@ export type Dot =
 /// 读屏与 title 的默认说法：新图形都要有文字，调用方不给就用这一份
 export const DOT_LABEL: Record<Dot, string> = {
   own: "原件",
-  linked: "已开启",
-  missing: "未开启",
+  linked: "已加上",
+  missing: "未加上",
   none: "无此格",
   broken: "链接失效",
   readOnly: "写不进",

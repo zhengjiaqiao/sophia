@@ -126,6 +126,19 @@ const rules = [
     },
   },
   {
+    id: "verb-direction",
+    // skill 与 agent 的关系用带方向的动词（DESIGN 冲突表「⑤⑥：skill 与 agent 的关系用什么动词」）：
+    // 「开启 Claude Code」「关闭 Codex」会被读成操作应用本身，写「加到 X」「从 X 移除」
+    desc: "动词：可见文案里「开启 / 关闭 / 已开启 / 未开启」不紧跟 agent 名或图标",
+    run(src) {
+      const text = visibleText(src);
+      const agent = "(?:✳|⎔|Claude|Codex|Cursor|Cline|Gemini|GitHub|Copilot|Amp|Droid|WeiboAP|Windsurf|CLAUDE|CODEX|CURSOR|CLINE)";
+      const hits = text.match(new RegExp(`(?:开启|关闭)\\s*${agent}`, "g")) || [];
+      if (/[已未]开启/.test(text)) hits.push("已开启 / 未开启（改说 已加上 / 未加上）");
+      return [...new Set(hits)];
+    },
+  },
+  {
     id: "size-14",
     // 字号只有 28 / 20 / 15 / 13 / 12：14 与 15、13 与 12 眼睛分不出来，已砍掉
     desc: "字号只有 28 / 20 / 15 / 13 / 12，不出现 14px",
