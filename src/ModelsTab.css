@@ -150,11 +150,10 @@
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
-  height: 36px;
+  min-height: 36px;
   padding: 0 5px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
-  overflow: hidden;
   cursor: pointer;
   transition: border-color var(--motion-fast) var(--ease-mech);
 }
@@ -175,13 +174,12 @@
   flex-shrink: 0;
 }
 
+/* 空着的原因与下一步：说后果的句子不截断，放不下就折行（框随之长高） */
 .models-box__hint {
-  padding: 0 7px;
+  padding: 4px 7px;
   font-size: var(--size-caption);
+  line-height: var(--leading-caption);
   color: var(--ink-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 尾端：等宽可选数 + 展开记号——放在下拉框尾自然读成「这里有 103 个可选」 */
@@ -280,11 +278,9 @@
   min-width: 0;
 }
 
+/* 限制说明是确定性信息（被截掉的恰好会是「不支持图片」）：不截断，放不下就折行 */
 .models-picker__group-note {
   color: var(--ink-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .ss-tipwrap > .models-picker__group-note {

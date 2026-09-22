@@ -544,7 +544,7 @@ export function ModelPicker({
         </Busy>
 
         <div className="models-picker__foot">
-          已选&nbsp;<span className="models-picker__count">{selected}</span>&nbsp;个
+          已选&nbsp;<span className="models-picker__count">{selected}</span>&nbsp;个模型
         </div>
       </div>
     </>

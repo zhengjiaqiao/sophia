@@ -598,12 +598,12 @@ test("ModelPicker：第三方分组头带限制说明与「管理网关 ›」�
     }),
   );
   assert.match(html, /models-picker__group-name">第三方</);
-  assert.match(html, /只支持文本对话与工具调用，不支持图片输入/);
+  assert.match(html, /只支持文本与工具调用，不支持图片/);
   assert.match(html, /管理网关<\/span>/);
   assert.ok(html.indexOf(">Beta<") < html.indexOf(">Alpha<"), "已选置顶");
   assert.match(
     html,
-    /已选&nbsp;<span class="models-picker__count">1<\/span>&nbsp;个|已选 <span class="models-picker__count">1<\/span> 个/,
+    /已选&nbsp;<span class="models-picker__count">1<\/span>&nbsp;个模型|已选 <span class="models-picker__count">1<\/span> 个模型/,
   );
   // 只有一家时不画每家的小抬头
   assert.doesNotMatch(html, /models-picker__provider-head/);
