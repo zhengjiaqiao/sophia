@@ -754,7 +754,7 @@ const panelProps = (
   ...extra,
 });
 
-test("GatewayPanel 已连：分段片（选中反色、末尾 + 网关）+ 一行摘要 `地址 · 已连 · 改` + 垃圾桶；右半「从这个网关选模型」", () => {
+test("GatewayPanel 已连：分段片（选中反色、末尾 + 网关）+ 一行摘要 `地址 · 已连 · 编辑` + 垃圾桶；右半「从这个网关选模型」", () => {
   const html = render(
     GatewayPanel,
     panelProps({
@@ -773,7 +773,7 @@ test("GatewayPanel 已连：分段片（选中反色、末尾 + 网关）+ 一�
   assert.match(html, /gw-panel__chip-down">连不上</);
   assert.match(html, />网关<\/span><\/button>/);
   assert.match(html, /gw-panel__state">已连</);
-  assert.match(html, />改<\/button>/);
+  assert.match(html, />编辑<\/button>/);
   // ap-gateway 是最后一家还在供模型的：垃圾桶禁用，提示框说原因
   assert.match(html, /role="tooltip"[^>]*>Codex 还在用它的 1 个模型，先取消勾选再删</);
   assert.match(html, /gw-panel__section">从这个网关选模型</);
