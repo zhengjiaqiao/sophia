@@ -139,6 +139,18 @@ const rules = [
     },
   },
   {
+    id: "single-char-action",
+    // 按钮与文字链不用单字（「改」读起来像半句话，写「编辑」）。图标键以提示框文字计
+    desc: "动作：按钮 / 文字链的可见文字、图标键的 title 不是单个汉字",
+    run(src) {
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+      const out = [];
+      for (const m of code.matchAll(/<(Button|IconButton|button|a)\b[^>]*>\s*([\u4e00-\u9fff])\s*<\/\1>/g)) out.push(`<${m[1]}>${m[2]}`);
+      for (const m of code.matchAll(/<(?:IconButton|Button)\b[^>]*\btitle=["']([\u4e00-\u9fff])["']/g)) out.push(`title=${m[1]}`);
+      return [...new Set(out)];
+    },
+  },
+  {
     id: "size-14",
     // 字号只有 28 / 20 / 15 / 13 / 12：14 与 15、13 与 12 眼睛分不出来，已砍掉
     desc: "字号只有 28 / 20 / 15 / 13 / 12，不出现 14px",

@@ -57,7 +57,7 @@ export function IconTrash(props: IconProps) {
   );
 }
 
-/// 改：45° 斜置的铅笔
+/// 编辑：45° 斜置的铅笔
 export function IconEdit(props: IconProps) {
   return (
     <Glyph {...props}>

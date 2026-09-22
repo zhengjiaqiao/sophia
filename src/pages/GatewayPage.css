@@ -125,7 +125,7 @@
   font-weight: 600;
 }
 
-/* 已连上的只一行摘要：`https://… · 已连 · 改` + 行尾垃圾桶 */
+/* 已连上的只一行摘要：`https://… · 已连 · 编辑` + 行尾垃圾桶 */
 .gw-panel__summary {
   display: flex;
   align-items: center;

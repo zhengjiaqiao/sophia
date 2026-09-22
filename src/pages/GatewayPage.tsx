@@ -155,7 +155,7 @@ interface Removing {
 /**
  * 三段，自上而下逐层按需（单列，与设置页同宽，没有右栏）：
  * - 网关切换：分段片 `ap-gateway 103 · openrouter 连不上 · + 网关`，选中反色
- * - 连接：已连上的只一行摘要 `https://… · 已连 · 改` + 垃圾桶；点 `改` 才出地址 / 密钥表单，
+ * - 连接：已连上的只一行摘要 `https://… · 已连 · 编辑` + 垃圾桶；点 `编辑` 才出地址 / 密钥表单，
  *   保存才生效、保存即拉取，保存中原位细弧 +「正在拉模型」；新加网关直接出表单；
  *   连不上：`连不上` + 8 `再试一次`；删网关：就地提示条 `删掉 X · 撤销`（延迟提交）
  * - 从这个网关选模型：段头下是限制说明，与模型下拉同一组件，只列本网关的模型；
@@ -443,7 +443,7 @@ export function GatewayBody({
             )}
             {current.unreachable ? null : <span className="gw-panel__sep">·</span>}
             <Button variant="link" onClick={() => setEditing(true)}>
-              改
+              编辑
             </Button>
             <span className="gw-panel__trash">
               {removeProviderBlockedReason(state, current, tool) === null ? (
