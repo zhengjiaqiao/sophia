@@ -1036,7 +1036,12 @@ function SourceChips({
   const arm = (id: string, el: HTMLElement) => {
     if (timer.current) clearTimeout(timer.current);
     const label = el.querySelector<HTMLElement>(".ss-chip__label");
-    if (label === null || label.scrollWidth <= label.clientWidth + 1) return;
+    const item = items.find((x) => x.id === id);
+    // 片名被截断（按片宽，或区分片段本身就截成了「…」）时才给完整值
+    const clipped =
+      (label !== null && label.scrollWidth > label.clientWidth + 1) ||
+      (item?.label.endsWith("…") ?? false);
+    if (!clipped) return;
     setTipLeft(window.innerWidth - el.getBoundingClientRect().right < 260);
     timer.current = setTimeout(() => setTipFor(id), TIP_DELAY_MS.default);
   };

@@ -171,9 +171,11 @@ export default function DomainView(props: DomainViewProps) {
   }
   for (const [label, ids] of byLabel) {
     const segs = distinguishingSegments(ids.map((id) => sourceOf(id)?.path ?? id));
-    // 区分片段就是名字本身（WeiboAP/skills 对 WeiboAP/agent_…/skills）时不重复写
+    // 区分片段就是名字本身（WeiboAP/skills 对 WeiboAP/agent_…/skills）时不重复写；
+    // 片段最多显示 10 个字符（内部 id 不整段露出来），完整值进提示框
+    const clip = (seg: string) => (seg.length > 10 ? `${seg.slice(0, 10)}…` : seg);
     ids.forEach((id, i) =>
-      originLabels.set(id, segs[i] && segs[i] !== label ? `${label} · ${segs[i]}` : label),
+      originLabels.set(id, segs[i] && segs[i] !== label ? `${label} · ${clip(segs[i])}` : label),
     );
   }
   const originOf = (id: string) => originLabels.get(id) ?? labelOf(id);
