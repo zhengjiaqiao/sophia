@@ -7,6 +7,7 @@ import { api } from "../api";
 import type { GatewayState, HarnessStatus } from "../types";
 import { parseBackendError, serviceLeftover } from "../modelsView.ts";
 import { AgentIcon, BlackNotice, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
+import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import "./SettingsPage.css";
 
@@ -305,7 +306,9 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
                       : `显示未安装的 ${absent.length} 个`}
                   </Button>
                 </div>
-                {showAbsent ? <div className="settings-page__absent">{grid(absent)}</div> : null}
+                {showAbsent ? (
+                  <AbsentAgents agents={absent} onRestore={(id) => void toggle(id, true)} />
+                ) : null}
               </>
             ) : null}
           </>

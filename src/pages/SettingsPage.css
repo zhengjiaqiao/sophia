@@ -110,8 +110,43 @@
   padding-left: var(--space-xs);
 }
 
-.settings-page__absent .settings-page__row:not([aria-checked="true"]) .settings-page__name {
+/* 未安装那一节：信息不是设置——没有复选框，名字 ink-faint，悬停没有反馈 */
+.settings-page__absent {
+  margin-top: var(--space-sm);
+}
+
+.settings-page__absent-head {
+  padding-left: var(--space-xs);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: var(--leading-micro);
+  color: var(--ink-mute);
+}
+
+.settings-page__info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: var(--row-h);
+  padding: 0 var(--space-xs);
   color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.settings-page__info .settings-page__name {
+  color: var(--ink-faint);
+}
+
+/* 在不显示名单里又卸载了的：名字后「装上后也不显示 · 恢复」 */
+.settings-page__hidden-note {
+  display: inline-flex;
+  align-items: center;
+  /* 文字链命中区左右各外扩 6（负外边距），gap 6 看起来约一个空格宽 */
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  color: var(--ink-mute);
 }
 
 .settings-page__about {
