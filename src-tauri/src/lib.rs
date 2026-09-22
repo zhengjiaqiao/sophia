@@ -835,6 +835,14 @@ pub fn run() {
             if let tauri::RunEvent::Reopen { .. } = _event {
                 tray::show_main(_app);
             }
+            // ⌘Q 等系统退出：第一次先拦下，请主窗口提交挂起的删除再退出；
+            // 提交过了（包括 quit_after_flush 自己最后调的 exit）直接放行
+            if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
+                if !tray::flushed() {
+                    api.prevent_exit();
+                    tray::quit_after_flush(_app);
+                }
+            }
             // 标记删除的网关在退出时立即提交（撤销窗口随应用一起结束）
             if let tauri::RunEvent::Exit = _event {
                 use tauri::Manager;
