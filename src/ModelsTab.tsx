@@ -435,7 +435,6 @@ export function ModelPicker({
           busy={busy}
           onToggle={onToggleModel}
           header={header}
-          showGateway={state.providers.length > 1}
           empty="还没拉到模型——在网关里存好地址和密钥就会拉"
         />
       ) : (

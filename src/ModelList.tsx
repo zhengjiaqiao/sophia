@@ -9,12 +9,11 @@ import {
   modelRowLabel,
   pinnedEntries,
   pinnedLabel,
-  providerLabel,
   snapshotOrder,
 } from "./modelsView.ts";
 import type { ModelEntry } from "./modelsView.ts";
 import type { GatewayProvider } from "./types.ts";
-import { Button, Tooltip } from "./ui/index.ts";
+import { Button } from "./ui/index.ts";
 import "./ModelList.css";
 
 /// 模型列表：模型下拉与网关页同一组件（DESIGN「模型列表的写法」）
@@ -28,8 +27,6 @@ export interface ModelListProps {
   header?: ReactNode;
   /// 这几个各闪一次（`网关id|模型id`）：新拉到的模型
   flashKeys?: string[];
-  /// 多于一家网关时，行的提示框带上是哪一家
-  showGateway?: boolean;
   /// 列表为空时的一句
   empty?: ReactNode;
 }
@@ -37,22 +34,14 @@ export interface ModelListProps {
 export const entryKey = modelEntryKey;
 
 /**
- * 默认一列名称，完整 id 进该行提示框；友好名与 id 明显不同时行尾才写 id（`modelRowId`）。
+ * 默认一列名称，行上没有提示框；友好名与 id 明显不同时行尾才写 id（`modelRowId`）。
  * 按服务商分小组头 `azure · 12`，一家一个也有；行内去掉重复前缀。
  * 已选置顶：最上面一组 `已选 · N`（名字写全带服务商前缀），各服务商分组里照常保留这些行；
  * 打开（挂载）时排一次序并冻结，之后勾选 / 取消不跳位，下次打开再重排；超过 5 个先列前 5
  * +「还有 N 个 ▸」（N 是没列出来的个数）。勾选当场写盘；超过约 8 行时出筛选框（已选组同样过滤），列表在自身范围内滚动；
  * 底部 `已选 N 个模型`。
  */
-export function ModelList({
-  entries,
-  busy,
-  onToggle,
-  header,
-  flashKeys,
-  showGateway,
-  empty,
-}: ModelListProps) {
+export function ModelList({ entries, busy, onToggle, header, flashKeys, empty }: ModelListProps) {
   const [query, setQuery] = useState("");
   /// 打开那一刻的排序：之后勾选只改状态、不挪位置（DESIGN「已选置顶」）
   const [snap] = useState(() => snapshotOrder(entries));
@@ -72,51 +61,48 @@ export function ModelList({
     const key = entryKey(entry);
     const flashing = where === "group" && flash.has(key);
     const id = where === "group" ? modelRowId(model) : null;
-    const fullId = model.slug || model.id;
+    const name = where === "pinned" ? pinnedLabel(model) : modelRowLabel(model);
     const i = order++;
+    // 行上不放提示框也不设 title：挑模型时完整 id 没有意义，还会盖住正在看的那一行（真机反馈）；
+    // 读屏名只写名称
     return (
-      <Tooltip
+      <div
         key={`${where}:${key}`}
-        content={showGateway ? `${fullId} · ${providerLabel(provider)}` : fullId}
+        className={`models-option${flashing ? " is-flash" : ""}`}
+        aria-label={name}
+        style={flashing ? { animationDelay: `${Math.min(i, 12) * 60}ms` } : undefined}
+        role="option"
+        aria-selected={model.selected}
+        tabIndex={0}
+        onClick={() => !busy && onToggle(provider, model.id)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (!busy) onToggle(provider, model.id);
+          }
+        }}
       >
-        <div
-          className={`models-option${flashing ? " is-flash" : ""}`}
-          style={flashing ? { animationDelay: `${Math.min(i, 12) * 60}ms` } : undefined}
-          role="option"
-          aria-selected={model.selected}
-          tabIndex={0}
-          onClick={() => !busy && onToggle(provider, model.id)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              if (!busy) onToggle(provider, model.id);
-            }
-          }}
+        {/* 12px 方框只画状态（方＝我选的）；命中区是整行，读屏走 aria-selected */}
+        <span
+          className={`ss-checkbox models-option__check${model.selected ? " is-on" : ""}`}
+          aria-hidden="true"
         >
-          {/* 12px 方框只画状态（方＝我选的）；命中区是整行，读屏走 aria-selected */}
-          <span
-            className={`ss-checkbox models-option__check${model.selected ? " is-on" : ""}`}
-            aria-hidden="true"
-          >
-            {model.selected ? (
-              <svg
-                width="8"
-                height="8"
-                viewBox="0 0 8 8"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.4"
-              >
-                <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
-              </svg>
-            ) : null}
-          </span>
-          <span className="models-option__name">
-            {where === "pinned" ? pinnedLabel(model) : modelRowLabel(model)}
-          </span>
-          {id !== null ? <span className="models-option__id">{id}</span> : null}
-        </div>
-      </Tooltip>
+          {model.selected ? (
+            <svg
+              width="8"
+              height="8"
+              viewBox="0 0 8 8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+            >
+              <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
+            </svg>
+          ) : null}
+        </span>
+        <span className="models-option__name">{name}</span>
+        {id !== null ? <span className="models-option__id">{id}</span> : null}
+      </div>
     );
   };
 

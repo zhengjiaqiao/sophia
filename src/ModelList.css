@@ -91,22 +91,6 @@
   color: var(--ink-faint);
 }
 
-/* 提示框包层让一行占满整宽 */
-.model-list__group > .ss-tipwrap {
-  display: flex;
-}
-
-/* 列表行的提示框放在该行同一行的右侧空白处（行尾对齐、不越出列表框），不放到上一行——
-   放到上一行会被读成上一行的信息（DESIGN「提示框 › 位置」）。覆盖 Tooltip 的上 / 下与对齐 */
-.model-list__group > .ss-tipwrap > .ss-tip {
-  top: 50%;
-  bottom: auto;
-  left: auto;
-  right: var(--space-sm);
-  max-width: calc(100% - 2 * var(--space-sm));
-  transform: translateY(-50%);
-}
-
 /* 一个模型一行：高 34，整行是命中区，悬停 surface */
 .models-option {
   display: flex;
@@ -141,7 +125,7 @@
   white-space: nowrap;
 }
 
-/* 行尾 id：只有友好名与 id 明显不同才出现；它是标识，放不下可以截断（提示框给全文） */
+/* 行尾 id：只有友好名与 id 明显不同才出现；它是标识，放不下可以截断 */
 .models-option__id {
   margin-left: auto;
   min-width: 0;

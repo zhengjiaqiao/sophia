@@ -613,7 +613,14 @@ test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；�
   assert.match(html, /model-list__vendor">azure</);
   assert.match(html, /model-list__count">2</);
   assert.match(html, /models-option__name">o3-mini</);
-  assert.match(html, /role="tooltip"[^>]*>wecode-azure\/gpt-4\.1</);
+  // 行上不放提示框也不设 title（真机反馈：挑模型时完整 id 没有意义，还会盖住正在看的那一行）；
+  // 读屏名只写名称
+  assert.doesNotMatch(html, /models-option[^>]*title=/);
+  assert.doesNotMatch(html, /role="tooltip"[^>]*>wecode-azure/);
+  assert.match(
+    html,
+    /role="option"[^>]*aria-label="gpt-4\.1"|aria-label="gpt-4\.1"[^>]*role="option"/,
+  );
   assert.ok(html.indexOf(">o3-mini<") < html.indexOf(">gpt-4.1<"), "已选置顶");
   assert.match(html, /已选(&nbsp;| )<span class="model-list__selected">1<\/span>(&nbsp;| )个模型/);
   // 不超过 8 行不出筛选框
