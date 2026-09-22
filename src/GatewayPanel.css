@@ -1,0 +1,410 @@
+/* 网关展开区与模型列表（DESIGN「网关在 Codex 行下就地展开」「模型列表的写法」，画板 Models / Gateway）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变；圆角只有 0 / 2px / 32px / 50%。 */
+@import "./tokens.css";
+
+/* ===== 模型列表：下拉与展开区同一组件 ===== */
+.model-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 筛选框：超过约 8 行才出现 */
+.model-list__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+  margin: var(--space-xs) var(--space-sm);
+  height: var(--control-h);
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  color: var(--ink-faint);
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.model-list__search:focus-within {
+  border-color: var(--ink);
+}
+
+.model-list__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+}
+
+.model-list__input::placeholder {
+  color: var(--ink-faint);
+}
+
+.model-list__input:focus,
+.model-list__input:focus-visible {
+  outline: none;
+}
+
+/* 列表在自身范围内滚动：约 8 行 + 组头 */
+.model-list__scroll {
+  position: relative;
+  min-height: 0;
+  max-height: calc(var(--row-h) * 8 + 56px);
+  overflow: auto;
+}
+
+.model-list__empty {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--size-caption);
+  color: var(--ink-faint);
+}
+
+/* 服务商小组头 `azure · 12`：与分段 / 组头同一套字——12/600 ink-mute + 等宽计数 ink-faint */
+.model-list__group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: var(--space-xs) var(--space-sm) 2px;
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+}
+
+.model-list__vendor {
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.model-list__dot {
+  color: var(--ink-faint);
+}
+
+.model-list__count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+/* 提示框包层让一行占满整宽 */
+.model-list__group > .ss-tipwrap {
+  display: flex;
+}
+
+/* 一个模型一行：高 34，整行是命中区，悬停 surface */
+.models-option {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: var(--row-h);
+  padding: 0 var(--space-sm);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.models-option:hover {
+  background: var(--surface);
+}
+
+.models-option:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* 方框只画状态：不接指针（点击落到整行上） */
+.models-option__check {
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.models-option__name {
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  white-space: nowrap;
+}
+
+/* 行尾 id：只有友好名与 id 明显不同才出现；它是标识，放不下可以截断（提示框给全文） */
+.models-option__id {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* 新拉到的模型各闪一次：120ms 反色再回落（与「刚点亮」同一个动作） */
+.models-option.is-flash {
+  animation: models-flash 240ms var(--ease-mech) both;
+}
+
+@keyframes models-flash {
+  0%,
+  50% {
+    background: var(--ink);
+    color: var(--canvas);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.model-list__foot {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  height: var(--row-h);
+  padding: 0 var(--space-sm);
+  border-top: 1px solid var(--hairline);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.model-list__selected {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* ===== 网关展开区：两半沿用行网格的列宽 ===== */
+.gw-panel {
+  display: grid;
+  grid-template-columns: var(--models-agent-w) minmax(0, var(--models-box-w));
+  column-gap: var(--space-xl);
+  align-items: start;
+  padding: var(--space-sm) 0 var(--space-xs);
+}
+
+.gw-panel__left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+/* 网关分段片：选中反色，最后一个是 `+ 网关` */
+.gw-panel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.gw-panel__chip-name {
+  white-space: nowrap;
+}
+
+.gw-panel__chip-count {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* `连不上`：强标签，墨色 600（选中反色时随片翻白） */
+.gw-panel__chip-down {
+  margin-left: 6px;
+  font-size: var(--size-micro);
+  font-weight: 600;
+}
+
+/* 已连上的只一行摘要：`https://… · 已连 · 改` + 行尾垃圾桶 */
+.gw-panel__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.gw-panel__summary > .ss-tipwrap:first-child {
+  min-width: 0;
+}
+
+/* 地址是标识：放不下截断，提示框给全文 */
+.gw-panel__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.gw-panel__sep {
+  color: var(--ink-faint);
+}
+
+.gw-panel__state {
+  white-space: nowrap;
+}
+
+/* 连不上：强标签 + 点状下划线（悬停读原因），后面 8 紧跟 `再试一次` */
+.gw-panel__down {
+  margin-right: 2px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  text-decoration: underline dotted var(--ink-faint);
+  text-underline-offset: 3px;
+}
+
+.gw-panel__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  white-space: nowrap;
+}
+
+.gw-panel__trash {
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.gw-panel__notice .ss-toast--notice {
+  max-width: 100%;
+}
+
+.gw-panel__leftover {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+/* 右半：从这个网关选模型。段头 13/600，限制说明 12 ink-faint（不截断） */
+.gw-panel__right {
+  min-width: 0;
+}
+
+.gw-panel__section {
+  font-size: var(--size-caption);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+}
+
+.gw-panel__note {
+  margin-top: 2px;
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+.gw-panel__list {
+  margin-top: var(--space-xs);
+  border: 1px solid var(--hairline);
+}
+
+/* ===== 连接表单：地址、密钥；保存才生效、保存即拉取 ===== */
+.gw-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.gw-form__field {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.gw-form__label {
+  font-size: var(--size-caption);
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.gw-form__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+}
+
+.gw-form__input:focus-visible,
+.gw-form__input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.gw-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-left: calc(36px + var(--space-sm));
+  min-height: var(--control-h);
+}
+
+.gw-form__ask {
+  font-size: var(--size-caption);
+  color: var(--ink);
+}
+
+.gw-form__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.gw-form__error {
+  padding-left: calc(36px + var(--space-sm));
+}
+
+.gw-form__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-sm);
+  margin: 0;
+  padding-left: calc(36px + var(--space-sm));
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.gw-form__facts dt {
+  font-weight: 600;
+}
+
+.gw-form__facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-list__search,
+  .models-option {
+    transition: none;
+  }
+  .models-option.is-flash {
+    animation: none;
+  }
+}

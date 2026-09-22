@@ -86,6 +86,34 @@
   min-width: 0;
 }
 
+/* 「配置网关」：展开 / 收起键。展开时是按下态（surface 底，与默认键 pressed 同一档），
+   尾端 12px 展开记号朝上；收着时朝下 */
+.models-gwkey {
+  gap: 4px;
+}
+
+.models-gwkey.is-pressed {
+  background: var(--surface);
+}
+
+/* 网关展开区：这一行正下方，横跨两列，内部沿用同一套列宽（左半对齐 agent 列、右半对齐生效模型列）。
+   展开 / 收起 200ms：grid-template-rows 0fr ↔ 1fr 机械缓动；收着时不占位 */
+.models-row__gateway {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms var(--ease-mech);
+}
+
+.models-row__gateway.is-open {
+  grid-template-rows: 1fr;
+}
+
+.models-row__gateway-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* 做不成的黑块挂在整行下面，左对齐 agent 格（① 就近：开关、改模型、重启的共同对象是这一行） */
 .models-row__notice {
   grid-column: 1 / -1;
@@ -229,44 +257,6 @@
   background: var(--canvas);
 }
 
-.models-picker__search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  margin: var(--space-xs) var(--space-sm);
-  height: var(--control-h);
-  box-sizing: border-box;
-  padding: 0 10px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-control);
-  color: var(--ink-faint);
-  transition: border-color var(--motion-fast) var(--ease-mech);
-}
-
-.models-picker__search:focus-within {
-  border-color: var(--ink);
-}
-
-.models-picker__input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-}
-
-.models-picker__input::placeholder {
-  color: var(--ink-faint);
-}
-
-.models-picker__input:focus,
-.models-picker__input:focus-visible {
-  outline: none;
-}
-
 /* 第三方分组头：`第三方` 12/600 ink-mute + 限制说明 12 ink-faint + 末尾 `管理网关 ›` */
 .models-picker__group {
   display: flex;
@@ -332,143 +322,14 @@
   text-underline-offset: 3px;
 }
 
-.models-picker__list {
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
-  min-height: 0;
-}
-
-.models-picker__scroll {
-  position: relative;
-  flex-grow: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.models-picker__empty {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  margin: 0;
-  padding: var(--space-xs) var(--space-sm);
-  font-size: var(--size-caption);
-  color: var(--ink-faint);
-}
-
-/* 多于一家时每家一个小抬头：网关名 12/600 + 等宽模型数 */
-.models-picker__provider-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-sm) 2px;
-  font-size: var(--size-micro);
-  font-weight: 600;
-  line-height: var(--leading-caption);
-  color: var(--ink);
-}
-
-.models-picker__provider-count {
-  font-family: var(--font-mono);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-faint);
-}
-
-/* 一个模型一行：高 34，整行是命中区，悬停 surface */
-.models-option {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  box-sizing: border-box;
-  height: var(--row-h);
-  padding: 0 var(--space-sm);
-  cursor: pointer;
-  transition: background-color var(--motion-fast) var(--ease-mech);
-}
-
-.models-option:hover {
-  background: var(--surface);
-}
-
-.models-option:focus-visible {
-  outline: 1px solid var(--ink);
-  outline-offset: -2px;
-}
-
-/* 方框只画状态：不接指针（点击落到整行上） */
-.models-option__check {
-  pointer-events: none;
-  flex-shrink: 0;
-}
-
-.models-option__name {
-  font-size: var(--size-body);
-  line-height: var(--leading-caption);
-  white-space: nowrap;
-}
-
-.models-option__id {
-  margin-left: auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--leading-caption);
-  color: var(--ink-faint);
-  white-space: nowrap;
-}
-
-/* 从网关页回来，新拉到的模型各闪一次：120ms 反色再回落（与「刚点亮」同一个动作） */
-.models-option.is-flash {
-  animation: models-flash 240ms var(--ease-mech) both;
-}
-
-@keyframes models-flash {
-  0%,
-  50% {
-    background: var(--ink);
-    color: var(--canvas);
-  }
-  100% {
-    background: transparent;
-  }
-}
-
-.models-picker__foot {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  height: var(--row-h);
-  padding: 0 var(--space-sm);
-  border-top: 1px solid var(--hairline);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-
-.models-picker__count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .models-box,
-  .models-option,
-  .models-picker__search {
+  .models-gwkey,
+  .models-row__gateway {
     transition: none;
   }
   /* 已生效直接消失由计时器负责；这里只去掉淡出 */
   .models-restart--done {
-    animation: none;
-  }
-  .models-option.is-flash {
     animation: none;
   }
 }

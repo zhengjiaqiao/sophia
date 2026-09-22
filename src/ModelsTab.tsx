@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -14,16 +14,11 @@ import {
   effectiveModels,
   emptyEffectiveText,
   enableDisabledReason,
-  modelKeys,
-  modelLabel,
-  newModelIds,
   parseBackendError,
-  providerLabel,
   routerUnavailable,
   shouldPollRestart,
   showRestartKey,
   showRouterBanner,
-  sortAndFilterModels,
   totalSelected,
 } from "./modelsView.ts";
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
@@ -35,7 +30,6 @@ import type {
 } from "./types.ts";
 import {
   AgentIcon,
-  Busy,
   Button,
   Confirm,
   ErrorBanner,
@@ -46,7 +40,8 @@ import {
   Tooltip,
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
-import { GatewayPage } from "./pages/GatewayPage.tsx";
+import { GatewayPanel, ModelList } from "./GatewayPanel.tsx";
+import type { GatewaySelection } from "./GatewayPanel.tsx";
 import "./ModelsTab.css";
 
 /// 模型页（DESIGN「产品裁决 › 模型页」，画板 Models）。
@@ -75,6 +70,9 @@ import "./ModelsTab.css";
 
 /// 模型页不分项目、不分域，左边那条侧栏对它没有意义。App.tsx 用这个常量做条件
 export const MODELS_TAB_FULL_BLEED = true;
+
+/// 网关区展开 / 收起的时长，与 ModelsTab.css 的过渡同值
+const GATEWAY_MOTION_MS = 200;
 
 const describeError = (error: unknown): string => parseBackendError(String(error)).message;
 
@@ -143,6 +141,10 @@ export interface AgentRowProps {
   onCloseNotice?: () => void;
   /// 生效模型那一格
   models: ReactNode;
+  /// 网关区展开着：`配置网关` 是按下态
+  gatewayOpen?: boolean;
+  /// 网关展开区（这一行正下方，左半对齐 agent 列、右半对齐生效模型列）
+  gateway?: ReactNode;
 }
 
 export function AgentRow({
@@ -156,6 +158,8 @@ export function AgentRow({
   notice,
   onCloseNotice,
   models,
+  gatewayOpen = false,
+  gateway,
 }: AgentRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   // 已启用时永远能关：停用不依赖密钥和模型还在不在
@@ -189,10 +193,17 @@ export function AgentRow({
             />
           </Tooltip>
         )}
-        <Tooltip content="加第三方模型的来源">
-          <Button size="compact" onClick={onConfigure}>
+        <Tooltip content={gatewayOpen ? "收起网关" : "加第三方模型的来源"}>
+          {/* 展开 / 收起键：展开时是按下态（与 ss-btn 同形，多一个展开记号） */}
+          <button
+            type="button"
+            className={`ss-btn ss-btn--compact models-gwkey${gatewayOpen ? " is-pressed" : ""}`}
+            aria-expanded={gatewayOpen}
+            onClick={onConfigure}
+          >
             配置网关
-          </Button>
+            <Chevron up={gatewayOpen} />
+          </button>
         </Tooltip>
         <RestartSlot
           tool={tool}
@@ -203,6 +214,12 @@ export function AgentRow({
         />
       </div>
       <div className="models-row__models">{models}</div>
+      {gateway !== undefined ? (
+        // 展开 / 收起 200ms（grid-template-rows 0fr ↔ 1fr），reduced-motion 即时；收着时 inert
+        <div className={`models-row__gateway${gatewayOpen ? " is-open" : ""}`} inert={!gatewayOpen}>
+          <div className="models-row__gateway-inner">{gateway}</div>
+        </div>
+      ) : null}
       {notice ? (
         <div className="models-row__notice">
           <Toast
@@ -359,186 +376,63 @@ export interface ModelPickerProps {
   tool: ModelsTool;
   state: GatewayState;
   busy: boolean;
-  query: string;
-  onQuery: (next: string) => void;
   onToggleModel: (provider: GatewayProvider, modelId: string) => void;
-  /// 去网关页；返回时回到这里
+  /// `管理网关 ›` / `+ 网关 ›`：收起下拉，展开这一行的网关区
   onManageGateways: () => void;
-  /// 打开时滚到这一家的分组（从网关页 `选模型 ›` 回来）
-  focusProviderId?: string | null;
-  /// 这几个模型各闪一次（刚拉到的）
-  flashIds?: string[];
 }
 
 /**
- * 选择器浮层：搜索框 + 列表，已选置顶，12px 方形复选框；整行可点，勾选当场写盘，
- * 没有保存 / 关闭按钮；底部一句 `已选 N 个`。
+ * 选择器浮层：与网关展开区同一组件（ModelList）——列全部网关的全部模型，按服务商分小组头；
+ * 超过约 8 行出筛选框；已选置顶、整行可点、勾选当场写盘；底部 `已选 N 个模型`。
  *
- * 第三方分组头 = `第三方` + 限制说明（只在挑模型时有用，① 放在这里）+ 末尾 `管理网关 ›`；
- * 没有网关时 `还没有网关 · + 网关 ›`。多于一家时每家再有一个小抬头，归属分得清。
+ * 第三方组头 = `第三方` + 限制说明（只在挑模型时有用，① 放在这里，不截断）+ 末尾 `管理网关 ›`；
+ * 没有网关时 `还没有网关 · + 网关 ›`。
  */
 export function ModelPicker({
   tool,
   state,
   busy,
-  query,
-  onQuery,
   onToggleModel,
   onManageGateways,
-  focusProviderId,
-  flashIds,
 }: ModelPickerProps) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const groups = state.providers
-    .map((provider) => ({ provider, models: sortAndFilterModels(provider.models, query) }))
-    .filter((group) => group.models.length > 0);
   const hasProviders = state.providers.length > 0;
-  const anyModel = state.providers.some((p) => p.models.length > 0);
-  const grouped = state.providers.length > 1;
-  const flash = new Set(flashIds ?? []);
-  const selected = totalSelected(state);
-
-  // 从网关页回来：滚到那一家的分组，抬头贴列表顶
-  useLayoutEffect(() => {
-    if (!focusProviderId || !listRef.current) return;
-    const target = listRef.current.querySelector<HTMLElement>(
-      `[data-provider="${CSS.escape(focusProviderId)}"]`,
-    );
-    if (target) listRef.current.scrollTop = target.offsetTop - listRef.current.offsetTop;
-  }, [focusProviderId]);
-
+  const entries = state.providers.flatMap((provider) =>
+    provider.models.map((model) => ({ provider, model })),
+  );
+  const header = (
+    <div className="models-picker__group">
+      <span className="models-picker__group-name">第三方</span>
+      {hasProviders ? (
+        <Tooltip content={tool.limitations}>
+          <span className="models-picker__group-note">{tool.pickerNote}</span>
+        </Tooltip>
+      ) : (
+        <span className="models-picker__group-note">还没有网关</span>
+      )}
+      <Tooltip content="在这一行下面展开网关">
+        <button type="button" className="models-picker__jump" onClick={onManageGateways}>
+          <span className="models-picker__jump-text">{hasProviders ? "管理网关" : "+ 网关"}</span>
+          <LinkChevron />
+        </button>
+      </Tooltip>
+    </div>
+  );
   return (
-    <>
-      {/* 点浮层外面关闭由 ModelsTab 在 pointerdown 捕获阶段做：不铺透明罩，外面那一下点击照常生效 */}
-      <div className="models-picker" role="dialog" aria-label={`选 ${tool.name} 的模型`}>
-        <div className="models-picker__search">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <circle cx="7" cy="7" r="4.6" />
-            <path d="M10.4 10.4L14 14" />
-          </svg>
-          <input
-            // 不用 type="search"：WebKit 的搜索框会自己吃掉 Esc（清空 / 取消），浮层就关不掉
-            type="text"
-            className="models-picker__input"
-            placeholder="筛选"
-            aria-label="筛选模型"
-            value={query}
-            autoFocus
-            onChange={(e) => onQuery(e.target.value)}
-          />
-        </div>
-
-        <div className="models-picker__group">
-          <span className="models-picker__group-name">第三方</span>
-          {hasProviders ? (
-            <Tooltip content={tool.limitations}>
-              <span className="models-picker__group-note">{tool.pickerNote}</span>
-            </Tooltip>
-          ) : (
-            <span className="models-picker__group-note">还没有网关</span>
-          )}
-          <Tooltip content="去网关页；返回时回到这里">
-            <button type="button" className="models-picker__jump" onClick={onManageGateways}>
-              <span className="models-picker__jump-text">
-                {hasProviders ? "管理网关" : "+ 网关"}
-              </span>
-              <LinkChevron />
-            </button>
-          </Tooltip>
-        </div>
-
-        <Busy busy={busy} className="models-picker__list">
-          <div ref={listRef} className="models-picker__scroll">
-            {!hasProviders ? null : !anyModel ? (
-              <p className="models-picker__empty">还没拉到模型——到网关页存好地址和密钥就会拉</p>
-            ) : groups.length === 0 ? (
-              <p className="models-picker__empty">
-                没有匹配的模型
-                <Button variant="link" onClick={() => onQuery("")}>
-                  清除筛选
-                </Button>
-              </p>
-            ) : (
-              groups.map(({ provider, models }, gi) => (
-                <div
-                  key={provider.id}
-                  className="models-picker__provider"
-                  data-provider={provider.id}
-                >
-                  {grouped ? (
-                    <div className="models-picker__provider-head">
-                      <span>{providerLabel(provider)}</span>
-                      <span className="models-picker__provider-count">
-                        {provider.models.length}
-                      </span>
-                    </div>
-                  ) : null}
-                  {models.map((m, i) => {
-                    const flashing = flash.has(m.id);
-                    return (
-                      <div
-                        key={m.id}
-                        className={`models-option${flashing ? " is-flash" : ""}`}
-                        style={
-                          flashing
-                            ? { animationDelay: `${Math.min(gi * 4 + i, 12) * 60}ms` }
-                            : undefined
-                        }
-                        role="option"
-                        aria-selected={m.selected}
-                        tabIndex={0}
-                        // 整行是命中区（DESIGN「命中区与视觉尺寸是两回事」）
-                        onClick={() => !busy && onToggleModel(provider, m.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            if (!busy) onToggleModel(provider, m.id);
-                          }
-                        }}
-                      >
-                        {/* 12px 方框只画状态（方＝我选的）；命中区是整行，读屏走 aria-selected */}
-                        <span
-                          className={`ss-checkbox models-option__check${m.selected ? " is-on" : ""}`}
-                          aria-hidden="true"
-                        >
-                          {m.selected ? (
-                            <svg
-                              width="8"
-                              height="8"
-                              viewBox="0 0 8 8"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.4"
-                            >
-                              <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
-                            </svg>
-                          ) : null}
-                        </span>
-                        <span className="models-option__name">{modelLabel(m)}</span>
-                        <span className="models-option__id">{m.slug || m.id}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))
-            )}
-          </div>
-        </Busy>
-
-        <div className="models-picker__foot">
-          已选&nbsp;<span className="models-picker__count">{selected}</span>&nbsp;个模型
-        </div>
-      </div>
-    </>
+    // 点浮层外面关闭由 ModelsTab 在 pointerdown 捕获阶段做：不铺透明罩，外面那一下点击照常生效
+    <div className="models-picker" role="dialog" aria-label={`选 ${tool.name} 的模型`}>
+      {hasProviders ? (
+        <ModelList
+          entries={entries}
+          busy={busy}
+          onToggle={onToggleModel}
+          header={header}
+          showGateway={state.providers.length > 1}
+          empty="还没拉到模型——在网关里存好地址和密钥就会拉"
+        />
+      ) : (
+        header
+      )}
+    </div>
   );
 }
 
@@ -552,27 +446,23 @@ export interface ModelsTabProps {
   onGatewayState?: (state: GatewayState) => void;
 }
 
-/// 选择器开着时的导航参数：从网关页 `选模型 ›` 回来时带上「滚到哪一家、哪几个闪」
-interface PickerNav {
-  toolId: string;
-  focusProviderId: string | null;
-  flashIds: string[];
-}
-
 export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
-  const [picker, setPicker] = useState<PickerNav | null>(null);
-  const [query, setQuery] = useState("");
-  /// 网关页（二级页面）；`fromPicker` 表示从下拉里的 `管理网关 ›` 进去，返回时回到下拉
-  const [gateway, setGateway] = useState<{ fromPicker: boolean } | null>(null);
+  /// 模型下拉开着的那个 agent
+  const [picker, setPicker] = useState<string | null>(null);
+  /// 网关展开区挂着（展开中、开着、收起动画中）；`initial` 是打开那一刻先选中哪一家
+  /// （"new" 直接出新网关表单）。`gatewayOpen` 才是开没开：收起时先置 false 播 200ms，再卸掉
+  const [gateway, setGateway] = useState<{ initial: GatewaySelection | null } | null>(null);
+  const [gatewayOpen, setGatewayOpen] = useState(false);
+  /// 连接区有没保存的改动；收起时有改动就不收，就地问「保存 / 丢弃」
+  const [gatewayDirty, setGatewayDirty] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
   /// 启动时的自愈试过了没有：试过仍没起来才出页级横幅
   const [healed, setHealed] = useState(false);
   const [routerFailure, setRouterFailure] = useState<string | null>(null);
-  /// 进网关页那一刻已有的模型：回来时差出新拉到的，各闪一次
-  const beforeGateway = useRef<Set<string>>(new Set());
   const mounted = useRef(true);
   const reportState = useRef(onGatewayState);
   reportState.current = onGatewayState;
@@ -659,7 +549,7 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
   // 浮层开着时：Esc 关闭并把焦点还给模型框；在框与浮层之外按下指针也关闭。
   // 两个都在捕获阶段听：Esc 不被输入框先吃掉；外面那一下只顺手关浮层，不拦截——
   // 点齿轮、点页签照常生效（不铺透明罩，罩子会把这一下点击吞掉）
-  const pickerOpen = picker?.toolId ?? null;
+  const pickerOpen = picker;
   useEffect(() => {
     if (pickerOpen === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -697,7 +587,7 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
     }
   };
 
-  /// 网关页要自己就地说明失败，所以这一支把错误原样抛回去
+  /// 网关展开区要自己就地说明失败，所以这一支把错误原样抛回去
   const runOrThrow = async (action: () => Promise<GatewayState>) => {
     onBusy(true);
     try {
@@ -772,60 +662,64 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
       "没移除",
     );
 
-  const openPicker = (tool: ModelsTool, nav?: Partial<PickerNav>) => {
-    setQuery("");
-    setPicker({ toolId: tool.id, focusProviderId: null, flashIds: [], ...nav });
-  };
+  const openPicker = (tool: ModelsTool) => setPicker(tool.id);
+  const closePicker = () => setPicker(null);
 
-  const closePicker = () => {
-    setQuery("");
+  /// 展开这一行的网关区（`配置网关`、下拉里的 `管理网关 ›` / `+ 网关 ›`）
+  const openGateway = (initial: GatewaySelection | null) => {
     setPicker(null);
+    setAskDiscard(false);
+    // 已经开着再从下拉点进来：换选中的那一家要重挂（key 变化），不然表单停在旧的那一家
+    setGateway({ initial });
+    // 先以收着的高度挂上，下一帧再展开，200ms 的过渡才播得出来
+    requestAnimationFrame(() => setGatewayOpen(true));
   };
 
-  const openGateway = (fromPicker: boolean) => {
-    if (state) beforeGateway.current = modelKeys(state);
-    setPicker(null);
-    setGateway({ fromPicker });
-  };
-
-  /// 删网关是延迟提交的（T4c）：离开网关页时把标记删除的全部提交——真正删配置与钥匙串密钥
-  const leaveGateway = () => {
-    setGateway(null);
+  /// 真正收起：删网关是延迟提交的（T4c），收起时把还挂着撤销窗口的全部提交
+  const collapseGateway = () => {
+    setGatewayOpen(false);
+    setAskDiscard(false);
+    setGatewayDirty(false);
     void api
       .gatewayCommitRemovals()
       .then((next) => mounted.current && applyState(next))
       .catch((error) => mounted.current && onError(describeError(error)));
   };
 
-  /// 网关页返回（`←`）：从下拉进去的回到下拉
-  const backFromGateway = () => {
-    const from = gateway?.fromPicker ?? false;
-    leaveGateway();
-    if (from) openPicker(MODELS_TOOLS[0]);
+  /// 想收起（再点 `配置网关` / Esc）：连接区有没保存的改动就不收，就地问一句
+  const requestCollapse = () => {
+    if (gatewayDirty) setAskDiscard(true);
+    else collapseGateway();
   };
+  const requestCollapseRef = useRef(requestCollapse);
+  requestCollapseRef.current = requestCollapse;
 
-  /// 网关页那一行的 `选模型 ›`：回到模型页、展开下拉、滚到这一家的分组，新拉到的模型各闪一次。
-  /// 网关页（T3）以 `onPickModelsFromGateway(providerId)` 调它
-  const pickModelsFromGateway = (providerId: string) => {
-    const flashIds = state ? newModelIds(state, beforeGateway.current, providerId) : [];
-    leaveGateway();
-    openPicker(MODELS_TOOLS[0], { focusProviderId: providerId, flashIds });
-  };
+  // 收起动画播完才卸掉；reduced-motion 下即时
+  useEffect(() => {
+    if (gatewayOpen || gateway === null) return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const timer = setTimeout(() => setGateway(null), reduce ? 0 : GATEWAY_MOTION_MS);
+    return () => clearTimeout(timer);
+  }, [gatewayOpen, gateway]);
 
-  /// 网关页（T3）要的回调：选模型、再试一次、删网关的延迟提交
-  const gatewayNext = {
-    onPickModelsFromGateway: pickModelsFromGateway,
-    /// 「再试一次」：拉取本身失败不抛错，原因记在那一家的 unreachable 上
-    onRetryProvider: (providerId: string) => runOrThrow(() => api.gatewayRetryProvider(providerId)),
-    /// 删网关第一步：只标记，行消失；提示条上的撤销走 onUndoRemove
-    onMarkRemove: (provider: GatewayProvider) =>
-      runOrThrow(() => api.gatewayMarkRemoveProvider(provider.id)),
-    onUndoRemove: (providerId: string) =>
-      runOrThrow(() => api.gatewayUndoRemoveProvider(providerId)),
-    /// 提示条到期：只提交这一家
-    onCommitRemovals: (providerId?: string) =>
-      runOrThrow(() => api.gatewayCommitRemovals(providerId)),
-  };
+  // 网关区开着、下拉没开时：Esc 收起（捕获阶段，输入框里按也算）
+  useEffect(() => {
+    if (!gatewayOpen || pickerOpen !== null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // 确认框开着时 Esc 归它
+      if (document.querySelector(".ss-confirm")) return;
+      event.preventDefault();
+      requestCollapseRef.current();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [gatewayOpen, pickerOpen]);
+
+  const onGatewayDirty = useCallback((dirty: boolean) => {
+    setGatewayDirty(dirty);
+    if (!dirty) setAskDiscard(false);
+  }, []);
 
   const restartRouter = async () => {
     onBusy(true);
@@ -841,21 +735,6 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
       onBusy(false);
     }
   };
-
-  if (gateway && state !== null) {
-    return (
-      <GatewayPage
-        state={state}
-        tool={MODELS_TOOLS[0]}
-        busy={busy}
-        onBack={backFromGateway}
-        onSave={saveProvider}
-        onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
-        onRestore={() => runOrThrow(() => api.gatewayRestore())}
-        {...gatewayNext}
-      />
-    );
-  }
 
   if (!state) {
     return (
@@ -896,7 +775,7 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
                   next ? api.gatewayEnable() : api.gatewayRestore(),
                 )
               }
-              onConfigure={() => openGateway(false)}
+              onConfigure={() => (gatewayOpen ? requestCollapse() : openGateway(null))}
               onRestart={(row) => {
                 const r = row.getBoundingClientRect();
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
@@ -907,27 +786,46 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
                 <ModelBox
                   tool={tool}
                   state={state}
-                  open={picker?.toolId === tool.id}
+                  open={picker === tool.id}
                   busy={busy}
-                  onToggleOpen={() =>
-                    picker?.toolId === tool.id ? closePicker() : openPicker(tool)
-                  }
+                  onToggleOpen={() => (picker === tool.id ? closePicker() : openPicker(tool))}
                   onRemoveModel={removeModel}
                 >
-                  {picker?.toolId === tool.id ? (
+                  {picker === tool.id ? (
                     <ModelPicker
                       tool={tool}
                       state={state}
                       busy={busy}
-                      query={query}
-                      onQuery={setQuery}
                       onToggleModel={toggleModel}
-                      onManageGateways={() => openGateway(true)}
-                      focusProviderId={picker.focusProviderId}
-                      flashIds={picker.flashIds}
+                      onManageGateways={() =>
+                        openGateway(state.providers.length === 0 ? "new" : null)
+                      }
                     />
                   ) : null}
                 </ModelBox>
+              }
+              gatewayOpen={gatewayOpen}
+              gateway={
+                gateway !== null ? (
+                  <GatewayPanel
+                    key={String(gateway.initial)}
+                    tool={tool}
+                    state={state}
+                    busy={busy}
+                    initial={gateway.initial}
+                    onSave={saveProvider}
+                    onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
+                    onRetry={(id) => runOrThrow(() => api.gatewayRetryProvider(id))}
+                    onMarkRemove={(p) => runOrThrow(() => api.gatewayMarkRemoveProvider(p.id))}
+                    onUndoRemove={(id) => runOrThrow(() => api.gatewayUndoRemoveProvider(id))}
+                    onCommitRemoval={(id) => runOrThrow(() => api.gatewayCommitRemovals(id))}
+                    onRestore={() => runOrThrow(() => api.gatewayRestore())}
+                    onToggleModel={toggleModel}
+                    onDirtyChange={onGatewayDirty}
+                    askDiscard={askDiscard}
+                    onCollapse={collapseGateway}
+                  />
+                ) : undefined
               }
             />
           ))}

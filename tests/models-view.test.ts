@@ -15,11 +15,15 @@ import {
   routerUnavailable,
   selectedModels,
   sortAndFilterModels,
+  splitModelId,
+  shouldShowModelId,
+  modelRowLabel,
+  modelRowId,
+  chipLabel,
+  modelGroups,
   totalSelected,
   availableCount,
   modelIssues,
-  modelKeys,
-  newModelIds,
   showRestartKey,
   shouldPollRestart,
   showRouterBanner,
@@ -64,6 +68,7 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
   };
 };
 
+const { GatewayPanel, ModelList } = await import("../src/GatewayPanel.tsx");
 const { AgentRow, ModelBox, ModelPicker, MODELS_TAB_FULL_BLEED } =
   await import("../src/ModelsTab.tsx");
 
@@ -349,23 +354,6 @@ test("路由没在跑：先自愈，自愈过仍没起来才出横幅", () => {
   assert.equal(showRouterBanner(state({ enabled: false }), true), false);
 });
 
-test("从网关页 `选模型 ›` 回来：差出这一家新拉到的模型；新加的一家全算新的", () => {
-  const before = state({
-    providers: [provider({ id: "a", models: [model({ id: "m1" })] })],
-  });
-  const keys = modelKeys(before);
-  const after = state({
-    providers: [
-      provider({ id: "a", models: [model({ id: "m1" }), model({ id: "m2" })] }),
-      provider({ id: "b", models: [model({ id: "x" }), model({ id: "y" })] }),
-    ],
-  });
-  assert.deepEqual(newModelIds(after, keys, "a"), ["m2"]);
-  assert.deepEqual(newModelIds(after, keys, "b"), ["x", "y"]);
-  assert.deepEqual(newModelIds(after, keys, "gone"), []);
-  assert.equal(availableCount(after), 4);
-});
-
 test("modelIssues：接管 / 配置被外部改过 / 网关连不上三类，key 随状况变", () => {
   assert.deepEqual(modelIssues(null), []);
   assert.deepEqual(modelIssues(state()), [], "平时没有待处理");
@@ -461,7 +449,8 @@ test("AgentRow：图标 + 名字（不大写）+ page 开关 + 配置网关，�
 
 test("AgentRow 待重启：配置网关之后出紧凑键「重启生效」，提示框写后果与代价（不用原生 title）", () => {
   const html = render(AgentRow, rowProps(withSelected({ enabled: true, needsCodexRestart: true })));
-  assert.match(html, /配置网关<\/button>.*重启生效<\/button>/s);
+  // 「配置网关」是展开键，尾端带展开记号（v82 网关就地展开）
+  assert.match(html, /aria-expanded="false"[^>]*>配置网关<svg[^]*?<\/button>.*重启生效<\/button>/s);
   assert.match(html, /role="tooltip"[^>]*>重启 Codex 桌面应用让改动生效，进行中的对话会中断</);
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
 });
@@ -578,21 +567,28 @@ const pickerProps = (overrides: Partial<GatewayState> = {}) => ({
   tool: MODELS_TOOLS[0],
   state: state(overrides),
   busy: false,
-  query: "",
-  onQuery: noop,
   onToggleModel: noop,
   onManageGateways: noop,
 });
 
-test("ModelPicker：第三方分组头带限制说明与「管理网关 ›」；已选置顶；底部「已选 N 个」", () => {
+test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；按服务商分小组头；已选置顶；底部「已选 N 个模型」", () => {
   const html = render(
     ModelPicker,
     pickerProps({
       providers: [
         provider({
           models: [
-            model({ id: "a", displayName: "Alpha" }),
-            model({ id: "b", displayName: "Beta", selected: true }),
+            model({
+              id: "azure/gpt-4.1",
+              slug: "wecode-azure/gpt-4.1",
+              displayName: "azure/gpt-4.1",
+            }),
+            model({
+              id: "azure/o3-mini",
+              slug: "wecode-azure/o3-mini",
+              displayName: "azure/o3-mini",
+              selected: true,
+            }),
           ],
         }),
       ],
@@ -601,34 +597,196 @@ test("ModelPicker：第三方分组头带限制说明与「管理网关 ›」�
   assert.match(html, /models-picker__group-name">第三方</);
   assert.match(html, /只支持文本与工具调用，不支持图片/);
   assert.match(html, /管理网关<\/span>/);
-  assert.ok(html.indexOf(">Beta<") < html.indexOf(">Alpha<"), "已选置顶");
-  assert.match(
-    html,
-    /已选&nbsp;<span class="models-picker__count">1<\/span>&nbsp;个模型|已选 <span class="models-picker__count">1<\/span> 个模型/,
-  );
-  // 只有一家时不画每家的小抬头
-  assert.doesNotMatch(html, /models-picker__provider-head/);
+  // 组头 `azure · 2`，行内去掉重复前缀，完整 id 进提示框
+  assert.match(html, /model-list__vendor">azure</);
+  assert.match(html, /model-list__count">2</);
+  assert.match(html, /models-option__name">o3-mini</);
+  assert.match(html, /role="tooltip"[^>]*>wecode-azure\/gpt-4\.1</);
+  assert.ok(html.indexOf(">o3-mini<") < html.indexOf(">gpt-4.1<"), "已选置顶");
+  assert.match(html, /已选(&nbsp;| )<span class="model-list__selected">1<\/span>(&nbsp;| )个模型/);
+  // 不超过 8 行不出筛选框
+  assert.doesNotMatch(html, /model-list__search/);
 });
 
-test("ModelPicker 没有网关：分组头是「还没有网关 · + 网关 ›」", () => {
+test("ModelPicker 没有网关：组头是「还没有网关 · + 网关 ›」", () => {
   const html = render(ModelPicker, pickerProps({ providers: [] }));
   assert.match(html, /还没有网关/);
   assert.match(html, /\+ 网关<\/span>/);
   assert.doesNotMatch(html, /管理网关/);
 });
 
-test("ModelPicker 从网关页回来：分组带 data-provider 供滚动定位，新模型各闪一次", () => {
-  const html = render(ModelPicker, {
-    ...pickerProps({
+// ===== 模型列表的写法 =====
+
+test("splitModelId：vendor/name 与网关路由命名 default-vendor-name 都拆得出服务商", () => {
+  assert.deepEqual(splitModelId("azure/gpt-4.1"), { vendor: "azure", rest: "gpt-4.1" });
+  assert.deepEqual(splitModelId("default-azure-gpt-4.1"), { vendor: "azure", rest: "gpt-4.1" });
+  assert.deepEqual(splitModelId("deepseek-chat"), { vendor: null, rest: "deepseek-chat" });
+});
+
+test("shouldShowModelId：友好名与 id 明显不同才显示；Opus / Kimi / azure 这类不显示", () => {
+  assert.equal(shouldShowModelId("DeepSeek V3.2", "deepseek-chat"), true);
+  assert.equal(shouldShowModelId("DeepSeek V3.2", "deepseek/deepseek-chat"), true);
+  assert.equal(shouldShowModelId("Opus 4.6", "anthropic/claude-opus-4-6"), false);
+  assert.equal(shouldShowModelId("Kimi K2", "moonshotai/kimi-k2-0905"), false);
+  assert.equal(shouldShowModelId("gpt-4.1", "default-azure-gpt-4.1"), false);
+  assert.equal(shouldShowModelId("GPT_4.1", "azure/gpt-4.1"), false, "分隔符与大小写不算不同");
+});
+
+test("行名与行尾 id：有友好名写友好名；没有就写去掉服务商前缀的 id；网关把 id 填进显示名不算友好名", () => {
+  const named = model({
+    id: "deepseek/deepseek-chat",
+    slug: "g-deepseek/deepseek-chat",
+    displayName: "DeepSeek V3.2",
+  });
+  assert.equal(modelRowLabel(named), "DeepSeek V3.2");
+  assert.equal(modelRowId(named), "deepseek-chat");
+  const kimi = model({ id: "moonshotai/kimi-k2-0905", slug: "g-x", displayName: "Kimi K2" });
+  assert.equal(modelRowId(kimi), null);
+  const bare = model({
+    id: "default-azure-gpt-4.1",
+    slug: "g-default-azure-gpt-4.1",
+    displayName: "default-azure-gpt-4.1",
+  });
+  assert.equal(modelRowLabel(bare), "gpt-4.1");
+  assert.equal(modelRowId(bare), null);
+});
+
+test("已选模型片：同一服务商省前缀，跨服务商保留前缀", () => {
+  const a = model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1" });
+  assert.equal(chipLabel(a, false), "gpt-4.1");
+  assert.equal(chipLabel(a, true), "azure/gpt-4.1");
+  const same = effectiveModels(
+    state({
       providers: [
-        provider({ id: "a", name: "甲", models: [model({ id: "m1" })] }),
-        provider({ id: "b", name: "乙", models: [model({ id: "n1" }), model({ id: "n2" })] }),
+        provider({
+          models: [
+            model({ id: "azure/gpt-4.1-mini", displayName: "azure/gpt-4.1-mini", selected: true }),
+            model({ id: "azure/o3-mini", displayName: "azure/o3-mini", selected: true }),
+          ],
+        }),
       ],
     }),
-    focusProviderId: "b",
-    flashIds: ["n2"],
+  ).map((r) => r.label);
+  assert.deepEqual(same, ["gpt-4.1-mini", "o3-mini"]);
+  const mixed = effectiveModels(
+    state({
+      providers: [
+        provider({
+          models: [
+            model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true }),
+            model({ id: "zhipu/glm-4.6", displayName: "zhipu/glm-4.6", selected: true }),
+          ],
+        }),
+      ],
+    }),
+  ).map((r) => r.label);
+  assert.deepEqual(mixed, ["azure/gpt-4.1", "zhipu/glm-4.6"]);
+});
+
+test("modelGroups：按服务商分组，一家一个也有组头；拆不出服务商退到网关名；组内已选置顶", () => {
+  const p = provider({ id: "g", name: "网关甲", models: [] });
+  const groups = modelGroups([
+    { provider: p, model: model({ id: "azure/a" }) },
+    { provider: p, model: model({ id: "zhipu/glm-4.6" }) },
+    { provider: p, model: model({ id: "azure/b", selected: true }) },
+    { provider: p, model: model({ id: "plain" }) },
+  ]);
+  assert.deepEqual(
+    groups.map((g) => [g.vendor, g.entries.map((e) => e.model.id)]),
+    [
+      ["azure", ["azure/b", "azure/a"]],
+      ["zhipu", ["zhipu/glm-4.6"]],
+      ["网关甲", ["plain"]],
+    ],
+  );
+});
+
+test("ModelList：超过 8 行出筛选框；新模型各闪一次；行尾 id 只在明显不同时出现", () => {
+  const p = provider({ id: "g", models: [] });
+  const entries = Array.from({ length: 9 }, (_, i) => ({
+    provider: p,
+    model: model({ id: `azure/m${i}`, slug: `g-azure/m${i}`, displayName: `azure/m${i}` }),
+  }));
+  entries.push({
+    provider: p,
+    model: model({ id: "deepseek/deepseek-chat", slug: "g-ds", displayName: "DeepSeek V3.2" }),
   });
-  assert.match(html, /data-provider="b"/);
-  assert.match(html, /models-picker__provider-head/);
+  const html = render(ModelList, {
+    entries,
+    busy: false,
+    onToggle: noop,
+    flashKeys: ["g|azure/m3"],
+  });
+  assert.match(html, /model-list__search/);
   assert.equal((html.match(/is-flash/g) ?? []).length, 1);
+  assert.equal((html.match(/models-option__id"/g) ?? []).length, 1);
+  assert.match(html, /models-option__id">deepseek-chat</);
+});
+
+// ===== 网关展开区 =====
+
+const panelProps = (
+  overrides: Partial<GatewayState> = {},
+  extra: Record<string, unknown> = {},
+) => ({
+  tool: MODELS_TOOLS[0],
+  state: state(overrides),
+  busy: false,
+  initial: null,
+  onSave: async () => "x",
+  onFetchModels: async () => {},
+  onRetry: async () => {},
+  onMarkRemove: async () => {},
+  onUndoRemove: async () => {},
+  onCommitRemoval: async () => {},
+  onRestore: async () => {},
+  onToggleModel: noop,
+  onDirtyChange: noop,
+  askDiscard: false,
+  onCollapse: noop,
+  ...extra,
+});
+
+test("GatewayPanel 已连：分段片（选中反色、末尾 + 网关）+ 一行摘要 `地址 · 已连 · 改` + 垃圾桶；右半「从这个网关选模型」", () => {
+  const html = render(
+    GatewayPanel,
+    panelProps({
+      providers: [
+        provider({
+          id: "ap",
+          name: "ap-gateway",
+          models: [model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true })],
+        }),
+        provider({ id: "or", name: "openrouter", unreachable: "地址连不上" }),
+      ],
+    }),
+  );
+  assert.match(html, /class="ss-chip is-selected"[^>]*>.*?ap-gateway.*?gw-panel__chip-count">1</s);
+  assert.match(html, /gw-panel__chip-down">连不上</);
+  assert.match(html, />网关<\/span><\/button>/);
+  assert.match(html, /gw-panel__state">已连</);
+  assert.match(html, />改<\/button>/);
+  assert.match(html, /aria-label="删掉 ap-gateway"/);
+  assert.match(html, /gw-panel__section">从这个网关选模型</);
+  assert.match(html, /gw-panel__note">只支持文本与工具调用，不支持图片</);
+  // 摘要态不出表单
+  assert.doesNotMatch(html, /gw-form/);
+});
+
+test("GatewayPanel 连不上：`连不上` + 再试一次；新加网关直接出表单；收起时没保存就地问保存 / 丢弃", () => {
+  const down = render(
+    GatewayPanel,
+    panelProps({
+      providers: [provider({ id: "or", name: "openrouter", unreachable: "地址连不上" })],
+    }),
+  );
+  assert.match(down, /gw-panel__down"[^>]*>连不上</);
+  assert.match(down, />再试一次</);
+  const fresh = render(GatewayPanel, panelProps({ providers: [] }));
+  assert.match(fresh, /class="gw-form"/);
+  assert.match(fresh, /新网关/);
+  assert.doesNotMatch(fresh, />取消</, "一家都没有时没有可退的");
+  const ask = render(GatewayPanel, panelProps({ providers: [] }, { askDiscard: true }));
+  assert.match(ask, /地址改动没保存/);
+  assert.match(ask, />丢弃</);
 });

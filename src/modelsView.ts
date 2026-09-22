@@ -106,16 +106,127 @@ export function effectiveModels(state: GatewayState): EffectiveModel[] {
   const rows = state.providers.flatMap((provider) =>
     selectedModels(provider).map((model) => ({ provider, model })),
   );
+  // 已选的都来自同一服务商时省前缀；跨服务商并存时保留前缀以区分（DESIGN「模型列表的写法」）
+  const vendors = new Set(rows.map((row) => splitModelId(row.model.id).vendor ?? ""));
+  const keepVendor = vendors.size > 1;
+  const nameOf = (row: { model: GatewayProviderModel }) => chipLabel(row.model, keepVendor);
   const times = new Map<string, number>();
   for (const row of rows) {
-    const name = modelLabel(row.model);
+    const name = nameOf(row);
     times.set(name, (times.get(name) ?? 0) + 1);
   }
   return rows.map((row) => {
-    const name = modelLabel(row.model);
+    const name = nameOf(row);
     const collides = (times.get(name) ?? 0) > 1;
     return { ...row, label: collides ? `${name} · ${providerLabel(row.provider)}` : name };
   });
+}
+
+// ===== 模型列表的写法（DESIGN「模型列表的写法」：下拉与网关展开区同一组件） =====
+
+/// 列表超过这么多行才出筛选框
+export const MODEL_FILTER_THRESHOLD = 8;
+
+/// 网关内部路由命名的前缀：`default-azure-gpt-4.1` 里的 `default-`
+const ROUTE_PREFIX = /^default-/i;
+
+/**
+ * 把模型 id 拆成服务商与其余部分：`azure/gpt-4.1` → azure · gpt-4.1；
+ * `default-azure-gpt-4.1` → azure · gpt-4.1（网关路由命名，第一段是服务商）；
+ * 拆不出服务商（`deepseek-chat`）→ vendor 为 null，其余原样。
+ */
+export function splitModelId(id: string): { vendor: string | null; rest: string } {
+  const routed = ROUTE_PREFIX.test(id);
+  const s = id.replace(ROUTE_PREFIX, "");
+  const slash = s.indexOf("/");
+  if (slash > 0) return { vendor: s.slice(0, slash), rest: s.slice(slash + 1) };
+  const dash = s.indexOf("-");
+  if (routed && dash > 0) return { vendor: s.slice(0, dash), rest: s.slice(dash + 1) };
+  return { vendor: null, rest: s };
+}
+
+/// 网关有没有给友好名：后端在没有显示名时把 id 填进 displayName，等于 id / slug 的不算
+export function hasFriendlyName(model: GatewayProviderModel): boolean {
+  const name = model.displayName.trim();
+  return name !== "" && name !== model.id && name !== model.slug;
+}
+
+/// 列表一行的名字：有友好名写友好名；没有就写去掉服务商前缀的 id（组头已给出服务商）
+export function modelRowLabel(model: GatewayProviderModel): string {
+  return hasFriendlyName(model) ? model.displayName.trim() : splitModelId(model.id).rest;
+}
+
+/// 已选模型片的名字：友好名优先；否则跨服务商时保留前缀（`azure/gpt-4.1`），同一服务商省前缀
+export function chipLabel(model: GatewayProviderModel, keepVendor: boolean): string {
+  if (hasFriendlyName(model)) return model.displayName.trim();
+  const { vendor, rest } = splitModelId(model.id);
+  return keepVendor && vendor ? `${vendor}/${rest}` : rest;
+}
+
+/// 比较用：去掉 `default-` 与服务商前缀、去掉分隔符 / - _ . 与空白、转小写
+function squash(text: string, vendor: string | null): string {
+  let s = text.replace(ROUTE_PREFIX, "").toLowerCase();
+  const v = vendor?.toLowerCase().replace(/[\s/_.-]+/g, "") ?? "";
+  s = s.replace(/[\s/_.-]+/g, "");
+  if (v !== "" && s.startsWith(v)) s = s.slice(v.length);
+  return s;
+}
+
+/**
+ * 行尾要不要显示 id：只有友好名与 id **明显不同**（从名字推不出 id）时才显示。
+ * 名称与 id 都去掉常见前缀（`default-`、服务商名）和分隔符（/ - _ .）、转小写后，
+ * 名称是 id 的子串 → 视为「不同不明显」，不显示。
+ * `DeepSeek V3.2` 对 `deepseek-chat` 显示；`Opus 4.6` 对 `anthropic/claude-opus-4-6`、
+ * `Kimi K2` 对 `moonshotai/kimi-k2-0905` 不显示。
+ */
+export function shouldShowModelId(name: string, id: string): boolean {
+  const { vendor, rest } = splitModelId(id);
+  const n = squash(name, vendor);
+  const i = squash(rest, vendor);
+  if (n === "") return false;
+  return !i.includes(n);
+}
+
+/// 行尾显示的 id（去掉服务商前缀，组头已给出）；不该显示时为 null
+export function modelRowId(model: GatewayProviderModel): string | null {
+  if (!hasFriendlyName(model)) return null;
+  return shouldShowModelId(model.displayName, model.id) ? splitModelId(model.id).rest : null;
+}
+
+export interface ModelEntry {
+  provider: GatewayProvider;
+  model: GatewayProviderModel;
+}
+
+export interface ModelGroup {
+  /// 组头：服务商；拆不出服务商时退到网关名
+  vendor: string;
+  entries: ModelEntry[];
+}
+
+/**
+ * 按服务商分组（一家只有一个模型也有组头），组的先后按第一次出现的顺序；
+ * 组内按筛选词过滤、已选置顶（sortAndFilterModels 的规则），空组不出现。
+ */
+export function modelGroups(entries: ModelEntry[], query = ""): ModelGroup[] {
+  const groups = new Map<string, ModelEntry[]>();
+  for (const entry of entries) {
+    const vendor = splitModelId(entry.model.id).vendor ?? providerLabel(entry.provider);
+    const list = groups.get(vendor);
+    if (list) list.push(entry);
+    else groups.set(vendor, [entry]);
+  }
+  const out: ModelGroup[] = [];
+  for (const [vendor, list] of groups) {
+    const kept = sortAndFilterModels(
+      list.map((e) => e.model),
+      query,
+    );
+    const byModel = new Map(list.map((e) => [e.model, e]));
+    const sorted = kept.map((m) => byModel.get(m) as ModelEntry);
+    if (sorted.length > 0) out.push({ vendor, entries: sorted });
+  }
+  return out;
 }
 
 /**
@@ -252,26 +363,6 @@ export function availableCount(state: GatewayState): number {
   return state.providers.reduce((sum, provider) => sum + provider.models.length, 0);
 }
 
-/// 进网关页那一刻记下的「已经有的模型」，回来时和它比，差出来的就是新拉到的
-export function modelKeys(state: GatewayState): Set<string> {
-  const keys = new Set<string>();
-  for (const provider of state.providers) {
-    for (const model of provider.models) keys.add(`${provider.id}|${model.id}`);
-  }
-  return keys;
-}
-
-/// 从网关页 `选模型 ›` 回来时这一家新拉到的模型 id（各闪一次）。这一家是新加的就全算新的
-export function newModelIds(
-  state: GatewayState,
-  before: Set<string>,
-  providerId: string,
-): string[] {
-  const provider = state.providers.find((p) => p.id === providerId);
-  if (!provider) return [];
-  return provider.models.filter((m) => !before.has(`${providerId}|${m.id}`)).map((m) => m.id);
-}
-
 /// 路由没在跑、且启动时自愈过一次仍没起来，才出页级横幅（DESIGN「路由服务没在跑」）
 export function showRouterBanner(state: GatewayState, healAttempted: boolean): boolean {
   return healAttempted && routerUnavailable(state);
@@ -283,7 +374,7 @@ export function showRouterBanner(state: GatewayState, healAttempted: boolean): b
  * 模型页里要用户拿主意、且不在某一行上就地出现的事（DESIGN「全局收件箱」）：
  * - `takeover`：Codex 正由 agents-manager 管着 → `接管`
  * - `configChanged`：Codex 升级后 Sophia 写进去的模型列表对不上了，要重新写一次 → `重新写入`
- * - `unreachable`：某家网关连不上 → `再试一次`（网关页那一行同时就地显示）
+ * - `unreachable`：某家网关连不上 → `再试一次`（网关展开区那一家同时就地显示）
  *
  * 「改动要重启 Codex 才生效」不进来——它已在 agent 行上就地出现，一件事只在一处说。
  * 「路由没在跑」也不进来——它影响整页、忽略毫无意义，走模型页页级横幅。
@@ -295,7 +386,7 @@ export function showRouterBanner(state: GatewayState, healAttempted: boolean): b
  * - `parts`：句子拆段，`subject: true` 的是对象名（墨色），其余是连接词（灰）
  * - `sentence`：整句，给读屏与提示框
  * - `action`：一个动作；`kind` 决定调哪个命令（App 的 `resolveModelIssue` 照它执行）
- * - `providerId`：只有 `unreachable` 有，给「再试一次」和跳回网关页那一行
+ * - `providerId`：只有 `unreachable` 有，给「再试一次」和跳回网关展开区那一家
  */
 export type ModelIssueKind = "takeover" | "configChanged" | "unreachable";
 
