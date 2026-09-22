@@ -249,7 +249,8 @@ fn auto_import_rule_only_covers_entries_that_appear_after_it() {
         "project:one".into(),
         vec![location_ref(&target)],
         false,
-    );
+    )
+    .unwrap();
     assert_eq!(rules.len(), 1);
     assert_eq!(
         rules[0].baseline,
@@ -283,7 +284,8 @@ fn auto_import_rule_only_covers_entries_that_appear_after_it() {
         "project:one".into(),
         vec![location_ref(&target)],
         false,
-    );
+    )
+    .unwrap();
     assert_eq!(rules.len(), 1);
     assert_eq!(
         rules[0].baseline,
@@ -342,4 +344,30 @@ fn legacy_auto_import_rule_without_baseline_migrates_to_current_entries() {
         auto_selections(&scan(&locations), &rules),
         vec![selection("source", "search", "target")]
     );
+}
+
+/// 建规则时来源配置读不出来：拒绝，给出能照着做的话，不拍空快照
+#[test]
+fn auto_import_rule_is_refused_when_source_config_is_unreadable() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let source_path = root.join("source.json");
+    let target_path = root.join("target.json");
+    fs::write(&source_path, b"{not json").unwrap();
+    json_file(&target_path, json!({"mcpServers": {}}));
+    let source = json_location("source", &source_path, "project:one");
+    let target = json_location("target", &target_path, "project:one");
+    let mut rules = Vec::new();
+
+    let err = upsert_auto_import(
+        &mut rules,
+        &scan(&[source.clone(), target.clone()]),
+        &source,
+        "project:one".into(),
+        vec![location_ref(&target)],
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(err, "读不到 source 的配置，先修好再开自动添加");
+    assert!(rules.is_empty());
 }

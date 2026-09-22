@@ -581,7 +581,7 @@ fn set_mcp_auto_import(
         target_domain,
         targets,
         allow_cross_domain,
-    );
+    )?;
     state.store.save_settings(&settings).map_err(err)
 }
 

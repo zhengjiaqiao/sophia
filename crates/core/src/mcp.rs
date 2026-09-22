@@ -132,7 +132,8 @@ pub fn location_ref(location: &McpLocation) -> McpLocationRef {
 }
 
 /// 新建或整条替换一条自动添加规则（同一来源 + 目标域即同一条），同时拍 baseline：
-/// 来源位置此刻的全部 MCP 名。替换等于重建，排除名单与 baseline 都重来
+/// 来源位置此刻的全部 MCP 名。替换等于重建，排除名单与 baseline 都重来。
+/// 来源配置这次读不出来就拒绝：拍成空集会在它修好后把现有的全部补上
 pub fn upsert_auto_import(
     rules: &mut Vec<McpAutoImportRule>,
     overview: &McpOverview,
@@ -140,7 +141,13 @@ pub fn upsert_auto_import(
     target_domain: String,
     targets: Vec<McpLocationRef>,
     allow_cross_domain: bool,
-) {
+) -> Result<(), String> {
+    if location_unreadable(overview, &source.id) {
+        return Err(format!(
+            "读不到 {} 的配置，先修好再开自动添加",
+            source.label
+        ));
+    }
     rules.retain(|rule| rule.source.id != source.id || rule.target_domain != target_domain);
     rules.push(McpAutoImportRule {
         source: location_ref(source),
@@ -150,6 +157,7 @@ pub fn upsert_auto_import(
         allow_cross_domain,
         baseline: Some(source_names(overview, &source.id)),
     });
+    Ok(())
 }
 
 /// 升级迁移：给没有 baseline 的旧规则补上来源位置当前的全部 MCP 名，于是旧规则从这一刻起
@@ -165,17 +173,21 @@ pub fn migrate_baselines(rules: &mut [McpAutoImportRule], overview: &McpOverview
         else {
             continue;
         };
-        if overview
-            .issues
-            .iter()
-            .any(|issue| issue.location_id == source.id && issue.name.is_none())
-        {
+        if location_unreadable(overview, &source.id) {
             continue;
         }
         rule.baseline = Some(source_names(overview, &source.id));
         changed = true;
     }
     changed
+}
+
+/// 该位置的配置这次读不出来（位置级问题，不是某一条 MCP 的问题）
+fn location_unreadable(overview: &McpOverview, location_id: &str) -> bool {
+    overview
+        .issues
+        .iter()
+        .any(|issue| issue.location_id == location_id && issue.name.is_none())
 }
 
 /// 来源位置当前定义的全部 MCP 名（含本次不支持或有问题的：它们也是「已有的」）
