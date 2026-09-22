@@ -10,7 +10,7 @@ import type {
   SyncReport,
 } from "../types";
 import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag, Toast } from "../ui";
-import { defer, type Deferred } from "../deferredCommit.ts";
+import { defer } from "../deferredCommit.ts";
 import { CheckMark } from "./CheckMark.tsx";
 import { joinWords } from "./pendingIssues.ts";
 import {
@@ -19,6 +19,7 @@ import {
   loadImportMemory,
   saveImportMemory,
   sameSet,
+  undoSlot,
 } from "./importDefaults.ts";
 import "./ImportPage.css";
 
@@ -214,16 +215,19 @@ export default function ImportPage({
 
   /// 挂起的替换：提示条还在时可撤销；到期、关掉、离开页面时提交
   const [replacing, setReplacing] = useState<{
+    /// 提示条的 key：每挂一笔换一个，新提示条重新计时
+    key: string;
     names: string[];
     commit: () => void;
     undo: () => void;
   } | null>(null);
-  const pendingReplace = useRef<Deferred | null>(null);
+  /// 一次只挂一笔替换：再挂之前先把上一笔提交掉
+  const pendingReplace = useRef(undoSlot());
+  const replaceSeq = useRef(0);
   // 离开页面：挂着的替换就此提交（窗口关闭另有 App 的 flushAll 兜底）
   useEffect(
     () => () => {
-      const d = pendingReplace.current;
-      if (d?.isPending()) void d.commit().then(onChange, (e) => onError(String(e)));
+      void pendingReplace.current.flush().then(onChange, (e) => onError(String(e)));
     },
     // 只在卸载时跑
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -242,6 +246,15 @@ export default function ImportPage({
   const doAdd = async () => {
     if (source === undefined) return;
     setBusy(true);
+    // 上一笔替换还挂着（比如换了来源又替换）：先提交它，失败交给壳，这一次照常做
+    if (pendingReplace.current.current()?.isPending()) {
+      setReplacing(null);
+      try {
+        await pendingReplace.current.flush();
+      } catch (e) {
+        onError(String(e));
+      }
+    }
     try {
       // 这次又勾上的、之前被排除在规则外的 skill 重新纳入
       for (const skill of names.filter((n) => excluded.includes(n))) {
@@ -286,7 +299,8 @@ export default function ImportPage({
 
       // 替换整体挂起：现有那份进废纸篓 + 这一份建链，一起在提交时做；撤销就相当于这几行没做。
       // 提交时再体检一次（后端只存一份删除计划，挂起期间可能被顶掉，也可能磁盘变了）
-      const d = defer(`replace:${page.key}:${selected}`, async () => {
+      const deferKey = `replace:${page.key}:${selected}`;
+      const d = defer(deferKey, async () => {
         for (const { skill, holder } of replaced) {
           const planned = await api.planDeleteSource(holder.sourceId, skill);
           if (planned.plan.inGit !== null)
@@ -299,7 +313,8 @@ export default function ImportPage({
         const report = await link(replaced.map((r) => r.skill));
         if (report !== null) onReport(report);
       });
-      pendingReplace.current = d;
+      pendingReplace.current.hold(d);
+      replaceSeq.current += 1;
       // 直接添加的那些已经做完，勾选里只留挂着的替换
       setNames(replaced.map((r) => r.skill));
       const done = () => {
@@ -308,6 +323,7 @@ export default function ImportPage({
         setReplace([]);
       };
       setReplacing({
+        key: `${deferKey}#${replaceSeq.current}`,
         names: replaced.map((r) => r.skill),
         commit: () => {
           done();
@@ -550,6 +566,7 @@ export default function ImportPage({
             // 挂起的替换：黑窗贴在 `添加 N 个` 上方、右沿对齐它（提示锚在触发它的控件上）
             <div className="ss-import__toast">
               <Toast
+                key={replacing.key}
                 kind="success"
                 verb="替换"
                 names={replacing.names}
