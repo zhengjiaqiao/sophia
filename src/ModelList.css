@@ -49,8 +49,12 @@
 }
 
 /* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从 canvas 白渐隐到透明（功能性渐变） */
+/* 自己也是纵向 flex：外层（下拉浮层 max-height 420）压矮它时，滚动区跟着变矮，
+   最后一行能完整滚出来，而不是溢出到浮层底边外被裁掉 */
 .model-list__viewport {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
 }
 
@@ -88,6 +92,9 @@
   min-height: 0;
   max-height: calc(var(--row-h) * 8 + 56px);
   overflow: auto;
+  /* 关掉浏览器自带的滚动锚定：已选组增减行后的补偿由 ModelList 手动做（WKWebView 不一定支持它，
+     Chromium 支持——两边都做会补偿两次） */
+  overflow-anchor: none;
 }
 
 .model-list__empty {
@@ -176,6 +183,22 @@
   white-space: nowrap;
 }
 
+/* 行尾网关短名：只在列表跨多个网关时出现；12 ink-faint UI 字体，不截断，右对齐。
+   有行尾 id 时排在 id 之后，间距是行内 gap 12 */
+.models-option__gateway {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.models-option__id + .models-option__gateway {
+  margin-left: 0;
+}
+
 /* 新拉到的模型各闪一次：120ms 反色再回落（与「刚点亮」同一个动作） */
 .models-option.is-flash {
   animation: models-flash 240ms var(--ease-mech) both;
@@ -222,27 +245,6 @@
   font-family: var(--font-mono);
   font-size: var(--size-micro);
   font-variant-numeric: tabular-nums;
-}
-
-.model-list__foot {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  height: var(--row-h);
-  padding: 0 var(--space-sm);
-  border-top: 1px solid var(--hairline);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-
-.model-list__selected {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -269,14 +269,86 @@ function byFrozen(order: string[]) {
 }
 
 /**
- * 已选组：打开时已选的那几个，按冻结的先后；之后取消勾选的仍留在组里（显示空框），
- * 新勾上的不进来——直到下次打开。按筛选词过滤，过滤后可能为空（调用方隐藏整组）
+ * 打开之后新勾上的（`网关id|模型id`），按勾上的先后：在上一次的基础上，把此刻勾着、
+ * 却既不在打开时的已选组、也还没记下的追加到末尾（同一批到的按列表顺序）。
+ * 记下的不会再移出——之后又取消了也留着，下次打开（重新快照）才清掉
  */
-export function pinnedEntries(entries: ModelEntry[], snap: ModelOrder, query = ""): ModelEntry[] {
-  const pinned = new Set(snap.pinned);
+export function pinnedAdditions(prev: string[], entries: ModelEntry[], snap: ModelOrder): string[] {
+  const known = new Set([...snap.pinned, ...prev]);
+  const fresh = entries
+    .filter((e) => e.model.selected && !known.has(modelEntryKey(e)))
+    .map(modelEntryKey);
+  return fresh.length === 0 ? prev : [...prev, ...fresh];
+}
+
+/**
+ * 已选组：打开时已选的那几个按冻结的先后，其后是打开之后新勾上的（`added`，追加到末尾）；
+ * 取消勾选的仍留在原位（显示空框），下次打开才移出。按筛选词过滤，过滤后可能为空（调用方隐藏整组）
+ */
+export function pinnedEntries(
+  entries: ModelEntry[],
+  snap: ModelOrder,
+  query = "",
+  added: string[] = [],
+): ModelEntry[] {
+  const members = [...snap.pinned, ...added.filter((k) => !snap.pinned.includes(k))];
+  const pinned = new Set(members);
   return entries
     .filter((e) => pinned.has(modelEntryKey(e)) && matches(e, query))
-    .sort(byFrozen(snap.pinned));
+    .sort(byFrozen(members));
+}
+
+/// 组头 `已选 · N`：此刻真正勾着的个数（取消了、还留在原位的那几行不算）
+export function pinnedCount(pinned: ModelEntry[]): number {
+  return pinned.filter((e) => e.model.selected).length;
+}
+
+/**
+ * 已选组变高 / 变矮后，让光标下那一行不动：按它在滚动内容里的位移补偿 scrollTop。
+ * WKWebView 不一定支持 `overflow-anchor`，所以手动做
+ */
+export function anchoredScrollTop(scrollTop: number, rowTopBefore: number, rowTopAfter: number) {
+  return Math.max(0, scrollTop + (rowTopAfter - rowTopBefore));
+}
+
+// ===== 跨网关时行尾写网关短名（DESIGN「模型列表的写法」） =====
+
+/// 列表跨几个网关：≥2 个时每行行尾写来源网关短名；只有一个（含网关页）不写
+export function showGatewayNames(entries: ModelEntry[]): boolean {
+  return new Set(entries.map((e) => e.provider.id)).size >= 2;
+}
+
+const IP_HOST = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])$/i;
+
+/**
+ * 行尾的网关短名：显示名优先；没有时取地址主机名的主体——去掉 `api.` `www.` 前缀和顶级域
+ * （`https://openrouter.ai/api/v1` → `openrouter`，`localhost:4000` → `localhost`），IP 原样
+ */
+export function gatewayShortName(provider: GatewayProvider): string {
+  const name = provider.name.trim();
+  if (name) return name;
+  const host = hostOf(provider.baseUrl);
+  if (!host) return provider.id;
+  if (IP_HOST.test(host)) return host;
+  const labels = host.split(".").filter(Boolean);
+  while (labels.length > 1 && (labels[0] === "api" || labels[0] === "www")) labels.shift();
+  if (labels.length > 1) labels.pop();
+  return labels.join(".") || provider.id;
+}
+
+/// 地址里的主机名（小写）；没写协议的（`localhost:4000`）补上再解析
+function hostOf(baseUrl: string): string {
+  const raw = baseUrl.trim();
+  if (!raw) return "";
+  for (const candidate of [raw, `http://${raw}`]) {
+    try {
+      const host = new URL(candidate).hostname;
+      if (host) return host.toLowerCase();
+    } catch {
+      // 换下一种写法
+    }
+  }
+  return "";
 }
 
 /// 各服务商分组：组与组内的先后都按冻结的顺序，勾选变化不挪位置；按筛选词过滤，空组不出现

@@ -29,6 +29,12 @@ import {
   showRouterBanner,
   snapshotOrder,
   pinnedEntries,
+  pinnedAdditions,
+  pinnedCount,
+  anchoredScrollTop,
+  showGatewayNames,
+  gatewayShortName,
+  PINNED_PREVIEW,
   frozenGroups,
   pinnedLabel,
   gatewayChips,
@@ -583,7 +589,7 @@ const pickerProps = (overrides: Partial<GatewayState> = {}) => ({
   onManageGateways: noop,
 });
 
-test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；按服务商分小组头；已选置顶；底部「已选 N 个模型」", () => {
+test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；按服务商分小组头；已选置顶；底部不再写「已选 N 个模型」", () => {
   const html = render(
     ModelPicker,
     pickerProps({
@@ -622,7 +628,10 @@ test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；�
     /role="option"[^>]*aria-label="gpt-4\.1"|aria-label="gpt-4\.1"[^>]*role="option"/,
   );
   assert.ok(html.indexOf(">o3-mini<") < html.indexOf(">gpt-4.1<"), "已选置顶");
-  assert.match(html, /已选(&nbsp;| )<span class="model-list__selected">1<\/span>(&nbsp;| )个模型/);
+  // 底部计数与已选组头重复，已删（DESIGN a4fede3）
+  assert.doesNotMatch(html, /model-list__foot|个模型/);
+  // 只有一个网关：行尾不写网关名
+  assert.doesNotMatch(html, /models-option__gateway/);
   // 不超过 8 行不出筛选框
   assert.doesNotMatch(html, /model-list__search/);
 });
@@ -942,16 +951,22 @@ test("snapshotOrder：打开时排一次序——已选组按分组顺序，组�
   assert.deepEqual(snap.order, ["g|azure/b", "g|azure/a", "g|zhipu/glm"]);
 });
 
-test("不跳位：打开之后勾选 / 取消只改状态，已选组成员与各组先后都不变；下次打开才重排", () => {
+test("不跳位：打开之后取消的留在已选组原位（空框），新勾的追加到组末；各组先后不变；下次打开才重排", () => {
   const before = [pe("azure/a"), pe("azure/b", true), pe("azure/c")];
   const snap = snapshotOrder(before);
   // 之后：取消 b、勾上 c
   const after = [pe("azure/a"), pe("azure/b", false), pe("azure/c", true)];
+  const added = pinnedAdditions([], after, snap);
+  assert.deepEqual(added, ["g|azure/c"]);
   assert.deepEqual(
-    pinnedEntries(after, snap).map((e) => [e.model.id, e.model.selected]),
-    [["azure/b", false]],
-    "取消勾选的仍留在已选组（空框），新勾上的不进来",
+    pinnedEntries(after, snap, "", added).map((e) => [e.model.id, e.model.selected]),
+    [
+      ["azure/b", false],
+      ["azure/c", true],
+    ],
+    "取消勾选的仍留在已选组（空框），新勾上的追加到末尾",
   );
+  assert.equal(pinnedCount(pinnedEntries(after, snap, "", added)), 1, "组头只数此刻勾着的");
   assert.deepEqual(
     frozenGroups(after, snap).flatMap((g) => g.entries.map((e) => e.model.id)),
     ["azure/b", "azure/a", "azure/c"],
@@ -1038,4 +1053,107 @@ test("删网关改为二次确认：页面上不再有「删掉 X · 撤销」�
   assert.doesNotMatch(html, /撤销/);
   assert.doesNotMatch(html, /ss-toast/);
   assert.match(html, /aria-label="删掉 ap-gateway"/);
+});
+
+test("已选组联动：新勾的按先后追加（同一批按列表顺序），取消后仍留着，再勾不重复；打开时已在的不重复记", () => {
+  const snap = snapshotOrder([pe("azure/a", true), pe("azure/b"), pe("azure/c"), pe("azure/d")]);
+  let added = pinnedAdditions(
+    [],
+    [pe("azure/a", true), pe("azure/b"), pe("azure/c"), pe("azure/d", true)],
+    snap,
+  );
+  assert.deepEqual(added, ["g|azure/d"]);
+  added = pinnedAdditions(
+    added,
+    [pe("azure/a", true), pe("azure/b", true), pe("azure/c", true), pe("azure/d")],
+    snap,
+  );
+  assert.deepEqual(added, ["g|azure/d", "g|azure/b", "g|azure/c"], "d 取消后仍留着，b、c 追加在后");
+  const same = pinnedAdditions(
+    added,
+    [pe("azure/a", true), pe("azure/b", true), pe("azure/c", true), pe("azure/d", true)],
+    snap,
+  );
+  assert.equal(same, added, "没有新勾的：原样返回");
+});
+
+test("已选组超过 5 个折叠时，新追加的落在折叠部分，「还有 N 个」随之变；组头是此刻勾着的个数", () => {
+  const initial = Array.from({ length: 9 }, (_, i) => pe(`azure/m${i}`, i < 5));
+  const snap = snapshotOrder(initial);
+  const now = initial.map((e, i) => pe(e.model.id, i < 5 || i === 7));
+  const added = pinnedAdditions([], now, snap);
+  const pinned = pinnedEntries(now, snap, "", added);
+  assert.deepEqual(
+    pinned.slice(PINNED_PREVIEW).map((e) => e.model.id),
+    ["azure/m7"],
+  );
+  assert.equal(pinnedCount(pinned), 6);
+});
+
+test("补偿滚动：被点那一行在内容里下移多少，scrollTop 就加多少；不低于 0", () => {
+  assert.equal(anchoredScrollTop(100, 300, 334), 134);
+  assert.equal(anchoredScrollTop(100, 300, 266), 66);
+  assert.equal(anchoredScrollTop(10, 300, 200), 0);
+});
+
+test("网关短名：显示名优先；否则主机名去掉 api. / www. 与顶级域；localhost、IP 原样", () => {
+  const gw = (name: string, baseUrl: string) => provider({ id: "x", name, baseUrl });
+  assert.equal(gatewayShortName(gw("ap-gateway", "https://api.openai.com/v1")), "ap-gateway");
+  assert.equal(gatewayShortName(gw("", "https://openrouter.ai/api/v1")), "openrouter");
+  assert.equal(gatewayShortName(gw("", "https://api.deepseek.com")), "deepseek");
+  assert.equal(gatewayShortName(gw("", "https://www.example.com/v1")), "example");
+  assert.equal(gatewayShortName(gw("", "localhost:4000")), "localhost");
+  assert.equal(gatewayShortName(gw("", "http://localhost:4000/v1")), "localhost");
+  assert.equal(gatewayShortName(gw("", "http://192.168.1.20:8080/v1")), "192.168.1.20");
+  assert.equal(gatewayShortName(gw("", "10.0.0.2:4000")), "10.0.0.2");
+  assert.equal(gatewayShortName(gw("  ", "")), "x", "什么都取不到时退到 id");
+});
+
+test("行尾网关短名：entries 跨 ≥2 个网关才写，id 在前、网关名在后；单网关不写", () => {
+  const a = provider({ id: "a", name: "", baseUrl: "https://openrouter.ai/api/v1" });
+  const b = provider({ id: "b", name: "ap-gateway", baseUrl: "https://x.example.com" });
+  const two = [
+    {
+      provider: a,
+      model: model({
+        id: "deepseek-chat",
+        slug: "deepseek-chat",
+        displayName: "DeepSeek V3.2",
+        selected: true,
+      }),
+    },
+    {
+      provider: b,
+      model: model({ id: "azure/gpt-4.1", slug: "azure/gpt-4.1", displayName: "azure/gpt-4.1" }),
+    },
+  ];
+  assert.equal(showGatewayNames(two), true);
+  assert.equal(showGatewayNames(two.slice(0, 1)), false);
+  const html = render(ModelList, { entries: two, busy: false, onToggle: noop });
+  // 已选组与分组里都写
+  assert.equal((html.match(/models-option__gateway">openrouter</g) ?? []).length, 2);
+  assert.match(html, /models-option__gateway">ap-gateway</);
+  assert.match(
+    html,
+    /models-option__id">deepseek-chat<\/span><span class="models-option__gateway">openrouter</,
+  );
+  assert.match(html, /aria-label="gpt-4\.1，ap-gateway"/);
+  const one = render(ModelList, { entries: two.slice(1), busy: false, onToggle: noop });
+  assert.doesNotMatch(one, /models-option__gateway/);
+});
+
+test("模型列表：底部不再有「已选 N 个模型」；滚动区的容器是纵向 flex，外层压矮时滚动区跟着变矮", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/ModelList.css", import.meta.url), "utf8");
+  const rule = (sel: string) =>
+    new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+  const html = render(ModelList, { entries: [pe("azure/a", true)], busy: false, onToggle: noop });
+  assert.doesNotMatch(html, /model-list__foot/);
+  assert.doesNotMatch(css, /model-list__foot/);
+  const viewport = rule(".model-list__viewport");
+  assert.match(viewport, /display:\s*flex/);
+  assert.match(viewport, /flex-direction:\s*column/);
+  assert.match(viewport, /min-height:\s*0/);
+  assert.match(rule(".model-list__scroll"), /min-height:\s*0/);
+  assert.match(rule(".models-option__gateway"), /color:\s*var\(--ink-faint\)/);
 });
