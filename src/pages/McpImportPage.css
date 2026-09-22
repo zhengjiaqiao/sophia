@@ -1,41 +1,51 @@
-/* MCP 导入页的布局。**整套骨架直接用 skill 导入页那一份**——两页是同一个界面，
-   用户换个 tab 不该重新学一套（spec 核心判断）。这里只补 MCP 多出来的两样东西：
-   来源位置要标出它属于哪个域（来源可以跨域），服务行要写传输方式。 */
+/* 添加 MCP 页。**骨架直接用添加 skill 页那一份**（ImportPage.css）——两页逐句对称，
+   用户换个页签不该重新学一套。这里只补 MCP 多出来的：左栏宽 300（位置名长）、
+   列表单列并多一列传输（画板 McpImport）。 */
 @import "./ImportPage.css";
 
-/* 来源位置的域名：跟在位置名后面的一句次要说明，左边那列窄，所以它会被挤掉省略号 */
-.ss-mcp__srcdomain {
-  min-width: 0;
-  overflow: hidden;
-  flex-shrink: 1;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-faint);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.ss-import--mcp .ss-import__sources {
+  width: 300px;
 }
 
-.ss-import__source.is-active .ss-mcp__srcdomain {
+.ss-import__srcempty {
+  padding: var(--space-md) var(--space-xxl);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
   color: var(--ink-mute);
 }
 
-/* 传输方式：标准输入输出 / HTTP / 不支持。靠右推，后面还有标签时标签再往右 */
-.ss-mcp__transport {
+/* 列表贴右栏右沿：名字吃掉剩余宽度 ｜ 传输 ｜ 状态标签 */
+.ss-mcp__list {
+  display: block;
+}
+
+.ss-mcp__listhead .ss-mcp__transporthead {
+  width: 104px;
   margin-left: auto;
-  flex-shrink: 0;
   font-family: var(--font-ui);
-  font-size: var(--size-caption);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.ss-mcp__row {
+  height: 30px;
+}
+
+.ss-mcp__transport {
+  flex-shrink: 0;
+  width: 56px;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
-/* 位置选择区与 skill 导入页同形，只是不需要那条上边界之外的额外留白 */
-.ss-mcp__targets {
-  padding: var(--space-xl) var(--space-xxl);
-  border-top: 1px solid var(--hairline);
+.ss-mcp__state {
+  display: flex;
+  justify-content: flex-end;
   flex-shrink: 0;
-}
-
-/* 传输方式已经把行推满了，标签不再抢 margin-left: auto */
-.ss-import__row .ss-mcp__transport + .ss-import__tag {
-  margin-left: 8px;
+  width: 48px;
+  white-space: nowrap;
 }
