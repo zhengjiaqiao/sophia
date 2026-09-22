@@ -20,6 +20,24 @@ const TOKEN_FILE = "src/tokens.css";
 /// 否则新写的文件会悄悄落进豁免里。
 const LEGACY = [];
 
+/// 文案旧词表（old-terms）的待清名单：这些页面文件的可见文案里还有旧词，
+/// 归 UI v4 的 T1–T3 改（docs/superpowers/plans/2026-09-22-ui-v4.md）。
+/// 同 LEGACY：逐个列文件、不许通配；谁改完自己的文件谁划掉，T5 收口时必须为空。
+const OLD_TERMS_PENDING = [
+  "src/App.tsx",
+  "src/DomainView.tsx",
+  "src/McpTab.tsx",
+  "src/SkillsTab.tsx",
+  "src/pages/ImportPage.tsx",
+  "src/pages/McpImportPage.tsx",
+  "src/pages/PendingPage.tsx",
+  "src/pages/SettingsPage.tsx",
+  "src/pages/pendingIssues.ts",
+];
+
+/// 带框标签（framed-tag）的待清名单：同上，归 T3
+const FRAMED_TAG_PENDING = ["src/pages/ImportPage.css"];
+
 const rules = [
   {
     id: "color",
@@ -114,6 +132,44 @@ const rules = [
     },
   },
   {
+    id: "old-terms",
+    // 用用户的语言（原则 ⑤）：「导入 / 引入」统一成「添加」，「矩阵」说「列表」，
+    // 「本体」说「原件」，「撞名」说「同名」，「整目录链走 / 链走」说「整个文件夹是链接」。
+    // 画板那边是 lint-artboards.mjs 的同名规则，这里拦代码里的回潮
+    desc: "术语：可见文案不说 导入 / 引入 / 矩阵 / 本体 / 撞名 / 整目录链走 / 链走",
+    run(src, path) {
+      if (OLD_TERMS_PENDING.includes(path)) return [];
+      const text = visibleText(src);
+      return ["导入", "引入", "矩阵", "本体", "撞名", "整目录链走", "链走"].filter((w) => text.includes(w));
+    },
+  },
+  {
+    id: "size-14",
+    // 字号只有 28 / 20 / 15 / 13 / 12：14 与 15、13 与 12 眼睛分不出来，已砍掉
+    desc: "字号只有 28 / 20 / 15 / 13 / 12，不出现 14px",
+    run(src) {
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+      const n = (code.match(/font-size\s*:\s*14px|fontSize\s*:\s*["']?14(?:px)?["']?\s*[,}]/g) || []).length;
+      return n ? [`${n} 处 14px 字号`] : [];
+    },
+  },
+  {
+    id: "framed-tag",
+    // 有框的都能点：不可点的标签是纯文字（强 ink 600 / 弱 ink-faint 400），
+    // 旧方标签的写法是 padding 1px 6px + 1px 描边，同一条规则块里两样都有就报
+    desc: "有框的都能点：不可点的标签不带框（旧方标签 padding 1px 6px + border）",
+    run(src, path) {
+      if (FRAMED_TAG_PENDING.includes(path)) return [];
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ");
+      const out = [];
+      for (const m of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const body = m[2];
+        if (/padding\s*:\s*1px 6px/.test(body) && /border\s*:\s*1px (?!none)/.test(body)) out.push(m[1].trim());
+      }
+      return out;
+    },
+  },
+  {
     id: "mcp-no-sync",
     // 「同步」是双向词。MCP 页只新增、从不覆盖也不删除，用它会骗人
     // （docs/specs/2026-09-21-ui-rebuild-mcp.md 的 R3 / AC7）。
@@ -181,6 +237,9 @@ const checked = files.length - skipped;
 if (errs === 0) console.log(`\x1b[32m✓\x1b[0m 界面规范：${checked} 个文件零违规${skipped ? `（${skipped} 个旧文件暂时豁免）` : ""}`);
 else console.log(`\n${errs} 个违规，检查了 ${checked} 个文件${skipped ? `，豁免 ${skipped} 个` : ""}`);
 
+if (args.length === 0 && (OLD_TERMS_PENDING.length || FRAMED_TAG_PENDING.length)) {
+  console.log(`\x1b[33m!\x1b[0m 旧词 / 带框标签待清名单还剩 ${OLD_TERMS_PENDING.length + FRAMED_TAG_PENDING.length} 个文件（T1–T3 改完划掉）`);
+}
 if (skipped > 0 && args.length === 0) {
   console.log(`\x1b[33m!\x1b[0m 豁免名单还剩 ${skipped} 个文件，T10 收口时必须清空：\n   ${LEGACY.join("\n   ")}`);
 }
