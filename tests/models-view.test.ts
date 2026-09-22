@@ -70,7 +70,9 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
   };
 };
 
-const { GatewayPanel, ModelList } = await import("../src/GatewayPanel.tsx");
+const { ModelList } = await import("../src/ModelList.tsx");
+const { GatewayBody, GatewayPage } = await import("../src/pages/GatewayPage.tsx");
+const GatewayPanel = GatewayBody;
 const { AgentRow, ModelBox, ModelPicker, MODELS_TAB_FULL_BLEED } =
   await import("../src/ModelsTab.tsx");
 
@@ -451,8 +453,8 @@ test("AgentRow：图标 + 名字（不大写）+ page 开关 + 配置网关，�
 
 test("AgentRow 待重启：配置网关之后出紧凑键「重启生效」，提示框写后果与代价（不用原生 title）", () => {
   const html = render(AgentRow, rowProps(withSelected({ enabled: true, needsCodexRestart: true })));
-  // 「配置网关」是展开键，尾端带展开记号（v82 网关就地展开）
-  assert.match(html, /aria-expanded="false"[^>]*>配置网关<svg[^]*?<\/button>.*重启生效<\/button>/s);
+  // 「配置网关」是进网关二级页的普通默认键，不带展开记号（v84）
+  assert.match(html, /配置网关<\/button>.*重启生效<\/button>/s);
   assert.match(html, /role="tooltip"[^>]*>重启 Codex 桌面应用让改动生效，进行中的对话会中断</);
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
 });
@@ -752,6 +754,7 @@ test("GatewayPanel 已连：分段片（选中反色、末尾 + 网关）+ 一�
   const html = render(
     GatewayPanel,
     panelProps({
+      enabled: true,
       providers: [
         provider({
           id: "ap",
@@ -767,7 +770,8 @@ test("GatewayPanel 已连：分段片（选中反色、末尾 + 网关）+ 一�
   assert.match(html, />网关<\/span><\/button>/);
   assert.match(html, /gw-panel__state">已连</);
   assert.match(html, />改<\/button>/);
-  assert.match(html, /aria-label="删掉 ap-gateway"/);
+  // ap-gateway 是最后一家还在供模型的：垃圾桶禁用，提示框说原因
+  assert.match(html, /role="tooltip"[^>]*>Codex 还在用它的 1 个模型，先取消勾选再删</);
   assert.match(html, /gw-panel__section">从这个网关选模型</);
   assert.match(html, /gw-panel__note">只支持文本与工具调用，不支持图片</);
   // 摘要态不出表单
@@ -839,5 +843,24 @@ test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（�
   assert.doesNotMatch(
     render(AgentRow, { ...rowProps(withSelected({ enabled: true })), onUninstall: noop }),
     /卸下后台服务/,
+  );
+});
+
+test("GatewayPage：二级页「← Codex 的网关」，标题后放页头动作；单列，没有右栏", () => {
+  const html = render(GatewayPage, {
+    ...panelProps({
+      providers: [provider({ id: "ap", name: "ap-gateway", models: [model({ id: "azure/a" })] })],
+    }),
+    headerAction: "RESTART-SLOT",
+    leaving: false,
+    onLeave: noop,
+  });
+  assert.match(html, /class="gw-page-shell"/);
+  assert.match(html, /gw-page__title">Codex 的网关(<!-- -->)?RESTART-SLOT/);
+  assert.match(html, /aria-label="返回"/);
+  assert.doesNotMatch(html, /gw-panel__right|gw-panel__left/);
+  assert.match(
+    render(GatewayPage, { ...panelProps({}), leaving: true, onLeave: noop }),
+    /class="gw-page-shell is-leaving"/,
   );
 });

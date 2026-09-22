@@ -42,8 +42,9 @@ import {
   Tooltip,
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
-import { GatewayPanel, ModelList } from "./GatewayPanel.tsx";
-import type { GatewaySelection } from "./GatewayPanel.tsx";
+import { ModelList } from "./ModelList.tsx";
+import { GATEWAY_PAGE_MOTION_MS, GatewayPage } from "./pages/GatewayPage.tsx";
+import type { GatewaySelection } from "./pages/GatewayPage.tsx";
 import "./ModelsTab.css";
 
 /// 模型页（DESIGN「产品裁决 › 模型页」，画板 Models）。
@@ -72,9 +73,6 @@ import "./ModelsTab.css";
 
 /// 模型页不分项目、不分域，左边那条侧栏对它没有意义。App.tsx 用这个常量做条件
 export const MODELS_TAB_FULL_BLEED = true;
-
-/// 网关区展开 / 收起的时长，与 ModelsTab.css 的过渡同值
-const GATEWAY_MOTION_MS = 200;
 
 const describeError = (error: unknown): string => parseBackendError(String(error)).message;
 
@@ -143,13 +141,9 @@ export interface AgentRowProps {
   onCloseNotice?: () => void;
   /// 生效模型那一格
   models: ReactNode;
-  /// 网关区展开着：`配置网关` 是按下态
-  gatewayOpen?: boolean;
   /// 停用后服务仍在时的 `卸下后台服务`（按钮即状态）；正在卸下时原位细弧 + 文字
   uninstalling?: boolean;
   onUninstall?: () => void;
-  /// 网关展开区（这一行正下方，左半对齐 agent 列、右半对齐生效模型列）
-  gateway?: ReactNode;
 }
 
 export function AgentRow({
@@ -163,8 +157,6 @@ export function AgentRow({
   notice,
   onCloseNotice,
   models,
-  gatewayOpen = false,
-  gateway,
   uninstalling = false,
   onUninstall,
 }: AgentRowProps) {
@@ -200,17 +192,11 @@ export function AgentRow({
             />
           </Tooltip>
         )}
-        <Tooltip content={gatewayOpen ? "收起网关" : "加第三方模型的来源"}>
-          {/* 展开 / 收起键：展开时是按下态（与 ss-btn 同形，多一个展开记号） */}
-          <button
-            type="button"
-            className={`ss-btn ss-btn--compact models-gwkey${gatewayOpen ? " is-pressed" : ""}`}
-            aria-expanded={gatewayOpen}
-            onClick={onConfigure}
-          >
+        {/* 进网关二级页：普通默认键，不带展开记号（DESIGN「网关配置是二级页」） */}
+        <Tooltip content="加第三方模型的来源">
+          <Button size="compact" onClick={onConfigure}>
             配置网关
-            <Chevron up={gatewayOpen} />
-          </button>
+          </Button>
         </Tooltip>
         <RestartSlot
           tool={tool}
@@ -243,12 +229,6 @@ export function AgentRow({
         ) : null}
       </div>
       <div className="models-row__models">{models}</div>
-      {gateway !== undefined ? (
-        // 展开 / 收起 200ms（grid-template-rows 0fr ↔ 1fr），reduced-motion 即时；收着时 inert
-        <div className={`models-row__gateway${gatewayOpen ? " is-open" : ""}`} inert={!gatewayOpen}>
-          <div className="models-row__gateway-inner">{gateway}</div>
-        </div>
-      ) : null}
       {notice ? (
         <div className="models-row__notice">
           <Toast
@@ -406,12 +386,12 @@ export interface ModelPickerProps {
   state: GatewayState;
   busy: boolean;
   onToggleModel: (provider: GatewayProvider, modelId: string) => void;
-  /// `管理网关 ›` / `+ 网关 ›`：收起下拉，展开这一行的网关区
+  /// `管理网关 ›` / `+ 网关 ›`：收起下拉，进网关二级页
   onManageGateways: () => void;
 }
 
 /**
- * 选择器浮层：与网关展开区同一组件（ModelList）——列全部网关的全部模型，按服务商分小组头；
+ * 选择器浮层：与网关页同一组件（ModelList）——列全部网关的全部模型，按服务商分小组头；
  * 超过约 8 行出筛选框；已选置顶、整行可点、勾选当场写盘；底部 `已选 N 个模型`。
  *
  * 第三方组头 = `第三方` + 限制说明（只在挑模型时有用，① 放在这里，不截断）+ 末尾 `管理网关 ›`；
@@ -438,7 +418,7 @@ export function ModelPicker({
       ) : (
         <span className="models-picker__group-note">还没有网关</span>
       )}
-      <Tooltip content="在这一行下面展开网关">
+      <Tooltip content="进 Codex 的网关页">
         <button type="button" className="models-picker__jump" onClick={onManageGateways}>
           <span className="models-picker__jump-text">{hasProviders ? "管理网关" : "+ 网关"}</span>
           <LinkChevron />
@@ -473,7 +453,7 @@ export interface ModelsTabProps {
   onBusy: (busy: boolean) => void;
   /// 每次拿到新状态都报给壳：顶栏收件箱的「模型」段要数它
   onGatewayState?: (state: GatewayState) => void;
-  /// 待处理页「网关连不上」跳回：展开网关区、选中这一家、它的分段片闪两下；处理完回调 onFocused，
+  /// 待处理页「网关连不上」跳回：进网关二级页、选中这一家、它的分段片闪两下；处理完回调 onFocused，
   /// 壳在那里清回 undefined（与 SkillsTab 的 focusKey 同一模式）
   focusProviderId?: string;
   onFocused?: () => void;
@@ -490,13 +470,12 @@ export default function ModelsTab({
   const [state, setState] = useState<GatewayState | null>(null);
   /// 模型下拉开着的那个 agent
   const [picker, setPicker] = useState<string | null>(null);
-  /// 网关展开区挂着（展开中、开着、收起动画中）；`initial` 是打开那一刻先选中哪一家
-  /// （"new" 直接出新网关表单）。`gatewayOpen` 才是开没开：收起时先置 false 播 200ms，再卸掉
-  const [gateway, setGateway] = useState<{ initial: GatewaySelection | null } | null>(null);
-  const [gatewayOpen, setGatewayOpen] = useState(false);
-  /// 连接区有没保存的改动；收起时有改动就不收，就地问「保存 / 丢弃」
-  const [gatewayDirty, setGatewayDirty] = useState(false);
-  const [askDiscard, setAskDiscard] = useState(false);
+  /// 网关二级页：开着时 `initial` 是进来那一刻先选中哪一家（"new" 直接出新网关表单）；
+  /// `leaving` 是返回滑回的那 200ms，播完才卸掉
+  const [gateway, setGateway] = useState<{
+    initial: GatewaySelection | null;
+    leaving: boolean;
+  } | null>(null);
   const [uninstalling, setUninstalling] = useState(false);
   /// 跳回定位的那一家：分段片闪两下（960ms）后清掉
   const [flashProvider, setFlashProvider] = useState<string | null>(null);
@@ -630,7 +609,7 @@ export default function ModelsTab({
     }
   };
 
-  /// 网关展开区要自己就地说明失败，所以这一支把错误原样抛回去
+  /// 网关页要自己就地说明失败，所以这一支把错误原样抛回去
   const runOrThrow = async (action: () => Promise<GatewayState>) => {
     onBusy(true);
     try {
@@ -708,58 +687,31 @@ export default function ModelsTab({
   const openPicker = (tool: ModelsTool) => setPicker(tool.id);
   const closePicker = () => setPicker(null);
 
-  /// 展开这一行的网关区（`配置网关`、下拉里的 `管理网关 ›` / `+ 网关 ›`）
+  /// 进网关二级页（`配置网关`、下拉里的 `管理网关 ›` / `+ 网关 ›`、待处理页跳回）
   const openGateway = (initial: GatewaySelection | null) => {
     setPicker(null);
-    setAskDiscard(false);
-    // 已经开着再从下拉点进来：换选中的那一家要重挂（key 变化），不然表单停在旧的那一家
-    setGateway({ initial });
-    // 先以收着的高度挂上，下一帧再展开，200ms 的过渡才播得出来
-    requestAnimationFrame(() => setGatewayOpen(true));
+    setGateway({ initial, leaving: false });
   };
 
-  /// 真正收起：删网关是延迟提交的（T4c），收起时把还挂着撤销窗口的全部提交
-  const collapseGateway = () => {
-    setGatewayOpen(false);
-    setAskDiscard(false);
-    setGatewayDirty(false);
+  /// 离开网关页：滑回 200ms 再卸掉（reduced-motion 即时）。删网关是延迟提交的（T4c），
+  /// 离开时把还挂着撤销窗口的全部提交
+  const leaveGateway = () => {
+    setGateway((g) => (g ? { ...g, leaving: true } : g));
     void api
       .gatewayCommitRemovals()
       .then((next) => mounted.current && applyState(next))
       .catch((error) => mounted.current && onError(describeError(error)));
   };
 
-  /// 想收起（再点 `配置网关` / Esc）：连接区有没保存的改动就不收，就地问一句
-  const requestCollapse = () => {
-    if (gatewayDirty) setAskDiscard(true);
-    else collapseGateway();
-  };
-  const requestCollapseRef = useRef(requestCollapse);
-  requestCollapseRef.current = requestCollapse;
-
-  // 收起动画播完才卸掉；reduced-motion 下即时
+  const gatewayLeaving = gateway?.leaving ?? false;
   useEffect(() => {
-    if (gatewayOpen || gateway === null) return;
+    if (!gatewayLeaving) return;
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const timer = setTimeout(() => setGateway(null), reduce ? 0 : GATEWAY_MOTION_MS);
+    const timer = setTimeout(() => setGateway(null), reduce ? 0 : GATEWAY_PAGE_MOTION_MS);
     return () => clearTimeout(timer);
-  }, [gatewayOpen, gateway]);
+  }, [gatewayLeaving]);
 
-  // 网关区开着、下拉没开时：Esc 收起（捕获阶段，输入框里按也算）
-  useEffect(() => {
-    if (!gatewayOpen || pickerOpen !== null) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      // 确认框开着时 Esc 归它
-      if (document.querySelector(".ss-confirm")) return;
-      event.preventDefault();
-      requestCollapseRef.current();
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [gatewayOpen, pickerOpen]);
-
-  // 待处理页跳回：状态读回来、且这一家还在，就展开网关区选中它、闪它的分段片
+  // 待处理页「网关连不上」跳回：状态读回来、且这一家还在，就进网关页选中它、闪它的分段片
   useEffect(() => {
     if (focusProviderId === undefined || state === null) return;
     if (state.providers.some((p) => p.id === focusProviderId)) {
@@ -776,11 +728,6 @@ export default function ModelsTab({
     const timer = setTimeout(() => setFlashProvider(null), 960);
     return () => clearTimeout(timer);
   }, [flashProvider]);
-
-  const onGatewayDirty = useCallback((dirty: boolean) => {
-    setGatewayDirty(dirty);
-    if (!dirty) setAskDiscard(false);
-  }, []);
 
   const restartRouter = async () => {
     onBusy(true);
@@ -836,7 +783,7 @@ export default function ModelsTab({
                   next ? api.gatewayEnable() : api.gatewayRestore(),
                 )
               }
-              onConfigure={() => (gatewayOpen ? requestCollapse() : openGateway(null))}
+              onConfigure={() => openGateway(null)}
               onRestart={(row) => {
                 const r = row.getBoundingClientRect();
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
@@ -865,7 +812,6 @@ export default function ModelsTab({
                   ) : null}
                 </ModelBox>
               }
-              gatewayOpen={gatewayOpen}
               uninstalling={uninstalling}
               onUninstall={() =>
                 void (async () => {
@@ -874,32 +820,46 @@ export default function ModelsTab({
                   if (mounted.current) setUninstalling(false);
                 })()
               }
-              gateway={
-                gateway !== null ? (
-                  <GatewayPanel
-                    key={String(gateway.initial)}
-                    tool={tool}
-                    state={state}
-                    busy={busy}
-                    initial={gateway.initial}
-                    onSave={saveProvider}
-                    onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
-                    onRetry={(id) => runOrThrow(() => api.gatewayRetryProvider(id))}
-                    onMarkRemove={(p) => runOrThrow(() => api.gatewayMarkRemoveProvider(p.id))}
-                    onUndoRemove={(id) => runOrThrow(() => api.gatewayUndoRemoveProvider(id))}
-                    onCommitRemoval={(id) => runOrThrow(() => api.gatewayCommitRemovals(id))}
-                    onToggleModel={toggleModel}
-                    onDirtyChange={onGatewayDirty}
-                    askDiscard={askDiscard}
-                    onCollapse={collapseGateway}
-                    flashProviderId={flashProvider}
-                  />
-                ) : undefined
-              }
             />
           ))}
         </div>
       </div>
+
+      {/* 网关二级页：盖在模型页上，从右侧推入；两处选模型读的是同一个 state */}
+      {gateway !== null ? (
+        <GatewayPage
+          key={String(gateway.initial)}
+          tool={MODELS_TOOLS[0]}
+          state={state}
+          busy={busy}
+          initial={gateway.initial}
+          leaving={gateway.leaving}
+          onLeave={leaveGateway}
+          modalOpen={confirmRestart !== null}
+          headerAction={
+            <RestartSlot
+              tool={MODELS_TOOLS[0]}
+              state={state}
+              phase={phase}
+              busy={busy}
+              onRestart={() => {
+                const bar = document.querySelector(".gw-page-shell .ss-subpage__bar");
+                if (!bar) return;
+                const r = bar.getBoundingClientRect();
+                setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
+              }}
+            />
+          }
+          onSave={saveProvider}
+          onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
+          onRetry={(id) => runOrThrow(() => api.gatewayRetryProvider(id))}
+          onMarkRemove={(p) => runOrThrow(() => api.gatewayMarkRemoveProvider(p.id))}
+          onUndoRemove={(id) => runOrThrow(() => api.gatewayUndoRemoveProvider(id))}
+          onCommitRemoval={(id) => runOrThrow(() => api.gatewayCommitRemovals(id))}
+          onToggleModel={toggleModel}
+          flashProviderId={flashProvider}
+        />
+      ) : null}
 
       {/* 会中断进行中的对话，确认一道（⑪ 确认只剩两件之一）；锚在那一行下面、那一行不被遮罩盖住 */}
       {confirmRestart !== null ? (

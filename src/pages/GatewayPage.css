@@ -1,0 +1,304 @@
+/* 网关配置二级页（DESIGN「网关配置是二级页」，画板 v84 Gateway）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变；圆角只有 0 / 2px / 32px / 50%。 */
+@import "../tokens.css";
+
+/* 转场：从右侧推入、返回滑回，200ms 机械缓动；reduced-motion 下直接切换。
+   外壳铺满整窗做位移，里面的 SubPage 仍是 fixed（相对这个带 transform 的外壳） */
+.gw-page-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  animation: gw-page-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.gw-page-shell.is-leaving {
+  animation: gw-page-out 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes gw-page-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes gw-page-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 页头：标题后 12 按状态出现「重启生效」（与模型页同组件） */
+.gw-page__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* 与设置页同宽、同页边 */
+.gw-page {
+  width: 744px;
+  max-width: 100%;
+  padding: var(--space-xxl);
+  box-sizing: content-box;
+}
+
+/* 最后一家的垃圾桶是禁用的：禁用键接不到悬停，让指针落到包层上，提示框才出得来 */
+.gw-panel__trash .ss-iconbtn:disabled {
+  pointer-events: none;
+}
+
+/* ===== 三段，单列自上而下：分段片 → 连接 → 从这个网关选模型 ===== */
+.gw-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.gw-panel__top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+/* 网关分段片：选中反色，最后一个是 `+ 网关` */
+.gw-panel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.gw-panel__chipwrap {
+  display: inline-flex;
+  margin: -3px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+}
+
+/* 从待处理页跳回定位到这一家：surface 带亮 → 灭 → 亮 → 灭，各 240ms（不用反色，黑只有两义） */
+.gw-panel__chipwrap.is-jump {
+  animation: gw-jump 960ms var(--ease-mech);
+}
+
+@keyframes gw-jump {
+  0%,
+  25% {
+    background-color: var(--surface);
+  }
+  26%,
+  50% {
+    background-color: transparent;
+  }
+  51%,
+  75% {
+    background-color: var(--surface);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.gw-panel__chip-name {
+  white-space: nowrap;
+}
+
+.gw-panel__chip-count {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* `连不上`：强标签，墨色 600（选中反色时随片翻白） */
+.gw-panel__chip-down {
+  margin-left: 6px;
+  font-size: var(--size-micro);
+  font-weight: 600;
+}
+
+/* 已连上的只一行摘要：`https://… · 已连 · 改` + 行尾垃圾桶 */
+.gw-panel__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.gw-panel__summary > .ss-tipwrap:first-child {
+  min-width: 0;
+}
+
+/* 地址是标识：放不下截断，提示框给全文 */
+.gw-panel__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.gw-panel__sep {
+  color: var(--ink-faint);
+}
+
+.gw-panel__state {
+  white-space: nowrap;
+}
+
+/* 连不上：强标签 + 点状下划线（悬停读原因），后面 8 紧跟 `再试一次` */
+.gw-panel__down {
+  margin-right: 2px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  text-decoration: underline dotted var(--ink-faint);
+  text-underline-offset: 3px;
+}
+
+.gw-panel__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  white-space: nowrap;
+}
+
+.gw-panel__trash {
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.gw-panel__notice .ss-toast--notice {
+  max-width: 100%;
+}
+
+/* 第三段：从这个网关选模型。段头 13/600，限制说明 12 ink-faint（不截断） */
+.gw-panel__models {
+  min-width: 0;
+}
+
+.gw-panel__models:empty {
+  display: none;
+}
+
+.gw-panel__section {
+  font-size: var(--size-caption);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+}
+
+.gw-panel__note {
+  margin-top: 2px;
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+.gw-panel__list {
+  margin-top: var(--space-xs);
+  border: 1px solid var(--hairline);
+}
+
+/* ===== 连接表单：地址、密钥；保存才生效、保存即拉取 ===== */
+.gw-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.gw-form__field {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.gw-form__label {
+  font-size: var(--size-caption);
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.gw-form__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+}
+
+.gw-form__input:focus-visible,
+.gw-form__input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.gw-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-left: calc(36px + var(--space-sm));
+  min-height: var(--control-h);
+}
+
+.gw-form__ask {
+  font-size: var(--size-caption);
+  color: var(--ink);
+}
+
+.gw-form__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.gw-form__error {
+  padding-left: calc(36px + var(--space-sm));
+}
+
+.gw-form__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-sm);
+  margin: 0;
+  padding-left: calc(36px + var(--space-sm));
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.gw-form__facts dt {
+  font-weight: 600;
+}
+
+.gw-form__facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gw-page-shell,
+  .gw-page-shell.is-leaving {
+    animation: none;
+  }
+  .gw-panel__chipwrap.is-jump {
+    animation: none;
+  }
+}

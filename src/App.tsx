@@ -83,7 +83,7 @@ export default function App() {
   /// 待处理页跳回来要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
   const [focus, setFocus] = useState<{ segment: "skills" | "mcp"; key: string } | undefined>();
   const clearFocus = useCallback(() => setFocus(undefined), []);
-  /// 模型页跳回：要展开网关区并选中的那一家
+  /// 模型页跳回：要进网关页并选中的那一家
   const [modelFocus, setModelFocus] = useState<string | undefined>();
   const clearModelFocus = useCallback(() => setModelFocus(undefined), []);
   /// 提示条的到点消失按回调身份计时：必须稳定，否则每次重渲染都重新计时
@@ -401,7 +401,7 @@ export default function App() {
     if (segment === "models") {
       if (!modelsSupported) return;
       switchTab("models");
-      // 「网关连不上」那一条：展开 Codex 行的网关区、选中那一家；别的类别只切到模型页
+      // 「网关连不上」那一条：进网关二级页、选中那一家；别的类别只切到模型页
       const providerId = modelIssueList.find((i) => i.key === key)?.providerId;
       if (providerId !== undefined) setModelFocus(providerId);
       refreshGateway();

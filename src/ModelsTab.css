@@ -87,34 +87,6 @@
   min-width: 0;
 }
 
-/* 「配置网关」：展开 / 收起键。展开时是按下态（surface 底，与默认键 pressed 同一档），
-   尾端 12px 展开记号朝上；收着时朝下 */
-.models-gwkey {
-  gap: 4px;
-}
-
-.models-gwkey.is-pressed {
-  background: var(--surface);
-}
-
-/* 网关展开区：这一行正下方，横跨两列，内部沿用同一套列宽（左半对齐 agent 列、右半对齐生效模型列）。
-   展开 / 收起 200ms：grid-template-rows 0fr ↔ 1fr 机械缓动；收着时不占位 */
-.models-row__gateway {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 200ms var(--ease-mech);
-}
-
-.models-row__gateway.is-open {
-  grid-template-rows: 1fr;
-}
-
-.models-row__gateway-inner {
-  min-height: 0;
-  overflow: hidden;
-}
-
 /* 做不成的黑块挂在整行下面，左对齐 agent 格（① 就近：开关、改模型、重启的共同对象是这一行） */
 .models-row__notice {
   grid-column: 1 / -1;
@@ -335,9 +307,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .models-box,
-  .models-gwkey,
-  .models-row__gateway {
+  .models-box {
     transition: none;
   }
   /* 已生效直接消失由计时器负责；这里只去掉淡出 */

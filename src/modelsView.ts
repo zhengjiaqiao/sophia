@@ -122,7 +122,7 @@ export function effectiveModels(state: GatewayState): EffectiveModel[] {
   });
 }
 
-// ===== 模型列表的写法（DESIGN「模型列表的写法」：下拉与网关展开区同一组件） =====
+// ===== 模型列表的写法（DESIGN「模型列表的写法」：下拉与网关页同一组件） =====
 
 /// 列表超过这么多行才出筛选框
 export const MODEL_FILTER_THRESHOLD = 8;
@@ -387,7 +387,7 @@ export function showRouterBanner(state: GatewayState, healAttempted: boolean): b
  * 模型页里要用户拿主意、且不在某一行上就地出现的事（DESIGN「全局收件箱」）：
  * - `takeover`：Codex 正由 agents-manager 管着 → `接管`
  * - `configChanged`：Codex 升级后 Sophia 写进去的模型列表对不上了，要重新写一次 → `重新写入`
- * - `unreachable`：某家网关连不上 → `再试一次`（网关展开区那一家同时就地显示）
+ * - `unreachable`：某家网关连不上 → `再试一次`（网关页那一家同时就地显示）
  *
  * 「改动要重启 Codex 才生效」不进来——它已在 agent 行上就地出现，一件事只在一处说。
  * 「路由没在跑」也不进来——它影响整页、忽略毫无意义，走模型页页级横幅。
@@ -399,7 +399,7 @@ export function showRouterBanner(state: GatewayState, healAttempted: boolean): b
  * - `parts`：句子拆段，`subject: true` 的是对象名（墨色），其余是连接词（灰）
  * - `sentence`：整句，给读屏与提示框
  * - `action`：一个动作；`kind` 决定调哪个命令（App 的 `resolveModelIssue` 照它执行）
- * - `providerId`：只有 `unreachable` 有，给「再试一次」和跳回网关展开区那一家
+ * - `providerId`：只有 `unreachable` 有，给「再试一次」和跳回网关页那一家
  */
 export type ModelIssueKind = "takeover" | "configChanged" | "unreachable";
 
