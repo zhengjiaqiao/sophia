@@ -2,30 +2,40 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
-import { factsLine, parseBackendError } from "./modelsView";
-import { RESTART_CONSEQUENCE, trayRow } from "./trayView";
+import { RESTART_DONE_MS, RESTART_STILL_STALE, parseBackendError } from "./modelsView";
+import { RESTART_CONSEQUENCE, RESTART_TIP, trayRow } from "./trayView";
 import type { GatewayState } from "./types";
-import { AgentIcon, Busy, Button } from "./ui";
+import { AgentIcon, Button, Rotor, Switch, Toast, Tooltip } from "./ui";
 import "./TrayPanel.css";
 
-/// 菜单栏面板（docs/specs/2026-09-21-tray.md）。
+/// 菜单栏面板（DESIGN「托盘面板」，画板 Tray）。
 ///
-/// - 一行 Codex：现状一句话 + 开关。开关是 ghost pill 两态，反色＝已启用；不用滑动开关（DESIGN「Don't」）
-/// - 面板放不下一段解释：动作做不成时把主窗口带到「模型」页，由那里说原因（R5）——一件事只在一个地方说
-/// - 「重启 Codex」只在有改动等着生效时出现；它会中断进行中的对话，确认一道，就在那一行上完成（R4）
-/// - 面板改了状态就广播 `gateway-changed`，主窗口的「模型」页跟着刷新（R8）
+/// 与模型页同一行的缩小版：`16px 图标 + Codex + 开关`，没有状态句。改动等着生效时开关后 12
+/// 出紧凑键 `重启生效`（按钮即状态），确认在面板里当场展开；重启中 = 14px 转盘 +
+/// 「正在重启 Codex」，成功 = `✓ 已生效` 约 4 秒淡出，失败 = 黑块 + 原因 + `再试一次`。
+/// 菜单三项 `打开 Sophia` `设置` `退出`，悬停 `surface` 底。与主窗口共用 tokens 与组件。
+///
+/// - 开关做不成：把主窗口带到「模型」页，由那里说原因——面板放不下一段解释
+/// - 面板改了状态就广播 `gateway-changed`，主窗口的「模型」页跟着刷新
 
 /// 面板里的动作做不成：主窗口到前面、切到「模型」页、把原话带过去
 const failOver = (error: unknown) =>
   api.trayOpenMain("models", parseBackendError(String(error)).message);
 
+type Restart =
+  | { kind: "idle" }
+  | { kind: "confirming" }
+  | { kind: "restarting"; spinning: boolean }
+  | { kind: "done" };
+
 export default function TrayPanel() {
   const [state, setState] = useState<GatewayState | null>(null);
-  /// 正在做的事，顶替现状句：只把按钮变淡不说话，那几百毫秒到几秒里看起来就是卡住了
-  const [busy, setBusy] = useState<null | string>(null);
-  const [confirmingRestart, setConfirmingRestart] = useState(false);
-  /// 重启 Codex 的结果就一句，顶替现状句；面板下次弹出时清掉
-  const [restartNote, setRestartNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [restart, setRestart] = useState<Restart>({ kind: "idle" });
+  /// 重启没成的原因（黑块）；面板下次弹出时清掉
+  const [failure, setFailure] = useState<string | null>(null);
+  /// 转盘停稳之后换上的结果
+  const after = useRef<Restart>({ kind: "idle" });
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -40,11 +50,11 @@ export default function TrayPanel() {
   useEffect(() => {
     mounted.current = true;
     void refresh();
-    // 每次弹出都重读：主窗口、命令行、别的程序都可能改过状态（R8）
+    // 每次弹出都重读：主窗口、命令行、别的程序都可能改过状态；外部重启了 Codex，键要自己消失
     const pending = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
       if (!focused) return;
-      setConfirmingRestart(false);
-      setRestartNote(null);
+      setRestart((r) => (r.kind === "restarting" ? r : { kind: "idle" }));
+      setFailure(null);
       void refresh();
     });
     return () => {
@@ -53,51 +63,60 @@ export default function TrayPanel() {
     };
   }, [refresh]);
 
-  const toggle = async (on: boolean) => {
-    setBusy(on ? "正在停用…" : "正在启用…");
+  // ✓ 已生效约 4 秒后淡出（淡出在 css 末尾 120ms）
+  useEffect(() => {
+    if (restart.kind !== "done") return;
+    const timer = setTimeout(() => setRestart({ kind: "idle" }), RESTART_DONE_MS);
+    return () => clearTimeout(timer);
+  }, [restart]);
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
     try {
-      const next = on ? await api.gatewayRestore() : await api.gatewayEnable();
-      if (mounted.current) setState(next);
+      const fresh = next ? await api.gatewayEnable() : await api.gatewayRestore();
+      if (mounted.current) setState(fresh);
       void emit("gateway-changed");
     } catch (error) {
       void failOver(error);
     } finally {
-      if (mounted.current) setBusy(null);
+      if (mounted.current) setBusy(false);
     }
   };
 
   const restartCodex = async () => {
-    setConfirmingRestart(false);
-    setBusy("正在结束 Codex 的后台进程…");
+    setFailure(null);
+    setRestart({ kind: "restarting", spinning: true });
+    setBusy(true);
+    let reason: string | null = null;
     try {
-      const result = await api.gatewayRestartCodex();
-      if (!mounted.current) return;
-      setRestartNote(
-        result.terminated > 0
-          ? `结束了 ${result.terminated} 个 Codex 进程，下次启动就是新配置`
-          : "Codex 现在没在跑，下次启动就是新配置",
-      );
-      await refresh();
+      await api.gatewayRestartCodex();
+      const fresh = await api.gatewayState();
+      if (mounted.current) setState(fresh);
+      if (fresh.needsCodexRestart) reason = RESTART_STILL_STALE;
       void emit("gateway-changed");
     } catch (error) {
-      void failOver(error);
+      reason = parseBackendError(String(error)).message;
     } finally {
-      if (mounted.current) setBusy(null);
+      if (mounted.current) setBusy(false);
     }
+    if (!mounted.current) return;
+    setFailure(reason);
+    after.current = reason === null ? { kind: "done" } : { kind: "idle" };
+    setRestart({ kind: "restarting", spinning: false });
   };
 
-  // 浮层点外面或 Esc 关（DESIGN「什么时候才有按钮」）。确认行开着时 Esc 先收回那一问
+  // Esc：确认开着先收回那一问，否则收起面板
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (confirmingRestart) setConfirmingRestart(false);
+      if (restart.kind === "confirming") setRestart({ kind: "idle" });
       else void api.trayHide();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [confirmingRestart]);
+  }, [restart]);
 
-  // 面板高度跟着内容走：不同状态下行数不一样（要不要「去配置」、确认行高一点）
+  // 面板高度跟着内容走：确认、黑块展开时高一点
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const root = rootRef.current;
@@ -111,79 +130,110 @@ export default function TrayPanel() {
 
   const row = state ? trayRow(state) : null;
 
+  const restartSlot = () => {
+    if (restart.kind === "restarting") {
+      return (
+        <span className="tray__restart" role="status">
+          <Rotor
+            size={14}
+            spinning={restart.spinning}
+            label="正在重启 Codex"
+            onStopped={() => setRestart(after.current)}
+          />
+          <span className="tray__restart-text">正在重启 Codex</span>
+        </span>
+      );
+    }
+    if (restart.kind === "done") {
+      return (
+        <span className="tray__restart tray__restart--done">
+          <Toast tier="routine" kind="success" verb="已生效" />
+        </span>
+      );
+    }
+    if (!row?.showRestart) return null;
+    return (
+      <Tooltip content={RESTART_TIP} placement="bottom">
+        {busy ? (
+          <Button size="compact" disabled disabledReason="正在处理上一步">
+            重启生效
+          </Button>
+        ) : (
+          <Button
+            size="compact"
+            onClick={() => {
+              setFailure(null);
+              setRestart({ kind: "confirming" });
+            }}
+          >
+            重启生效
+          </Button>
+        )}
+      </Tooltip>
+    );
+  };
+
   return (
     <div className="tray" ref={rootRef}>
       {state && row?.visible ? (
         <section className="tray__agent">
-          <div className="tray__identity">
-            <div className="tray__name">
-              <AgentIcon id="codex" name="Codex" />
-              <span>Codex</span>
-            </div>
-            <Busy busy={busy !== null} className="tray__switch">
-              {row.toggle.disabledReason !== null ? (
-                <Button size="compact" disabled disabledReason={row.toggle.disabledReason}>
-                  {row.toggle.label}
-                </Button>
-              ) : (
-                <Button
-                  size="compact"
-                  // 反色＝现在开着（DESIGN「Do」）
-                  variant={row.toggle.on ? "inverse" : "default"}
-                  title={
-                    row.toggle.on
-                      ? "点一下停用：Codex 的模型列表只保留官方模型"
-                      : "点一下启用：选好的模型进 Codex 的模型列表"
-                  }
-                  onClick={() => void toggle(row.toggle.on)}
-                >
-                  {row.toggle.label}
-                </Button>
-              )}
-            </Busy>
+          <div className="tray__row">
+            <AgentIcon id="codex" name="Codex" size={16} />
+            <span className="tray__name">Codex</span>
+            {row.toggle.disabledReason !== null ? (
+              <Switch
+                checked={false}
+                onChange={() => undefined}
+                label="启用 Codex 的第三方模型"
+                disabledReason={row.toggle.disabledReason}
+              />
+            ) : (
+              <Tooltip
+                content={row.toggle.on ? "关掉：Codex 只剩官方模型" : "打开：选好的模型进 Codex"}
+                placement="bottom"
+              >
+                <Switch
+                  checked={row.toggle.on}
+                  onChange={(next) => void toggle(next)}
+                  label="启用 Codex 的第三方模型"
+                  disabledReason={busy ? "正在处理上一步" : undefined}
+                />
+              </Tooltip>
+            )}
+            {restartSlot()}
           </div>
-          {/* 重启完那一行就没了，结果说在这里；面板下次弹出时清掉 */}
-          <p className="tray__status">{busy ?? restartNote ?? row.status}</p>
-          <p className="tray__facts">{factsLine(state)}</p>
-          {row.needsSetup ? (
-            <Button variant="link" onClick={() => void api.trayOpenMain("models", null)}>
-              去「模型」页配置
-            </Button>
+          {restart.kind === "confirming" ? (
+            // 确认在面板里当场展开：标题 + 一句后果 + 取消（文字链）+ 重启（主动作）
+            <div className="tray__confirm" role="dialog" aria-label="重启 Codex？">
+              <div className="tray__confirm-title">重启 Codex？</div>
+              <div className="tray__confirm-body">{RESTART_CONSEQUENCE}</div>
+              <div className="tray__confirm-foot">
+                <Button variant="link" onClick={() => setRestart({ kind: "idle" })}>
+                  取消
+                </Button>
+                <Button variant="primary" size="compact" onClick={() => void restartCodex()}>
+                  重启
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {failure !== null && restart.kind === "idle" ? (
+            <div className="tray__notice">
+              <Toast
+                kind="cannot"
+                verb="没重启"
+                agents={[{ id: "codex", name: "Codex" }]}
+                names={["Codex"]}
+                reason={failure}
+                action={{ label: "再试一次", onClick: () => void restartCodex() }}
+                onClose={() => setFailure(null)}
+              />
+            </div>
           ) : null}
         </section>
       ) : null}
 
       <ul className="tray__menu">
-        {row?.visible && row.showRestart ? (
-          <li>
-            {confirmingRestart ? (
-              // 确认一道，就在这一行上：一句后果 + 紧凑 pill（R4）
-              <div className="tray__confirm">
-                <span>{RESTART_CONSEQUENCE}</span>
-                <span className="tray__confirm-actions">
-                  <Button size="compact" onClick={() => void restartCodex()}>
-                    重启
-                  </Button>
-                  <Button variant="link" onClick={() => setConfirmingRestart(false)}>
-                    取消
-                  </Button>
-                </span>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="tray__item"
-                disabled={busy !== null}
-                onClick={() => {
-                  setRestartNote(null);
-                  setConfirmingRestart(true);
-                }}
-              >
-                重启 Codex
-              </button>
-            )}
-          </li>
-        ) : null}
         <li>
           <button
             type="button"
@@ -202,16 +252,8 @@ export default function TrayPanel() {
             设置
           </button>
         </li>
-      </ul>
-
-      <ul className="tray__menu tray__menu--last">
         <li>
-          <button
-            type="button"
-            className="tray__item"
-            title="退出应用。模型注入由系统后台服务维持，不受影响"
-            onClick={() => void api.trayQuit()}
-          >
+          <button type="button" className="tray__item" onClick={() => void api.trayQuit()}>
             退出
           </button>
         </li>

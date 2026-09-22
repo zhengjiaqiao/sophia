@@ -1,79 +1,126 @@
-/* 菜单栏面板（docs/specs/2026-09-21-tray.md）。
-   零圆角、1px ink 描边、无阴影（DESIGN「Elevation」）；层级只靠描边与反色。 */
+/* 菜单栏面板（DESIGN「托盘面板」，画板 Tray）：宽 320，1px hairline 描边、零圆角、无阴影。
+   与主窗口共用 tokens.css 与组件库——开关、键、提示框、转盘、提示条都是同一份。 */
 @import "./tokens.css";
+
 .tray {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--hairline);
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--size-body);
-  line-height: var(--leading-body);
+  line-height: var(--leading-caption);
   user-select: none;
   cursor: default;
 }
 
 .tray__agent {
-  padding: 16px 16px 12px;
   border-bottom: 1px solid var(--hairline);
 }
 
-.tray__identity {
+/* Codex 那一行：高 44，图标 16 + 名字 + 开关 + [重启生效]，与模型页 agent 格同一组 */
+.tray__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  box-sizing: border-box;
+  height: 44px;
+  padding: 0 var(--space-sm);
 }
 
-/* agent 名是被谈论的对象，不大写（DESIGN「大写是结构的语言」） */
+/* agent 名是被谈论的对象，不大写 */
 .tray__name {
+  margin-right: 2px;
+  font-size: var(--size-body);
+  font-weight: 600;
+}
+
+/* 开关后 12 出重启那一格（gap 10 + 2） */
+.tray__row > .ss-tipwrap:last-child,
+.tray__restart {
+  margin-left: 2px;
+}
+
+.tray__restart {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 700;
+  gap: var(--space-xs);
+  height: var(--control-h-compact);
+  white-space: nowrap;
 }
 
-.tray__status {
-  margin: 8px 0 0;
+.tray__restart-text {
   font-size: var(--size-caption);
-  line-height: 1.5;
   color: var(--ink-mute);
 }
 
-/* 版本与端口是计数类事实，走等宽 */
-.tray__facts {
-  margin: 4px 0 0;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  line-height: 1.6;
-  color: var(--ink-faint);
+.tray__restart--done {
+  animation: tray-done-fade 4s var(--ease-mech) forwards;
 }
 
-.tray__agent .ss-btn--link {
-  margin-top: 8px;
+.tray__restart--done .ss-toast--routine {
+  height: var(--control-h-compact);
+  font-size: var(--size-caption);
+}
+
+@keyframes tray-done-fade {
+  0%,
+  97% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 确认当场展开在那一行下面：无外框，标题 15/600，一句后果 13 ink-mute，取消（链）+ 重启（主动作） */
+.tray__confirm {
+  padding: 4px var(--space-sm) var(--space-sm);
+}
+
+.tray__confirm-title {
+  font-size: var(--size-body);
+  font-weight: 600;
+}
+
+.tray__confirm-body {
+  margin-top: 4px;
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.tray__confirm-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.tray__notice {
+  padding: 0 var(--space-sm) var(--space-sm);
+}
+
+.tray__notice .ss-toast--notice {
+  max-width: 100%;
 }
 
 .tray__menu {
   margin: 0;
   padding: 4px 0;
   list-style: none;
-  border-bottom: 1px solid var(--hairline);
 }
 
-.tray__menu--last {
-  border-bottom: 0;
-}
-
-/* 列表行：无描边，hover 底色转 surface（DESIGN「可点的面」） */
+/* 菜单行：高 34，无描边，悬停 surface 底（DESIGN「可点的面」） */
 .tray__item {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 36px;
+  height: var(--row-h);
   box-sizing: border-box;
-  padding: 6px 16px;
+  padding: 0 var(--space-sm);
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -81,32 +128,20 @@
   font: inherit;
   text-align: left;
   cursor: default;
+  transition: background-color var(--motion-fast) var(--ease-mech);
 }
 
-.tray__item:hover:not(:disabled),
+.tray__item:hover,
 .tray__item:focus-visible {
   background: var(--surface);
   outline: none;
 }
 
-.tray__item:disabled {
-  opacity: 0.45;
-}
-
-.tray__confirm {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 36px;
-  box-sizing: border-box;
-  padding: 6px 16px;
-  font-size: var(--size-caption);
-}
-
-.tray__confirm-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
+@media (prefers-reduced-motion: reduce) {
+  .tray__item {
+    transition: none;
+  }
+  .tray__restart--done {
+    animation: none;
+  }
 }
