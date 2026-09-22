@@ -28,8 +28,8 @@
 ///   在 `verbTail`，Toast 写在图标之后）/ 写进 / 清除 / 拆开 / 只留 / 自动加到 / 自动写进。
 ///   「开启 Claude Code」读成操作应用本身，所以 skill 与 agent 的关系一律带方向（DESIGN 冲突表）；
 ///   全部没成时用**否定动词**（`没加上` `没移除`）——失败里写「加到」会被一眼读成已加上
-/// - 档位（① 严重程度决定打断程度）：例行成功 `routine`（结果已由格子闪烁表达，这行只给撤销）；
-///   做不成、部分失败、可撤销的删除（只留这份）、自动发生的事一律 `notice` 黑窗
+/// - 档位（① 严重程度决定打断程度）：**所有成功**一律例行 `routine`——含自动规则在背后做的事、
+///   确认过的删除（只留这份）的结果；黑窗 `notice` 只给要停下来看的：做不成、部分失败
 /// - 名字去重、保序；多于两个由 `Toast` 自己写成 `+N`，这里不截
 /// - agent 图标按 id 去重、保序
 
@@ -44,7 +44,7 @@ export type ToastOp =
   | "clear"
   /// 把整个文件夹是链接的目录拆开
   | "split"
-  /// 同名两份：只留这份，另一份进废纸篓（可撤销）
+  /// 同名两份：只留这份，另一份进废纸篓（先确认，结果不带撤销）
   | "keepThis"
   /// 自动规则在背后加上了几个（⑨⑬ 自动发生的事要交代）
   | "autoLink"
@@ -124,9 +124,6 @@ const PARTIAL_VERB: Partial<Record<ToastOp, string>> = {
 /// 带方向的动词后半截：`从 [图标] 移除`
 const VERB_TAIL: Partial<Record<ToastOp, string>> = { unlink: "移除" };
 
-/// 成功时用黑窗的几种：可撤销的删除、自动发生的事（DESIGN「提示条分两档」）
-const NOTICE_ON_SUCCESS = new Set<ToastOp>(["keepThis", "autoLink", "autoWrite"]);
-
 const uniq = (xs: string[]) => [...new Set(xs)];
 
 const agentsOf = (items: ToastItem[]): ToastAgentRef[] => {
@@ -169,11 +166,27 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
     };
   }
   return {
-    tier: NOTICE_ON_SUCCESS.has(op) ? "notice" : "routine",
+    // 成功一律例行一行（DESIGN「提示条分两档」：黑块只给失败）
+    tier: "routine",
     kind: "success",
     verb: VERB[op],
     verbTail: VERB_TAIL[op],
     names: namesOf(done),
     agents: agentsOf(done),
+  };
+}
+
+/// 「只留这份」确认框（DESIGN「页面还是弹层」）：标题问留哪份；正文写哪份进废纸篓、几条链接改指，
+/// 没有要改指的就不写后半句
+export function keepThisConfirm(input: {
+  keptLabel: string;
+  otherLabel: string;
+  skill: string;
+  relinked: number;
+}): { title: string; body: string } {
+  const trash = `${input.otherLabel} 那份移到废纸篓`;
+  return {
+    title: `只留 ${input.keptLabel} 的 ${input.skill}？`,
+    body: input.relinked > 0 ? `${trash}，${input.relinked} 条链接改指到这一份` : trash,
   };
 }

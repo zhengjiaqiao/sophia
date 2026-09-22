@@ -560,12 +560,16 @@
   pointer-events: none;
 }
 
-/* 贴在该行下方的提示条（只留这份 · 撤销） */
+/* 贴在该行下方的提示条（只留这份的结果、没删掉）。例行档无框无底，
+   盖在下一行上时要自带画布底，否则字叠在下一行的名字上 */
 .mx-rowtoast {
   position: absolute;
   top: calc(100% + 4px);
   left: 34px;
   z-index: 6;
+  display: flex;
+  padding: 0 16px 0 0;
+  background: var(--canvas);
 }
 
 .mx-empty {

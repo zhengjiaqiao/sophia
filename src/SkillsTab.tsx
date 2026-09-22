@@ -5,10 +5,16 @@ import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
 import ImportPage from "./pages/ImportPage";
 import { pathsOfKey } from "./pages/pendingIssues";
-import { defer, type Deferred } from "./deferredCommit";
 import { shortDate } from "./dateText";
-import { Empty, Toast, TOAST_DWELL_MS } from "./ui";
-import { toastFor, type FailedItem, type ToastItem, type ToastOp } from "./toastText";
+import { Confirm, Empty, Toast, TOAST_DWELL_MS } from "./ui";
+import type { ConfirmAnchor } from "./ui";
+import {
+  keepThisConfirm,
+  toastFor,
+  type FailedItem,
+  type ToastItem,
+  type ToastOp,
+} from "./toastText";
 import type {
   AutoLink,
   CellRef,
@@ -23,6 +29,18 @@ import type {
 
 /// 写不进去的典型原因。命中时说人话，否则原样转述 core 给的那句
 const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
+
+/// 「只留这份」确认框要的全部：体检结果先拿到，确认框才写得出几条链接改指
+interface KeepPane {
+  kept: DomainRow;
+  other: DomainRow;
+  anchor: ConfirmAnchor;
+  planId: string;
+  keptLabel: string;
+  otherLabel: string;
+  /// 要改指到留下那份的链接条数
+  relinked: number;
+}
 
 export interface SkillsTabProps {
   overview: Overview | null;
@@ -48,8 +66,8 @@ export interface SkillsTabProps {
 /// 反馈的位置（DESIGN「提示条的位置」）：
 /// - 单格：乐观更新 + 格子闪一下，**不出提示条**；失败弹回 + 格下小黑窗说原因；撤销用 ⌘Z
 /// - 批量：一行提示条贴在被按下的键下方，右对齐该键；动词与键一致，键上读数随之翻转
-/// - 只留这份：黑窗提示条贴在留下那一行下方 + 撤销
-/// - 自动规则在背后做了事：右下黑窗，右沿对齐面板右沿 + 撤销
+/// - 只留这份：先出锚定确认；确认后直接删，例行一行贴在留下那一行下方（无撤销）
+/// - 自动规则在背后做了事：右下例行一行，右沿对齐面板右沿 + 撤销
 export default function SkillsTab({
   overview,
   autoLinks,
@@ -97,10 +115,8 @@ export default function SkillsTab({
     queue.current = queue.current.then(job, job);
     return queue.current;
   };
-  // 同名两份「只留这份」：另一份先藏起来，删除挂在 deferredCommit 上——提示条到期、被关掉、
-  // 切走或窗口关闭（App 调 flushAll）时才真的删；撤销＝丢掉挂起的提交，链接也就不用改指回去
-  // （DESIGN「页面还是弹层」：删原件不确认，删 + 撤销）。一次只挂一个
-  const keepRef = useRef<Deferred | null>(null);
+  // 同名两份「只留这份」的确认框：点了按钮、体检过、等用户拍板
+  const [keepPane, setKeepPane] = useState<KeepPane | null>(null);
 
   const pages = overview === null ? [] : overview.domains.filter((d) => d.key === selectedKey);
   const page: DomainPage | null = pages[0] ?? null;
@@ -128,17 +144,10 @@ export default function SkillsTab({
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
 
-  // 切走之前把「只留这份」提交掉：提示条已经不在了，没有撤销的入口了
-  useEffect(() => {
-    return () => {
-      void keepRef.current?.commit();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey]);
-
   // 提示与弹层只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
     setImportOpen(false);
+    setKeepPane(null);
     setKeyToast(null);
     setRowToast(null);
     setCellNotice(null);
@@ -384,49 +393,11 @@ export default function SkillsTab({
   };
 
   // ===== 同名：只留这份 =====
+  // DESIGN「页面还是弹层」：删用户的原件先确认（锚在按钮上），确认后直接删、不挂起；
+  // 结果是例行一行、不带撤销——废纸篓只找得回文件夹，改指过的链接回不来
 
-  /// 真的删掉另一份（deferredCommit 到期时调）
-  const deleteOther = async (other: DomainRow, planId: string) => {
-    const key = skillRowKey(other);
-    try {
-      let report: SyncReport;
-      try {
-        report = await api.deleteSource(planId);
-      } catch {
-        // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删（仓库里的照旧不代删）
-        const again = await api.planDeleteSource(other.sourceId, other.skill);
-        if (again.plan.inGit !== null)
-          throw new Error(`它在 git 仓库 ${again.plan.inGit} 里，这里不代删`);
-        report = await api.deleteSource(again.planId);
-      }
-      const bad = report.entries.find((e) => e.outcome.status === "failed");
-      if (bad && bad.outcome.status === "failed") {
-        setGlobalToast(
-          <Toast
-            kind="cannot"
-            verb="没删掉"
-            names={[other.skill]}
-            reason={bad.outcome.reason}
-            onDismiss={dismissGlobal}
-            onClose={dismissGlobal}
-          />,
-        );
-      }
-    } catch (e) {
-      onError(String(e));
-    }
-    await onRefresh();
-    setHidden((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  };
-
-  const keepThis = async (kept: DomainRow, other: DomainRow) => {
-    // 上一次的还没提交：先提交它，一次只挂一个撤销
-    await keepRef.current?.commit();
-    const keptLabel = overview?.sources.find((s) => s.id === kept.sourceId)?.label ?? kept.sourceId;
+  const keepThis = async (kept: DomainRow, other: DomainRow, anchor: ConfirmAnchor) => {
+    const labelOf = (id: string) => overview?.sources.find((s) => s.id === id)?.label ?? id;
     const rowKey = skillRowKey(kept);
     let planned;
     try {
@@ -451,39 +422,62 @@ export default function SkillsTab({
       });
       return;
     }
+    setKeepPane({
+      kept,
+      other,
+      anchor,
+      planId: planned.planId,
+      keptLabel: labelOf(kept.sourceId),
+      otherLabel: labelOf(other.sourceId),
+      relinked: planned.plan.affected.length,
+    });
+  };
+
+  /// 确认之后：立即删掉另一份（先藏起来，删完重扫再放开）
+  const confirmKeep = async (pane: KeepPane) => {
+    setKeepPane(null);
+    const { kept, other } = pane;
     const otherKey = skillRowKey(other);
-    const planId = planned.planId;
-    const d = defer(`keep:${otherKey}`, () => deleteOther(other, planId));
-    keepRef.current = d;
     setHidden((prev) => new Set(prev).add(otherKey));
-    const undo = () => {
-      d.undo();
-      undoRef.current = null;
-      setRowToast(null);
-      setHidden((prev) => {
-        const next = new Set(prev);
-        next.delete(otherKey);
-        return next;
-      });
-    };
-    const commit = () => {
-      setRowToast(null);
-      void d.commit();
-    };
-    undoRef.current = undo;
-    const n = planned.plan.affected.length;
-    const text = toastFor("keepThis", { done: [{ name: kept.skill }], keepLabel: keptLabel });
+    let ok = false;
+    try {
+      let report: SyncReport;
+      try {
+        report = await api.deleteSource(pane.planId);
+      } catch {
+        // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删（仓库里的照旧不代删）
+        const again = await api.planDeleteSource(other.sourceId, other.skill);
+        if (again.plan.inGit !== null)
+          throw new Error(`它在 git 仓库 ${again.plan.inGit} 里，这里不代删`);
+        report = await api.deleteSource(again.planId);
+      }
+      const bad = report.entries.find((e) => e.outcome.status === "failed");
+      if (bad && bad.outcome.status === "failed") {
+        setGlobalToast(
+          <Toast
+            kind="cannot"
+            verb="没删掉"
+            names={[other.skill]}
+            reason={bad.outcome.reason}
+            onDismiss={dismissGlobal}
+            onClose={dismissGlobal}
+          />,
+        );
+      } else ok = true;
+    } catch (e) {
+      onError(String(e));
+    }
+    await onRefresh();
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.delete(otherKey);
+      return next;
+    });
+    if (!ok) return;
+    const text = toastFor("keepThis", { done: [{ name: kept.skill }], keepLabel: pane.keptLabel });
     setRowToast({
-      rowKey,
-      node: (
-        <Toast
-          {...text}
-          stats={n === 0 ? "另一份进废纸篓" : `另一份进废纸篓 · ${n} 条链接改指到这份`}
-          action={{ label: "撤销", onClick: undo }}
-          onDismiss={commit}
-          onClose={commit}
-        />
-      ),
+      rowKey: skillRowKey(kept),
+      node: <Toast {...text} onDismiss={() => setRowToast(null)} />,
     });
   };
 
@@ -515,7 +509,7 @@ export default function SkillsTab({
       .catch(() => undefined);
   };
 
-  // ===== 自动规则在背后做了事：右下黑窗 + 撤销，被开启的格依次闪一下 =====
+  // ===== 自动规则在背后做了事：右下例行一行 + 撤销，被开启的格依次闪一下 =====
 
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
@@ -642,7 +636,7 @@ export default function SkillsTab({
         hiddenRows={hiddenRows}
         dupReadout={dupReadout}
         onDupHover={dupHover}
-        onKeepThis={(kept, other) => void keepThis(kept, other)}
+        onKeepThis={(kept, other, anchor) => void keepThis(kept, other, anchor)}
         busy={busy}
         filterText={filterText}
         onFilterText={setFilterText}
@@ -671,6 +665,18 @@ export default function SkillsTab({
         focus={focus}
       />
 
+      {keepPane ? (
+        <Confirm
+          title={keepThisConfirm({ ...keepPane, skill: keepPane.kept.skill }).title}
+          confirmLabel="只留这份"
+          onConfirm={() => void confirmKeep(keepPane)}
+          onCancel={() => setKeepPane(null)}
+          anchor={keepPane.anchor}
+        >
+          {keepThisConfirm({ ...keepPane, skill: keepPane.kept.skill }).body}
+        </Confirm>
+      ) : null}
+
       {importOpen && (
         <ImportPage
           overview={overview}
@@ -695,9 +701,7 @@ export default function SkillsTab({
                     : "",
               })),
             });
-            setGlobalToast(
-              <Toast {...text} tier="notice" onDismiss={dismissGlobal} onClose={dismissGlobal} />,
-            );
+            setGlobalToast(<Toast {...text} onDismiss={dismissGlobal} onClose={dismissGlobal} />);
           }}
           onError={onError}
           onNotice={(text) =>

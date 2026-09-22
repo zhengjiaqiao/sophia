@@ -186,7 +186,7 @@ export default function McpTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  // 自动规则在背后写了：右下黑窗交代一声（⑨⑬），被写进的格依次闪一下
+  // 自动规则在背后写了：右下例行一行交代一声（⑨⑬），被写进的格依次闪一下
   const domainsRef = useRef<McpDomain[]>([]);
   useEffect(() => {
     let disposed = false;

@@ -7,7 +7,7 @@
 /// 「原件位置」列恢复、按来源分组撤销（DESIGN「产品裁决」冲突表）：位置信息常驻视线；
 /// 点这一列列头文字按位置排序。自动添加规则只在添加页管理，主视图不放规则入口。
 /// 说明横幅、「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接）。
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import Matrix, {
   cellKey,
@@ -21,6 +21,7 @@ import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
 import { AddButton, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
+import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
 /// 行键：本体位置 + skill（一页只显示一个域）
@@ -48,12 +49,13 @@ export interface DomainViewProps {
   pendingCells: Set<string>;
   /// 正在操作的行 → 忙什么（行内转盘 + 读屏句子）
   busyRows: Map<string, string>;
-  /// 只留这份之后、提交之前先藏起来的那一份
+  /// 只留这份确认之后、删除完成之前先藏起来的那一份
   hiddenRows: Set<string>;
   /// 同名行悬停读数（`3 个文件`）；没取到时为 undefined
   dupReadout: Map<string, string>;
   onDupHover: (row: DomainRow) => void;
-  onKeepThis: (row: DomainRow, other: DomainRow) => void;
+  /// 点「只留这份」：anchor 是按钮此刻的矩形，确认框锚在它上面
+  onKeepThis: (row: DomainRow, other: DomainRow, anchor: ConfirmAnchor) => void;
 
   busy: boolean;
   filterText: string;
@@ -258,7 +260,7 @@ export default function DomainView(props: DomainViewProps) {
           other === undefined ? undefined : (
             <DupExtra
               onShow={() => props.onDupHover(row)}
-              onKeep={() => props.onKeepThis(row, other)}
+              onKeep={(anchor) => props.onKeepThis(row, other, anchor)}
               label={`只留 ${labelOf(row.sourceId)} 的 ${row.skill}`}
             />
           ),
@@ -452,19 +454,31 @@ function DupExtra({
   label,
 }: {
   onShow: () => void;
-  onKeep: () => void;
+  onKeep: (anchor: ConfirmAnchor) => void;
   label: string;
 }) {
+  const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     onShow();
     // 只在出现时取一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <Tooltip content="另一份进废纸篓，可撤销">
-      <Button variant="link" onClick={onKeep} ariaLabel={label}>
-        只留这份
-      </Button>
+    <Tooltip content="另一份移到废纸篓，先确认">
+      <span ref={ref}>
+        <Button
+          variant="link"
+          onClick={() => {
+            // 锚在这一行：确认框出在行下方，遮罩挖出整行（用户看得见自己在决定哪一行）
+            const el = ref.current?.closest(".mx-row") ?? ref.current;
+            const r = el?.getBoundingClientRect();
+            if (r) onKeep({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
+          }}
+          ariaLabel={label}
+        >
+          只留这份
+        </Button>
+      </span>
     </Tooltip>
   );
 }

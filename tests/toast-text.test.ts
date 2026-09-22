@@ -65,12 +65,27 @@ test("部分失败：黑窗 + 肯定动词 + 读数 + 第一条原因", () => {
   assert.equal(mixed.verbTail, undefined);
 });
 
-test("可撤销的删除与自动发生的事成功时也走黑窗；只留这份把来源拼进名字", () => {
+test("所有成功都是例行一行（含只留这份、自动规则）；黑窗只给失败。只留这份把来源拼进名字", () => {
   const keep = toastFor("keepThis", { done: [{ name: "defuddle" }], keepLabel: "通用仓库" });
-  assert.equal(keep.tier, "notice");
+  assert.equal(keep.tier, "routine");
   assert.equal(keep.verb, "只留");
   assert.deepEqual(keep.names, ["通用仓库 的 defuddle"]);
-  assert.equal(toastFor("autoLink", { done: [{ name: "x" }] }).tier, "notice");
+  assert.equal(toastFor("autoLink", { done: [{ name: "x" }] }).tier, "routine");
+  assert.equal(toastFor("autoWrite", { done: [{ name: "x" }] }).tier, "routine");
+  // 失败照旧黑窗
+  const failed = [{ name: "x", reason: "r" }];
+  assert.equal(toastFor("keepThis", { done: [], failed }).tier, "notice");
+  assert.equal(toastFor("autoLink", { done: [{ name: "y" }], failed }).tier, "notice");
   assert.equal(toastFor("autoLink", { done: [{ name: "x" }] }).verb, "自动加到");
   assert.equal(toastFor("autoWrite", { done: [{ name: "x" }] }).verb, "自动写进");
+});
+
+test("只留这份的确认框：标题问留哪份；正文写哪份进废纸篓、几条链接改指，没有就不写后半句", async () => {
+  const { keepThisConfirm } = await import("../src/toastText.ts");
+  const base = { keptLabel: "通用仓库", otherLabel: "WeiboAP", skill: "defuddle" };
+  assert.deepEqual(keepThisConfirm({ ...base, relinked: 3 }), {
+    title: "只留 通用仓库 的 defuddle？",
+    body: "WeiboAP 那份移到废纸篓，3 条链接改指到这一份",
+  });
+  assert.equal(keepThisConfirm({ ...base, relinked: 0 }).body, "WeiboAP 那份移到废纸篓");
 });
