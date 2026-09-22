@@ -262,6 +262,11 @@ pub struct AutoLink {
     /// 手动清除过、不再自动链接的 skill
     #[serde(default)]
     pub excluded: BTreeSet<String>,
+    /// 建规则那一刻本体位置里已有的 skill：规则只管之后新出现的，这些不补建。
+    /// `None` 只出现在升级前持久化的旧规则上——展开时整条跳过，
+    /// 首次扫描由 `skills::migrate_baselines` 取当时的全部名字补上
+    #[serde(default)]
+    pub baseline: Option<BTreeSet<String>>,
 }
 
 /// 一条指向某本体的链接，以及改指时该怎么写。
@@ -491,13 +496,16 @@ mod tests {
             source: PathBuf::from("/a/skills"),
             targets: vec!["claude-code".into()],
             excluded: BTreeSet::from(["x".to_string()]),
+            baseline: Some(BTreeSet::from(["y".to_string()])),
         };
         assert_eq!(
             serde_json::to_value(&rule).unwrap(),
-            json!({"source": "/a/skills", "targets": ["claude-code"], "excluded": ["x"]})
+            json!({"source": "/a/skills", "targets": ["claude-code"], "excluded": ["x"], "baseline": ["y"]})
         );
         let old: AutoLink =
             serde_json::from_value(json!({"source": "/a/skills", "targets": []})).unwrap();
         assert!(old.excluded.is_empty());
+        // 升级前的规则没有 baseline：读成 None，等首次扫描迁移
+        assert_eq!(old.baseline, None);
     }
 }

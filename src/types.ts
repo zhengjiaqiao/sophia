@@ -168,6 +168,9 @@ export interface AutoLink {
   targets: string[];
   /// 手动清除过、不再自动链接的 skill
   excluded: string[];
+  /// 建规则那一刻本体位置里已有的 skill，规则不补建它们（只管以后新出现的）。
+  /// 由 core 拍快照，前端不传；升级前的旧规则在首次扫描迁移前为 null
+  baseline?: string[] | null;
 }
 
 export interface HarnessStatus {
@@ -259,6 +262,9 @@ export interface McpAutoImportRule {
   targets: McpLocationRef[];
   excluded: string[];
   allowCrossDomain: boolean;
+  /// 建规则那一刻来源位置里已有的 MCP 名，规则不补它们（只管以后新出现的）。
+  /// 由 core 拍快照，前端不传；升级前的旧规则在首次扫描迁移前为 null
+  baseline?: string[] | null;
 }
 
 export const actionId = (a: PlannedAction): string => `${a.kind}|${a.targetPath}`;

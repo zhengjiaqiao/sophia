@@ -204,7 +204,11 @@ fn scan_mcp(
     let discovery = discover_mcp(&state)?;
     let mut overview = symsync_core::mcp::scan(&discovery.locations);
     overview.issues.extend(discovery.issues);
-    let rules = state.store.load_settings().map_err(err)?.mcp_auto_imports;
+    let rules = state
+        .store
+        .load_settings_migrating_mcp_auto_imports(&overview)
+        .map_err(err)?
+        .mcp_auto_imports;
     if let Some(report) = auto_import_mcp(&state, &overview, &rules)? {
         let _ = app.emit("mcp-auto-imported", &report);
         let discovery = discover_mcp(&state)?;
@@ -269,7 +273,11 @@ fn apply_mcp(
 
 /// 自动同步规则展开成建链动作并执行；无规则或没有缺口时返回 None
 fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>, String> {
-    let rules = state.store.load_settings().map_err(err)?.auto_links;
+    let rules = state
+        .store
+        .load_settings_migrating_auto_links(&scanned.sources)
+        .map_err(err)?
+        .auto_links;
     if rules.is_empty() {
         return Ok(None);
     }
@@ -302,6 +310,11 @@ fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<
         let discovery = discover_mcp(&state)?;
         let mut mcp_overview = symsync_core::mcp::scan(&discovery.locations);
         mcp_overview.issues.extend(discovery.issues);
+        let mcp_rules = state
+            .store
+            .load_settings_migrating_mcp_auto_imports(&mcp_overview)
+            .map_err(err)?
+            .mcp_auto_imports;
         if let Some(report) = auto_import_mcp(&state, &mcp_overview, &mcp_rules)? {
             let _ = app.emit("mcp-auto-imported", &report);
         }
@@ -558,19 +571,17 @@ fn set_mcp_auto_import(
         return Err("跨域自动引入需要明确允许".into());
     }
     let mut settings = state.store.load_settings().map_err(err)?;
-    // 重新设置同一来源+目标域即完整替换，避免旧规则的选择状态泄漏到新目标集合。
-    settings
-        .mcp_auto_imports
-        .retain(|rule| rule.source.id != source_id || rule.target_domain != target_domain);
-    settings
-        .mcp_auto_imports
-        .push(symsync_core::mcp::McpAutoImportRule {
-            source: symsync_core::mcp::location_ref(source),
-            target_domain,
-            targets,
-            excluded: Default::default(),
-            allow_cross_domain,
-        });
+    // 重新设置同一来源+目标域即完整替换，避免旧规则的选择状态泄漏到新目标集合；
+    // baseline 在 core 里按此刻来源的全部名字拍，规则只管以后新出现的
+    let overview = symsync_core::mcp::scan(&discovery.locations);
+    symsync_core::mcp::upsert_auto_import(
+        &mut settings.mcp_auto_imports,
+        &overview,
+        source,
+        target_domain,
+        targets,
+        allow_cross_domain,
+    );
     state.store.save_settings(&settings).map_err(err)
 }
 
@@ -594,8 +605,10 @@ fn set_auto_link(
     targets: Vec<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    // baseline 在 core 里按此刻本体位置的全部 skill 拍，规则只管以后新出现的
+    let (sources, _) = discover(&state)?;
     update_auto_links(&state, |rules| {
-        skills::upsert_auto_link(rules, &source, &targets)
+        skills::upsert_auto_link(rules, &sources, &source, &targets)
     })
 }
 

@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use symsync_core::mcp::{
-    auto_selections, execute, location_ref, prepare, scan, McpAutoImportRule, McpLocation,
-    McpSelection,
+    auto_selections, execute, location_ref, migrate_baselines, prepare, scan, upsert_auto_import,
+    McpAutoImportRule, McpLocation, McpSelection,
 };
 use tempfile::tempdir;
 
@@ -33,6 +33,8 @@ fn rule(source: &McpLocation, target_domain: &str, targets: &[McpLocation]) -> M
         targets: targets.iter().map(location_ref).collect(),
         excluded: BTreeSet::new(),
         allow_cross_domain: true,
+        // 手写的规则等同于在来源还空着时建的：来源里的都算新出现的
+        baseline: Some(BTreeSet::new()),
     }
 }
 
@@ -221,4 +223,123 @@ fn rule_serialization_never_contains_mcp_definition_values() {
     assert!(!encoded.contains("fixture-secret"));
     assert!(!encoded.contains("mcpServers"));
     assert!(!encoded.contains("command"));
+}
+
+/// 规则只管以后新出现的：建规则时来源里已有的不补；新增的补；排除照旧；整条重建会重拍 baseline
+#[test]
+fn auto_import_rule_only_covers_entries_that_appear_after_it() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let source_path = root.join("source.json");
+    let target_path = root.join("target.json");
+    json_file(
+        &source_path,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    json_file(&target_path, json!({"mcpServers": {}}));
+    let source = json_location("source", &source_path, "project:one");
+    let target = json_location("target", &target_path, "project:one");
+    let locations = vec![source.clone(), target.clone()];
+    let mut rules = Vec::new();
+
+    upsert_auto_import(
+        &mut rules,
+        &scan(&locations),
+        &source,
+        "project:one".into(),
+        vec![location_ref(&target)],
+        false,
+    );
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        rules[0].baseline,
+        Some(BTreeSet::from(["docs".to_string()]))
+    );
+    // 已有的 docs 不补
+    assert!(auto_selections(&scan(&locations), &rules).is_empty());
+
+    // 新出现的 search 补，且只补它
+    json_file(
+        &source_path,
+        json!({"mcpServers": {
+            "docs": {"command": "docs"},
+            "search": {"command": "search"}
+        }}),
+    );
+    assert_eq!(
+        auto_selections(&scan(&locations), &rules),
+        vec![selection("source", "search", "target")]
+    );
+
+    // 排除照旧
+    rules[0].excluded.insert("search".into());
+    assert!(auto_selections(&scan(&locations), &rules).is_empty());
+
+    // 同一来源 + 目标域重新设置 = 整条重建：baseline 重拍，排除名单清空
+    upsert_auto_import(
+        &mut rules,
+        &scan(&locations),
+        &source,
+        "project:one".into(),
+        vec![location_ref(&target)],
+        false,
+    );
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        rules[0].baseline,
+        Some(BTreeSet::from(["docs".to_string(), "search".to_string()]))
+    );
+    assert!(rules[0].excluded.is_empty());
+    assert!(auto_selections(&scan(&locations), &rules).is_empty());
+}
+
+/// 升级前持久化的规则没有 baseline：迁移前整条不补，迁移取来源当前全部名字，此后只补新的
+#[test]
+fn legacy_auto_import_rule_without_baseline_migrates_to_current_entries() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let source_path = root.join("source.json");
+    let target_path = root.join("target.json");
+    json_file(
+        &source_path,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    json_file(&target_path, json!({"mcpServers": {}}));
+    let source = json_location("source", &source_path, "project:one");
+    let target = json_location("target", &target_path, "project:one");
+    let locations = vec![source.clone(), target.clone()];
+    let mut encoded = serde_json::to_value(rule(&source, "project:one", &[target])).unwrap();
+    encoded.as_object_mut().unwrap().remove("baseline");
+    let mut rules: Vec<McpAutoImportRule> = vec![serde_json::from_value(encoded).unwrap()];
+    assert_eq!(rules[0].baseline, None);
+    assert!(auto_selections(&scan(&locations), &rules).is_empty());
+
+    // 来源这次读不出来：不迁移，免得恢复时把现有的全补上
+    fs::write(&source_path, b"{not json").unwrap();
+    assert!(!migrate_baselines(&mut rules, &scan(&locations)));
+    assert_eq!(rules[0].baseline, None);
+
+    json_file(
+        &source_path,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    assert!(migrate_baselines(&mut rules, &scan(&locations)));
+    assert_eq!(
+        rules[0].baseline,
+        Some(BTreeSet::from(["docs".to_string()]))
+    );
+    assert!(!migrate_baselines(&mut rules, &scan(&locations)));
+    assert!(auto_selections(&scan(&locations), &rules).is_empty());
+
+    json_file(
+        &source_path,
+        json!({"mcpServers": {
+            "docs": {"command": "docs"},
+            "search": {"command": "search"}
+        }}),
+    );
+    assert_eq!(
+        auto_selections(&scan(&locations), &rules),
+        vec![selection("source", "search", "target")]
+    );
 }

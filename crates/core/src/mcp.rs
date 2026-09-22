@@ -60,6 +60,11 @@ pub struct McpAutoImportRule {
     pub excluded: BTreeSet<String>,
     #[serde(default)]
     pub allow_cross_domain: bool,
+    /// 建规则那一刻来源位置里已有的 MCP 名：规则只管之后新出现的，这些不补。
+    /// `None` 只出现在升级前持久化的旧规则上——展开时整条跳过，
+    /// 首次扫描由 `migrate_baselines` 取当时的全部名字补上
+    #[serde(default)]
+    pub baseline: Option<BTreeSet<String>>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,6 +131,63 @@ pub fn location_ref(location: &McpLocation) -> McpLocationRef {
     }
 }
 
+/// 新建或整条替换一条自动添加规则（同一来源 + 目标域即同一条），同时拍 baseline：
+/// 来源位置此刻的全部 MCP 名。替换等于重建，排除名单与 baseline 都重来
+pub fn upsert_auto_import(
+    rules: &mut Vec<McpAutoImportRule>,
+    overview: &McpOverview,
+    source: &McpLocation,
+    target_domain: String,
+    targets: Vec<McpLocationRef>,
+    allow_cross_domain: bool,
+) {
+    rules.retain(|rule| rule.source.id != source.id || rule.target_domain != target_domain);
+    rules.push(McpAutoImportRule {
+        source: location_ref(source),
+        target_domain,
+        targets,
+        excluded: BTreeSet::new(),
+        allow_cross_domain,
+        baseline: Some(source_names(overview, &source.id)),
+    });
+}
+
+/// 升级迁移：给没有 baseline 的旧规则补上来源位置当前的全部 MCP 名，于是旧规则从这一刻起
+/// 也只管以后新出现的。来源这次没发现、或配置读不出来的先不补（补成空集会在它恢复时
+/// 把现有的全部补上），规则继续整条跳过。返回是否改动过
+pub fn migrate_baselines(rules: &mut [McpAutoImportRule], overview: &McpOverview) -> bool {
+    let mut changed = false;
+    for rule in rules.iter_mut().filter(|r| r.baseline.is_none()) {
+        let Some(source) = overview
+            .locations
+            .iter()
+            .find(|location| location_ref(location) == rule.source)
+        else {
+            continue;
+        };
+        if overview
+            .issues
+            .iter()
+            .any(|issue| issue.location_id == source.id && issue.name.is_none())
+        {
+            continue;
+        }
+        rule.baseline = Some(source_names(overview, &source.id));
+        changed = true;
+    }
+    changed
+}
+
+/// 来源位置当前定义的全部 MCP 名（含本次不支持或有问题的：它们也是「已有的」）
+fn source_names(overview: &McpOverview, source_id: &str) -> BTreeSet<String> {
+    overview
+        .entries
+        .iter()
+        .filter(|entry| entry.source_id == source_id)
+        .map(|entry| entry.name.clone())
+        .collect()
+}
+
 /// 根据当前扫描结果展开自动引入规则。
 ///
 /// 规则内的位置必须仍精确匹配本次发现的位置。条目及单元格状态一律以本次扫描为准，
@@ -133,6 +195,10 @@ pub fn location_ref(location: &McpLocation) -> McpLocationRef {
 pub fn auto_selections(overview: &McpOverview, rules: &[McpAutoImportRule]) -> Vec<McpSelection> {
     let mut out = BTreeSet::new();
     for rule in rules {
+        // 规则只管以后新出现的：没有 baseline 就分不清哪些是新的，宁可不补
+        let Some(baseline) = &rule.baseline else {
+            continue;
+        };
         let Some(source) = overview
             .locations
             .iter()
@@ -159,6 +225,7 @@ pub fn auto_selections(overview: &McpOverview, rules: &[McpAutoImportRule]) -> V
                     && entry.reason.is_none()
                     && is_supported_transport(&entry.transport)
                     && !rule.excluded.contains(&entry.name)
+                    && !baseline.contains(&entry.name)
             }) {
                 if entry
                     .cells

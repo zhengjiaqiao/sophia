@@ -1,5 +1,9 @@
 //! JSON 持久化：projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
-use crate::{codex_models::settings::GatewaySettings, mcp::McpAutoImportRule, models::AutoLink};
+use crate::{
+    codex_models::settings::GatewaySettings,
+    mcp::{McpAutoImportRule, McpOverview},
+    models::{AutoLink, Source},
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -153,6 +157,29 @@ impl Store {
         save_json(&self.dir.join("settings.json"), settings)
     }
 
+    /// 读设置，顺手做 skill 自动同步规则的升级迁移：没有 baseline 的旧规则补上本体位置
+    /// 当前的全部 skill 名（见 `skills::migrate_baselines`），改过才写回。
+    /// 要扫描结果才能迁移，所以只在扫描之后展开规则的地方用它，其余照旧 `load_settings`
+    pub fn load_settings_migrating_auto_links(&self, sources: &[Source]) -> io::Result<Settings> {
+        let mut settings = self.load_settings()?;
+        if crate::skills::migrate_baselines(&mut settings.auto_links, sources) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
+    /// 同上，MCP 自动添加规则：取来源位置当前的全部 MCP 名（见 `mcp::migrate_baselines`）
+    pub fn load_settings_migrating_mcp_auto_imports(
+        &self,
+        overview: &McpOverview,
+    ) -> io::Result<Settings> {
+        let mut settings = self.load_settings()?;
+        if crate::mcp::migrate_baselines(&mut settings.mcp_auto_imports, overview) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
     /// 记下一条忽略；同一个 key 已经在里面就保持原样（不刷新 at）
     pub fn ignore(&self, issue: IgnoredIssue) -> io::Result<()> {
         let mut settings = self.load_settings()?;
@@ -238,6 +265,7 @@ mod tests {
                 source: PathBuf::from("/a/skills"),
                 targets: vec!["claude-code".into()],
                 excluded: ["x".to_string()].into_iter().collect(),
+                baseline: Some(["y".to_string()].into_iter().collect()),
             }],
             mcp_auto_imports: vec![McpAutoImportRule {
                 source: crate::mcp::McpLocationRef {
@@ -257,6 +285,7 @@ mod tests {
                 }],
                 excluded: ["private".to_string()].into_iter().collect(),
                 allow_cross_domain: true,
+                baseline: Some(["docs".to_string()].into_iter().collect()),
             }],
             codex_gateway: GatewaySettings::default(),
             ignored: vec![IgnoredIssue::new(
@@ -278,6 +307,67 @@ mod tests {
         assert_eq!(loaded.manual_sources, Vec::<PathBuf>::new());
         assert_eq!(loaded.auto_links, Vec::<AutoLink>::new());
         assert_eq!(loaded.mcp_auto_imports, Vec::<McpAutoImportRule>::new());
+    }
+
+    /// 升级前写下的 settings.json：两类规则都没有 baseline。
+    /// 首次扫描后读设置即迁移成当前全部名字并写回，旧规则从此不再补建现有的
+    #[test]
+    fn rules_persisted_without_baseline_migrate_on_first_scanned_load() {
+        let t = TempTree::new();
+        let dir = t.root().join("data/SymSync");
+        let store_dir = t.dir("store");
+        t.dir("store/a");
+        t.dir("store/b");
+        let mcp_path = t.root().join("mcp.json");
+        std::fs::write(&mcp_path, r#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = serde_json::json!({
+            "autoLinks": [{"source": store_dir, "targets": ["claude-code"], "excluded": []}],
+            "mcpAutoImports": [{
+                "source": {"id": "src", "harnessId": "claude-code", "domain": "global", "path": mcp_path},
+                "targetDomain": "global",
+                "targets": [],
+                "excluded": []
+            }]
+        });
+        std::fs::write(dir.join("settings.json"), old.to_string()).unwrap();
+        let s = Store::new(dir.clone());
+        let loaded = s.load_settings().unwrap();
+        assert_eq!(loaded.auto_links[0].baseline, None);
+        assert_eq!(loaded.mcp_auto_imports[0].baseline, None);
+
+        let env = crate::discovery::Env {
+            home: t.dir("home"),
+            vars: Default::default(),
+        };
+        let sources = crate::discovery::sources(&env, &[], &[], std::slice::from_ref(&store_dir));
+        let migrated = s.load_settings_migrating_auto_links(&sources).unwrap();
+        let names = |v: &[&str]| Some(v.iter().map(|n| n.to_string()).collect());
+        assert_eq!(migrated.auto_links[0].baseline, names(&["a", "b"]));
+        // 写回了：之后普通读取也带着 baseline，新增的名字不会被并进去
+        t.dir("store/c");
+        assert_eq!(
+            s.load_settings().unwrap().auto_links[0].baseline,
+            names(&["a", "b"])
+        );
+
+        let location = crate::mcp::McpLocation {
+            id: "src".into(),
+            label: "src".into(),
+            harness_id: "claude-code".into(),
+            domain: "global".into(),
+            path: mcp_path,
+            selector: None,
+            matrix_hidden: false,
+        };
+        let overview = crate::mcp::scan(&[location]);
+        let migrated = s
+            .load_settings_migrating_mcp_auto_imports(&overview)
+            .unwrap();
+        assert_eq!(migrated.mcp_auto_imports[0].baseline, names(&["docs"]));
+        let reloaded = s.load_settings().unwrap();
+        assert_eq!(reloaded.mcp_auto_imports[0].baseline, names(&["docs"]));
+        assert_eq!(reloaded.auto_links[0].baseline, names(&["a", "b"]));
     }
 
     #[test]

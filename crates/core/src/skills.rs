@@ -214,11 +214,16 @@ fn propose_by(
     out
 }
 
-/// 自动同步规则展开成格：本体位置找不到 / 目标找不到 → 跳过；skill 在排除名单里 → 跳过。
+/// 自动同步规则展开成格：本体位置找不到 / 目标找不到 → 跳过；skill 在排除名单或
+/// baseline（建规则时已有的）里 → 跳过；还没有 baseline 的旧规则整条跳过。
 /// 随后交给 `propose_links`，只对 Missing 建链
 pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink]) -> Vec<CellRef> {
     let mut out = Vec::new();
     for rule in rules {
+        // 规则只管以后新出现的：没有 baseline 就分不清哪些是新的，宁可不建
+        let Some(baseline) = &rule.baseline else {
+            continue;
+        };
         let Some(source) = find_source(sources, &rule.source) else {
             continue;
         };
@@ -231,7 +236,7 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
                 continue;
             }
             for skill in &source.skills {
-                if rule.excluded.contains(&skill.name) {
+                if rule.excluded.contains(&skill.name) || baseline.contains(&skill.name) {
                     continue;
                 }
                 out.push(CellRef {
@@ -245,20 +250,32 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
     out
 }
 
-/// 新建或合并一条规则：同一本体位置已有规则则并入目标（排除名单不动，解除排除走 `include`）
-pub fn upsert_auto_link(rules: &mut Vec<AutoLink>, source: &Path, targets: &[String]) {
+/// 新建或合并一条规则：同一本体位置已有规则则并入目标（排除名单不动，解除排除走 `include`）。
+/// 规则从无到有（新建，或原先只剩排除名单、没有目标）时拍 baseline：`sources` 里该位置
+/// 当前的全部 skill 名；位置不在 `sources` 里即一个都没有。已生效的规则并入目标不重拍
+pub fn upsert_auto_link(
+    rules: &mut Vec<AutoLink>,
+    sources: &[Source],
+    source: &Path,
+    targets: &[String],
+) {
     let source = normalize(source);
+    let snapshot = || source_names(sources, &source).unwrap_or_default();
     let rule = match rules.iter().position(|r| r.source == source) {
         Some(i) => &mut rules[i],
         None => {
             rules.push(AutoLink {
-                source,
+                source: source.clone(),
                 targets: Vec::new(),
                 excluded: BTreeSet::new(),
+                baseline: None,
             });
             rules.last_mut().expect("刚 push 过")
         }
     };
+    if rule.targets.is_empty() {
+        rule.baseline = Some(snapshot());
+    }
     for t in targets {
         if !rule.targets.contains(t) {
             rule.targets.push(t.clone());
@@ -293,12 +310,33 @@ pub fn exclude(rules: &mut Vec<AutoLink>, source: &Path, skill: &str) {
         Some(i) => {
             rules[i].excluded.insert(skill.to_string());
         }
+        // 没有目标的规则不建任何链；baseline 等 `upsert_auto_link` 加目标时再拍
         None => rules.push(AutoLink {
             source,
             targets: Vec::new(),
             excluded: BTreeSet::from([skill.to_string()]),
+            baseline: Some(BTreeSet::new()),
         }),
     }
+}
+
+/// 升级迁移：给没有 baseline 的旧规则补上本体位置当前的全部 skill 名，
+/// 于是旧规则从这一刻起也只管以后新出现的。本体位置这次没扫到的先不补（可能只是暂时
+/// 不在，补成空集会在它回来时把现有的全部补建），规则继续整条跳过。返回是否改动过
+pub fn migrate_baselines(rules: &mut [AutoLink], sources: &[Source]) -> bool {
+    let mut changed = false;
+    for rule in rules.iter_mut().filter(|r| r.baseline.is_none()) {
+        if let Some(names) = source_names(sources, &rule.source) {
+            rule.baseline = Some(names);
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// 该本体位置当前的全部 skill 名；位置不在 `sources` 里 → None
+fn source_names(sources: &[Source], source: &Path) -> Option<BTreeSet<String>> {
+    find_source(sources, source).map(|s| s.skills.iter().map(|k| k.name.clone()).collect())
 }
 
 /// 解除排除，该 skill 重新纳入自动链接
@@ -1009,12 +1047,14 @@ mod tests {
                 // "nope" 目标不存在：跳过
                 targets: vec!["claude-code".into(), "nope".into()],
                 excluded: ["b".to_string()].into_iter().collect(),
+                baseline: Some(BTreeSet::new()),
             },
             // 本体位置不存在：整条跳过
             AutoLink {
                 source: tree.root().join("gone"),
                 targets: vec!["codex".into()],
                 excluded: BTreeSet::new(),
+                baseline: Some(BTreeSet::new()),
             },
         ];
         let cells = auto_link_cells(&sources, &targets, &rules);
@@ -1037,18 +1077,23 @@ mod tests {
         let mut rules: Vec<AutoLink> = Vec::new();
         let source = PathBuf::from("/a/skills");
         let dotted = PathBuf::from("/a/./skills/"); // 同一处的非归一化写法
-        upsert_auto_link(&mut rules, &source, &["claude-code".into()]);
+        upsert_auto_link(&mut rules, &[], &source, &["claude-code".into()]);
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].source, source);
         // 同 source 合并目标，不重复
-        upsert_auto_link(&mut rules, &dotted, &["claude-code".into(), "codex".into()]);
+        upsert_auto_link(
+            &mut rules,
+            &[],
+            &dotted,
+            &["claude-code".into(), "codex".into()],
+        );
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].targets, vec!["claude-code", "codex"]);
 
         exclude(&mut rules, &dotted, "x");
         assert!(rules[0].excluded.contains("x"));
         // upsert 不动排除名单
-        upsert_auto_link(&mut rules, &source, &["cursor".into()]);
+        upsert_auto_link(&mut rules, &[], &source, &["cursor".into()]);
         assert!(rules[0].excluded.contains("x"));
         assert!(covering(&rules, "/a/skills", "x").is_none());
         assert!(covering(&rules, "/a/skills", "y").is_some());
@@ -1077,6 +1122,7 @@ mod tests {
         let dotted = PathBuf::from("/a/./skills/"); // 同一处的非归一化写法
         upsert_auto_link(
             &mut rules,
+            &[],
             &source,
             &["claude-code".into(), "codex".into(), "cursor".into()],
         );
@@ -1104,7 +1150,7 @@ mod tests {
     fn remove_auto_link_targets_keeps_a_rule_that_still_excludes_something() {
         let mut rules: Vec<AutoLink> = Vec::new();
         let source = PathBuf::from("/a/skills");
-        upsert_auto_link(&mut rules, &source, &["codex".into()]);
+        upsert_auto_link(&mut rules, &[], &source, &["codex".into()]);
         exclude(&mut rules, &source, "x");
 
         remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
@@ -1116,6 +1162,147 @@ mod tests {
         include(&mut rules, &source, "x");
         remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
         assert!(rules.is_empty());
+    }
+
+    /// 真实目录里读本体位置（手动添加的位置），与界面上扫描走同一条 `discovery::sources`
+    fn scan_sources(tree: &TempTree, dir: &Path) -> Vec<Source> {
+        let env = crate::discovery::Env {
+            home: tree.dir("home"),
+            vars: Default::default(),
+        };
+        crate::discovery::sources(&env, &[], &[], &[dir.to_path_buf()])
+    }
+
+    /// 本轮会真的建的链：规则展开 → 只对 Missing 建链
+    fn auto_actions(tree: &TempTree, dir: &Path, t: &Target, rules: &[AutoLink]) -> Vec<String> {
+        let sources = scan_sources(tree, dir);
+        let targets = vec![t.clone()];
+        let cells = auto_link_cells(&sources, &targets, rules);
+        propose_links(&sources, &targets, &cells)
+            .into_iter()
+            .map(|a| a.item_name)
+            .collect()
+    }
+
+    /// 规则只管以后新出现的：建规则时已有的不补建；新增的建；排除照旧；删了重建会重拍 baseline
+    #[test]
+    fn auto_link_rule_only_covers_skills_that_appear_after_it() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.dir("store/a");
+        tree.dir("store/b");
+        let claude = tree.dir("home/.claude/skills");
+        let t = global("claude-code", &claude);
+        let mut rules: Vec<AutoLink> = Vec::new();
+
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&t.id),
+        );
+        assert_eq!(
+            rules[0].baseline,
+            Some(BTreeSet::from(["a".to_string(), "b".to_string()]))
+        );
+        // 已有的 a、b 不建链
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+
+        // 新出现的 c 建，且只建它
+        tree.dir("store/c");
+        let acts = auto_actions(&tree, &store, &t, &rules);
+        assert_eq!(acts, vec!["c"]);
+        tree.link(&claude.join("c"), &store.join("c"));
+
+        // 并入目标不重拍 baseline
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            &["codex".into()],
+        );
+        assert!(!rules[0].baseline.as_ref().unwrap().contains("c"));
+
+        // 排除名单照旧生效
+        tree.dir("store/d");
+        exclude(&mut rules, &store, "d");
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+
+        // 删掉规则再建：baseline 重拍成此刻的全部
+        remove_auto_link(&mut rules, &store);
+        tree.dir("store/e");
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&t.id),
+        );
+        assert_eq!(
+            rules[0].baseline,
+            Some(["a", "b", "c", "d", "e"].map(String::from).into())
+        );
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+        tree.dir("store/f");
+        assert_eq!(auto_actions(&tree, &store, &t, &rules), vec!["f"]);
+    }
+
+    /// 只剩排除名单的规则（exclude 先于规则建出来的）加上目标时才算建规则，这时拍 baseline
+    #[test]
+    fn exclude_only_rule_snapshots_baseline_when_it_gains_targets() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.dir("store/a");
+        let claude = tree.dir("home/.claude/skills");
+        let t = global("claude-code", &claude);
+        let mut rules: Vec<AutoLink> = Vec::new();
+        exclude(&mut rules, &store, "x");
+        tree.dir("store/b");
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&t.id),
+        );
+        assert_eq!(
+            rules[0].baseline,
+            Some(BTreeSet::from(["a".to_string(), "b".to_string()]))
+        );
+        assert!(rules[0].excluded.contains("x"));
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+    }
+
+    /// 升级前持久化的规则没有 baseline：迁移前整条不建，迁移取当前全部名字，此后只建新的
+    #[test]
+    fn legacy_rule_without_baseline_migrates_to_current_skills() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.dir("store/a");
+        tree.dir("store/b");
+        let claude = tree.dir("home/.claude/skills");
+        let t = global("claude-code", &claude);
+        let json = format!(
+            r#"[{{"source":{:?},"targets":["claude-code"],"excluded":[]}}]"#,
+            normalize(&store).to_string_lossy()
+        );
+        let mut rules: Vec<AutoLink> = serde_json::from_str(&json).unwrap();
+        assert_eq!(rules[0].baseline, None);
+        // 迁移前：旧规则不再补建
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+
+        // 本体位置这次没扫到：不迁移
+        assert!(!migrate_baselines(&mut rules, &[]));
+        assert_eq!(rules[0].baseline, None);
+
+        assert!(migrate_baselines(&mut rules, &scan_sources(&tree, &store)));
+        assert_eq!(
+            rules[0].baseline,
+            Some(BTreeSet::from(["a".to_string(), "b".to_string()]))
+        );
+        // 迁移只做一次
+        assert!(!migrate_baselines(&mut rules, &scan_sources(&tree, &store)));
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+        tree.dir("store/c");
+        assert_eq!(auto_actions(&tree, &store, &t, &rules), vec!["c"]);
     }
 
     #[test]
@@ -1166,6 +1353,7 @@ mod tests {
             source: normalize(&ego),
             targets: vec![tg.id.clone()],
             excluded: BTreeSet::new(),
+            baseline: Some(BTreeSet::new()),
         }];
         assert!(auto_link_cells(&sources, &targets, &rules).is_empty());
     }
