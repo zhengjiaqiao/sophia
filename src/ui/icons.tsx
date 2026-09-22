@@ -155,34 +155,3 @@ export function IconAttention(props: IconProps) {
     </Glyph>
   );
 }
-
-// ---- 以下三个不在 DESIGN 的图标词表里，保留给还没改完的页面；T1–T3 改完就删 ----
-
-/// @deprecated 词表外：撤销写字（`撤销` 文字链）
-export function IconUndo(props: IconProps) {
-  return (
-    <Glyph {...props}>
-      <path d="M5.6 3.4 2.6 6.4l3 3" />
-      <path d="M2.6 6.4h6a3.8 3.8 0 0 1 0 7.6H6.2" />
-    </Glyph>
-  );
-}
-
-/// @deprecated 词表外：「再试一次」写字（循环箭头是「刷新」）
-export function IconRefresh(props: IconProps) {
-  return (
-    <Glyph {...props}>
-      <path d="M13.5 8a5.5 5.5 0 1 0-1.6 3.9" />
-      <path d="M13.5 3.6V8H9.1" />
-    </Glyph>
-  );
-}
-
-/// @deprecated 词表外：「打开目录」是离开 Sophia 的文字链（`Button variant="external"`）
-export function IconReveal(props: IconProps) {
-  return (
-    <Glyph {...props}>
-      <path d="M2 12.6V3.8h3.8l1.4 1.8H14v7a.9.9 0 0 1-.9.9H2.9a.9.9 0 0 1-.9-.9Z" />
-    </Glyph>
-  );
-}

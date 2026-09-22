@@ -42,12 +42,6 @@ export interface ConfirmProps {
   onCancel: () => void;
   /// 触发行。不给就居中（没有触发行的场合）
   anchor?: ConfirmAnchor;
-  /** @deprecated 用 children */
-  body?: ReactNode;
-  /** @deprecated 用 nameplate / safetyNote */
-  warning?: ReactNode;
-  /** @deprecated 破坏性不再有单独的样子，忽略 */
-  destructive?: boolean;
 }
 
 const GAP = 6;
@@ -74,8 +68,6 @@ export function Confirm({
   cancelLabel = "取消",
   onCancel,
   anchor,
-  body,
-  warning,
 }: ConfirmProps) {
   // Esc 等同取消
   useEffect(() => {
@@ -119,8 +111,7 @@ export function Confirm({
       )}
       <div className="ss-confirm" role="dialog" aria-modal="true" style={dialogStyle}>
         <div className="ss-confirm__title">{title}</div>
-        {children || body ? <div className="ss-confirm__body">{children ?? body}</div> : null}
-        {warning ? <div className="ss-confirm__body">{warning}</div> : null}
+        {children ? <div className="ss-confirm__body">{children}</div> : null}
         {nameplate ? (
           <div className="ss-confirm__nameplate">
             <div className="ss-confirm__path">{nameplate.path}</div>

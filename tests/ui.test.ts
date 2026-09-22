@@ -29,8 +29,8 @@ const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TIP_DELAY_MS } = await import("../src/ui/Tooltip.tsx");
 const { Rotor } = await import("../src/ui/Rotor.tsx");
-const { Toast, LegacyToast, TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
-const { ErrorBanner, BlackNotice, RowNotice } = await import("../src/ui/ErrorBanner.tsx");
+const { Toast, TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
+const { ErrorBanner, BlackNotice } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
 const { SubPage } = await import("../src/ui/SubPage.tsx");
 const { Cap, capRuns } = await import("../src/ui/Cap.tsx");
@@ -65,9 +65,6 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "AgentKey",
     "Empty",
     "Busy",
-    // 兼容别名：T1–T3 改完调用点删
-    "LegacyToast",
-    "RowNotice",
   ];
   for (const name of exported) {
     assert.equal(typeof (ui as Record<string, unknown>)[name], "function", name);
@@ -278,17 +275,6 @@ test("Button 黑面上：白描边键", () => {
   const html = render(Button, { children: "撤销", size: "compact", onDark: true, onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--compact is-on-dark"/);
   assert.match(cssRule(uiCss, ".ss-btn.is-on-dark"), /border-color:\s*var\(--canvas\)/);
-});
-
-test("Button 兼容：旧 destructive 长得就是默认键，旧 inverse 落到主动作", () => {
-  assert.match(
-    render(Button, { children: "删到废纸篓", variant: "destructive", onClick: noop }),
-    /class="ss-btn"/,
-  );
-  assert.match(
-    render(Button, { children: "已启用", variant: "inverse", onClick: noop }),
-    /class="ss-btn ss-btn--primary"/,
-  );
 });
 
 test("IconButton：28×28，title 必填且同时作 aria-label；收件箱计数等宽跟在右侧", () => {
@@ -576,12 +562,6 @@ test("Toast routine：一行墨字落在白底上，无框无底，撤销是文�
   assert.doesNotMatch(rule, /(^|\s)(background|border)(-[a-z]+)?:/);
 });
 
-test("LegacyToast（兼容）：旧的一句话，外观已是黑显示窗", () => {
-  const html = render(LegacyToast, { kind: "success", message: "开启了", onClose: noop });
-  assert.match(html, /ss-toast--notice ss-toast--legacy/);
-  assert.match(html, /开启了/);
-});
-
 // ===== 错误横幅与行内黑窗 =====
 
 test("ErrorBanner：通栏实心黑 + 40px 指示窗 !，不自动消失；可带白描边键与 ×", () => {
@@ -614,17 +594,6 @@ test("BlackNotice：! + 一句 + 白描边键 + 可选文字链，替代白底�
   const rule = cssRule(uiCss, ".ss-blacknotice");
   assert.match(rule, /background:\s*var\(--ink\)/);
   assert.match(rule, /min-height:\s*var\(--control-h-row\)/);
-});
-
-test("RowNotice（兼容）：旧 props 落到黑窗，禁用动作带原因", () => {
-  const html = render(RowNotice, {
-    message: "这条链接指向一个不存在的地方。",
-    actions: [{ label: "清除", onClick: noop, disabledReason: "这个 agent 的目录只读" }],
-    onLater: noop,
-  });
-  assert.match(html, /class="ss-blacknotice"/);
-  assert.match(html, /title="这个 agent 的目录只读"/);
-  assert.match(html, />稍后</);
 });
 
 // ===== 确认弹窗 =====

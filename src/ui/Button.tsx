@@ -21,11 +21,7 @@ export type ButtonVariant =
   | "primary"
   | "default"
   | "link"
-  | "external"
-  /** @deprecated 规范里没有「破坏性」这一档，长得就是 default；T1–T3 改完调用点删 */
-  | "destructive"
-  /** @deprecated 反色按钮当开关用已作废，布尔状态走 `Switch`，提交走 `primary`；T2 删 */
-  | "inverse";
+  | "external";
 export type ButtonSize = "regular" | "compact" | "row";
 
 interface ButtonBase {
@@ -37,8 +33,6 @@ interface ButtonBase {
   icon?: ReactNode;
   /// 放在实心黑面上：默认键变白描边键、文字链变 `ink-faint`
   onDark?: boolean;
-  /** @deprecated 同 onDark */
-  inverse?: boolean;
 }
 
 /// 禁用必须同时给出原因（DESIGN：禁用必须同时给 title 说明原因，类型上强制）
@@ -84,18 +78,17 @@ export function Button(props: ButtonProps) {
     icon,
     ariaLabel,
     onDark,
-    inverse,
     disabled,
     disabledReason,
   } = props;
 
   const classes = ["ss-btn"];
-  if (variant === "primary" || variant === "inverse") classes.push("ss-btn--primary");
+  if (variant === "primary") classes.push("ss-btn--primary");
   if (variant === "link") classes.push("ss-btn--link");
   if (variant === "external") classes.push("ss-btn--link", "ss-btn--external");
   if (size === "compact") classes.push("ss-btn--compact");
   if (size === "row") classes.push("ss-btn--row");
-  if (onDark || inverse) classes.push("is-on-dark");
+  if (onDark) classes.push("is-on-dark");
   if (icon && children === undefined) classes.push("ss-btn--icon");
 
   return (

@@ -66,8 +66,6 @@
      2px 矩形＝动作与输入、胶囊＝片与开关、圆＝只读状态、直角＝容器 ---- */
   --radius-control: 2px;
   --radius-pill: 32px;
-  /* @deprecated 输入框并入 2px 的 control；页面 css 还在引用，T1–T3 改完删 */
-  --radius-input: var(--radius-control);
 
   /* ---- 可点元素的定高：一律偶数 ----
      实测（Chrome 无头渲染 + 逐像素比对，见 PR 说明）：按钮原先靠 9px/5px 内边距

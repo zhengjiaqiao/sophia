@@ -58,12 +58,9 @@ export {
   IconEdit,
   IconInbox,
   IconPlus,
-  IconRefresh,
-  IconReveal,
   IconSearch,
   IconSettings,
   IconTrash,
-  IconUndo,
 } from "./icons.tsx";
 export type { IconProps } from "./icons.tsx";
 
@@ -71,13 +68,3 @@ export { Busy, Empty } from "./Empty.tsx";
 export type { BusyProps, EmptyAction, EmptyKind, EmptyProps } from "./Empty.tsx";
 
 export { Plain } from "./Plain.tsx";
-
-// ---- 兼容别名：T0 期间页面还按旧 props 写，T1–T3 改完调用点就删 ----
-
-/** @deprecated 旧的「一句话」提示条（没有动词）。用 `Toast`，`verb` 必填 */
-export { LegacyToast } from "./Toast.tsx";
-export type { LegacyToastProps } from "./Toast.tsx";
-
-/** @deprecated 用 `BlackNotice`（行内黑窗） */
-export { RowNotice } from "./ErrorBanner.tsx";
-export type { RowNoticeAction, RowNoticeProps } from "./ErrorBanner.tsx";

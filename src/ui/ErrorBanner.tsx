@@ -60,7 +60,7 @@ export interface BlackNoticeProps {
 }
 
 /// 行内黑窗（画板 Models / Tray「待重启」）：挂在某一行下面、内容宽、高 32 的实心黑块，
-/// `!` + 一句 + 白描边键 + 可选文字链。替代旧的白底线框 RowNotice
+/// `!` + 一句 + 白描边键 + 可选文字链
 export function BlackNotice({ message, action, link }: BlackNoticeProps) {
   return (
     <div className="ss-blacknotice" role="status">
@@ -88,46 +88,6 @@ export function BlackNotice({ message, action, link }: BlackNoticeProps) {
           ) : null}
         </span>
       ) : null}
-    </div>
-  );
-}
-
-export interface RowNoticeAction extends BlackNoticeAction {
-  /// @deprecated 词表外的图标不再上按钮，忽略
-  icon?: ReactNode;
-}
-
-export interface RowNoticeProps {
-  message: ReactNode;
-  actions: RowNoticeAction[];
-  onLater: () => void;
-  laterLabel?: string;
-}
-
-/// @deprecated 用 `BlackNotice`。只为 T2 / T3 改完之前页面还能编译；外观已是黑窗
-export function RowNotice({ message, actions, onLater, laterLabel = "稍后" }: RowNoticeProps) {
-  return (
-    <div className="ss-blacknotice" role="status">
-      <span className="ss-blacknotice__mark" title="要你动手" role="img" aria-label="要你动手">
-        <IconAttention />
-      </span>
-      <span className="ss-blacknotice__message">{message}</span>
-      <span className="ss-blacknotice__actions">
-        {actions.map((a) =>
-          a.disabledReason ? (
-            <Button key={a.label} size="compact" onDark disabled disabledReason={a.disabledReason}>
-              {a.label}
-            </Button>
-          ) : (
-            <Button key={a.label} size="compact" onDark onClick={a.onClick}>
-              {a.label}
-            </Button>
-          ),
-        )}
-        <Button variant="link" onDark onClick={onLater}>
-          {laterLabel}
-        </Button>
-      </span>
     </div>
   );
 }
