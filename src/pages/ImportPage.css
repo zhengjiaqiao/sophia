@@ -324,9 +324,10 @@
   color: var(--ink-faint);
 }
 
-/* 挂起的替换：黑窗贴在被替换那一行正下方 4，从名字那一列起 */
-.ss-import__rowtoast {
-  padding: 4px 0 6px 22px;
+/* 替换的结果：例行一行，占「只建链接，不动源文件」那个位置，贴在「添加 N 个」左边 */
+.ss-import__result {
+  margin-left: auto;
+  padding-right: var(--space-xs);
 }
 
 /* ---- 列表最后一行：已添加 N 个 ▸（12 ink-mute，可展开） ---- */

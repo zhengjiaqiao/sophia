@@ -6,12 +6,14 @@ import {
   Busy,
   Button,
   Chip,
+  Confirm,
   DupMark,
   Spinner,
   StateDot,
   SubPage,
   Toast,
   Tooltip,
+  type ConfirmAnchor,
   type Dot,
   type ToastAgent,
   type ToastKind,
@@ -26,7 +28,6 @@ import {
   type SentencePart,
 } from "./pendingIssues.ts";
 import type { ModelIssue } from "../modelsView.ts";
-import { defer, type Deferred } from "../deferredCommit.ts";
 import { displayPath } from "../pathText.ts";
 import { RowTip } from "./RowTip.tsx";
 import "./PendingPage.css";
@@ -112,10 +113,21 @@ interface Done {
   reason?: string;
   stats?: string;
   undo?: () => void;
-  /// 提示条到期或被关掉时要做的事（挂起的删除在这时真正提交）
-  onExpire?: () => void;
-  /// 收起这条提示并执行 onExpire；由 settle 一次建好
+  /// 收起这条提示；由 settle 一次建好（函数身份不变，提示条的计时器不会被重渲染重置）
   expire: () => void;
+}
+
+/// 等用户确认的「只留 X 的」
+interface Asking {
+  issue: SkillIssue;
+  /// null：另一份不在已知来源里，只能删这一份
+  keep: DeleteChoice | null;
+  /// 要移到废纸篓的那几份
+  drop: DeleteChoice[];
+  /// 删完会改指到留下那份的链接数
+  relink: number;
+  index: number;
+  anchor?: ConfirmAnchor;
 }
 
 /// 模型段在本机记下的忽略
@@ -454,14 +466,8 @@ export function PendingPage({
   const [done, setDone] = useState<Done[]>([]);
   /// MCP 两份不一样：展开着的那几条与各自的比对结果
   const [diffs, setDiffs] = useState<Record<string, McpDiff | "loading" | Error>>({});
-  /// 挂起的删除（只留 X 的）：提示条到期 / 关掉 / 换段 / 离开页面时提交，撤销则丢掉
-  const deferred = useRef(new Map<string, Deferred>());
-  const commitAll = () => {
-    for (const d of deferred.current.values()) void d.commit().catch(() => {});
-    deferred.current.clear();
-  };
-  // 离开页面：挂着的删除全部提交（窗口关闭另有 App 的 flushAll 兜底）
-  useEffect(() => () => commitAll(), []);
+  /// 「只留 X 的」等用户确认的那一次：删用户内容一律先确认（DESIGN 20b2844）
+  const [asking, setAsking] = useState<Asking | null>(null);
 
   /// 句子列与动作列的宽度**只增不减，冻结到离开页面**：处理完一行后那一行换成提示条，
   /// 列宽若按剩下的行重算，整列会跳一下。每段各记各的
@@ -491,7 +497,6 @@ export function PendingPage({
   useEffect(() => {
     setShowIgnored(false);
     setDone([]);
-    commitAll();
   }, [segment]);
 
   // 量出这一段当前的句子列 / 动作列宽度，只在变宽时更新（setState 后再量结果不变，不会循环）
@@ -540,10 +545,7 @@ export function PendingPage({
   /// 这一行处理完：提示条插回它原来的位置
   /// 到期 / 关掉的回调在这里一次建好：传给提示条的函数身份不变，它的计时器才不会每次重渲染都重来
   const settle = (key: string, index: number, toast: Omit<Done, "key" | "index" | "expire">) => {
-    const expire = () => {
-      setDone((prev) => prev.filter((d) => d.key !== key));
-      toast.onExpire?.();
-    };
+    const expire = () => setDone((prev) => prev.filter((d) => d.key !== key));
     setDone((prev) => [...prev.filter((d) => d.key !== key), { key, index, ...toast, expire }]);
   };
 
@@ -691,13 +693,14 @@ export function PendingPage({
       await onRefresh();
     });
 
-  /// 同名两份：只留 `keep` 的，另外几份进废纸篓。**不确认，给撤销**（⑪）：删除先挂起
-  /// （deferredCommit），界面上当它已经发生；提示条到期、被关掉、换段或离开页面时才真正删，
-  /// 撤销就是什么都没发生。在 git 仓库里的不代删——先体检一次，挡住就不挂起；
-  /// 提交时再体检一次（计划只在后端存一份，挂起期间可能被别的删除顶掉，也可能磁盘变了）
+  /// 同名两份：只留 `keep` 的，另外几份移到废纸篓。**删用户内容先确认**（DESIGN 20b2844）：
+  /// 先体检（git 仓库里的不代删——那道闸门在 core 的删除计划里，挡住就直接说「没删掉」），
+  /// 通过了才弹锚定确认，说清哪份进废纸篓、几条链接改指；确认后执行，这一行原位出例行一行。
+  /// `keep` 为 null：另一份不在已知来源里，只能删这一份
   const keepOnly = (issue: SkillIssue, keep: DeleteChoice | null, index: number) =>
     void run(async () => {
       const drop = issue.deletes.filter((d) => d !== keep);
+      let relink = 0;
       for (const choice of drop) {
         const planned = await api.planDeleteSource(choice.sourceId, choice.skill);
         if (planned.plan.inGit !== null) {
@@ -711,50 +714,74 @@ export function PendingPage({
           });
           return;
         }
+        if (planned.plan.relinkTo !== null) relink += planned.plan.affected.length;
       }
-      const d = defer(`keep:${issue.key}`, async () => {
-        for (const choice of drop) {
-          const planned = await api.planDeleteSource(choice.sourceId, choice.skill);
-          if (planned.plan.inGit !== null) throw new Error("它在 git 仓库里，交给 git 处理更稳妥");
-          const reason = failureReason(await api.deleteSource(planned.planId));
-          if (reason !== null) throw new Error(reason);
-        }
-      });
-      deferred.current.set(issue.key, d);
-      const kept = keep ?? null;
-      const commit = () => {
-        deferred.current.delete(issue.key);
-        void d
-          .commit()
-          .then(onRefresh)
-          .catch((e) => {
-            settle(issue.key, index, {
-              tier: "notice",
-              kind: "cannot",
-              verb: "没删掉",
-              names: drop.map((c) => `${c.label} 的 ${c.skill}`),
-              reason: e instanceof Error ? e.message : String(e),
-            });
-            void onRefresh();
-          });
-      };
-      settle(issue.key, index, {
-        tier: "notice",
-        kind: "success",
-        verb: kept === null ? "删到废纸篓" : "只留",
-        names: [
-          kept === null
-            ? `${drop[0]?.label ?? ""} 的 ${issue.subject ?? ""}`
-            : `${kept.label} 的 ${issue.subject ?? kept.skill}`,
-        ],
-        undo: () => {
-          d.undo();
-          deferred.current.delete(issue.key);
-          dismiss(issue.key);
-        },
-        onExpire: commit,
+      // 确认框锚在这一行、右沿对齐按下的那组键（DESIGN「对话框」：触发行留在遮罩之上）
+      const row = pageRef.current?.querySelector<HTMLElement>(
+        `[data-issue-key="${CSS.escape(issue.key)}"]`,
+      );
+      const keys = row?.querySelector<HTMLElement>(".pending-page__buttons");
+      const r = row?.getBoundingClientRect();
+      const k = keys?.getBoundingClientRect();
+      setAsking({
+        issue,
+        keep,
+        drop,
+        relink,
+        index,
+        anchor: r && k ? { top: r.top, bottom: r.bottom, left: r.left, right: k.right } : undefined,
       });
     });
+
+  /// 确认之后：再体检一次（磁盘可能变了），删掉，这一行原位出例行一行（不带撤销）
+  const confirmKeep = () => {
+    if (asking === null) return;
+    const { issue, keep, drop, index } = asking;
+    setAsking(null);
+    void run(async () => {
+      for (const choice of drop) {
+        const planned = await api.planDeleteSource(choice.sourceId, choice.skill);
+        const reason =
+          planned.plan.inGit !== null
+            ? "它在 git 仓库里，交给 git 处理更稳妥"
+            : failureReason(await api.deleteSource(planned.planId));
+        if (reason !== null) {
+          settle(issue.key, index, {
+            tier: "notice",
+            kind: "cannot",
+            verb: "没删掉",
+            names: [`${choice.label} 的 ${choice.skill}`],
+            reason,
+          });
+          await onRefresh();
+          return;
+        }
+      }
+      settle(issue.key, index, {
+        tier: "routine",
+        kind: "success",
+        verb: keep === null ? "删到废纸篓" : "只留",
+        names: [
+          keep === null
+            ? `${drop[0]?.label ?? ""} 的 ${issue.subject ?? ""}`
+            : `${keep.label} 的 ${issue.subject ?? keep.skill}`,
+        ],
+      });
+      await onRefresh();
+    });
+  };
+
+  // 确认框开着时 Esc 只关确认框：SubPage 也在 document 上听 Esc，不拦的话会顺带退回主视图
+  useEffect(() => {
+    if (asking === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setAsking(null);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [asking]);
 
   // ----- MCP 段的动作 -----
 
@@ -835,7 +862,12 @@ export function PendingPage({
     actions: ReactNode,
     extra?: ReactNode,
   ) => (
-    <div className={`pending-page__row${extra ? " is-open" : ""}`} key={key} data-rowtip>
+    <div
+      className={`pending-page__row${extra ? " is-open" : ""}`}
+      key={key}
+      data-rowtip
+      data-issue-key={key}
+    >
       <div className="pending-page__markcell">{mark}</div>
       <div className="pending-page__sentence">{sentence}</div>
       <div className="pending-page__actions">{actions}</div>
@@ -1137,6 +1169,23 @@ export function PendingPage({
           {rows()}
         </Busy>
       </div>
+      {asking !== null ? (
+        <Confirm
+          title={
+            asking.keep === null
+              ? `删掉 ${asking.drop[0]?.label ?? ""} 的 ${asking.issue.subject ?? ""}？`
+              : `只留 ${asking.keep.label} 的 ${asking.issue.subject ?? asking.keep.skill}？`
+          }
+          confirmLabel={asking.keep === null ? "删到废纸篓" : "只留这份"}
+          onConfirm={confirmKeep}
+          onCancel={() => setAsking(null)}
+          anchor={asking.anchor}
+          align="end"
+        >
+          {joinWords(asking.drop.map((d) => d.label).join("、"), "那份移到废纸篓")}
+          {asking.relink > 0 ? `，${asking.relink} 条链接改指到这一份` : null}
+        </Confirm>
+      ) : null}
     </SubPage>
   );
 }

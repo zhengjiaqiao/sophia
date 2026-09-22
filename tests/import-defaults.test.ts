@@ -20,37 +20,6 @@ test("同一组目标与顺序无关；按列切", () => {
   ]);
 });
 
-test("一次只挂一个撤销：挂第二笔前先提交第一笔，离开时提交还挂着的", async () => {
-  const { defer, pendingCount } = await import("../src/deferredCommit.ts");
-  const { undoSlot } = await import("../src/pages/importDefaults.ts");
-  const ran: string[] = [];
-  const slot = undoSlot();
-
-  // 第一笔：换一个来源前挂着
-  slot.hold(defer("replace:global:/a", async () => void ran.push("a")));
-  // 第二笔（另一个来源，key 不同，defer 自己不会顶掉第一笔）：先 flush 再挂
-  await slot.flush();
-  assert.deepEqual(ran, ["a"]);
-  slot.hold(defer("replace:global:/b", async () => void ran.push("b")));
-  assert.equal(pendingCount(), 1);
-
-  // 撤销过的不再提交
-  slot.undo();
-  await slot.flush();
-  assert.deepEqual(ran, ["a"]);
-  assert.equal(pendingCount(), 0);
-
-  // 离开页面：还挂着的那一笔提交；提交失败原样抛给调用方（ImportPage 交给 onError）
-  slot.hold(
-    defer("replace:global:/c", async () => {
-      throw new Error("写不进去");
-    }),
-  );
-  await assert.rejects(slot.flush(), /写不进去/);
-  assert.equal(pendingCount(), 0);
-  await slot.flush();
-});
-
 test("同名来源：只挑出路径里不同的那一级", async () => {
   const { distinguishingSegments } = await import("../src/pages/importDefaults.ts");
   const base = "/Users/me/Library/Application Support/WeiboAP";

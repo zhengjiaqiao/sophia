@@ -12,7 +12,6 @@ import type {
 import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Toast } from "../ui";
 import { displayPath } from "../pathText.ts";
 import { RowTip } from "./RowTip.tsx";
-import { defer } from "../deferredCommit.ts";
 import foldersArt from "../assets/type-folders.svg";
 import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
@@ -24,7 +23,6 @@ import {
   saveImportMemory,
   distinguishingSegments,
   sameSet,
-  undoSlot,
 } from "./importDefaults.ts";
 import "./ImportPage.css";
 
@@ -251,26 +249,11 @@ export default function ImportPage({
     void run(() => (on ? api.removeAutoLinkTargets(path, [id]) : api.setAutoLink(path, [id])));
   };
 
-  /// 挂起的替换：提示条还在时可撤销；到期、关掉、离开页面时提交
-  const [replacing, setReplacing] = useState<{
-    /// 提示条的 key：每挂一笔换一个，新提示条重新计时
-    key: string;
-    names: string[];
-    commit: () => void;
-    undo: () => void;
-  } | null>(null);
-  /// 一次只挂一笔替换：再挂之前先把上一笔提交掉
-  const pendingReplace = useRef(undoSlot());
-  const replaceSeq = useRef(0);
-  // 离开页面：挂着的替换就此提交（窗口关闭另有 App 的 flushAll 兜底）
-  useEffect(
-    () => () => {
-      void pendingReplace.current.flush().then(onChange, (e) => onError(String(e)));
-    },
-    // 只在卸载时跑
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+  /// 刚替换完的那几个：底栏结果位置出例行一行 `✓ 替换 sdlc`（不带撤销）。
+  /// 每次替换换一个 key，新提示条重新计时
+  const [replaced, setReplaced] = useState<{ key: number; names: string[] } | null>(null);
+  /// 函数身份不变：提示条的计时器不会被重渲染重置
+  const dismissReplaced = useRef(() => setReplaced(null)).current;
 
   /// 建链：这些 skill × 点亮的目标里缺的
   const link = async (skills: string[]): Promise<SyncReport | null> => {
@@ -284,22 +267,15 @@ export default function ImportPage({
   const doAdd = async () => {
     if (source === undefined) return;
     setBusy(true);
-    // 上一笔替换还挂着（比如换了来源又替换）：先提交它，失败交给壳，这一次照常做
-    if (pendingReplace.current.current()?.isPending()) {
-      setReplacing(null);
-      try {
-        await pendingReplace.current.flush();
-      } catch (e) {
-        onError(String(e));
-      }
-    }
     try {
       // 这次又勾上的、之前被排除在规则外的 skill 重新纳入
       for (const skill of names.filter((n) => excluded.includes(n))) {
         await api.includeAutoLink(source.path, skill);
       }
-      // 同名选了替换的：先体检一次，在 git 仓库里的不代删、这一行照常跳过
-      const replaced: { skill: string; holder: { sourceId: string; label: string } }[] = [];
+      // 同名选了替换的：这一行的显式选择 + 按下「添加 N 个」就是确认（DESIGN 20b2844），当场执行、
+      // 不挂起不给撤销。先把现有那份移到废纸篓（链到它的会改指到这一份），再和其余的一起建链。
+      // 在 git 仓库里的不代删，这一行照常跳过
+      const done: string[] = [];
       for (const skill of replace.filter((n) => names.includes(n))) {
         const holder = holders.get(skill);
         if (!holder) continue;
@@ -308,75 +284,39 @@ export default function ImportPage({
           onNotice(`没替换 ${skill}：${holder.label} 那份在 git 仓库里，交给 git 处理更稳妥`);
           continue;
         }
-        replaced.push({ skill, holder });
+        const failed = (await api.deleteSource(planned.planId)).entries.find(
+          (e) => e.outcome.status === "failed",
+        );
+        if (failed && failed.outcome.status === "failed") {
+          onNotice(`没替换 ${skill}：${failed.outcome.reason}`);
+          continue;
+        }
+        done.push(skill);
       }
-      const direct = names.filter((n) => !replaced.some((r) => r.skill === n));
       const memory = loadImportMemory(memoryKey);
       saveImportMemory(memoryKey, {
         last: targetIds,
         streak: memory && sameSet(memory.last, targetIds) ? memory.streak + 1 : 1,
       });
 
-      if (direct.length > 0) {
-        const report = await link(direct);
-        if (report === null && replaced.length === 0) {
-          // 动作为空不等于「都已经开着了」：同名被占、链接失效、整个文件夹是链接都产出空动作
-          onNotice("一个都没添加：选中的 skill 在这些 agent 下的位置已经被占着了");
-          await onChange();
-          setBusy(false);
-          return;
-        }
-        if (report !== null) onReport(report);
-      }
-
-      if (replaced.length === 0) {
+      const report = await link(names);
+      if (report === null && done.length === 0) {
+        // 动作为空不等于「都已经开着了」：同名被占、链接失效、整个文件夹是链接都产出空动作
+        onNotice("一个都没添加：选中的 skill 在这些 agent 下的位置已经被占着了");
         await onChange();
+        setBusy(false);
+        return;
+      }
+      if (report !== null) onReport(report);
+      await onChange();
+      if (done.length === 0) {
         onClose();
         return;
       }
-
-      // 替换整体挂起：现有那份进废纸篓 + 这一份建链，一起在提交时做；撤销就相当于这几行没做。
-      // 提交时再体检一次（后端只存一份删除计划，挂起期间可能被顶掉，也可能磁盘变了）
-      const deferKey = `replace:${page.key}:${selected}`;
-      const d = defer(deferKey, async () => {
-        for (const { skill, holder } of replaced) {
-          const planned = await api.planDeleteSource(holder.sourceId, skill);
-          if (planned.plan.inGit !== null)
-            throw new Error(`没替换 ${skill}：${holder.label} 那份在 git 仓库里`);
-          const failed = (await api.deleteSource(planned.planId)).entries.find(
-            (e) => e.outcome.status === "failed",
-          );
-          if (failed && failed.outcome.status === "failed") throw new Error(failed.outcome.reason);
-        }
-        const report = await link(replaced.map((r) => r.skill));
-        if (report !== null) onReport(report);
-      });
-      pendingReplace.current.hold(d);
-      replaceSeq.current += 1;
-      // 直接添加的那些已经做完，勾选里只留挂着的替换
-      setNames(replaced.map((r) => r.skill));
-      const done = () => {
-        setReplacing(null);
-        setNames([]);
-        setReplace([]);
-      };
-      setReplacing({
-        key: `${deferKey}#${replaceSeq.current}`,
-        names: replaced.map((r) => r.skill),
-        commit: () => {
-          done();
-          void d.commit().then(onChange, (e) => {
-            onError(String(e));
-            void onChange();
-          });
-        },
-        undo: () => {
-          d.undo();
-          done();
-          void onChange();
-        },
-      });
-      await onChange();
+      // 有替换：留在这一页，底栏结果位置说一声替换了哪几个
+      setNames([]);
+      setReplace([]);
+      setReplaced({ key: Date.now(), names: done });
       setBusy(false);
     } catch (e) {
       onError(String(e));
@@ -566,7 +506,6 @@ export default function ImportPage({
                       {col.map((entry) => {
                         const on = names.includes(entry.name);
                         const chosen = replace.includes(entry.name);
-                        const pendingHere = replacing?.names.includes(entry.name) ?? false;
                         return (
                           <div key={entry.name}>
                             <button
@@ -596,20 +535,7 @@ export default function ImportPage({
                                 </span>
                               ) : null}
                             </button>
-                            {replacing !== null && replacing.names[0] === entry.name ? (
-                              // 挂起的替换：提示条贴在被替换的那一行下方（锚在触发它的控件上）
-                              <div className="ss-import__rowtoast">
-                                <Toast
-                                  key={replacing.key}
-                                  kind="success"
-                                  verb="替换"
-                                  names={replacing.names}
-                                  action={{ label: "撤销", onClick: replacing.undo }}
-                                  onDismiss={replacing.commit}
-                                  onClose={replacing.commit}
-                                />
-                              </div>
-                            ) : on && entry.holder !== null && !pendingHere ? (
+                            {on && entry.holder !== null ? (
                               <div className="ss-import__clash">
                                 {chosen ? (
                                   <Button
@@ -635,7 +561,7 @@ export default function ImportPage({
                                   {joinWords(
                                     "替换后",
                                     entry.holder.label,
-                                    "那份进废纸篓、链到它的改指到这一份，可撤销",
+                                    "那份进废纸篓、链到它的改指到这一份",
                                   )}
                                 </span>
                                 <Button variant="link" onClick={() => toggleName(entry.name)}>
@@ -703,7 +629,21 @@ export default function ImportPage({
                 <span className="ss-import__suggest">每次都选这几个？可以打开</span>
               ) : null}
             </span>
-            <span className="ss-import__safety">只建链接，不动源文件</span>
+            {replaced !== null ? (
+              // 替换的结果：例行一行，贴在「添加 N 个」左边的结果位置（锚在触发它的控件上）
+              <span className="ss-import__result">
+                <Toast
+                  key={replaced.key}
+                  tier="routine"
+                  kind="success"
+                  verb="替换"
+                  names={replaced.names}
+                  onDismiss={dismissReplaced}
+                />
+              </span>
+            ) : (
+              <span className="ss-import__safety">只建链接，不动源文件</span>
+            )}
             {blocked ? (
               <Button size="row" variant="primary" disabled disabledReason={blocked}>
                 {`添加 ${chosen} 个`}
