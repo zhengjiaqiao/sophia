@@ -20,23 +20,6 @@ const TOKEN_FILE = "src/tokens.css";
 /// 否则新写的文件会悄悄落进豁免里。
 const LEGACY = [];
 
-/// 文案旧词表（old-terms）的待清名单：这些页面文件的可见文案里还有旧词，
-/// 归 UI v4 的 T1–T3 改（docs/superpowers/plans/2026-09-22-ui-v4.md）。
-/// 同 LEGACY：逐个列文件、不许通配；谁改完自己的文件谁划掉，T5 收口时必须为空。
-const OLD_TERMS_PENDING = [
-  "src/App.tsx",
-  "src/DomainView.tsx",
-  "src/McpTab.tsx",
-  "src/SkillsTab.tsx",
-  "src/pages/ImportPage.tsx",
-  "src/pages/McpImportPage.tsx",
-  "src/pages/PendingPage.tsx",
-  "src/pages/SettingsPage.tsx",
-  "src/pages/pendingIssues.ts",
-];
-
-/// 带框标签（framed-tag）的待清名单：同上，归 T3
-const FRAMED_TAG_PENDING = ["src/pages/ImportPage.css"];
 
 const rules = [
   {
@@ -138,7 +121,6 @@ const rules = [
     // 画板那边是 lint-artboards.mjs 的同名规则，这里拦代码里的回潮
     desc: "术语：可见文案不说 导入 / 引入 / 矩阵 / 本体 / 撞名 / 整目录链走 / 链走",
     run(src, path) {
-      if (OLD_TERMS_PENDING.includes(path)) return [];
       const text = visibleText(src);
       return ["导入", "引入", "矩阵", "本体", "撞名", "整目录链走", "链走"].filter((w) => text.includes(w));
     },
@@ -159,7 +141,6 @@ const rules = [
     // 旧方标签的写法是 padding 1px 6px + 1px 描边，同一条规则块里两样都有就报
     desc: "有框的都能点：不可点的标签不带框（旧方标签 padding 1px 6px + border）",
     run(src, path) {
-      if (FRAMED_TAG_PENDING.includes(path)) return [];
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ");
       const out = [];
       for (const m of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -237,9 +218,6 @@ const checked = files.length - skipped;
 if (errs === 0) console.log(`\x1b[32m✓\x1b[0m 界面规范：${checked} 个文件零违规${skipped ? `（${skipped} 个旧文件暂时豁免）` : ""}`);
 else console.log(`\n${errs} 个违规，检查了 ${checked} 个文件${skipped ? `，豁免 ${skipped} 个` : ""}`);
 
-if (args.length === 0 && (OLD_TERMS_PENDING.length || FRAMED_TAG_PENDING.length)) {
-  console.log(`\x1b[33m!\x1b[0m 旧词 / 带框标签待清名单还剩 ${OLD_TERMS_PENDING.length + FRAMED_TAG_PENDING.length} 个文件（T1–T3 改完划掉）`);
-}
 if (skipped > 0 && args.length === 0) {
   console.log(`\x1b[33m!\x1b[0m 豁免名单还剩 ${skipped} 个文件，T10 收口时必须清空：\n   ${LEGACY.join("\n   ")}`);
 }
