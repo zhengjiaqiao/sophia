@@ -6,6 +6,7 @@ import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./Domain
 import ImportPage from "./pages/ImportPage";
 import { pathsOfKey } from "./pages/pendingIssues";
 import { defer, type Deferred } from "./deferredCommit";
+import { shortDate } from "./dateText";
 import { Empty, Toast, TOAST_DWELL_MS } from "./ui";
 import { toastFor, type FailedItem, type ToastItem, type ToastOp } from "./toastText";
 import type {
@@ -505,7 +506,18 @@ export default function SkillsTab({
     void api
       .planDeleteSource(row.sourceId, row.skill)
       .then((planned) =>
-        setDupReadout((prev) => new Map(prev).set(key, `${planned.plan.entries} 个文件`)),
+        setDupReadout((prev) =>
+          new Map(prev).set(
+            key,
+            // `改于 9月20日 · 3 个文件`；改动时间读不到时只写文件数
+            [
+              planned.plan.modified != null ? `改于 ${shortDate(planned.plan.modified)}` : null,
+              `${planned.plan.entries} 个文件`,
+            ]
+              .filter((part): part is string => part !== null)
+              .join(" · "),
+          ),
+        ),
       )
       .catch(() => undefined);
   };

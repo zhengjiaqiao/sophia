@@ -406,7 +406,11 @@ function DupExtra({
   }, []);
   return (
     <>
-      {readout !== undefined ? <span>{readout}</span> : null}
+      {readout !== undefined ? (
+        <span className="mx-extra__readout" title={readout}>
+          {readout}
+        </span>
+      ) : null}
       <Tooltip content="另一份进废纸篓，可撤销">
         <Button variant="link" onClick={onKeep} ariaLabel={label}>
           只留这份

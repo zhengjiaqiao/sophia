@@ -662,7 +662,7 @@ export default function Matrix(props: MatrixProps) {
         // 列头只回应列头自己的悬停；格子的十字带不点亮列头（画板 Main）
         if (headHover === col.id) classes.push("is-hot");
         else if (hintCols.includes(col.id)) classes.push("is-hint");
-        if (flashCol === col.id) classes.push("ss-flash");
+        if (flashCol === col.id) classes.push("mx-jump");
         return (
           <div
             key={col.id}
@@ -753,7 +753,7 @@ export default function Matrix(props: MatrixProps) {
     const classes = ["mx-grid", "mx-row"];
     if (isSelected) classes.push("is-selected");
     if (hot) classes.push("is-hot");
-    if (flashRows.has(row.key)) classes.push("ss-flash");
+    if (flashRows.has(row.key)) classes.push("mx-jump");
     const showExtra = row.extra !== undefined && hot;
     return (
       <div

@@ -371,6 +371,8 @@
 }
 
 .mx-name {
+  flex-shrink: 0;
+  max-width: 100%;
   overflow: hidden;
   font-size: var(--size-body);
   line-height: var(--leading-caption);
@@ -388,11 +390,31 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
   font-size: var(--size-caption);
   color: var(--ink-mute);
   white-space: nowrap;
+}
+
+.mx-row__name > * {
+  flex-shrink: 0;
+}
+
+.mx-row__name > .mx-extra {
+  flex-shrink: 1;
+}
+
+/* 名字不让位：名称列放不下全句时读数自己省略，全文在 title 里；「只留这份」不缩 */
+.mx-extra__readout {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mx-extra .ss-tipwrap {
+  flex-shrink: 0;
 }
 
 .mx-row__transport {
@@ -490,5 +512,45 @@
   .mx-filter,
   .mx-head__col {
     transition: none;
+  }
+}
+
+/* 刚变化的格子闪的是**目标状态**：闪烁那 120ms 里不画悬停预览——否则鼠标还停在格上，
+   刚开启的格会被预览成「关掉之后」的空心环（反色空心环读作「未开启」） */
+.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-preview] .ss-dot__fill {
+  opacity: 1;
+}
+
+.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-preview] .ss-dot__preview {
+  opacity: 0;
+}
+
+/* 从待处理页跳回：surface 行带闪两次（不用反色——实心黑只有「机器在说话 / 已按下」两个意思）。
+   整列定位时列头同样闪两次 */
+.mx-jump {
+  animation: mx-jump calc(var(--motion-fast) * 4) var(--ease-mech);
+}
+
+@keyframes mx-jump {
+  0%,
+  25% {
+    background-color: var(--surface);
+  }
+  26%,
+  50% {
+    background-color: transparent;
+  }
+  51%,
+  75% {
+    background-color: var(--surface);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mx-jump {
+    animation: none;
   }
 }
