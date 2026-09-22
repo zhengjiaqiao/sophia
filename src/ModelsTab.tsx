@@ -315,12 +315,12 @@ export function ModelBox({
     <div className="models-box-wrap">
       <div
         className={`models-box${open ? " is-open" : ""}`}
-        data-tool={tool.id}
         role="button"
         tabIndex={0}
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-label={`${tool.name} 的生效模型，点一下改选`}
+        data-tool={tool.id}
         onClick={onToggleOpen}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget) return;
