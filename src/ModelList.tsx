@@ -2,10 +2,15 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import {
   MODEL_FILTER_THRESHOLD,
-  modelGroups,
+  PINNED_PREVIEW,
+  frozenGroups,
+  modelEntryKey,
   modelRowId,
   modelRowLabel,
+  pinnedEntries,
+  pinnedLabel,
   providerLabel,
+  snapshotOrder,
 } from "./modelsView.ts";
 import type { ModelEntry } from "./modelsView.ts";
 import type { GatewayProvider } from "./types.ts";
@@ -29,12 +34,15 @@ export interface ModelListProps {
   empty?: ReactNode;
 }
 
-export const entryKey = (entry: ModelEntry) => `${entry.provider.id}|${entry.model.id}`;
+export const entryKey = modelEntryKey;
 
 /**
  * 默认一列名称，完整 id 进该行提示框；友好名与 id 明显不同时行尾才写 id（`modelRowId`）。
  * 按服务商分小组头 `azure · 12`，一家一个也有；行内去掉重复前缀。
- * 已选置顶、勾选当场写盘；超过约 8 行时出筛选框，列表在自身范围内滚动；底部 `已选 N 个模型`。
+ * 已选置顶：最上面一组 `已选 · N`（名字写全带服务商前缀），各服务商分组里照常保留这些行；
+ * 打开（挂载）时排一次序并冻结，之后勾选 / 取消不跳位，下次打开再重排；超过 5 个先列前 5
+ * +「等 N 个 ▸」。勾选当场写盘；超过约 8 行时出筛选框（已选组同样过滤），列表在自身范围内滚动；
+ * 底部 `已选 N 个模型`。
  */
 export function ModelList({
   entries,
@@ -46,11 +54,71 @@ export function ModelList({
   empty,
 }: ModelListProps) {
   const [query, setQuery] = useState("");
+  /// 打开那一刻的排序：之后勾选只改状态、不挪位置（DESIGN「已选置顶」）
+  const [snap] = useState(() => snapshotOrder(entries));
+  const [pinnedOpen, setPinnedOpen] = useState(false);
   const withFilter = entries.length > MODEL_FILTER_THRESHOLD;
-  const groups = modelGroups(entries, withFilter ? query : "");
+  const term = withFilter ? query : "";
+  const groups = frozenGroups(entries, snap, term);
+  const pinned = pinnedEntries(entries, snap, term);
+  const pinnedShown = pinnedOpen ? pinned : pinned.slice(0, PINNED_PREVIEW);
   const flash = new Set(flashKeys ?? []);
   const selected = entries.filter((e) => e.model.selected).length;
   let order = 0;
+
+  /// 一行：整行是命中区；已选组里的名字写全（带服务商前缀），分组里去掉重复前缀
+  const row = (entry: ModelEntry, where: "pinned" | "group") => {
+    const { provider, model } = entry;
+    const key = entryKey(entry);
+    const flashing = where === "group" && flash.has(key);
+    const id = where === "group" ? modelRowId(model) : null;
+    const fullId = model.slug || model.id;
+    const i = order++;
+    return (
+      <Tooltip
+        key={`${where}:${key}`}
+        content={showGateway ? `${fullId} · ${providerLabel(provider)}` : fullId}
+      >
+        <div
+          className={`models-option${flashing ? " is-flash" : ""}`}
+          style={flashing ? { animationDelay: `${Math.min(i, 12) * 60}ms` } : undefined}
+          role="option"
+          aria-selected={model.selected}
+          tabIndex={0}
+          onClick={() => !busy && onToggle(provider, model.id)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              if (!busy) onToggle(provider, model.id);
+            }
+          }}
+        >
+          {/* 12px 方框只画状态（方＝我选的）；命中区是整行，读屏走 aria-selected */}
+          <span
+            className={`ss-checkbox models-option__check${model.selected ? " is-on" : ""}`}
+            aria-hidden="true"
+          >
+            {model.selected ? (
+              <svg
+                width="8"
+                height="8"
+                viewBox="0 0 8 8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+              >
+                <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
+              </svg>
+            ) : null}
+          </span>
+          <span className="models-option__name">
+            {where === "pinned" ? pinnedLabel(model) : modelRowLabel(model)}
+          </span>
+          {id !== null ? <span className="models-option__id">{id}</span> : null}
+        </div>
+      </Tooltip>
+    );
+  };
 
   return (
     <div className="model-list">
@@ -99,67 +167,51 @@ export function ModelList({
               </Button>
             </p>
           ) : (
-            groups.map((group) => (
-              <div key={group.vendor} className="model-list__group">
-                <div className="model-list__group-head">
-                  <span className="model-list__vendor">{group.vendor}</span>
-                  <span className="model-list__dot">·</span>
-                  <span className="model-list__count">{group.entries.length}</span>
-                </div>
-                {group.entries.map((entry) => {
-                  const { provider, model } = entry;
-                  const key = entryKey(entry);
-                  const flashing = flash.has(key);
-                  const id = modelRowId(model);
-                  const fullId = model.slug || model.id;
-                  const i = order++;
-                  return (
-                    <Tooltip
-                      key={key}
-                      content={showGateway ? `${fullId} · ${providerLabel(provider)}` : fullId}
+            <>
+              {/* 已选置顶：打开时已选的那几个；为 0 或筛选后为空时整组不出现 */}
+              {pinned.length > 0 ? (
+                <div className="model-list__group model-list__group--pinned">
+                  <div className="model-list__group-head">
+                    <span className="model-list__vendor">已选</span>
+                    <span className="model-list__dot">·</span>
+                    <span className="model-list__count">{pinned.length}</span>
+                  </div>
+                  {pinnedShown.map((entry) => row(entry, "pinned"))}
+                  {!pinnedOpen && pinned.length > PINNED_PREVIEW ? (
+                    <button
+                      type="button"
+                      className="model-list__more"
+                      onClick={() => setPinnedOpen(true)}
                     >
-                      <div
-                        className={`models-option${flashing ? " is-flash" : ""}`}
-                        style={
-                          flashing ? { animationDelay: `${Math.min(i, 12) * 60}ms` } : undefined
-                        }
-                        role="option"
-                        aria-selected={model.selected}
-                        tabIndex={0}
-                        onClick={() => !busy && onToggle(provider, model.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            if (!busy) onToggle(provider, model.id);
-                          }
-                        }}
+                      等 <span className="model-list__more-count">{pinned.length}</span> 个
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 10 10"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
                       >
-                        {/* 12px 方框只画状态（方＝我选的）；命中区是整行，读屏走 aria-selected */}
-                        <span
-                          className={`ss-checkbox models-option__check${model.selected ? " is-on" : ""}`}
-                          aria-hidden="true"
-                        >
-                          {model.selected ? (
-                            <svg
-                              width="8"
-                              height="8"
-                              viewBox="0 0 8 8"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.4"
-                            >
-                              <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
-                            </svg>
-                          ) : null}
-                        </span>
-                        <span className="models-option__name">{modelRowLabel(model)}</span>
-                        {id !== null ? <span className="models-option__id">{id}</span> : null}
-                      </div>
-                    </Tooltip>
-                  );
-                })}
-              </div>
-            ))
+                        <path d="M4 2.5L6.5 5 4 7.5" />
+                      </svg>
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {groups.map((group) => (
+                <div key={group.vendor} className="model-list__group">
+                  <div className="model-list__group-head">
+                    <span className="model-list__vendor">{group.vendor}</span>
+                    <span className="model-list__dot">·</span>
+                    <span className="model-list__count">{group.entries.length}</span>
+                  </div>
+                  {group.entries.map((entry) => row(entry, "group"))}
+                </div>
+              ))}
+            </>
           )}
         </div>
       )}

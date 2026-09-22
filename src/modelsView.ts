@@ -229,6 +229,74 @@ export function modelGroups(entries: ModelEntry[], query = ""): ModelGroup[] {
   return out;
 }
 
+// ===== 已选置顶、不跳位（DESIGN「模型列表的写法 › 已选置顶」） =====
+
+/// 列表里一行的稳定键：同名模型可能来自不同网关
+export const modelEntryKey = (entry: ModelEntry) => `${entry.provider.id}|${entry.model.id}`;
+
+/// 已选组折叠前最多显示几个
+export const PINNED_PREVIEW = 5;
+
+/**
+ * 打开那一刻排一次序并冻结：已选的有哪些（已选组的成员与先后）、各组里的先后（已选在前）。
+ * 之后勾选 / 取消只改勾选状态、不挪位置；下次打开（组件重挂）再重排
+ */
+export interface ModelOrder {
+  pinned: string[];
+  order: string[];
+}
+
+export function snapshotOrder(entries: ModelEntry[]): ModelOrder {
+  const order = modelGroups(entries).flatMap((g) => g.entries.map(modelEntryKey));
+  const selected = new Set(entries.filter((e) => e.model.selected).map(modelEntryKey));
+  return { pinned: order.filter((k) => selected.has(k)), order };
+}
+
+/// 筛选词命中：id / slug / 显示名，大小写不敏感（与 sortAndFilterModels 同规则）
+function matches(entry: ModelEntry, query: string): boolean {
+  const term = query.trim().toLowerCase();
+  if (term === "") return true;
+  const { id, slug, displayName } = entry.model;
+  return [id, slug, displayName].some((t) => t.toLowerCase().includes(term));
+}
+
+/// 按冻结的先后排：冻结之后才出现的（新拉到的）排在各自组的末尾
+function byFrozen(order: string[]) {
+  const rank = new Map(order.map((k, i) => [k, i]));
+  return (a: ModelEntry, b: ModelEntry) =>
+    (rank.get(modelEntryKey(a)) ?? Number.MAX_SAFE_INTEGER) -
+    (rank.get(modelEntryKey(b)) ?? Number.MAX_SAFE_INTEGER);
+}
+
+/**
+ * 已选组：打开时已选的那几个，按冻结的先后；之后取消勾选的仍留在组里（显示空框），
+ * 新勾上的不进来——直到下次打开。按筛选词过滤，过滤后可能为空（调用方隐藏整组）
+ */
+export function pinnedEntries(entries: ModelEntry[], snap: ModelOrder, query = ""): ModelEntry[] {
+  const pinned = new Set(snap.pinned);
+  return entries
+    .filter((e) => pinned.has(modelEntryKey(e)) && matches(e, query))
+    .sort(byFrozen(snap.pinned));
+}
+
+/// 各服务商分组：组与组内的先后都按冻结的顺序，勾选变化不挪位置；按筛选词过滤，空组不出现
+export function frozenGroups(entries: ModelEntry[], snap: ModelOrder, query = ""): ModelGroup[] {
+  const sorted = entries.filter((e) => matches(e, query)).sort(byFrozen(snap.order));
+  const groups = new Map<string, ModelEntry[]>();
+  for (const entry of sorted) {
+    const vendor = splitModelId(entry.model.id).vendor ?? providerLabel(entry.provider);
+    const list = groups.get(vendor);
+    if (list) list.push(entry);
+    else groups.set(vendor, [entry]);
+  }
+  return [...groups].map(([vendor, list]) => ({ vendor, entries: list }));
+}
+
+/// 已选组里的名字写全：可能跨服务商，没有友好名时带服务商前缀（`azure/gpt-4.1`）
+export function pinnedLabel(model: GatewayProviderModel): string {
+  return chipLabel(model, true);
+}
+
 /**
  * 「生效的模型」那块空着时说清**为什么空、下一步做什么**，而不是一律「还没选模型」。
  * 三种空是三件不同的事，混成一句用户就不知道该去哪儿（DESIGN「说结果，不说机制」）。
