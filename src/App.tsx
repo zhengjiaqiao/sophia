@@ -81,6 +81,9 @@ export default function App() {
   /// 待处理页跳回来要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
   const [focus, setFocus] = useState<{ segment: "skills" | "mcp"; key: string } | undefined>();
   const clearFocus = useCallback(() => setFocus(undefined), []);
+  /// 模型页跳回：要展开网关区并选中的那一家
+  const [modelFocus, setModelFocus] = useState<string | undefined>();
+  const clearModelFocus = useCallback(() => setModelFocus(undefined), []);
   /// 提示条的到点消失按回调身份计时：必须稳定，否则每次重渲染都重新计时
   const closeMcpToast = useCallback(() => setBackgroundMcpReport(null), []);
   // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
@@ -392,7 +395,11 @@ export default function App() {
   const jumpToRow = (segment: PendingSegment, key: string) => {
     setSubPage(null);
     if (segment === "models") {
-      if (modelsSupported) switchTab("models");
+      if (!modelsSupported) return;
+      switchTab("models");
+      // 「网关连不上」那一条：展开 Codex 行的网关区、选中那一家；别的类别只切到模型页
+      const providerId = modelIssueList.find((i) => i.key === key)?.providerId;
+      if (providerId !== undefined) setModelFocus(providerId);
       refreshGateway();
       return;
     }
@@ -562,6 +569,8 @@ export default function App() {
             busy={busy}
             onBusy={setBusyState}
             onGatewayState={setGatewayState}
+            focusProviderId={modelFocus}
+            onFocused={clearModelFocus}
           />
         ) : activeTab === "mcp" ? (
           <McpTab

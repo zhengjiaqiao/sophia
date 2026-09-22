@@ -790,3 +790,20 @@ test("GatewayPanel 连不上：`连不上` + 再试一次；新加网关直接�
   assert.match(ask, /地址改动没保存/);
   assert.match(ask, />丢弃</);
 });
+
+test("GatewayPanel 跳回定位：那一家的分段片外包一层 surface 闪两下（is-jump），选中它", () => {
+  const html = render(
+    GatewayPanel,
+    panelProps(
+      {
+        providers: [
+          provider({ id: "ap", name: "ap-gateway" }),
+          provider({ id: "or", name: "openrouter", unreachable: "地址连不上" }),
+        ],
+      },
+      { initial: "or", flashProviderId: "or" },
+    ),
+  );
+  assert.equal((html.match(/gw-panel__chipwrap is-jump/g) ?? []).length, 1);
+  assert.match(html, /gw-panel__chipwrap is-jump"><button[^>]*class="ss-chip is-selected"/);
+});

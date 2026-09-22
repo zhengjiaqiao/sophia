@@ -224,6 +224,8 @@ export interface GatewayPanelProps {
   askDiscard: boolean;
   /// 丢弃或保存完，真正收起
   onCollapse: () => void;
+  /// 从待处理页跳回来定位的那一家：它的分段片用 surface 带闪两下
+  flashProviderId?: string | null;
 }
 
 interface Removing {
@@ -256,6 +258,7 @@ export function GatewayPanel({
   onDirtyChange,
   askDiscard,
   onCollapse,
+  flashProviderId,
 }: GatewayPanelProps) {
   const first = state.providers[0]?.id ?? "new";
   const [selected, setSelected] = useState<GatewaySelection>(initial ?? first);
@@ -372,14 +375,20 @@ export function GatewayPanel({
       <div className="gw-panel__left">
         <div className="gw-panel__chips" role="tablist" aria-label={`${tool.name} 的网关`}>
           {state.providers.map((p) => (
-            <Chip key={p.id} selected={selected === p.id} onClick={() => choose(p.id)}>
-              <span className="gw-panel__chip-name">{providerLabel(p)}</span>
-              {p.unreachable ? (
-                <span className="gw-panel__chip-down">连不上</span>
-              ) : p.models.length > 0 ? (
-                <span className="gw-panel__chip-count">{p.models.length}</span>
-              ) : null}
-            </Chip>
+            // 包一层给跳回定位的闪烁用：surface 带围在片外，选中反色的片上也看得见
+            <span
+              key={p.id}
+              className={`gw-panel__chipwrap${flashProviderId === p.id ? " is-jump" : ""}`}
+            >
+              <Chip selected={selected === p.id} onClick={() => choose(p.id)}>
+                <span className="gw-panel__chip-name">{providerLabel(p)}</span>
+                {p.unreachable ? (
+                  <span className="gw-panel__chip-down">连不上</span>
+                ) : p.models.length > 0 ? (
+                  <span className="gw-panel__chip-count">{p.models.length}</span>
+                ) : null}
+              </Chip>
+            </span>
           ))}
           {selected === "new" ? (
             <Chip selected onClick={() => undefined}>

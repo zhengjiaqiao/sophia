@@ -444,9 +444,20 @@ export interface ModelsTabProps {
   onBusy: (busy: boolean) => void;
   /// 每次拿到新状态都报给壳：顶栏收件箱的「模型」段要数它
   onGatewayState?: (state: GatewayState) => void;
+  /// 待处理页「网关连不上」跳回：展开网关区、选中这一家、它的分段片闪两下；处理完回调 onFocused，
+  /// 壳在那里清回 undefined（与 SkillsTab 的 focusKey 同一模式）
+  focusProviderId?: string;
+  onFocused?: () => void;
 }
 
-export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: ModelsTabProps) {
+export default function ModelsTab({
+  onError,
+  busy,
+  onBusy,
+  onGatewayState,
+  focusProviderId,
+  onFocused,
+}: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
   /// 模型下拉开着的那个 agent
   const [picker, setPicker] = useState<string | null>(null);
@@ -457,6 +468,8 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
   /// 连接区有没保存的改动；收起时有改动就不收，就地问「保存 / 丢弃」
   const [gatewayDirty, setGatewayDirty] = useState(false);
   const [askDiscard, setAskDiscard] = useState(false);
+  /// 跳回定位的那一家：分段片闪两下（960ms）后清掉
+  const [flashProvider, setFlashProvider] = useState<string | null>(null);
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
@@ -716,6 +729,24 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, [gatewayOpen, pickerOpen]);
 
+  // 待处理页跳回：状态读回来、且这一家还在，就展开网关区选中它、闪它的分段片
+  useEffect(() => {
+    if (focusProviderId === undefined || state === null) return;
+    if (state.providers.some((p) => p.id === focusProviderId)) {
+      openGateway(focusProviderId);
+      setFlashProvider(focusProviderId);
+    }
+    onFocused?.();
+    // openGateway 只写本地状态
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusProviderId, state === null]);
+
+  useEffect(() => {
+    if (flashProvider === null) return;
+    const timer = setTimeout(() => setFlashProvider(null), 960);
+    return () => clearTimeout(timer);
+  }, [flashProvider]);
+
   const onGatewayDirty = useCallback((dirty: boolean) => {
     setGatewayDirty(dirty);
     if (!dirty) setAskDiscard(false);
@@ -824,6 +855,7 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
                     onDirtyChange={onGatewayDirty}
                     askDiscard={askDiscard}
                     onCollapse={collapseGateway}
+                    flashProviderId={flashProvider}
                   />
                 ) : undefined
               }

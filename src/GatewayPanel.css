@@ -205,6 +205,36 @@
   gap: var(--space-xs);
 }
 
+.gw-panel__chipwrap {
+  display: inline-flex;
+  margin: -3px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+}
+
+/* 从待处理页跳回定位到这一家：surface 带亮 → 灭 → 亮 → 灭，各 240ms（不用反色，黑只有两义） */
+.gw-panel__chipwrap.is-jump {
+  animation: gw-jump 960ms var(--ease-mech);
+}
+
+@keyframes gw-jump {
+  0%,
+  25% {
+    background-color: var(--surface);
+  }
+  26%,
+  50% {
+    background-color: transparent;
+  }
+  51%,
+  75% {
+    background-color: var(--surface);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
 .gw-panel__chip-name {
   white-space: nowrap;
 }
@@ -404,7 +434,8 @@
   .models-option {
     transition: none;
   }
-  .models-option.is-flash {
+  .models-option.is-flash,
+  .gw-panel__chipwrap.is-jump {
     animation: none;
   }
 }
