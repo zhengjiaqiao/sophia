@@ -250,3 +250,58 @@ fn url_userinfo_is_masked() {
     let wire = serde_json::to_string(&diff).unwrap();
     assert!(!wire.contains("hunter2") && !wire.contains("admin") && !wire.contains("tokenuser"));
 }
+
+#[test]
+fn concatenated_header_flag_is_masked() {
+    let (values, wire) = args_diff(
+        &[
+            "mcp-remote",
+            "-HAuthorization: Bearer sk-live-eeee3333=ffff",
+        ],
+        &["mcp-remote", "-HX-Api-Key: xk-glued-11223344"],
+    );
+    assert_eq!(
+        values,
+        vec![
+            plain("mcp-remote -HAuthorization: …ffff"),
+            plain("mcp-remote -HX-Api-Key: …3344"),
+        ]
+    );
+    assert!(!wire.contains("sk-live") && !wire.contains("eeee3333") && !wire.contains("xk-glued"));
+}
+
+#[test]
+fn url_fragment_values_are_masked() {
+    let dir = tempdir().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let a = root.join("a.json");
+    let b = root.join("b.json");
+    fs::write(
+        &a,
+        serde_json::to_vec(&json!({"mcpServers":{"frag":{"type":"http",
+            "url":"https://mcp.example.test/mcp?x=1#access_token=frag-secret-aaaa&state=frag-state-bbbb"}}}))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &b,
+        serde_json::to_vec(&json!({"mcpServers":{"frag":{"type":"http",
+            "url":"https://mcp.example.test/mcp#token=frag-secret-cccc"}}}))
+        .unwrap(),
+    )
+    .unwrap();
+    let locations = vec![loc("A", &a, "claude-code"), loc("B", &b, "cursor")];
+
+    let diff = diff_fields(&locations, "frag", &["A".into(), "B".into()]);
+
+    let url = diff.fields.iter().find(|f| f.field == "url").unwrap();
+    assert_eq!(
+        url.values,
+        vec![
+            plain("https://mcp.example.test/mcp?x=…#access_token=…&state=…"),
+            plain("https://mcp.example.test/mcp#token=…"),
+        ]
+    );
+    let wire = serde_json::to_string(&diff).unwrap();
+    assert!(!wire.contains("frag-secret") && !wire.contains("frag-state"));
+}

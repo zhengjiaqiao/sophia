@@ -585,7 +585,7 @@ pub fn scan(locations: &[McpLocation]) -> McpOverview {
 }
 
 /// 字段级差异里的一格：某个位置上这个字段的值。**凭据不出 core**：请求头与环境变量的值、
-/// URL 查询串的值与账号密码、紧跟在 key / token 类参数后面的值、参数里的请求头行与
+/// URL 查询串与 `#` 片段的值、账号密码、紧跟在 key / token 类参数后面的值、参数里的请求头行与
 /// `Bearer …`，一律只给「不同」与末 4 位。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -635,16 +635,20 @@ fn secret_value(value: &str) -> McpFieldValue {
     McpFieldValue::Secret { last4 }
 }
 
-/// URL 里的凭据：查询串的值换成 `…`、键留着（`?api_key=…`）；地址里的账号密码
-/// （`https://user:pass@host`）整段换成 `…:…@`，账号本身也可能是令牌，一并不给
+/// URL 里的凭据：查询串与 `#` 片段里的值换成 `…`、键留着（`?api_key=…`、`#access_token=…`）；
+/// 地址里的账号密码（`https://user:pass@host`）整段换成 `…:…@`，账号本身也可能是令牌，一并不给
 fn url_without_secrets(url: &str) -> String {
+    let (url, fragment) = match url.split_once('#') {
+        Some((url, fragment)) => (url, Some(fragment)),
+        None => (url, None),
+    };
     let (base, query) = match url.split_once('?') {
         Some((base, query)) => (base, Some(query)),
         None => (url, None),
     };
-    let base = match base.split_once("://") {
+    let mut out = match base.split_once("://") {
         Some((scheme, rest)) => {
-            let end = rest.find(['/', '#']).unwrap_or(rest.len());
+            let end = rest.find('/').unwrap_or(rest.len());
             match rest[..end].rsplit_once('@') {
                 Some((userinfo, host)) => {
                     let masked = if userinfo.contains(':') {
@@ -659,17 +663,22 @@ fn url_without_secrets(url: &str) -> String {
         }
         None => base.to_owned(),
     };
-    let Some(query) = query else {
-        return base;
+    let mask_pairs = |part: &str| {
+        part.split('&')
+            .map(|pair| match pair.split_once('=') {
+                Some((key, _)) => format!("{key}=…"),
+                None => pair.to_owned(),
+            })
+            .collect::<Vec<_>>()
+            .join("&")
     };
-    let masked: Vec<String> = query
-        .split('&')
-        .map(|pair| match pair.split_once('=') {
-            Some((key, _)) => format!("{key}=…"),
-            None => pair.to_owned(),
-        })
-        .collect();
-    format!("{base}?{}", masked.join("&"))
+    if let Some(query) = query {
+        out = format!("{out}?{}", mask_pairs(query));
+    }
+    if let Some(fragment) = fragment {
+        out = format!("{out}#{}", mask_pairs(fragment));
+    }
+    out
 }
 
 fn secretish(word: &str) -> bool {
@@ -728,7 +737,7 @@ fn header_flag(flag: &str) -> bool {
 }
 
 /// 参数里的凭据：`--api-key xyz` 的 xyz、`--token=xyz` 的 xyz 换成 `…`；`--header` / `-H`
-/// 后面的请求头行只留名字；参数自身像凭据的（见 `arg_without_secrets`）按末 4 位规则脱敏
+/// 后面（或与 `-H` 连写）的请求头行只留名字；参数自身像凭据的（见 `arg_without_secrets`）按末 4 位规则脱敏
 fn args_without_secrets(args: &[String]) -> String {
     enum Next {
         Plain,
@@ -748,6 +757,14 @@ fn args_without_secrets(args: &[String]) -> String {
                 continue;
             }
             Next::Plain => {}
+        }
+        // 连写的 `-HAuthorization: …`：要在按 `=` 拆之前认出来，否则值里的 `=` 会把凭据切进「键」里
+        if let Some(line) = arg
+            .strip_prefix("-H")
+            .filter(|line| !line.is_empty() && !line.starts_with('='))
+        {
+            out.push(format!("-H{}", masked_header_line(line)));
+            continue;
         }
         match arg.split_once('=') {
             Some((key, line)) if header_flag(key) => {
