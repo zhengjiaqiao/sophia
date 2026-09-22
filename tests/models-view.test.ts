@@ -632,3 +632,15 @@ test("ModelPicker 从网关页回来：分组带 data-provider 供滚动定位�
   assert.match(html, /models-picker__provider-head/);
   assert.equal((html.match(/is-flash/g) ?? []).length, 1);
 });
+
+test("面板宽度：模型页右沿对齐 MCP 面板（280 + 72 + 88×N + 24）；生效模型列最少 360", async () => {
+  const { mcpPanelWidth, modelsBoxWidth, MODELS_AGENT_W } = await import("../src/modelsView.ts");
+  assert.equal(mcpPanelWidth(4), 728);
+  assert.equal(mcpPanelWidth(6), 904);
+  // 6 列：904 − 324 − 24 − 24 = 532，模型页总宽 = 324 + 24 + 532 + 24 = 904
+  assert.equal(modelsBoxWidth(6), 532);
+  assert.equal(MODELS_AGENT_W + 24 + modelsBoxWidth(6) + 24, mcpPanelWidth(6));
+  // 4 列时算出 356 < 360，取最小值
+  assert.equal(modelsBoxWidth(4), 360);
+  assert.equal(modelsBoxWidth(0), 360);
+});

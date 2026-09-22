@@ -380,3 +380,25 @@ export function modelIssues(state: GatewayState | null, tool: ModelsTool = CODEX
   }
   return out;
 }
+
+// ===== 面板宽度：模型页右沿对齐 MCP 主视图（DESIGN 第 5 轮裁决） =====
+
+/// MCP 面板的列：名称 280、传输 72、每个 agent 88，横线止于最后一列 + 24
+const MCP_NAME_W = 280;
+const MCP_TRANSPORT_W = 72;
+const MCP_AGENT_W = 88;
+const PANEL_TAIL = 24;
+/// 模型页：agent 列固定 324，列间 24，生效模型列填满剩下的、最少 360
+export const MODELS_AGENT_W = 324;
+const MODELS_GAP = 24;
+const MODELS_BOX_MIN = 360;
+
+/// MCP 主视图面板总宽（含右侧 24）：`n` 是它显示的 agent 列数
+export function mcpPanelWidth(n: number): number {
+  return MCP_NAME_W + MCP_TRANSPORT_W + MCP_AGENT_W * Math.max(0, n) + PANEL_TAIL;
+}
+
+/// 模型页「生效模型」列宽：让面板右沿与 MCP 面板右沿对齐；太窄时取最小 360
+export function modelsBoxWidth(n: number): number {
+  return Math.max(MODELS_BOX_MIN, mcpPanelWidth(n) - MODELS_AGENT_W - MODELS_GAP - PANEL_TAIL);
+}

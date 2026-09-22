@@ -38,9 +38,33 @@
 }
 
 /* 开关后 12 出重启那一格（gap 10 + 2） */
-.tray__row > .ss-tipwrap:last-child,
+.tray__restart-tip,
 .tray__restart {
   margin-left: 2px;
+}
+
+.tray__restart-tip {
+  display: inline-flex;
+}
+
+/* 「重启生效」的提示框按画板单行显示（其余提示框仍是 240 上限）。这句约 305 宽，面板只有 320：
+   锚在键上居中会出窗，所以改锚在这一行上、左对齐面板内边距 12，贴行下沿（键下 6） */
+.tray__row {
+  position: relative;
+}
+
+.tray__restart-tip .ss-tipwrap {
+  position: static;
+}
+
+.tray__restart-tip .ss-tip {
+  top: calc(100% - 4px);
+  bottom: auto;
+  left: var(--space-sm);
+  right: auto;
+  max-width: none;
+  white-space: nowrap;
+  transform: none;
 }
 
 .tray__restart {

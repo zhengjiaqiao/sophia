@@ -2,7 +2,7 @@
    色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变。
    圆角只有 0 / 2px / 32px / 50%：模型框与键是 2px（动作）、模型片是胶囊（片）、面板直角（容器）。
 
-   一张面板表：agent 324 ｜ 24 ｜ 生效模型 543，横线止于最后一列 + 24（共 915）。
+   一张面板表：agent 324 ｜ 24 ｜ 生效模型（填满到 MCP 面板右沿，最少 360），横线止于最后一列 + 24。
    页边 24 上、32 左右，与 Skills / MCP 的内容区同一起点。 */
 @import "./tokens.css";
 
@@ -29,7 +29,9 @@
 /* ===== 面板 ===== */
 .models-panel {
   --models-agent-w: 324px;
-  --models-box-w: 543px;
+  /* 生效模型列宽由 ModelsTab 按 modelsBoxWidth(已安装 agent 数) 写进来，让右沿对齐 MCP 面板；
+     这里是读到之前的兜底（最小值） */
+  --models-box-w: 360px;
   box-sizing: border-box;
   width: calc(var(--models-agent-w) + var(--space-xl) + var(--models-box-w) + var(--space-xl));
   max-width: 100%;
@@ -122,6 +124,17 @@
   100% {
     opacity: 0;
   }
+}
+
+/* 「重启生效」的提示框按画板单行显示：这句不折行；其余提示框的 240 上限不动。
+   出窗时 Tooltip 自己改为对齐外侧边 */
+.models-restart-tip {
+  display: inline-flex;
+}
+
+.models-restart-tip .ss-tip {
+  max-width: none;
+  white-space: nowrap;
 }
 
 /* ===== 模型框 ===== */

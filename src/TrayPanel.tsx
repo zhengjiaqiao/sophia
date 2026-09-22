@@ -153,23 +153,26 @@ export default function TrayPanel() {
     }
     if (!row?.showRestart) return null;
     return (
-      <Tooltip content={RESTART_TIP} placement="bottom">
-        {busy ? (
-          <Button size="compact" disabled disabledReason="正在处理上一步">
-            重启生效
-          </Button>
-        ) : (
-          <Button
-            size="compact"
-            onClick={() => {
-              setFailure(null);
-              setRestart({ kind: "confirming" });
-            }}
-          >
-            重启生效
-          </Button>
-        )}
-      </Tooltip>
+      // 这句提示框按画板单行显示（其余提示框仍是 240 上限）
+      <span className="tray__restart-tip">
+        <Tooltip content={RESTART_TIP} placement="bottom">
+          {busy ? (
+            <Button size="compact" disabled disabledReason="正在处理上一步">
+              重启生效
+            </Button>
+          ) : (
+            <Button
+              size="compact"
+              onClick={() => {
+                setFailure(null);
+                setRestart({ kind: "confirming" });
+              }}
+            >
+              重启生效
+            </Button>
+          )}
+        </Tooltip>
+      </span>
     );
   };
 

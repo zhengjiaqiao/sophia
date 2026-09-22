@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api.ts";
@@ -16,12 +16,11 @@ import {
   enableDisabledReason,
   modelKeys,
   modelLabel,
+  modelsBoxWidth,
   newModelIds,
   parseBackendError,
   providerLabel,
-  removeProviderBlockedReason,
   routerUnavailable,
-  selectedModels,
   shouldPollRestart,
   showRestartKey,
   showRouterBanner,
@@ -265,17 +264,20 @@ function RestartSlot({
   }
   if (!showRestartKey(state, phase)) return null;
   return (
-    <Tooltip content={RESTART_TIP}>
-      {busy ? (
-        <Button size="compact" disabled disabledReason="正在处理上一步">
-          重启生效
-        </Button>
-      ) : (
-        <Button size="compact" onClick={onRestart}>
-          重启生效
-        </Button>
-      )}
-    </Tooltip>
+    // 这句提示框按画板单行显示（其余提示框仍是 240 上限），见 css 的 .models-restart-tip
+    <span className="models-restart-tip">
+      <Tooltip content={RESTART_TIP}>
+        {busy ? (
+          <Button size="compact" disabled disabledReason="正在处理上一步">
+            重启生效
+          </Button>
+        ) : (
+          <Button size="compact" onClick={onRestart}>
+            重启生效
+          </Button>
+        )}
+      </Tooltip>
+    </span>
   );
 }
 
@@ -585,9 +587,9 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
   /// 启动时的自愈试过了没有：试过仍没起来才出页级横幅
   const [healed, setHealed] = useState(false);
+  /// 已安装的 agent 数＝MCP 主视图的列数：面板右沿与 MCP 面板对齐（modelsBoxWidth）
+  const [agentColumns, setAgentColumns] = useState(0);
   const [routerFailure, setRouterFailure] = useState<string | null>(null);
-  /// 删网关的旧确认框（T3 把网关页换成延迟提交后删）
-  const [confirmRemove, setConfirmRemove] = useState<GatewayProvider | null>(null);
   /// 进网关页那一刻已有的模型：回来时差出新拉到的，各闪一次
   const beforeGateway = useRef<Set<string>>(new Set());
   const mounted = useRef(true);
@@ -608,6 +610,13 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
       // 轻查失败不打扰：下一次焦点或操作还会再读
     }
   }, [applyState]);
+
+  useEffect(() => {
+    void api
+      .listHarnesses()
+      .then((list) => mounted.current && setAgentColumns(list.filter((h) => h.installed).length))
+      .catch(() => undefined);
+  }, []);
 
   // 挂载：读一次；路由没在跑就先自愈一次（重启路由），还不行才让横幅出来
   useEffect(() => {
@@ -825,8 +834,7 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
     openPicker(MODELS_TOOLS[0], { focusProviderId: providerId, flashIds });
   };
 
-  /// 网关页（T3）接下来要的回调。名字是和 T3 约好的契约；T3 的 props 落地之前，
-  /// 展开传进去的多余属性不起作用（JSX 展开不做多余属性检查），落地后自动接上
+  /// 网关页（T3）要的回调：选模型、再试一次、删网关的延迟提交
   const gatewayNext = {
     onPickModelsFromGateway: pickModelsFromGateway,
     /// 「再试一次」：拉取本身失败不抛错，原因记在那一家的 unreachable 上
@@ -856,42 +864,18 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
     }
   };
 
-  const removeConfirm = (current: GatewayState) => {
-    if (confirmRemove === null) return null;
-    const provider = confirmRemove;
-    const blocked = removeProviderBlockedReason(current, provider);
-    return (
-      <Confirm
-        title={`删掉 ${providerLabel(provider)}？`}
-        nameplate={{ path: provider.baseUrl }}
-        safetyNote={`地址、模型列表和钥匙串里的密钥一起删掉；已选的 ${selectedModels(provider).length} 个模型会从 Codex 的模型列表里去掉`}
-        confirmLabel="连密钥一起删掉"
-        confirmDisabledReason={blocked ?? undefined}
-        onConfirm={() => {
-          setConfirmRemove(null);
-          void run("没删掉", () => api.gatewayRemoveProvider(provider.id));
-        }}
-        onCancel={() => setConfirmRemove(null)}
-      />
-    );
-  };
-
   if (gateway && state !== null) {
     return (
-      <>
-        <GatewayPage
-          state={state}
-          tool={MODELS_TOOLS[0]}
-          busy={busy}
-          onBack={backFromGateway}
-          onSave={saveProvider}
-          onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
-          onRemove={(provider) => setConfirmRemove(provider)}
-          onRestore={() => runOrThrow(() => api.gatewayRestore())}
-          {...gatewayNext}
-        />
-        {removeConfirm(state)}
-      </>
+      <GatewayPage
+        state={state}
+        tool={MODELS_TOOLS[0]}
+        busy={busy}
+        onBack={backFromGateway}
+        onSave={saveProvider}
+        onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
+        onRestore={() => runOrThrow(() => api.gatewayRestore())}
+        {...gatewayNext}
+      />
     );
   }
 
@@ -917,7 +901,10 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
       ) : null}
 
       <div className="models-page__body">
-        <div className="models-panel">
+        <div
+          className="models-panel"
+          style={{ "--models-box-w": `${modelsBoxWidth(agentColumns)}px` } as CSSProperties}
+        >
           <div className="models-panel__head">
             <span>agent</span>
             <span>生效模型</span>
