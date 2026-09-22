@@ -1,166 +1,199 @@
-/* Codex 网关配置页的排版（组件规范 §4.6 二级页面）。
-   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影，圆角只有输入框那 4px。 */
+/* 网关页（DESIGN「模型页 › 网关配置页」，画板 Gateway）。
+   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影。
+   左栏面板（表头底 2px、行 hairline），右栏表单 344，竖线从页头底接到窗底。 */
 @import "../tokens.css";
 
 .gateway-page {
-  box-sizing: border-box;
-  max-width: 560px;
-  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
-}
-
-.gateway-page__field {
-  display: block;
-  margin-bottom: var(--space-xl);
-}
-
-/* ===== 列表视图：这台机器上的网关 =====
-   表单那 560px 是**正文列宽**，给两个输入框用刚好；列表是一行一家、
-   还要摆下地址和两个动作，套那个宽度会把抬头挤断行、把地址早早省略掉。
-   所以列表自己一档，和模型页的 880px 对齐。 */
-.gateway-page--list {
-  max-width: 880px;
-}
-
-.gateway-page__head {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-xs);
+  min-height: 100%;
+  padding-left: var(--space-xxl);
+  box-sizing: border-box;
 }
 
-/* 抬头里的标签是同一行的一员，不要表单字段那条下边距 */
-.gateway-page__head .gateway-page__label {
-  margin-bottom: 0;
+.gateway-page__list {
+  flex-grow: 1;
+  min-width: 0;
+  padding: var(--space-xl) var(--space-xl) var(--space-xxl) 0;
+}
+
+.gateway-page__side {
+  flex-shrink: 0;
+  width: 344px;
+  box-sizing: border-box;
+  border-left: 1px solid var(--hairline);
+  padding: var(--space-xl) var(--space-xxl) 0;
+}
+
+/* 名字列吃掉剩余宽度 ｜ 模型 140 ｜ 两个图标键 76 */
+.gateway-head,
+.gateway-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 76px;
+  column-gap: var(--space-sm);
+  align-items: center;
+}
+
+.gateway-head {
+  align-items: end;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.gateway-head__label {
+  padding-left: var(--space-xs);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
   white-space: nowrap;
 }
 
-.gateway-page__head-action {
-  margin-left: auto;
+.gateway-head__label--models {
+  text-align: right;
 }
 
-.gateway-page__empty {
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--ink);
+.gateway-head__add {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .gateway-list {
   margin: 0;
   padding: 0;
   list-style: none;
-  border-top: 1px solid var(--ink);
 }
 
-/* 一家一行。行高往大了给，别排成一张密表（DESIGN「Layout」） */
 .gateway-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-sm) 0;
+  height: 40px;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--hairline);
 }
 
-/* 网关名是被谈论的对象，不大写（§1.2） */
+/* 正在编辑的那一行 surface 底：和右栏表单连起来读 */
+.gateway-row.is-editing {
+  background: var(--surface);
+}
+
+/* 删掉之后提示条落在这一行原位 */
+.gateway-row--notice {
+  display: flex;
+}
+
+.gateway-row--notice .ss-toast__body {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.gateway-row__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-left: var(--space-xs);
+}
+
 .gateway-row__name {
   font-family: var(--font-ui);
   font-size: var(--size-body);
-  font-weight: 600;
+  line-height: var(--leading-caption);
+  white-space: nowrap;
 }
 
-/* 地址占掉中间的空当；长了省略，全文在 title 上。
-   flex 项要 min-width: 0 才收得住，否则长地址会把这一行撑出去而不是省略 */
+/* `再试一次` 紧跟 `连不上` 8（gap 10 − 2） */
+.gateway-row__retry {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: -2px;
+}
+
 .gateway-row__url {
-  flex: 1 1 auto;
-  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.gateway-row__modelcell {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.gateway-row__models {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.gateway-row__count,
+.gateway-row__none {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-caption);
+}
+
+.gateway-row__none {
+  color: var(--ink-faint);
+}
+
+.gateway-row__unit {
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+}
+
+.gateway-row__dot {
+  margin: 0 2px;
   font-size: var(--size-micro);
   color: var(--ink-faint);
 }
 
-.gateway-row__count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-  white-space: nowrap;
+/* `选模型 ›`：应用内的次级动作 = 文字链（13 ink-mute 下划线），命中区高 24 */
+.gateway-row__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--hit-min);
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  cursor: pointer;
+}
+
+.gateway-row__picktext {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.gateway-row__pick:hover {
+  color: var(--ink);
+}
+
+.gateway-row__pick:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
 }
 
 .gateway-row__actions {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
-/* 方标签 tag-square（DESIGN components.tag-square）：零圆角、micro-cap、ink 描边。
-   **不可点**——圆角只留给可点的东西（§1.3）。组件库里还没有这个组件，
-   先在这儿按 token 写一份 */
-/* 区域标签是我们自己写的结构词，大写（§1.2） */
-.gateway-page__label {
-  display: block;
-  margin-bottom: var(--space-xs);
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-transform: uppercase;
-  color: var(--ink-mute);
-}
-
-.gateway-page__input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-input);
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-/* 网关地址是路径类事实，走等宽（§1.2） */
-.gateway-page__input--mono {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-}
-
-.gateway-page__input:focus {
-  border-color: var(--ink);
-  outline: none;
-}
-
-.gateway-page__actions {
   display: flex;
   align-items: center;
-  gap: var(--space-md);
-  margin-top: var(--space-xl);
+  justify-content: flex-end;
+  gap: 4px;
 }
 
-.gateway-page__facts {
-  margin-top: var(--space-huge);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--hairline);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-  line-height: var(--leading-caption);
-}
-
-/* 端口与协议是计数类事实，走等宽（§1.2） */
-.gateway-page__mono {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink);
-}
-
-.gateway-page__note {
-  margin-top: var(--space-xxs);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-faint);
-  line-height: var(--leading-caption);
+.gateway-page__empty {
+  padding-top: var(--space-xl);
 }
 
 .gateway-page__leftover {
@@ -168,15 +201,98 @@
   align-items: center;
   gap: var(--space-sm);
   margin-top: var(--space-xl);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--hairline);
 }
 
 .gateway-page__leftover-text {
-  flex-grow: 1;
-  min-width: 0;
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   color: var(--ink-mute);
+}
+
+/* ---- 右栏表单 ---- */
+.gateway-form__title {
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  font-weight: 600;
   line-height: var(--leading-caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gateway-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-md);
+}
+
+.gateway-form__field:first-of-type {
+  margin-top: var(--space-sm);
+}
+
+.gateway-form__label {
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.gateway-form__input {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-h-row);
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  outline: none;
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.gateway-form__input:hover,
+.gateway-form__input:focus {
+  border-color: var(--ink);
+}
+
+.gateway-form__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  margin-top: var(--space-xl);
+}
+
+.gateway-form__error {
+  margin-top: var(--space-sm);
+}
+
+.gateway-form__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--space-xl);
+  row-gap: var(--space-xs);
+  margin: var(--space-xl) 0 0;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--hairline);
+}
+
+.gateway-form__facts dt {
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.gateway-form__facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.8;
+  color: var(--ink);
+  white-space: nowrap;
 }
