@@ -136,7 +136,21 @@
   display: block;
 }
 
+/* 开了规则的来源：名字后小字「自动」（ink-mute，不加框、不用箭头——箭头已有排序义）。
+   规范写 11，但字号只有 28 / 20 / 15 / 13 / 12 五档，取最小的 12 */
+.ss-import__auto {
+  margin-left: 6px;
+  font-size: var(--size-micro);
+  color: var(--ink-mute);
+}
+
+/* 来源提示框：规则目标一行 + 完整路径一行 */
+.ss-import__tipline {
+  display: block;
+}
+
 .ss-import__path {
+  display: block;
   font-family: var(--font-mono);
   word-break: break-all;
 }

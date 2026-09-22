@@ -323,6 +323,13 @@ export default function McpImportPage({
               {sortedSources.map((location) => {
                 const count = countOf(location);
                 const seg = distinct.get(location.id);
+                // 开了「以后新出现的也加」规则的位置：名字后小字「自动」，提示框补充目标
+                const autoRule = autoImports.find(
+                  (r) => r.source.id === location.id && r.targetDomain === page.key,
+                );
+                const autoTo = (autoRule?.targets ?? []).map(
+                  (t) => domainTargets.find((d) => d.id === t.id)?.label ?? t.id,
+                );
                 return (
                   <div
                     key={location.id}
@@ -335,7 +342,14 @@ export default function McpImportPage({
                     <RowTip
                       focusable={false}
                       content={
-                        <span className="ss-import__path">{displayPath(location.path)}</span>
+                        <>
+                          {autoTo.length > 0 ? (
+                            <span className="ss-import__tipline">
+                              以后新出现的会自动写进 {autoTo.join(" · ")}
+                            </span>
+                          ) : null}
+                          <span className="ss-import__path">{displayPath(location.path)}</span>
+                        </>
                       }
                     >
                       <button
@@ -345,7 +359,12 @@ export default function McpImportPage({
                         onClick={() => setSourceId(location.id)}
                       >
                         <span className="ss-import__srctext">
-                          <span className="ss-import__srcname">{location.label}</span>
+                          <span className="ss-import__srcname">
+                            {location.label}
+                            {autoTo.length > 0 ? (
+                              <span className="ss-import__auto">自动</span>
+                            ) : null}
+                          </span>
                           <span className="ss-import__srcscope">
                             {seg
                               ? `${mcpDomainLabel(location.domain)} · ${seg}`

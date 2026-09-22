@@ -453,6 +453,10 @@ export default function ImportPage({
               {sortedSources.map((s) => {
                 const count = s.skills.filter((sk) => notAdded(s.id, sk.name)).length;
                 const seg = distinct.get(s.id);
+                // 开了「以后新出现的也加」规则的来源：名字后小字「自动」，提示框补充目标
+                const autoTo = page.targets
+                  .filter((t) => autoLinks.find((r) => r.source === s.id)?.targets.includes(t.id))
+                  .map((t) => t.label);
                 return (
                   <div
                     key={s.id}
@@ -464,7 +468,16 @@ export default function ImportPage({
                     {/* 完整路径进提示框（不用原生 title） */}
                     <RowTip
                       focusable={false}
-                      content={<span className="ss-import__path">{displayPath(s.path)}</span>}
+                      content={
+                        <>
+                          {autoTo.length > 0 ? (
+                            <span className="ss-import__tipline">
+                              以后新出现的会自动开启到 {autoTo.join(" · ")}
+                            </span>
+                          ) : null}
+                          <span className="ss-import__path">{displayPath(s.path)}</span>
+                        </>
+                      }
                     >
                       <button
                         type="button"
@@ -473,7 +486,12 @@ export default function ImportPage({
                         onClick={() => setSelected(s.id)}
                       >
                         <span className="ss-import__srctext">
-                          <span className="ss-import__srcname">{s.label}</span>
+                          <span className="ss-import__srcname">
+                            {s.label}
+                            {autoTo.length > 0 ? (
+                              <span className="ss-import__auto">自动</span>
+                            ) : null}
+                          </span>
                           <span className="ss-import__srcscope">
                             {seg ? `${scopeOf(s.kind)} · ${seg}` : scopeOf(s.kind)}
                           </span>
