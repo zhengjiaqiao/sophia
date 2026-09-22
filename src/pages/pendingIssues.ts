@@ -31,17 +31,23 @@ export function pathsOfKey(key: string): string[] {
   return key.split(KEY_SEP).slice(1);
 }
 
-/// 四类问题的区域标签，与各自的动作一一对应
+/// 类别名：待处理页左列记号的提示框与读屏名（DESIGN「视觉优先」：类别名进 title，
+/// 记号与格内异常同形）。只是展示，改它不影响 key
 export const KIND_LABEL: Record<IssueKind, string> = {
-  duplicateSource: "同名本体",
+  duplicateSource: "同名：有两份",
   brokenLink: "链接失效",
-  wholeLinkedTarget: "整目录链接",
-  readOnlyTarget: "目录不可写",
-  // MCP 页自己渲染待处理，这两类不会走到 skill 的待处理页；
-  // 但 Record<IssueKind, …> 要穷尽，留着也让以后合并两页时有现成的
-  differentCopies: "几份不一样",
-  invalidLocation: "配置读不出",
+  wholeLinkedTarget: "整个文件夹是链接",
+  readOnlyTarget: "写不进",
+  differentCopies: "两份不一样",
+  invalidLocation: "位置无效",
 };
+
+/// 句子的一段：`subject` 的是对象名（墨色），其余是连接词（灰）——
+/// 待处理页一眼扫对象，不逐字读句子
+export interface SentencePart {
+  text: string;
+  subject?: boolean;
+}
 
 /// 列表里的先后：同名本体最需要拿主意，排最前；目录不可写多半是一过性的，排最后
 const KIND_RANK: Record<IssueKind, number> = {
@@ -53,13 +59,13 @@ const KIND_RANK: Record<IssueKind, number> = {
   invalidLocation: 5,
 };
 
-/// 「删 X 的」的一个选项：删哪一处的本体
+/// 同名两份里的一份：待处理页给「只留 X 的」，删的是另一份
 export interface DeleteChoice {
   /// 按钮上的位置名，如「通用仓库」
   label: string;
   sourceId: string;
   skill: string;
-  /// 本体目录，确认弹窗要摆出来
+  /// 原件目录
   path: string;
 }
 
@@ -74,11 +80,15 @@ export interface PendingIssue {
   subject: string | null;
   /// 主行正文，接在 subject 后面
   text: string;
+  /// 整句拆段（对象墨色、连接词灰），待处理页照它渲染；读屏读 `subject + text`
+  parts: SentencePart[];
   /// 副行：涉及的位置
   detail: string;
   /// 相关的 agent 名，用来写提示条；与 skill 无关的那两类才有
   agent: string | null;
-  /// 同名本体：两处本体各一个「删 X 的」
+  /// 相关 agent 的 id（决定图标），提示条里画图标用
+  agentId: string | null;
+  /// 同名：两份原件各一个选项（「只留 X 的」删另一份）
   deletes: DeleteChoice[];
   /// 链接失效：`清除` 要执行的动作
   clear: PlannedAction | null;
@@ -89,7 +99,8 @@ export interface PendingIssue {
 }
 
 /// 后端路径是「目录 + 分隔符 + 条目名」，两种分隔符都认
-const join = (dir: string, name: string) => `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
+/// （不用模板串：串里的反斜杠会让 lint-ui 取文案时引号配错对）
+const join = (dir: string, name: string) => dir + (dir.includes("\\") ? "\\" : "/") + name;
 
 /// 一条空壳，四类问题各自往上填
 const blank = (kind: IssueKind, paths: string[]): PendingIssue => ({
@@ -98,8 +109,10 @@ const blank = (kind: IssueKind, paths: string[]): PendingIssue => ({
   paths,
   subject: null,
   text: "",
+  parts: [],
   detail: paths.join(" · "),
   agent: null,
+  agentId: null,
   deletes: [],
   clear: null,
   splitTargetId: null,
@@ -111,8 +124,10 @@ const blank = (kind: IssueKind, paths: string[]): PendingIssue => ({
 /// 文案与动作仍走这一份，主视图的待处理栏与待处理页说的是同一句话
 export function readOnlyIssue(target: Target, retry: CellRef[]): PendingIssue {
   const issue = blank("readOnlyTarget", [target.path]);
-  issue.text = `${target.label} 的 skills 目录写不进去，开不了 skill`;
+  issue.text = " 的 skills 目录写不进去，开不了 skill";
+  issue.parts = [{ text: target.label, subject: true }, { text: issue.text }];
   issue.agent = target.label;
+  issue.agentId = target.scope.harnessId;
   issue.retry.push(...retry);
   return issue;
 }
@@ -193,8 +208,9 @@ function collectPage(
           }
           issue.text =
             issue.deletes.length > 1
-              ? " 有两个本体，删掉哪个？"
-              : " 在别处还有一个同名的，那一处不在已知的本体位置里，只能删这一处";
+              ? ` · ${issue.deletes.map((d) => d.label).join("、")} 各一份`
+              : " 在别处还有一份同名的，那一处不在已知的来源里，只能删这一份";
+          issue.parts = [{ text: row.skill, subject: true }, { text: issue.text }];
           add(issue);
           break;
         }
@@ -203,7 +219,9 @@ function collectPage(
           issue.subject = row.skill;
           // 主语是 skill，但待处理栏一次只显示一条，不点名 agent 就不知道是哪一列的
           issue.text = ` 在 ${target.label} 下的链接指向的位置没了`;
+          issue.parts = [{ text: row.skill, subject: true }, { text: issue.text }];
           issue.agent = target.label;
+          issue.agentId = target.scope.harnessId;
           // 扫描已经把这个目录里解析不到的链接都算成动作了；万一对不上就现搭一条，
           // 执行前后端还会重校验它仍是一条链接
           issue.clear = brokenAt.get(cell.path) ?? {
@@ -219,9 +237,12 @@ function collectPage(
         case "wholeLinkedTarget": {
           const whole = target.linkedWholeTo;
           const issue = blank(kind, whole === null ? [target.path] : [target.path, whole]);
-          issue.text = `${target.label} 的 skills 目录整个链到了别的本体，要逐条开关得先拆开`;
+          const where = whole === null ? "别处" : placeName(whole, overview);
+          issue.text = ` 的 skills 文件夹整个链接到了 ${where}，拆开后才能逐个开关`;
+          issue.parts = [{ text: target.label, subject: true }, { text: issue.text }];
           issue.detail = whole === null ? target.path : `${target.path} → ${whole}`;
           issue.agent = target.label;
+          issue.agentId = target.scope.harnessId;
           issue.splitTargetId = target.id;
           add(issue);
           break;
@@ -243,11 +264,37 @@ function collectPage(
   for (const action of page.broken) {
     const issue = blank("brokenLink", [action.targetPath]);
     issue.subject = action.itemName;
-    issue.agent = page.targets.find((t) => t.path === action.target)?.label ?? null;
+    const target = page.targets.find((t) => t.path === action.target);
+    issue.agent = target?.label ?? null;
+    issue.agentId = target?.scope.harnessId ?? null;
     issue.text = ` 在 ${issue.agent ?? "这个 agent"} 下的链接指向的位置没了`;
+    issue.parts = [{ text: action.itemName, subject: true }, { text: issue.text }];
     issue.clear = action;
     add(issue);
   }
+}
+
+/// 整个文件夹链去的那个地方叫什么：是已知来源就用来源名（`WeiboAP`），
+/// 否则取路径末尾那一级。绝对路径不进可见文案（DESIGN「来源的名字」）
+function placeName(path: string, overview: Overview): string {
+  const trim = (p: string) => p.replace(/[/\\]+$/, "");
+  const known = overview.sources.find(
+    (s) => trim(s.path) === trim(path) || trim(s.id) === trim(path),
+  );
+  if (known !== undefined) return known.label;
+  const parts = trim(path).split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+/// 按钮里的专名不靠空格断词（DESIGN「按钮」）：汉字之间不加空格，中西文之间一个空格。
+/// `只留通用仓库的`、`只留 WeiboAP 的`
+export function joinWords(...words: string[]): string {
+  const latin = /[A-Za-z0-9]/;
+  return words.reduce((acc, word) => {
+    if (acc === "" || word === "") return acc + word;
+    const gap = latin.test(acc[acc.length - 1]) !== latin.test(word[0]) ? " " : "";
+    return acc + gap + word;
+  }, "");
 }
 
 /// 目录大小：给人读的一位小数。确认弹窗靠它判断「这一处是不是那个该留下的」

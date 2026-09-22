@@ -1,134 +1,223 @@
-/* 待处理页的排版（组件规范 §4.3 待处理页、§4.6 二级页面）。
-   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变。
-   圆角只在 Button 自己身上（pill），这一页不引入任何新的圆角。 */
+/* 待处理页（DESIGN「全局收件箱」，画板 Pending / PendingMcp / PendingModels）。
+   色值一律 var(--…)，唯一来源是 tokens.css。
+
+   一张网格四列：记号 40（16 记号 + 24）｜句子（最长一句的实际宽度）｜动作（成一列，
+   离句子列 16）｜行线尾巴 24。每行是 subgrid，所以各行的句子列与动作列天然对齐，
+   行线止于动作列右沿 + 24（DESIGN「提示与反馈锚在触发它的控件上」）。 */
 @import "../tokens.css";
 
 .pending-page {
   box-sizing: border-box;
-  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
+  padding: 0 var(--space-xxl) var(--space-xxl);
 }
 
-/* 两张表是同一张列表的两个视图，所以是标签页而不是两个页面 */
-.pending-page__tabs {
+.pending-page__grid {
+  display: inline-grid;
+  grid-template-columns: 40px max-content max-content 24px;
+  min-width: 480px;
+}
+
+/* 分段片 + 右端 已忽略 N；底 hairline 与行线同长 */
+.pending-page__segments {
+  grid-column: 1 / -1;
   display: flex;
-  align-items: flex-end;
-  gap: var(--space-xl);
-  border-bottom: 1px solid var(--ink);
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-xl);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--hairline);
 }
 
-/* 不是 pill：标签页不是按钮形，圆角只给可点的 pill（§3.1）。
-   这里靠下边框的黑线表示「正在看这一张」 */
-.pending-page__tab {
+.pending-page__ignored {
+  margin-left: auto;
+  padding-left: var(--space-xl);
+}
+
+.pending-page__row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 52px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.pending-page__markcell {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 0 0 var(--space-xs);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: none;
-  color: var(--ink-faint);
-  cursor: pointer;
+  align-items: center;
 }
 
-.pending-page__tab.is-active {
-  border-bottom-color: var(--ink);
+/* 可悬停不可点的记号：点状下划线（abbr 惯例），提示框给类别名 */
+.pending-page__mark {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding-bottom: 2px;
+  border-bottom: 1px dotted var(--ink-faint);
   color: var(--ink);
 }
 
-/* micro-cap：Condensed 12/600/0.96px/行高 2.0 大写（§1.2）。中文不受大写影响 */
-.pending-page__tab-name {
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-transform: uppercase;
+/* 句子：对象墨色、连接词灰；超长时换行（列宽取最长一句，但不为长句撑破窗口） */
+.pending-page__sentence {
+  max-width: 600px;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  color: var(--ink);
 }
 
-.pending-page__tab-count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
+.pending-page__subject {
+  color: var(--ink);
 }
 
-/* 一行三段：类别 · 说什么 · 动作。类别列定宽，四类标签才能上下对齐 */
-.pending-page__row {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-sm) 0;
-  border-bottom: 1px solid var(--surface);
-}
-
-/* micro-cap：我们自己写的结构词（§1.2） */
-.pending-page__kind {
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-transform: uppercase;
+.pending-page__connector {
   color: var(--ink-mute);
 }
 
-.pending-page__what {
-  min-width: 0;
+/* 对象名兼作跳回那一行的入口：静止时就是一个名字，悬停才出下划线 */
+.pending-page__subject.is-jump {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
 }
 
-.pending-page__line {
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-  line-height: var(--leading-body);
+.pending-page__subject.is-jump:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-/* 副行：涉及的位置。路径要对齐、要分得清 l 与 1，等宽（§1.2） */
-.pending-page__detail {
-  margin-top: var(--space-xxs);
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-  overflow-wrap: anywhere;
+.pending-page__subject.is-jump:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
 }
 
-/* skill 名：正文档，原样渲染、不做大小写转换。**不用等宽**——等宽的理由是路径要
-   对齐、要分得清 l 与 1，skill 名在列表里是当词读的（§1.2）。
-   写出来是因为它也出现在确认弹窗的标题里，那一档是 Condensed，得掰回正文档 */
-.pending-page__name {
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-  font-weight: 400;
-  letter-spacing: normal;
-}
-
-/* 路径与计数：等宽，要对齐、要分得清 l 与 1（§1.2） */
-.pending-page__mono {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
+/* MCP：`看两边差在哪` 跟在句尾 12 */
+.pending-page__inline {
+  margin-left: var(--space-sm);
 }
 
 .pending-page__actions {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  flex-shrink: 0;
+  padding-left: var(--space-md);
 }
 
-.pending-page__foot {
-  max-width: 560px;
-  margin-top: var(--space-huge);
+.pending-page__buttons {
+  display: inline-flex;
+  gap: var(--space-xs);
+}
+
+/* 就地展开的区域：从句子列起，占到行尾 */
+.pending-page__extra {
+  grid-column: 2 / -1;
+}
+
+.pending-page__row.is-open {
+  padding-bottom: 14px;
+}
+
+/* 处理完的那一行：提示条落在原位。例行成功的 ✓ 落进记号列，动词对齐句子列 */
+.pending-page__row.is-done {
+  display: flex;
+}
+
+.pending-page__row.is-routine .ss-toast__mark {
+  width: 32px;
+}
+
+.pending-page__row.is-notice {
+  padding: 8px 0;
+}
+
+.pending-page__empty {
+  grid-column: 1 / -1;
+  padding: var(--space-xl) 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  color: var(--ink-mute);
+}
+
+/* ---- MCP 两份不一样：就地展开的字段级差异（T3b） ---- */
+.pending-diff {
+  padding-top: var(--space-sm);
+}
+
+.pending-diff__grid {
+  display: grid;
+  column-gap: var(--space-md);
+  align-items: center;
+}
+
+.pending-diff__row {
+  display: contents;
+}
+
+.pending-diff__place {
+  height: 22px;
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.pending-diff__field,
+.pending-diff__value {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  white-space: nowrap;
+}
+
+.pending-diff__field {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.pending-diff__value {
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  color: var(--ink);
+}
+
+.pending-diff__mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.pending-diff__mono b {
+  font-weight: 600;
+}
+
+/* 令牌与密钥：可悬停不可点 → 点状下划线，提示框「出于安全不显示原值」 */
+.pending-diff__secret {
+  text-decoration: underline dotted var(--ink-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.pending-diff__absent {
+  color: var(--ink-faint);
+}
+
+.pending-diff__note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: 6px;
   font-family: var(--font-ui);
   font-size: var(--size-caption);
-  color: var(--ink-mute);
   line-height: var(--leading-caption);
+  color: var(--ink-mute);
 }
 
-/* 确认弹窗的警告段：一行一句——路径、体积、受影响的链接、git 状态（§10 第 2 条）。
-   弹窗不在 .pending-page 里面（它是整窗的兄弟层），所以自带一个类名做作用域 */
-.pending-page__facts > div + div {
-  margin-top: var(--space-xxs);
-}
-
-.pending-page__facts .pending-page__mono {
-  overflow-wrap: anywhere;
+.pending-diff__foot {
+  margin-top: var(--space-xs);
 }
