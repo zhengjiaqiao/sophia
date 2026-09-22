@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { canSupplement, importedInDomain, mcpDomainLabel, type McpDomain } from "../mcpView";
 import type { McpAutoImportRule, McpEntry, McpLocation, McpOverview, McpPreview } from "../types";
-import { AgentKey, Busy, Button, SubPage, Switch, Tag, Tooltip } from "../ui";
+import { AgentKey, Busy, Button, SubPage, Switch } from "../ui";
+import { displayPath } from "../pathText.ts";
+import { RowTip } from "./RowTip.tsx";
 import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import {
@@ -324,12 +326,18 @@ export default function McpImportPage({
                 return (
                   <div
                     key={location.id}
+                    data-rowtip
                     className={
                       location.id === sourceId ? "ss-import__source is-active" : "ss-import__source"
                     }
                   >
                     {/* 完整路径进提示框（不用原生 title） */}
-                    <Tooltip content={<span className="ss-import__path">{location.path}</span>}>
+                    <RowTip
+                      focusable={false}
+                      content={
+                        <span className="ss-import__path">{displayPath(location.path)}</span>
+                      }
+                    >
                       <button
                         type="button"
                         className="ss-import__pick"
@@ -351,7 +359,7 @@ export default function McpImportPage({
                           {count}
                         </span>
                       </button>
-                    </Tooltip>
+                    </RowTip>
                   </div>
                 );
               })}
@@ -394,16 +402,18 @@ export default function McpImportPage({
                         <div
                           key={entryKey(item.entry)}
                           className="ss-import__row ss-mcp__row is-added"
+                          data-rowtip
                         >
                           <span className="ss-import__nobox" aria-hidden="true" />
                           <span className="ss-import__name">{item.name}</span>
                           <span className="ss-mcp__transport">{item.transport}</span>
                           <span className="ss-mcp__state">
-                            <Tag
-                              tip={`${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`}
+                            <RowTip
+                              side="before"
+                              content={`${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`}
                             >
-                              搬不过去
-                            </Tag>
+                              <span className="ss-tag ss-tag--strong has-tip">搬不过去</span>
+                            </RowTip>
                           </span>
                         </div>
                       );

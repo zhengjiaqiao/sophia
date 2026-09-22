@@ -4,8 +4,9 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
-import type { HarnessStatus } from "../types";
-import { AgentIcon, BlackNotice, Button, Empty, SubPage } from "../ui";
+import type { GatewayState, HarnessStatus } from "../types";
+import { canRestore, parseBackendError } from "../modelsView.ts";
+import { AgentIcon, BlackNotice, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
 import { CheckMark } from "./CheckMark.tsx";
 import "./SettingsPage.css";
 
@@ -174,6 +175,35 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   /// 退回应用内检查且没有新版时，版本旁说一句
   const [latest, setLatest] = useState(false);
 
+  /// 后台服务（Codex 模型网关的路由服务）那一行：按状态写，不常驻「卸下」。
+  /// null＝还没读到、或这台机器不支持（读不到就整行不显示，不打扰）
+  const [gateway, setGateway] = useState<GatewayState | null>(null);
+  const [uninstalling, setUninstalling] = useState(false);
+  const [uninstallError, setUninstallError] = useState<string | null>(null);
+  useEffect(() => {
+    void api.gatewayState().then(
+      (state) => setGateway(state.supported ? state : null),
+      () => setGateway(null),
+    );
+  }, []);
+  /// 停用了但服务还在（自动卸下失败或旧版遗留）。与 Codex 行「卸下后台服务」同一条件；
+  /// T2 的 `serviceLeftover` 合入后换成它（等价于 !enabled && router.installed）
+  const leftover = gateway !== null && !gateway.enabled && canRestore(gateway);
+  const inUse = gateway !== null && gateway.enabled;
+
+  /// 卸下：恢复 Codex 设置、卸载后台服务。完成后这一行随状态消失；失败就在这一行说原因
+  const uninstall = async () => {
+    setUninstalling(true);
+    setUninstallError(null);
+    try {
+      setGateway(await api.gatewayRestore());
+    } catch (e) {
+      setUninstallError(parseBackendError(String(e)).message);
+    } finally {
+      setUninstalling(false);
+    }
+  };
+
   /// 刚取消勾选的那一行：行旁出一句说明，4 秒后淡出
   const [unchecked, setUnchecked] = useState<string | null>(null);
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -293,6 +323,43 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           </span>
         </div>
         <div className="settings-page__update">{updateNotice()}</div>
+        {inUse ? (
+          <div className="settings-page__service">
+            <span className="settings-page__name">后台服务</span>
+            <span className="settings-page__dot">·</span>
+            <Tooltip content="要停用，请在模型页关掉 Codex 的开关" focusable>
+              <span className="settings-page__state has-tip">使用中</span>
+            </Tooltip>
+          </div>
+        ) : leftover ? (
+          <>
+            <div className="settings-page__service">
+              <span className="settings-page__name">后台服务</span>
+              <span className="settings-page__dot">·</span>
+              <span className="settings-page__state">已停用但仍在运行</span>
+              <span className="settings-page__dot">·</span>
+              {uninstalling ? (
+                <span className="settings-page__busy">
+                  <Spinner size={14} label="正在卸下后台服务" />
+                  正在卸下
+                </span>
+              ) : (
+                <Button
+                  variant="link"
+                  title="恢复 Codex 设置、卸载后台服务，卸下后不再占用资源"
+                  onClick={() => void uninstall()}
+                >
+                  卸下
+                </Button>
+              )}
+            </div>
+            {uninstallError !== null ? (
+              <div className="settings-page__update">
+                <BlackNotice message={`没卸下：${uninstallError}`} />
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </div>
     </SubPage>
   );

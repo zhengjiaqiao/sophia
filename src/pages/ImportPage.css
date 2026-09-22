@@ -122,8 +122,17 @@
   color: var(--ink-faint);
 }
 
-/* 来源行的完整路径走提示框：包裹层撑满整行 */
-.ss-import__source > .ss-tipwrap {
+/* 列表行提示框（RowTip）的包裹层；来源行的包裹层撑满整行 */
+.pages-rowtip {
+  display: inline-flex;
+}
+
+.pages-rowtip:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ss-import__source > .pages-rowtip {
   display: block;
 }
 

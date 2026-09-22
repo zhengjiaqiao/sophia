@@ -27,6 +27,8 @@ import {
 } from "./pendingIssues.ts";
 import type { ModelIssue } from "../modelsView.ts";
 import { defer, type Deferred } from "../deferredCommit.ts";
+import { displayPath } from "../pathText.ts";
+import { RowTip } from "./RowTip.tsx";
 import "./PendingPage.css";
 
 /// 待处理页＝**全局收件箱**（DESIGN「材料与工艺 › 全局收件箱」）：一个页面，顶部分段片
@@ -199,11 +201,12 @@ function AttentionRing({ label }: { label: string }) {
 /// 左列记号：与格内异常同形，类别名进提示框（可悬停不可点 → 点状下划线）
 function Mark({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <Tooltip content={label} focusable>
+    // 列表行的提示框放在这一行的右侧空白处（行线尾之外），不放到上一行
+    <RowTip content={label}>
       <span className="pending-page__mark" aria-label={label}>
         {children}
       </span>
-    </Tooltip>
+    </RowTip>
   );
 }
 
@@ -704,7 +707,7 @@ export function PendingPage({
             verb: "没删掉",
             names: [`${choice.label} 的 ${choice.skill}`],
             reason: "它在 git 仓库里，交给 git 处理更稳妥",
-            stats: planned.plan.inGit,
+            stats: displayPath(planned.plan.inGit),
           });
           return;
         }
@@ -832,7 +835,7 @@ export function PendingPage({
     actions: ReactNode,
     extra?: ReactNode,
   ) => (
-    <div className={`pending-page__row${extra ? " is-open" : ""}`} key={key}>
+    <div className={`pending-page__row${extra ? " is-open" : ""}`} key={key} data-rowtip>
       <div className="pending-page__markcell">{mark}</div>
       <div className="pending-page__sentence">{sentence}</div>
       <div className="pending-page__actions">{actions}</div>
@@ -1061,7 +1064,7 @@ export function PendingPage({
         // 状况已经不在了：key 里留着可读的路径，照样摆出来
         return (
           <span className="pending-page__connector">
-            已经不在了 · {pathsOfKey(entry.key).join(" · ")}
+            已经不在了 · {pathsOfKey(entry.key).map(displayPath).join(" · ")}
           </span>
         );
       })();

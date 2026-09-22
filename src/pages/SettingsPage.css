@@ -145,3 +145,39 @@
   font-size: var(--size-caption);
   color: var(--ink-mute);
 }
+
+/* 后台服务那一行：按状态写（使用中 / 已停用但仍在运行 · 卸下），没装不显示 */
+.settings-page__service {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: var(--row-h);
+  padding-left: var(--space-xs);
+}
+
+.settings-page__dot {
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.settings-page__state {
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.settings-page__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+/* 可悬停不可点：点状下划线（abbr 惯例），提示框说怎么停用 */
+.settings-page__state.has-tip {
+  text-decoration: underline dotted var(--ink-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}

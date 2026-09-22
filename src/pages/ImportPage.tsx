@@ -9,7 +9,9 @@ import type {
   SourceKind,
   SyncReport,
 } from "../types";
-import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag, Toast, Tooltip } from "../ui";
+import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Toast } from "../ui";
+import { displayPath } from "../pathText.ts";
+import { RowTip } from "./RowTip.tsx";
 import { defer } from "../deferredCommit.ts";
 import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
@@ -454,12 +456,16 @@ export default function ImportPage({
                 return (
                   <div
                     key={s.id}
+                    data-rowtip
                     className={
                       s.id === selected ? "ss-import__source is-active" : "ss-import__source"
                     }
                   >
                     {/* 完整路径进提示框（不用原生 title） */}
-                    <Tooltip content={<span className="ss-import__path">{s.path}</span>}>
+                    <RowTip
+                      focusable={false}
+                      content={<span className="ss-import__path">{displayPath(s.path)}</span>}
+                    >
                       <button
                         type="button"
                         className="ss-import__pick"
@@ -479,7 +485,7 @@ export default function ImportPage({
                           {count}
                         </span>
                       </button>
-                    </Tooltip>
+                    </RowTip>
                     {s.kind.type === "manual" ? (
                       <span className="ss-import__remove">
                         <Button variant="link" onClick={() => removeSource(s.path)}>
@@ -545,6 +551,7 @@ export default function ImportPage({
                             <button
                               type="button"
                               className="ss-import__row"
+                              data-rowtip
                               role="checkbox"
                               aria-checked={on}
                               onClick={() => toggleName(entry.name)}
@@ -553,15 +560,18 @@ export default function ImportPage({
                               <span className="ss-import__name">{entry.name}</span>
                               {entry.holder !== null ? (
                                 <span className="ss-import__tag">
-                                  <Tag
-                                    tip={
+                                  {/* 列表行的提示框放同一行、贴在标签左边，不放到上一行 */}
+                                  <RowTip
+                                    side="before"
+                                    focusable={false}
+                                    content={
                                       <>
                                         <b>同名</b>：{entry.holder.label} 里已有一份
                                       </>
                                     }
                                   >
-                                    同名
-                                  </Tag>
+                                    <span className="ss-tag ss-tag--strong has-tip">同名</span>
+                                  </RowTip>
                                 </span>
                               ) : null}
                             </button>
