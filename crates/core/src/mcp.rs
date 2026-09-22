@@ -131,8 +131,10 @@ pub fn location_ref(location: &McpLocation) -> McpLocationRef {
     }
 }
 
-/// 新建或整条替换一条自动添加规则（同一来源 + 目标域即同一条），同时拍 baseline：
-/// 来源位置此刻的全部 MCP 名。替换等于重建，排除名单与 baseline 都重来。
+/// 新建或更新一条自动添加规则（同一来源 + 目标域即同一条）：目标集合整体换成 `targets`，
+/// 跨域许可随之更新。规则从无到有（新建，或原先没有目标）时拍 baseline：来源位置此刻的
+/// 全部 MCP 名，排除名单清空；已生效的规则改目标不重拍，baseline 与排除名单都保留——
+/// 按「规则建立之后」算，建规则后才出现的会补到新加的目标上。关掉（删规则）再开才重拍。
 /// 来源配置这次读不出来就拒绝：拍成空集会在它修好后把现有的全部补上
 pub fn upsert_auto_import(
     rules: &mut Vec<McpAutoImportRule>,
@@ -148,15 +150,31 @@ pub fn upsert_auto_import(
             source.label
         ));
     }
-    rules.retain(|rule| rule.source.id != source.id || rule.target_domain != target_domain);
-    rules.push(McpAutoImportRule {
-        source: location_ref(source),
-        target_domain,
-        targets,
-        excluded: BTreeSet::new(),
-        allow_cross_domain,
-        baseline: Some(source_names(overview, &source.id)),
-    });
+    let snapshot = || source_names(overview, &source.id);
+    let existing = rules
+        .iter()
+        .position(|rule| rule.source.id == source.id && rule.target_domain == target_domain);
+    match existing {
+        Some(i) if !rules[i].targets.is_empty() => {
+            let rule = &mut rules[i];
+            rule.source = location_ref(source);
+            rule.targets = targets;
+            rule.allow_cross_domain = allow_cross_domain;
+            // 升级前的旧规则还没迁移：此刻迁移，与 `migrate_baselines` 同义
+            rule.baseline.get_or_insert_with(snapshot);
+        }
+        _ => {
+            rules.retain(|rule| rule.source.id != source.id || rule.target_domain != target_domain);
+            rules.push(McpAutoImportRule {
+                source: location_ref(source),
+                target_domain,
+                targets,
+                excluded: BTreeSet::new(),
+                allow_cross_domain,
+                baseline: Some(snapshot()),
+            });
+        }
+    }
     Ok(())
 }
 

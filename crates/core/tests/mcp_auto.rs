@@ -225,7 +225,7 @@ fn rule_serialization_never_contains_mcp_definition_values() {
     assert!(!encoded.contains("command"));
 }
 
-/// 规则只管以后新出现的：建规则时来源里已有的不补；新增的补；排除照旧；整条重建会重拍 baseline
+/// 规则只管以后新出现的：建规则时来源里已有的不补；新增的补；排除照旧；已生效时重新设置不重拍
 #[test]
 fn auto_import_rule_only_covers_entries_that_appear_after_it() {
     let temp = tempdir().unwrap();
@@ -276,7 +276,7 @@ fn auto_import_rule_only_covers_entries_that_appear_after_it() {
     rules[0].excluded.insert("search".into());
     assert!(auto_selections(&scan(&locations), &rules).is_empty());
 
-    // 同一来源 + 目标域重新设置 = 整条重建：baseline 重拍，排除名单清空
+    // 同一来源 + 目标域重新设置（规则已生效）：不重拍，baseline 与排除名单保留
     upsert_auto_import(
         &mut rules,
         &scan(&locations),
@@ -289,9 +289,139 @@ fn auto_import_rule_only_covers_entries_that_appear_after_it() {
     assert_eq!(rules.len(), 1);
     assert_eq!(
         rules[0].baseline,
-        Some(BTreeSet::from(["docs".to_string(), "search".to_string()]))
+        Some(BTreeSet::from(["docs".to_string()]))
     );
+    assert_eq!(rules[0].excluded, BTreeSet::from(["search".to_string()]));
+    assert!(auto_selections(&scan(&locations), &rules).is_empty());
+}
+
+/// 给已生效的规则加目标不重拍：建规则前已有的不补到新目标，建规则后才出现的补上
+#[test]
+fn adding_target_to_active_rule_keeps_baseline() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let source_path = root.join("source.json");
+    let first_path = root.join("first.json");
+    let second_path = root.join("second.json");
+    json_file(
+        &source_path,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    json_file(&first_path, json!({"mcpServers": {}}));
+    json_file(&second_path, json!({"mcpServers": {}}));
+    let source = json_location("source", &source_path, "project:one");
+    let first = json_location("first", &first_path, "project:one");
+    let second = json_location("second", &second_path, "project:one");
+    let locations = vec![source.clone(), first.clone(), second.clone()];
+    let mut rules = Vec::new();
+
+    upsert_auto_import(
+        &mut rules,
+        &scan(&locations),
+        &source,
+        "project:one".into(),
+        vec![location_ref(&first)],
+        false,
+    )
+    .unwrap();
+    // 建规则之后出现的 search
+    json_file(
+        &source_path,
+        json!({"mcpServers": {
+            "docs": {"command": "docs"},
+            "search": {"command": "search"}
+        }}),
+    );
+
+    upsert_auto_import(
+        &mut rules,
+        &scan(&locations),
+        &source,
+        "project:one".into(),
+        vec![location_ref(&first), location_ref(&second)],
+        false,
+    )
+    .unwrap();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        rules[0].baseline,
+        Some(BTreeSet::from(["docs".to_string()]))
+    );
+    assert_eq!(
+        auto_selections(&scan(&locations), &rules),
+        vec![
+            selection("source", "search", "first"),
+            selection("source", "search", "second"),
+        ]
+    );
+}
+
+/// 关掉再开 = 重建：删规则或目标清空都算关，再开时 baseline 重拍、排除名单清空
+#[test]
+fn turning_rule_off_then_on_resnapshots_baseline() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let source_path = root.join("source.json");
+    let target_path = root.join("target.json");
+    json_file(
+        &source_path,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    json_file(&target_path, json!({"mcpServers": {}}));
+    let source = json_location("source", &source_path, "project:one");
+    let target = json_location("target", &target_path, "project:one");
+    let locations = vec![source.clone(), target.clone()];
+    let set = |rules: &mut Vec<McpAutoImportRule>| {
+        upsert_auto_import(
+            rules,
+            &scan(&locations),
+            &source,
+            "project:one".into(),
+            vec![location_ref(&target)],
+            false,
+        )
+        .unwrap()
+    };
+    let mut rules = Vec::new();
+    set(&mut rules);
+    json_file(
+        &source_path,
+        json!({"mcpServers": {
+            "docs": {"command": "docs"},
+            "search": {"command": "search"}
+        }}),
+    );
+    rules[0].excluded.insert("docs".into());
+
+    // 关：整条删掉（remove_mcp_auto_import 的做法）
+    rules.retain(|rule| rule.source.id != source.id || rule.target_domain != "project:one");
+    set(&mut rules);
+    let both = Some(BTreeSet::from(["docs".to_string(), "search".to_string()]));
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].baseline, both);
     assert!(rules[0].excluded.is_empty());
+    assert!(auto_selections(&scan(&locations), &rules).is_empty());
+
+    // 关：目标清空也算关
+    json_file(
+        &source_path,
+        json!({"mcpServers": {
+            "docs": {"command": "docs"},
+            "search": {"command": "search"},
+            "web": {"command": "web"}
+        }}),
+    );
+    rules[0].targets.clear();
+    set(&mut rules);
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        rules[0].baseline,
+        Some(BTreeSet::from([
+            "docs".to_string(),
+            "search".to_string(),
+            "web".to_string()
+        ]))
+    );
     assert!(auto_selections(&scan(&locations), &rules).is_empty());
 }
 

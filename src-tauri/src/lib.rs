@@ -586,8 +586,8 @@ fn set_mcp_auto_import(
         return Err("跨域自动引入需要明确允许".into());
     }
     let mut settings = state.store.load_settings().map_err(err)?;
-    // 重新设置同一来源+目标域即完整替换，避免旧规则的选择状态泄漏到新目标集合；
-    // baseline 在 core 里按此刻来源的全部名字拍，规则只管以后新出现的
+    // 同一来源+目标域重新设置：目标集合整体替换；已生效的规则保留 baseline 与排除名单，
+    // 不重拍。新建（或关掉后再开）才在 core 里按此刻来源的全部名字拍 baseline
     let overview = symsync_core::mcp::scan(&discovery.locations);
     symsync_core::mcp::upsert_auto_import(
         &mut settings.mcp_auto_imports,
