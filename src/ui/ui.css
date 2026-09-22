@@ -980,6 +980,8 @@
   padding: 24px 28px;
   background: var(--canvas);
   color: var(--ink);
+  /* 浮在 80% 白遮罩上：不用阴影，靠 1px 墨线与底色分开（与下拉浮层同一种边） */
+  border: 1px solid var(--ink);
 }
 
 /* 标题 head-cap 档：15/600，汉字字距 0 */
