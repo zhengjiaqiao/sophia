@@ -142,6 +142,9 @@ export default function McpTab({
   // 本次会话里关掉的规则：来源位置 → 当时的目标，组头留一段灰的规则与开关好重开
   const [offRules, setOffRules] = useState<Map<string, McpAutoImportRule>>(new Map());
   const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
+  // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
+  const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
+  const diffAsked = useRef<Set<string>>(new Set());
   const focusedRef = useRef<string | undefined>(undefined);
   const refreshVersion = useRef(0);
   const mounted = useRef(true);
@@ -237,6 +240,32 @@ export default function McpTab({
   }, [cellNotice]);
 
   const page: McpDomain | null = domains.find((d) => d.key === selectedKey) ?? null;
+
+  // 扫描变了，差异可能也变了：重新懒加载
+  useEffect(() => {
+    diffAsked.current = new Set();
+    setDiffs(new Map());
+  }, [overview]);
+
+  const loadDiff = (name: string, locationIds: string[]) => {
+    if (diffAsked.current.has(name)) return;
+    diffAsked.current.add(name);
+    void api
+      .mcpFieldDiff(name, locationIds)
+      .then((diff) =>
+        setDiffs((prev) =>
+          new Map(prev).set(name, diff.fields.length > 0 ? diff.fields.map((f) => f.field) : null),
+        ),
+      )
+      .catch(() => setDiffs((prev) => new Map(prev).set(name, null)));
+  };
+
+  /// 提示框：列出不同的字段名；没加载完或读不到时用扫描里认得出的（url），都没有就写「配置不一样」
+  const diffTip = (name: string, scanned: string[]) => {
+    const loaded = diffs.get(name);
+    const fields = loaded ?? scanned;
+    return fields.length > 0 ? `${fields.join("、")} 不同` : "配置不一样";
+  };
 
   // 待处理页跳回：key 里带着位置路径与 `#服务名`（与 core 同公式），认出行或列
   useEffect(() => {
@@ -584,9 +613,14 @@ export default function McpTab({
       // 差异是行级事实，不进格：点状下划线，提示框给差异字段名（字段级原值 T3 在待处理页展开）
       mark:
         differing.length > 0 ? (
-          <Tag tone="weak" tip={fields.length > 0 ? `${fields.join("、")} 不同` : "配置不一样"}>
-            {`${differing.length} 份不一样`}
-          </Tag>
+          <span
+            onMouseEnter={() => loadDiff(row.name, differing)}
+            onFocus={() => loadDiff(row.name, differing)}
+          >
+            <Tag tone="weak" tip={diffTip(row.name, fields)}>
+              {`${differing.length} 份不一样`}
+            </Tag>
+          </span>
         ) : unsupportedAt.length > 0 ? (
           <Tag tone="weak" tip={`${unsupportedAt.join("、")} 不支持 ${row.name} 的接入方式`}>
             {`${unsupportedAt.join("、")} 不支持`}

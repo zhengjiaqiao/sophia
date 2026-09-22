@@ -120,10 +120,20 @@
   flex-shrink: 0;
 }
 
-/* 选择操作条的键：默认按钮 + 8px 点 + 名字 + 等宽增量 */
+/* 选择操作条的键：紧凑默认按钮（24）+ 8px 点 + 名字 + 等宽增量 */
 .mx-key {
-  gap: 8px;
-  padding: 0 12px;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+/* 选择操作条收在面板之内：一颗键都不许被挤扁，放不下由组件逐级退（N 个 / 让出添加键） */
+.mx-toolbar--select > * {
+  flex-shrink: 0;
+}
+
+/* 「全部 +N」与 agent 键之间只留 8 */
+.mx-keywrap--all {
+  margin-left: 2px;
 }
 
 .mx-keydot {
@@ -149,10 +159,6 @@
   font-size: var(--size-micro);
   font-weight: 400;
   color: var(--ink-mute);
-}
-
-.mx-clear {
-  margin-left: 6px;
 }
 
 /* 批量提示条：被按下的键正下方 4，文字右沿对齐该键右沿、向左展开。盖在列头上时垫一层白底，

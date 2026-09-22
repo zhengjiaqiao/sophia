@@ -5,6 +5,7 @@ import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
 import ImportPage from "./pages/ImportPage";
 import { pathsOfKey } from "./pages/pendingIssues";
+import { defer, type Deferred } from "./deferredCommit";
 import { Empty, Toast, TOAST_DWELL_MS } from "./ui";
 import { toastFor, type FailedItem, type ToastItem, type ToastOp } from "./toastText";
 import type {
@@ -21,15 +22,6 @@ import type {
 
 /// 写不进去的典型原因。命中时说人话，否则原样转述 core 给的那句
 const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
-
-/// 同名两份「只留这份」：另一份先藏起来，提示条消失（或关掉、切走）时才真的删；
-/// 撤销＝什么都没发生过，链接也就不用改指回去（DESIGN「页面还是弹层」：删原件不确认，删 + 撤销）
-interface Keeping {
-  kept: DomainRow;
-  other: DomainRow;
-  keptLabel: string;
-  planId: string;
-}
 
 export interface SkillsTabProps {
   overview: Overview | null;
@@ -88,7 +80,8 @@ export default function SkillsTab({
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
   const [rowToast, setRowToast] = useState<{ rowKey: string; node: ReactNode } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
-  const [keeping, setKeeping] = useState<Keeping | null>(null);
+  // 「只留这份」挂起未提交时藏起来的另一份（行键）
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [dupReadout, setDupReadout] = useState<Map<string, string>>(new Map());
   // 本次会话里关掉的规则：来源 → 当时的目标。组头留一段灰的规则与开关，好重开
   const [offRules, setOffRules] = useState<Map<string, string[]>>(new Map());
@@ -103,8 +96,10 @@ export default function SkillsTab({
     queue.current = queue.current.then(job, job);
     return queue.current;
   };
-  const keepingRef = useRef<Keeping | null>(null);
-  keepingRef.current = keeping;
+  // 同名两份「只留这份」：另一份先藏起来，删除挂在 deferredCommit 上——提示条到期、被关掉、
+  // 切走或窗口关闭（App 调 flushAll）时才真的删；撤销＝丢掉挂起的提交，链接也就不用改指回去
+  // （DESIGN「页面还是弹层」：删原件不确认，删 + 撤销）。一次只挂一个
+  const keepRef = useRef<Deferred | null>(null);
 
   const pages = overview === null ? [] : overview.domains.filter((d) => d.key === selectedKey);
   const page: DomainPage | null = pages[0] ?? null;
@@ -135,8 +130,7 @@ export default function SkillsTab({
   // 切走之前把「只留这份」提交掉：提示条已经不在了，没有撤销的入口了
   useEffect(() => {
     return () => {
-      const k = keepingRef.current;
-      if (k) void commitKeep(k);
+      void keepRef.current?.commit();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
@@ -147,7 +141,6 @@ export default function SkillsTab({
     setKeyToast(null);
     setRowToast(null);
     setCellNotice(null);
-    setKeeping(null);
     undoRef.current = null;
   }, [selectedKey]);
 
@@ -402,16 +395,16 @@ export default function SkillsTab({
 
   // ===== 同名：只留这份 =====
 
-  const commitKeep = async (k: Keeping) => {
-    setKeeping((prev) => (prev?.planId === k.planId ? null : prev));
-    setRowToast(null);
+  /// 真的删掉另一份（deferredCommit 到期时调）
+  const deleteOther = async (other: DomainRow, planId: string) => {
+    const key = skillRowKey(other);
     try {
       let report: SyncReport;
       try {
-        report = await api.deleteSource(k.planId);
+        report = await api.deleteSource(planId);
       } catch {
         // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删（仓库里的照旧不代删）
-        const again = await api.planDeleteSource(k.other.sourceId, k.other.skill);
+        const again = await api.planDeleteSource(other.sourceId, other.skill);
         if (again.plan.inGit !== null)
           throw new Error(`它在 git 仓库 ${again.plan.inGit} 里，这里不代删`);
         report = await api.deleteSource(again.planId);
@@ -422,7 +415,7 @@ export default function SkillsTab({
           <Toast
             kind="cannot"
             verb="没删掉"
-            names={[k.other.skill]}
+            names={[other.skill]}
             reason={bad.outcome.reason}
             onDismiss={dismissGlobal}
             onClose={dismissGlobal}
@@ -433,11 +426,16 @@ export default function SkillsTab({
       onError(String(e));
     }
     await onRefresh();
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
   };
 
   const keepThis = async (kept: DomainRow, other: DomainRow) => {
     // 上一次的还没提交：先提交它，一次只挂一个撤销
-    if (keepingRef.current) await commitKeep(keepingRef.current);
+    await keepRef.current?.commit();
     const keptLabel = overview?.sources.find((s) => s.id === kept.sourceId)?.label ?? kept.sourceId;
     const rowKey = skillRowKey(kept);
     let planned;
@@ -463,12 +461,24 @@ export default function SkillsTab({
       });
       return;
     }
-    const k: Keeping = { kept, other, keptLabel, planId: planned.planId };
-    setKeeping(k);
+    const otherKey = skillRowKey(other);
+    const planId = planned.planId;
+    const d = defer(`keep:${otherKey}`, () => deleteOther(other, planId));
+    keepRef.current = d;
+    setHidden((prev) => new Set(prev).add(otherKey));
     const undo = () => {
+      d.undo();
       undoRef.current = null;
-      setKeeping(null);
       setRowToast(null);
+      setHidden((prev) => {
+        const next = new Set(prev);
+        next.delete(otherKey);
+        return next;
+      });
+    };
+    const commit = () => {
+      setRowToast(null);
+      void d.commit();
     };
     undoRef.current = undo;
     const n = planned.plan.affected.length;
@@ -480,8 +490,8 @@ export default function SkillsTab({
           {...text}
           stats={n === 0 ? "另一份进废纸篓" : `另一份进废纸篓 · ${n} 条链接改指到这份`}
           action={{ label: "撤销", onClick: undo }}
-          onDismiss={() => void commitKeep(k)}
-          onClose={() => void commitKeep(k)}
+          onDismiss={commit}
+          onClose={commit}
         />
       ),
     });
@@ -642,7 +652,7 @@ export default function SkillsTab({
       (sources === undefined || sources.size === 0 || sources.has(row.sourceId)),
   );
   const selected = selection.get(page.key) ?? new Set<string>();
-  const hiddenRows = new Set(keeping ? [skillRowKey(keeping.other)] : []);
+  const hiddenRows = hidden;
 
   return (
     <section className="mx-page">

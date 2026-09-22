@@ -22,6 +22,7 @@ import {
   AgentMark,
   Checkbox,
   DOT_LABEL,
+  IconButton,
   IconCannot,
   IconClose,
   IconSearch,
@@ -233,7 +234,7 @@ function KeyButton({ k }: { k: SelectionKey }) {
   const button = (
     <button
       type="button"
-      className="ss-btn mx-key"
+      className="ss-btn ss-btn--compact mx-key"
       disabled={disabled}
       aria-label={`${k.name}${sign ? ` ${sign}` : ""}${disabled ? `：${k.disabledReason}` : ""}`}
       onClick={disabled ? undefined : k.onPress}
@@ -527,10 +528,22 @@ export default function Matrix(props: MatrixProps) {
 
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
+  const selRef = useRef<HTMLDivElement>(null);
+  // 0：完整；1：「已选 N 个」缩成「N 个」；2：再让出添加键。列数变了从头量
+  const [fit, setFit] = useState(0);
+  useLayoutEffect(() => setFit(0), [columns.length, width]);
+  useLayoutEffect(() => {
+    const el = selRef.current;
+    if (!selecting || !el || fit >= 2) return;
+    if (el.scrollWidth > el.clientWidth + 1) setFit((f) => f + 1);
+  });
   const toolbar = selecting ? (
-    <div className="mx-toolbar" style={{ minWidth: width, width: "max-content" }}>
+    // 选择操作条收在面板右沿之内：紧凑键、取消选择是 Esc 图标键；
+    // 还放不下就把「已选 N 个」缩成「N 个」，再放不下才让出右端的添加键（fit 逐级退）
+    <div className="mx-toolbar mx-toolbar--select" ref={selRef} style={{ width }}>
       <span className="mx-selcount">
-        已选 <span className="mx-mono">{selectedVisible.length}</span> 个
+        {fit === 0 ? "已选 " : null}
+        <span className="mx-mono">{selectedVisible.length}</span> 个
       </span>
       <span className={`mx-keys${busy ? " ss-busy" : ""}`}>
         {selectionKeys.map((k) => (
@@ -540,7 +553,7 @@ export default function Matrix(props: MatrixProps) {
           </span>
         ))}
         {selectionAll ? (
-          <span className="mx-keywrap">
+          <span className="mx-keywrap mx-keywrap--all">
             <KeyButton k={selectionAll} />
             {keyToast?.keyId === selectionAll.id ? (
               <div className="mx-keytoast">{keyToast.node}</div>
@@ -549,14 +562,12 @@ export default function Matrix(props: MatrixProps) {
         ) : null}
       </span>
       {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
-      <button
-        type="button"
-        className="ss-btn ss-btn--link mx-clear"
+      <IconButton
+        icon={<IconClose />}
+        title="取消选择 Esc"
         onClick={() => onSelectionChange(new Set())}
-      >
-        取消选择
-      </button>
-      {addButton ? (
+      />
+      {addButton && fit < 2 ? (
         <span className={`mx-toolbar__end${busy ? " ss-busy" : ""}`}>{addButton}</span>
       ) : null}
     </div>
