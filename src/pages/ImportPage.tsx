@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag, Toast, Tooltip } from "../ui";
 import { defer } from "../deferredCommit.ts";
+import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { joinWords } from "./pendingIssues.ts";
 import {
@@ -144,10 +145,14 @@ export default function ImportPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initKey]);
 
+  /// 已添加那一行展开没有；换来源时收起
+  const [showAdded, setShowAdded] = useState(false);
+
   // 切换来源时清空勾选（添加是一次性动作，不预填）
   useEffect(() => {
     setNames([]);
     setReplace([]);
+    setShowAdded(false);
   }, [selected]);
 
   // 选中项消失（如手动来源被移除）时回落到第一项
@@ -197,7 +202,9 @@ export default function ImportPage({
     holder: holders.get(sk.name) ?? null,
   }));
   const fresh = entries.filter((e) => !e.added);
-  const columns = columnsOf(entries, entries.length > 28 ? 3 : 2);
+  /// 列表只列未添加的；多到一列放不下才分两列
+  const columns = columnsOf(fresh, fresh.length > 16 ? 2 : 1);
+  const added = entries.filter((e) => e.added);
   const allSelected = fresh.length > 0 && fresh.every((e) => names.includes(e.name));
   const someSelected = fresh.some((e) => names.includes(e.name));
 
@@ -490,7 +497,23 @@ export default function ImportPage({
           </Busy>
 
           <div className="ss-import__main">
-            {source !== undefined ? (
+            {source !== undefined && fresh.length === 0 ? (
+              // 都已添加：右栏只写一句 + 已添加那一行，不显示底部块
+              <div className="ss-import__alldone">
+                <div className="ss-import__alldone-text">{source.label}里的都已添加</div>
+                <AddedFold
+                  count={added.length}
+                  open={showAdded}
+                  onToggle={() => setShowAdded(!showAdded)}
+                >
+                  {added.map((e) => (
+                    <span key={e.name} className="ss-import__addedname">
+                      {e.name}
+                    </span>
+                  ))}
+                </AddedFold>
+              </div>
+            ) : source !== undefined ? (
               <>
                 <div className="ss-import__listhead">
                   <span className="ss-import__headline">
@@ -514,18 +537,6 @@ export default function ImportPage({
                   {columns.map((col) => (
                     <div className="ss-import__col" key={col[0].name}>
                       {col.map((entry) => {
-                        // 已添加的不是可选项：不画复选框、不给悬停反馈，只留一个同宽的空位对齐名字
-                        if (entry.added) {
-                          return (
-                            <div key={entry.name} className="ss-import__row is-added">
-                              <span className="ss-import__nobox" aria-hidden="true" />
-                              <span className="ss-import__name">{entry.name}</span>
-                              <span className="ss-import__tag">
-                                <Tag tone="weak">已添加</Tag>
-                              </span>
-                            </div>
-                          );
-                        }
                         const on = names.includes(entry.name);
                         const chosen = replace.includes(entry.name);
                         const pendingHere = replacing?.names.includes(entry.name) ?? false;
@@ -606,60 +617,73 @@ export default function ImportPage({
                       })}
                     </div>
                   ))}
+                  <AddedFold
+                    count={added.length}
+                    open={showAdded}
+                    onToggle={() => setShowAdded(!showAdded)}
+                  >
+                    {added.map((e) => (
+                      <span key={e.name} className="ss-import__addedname">
+                        {e.name}
+                      </span>
+                    ))}
+                  </AddedFold>
                 </Busy>
               </>
             ) : null}
           </div>
         </div>
 
-        <Busy busy={busy} className="ss-import__foot">
-          <div className="ss-import__keys">
-            {page.targets.length === 0 ? (
-              <span className="ss-import__hint">还没有启用任何 agent，先去设置里开一个</span>
+        {source !== undefined && fresh.length === 0 ? null : (
+          <Busy busy={busy} className="ss-import__foot">
+            <div className="ss-import__keys">
+              {page.targets.length === 0 ? (
+                <span className="ss-import__hint">还没有启用任何 agent，先去设置里开一个</span>
+              ) : (
+                page.targets.map((target) => (
+                  <AgentKey
+                    key={target.id}
+                    id={target.scope.harnessId}
+                    name={target.label}
+                    pressed={targetIds.includes(target.id)}
+                    onToggle={() => toggleTarget(target.id)}
+                    disabledReason={
+                      target.linkedWholeTo === null
+                        ? undefined
+                        : `${target.label} 的 skills 文件夹整个是链接，拆开后才能逐个开关`
+                    }
+                  />
+                ))
+              )}
+            </div>
+            <span className="ss-import__rule" title="只管以后新出现的，现有的不变">
+              <Switch
+                size="inline"
+                checked={ruleOn}
+                onChange={toggleRule}
+                label={`${source?.label ?? "这个来源"} 以后新出现的也加`}
+                title={
+                  source ? `${source.label} 以后新出现的 skill 也自动添加到点亮的 agent` : undefined
+                }
+                disabledReason={ruleOn ? undefined : ruleReason}
+              />
+              <span className="ss-import__rulelabel">以后新出现的也加</span>
+              {suggestRule ? (
+                <span className="ss-import__suggest">每次都选这几个？可以打开</span>
+              ) : null}
+            </span>
+            <span className="ss-import__safety">只建链接，不动源文件</span>
+            {blocked ? (
+              <Button size="row" variant="primary" disabled disabledReason={blocked}>
+                {`添加 ${chosen} 个`}
+              </Button>
             ) : (
-              page.targets.map((target) => (
-                <AgentKey
-                  key={target.id}
-                  id={target.scope.harnessId}
-                  name={target.label}
-                  pressed={targetIds.includes(target.id)}
-                  onToggle={() => toggleTarget(target.id)}
-                  disabledReason={
-                    target.linkedWholeTo === null
-                      ? undefined
-                      : `${target.label} 的 skills 文件夹整个是链接，拆开后才能逐个开关`
-                  }
-                />
-              ))
+              <Button size="row" variant="primary" onClick={() => void doAdd()}>
+                {`添加 ${chosen} 个`}
+              </Button>
             )}
-          </div>
-          <span className="ss-import__rule" title="只管以后新出现的，现有的不变">
-            <Switch
-              size="inline"
-              checked={ruleOn}
-              onChange={toggleRule}
-              label={`${source?.label ?? "这个来源"} 以后新出现的也加`}
-              title={
-                source ? `${source.label} 以后新出现的 skill 也自动添加到点亮的 agent` : undefined
-              }
-              disabledReason={ruleOn ? undefined : ruleReason}
-            />
-            <span className="ss-import__rulelabel">以后新出现的也加</span>
-            {suggestRule ? (
-              <span className="ss-import__suggest">每次都选这几个？可以打开</span>
-            ) : null}
-          </span>
-          <span className="ss-import__safety">只建链接，不动源文件</span>
-          {blocked ? (
-            <Button size="row" variant="primary" disabled disabledReason={blocked}>
-              {`添加 ${chosen} 个`}
-            </Button>
-          ) : (
-            <Button size="row" variant="primary" onClick={() => void doAdd()}>
-              {`添加 ${chosen} 个`}
-            </Button>
-          )}
-        </Busy>
+          </Busy>
+        )}
       </div>
     </SubPage>
   );

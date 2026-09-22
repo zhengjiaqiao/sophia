@@ -100,6 +100,17 @@
   white-space: nowrap;
 }
 
+/* 再试一次进行中：行内细弧 + 一句忙什么 */
+.gateway-row__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
 /* `再试一次` 紧跟 `连不上` 8（gap 10 − 2） */
 .gateway-row__retry {
   display: inline-flex;

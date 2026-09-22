@@ -3,6 +3,7 @@ import { api } from "../api";
 import { canSupplement, importedInDomain, mcpDomainLabel, type McpDomain } from "../mcpView";
 import type { McpAutoImportRule, McpEntry, McpLocation, McpOverview, McpPreview } from "../types";
 import { AgentKey, Busy, Button, SubPage, Switch, Tag, Tooltip } from "../ui";
+import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import {
   defaultTargets,
@@ -144,10 +145,19 @@ export default function McpImportPage({
     () => overview.entries.filter((entry) => entry.sourceId === sourceId),
     [overview.entries, sourceId],
   );
-  const canPick = (entry: McpEntry) => canSupplement(entry, targetIdSet);
+  /// 「未添加」按本域其余全部位置算（不是只按当场点亮的）：否则熄掉几个键，列表就把项
+  /// 收进「已添加」、甚至整页变成「都已添加」而没有底部块去重新点亮
+  const otherTargetSet = useMemo(() => new Set(pickableTargets), [pickableTargets.join(",")]);
+  const canPick = (entry: McpEntry) => canSupplement(entry, otherTargetSet);
+
+  /// 已添加那一行展开没有；换来源时收起
+  const [showAdded, setShowAdded] = useState(false);
 
   // 切换来源时清空勾选（添加是一次性动作，不预填）
-  useEffect(() => setNames([]), [sourceId]);
+  useEffect(() => {
+    setNames([]);
+    setShowAdded(false);
+  }, [sourceId]);
 
   // 选中的来源消失（项目被移除）时回落到第一个
   useEffect(() => {
@@ -159,11 +169,11 @@ export default function McpImportPage({
   useEffect(() => {
     setNames((previous) =>
       previous.filter((name) =>
-        sourceEntries.some((entry) => entry.name === name && canSupplement(entry, targetIdSet)),
+        sourceEntries.some((entry) => entry.name === name && canSupplement(entry, otherTargetSet)),
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetIdSet, sourceId]);
+  }, [otherTargetSet, sourceId]);
 
   /// 改规则：`set_mcp_auto_import` 在来源读不出来时拒绝，原话交给壳
   const run = async (act: () => Promise<unknown>) => {
@@ -243,7 +253,11 @@ export default function McpImportPage({
     added: importedInDomain(entry, page),
     unsupported: entry.transport === "unsupported" || entry.reason !== null,
   }));
-  const pickable = entries.filter((e) => e.pickable);
+  const pickable = entries.filter((e) => e.pickable && !e.unsupported);
+  /// 列表只列未添加的（搬不过去的也留在列表里，说明它为什么选不了）；已添加的收进最后一行
+  const listed = entries.filter((e) => e.pickable || e.unsupported);
+  const added = entries.filter((e) => !e.pickable && !e.unsupported);
+  const allDone = listed.length === 0 && entries.length > 0;
   const allSelected = pickable.length > 0 && pickable.every((e) => names.includes(e.name));
   const someSelected = pickable.some((e) => names.includes(e.name));
 
@@ -269,6 +283,24 @@ export default function McpImportPage({
     memory.streak >= 2 &&
     targetIds.length > 0 &&
     sameSet(memory.last, targetIds);
+
+  /// 列表最后一行：已添加 N 个 ▸，展开是「名字 + 传输」的灰行（不是可选项）
+  const addedFold = (
+    <AddedFold
+      count={added.length}
+      open={showAdded}
+      onToggle={() => setShowAdded(!showAdded)}
+      layout="rows"
+    >
+      {added.map((item) => (
+        <div key={entryKey(item.entry)} className="ss-import__row ss-mcp__row is-added">
+          <span className="ss-import__name">{item.name}</span>
+          <span className="ss-mcp__transport">{item.transport}</span>
+          <span className="ss-mcp__state" />
+        </div>
+      ))}
+    </AddedFold>
+  );
 
   return (
     <SubPage title={<>添加 MCP 到「{page.label}」</>} onBack={onClose}>
@@ -327,7 +359,13 @@ export default function McpImportPage({
           </Busy>
 
           <div className="ss-import__main">
-            {source !== undefined ? (
+            {source !== undefined && allDone ? (
+              // 都已添加：右栏只写一句 + 已添加那一行，不显示底部块
+              <div className="ss-import__alldone">
+                <div className="ss-import__alldone-text">{source.label} 里的都已添加</div>
+                {addedFold}
+              </div>
+            ) : source !== undefined ? (
               <>
                 <div className="ss-import__listhead ss-mcp__listhead">
                   <span className="ss-import__headline">
@@ -349,18 +387,9 @@ export default function McpImportPage({
                 </div>
 
                 <Busy busy={busy} className="ss-import__grid ss-mcp__list">
-                  {entries.map((item) => {
-                    const state = item.unsupported ? (
-                      <Tag
-                        tip={`${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`}
-                      >
-                        搬不过去
-                      </Tag>
-                    ) : !item.pickable && item.added ? (
-                      <Tag tone="weak">已添加</Tag>
-                    ) : null;
-                    // 选不了的（已添加 / 搬不过去）不是可选项：不画复选框、不给悬停反馈
-                    if (!item.pickable) {
+                  {listed.map((item) => {
+                    // 搬不过去的不是可选项：不画复选框、不给悬停反馈
+                    if (item.unsupported) {
                       return (
                         <div
                           key={entryKey(item.entry)}
@@ -369,7 +398,13 @@ export default function McpImportPage({
                           <span className="ss-import__nobox" aria-hidden="true" />
                           <span className="ss-import__name">{item.name}</span>
                           <span className="ss-mcp__transport">{item.transport}</span>
-                          <span className="ss-mcp__state">{state}</span>
+                          <span className="ss-mcp__state">
+                            <Tag
+                              tip={`${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`}
+                            >
+                              搬不过去
+                            </Tag>
+                          </span>
                         </div>
                       );
                     }
@@ -386,64 +421,67 @@ export default function McpImportPage({
                         <CheckMark on={on} />
                         <span className="ss-import__name">{item.name}</span>
                         <span className="ss-mcp__transport">{item.transport}</span>
-                        <span className="ss-mcp__state">{state}</span>
+                        <span className="ss-mcp__state" />
                       </button>
                     );
                   })}
+                  {addedFold}
                 </Busy>
               </>
             ) : null}
           </div>
         </div>
 
-        <Busy busy={busy} className="ss-import__foot">
-          <div className="ss-import__keys">
-            {domainTargets.length === 0 ? (
-              <span className="ss-import__hint">
-                这个位置下还没有任何 MCP 配置文件，添加第一个服务时会建出来
-              </span>
+        {source !== undefined && allDone ? null : (
+          <Busy busy={busy} className="ss-import__foot">
+            <div className="ss-import__keys">
+              {domainTargets.length === 0 ? (
+                <span className="ss-import__hint">
+                  这个位置下还没有任何 MCP 配置文件，添加第一个服务时会建出来
+                </span>
+              ) : (
+                domainTargets.map((target) => (
+                  <AgentKey
+                    key={target.id}
+                    id={target.harnessId}
+                    name={targetLabel(target)}
+                    pressed={targetIds.includes(target.id)}
+                    onToggle={() => toggleTarget(target.id)}
+                    disabledReason={target.id === sourceId ? "这就是来源" : undefined}
+                  />
+                ))
+              )}
+            </div>
+            <span className="ss-import__rule" title="只管以后新出现的，现有的不变">
+              <Switch
+                size="inline"
+                checked={ruleOn}
+                onChange={toggleRule}
+                label={`${source?.label ?? "这个位置"} 以后新出现的也加`}
+                title={
+                  source
+                    ? `${source.label} 以后新出现的服务也自动添加到点亮的位置${isCrossDomain ? "；跨域会把请求头和令牌一并复制过去" : ""}`
+                    : undefined
+                }
+                disabledReason={ruleOn || targetIds.length > 0 ? undefined : "先点亮至少一个位置"}
+              />
+              <span className="ss-import__rulelabel">以后新出现的也加</span>
+              {suggestRule ? (
+                <span className="ss-import__suggest">每次都选这几个？可以打开</span>
+              ) : null}
+            </span>
+            <span className="ss-import__safety">只新增，不覆盖同名配置</span>
+            {blocked ? (
+              <Button size="row" variant="primary" disabled disabledReason={blocked}>
+                {`添加 ${chosen} 个`}
+              </Button>
             ) : (
-              domainTargets.map((target) => (
-                <AgentKey
-                  key={target.id}
-                  id={target.harnessId}
-                  name={targetLabel(target)}
-                  pressed={targetIds.includes(target.id)}
-                  onToggle={() => toggleTarget(target.id)}
-                  disabledReason={target.id === sourceId ? "这就是来源" : undefined}
-                />
-              ))
+              <Button size="row" variant="primary" onClick={() => void doAdd()}>
+                {`添加 ${chosen} 个`}
+              </Button>
             )}
-          </div>
-          <span className="ss-import__rule" title="只管以后新出现的，现有的不变">
-            <Switch
-              size="inline"
-              checked={ruleOn}
-              onChange={toggleRule}
-              label={`${source?.label ?? "这个位置"} 以后新出现的也加`}
-              title={
-                source
-                  ? `${source.label} 以后新出现的服务也自动添加到点亮的位置${isCrossDomain ? "；跨域会把请求头和令牌一并复制过去" : ""}`
-                  : undefined
-              }
-              disabledReason={ruleOn || targetIds.length > 0 ? undefined : "先点亮至少一个位置"}
-            />
-            <span className="ss-import__rulelabel">以后新出现的也加</span>
-            {suggestRule ? (
-              <span className="ss-import__suggest">每次都选这几个？可以打开</span>
-            ) : null}
-          </span>
-          <span className="ss-import__safety">只新增，不覆盖同名配置</span>
-          {blocked ? (
-            <Button size="row" variant="primary" disabled disabledReason={blocked}>
-              {`添加 ${chosen} 个`}
-            </Button>
-          ) : (
-            <Button size="row" variant="primary" onClick={() => void doAdd()}>
-              {`添加 ${chosen} 个`}
-            </Button>
-          )}
-        </Busy>
+          </Busy>
+        )}
       </div>
     </SubPage>
   );

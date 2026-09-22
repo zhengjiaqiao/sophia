@@ -19,7 +19,7 @@ import {
   IconChevronRight,
   IconEdit,
   IconTrash,
-  Rotor,
+  Spinner,
   SubPage,
   Tag,
   Toast,
@@ -256,7 +256,10 @@ export function GatewayPage({
             <Tag tip={item.unreachable}>连不上</Tag>
             <span className="gateway-row__retry">
               {retrying === item.id ? (
-                <Rotor size={14} spinning label="正在重连" />
+                <span className="gateway-row__busy">
+                  <Spinner size={14} label="正在重连" />
+                  正在重连
+                </span>
               ) : (
                 <Button
                   size="compact"

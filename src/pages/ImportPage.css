@@ -215,7 +215,9 @@
 
 .ss-import__grid {
   display: flex;
-  gap: var(--space-xxl);
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0 var(--space-xxl);
   flex-grow: 1;
   min-height: 0;
   overflow-y: auto;
@@ -302,6 +304,81 @@
 /* 挂起的替换：黑窗贴在被替换那一行正下方 4，从名字那一列起 */
 .ss-import__rowtoast {
   padding: 4px 0 6px 22px;
+}
+
+/* ---- 列表最后一行：已添加 N 个 ▸（12 ink-mute，可展开） ---- */
+.ss-import__fold {
+  flex-basis: 100%;
+  margin-top: var(--space-md);
+}
+
+.ss-import__foldkey {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--hit-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  color: var(--ink-mute);
+  cursor: pointer;
+}
+
+.ss-import__foldkey:hover {
+  color: var(--ink);
+}
+
+.ss-import__foldkey:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ss-import__foldkey svg {
+  transition: transform var(--motion-fast) var(--ease-mech);
+}
+
+.ss-import__foldkey.is-open svg {
+  transform: rotate(90deg);
+}
+
+/* 展开的已添加项：不是可选项——没有复选框、名字 ink-faint、悬停没有反馈；三列按行排 */
+.ss-import__folded {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+  column-gap: var(--space-huge);
+  padding: var(--space-xs) 0 0 22px;
+}
+
+.ss-import__addedname {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: 1.6;
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+/* MCP：已添加的一行 = 名字 + 传输（同为 ink-faint） */
+.ss-import__folded--rows {
+  display: block;
+  padding-left: 22px;
+}
+
+/* ---- 都已添加：右栏只写一句 + 已添加那一行，不显示底部块 ---- */
+.ss-import__alldone {
+  padding-top: var(--space-xl);
+}
+
+.ss-import__alldone-text {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+}
+
+.ss-import__alldone .ss-import__fold {
+  margin-top: var(--space-xs);
 }
 
 /* ---- 底部一行：一组目标 + 规则开关 + 安全小字 + 添加 N 个 ---- */

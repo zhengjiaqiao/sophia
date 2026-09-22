@@ -7,7 +7,7 @@ import {
   Button,
   Chip,
   DupMark,
-  Rotor,
+  Spinner,
   StateDot,
   SubPage,
   Toast,
@@ -368,7 +368,7 @@ function DiffPanel({ issue, diff }: { issue: McpIssue; diff: McpDiff | "loading"
     return (
       <div className="pending-diff">
         <div className="pending-diff__note">
-          <Rotor size={14} spinning label="正在比对" />
+          <Spinner size={14} label="正在比对" />
           正在比对
         </div>
       </div>
