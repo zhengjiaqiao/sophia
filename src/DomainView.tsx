@@ -18,6 +18,7 @@ import Matrix, {
 } from "./Matrix";
 import { distinguishingSegments } from "./pages/importDefaults";
 import { viewOf } from "./cellState";
+import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
 import { AddButton, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
@@ -90,7 +91,7 @@ const verbOf = (state: CellState, agent: string): string | undefined =>
       : state === "broken"
         ? "点一下重新链接"
         : state === "readOnly"
-          ? "点一下再试一次"
+          ? `${agent} 的 skills 目录写不进去 · 点一下再试一次`
           : undefined;
 
 /// 按 agent 那一项的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、写不进的注明不受影响
@@ -199,7 +200,7 @@ export default function DomainView(props: DomainViewProps) {
         cells[target.id] = {
           dot: view.dot,
           clickable: verb !== undefined,
-          tip: verb ?? view.reason ?? "",
+          tip: verb ?? blockedTipOf(state, target.label, row.skill, view.reason ?? ""),
           pending: props.pendingCells.has(skillCellKey(ref)),
         };
       }

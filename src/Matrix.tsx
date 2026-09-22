@@ -39,6 +39,12 @@ const CHECK_W = 34;
 const NAME_W = 246;
 const COL_W = 88;
 const TAIL_W = 24;
+/// 点了做不了的格子后，说明停留的时长
+export const PINNED_TIP_MS = 3000;
+
+/// 按下一格（点击或空格）做什么：能改的交给调用方改数据；做不了的只当即说明，不碰数据
+export const cellPress = (view: Pick<MatrixCellView, "clickable">): "act" | "explain" =>
+  view.clickable ? "act" : "explain";
 const ORIGIN_W = 120;
 
 /// 一格的键：行键 + 列 id。闪烁、就地提示都按它认格
@@ -349,6 +355,8 @@ export default function Matrix(props: MatrixProps) {
   const [tip, setTip] = useState<string | null>(null);
   // 这一格的提示框因上方被吸顶区盖住而翻到了下方
   const [tipFlip, setTipFlip] = useState<string | null>(null);
+  // 这一格的提示框是点出来的（做不了的格子），不是悬停出来的
+  const [tipPinned, setTipPinned] = useState(false);
   const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 正在闪的格
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
@@ -457,6 +465,7 @@ export default function Matrix(props: MatrixProps) {
     if (tipTimer.current) clearTimeout(tipTimer.current);
     setTip(null);
     setTipFlip(null);
+    setTipPinned(false);
     tipTimer.current = setTimeout(() => setTip(key), TIP_DELAY_MS.table);
   };
   const dropTip = () => {
@@ -464,8 +473,28 @@ export default function Matrix(props: MatrixProps) {
     tipTimer.current = null;
     setTip(null);
     setTipFlip(null);
+    setTipPinned(false);
   };
   useEffect(() => () => dropTip(), []);
+  // 点了做不了的格子（或空格）：不等 700ms，当即弹出这一格的提示框，停约 3 秒；移开、点别处即消
+  const pinTip = (key: string) => {
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    if (tip !== key) {
+      setTipFlip(null);
+      setTip(key);
+    }
+    setTipPinned(true);
+    tipTimer.current = setTimeout(dropTip, PINNED_TIP_MS);
+  };
+  useEffect(() => {
+    if (!tipPinned) return;
+    const away = (e: PointerEvent) => {
+      const cell = (e.target as Element | null)?.closest?.(".mx-cell");
+      if (!cell || !cell.contains(document.getElementById(`${tipId}-tip`))) dropTip();
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [tipPinned, tipId]);
 
   // 格子提示框默认向上（第一行向下）；上方被吸顶区盖住时翻到格子下方
   useLayoutEffect(() => {
@@ -961,8 +990,12 @@ export default function Matrix(props: MatrixProps) {
                     }}
                     onBlur={dropTip}
                     onClick={() => {
+                      if (cellPress(view) === "explain") {
+                        pinTip(key);
+                        return;
+                      }
                       dropTip();
-                      if (view.clickable) onCell(row.key, col.id);
+                      onCell(row.key, col.id);
                     }}
                   >
                     <StateDot

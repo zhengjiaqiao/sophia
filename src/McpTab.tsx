@@ -26,6 +26,7 @@ import {
 import { AddButton, Confirm, Empty, Tag, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import { toastFor, type ToastItem, type ToastText } from "./toastText";
+import { mcpOwnTip } from "./cellTip";
 import type {
   McpUndoReport,
   McpAutoImportRule,
@@ -606,7 +607,11 @@ export default function McpTab({
       cells[target.id] = {
         dot: view.dot,
         clickable: view.clickable,
-        tip: view.clickable ? "点一下写进" : (view.reason ?? ""),
+        tip: view.clickable
+          ? "点一下写进"
+          : view.dot === "own" && view.issue === undefined
+            ? mcpOwnTip(names.get(target.id) ?? target.label)
+            : (view.reason ?? ""),
         pending: pendingCells.has(cellKey(key, target.id)),
       };
     }

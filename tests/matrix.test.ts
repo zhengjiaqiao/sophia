@@ -187,3 +187,44 @@ test("Matrix：工具行第二行来源筛选片——全部 N 在最前默认�
   assert.match(picking, /已选/);
   assert.match(picking, /class="mx-sources"/);
 });
+
+test("点了做不了的格子：只当即说明（提示框立即出现、停约 3 秒），不交给调用方改数据", async () => {
+  const { cellPress, PINNED_TIP_MS } = await import("../src/Matrix.tsx");
+  assert.equal(cellPress({ clickable: false }), "explain");
+  assert.equal(cellPress({ clickable: true }), "act");
+  assert.equal(PINNED_TIP_MS, 3000);
+  // 做不了的格子仍是可聚焦、可按的按钮（空格同样触发），不是被禁用的死控件
+  const html = render(Matrix, {
+    ...base,
+    rows: [
+      {
+        ...base.rows[0],
+        cells: {
+          cc: { dot: "own" as const, clickable: false, tip: "这就是原件" },
+          cx: { dot: "missing" as const, clickable: true, tip: "加到 Codex" },
+        },
+      },
+    ],
+  });
+  assert.match(html, /<button type="button" class="ss-dot-btn mx-cellbtn is-inert"/);
+  assert.doesNotMatch(html, /mx-cellbtn is-inert"[^>]*disabled/);
+});
+
+test("做不了的格子的说明：为什么 + 去哪做", async () => {
+  const { blockedTipOf, mcpOwnTip } = await import("../src/cellTip.ts");
+  assert.equal(
+    blockedTipOf("own", "Claude Code", "docx", ""),
+    "这就是原件，不需要链接 · 要从 Claude Code 移除，只能删掉原件",
+  );
+  assert.equal(
+    blockedTipOf("duplicate", "Cursor", "docx", ""),
+    "Cursor 下已有一个同名的 docx，不是这一份",
+  );
+  assert.equal(
+    blockedTipOf("foreign", "Cursor", "docx", ""),
+    "Cursor 下已有一个同名的 docx，不是这一份",
+  );
+  // 整个文件夹是链接：沿用 cellState 的原因
+  assert.equal(blockedTipOf("wholeLinked", "Cursor", "docx", "原句"), "原句");
+  assert.match(mcpOwnTip("Claude Code"), /^这就是原件，不需要写进 · 要从 Claude Code 移除/);
+});
