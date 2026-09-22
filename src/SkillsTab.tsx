@@ -61,10 +61,10 @@ export default function SkillsTab({
   focusKey,
   onFocused,
 }: SkillsTabProps) {
-  // 选中的行：域 key → 行键集合（跨侧栏切换保留）
-  const [selection, setSelection] = useState<Map<string, Set<string>>>(new Map());
+  // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
+  // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  const [filterSources, setFilterSources] = useState<Map<string, Set<string>>>(new Map());
   const [importOpen, setImportOpen] = useState(false);
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
@@ -142,24 +142,12 @@ export default function SkillsTab({
     setKeyToast(null);
     setRowToast(null);
     setCellNotice(null);
+    setSelected(new Set());
     undoRef.current = null;
   }, [selectedKey]);
 
-  // 重扫回来后：高亮的来源在该域已没有行 → 取消这个筛选，否则表格会莫名其妙地空着
   useEffect(() => {
     if (!overview) return;
-    setFilterSources((prev) => {
-      let changed = false;
-      const next = new Map<string, Set<string>>();
-      for (const [key, ids] of prev) {
-        const p = overview.domains.find((d) => d.key === key);
-        const present = new Set(p?.rows.map((r) => r.sourceId) ?? []);
-        const kept = new Set([...ids].filter((id) => present.has(id)));
-        if (kept.size !== ids.size) changed = true;
-        if (kept.size > 0) next.set(key, kept);
-      }
-      return changed ? next : prev;
-    });
     // 读数跟着这一轮扫描，文件可能变了
     setDupReadout(new Map());
   }, [overview]);
@@ -498,7 +486,11 @@ export default function SkillsTab({
     });
   };
 
+  /// 同名两份的读数：×2 的提示框要同时列两份，所以一次把同名的几份都取了（取过的不再取）
   const dupHover = (row: DomainRow) => {
+    for (const copy of page?.rows.filter((r) => r.skill === row.skill) ?? [row]) readoutOf(copy);
+  };
+  const readoutOf = (row: DomainRow) => {
     const key = skillRowKey(row);
     if (dupReadout.has(key)) return;
     // 先占位，悬停来回扫时不重复体检
@@ -628,14 +620,7 @@ export default function SkillsTab({
     }
     if (rowKeys.length === 0) columnId = page.targets.find((t) => paths.has(t.path))?.id;
     // 要跳的行被筛掉了：先清筛选，不然跳过去是空的
-    if (rowKeys.length > 0) {
-      setFilterText("");
-      setFilterSources((prev) => {
-        const next = new Map(prev);
-        next.delete(page.key);
-        return next;
-      });
-    }
+    if (rowKeys.length > 0) setFilterText("");
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -657,13 +642,9 @@ export default function SkillsTab({
   }
 
   const query = filterText.trim().toLowerCase();
-  const sources = filterSources.get(page.key);
   const visible = page.rows.filter(
-    (row) =>
-      (query === "" || row.skill.toLowerCase().includes(query)) &&
-      (sources === undefined || sources.size === 0 || sources.has(row.sourceId)),
+    (row) => query === "" || row.skill.toLowerCase().includes(query),
   );
-  const selected = selection.get(page.key) ?? new Set<string>();
   const hiddenRows = hidden;
 
   return (
@@ -684,32 +665,12 @@ export default function SkillsTab({
         busy={busy}
         filterText={filterText}
         onFilterText={setFilterText}
-        activeSources={sources ?? new Set()}
-        onToggleSource={(sourceId) =>
-          setFilterSources((prev) => {
-            const next = new Map(prev);
-            const set = new Set(next.get(page.key) ?? []);
-            if (set.has(sourceId)) set.delete(sourceId);
-            else set.add(sourceId);
-            next.set(page.key, set);
-            return next;
-          })
-        }
-        onClearSources={() =>
-          setFilterSources((prev) => {
-            const next = new Map(prev);
-            next.delete(page.key);
-            return next;
-          })
-        }
-        onClearFilter={() => {
-          setFilterText("");
-          setFilterSources(new Map());
-        }}
+        onClearFilter={() => setFilterText("")}
+        onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}
         onImport={() => setImportOpen(true)}
         selected={selected}
         onSelectionChange={(next) => {
-          setSelection((prev) => new Map(prev).set(page.key, next));
+          setSelected(next);
           if (next.size === 0) setKeyToast(null);
         }}
         onCell={onCell}

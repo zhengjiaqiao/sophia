@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import Matrix, {
   cellKey,
+  duplicatesAKey,
   type MatrixCellView,
   type MatrixRowView,
   type SelectionKey,
@@ -22,10 +23,12 @@ import {
   type McpDomain,
   type McpDomainRow,
 } from "./mcpView";
-import { AddButton, Chip, Confirm, Empty, Tag, Toast, TOAST_DWELL_MS } from "./ui";
+import { AddButton, Confirm, Empty, Tag, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
-import { toastFor, type ToastItem } from "./toastText";
+import { toastFor, type ToastItem, type ToastText } from "./toastText";
 import type {
+  CellRef,
+  McpUndoReport,
   McpAutoImportRule,
   McpEntry,
   McpLocation,
@@ -42,7 +45,8 @@ import "./McpTab.css";
 /// MCP 特有的差异：
 /// 1. **格是单向的**——只有「写进去」，没有「拿掉」（core 只新增、不删条目）。
 ///    所以选择条上的键只有 `+N`；已经都有了的键禁用，不写 `−N`
-/// 2. **实心不是一条链接，是一份独立副本**——写入从界面上不可逆，提示条给的是「看看备份」
+/// 2. **实心不是一条链接，是一份独立副本**——写入后 core 留快照：写完没人改过就能撤销，
+///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底
 /// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（点状下划线，提示框给差异字段名）
 /// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格不确认
 
@@ -68,9 +72,6 @@ const rowKeyOf = (row: McpDomainRow) => row.name;
 /// 传输方式：只写真实的传输方式（DESIGN「主视图」）
 const transportText = (entry: McpEntry): string | null =>
   entry.transport === "stdio" ? "stdio" : entry.transport === "http" ? "HTTP" : null;
-
-/// 备份文件名：完整路径在「看看备份」那个动作里
-const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
 /// 列头名：位置名里 agent 那一段。同一页里两列撞名（Claude Code 的 Local / Project）才带上作用域
 const columnNames = (targets: McpLocation[]): Map<string, string> => {
@@ -121,9 +122,8 @@ export default function McpTab({
   const [overview, setOverview] = useState<McpOverview | null>(null);
   const [autoImports, setAutoImports] = useState<McpAutoImportRule[]>([]);
   // 选中的行：域 key → 行键集合
-  const [selection, setSelection] = useState<Map<string, Set<string>>>(new Map());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  const [filterSources, setFilterSources] = useState<Map<string, Set<string>>>(new Map());
   const [importOpen, setImportOpen] = useState(false);
   // 单格歧义跳过来时预选的那个位置
   const [importTargetIds, setImportTargetIds] = useState<string[] | null>(null);
@@ -146,6 +146,8 @@ export default function McpTab({
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
   const diffAsked = useRef<Set<string>>(new Set());
   const focusedRef = useRef<string | undefined>(undefined);
+  // 最近一次可撤销的写入（⌘Z 与提示条「撤销」走同一个）
+  const undoRef = useRef<(() => void) | null>(null);
   const refreshVersion = useRef(0);
   const mounted = useRef(true);
 
@@ -231,6 +233,9 @@ export default function McpTab({
     setPane(null);
     setKeyToast(null);
     setCellNotice(null);
+    // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
+    setSelected(new Set());
+    undoRef.current = null;
   }, [selectedKey]);
 
   useEffect(() => {
@@ -287,14 +292,7 @@ export default function McpTab({
       .map(rowKeyOf);
     const columnId =
       rowKeys.length === 0 ? page.targets.find((t) => paths.includes(t.path))?.id : undefined;
-    if (rowKeys.length > 0) {
-      setFilterText("");
-      setFilterSources((prev) => {
-        const next = new Map(prev);
-        next.delete(page.key);
-        return next;
-      });
-    }
+    if (rowKeys.length > 0) setFilterText("");
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -368,18 +366,16 @@ export default function McpTab({
           reason: `${labelOf(failed[i].targetId)} 那边没写成：${failed[i].message}`,
         })),
       });
-      const backup = created.find((e) => e.backupPath !== null)?.backupPath ?? null;
-      // 写入不可逆，能给的只有「备份在哪」
-      const action =
-        backup === null ? undefined : { label: "看看备份", onClick: () => void reveal(backup) };
+      const undoId = result.undoId;
+      const undo = undoId ? () => void undoWrite(undoId, keyId, text) : null;
+      undoRef.current = undo;
       if (keyId !== undefined) {
         setKeyToast({
           keyId,
           node: (
             <Toast
               {...text}
-              stats={text.tier === "notice" && backup ? baseName(backup) : undefined}
-              action={action}
+              action={undo ? { label: "撤销", onClick: undo } : undefined}
               onDismiss={dismissKey}
               onClose={text.tier === "notice" ? dismissKey : undefined}
             />
@@ -397,6 +393,55 @@ export default function McpTab({
       for (const k of keys) next.delete(k);
       return next;
     });
+  };
+
+  /// 撤销一次写入：core 只在文件仍等于写入后的样子时才从快照还原。改过了就撤不了——
+  /// 撤销禁用、提示框说原因，另给「在访达中显示备份 ↗」作手动兜底（DESIGN「MCP 写入的撤销」）
+  const undoWrite = async (undoId: string, keyId: string | undefined, text: ToastText) => {
+    undoRef.current = null;
+    let report: McpUndoReport;
+    try {
+      report = await api.mcpUndoWrite(undoId);
+    } catch (error) {
+      onError(String(error));
+      return;
+    }
+    if (report.outcome === "undone") {
+      setKeyToast(null);
+      await refresh();
+      return;
+    }
+    const backup = report.files.find((f) => f.backupPath !== null)?.backupPath ?? null;
+    if (report.outcome === "changed") {
+      const node = (
+        <Toast
+          {...text}
+          action={{
+            label: "撤销",
+            onClick: () => undefined,
+            disabledReason: "写入之后文件又被改过，没法安全撤销",
+          }}
+          secondary={
+            backup === null
+              ? undefined
+              : { label: "在访达中显示备份", onClick: () => void reveal(backup) }
+          }
+          onDismiss={dismissKey}
+        />
+      );
+      if (keyId !== undefined) setKeyToast({ keyId, node });
+      else setGlobalToast(node);
+      return;
+    }
+    setGlobalToast(
+      <Toast
+        kind="cannot"
+        verb="没撤销"
+        reason={report.message}
+        onDismiss={dismissGlobal}
+        onClose={dismissGlobal}
+      />,
+    );
   };
 
   /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）
@@ -512,15 +557,7 @@ export default function McpTab({
   const targetIds = new Set(page.targets.map((t) => t.id));
   const names = columnNames(page.targets);
   const query = filterText.trim().toLowerCase();
-  const sources = filterSources.get(page.key);
-  const visible = page.rows.filter(
-    (row) =>
-      (query === "" || row.name.toLowerCase().includes(query)) &&
-      (sources === undefined ||
-        sources.size === 0 ||
-        row.entries.some((entry) => sources.has(entry.sourceId))),
-  );
-  const selected = selection.get(page.key) ?? new Set<string>();
+  const visible = page.rows.filter((row) => query === "" || row.name.toLowerCase().includes(query));
 
   /// 格此刻画成什么：乐观点亮的画实心
   const viewAt = (row: McpDomainRow, targetId: string) => {
@@ -551,13 +588,6 @@ export default function McpTab({
   for (const row of page.rows) {
     const g = mcpGroupOf(row);
     counts.set(g, (counts.get(g) ?? 0) + 1);
-  }
-  // 筛选片按「出现过定义的位置」数，一行几份定义各算一次
-  const chipCounts = new Map<string, number>();
-  for (const row of page.rows) {
-    for (const id of new Set(row.entries.map((e) => e.sourceId))) {
-      chipCounts.set(id, (chipCounts.get(id) ?? 0) + 1);
-    }
   }
   const groups = [...counts].map(([sourceId, count]) => {
     const live = autoImports.find((r) => r.source.id === sourceId && r.targetDomain === page.key);
@@ -628,6 +658,11 @@ export default function McpTab({
         ) : undefined,
       transport: transports.join(" / "),
       selectDisabledReason: blockedOf(page, row),
+      // 行悬停「打开 ↗」：定义所在的配置文件
+      reveal: (() => {
+        const path = locationOf(row.entries[0]?.sourceId ?? "")?.path;
+        return path === undefined ? undefined : { path, onReveal: () => void reveal(path) };
+      })(),
       busy: busyRows.get(key),
     };
   });
@@ -642,15 +677,21 @@ export default function McpTab({
         ? [{ sourceId: source.sourceId, name: row.name, targetId }]
         : [];
     });
+  // 动词键：MCP 只能写进、不能拿掉，所以动词只有「写进」；已经都有了的键禁用。
+  // 受影响数 ≠ 已选数时才写「· N 个」
+  const countIf = (n: number, total: number) => (n !== total ? n : undefined);
+  const presses: { op: string; cells: CellRef[] }[] = [];
+  const asRefs = (cells: McpSelection[]): CellRef[] =>
+    cells.map((c) => ({ sourceId: c.sourceId, skill: c.name, targetId: c.targetId }));
   const keys: SelectionKey[] = page.targets.map((target) => {
     const cells = missingAt(target.id);
     const name = names.get(target.id) ?? target.label;
-    const base = { id: target.id, agentId: target.harnessId, name };
+    const base = { id: target.id, agentId: target.harnessId, name, verb: "写进" };
     if (cells.length > 0) {
+      presses.push({ op: "write", cells: asRefs(cells) });
       return {
         ...base,
-        dot: "missing" as const,
-        delta: cells.length,
+        count: countIf(cells.length, chosen.length),
         tip: `把已选的写进 ${target.label}：新增 ${cells.length} 处`,
         onPress: () => void write(cells, target.id),
       };
@@ -659,8 +700,6 @@ export default function McpTab({
       chosen.length > 0 && chosen.every((row) => viewAt(row, target.id)?.dot === "own");
     return {
       ...base,
-      dot: allOwn ? ("own" as const) : ("linked" as const),
-      delta: 0,
       disabledReason: allOwn
         ? `${target.label} · 已选的都定义在这里`
         : `已选的在 ${target.label} 里都有了，或写不过去`,
@@ -668,51 +707,17 @@ export default function McpTab({
     };
   });
   const allMissing = page.targets.flatMap((t) => missingAt(t.id));
-  const selectionAll: SelectionKey = {
-    id: "all",
-    name: "全部",
-    delta: allMissing.length,
-    tip: `写进所有还缺它的位置：共新增 ${allMissing.length} 处`,
-    disabledReason: allMissing.length === 0 ? "已选的在这里每个位置上都已经有了" : undefined,
-    onPress: () => void write(allMissing, "all"),
-  };
-
-  const chips = (
-    <>
-      <Chip
-        selected={(sources?.size ?? 0) === 0}
-        count={page.rows.length}
-        onClick={() =>
-          setFilterSources((prev) => {
-            const next = new Map(prev);
-            next.delete(page.key);
-            return next;
-          })
-        }
-      >
-        全部
-      </Chip>
-      {[...chipCounts].map(([sourceId, n]) => (
-        <Chip
-          key={sourceId}
-          selected={sources?.has(sourceId) ?? false}
-          count={n}
-          onClick={() =>
-            setFilterSources((prev) => {
-              const next = new Map(prev);
-              const set = new Set(next.get(page.key) ?? []);
-              if (set.has(sourceId)) set.delete(sourceId);
-              else set.add(sourceId);
-              next.set(page.key, set);
-              return next;
-            })
-          }
-        >
-          {groupLabel(locationOf(sourceId), sourceId)}
-        </Chip>
-      ))}
-    </>
-  );
+  // 「全部」与某颗键做同一件事时隐藏
+  const selectionAll: SelectionKey | undefined =
+    allMissing.length === 0 || duplicatesAKey({ op: "write", cells: asRefs(allMissing) }, presses)
+      ? undefined
+      : {
+          id: "all",
+          verb: "全部写进",
+          count: countIf(allMissing.length, chosen.length * page.targets.length),
+          tip: `写进所有还缺它的位置：共新增 ${allMissing.length} 处`,
+          onPress: () => void write(allMissing, "all"),
+        };
 
   const openImport = () => {
     setImportTargetIds(null);
@@ -720,18 +725,10 @@ export default function McpTab({
   };
   const addAction = { label: "MCP", onClick: openImport, icon: <PlusGlyph /> };
   const empty =
-    (sources?.size ?? 0) > 0 || query !== "" ? (
+    query !== "" ? (
       <TableEmpty
-        text={
-          query !== "" ? `没有名字里带「${filterText.trim()}」的服务` : "这个来源下没有匹配的服务"
-        }
-        action={{
-          label: "清除筛选",
-          onClick: () => {
-            setFilterText("");
-            setFilterSources(new Map());
-          },
-        }}
+        text={`没有名字里带「${filterText.trim()}」的服务`}
+        action={{ label: "清除筛选", onClick: () => setFilterText("") }}
       />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
       <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" action={addAction} />
@@ -752,18 +749,19 @@ export default function McpTab({
         rows={rows}
         nameLabel="服务"
         nameTip="定义住在哪一格由原件环表示"
+        nameCount={page.rows.length}
         transportLabel="传输"
         filterText={filterText}
         onFilterText={setFilterText}
-        chips={chipCounts.size > 0 ? chips : undefined}
         addButton={<AddButton noun="MCP" onClick={openImport} />}
         selected={selected}
         onSelectionChange={(next) => {
-          setSelection((prev) => new Map(prev).set(page.key, next));
+          setSelected(next);
           if (next.size === 0) setKeyToast(null);
         }}
         selectionKeys={keys}
-        selectionAll={page.targets.length > 1 ? selectionAll : undefined}
+        selectionAll={selectionAll}
+        onUndo={() => undoRef.current?.()}
         busy={busy}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
         shortcuts={!importOpen && pane === null}

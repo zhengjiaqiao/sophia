@@ -4,8 +4,16 @@
 @import "./tokens.css";
 
 .mx {
-  padding-top: var(--space-md);
   padding-bottom: var(--space-huge);
+}
+
+/* 吸顶的工具行 / 选择条：上下各 16 的留白算在吸顶块里，行不会从缝里漏出来 */
+.mx-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: var(--space-md) 0;
+  background: var(--canvas);
 }
 
 .mx-mono {
@@ -35,31 +43,26 @@
   flex-shrink: 0;
 }
 
-.mx-chips,
 .mx-keys {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* 选择操作条的键一颗都不能被挤：放不下时整条比面板宽，而不是键叠在一起 */
-.mx-keys {
+  gap: 8px;
   flex-shrink: 0;
 }
 
+/* 筛选框弹性，最小 200；右端添加键与它至少隔 24 */
 .mx-filter {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 180px;
+  flex: 1 1 auto;
+  min-width: 200px;
   height: var(--control-h);
   box-sizing: border-box;
   padding: 0 4px 0 10px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
   color: var(--ink-faint);
-  flex-shrink: 0;
   transition: border-color var(--motion-fast) var(--ease-mech);
 }
 
@@ -120,50 +123,40 @@
   flex-shrink: 0;
 }
 
-/* 选择操作条的键：紧凑默认按钮（24）+ 8px 点 + 名字 + 等宽增量 */
+/* 选择操作条的动词键：动词（按钮字）+ 14px agent 图标 + Condensed 大写名 + 可选「· N 个」 */
 .mx-key {
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 12px;
 }
 
-/* 选择操作条收在面板之内：一颗键都不许被挤扁，放不下由组件退一级（已选 N 个 → N 个） */
+.mx-keyname {
+  font-family: var(--font-cond);
+  font-size: var(--size-micro);
+  font-weight: 600;
+}
+
+.mx-keycount {
+  font-weight: 400;
+  color: var(--ink-mute);
+}
+
+.mx-key:disabled .mx-keycount {
+  color: inherit;
+}
+
+/* 选择操作条收在面板之内：一颗键都不许被挤扁，放不下由组件逐级降级 */
 .mx-toolbar--select > * {
   flex-shrink: 0;
 }
 
-/* 取消选择：文字链，与键组隔开 */
+/* 降级第一步：键距收到 4 */
+.mx-toolbar--select.is-tight,
+.mx-toolbar--select.is-tight .mx-keys {
+  gap: 4px;
+}
+
 .mx-clear {
   margin-left: 6px;
-}
-
-/* 「全部 +N」与 agent 键之间只留 8 */
-.mx-keywrap--all {
-  margin-left: 2px;
-}
-
-.mx-keydot {
-  display: block;
-  width: 8px;
-  height: 8px;
-  box-sizing: border-box;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.mx-keydot--linked {
-  background: currentColor;
-}
-
-.mx-keydot--missing {
-  border: 1.4px solid currentColor;
-}
-
-.mx-keydelta {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--size-micro);
-  font-weight: 400;
-  color: var(--ink-mute);
 }
 
 /* 批量提示条：被按下的键正下方 4，文字右沿对齐该键右沿、向左展开。盖在列头上时垫一层白底，
@@ -185,17 +178,36 @@
 /* ===== 面板 ===== */
 .mx-panel {
   position: relative;
-  margin-top: var(--space-md);
+}
+
+/* 同名 ×2 挂了提示框（同时列两份读数）：点状下划线，可悬停不可点 */
+.mx-row__name .ss-dup.has-tip {
+  text-decoration: underline dotted var(--ink-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: default;
 }
 
 .mx-grid {
   display: grid;
 }
 
+/* 列头吸顶（连同 2px 结构线）；不加阴影，靠 canvas 底色盖住下面的行 */
 .mx-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   align-items: end;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--ink);
+  background: var(--canvas);
+}
+
+.mx-namecount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: var(--ink-faint);
 }
 
 .mx-head__check,
@@ -380,40 +392,44 @@
   white-space: nowrap;
 }
 
-.mx-rotor {
+.mx-busy {
   display: inline-flex;
   flex-shrink: 0;
 }
 
-/* 同名行悬停：名字右侧出判断用读数 + 文字按钮「只留这份」 */
+/* 行悬停时名字后的「打开 ↗」：12 ink-mute，悬停转 ink 加下划线 */
+.mx-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: var(--hit-min);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.mx-reveal:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+/* 同名行悬停：「打开 ↗」后面出文字按钮「只留这份」；读数在 ×2 的提示框里，不越过面板右沿 */
 .mx-extra {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 auto;
-  justify-content: flex-end;
-  min-width: 0;
   font-size: var(--size-caption);
   color: var(--ink-mute);
   white-space: nowrap;
 }
 
 .mx-row__name > * {
-  flex-shrink: 0;
-}
-
-.mx-row__name > .mx-extra {
-  flex-shrink: 1;
-}
-
-/* 名字不让位：名称列放不下全句时读数自己省略，全文在 title 里；「只留这份」不缩 */
-.mx-extra__readout {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.mx-extra .ss-tipwrap {
   flex-shrink: 0;
 }
 

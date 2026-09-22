@@ -10,13 +10,14 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import Matrix, {
+  duplicatesAKey,
   cellKey,
   type MatrixCellView,
   type MatrixRowView,
   type SelectionKey,
 } from "./Matrix";
 import { viewOf } from "./cellState";
-import { AddButton, Button, Chip, DupMark, Tooltip } from "./ui";
+import { AddButton, Button, DupMark, Tooltip } from "./ui";
 import type { AutoLink, CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
 /// 行键：本体位置 + skill（一页只显示一个域）
@@ -57,10 +58,9 @@ export interface DomainViewProps {
   busy: boolean;
   filterText: string;
   onFilterText: (text: string) => void;
-  activeSources: Set<string>;
-  onToggleSource: (sourceId: string) => void;
-  onClearSources: () => void;
   onClearFilter: () => void;
+  /// 行悬停「打开 ↗」：在访达中显示原件
+  onReveal: (path: string) => void;
   onImport: () => void;
 
   selected: Set<string>;
@@ -92,6 +92,14 @@ export default function DomainView(props: DomainViewProps) {
 
   const sourceOf = (id: string) => overview.sources.find((s) => s.id === id);
   const labelOf = (id: string) => sourceOf(id)?.label ?? id;
+  /// 原件完整路径：skill 自带；查不到时回退到「来源目录 + 名字」
+  const pathOf = (row: DomainRow) => {
+    const source = sourceOf(row.sourceId);
+    return (
+      source?.skills.find((k) => k.name === row.skill)?.path ??
+      `${source?.path ?? row.sourceId}/${row.skill}`
+    );
+  };
 
   // 来源顺序 = 行里第一次出现的先后；筛选片与分组共用，计数按本域全部行（筛选不改计数）
   const counts = new Map<string, number>();
@@ -179,18 +187,40 @@ export default function DomainView(props: DomainViewProps) {
       }
       const dup = copies.get(row.skill) ?? [];
       const other = dup.length === 2 ? dup.find((r) => r.sourceId !== row.sourceId) : undefined;
-      const readout = props.dupReadout.get(key);
+      const readout = props.dupReadout.get(key) || undefined;
+      const otherReadout = other
+        ? props.dupReadout.get(skillRowKey(other)) || undefined
+        : undefined;
+      const path = pathOf(row);
       return {
         key,
         group: row.sourceId,
         name: row.skill,
         cells,
-        mark: dup.length > 1 ? <DupMark count={dup.length} /> : undefined,
+        // 判断用的读数不越过面板右沿：进 ×2 的提示框，两份同时列出（DESIGN「表格 = 面板」）
+        mark:
+          dup.length > 1 ? (
+            <span onMouseEnter={() => props.onDupHover(row)} onFocus={() => props.onDupHover(row)}>
+              <DupMark
+                count={dup.length}
+                tip={
+                  other === undefined ? undefined : (
+                    <>
+                      <div>这份 {readout ?? "…"}</div>
+                      <div>
+                        {labelOf(other.sourceId)} 那份 {otherReadout ?? "…"}
+                      </div>
+                    </>
+                  )
+                }
+              />
+            </span>
+          ) : undefined,
         dupGroup: dup.length > 1 ? row.skill : undefined,
+        reveal: { path, onReveal: () => props.onReveal(path) },
         extra:
           other === undefined ? undefined : (
             <DupExtra
-              readout={readout}
               onShow={() => props.onDupHover(row)}
               onKeep={() => props.onKeepThis(row, other)}
               label={`只留 ${labelOf(row.sourceId)} 的 ${row.skill}`}
@@ -204,6 +234,9 @@ export default function DomainView(props: DomainViewProps) {
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
+  // 动词键：`开启 ⎔ CODEX` / `关闭 ✳ CLAUDE CODE`；受影响数 ≠ 已选数时才写「· N 个」
+  const countIf = (n: number, total: number) => (n !== total ? n : undefined);
+  const pressOf = new Map<string, BatchPress>();
   const keys: SelectionKey[] = page.targets.map((target) => {
     const linked: CellRef[] = [];
     const missing: CellRef[] = [];
@@ -219,94 +252,75 @@ export default function DomainView(props: DomainViewProps) {
     if (target.linkedWholeTo !== null) {
       return {
         ...base,
-        delta: 0,
-        disabledReason: `${target.label} 的 skills 文件夹整个是链接，拆开后才能逐个开关`,
-        dot: "own" as const,
+        verb: "开启",
+        disabledReason: `${target.label} 的 skills 整个文件夹是链接`,
         onPress: () => undefined,
       };
     }
     if (missing.length > 0) {
+      const press: BatchPress = { keyId: target.id, op: "link", cells: missing };
+      pressOf.set(target.id, press);
       return {
         ...base,
-        dot: "missing" as const,
-        delta: missing.length,
+        verb: "开启",
+        count: countIf(missing.length, chosen.length),
         tip: `在 ${target.label} 下开启没开的 ${missing.length} 个`,
-        onPress: () => props.onBatch({ keyId: target.id, op: "link", cells: missing }),
+        onPress: () => props.onBatch(press),
       };
     }
     if (linked.length > 0) {
+      const press: BatchPress = { keyId: target.id, op: "unlink", cells: linked };
+      pressOf.set(target.id, press);
       return {
         ...base,
-        dot: "linked" as const,
-        delta: -linked.length,
-        tip: `已选的在 ${target.label} 下都开着：点一下全部关掉`,
-        onPress: () => props.onBatch({ keyId: target.id, op: "unlink", cells: linked }),
+        verb: "关闭",
+        count: countIf(linked.length, chosen.length),
+        tip: `关掉已选的在 ${target.label} 下的 ${linked.length} 个`,
+        onPress: () => props.onBatch(press),
       };
     }
     return {
       ...base,
-      dot: own > 0 ? ("own" as const) : undefined,
-      delta: 0,
-      disabledReason:
-        own > 0
-          ? `${target.label} · 已选的原件都在这里`
-          : `已选的在 ${target.label} 下没有能开关的格`,
+      verb: "开启",
+      disabledReason: own > 0 ? "已选的都是原件" : `已选的在 ${target.label} 下没有能开关的格`,
       onPress: () => undefined,
     };
   });
-  const usable = keys.filter((k) => k.disabledReason === undefined);
-  const allMissing = usable.filter((k) => k.delta > 0);
-  const allCells = (op: "link" | "unlink") =>
-    page.targets.flatMap((target) =>
-      chosen.flatMap((row) => {
-        const s = stateAt(row, target.id);
-        return (op === "link" ? s === "missing" : s === "linked") && target.linkedWholeTo === null
-          ? [{ sourceId: row.sourceId, skill: row.skill, targetId: target.id }]
-          : [];
-      }),
-    );
-  const allOp: "link" | "unlink" = allMissing.length > 0 ? "link" : "unlink";
-  const allTargets = allCells(allOp);
-  const selectionAll: SelectionKey = {
-    id: "all",
-    name: "全部",
-    delta: allOp === "link" ? allTargets.length : -allTargets.length,
-    tip: allOp === "link" ? "在所有 agent 下开启没开的" : "在所有 agent 下关掉已选的",
-    disabledReason: allTargets.length === 0 ? "已选的在这些 agent 下都没有能开关的格" : undefined,
-    onPress: () => props.onBatch({ keyId: "all", op: allOp, cells: allTargets }),
-  };
-
-  const chips = (
-    <>
-      {/* 「全部 N」与侧栏、与各片同源：本域的 skill 行数 */}
-      <Chip
-        selected={props.activeSources.size === 0}
-        count={page.rows.length}
-        onClick={props.onClearSources}
-      >
-        全部
-      </Chip>
-      {[...counts].map(([sourceId, n]) => (
-        <Chip
-          key={sourceId}
-          selected={props.activeSources.has(sourceId)}
-          count={n}
-          onClick={() => props.onToggleSource(sourceId)}
-        >
-          {labelOf(sourceId)}
-        </Chip>
-      ))}
-    </>
+  // 全部：已选的在所有 agent 下都开着 → 全部关闭；否则全部开启（补齐缺的）
+  const allOp: "link" | "unlink" = [...pressOf.values()].some((p) => p.op === "link")
+    ? "link"
+    : "unlink";
+  const allTargets = page.targets.flatMap((target) =>
+    target.linkedWholeTo !== null
+      ? []
+      : chosen.flatMap((row) => {
+          const s = stateAt(row, target.id);
+          return (allOp === "link" ? s === "missing" : s === "linked")
+            ? [{ sourceId: row.sourceId, skill: row.skill, targetId: target.id }]
+            : [];
+        }),
   );
+  const allPress: BatchPress = { keyId: "all", op: allOp, cells: allTargets };
+  // 「全部」与某颗 agent 键做同一件事时隐藏（DESIGN「选择操作条」）
+  const selectionAll: SelectionKey | undefined =
+    allTargets.length === 0 || duplicatesAKey(allPress, [...pressOf.values()])
+      ? undefined
+      : {
+          id: "all",
+          verb: allOp === "link" ? "全部开启" : "全部关闭",
+          count: countIf(allTargets.length, chosen.length * page.targets.length),
+          tip: allOp === "link" ? "在所有 agent 下开启没开的" : "在所有 agent 下关掉已选的",
+          onPress: () => props.onBatch(allPress),
+        };
 
   // ---- 空态：一句现状 + 一个动作（DESIGN「空态与忙碌态」） ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
   const query = props.filterText.trim();
   const addAction = { label: "skill", onClick: props.onImport, icon: <PlusGlyph /> };
   const empty =
-    props.activeSources.size > 0 || query !== "" ? (
+    query !== "" ? (
       <Empty
-        text={query !== "" ? `没有名字里带「${query}」的 skill` : "这个来源下没有匹配的 skill"}
+        text={`没有名字里带「${query}」的 skill`}
         action={{ label: "清除筛选", onClick: props.onClearFilter }}
       />
     ) : noAgentDirs ? (
@@ -322,14 +336,14 @@ export default function DomainView(props: DomainViewProps) {
       rows={matrixRows}
       nameLabel="名称"
       nameTip="列表里只出现两种 skill：原件就在这个位置下的，和在某个 agent 下有链接的"
+      nameCount={page.rows.length - props.hiddenRows.size}
       filterText={props.filterText}
       onFilterText={props.onFilterText}
-      chips={counts.size > 0 ? chips : undefined}
       addButton={<AddButton noun="skill" onClick={props.onImport} />}
       selected={props.selected}
       onSelectionChange={props.onSelectionChange}
       selectionKeys={keys}
-      selectionAll={page.targets.length > 1 ? selectionAll : undefined}
+      selectionAll={selectionAll}
       busy={props.busy}
       onCell={(rowKey, columnId) => {
         const row = page.rows.find((r) => skillRowKey(r) === rowKey);
@@ -387,14 +401,12 @@ export function Empty({
   );
 }
 
-/// 同名行悬停时出现的读数 + 「只留这份」。出现那一刻去取读数（取过的不再取）
+/// 同名行悬停时出现的「只留这份」。出现那一刻去取两份的读数（取过的不再取），给 ×2 的提示框用
 function DupExtra({
-  readout,
   onShow,
   onKeep,
   label,
 }: {
-  readout: string | undefined;
   onShow: () => void;
   onKeep: () => void;
   label: string;
@@ -405,17 +417,10 @@ function DupExtra({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <>
-      {readout !== undefined ? (
-        <span className="mx-extra__readout" title={readout}>
-          {readout}
-        </span>
-      ) : null}
-      <Tooltip content="另一份进废纸篓，可撤销">
-        <Button variant="link" onClick={onKeep} ariaLabel={label}>
-          只留这份
-        </Button>
-      </Tooltip>
-    </>
+    <Tooltip content="另一份进废纸篓，可撤销">
+      <Button variant="link" onClick={onKeep} ariaLabel={label}>
+        只留这份
+      </Button>
+    </Tooltip>
   );
 }

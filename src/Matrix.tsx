@@ -22,10 +22,11 @@ import {
   AgentMark,
   Checkbox,
   DOT_LABEL,
+  Cap,
   IconCannot,
   IconClose,
   IconSearch,
-  Rotor,
+  Spinner,
   StateDot,
   Switch,
   TIP_DELAY_MS,
@@ -74,12 +75,15 @@ export interface MatrixRowView {
   name: string;
   /// 列 id → 格；null＝这一行在这一列没有格（短横，不可点）
   cells: Record<string, MatrixCellView | null>;
-  /// 名字后的标注：`×2`、`2 份不一样`、`Codex 不支持`
+  /// 名字后的标注：`×2`（提示框同时列两份读数）、`2 份不一样`、`Codex 不支持`
   mark?: ReactNode;
   /// 同名组：悬停（或键盘焦点）任一行，同组的行一起亮，并出 `extra`
   dupGroup?: string;
-  /// 同名行悬停时名字右侧出现的读数与动作（`3 个文件` + `只留这份`）
+  /// 同名行悬停时的动作（`只留这份`），跟在名字格 `打开 ↗` 之后。不越过面板右沿——
+  /// 判断用的读数进 `×2` 的提示框
   extra?: ReactNode;
+  /// 行悬停时名字后的 `打开 ↗`：提示框是原件完整路径，点一下在访达中显示
+  reveal?: { path: string; onReveal: () => void };
   /// MCP 的 `传输` 列内容
   transport?: ReactNode;
   /// 非空＝这一行勾不动，值是原因
@@ -105,16 +109,19 @@ export interface MatrixGroupView {
   rule?: MatrixRule;
 }
 
-/// 选择操作条上的一颗键：**已选的 × 这一列**。写出按下会产生的增量
+/// 选择操作条上的一颗**动词键**：对已选的，在这一列做这件事（DESIGN「选择操作条」）。
+/// `关闭 ✳ CLAUDE CODE` / `开启 ⎔ CODEX · 2 个`；「全部」键没有 agent：`全部开启`
 export interface SelectionKey {
   id: string;
-  /// 没有就是「全部」键，不画图标与点
+  /// harness id，画列头同一枚图标；没有就是「全部」键
   agentId?: string;
-  name: string;
-  /// linked：已选的在这儿全开着（按下关）；missing：有没开的（按下开）；own：禁用时的灰色原件环
-  dot?: "linked" | "missing" | "own";
-  /// 有符号的增量：`−2` / `+2`；0 由调用方给 disabledReason
-  delta: number;
+  /// agent 名（Condensed 大写，跟随列头）；「全部」键不给
+  name?: string;
+  /// 中文动词：`开启` `关闭` `写进` `全部开启` `全部关闭`
+  verb: string;
+  /// 受影响数 ≠ 已选数时才给，写成 `· N 个`
+  count?: number;
+  /// 没有能做的动作：禁用，提示框说原因
   disabledReason?: string;
   /// 提示框：按下会怎样
   tip?: string;
@@ -129,13 +136,13 @@ export interface MatrixProps {
   nameLabel: string;
   /// 名称列头的提示框（机制说明放这里，不放常驻说明条）
   nameTip?: string;
+  /// 名称列头后的总数（`名称 56`，等宽 ink-faint）；替代删掉的「全部 N」筛选片
+  nameCount?: number;
   /// MCP 的 `传输` 列（72）
   transportLabel?: string;
 
   filterText: string;
   onFilterText: (text: string) => void;
-  /// 来源筛选片（Chip 一排）
-  chips?: ReactNode;
   /// 工具行右端的 `+ skill` / `+ MCP`，右沿对齐面板右沿
   addButton?: ReactNode;
 
@@ -168,6 +175,22 @@ export interface MatrixProps {
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
+/// 一格的身份（行的来源 + 名字 + 列）
+type CellLike = { sourceId: string; skill: string; targetId: string };
+
+/// 「全部」的效果恰好等于某一颗 agent 键（同一个动作、同一批格）时，这颗「全部」是噪音，隐藏
+export function duplicatesAKey(
+  all: { op: string; cells: CellLike[] },
+  presses: { op: string; cells: CellLike[] }[],
+): boolean {
+  const key = (c: CellLike) => `${c.sourceId}|${c.skill}|${c.targetId}`;
+  const mine = new Set(all.cells.map(key));
+  return presses.some(
+    (p) =>
+      p.op === all.op && p.cells.length === mine.size && p.cells.every((c) => mine.has(key(c))),
+  );
+}
+
 /// 把键盘焦点格夹回当前表的范围：取最近的有效行和列。表为空（没有行或没有列）时返回 null
 export function clampFocus(
   focus: { r: number; c: number },
@@ -181,18 +204,15 @@ export function clampFocus(
   };
 }
 
-/// 行内转盘：活干完不立刻消失，停转回弹之后再卸（DESIGN「转盘」）
-function InlineRotor({ label }: { label?: string }) {
-  const [shown, setShown] = useState(label);
-  const active = label !== undefined;
-  useEffect(() => {
-    if (active) setShown(label);
-  }, [active, label]);
-  if (shown === undefined) return null;
+/// 行内忙碌：14px 细弧，句子进提示框与读屏文本（DESIGN「忙碌指示」）。完成即消失
+function InlineBusy({ label }: { label?: string }) {
+  if (label === undefined) return null;
   return (
-    <span className="mx-rotor" title={shown} role="status" aria-label={shown}>
-      <Rotor size={14} spinning={active} label={shown} onStopped={() => setShown(undefined)} />
-    </span>
+    <Tooltip content={label} context="table">
+      <span className="mx-busy" role="status">
+        <Spinner size={14} label={label} />
+      </span>
+    </Tooltip>
   );
 }
 
@@ -233,37 +253,35 @@ function RuleArrow() {
   );
 }
 
-/// 选择操作条上的键。默认按钮（2px 矩形，28）：点 + 名字 + 增量读数
-function KeyButton({ k }: { k: SelectionKey }) {
+/// 选择操作条上的动词键：动词（按钮字）+ 列头同一枚图标 + agent 名（Condensed 大写）+ 可选数量。
+/// 不画圆点、不写 ±N（圆点在按钮上读成「已选中」，−1 读成负数，都要解码）。
+/// `iconOnly`：最后一级降级，名字进提示框
+function KeyButton({ k, iconOnly }: { k: SelectionKey; iconOnly: boolean }) {
   const disabled = k.disabledReason !== undefined;
-  const sign = k.delta > 0 ? `+${k.delta}` : k.delta < 0 ? `−${-k.delta}` : "";
-  const dot =
-    k.dot === undefined ? null : disabled && k.dot === "own" ? (
-      <StateDot dot="own" muted title="" label="原件" />
-    ) : (
-      <span className={`mx-keydot mx-keydot--${k.dot}`} aria-hidden="true" />
-    );
+  const count = k.count !== undefined ? ` · ${k.count} 个` : "";
+  const label = `${k.verb}${k.name ? ` ${k.name}` : ""}${count}`;
   const button = (
     <button
       type="button"
-      className="ss-btn ss-btn--compact mx-key"
+      className="ss-btn mx-key"
       disabled={disabled}
-      aria-label={`${k.name}${sign ? ` ${sign}` : ""}${disabled ? `：${k.disabledReason}` : ""}`}
+      aria-label={disabled ? `${label}：${k.disabledReason}` : label}
       onClick={disabled ? undefined : k.onPress}
     >
-      {dot}
-      <span>{k.name}</span>
-      {sign && !disabled ? <span className="mx-keydelta">{sign}</span> : null}
+      <span>{k.verb}</span>
+      {k.agentId ? <AgentIcon id={k.agentId} name={k.name ?? ""} size={14} /> : null}
+      {k.name && !iconOnly ? (
+        <span className="mx-keyname">
+          <Cap>{k.name}</Cap>
+        </span>
+      ) : null}
+      {count ? <span className="mx-keycount">{count}</span> : null}
     </button>
   );
-  const tip = disabled ? k.disabledReason : k.tip;
-  return tip ? (
-    <Tooltip content={tip} placement="bottom">
-      {button}
-    </Tooltip>
-  ) : (
-    button
-  );
+  const tipText = disabled ? k.disabledReason : k.tip;
+  const tip = iconOnly && k.name ? (tipText ? `${k.name} · ${tipText}` : k.name) : tipText;
+  // 提示框默认在上方，放不下时 Tooltip 自己翻到下方
+  return tip ? <Tooltip content={tip}>{button}</Tooltip> : button;
 }
 
 export default function Matrix(props: MatrixProps) {
@@ -276,7 +294,7 @@ export default function Matrix(props: MatrixProps) {
     transportLabel,
     filterText,
     onFilterText,
-    chips,
+    nameCount,
     addButton,
     selected,
     onSelectionChange,
@@ -323,6 +341,9 @@ export default function Matrix(props: MatrixProps) {
   const shift = useRef(false);
   // 全局提示条的右沿：对齐面板右沿
   const [toastRight, setToastRight] = useState(32);
+  // 吸顶：工具行（勾选时是选择条）在最上面，列头紧贴它下面
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barH, setBarH] = useState(0);
 
   const hasTransport = transportLabel !== undefined;
   const template = [
@@ -389,20 +410,23 @@ export default function Matrix(props: MatrixProps) {
   const jumpNonce = jump?.nonce;
   useEffect(() => {
     if (!jump) return;
-    const root = rootRef.current;
-    const first = jump.rowKeys[0];
-    const el =
-      first !== undefined
-        ? root?.querySelector(`[data-row="${CSS.escape(first)}"]`)
-        : jump.columnId !== undefined
-          ? root?.querySelector(`[data-col="${CSS.escape(jump.columnId)}"]`)
-          : null;
-    el?.scrollIntoView({ block: "center" });
     setFlashRows(new Set(jump.rowKeys));
     setFlashCol(jump.rowKeys.length === 0 ? (jump.columnId ?? null) : null);
+    scrollToJump(jump);
     // 只跟 nonce
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpNonce]);
+  const scrollToJump = (target: { rowKeys: string[]; columnId?: string }) => {
+    const root = rootRef.current;
+    const first = target.rowKeys[0];
+    const el =
+      first !== undefined
+        ? root?.querySelector(`[data-row="${CSS.escape(first)}"]`)
+        : target.columnId !== undefined
+          ? root?.querySelector(`[data-col="${CSS.escape(target.columnId)}"]`)
+          : null;
+    el?.scrollIntoView({ block: "center" });
+  };
 
   const endFlash = (key: string) =>
     setFlashing((prev) => {
@@ -424,6 +448,16 @@ export default function Matrix(props: MatrixProps) {
     setTip(null);
   };
   useEffect(() => () => dropTip(), []);
+
+  // ---- 吸顶的列头高度、面板右侧余量 ----
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (barRef.current) setBarH(barRef.current.offsetHeight);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [width, columns.length]);
 
   // ---- 全局提示条贴面板右沿 ----
   useLayoutEffect(() => {
@@ -508,7 +542,8 @@ export default function Matrix(props: MatrixProps) {
         s.onUndo();
         return;
       }
-      if (mod && e.key.toLowerCase() === "a") {
+      // ⌘A 只在焦点就在表里时接管：在页面别处按 ⌘A 不该悄悄勾上一整组
+      if (mod && e.key.toLowerCase() === "a" && rootRef.current?.contains(document.activeElement)) {
         // 当前组：键盘焦点所在行 → 悬停的行 → 第一组
         const at =
           (s.focusWithin ? s.flat[s.focus.r] : undefined) ??
@@ -545,37 +580,33 @@ export default function Matrix(props: MatrixProps) {
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
   const selRef = useRef<HTMLDivElement>(null);
-  // 放不下时的最后一级退让：「已选 N 个」缩成「N 个」。列数变了从头量
-  const [short, setShort] = useState(false);
-  useLayoutEffect(() => setShort(false), [columns.length, width]);
+  // 放不下时的降级（「全部」与某颗键重复时由调用方直接不给）：
+  // 1 键距收到 4 → 2「已选 N 个」缩成「N 个」→ 3 agent 名只留图标。列数变了从头量
+  const [fit, setFit] = useState(0);
+  useLayoutEffect(() => setFit(0), [columns.length, width, selectionAll === undefined]);
   useLayoutEffect(() => {
     const el = selRef.current;
-    if (!selecting || !el || short) return;
-    if (el.scrollWidth > el.clientWidth + 1) setShort(true);
+    if (!selecting || !el || fit >= 3) return;
+    if (el.scrollWidth > el.clientWidth + 1) setFit((f) => f + 1);
   });
   const toolbar = selecting ? (
-    // 选择操作条「顶替工具行」（DESIGN「选择操作条」「主视图」）：`+ skill` / `+ MCP` 不出现，
-    // 收在面板右沿之内；紧凑键，取消选择是文字链。还放不下才把「已选 N 个」缩成「N 个」
-    <div className="mx-toolbar mx-toolbar--select" ref={selRef} style={{ width }}>
+    // 选择操作条「顶替工具行」：`+ skill` / `+ MCP` 不出现，收在面板右沿之内
+    <div
+      className={`mx-toolbar mx-toolbar--select${fit >= 1 ? " is-tight" : ""}`}
+      ref={selRef}
+      style={{ width }}
+    >
       <span className="mx-selcount">
-        {short ? null : "已选 "}
+        {fit >= 2 ? null : "已选 "}
         <span className="mx-mono">{selectedVisible.length}</span> 个
       </span>
       <span className={`mx-keys${busy ? " ss-busy" : ""}`}>
-        {selectionKeys.map((k) => (
+        {[...selectionKeys, ...(selectionAll ? [selectionAll] : [])].map((k) => (
           <span key={k.id} className="mx-keywrap">
-            <KeyButton k={k} />
+            <KeyButton k={k} iconOnly={fit >= 3} />
             {keyToast?.keyId === k.id ? <div className="mx-keytoast">{keyToast.node}</div> : null}
           </span>
         ))}
-        {selectionAll ? (
-          <span className="mx-keywrap mx-keywrap--all">
-            <KeyButton k={selectionAll} />
-            {keyToast?.keyId === selectionAll.id ? (
-              <div className="mx-keytoast">{keyToast.node}</div>
-            ) : null}
-          </span>
-        ) : null}
       </span>
       {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
       <button
@@ -587,7 +618,9 @@ export default function Matrix(props: MatrixProps) {
       </button>
     </div>
   ) : (
-    <div className="mx-toolbar" style={{ minWidth: width, width: "max-content" }}>
+    // 工具行只有筛选框（弹性，最小 200）+ 右端添加键；来源筛选片已删——表格按来源分组，
+    // 片与组头重复表达同一信息，按来源看靠组头折叠
+    <div className="mx-toolbar" style={{ width }}>
       {/* 筛选输入框不受 busy 约束（§6）；✕ 在框内 8px 以内 */}
       <label className="mx-filter">
         <IconSearch size={12} />
@@ -617,7 +650,6 @@ export default function Matrix(props: MatrixProps) {
           </button>
         ) : null}
       </label>
-      {chips ? <span className={`mx-chips${busy ? " ss-busy" : ""}`}>{chips}</span> : null}
       {addButton ? (
         <span className={`mx-toolbar__end${busy ? " ss-busy" : ""}`}>{addButton}</span>
       ) : null}
@@ -627,7 +659,7 @@ export default function Matrix(props: MatrixProps) {
   // ---- 表头 ----
   const sortBy = (key: string) => setSort((prev) => toggleSort(prev ?? sort, key));
   const header = (
-    <div className="mx-grid mx-head" style={gridStyle}>
+    <div className="mx-grid mx-head" style={{ ...gridStyle, top: barH }}>
       <div className="mx-head__check">
         {/* 表头整行不置灰，只灰这个全选框（§6 第二条细节） */}
         {selectable.length === 0 ? (
@@ -646,12 +678,14 @@ export default function Matrix(props: MatrixProps) {
           <Tooltip content={nameTip} context="table">
             <button type="button" className="mx-headbtn" onClick={() => sortBy("name")}>
               {nameLabel}
+              {nameCount !== undefined ? <span className="mx-namecount">{nameCount}</span> : null}
               <SortArrow active={sortState?.key === "name"} desc={sort.dir === "desc"} />
             </button>
           </Tooltip>
         ) : (
           <button type="button" className="mx-headbtn" onClick={() => sortBy("name")}>
             {nameLabel}
+            {nameCount !== undefined ? <span className="mx-namecount">{nameCount}</span> : null}
             <SortArrow active={sortState?.key === "name"} desc={sort.dir === "desc"} />
           </button>
         )}
@@ -755,6 +789,7 @@ export default function Matrix(props: MatrixProps) {
     if (hot) classes.push("is-hot");
     if (flashRows.has(row.key)) classes.push("mx-jump");
     const showExtra = row.extra !== undefined && hot;
+
     return (
       <div
         key={row.key}
@@ -796,9 +831,35 @@ export default function Matrix(props: MatrixProps) {
         <div className="mx-row__name">
           <span className="mx-name">{row.name}</span>
           {row.mark}
-          <InlineRotor label={row.busy} />
+          {row.reveal && hot ? (
+            <Tooltip content={<span className="mx-mono">{row.reveal.path}</span>}>
+              <button
+                type="button"
+                className="mx-reveal"
+                aria-label={`在访达中显示 ${row.reveal.path}`}
+                onClick={row.reveal.onReveal}
+              >
+                打开
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M3 7l4-4M3.6 3H7v3.4" />
+                </svg>
+              </button>
+            </Tooltip>
+          ) : null}
           {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
+          <InlineBusy label={row.busy} />
         </div>
+
         {hasTransport ? <div className="mx-row__transport">{row.transport}</div> : null}
         {columns.map((col, c) => {
           const view = row.cells[col.id] ?? null;
@@ -899,7 +960,10 @@ export default function Matrix(props: MatrixProps) {
 
   return (
     <div className="mx" ref={rootRef}>
-      {toolbar}
+      {/* 工具行 / 选择条吸顶：共用一个槽位，滚动之后也要点得到 */}
+      <div className="mx-bar" ref={barRef}>
+        {toolbar}
+      </div>
       <div className="mx-panel" ref={panelRef} style={{ width }}>
         {header}
         <div
@@ -925,7 +989,7 @@ export default function Matrix(props: MatrixProps) {
             </div>
           ))}
         </div>
-        {flat.length === 0 && empty ? <div className="mx-empty">{empty}</div> : null}
+        {sections.length === 0 && empty ? <div className="mx-empty">{empty}</div> : null}
       </div>
       {globalToast ? (
         <div className="mx-globaltoast" style={{ right: toastRight }}>

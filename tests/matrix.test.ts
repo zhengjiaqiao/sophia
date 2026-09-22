@@ -92,28 +92,30 @@ test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具
         id: "cx",
         agentId: "codex",
         name: "Codex",
-        dot: "missing" as const,
-        delta: 1,
+        verb: "开启",
+        count: 2,
         onPress: () => undefined,
       },
       {
         id: "cc",
         agentId: "claude-code",
         name: "Claude Code",
-        dot: "own" as const,
-        delta: 0,
-        disabledReason: "Claude Code · 已选的原件都在这里",
+        verb: "关闭",
+        disabledReason: "已选的都是原件",
         onPress: () => undefined,
       },
     ],
   });
   assert.match(html, /grid-template-columns:34px 246px 72px 88px 88px 24px/);
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
-  assert.match(html, /\+1/);
+  // 动词键：动词 + 列头同一枚图标 + Condensed 大写名 + 受影响数 ≠ 已选数时的「· N 个」；
+  // 不画圆点、不写 ±N（第 5 轮「状态点 + 增量」已撤回）
+  assert.match(html, /aria-label="开启 Codex · 2 个"/);
+  assert.match(html, /class="mx-keycount"> · 2 个</);
+  assert.doesNotMatch(html, /mx-keydot|ss-dot--own is-muted|\+1/);
   assert.match(html, /取消选择/);
-  // 已选的都是原件：键禁用，画灰色原件环
-  assert.match(html, /disabled=""[^>]*aria-label="Claude Code：Claude Code · 已选的原件都在这里"/);
-  assert.match(html, /ss-dot--own is-muted/);
+  // 没有能做的动作：禁用，原因进提示框
+  assert.match(html, /disabled=""[^>]*aria-label="关闭 Claude Code：已选的都是原件"/);
   // 工具行（筛选框）让位
   assert.doesNotMatch(html, /placeholder="筛选"/);
 });
@@ -133,5 +135,33 @@ test("clampFocus：筛选让行变少、列数变了之后，焦点格夹回最�
 
 test("Matrix：表里总有一个 tabIndex=0 的格，Tab 键进得来", () => {
   const html = render(Matrix, base);
-  assert.equal((html.match(/tabindex="0"/g) ?? []).length, 1);
+  assert.equal((html.match(/data-cell="[^"]*" tabindex="0"/g) ?? []).length, 1);
+});
+
+test("duplicatesAKey：「全部」与某颗键做同一件事（同动作、同一批格）时隐藏", async () => {
+  const { duplicatesAKey } = await import("../src/Matrix.tsx");
+  const c = (skill: string, targetId: string) => ({ sourceId: "s", skill, targetId });
+  const codex = { op: "link", cells: [c("a", "codex"), c("b", "codex")] };
+  const cc = { op: "unlink", cells: [c("a", "cc")] };
+  // 只有 Codex 那颗能开：全部开启 = 开启 Codex
+  assert.equal(
+    duplicatesAKey({ op: "link", cells: [c("b", "codex"), c("a", "codex")] }, [codex, cc]),
+    true,
+  );
+  // 全部开启涉及两列：不重复
+  assert.equal(
+    duplicatesAKey({ op: "link", cells: [c("a", "codex"), c("b", "codex"), c("a", "cursor")] }, [
+      codex,
+    ]),
+    false,
+  );
+  // 同一批格但动作不同：不重复
+  assert.equal(duplicatesAKey({ op: "link", cells: [c("a", "cc")] }, [cc]), false);
+});
+
+test("Matrix：名称列头带总数，没有来源筛选片", () => {
+  const html = render(Matrix, { ...base, nameCount: 12 });
+  assert.match(html, /名称<span class="mx-namecount">12<\/span>/);
+  // 没有来源筛选片
+  assert.doesNotMatch(html, /ss-chip/);
 });
