@@ -10,11 +10,11 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import Matrix, {
-  duplicatesAKey,
   cellKey,
   RevealLink,
   type MatrixCellView,
   type MatrixRowView,
+  type ColumnKeyAction,
   type SelectionKey,
 } from "./Matrix";
 import { distinguishingSegments } from "./pages/importDefaults";
@@ -94,16 +94,22 @@ const verbOf = (state: CellState, agent: string): string | undefined =>
           ? "点一下再试一次"
           : undefined;
 
-/// 键的提示框：受影响的名字（前 5 个 +「等 N 个」）；移除时原件不在其中，末尾注明
-export function affectedTip(names: string[], own: string[] = []): ReactNode {
-  const shown = names.slice(0, 5).join("、");
-  const more = names.length > 5 ? ` 等 ${names.length} 个` : "";
+/// ＋ / － 的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、写不进的注明不受影响
+export function affectedTip(
+  head: string,
+  names: string[],
+  notes: { names: string[]; why: string }[] = [],
+): ReactNode {
+  const list = (xs: string[]) =>
+    `${xs.slice(0, 5).join("、")}${xs.length > 5 ? ` 等 ${xs.length} 个` : ""}`;
   return (
     <>
-      <div>{`${shown}${more}`}</div>
-      {own.length > 0 ? (
-        <div>{`${own.slice(0, 5).join("、")}${own.length > 5 ? ` 等 ${own.length} 个` : ""} 是原件，不受影响`}</div>
-      ) : null}
+      <div>{`${head} · ${names.length} 个：${list(names)}`}</div>
+      {notes
+        .filter((n) => n.names.length > 0)
+        .map((n) => (
+          <div key={n.why}>{`${list(n.names)} ${n.why}，不受影响`}</div>
+        ))}
     </>
   );
 }
@@ -262,85 +268,80 @@ export default function DomainView(props: DomainViewProps) {
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
-  // 动词键：`加到 ⎔ CODEX` / `从 ✳ CLAUDE CODE 移除`；受影响数 ≠ 已选数时才写「· N 个」
-  const countIf = (n: number, total: number) => (n !== total ? n : undefined);
-  const pressOf = new Map<string, BatchPress>();
-  const keys: SelectionKey[] = page.targets.map((target) => {
+  // 选择态：每个 agent 列头上方一对固定的 ＋ / －（不翻转、不改文字），全局一对 全部加上 / 全部移除
+  const columnKeys: Record<string, { add?: ColumnKeyAction; remove?: ColumnKeyAction }> = {};
+  const allAdd: CellRef[] = [];
+  const allRemove: CellRef[] = [];
+  for (const target of page.targets) {
     const linked: CellRef[] = [];
     const missing: CellRef[] = [];
     const own: string[] = [];
+    const blocked: string[] = [];
     for (const row of chosen) {
       const s = stateAt(row, target.id);
       const ref = { sourceId: row.sourceId, skill: row.skill, targetId: target.id };
       if (s === "linked") linked.push(ref);
       else if (s === "missing") missing.push(ref);
       else if (s === "own") own.push(row.skill);
+      else if (s !== null) blocked.push(row.skill);
     }
-    const base = { id: target.id, agentId: target.scope.harnessId, name: target.label };
-    if (target.linkedWholeTo !== null) {
-      return {
-        ...base,
-        verb: "加到",
-        disabledReason: `${target.label} 的 skills 整个文件夹是链接`,
-        onPress: () => undefined,
-      };
+    const whole =
+      target.linkedWholeTo !== null ? `${target.label} 的 skills 整个文件夹是链接` : undefined;
+    if (!whole) {
+      allAdd.push(...missing);
+      allRemove.push(...linked);
     }
-    if (missing.length > 0) {
-      const press: BatchPress = { keyId: target.id, op: "link", cells: missing };
-      pressOf.set(target.id, press);
-      return {
-        ...base,
-        verb: "加到",
-        count: countIf(missing.length, chosen.length),
-        tip: affectedTip(missing.map((c) => c.skill)),
-        onPress: () => props.onBatch(press),
-      };
-    }
-    if (linked.length > 0) {
-      const press: BatchPress = { keyId: target.id, op: "unlink", cells: linked };
-      pressOf.set(target.id, press);
-      return {
-        ...base,
-        verb: "从",
-        verbTail: "移除",
-        count: countIf(linked.length, chosen.length),
+    const addPress: BatchPress = { keyId: target.id, op: "link", cells: missing };
+    const removePress: BatchPress = { keyId: target.id, op: "unlink", cells: linked };
+    columnKeys[target.id] = {
+      add: {
         tip: affectedTip(
+          `加到 ${target.label}`,
+          missing.map((c) => c.skill),
+          [
+            { names: own, why: "是原件" },
+            { names: blocked, why: "写不进" },
+          ],
+        ),
+        disabledReason:
+          whole ??
+          (missing.length > 0
+            ? undefined
+            : blocked.length > 0 && linked.length + own.length === 0
+              ? "这几个都写不进"
+              : "都已加上"),
+        onPress: () => props.onBatch(addPress),
+      },
+      remove: {
+        tip: affectedTip(
+          `从 ${target.label} 移除`,
           linked.map((c) => c.skill),
-          own,
+          [{ names: own, why: "是原件" }],
         ),
-        onPress: () => props.onBatch(press),
-      };
-    }
-    return {
-      ...base,
-      verb: "加到",
-      disabledReason:
-        own.length > 0 ? "已选的都是原件" : `已选的在 ${target.label} 下没有能加上或移除的`,
-      onPress: () => undefined,
+        disabledReason:
+          whole ??
+          (linked.length > 0 ? undefined : own.length > 0 ? "只剩原件，移除不了" : "都还没加上"),
+        onPress: () => props.onBatch(removePress),
+      },
     };
-  });
-  // 全部加上：把已选的在所有 agent 下补齐。没有「全部移除」（误触代价高、低频，逐个 agent 移除）
-  const allTargets = page.targets.flatMap((target) =>
-    target.linkedWholeTo !== null
-      ? []
-      : chosen.flatMap((row) =>
-          stateAt(row, target.id) === "missing"
-            ? [{ sourceId: row.sourceId, skill: row.skill, targetId: target.id }]
-            : [],
-        ),
-  );
-  const allPress: BatchPress = { keyId: "all", op: "link", cells: allTargets };
-  // 「全部加上」与某颗 agent 键做同一件事时隐藏（DESIGN「选择操作条」）
-  const selectionAll: SelectionKey | undefined =
-    allTargets.length === 0 || duplicatesAKey(allPress, [...pressOf.values()])
-      ? undefined
-      : {
-          id: "all",
-          verb: "全部加上",
-          count: countIf(allTargets.length, chosen.length * page.targets.length),
-          tip: affectedTip([...new Set(allTargets.map((c) => c.skill))]),
-          onPress: () => props.onBatch(allPress),
-        };
+  }
+  const uniqNames = (cells: CellRef[]) => [...new Set(cells.map((c) => c.skill))];
+  const keys: SelectionKey[] = [
+    {
+      id: "all-add",
+      label: "全部加上",
+      tip: affectedTip(`加到所有 agent · ${allAdd.length} 处`, uniqNames(allAdd)),
+      disabledReason: allAdd.length === 0 ? "都已加上" : undefined,
+      onPress: () => props.onBatch({ keyId: "all-add", op: "link", cells: allAdd }),
+    },
+    {
+      id: "all-remove",
+      label: "全部移除",
+      tip: affectedTip(`从所有 agent 移除 · ${allRemove.length} 处`, uniqNames(allRemove)),
+      disabledReason: allRemove.length === 0 ? "都还没加上" : undefined,
+      onPress: () => props.onBatch({ keyId: "all-remove", op: "unlink", cells: allRemove }),
+    },
+  ];
 
   // ---- 空态：一句现状 + 一个动作（DESIGN「空态与忙碌态」） ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
@@ -383,7 +384,7 @@ export default function DomainView(props: DomainViewProps) {
       selected={props.selected}
       onSelectionChange={props.onSelectionChange}
       selectionKeys={keys}
-      selectionAll={selectionAll}
+      columnKeys={columnKeys}
       busy={props.busy}
       onCell={(rowKey, columnId) => {
         const row = page.rows.find((r) => skillRowKey(r) === rowKey);

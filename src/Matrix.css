@@ -117,62 +117,17 @@
   font-weight: 500;
 }
 
-.mx-keywrap {
-  position: relative;
-  display: inline-flex;
-  flex-shrink: 0;
-}
-
-/* 选择操作条的动词键：动词（按钮字）+ 14px agent 图标 + Condensed 大写名 + 可选「· N 个」 */
+/* 选择态第一行的全局键：全部加上 / 全部移除（默认按钮 28） */
 .mx-key {
-  gap: 6px;
   padding: 0 12px;
 }
 
-.mx-keyname {
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-}
-
-.mx-keycount {
-  font-weight: 400;
-  color: var(--ink-mute);
-}
-
-.mx-key:disabled .mx-keycount {
-  color: inherit;
-}
-
-/* 选择操作条收在面板之内：一颗键都不许被挤扁，放不下由组件逐级降级 */
 .mx-toolbar--select > * {
   flex-shrink: 0;
 }
 
-/* 降级第一步：键距收到 4 */
-.mx-toolbar--select.is-tight,
-.mx-toolbar--select.is-tight .mx-keys {
-  gap: 4px;
-}
-
 .mx-clear {
   margin-left: 6px;
-}
-
-/* 批量提示条：被按下的键正下方 4，文字右沿对齐该键右沿、向左展开。盖在列头上时垫一层白底，
-   白底向右多出 16，把被半盖的列头图标整个遮住（画板 Mcp） */
-.mx-keytoast {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: -16px;
-  z-index: 6;
-  display: flex;
-  padding: 0 16px 0 8px;
-  background: var(--canvas);
-}
-
-.mx-keytoast .ss-toast--routine {
-  height: 32px;
 }
 
 /* ===== 面板 ===== */
@@ -192,11 +147,48 @@
   display: grid;
 }
 
-/* 列头吸顶（连同 2px 结构线）；不加阴影，靠 canvas 底色盖住下面的行 */
-.mx-head {
+/* 列头吸顶（连同 2px 结构线与选择态的键行）；不加阴影，靠 canvas 底色盖住下面的行 */
+.mx-headwrap {
   position: sticky;
   top: 0;
-  z-index: 4;
+  /* 比工具行高一层：键行上的提示框向上弹，要盖在工具行（来源片）上面 */
+  z-index: 6;
+  background: var(--canvas);
+}
+
+/* 选择态：列头上方一行 ＋ / －，每对与列中心对齐、间距 4；最左那段空白放批量提示条 */
+.mx-keyrow {
+  align-items: center;
+  height: 32px;
+  margin-bottom: 4px;
+}
+
+.mx-keyrow__pair {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* 提示条右对齐到第一对键左边 16：第一对键左沿在第一列里 (88 − 52) / 2 = 18 处 */
+.mx-keyrow__toast {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  margin-right: -2px;
+}
+
+.mx-pm {
+  width: 24px;
+  padding: 0;
+}
+
+/* 禁用的键不吃指针事件，让外层提示框接住悬停——禁用的原因要在提示框里看得到 */
+.mx-pm:disabled,
+.mx-key:disabled {
+  pointer-events: none;
+}
+
+.mx-head {
   align-items: end;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--ink);

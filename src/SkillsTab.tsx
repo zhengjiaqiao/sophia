@@ -369,6 +369,9 @@ export default function SkillsTab({
         node: (
           <Toast
             {...text}
+            // 键行左侧空白窄：写数量，不逐个写名字（`✓ 加到 ✳ 1 个 · 撤销`）；名字在键的提示框里
+            names={text.kind === "success" ? undefined : text.names}
+            reading={text.kind === "success" ? `${done.length} 个` : undefined}
             action={undo ? { label: "撤销", onClick: undo } : undefined}
             onDismiss={dismissKey}
             onClose={text.tier === "notice" ? dismissKey : undefined}

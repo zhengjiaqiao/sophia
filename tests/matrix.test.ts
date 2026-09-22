@@ -88,43 +88,39 @@ test("Matrix：原件位置列头只排序——没有 ▾ 下拉、没有规则
   assert.match(html, /class="mx-head__origin"><button type="button" class="mx-headbtn">原件位置/);
 });
 
-test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具行", () => {
+test("Matrix：选择态——第一行 已选 N 个 + 全部加上 / 全部移除 + 取消选择；列头上方固定成对的 ＋ / －", () => {
+  const noop = () => undefined;
   const html = render(Matrix, {
     ...base,
     transportLabel: "传输",
     selected: new Set(["u|docx"]),
     selectionKeys: [
-      {
-        id: "cx",
-        agentId: "codex",
-        name: "Codex",
-        verb: "加到",
-        count: 2,
-        onPress: () => undefined,
-      },
-      {
-        id: "cc",
-        agentId: "claude-code",
-        name: "Claude Code",
-        verb: "从",
-        verbTail: "移除",
-        disabledReason: "已选的都是原件",
-        onPress: () => undefined,
-      },
+      { id: "all-add", label: "全部加上", onPress: noop },
+      { id: "all-remove", label: "全部移除", disabledReason: "都还没加上", onPress: noop },
     ],
+    columnKeys: {
+      cc: {
+        add: { tip: "加到 Claude Code · 1 个：docx", onPress: noop },
+        remove: { tip: "从 Claude Code 移除", disabledReason: "只剩原件，移除不了", onPress: noop },
+      },
+      cx: { add: { tip: "写进 Codex", onPress: noop } },
+    },
   });
   assert.match(html, /grid-template-columns:34px 246px 72px 120px 88px 88px 24px/);
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
-  // 动词键：动词 + 列头同一枚图标 + Condensed 大写名 + 受影响数 ≠ 已选数时的「· N 个」；
-  // 不画圆点、不写 ±N（第 5 轮「状态点 + 增量」已撤回）
-  // 动词带方向（「开启 Codex」会读成操作应用本身）
-  assert.match(html, /aria-label="加到 Codex · 2 个"/);
-  assert.match(html, /class="mx-keycount"> · 2 个</);
-  assert.doesNotMatch(html, /mx-keydot|ss-dot--own is-muted|\+1/);
+  assert.match(html, />全部加上</);
+  assert.match(html, /disabled=""[^>]*aria-label="全部移除：都还没加上"/);
   assert.match(html, /取消选择/);
-  // 没有能做的动作：禁用，原因进提示框
-  assert.match(html, /disabled=""[^>]*aria-label="从 Claude Code 移除：已选的都是原件"/);
-  // 工具行（筛选框）让位
+  // 键行：每列一对 ＋ / －，禁用的一侧提示框说原因；只给 add 的列（MCP）只画 ＋
+  assert.match(html, /class="mx-grid mx-keyrow"/);
+  assert.match(html, /aria-label="加到 Claude Code"/);
+  assert.match(html, /disabled=""[^>]*aria-label="从 Claude Code 移除：只剩原件，移除不了"/);
+  assert.equal((html.match(/class="ss-btn ss-btn--compact mx-pm"/g) ?? []).length, 3);
+  // 按 agent 的动词键（「加到 ✳ CLAUDE CODE」一类）属于已退役的行为
+  assert.doesNotMatch(html, /mx-keyname|mx-keycount/);
+  // 名称列头的复选框部分选中时半选
+  assert.match(html, /aria-checked="mixed" aria-label="全选"/);
+  // 工具行第一行（筛选框）让位
   assert.doesNotMatch(html, /placeholder="筛选"/);
 });
 
@@ -144,27 +140,6 @@ test("clampFocus：筛选让行变少、列数变了之后，焦点格夹回最�
 test("Matrix：表里总有一个 tabIndex=0 的格，Tab 键进得来", () => {
   const html = render(Matrix, base);
   assert.equal((html.match(/data-cell="[^"]*" tabindex="0"/g) ?? []).length, 1);
-});
-
-test("duplicatesAKey：「全部」与某颗键做同一件事（同动作、同一批格）时隐藏", async () => {
-  const { duplicatesAKey } = await import("../src/Matrix.tsx");
-  const c = (skill: string, targetId: string) => ({ sourceId: "s", skill, targetId });
-  const codex = { op: "link", cells: [c("a", "codex"), c("b", "codex")] };
-  const cc = { op: "unlink", cells: [c("a", "cc")] };
-  // 只有 Codex 那颗能开：全部开启 = 开启 Codex
-  assert.equal(
-    duplicatesAKey({ op: "link", cells: [c("b", "codex"), c("a", "codex")] }, [codex, cc]),
-    true,
-  );
-  // 全部开启涉及两列：不重复
-  assert.equal(
-    duplicatesAKey({ op: "link", cells: [c("a", "codex"), c("b", "codex"), c("a", "cursor")] }, [
-      codex,
-    ]),
-    false,
-  );
-  // 同一批格但动作不同：不重复
-  assert.equal(duplicatesAKey({ op: "link", cells: [c("a", "cc")] }, [cc]), false);
 });
 
 test("Matrix：名称列头带总数，没有来源筛选片", () => {

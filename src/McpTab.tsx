@@ -4,12 +4,12 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import Matrix, {
   cellKey,
-  duplicatesAKey,
   type MatrixCellView,
   type MatrixRowView,
+  type ColumnKeyAction,
   type SelectionKey,
 } from "./Matrix";
-import { Empty as TableEmpty, PlusGlyph } from "./DomainView";
+import { affectedTip, Empty as TableEmpty, PlusGlyph } from "./DomainView";
 import McpImportPage from "./pages/McpImportPage";
 import { displayPath } from "./pathText";
 import { pathsOfKey } from "./pages/pendingIssues";
@@ -28,7 +28,6 @@ import { AddButton, Confirm, Empty, Tag, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import { toastFor, type ToastItem, type ToastText } from "./toastText";
 import type {
-  CellRef,
   McpUndoReport,
   McpAutoImportRule,
   McpEntry,
@@ -387,6 +386,9 @@ export default function McpTab({
           node: (
             <Toast
               {...text}
+              // 键行左侧空白窄：写数量（`✓ 写进 ⎔ 2 个`），名字在键的提示框里
+              names={text.kind === "success" ? undefined : text.names}
+              reading={text.kind === "success" ? `${created.length} 个` : undefined}
               action={undo ? { label: "撤销", onClick: undo } : undefined}
               onDismiss={dismissKey}
               onClose={text.tier === "notice" ? dismissKey : undefined}
@@ -649,7 +651,7 @@ export default function McpTab({
     };
   });
 
-  // ---- 选择操作条：已选的 × 每个位置，只写 `+N`（格是单向的） ----
+  // ---- 选择态 ----
   const chosen = visible.filter((row) => selected.has(rowKeyOf(row)));
   const missingAt = (targetId: string): McpSelection[] =>
     chosen.flatMap((row) => {
@@ -659,47 +661,49 @@ export default function McpTab({
         ? [{ sourceId: source.sourceId, name: row.name, targetId }]
         : [];
     });
-  // 动词键：MCP 只能写进、不能拿掉，所以动词只有「写进」；已经都有了的键禁用。
-  // 受影响数 ≠ 已选数时才写「· N 个」
-  const countIf = (n: number, total: number) => (n !== total ? n : undefined);
-  const presses: { op: string; cells: CellRef[] }[] = [];
-  const asRefs = (cells: McpSelection[]): CellRef[] =>
-    cells.map((c) => ({ sourceId: c.sourceId, skill: c.name, targetId: c.targetId }));
-  const keys: SelectionKey[] = page.targets.map((target) => {
+  // 选择态：每个位置列头上方只有 ＋（写进）——MCP 不能删条目，不画 －；全局只有「全部写进」
+  const columnKeys: Record<string, { add?: ColumnKeyAction }> = {};
+  for (const target of page.targets) {
     const cells = missingAt(target.id);
-    const name = names.get(target.id) ?? target.label;
-    const base = { id: target.id, agentId: target.harnessId, name, verb: "写进" };
-    if (cells.length > 0) {
-      presses.push({ op: "write", cells: asRefs(cells) });
-      return {
-        ...base,
-        count: countIf(cells.length, chosen.length),
-        tip: `把已选的写进 ${target.label}：新增 ${cells.length} 处`,
+    const own = chosen.filter((row) => viewAt(row, target.id)?.dot === "own").map((r) => r.name);
+    const cant = chosen
+      .filter((row) => {
+        const v = viewAt(row, target.id);
+        return v !== null && !v.clickable && v.dot !== "own" && v.dot !== "linked";
+      })
+      .map((r) => r.name);
+    columnKeys[target.id] = {
+      add: {
+        tip: affectedTip(
+          `写进 ${target.label}`,
+          cells.map((c) => c.name),
+          [
+            { names: own, why: "就定义在这里" },
+            { names: cant, why: "写不过去" },
+          ],
+        ),
+        disabledReason:
+          cells.length > 0
+            ? undefined
+            : cant.length > 0 && own.length === 0
+              ? "这几个都写不过去"
+              : "都已写进",
         onPress: () => void write(cells, target.id),
-      };
-    }
-    const allOwn =
-      chosen.length > 0 && chosen.every((row) => viewAt(row, target.id)?.dot === "own");
-    return {
-      ...base,
-      disabledReason: allOwn
-        ? `${target.label} · 已选的都定义在这里`
-        : `已选的在 ${target.label} 里都有了，或写不过去`,
-      onPress: () => undefined,
+      },
     };
-  });
+  }
   const allMissing = page.targets.flatMap((t) => missingAt(t.id));
-  // 「全部」与某颗键做同一件事时隐藏
-  const selectionAll: SelectionKey | undefined =
-    allMissing.length === 0 || duplicatesAKey({ op: "write", cells: asRefs(allMissing) }, presses)
-      ? undefined
-      : {
-          id: "all",
-          verb: "全部写进",
-          count: countIf(allMissing.length, chosen.length * page.targets.length),
-          tip: `写进所有还缺它的位置：共新增 ${allMissing.length} 处`,
-          onPress: () => void write(allMissing, "all"),
-        };
+  const keys: SelectionKey[] = [
+    {
+      id: "all",
+      label: "全部写进",
+      tip: affectedTip(`写进所有还缺它的位置 · ${allMissing.length} 处`, [
+        ...new Set(allMissing.map((c) => c.name)),
+      ]),
+      disabledReason: allMissing.length === 0 ? "都已写进" : undefined,
+      onPress: () => void write(allMissing, "all"),
+    },
+  ];
 
   const openImport = () => {
     setImportTargetIds(null);
@@ -763,7 +767,7 @@ export default function McpTab({
           if (next.size === 0) setKeyToast(null);
         }}
         selectionKeys={keys}
-        selectionAll={selectionAll}
+        columnKeys={columnKeys}
         onUndo={() => undoRef.current?.()}
         busy={busy}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}

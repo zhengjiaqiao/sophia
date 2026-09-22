@@ -18,12 +18,10 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } fr
 import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
 import {
-  AgentIcon,
   AgentMark,
   Checkbox,
   Chip,
   DOT_LABEL,
-  Cap,
   IconCannot,
   IconClose,
   IconSearch,
@@ -94,24 +92,23 @@ export interface MatrixRowView {
   busy?: string;
 }
 
-/// 选择操作条上的一颗**动词键**：对已选的，在这一列做这件事（DESIGN「选择操作条」）。
-/// 动词带方向：`加到 ⎔ CODEX · 2 个` / `从 ✳ CLAUDE CODE 移除`；「全部」键没有 agent：`全部加上`
+/// 选择态下工具行第一行的全局键：`全部加上` `全部移除`（MCP 只有 `全部写进`）
 export interface SelectionKey {
   id: string;
-  /// harness id，画列头同一枚图标；没有就是「全部」键
-  agentId?: string;
-  /// agent 名（Condensed 大写，跟随列头）；「全部」键不给
-  name?: string;
-  /// 中文动词（写在图标前）：`加到` `从` `写进` `全部加上`
-  verb: string;
-  /// 动词后半截（写在 agent 名之后）：`从 ✳ CLAUDE CODE 移除` 的「移除」
-  verbTail?: string;
-  /// 受影响数 ≠ 已选数时才给，写成 `· N 个`
-  count?: number;
-  /// 没有能做的动作：禁用，提示框说原因
+  label: string;
+  /// 没有能做的：禁用，提示框说原因
   disabledReason?: string;
   /// 提示框：按下会怎样（受影响的名字）
   tip?: ReactNode;
+  onPress: () => void;
+}
+
+/// 列头上方的一颗 ＋ / －（DESIGN「选择操作条」：固定成对、不翻转、不改文字）
+export interface ColumnKeyAction {
+  /// 提示框：动词 + 数量 + 受影响的名字（`加到 Claude Code · 1 个：…`）
+  tip: ReactNode;
+  /// 这一侧没有效果：禁用，提示框写原因（`都已加上` `只剩原件，移除不了`…）
+  disabledReason?: string;
   onPress: () => void;
 }
 
@@ -145,9 +142,10 @@ export interface MatrixProps {
   /// 选中的行键
   selected: Set<string>;
   onSelectionChange: (next: Set<string>) => void;
-  /// 选择操作条：每列一颗键 + 「全部」
+  /// 选择态：工具行第一行的全局键（全部加上 / 全部移除）
   selectionKeys: SelectionKey[];
-  selectionAll?: SelectionKey;
+  /// 选择态：每个 agent 列头上方的 ＋ / －（MCP 只给 add）
+  columnKeys?: Record<string, { add?: ColumnKeyAction; remove?: ColumnKeyAction }>;
 
   busy: boolean;
   onCell: (rowKey: string, columnId: string) => void;
@@ -163,7 +161,8 @@ export interface MatrixProps {
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   /// 贴在某一行下方的提示条（只留这份 · 撤销）
   rowToast?: { rowKey: string; node: ReactNode } | null;
-  /// 贴在被按下的键下方 4、右对齐该键的提示条（批量结果）
+  /// 批量结果的例行提示条：固定在键行最左边那段空白里（名称 / 原件位置两列上方），
+  /// 右对齐到第一对键左边 16，按哪一列都落在同一处
   keyToast?: { keyId: string; node: ReactNode } | null;
   /// 无关位置的全局事（自动规则）：右下，右沿对齐面板右沿
   globalToast?: ReactNode;
@@ -178,22 +177,6 @@ const DOT_TEXT: Record<Dot, string> = {
   missing: "未加上",
   own: "已加上 · 原件",
 };
-
-/// 一格的身份（行的来源 + 名字 + 列）
-type CellLike = { sourceId: string; skill: string; targetId: string };
-
-/// 「全部」的效果恰好等于某一颗 agent 键（同一个动作、同一批格）时，这颗「全部」是噪音，隐藏
-export function duplicatesAKey(
-  all: { op: string; cells: CellLike[] },
-  presses: { op: string; cells: CellLike[] }[],
-): boolean {
-  const key = (c: CellLike) => `${c.sourceId}|${c.skill}|${c.targetId}`;
-  const mine = new Set(all.cells.map(key));
-  return presses.some(
-    (p) =>
-      p.op === all.op && p.cells.length === mine.size && p.cells.every((c) => mine.has(key(c))),
-  );
-}
 
 /// 把键盘焦点格夹回当前表的范围：取最近的有效行和列。表为空（没有行或没有列）时返回 null
 export function clampFocus(
@@ -290,46 +273,6 @@ function SortArrow({ active, desc }: { active: boolean; desc: boolean }) {
   );
 }
 
-/// 选择操作条上的动词键：动词（按钮字）+ 列头同一枚图标 + agent 名（Condensed 大写）+ 可选数量。
-/// 不画圆点、不写 ±N（圆点在按钮上读成「已选中」，−1 读成负数，都要解码）。
-/// `iconOnly`：最后一级降级，名字进提示框
-function KeyButton({ k, iconOnly }: { k: SelectionKey; iconOnly: boolean }) {
-  const disabled = k.disabledReason !== undefined;
-  const count = k.count !== undefined ? ` · ${k.count} 个` : "";
-  const label = `${k.verb}${k.name ? ` ${k.name}` : ""}${k.verbTail ? ` ${k.verbTail}` : ""}${count}`;
-  const button = (
-    <button
-      type="button"
-      className="ss-btn mx-key"
-      disabled={disabled}
-      aria-label={disabled ? `${label}：${k.disabledReason}` : label}
-      onClick={disabled ? undefined : k.onPress}
-    >
-      <span>{k.verb}</span>
-      {k.agentId ? <AgentIcon id={k.agentId} name={k.name ?? ""} size={14} /> : null}
-      {k.name && !iconOnly ? (
-        <span className="mx-keyname">
-          <Cap>{k.name}</Cap>
-        </span>
-      ) : null}
-      {k.verbTail ? <span>{k.verbTail}</span> : null}
-      {count ? <span className="mx-keycount">{count}</span> : null}
-    </button>
-  );
-  const tipText = disabled ? k.disabledReason : k.tip;
-  const tip =
-    iconOnly && k.name ? (
-      <>
-        <div>{k.name}</div>
-        {tipText ? <div>{tipText}</div> : null}
-      </>
-    ) : (
-      tipText
-    );
-  // 提示框默认在上方，放不下时 Tooltip 自己翻到下方
-  return tip ? <Tooltip content={tip}>{button}</Tooltip> : button;
-}
-
 export default function Matrix(props: MatrixProps) {
   const {
     columns,
@@ -346,7 +289,7 @@ export default function Matrix(props: MatrixProps) {
     selected,
     onSelectionChange,
     selectionKeys,
-    selectionAll,
+    columnKeys,
     busy,
     onCell,
     onUndo,
@@ -627,52 +570,44 @@ export default function Matrix(props: MatrixProps) {
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
   const selRef = useRef<HTMLDivElement>(null);
-  // 批量提示条右对齐被按下的键、向左展开；向左会越出面板左沿时改为贴面板左沿
-  const keyToastRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const t = keyToastRef.current;
-    const wrap = t?.parentElement;
-    const root = rootRef.current;
-    if (!t || !wrap || !root) return;
-    t.style.left = "";
-    t.style.right = "";
-    const rootLeft = root.getBoundingClientRect().left;
-    if (t.getBoundingClientRect().left < rootLeft) {
-      t.style.right = "auto";
-      t.style.left = `${rootLeft - wrap.getBoundingClientRect().left}px`;
-    }
-  }, [keyToast]);
-  // 放不下时的降级（「全部」与某颗键重复时由调用方直接不给）：
-  // 1 键距收到 4 → 2「已选 N 个」缩成「N 个」→ 3 agent 名只留图标。列数变了从头量
-  const [fit, setFit] = useState(0);
-  useLayoutEffect(() => setFit(0), [columns.length, width, selectionAll === undefined]);
+  // 放不下时的最后手段：「已选 N 个」缩成「N 个」。列数变了从头量
+  const [short, setShort] = useState(false);
+  useLayoutEffect(() => setShort(false), [columns.length, width]);
   useLayoutEffect(() => {
     const el = selRef.current;
-    if (!selecting || !el || fit >= 3) return;
-    if (el.scrollWidth > el.clientWidth + 1) setFit((f) => f + 1);
+    if (!selecting || !el || short) return;
+    if (el.scrollWidth > el.clientWidth + 1) setShort(true);
   });
   const toolbar = selecting ? (
-    // 选择操作条「顶替工具行」：`+ skill` / `+ MCP` 不出现，收在面板右沿之内
-    <div
-      className={`mx-toolbar mx-toolbar--select${fit >= 1 ? " is-tight" : ""}`}
-      ref={selRef}
-      style={{ width }}
-    >
+    // 选择态的第一行：已选 N 个 + 全局一对「全部加上」「全部移除」+ 取消选择（第二行来源片保留）
+    <div className="mx-toolbar mx-toolbar--select" ref={selRef} style={{ width }}>
       <span className="mx-selcount">
-        {fit >= 2 ? null : "已选 "}
+        {short ? null : "已选 "}
         <span className="mx-mono">{selectedVisible.length}</span> 个
       </span>
       <span className={`mx-keys${busy ? " ss-busy" : ""}`}>
-        {[...selectionKeys, ...(selectionAll ? [selectionAll] : [])].map((k) => (
-          <span key={k.id} className="mx-keywrap">
-            <KeyButton k={k} iconOnly={fit >= 3} />
-            {keyToast?.keyId === k.id ? (
-              <div className="mx-keytoast" ref={keyToastRef}>
-                {keyToast.node}
-              </div>
-            ) : null}
-          </span>
-        ))}
+        {selectionKeys.map((k) => {
+          const button = (
+            <button
+              key={k.id}
+              type="button"
+              className="ss-btn mx-key"
+              disabled={k.disabledReason !== undefined}
+              aria-label={k.disabledReason ? `${k.label}：${k.disabledReason}` : k.label}
+              onClick={k.disabledReason ? undefined : k.onPress}
+            >
+              {k.label}
+            </button>
+          );
+          const tip = k.disabledReason ?? k.tip;
+          return tip ? (
+            <Tooltip key={k.id} content={tip}>
+              {button}
+            </Tooltip>
+          ) : (
+            button
+          );
+        })}
       </span>
       {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
       <button
@@ -723,8 +658,55 @@ export default function Matrix(props: MatrixProps) {
 
   // ---- 表头 ----
   const sortBy = (key: string) => setSort((prev) => toggleSort(prev ?? sort, key));
+  // 选择态：列头上方一行键——每个 agent 列一对 ＋ / －（与列中心对齐），最左那段空白放批量提示条
+  const pmKey = (kind: "add" | "remove", col: MatrixColumn, a: ColumnKeyAction | undefined) => {
+    if (!a) return null;
+    const disabled = a.disabledReason !== undefined;
+    const button = (
+      <button
+        type="button"
+        className="ss-btn ss-btn--compact mx-pm"
+        disabled={disabled}
+        aria-label={`${kind === "add" ? `加到 ${col.name}` : `从 ${col.name} 移除`}${disabled ? `：${a.disabledReason}` : ""}`}
+        onClick={disabled ? undefined : a.onPress}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d={kind === "add" ? "M6 1.5v9M1.5 6h9" : "M1.5 6h9"} />
+        </svg>
+      </button>
+    );
+    return <Tooltip content={disabled ? a.disabledReason : a.tip}>{button}</Tooltip>;
+  };
+  const keyRow =
+    selecting && columnKeys ? (
+      <div className="mx-grid mx-keyrow" style={gridStyle}>
+        <div
+          className="mx-keyrow__toast"
+          style={{ gridColumn: `1 / span ${hasTransport ? 4 : 3}` }}
+        >
+          {keyToast ? keyToast.node : null}
+        </div>
+        {columns.map((col) => (
+          <div key={col.id} className="mx-keyrow__pair">
+            {pmKey("add", col, columnKeys[col.id]?.add)}
+            {pmKey("remove", col, columnKeys[col.id]?.remove)}
+          </div>
+        ))}
+        <div />
+      </div>
+    ) : null;
+
   const header = (
-    <div className="mx-grid mx-head" style={{ ...gridStyle, top: barH }}>
+    <div className="mx-grid mx-head" style={gridStyle}>
       <div className="mx-head__check">
         {/* 表头整行不置灰，只灰这个全选框（§6 第二条细节） */}
         {selectable.length === 0 ? (
@@ -1009,7 +991,11 @@ export default function Matrix(props: MatrixProps) {
         {sources ? <SourceChips {...sources} width={width} /> : null}
       </div>
       <div className="mx-panel" ref={panelRef} style={{ width }}>
-        {header}
+        {/* 列头吸顶（连同选择态的键行），紧贴两行工具行下面 */}
+        <div className="mx-headwrap" style={{ top: barH }}>
+          {keyRow}
+          {header}
+        </div>
         <div
           className="mx-body"
           ref={bodyRef}
