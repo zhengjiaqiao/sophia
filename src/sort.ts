@@ -1,4 +1,4 @@
-import type { CellState } from "./types";
+import type { Dot } from "./cellState";
 
 export type SortDir = "asc" | "desc";
 export interface SortState {
@@ -12,18 +12,18 @@ export function toggleSort(prev: SortState | null, key: string): SortState {
   return { key, dir: "asc" };
 }
 
-/// 目标列按状态排序时的次序：好的在前，越靠后越需要处理。
-/// `wholeLinked` 是旧名 `unwritable` 改的；`readOnly` 是新增的第八种状态，
-/// 扫描不产出，只有真的写失败之后由上层构造（见 types.ts 的 CellState）
-export const STATE_RANK: Record<CellState, number> = {
+/// agent 列按格子排序时的次序：能用的在前，越靠后越需要处理，没有格的排最后。
+/// 按画出来的记号排，不按后端状态排——Skills 与 MCP 共用一张表（Matrix），
+/// 两边的后端状态不同，但记号是同一套
+export const DOT_RANK: Record<Dot, number> = {
   own: 0,
   linked: 0,
   missing: 1,
   broken: 2,
-  foreign: 3,
-  duplicate: 4,
-  wholeLinked: 5,
-  readOnly: 6,
+  blocked: 3,
+  wholeLinked: 4,
+  readOnly: 5,
+  none: 6,
 };
 
 /// 取值比较器：字符串走 localeCompare，数字按大小。Array.sort 本身稳定，同值保持原序

@@ -41,6 +41,9 @@ export interface StateDotProps {
   label?: string;
   /// 给了才渲染成可点的按钮（整格命中区由调用方撑，这里至少 24×24）
   onClick?: () => void;
+  /// 调用方自己渲染外层按钮（`.ss-dot-btn`，表格要整格命中与键盘焦点）时给 true：
+  /// 不带 onClick 也画悬停预览
+  preview?: boolean;
 }
 
 /// 只有这两种点下去是开关，才画悬停预览
@@ -181,12 +184,21 @@ function Glyph16({ dot }: { dot: Dot }) {
   }
 }
 
-export function StateDot({ dot, size = 10, inverse, muted, title, label, onClick }: StateDotProps) {
+export function StateDot({
+  dot,
+  size = 10,
+  inverse,
+  muted,
+  title,
+  label,
+  onClick,
+  preview: forcePreview,
+}: StateDotProps) {
   const text = label ?? title ?? DOT_LABEL[dot];
   const classes = ["ss-dot", `ss-dot--${dot}`];
   if (inverse) classes.push("is-inverse");
   if (muted) classes.push("is-muted");
-  const preview = Boolean(onClick) && PREVIEWS.has(dot);
+  const preview = (Boolean(onClick) || Boolean(forcePreview)) && PREVIEWS.has(dot);
 
   const glyph = (
     <svg

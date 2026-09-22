@@ -18,7 +18,11 @@ const entry = (sourceId: string, name: string, cells: McpCell[]): McpEntry => ({
   reason: null,
   cells,
 });
-const cell = (targetId: string, state: McpCell["state"], reason: string | null = null): McpCell => ({
+const cell = (
+  targetId: string,
+  state: McpCell["state"],
+  reason: string | null = null,
+): McpCell => ({
   targetId,
   state,
   reason,

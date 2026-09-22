@@ -1,0 +1,483 @@
+/* 表格 = 面板（Matrix.tsx）。写法照画板 Main / Mcp / Empty 抄：
+   名称列 280（勾选 34 + 名字 246）、agent 列 88、MCP 传输列 72、尾 24；行高 34；
+   表头底 2px ink、分组 1px ink、行 1px hairline。色值一律 var(--…)，唯一来源是 tokens.css。 */
+@import "./tokens.css";
+
+.mx {
+  padding-top: var(--space-md);
+  padding-bottom: var(--space-huge);
+}
+
+.mx-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mx-faint {
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+/* ===== 工具行 / 选择操作条：同一个 28 槽位，右端动作对齐面板右沿 ===== */
+.mx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h);
+  box-sizing: border-box;
+}
+
+.mx-toolbar__end {
+  margin-left: auto;
+  padding-left: var(--space-xl);
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.mx-chips,
+.mx-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 选择操作条的键一颗都不能被挤：放不下时整条比面板宽，而不是键叠在一起 */
+.mx-keys {
+  flex-shrink: 0;
+}
+
+.mx-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 180px;
+  height: var(--control-h);
+  box-sizing: border-box;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  color: var(--ink-faint);
+  flex-shrink: 0;
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.mx-filter:hover,
+.mx-filter:focus-within {
+  border-color: var(--ink);
+}
+
+.mx-filter input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+}
+
+.mx-filter input::placeholder {
+  color: var(--ink-faint);
+}
+
+.mx-filter__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--hit-min);
+  height: var(--hit-min);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  cursor: pointer;
+}
+
+.mx-filter__clear:hover {
+  color: var(--ink);
+}
+
+.mx-selcount {
+  margin-right: 2px;
+  font-size: var(--size-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mx-selcount .mx-mono {
+  font-weight: 500;
+}
+
+.mx-keywrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* 选择操作条的键：默认按钮 + 8px 点 + 名字 + 等宽增量 */
+.mx-key {
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.mx-keydot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mx-keydot--linked {
+  background: currentColor;
+}
+
+.mx-keydot--missing {
+  border: 1.4px solid currentColor;
+}
+
+.mx-keydelta {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--size-micro);
+  font-weight: 400;
+  color: var(--ink-mute);
+}
+
+.mx-clear {
+  margin-left: 6px;
+}
+
+/* 批量提示条：被按下的键正下方 4，文字右沿对齐该键右沿、向左展开。盖在列头上时垫一层白底，
+   白底向右多出 16，把被半盖的列头图标整个遮住（画板 Mcp） */
+.mx-keytoast {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: -16px;
+  z-index: 6;
+  display: flex;
+  padding: 0 16px 0 8px;
+  background: var(--canvas);
+}
+
+.mx-keytoast .ss-toast--routine {
+  height: 32px;
+}
+
+/* ===== 面板 ===== */
+.mx-panel {
+  position: relative;
+  margin-top: var(--space-md);
+}
+
+.mx-grid {
+  display: grid;
+}
+
+.mx-head {
+  align-items: end;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.mx-head__check,
+.mx-row__check {
+  display: flex;
+  align-items: center;
+  padding-left: 10px;
+}
+
+.mx-head__check {
+  height: 19px;
+}
+
+.mx-headbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.mx-head__label {
+  color: var(--ink-mute);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.mx-head__col {
+  display: flex;
+  justify-content: center;
+  align-self: stretch;
+  align-items: flex-end;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+/* 列头悬停：整列出列带；组头规则悬停：作用的列头轻亮 */
+.mx-head__col.is-hot,
+.mx-head__col.is-hint {
+  background: var(--surface);
+}
+
+.mx-colbtn {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+/* 这一列的目录还不存在：虚线列头（虚线＝目标不在，添加时顺手建出来） */
+.mx-colbtn.is-missing {
+  border: 1px dashed var(--disabled);
+}
+
+.mx-colbtn .mx-sort {
+  position: absolute;
+  top: 2px;
+  right: -8px;
+}
+
+.mx-sort {
+  flex-shrink: 0;
+  visibility: hidden;
+  color: var(--ink-faint);
+}
+
+.mx-headbtn:hover .mx-sort,
+.mx-colbtn:hover .mx-sort,
+.mx-sort.is-active {
+  visibility: visible;
+}
+
+.mx-sort.is-active {
+  color: var(--ink);
+}
+
+.mx-body {
+  position: relative;
+}
+
+/* 列带：垫在最底层，组头的白底把它挡掉（列带跳过组头） */
+.mx-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 88px;
+  background: var(--surface);
+  pointer-events: none;
+}
+
+.mx-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--row-h);
+  box-sizing: border-box;
+  padding-left: 10px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--canvas);
+}
+
+.mx-group.is-first {
+  border-top: 0;
+}
+
+.mx-group__name {
+  font-size: var(--size-caption);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  white-space: nowrap;
+}
+
+.mx-rule {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+
+.mx-rule__text {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* 规则关闭：整段退到 ink-faint，开关留着以便重开 */
+.mx-rule.is-off,
+.mx-rule.is-off .mx-rule__text {
+  color: var(--ink-faint);
+}
+
+.mx-rule__switch {
+  display: inline-flex;
+  margin-left: 2px;
+}
+
+.mx-row {
+  position: relative;
+  align-items: center;
+  height: var(--row-h);
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.mx-row.is-hot,
+.mx-row.is-selected {
+  background: var(--surface);
+}
+
+.mx-row__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 12px;
+}
+
+.mx-name {
+  overflow: hidden;
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mx-rotor {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* 同名行悬停：名字右侧出判断用读数 + 文字按钮「只留这份」 */
+.mx-extra {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.mx-row__transport {
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* 整格是命中区 */
+.mx-cell {
+  position: relative;
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: -1px;
+}
+
+.mx-cellbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  outline: 0;
+}
+
+.mx-cellbtn.is-inert {
+  cursor: default;
+}
+
+/* 键盘焦点：1px ink 环画在格里的点外 2（不用整格外框——那会压到邻格与行线） */
+.mx-cellbtn.ss-dot-btn:focus-visible {
+  outline: 0;
+}
+
+.mx-cellbtn:focus-visible::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  margin: -8px 0 0 -8px;
+  border: 1px solid var(--ink);
+  pointer-events: none;
+}
+
+.mx-cell .ss-tip {
+  z-index: 8;
+}
+
+/* 单格失败：格子下方的小黑窗，说原因 */
+.mx-cellnotice {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 240px;
+  padding: 6px 8px;
+  background: var(--ink);
+  color: var(--canvas);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* 贴在该行下方的提示条（只留这份 · 撤销） */
+.mx-rowtoast {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 34px;
+  z-index: 6;
+}
+
+.mx-empty {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.mx-globaltoast {
+  position: fixed;
+  bottom: var(--space-md);
+  z-index: 20;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mx-filter,
+  .mx-head__col {
+    transition: none;
+  }
+}
