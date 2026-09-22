@@ -124,7 +124,7 @@ const blank = (kind: IssueKind, paths: string[]): PendingIssue => ({
 /// 文案与动作仍走这一份，主视图的待处理栏与待处理页说的是同一句话
 export function readOnlyIssue(target: Target, retry: CellRef[]): PendingIssue {
   const issue = blank("readOnlyTarget", [target.path]);
-  issue.text = " 的 skills 目录写不进去，开不了 skill";
+  issue.text = " 的 skills 目录写不进去，skill 加不进去";
   issue.parts = [{ text: target.label, subject: true }, { text: issue.text }];
   issue.agent = target.label;
   issue.agentId = target.scope.harnessId;

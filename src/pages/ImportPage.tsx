@@ -475,7 +475,7 @@ export default function ImportPage({
                         <>
                           {autoTo.length > 0 ? (
                             <span className="ss-import__tipline">
-                              以后新出现的会自动开启到 {autoTo.join(" · ")}
+                              以后新出现的会自动加到 {autoTo.join(" · ")}
                             </span>
                           ) : null}
                           <span className="ss-import__path">{displayPath(s.path)}</span>

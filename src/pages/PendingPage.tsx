@@ -663,7 +663,7 @@ export function PendingPage({
         settle(issue.key, index, {
           tier: "notice",
           kind: "cannot",
-          verb: "没开启",
+          verb: "没加到",
           agents: agentsOf(issue),
           reason: "现在没有要补的了",
         });
@@ -678,11 +678,11 @@ export function PendingPage({
         issue.key,
         index,
         failed === 0
-          ? { tier: "routine", kind: "success", verb: "开启", agents: agentsOf(issue), names }
+          ? { tier: "routine", kind: "success", verb: "加到", agents: agentsOf(issue), names }
           : {
               tier: "notice",
               kind: created.length === 0 ? "cannot" : "partial",
-              verb: created.length === 0 ? "没开启" : "开启",
+              verb: created.length === 0 ? "没加到" : "加到",
               agents: agentsOf(issue),
               names,
               reason: failureReason(report) ?? undefined,
