@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { emit, listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import type {
@@ -18,7 +18,6 @@ import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { PendingPage, loadModelIgnoredKeys, type PendingSegment } from "./pages/PendingPage";
 import { collectIssues } from "./pages/pendingIssues";
 import { collectMcpIssues } from "./mcpView";
-import { flushAll } from "./deferredCommit";
 import { displayPath, loadHome } from "./pathText";
 import { modelIssues, parseBackendError } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
@@ -200,25 +199,6 @@ export default function App() {
       listen<McpReport>("mcp-auto-imported", ({ payload }) => {
         // MCP 页有自己的结果；停留在别的页签时也不能丢掉自动添加的结果（⑬ 自动发生的事要交代）
         if (activeTabRef.current !== "mcp") setBackgroundMcpReport(payload);
-      }),
-    );
-    // 可撤销删除的延迟提交（deferredCommit）：主窗口关掉前全部提交。
-    // macOS 上关主窗口＝藏到菜单栏（tray.rs 的 intercept_close 已经 prevent_close + hide），
-    // JS 这一侧也必须 preventDefault，不然 onCloseRequested 会把窗口销毁。
-    // 别的系统没有菜单栏入口、关窗就是退出，不接管关闭（接管要销毁权限，且那边没有模型页）
-    if (navigator.userAgent.includes("Mac")) {
-      collect(
-        getCurrentWindow().onCloseRequested(async (event) => {
-          event.preventDefault();
-          await flushAll();
-        }),
-      );
-    }
-    // 托盘「退出」：Rust 先发 flush-pending，最多等 2 秒 flush-done 回执再退出
-    collect(
-      listen("flush-pending", async () => {
-        await flushAll();
-        await emit("flush-done");
       }),
     );
     // 菜单栏面板改了模型状态，收件箱的「模型」段跟着重数

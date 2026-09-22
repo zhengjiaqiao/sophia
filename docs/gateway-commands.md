@@ -46,9 +46,6 @@ interface GatewayState {
 | `gateway_state` | — | 只读 |
 | `gateway_upsert_provider` | `id?: string, name?: string, baseUrl: string, key?: string` | 返回 `{ providerId: string; state: GatewayState }`。`id` 省略是**新建**一家；`name` 省略时新建用地址里的主机名、修改时不改名；`key` 省略或为空表示不动已存的密钥。带了密钥就先向网关校验，失败什么都不保存（也不标 `unreachable`：已存的配置没变）；成功时一并拉回模型列表并清空 `unreachable`。改了地址时 `unreachable` 清空。新建时密钥没存成，这一家不会留下 |
 | `gateway_remove_provider` | `id: string` | 删掉这一家、它的模型和**钥匙串里的密钥（不可恢复，确认由界面负责，后端不再二次确认）**。已启用时同步重写目录，它的模型进停用名单；已启用且它是最后一家还在发布模型的网关时拒绝（`invalid`），请先恢复 |
-| `gateway_mark_remove_provider` | `id: string` | 删网关第一步（界面不弹确认）：只在内存里标记，返回的 state 里已经没有这一家；配置、模型和钥匙串密钥都还在。真删会被拒绝的情况（已启用且它是最后一家还在发布模型的）标记时就拒绝（`invalid`）。标记不落盘：进程意外退出时这一家原样保留 |
-| `gateway_undo_remove_provider` | `id: string` | 撤销标记，这一家原样回来；本来就没标记不算错 |
-| `gateway_commit_removals` | `id?: string` | 真正删掉标记过的网关，效果同 `gateway_remove_provider`（含钥匙串密钥）。提示条 8 秒到期传 `id`；离开网关页不传，提交全部。**应用退出时后端自动提交全部**。某一家删不成时它的标记被撤掉（重新出现），返回错误 |
 | `gateway_fetch_models` | `providerId?: string` | 用钥匙串里的密钥拉取。成功时并入模型列表并清空这一家的 `unreachable`；拉取失败（`auth` / `network`）时把短原因记到这一家的 `unreachable` 并落盘，模型和勾选不动，然后照常返回错误。界面的「再试一次」用 `api.gatewayRetryProvider`，它吞掉这两种错误、改为返回最新 state |
 | `gateway_select_models` | `selected: { id: string; displayName: string }[], providerId?: string` | `selected` 是**这一家**的完整勾选，不影响别家。已启用时同时重写目录和路由清单 |
 | `gateway_enable` | — | 先让路由常驻并确认健康，再写 Codex 设置。有模型要发布的每一家都必须有地址和密钥，缺的那家会在错误信息里点名；没勾选模型的网关不挡路 |

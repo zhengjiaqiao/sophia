@@ -116,15 +116,6 @@ export const api = {
     invoke<GatewayProviderSaved>("gateway_upsert_provider", input),
   /** 连同钥匙串里的密钥一起删，删了回不来：调用前先向用户确认 */
   gatewayRemoveProvider: (id: string) => invoke<GatewayState>("gateway_remove_provider", { id }),
-  /** 删网关第一步：只标记，返回的 state 里已没有这一家；配置与密钥都还在，可撤销 */
-  gatewayMarkRemoveProvider: (id: string) =>
-    invoke<GatewayState>("gateway_mark_remove_provider", { id }),
-  /** 撤销标记删除，这一家原样回来 */
-  gatewayUndoRemoveProvider: (id: string) =>
-    invoke<GatewayState>("gateway_undo_remove_provider", { id }),
-  /** 真正删掉（连同钥匙串密钥）：提示条到期传 id；离开网关页不传 id，提交全部。应用退出时后端自己提交 */
-  gatewayCommitRemovals: (id?: string) =>
-    invoke<GatewayState>("gateway_commit_removals", id === undefined ? {} : { id }),
   /** 失败时后端已把原因记到这一家的 unreachable 上，再照常抛错 */
   gatewayFetchModelsOf: (providerId: string) =>
     invoke<GatewayState>("gateway_fetch_models", { providerId }),
