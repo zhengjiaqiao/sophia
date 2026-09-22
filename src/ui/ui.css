@@ -773,6 +773,12 @@
   display: inline-flex;
 }
 
+/* 悬停不计时的那一档（单格例行一行）到点末尾 120ms 淡出；机械缓动，不是 300ms 渐隐 */
+.ss-toast.is-leaving {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
 /* 需要注意：黑显示窗，8 圆角（layer）无外框，浮层阴影 tip，宽 ≤ 400。
    里面没有自带底色的块，不必裁切（裁切会把放不下的撤销键切掉） */
 .ss-toast--notice {
@@ -1378,6 +1384,11 @@
 
   .ss-spinner {
     animation: none;
+  }
+
+  /* 例行一行到点直接消失，不淡 */
+  .ss-toast.is-leaving {
+    transition: none;
   }
 
   /* 文字后跟三点，一次只露 1 / 2 / 3 / 2 点（每 500ms 一步）。框宽固定，文字不跟着抖。

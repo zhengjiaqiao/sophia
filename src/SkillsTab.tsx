@@ -7,7 +7,7 @@ import { BATCH_BUSY_DELAY_MS } from "./Matrix";
 import ImportPage from "./pages/ImportPage";
 import { pathsOfKey } from "./pages/pendingIssues";
 import { shortDate } from "./dateText";
-import { Confirm, Empty, Toast, TOAST_DWELL_MS } from "./ui";
+import { CELL_TOAST_DWELL_MS, Confirm, Empty, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import {
   batchBusyText,
@@ -66,7 +66,8 @@ export interface SkillsTabProps {
 /// Skills 页：两行工具行（筛选框 + 来源筛选片）+ 表格（DomainView → Matrix）。
 ///
 /// 反馈的位置（DESIGN「提示条的位置」）：
-/// - 单格：乐观更新 + 格子闪一下，**不出提示条**；失败弹回 + 格下小黑窗说原因；撤销用 ⌘Z
+/// - 单格：乐观更新 + 格子闪一下；成功再出例行一行（列头行左段，一次一条，约 4 秒淡出），
+///   `撤销` 与 ⌘Z 同一条路径、撤后这一行直接消失；失败不出这一行，弹回 + 格下小黑窗说原因
 /// - 批量：一行提示条贴在被按下的键下方，右对齐该键；动词与键一致，键上读数随之翻转
 /// - 只留这份：先出锚定确认；确认后直接删，例行一行贴在留下那一行下方（无撤销）
 /// - 自动规则在背后做了事：右下例行一行，右沿对齐面板右沿 + 撤销
@@ -92,7 +93,7 @@ export default function SkillsTab({
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录写不进去）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
   const [readOnly, setReadOnly] = useState<Set<string>>(new Set());
-  // 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，触发项旁的细弧 + 一句
+  // 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，触发项旁的忙碌指示 + 一句
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
   const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
   const [cellNotice, setCellNotice] = useState<{
@@ -101,6 +102,9 @@ export default function SkillsTab({
     text: string;
   } | null>(null);
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
+  // 单格成功的例行一行：一个槽位，新的替换旧的（id 变了 Matrix 重挂、计时从头来）
+  const [cellToast, setCellToast] = useState<{ id: number; node: ReactNode } | null>(null);
+  const cellToastSeq = useRef(0);
   const [rowToast, setRowToast] = useState<{ rowKey: string; node: ReactNode } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
   // 「只留这份」挂起未提交时藏起来的另一份（行键）
@@ -145,12 +149,14 @@ export default function SkillsTab({
   // ---- 提示条：各自到点消失。回调要稳定，否则 Toast 的计时器每次渲染都重来 ----
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
+  const dismissCell = useCallback(() => setCellToast(null), []);
 
   // 提示与弹层只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
     setImportOpen(false);
     setKeepPane(null);
     setKeyToast(null);
+    setCellToast(null);
     setRowToast(null);
     setCellNotice(null);
     setSelected(new Set());
@@ -260,9 +266,27 @@ export default function SkillsTab({
       return next;
     });
 
-  // ===== 单格：乐观更新，不出提示条 =====
+  // ===== 单格：乐观更新 + 闪一下；成功出例行一行 =====
 
-  const toggleCell = (ref: CellRef, from: CellState) => {
+  /// 单格成功：列头行左段出 `✓ 加到 [Codex] excalidraw · 撤销`，替换上一条
+  const showCellToast = (id: number, op: "link" | "unlink", ref: CellRef, undo?: () => void) => {
+    const text = toastFor(op, { done: toastItems([ref]) });
+    setCellToast({
+      id,
+      node: (
+        <Toast
+          {...text}
+          action={undo ? { label: "撤销", onClick: undo } : undefined}
+          dwellMs={CELL_TOAST_DWELL_MS}
+          holdOnHover
+          onDismiss={dismissCell}
+        />
+      ),
+    });
+  };
+
+  /// `undoing`：这是撤销本身——做成了不再出例行一行，也不再留可撤销的操作
+  const toggleCell = (ref: CellRef, from: CellState, undoing = false) => {
     const key = skillCellKey(ref);
     const rowKey = skillRowKey(ref);
     setCellNotice(null);
@@ -280,7 +304,9 @@ export default function SkillsTab({
           if (result.failed.length > 0) {
             setCellNotice({ rowKey, columnId: ref.targetId, text: result.failed[0].reason });
           } else {
+            // 重新链接没有可撤销的反面：出一行交代，不带撤销
             undoRef.current = null;
+            showCellToast(++cellToastSeq.current, "link", ref);
           }
           await onRefresh();
         } catch (e) {
@@ -303,9 +329,17 @@ export default function SkillsTab({
           // 弹回 + 格下小黑窗说原因
           setOptimisticFor([ref], null);
           setCellNotice({ rowKey, columnId: ref.targetId, text: result.failed[0].reason });
-        } else {
+        } else if (!undoing) {
           const back = op === "link" ? "linked" : "missing";
-          undoRef.current = () => toggleCell(ref, back);
+          const id = ++cellToastSeq.current;
+          // 提示条里的「撤销」与 ⌘Z 是同一个函数；撤了这一行直接消失，不另出「已撤销」
+          const undo = () => {
+            if (undoRef.current === undo) undoRef.current = null;
+            setCellToast((prev) => (prev?.id === id ? null : prev));
+            toggleCell(ref, back, true);
+          };
+          undoRef.current = undo;
+          showCellToast(id, op, ref, undo);
         }
         await onRefresh();
       } catch (e) {
@@ -333,8 +367,9 @@ export default function SkillsTab({
   const batch = async ({ keyId, op, cells }: BatchPress, undoing = false) => {
     if (cells.length === 0) return;
     setKeyToast(null);
+    setCellToast(null);
     setCellNotice(null);
-    // 格子同时变成新状态，不闪、不依次点亮；真的慢才在触发项旁出细弧 + 一句（DESIGN「选择操作条」）
+    // 格子同时变成新状态，不闪、不依次点亮；真的慢才在触发项旁出忙碌指示 + 一句（DESIGN「选择操作条」）
     setOptimisticFor(cells, op === "link" ? "linked" : "missing");
     const agent = keyId === "all" ? "所有 agent" : (targetOf(keyId)?.label ?? "");
     const slow = keyId
@@ -662,6 +697,7 @@ export default function SkillsTab({
         cellNotice={cellNotice}
         rowToast={rowToast}
         keyToast={keyToast}
+        cellToast={cellToast}
         keyBusy={keyBusy}
         globalToast={globalToast}
         focus={focus}

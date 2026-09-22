@@ -29,7 +29,7 @@ const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TIP_DELAY_MS } = await import("../src/ui/Tooltip.tsx");
 const { Spinner } = await import("../src/ui/Spinner.tsx");
-const { Toast, TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
+const { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
 const { ErrorBanner, BlackNotice } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
 const { SubPage, holdInert, pickTrigger, triggerKey } = await import("../src/ui/SubPage.tsx");
@@ -597,6 +597,27 @@ test("Toast routine：一行墨字落在白底上，无框无底，撤销是文�
   assert.doesNotMatch(rule, /box-shadow/);
 });
 
+test("Toast 单格例行一行：约 4 秒（比批量的 6 秒短），悬停不计时，到点末尾 120ms 淡出、减少动效时直接消失", () => {
+  assert.equal(CELL_TOAST_DWELL_MS, 4000);
+  assert.ok(CELL_TOAST_DWELL_MS < TOAST_DWELL_MS.success);
+  const html = render(Toast, {
+    tier: "routine",
+    kind: "success",
+    verb: "加到",
+    names: ["excalidraw"],
+    dwellMs: CELL_TOAST_DWELL_MS,
+    holdOnHover: true,
+    onDismiss: noop,
+  });
+  // 刚出现时不在淡出
+  assert.match(html, /class="ss-toast ss-toast--routine" data-kind="success" role="status"/);
+  const leaving = cssRule(uiCss, ".ss-toast.is-leaving");
+  assert.match(leaving, /opacity:\s*0/);
+  assert.match(leaving, /transition:\s*opacity var\(--motion-fast\) var\(--ease-mech\)/);
+  const reduced = uiCss.slice(uiCss.indexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.match(reduced, /\.ss-toast\.is-leaving \{\s*transition: none;/);
+});
+
 // ===== 错误横幅与行内黑窗 =====
 
 test("ErrorBanner：通栏实心黑 + 40px 指示窗 !，不自动消失；可带白描边键与 ×", () => {
@@ -825,7 +846,7 @@ test("Empty 首次扫描：24px 忙碌指示 + 一句忙什么（自创转盘已
   const html = render(Empty, { kind: "scanning" });
   assert.match(html, /class="ss-empty ss-empty--scanning"/);
   assert.match(html, /class="ss-spinner" width="24" height="24"/);
-  assert.match(html, /正在读 skill 目录…/);
+  assert.match(html, /正在读 skill 目录</);
   assert.doesNotMatch(html, /ss-empty__actions/);
 });
 

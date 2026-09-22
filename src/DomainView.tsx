@@ -72,11 +72,13 @@ export interface DomainViewProps {
   shortcuts: boolean;
 
   flash?: { keys: string[]; nonce: number };
-  /// 批量写入真的慢时，触发项旁的细弧 + 一句
+  /// 批量写入真的慢时，触发项旁的忙碌指示 + 一句
   keyBusy?: { keyId: string; label: string } | null;
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   rowToast?: { rowKey: string; node: ReactNode } | null;
   keyToast?: { keyId: string; node: ReactNode } | null;
+  /// 单格成功的例行一行（列头行左段）
+  cellToast?: { id: number; node: ReactNode } | null;
   globalToast?: ReactNode;
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
@@ -397,6 +399,7 @@ export default function DomainView(props: DomainViewProps) {
       cellNotice={props.cellNotice}
       rowToast={props.rowToast}
       keyToast={props.keyToast}
+      cellToast={props.cellToast}
       keyBusy={props.keyBusy}
       globalToast={props.globalToast}
       focus={props.focus}

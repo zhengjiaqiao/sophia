@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type { FocusEvent, ReactNode } from "react";
 import { AgentIcon } from "./AgentMark.tsx";
 import { Button, IconButton } from "./Button.tsx";
 import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
@@ -17,8 +17,9 @@ import { Tooltip } from "./Tooltip.tsx";
 /// 失败态动词带否定（`没开启`）——失败里写「开启」会被一眼读成已开启。名字至多两个，
 /// 超过写 `+N`（等宽 15/500）。
 ///
-/// **位置由调用方定**：锚在触发控件上（批量贴被按下的键下 4、右对齐该键；二级页贴被
-/// 处理那一行；无关位置的全局事右下、右沿对齐面板右沿）。组件只负责形制，不写 position。
+/// **位置由调用方定**：锚在触发控件上（批量贴被按下的键下 4、右对齐该键；单格固定在列头行
+/// 左段、左对齐名称列；二级页贴被处理那一行；无关位置的全局事右下、右沿对齐面板右沿）。
+/// 组件只负责形制，不写 position。
 
 export type ToastKind = "success" | "cannot" | "partial";
 
@@ -28,6 +29,13 @@ export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   cannot: 8000,
   partial: 8000,
 };
+
+/// 单格例行一行的停留时长：约 4 秒，比批量的 6 秒短——单格高频，结果格子本身已经画出来
+/// （DESIGN「单格操作出例行一行」）
+export const CELL_TOAST_DWELL_MS = 4000;
+
+/// `holdOnHover` 到点时末尾这一段淡出，与 `--motion-fast` 同值
+const LEAVE_MS = 120;
 
 export interface ToastAgent {
   id: string;
@@ -72,6 +80,11 @@ export interface ToastProps {
   secondary?: ToastAction;
   /// 给了就到点自动消失
   onDismiss?: () => void;
+  /// 停留时长（毫秒）；不给按 kind 取 `TOAST_DWELL_MS`。单格例行一行给 `CELL_TOAST_DWELL_MS`
+  dwellMs?: number;
+  /// 只给 routine：鼠标停在这一行上（或键盘焦点在里面）时不计时，移开后重新计满；
+  /// 到点末尾 120ms 淡出。单格例行一行用，好让人点得到「撤销」
+  holdOnHover?: boolean;
   /// notice 右端的 ×。busy 期间照常可用
   onClose?: () => void;
 }
@@ -121,13 +134,38 @@ export function Toast(props: ToastProps) {
     secondary,
     onDismiss,
     onClose,
+    dwellMs,
+    holdOnHover = false,
   } = props;
+  const dwell = dwellMs ?? TOAST_DWELL_MS[kind];
+  // 悬停 / 焦点在里面：停表；到点前最后 120ms：淡出中
+  const [held, setHeld] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
-    if (!onDismiss) return;
-    const timer = setTimeout(onDismiss, TOAST_DWELL_MS[kind]);
-    return () => clearTimeout(timer);
-  }, [kind, onDismiss]);
+    if (!onDismiss || held) return;
+    const timer = setTimeout(onDismiss, dwell);
+    const fade = holdOnHover ? setTimeout(() => setLeaving(true), dwell - LEAVE_MS) : undefined;
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(fade);
+    };
+  }, [dwell, onDismiss, held, holdOnHover]);
+
+  const hold = (on: boolean) => {
+    setHeld(on);
+    if (on) setLeaving(false);
+  };
+  const holdHandlers = holdOnHover
+    ? {
+        onMouseEnter: () => hold(true),
+        onMouseLeave: () => hold(false),
+        onFocus: () => hold(true),
+        onBlur: (e: FocusEvent<HTMLDivElement>) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hold(false);
+        },
+      }
+    : {};
 
   const main = (
     <>
@@ -155,7 +193,12 @@ export function Toast(props: ToastProps) {
 
   if (tier === "routine") {
     return (
-      <div className="ss-toast ss-toast--routine" data-kind={kind} role="status">
+      <div
+        className={`ss-toast ss-toast--routine${leaving ? " is-leaving" : ""}`}
+        data-kind={kind}
+        role="status"
+        {...holdHandlers}
+      >
         <span className="ss-toast__mark" title="成功" aria-hidden="true">
           <IconCheck />
         </span>

@@ -41,7 +41,7 @@ const COL_W = 88;
 const TAIL_W = 24;
 /// 点了做不了的格子后，说明停留的时长
 export const PINNED_TIP_MS = 3000;
-/// 批量写入超过这么久还没完成，触发项旁才出细弧 + 一句；更快的什么都不显示
+/// 批量写入超过这么久还没完成，触发项旁才出忙碌指示 + 一句；更快的什么都不显示
 export const BATCH_BUSY_DELAY_MS = 500;
 
 /// 按下一格（点击或空格）做什么：能改的交给调用方改数据；做不了的只当即说明，不碰数据
@@ -159,16 +159,19 @@ export interface MatrixProps {
   /// 刚变化的格：播一次 120ms 反色闪，`nonce` 变了才重播。**只给单格**：批量时格子同时变成新状态、
   /// 不闪（DESIGN 冲突表「格子变化要不要闪」）
   flash?: { keys: string[]; nonce: number };
-  /// 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，工具行里触发的那一项旁出 14px 细弧 + 一句
+  /// 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，工具行里触发的那一项旁出 14px 地球绕太阳 + 一句
   /// （`正在加到 Codex`）；keyId 同 keyToast（"all" 或列 id）。调用方负责延迟与撤掉
   keyBusy?: { keyId: string; label: string } | null;
   /// 单格失败：格子下方的小黑窗
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   /// 贴在某一行下方的提示条（只留这份 · 撤销）
   rowToast?: { rowKey: string; node: ReactNode } | null;
-  /// 批量结果的例行提示条：固定在键行最左边那段空白里（名称 / 原件位置两列上方），
-  /// 右对齐到第一对键左边 16，按哪一列都落在同一处
+  /// 批量结果的例行提示条：贴在按下的那一项下方（见 .mx-keytoast）
   keyToast?: { keyId: string; node: ReactNode } | null;
+  /// 单格加上 / 移除成功后的例行一行：固定在列头行左段——名称 / 原件位置列头文字上方的空白，
+  /// 左对齐名称列；列头吸顶，滚到哪都看得见，也不盖任何行（DESIGN「单格操作出例行一行」）。
+  /// 一次只一条：`id` 变了就重挂，计时从头来
+  cellToast?: { id: number; node: ReactNode } | null;
   /// 无关位置的全局事（自动规则）：右下，右沿对齐面板右沿
   globalToast?: ReactNode;
   /// 从待处理页跳回来：滚到这几行（或这一列的列头）并闪一下（⑦）。`nonce` 变了才重做
@@ -196,7 +199,7 @@ export function clampFocus(
   };
 }
 
-/// 批量写入真的慢时触发项旁的忙碌：14px 细弧 + 一句，句子同时进读屏（DESIGN「忙碌指示」）
+/// 批量写入真的慢时触发项旁的忙碌：14px 地球绕太阳 + 一句，句子同时进读屏（DESIGN「忙碌指示」）
 function KeyBusy({ label }: { label: string }) {
   return (
     <span className="mx-keybusy" role="status">
@@ -205,6 +208,11 @@ function KeyBusy({ label }: { label: string }) {
     </span>
   );
 }
+
+/// 工具行各项的忙碌外观：不忙无类；忙了先只锁（`mx-locked`，点不动、不变淡），
+/// 忙过 BATCH_BUSY_DELAY_MS 才变淡（`ss-busy`）
+export const busyLockClass = (busy: boolean, dim: boolean): string | undefined =>
+  !busy ? undefined : dim ? "ss-busy" : "mx-locked";
 
 /// 展开记号：12px 实心三角，▸ 收起 / ▾ 展开。不在悬停也没展开时占位不显示（名字不跳）
 function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
@@ -257,7 +265,16 @@ export function RevealLink({ path, onReveal }: { path: string; onReveal: () => v
 /// 工具行里按 agent 的一项：10px 状态点（● / ○）+ 正文名字，无图标无框。悬停预览点下去之后的样子
 /// （与格子同一套 preview），提示框列受影响的名字；禁用时点和字都用 disabled 色、提示框写原因。
 /// 名字放不下时截断，完整名在提示框里（提示框第一句就带着 agent 名）
-function AgentItem({ check, name }: { check: ColumnCheck; name: string }) {
+function AgentItem({
+  check,
+  name,
+  locked = false,
+}: {
+  check: ColumnCheck;
+  name: string;
+  /// 批量写入进行中：点不动（键盘的空格 / 回车也不行），外观由外层的忙碌类决定
+  locked?: boolean;
+}) {
   const disabled = check.disabledReason !== undefined;
   const button = (
     <button
@@ -265,7 +282,7 @@ function AgentItem({ check, name }: { check: ColumnCheck; name: string }) {
       className={`ss-dot-btn mx-agentitem${disabled ? " is-disabled" : ""}`}
       aria-label={disabled ? `${check.label}：${check.disabledReason}` : check.label}
       aria-disabled={disabled || undefined}
-      onClick={disabled ? undefined : () => check.onToggle()}
+      onClick={disabled || locked ? undefined : () => check.onToggle()}
     >
       <StateDot
         dot={check.checked ? "linked" : "missing"}
@@ -332,6 +349,7 @@ export default function Matrix(props: MatrixProps) {
     cellNotice,
     rowToast,
     keyToast,
+    cellToast,
     keyBusy,
     globalToast,
     focus: jump,
@@ -659,6 +677,19 @@ export default function Matrix(props: MatrixProps) {
     (focusRow !== undefined ? focusRow.dupGroup : undefined);
   const bandIndex = activeCol === null ? -1 : columns.findIndex((c) => c.id === activeCol);
 
+  // ---- 忙碌锁：批量写入一开始工具行各项就锁住（防重复点），超过 BATCH_BUSY_DELAY_MS 还没完成
+  // 才变淡——与触发项旁的忙碌指示同一时刻出现；写得快时先淡再恢复会闪一下 ----
+  const [busyDim, setBusyDim] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setBusyDim(false);
+      return;
+    }
+    const timer = setTimeout(() => setBusyDim(true), BATCH_BUSY_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [busy]);
+  const lockClass = busyLockClass(busy, busyDim);
+
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
   const selRef = useRef<HTMLDivElement>(null);
@@ -694,8 +725,8 @@ export default function Matrix(props: MatrixProps) {
       <span className="mx-agentitems">
         {allAgents ? (
           <span className="mx-keywrap">
-            <span className={busy ? "ss-busy" : undefined}>
-              <AgentItem check={allAgents} name="所有 agent" />
+            <span className={lockClass}>
+              <AgentItem check={allAgents} name="所有 agent" locked={busy} />
             </span>
             {keyBusy?.keyId === "all" ? <KeyBusy label={keyBusy.label} /> : null}
             {keyToast?.keyId === "all" ? (
@@ -708,8 +739,8 @@ export default function Matrix(props: MatrixProps) {
         {columns.map((col) =>
           columnChecks?.[col.id] ? (
             <span key={col.id} className="mx-keywrap">
-              <span className={busy ? "ss-busy" : undefined}>
-                <AgentItem check={columnChecks[col.id]} name={col.name} />
+              <span className={lockClass}>
+                <AgentItem check={columnChecks[col.id]} name={col.name} locked={busy} />
               </span>
               {keyBusy?.keyId === col.id ? <KeyBusy label={keyBusy.label} /> : null}
               {keyToast?.keyId === col.id ? (
@@ -763,7 +794,7 @@ export default function Matrix(props: MatrixProps) {
         ) : null}
       </label>
       {addButton ? (
-        <span className={`mx-toolbar__end${busy ? " ss-busy" : ""}`}>{addButton}</span>
+        <span className={`mx-toolbar__end${lockClass ? ` ${lockClass}` : ""}`}>{addButton}</span>
       ) : null}
     </div>
   );
@@ -810,6 +841,15 @@ export default function Matrix(props: MatrixProps) {
           <SortArrow active={sort.key === "origin"} desc={sort.dir === "desc"} />
         </button>
       </div>
+      {cellToast ? (
+        <div
+          key={cellToast.id}
+          className="mx-celltoast"
+          style={{ left: CHECK_W, width: lead - CHECK_W }}
+        >
+          {cellToast.node}
+        </div>
+      ) : null}
       {columns.map((col) => {
         const classes = ["mx-head__col"];
         // 列头只回应列头自己的悬停；格子的十字带不点亮列头（画板 Main）

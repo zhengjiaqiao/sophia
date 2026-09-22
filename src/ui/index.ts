@@ -30,7 +30,7 @@ export type { TooltipProps } from "./Tooltip.tsx";
 export { Spinner } from "./Spinner.tsx";
 export type { SpinnerProps } from "./Spinner.tsx";
 
-export { Toast, TOAST_DWELL_MS } from "./Toast.tsx";
+export { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } from "./Toast.tsx";
 export type { ToastAction, ToastAgent, ToastKind, ToastProps } from "./Toast.tsx";
 
 export { ErrorBanner, BlackNotice } from "./ErrorBanner.tsx";

@@ -289,7 +289,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         <div className="settings-page__section">哪些 agent 出现在列表里</div>
 
         {agents === null ? (
-          <Empty kind="scanning" description="读取中…" />
+          <Empty kind="scanning" description="读取中" />
         ) : agents.length === 0 ? (
           <div className="settings-page__note">本机上还没有发现任何 agent。</div>
         ) : (

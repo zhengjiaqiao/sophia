@@ -171,6 +171,11 @@
   white-space: nowrap;
 }
 
+/* 批量写入刚开始：工具行各项先只锁住、不变淡；忙过 500ms 才换成 .ss-busy 变淡（Matrix.tsx busyLockClass） */
+.mx-locked {
+  pointer-events: none;
+}
+
 .mx-agentitem.is-disabled {
   color: var(--disabled);
   cursor: default;
@@ -212,6 +217,36 @@
   padding-bottom: 6px;
   border-bottom: 2px solid var(--ink);
   background: var(--canvas);
+}
+
+/* 单格的例行一行：列头行左段——名称 / 原件位置列头文字上方的空白，左对齐名称列（left / width 由
+   Matrix.tsx 按列宽给）。底边停在列头文字上沿：文字高 19（.mx-head__origin）+ 表头下内边距 6。
+   不越过原件位置列右沿、不盖 agent 列头；名字太长就截断，完整名在格子上 */
+.mx-celltoast {
+  position: absolute;
+  top: 0;
+  bottom: 25px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mx-celltoast .ss-toast--routine {
+  max-width: 100%;
+  height: auto;
+  font-size: var(--size-caption);
+}
+
+.mx-celltoast .ss-toast--routine > * {
+  flex-shrink: 0;
+}
+
+.mx-celltoast .ss-toast__names {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mx-namecount {
@@ -445,7 +480,7 @@
   white-space: nowrap;
 }
 
-/* 批量写入真的慢时触发项旁的细弧 + 一句：13 ink-mute，紧跟状态点项 */
+/* 批量写入真的慢时触发项旁的忙碌指示 + 一句：13 ink-mute，紧跟状态点项 */
 .mx-keybusy {
   display: inline-flex;
   align-items: center;

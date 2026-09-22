@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
 import { render } from "./ui-render.ts";
 
 const { default: Matrix } = await import("../src/Matrix.tsx");
@@ -255,4 +257,55 @@ test("批量写入：格子同时变、不依次点亮；真的慢（> 500ms）�
     slow.slice(at),
     /^class="mx-keybusy" role="status">[\s\S]*?<span>正在加到 Codex<\/span>/,
   );
+});
+
+test("单格成功的例行一行：固定在列头行左段（名称 / 原件位置列头文字上方），左对齐名称列，一次只一条", async () => {
+  const { Toast } = await import("../src/ui/Toast.tsx");
+  const { toastFor } = await import("../src/toastText.ts");
+  const text = toastFor("link", {
+    done: [{ name: "excalidraw", agent: { id: "codex", name: "Codex" } }],
+  });
+  const node = createElement(Toast, {
+    ...text,
+    action: { label: "撤销", onClick: () => undefined },
+  });
+  // 没有就不占位
+  assert.doesNotMatch(render(Matrix, base), /mx-celltoast/);
+  const html = render(Matrix, { ...base, cellToast: { id: 1, node } });
+  // 只一条（槽位是单值，新的替换旧的，不排队）
+  assert.equal((html.match(/class="mx-celltoast"/g) ?? []).length, 1);
+  // 在吸顶的列头里、agent 列头之前；左沿 = 勾选列宽（对齐名称列），宽 = 名字 246 + 原件位置 120，不伸进 agent 列
+  const head = html.indexOf('class="mx-grid mx-head"');
+  const at = html.indexOf('class="mx-celltoast"');
+  assert.ok(head >= 0 && at > head && at < html.indexOf('class="mx-head__col"'));
+  assert.match(html.slice(at), /^class="mx-celltoast" style="left:34px;width:366px">/);
+  // 造句复用 toastFor、组件复用例行档：✓ 加到 [Codex] excalidraw · 撤销
+  assert.match(html.slice(at), /ss-toast--routine[\s\S]*?加到[\s\S]*?excalidraw[\s\S]*?>撤销</);
+  // 底边停在列头文字上沿（文字 19 + 表头下内边距 6），不盖列头文字
+  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.match(css, /\.mx-celltoast \{[^}]*position: absolute;[^}]*top: 0;[^}]*bottom: 25px;/);
+});
+
+test("批量忙碌锁：开始就锁住工具行各项、不变淡；忙过 500ms（与忙碌指示同一时刻）才变淡", async () => {
+  const { busyLockClass, BATCH_BUSY_DELAY_MS } = await import("../src/Matrix.tsx");
+  assert.equal(busyLockClass(false, false), undefined);
+  assert.equal(busyLockClass(true, false), "mx-locked");
+  assert.equal(busyLockClass(true, true), "ss-busy");
+  assert.equal(BATCH_BUSY_DELAY_MS, 500);
+  const noop = () => undefined;
+  const check = (label: string) => ({ checked: false, label, tip: label, onToggle: noop });
+  // 刚开始忙（首帧，计时器还没到点）：各项锁住但不淡
+  const html = render(Matrix, {
+    ...base,
+    busy: true,
+    selected: new Set(["u|docx"]),
+    allAgents: check("选中的都加到所有 agent"),
+    columnChecks: { cc: check("选中的都加到 Claude Code"), cx: check("选中的都加到 Codex") },
+  });
+  assert.equal((html.match(/<span class="mx-locked">/g) ?? []).length, 3);
+  assert.doesNotMatch(html, /ss-busy/);
+  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  const locked = css.match(/\.mx-locked \{([^}]*)\}/)?.[1] ?? "";
+  assert.match(locked, /pointer-events: none/);
+  assert.doesNotMatch(locked, /opacity/);
 });

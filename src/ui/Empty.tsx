@@ -31,7 +31,7 @@ export type EmptyKind =
   | "noSkills";
 
 const DEFAULT_DESCRIPTION: Record<EmptyKind, string> = {
-  scanning: "正在读 skill 目录…",
+  scanning: "正在读 skill 目录",
   noAgentDirs: "这个项目下还没有任何 agent 的 skill 目录。添加时会顺手建出来。",
   noMatch: "没有匹配的 skill",
   noSkills: "这个来源里还没有 skill。",
