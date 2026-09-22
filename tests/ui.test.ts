@@ -457,7 +457,7 @@ test("Tag 可悬停不可点：点状下划线 + 提示框（aria-describedby）
 
 // ===== 提示框 =====
 
-test("Tooltip：白窗墨字 12 + 1px hairline 描边，内边距 6 8，最大宽 240；内容作 aria-describedby", () => {
+test("Tooltip：黑窗白字 12，内边距 6 8，最大宽 240；内容作 aria-describedby", () => {
   const html = render(Tooltip, {
     content: "点一下开启",
     shortcut: "空格",
@@ -473,12 +473,7 @@ test("Tooltip：白窗墨字 12 + 1px hairline 描边，内边距 6 8，最大�
   const rule = cssRule(uiCss, ".ss-tip");
   assert.match(rule, /padding:\s*6px 8px/);
   assert.match(rule, /max-width:\s*240px/);
-  // 白窗：canvas 底、墨字、1px hairline 描边（不用黑窗：悬停出的说明是轻信息）
-  assert.match(rule, /background:\s*var\(--canvas\)/);
-  assert.match(rule, /(^|\s)color:\s*var\(--ink\)/);
-  assert.match(rule, /border:\s*1px solid var\(--hairline\)/);
-  assert.doesNotMatch(rule, /background:\s*var\(--ink\)/);
-  assert.match(cssRule(uiCss, ".ss-tip__key"), /color:\s*var\(--ink-faint\)/);
+  assert.match(rule, /background:\s*var\(--ink\)/);
   assert.match(rule, /font-size:\s*var\(--size-micro\)/);
   assert.match(cssRule(uiCss, ".ss-tip--top"), /bottom:\s*calc\(100% \+ 6px\)/);
 });
