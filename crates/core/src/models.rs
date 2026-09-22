@@ -297,6 +297,10 @@ pub struct DeleteSourcePlan {
     pub in_git: Option<PathBuf>,
     /// 别处同名的另一个本体；删完把 `affected` 改指到它。None 表示没有别处可指
     pub relink_to: Option<PathBuf>,
+    /// 目录里普通文件最新的修改时间（Unix 毫秒）。只读事实，给「改于 9月20日」用；
+    /// 没有文件或读不到时为 None。旧数据里没有这个字段，反序列化按 None
+    #[serde(default)]
+    pub modified: Option<u64>,
 }
 
 /// 一次扫描的完整结果
@@ -416,6 +420,7 @@ mod tests {
             ],
             in_git: None,
             relink_to: Some(PathBuf::from("/b/skills/x")),
+            modified: Some(1_758_326_400_000),
         };
         assert_eq!(
             serde_json::to_value(&plan).unwrap(),
@@ -428,7 +433,8 @@ mod tests {
                     {"path": "/p/.claude/skills/x", "style": "relative"}
                 ],
                 "inGit": null,
-                "relinkTo": "/b/skills/x"
+                "relinkTo": "/b/skills/x",
+                "modified": 1_758_326_400_000u64
             })
         );
     }

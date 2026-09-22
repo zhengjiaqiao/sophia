@@ -541,7 +541,7 @@ pub fn plan_delete_source(
     targets: &[Target],
 ) -> DeleteSourcePlan {
     let path = normalize(&skill.path);
-    let (entries, bytes) = dir_size(&path);
+    let (entries, bytes, modified) = dir_size(&path);
     let relink_to = same_name_elsewhere(&skill.name, sources, &path);
     // 比较"是否同一处"两侧都要走 real_path：macOS 上 /var 会变成 /private/var
     let real = real_path(&path);
@@ -556,35 +556,46 @@ pub fn plan_delete_source(
         },
         in_git: git_root(&path),
         relink_to,
+        modified,
         path,
     }
 }
 
-/// 递归统计条目数（不含自身）与普通文件字节数。软链只当作一个条目，不跟随、不计字节
-fn dir_size(path: &Path) -> (usize, u64) {
+/// 递归统计条目数（不含自身）、普通文件字节数，以及普通文件最新的修改时间（Unix 毫秒）。
+/// 软链只当作一个条目，不跟随、不计字节、不计时间；目录自身的 mtime 不算（增删条目就会变，
+/// 说的不是「内容改于何时」）。一个文件都没有、或时间读不出来时为 None
+fn dir_size(path: &Path) -> (usize, u64, Option<u64>) {
     let Ok(rd) = std::fs::read_dir(path) else {
-        return (0, 0);
+        return (0, 0, None);
     };
     let mut entries = 0usize;
     let mut bytes = 0u64;
+    let mut modified: Option<u64> = None;
     for e in rd.flatten() {
         entries += 1;
         let child = e.path();
         match entry_kind(&child) {
             EntryKind::Dir => {
-                let (n, b) = dir_size(&child);
+                let (n, b, m) = dir_size(&child);
                 entries += n;
                 bytes += b;
+                modified = modified.max(m);
             }
             EntryKind::File => {
-                bytes += std::fs::symlink_metadata(&child)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                if let Ok(meta) = std::fs::symlink_metadata(&child) {
+                    bytes += meta.len();
+                    let ms = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as u64);
+                    modified = modified.max(ms);
+                }
             }
             _ => {}
         }
     }
-    (entries, bytes)
+    (entries, bytes, modified)
 }
 
 /// 各目标目录里解析后落在 `real`（本体的真实路径）之内、含它自身的软链。
@@ -1472,6 +1483,37 @@ mod tests {
         );
         assert_eq!(plan.in_git, None);
         assert_eq!(plan.relink_to, Some(other_body));
+    }
+
+    #[test]
+    fn plan_delete_source_reports_the_newest_file_mtime_inside_the_body() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let t = TempTree::new();
+        let store = t.dir("store");
+        let body = t.dir("store/a");
+        t.file(&body, "SKILL.md");
+        let sub = t.dir("store/a/refs");
+        t.file(&sub, "note.md");
+        let set = |p: &Path, ms: u64| {
+            std::fs::File::options()
+                .write(true)
+                .open(p)
+                .unwrap()
+                .set_modified(UNIX_EPOCH + Duration::from_millis(ms))
+                .unwrap();
+        };
+        set(&body.join("SKILL.md"), 1_700_000_000_000);
+        // 子目录里的文件更新：取它
+        set(&sub.join("note.md"), 1_758_326_400_000);
+        let empty = t.dir("store/b");
+
+        let sources = vec![source(&store, &["a", "b"])];
+        let plan = plan_delete_source(&sources[0].skills[0], &sources, &[]);
+        assert_eq!(plan.modified, Some(1_758_326_400_000));
+        // 目录自身的时间不算：一个文件都没有就是 None
+        assert_eq!(empty, sources[0].skills[1].path);
+        let plan = plan_delete_source(&sources[0].skills[1], &sources, &[]);
+        assert_eq!(plan.modified, None);
     }
 
     /// 只有一处本体时没有可改指的目标，如实为 None

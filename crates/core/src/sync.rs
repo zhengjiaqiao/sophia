@@ -418,6 +418,7 @@ mod tests {
             affected: vec![absolute(&link)],
             in_git: Some(repo.clone()),
             relink_to: Some(t.dir("other/a")),
+            modified: None,
         };
         let r = delete_source(&plan);
         assert_eq!(r.entries.len(), 1);
