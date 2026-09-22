@@ -5,13 +5,13 @@ import { api } from "./api";
 import { RESTART_DONE_MS, RESTART_STILL_STALE, parseBackendError } from "./modelsView";
 import { RESTART_CONSEQUENCE, RESTART_TIP, trayRow } from "./trayView";
 import type { GatewayState } from "./types";
-import { AgentIcon, Button, Rotor, Switch, Toast, Tooltip } from "./ui";
+import { AgentIcon, Button, Spinner, Switch, Toast, Tooltip } from "./ui";
 import "./TrayPanel.css";
 
 /// 菜单栏面板（DESIGN「托盘面板」，画板 Tray）。
 ///
 /// 与模型页同一行的缩小版：`16px 图标 + Codex + 开关`，没有状态句。改动等着生效时开关后 12
-/// 出紧凑键 `重启生效`（按钮即状态），确认在面板里当场展开；重启中 = 14px 转盘 +
+/// 出紧凑键 `重启生效`（按钮即状态），确认在面板里当场展开；重启中 = 14px 细弧 +
 /// 「正在重启 Codex」，成功 = `✓ 已生效` 约 4 秒淡出，失败 = 黑块 + 原因 + `再试一次`。
 /// 菜单三项 `打开 Sophia` `设置` `退出`，悬停 `surface` 底。与主窗口共用 tokens 与组件。
 ///
@@ -23,10 +23,7 @@ const failOver = (error: unknown) =>
   api.trayOpenMain("models", parseBackendError(String(error)).message);
 
 type Restart =
-  | { kind: "idle" }
-  | { kind: "confirming" }
-  | { kind: "restarting"; spinning: boolean }
-  | { kind: "done" };
+  { kind: "idle" } | { kind: "confirming" } | { kind: "restarting" } | { kind: "done" };
 
 export default function TrayPanel() {
   const [state, setState] = useState<GatewayState | null>(null);
@@ -34,8 +31,6 @@ export default function TrayPanel() {
   const [restart, setRestart] = useState<Restart>({ kind: "idle" });
   /// 重启没成的原因（黑块）；面板下次弹出时清掉
   const [failure, setFailure] = useState<string | null>(null);
-  /// 转盘停稳之后换上的结果
-  const after = useRef<Restart>({ kind: "idle" });
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -85,7 +80,7 @@ export default function TrayPanel() {
 
   const restartCodex = async () => {
     setFailure(null);
-    setRestart({ kind: "restarting", spinning: true });
+    setRestart({ kind: "restarting" });
     setBusy(true);
     let reason: string | null = null;
     try {
@@ -101,8 +96,7 @@ export default function TrayPanel() {
     }
     if (!mounted.current) return;
     setFailure(reason);
-    after.current = reason === null ? { kind: "done" } : { kind: "idle" };
-    setRestart({ kind: "restarting", spinning: false });
+    setRestart(reason === null ? { kind: "done" } : { kind: "idle" });
   };
 
   // Esc：确认开着先收回那一问，否则收起面板
@@ -134,12 +128,7 @@ export default function TrayPanel() {
     if (restart.kind === "restarting") {
       return (
         <span className="tray__restart" role="status">
-          <Rotor
-            size={14}
-            spinning={restart.spinning}
-            label="正在重启 Codex"
-            onStopped={() => setRestart(after.current)}
-          />
+          <Spinner size={14} label="正在重启 Codex" />
           <span className="tray__restart-text">正在重启 Codex</span>
         </span>
       );

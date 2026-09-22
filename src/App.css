@@ -130,7 +130,7 @@ input:focus-visible {
   color: var(--ink);
 }
 
-/* 右端：[转盘 18] 收件箱 设置，间距 4 */
+/* 右端：收件箱 设置，间距 4 */
 .topbar__end {
   display: flex;
   align-items: center;

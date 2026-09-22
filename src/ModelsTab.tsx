@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api.ts";
@@ -16,7 +16,6 @@ import {
   enableDisabledReason,
   modelKeys,
   modelLabel,
-  modelsBoxWidth,
   newModelIds,
   parseBackendError,
   providerLabel,
@@ -41,7 +40,7 @@ import {
   Confirm,
   ErrorBanner,
   ModelChip,
-  Rotor,
+  Spinner,
   Switch,
   Toast,
   Tooltip,
@@ -140,8 +139,6 @@ export interface AgentRowProps {
   onConfigure: () => void;
   /// 点了「重启生效」：带上整行，确认框锚在它下面、它不被遮罩盖住（⑦）
   onRestart: (row: HTMLElement) => void;
-  /// 转盘停稳了（停转回弹结束），把结果换上来
-  onRotorStopped?: () => void;
   notice?: RowNoticeState | null;
   onCloseNotice?: () => void;
   /// 生效模型那一格
@@ -156,7 +153,6 @@ export function AgentRow({
   onToggle,
   onConfigure,
   onRestart,
-  onRotorStopped,
   notice,
   onCloseNotice,
   models,
@@ -204,7 +200,6 @@ export function AgentRow({
           phase={phase}
           busy={busy}
           onRestart={() => rowRef.current && onRestart(rowRef.current)}
-          onRotorStopped={onRotorStopped}
         />
       </div>
       <div className="models-row__models">{models}</div>
@@ -225,7 +220,7 @@ export function AgentRow({
   );
 }
 
-/// 「重启生效」那一格：键 / 转盘 + 正在重启 / ✓ 已生效（例行成功，约 4 秒淡出）。
+/// 「重启生效」那一格：键 / 细弧 + 正在重启 / ✓ 已生效（例行成功，约 4 秒淡出）。
 /// 失败的黑块不在这里——它挂在整行下面（`notice`），键照常留着可以再点
 function RestartSlot({
   tool,
@@ -233,24 +228,17 @@ function RestartSlot({
   phase,
   busy,
   onRestart,
-  onRotorStopped,
 }: {
   tool: ModelsTool;
   state: GatewayState;
   phase: RestartPhase;
   busy: boolean;
   onRestart: () => void;
-  onRotorStopped?: () => void;
 }) {
   if (phase.kind === "restarting") {
     return (
       <span className="models-restart models-restart--busy" role="status">
-        <Rotor
-          size={14}
-          spinning={phase.spinning}
-          onStopped={onRotorStopped}
-          label={`正在重启 ${tool.name}`}
-        />
+        <Spinner size={14} label={`正在重启 ${tool.name}`} />
         <span className="models-restart__text">正在重启 {tool.name}</span>
       </span>
     );
@@ -335,20 +323,23 @@ export function ModelBox({
             {state.providers.length === 0 ? "还没有网关" : emptyEffectiveText(state)}
           </span>
         ) : (
-          rows.map(({ provider, model, label }) => (
-            // 片上的 × 只移除这一个，别顺带把选择器也开关了
-            <span
-              key={`${provider.id}|${model.id}`}
-              className="models-box__chip"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <ModelChip
-                name={label}
-                id={model.slug || model.id}
-                onRemove={busy ? undefined : () => onRemoveModel(provider, model)}
-              />
-            </span>
-          ))
+          // 片放不下就换行（框随之长高），可选数与展开记号钉在第一行右端
+          <span className="models-box__chips">
+            {rows.map(({ provider, model, label }) => (
+              // 片上的 × 只移除这一个，别顺带把选择器也开关了
+              <span
+                key={`${provider.id}|${model.id}`}
+                className="models-box__chip"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ModelChip
+                  name={label}
+                  id={model.slug || model.id}
+                  onRemove={busy ? undefined : () => onRemoveModel(provider, model)}
+                />
+              </span>
+            ))}
+          </span>
         )}
         <span className="models-box__tail">
           <Tooltip content={`${count} 个可用模型`}>
@@ -559,8 +550,6 @@ export interface ModelsTabProps {
   onBusy: (busy: boolean) => void;
   /// 每次拿到新状态都报给壳：顶栏收件箱的「模型」段要数它
   onGatewayState?: (state: GatewayState) => void;
-  /// MCP 主视图此刻显示的 agent 列数：面板右沿与 MCP 面板对齐（modelsBoxWidth）
-  agentColumns?: number;
 }
 
 /// 选择器开着时的导航参数：从网关页 `选模型 ›` 回来时带上「滚到哪一家、哪几个闪」
@@ -570,21 +559,13 @@ interface PickerNav {
   flashIds: string[];
 }
 
-export default function ModelsTab({
-  onError,
-  busy,
-  onBusy,
-  onGatewayState,
-  agentColumns = 0,
-}: ModelsTabProps) {
+export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
   const [picker, setPicker] = useState<PickerNav | null>(null);
   const [query, setQuery] = useState("");
   /// 网关页（二级页面）；`fromPicker` 表示从下拉里的 `管理网关 ›` 进去，返回时回到下拉
   const [gateway, setGateway] = useState<{ fromPicker: boolean } | null>(null);
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
-  /// 转盘停稳之后要换上的结果（停转回弹 600ms，DESIGN「转盘」）
-  const nextPhase = useRef<RestartPhase | null>(null);
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
   /// 启动时的自愈试过了没有：试过仍没起来才出页级横幅
@@ -601,7 +582,7 @@ export default function ModelsTab({
     reportState.current?.(next);
   }, []);
 
-  /// 轻查：不点亮全局转盘、不锁页面（焦点重读、键显示时的轮询）
+  /// 轻查：后台例行读取，不显示忙碌、不锁页面（焦点重读、键显示时的轮询）
   const quietRefresh = useCallback(async () => {
     try {
       const next = await api.gatewayState();
@@ -744,13 +725,12 @@ export default function ModelsTab({
     }
   };
 
-  /// 重启 Codex：确认之后键位原地换成转盘；结束了进程再重读一次，键消失才算生效。
+  /// 重启 Codex：确认之后键位原地换成细弧 + 「正在重启 Codex」；结束了进程再重读一次，键消失才算生效。
   /// 键还在（Codex 还揣着旧配置）就如实说没成，不假装成功（⑫）
   const restart = async (tool: ModelsTool) => {
     setConfirmRestart(null);
     setNotice(null);
-    nextPhase.current = null;
-    setPhase({ kind: "restarting", spinning: true });
+    setPhase({ kind: "restarting" });
     onBusy(true);
     let failure: string | null = null;
     try {
@@ -771,15 +751,7 @@ export default function ModelsTab({
         action: { label: "再试一次", onClick: () => void restart(tool) },
       });
     }
-    // 转盘带阻尼停下，停稳后再换上结果
-    nextPhase.current = failure === null ? { kind: "done" } : { kind: "idle" };
-    setPhase({ kind: "restarting", spinning: false });
-  };
-
-  const onRotorStopped = () => {
-    const next = nextPhase.current;
-    nextPhase.current = null;
-    setPhase(next ?? { kind: "idle" });
+    setPhase(failure === null ? { kind: "done" } : { kind: "idle" });
   };
 
   /// 勾选当场写盘，不出成功提示条：片的增减本身就是反馈；只有失败才说话
@@ -891,7 +863,7 @@ export default function ModelsTab({
     return (
       <section className="models-page" aria-busy="true">
         <div className="models-page__loading">
-          <Rotor size={14} spinning label="正在读模型设置" />
+          <Spinner size={14} label="正在读模型设置" />
           <span>正在读模型设置</span>
         </div>
       </section>
@@ -909,10 +881,7 @@ export default function ModelsTab({
       ) : null}
 
       <div className="models-page__body">
-        <div
-          className="models-panel"
-          style={{ "--models-box-w": `${modelsBoxWidth(agentColumns)}px` } as CSSProperties}
-        >
+        <div className="models-panel">
           <div className="models-panel__head">
             <span>agent</span>
             <span>生效模型</span>
@@ -934,7 +903,6 @@ export default function ModelsTab({
                 const r = row.getBoundingClientRect();
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
               }}
-              onRotorStopped={onRotorStopped}
               notice={notice}
               onCloseNotice={() => setNotice(null)}
               models={

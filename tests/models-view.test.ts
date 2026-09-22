@@ -328,13 +328,13 @@ test("MODELS_TOOLS：版面按工具分块；今天只有 Codex，但名字一�
 test("重启生效：按钮即状态——只在 needsCodexRestart 且空闲时显示；键显示着才轮询", () => {
   const stale = state({ enabled: true, needsCodexRestart: true });
   assert.equal(showRestartKey(stale, { kind: "idle" }), true);
-  assert.equal(showRestartKey(stale, { kind: "restarting", spinning: true }), false);
+  assert.equal(showRestartKey(stale, { kind: "restarting" }), false);
   assert.equal(showRestartKey(stale, { kind: "done" }), false);
   assert.equal(showRestartKey(state({ enabled: true }), { kind: "idle" }), false);
   assert.equal(shouldPollRestart(stale, { kind: "idle" }), true);
   assert.equal(shouldPollRestart(state(), { kind: "idle" }), false, "键消失即停");
   assert.equal(shouldPollRestart(null, { kind: "idle" }), false);
-  assert.equal(shouldPollRestart(stale, { kind: "restarting", spinning: true }), false);
+  assert.equal(shouldPollRestart(stale, { kind: "restarting" }), false);
   // 提示框只写点击的后果与代价；检测只认桌面应用，写明
   assert.equal(RESTART_TIP, "重启 Codex 桌面应用让改动生效，进行中的对话会中断");
 });
@@ -466,12 +466,13 @@ test("AgentRow 待重启：配置网关之后出紧凑键「重启生效」，�
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
 });
 
-test("AgentRow 重启中：键位原地换成 14px 转盘 +「正在重启 Codex」；已生效：一行例行成功", () => {
+test("AgentRow 重启中：键位原地换成 14px 细弧 +「正在重启 Codex」；已生效：一行例行成功", () => {
   const busyHtml = render(AgentRow, {
     ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
-    phase: { kind: "restarting", spinning: true },
+    phase: { kind: "restarting" },
   });
-  assert.match(busyHtml, /class="ss-rotor is-spinning" width="14"/);
+  // 重启中用细弧 Spinner（UI v4 第四轮删掉了自创转盘，原来钉 ss-rotor 的断言随之改写）
+  assert.match(busyHtml, /class="ss-spinner" width="14"/);
   assert.match(busyHtml, /正在重启 Codex/);
   assert.doesNotMatch(busyHtml, /重启生效<\/button>/);
   const doneHtml = render(AgentRow, {
@@ -630,16 +631,4 @@ test("ModelPicker 从网关页回来：分组带 data-provider 供滚动定位�
   assert.match(html, /data-provider="b"/);
   assert.match(html, /models-picker__provider-head/);
   assert.equal((html.match(/is-flash/g) ?? []).length, 1);
-});
-
-test("面板宽度：模型页右沿对齐 MCP 面板（280 + 72 + 88×N + 24）；生效模型列最少 360", async () => {
-  const { mcpPanelWidth, modelsBoxWidth, MODELS_AGENT_W } = await import("../src/modelsView.ts");
-  assert.equal(mcpPanelWidth(4), 728);
-  assert.equal(mcpPanelWidth(6), 904);
-  // 6 列：904 − 324 − 24 − 24 = 532，模型页总宽 = 324 + 24 + 532 + 24 = 904
-  assert.equal(modelsBoxWidth(6), 532);
-  assert.equal(MODELS_AGENT_W + 24 + modelsBoxWidth(6) + 24, mcpPanelWidth(6));
-  // 4 列时算出 356 < 360，取最小值
-  assert.equal(modelsBoxWidth(4), 360);
-  assert.equal(modelsBoxWidth(0), 360);
 });

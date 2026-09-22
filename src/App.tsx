@@ -17,7 +17,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { PendingPage, loadModelIgnoredKeys, type PendingSegment } from "./pages/PendingPage";
 import { collectIssues } from "./pages/pendingIssues";
-import { collectMcpIssues, mcpDomains } from "./mcpView";
+import { collectMcpIssues } from "./mcpView";
 import { flushAll } from "./deferredCommit";
 import { modelIssues, parseBackendError } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
@@ -29,7 +29,6 @@ import {
   IconClose,
   IconInbox,
   IconSettings,
-  Rotor,
   Toast,
 } from "./ui";
 import wordmark from "../assets/logo/wordmark.svg";
@@ -53,8 +52,6 @@ const TABS: Array<{ id: Tab; label: string }> = [
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [busy, setBusy] = useState(false);
-  /// 顶栏转盘：忙时出现；忙完带阻尼停转，停稳后才卸掉（DESIGN「转盘」）
-  const [rotorShown, setRotorShown] = useState(false);
   const [selectedKey, setSelectedKey] = useState(DEFAULT_KEY);
   const [error, setError] = useState<string | null>(null);
   /// 二级页面：占满整窗、不渲染侧栏。null＝主视图
@@ -93,9 +90,6 @@ export default function App() {
   const activeTabRef = useRef(activeTab);
   busyRef.current = busy;
   activeTabRef.current = activeTab;
-
-  // 转盘出现就挂上；停转回弹结束（onStopped）才卸掉
-  if (busy && !rotorShown) setRotorShown(true);
 
   const setBusyState = (next: boolean) => {
     busyRef.current = next;
@@ -146,7 +140,7 @@ export default function App() {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
-  /// 模型状态只为数「模型」段：轻查，不点亮转盘
+  /// 模型状态只为数「模型」段：后台轻查，不显示忙碌
   const refreshGateway = useCallback(() => {
     void api.gatewayState().then(
       (state) => setGatewayState(state),
@@ -287,11 +281,6 @@ export default function App() {
     () => new Set(loadModelIgnoredKeys()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [subPage],
-  );
-  // 模型页右沿对齐 MCP 面板：列数取 MCP 页默认那一域（全局）实际显示的列
-  const mcpColumns = useMemo(
-    () => (mcpOverview ? (mcpDomains(mcpOverview)[0]?.targets.length ?? 0) : 0),
-    [mcpOverview],
   );
   const inboxCount =
     skillIssues.filter((i) => !ignoredKeys.has(i.key)).length +
@@ -463,17 +452,11 @@ export default function App() {
             );
           })}
         </nav>
-        {/* 右端：全局忙碌转盘（只在有活干时）+ 收件箱（三段未处理之和，0 时无数字、图标常驻）+ 设置。
+        {/* 右端：收件箱（三段未处理之和，0 时无数字、图标常驻）+ 设置。
+            **顶栏没有全局忙碌指示**：后台例行读取（刷新、文件监听重扫、网关轮询、收件箱计数）
+            不显示忙碌，用户没在等，出现转动只会被读成出了问题（DESIGN「忙碌指示」）。
             设置是全局的，busy 期间照常可用 */}
         <div className="topbar__end">
-          {rotorShown ? (
-            <Rotor
-              size={18}
-              spinning={busy}
-              label="正在读取"
-              onStopped={() => setRotorShown(false)}
-            />
-          ) : null}
           <IconButton icon={<IconInbox />} title="待处理" count={inboxCount} onClick={openInbox} />
           <IconButton icon={<IconSettings />} title="设置" onClick={() => setSubPage("settings")} />
         </div>
@@ -556,7 +539,6 @@ export default function App() {
             busy={busy}
             onBusy={setBusyState}
             onGatewayState={setGatewayState}
-            agentColumns={mcpColumns}
           />
         ) : activeTab === "mcp" ? (
           <McpTab

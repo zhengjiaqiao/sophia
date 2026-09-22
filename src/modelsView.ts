@@ -222,15 +222,13 @@ export const RESTART_STILL_STALE = "Codex 还在用旧配置，稍后再试一�
 /**
  * 「重启生效」那一格（DESIGN「点了重启生效之后」）：
  * - idle：`needsCodexRestart` 为真时显示键，否则什么都没有
- * - restarting：键位原地换成 14px 转盘 + 「正在重启 Codex」；`spinning` 为 false 时转盘在做
- *   阻尼停转，停稳后换上结果
+ * - restarting：键位原地换成 14px 细弧（Spinner）+ 「正在重启 Codex」——用户正在等，就地带文字
  * - done：一行例行成功 `✓ 已生效`，约 4 秒后淡出
  *
  * 失败不是这一格的状态：黑块「没重启 Codex」+ 原因 + `再试一次` 挂在整行下面，格子回到 idle
  * （键还在就还能点）
  */
-export type RestartPhase =
-  { kind: "idle" } | { kind: "restarting"; spinning: boolean } | { kind: "done" };
+export type RestartPhase = { kind: "idle" } | { kind: "restarting" } | { kind: "done" };
 
 /// 已生效那行停多久（含末尾 120ms 淡出）
 export const RESTART_DONE_MS = 4000;
@@ -379,26 +377,4 @@ export function modelIssues(state: GatewayState | null, tool: ModelsTool = CODEX
     );
   }
   return out;
-}
-
-// ===== 面板宽度：模型页右沿对齐 MCP 主视图（DESIGN 第 5 轮裁决） =====
-
-/// MCP 面板的列：名称 280、传输 72、每个 agent 88，横线止于最后一列 + 24
-const MCP_NAME_W = 280;
-const MCP_TRANSPORT_W = 72;
-const MCP_AGENT_W = 88;
-const PANEL_TAIL = 24;
-/// 模型页：agent 列固定 324，列间 24，生效模型列填满剩下的、最少 360
-export const MODELS_AGENT_W = 324;
-const MODELS_GAP = 24;
-const MODELS_BOX_MIN = 360;
-
-/// MCP 主视图面板总宽（含右侧 24）：`n` 是它显示的 agent 列数
-export function mcpPanelWidth(n: number): number {
-  return MCP_NAME_W + MCP_TRANSPORT_W + MCP_AGENT_W * Math.max(0, n) + PANEL_TAIL;
-}
-
-/// 模型页「生效模型」列宽：让面板右沿与 MCP 面板右沿对齐；太窄时取最小 360
-export function modelsBoxWidth(n: number): number {
-  return Math.max(MODELS_BOX_MIN, mcpPanelWidth(n) - MODELS_AGENT_W - MODELS_GAP - PANEL_TAIL);
 }

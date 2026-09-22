@@ -28,9 +28,9 @@
 
 /* ===== 面板 ===== */
 .models-panel {
+  /* 模型页取自身宽度：agent 324 + 24 + 生效模型 360 + 24（DESIGN「三个主视图怎么对齐」：
+     第 5 轮的「右沿对齐 MCP」已放弃——真实数据下 MCP 只有两列，对齐就放不下模型框） */
   --models-agent-w: 324px;
-  /* 生效模型列宽由 ModelsTab 按 modelsBoxWidth(已安装 agent 数) 写进来，让右沿对齐 MCP 面板；
-     这里是读到之前的兜底（最小值） */
   --models-box-w: 360px;
   box-sizing: border-box;
   width: calc(var(--models-agent-w) + var(--space-xl) + var(--models-box-w) + var(--space-xl));
@@ -132,9 +132,13 @@
   display: inline-flex;
 }
 
+/* 右对齐键的右沿向左展开（可以盖住「agent」列头，评审已确认），不居中 */
 .models-restart-tip .ss-tip {
+  left: auto;
+  right: 0;
   max-width: none;
   white-space: nowrap;
+  transform: none;
 }
 
 /* ===== 模型框 ===== */
@@ -147,11 +151,11 @@
    换底色会把里面的片糊掉（DESIGN「可点的面」） */
 .models-box {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   box-sizing: border-box;
   min-height: 36px;
-  padding: 0 5px;
+  padding: 5px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
   cursor: pointer;
@@ -169,6 +173,14 @@
   outline-offset: 2px;
 }
 
+.models-box__chips {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
 .models-box__chip {
   display: inline-flex;
   flex-shrink: 0;
@@ -176,7 +188,7 @@
 
 /* 空着的原因与下一步：说后果的句子不截断，放不下就折行（框随之长高） */
 .models-box__hint {
-  padding: 4px 7px;
+  padding: 2px 7px;
   font-size: var(--size-caption);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
@@ -188,6 +200,7 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  height: var(--control-h-compact);
   margin-left: auto;
   padding: 0 4px 0 12px;
   color: var(--ink);
