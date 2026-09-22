@@ -78,6 +78,27 @@ input:focus-visible {
   width: auto;
 }
 
+/* 字标动效（DESIGN「字标动效：黑猫与玻璃」）：外层四周各多 6px 的命中区（padding 撑开、
+   负 margin 收回，排版不变），这一块不当拖窗区。画布由 GlassMark 定位与定尺寸，
+   向左右各伸 24px、上下伸到顶栏内容区的顶和底线；它不接指针事件，事件都落在外层 */
+.brandmark {
+  position: relative;
+  display: block;
+  padding: 6px;
+  margin: -6px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.brandmark__canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
 /* 页签：字标后 32，彼此 24。拉丁 run 由 <Cap tone="nav"> 套 Condensed 大写 + 字距，
    汉字 Barlow / 苹方 15/700、字距 0（DESIGN「三个字族都没有中文字形」） */
 .topbar__tabs {

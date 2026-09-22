@@ -32,7 +32,7 @@ import {
   Toast,
   Tooltip,
 } from "./ui";
-import wordmark from "../assets/logo/wordmark.svg";
+import { AnimatedWordmark } from "./brand/AnimatedWordmark";
 import "./App.css";
 
 /// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
@@ -466,9 +466,10 @@ export default function App() {
       {/* 顶栏独立于侧栏：模型页不要侧栏，字标与页签不能跟着一起消失。
           系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，上面 28 给红绿灯 */}
       <header className="topbar" data-tauri-drag-region>
-        {/* 字标用资产不用纯文本：首字母的重影是这个标志的识别点（DESIGN「壳」） */}
+        {/* 字标用资产不用纯文本：首字母的重影是这个标志的识别点；
+            悬停唤起黑猫、点击敲碎玻璃（DESIGN「壳」） */}
         <h1 className="topbar__mark">
-          <img src={wordmark} alt="Sophia" className="wordmark" />
+          <AnimatedWordmark />
         </h1>
         <nav className="topbar__tabs" aria-label="功能">
           {TABS.filter((tab) => tab.id !== "models" || modelsSupported).map((tab) => {
