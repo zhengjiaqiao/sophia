@@ -86,6 +86,8 @@ export default function App() {
   // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
   const busyRef = useRef(false);
   const pendingRef = useRef(false);
+  /// 正在跑的那一轮后台重扫
+  const scanningRef = useRef<Promise<void> | null>(null);
   const timerRef = useRef<number | null>(null);
   const activeTabRef = useRef(activeTab);
   busyRef.current = busy;
@@ -104,12 +106,16 @@ export default function App() {
     }
   };
 
-  /// 顶栏收件箱是**全局**入口：不论停在哪个页签，三段都要数得出来，所以 skill 每次都扫。
+  /// 重扫：后台那一路，**只更新数据、不置 busy、不锁任何控件**（DESIGN「忙碌指示」「空态与忙碌态」）——
+  /// 界面上没有忙碌提示却点不动，用户只会觉得坏了。锁控件只给用户发起、正在等的操作（setBusyState）。
+  ///
+  /// 顶栏收件箱是全局入口：不论停在哪个页签，三段都要数得出来，所以 skill 每次都扫。
   /// MCP 停在 MCP 页时由 McpTab 扫完回传（onOverview），不重复扫；停在别的页签时这里扫一次，
-  /// 缓存到下次聚焦 / 文件变化。扫描可能触发已授权的自动规则；界面以重新扫描的实际结果为准
-  const refresh = async () => {
-    busyRef.current = true;
-    setBusy(true);
+  /// 缓存到下次聚焦 / 文件变化。扫描可能触发已授权的自动规则；界面以重新扫描的实际结果为准。
+  ///
+  /// 同一时间只跑一轮：扫描中又被叫到，记一个标记、等这一轮连同补扫一起结束再返回——
+  /// 调用方 await 回来时拿到的是最新的
+  const scanOnce = async () => {
     try {
       const [next, projects, rules, ignoredList, mcp] = await Promise.all([
         api.scanAll(),
@@ -127,14 +133,24 @@ export default function App() {
       setRefreshKey((key) => key + 1);
     } catch (e) {
       setError(String(e));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
     }
-    // 扫描期间到达的事件只记一个标记，扫完再补一次
-    if (pendingRef.current) {
-      pendingRef.current = false;
-      await refresh();
+  };
+  const refresh = async (): Promise<void> => {
+    if (scanningRef.current) {
+      pendingRef.current = true;
+      return scanningRef.current;
+    }
+    const run = (async () => {
+      do {
+        pendingRef.current = false;
+        await scanOnce();
+      } while (pendingRef.current);
+    })();
+    scanningRef.current = run;
+    try {
+      await run;
+    } finally {
+      scanningRef.current = null;
     }
   };
   const refreshRef = useRef(refresh);
@@ -148,7 +164,7 @@ export default function App() {
     );
   }, []);
 
-  // 文件系统变化与窗口获得焦点都走这里：忙则排队，闲则去抖后重扫
+  // 文件系统变化与窗口获得焦点都走这里：用户的操作进行中则排到它结束之后，否则去抖后重扫
   const requestRefresh = useCallback(() => {
     if (busyRef.current) {
       pendingRef.current = true;
@@ -334,20 +350,27 @@ export default function App() {
   const addProject = async () => {
     const path = await api.pickDirectory("选择项目目录");
     if (!path) return;
+    // 用户发起、正在等：锁它影响到的控件（侧栏与页签），做完解锁
+    setBusyState(true);
     try {
       await api.addProject(path);
       await refresh();
     } catch (e) {
       setError(String(e));
+    } finally {
+      setBusyState(false);
     }
   };
 
   const removeProject = async (path: string) => {
+    setBusyState(true);
     try {
       await api.removeProject(path);
       await refresh();
     } catch (e) {
       setError(String(e));
+    } finally {
+      setBusyState(false);
     }
   };
 

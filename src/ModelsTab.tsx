@@ -592,11 +592,11 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
     }
   }, [applyState]);
 
-  // 挂载：读一次；路由没在跑就先自愈一次（重启路由），还不行才让横幅出来
+  // 挂载：读一次；路由没在跑就先自愈一次（重启路由），还不行才让横幅出来。
+  // 这是后台读取，不置 busy、不锁页签（读回来之前这一页只有一行「正在读模型设置」）
   useEffect(() => {
     mounted.current = true;
     void (async () => {
-      onBusy(true);
       try {
         let next = await api.gatewayState();
         if (routerUnavailable(next)) {
@@ -612,8 +612,6 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
         }
       } catch (error) {
         onError(describeError(error));
-      } finally {
-        onBusy(false);
       }
     })();
     return () => {
