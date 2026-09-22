@@ -18,9 +18,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } fr
 import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
 import {
-  AgentIcon,
   AgentMark,
-  Cap,
   Checkbox,
   Chip,
   DOT_LABEL,
@@ -94,12 +92,12 @@ export interface MatrixRowView {
   busy?: string;
 }
 
-/// 选择态下按 agent 的批量操作：列头复选框（DESIGN「选择操作条」）。**只有两态**：
-/// 打勾＝选中的在这个 agent 里（按能改的格算）全都有；否则空框，不画半选。
-/// 点空框＝全部加上（补齐缺的），点打勾＝全部移除——点完一定落到打勾或空框
+/// 选择态下按 agent 的批量操作：工具行里「状态点 + 名字」一项（DESIGN「选择操作条」），与格子同一套记号。
+/// **只有两态**：● ＝选中的在这个 agent 里（按能改的格算）全都有；否则 ○，不画半选。
+/// 点 ○ ＝全部加上（补齐缺的），点 ● ＝全部移除——和点格子是同一件事
 export interface ColumnCheck {
   checked: boolean;
-  /// 读屏名：`选中的都加到 Claude Code`
+  /// 读屏名：`选中的都加到 Claude Code` / `选中的都从 Codex 移除`
   label: string;
   /// 提示框：动词 + 数量 + 受影响的名字；不受影响的注明原因
   tip: ReactNode;
@@ -138,9 +136,9 @@ export interface MatrixProps {
   /// 选中的行键
   selected: Set<string>;
   onSelectionChange: (next: Set<string>) => void;
-  /// 选择态：工具行第一行的「所有 agent」复选框（规则同列头复选框）
+  /// 选择态：工具行第一行的「所有 agent」一项（规则同每个 agent 那一项）
   allAgents?: ColumnCheck;
-  /// 选择态：每个 agent 列头名字左边的复选框
+  /// 选择态：工具行第一行每个 agent 一项「● 名字 / ○ 名字」，键为列 id
   columnChecks?: Record<string, ColumnCheck>;
 
   busy: boolean;
@@ -247,35 +245,30 @@ export function RevealLink({ path, onReveal }: { path: string; onReveal: () => v
   );
 }
 
-/// 列头 / 「所有 agent」的两态复选框：打勾＝全都有，否则空框（不画半选）。提示框写受影响的名字，
-/// 禁用时写原因——禁用的框不吃指针事件，外层接住悬停
-function CheckBox({ check }: { check: ColumnCheck }) {
-  const box = check.disabledReason ? (
-    <Checkbox checked={check.checked} label={check.label} disabledReason={check.disabledReason} />
-  ) : (
-    <Checkbox checked={check.checked} label={check.label} onChange={() => check.onToggle()} />
+/// 工具行里按 agent 的一项：10px 状态点（● / ○）+ 正文名字，无图标无框。悬停预览点下去之后的样子
+/// （与格子同一套 preview），提示框列受影响的名字；禁用时点和字都用 disabled 色、提示框写原因。
+/// 名字放不下时截断，完整名在提示框里（提示框第一句就带着 agent 名）
+function AgentItem({ check, name }: { check: ColumnCheck; name: string }) {
+  const disabled = check.disabledReason !== undefined;
+  const button = (
+    <button
+      type="button"
+      className={`ss-dot-btn mx-agentitem${disabled ? " is-disabled" : ""}`}
+      aria-label={disabled ? `${check.label}：${check.disabledReason}` : check.label}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : () => check.onToggle()}
+    >
+      <StateDot
+        dot={check.checked ? "linked" : "missing"}
+        preview={!disabled}
+        muted={disabled}
+        title=""
+        label={check.checked ? "已加上" : "未加上"}
+      />
+      <span className="mx-agentitem__name">{name}</span>
+    </button>
   );
-  return (
-    <Tooltip content={check.disabledReason ?? check.tip}>
-      <span className="mx-checkwrap">{box}</span>
-    </Tooltip>
-  );
-}
-
-/// 工具行第一行的「☐ 所有 agent」：框 + 字，点字也切换
-function CheckLabel({ check, text }: { check: ColumnCheck; text: string }) {
-  return (
-    <span className={`mx-checklabel${check.disabledReason ? " is-disabled" : ""}`}>
-      <CheckBox check={check} />
-      <span
-        className="mx-checklabel__text"
-        onClick={check.disabledReason ? undefined : () => check.onToggle()}
-        aria-hidden="true"
-      >
-        {text}
-      </span>
-    </span>
-  );
+  return <Tooltip content={check.disabledReason ?? check.tip}>{button}</Tooltip>;
 }
 
 /// 排序箭头 ↑ / ↓：只在当前的排序依据列常显（默认名称升序时也显示，Finder 惯例）；其余列不占眼
@@ -597,6 +590,19 @@ export default function Matrix(props: MatrixProps) {
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
   const selRef = useRef<HTMLDivElement>(null);
+  // 批量提示条贴在按下的那一项下方、左对齐；越出面板右沿时改为右对齐到那一项
+  const keyToastRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const t = keyToastRef.current;
+    const panel = panelRef.current;
+    if (!t || !panel) return;
+    t.style.left = "";
+    t.style.right = "";
+    if (t.getBoundingClientRect().right > panel.getBoundingClientRect().right) {
+      t.style.left = "auto";
+      t.style.right = "0";
+    }
+  }, [keyToast]);
   // 放不下时的最后手段：「已选 N 个」缩成「N 个」。列数变了从头量
   const [short, setShort] = useState(false);
   useLayoutEffect(() => setShort(false), [columns.length, width]);
@@ -612,11 +618,30 @@ export default function Matrix(props: MatrixProps) {
         {short ? null : "已选 "}
         <span className="mx-mono">{selectedVisible.length}</span> 个
       </span>
-      {allAgents ? (
-        <span className={`mx-keys${busy ? " ss-busy" : ""}`}>
-          <CheckLabel check={allAgents} text="所有 agent" />
-        </span>
-      ) : null}
+      <span className={`mx-agentitems${busy ? " ss-busy" : ""}`}>
+        {allAgents ? (
+          <span className="mx-keywrap">
+            <AgentItem check={allAgents} name="所有 agent" />
+            {keyToast?.keyId === "all" ? (
+              <div className="mx-keytoast" ref={keyToastRef}>
+                {keyToast.node}
+              </div>
+            ) : null}
+          </span>
+        ) : null}
+        {columns.map((col) =>
+          columnChecks?.[col.id] ? (
+            <span key={col.id} className="mx-keywrap">
+              <AgentItem check={columnChecks[col.id]} name={col.name} />
+              {keyToast?.keyId === col.id ? (
+                <div className="mx-keytoast" ref={keyToastRef}>
+                  {keyToast.node}
+                </div>
+              ) : null}
+            </span>
+          ) : null,
+        )}
+      </span>
       {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
       <button
         type="button"
@@ -668,13 +693,6 @@ export default function Matrix(props: MatrixProps) {
   const sortBy = (key: string) => setSort((prev) => toggleSort(prev ?? sort, key));
   const header = (
     <div className="mx-grid mx-head" style={gridStyle}>
-      {/* 批量结果的例行提示条：固定在列头行最左边那段空白（名称 / 原件位置两列上方），
-          右对齐到第一列列头左边，靠 agent 图标标明是哪一列 */}
-      {selecting && keyToast ? (
-        <div className="mx-headtoast" style={{ width: lead }}>
-          {keyToast.node}
-        </div>
-      ) : null}
       <div className="mx-head__check">
         {/* 表头整行不置灰，只灰这个全选框（§6 第二条细节） */}
         {selectable.length === 0 ? (
@@ -727,50 +745,23 @@ export default function Matrix(props: MatrixProps) {
             onMouseEnter={() => setHeadHover(col.id)}
             onMouseLeave={() => setHeadHover((prev) => (prev === col.id ? null : prev))}
           >
-            {selecting && columnChecks?.[col.id] ? (
-              // 选择态：名字左边一个 12px 复选框、同一行。排序键铺在整格底下（透明），
-              // 图标 / 名字 / 计数只是画出来的字，复选框单独接点击——不把可点的东西嵌进按钮里
-              <div className="mx-colcheck">
-                <Tooltip content={col.tip} context="table">
-                  <button
-                    type="button"
-                    className="mx-colsort"
-                    aria-label={`${col.tip}，按这一列排序`}
-                    onClick={() => sortBy(col.id)}
-                  />
-                </Tooltip>
-                <span
-                  className={`ss-mark ss-mark--header mx-colmark${col.missing ? " is-dim" : ""}`}
-                >
-                  <span className="ss-mark__icon">
-                    <AgentIcon id={col.agentId} name={col.name} />
-                  </span>
-                  <span className="ss-mark__name mx-colmark__name">
-                    <CheckBox check={columnChecks[col.id]} />
-                    <Cap>{col.name}</Cap>
-                  </span>
-                  <span className="ss-mark__count">{col.count}</span>
-                </span>
-              </div>
-            ) : (
-              <Tooltip content={col.tip} context="table">
-                <button
-                  type="button"
-                  className={`mx-colbtn${col.missing ? " is-missing" : ""}`}
-                  aria-label={`${col.tip}，按这一列排序`}
-                  onClick={() => sortBy(col.id)}
-                >
-                  <AgentMark
-                    id={col.agentId}
-                    name={col.name}
-                    layout="header"
-                    count={col.count}
-                    dim={col.missing}
-                  />
-                  <SortArrow active={sort.key === col.id} desc={sort.dir === "desc"} />
-                </button>
-              </Tooltip>
-            )}
+            <Tooltip content={col.tip} context="table">
+              <button
+                type="button"
+                className={`mx-colbtn${col.missing ? " is-missing" : ""}`}
+                aria-label={`${col.tip}，按这一列排序`}
+                onClick={() => sortBy(col.id)}
+              >
+                <AgentMark
+                  id={col.agentId}
+                  name={col.name}
+                  layout="header"
+                  count={col.count}
+                  dim={col.missing}
+                />
+                <SortArrow active={sort.key === col.id} desc={sort.dir === "desc"} />
+              </button>
+            </Tooltip>
           </div>
         );
       })}

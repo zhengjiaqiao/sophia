@@ -88,7 +88,7 @@ test("Matrix：原件位置列头只排序——没有 ▾ 下拉、没有规则
   assert.match(html, /class="mx-head__origin"><button type="button" class="mx-headbtn">原件位置/);
 });
 
-test("Matrix：选择态——第一行 已选 N 个 + ☐ 所有 agent + 取消选择；列头名字左边两态复选框", () => {
+test("Matrix：选择态——第一行 已选 N 个 + 所有 agent + 每个 agent 一项「● / ○ 名字」+ 取消选择", () => {
   const noop = () => undefined;
   const html = render(Matrix, {
     ...base,
@@ -103,7 +103,7 @@ test("Matrix：选择态——第一行 已选 N 个 + ☐ 所有 agent + 取消
     columnChecks: {
       cc: {
         checked: true,
-        label: "选中的都加到 Claude Code",
+        label: "选中的都从 Claude Code 移除",
         tip: "从 Claude Code 移除",
         onToggle: noop,
       },
@@ -119,14 +119,21 @@ test("Matrix：选择态——第一行 已选 N 个 + ☐ 所有 agent + 取消
   assert.match(html, /grid-template-columns:34px 246px 72px 120px 88px 88px 24px/);
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
   assert.match(html, /aria-label="选中的都加到所有 agent"/);
-  assert.match(html, />所有 agent</);
+  assert.match(html, /class="mx-agentitem__name">所有 agent</);
+  // 每一项是 button：状态点（● linked / ○ missing，与格子同一套，带悬停预览）+ 正文名字
+  assert.match(
+    html,
+    /aria-label="选中的都从 Claude Code 移除"[^>]*>[\s\S]*?data-dot="linked" data-preview=""/,
+  );
+  assert.match(html, /class="mx-agentitem__name">Claude Code</);
+  // 禁用：点和字都用 disabled 色，读屏带原因
+  assert.match(
+    html,
+    /class="ss-dot-btn mx-agentitem is-disabled" aria-label="选中的都加到 Codex：这几个都写不进"/,
+  );
   assert.match(html, /取消选择/);
-  // 列头复选框只有两态：打勾 / 空框，不画半选；禁用的提示框说原因
-  assert.match(html, /aria-checked="true" aria-label="选中的都加到 Claude Code"/);
-  assert.match(html, /aria-checked="false" aria-label="选中的都加到 Codex"[^>]*disabled=""/);
-  assert.equal((html.match(/class="mx-colcheck"/g) ?? []).length, 2);
-  // 列头上方的 ＋ / － 与全局「全部加上 / 全部移除」两颗键属于已退役的行为
-  assert.doesNotMatch(html, /mx-keyrow|mx-pm|全部加上|全部移除/);
+  // 列头复选框属于已退役的行为：列头回到只有图标、名字、计数
+  assert.doesNotMatch(html, /mx-colcheck|选中的都加到 Claude Code/);
   // 名称列头左边的「全选」框是选行用的，照旧半选
   assert.match(html, /aria-checked="mixed" aria-label="全选"/);
   assert.doesNotMatch(html, /placeholder="筛选"/);

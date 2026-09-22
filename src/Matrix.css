@@ -117,8 +117,63 @@
   font-weight: 500;
 }
 
+/* 选择态第一行：放不下先折行（再不行由 agent 名截断），所以高度随内容 */
+.mx-toolbar--select {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: var(--control-h);
+  row-gap: 4px;
+}
+
 .mx-toolbar--select > * {
   flex-shrink: 0;
+}
+
+.mx-agentitems {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-width: 0;
+}
+
+/* 按 agent 的一项：10px 状态点 + 正文 13 名字，无图标无框；整项是命中区 */
+.mx-agentitem.ss-dot-btn {
+  gap: 6px;
+  min-height: var(--control-h);
+  padding: 0 2px;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  white-space: nowrap;
+}
+
+.mx-agentitem__name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mx-keywrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 批量结果的例行提示条：贴在按下的那一项下方 4，可以暂时盖住来源片；越出面板右沿时改右对齐 */
+.mx-keytoast {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 7;
+  display: flex;
+  padding: 0 16px 0 0;
+  background: var(--canvas);
+  white-space: nowrap;
+}
+
+.mx-agentitem.is-disabled {
+  color: var(--disabled);
+  cursor: default;
 }
 
 .mx-clear {
@@ -149,81 +204,6 @@
   /* 比工具行高一层：键行上的提示框向上弹，要盖在工具行（来源片）上面 */
   z-index: 6;
   background: var(--canvas);
-}
-
-/* 选择态：列头名字左边一个 12px 复选框、同一行。排序键是铺满整格的透明按钮，
-   图标 / 名字 / 计数只是画出来的字（不接指针），复选框单独接点击 */
-.mx-colcheck {
-  position: relative;
-  display: inline-flex;
-}
-
-.mx-colcheck > .ss-tipwrap {
-  position: absolute;
-  inset: 0;
-}
-
-.mx-colsort {
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  cursor: pointer;
-}
-
-.mx-colmark {
-  position: relative;
-  padding: 0 4px;
-  pointer-events: none;
-}
-
-.mx-colmark__name {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.mx-colmark .ss-tipwrap,
-.mx-checkwrap {
-  display: inline-flex;
-  pointer-events: auto;
-}
-
-/* 禁用的框不吃指针事件，让外层提示框接住悬停——禁用的原因要看得到 */
-.mx-checkwrap .ss-checkbox:disabled {
-  pointer-events: none;
-}
-
-/* 工具行第一行的「☐ 所有 agent」 */
-.mx-checklabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--size-caption);
-  white-space: nowrap;
-}
-
-.mx-checklabel__text {
-  cursor: pointer;
-}
-
-.mx-checklabel.is-disabled .mx-checklabel__text {
-  color: var(--disabled);
-  cursor: default;
-}
-
-/* 批量结果的例行提示条：列头行最左那段空白里（名称 / 原件位置两列上方），右对齐、离第一列 16 */
-.mx-headtoast {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 2;
-  display: flex;
-  justify-content: flex-end;
-  box-sizing: border-box;
-  padding-right: 16px;
 }
 
 .mx-head {

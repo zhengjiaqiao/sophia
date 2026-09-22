@@ -93,7 +93,7 @@ const verbOf = (state: CellState, agent: string): string | undefined =>
           ? "点一下再试一次"
           : undefined;
 
-/// 列头复选框的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、写不进的注明不受影响
+/// 按 agent 那一项的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、写不进的注明不受影响
 export function affectedTip(
   head: string,
   names: string[],
@@ -269,8 +269,8 @@ export default function DomainView(props: DomainViewProps) {
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
-  // 选择态：每个 agent 列头一个两态复选框——打勾＝选中的在这里（按能改的格算）全都有，否则空框；
-  // 点空框补齐缺的，点打勾全部移除。原件、写不进、同名被挡的格不计入（DESIGN「选择操作条」）
+  // 选择态：工具行里每个 agent 一项「● / ○ 名字」——● ＝选中的在这里（按能改的格算）全都有，否则 ○；
+  // 点 ○ 补齐缺的，点 ● 全部移除。原件、写不进、同名被挡的格不计入（DESIGN「选择操作条」）
   const columnChecks: Record<string, ColumnCheck> = {};
   const enabledPresses: { add: CellRef[]; remove: CellRef[]; checked: boolean }[] = [];
   for (const target of page.targets) {
@@ -303,7 +303,7 @@ export default function DomainView(props: DomainViewProps) {
       enabledPresses.push({ add: missing, remove: linked, checked });
     columnChecks[target.id] = {
       checked,
-      label: `选中的都加到 ${target.label}`,
+      label: checked ? `选中的都从 ${target.label} 移除` : `选中的都加到 ${target.label}`,
       tip: checked
         ? affectedTip(
             `从 ${target.label} 移除`,
@@ -331,7 +331,7 @@ export default function DomainView(props: DomainViewProps) {
   const uniqNames = (cells: CellRef[]) => [...new Set(cells.map((c) => c.skill))];
   const allAgents: ColumnCheck = {
     checked: allChecked,
-    label: "选中的都加到所有 agent",
+    label: allChecked ? "选中的都从所有 agent 移除" : "选中的都加到所有 agent",
     tip: allChecked
       ? affectedTip(`从所有 agent 移除 · ${allRemove.length} 处`, uniqNames(allRemove))
       : affectedTip(`加到所有 agent · ${allAdd.length} 处`, uniqNames(allAdd)),

@@ -660,7 +660,8 @@ export default function McpTab({
         ? [{ sourceId: source.sourceId, name: row.name, targetId }]
         : [];
     });
-  // 选择态：列头复选框。MCP 只能写进、不能删条目——打勾（都有了）后禁用，提示框「都已写进」
+  // 选择态：工具行里每个位置一项「● / ○ 名字」。MCP 只能写进、不能删条目——● （都有了）后禁用，
+  // 提示框「都已写进」
   const columnChecks: Record<string, ColumnCheck> = {};
   for (const target of page.targets) {
     const cells = missingAt(target.id);
