@@ -25,6 +25,7 @@ import {
   type PendingIssue,
   type SentencePart,
 } from "./pendingIssues.ts";
+import type { ModelIssue } from "../modelsView.ts";
 import "./PendingPage.css";
 
 /// 待处理页＝**全局收件箱**（DESIGN「材料与工艺 › 全局收件箱」）：一个页面，顶部分段片
@@ -67,19 +68,8 @@ export interface McpIssue {
   paths: string[];
 }
 
-/// 模型段的一条。形状与 T2 的 `modelsView.ts › modelIssues`（`ModelIssue`）一致
-export interface ModelIssue {
-  kind: "takeover" | "configChanged" | "unreachable";
-  /// 状况一变就变的忽略依据（不进 core）
-  key: string;
-  /// 句子拆段：`subject` 墨色，其余灰
-  parts: SentencePart[];
-  sentence: string;
-  /// 一个动作；由 `onResolveModelIssue` 执行
-  action: { kind: "takeover" | "rewrite" | "retry"; label: string };
-  /// 只有 unreachable 有
-  providerId?: string;
-}
+/// 模型段的一条：以 T2 的 `modelsView.ts › modelIssues` 为准
+export type { ModelIssue };
 
 export interface PendingSegments {
   skills: SkillIssue[];
@@ -139,6 +129,11 @@ function loadModelIgnored(): ModelIgnored[] {
   } catch {
     return [];
   }
+}
+
+/// 模型段已忽略的 key：壳数顶栏收件箱时用（已忽略的不计数）
+export function loadModelIgnoredKeys(): string[] {
+  return loadModelIgnored().map((entry) => entry.key);
 }
 
 function saveModelIgnored(list: ModelIgnored[]) {

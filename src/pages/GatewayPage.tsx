@@ -47,7 +47,8 @@ export interface GatewayPageProps {
   /// 页面名要点名是哪个工具的网关：`Codex 的网关`
   tool: ModelsTool;
   busy: boolean;
-  /// 返回。**离开即提交**标记删除的网关：页面卸载时自己提交一次（调用方也提交无妨，幂等）
+  /// 返回。**离开即提交**标记删除的网关：接了 `onCommitRemovals` 时由调用方离开时提交全部，
+  /// 没接时页面自己提交
   onBack: () => void;
   /// 存网关地址与密钥（密钥省略表示不改），返回这一家的 id。失败时抛出
   onSave: (input: { id?: string; baseUrl: string; key?: string }) => Promise<string>;
@@ -55,10 +56,10 @@ export interface GatewayPageProps {
   onFetchModels: (providerId: string) => Promise<void>;
   /// 彻底撤下：卸载后台服务，清掉本功能写进 Codex 设置的一切
   onRestore: () => Promise<void>;
-  /// 保存成功那一行的 `选模型 ›`：回到模型页、展开下拉、滚到这一家的分组（T2 接线）
-  onPickModels?: (providerId: string) => void;
-  /** 同 `onPickModels`（T2 先按这个名字接的线） */
+  /// 保存成功那一行的 `选模型 ›`：回到模型页、展开下拉、滚到这一家的分组（ModelsTab 接线）
   onPickModelsFromGateway?: (providerId: string) => void;
+  /** 同 `onPickModelsFromGateway` 的别名 */
+  onPickModels?: (providerId: string) => void;
   /// 以下四个由调用方执行并刷新 `state`；不给时页面自己调 api，结果只在本页生效
   /// 「再试一次」：按 id 重拉这一家（拉取失败不抛错，原因记在 unreachable 上）
   onRetryProvider?: (providerId: string) => Promise<void>;
@@ -115,7 +116,7 @@ export function GatewayPage({
   const [removing, setRemoving] = useState<Removing | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const pick = onPickModels ?? onPickModelsFromGateway;
+  const pick = onPickModelsFromGateway ?? onPickModels;
 
   const report = (e: unknown) => setError(parseBackendError(String(e)).message);
 
@@ -130,16 +131,19 @@ export function GatewayPage({
   const commit = (id?: string) =>
     onCommitRemovals ? onCommitRemovals(id) : api.gatewayCommitRemovals(id).then(setLocal);
 
-  // 离开网关页即提交：卸载时还挂着撤销窗口的那一家立刻真正删掉
+  // 离开网关页即提交：接了回调时调用方（ModelsTab）离开时统一提交全部，这里只清计时器；
+  // 没接回调（页面自己调 api）时，卸载那一刻把还挂着撤销窗口的那一家真正删掉
   const pendingRef = useRef<string | null>(null);
   pendingRef.current = removing?.provider.id ?? null;
-  const commitRef = useRef(commit);
-  commitRef.current = commit;
+  const selfCommit = onCommitRemovals === undefined;
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
-      if (pendingRef.current !== null) void commitRef.current().catch(() => {});
+      if (selfCommit && pendingRef.current !== null)
+        void api.gatewayCommitRemovals().catch(() => {});
     },
+    // 只在卸载时跑一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -192,8 +196,10 @@ export function GatewayPage({
       }
     })();
 
+  /// 返回：调用方接了回调就由它在离开时提交全部；没接时这里先把挂着的那一家提交掉
   const back = () => {
-    if (removing !== null) commitOne(removing.provider.id);
+    clearTimer();
+    if (selfCommit && removing !== null) void commit(removing.provider.id).catch(() => {});
     onBack();
   };
 
