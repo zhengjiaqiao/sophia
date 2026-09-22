@@ -59,7 +59,7 @@ const base = {
 test("Matrix：通道条表头 + 原件位置列（120，来源名），没有分组组头", () => {
   const html = render(Matrix, base);
   assert.match(html, /class="mx-grid mx-head"/);
-  // 原件位置列恢复：列头文字可排序 + ▾ 下拉；格里写来源名
+  // 原件位置列恢复：点列头文字按位置排序（没有 ▾ 下拉）；格里写来源名
   assert.match(html, /class="mx-head__origin"/);
   assert.match(html, /class="mx-origin"[^>]*>通用仓库</);
   assert.match(html, /class="mx-origin"[^>]*>WeiboAP</);
@@ -75,65 +75,17 @@ test("Matrix：通道条表头 + 原件位置列（120，来源名），没有�
   assert.match(html, /aria-label="正在开启 2 个"/);
 });
 
-test("Matrix：按位置筛选时列头写「原件位置 · 通用仓库 ×」", () => {
-  const html = render(Matrix, {
-    ...base,
-    originFilter: { label: "通用仓库", onClear: () => undefined },
-    originMenu: () => null,
-  });
-  assert.match(html, /<span>· 通用仓库<\/span>/);
-  assert.match(html, /aria-label="清除按位置筛选"/);
-  assert.match(html, /aria-haspopup="dialog"/);
+test("Matrix：当前排序依据列常显 ↑（默认名称升序也显示），其余列不画", () => {
+  const html = render(Matrix, base);
+  assert.equal((html.match(/class="mx-sort is-active"/g) ?? []).length, 1);
+  assert.match(html, /名称<svg class="mx-sort is-active"[^>]*aria-label="升序"/);
 });
 
-test("OriginMenu：全部 N 选中反色；每个来源一行规则，没开的整段 ink-faint，目标图标组可点", async () => {
-  const { OriginMenu } = await import("../src/Matrix.tsx");
-  const noop = () => undefined;
-  const html = render(OriginMenu, {
-    total: 56,
-    selected: null,
-    onSelect: noop,
-    hint: noop,
-    close: noop,
-    sources: [
-      {
-        id: "u",
-        label: "通用仓库",
-        count: 26,
-        rule: {
-          on: true,
-          targets: ["cc", "cx"],
-          available: [
-            { id: "cc", agentId: "claude-code", name: "Claude Code" },
-            { id: "cx", agentId: "codex", name: "Codex" },
-          ],
-          onToggle: noop,
-          onTargets: noop,
-        },
-      },
-      {
-        id: "w",
-        label: "WeiboAP",
-        count: 29,
-        rule: {
-          on: false,
-          targets: ["cc"],
-          available: [{ id: "cc", agentId: "claude-code", name: "Claude Code" }],
-          onToggle: noop,
-          onTargets: noop,
-          error: "来源位置已不存在，请刷新",
-        },
-      },
-    ],
-  });
-  assert.match(html, /class="mx-omenu__all is-selected"/);
-  assert.match(html, /全部 <span class="mx-mono">56<\/span>/);
-  assert.match(html, /class="mx-rule"/);
-  assert.match(html, /class="mx-rule is-off"/);
-  assert.match(html, /aria-label="改目标：Claude Code、Codex"/);
-  assert.match(html, /role="switch" aria-checked="true"/);
-  // 规则设不上：行内黑窗
-  assert.match(html, /class="mx-omenu__error" role="alert"/);
+test("Matrix：原件位置列头只排序——没有 ▾ 下拉、没有规则入口", () => {
+  const html = render(Matrix, base);
+  // 列头下拉（规则开关、目标图标、AgentKey 弹层、按位置筛选）属于已退役的行为
+  assert.doesNotMatch(html, /aria-haspopup|以后新出现的|role="switch"|ss-agentkey/);
+  assert.match(html, /class="mx-head__origin"><button type="button" class="mx-headbtn">原件位置/);
 });
 
 test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具行", () => {

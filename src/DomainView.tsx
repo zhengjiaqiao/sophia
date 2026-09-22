@@ -1,29 +1,27 @@
 /// Skills 的一个域（全局或某项目）→ 共享表格 `Matrix` 的视图（DESIGN「主视图」「表格 = 面板」）。
 ///
-/// 只做折算：把 DomainPage 的行 × 目标折成「行 + 原件位置 + 格 + 选择键 + 列头下拉」，点了什么
+/// 只做折算：把 DomainPage 的行 × 目标折成「行 + 原件位置 + 格 + 选择键」，点了什么
 /// 原样交回 SkillsTab（写操作、乐观更新、提示条都在那里）。格的语义取自 `cellState.viewOf`，
 /// 不在这里另写一份。
 ///
 /// 「原件位置」列恢复、按来源分组撤销（DESIGN「产品裁决」冲突表）：位置信息常驻视线；
-/// 自动添加规则与按来源筛选在这一列列头的 ▾ 下拉里。说明横幅、独占一行的自动同步框、
-/// 「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接）。
+/// 点这一列列头文字按位置排序。自动添加规则只在添加页管理，主视图不放规则入口。
+/// 说明横幅、「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接）。
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import Matrix, {
   duplicatesAKey,
   cellKey,
-  OriginMenu,
   RevealLink,
   type MatrixCellView,
   type MatrixRowView,
-  type OriginMenuSource,
   type SelectionKey,
 } from "./Matrix";
-import { defaultTargets, distinguishingSegments, loadImportMemory } from "./pages/importDefaults";
+import { distinguishingSegments } from "./pages/importDefaults";
 import { viewOf } from "./cellState";
 import { displayPath } from "./pathText";
 import { AddButton, Button, DupMark, Tooltip } from "./ui";
-import type { AutoLink, CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
+import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
 /// 行键：本体位置 + skill（一页只显示一个域）
 export const skillRowKey = (row: { sourceId: string; skill: string }) =>
@@ -42,14 +40,6 @@ export interface BatchPress {
 export interface DomainViewProps {
   overview: Overview;
   page: DomainPage;
-  autoLinks: AutoLink[];
-  /// 规则关着时记住的目标（关掉那一刻的、或关着时在下拉里改过的）：来源 → 目标列 id
-  offRules: Map<string, string[]>;
-  /// 规则设不上的原因（读不到来源等），下拉里该行的行内黑窗
-  ruleErrors: Map<string, string>;
-  /// 按原件位置筛选中的来源；null＝全部
-  originFilter: string | null;
-  onOriginFilter: (sourceId: string | null) => void;
   /// 经过筛选、要显示的行
   rows: DomainRow[];
   /// 格此刻该画成什么（乐观更新之后的状态）
@@ -77,9 +67,6 @@ export interface DomainViewProps {
   onSelectionChange: (next: Set<string>) => void;
   onCell: (ref: CellRef) => void;
   onBatch: (press: BatchPress) => void;
-  onRule: (sourceId: string, targets: string[], on: boolean) => void;
-  /// 在下拉里改目标：开着时就地增删，关着时只记住
-  onRuleTargets: (sourceId: string, next: string[], on: boolean, prev: string[]) => void;
   onUndo: () => void;
   shortcuts: boolean;
 
@@ -100,7 +87,7 @@ const VERB: Partial<Record<CellState, string>> = {
 };
 
 export default function DomainView(props: DomainViewProps) {
-  const { overview, page, autoLinks, offRules, rows: visible, stateOf } = props;
+  const { overview, page, rows: visible, stateOf } = props;
 
   const sourceOf = (id: string) => overview.sources.find((s) => s.id === id);
   const labelOf = (id: string) => sourceOf(id)?.label ?? id;
@@ -157,44 +144,12 @@ export default function DomainView(props: DomainViewProps) {
   }
   for (const [label, ids] of byLabel) {
     const segs = distinguishingSegments(ids.map((id) => sourceOf(id)?.path ?? id));
-    ids.forEach((id, i) => originLabels.set(id, segs[i] ? `${label} · ${segs[i]}` : label));
+    // 区分片段就是名字本身（WeiboAP/skills 对 WeiboAP/agent_…/skills）时不重复写
+    ids.forEach((id, i) =>
+      originLabels.set(id, segs[i] && segs[i] !== label ? `${label} · ${segs[i]}` : label),
+    );
   }
   const originOf = (id: string) => originLabels.get(id) ?? labelOf(id);
-
-  // ---- 列头下拉：每个来源一行 + 它的规则 ----
-  const available = page.targets.map((t) => ({
-    id: t.id,
-    agentId: t.scope.harnessId,
-    name: t.label,
-  }));
-  const menuSources: OriginMenuSource[] = [...counts].map(([sourceId, count]) => {
-    const rule = autoLinks.find((r) => r.source === sourceId);
-    const local = rule?.targets.filter((id) => page.targets.some((t) => t.id === id)) ?? [];
-    const on = local.length > 0;
-    // 关着：上次关掉 / 改过的目标，没有则这个来源上次添加时用的，再没有则已安装的前两个
-    const targets = on
-      ? local
-      : (offRules.get(sourceId) ??
-        defaultTargets(
-          available.map((a) => a.id),
-          loadImportMemory(`skill|${page.key}|${sourceId}`)?.last,
-        ));
-    return {
-      id: sourceId,
-      label: originOf(sourceId),
-      title: sourceOf(sourceId)?.path,
-      count,
-      rule: {
-        on,
-        targets,
-        available,
-        onToggle: (next: boolean) => props.onRule(sourceId, targets, next),
-        onTargets: (next: string[]) => props.onRuleTargets(sourceId, next, on, targets),
-        error: props.ruleErrors.get(sourceId) ?? null,
-        disabledReason: props.busy ? "正在执行上一步操作" : undefined,
-      },
-    };
-  });
 
   // ---- 行 ----
   const matrixRows: MatrixRowView[] = visible
@@ -385,24 +340,9 @@ export default function DomainView(props: DomainViewProps) {
       columns={columns}
       rows={matrixRows}
       originLabel="原件位置"
-      originFilter={
-        props.originFilter === null
-          ? null
-          : { label: originOf(props.originFilter), onClear: () => props.onOriginFilter(null) }
-      }
-      originMenu={({ close, hint }) => (
-        <OriginMenu
-          total={page.rows.length}
-          selected={props.originFilter}
-          onSelect={props.onOriginFilter}
-          sources={menuSources}
-          hint={hint}
-          close={close}
-        />
-      )}
       nameLabel="名称"
       nameTip="列表里只出现两种 skill：原件就在这个位置下的，和在某个 agent 下有链接的"
-      nameCount={page.rows.length - props.hiddenRows.size}
+      nameCount={matrixRows.length}
       filterText={props.filterText}
       onFilterText={props.onFilterText}
       addButton={<AddButton noun="skill" onClick={props.onImport} />}

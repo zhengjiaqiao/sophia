@@ -252,9 +252,8 @@
   transition: background-color var(--motion-fast) var(--ease-mech);
 }
 
-/* 列头悬停：整列出列带；组头规则悬停：作用的列头轻亮 */
-.mx-head__col.is-hot,
-.mx-head__col.is-hint {
+/* 列头悬停：整列出列带 */
+.mx-head__col.is-hot {
   background: var(--surface);
 }
 
@@ -282,20 +281,15 @@
   right: -8px;
 }
 
+/* 排序 ↑ / ↓ 只在当前的排序依据列常显（默认名称升序也显示）；其余列不画 */
 .mx-sort {
+  display: none;
   flex-shrink: 0;
-  visibility: hidden;
-  color: var(--ink-faint);
-}
-
-.mx-headbtn:hover .mx-sort,
-.mx-colbtn:hover .mx-sort,
-.mx-sort.is-active {
-  visibility: visible;
-}
-
-.mx-sort.is-active {
   color: var(--ink);
+}
+
+.mx-sort.is-active {
+  display: block;
 }
 
 .mx-body {
@@ -312,180 +306,12 @@
   pointer-events: none;
 }
 
-/* ===== 原件位置列头：点文字排序，点 ▾ 打开下拉 ===== */
+/* ===== 原件位置列头：点文字按位置排序 ===== */
 .mx-head__origin {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
   height: 19px;
   white-space: nowrap;
-}
-
-.mx-originfilter {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--ink);
-  font-size: var(--size-micro);
-  font-weight: 600;
-}
-
-.mx-originfilter__clear,
-.mx-menubtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--ink-mute);
-  cursor: pointer;
-}
-
-.mx-originfilter__clear:hover,
-.mx-menubtn:hover,
-.mx-menubtn.is-open {
-  background: var(--surface);
-  color: var(--ink);
-}
-
-/* 下拉：区块线 1px ink 圈住，canvas 底，不加阴影 */
-.mx-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  z-index: 10;
-  width: 380px;
-  box-sizing: border-box;
-  border: 1px solid var(--ink);
-  background: var(--canvas);
-}
-
-.mx-omenu {
-  display: flex;
-  flex-direction: column;
-  padding: 4px 0;
-}
-
-.mx-omenu__all,
-.mx-omenu__name {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: inherit;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.mx-omenu__all {
-  height: var(--row-h);
-  padding: 0 12px;
-}
-
-.mx-omenu__row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  height: var(--row-h);
-  padding: 0 12px;
-}
-
-.mx-omenu__all .mx-mono,
-.mx-omenu__name .mx-mono {
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-}
-
-.mx-omenu__all:hover,
-.mx-omenu__row:hover {
-  background: var(--surface);
-}
-
-/* 当前筛选：反色（选中的片 / 已按下的键同一语言） */
-.mx-omenu__all.is-selected,
-.mx-omenu__row.is-selected {
-  background: var(--ink);
-  color: var(--canvas);
-}
-
-.mx-omenu__all.is-selected .mx-mono,
-.mx-omenu__row.is-selected .mx-mono,
-.mx-omenu__row.is-selected .mx-rule,
-.mx-omenu__row.is-selected .mx-rule__text {
-  color: var(--canvas);
-}
-
-.mx-rule__targets {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--hit-min);
-  padding: 0 2px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-
-.mx-rule__targets:hover {
-  background: var(--surface);
-}
-
-.mx-omenu__keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 4px 12px 10px;
-}
-
-.mx-omenu__error {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 12px 8px;
-  padding: 6px 8px;
-  background: var(--ink);
-  color: var(--canvas);
-  font-size: var(--size-micro);
-  line-height: var(--leading-caption);
-}
-
-.mx-rule {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink);
-}
-
-.mx-rule__text {
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-
-/* 规则关闭：整段退到 ink-faint，开关留着以便重开 */
-.mx-rule.is-off,
-.mx-rule.is-off .mx-rule__text {
-  color: var(--ink-faint);
-}
-
-.mx-rule__switch {
-  display: inline-flex;
-  margin-left: 2px;
 }
 
 .mx-row {
@@ -791,13 +617,4 @@
 
 .mx-detail__desc {
   white-space: pre-line;
-}
-
-/* 下拉里的行：提示框放在同一行、规则段左边（暂时盖住来源名，不盖触发它的规则段），
-   不放到上一行，也不越出下拉框 */
-.mx-rowtip {
-  top: 50%;
-  left: 8px;
-  white-space: nowrap;
-  transform: translateY(-50%);
 }

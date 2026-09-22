@@ -26,7 +26,7 @@ const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
 
 export interface SkillsTabProps {
   overview: Overview | null;
-  /// 自动同步规则；组头规则图式与关链前写排除都靠它
+  /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身只在添加页管理）
   autoLinks: AutoLink[];
   busy: boolean;
   onBusy: (busy: boolean) => void;
@@ -84,11 +84,6 @@ export default function SkillsTab({
   // 「只留这份」挂起未提交时藏起来的另一份（行键）
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [dupReadout, setDupReadout] = useState<Map<string, string>>(new Map());
-  // 本次会话里关掉的规则：来源 → 当时的目标。组头留一段灰的规则与开关，好重开
-  const [offRules, setOffRules] = useState<Map<string, string[]>>(new Map());
-  const [ruleErrors, setRuleErrors] = useState<Map<string, string>>(new Map());
-  // 按原件位置筛选（列头下拉里点来源名）；null＝全部
-  const [originFilter, setOriginFilter] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
   const focusedRef = useRef<string | undefined>(undefined);
 
@@ -146,7 +141,6 @@ export default function SkillsTab({
     setRowToast(null);
     setCellNotice(null);
     setSelected(new Set());
-    setOriginFilter(null);
     undoRef.current = null;
   }, [selectedKey]);
 
@@ -518,59 +512,6 @@ export default function SkillsTab({
       .catch(() => undefined);
   };
 
-  // ===== 组头规则：只管以后新出现的 =====
-
-  /// 规则设不上：原因挂在下拉里那一行的行内黑窗上，不走全局横幅（DESIGN「提示与反馈锚在触发它的控件上」）
-  const setRuleError = (sourceId: string, error: string | null) =>
-    setRuleErrors((prev) => {
-      const next = new Map(prev);
-      if (error === null) next.delete(sourceId);
-      else next.set(sourceId, error);
-      return next;
-    });
-
-  const rule = async (sourceId: string, targets: string[], on: boolean) => {
-    setRuleError(sourceId, null);
-    onBusy(true);
-    try {
-      if (on) {
-        await api.setAutoLink(sourceId, targets);
-        setOffRules((prev) => {
-          const next = new Map(prev);
-          next.delete(sourceId);
-          return next;
-        });
-      } else {
-        await api.removeAutoLinkTargets(sourceId, targets);
-        setOffRules((prev) => new Map(prev).set(sourceId, targets));
-      }
-    } catch (e) {
-      setRuleError(sourceId, String(e));
-    } finally {
-      onBusy(false);
-    }
-    await onRefresh();
-  };
-
-  /// 在下拉里改目标：开着时就地增删（set 是取并集，删要单独调）；关着时只记住，打开时用
-  const ruleTargets = async (sourceId: string, next: string[], on: boolean, prev: string[]) => {
-    if (next.length === 0) return;
-    if (!on) {
-      setOffRules((m) => new Map(m).set(sourceId, next));
-      return;
-    }
-    setRuleError(sourceId, null);
-    const added = next.filter((id) => !prev.includes(id));
-    const removed = prev.filter((id) => !next.includes(id));
-    try {
-      if (added.length > 0) await api.setAutoLink(sourceId, added);
-      if (removed.length > 0) await api.removeAutoLinkTargets(sourceId, removed);
-    } catch (e) {
-      setRuleError(sourceId, String(e));
-    }
-    await onRefresh();
-  };
-
   // ===== 自动规则在背后做了事：右下黑窗 + 撤销，被开启的格依次闪一下 =====
 
   const pagesRef = useRef(pages);
@@ -653,10 +594,7 @@ export default function SkillsTab({
     }
     if (rowKeys.length === 0) columnId = page.targets.find((t) => paths.has(t.path))?.id;
     // 要跳的行被筛掉了：先清筛选，不然跳过去是空的
-    if (rowKeys.length > 0) {
-      setFilterText("");
-      setOriginFilter(null);
-    }
+    if (rowKeys.length > 0) setFilterText("");
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -679,9 +617,7 @@ export default function SkillsTab({
 
   const query = filterText.trim().toLowerCase();
   const visible = page.rows.filter(
-    (row) =>
-      (query === "" || row.skill.toLowerCase().includes(query)) &&
-      (originFilter === null || row.sourceId === originFilter),
+    (row) => query === "" || row.skill.toLowerCase().includes(query),
   );
   const hiddenRows = hidden;
 
@@ -690,12 +626,6 @@ export default function SkillsTab({
       <DomainView
         overview={overview}
         page={page}
-        autoLinks={autoLinks}
-        offRules={offRules}
-        ruleErrors={ruleErrors}
-        originFilter={originFilter}
-        onOriginFilter={setOriginFilter}
-        onRuleTargets={(sourceId, next, on, prev) => void ruleTargets(sourceId, next, on, prev)}
         rows={visible}
         stateOf={stateOf}
         pendingCells={pendingCells}
@@ -707,10 +637,7 @@ export default function SkillsTab({
         busy={busy}
         filterText={filterText}
         onFilterText={setFilterText}
-        onClearFilter={() => {
-          setFilterText("");
-          setOriginFilter(null);
-        }}
+        onClearFilter={() => setFilterText("")}
         onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}
         onImport={() => setImportOpen(true)}
         selected={selected}
@@ -720,7 +647,6 @@ export default function SkillsTab({
         }}
         onCell={onCell}
         onBatch={(press) => void batch(press)}
-        onRule={(sourceId, targets, on) => void rule(sourceId, targets, on)}
         onUndo={() => undoRef.current?.()}
         shortcuts={!importOpen}
         flash={flash}

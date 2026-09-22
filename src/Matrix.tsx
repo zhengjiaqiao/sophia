@@ -19,7 +19,6 @@ import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
 import {
   AgentIcon,
-  AgentKey,
   AgentMark,
   Checkbox,
   DOT_LABEL,
@@ -29,7 +28,6 @@ import {
   IconSearch,
   Spinner,
   StateDot,
-  Switch,
   TIP_DELAY_MS,
   Tooltip,
 } from "./ui/index.ts";
@@ -118,10 +116,6 @@ export interface MatrixProps {
   columns: MatrixColumn[];
   /// 原件位置列：列头文字（`原件位置` / `来源位置`）
   originLabel: string;
-  /// 按位置筛选中：列头写 `原件位置 · 通用仓库 ×`
-  originFilter?: { label: string; onClear: () => void } | null;
-  /// 列头 ▾ 下拉的内容（全部 N / 各来源行 + 规则）。`hint` 让规则行悬停时作用列列头轻亮
-  originMenu?: (ctl: { close: () => void; hint: (columnIds: string[]) => void }) => ReactNode;
   rows: MatrixRowView[];
   /// 名称列头：`名称` / `服务`
   nameLabel: string;
@@ -255,39 +249,24 @@ export function RevealLink({ path, onReveal }: { path: string; onReveal: () => v
   );
 }
 
-/// 排序箭头：默认不占眼（占位不抽走，hover 时行不跳），hover 出淡箭头，激活转黑
+/// 排序箭头 ↑ / ↓：只在当前的排序依据列常显（默认名称升序时也显示，Finder 惯例）；其余列不占眼
 function SortArrow({ active, desc }: { active: boolean; desc: boolean }) {
   return (
     <svg
       className={`mx-sort${active ? " is-active" : ""}`}
-      width="8"
-      height="8"
-      viewBox="0 0 8 8"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.3"
-      aria-hidden="true"
-    >
-      <path d={desc ? "M1.4 2.8L4 5.4l2.6-2.6" : "M1.4 5.2L4 2.6l2.6 2.6"} />
-    </svg>
-  );
-}
-
-/// 规则图式里的箭头：来源 → 目标
-function RuleArrow() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.4"
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden="true"
+      role={active ? "img" : undefined}
+      aria-label={active ? (desc ? "降序" : "升序") : undefined}
+      aria-hidden={active ? undefined : true}
     >
-      <path d="M2.5 8h10.5M9 4l4 4-4 4" />
+      <path d={desc ? "M5 1.5v7M2 5.5l3 3 3-3" : "M5 8.5v-7M2 4.5l3-3 3 3"} />
     </svg>
   );
 }
@@ -327,8 +306,6 @@ export default function Matrix(props: MatrixProps) {
   const {
     columns,
     originLabel,
-    originFilter,
-    originMenu,
     rows,
     nameLabel,
     nameTip,
@@ -367,7 +344,6 @@ export default function Matrix(props: MatrixProps) {
   // 悬停的格（十字带）/ 列头（列带）/ 下拉里规则行（作用列轻亮）/ 同名组
   const [hover, setHover] = useState<{ row: string; col: string | null } | null>(null);
   const [headHover, setHeadHover] = useState<string | null>(null);
-  const [hintCols, setHintCols] = useState<string[]>([]);
   // 键盘焦点所在格（行序号、列序号），以及焦点此刻在不在表身里
   // 键盘焦点（roving tabindex）存的原值；用时一律经 clampFocus 夹回当前表的范围
   const [focusRaw, setFocus] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
@@ -385,9 +361,6 @@ export default function Matrix(props: MatrixProps) {
   // 吸顶：工具行（勾选时是选择条）在最上面，列头紧贴它下面
   const barRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(0);
-  // 原件位置列头 ▾ 下拉
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   // 就地展开详情的那一行（一次只展开一行）
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -492,19 +465,6 @@ export default function Matrix(props: MatrixProps) {
   };
   useEffect(() => () => dropTip(), []);
 
-  // ---- 下拉：点外面关闭 ----
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) {
-        setMenuOpen(false);
-        setHintCols([]);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
   // ---- 吸顶的列头高度、面板右侧余量 ----
   useLayoutEffect(() => {
     const measure = () => {
@@ -575,8 +535,8 @@ export default function Matrix(props: MatrixProps) {
   };
 
   // ⌘F 筛选、⌘Z 撤销、⌘A 全选当前组、Esc 取消选择
-  const live = useRef({ onUndo, onSelectionChange, selected, flat, menuOpen, expanded });
-  live.current = { onUndo, onSelectionChange, selected, flat, menuOpen, expanded };
+  const live = useRef({ onUndo, onSelectionChange, selected, flat, expanded });
+  live.current = { onUndo, onSelectionChange, selected, flat, expanded };
   useEffect(() => {
     if (!shortcuts) return;
     const onKey = (e: KeyboardEvent) => {
@@ -610,10 +570,9 @@ export default function Matrix(props: MatrixProps) {
         s.onSelectionChange(next);
         return;
       }
-      // Esc：先收起下拉 / 展开的行，再取消选择
-      if (e.key === "Escape" && (s.menuOpen || s.expanded !== null)) {
+      // Esc：先收起展开的行，再取消选择
+      if (e.key === "Escape" && s.expanded !== null) {
         e.preventDefault();
-        setMenuOpen(false);
         setExpanded(null);
         return;
       }
@@ -738,81 +697,29 @@ export default function Matrix(props: MatrixProps) {
             <button type="button" className="mx-headbtn" onClick={() => sortBy("name")}>
               {nameLabel}
               {nameCount !== undefined ? <span className="mx-namecount">{nameCount}</span> : null}
-              <SortArrow active={sortState?.key === "name"} desc={sort.dir === "desc"} />
+              <SortArrow active={sort.key === "name"} desc={sort.dir === "desc"} />
             </button>
           </Tooltip>
         ) : (
           <button type="button" className="mx-headbtn" onClick={() => sortBy("name")}>
             {nameLabel}
             {nameCount !== undefined ? <span className="mx-namecount">{nameCount}</span> : null}
-            <SortArrow active={sortState?.key === "name"} desc={sort.dir === "desc"} />
+            <SortArrow active={sort.key === "name"} desc={sort.dir === "desc"} />
           </button>
         )}
       </div>
       {hasTransport ? <div className="mx-head__label">{transportLabel}</div> : null}
-      {/* 原件位置：点文字按位置排序，点 ▾ 打开下拉（自动添加规则 + 按来源筛选） */}
-      <div className="mx-head__origin" ref={menuRef}>
+      {/* 原件位置：点文字按位置排序（同来源自然聚拢） */}
+      <div className="mx-head__origin">
         <button type="button" className="mx-headbtn" onClick={() => sortBy("origin")}>
           {originLabel}
-          {originFilter ? null : (
-            <SortArrow active={sortState?.key === "origin"} desc={sort.dir === "desc"} />
-          )}
+          <SortArrow active={sort.key === "origin"} desc={sort.dir === "desc"} />
         </button>
-        {originFilter ? (
-          <span className="mx-originfilter">
-            <span>· {originFilter.label}</span>
-            <button
-              type="button"
-              className="mx-originfilter__clear"
-              title="清除按位置筛选"
-              aria-label="清除按位置筛选"
-              onClick={originFilter.onClear}
-            >
-              <IconClose size={10} />
-            </button>
-          </span>
-        ) : null}
-        {originMenu ? (
-          <button
-            type="button"
-            className={`mx-menubtn${menuOpen ? " is-open" : ""}`}
-            aria-expanded={menuOpen}
-            aria-haspopup="dialog"
-            aria-label={`${originLabel}：自动添加规则与按位置筛选`}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 10 10"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M2.2 3.8 5 6.6l2.8-2.8" />
-            </svg>
-          </button>
-        ) : null}
-        {menuOpen && originMenu ? (
-          <div className="mx-menu" role="dialog" aria-label={originLabel}>
-            {originMenu({
-              close: () => {
-                setMenuOpen(false);
-                setHintCols([]);
-              },
-              hint: setHintCols,
-            })}
-          </div>
-        ) : null}
       </div>
       {columns.map((col) => {
         const classes = ["mx-head__col"];
         // 列头只回应列头自己的悬停；格子的十字带不点亮列头（画板 Main）
         if (headHover === col.id) classes.push("is-hot");
-        else if (hintCols.includes(col.id)) classes.push("is-hint");
         if (flashCol === col.id) classes.push("mx-jump");
         return (
           <div
@@ -837,7 +744,7 @@ export default function Matrix(props: MatrixProps) {
                   count={col.count}
                   dim={col.missing}
                 />
-                <SortArrow active={sortState?.key === col.id} desc={sort.dir === "desc"} />
+                <SortArrow active={sort.key === col.id} desc={sort.dir === "desc"} />
               </button>
             </Tooltip>
           </div>
@@ -1078,179 +985,6 @@ export default function Matrix(props: MatrixProps) {
           {globalToast}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/// 原件位置列头下拉里的一个来源（DESIGN「材料与工艺」：自动添加规则在列头下拉里）
-export interface OriginMenuSource {
-  id: string;
-  label: string;
-  /// 完整路径，进提示框
-  title?: string;
-  count: number;
-  rule: {
-    on: boolean;
-    /// 目标列 id；关着时是「打开会用哪些」（上次用的，没有则已安装的前两个）
-    targets: string[];
-    /// 可选的目标（列 id + agent 图标）
-    available: { id: string; agentId: string; name: string }[];
-    onToggle: (next: boolean) => void;
-    onTargets: (ids: string[]) => void;
-    /// 规则设不上（读不到来源等）：行内黑窗说原因
-    error?: string | null;
-    disabledReason?: string;
-  };
-}
-
-/// 列头下拉：顶部 `全部 N`（选中反色）；每个来源一行
-/// `名字 N · 以后新出现的 → [目标图标组] [紧凑开关]`。点来源名＝按它筛选；点图标组就地弹出
-/// agent 图标键改目标（与添加页同组件，至少留一个）；规则关着这一段 ink-faint，开关可以直接打开
-export function OriginMenu({
-  total,
-  selected,
-  onSelect,
-  sources,
-  hint,
-  close,
-}: {
-  total: number;
-  selected: string | null;
-  onSelect: (id: string | null) => void;
-  sources: OriginMenuSource[];
-  hint: (columnIds: string[]) => void;
-  close: () => void;
-}) {
-  const [editing, setEditing] = useState<string | null>(null);
-  // 列表行的提示框放在该行同一行的空白处（规则段左边），不放到上一行——
-  // 放到上一行会被读成上一行的信息（DESIGN「提示框」）
-  const [tipFor, setTipFor] = useState<string | null>(null);
-  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tipId = useId();
-  const armRowTip = (id: string) => {
-    if (tipTimer.current) clearTimeout(tipTimer.current);
-    tipTimer.current = setTimeout(() => setTipFor(id), TIP_DELAY_MS.default);
-  };
-  const dropRowTip = () => {
-    if (tipTimer.current) clearTimeout(tipTimer.current);
-    tipTimer.current = null;
-    setTipFor(null);
-  };
-  useEffect(() => dropRowTip, []);
-  return (
-    <div className="mx-omenu">
-      <button
-        type="button"
-        className={`mx-omenu__all${selected === null ? " is-selected" : ""}`}
-        onClick={() => {
-          onSelect(null);
-          close();
-        }}
-      >
-        全部 <span className="mx-mono">{total}</span>
-      </button>
-      {sources.map((src) => {
-        const rule = src.rule;
-        const chosen = rule.available.filter((a) => rule.targets.includes(a.id));
-        return (
-          <div key={src.id} className="mx-omenu__item">
-            <div className={`mx-omenu__row${selected === src.id ? " is-selected" : ""}`}>
-              <button
-                type="button"
-                className="mx-omenu__name"
-                title={src.title}
-                onClick={() => {
-                  onSelect(src.id);
-                  close();
-                }}
-              >
-                {src.label} <span className="mx-mono">{src.count}</span>
-              </button>
-              <span
-                className={`mx-rule${rule.on ? "" : " is-off"}`}
-                aria-describedby={`${tipId}-${src.id}`}
-                onMouseEnter={() => {
-                  hint(rule.targets);
-                  armRowTip(src.id);
-                }}
-                onMouseLeave={() => {
-                  hint([]);
-                  dropRowTip();
-                }}
-                onFocus={() => armRowTip(src.id)}
-                onBlur={dropRowTip}
-              >
-                <span
-                  id={`${tipId}-${src.id}`}
-                  role="tooltip"
-                  className={`ss-tip mx-rowtip${tipFor === src.id ? " is-open" : ""}`}
-                >
-                  只管以后新出现的，现有的不变
-                </span>
-                <span className="mx-rule__text">以后新出现的</span>
-                <RuleArrow />
-                <button
-                  type="button"
-                  className="mx-rule__targets"
-                  aria-expanded={editing === src.id}
-                  aria-label={`改目标：${chosen.map((a) => a.name).join("、") || "还没选"}`}
-                  onClick={() => setEditing((v) => (v === src.id ? null : src.id))}
-                >
-                  {chosen.map((a) => (
-                    <AgentIcon key={a.id} id={a.agentId} name={a.name} labelled />
-                  ))}
-                </button>
-                <span className="mx-rule__switch">
-                  {rule.disabledReason ? (
-                    <Switch
-                      size="inline"
-                      checked={rule.on}
-                      onChange={rule.onToggle}
-                      label={`${src.label} 以后新出现的自动添加`}
-                      disabledReason={rule.disabledReason}
-                    />
-                  ) : (
-                    <Switch
-                      size="inline"
-                      checked={rule.on}
-                      onChange={rule.onToggle}
-                      label={`${src.label} 以后新出现的自动添加`}
-                    />
-                  )}
-                </span>
-              </span>
-            </div>
-            {editing === src.id ? (
-              <div className="mx-omenu__keys">
-                {rule.available.map((a) => {
-                  const pressed = rule.targets.includes(a.id);
-                  const last = pressed && rule.targets.length === 1;
-                  return (
-                    <AgentKey
-                      key={a.id}
-                      id={a.agentId}
-                      name={a.name}
-                      pressed={pressed}
-                      disabledReason={last ? "至少留一个" : undefined}
-                      onToggle={(next) =>
-                        rule.onTargets(
-                          next ? [...rule.targets, a.id] : rule.targets.filter((id) => id !== a.id),
-                        )
-                      }
-                    />
-                  );
-                })}
-              </div>
-            ) : null}
-            {rule.error ? (
-              <div className="mx-omenu__error" role="alert">
-                <IconCannot size={12} />
-                {rule.error}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
     </div>
   );
 }
