@@ -145,3 +145,108 @@ fn dynamic_auth_headers_are_not_compared() {
         .unwrap()
         .contains("fixture-secret"));
 }
+
+/// 两份只有参数不同的 stdio 配置，返回 args 字段两边的显示值与整份 DTO 的序列化
+fn args_diff(args_a: &[&str], args_b: &[&str]) -> (Vec<McpFieldValue>, String) {
+    let dir = tempdir().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let a = root.join("a.json");
+    let b = root.join("b.json");
+    for (path, args) in [(&a, args_a), (&b, args_b)] {
+        fs::write(
+            path,
+            serde_json::to_vec(&json!({"mcpServers":{"remote":{"command":"npx","args":args}}}))
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    let locations = vec![loc("A", &a, "claude-code"), loc("B", &b, "cursor")];
+    let diff = diff_fields(&locations, "remote", &["A".into(), "B".into()]);
+    let values = diff
+        .fields
+        .iter()
+        .find(|f| f.field == "args")
+        .unwrap()
+        .values
+        .clone();
+    (values, serde_json::to_string(&diff).unwrap())
+}
+
+#[test]
+fn header_flag_values_in_args_are_masked() {
+    let (values, wire) = args_diff(
+        &[
+            "mcp-remote",
+            "https://mcp.example.test/sse",
+            "--header",
+            "Authorization: Bearer sk-live-aaaa1111bbbb",
+        ],
+        &[
+            "mcp-remote",
+            "https://mcp.example.test/sse",
+            "-H",
+            "Authorization: Bearer sk-live-cccc2222dddd",
+        ],
+    );
+    assert_eq!(
+        values,
+        vec![
+            plain("mcp-remote https://mcp.example.test/sse --header Authorization: …bbbb"),
+            plain("mcp-remote https://mcp.example.test/sse -H Authorization: …dddd"),
+        ]
+    );
+    // DTO 里不含任何凭据原文
+    assert!(!wire.contains("sk-live") && !wire.contains("aaaa1111"));
+}
+
+#[test]
+fn secret_named_header_args_and_bare_bearer_are_masked() {
+    let (values, wire) = args_diff(
+        &["mcp-remote", "X-Api-Key: xk-plain-4455667788"],
+        &["mcp-remote", "Bearer tok-plain-99887766"],
+    );
+    assert_eq!(
+        values,
+        vec![
+            plain("mcp-remote X-Api-Key: …7788"),
+            plain("mcp-remote Bearer …7766"),
+        ]
+    );
+    assert!(!wire.contains("xk-plain") && !wire.contains("tok-plain"));
+}
+
+#[test]
+fn url_userinfo_is_masked() {
+    let dir = tempdir().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let a = root.join("a.json");
+    let b = root.join("b.json");
+    fs::write(
+        &a,
+        serde_json::to_vec(&json!({"mcpServers":{"db":{"type":"http",
+            "url":"https://admin:hunter2-pass@mcp.example.test/mcp?x=1"}}}))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        &b,
+        serde_json::to_vec(&json!({"mcpServers":{"db":{"type":"http",
+            "url":"https://tokenuser@mcp.example.test/mcp"}}}))
+        .unwrap(),
+    )
+    .unwrap();
+    let locations = vec![loc("A", &a, "claude-code"), loc("B", &b, "cursor")];
+
+    let diff = diff_fields(&locations, "db", &["A".into(), "B".into()]);
+
+    let url = diff.fields.iter().find(|f| f.field == "url").unwrap();
+    assert_eq!(
+        url.values,
+        vec![
+            plain("https://…:…@mcp.example.test/mcp?x=…"),
+            plain("https://…@mcp.example.test/mcp"),
+        ]
+    );
+    let wire = serde_json::to_string(&diff).unwrap();
+    assert!(!wire.contains("hunter2") && !wire.contains("admin") && !wire.contains("tokenuser"));
+}

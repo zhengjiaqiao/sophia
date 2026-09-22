@@ -585,7 +585,8 @@ pub fn scan(locations: &[McpLocation]) -> McpOverview {
 }
 
 /// 字段级差异里的一格：某个位置上这个字段的值。**凭据不出 core**：请求头与环境变量的值、
-/// URL 查询串的值、紧跟在 key / token 类参数后面的值，一律只给「不同」与末 4 位。
+/// URL 查询串的值与账号密码、紧跟在 key / token 类参数后面的值、参数里的请求头行与
+/// `Bearer …`，一律只给「不同」与末 4 位。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum McpFieldValue {
@@ -634,10 +635,32 @@ fn secret_value(value: &str) -> McpFieldValue {
     McpFieldValue::Secret { last4 }
 }
 
-/// URL 查询串里的值可能是令牌（`?api_key=…`）：值换成 `…`，键留着
+/// URL 里的凭据：查询串的值换成 `…`、键留着（`?api_key=…`）；地址里的账号密码
+/// （`https://user:pass@host`）整段换成 `…:…@`，账号本身也可能是令牌，一并不给
 fn url_without_secrets(url: &str) -> String {
-    let Some((base, query)) = url.split_once('?') else {
-        return url.to_owned();
+    let (base, query) = match url.split_once('?') {
+        Some((base, query)) => (base, Some(query)),
+        None => (url, None),
+    };
+    let base = match base.split_once("://") {
+        Some((scheme, rest)) => {
+            let end = rest.find(['/', '#']).unwrap_or(rest.len());
+            match rest[..end].rsplit_once('@') {
+                Some((userinfo, host)) => {
+                    let masked = if userinfo.contains(':') {
+                        "…:…"
+                    } else {
+                        "…"
+                    };
+                    format!("{scheme}://{masked}@{host}{}", &rest[end..])
+                }
+                None => base.to_owned(),
+            }
+        }
+        None => base.to_owned(),
+    };
+    let Some(query) = query else {
+        return base;
     };
     let masked: Vec<String> = query
         .split('&')
@@ -651,29 +674,97 @@ fn url_without_secrets(url: &str) -> String {
 
 fn secretish(word: &str) -> bool {
     let lower = word.to_ascii_lowercase();
-    ["key", "token", "secret", "password", "auth", "bearer"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "key", "token", "secret", "password", "auth", "bearer", "cookie",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
-/// 参数里的凭据：`--api-key xyz` 的 xyz、`--token=xyz` 的 xyz 换成 `…`
+/// 参数串是纯文本，凭据按 `secret_value` 的规则嵌进去：`…` 加末 4 位，太短只给 `…`
+fn masked_text(value: &str) -> String {
+    match secret_value(value.trim()) {
+        McpFieldValue::Plain { text } => text,
+        McpFieldValue::Secret { last4: Some(last4) } => format!("…{last4}"),
+        _ => "…".to_owned(),
+    }
+}
+
+/// 请求头行 `Name: value`：请求头的值在别处一律脱敏，这里也一样，名字留着
+fn masked_header_line(line: &str) -> String {
+    match line.split_once(':') {
+        Some((name, value)) => format!("{name}: {}", masked_text(value)),
+        None => masked_text(line),
+    }
+}
+
+/// 单个参数自身带凭据：`Authorization: Bearer x`、`API_KEY=x`（名字像凭据）、裸的 `Bearer x`
+fn arg_without_secrets(arg: &str) -> String {
+    if arg.contains("://") {
+        return url_without_secrets(arg);
+    }
+    if let Some(token) = arg
+        .strip_prefix("Bearer ")
+        .or_else(|| arg.strip_prefix("bearer "))
+    {
+        return format!("Bearer {}", masked_text(token));
+    }
+    let named = |sep: char| {
+        arg.split_once(sep).filter(|(name, _)| {
+            !name.is_empty() && !name.contains(char::is_whitespace) && secretish(name)
+        })
+    };
+    if let Some((name, value)) = named(':') {
+        return format!("{name}: {}", masked_text(value));
+    }
+    if let Some((name, value)) = named('=') {
+        return format!("{name}={}", masked_text(value));
+    }
+    arg.to_owned()
+}
+
+fn header_flag(flag: &str) -> bool {
+    flag == "-H" || flag.eq_ignore_ascii_case("--header")
+}
+
+/// 参数里的凭据：`--api-key xyz` 的 xyz、`--token=xyz` 的 xyz 换成 `…`；`--header` / `-H`
+/// 后面的请求头行只留名字；参数自身像凭据的（见 `arg_without_secrets`）按末 4 位规则脱敏
 fn args_without_secrets(args: &[String]) -> String {
+    enum Next {
+        Plain,
+        Hide,
+        Header,
+    }
     let mut out = Vec::with_capacity(args.len());
-    let mut hide_next = false;
+    let mut next = Next::Plain;
     for arg in args {
-        if hide_next {
-            out.push("…".to_owned());
-            hide_next = false;
-            continue;
+        match std::mem::replace(&mut next, Next::Plain) {
+            Next::Hide => {
+                out.push("…".to_owned());
+                continue;
+            }
+            Next::Header => {
+                out.push(masked_header_line(arg));
+                continue;
+            }
+            Next::Plain => {}
         }
         match arg.split_once('=') {
+            Some((key, line)) if header_flag(key) => {
+                out.push(format!("{key}={}", masked_header_line(line)))
+            }
             Some((key, _)) if key.starts_with('-') && secretish(key) => {
                 out.push(format!("{key}=…"))
             }
-            _ => {
-                hide_next = arg.starts_with('-') && secretish(arg);
+            _ if header_flag(arg) => {
+                next = Next::Header;
                 out.push(arg.clone());
             }
+            _ if arg.starts_with('-') && secretish(arg) => {
+                next = Next::Hide;
+                out.push(arg.clone());
+            }
+            _ => out.push(arg_without_secrets(arg)),
         }
     }
     out.join(" ")
