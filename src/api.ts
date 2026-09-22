@@ -109,15 +109,10 @@ export const api = {
     invoke<GatewayState>("gateway_select_models", { selected }),
   // ----- 多家网关：带 providerId 的版本。上面不带 id 的三个作用在第一家上，界面迁完后删 -----
   /** id 省略是新建；key 省略表示不动已存的密钥，带了就先向网关校验 */
-  gatewayUpsertProvider: (input: {
-    id?: string;
-    name?: string;
-    baseUrl: string;
-    key?: string;
-  }) => invoke<GatewayProviderSaved>("gateway_upsert_provider", input),
+  gatewayUpsertProvider: (input: { id?: string; name?: string; baseUrl: string; key?: string }) =>
+    invoke<GatewayProviderSaved>("gateway_upsert_provider", input),
   /** 连同钥匙串里的密钥一起删，删了回不来：调用前先向用户确认 */
-  gatewayRemoveProvider: (id: string) =>
-    invoke<GatewayState>("gateway_remove_provider", { id }),
+  gatewayRemoveProvider: (id: string) => invoke<GatewayState>("gateway_remove_provider", { id }),
   /** 删网关第一步：只标记，返回的 state 里已没有这一家；配置与密钥都还在，可撤销 */
   gatewayMarkRemoveProvider: (id: string) =>
     invoke<GatewayState>("gateway_mark_remove_provider", { id }),

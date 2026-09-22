@@ -340,9 +340,7 @@ export interface GatewaySelectedModel {
 /// 与 core `mcp::McpFieldValue` 对应：某个位置上一个字段的值。凭据在 core 里就脱敏了，
 /// 前端拿不到原文——`secret` 只有末 4 位（值太短时连末 4 位也没有）
 export type McpFieldValue =
-  | { kind: "plain"; text: string }
-  | { kind: "secret"; last4: string | null }
-  | { kind: "absent" };
+  { kind: "plain"; text: string } | { kind: "secret"; last4: string | null } | { kind: "absent" };
 /// 同名服务在几个位置上的字段级差异（`mcp_field_diff`）。只列不同的字段
 export interface McpDiff {
   name: string;
