@@ -467,7 +467,7 @@ test("AgentRow 待重启：配置网关之后出紧凑键「重启生效」，�
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
 });
 
-test("AgentRow 重启中：键位原地换成 14px 细弧 +「正在重启 Codex」；已生效：一行例行成功", () => {
+test("AgentRow 重启中：键位原地换成 14px 地球绕太阳 +「正在重启 Codex」；已生效：一行例行成功", () => {
   const busyHtml = render(AgentRow, {
     ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
     phase: { kind: "restarting" },
@@ -840,7 +840,7 @@ test("serviceLeftover：只有停用了、后台服务却还装着才算残留�
   assert.equal(serviceLeftover(state({ enabled: false, router: router(false) })), false);
 });
 
-test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（与重启生效同形），提示框写结果；正在卸下时细弧 + 文字", () => {
+test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（与重启生效同形），提示框写结果；正在卸下时忙碌指示 + 文字", () => {
   const leftover = {
     enabled: false,
     router: { installed: true, running: true, port: 1, protocol: "chat", error: "" },

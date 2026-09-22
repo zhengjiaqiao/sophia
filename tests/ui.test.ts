@@ -879,7 +879,7 @@ test("Empty 两个动作里只有一个是按钮，另一个降文字链", () =>
   assert.match(html, /class="ss-btn ss-btn--link">打开目录</);
 });
 
-test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首次扫描有图时细弧跟在句子前", () => {
+test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首次扫描有图时忙碌指示跟在句子前", () => {
   const folders = render(Empty, {
     kind: "noAgentDirs",
     art: "folders",
