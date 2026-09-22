@@ -445,9 +445,15 @@
   white-space: nowrap;
 }
 
-.mx-busy {
+/* 批量写入真的慢时触发项旁的细弧 + 一句：13 ink-mute，紧跟状态点项 */
+.mx-keybusy {
   display: inline-flex;
-  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  color: var(--ink-mute);
+  font-size: var(--size-caption);
+  white-space: nowrap;
 }
 
 /* 行悬停时名字后的「打开 ↗」：12 ink-mute，悬停转 ink 加下划线 */

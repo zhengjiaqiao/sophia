@@ -42,7 +42,6 @@ const base = {
       name: "pdf",
       origin: { id: "w", label: "WeiboAP", path: "/w/skills/pdf", onReveal: () => undefined },
       cells: { cc: { dot: "own" as const, clickable: false, tip: "原件就在这儿" }, cx: null },
-      busy: "正在开启 2 个",
     },
   ],
   nameLabel: "名称",
@@ -71,8 +70,8 @@ test("Matrix：通道条表头 + 原件位置列（120，来源名），没有�
   assert.match(html, /grid-template-columns:34px 246px 120px 88px 88px 24px/);
   // 默认名称升序
   assert.ok(html.indexOf(">docx<") < html.indexOf(">pdf<"));
-  // 行内细弧，句子进读屏
-  assert.match(html, /aria-label="正在开启 2 个"/);
+  // 行内细弧 + 句子属于退役行为：批量时格子同时变、不在行里转
+  assert.doesNotMatch(html, /mx-busy|正在开启/);
 });
 
 test("Matrix：当前排序依据列常显 ↑（默认名称升序也显示），其余列不画", () => {
@@ -227,4 +226,33 @@ test("做不了的格子的说明：为什么 + 去哪做", async () => {
   // 整个文件夹是链接：沿用 cellState 的原因
   assert.equal(blockedTipOf("wholeLinked", "Cursor", "docx", "原句"), "原句");
   assert.match(mcpOwnTip("Claude Code"), /^这就是原件，不需要写进 · 要从 Claude Code 移除/);
+});
+
+test("批量写入：格子同时变、不依次点亮；真的慢（> 500ms）才在触发项旁出细弧 + 一句", async () => {
+  const { BATCH_BUSY_DELAY_MS } = await import("../src/Matrix.tsx");
+  const { batchBusyText } = await import("../src/toastText.ts");
+  assert.equal(BATCH_BUSY_DELAY_MS, 500);
+  assert.equal(batchBusyText("link", "Codex"), "正在加到 Codex");
+  assert.equal(batchBusyText("unlink", "Codex"), "正在从 Codex 移除");
+  assert.equal(batchBusyText("write", "Cursor"), "正在写进 Cursor");
+  const noop = () => undefined;
+  const check = (label: string) => ({ checked: false, label, tip: label, onToggle: noop });
+  const props = {
+    ...base,
+    selected: new Set(["u|docx"]),
+    allAgents: check("选中的都加到所有 agent"),
+    columnChecks: { cc: check("选中的都加到 Claude Code"), cx: check("选中的都加到 Codex") },
+  };
+  // 没慢到阈值：什么都不显示
+  assert.doesNotMatch(render(Matrix, props), /mx-keybusy/);
+  // 慢了：细弧 + 句子贴在触发的那一项旁，只这一项
+  const slow = render(Matrix, { ...props, keyBusy: { keyId: "cx", label: "正在加到 Codex" } });
+  assert.equal((slow.match(/class="mx-keybusy"/g) ?? []).length, 1);
+  const at = slow.indexOf('class="mx-keybusy"');
+  assert.ok(at > slow.indexOf('mx-agentitem__name">Codex<'));
+  assert.ok(at > slow.indexOf('mx-agentitem__name">Claude Code<'));
+  assert.match(
+    slow.slice(at),
+    /^class="mx-keybusy" role="status">[\s\S]*?<span>正在加到 Codex<\/span>/,
+  );
 });

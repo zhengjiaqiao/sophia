@@ -41,6 +41,8 @@ const COL_W = 88;
 const TAIL_W = 24;
 /// 点了做不了的格子后，说明停留的时长
 export const PINNED_TIP_MS = 3000;
+/// 批量写入超过这么久还没完成，触发项旁才出细弧 + 一句；更快的什么都不显示
+export const BATCH_BUSY_DELAY_MS = 500;
 
 /// 按下一格（点击或空格）做什么：能改的交给调用方改数据；做不了的只当即说明，不碰数据
 export const cellPress = (view: Pick<MatrixCellView, "clickable">): "act" | "explain" =>
@@ -71,7 +73,7 @@ export interface MatrixCellView {
   clickable: boolean;
   /// 提示框一行：可点时是「动词」（`加到 Claude Code`），不可点时是原因
   tip: string;
-  /// 操作进行中：画成灰色的将来状态（进度就是格子依次点亮）
+  /// 单格写入进行中：画成灰色的将来状态（批量不用它，格子同时变）
   pending?: boolean;
 }
 
@@ -95,8 +97,6 @@ export interface MatrixRowView {
   transport?: ReactNode;
   /// 非空＝这一行勾不动，值是原因
   selectDisabledReason?: string;
-  /// 非空＝这一行正在操作：名字后 14px 转盘，句子进读屏与悬停
-  busy?: string;
 }
 
 /// 选择态下按 agent 的批量操作：工具行里「状态点 + 名字」一项（DESIGN「选择操作条」），与格子同一套记号。
@@ -156,8 +156,12 @@ export interface MatrixProps {
 
   /// 一行都没有时，表头下面放什么（空态）
   empty?: ReactNode;
-  /// 刚变化的格：播一次 120ms 反色闪，`nonce` 变了才重播；`stagger` 毫秒依次亮
-  flash?: { keys: string[]; nonce: number; stagger?: number };
+  /// 刚变化的格：播一次 120ms 反色闪，`nonce` 变了才重播。**只给单格**：批量时格子同时变成新状态、
+  /// 不闪（DESIGN 冲突表「格子变化要不要闪」）
+  flash?: { keys: string[]; nonce: number };
+  /// 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，工具行里触发的那一项旁出 14px 细弧 + 一句
+  /// （`正在加到 Codex`）；keyId 同 keyToast（"all" 或列 id）。调用方负责延迟与撤掉
+  keyBusy?: { keyId: string; label: string } | null;
   /// 单格失败：格子下方的小黑窗
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   /// 贴在某一行下方的提示条（只留这份 · 撤销）
@@ -192,15 +196,13 @@ export function clampFocus(
   };
 }
 
-/// 行内忙碌：14px 细弧，句子进提示框与读屏文本（DESIGN「忙碌指示」）。完成即消失
-function InlineBusy({ label }: { label?: string }) {
-  if (label === undefined) return null;
+/// 批量写入真的慢时触发项旁的忙碌：14px 细弧 + 一句，句子同时进读屏（DESIGN「忙碌指示」）
+function KeyBusy({ label }: { label: string }) {
   return (
-    <Tooltip content={label} context="table">
-      <span className="mx-busy" role="status">
-        <Spinner size={14} label={label} />
-      </span>
-    </Tooltip>
+    <span className="mx-keybusy" role="status">
+      <Spinner size={14} label={label} />
+      <span>{label}</span>
+    </span>
   );
 }
 
@@ -330,6 +332,7 @@ export default function Matrix(props: MatrixProps) {
     cellNotice,
     rowToast,
     keyToast,
+    keyBusy,
     globalToast,
     focus: jump,
   } = props;
@@ -415,16 +418,7 @@ export default function Matrix(props: MatrixProps) {
   const flashNonce = flash?.nonce;
   useEffect(() => {
     if (!flash || flash.keys.length === 0) return;
-    const stagger = flash.stagger ?? 0;
-    if (stagger === 0) {
-      setFlashing(new Set(flash.keys));
-      return;
-    }
-    // 依次点亮：一格接一格，那就是进度
-    const timers = flash.keys.map((key, i) =>
-      setTimeout(() => setFlashing((prev) => new Set(prev).add(key)), i * stagger),
-    );
-    return () => timers.forEach(clearTimeout);
+    setFlashing(new Set(flash.keys));
     // 只跟 nonce：同一批 keys 的数组身份每次渲染都会变
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flashNonce]);
@@ -696,10 +690,14 @@ export default function Matrix(props: MatrixProps) {
         {short ? null : "已选 "}
         <span className="mx-mono">{selectedVisible.length}</span> 个
       </span>
-      <span className={`mx-agentitems${busy ? " ss-busy" : ""}`}>
+      {/* 忙时置灰的是各项本身，不是整组：项旁「正在加到 X」那一句要读得清 */}
+      <span className="mx-agentitems">
         {allAgents ? (
           <span className="mx-keywrap">
-            <AgentItem check={allAgents} name="所有 agent" />
+            <span className={busy ? "ss-busy" : undefined}>
+              <AgentItem check={allAgents} name="所有 agent" />
+            </span>
+            {keyBusy?.keyId === "all" ? <KeyBusy label={keyBusy.label} /> : null}
             {keyToast?.keyId === "all" ? (
               <div className="mx-keytoast" ref={keyToastRef}>
                 {keyToast.node}
@@ -710,7 +708,10 @@ export default function Matrix(props: MatrixProps) {
         {columns.map((col) =>
           columnChecks?.[col.id] ? (
             <span key={col.id} className="mx-keywrap">
-              <AgentItem check={columnChecks[col.id]} name={col.name} />
+              <span className={busy ? "ss-busy" : undefined}>
+                <AgentItem check={columnChecks[col.id]} name={col.name} />
+              </span>
+              {keyBusy?.keyId === col.id ? <KeyBusy label={keyBusy.label} /> : null}
               {keyToast?.keyId === col.id ? (
                 <div className="mx-keytoast" ref={keyToastRef}>
                   {keyToast.node}
@@ -914,7 +915,6 @@ export default function Matrix(props: MatrixProps) {
             )}
             {row.mark}
             {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
-            <InlineBusy label={row.busy} />
           </div>
           {hasTransport ? <div className="mx-row__transport">{row.transport}</div> : null}
           {/* 原件位置：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}

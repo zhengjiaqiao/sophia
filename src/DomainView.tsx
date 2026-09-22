@@ -45,10 +45,6 @@ export interface DomainViewProps {
   rows: DomainRow[];
   /// 格此刻该画成什么（乐观更新之后的状态）
   stateOf: (ref: CellRef, actual: CellState) => CellState;
-  /// 批量操作进行中的格：画成灰色的将来状态
-  pendingCells: Set<string>;
-  /// 正在操作的行 → 忙什么（行内转盘 + 读屏句子）
-  busyRows: Map<string, string>;
   /// 只留这份确认之后、删除完成之前先藏起来的那一份
   hiddenRows: Set<string>;
   /// 同名行悬停读数（`3 个文件`）；没取到时为 undefined
@@ -75,7 +71,9 @@ export interface DomainViewProps {
   onUndo: () => void;
   shortcuts: boolean;
 
-  flash?: { keys: string[]; nonce: number; stagger?: number };
+  flash?: { keys: string[]; nonce: number };
+  /// 批量写入真的慢时，触发项旁的细弧 + 一句
+  keyBusy?: { keyId: string; label: string } | null;
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   rowToast?: { rowKey: string; node: ReactNode } | null;
   keyToast?: { keyId: string; node: ReactNode } | null;
@@ -203,7 +201,6 @@ export default function DomainView(props: DomainViewProps) {
           dot: view.dot,
           clickable: verb !== undefined,
           tip: verb ?? blockedTipOf(state, target.label, row.skill, view.reason ?? ""),
-          pending: props.pendingCells.has(skillCellKey(ref)),
         };
       }
       const dup = copies.get(row.skill) ?? [];
@@ -264,7 +261,6 @@ export default function DomainView(props: DomainViewProps) {
               label={`只留 ${labelOf(row.sourceId)} 的 ${row.skill}`}
             />
           ),
-        busy: props.busyRows.get(key),
       };
     });
 
@@ -401,6 +397,7 @@ export default function DomainView(props: DomainViewProps) {
       cellNotice={props.cellNotice}
       rowToast={props.rowToast}
       keyToast={props.keyToast}
+      keyBusy={props.keyBusy}
       globalToast={props.globalToast}
       focus={props.focus}
     />

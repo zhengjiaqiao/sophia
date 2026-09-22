@@ -3,12 +3,14 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
+import { BATCH_BUSY_DELAY_MS } from "./Matrix";
 import ImportPage from "./pages/ImportPage";
 import { pathsOfKey } from "./pages/pendingIssues";
 import { shortDate } from "./dateText";
 import { Confirm, Empty, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import {
+  batchBusyText,
   keepThisConfirm,
   toastFor,
   type FailedItem,
@@ -90,9 +92,9 @@ export default function SkillsTab({
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录写不进去）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
   const [readOnly, setReadOnly] = useState<Set<string>>(new Set());
-  const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
-  const [busyRows, setBusyRows] = useState<Map<string, string>>(new Map());
-  const [flash, setFlash] = useState<{ keys: string[]; nonce: number; stagger?: number }>();
+  // 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，触发项旁的细弧 + 一句
+  const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
+  const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
   const [cellNotice, setCellNotice] = useState<{
     rowKey: string;
     columnId: string;
@@ -332,12 +334,15 @@ export default function SkillsTab({
     if (cells.length === 0) return;
     setKeyToast(null);
     setCellNotice(null);
-    const keys = cells.map(skillCellKey);
-    const rows = [...new Set(cells.map(skillRowKey))];
-    const sentence = `正在${op === "link" ? "加上" : "移除"} ${cells.length} 个`;
+    // 格子同时变成新状态，不闪、不依次点亮；真的慢才在触发项旁出细弧 + 一句（DESIGN「选择操作条」）
     setOptimisticFor(cells, op === "link" ? "linked" : "missing");
-    setPendingCells(new Set(keys));
-    setBusyRows(new Map(rows.map((r) => [r, sentence])));
+    const agent = keyId === "all" ? "所有 agent" : (targetOf(keyId)?.label ?? "");
+    const slow = keyId
+      ? setTimeout(
+          () => setKeyBusy({ keyId, label: batchBusyText(op, agent) }),
+          BATCH_BUSY_DELAY_MS,
+        )
+      : undefined;
     onBusy(true);
     let result: Awaited<ReturnType<typeof run>> | null = null;
     try {
@@ -346,17 +351,16 @@ export default function SkillsTab({
       onError(String(e));
     } finally {
       onBusy(false);
-      setPendingCells(new Set());
-      setBusyRows(new Map());
+      clearTimeout(slow);
+      setKeyBusy(null);
     }
     if (result !== null) {
       noteReadOnly(result.failed, op === "link" ? cells : []);
-      // 没成的先弹回；做成的依次闪一下——进度就是格子依次点亮
+      // 没成的弹回；做成的保持新状态，结果由提示条交代
       setOptimisticFor(
         result.failed.map((f) => f.ref),
         null,
       );
-      setFlash({ keys: result.done.map(skillCellKey), nonce: Date.now(), stagger: 40 });
       const done = result.done;
       const text = toastFor(op, {
         done: toastItems(done),
@@ -509,7 +513,7 @@ export default function SkillsTab({
       .catch(() => undefined);
   };
 
-  // ===== 自动规则在背后做了事：右下例行一行 + 撤销，被开启的格依次闪一下 =====
+  // ===== 自动规则在背后做了事：右下例行一行 + 撤销；格子直接是新状态，不闪 =====
 
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
@@ -536,7 +540,6 @@ export default function SkillsTab({
         if (row && target)
           refs.push({ sourceId: row.sourceId, skill: row.skill, targetId: target.id });
       }
-      setFlash({ keys: refs.map(skillCellKey), nonce: Date.now(), stagger: 40 });
       const undo =
         refs.length > 0
           ? () => {
@@ -631,8 +634,6 @@ export default function SkillsTab({
         page={page}
         rows={visible}
         stateOf={stateOf}
-        pendingCells={pendingCells}
-        busyRows={busyRows}
         hiddenRows={hiddenRows}
         dupReadout={dupReadout}
         onDupHover={dupHover}
@@ -661,6 +662,7 @@ export default function SkillsTab({
         cellNotice={cellNotice}
         rowToast={rowToast}
         keyToast={keyToast}
+        keyBusy={keyBusy}
         globalToast={globalToast}
         focus={focus}
       />

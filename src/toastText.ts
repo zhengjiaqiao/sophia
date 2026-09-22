@@ -190,3 +190,10 @@ export function keepThisConfirm(input: {
     body: input.relinked > 0 ? `${trash}，${input.relinked} 条链接改指到这一份` : trash,
   };
 }
+
+/// 批量写入真的慢时触发项旁的那一句（DESIGN「忙碌指示」）：`正在加到 Codex` / `正在从 Codex 移除` /
+/// `正在写进 Codex`。agent 为「所有 agent」时照样拼
+export function batchBusyText(op: "link" | "unlink" | "write", agent: string): string {
+  if (op === "unlink") return `正在从 ${agent} 移除`;
+  return `正在${op === "link" ? "加到" : "写进"} ${agent}`;
+}

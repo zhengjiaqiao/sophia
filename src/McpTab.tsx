@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import Matrix, {
+  BATCH_BUSY_DELAY_MS,
   cellKey,
   type MatrixCellView,
   type MatrixRowView,
@@ -25,7 +26,7 @@ import {
 } from "./mcpView";
 import { AddButton, Confirm, Empty, Tag, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
-import { toastFor, type ToastItem, type ToastText } from "./toastText";
+import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
 import { mcpOwnTip } from "./cellTip";
 import type {
   McpUndoReport,
@@ -134,8 +135,9 @@ export default function McpTab({
   const [pane, setPane] = useState<Pane | null>(null);
   const [optimistic, setOptimistic] = useState<Set<string>>(new Set());
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
-  const [busyRows, setBusyRows] = useState<Map<string, string>>(new Map());
-  const [flash, setFlash] = useState<{ keys: string[]; nonce: number; stagger?: number }>();
+  // 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，触发项旁的细弧 + 一句
+  const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
+  const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
   const [cellNotice, setCellNotice] = useState<{
     rowKey: string;
     columnId: string;
@@ -186,7 +188,7 @@ export default function McpTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  // 自动规则在背后写了：右下例行一行交代一声（⑨⑬），被写进的格依次闪一下
+  // 自动规则在背后写了：右下例行一行交代一声（⑨⑬）；格子直接是新状态，不闪
   const domainsRef = useRef<McpDomain[]>([]);
   useEffect(() => {
     let disposed = false;
@@ -198,11 +200,6 @@ export default function McpTab({
       const items: ToastItem[] = created.map((e) => {
         const t = targets.find((x) => x.id === e.targetId);
         return { name: e.name, agent: t ? { id: t.harnessId, name: t.label } : undefined };
-      });
-      setFlash({
-        keys: created.map((e) => cellKey(e.name, e.targetId)),
-        nonce: Date.now(),
-        stagger: 40,
       });
       const text = toastFor("autoWrite", { done: items });
       setGlobalToast(
@@ -346,11 +343,24 @@ export default function McpTab({
     fromImport = false,
   ) => {
     const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
-    const rows = [...new Set(preview.actions.map((a) => a.name))];
+    // 单格：写的时候那一格灰着，写成闪一下。批量（按键、添加页）：格子同时变成新状态、不闪，
+    // 真的慢才在触发项旁出细弧 + 一句（DESIGN 冲突表「格子变化要不要闪」）
+    const single = keyId === undefined && !fromImport;
     setPane(null);
     setOptimistic((prev) => new Set([...prev, ...keys]));
-    setPendingCells(new Set(keys));
-    setBusyRows(new Map(rows.map((r) => [r, `正在写进 ${keys.length} 处`])));
+    if (single) setPendingCells(new Set(keys));
+    const agent =
+      keyId === "all"
+        ? "所有 agent"
+        : keyId
+          ? ((page ? columnNames(page.targets).get(keyId) : undefined) ?? labelOf(keyId))
+          : "";
+    const slow = keyId
+      ? setTimeout(
+          () => setKeyBusy({ keyId, label: batchBusyText("write", agent) }),
+          BATCH_BUSY_DELAY_MS,
+        )
+      : undefined;
     onBusy(true);
     let result: McpReport | null = null;
     try {
@@ -360,16 +370,14 @@ export default function McpTab({
     } finally {
       onBusy(false);
       setPendingCells(new Set());
-      setBusyRows(new Map());
+      clearTimeout(slow);
+      setKeyBusy(null);
     }
     if (result !== null) {
       const created = result.entries.filter((e) => e.outcome === "created");
       const failed = result.entries.filter((e) => e.outcome === "failed");
-      setFlash({
-        keys: created.map((e) => cellKey(e.name, e.targetId)),
-        nonce: Date.now(),
-        stagger: 40,
-      });
+      if (single)
+        setFlash({ keys: created.map((e) => cellKey(e.name, e.targetId)), nonce: Date.now() });
       const text = toastFor("write", {
         done: itemsOf(created),
         failed: itemsOf(failed).map((item, i) => ({
@@ -651,7 +659,6 @@ export default function McpTab({
         ) : undefined,
       transport: transports.join(" / "),
       selectDisabledReason: blockedOf(page, row),
-      busy: busyRows.get(key),
     };
   });
 
@@ -789,6 +796,7 @@ export default function McpTab({
         flash={flash}
         cellNotice={cellNotice}
         keyToast={keyToast}
+        keyBusy={keyBusy}
         globalToast={globalToast}
         focus={focus}
       />
