@@ -609,7 +609,7 @@ export default function SkillsTab({
   // ===== 渲染 =====
 
   if (!overview) {
-    return <Empty kind="scanning" description="正在读 skill 目录" />;
+    return <Empty kind="scanning" description="正在读 skill 目录" art="horizon" />;
   }
   if (page === null) {
     return (
@@ -617,6 +617,7 @@ export default function SkillsTab({
         kind="noAgentDirs"
         description="这个位置下还没有 agent 的 skill 目录"
         primary={{ label: "添加 skill", onClick: () => setImportOpen(true) }}
+        art="folders"
       />
     );
   }

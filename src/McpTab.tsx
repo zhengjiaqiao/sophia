@@ -511,7 +511,7 @@ export default function McpTab({
 
   // ===== 渲染 =====
 
-  if (!overview) return <Empty kind="scanning" description="正在读 MCP 配置" />;
+  if (!overview) return <Empty kind="scanning" description="正在读 MCP 配置" art="horizon" />;
 
   if (overview.locations.length === 0) {
     return (
@@ -519,6 +519,7 @@ export default function McpTab({
         kind="noAgentDirs"
         description="没找到 Claude Code、Codex 或 Cursor 的 MCP 配置文件"
         hint="只看文件里的配置；Claude.ai 的连接器和内置 MCP 不在其中"
+        art="folders"
       />
     );
   }
@@ -529,6 +530,7 @@ export default function McpTab({
         kind="noAgentDirs"
         description="这个位置下还没有可用的 MCP 配置位置"
         hint="添加第一个服务时会把配置文件建出来"
+        art="folders"
       />
     );
   }
@@ -702,9 +704,13 @@ export default function McpTab({
         }}
       />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
-      <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" action={addAction} />
+      <TableEmpty
+        text="这里没有能复制的完整定义，从别处添加一份过来"
+        action={addAction}
+        art="links"
+      />
     ) : (
-      <TableEmpty text={`${page.label} 还没有自己的 MCP 配置`} action={addAction} />
+      <TableEmpty text={`${page.label} 还没有自己的 MCP 配置`} action={addAction} art="links" />
     );
 
   // 写进 WeiboAP 的那几处要额外说一句：它只收下定义，启用是它自己的事

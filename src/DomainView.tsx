@@ -20,7 +20,7 @@ import Matrix, {
 import { distinguishingSegments } from "./pages/importDefaults";
 import { viewOf } from "./cellState";
 import { displayPath } from "./pathText";
-import { AddButton, Button, DupMark, Tooltip } from "./ui";
+import { AddButton, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
 /// 行键：本体位置 + skill（一页只显示一个域）
@@ -333,9 +333,9 @@ export default function DomainView(props: DomainViewProps) {
         action={{ label: "清除筛选", onClick: props.onClearFilter }}
       />
     ) : noAgentDirs ? (
-      <Empty text={`${page.label} 下还没有 agent 的 skill 目录`} action={addAction} />
+      <Empty text={`${page.label} 下还没有 agent 的 skill 目录`} action={addAction} art="folders" />
     ) : (
-      <Empty text={`${page.label} 里还没有 skill`} action={addAction} />
+      <Empty text={`${page.label} 里还没有 skill`} action={addAction} art="links" />
     );
 
   return (
@@ -401,23 +401,24 @@ export function PlusGlyph() {
   );
 }
 
-/// 表格里的空态：一句现状 + 一个按钮（表头照常在上面——列在，用户才有入口把目录建出来）
+/// 表格里的空态：一句现状 + 一个按钮（表头照常在上面——列在，用户才有入口把目录建出来）。
+/// 图按 DESIGN「图像」：没有 agent 目录 folders、一个都没有 links；筛选无结果不放图
 export function Empty({
   text,
   action,
+  art,
 }: {
   text: string;
   action: { label: string; onClick: () => void; icon?: ReactNode };
+  art?: EmptyArt;
 }) {
   return (
-    <div className="ss-empty">
-      <div className="ss-empty__description">{text}</div>
-      <div className="ss-empty__actions">
-        <Button icon={action.icon} onClick={action.onClick}>
-          {action.label}
-        </Button>
-      </div>
-    </div>
+    <UiEmpty
+      kind={art === "folders" ? "noAgentDirs" : art === "links" ? "noSkills" : "noMatch"}
+      description={text}
+      primary={action}
+      art={art}
+    />
   );
 }
 
