@@ -21,6 +21,7 @@ import Matrix, {
 } from "./Matrix";
 import { defaultTargets, distinguishingSegments, loadImportMemory } from "./pages/importDefaults";
 import { viewOf } from "./cellState";
+import { displayPath } from "./pathText";
 import { AddButton, Button, DupMark, Tooltip } from "./ui";
 import type { AutoLink, CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
@@ -514,9 +515,7 @@ function SkillDetail({
     <>
       {description ? <div className="mx-detail__desc">{description}</div> : null}
       <div className="mx-detail__path">
-        <span className="mx-mono" title={path}>
-          {path}
-        </span>
+        <span className="mx-mono">{displayPath(path)}</span>
         <RevealLink path={path} onReveal={onReveal} />
       </div>
       {readout ? <div>{readout}</div> : null}

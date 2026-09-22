@@ -33,6 +33,7 @@ import {
   TIP_DELAY_MS,
   Tooltip,
 } from "./ui/index.ts";
+import { displayPath } from "./pathText.ts";
 import "./Matrix.css";
 
 /// 版式常量，与 Matrix.css 同值（列带要按它算左边距）
@@ -228,11 +229,11 @@ function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
 /// `打开 ↗`：12 ink-mute，悬停转 ink 加下划线；点一下在访达中显示。提示框是完整路径
 export function RevealLink({ path, onReveal }: { path: string; onReveal: () => void }) {
   return (
-    <Tooltip content={<span className="mx-mono">{path}</span>}>
+    <Tooltip content={<span className="mx-mono">{displayPath(path)}</span>}>
       <button
         type="button"
         className="mx-reveal"
-        aria-label={`在访达中显示 ${path}`}
+        aria-label={`在访达中显示 ${displayPath(path)}`}
         onClick={onReveal}
       >
         打开
@@ -918,7 +919,15 @@ export default function Matrix(props: MatrixProps) {
           {hasTransport ? <div className="mx-row__transport">{row.transport}</div> : null}
           {/* 原件位置：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
           <div className="mx-row__origin">
-            <Tooltip content={<span className="mx-mono">{row.origin.path}</span>} context="table">
+            <Tooltip
+              content={
+                <>
+                  <div>{row.origin.label}</div>
+                  <div className="mx-mono">{displayPath(row.origin.path)}</div>
+                </>
+              }
+              context="table"
+            >
               <span className="mx-origin" tabIndex={-1}>
                 {row.origin.label}
               </span>
@@ -1113,6 +1122,21 @@ export function OriginMenu({
   close: () => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  // 列表行的提示框放在该行同一行的空白处（规则段左边），不放到上一行——
+  // 放到上一行会被读成上一行的信息（DESIGN「提示框」）
+  const [tipFor, setTipFor] = useState<string | null>(null);
+  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipId = useId();
+  const armRowTip = (id: string) => {
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    tipTimer.current = setTimeout(() => setTipFor(id), TIP_DELAY_MS.default);
+  };
+  const dropRowTip = () => {
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    tipTimer.current = null;
+    setTipFor(null);
+  };
+  useEffect(() => dropRowTip, []);
   return (
     <div className="mx-omenu">
       <button
@@ -1142,45 +1166,59 @@ export function OriginMenu({
               >
                 {src.label} <span className="mx-mono">{src.count}</span>
               </button>
-              <Tooltip content="只管以后新出现的，现有的不变">
+              <span
+                className={`mx-rule${rule.on ? "" : " is-off"}`}
+                aria-describedby={`${tipId}-${src.id}`}
+                onMouseEnter={() => {
+                  hint(rule.targets);
+                  armRowTip(src.id);
+                }}
+                onMouseLeave={() => {
+                  hint([]);
+                  dropRowTip();
+                }}
+                onFocus={() => armRowTip(src.id)}
+                onBlur={dropRowTip}
+              >
                 <span
-                  className={`mx-rule${rule.on ? "" : " is-off"}`}
-                  onMouseEnter={() => hint(rule.targets)}
-                  onMouseLeave={() => hint([])}
+                  id={`${tipId}-${src.id}`}
+                  role="tooltip"
+                  className={`ss-tip mx-rowtip${tipFor === src.id ? " is-open" : ""}`}
                 >
-                  <span className="mx-rule__text">以后新出现的</span>
-                  <RuleArrow />
-                  <button
-                    type="button"
-                    className="mx-rule__targets"
-                    aria-expanded={editing === src.id}
-                    aria-label={`改目标：${chosen.map((a) => a.name).join("、") || "还没选"}`}
-                    onClick={() => setEditing((v) => (v === src.id ? null : src.id))}
-                  >
-                    {chosen.map((a) => (
-                      <AgentIcon key={a.id} id={a.agentId} name={a.name} labelled />
-                    ))}
-                  </button>
-                  <span className="mx-rule__switch">
-                    {rule.disabledReason ? (
-                      <Switch
-                        size="inline"
-                        checked={rule.on}
-                        onChange={rule.onToggle}
-                        label={`${src.label} 以后新出现的自动添加`}
-                        disabledReason={rule.disabledReason}
-                      />
-                    ) : (
-                      <Switch
-                        size="inline"
-                        checked={rule.on}
-                        onChange={rule.onToggle}
-                        label={`${src.label} 以后新出现的自动添加`}
-                      />
-                    )}
-                  </span>
+                  只管以后新出现的，现有的不变
                 </span>
-              </Tooltip>
+                <span className="mx-rule__text">以后新出现的</span>
+                <RuleArrow />
+                <button
+                  type="button"
+                  className="mx-rule__targets"
+                  aria-expanded={editing === src.id}
+                  aria-label={`改目标：${chosen.map((a) => a.name).join("、") || "还没选"}`}
+                  onClick={() => setEditing((v) => (v === src.id ? null : src.id))}
+                >
+                  {chosen.map((a) => (
+                    <AgentIcon key={a.id} id={a.agentId} name={a.name} labelled />
+                  ))}
+                </button>
+                <span className="mx-rule__switch">
+                  {rule.disabledReason ? (
+                    <Switch
+                      size="inline"
+                      checked={rule.on}
+                      onChange={rule.onToggle}
+                      label={`${src.label} 以后新出现的自动添加`}
+                      disabledReason={rule.disabledReason}
+                    />
+                  ) : (
+                    <Switch
+                      size="inline"
+                      checked={rule.on}
+                      onChange={rule.onToggle}
+                      label={`${src.label} 以后新出现的自动添加`}
+                    />
+                  )}
+                </span>
+              </span>
             </div>
             {editing === src.id ? (
               <div className="mx-omenu__keys">
