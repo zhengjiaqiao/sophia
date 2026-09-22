@@ -168,6 +168,19 @@ export interface MatrixProps {
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
+/// 把键盘焦点格夹回当前表的范围：取最近的有效行和列。表为空（没有行或没有列）时返回 null
+export function clampFocus(
+  focus: { r: number; c: number },
+  rows: number,
+  cols: number,
+): { r: number; c: number } | null {
+  if (rows <= 0 || cols <= 0) return null;
+  return {
+    r: Math.max(0, Math.min(rows - 1, focus.r)),
+    c: Math.max(0, Math.min(cols - 1, focus.c)),
+  };
+}
+
 /// 行内转盘：活干完不立刻消失，停转回弹之后再卸（DESIGN「转盘」）
 function InlineRotor({ label }: { label?: string }) {
   const [shown, setShown] = useState(label);
@@ -297,7 +310,8 @@ export default function Matrix(props: MatrixProps) {
   const [headHover, setHeadHover] = useState<string | null>(null);
   const [hintCols, setHintCols] = useState<string[]>([]);
   // 键盘焦点所在格（行序号、列序号），以及焦点此刻在不在表身里
-  const [focus, setFocus] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
+  // 键盘焦点（roving tabindex）存的原值；用时一律经 clampFocus 夹回当前表的范围
+  const [focusRaw, setFocus] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
   const [focusWithin, setFocusWithin] = useState(false);
   // 提示框：停够 700ms 的那一格
   const [tip, setTip] = useState<string | null>(null);
@@ -339,6 +353,9 @@ export default function Matrix(props: MatrixProps) {
   // 键盘在格间移动按这个顺序
   const flat = sections.flatMap((s) => s.rows);
   const rowIndex = new Map(flat.map((row, i) => [row.key, i]));
+  // 筛选让行变少、列数变了之后，焦点格可能落在表外——那样整张表没有一个 tabIndex=0 的格，
+  // Tab 键会直接跳过整张表。所以每次渲染都夹回最近的有效格；表为空时没有格可夹
+  const focus = clampFocus(focusRaw, flat.length, columns.length) ?? { r: 0, c: 0 };
 
   const selectable = flat.filter((row) => row.selectDisabledReason === undefined);
   const selectedVisible = flat.filter((row) => selected.has(row.key));

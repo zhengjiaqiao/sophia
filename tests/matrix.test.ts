@@ -117,3 +117,21 @@ test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具
   // 工具行（筛选框）让位
   assert.doesNotMatch(html, /placeholder="筛选"/);
 });
+
+test("clampFocus：筛选让行变少、列数变了之后，焦点格夹回最近的有效格；表为空时不设", async () => {
+  const { clampFocus } = await import("../src/Matrix.tsx");
+  // 原来停在第 10 行，筛选后只剩 3 行：夹到最后一行，列不变
+  assert.deepEqual(clampFocus({ r: 9, c: 1 }, 3, 4), { r: 2, c: 1 });
+  // 列从 6 减到 4
+  assert.deepEqual(clampFocus({ r: 0, c: 5 }, 3, 4), { r: 0, c: 3 });
+  // 还在范围里的不动
+  assert.deepEqual(clampFocus({ r: 1, c: 2 }, 3, 4), { r: 1, c: 2 });
+  // 表为空：没有格可夹
+  assert.equal(clampFocus({ r: 2, c: 1 }, 0, 4), null);
+  assert.equal(clampFocus({ r: 2, c: 1 }, 3, 0), null);
+});
+
+test("Matrix：表里总有一个 tabIndex=0 的格，Tab 键进得来", () => {
+  const html = render(Matrix, base);
+  assert.equal((html.match(/tabindex="0"/g) ?? []).length, 1);
+});
