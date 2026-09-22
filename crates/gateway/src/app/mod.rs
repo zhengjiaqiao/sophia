@@ -87,7 +87,7 @@ pub struct Deps {
     pub list_processes: Get<io::Result<Vec<process::ProcessInfo>>>,
     /// 向进程发 SIGTERM
     pub terminate: Op<u32, io::Result<()>>,
-    /// Codex 桌面应用主进程的启动时间（unix 秒）；没在运行为 None
+    /// Codex 后台进程（app-server，配置是它读的）最早的启动时间（unix 秒）；没在运行为 None
     pub codex_started_at: Get<Option<u64>>,
     pub codex_version: Get<String>,
     pub now: Get<u64>,
