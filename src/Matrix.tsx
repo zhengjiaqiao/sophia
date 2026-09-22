@@ -13,12 +13,13 @@
 /// - 悬停十字带：行带 + 列带（列带跳过组头——组头不是数据行）
 /// - 格子提示框：一行「动词 · 快捷键」，格子正上方 6，停留 700ms；格间移动每格重新计时，
 ///   所以不追着鼠标；键盘焦点到达同样计时
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
 import {
   AgentIcon,
+  AgentKey,
   AgentMark,
   Checkbox,
   DOT_LABEL,
@@ -39,6 +40,7 @@ const CHECK_W = 34;
 const NAME_W = 246;
 const COL_W = 88;
 const TAIL_W = 24;
+const ORIGIN_W = 120;
 
 /// 一格的键：行键 + 列 id。闪烁、就地提示都按它认格
 const CELL_SEP = String.fromCharCode(31);
@@ -70,43 +72,26 @@ export interface MatrixCellView {
 
 export interface MatrixRowView {
   key: string;
-  /// 属于哪个分组（MatrixGroupView.key）
-  group: string;
   name: string;
+  /// 原件位置 / 来源位置格：来源名（同名来源用区分片段）+ 完整路径；悬停出路径提示框与 `打开 ↗`
+  origin: { id: string; label: string; path: string; onReveal: () => void };
   /// 列 id → 格；null＝这一行在这一列没有格（短横，不可点）
   cells: Record<string, MatrixCellView | null>;
   /// 名字后的标注：`×2`（提示框同时列两份读数）、`2 份不一样`、`Codex 不支持`
   mark?: ReactNode;
   /// 同名组：悬停（或键盘焦点）任一行，同组的行一起亮，并出 `extra`
   dupGroup?: string;
-  /// 同名行悬停时的动作（`只留这份`），跟在名字格 `打开 ↗` 之后。不越过面板右沿——
+  /// 同名行悬停时的动作（`只留这份`），在名称格里。不越过面板右沿——
   /// 判断用的读数进 `×2` 的提示框
   extra?: ReactNode;
-  /// 行悬停时名字后的 `打开 ↗`：提示框是原件完整路径，点一下在访达中显示
-  reveal?: { path: string; onReveal: () => void };
+  /// 点名字就地展开的详情（描述 / 路径 + 打开 ↗ / 改于 …）；不给就不能展开
+  detail?: ReactNode;
   /// MCP 的 `传输` 列内容
   transport?: ReactNode;
   /// 非空＝这一行勾不动，值是原因
   selectDisabledReason?: string;
   /// 非空＝这一行正在操作：名字后 14px 转盘，句子进读屏与悬停
   busy?: string;
-}
-
-export interface MatrixRule {
-  on: boolean;
-  /// 规则作用的列：图标组，悬停组头时这几列列头轻亮
-  agents: { id: string; name: string; columnId: string }[];
-  onToggle: (next: boolean) => void;
-  disabledReason?: string;
-}
-
-export interface MatrixGroupView {
-  key: string;
-  label: string;
-  /// 组名的读屏补充（来源路径）；路径不出现在可见文案里
-  title?: string;
-  count: number;
-  rule?: MatrixRule;
 }
 
 /// 选择操作条上的一颗**动词键**：对已选的，在这一列做这件事（DESIGN「选择操作条」）。
@@ -130,7 +115,12 @@ export interface SelectionKey {
 
 export interface MatrixProps {
   columns: MatrixColumn[];
-  groups: MatrixGroupView[];
+  /// 原件位置列：列头文字（`原件位置` / `来源位置`）
+  originLabel: string;
+  /// 按位置筛选中：列头写 `原件位置 · 通用仓库 ×`
+  originFilter?: { label: string; onClear: () => void } | null;
+  /// 列头 ▾ 下拉的内容（全部 N / 各来源行 + 规则）。`hint` 让规则行悬停时作用列列头轻亮
+  originMenu?: (ctl: { close: () => void; hint: (columnIds: string[]) => void }) => ReactNode;
   rows: MatrixRowView[];
   /// 名称列头：`名称` / `服务`
   nameLabel: string;
@@ -216,6 +206,54 @@ function InlineBusy({ label }: { label?: string }) {
   );
 }
 
+/// 展开记号：12px 实心三角，▸ 收起 / ▾ 展开。不在悬停也没展开时占位不显示（名字不跳）
+function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
+  return (
+    <svg
+      className="mx-disclosure"
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      aria-hidden="true"
+      style={{
+        transform: open ? "rotate(90deg)" : undefined,
+        visibility: shown ? "visible" : "hidden",
+      }}
+    >
+      <path d="M4 2.5 8.5 6 4 9.5Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/// `打开 ↗`：12 ink-mute，悬停转 ink 加下划线；点一下在访达中显示。提示框是完整路径
+export function RevealLink({ path, onReveal }: { path: string; onReveal: () => void }) {
+  return (
+    <Tooltip content={<span className="mx-mono">{path}</span>}>
+      <button
+        type="button"
+        className="mx-reveal"
+        aria-label={`在访达中显示 ${path}`}
+        onClick={onReveal}
+      >
+        打开
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 7l4-4M3.6 3H7v3.4" />
+        </svg>
+      </button>
+    </Tooltip>
+  );
+}
+
 /// 排序箭头：默认不占眼（占位不抽走，hover 时行不跳），hover 出淡箭头，激活转黑
 function SortArrow({ active, desc }: { active: boolean; desc: boolean }) {
   return (
@@ -287,7 +325,9 @@ function KeyButton({ k, iconOnly }: { k: SelectionKey; iconOnly: boolean }) {
 export default function Matrix(props: MatrixProps) {
   const {
     columns,
-    groups,
+    originLabel,
+    originFilter,
+    originMenu,
     rows,
     nameLabel,
     nameTip,
@@ -319,11 +359,11 @@ export default function Matrix(props: MatrixProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
 
-  // 默认排序：名称升序，组内排序（DESIGN「默认值」）
+  // 默认排序：名称升序，同名两份天然相邻（DESIGN「默认值」）
   // null＝默认（名称升序），表头不画箭头；点过才画（DESIGN「表头排序」）
   const [sortState, setSort] = useState<SortState | null>(null);
   const sort: SortState = sortState ?? { key: "name", dir: "asc" };
-  // 悬停的格（十字带）/ 列头（列带）/ 组头规则（作用列轻亮）/ 同名组
+  // 悬停的格（十字带）/ 列头（列带）/ 下拉里规则行（作用列轻亮）/ 同名组
   const [hover, setHover] = useState<{ row: string; col: string | null } | null>(null);
   const [headHover, setHeadHover] = useState<string | null>(null);
   const [hintCols, setHintCols] = useState<string[]>([]);
@@ -344,35 +384,37 @@ export default function Matrix(props: MatrixProps) {
   // 吸顶：工具行（勾选时是选择条）在最上面，列头紧贴它下面
   const barRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(0);
+  // 原件位置列头 ▾ 下拉
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // 就地展开详情的那一行（一次只展开一行）
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const hasTransport = transportLabel !== undefined;
   const template = [
     `${CHECK_W}px`,
     `${NAME_W}px`,
     ...(hasTransport ? ["72px"] : []),
+    `${ORIGIN_W}px`,
     ...columns.map(() => `${COL_W}px`),
     `${TAIL_W}px`,
   ].join(" ");
-  const width = CHECK_W + NAME_W + (hasTransport ? 72 : 0) + columns.length * COL_W + TAIL_W;
-  const colLeft = (index: number) => CHECK_W + NAME_W + (hasTransport ? 72 : 0) + index * COL_W;
+  const lead = CHECK_W + NAME_W + (hasTransport ? 72 : 0) + ORIGIN_W;
+  const width = lead + columns.length * COL_W + TAIL_W;
+  const colLeft = (index: number) => lead + index * COL_W;
   const gridStyle: CSSProperties = { gridTemplateColumns: template };
 
-  // ---- 分组 + 组内排序 ----
-  const byGroup = new Map<string, MatrixRowView[]>();
-  for (const row of rows) {
-    const list = byGroup.get(row.group);
-    if (list) list.push(row);
-    else byGroup.set(row.group, [row]);
-  }
-  const cmp =
+  // ---- 排序：名称 / 原件位置 / 某一列的格；同值再按名称、位置，同名两份相邻 ----
+  const byName = compareBy((r: MatrixRowView) => r.name, "asc");
+  const byOrigin = compareBy((r: MatrixRowView) => r.origin.label, "asc");
+  const primary =
     sort.key === "name"
       ? compareBy((r: MatrixRowView) => r.name, sort.dir)
-      : compareBy((r: MatrixRowView) => DOT_RANK[r.cells[sort.key]?.dot ?? "none"], sort.dir);
-  const sections = groups
-    .map((group) => ({ group, rows: [...(byGroup.get(group.key) ?? [])].sort(cmp) }))
-    .filter((s) => s.rows.length > 0);
+      : sort.key === "origin"
+        ? compareBy((r: MatrixRowView) => r.origin.label, sort.dir)
+        : compareBy((r: MatrixRowView) => DOT_RANK[r.cells[sort.key]?.dot ?? "none"], sort.dir);
   // 键盘在格间移动按这个顺序
-  const flat = sections.flatMap((s) => s.rows);
+  const flat = [...rows].sort((a, b) => primary(a, b) || byName(a, b) || byOrigin(a, b));
   const rowIndex = new Map(flat.map((row, i) => [row.key, i]));
   // 筛选让行变少、列数变了之后，焦点格可能落在表外——那样整张表没有一个 tabIndex=0 的格，
   // Tab 键会直接跳过整张表。所以每次渲染都夹回最近的有效格；表为空时没有格可夹
@@ -449,6 +491,19 @@ export default function Matrix(props: MatrixProps) {
   };
   useEffect(() => () => dropTip(), []);
 
+  // ---- 下拉：点外面关闭 ----
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) {
+        setMenuOpen(false);
+        setHintCols([]);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
   // ---- 吸顶的列头高度、面板右侧余量 ----
   useLayoutEffect(() => {
     const measure = () => {
@@ -519,8 +574,8 @@ export default function Matrix(props: MatrixProps) {
   };
 
   // ⌘F 筛选、⌘Z 撤销、⌘A 全选当前组、Esc 取消选择
-  const live = useRef({ onUndo, onSelectionChange, selected, flat, focus, hover, focusWithin });
-  live.current = { onUndo, onSelectionChange, selected, flat, focus, hover, focusWithin };
+  const live = useRef({ onUndo, onSelectionChange, selected, flat, menuOpen, expanded });
+  live.current = { onUndo, onSelectionChange, selected, flat, menuOpen, expanded };
   useEffect(() => {
     if (!shortcuts) return;
     const onKey = (e: KeyboardEvent) => {
@@ -544,18 +599,21 @@ export default function Matrix(props: MatrixProps) {
       }
       // ⌘A 只在焦点就在表里时接管：在页面别处按 ⌘A 不该悄悄勾上一整组
       if (mod && e.key.toLowerCase() === "a" && rootRef.current?.contains(document.activeElement)) {
-        // 当前组：键盘焦点所在行 → 悬停的行 → 第一组
-        const at =
-          (s.focusWithin ? s.flat[s.focus.r] : undefined) ??
-          s.flat.find((r) => r.key === s.hover?.row) ??
-          s.flat[0];
-        if (!at) return;
+        // 没有分组了：全选当前可见的行
+        if (s.flat.length === 0) return;
         e.preventDefault();
         const next = new Set(s.selected);
         for (const r of s.flat) {
-          if (r.group === at.group && r.selectDisabledReason === undefined) next.add(r.key);
+          if (r.selectDisabledReason === undefined) next.add(r.key);
         }
         s.onSelectionChange(next);
+        return;
+      }
+      // Esc：先收起下拉 / 展开的行，再取消选择
+      if (e.key === "Escape" && (s.menuOpen || s.expanded !== null)) {
+        e.preventDefault();
+        setMenuOpen(false);
+        setExpanded(null);
         return;
       }
       if (e.key === "Escape" && s.selected.size > 0) {
@@ -691,6 +749,64 @@ export default function Matrix(props: MatrixProps) {
         )}
       </div>
       {hasTransport ? <div className="mx-head__label">{transportLabel}</div> : null}
+      {/* 原件位置：点文字按位置排序，点 ▾ 打开下拉（自动添加规则 + 按来源筛选） */}
+      <div className="mx-head__origin" ref={menuRef}>
+        <button type="button" className="mx-headbtn" onClick={() => sortBy("origin")}>
+          {originLabel}
+          {originFilter ? null : (
+            <SortArrow active={sortState?.key === "origin"} desc={sort.dir === "desc"} />
+          )}
+        </button>
+        {originFilter ? (
+          <span className="mx-originfilter">
+            <span>· {originFilter.label}</span>
+            <button
+              type="button"
+              className="mx-originfilter__clear"
+              title="清除按位置筛选"
+              aria-label="清除按位置筛选"
+              onClick={originFilter.onClear}
+            >
+              <IconClose size={10} />
+            </button>
+          </span>
+        ) : null}
+        {originMenu ? (
+          <button
+            type="button"
+            className={`mx-menubtn${menuOpen ? " is-open" : ""}`}
+            aria-expanded={menuOpen}
+            aria-haspopup="dialog"
+            aria-label={`${originLabel}：自动添加规则与按位置筛选`}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M2.2 3.8 5 6.6l2.8-2.8" />
+            </svg>
+          </button>
+        ) : null}
+        {menuOpen && originMenu ? (
+          <div className="mx-menu" role="dialog" aria-label={originLabel}>
+            {originMenu({
+              close: () => {
+                setMenuOpen(false);
+                setHintCols([]);
+              },
+              hint: setHintCols,
+            })}
+          </div>
+        ) : null}
+      </div>
       {columns.map((col) => {
         const classes = ["mx-head__col"];
         // 列头只回应列头自己的悬停；格子的十字带不点亮列头（画板 Main）
@@ -731,55 +847,6 @@ export default function Matrix(props: MatrixProps) {
   );
 
   // ---- 表身 ----
-  const groupHeader = (group: MatrixGroupView, first: boolean) => {
-    const rule = group.rule;
-    return (
-      <div
-        key={`g:${group.key}`}
-        className={`mx-group${first ? " is-first" : ""}`}
-        style={{ width }}
-      >
-        <span className="mx-group__name" title={group.title}>
-          {group.label}
-        </span>
-        <span className="mx-mono mx-faint">{group.count}</span>
-        {rule ? (
-          <Tooltip content="只管以后新出现的，现有的不变">
-            <span
-              className={`mx-rule${rule.on ? "" : " is-off"}`}
-              onMouseEnter={() => setHintCols(rule.agents.map((a) => a.columnId))}
-              onMouseLeave={() => setHintCols([])}
-            >
-              <span className="mx-rule__text">· 以后新出现的</span>
-              <RuleArrow />
-              {rule.agents.map((a) => (
-                <AgentIcon key={a.columnId} id={a.id} name={a.name} labelled />
-              ))}
-              <span className="mx-rule__switch">
-                {rule.disabledReason ? (
-                  <Switch
-                    size="inline"
-                    checked={rule.on}
-                    onChange={rule.onToggle}
-                    label={`${group.label} 以后新出现的自动开启`}
-                    disabledReason={rule.disabledReason}
-                  />
-                ) : (
-                  <Switch
-                    size="inline"
-                    checked={rule.on}
-                    onChange={rule.onToggle}
-                    label={`${group.label} 以后新出现的自动开启`}
-                  />
-                )}
-              </span>
-            </span>
-          </Tooltip>
-        ) : null}
-      </div>
-    );
-  };
-
   const renderRow = (row: MatrixRowView) => {
     const r = rowIndex.get(row.key) ?? 0;
     const isSelected = selected.has(row.key);
@@ -789,172 +856,183 @@ export default function Matrix(props: MatrixProps) {
     if (hot) classes.push("is-hot");
     if (flashRows.has(row.key)) classes.push("mx-jump");
     const showExtra = row.extra !== undefined && hot;
+    const open = expanded === row.key && row.detail !== undefined;
 
     return (
-      <div
-        key={row.key}
-        data-row={row.key}
-        className={classes.join(" ")}
-        style={gridStyle}
-        onAnimationEnd={(e) => {
-          if (e.target === e.currentTarget)
-            setFlashRows((prev) => {
-              if (!prev.has(row.key)) return prev;
-              const next = new Set(prev);
-              next.delete(row.key);
-              return next;
-            });
-        }}
-        onMouseEnter={() => setHover({ row: row.key, col: null })}
-        onMouseLeave={() => setHover(null)}
-      >
+      <Fragment key={row.key}>
         <div
-          className="mx-row__check"
-          onClickCapture={(e) => {
-            shift.current = e.shiftKey;
+          data-row={row.key}
+          className={classes.join(" ")}
+          style={gridStyle}
+          onAnimationEnd={(e) => {
+            if (e.target === e.currentTarget)
+              setFlashRows((prev) => {
+                if (!prev.has(row.key)) return prev;
+                const next = new Set(prev);
+                next.delete(row.key);
+                return next;
+              });
           }}
+          onMouseEnter={() => setHover({ row: row.key, col: null })}
+          onMouseLeave={() => setHover(null)}
         >
-          {row.selectDisabledReason !== undefined ? (
-            <Checkbox
-              checked={false}
-              label={`勾选 ${row.name}`}
-              disabledReason={row.selectDisabledReason}
-            />
-          ) : (
-            <Checkbox
-              checked={isSelected}
-              label={`勾选 ${row.name}`}
-              onChange={() => toggleRow(row)}
-            />
-          )}
-        </div>
-        <div className="mx-row__name">
-          <span className="mx-name">{row.name}</span>
-          {row.mark}
-          {row.reveal && hot ? (
-            <Tooltip content={<span className="mx-mono">{row.reveal.path}</span>}>
+          <div
+            className="mx-row__check"
+            onClickCapture={(e) => {
+              shift.current = e.shiftKey;
+            }}
+          >
+            {row.selectDisabledReason !== undefined ? (
+              <Checkbox
+                checked={false}
+                label={`勾选 ${row.name}`}
+                disabledReason={row.selectDisabledReason}
+              />
+            ) : (
+              <Checkbox
+                checked={isSelected}
+                label={`勾选 ${row.name}`}
+                onChange={() => toggleRow(row)}
+              />
+            )}
+          </div>
+          <div className="mx-row__name">
+            {row.detail !== undefined ? (
               <button
                 type="button"
-                className="mx-reveal"
-                aria-label={`在访达中显示 ${row.reveal.path}`}
-                onClick={row.reveal.onReveal}
+                className="mx-namebtn"
+                aria-expanded={open}
+                aria-label={`${row.name}，${open ? "收起详情" : "展开详情"}`}
+                onClick={() => setExpanded(open ? null : row.key)}
               >
-                打开
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M3 7l4-4M3.6 3H7v3.4" />
-                </svg>
+                <Disclosure open={open} shown={open || hot} />
+                <span className="mx-name">{row.name}</span>
               </button>
+            ) : (
+              <span className="mx-name mx-name--plain">{row.name}</span>
+            )}
+            {row.mark}
+            {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
+            <InlineBusy label={row.busy} />
+          </div>
+          {hasTransport ? <div className="mx-row__transport">{row.transport}</div> : null}
+          {/* 原件位置：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
+          <div className="mx-row__origin">
+            <Tooltip content={<span className="mx-mono">{row.origin.path}</span>} context="table">
+              <span className="mx-origin" tabIndex={-1}>
+                {row.origin.label}
+              </span>
             </Tooltip>
-          ) : null}
-          {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
-          <InlineBusy label={row.busy} />
+            {hot && !open ? (
+              <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
+            ) : null}
+          </div>
+          {columns.map((col, c) => {
+            const view = row.cells[col.id] ?? null;
+            const key = cellKey(row.key, col.id);
+            const cellClasses = ["mx-cell"];
+            if (flashing.has(key)) cellClasses.push("ss-flash");
+            const notice =
+              cellNotice && cellNotice.rowKey === row.key && cellNotice.columnId === col.id
+                ? cellNotice.text
+                : null;
+            const focused = focus.r === r && focus.c === c;
+            const enter = () => {
+              setHover({ row: row.key, col: col.id });
+              armTip(key);
+            };
+            return (
+              <div
+                key={col.id}
+                className={cellClasses.join(" ")}
+                onMouseEnter={enter}
+                onMouseLeave={() => {
+                  setHover({ row: row.key, col: null });
+                  dropTip();
+                }}
+                onAnimationEnd={() => endFlash(key)}
+              >
+                {view === null ? (
+                  <span
+                    className="mx-cellbtn is-inert"
+                    data-cell={`${r}:${c}`}
+                    tabIndex={focused ? 0 : -1}
+                    role="img"
+                    aria-label={`${row.name} · ${col.name}：这一列没有这一格`}
+                    onFocus={() => {
+                      setFocus({ r, c });
+                      armTip(key);
+                    }}
+                    onBlur={dropTip}
+                  >
+                    <StateDot dot="none" title="" label="无此格" />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className={`ss-dot-btn mx-cellbtn${view.clickable ? "" : " is-inert"}`}
+                    data-cell={`${r}:${c}`}
+                    tabIndex={focused ? 0 : -1}
+                    aria-label={`${row.name} · ${col.name}：${DOT_LABEL[view.dot]}。${view.tip}`}
+                    aria-describedby={tip === key ? `${tipId}-tip` : undefined}
+                    onFocus={() => {
+                      setFocus({ r, c });
+                      armTip(key);
+                    }}
+                    onBlur={dropTip}
+                    onClick={() => {
+                      dropTip();
+                      if (view.clickable) onCell(row.key, col.id);
+                    }}
+                  >
+                    <StateDot
+                      dot={view.dot}
+                      preview={view.clickable && !view.pending}
+                      muted={view.pending}
+                      title=""
+                      label={DOT_LABEL[view.dot]}
+                    />
+                  </button>
+                )}
+                {tip === key && view !== null ? (
+                  <span
+                    id={`${tipId}-tip`}
+                    role="tooltip"
+                    className={`ss-tip ${r === 0 ? "ss-tip--bottom" : "ss-tip--top"} ss-tip--center is-open`}
+                  >
+                    {view.tip}
+                    {view.clickable ? (
+                      <>
+                        {" · "}
+                        <span className="ss-tip__key">空格</span>
+                      </>
+                    ) : null}
+                  </span>
+                ) : null}
+                {notice !== null ? (
+                  <span className="mx-cellnotice" role="alert">
+                    <IconCannot size={12} />
+                    {notice}
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+          <div />
+          {rowToast?.rowKey === row.key ? <div className="mx-rowtoast">{rowToast.node}</div> : null}
         </div>
-
-        {hasTransport ? <div className="mx-row__transport">{row.transport}</div> : null}
-        {columns.map((col, c) => {
-          const view = row.cells[col.id] ?? null;
-          const key = cellKey(row.key, col.id);
-          const cellClasses = ["mx-cell"];
-          if (flashing.has(key)) cellClasses.push("ss-flash");
-          const notice =
-            cellNotice && cellNotice.rowKey === row.key && cellNotice.columnId === col.id
-              ? cellNotice.text
-              : null;
-          const focused = focus.r === r && focus.c === c;
-          const enter = () => {
-            setHover({ row: row.key, col: col.id });
-            armTip(key);
-          };
-          return (
+        {open ? (
+          // 就地展开：左沿与名字对齐，不跨进 agent 列
+          <div className="mx-grid mx-detail" style={gridStyle}>
             <div
-              key={col.id}
-              className={cellClasses.join(" ")}
-              onMouseEnter={enter}
-              onMouseLeave={() => {
-                setHover({ row: row.key, col: null });
-                dropTip();
-              }}
-              onAnimationEnd={() => endFlash(key)}
+              className="mx-detail__body"
+              style={{ gridColumn: `2 / span ${hasTransport ? 3 : 2}` }}
             >
-              {view === null ? (
-                <span
-                  className="mx-cellbtn is-inert"
-                  data-cell={`${r}:${c}`}
-                  tabIndex={focused ? 0 : -1}
-                  role="img"
-                  aria-label={`${row.name} · ${col.name}：这一列没有这一格`}
-                  onFocus={() => {
-                    setFocus({ r, c });
-                    armTip(key);
-                  }}
-                  onBlur={dropTip}
-                >
-                  <StateDot dot="none" title="" label="无此格" />
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className={`ss-dot-btn mx-cellbtn${view.clickable ? "" : " is-inert"}`}
-                  data-cell={`${r}:${c}`}
-                  tabIndex={focused ? 0 : -1}
-                  aria-label={`${row.name} · ${col.name}：${DOT_LABEL[view.dot]}。${view.tip}`}
-                  aria-describedby={tip === key ? `${tipId}-tip` : undefined}
-                  onFocus={() => {
-                    setFocus({ r, c });
-                    armTip(key);
-                  }}
-                  onBlur={dropTip}
-                  onClick={() => {
-                    dropTip();
-                    if (view.clickable) onCell(row.key, col.id);
-                  }}
-                >
-                  <StateDot
-                    dot={view.dot}
-                    preview={view.clickable && !view.pending}
-                    muted={view.pending}
-                    title=""
-                    label={DOT_LABEL[view.dot]}
-                  />
-                </button>
-              )}
-              {tip === key && view !== null ? (
-                <span
-                  id={`${tipId}-tip`}
-                  role="tooltip"
-                  className={`ss-tip ${r === 0 ? "ss-tip--bottom" : "ss-tip--top"} ss-tip--center is-open`}
-                >
-                  {view.tip}
-                  {view.clickable ? (
-                    <>
-                      {" · "}
-                      <span className="ss-tip__key">空格</span>
-                    </>
-                  ) : null}
-                </span>
-              ) : null}
-              {notice !== null ? (
-                <span className="mx-cellnotice" role="alert">
-                  <IconCannot size={12} />
-                  {notice}
-                </span>
-              ) : null}
+              {row.detail}
             </div>
-          );
-        })}
-        <div />
-        {rowToast?.rowKey === row.key ? <div className="mx-rowtoast">{rowToast.node}</div> : null}
-      </div>
+          </div>
+        ) : null}
+      </Fragment>
     );
   };
 
@@ -982,20 +1060,159 @@ export default function Matrix(props: MatrixProps) {
           {bandIndex >= 0 && flat.length > 0 ? (
             <div className="mx-band" style={{ left: colLeft(bandIndex) }} aria-hidden="true" />
           ) : null}
-          {sections.map((s, i) => (
-            <div key={s.group.key} role="rowgroup" aria-label={s.group.label}>
-              {groupHeader(s.group, i === 0)}
-              {s.rows.map(renderRow)}
-            </div>
-          ))}
+          {flat.map(renderRow)}
         </div>
-        {sections.length === 0 && empty ? <div className="mx-empty">{empty}</div> : null}
+        {flat.length === 0 && empty ? <div className="mx-empty">{empty}</div> : null}
       </div>
       {globalToast ? (
         <div className="mx-globaltoast" style={{ right: toastRight }}>
           {globalToast}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/// 原件位置列头下拉里的一个来源（DESIGN「材料与工艺」：自动添加规则在列头下拉里）
+export interface OriginMenuSource {
+  id: string;
+  label: string;
+  /// 完整路径，进提示框
+  title?: string;
+  count: number;
+  rule: {
+    on: boolean;
+    /// 目标列 id；关着时是「打开会用哪些」（上次用的，没有则已安装的前两个）
+    targets: string[];
+    /// 可选的目标（列 id + agent 图标）
+    available: { id: string; agentId: string; name: string }[];
+    onToggle: (next: boolean) => void;
+    onTargets: (ids: string[]) => void;
+    /// 规则设不上（读不到来源等）：行内黑窗说原因
+    error?: string | null;
+    disabledReason?: string;
+  };
+}
+
+/// 列头下拉：顶部 `全部 N`（选中反色）；每个来源一行
+/// `名字 N · 以后新出现的 → [目标图标组] [紧凑开关]`。点来源名＝按它筛选；点图标组就地弹出
+/// agent 图标键改目标（与添加页同组件，至少留一个）；规则关着这一段 ink-faint，开关可以直接打开
+export function OriginMenu({
+  total,
+  selected,
+  onSelect,
+  sources,
+  hint,
+  close,
+}: {
+  total: number;
+  selected: string | null;
+  onSelect: (id: string | null) => void;
+  sources: OriginMenuSource[];
+  hint: (columnIds: string[]) => void;
+  close: () => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  return (
+    <div className="mx-omenu">
+      <button
+        type="button"
+        className={`mx-omenu__all${selected === null ? " is-selected" : ""}`}
+        onClick={() => {
+          onSelect(null);
+          close();
+        }}
+      >
+        全部 <span className="mx-mono">{total}</span>
+      </button>
+      {sources.map((src) => {
+        const rule = src.rule;
+        const chosen = rule.available.filter((a) => rule.targets.includes(a.id));
+        return (
+          <div key={src.id} className="mx-omenu__item">
+            <div className={`mx-omenu__row${selected === src.id ? " is-selected" : ""}`}>
+              <button
+                type="button"
+                className="mx-omenu__name"
+                title={src.title}
+                onClick={() => {
+                  onSelect(src.id);
+                  close();
+                }}
+              >
+                {src.label} <span className="mx-mono">{src.count}</span>
+              </button>
+              <Tooltip content="只管以后新出现的，现有的不变">
+                <span
+                  className={`mx-rule${rule.on ? "" : " is-off"}`}
+                  onMouseEnter={() => hint(rule.targets)}
+                  onMouseLeave={() => hint([])}
+                >
+                  <span className="mx-rule__text">以后新出现的</span>
+                  <RuleArrow />
+                  <button
+                    type="button"
+                    className="mx-rule__targets"
+                    aria-expanded={editing === src.id}
+                    aria-label={`改目标：${chosen.map((a) => a.name).join("、") || "还没选"}`}
+                    onClick={() => setEditing((v) => (v === src.id ? null : src.id))}
+                  >
+                    {chosen.map((a) => (
+                      <AgentIcon key={a.id} id={a.agentId} name={a.name} labelled />
+                    ))}
+                  </button>
+                  <span className="mx-rule__switch">
+                    {rule.disabledReason ? (
+                      <Switch
+                        size="inline"
+                        checked={rule.on}
+                        onChange={rule.onToggle}
+                        label={`${src.label} 以后新出现的自动添加`}
+                        disabledReason={rule.disabledReason}
+                      />
+                    ) : (
+                      <Switch
+                        size="inline"
+                        checked={rule.on}
+                        onChange={rule.onToggle}
+                        label={`${src.label} 以后新出现的自动添加`}
+                      />
+                    )}
+                  </span>
+                </span>
+              </Tooltip>
+            </div>
+            {editing === src.id ? (
+              <div className="mx-omenu__keys">
+                {rule.available.map((a) => {
+                  const pressed = rule.targets.includes(a.id);
+                  const last = pressed && rule.targets.length === 1;
+                  return (
+                    <AgentKey
+                      key={a.id}
+                      id={a.agentId}
+                      name={a.name}
+                      pressed={pressed}
+                      disabledReason={last ? "至少留一个" : undefined}
+                      onToggle={(next) =>
+                        rule.onTargets(
+                          next ? [...rule.targets, a.id] : rule.targets.filter((id) => id !== a.id),
+                        )
+                      }
+                    />
+                  );
+                })}
+              </div>
+            ) : null}
+            {rule.error ? (
+              <div className="mx-omenu__error" role="alert">
+                <IconCannot size={12} />
+                {rule.error}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -302,7 +302,7 @@
   position: relative;
 }
 
-/* 列带：垫在最底层，组头的白底把它挡掉（列带跳过组头） */
+/* 列带：垫在最底层 */
 .mx-band {
   position: absolute;
   top: 0;
@@ -312,28 +312,154 @@
   pointer-events: none;
 }
 
-.mx-group {
+/* ===== 原件位置列头：点文字排序，点 ▾ 打开下拉 ===== */
+.mx-head__origin {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: var(--row-h);
+  gap: 4px;
+  height: 19px;
+  white-space: nowrap;
+}
+
+.mx-originfilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink);
+  font-size: var(--size-micro);
+  font-weight: 600;
+}
+
+.mx-originfilter__clear,
+.mx-menubtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-mute);
+  cursor: pointer;
+}
+
+.mx-originfilter__clear:hover,
+.mx-menubtn:hover,
+.mx-menubtn.is-open {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* 下拉：区块线 1px ink 圈住，canvas 底，不加阴影 */
+.mx-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 10;
+  width: 380px;
   box-sizing: border-box;
-  padding-left: 10px;
-  border-top: 1px solid var(--ink);
-  border-bottom: 1px solid var(--hairline);
+  border: 1px solid var(--ink);
   background: var(--canvas);
 }
 
-.mx-group.is-first {
-  border-top: 0;
+.mx-omenu {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
 }
 
-.mx-group__name {
+.mx-omenu__all,
+.mx-omenu__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-family: var(--font-ui);
   font-size: var(--size-caption);
-  font-weight: 600;
-  line-height: var(--leading-caption);
+  cursor: pointer;
   white-space: nowrap;
+}
+
+.mx-omenu__all {
+  height: var(--row-h);
+  padding: 0 12px;
+}
+
+.mx-omenu__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: var(--row-h);
+  padding: 0 12px;
+}
+
+.mx-omenu__all .mx-mono,
+.mx-omenu__name .mx-mono {
+  font-size: var(--size-micro);
+  color: var(--ink-faint);
+}
+
+.mx-omenu__all:hover,
+.mx-omenu__row:hover {
+  background: var(--surface);
+}
+
+/* 当前筛选：反色（选中的片 / 已按下的键同一语言） */
+.mx-omenu__all.is-selected,
+.mx-omenu__row.is-selected {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.mx-omenu__all.is-selected .mx-mono,
+.mx-omenu__row.is-selected .mx-mono,
+.mx-omenu__row.is-selected .mx-rule,
+.mx-omenu__row.is-selected .mx-rule__text {
+  color: var(--canvas);
+}
+
+.mx-rule__targets {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--hit-min);
+  padding: 0 2px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.mx-rule__targets:hover {
+  background: var(--surface);
+}
+
+.mx-omenu__keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 12px 10px;
+}
+
+.mx-omenu__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px 8px;
+  padding: 6px 8px;
+  background: var(--ink);
+  color: var(--canvas);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
 }
 
 .mx-rule {
@@ -372,6 +498,83 @@
 .mx-row.is-hot,
 .mx-row.is-selected {
   background: var(--surface);
+}
+
+/* 原件位置格：来源名 ink-mute；悬停出 `打开 ↗` */
+.mx-row__origin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 8px;
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.mx-origin {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 名字是展开详情的按钮：前面 12px ▸ / ▾（不悬停时占位不显示） */
+.mx-namebtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mx-name--plain {
+  margin-left: 16px;
+}
+
+.mx-disclosure {
+  display: block;
+  flex-shrink: 0;
+  color: var(--ink-mute);
+  transition: transform var(--motion-fast) var(--ease-mech);
+}
+
+/* 就地展开的详情：左沿与名字对齐（勾选 34 + ▸ 16），不跨进 agent 列 */
+.mx-detail {
+  position: relative;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--canvas);
+}
+
+.mx-detail__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 12px 12px 16px;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.mx-detail__path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mx-detail__path .mx-mono {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: var(--size-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mx-row__name {
@@ -526,7 +729,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mx-filter,
-  .mx-head__col {
+  .mx-head__col,
+  .mx-disclosure {
     transition: none;
   }
 }
@@ -569,4 +773,8 @@
   .mx-jump {
     animation: none;
   }
+}
+
+.mx-detail__desc {
+  white-space: pre-line;
 }

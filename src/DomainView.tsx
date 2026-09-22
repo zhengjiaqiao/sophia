@@ -1,21 +1,25 @@
 /// Skills 的一个域（全局或某项目）→ 共享表格 `Matrix` 的视图（DESIGN「主视图」「表格 = 面板」）。
 ///
-/// 只做折算：把 DomainPage 的行 × 目标折成「分组 + 行 + 格 + 选择键」，点了什么原样交回
-/// SkillsTab（写操作、乐观更新、提示条都在那里）。格的语义取自 `cellState.viewOf`，
+/// 只做折算：把 DomainPage 的行 × 目标折成「行 + 原件位置 + 格 + 选择键 + 列头下拉」，点了什么
+/// 原样交回 SkillsTab（写操作、乐观更新、提示条都在那里）。格的语义取自 `cellState.viewOf`，
 /// 不在这里另写一份。
 ///
-/// 这一版删掉的（DESIGN「主视图」）：「原件位置」列（改为按来源分组）、说明横幅（机制说明
-/// 进名称列头的提示框）、独占一行的自动同步框（并进组头规则）、「清除失效的」总按钮
-/// （失效就画在那一格上，点那一格就是重新链接）。
+/// 「原件位置」列恢复、按来源分组撤销（DESIGN「产品裁决」冲突表）：位置信息常驻视线；
+/// 自动添加规则与按来源筛选在这一列列头的 ▾ 下拉里。说明横幅、独占一行的自动同步框、
+/// 「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接）。
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import Matrix, {
   duplicatesAKey,
   cellKey,
+  OriginMenu,
+  RevealLink,
   type MatrixCellView,
   type MatrixRowView,
+  type OriginMenuSource,
   type SelectionKey,
 } from "./Matrix";
+import { defaultTargets, distinguishingSegments, loadImportMemory } from "./pages/importDefaults";
 import { viewOf } from "./cellState";
 import { AddButton, Button, DupMark, Tooltip } from "./ui";
 import type { AutoLink, CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
@@ -38,8 +42,13 @@ export interface DomainViewProps {
   overview: Overview;
   page: DomainPage;
   autoLinks: AutoLink[];
-  /// 本次会话里关掉的规则：来源 → 当时的目标。组头保留一段灰的规则和开关，好重开
+  /// 规则关着时记住的目标（关掉那一刻的、或关着时在下拉里改过的）：来源 → 目标列 id
   offRules: Map<string, string[]>;
+  /// 规则设不上的原因（读不到来源等），下拉里该行的行内黑窗
+  ruleErrors: Map<string, string>;
+  /// 按原件位置筛选中的来源；null＝全部
+  originFilter: string | null;
+  onOriginFilter: (sourceId: string | null) => void;
   /// 经过筛选、要显示的行
   rows: DomainRow[];
   /// 格此刻该画成什么（乐观更新之后的状态）
@@ -68,6 +77,8 @@ export interface DomainViewProps {
   onCell: (ref: CellRef) => void;
   onBatch: (press: BatchPress) => void;
   onRule: (sourceId: string, targets: string[], on: boolean) => void;
+  /// 在下拉里改目标：开着时就地增删，关着时只记住
+  onRuleTargets: (sourceId: string, next: string[], on: boolean, prev: string[]) => void;
   onUndo: () => void;
   shortcuts: boolean;
 
@@ -136,29 +147,51 @@ export default function DomainView(props: DomainViewProps) {
     };
   });
 
-  // ---- 分组：来源名 + 计数 + 规则图式 ----
-  const groups = [...counts].map(([sourceId, count]) => {
+  // ---- 原件位置：来源名；同名来源用路径里能区分它们的那一级 ----
+  const originLabels = new Map<string, string>();
+  const byLabel = new Map<string, string[]>();
+  for (const id of counts.keys()) {
+    const label = labelOf(id);
+    byLabel.set(label, [...(byLabel.get(label) ?? []), id]);
+  }
+  for (const [label, ids] of byLabel) {
+    const segs = distinguishingSegments(ids.map((id) => sourceOf(id)?.path ?? id));
+    ids.forEach((id, i) => originLabels.set(id, segs[i] ? `${label} · ${segs[i]}` : label));
+  }
+  const originOf = (id: string) => originLabels.get(id) ?? labelOf(id);
+
+  // ---- 列头下拉：每个来源一行 + 它的规则 ----
+  const available = page.targets.map((t) => ({
+    id: t.id,
+    agentId: t.scope.harnessId,
+    name: t.label,
+  }));
+  const menuSources: OriginMenuSource[] = [...counts].map(([sourceId, count]) => {
     const rule = autoLinks.find((r) => r.source === sourceId);
     const local = rule?.targets.filter((id) => page.targets.some((t) => t.id === id)) ?? [];
-    const off = offRules.get(sourceId);
-    const targets = local.length > 0 ? local : (off ?? []);
+    const on = local.length > 0;
+    // 关着：上次关掉 / 改过的目标，没有则这个来源上次添加时用的，再没有则已安装的前两个
+    const targets = on
+      ? local
+      : (offRules.get(sourceId) ??
+        defaultTargets(
+          available.map((a) => a.id),
+          loadImportMemory(`skill|${page.key}|${sourceId}`)?.last,
+        ));
     return {
-      key: sourceId,
-      label: labelOf(sourceId),
+      id: sourceId,
+      label: originOf(sourceId),
       title: sourceOf(sourceId)?.path,
       count,
-      rule:
-        targets.length === 0
-          ? undefined
-          : {
-              on: local.length > 0,
-              agents: targets.flatMap((id) => {
-                const t = page.targets.find((x) => x.id === id);
-                return t ? [{ id: t.scope.harnessId, name: t.label, columnId: t.id }] : [];
-              }),
-              onToggle: (next: boolean) => props.onRule(sourceId, targets, next),
-              disabledReason: props.busy ? "正在执行上一步操作" : undefined,
-            },
+      rule: {
+        on,
+        targets,
+        available,
+        onToggle: (next: boolean) => props.onRule(sourceId, targets, next),
+        onTargets: (next: string[]) => props.onRuleTargets(sourceId, next, on, targets),
+        error: props.ruleErrors.get(sourceId) ?? null,
+        disabledReason: props.busy ? "正在执行上一步操作" : undefined,
+      },
     };
   });
 
@@ -192,10 +225,18 @@ export default function DomainView(props: DomainViewProps) {
         ? props.dupReadout.get(skillRowKey(other)) || undefined
         : undefined;
       const path = pathOf(row);
+      const description = sourceOf(row.sourceId)?.skills.find(
+        (k) => k.name === row.skill,
+      )?.description;
       return {
         key,
-        group: row.sourceId,
         name: row.skill,
+        origin: {
+          id: row.sourceId,
+          label: originOf(row.sourceId),
+          path,
+          onReveal: () => props.onReveal(path),
+        },
         cells,
         // 判断用的读数不越过面板右沿：进 ×2 的提示框，两份同时列出（DESIGN「表格 = 面板」）
         mark:
@@ -217,7 +258,16 @@ export default function DomainView(props: DomainViewProps) {
             </span>
           ) : undefined,
         dupGroup: dup.length > 1 ? row.skill : undefined,
-        reveal: { path, onReveal: () => props.onReveal(path) },
+        // 点名字就地展开：描述、路径 + 打开 ↗、改于 … · N 个文件（读不到描述不写那一行）
+        detail: (
+          <SkillDetail
+            description={description}
+            path={path}
+            readout={readout}
+            onShow={() => props.onDupHover(row)}
+            onReveal={() => props.onReveal(path)}
+          />
+        ),
         extra:
           other === undefined ? undefined : (
             <DupExtra
@@ -332,8 +382,23 @@ export default function DomainView(props: DomainViewProps) {
   return (
     <Matrix
       columns={columns}
-      groups={groups}
       rows={matrixRows}
+      originLabel="原件位置"
+      originFilter={
+        props.originFilter === null
+          ? null
+          : { label: originOf(props.originFilter), onClear: () => props.onOriginFilter(null) }
+      }
+      originMenu={({ close, hint }) => (
+        <OriginMenu
+          total={page.rows.length}
+          selected={props.originFilter}
+          onSelect={props.onOriginFilter}
+          sources={menuSources}
+          hint={hint}
+          close={close}
+        />
+      )}
       nameLabel="名称"
       nameTip="列表里只出现两种 skill：原件就在这个位置下的，和在某个 agent 下有链接的"
       nameCount={page.rows.length - props.hiddenRows.size}
@@ -422,5 +487,39 @@ function DupExtra({
         只留这份
       </Button>
     </Tooltip>
+  );
+}
+
+/// 行内展开的详情：描述（ink-mute 13，不截断；读不到不写）、路径（等宽 ink-faint）+ 打开 ↗、
+/// 改于 … · N 个文件。出现那一刻去取读数
+function SkillDetail({
+  description,
+  path,
+  readout,
+  onShow,
+  onReveal,
+}: {
+  description?: string;
+  path: string;
+  readout?: string;
+  onShow: () => void;
+  onReveal: () => void;
+}) {
+  useEffect(() => {
+    onShow();
+    // 只在展开时取一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <>
+      {description ? <div className="mx-detail__desc">{description}</div> : null}
+      <div className="mx-detail__path">
+        <span className="mx-mono" title={path}>
+          {path}
+        </span>
+        <RevealLink path={path} onReveal={onReveal} />
+      </div>
+      {readout ? <div>{readout}</div> : null}
+    </>
   );
 }

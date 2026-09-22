@@ -22,24 +22,16 @@ const base = {
       missing: true,
     },
   ],
-  groups: [
-    {
-      key: "u",
-      label: "通用仓库",
-      count: 2,
-      rule: {
-        on: false,
-        agents: [{ id: "codex", name: "Codex", columnId: "cx" }],
-        onToggle: () => undefined,
-      },
-    },
-    { key: "w", label: "WeiboAP", count: 1 },
-  ],
   rows: [
     {
       key: "u|docx",
-      group: "u",
       name: "docx",
+      origin: {
+        id: "u",
+        label: "通用仓库",
+        path: "/h/.agents/skills/docx",
+        onReveal: () => undefined,
+      },
       cells: {
         cc: { dot: "linked" as const, clickable: true, tip: "点一下关闭" },
         cx: { dot: "missing" as const, clickable: true, tip: "点一下开启" },
@@ -47,13 +39,14 @@ const base = {
     },
     {
       key: "w|pdf",
-      group: "w",
       name: "pdf",
+      origin: { id: "w", label: "WeiboAP", path: "/w/skills/pdf", onReveal: () => undefined },
       cells: { cc: { dot: "own" as const, clickable: false, tip: "原件就在这儿" }, cx: null },
       busy: "正在开启 2 个",
     },
   ],
   nameLabel: "名称",
+  originLabel: "原件位置",
   filterText: "",
   onFilterText: () => undefined,
   selected: new Set<string>(),
@@ -63,23 +56,84 @@ const base = {
   onCell: () => undefined,
 };
 
-test("Matrix：通道条表头、按来源分组、组头规则图式，没有「原件位置」列", () => {
+test("Matrix：通道条表头 + 原件位置列（120，来源名），没有分组组头", () => {
   const html = render(Matrix, base);
   assert.match(html, /class="mx-grid mx-head"/);
-  assert.match(html, /通用仓库/);
-  assert.match(html, /以后新出现的/);
-  // 规则关着：整段退到 ink-faint，开关还在
-  assert.match(html, /mx-rule is-off/);
-  assert.match(html, /role="switch"/);
-  // 没有规则的来源只有名字 + 计数
-  assert.equal((html.match(/class="mx-rule__text"/g) ?? []).length, 1);
-  assert.doesNotMatch(html, /原件位置|本体位置/);
+  // 原件位置列恢复：列头文字可排序 + ▾ 下拉；格里写来源名
+  assert.match(html, /class="mx-head__origin"/);
+  assert.match(html, /class="mx-origin"[^>]*>通用仓库</);
+  assert.match(html, /class="mx-origin"[^>]*>WeiboAP</);
+  // 按来源分组已撤销（退役行为）：没有组头、没有组头上的规则开关
+  assert.doesNotMatch(html, /mx-group|以后新出现的/);
   // 目录还不存在的列：虚线列头
   assert.match(html, /mx-colbtn is-missing/);
-  // 行高与列宽写进网格模板：勾选 34 + 名字 246 + 88 × 2 + 尾 24
-  assert.match(html, /grid-template-columns:34px 246px 88px 88px 24px/);
-  // 行内转盘，句子进读屏
+  // 列宽：勾选 34 + 名字 246 + 原件位置 120 + 88 × 2 + 尾 24
+  assert.match(html, /grid-template-columns:34px 246px 120px 88px 88px 24px/);
+  // 默认名称升序
+  assert.ok(html.indexOf(">docx<") < html.indexOf(">pdf<"));
+  // 行内细弧，句子进读屏
   assert.match(html, /aria-label="正在开启 2 个"/);
+});
+
+test("Matrix：按位置筛选时列头写「原件位置 · 通用仓库 ×」", () => {
+  const html = render(Matrix, {
+    ...base,
+    originFilter: { label: "通用仓库", onClear: () => undefined },
+    originMenu: () => null,
+  });
+  assert.match(html, /<span>· 通用仓库<\/span>/);
+  assert.match(html, /aria-label="清除按位置筛选"/);
+  assert.match(html, /aria-haspopup="dialog"/);
+});
+
+test("OriginMenu：全部 N 选中反色；每个来源一行规则，没开的整段 ink-faint，目标图标组可点", async () => {
+  const { OriginMenu } = await import("../src/Matrix.tsx");
+  const noop = () => undefined;
+  const html = render(OriginMenu, {
+    total: 56,
+    selected: null,
+    onSelect: noop,
+    hint: noop,
+    close: noop,
+    sources: [
+      {
+        id: "u",
+        label: "通用仓库",
+        count: 26,
+        rule: {
+          on: true,
+          targets: ["cc", "cx"],
+          available: [
+            { id: "cc", agentId: "claude-code", name: "Claude Code" },
+            { id: "cx", agentId: "codex", name: "Codex" },
+          ],
+          onToggle: noop,
+          onTargets: noop,
+        },
+      },
+      {
+        id: "w",
+        label: "WeiboAP",
+        count: 29,
+        rule: {
+          on: false,
+          targets: ["cc"],
+          available: [{ id: "cc", agentId: "claude-code", name: "Claude Code" }],
+          onToggle: noop,
+          onTargets: noop,
+          error: "来源位置已不存在，请刷新",
+        },
+      },
+    ],
+  });
+  assert.match(html, /class="mx-omenu__all is-selected"/);
+  assert.match(html, /全部 <span class="mx-mono">56<\/span>/);
+  assert.match(html, /class="mx-rule"/);
+  assert.match(html, /class="mx-rule is-off"/);
+  assert.match(html, /aria-label="改目标：Claude Code、Codex"/);
+  assert.match(html, /role="switch" aria-checked="true"/);
+  // 规则设不上：行内黑窗
+  assert.match(html, /class="mx-omenu__error" role="alert"/);
 });
 
 test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具行", () => {
@@ -106,7 +160,7 @@ test("Matrix：MCP 多一列 72 的传输；选中后选择操作条顶替工具
       },
     ],
   });
-  assert.match(html, /grid-template-columns:34px 246px 72px 88px 88px 24px/);
+  assert.match(html, /grid-template-columns:34px 246px 72px 120px 88px 88px 24px/);
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
   // 动词键：动词 + 列头同一枚图标 + Condensed 大写名 + 受影响数 ≠ 已选数时的「· N 个」；
   // 不画圆点、不写 ±N（第 5 轮「状态点 + 增量」已撤回）

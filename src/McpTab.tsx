@@ -5,12 +5,15 @@ import { api } from "./api";
 import Matrix, {
   cellKey,
   duplicatesAKey,
+  OriginMenu,
+  type OriginMenuSource,
   type MatrixCellView,
   type MatrixRowView,
   type SelectionKey,
 } from "./Matrix";
 import { Empty as TableEmpty, PlusGlyph } from "./DomainView";
 import McpImportPage from "./pages/McpImportPage";
+import { defaultTargets, loadImportMemory } from "./pages/importDefaults";
 import { pathsOfKey } from "./pages/pendingIssues";
 import {
   cellViewOf,
@@ -140,7 +143,10 @@ export default function McpTab({
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
   // 本次会话里关掉的规则：来源位置 → 当时的目标，组头留一段灰的规则与开关好重开
-  const [offRules, setOffRules] = useState<Map<string, McpAutoImportRule>>(new Map());
+  const [offRules, setOffRules] = useState<Map<string, string[]>>(new Map());
+  const [ruleErrors, setRuleErrors] = useState<Map<string, string>>(new Map());
+  // 按来源位置筛选（列头下拉里点来源名）；null＝全部
+  const [originFilter, setOriginFilter] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
@@ -235,6 +241,7 @@ export default function McpTab({
     setCellNotice(null);
     // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
     setSelected(new Set());
+    setOriginFilter(null);
     undoRef.current = null;
   }, [selectedKey]);
 
@@ -292,7 +299,10 @@ export default function McpTab({
       .map(rowKeyOf);
     const columnId =
       rowKeys.length === 0 ? page.targets.find((t) => paths.includes(t.path))?.id : undefined;
-    if (rowKeys.length > 0) setFilterText("");
+    if (rowKeys.length > 0) {
+      setFilterText("");
+      setOriginFilter(null);
+    }
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -503,31 +513,48 @@ export default function McpTab({
 
   // ===== 组头规则：只管以后新出现的 =====
 
-  const setRule = async (rule: McpAutoImportRule, on: boolean) => {
+  /// 规则设不上：原因挂在下拉里那一行的行内黑窗上
+  const setRuleError = (sourceId: string, error: string | null) =>
+    setRuleErrors((prev) => {
+      const next = new Map(prev);
+      if (error === null) next.delete(sourceId);
+      else next.set(sourceId, error);
+      return next;
+    });
+
+  /// 开 / 关一条规则。开：目标整体替换（core 同一来源 + 目标域重设即替换）；关：删掉，但记住目标好重开
+  const setRule = async (domain: string, sourceId: string, targetIds: string[], on: boolean) => {
+    setRuleError(sourceId, null);
     onBusy(true);
     try {
       if (on) {
-        await api.setMcpAutoImport(
-          rule.source.id,
-          rule.targetDomain,
-          rule.targets.map((t) => t.id),
-          rule.allowCrossDomain,
-        );
+        await api.setMcpAutoImport(sourceId, domain, targetIds, false);
         setOffRules((prev) => {
           const next = new Map(prev);
-          next.delete(`${rule.source.id}|${rule.targetDomain}`);
+          next.delete(sourceId);
           return next;
         });
       } else {
-        await api.removeMcpAutoImport(rule.source.id, rule.targetDomain);
-        setOffRules((prev) => new Map(prev).set(`${rule.source.id}|${rule.targetDomain}`, rule));
+        await api.removeMcpAutoImport(sourceId, domain);
+        setOffRules((prev) => new Map(prev).set(sourceId, targetIds));
       }
     } catch (error) {
-      onError(String(error));
+      // 读不到来源等：core 返回错误，就地说
+      setRuleError(sourceId, String(error));
     } finally {
       onBusy(false);
     }
     await refresh();
+  };
+
+  /// 在下拉里改目标：开着时就地替换，关着时只记住
+  const setRuleTargets = async (domain: string, sourceId: string, next: string[], on: boolean) => {
+    if (next.length === 0) return;
+    if (!on) {
+      setOffRules((m) => new Map(m).set(sourceId, next));
+      return;
+    }
+    await setRule(domain, sourceId, next, true);
   };
 
   // ===== 渲染 =====
@@ -557,7 +584,11 @@ export default function McpTab({
   const targetIds = new Set(page.targets.map((t) => t.id));
   const names = columnNames(page.targets);
   const query = filterText.trim().toLowerCase();
-  const visible = page.rows.filter((row) => query === "" || row.name.toLowerCase().includes(query));
+  const visible = page.rows.filter(
+    (row) =>
+      (query === "" || row.name.toLowerCase().includes(query)) &&
+      (originFilter === null || row.entries.some((e) => e.sourceId === originFilter)),
+  );
 
   /// 格此刻画成什么：乐观点亮的画实心
   const viewAt = (row: McpDomainRow, targetId: string) => {
@@ -583,31 +614,40 @@ export default function McpTab({
     };
   });
 
-  // ---- 分组：来源位置 ----
+  // ---- 来源位置：列头下拉每个来源一行 + 它的规则；计数按「这里有它的一份定义」数 ----
   const counts = new Map<string, number>();
   for (const row of page.rows) {
-    const g = mcpGroupOf(row);
-    counts.set(g, (counts.get(g) ?? 0) + 1);
+    for (const id of new Set(row.entries.map((e) => e.sourceId))) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
   }
-  const groups = [...counts].map(([sourceId, count]) => {
+  const menuSources: OriginMenuSource[] = [...counts].map(([sourceId, count]) => {
     const live = autoImports.find((r) => r.source.id === sourceId && r.targetDomain === page.key);
-    const rule = live ?? offRules.get(`${sourceId}|${page.key}`);
+    const available = page.targets
+      .filter((t) => t.id !== sourceId)
+      .map((t) => ({ id: t.id, agentId: t.harnessId, name: names.get(t.id) ?? t.label }));
+    const on = live !== undefined;
+    const targets = on
+      ? live.targets.map((t) => t.id).filter((id) => targetIds.has(id))
+      : (offRules.get(sourceId) ??
+        defaultTargets(
+          available.map((a) => a.id),
+          loadImportMemory(`mcp|${page.key}|${sourceId}`)?.last,
+        ));
     return {
-      key: sourceId,
+      id: sourceId,
       label: groupLabel(locationOf(sourceId), sourceId),
       title: locationOf(sourceId)?.path,
       count,
-      rule:
-        rule === undefined
-          ? undefined
-          : {
-              on: live !== undefined,
-              agents: rule.targets
-                .filter((t) => targetIds.has(t.id))
-                .map((t) => ({ id: t.harnessId, name: labelOf(t.id), columnId: t.id })),
-              onToggle: (next: boolean) => void setRule(rule, next),
-              disabledReason: busy ? "正在执行上一步操作" : undefined,
-            },
+      rule: {
+        on,
+        targets,
+        available,
+        onToggle: (next: boolean) => void setRule(page.key, sourceId, targets, next),
+        onTargets: (next: string[]) => void setRuleTargets(page.key, sourceId, next, on),
+        error: ruleErrors.get(sourceId) ?? null,
+        disabledReason: busy ? "正在执行上一步操作" : undefined,
+      },
     };
   });
 
@@ -635,10 +675,18 @@ export default function McpTab({
     const transports = [
       ...new Set(row.entries.map(transportText).filter((t): t is string => t !== null)),
     ];
+    const originId = mcpGroupOf(row);
+    const originPath = locationOf(originId)?.path ?? originId;
     return {
       key,
-      group: mcpGroupOf(row),
       name: row.name,
+      // 来源位置：定义住在哪个配置文件；悬停出完整路径与打开 ↗
+      origin: {
+        id: originId,
+        label: groupLabel(locationOf(originId), originId),
+        path: originPath,
+        onReveal: () => void reveal(originPath),
+      },
       cells,
       // 差异是行级事实，不进格：点状下划线，提示框给差异字段名（字段级原值 T3 在待处理页展开）
       mark:
@@ -658,11 +706,6 @@ export default function McpTab({
         ) : undefined,
       transport: transports.join(" / "),
       selectDisabledReason: blockedOf(page, row),
-      // 行悬停「打开 ↗」：定义所在的配置文件
-      reveal: (() => {
-        const path = locationOf(row.entries[0]?.sourceId ?? "")?.path;
-        return path === undefined ? undefined : { path, onReveal: () => void reveal(path) };
-      })(),
       busy: busyRows.get(key),
     };
   });
@@ -728,7 +771,13 @@ export default function McpTab({
     query !== "" ? (
       <TableEmpty
         text={`没有名字里带「${filterText.trim()}」的服务`}
-        action={{ label: "清除筛选", onClick: () => setFilterText("") }}
+        action={{
+          label: "清除筛选",
+          onClick: () => {
+            setFilterText("");
+            setOriginFilter(null);
+          },
+        }}
       />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
       <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" action={addAction} />
@@ -745,7 +794,25 @@ export default function McpTab({
     <section className="mx-page mcp-tab">
       <Matrix
         columns={columns}
-        groups={groups}
+        originLabel="来源位置"
+        originFilter={
+          originFilter === null
+            ? null
+            : {
+                label: groupLabel(locationOf(originFilter), originFilter),
+                onClear: () => setOriginFilter(null),
+              }
+        }
+        originMenu={({ close, hint }) => (
+          <OriginMenu
+            total={page.rows.length}
+            selected={originFilter}
+            onSelect={setOriginFilter}
+            sources={menuSources}
+            hint={hint}
+            close={close}
+          />
+        )}
         rows={rows}
         nameLabel="服务"
         nameTip="定义住在哪一格由原件环表示"
