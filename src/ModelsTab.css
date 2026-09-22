@@ -67,8 +67,9 @@
 /* agent 格：图标 + 名字 + 开关 + 配置网关 + [重启生效]，一组，间距 12 */
 .models-row__agent {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-xs) var(--space-sm);
   min-width: 0;
 }
 
@@ -167,6 +168,17 @@
   max-width: none;
   white-space: nowrap;
   transform: none;
+}
+
+/* 「卸下后台服务」的提示框同样单行；键可能折到第二行、贴着左沿，所以不强制右对齐，
+   出窗时由 Tooltip 自己改为对齐外侧边 */
+.models-uninstall-tip {
+  display: inline-flex;
+}
+
+.models-uninstall-tip .ss-tip {
+  max-width: none;
+  white-space: nowrap;
 }
 
 /* ===== 模型框 ===== */

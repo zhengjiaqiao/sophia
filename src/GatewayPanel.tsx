@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   MODEL_FILTER_THRESHOLD,
-  canRestore,
   modelGroups,
   modelRowId,
   modelRowLabel,
@@ -215,8 +214,6 @@ export interface GatewayPanelProps {
   onUndoRemove: (providerId: string) => Promise<void>;
   /// 真正删掉这一家（提示条到期或关掉）
   onCommitRemoval: (providerId: string) => Promise<void>;
-  /// 彻底撤下（停用之后后台服务还装着）
-  onRestore: () => Promise<void>;
   onToggleModel: (provider: GatewayProvider, modelId: string) => void;
   /// 连接区有没有没保存的改动：收起时壳要先问
   onDirtyChange: (dirty: boolean) => void;
@@ -253,7 +250,6 @@ export function GatewayPanel({
   onMarkRemove,
   onUndoRemove,
   onCommitRemoval,
-  onRestore,
   onToggleModel,
   onDirtyChange,
   askDiscard,
@@ -367,8 +363,6 @@ export function GatewayPanel({
     setSelected(next);
     setEditing(next === "new");
   };
-
-  const leftover = !state.enabled && canRestore(state);
 
   return (
     <div className="gw-panel">
@@ -487,15 +481,6 @@ export function GatewayPanel({
         {error !== null ? (
           <div className="gw-panel__error">
             <BlackNotice message={error} />
-          </div>
-        ) : null}
-
-        {leftover ? (
-          <div className="gw-panel__leftover">
-            <span>后台服务还装着，只是空转，也可以现在就撤掉。</span>
-            <Button size="compact" onClick={() => void onRestore().catch(report)}>
-              彻底撤下
-            </Button>
           </div>
         ) : null}
       </div>

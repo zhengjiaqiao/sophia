@@ -192,6 +192,16 @@ input:focus-visible {
   color: var(--ink);
 }
 
+/* 项目名带提示框时，包层接过弹性占位，名字照样能截断 */
+.sidebar__list li > .ss-tipwrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar__list li > .ss-tipwrap > .sidebar__name {
+  min-width: 0;
+}
+
 .sidebar__name {
   flex: 1;
   min-width: 0;

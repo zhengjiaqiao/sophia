@@ -18,7 +18,9 @@ import {
   routerUnavailable,
   shouldPollRestart,
   showRestartKey,
+  serviceLeftover,
   showRouterBanner,
+  UNINSTALL_TIP,
   totalSelected,
 } from "./modelsView.ts";
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
@@ -143,6 +145,9 @@ export interface AgentRowProps {
   models: ReactNode;
   /// 网关区展开着：`配置网关` 是按下态
   gatewayOpen?: boolean;
+  /// 停用后服务仍在时的 `卸下后台服务`（按钮即状态）；正在卸下时原位细弧 + 文字
+  uninstalling?: boolean;
+  onUninstall?: () => void;
   /// 网关展开区（这一行正下方，左半对齐 agent 列、右半对齐生效模型列）
   gateway?: ReactNode;
 }
@@ -160,6 +165,8 @@ export function AgentRow({
   models,
   gatewayOpen = false,
   gateway,
+  uninstalling = false,
+  onUninstall,
 }: AgentRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   // 已启用时永远能关：停用不依赖密钥和模型还在不在
@@ -212,6 +219,28 @@ export function AgentRow({
           busy={busy}
           onRestart={() => rowRef.current && onRestart(rowRef.current)}
         />
+        {uninstalling ? (
+          <span className="models-restart models-restart--busy" role="status">
+            <Spinner size={14} label="正在卸下后台服务" />
+            <span className="models-restart__text">正在卸下后台服务</span>
+          </span>
+        ) : serviceLeftover(state) && onUninstall ? (
+          // 与「重启生效」同一组件、同一「按钮即状态」规则：停用后服务仍在才出现，卸下即消失
+          <span className="models-uninstall-tip">
+            {/* 键折到第二行时，上方正是 Codex 这一行：提示框放键下方，不盖住触发它的这一行 */}
+            <Tooltip content={UNINSTALL_TIP} placement="bottom">
+              {busy ? (
+                <Button size="compact" disabled disabledReason="正在处理上一步">
+                  卸下后台服务
+                </Button>
+              ) : (
+                <Button size="compact" onClick={onUninstall}>
+                  卸下后台服务
+                </Button>
+              )}
+            </Tooltip>
+          </span>
+        ) : null}
       </div>
       <div className="models-row__models">{models}</div>
       {gateway !== undefined ? (
@@ -468,6 +497,7 @@ export default function ModelsTab({
   /// 连接区有没保存的改动；收起时有改动就不收，就地问「保存 / 丢弃」
   const [gatewayDirty, setGatewayDirty] = useState(false);
   const [askDiscard, setAskDiscard] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
   /// 跳回定位的那一家：分段片闪两下（960ms）后清掉
   const [flashProvider, setFlashProvider] = useState<string | null>(null);
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
@@ -836,6 +866,14 @@ export default function ModelsTab({
                 </ModelBox>
               }
               gatewayOpen={gatewayOpen}
+              uninstalling={uninstalling}
+              onUninstall={() =>
+                void (async () => {
+                  setUninstalling(true);
+                  await run("没卸下", () => api.gatewayRestore());
+                  if (mounted.current) setUninstalling(false);
+                })()
+              }
               gateway={
                 gateway !== null ? (
                   <GatewayPanel
@@ -850,7 +888,6 @@ export default function ModelsTab({
                     onMarkRemove={(p) => runOrThrow(() => api.gatewayMarkRemoveProvider(p.id))}
                     onUndoRemove={(id) => runOrThrow(() => api.gatewayUndoRemoveProvider(id))}
                     onCommitRemoval={(id) => runOrThrow(() => api.gatewayCommitRemovals(id))}
-                    onRestore={() => runOrThrow(() => api.gatewayRestore())}
                     onToggleModel={toggleModel}
                     onDirtyChange={onGatewayDirty}
                     askDiscard={askDiscard}

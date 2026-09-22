@@ -1,10 +1,10 @@
 /// 菜单栏面板里 Codex 那一行要显示什么（DESIGN「托盘面板」，画板 Tray）。
 /// 纯函数：面板与「模型」页同一行的缩小版——`图标 + Codex + 开关 + [重启生效]`，没有状态句。
 /// 文案与判断一律取自 modelsView，两边说同一句话。
-import { enableDisabledReason, totalSelected } from "./modelsView.ts";
+import { enableDisabledReason, serviceLeftover, totalSelected } from "./modelsView.ts";
 import type { GatewayState } from "./types.ts";
 
-export { RESTART_CONSEQUENCE, RESTART_TIP } from "./modelsView.ts";
+export { RESTART_CONSEQUENCE, RESTART_TIP, UNINSTALL_TIP } from "./modelsView.ts";
 
 export interface TrayToggle {
   /// 开关现在开着没有
@@ -20,6 +20,9 @@ export interface TrayRow {
   /// 「重启生效」键：按钮即状态，只在改动等着生效时出现。启用和停用都算——
   /// 停用之后 Codex 的列表同样要重启才会变回去
   showRestart: boolean;
+  /// 「卸下后台服务」：停用后服务仍在才出现（与模型页同一规则）。面板只有 320 宽，
+  /// 和「重启生效」同时该出现时让位给重启——一行放不下两颗键
+  showUninstall: boolean;
 }
 
 export function trayRow(state: GatewayState): TrayRow {
@@ -29,5 +32,6 @@ export function trayRow(state: GatewayState): TrayRow {
     visible: state.supported,
     toggle: { on: state.enabled, disabledReason },
     showRestart: state.needsCodexRestart,
+    showUninstall: serviceLeftover(state) && !state.needsCodexRestart,
   };
 }

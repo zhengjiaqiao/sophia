@@ -119,3 +119,13 @@ test("R4 刚停用也一样：Codex 的列表要重启才会变回去", () => {
   const row = trayRow(withModels(2, { enabled: false, needsCodexRestart: true }));
   assert.equal(row.showRestart, true);
 });
+
+test("托盘「卸下后台服务」：停用后服务仍在才出现；和「重启生效」同时该出现时让位给重启（一行放不下两颗键）", () => {
+  const router = { installed: true, running: true, port: 47328, protocol: "chat", error: "" };
+  assert.equal(trayRow(withModels(2, { enabled: false, router })).showUninstall, true);
+  assert.equal(trayRow(withModels(2, { enabled: true, router })).showUninstall, false);
+  assert.equal(
+    trayRow(withModels(2, { enabled: false, router, needsCodexRestart: true })).showUninstall,
+    false,
+  );
+});

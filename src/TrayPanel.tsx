@@ -3,7 +3,7 @@ import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { RESTART_DONE_MS, RESTART_STILL_STALE, parseBackendError } from "./modelsView";
-import { RESTART_CONSEQUENCE, RESTART_TIP, trayRow } from "./trayView";
+import { RESTART_CONSEQUENCE, RESTART_TIP, UNINSTALL_TIP, trayRow } from "./trayView";
 import type { GatewayState } from "./types";
 import { AgentIcon, Button, Spinner, Switch, Toast, Tooltip } from "./ui";
 import "./TrayPanel.css";
@@ -28,6 +28,7 @@ type Restart =
 export default function TrayPanel() {
   const [state, setState] = useState<GatewayState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
   const [restart, setRestart] = useState<Restart>({ kind: "idle" });
   /// 重启没成的原因（黑块）；面板下次弹出时清掉
   const [failure, setFailure] = useState<string | null>(null);
@@ -75,6 +76,24 @@ export default function TrayPanel() {
       void failOver(error);
     } finally {
       if (mounted.current) setBusy(false);
+    }
+  };
+
+  /// 停用后服务仍在：卸下它。做不成就把主窗口带到模型页说原因（面板放不下一段解释）
+  const uninstall = async () => {
+    setUninstalling(true);
+    setBusy(true);
+    try {
+      const fresh = await api.gatewayRestore();
+      if (mounted.current) setState(fresh);
+      void emit("gateway-changed");
+    } catch (error) {
+      void failOver(error);
+    } finally {
+      if (mounted.current) {
+        setBusy(false);
+        setUninstalling(false);
+      }
     }
   };
 
@@ -137,6 +156,31 @@ export default function TrayPanel() {
       return (
         <span className="tray__restart tray__restart--done">
           <Toast tier="routine" kind="success" verb="已生效" />
+        </span>
+      );
+    }
+    if (uninstalling) {
+      return (
+        <span className="tray__restart" role="status">
+          <Spinner size={14} label="正在卸下后台服务" />
+          <span className="tray__restart-text">正在卸下后台服务</span>
+        </span>
+      );
+    }
+    if (row?.showUninstall) {
+      return (
+        <span className="tray__restart-tip">
+          <Tooltip content={UNINSTALL_TIP} placement="bottom">
+            {busy ? (
+              <Button size="compact" disabled disabledReason="正在处理上一步">
+                卸下后台服务
+              </Button>
+            ) : (
+              <Button size="compact" onClick={() => void uninstall()}>
+                卸下后台服务
+              </Button>
+            )}
+          </Tooltip>
         </span>
       );
     }

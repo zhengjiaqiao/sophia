@@ -97,6 +97,17 @@
   display: flex;
 }
 
+/* 列表行的提示框放在该行同一行的右侧空白处（行尾对齐、不越出列表框），不放到上一行——
+   放到上一行会被读成上一行的信息（DESIGN「提示框 › 位置」）。覆盖 Tooltip 的上 / 下与对齐 */
+.model-list__group > .ss-tipwrap > .ss-tip {
+  top: 50%;
+  bottom: auto;
+  left: auto;
+  right: var(--space-sm);
+  max-width: calc(100% - 2 * var(--space-sm));
+  transform: translateY(-50%);
+}
+
 /* 一个模型一行：高 34，整行是命中区，悬停 surface */
 .models-option {
   display: flex;
@@ -310,15 +321,6 @@
 
 .gw-panel__notice .ss-toast--notice {
   max-width: 100%;
-}
-
-.gw-panel__leftover {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-xs) var(--space-sm);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
 }
 
 /* 右半：从这个网关选模型。段头 13/600，限制说明 12 ink-faint（不截断） */

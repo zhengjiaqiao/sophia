@@ -19,6 +19,7 @@ import { PendingPage, loadModelIgnoredKeys, type PendingSegment } from "./pages/
 import { collectIssues } from "./pages/pendingIssues";
 import { collectMcpIssues } from "./mcpView";
 import { flushAll } from "./deferredCommit";
+import { displayPath, loadHome } from "./pathText";
 import { modelIssues, parseBackendError } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
 import {
@@ -30,6 +31,7 @@ import {
   IconInbox,
   IconSettings,
   Toast,
+  Tooltip,
 } from "./ui";
 import wordmark from "../assets/logo/wordmark.svg";
 import "./App.css";
@@ -270,6 +272,8 @@ export default function App() {
         // 读不到就当作不支持，标签页保持隐藏
         if (!cancelled) applyModelsSupported(false);
       });
+    // 路径显示把主目录写成 ~：主目录启动时读一次，之后 displayPath 同步可用
+    void loadHome();
     // 启动时扫一次：停在模型页也要数得出 Skills 与 MCP 两段
     void refresh();
     return () => {
@@ -514,7 +518,7 @@ export default function App() {
                   className={d.key === selectedKey ? "is-active" : ""}
                   onClick={() => !busy && setSelectedKey(d.key)}
                 >
-                  <span className="sidebar__name">{d.label}</span>
+                  <SidebarName label={d.label} domainKey={d.key} />
                   {manualPath !== undefined && (
                     <RemoveProject
                       busy={busy}
@@ -537,7 +541,7 @@ export default function App() {
                       className={key === selectedKey ? "is-active" : ""}
                       onClick={() => !busy && setSelectedKey(key)}
                     >
-                      <span className="sidebar__name">{name}</span>
+                      <SidebarName label={name} domainKey={key} />
                       <RemoveProject
                         busy={busy}
                         name={name}
@@ -606,6 +610,13 @@ export default function App() {
       )}
     </div>
   );
+}
+
+/// 侧栏项目名：放不下截断，提示框给出完整路径（主目录写成 ~）；不是项目的域只写名字
+function SidebarName({ label, domainKey }: { label: string; domainKey: string }) {
+  const name = <span className="sidebar__name">{label}</span>;
+  if (!domainKey.startsWith("project:")) return name;
+  return <Tooltip content={displayPath(domainKey.slice("project:".length))}>{name}</Tooltip>;
 }
 
 /// 侧栏里手动添加的项目才有移除键：16px ×，行内右端

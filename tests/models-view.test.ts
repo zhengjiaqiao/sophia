@@ -27,6 +27,8 @@ import {
   showRestartKey,
   shouldPollRestart,
   showRouterBanner,
+  serviceLeftover,
+  UNINSTALL_TIP,
   RESTART_TIP,
 } from "../src/modelsView.ts";
 import type { ModelsTool } from "../src/modelsView.ts";
@@ -739,7 +741,6 @@ const panelProps = (
   onMarkRemove: async () => {},
   onUndoRemove: async () => {},
   onCommitRemoval: async () => {},
-  onRestore: async () => {},
   onToggleModel: noop,
   onDirtyChange: noop,
   askDiscard: false,
@@ -806,4 +807,37 @@ test("GatewayPanel 跳回定位：那一家的分段片外包一层 surface 闪�
   );
   assert.equal((html.match(/gw-panel__chipwrap is-jump/g) ?? []).length, 1);
   assert.match(html, /gw-panel__chipwrap is-jump"><button[^>]*class="ss-chip is-selected"/);
+});
+
+test("serviceLeftover：只有停用了、后台服务却还装着才算残留（关开关本身会卸下）", () => {
+  const router = (installed: boolean) => ({
+    installed,
+    running: installed,
+    port: 1,
+    protocol: "chat",
+    error: "",
+  });
+  assert.equal(serviceLeftover(state({ enabled: false, router: router(true) })), true);
+  assert.equal(serviceLeftover(state({ enabled: true, router: router(true) })), false);
+  assert.equal(serviceLeftover(state({ enabled: false, router: router(false) })), false);
+});
+
+test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（与重启生效同形），提示框写结果；正在卸下时细弧 + 文字", () => {
+  const leftover = {
+    enabled: false,
+    router: { installed: true, running: true, port: 1, protocol: "chat", error: "" },
+  };
+  const html = render(AgentRow, { ...rowProps(withSelected(leftover)), onUninstall: noop });
+  assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>卸下后台服务</);
+  assert.match(html, new RegExp(`role="tooltip"[^>]*>${UNINSTALL_TIP}<`));
+  const busyHtml = render(AgentRow, {
+    ...rowProps(withSelected(leftover)),
+    onUninstall: noop,
+    uninstalling: true,
+  });
+  assert.match(busyHtml, /class="ss-spinner"[^]*正在卸下后台服务/);
+  assert.doesNotMatch(
+    render(AgentRow, { ...rowProps(withSelected({ enabled: true })), onUninstall: noop }),
+    /卸下后台服务/,
+  );
 });

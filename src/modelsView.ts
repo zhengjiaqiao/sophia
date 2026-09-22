@@ -292,6 +292,19 @@ export function canRestore(state: GatewayState): boolean {
   return state.enabled || state.router.installed;
 }
 
+/**
+ * 后台服务残留：已经停用、服务却还装着（自动卸下失败，或旧版本遗留）。
+ * 关开关时的 gatewayRestore 本身就会卸下服务，所以手动入口只在这种状态下出现——
+ * Codex 行（与托盘那一行）按状态出现紧凑键 `卸下后台服务`，设置页「关于」下方也用它判断
+ * （DESIGN「停用即卸下后台服务」）。
+ */
+export function serviceLeftover(state: GatewayState): boolean {
+  return !state.enabled && state.router.installed;
+}
+
+/// 「卸下后台服务」键的提示框：只写点下去的结果
+export const UNINSTALL_TIP = "停用后后台服务还在运行，卸下后不再占用资源";
+
 /// 「重启 Codex」不设禁用态：结束进程不依赖我们的路由装没装上，
 /// 一个进程都没找到也不算失败（R6 修订 v2、AC7′），所以这里没有对应的 reason 函数。
 
