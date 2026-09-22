@@ -117,6 +117,21 @@
   color: var(--ink);
 }
 
+/* 全添加过的来源：数字弱色（选中时也弱），排在列表后面 */
+.ss-import__source .ss-import__count.is-zero {
+  color: var(--ink-faint);
+}
+
+/* 来源行的完整路径走提示框：包裹层撑满整行 */
+.ss-import__source > .ss-tipwrap {
+  display: block;
+}
+
+.ss-import__path {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
 /* 手动加的来源可以移除：只在悬停 / 聚焦这一行时出现，不常驻 */
 .ss-import__remove {
   position: absolute;
@@ -237,14 +252,16 @@
   outline-offset: 2px;
 }
 
-/* 已添加的整行灰 */
+/* 已添加的：整行灰，不是可选项——没有复选框、没有悬停反馈 */
 .ss-import__row.is-added {
   color: var(--ink-faint);
   cursor: default;
 }
 
-.ss-checkbox.is-dim {
-  border-color: var(--hairline);
+/* 复选框的空位：让已添加的名字与可选的名字对齐 */
+.ss-import__nobox {
+  flex-shrink: 0;
+  width: 12px;
 }
 
 .ss-import__name {
@@ -262,30 +279,33 @@
   margin-left: auto;
 }
 
-/* 同名就地展开：`替换现有的 · 说明 · 跳过`，从名字那一列起 */
+/* 同名就地展开：`替换现有的 · 说明 · 跳过`，从名字那一列起。
+   说明承载后果，**不截断**：放不下就折行（C3） */
 .ss-import__clash {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  height: 30px;
-  padding-left: 22px;
+  min-height: 30px;
+  padding: 3px 0 3px 22px;
+  box-sizing: border-box;
 }
 
 .ss-import__clashnote {
-  flex-grow: 1;
+  flex: 1 1 0;
   min-width: 0;
-  overflow: hidden;
   font-family: var(--font-ui);
   font-size: var(--size-micro);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+}
+
+/* 挂起的替换：黑窗贴在被替换那一行正下方 4，从名字那一列起 */
+.ss-import__rowtoast {
+  padding: 4px 0 6px 22px;
 }
 
 /* ---- 底部一行：一组目标 + 规则开关 + 安全小字 + 添加 N 个 ---- */
 .ss-import__foot {
-  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-xs);
@@ -342,14 +362,6 @@
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   color: var(--ink-mute);
-}
-
-/* 挂起的替换：贴在底部一行上方 8，右沿对齐 `添加 N 个` */
-.ss-import__toast {
-  position: absolute;
-  right: var(--space-xxl);
-  bottom: calc(100% + var(--space-xs));
-  z-index: 1;
 }
 
 /* ---- 0 个来源：不分栏，内容区居中三行（间距 8 / 16） ---- */

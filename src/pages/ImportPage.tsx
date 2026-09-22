@@ -9,7 +9,7 @@ import type {
   SourceKind,
   SyncReport,
 } from "../types";
-import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag, Toast } from "../ui";
+import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Tag, Toast, Tooltip } from "../ui";
 import { defer } from "../deferredCommit.ts";
 import { CheckMark } from "./CheckMark.tsx";
 import { joinWords } from "./pendingIssues.ts";
@@ -18,6 +18,7 @@ import {
   defaultTargets,
   loadImportMemory,
   saveImportMemory,
+  distinguishingSegments,
   sameSet,
   undoSlot,
 } from "./importDefaults.ts";
@@ -76,7 +77,34 @@ export default function ImportPage({
   onError,
   onNotice,
 }: ImportPageProps) {
-  const [selected, setSelected] = useState(overview.sources[0]?.id ?? "");
+  /// 这个来源在本域还有几个没添加（左栏右端的数）
+  const freshCount = (src: Source) =>
+    src.skills.filter((sk) => !page.rows.some((r) => r.sourceId === src.id && r.skill === sk.name))
+      .length;
+  /// 左栏顺序：还有没添加的排前面，全添加过的排后面；**进页时定一次**，添加完不跳位，
+  /// 之后新加的来源接在末尾
+  const [order] = useState(() =>
+    [...overview.sources]
+      .sort((a, b) => Number(freshCount(b) > 0) - Number(freshCount(a) > 0))
+      .map((x) => x.id),
+  );
+  const sortedSources = [
+    ...order.flatMap((id) => overview.sources.filter((x) => x.id === id)),
+    ...overview.sources.filter((x) => !order.includes(x.id)),
+  ];
+  /// 同名的来源（真机里三个「WeiboAP · 外部」）第二行带上路径里能区分它们的那一级
+  const distinct = new Map<string, string>();
+  for (const label of new Set(overview.sources.map((x) => x.label))) {
+    const same = overview.sources.filter((x) => x.label === label);
+    if (same.length < 2) continue;
+    distinguishingSegments(same.map((x) => x.path)).forEach((seg, i) =>
+      distinct.set(same[i].id, seg),
+    );
+  }
+  // 默认选中第一个还有没添加的来源
+  const [selected, setSelected] = useState(
+    () => sortedSources.find((x) => freshCount(x) > 0)?.id ?? sortedSources[0]?.id ?? "",
+  );
   const [names, setNames] = useState<string[]>([]);
   /// 同名的行里选了「替换现有的」的那些
   const [replace, setReplace] = useState<string[]>([]);
@@ -413,8 +441,9 @@ export default function ImportPage({
               <span>未添加</span>
             </div>
             <div className="ss-import__srclist" ref={listRef}>
-              {overview.sources.map((s) => {
+              {sortedSources.map((s) => {
                 const count = s.skills.filter((sk) => notAdded(s.id, sk.name)).length;
+                const seg = distinct.get(s.id);
                 return (
                   <div
                     key={s.id}
@@ -422,24 +451,28 @@ export default function ImportPage({
                       s.id === selected ? "ss-import__source is-active" : "ss-import__source"
                     }
                   >
-                    <button
-                      type="button"
-                      className="ss-import__pick"
-                      title={s.path}
-                      aria-current={s.id === selected}
-                      onClick={() => setSelected(s.id)}
-                    >
-                      <span className="ss-import__srctext">
-                        <span className="ss-import__srcname">{s.label}</span>
-                        <span className="ss-import__srcscope">{scopeOf(s.kind)}</span>
-                      </span>
-                      <span
-                        className={`ss-import__count${count === 0 ? " is-zero" : ""}`}
-                        title="还没出现在这个位置的 skill 数"
+                    {/* 完整路径进提示框（不用原生 title） */}
+                    <Tooltip content={<span className="ss-import__path">{s.path}</span>}>
+                      <button
+                        type="button"
+                        className="ss-import__pick"
+                        aria-current={s.id === selected}
+                        onClick={() => setSelected(s.id)}
                       >
-                        {count}
-                      </span>
-                    </button>
+                        <span className="ss-import__srctext">
+                          <span className="ss-import__srcname">{s.label}</span>
+                          <span className="ss-import__srcscope">
+                            {seg ? `${scopeOf(s.kind)} · ${seg}` : scopeOf(s.kind)}
+                          </span>
+                        </span>
+                        <span
+                          className={`ss-import__count${count === 0 ? " is-zero" : ""}`}
+                          title="还没出现在这个位置的 skill 数"
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    </Tooltip>
                     {s.kind.type === "manual" ? (
                       <span className="ss-import__remove">
                         <Button variant="link" onClick={() => removeSource(s.path)}>
@@ -481,30 +514,33 @@ export default function ImportPage({
                   {columns.map((col) => (
                     <div className="ss-import__col" key={col[0].name}>
                       {col.map((entry) => {
+                        // 已添加的不是可选项：不画复选框、不给悬停反馈，只留一个同宽的空位对齐名字
+                        if (entry.added) {
+                          return (
+                            <div key={entry.name} className="ss-import__row is-added">
+                              <span className="ss-import__nobox" aria-hidden="true" />
+                              <span className="ss-import__name">{entry.name}</span>
+                              <span className="ss-import__tag">
+                                <Tag tone="weak">已添加</Tag>
+                              </span>
+                            </div>
+                          );
+                        }
                         const on = names.includes(entry.name);
-                        const replacing = replace.includes(entry.name);
+                        const chosen = replace.includes(entry.name);
+                        const pendingHere = replacing?.names.includes(entry.name) ?? false;
                         return (
                           <div key={entry.name}>
                             <button
                               type="button"
-                              className={`ss-import__row${entry.added ? " is-added" : ""}`}
+                              className="ss-import__row"
                               role="checkbox"
                               aria-checked={on}
-                              disabled={entry.added}
-                              title={
-                                entry.added
-                                  ? `${entry.name} 已经在这个位置的列表里了`
-                                  : `${source.path}/${entry.name}`
-                              }
                               onClick={() => toggleName(entry.name)}
                             >
-                              <CheckMark on={on} dim={entry.added} />
+                              <CheckMark on={on} />
                               <span className="ss-import__name">{entry.name}</span>
-                              {entry.added ? (
-                                <span className="ss-import__tag">
-                                  <Tag tone="weak">已添加</Tag>
-                                </span>
-                              ) : entry.holder !== null ? (
+                              {entry.holder !== null ? (
                                 <span className="ss-import__tag">
                                   <Tag
                                     tip={
@@ -518,9 +554,22 @@ export default function ImportPage({
                                 </span>
                               ) : null}
                             </button>
-                            {on && entry.holder !== null && !entry.added ? (
+                            {replacing !== null && replacing.names[0] === entry.name ? (
+                              // 挂起的替换：提示条贴在被替换的那一行下方（锚在触发它的控件上）
+                              <div className="ss-import__rowtoast">
+                                <Toast
+                                  key={replacing.key}
+                                  kind="success"
+                                  verb="替换"
+                                  names={replacing.names}
+                                  action={{ label: "撤销", onClick: replacing.undo }}
+                                  onDismiss={replacing.commit}
+                                  onClose={replacing.commit}
+                                />
+                              </div>
+                            ) : on && entry.holder !== null && !pendingHere ? (
                               <div className="ss-import__clash">
-                                {replacing ? (
+                                {chosen ? (
                                   <Button
                                     size="compact"
                                     variant="primary"
@@ -539,11 +588,13 @@ export default function ImportPage({
                                     替换现有的
                                   </Button>
                                 )}
-                                <span
-                                  className="ss-import__clashnote"
-                                  title="现有的那份进废纸篓、链到它的改指到这一份；添加后提示条上可以撤销"
-                                >
-                                  {joinWords("替换后", entry.holder.label, "那份进废纸篓，可撤销")}
+                                {/* 后果说明不截断，放不下就折行 */}
+                                <span className="ss-import__clashnote">
+                                  {joinWords(
+                                    "替换后",
+                                    entry.holder.label,
+                                    "那份进废纸篓、链到它的改指到这一份，可撤销",
+                                  )}
                                 </span>
                                 <Button variant="link" onClick={() => toggleName(entry.name)}>
                                   跳过
@@ -562,20 +613,6 @@ export default function ImportPage({
         </div>
 
         <Busy busy={busy} className="ss-import__foot">
-          {replacing !== null ? (
-            // 挂起的替换：黑窗贴在 `添加 N 个` 上方、右沿对齐它（提示锚在触发它的控件上）
-            <div className="ss-import__toast">
-              <Toast
-                key={replacing.key}
-                kind="success"
-                verb="替换"
-                names={replacing.names}
-                action={{ label: "撤销", onClick: replacing.undo }}
-                onDismiss={replacing.commit}
-                onClose={replacing.commit}
-              />
-            </div>
-          ) : null}
           <div className="ss-import__keys">
             {page.targets.length === 0 ? (
               <span className="ss-import__hint">还没有启用任何 agent，先去设置里开一个</span>

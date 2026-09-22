@@ -2,9 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { canSupplement, importedInDomain, mcpDomainLabel, type McpDomain } from "../mcpView";
 import type { McpAutoImportRule, McpEntry, McpLocation, McpOverview, McpPreview } from "../types";
-import { AgentKey, Busy, Button, SubPage, Switch, Tag } from "../ui";
+import { AgentKey, Busy, Button, SubPage, Switch, Tag, Tooltip } from "../ui";
 import { CheckMark } from "./CheckMark.tsx";
-import { defaultTargets, loadImportMemory, saveImportMemory, sameSet } from "./importDefaults.ts";
+import {
+  defaultTargets,
+  distinguishingSegments,
+  loadImportMemory,
+  saveImportMemory,
+  sameSet,
+} from "./importDefaults.ts";
 import "./McpImportPage.css";
 
 /// 添加 MCP 页（DESIGN「产品裁决 › 添加页」，画板 McpImport）：与添加 skill 页**逐句对称**，
@@ -72,8 +78,35 @@ export default function McpImportPage({
     [overview.locations],
   );
 
+  /// 这个位置能往本域其余位置补几个（排序与默认选中用：不随当场点亮的目标变）
+  const freshCount = (location: McpLocation) => {
+    const others = new Set(domainTargets.filter((t) => t.id !== location.id).map((t) => t.id));
+    return overview.entries.filter((e) => e.sourceId === location.id && canSupplement(e, others))
+      .length;
+  };
+  /// 左栏顺序：还有能补的排前面，没有的排后面；**进页时定一次**，添加完不跳位
+  const [order] = useState(() =>
+    [...sources]
+      .sort((a, b) => Number(freshCount(b) > 0) - Number(freshCount(a) > 0))
+      .map((x) => x.id),
+  );
+  const sortedSources = [
+    ...order.flatMap((id) => sources.filter((x) => x.id === id)),
+    ...sources.filter((x) => !order.includes(x.id)),
+  ];
+  /// 名字和所在域都一样的位置，第二行再带上路径里能区分它们的那一级
+  const distinct = new Map<string, string>();
+  const scopeKey = (x: McpLocation) => `${x.label}|${mcpDomainLabel(x.domain)}`;
+  for (const k of new Set(sources.map(scopeKey))) {
+    const same = sources.filter((x) => scopeKey(x) === k);
+    if (same.length < 2) continue;
+    distinguishingSegments(same.map((x) => x.path)).forEach((seg, i) =>
+      distinct.set(same[i].id, seg),
+    );
+  }
+  // 默认选中第一个还有能补的位置
   const [sourceId, setSourceId] = useState(
-    () => sources.find((s) => s.domain === page.key)?.id ?? sources[0]?.id ?? "",
+    () => sortedSources.find((x) => freshCount(x) > 0)?.id ?? sortedSources[0]?.id ?? "",
   );
   const [names, setNames] = useState<string[]>([]);
   const [targetIds, setTargetIds] = useState<string[]>([]);
@@ -253,8 +286,9 @@ export default function McpImportPage({
                   的配置里有服务定义时才会出现在这儿。
                 </div>
               ) : null}
-              {sources.map((location) => {
+              {sortedSources.map((location) => {
                 const count = countOf(location);
+                const seg = distinct.get(location.id);
                 return (
                   <div
                     key={location.id}
@@ -262,26 +296,30 @@ export default function McpImportPage({
                       location.id === sourceId ? "ss-import__source is-active" : "ss-import__source"
                     }
                   >
-                    <button
-                      type="button"
-                      className="ss-import__pick"
-                      title={location.path}
-                      aria-current={location.id === sourceId}
-                      onClick={() => setSourceId(location.id)}
-                    >
-                      <span className="ss-import__srctext">
-                        <span className="ss-import__srcname">{location.label}</span>
-                        <span className="ss-import__srcscope">
-                          {mcpDomainLabel(location.domain)}
-                        </span>
-                      </span>
-                      <span
-                        className={`ss-import__count${count === 0 ? " is-zero" : ""}`}
-                        title="现在能往点亮的位置里补几个"
+                    {/* 完整路径进提示框（不用原生 title） */}
+                    <Tooltip content={<span className="ss-import__path">{location.path}</span>}>
+                      <button
+                        type="button"
+                        className="ss-import__pick"
+                        aria-current={location.id === sourceId}
+                        onClick={() => setSourceId(location.id)}
                       >
-                        {count}
-                      </span>
-                    </button>
+                        <span className="ss-import__srctext">
+                          <span className="ss-import__srcname">{location.label}</span>
+                          <span className="ss-import__srcscope">
+                            {seg
+                              ? `${mcpDomainLabel(location.domain)} · ${seg}`
+                              : mcpDomainLabel(location.domain)}
+                          </span>
+                        </span>
+                        <span
+                          className={`ss-import__count${count === 0 ? " is-zero" : ""}`}
+                          title="现在能往点亮的位置里补几个"
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    </Tooltip>
                   </div>
                 );
               })}
@@ -312,34 +350,43 @@ export default function McpImportPage({
 
                 <Busy busy={busy} className="ss-import__grid ss-mcp__list">
                   {entries.map((item) => {
+                    const state = item.unsupported ? (
+                      <Tag
+                        tip={`${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`}
+                      >
+                        搬不过去
+                      </Tag>
+                    ) : !item.pickable && item.added ? (
+                      <Tag tone="weak">已添加</Tag>
+                    ) : null;
+                    // 选不了的（已添加 / 搬不过去）不是可选项：不画复选框、不给悬停反馈
+                    if (!item.pickable) {
+                      return (
+                        <div
+                          key={entryKey(item.entry)}
+                          className="ss-import__row ss-mcp__row is-added"
+                        >
+                          <span className="ss-import__nobox" aria-hidden="true" />
+                          <span className="ss-import__name">{item.name}</span>
+                          <span className="ss-mcp__transport">{item.transport}</span>
+                          <span className="ss-mcp__state">{state}</span>
+                        </div>
+                      );
+                    }
                     const on = names.includes(item.name);
                     return (
                       <button
                         key={entryKey(item.entry)}
                         type="button"
-                        className={`ss-import__row ss-mcp__row${item.pickable ? "" : " is-added"}`}
+                        className="ss-import__row ss-mcp__row"
                         role="checkbox"
                         aria-checked={on}
-                        disabled={!item.pickable}
-                        title={
-                          item.unsupported
-                            ? `${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`
-                            : item.pickable
-                              ? `${source.path} 里的 ${item.name}`
-                              : `${item.name} 在点亮的位置上都已经有了`
-                        }
                         onClick={() => toggleName(item.name)}
                       >
-                        <CheckMark on={on} dim={!item.pickable} />
+                        <CheckMark on={on} />
                         <span className="ss-import__name">{item.name}</span>
                         <span className="ss-mcp__transport">{item.transport}</span>
-                        <span className="ss-mcp__state">
-                          {item.unsupported ? (
-                            <Tag tip="只有来源那个 agent 认得这种写法">搬不过去</Tag>
-                          ) : !item.pickable && item.added ? (
-                            <Tag tone="weak">已添加</Tag>
-                          ) : null}
-                        </span>
+                        <span className="ss-mcp__state">{state}</span>
                       </button>
                     );
                   })}

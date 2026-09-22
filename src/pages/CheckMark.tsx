@@ -3,10 +3,9 @@
 /// 给「整行是按钮」的列表用：命中区是整行（DESIGN「命中区与视觉尺寸是两回事」：列表行里
 /// 的选择记号只是告诉你点了会发生什么），方框本身不再是一个按钮——按钮里套按钮不合法。
 /// 读屏状态由外层行的 `role="checkbox"` + `aria-checked` 说，这里 aria-hidden。
-export function CheckMark({ on, dim }: { on: boolean; dim?: boolean }) {
+export function CheckMark({ on }: { on: boolean }) {
   const classes = ["ss-checkbox", "pages-checkmark"];
   if (on) classes.push("is-on");
-  if (dim) classes.push("is-dim");
   return (
     <span className={classes.join(" ")} aria-hidden="true">
       {on ? (

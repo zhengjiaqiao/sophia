@@ -50,3 +50,33 @@ test("一次只挂一个撤销：挂第二笔前先提交第一笔，离开时�
   assert.equal(pendingCount(), 0);
   await slot.flush();
 });
+
+test("同名来源：只挑出路径里不同的那一级", async () => {
+  const { distinguishingSegments } = await import("../src/pages/importDefaults.ts");
+  const base = "/Users/me/Library/Application Support/WeiboAP";
+  assert.deepEqual(
+    distinguishingSegments([`${base}/alpha/skills`, `${base}/beta/skills`, `${base}/gamma/skills`]),
+    ["alpha", "beta", "gamma"],
+  );
+  // 各自取第一个与别人在同一位置上都不同的那一级（只一级，不拼接）
+  assert.deepEqual(distinguishingSegments(["/a/x/one/s", "/b/x/two/s", "/b/y/one/s"]), [
+    "a",
+    "two",
+    "y",
+  ]);
+  // 真机的情形：一个项目里的 WeiboAP 和两个应用数据目录里的
+  assert.deepEqual(distinguishingSegments(["/w", `${base}/alpha/skills`, `${base}/beta/skills`]), [
+    "w",
+    "alpha",
+    "beta",
+  ]);
+  // 结尾不同就直接是结尾
+  assert.deepEqual(distinguishingSegments(["/p/q/skills", "/p/q/skills-2"]), [
+    "skills",
+    "skills-2",
+  ]);
+  // 只有一条：不需要区分
+  assert.deepEqual(distinguishingSegments(["/only/one"]), [""]);
+  // 反斜杠也认
+  assert.deepEqual(distinguishingSegments(["C:\\a\\one\\s", "C:\\a\\two\\s"]), ["one", "two"]);
+});

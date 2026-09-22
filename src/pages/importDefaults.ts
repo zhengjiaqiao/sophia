@@ -84,3 +84,21 @@ export function undoSlot(): UndoSlot {
     current: () => held,
   };
 }
+
+/// 同名来源分不清时（真机里三个「WeiboAP · 外部」），挑出每条路径里能区分它的**那一级**。
+///
+/// 从结尾往前找：第一个「别的路径在同一位置（从结尾数）上都不是它」的分量就是答案——
+/// 共有的结尾（通常是 `skills`）自然被跳过。找不到单独一级能区分的（极少见），退回整条路径。
+/// 返回与输入同序；只有一条时返回空串（不需要区分）
+export function distinguishingSegments(paths: string[]): string[] {
+  if (paths.length < 2) return paths.map(() => "");
+  const parts = paths.map((p) => p.split(/[/\\]+/).filter(Boolean));
+  const at = (ps: string[], k: number) => ps[ps.length - 1 - k];
+  return parts.map((mine, i) => {
+    for (let k = 0; k < mine.length; k += 1) {
+      const c = at(mine, k);
+      if (parts.every((other, j) => j === i || at(other, k) !== c)) return c;
+    }
+    return paths[i];
+  });
+}
