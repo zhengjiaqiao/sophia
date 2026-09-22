@@ -268,7 +268,11 @@ function AgentItem({ check, name }: { check: ColumnCheck; name: string }) {
       <span className="mx-agentitem__name">{name}</span>
     </button>
   );
-  return <Tooltip content={check.disabledReason ?? check.tip}>{button}</Tooltip>;
+  return (
+    <Tooltip content={check.disabledReason ?? check.tip} placement="bottom">
+      {button}
+    </Tooltip>
+  );
 }
 
 /// 排序箭头 ↑ / ↓：只在当前的排序依据列常显（默认名称升序时也显示，Finder 惯例）；其余列不占眼
@@ -708,7 +712,7 @@ export default function Matrix(props: MatrixProps) {
       <div className="mx-head__name">
         {/* 表头排序 busy 期间照常可点：排序不写磁盘 */}
         {nameTip ? (
-          <Tooltip content={nameTip} context="table">
+          <Tooltip content={nameTip} context="table" placement="bottom">
             <button type="button" className="mx-headbtn" onClick={() => sortBy("name")}>
               {nameLabel}
               {nameCount !== undefined ? <span className="mx-namecount">{nameCount}</span> : null}
@@ -745,7 +749,7 @@ export default function Matrix(props: MatrixProps) {
             onMouseEnter={() => setHeadHover(col.id)}
             onMouseLeave={() => setHeadHover((prev) => (prev === col.id ? null : prev))}
           >
-            <Tooltip content={col.tip} context="table">
+            <Tooltip content={col.tip} context="table" placement="bottom">
               <button
                 type="button"
                 className={`mx-colbtn${col.missing ? " is-missing" : ""}`}

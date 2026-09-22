@@ -71,11 +71,13 @@ export function Tooltip({
 
   useEffect(() => clear, []);
 
-  // 出现那一刻量一次：上方出窗就翻到下方，左右出窗就对齐外侧边
+  // 出现那一刻量一次：上方出界就翻到下方，左右出窗就对齐外侧边。
+  // 上界取窗口顶与最近的裁切祖先（滚动容器）顶中更低的那个：顶栏在滚动容器外面，
+  // 吸顶元素上往上弹的提示框会被容器裁掉、看起来像被顶栏盖住
   useLayoutEffect(() => {
     if (!open || !bubble.current) return;
     const r = bubble.current.getBoundingClientRect();
-    if (side === "top" && r.top < 0) setSide("bottom");
+    if (side === "top" && r.top < clipTop(bubble.current)) setSide("bottom");
     if (align === "center") {
       if (r.left < 0) setAlign("start");
       else if (r.right > window.innerWidth) setAlign("end");
@@ -112,4 +114,13 @@ export function Tooltip({
       </span>
     </span>
   );
+}
+
+/// 提示框可见区域的上界：窗口顶，或最近一个会裁切内容的祖先（overflow 非 visible）的顶
+function clipTop(el: HTMLElement): number {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const { overflowY } = getComputedStyle(p);
+    if (overflowY !== "visible") return Math.max(0, p.getBoundingClientRect().top);
+  }
+  return 0;
 }
