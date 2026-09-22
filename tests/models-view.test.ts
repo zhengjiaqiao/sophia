@@ -985,7 +985,7 @@ test("已选组里的名字写全：没有友好名时带服务商前缀；有�
   assert.equal(pinnedLabel(model({ id: "moonshotai/kimi-k2", displayName: "Kimi K2" })), "Kimi K2");
 });
 
-test("ModelList 已选组：「已选 · N」在各服务商分组之前；超过 5 个先列前 5 +「等 N 个 ▸」；为 0 不出现", () => {
+test("ModelList 已选组：「已选 · N」在各服务商分组之前；超过 5 个先列前 5 +「还有 N 个 ▸」（写剩下的个数）；为 0 不出现", () => {
   const seven = Array.from({ length: 9 }, (_, i) => pe(`azure/m${i}`, i < 7));
   const html = render(ModelList, { entries: seven, busy: false, onToggle: noop });
   assert.match(html, /model-list__vendor">已选<[^]*model-list__count">7</);
@@ -995,7 +995,11 @@ test("ModelList 已选组：「已选 · N」在各服务商分组之前；超�
     5,
     "已选组只列前 5 个（写全）",
   );
-  assert.match(html, /model-list__more"[^>]*>等 <span class="model-list__more-count">7<\/span> 个/);
+  // 已选 7 个、列出前 5 个：写剩下的 2 个，不写总数
+  assert.match(
+    html,
+    /model-list__more"[^>]*>还有[^<]*<span class="model-list__more-count">2<\/span>[^<]*个/,
+  );
   const none = render(ModelList, { entries: [pe("azure/a")], busy: false, onToggle: noop });
   assert.doesNotMatch(none, />已选</);
 });

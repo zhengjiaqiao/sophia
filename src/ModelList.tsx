@@ -41,7 +41,7 @@ export const entryKey = modelEntryKey;
  * 按服务商分小组头 `azure · 12`，一家一个也有；行内去掉重复前缀。
  * 已选置顶：最上面一组 `已选 · N`（名字写全带服务商前缀），各服务商分组里照常保留这些行；
  * 打开（挂载）时排一次序并冻结，之后勾选 / 取消不跳位，下次打开再重排；超过 5 个先列前 5
- * +「等 N 个 ▸」。勾选当场写盘；超过约 8 行时出筛选框（已选组同样过滤），列表在自身范围内滚动；
+ * +「还有 N 个 ▸」（N 是没列出来的个数）。勾选当场写盘；超过约 8 行时出筛选框（已选组同样过滤），列表在自身范围内滚动；
  * 底部 `已选 N 个模型`。
  */
 export function ModelList({
@@ -183,7 +183,11 @@ export function ModelList({
                       className="model-list__more"
                       onClick={() => setPinnedOpen(true)}
                     >
-                      等 <span className="model-list__more-count">{pinned.length}</span> 个
+                      还有{" "}
+                      <span className="model-list__more-count">
+                        {pinned.length - PINNED_PREVIEW}
+                      </span>{" "}
+                      个
                       <svg
                         width="10"
                         height="10"
