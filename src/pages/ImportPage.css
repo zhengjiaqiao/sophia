@@ -477,6 +477,13 @@
   text-align: center;
 }
 
+.ss-import__nothing-art {
+  display: block;
+  width: 250px;
+  height: auto;
+  margin-bottom: var(--space-md);
+}
+
 .ss-import__nothing-title {
   font-family: var(--font-ui);
   font-size: var(--size-body);

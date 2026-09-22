@@ -19,6 +19,15 @@ registerHooks({
     if (url.endsWith(".css")) {
       return { format: "module", shortCircuit: true, source: "export default {};" };
     }
+    // 图像资源（vite 里 import 得到 URL）：换成文件名字符串，断言用得上
+    const asset = /\/([^/]+\.(?:jpe?g|png|svg))$/.exec(url);
+    if (asset) {
+      return {
+        format: "module",
+        shortCircuit: true,
+        source: `export default ${JSON.stringify(asset[1])};`,
+      };
+    }
     if (!url.endsWith(".tsx")) return nextLoad(url, context);
     const source = ts.transpileModule(readFileSync(fileURLToPath(url), "utf8"), {
       compilerOptions: {

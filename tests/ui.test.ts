@@ -804,6 +804,34 @@ test("Empty 两个动作里只有一个是按钮，另一个降文字链", () =>
   assert.match(html, /class="ss-btn ss-btn--link">打开目录</);
 });
 
+test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首次扫描有图时细弧跟在句子前", () => {
+  const folders = render(Empty, {
+    kind: "noAgentDirs",
+    art: "folders",
+    primary: { label: "添加 skill", onClick: noop },
+  });
+  assert.match(folders, /class="ss-empty ss-empty--noAgentDirs has-art"/);
+  assert.match(
+    folders,
+    /<img class="ss-empty__art ss-empty__art--folders" src="type-folders\.svg" alt="" aria-hidden="true"\/>/,
+  );
+  // 顺序：图 → 一句现状 → 动作
+  assert.ok(folders.indexOf("ss-empty__art") < folders.indexOf("ss-empty__description"));
+  assert.ok(folders.indexOf("ss-empty__description") < folders.indexOf("ss-empty__actions"));
+
+  const scanning = render(Empty, {
+    kind: "scanning",
+    art: "horizon",
+    description: "正在读 3 个位置",
+  });
+  assert.match(scanning, /src="horizon\.jpg"/);
+  assert.match(scanning, /class="ss-empty__busy"><svg class="ss-spinner" width="14"/);
+
+  // 不给 art 就不放图（筛选无结果）
+  assert.doesNotMatch(render(Empty, { kind: "noMatch" }), /<img/);
+  assert.match(cssRule(uiCss, ".ss-empty__art--horizon"), /object-fit:\s*cover/);
+});
+
 test("Busy 操作进行中：受影响的部分置灰，不忙时不加类", () => {
   assert.match(render(Busy, { busy: true, children: "表格" }), /class="ss-busy" aria-busy="true"/);
   const idle = render(Busy, { busy: false, children: "表格" });

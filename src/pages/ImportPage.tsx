@@ -13,6 +13,7 @@ import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Toast } from "../ui
 import { displayPath } from "../pathText.ts";
 import { RowTip } from "./RowTip.tsx";
 import { defer } from "../deferredCommit.ts";
+import foldersArt from "../assets/type-folders.svg";
 import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { joinWords } from "./pendingIssues.ts";
@@ -406,6 +407,8 @@ export default function ImportPage({
     return (
       <SubPage title={title} onBack={onClose}>
         <div className="ss-import__nothing">
+          {/* 空态图像（DESIGN「图像」）：与 Empty 的 art="folders" 同一版式；装饰，读屏跳过 */}
+          <img className="ss-import__nothing-art" src={foldersArt} alt="" aria-hidden="true" />
           <div className="ss-import__nothing-title">还没有来源</div>
           <div className="ss-import__nothing-hint">先添加一个放 skill 的文件夹</div>
           <Button variant="primary" icon={<PlusGlyph />} onClick={() => void addFolder()}>

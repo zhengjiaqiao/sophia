@@ -1243,6 +1243,44 @@
   gap: var(--space-md);
 }
 
+/* 空态图像（DESIGN「图像」）：图在上、不带边框；图 16 → 一句 8 → 次要说明 16 → 动作 */
+.ss-empty.has-art {
+  gap: 0;
+}
+
+.ss-empty__art {
+  display: block;
+  max-width: 100%;
+  margin-bottom: var(--space-md);
+}
+
+.ss-empty__art--horizon {
+  width: 472px;
+  height: 200px;
+  object-fit: cover;
+}
+
+.ss-empty__art--folders,
+.ss-empty__art--links {
+  width: 250px;
+  height: auto;
+}
+
+.ss-empty.has-art .ss-empty__hint {
+  margin-top: var(--space-xs);
+}
+
+.ss-empty.has-art .ss-empty__actions {
+  margin-top: var(--space-md);
+}
+
+/* 有图时首次扫描：细弧跟在那句话前面 */
+.ss-empty__busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
 /* 操作进行中：受影响控件置灰 */
 .ss-busy {
   opacity: var(--busy-dim);

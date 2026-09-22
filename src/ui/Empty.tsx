@@ -1,11 +1,24 @@
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
 import { Spinner } from "./Spinner.tsx";
+import horizon from "../assets/horizon.jpg";
+import folders from "../assets/type-folders.svg";
+import links from "../assets/type-links.svg";
 
 /// 空态与忙碌态（DESIGN「空态与忙碌态」「转盘」）。
 ///
 /// **空态里若有两个动作，只有一个是按钮**，另一个降为文字链。
 /// 首次扫描：24px 细弧居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
+///
+/// 图像（DESIGN「图像」）：只用在没有数据、等待、刚开始的时刻；筛选无结果不放图。
+/// 图在上、不带边框，下面依次是现状一句、动作（间距 16 / 8 / 16），整体居中；图是装饰，
+/// `alt=""` + `aria-hidden`。`horizon` 地平线照片（仅首次启动 / 首次扫描，472×200 cover）；
+/// `folders` / `links` 类型学线稿（原尺寸 250 宽）。有图时首次扫描的细弧跟在那句话前面
+
+/// 空态图像：地平线照片与两张类型学线稿
+export type EmptyArt = "horizon" | "folders" | "links";
+
+const ART_SRC: Record<EmptyArt, string> = { horizon, folders, links };
 
 export type EmptyKind =
   /// 首次扫描中：24px 细弧 + 一句忙什么
@@ -41,18 +54,36 @@ export interface EmptyProps {
   primary?: EmptyAction;
   /// 文字链动作
   secondary?: EmptyAction;
+  /// 图在上（装饰）；不给就不放图
+  art?: EmptyArt;
 }
 
-export function Empty({ kind, description, hint, primary, secondary }: EmptyProps) {
+export function Empty({ kind, description, hint, primary, secondary, art }: EmptyProps) {
+  const busyLabel = typeof description === "string" ? description : DEFAULT_DESCRIPTION.scanning;
+  const text = (
+    <div className="ss-empty__description">{description ?? DEFAULT_DESCRIPTION[kind]}</div>
+  );
   return (
-    <div className={`ss-empty ss-empty--${kind}`} data-kind={kind}>
-      {kind === "scanning" ? (
-        <Spinner
-          size={24}
-          label={typeof description === "string" ? description : DEFAULT_DESCRIPTION.scanning}
+    <div className={`ss-empty ss-empty--${kind}${art ? " has-art" : ""}`} data-kind={kind}>
+      {art ? (
+        <img
+          className={`ss-empty__art ss-empty__art--${art}`}
+          src={ART_SRC[art]}
+          alt=""
+          aria-hidden="true"
         />
       ) : null}
-      <div className="ss-empty__description">{description ?? DEFAULT_DESCRIPTION[kind]}</div>
+      {kind === "scanning" && art ? (
+        <div className="ss-empty__busy">
+          <Spinner size={14} label={busyLabel} />
+          {text}
+        </div>
+      ) : (
+        <>
+          {kind === "scanning" ? <Spinner size={24} label={busyLabel} /> : null}
+          {text}
+        </>
+      )}
       {hint ? <div className="ss-empty__hint">{hint}</div> : null}
       {primary || secondary ? (
         <div className="ss-empty__actions">

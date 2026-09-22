@@ -65,6 +65,6 @@ export {
 export type { IconProps } from "./icons.tsx";
 
 export { Busy, Empty } from "./Empty.tsx";
-export type { BusyProps, EmptyAction, EmptyKind, EmptyProps } from "./Empty.tsx";
+export type { BusyProps, EmptyAction, EmptyArt, EmptyKind, EmptyProps } from "./Empty.tsx";
 
 export { Plain } from "./Plain.tsx";
