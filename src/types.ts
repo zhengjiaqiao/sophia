@@ -280,6 +280,8 @@ export interface GatewayProvider {
   protocol: string;
   hasKey: boolean;
   models: GatewayProviderModel[];
+  /** 上次拉取模型失败的原因（「地址连不上」「密钥不对」…）；null / 缺省表示上次成功或还没拉过 */
+  unreachable?: string | null;
 }
 export interface GatewayRouter {
   installed: boolean;

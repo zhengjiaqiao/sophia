@@ -122,6 +122,8 @@ pub struct ProviderView {
     pub protocol: String,
     pub has_key: bool,
     pub models: Vec<ModelView>,
+    /// 上次拉取模型失败的原因（「地址连不上」「密钥不对」…）；None 表示上次成功或还没拉过
+    pub unreachable: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -358,6 +360,7 @@ impl App {
                 provider.base_url = cleaned;
                 if changed {
                     provider.api_base = None; // 旧地址探明的接口基址作废
+                    provider.unreachable = None; // 连不上是对旧地址的结论
                 }
                 if let Some(name) = name {
                     provider.name = name.to_owned();
@@ -495,11 +498,35 @@ impl App {
         self.merge_locked(id, ids, api_base)
     }
 
+    /// 某一家拉取模型失败：把原因记在这一家上并保存，模型列表和勾选原样保留
+    pub fn record_unreachable(&self, reason: &str) -> Result<(), AppError> {
+        let _guard = self.guard();
+        let id = self
+            .first_provider_id()?
+            .ok_or_else(|| AppError::new("invalid", "还没有填写网关地址"))?;
+        self.unreachable_locked(&id, reason)
+    }
+
+    pub fn record_unreachable_for(&self, id: &str, reason: &str) -> Result<(), AppError> {
+        let _guard = self.guard();
+        self.unreachable_locked(id, reason)
+    }
+
+    fn unreachable_locked(&self, id: &str, reason: &str) -> Result<(), AppError> {
+        let mut settings = self.load()?;
+        let provider = settings
+            .provider_mut(id)
+            .ok_or_else(|| unknown_provider(id))?;
+        provider.unreachable = Some(reason.to_owned());
+        self.save(&settings)
+    }
+
     fn merge_locked(&self, id: &str, ids: Vec<String>, api_base: &str) -> Result<(), AppError> {
         let mut settings = self.load()?;
         let provider = settings
             .provider_mut(id)
             .ok_or_else(|| unknown_provider(id))?;
+        provider.unreachable = None; // 拉到了就是连得上
         let api_base = api_base.trim().trim_end_matches('/');
         let api_base_changed =
             !api_base.is_empty() && provider.api_base.as_deref() != Some(api_base);
@@ -963,6 +990,7 @@ impl App {
                     selected: m.selected,
                 })
                 .collect(),
+            unreachable: None,
         };
         match settings.provider_mut(&target) {
             Some(existing) => *existing = provider,
@@ -1112,6 +1140,7 @@ impl App {
                 base_url: provider.base_url.clone(),
                 protocol: provider.protocol().to_owned(),
                 has_key: (self.deps.get_key)(&provider.id).is_ok_and(|k| !k.trim().is_empty()),
+                unreachable: provider.unreachable.clone(),
                 models: provider
                     .models
                     .iter()

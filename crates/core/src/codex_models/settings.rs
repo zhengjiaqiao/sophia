@@ -44,6 +44,9 @@ pub struct ProviderSettings {
     /// 这家网关支持的协议："chat"（默认）或 "responses"。读取请用 `protocol()`，它会归一化未知值
     pub protocol: String,
     pub models: Vec<SavedModel>,
+    /// 上次拉取模型失败的原因（短句，如「地址连不上」「密钥不对」）；拉取成功或换地址后清空
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unreachable: Option<String>,
 }
 
 impl Default for ProviderSettings {
@@ -55,6 +58,7 @@ impl Default for ProviderSettings {
             api_base: None,
             protocol: PROTOCOL_CHAT.into(),
             models: Vec::new(),
+            unreachable: None,
         }
     }
 }
@@ -270,6 +274,7 @@ impl<'de> Deserialize<'de> for GatewaySettings {
                     raw.protocol
                 },
                 models: raw.models,
+                unreachable: None,
             });
         }
         Ok(Self {
@@ -638,6 +643,7 @@ mod tests {
                     },
                     selected: true,
                 }],
+                unreachable: None,
             }],
             port: 5000,
             added_newline: true,

@@ -16,6 +16,9 @@ interface GatewayProvider {
   /** "chat" 或 "responses"，拉取模型时探明 */
   protocol: string;
   hasKey: boolean;
+  /** 上次拉取模型失败的原因：「地址连不上」「密钥不对」「地址不对，没拿到模型列表」；
+   *  null 表示上次成功或还没拉过。拉取成功、或改了地址时清空 */
+  unreachable: string | null;
   /** slug 是这个模型在 Codex 里的标识，固定为「网关 id-模型名」：两家都有同名模型也不相撞 */
   models: { id: string; slug: string; displayName: string; selected: boolean }[];
 }
@@ -41,9 +44,9 @@ interface GatewayState {
 | 命令 | 参数 | 说明 |
 |---|---|---|
 | `gateway_state` | — | 只读 |
-| `gateway_upsert_provider` | `id?: string, name?: string, baseUrl: string, key?: string` | 返回 `{ providerId: string; state: GatewayState }`。`id` 省略是**新建**一家；`name` 省略时新建用地址里的主机名、修改时不改名；`key` 省略或为空表示不动已存的密钥。带了密钥就先向网关校验，失败什么都不保存；成功时一并拉回模型列表。新建时密钥没存成，这一家不会留下 |
+| `gateway_upsert_provider` | `id?: string, name?: string, baseUrl: string, key?: string` | 返回 `{ providerId: string; state: GatewayState }`。`id` 省略是**新建**一家；`name` 省略时新建用地址里的主机名、修改时不改名；`key` 省略或为空表示不动已存的密钥。带了密钥就先向网关校验，失败什么都不保存（也不标 `unreachable`：已存的配置没变）；成功时一并拉回模型列表并清空 `unreachable`。改了地址时 `unreachable` 清空。新建时密钥没存成，这一家不会留下 |
 | `gateway_remove_provider` | `id: string` | 删掉这一家、它的模型和**钥匙串里的密钥（不可恢复，确认由界面负责，后端不再二次确认）**。已启用时同步重写目录，它的模型进停用名单；已启用且它是最后一家还在发布模型的网关时拒绝（`invalid`），请先恢复 |
-| `gateway_fetch_models` | `providerId?: string` | 用钥匙串里的密钥拉取；失败不改已保存内容 |
+| `gateway_fetch_models` | `providerId?: string` | 用钥匙串里的密钥拉取。成功时并入模型列表并清空这一家的 `unreachable`；拉取失败（`auth` / `network`）时把短原因记到这一家的 `unreachable` 并落盘，模型和勾选不动，然后照常返回错误。界面的「再试一次」用 `api.gatewayRetryProvider`，它吞掉这两种错误、改为返回最新 state |
 | `gateway_select_models` | `selected: { id: string; displayName: string }[], providerId?: string` | `selected` 是**这一家**的完整勾选，不影响别家。已启用时同时重写目录和路由清单 |
 | `gateway_enable` | — | 先让路由常驻并确认健康，再写 Codex 设置。有模型要发布的每一家都必须有地址和密钥，缺的那家会在错误信息里点名；没勾选模型的网关不挡路 |
 | `gateway_restore` | — | 移除本功能写入的一切；各家的地址、模型和密钥保留 |

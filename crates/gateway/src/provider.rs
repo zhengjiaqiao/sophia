@@ -14,6 +14,17 @@ pub enum FetchErrorKind {
     Unexpected,
 }
 
+impl FetchErrorKind {
+    /// 记在那一家网关上的短原因，界面在那一行显示「连不上」时用它说明为什么
+    pub fn unreachable_reason(self) -> &'static str {
+        match self {
+            FetchErrorKind::Auth => "密钥不对",
+            FetchErrorKind::Network => "地址连不上",
+            FetchErrorKind::Unexpected => "地址不对，没拿到模型列表",
+        }
+    }
+}
+
 /// 拉取模型列表失败。错误信息里从不出现密钥。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchError {
@@ -309,6 +320,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(kind_of(&err), FetchErrorKind::Auth);
         assert!(!err.message.contains("bad"));
+        assert_eq!(err.kind.unreachable_reason(), "密钥不对");
     }
 
     /// AC9：网关不可达时在超时内报网络错误。
@@ -339,6 +351,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(kind_of(&err2), FetchErrorKind::Network);
+        assert_eq!(err2.kind.unreachable_reason(), "地址连不上");
         assert!(
             refuse_start.elapsed() < Duration::from_secs(2),
             "连接被拒绝应当很快返回，耗时 {:?}",
@@ -358,6 +371,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(kind_of(&err), FetchErrorKind::Unexpected);
+        assert_eq!(err.kind.unreachable_reason(), "地址不对，没拿到模型列表");
     }
 
     /// 用 `client_builder_defaults()` 建出的 client 不跟随重定向：请求里带着密钥，

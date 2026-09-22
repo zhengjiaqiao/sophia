@@ -114,8 +114,21 @@ export const api = {
   /** 连同钥匙串里的密钥一起删，删了回不来：调用前先向用户确认 */
   gatewayRemoveProvider: (id: string) =>
     invoke<GatewayState>("gateway_remove_provider", { id }),
+  /** 失败时后端已把原因记到这一家的 unreachable 上，再照常抛错 */
   gatewayFetchModelsOf: (providerId: string) =>
     invoke<GatewayState>("gateway_fetch_models", { providerId }),
+  /** 「再试一次」：按 id 重拉这一家。拉取本身失败（auth / network）不抛错——原因已记在
+   *  这一家的 unreachable 上，返回最新状态让那一行显示「连不上」；其余错误照常抛 */
+  gatewayRetryProvider: async (providerId: string): Promise<GatewayState> => {
+    try {
+      return await invoke<GatewayState>("gateway_fetch_models", { providerId });
+    } catch (error) {
+      if (/^\[(auth|network)\] /.test(String(error))) {
+        return invoke<GatewayState>("gateway_state");
+      }
+      throw error;
+    }
+  },
   gatewaySelectModelsOf: (providerId: string, selected: GatewaySelectedModel[]) =>
     invoke<GatewayState>("gateway_select_models", { providerId, selected }),
   gatewayEnable: () => invoke<GatewayState>("gateway_enable"),

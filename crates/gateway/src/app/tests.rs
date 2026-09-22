@@ -1624,3 +1624,95 @@ fn enable_brings_the_router_up_before_writing_the_routing_catalog() {
     assert!(!f.codex().join("symsync-routing.json").exists());
     assert_eq!(f.read_config(), ORIGINAL);
 }
+
+/// 拉取失败：原因记在那一家上并落盘，模型和勾选不动；再拉成功就清掉
+#[test]
+fn a_failed_fetch_marks_the_provider_unreachable_until_the_next_success() {
+    let f = fixture();
+    let (a, _) = two_providers(&f);
+    f.app.record_unreachable_for(&a, "地址连不上").unwrap();
+
+    // 落盘：设置里有，重新读出的状态里也有
+    {
+        let world = f.world.lock().unwrap();
+        let saved = world.settings.provider(&a).unwrap();
+        assert_eq!(saved.unreachable.as_deref(), Some("地址连不上"));
+        let json = serde_json::to_value(&world.settings).unwrap();
+        assert_eq!(json["providers"][0]["unreachable"], "地址连不上");
+    }
+    let view = &f.app.state().providers[0];
+    assert_eq!(view.unreachable.as_deref(), Some("地址连不上"));
+    assert_eq!(view.models.len(), 2, "失败不丢模型列表");
+    assert!(view.models.iter().any(|m| m.selected), "失败不丢勾选");
+    let json = serde_json::to_value(view).unwrap();
+    assert_eq!(
+        json["unreachable"], "地址连不上",
+        "界面字段名是 unreachable"
+    );
+
+    // 再试一次，这回拉到了：清空
+    f.app
+        .merge_fetched_models_for(&a, vec!["deepseek/v4".into()], "")
+        .unwrap();
+    assert_eq!(f.app.state().providers[0].unreachable, None);
+    let world = f.world.lock().unwrap();
+    assert_eq!(world.settings.provider(&a).unwrap().unreachable, None);
+    let json = serde_json::to_value(&world.settings).unwrap();
+    assert!(
+        json["providers"][0].get("unreachable").is_none(),
+        "清空后不写这个键"
+    );
+}
+
+/// 按 id 再试一次只改那一家；不带 id 的旧命令作用在第一家
+#[test]
+fn retrying_one_provider_leaves_the_others_alone() {
+    let f = fixture();
+    let (a, b) = two_providers(&f);
+    f.app.record_unreachable_for(&a, "地址连不上").unwrap();
+    f.app.record_unreachable_for(&b, "密钥不对").unwrap();
+
+    f.app
+        .merge_fetched_models_for(&b, vec!["deepseek/v4".into()], "")
+        .unwrap();
+    let state = f.app.state();
+    assert_eq!(
+        state.providers[0].unreachable.as_deref(),
+        Some("地址连不上")
+    );
+    assert_eq!(state.providers[1].unreachable, None);
+
+    f.app.record_unreachable_for(&b, "密钥不对").unwrap();
+    f.app
+        .merge_fetched_models(vec!["glm-5".into()], "")
+        .unwrap();
+    let state = f.app.state();
+    assert_eq!(state.providers[0].unreachable, None, "旧命令作用在第一家");
+    assert_eq!(state.providers[1].unreachable.as_deref(), Some("密钥不对"));
+
+    f.app.record_unreachable("地址连不上").unwrap();
+    assert_eq!(
+        f.app.state().providers[0].unreachable.as_deref(),
+        Some("地址连不上")
+    );
+    assert_eq!(code(f.app.record_unreachable_for("nope", "x")), "invalid");
+}
+
+/// 换了地址，「连不上」是对旧地址的结论，一并清掉；只改名不清
+#[test]
+fn changing_the_address_forgets_the_old_unreachable_verdict() {
+    let f = fixture();
+    let (a, _) = two_providers(&f);
+    f.app.record_unreachable_for(&a, "地址连不上").unwrap();
+    f.app
+        .upsert_provider(Some(&a), Some("WeCode 2"), "https://wecode.example/openai")
+        .unwrap();
+    assert_eq!(
+        f.app.state().providers[0].unreachable.as_deref(),
+        Some("地址连不上")
+    );
+    f.app
+        .upsert_provider(Some(&a), None, "https://wecode2.example/openai")
+        .unwrap();
+    assert_eq!(f.app.state().providers[0].unreachable, None);
+}

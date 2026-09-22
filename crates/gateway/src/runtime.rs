@@ -381,13 +381,33 @@ pub fn prewarm(app: &App) {
 }
 
 pub async fn fetch_models(base_url: &str, key: &str) -> Result<(Vec<String>, String), AppError> {
+    fetch_models_detailed(base_url, key)
+        .await
+        .map_err(|failure| failure.error)
+}
+
+/// 一次拉取失败：给用户看的错误，以及要记在那一家网关上的短原因（没联网就失败时为 None）
+#[derive(Debug)]
+pub struct FetchFailure {
+    pub error: AppError,
+    pub unreachable: Option<&'static str>,
+}
+
+/// 同 [`fetch_models`]，失败时多带一个按错误种类归纳的短原因，供调用方记到那一家网关上
+pub async fn fetch_models_detailed(
+    base_url: &str,
+    key: &str,
+) -> Result<(Vec<String>, String), FetchFailure> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let resolve = system_proxy();
     let client = provider::client_builder_defaults()
         .no_proxy()
         .proxy(reqwest::Proxy::custom(move |url| resolve(url)))
         .build()
-        .map_err(|e| AppError::new("internal", e.to_string()))?;
+        .map_err(|e| FetchFailure {
+            error: AppError::new("internal", e.to_string()),
+            unreachable: None,
+        })?;
     match provider::fetch_models(&client, base_url, key, Duration::from_secs(10)).await {
         Ok(result) => Ok((result.ids, result.api_base)),
         Err(e) => {
@@ -396,7 +416,10 @@ pub async fn fetch_models(base_url: &str, key: &str) -> Result<(Vec<String>, Str
             } else {
                 "network"
             };
-            Err(AppError::new(code, e.message))
+            Err(FetchFailure {
+                error: AppError::new(code, e.message),
+                unreachable: Some(e.kind.unreachable_reason()),
+            })
         }
     }
 }
