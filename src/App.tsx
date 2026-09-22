@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import type {
@@ -15,10 +15,10 @@ import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
-import * as pendingPage from "./pages/PendingPage";
-import { PendingPage, type McpIssue, type PendingSegment } from "./pages/PendingPage";
+import { PendingPage, loadModelIgnoredKeys, type PendingSegment } from "./pages/PendingPage";
 import { collectIssues } from "./pages/pendingIssues";
-import * as mcpView from "./mcpView";
+import { collectMcpIssues, mcpDomains } from "./mcpView";
+import { flushAll } from "./deferredCommit";
 import { modelIssues, parseBackendError } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
 import {
@@ -42,18 +42,6 @@ const DEFAULT_KEY = "global";
 const REFRESH_DELAY = 300;
 type SidebarDomain = { key: string; label: string };
 type Tab = "skills" | "mcp" | "models";
-
-/// MCP 段的待处理由 T1 的 `collectMcpIssues`（src/mcpView.ts）收集；它落地之前按空算。
-/// 形状与待处理页的 `McpIssue` 结构一致（T3 按 T1 的 McpPendingItem 写的）
-const collectMcpIssues = (
-  mcpView as unknown as {
-    collectMcpIssues?: (overview: McpOverview | null) => McpIssue[];
-  }
-).collectMcpIssues;
-
-/// 模型段已忽略的 key：待处理页（T3）记在本机，导出 `loadModelIgnoredKeys` 之前按没忽略过算
-const loadModelIgnoredKeys = (pendingPage as unknown as { loadModelIgnoredKeys?: () => string[] })
-  .loadModelIgnoredKeys;
 
 /// 顶栏页签：顺序即高频程度。`Cap` 只给拉丁 run 套 Condensed 大写 + 字距，汉字原样
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -93,6 +81,9 @@ export default function App() {
   const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
   const [gatewayState, setGatewayState] = useState<GatewayState | null>(null);
   const [ignored, setIgnored] = useState<IgnoredIssue[]>([]);
+  /// 待处理页跳回来要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
+  const [focus, setFocus] = useState<{ segment: "skills" | "mcp"; key: string } | undefined>();
+  const clearFocus = useCallback(() => setFocus(undefined), []);
   /// 提示条的到点消失按回调身份计时：必须稳定，否则每次重渲染都重新计时
   const closeMcpToast = useCallback(() => setBackgroundMcpReport(null), []);
   // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
@@ -119,8 +110,9 @@ export default function App() {
     }
   };
 
-  /// 顶栏收件箱是**全局**入口：不论停在哪个页签，三段都要数得出来，所以 skill 与 MCP
-  /// 每次都扫。扫描可能触发已授权的自动规则；界面始终以重新扫描的实际结果为准
+  /// 顶栏收件箱是**全局**入口：不论停在哪个页签，三段都要数得出来，所以 skill 每次都扫。
+  /// MCP 停在 MCP 页时由 McpTab 扫完回传（onOverview），不重复扫；停在别的页签时这里扫一次，
+  /// 缓存到下次聚焦 / 文件变化。扫描可能触发已授权的自动规则；界面以重新扫描的实际结果为准
   const refresh = async () => {
     busyRef.current = true;
     setBusy(true);
@@ -131,7 +123,7 @@ export default function App() {
         api.listAutoLinks(),
         // 计数的原料读不到不挡主流程：少数一个数字，好过整页报错
         api.listIgnored().catch(() => null),
-        api.scanMcp().catch(() => null),
+        activeTabRef.current === "mcp" ? Promise.resolve(null) : api.scanMcp().catch(() => null),
       ]);
       setOverview(next);
       setManualProjects(projects);
@@ -193,6 +185,25 @@ export default function App() {
       listen<McpReport>("mcp-auto-imported", ({ payload }) => {
         // MCP 页有自己的结果；停留在别的页签时也不能丢掉自动添加的结果（⑬ 自动发生的事要交代）
         if (activeTabRef.current !== "mcp") setBackgroundMcpReport(payload);
+      }),
+    );
+    // 可撤销删除的延迟提交（deferredCommit）：主窗口关掉前全部提交。
+    // macOS 上关主窗口＝藏到菜单栏（tray.rs 的 intercept_close 已经 prevent_close + hide），
+    // JS 这一侧也必须 preventDefault，不然 onCloseRequested 会把窗口销毁。
+    // 别的系统没有菜单栏入口、关窗就是退出，不接管关闭（接管要销毁权限，且那边没有模型页）
+    if (navigator.userAgent.includes("Mac")) {
+      collect(
+        getCurrentWindow().onCloseRequested(async (event) => {
+          event.preventDefault();
+          await flushAll();
+        }),
+      );
+    }
+    // 托盘「退出」：Rust 先发 flush-pending，最多等 2 秒 flush-done 回执再退出
+    collect(
+      listen("flush-pending", async () => {
+        await flushAll();
+        await emit("flush-done");
       }),
     );
     // 菜单栏面板改了模型状态，收件箱的「模型」段跟着重数
@@ -266,16 +277,21 @@ export default function App() {
   // 三段原样交给待处理页（含已忽略的，页面自己按忽略表滤）；顶栏数字扣掉已忽略的
   const ignoredKeys = useMemo(() => new Set(ignored.map((i) => i.key)), [ignored]);
   const skillIssues = useMemo(() => collectIssues(overview), [overview]);
-  const mcpIssues = useMemo(() => collectMcpIssues?.(mcpOverview) ?? [], [mcpOverview]);
+  const mcpIssues = useMemo(() => collectMcpIssues(mcpOverview), [mcpOverview]);
   const modelIssueList: ModelIssue[] = useMemo(
     () => (modelsSupported ? modelIssues(gatewayState) : []),
     [gatewayState, modelsSupported],
   );
   // 模型段的忽略不进 core，由待处理页记在本机；回到主视图时（subPage 变了）重读一次
   const modelIgnoredKeys = useMemo(
-    () => new Set(loadModelIgnoredKeys?.() ?? []),
+    () => new Set(loadModelIgnoredKeys()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [subPage],
+  );
+  // 模型页右沿对齐 MCP 面板：列数取 MCP 页默认那一域（全局）实际显示的列
+  const mcpColumns = useMemo(
+    () => (mcpOverview ? (mcpDomains(mcpOverview)[0]?.targets.length ?? 0) : 0),
+    [mcpOverview],
   );
   const inboxCount =
     skillIssues.filter((i) => !ignoredKeys.has(i.key)).length +
@@ -359,13 +375,34 @@ export default function App() {
     setSubPage("pending");
   };
 
-  /// 待处理页「跳回」：回到那一段对应的页签（行内闪一下由各页自己做）
-  const jumpToRow = (segment: PendingSegment) => {
+  /// 待处理页「跳回」：切到对应页签；这一条属于别的域就先切侧栏；再把 key 交给那一页，
+  /// 它滚到那一行并闪一下，处理完回调 onFocused 清掉（下次跳同一条才会再触发）
+  const jumpToRow = (segment: PendingSegment, key: string) => {
     setSubPage(null);
-    if (segment === "models" && !modelsSupported) return;
+    if (segment === "models") {
+      if (modelsSupported) switchTab("models");
+      refreshGateway();
+      return;
+    }
+    const domain = segment === "mcp" ? mcpDomainOf(key) : skillDomainOf(key);
     switchTab(segment);
-    refreshGateway();
+    if (domain !== null) setSelectedKey(domain);
+    setFocus({ segment, key });
   };
+
+  /// skill 待处理属于哪个域：当前侧栏选中的域里有就留在这儿，否则取第一个有它的域
+  const skillDomainOf = (key: string): string | null => {
+    const hit = (d: { key: string }) =>
+      collectIssues(
+        overview,
+        domains.filter((x) => x.key === d.key),
+      ).some((i) => i.key === key);
+    if (domains.some((d) => d.key === selectedKey && hit(d))) return selectedKey;
+    return domains.find(hit)?.key ?? null;
+  };
+
+  const mcpDomainOf = (key: string): string | null =>
+    mcpIssues.find((i) => i.key === key)?.domain ?? null;
 
   /// 待处理页「模型」段的动作：照 `ModelIssue.action.kind` 调对应命令，做完重数。
   /// 失败原样抛给页面，由它贴在那一行上说
@@ -519,6 +556,7 @@ export default function App() {
             busy={busy}
             onBusy={setBusyState}
             onGatewayState={setGatewayState}
+            agentColumns={mcpColumns}
           />
         ) : activeTab === "mcp" ? (
           <McpTab
@@ -528,6 +566,9 @@ export default function App() {
             onBusy={setBusyState}
             refreshKey={refreshKey}
             onDomains={updateMcpSidebarDomains}
+            onOverview={setMcpOverview}
+            focusKey={focus?.segment === "mcp" ? focus.key : undefined}
+            onFocused={clearFocus}
           />
         ) : (
           <SkillsTab
@@ -539,6 +580,8 @@ export default function App() {
             onRefresh={refresh}
             onError={setError}
             onOpenPending={openInbox}
+            focusKey={focus?.segment === "skills" ? focus.key : undefined}
+            onFocused={clearFocus}
           />
         )}
       </main>

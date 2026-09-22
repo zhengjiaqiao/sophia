@@ -195,7 +195,7 @@ mod imp {
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
                 "open" => show_main(app),
-                "quit" => app.exit(0),
+                "quit" => quit_after_flush(app),
                 _ => {}
             })
             .on_tray_icon_event(|tray, event| {
@@ -279,7 +279,36 @@ pub fn tray_hide(app: tauri::AppHandle) {
 
 #[tauri::command]
 pub fn tray_quit(app: tauri::AppHandle) {
-    app.exit(0);
+    quit_after_flush(&app);
+}
+
+/// 退出前等主窗口提交挂起的删除，最多这么久
+pub const FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// 退出：可撤销的删除（只留这份、删原件……）在前端延迟提交（src/deferredCommit.ts），
+/// 提示条还没到期就退出会丢。所以先向主窗口发 `flush-pending`，等它回 `flush-done`
+/// （最多 2 秒）再退出；主窗口不存在、发不出去或超时都直接退出，不让退出卡住。
+/// 等待放在另一条线程上：菜单回调在主线程，堵住它前端的回执就送不回来
+pub fn quit_after_flush(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Listener, Manager};
+    if app.get_webview_window(MAIN).is_none() {
+        app.exit(0);
+        return;
+    }
+    let (done, wait) = std::sync::mpsc::channel::<()>();
+    let id = app.once_any("flush-done", move |_| {
+        let _ = done.send(());
+    });
+    if app.emit_to(MAIN, "flush-pending", ()).is_err() {
+        app.unlisten(id);
+        app.exit(0);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _ = wait.recv_timeout(FLUSH_TIMEOUT);
+        app.exit(0);
+    });
 }
 
 #[cfg(test)]

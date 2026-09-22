@@ -565,6 +565,8 @@ export interface ModelsTabProps {
   onBusy: (busy: boolean) => void;
   /// 每次拿到新状态都报给壳：顶栏收件箱的「模型」段要数它
   onGatewayState?: (state: GatewayState) => void;
+  /// MCP 主视图此刻显示的 agent 列数：面板右沿与 MCP 面板对齐（modelsBoxWidth）
+  agentColumns?: number;
 }
 
 /// 选择器开着时的导航参数：从网关页 `选模型 ›` 回来时带上「滚到哪一家、哪几个闪」
@@ -574,7 +576,13 @@ interface PickerNav {
   flashIds: string[];
 }
 
-export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: ModelsTabProps) {
+export default function ModelsTab({
+  onError,
+  busy,
+  onBusy,
+  onGatewayState,
+  agentColumns = 0,
+}: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
   const [picker, setPicker] = useState<PickerNav | null>(null);
   const [query, setQuery] = useState("");
@@ -587,8 +595,6 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
   /// 启动时的自愈试过了没有：试过仍没起来才出页级横幅
   const [healed, setHealed] = useState(false);
-  /// 已安装的 agent 数＝MCP 主视图的列数：面板右沿与 MCP 面板对齐（modelsBoxWidth）
-  const [agentColumns, setAgentColumns] = useState(0);
   const [routerFailure, setRouterFailure] = useState<string | null>(null);
   /// 进网关页那一刻已有的模型：回来时差出新拉到的，各闪一次
   const beforeGateway = useRef<Set<string>>(new Set());
@@ -610,13 +616,6 @@ export default function ModelsTab({ onError, busy, onBusy, onGatewayState }: Mod
       // 轻查失败不打扰：下一次焦点或操作还会再读
     }
   }, [applyState]);
-
-  useEffect(() => {
-    void api
-      .listHarnesses()
-      .then((list) => mounted.current && setAgentColumns(list.filter((h) => h.installed).length))
-      .catch(() => undefined);
-  }, []);
 
   // 挂载：读一次；路由没在跑就先自愈一次（重启路由），还不行才让横幅出来
   useEffect(() => {
