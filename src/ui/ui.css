@@ -654,7 +654,8 @@
   color: var(--ink);
 }
 
-/* ===== 5. 提示框 Tooltip：黑窗白字 12，内边距 6 8，圆角 6（control），浮层阴影 tip，最大宽 240 ===== */
+/* ===== 5. 提示框 Tooltip：白窗墨字 12，1px hairline 描边，内边距 6 8，圆角 6（control），浮层阴影 tip，最大宽 240。
+   悬停一下就出现的说明是轻信息，不用黑窗——黑块只留给要停下来看的事 ===== */
 .ss-tipwrap {
   position: relative;
   display: inline-flex;
@@ -668,9 +669,10 @@
   width: max-content;
   max-width: 240px;
   padding: 6px 8px;
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
-  background: var(--ink);
-  color: var(--canvas);
+  background: var(--canvas);
+  color: var(--ink);
   box-shadow: var(--elev-tip);
   font-family: var(--font-ui);
   font-size: var(--size-micro);
