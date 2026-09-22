@@ -589,7 +589,7 @@ test("BlackNotice：! + 一句 + 白描边键 + 可选文字链，替代白底�
 
 // ===== 确认弹窗 =====
 
-test("Confirm：无外框白板 460，canvas 80% 遮罩；主动作反色、取消是文字链", () => {
+test("Confirm：白板 460 + 1px 墨线描边，canvas 80% 遮罩；主动作反色、取消是文字链", () => {
   const html = render(Confirm, {
     title: "重启 Codex？",
     children: "会结束 Codex 正在运行的进程，进行中的对话会中断",
@@ -603,7 +603,9 @@ test("Confirm：无外框白板 460，canvas 80% 遮罩；主动作反色、取�
   assert.match(html, /class="ss-btn ss-btn--primary">重启</);
   assert.match(html, /class="ss-confirm-veil ss-confirm-veil--full"/);
   const board = cssRule(uiCss, ".ss-confirm");
-  assert.doesNotMatch(board, /(^|\s)border(-[a-z]+)?:/);
+  // 浮在白遮罩上，靠 1px 墨线与底色分开（不用阴影）
+  assert.match(board, /border:\s*1px solid var\(--ink\)/);
+  assert.doesNotMatch(board, /box-shadow/);
   assert.match(board, /width:\s*460px/);
   assert.match(board, /padding:\s*24px 28px/);
   const veil = cssRule(uiCss, ".ss-confirm-veil");
