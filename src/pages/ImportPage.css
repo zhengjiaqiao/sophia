@@ -304,24 +304,14 @@
   margin-left: auto;
 }
 
-/* 同名就地展开：`替换现有的 · 说明 · 跳过`，从名字那一列起。
-   说明承载后果，**不截断**：放不下就折行（C3） */
-.ss-import__clash {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  min-height: 30px;
-  padding: 3px 0 3px 22px;
-  box-sizing: border-box;
-}
-
+/* 勾上同名的行＝替换现有的：行下一句后果说明（ink-mute 12），从名字那一列起；
+   承载后果，**不截断**，放不下就折行（C3） */
 .ss-import__clashnote {
-  flex: 1 1 0;
-  min-width: 0;
+  padding: 0 0 6px 22px;
   font-family: var(--font-ui);
   font-size: var(--size-micro);
   line-height: var(--leading-caption);
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
 /* 替换的结果：例行一行，占「只建链接，不动源文件」那个位置，贴在「添加 N 个」左边 */

@@ -108,8 +108,6 @@ export default function ImportPage({
     () => sortedSources.find((x) => freshCount(x) > 0)?.id ?? sortedSources[0]?.id ?? "",
   );
   const [names, setNames] = useState<string[]>([]);
-  /// 同名的行里选了「替换现有的」的那些
-  const [replace, setReplace] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   // 刚通过「+ 来源」加入、等待在新一轮 overview 中出现的路径
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -152,7 +150,6 @@ export default function ImportPage({
   // 切换来源时清空勾选（添加是一次性动作，不预填）
   useEffect(() => {
     setNames([]);
-    setReplace([]);
     setShowAdded(false);
   }, [selected]);
 
@@ -193,7 +190,10 @@ export default function ImportPage({
   const holders = new Map<string, { sourceId: string; label: string }>();
   for (const row of page.rows) {
     if (row.sourceId === selected || holders.has(row.skill)) continue;
-    const label = overview.sources.find((s) => s.id === row.sourceId)?.label ?? row.sourceId;
+    const src = overview.sources.find((s) => s.id === row.sourceId);
+    // 同名来源（三个 WeiboAP）带上区分片段，才说得清换掉的是哪一份
+    const seg = src ? distinct.get(src.id) : undefined;
+    const label = (src?.label ?? row.sourceId) + (seg ? `（${seg}）` : "");
     holders.set(row.skill, { sourceId: row.sourceId, label });
   }
 
@@ -206,12 +206,13 @@ export default function ImportPage({
   /// 列表只列未添加的；多到一列放不下才分两列
   const columns = columnsOf(fresh, fresh.length > 16 ? 2 : 1);
   const added = entries.filter((e) => e.added);
-  const allSelected = fresh.length > 0 && fresh.every((e) => names.includes(e.name));
-  const someSelected = fresh.some((e) => names.includes(e.name));
+  /// 全选不带同名的行：同名勾上就是替换现有的（删用户内容），要逐行自己勾
+  const bulk = fresh.filter((e) => e.holder === null);
+  const allSelected = bulk.length > 0 && bulk.every((e) => names.includes(e.name));
+  const someSelected = bulk.some((e) => names.includes(e.name));
 
   const toggleName = (skill: string) => {
     setNames((prev) => (prev.includes(skill) ? prev.filter((n) => n !== skill) : [...prev, skill]));
-    setReplace((prev) => prev.filter((n) => n !== skill));
   };
 
   const run = async (act: () => Promise<unknown>) => {
@@ -272,11 +273,11 @@ export default function ImportPage({
       for (const skill of names.filter((n) => excluded.includes(n))) {
         await api.includeAutoLink(source.path, skill);
       }
-      // 同名选了替换的：这一行的显式选择 + 按下「添加 N 个」就是确认（DESIGN 20b2844），当场执行、
-      // 不挂起不给撤销。先把现有那份移到废纸篓（链到它的会改指到这一份），再和其余的一起建链。
-      // 在 git 仓库里的不代删，这一行照常跳过
+      // 同名的行勾上就是替换现有的（不勾就是跳过）：勾选 + 按下「添加 N 个」就是确认
+      // （DESIGN 20b2844 与「添加页」），当场执行、不挂起不给撤销。先把现有那份移到废纸篓
+      // （链到它的会改指到这一份），再和其余的一起建链。在 git 仓库里的不代删，这一行照常跳过
       const done: string[] = [];
-      for (const skill of replace.filter((n) => names.includes(n))) {
+      for (const skill of names.filter((n) => holders.has(n))) {
         const holder = holders.get(skill);
         if (!holder) continue;
         const planned = await api.planDeleteSource(holder.sourceId, skill);
@@ -315,7 +316,6 @@ export default function ImportPage({
       }
       // 有替换：留在这一页，底栏结果位置说一声替换了哪几个
       setNames([]);
-      setReplace([]);
       setReplaced({ key: Date.now(), names: done });
       setBusy(false);
     } catch (e) {
@@ -486,13 +486,19 @@ export default function ImportPage({
                   <span className="ss-import__headline">
                     {source.label} · <span className="ss-import__num">{source.skills.length}</span>
                   </span>
-                  {fresh.length > 0 ? (
+                  {bulk.length > 0 ? (
                     <button
                       type="button"
                       role="checkbox"
                       aria-checked={allSelected ? true : someSelected ? "mixed" : false}
                       className="ss-import__all"
-                      onClick={() => setNames(allSelected ? [] : fresh.map((e) => e.name))}
+                      onClick={() =>
+                        setNames(
+                          allSelected
+                            ? names.filter((n) => !bulk.some((e) => e.name === n))
+                            : [...new Set([...names, ...bulk.map((e) => e.name)])],
+                        )
+                      }
                     >
                       <CheckMark on={allSelected} />
                       全选
@@ -505,7 +511,6 @@ export default function ImportPage({
                     <div className="ss-import__col" key={col[0].name}>
                       {col.map((entry) => {
                         const on = names.includes(entry.name);
-                        const chosen = replace.includes(entry.name);
                         return (
                           <div key={entry.name}>
                             <button
@@ -536,37 +541,13 @@ export default function ImportPage({
                               ) : null}
                             </button>
                             {on && entry.holder !== null ? (
-                              <div className="ss-import__clash">
-                                {chosen ? (
-                                  <Button
-                                    size="compact"
-                                    variant="primary"
-                                    title="不替换了，添加时跳过它"
-                                    onClick={() =>
-                                      setReplace((prev) => prev.filter((n) => n !== entry.name))
-                                    }
-                                  >
-                                    替换现有的
-                                  </Button>
-                                ) : (
-                                  <Button
-                                    size="compact"
-                                    onClick={() => setReplace((prev) => [...prev, entry.name])}
-                                  >
-                                    替换现有的
-                                  </Button>
+                              // 勾上同名的行＝替换现有的：行下一句后果说明，承载后果、不截断，放不下就折行
+                              <div className="ss-import__clashnote">
+                                会替换现有的：
+                                {joinWords(
+                                  entry.holder.label,
+                                  "那份进废纸篓，链到它的改指到这一份",
                                 )}
-                                {/* 后果说明不截断，放不下就折行 */}
-                                <span className="ss-import__clashnote">
-                                  {joinWords(
-                                    "替换后",
-                                    entry.holder.label,
-                                    "那份进废纸篓、链到它的改指到这一份",
-                                  )}
-                                </span>
-                                <Button variant="link" onClick={() => toggleName(entry.name)}>
-                                  跳过
-                                </Button>
                               </div>
                             ) : null}
                           </div>
