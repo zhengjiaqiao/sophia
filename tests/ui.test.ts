@@ -28,7 +28,6 @@ const { Switch, Checkbox } = await import("../src/ui/Switch.tsx");
 const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TIP_DELAY_MS } = await import("../src/ui/Tooltip.tsx");
-const { Rotor } = await import("../src/ui/Rotor.tsx");
 const { Spinner } = await import("../src/ui/Spinner.tsx");
 const { Toast, TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
 const { ErrorBanner, BlackNotice } = await import("../src/ui/ErrorBanner.tsx");
@@ -54,7 +53,6 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "ModelChip",
     "Tag",
     "Tooltip",
-    "Rotor",
     "Spinner",
     "Toast",
     "ErrorBanner",
@@ -98,7 +96,9 @@ test("tokens：七个中性灰、2px 控件圆角、28/24/32 控件高、行高 
   assert.match(tokensCss, /--row-h:\s*34px;/);
   assert.match(tokensCss, /--motion-fast:\s*120ms;/);
   assert.match(tokensCss, /--ease-mech:\s*cubic-bezier\(0\.2, 0\.8, 0\.2, 1\);/);
-  assert.match(tokensCss, /--motion-rotor:\s*1\.2s;/);
+  assert.match(tokensCss, /--motion-spinner:\s*0\.9s;/);
+  // 自创转盘已删，它的时长 token 不该回来
+  assert.doesNotMatch(tokensCss, /--motion-rotor/);
 });
 
 test("动效：状态变化走 120ms 机械缓动，不退化成默认 transition；减少动效时关掉", () => {
@@ -115,12 +115,9 @@ test("动效：状态变化走 120ms 机械缓动，不退化成默认 transitio
     }
   }
   assert.match(uiCss, /@media \(prefers-reduced-motion: reduce\)/);
-  // 转盘：1.2s 线性；减少动效下每 400ms 跳 45°（8 步 3.2s）
-  assert.match(
-    cssRule(uiCss, ".ss-rotor.is-spinning"),
-    /ss-spin var\(--motion-rotor\) linear infinite/,
-  );
-  assert.match(uiCss, /ss-spin 3\.2s steps\(8, end\) infinite/);
+  // 细弧：0.9s 线性匀速（关键帧 ss-spin）；自创转盘的样式已删
+  assert.match(cssRule(uiCss, ".ss-spinner"), /ss-spin var\(--motion-spinner\) linear infinite/);
+  assert.doesNotMatch(uiCss, /\.ss-rotor/);
 });
 
 // ===== 状态点 =====
@@ -453,23 +450,6 @@ test("Tooltip：黑窗白字 12，内边距 6 8，最大宽 240；内容作 aria
 test("Tooltip 时机：表格内 700ms、表格外 400ms", () => {
   assert.equal(TIP_DELAY_MS.table, 700);
   assert.equal(TIP_DELAY_MS.default, 400);
-});
-
-// ===== 转盘 =====
-
-test("Rotor ≤20：盘面 + 偏心点 r1.9，不加轴毂；64：加轴毂，偏心点 r1.3", () => {
-  const small = render(Rotor, { size: 18, spinning: true, label: "正在写入" });
-  assert.match(small, /class="ss-rotor is-spinning"/);
-  assert.match(small, /r="1\.9"/);
-  assert.doesNotMatch(small, /r="2\.4"/);
-  assert.match(small, /aria-label="正在写入"/);
-  assert.match(small, /<title>正在写入<\/title>/);
-  const big = render(Rotor, { size: 64, spinning: true });
-  assert.match(big, /r="2\.4"/);
-  assert.match(big, /r="1\.3"/);
-  assert.match(big, /vector-effect="non-scaling-stroke"/);
-  // 停着就不带转动类（停转回弹由 WAAPI 在客户端做）
-  assert.doesNotMatch(render(Rotor, { spinning: false }), /is-spinning/);
 });
 
 test("Spinner：270° 细弧、1.5 线宽、必带读屏文本；14 / 24 两档", () => {

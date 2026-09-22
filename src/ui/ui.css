@@ -714,18 +714,7 @@
   color: var(--ink-faint);
 }
 
-/* ===== 6. 转盘 Rotor：1 圈 / 1.2s 线性；停转由 WAAPI 做（Rotor.tsx） ===== */
-.ss-rotor {
-  display: block;
-  flex-shrink: 0;
-  color: var(--ink);
-  transform-origin: 50% 50%;
-}
-
-.ss-rotor.is-spinning {
-  animation: ss-spin var(--motion-rotor) linear infinite;
-}
-
+/* ===== 6. 旋转关键帧：细弧 Spinner 用 ===== */
 @keyframes ss-spin {
   to {
     transform: rotate(360deg);
@@ -1295,7 +1284,7 @@
 }
 
 /* ===== 14. 减少动效：状态变化即时发生，信息不减 =====
-   转盘不转，改为每 400ms 跳 45°（8 步一圈 = 3.2s）；停转由 Rotor.tsx 直接略过 */
+   细弧不转（静止的弧 + 文字照常） */
 @media (prefers-reduced-motion: reduce) {
   .ss-btn,
   .ss-iconbtn,
@@ -1316,10 +1305,6 @@
   .ss-agentkey:active:not(:disabled),
   .ss-iconbtn:active:not(:disabled) .ss-iconbtn__glyph {
     transform: none;
-  }
-
-  .ss-rotor.is-spinning {
-    animation: ss-spin 3.2s steps(8, end) infinite;
   }
 
   .ss-spinner {
