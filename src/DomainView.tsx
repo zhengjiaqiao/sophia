@@ -14,8 +14,7 @@ import Matrix, {
   RevealLink,
   type MatrixCellView,
   type MatrixRowView,
-  type ColumnKeyAction,
-  type SelectionKey,
+  type ColumnCheck,
 } from "./Matrix";
 import { distinguishingSegments } from "./pages/importDefaults";
 import { viewOf } from "./cellState";
@@ -94,7 +93,7 @@ const verbOf = (state: CellState, agent: string): string | undefined =>
           ? "点一下再试一次"
           : undefined;
 
-/// ＋ / － 的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、写不进的注明不受影响
+/// 列头复选框的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、写不进的注明不受影响
 export function affectedTip(
   head: string,
   names: string[],
@@ -268,10 +267,10 @@ export default function DomainView(props: DomainViewProps) {
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
-  // 选择态：每个 agent 列头上方一对固定的 ＋ / －（不翻转、不改文字），全局一对 全部加上 / 全部移除
-  const columnKeys: Record<string, { add?: ColumnKeyAction; remove?: ColumnKeyAction }> = {};
-  const allAdd: CellRef[] = [];
-  const allRemove: CellRef[] = [];
+  // 选择态：每个 agent 列头一个两态复选框——打勾＝选中的在这里（按能改的格算）全都有，否则空框；
+  // 点空框补齐缺的，点打勾全部移除。原件、写不进、同名被挡的格不计入（DESIGN「选择操作条」）
+  const columnChecks: Record<string, ColumnCheck> = {};
+  const enabledPresses: { add: CellRef[]; remove: CellRef[]; checked: boolean }[] = [];
   for (const target of page.targets) {
     const linked: CellRef[] = [];
     const missing: CellRef[] = [];
@@ -285,63 +284,63 @@ export default function DomainView(props: DomainViewProps) {
       else if (s === "own") own.push(row.skill);
       else if (s !== null) blocked.push(row.skill);
     }
-    const whole =
-      target.linkedWholeTo !== null ? `${target.label} 的 skills 整个文件夹是链接` : undefined;
-    if (!whole) {
-      allAdd.push(...missing);
-      allRemove.push(...linked);
-    }
-    const addPress: BatchPress = { keyId: target.id, op: "link", cells: missing };
-    const removePress: BatchPress = { keyId: target.id, op: "unlink", cells: linked };
-    columnKeys[target.id] = {
-      add: {
-        tip: affectedTip(
-          `加到 ${target.label}`,
-          missing.map((c) => c.skill),
-          [
-            { names: own, why: "是原件" },
-            { names: blocked, why: "写不进" },
-          ],
+    const checked = missing.length === 0 && linked.length > 0;
+    const notes = [
+      { names: own, why: "是原件" },
+      { names: blocked, why: "写不进" },
+    ];
+    const disabledReason =
+      target.linkedWholeTo !== null
+        ? `${target.label} 的 skills 整个文件夹是链接`
+        : linked.length + missing.length > 0
+          ? undefined
+          : own.length > 0 && blocked.length === 0
+            ? "这几个都是原件，改不了"
+            : "这几个都写不进";
+    if (disabledReason === undefined)
+      enabledPresses.push({ add: missing, remove: linked, checked });
+    columnChecks[target.id] = {
+      checked,
+      label: `选中的都加到 ${target.label}`,
+      tip: checked
+        ? affectedTip(
+            `从 ${target.label} 移除`,
+            linked.map((c) => c.skill),
+            notes,
+          )
+        : affectedTip(
+            `加到 ${target.label}`,
+            missing.map((c) => c.skill),
+            notes,
+          ),
+      disabledReason,
+      onToggle: () =>
+        props.onBatch(
+          checked
+            ? { keyId: target.id, op: "unlink", cells: linked }
+            : { keyId: target.id, op: "link", cells: missing },
         ),
-        disabledReason:
-          whole ??
-          (missing.length > 0
-            ? undefined
-            : blocked.length > 0 && linked.length + own.length === 0
-              ? "这几个都写不进"
-              : "都已加上"),
-        onPress: () => props.onBatch(addPress),
-      },
-      remove: {
-        tip: affectedTip(
-          `从 ${target.label} 移除`,
-          linked.map((c) => c.skill),
-          [{ names: own, why: "是原件" }],
-        ),
-        disabledReason:
-          whole ??
-          (linked.length > 0 ? undefined : own.length > 0 ? "只剩原件，移除不了" : "都还没加上"),
-        onPress: () => props.onBatch(removePress),
-      },
     };
   }
+  // 「所有 agent」：每个能改的 agent 都全有才打勾；点空框全部加上，点打勾全部移除
+  const allChecked = enabledPresses.length > 0 && enabledPresses.every((p) => p.checked);
+  const allAdd = enabledPresses.flatMap((p) => p.add);
+  const allRemove = enabledPresses.flatMap((p) => p.remove);
   const uniqNames = (cells: CellRef[]) => [...new Set(cells.map((c) => c.skill))];
-  const keys: SelectionKey[] = [
-    {
-      id: "all-add",
-      label: "全部加上",
-      tip: affectedTip(`加到所有 agent · ${allAdd.length} 处`, uniqNames(allAdd)),
-      disabledReason: allAdd.length === 0 ? "都已加上" : undefined,
-      onPress: () => props.onBatch({ keyId: "all-add", op: "link", cells: allAdd }),
-    },
-    {
-      id: "all-remove",
-      label: "全部移除",
-      tip: affectedTip(`从所有 agent 移除 · ${allRemove.length} 处`, uniqNames(allRemove)),
-      disabledReason: allRemove.length === 0 ? "都还没加上" : undefined,
-      onPress: () => props.onBatch({ keyId: "all-remove", op: "unlink", cells: allRemove }),
-    },
-  ];
+  const allAgents: ColumnCheck = {
+    checked: allChecked,
+    label: "选中的都加到所有 agent",
+    tip: allChecked
+      ? affectedTip(`从所有 agent 移除 · ${allRemove.length} 处`, uniqNames(allRemove))
+      : affectedTip(`加到所有 agent · ${allAdd.length} 处`, uniqNames(allAdd)),
+    disabledReason: enabledPresses.length === 0 ? "没有能加上或移除的" : undefined,
+    onToggle: () =>
+      props.onBatch(
+        allChecked
+          ? { keyId: "all", op: "unlink", cells: allRemove }
+          : { keyId: "all", op: "link", cells: allAdd },
+      ),
+  };
 
   // ---- 空态：一句现状 + 一个动作（DESIGN「空态与忙碌态」） ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
@@ -383,8 +382,8 @@ export default function DomainView(props: DomainViewProps) {
       addButton={<AddButton noun="skill" onClick={props.onImport} />}
       selected={props.selected}
       onSelectionChange={props.onSelectionChange}
-      selectionKeys={keys}
-      columnKeys={columnKeys}
+      allAgents={allAgents}
+      columnChecks={columnChecks}
       busy={props.busy}
       onCell={(rowKey, columnId) => {
         const row = page.rows.find((r) => skillRowKey(r) === rowKey);

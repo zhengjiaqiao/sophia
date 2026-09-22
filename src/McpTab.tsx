@@ -6,8 +6,7 @@ import Matrix, {
   cellKey,
   type MatrixCellView,
   type MatrixRowView,
-  type ColumnKeyAction,
-  type SelectionKey,
+  type ColumnCheck,
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty, PlusGlyph } from "./DomainView";
 import McpImportPage from "./pages/McpImportPage";
@@ -661,49 +660,57 @@ export default function McpTab({
         ? [{ sourceId: source.sourceId, name: row.name, targetId }]
         : [];
     });
-  // 选择态：每个位置列头上方只有 ＋（写进）——MCP 不能删条目，不画 －；全局只有「全部写进」
-  const columnKeys: Record<string, { add?: ColumnKeyAction }> = {};
+  // 选择态：列头复选框。MCP 只能写进、不能删条目——打勾（都有了）后禁用，提示框「都已写进」
+  const columnChecks: Record<string, ColumnCheck> = {};
   for (const target of page.targets) {
     const cells = missingAt(target.id);
+    const present = chosen.filter((row) => viewAt(row, target.id)?.dot === "linked").length;
     const own = chosen.filter((row) => viewAt(row, target.id)?.dot === "own").map((r) => r.name);
     const cant = chosen
       .filter((row) => {
         const v = viewAt(row, target.id);
-        return v !== null && !v.clickable && v.dot !== "own" && v.dot !== "linked";
+        return (
+          v !== null &&
+          v.dot !== "own" &&
+          v.dot !== "linked" &&
+          !cells.some((c) => c.name === row.name)
+        );
       })
       .map((r) => r.name);
-    columnKeys[target.id] = {
-      add: {
-        tip: affectedTip(
-          `写进 ${target.label}`,
-          cells.map((c) => c.name),
-          [
-            { names: own, why: "就定义在这里" },
-            { names: cant, why: "写不过去" },
-          ],
-        ),
-        disabledReason:
-          cells.length > 0
-            ? undefined
-            : cant.length > 0 && own.length === 0
+    const checked = cells.length === 0 && present > 0;
+    columnChecks[target.id] = {
+      checked,
+      label: `选中的都写进 ${target.label}`,
+      tip: affectedTip(
+        `写进 ${target.label}`,
+        cells.map((c) => c.name),
+        [
+          { names: own, why: "就定义在这里" },
+          { names: cant, why: "写不过去" },
+        ],
+      ),
+      disabledReason:
+        cells.length > 0
+          ? undefined
+          : checked
+            ? "都已写进"
+            : cant.length > 0
               ? "这几个都写不过去"
-              : "都已写进",
-        onPress: () => void write(cells, target.id),
-      },
+              : "这几个就定义在这里",
+      onToggle: () => void write(cells, target.id),
     };
   }
   const allMissing = page.targets.flatMap((t) => missingAt(t.id));
-  const keys: SelectionKey[] = [
-    {
-      id: "all",
-      label: "全部写进",
-      tip: affectedTip(`写进所有还缺它的位置 · ${allMissing.length} 处`, [
-        ...new Set(allMissing.map((c) => c.name)),
-      ]),
-      disabledReason: allMissing.length === 0 ? "都已写进" : undefined,
-      onPress: () => void write(allMissing, "all"),
-    },
-  ];
+  const allWritten = allMissing.length === 0 && Object.values(columnChecks).some((c) => c.checked);
+  const allAgents: ColumnCheck = {
+    checked: allWritten,
+    label: "选中的都写进所有位置",
+    tip: affectedTip(`写进所有还缺它的位置 · ${allMissing.length} 处`, [
+      ...new Set(allMissing.map((c) => c.name)),
+    ]),
+    disabledReason: allMissing.length > 0 ? undefined : allWritten ? "都已写进" : "没有能写进的",
+    onToggle: () => void write(allMissing, "all"),
+  };
 
   const openImport = () => {
     setImportTargetIds(null);
@@ -766,8 +773,8 @@ export default function McpTab({
           setSelected(next);
           if (next.size === 0) setKeyToast(null);
         }}
-        selectionKeys={keys}
-        columnKeys={columnKeys}
+        allAgents={allAgents}
+        columnChecks={columnChecks}
         onUndo={() => undoRef.current?.()}
         busy={busy}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}

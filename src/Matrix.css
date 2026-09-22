@@ -117,11 +117,6 @@
   font-weight: 500;
 }
 
-/* 选择态第一行的全局键：全部加上 / 全部移除（默认按钮 28） */
-.mx-key {
-  padding: 0 12px;
-}
-
 .mx-toolbar--select > * {
   flex-shrink: 0;
 }
@@ -156,39 +151,83 @@
   background: var(--canvas);
 }
 
-/* 选择态：列头上方一行 ＋ / －，每对与列中心对齐、间距 4；最左那段空白放批量提示条 */
-.mx-keyrow {
-  align-items: center;
-  height: 32px;
-  margin-bottom: 4px;
+/* 选择态：列头名字左边一个 12px 复选框、同一行。排序键是铺满整格的透明按钮，
+   图标 / 名字 / 计数只是画出来的字（不接指针），复选框单独接点击 */
+.mx-colcheck {
+  position: relative;
+  display: inline-flex;
 }
 
-.mx-keyrow__pair {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
+.mx-colcheck > .ss-tipwrap {
+  position: absolute;
+  inset: 0;
 }
 
-/* 提示条右对齐到第一对键左边 16：第一对键左沿在第一列里 (88 − 52) / 2 = 18 处 */
-.mx-keyrow__toast {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
-  margin-right: -2px;
-}
-
-.mx-pm {
-  width: 24px;
+.mx-colsort {
+  width: 100%;
+  height: 100%;
   padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
 }
 
-/* 禁用的键不吃指针事件，让外层提示框接住悬停——禁用的原因要在提示框里看得到 */
-.mx-pm:disabled,
-.mx-key:disabled {
+.mx-colmark {
+  position: relative;
+  padding: 0 4px;
   pointer-events: none;
 }
 
+.mx-colmark__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mx-colmark .ss-tipwrap,
+.mx-checkwrap {
+  display: inline-flex;
+  pointer-events: auto;
+}
+
+/* 禁用的框不吃指针事件，让外层提示框接住悬停——禁用的原因要看得到 */
+.mx-checkwrap .ss-checkbox:disabled {
+  pointer-events: none;
+}
+
+/* 工具行第一行的「☐ 所有 agent」 */
+.mx-checklabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--size-caption);
+  white-space: nowrap;
+}
+
+.mx-checklabel__text {
+  cursor: pointer;
+}
+
+.mx-checklabel.is-disabled .mx-checklabel__text {
+  color: var(--disabled);
+  cursor: default;
+}
+
+/* 批量结果的例行提示条：列头行最左那段空白里（名称 / 原件位置两列上方），右对齐、离第一列 16 */
+.mx-headtoast {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  padding-right: 16px;
+}
+
 .mx-head {
+  position: relative;
   align-items: end;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--ink);

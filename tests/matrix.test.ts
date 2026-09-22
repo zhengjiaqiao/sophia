@@ -88,39 +88,47 @@ test("Matrix：原件位置列头只排序——没有 ▾ 下拉、没有规则
   assert.match(html, /class="mx-head__origin"><button type="button" class="mx-headbtn">原件位置/);
 });
 
-test("Matrix：选择态——第一行 已选 N 个 + 全部加上 / 全部移除 + 取消选择；列头上方固定成对的 ＋ / －", () => {
+test("Matrix：选择态——第一行 已选 N 个 + ☐ 所有 agent + 取消选择；列头名字左边两态复选框", () => {
   const noop = () => undefined;
   const html = render(Matrix, {
     ...base,
     transportLabel: "传输",
     selected: new Set(["u|docx"]),
-    selectionKeys: [
-      { id: "all-add", label: "全部加上", onPress: noop },
-      { id: "all-remove", label: "全部移除", disabledReason: "都还没加上", onPress: noop },
-    ],
-    columnKeys: {
+    allAgents: {
+      checked: false,
+      label: "选中的都加到所有 agent",
+      tip: "加到所有 agent",
+      onToggle: noop,
+    },
+    columnChecks: {
       cc: {
-        add: { tip: "加到 Claude Code · 1 个：docx", onPress: noop },
-        remove: { tip: "从 Claude Code 移除", disabledReason: "只剩原件，移除不了", onPress: noop },
+        checked: true,
+        label: "选中的都加到 Claude Code",
+        tip: "从 Claude Code 移除",
+        onToggle: noop,
       },
-      cx: { add: { tip: "写进 Codex", onPress: noop } },
+      cx: {
+        checked: false,
+        label: "选中的都加到 Codex",
+        tip: "加到 Codex",
+        disabledReason: "这几个都写不进",
+        onToggle: noop,
+      },
     },
   });
   assert.match(html, /grid-template-columns:34px 246px 72px 120px 88px 88px 24px/);
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
-  assert.match(html, />全部加上</);
-  assert.match(html, /disabled=""[^>]*aria-label="全部移除：都还没加上"/);
+  assert.match(html, /aria-label="选中的都加到所有 agent"/);
+  assert.match(html, />所有 agent</);
   assert.match(html, /取消选择/);
-  // 键行：每列一对 ＋ / －，禁用的一侧提示框说原因；只给 add 的列（MCP）只画 ＋
-  assert.match(html, /class="mx-grid mx-keyrow"/);
-  assert.match(html, /aria-label="加到 Claude Code"/);
-  assert.match(html, /disabled=""[^>]*aria-label="从 Claude Code 移除：只剩原件，移除不了"/);
-  assert.equal((html.match(/class="ss-btn ss-btn--compact mx-pm"/g) ?? []).length, 3);
-  // 按 agent 的动词键（「加到 ✳ CLAUDE CODE」一类）属于已退役的行为
-  assert.doesNotMatch(html, /mx-keyname|mx-keycount/);
-  // 名称列头的复选框部分选中时半选
+  // 列头复选框只有两态：打勾 / 空框，不画半选；禁用的提示框说原因
+  assert.match(html, /aria-checked="true" aria-label="选中的都加到 Claude Code"/);
+  assert.match(html, /aria-checked="false" aria-label="选中的都加到 Codex"[^>]*disabled=""/);
+  assert.equal((html.match(/class="mx-colcheck"/g) ?? []).length, 2);
+  // 列头上方的 ＋ / － 与全局「全部加上 / 全部移除」两颗键属于已退役的行为
+  assert.doesNotMatch(html, /mx-keyrow|mx-pm|全部加上|全部移除/);
+  // 名称列头左边的「全选」框是选行用的，照旧半选
   assert.match(html, /aria-checked="mixed" aria-label="全选"/);
-  // 工具行第一行（筛选框）让位
   assert.doesNotMatch(html, /placeholder="筛选"/);
 });
 
