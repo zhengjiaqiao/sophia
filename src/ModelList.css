@@ -48,6 +48,40 @@
   outline: none;
 }
 
+/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从 canvas 白渐隐到透明（功能性渐变） */
+.model-list__viewport {
+  position: relative;
+  min-height: 0;
+}
+
+.model-list__viewport::before,
+.model-list__viewport::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: var(--fade-edge);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.model-list__viewport::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--canvas), transparent);
+}
+
+.model-list__viewport::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--canvas), transparent);
+}
+
+.model-list__viewport[data-fade-top]::before,
+.model-list__viewport[data-fade-bottom]::after {
+  opacity: 1;
+}
+
 /* 列表在自身范围内滚动：约 8 行 + 组头 */
 .model-list__scroll {
   position: relative;
@@ -99,7 +133,10 @@
   gap: var(--space-sm);
   box-sizing: border-box;
   height: var(--row-h);
-  padding: 0 var(--space-sm);
+  /* 行悬停底 6 圆角（control），左右各让 4；文字起点不变（12 = 4 + 8） */
+  margin: 0 var(--space-xxs);
+  padding: 0 var(--space-xs);
+  border-radius: var(--radius-control);
   cursor: pointer;
   transition: background-color var(--motion-fast) var(--ease-mech);
 }
@@ -209,6 +246,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .model-list__viewport::before,
+  .model-list__viewport::after,
   .model-list__search,
   .models-option {
     transition: none;

@@ -54,7 +54,8 @@ const PREVIEWS = new Set<Dot>(["linked", "missing"]);
 function Glyph10({ dot }: { dot: Dot }) {
   switch (dot) {
     case "linked":
-      // 环打底、实心盖在上面：悬停时实心褪去，剩下的就是「关掉之后」的样子
+      // 环打底、实心盖在上面。悬停预览是整颗点淡到 40%（40% 浓度＝预览、还没发生），
+      // 不褪去实心露出空环——空环是真实的「未开启」，会被读成已经取消了
       return (
         <>
           <circle cx="5" cy="5" r="4.25" />

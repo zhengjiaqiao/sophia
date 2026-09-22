@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   MODEL_FILTER_THRESHOLD,
+  edgeFades,
   PINNED_PREVIEW,
   frozenGroups,
   modelEntryKey,
@@ -46,6 +47,25 @@ export function ModelList({ entries, busy, onToggle, header, flashKeys, empty }:
   /// 打开那一刻的排序：之后勾选只改状态、不挪位置（DESIGN「已选置顶」）
   const [snap] = useState(() => snapshotOrder(entries));
   const [pinnedOpen, setPinnedOpen] = useState(false);
+  /// 滚动边缘渐隐：上面 / 下面还有被裁掉的行时，那一边出 16px 渐隐（DESIGN「渐变只用于功能」）
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [fade, setFade] = useState({ start: false, end: false });
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const next = edgeFades(el.scrollTop, el.clientHeight, el.scrollHeight);
+      setFade((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  });
   const withFilter = entries.length > MODEL_FILTER_THRESHOLD;
   const term = withFilter ? query : "";
   const groups = frozenGroups(entries, snap, term);
@@ -141,68 +161,75 @@ export function ModelList({ entries, busy, onToggle, header, flashKeys, empty }:
         ) : null
       ) : (
         <div
-          className={`model-list__scroll${busy ? " ss-busy" : ""}`}
-          role="listbox"
-          aria-multiselectable="true"
+          className="model-list__viewport"
+          data-fade-top={fade.start || undefined}
+          data-fade-bottom={fade.end || undefined}
         >
-          {groups.length === 0 ? (
-            <p className="model-list__empty">
-              没有匹配的模型
-              <Button variant="link" onClick={() => setQuery("")}>
-                清除筛选
-              </Button>
-            </p>
-          ) : (
-            <>
-              {/* 已选置顶：打开时已选的那几个；为 0 或筛选后为空时整组不出现 */}
-              {pinned.length > 0 ? (
-                <div className="model-list__group model-list__group--pinned">
-                  <div className="model-list__group-head">
-                    <span className="model-list__vendor">已选</span>
-                    <span className="model-list__dot">·</span>
-                    <span className="model-list__count">{pinned.length}</span>
-                  </div>
-                  {pinnedShown.map((entry) => row(entry, "pinned"))}
-                  {!pinnedOpen && pinned.length > PINNED_PREVIEW ? (
-                    <button
-                      type="button"
-                      className="model-list__more"
-                      onClick={() => setPinnedOpen(true)}
-                    >
-                      还有{" "}
-                      <span className="model-list__more-count">
-                        {pinned.length - PINNED_PREVIEW}
-                      </span>{" "}
-                      个
-                      <svg
-                        width="10"
-                        height="10"
-                        viewBox="0 0 10 10"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
+          <div
+            ref={scrollRef}
+            className={`model-list__scroll${busy ? " ss-busy" : ""}`}
+            role="listbox"
+            aria-multiselectable="true"
+          >
+            {groups.length === 0 ? (
+              <p className="model-list__empty">
+                没有匹配的模型
+                <Button variant="link" onClick={() => setQuery("")}>
+                  清除筛选
+                </Button>
+              </p>
+            ) : (
+              <>
+                {/* 已选置顶：打开时已选的那几个；为 0 或筛选后为空时整组不出现 */}
+                {pinned.length > 0 ? (
+                  <div className="model-list__group model-list__group--pinned">
+                    <div className="model-list__group-head">
+                      <span className="model-list__vendor">已选</span>
+                      <span className="model-list__dot">·</span>
+                      <span className="model-list__count">{pinned.length}</span>
+                    </div>
+                    {pinnedShown.map((entry) => row(entry, "pinned"))}
+                    {!pinnedOpen && pinned.length > PINNED_PREVIEW ? (
+                      <button
+                        type="button"
+                        className="model-list__more"
+                        onClick={() => setPinnedOpen(true)}
                       >
-                        <path d="M4 2.5L6.5 5 4 7.5" />
-                      </svg>
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-              {groups.map((group) => (
-                <div key={group.vendor} className="model-list__group">
-                  <div className="model-list__group-head">
-                    <span className="model-list__vendor">{group.vendor}</span>
-                    <span className="model-list__dot">·</span>
-                    <span className="model-list__count">{group.entries.length}</span>
+                        还有{" "}
+                        <span className="model-list__more-count">
+                          {pinned.length - PINNED_PREVIEW}
+                        </span>{" "}
+                        个
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 10 10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M4 2.5L6.5 5 4 7.5" />
+                        </svg>
+                      </button>
+                    ) : null}
                   </div>
-                  {group.entries.map((entry) => row(entry, "group"))}
-                </div>
-              ))}
-            </>
-          )}
+                ) : null}
+                {groups.map((group) => (
+                  <div key={group.vendor} className="model-list__group">
+                    <div className="model-list__group-head">
+                      <span className="model-list__vendor">{group.vendor}</span>
+                      <span className="model-list__dot">·</span>
+                      <span className="model-list__count">{group.entries.length}</span>
+                    </div>
+                    {group.entries.map((entry) => row(entry, "group"))}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
         </div>
       )}
       <div className="model-list__foot">

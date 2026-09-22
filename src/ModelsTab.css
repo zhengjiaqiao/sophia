@@ -233,7 +233,7 @@
   color: var(--ink-faint);
 }
 
-/* ===== 选择器浮层：与框同宽左对齐，框下 4 ===== */
+/* ===== 选择器浮层：与框同宽左对齐，框下 4；8 圆角（layer）+ 浮层阴影，无黑框 ===== */
 .models-picker {
   position: absolute;
   top: calc(100% + 4px);
@@ -244,8 +244,10 @@
   flex-direction: column;
   box-sizing: border-box;
   max-height: 420px;
-  border: 1px solid var(--ink);
+  overflow: hidden;
+  border-radius: var(--radius-layer);
   background: var(--canvas);
+  box-shadow: var(--elev-layer);
 }
 
 /* 第三方分组头：`第三方` 12/600 ink-mute + 限制说明 12 ink-faint + 末尾 `管理网关 ›` */

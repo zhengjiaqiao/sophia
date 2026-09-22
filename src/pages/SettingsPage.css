@@ -47,6 +47,8 @@
   height: var(--row-h);
   padding: 0 var(--space-xs);
   border: 0;
+  /* 行悬停底 6 圆角（control） */
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
   text-align: left;

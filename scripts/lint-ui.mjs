@@ -10,8 +10,39 @@ const TOKENS = new Set([
   "#ffffff", "#000000", "#f2f2f2", "#e2e2e2", "#c8c8c8", "#9a9a9a", "#5a5a5a",
 ]);
 const FONTS = ["Barlow Condensed", "Barlow", "IBM Plex Mono"];
-/// 动作与输入 2px、片与开关 32px、圆点 50%，其余 0（DESIGN「Shapes」）
-const RADII = new Set(["0", "0px", "2px", "32px", "50%"]);
+/// 圆角随尺寸：记号 3、控件 6、浮层 8、弹窗 12、片与开关 32、圆点 50%，平铺结构 0（DESIGN「Shapes」）
+const RADII = new Set(["0", "0px", "3px", "6px", "8px", "12px", "32px", "50%"]);
+/// 浮层阴影只用这两个 token（DESIGN「Elevation & Depth」）
+const ELEVATIONS = new Set(["var(--elev-layer)", "var(--elev-tip)"]);
+/// 功能性渐变只能从 canvas 白过渡到透明（滚动边缘渐隐），不做装饰
+const FADE_STOPS = new Set(["var(--canvas)", "#fff", "#ffffff", "transparent"]);
+
+/// tokens.css 里阴影 token 的定义行：只有这两行可以出现 rgba 字面值
+const ELEV_DEF = /^\s*--elev-(?:layer|tip)\s*:.*$/gm;
+
+/// 一个 linear-gradient(...) 的参数是不是只有「方向 + canvas / 透明 + 位置」
+function isEdgeFade(args) {
+  const parts = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of args) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  parts.push(cur.trim());
+  const stops = parts.filter((p) => !/^(to\s|-?[\d.]+(deg|turn|rad)$)/.test(p));
+  return (
+    stops.length >= 2 &&
+    stops.every((p) => {
+      const color = p.replace(/\s+(-?[\d.]+(px|%)?|var\(--fade-edge\)|calc\([^)]*\))$/, "").trim();
+      return FADE_STOPS.has(color);
+    })
+  );
+}
 /// 只有这个文件可以写字面色值
 const TOKEN_FILE = "src/tokens.css";
 
@@ -39,10 +70,11 @@ const rules = [
   },
   {
     id: "no-color-fn",
-    desc: "§1.1 零色彩：不出现 oklch / rgb / hsl / 具名色",
-    run(src) {
+    desc: "§1.1 零色彩：不出现 oklch / rgb / hsl / 具名色（tokens.css 的阴影 token 除外）",
+    run(src, path) {
       const out = [];
-      for (const m of src.matchAll(/\b(oklch|rgba?|hsla?|color-mix)\s*\(/g)) out.push(m[1]);
+      const body = path === TOKEN_FILE ? src.replace(ELEV_DEF, "") : src;
+      for (const m of body.matchAll(/\b(oklch|rgba?|hsla?|color-mix)\s*\(/g)) out.push(m[1]);
       for (const m of src.matchAll(/(?:color|background(?:Color)?|background-color|borderColor|border-color|stroke|fill)\s*[:=]\s*["']?([a-z]{3,20})["']?\s*[;,"'}]/gi)) {
         const w = m[1].toLowerCase();
         if (["none", "transparent", "inherit", "currentcolor", "initial", "unset"].includes(w)) continue;
@@ -53,24 +85,30 @@ const rules = [
   },
   {
     id: "elevation",
-    desc: "§1.3 零阴影零渐变",
+    desc: "§1.3 阴影只给浮层（var(--elev-layer) / var(--elev-tip)）；渐变只做滚动边缘渐隐",
     run(src) {
       const out = [];
-      if (/box-?[Ss]hadow\s*[:=]\s*["']?(?!none)/.test(src)) out.push("box-shadow");
+      for (const m of src.matchAll(/box-?[Ss]hadow\s*[:=]\s*["']?([^;"'}\n]+)/g)) {
+        const v = m[1].trim();
+        if (v !== "none" && !ELEVATIONS.has(v)) out.push(`box-shadow: ${v}`);
+      }
       if (/text-?[Ss]hadow\s*[:=]\s*["']?(?!none)/.test(src)) out.push("text-shadow");
-      if (/\b(?:linear|radial|conic)-gradient\s*\(/.test(src)) out.push("gradient");
+      if (/\b(?:radial|conic|repeating-linear)-gradient\s*\(/.test(src)) out.push("装饰性渐变");
+      for (const m of src.matchAll(/\blinear-gradient\s*\(((?:[^()]|\([^()]*\))*)\)/g)) {
+        if (!isEdgeFade(m[1])) out.push(`linear-gradient(${m[1]})（只允许 canvas → transparent 的边缘渐隐）`);
+      }
       if (/filter\s*[:=]\s*["']?[^;"'}]*blur/.test(src)) out.push("blur");
       return out;
     },
   },
   {
     id: "radius",
-    desc: "§1.3 圆角只有 4px（输入框）/ 32px（pill）/ 50%（圆点）",
+    desc: "§1.3 圆角只有 0 / 3 / 6 / 8 / 12 / 32px / 50% 或 var(--radius-*)",
     run(src) {
       const out = [];
       for (const m of src.matchAll(/border-?[Rr]adius\s*[:=]\s*["']?([^;"'}\n]+)/g)) {
         const v = m[1].trim().replace(/["']$/, "");
-        if (v.startsWith("var(")) continue;
+        if (/^var\(--radius-[a-z]+\)$/.test(v)) continue;
         if (!v.split(/\s+/).every((p) => RADII.has(p))) out.push(v);
       }
       return [...new Set(out)];

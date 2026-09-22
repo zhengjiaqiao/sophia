@@ -399,7 +399,7 @@
   height: 12px;
   padding: 0;
   border: 1px solid var(--ink-faint);
-  border-radius: 0;
+  border-radius: var(--radius-mark);
   background: var(--canvas);
   color: var(--canvas);
   cursor: pointer;
@@ -599,7 +599,8 @@
   color: var(--disabled);
 }
 
-/* 悬停预览：未开启的环内填 40%，已开启的实心褪去只剩环（opacity，不用 rgba） */
+/* 悬停预览：40% 浓度＝预览、还没发生（opacity，不用 rgba）。未开启的环保持原样、环内填 40% 实心；
+   已开启的整颗实心点淡到 40%——不露出空环，空环是真实的「未开启」，还没点就会被读成已经取消了 */
 .ss-dot__preview {
   opacity: 0;
 }
@@ -609,9 +610,9 @@
   opacity: 0.4;
 }
 
-.ss-dot-btn:hover .ss-dot[data-preview] .ss-dot__fill,
-.ss-dot-btn:focus-visible .ss-dot[data-preview] .ss-dot__fill {
-  opacity: 0;
+.ss-dot-btn:hover .ss-dot--linked[data-preview],
+.ss-dot-btn:focus-visible .ss-dot--linked[data-preview] {
+  opacity: 0.4;
 }
 
 .ss-dot-wrap {
@@ -653,7 +654,7 @@
   color: var(--ink);
 }
 
-/* ===== 5. 提示框 Tooltip：黑窗白字 12，内边距 6 8，圆角 0，最大宽 240 ===== */
+/* ===== 5. 提示框 Tooltip：黑窗白字 12，内边距 6 8，圆角 6（control），浮层阴影 tip，最大宽 240 ===== */
 .ss-tipwrap {
   position: relative;
   display: inline-flex;
@@ -667,8 +668,10 @@
   width: max-content;
   max-width: 240px;
   padding: 6px 8px;
+  border-radius: var(--radius-control);
   background: var(--ink);
   color: var(--canvas);
+  box-shadow: var(--elev-tip);
   font-family: var(--font-ui);
   font-size: var(--size-micro);
   font-weight: 400;
@@ -738,8 +741,9 @@
   line-height: var(--leading-caption);
 }
 
-/* 例行成功：一行墨字直接落在白底上，无框无底 */
+/* 例行成功：一行墨字直接落在白底上，无框无底（圆角随提示条一档，无阴影——它不是一块） */
 .ss-toast--routine {
+  border-radius: var(--radius-layer);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -752,13 +756,16 @@
   display: inline-flex;
 }
 
-/* 需要注意：黑显示窗，0 圆角无外框，宽 ≤ 400 */
+/* 需要注意：黑显示窗，8 圆角（layer）无外框，浮层阴影 tip，宽 ≤ 400。
+   里面没有自带底色的块，不必裁切（裁切会把放不下的撤销键切掉） */
 .ss-toast--notice {
   display: flex;
   width: max-content;
   max-width: 400px;
+  border-radius: var(--radius-layer);
   background: var(--ink);
   color: var(--canvas);
+  box-shadow: var(--elev-tip);
 }
 
 .ss-toast__indicator {
@@ -915,6 +922,8 @@
   box-sizing: border-box;
   min-height: var(--control-h-row);
   padding: 0 10px;
+  /* 提示条一档 8 圆角；它在页面流里（挂在某一行下面），不浮起，所以没有阴影 */
+  border-radius: var(--radius-layer);
   background: var(--ink);
   color: var(--canvas);
   font-family: var(--font-ui);
@@ -941,7 +950,7 @@
   margin-left: 2px;
 }
 
-/* ===== 9. 确认弹窗 Confirm：无外框白板 460；canvas 80% 遮罩，触发行留在罩上 ===== */
+/* ===== 9. 确认弹窗 Confirm：白板 460，12 圆角（dialog）+ 浮层阴影 layer，无黑框；黑 18% 遮罩，触发行留在罩上 ===== */
 .ss-confirm-layer {
   position: fixed;
   inset: 0;
@@ -959,8 +968,8 @@
 
 .ss-confirm-veil {
   position: absolute;
-  background: var(--canvas);
-  opacity: 0.8;
+  background: var(--ink);
+  opacity: var(--veil-opacity);
 }
 
 .ss-confirm-veil--full {
@@ -978,10 +987,11 @@
   width: 460px;
   max-width: calc(100vw - 32px);
   padding: 24px 28px;
+  border-radius: var(--radius-dialog);
   background: var(--canvas);
   color: var(--ink);
-  /* 浮在 80% 白遮罩上：不用阴影，靠 1px 墨线与底色分开（与下拉浮层同一种边） */
-  border: 1px solid var(--ink);
+  /* 浮层阴影（一圈 8% 墨描边 + 柔和投影）替掉原来的 1px 黑框 */
+  box-shadow: var(--elev-layer);
 }
 
 /* 标题 head-cap 档：15/600，汉字字距 0 */
@@ -1126,7 +1136,7 @@
   width: 14px;
   height: 14px;
   border: 1px solid var(--hairline);
-  border-radius: 0;
+  border-radius: var(--radius-mark);
   font-family: var(--font-cond);
   font-size: var(--size-micro);
   font-weight: 600;

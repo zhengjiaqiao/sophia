@@ -89,7 +89,19 @@ test("tokens：七个中性灰、2px 控件圆角、28/24/32 控件高、行高 
     assert.match(tokensCss, new RegExp(`--${name}:\\s*${value};`), name);
   }
   assert.doesNotMatch(tokensCss, /--ink-faint-inverse/);
-  assert.match(tokensCss, /--radius-control:\s*2px;/);
+  // 圆角随尺寸：记号 3、控件 6、浮层 8、弹窗 12、胶囊 32（UI v4 视觉调整；原「控件 2px」已退役）
+  assert.match(tokensCss, /--radius-mark:\s*3px;/);
+  assert.match(tokensCss, /--radius-control:\s*6px;/);
+  assert.match(tokensCss, /--radius-layer:\s*8px;/);
+  assert.match(tokensCss, /--radius-dialog:\s*12px;/);
+  assert.match(tokensCss, /--radius-pill:\s*32px;/);
+  // 浮层阴影两档，逐字；遮罩黑 18%
+  assert.match(
+    tokensCss,
+    /--elev-layer: 0 0 0 1px rgba\(0,0,0,\.08\), 0 12px 32px rgba\(0,0,0,\.14\), 0 2px 6px rgba\(0,0,0,\.06\);/,
+  );
+  assert.match(tokensCss, /--elev-tip: 0 4px 12px rgba\(0,0,0,\.14\);/);
+  assert.match(tokensCss, /--veil-opacity:\s*0\.18;/);
   assert.match(tokensCss, /--control-h:\s*28px;/);
   assert.match(tokensCss, /--control-h-compact:\s*24px;/);
   assert.match(tokensCss, /--control-h-row:\s*32px;/);
@@ -173,14 +185,23 @@ test("StateDot 可点：渲染成按钮；只有开 / 关两种画悬停预览",
   assert.doesNotMatch(render(StateDot, { dot: "missing" }), /data-preview/);
 });
 
-test("StateDot 悬停预览：未加上环内 40% 实心，已加上实心褪去只剩环——两者相反", () => {
+// 已加上的预览原来是「实心褪去只剩环」——和真实的「未加上」一模一样，还没点就被读成已取消（真机反馈），
+// 这条行为已退役；现在 40% 浓度＝预览、还没发生
+test("StateDot 悬停预览：未加上环内 40% 实心；已加上整颗点淡到 40%，实心不隐藏、不露空环", () => {
   assert.match(
     uiCss,
     /\.ss-dot-btn:hover \.ss-dot\[data-preview\] \.ss-dot__preview[^{]*\{\s*opacity:\s*0\.4;/,
   );
   assert.match(
     uiCss,
-    /\.ss-dot-btn:hover \.ss-dot\[data-preview\] \.ss-dot__fill[^{]*\{\s*opacity:\s*0;/,
+    /\.ss-dot-btn:hover \.ss-dot--linked\[data-preview\][^{]*\{\s*opacity:\s*0\.4;/,
+  );
+  assert.doesNotMatch(uiCss, /\.ss-dot__fill[^{]*\{\s*opacity:\s*0;/);
+  // 闪烁帧画目标状态：不带预览的淡化
+  const matrixCss = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.match(
+    matrixCss,
+    /\.mx-cell\.ss-flash \.ss-dot-btn \.ss-dot\[data-preview\] \{\s*opacity:\s*1;/,
   );
 });
 
@@ -364,7 +385,8 @@ test("Checkbox 12px：未选 / 已选 / 半选 / 不可选", () => {
   assert.match(off, /title="已添加"/);
   const rule = cssRule(uiCss, ".ss-checkbox");
   assert.match(rule, /width:\s*12px/);
-  assert.match(rule, /border-radius:\s*0/);
+  // 复选框是记号：3 圆角（原 0 圆角已退役）
+  assert.match(rule, /border-radius:\s*var\(--radius-mark\)/);
   // 命中区用伪元素撑到 24，不动 border
   assert.match(cssRule(uiCss, ".ss-checkbox::before"), /inset:\s*-6px/);
 });
@@ -483,7 +505,10 @@ test("Toast notice 成功：黑显示窗，40px 指示窗 ✓ + 动词 + 白图�
   const rule = cssRule(uiCss, ".ss-toast--notice");
   assert.match(rule, /background:\s*var\(--ink\)/);
   assert.match(rule, /max-width:\s*400px/);
-  assert.doesNotMatch(rule, /(^|\s)border(-[a-z]+)?:/);
+  // 无外框；提示条 8 圆角 + 浮层阴影 tip（原「0 圆角、无阴影」已退役）
+  assert.doesNotMatch(rule, /(^|\s)border(-(?!radius)[a-z]+)?:/);
+  assert.match(rule, /border-radius:\s*var\(--radius-layer\)/);
+  assert.match(rule, /box-shadow:\s*var\(--elev-tip\)/);
   assert.match(cssRule(uiCss, ".ss-toast__indicator"), /width:\s*40px/);
 });
 
@@ -550,7 +575,9 @@ test("Toast routine：一行墨字落在白底上，无框无底，撤销是文�
   assert.match(html, /class="ss-btn ss-btn--link">撤销</);
   assert.doesNotMatch(html, /ss-toast__indicator/);
   const rule = cssRule(uiCss, ".ss-toast--routine");
-  assert.doesNotMatch(rule, /(^|\s)(background|border)(-[a-z]+)?:/);
+  // 无框无底（圆角随提示条一档，但没有底色，所以看不出来，也不加阴影）
+  assert.doesNotMatch(rule, /(^|\s)(background|border)(-(?!radius)[a-z]+)?:/);
+  assert.doesNotMatch(rule, /box-shadow/);
 });
 
 // ===== 错误横幅与行内黑窗 =====
@@ -603,14 +630,16 @@ test("Confirm：白板 460 + 1px 墨线描边，canvas 80% 遮罩；主动作反
   assert.match(html, /class="ss-btn ss-btn--primary">重启</);
   assert.match(html, /class="ss-confirm-veil ss-confirm-veil--full"/);
   const board = cssRule(uiCss, ".ss-confirm");
-  // 浮在白遮罩上，靠 1px 墨线与底色分开（不用阴影）
-  assert.match(board, /border:\s*1px solid var\(--ink\)/);
-  assert.doesNotMatch(board, /box-shadow/);
+  // 12 圆角 + 浮层阴影 layer，不用黑框（原「1px 墨线、无阴影」已退役）
+  assert.doesNotMatch(board, /(^|\s)border:/);
+  assert.match(board, /border-radius:\s*var\(--radius-dialog\)/);
+  assert.match(board, /box-shadow:\s*var\(--elev-layer\)/);
   assert.match(board, /width:\s*460px/);
   assert.match(board, /padding:\s*24px 28px/);
   const veil = cssRule(uiCss, ".ss-confirm-veil");
-  assert.match(veil, /background:\s*var\(--canvas\)/);
-  assert.match(veil, /opacity:\s*0\.8/);
+  // 遮罩黑 18%（原 canvas 80% 已退役）
+  assert.match(veil, /background:\s*var\(--ink\)/);
+  assert.match(veil, /opacity:\s*var\(--veil-opacity\)/);
 });
 
 test("Confirm 锚在触发行下方 6px，遮罩挖出那一行，用户看得见正在决定的那一行", () => {
@@ -948,4 +977,31 @@ test("Confirm align=end：触发控件在行尾时对话框右沿对齐触发行
     anchor,
   });
   assert.match(start, /left:min\(32px, calc\(100vw - 476px\)\)/);
+});
+
+test("提示框：6 圆角 + 浮层阴影 tip；平铺的横幅仍是直角、无阴影", () => {
+  const tip = cssRule(uiCss, ".ss-tip");
+  assert.match(tip, /border-radius:\s*var\(--radius-control\)/);
+  assert.match(tip, /box-shadow:\s*var\(--elev-tip\)/);
+  const banner = cssRule(uiCss, ".ss-banner");
+  assert.doesNotMatch(banner, /border-radius|box-shadow/);
+});
+
+test("阴影只有两个 token：src 里凡是 box-shadow 都是 var(--elev-layer) / var(--elev-tip) / none", async () => {
+  const { readdirSync, statSync } = await import("node:fs");
+  const walk = (dir: URL): URL[] =>
+    readdirSync(dir).flatMap((name) => {
+      const u = new URL(name, dir.href.endsWith("/") ? dir : new URL(dir.href + "/"));
+      return statSync(u).isDirectory() ? walk(new URL(u.href + "/")) : [u];
+    });
+  const css = walk(new URL("../src/", import.meta.url)).filter((u) => u.pathname.endsWith(".css"));
+  for (const u of css) {
+    const src = readFileSync(u, "utf8");
+    for (const m of src.matchAll(/box-shadow:\s*([^;]+);/g)) {
+      assert.ok(
+        ["none", "var(--elev-layer)", "var(--elev-tip)"].includes(m[1].trim()),
+        `${u.pathname}: box-shadow: ${m[1]}`,
+      );
+    }
+  }
 });

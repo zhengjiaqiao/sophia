@@ -19,7 +19,7 @@ import { PendingPage, loadModelIgnoredKeys, type PendingSegment } from "./pages/
 import { collectIssues } from "./pages/pendingIssues";
 import { collectMcpIssues } from "./mcpView";
 import { displayPath, loadHome } from "./pathText";
-import { modelIssues, parseBackendError } from "./modelsView";
+import { edgeFades, modelIssues, parseBackendError } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
 import {
   AddButton,
@@ -85,6 +85,27 @@ export default function App() {
   /// 模型页跳回：要进网关页并选中的那一家
   const [modelFocus, setModelFocus] = useState<string | undefined>();
   const clearModelFocus = useCallback(() => setModelFocus(undefined), []);
+  /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐
+  const contentRef = useRef<HTMLElement>(null);
+  const [contentFade, setContentFade] = useState({ start: false, end: false });
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const update = () => {
+      const next = edgeFades(el.scrollLeft, el.clientWidth, el.scrollWidth);
+      setContentFade((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    // 窗口变窄、表格长宽（换页签、扫描回来）都会改变能不能横向滚动
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(el);
+    for (const child of Array.from(el.children)) observer?.observe(child);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  });
   /// 提示条的到点消失按回调身份计时：必须稳定，否则每次重渲染都重新计时
   const closeMcpToast = useCallback(() => setBackgroundMcpReport(null), []);
   // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
@@ -540,49 +561,56 @@ export default function App() {
           </div>
         </aside>
       )}
-      <main className={showModels ? "content content--bleed" : "content"}>
-        {error && (
-          <div className="content__banner">
-            <ErrorBanner message={error} onClose={() => setError(null)} />
-          </div>
-        )}
-        {/* 还没问出模型页支不支持的那一瞬间也落在 Skills 上：宁可闪一下扫描中，不能白屏 */}
-        {showModels ? (
-          <ModelsTab
-            onError={setError}
-            busy={busy}
-            onBusy={setBusyState}
-            onGatewayState={setGatewayState}
-            focusProviderId={modelFocus}
-            onFocused={clearModelFocus}
-          />
-        ) : activeTab === "mcp" ? (
-          <McpTab
-            selectedKey={selectedKey}
-            onError={setError}
-            busy={busy}
-            onBusy={setBusyState}
-            refreshKey={refreshKey}
-            onDomains={updateMcpSidebarDomains}
-            onOverview={setMcpOverview}
-            focusKey={focus?.segment === "mcp" ? focus.key : undefined}
-            onFocused={clearFocus}
-          />
-        ) : (
-          <SkillsTab
-            overview={overview}
-            autoLinks={autoLinks}
-            busy={busy}
-            onBusy={setBusyState}
-            selectedKey={selectedKey}
-            onRefresh={refresh}
-            onError={setError}
-            onOpenPending={openInbox}
-            focusKey={focus?.segment === "skills" ? focus.key : undefined}
-            onFocused={clearFocus}
-          />
-        )}
-      </main>
+      {/* 内容区外面包一层：表格横向放不下时，被裁掉的左 / 右边缘出 16px 渐隐（DESIGN「渐变只用于功能」） */}
+      <div
+        className="content-shell"
+        data-fade-left={contentFade.start || undefined}
+        data-fade-right={contentFade.end || undefined}
+      >
+        <main ref={contentRef} className={showModels ? "content content--bleed" : "content"}>
+          {error && (
+            <div className="content__banner">
+              <ErrorBanner message={error} onClose={() => setError(null)} />
+            </div>
+          )}
+          {/* 还没问出模型页支不支持的那一瞬间也落在 Skills 上：宁可闪一下扫描中，不能白屏 */}
+          {showModels ? (
+            <ModelsTab
+              onError={setError}
+              busy={busy}
+              onBusy={setBusyState}
+              onGatewayState={setGatewayState}
+              focusProviderId={modelFocus}
+              onFocused={clearModelFocus}
+            />
+          ) : activeTab === "mcp" ? (
+            <McpTab
+              selectedKey={selectedKey}
+              onError={setError}
+              busy={busy}
+              onBusy={setBusyState}
+              refreshKey={refreshKey}
+              onDomains={updateMcpSidebarDomains}
+              onOverview={setMcpOverview}
+              focusKey={focus?.segment === "mcp" ? focus.key : undefined}
+              onFocused={clearFocus}
+            />
+          ) : (
+            <SkillsTab
+              overview={overview}
+              autoLinks={autoLinks}
+              busy={busy}
+              onBusy={setBusyState}
+              selectedKey={selectedKey}
+              onRefresh={refresh}
+              onError={setError}
+              onOpenPending={openInbox}
+              focusKey={focus?.segment === "skills" ? focus.key : undefined}
+              onFocused={clearFocus}
+            />
+          )}
+        </main>
+      </div>
       {backgroundMcpReport && (
         <div className="app__toast">
           <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />

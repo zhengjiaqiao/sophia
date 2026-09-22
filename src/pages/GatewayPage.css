@@ -201,9 +201,12 @@
   color: var(--ink-faint);
 }
 
+/* 模型勾选列表框：8 圆角（layer），平铺在页面里所以只有 hairline 边、没有阴影 */
 .gw-panel__list {
   margin-top: var(--space-xs);
+  overflow: hidden;
   border: 1px solid var(--hairline);
+  border-radius: var(--radius-layer);
 }
 
 /* ===== 连接表单：地址、密钥；保存才生效、保存即拉取 ===== */

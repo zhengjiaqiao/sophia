@@ -173,7 +173,10 @@ input:focus-visible {
   align-items: center;
   gap: var(--space-xxs);
   height: 36px;
-  padding: 0 var(--space-xs) 0 var(--space-md);
+  /* 行悬停 / 选中底 6 圆角（control），左右各让 8；文字起点不变（16 = 8 + 8） */
+  margin: 0 var(--space-xs);
+  padding: 0 var(--space-xxs) 0 var(--space-xs);
+  border-radius: var(--radius-control);
   color: var(--ink-mute);
   font-size: var(--size-body);
   line-height: var(--leading-caption);
@@ -252,11 +255,51 @@ input:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .content-shell::before,
+  .content-shell::after,
   .topbar__tab,
   .sidebar__list li,
   .sidebar__remove {
     transition: none;
   }
+}
+
+/* 内容区外壳：横向放不下时被裁掉的左 / 右边缘 16px 从 canvas 白渐隐到透明（功能性渐变）。
+   渐隐盖在滚动容器外面，不随内容滚走 */
+.content-shell {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.content-shell::before,
+.content-shell::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* 高过 Matrix 的吸顶工具行与列头（最高 8），低过二级页（30）与浮层 */
+  z-index: 9;
+  width: var(--fade-edge);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.content-shell::before {
+  left: 0;
+  background: linear-gradient(to right, var(--canvas), transparent);
+}
+
+.content-shell::after {
+  right: 0;
+  background: linear-gradient(to left, var(--canvas), transparent);
+}
+
+.content-shell[data-fade-left]::before,
+.content-shell[data-fade-right]::after {
+  opacity: 1;
 }
 
 /* 页边 32（DESIGN「Layout」）。**上下内边距必须是 0**：sticky 的落点按滚动容器的内容盒算，

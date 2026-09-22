@@ -597,8 +597,8 @@
 }
 
 /* 刚变化的格子闪的是**目标状态**：闪烁那 120ms 里不画悬停预览——否则鼠标还停在格上，
-   刚开启的格会被预览成「关掉之后」的空心环（反色空心环读作「未开启」） */
-.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-preview] .ss-dot__fill {
+   刚开启的格会被预览成淡到 40% 的点、刚关掉的格环内会出 40% 实心，都不是目标状态 */
+.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-preview] {
   opacity: 1;
 }
 

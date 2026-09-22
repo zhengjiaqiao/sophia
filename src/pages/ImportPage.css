@@ -50,6 +50,12 @@
   position: relative;
 }
 
+/* 来源行的选中 / 悬停底 6 圆角（control），左右各让 8；文字起点不变（32 = 8 + 24） */
+.ss-import__source {
+  margin: 0 var(--space-xs);
+  border-radius: var(--radius-control);
+}
+
 .ss-import__source.is-active {
   background: var(--surface);
 }
@@ -61,8 +67,9 @@
   box-sizing: border-box;
   width: 100%;
   height: 44px;
-  padding: 0 var(--space-xxl);
+  padding: 0 var(--space-xl);
   border: 0;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
   text-align: left;
