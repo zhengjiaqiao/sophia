@@ -28,6 +28,8 @@ export { Tooltip, TIP_DELAY_MS } from "./Tooltip.tsx";
 export type { TooltipProps } from "./Tooltip.tsx";
 
 export { Rotor } from "./Rotor.tsx";
+export { Spinner } from "./Spinner.tsx";
+export type { SpinnerProps } from "./Spinner.tsx";
 export type { RotorProps } from "./Rotor.tsx";
 
 export { Toast, TOAST_DWELL_MS } from "./Toast.tsx";

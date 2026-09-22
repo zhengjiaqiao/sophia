@@ -88,6 +88,7 @@
   --motion-fast: 120ms; /* 一切状态变化：开关位移、刚点亮反色、悬停 */
   --ease-mech: cubic-bezier(0.2, 0.8, 0.2, 1);
   --motion-rotor: 1.2s; /* 转盘匀速一圈 */
+  --motion-spinner: 0.9s; /* 细弧匀速一圈 */
   --motion-rotor-stop: 600ms; /* 停转减速，末端过冲 2° 回弹 */
 
   /* busy 时受影响控件的不透明度（§6） */

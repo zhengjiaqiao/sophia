@@ -732,6 +732,15 @@
   }
 }
 
+/* ===== 6b. 细弧 Spinner：1 圈 / 0.9s 线性（Spinner.tsx）；只在用户等的地方、带文字 ===== */
+.ss-spinner {
+  display: block;
+  flex-shrink: 0;
+  color: var(--ink);
+  transform-origin: 50% 50%;
+  animation: ss-spin var(--motion-spinner) linear infinite;
+}
+
 /* ===== 7. 提示条 Toast ===== */
 .ss-toast {
   box-sizing: border-box;
@@ -1311,6 +1320,10 @@
 
   .ss-rotor.is-spinning {
     animation: ss-spin 3.2s steps(8, end) infinite;
+  }
+
+  .ss-spinner {
+    animation: none;
   }
 
   /* 反色闪退化为无：变化本身（点亮 / 熄灭）已即时可见 */

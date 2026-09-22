@@ -29,6 +29,7 @@ const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TIP_DELAY_MS } = await import("../src/ui/Tooltip.tsx");
 const { Rotor } = await import("../src/ui/Rotor.tsx");
+const { Spinner } = await import("../src/ui/Spinner.tsx");
 const { Toast, TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
 const { ErrorBanner, BlackNotice } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
@@ -54,6 +55,7 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "Tag",
     "Tooltip",
     "Rotor",
+    "Spinner",
     "Toast",
     "ErrorBanner",
     "BlackNotice",
@@ -468,6 +470,15 @@ test("Rotor ≤20：盘面 + 偏心点 r1.9，不加轴毂；64：加轴毂，�
   assert.match(big, /vector-effect="non-scaling-stroke"/);
   // 停着就不带转动类（停转回弹由 WAAPI 在客户端做）
   assert.doesNotMatch(render(Rotor, { spinning: false }), /is-spinning/);
+});
+
+test("Spinner：270° 细弧、1.5 线宽、必带读屏文本；14 / 24 两档", () => {
+  const small = render(Spinner, { label: "正在重启 Codex" });
+  assert.match(small, /class="ss-spinner"/);
+  assert.match(small, /width="14"/);
+  assert.match(small, /stroke-width="1.5"/);
+  assert.match(small, /aria-label="正在重启 Codex"/);
+  assert.match(render(Spinner, { size: 24, label: "正在读 3 个位置" }), /width="24"/);
 });
 
 // ===== 提示条 =====
