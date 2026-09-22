@@ -566,6 +566,250 @@ pub fn scan(locations: &[McpLocation]) -> McpOverview {
     }
 }
 
+/// 字段级差异里的一格：某个位置上这个字段的值。**凭据不出 core**：请求头与环境变量的值、
+/// URL 查询串的值、紧跟在 key / token 类参数后面的值，一律只给「不同」与末 4 位。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum McpFieldValue {
+    /// 可以原样显示的值（命令、参数、去掉查询值的 URL、传输方式）
+    Plain { text: String },
+    /// 凭据：只给末 4 位；值太短（末 4 位就等于泄露大半）时为 None
+    Secret { last4: Option<String> },
+    /// 这个位置上没有这个字段
+    Absent,
+}
+
+/// 一个不一样的字段：`values` 与请求的位置一一对应、同序
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpFieldDiff {
+    /// `url` `command` `args` `transport` `env.NAME` `headers.Name`
+    pub field: String,
+    pub values: Vec<McpFieldValue>,
+}
+
+/// 同名服务在几个位置上的字段级差异（待处理页「看两边差在哪」）。只读，不改任何文件
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpDiff {
+    pub name: String,
+    /// 与请求同序；找不到的位置照样占一列，值全是 Absent
+    pub location_ids: Vec<String>,
+    /// 只列不同的字段；相同的不出现
+    pub fields: Vec<McpFieldDiff>,
+    /// 有一边的认证头要到运行时才生成（`http_headers_helper`），请求头没法逐字比对
+    pub dynamic_auth: bool,
+    /// 读不出来、或这一份用了没法逐项比较的写法的位置
+    pub unreadable: Vec<String>,
+}
+
+/// 值是不是只含引用（`${TOKEN}`）：引用本身不是凭据，可以原样显示
+fn secret_value(value: &str) -> McpFieldValue {
+    if reference(value) && !value.contains(char::is_whitespace) {
+        return McpFieldValue::Plain {
+            text: value.to_owned(),
+        };
+    }
+    let chars: Vec<char> = value.chars().collect();
+    // 短于 12 个字符时末 4 位占去三分之一以上，宁可不给
+    let last4 = (chars.len() >= 12).then(|| chars[chars.len() - 4..].iter().collect());
+    McpFieldValue::Secret { last4 }
+}
+
+/// URL 查询串里的值可能是令牌（`?api_key=…`）：值换成 `…`，键留着
+fn url_without_secrets(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_owned();
+    };
+    let masked: Vec<String> = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((key, _)) => format!("{key}=…"),
+            None => pair.to_owned(),
+        })
+        .collect();
+    format!("{base}?{}", masked.join("&"))
+}
+
+fn secretish(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    ["key", "token", "secret", "password", "auth", "bearer"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
+/// 参数里的凭据：`--api-key xyz` 的 xyz、`--token=xyz` 的 xyz 换成 `…`
+fn args_without_secrets(args: &[String]) -> String {
+    let mut out = Vec::with_capacity(args.len());
+    let mut hide_next = false;
+    for arg in args {
+        if hide_next {
+            out.push("…".to_owned());
+            hide_next = false;
+            continue;
+        }
+        match arg.split_once('=') {
+            Some((key, _)) if key.starts_with('-') && secretish(key) => {
+                out.push(format!("{key}=…"))
+            }
+            _ => {
+                hide_next = arg.starts_with('-') && secretish(arg);
+                out.push(arg.clone());
+            }
+        }
+    }
+    out.join(" ")
+}
+
+/// 同名服务 `name` 在 `location_ids` 这几个位置上哪些字段不一样。
+///
+/// 比较的是**原值**（凭据也按原值比，不一样才列），显示的是脱敏后的值；DTO 里不含任何凭据原文。
+/// 请求头名大小写不敏感（与 `headers_eq` 同规则），显示取第一个有它的位置的写法。
+pub fn diff_fields(locations: &[McpLocation], name: &str, location_ids: &[String]) -> McpDiff {
+    let mut unreadable = Vec::new();
+    let defs: Vec<Option<Canonical>> = location_ids
+        .iter()
+        .map(|id| {
+            let def = locations
+                .iter()
+                .find(|location| &location.id == id)
+                .map(parse)
+                .and_then(|parsed| parsed.values.get(name).cloned());
+            match def {
+                // 「没法无损迁移」的定义字段照样在（变量引用、动态请求头）；只有连字段都
+                // 取不出来的（`unsupported_with`，传输记作 unsupported）才算读不出来
+                Some(def) if def.transport != "unsupported" => Some(def),
+                _ => {
+                    unreadable.push(id.clone());
+                    None
+                }
+            }
+        })
+        .collect();
+    let dynamic_auth = defs.iter().flatten().any(|def| def.helper_only);
+
+    // (字段名, 比较用的原值, 显示用的值)；None = 这一处没有这个字段
+    type Cell = Option<(String, McpFieldValue)>;
+    let mut rows: Vec<(String, Vec<Cell>)> = Vec::new();
+    // 读不出来的位置照样占一列，但不参与比较：否则它会让每个字段都显得「不一样」
+    let readable: Vec<bool> = defs.iter().map(Option::is_some).collect();
+    let mut push = |field: String, cells: Vec<Cell>| {
+        let mut raws = cells
+            .iter()
+            .zip(&readable)
+            .filter(|(_, ok)| **ok)
+            .map(|(c, _)| c.as_ref().map(|(raw, _)| raw));
+        let first = raws.next();
+        let all_same = raws.all(|raw| Some(raw) == first);
+        if !all_same {
+            rows.push((field, cells));
+        }
+    };
+    let plain = |text: String| McpFieldValue::Plain { text };
+
+    push(
+        "transport".into(),
+        defs.iter()
+            .map(|d| {
+                d.as_ref()
+                    .map(|d| (d.transport.clone(), plain(d.transport.clone())))
+            })
+            .collect(),
+    );
+    push(
+        "url".into(),
+        defs.iter()
+            .map(|d| {
+                d.as_ref()
+                    .and_then(|d| d.url.clone())
+                    .map(|url| (url.clone(), plain(url_without_secrets(&url))))
+            })
+            .collect(),
+    );
+    push(
+        "command".into(),
+        defs.iter()
+            .map(|d| {
+                d.as_ref()
+                    .and_then(|d| d.command.clone())
+                    .map(|c| (c.clone(), plain(c)))
+            })
+            .collect(),
+    );
+    push(
+        "args".into(),
+        defs.iter()
+            .map(|d| {
+                d.as_ref()
+                    .filter(|d| !d.args.is_empty())
+                    .map(|d| (d.args.join("\u{1f}"), plain(args_without_secrets(&d.args))))
+            })
+            .collect(),
+    );
+
+    let mut env_names = BTreeSet::new();
+    for def in defs.iter().flatten() {
+        env_names.extend(def.env.keys().cloned());
+    }
+    for key in env_names {
+        push(
+            format!("env.{key}"),
+            defs.iter()
+                .map(|d| {
+                    d.as_ref()
+                        .and_then(|d| d.env.get(&key))
+                        .map(|v| (v.clone(), secret_value(v)))
+                })
+                .collect(),
+        );
+    }
+
+    // 请求头：动态认证那一边的静态请求头不完整，逐字比对没有意义，整组不列
+    if !dynamic_auth {
+        let mut header_names: Vec<String> = Vec::new();
+        for def in defs.iter().flatten() {
+            for header in def.headers.keys() {
+                if !header_names.iter().any(|h| h.eq_ignore_ascii_case(header)) {
+                    header_names.push(header.clone());
+                }
+            }
+        }
+        for header in header_names {
+            push(
+                format!("headers.{header}"),
+                defs.iter()
+                    .map(|d| {
+                        d.as_ref()
+                            .and_then(|d| {
+                                d.headers
+                                    .iter()
+                                    .find(|(name, _)| name.eq_ignore_ascii_case(&header))
+                            })
+                            .map(|(_, v)| (v.clone(), secret_value(v)))
+                    })
+                    .collect(),
+            );
+        }
+    }
+
+    McpDiff {
+        name: name.to_owned(),
+        location_ids: location_ids.to_vec(),
+        fields: rows
+            .into_iter()
+            .map(|(field, cells)| McpFieldDiff {
+                field,
+                values: cells
+                    .into_iter()
+                    .map(|c| c.map_or(McpFieldValue::Absent, |(_, shown)| shown))
+                    .collect(),
+            })
+            .collect(),
+        dynamic_auth,
+        unreadable,
+    }
+}
+
 pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> PreparedPlan {
     let map: BTreeMap<_, _> = locations
         .iter()

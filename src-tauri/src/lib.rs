@@ -222,6 +222,21 @@ fn scan_mcp(
     Ok(overview)
 }
 
+/// 待处理页「看两边差在哪」：同名服务在几个位置上哪些字段不一样。只读；凭据在 core 里就脱敏了
+#[tauri::command]
+fn mcp_field_diff(
+    name: String,
+    location_ids: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<symsync_core::mcp::McpDiff, String> {
+    let discovery = discover_mcp(&state)?;
+    Ok(symsync_core::mcp::diff_fields(
+        &discovery.locations,
+        &name,
+        &location_ids,
+    ))
+}
+
 #[tauri::command]
 fn propose_mcp_sync(
     selections: Vec<symsync_core::mcp::McpSelection>,
@@ -744,6 +759,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_all,
             scan_mcp,
+            mcp_field_diff,
             propose_mcp_sync,
             apply_mcp,
             propose_links,

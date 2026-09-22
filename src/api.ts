@@ -19,6 +19,7 @@ import type {
   McpReport,
   McpSelection,
   McpAutoImportRule,
+  McpDiff,
 } from "./types";
 
 // PlannedDeletion 与 IgnoredIssue 定义在 types.ts（与 serde 一一对应）；
@@ -77,6 +78,9 @@ export const api = {
   /// 在系统文件管理器里定位并选中该路径
   revealInDir: (path: string) => revealItemInDir(path),
   scanMcp: () => invoke<McpOverview>("scan_mcp"),
+  /// 同名服务在这几个位置上哪些字段不一样（只读；凭据已在 core 脱敏）
+  mcpFieldDiff: (name: string, locationIds: string[]) =>
+    invoke<McpDiff>("mcp_field_diff", { name, locationIds }),
   proposeMcpSync: (selections: McpSelection[]) =>
     invoke<McpPreview>("propose_mcp_sync", { selections }),
   applyMcp: (planId: string, allowCrossDomain: boolean) =>
