@@ -693,7 +693,7 @@ export default function McpTab({
         cells[target.id] = null;
         continue;
       }
-      if (view.dot === "none") unsupportedAt.push(names.get(target.id) ?? target.label);
+      if (view.dot === "blocked") unsupportedAt.push(names.get(target.id) ?? target.label);
       // 位置无效：原因 + 点一下在访达中显示那个配置文件
       const invalid = view.issue === "invalidLocation";
       cells[target.id] = {

@@ -78,9 +78,9 @@ export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
       };
     case "unsupported":
       // 搬过去就不是原来那个了，所以整行都不给点——给点的机会等于给犯错的机会。
-      // 画成无此格的短横（画板 Mcp.dc.html「Codex 不支持这个服务」）：这里根本放不进这一格
+      // 画成与 skill「同名被挡」同一个受阻记号（环 + 短横）：这一格放不进去，不另造一种样式
       return {
-        dot: "none",
+        dot: "blocked",
         clickable: false,
         reason: `${ctx.service} 用了只有 ${ctx.source} 认得的写法，搬到别处就不是原来那个了`,
       };

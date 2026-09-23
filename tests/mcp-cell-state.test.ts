@@ -65,10 +65,10 @@ test("invalid：整份文件读不出来，画斜杠环，不写，进待处理�
   });
 });
 
-test("unsupported：搬过去就不是原来那个了，画无此格短横，不写，也不进待处理栏", () => {
+test("unsupported：搬过去就不是原来那个了，画受阻记号（与 skill 同名被挡同形），不写，也不进待处理栏", () => {
   const view = viewOf("unsupported", ctx);
   assert.deepEqual(view, {
-    dot: "none",
+    dot: "blocked",
     clickable: false,
     reason: "notion 用了只有 Claude Code 认得的写法，搬到别处就不是原来那个了",
   });
