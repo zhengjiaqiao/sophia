@@ -92,9 +92,6 @@
   min-height: 0;
   max-height: calc(var(--row-h) * 8 + 56px);
   overflow: auto;
-  /* 关掉浏览器自带的滚动锚定：已选组增减行后的补偿由 ModelList 手动做（WKWebView 不一定支持它，
-     Chromium 支持——两边都做会补偿两次） */
-  overflow-anchor: none;
 }
 
 .model-list__empty {
@@ -213,38 +210,6 @@
   100% {
     background: transparent;
   }
-}
-
-/* 已选组与下面的服务商分组之间一条刻度线：它是置顶的摘要，不是又一家服务商 */
-.model-list__group--pinned {
-  border-bottom: 1px solid var(--hairline);
-  padding-bottom: 4px;
-}
-
-/* 「等 N 个 ▸」：点开显示全部。一行文字链，缩进对齐名字 */
-.model-list__more {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: var(--row-h);
-  padding: 0 var(--space-sm) 0 calc(var(--space-sm) + 12px + var(--space-sm));
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--ink-mute);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  cursor: pointer;
-}
-
-.model-list__more:hover {
-  color: var(--ink);
-}
-
-.model-list__more-count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  font-variant-numeric: tabular-nums;
 }
 
 @media (prefers-reduced-motion: reduce) {

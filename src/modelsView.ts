@@ -122,6 +122,18 @@ export function effectiveModels(state: GatewayState): EffectiveModel[] {
   });
 }
 
+/**
+ * 网关页列表上方那一行已选模型片：只这一家已选的，按网关给的顺序；前缀规则与模型页的片相同
+ * （这一家已选的都来自同一服务商时省前缀，跨服务商并存时保留）。一个都没选时是空数组（整行不渲染）
+ */
+export function gatewaySelectedChips(
+  provider: GatewayProvider,
+): { model: GatewayProviderModel; label: string }[] {
+  const models = selectedModels(provider);
+  const keepVendor = new Set(models.map((m) => splitModelId(m.id).vendor ?? "")).size > 1;
+  return models.map((model) => ({ model, label: chipLabel(model, keepVendor) }));
+}
+
 // ===== 模型列表的写法（DESIGN「模型列表的写法」：下拉与网关页同一组件） =====
 
 /// 列表超过这么多行才出筛选框
@@ -211,7 +223,7 @@ export interface ModelGroup {
 export function modelGroups(entries: ModelEntry[], query = ""): ModelGroup[] {
   const groups = new Map<string, ModelEntry[]>();
   for (const entry of entries) {
-    const vendor = splitModelId(entry.model.id).vendor ?? providerLabel(entry.provider);
+    const vendor = splitModelId(entry.model.id).vendor ?? gatewayShortName(entry.provider);
     const list = groups.get(vendor);
     if (list) list.push(entry);
     else groups.set(vendor, [entry]);
@@ -229,27 +241,21 @@ export function modelGroups(entries: ModelEntry[], query = ""): ModelGroup[] {
   return out;
 }
 
-// ===== 已选置顶、不跳位（DESIGN「模型列表的写法 › 已选置顶」） =====
+// ===== 勾选不挪位置（DESIGN「模型列表的写法」） =====
 
 /// 列表里一行的稳定键：同名模型可能来自不同网关
 export const modelEntryKey = (entry: ModelEntry) => `${entry.provider.id}|${entry.model.id}`;
 
-/// 已选组折叠前最多显示几个
-export const PINNED_PREVIEW = 5;
-
 /**
- * 打开那一刻排一次序并冻结：已选的有哪些（已选组的成员与先后）、各组里的先后（已选在前）。
+ * 打开那一刻排一次序并冻结：各组里的先后（已选在前）。
  * 之后勾选 / 取消只改勾选状态、不挪位置；下次打开（组件重挂）再重排
  */
 export interface ModelOrder {
-  pinned: string[];
   order: string[];
 }
 
 export function snapshotOrder(entries: ModelEntry[]): ModelOrder {
-  const order = modelGroups(entries).flatMap((g) => g.entries.map(modelEntryKey));
-  const selected = new Set(entries.filter((e) => e.model.selected).map(modelEntryKey));
-  return { pinned: order.filter((k) => selected.has(k)), order };
+  return { order: modelGroups(entries).flatMap((g) => g.entries.map(modelEntryKey)) };
 }
 
 /// 筛选词命中：id / slug / 显示名，大小写不敏感（与 sortAndFilterModels 同规则）
@@ -266,49 +272,6 @@ function byFrozen(order: string[]) {
   return (a: ModelEntry, b: ModelEntry) =>
     (rank.get(modelEntryKey(a)) ?? Number.MAX_SAFE_INTEGER) -
     (rank.get(modelEntryKey(b)) ?? Number.MAX_SAFE_INTEGER);
-}
-
-/**
- * 打开之后新勾上的（`网关id|模型id`），按勾上的先后：在上一次的基础上，把此刻勾着、
- * 却既不在打开时的已选组、也还没记下的追加到末尾（同一批到的按列表顺序）。
- * 记下的不会再移出——之后又取消了也留着，下次打开（重新快照）才清掉
- */
-export function pinnedAdditions(prev: string[], entries: ModelEntry[], snap: ModelOrder): string[] {
-  const known = new Set([...snap.pinned, ...prev]);
-  const fresh = entries
-    .filter((e) => e.model.selected && !known.has(modelEntryKey(e)))
-    .map(modelEntryKey);
-  return fresh.length === 0 ? prev : [...prev, ...fresh];
-}
-
-/**
- * 已选组：打开时已选的那几个按冻结的先后，其后是打开之后新勾上的（`added`，追加到末尾）；
- * 取消勾选的仍留在原位（显示空框），下次打开才移出。按筛选词过滤，过滤后可能为空（调用方隐藏整组）
- */
-export function pinnedEntries(
-  entries: ModelEntry[],
-  snap: ModelOrder,
-  query = "",
-  added: string[] = [],
-): ModelEntry[] {
-  const members = [...snap.pinned, ...added.filter((k) => !snap.pinned.includes(k))];
-  const pinned = new Set(members);
-  return entries
-    .filter((e) => pinned.has(modelEntryKey(e)) && matches(e, query))
-    .sort(byFrozen(members));
-}
-
-/// 组头 `已选 · N`：此刻真正勾着的个数（取消了、还留在原位的那几行不算）
-export function pinnedCount(pinned: ModelEntry[]): number {
-  return pinned.filter((e) => e.model.selected).length;
-}
-
-/**
- * 已选组变高 / 变矮后，让光标下那一行不动：按它在滚动内容里的位移补偿 scrollTop。
- * WKWebView 不一定支持 `overflow-anchor`，所以手动做
- */
-export function anchoredScrollTop(scrollTop: number, rowTopBefore: number, rowTopAfter: number) {
-  return Math.max(0, scrollTop + (rowTopAfter - rowTopBefore));
 }
 
 // ===== 跨网关时行尾写网关短名（DESIGN「模型列表的写法」） =====
@@ -359,17 +322,12 @@ export function frozenGroups(entries: ModelEntry[], snap: ModelOrder, query = ""
   const sorted = entries.filter((e) => matches(e, query)).sort(byFrozen(snap.order));
   const groups = new Map<string, ModelEntry[]>();
   for (const entry of sorted) {
-    const vendor = splitModelId(entry.model.id).vendor ?? providerLabel(entry.provider);
+    const vendor = splitModelId(entry.model.id).vendor ?? gatewayShortName(entry.provider);
     const list = groups.get(vendor);
     if (list) list.push(entry);
     else groups.set(vendor, [entry]);
   }
   return [...groups].map(([vendor, list]) => ({ vendor, entries: list }));
-}
-
-/// 已选组里的名字写全：可能跨服务商，没有友好名时带服务商前缀（`azure/gpt-4.1`）
-export function pinnedLabel(model: GatewayProviderModel): string {
-  return chipLabel(model, true);
 }
 
 /**

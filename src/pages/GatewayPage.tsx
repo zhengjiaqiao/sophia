@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import {
   choiceAfterCancel,
   gatewayChips,
+  gatewaySelectedChips,
+  gatewayShortName,
   parseBackendError,
-  providerLabel,
   removeProviderBlockedReason,
   selectedModels,
   switchNeedsConfirm,
@@ -20,6 +21,7 @@ import {
   IconButton,
   IconPlus,
   IconTrash,
+  ModelChip,
   Spinner,
   SubPage,
   Tooltip,
@@ -152,12 +154,13 @@ interface ConfirmingRemove {
 
 /**
  * 三段，自上而下逐层按需（单列，与设置页同宽，没有右栏）：
- * - 网关切换：分段片 `ap-gateway 103 · openrouter 连不上 · + 网关`，选中反色
+ * - 网关切换：分段片 `ap-gateway 103 · openrouter 连不上 · + 网关`，选中反色；片上写网关短名
  * - 连接：已连上的只一行摘要 `https://… · 已连 · 编辑` + 垃圾桶；点 `编辑` 才出地址 / 密钥表单，
  *   保存才生效、保存即拉取，保存中原位忙碌指示 +「正在拉模型」；新加网关直接出表单；
  *   连不上：`连不上` + 8 `再试一次`；删网关：锚在垃圾桶旁的确认「删掉 X？」，确认后直接删
  *   （地址与钥匙串里的密钥一起删、找不回，按 ⑪ 要确认；不再有撤销提示条）
- * - 从这个网关选模型：段头下是限制说明，与模型下拉同一组件，只列本网关的模型；
+ * - 从这个网关选模型：段头下是限制说明，其下一行本网关已选的模型片（与模型页同一个 ModelChip，
+ *   × 可移除，折行不藏，一个没选时不出），再下是与模型下拉同一组件的列表，只列本网关的模型；
  *   首次在这里选：新加网关保存成功拉到模型后这一段原地出现，新模型各闪一次
  */
 export function GatewayBody({
@@ -322,7 +325,7 @@ export function GatewayBody({
                 className={`gw-panel__chipwrap${flashProviderId === p.id ? " is-jump" : ""}`}
               >
                 <Chip selected={selected === p.id} onClick={() => choose(p.id)}>
-                  <span className="gw-panel__chip-name">{providerLabel(p)}</span>
+                  <span className="gw-panel__chip-name">{gatewayShortName(p)}</span>
                   {p.unreachable ? (
                     <span className="gw-panel__chip-down">连不上</span>
                   ) : p.models.length > 0 ? (
@@ -408,7 +411,7 @@ export function GatewayBody({
               {removeProviderBlockedReason(state, current, tool) === null ? (
                 <IconButton
                   icon={<IconTrash />}
-                  title={`删掉 ${providerLabel(current)}`}
+                  title={`删掉 ${gatewayShortName(current)}`}
                   onClick={() => {
                     // 摘要行只有一个垃圾桶（当前这一家）
                     const el = document.querySelector<HTMLElement>(".gw-panel__trash");
@@ -424,7 +427,7 @@ export function GatewayBody({
                 >
                   <IconButton
                     icon={<IconTrash />}
-                    title={`删掉 ${providerLabel(current)}`}
+                    title={`删掉 ${gatewayShortName(current)}`}
                     disabledReason={`${tool.name} 还在用它的 ${selectedModels(current).length} 个模型，先取消勾选再删`}
                   />
                 </Tooltip>
@@ -442,7 +445,7 @@ export function GatewayBody({
         {/* 删网关：地址与钥匙串里的密钥一起删、找不回——二次确认（⑪） */}
         {confirming !== null ? (
           <Confirm
-            title={`删掉 ${providerLabel(confirming.provider)}？`}
+            title={`删掉 ${gatewayShortName(confirming.provider)}？`}
             confirmLabel="删掉"
             anchor={confirming.anchor}
             align="end"
@@ -459,6 +462,22 @@ export function GatewayBody({
           <>
             <div className="gw-panel__section">从这个网关选模型</div>
             <div className="gw-panel__note">{tool.pickerNote}</div>
+            {/* 已选用模型片表达（与模型页同一个 ModelChip）：勾选 / 取消 / 点 × 三处实时联动 */}
+            {gatewaySelectedChips(current).length > 0 ? (
+              <div
+                className="gw-panel__chosen"
+                aria-label={`已从 ${gatewayShortName(current)} 选的模型`}
+              >
+                {gatewaySelectedChips(current).map(({ model, label }) => (
+                  <ModelChip
+                    key={model.id}
+                    name={label}
+                    id={model.slug || model.id}
+                    onRemove={busy ? undefined : () => onToggleModel(current, model.id)}
+                  />
+                ))}
+              </div>
+            ) : null}
             <div className="gw-panel__list">
               <ModelList
                 // 换一家网关就是「重新打开」这份列表：重排一次序

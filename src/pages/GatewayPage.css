@@ -201,6 +201,14 @@
   color: var(--ink-faint);
 }
 
+/* 本网关已选的模型片：一行放不下就折行，不藏（与模型页框里的片同一组件、同一间距） */
+.gw-panel__chosen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-xs);
+}
+
 /* 模型勾选列表框：8 圆角（layer），平铺在页面里所以只有 hairline 边、没有阴影 */
 .gw-panel__list {
   margin-top: var(--space-xs);

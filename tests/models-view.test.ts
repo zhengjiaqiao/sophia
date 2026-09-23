@@ -28,15 +28,10 @@ import {
   shouldPollRestart,
   showRouterBanner,
   snapshotOrder,
-  pinnedEntries,
-  pinnedAdditions,
-  pinnedCount,
-  anchoredScrollTop,
   showGatewayNames,
   gatewayShortName,
-  PINNED_PREVIEW,
+  gatewaySelectedChips,
   frozenGroups,
-  pinnedLabel,
   gatewayChips,
   choiceAfterCancel,
   switchNeedsConfirm,
@@ -589,7 +584,7 @@ const pickerProps = (overrides: Partial<GatewayState> = {}) => ({
   onManageGateways: noop,
 });
 
-test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；按服务商分小组头；已选置顶；底部不再写「已选 N 个模型」", () => {
+test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；按服务商分小组头；不出已选组；底部不再写「已选 N 个模型」", () => {
   const html = render(
     ModelPicker,
     pickerProps({
@@ -627,7 +622,9 @@ test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；�
     html,
     /role="option"[^>]*aria-label="gpt-4\.1"|aria-label="gpt-4\.1"[^>]*role="option"/,
   );
-  assert.ok(html.indexOf(">o3-mini<") < html.indexOf(">gpt-4.1<"), "已选置顶");
+  // 已选由框里的模型片表达，下拉里不另列已选组（DESIGN d9d87d1）；组内仍是打开时已选在前
+  assert.doesNotMatch(html, /model-list__group--pinned|>已选</);
+  assert.ok(html.indexOf(">o3-mini<") < html.indexOf(">gpt-4.1<"), "组内已选在前");
   // 底部计数与已选组头重复，已删（DESIGN a4fede3）
   assert.doesNotMatch(html, /model-list__foot|个模型/);
   // 只有一个网关：行尾不写网关名
@@ -936,7 +933,7 @@ test("GatewayBody 草稿态：「新网关」选中反色、没有「+ 网关」
   assert.match(html, /拉模型时探明/);
 });
 
-// ===== 已选置顶、不跳位 =====
+// ===== 勾选不挪位置 =====
 
 const pinProvider = provider({ id: "g", name: "网关" });
 const pe = (id: string, selected = false, displayName = id) => ({
@@ -944,46 +941,34 @@ const pe = (id: string, selected = false, displayName = id) => ({
   model: model({ id, slug: `g-${id}`, displayName, selected }),
 });
 
-test("snapshotOrder：打开时排一次序——已选组按分组顺序，组内已选在前", () => {
+test("snapshotOrder：打开时排一次序——按分组顺序，组内已选在前", () => {
   const entries = [pe("azure/a"), pe("zhipu/glm", true), pe("azure/b", true)];
   const snap = snapshotOrder(entries);
-  assert.deepEqual(snap.pinned, ["g|azure/b", "g|zhipu/glm"]);
   assert.deepEqual(snap.order, ["g|azure/b", "g|azure/a", "g|zhipu/glm"]);
 });
 
-test("不跳位：打开之后取消的留在已选组原位（空框），新勾的追加到组末；各组先后不变；下次打开才重排", () => {
+test("不跳位：打开之后勾选 / 取消只改状态，各组先后不变；下次打开才重排", () => {
   const before = [pe("azure/a"), pe("azure/b", true), pe("azure/c")];
   const snap = snapshotOrder(before);
   // 之后：取消 b、勾上 c
   const after = [pe("azure/a"), pe("azure/b", false), pe("azure/c", true)];
-  const added = pinnedAdditions([], after, snap);
-  assert.deepEqual(added, ["g|azure/c"]);
-  assert.deepEqual(
-    pinnedEntries(after, snap, "", added).map((e) => [e.model.id, e.model.selected]),
-    [
-      ["azure/b", false],
-      ["azure/c", true],
-    ],
-    "取消勾选的仍留在已选组（空框），新勾上的追加到末尾",
-  );
-  assert.equal(pinnedCount(pinnedEntries(after, snap, "", added)), 1, "组头只数此刻勾着的");
   assert.deepEqual(
     frozenGroups(after, snap).flatMap((g) => g.entries.map((e) => e.model.id)),
     ["azure/b", "azure/a", "azure/c"],
     "分组里的行留在原位",
   );
-  // 下次打开：重排
-  assert.deepEqual(snapshotOrder(after).pinned, ["g|azure/c"]);
+  // 下次打开：重排（已选在前）
+  assert.deepEqual(snapshotOrder(after).order, ["g|azure/c", "g|azure/a", "g|azure/b"]);
 });
 
-test("已选组按筛选词过滤，过滤后为空时是空数组（调用方隐藏整组）；打开后才出现的新模型排到组尾", () => {
+test("按筛选词过滤各组；打开后才出现的新模型排到组尾", () => {
   const entries = [pe("azure/gpt-4.1", true), pe("zhipu/glm-4.6", true)];
   const snap = snapshotOrder(entries);
   assert.deepEqual(
-    pinnedEntries(entries, snap, "glm").map((e) => e.model.id),
+    frozenGroups(entries, snap, "glm").flatMap((g) => g.entries.map((e) => e.model.id)),
     ["zhipu/glm-4.6"],
   );
-  assert.deepEqual(pinnedEntries(entries, snap, "claude"), []);
+  assert.deepEqual(frozenGroups(entries, snap, "claude"), []);
   const grown = [...entries, pe("azure/o3")];
   assert.deepEqual(
     frozenGroups(grown, snap)[0].entries.map((e) => e.model.id),
@@ -991,37 +976,20 @@ test("已选组按筛选词过滤，过滤后为空时是空数组（调用方�
   );
 });
 
-test("已选组里的名字写全：没有友好名时带服务商前缀；有友好名写友好名", () => {
-  assert.equal(
-    pinnedLabel(model({ id: "openrouter/gpt-4.1", displayName: "openrouter/gpt-4.1" })),
-    "openrouter/gpt-4.1",
+test("拆不出服务商时组头用网关短名（与分段片、行尾一致）", () => {
+  const p = provider({ id: "or", name: "openrouter.ai" });
+  const groups = modelGroups([{ provider: p, model: model({ id: "deepseek-chat" }) }]);
+  assert.deepEqual(
+    groups.map((g) => g.vendor),
+    ["openrouter"],
   );
-  assert.equal(
-    pinnedLabel(
-      model({ id: "default-azure-gpt-4.1", slug: "x", displayName: "default-azure-gpt-4.1" }),
-    ),
-    "azure/gpt-4.1",
-  );
-  assert.equal(pinnedLabel(model({ id: "moonshotai/kimi-k2", displayName: "Kimi K2" })), "Kimi K2");
 });
 
-test("ModelList 已选组：「已选 · N」在各服务商分组之前；超过 5 个先列前 5 +「还有 N 个 ▸」（写剩下的个数）；为 0 不出现", () => {
+test("ModelList 不再有已选置顶组：已选只由上方模型片表达，每行只在服务商分组里出现一次", () => {
   const seven = Array.from({ length: 9 }, (_, i) => pe(`azure/m${i}`, i < 7));
   const html = render(ModelList, { entries: seven, busy: false, onToggle: noop });
-  assert.match(html, /model-list__vendor">已选<[^]*model-list__count">7</);
-  assert.ok(html.indexOf(">已选<") < html.indexOf(">azure<"), "已选组在分组之前");
-  assert.equal(
-    (html.match(/models-option__name">azure\/m/g) ?? []).length,
-    5,
-    "已选组只列前 5 个（写全）",
-  );
-  // 已选 7 个、列出前 5 个：写剩下的 2 个，不写总数
-  assert.match(
-    html,
-    /model-list__more"[^>]*>还有[^<]*<span class="model-list__more-count">2<\/span>[^<]*个/,
-  );
-  const none = render(ModelList, { entries: [pe("azure/a")], busy: false, onToggle: noop });
-  assert.doesNotMatch(none, />已选</);
+  assert.doesNotMatch(html, /model-list__group--pinned|>已选<|model-list__more/);
+  assert.equal((html.match(/role="option"/g) ?? []).length, 9);
 });
 
 test("模型页表宽 = 324 + 24 + 框 + 24：框随内容区弹性 360–640（CSS 实现），行线止于框右沿 + 24", async () => {
@@ -1053,47 +1021,6 @@ test("删网关改为二次确认：页面上不再有「删掉 X · 撤销」�
   assert.doesNotMatch(html, /撤销/);
   assert.doesNotMatch(html, /ss-toast/);
   assert.match(html, /aria-label="删掉 ap-gateway"/);
-});
-
-test("已选组联动：新勾的按先后追加（同一批按列表顺序），取消后仍留着，再勾不重复；打开时已在的不重复记", () => {
-  const snap = snapshotOrder([pe("azure/a", true), pe("azure/b"), pe("azure/c"), pe("azure/d")]);
-  let added = pinnedAdditions(
-    [],
-    [pe("azure/a", true), pe("azure/b"), pe("azure/c"), pe("azure/d", true)],
-    snap,
-  );
-  assert.deepEqual(added, ["g|azure/d"]);
-  added = pinnedAdditions(
-    added,
-    [pe("azure/a", true), pe("azure/b", true), pe("azure/c", true), pe("azure/d")],
-    snap,
-  );
-  assert.deepEqual(added, ["g|azure/d", "g|azure/b", "g|azure/c"], "d 取消后仍留着，b、c 追加在后");
-  const same = pinnedAdditions(
-    added,
-    [pe("azure/a", true), pe("azure/b", true), pe("azure/c", true), pe("azure/d", true)],
-    snap,
-  );
-  assert.equal(same, added, "没有新勾的：原样返回");
-});
-
-test("已选组超过 5 个折叠时，新追加的落在折叠部分，「还有 N 个」随之变；组头是此刻勾着的个数", () => {
-  const initial = Array.from({ length: 9 }, (_, i) => pe(`azure/m${i}`, i < 5));
-  const snap = snapshotOrder(initial);
-  const now = initial.map((e, i) => pe(e.model.id, i < 5 || i === 7));
-  const added = pinnedAdditions([], now, snap);
-  const pinned = pinnedEntries(now, snap, "", added);
-  assert.deepEqual(
-    pinned.slice(PINNED_PREVIEW).map((e) => e.model.id),
-    ["azure/m7"],
-  );
-  assert.equal(pinnedCount(pinned), 6);
-});
-
-test("补偿滚动：被点那一行在内容里下移多少，scrollTop 就加多少；不低于 0", () => {
-  assert.equal(anchoredScrollTop(100, 300, 334), 134);
-  assert.equal(anchoredScrollTop(100, 300, 266), 66);
-  assert.equal(anchoredScrollTop(10, 300, 200), 0);
 });
 
 test("网关短名：显示名优先；否则主机名去掉 api. / www. 与顶级域；localhost、IP 原样", () => {
@@ -1149,8 +1076,8 @@ test("行尾网关短名：entries 跨 ≥2 个网关才写，id 在前、网关
   assert.equal(showGatewayNames(two), true);
   assert.equal(showGatewayNames(two.slice(0, 1)), false);
   const html = render(ModelList, { entries: two, busy: false, onToggle: noop });
-  // 已选组与分组里都写
-  assert.equal((html.match(/models-option__gateway">openrouter</g) ?? []).length, 2);
+  // 已选组已删，每行只在服务商分组里出现一次
+  assert.equal((html.match(/models-option__gateway">openrouter</g) ?? []).length, 1);
   assert.match(html, /models-option__gateway">ap-gateway</);
   assert.match(
     html,
@@ -1175,4 +1102,67 @@ test("模型列表：底部不再有「已选 N 个模型」；滚动区的容�
   assert.match(viewport, /min-height:\s*0/);
   assert.match(rule(".model-list__scroll"), /min-height:\s*0/);
   assert.match(rule(".models-option__gateway"), /color:\s*var\(--ink-faint\)/);
+});
+
+test("网关页：分段片写网关短名；段头说明下一行本网关已选的模型片（× 可移除），没选时整行不出", () => {
+  const html = render(
+    GatewayPanel,
+    panelProps({
+      enabled: true,
+      providers: [
+        provider({
+          id: "ap",
+          name: "ap-gateway.intra.weibo.com",
+          models: [
+            model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true }),
+            model({ id: "zhipu/glm-4.6", displayName: "zhipu/glm-4.6", selected: true }),
+            model({ id: "azure/o3", displayName: "azure/o3" }),
+          ],
+        }),
+        provider({ id: "or", name: "openrouter.ai" }),
+      ],
+    }),
+  );
+  assert.match(html, /gw-panel__chip-name">ap-gateway</);
+  assert.match(html, /gw-panel__chip-name">openrouter</);
+  assert.match(html, /aria-label="删掉 ap-gateway"|title="删掉 ap-gateway"/);
+  // 跨服务商：片保留前缀；片在说明之后、列表框之前
+  const chosen = html.indexOf("gw-panel__chosen");
+  assert.ok(html.indexOf("gw-panel__note") < chosen && chosen < html.indexOf("gw-panel__list"));
+  assert.match(html, /ss-modelchip__name">azure\/gpt-4\.1</);
+  assert.match(html, /aria-label="移除 zhipu\/glm-4\.6"/);
+  assert.doesNotMatch(html, /ss-modelchip__name">azure\/o3</);
+
+  const none = render(
+    GatewayPanel,
+    panelProps({
+      providers: [provider({ id: "ap", name: "ap", models: [model({ id: "azure/o3" })] })],
+    }),
+  );
+  assert.doesNotMatch(none, /gw-panel__chosen/);
+});
+
+test("gatewaySelectedChips：只这一家已选的；同一服务商省前缀，跨服务商保留", () => {
+  const one = provider({
+    models: [
+      model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true }),
+      model({ id: "azure/o3", displayName: "azure/o3", selected: true }),
+      model({ id: "zhipu/glm-4.6", displayName: "zhipu/glm-4.6" }),
+    ],
+  });
+  assert.deepEqual(
+    gatewaySelectedChips(one).map((c) => c.label),
+    ["gpt-4.1", "o3"],
+  );
+  const mixed = provider({
+    models: [
+      model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true }),
+      model({ id: "zhipu/glm-4.6", displayName: "zhipu/glm-4.6", selected: true }),
+    ],
+  });
+  assert.deepEqual(
+    gatewaySelectedChips(mixed).map((c) => c.label),
+    ["azure/gpt-4.1", "zhipu/glm-4.6"],
+  );
+  assert.deepEqual(gatewaySelectedChips(provider({ models: [model({ id: "a" })] })), []);
 });
