@@ -377,6 +377,12 @@ mod tests {
                 excluded: ["private".to_string()].into_iter().collect(),
                 allow_cross_domain: true,
                 baseline: Some(["docs".to_string()].into_iter().collect()),
+                target_baselines: [(
+                    "target".to_string(),
+                    ["web".to_string()].into_iter().collect(),
+                )]
+                .into_iter()
+                .collect(),
             }],
             codex_gateway: GatewaySettings::default(),
             seen_issues: vec![SeenIssue {

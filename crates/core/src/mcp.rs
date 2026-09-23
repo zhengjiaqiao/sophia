@@ -65,6 +65,11 @@ pub struct McpAutoImportRule {
     /// 首次扫描由 `migrate_baselines` 取当时的全部名字补上
     #[serde(default)]
     pub baseline: Option<BTreeSet<String>>,
+    /// 规则已生效之后才加进来的目标（位置 id）各自的 baseline：加进来那一刻来源里已有的名字。
+    /// 新目标同样只管以后新出现的，不把建规则之后出现过的补写过去；不在表里的目标用整条的 `baseline`。
+    /// 旧文件没有这个字段，读成空
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub target_baselines: BTreeMap<String, BTreeSet<String>>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,8 +138,10 @@ pub fn location_ref(location: &McpLocation) -> McpLocationRef {
 
 /// 新建或更新一条自动添加规则（同一来源 + 目标域即同一条）：目标集合整体换成 `targets`，
 /// 跨域许可随之更新。规则从无到有（新建，或原先没有目标）时拍 baseline：来源位置此刻的
-/// 全部 MCP 名，排除名单清空；已生效的规则改目标不重拍，baseline 与排除名单都保留——
-/// 按「规则建立之后」算，建规则后才出现的会补到新加的目标上。关掉（删规则）再开才重拍。
+/// 全部 MCP 名，排除名单清空；已生效的规则改目标不重拍整条的 baseline，排除名单也保留，
+/// 只给新加的目标单独拍一份（`target_baselines`）：新目标同样只管从它加进来起新出现的，
+/// 不把建规则之后出现过的补写过去（与 skill 的 `upsert_auto_link` 同一修法）；撤掉的目标
+/// 那一份随之丢掉。关掉（删规则）再开才重拍。
 /// 来源配置这次读不出来就拒绝：拍成空集会在它修好后把现有的全部补上
 pub fn upsert_auto_import(
     rules: &mut Vec<McpAutoImportRule>,
@@ -158,6 +165,13 @@ pub fn upsert_auto_import(
         Some(i) if !rules[i].targets.is_empty() => {
             let rule = &mut rules[i];
             rule.source = location_ref(source);
+            for target in &targets {
+                if !rule.targets.iter().any(|old| old.id == target.id) {
+                    rule.target_baselines.insert(target.id.clone(), snapshot());
+                }
+            }
+            rule.target_baselines
+                .retain(|id, _| targets.iter().any(|target| &target.id == id));
             rule.targets = targets;
             rule.allow_cross_domain = allow_cross_domain;
             // 升级前的旧规则还没迁移：此刻迁移，与 `migrate_baselines` 同义
@@ -172,6 +186,7 @@ pub fn upsert_auto_import(
                 excluded: BTreeSet::new(),
                 allow_cross_domain,
                 baseline: Some(snapshot()),
+                target_baselines: BTreeMap::new(),
             });
         }
     }
@@ -250,6 +265,7 @@ pub fn auto_selections(overview: &McpOverview, rules: &[McpAutoImportRule]) -> V
             if source.domain != target.domain && !rule.allow_cross_domain {
                 continue;
             }
+            let baseline = rule.target_baselines.get(&target.id).unwrap_or(baseline);
             for entry in overview.entries.iter().filter(|entry| {
                 entry.source_id == source.id
                     && entry.reason.is_none()

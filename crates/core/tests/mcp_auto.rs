@@ -35,6 +35,7 @@ fn rule(source: &McpLocation, target_domain: &str, targets: &[McpLocation]) -> M
         allow_cross_domain: true,
         // 手写的规则等同于在来源还空着时建的：来源里的都算新出现的
         baseline: Some(BTreeSet::new()),
+        target_baselines: Default::default(),
     }
 }
 
@@ -295,9 +296,10 @@ fn auto_import_rule_only_covers_entries_that_appear_after_it() {
     assert!(auto_selections(&scan(&locations), &rules).is_empty());
 }
 
-/// 给已生效的规则加目标不重拍：建规则前已有的不补到新目标，建规则后才出现的补上
+/// 给已生效的规则加目标：整条的 baseline 不重拍，新目标另拍一份——它也只管从加进来起新出现的，
+/// 建规则之后、加目标之前出现的不补过去；原有目标照旧补
 #[test]
-fn adding_target_to_active_rule_keeps_baseline() {
+fn adding_target_to_active_rule_snapshots_the_new_target() {
     let temp = tempdir().unwrap();
     let root = fs::canonicalize(temp.path()).unwrap();
     let source_path = root.join("source.json");
@@ -348,12 +350,43 @@ fn adding_target_to_active_rule_keeps_baseline() {
         Some(BTreeSet::from(["docs".to_string()]))
     );
     assert_eq!(
+        rules[0].target_baselines.get("second"),
+        Some(&BTreeSet::from(["docs".to_string(), "search".to_string()]))
+    );
+    assert_eq!(
+        auto_selections(&scan(&locations), &rules),
+        vec![selection("source", "search", "first")]
+    );
+
+    // 加进来之后才出现的 web 两个目标都补
+    json_file(
+        &source_path,
+        json!({"mcpServers": {
+            "docs": {"command": "docs"},
+            "search": {"command": "search"},
+            "web": {"command": "web"}
+        }}),
+    );
+    assert_eq!(
         auto_selections(&scan(&locations), &rules),
         vec![
             selection("source", "search", "first"),
-            selection("source", "search", "second"),
+            selection("source", "web", "first"),
+            selection("source", "web", "second"),
         ]
     );
+
+    // 撤掉的目标那一份随之丢掉
+    upsert_auto_import(
+        &mut rules,
+        &scan(&locations),
+        &source,
+        "project:one".into(),
+        vec![location_ref(&first)],
+        false,
+    )
+    .unwrap();
+    assert!(rules[0].target_baselines.is_empty());
 }
 
 /// 关掉再开 = 重建：删规则或目标清空都算关，再开时 baseline 重拍、排除名单清空
