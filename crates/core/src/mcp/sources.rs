@@ -551,6 +551,7 @@ fn entry(
         outcome: outcome.into(),
         message: message.into(),
         backup_path,
+        identical: None,
     }
 }
 
@@ -656,7 +657,11 @@ fn remove_group(
 
 /// 从 `mcpServers`（`selector` 给了就是 `projects[selector].mcpServers`）里拿掉 `name` 这个成员，
 /// 其余字节原样。结果与「原文件的值去掉这一项」不相等就放弃（返回 None）
-fn remove_json_server(bytes: &[u8], selector: Option<&str>, name: &str) -> Option<Vec<u8>> {
+pub(super) fn remove_json_server(
+    bytes: &[u8],
+    selector: Option<&str>,
+    name: &str,
+) -> Option<Vec<u8>> {
     serde_json::from_slice::<NoDuplicates>(bytes).ok()?;
     let servers = match selector {
         None => raw_json_ranges(bytes).ok()?.2?,
@@ -755,7 +760,7 @@ fn blank_or_comment(line: &str) -> bool {
 /// 表里 / 根上以它开头的单行键。其余行逐字节原样（换行、BOM、注释都不动）。
 /// 删完按语义核对「与原文件去掉这一项一模一样」，对不上就放弃（返回 None）——
 /// 不用 toml_edit 重新序列化整个文件（它会改换行、丢 BOM）
-fn remove_toml_server(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
+pub(super) fn remove_toml_server(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
     let text = std::str::from_utf8(bytes).ok()?;
     let (bom, body) = match text.strip_prefix('\u{feff}') {
         Some(rest) => ("\u{feff}", rest),

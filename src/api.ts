@@ -109,6 +109,11 @@ export const api = {
     invoke<McpPreview>("propose_mcp_sync", { selections }),
   applyMcp: (planId: string, allowCrossDomain: boolean) =>
     invoke<McpReport>("apply_mcp", { planId, allowCrossDomain }),
+  /// 从格子上移除 MCP 副本（可批量）：`sourceId` 是行的来源（原件），`targetId` 是副本所在位置。
+  /// 原件那一格、单独拿不掉的写法等以 `skipped` + 原因返回；成功的条目带 `identical`，
+  /// 撤销（`undoId`）交给 `mcpUndoWrite`
+  removeMcpCopies: (selections: McpSelection[]) =>
+    invoke<McpReport>("remove_mcp_copies", { selections }),
   /// 撤销一次 MCP 写入；id 不存在或已过期时 reject「撤销记录不存在或已过期」
   mcpUndoWrite: (undoId: string) => invoke<McpUndoReport>("mcp_undo_write", { undoId }),
   setMcpAutoImport: (

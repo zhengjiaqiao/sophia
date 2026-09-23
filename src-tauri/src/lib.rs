@@ -380,6 +380,23 @@ fn apply_mcp(
     Ok(report)
 }
 
+/// 从格子上移除 MCP 副本（可批量）：每项是 (行的来源＝原件, 服务名, 副本所在位置)。
+/// 判定与执行一次做完（格子是开关，没有预览这一步），拒绝的项以 `skipped` + 原因进报告；
+/// 撤销与写入共用 `mcp_undo_write`。原件那一格 core 拒绝
+#[tauri::command]
+fn remove_mcp_copies(
+    selections: Vec<symsync_core::mcp::McpSelection>,
+    state: tauri::State<'_, AppState>,
+) -> Result<symsync_core::mcp::McpReport, String> {
+    let discovery = discover_mcp(&state)?;
+    // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 apply_mcp）
+    let _config_guard = state.config_lock.blocking_lock();
+    let plan = symsync_core::mcp::prepare_removal(&discovery.locations, &selections);
+    let mut report = symsync_core::mcp::execute_removal(plan);
+    register_mcp_undo(&state, &mut report)?;
+    Ok(report)
+}
+
 /// 撤销一次 MCP 写入。记录用过即删；写后文件被改过时 core 整体拒绝，返回里带备份路径
 #[tauri::command]
 fn mcp_undo_write(
@@ -1077,6 +1094,7 @@ pub fn run() {
             mcp_field_diff,
             propose_mcp_sync,
             apply_mcp,
+            remove_mcp_copies,
             mcp_undo_write,
             propose_links,
             propose_unlinks,

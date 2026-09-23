@@ -320,10 +320,13 @@ export interface McpPreview {
 export interface McpReportEntry {
   name: string;
   targetId: string;
-  /// `removed` 只出现在移除 MCP 来源的报告里
+  /// `removed` 只出现在移除 MCP 来源、从格子上移除副本（`removeMcpCopies`）的报告里
   outcome: "created" | "removed" | "skipped" | "failed";
   message: string;
   backupPath: string | null;
+  /// 只在从格子上移除副本成功的条目上有：移除的那份与来源原版是否一样。
+  /// 一样时再点一次写回的就是同样的内容，不给撤销；不一样（`2 份不一样`）才给
+  identical?: boolean;
 }
 export interface McpReport {
   entries: McpReportEntry[];
