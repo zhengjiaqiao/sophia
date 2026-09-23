@@ -131,16 +131,20 @@ export function affectedTip(
   head: string,
   names: string[],
   notes: { names: string[]; why: string }[] = [],
+  /// 「所有 agent」那一项：同一个名字可能改好几处，写总处数
+  places?: number,
 ): ReactNode {
+  // 名字列出前 5 个；只有被截掉时才补数量（数量与名字并排是重复）
   const list = (xs: string[]) =>
     `${xs.slice(0, 5).join("、")}${xs.length > 5 ? ` 等 ${xs.length} 个` : ""}`;
   return (
     <>
-      <div>{`${head} · ${names.length} 个：${list(names)}`}</div>
+      <div>{`${head}：${list(names)}${places !== undefined ? `（共 ${places} 处）` : ""}`}</div>
+      {/* 不会被改的：一类一行，写清楚为什么跳过（原因说清是哪个 agent） */}
       {notes
         .filter((n) => n.names.length > 0)
         .map((n) => (
-          <div key={n.why}>{`${list(n.names)} ${n.why}，不受影响`}</div>
+          <div key={n.why}>{`跳过 ${list(n.names)}：${n.why}`}</div>
         ))}
     </>
   );
@@ -337,8 +341,8 @@ export default function DomainView(props: DomainViewProps) {
     }
     const checked = missing.length === 0 && linked.length > 0;
     const notes = [
-      { names: own, why: "是原件" },
-      { names: blocked, why: "写不进" },
+      { names: own, why: `原件就在 ${target.label} 里` },
+      { names: blocked, why: `${target.label} 里写不进` },
     ];
     const disabledReason =
       target.linkedWholeTo !== null
@@ -382,8 +386,8 @@ export default function DomainView(props: DomainViewProps) {
     checked: allChecked,
     label: allChecked ? "选中的都从所有 agent 移除" : "选中的都加到所有 agent",
     tip: allChecked
-      ? affectedTip(`从所有 agent 移除 · ${allRemove.length} 处`, uniqNames(allRemove))
-      : affectedTip(`加到所有 agent · ${allAdd.length} 处`, uniqNames(allAdd)),
+      ? affectedTip("从所有 agent 移除", uniqNames(allRemove), [], allRemove.length)
+      : affectedTip("加到所有 agent", uniqNames(allAdd), [], allAdd.length),
     disabledReason: enabledPresses.length === 0 ? "没有能加上或移除的" : undefined,
     onToggle: () =>
       props.onBatch(

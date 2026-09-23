@@ -1125,8 +1125,10 @@ export default function McpTab({
       .map((r) => r.name);
     const checked = cells.length === 0 && present > 0;
     const notes = [
-      { names: own, why: "是原件" },
-      checked ? { names: stuck, why: "这里移除不了" } : { names: cant, why: "写不过去" },
+      { names: own, why: `原件就在 ${target.label} 里` },
+      checked
+        ? { names: stuck, why: `${target.label} 里移除不了` }
+        : { names: cant, why: `写不到 ${target.label}` },
     ];
     const disabledReason =
       (checked ? copies.length : cells.length) > 0
@@ -1168,8 +1170,8 @@ export default function McpTab({
     checked: allChecked,
     label: allChecked ? "选中的都从所有位置移除" : "选中的都写进所有位置",
     tip: allChecked
-      ? affectedTip(`从所有位置移除 · ${allRemove.length} 处`, uniqNames(allRemove))
-      : affectedTip(`写进所有还缺它的位置 · ${allAdd.length} 处`, uniqNames(allAdd)),
+      ? affectedTip("从所有位置移除", uniqNames(allRemove), [], allRemove.length)
+      : affectedTip("写进所有还缺它的位置", uniqNames(allAdd), [], allAdd.length),
     disabledReason: enabledPresses.length === 0 ? "没有能写进或移除的" : undefined,
     onToggle: () =>
       void (allChecked
