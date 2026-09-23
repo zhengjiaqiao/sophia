@@ -26,6 +26,9 @@ import {
   modelIssues,
   showRestartKey,
   shouldPollRestart,
+  showLaunchKey,
+  selectModel,
+  LAUNCH_TIP,
   showRouterTodo,
   snapshotOrder,
   showGatewayNames,
@@ -357,6 +360,65 @@ test("重启生效：按钮即状态——只在 needsCodexRestart 且空闲时�
   assert.equal(RESTART_TIP, "重启 Codex 桌面应用让改动生效，进行中的对话会中断");
 });
 
+test("启动 Codex：网关开着、Codex 没在跑、空闲时才出键；键显示着也轮询，用户自己打开了键就消失", () => {
+  const codex = (running: boolean) => ({
+    version: "26.0",
+    running,
+    catalogVersion: "1",
+    drift: false,
+  });
+  const idle = { kind: "idle" } as const;
+  const down = state({ enabled: true, codex: codex(false) });
+  assert.equal(showLaunchKey(down, idle), true);
+  assert.equal(showLaunchKey(down, { kind: "launching" }), false);
+  assert.equal(showLaunchKey(down, { kind: "launched" }), false);
+  assert.equal(
+    showLaunchKey(state({ enabled: false, codex: codex(false) }), idle),
+    false,
+    "网关关着不出",
+  );
+  assert.equal(showLaunchKey(state({ enabled: true, codex: codex(true) }), idle), false);
+  // 与重启生效不同时出现：要重启说明它在跑
+  assert.equal(showLaunchKey(state({ enabled: true, needsCodexRestart: true }), idle), false);
+  assert.equal(shouldPollRestart(down, idle), true);
+  assert.equal(shouldPollRestart(down, { kind: "launching" }), false, "启动中由自己轮询");
+  assert.equal(shouldPollRestart(state({ enabled: true, codex: codex(true) }), idle), false);
+  assert.equal(LAUNCH_TIP, "打开 Codex 桌面应用，它会用上现在的模型设置");
+});
+
+test("selectModel：只翻这一家这一个模型；网关开着时去掉最后一个生效模型 → 开关随之画成关", () => {
+  const two = state({
+    enabled: true,
+    providers: [
+      provider({ id: "a", models: [model({ id: "m1", selected: true }), model({ id: "m2" })] }),
+      provider({ id: "b", models: [model({ id: "m1", selected: true })] }),
+    ],
+  });
+  const added = selectModel(two, "a", "m2", true);
+  assert.equal(added.turnsOff, false);
+  assert.deepEqual(
+    added.next.providers.map((p) => p.models.map((m) => m.selected)),
+    [[true, true], [true]],
+  );
+  assert.equal(added.next.provider.models[1].selected, true, "兼容字段跟着换");
+  assert.equal(two.providers[0].models[1].selected, false, "不改原状态");
+
+  // 另一家还有生效模型：不是最后一个，开关不动
+  const partial = selectModel(two, "a", "m1", false);
+  assert.equal(partial.turnsOff, false);
+  assert.equal(partial.next.enabled, true);
+
+  // 全部网关加起来一个不剩：等同关掉开关
+  const last = selectModel(partial.next, "b", "m1", false);
+  assert.equal(last.turnsOff, true);
+  assert.equal(last.next.enabled, false);
+  assert.equal(totalSelected(last.next), 0);
+
+  // 网关本来就关着：去掉最后一个只是去掉
+  const off = selectModel({ ...partial.next, enabled: false }, "b", "m1", false);
+  assert.equal(off.turnsOff, false);
+});
+
 test("路由没在跑：先自愈，自愈过仍没起来才出横幅", () => {
   const down = state({
     enabled: true,
@@ -484,19 +546,53 @@ test("AgentRow 重启中：键位原地换成 14px 地球绕太阳 +「正在重
   assert.match(doneHtml, /ss-toast--routine[^]*已生效/);
 });
 
-test("AgentRow 重启失败：黑块「没重启 Codex」+ 原因 + 再试一次，挂在整行下面", () => {
+test("AgentRow 重启失败：行下灰面板「没重启 Codex」+ 原因 + 再试一次 + ×，不用黑块", () => {
   const html = render(AgentRow, {
     ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
     notice: {
-      verb: "没重启",
+      message: "没重启 Codex",
       reason: "Codex 还在用旧配置",
       action: { label: "再试一次", onClick: noop },
     },
+    onCloseNotice: noop,
   });
   assert.match(
     html,
-    /models-row__notice[^]*ss-toast--notice[^]*没重启[^]*Codex 还在用旧配置[^]*再试一次/,
+    /models-row__notice[^]*ss-noticepanel[^]*没重启 Codex[^]*Codex 还在用旧配置[^]*再试一次[^]*关闭/,
   );
+  // 大面积不用黑（DESIGN「提示条分两档」）
+  assert.doesNotMatch(html, /ss-toast--notice|ss-toast--cannot/);
+});
+
+test("AgentRow 启动 Codex：网关开着、Codex 没在跑才出紧凑键，提示框写结果；网关关着不出", () => {
+  const html = render(AgentRow, {
+    ...rowProps(withSelected({ enabled: true })),
+    onLaunch: noop,
+  });
+  assert.match(html, /配置网关<\/button>.*启动 Codex<\/button>/s);
+  assert.match(html, /role="tooltip"[^>]*>打开 Codex 桌面应用，它会用上现在的模型设置</);
+  assert.doesNotMatch(html, /重启生效/);
+  const off = render(AgentRow, { ...rowProps(withSelected({ enabled: false })), onLaunch: noop });
+  assert.doesNotMatch(off, /启动 Codex/);
+  const launching = render(AgentRow, {
+    ...rowProps(withSelected({ enabled: true })),
+    onLaunch: noop,
+    phase: { kind: "launching" },
+  });
+  assert.match(launching, /class="ss-spinner" width="14"/);
+  assert.match(launching, /正在启动 Codex/);
+  assert.doesNotMatch(launching, /启动 Codex<\/button>/);
+  const launched = render(AgentRow, {
+    ...rowProps(
+      withSelected({
+        enabled: true,
+        codex: { version: "26.0", running: true, catalogVersion: "1", drift: false },
+      }),
+    ),
+    onLaunch: noop,
+    phase: { kind: "launched" },
+  });
+  assert.match(launched, /models-restart--done[^]*ss-toast--routine[^]*已启动/);
 });
 
 test("AgentRow 启用不了：开关禁用，原因作为悬停说明", () => {

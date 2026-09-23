@@ -494,10 +494,18 @@ export const RESTART_STILL_STALE = "Codex 还在用旧配置，稍后再试一�
  * - restarting：键位原地换成 14px 忙碌指示（Spinner）+ 「正在重启 Codex」——用户正在等，就地带文字
  * - done：一行例行成功 `✓ 已生效`，约 4 秒后淡出
  *
- * 失败不是这一格的状态：黑块「没重启 Codex」+ 原因 + `再试一次` 挂在整行下面，格子回到 idle
- * （键还在就还能点）
+ * - launching：`启动 Codex` 点下去之后，键位换成忙碌指示 + 「正在启动 Codex」，等到检测到它在跑
+ * - launched：一行例行成功 `✓ 已启动`，约 4 秒后淡出
+ *
+ * 失败不是这一格的状态：灰面板「没重启 Codex」/「没启动 Codex」+ 原因 + `再试一次` 挂在整行下面，
+ * 格子回到 idle（键还在就还能点）
  */
-export type RestartPhase = { kind: "idle" } | { kind: "restarting" } | { kind: "done" };
+export type RestartPhase =
+  | { kind: "idle" }
+  | { kind: "restarting" }
+  | { kind: "done" }
+  | { kind: "launching" }
+  | { kind: "launched" };
 
 /// 已生效那行停多久（含末尾 120ms 淡出）
 export const RESTART_DONE_MS = 4000;
@@ -509,12 +517,60 @@ export function showRestartKey(state: GatewayState, phase: RestartPhase): boolea
   return state.needsCodexRestart && phase.kind === "idle";
 }
 
-/// 只在键显示着时轮询；键消失即停，不做常驻进程监控
+/// Codex 没在跑时那一格的键（DESIGN「Codex 没在跑：同一格换成 启动 Codex」）：网关开着、Codex 桌面应用
+/// 没在跑、且此刻空闲。网关关着时不出现——那时 Codex 用自己的模型，启动它与这一页无关
+export function showLaunchKey(state: GatewayState, phase: RestartPhase): boolean {
+  return state.enabled && !state.codex.running && !state.needsCodexRestart && phase.kind === "idle";
+}
+
+/// `启动 Codex` 的提示框：点击的结果，不打断任何东西，所以不确认
+export const LAUNCH_TIP = "打开 Codex 桌面应用，它会用上现在的模型设置";
+/// 点了之后最多等多久看它跑起来
+export const LAUNCH_TIMEOUT_MS = 15000;
+/// 等它跑起来时多久查一次
+export const LAUNCH_POLL_MS = 1000;
+/// 等满了还没检测到：如实说
+export const LAUNCH_TIMEOUT = "Codex 没能在 15 秒内打开";
+
+/// 只在键（重启生效 / 启动 Codex）显示着时轮询；键消失即停，不做常驻进程监控。
+/// 用户自己重启或打开了 Codex，键要自己消失（按钮即状态）
 export function shouldPollRestart(state: GatewayState | null, phase: RestartPhase): boolean {
-  return state !== null && state.needsCodexRestart && phase.kind === "idle";
+  return state !== null && (showRestartKey(state, phase) || showLaunchKey(state, phase));
 }
 
 // ===== 模型框与选择器 =====
+
+/**
+ * 勾选 / 取消一个模型之后该画成什么样（DESIGN「勾选不闪」）：片与勾选框先按用户的操作变，
+ * 写盘在后台完成。只改这一家这一个模型的 `selected`；兼容字段 `provider` 跟着换。
+ *
+ * 网关开着时去掉的是最后一个生效模型（全部网关加起来一个不剩）：`turnsOff` 为真、开关随之画成关——
+ * 等同把开关关掉，不提示、不确认（DESIGN「移除最后一个生效模型 = 关掉网关」）
+ */
+export function selectModel(
+  state: GatewayState,
+  providerId: string,
+  modelId: string,
+  selected: boolean,
+): { next: GatewayState; turnsOff: boolean } {
+  const providers = state.providers.map((provider) =>
+    provider.id !== providerId
+      ? provider
+      : {
+          ...provider,
+          models: provider.models.map((model) =>
+            model.id === modelId ? { ...model, selected } : model,
+          ),
+        },
+  );
+  const moved = {
+    ...state,
+    providers,
+    provider: providers.find((p) => p.id === state.provider.id) ?? state.provider,
+  };
+  const turnsOff = state.enabled && totalSelected(moved) === 0;
+  return { next: turnsOff ? { ...moved, enabled: false } : moved, turnsOff };
+}
 
 /// 模型框尾端的等宽读数：全部网关一共拉到几个可选模型
 export function availableCount(state: GatewayState): number {

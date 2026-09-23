@@ -4,6 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api.ts";
 import {
+  LAUNCH_POLL_MS,
+  LAUNCH_TIMEOUT,
+  LAUNCH_TIMEOUT_MS,
+  LAUNCH_TIP,
   MODELS_TOOLS,
   RESTART_CONSEQUENCE,
   RESTART_DONE_MS,
@@ -15,9 +19,12 @@ import {
   emptyEffectiveText,
   enableDisabledReason,
   modelIssues,
+  modelLabel,
   parseBackendError,
   routerUnavailable,
+  selectModel,
   shouldPollRestart,
+  showLaunchKey,
   showRestartKey,
   serviceLeftover,
   showRouterTodo,
@@ -44,6 +51,7 @@ import {
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
 import { ModelList } from "./ModelList.tsx";
+import { createSelectionWriter } from "./selectionWrites.ts";
 import { GATEWAY_PAGE_MOTION_MS, GatewayPage } from "./pages/GatewayPage.tsx";
 import type { GatewaySelection } from "./pages/GatewayPage.tsx";
 import "./ModelsTab.css";
@@ -121,9 +129,10 @@ function LinkChevron() {
   );
 }
 
-/// 行内的那一处黑窗：做不成的事就地说（锚在 agent 行下，① 就近）
+/// 行下那块灰面板：做不成的事就地说（锚在 agent 行下，① 就近；大面积不用黑）。
+/// `message` 是整句（`没重启 Codex` `没移除 GPT 5`），原因写全、折行不截断
 export interface RowNoticeState {
-  verb: string;
+  message: string;
   reason: string;
   action?: { label: string; onClick: () => void };
 }
@@ -139,6 +148,8 @@ export interface AgentRowProps {
   onConfigure: () => void;
   /// 点了「重启生效」：带上整行，确认框锚在它下面、它不被遮罩盖住（⑦）
   onRestart: (row: HTMLElement) => void;
+  /// 点了「启动 Codex」：不打断任何东西，不确认
+  onLaunch?: () => void;
   notice?: RowNoticeState | null;
   onCloseNotice?: () => void;
   /// 挂在整行下面的行内待办条（接管 / 重新写入）
@@ -158,6 +169,7 @@ export function AgentRow({
   onToggle,
   onConfigure,
   onRestart,
+  onLaunch,
   notice,
   onCloseNotice,
   todos,
@@ -209,6 +221,7 @@ export function AgentRow({
           phase={phase}
           busy={busy}
           onRestart={() => rowRef.current && onRestart(rowRef.current)}
+          onLaunch={onLaunch}
         />
         {uninstalling ? (
           <span className="models-restart models-restart--busy" role="status">
@@ -237,11 +250,8 @@ export function AgentRow({
       {todos ? <div className="models-row__todos">{todos}</div> : null}
       {notice ? (
         <div className="models-row__notice">
-          <Toast
-            kind="cannot"
-            verb={notice.verb}
-            agents={[{ id: tool.id, name: tool.name }]}
-            names={[tool.name]}
+          <NoticePanel
+            message={notice.message}
             reason={notice.reason}
             action={notice.action}
             onClose={onCloseNotice}
@@ -253,32 +263,53 @@ export function AgentRow({
 }
 
 /// 「重启生效」那一格：键 / 忙碌指示 + 正在重启 / ✓ 已生效（例行成功，约 4 秒淡出）。
-/// 失败的黑块不在这里——它挂在整行下面（`notice`），键照常留着可以再点
+/// Codex 没在跑时同一格换成 `启动 Codex`（同一套：忙碌指示 + 正在启动 / ✓ 已启动）。
+/// 失败的灰面板不在这里——它挂在整行下面（`notice`），键照常留着可以再点
 function RestartSlot({
   tool,
   state,
   phase,
   busy,
   onRestart,
+  onLaunch,
 }: {
   tool: ModelsTool;
   state: GatewayState;
   phase: RestartPhase;
   busy: boolean;
   onRestart: () => void;
+  onLaunch?: () => void;
 }) {
-  if (phase.kind === "restarting") {
+  if (phase.kind === "restarting" || phase.kind === "launching") {
+    const text = `${phase.kind === "restarting" ? "正在重启" : "正在启动"} ${tool.name}`;
     return (
       <span className="models-restart models-restart--busy" role="status">
-        <Spinner size={14} label={`正在重启 ${tool.name}`} />
-        <span className="models-restart__text">正在重启 {tool.name}</span>
+        <Spinner size={14} label={text} />
+        <span className="models-restart__text">{text}</span>
       </span>
     );
   }
-  if (phase.kind === "done") {
+  if (phase.kind === "done" || phase.kind === "launched") {
     return (
       <span className="models-restart models-restart--done">
-        <Toast tier="routine" kind="success" verb="已生效" />
+        <Toast tier="routine" kind="success" verb={phase.kind === "done" ? "已生效" : "已启动"} />
+      </span>
+    );
+  }
+  if (onLaunch && showLaunchKey(state, phase)) {
+    return (
+      <span className="models-restart-tip">
+        <Tooltip content={LAUNCH_TIP}>
+          {busy ? (
+            <Button size="compact" disabled disabledReason="正在处理上一步">
+              {`启动 ${tool.name}`}
+            </Button>
+          ) : (
+            <Button size="compact" onClick={onLaunch}>
+              {`启动 ${tool.name}`}
+            </Button>
+          )}
+        </Tooltip>
       </span>
     );
   }
@@ -495,11 +526,24 @@ export default function ModelsTab({
   const mounted = useRef(true);
   const reportState = useRef(onGatewayState);
   reportState.current = onGatewayState;
-
-  const applyState = useCallback((next: GatewayState) => {
-    setState(next);
-    reportState.current?.(next);
-  }, []);
+  /// 此刻画在页面上的状态（含还没写完的勾选）：连点时下一下在上一下的基础上算
+  const shown = useRef<GatewayState | null>(null);
+  /// 勾选的写盘队列（DESIGN「勾选不闪」）：先画、后台排队写、失败才回滚并说话。
+  /// 后端给的状态一律经它（applyState）：还有没写完的勾选时只记下、不画，片不会跳回去再跳回来
+  const [writer] = useState(() =>
+    createSelectionWriter<GatewayState>({
+      paint: (next) => {
+        shown.current = next;
+        setState(next);
+      },
+      report: (next) => reportState.current?.(next),
+      reread: () => api.gatewayState(),
+      onDone: () => setNotice(null),
+      onFail: (message, error) => setNotice({ message, reason: describeError(error) }),
+      alive: () => mounted.current,
+    }),
+  );
+  const applyState = writer.accept;
 
   /// 轻查：后台例行读取，不显示忙碌、不锁页面（焦点重读、键显示时的轮询）
   const quietRefresh = useCallback(async () => {
@@ -568,9 +612,9 @@ export default function ModelsTab({
     return () => clearInterval(timer);
   }, [polling, quietRefresh]);
 
-  // 已生效那一行约 4 秒后淡出（淡出本身在 css 里，末尾 120ms）
+  // 已生效 / 已启动那一行约 4 秒后淡出（淡出本身在 css 里，末尾 120ms）
   useEffect(() => {
-    if (phase.kind !== "done") return;
+    if (phase.kind !== "done" && phase.kind !== "launched") return;
     const timer = setTimeout(() => setPhase({ kind: "idle" }), RESTART_DONE_MS);
     return () => clearTimeout(timer);
   }, [phase]);
@@ -600,17 +644,20 @@ export default function ModelsTab({
     };
   }, [pickerOpen]);
 
-  /// 调命令 → 用返回的最新状态刷新；做不成就在 agent 行下就地说（① 就近）
-  const run = async (verb: string, action: () => Promise<GatewayState>) => {
+  /// 调命令 → 用返回的最新状态刷新；做不成就在 agent 行下灰面板就地说（① 就近）。
+  /// 开关、接管这类用户在等的操作才走这里（锁页、忙碌）；勾选不走这里，见 writer
+  const run = async (message: string, action: () => Promise<GatewayState>) => {
     onBusy(true);
     try {
+      // 排在还没写完的勾选后面：两边都写 Codex 设置，谁先谁后要和点的顺序一致
+      await writer.idle();
       const next = await action();
       if (mounted.current) {
         applyState(next);
         setNotice(null);
       }
     } catch (error) {
-      if (mounted.current) setNotice({ verb, reason: describeError(error) });
+      if (mounted.current) setNotice({ message, reason: describeError(error) });
     } finally {
       onBusy(false);
     }
@@ -620,6 +667,7 @@ export default function ModelsTab({
   const runOrThrow = async (action: () => Promise<GatewayState>) => {
     onBusy(true);
     try {
+      await writer.idle();
       const next = await action();
       if (mounted.current) applyState(next);
     } finally {
@@ -663,7 +711,7 @@ export default function ModelsTab({
     if (!mounted.current) return;
     if (failure !== null) {
       setNotice({
-        verb: "没重启",
+        message: `没重启 ${tool.name}`,
         reason: failure,
         action: { label: "再试一次", onClick: () => void restart(tool) },
       });
@@ -671,25 +719,76 @@ export default function ModelsTab({
     setPhase(failure === null ? { kind: "done" } : { kind: "idle" });
   };
 
-  /// 勾选当场写盘，不出成功提示条：片的增减本身就是反馈；只有失败才说话
-  const commitModels = (provider: GatewayProvider, models: GatewayProviderModel[], verb: string) =>
-    run(verb, () => api.gatewaySelectModelsOf(provider.id, selectedPayload(models)));
+  /// 启动 Codex（DESIGN「Codex 没在跑：同一格换成 启动 Codex」）：不打断任何东西，不确认、不锁页。
+  /// 键位原地换成忙碌指示 +「正在启动 Codex」，轮询到它在跑（上限 15 秒）才算成；超时或打不开，
+  /// 行下灰面板说原因 + `再试一次`
+  const launch = async (tool: ModelsTool) => {
+    setNotice(null);
+    setPhase({ kind: "launching" });
+    let failure: string | null = null;
+    try {
+      await api.gatewayLaunchCodex();
+      const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
+      for (;;) {
+        const fresh = await api.gatewayState();
+        if (!mounted.current) return;
+        applyState(fresh);
+        if (fresh.codex.running) break;
+        if (Date.now() >= deadline) {
+          failure = LAUNCH_TIMEOUT;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, LAUNCH_POLL_MS));
+        if (!mounted.current) return;
+      }
+    } catch (error) {
+      failure = describeError(error);
+    }
+    if (!mounted.current) return;
+    if (failure !== null) {
+      setNotice({
+        message: `没启动 ${tool.name}`,
+        reason: failure,
+        action: { label: "再试一次", onClick: () => void launch(tool) },
+      });
+    }
+    setPhase(failure === null ? { kind: "launched" } : { kind: "idle" });
+  };
 
-  const toggleModel = (provider: GatewayProvider, id: string) => {
-    const model = provider.models.find((m) => m.id === id);
-    void commitModels(
-      provider,
-      provider.models.map((m) => (m.id === id ? { ...m, selected: !m.selected } : m)),
-      model?.selected ? "没移除" : "没加上",
+  /// 勾上 / 取消一个模型。网关开着时去掉的是最后一个生效模型 → 等同关掉开关：
+  /// 先恢复（`gateway_restore` 不动勾选），再把这一家的勾选清空（关着时后端不再要求至少一个），
+  /// 两步都完成才是「开关关、没有片」
+  const setModel = (providerId: string, modelId: string, selected: boolean) => {
+    const base = shown.current;
+    const model = base?.providers
+      .find((p) => p.id === providerId)
+      ?.models.find((m) => m.id === modelId);
+    if (!base || !model || model.selected === selected) return;
+    const { next, turnsOff } = selectModel(base, providerId, modelId, selected);
+    const models = next.providers.find((p) => p.id === providerId)?.models ?? [];
+    const payload = selectedPayload(models);
+    writer.write(
+      `${selected ? "没加上" : "没移除"} ${modelLabel(model)}`,
+      next,
+      turnsOff
+        ? async () => {
+            await api.gatewayRestore();
+            return api.gatewaySelectModelsOf(providerId, payload);
+          }
+        : () => api.gatewaySelectModelsOf(providerId, payload),
     );
   };
 
+  /// 选择器与网关页共用：以画面上的状态为准翻转（连点时 provider 对象可能还是上一帧的）
+  const toggleModel = (provider: GatewayProvider, id: string) => {
+    const model = shown.current?.providers
+      .find((p) => p.id === provider.id)
+      ?.models.find((m) => m.id === id);
+    if (model) setModel(provider.id, id, !model.selected);
+  };
+
   const removeModel = (provider: GatewayProvider, model: GatewayProviderModel) =>
-    void commitModels(
-      provider,
-      provider.models.map((m) => (m.id === model.id ? { ...m, selected: false } : m)),
-      "没移除",
-    );
+    setModel(provider.id, model.id, false);
 
   const openPicker = (tool: ModelsTool) => setPicker(tool.id);
   const closePicker = () => setPicker(null);
@@ -730,10 +829,10 @@ export default function ModelsTab({
   }, [flashProvider]);
 
   /// 行内待办条的动作：接管 / 重新写入。做成了用返回的状态刷新，条随问题一起消失；
-  /// 做不成走同一个行下黑块说原因
+  /// 做不成走同一个行下灰面板说原因
   const resolveTodo = async (kind: "takeover" | "rewrite") => {
     setResolving(kind);
-    await run(kind === "takeover" ? "没接管" : "没写入", () =>
+    await run(kind === "takeover" ? "没接管 Codex 的配置" : "没重新写入 Codex 的设置", () =>
       kind === "takeover" ? api.gatewayTakeover() : api.gatewayEnable(),
     );
     if (mounted.current) setResolving(null);
@@ -798,7 +897,7 @@ export default function ModelsTab({
               busy={busy}
               phase={phase}
               onToggle={(next) =>
-                void run(next ? "没打开" : "没关掉", () =>
+                void run(`${next ? "没打开" : "没关掉"} ${tool.name} 的第三方模型`, () =>
                   next ? api.gatewayEnable() : api.gatewayRestore(),
                 )
               }
@@ -807,6 +906,7 @@ export default function ModelsTab({
                 const r = row.getBoundingClientRect();
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
               }}
+              onLaunch={() => void launch(tool)}
               notice={notice}
               onCloseNotice={() => setNotice(null)}
               todos={(() => {
@@ -882,7 +982,7 @@ export default function ModelsTab({
               onUninstall={() =>
                 void (async () => {
                   setUninstalling(true);
-                  await run("没卸下", () => api.gatewayRestore());
+                  await run("没卸下后台服务", () => api.gatewayRestore());
                   if (mounted.current) setUninstalling(false);
                 })()
               }
@@ -915,6 +1015,7 @@ export default function ModelsTab({
                 const r = bar.getBoundingClientRect();
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
               }}
+              onLaunch={() => void launch(MODELS_TOOLS[0])}
             />
           }
           onSave={saveProvider}
