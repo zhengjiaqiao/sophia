@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { render } from "./ui-render.ts";
 
-const { default: Matrix } = await import("../src/Matrix.tsx");
+const { default: Matrix, PANEL_W } = await import("../src/Matrix.tsx");
 
 const base = {
   columns: [
@@ -68,7 +68,7 @@ test("Matrix：通道条表头 + 原件位置列（120，来源名），没有�
   // 目录还不存在的列：虚线列头
   assert.match(html, /mx-colbtn is-missing/);
   // 列宽：勾选 34 + 名字 246 + 原件位置 120 + 88 × 2 + 尾 24
-  assert.match(html, /grid-template-columns:34px 246px 120px 88px 88px 24px/);
+  assert.match(html, /grid-template-columns:34px minmax\(246px, 1fr\) 120px 88px 88px 24px/);
   // 默认名称升序
   assert.ok(html.indexOf(">docx<") < html.indexOf(">pdf<"));
   // 行内忙碌指示 + 句子属于退役行为：批量时格子同时变、不在行里转
@@ -146,7 +146,7 @@ test("Matrix：选择态——第一行 已选 N 个 + 所有 agent + 每个 age
       },
     },
   });
-  assert.match(html, /grid-template-columns:34px 246px 72px 120px 88px 88px 24px/);
+  assert.match(html, /grid-template-columns:34px minmax\(246px, 1fr\) 72px 120px 88px 88px 24px/);
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
   assert.match(html, /aria-label="选中的都加到所有 agent"/);
   assert.match(html, /class="mx-agentitem__name">所有 agent</);
@@ -422,4 +422,8 @@ test("格子提示框的 · 空格 只给键盘：鼠标悬停不写，格子按
     css,
     /\.mx-cell:has\(\.mx-cellbtn:focus-visible\) \.ss-tip__keyhint \{\s*display: inline;/,
   );
+});
+
+test("Skills 与 MCP 同一个固定面板宽度：工具行、表格都是 848，agent 少时多出的给名称列（DESIGN「三个主视图怎么对齐」）", () => {
+  assert.equal(PANEL_W, 848);
 });

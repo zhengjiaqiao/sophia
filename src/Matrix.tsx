@@ -50,6 +50,13 @@ export { PINNED_TIP_MS };
 export const cellPress = (view: Pick<MatrixCellView, "clickable">): "act" | "explain" =>
   view.clickable ? "act" : "explain";
 const ORIGIN_W = 120;
+/// MCP 表才有的「传输」列
+const TRANSPORT_W = 72;
+/// 列表里最多显示几个 agent（core 的 `MAX_SHOWN`，DESIGN「设置页 · 最多 4 个」）
+const MAX_AGENTS = 4;
+/// Skills 与 MCP 同一个固定面板宽度（DESIGN「三个主视图怎么对齐」）：按最多 4 个 agent、带传输列时定，
+/// 工具行、筛选片、表格右沿同一条线，切页签按钮不跳；agent 少时多出的给名称列
+export const PANEL_W = CHECK_W + NAME_W + TRANSPORT_W + ORIGIN_W + MAX_AGENTS * COL_W + TAIL_W;
 
 /// 一格的键：行键 + 列 id。闪烁、就地提示都按它认格
 const CELL_SEP = String.fromCharCode(31);
@@ -435,15 +442,15 @@ export default function Matrix(props: MatrixProps) {
   const dotText = hasTransport ? MCP_DOT_TEXT : SKILL_DOT_TEXT;
   const template = [
     `${CHECK_W}px`,
-    `${NAME_W}px`,
-    ...(hasTransport ? ["72px"] : []),
+    `minmax(${NAME_W}px, 1fr)`,
+    ...(hasTransport ? [`${TRANSPORT_W}px`] : []),
     `${ORIGIN_W}px`,
     ...columns.map(() => `${COL_W}px`),
     `${TAIL_W}px`,
   ].join(" ");
-  const lead = CHECK_W + NAME_W + (hasTransport ? 72 : 0) + ORIGIN_W;
-  const width = lead + columns.length * COL_W + TAIL_W;
-  const colLeft = (index: number) => lead + index * COL_W;
+  const width = PANEL_W;
+  // agent 列靠右：从面板右沿往左数（名称列吸收多出的宽度）
+  const colLeft = (index: number) => width - TAIL_W - (columns.length - index) * COL_W;
   const gridStyle: CSSProperties = { gridTemplateColumns: template };
 
   // ---- 排序：名称 / 原件位置 / 某一列的格；同值再按名称、位置，同名两份相邻 ----
