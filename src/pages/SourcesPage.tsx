@@ -559,7 +559,7 @@ export default function SourcesPage(props: SourcesPageProps) {
 /// 小浮层（与侧栏排序下拉、模型选择器同一写法：layer 圆角 + 浮层阴影，无黑框）：
 /// 锚在触发它的控件下方 6、左对齐；下方放不下就翻到上方。点外面、Esc、滚动都关，不铺透明罩。
 /// 用 fixed 定位：空态里的 `+ 来源` 在 Empty 里面，没法给它包一个定位容器
-function FloatingLayer({
+export function FloatingLayer({
   trigger,
   onClose,
   className,

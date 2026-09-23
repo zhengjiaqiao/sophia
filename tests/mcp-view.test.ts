@@ -3,11 +3,15 @@ import test from "node:test";
 import {
   canSupplement,
   mcpDomains,
+  pickChoices,
+  pickDiffText,
+  pickTip,
+  pickTitle,
   sourceForMissing,
   sourceForMissingTarget,
   supplementSourcesForTarget,
 } from "../src/mcpView.ts";
-import type { McpCellState, McpEntry, McpLocation, McpOverview } from "../src/types.ts";
+import type { McpCellState, McpDiff, McpEntry, McpLocation, McpOverview } from "../src/types.ts";
 
 const location = (id: string, domain = "global"): McpLocation => ({
   id,
@@ -299,5 +303,89 @@ test("订阅着的别处来源：它的全部服务进本域列表，没写进�
   assert.deepEqual(
     other.rows.map((row) => row.name),
     ["x"],
+  );
+});
+
+test("同名多份：只列互不等价的几份，等价的并成一份", () => {
+  const [page] = mcpDomains(
+    overview(
+      [location("a"), location("b"), location("c"), location("d")],
+      [
+        entry("a", "notion", { a: "own", b: "equal", c: "conflict", d: "missing" }),
+        entry("b", "notion", { a: "equal", b: "own", c: "conflict", d: "missing" }),
+        entry("c", "notion", { a: "conflict", b: "conflict", c: "own", d: "missing" }),
+      ],
+    ),
+  );
+  const row = page.rows[0];
+  assert.equal(sourceForMissingTarget(row, "d"), null);
+  assert.deepEqual(
+    pickChoices(row, "d").map((e) => e.sourceId),
+    ["a", "c"],
+  );
+  // 只有一份可写（或都等价）时不用挑
+  const [single] = mcpDomains(
+    overview([location("a"), location("b")], [entry("a", "x", { a: "own", b: "missing" })]),
+  );
+  assert.equal(pickChoices(single.rows[0], "b").length, 1);
+});
+
+test("挑选浮层的标题与格子提示框", () => {
+  assert.equal(pickTitle("notion", 2), "notion 有 2 份不一样的，写进哪一份？");
+  assert.equal(pickTip("notion", 3), "有 3 份不一样的同名 notion · 点一下挑一份");
+});
+
+const diff = (
+  locationIds: string[],
+  fields: McpDiff["fields"],
+  extra: Partial<McpDiff> = {},
+): McpDiff => ({
+  name: "notion",
+  locationIds,
+  fields,
+  dynamicAuth: false,
+  unreadable: [],
+  ...extra,
+});
+const plain = (text: string) => ({ kind: "plain" as const, text });
+
+test("差异摘要：两份时列出全部不同的字段，凭据只给字段名", () => {
+  const d = diff(
+    ["a", "b"],
+    [
+      { field: "url", values: [plain("https://a"), plain("https://b")] },
+      {
+        field: "headers.Authorization",
+        values: [
+          { kind: "secret", last4: "abcd" },
+          { kind: "secret", last4: "wxyz" },
+        ],
+      },
+    ],
+  );
+  assert.equal(pickDiffText(d, "a"), "url、headers.Authorization 不同");
+  assert.equal(pickDiffText(d, "b"), "url、headers.Authorization 不同");
+  assert.ok(!pickDiffText(d, "a").includes("abcd"));
+});
+
+test("差异摘要：三份时只列这一份独有的，没有独有的退回全部", () => {
+  const d = diff(
+    ["a", "b", "c"],
+    [
+      { field: "url", values: [plain("x"), plain("x"), plain("y")] },
+      { field: "command", values: [plain("1"), plain("2"), plain("1")] },
+    ],
+  );
+  assert.equal(pickDiffText(d, "c"), "url 不同");
+  assert.equal(pickDiffText(d, "b"), "command 不同");
+  assert.equal(pickDiffText(d, "a"), "url、command 不同");
+});
+
+test("差异摘要：取不到、读不出来或比不了时说清楚", () => {
+  assert.equal(pickDiffText(null, "a"), "配置不一样");
+  assert.equal(pickDiffText(diff(["a", "b"], [], { unreadable: ["a"] }), "a"), "配置不一样");
+  assert.equal(
+    pickDiffText(diff(["a", "b"], [], { dynamicAuth: true }), "a"),
+    "认证头要到运行时才生成，没法逐字比对",
   );
 });

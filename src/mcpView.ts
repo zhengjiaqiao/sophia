@@ -6,7 +6,7 @@ import {
   type McpIssueKind,
 } from "./mcpCellState.ts";
 import { issueKey } from "./issues.ts";
-import type { McpEntry, McpLocation, McpOverview } from "./types.ts";
+import type { McpDiff, McpEntry, McpFieldValue, McpLocation, McpOverview } from "./types.ts";
 
 export interface McpDomainRow {
   name: string;
@@ -147,6 +147,49 @@ export function sourceForMissingTarget(row: McpDomainRow, targetId: string): Mcp
   )
     ? candidates[0]
     : null;
+}
+
+/**
+ * 一个缺失格上能写的几份同名定义里**互不等价**的那几份（等价的只留第一份，顺序按行内先后）。
+ * 多于一份就不替用户挑，点格出挑选浮层（DESIGN「MCP 同名多份时就地挑一份写进去」）。
+ */
+export function pickChoices(row: McpDomainRow, targetId: string): McpEntry[] {
+  const out: McpEntry[] = [];
+  for (const entry of supplementSourcesForTarget(row, targetId)) {
+    if (!out.some((kept) => equivalent(kept, entry))) out.push(entry);
+  }
+  return out;
+}
+
+/// 挑选浮层的标题
+export const pickTitle = (name: string, count: number): string =>
+  `${name} 有 ${count} 份不一样的，写进哪一份？`;
+
+/// 这种格的提示框
+export const pickTip = (name: string, count: number): string =>
+  `有 ${count} 份不一样的同名 ${name} · 点一下挑一份`;
+
+const sameValue = (a: McpFieldValue, b: McpFieldValue) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * 挑选浮层里一项的差异摘要：这一份与其他几份差在哪几个字段（`url 不同`，字段名写法同「只标差异」）。
+ * 只列这一份独有的值；两份时就是全部不同的字段。三份以上一个独有的都没有（每个值都和另一份撞上），
+ * 退回列出全部不同的字段。只给字段名，令牌、密钥的值一概不出现。
+ */
+export function pickDiffText(diff: McpDiff | null, sourceId: string): string {
+  const fallback = diff?.dynamicAuth ? "认证头要到运行时才生成，没法逐字比对" : "配置不一样";
+  if (diff === null) return fallback;
+  const index = diff.locationIds.indexOf(sourceId);
+  if (index < 0 || diff.unreadable.includes(sourceId)) return fallback;
+  const readable = diff.locationIds
+    .map((id, i) => ({ id, i }))
+    .filter(({ id, i }) => i !== index && !diff.unreadable.includes(id))
+    .map(({ i }) => i);
+  const own = diff.fields
+    .filter((f) => readable.every((i) => !sameValue(f.values[i], f.values[index])))
+    .map((f) => f.field);
+  const fields = own.length > 0 ? own : diff.fields.map((f) => f.field);
+  return fields.length > 0 ? `${fields.join("、")} 不同` : fallback;
 }
 
 const domainRows = (entries: McpEntry[]): McpDomainRow[] => {

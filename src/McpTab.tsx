@@ -11,6 +11,7 @@ import Matrix, {
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty } from "./DomainView";
 import SourcesPage from "./pages/SourcesPage";
+import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
 import { pathsOfKey } from "./issues";
 import {
@@ -19,6 +20,8 @@ import {
   differingSourceIds,
   mcpDomains,
   mcpGroupOf,
+  pickChoices,
+  pickTip,
   sourceForMissing,
   sourceForMissingTarget,
   type McpDomain,
@@ -152,6 +155,8 @@ export default function McpTab({
   // 来源管理页（工具行 `来源`）开着没有
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [pane, setPane] = useState<Pane | null>(null);
+  // 同名多份的空格：点它出的挑选浮层（锚在那一格上）
+  const [pick, setPick] = useState<McpPick | null>(null);
   const [optimistic, setOptimistic] = useState<Set<string>>(new Set());
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
   // 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，触发项旁的忙碌指示 + 一句
@@ -186,6 +191,7 @@ export default function McpTab({
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
   const dismissCell = useCallback(() => setCellToast(null), []);
+  const closePick = useCallback(() => setPick(null), []);
 
   const refresh = async () => {
     const version = ++refreshVersion.current;
@@ -253,6 +259,7 @@ export default function McpTab({
   useEffect(() => {
     setSourcesOpen(false);
     setPane(null);
+    setPick(null);
     setKeyToast(null);
     setCellToast(null);
     setCellNotice(null);
@@ -595,11 +602,49 @@ export default function McpTab({
     setCellNotice(null);
     const source = sourceForMissingTarget(row, target.id);
     if (source === null) {
-      // 有好几份不等价的同名来源：不替用户挑，格下说清为什么没写
-      setCellNotice({ rowKey: row.name, columnId: target.id, text: ambiguousText(row.name) });
+      const choices = pickChoices(row, target.id);
+      const trigger = cellElement(p, rowKey, target.id);
+      if (choices.length < 2 || trigger === null) {
+        // 走不到挑选（按理不会）：不替用户挑，格下说清为什么没写
+        setCellNotice({ rowKey: row.name, columnId: target.id, text: ambiguousText(row.name) });
+        return;
+      }
+      // 有好几份不一样的同名定义：不替用户挑，也不另开页——锚在格子上出小浮层挑一份（再点一下收起）
+      if (pick?.name === row.name && pick.targetId === target.id) {
+        setPick(null);
+        return;
+      }
+      openPick({ name: row.name, targetId: target.id, trigger, choices });
       return;
     }
     void write([{ sourceId: source.sourceId, name: row.name, targetId: target.id }]);
+  };
+
+  /// 格子本身（挑选浮层的锚）：那一行里第几列的那颗格
+  const cellElement = (p: McpDomain, rowKey: string, targetId: string): HTMLElement | null => {
+    const column = p.targets.findIndex((t) => t.id === targetId);
+    const rowEl = document.querySelector(`[data-row="${CSS.escape(rowKey)}"]`);
+    return rowEl?.querySelector<HTMLElement>(`[data-cell$=":${column}"]`) ?? null;
+  };
+
+  /// 打开挑选浮层，同时懒取各份的字段级差异（只要字段名；取不到就只说「配置不一样」）
+  const openPick = (next: McpPick) => {
+    setPick(next);
+    const ids = next.choices.map((entry) => entry.sourceId);
+    const settle = (diff: McpPick["diff"]) =>
+      setPick((prev) =>
+        prev?.name === next.name && prev.targetId === next.targetId ? { ...prev, diff } : prev,
+      );
+    api.mcpFieldDiff(next.name, ids).then(settle, () => settle(null));
+  };
+
+  /// 挑了一份：焦点先还给格子（跨域确认框锚在它下面），再照单格写入走
+  const choose = (sourceId: string) => {
+    if (pick === null) return;
+    const { name, targetId, trigger } = pick;
+    trigger.focus();
+    setPick(null);
+    void write([{ sourceId, name, targetId }]);
   };
 
   // ===== 渲染 =====
@@ -671,6 +716,10 @@ export default function McpTab({
     };
   });
 
+  /// 这一空格上有几份不一样的同名定义可挑（能直接定下来源的记 1）
+  const choiceCount = (row: McpDomainRow, targetId: string) =>
+    sourceForMissingTarget(row, targetId) === null ? pickChoices(row, targetId).length : 1;
+
   // ---- 行 ----
   const rows: MatrixRowView[] = visible.map((row) => {
     const key = rowKeyOf(row);
@@ -691,7 +740,9 @@ export default function McpTab({
         tip: invalid
           ? `${view.reason ?? ""} · 点一下在访达中显示`
           : view.clickable
-            ? "点一下写进"
+            ? choiceCount(row, target.id) > 1
+              ? pickTip(row.name, choiceCount(row, target.id))
+              : "点一下写进"
             : view.dot === "own" && view.issue === undefined
               ? mcpOwnTip(names.get(target.id) ?? target.label)
               : (view.reason ?? ""),
@@ -890,7 +941,7 @@ export default function McpTab({
         onUndo={() => undoRef.current?.()}
         busy={busy}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
-        shortcuts={!sourcesOpen && pane === null}
+        shortcuts={!sourcesOpen && pane === null && pick === null}
         empty={empty}
         flash={flash}
         cellNotice={cellNotice}
@@ -936,6 +987,15 @@ export default function McpTab({
             </div>
           ))}
         </Confirm>
+      )}
+
+      {pick !== null && (
+        <McpPickLayer
+          pick={pick}
+          labelOf={(id) => groupLabel(locationOf(id), id)}
+          onPick={choose}
+          onClose={closePick}
+        />
       )}
 
       {sourcesOpen && (

@@ -3017,6 +3017,60 @@ mod undo_tests {
     }
 
     #[test]
+    fn chosen_copy_is_written_when_same_name_differs() {
+        // 同名 docs 有两份不一样的：写进哪一份由选择里的来源决定，另一份不参与
+        let tree = TempTree::new();
+        let first = tree.root().join("first.json");
+        let second = tree.root().join("second.json");
+        let target = tree.root().join("config.toml");
+        fs::write(&first, br#"{"mcpServers":{"docs":{"command":"one"}}}"#).unwrap();
+        fs::write(
+            &second,
+            br#"{"mcpServers":{"docs":{"url":"https://two/mcp"}}}"#,
+        )
+        .unwrap();
+        let locations = vec![
+            loc("first", &first),
+            loc("second", &second),
+            loc("target", &target),
+        ];
+        let overview = scan(&locations);
+        let cells = |source: &str| {
+            overview
+                .entries
+                .iter()
+                .find(|entry| entry.source_id == source)
+                .unwrap()
+                .cells
+                .clone()
+        };
+        let state = |source: &str, target: &str| {
+            cells(source)
+                .into_iter()
+                .find(|cell| cell.target_id == target)
+                .unwrap()
+                .state
+        };
+        assert_eq!(state("first", "second"), McpCellState::Conflict);
+        assert_eq!(state("first", "target"), McpCellState::Missing);
+        assert_eq!(state("second", "target"), McpCellState::Missing);
+
+        let selection = McpSelection {
+            source_id: "second".into(),
+            name: "docs".into(),
+            target_id: "target".into(),
+        };
+        let report = execute(prepare(&locations, &[selection]), false);
+        assert_eq!(report.entries[0].outcome, "created");
+        let written = parse_toml(&fs::read(&target).unwrap(), State::Missing);
+        assert_eq!(
+            written.values["docs"].url.as_deref(),
+            Some("https://two/mcp")
+        );
+        assert_eq!(written.values["docs"].command, None);
+    }
+
+    #[test]
     fn failed_write_has_no_undo() {
         let tree = TempTree::new();
         let source = tree.root().join("source.json");
