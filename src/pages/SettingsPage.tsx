@@ -247,7 +247,11 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   );
 
   /// 点一下切换，当场生效。写盘成功后重读一次，界面始终以落盘结果为准
+  /// 勾选先画出来再写（同模型页「勾选不闪」）：写失败读回实际状态并说原因
   const toggle = async (id: string, enabled: boolean) => {
+    setList((l) =>
+      l ? { ...l, harnesses: l.harnesses.map((h) => (h.id === id ? { ...h, enabled } : h)) } : l,
+    );
     try {
       await api.setHarnessEnabled(id, enabled);
       if (noteTimer.current) clearTimeout(noteTimer.current);
@@ -259,6 +263,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
       await reload();
     } catch (e) {
       onError(String(e));
+      await reload();
     }
   };
 
