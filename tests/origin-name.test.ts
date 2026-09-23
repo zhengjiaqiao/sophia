@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { originNames, originText } from "../src/originName.ts";
+import { originNames, originText, shortSegments } from "../src/originName.ts";
 
 const base = "/Users/jia/Library/Application Support/ego lite";
 
@@ -29,7 +29,31 @@ test("原件位置显示名：同名来源拆成来源名 + 区分片段两段�
   assert.equal(originText(names.get("x")!), "ego lite · 0.5.0.32");
 });
 
-test("原件位置显示名：区分片段就是名字本身时不重复写；过长的片段截到 10 个字符", () => {
+test("区分片段：先去掉共有开头（退到分隔符之后），再截到能区分的最短一段、至少 4 个字符", () => {
+  const names = originNames(
+    ["a", "b"],
+    [
+      { id: "a", label: "WeiboAP", path: "/w/WeiboAP/agent_1776847465710_d5z6cowep/skills" },
+      { id: "b", label: "WeiboAP", path: "/w/WeiboAP/agent_1787890675056_m9ac9h594/skills" },
+    ],
+  );
+  assert.deepEqual(names.get("a"), { name: "WeiboAP", seg: "1776…" });
+  assert.equal(originText(names.get("b")!), "WeiboAP · 1787…");
+  // 前面几位都一样：截到分得开为止
+  assert.deepEqual(shortSegments(["agent_1776847465710_x", "agent_1776999999999_y"]), [
+    "17768…",
+    "17769…",
+  ]);
+  // 去掉共有开头后够短的整段写；版本号的 `.` 不算分隔，整段读
+  assert.deepEqual(shortSegments(["team_alpha", "team_beta"]), ["alpha", "beta"]);
+  assert.deepEqual(shortSegments(["0.5.0.32", "0.5.1.11"]), ["0.5.0.32", "0.5.1.11"]);
+  // 共有开头就是某一段的全部：不去掉，免得那段变成空的
+  assert.deepEqual(shortSegments(["agent_", "agent_2"]), ["agent_", "agent_2"]);
+  // 空串（片段就是名字本身）原样返回、不参与比较
+  assert.deepEqual(shortSegments(["", "agent_1776847465710_d5z6cowep"]), ["", "agent_1776…"]);
+});
+
+test("原件位置显示名：区分片段就是名字本身时不重复写；只剩一段时截到 10 个字符", () => {
   const names = originNames(
     ["p", "q"],
     [
