@@ -99,6 +99,16 @@ export interface TooltipProps {
 
 type Align = "center" | "start" | "end";
 
+/// 这次焦点是不是键盘带来的（Tab / 方向键），按浏览器的 `:focus-visible` 判断；不支持时当作是
+function isKeyboardFocus(target: EventTarget): boolean {
+  if (!(target instanceof Element)) return true;
+  try {
+    return target.matches(":focus-visible");
+  } catch {
+    return true;
+  }
+}
+
 export function Tooltip({
   content,
   shortcut,
@@ -250,7 +260,15 @@ export function Tooltip({
                 press();
               }
         }
-        onFocus={idle ? undefined : arm}
+        // 只有键盘带来的焦点才弹（`:focus-visible`）：从二级页返回把焦点还给入口键、面板弹出时
+        // 把焦点放进来，这些是程序放的焦点，用户没在看这颗键，弹出来就是无端冒提示（产品负责人）
+        onFocus={
+          idle
+            ? undefined
+            : (e) => {
+                if (isKeyboardFocus(e.target)) arm();
+              }
+        }
         onBlur={idle ? undefined : leave}
       >
         {trigger}
