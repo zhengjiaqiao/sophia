@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { keyboardModality } from "../inputModality.ts";
 import type { ReactElement, ReactNode } from "react";
 
 /// 提示框（DESIGN「提示框」，画板 States「提示框」）：文字确定性由它承载，
@@ -110,14 +111,10 @@ export function isClipped(root: Element | null): boolean {
 
 type Align = "center" | "start" | "end";
 
-/// 这次焦点是不是键盘带来的（Tab / 方向键），按浏览器的 `:focus-visible` 判断；不支持时当作是
-function isKeyboardFocus(target: EventTarget): boolean {
-  if (!(target instanceof Element)) return true;
-  try {
-    return target.matches(":focus-visible");
-  } catch {
-    return true;
-  }
+/// 这次焦点是不是用户用键盘带来的：看本窗口最近一次操作是按键还是指针（inputModality）。
+/// 不用浏览器的 `:focus-visible`——窗口刚从托盘、原生对话框切回来时，它会把程序放的焦点猜成键盘焦点
+function isKeyboardFocus(): boolean {
+  return keyboardModality();
 }
 
 export function Tooltip({
@@ -274,13 +271,13 @@ export function Tooltip({
                 press();
               }
         }
-        // 只有键盘带来的焦点才弹（`:focus-visible`）：从二级页返回把焦点还给入口键、面板弹出时
+        // 只有用户用键盘带来的焦点才弹（inputModality）：从二级页返回把焦点还给入口键、面板弹出时
         // 把焦点放进来，这些是程序放的焦点，用户没在看这颗键，弹出来就是无端冒提示（产品负责人）
         onFocus={
           idle
             ? undefined
-            : (e) => {
-                if (isKeyboardFocus(e.target)) arm();
+            : () => {
+                if (isKeyboardFocus()) arm();
               }
         }
         onBlur={idle ? undefined : leave}
