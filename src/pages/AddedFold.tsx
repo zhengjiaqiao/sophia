@@ -9,10 +9,7 @@ export function AddedFold({
   open,
   onToggle,
   children,
-  layout = "grid",
 }: {
-  /// grid：名字三列按行排（skill）；rows：一行一个（MCP，名字 + 传输）
-  layout?: "grid" | "rows";
   count: number;
   open: boolean;
   onToggle: () => void;
@@ -30,11 +27,7 @@ export function AddedFold({
         已添加 {count} 个
         <IconChevronRight size={10} />
       </button>
-      {open ? (
-        <div className={`ss-import__folded${layout === "rows" ? " ss-import__folded--rows" : ""}`}>
-          {children}
-        </div>
-      ) : null}
+      {open ? <div className="ss-import__folded">{children}</div> : null}
     </div>
   );
 }

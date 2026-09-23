@@ -374,12 +374,6 @@
   cursor: default;
 }
 
-/* MCP：已添加的一行 = 名字 + 传输（同为 ink-faint） */
-.ss-import__folded--rows {
-  display: block;
-  padding-left: 22px;
-}
-
 /* ---- 都已添加：右栏只写一句 + 已添加那一行，不显示底部块 ---- */
 .ss-import__alldone {
   padding-top: var(--space-xl);

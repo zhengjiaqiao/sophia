@@ -10,6 +10,7 @@ import { CheckMark } from "./CheckMark.tsx";
 import { TargetCheck } from "./TargetCheck.tsx";
 import {
   addLabel,
+  columnsOf,
   defaultTargets,
   distinguishingSegments,
   loadImportMemory,
@@ -26,7 +27,8 @@ import "./McpImportPage.css";
 /// 与 skill 那页的不同：
 /// - 左栏是**位置**（`Claude Code · User`），第二行灰字写它在哪（`全局` / `项目 · CardBox`）；
 ///   位置是发现出来的，没有 `+ 来源`
-/// - 列表多一列 `传输`（HTTP / stdio）
+/// - 列表与 skill 页同样双列排，不列传输方式（不影响要不要添加）；影响决策的「搬不过去」那一行
+///   不给勾，行尾 `搬不过去` 标签，悬停说原因
 /// - 底部目标（复选框 + 图标 + 名字，与 skill 页同一种写法）是本域的全部位置，**包含主视图里
 ///   藏起来的**（`matrixHidden`）——这一页是它们唯一的入口；**来源自己那个位置禁用**，提示「这就是来源」
 /// - `添加 N 个` 不直接写：把预览交回 MCP 页，批量或跨域写入在那里确认一道
@@ -50,10 +52,6 @@ export interface McpImportPageProps {
 }
 
 const entryKey = (entry: McpEntry) => `${entry.sourceId}|${entry.name}`;
-
-/// 传输方式：只写真实的传输方式
-const transportText = (entry: McpEntry) =>
-  entry.transport === "stdio" ? "stdio" : entry.transport === "http" ? "HTTP" : "—";
 
 /// 位置名。主视图里藏起来的那些要说清点下去会发生什么
 const targetLabel = (target: McpLocation) => {
@@ -254,7 +252,6 @@ export default function McpImportPage({
   const entries = sourceEntries.map((entry) => ({
     entry,
     name: entry.name,
-    transport: transportText(entry),
     pickable: canPick(entry),
     added: importedInDomain(entry, page),
     unsupported: entry.transport === "unsupported" || entry.reason !== null,
@@ -264,6 +261,8 @@ export default function McpImportPage({
   const listed = entries.filter((e) => e.pickable || e.unsupported);
   const added = entries.filter((e) => !e.pickable && !e.unsupported);
   const allDone = listed.length === 0 && entries.length > 0;
+  /// 与 skill 页同一种排法：多到一列放不下才分两列，按列读
+  const columns = columnsOf(listed, listed.length > 16 ? 2 : 1);
   /// 全选三态照实算（与 skill 页同一份逻辑）。MCP 没有同名替换：同名已有的格子本来就不写
   const pickableNames = pickable.map((e) => e.name);
   const allState = selectAllState(pickableNames, names);
@@ -291,20 +290,13 @@ export default function McpImportPage({
     targetIds.length > 0 &&
     sameSet(memory.last, targetIds);
 
-  /// 列表最后一行：已添加 N 个 ▸，展开是「名字 + 传输」的灰行（不是可选项）
+  /// 列表最后一行：已添加 N 个 ▸，展开是灰着的名字（不是可选项），与 skill 页同一种写法
   const addedFold = (
-    <AddedFold
-      count={added.length}
-      open={showAdded}
-      onToggle={() => setShowAdded(!showAdded)}
-      layout="rows"
-    >
+    <AddedFold count={added.length} open={showAdded} onToggle={() => setShowAdded(!showAdded)}>
       {added.map((item) => (
-        <div key={entryKey(item.entry)} className="ss-import__row ss-mcp__row is-added">
-          <span className="ss-import__name">{item.name}</span>
-          <span className="ss-mcp__transport">{item.transport}</span>
-          <span className="ss-mcp__state" />
-        </div>
+        <span key={entryKey(item.entry)} className="ss-import__addedname">
+          {item.name}
+        </span>
       ))}
     </AddedFold>
   );
@@ -399,7 +391,7 @@ export default function McpImportPage({
               </div>
             ) : source !== undefined ? (
               <>
-                <div className="ss-import__listhead ss-mcp__listhead">
+                <div className="ss-import__listhead">
                   <span className="ss-import__headline">
                     {source.label} · <span className="ss-import__num">{sourceEntries.length}</span>
                   </span>
@@ -415,50 +407,50 @@ export default function McpImportPage({
                       全选
                     </button>
                   ) : null}
-                  <span className="ss-mcp__transporthead">传输</span>
                 </div>
 
-                <Busy busy={busy} className="ss-import__grid ss-mcp__list">
-                  {listed.map((item) => {
-                    // 搬不过去的不是可选项：不画复选框、不给悬停反馈
-                    if (item.unsupported) {
-                      return (
-                        <div
-                          key={entryKey(item.entry)}
-                          className="ss-import__row ss-mcp__row is-added"
-                          data-rowtip
-                        >
-                          <span className="ss-import__nobox" aria-hidden="true" />
-                          <span className="ss-import__name">{item.name}</span>
-                          <span className="ss-mcp__transport">{item.transport}</span>
-                          <span className="ss-mcp__state">
-                            <RowTip
-                              side="before"
-                              content={`${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`}
+                <Busy busy={busy} className="ss-import__grid">
+                  {columns.map((col) => (
+                    <div className="ss-import__col" key={entryKey(col[0].entry)}>
+                      {col.map((item) => {
+                        // 搬不过去的不是可选项：不画复选框、不给悬停反馈
+                        if (item.unsupported) {
+                          return (
+                            <div
+                              key={entryKey(item.entry)}
+                              className="ss-import__row is-added"
+                              data-rowtip
                             >
-                              <span className="ss-tag ss-tag--strong has-tip">搬不过去</span>
-                            </RowTip>
-                          </span>
-                        </div>
-                      );
-                    }
-                    const on = names.includes(item.name);
-                    return (
-                      <button
-                        key={entryKey(item.entry)}
-                        type="button"
-                        className="ss-import__row ss-mcp__row"
-                        role="checkbox"
-                        aria-checked={on}
-                        onClick={() => toggleName(item.name)}
-                      >
-                        <CheckMark on={on} />
-                        <span className="ss-import__name">{item.name}</span>
-                        <span className="ss-mcp__transport">{item.transport}</span>
-                        <span className="ss-mcp__state" />
-                      </button>
-                    );
-                  })}
+                              <span className="ss-import__nobox" aria-hidden="true" />
+                              <span className="ss-import__name">{item.name}</span>
+                              <span className="ss-import__tag">
+                                <RowTip
+                                  side="before"
+                                  content={`${item.name} 用了只有 ${source.label} 认得的写法，搬到别处就不是原来那个了`}
+                                >
+                                  <span className="ss-tag ss-tag--strong has-tip">搬不过去</span>
+                                </RowTip>
+                              </span>
+                            </div>
+                          );
+                        }
+                        const on = names.includes(item.name);
+                        return (
+                          <button
+                            key={entryKey(item.entry)}
+                            type="button"
+                            className="ss-import__row"
+                            role="checkbox"
+                            aria-checked={on}
+                            onClick={() => toggleName(item.name)}
+                          >
+                            <CheckMark on={on} />
+                            <span className="ss-import__name">{item.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
                   {addedFold}
                 </Busy>
               </>
@@ -504,16 +496,19 @@ export default function McpImportPage({
                 <span className="ss-import__suggest">每次都选这几个？可以打开</span>
               ) : null}
             </span>
-            <span className="ss-mcp__safety">只新增，不覆盖同名配置</span>
-            {blocked ? (
-              <Button size="row" variant="primary" disabled disabledReason={blocked}>
-                {addLabel(chosen, 0)}
-              </Button>
-            ) : (
-              <Button size="row" variant="primary" onClick={() => void doAdd()}>
-                {addLabel(chosen, 0)}
-              </Button>
-            )}
+            {/* 右端一组：安全小字 + 主动作，折行时一起走 */}
+            <span className="ss-import__submit">
+              <span className="ss-mcp__safety">只新增，不覆盖同名配置</span>
+              {blocked ? (
+                <Button size="row" variant="primary" disabled disabledReason={blocked}>
+                  {addLabel(chosen, 0)}
+                </Button>
+              ) : (
+                <Button size="row" variant="primary" onClick={() => void doAdd()}>
+                  {addLabel(chosen, 0)}
+                </Button>
+              )}
+            </span>
           </Busy>
         )}
       </div>
