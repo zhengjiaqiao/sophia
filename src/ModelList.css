@@ -196,30 +196,11 @@
   margin-left: 0;
 }
 
-/* 新拉到的模型各闪一次：120ms 反色再回落（与「刚点亮」同一个动作） */
-.models-option.is-flash {
-  animation: models-flash 240ms var(--ease-mech) both;
-}
-
-@keyframes models-flash {
-  0%,
-  50% {
-    background: var(--ink);
-    color: var(--canvas);
-  }
-  100% {
-    background: transparent;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .model-list__viewport::before,
   .model-list__viewport::after,
   .model-list__search,
   .models-option {
     transition: none;
-  }
-  .models-option.is-flash {
-    animation: none;
   }
 }

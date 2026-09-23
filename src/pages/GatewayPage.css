@@ -1,4 +1,5 @@
-/* 网关配置二级页（DESIGN「网关配置是二级页」，画板 v84 Gateway）。
+/* 网关配置二级页（DESIGN「网关配置是二级页」，画板 Gateway）。
+   列表的骨架与来源管理页同一套（SourcesPage.css），这里只写网关特有的。
    色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变；圆角只有 0 / 2px / 32px / 50%。 */
 @import "../tokens.css";
 
@@ -37,172 +38,117 @@
   gap: var(--space-sm);
 }
 
-/* 与设置页同宽、同页边 */
-.gw-page {
-  width: 744px;
-  max-width: 100%;
-  padding: var(--space-xxl);
-  box-sizing: content-box;
+/* ===== 列表：与来源管理页同一套骨架（SourcesPage.css 的 .src-panel / .src-row），这里只写不同的 =====
+   一家一行：左边名字格（▸ + 短名 + 第二行）占满，右边是行尾动作（`再试一次` `编辑` 垃圾桶） */
+.gw-row .src-row__main {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
-/* ===== 三段，单列自上而下：分段片 → 连接 → 从这个网关选模型 ===== */
-.gw-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xl);
+/* 名字格整块可点（点整行展开）：第二行要用满这一格的宽度，地址才只在放不下时截断 */
+.gw-row__name .src-row__text {
+  flex: 1 1 auto;
 }
 
-.gw-panel__top {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  min-width: 0;
+/* 编辑中 / 新网关：名字位不是展开键 */
+.gw-row__name.is-static {
+  cursor: default;
 }
 
-/* 网关分段片：选中反色，最后一个是 `+ 网关` */
-.gw-panel__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-xs);
-}
-
-.gw-panel__chipwrap {
-  display: inline-flex;
-  margin: -3px;
-  padding: 3px;
-  border-radius: var(--radius-pill);
-}
-
-/* 新问题提示「查看」定位到这一家：surface 带亮 → 灭 → 亮 → 灭，各 240ms（不用反色，黑只有两义） */
-.gw-panel__chipwrap.is-jump {
-  animation: gw-jump 960ms var(--ease-mech);
-}
-
-@keyframes gw-jump {
-  0%,
-  25% {
-    background-color: var(--surface);
-  }
-  26%,
-  50% {
-    background-color: transparent;
-  }
-  51%,
-  75% {
-    background-color: var(--surface);
-  }
-  100% {
-    background-color: transparent;
-  }
-}
-
-.gw-panel__chip-name {
-  white-space: nowrap;
-}
-
-.gw-panel__chip-count {
-  margin-left: 6px;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  font-variant-numeric: tabular-nums;
-  opacity: 0.7;
-}
-
-/* `连不上`：强标签，墨色 600（选中反色时随片翻白） */
-.gw-panel__chip-down {
-  margin-left: 6px;
-  font-size: var(--size-micro);
-  font-weight: 600;
-}
-
-/* 已连上的只一行摘要：`https://… · 已连 · 编辑` + 行尾垃圾桶 */
-.gw-panel__summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--control-h);
-  font-size: var(--size-caption);
+/* 新网关：名字位是普通 ink-mute 字（不是反色片） */
+.gw-row__draft {
   color: var(--ink-mute);
 }
 
-.gw-panel__summary > .ss-tipwrap:first-child {
+/* 第二行 12 ink-mute：地址占满放得下的宽度，放不下才截断（截断才提示）；
+   连不上的原因写全，窄了折行，不藏进悬停 */
+.src-row__sub.gw-row__sub {
+  align-items: flex-start;
+  color: var(--ink-mute);
+}
+
+.gw-row__sub > .ss-tipwrap {
+  flex: 0 1 auto;
   min-width: 0;
 }
 
-/* 地址是标识：放不下截断，提示框给全文 */
-.gw-panel__url {
+.gw-row__url {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
 }
 
-.gw-panel__sep {
-  color: var(--ink-faint);
+.gw-row__fact {
+  flex-shrink: 0;
 }
 
-.gw-panel__state {
-  white-space: nowrap;
-}
-
-/* 连不上：强标签 + 点状下划线（悬停读原因），后面 8 紧跟 `再试一次` */
-.gw-panel__down {
-  margin-right: 2px;
+/* `连不上`：强标签，墨色 600 */
+.gw-row__down {
   font-weight: 600;
   color: var(--ink);
-  white-space: nowrap;
-  text-decoration: underline dotted var(--ink-faint);
-  text-underline-offset: 3px;
 }
 
-.gw-panel__trash {
+.gw-row__reason {
+  flex: 1 1 0;
+  min-width: 40%;
+  white-space: normal;
+}
+
+/* 行尾动作：`再试一次` `编辑` 垃圾桶，同来源页行尾 × 的位置 */
+.gw-row__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.gw-row__trash {
   display: inline-flex;
-  margin-left: auto;
 }
 
-/* 第三段：从这个网关选模型。段头 13/600，限制说明 12 ink-faint（不截断） */
-.gw-panel__models {
-  min-width: 0;
+/* 展开区（选模型）与行里的表单：在这一行的线以内，缩进对齐网关名（▸ 14 + 8），
+   上下留白同来源页的展开区 */
+.gw-row__body,
+.gw-row__form,
+.gw-row__notice {
+  padding: var(--space-xxs) 0 calc(var(--space-sm) + 10px) 22px;
 }
 
-.gw-panel__models:empty {
-  display: none;
+/* 删 / 重连没成的灰面板：接在这一行的名字下面 */
+.gw-row__notice {
+  padding-top: 0;
 }
 
-.gw-panel__section {
-  font-size: var(--size-caption);
-  font-weight: 600;
-  line-height: var(--leading-caption);
+.gw-row.is-open .gw-row__notice {
+  padding-top: var(--space-xxs);
 }
 
-.gw-panel__note {
-  margin-top: 2px;
+/* 限制说明 12 ink-faint（不截断） */
+.gw-row__note {
   font-size: var(--size-micro);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
 }
 
 /* 本网关已选的模型片：一行放不下就折行，不藏（与模型页框里的片同一组件、同一间距） */
-.gw-panel__chosen {
+.gw-row__chosen {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: var(--space-xs);
 }
 
-/* 模型勾选列表框：8 圆角（layer），平铺在页面里所以只有 hairline 边、没有阴影 */
-/* 勾选没写成的灰面板：夹在模型片与列表之间 */
-/* 这一页的灰面板（删 / 重连没成、勾选没写成、保存没成）只有一种间距：离上一样东西 8。
-   三处的父级不同（块 / 间距 12 的列 / 间距 8 的列），各自折算成同一个 8；
+.gw-row__none {
+  margin-top: var(--space-xs);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+/* 勾选没写成 / 保存没成的灰面板：离上一样东西 8。
    表单里的那一块随表单的键列缩进（缩进属于表单的对齐，不是面板的间距） */
 .gw-notice {
   margin-top: var(--space-xs);
-}
-
-.gw-panel__top > .gw-notice {
-  margin-top: calc(var(--space-xs) - var(--space-sm));
 }
 
 .gw-form > .gw-notice {
@@ -210,7 +156,8 @@
   padding-left: calc(36px + var(--space-sm));
 }
 
-.gw-panel__list {
+/* 模型勾选列表框：8 圆角（layer），平铺在页面里所以只有 hairline 边、没有阴影 */
+.gw-row__list {
   margin-top: var(--space-xs);
   overflow: hidden;
   border: 1px solid var(--hairline);
@@ -293,9 +240,6 @@
 @media (prefers-reduced-motion: reduce) {
   .ss-subpage.gw-page-sub,
   .ss-subpage.gw-page-sub.is-leaving {
-    animation: none;
-  }
-  .gw-panel__chipwrap.is-jump {
     animation: none;
   }
 }

@@ -36,10 +36,6 @@ import {
   gatewayShortName,
   gatewaySelectedChips,
   frozenGroups,
-  gatewayChips,
-  choiceAfterCancel,
-  switchNeedsConfirm,
-  unsavedText,
   serviceLeftover,
   UNINSTALL_TIP,
   RESTART_TIP,
@@ -91,8 +87,6 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
 };
 
 const { ModelList } = await import("../src/ModelList.tsx");
-const { GatewayBody, GatewayPage } = await import("../src/pages/GatewayPage.tsx");
-const GatewayPanel = GatewayBody;
 const { AgentRow, ModelBox, ModelPicker, MODELS_TAB_FULL_BLEED } =
   await import("../src/ModelsTab.tsx");
 
@@ -841,7 +835,7 @@ test("modelGroups：按服务商分组，一家一个也有组头；拆不出服
   );
 });
 
-test("ModelList：超过 8 行出筛选框；新模型各闪一次；行尾 id 只在明显不同时出现", () => {
+test("ModelList：超过 8 行出筛选框；新拉到的模型整批出现不逐个闪；行尾 id 只在明显不同时出现", () => {
   const p = provider({ id: "g", models: [] });
   const entries = Array.from({ length: 9 }, (_, i) => ({
     provider: p,
@@ -851,100 +845,12 @@ test("ModelList：超过 8 行出筛选框；新模型各闪一次；行尾 id �
     provider: p,
     model: model({ id: "deepseek/deepseek-chat", slug: "g-ds", displayName: "DeepSeek V3.2" }),
   });
-  const html = render(ModelList, {
-    entries,
-    onToggle: noop,
-    flashKeys: ["g|azure/m3"],
-  });
+  const html = render(ModelList, { entries, onToggle: noop });
   assert.match(html, /model-list__search/);
-  assert.equal((html.match(/is-flash/g) ?? []).length, 1);
+  // 批量不闪、不依次点亮（DESIGN 2026-09-24）：行上没有逐个闪的动画
+  assert.doesNotMatch(html, /is-flash|animation-delay/);
   assert.equal((html.match(/models-option__id"/g) ?? []).length, 1);
   assert.match(html, /models-option__id">deepseek-chat</);
-});
-
-// ===== 网关展开区 =====
-
-const panelProps = (
-  overrides: Partial<GatewayState> = {},
-  extra: Record<string, unknown> = {},
-) => ({
-  tool: MODELS_TOOLS[0],
-  state: state(overrides),
-  busy: false,
-  initial: null,
-  onSave: async () => "x",
-  onFetchModels: async () => {},
-  onRetry: async () => {},
-  onRemove: async () => {},
-  onToggleModel: noop,
-  onDirtyChange: noop,
-  askDiscard: false,
-  onCollapse: noop,
-  ...extra,
-});
-
-test("GatewayPanel 已连：分段片（选中反色、末尾 + 网关）+ 一行摘要 `地址 · 已连 · 编辑` + 垃圾桶；右半「从这个网关选模型」", () => {
-  const html = render(
-    GatewayPanel,
-    panelProps({
-      enabled: true,
-      providers: [
-        provider({
-          id: "ap",
-          name: "ap-gateway",
-          models: [model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true })],
-        }),
-        provider({ id: "or", name: "openrouter", unreachable: "地址连不上" }),
-      ],
-    }),
-  );
-  assert.match(html, /class="ss-chip is-selected"[^>]*>.*?ap-gateway.*?gw-panel__chip-count">1</s);
-  assert.match(html, /gw-panel__chip-down">连不上</);
-  assert.match(html, />网关<\/span><\/button>/);
-  assert.match(html, /gw-panel__state">已连</);
-  assert.match(html, />编辑<\/button>/);
-  // ap-gateway 是最后一家还在供模型的：垃圾桶禁用，提示框说原因
-  assert.match(html, /role="tooltip"[^>]*>Codex 还在用它的 1 个模型，先取消勾选再删</);
-  assert.match(html, /gw-panel__section">从这个网关选模型</);
-  assert.match(html, /gw-panel__note">只支持文本与工具调用，不支持图片</);
-  // 摘要态不出表单
-  assert.doesNotMatch(html, /gw-form/);
-});
-
-test("GatewayPanel 连不上：`连不上` + 再试一次；新加网关直接出表单；收起时没保存就地问保存 / 丢弃", () => {
-  const down = render(
-    GatewayPanel,
-    panelProps({
-      providers: [provider({ id: "or", name: "openrouter", unreachable: "地址连不上" })],
-    }),
-  );
-  assert.match(down, /gw-panel__down"[^>]*>连不上</);
-  assert.match(down, />再试一次</);
-  const fresh = render(GatewayPanel, panelProps({ providers: [] }));
-  assert.match(fresh, /class="gw-form"/);
-  assert.match(fresh, /新网关/);
-  assert.doesNotMatch(fresh, />取消</, "一家都没有时没有可退的");
-  const ask = render(GatewayPanel, panelProps({ providers: [] }, { askDiscard: true }));
-  // 草稿没保存与改动没保存说法不同（v84 第八轮）
-  assert.match(ask, /新网关没保存/);
-  assert.match(ask, />丢弃</);
-});
-
-test("GatewayPanel 跳回定位：那一家的分段片外包一层 surface 闪两下（is-jump），选中它", () => {
-  const html = render(
-    GatewayPanel,
-    panelProps(
-      {
-        providers: [
-          provider({ id: "ap", name: "ap-gateway" }),
-          provider({ id: "or", name: "openrouter", unreachable: "地址连不上" }),
-        ],
-      },
-      { initial: "or", flashProviderId: "or" },
-    ),
-  );
-  assert.equal((html.match(/gw-panel__chipwrap is-jump/g) ?? []).length, 1);
-  assert.match(html, /gw-panel__chipwrap is-jump"><button[^>]*class="ss-chip is-selected"/);
 });
 
 test("serviceLeftover：只有停用了、后台服务却还装着才算残留（关开关本身会卸下）", () => {
@@ -979,73 +885,6 @@ test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（�
     render(AgentRow, { ...rowProps(withSelected({ enabled: true })), onUninstall: noop }),
     /卸下后台服务/,
   );
-});
-
-test("GatewayPage：二级页「← Codex 的网关」，标题后放页头动作；单列，没有右栏", () => {
-  const html = render(GatewayPage, {
-    ...panelProps({
-      providers: [provider({ id: "ap", name: "ap-gateway", models: [model({ id: "azure/a" })] })],
-    }),
-    headerAction: "RESTART-SLOT",
-    leaving: false,
-    onLeave: noop,
-  });
-  // 二级页挂在 body 上，转场做在 SubPage 自己身上
-  assert.match(html, /class="ss-subpage gw-page-sub"/);
-  assert.match(html, /gw-page__title">Codex 的网关(<!-- -->)?RESTART-SLOT/);
-  assert.match(html, /aria-label="返回"/);
-  assert.doesNotMatch(html, /gw-panel__right|gw-panel__left/);
-  assert.match(
-    render(GatewayPage, { ...panelProps({}), leaving: true, onLeave: noop }),
-    /class="ss-subpage gw-page-sub is-leaving"/,
-  );
-});
-
-test("网关分段片：点「+ 网关」原位变成「新网关」草稿片，草稿在时不渲染「+ 网关」；保存后换成真实那一家、「+ 网关」回来", () => {
-  assert.deepEqual(gatewayChips(["ap", "or"], "ap"), [
-    { kind: "provider", id: "ap" },
-    { kind: "provider", id: "or" },
-    { kind: "add" },
-  ]);
-  assert.deepEqual(gatewayChips(["ap"], "new"), [
-    { kind: "provider", id: "ap" },
-    { kind: "draft" },
-  ]);
-  // 保存成功：新的一家进了列表、选中它，末尾又是「+ 网关」
-  assert.deepEqual(gatewayChips(["ap", "ds"], "ds"), [
-    { kind: "provider", id: "ap" },
-    { kind: "provider", id: "ds" },
-    { kind: "add" },
-  ]);
-});
-
-test("取消草稿回到之前选中的那一家；它不在了退到第一家；一家都没有仍是草稿", () => {
-  assert.equal(choiceAfterCancel("or", ["ap", "or"]), "or");
-  assert.equal(choiceAfterCancel("gone", ["ap", "or"]), "ap");
-  assert.equal(choiceAfterCancel(null, ["ap"]), "ap");
-  assert.equal(choiceAfterCancel("ap", []), "new");
-});
-
-test("换一家前：有没保存的改动才拦下问；点当前这一家不算换；拦截句草稿与改动说法不同", () => {
-  assert.equal(switchNeedsConfirm("new", "ap", true), true);
-  assert.equal(switchNeedsConfirm("new", "ap", false), false, "空草稿没东西可丢");
-  assert.equal(switchNeedsConfirm("ap", "ap", true), false);
-  assert.equal(switchNeedsConfirm("ap", "or", true), true, "改了地址也不能静默丢掉");
-  assert.equal(unsavedText("new"), "新网关没保存");
-  assert.equal(unsavedText("ap"), "地址改动没保存");
-});
-
-test("GatewayBody 草稿态：「新网关」选中反色、没有「+ 网关」；地址为空时保存禁用，提示框「先填地址」", () => {
-  const html = render(
-    GatewayPanel,
-    panelProps({ providers: [provider({ id: "ap", name: "ap-gateway" })] }, { initial: "new" }),
-  );
-  assert.match(html, /class="ss-chip is-selected"[^>]*><span class="ss-chip__label">新网关</);
-  assert.doesNotMatch(html, />网关<\/span><\/button>/);
-  assert.match(html, /role="tooltip"[^>]*>先填地址</);
-  assert.match(html, /title="先填地址" disabled=""/);
-  assert.match(html, />取消</);
-  assert.match(html, /拉模型时探明/);
 });
 
 // ===== 勾选不挪位置 =====
@@ -1129,21 +968,6 @@ test("模型页表宽 = 324 + 24 + 框 + 24：框随内容区弹性 360–640（
   assert.match(row, /padding-right:\s*var\(--space-xl\)/);
 });
 
-test("删网关改为二次确认：页面上不再有「删掉 X · 撤销」提示条，垃圾桶可点时带读屏名", () => {
-  const html = render(
-    GatewayPanel,
-    panelProps({
-      providers: [
-        provider({ id: "ap", name: "ap-gateway" }),
-        provider({ id: "or", name: "openrouter.ai" }),
-      ],
-    }),
-  );
-  assert.doesNotMatch(html, /撤销/);
-  assert.doesNotMatch(html, /ss-toast/);
-  assert.match(html, /aria-label="删掉 ap-gateway"/);
-});
-
 test("网关短名：显示名优先；否则主机名去掉 api. / www. 与顶级域；localhost、IP 原样", () => {
   const gw = (name: string, baseUrl: string) => provider({ id: "x", name, baseUrl });
   assert.equal(gatewayShortName(gw("ap-gateway", "https://api.openai.com/v1")), "ap-gateway");
@@ -1223,44 +1047,6 @@ test("模型列表：底部不再有「已选 N 个模型」；滚动区的容�
   assert.match(viewport, /min-height:\s*0/);
   assert.match(rule(".model-list__scroll"), /min-height:\s*0/);
   assert.match(rule(".models-option__gateway"), /color:\s*var\(--ink-faint\)/);
-});
-
-test("网关页：分段片写网关短名；段头说明下一行本网关已选的模型片（× 可移除），没选时整行不出", () => {
-  const html = render(
-    GatewayPanel,
-    panelProps({
-      enabled: true,
-      providers: [
-        provider({
-          id: "ap",
-          name: "ap-gateway.intra.weibo.com",
-          models: [
-            model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true }),
-            model({ id: "zhipu/glm-4.6", displayName: "zhipu/glm-4.6", selected: true }),
-            model({ id: "azure/o3", displayName: "azure/o3" }),
-          ],
-        }),
-        provider({ id: "or", name: "openrouter.ai" }),
-      ],
-    }),
-  );
-  assert.match(html, /gw-panel__chip-name">ap-gateway</);
-  assert.match(html, /gw-panel__chip-name">openrouter</);
-  assert.match(html, /aria-label="删掉 ap-gateway"|title="删掉 ap-gateway"/);
-  // 跨服务商：片保留前缀；片在说明之后、列表框之前
-  const chosen = html.indexOf("gw-panel__chosen");
-  assert.ok(html.indexOf("gw-panel__note") < chosen && chosen < html.indexOf("gw-panel__list"));
-  assert.match(html, /ss-modelchip__name">azure\/gpt-4\.1</);
-  assert.match(html, /aria-label="移除 zhipu\/glm-4\.6"/);
-  assert.doesNotMatch(html, /ss-modelchip__name">azure\/o3</);
-
-  const none = render(
-    GatewayPanel,
-    panelProps({
-      providers: [provider({ id: "ap", name: "ap", models: [model({ id: "azure/o3" })] })],
-    }),
-  );
-  assert.doesNotMatch(none, /gw-panel__chosen/);
 });
 
 test("gatewaySelectedChips：只这一家已选的；同一服务商省前缀，跨服务商保留", () => {

@@ -24,8 +24,6 @@ export interface ModelListProps {
   onToggle: (provider: GatewayProvider, modelId: string) => void;
   /// 筛选框与列表之间的一段（下拉里的「第三方」组头）
   header?: ReactNode;
-  /// 这几个各闪一次（`网关id|模型id`）：新拉到的模型
-  flashKeys?: string[];
   /// 列表为空时的一句
   empty?: ReactNode;
 }
@@ -40,7 +38,7 @@ export const entryKey = modelEntryKey;
  * 打开（挂载）时排一次序（组内已选在前），之后勾选 / 取消不挪位置，下次打开再重排。
  * 勾选当场写盘；超过约 8 行时出筛选框，列表在自身范围内滚动。
  */
-export function ModelList({ entries, onToggle, header, flashKeys, empty }: ModelListProps) {
+export function ModelList({ entries, onToggle, header, empty }: ModelListProps) {
   const [query, setQuery] = useState("");
   /// 打开那一刻的排序：之后勾选只改状态、不挪位置
   const [snap] = useState(() => snapshotOrder(entries));
@@ -66,28 +64,23 @@ export function ModelList({ entries, onToggle, header, flashKeys, empty }: Model
   const withFilter = entries.length > MODEL_FILTER_THRESHOLD;
   const term = withFilter ? query : "";
   const groups = frozenGroups(entries, snap, term);
-  const flash = new Set(flashKeys ?? []);
   const gatewayNames = showGatewayNames(entries);
-  let order = 0;
 
   /// 一行：整行是命中区；组头已给出服务商，行内去掉重复前缀
   const row = (entry: ModelEntry) => {
     const { provider, model } = entry;
     const key = entryKey(entry);
-    const flashing = flash.has(key);
     const id = modelRowId(model);
     const name = modelRowLabel(model);
     const gateway = gatewayNames ? gatewayShortName(provider) : null;
-    const i = order++;
     const toggle = () => onToggle(provider, model.id);
     // 行上不放提示框也不设 title：挑模型时完整 id 没有意义，还会盖住正在看的那一行（真机反馈）；
     // 读屏名只写名称，跨网关时补上来源网关（同名模型可能来自两家）
     return (
       <div
         key={key}
-        className={`models-option${flashing ? " is-flash" : ""}`}
+        className="models-option"
         aria-label={gateway === null ? name : `${name}，${gateway}`}
-        style={flashing ? { animationDelay: `${Math.min(i, 12) * 60}ms` } : undefined}
         role="option"
         aria-selected={model.selected}
         tabIndex={0}

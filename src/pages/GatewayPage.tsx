@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { Disclosure } from "../Matrix.tsx";
 import {
-  choiceAfterCancel,
-  gatewayChips,
   gatewaySelectedChips,
   gatewayShortName,
   parseBackendError,
@@ -11,16 +10,16 @@ import {
   switchNeedsConfirm,
   unsavedText,
 } from "../modelsView.ts";
-import type { ModelsTool } from "../modelsView.ts";
+import type { GatewayChoice, ModelsTool } from "../modelsView.ts";
 import type { GatewayProvider, GatewayState } from "../types.ts";
 import {
+  AddButton,
   NoticePanel,
   BusySlot,
   Button,
-  Chip,
   Confirm,
+  Empty,
   IconButton,
-  IconPlus,
   IconTrash,
   ModelChip,
   SubPage,
@@ -29,13 +28,27 @@ import {
 } from "../ui/index.ts";
 import type { ConfirmAnchor } from "../ui/index.ts";
 import { ModelList } from "../ModelList.tsx";
+// 与来源管理页同一套骨架：表头、行、▸、展开区、跳转闪都用它的类（DESIGN「网关配置是二级页」）
+import "./SourcesPage.css";
 import "./GatewayPage.css";
 
-/// 网关配置二级页 `Codex 的网关`（DESIGN「网关配置是二级页」，画板 v84 Gateway）。
+/// 网关配置二级页 `Codex 的网关`（DESIGN「网关配置是二级页」，画板 Gateway）。
 ///
 /// 与设置 / 添加同一「← 标题」骨架；模型页的 `配置网关`、模型下拉里的 `管理网关 ›` /
 /// `还没有网关 · + 网关 ›` 都进这一页。转场：从右侧推入、返回滑回，200ms 机械缓动，
-/// reduced-motion 即时（⑦ 动效解释空间关系）。页头标题后按状态出现 `重启生效`（与模型页同组件）。
+/// reduced-motion 即时（⑦ 动效解释空间关系）。页头标题后按状态出现 `重启生效`（与模型页同组件），
+/// 右端 `+ 网关`（与来源管理页 `+ 来源` 同位置、同组件）。
+///
+/// 列表与来源管理页同一套骨架（表头 `网关` + 2px 结构线、一家一行、行间 hairline、点整行展开）：
+/// - 第一行 `▸` + 网关短名；第二行 `地址 · 已连 · 已选 3 / 103 个模型`，地址放不下才截断（截断才提示）；
+///   连不上：`地址 · 连不上 · 原因`（原因写全），行尾动作列出 `再试一次`
+/// - 行尾 `编辑` + 垃圾桶（锚在垃圾桶下的确认，地址与钥匙串里的密钥一起删）
+/// - 点整行展开＝从这个网关选模型：限制说明 → 已选模型片 → 与模型下拉同一组件的勾选列表；
+///   几行可以同时展开，各自独立
+/// - 进来时每行都收着（同来源管理页）；只有刚新增成功的那一行、跳转定位的那一行自动展开
+/// - `编辑` / `+ 网关`：表单在行里就地展开（新网关插在最上面，名字位写 `新网关`）；
+///   保存成功、拉到模型后新网关变成普通行并自动展开，模型整批出现不逐个闪，
+///   这一行 surface 行带闪两下（同跳转定位）交代「就是它」
 ///
 /// 两处都能选模型，同一份状态：这一页勾上的回到模型页已在框里，下拉里去掉的这一页同步取消——
 /// 两边都读 ModelsTab 持有的同一个 GatewayState。
@@ -43,10 +56,29 @@ import "./GatewayPage.css";
 /// 转场时长，与 GatewayPage.css 同值
 export const GATEWAY_PAGE_MOTION_MS = 200;
 
-export interface GatewayPageProps extends Omit<
-  GatewayBodyProps,
-  "askDiscard" | "onCollapse" | "onDirtyChange"
-> {
+/// 打开时定位哪一家；"new" 直接在最上面插一行新网关的表单
+export type GatewaySelection = GatewayChoice;
+
+export interface GatewayPageProps {
+  tool: ModelsTool;
+  state: GatewayState;
+  busy: boolean;
+  /// 打开时定位哪一家（展开它）；"new" 直接出新网关的表单；null 每行都收着
+  initial: GatewaySelection | null;
+  /// 存网关地址与密钥（密钥省略表示不改），返回这一家的 id。失败时抛出原话
+  onSave: (input: { id?: string; baseUrl: string; key?: string }) => Promise<string>;
+  /// 保存之后拉一次模型列表（保存即拉取）
+  onFetchModels: (providerId: string) => Promise<void>;
+  /// 「再试一次」：按 id 重拉（拉取失败不抛错，原因记在 unreachable 上）
+  onRetry: (providerId: string) => Promise<void>;
+  /// 删掉这一家（地址与钥匙串里的密钥一起删，找不回）：确认之后才调。失败时抛出原话
+  onRemove: (provider: GatewayProvider) => Promise<void>;
+  onToggleModel: (provider: GatewayProvider, modelId: string) => void;
+  /// 新问题提示「查看」定位的那一家：滚到这一行，行带 surface 闪两下（同来源管理页）
+  flashProviderId?: string | null;
+  /// 勾选没写成：就在那一行的展开区里说（灰面板，原因写全、可关），不必回模型页才看到
+  notice?: { message: string; reason: string } | null;
+  onCloseNotice?: () => void;
   /// 页头标题后的 `重启生效`（ModelsTab 传同一个 RestartSlot）
   headerAction?: ReactNode;
   /// 返回滑回的那 200ms：播退场动画，播完由 ModelsTab 卸掉
@@ -59,57 +91,14 @@ export interface GatewayPageProps extends Omit<
   overlay?: ReactNode;
 }
 
-export function GatewayPage({
-  headerAction,
-  leaving,
-  onLeave,
-  modalOpen,
-  overlay,
-  ...body
-}: GatewayPageProps) {
-  const [dirty, setDirty] = useState(false);
-  const [askDiscard, setAskDiscard] = useState(false);
-  const onDirtyChange = useCallback((next: boolean) => {
-    setDirty(next);
-    if (!next) setAskDiscard(false);
-  }, []);
-
-  /// 点 ← 或 Esc：连接区有没保存的改动就拦下，段内就地问一句（⑪⑫）
-  const back = () => {
-    // 确认框开着（重启确认、删网关确认）：Esc 归确认框，不当返回
-    if (modalOpen || leaving || document.querySelector(".ss-confirm")) return;
-    if (dirty) setAskDiscard(true);
-    else onLeave();
-  };
-
-  return (
-    <SubPage
-      className={`gw-page-sub${leaving ? " is-leaving" : ""}`}
-      title={
-        <span className="gw-page__title">
-          {body.tool.name} 的网关
-          {headerAction}
-        </span>
-      }
-      onBack={back}
-    >
-      <div className="gw-page">
-        <GatewayBody
-          {...body}
-          onDirtyChange={onDirtyChange}
-          askDiscard={askDiscard}
-          onCollapse={() => {
-            setAskDiscard(false);
-            setDirty(false);
-            onLeave();
-          }}
-        />
-      </div>
-      {/* 页面里的浮层（重启确认）也要在二级页里：主视图打开二级页期间是 inert 的 */}
-      {overlay}
-    </SubPage>
-  );
+/// 删网关的确认：删的是哪一家、锚在哪（垃圾桶所在的那一行）
+interface ConfirmingRemove {
+  provider: GatewayProvider;
+  anchor: ConfirmAnchor;
 }
+
+/// 草稿存在期间 `+ 网关` 禁用的原因（从源头防止两个草稿）
+export const ADD_GATEWAY_BLOCKED = "先保存或取消正在添加的网关";
 
 /// 协议的只读读法：本机路由收 Responses，转给网关时说它的协议
 function protocolText(protocol: string | undefined): string {
@@ -118,56 +107,14 @@ function protocolText(protocol: string | undefined): string {
   return "拉模型时探明";
 }
 
-/// 选中的是哪一家；"new" 是新加的那一家（直接出表单）
-export type { GatewayChoice as GatewaySelection } from "../modelsView.ts";
-import type { GatewayChoice as GatewaySelection } from "../modelsView.ts";
-
-export interface GatewayBodyProps {
-  tool: ModelsTool;
-  state: GatewayState;
-  busy: boolean;
-  /// 打开时先选中哪一家；"new" 直接出新网关的表单
-  initial: GatewaySelection | null;
-  /// 存网关地址与密钥（密钥省略表示不改），返回这一家的 id。失败时抛出原话
-  onSave: (input: { id?: string; baseUrl: string; key?: string }) => Promise<string>;
-  /// 保存之后拉一次模型列表（保存即拉取）
-  onFetchModels: (providerId: string) => Promise<void>;
-  /// 「再试一次」：按 id 重拉（拉取失败不抛错，原因记在 unreachable 上）
-  onRetry: (providerId: string) => Promise<void>;
-  /// 删掉这一家（地址与钥匙串里的密钥一起删，找不回）：确认之后才调。失败时抛出原话
-  onRemove: (provider: GatewayProvider) => Promise<void>;
-  onToggleModel: (provider: GatewayProvider, modelId: string) => void;
-  /// 连接区有没有没保存的改动：离开时要先问
-  onDirtyChange: (dirty: boolean) => void;
-  /// 想离开但连接区还有改动：就地一句「地址改动没保存」+ 保存 / 丢弃
-  askDiscard: boolean;
-  /// 丢弃或保存完，真正离开
-  onCollapse: () => void;
-  /// 新问题提示「查看」定位的那一家：它的分段片用 surface 带闪两下
-  flashProviderId?: string | null;
-  /// 勾选没写成：就在「从这个网关选模型」这一段里说（灰面板，原因写全、可关），不必回模型页才看到
-  notice?: { message: string; reason: string } | null;
-  onCloseNotice?: () => void;
+/// 打开时展开哪几行：进来时每行都收着（同来源管理页）；只有跳转定位的那一家展开
+function initialExpanded(initial: GatewaySelection | null, providerIds: string[]): Set<string> {
+  return new Set(
+    initial !== null && initial !== "new" && providerIds.includes(initial) ? [initial] : [],
+  );
 }
 
-/// 删网关的确认：删的是哪一家、锚在哪（垃圾桶所在的那一行）
-interface ConfirmingRemove {
-  provider: GatewayProvider;
-  anchor: ConfirmAnchor;
-}
-
-/**
- * 三段，自上而下逐层按需（单列，与设置页同宽，没有右栏）：
- * - 网关切换：分段片 `ap-gateway 103 · openrouter 连不上 · + 网关`，选中反色；片上写网关短名
- * - 连接：已连上的只一行摘要 `https://… · 已连 · 编辑` + 垃圾桶；点 `编辑` 才出地址 / 密钥表单，
- *   保存才生效、保存即拉取，保存中原位忙碌指示 +「正在拉模型」；新加网关直接出表单；
- *   连不上：`连不上` + 8 `再试一次`；删网关：锚在垃圾桶旁的确认「删掉 X？」，确认后直接删
- *   （地址与钥匙串里的密钥一起删、找不回，按 ⑪ 要确认；不再有撤销提示条）
- * - 从这个网关选模型：段头下是限制说明，其下一行本网关已选的模型片（与模型页同一个 ModelChip，
- *   × 可移除，折行不藏，一个没选时不出），再下是与模型下拉同一组件的列表，只列本网关的模型；
- *   首次在这里选：新加网关保存成功拉到模型后这一段原地出现，新模型各闪一次
- */
-export function GatewayBody({
+export function GatewayPage({
   tool,
   state,
   busy,
@@ -177,71 +124,98 @@ export function GatewayBody({
   onRetry,
   onRemove,
   onToggleModel,
-  onDirtyChange,
-  askDiscard,
-  onCollapse,
   flashProviderId,
   notice,
   onCloseNotice,
-}: GatewayBodyProps) {
-  const first = state.providers[0]?.id ?? "new";
-  const [selected, setSelected] = useState<GatewaySelection>(initial ?? first);
-  const [editing, setEditing] = useState(initial === "new" || first === "new");
+  headerAction,
+  leaving,
+  onLeave,
+  modalOpen,
+  overlay,
+}: GatewayPageProps) {
+  const providers = state.providers;
+  const [expanded, setExpanded] = useState<Set<string>>(() =>
+    initialExpanded(
+      initial,
+      providers.map((p) => p.id),
+    ),
+  );
+  /// 表单开在哪一行（一次只开一份）；"new" 是最上面那一行新网关
+  const [editing, setEditing] = useState<GatewaySelection | null>(initial === "new" ? "new" : null);
+  /// 表单里有没保存的改动：离开 / 换一行编辑之前先问
+  const [formDirty, setFormDirty] = useState(false);
+  /// 想离开但表单还有改动：在那一行里就地一句「地址改动没保存」+ 保存 / 丢弃
+  const [askDiscard, setAskDiscard] = useState(false);
+  /// 表单有改动时又点了别的 `编辑` / `+ 网关`：就地问完再换过去
+  const [switchTo, setSwitchTo] = useState<GatewaySelection | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
   /// 正在删的那一家：垃圾桶锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
   const [removing, setRemoving] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ConfirmingRemove | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  /// 新拉到的模型各闪一次：保存 / 再试之前记下已有的，state 更新后差出来
-  const [pendingFlash, setPendingFlash] = useState<{ id: string; before: Set<string> } | null>(
-    null,
-  );
-  const [flashKeys, setFlashKeys] = useState<string[]>([]);
-  /// 点 `+ 网关` 之前选中的那一家：取消草稿时回到它
-  const [previous, setPrevious] = useState<GatewaySelection | null>(null);
-  /// 连接区有没保存的改动（这一层也要知道：换一家之前先问）
-  const [formDirty, setFormDirty] = useState(false);
-  /// 草稿 / 改动没保存时点了别的分段片：就地问「保存 / 丢弃」，问完换到这一家
-  const [switchTo, setSwitchTo] = useState<GatewaySelection | null>(null);
-  const trackDirty = useCallback(
-    (dirty: boolean) => {
-      setFormDirty(dirty);
-      if (!dirty) setSwitchTo(null);
-      onDirtyChange(dirty);
-    },
-    [onDirtyChange],
-  );
+  /// 删 / 重连没成：灰面板出在那一行里
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  /// 刚新增成功的那一行：surface 行带闪两下（同跳转定位），模型本身整批出现、不逐个闪
+  const [addedId, setAddedId] = useState<string | null>(null);
+  /// 最近在哪一家勾选过：勾选没写成的灰面板出在那一行的展开区
+  const [toggledIn, setToggledIn] = useState<string | null>(null);
+  const rowEls = useRef(new Map<string, HTMLDivElement>());
 
-  // 选中的那一家消失了（被删、外部变化）：退到第一家
-  const current = selected === "new" ? null : state.providers.find((p) => p.id === selected);
-  /// 刚保存成功的那一家：父层的新状态可能晚一拍才到，这期间不当它「消失了」
-  const justSaved = useRef<string | null>(null);
-  useEffect(() => {
-    if (current !== undefined && current !== null) justSaved.current = null;
-    if (selected === justSaved.current) return;
-    if (selected !== "new" && current === undefined) {
-      setSelected(state.providers[0]?.id ?? "new");
-      setEditing(state.providers.length === 0);
+  const trackDirty = useCallback((dirty: boolean) => {
+    setFormDirty(dirty);
+    if (!dirty) {
+      setSwitchTo(null);
+      setAskDiscard(false);
     }
-  }, [selected, current, state.providers]);
+  }, []);
 
+  /// 点 ← 或 Esc：表单有没保存的改动就拦下，在那一行里就地问一句（⑪⑫）
+  const back = () => {
+    // 确认框开着（重启确认、删网关确认）：Esc 归确认框，不当返回
+    if (modalOpen || leaving || document.querySelector(".ss-confirm")) return;
+    if (formDirty && editing !== null) setAskDiscard(true);
+    else onLeave();
+  };
+
+  // 正在编辑的那一家消失了（被删、外部变化）：收起表单
   useEffect(() => {
-    if (pendingFlash === null) return;
-    const provider = state.providers.find((p) => p.id === pendingFlash.id);
-    if (!provider) return;
-    setFlashKeys(
-      provider.models
-        .filter((m) => !pendingFlash.before.has(m.id))
-        .map((m) => `${provider.id}|${m.id}`),
-    );
-    setPendingFlash(null);
-  }, [state, pendingFlash]);
+    if (editing !== null && editing !== "new" && !providers.some((p) => p.id === editing)) {
+      setEditing(null);
+      setFormDirty(false);
+    }
+  }, [editing, providers]);
 
-  const report = (e: unknown) => setError(parseBackendError(String(e)).message);
+  // 新问题提示「查看」定位、刚新增成功：滚到那一行（行本身 surface 闪两下，见 is-jump）。
+  // 新增的那一行在状态回来之后才有：等它挂上再滚
+  const jumpTo = addedId ?? flashProviderId ?? null;
+  const jumpMounted = jumpTo !== null && providers.some((p) => p.id === jumpTo);
+  useEffect(() => {
+    if (jumpTo === null || !jumpMounted) return;
+    rowEls.current.get(jumpTo)?.scrollIntoView?.({ block: "nearest" });
+  }, [jumpTo, jumpMounted]);
 
-  /// 点垃圾桶：先问一句。垃圾桶所在的那一行整行抬到遮罩之上（⑦），确认框右沿对齐垃圾桶
+  const toggleRow = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
+  /// 真正换过去（已确认没有要丢的改动）
+  const startEditing = (next: GatewaySelection) => {
+    setSwitchTo(null);
+    setRowError(null);
+    setEditing(next);
+  };
+
+  /// 点 `编辑` / `+ 网关`：另一份表单有没保存的改动就拦下就地问，不静默丢掉
+  const choose = (next: GatewaySelection) => {
+    if (editing !== null && switchNeedsConfirm(editing, next, formDirty)) setSwitchTo(next);
+    else startEditing(next);
+  };
+
+  /// 点垃圾桶：先问一句。确认框锚在这一行下方、右沿对齐垃圾桶（同来源页 × 的确认位置规则）
   const askRemove = (provider: GatewayProvider, trash: HTMLElement) => {
-    const row = trash.closest(".gw-panel__summary") ?? trash;
+    const row = rowEls.current.get(provider.id) ?? trash;
     const r = row.getBoundingClientRect();
     const t = trash.getBoundingClientRect();
     setConfirming({
@@ -250,7 +224,7 @@ export function GatewayBody({
     });
   };
 
-  /// 确认之后直接删；这一家从分段片里消失，选中落到剩下的第一家
+  /// 确认之后直接删；这一行从列表里消失
   const remove = (provider: GatewayProvider) =>
     void (async () => {
       setConfirming(null);
@@ -258,255 +232,327 @@ export function GatewayBody({
       try {
         await onRemove(provider);
       } catch (e) {
-        report(e);
+        setRowError({ id: provider.id, message: parseBackendError(String(e)).message });
         return;
       } finally {
         setRemoving(null);
       }
-      const next = state.providers.find((p) => p.id !== provider.id);
-      setSelected(next?.id ?? "new");
-      setEditing(next === undefined);
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(provider.id);
+        return next;
+      });
     })();
 
   const retry = (id: string) =>
     void (async () => {
       setRetrying(id);
-      const provider = state.providers.find((p) => p.id === id);
-      const before = new Set(provider?.models.map((m) => m.id) ?? []);
+      setRowError(null);
       try {
         await onRetry(id);
-        setPendingFlash({ id, before });
       } catch (e) {
-        report(e);
+        setRowError({ id, message: parseBackendError(String(e)).message });
       } finally {
         setRetrying(null);
       }
     })();
 
-  /// 真正换过去（已确认没有要丢的改动）
-  const switchTo_ = (next: GatewaySelection) => {
-    setError(null);
-    setSwitchTo(null);
-    if (next === "new" && selected !== "new") setPrevious(selected);
-    setSelected(next);
-    setEditing(next === "new");
+  const toggleModel = (provider: GatewayProvider, modelId: string) => {
+    setToggledIn(provider.id);
+    onToggleModel(provider, modelId);
   };
 
-  /// 点分段片：有没保存的改动就拦下就地问，不静默丢掉
-  const choose = (next: GatewaySelection) => {
-    if (switchNeedsConfirm(selected, next, formDirty)) setSwitchTo(next);
-    else switchTo_(next);
+  /// 勾选没写成的灰面板出在哪一行：最近勾选的那一行（展开着），否则第一行展开着的
+  const noticeRow =
+    toggledIn !== null && expanded.has(toggledIn)
+      ? toggledIn
+      : (providers.find((p) => expanded.has(p.id))?.id ?? null);
+
+  /// 这一行的表单（编辑 / 新网关）
+  const form = (provider: GatewayProvider | null) => {
+    const key: GatewaySelection = provider?.id ?? "new";
+    return (
+      <div className="gw-row__form">
+        <GatewayForm
+          state={state}
+          provider={provider}
+          busy={busy}
+          onSave={onSave}
+          onFetchModels={onFetchModels}
+          onSaved={(id) => {
+            setEditing(null);
+            if (provider !== null) return;
+            // 新网关变成普通行并自动展开选模型（首次在这里选）；行带闪两下交代「就是它」
+            setExpanded((prev) => new Set(prev).add(id));
+            setAddedId(id);
+          }}
+          onCancel={() => {
+            trackDirty(false);
+            // 取消新网关：那一行拿掉；取消编辑：第二行换回来
+            setEditing(null);
+          }}
+          onDirtyChange={trackDirty}
+          ask={
+            switchTo !== null
+              ? { text: unsavedText(key), onDone: () => startEditing(switchTo) }
+              : askDiscard
+                ? {
+                    text: unsavedText(key),
+                    onDone: () => {
+                      trackDirty(false);
+                      onLeave();
+                    },
+                  }
+                : null
+          }
+        />
+      </div>
+    );
   };
 
-  const chips = gatewayChips(
-    state.providers.map((p) => p.id),
-    selected,
+  /// 第二行：`地址 · 已连 · 已选 3 / 103 个模型`；连不上：`地址 · 连不上 · 原因`（原因写全）
+  const subLine = (p: GatewayProvider) => {
+    const url = p.baseUrl || "还没填地址";
+    return (
+      <span className="src-row__sub gw-row__sub">
+        {/* 地址占满放得下的宽度，放不下才截断；截断了才给完整值 */}
+        <TruncTip content={url}>
+          <span className="gw-row__url">{url}</span>
+        </TruncTip>
+        {p.unreachable ? (
+          <>
+            <span className="gw-row__fact">
+              {" · "}
+              <span className="gw-row__down">连不上</span>
+              {" · "}
+            </span>
+            <span className="gw-row__reason">{p.unreachable}</span>
+          </>
+        ) : (
+          <span className="gw-row__fact">
+            {` · ${p.hasKey ? "已连" : "还没有密钥"}`}
+            {p.models.length > 0
+              ? ` · 已选 ${selectedModels(p).length} / ${p.models.length} 个模型`
+              : null}
+          </span>
+        )}
+      </span>
+    );
+  };
+
+  /// 行尾：连不上时 `再试一次`，然后 `编辑` + 垃圾桶
+  const actions = (p: GatewayProvider, isEditing: boolean) => (
+    <div className="gw-row__actions">
+      {p.unreachable && !isEditing ? (
+        <BusySlot busy={retrying === p.id} label="正在重连">
+          <Button size="compact" onClick={() => retrying !== p.id && retry(p.id)}>
+            再试一次
+          </Button>
+        </BusySlot>
+      ) : null}
+      {isEditing ? null : (
+        <Button variant="link" onClick={() => choose(p.id)}>
+          编辑
+        </Button>
+      )}
+      <span className="gw-row__trash">
+        {removeProviderBlockedReason(state, p, tool) === null ? (
+          <BusySlot busy={removing === p.id} label="正在删掉">
+            <IconButton
+              icon={<IconTrash />}
+              title={`删掉 ${gatewayShortName(p)}`}
+              onClick={() => {
+                if (removing === p.id) return;
+                const el = rowEls.current
+                  .get(p.id)
+                  ?.querySelector<HTMLElement>(".gw-row__trash button");
+                if (el) askRemove(p, el);
+              }}
+            />
+          </BusySlot>
+        ) : (
+          // 最后一家还在供模型：后端会拒，键上就说清下一步（禁用键自带原因提示框）
+          <IconButton
+            icon={<IconTrash />}
+            title={`删掉 ${gatewayShortName(p)}`}
+            disabledReason={`${tool.name} 还在用它的 ${selectedModels(p).length} 个模型，先取消勾选再删`}
+          />
+        )}
+      </span>
+    </div>
   );
 
-  return (
-    <div className="gw-panel">
-      <div className="gw-panel__top">
-        <div className="gw-panel__chips" role="tablist" aria-label={`${tool.name} 的网关`}>
-          {chips.map((chip) => {
-            if (chip.kind === "draft") {
-              // `+ 网关` 原位变成的草稿片：选中反色；草稿在时不再有 `+ 网关`
-              return (
-                <Chip key="draft" selected onClick={() => undefined}>
-                  新网关
-                </Chip>
-              );
-            }
-            if (chip.kind === "add") {
-              return (
-                <Chip
-                  key="add"
-                  icon={<IconPlus size={12} />}
-                  onClick={() => choose("new")}
-                  title="添加网关"
-                >
-                  网关
-                </Chip>
-              );
-            }
-            const p = state.providers.find((x) => x.id === chip.id) as GatewayProvider;
-            return (
-              // 包一层给跳回定位的闪烁用：surface 带围在片外，选中反色的片上也看得见
-              <span
-                key={p.id}
-                className={`gw-panel__chipwrap${flashProviderId === p.id ? " is-jump" : ""}`}
-              >
-                <Chip selected={selected === p.id} onClick={() => choose(p.id)}>
-                  <span className="gw-panel__chip-name">{gatewayShortName(p)}</span>
-                  {p.unreachable ? (
-                    <span className="gw-panel__chip-down">连不上</span>
-                  ) : p.models.length > 0 ? (
-                    <span className="gw-panel__chip-count">{p.models.length}</span>
-                  ) : null}
-                </Chip>
-              </span>
-            );
-          })}
-        </div>
-
-        {editing || selected === "new" ? (
-          <GatewayForm
-            key={selected}
-            state={state}
-            provider={current ?? null}
-            busy={busy}
-            onSave={async (input) => {
-              const before = new Set(current?.models.map((m) => m.id) ?? []);
-              const id = await onSave(input);
-              setPendingFlash({ id, before });
-              return id;
-            }}
-            onFetchModels={onFetchModels}
-            onSaved={(id) => {
-              // 草稿片换成真实那一家（名称 + 模型数），`+ 网关` 重新出现；选模型段原地出现
-              justSaved.current = id;
-              setSelected(id);
-              setEditing(false);
-            }}
-            onCancel={() => {
-              trackDirty(false);
-              // 取消草稿：「新网关」变回「+ 网关」，回到之前选中的那一家
-              if (selected === "new") {
-                switchTo_(
-                  choiceAfterCancel(
-                    previous,
-                    state.providers.map((p) => p.id),
-                  ),
-                );
-              } else setEditing(false);
-            }}
-            onDirtyChange={trackDirty}
-            ask={
-              switchTo !== null
-                ? { text: unsavedText(selected), onDone: () => switchTo_(switchTo) }
-                : askDiscard
-                  ? { text: unsavedText(selected), onDone: onCollapse }
-                  : null
-            }
-            canCancel={selected !== "new" || state.providers.length > 0}
-          />
-        ) : current ? (
-          <div className="gw-panel__summary">
-            {/* 地址已经显示在这里：只在放不下被截断时才给完整值 */}
-            <TruncTip content={current.baseUrl || "还没填地址"}>
-              <span className="gw-panel__url">{current.baseUrl || "还没填地址"}</span>
-            </TruncTip>
-            <span className="gw-panel__sep">·</span>
-            {current.unreachable ? (
-              <>
-                <Tooltip content={current.unreachable}>
-                  <span className="gw-panel__down">连不上</span>
-                </Tooltip>
-                <BusySlot busy={retrying === current.id} label="正在重连">
-                  <Button
-                    size="compact"
-                    onClick={() => retrying !== current.id && retry(current.id)}
-                  >
-                    再试一次
-                  </Button>
-                </BusySlot>
-              </>
-            ) : (
-              <span className="gw-panel__state">{current.hasKey ? "已连" : "还没有密钥"}</span>
-            )}
-            {current.unreachable ? null : <span className="gw-panel__sep">·</span>}
-            <Button variant="link" onClick={() => setEditing(true)}>
-              编辑
-            </Button>
-            <span className="gw-panel__trash">
-              {removeProviderBlockedReason(state, current, tool) === null ? (
-                <BusySlot busy={removing === current.id} label="正在删掉">
-                  <IconButton
-                    icon={<IconTrash />}
-                    title={`删掉 ${gatewayShortName(current)}`}
-                    onClick={() => {
-                      if (removing === current.id) return;
-                      // 摘要行只有一个垃圾桶（当前这一家）
-                      const el = document.querySelector<HTMLElement>(".gw-panel__trash");
-                      if (el) askRemove(current, el);
-                    }}
-                  />
-                </BusySlot>
-              ) : (
-                // 最后一家还在供模型：后端会拒，键上就说清下一步（禁用键自带原因提示框）
-                <IconButton
-                  icon={<IconTrash />}
-                  title={`删掉 ${gatewayShortName(current)}`}
-                  disabledReason={`${tool.name} 还在用它的 ${selectedModels(current).length} 个模型，先取消勾选再删`}
-                />
-              )}
-            </span>
-          </div>
-        ) : null}
-
-        {error !== null ? (
-          <div className="gw-notice">
-            <NoticePanel message={error} />
-          </div>
-        ) : null}
-
-        {/* 删网关：地址与钥匙串里的密钥一起删、找不回——二次确认（⑪） */}
-        {confirming !== null ? (
-          <Confirm
-            title={`删掉 ${gatewayShortName(confirming.provider)}？`}
-            confirmLabel="删掉"
-            anchor={confirming.anchor}
-            align="end"
-            onConfirm={() => remove(confirming.provider)}
-            onCancel={() => setConfirming(null)}
-          >
-            地址和钥匙串里的密钥一起删掉，删了找不回来
-          </Confirm>
-        ) : null}
-      </div>
-
-      <div className="gw-panel__models">
-        {current && current.models.length > 0 && !editing ? (
-          <>
-            <div className="gw-panel__section">从这个网关选模型</div>
-            <div className="gw-panel__note">{tool.pickerNote}</div>
-            {/* 已选用模型片表达（与模型页同一个 ModelChip）：勾选 / 取消 / 点 × 三处实时联动 */}
-            {gatewaySelectedChips(current).length > 0 ? (
-              <div
-                className="gw-panel__chosen"
-                aria-label={`已从 ${gatewayShortName(current)} 选的模型`}
-              >
-                {gatewaySelectedChips(current).map(({ model, label }) => (
-                  <ModelChip
-                    key={model.id}
-                    name={label}
-                    id={model.slug || model.id}
-                    onRemove={() => onToggleModel(current, model.id)}
-                  />
-                ))}
-              </div>
-            ) : null}
-            {notice ? (
-              <div className="gw-notice">
-                <NoticePanel
-                  message={notice.message}
-                  reason={notice.reason}
-                  onClose={onCloseNotice}
-                />
-              </div>
-            ) : null}
-            <div className="gw-panel__list">
-              <ModelList
-                // 换一家网关就是「重新打开」这份列表：重排一次序
-                key={current.id}
-                entries={current.models.map((model) => ({ provider: current, model }))}
-                onToggle={onToggleModel}
-                flashKeys={flashKeys}
+  /// 展开区＝从这个网关选模型：限制说明 → 已选模型片 → 勾选列表（缩进对齐网关名）
+  const models = (p: GatewayProvider) => {
+    const chips = gatewaySelectedChips(p);
+    return (
+      <div className="gw-row__body">
+        <div className="gw-row__note">{tool.pickerNote}</div>
+        {/* 已选用模型片表达（与模型页同一个 ModelChip）：勾选 / 取消 / 点 × 三处实时联动 */}
+        {chips.length > 0 ? (
+          <div className="gw-row__chosen" aria-label={`已从 ${gatewayShortName(p)} 选的模型`}>
+            {chips.map(({ model, label }) => (
+              <ModelChip
+                key={model.id}
+                name={label}
+                id={model.slug || model.id}
+                onRemove={() => toggleModel(p, model.id)}
               />
-            </div>
-          </>
+            ))}
+          </div>
         ) : null}
+        {notice && noticeRow === p.id ? (
+          <div className="gw-notice">
+            <NoticePanel message={notice.message} reason={notice.reason} onClose={onCloseNotice} />
+          </div>
+        ) : null}
+        {p.models.length > 0 ? (
+          <div className="gw-row__list">
+            <ModelList
+              // 收起再展开就是「重新打开」这份列表：重排一次序
+              key={p.id}
+              entries={p.models.map((model) => ({ provider: p, model }))}
+              onToggle={toggleModel}
+            />
+          </div>
+        ) : (
+          <div className="gw-row__none">
+            {p.unreachable ? "连不上，还没拉到模型" : "还没拉到模型"}
+          </div>
+        )}
       </div>
+    );
+  };
+
+  const row = (p: GatewayProvider) => {
+    const open = expanded.has(p.id);
+    const isEditing = editing === p.id;
+    const name = (
+      <span className="src-row__caret">
+        <Disclosure open={open || isEditing} shown />
+      </span>
+    );
+    return (
+      <div
+        key={p.id}
+        className={`src-row gw-row${open || isEditing ? " is-open" : ""}${flashProviderId === p.id || addedId === p.id ? " is-jump" : ""}`}
+        onAnimationEnd={(e) => {
+          if (e.target === e.currentTarget && addedId === p.id) setAddedId(null);
+        }}
+      >
+        <div
+          className="src-row__main gw-row__main"
+          ref={(el) => {
+            if (el) rowEls.current.set(p.id, el);
+            else rowEls.current.delete(p.id);
+          }}
+        >
+          {isEditing ? (
+            // 编辑时第二行换成表单：名字位不再是展开键
+            <div className="src-row__name gw-row__name is-static">
+              {name}
+              <span className="src-row__text">
+                <span className="src-row__label">{gatewayShortName(p)}</span>
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="src-row__name gw-row__name"
+              aria-expanded={open}
+              onClick={() => toggleRow(p.id)}
+            >
+              {name}
+              <span className="src-row__text">
+                <span className="src-row__label">{gatewayShortName(p)}</span>
+                {subLine(p)}
+              </span>
+            </button>
+          )}
+          {actions(p, isEditing)}
+        </div>
+        {isEditing ? form(p) : null}
+        {rowError?.id === p.id ? (
+          <div className="gw-row__notice">
+            <NoticePanel message={rowError.message} />
+          </div>
+        ) : null}
+        {open && !isEditing ? models(p) : null}
+      </div>
+    );
+  };
+
+  /// 新网关：插在列表最上面，名字位写 `新网关`（普通 ink-mute 字，不是反色片），表单直接开着
+  const draftRow = (
+    <div key="new" className="src-row gw-row is-open">
+      <div className="src-row__main gw-row__main">
+        <div className="src-row__name gw-row__name is-static">
+          <span className="src-row__caret">
+            <Disclosure open shown />
+          </span>
+          <span className="src-row__text">
+            <span className="src-row__label gw-row__draft">新网关</span>
+          </span>
+        </div>
+      </div>
+      {form(null)}
     </div>
+  );
+
+  const drafting = editing === "new";
+  const body =
+    providers.length === 0 && !drafting ? (
+      // 空态一句；动作在页头 `+ 网关`，空态不重复按钮
+      <div className="src-page__empty">
+        <Empty kind="noSkills" description="还没有网关" art="emptyFolder" />
+      </div>
+    ) : (
+      <div className="src-page">
+        <div className="src-panel">
+          <div className="src-panel__head">
+            <span>网关</span>
+          </div>
+          {drafting ? draftRow : null}
+          {providers.map(row)}
+        </div>
+      </div>
+    );
+
+  return (
+    <SubPage
+      className={`gw-page-sub${leaving ? " is-leaving" : ""}`}
+      title={
+        <span className="gw-page__title">
+          {tool.name} 的网关
+          {headerAction}
+        </span>
+      }
+      onBack={back}
+      aside={
+        <AddButton
+          noun="网关"
+          onClick={() => choose("new")}
+          disabledReason={drafting ? ADD_GATEWAY_BLOCKED : undefined}
+        />
+      }
+    >
+      {body}
+      {/* 删网关：地址与钥匙串里的密钥一起删、找不回——二次确认（⑪） */}
+      {confirming !== null ? (
+        <Confirm
+          title={`删掉 ${gatewayShortName(confirming.provider)}？`}
+          confirmLabel="删掉"
+          anchor={confirming.anchor}
+          align="end"
+          onConfirm={() => remove(confirming.provider)}
+          onCancel={() => setConfirming(null)}
+        >
+          地址和钥匙串里的密钥一起删掉，删了找不回来
+        </Confirm>
+      ) : null}
+      {/* 页面里的浮层（重启确认）也要在二级页里：主视图打开二级页期间是 inert 的 */}
+      {overlay}
+    </SubPage>
   );
 }
 
@@ -520,10 +566,8 @@ interface GatewayFormProps {
   onSaved: (providerId: string) => void;
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
-  /// 离开页面或换一家时连接区还有改动：就地一句 + 保存 / 丢弃，问完做 `onDone`
+  /// 离开页面或换一行编辑时表单还有改动：就地一句 + 保存 / 丢弃，问完做 `onDone`
   ask: { text: string; onDone: () => void } | null;
-  /// 一家都没有时新网关的表单没有「取消」可退
-  canCancel: boolean;
 }
 
 /// 地址为空时的「保存」：禁用，提示框「先填地址」（禁用键自带原因提示框，按下当即出）
@@ -546,7 +590,6 @@ function GatewayForm({
   onCancel,
   onDirtyChange,
   ask,
-  canCancel,
 }: GatewayFormProps) {
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
   const [apiKey, setApiKey] = useState("");
@@ -558,7 +601,7 @@ function GatewayForm({
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
-  // 卸载（收起、换一家）时不再算有改动
+  // 卸载（收起、换一行）时不再算有改动
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   /**
@@ -607,7 +650,7 @@ function GatewayForm({
           className="gw-form__input"
           type="text"
           value={baseUrl}
-          autoFocus={provider === null}
+          autoFocus
           placeholder="https://example.com/openai/v1"
           onChange={(e) => setBaseUrl(e.target.value)}
         />
@@ -625,7 +668,7 @@ function GatewayForm({
       </label>
       <div className="gw-form__actions">
         {ask !== null ? (
-          // 离开 / 换一家时连接区有未保存的改动：不走，就地问一句（⑪⑫）；同一个组件
+          // 离开 / 换一行编辑时表单有未保存的改动：不走，在这一行里就地问一句（⑪⑫）
           <>
             <span className="gw-form__ask">{ask.text}</span>
             {blank ? (
@@ -666,7 +709,7 @@ function GatewayForm({
             </Button>
           </Tooltip>
         )}
-        {ask === null && canCancel ? (
+        {ask === null ? (
           <Button variant="link" onClick={onCancel}>
             取消
           </Button>
