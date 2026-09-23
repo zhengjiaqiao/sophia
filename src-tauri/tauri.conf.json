@@ -15,7 +15,7 @@
         "title": "Sophia",
         "width": 1100,
         "height": 720,
-        "minWidth": 1042,
+        "minWidth": 1100,
         "minHeight": 560,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
