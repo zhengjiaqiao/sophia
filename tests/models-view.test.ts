@@ -42,6 +42,7 @@ import {
   serviceLeftover,
   UNINSTALL_TIP,
   RESTART_TIP,
+  predictEnabled,
 } from "../src/modelsView.ts";
 import type { ModelsTool } from "../src/modelsView.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
@@ -413,6 +414,8 @@ test("selectModel：只翻这一家这一个模型；网关开着时去掉最后
   assert.equal(last.turnsOff, true);
   assert.equal(last.next.enabled, false);
   assert.equal(totalSelected(last.next), 0);
+  // 关掉的预测连路由一起：否则等结果那一下 `卸下后台服务` 会闪出来
+  assert.equal(serviceLeftover(last.next), false);
 
   // 网关本来就关着：去掉最后一个只是去掉
   const off = selectModel({ ...partial.next, enabled: false }, "b", "m1", false);
@@ -1260,4 +1263,20 @@ test("gatewaySelectedChips：只这一家已选的；同一服务商省前缀，
     ["azure/gpt-4.1", "zhipu/glm-4.6"],
   );
   assert.deepEqual(gatewaySelectedChips(provider({ models: [model({ id: "a" })] })), []);
+});
+
+test("predictEnabled：拨开关先画做成之后的样子——开时路由在跑、关时服务已卸，提示不闪", () => {
+  const base = state();
+  const on = predictEnabled(
+    { ...base, enabled: false, router: { ...base.router, installed: false, running: false } },
+    true,
+  );
+  assert.equal(on.enabled, true);
+  assert.equal(routerUnavailable(on), false);
+  const off = predictEnabled(
+    { ...base, enabled: true, router: { ...base.router, installed: true, running: true } },
+    false,
+  );
+  assert.equal(off.enabled, false);
+  assert.equal(serviceLeftover(off), false);
 });

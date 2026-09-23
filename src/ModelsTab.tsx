@@ -21,6 +21,7 @@ import {
   modelIssues,
   modelLabel,
   parseBackendError,
+  predictEnabled,
   routerUnavailable,
   selectModel,
   shouldPollRestart,
@@ -799,13 +800,11 @@ export default function ModelsTab({
   const toggleGateway = (tool: ModelsTool, next: boolean) => {
     const current = shown.current;
     if (!current) return;
-    // 先画的是「做成之后」的样子：启用成功时路由必然已就绪（后端等到就绪才返回），
-    // 只翻 enabled 会让「路由没在跑」待办条在等结果的那一下闪出来
-    const predicted = next
-      ? { ...current, enabled: true, router: { ...current.router, installed: true, running: true } }
-      : { ...current, enabled: false };
-    writer.write(`${next ? "没打开" : "没关掉"} ${tool.name} 的第三方模型`, predicted, () =>
-      next ? api.gatewayEnable() : api.gatewayRestore(),
+    // 先画「做成之后」的样子（路由一并预测），见 predictEnabled
+    writer.write(
+      `${next ? "没打开" : "没关掉"} ${tool.name} 的第三方模型`,
+      predictEnabled(current, next),
+      () => (next ? api.gatewayEnable() : api.gatewayRestore()),
     );
   };
 

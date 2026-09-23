@@ -547,6 +547,15 @@ export function shouldPollRestart(state: GatewayState | null, phase: RestartPhas
  * 网关开着时去掉的是最后一个生效模型（全部网关加起来一个不剩）：`turnsOff` 为真、开关随之画成关——
  * 等同把开关关掉，不提示、不确认（DESIGN「移除最后一个生效模型 = 关掉网关」）
  */
+/// 拨开关时先画的「做成之后」的样子（DESIGN「勾选不闪」）：只翻 enabled 会让依赖它的提示在等结果的
+/// 那一下闪出来——开时「路由没在跑」待办条（启用成功时后端已等到路由就绪），关时 `卸下后台服务` 键
+/// （恢复会一并卸掉路由服务）。做不成时整份回滚到后端给的状态，所以这里只预测成功
+export function predictEnabled(state: GatewayState, enabled: boolean): GatewayState {
+  return enabled
+    ? { ...state, enabled, router: { ...state.router, installed: true, running: true } }
+    : { ...state, enabled, router: { ...state.router, installed: false, running: false } };
+}
+
 export function selectModel(
   state: GatewayState,
   providerId: string,
@@ -569,7 +578,7 @@ export function selectModel(
     provider: providers.find((p) => p.id === state.provider.id) ?? state.provider,
   };
   const turnsOff = state.enabled && totalSelected(moved) === 0;
-  return { next: turnsOff ? { ...moved, enabled: false } : moved, turnsOff };
+  return { next: turnsOff ? predictEnabled(moved, false) : moved, turnsOff };
 }
 
 /// 模型框尾端的等宽读数：全部网关一共拉到几个可选模型
