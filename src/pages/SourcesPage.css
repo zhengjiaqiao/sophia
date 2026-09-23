@@ -161,10 +161,10 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-xxs);
-  /* 悬停底比图标宽出 6：负外边距抵掉，静息时图标仍离文字 8 */
-  margin: 0 -6px;
-  padding: var(--space-xxs) 6px;
-  border: 0;
+  /* 带描边与 ▾ 的小框：一眼看得出是能点开改的选择（原来只有图标，看不出能选 agent） */
+  height: var(--control-h-compact);
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
   background: none;
   color: var(--ink);
@@ -176,7 +176,11 @@
 
 .src-row__targets:hover,
 .src-row__targets.is-open {
-  background: var(--surface);
+  border-color: var(--ink);
+}
+
+.src-row__chevron {
+  color: var(--ink-mute);
 }
 
 .src-row__targets:focus-visible {

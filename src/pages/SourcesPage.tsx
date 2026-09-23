@@ -92,6 +92,15 @@ export default function SourcesPage({ domain, onClose, onChange }: SourcesPagePr
   /// 刚拨过的开关 / 刚改过的目标：重读回来之前先按点下去的样子画（开关不回弹）。值是目标 id，空＝关
   const [optimistic, setOptimistic] = useState<Map<string, string[]>>(new Map());
   const rowEls = useRef(new Map<string, HTMLDivElement>());
+  /// 目标键：打开开关后当场把选目标的浮层开在它上面（产品负责人：看不出能选自动加到哪个 agent）
+  const targetEls = useRef(new Map<string, HTMLButtonElement>());
+  const [openTargetsOf, setOpenTargetsOf] = useState<string | null>(null);
+  useEffect(() => {
+    if (openTargetsOf === null) return;
+    const trigger = targetEls.current.get(openTargetsOf);
+    if (trigger) setLayer({ kind: "targets", id: openTargetsOf, trigger });
+    setOpenTargetsOf(null);
+  }, [openTargetsOf]);
   const addWrap = useRef<HTMLSpanElement>(null);
   const emptyWrap = useRef<HTMLDivElement>(null);
 
@@ -167,7 +176,10 @@ export default function SourcesPage({ domain, onClose, onChange }: SourcesPagePr
         openTargets.map((t) => t.id),
         loadImportMemory(memoryKey(domain.key, source.id))?.last,
       );
-      void changeRule(source, targets, () => api.setAutoLink(source.path, targets), "没打开");
+      // 打开后当场展开选目标的浮层：默认目标只是起点，要让人看见、能改
+      void changeRule(source, targets, () => api.setAutoLink(source.path, targets), "没打开").then(
+        () => setOpenTargetsOf(source.id),
+      );
     } else {
       const all = domain.targets.map((t) => t.id);
       void changeRule(source, [], () => api.removeAutoLinkTargets(source.path, all), "没关掉");
@@ -394,6 +406,10 @@ export default function SourcesPage({ domain, onClose, onChange }: SourcesPagePr
                     {on ? (
                       <button
                         type="button"
+                        ref={(el) => {
+                          if (el) targetEls.current.set(source.id, el);
+                          else targetEls.current.delete(source.id);
+                        }}
                         className={`src-row__targets${layer?.kind === "targets" && layer.id === source.id ? " is-open" : ""}`}
                         aria-haspopup="menu"
                         aria-expanded={layer?.kind === "targets" && layer.id === source.id}
@@ -418,6 +434,21 @@ export default function SourcesPage({ domain, onClose, onChange }: SourcesPagePr
                               />
                             ))
                           : `${targets.length} 个 agent`}
+                        {/* 下拉记号：看得出这组图标能点开改（⑥ 外观说明如何操作） */}
+                        <svg
+                          className="src-row__chevron"
+                          width="10"
+                          height="10"
+                          viewBox="0 0 10 10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M2.5 4 5 6.5 7.5 4" />
+                        </svg>
                       </button>
                     ) : null}
                     <span className="src-row__remove">
