@@ -803,9 +803,15 @@ fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), S
     let path = normalize(&path);
     let mut list = state.store.load_projects().map_err(err)?;
     if !list.iter().any(|p| normalize(p) == path) {
-        list.push(path);
+        list.push(path.clone());
     }
-    state.store.save_projects(&list).map_err(err)
+    state.store.save_projects(&list).map_err(err)?;
+    // 侧栏「最近创建」在取不到文件夹创建时间时用加入时间
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    state.store.mark_project_added(&path, now).map_err(err)
 }
 
 #[tauri::command]
@@ -813,7 +819,34 @@ fn remove_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<()
     let path = normalize(&path);
     let mut list = state.store.load_projects().map_err(err)?;
     list.retain(|p| normalize(p) != path);
-    state.store.save_projects(&list).map_err(err)
+    state.store.save_projects(&list).map_err(err)?;
+    state.store.forget_project_added(&path).map_err(err)
+}
+
+/// 侧栏排序用的项目时间（最近活跃 / 最近创建），按传入顺序返回。只读元数据，不写盘
+#[tauri::command]
+fn project_times(
+    paths: Vec<PathBuf>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<symsync_core::activity::ProjectTimes>, String> {
+    let env = runtime_env()?;
+    let claude_projects = env
+        .vars
+        .get("CLAUDE_CONFIG_DIR")
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env.home.join(".claude"))
+        .join("projects");
+    let agent_dirs = symsync_core::activity::agent_dir_names(&discovery::all_harnesses(&env));
+    let added = state.store.load_settings().map_err(err)?.project_added_at;
+    Ok(paths
+        .iter()
+        .map(|p| {
+            let at = added.get(normalize(p).to_string_lossy().as_ref()).copied();
+            symsync_core::activity::project_times(p, &claude_projects, &agent_dirs, at)
+        })
+        .collect())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -858,6 +891,7 @@ pub fn run() {
             list_manual_projects,
             add_project,
             remove_project,
+            project_times,
             list_auto_links,
             set_auto_link,
             remove_auto_link,
