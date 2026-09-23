@@ -316,3 +316,16 @@ test("批量忙碌锁：开始就锁住工具行各项、不变淡；忙过 500m
   assert.match(locked, /pointer-events: none/);
   assert.doesNotMatch(locked, /opacity/);
 });
+
+test("格子提示框的 · 空格 只给键盘：鼠标悬停不写，格子按钮 :focus-visible 时才写", () => {
+  const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /<span className="ss-tip__keyhint">\s*\{" · "\}\s*<span className="ss-tip__key">空格<\/span>/,
+  );
+  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.match(
+    css,
+    /\.mx-cell:has\(\.mx-cellbtn:focus-visible\) \.ss-tip__keyhint \{\s*display: inline;/,
+  );
+});

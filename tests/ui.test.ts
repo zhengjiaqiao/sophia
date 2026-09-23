@@ -479,7 +479,13 @@ test("Tooltip：黑窗白字 12，内边距 6 8，最大宽 240；内容作 aria
   const id = html.match(/role="tooltip"/) && html.match(/aria-describedby="([^"]+)"/)?.[1];
   assert.ok(id, "触发控件要挂 aria-describedby");
   assert.match(html, new RegExp(`id="${id}" role="tooltip"`));
-  assert.match(html, /点一下开启 · <span class="ss-tip__key">空格<\/span>/);
+  assert.match(
+    html,
+    /点一下开启<span class="ss-tip__keyhint"> · <span class="ss-tip__key">空格<\/span><\/span>/,
+  );
+  // 快捷键只给键盘：默认不显示，触发控件 :focus-visible（键盘焦点）时才显示
+  assert.match(cssRule(uiCss, ".ss-tip__keyhint"), /display:\s*none/);
+  assert.match(uiCss, /\.ss-tipwrap:has\(:focus-visible\) \.ss-tip__keyhint \{\s*display: inline;/);
   // 静止时不显示；原生 title 不作唯一说明
   assert.doesNotMatch(html, /is-open/);
   const rule = cssRule(uiCss, ".ss-tip");

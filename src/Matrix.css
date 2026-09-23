@@ -577,6 +577,11 @@
   cursor: default;
 }
 
+/* 格子提示框的 ` · 空格` 只在键盘焦点唤起时写（ui.css 的 .ss-tip__keyhint 默认不显示） */
+.mx-cell:has(.mx-cellbtn:focus-visible) .ss-tip__keyhint {
+  display: inline;
+}
+
 /* 键盘焦点：1px ink 环画在格里的点外 2（不用整格外框——那会压到邻格与行线） */
 .mx-cellbtn.ss-dot-btn:focus-visible {
   outline: 0;

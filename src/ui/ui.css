@@ -710,6 +710,17 @@
   right: 0;
 }
 
+/* 快捷键只给键盘（DESIGN「提示框」）：鼠标悬停唤起时不写 ` · 空格`，键盘焦点唤起时才写。
+   `:focus-visible` 只在键盘（方向键、Tab）带来的焦点上成立，鼠标点过的按钮不算 */
+.ss-tip__keyhint {
+  display: none;
+}
+
+.ss-tipwrap:focus-visible .ss-tip__keyhint,
+.ss-tipwrap:has(:focus-visible) .ss-tip__keyhint {
+  display: inline;
+}
+
 .ss-tip__key {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

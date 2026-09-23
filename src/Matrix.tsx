@@ -1098,11 +1098,12 @@ export default function Matrix(props: MatrixProps) {
                     className={`ss-tip ${r === 0 || tipFlip === key ? "ss-tip--bottom" : "ss-tip--top"} ss-tip--center is-open`}
                   >
                     {view.tip}
+                    {/* 快捷键只给键盘：格子 :focus-visible 时才显示（Matrix.css） */}
                     {view.clickable ? (
-                      <>
+                      <span className="ss-tip__keyhint">
                         {" · "}
                         <span className="ss-tip__key">空格</span>
-                      </>
+                      </span>
                     ) : null}
                   </span>
                 ) : null}

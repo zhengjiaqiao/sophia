@@ -14,7 +14,8 @@ import type { ReactElement, ReactNode } from "react";
 ///
 /// - 材质：黑窗白字 12/400，重点词 600（调用方用 <b> 包）；圆角 0、无阴影无箭头；
 ///   内边距 6 8；最大宽 240，超出换行
-/// - 表格格子只一行「动词 · 快捷键」：`点一下开启 · 空格`
+/// - 表格格子只一行「动词」；快捷键（` · 空格`）只在键盘焦点唤起时写，鼠标悬停不写
+///   （`.ss-tip__keyhint` 默认不显示，触发控件 `:focus-visible` 时才显示，见 ui.css）
 /// - 位置：锚在触发控件上，正上方 6、水平居中（≤16px 就近）；上方放不下才放下方，
 ///   居中出窗时对齐外侧边。格子的提示框允许盖住上一行邻格，只保护本格与本行
 /// - 时机：表格内停留 700ms、表格外 400ms；在格与格之间移动时每格重新计时，所以
@@ -122,10 +123,10 @@ export function Tooltip({
       <span ref={bubble} id={id} role="tooltip" className={classes.join(" ")}>
         {content}
         {shortcut ? (
-          <>
+          <span className="ss-tip__keyhint">
             {" · "}
             <span className="ss-tip__key">{shortcut}</span>
-          </>
+          </span>
         ) : null}
       </span>
     </span>
