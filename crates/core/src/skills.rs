@@ -1,14 +1,15 @@
 //! 按域（全局 / 每个项目）组织的扫描：行的两类来源、格状态、按选中格生成建链 / 删链动作、整目录链接拆分
 use crate::fs::{create_link, entry_kind, normalize, real_path, remove_link, same_real, EntryKind};
 use crate::models::*;
+use crate::subscriptions::{subscribed, Subscriptions};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// 拆分报告里代表那条目录级软链的条目名
-const WHOLE_LINK_ITEM: &str = "<整目录链接>";
+pub(crate) const WHOLE_LINK_ITEM: &str = "<整目录链接>";
 
 /// 全局域的 key
-const GLOBAL_KEY: &str = "global";
+pub(crate) const GLOBAL_KEY: &str = "global";
 
 /// 外部位置不属于任何域，用一个不会与域 key 相等的值占位
 const EXTERNAL_KEY: &str = "external";
@@ -37,7 +38,7 @@ pub(crate) fn project_key(project: &Path) -> String {
     format!("project:{}", normalize(project).display())
 }
 
-fn dir_name(path: &Path) -> String {
+pub(crate) fn dir_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
@@ -54,7 +55,7 @@ fn source_domain(kind: &SourceKind) -> String {
 }
 
 /// 按域分组目标：全局在前，项目按 `targets` 里的首现顺序
-fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
+pub(crate) fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
     let mut out: Vec<(String, String, Vec<Target>)> = Vec::new();
     for t in targets {
         let key = domain_key(&t.scope);
@@ -69,26 +70,26 @@ fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
 }
 
 /// `t/name` 是解析到该 skill 本体路径的软链
-fn links_to(target: &Target, skill: &Skill) -> bool {
+pub(crate) fn links_to(target: &Target, skill: &Skill) -> bool {
     let path = target.path.join(&skill.name);
     matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &skill.path)
 }
 
-/// 只读扫描，按域组织。只产出事实，不作任何选择
-pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
+/// 只读扫描，按域组织。只产出事实，不作任何选择。
+/// 行 = 这个域已订阅的来源（见 `subscriptions::subscribed`）的**全部** skill，没链的格是 Missing
+pub fn scan(sources: &[Source], targets: &[Target], subs: &Subscriptions) -> Overview {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut domains = Vec::new();
     // 目录尚不存在的目标照常成列：格状态自然全是 Missing，补齐时由 `sync::execute` 建目录
     for (key, label, d_targets) in group_domains(targets) {
-        // 行 = 自有全部 ∪ 已链接的那些；(skill, 本体位置 label, 本体位置 id) 排序去重
+        // 行 = 已订阅来源的全部 skill；(skill, 本体位置 label, 本体位置 id) 排序去重
         let mut keys: BTreeSet<(String, String, String)> = BTreeSet::new();
         for s in sources {
-            let own = source_domain(&s.kind) == key;
+            if !subscribed(s, &key, &d_targets, subs) {
+                continue;
+            }
             for skill in &s.skills {
-                let linked = || d_targets.iter().any(|t| links_to(t, skill));
-                if own || linked() {
-                    keys.insert((skill.name.clone(), s.label.clone(), s.id.clone()));
-                }
+                keys.insert((skill.name.clone(), s.label.clone(), s.id.clone()));
             }
         }
 
@@ -749,6 +750,11 @@ mod tests {
     use super::*;
     use crate::test_support::TempTree;
 
+    /// 还没有订阅记录时的扫描：自己的来源与此刻有链的来源成行
+    fn scan(sources: &[Source], targets: &[Target]) -> Overview {
+        super::scan(sources, targets, &Subscriptions::new())
+    }
+
     fn make_source(path: &Path, label: &str, kind: SourceKind, skills: &[&str]) -> Source {
         let path = normalize(path);
         Source {
@@ -842,8 +848,9 @@ mod tests {
         }
     }
 
+    /// 来源是订阅单位：有一条链就算订阅，它的全部 skill 成行，没链的是 Missing
     #[test]
-    fn rows_are_own_skills_plus_linked_ones_only() {
+    fn rows_are_own_skills_plus_every_skill_of_linked_sources() {
         let tree = TempTree::new();
         let universal = tree.dir("universal"); // 全局自有：a, b
         let proj_root = tree.dir("proj");
@@ -876,16 +883,18 @@ mod tests {
             ]
         );
         let proj = &ov.domains[1];
-        // 项目域：自有 c、d 全部成行；universal 只有被链的 a，不带入 b（本体位置不属于本域）
+        // 项目域：自有 c、d 全部成行；universal 链了 a 就算订阅，没链的 b 也成行
         assert_eq!(
             rows(proj),
             vec![
                 (sources[0].id.clone(), "a".into(), false),
+                (sources[0].id.clone(), "b".into(), false),
                 (sources[1].id.clone(), "c".into(), true),
                 (sources[1].id.clone(), "d".into(), true),
             ]
         );
         assert_eq!(proj.rows[0].cells[0].state, CellState::Linked);
+        assert_eq!(proj.rows[1].cells[0].state, CellState::Missing);
     }
 
     #[test]
@@ -1519,14 +1528,17 @@ mod tests {
         let targets = vec![tg.clone()];
 
         let ov = scan(&sources, &targets);
-        // 外部位置不属于任何域：只有被链接的那行成行，own 恒为 false
+        // 外部位置不属于任何域（own 恒为 false）；有一条链就算订阅，它的 skill 全部成行
         assert_eq!(
             rows(&ov.domains[0]),
-            vec![(s.id.clone(), "ego-browser".into(), false)]
+            vec![
+                (s.id.clone(), "ego-browser".into(), false),
+                (s.id.clone(), "ego-writer".into(), false)
+            ]
         );
         assert_eq!(ov.domains[0].rows[0].cells[0].state, CellState::Linked);
 
-        // 未成行的 ego-writer 也能建链，链接指向真实路径而非 位置/名字 的拼接
+        // 没链的 ego-writer 能建链，链接指向真实路径而非 位置/名字 的拼接
         let acts = propose_links(&sources, &targets, &[cell(&s, "ego-writer", &tg)]);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].source_path, writer);

@@ -17,6 +17,7 @@ use symsync_core::fs::normalize;
 use symsync_core::models::*;
 use symsync_core::skills;
 use symsync_core::store::Store;
+use symsync_core::subscriptions;
 use symsync_core::sync;
 use tauri::Emitter;
 
@@ -140,6 +141,7 @@ struct McpPreview {
 
 /// 一次发现：本体位置与目标目录，按当前设置解析。返回的目标含目录尚不存在的那批
 /// （`Target.exists == false`），它们照常成列，补齐时目录就地创建。
+/// 订阅记录里常规发现找不到的文件夹（来源管理页选的）在目标之前读进来；
 /// 目标目录里指向已知位置之外的软链再合成出外部本体位置
 fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = runtime_env()?;
@@ -148,16 +150,34 @@ fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let manual_projects = state.store.load_projects().map_err(err)?;
     let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
     let mut sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
+    let subscribed = discovery::subscribed_sources(
+        &subscriptions::recorded_dirs(&settings.subscriptions),
+        &sources,
+    );
+    sources.extend(subscribed);
     let targets = discovery::targets(&env, &harnesses, &projects, &sources);
     let external = discovery::external_sources(&env, &targets, &sources);
     sources.extend(external);
     Ok((sources, targets))
 }
 
-/// 完整扫描：发现 → 按域扫描，只产出事实，不落盘
+/// 完整扫描：发现 → 把此刻有软链的来源记进订阅（第一次扫描时认领老数据）→ 按域扫描
 fn overview(state: &AppState) -> Result<Overview, String> {
     let (sources, targets) = discover(state)?;
-    Ok(skills::scan(&sources, &targets))
+    let settings = subscribed_settings(state, &sources, &targets)?;
+    Ok(skills::scan(&sources, &targets, &settings.subscriptions))
+}
+
+/// 读设置并认领订阅；凡是要读或改订阅记录的地方都先过这一步，第一次扫描的认领才不会被跳过
+fn subscribed_settings(
+    state: &AppState,
+    sources: &[Source],
+    targets: &[Target],
+) -> Result<symsync_core::store::Settings, String> {
+    state
+        .store
+        .load_settings_adopting_subscriptions(sources, targets)
+        .map_err(err)
 }
 
 /// 所有仍生效的自动引入规则只保存位置身份；扫描时才把它们展开为当前缺失项。

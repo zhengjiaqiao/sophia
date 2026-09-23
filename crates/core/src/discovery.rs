@@ -445,6 +445,51 @@ pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec
         .collect()
 }
 
+/// 订阅记录里、常规发现没找到的文件夹（用户在来源管理页选的，或外部位置的软链都撤了之后
+/// 记录里还留着的）：按手动位置读进来，名字与外部位置同一套取法（`folder_label`）。
+/// 这些文件夹是任意位置，里面未必都是 skill（外部位置的父目录可能就是 `~/Project`），
+/// 所以只认带 `SKILL.md` 的子目录。不在了、一个 skill 都没有、或与已知位置同一处（按
+/// `real_path`）的不产出。要在 `targets` 之前调用，整目录链接与外部位置才认得出它们
+pub fn subscribed_sources<'a>(
+    dirs: impl IntoIterator<Item = &'a PathBuf>,
+    known: &[Source],
+) -> Vec<Source> {
+    let mut keys: Vec<PathBuf> = known
+        .iter()
+        .map(|s| real_path(&s.path).unwrap_or_else(|| normalize(&s.path)))
+        .collect();
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Some(key) = real_path(dir) else {
+            continue;
+        };
+        if keys.contains(&key) || known.iter().any(|s| normalize(&s.path) == normalize(dir)) {
+            continue;
+        }
+        let skills: Vec<Skill> = skills_in(dir)
+            .into_iter()
+            .filter(|s| s.path.join("SKILL.md").is_file())
+            .collect();
+        if skills.is_empty() {
+            continue;
+        }
+        keys.push(key);
+        out.push(Source {
+            id: normalize(dir).to_string_lossy().into_owned(),
+            path: normalize(dir),
+            kind: SourceKind::Manual,
+            label: folder_label(dir),
+            skills,
+        });
+    }
+    out
+}
+
+/// 任意文件夹的来源名：与外部位置同一套（应用名、跳过 `skills` 这类泛称）
+pub(crate) fn folder_label(path: &Path) -> String {
+    external_label(path)
+}
+
 /// 外部本体位置的标签是**用户认得的名字**，不是路径（DESIGN.md「来源的名字」）：
 /// 路径里任一祖先是应用包（`.app`）→ 取那一级去掉后缀的应用名，其余取最后一级目录名。
 /// 逐路径分量判断：字符串 `contains(".app")` 会被 `my.application` 骗到。

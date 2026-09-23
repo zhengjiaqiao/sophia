@@ -2,7 +2,8 @@
 use crate::{
     codex_models::settings::GatewaySettings,
     mcp::{McpAutoImportRule, McpOverview},
-    models::{AutoLink, Source},
+    models::{AutoLink, Source, Target},
+    subscriptions::Subscriptions,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -30,6 +31,9 @@ pub struct Settings {
     /// 手动项目加入 Sophia 的时间：规范化路径 → 毫秒时间戳。侧栏「最近创建」在取不到文件夹
     /// 创建时间时用它；旧文件没有这个字段，旧项目也就没有记录（回退到文件夹修改时间）
     pub project_added_at: BTreeMap<String, u64>,
+    /// 每个位置订阅了哪些来源：域 key（`global` / `project:<路径>`）→ 来源路径（normalize 后）。
+    /// 旧文件没有这个字段，读成空；第一次扫描由 `subscriptions::adopt` 按老数据补上
+    pub subscriptions: Subscriptions,
     /// 旧版「忽略」表，只读不写：`load_settings` 把它并进 `seen_issues` 后清空，
     /// 下次写盘时这个字段就从文件里消失了
     #[serde(rename = "ignored", skip_serializing)]
@@ -187,6 +191,21 @@ impl Store {
     pub fn load_settings_migrating_auto_links(&self, sources: &[Source]) -> io::Result<Settings> {
         let mut settings = self.load_settings()?;
         if crate::skills::migrate_baselines(&mut settings.auto_links, sources) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
+    /// 读设置，顺手把此刻有软链的来源写进各位置的订阅记录（见 `subscriptions::adopt`；
+    /// 第一次扫描时认领老数据），改过才写回。要发现结果才能认领，所以只在发现之后用
+    pub fn load_settings_adopting_subscriptions(
+        &self,
+        sources: &[Source],
+        targets: &[Target],
+    ) -> io::Result<Settings> {
+        let mut settings = self.load_settings()?;
+        let legacy = settings.manual_sources.clone();
+        if crate::subscriptions::adopt(&mut settings.subscriptions, sources, targets, &legacy) {
             self.save_settings(&settings)?;
         }
         Ok(settings)
@@ -367,6 +386,12 @@ mod tests {
             project_added_at: [("/a".to_string(), 1_700_000_000_000)]
                 .into_iter()
                 .collect(),
+            subscriptions: [(
+                "project:/p".to_string(),
+                [PathBuf::from("/a/skills")].into_iter().collect(),
+            )]
+            .into_iter()
+            .collect(),
             legacy_ignored: Vec::new(),
         };
         s.save_settings(&settings).unwrap();
@@ -401,6 +426,8 @@ mod tests {
         assert_eq!(loaded.manual_sources, Vec::<PathBuf>::new());
         assert_eq!(loaded.auto_links, Vec::<AutoLink>::new());
         assert_eq!(loaded.mcp_auto_imports, Vec::<McpAutoImportRule>::new());
+        // 订阅记录是后加的：旧文件读成空，等第一次扫描认领
+        assert!(loaded.subscriptions.is_empty());
     }
 
     /// 升级前写下的 settings.json：两类规则都没有 baseline。

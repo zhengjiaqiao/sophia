@@ -26,6 +26,7 @@
 - `fs.rs`：`entry_kind`（lstat）、`real_path`、`normalize`、`create_link`
 - `sync.rs`：`execute` 执行动作
 - `skills.rs`：矩阵 `scan`（只读事实）/ `propose_links` / `propose_unlinks`（按选中格生成动作），本体判定
+- `subscriptions.rs`：来源订阅（每个位置订阅了哪些来源，存 `settings.json`）、老数据认领、来源管理页的列表 / 候选 / 移除；`scan` 按它成行
 - `discovery.rs` + `data/harnesses.json`：harness 表、已安装判定、项目候选
 - `store.rs`：`projects.json` / `settings.json`
 - `crates/core/src/atomicfile.rs`：写用户配置文件的唯一通道（快照、备份、原子替换、写前写后指纹校验、拒绝软链父目录）。MCP 同步和模型网关共用，不要另写一份

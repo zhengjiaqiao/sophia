@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod models;
 pub mod skills;
 pub mod store;
+pub mod subscriptions;
 pub mod sync;
 
 #[cfg(test)]
