@@ -830,28 +830,31 @@ export default function ModelsTab({
                   />
                 ) : null;
                 if (todos.length === 0 && router === null) return undefined;
-                return [router, ...todos.map(({ key, kind }) => (
-                  <NoticePanel
-                    key={key}
-                    message={
-                      kind === "takeover"
-                        ? `${tool.name} 正由 agents-manager 管理`
-                        : "Sophia 写进去的设置被改掉了"
-                    }
-                    busy={
-                      resolving === kind
-                        ? kind === "takeover"
-                          ? "正在接管"
-                          : "正在重新写入"
-                        : undefined
-                    }
-                    action={{
-                      label: kind === "takeover" ? "接管" : "重新写入",
-                      onClick: () => void resolveTodo(kind),
-                      disabledReason: busy ? "正在处理上一步" : undefined,
-                    }}
-                  />
-                ))];
+                return [
+                  router,
+                  ...todos.map(({ key, kind }) => (
+                    <NoticePanel
+                      key={key}
+                      message={
+                        kind === "takeover"
+                          ? `${tool.name} 正由 agents-manager 管理`
+                          : "Sophia 写进去的设置被改掉了"
+                      }
+                      busy={
+                        resolving === kind
+                          ? kind === "takeover"
+                            ? "正在接管"
+                            : "正在重新写入"
+                          : undefined
+                      }
+                      action={{
+                        label: kind === "takeover" ? "接管" : "重新写入",
+                        onClick: () => void resolveTodo(kind),
+                        disabledReason: busy ? "正在处理上一步" : undefined,
+                      }}
+                    />
+                  )),
+                ];
               })()}
               models={
                 <ModelBox

@@ -378,11 +378,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           <span className="settings-page__version">{current ?? "…"}</span>
           <span className="settings-page__check">
             {checking || update.kind === "downloading" ? (
-              <Button
-                variant="link"
-                disabled
-                disabledReason={checking ? "正在检查" : "正在下载"}
-              >
+              <Button variant="link" disabled disabledReason={checking ? "正在检查" : "正在下载"}>
                 检查更新
               </Button>
             ) : (

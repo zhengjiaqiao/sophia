@@ -498,7 +498,10 @@ test("Spinner：地球绕太阳，太阳大地球小、画一圈细轨道、必�
   assert.match(small, /class="ss-spinner__earth" cx="7" cy="1.25" r="1.25" fill="currentColor"/);
   // 轨道：一圈穿过地球中心的细环，不填充；颜色与线宽在 CSS（1px ink-faint）
   assert.match(small, /class="ss-spinner__orbit" cx="7" cy="7" r="5.75" fill="none"/);
-  assert.match(cssRule(uiCss, ".ss-spinner__orbit"), /stroke:\s*var\(--ink-faint\);[^}]*stroke-width:\s*1;/);
+  assert.match(
+    cssRule(uiCss, ".ss-spinner__orbit"),
+    /stroke:\s*var\(--ink-faint\);[^}]*stroke-width:\s*1;/,
+  );
   const large = render(Spinner, { size: 24, label: "正在读 3 个位置" });
   assert.match(large, /width="24"/);
   assert.match(large, /class="ss-spinner__sun" cx="12" cy="12" r="4.5"/);

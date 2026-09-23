@@ -17,11 +17,7 @@ import type { ReactNode } from "react";
 ///
 /// 破坏性不涂红：分量由信息和按钮文案承担（`删到废纸篓`，不写「确定」）。
 
-export type ButtonVariant =
-  | "primary"
-  | "default"
-  | "link"
-  | "external";
+export type ButtonVariant = "primary" | "default" | "link" | "external";
 export type ButtonSize = "regular" | "compact" | "row";
 
 interface ButtonBase {
