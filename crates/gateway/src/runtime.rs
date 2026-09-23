@@ -642,7 +642,10 @@ mod tests {
                   00:10 /Applications/ChatGPT.app/Contents/Resources/codex -c a=b app-server --x\n\
                   05:00 /opt/homebrew/bin/codex\n";
         assert_eq!(earliest_codex_start(ps, 1000), Some(990));
-        assert_eq!(earliest_codex_start("05:00 /opt/homebrew/bin/codex\n", 1000), None);
+        assert_eq!(
+            earliest_codex_start("05:00 /opt/homebrew/bin/codex\n", 1000),
+            None
+        );
     }
 
     /// AC28 的判据：内容没变不复制；内容变了才复制并报告已更新；只是修改时间变了不算更新
