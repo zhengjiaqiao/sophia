@@ -16,14 +16,16 @@ import {
   effectiveModels,
   emptyEffectiveText,
   enableDisabledReason,
+  gatewayConfirmText,
+  gatewaySwitchText,
   modelIssues,
   modelLabel,
   parseBackendError,
-  predictEnabled,
   routerUnavailable,
   selectModel,
   settleAfterRestart,
   shouldPollRestart,
+  switchGateway,
   showLaunchKey,
   showRestartKey,
   serviceLeftover,
@@ -92,6 +94,13 @@ const describeError = (error: unknown): string => parseBackendError(String(error
 const selectedPayload = (models: GatewayProviderModel[]): GatewaySelectedModel[] =>
   models.filter((m) => m.selected).map(({ id, displayName }) => ({ id, displayName }));
 
+/// 确认框锚点：元素此刻在视口里的矩形
+const anchorOf = (el: Element | null): ConfirmAnchor | undefined => {
+  if (!el) return undefined;
+  const r = el.getBoundingClientRect();
+  return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+};
+
 /// 12px 展开记号：朝下＝收着，朝上＝开着
 function Chevron({ up }: { up: boolean }) {
   return (
@@ -147,7 +156,11 @@ export interface AgentRowProps {
   state: GatewayState;
   busy: boolean;
   phase: RestartPhase;
-  onToggle: (next: boolean) => void;
+  /// 拨了开关：带上整行，Codex 在跑时确认框锚在它下面（同「重启生效」的确认）
+  onToggle: (next: boolean, row: HTMLElement) => void;
+  /// 拨开关成了：开关原位下方浮起的那一窗（`✓ 已添加到 Codex`）；到点调 onSwitchDoneDismiss
+  switchDone?: string | null;
+  onSwitchDoneDismiss?: () => void;
   onConfigure: () => void;
   /// 点了「重启生效」：带上整行，确认框锚在它下面、它不被遮罩盖住（⑦）
   onRestart: (row: HTMLElement) => void;
@@ -172,6 +185,8 @@ export function AgentRow({
   busy,
   phase,
   onToggle,
+  switchDone,
+  onSwitchDoneDismiss,
   onConfigure,
   onRestart,
   onLaunch,
@@ -186,36 +201,53 @@ export function AgentRow({
   const rowRef = useRef<HTMLDivElement>(null);
   // 已启用时永远能关：停用不依赖密钥和模型还在不在
   const blocked = state.enabled ? null : enableDisabledReason(state, totalSelected(state));
+  // 拨了开关、正在写 / 重启 / 等 Codex 换上：开关原位转圈（过了 0.3 秒门槛），不锁页
+  const switching = phase.kind === "switching" ? phase.next : null;
 
   return (
     <div className="models-row" ref={rowRef}>
       <div className="models-row__agent">
         <AgentIcon id={tool.id} name={tool.name} size={24} />
         <span className="models-row__name">{tool.name}</span>
-        {blocked !== null ? (
-          // 禁用的开关自带原因提示框：悬停出、按下当即出
-          <Switch
-            checked={false}
-            onChange={() => undefined}
-            label={`启用 ${tool.name} 的第三方模型`}
-            disabledReason={blocked}
-          />
-        ) : (
-          <Tooltip
-            content={
-              state.enabled
-                ? `关掉：${tool.name} 只剩官方模型`
-                : `打开：选好的模型进 ${tool.name} 的模型列表`
-            }
-          >
+        {/* 开关不乐观翻转（DESIGN「开关的状态＝Codex 正在用的状态」）：等确认、等生效，
+            成了才落到新状态，原位下方浮起一窗 */}
+        <span className="models-switch">
+          {blocked !== null && switching === null ? (
+            // 禁用的开关自带原因提示框：悬停出、按下当即出
             <Switch
-              checked={state.enabled}
-              onChange={onToggle}
+              checked={false}
+              onChange={() => undefined}
               label={`启用 ${tool.name} 的第三方模型`}
-              disabledReason={busy ? "正在处理上一步" : undefined}
+              disabledReason={blocked}
             />
-          </Tooltip>
-        )}
+          ) : (
+            <BusySlot
+              busy={switching !== null}
+              label={gatewaySwitchText(switching ?? true, true, tool).busy}
+              className="models-restart"
+            >
+              <Tooltip
+                content={
+                  state.enabled
+                    ? `关掉：${tool.name} 只剩官方模型`
+                    : `打开：选好的模型进 ${tool.name} 的模型列表`
+                }
+              >
+                <Switch
+                  checked={state.enabled}
+                  onChange={(next) => rowRef.current && onToggle(next, rowRef.current)}
+                  label={`启用 ${tool.name} 的第三方模型`}
+                  disabledReason={busy && switching === null ? "正在处理上一步" : undefined}
+                />
+              </Tooltip>
+            </BusySlot>
+          )}
+          {switchDone ? (
+            <FloatingToast align="start">
+              <Toast kind="success" verb={switchDone} onDismiss={onSwitchDoneDismiss} />
+            </FloatingToast>
+          ) : null}
+        </span>
         {/* 进网关二级页：普通默认键，不带展开记号（DESIGN「网关配置是二级页」） */}
         <Tooltip content="加第三方模型的来源">
           <Button size="compact" onClick={onConfigure}>
@@ -534,6 +566,15 @@ export default function ModelsTab({
   const [flashProvider, setFlashProvider] = useState<string | null>(null);
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
+  /// Codex 在跑时拨开关的那一道确认（DESIGN「开关的状态＝Codex 正在用的状态」）：拨向哪边、锚在哪；
+  /// `afterOff` 是删掉最后一个生效模型那一支——关成了再清那一个勾选
+  const [confirmSwitch, setConfirmSwitch] = useState<{
+    next: boolean;
+    anchor?: ConfirmAnchor;
+    afterOff?: () => void;
+  } | null>(null);
+  /// 拨开关成了：开关原位下方浮起的那一句（`已添加到 Codex`），到点清掉
+  const [switchDone, setSwitchDone] = useState<string | null>(null);
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
   /// 行内待办条正在执行的那一条（接管 / 重新写入）：它的键换成忙碌指示
   const [resolving, setResolving] = useState<"takeover" | "rewrite" | "router" | null>(null);
@@ -631,6 +672,7 @@ export default function ModelsTab({
 
   // ✓ 已生效 / 已启动那一窗到点（停留、悬停停表、淡出都在 Toast 里）
   const dismissDone = useCallback(() => setPhase({ kind: "idle" }), []);
+  const dismissSwitchDone = useCallback(() => setSwitchDone(null), []);
 
   // 浮层开着时：Esc 关闭并把焦点还给模型框；在框与浮层之外按下指针也关闭。
   // 两个都在捕获阶段听：Esc 不被输入框先吃掉；外面那一下只顺手关浮层，不拦截——
@@ -769,9 +811,75 @@ export default function ModelsTab({
     setPhase(failure === null ? { kind: "launched" } : { kind: "idle" });
   };
 
+  /// 确认框锚在开关所在那一行下面；网关页开着时锚在它的页头（同「重启生效」的确认）
+  const switchAnchor = () =>
+    anchorOf(
+      document.querySelector(".gw-page-sub .ss-subpage__bar") ??
+        document.querySelector(".models-row"),
+    );
+
+  /// 拨开关（DESIGN「开关的状态＝Codex 正在用的状态」）：开关不乐观翻转。Codex 在跑时先确认
+  /// （要重启，进行中的对话会中断），取消则什么都不写；没在跑直接写，开关落到新状态
+  const requestSwitch = (next: boolean, anchor?: ConfirmAnchor, afterOff?: () => void) => {
+    const current = shown.current;
+    if (!current) return;
+    if (current.codex.running) {
+      // 确认锚在行下，下拉也在行下：先收起下拉，免得两层叠在一起
+      setPicker(null);
+      setConfirmSwitch({ next, anchor, afterOff });
+      return;
+    }
+    void runSwitch(MODELS_TOOLS[0], next, false, afterOff);
+  };
+
+  /// 确认之后（或 Codex 没在跑）：开关原位转圈 +「正在添加 / 正在移除」（0.3 秒门槛，不锁页）→
+  /// 写配置 →（在跑时）重启 Codex → 等它换上（最多 15 秒）。成了开关落到新状态、原位下方浮起一窗；
+  /// 没成则开关与配置一起回到原样（switchGateway 撤回刚写的），行下灰面板 + `再试一次`
+  const runSwitch = async (
+    tool: ModelsTool,
+    next: boolean,
+    restart: boolean,
+    afterOff?: () => void,
+  ) => {
+    setConfirmSwitch(null);
+    setNotice(null);
+    setSwitchDone(null);
+    setPhase({ kind: "switching", next });
+    onBusy(true);
+    let failure: string | null | undefined;
+    try {
+      // 排在还没写完的勾选后面：两边都写 Codex 设置，谁先谁后要和点的顺序一致
+      await writer.idle();
+      failure = await switchGateway(next, restart, {
+        write: (on) => (on ? api.gatewayEnable() : api.gatewayRestore()),
+        restartCodex: api.gatewayRestartCodex,
+        read: api.gatewayState,
+        onState: applyState,
+        alive: () => mounted.current,
+        describe: describeError,
+      });
+    } finally {
+      onBusy(false);
+    }
+    if (failure === undefined || !mounted.current) return;
+    setPhase({ kind: "idle" });
+    const text = gatewaySwitchText(next, restart, tool);
+    if (failure === null) {
+      setSwitchDone(text.done);
+      afterOff?.();
+      return;
+    }
+    setNotice({
+      message: text.failed,
+      reason: failure,
+      action: { label: "再试一次", onClick: () => requestSwitch(next, switchAnchor(), afterOff) },
+    });
+  };
+
   /// 勾上 / 取消一个模型。网关开着时去掉的是最后一个生效模型 → 等同关掉开关：
-  /// 先恢复（`gateway_restore` 不动勾选），再把这一家的勾选清空（关着时后端不再要求至少一个），
-  /// 两步都完成才是「开关关、没有片」
+  /// Codex 在跑时走开关「关掉」的同一条路（先确认，关成了再清这一个勾选；取消则片还在）；
+  /// 没在跑时直接写——先恢复（`gateway_restore` 不动勾选），再把这一家的勾选清空
+  /// （关着时后端不再要求至少一个），两步都完成才是「开关关、没有片」
   const setModel = (providerId: string, modelId: string, selected: boolean) => {
     const base = shown.current;
     const model = base?.providers
@@ -779,6 +887,10 @@ export default function ModelsTab({
       ?.models.find((m) => m.id === modelId);
     if (!base || !model || model.selected === selected) return;
     const { next, turnsOff } = selectModel(base, providerId, modelId, selected);
+    if (turnsOff && base.codex.running) {
+      requestSwitch(false, switchAnchor(), () => setModel(providerId, modelId, false));
+      return;
+    }
     const models = next.providers.find((p) => p.id === providerId)?.models ?? [];
     const payload = selectedPayload(models);
     writer.write(
@@ -799,19 +911,6 @@ export default function ModelsTab({
       .find((p) => p.id === provider.id)
       ?.models.find((m) => m.id === id);
     if (model) setModel(provider.id, id, !model.selected);
-  };
-
-  /// 开关与勾选同一套（DESIGN「勾选不闪」）：先拨过去，后台排队写，不锁页；失败回滚并在行下说。
-  /// 实测启用一次约 0.25 秒（装服务、等路由就绪、写配置、读回状态），等它回来再拨就是一下停顿
-  const toggleGateway = (tool: ModelsTool, next: boolean) => {
-    const current = shown.current;
-    if (!current) return;
-    // 先画「做成之后」的样子（路由一并预测），见 predictEnabled
-    writer.write(
-      `${next ? "没打开" : "没关掉"} ${tool.name} 的第三方模型`,
-      predictEnabled(current, next),
-      () => (next ? api.gatewayEnable() : api.gatewayRestore()),
-    );
   };
 
   const removeModel = (provider: GatewayProvider, model: GatewayProviderModel) =>
@@ -894,7 +993,23 @@ export default function ModelsTab({
   }
 
   /// 重启确认：会中断进行中的对话，确认一道（⑪ 确认只剩两件之一）；锚在触发它的那一行下面、
-  /// 那一行不被遮罩盖住。网关页开着时它渲染在网关页里——主视图那时是 inert 的
+  /// 那一行不被遮罩盖住。网关页开着时它渲染在网关页里——主视图那时是 inert 的。
+  /// 拨开关要重启 Codex 的那一道同理（同一组件、同一锚法），取消什么都不写
+  const switchText = confirmSwitch ? gatewayConfirmText(state, confirmSwitch.next) : null;
+  const switchConfirm =
+    confirmSwitch !== null && switchText !== null ? (
+      <Confirm
+        title={switchText.title}
+        confirmLabel={switchText.confirmLabel}
+        anchor={confirmSwitch.anchor}
+        onConfirm={() =>
+          void runSwitch(MODELS_TOOLS[0], confirmSwitch.next, true, confirmSwitch.afterOff)
+        }
+        onCancel={() => setConfirmSwitch(null)}
+      >
+        {switchText.body}
+      </Confirm>
+    ) : null;
   const restartConfirm =
     confirmRestart !== null ? (
       <Confirm
@@ -923,7 +1038,9 @@ export default function ModelsTab({
               state={state}
               busy={busy}
               phase={phase}
-              onToggle={(next) => toggleGateway(tool, next)}
+              onToggle={(next, row) => requestSwitch(next, anchorOf(row))}
+              switchDone={switchDone}
+              onSwitchDoneDismiss={dismissSwitchDone}
               onConfigure={() => openGateway(null)}
               onRestart={(row) => {
                 const r = row.getBoundingClientRect();
@@ -1023,8 +1140,8 @@ export default function ModelsTab({
           initial={gateway.initial}
           leaving={gateway.leaving}
           onLeave={leaveGateway}
-          modalOpen={confirmRestart !== null}
-          overlay={restartConfirm}
+          modalOpen={confirmRestart !== null || confirmSwitch !== null}
+          overlay={restartConfirm ?? switchConfirm}
           headerAction={
             <RestartSlot
               tool={MODELS_TOOLS[0]}
@@ -1052,7 +1169,7 @@ export default function ModelsTab({
         />
       ) : null}
 
-      {gateway === null ? restartConfirm : null}
+      {gateway === null ? (restartConfirm ?? switchConfirm) : null}
     </section>
   );
 }

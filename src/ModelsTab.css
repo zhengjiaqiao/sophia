@@ -110,6 +110,12 @@
   grid-column: 1 / -1;
 }
 
+/* 开关那一格：开关 / 原位转圈 +「正在添加」；也是 `✓ 已添加到 Codex` 那一窗的锚（浮在它正下方 4） */
+.models-switch {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* ===== 重启生效那一格 ===== */
 .models-restart {
   display: inline-flex;
