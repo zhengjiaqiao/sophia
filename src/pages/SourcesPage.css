@@ -395,7 +395,7 @@
 .src-targetmenu {
   display: flex;
   flex-direction: column;
-  width: 180px;
+  width: 220px;
   padding: 6px 0;
 }
 
@@ -403,8 +403,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-xs);
-  height: 30px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 4px 10px;
   border: 0;
   background: none;
   color: var(--ink);
@@ -420,6 +420,21 @@
 
 .src-target:hover:not(:disabled) .ss-checkbox {
   border-color: var(--ink);
+}
+
+.src-target__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 点不了的原因：名字下面一行，12 ink-faint，可折行（原因要写全） */
+.src-target__why {
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: normal;
+  text-align: left;
 }
 
 .src-target__name {

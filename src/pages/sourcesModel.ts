@@ -326,7 +326,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
         id: l.id,
         iconId: l.harnessId,
         label: mcpTargetLabel(l),
-        disabledReason: l.id === row.id ? "这就是来源" : undefined,
+        disabledReason: l.id === row.id ? "这就是来源本身，不能写进自己" : undefined,
       })),
     pickable: (row) =>
       locations.filter((l) => l.matrixHidden !== true && l.id !== row.id).map((l) => l.id),

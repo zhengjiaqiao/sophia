@@ -522,13 +522,22 @@ export default function SourcesPage(props: SourcesPageProps) {
                           role="menuitemcheckbox"
                           aria-checked={checked}
                           className={`src-target${checked ? " is-on" : ""}`}
-                          title={t.disabledReason}
+                          aria-describedby={t.disabledReason ? `${row.id}-${t.id}-why` : undefined}
                           disabled={t.disabledReason !== undefined}
                           onClick={(e) => toggleTarget(row, t.id, e.currentTarget)}
                         >
                           <CheckMark on={checked} />
                           <AgentIcon id={t.iconId} name={t.label} size={14} />
-                          <span className="src-target__name">{t.label}</span>
+                          <span className="src-target__text">
+                            <span className="src-target__name">{t.label}</span>
+                            {/* 点不了的那一项：原因就写在这一行里（DESIGN「提示框」列表行的说明在同一行；
+                                浮层会滚动裁切，悬停提示框放不进去，也不该要用户去点才知道） */}
+                            {t.disabledReason ? (
+                              <span className="src-target__why" id={`${row.id}-${t.id}-why`}>
+                                {t.disabledReason}
+                              </span>
+                            ) : null}
+                          </span>
                         </button>
                       );
                     })}
