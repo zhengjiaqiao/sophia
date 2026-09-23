@@ -5,6 +5,7 @@ use crate::{
     models::{AutoLink, Source},
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,6 +27,9 @@ pub struct Settings {
     pub codex_gateway: GatewaySettings,
     /// 用户已经看过的问题（新问题只提示一次，看过即止）；旧文件没有这个字段
     pub seen_issues: Vec<SeenIssue>,
+    /// 手动项目加入 Sophia 的时间：规范化路径 → 毫秒时间戳。侧栏「最近创建」在取不到文件夹
+    /// 创建时间时用它；旧文件没有这个字段，旧项目也就没有记录（回退到文件夹修改时间）
+    pub project_added_at: BTreeMap<String, u64>,
     /// 旧版「忽略」表，只读不写：`load_settings` 把它并进 `seen_issues` 后清空，
     /// 下次写盘时这个字段就从文件里消失了
     #[serde(rename = "ignored", skip_serializing)]
@@ -210,6 +214,30 @@ impl Store {
         Ok(settings)
     }
 
+    /// 记下手动项目加入的时间（毫秒）；已有记录不覆盖——移除前再加一次不算新加入
+    pub fn mark_project_added(&self, path: &Path, at_ms: u64) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        let key = project_key(path);
+        if settings.project_added_at.contains_key(&key) {
+            return Ok(());
+        }
+        settings.project_added_at.insert(key, at_ms);
+        self.save_settings(&settings)
+    }
+
+    /// 移除手动项目时一并忘掉它的加入时间；本来就没有记录时不写盘
+    pub fn forget_project_added(&self, path: &Path) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if settings
+            .project_added_at
+            .remove(&project_key(path))
+            .is_none()
+        {
+            return Ok(());
+        }
+        self.save_settings(&settings)
+    }
+
     /// 把这些 key 记为看过；已在表里的保持原样（不刷新 at），空串跳过。没有新增就不写盘
     pub fn mark_seen(&self, keys: &[String]) -> io::Result<()> {
         let mut settings = self.load_settings()?;
@@ -239,6 +267,11 @@ impl Store {
             .map(|i| i.key)
             .collect())
     }
+}
+
+/// `project_added_at` 的 key：规范化后的路径文本
+fn project_key(path: &Path) -> String {
+    crate::fs::normalize(path).to_string_lossy().into_owned()
 }
 
 /// 文件不存在 → 默认值；存在但损坏 → 报错，不静默清空
@@ -328,11 +361,32 @@ mod tests {
                 key: issue_key(IssueKind::BrokenLink, &[PathBuf::from("/a/skills/x")]),
                 at: "2026-09-23T00:00:00Z".into(),
             }],
+            project_added_at: [("/a".to_string(), 1_700_000_000_000)]
+                .into_iter()
+                .collect(),
             legacy_ignored: Vec::new(),
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
         assert!(!dir.join("settings.json.tmp").exists());
+    }
+
+    #[test]
+    fn project_added_at_is_kept_once_and_forgotten_on_remove() {
+        let t = TempTree::new();
+        let s = Store::new(t.root().join("data/SymSync"));
+        s.mark_project_added(Path::new("/w/app/"), 10).unwrap();
+        // 再加一次不覆盖最初的时间；路径按规范化后比较
+        s.mark_project_added(Path::new("/w/app"), 20).unwrap();
+        assert_eq!(
+            s.load_settings().unwrap().project_added_at.get("/w/app"),
+            Some(&10)
+        );
+        s.forget_project_added(Path::new("/w/./app")).unwrap();
+        assert!(s.load_settings().unwrap().project_added_at.is_empty());
+        // 旧文件没有这个字段：读成空表
+        std::fs::write(t.root().join("data/SymSync/settings.json"), "{}").unwrap();
+        assert!(s.load_settings().unwrap().project_added_at.is_empty());
     }
 
     #[test]
