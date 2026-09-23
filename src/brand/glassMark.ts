@@ -7,7 +7,8 @@
    - 色值取自 tokens.css 的变量（--ink / --canvas / --ink-mute）。字标位图由 SVG 资产的源码
      逐条路径填出来，和 <img> 同源，灰影的色值只在 SVG 里。不直接 drawImage(<img>)：
      没写宽高的 SVG 在各引擎里的固有尺寸不一致，画进画布会变形。
-   - 本文件的纯函数（rng / fracture / labelShards）不碰 DOM，tests/glass-mark.test.ts 直接测。 */
+   - 本文件的纯函数（rng / fracture / labelShards / packShards）不碰 DOM，
+     tests/glass-mark.test.ts 直接测。 */
 
 export type Pt = [number, number];
 export type Rand = () => number;
@@ -262,6 +263,39 @@ export function labelShards(
   return { lab, regions: boxes.filter((b) => kept[b.id] && b.x1 >= 0) };
 }
 
+/** 碎片图集的排法：按高矮排成几行货架，图集宽 rw + 2·gap，最宽的碎片也放得下。
+    每块碎片的外框占一格，格与格之间、格与图集边之间至少隔 gap（≥ 2）个像素：
+    紧挨着格子的那一圈由 segment 填上复制出来的边缘像素，外面再留透明——
+    碎片旋转着画时插值会取到框外，取到的和单独一张画布时（边缘夹取）一样，也取不到邻居。
+    cells[i] 是 regions[i] 那一格的左上角 */
+export function packShards(
+  regions: ShardRegion[],
+  rw: number,
+  gap = 2,
+): { cells: Pt[]; w: number; h: number } {
+  const w = rw + gap * 2;
+  const size = (r: ShardRegion) => [r.x1 - r.x0 + 1, r.y1 - r.y0 + 1];
+  const order = regions
+    .map((_, i) => i)
+    .sort((a, b) => size(regions[b])[1] - size(regions[a])[1] || a - b);
+  const cells: Pt[] = [];
+  let x = gap,
+    y = gap,
+    rowH = 0;
+  for (const i of order) {
+    const [sw, sh] = size(regions[i]);
+    if (x + sw + gap > w && x > gap) {
+      x = gap;
+      y += rowH + gap;
+      rowH = 0;
+    }
+    cells[i] = [x, y];
+    x += sw + gap;
+    rowH = Math.max(rowH, sh);
+  }
+  return { cells, w, h: y + rowH + gap };
+}
+
 /** 凸包（单调链），给碎片落地时算最低点 */
 function hull(P: Pt[]): Pt[] {
   P.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
@@ -364,7 +398,8 @@ interface Layer extends Fracture {
 }
 
 interface Shard {
-  cv: HTMLCanvasElement;
+  ax: number; // 在图集里的左上角
+  ay: number;
   sw: number;
   sh: number;
   pts: Pt[];
@@ -473,6 +508,7 @@ export class GlassMark {
   private data!: Uint8ClampedArray;
   private layer!: HTMLCanvasElement;
   private crackImg!: HTMLCanvasElement;
+  private atlas: HTMLCanvasElement | null = null; // 全部碎片的像素，每块占一格
   private front!: Path2D;
   private catCv: HTMLCanvasElement | null = null;
   private catTint: HTMLCanvasElement | null = null;
@@ -800,11 +836,13 @@ export class GlassMark {
 
   private drawFrags(g: CanvasRenderingContext2D) {
     this.clear(g);
+    const atlas = this.atlas;
+    if (!atlas) return;
     for (const f of this.frags) {
       const cs = Math.cos(f.r),
         sn = Math.sin(f.r);
       g.setTransform(cs, sn, -sn, cs, f.px + this.sh.x, f.py + this.sh.y);
-      g.drawImage(f.cv, -f.sw / 2, -f.sh / 2);
+      g.drawImage(atlas, f.ax, f.ay, f.sw, f.sh, -f.sw / 2, -f.sh / 2, f.sw, f.sh);
     }
     g.setTransform(1, 0, 0, 1, 0, 0);
   }
@@ -1399,7 +1437,9 @@ export class GlassMark {
     this.catExit(true);
   }
 
-  /** 逐像素切分（labelShards），再把每块碎片连同它身上的裂纹拷成一张小画布 */
+  /** 逐像素切分（labelShards），再把每块碎片连同它身上的裂纹拷进一张图集（packShards 排格子）：
+      像素只拷一次、只上传一次，画的时候 drawImage 取各自那一格。
+      以前每块碎片一张小画布，WebKit 里光是建这三十多张画布就要十几毫秒 */
   private segment(): Shard[] {
     const { rw, rh } = this;
     const ck = ctx2d(this.crackImg).getImageData(0, 0, rw, rh).data;
@@ -1410,21 +1450,21 @@ export class GlassMark {
       rh,
       Math.max(3, 5 * this.dpr * this.dpr),
     );
+    const { cells, w: AW, h: AH } = packShards(regions, rw);
+    const atlas = new ImageData(AW, AH),
+      od = atlas.data;
     const frags: Shard[] = [];
-    for (const r of regions) {
+    regions.forEach((r, i) => {
       const sw = r.x1 - r.x0 + 1,
         sh = r.y1 - r.y0 + 1,
-        cv = makeCanvas(sw, sh);
-      const cg = ctx2d(cv),
-        out = cg.createImageData(sw, sh),
-        od = out.data,
+        [ax, ay] = cells[i],
         edge: Pt[] = [];
       for (let y = r.y0; y <= r.y1; y++) {
         for (let x = r.x0; x <= r.x1; x++) {
           const j = y * rw + x;
           if (lab[j] !== r.id) continue;
           const p = j * 4,
-            q = ((y - r.y0) * sw + (x - r.x0)) * 4;
+            q = ((ay + y - r.y0) * AW + (ax + x - r.x0)) * 4;
           od[q] = ck[p];
           od[q + 1] = ck[p + 1];
           od[q + 2] = ck[p + 2];
@@ -1441,12 +1481,20 @@ export class GlassMark {
           }
         }
       }
-      cg.putImageData(out, 0, 0);
+      // 格子外面一圈复制边上的像素（先上下两行，再左右两列连角一起）
+      const at = (x: number, y: number) => (y * AW + x) * 4;
+      od.copyWithin(at(ax, ay - 1), at(ax, ay), at(ax + sw, ay));
+      od.copyWithin(at(ax, ay + sh), at(ax, ay + sh - 1), at(ax + sw, ay + sh - 1));
+      for (let y = ay - 1; y <= ay + sh; y++) {
+        od.copyWithin(at(ax - 1, y), at(ax, y), at(ax + 1, y));
+        od.copyWithin(at(ax + sw, y), at(ax + sw - 1, y), at(ax + sw, y));
+      }
       const pts = hull(edge).map(([x, y]): Pt => [x - sw / 2, y - sh / 2]);
       const hcx = this.ox + r.x0 + sw / 2,
         hcy = this.oy + r.y0 + sh / 2;
       frags.push({
-        cv,
+        ax,
+        ay,
         sw,
         sh,
         pts,
@@ -1468,7 +1516,11 @@ export class GlassMark {
         lifted: false,
         liftV: 0,
       });
-    }
+    });
+    // 图集画布够大就沿用（putImageData 连透明像素一起覆盖，不用先清），不够才换一张
+    if (!this.atlas || this.atlas.width < AW || this.atlas.height < AH)
+      this.atlas = makeCanvas(AW, AH);
+    ctx2d(this.atlas).putImageData(atlas, 0, 0);
     return frags;
   }
 

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fracture, labelShards, rng } from "../src/brand/glassMark.ts";
+import { fracture, labelShards, packShards, rng } from "../src/brand/glassMark.ts";
 
-/// 字标动效的纯逻辑：裂纹生成可复现、碎片切分恰好铺满。
+/// 字标动效的纯逻辑：裂纹生成可复现、碎片切分恰好铺满、碎片图集的格子互不挨着。
 /// 画布那一半（绘制、物理）在浏览器里验，这里不 mock canvas
 
 /** rw×rh 的 RGBA；ink(x, y) 为真的像素是不透明黑 */
@@ -111,4 +111,34 @@ test("真实裂纹切出来的碎片恰好铺满字形", () => {
   const { lab, regions } = labelShards(base, ck, rw, rh, 20);
   assert.ok(regions.length > 4, `应碎成多块，实际 ${regions.length}`);
   assertCovers(base, lab, new Set(regions.map((r) => r.id)));
+});
+
+test("碎片图集：每块一格、都在图集里，格与格、格与边至少隔 2px", () => {
+  const rw = 188,
+    R = rng(99);
+  // 四十块大小不一的碎片外框，外加一块和字标一样宽的：最宽的也要放得下
+  const regions = Array.from({ length: 40 }, (_, id) => {
+    const x0 = Math.floor(R() * 150),
+      y0 = Math.floor(R() * 40);
+    return { id, x0, y0, x1: x0 + Math.floor(R() * 37), y1: y0 + Math.floor(R() * 12) };
+  });
+  regions.push({ id: 40, x0: 0, y0: 0, x1: rw - 1, y1: 3 });
+  const gap = 2;
+  const { cells, w, h } = packShards(regions, rw, gap);
+  assert.equal(cells.length, regions.length);
+  const boxes = regions.map((r, i) => {
+    const [x, y] = cells[i];
+    return { x0: x, y0: y, x1: x + r.x1 - r.x0 + 1, y1: y + r.y1 - r.y0 + 1 }; // 右、下开区间
+  });
+  for (const b of boxes) {
+    assert.ok(b.x0 >= gap && b.y0 >= gap && b.x1 + gap <= w && b.y1 + gap <= h, "离图集边至少 gap");
+  }
+  for (let i = 0; i < boxes.length; i++)
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i],
+        b = boxes[j];
+      const apart =
+        a.x1 + gap <= b.x0 || b.x1 + gap <= a.x0 || a.y1 + gap <= b.y0 || b.y1 + gap <= a.y0;
+      assert.ok(apart, `格 ${i} 与格 ${j} 挨得太近`);
+    }
 });
