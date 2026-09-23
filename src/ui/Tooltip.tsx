@@ -52,6 +52,9 @@ export function Tooltip({
   const [side, setSide] = useState<"top" | "bottom">(placement);
   const [align, setAlign] = useState<Align>("center");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /// 按下之后到移开之前不再出：按下是决定，结果提示（批量提示条、行内一行）就出在触发控件旁，
+  /// 提示框还挂着会把它盖住（产品负责人真机）
+  const pressed = useRef(false);
   const bubble = useRef<HTMLSpanElement>(null);
 
   const clear = () => {
@@ -60,6 +63,7 @@ export function Tooltip({
   };
   const arm = () => {
     clear();
+    if (pressed.current) return;
     timer.current = setTimeout(() => setOpen(true), TIP_DELAY_MS[context]);
   };
   const close = () => {
@@ -67,6 +71,15 @@ export function Tooltip({
     setOpen(false);
     setSide(placement);
     setAlign("center");
+  };
+
+  const press = () => {
+    pressed.current = true;
+    close();
+  };
+  const leave = () => {
+    pressed.current = false;
+    close();
   };
 
   useEffect(() => clear, []);
@@ -97,9 +110,13 @@ export function Tooltip({
       tabIndex={focusable ? 0 : undefined}
       aria-describedby={focusable ? id : undefined}
       onMouseEnter={arm}
-      onMouseLeave={close}
+      onMouseLeave={leave}
+      onPointerDown={press}
+      onKeyDown={(e) => {
+        if (e.key === " " || e.key === "Enter") press();
+      }}
       onFocus={arm}
-      onBlur={close}
+      onBlur={leave}
     >
       {trigger}
       <span ref={bubble} id={id} role="tooltip" className={classes.join(" ")}>
