@@ -77,8 +77,8 @@ export interface DomainViewProps {
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   rowToast?: { rowKey: string; node: ReactNode } | null;
   keyToast?: { keyId: string; node: ReactNode } | null;
-  /// 单格成功的例行一行（列头行左段）
-  cellToast?: { id: number; node: ReactNode } | null;
+  /// 单格成功的例行一行（在被点的那一行里，紧跟名字）
+  cellToast?: { id: number; rowKey: string; node: ReactNode } | null;
   globalToast?: ReactNode;
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }

@@ -168,10 +168,11 @@ export interface MatrixProps {
   rowToast?: { rowKey: string; node: ReactNode } | null;
   /// 批量结果的例行提示条：贴在按下的那一项下方（见 .mx-keytoast）
   keyToast?: { keyId: string; node: ReactNode } | null;
-  /// 单格加上 / 移除成功后的例行一行：固定在列头行左段——名称 / 原件位置列头文字上方的空白，
-  /// 左对齐名称列；列头吸顶，滚到哪都看得见，也不盖任何行（DESIGN「单格操作出例行一行」）。
-  /// 一次只一条：`id` 变了就重挂，计时从头来
-  cellToast?: { id: number; node: ReactNode } | null;
+  /// 单格加上 / 移除成功后的例行一行：就在被点的那一行里，紧跟名字（有 `×2` 跟在它后面），
+  /// 间距 12；随行滚动，不吸顶。放不下时暂时盖住同一行的原件位置格（行当下的底色），
+  /// 不越过第一个 agent 列；显示期间这一行的悬停动作（`只留这份` `打开 ↗`）让位
+  /// （DESIGN「单格操作出例行一行」）。一次只一条：`id` 变了就重挂，计时从头来
+  cellToast?: { id: number; rowKey: string; node: ReactNode } | null;
   /// 无关位置的全局事（自动规则）：右下，右沿对齐面板右沿
   globalToast?: ReactNode;
   /// 从待处理页跳回来：滚到这几行（或这一列的列头）并闪一下（⑦）。`nonce` 变了才重做
@@ -557,6 +558,20 @@ export default function Matrix(props: MatrixProps) {
     return () => window.removeEventListener("resize", measure);
   }, [width, columns.length]);
 
+  // ---- 单格例行一行放不下：先在名称格里排一次，超出名称格右沿（减去 12 右内边距）就改为跨列盖住
+  // 原件位置格；同一条只量一次（名字宽度在它显示的 4 秒里不变） ----
+  const [coverId, setCoverId] = useState<number | null>(null);
+  const cellToastId = cellToast?.id;
+  useLayoutEffect(() => {
+    if (cellToastId === undefined || coverId === cellToastId) return;
+    const el = rootRef.current?.querySelector<HTMLElement>(".mx-celltoast");
+    const cell = el?.closest<HTMLElement>(".mx-row__name");
+    if (!el || !cell) return;
+    const pad = parseFloat(getComputedStyle(cell).paddingRight) || 0;
+    if (el.getBoundingClientRect().right > cell.getBoundingClientRect().right - pad)
+      setCoverId(cellToastId);
+  }, [cellToastId, coverId]);
+
   // ---- 全局提示条贴面板右沿 ----
   useLayoutEffect(() => {
     if (!globalToast) return;
@@ -841,15 +856,6 @@ export default function Matrix(props: MatrixProps) {
           <SortArrow active={sort.key === "origin"} desc={sort.dir === "desc"} />
         </button>
       </div>
-      {cellToast ? (
-        <div
-          key={cellToast.id}
-          className="mx-celltoast"
-          style={{ left: CHECK_W, width: lead - CHECK_W }}
-        >
-          {cellToast.node}
-        </div>
-      ) : null}
       {columns.map((col) => {
         const classes = ["mx-head__col"];
         // 列头只回应列头自己的悬停；格子的十字带不点亮列头（画板 Main）
@@ -897,7 +903,10 @@ export default function Matrix(props: MatrixProps) {
     if (isSelected) classes.push("is-selected");
     if (hot) classes.push("is-hot");
     if (flashRows.has(row.key)) classes.push("mx-jump");
-    const showExtra = row.extra !== undefined && hot;
+    // 单格例行一行在这一行时：悬停动作让位；放不下时名称格跨到第一个 agent 列前、盖住原件位置
+    const toast = cellToast?.rowKey === row.key ? cellToast : null;
+    const covering = toast !== null && coverId === toast.id;
+    const showExtra = row.extra !== undefined && hot && toast === null;
     const open = expanded === row.key && row.detail !== undefined;
 
     return (
@@ -938,7 +947,10 @@ export default function Matrix(props: MatrixProps) {
               />
             )}
           </div>
-          <div className="mx-row__name">
+          <div
+            className={`mx-row__name${covering ? " is-covering" : ""}`}
+            style={covering ? { gridColumn: `2 / span ${hasTransport ? 3 : 2}` } : undefined}
+          >
             {row.detail !== undefined ? (
               <button
                 type="button"
@@ -954,28 +966,37 @@ export default function Matrix(props: MatrixProps) {
               <span className="mx-name mx-name--plain">{row.name}</span>
             )}
             {row.mark}
+            {toast ? (
+              <span key={toast.id} className="mx-celltoast">
+                {toast.node}
+              </span>
+            ) : null}
             {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
           </div>
-          {hasTransport ? <div className="mx-row__transport">{row.transport}</div> : null}
+          {hasTransport && !covering ? (
+            <div className="mx-row__transport">{row.transport}</div>
+          ) : null}
           {/* 原件位置：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
-          <div className="mx-row__origin">
-            <Tooltip
-              content={
-                <>
-                  <div>{row.origin.label}</div>
-                  <div className="mx-mono">{displayPath(row.origin.path)}</div>
-                </>
-              }
-              context="table"
-            >
-              <span className="mx-origin" tabIndex={-1}>
-                {row.origin.label}
-              </span>
-            </Tooltip>
-            {hot && !open ? (
-              <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
-            ) : null}
-          </div>
+          {covering ? null : (
+            <div className="mx-row__origin">
+              <Tooltip
+                content={
+                  <>
+                    <div>{row.origin.label}</div>
+                    <div className="mx-mono">{displayPath(row.origin.path)}</div>
+                  </>
+                }
+                context="table"
+              >
+                <span className="mx-origin" tabIndex={-1}>
+                  {row.origin.label}
+                </span>
+              </Tooltip>
+              {hot && !open && toast === null ? (
+                <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
+              ) : null}
+            </div>
+          )}
           {columns.map((col, c) => {
             const view = row.cells[col.id] ?? null;
             const key = cellKey(row.key, col.id);

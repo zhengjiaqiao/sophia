@@ -144,8 +144,12 @@ export default function McpTab({
     text: string;
   } | null>(null);
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
-  // 单格写成的例行一行（列头行左段）：一个槽位，新的替换旧的
-  const [cellToast, setCellToast] = useState<{ id: number; node: ReactNode } | null>(null);
+  // 单格写成的例行一行（出在被点的那一行里）：一个槽位，新的替换旧的
+  const [cellToast, setCellToast] = useState<{
+    id: number;
+    rowKey: string;
+    node: ReactNode;
+  } | null>(null);
   const cellToastSeq = useRef(0);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
   const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
@@ -393,9 +397,11 @@ export default function McpTab({
         })),
       });
       const undoId = result.undoId;
-      const undo = undoId
-        ? () => void undoWrite(undoId, keyId, text, single ? keys : undefined)
-        : null;
+      // 单格：那一格的键与行键（撤销后闪那一格；撤不了时说明出在那一行）
+      const one = single && created.length > 0 ? { keys, rowKey: created[0].name } : undefined;
+      // 单格那一行已说明对象：只写 `✓ 写进 [Codex] · 撤销`（撤不了时的说明同样不重复服务名）
+      const rowText = one ? toastFor("write", { done: itemsOf(created), omitNames: true }) : text;
+      const undo = undoId ? () => void undoWrite(undoId, keyId, rowText, one) : null;
       undoRef.current = undo;
       if (keyId !== undefined) {
         setKeyToast({
@@ -427,12 +433,13 @@ export default function McpTab({
         const f = failed[0];
         setCellNotice({ rowKey: f.name, columnId: f.targetId, text: f.message });
       } else if (created.length > 0) {
-        // 单格写成：列头行左段出 `✓ 写进 [Codex] excalidraw · 撤销`，替换上一条
+        // 单格写成：被点的那一行里紧跟名字出 `✓ 写进 [Codex] · 撤销`（不重复服务名），替换上一条
         setCellToast({
           id: ++cellToastSeq.current,
+          rowKey: created[0].name,
           node: (
             <Toast
-              {...text}
+              {...rowText}
               action={undo ? { label: "撤销", onClick: undo } : undefined}
               dwellMs={CELL_TOAST_DWELL_MS}
               holdOnHover
@@ -452,15 +459,15 @@ export default function McpTab({
 
   /// 撤销一次写入：core 只在文件仍等于写入后的样子时才从快照还原。改过了就撤不了——
   /// 撤销禁用、提示框说原因，另给「在访达中显示备份 ↗」作手动兜底（DESIGN「MCP 写入的撤销」）
-  /// `singleKeys`：单格写入的撤销（那一格的键）——撤成了那一行直接消失、格子回原状并闪一下；
-  /// 撤不了时说明也出在那一行的位置
+  /// `one`：单格写入的撤销（那一格的键与行键）——撤成了那一行直接消失、格子回原状并闪一下；
+  /// 撤不了时说明也出在那一行里
   const undoWrite = async (
     undoId: string,
     keyId: string | undefined,
     text: ToastText,
-    singleKeys?: string[],
+    one?: { keys: string[]; rowKey: string },
   ) => {
-    const single = singleKeys !== undefined;
+    const single = one !== undefined;
     undoRef.current = null;
     let report: McpUndoReport;
     try {
@@ -474,7 +481,7 @@ export default function McpTab({
       setCellToast(null);
       setGlobalToast(null);
       await refresh();
-      if (singleKeys) setFlash({ keys: singleKeys, nonce: Date.now() });
+      if (one) setFlash({ keys: one.keys, nonce: Date.now() });
       return;
     }
     const backup = report.files.find((f) => f.backupPath !== null)?.backupPath ?? null;
@@ -498,7 +505,7 @@ export default function McpTab({
         />
       );
       if (keyId !== undefined) setKeyToast({ keyId, node });
-      else if (single) setCellToast({ id: ++cellToastSeq.current, node });
+      else if (one) setCellToast({ id: ++cellToastSeq.current, rowKey: one.rowKey, node });
       else setGlobalToast(node);
       return;
     }
@@ -548,7 +555,7 @@ export default function McpTab({
       setPane({ preview, crossDomain, anchor, keyId });
       return;
     }
-    // 同域单格：乐观点亮 + 闪一下，不确认；写成出例行一行（列头行左段）
+    // 同域单格：乐观点亮 + 闪一下，不确认；写成出例行一行（被点的那一行里，紧跟名字）
     await apply(preview, false);
   };
 

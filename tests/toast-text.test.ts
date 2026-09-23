@@ -30,6 +30,21 @@ test("例行成功：动词与键一致，走 routine 一行字，名字与图�
   assert.equal(on.verbTail, undefined);
 });
 
+test("单格例行一行省名字：行里已写着对象，只写动词 + agent 图标", () => {
+  const on = toastFor("link", { done: [{ name: "docx", agent: codex }], omitNames: true });
+  assert.deepEqual(on.names, []);
+  assert.equal(on.verb, "加到");
+  assert.deepEqual(on.agents, [codex]);
+  const off = toastFor("unlink", { done: [{ name: "docx", agent: codex }], omitNames: true });
+  assert.equal(off.verb, "从");
+  assert.equal(off.verbTail, "移除");
+  assert.deepEqual(off.names, []);
+  assert.deepEqual(
+    toastFor("write", { done: [{ name: "notion", agent: cc }], omitNames: true }).names,
+    [],
+  );
+});
+
 test("全部没成：黑窗 + 否定动词 + 一句原因（失败里写「加到」会被读成已加上）", () => {
   const t = toastFor("link", {
     done: [],

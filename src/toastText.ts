@@ -74,6 +74,8 @@ export interface ToastInput {
   failed?: FailedItem[];
   /// keepThis：留下的那份所在的来源名，拼进名字里（`通用仓库 的 defuddle`）
   keepLabel?: string;
+  /// 对象已经写在旁边时省掉名字（单格例行一行出在被点的那一行里：`✓ 加到 [Codex] · 撤销`）
+  omitNames?: boolean;
 }
 
 export type ToastTier = "notice" | "routine";
@@ -138,11 +140,13 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
   const done = input.done;
   const failed = input.failed ?? [];
   const namesOf = (items: ToastItem[]) =>
-    uniq(
-      items.map((i) =>
-        op === "keepThis" && input.keepLabel ? `${input.keepLabel} 的 ${i.name}` : i.name,
-      ),
-    );
+    input.omitNames
+      ? []
+      : uniq(
+          items.map((i) =>
+            op === "keepThis" && input.keepLabel ? `${input.keepLabel} 的 ${i.name}` : i.name,
+          ),
+        );
 
   if (done.length === 0 && failed.length > 0) {
     return {

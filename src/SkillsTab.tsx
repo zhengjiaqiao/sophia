@@ -66,7 +66,7 @@ export interface SkillsTabProps {
 /// Skills 页：两行工具行（筛选框 + 来源筛选片）+ 表格（DomainView → Matrix）。
 ///
 /// 反馈的位置（DESIGN「提示条的位置」）：
-/// - 单格：乐观更新 + 格子闪一下；成功再出例行一行（列头行左段，一次一条，约 4 秒淡出），
+/// - 单格：乐观更新 + 格子闪一下；成功再出例行一行（被点的那一行里紧跟名字，一次一条，约 4 秒淡出），
 ///   `撤销` 与 ⌘Z 同一条路径、撤后这一行直接消失；失败不出这一行，弹回 + 格下小黑窗说原因
 /// - 批量：一行提示条贴在被按下的键下方，右对齐该键；动词与键一致，键上读数随之翻转
 /// - 只留这份：先出锚定确认；确认后直接删，例行一行贴在留下那一行下方（无撤销）
@@ -102,8 +102,12 @@ export default function SkillsTab({
     text: string;
   } | null>(null);
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
-  // 单格成功的例行一行：一个槽位，新的替换旧的（id 变了 Matrix 重挂、计时从头来）
-  const [cellToast, setCellToast] = useState<{ id: number; node: ReactNode } | null>(null);
+  // 单格成功的例行一行（出在被点的那一行里）：一个槽位，新的替换旧的（id 变了重挂、计时从头来）
+  const [cellToast, setCellToast] = useState<{
+    id: number;
+    rowKey: string;
+    node: ReactNode;
+  } | null>(null);
   const cellToastSeq = useRef(0);
   const [rowToast, setRowToast] = useState<{ rowKey: string; node: ReactNode } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
@@ -268,11 +272,12 @@ export default function SkillsTab({
 
   // ===== 单格：乐观更新 + 闪一下；成功出例行一行 =====
 
-  /// 单格成功：列头行左段出 `✓ 加到 [Codex] excalidraw · 撤销`，替换上一条
+  /// 单格成功：被点的那一行里紧跟名字出 `✓ 加到 [Codex] · 撤销`（行已说明对象，不重复名字），替换上一条
   const showCellToast = (id: number, op: "link" | "unlink", ref: CellRef, undo?: () => void) => {
-    const text = toastFor(op, { done: toastItems([ref]) });
+    const text = toastFor(op, { done: toastItems([ref]), omitNames: true });
     setCellToast({
       id,
+      rowKey: skillRowKey(ref),
       node: (
         <Toast
           {...text}

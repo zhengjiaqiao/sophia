@@ -259,11 +259,12 @@ test("批量写入：格子同时变、不依次点亮；真的慢（> 500ms）�
   );
 });
 
-test("单格成功的例行一行：固定在列头行左段（名称 / 原件位置列头文字上方），左对齐名称列，一次只一条", async () => {
+test("单格成功的例行一行：出在被点的那一行里，紧跟名字（有 ×2 跟在它后面），不重复名字，一次只一条", async () => {
   const { Toast } = await import("../src/ui/Toast.tsx");
   const { toastFor } = await import("../src/toastText.ts");
   const text = toastFor("link", {
-    done: [{ name: "excalidraw", agent: { id: "codex", name: "Codex" } }],
+    done: [{ name: "docx", agent: { id: "codex", name: "Codex" } }],
+    omitNames: true,
   });
   const node = createElement(Toast, {
     ...text,
@@ -271,19 +272,27 @@ test("单格成功的例行一行：固定在列头行左段（名称 / 原件�
   });
   // 没有就不占位
   assert.doesNotMatch(render(Matrix, base), /mx-celltoast/);
-  const html = render(Matrix, { ...base, cellToast: { id: 1, node } });
+  const rows = [
+    { ...base.rows[0], mark: createElement("span", { className: "dup" }, "×2") },
+    base.rows[1],
+  ];
+  const html = render(Matrix, { ...base, rows, cellToast: { id: 1, rowKey: "u|docx", node } });
   // 只一条（槽位是单值，新的替换旧的，不排队）
   assert.equal((html.match(/class="mx-celltoast"/g) ?? []).length, 1);
-  // 在吸顶的列头里、agent 列头之前；左沿 = 勾选列宽（对齐名称列），宽 = 名字 246 + 原件位置 120，不伸进 agent 列
-  const head = html.indexOf('class="mx-grid mx-head"');
+  // 列头里没有它（原来的列头行左段挂载点已撤）；在 docx 那一行的名称格里，名字 → ×2 → 提示条
   const at = html.indexOf('class="mx-celltoast"');
-  assert.ok(head >= 0 && at > head && at < html.indexOf('class="mx-head__col"'));
-  assert.match(html.slice(at), /^class="mx-celltoast" style="left:34px;width:366px">/);
-  // 造句复用 toastFor、组件复用例行档：✓ 加到 [Codex] excalidraw · 撤销
-  assert.match(html.slice(at), /ss-toast--routine[\s\S]*?加到[\s\S]*?excalidraw[\s\S]*?>撤销</);
-  // 底边停在列头文字上沿（文字 19 + 表头下内边距 6），不盖列头文字
+  assert.ok(at > html.indexOf('data-row="u|docx"'));
+  assert.ok(at > html.indexOf(">docx<") && at > html.indexOf(">×2<"));
+  // 不是别的行：下一行（pdf）在它之后才开始
+  assert.ok(at < html.indexOf('data-row="w|pdf"'));
+  const line = html.slice(at, html.indexOf("</span></div>", at));
+  // `✓ 加到 [Codex] · 撤销`：造句复用 toastFor（省名字），组件复用例行档，不重复 skill 名
+  assert.match(line, /ss-toast--routine[\s\S]*?加到[\s\S]*?>撤销</);
+  assert.doesNotMatch(line, /docx/);
+  // 名字（或 ×2）后间距 12：行内 gap 8 + 4
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  assert.match(css, /\.mx-celltoast \{[^}]*position: absolute;[^}]*top: 0;[^}]*bottom: 25px;/);
+  assert.match(css, /\.mx-celltoast \{[^}]*margin-left: 4px;/);
+  assert.doesNotMatch(css, /\.mx-celltoast \{[^}]*position: absolute/);
 });
 
 test("批量忙碌锁：开始就锁住工具行各项、不变淡；忙过 500ms（与忙碌指示同一时刻）才变淡", async () => {

@@ -219,36 +219,6 @@
   background: var(--canvas);
 }
 
-/* 单格的例行一行：列头行左段——名称 / 原件位置列头文字上方的空白，左对齐名称列（left / width 由
-   Matrix.tsx 按列宽给）。底边停在列头文字上沿：文字高 19（.mx-head__origin）+ 表头下内边距 6。
-   不越过原件位置列右沿、不盖 agent 列头；名字太长就截断，完整名在格子上 */
-.mx-celltoast {
-  position: absolute;
-  top: 0;
-  bottom: 25px;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.mx-celltoast .ss-toast--routine {
-  max-width: 100%;
-  height: auto;
-  font-size: var(--size-caption);
-}
-
-.mx-celltoast .ss-toast--routine > * {
-  flex-shrink: 0;
-}
-
-.mx-celltoast .ss-toast__names {
-  flex-shrink: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .mx-namecount {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -526,6 +496,31 @@
 
 .mx-row__name > * {
   flex-shrink: 0;
+}
+
+/* 单格的例行一行：就在被点的那一行里，紧跟名字（有 ×2 跟在它后面），间距 12（行内 gap 8 + 4）。
+   13 号、高随行；随行滚动，不吸顶 */
+.mx-celltoast {
+  display: inline-flex;
+  margin-left: 4px;
+}
+
+.mx-celltoast .ss-toast--routine {
+  height: auto;
+  font-size: var(--size-caption);
+}
+
+/* 放不下时名称格跨到第一个 agent 列前（Matrix.tsx 量过才加），原件位置格让出来——底色就是
+   行当下的底色（悬停 / 选中时 surface）；再放不下就截名字，提示条整条保留 */
+.mx-row__name.is-covering > .mx-namebtn,
+.mx-row__name.is-covering > .mx-name {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.mx-row__name.is-covering .mx-name {
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .mx-row__transport {
