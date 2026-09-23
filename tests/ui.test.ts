@@ -179,38 +179,50 @@ test("StateDot 16px 版：给待处理页左列，与格内同形", () => {
   assert.match(html, /stroke-dasharray="8\.4 1\.5"/);
 });
 
-test("StateDot 可点：渲染成按钮；只有开 / 关两种画悬停预览", () => {
+test("StateDot 可点：渲染成按钮；只有开 / 关两种出悬停光晕", () => {
   const linked = render(StateDot, { dot: "linked", onClick: noop, title: "点一下关闭" });
   assert.match(linked, /<button type="button" class="ss-dot-btn"/);
-  assert.match(linked, /data-preview=""/);
+  assert.match(linked, /data-hoverable=""/);
   assert.match(linked, /class="ss-dot__fill"/);
   const missing = render(StateDot, { dot: "missing", onClick: noop });
-  assert.match(missing, /class="ss-dot__preview"/);
-  assert.match(missing, /data-preview=""/);
-  // 原件与异常点了不是开关：不预览
-  assert.doesNotMatch(render(StateDot, { dot: "own", onClick: noop }), /data-preview/);
-  assert.doesNotMatch(render(StateDot, { dot: "broken", onClick: noop }), /data-preview/);
-  // 不可点的不预览
-  assert.doesNotMatch(render(StateDot, { dot: "missing" }), /data-preview/);
+  assert.match(missing, /data-hoverable=""/);
+  // 光晕：直径 22 的圆，先画、压在点下层
+  assert.match(missing, /data-hoverable=""[^>]*><circle class="ss-dot__halo" cx="5" cy="5" r="11"/);
+  // 调用方自己渲染外层按钮：hoverable 让不带 onClick 的点也出光晕
+  assert.match(render(StateDot, { dot: "missing", hoverable: true }), /class="ss-dot__halo"/);
+  // 原件与异常点了不是开关：不出光晕
+  for (const dot of ["own", "broken"] as const) {
+    const html = render(StateDot, { dot, onClick: noop });
+    assert.doesNotMatch(html, /data-hoverable|ss-dot__halo/);
+  }
+  // 不可点的不出光晕
+  assert.doesNotMatch(render(StateDot, { dot: "missing" }), /data-hoverable|ss-dot__halo/);
 });
 
-// 已加上的预览原来是「实心褪去只剩环」——和真实的「未加上」一模一样，还没点就被读成已取消（真机反馈），
-// 这条行为已退役；现在 40% 浓度＝预览、还没发生
-test("StateDot 悬停预览：未加上环内 40% 实心；已加上整颗点淡到 40%，实心不隐藏、不露空环", () => {
-  assert.match(
-    uiCss,
-    /\.ss-dot-btn:hover \.ss-dot\[data-preview\] \.ss-dot__preview[^{]*\{\s*opacity:\s*0\.4;/,
-  );
-  assert.match(
-    uiCss,
-    /\.ss-dot-btn:hover \.ss-dot--linked\[data-preview\][^{]*\{\s*opacity:\s*0\.4;/,
-  );
+// 悬停时改点本身的两代做法都已退役（真机反馈：点一变就被读成已经点了）——
+// 先是 ● 褪成空环，后是 40% 浓度（○ 环内填 40%、● 整颗淡到 40%）
+test("StateDot 悬停：点本身不变，只在下层出 surface 光晕", () => {
+  // 未加上的环内不再藏一颗预览实心
+  assert.doesNotMatch(render(StateDot, { dot: "missing", onClick: noop }), /ss-dot__preview/);
+  assert.doesNotMatch(uiCss, /ss-dot__preview|data-preview/);
+  // 悬停 / 键盘聚焦时，选到点（.ss-dot，不含外层按钮 .ss-dot-btn）的规则只许动光晕
+  const css = uiCss.replace(/\/\*[\s\S]*?\*\//g, "");
+  const hoverRules = [...css.matchAll(/([^{}]*:(?:hover|focus-visible)[^{}]*)\{([^}]*)\}/g)]
+    .flatMap(([, sel, body]) => sel.split(",").map((part) => [part.trim(), body] as const))
+    .filter(([sel]) => /:(?:hover|focus-visible).*\.ss-dot(?!-btn)/.test(sel));
+  assert.ok(hoverRules.length >= 2);
+  for (const [sel, body] of hoverRules) {
+    assert.match(sel, /\.ss-dot__halo$/, sel);
+    assert.match(body, /^\s*opacity:\s*1;\s*$/);
+  }
+  assert.match(uiCss, /\.ss-dot__halo \{\s*fill: var\(--surface\);\s*opacity: 0;/);
   assert.doesNotMatch(uiCss, /\.ss-dot__fill[^{]*\{\s*opacity:\s*0;/);
-  // 闪烁帧画目标状态：不带预览的淡化
+  // 闪烁帧（黑底）上不出光晕
   const matrixCss = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.doesNotMatch(matrixCss, /ss-dot__preview|data-preview/);
   assert.match(
     matrixCss,
-    /\.mx-cell\.ss-flash \.ss-dot-btn \.ss-dot\[data-preview\] \{\s*opacity:\s*1;/,
+    /\.mx-cell\.ss-flash \.ss-dot-btn \.ss-dot\[data-hoverable\] \.ss-dot__halo \{\s*opacity:\s*0;/,
   );
 });
 

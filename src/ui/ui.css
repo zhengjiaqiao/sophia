@@ -599,20 +599,18 @@
   color: var(--disabled);
 }
 
-/* 悬停预览：40% 浓度＝预览、还没发生（opacity，不用 rgba）。未开启的环保持原样、环内填 40% 实心；
-   已开启的整颗实心点淡到 40%——不露出空环，空环是真实的「未开启」，还没点就会被读成已经取消了 */
-.ss-dot__preview {
+/* 悬停光晕：点本身一点不变（点的颜色或填充一变就被读成已经点了），只在点的下层出一圈
+   直径 22 的圆形 surface 实底——和图标按钮悬停出 surface 底同一个惯例，说「能点」，不预告结果。
+   光晕是 svg 里先画的圆，溢出 viewBox，不占布局 */
+.ss-dot__halo {
+  fill: var(--surface);
   opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
 }
 
-.ss-dot-btn:hover .ss-dot[data-preview] .ss-dot__preview,
-.ss-dot-btn:focus-visible .ss-dot[data-preview] .ss-dot__preview {
-  opacity: 0.4;
-}
-
-.ss-dot-btn:hover .ss-dot--linked[data-preview],
-.ss-dot-btn:focus-visible .ss-dot--linked[data-preview] {
-  opacity: 0.4;
+.ss-dot-btn:hover .ss-dot[data-hoverable] .ss-dot__halo,
+.ss-dot-btn:focus-visible .ss-dot[data-hoverable] .ss-dot__halo {
+  opacity: 1;
 }
 
 .ss-dot-wrap {
@@ -1368,7 +1366,8 @@
   .ss-switch,
   .ss-switch__knob,
   .ss-checkbox,
-  .ss-agentkey {
+  .ss-agentkey,
+  .ss-dot__halo {
     transition: none;
   }
 

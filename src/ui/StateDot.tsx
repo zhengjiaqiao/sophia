@@ -10,9 +10,9 @@ import { Tooltip } from "./Tooltip.tsx";
 ///
 /// 16px 版给待处理页左列：与格内同形，类别名进 title，三处只学一次。
 ///
-/// 悬停预览（DESIGN「格子悬停预览」）：可点的格画出**点下去会变成什么**——
-/// 未加上：环内填 40% 实心；已加上：实心褪去只剩环。两者必须长得相反。
-/// 原件 / 无此格 / 异常格点了不是开关，不预览。
+/// 悬停光晕（DESIGN「格子悬停光晕」）：可点的点悬停 / 键盘聚焦时，**点本身一点不变**，
+/// 只在点的下层出一圈直径 22 的圆形 surface 光晕，说「能点」，不预告结果（结果由提示框的动词说）。
+/// 原件 / 无此格 / 异常格点了不是开关，不出光晕。
 
 export type Dot =
   "own" | "linked" | "missing" | "none" | "broken" | "readOnly" | "blocked" | "wholeLinked";
@@ -44,18 +44,17 @@ export interface StateDotProps {
   /// 给了才渲染成可点的按钮（整格命中区由调用方撑，这里至少 24×24）
   onClick?: () => void;
   /// 调用方自己渲染外层按钮（`.ss-dot-btn`，表格要整格命中与键盘焦点）时给 true：
-  /// 不带 onClick 也画悬停预览
-  preview?: boolean;
+  /// 表示这颗点可点，不带 onClick 也出悬停光晕
+  hoverable?: boolean;
 }
 
-/// 只有这两种点下去是开关，才画悬停预览
-const PREVIEWS = new Set<Dot>(["linked", "missing"]);
+/// 只有这两种点下去是开关，才出悬停光晕
+const TOGGLES = new Set<Dot>(["linked", "missing"]);
 
 function Glyph10({ dot }: { dot: Dot }) {
   switch (dot) {
     case "linked":
-      // 环打底、实心盖在上面。悬停预览是整颗点淡到 40%（40% 浓度＝预览、还没发生），
-      // 不褪去实心露出空环——空环是真实的「未开启」，会被读成已经取消了
+      // 环打底、实心盖在上面
       return (
         <>
           <circle cx="5" cy="5" r="4.25" />
@@ -63,19 +62,7 @@ function Glyph10({ dot }: { dot: Dot }) {
         </>
       );
     case "missing":
-      return (
-        <>
-          <circle cx="5" cy="5" r="4.25" />
-          <circle
-            className="ss-dot__preview"
-            cx="5"
-            cy="5"
-            r="3.5"
-            stroke="none"
-            fill="currentColor"
-          />
-        </>
-      );
+      return <circle cx="5" cy="5" r="4.25" />;
     case "own":
       return (
         <>
@@ -130,19 +117,7 @@ function Glyph16({ dot }: { dot: Dot }) {
         </>
       );
     case "missing":
-      return (
-        <>
-          <circle cx="8" cy="8" r="6.3" />
-          <circle
-            className="ss-dot__preview"
-            cx="8"
-            cy="8"
-            r="5.6"
-            stroke="none"
-            fill="currentColor"
-          />
-        </>
-      );
+      return <circle cx="8" cy="8" r="6.3" />;
     case "own":
       return (
         <>
@@ -195,19 +170,20 @@ export function StateDot({
   title,
   label,
   onClick,
-  preview: forcePreview,
+  hoverable: forceHoverable,
 }: StateDotProps) {
   const text = label ?? title ?? DOT_LABEL[dot];
   const classes = ["ss-dot", `ss-dot--${dot}`];
   if (inverse) classes.push("is-inverse");
   if (muted) classes.push("is-muted");
-  const preview = (Boolean(onClick) || Boolean(forcePreview)) && PREVIEWS.has(dot);
+  const hoverable = (Boolean(onClick) || Boolean(forceHoverable)) && TOGGLES.has(dot);
+  const center = size === 16 ? 8 : 5;
 
   const glyph = (
     <svg
       className={classes.join(" ")}
       data-dot={dot}
-      data-preview={preview ? "" : undefined}
+      data-hoverable={hoverable ? "" : undefined}
       width={size}
       height={size}
       viewBox={size === 16 ? "0 0 16 16" : "0 0 10 10"}
@@ -219,6 +195,10 @@ export function StateDot({
       aria-hidden="true"
       focusable="false"
     >
+      {hoverable && (
+        // 光晕先画、压在点下层；溢出 viewBox（svg overflow: visible），不占布局
+        <circle className="ss-dot__halo" cx={center} cy={center} r="11" stroke="none" />
+      )}
       {size === 16 ? <Glyph16 dot={dot} /> : <Glyph10 dot={dot} />}
     </svg>
   );

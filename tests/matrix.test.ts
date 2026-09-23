@@ -121,10 +121,10 @@ test("Matrix：选择态——第一行 已选 N 个 + 所有 agent + 每个 age
   assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
   assert.match(html, /aria-label="选中的都加到所有 agent"/);
   assert.match(html, /class="mx-agentitem__name">所有 agent</);
-  // 每一项是 button：状态点（● linked / ○ missing，与格子同一套，带悬停预览）+ 正文名字
+  // 每一项是 button：状态点（● linked / ○ missing，与格子同一套，悬停出光晕）+ 正文名字
   assert.match(
     html,
-    /aria-label="选中的都从 Claude Code 移除"[^>]*>[\s\S]*?data-dot="linked" data-preview=""/,
+    /aria-label="选中的都从 Claude Code 移除"[^>]*>[\s\S]*?data-dot="linked" data-hoverable=""/,
   );
   assert.match(html, /class="mx-agentitem__name">Claude Code</);
   // 禁用：点和字都用 disabled 色，读屏带原因
