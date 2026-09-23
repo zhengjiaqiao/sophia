@@ -17,7 +17,7 @@ import Matrix, {
   type MatrixRowView,
   type ColumnCheck,
 } from "./Matrix";
-import { distinguishingSegments } from "./pages/importDefaults";
+import { originNames, originText } from "./originName";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
@@ -174,22 +174,9 @@ export default function DomainView(props: DomainViewProps) {
   });
 
   // ---- 原件位置：来源名；同名来源用路径里能区分它们的那一级 ----
-  const originLabels = new Map<string, string>();
-  const byLabel = new Map<string, string[]>();
-  for (const id of counts.keys()) {
-    const label = labelOf(id);
-    byLabel.set(label, [...(byLabel.get(label) ?? []), id]);
-  }
-  for (const [label, ids] of byLabel) {
-    const segs = distinguishingSegments(ids.map((id) => sourceOf(id)?.path ?? id));
-    // 区分片段就是名字本身（WeiboAP/skills 对 WeiboAP/agent_…/skills）时不重复写；
-    // 片段最多显示 10 个字符（内部 id 不整段露出来），完整值进提示框
-    const clip = (seg: string) => (seg.length > 10 ? `${seg.slice(0, 10)}…` : seg);
-    ids.forEach((id, i) =>
-      originLabels.set(id, segs[i] && segs[i] !== label ? `${label} · ${clip(segs[i])}` : label),
-    );
-  }
-  const originOf = (id: string) => originLabels.get(id) ?? labelOf(id);
+  const names = originNames(counts.keys(), overview.sources);
+  const nameOf = (id: string) => names.get(id) ?? { name: labelOf(id), seg: "" };
+  const originOf = (id: string) => originText(nameOf(id));
 
   // ---- 行 ----
   const matrixRows: MatrixRowView[] = visible
@@ -229,6 +216,7 @@ export default function DomainView(props: DomainViewProps) {
         origin: {
           id: row.sourceId,
           label: originOf(row.sourceId),
+          split: nameOf(row.sourceId).seg ? nameOf(row.sourceId) : undefined,
           path,
           onReveal: () => props.onReveal(path),
         },
@@ -244,7 +232,7 @@ export default function DomainView(props: DomainViewProps) {
                     <>
                       <div>这份 {readout ?? "…"}</div>
                       <div>
-                        {labelOf(other.sourceId)} 那份 {otherReadout ?? "…"}
+                        {originOf(other.sourceId)} 那份 {otherReadout ?? "…"}
                       </div>
                     </>
                   )
@@ -268,7 +256,7 @@ export default function DomainView(props: DomainViewProps) {
             <DupExtra
               onShow={() => props.onDupHover(row)}
               onKeep={(anchor) => props.onKeepThis(row, other, anchor)}
-              label={`只留 ${labelOf(row.sourceId)} 的 ${row.skill}`}
+              label={`只留 ${originOf(row.sourceId)} 的 ${row.skill}`}
             />
           ),
       };

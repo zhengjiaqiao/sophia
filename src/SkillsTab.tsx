@@ -5,6 +5,7 @@ import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
 import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
+import { originNames, originText, type OriginName } from "./originName";
 import ImportPage from "./pages/ImportPage";
 import { pathsOfKey } from "./pages/pendingIssues";
 import { shortDate } from "./dateText";
@@ -40,8 +41,11 @@ interface KeepPane {
   other: DomainRow;
   anchor: ConfirmAnchor;
   planId: string;
-  keptLabel: string;
-  otherLabel: string;
+  /// 两份的来源名（同名来源带区分片段，与原件位置列同一写法）与完整路径
+  keptName: OriginName;
+  otherName: OriginName;
+  keptPath: string;
+  otherPath: string;
   /// 要改指到留下那份的链接条数
   relinked: number;
 }
@@ -546,7 +550,17 @@ export default function SkillsTab({
   // 结果是例行一行、不带撤销——废纸篓只找得回文件夹，改指过的链接回不来
 
   const keepThis = async (kept: DomainRow, other: DomainRow, anchor: ConfirmAnchor) => {
-    const labelOf = (id: string) => overview?.sources.find((s) => s.id === id)?.label ?? id;
+    const sources = overview?.sources ?? [];
+    // 与原件位置列同一套：按本域出现的来源算，同名来源才分得开
+    const names = originNames(
+      (page?.rows ?? [kept, other]).map((r) => r.sourceId),
+      sources,
+    );
+    const nameOf = (id: string): OriginName => names.get(id) ?? { name: id, seg: "" };
+    const source = sources.find((s) => s.id === kept.sourceId);
+    const keptPath =
+      source?.skills.find((k) => k.name === kept.skill)?.path ??
+      `${source?.path ?? kept.sourceId}/${kept.skill}`;
     const rowKey = skillRowKey(kept);
     let planned;
     try {
@@ -576,8 +590,10 @@ export default function SkillsTab({
       other,
       anchor,
       planId: planned.planId,
-      keptLabel: labelOf(kept.sourceId),
-      otherLabel: labelOf(other.sourceId),
+      keptName: nameOf(kept.sourceId),
+      otherName: nameOf(other.sourceId),
+      keptPath,
+      otherPath: planned.plan.path,
       relinked: planned.plan.affected.length,
     });
   };
@@ -623,7 +639,10 @@ export default function SkillsTab({
       return next;
     });
     if (!ok) return;
-    const text = toastFor("keepThis", { done: [{ name: kept.skill }], keepLabel: pane.keptLabel });
+    const text = toastFor("keepThis", {
+      done: [{ name: kept.skill }],
+      keepLabel: originText(pane.keptName),
+    });
     setRowToast({
       rowKey: skillRowKey(kept),
       node: <Toast {...text} onDismiss={() => setRowToast(null)} />,
@@ -765,6 +784,15 @@ export default function SkillsTab({
   }
 
   const query = filterText.trim().toLowerCase();
+  const keepConfirm = keepPane
+    ? keepThisConfirm({
+        kept: { ...keepPane.keptName, path: keepPane.keptPath },
+        other: { ...keepPane.otherName, path: keepPane.otherPath },
+        skill: keepPane.kept.skill,
+        relinked: keepPane.relinked,
+      })
+    : null;
+
   const visible = page.rows.filter(
     (row) =>
       (query === "" || row.skill.toLowerCase().includes(query)) &&
@@ -827,15 +855,24 @@ export default function SkillsTab({
         focus={focus}
       />
 
-      {keepPane ? (
+      {keepConfirm && keepPane ? (
         <Confirm
-          title={keepThisConfirm({ ...keepPane, skill: keepPane.kept.skill }).title}
+          title={keepConfirm.title}
           confirmLabel="只留这份"
           onConfirm={() => void confirmKeep(keepPane)}
           onCancel={() => setKeepPane(null)}
           anchor={keepPane.anchor}
         >
-          {keepThisConfirm({ ...keepPane, skill: keepPane.kept.skill }).body}
+          {/* 标题下两行路径：决定删哪份的依据，不截断、太长就折行 */}
+          <div className="mx-keeppaths">
+            {keepConfirm.paths.map((p) => (
+              <div key={p.label} className="mx-keeppaths__row">
+                <span className="mx-keeppaths__label">{p.label}</span>
+                <span className="mx-keeppaths__path">{p.path}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mx-keeppaths__body">{keepConfirm.body}</div>
         </Confirm>
       ) : null}
 

@@ -97,12 +97,45 @@ test("所有成功都是例行一行（含只留这份、自动规则）；黑�
 
 test("只留这份的确认框：标题问留哪份；正文写哪份进废纸篓、几条链接改指，没有就不写后半句", async () => {
   const { keepThisConfirm } = await import("../src/toastText.ts");
-  const base = { keptLabel: "通用仓库", otherLabel: "WeiboAP", skill: "defuddle" };
-  assert.deepEqual(keepThisConfirm({ ...base, relinked: 3 }), {
-    title: "只留 通用仓库 的 defuddle？",
-    body: "WeiboAP 那份移到废纸篓，3 条链接改指到这一份",
-  });
+  const base = {
+    kept: { name: "通用仓库", seg: "", path: "/Users/jia/.agents/skills/defuddle" },
+    other: { name: "WeiboAP", seg: "", path: "/Users/jia/WeiboAP/skills/defuddle" },
+    skill: "defuddle",
+  };
+  const t = keepThisConfirm({ ...base, relinked: 3 });
+  assert.equal(t.title, "只留 通用仓库 的 defuddle？");
+  assert.equal(t.body, "WeiboAP 那份移到废纸篓，3 条链接改指到这一份");
   assert.equal(keepThisConfirm({ ...base, relinked: 0 }).body, "WeiboAP 那份移到废纸篓");
+});
+
+test("只留这份的确认框：标题下两行写两份的完整路径，主目录写 ~，不截断", async () => {
+  const { keepThisConfirm } = await import("../src/toastText.ts");
+  const { setHome } = await import("../src/pathText.ts");
+  setHome("/Users/jia");
+  const long = `/Users/jia/${"very-long-folder/".repeat(8)}skills/defuddle`;
+  const t = keepThisConfirm({
+    kept: { name: "通用仓库", seg: "", path: "/Users/jia/.agents/skills/defuddle" },
+    other: { name: "WeiboAP", seg: "", path: long },
+    skill: "defuddle",
+    relinked: 0,
+  });
+  assert.deepEqual(t.paths, [
+    { label: "留下", path: "~/.agents/skills/defuddle" },
+    { label: "移到废纸篓", path: `~/${"very-long-folder/".repeat(8)}skills/defuddle` },
+  ]);
+  setHome(null);
+});
+
+test("只留这份的确认框：同名来源在标题和后果句里用区分片段", async () => {
+  const { keepThisConfirm } = await import("../src/toastText.ts");
+  const t = keepThisConfirm({
+    kept: { name: "ego lite", seg: "0.5.1.11", path: "/e/0.5.1.11/skills/ego-browser" },
+    other: { name: "ego lite", seg: "0.5.0.32", path: "/e/0.5.0.32/skills/ego-browser" },
+    skill: "ego-browser",
+    relinked: 2,
+  });
+  assert.equal(t.title, "只留 ego lite · 0.5.1.11 的 ego-browser？");
+  assert.equal(t.body, "ego lite · 0.5.0.32 那份移到废纸篓，2 条链接改指到这一份");
 });
 
 test("拆开的确认框：标题问拆哪个 agent 的 skills 文件夹，正文说后果", async () => {

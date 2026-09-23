@@ -33,6 +33,9 @@
 /// - 名字去重、保序；多于两个由 `Toast` 自己写成 `+N`，这里不截
 /// - agent 图标按 id 去重、保序
 
+import { originText, type OriginName } from "./originName.ts";
+import { displayPath } from "./pathText.ts";
+
 export type ToastOp =
   /// skill：加到某个 agent（建链）
   | "link"
@@ -180,18 +183,24 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
   };
 }
 
-/// 「只留这份」确认框（DESIGN「页面还是弹层」）：标题问留哪份；正文写哪份进废纸篓、几条链接改指，
-/// 没有要改指的就不写后半句
+/// 「只留这份」确认框（DESIGN「页面还是弹层」「贴底栏「defuddle 有两份原件，删掉哪个？」」）：
+/// 标题问留哪份；正文写哪份进废纸篓、几条链接改指，没有要改指的就不写后半句。
+/// 来源名用原件位置列的写法（`originNames`）：同名来源带区分片段（`ego lite · 0.5.1.11`）。
+/// `paths` 是标题下的两行：`留下` / `移到废纸篓` + 那一份的完整路径（主目录写 `~`，不截断）
 export function keepThisConfirm(input: {
-  keptLabel: string;
-  otherLabel: string;
+  kept: OriginName & { path: string };
+  other: OriginName & { path: string };
   skill: string;
   relinked: number;
-}): { title: string; body: string } {
-  const trash = `${input.otherLabel} 那份移到废纸篓`;
+}): { title: string; body: string; paths: { label: string; path: string }[] } {
+  const trash = `${originText(input.other)} 那份移到废纸篓`;
   return {
-    title: `只留 ${input.keptLabel} 的 ${input.skill}？`,
+    title: `只留 ${originText(input.kept)} 的 ${input.skill}？`,
     body: input.relinked > 0 ? `${trash}，${input.relinked} 条链接改指到这一份` : trash,
+    paths: [
+      { label: "留下", path: displayPath(input.kept.path) },
+      { label: "移到废纸篓", path: displayPath(input.other.path) },
+    ],
   };
 }
 

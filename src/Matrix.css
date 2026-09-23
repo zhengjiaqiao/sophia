@@ -361,6 +361,25 @@
   white-space: nowrap;
 }
 
+/* 同名来源：来源名 + 区分片段两段。放不下只截来源名，区分片段完整保留（ego… · 0.5.0.32）——
+   截掉的若是区分片段，两行就只剩一样的来源名，等于没写 */
+.mx-origin.is-split {
+  display: flex;
+  min-width: 0;
+}
+
+.mx-origin__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mx-origin__seg {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* 孤链行：原件已经不在了，位置格写「不在了」 */
 .mx-origin.is-gone {
   color: var(--ink-faint);
@@ -710,4 +729,32 @@
 .mx-rowtip--left {
   right: calc(100% + 8px);
   left: auto;
+}
+
+/* 「只留这份」确认框标题下的两行：留下 / 移到废纸篓 + 那份的完整路径。
+   标签列对齐；路径等宽 12、不截断，太长就折行（决定删哪份的依据） */
+.mx-keeppaths {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: baseline;
+}
+
+.mx-keeppaths__row {
+  display: contents;
+}
+
+.mx-keeppaths__label {
+  white-space: nowrap;
+}
+
+.mx-keeppaths__path {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.mx-keeppaths__body {
+  margin-top: 12px;
 }

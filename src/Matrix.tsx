@@ -81,8 +81,16 @@ export interface MatrixRowView {
   key: string;
   name: string;
   /// 原件位置 / 来源位置格：来源名（同名来源用区分片段）+ 完整路径；悬停出路径提示框与 `打开 ↗`。
-  /// `gone`：原件已经不在了（孤链行），名字用 `ink-faint`，不出 `打开 ↗`
-  origin: { id: string; label: string; path: string; onReveal: () => void; gone?: boolean };
+  /// `gone`：原件已经不在了（孤链行），名字用 `ink-faint`，不出 `打开 ↗`。
+  /// `split`：同名来源时把 `label` 拆成来源名 + 区分片段两段画，放不下只截来源名（`ego… · 0.5.0.32`）
+  origin: {
+    id: string;
+    label: string;
+    split?: { name: string; seg: string };
+    path: string;
+    onReveal: () => void;
+    gone?: boolean;
+  };
   /// 列 id → 格；null＝这一行在这一列没有格（短横，不可点）
   cells: Record<string, MatrixCellView | null>;
   /// 名字后的标注：`×2`（提示框同时列两份读数）、`2 份不一样`、`Codex 不支持`
@@ -992,8 +1000,19 @@ export default function Matrix(props: MatrixProps) {
                 }
                 context="table"
               >
-                <span className={`mx-origin${row.origin.gone ? " is-gone" : ""}`} tabIndex={-1}>
-                  {row.origin.label}
+                <span
+                  className={`mx-origin${row.origin.gone ? " is-gone" : ""}${row.origin.split ? " is-split" : ""}`}
+                  tabIndex={-1}
+                >
+                  {row.origin.split ? (
+                    <>
+                      <span className="mx-origin__name">{row.origin.split.name}</span>
+                      {/* 分隔用不换行空格：flex 项之间的普通空白会被吃掉 */}
+                      <span className="mx-origin__seg">{`\u00a0·\u00a0${row.origin.split.seg}`}</span>
+                    </>
+                  ) : (
+                    row.origin.label
+                  )}
                 </span>
               </Tooltip>
               {hot && !open && toast === null && !row.origin.gone ? (
