@@ -25,6 +25,7 @@ import {
   ModelChip,
   SubPage,
   Tooltip,
+  TruncTip,
 } from "../ui/index.ts";
 import type { ConfirmAnchor } from "../ui/index.ts";
 import { ModelList } from "../ModelList.tsx";
@@ -390,9 +391,10 @@ export function GatewayBody({
           />
         ) : current ? (
           <div className="gw-panel__summary">
-            <Tooltip content={current.baseUrl || "还没填地址"}>
+            {/* 地址已经显示在这里：只在放不下被截断时才给完整值 */}
+            <TruncTip content={current.baseUrl || "还没填地址"}>
               <span className="gw-panel__url">{current.baseUrl || "还没填地址"}</span>
-            </Tooltip>
+            </TruncTip>
             <span className="gw-panel__sep">·</span>
             {current.unreachable ? (
               <>

@@ -10,6 +10,7 @@ import {
   Tag,
   Toast,
   Tooltip,
+  TruncTip,
   useBusyShown,
 } from "../ui";
 import { edgeFades } from "../modelsView";
@@ -276,11 +277,18 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     } else if (line.kind === "message") {
       second = <span className="add-src__meta">{line.text}</span>;
     } else {
-      second = (
-        <Tooltip content={entry.title ?? line.text}>
-          <span className="add-src__meta">{line.text}</span>
-        </Tooltip>
-      );
+      second =
+        entry.title !== undefined ? (
+          // 第二行只写短路径：提示框补完整路径（屏幕上没有的）
+          <Tooltip content={entry.title}>
+            <span className="add-src__meta">{line.text}</span>
+          </Tooltip>
+        ) : (
+          // 没有别的可补：只在这一行放不下被截断时给全文
+          <TruncTip content={line.text}>
+            <span className="add-src__meta">{line.text}</span>
+          </TruncTip>
+        );
     }
     return (
       <div

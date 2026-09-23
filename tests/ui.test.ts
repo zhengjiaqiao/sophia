@@ -27,7 +27,7 @@ const { Button, IconButton, AddButton } = await import("../src/ui/Button.tsx");
 const { Switch, Checkbox } = await import("../src/ui/Switch.tsx");
 const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
-const { Tooltip, TIP_DELAY_MS, PINNED_TIP_MS, TIP_IDLE, nextTip } =
+const { Tooltip, TruncTip, isClipped, TIP_DELAY_MS, PINNED_TIP_MS, TIP_IDLE, nextTip } =
   await import("../src/ui/Tooltip.tsx");
 const { Spinner, BusySlot, BUSY_DELAY_MS } = await import("../src/ui/Spinner.tsx");
 const { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
@@ -624,6 +624,27 @@ test("Spinner：地球绕太阳，太阳大地球小、画一圈细轨道、必�
   assert.match(large, /class="ss-spinner__sun" cx="12" cy="12" r="4.5"/);
   assert.match(large, /class="ss-spinner__earth" cx="12" cy="2" r="2"/);
   assert.match(large, /class="ss-spinner__orbit" cx="12" cy="12" r="10"/);
+});
+
+test("TruncTip：内容只是触发文字的完整值，文字真被截断才出；读屏不重复挂描述", () => {
+  // 量法：包层里任一段文字横向溢出（行内元素量不出宽度，不算）
+  const el = (clientWidth: number, scrollWidth: number, kids: unknown[] = []) =>
+    ({ clientWidth, scrollWidth, querySelectorAll: () => kids }) as unknown as Element;
+  assert.equal(isClipped(null), false);
+  assert.equal(isClipped(el(0, 0, [el(200, 200)])), false);
+  assert.equal(isClipped(el(0, 0, [el(0, 0), el(120, 260)])), true);
+  assert.equal(isClipped(el(120, 121)), false);
+  // 完整值就是文字本身：不挂 aria-describedby（视觉截断，文字读得全）
+  const html = render(TruncTip, {
+    content: "https://example.com/openai/v1",
+    children: createElement(
+      "span",
+      { className: "gw-panel__url" },
+      "https://example.com/openai/v1",
+    ),
+  });
+  assert.doesNotMatch(html, /aria-describedby/);
+  assert.match(html, /role="tooltip"/);
 });
 
 // ===== 提示条 =====

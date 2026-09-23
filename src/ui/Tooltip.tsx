@@ -26,6 +26,8 @@ import type { ReactElement, ReactNode } from "react";
 ///   **点了做不了的控件**（`explain`）按下当即弹出、不等延时，停约 3 秒，再按一下收起
 ///   ——同格子的「点了做不了的格子，立刻说明」（Matrix 的 cellPress / PINNED_TIP_MS）
 /// - 嵌套：外层提示框包着的控件自己也有提示框（禁用原因）时，指针或焦点在里层上只出里层那一个
+/// - **只说屏幕上没说的**：内容只是触发文字的完整值时用 `TruncTip`——悬停 / 焦点那一刻量一次，
+///   文字真被截断才出，完整显示着就不出（DESIGN「提示框只说屏幕上没说的」）
 /// - 可访问性：内容同时作 `aria-describedby`，不依赖悬停
 
 export const TIP_DELAY_MS = { table: 700, default: 400 } as const;
@@ -94,7 +96,16 @@ export interface TooltipProps {
   /// 触发控件点了做不了（禁用）：按下当即弹出说明、不等延时，再按收起；
   /// 包层里的原生禁用控件不吃指针（ui.css），悬停和按下都落在包层上
   explain?: boolean;
+  /// 内容就是触发文字的完整值：只在它此刻真被截断时出（见 `TruncTip`）
+  truncated?: boolean;
   children: ReactElement;
+}
+
+/// 包层里有没有哪一段文字此刻被截断（横向溢出）；行内元素量不出宽度，不算
+export function isClipped(root: Element | null): boolean {
+  if (!root) return false;
+  const all = [root, ...Array.from(root.querySelectorAll("*"))];
+  return all.some((el) => el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1);
 }
 
 type Align = "center" | "start" | "end";
@@ -116,6 +127,7 @@ export function Tooltip({
   placement = "top",
   focusable,
   explain = false,
+  truncated = false,
   children,
 }: TooltipProps) {
   const id = useId();
@@ -176,6 +188,8 @@ export function Tooltip({
   };
 
   const arm = () => {
+    // 只给完整值的：文字完整显示着就不出（悬停那一刻量一次）
+    if (truncated && !isClipped(wrapper.current)) return;
     claim();
     // 已开着（悬停出的、按下钉出的）不重新计时：点一下包层也会让它得到焦点，别把钉住的计时冲掉
     if (state.current.pressed || state.current.open) return;
@@ -230,7 +244,7 @@ export function Tooltip({
   const wrapFocus = focusable && !idle;
   const trigger =
     !wrapFocus && isValidElement<{ "aria-describedby"?: string }>(children)
-      ? cloneElement(children, { "aria-describedby": idle ? undefined : id })
+      ? cloneElement(children, { "aria-describedby": idle || truncated ? undefined : id })
       : children;
 
   const classes = ["ss-tip", `ss-tip--${side}`, `ss-tip--${align}`];
@@ -319,4 +333,11 @@ export function tipCeiling(el: HTMLElement): number {
     }
   }
   return Math.max(0, inset);
+}
+
+/// 「截断才提示」（DESIGN「提示框只说屏幕上没说的」）：内容只是触发文字的完整值（网关地址、
+/// 放不下的一行）时用它。悬停 / 键盘焦点那一刻量一次触发文字是否溢出，真被截断才出提示框；
+/// 完整显示着就什么都不出。读屏不挂 `aria-describedby`——截断只是视觉的，文字本身读得全
+export function TruncTip(props: Omit<TooltipProps, "truncated" | "explain">) {
+  return <Tooltip {...props} truncated />;
 }

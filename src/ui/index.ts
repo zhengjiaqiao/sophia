@@ -27,6 +27,8 @@ export type { TagProps } from "./Tag.tsx";
 export {
   Tooltip,
   ReasonTip,
+  TruncTip,
+  isClipped,
   TIP_DELAY_MS,
   PINNED_TIP_MS,
   TIP_IDLE,
