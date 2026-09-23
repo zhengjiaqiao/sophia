@@ -75,6 +75,36 @@ test("Matrix：通道条表头 + 原件位置列（120，来源名），没有�
   assert.doesNotMatch(html, /mx-busy|正在开启/);
 });
 
+test("MCP 格的读屏名不说「软链」：linked＝已写进 · 副本，own＝原件（这两个域共用一张表，词不能照抄 skill 的）", () => {
+  const mcpProps = {
+    ...base,
+    transportLabel: "传输",
+    rows: [
+      {
+        ...base.rows[0],
+        cells: {
+          cc: { dot: "linked" as const, clickable: true, tip: "从 Claude Code 移除" },
+          cx: { dot: "missing" as const, clickable: true, tip: "写进 Codex" },
+        },
+      },
+      {
+        ...base.rows[1],
+        cells: { cc: { dot: "own" as const, clickable: false, tip: "原件就在这儿" }, cx: null },
+      },
+    ],
+  };
+  const html = render(Matrix, mcpProps);
+  assert.doesNotMatch(html, /软链/);
+  assert.match(html, /aria-label="docx · Claude Code：已写进 · 副本。从 Claude Code 移除"/);
+  assert.match(html, /aria-label="pdf · Claude Code：原件。原件就在这儿"/);
+});
+
+test("skill 格的读屏名不受 MCP 影响：linked 仍是「已加上 · 软链」，own 仍是「已加上 · 原件」", () => {
+  const html = render(Matrix, base);
+  assert.match(html, /aria-label="docx · Claude Code：已加上 · 软链。从 Claude Code 移除"/);
+  assert.match(html, /aria-label="pdf · Claude Code：已加上 · 原件。原件就在这儿"/);
+});
+
 test("Matrix：当前排序依据列常显 ↑（默认名称升序也显示），其余列不画", () => {
   const html = render(Matrix, base);
   assert.equal((html.match(/class="mx-sort is-active"/g) ?? []).length, 1);

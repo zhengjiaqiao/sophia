@@ -205,12 +205,22 @@ export interface MatrixProps {
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
-/// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着），其余沿用 DOT_LABEL
-const DOT_TEXT: Record<Dot, string> = {
+/// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着），其余沿用 DOT_LABEL。
+/// skill 与 MCP 共用这张表，但 `linked`（这儿有一份）在两边不是同一件事——skill 是一条软链，
+/// MCP 是一份独立配置副本，没有软链（DESIGN「MCP 格子同样是开关」）：读屏词不能说反
+const SKILL_DOT_TEXT: Record<Dot, string> = {
   ...DOT_LABEL,
   linked: "已加上 · 软链",
   missing: "未加上",
   own: "已加上 · 原件",
+};
+/// MCP 用词与格子提示框、原件格提示框同一套（`MCP_OWN_TIP`）：原件不说「已加上」——
+/// 它本来就在那儿，不是被加上去的
+const MCP_DOT_TEXT: Record<Dot, string> = {
+  ...DOT_LABEL,
+  linked: "已写进 · 副本",
+  missing: "未加上",
+  own: "原件",
 };
 
 /// 把键盘焦点格夹回当前表的范围：取最近的有效行和列。表为空（没有行或没有列）时返回 null
@@ -421,6 +431,8 @@ export default function Matrix(props: MatrixProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const hasTransport = transportLabel !== undefined;
+  // 只有 MCP 表带「传输」列（`transportLabel`）：拿它认哪边的表，选对应的读屏词表
+  const dotText = hasTransport ? MCP_DOT_TEXT : SKILL_DOT_TEXT;
   const template = [
     `${CHECK_W}px`,
     `${NAME_W}px`,
@@ -1018,7 +1030,7 @@ export default function Matrix(props: MatrixProps) {
                     className={`ss-dot-btn mx-cellbtn${view.clickable ? "" : " is-inert"}`}
                     data-cell={`${r}:${c}`}
                     tabIndex={focused ? 0 : -1}
-                    aria-label={`${row.name} · ${col.name}：${DOT_TEXT[view.dot]}。${view.tip}`}
+                    aria-label={`${row.name} · ${col.name}：${dotText[view.dot]}。${view.tip}`}
                     aria-describedby={tip === key ? `${tipId}-tip` : undefined}
                     onFocus={() => {
                       setFocus({ r, c });
@@ -1039,7 +1051,7 @@ export default function Matrix(props: MatrixProps) {
                       hoverable={view.clickable && !view.pending}
                       muted={view.pending}
                       title=""
-                      label={DOT_TEXT[view.dot]}
+                      label={dotText[view.dot]}
                     />
                   </button>
                 )}
