@@ -1,7 +1,8 @@
-/// 两张添加页（skill / MCP）共用的纯逻辑：默认目标、记住上次的目标、按列切、同名来源的区分片段。
+/// 两张添加页（skill / MCP）共用的纯逻辑：默认目标、记住上次的目标、按列切、同名来源的区分片段、
+/// 全选三态与主动作的字。
 /// 不碰 api、不产 JSX。
 
-/// 这个来源上次添加时点亮的目标，以及连续几次点的是同一组
+/// 这个来源上次添加时勾上的目标，以及连续几次点的是同一组
 export interface ImportMemory {
   last: string[];
   streak: number;
@@ -69,4 +70,24 @@ export function distinguishingSegments(paths: string[]): string[] {
     }
     return paths[i];
   });
+}
+
+/// 全选框的三态，照实算（DESIGN「添加页」：全选就是全部，**同名行也算在内**）：
+/// 列表里可勾的全勾上 `true`，勾了一部分 `"mixed"`，一个没勾 `false`
+export function selectAllState(pickable: string[], chosen: string[]): boolean | "mixed" {
+  const on = pickable.filter((name) => chosen.includes(name)).length;
+  if (pickable.length > 0 && on === pickable.length) return true;
+  return on > 0 ? "mixed" : false;
+}
+
+/// 按一下全选：已经全勾上就全部取消（只动列表里这些），否则把列表里的全部勾上
+export function toggleAll(pickable: string[], chosen: string[]): string[] {
+  return selectAllState(pickable, chosen) === true
+    ? chosen.filter((name) => !pickable.includes(name))
+    : [...new Set([...chosen, ...pickable])];
+}
+
+/// 主动作的字：含替换时写明这次会替换几个（`添加 38 个（替换 1 个）`），不含时照旧
+export function addLabel(count: number, replacing: number): string {
+  return replacing > 0 ? `添加 ${count} 个（替换 ${replacing} 个）` : `添加 ${count} 个`;
 }

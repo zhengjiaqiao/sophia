@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { columnsOf, defaultTargets, sameSet } from "../src/pages/importDefaults.ts";
+import {
+  addLabel,
+  columnsOf,
+  defaultTargets,
+  sameSet,
+  selectAllState,
+  toggleAll,
+} from "../src/pages/importDefaults.ts";
 
 test("默认目标：上次用的（只留现在还在的），没有上次则前两个", () => {
   assert.deepEqual(defaultTargets(["cc", "codex", "cursor"], undefined), ["cc", "codex"]);
@@ -48,4 +55,31 @@ test("同名来源：只挑出路径里不同的那一级", async () => {
   assert.deepEqual(distinguishingSegments(["/only/one"]), [""]);
   // 反斜杠也认
   assert.deepEqual(distinguishingSegments(["C:\\a\\one\\s", "C:\\a\\two\\s"]), ["one", "two"]);
+});
+
+test("全选：连同名行一起勾上；三态照实算", () => {
+  // 列表里 xlsx 是同名行：全选也把它勾上（产品负责人真机：单行能勾、全选却勾不上，读成坏了）
+  const listed = ["docx", "pdf", "xlsx"];
+  assert.deepEqual(toggleAll(listed, []), ["docx", "pdf", "xlsx"]);
+  assert.equal(selectAllState(listed, ["docx", "pdf", "xlsx"]), true);
+  // 只勾了同名行 / 只勾了普通行：都是半选
+  assert.equal(selectAllState(listed, ["xlsx"]), "mixed");
+  assert.equal(selectAllState(listed, ["docx"]), "mixed");
+  assert.equal(selectAllState(listed, []), false);
+  // 半选时按一下：补全，不重复
+  assert.deepEqual(toggleAll(listed, ["pdf"]), ["pdf", "docx", "xlsx"]);
+  // 全勾上时按一下：全部取消
+  assert.deepEqual(toggleAll(listed, ["xlsx", "docx", "pdf"]), []);
+  // 列表外的勾选（不在这一列表里的名字）不参与三态，全选也不动它
+  assert.equal(selectAllState(listed, ["gone"]), false);
+  assert.deepEqual(toggleAll(listed, ["gone", "docx", "pdf", "xlsx"]), ["gone"]);
+  // 空列表：永远是不勾
+  assert.equal(selectAllState([], ["docx"]), false);
+});
+
+test("主动作：含替换时写明替换几个，不含时照旧", () => {
+  assert.equal(addLabel(3, 0), "添加 3 个");
+  assert.equal(addLabel(0, 0), "添加 0 个");
+  assert.equal(addLabel(38, 1), "添加 38 个（替换 1 个）");
+  assert.equal(addLabel(2, 2), "添加 2 个（替换 2 个）");
 });
