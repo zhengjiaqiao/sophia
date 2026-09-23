@@ -12,6 +12,7 @@ import type {
   PlannedAction,
   PlannedDeletion,
   SourceList,
+  SourceSummary,
   SourceRemoval,
   SyncReport,
   McpOverview,
@@ -52,6 +53,9 @@ export const api = {
   /// 在这个位置订阅一个来源（候选的 path，或用户选的文件夹）；只记订阅，不建链
   subscribeSource: (domain: string, path: string) =>
     invoke<void>("subscribe_source", { domain, path }),
+  /// 添加来源弹窗：选好的文件夹订阅之前的只读预览（只认带 SKILL.md 的子目录）
+  previewSourceFolder: (path: string) =>
+    invoke<SourceSummary>("preview_source_folder", { path }),
   /// 移除前的只读清单：会撤掉的软链。原件在这个位置里的来源 reject，错误信息就是给用户看的原因
   planRemoveSource: (domain: string, sourceId: string) =>
     invoke<SourceRemoval>("plan_remove_source", { domain, sourceId }),

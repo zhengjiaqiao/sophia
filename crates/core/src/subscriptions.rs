@@ -227,6 +227,24 @@ pub fn subscribe(
     Ok(())
 }
 
+/// 添加来源弹窗里「选择文件夹…」选好之后、订阅之前的预览。只读，什么都不写。
+/// 与已发现的来源同一处时给那个来源（名字、skill 与列表里一致）；否则按订阅后读进来的样子读
+/// （`discovery::subscribed_sources`：只认带 `SKILL.md` 的子目录）。选中的是一个 skill 本身、
+/// 文件夹不在了或里面一个 skill 都没有时 `skills` 为空——`subscribe` 对前一种也会拒绝
+pub fn preview_folder(path: &Path, sources: &[Source], home: &Path) -> SourceSummary {
+    if let Some(s) = sources.iter().find(|s| same_place(&s.path, path)) {
+        return summary(s, home);
+    }
+    if path.join("SKILL.md").is_file() {
+        return missing_summary(&normalize(path), home);
+    }
+    let dir = path.to_path_buf();
+    match crate::discovery::subscribed_sources(std::iter::once(&dir), sources).first() {
+        Some(s) => summary(s, home),
+        None => missing_summary(&normalize(path), home),
+    }
+}
+
 /// 位置显示名：当前有目标的位置取扫描时的名字，已经不在的按 key 推
 fn domain_names(targets: &[Target]) -> BTreeMap<String, String> {
     group_domains(targets)
@@ -777,6 +795,39 @@ mod tests {
         assert_eq!(page.subscribed.len(), 1);
         assert_eq!(page.subscribed[0].source.skill_count, 0);
         assert_eq!(page.subscribed[0].source.path, normalize(&picked));
+    }
+
+    /// 选文件夹后的预览：只认带 SKILL.md 的子目录；已知来源给那个来源；
+    /// 选中 skill 本身、空文件夹、不在的文件夹都没有 skill；什么都不写
+    #[test]
+    fn preview_folder_reads_without_writing() {
+        let f = Fixture::new();
+        let home = f.tree.root().join("home");
+        let picked = f.tree.dir("Downloads/team-skills");
+        let x = f.tree.dir("Downloads/team-skills/x");
+        f.tree.file(&x, "SKILL.md");
+        f.tree.dir("Downloads/team-skills/node_modules");
+        let base = vec![f.universal()];
+
+        let p = preview_folder(&picked, &base, &home);
+        assert_eq!(p.label, "team-skills");
+        assert_eq!(p.skills, vec!["x".to_string()]);
+        assert_eq!(p.skill_count, 1);
+        assert_eq!(p.path, normalize(&picked));
+
+        // 已发现的来源：给它本身（名字与列表一致）
+        let known = preview_folder(&f.universal, &base, &home);
+        assert_eq!(known.id, base[0].id);
+        assert_eq!(known.label, base[0].label);
+
+        // 选中一个 skill 本身 / 空文件夹 / 不在的：没有 skill
+        assert!(preview_folder(&x, &base, &home).skills.is_empty());
+        let empty = f.tree.dir("Downloads/empty");
+        assert!(preview_folder(&empty, &base, &home).skills.is_empty());
+        let gone = f.tree.root().join("nope");
+        let g = preview_folder(&gone, &base, &home);
+        assert_eq!(g.skill_count, 0);
+        assert!(!gone.exists());
     }
 
     /// 点掉最后一条软链后，行仍在（记录在认领时已写下）；没有记录的话才会消失

@@ -639,6 +639,17 @@ fn subscribe_source(
     state.store.save_settings(&settings).map_err(err)
 }
 
+/// 添加来源弹窗：选好的文件夹订阅之前先看一眼里面的 skill。只读，不记订阅、不建链
+#[tauri::command]
+fn preview_source_folder(
+    path: PathBuf,
+    state: tauri::State<'_, AppState>,
+) -> Result<subscriptions::SourceSummary, String> {
+    let (sources, _) = discover(&state)?;
+    let home = runtime_env()?.home;
+    Ok(subscriptions::preview_folder(&path, &sources, &home))
+}
+
 /// 移除来源前的只读清单：会撤掉的软链（skill × agent），给确认框列出。
 /// 原件在这个位置里的来源返回拒绝的原因
 #[tauri::command]
@@ -1075,6 +1086,7 @@ pub fn run() {
             delete_source,
             list_sources,
             subscribe_source,
+            preview_source_folder,
             plan_remove_source,
             remove_source,
             list_mcp_sources,
