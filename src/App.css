@@ -171,12 +171,88 @@ input:focus-visible {
   border-right: 1px solid var(--hairline);
 }
 
-.sidebar__label {
+/* 小标题行：左 `项目`，右端排序下拉 */
+.sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
   padding: var(--space-md) var(--space-md) 0;
+}
+
+.sidebar__label {
   font-size: var(--size-micro);
   font-weight: 600;
   line-height: var(--leading-micro);
   color: var(--ink-mute);
+}
+
+/* 排序下拉：12 ink-mute 纯文字，悬停转 ink；浮层锚在它右下 */
+.sidebar__sort {
+  position: relative;
+  display: inline-flex;
+}
+
+.sidebar__sort-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  line-height: var(--leading-micro);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sidebar__sort-button:hover,
+.sidebar__sort-button[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+/* 两项的小浮层：与模型选择器同一写法，8 圆角（layer）+ 浮层阴影，无黑框 */
+.sidebar__sort-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 120px;
+  padding: var(--space-xxs);
+  border-radius: var(--radius-layer);
+  background: var(--canvas);
+  box-shadow: var(--elev-layer);
+}
+
+.sidebar__sort-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  height: 28px;
+  padding: 0 var(--space-xs) 0 var(--space-xxs);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sidebar__sort-item:hover {
+  background: var(--surface);
+}
+
+/* ✓ 占固定一格：没打勾的那项文字照样对齐 */
+.sidebar__sort-check {
+  display: inline-flex;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
 }
 
 .sidebar__list {

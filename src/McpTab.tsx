@@ -64,12 +64,11 @@ import "./McpTab.css";
 
 export interface McpTabProps {
   selectedKey: string;
-  onDomains: (domains: { key: string; label: string }[]) => void;
   onError: (error: string) => void;
   busy: boolean;
   onBusy: (busy: boolean) => void;
   refreshKey: number;
-  /// 每次扫描完回传一次（壳拿它认新问题、出一次性提示，不用再自己扫一遍）
+  /// 每次扫描完回传一次（壳拿它认新问题、出一次性提示，也拿它算侧栏的项目并集，不用再自己扫一遍）
   onOverview?: (overview: McpOverview) => void;
   /// 新问题提示的「查看」：一条 MCP 问题的 key（`McpIssueItem.key`，也收服务名）。
   /// 收到新值就滚到那一行（或读不出来的那一列列头）并闪两下；处理完回调 `onFocused`，
@@ -124,7 +123,6 @@ const anchorNow = (): ConfirmAnchor | undefined => {
 
 export default function McpTab({
   selectedKey,
-  onDomains,
   onError,
   busy,
   onBusy,
@@ -241,10 +239,6 @@ export default function McpTab({
 
   const domains = useMemo(() => (overview ? mcpDomains(overview) : []), [overview]);
   domainsRef.current = domains;
-
-  useEffect(() => {
-    if (overview) onDomains(domains.map(({ key, label }) => ({ key, label })));
-  }, [overview, domains, onDomains]);
 
   // 提示与二级页面只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
@@ -631,12 +625,15 @@ export default function McpTab({
     );
   }
 
+  // 侧栏是 Skills 与 MCP 的并集：选中的项目在 MCP 这边可能一个配置位置都没有（没开能写 MCP 的 agent）
   if (page === null) {
     return (
       <Empty
         kind="noAgentDirs"
-        description="这个位置下还没有可用的 MCP 配置位置"
-        hint="添加第一个服务时会把配置文件建出来"
+        description={
+          selectedKey === "global" ? "这个位置下还没有可用的 MCP 配置位置" : "这个项目里还没有 MCP"
+        }
+        hint="装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置"
         art="folders"
       />
     );
@@ -855,7 +852,13 @@ export default function McpTab({
         art="links"
       />
     ) : (
-      <TableEmpty text={`${page.label} 还没有自己的 MCP 配置`} action={addAction} art="links" />
+      <TableEmpty
+        text={
+          page.key === "global" ? `${page.label} 还没有自己的 MCP 配置` : "这个项目里还没有 MCP"
+        }
+        action={addAction}
+        art="links"
+      />
     );
 
   // 写进 WeiboAP 的那几处要额外说一句：它只收下定义，启用是它自己的事

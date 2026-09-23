@@ -19,6 +19,7 @@ import type {
   McpSelection,
   McpAutoImportRule,
   McpDiff,
+  ProjectTimes,
 } from "./types";
 
 // PlannedDeletion 定义在 types.ts（与 serde 一一对应）；
@@ -57,6 +58,8 @@ export const api = {
   listManualProjects: () => invoke<string[]>("list_manual_projects"),
   addProject: (path: string) => invoke<void>("add_project", { path }),
   removeProject: (path: string) => invoke<void>("remove_project", { path }),
+  /// 侧栏排序用的项目时间，按传入顺序返回；只读
+  projectTimes: (paths: string[]) => invoke<ProjectTimes[]>("project_times", { paths }),
   listAutoLinks: () => invoke<AutoLink[]>("list_auto_links"),
   /// 新建或合并该本体位置的规则（目标取并集）
   setAutoLink: (source: string, targets: string[]) =>

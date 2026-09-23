@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
-import type { AutoLink, GatewayState, McpOverview, McpReport, Overview } from "./types";
+import type {
+  AutoLink,
+  GatewayState,
+  McpOverview,
+  McpReport,
+  Overview,
+  ProjectTimes,
+} from "./types";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
@@ -17,8 +24,18 @@ import {
   unseenNotices,
   type IssueSegment,
 } from "./issueNotice";
-import { collectMcpIssues } from "./mcpView";
+import { collectMcpIssues, mcpDomains } from "./mcpView";
 import { displayPath, loadHome } from "./pathText";
+import { relativeTime } from "./dateText";
+import {
+  loadProjectSort,
+  PROJECT_SORTS,
+  projectName,
+  saveProjectSort,
+  sortProjects,
+  unionProjects,
+  type ProjectSort,
+} from "./sidebarProjects";
 import { edgeFades, modelIssues } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
 import {
@@ -26,6 +43,7 @@ import {
   Cap,
   ErrorBanner,
   IconButton,
+  IconCheck,
   IconClose,
   IconSettings,
   Toast,
@@ -39,7 +57,6 @@ import "./App.css";
 const DEFAULT_KEY = "global";
 /// 文件系统事件与窗口获得焦点后的重扫去抖
 const REFRESH_DELAY = 300;
-type SidebarDomain = { key: string; label: string };
 type Tab = "skills" | "mcp" | "models";
 
 /// 顶栏页签：顺序即高频程度。`Cap` 只给拉丁 run 套 Condensed 大写 + 字距，汉字原样
@@ -65,12 +82,14 @@ export default function App() {
   // 「模型」标签页只在后端确认支持（当前只有 macOS）时才出现；读取失败时静默隐藏
   const [modelsSupported, setModelsSupported] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  // 手动添加的项目路径，用来判断侧栏哪些域可以移除
+  // 手动添加的项目路径：侧栏并集的一份，也用来判断哪些项目可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
+  /// 侧栏排序：选择记在本机，下次打开照旧
+  const [projectSort, setProjectSort] = useState<ProjectSort>(loadProjectSort);
+  /// 项目路径 → 两种时间；读不到时列表保持并集的次序
+  const [projectTimes, setProjectTimes] = useState<ReadonlyMap<string, ProjectTimes>>(new Map());
   // 自动同步规则；扫描时顺带取回，域页与添加页都用它
   const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
-  // MCP 扫描到的域独立于 skills；例如没有 skill 的 WeiboAP agent 也能在 MCP 页选择。
-  const [mcpSidebarDomains, setMcpSidebarDomains] = useState<SidebarDomain[]>([]);
   const [backgroundMcpReport, setBackgroundMcpReport] = useState<McpReport | null>(null);
   /// 新问题一次性提示的三份原料：skill 扫描（overview）、MCP 扫描、模型状态；外加看过的 key。
   /// 看过表还没读到（null）就不提示——宁可晚一轮，不能把看过的又提示一遍
@@ -289,10 +308,48 @@ export default function App() {
   const domains = overview?.domains ?? [];
   // 模型页当前是否真的在显示：还没问出支不支持时按不支持算，落回 Skills（见下方主视图分支）
   const showModels = activeTab === "models" && modelsSupported;
-  const sidebarDomains =
-    activeTab === "mcp" ? mcpSidebarDomains : activeTab === "models" ? [] : domains;
-  // 域 key → 手动项目路径；自动发现的项目与 agent 域不在其中，因此没有移除按钮
-  const manualByKey = new Map(manualProjects.map((p) => [`project:${p}`, p]));
+  // 侧栏（DESIGN「侧栏：Skills 与 MCP 共用同一个」）：skill 与 MCP 两边发现的项目 ∪ 手动添加的，
+  // 与当前页签无关，切页签时列表与选中都不变。例如没有 skill 的 WeiboAP agent 也在里面
+  const mcpDomainList = useMemo(
+    () =>
+      mcpOverview === null
+        ? []
+        : mcpDomains(mcpOverview).map((d) => ({
+            key: d.key,
+            // MCP 那边的名字带「项目 · 」前缀；侧栏只写项目名，WeiboAP 的 agent 保留它的显示名
+            label: d.targets.some((t) => t.harnessId === "weiboap")
+              ? d.label
+              : projectName(d.key.slice("project:".length)),
+          })),
+    [mcpOverview],
+  );
+  const projects = useMemo(
+    () => unionProjects(domains, mcpDomainList, manualProjects),
+    [domains, mcpDomainList, manualProjects],
+  );
+  const sortedProjects = useMemo(
+    () => sortProjects(projects, projectTimes, projectSort),
+    [projects, projectTimes, projectSort],
+  );
+  // 项目变了、或又扫了一轮（活跃时间会走），重读时间；读不到不报错，只是不排序
+  const projectPathsKey = projects.map((p) => p.path).join("\n");
+  useEffect(() => {
+    if (projectPathsKey === "") return;
+    let cancelled = false;
+    void api.projectTimes(projectPathsKey.split("\n")).then(
+      (list) => {
+        if (!cancelled) setProjectTimes(new Map(list.map((t) => [t.path, t])));
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [projectPathsKey, refreshKey]);
+  const chooseSort = (sort: ProjectSort) => {
+    setProjectSort(sort);
+    saveProjectSort(sort);
+  };
 
   // ===== 新问题只提示一次（DESIGN「没有收件箱、待处理页和「忽略」」） =====
   // 三类扫描结果任一更新都重算：当前问题减去看过的，剩下的进右下那一个黑窗
@@ -340,45 +397,16 @@ export default function App() {
     jumpToRow(first.segment, first.key);
   };
 
-  const updateMcpSidebarDomains = useCallback((next: SidebarDomain[]) => {
-    setMcpSidebarDomains((previous) =>
-      previous.length === next.length &&
-      previous.every(
-        (domain, index) => domain.key === next[index].key && domain.label === next[index].label,
-      )
-        ? previous
-        : next,
-    );
-  }, []);
-
-  // 选中的域消失（项目不再存在）时回落到「全部」。MCP 首次扫描前不清掉选择，
-  // 否则没有 skill 的 agent 域会在它的 MCP 位置返回前被错误地重置。
+  // 选中的项目从侧栏消失（移除了、不再存在）时回落到「全局」。列表是两边的并集，与页签无关
   useEffect(() => {
-    if (activeTab === "mcp") {
-      if (
-        mcpSidebarDomains.length > 0 &&
-        !mcpSidebarDomains.some((domain) => domain.key === selectedKey)
-      ) {
-        setSelectedKey(mcpSidebarDomains[0].key);
-      }
-      return;
-    }
-    if (activeTab === "models") return;
     if (!overview) return;
-    const manualProjectKeys = new Set(manualProjects.map((p) => `project:${p}`));
-    if (
-      selectedKey !== DEFAULT_KEY &&
-      !domains.some((d) => d.key === selectedKey) &&
-      !manualProjectKeys.has(selectedKey)
-    ) {
+    if (selectedKey !== DEFAULT_KEY && !projects.some((p) => p.key === selectedKey)) {
       setSelectedKey(DEFAULT_KEY);
     }
-  }, [activeTab, overview, manualProjects, selectedKey, domains, mcpSidebarDomains]);
+  }, [overview, projects, selectedKey]);
 
   const switchTab = (tab: Tab) => {
     if (tab === activeTab) return;
-    // 新一轮 MCP 扫描返回前，不用上次的域去重置当前选择
-    if (tab === "mcp") setMcpSidebarDomains([]);
     setActiveTab(tab);
     // 切回 Skills 时显式重扫；MCP 页由自身 refreshKey 驱动扫描
     if (tab === "skills") void refresh();
@@ -495,56 +523,38 @@ export default function App() {
           UA 样式，写成 `hidden={…}` 侧栏照样显示 */}
       {!showModels && (
         <aside className="sidebar">
-          <div className="sidebar__label">位置</div>
+          {/* 小标题 `项目` + 右端排序下拉；`全局` 固定第一，不参与排序 */}
+          <div className="sidebar__head">
+            <span className="sidebar__label">项目</span>
+            <SortMenu value={projectSort} onChange={chooseSort} />
+          </div>
           <ul className="sidebar__list">
-            {!sidebarDomains.some((d) => d.key === "global") && (
+            <li
+              className={selectedKey === DEFAULT_KEY ? "is-active" : ""}
+              onClick={() => !busy && setSelectedKey(DEFAULT_KEY)}
+            >
+              <span className="sidebar__name">全局</span>
+            </li>
+            {sortedProjects.map((p) => (
               <li
-                className={selectedKey === "global" ? "is-active" : ""}
-                onClick={() => !busy && setSelectedKey("global")}
+                key={p.key}
+                className={p.key === selectedKey ? "is-active" : ""}
+                onClick={() => !busy && setSelectedKey(p.key)}
               >
-                <span className="sidebar__name">全局</span>
+                <SidebarName
+                  label={p.label}
+                  path={p.path}
+                  lastActive={projectTimes.get(p.path)?.lastActive ?? null}
+                />
+                {p.manual && (
+                  <RemoveProject
+                    busy={busy}
+                    name={p.label}
+                    onRemove={() => void removeProject(p.path)}
+                  />
+                )}
               </li>
-            )}
-            {sidebarDomains.map((d) => {
-              const manualPath = manualByKey.get(d.key);
-              return (
-                <li
-                  key={d.key}
-                  className={d.key === selectedKey ? "is-active" : ""}
-                  onClick={() => !busy && setSelectedKey(d.key)}
-                >
-                  <SidebarName label={d.label} domainKey={d.key} />
-                  {manualPath !== undefined && (
-                    <RemoveProject
-                      busy={busy}
-                      name={d.label}
-                      onRemove={() => void removeProject(manualPath)}
-                    />
-                  )}
-                </li>
-              );
-            })}
-            {activeTab === "skills" &&
-              manualProjects
-                .filter((path) => !domains.some((d) => d.key === `project:${path}`))
-                .map((path) => {
-                  const key = `project:${path}`;
-                  const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-                  return (
-                    <li
-                      key={key}
-                      className={key === selectedKey ? "is-active" : ""}
-                      onClick={() => !busy && setSelectedKey(key)}
-                    >
-                      <SidebarName label={name} domainKey={key} />
-                      <RemoveProject
-                        busy={busy}
-                        name={name}
-                        onRemove={() => void removeProject(path)}
-                      />
-                    </li>
-                  );
-                })}
+            ))}
           </ul>
           <div className="sidebar__foot">
             <AddButton
@@ -584,7 +594,6 @@ export default function App() {
               busy={busy}
               onBusy={setBusyState}
               refreshKey={refreshKey}
-              onDomains={updateMcpSidebarDomains}
               onOverview={setMcpOverview}
               focusKey={focus?.segment === "mcp" ? focus.key : undefined}
               onFocused={clearFocus}
@@ -626,11 +635,103 @@ export default function App() {
   );
 }
 
-/// 侧栏项目名：放不下截断，提示框给出完整路径（主目录写成 ~）；不是项目的域只写名字
-function SidebarName({ label, domainKey }: { label: string; domainKey: string }) {
-  const name = <span className="sidebar__name">{label}</span>;
-  if (!domainKey.startsWith("project:")) return name;
-  return <Tooltip content={displayPath(domainKey.slice("project:".length))}>{name}</Tooltip>;
+/// 侧栏项目名：放不下截断；提示框给完整路径（主目录写成 ~）和「活跃于 3 天前」。
+/// 时间不写在侧栏上（DESIGN：侧栏只放名字）
+function SidebarName({
+  label,
+  path,
+  lastActive,
+}: {
+  label: string;
+  path: string;
+  lastActive: number | null;
+}) {
+  const tip = (
+    <>
+      {displayPath(path)}
+      {lastActive !== null && (
+        <>
+          <br />
+          活跃于 {relativeTime(lastActive)}
+        </>
+      )}
+    </>
+  );
+  return (
+    <Tooltip content={tip}>
+      <span className="sidebar__name">{label}</span>
+    </Tooltip>
+  );
+}
+
+/// 小标题行右端的排序下拉：`最近活跃 ▾`，点开两项的小浮层，当前项前打 ✓。
+/// 浮层与模型选择器同一写法（layer 圆角 + 浮层阴影）；点外面、按 Esc 关闭，不铺透明罩
+function SortMenu({
+  value,
+  onChange,
+}: {
+  value: ProjectSort;
+  onChange: (sort: ProjectSort) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      button.current?.focus();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && wrap.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, [open]);
+  const current = PROJECT_SORTS.find((s) => s.id === value) ?? PROJECT_SORTS[0];
+  return (
+    <span ref={wrap} className="sidebar__sort">
+      <button
+        ref={button}
+        type="button"
+        className="sidebar__sort-button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {current.label} ▾
+      </button>
+      {open && (
+        <div className="sidebar__sort-menu" role="menu" aria-label="项目排序">
+          {PROJECT_SORTS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={s.id === value}
+              className="sidebar__sort-item"
+              onClick={() => {
+                onChange(s.id);
+                setOpen(false);
+              }}
+            >
+              <span className="sidebar__sort-check">
+                {s.id === value && <IconCheck size={12} />}
+              </span>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
 }
 
 /// 侧栏里手动添加的项目才有移除键：16px ×，行内右端

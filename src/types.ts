@@ -82,6 +82,16 @@ export interface Overview {
   sources: Source[];
 }
 
+/// 侧栏排序用的项目时间（core `activity::ProjectTimes`），毫秒时间戳；取不到为 null
+export interface ProjectTimes {
+  path: string;
+  /// 最近一次有 agent 在项目里干活：Claude Code 会话记录与项目里各 agent 目录取较晚的，
+  /// 都没有时用项目文件夹的修改时间
+  lastActive: number | null;
+  /// 项目文件夹的创建时间；取不到时用加入 Sophia 的时间，再没有用文件夹修改时间
+  created: number | null;
+}
+
 /// 一个格：本体位置 id + skill + 目标 id。目标 id 决定域；格不必已出现在表里（导入弹层用）
 export interface CellRef {
   sourceId: string;

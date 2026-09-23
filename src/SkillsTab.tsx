@@ -772,7 +772,7 @@ export default function SkillsTab({
     return (
       <Empty
         kind="noAgentDirs"
-        description="这个位置下还没有 agent 的 skill 目录"
+        description="这个项目下还没有 agent 的 skill 目录"
         primary={{ label: "添加 skill", onClick: () => setImportOpen(true) }}
         art="folders"
       />
