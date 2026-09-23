@@ -24,7 +24,17 @@ import {
   type McpDomain,
   type McpDomainRow,
 } from "./mcpView";
-import { AddButton, CELL_TOAST_DWELL_MS, Confirm, Empty, Tag, Toast, TOAST_DWELL_MS } from "./ui";
+import {
+  AddButton,
+  CELL_TOAST_DWELL_MS,
+  Confirm,
+  Empty,
+  Tag,
+  Toast,
+  TOAST_DWELL_MS,
+  Tooltip,
+} from "./ui";
+import { McpDiffPanel, type McpDiffState } from "./McpDiffPanel";
 import type { ConfirmAnchor } from "./ui";
 import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
 import { mcpOwnTip } from "./cellTip";
@@ -48,7 +58,8 @@ import "./McpTab.css";
 ///    所以选择条上的键只有 `+N`；已经都有了的键禁用，不写 `−N`
 /// 2. **实心不是一条链接，是一份独立副本**——写入后 core 留快照：写完没人改过就能撤销，
 ///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底
-/// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（点状下划线，提示框给差异字段名）
+/// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（文字链，提示框给差异字段名）；
+///    点它这一行就地展开不同的字段，再点收起
 /// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格不确认
 
 export interface McpTabProps {
@@ -156,6 +167,8 @@ export default function McpTab({
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
   const diffAsked = useRef<Set<string>>(new Set());
+  // 点开了 `2 份不一样` 的那几行（服务名 → 比对结果）：就地展开字段级差异，再点收起
+  const [openDiffs, setOpenDiffs] = useState<Map<string, McpDiffState>>(new Map());
   const focusedRef = useRef<string | undefined>(undefined);
   // 最近一次可撤销的写入（⌘Z 与提示条「撤销」走同一个）
   const undoRef = useRef<(() => void) | null>(null);
@@ -272,6 +285,26 @@ export default function McpTab({
         ),
       )
       .catch(() => setDiffs((prev) => new Map(prev).set(name, null)));
+  };
+
+  /// 点 `2 份不一样`：展开就懒取一次字段级差异，已展开就收起
+  const toggleDiff = (name: string, locationIds: string[]) => {
+    if (openDiffs.has(name)) {
+      setOpenDiffs((prev) => {
+        const next = new Map(prev);
+        next.delete(name);
+        return next;
+      });
+      return;
+    }
+    setOpenDiffs((prev) => new Map(prev).set(name, "loading"));
+    // 取回来时这一行已经收起了就不再展开
+    const settle = (value: McpDiffState) =>
+      setOpenDiffs((prev) => (prev.has(name) ? new Map(prev).set(name, value) : prev));
+    api.mcpFieldDiff(name, locationIds).then(
+      (diff) => settle(diff),
+      (e) => settle(new Error(String(e))),
+    );
   };
 
   /// 提示框：列出不同的字段名；没加载完或读不到时用扫描里认得出的（url），都没有就写「配置不一样」
@@ -684,22 +717,42 @@ export default function McpTab({
         onReveal: () => void reveal(originPath),
       },
       cells,
-      // 差异是行级事实，不进格：点状下划线，提示框给差异字段名（字段级原值 T3 在待处理页展开）
+      // 差异是行级事实，不进格：文字链，提示框给差异字段名；点它这一行就地展开字段级差异
       mark:
         differing.length > 0 ? (
           <span
             onMouseEnter={() => loadDiff(row.name, differing)}
             onFocus={() => loadDiff(row.name, differing)}
           >
-            <Tag tone="weak" tip={diffTip(row.name, fields)}>
-              {`${differing.length} 份不一样`}
-            </Tag>
+            <Tooltip content={diffTip(row.name, fields)}>
+              <button
+                type="button"
+                className="ss-btn ss-btn--link mcp-difftoggle"
+                aria-expanded={openDiffs.has(row.name)}
+                onClick={() => toggleDiff(row.name, differing)}
+              >
+                {`${differing.length} 份不一样`}
+              </button>
+            </Tooltip>
           </span>
         ) : unsupportedAt.length > 0 ? (
           <Tag tone="weak" tip={`${unsupportedAt.join("、")} 不支持 ${row.name} 的接入方式`}>
             {`${unsupportedAt.join("、")} 不支持`}
           </Tag>
         ) : undefined,
+      panel: (() => {
+        const diff = differing.length > 0 ? openDiffs.get(row.name) : undefined;
+        if (diff === undefined) return undefined;
+        const revealPath = locationOf(differing[0])?.path;
+        return (
+          <McpDiffPanel
+            diff={diff}
+            labelOf={labelOf}
+            revealPath={revealPath}
+            onReveal={(path) => void reveal(path)}
+          />
+        );
+      })(),
       transport: transports.join(" / "),
       selectDisabledReason: blockedOf(page, row),
     };

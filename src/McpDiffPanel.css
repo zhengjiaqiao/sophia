@@ -1,0 +1,81 @@
+/* MCP「N 份不一样」就地展开的字段级差异（McpDiffPanel）。色值一律 var(--…)，唯一来源是 tokens.css */
+@import "./tokens.css";
+
+.mcp-diff {
+  padding-top: var(--space-sm);
+}
+
+.mcp-diff__grid {
+  display: grid;
+  column-gap: var(--space-md);
+  align-items: center;
+}
+
+.mcp-diff__row {
+  display: contents;
+}
+
+.mcp-diff__place {
+  height: 22px;
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.mcp-diff__field,
+.mcp-diff__value {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  white-space: nowrap;
+}
+
+.mcp-diff__field {
+  font-family: var(--font-mono);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.mcp-diff__value {
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  color: var(--ink);
+}
+
+.mcp-diff__mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mcp-diff__mono b {
+  font-weight: 600;
+}
+
+/* 令牌与密钥：可悬停不可点 → 点状下划线，提示框「出于安全不显示原值」 */
+.mcp-diff__secret {
+  text-decoration: underline dotted var(--ink-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.mcp-diff__absent {
+  color: var(--ink-faint);
+}
+
+.mcp-diff__note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.mcp-diff__foot {
+  margin-top: var(--space-xs);
+}

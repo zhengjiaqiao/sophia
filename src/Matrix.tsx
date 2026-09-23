@@ -94,6 +94,9 @@ export interface MatrixRowView {
   extra?: ReactNode;
   /// 点名字就地展开的详情（描述 / 路径 + 打开 ↗ / 改于 …）；不给就不能展开
   detail?: ReactNode;
+  /// 调用方控制开合的就地展开区（MCP 点 `2 份不一样` 展开的字段差异）：给了就出在这一行下面，
+  /// 从名字左沿铺到最后一列；不给就收着
+  panel?: ReactNode;
   /// MCP 的 `传输` 列内容
   transport?: ReactNode;
   /// 非空＝这一行勾不动，值是原因
@@ -1104,6 +1107,13 @@ export default function Matrix(props: MatrixProps) {
               style={{ gridColumn: `2 / span ${hasTransport ? 3 : 2}` }}
             >
               {row.detail}
+            </div>
+          </div>
+        ) : null}
+        {row.panel ? (
+          <div className="mx-grid mx-detail" style={gridStyle}>
+            <div className="mx-detail__body" style={{ gridColumn: "2 / -1" }}>
+              {row.panel}
             </div>
           </div>
         ) : null}

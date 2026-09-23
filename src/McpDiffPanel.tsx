@@ -1,0 +1,142 @@
+import type { McpDiff, McpFieldValue } from "./types.ts";
+import { Button, Spinner, Tooltip } from "./ui/index.ts";
+import "./McpDiffPanel.css";
+
+/// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：主视图该服务行就地展开。
+///
+/// - 只列**不同的字段**：字段名 ｜ 位置 A 的值 ｜ 位置 B 的值，三列对齐；值用等宽，不同的那一段加粗
+///   （不用反色，反色已是「刚变化」）
+/// - headers、env 里的令牌与密钥不显示原值，只写「不同 · 末 4 位」，悬停「出于安全不显示原值」
+/// - 认证头运行时才生成的，如实说比不了，不假装比过
+/// - `在访达中显示 ↗` 是展开区末尾的次要文字链
+///
+/// 不碰 api：比对结果由调用方懒取（`api.mcpFieldDiff`）后传进来。
+export type McpDiffState = McpDiff | "loading" | Error;
+
+export interface McpDiffPanelProps {
+  diff: McpDiffState;
+  /// 位置 id → 给人看的位置名
+  labelOf: (locationId: string) => string;
+  /// 末尾 `在访达中显示 ↗` 要显示的配置文件；不给就不出这条链
+  revealPath?: string;
+  onReveal: (path: string) => void;
+}
+
+/// 几个值共同的前缀与后缀长度（不重叠）：不同的那一段加粗
+export function commonEnds(texts: string[]): [number, number] {
+  if (texts.length < 2) return [0, 0];
+  const shortest = Math.min(...texts.map((t) => t.length));
+  let pre = 0;
+  while (pre < shortest && texts.every((t) => t[pre] === texts[0][pre])) pre += 1;
+  let suf = 0;
+  while (
+    suf < shortest - pre &&
+    texts.every((t) => t[t.length - 1 - suf] === texts[0][texts[0].length - 1 - suf])
+  )
+    suf += 1;
+  return [pre, suf];
+}
+
+function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, number] }) {
+  if (value.kind === "absent") {
+    return <span className="mcp-diff__absent">没有这一项</span>;
+  }
+  if (value.kind === "secret") {
+    return (
+      <Tooltip content="出于安全不显示原值" focusable>
+        <span className="mcp-diff__secret">
+          不同
+          {value.last4 !== null ? (
+            <>
+              {" · 末 4 位 "}
+              <span className="mcp-diff__mono">…{value.last4}</span>
+            </>
+          ) : null}
+        </span>
+      </Tooltip>
+    );
+  }
+  const [pre, suf] = ends;
+  const text = value.text;
+  const mid = text.slice(pre, text.length - suf);
+  return (
+    <span className="mcp-diff__mono">
+      {text.slice(0, pre)}
+      {mid ? <b>{mid}</b> : null}
+      {text.slice(text.length - suf)}
+    </span>
+  );
+}
+
+export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPanelProps) {
+  const revealLink = revealPath ? (
+    <div className="mcp-diff__foot">
+      <Button variant="external" onClick={() => onReveal(revealPath)}>
+        在访达中显示
+      </Button>
+    </div>
+  ) : null;
+  if (diff === "loading") {
+    return (
+      <div className="mcp-diff">
+        <div className="mcp-diff__note">
+          <Spinner size={14} label="正在比对" />
+          正在比对
+        </div>
+      </div>
+    );
+  }
+  if (diff instanceof Error) {
+    return (
+      <div className="mcp-diff">
+        <div className="mcp-diff__note">没比成：{diff.message}</div>
+        {revealLink}
+      </div>
+    );
+  }
+  const columns = `max-content repeat(${diff.locationIds.length}, max-content)`;
+  return (
+    <div className="mcp-diff">
+      {diff.fields.length > 0 ? (
+        <div className="mcp-diff__grid" style={{ gridTemplateColumns: columns }}>
+          <span />
+          {diff.locationIds.map((id) => (
+            <span key={id} className="mcp-diff__place">
+              {labelOf(id)}
+            </span>
+          ))}
+          {diff.fields.map((field) => {
+            const plain = field.values.flatMap((v) => (v.kind === "plain" ? [v.text] : []));
+            const ends =
+              plain.length === field.values.length
+                ? commonEnds(plain)
+                : ([0, 0] as [number, number]);
+            return (
+              <div key={field.field} className="mcp-diff__row">
+                <span className="mcp-diff__field">{field.field}</span>
+                {field.values.map((value, i) => (
+                  <span key={i} className="mcp-diff__value">
+                    <FieldValue value={value} ends={ends} />
+                  </span>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : diff.dynamicAuth ? null : (
+        <div className="mcp-diff__note">
+          连接字段逐项看都一样，不一样的是只有某个 agent 认得的写法
+        </div>
+      )}
+      {diff.dynamicAuth ? (
+        <div className="mcp-diff__note">认证头要到运行时才生成，没法逐字比对</div>
+      ) : null}
+      {diff.unreadable.length > 0 ? (
+        <div className="mcp-diff__note">
+          {diff.unreadable.map(labelOf).join("、")} 这次读不出来，没法比
+        </div>
+      ) : null}
+      {revealLink}
+    </div>
+  );
+}

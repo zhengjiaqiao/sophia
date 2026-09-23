@@ -21,3 +21,8 @@
   font-size: var(--size-caption);
   line-height: var(--leading-caption);
 }
+
+/* 服务名后的 `2 份不一样`：可点的文字链（点它这一行就地展开差异），与名字后的标注同为 12 */
+.mcp-difftoggle {
+  font-size: var(--size-micro);
+}
