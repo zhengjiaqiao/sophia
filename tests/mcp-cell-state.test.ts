@@ -56,7 +56,7 @@ test("missing：空心，可点，不自带成功文案", () => {
   assert.equal(view.reason, undefined);
 });
 
-test("invalid：整份文件读不出来，画斜杠环，不写，进待处理栏", () => {
+test("invalid：整份文件读不出来，画斜杠环，不写，算要拿主意的问题", () => {
   assert.deepEqual(viewOf("invalid", ctx), {
     dot: "readOnly",
     clickable: false,
@@ -65,7 +65,7 @@ test("invalid：整份文件读不出来，画斜杠环，不写，进待处理�
   });
 });
 
-test("unsupported：搬过去就不是原来那个了，画受阻记号（与 skill 同名被挡同形），不写，也不进待处理栏", () => {
+test("unsupported：搬过去就不是原来那个了，画受阻记号（与 skill 同名被挡同形），不写，也不算要拿主意的问题", () => {
   const view = viewOf("unsupported", ctx);
   assert.deepEqual(view, {
     dot: "blocked",

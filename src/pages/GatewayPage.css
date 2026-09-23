@@ -83,7 +83,7 @@
   border-radius: var(--radius-pill);
 }
 
-/* 从待处理页跳回定位到这一家：surface 带亮 → 灭 → 亮 → 灭，各 240ms（不用反色，黑只有两义） */
+/* 新问题提示「查看」定位到这一家：surface 带亮 → 灭 → 亮 → 灭，各 240ms（不用反色，黑只有两义） */
 .gw-panel__chipwrap.is-jump {
   animation: gw-jump 960ms var(--ease-mech);
 }

@@ -187,7 +187,7 @@ export interface MatrixProps {
   cellToast?: { id: number; rowKey: string; node: ReactNode } | null;
   /// 无关位置的全局事（自动规则）：右下，右沿对齐面板右沿
   globalToast?: ReactNode;
-  /// 从待处理页跳回来：滚到这几行（或这一列的列头）并闪一下（⑦）。`nonce` 变了才重做
+  /// 新问题提示「查看」跳过来：滚到这几行（或这一列的列头）并闪两下（⑦）。`nonce` 变了才重做
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 

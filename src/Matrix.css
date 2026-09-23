@@ -676,7 +676,7 @@
   transition: none;
 }
 
-/* 从待处理页跳回：surface 行带闪两次（不用反色——实心黑只有「机器在说话 / 已按下」两个意思）。
+/* 新问题提示「查看」跳过来：surface 行带闪两次（不用反色——实心黑只有「机器在说话 / 已按下」两个意思）。
    整列定位时列头同样闪两次 */
 .mx-jump {
   animation: mx-jump calc(var(--motion-fast) * 4) var(--ease-mech);

@@ -1,4 +1,4 @@
-/// 格状态 → 圆点 + 点击行为 + 文案。矩阵、导入页、待处理栏三处共用这一份映射。
+/// 格状态 → 圆点 + 点击行为 + 文案。矩阵、导入页与新问题的一次性提示共用这一份映射。
 ///
 /// 存在的理由：后端 `CellState` 有八种，`propose_links` 对四种异常态都返回空动作数组，
 /// 凭动作数组为空就统一说一句话，对它们全是错的。所以先判状态，再决定画什么、说什么。
@@ -9,7 +9,7 @@ import type { Cell, IssueKind, Target } from "./types";
 
 /// 格里的记号。前三种是常驻状态；`none` 是「这一行在这一列没有格」；
 /// 后四种是异常，画在同一个环骨架上（`foreign` 与 `duplicate` 都画成 `blocked`：
-/// 对用户都是「同名的挡在那儿」，差别在点击时说的那句话与进不进待处理）
+/// 对用户都是「同名的挡在那儿」，差别在点击时说的那句话与算不算要拿主意的问题）
 export type Dot =
   "own" | "linked" | "missing" | "none" | "broken" | "readOnly" | "blocked" | "wholeLinked";
 
@@ -21,7 +21,7 @@ export interface CellView {
   /// 为什么不能点。成功句不在这里——按 §4.1，一次批量操作只汇总成一句，
   /// 「每个格自己的成功文案」从构造上就是错的，由调用方在操作结果处聚合（§8.1）
   reason?: string;
-  /// 非空表示这条要进待处理栏
+  /// 非空表示这是要用户拿主意的问题（就地常显，新出现时提示一次）
   issue?: IssueKind;
 }
 
@@ -57,7 +57,7 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
         issue: "duplicateSource",
       };
     case "duplicate":
-      // 那里是用户自己放的真实文件或目录，不进待处理栏，只在点击时说一次
+      // 那里是用户自己放的真实文件或目录，不算要拿主意的问题，只在点击时说一次
       return {
         dot: "blocked",
         clickable: false,

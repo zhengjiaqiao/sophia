@@ -1,4 +1,4 @@
-//! 待处理页「看两边差在哪」：字段级差异只读、只列不同、凭据不出 core
+//! MCP「N 份不一样」就地展开：字段级差异只读、只列不同、凭据不出 core
 use serde_json::json;
 use std::fs;
 use std::path::Path;

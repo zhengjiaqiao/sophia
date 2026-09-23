@@ -45,7 +45,7 @@ test("missing：空心，可点，不自带成功文案", () => {
   assert.equal(v.reason, undefined);
 });
 
-test("broken：格里画虚线环，不可点，进待处理栏", () => {
+test("broken：格里画虚线环，不可点，算要拿主意的问题", () => {
   assert.deepEqual(view("broken"), {
     dot: "broken",
     clickable: false,
@@ -54,7 +54,7 @@ test("broken：格里画虚线环，不可点，进待处理栏", () => {
   });
 });
 
-test("foreign：说出同名的那条指向哪个本体，进待处理栏", () => {
+test("foreign：说出同名的那条指向哪个本体，算要拿主意的问题", () => {
   assert.deepEqual(view("foreign", target(), "/Users/me/other/obsidian-cli"), {
     dot: "blocked",
     clickable: false,
@@ -73,7 +73,7 @@ test("foreign：pointsTo 为空时退回含糊的说法，不说半句话", () =
   });
 });
 
-test("duplicate：是用户自己放的东西，只在点击时说一次，不进待处理栏", () => {
+test("duplicate：是用户自己放的东西，只在点击时说一次，不算要拿主意的问题", () => {
   const v = view("duplicate");
   assert.deepEqual(v, {
     dot: "blocked",

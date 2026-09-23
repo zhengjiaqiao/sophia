@@ -32,7 +32,7 @@ import "./GatewayPage.css";
 
 /// 网关配置二级页 `Codex 的网关`（DESIGN「网关配置是二级页」，画板 v84 Gateway）。
 ///
-/// 与设置 / 添加 / 待处理同一「← 标题」骨架；模型页的 `配置网关`、模型下拉里的 `管理网关 ›` /
+/// 与设置 / 添加同一「← 标题」骨架；模型页的 `配置网关`、模型下拉里的 `管理网关 ›` /
 /// `还没有网关 · + 网关 ›` 都进这一页。转场：从右侧推入、返回滑回，200ms 机械缓动，
 /// reduced-motion 即时（⑦ 动效解释空间关系）。页头标题后按状态出现 `重启生效`（与模型页同组件）。
 ///
@@ -142,7 +142,7 @@ export interface GatewayBodyProps {
   askDiscard: boolean;
   /// 丢弃或保存完，真正离开
   onCollapse: () => void;
-  /// 从待处理页跳回来定位的那一家：它的分段片用 surface 带闪两下
+  /// 新问题提示「查看」定位的那一家：它的分段片用 surface 带闪两下
   flashProviderId?: string | null;
 }
 

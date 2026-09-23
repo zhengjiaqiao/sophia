@@ -1,4 +1,4 @@
-/// MCP 格状态 → 圆点 + 点击行为 + 文案。矩阵、导入页、待处理栏三处共用这一份映射。
+/// MCP 格状态 → 圆点 + 点击行为 + 文案。矩阵、导入页与新问题的一次性提示共用这一份映射。
 ///
 /// 契约与 `cellState.ts` 完全一致（组件规范 §8.1）：`reason` **只在不可点时有值**，
 /// 装的是「为什么不能点」；成功句由调用方在操作结果处聚合，不由格提供——按 §4.1
@@ -27,7 +27,7 @@ export interface McpCellView {
   clickable: boolean;
   /// 给提示条用的**完整句子**。**只在 `clickable === false` 时有值**
   reason?: string;
-  /// 非空表示这条要进待处理栏
+  /// 非空表示这是要用户拿主意的问题（就地常显，新出现时提示一次）
   issue?: McpIssueKind;
 }
 
@@ -98,7 +98,7 @@ export function differentCopiesTitle(locations: string[]): string {
   return `${locations.join(" 和 ")} 各有一份，连的地址不一样`;
 }
 
-/// 待处理栏里那一条。动作只有「看两边差在哪」和「忽略」——
+/// 两份不一样的整句（行视角）。只标差异、不给覆盖与合并——
 /// `prepare` 对目标已有的同名条目一律跳过，覆盖与合并是新的破坏性能力，这一期没有
 export function differentCopiesMessage(service: string, locations: string[]): string {
   return `${locations.join(" 和 ")} 各有一份 ${service}，连的地址不一样——两份都没动`;

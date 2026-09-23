@@ -69,7 +69,7 @@ impl IssueKind {
 ///
 /// key 是不透明字符串，由前端算好传进来，core 只负责存。两种来源、两种格式，互不相撞：
 /// - skill / MCP：`issue_key` 的公式，`<IssueKind>` + `\u{1f}` + 涉及位置（规范化、排序）逐个拼接，
-///   如 `duplicateSource\u{1f}/a/skills/x\u{1f}/b/skills/x`。与前端 `pendingIssues.ts › issueKey`
+///   如 `duplicateSource\u{1f}/a/skills/x\u{1f}/b/skills/x`。与前端 `issues.ts › issueKey`
 ///   两边钉死（`key_format_is_pinned_for_the_frontend` / `tests/issue-key-contract.test.ts`）
 /// - 模型：以 `MODEL_KEY_PREFIX`（`model\u{1f}`）开头，后接类别与能区分状况的细节，段间同样用 `\u{1f}`：
 ///   - `model\u{1f}takeover\u{1f}<接管方的 baseUrl>`
@@ -663,7 +663,7 @@ mod tests {
         assert!(Store::new(dir).load_projects().is_err());
     }
 
-    /// 跨语言契约：前端 `src/pages/pendingIssues.ts` 的 `issueKey` 必须算出同一个串。
+    /// 跨语言契约：前端 `src/issues.ts` 的 `issueKey` 必须算出同一个串。
     /// 两边各钉一条同输入同期望的测试——任一边改了格式，另一边立刻红。
     /// 改这条时必须同步改 `tests/issue-key-contract.test.ts` 里的同名期望值。
     #[test]

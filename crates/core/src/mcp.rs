@@ -752,7 +752,7 @@ pub struct McpFieldDiff {
     pub values: Vec<McpFieldValue>,
 }
 
-/// 同名服务在几个位置上的字段级差异（待处理页「看两边差在哪」）。只读，不改任何文件
+/// 同名服务在几个位置上的字段级差异（主视图该行「N 份不一样」就地展开）。只读，不改任何文件
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpDiff {

@@ -457,9 +457,9 @@ export interface ModelsTabProps {
   onError: (message: string) => void;
   busy: boolean;
   onBusy: (busy: boolean) => void;
-  /// 每次拿到新状态都报给壳：顶栏收件箱的「模型」段要数它
+  /// 每次拿到新状态都报给壳：新问题的一次性提示要认模型类的问题
   onGatewayState?: (state: GatewayState) => void;
-  /// 待处理页「网关连不上」跳回：进网关二级页、选中这一家、它的分段片闪两下；处理完回调 onFocused，
+  /// 新问题提示「查看」网关连不上：进网关二级页、选中这一家、它的分段片闪两下；处理完回调 onFocused，
   /// 壳在那里清回 undefined（与 SkillsTab 的 focusKey 同一模式）
   focusProviderId?: string;
   onFocused?: () => void;
@@ -695,7 +695,7 @@ export default function ModelsTab({
   const openPicker = (tool: ModelsTool) => setPicker(tool.id);
   const closePicker = () => setPicker(null);
 
-  /// 进网关二级页（`配置网关`、下拉里的 `管理网关 ›` / `+ 网关 ›`、待处理页跳回）
+  /// 进网关二级页（`配置网关`、下拉里的 `管理网关 ›` / `+ 网关 ›`、新问题提示的「查看」）
   const openGateway = (initial: GatewaySelection | null) => {
     setPicker(null);
     setGateway({ initial, leaving: false });
@@ -712,7 +712,7 @@ export default function ModelsTab({
     return () => clearTimeout(timer);
   }, [gatewayLeaving]);
 
-  // 待处理页「网关连不上」跳回：状态读回来、且这一家还在，就进网关页选中它、闪它的分段片
+  // 新问题提示「查看」网关连不上：状态读回来、且这一家还在，就进网关页选中它、闪它的分段片
   useEffect(() => {
     if (focusProviderId === undefined || state === null) return;
     if (state.providers.some((p) => p.id === focusProviderId)) {

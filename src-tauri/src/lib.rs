@@ -287,7 +287,7 @@ fn scan_mcp(
     Ok(overview)
 }
 
-/// 待处理页「看两边差在哪」：同名服务在几个位置上哪些字段不一样。只读；凭据在 core 里就脱敏了
+/// MCP「N 份不一样」就地展开：同名服务在几个位置上哪些字段不一样。只读；凭据在 core 里就脱敏了
 #[tauri::command]
 fn mcp_field_diff(
     name: String,
