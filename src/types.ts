@@ -168,13 +168,14 @@ export interface SyncReport {
   entries: ReportEntry[];
 }
 
-/// 一条自动同步规则：该本体位置下的全部 skill（排除名单除外）持续补齐到这些目标
+/// 一条自动同步规则：该本体位置下的全部 skill（各目标的排除名单除外）持续补齐到这些目标
 export interface AutoLink {
   /// 归一化后的本体位置路径，与 Source.id / Source.path 可直接比较
   source: string;
   targets: string[];
-  /// 手动清除过、不再自动链接的 skill
-  excluded: string[];
+  /// 按目标 id 记的排除名单：在这个目标上手动清除过、不再自动链接的 skill。
+  /// 为空时 core 省略这个字段
+  targetExcluded?: Record<string, string[]>;
   /// 建规则那一刻本体位置里已有的 skill，规则不补建它们（只管以后新出现的）。
   /// 由 core 拍快照，前端不传；升级前的旧规则在首次扫描迁移前为 null
   baseline?: string[] | null;

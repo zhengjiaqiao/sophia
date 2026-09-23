@@ -372,7 +372,12 @@ mod tests {
             auto_links: vec![AutoLink {
                 source: PathBuf::from("/a/skills"),
                 targets: vec!["claude-code".into()],
-                excluded: ["x".to_string()].into_iter().collect(),
+                target_excluded: [(
+                    "claude-code".to_string(),
+                    ["x".to_string()].into_iter().collect(),
+                )]
+                .into_iter()
+                .collect(),
                 baseline: Some(["y".to_string()].into_iter().collect()),
                 target_baselines: [("codex".to_string(), ["z".to_string()].into_iter().collect())]
                     .into_iter()
@@ -527,6 +532,92 @@ mod tests {
         let reloaded = s.load_settings().unwrap();
         assert_eq!(reloaded.mcp_auto_imports[0].baseline, names(&["docs"]));
         assert_eq!(reloaded.auto_links[0].baseline, names(&["a", "b"]));
+    }
+
+    /// 升级前的整条 `excluded`：读进来按「对当时的所有目标都生效」拆到各目标，展开结果与
+    /// 升级前一样；写回只有新结构，再读回不变
+    #[test]
+    fn legacy_rule_wide_excluded_migrates_per_target_and_round_trips() {
+        use crate::models::TargetScope;
+        let t = TempTree::new();
+        let dir = t.root().join("data/SymSync");
+        let store_dir = t.dir("store");
+        t.dir("store/a");
+        let claude = t.dir("home/.claude/skills");
+        let proj = t.dir("proj");
+        let proj_codex = t.dir("proj/.codex/skills");
+        let global = Target {
+            id: "claude-code".into(),
+            label: "claude-code".into(),
+            path: claude.clone(),
+            scope: TargetScope::Global {
+                harness_id: "claude-code".into(),
+            },
+            exists: true,
+            linked_whole_to: None,
+        };
+        let project = Target {
+            id: format!("project:{}::codex", proj.display()),
+            label: "codex".into(),
+            path: proj_codex.clone(),
+            scope: TargetScope::Project {
+                project: proj.clone(),
+                harness_id: "codex".into(),
+                project_label: None,
+            },
+            exists: true,
+            linked_whole_to: None,
+        };
+        let targets = vec![global.clone(), project.clone()];
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = serde_json::json!({
+            "autoLinks": [{
+                "source": store_dir,
+                "targets": [global.id, project.id],
+                "excluded": ["x"],
+                "baseline": ["a"]
+            }]
+        });
+        std::fs::write(dir.join("settings.json"), old.to_string()).unwrap();
+        // 建规则之后出现的 x（被排除）与 y
+        t.dir("store/x");
+        t.dir("store/y");
+
+        let s = Store::new(dir.clone());
+        let loaded = s.load_settings().unwrap();
+        let rule = &loaded.auto_links[0];
+        assert!(rule.is_excluded(&global.id, "x"));
+        assert!(rule.is_excluded(&project.id, "x"));
+        // 行为不变：x 两处都不补，y 两处都补
+        let env = crate::discovery::Env {
+            home: t.dir("home"),
+            vars: Default::default(),
+        };
+        let sources = crate::discovery::sources(&env, &[], &[], std::slice::from_ref(&store_dir));
+        let cells = crate::skills::auto_link_cells(&sources, &targets, &loaded.auto_links);
+        let mut built: Vec<(String, PathBuf)> =
+            crate::skills::propose_links(&sources, &targets, &cells)
+                .into_iter()
+                .map(|a| (a.item_name, a.target))
+                .collect();
+        built.sort();
+        assert_eq!(
+            built,
+            vec![("y".to_string(), claude), ("y".to_string(), proj_codex)]
+        );
+
+        // 写回用新结构：没有 excluded，只有按目标的 targetExcluded
+        s.save_settings(&loaded).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        let written = &raw["autoLinks"][0];
+        assert!(written.get("excluded").is_none());
+        assert_eq!(
+            written["targetExcluded"],
+            serde_json::json!({ global.id.clone(): ["x"], project.id.clone(): ["x"] })
+        );
+        assert_eq!(s.load_settings().unwrap(), loaded);
     }
 
     #[test]

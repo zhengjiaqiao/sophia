@@ -83,11 +83,11 @@ export const api = {
   /// 只撤该规则的部分目标；目标去空则整条规则删除
   removeAutoLinkTargets: (source: string, targets: string[]) =>
     invoke<void>("remove_auto_link_targets", { source, targets }),
-  /// 该 skill 不再自动链接（手动清除过）
-  excludeAutoLink: (source: string, skill: string) =>
-    invoke<void>("exclude_auto_link", { source, skill }),
-  includeAutoLink: (source: string, skill: string) =>
-    invoke<void>("include_auto_link", { source, skill }),
+  /// 该 skill 不再自动链接到这个目标（在这一格手动清除过）；别的目标不受影响
+  excludeAutoLink: (source: string, target: string, skill: string) =>
+    invoke<void>("exclude_auto_link", { source, target, skill }),
+  includeAutoLink: (source: string, target: string, skill: string) =>
+    invoke<void>("include_auto_link", { source, target, skill }),
   listHarnesses: () => invoke<HarnessList>("list_harnesses"),
   setHarnessEnabled: (id: string, enabled: boolean) =>
     invoke<void>("set_harness_enabled", { id, enabled }),

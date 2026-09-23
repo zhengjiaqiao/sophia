@@ -208,30 +208,45 @@ export default function SkillsTab({
 
   // ===== 规则：排除 / 恢复 =====
 
-  /// 这批格里仍在某条自动同步规则范围内的 skill：关掉前必须先写排除，
+  /// 规则在这个目标上排除了这个 skill（排除名单按目标记，只管这一格）
+  const excludedAt = (r: AutoLink, target: string, skill: string) =>
+    r.targetExcluded?.[target]?.includes(skill) ?? false;
+  /// 这批格里仍在某条自动同步规则范围内的格：关掉前必须先写排除，
   /// 否则下一轮扫描立刻把链接补回来
   const toExclude = (cells: CellRef[]) => {
-    const out = new Map<string, { source: string; skill: string }>();
+    const out = new Map<string, { source: string; target: string; skill: string }>();
     for (const c of cells) {
       const covered = autoLinks.some(
         (r) =>
           r.source === c.sourceId &&
-          !r.excluded.includes(c.skill) &&
+          !excludedAt(r, c.targetId, c.skill) &&
           r.targets.includes(c.targetId),
       );
-      if (covered) out.set(`${c.sourceId}|${c.skill}`, { source: c.sourceId, skill: c.skill });
+      if (covered)
+        out.set(`${c.sourceId}|${c.targetId}|${c.skill}`, {
+          source: c.sourceId,
+          target: c.targetId,
+          skill: c.skill,
+        });
     }
     return [...out.values()];
   };
-  /// 这批格里被规则覆盖、且在排除名单上的 skill：点开时放回规则里
+  /// 这批格里被规则覆盖、且在这个目标的排除名单上的：点开时放回规则里
   const toInclude = (cells: CellRef[]) => {
-    const out = new Map<string, { source: string; skill: string }>();
+    const out = new Map<string, { source: string; target: string; skill: string }>();
     for (const c of cells) {
       const covered = autoLinks.some(
         (r) =>
-          r.source === c.sourceId && r.excluded.includes(c.skill) && r.targets.includes(c.targetId),
+          r.source === c.sourceId &&
+          excludedAt(r, c.targetId, c.skill) &&
+          r.targets.includes(c.targetId),
       );
-      if (covered) out.set(`${c.sourceId}|${c.skill}`, { source: c.sourceId, skill: c.skill });
+      if (covered)
+        out.set(`${c.sourceId}|${c.targetId}|${c.skill}`, {
+          source: c.sourceId,
+          target: c.targetId,
+          skill: c.skill,
+        });
     }
     return [...out.values()];
   };
@@ -252,8 +267,8 @@ export default function SkillsTab({
   ): Promise<{ done: CellRef[]; failed: { ref: CellRef; reason: string }[] }> => {
     const actions = op === "link" ? await api.proposeLinks(cells) : await api.proposeUnlinks(cells);
     if (op === "link")
-      for (const r of toInclude(cells)) await api.includeAutoLink(r.source, r.skill);
-    else for (const r of toExclude(cells)) await api.excludeAutoLink(r.source, r.skill);
+      for (const r of toInclude(cells)) await api.includeAutoLink(r.source, r.target, r.skill);
+    else for (const r of toExclude(cells)) await api.excludeAutoLink(r.source, r.target, r.skill);
     const report = actions.length === 0 ? { entries: [] } : await api.applyAll(actions, false);
     const byPath = new Map(report.entries.map((e) => [e.action.targetPath, e]));
     const done: CellRef[] = [];

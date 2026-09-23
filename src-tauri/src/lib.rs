@@ -904,22 +904,29 @@ fn remove_auto_link_targets(
     })
 }
 
+/// 只在这个目标上排除：别的位置照常自动链接
 #[tauri::command]
 fn exclude_auto_link(
     source: PathBuf,
+    target: String,
     skill: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    update_auto_links(&state, |rules| skills::exclude(rules, &source, &skill))
+    update_auto_links(&state, |rules| {
+        skills::exclude(rules, &source, &target, &skill)
+    })
 }
 
 #[tauri::command]
 fn include_auto_link(
     source: PathBuf,
+    target: String,
     skill: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    update_auto_links(&state, |rules| skills::include(rules, &source, &skill))
+    update_auto_links(&state, |rules| {
+        skills::include(rules, &source, &target, &skill)
+    })
 }
 
 fn update_auto_links(
