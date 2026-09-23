@@ -259,17 +259,14 @@ test("批量写入：格子同时变、不依次点亮；真的慢（> 500ms）�
   );
 });
 
-test("单格成功的例行一行：出在被点的那一行里，紧跟名字（有 ×2 跟在它后面），不重复名字，一次只一条", async () => {
+test("单格成功的例行一行：出在被点的那一行里，紧跟名字（有 ×2 跟在它后面），不重复名字，不带撤销，一次只一条", async () => {
   const { Toast } = await import("../src/ui/Toast.tsx");
   const { toastFor } = await import("../src/toastText.ts");
   const text = toastFor("link", {
     done: [{ name: "docx", agent: { id: "codex", name: "Codex" } }],
     omitNames: true,
   });
-  const node = createElement(Toast, {
-    ...text,
-    action: { label: "撤销", onClick: () => undefined },
-  });
+  const node = createElement(Toast, { ...text, dwellMs: 4000, fadeOut: true });
   // 没有就不占位
   assert.doesNotMatch(render(Matrix, base), /mx-celltoast/);
   const rows = [
@@ -286,8 +283,9 @@ test("单格成功的例行一行：出在被点的那一行里，紧跟名字�
   // 不是别的行：下一行（pdf）在它之后才开始
   assert.ok(at < html.indexOf('data-row="w|pdf"'));
   const line = html.slice(at, html.indexOf("</span></div>", at));
-  // `✓ 加到 [Codex] · 撤销`：造句复用 toastFor（省名字），组件复用例行档，不重复 skill 名
-  assert.match(line, /ss-toast--routine[\s\S]*?加到[\s\S]*?>撤销</);
+  // `✓ 加到 [Codex]`：造句复用 toastFor（省名字），组件复用例行档，不重复 skill 名；不带撤销
+  assert.match(line, /ss-toast--routine[\s\S]*?加到/);
+  assert.doesNotMatch(line, /撤销/);
   assert.doesNotMatch(line, /docx/);
   // 名字（或 ×2）后间距 12：行内 gap 8 + 4
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");

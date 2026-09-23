@@ -291,21 +291,15 @@ export default function SkillsTab({
 
   // ===== 单格：乐观更新 + 闪一下；成功出例行一行 =====
 
-  /// 单格成功：被点的那一行里紧跟名字出 `✓ 加到 [Codex] · 撤销`（行已说明对象，不重复名字），替换上一条
-  const showCellToast = (id: number, op: "link" | "unlink", ref: CellRef, undo?: () => void) => {
+  /// 单格成功：被点的那一行里紧跟名字出 `✓ 加到 [Codex]`（行已说明对象，不重复名字），替换上一条。
+  /// 不带撤销（DESIGN「单格操作出例行一行，不带撤销」：再点一下格子就恢复了，⌘Z 照旧可用）；
+  /// 约 4 秒淡出，悬停不停表
+  const showCellToast = (id: number, op: "link" | "unlink", ref: CellRef) => {
     const text = toastFor(op, { done: toastItems([ref]), omitNames: true });
     setCellToast({
       id,
       rowKey: skillRowKey(ref),
-      node: (
-        <Toast
-          {...text}
-          action={undo ? { label: "撤销", onClick: undo } : undefined}
-          dwellMs={CELL_TOAST_DWELL_MS}
-          holdOnHover
-          onDismiss={dismissCell}
-        />
-      ),
+      node: <Toast {...text} dwellMs={CELL_TOAST_DWELL_MS} fadeOut onDismiss={dismissCell} />,
     });
   };
 
@@ -356,14 +350,14 @@ export default function SkillsTab({
         } else if (!undoing) {
           const back = op === "link" ? "linked" : "missing";
           const id = ++cellToastSeq.current;
-          // 提示条里的「撤销」与 ⌘Z 是同一个函数；撤了这一行直接消失，不另出「已撤销」
+          // ⌘Z 撤最新这一次；撤了这一行直接消失，不另出「已撤销」
           const undo = () => {
             if (undoRef.current === undo) undoRef.current = null;
             setCellToast((prev) => (prev?.id === id ? null : prev));
             toggleCell(ref, back, true);
           };
           undoRef.current = undo;
-          showCellToast(id, op, ref, undo);
+          showCellToast(id, op, ref);
         }
         await onRefresh();
       } catch (e) {

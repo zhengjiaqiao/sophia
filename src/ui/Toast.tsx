@@ -34,7 +34,7 @@ export const TOAST_DWELL_MS: Record<ToastKind, number> = {
 /// （DESIGN「单格操作出例行一行」）
 export const CELL_TOAST_DWELL_MS = 4000;
 
-/// `holdOnHover` 到点时末尾这一段淡出，与 `--motion-fast` 同值
+/// `fadeOut` / `holdOnHover` 到点时末尾这一段淡出，与 `--motion-fast` 同值
 const LEAVE_MS = 120;
 
 export interface ToastAgent {
@@ -82,8 +82,10 @@ export interface ToastProps {
   onDismiss?: () => void;
   /// 停留时长（毫秒）；不给按 kind 取 `TOAST_DWELL_MS`。单格例行一行给 `CELL_TOAST_DWELL_MS`
   dwellMs?: number;
+  /// 只给 routine：到点末尾 120ms 淡出，悬停照常计时。skill 单格例行一行用（不带撤销）
+  fadeOut?: boolean;
   /// 只给 routine：鼠标停在这一行上（或键盘焦点在里面）时不计时，移开后重新计满；
-  /// 到点末尾 120ms 淡出。单格例行一行用，好让人点得到「撤销」
+  /// 到点末尾 120ms 淡出。MCP 单格写进用，好让人点得到「撤销」
   holdOnHover?: boolean;
   /// notice 右端的 ×。busy 期间照常可用
   onClose?: () => void;
@@ -135,6 +137,7 @@ export function Toast(props: ToastProps) {
     onDismiss,
     onClose,
     dwellMs,
+    fadeOut = false,
     holdOnHover = false,
   } = props;
   const dwell = dwellMs ?? TOAST_DWELL_MS[kind];
@@ -145,12 +148,13 @@ export function Toast(props: ToastProps) {
   useEffect(() => {
     if (!onDismiss || held) return;
     const timer = setTimeout(onDismiss, dwell);
-    const fade = holdOnHover ? setTimeout(() => setLeaving(true), dwell - LEAVE_MS) : undefined;
+    const fade =
+      holdOnHover || fadeOut ? setTimeout(() => setLeaving(true), dwell - LEAVE_MS) : undefined;
     return () => {
       clearTimeout(timer);
       clearTimeout(fade);
     };
-  }, [dwell, onDismiss, held, holdOnHover]);
+  }, [dwell, onDismiss, held, holdOnHover, fadeOut]);
 
   const hold = (on: boolean) => {
     setHeld(on);
