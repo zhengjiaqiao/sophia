@@ -600,10 +600,11 @@
 }
 
 /* 悬停光晕：点本身一点不变（点的颜色或填充一变就被读成已经点了），只在点的下层出一圈
-   直径 22 的圆形 surface 实底——和图标按钮悬停出 surface 底同一个惯例，说「能点」，不预告结果。
+   直径 22 的圆形实底，说「能点」，不预告结果。用 hairline 不用 surface：悬停格正落在
+   surface 的行带与列带交叉处，surface 光晕在那里看不出来（实测同为 242）。
    光晕是 svg 里先画的圆，溢出 viewBox，不占布局 */
 .ss-dot__halo {
-  fill: var(--surface);
+  fill: var(--hairline);
   opacity: 0;
   transition: opacity var(--motion-fast) var(--ease-mech);
 }

@@ -201,7 +201,7 @@ test("StateDot 可点：渲染成按钮；只有开 / 关两种出悬停光晕",
 
 // 悬停时改点本身的两代做法都已退役（真机反馈：点一变就被读成已经点了）——
 // 先是 ● 褪成空环，后是 40% 浓度（○ 环内填 40%、● 整颗淡到 40%）
-test("StateDot 悬停：点本身不变，只在下层出 surface 光晕", () => {
+test("StateDot 悬停：点本身不变，只在下层出 hairline 光晕（surface 行带上也看得出）", () => {
   // 未加上的环内不再藏一颗预览实心
   assert.doesNotMatch(render(StateDot, { dot: "missing", onClick: noop }), /ss-dot__preview/);
   assert.doesNotMatch(uiCss, /ss-dot__preview|data-preview/);
@@ -215,7 +215,7 @@ test("StateDot 悬停：点本身不变，只在下层出 surface 光晕", () =>
     assert.match(sel, /\.ss-dot__halo$/, sel);
     assert.match(body, /^\s*opacity:\s*1;\s*$/);
   }
-  assert.match(uiCss, /\.ss-dot__halo \{\s*fill: var\(--surface\);\s*opacity: 0;/);
+  assert.match(uiCss, /\.ss-dot__halo \{\s*fill: var\(--hairline\);\s*opacity: 0;/);
   assert.doesNotMatch(uiCss, /\.ss-dot__fill[^{]*\{\s*opacity:\s*0;/);
   // 闪烁帧（黑底）上不出光晕
   const matrixCss = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
