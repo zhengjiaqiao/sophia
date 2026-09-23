@@ -656,6 +656,18 @@
   border-bottom: 1px solid var(--hairline);
 }
 
+/* 工具行下一行的例行一行（加完来源）：来源片下 4，浮在列头左段上，随列头吸顶，不挤动表格。
+   盖在列头上要自带画布底（同 .mx-rowtoast）；挂在列头里才压得过它（工具行是更低的一层） */
+.mx-bartoast {
+  position: absolute;
+  top: calc(4px - var(--space-md));
+  left: 0;
+  z-index: 1;
+  display: flex;
+  padding-right: 16px;
+  background: var(--canvas);
+}
+
 .mx-globaltoast {
   position: fixed;
   bottom: var(--space-md);

@@ -55,6 +55,36 @@
   border-bottom: 0;
 }
 
+/* 加完来源滑回这一页：新加的行 surface 带亮 → 灭 → 亮 → 灭，各 120ms（同主视图跳转定位 .mx-jump，
+   不用反色——实心黑只有「机器在说话 / 已按下」两个意思） */
+.src-row.is-jump {
+  animation: src-jump calc(var(--motion-fast) * 4) var(--ease-mech);
+}
+
+@keyframes src-jump {
+  0%,
+  25% {
+    background-color: var(--surface);
+  }
+  26%,
+  50% {
+    background-color: transparent;
+  }
+  51%,
+  75% {
+    background-color: var(--surface);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .src-row.is-jump {
+    animation: none;
+  }
+}
+
 .src-row__main {
   align-items: center;
   padding: 10px 0;

@@ -71,9 +71,11 @@ export interface DomainViewProps {
   filterText: string;
   onFilterText: (text: string) => void;
   onClearFilter: () => void;
-  /// 按来源筛选中的来源（工具行第二行的片）；null＝全部
-  originFilter: string | null;
-  onOriginFilter: (sourceId: string | null) => void;
+  /// 按来源筛选中的来源（工具行第二行的片）；空＝全部。加完来源时可能一次选中几片
+  originFilter: readonly string[];
+  onOriginFilter: (next: string[]) => void;
+  /// 本次运行里刚加到这个位置的来源：筛选片名字后带 `新`
+  isNewOrigin: (sourceId: string) => boolean;
   /// 行悬停「打开 ↗」：在访达中显示原件
   onReveal: (path: string) => void;
   /// 工具行右端 `管理来源`：进来源管理页
@@ -97,6 +99,8 @@ export interface DomainViewProps {
   /// 单格成功的例行一行（在被点的那一行里，紧跟名字）
   cellToast?: { id: number; rowKey: string; node: ReactNode } | null;
   globalToast?: ReactNode;
+  /// 工具行下一行的例行一行（加完来源）
+  barToast?: ReactNode;
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
@@ -277,7 +281,7 @@ export default function DomainView(props: DomainViewProps) {
   const orphanQuery = props.filterText.trim().toLowerCase();
   const orphans = props.orphans.filter(
     (o) =>
-      props.originFilter === null &&
+      props.originFilter.length === 0 &&
       (orphanQuery === "" || o.skill.toLowerCase().includes(orphanQuery)),
   );
   for (const orphan of orphans) {
@@ -411,6 +415,7 @@ export default function DomainView(props: DomainViewProps) {
           label: originOf(id),
           full: `${originOf(id)} · ${displayPath(sourceOf(id)?.path ?? id)}`,
           count,
+          isNew: props.isNewOrigin(id),
         })),
       }}
       nameLabel="名称"
@@ -448,6 +453,7 @@ export default function DomainView(props: DomainViewProps) {
       cellToast={props.cellToast}
       keyBusy={props.keyBusy}
       globalToast={props.globalToast}
+      barToast={props.barToast}
       focus={props.focus}
     />
   );

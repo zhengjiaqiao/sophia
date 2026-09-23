@@ -11,8 +11,10 @@ import Matrix, {
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty } from "./DomainView";
 import SourcesPage from "./pages/SourcesPage";
-import { AddSourcePage } from "./pages/AddSourcePage";
+import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
+import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
+import { addedOrigins, newOriginKey, originMatches } from "./originFilter";
 import { mcpLocationName } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
@@ -82,6 +84,9 @@ export interface McpTabProps {
   /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
   focusKey?: string;
   onFocused?: () => void;
+  /// 本次运行里刚加的来源（`newOriginKey`，壳上记着，切页签不丢）：筛选片带 `新`
+  newOrigins: ReadonlySet<string>;
+  onNewOrigins: (keys: string[]) => void;
 }
 
 /// 行键：同名服务在一个域里合成一行
@@ -148,13 +153,15 @@ export default function McpTab({
   onOverview,
   focusKey,
   onFocused,
+  newOrigins,
+  onNewOrigins,
 }: McpTabProps) {
   const [overview, setOverview] = useState<McpOverview | null>(null);
   // 选中的行：域 key → 行键集合
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  // 按来源筛选（工具行第二行的来源片）；null＝全部
-  const [originFilter, setOriginFilter] = useState<string | null>(null);
+  // 按来源筛选（工具行第二行的来源片）；空＝全部。点片单选，加完来源时一次选中新加的几片
+  const [originFilter, setOriginFilter] = useState<string[]>([]);
   // 来源管理页（工具行 `管理来源`）开着没有
   const [sourcesOpen, setSourcesOpen] = useState(false);
   // 添加来源页（工具行 / 空态的 `+ 来源`）开着没有
@@ -182,6 +189,9 @@ export default function McpTab({
   } | null>(null);
   const cellToastSeq = useRef(0);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
+  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；工具行下的例行一行
+  const [justAdded, setJustAdded] = useState<CandidateEntry[] | null>(null);
+  const [addedToast, setAddedToast] = useState<{ key: number; parts: string[] } | null>(null);
   const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
@@ -197,6 +207,7 @@ export default function McpTab({
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
   const dismissCell = useCallback(() => setCellToast(null), []);
+  const dismissAdded = useCallback(() => setAddedToast(null), []);
   const closePick = useCallback(() => setPick(null), []);
 
   const refresh = async () => {
@@ -269,9 +280,10 @@ export default function McpTab({
     setKeyToast(null);
     setCellToast(null);
     setCellNotice(null);
+    setAddedToast(null);
     // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
     setSelected(new Set());
-    setOriginFilter(null);
+    setOriginFilter([]);
     undoRef.current = null;
   }, [selectedKey]);
 
@@ -282,6 +294,49 @@ export default function McpTab({
   }, [cellNotice]);
 
   const page: McpDomain | null = domains.find((d) => d.key === selectedKey) ?? null;
+
+  // 加完来源滑回主视图（同 Skills）：重扫已完，列表筛到新来源——它们的片选中（几个选几片，
+  // 列表是并集），工具行下例行一行 `✓ 已添加 …`；这几片记成 `新`
+  useEffect(() => {
+    if (justAdded === null || !overview) return;
+    setJustAdded(null);
+    if (!page) return;
+    onNewOrigins(justAdded.map((e) => newOriginKey(page.key, e.id)));
+    const ids = addedOrigins(
+      justAdded.map((e) => e.id),
+      page.rows.flatMap((r) => r.entries.map((e) => e.sourceId)),
+    );
+    let parts: string[];
+    if (ids.length > 0) {
+      // 名字与片同一个写法（groupLabel）；数量＝列表里并集的行数
+      parts = addedParts(
+        ids.map((id) =>
+          groupLabel(
+            overview.locations.find((l) => l.id === id),
+            id,
+          ),
+        ),
+        page.rows.filter((r) =>
+          originMatches(
+            ids,
+            r.entries.map((e) => e.sourceId),
+          ),
+        ).length,
+        "MCP",
+      );
+      setFilterText("");
+      setOriginFilter(ids);
+    } else {
+      // 新来源在这个位置下一行都没有：没有片可选，只交代加上了
+      parts = addedParts(
+        justAdded.map((e) => e.name),
+        justAdded.reduce((n, e) => n + e.count, 0),
+        "MCP",
+      );
+    }
+    setAddedToast({ key: Date.now(), parts });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [justAdded, overview]);
 
   // 扫描变了，差异可能也变了：重新懒加载
   useEffect(() => {
@@ -351,7 +406,7 @@ export default function McpTab({
       rowKeys.length === 0 ? page.targets.find((t) => paths.includes(t.path))?.id : undefined;
     if (rowKeys.length > 0) {
       setFilterText("");
-      setOriginFilter(null);
+      setOriginFilter([]);
     }
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
@@ -688,7 +743,10 @@ export default function McpTab({
   const visible = page.rows.filter(
     (row) =>
       (query === "" || row.name.toLowerCase().includes(query)) &&
-      (originFilter === null || row.entries.some((e) => e.sourceId === originFilter)),
+      originMatches(
+        originFilter,
+        row.entries.map((e) => e.sourceId),
+      ),
   );
   // 来源片：每个位置 · 这里有它的一份定义的行数（一行几份定义各算一次）
   const sourceCounts = new Map<string, number>();
@@ -891,7 +949,7 @@ export default function McpTab({
           label: "清除筛选",
           onClick: () => {
             setFilterText("");
-            setOriginFilter(null);
+            setOriginFilter([]);
           },
         }}
       />
@@ -930,6 +988,7 @@ export default function McpTab({
             label: groupLabel(locationOf(id), id),
             full: `${groupLabel(locationOf(id), id)} · ${displayPath(locationOf(id)?.path ?? id)}`,
             count,
+            isNew: newOrigins.has(newOriginKey(page.key, id)),
           })),
         }}
         rows={rows}
@@ -963,6 +1022,11 @@ export default function McpTab({
         cellToast={cellToast}
         keyBusy={keyBusy}
         globalToast={globalToast}
+        barToast={
+          addedToast ? (
+            <AddedToast key={addedToast.key} parts={addedToast.parts} onDismiss={dismissAdded} />
+          ) : null
+        }
         focus={focus}
       />
 
@@ -1013,12 +1077,13 @@ export default function McpTab({
       )}
 
       {addOpen && (
-        // 加好后主视图重扫（新来源的服务以 ○ 行出现），滑回主视图，不另出提示
+        // 加好后主视图重扫，滑回主视图；全加上时列表筛到新来源 + 例行一行（见上）
         <AddSourcePage
           model={mcpSourcesModel(domainRef, domainLocations)}
           domain={domainRef}
           onClose={closeAdd}
           onAdded={refresh}
+          onAllAdded={setJustAdded}
         />
       )}
 
@@ -1029,6 +1094,7 @@ export default function McpTab({
           locations={domainLocations}
           onClose={() => setSourcesOpen(false)}
           onChange={refresh}
+          onSourcesAdded={(ids) => onNewOrigins(ids.map((id) => newOriginKey(page.key, id)))}
         />
       )}
     </section>

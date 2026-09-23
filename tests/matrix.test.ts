@@ -168,7 +168,7 @@ test("Matrix：名称列头带总数，没有来源筛选片", () => {
 test("Matrix：工具行第二行来源筛选片——全部 N 在最前默认选中；选择条只顶替第一行，来源片仍在", () => {
   const sources = {
     total: 2,
-    selected: null,
+    selected: [],
     onSelect: () => undefined,
     items: [
       { id: "u", label: "通用仓库", count: 1 },
@@ -187,6 +187,39 @@ test("Matrix：工具行第二行来源筛选片——全部 N 在最前默认�
   assert.doesNotMatch(picking, /placeholder="筛选"/);
   assert.match(picking, /已选/);
   assert.match(picking, /class="mx-sources"/);
+});
+
+test("Matrix：加完来源一次选中几片（全部不选中）；新来源的片名字后带「新」；工具行下的例行一行挂在列头里", () => {
+  const html = render(Matrix, {
+    ...base,
+    sources: {
+      total: 3,
+      selected: ["u", "w"],
+      onSelect: () => undefined,
+      items: [
+        { id: "u", label: "通用仓库", count: 1 },
+        { id: "w", label: "WeiboAP", count: 1, isNew: true },
+        { id: "x", label: "别处", count: 1 },
+      ],
+    },
+    barToast: createElement("span", { className: "probe" }, "已添加"),
+  });
+  assert.match(html, /aria-pressed="false"><span class="ss-chip__label">全部</);
+  assert.match(html, /aria-pressed="true"><span class="ss-chip__label">通用仓库</);
+  assert.match(
+    html,
+    /aria-pressed="true"><span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__badge">新<\/span><span class="ss-chip__count">1</,
+  );
+  assert.match(
+    html,
+    /aria-pressed="false"><span class="ss-chip__label">别处<\/span><span class="ss-chip__count">/,
+  );
+  // 只有 WeiboAP 一片带「新」
+  assert.equal(html.match(/ss-chip__badge/g)?.length, 1);
+  assert.match(
+    html,
+    /class="mx-headwrap"[^>]*><div class="mx-bartoast"><span class="probe">已添加/,
+  );
 });
 
 test("点了做不了的格子：只当即说明（提示框立即出现、停约 3 秒），不交给调用方改数据", async () => {

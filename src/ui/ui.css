@@ -485,6 +485,12 @@
   flex-shrink: 0;
 }
 
+.ss-chip__badge {
+  flex-shrink: 0;
+  font-size: var(--size-micro);
+  font-weight: 600;
+}
+
 .ss-chip__count {
   font-family: var(--font-mono);
   font-size: var(--size-micro);
@@ -837,6 +843,13 @@
 
 .ss-toast__message {
   white-space: normal;
+}
+
+/* 读数可以是 ` · ` 隔开的几段（`WeiboAP · 39 个 skill`）：段与段、点与段同主行的 8 间距 */
+.ss-toast__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .ss-toast__more,

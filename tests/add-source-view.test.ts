@@ -11,6 +11,7 @@ import {
   SUGGESTED_LABEL,
   addFailureToast,
   addLabel,
+  addedParts,
   addSourceTitle,
   alreadySubscribedText,
   checkedEntries,
@@ -164,4 +165,17 @@ test("加完的提示：全成不出；全没成＝做不成；部分成＝部�
       reason: "目录不见了",
     },
   );
+});
+
+test("全加上滑回主视图的例行一行：一个来源写名字，几个写「N 个来源」，数量带名词", () => {
+  const line = (parts: string[]) => ["已添加", parts.join(" · ")].join(" ");
+  assert.equal(line(addedParts(["WeiboAP"], 39, "skill")), "已添加 WeiboAP · 39 个 skill");
+  assert.equal(
+    line(addedParts(["WeiboAP", "通用仓库"], 41, "skill")),
+    "已添加 2 个来源 · 41 个 skill",
+  );
+  assert.deepEqual(addedParts(["Claude Code · User"], 3, "MCP"), [
+    "Claude Code · User",
+    "3 个 MCP",
+  ]);
 });

@@ -10,6 +10,9 @@ interface ChipBase {
   icon?: ReactNode;
   /// 等宽 tabular 计数，跟在名字后面；不零填充
   count?: number;
+  /// 名字后 6 的一个短标记（新来源的 `新`）：12/600，与片内文字同色，选中反色时跟着反；
+  /// 在名字那段之外，名字截断时照样看得见
+  badge?: string;
   selected?: boolean;
   onClick?: () => void;
   title?: string;
@@ -22,7 +25,8 @@ type ChipDisabled =
 export type ChipProps = ChipBase & ChipDisabled;
 
 export function Chip(props: ChipProps) {
-  const { children, icon, count, selected, onClick, title, disabled, disabledReason } = props;
+  const { children, icon, count, badge, selected, onClick, title, disabled, disabledReason } =
+    props;
   const classes = ["ss-chip"];
   if (selected) classes.push("is-selected");
 
@@ -37,6 +41,7 @@ export function Chip(props: ChipProps) {
     >
       {icon ? <span className="ss-chip__icon">{icon}</span> : null}
       <span className="ss-chip__label">{children}</span>
+      {badge ? <span className="ss-chip__badge">{badge}</span> : null}
       {count !== undefined ? <span className="ss-chip__count">{count}</span> : null}
     </button>
   );

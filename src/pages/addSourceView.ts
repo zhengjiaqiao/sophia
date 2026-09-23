@@ -58,6 +58,8 @@ export function sameNameItems(skills: string[], subscribed: string[][]): Preview
 export interface CandidateEntry {
   /// 订阅时交给 core 的：skill 是路径，MCP 是位置 id；也是选中键
   ref: string;
+  /// 加上之后它的来源 id：主视图筛选片与来源管理页的行都以它为键（skill 是 Source.id，MCP 是位置 id）
+  id: string;
   name: string;
   sub: string;
   /// 完整路径（第二行只写短路径）
@@ -129,6 +131,14 @@ export const NOTHING_CHECKED = "先勾选要加的来源";
 
 /// 底部主动作：`添加 3 个来源`；一个没勾时写 `添加来源`（禁用，提示框 NOTHING_CHECKED）
 export const addLabel = (count: number) => (count === 0 ? "添加来源" : `添加 ${count} 个来源`);
+
+/// 全加上、滑回主视图时工具行下的例行一行，动词 `已添加` 之后用 ` · ` 隔开的几段：
+/// 一个来源 `WeiboAP · 39 个 skill`，几个 `2 个来源 · 41 个 skill`（MCP 写 `3 个 MCP`）。
+/// names：新来源在筛选片上的名字（与片同一个起名函数）；count：列表里这几片的并集有几行
+export function addedParts(names: string[], count: number, noun: string): string[] {
+  const what = names.length === 1 ? names[0] : `${names.length} 个来源`;
+  return [what, countText(count, noun)];
+}
 
 /// 逐个加完之后的提示条（全成不出提示，直接滑回）：全没成＝做不成，部分成＝部分失败。
 /// 名字只写没加上的；原因取第一个（几个原因相同时就是那一句）

@@ -48,7 +48,8 @@ import "./SourcesPage.css";
 /// - **×**＝从这个位置移除：先取清单，再出锚定确认写明会撤掉的（skill 的软链、MCP 写进来的那几份）；
 ///   这个位置自己的来源不能移除，× 禁用并说原因
 /// - 页头右端 `+ 来源`（跟随列表的话列表长了就找不到）：推入添加来源页（`AddSourcePage`，
-///   与主视图工具行的 `+ 来源` 同一页）；加好后滑回这一页，新来源已在列表里，不另出提示
+///   与主视图工具行的 `+ 来源` 同一页）；加好后滑回这一页，新加的行 `surface` 行带闪两下
+///   （同跳转定位），不筛选、不另出提示
 /// - 反馈（DESIGN「反馈」）：二级页自己渲染提示条，接在列表下方；成功是例行一行，做不成走黑窗
 
 export type SourcesPageProps = {
@@ -57,6 +58,8 @@ export type SourcesPageProps = {
   onClose: () => void;
   /// 改动之后让主视图重扫（订阅与移除都会改主列表的行）
   onChange: () => Promise<void>;
+  /// 从这一页的 `+ 来源` 全加上了：加上的来源 id（主视图的筛选片记成 `新`）
+  onSourcesAdded?: (ids: string[]) => void;
 } & (
   | {
       kind: "skill";
@@ -81,7 +84,7 @@ interface PendingRemove {
 }
 
 export default function SourcesPage(props: SourcesPageProps) {
-  const { domain, onClose, onChange } = props;
+  const { domain, onClose, onChange, onSourcesAdded } = props;
   const targetList: (Target | McpLocation)[] =
     props.kind === "skill" ? props.targets : props.locations;
   const targetsKey = targetList.map((t) => t.id).join("|");
@@ -210,7 +213,29 @@ export default function SourcesPage(props: SourcesPageProps) {
   /// 浮层开着时 Esc 由浮层接走；确认框开着时 Esc 只取消确认，不退出这一页
   /// （叠在上面的添加来源页开着时，Esc 由 SubPage 只交给最上面那一页）
   const back = pending ? () => undefined : onClose;
-  const closeAdd = useCallback(() => setAdding(false), []);
+  /// 加完滑回：新加的行 surface 行带闪两下（同跳转定位）。等添加页滑走、卸掉之后再闪，
+  /// 不然前一两拍闪在滑走的页底下
+  const addedIds = useRef<string[]>([]);
+  const [jumpIds, setJumpIds] = useState<Set<string>>(new Set());
+  const closeAdd = useCallback(() => {
+    setAdding(false);
+    if (addedIds.current.length > 0) setJumpIds(new Set(addedIds.current));
+    addedIds.current = [];
+  }, []);
+  useEffect(() => {
+    if (jumpIds.size === 0) return;
+    const first = data?.rows.find((r) => jumpIds.has(r.id));
+    if (first) rowEls.current.get(first.id)?.scrollIntoView({ block: "nearest" });
+    // 只在要闪的这一批换了时滚
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpIds]);
+  const endJump = (id: string) =>
+    setJumpIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   const toastNode = toast ? (
     <Toast
@@ -267,7 +292,13 @@ export default function SourcesPage(props: SourcesPageProps) {
                 (model.pickable(row).length === 0 ? model.noTargetsReason : undefined));
             const ruleLabel = `${row.name} 以后新出现的 ${model.noun} 自动添加`;
             return (
-              <div className={`src-row${open ? " is-open" : ""}`} key={row.id}>
+              <div
+                className={`src-row${open ? " is-open" : ""}${jumpIds.has(row.id) ? " is-jump" : ""}`}
+                key={row.id}
+                onAnimationEnd={(e) => {
+                  if (e.target === e.currentTarget) endJump(row.id);
+                }}
+              >
                 <div
                   className="src-row__main"
                   ref={(el) => {
@@ -474,6 +505,10 @@ export default function SourcesPage(props: SourcesPageProps) {
           onClose={closeAdd}
           onAdded={async () => {
             await settle();
+          }}
+          onAllAdded={(added) => {
+            addedIds.current = added.map((e) => e.id);
+            onSourcesAdded?.(addedIds.current);
           }}
         />
       ) : null}

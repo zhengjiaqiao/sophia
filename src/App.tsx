@@ -107,6 +107,18 @@ export default function App() {
   /// `查看`「网关连不上」：要进网关页并选中的那一家
   const [modelFocus, setModelFocus] = useState<string | undefined>();
   const clearModelFocus = useCallback(() => setModelFocus(undefined), []);
+  // 本次运行里刚加的来源（`newOriginKey`）：主视图筛选片带 `新`。只在内存里，重启就没了；
+  // 记在壳上，切页签（主视图重挂）不丢
+  const [newSkillOrigins, setNewSkillOrigins] = useState<ReadonlySet<string>>(new Set());
+  const [newMcpOrigins, setNewMcpOrigins] = useState<ReadonlySet<string>>(new Set());
+  const addNewSkillOrigins = useCallback(
+    (keys: string[]) => setNewSkillOrigins((prev) => new Set([...prev, ...keys])),
+    [],
+  );
+  const addNewMcpOrigins = useCallback(
+    (keys: string[]) => setNewMcpOrigins((prev) => new Set([...prev, ...keys])),
+    [],
+  );
   /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐
   const contentRef = useRef<HTMLElement>(null);
   const [contentFade, setContentFade] = useState({ start: false, end: false });
@@ -597,6 +609,8 @@ export default function App() {
               onOverview={setMcpOverview}
               focusKey={focus?.segment === "mcp" ? focus.key : undefined}
               onFocused={clearFocus}
+              newOrigins={newMcpOrigins}
+              onNewOrigins={addNewMcpOrigins}
             />
           ) : (
             <SkillsTab
@@ -609,6 +623,8 @@ export default function App() {
               onError={setError}
               focusKey={focus?.segment === "skills" ? focus.key : undefined}
               onFocused={clearFocus}
+              newOrigins={newSkillOrigins}
+              onNewOrigins={addNewSkillOrigins}
             />
           )}
         </main>

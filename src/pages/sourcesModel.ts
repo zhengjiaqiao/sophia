@@ -116,7 +116,7 @@ export interface SourcesModel {
   pickFolder: () => Promise<string | null>;
   /// 选好的文件夹订阅之前的只读预览；`rows` 是已订阅的来源（标 `同名` 用）。
   /// `id` 是 core 认出的来源 id：与已订阅的某行相同＝已经在这里了
-  previewFolder: (path: string, rows: SourceRow[]) => Promise<CandidateEntry & { id: string }>;
+  previewFolder: (path: string, rows: SourceRow[]) => Promise<CandidateEntry>;
   /// 把规则的目标从 `prev` 改成 `next`；`next` 为空＝关掉
   setTargets: (row: SourceRow, next: string[], prev: string[]) => Promise<void>;
   /// 移除前的清单：确认框正文，以及确认后要执行的那一步（返回提示条内容，不含名字）
@@ -160,6 +160,8 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
       const dups = duplicateNames(list.subscribed);
       const names = sourceNames(list.subscribed);
       const taken = list.subscribed.map((s) => s.skills);
+      // 候选按路径订阅；加上之后它在主视图筛选片、来源管理页行上的键是来源 id
+      const idOf = new Map([...list.elsewhere, ...list.detected].map((c) => [c.path, c.id]));
       return {
         rows: list.subscribed.map((s) => ({
           id: s.id,
@@ -183,6 +185,7 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
           title: g.title,
           items: g.items.map((i) => ({
             ref: i.path,
+            id: idOf.get(i.path) ?? i.path,
             name: i.name,
             sub: i.sub,
             title: i.path,
@@ -305,6 +308,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
           title: g.title,
           items: g.items.map((i) => ({
             ref: i.id,
+            id: i.id,
             name: i.name,
             sub: i.sub,
             count: i.services.length,

@@ -17,6 +17,7 @@ import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "r
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
+import { pickOrigin } from "./originFilter.ts";
 import {
   AgentMark,
   Checkbox,
@@ -130,12 +131,14 @@ export interface MatrixProps {
   /// 「来源」列：列头文字（skill 与 MCP 都是 `来源`）
   originLabel: string;
   /// 工具行第二行的来源筛选片：`全部 N` 在最前、默认选中；每片 `来源名 N`，选中反色。
-  /// 放不下折行（不超出面板宽）；片名放不下截断，完整值用同一行右侧的提示框给
+  /// 放不下折行（不超出面板宽）；片名放不下截断，完整值用同一行右侧的提示框给。
+  /// selected 空＝全部；用户点片是单选（originFilter.ts `pickOrigin`），加完来源时调用方可一次选中几片。
+  /// isNew：本次运行里刚加的来源，名字后带 `新`
   sources?: {
     total: number;
-    selected: string | null;
-    onSelect: (id: string | null) => void;
-    items: { id: string; label: string; full?: string; count: number }[];
+    selected: readonly string[];
+    onSelect: (next: string[]) => void;
+    items: { id: string; label: string; full?: string; count: number; isNew?: boolean }[];
   };
   rows: MatrixRowView[];
   /// 名称列头：`名称` / `服务`
@@ -187,6 +190,9 @@ export interface MatrixProps {
   cellToast?: { id: number; rowKey: string; node: ReactNode } | null;
   /// 无关位置的全局事（自动规则）：右下，右沿对齐面板右沿
   globalToast?: ReactNode;
+  /// 工具行下一行的例行一行（加完来源滑回：`✓ 已添加 WeiboAP · 39 个 skill`）：浮在列头左段上，
+  /// 随列头吸顶，不挤动表格
+  barToast?: ReactNode;
   /// 新问题提示「查看」跳过来：滚到这几行（或这一列的列头）并闪两下（⑦）。`nonce` 变了才重做
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
@@ -365,6 +371,7 @@ export default function Matrix(props: MatrixProps) {
     cellToast,
     keyBusy,
     globalToast,
+    barToast,
     focus: jump,
   } = props;
 
@@ -1160,6 +1167,7 @@ export default function Matrix(props: MatrixProps) {
       <div className="mx-panel" ref={panelRef} style={{ width }}>
         {/* 列头吸顶（连同选择态的键行），紧贴两行工具行下面 */}
         <div className="mx-headwrap" ref={headRef} style={{ top: barH }}>
+          {barToast ? <div className="mx-bartoast">{barToast}</div> : null}
           {header}
         </div>
         <div
@@ -1225,7 +1233,7 @@ function SourceChips({
   useEffect(() => drop, []);
   return (
     <div className="mx-sources" style={{ maxWidth: width }} role="group" aria-label="按来源筛选">
-      <Chip selected={selected === null} count={total} onClick={() => onSelect(null)}>
+      <Chip selected={selected.length === 0} count={total} onClick={() => onSelect([])}>
         全部
       </Chip>
       {items.map((item) => (
@@ -1239,9 +1247,10 @@ function SourceChips({
           aria-describedby={tipFor === item.id ? `${tipId}-${item.id}` : undefined}
         >
           <Chip
-            selected={selected === item.id}
+            selected={selected.includes(item.id)}
             count={item.count}
-            onClick={() => onSelect(selected === item.id ? null : item.id)}
+            badge={item.isNew ? "新" : undefined}
+            onClick={() => onSelect(pickOrigin(selected, item.id))}
           >
             {item.label}
           </Chip>

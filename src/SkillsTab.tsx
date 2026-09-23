@@ -6,8 +6,10 @@ import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./Domain
 import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
+import { addedOrigins, newOriginKey, originMatches } from "./originFilter";
 import SourcesPage from "./pages/SourcesPage";
-import { AddSourcePage } from "./pages/AddSourcePage";
+import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
+import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { skillSourcesModel } from "./pages/sourcesModel";
 import type { DomainRef } from "./pages/sourcesView";
 import { pathsOfKey } from "./issues";
@@ -76,6 +78,9 @@ export interface SkillsTabProps {
   /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
   focusKey?: string;
   onFocused?: () => void;
+  /// 本次运行里刚加的来源（`newOriginKey`，壳上记着，切页签不丢）：筛选片带 `新`
+  newOrigins: ReadonlySet<string>;
+  onNewOrigins: (keys: string[]) => void;
 }
 
 /// Skills 页：两行工具行（筛选框 + 来源筛选片）+ 表格（DomainView → Matrix）。
@@ -98,13 +103,15 @@ export default function SkillsTab({
   onError,
   focusKey,
   onFocused,
+  newOrigins,
+  onNewOrigins,
 }: SkillsTabProps) {
   // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  // 按来源筛选（工具行第二行的来源片）；null＝全部
-  const [originFilter, setOriginFilter] = useState<string | null>(null);
+  // 按来源筛选（工具行第二行的来源片）；空＝全部。点片单选，加完来源时一次选中新加的几片
+  const [originFilter, setOriginFilter] = useState<string[]>([]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   // 添加来源页（工具行 / 空态的 `+ 来源`）开着没有
   const [addOpen, setAddOpen] = useState(false);
@@ -131,6 +138,9 @@ export default function SkillsTab({
   const cellToastSeq = useRef(0);
   const [rowToast, setRowToast] = useState<{ rowKey: string; node: ReactNode } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
+  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；工具行下的例行一行
+  const [justAdded, setJustAdded] = useState<CandidateEntry[] | null>(null);
+  const [addedToast, setAddedToast] = useState<{ key: number; parts: string[] } | null>(null);
   // 孤链格：点下去就先画成没有这一格（清除的目标状态），做成重扫后数据自己对上，没成弹回
   const [orphanGone, setOrphanGone] = useState<Set<string>>(new Set());
   // 刚清完的孤链行：数据里已经没有它了，例行一行还要在它里面待满 4 秒，这期间照原样留着
@@ -184,6 +194,7 @@ export default function SkillsTab({
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
   const dismissCell = useCallback(() => setCellToast(null), []);
+  const dismissAdded = useCallback(() => setAddedToast(null), []);
 
   // 提示与弹层只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
@@ -194,10 +205,46 @@ export default function SkillsTab({
     setCellToast(null);
     setRowToast(null);
     setCellNotice(null);
+    setAddedToast(null);
     setSelected(new Set());
-    setOriginFilter(null);
+    setOriginFilter([]);
     undoRef.current = null;
   }, [selectedKey]);
+
+  // 加完来源滑回主视图（DESIGN「添加来源」）：重扫已完，列表筛到新来源——工具行里它们的片选中
+  // （加了几个选几片，列表是并集），工具行下例行一行 `✓ 已添加 …`；这几片记成 `新`
+  useEffect(() => {
+    if (justAdded === null || !overview) return;
+    setJustAdded(null);
+    if (!page) return;
+    onNewOrigins(justAdded.map((e) => newOriginKey(page.key, e.id)));
+    const order = page.rows.map((r) => r.sourceId);
+    const ids = addedOrigins(
+      justAdded.map((e) => e.id),
+      order,
+    );
+    let parts: string[];
+    if (ids.length > 0) {
+      // 名字与片同一个起名函数、同一组来源（DomainView 的筛选片）；数量＝列表里并集的行数
+      const names = originNames(order, overview.sources);
+      parts = addedParts(
+        ids.map((id) => originText(names.get(id)!)),
+        page.rows.filter((r) => originMatches(ids, [r.sourceId])).length,
+        "skill",
+      );
+      setFilterText("");
+      setOriginFilter(ids);
+    } else {
+      // 新来源在这个位置下一行都没有：没有片可选，只交代加上了
+      parts = addedParts(
+        justAdded.map((e) => e.name),
+        justAdded.reduce((n, e) => n + e.count, 0),
+        "skill",
+      );
+    }
+    setAddedToast({ key: Date.now(), parts });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [justAdded, overview]);
 
   useEffect(() => {
     if (!overview) return;
@@ -785,7 +832,7 @@ export default function SkillsTab({
     // 要跳的行被筛掉了：先清筛选，不然跳过去是空的
     if (rowKeys.length > 0) {
       setFilterText("");
-      setOriginFilter(null);
+      setOriginFilter([]);
     }
     setFocus({ rowKeys, columnId, nonce: Date.now() });
     onFocused?.();
@@ -794,7 +841,7 @@ export default function SkillsTab({
 
   // ===== 渲染 =====
 
-  /// 添加来源页：加好后主视图重扫（新来源的 skill 以 ○ 行出现），滑回主视图，不另出提示
+  /// 添加来源页：加好后主视图重扫，滑回主视图；全加上时列表筛到新来源 + 例行一行（见上）
   const addPage = (domain: DomainRef, targets: Target[]) =>
     addOpen ? (
       <AddSourcePage
@@ -802,6 +849,7 @@ export default function SkillsTab({
         domain={domain}
         onClose={closeAdd}
         onAdded={onRefresh}
+        onAllAdded={setJustAdded}
       />
     ) : null;
 
@@ -836,7 +884,7 @@ export default function SkillsTab({
   const visible = page.rows.filter(
     (row) =>
       (query === "" || row.skill.toLowerCase().includes(query)) &&
-      (originFilter === null || row.sourceId === originFilter),
+      originMatches(originFilter, [row.sourceId]),
   );
   const hiddenRows = hidden;
   // 孤链行：点过的格先去掉；刚清完、数据里已没有的那一行，例行一行还在时照留
@@ -870,10 +918,11 @@ export default function SkillsTab({
         onFilterText={setFilterText}
         onClearFilter={() => {
           setFilterText("");
-          setOriginFilter(null);
+          setOriginFilter([]);
         }}
         originFilter={originFilter}
         onOriginFilter={setOriginFilter}
+        isNewOrigin={(id) => newOrigins.has(newOriginKey(page.key, id))}
         onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}
         onSources={() => setSourcesOpen(true)}
         onAddSource={() => setAddOpen(true)}
@@ -893,6 +942,11 @@ export default function SkillsTab({
         cellToast={cellToast}
         keyBusy={keyBusy}
         globalToast={globalToast}
+        barToast={
+          addedToast ? (
+            <AddedToast key={addedToast.key} parts={addedToast.parts} onDismiss={dismissAdded} />
+          ) : null
+        }
         focus={focus}
       />
 
@@ -938,6 +992,7 @@ export default function SkillsTab({
           targets={page.targets}
           onClose={() => setSourcesOpen(false)}
           onChange={onRefresh}
+          onSourcesAdded={(ids) => onNewOrigins(ids.map((id) => newOriginKey(page.key, id)))}
         />
       )}
     </section>

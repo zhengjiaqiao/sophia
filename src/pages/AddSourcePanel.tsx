@@ -47,8 +47,8 @@ export interface AddSourcePanelProps {
   domain: DomainRef;
   /// 加上了至少一个之后：主视图重扫 / 来源管理页重读。Panel 等它做完再往下走
   onChanged: () => Promise<void>;
-  /// 勾的全加上了：容器收尾（滑回）。Panel 等它做完才收起忙碌指示
-  onDone: () => Promise<void>;
+  /// 勾的全加上了（added：加上的那几个，按列表先后）：容器收尾（滑回）。Panel 等它做完才收起忙碌指示
+  onDone: (added: CandidateEntry[]) => Promise<void>;
 }
 
 /// 滚动边缘渐隐：上面 / 下面还有被裁掉的内容时，那一边出 16px 渐隐（与模型列表、小浮层同一写法）
@@ -230,7 +230,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     }
     if (done.length > 0) await onChanged();
     if (failed.length === 0) {
-      await onDone();
+      await onDone(entries);
       if (alive.current) setAdding(false);
       return;
     }
