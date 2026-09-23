@@ -546,7 +546,7 @@ export default function SkillsTab({
   const toastItems = (refs: CellRef[]): ToastItem[] =>
     refs.map((ref) => ({ name: ref.skill, agent: agentRef(targetOf(ref.targetId)) }));
 
-  const batch = async ({ keyId, op, cells }: BatchPress, undoing = false) => {
+  const batch = async ({ keyId, op, cells, reversible }: BatchPress, undoing = false) => {
     if (cells.length === 0) return;
     setKeyToast(null);
     setCellToast(null);
@@ -590,7 +590,10 @@ export default function SkillsTab({
         done.length > 0 && !undoing
           ? () => {
               undoRef.current = null;
-              void batch({ keyId, op: op === "link" ? "unlink" : "link", cells: done }, true);
+              void batch(
+                { keyId, op: op === "link" ? "unlink" : "link", cells: done, reversible: true },
+                true,
+              );
             }
           : null;
       undoRef.current = undo;
@@ -602,7 +605,8 @@ export default function SkillsTab({
             // 键行左侧空白窄：写数量，不逐个写名字（`✓ 加到 ✳ 1 个 · 撤销`）；名字在键的提示框里
             names={text.kind === "success" ? undefined : text.names}
             reading={text.kind === "success" ? `${done.length} 个` : undefined}
-            action={undo ? { label: "撤销", onClick: undo } : undefined}
+            // 再按一次同一个键就恰好撤回时不给 `撤销`（⌘Z 照旧可用）；见 BatchPress.reversible
+            action={undo && !reversible ? { label: "撤销", onClick: undo } : undefined}
             onDismiss={dismissKey}
             onClose={text.tier === "notice" ? dismissKey : undefined}
           />
@@ -777,7 +781,10 @@ export default function SkillsTab({
           ? () => {
               undoRef.current = null;
               setGlobalToast(null);
-              void batchRef.current({ keyId: "", op: "unlink", cells: refs }, true);
+              void batchRef.current(
+                { keyId: "", op: "unlink", cells: refs, reversible: true },
+                true,
+              );
             }
           : null;
       undoRef.current = undo;
