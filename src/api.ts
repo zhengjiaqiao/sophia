@@ -19,7 +19,6 @@ import type {
   McpReport,
   McpUndoReport,
   McpSelection,
-  McpAutoImportRule,
   McpDiff,
   McpRemovalItem,
   McpSourceList,
@@ -109,7 +108,6 @@ export const api = {
     invoke<McpReport>("apply_mcp", { planId, allowCrossDomain }),
   /// 撤销一次 MCP 写入；id 不存在或已过期时 reject「撤销记录不存在或已过期」
   mcpUndoWrite: (undoId: string) => invoke<McpUndoReport>("mcp_undo_write", { undoId }),
-  listMcpAutoImports: () => invoke<McpAutoImportRule[]>("list_mcp_auto_imports"),
   setMcpAutoImport: (
     sourceId: string,
     targetDomain: string,

@@ -1,5 +1,4 @@
-/// 两张添加页（skill / MCP）共用的纯逻辑：默认目标、记住上次的目标、按列切、同名来源的区分片段、
-/// 全选三态与主动作的字、专名拼句。
+/// 来源管理页与主视图共用的纯逻辑：自动添加的默认目标、记住上次的目标、同名来源的区分片段、专名拼句。
 /// 不碰 api、不产 JSX。
 
 /// 这个来源上次添加时勾上的目标，以及连续几次点的是同一组
@@ -43,17 +42,6 @@ export function defaultTargets(available: string[], last: string[] | undefined):
   return kept.length > 0 ? kept : available.slice(0, 2);
 }
 
-export const sameSet = (a: string[], b: string[]) =>
-  a.length === b.length && a.every((x) => b.includes(x));
-
-/// 切成若干竖排的列，按列读（字母序竖着看比横着跳舒服）
-export function columnsOf<T>(list: T[], count: number): T[][] {
-  const per = Math.ceil(list.length / count);
-  return Array.from({ length: count }, (_, i) => list.slice(i * per, (i + 1) * per)).filter(
-    (col) => col.length > 0,
-  );
-}
-
 /// 同名来源分不清时（真机里三个「WeiboAP · 外部」），挑出每条路径里能区分它的**那一级**。
 ///
 /// 从结尾往前找：第一个「别的路径在同一位置（从结尾数）上都不是它」的分量就是答案——
@@ -70,26 +58,6 @@ export function distinguishingSegments(paths: string[]): string[] {
     }
     return paths[i];
   });
-}
-
-/// 全选框的三态，照实算（DESIGN「添加页」：全选就是全部，**同名行也算在内**）：
-/// 列表里可勾的全勾上 `true`，勾了一部分 `"mixed"`，一个没勾 `false`
-export function selectAllState(pickable: string[], chosen: string[]): boolean | "mixed" {
-  const on = pickable.filter((name) => chosen.includes(name)).length;
-  if (pickable.length > 0 && on === pickable.length) return true;
-  return on > 0 ? "mixed" : false;
-}
-
-/// 按一下全选：已经全勾上就全部取消（只动列表里这些），否则把列表里的全部勾上
-export function toggleAll(pickable: string[], chosen: string[]): string[] {
-  return selectAllState(pickable, chosen) === true
-    ? chosen.filter((name) => !pickable.includes(name))
-    : [...new Set([...chosen, ...pickable])];
-}
-
-/// 主动作的字：含替换时写明这次会替换几个（`添加 38 个（替换 1 个）`），不含时照旧
-export function addLabel(count: number, replacing: number): string {
-  return replacing > 0 ? `添加 ${count} 个（替换 ${replacing} 个）` : `添加 ${count} 个`;
 }
 
 /// 按钮与说明里的专名不靠空格断词（DESIGN「按钮」）：汉字之间不加空格，中西文之间一个空格。

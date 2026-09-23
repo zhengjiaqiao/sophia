@@ -805,13 +805,6 @@ fn list_auto_links(state: tauri::State<'_, AppState>) -> Result<Vec<AutoLink>, S
     Ok(state.store.load_settings().map_err(err)?.auto_links)
 }
 
-#[tauri::command]
-fn list_mcp_auto_imports(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<symsync_core::mcp::McpAutoImportRule>, String> {
-    Ok(state.store.load_settings().map_err(err)?.mcp_auto_imports)
-}
-
 /// 保存的是已发现位置的精确身份，不保存任何 MCP 定义或凭据。
 #[tauri::command]
 fn set_mcp_auto_import(
@@ -1096,7 +1089,6 @@ pub fn run() {
             remove_auto_link_targets,
             exclude_auto_link,
             include_auto_link,
-            list_mcp_auto_imports,
             set_mcp_auto_import,
             remove_mcp_auto_import,
             list_harnesses,

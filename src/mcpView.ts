@@ -194,16 +194,6 @@ export function mcpDomains(overview: McpOverview): McpDomain[] {
   });
 }
 
-/// 本域任一配置位置已有相同定义时，服务已被导入该域。
-export function importedInDomain(entry: McpEntry, page: McpDomain): boolean {
-  const targetIds = new Set(page.targets.map((target) => target.id));
-  return entry.cells.some(
-    (cell) =>
-      targetIds.has(cell.targetId) &&
-      (cell.state === "own" || cell.state === "equal" || cell.state === "sameEndpoint"),
-  );
-}
-
 /**
  * 本行几份副本在**哪些字段**上不一样，给主视图 `2 份不一样` 的提示框用（DESIGN「材料与工艺」
  * MCP 两份不一样：提示框给差异字段名，`url 不同`）。
@@ -226,7 +216,7 @@ export function differingFields(row: McpDomainRow, targetIds: Set<string>): stri
   return unknown ? [] : [...fields];
 }
 
-/// 行的来源位置（来源位置列写它）：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）
+/// 行的来源位置（「来源」列写它）：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）
 export const mcpGroupOf = (row: McpDomainRow): string => row.entries[0]?.sourceId ?? "";
 
 /**

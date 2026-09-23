@@ -438,25 +438,6 @@ export default function DomainView(props: DomainViewProps) {
   );
 }
 
-/// 空态的 `+`：与 AddButton 同一个 12px 1.4 描边线性图形
-export function PlusGlyph() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M6 1.5v9M1.5 6h9" />
-    </svg>
-  );
-}
-
 /// 表格里的空态：一句现状 + 一个按钮（表头照常在上面——列在，用户才有入口把目录建出来）。
 /// 图按 DESIGN「图像」：没有 agent 目录 folders、一个都没有 links；筛选无结果不放图
 export function Empty({
