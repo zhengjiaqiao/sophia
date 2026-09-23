@@ -102,22 +102,3 @@ export function Empty({ kind, description, hint, primary, secondary, art }: Empt
     </div>
   );
 }
-
-export interface BusyProps {
-  /// 操作进行中：受影响控件置灰且点不动
-  busy: boolean;
-  children: ReactNode;
-  className?: string;
-}
-
-/// 忙碌态（§6 第五行）：包住受 busy 约束的部分。
-/// **不受 busy 约束的五处不要包进来**：设置、筛选输入框、取消选择、提示条关闭、表头排序。
-/// 豁免控件保持不透明，也不加聚焦态——同一屏里别的东西灰了，它没灰，对比本身就说明了它还能用。
-export function Busy({ busy, children, className }: BusyProps) {
-  const classes = [className, busy ? "ss-busy" : null].filter(Boolean).join(" ");
-  return (
-    <div className={classes || undefined} aria-busy={busy || undefined}>
-      {children}
-    </div>
-  );
-}

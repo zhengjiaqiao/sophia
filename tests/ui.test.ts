@@ -37,7 +37,7 @@ const { SubPage, holdInert, pickTrigger, triggerKey } = await import("../src/ui/
 const { Cap, capRuns } = await import("../src/ui/Cap.tsx");
 const { AgentIcon, AgentMark, agentInitial, hasAgentIcon } =
   await import("../src/ui/AgentMark.tsx");
-const { Busy, Empty } = await import("../src/ui/Empty.tsx");
+const { Empty } = await import("../src/ui/Empty.tsx");
 const { IconCheck } = await import("../src/ui/icons.tsx");
 
 test("index 把组件和样式一起交出去，用的人不必自己 import css", async () => {
@@ -64,7 +64,6 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "AgentMark",
     "AgentIcon",
     "Empty",
-    "Busy",
   ];
   for (const name of exported) {
     assert.equal(typeof (ui as Record<string, unknown>)[name], "function", name);
@@ -72,6 +71,8 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
   // 已删：方标签（有框的都能点）与左下贴底待处理窗（定稿增量取消）
   assert.equal((ui as Record<string, unknown>).TagSquare, undefined);
   assert.equal((ui as Record<string, unknown>).PendingWindow, undefined);
+  // 已删：整块变暗的 Busy（单一对象的操作不许整片变暗，忙碌只落在按下的那颗键上，见 BusySlot）
+  assert.equal((ui as Record<string, unknown>).Busy, undefined);
 });
 
 // ===== 设计变量 =====
@@ -1143,13 +1144,6 @@ test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首�
   // 不给 art 就不放图（筛选无结果）
   assert.doesNotMatch(render(Empty, { kind: "noMatch" }), /<img/);
   assert.match(cssRule(uiCss, ".ss-empty__art--horizon"), /object-fit:\s*cover/);
-});
-
-test("Busy 操作进行中：受影响的部分置灰，不忙时不加类", () => {
-  assert.match(render(Busy, { busy: true, children: "表格" }), /class="ss-busy" aria-busy="true"/);
-  const idle = render(Busy, { busy: false, children: "表格" });
-  assert.doesNotMatch(idle, /ss-busy/);
-  assert.doesNotMatch(idle, /aria-busy/);
 });
 
 test("刚变化的格子闪一下：120ms 反色再回落，减少动效时退化为无", () => {

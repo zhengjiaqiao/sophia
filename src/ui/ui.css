@@ -1363,7 +1363,7 @@
   gap: var(--space-xs);
 }
 
-/* 操作进行中：受影响控件置灰 */
+/* 按下的那一项忙过 0.3 秒门槛（Matrix 批量键 busyLockClass）：变淡且点不动 */
 .ss-busy {
   opacity: var(--busy-dim);
   pointer-events: none;
