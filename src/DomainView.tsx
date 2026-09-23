@@ -5,7 +5,7 @@
 /// 不在这里另写一份。
 ///
 /// 「原件位置」列恢复、按来源分组撤销（DESIGN「产品裁决」冲突表）：位置信息常驻视线；
-/// 点这一列列头文字按位置排序。自动添加规则只在添加页管理，主视图不放规则入口。
+/// 点这一列列头文字按位置排序。自动添加规则只在来源管理页管理，主视图不放规则入口。
 /// 说明横幅、「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接；
 /// 原件已不在的孤链照样成一行，点那一格就是清除）。
 import { useEffect, useRef } from "react";
@@ -22,7 +22,7 @@ import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
-import { AddButton, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
+import { Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
@@ -68,7 +68,8 @@ export interface DomainViewProps {
   onOriginFilter: (sourceId: string | null) => void;
   /// 行悬停「打开 ↗」：在访达中显示原件
   onReveal: (path: string) => void;
-  onImport: () => void;
+  /// 工具行右端 `来源`：进来源管理页
+  onSources: () => void;
 
   selected: Set<string>;
   onSelectionChange: (next: Set<string>) => void;
@@ -372,7 +373,8 @@ export default function DomainView(props: DomainViewProps) {
   // ---- 空态：一句现状 + 一个动作（DESIGN「空态与忙碌态」） ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
   const query = props.filterText.trim();
-  const addAction = { label: "skill", onClick: props.onImport, icon: <PlusGlyph /> };
+  // 空态里的动作同工具行：进来源管理页（管理入口，不带 `+`）
+  const addAction = { label: "来源", onClick: props.onSources };
   const empty =
     query !== "" ? (
       <Empty
@@ -406,7 +408,7 @@ export default function DomainView(props: DomainViewProps) {
       nameCount={matrixRows.length}
       filterText={props.filterText}
       onFilterText={props.onFilterText}
-      addButton={<AddButton noun="skill" onClick={props.onImport} />}
+      addButton={<Button onClick={props.onSources}>来源</Button>}
       selected={props.selected}
       onSelectionChange={props.onSelectionChange}
       allAgents={allAgents}

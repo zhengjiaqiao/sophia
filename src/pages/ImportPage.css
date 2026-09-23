@@ -1,5 +1,6 @@
 /* 添加页的骨架（DESIGN「产品裁决 › 添加页」，画板 Import / McpImport / ImportEmpty）。
-   skill 与 MCP 两页共用这一份——两页逐句对称，只换名词。MCP 多出来的在 McpImportPage.css。
+   原是 skill 与 MCP 两页共用；skill 那页已换成来源管理页（SourcesPage），这一份现在只有
+   MCP 添加页经 McpImportPage.css 引用，随它改成来源管理页时一起删。
    色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "../tokens.css";
 

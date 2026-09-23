@@ -1,0 +1,375 @@
+/* 来源管理页（DESIGN「来源管理页」，画板 Import / Sources / ImportEmpty）。
+   色值一律 var(--…)，唯一来源是 tokens.css。
+
+   与模型页同一种面板（ModelsTab.css 的 .models-panel）：表头 12/600 ink-mute + 2px ink 结构线，
+   行间 1px hairline，左列 `来源` 定宽 324、间距 24、右列是开关 + 目标 + 行尾 ×。
+   面板弹性、有上限 732（画板宽度）：开关与 × 贴近名字（① 就近），不铺满窗口 */
+@import "../tokens.css";
+
+.src-page {
+  box-sizing: border-box;
+  padding: var(--space-xl) var(--space-xxl) var(--space-huge);
+}
+
+.src-page__error {
+  padding: var(--space-xl) var(--space-xxl);
+}
+
+/* 空态整块居中；提示条（刚移除掉最后一个来源时）接在下方 */
+.src-page__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+}
+
+.src-panel {
+  --src-name-w: 324px;
+  width: min(100%, calc(var(--src-name-w) + var(--space-xl) + 384px));
+}
+
+.src-panel__head,
+.src-row__main {
+  display: grid;
+  grid-template-columns: var(--src-name-w) minmax(0, 1fr);
+  column-gap: var(--space-xl);
+}
+
+.src-panel__head {
+  align-items: end;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--ink);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.src-row {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.src-row:last-child {
+  border-bottom: 0;
+}
+
+.src-row__main {
+  align-items: center;
+  padding: 10px 0;
+}
+
+/* 展开时名字行不留下边距，展开区接在名字下面；行底的 10 挪到展开区之后 */
+.src-row.is-open .src-row__main {
+  padding-bottom: 0;
+}
+
+/* 名字格整块可点：▸ + 名字 + 第二行灰字；点了就地展开 */
+.src-row__name {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.src-row__name:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* ▸ 与主视图展开记号同一个（Matrix 的 Disclosure），14 格、对齐名字第一行 */
+.src-row__caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.src-row__caret .mx-disclosure {
+  color: var(--ink);
+}
+
+.src-row__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.src-row__label {
+  overflow: hidden;
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.src-row__sub {
+  display: block;
+  overflow: hidden;
+  font-size: var(--size-micro);
+  line-height: 1.4;
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.src-row__text > .ss-tipwrap {
+  display: block;
+  min-width: 0;
+}
+
+/* 右列：开关 + `自动加到` + 目标图标，× 推到行尾 */
+.src-row__rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.src-row__rulelabel {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  white-space: nowrap;
+}
+
+.src-row__rulelabel.is-disabled {
+  color: var(--ink-faint);
+}
+
+/* 禁用的开关接不到悬停：让指针落到包层上，提示框才出得来 */
+.src-row__switch {
+  display: inline-flex;
+}
+
+.src-row__switch .ss-switch:disabled {
+  pointer-events: none;
+}
+
+/* 目标图标组：点开改目标的浮层。静息无底，悬停 / 打开铺 surface（无描边的可点面） */
+.src-row__targets {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  /* 悬停底比图标宽出 6：负外边距抵掉，静息时图标仍离文字 8 */
+  margin: 0 -6px;
+  padding: var(--space-xxs) 6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.src-row__targets:hover,
+.src-row__targets.is-open {
+  background: var(--surface);
+}
+
+.src-row__targets:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.src-row__remove {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.src-row__remove .ss-iconbtn:disabled {
+  pointer-events: none;
+}
+
+/* 这一句按画板单行显示（不受提示框 240 上限折行）；出窗时 Tooltip 自己改为对齐外侧边 */
+.src-row__remove .ss-tip {
+  max-width: none;
+  white-space: nowrap;
+}
+
+/* 展开区：在这一行的线以内，缩进对齐来源名（▸ 14 + 8），两列按列读，13 ink-mute */
+.src-row__skills {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  column-gap: 40px;
+  padding: var(--space-xxs) 0 calc(var(--space-sm) + 10px) 22px;
+}
+
+.src-row__none {
+  padding: var(--space-xxs) 0 calc(var(--space-sm) + 10px) 22px;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+.src-skill {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  height: var(--control-h-compact);
+}
+
+.src-skill__name {
+  overflow: hidden;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 列表底部：`+ 来源` 与提示条同一行（提示锚在触发它的控件旁） */
+.src-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-top: var(--space-md);
+}
+
+/* ===== 小浮层：layer 圆角 + 浮层阴影，无黑框（与侧栏排序下拉同一写法） ===== */
+.src-layer {
+  position: fixed;
+  z-index: 35;
+  box-sizing: border-box;
+  border-radius: var(--radius-layer);
+  background: var(--canvas);
+  box-shadow: var(--elev-layer);
+}
+
+/* `+ 来源`：三组，组间 hairline，组头 12 ink-faint；超出窗口高度在自身范围内滚动 */
+.src-menu {
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  max-height: calc(100vh - 32px);
+  padding: var(--space-xs) 0;
+  overflow-y: auto;
+}
+
+.src-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px var(--space-md);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.src-menu__item:first-child {
+  padding-top: var(--space-xs);
+  padding-bottom: var(--space-xs);
+}
+
+.src-menu__item:hover,
+.src-menu__item:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+.src-menu__name,
+.src-menu__sub {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.src-menu__name {
+  font-size: var(--size-caption);
+  line-height: 1.4;
+}
+
+.src-menu__sub {
+  font-size: var(--size-micro);
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+
+.src-menu__sep {
+  height: 1px;
+  margin: var(--space-xxs) 0;
+  background: var(--hairline);
+}
+
+.src-menu__head {
+  padding: 6px var(--space-md) 2px;
+  font-size: var(--size-micro);
+  line-height: 1.6;
+  color: var(--ink-faint);
+}
+
+/* 目标浮层：一行 = 复选框 + 图标 14 + 名字，整行可点；没勾的名字 ink-mute */
+.src-targetmenu {
+  display: flex;
+  flex-direction: column;
+  width: 180px;
+  padding: 6px 0;
+}
+
+.src-target {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+
+.src-target:hover:not(:disabled),
+.src-target:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+.src-target:hover:not(:disabled) .ss-checkbox {
+  border-color: var(--ink);
+}
+
+.src-target__name {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.src-target.is-on .src-target__name {
+  color: var(--ink);
+}
+
+.src-target:disabled {
+  color: var(--disabled);
+  cursor: default;
+}
+
+.src-target:disabled .src-target__name {
+  color: var(--disabled);
+}
+
+.src-target:disabled .ss-checkbox {
+  border-color: var(--hairline);
+}

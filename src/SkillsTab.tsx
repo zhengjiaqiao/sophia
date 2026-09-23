@@ -6,7 +6,7 @@ import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./Domain
 import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
-import ImportPage from "./pages/ImportPage";
+import SourcesPage from "./pages/SourcesPage";
 import { pathsOfKey } from "./issues";
 import { shortDate } from "./dateText";
 import { CELL_TOAST_DWELL_MS, Confirm, Empty, Toast, TOAST_DWELL_MS } from "./ui";
@@ -18,7 +18,6 @@ import {
   toastFor,
   type FailedItem,
   type ToastItem,
-  type ToastOp,
 } from "./toastText";
 import type {
   AutoLink,
@@ -27,10 +26,19 @@ import type {
   DomainPage,
   DomainRow,
   Overview,
-  PlannedAction,
   SyncReport,
   Target,
 } from "./types";
+
+/// 还没扫描出页的位置的显示名：项目取文件夹名（`project:/…/CardBox` → `CardBox`）
+const folderLabel = (key: string): string =>
+  key === "global"
+    ? "全局"
+    : (key
+        .replace(/^project:/, "")
+        .split(/[/\\]+/)
+        .filter(Boolean)
+        .pop() ?? key);
 
 /// 写不进去的典型原因。命中时说人话，否则原样转述 core 给的那句
 const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
@@ -52,7 +60,7 @@ interface KeepPane {
 
 export interface SkillsTabProps {
   overview: Overview | null;
-  /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身只在添加页管理）
+  /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身只在来源管理页管理）
   autoLinks: AutoLink[];
   busy: boolean;
   onBusy: (busy: boolean) => void;
@@ -94,7 +102,7 @@ export default function SkillsTab({
   const [filterText, setFilterText] = useState("");
   // 按来源筛选（工具行第二行的来源片）；null＝全部
   const [originFilter, setOriginFilter] = useState<string | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录写不进去）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
@@ -173,7 +181,7 @@ export default function SkillsTab({
 
   // 提示与弹层只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
-    setImportOpen(false);
+    setSourcesOpen(false);
     setKeepPane(null);
     setSplitPane(null);
     setKeyToast(null);
@@ -770,12 +778,22 @@ export default function SkillsTab({
   }
   if (page === null) {
     return (
-      <Empty
-        kind="noAgentDirs"
-        description="这个项目下还没有 agent 的 skill 目录"
-        primary={{ label: "添加 skill", onClick: () => setImportOpen(true) }}
-        art="folders"
-      />
+      <>
+        <Empty
+          kind="noAgentDirs"
+          description="这个项目下还没有 agent 的 skill 目录"
+          primary={{ label: "来源", onClick: () => setSourcesOpen(true) }}
+          art="folders"
+        />
+        {sourcesOpen && (
+          // 这个位置还没有扫描出来的页：名字取项目文件夹名，没有列可当目标
+          <SourcesPage
+            domain={{ key: selectedKey, label: folderLabel(selectedKey), targets: [] }}
+            onClose={() => setSourcesOpen(false)}
+            onChange={onRefresh}
+          />
+        )}
+      </>
     );
   }
 
@@ -831,7 +849,7 @@ export default function SkillsTab({
         originFilter={originFilter}
         onOriginFilter={setOriginFilter}
         onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}
-        onImport={() => setImportOpen(true)}
+        onSources={() => setSourcesOpen(true)}
         selected={selected}
         onSelectionChange={(next) => {
           setSelected(next);
@@ -840,7 +858,7 @@ export default function SkillsTab({
         onCell={onCell}
         onBatch={(press) => void batch(press)}
         onUndo={() => undoRef.current?.()}
-        shortcuts={!importOpen}
+        shortcuts={!sourcesOpen}
         flash={flash}
         cellNotice={cellNotice}
         rowToast={rowToast}
@@ -884,45 +902,8 @@ export default function SkillsTab({
         </Confirm>
       ) : null}
 
-      {importOpen && (
-        <ImportPage
-          overview={overview}
-          page={page}
-          autoLinks={autoLinks}
-          onClose={() => setImportOpen(false)}
-          onChange={onRefresh}
-          onReport={(r) => {
-            const created = r.entries.filter((e) => e.outcome.status === "created");
-            const failed = r.entries.filter((e) => e.outcome.status === "failed");
-            const item = (a: PlannedAction): ToastItem => ({
-              name: a.itemName,
-              agent: agentRef(targetByPath(a.target)),
-            });
-            const text = toastFor("link" satisfies ToastOp, {
-              done: created.map((e) => item(e.action)),
-              failed: failed.map((e) => ({
-                ...item(e.action),
-                reason:
-                  e.outcome.status === "failed"
-                    ? reasonOf(e.action.target, e.outcome.reason, "link")
-                    : "",
-              })),
-            });
-            setGlobalToast(<Toast {...text} onDismiss={dismissGlobal} onClose={dismissGlobal} />);
-          }}
-          onError={onError}
-          onNotice={(text) =>
-            setGlobalToast(
-              <Toast
-                kind="cannot"
-                verb="没添加"
-                reason={text}
-                onDismiss={dismissGlobal}
-                onClose={dismissGlobal}
-              />,
-            )
-          }
-        />
+      {sourcesOpen && (
+        <SourcesPage domain={page} onClose={() => setSourcesOpen(false)} onChange={onRefresh} />
       )}
     </section>
   );

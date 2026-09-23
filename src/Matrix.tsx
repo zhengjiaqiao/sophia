@@ -8,7 +8,7 @@
 ///
 /// 版式（画板的写法直接当 CSS 抄，见 Matrix.css）：
 /// - 名称列定宽 280（勾选 34 + 名字 246），原件位置 120，agent 列各 88，MCP 另有 72 的 `传输` 列；
-///   所有横线止于最后一列右沿 + 24，工具行的 `+ skill` 右对齐到同一条边
+///   所有横线止于最后一列右沿 + 24，工具行的 `来源` 右对齐到同一条边
 /// - 表头底 2px 结构线；行 1px `hairline`；行高 34
 /// - 悬停十字带：行带 + 列带
 /// - 格子提示框：一行「动词 · 快捷键」，格子正上方 6，停留 700ms；格间移动每格重新计时，
@@ -149,7 +149,7 @@ export interface MatrixProps {
 
   filterText: string;
   onFilterText: (text: string) => void;
-  /// 工具行右端的 `+ skill` / `+ MCP`，右沿对齐面板右沿
+  /// 工具行右端的 `来源`（skill）/ `+ MCP`，右沿对齐面板右沿
   addButton?: ReactNode;
 
   /// 选中的行键
@@ -228,7 +228,7 @@ export const busyLockClass = (busy: boolean, dim: boolean): string | undefined =
   !busy ? undefined : dim ? "ss-busy" : "mx-locked";
 
 /// 展开记号：12px 实心三角，▸ 收起 / ▾ 展开。不在悬停也没展开时占位不显示（名字不跳）
-function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
+export function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
   return (
     <svg
       className="mx-disclosure"
