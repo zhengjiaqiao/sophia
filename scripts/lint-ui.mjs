@@ -7,7 +7,13 @@ import { join, extname, relative } from "node:path";
 
 /// 唯一的色值来源；tokens.css 之外的地方不许出现字面色值
 const TOKENS = new Set([
-  "#ffffff", "#000000", "#f2f2f2", "#e2e2e2", "#c8c8c8", "#9a9a9a", "#5a5a5a",
+  "#ffffff",
+  "#000000",
+  "#f2f2f2",
+  "#e2e2e2",
+  "#c8c8c8",
+  "#9a9a9a",
+  "#5a5a5a",
 ]);
 const FONTS = ["Barlow Condensed", "Barlow", "IBM Plex Mono"];
 /// 圆角随尺寸：记号 3、控件 6、浮层 8、弹窗 12、片与开关 32、圆点 50%，平铺结构 0（DESIGN「Shapes」）
@@ -51,7 +57,6 @@ const TOKEN_FILE = "src/tokens.css";
 /// 否则新写的文件会悄悄落进豁免里。
 const LEGACY = [];
 
-
 const rules = [
   {
     id: "color",
@@ -63,7 +68,8 @@ const rules = [
         const v = m[0].toLowerCase();
         const expanded = v.length === 4 ? "#" + [...v.slice(1)].map((c) => c + c).join("") : v;
         if (!TOKENS.has(expanded)) out.push(`${m[0]} 不是 token 色`);
-        else if (!isTokenFile) out.push(`${m[0]} 是 token 色，但只有 ${TOKEN_FILE} 能写字面值，别处用 var(--…)`);
+        else if (!isTokenFile)
+          out.push(`${m[0]} 是 token 色，但只有 ${TOKEN_FILE} 能写字面值，别处用 var(--…)`);
       }
       return [...new Set(out)];
     },
@@ -75,9 +81,12 @@ const rules = [
       const out = [];
       const body = path === TOKEN_FILE ? src.replace(ELEV_DEF, "") : src;
       for (const m of body.matchAll(/\b(oklch|rgba?|hsla?|color-mix)\s*\(/g)) out.push(m[1]);
-      for (const m of src.matchAll(/(?:color|background(?:Color)?|background-color|borderColor|border-color|stroke|fill)\s*[:=]\s*["']?([a-z]{3,20})["']?\s*[;,"'}]/gi)) {
+      for (const m of src.matchAll(
+        /(?:color|background(?:Color)?|background-color|borderColor|border-color|stroke|fill)\s*[:=]\s*["']?([a-z]{3,20})["']?\s*[;,"'}]/gi,
+      )) {
         const w = m[1].toLowerCase();
-        if (["none", "transparent", "inherit", "currentcolor", "initial", "unset"].includes(w)) continue;
+        if (["none", "transparent", "inherit", "currentcolor", "initial", "unset"].includes(w))
+          continue;
         out.push(`${m[1]}（具名色，用 token 变量）`);
       }
       return [...new Set(out)];
@@ -95,7 +104,8 @@ const rules = [
       if (/text-?[Ss]hadow\s*[:=]\s*["']?(?!none)/.test(src)) out.push("text-shadow");
       if (/\b(?:radial|conic|repeating-linear)-gradient\s*\(/.test(src)) out.push("装饰性渐变");
       for (const m of src.matchAll(/\blinear-gradient\s*\(((?:[^()]|\([^()]*\))*)\)/g)) {
-        if (!isEdgeFade(m[1])) out.push(`linear-gradient(${m[1]})（只允许 canvas → transparent 的边缘渐隐）`);
+        if (!isEdgeFade(m[1]))
+          out.push(`linear-gradient(${m[1]})（只允许 canvas → transparent 的边缘渐隐）`);
       }
       if (/filter\s*[:=]\s*["']?[^;"'}]*blur/.test(src)) out.push("blur");
       return out;
@@ -125,7 +135,10 @@ const rules = [
       for (const m of src.matchAll(/(?:font-?[Ff]amily|--font-[a-z-]+)\s*[:=]\s*([^;}\n]+)/g)) {
         const decl = m[1].trim().replace(/^["']|["']$/g, "");
         if (decl.startsWith("var(")) continue;
-        const head = decl.split(",")[0].trim().replace(/^['"]|['"]$/g, "");
+        const head = decl
+          .split(",")[0]
+          .trim()
+          .replace(/^['"]|['"]$/g, "");
         if (!FONTS.includes(head) && !["monospace", "inherit", "ui-monospace"].includes(head)) {
           out.push(`${head}（不在三个字族里）`);
         } else if (path === TOKEN_FILE && !/PingFang|YaHei/.test(decl)) {
@@ -148,7 +161,15 @@ const rules = [
     desc: "§4.5 说结果不说机制",
     run(src) {
       const text = visibleText(src);
-      const bad = ["操作失败", "执行失败", "出错了", "未知错误", "调用失败", "请重试", "没有需要建立的链接"];
+      const bad = [
+        "操作失败",
+        "执行失败",
+        "出错了",
+        "未知错误",
+        "调用失败",
+        "请重试",
+        "没有需要建立的链接",
+      ];
       return bad.filter((w) => text.includes(w));
     },
   },
@@ -160,7 +181,9 @@ const rules = [
     desc: "术语：可见文案不说 导入 / 引入 / 矩阵 / 本体 / 撞名 / 整目录链走 / 链走",
     run(src, path) {
       const text = visibleText(src);
-      return ["导入", "引入", "矩阵", "本体", "撞名", "整目录链走", "链走"].filter((w) => text.includes(w));
+      return ["导入", "引入", "矩阵", "本体", "撞名", "整目录链走", "链走"].filter((w) =>
+        text.includes(w),
+      );
     },
   },
   {
@@ -170,7 +193,8 @@ const rules = [
     desc: "动词：可见文案里「开启 / 关闭 / 已开启 / 未开启」不紧跟 agent 名或图标",
     run(src) {
       const text = visibleText(src);
-      const agent = "(?:✳|⎔|Claude|Codex|Cursor|Cline|Gemini|GitHub|Copilot|Amp|Droid|WeiboAP|Windsurf|CLAUDE|CODEX|CURSOR|CLINE)";
+      const agent =
+        "(?:✳|⎔|Claude|Codex|Cursor|Cline|Gemini|GitHub|Copilot|Amp|Droid|WeiboAP|Windsurf|CLAUDE|CODEX|CURSOR|CLINE)";
       const hits = text.match(new RegExp(`(?:开启|关闭)\\s*${agent}`, "g")) || [];
       if (/[已未]开启/.test(text)) hits.push("已开启 / 未开启（改说 已加上 / 未加上）");
       return [...new Set(hits)];
@@ -183,8 +207,14 @@ const rules = [
     run(src) {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
       const out = [];
-      for (const m of code.matchAll(/<(Button|IconButton|button|a)\b[^>]*>\s*([\u4e00-\u9fff])\s*<\/\1>/g)) out.push(`<${m[1]}>${m[2]}`);
-      for (const m of code.matchAll(/<(?:IconButton|Button)\b[^>]*\btitle=["']([\u4e00-\u9fff])["']/g)) out.push(`title=${m[1]}`);
+      for (const m of code.matchAll(
+        /<(Button|IconButton|button|a)\b[^>]*>\s*([\u4e00-\u9fff])\s*<\/\1>/g,
+      ))
+        out.push(`<${m[1]}>${m[2]}`);
+      for (const m of code.matchAll(
+        /<(?:IconButton|Button)\b[^>]*\btitle=["']([\u4e00-\u9fff])["']/g,
+      ))
+        out.push(`title=${m[1]}`);
       return [...new Set(out)];
     },
   },
@@ -194,7 +224,9 @@ const rules = [
     desc: "字号只有 28 / 20 / 15 / 13 / 12，不出现 14px",
     run(src) {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
-      const n = (code.match(/font-size\s*:\s*14px|fontSize\s*:\s*["']?14(?:px)?["']?\s*[,}]/g) || []).length;
+      const n = (
+        code.match(/font-size\s*:\s*14px|fontSize\s*:\s*["']?14(?:px)?["']?\s*[,}]/g) || []
+      ).length;
       return n ? [`${n} 处 14px 字号`] : [];
     },
   },
@@ -208,7 +240,8 @@ const rules = [
       const out = [];
       for (const m of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
         const body = m[2];
-        if (/padding\s*:\s*1px 6px/.test(body) && /border\s*:\s*1px (?!none)/.test(body)) out.push(m[1].trim());
+        if (/padding\s*:\s*1px 6px/.test(body) && /border\s*:\s*1px (?!none)/.test(body))
+          out.push(m[1].trim());
       }
       return out;
     },
@@ -220,7 +253,10 @@ const rules = [
     // 只管 MCP 那几个文件：skill 页的「自动同步」是名副其实的双向维护，不受此限
     desc: "MCP 页的文案不出现「同步」（R3）",
     run(src, path) {
-      const mcp = /^src\/[Mm]cp[A-Za-z]*\.(tsx|ts|css)$/.test(path) || /^src\/pages\/McpImportPage\./.test(path);
+      // 来源管理页 skill 与 MCP 共用一套文案文件，一并管
+      const mcp =
+        /^src\/[Mm]cp[A-Za-z]*\.(tsx|ts|css)$/.test(path) ||
+        /^src\/pages\/(SourcesPage\.tsx|sourcesModel\.ts|sourcesView\.ts)$/.test(path);
       if (!mcp) return [];
       return visibleText(src).includes("同步") ? ["MCP 页的可见文案里出现了「同步」"] : [];
     },
@@ -235,8 +271,9 @@ const rules = [
 /// 注释里的词也不算违规，那是给读代码的人看的。
 function visibleText(src) {
   const noComments = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
-  const strings = [...noComments.matchAll(/"([^"\\\n]{2,})"|'([^'\\\n]{2,})'|`([^`\\]{2,})`/g)]
-    .map((m) => m[1] ?? m[2] ?? m[3]);
+  const strings = [...noComments.matchAll(/"([^"\\\n]{2,})"|'([^'\\\n]{2,})'|`([^`\\]{2,})`/g)].map(
+    (m) => m[1] ?? m[2] ?? m[3],
+  );
   // JSX 文本节点：`[^<>{}]` 不排除换行，所以跨行的整块也能取到。
   // 曾经这里带着 \n，于是 `>\n  操作失败\n<` 这种被整段漏掉——
   // 三条文案规则（term / mechanism-words / mcp-no-sync）一起失效，
@@ -278,10 +315,16 @@ for (const f of files.sort()) {
 }
 
 const checked = files.length - skipped;
-if (errs === 0) console.log(`\x1b[32m✓\x1b[0m 界面规范：${checked} 个文件零违规${skipped ? `（${skipped} 个旧文件暂时豁免）` : ""}`);
-else console.log(`\n${errs} 个违规，检查了 ${checked} 个文件${skipped ? `，豁免 ${skipped} 个` : ""}`);
+if (errs === 0)
+  console.log(
+    `\x1b[32m✓\x1b[0m 界面规范：${checked} 个文件零违规${skipped ? `（${skipped} 个旧文件暂时豁免）` : ""}`,
+  );
+else
+  console.log(`\n${errs} 个违规，检查了 ${checked} 个文件${skipped ? `，豁免 ${skipped} 个` : ""}`);
 
 if (skipped > 0 && args.length === 0) {
-  console.log(`\x1b[33m!\x1b[0m 豁免名单还剩 ${skipped} 个文件，T10 收口时必须清空：\n   ${LEGACY.join("\n   ")}`);
+  console.log(
+    `\x1b[33m!\x1b[0m 豁免名单还剩 ${skipped} 个文件，T10 收口时必须清空：\n   ${LEGACY.join("\n   ")}`,
+  );
 }
 process.exit(errs ? 1 : 0);

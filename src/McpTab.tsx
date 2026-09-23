@@ -9,8 +9,8 @@ import Matrix, {
   type MatrixRowView,
   type ColumnCheck,
 } from "./Matrix";
-import { affectedTip, Empty as TableEmpty, PlusGlyph } from "./DomainView";
-import McpImportPage from "./pages/McpImportPage";
+import { affectedTip, Empty as TableEmpty } from "./DomainView";
+import SourcesPage from "./pages/SourcesPage";
 import { displayPath } from "./pathText";
 import { pathsOfKey } from "./issues";
 import {
@@ -25,7 +25,7 @@ import {
   type McpDomainRow,
 } from "./mcpView";
 import {
-  AddButton,
+  Button,
   CELL_TOAST_DWELL_MS,
   Confirm,
   Empty,
@@ -40,7 +40,6 @@ import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toast
 import { mcpOwnTip } from "./cellTip";
 import type {
   McpUndoReport,
-  McpAutoImportRule,
   McpEntry,
   McpLocation,
   McpOverview,
@@ -96,12 +95,27 @@ const columnNames = (targets: McpLocation[]): Map<string, string> => {
   return out;
 };
 
-/// 组名：来源位置名，去掉 `MCPs` 这类泛称；全局位置补上 `User`（画板 Mcp「Claude Code · User」）
+/// 组名（「来源」列）：定义所在的位置名，去掉 `MCPs` 这类泛称；全局位置补上 `User`（画板 Mcp「Claude Code · User」）
 const groupLabel = (l: McpLocation | undefined, id: string): string => {
   if (!l) return id;
   const label = l.label.replace(/ MCPs$/, "");
   return l.domain === "global" && !label.includes(" · ") ? `${label} · User` : label;
 };
+
+/// 来源管理页的位置名：全局 / 项目文件夹名（`CardBox 的 MCP 来源`）；WeiboAP agent 沿用侧栏的名字
+const placeName = (page: McpDomain): string =>
+  page.key === "global"
+    ? "全局"
+    : page.targets.some((t) => t.harnessId === "weiboap")
+      ? page.label
+      : (page.key
+          .replace(/^project:/, "")
+          .split(/[/\\]+/)
+          .filter(Boolean)
+          .pop() ?? page.label);
+
+/// 一个空格上有好几份不一样的同名定义能写：不替用户挑
+const ambiguousText = (name: string) => `有好几份不一样的同名 ${name}，没法替你挑用哪一份`;
 
 /// 待确认的一次写入：批量与跨域确认，同域单格不确认
 interface Pane {
@@ -109,8 +123,6 @@ interface Pane {
   crossDomain: boolean;
   anchor?: ConfirmAnchor;
   keyId?: string;
-  /// 从「+ MCP」添加页来的：没有键可锚，结果走右下的全局提示条
-  fromImport?: boolean;
 }
 
 /// 触发控件此刻的位置：点下去的那颗键 / 那一格还拿着焦点
@@ -132,15 +144,13 @@ export default function McpTab({
   onFocused,
 }: McpTabProps) {
   const [overview, setOverview] = useState<McpOverview | null>(null);
-  const [autoImports, setAutoImports] = useState<McpAutoImportRule[]>([]);
   // 选中的行：域 key → 行键集合
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  // 按来源位置筛选（工具行第二行的来源片）；null＝全部
+  // 按来源筛选（工具行第二行的来源片）；null＝全部
   const [originFilter, setOriginFilter] = useState<string | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  // 单格歧义跳过来时预选的那个位置
-  const [importTargetIds, setImportTargetIds] = useState<string[] | null>(null);
+  // 来源管理页（工具行 `来源`）开着没有
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [pane, setPane] = useState<Pane | null>(null);
   const [optimistic, setOptimistic] = useState<Set<string>>(new Set());
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
@@ -181,10 +191,9 @@ export default function McpTab({
     const version = ++refreshVersion.current;
     onBusy(true);
     try {
-      const [next, rules] = await Promise.all([api.scanMcp(), api.listMcpAutoImports()]);
+      const next = await api.scanMcp();
       if (mounted.current && version === refreshVersion.current) {
         setOverview(next);
-        setAutoImports(rules);
         onOverview?.(next);
       }
     } catch (error) {
@@ -242,8 +251,7 @@ export default function McpTab({
 
   // 提示与二级页面只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
-    setImportOpen(false);
-    setImportTargetIds(null);
+    setSourcesOpen(false);
     setPane(null);
     setKeyToast(null);
     setCellToast(null);
@@ -360,7 +368,7 @@ export default function McpTab({
     if (row.entries.every((entry) => entry.transport === "unsupported" || entry.reason !== null)) {
       return `${row.name} 用了只有 ${labelOf(row.entries[0].sourceId)} 认得的写法，搬到别处就不是原来那个了`;
     }
-    return `有好几份不一样的同名 ${row.name}，用「+ MCP」指定用哪一份`;
+    return ambiguousText(row.name);
   };
 
   // ===== 写入 =====
@@ -372,16 +380,11 @@ export default function McpTab({
     });
 
   /// 写一批（已经确认过或不需要确认）。keyId 给了就把提示条贴在那颗键下
-  const apply = async (
-    preview: McpPreview,
-    allowCrossDomain: boolean,
-    keyId?: string,
-    fromImport = false,
-  ) => {
+  const apply = async (preview: McpPreview, allowCrossDomain: boolean, keyId?: string) => {
     const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
-    // 单格：写的时候那一格灰着，写成闪一下。批量（按键、添加页）：格子同时变成新状态、不闪，
+    // 单格：写的时候那一格灰着，写成闪一下。批量（按键）：格子同时变成新状态、不闪，
     // 真的慢才在触发项旁出忙碌指示 + 一句（DESIGN 冲突表「格子变化要不要闪」）
-    const single = keyId === undefined && !fromImport;
+    const single = keyId === undefined;
     setPane(null);
     // 批量开始时收起单格那一行：一次只一条，撤销入口不混
     if (!single) setCellToast(null);
@@ -445,16 +448,6 @@ export default function McpTab({
             />
           ),
         });
-      } else if (fromImport) {
-        // 从添加页来的批量 / 跨域写入：没有键可锚，右下出全局提示条（例行、可撤销；失败说原因）
-        setGlobalToast(
-          <Toast
-            {...text}
-            action={undo ? { label: "撤销", onClick: undo } : undefined}
-            onDismiss={dismissGlobal}
-            onClose={text.tier === "notice" ? dismissGlobal : undefined}
-          />,
-        );
       } else if (failed.length > 0) {
         // 单格失败：不出例行一行，格下小黑窗说原因
         const f = failed[0];
@@ -602,9 +595,8 @@ export default function McpTab({
     setCellNotice(null);
     const source = sourceForMissingTarget(row, target.id);
     if (source === null) {
-      // 有好几份不等价的同名来源，必须指定用哪一份 → 交给添加页
-      setImportTargetIds([target.id]);
-      setImportOpen(true);
+      // 有好几份不等价的同名来源：不替用户挑，格下说清为什么没写
+      setCellNotice({ rowKey: row.name, columnId: target.id, text: ambiguousText(row.name) });
       return;
     }
     void write([{ sourceId: source.sourceId, name: row.name, targetId: target.id }]);
@@ -716,7 +708,7 @@ export default function McpTab({
     return {
       key,
       name: row.name,
-      // 来源位置：定义住在哪个配置文件；悬停出完整路径与打开 ↗
+      // 来源：定义住在哪个配置文件；悬停出完整路径与打开 ↗
       origin: {
         id: originId,
         label: groupLabel(locationOf(originId), originId),
@@ -828,11 +820,9 @@ export default function McpTab({
     onToggle: () => void write(allMissing, "all"),
   };
 
-  const openImport = () => {
-    setImportTargetIds(null);
-    setImportOpen(true);
-  };
-  const addAction = { label: "MCP", onClick: openImport, icon: <PlusGlyph /> };
+  const openSources = () => setSourcesOpen(true);
+  // 空态里的动作同工具行：进来源管理页（管理入口，不带 `+`）
+  const addAction = { label: "来源", onClick: openSources };
   const empty =
     query !== "" ? (
       <TableEmpty
@@ -870,7 +860,7 @@ export default function McpTab({
     <section className="mx-page mcp-tab">
       <Matrix
         columns={columns}
-        originLabel="来源位置"
+        originLabel="来源"
         sources={{
           total: page.rows.length,
           selected: originFilter,
@@ -889,7 +879,7 @@ export default function McpTab({
         transportLabel="传输"
         filterText={filterText}
         onFilterText={setFilterText}
-        addButton={<AddButton noun="MCP" onClick={openImport} />}
+        addButton={<Button onClick={openSources}>来源</Button>}
         selected={selected}
         onSelectionChange={(next) => {
           setSelected(next);
@@ -900,7 +890,7 @@ export default function McpTab({
         onUndo={() => undoRef.current?.()}
         busy={busy}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
-        shortcuts={!importOpen && pane === null}
+        shortcuts={!sourcesOpen && pane === null}
         empty={empty}
         flash={flash}
         cellNotice={cellNotice}
@@ -922,7 +912,7 @@ export default function McpTab({
               : "已经存在的同名配置不会被覆盖；写进已有文件前会先备份"
           }
           confirmLabel="写进去"
-          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId, pane.fromImport)}
+          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId)}
           onCancel={() => setPane(null)}
         >
           <ul className="mcp-confirm-list">
@@ -948,50 +938,13 @@ export default function McpTab({
         </Confirm>
       )}
 
-      {importOpen && (
-        <McpImportPage
-          overview={overview}
-          page={page}
-          initialTargetIds={importTargetIds ?? undefined}
-          autoImports={autoImports}
-          onClose={() => {
-            setImportOpen(false);
-            setImportTargetIds(null);
-          }}
+      {sourcesOpen && (
+        <SourcesPage
+          kind="mcp"
+          domain={{ key: page.key, label: placeName(page) }}
+          locations={overview.locations.filter((l) => l.domain === page.key)}
+          onClose={() => setSourcesOpen(false)}
           onChange={refresh}
-          onPreview={(preview) => {
-            setImportOpen(false);
-            setImportTargetIds(null);
-            if (preview.actions.length === 0) {
-              setGlobalToast(
-                <Toast
-                  kind="cannot"
-                  verb="没写进"
-                  reason={preview.issues[0]?.message ?? "这些位置上都已经有了，没有要新增的"}
-                  onDismiss={dismissGlobal}
-                  onClose={dismissGlobal}
-                />,
-              );
-              return;
-            }
-            setPane({
-              preview,
-              crossDomain: preview.actions.some((action) => action.crossDomain),
-              fromImport: true,
-            });
-          }}
-          onError={onError}
-          onNotice={(text) =>
-            setGlobalToast(
-              <Toast
-                kind="cannot"
-                verb="没添加"
-                reason={text}
-                onDismiss={dismissGlobal}
-                onClose={dismissGlobal}
-              />,
-            )
-          }
         />
       )}
     </section>

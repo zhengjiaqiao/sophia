@@ -80,7 +80,7 @@ export interface MatrixCellView {
 export interface MatrixRowView {
   key: string;
   name: string;
-  /// 原件位置 / 来源位置格：来源名（同名来源用区分片段）+ 完整路径；悬停出路径提示框与 `打开 ↗`。
+  /// 「来源」格：来源名（同名来源用区分片段）+ 完整路径；悬停出路径提示框与 `打开 ↗`。
   /// `gone`：原件已经不在了（孤链行），名字用 `ink-faint`，不出 `打开 ↗`。
   /// `split`：同名来源时把 `label` 拆成来源名 + 区分片段两段画，放不下只截来源名（`ego… · 0.5.0.32`）
   origin: {
@@ -127,7 +127,7 @@ export interface ColumnCheck {
 
 export interface MatrixProps {
   columns: MatrixColumn[];
-  /// 原件位置列：列头文字（`原件位置` / `来源位置`）
+  /// 「来源」列：列头文字（skill 与 MCP 都是 `来源`）
   originLabel: string;
   /// 工具行第二行的来源筛选片：`全部 N` 在最前、默认选中；每片 `来源名 N`，选中反色。
   /// 放不下折行（不超出面板宽）；片名放不下截断，完整值用同一行右侧的提示框给
