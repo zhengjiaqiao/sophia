@@ -1122,6 +1122,7 @@ pub fn run() {
             gateway::gateway_restore,
             gateway::gateway_restart,
             gateway::gateway_restart_codex,
+            gateway::gateway_launch_codex,
             gateway::gateway_takeover,
             tray::tray_open_main,
             tray::tray_set_height,

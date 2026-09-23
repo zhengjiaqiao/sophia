@@ -31,6 +31,10 @@ struct World {
     terminated: Vec<u32>,
     /// 非空时发信号失败，内容就是系统的原话
     terminate_error: Option<String>,
+    /// 打开 Codex 桌面应用被调了几次：测试不真去打开
+    launches: u32,
+    /// 非空时打开失败，内容就是系统的原话
+    launch_error: Option<String>,
     codex_started_at: Option<u64>,
     codex_version: String,
     now: u64,
@@ -234,6 +238,19 @@ fn fixture() -> Fixture {
                     Some(message) => Err(std::io::Error::other(message)),
                     None => {
                         w.terminated.push(pid);
+                        Ok(())
+                    }
+                }
+            }
+        }),
+        launch_codex: Box::new({
+            let w = w.clone();
+            move || {
+                let mut w = w.lock().unwrap();
+                match w.launch_error.clone() {
+                    Some(message) => Err(std::io::Error::other(message)),
+                    None => {
+                        w.launches += 1;
                         Ok(())
                     }
                 }
@@ -784,6 +801,34 @@ fn restart_codex_relays_the_signal_error_verbatim() {
         err.message,
         "结束进程 7503 失败: kill: 7503: Operation not permitted"
     );
+}
+
+/// `启动 Codex`：只调一次注入的打开动作，不写 Codex 设置、不结束任何进程
+#[test]
+fn launch_codex_opens_the_app_once_and_touches_nothing_else() {
+    let f = fixture();
+    f.world.lock().unwrap().processes = fake_processes();
+    f.app.launch_codex().unwrap();
+    let w = f.world.lock().unwrap();
+    assert_eq!(w.launches, 1);
+    assert!(w.terminated.is_empty(), "启动不结束任何进程");
+    drop(w);
+    assert_eq!(f.read_config(), ORIGINAL, "启动不写 Codex 设置");
+}
+
+/// 打不开时原样转述系统的话，不编
+#[test]
+fn launch_codex_relays_the_open_error_verbatim() {
+    let f = fixture();
+    f.world.lock().unwrap().launch_error =
+        Some("Unable to find application with bundle identifier com.openai.codex.".to_owned());
+    let err = f.app.launch_codex().unwrap_err();
+    assert_eq!(err.code, "internal");
+    assert_eq!(
+        err.message,
+        "Unable to find application with bundle identifier com.openai.codex."
+    );
+    assert_eq!(f.world.lock().unwrap().launches, 0);
 }
 
 fn agents_manager_setup(f: &Fixture) -> String {

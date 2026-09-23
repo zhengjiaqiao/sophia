@@ -172,6 +172,8 @@ export const api = {
   gatewayRestart: () => invoke<GatewayState>("gateway_restart"),
   /// 结束 Codex 的后台进程，下次启动才读到新配置；terminated 为 0 表示 Codex 当时没在跑
   gatewayRestartCodex: () => invoke<GatewayRestartReport>("gateway_restart_codex"),
+  /// 按应用标识打开 Codex 桌面应用；只发出请求，等它起来要自己轮询 `codex.running`
+  gatewayLaunchCodex: () => invoke<void>("gateway_launch_codex"),
   /// 菜单栏面板用：把主窗口带到前面；`page` 给了就切过去，`error` 给了就在那一页上说
   trayOpenMain: (page: "models" | "settings" | null, error: string | null) =>
     invoke<void>("tray_open_main", { page, error }),

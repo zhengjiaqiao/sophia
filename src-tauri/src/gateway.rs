@@ -283,6 +283,14 @@ pub async fn gateway_restart_codex(
     blocking(move || app.restart_codex()).await
 }
 
+/// 打开 Codex 桌面应用（按应用标识）。只发出打开请求，界面自己轮询 `codex.running` 等它起来。
+/// 它不写 `~/.codex/config.toml`，所以不取 `config_lock`
+#[tauri::command]
+pub async fn gateway_launch_codex(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let app = app(&state)?;
+    blocking(move || app.launch_codex()).await
+}
+
 #[tauri::command]
 pub async fn gateway_takeover(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
     let app = app(&state)?;

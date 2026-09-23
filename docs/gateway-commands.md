@@ -52,6 +52,7 @@ interface GatewayState {
 | `gateway_restore` | — | 移除本功能写入的一切；各家的地址、模型和密钥保留 |
 | `gateway_restart` | — | `launchctl kickstart -k` 重启本机路由服务。**只重启我们自己装的 launchd 服务，不碰 Codex**；不写 `~/.codex/config.toml`，所以不取 `config_lock`。失败时原样转述 `launchctl` 的话，代码 `router_down`。界面上不给按钮，保留为内部能力 |
 | `gateway_restart_codex` | — | 返回 `{ terminated: number; pids: number[] }`，不是 `GatewayState`。结束 Codex 的后台进程（`codex app-server` 与 `codex-code-mode-host`，SIGTERM），下次任何工具拉起 Codex 时才读到新配置。**不碰用户在终端里的交互式 `codex` 会话**；一个都没找到不算失败，返回 `terminated: 0`。不写 `~/.codex/config.toml`，所以不取 `config_lock` |
+| `gateway_launch_codex` | — | 返回空。按应用标识打开 Codex 桌面应用（`open -b com.openai.codex`，不写死路径），只发出打开请求、不等它起来——界面轮询 `codex.running`。打不开时原样转述 `open` 的话，代码 `internal`。不写 `~/.codex/config.toml`，所以不取 `config_lock` |
 | `gateway_takeover` | — | 接管 agents-manager 的现有配置，生成 id 为 `wecode` 的一家；不动用户自己加的网关 |
 
 `providerId` 省略时作用在第一家上。旧命令 `gateway_save_provider(baseUrl, key)` 仍在：有网关时改第一家，没有时新建一家。

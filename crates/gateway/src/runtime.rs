@@ -174,6 +174,26 @@ pub fn parse_etime(text: &str) -> Option<u64> {
     Some(days * 86400 + seconds)
 }
 
+/// Codex 桌面应用的应用标识。本机实测应用包是 `ChatGPT.app`，按标识打开就不必写死路径
+const CODEX_BUNDLE_ID: &str = "com.openai.codex";
+
+/// `open -b com.openai.codex`：让系统按应用标识打开 Codex 桌面应用（已开着就只是带到前面）。
+/// 打不开时把 `open` 的原话带回去
+fn launch_codex() -> io::Result<()> {
+    let output = Command::new("/usr/bin/open")
+        .args(["-b", CODEX_BUNDLE_ID])
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    Err(io::Error::other(if said.is_empty() {
+        format!("open 没能打开 {CODEX_BUNDLE_ID}（{}）", output.status)
+    } else {
+        said
+    }))
+}
+
 /// Codex 加载配置的那批进程里最早的启动时间；一个都没在跑为 None。
 ///
 /// 认的是 `restart_codex` 会结束的同一批后台进程（`process::is_codex_background`：
@@ -362,6 +382,7 @@ pub fn build_app(store_dir: PathBuf) -> App {
         }),
         list_processes: Box::new(process::list_processes),
         terminate: Box::new(process::terminate),
+        launch_codex: Box::new(launch_codex),
         codex_started_at: Box::new(codex_started_at),
         codex_version: Box::new(codex_version_cached()),
         now: Box::new(unix_now),

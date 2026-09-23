@@ -87,6 +87,8 @@ pub struct Deps {
     pub list_processes: Get<io::Result<Vec<process::ProcessInfo>>>,
     /// 向进程发 SIGTERM
     pub terminate: Op<u32, io::Result<()>>,
+    /// 打开 Codex 桌面应用（按应用标识，不写死路径）；打不开时带回系统的原话
+    pub launch_codex: Get<io::Result<()>>,
     /// Codex 后台进程（app-server，配置是它读的）最早的启动时间（unix 秒）；没在运行为 None
     pub codex_started_at: Get<Option<u64>>,
     pub codex_version: Get<String>,
@@ -949,6 +951,13 @@ impl App {
         }
         report.terminated = report.pids.len() as u32;
         Ok(report)
+    }
+
+    /// 打开 Codex 桌面应用。只发出打开请求、不等它起来——界面自己轮询 `codex.running`，
+    /// 刚起来的 Codex 读的就是现在的设置。不读写 `~/.codex/config.toml`，所以不取 `self.lock`。
+    /// 失败时原样转述系统的话，不编
+    pub fn launch_codex(&self) -> Result<(), AppError> {
+        (self.deps.launch_codex)().map_err(|e| AppError::new("internal", e.to_string()))
     }
 
     /// 接管 agents-manager 的现有配置：地址、模型、显示名、密钥、启用前默认模型原样带过来
