@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CELL_TOAST_DWELL_MS, SubPage, Toast } from "../ui";
+import { SubPage, Toast } from "../ui";
 import { AddSourcePanel } from "./AddSourcePanel.tsx";
 import type { CandidateEntry } from "./addSourceView.ts";
 import type { DomainRef } from "./sourcesView.ts";
@@ -70,8 +70,8 @@ export function AddSourcePage({ model, domain, onClose, onAdded, onAllAdded }: A
   );
 }
 
-/// 加完来源滑回主视图时工具行下的例行一行：`✓ 已添加 WeiboAP · 39 个 skill`（段由 `addedParts` 给），
-/// 约 4 秒淡出，不带撤销（移除在来源管理页）。skill 与 MCP 主视图共用
+/// 加完来源滑回主视图时新来源那几片正下方浮起的一窗：`✓ 已添加 WeiboAP · 39 个 skill`
+/// （段由 `addedParts` 给），约 4 秒淡出，不带撤销（移除在来源管理页）。skill 与 MCP 主视图共用
 export function AddedToast({ parts, onDismiss }: { parts: string[]; onDismiss: () => void }) {
   return (
     <Toast
@@ -88,8 +88,6 @@ export function AddedToast({ parts, onDismiss }: { parts: string[]; onDismiss: (
           : []),
         <span key={i}>{part}</span>,
       ])}
-      dwellMs={CELL_TOAST_DWELL_MS}
-      fadeOut
       onDismiss={onDismiss}
     />
   );

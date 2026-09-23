@@ -5,9 +5,10 @@ import type { McpLocation, Target } from "../types";
 import {
   AddButton,
   AgentIcon,
-  Busy,
+  BusySlot,
   Confirm,
   Empty,
+  FloatingToast,
   IconButton,
   IconClose,
   IconPlus,
@@ -20,7 +21,7 @@ import {
 } from "../ui";
 import type { ConfirmAnchor } from "../ui";
 import { edgeFades } from "../modelsView";
-import { placeLayer, type LayerPlacement } from "../layerPlace";
+import { placeLayer, type AnchorRect, type LayerPlacement, type ToastAlign } from "../layerPlace";
 import { AddSourcePage } from "./AddSourcePage.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./importDefaults.ts";
@@ -81,6 +82,8 @@ interface PendingRemove {
   body: string;
   commit: () => Promise<ToastText>;
   anchor: ConfirmAnchor;
+  /// 按下那一刻 × 的位置（结果锚在这里）
+  at: AnchorRect | null;
 }
 
 export default function SourcesPage(props: SourcesPageProps) {
@@ -100,13 +103,25 @@ export default function SourcesPage(props: SourcesPageProps) {
 
   const [data, setData] = useState<SourcesData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  /// 点了 × 的那一行：先算影响（planning），确认后移除（removing）。只锁这一行的 ×，
+  /// 过了 0.3 秒门槛原位换成忙碌指示 + 一句；别的行、开关、`+ 来源` 照常
+  const [rowBusy, setRowBusy] = useState<{ id: string; kind: "planning" | "removing" } | null>(
+    null,
+  );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [layer, setLayer] = useState<Layer | null>(null);
   /// 添加来源页（页头 / 空态的 `+ 来源`）开着没有
   const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState<PendingRemove | null>(null);
-  const [toast, setToast] = useState<{ key: number; text: ToastText } | null>(null);
+  /// 提示小窗：锚在被按下的那个控件上（DESIGN「浮起小窗的位置 · 一行」）——行尾 × 按下的出在 ×
+  /// 正下方、右对齐 ×；开关、目标项按下的出在它下方。`at` 是按下那一刻控件的位置（左右取控件，
+  /// 上下取这一行），行被移除之后也还在原处
+  const [toast, setToast] = useState<{
+    key: number;
+    text: ToastText;
+    at: AnchorRect;
+    align: ToastAlign;
+  } | null>(null);
   /// 刚拨过的开关 / 刚改过的目标：重读回来之前先按点下去的样子画（开关不回弹）。值是目标 id，空＝关
   const [optimistic, setOptimistic] = useState<Map<string, string[]>>(new Map());
   const rowEls = useRef(new Map<string, HTMLDivElement>());
@@ -123,9 +138,33 @@ export default function SourcesPage(props: SourcesPageProps) {
   /// 函数身份不变：提示条的计时器不会被重渲染重置
   const dismissToast = useCallback(() => setToast(null), []);
   const closeLayer = useCallback(() => setLayer(null), []);
-  const say = (text: ToastText) => setToast({ key: Date.now(), text });
-  const cannot = (verb: string, error: unknown, names?: string[]) =>
-    say({ tier: "notice", kind: "cannot", verb, names, reason: String(error) });
+  /// 按下那一刻控件的位置：左右取控件；在行里的，上下取这一行（不盖住这一行）
+  const pressedAt = (el: Element | null | undefined, row?: SourceRow): AnchorRect | null => {
+    if (!el) return null;
+    const c = el.getBoundingClientRect();
+    const line = row ? rowEls.current.get(row.id)?.getBoundingClientRect() : undefined;
+    return {
+      top: line?.top ?? c.top,
+      bottom: line?.bottom ?? c.bottom,
+      left: c.left,
+      right: c.right,
+    };
+  };
+  const say = (text: ToastText, at: AnchorRect | null, align: ToastAlign) => {
+    if (at) setToast({ key: Date.now(), text, at, align });
+  };
+  const cannot = (
+    verb: string,
+    error: unknown,
+    row: SourceRow,
+    at: AnchorRect | null,
+    align: ToastAlign,
+  ) =>
+    say(
+      { tier: "notice", kind: "cannot", verb, names: [row.name], reason: String(error) },
+      at,
+      align,
+    );
 
   const load = useCallback(async () => {
     try {
@@ -147,7 +186,12 @@ export default function SourcesPage(props: SourcesPageProps) {
   const targetsOf = (row: SourceRow) => optimistic.get(row.id) ?? row.targets;
 
   /// 改规则：打开 / 关掉 / 加减一个目标都当场生效，不确认；失败时开关回到原样并说一声
-  const changeRule = async (row: SourceRow, next: string[], failVerb: string) => {
+  const changeRule = async (
+    row: SourceRow,
+    next: string[],
+    failVerb: string,
+    at: AnchorRect | null,
+  ) => {
     const prev = targetsOf(row);
     setOptimistic((m) => new Map(m).set(row.id, next));
     try {
@@ -155,33 +199,40 @@ export default function SourcesPage(props: SourcesPageProps) {
       if (next.length > 0) saveImportMemory(model.memoryKey(row.id), { last: next, streak: 1 });
       await settle();
     } catch (e) {
-      cannot(failVerb, e, [row.name]);
+      cannot(failVerb, e, row, at, "start");
       await load();
     }
   };
 
   const toggleRule = (row: SourceRow, on: boolean) => {
+    // 按下的是这一行的开关：没成的话说在它下方
+    const at = pressedAt(rowEls.current.get(row.id)?.querySelector('[role="switch"]'), row);
     if (on) {
       const targets = defaultTargets(
         model.pickable(row),
         loadImportMemory(model.memoryKey(row.id))?.last,
       );
       // 打开后当场展开选目标的浮层：默认目标只是起点，要让人看见、能改
-      void changeRule(row, targets, "没打开").then(() => setOpenTargetsOf(row.id));
+      void changeRule(row, targets, "没打开", at).then(() => setOpenTargetsOf(row.id));
     } else {
-      void changeRule(row, [], "没关掉");
+      void changeRule(row, [], "没关掉", at);
     }
   };
 
-  const toggleTarget = (row: SourceRow, id: string) => {
+  /// `el`：按下的那一项（目标浮层里）：没成的话说在它下方
+  const toggleTarget = (row: SourceRow, id: string, el: Element) => {
     const current = targetsOf(row);
     const next = current.includes(id) ? current.filter((t) => t !== id) : [...current, id];
-    void changeRule(row, next, "没改");
+    void changeRule(row, next, "没改", pressedAt(el));
   };
 
-  /// 点 ×：先取会撤掉的清单，再出锚定确认（锚在这一行下方）
-  const askRemove = async (row: SourceRow) => {
+  /// 点 ×：先取会撤掉的清单（× 原位忙碌），再出锚定确认（锚在这一行下方）。
+  /// 按下那一刻记下 × 的位置：结果出在它正下方、右对齐它，行被移除之后也还在原处
+  const askRemove = async (row: SourceRow, trigger: Element) => {
+    if (rowBusy?.id === row.id) return;
     const el = rowEls.current.get(row.id);
+    const at = pressedAt(trigger, row);
+    setRowBusy({ id: row.id, kind: "planning" });
     try {
       const { body, commit } = await model.planRemove(row);
       const r = el?.getBoundingClientRect();
@@ -191,23 +242,28 @@ export default function SourcesPage(props: SourcesPageProps) {
         body,
         commit,
         anchor: { top: r.top, left: r.left, right: r.right, bottom: r.bottom },
+        at,
       });
     } catch (e) {
-      cannot("没移除", e, [row.name]);
+      cannot("没移除", e, row, at, "end");
+    } finally {
+      setRowBusy((prev) => (prev?.id === row.id && prev.kind === "planning" ? null : prev));
     }
   };
 
-  const remove = async ({ row, commit }: PendingRemove) => {
+  /// 确认之后移除：只有这一行的 × 忙碌，不把整页变暗、不锁别的行
+  const remove = async ({ row, commit, at }: PendingRemove) => {
     setPending(null);
-    setBusy(true);
+    setRowBusy({ id: row.id, kind: "removing" });
     try {
       const text = await commit();
       await settle();
-      say({ ...text, names: [row.name] });
+      say({ ...text, names: [row.name] }, at, "end");
     } catch (e) {
-      cannot("没移除", e, [row.name]);
+      cannot("没移除", e, row, at, "end");
+    } finally {
+      setRowBusy((prev) => (prev?.id === row.id ? null : prev));
     }
-    setBusy(false);
   };
 
   /// 浮层开着时 Esc 由浮层接走；确认框开着时 Esc 只取消确认，不退出这一页
@@ -238,12 +294,13 @@ export default function SourcesPage(props: SourcesPageProps) {
     });
 
   const toastNode = toast ? (
-    <Toast
-      key={toast.key}
-      {...toast.text}
-      onDismiss={dismissToast}
-      onClose={toast.text.tier === "notice" ? dismissToast : undefined}
-    />
+    <FloatingToast key={toast.key} align={toast.align} anchor={() => toast.at}>
+      <Toast
+        {...toast.text}
+        onDismiss={dismissToast}
+        onClose={toast.text.tier === "notice" ? dismissToast : undefined}
+      />
+    </FloatingToast>
   ) : null;
 
   let body: ReactNode;
@@ -269,19 +326,19 @@ export default function SourcesPage(props: SourcesPageProps) {
             onClick: () => setAdding(true),
           }}
         />
-        {toastNode}
       </div>
     );
   } else {
     body = (
       <div className="src-page">
-        <Busy busy={busy} className="src-panel">
+        <div className="src-panel">
           <div className="src-panel__head">
             <span>来源</span>
             <span>以后新出现的</span>
           </div>
           {data.rows.map((row) => {
             const open = expanded.has(row.id);
+            const busyHere = rowBusy?.id === row.id ? rowBusy.kind : null;
             const targets = targetsOf(row);
             const on = targets.length > 0;
             const options = model.targetsFor(row);
@@ -409,11 +466,21 @@ export default function SourcesPage(props: SourcesPageProps) {
                           tipPlacement="bottom"
                         />
                       ) : (
-                        <IconButton
-                          icon={<IconClose />}
-                          title={removeTitle(domain, row.name)}
-                          onClick={() => void askRemove(row)}
-                        />
+                        <BusySlot
+                          busy={busyHere !== null}
+                          label={busyHere === "removing" ? "正在移除" : "正在查看影响"}
+                        >
+                          <IconButton
+                            icon={<IconClose />}
+                            title={removeTitle(domain, row.name)}
+                            onClick={() => {
+                              const x = rowEls.current
+                                .get(row.id)
+                                ?.querySelector(".src-row__remove button");
+                              if (x) void askRemove(row, x);
+                            }}
+                          />
+                        </BusySlot>
                       )}
                     </span>
                   </div>
@@ -459,7 +526,7 @@ export default function SourcesPage(props: SourcesPageProps) {
                           className={`src-target${checked ? " is-on" : ""}`}
                           title={t.disabledReason}
                           disabled={t.disabledReason !== undefined}
-                          onClick={() => toggleTarget(row, t.id)}
+                          onClick={(e) => toggleTarget(row, t.id, e.currentTarget)}
                         >
                           <CheckMark on={checked} />
                           <AgentIcon id={t.iconId} name={t.label} size={14} />
@@ -472,8 +539,7 @@ export default function SourcesPage(props: SourcesPageProps) {
               </div>
             );
           })}
-        </Busy>
-        {toastNode ? <div className="src-foot">{toastNode}</div> : null}
+        </div>
       </div>
     );
   }
@@ -485,13 +551,13 @@ export default function SourcesPage(props: SourcesPageProps) {
       aside={
         // 页头右端固定（DESIGN：跟随列表的话列表长了就找不到）；空态里已有同一个动作，不重复
         data !== null && data.rows.length > 0 ? (
-          <Busy busy={busy}>
-            <AddButton noun="来源" onClick={() => setAdding(true)} />
-          </Busy>
+          <AddButton noun="来源" onClick={() => setAdding(true)} />
         ) : null
       }
     >
       {body}
+      {/* 提示小窗锚在按下那一刻记下的控件位置上（不挂进行里：行可能已被移除） */}
+      {toastNode}
       {adding ? (
         // 加好后主视图重扫、这一页重读，再滑回这一页
         <AddSourcePage

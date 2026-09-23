@@ -125,28 +125,13 @@
   color: var(--ink-mute);
 }
 
-/* 例行成功一行，约 4 秒后淡出：前 3.88 秒静止，末尾 120ms 机械缓动淡掉（不是 300ms 渐隐） */
+/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在它正下方 4（FloatingToast） */
 .models-restart--done {
-  animation: models-done-fade 4s var(--ease-mech) forwards;
-}
-
-.models-restart--done .ss-toast--routine {
+  display: inline-block;
+  width: 0;
   height: var(--control-h-compact);
-  font-size: var(--size-caption);
 }
 
-@keyframes models-done-fade {
-  0%,
-  97% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
-
-/* 「重启生效」的提示框按画板单行显示：这句不折行；其余提示框的 240 上限不动。
-   出窗时 Tooltip 自己改为对齐外侧边 */
 .models-restart-tip {
   display: inline-flex;
 }
@@ -329,9 +314,5 @@
 @media (prefers-reduced-motion: reduce) {
   .models-box {
     transition: none;
-  }
-  /* 已生效直接消失由计时器负责；这里只去掉淡出 */
-  .models-restart--done {
-    animation: none;
   }
 }

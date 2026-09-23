@@ -270,13 +270,6 @@
 }
 
 /* 列表底部：这一页的提示条（移除、改规则的结果） */
-.src-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-sm);
-  padding-top: var(--space-md);
-}
 
 /* ===== 小浮层：layer 圆角 + 浮层阴影，无黑框（与侧栏排序下拉同一写法） ===== */
 /* 外框只管位置、圆角与阴影；最大高度由定位规则给（`placeLayer`），超出的在里面的滚动区滚 */

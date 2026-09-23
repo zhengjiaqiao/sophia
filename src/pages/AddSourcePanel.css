@@ -197,7 +197,7 @@
   flex: 1 1 auto;
 }
 
-/* ---- 底部一行：只有右端主动作（没加上的提示条在它左边）；添加中换成忙碌指示 ---- */
+/* ---- 底部一行：只有右端主动作（没加上的提示小窗浮在它那里）；添加中过了 0.3 秒换成忙碌指示 ---- */
 .add-src__foot {
   display: flex;
   align-items: center;
@@ -205,6 +205,13 @@
   gap: var(--space-sm);
   flex-shrink: 0;
   margin-top: var(--space-md);
+}
+
+/* 选了文件夹、正在读（过了 0.3 秒门槛才出现）：第二行原位忙碌指示 + 一句 */
+.add-src__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .add-src__busy {

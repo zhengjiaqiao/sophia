@@ -10,7 +10,6 @@ import {
   LAUNCH_TIP,
   MODELS_TOOLS,
   RESTART_CONSEQUENCE,
-  RESTART_DONE_MS,
   RESTART_POLL_MS,
   RESTART_TIP,
   availableCount,
@@ -41,14 +40,17 @@ import type {
 } from "./types.ts";
 import {
   AgentIcon,
+  BusySlot,
   NoticePanel,
   Button,
   Confirm,
+  FloatingToast,
   ModelChip,
   Spinner,
   Switch,
   Toast,
   Tooltip,
+  useBusyShown,
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
 import { ModelList } from "./ModelList.tsx";
@@ -151,6 +153,8 @@ export interface AgentRowProps {
   onRestart: (row: HTMLElement) => void;
   /// 点了「启动 Codex」：不打断任何东西，不确认
   onLaunch?: () => void;
+  /// `✓ 已生效 / 已启动` 那一窗到点
+  onDoneDismiss?: () => void;
   notice?: RowNoticeState | null;
   onCloseNotice?: () => void;
   /// 挂在整行下面的行内待办条（接管 / 重新写入）
@@ -171,6 +175,7 @@ export function AgentRow({
   onConfigure,
   onRestart,
   onLaunch,
+  onDoneDismiss,
   notice,
   onCloseNotice,
   todos,
@@ -224,28 +229,27 @@ export function AgentRow({
           busy={busy}
           onRestart={() => rowRef.current && onRestart(rowRef.current)}
           onLaunch={onLaunch}
+          onDoneDismiss={onDoneDismiss}
         />
-        {uninstalling ? (
-          <span className="models-restart models-restart--busy" role="status">
-            <Spinner size={14} label="正在卸下后台服务" />
-            <span className="models-restart__text">正在卸下后台服务</span>
-          </span>
-        ) : serviceLeftover(state) && onUninstall ? (
-          // 与「重启生效」同一组件、同一「按钮即状态」规则：停用后服务仍在才出现，卸下即消失
-          <span className="models-uninstall-tip">
-            {/* 键折到第二行时，上方正是 Codex 这一行：提示框放键下方，不盖住触发它的这一行 */}
-            <Tooltip content={UNINSTALL_TIP} placement="bottom">
-              {busy ? (
-                <Button size="compact" disabled disabledReason="正在处理上一步">
-                  卸下后台服务
-                </Button>
-              ) : (
-                <Button size="compact" onClick={onUninstall}>
-                  卸下后台服务
-                </Button>
-              )}
-            </Tooltip>
-          </span>
+        {serviceLeftover(state) && onUninstall ? (
+          // 与「重启生效」同一组件、同一「按钮即状态」规则：停用后服务仍在才出现，卸下即消失。
+          // 卸下中：键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
+          <BusySlot busy={uninstalling} label="正在卸下后台服务" className="models-restart">
+            <span className="models-uninstall-tip">
+              {/* 键折到第二行时，上方正是 Codex 这一行：提示框放键下方，不盖住触发它的这一行 */}
+              <Tooltip content={UNINSTALL_TIP} placement="bottom">
+                {busy && !uninstalling ? (
+                  <Button size="compact" disabled disabledReason="正在处理上一步">
+                    卸下后台服务
+                  </Button>
+                ) : (
+                  <Button size="compact" onClick={uninstalling ? undefined : onUninstall}>
+                    卸下后台服务
+                  </Button>
+                )}
+              </Tooltip>
+            </span>
+          </BusySlot>
         ) : null}
       </div>
       <div className="models-row__models">{models}</div>
@@ -264,9 +268,10 @@ export function AgentRow({
   );
 }
 
-/// 「重启生效」那一格：键 / 忙碌指示 + 正在重启 / ✓ 已生效（例行成功，约 4 秒淡出）。
+/// 「重启生效」那一格：键 / 忙碌指示 + 正在重启 / 键消失、原位下方浮起 `✓ 已生效`（约 4 秒淡出）。
 /// Codex 没在跑时同一格换成 `启动 Codex`（同一套：忙碌指示 + 正在启动 / ✓ 已启动）。
-/// 失败的灰面板不在这里——它挂在整行下面（`notice`），键照常留着可以再点
+/// 忙碌过了 0.3 秒门槛才出现，之前键照旧、点不动。
+/// 失败的灰面板不在这里——它挂在整行下面（`notice`，不会自己走），键照常留着可以再点
 function RestartSlot({
   tool,
   state,
@@ -274,6 +279,7 @@ function RestartSlot({
   busy,
   onRestart,
   onLaunch,
+  onDoneDismiss,
 }: {
   tool: ModelsTool;
   state: GatewayState;
@@ -281,8 +287,11 @@ function RestartSlot({
   busy: boolean;
   onRestart: () => void;
   onLaunch?: () => void;
+  onDoneDismiss?: () => void;
 }) {
-  if (phase.kind === "restarting" || phase.kind === "launching") {
+  const waiting = phase.kind === "restarting" || phase.kind === "launching";
+  const shown = useBusyShown(waiting);
+  if (waiting && shown) {
     const text = `${phase.kind === "restarting" ? "正在重启" : "正在启动"} ${tool.name}`;
     return (
       <span className="models-restart models-restart--busy" role="status">
@@ -291,10 +300,26 @@ function RestartSlot({
       </span>
     );
   }
+  if (waiting) {
+    // 还没过门槛：键照旧、点不动（不闪一下忙碌）
+    const label = phase.kind === "restarting" ? "重启生效" : `启动 ${tool.name}`;
+    return (
+      <span className="models-restart-tip ss-locked" aria-busy="true">
+        <Button size="compact">{label}</Button>
+      </span>
+    );
+  }
   if (phase.kind === "done" || phase.kind === "launched") {
+    // 键已消失：原来那颗键的位置留一个不占宽的锚，结果浮在它正下方 4
     return (
       <span className="models-restart models-restart--done">
-        <Toast tier="routine" kind="success" verb={phase.kind === "done" ? "已生效" : "已启动"} />
+        <FloatingToast align="start">
+          <Toast
+            kind="success"
+            verb={phase.kind === "done" ? "已生效" : "已启动"}
+            onDismiss={onDoneDismiss}
+          />
+        </FloatingToast>
       </span>
     );
   }
@@ -487,8 +512,6 @@ export function ModelPicker({
 
 export interface ModelsTabProps {
   onError: (message: string) => void;
-  busy: boolean;
-  onBusy: (busy: boolean) => void;
   /// 每次拿到新状态都报给壳：新问题的一次性提示要认模型类的问题
   onGatewayState?: (state: GatewayState) => void;
   /// 新问题提示「查看」网关连不上：进网关二级页、选中这一家、它的分段片闪两下；处理完回调 onFocused，
@@ -499,13 +522,14 @@ export interface ModelsTabProps {
 
 export default function ModelsTab({
   onError,
-  busy,
-  onBusy,
   onGatewayState,
   focusProviderId,
   onFocused,
 }: ModelsTabProps) {
   const [state, setState] = useState<GatewayState | null>(null);
+  /// 这一页自己的忙碌（重启、接管、重启路由、存网关……）：锁这一行里写 Codex 设置的键，
+  /// 不锁页签、不锁别的页（DESIGN「反馈的两种形态 › 忙碌」）
+  const [busy, onBusy] = useState(false);
   /// 模型下拉开着的那个 agent
   const [picker, setPicker] = useState<string | null>(null);
   /// 网关二级页：开着时 `initial` 是进来那一刻先选中哪一家（"new" 直接出新网关表单）；
@@ -614,12 +638,8 @@ export default function ModelsTab({
     return () => clearInterval(timer);
   }, [polling, quietRefresh]);
 
-  // 已生效 / 已启动那一行约 4 秒后淡出（淡出本身在 css 里，末尾 120ms）
-  useEffect(() => {
-    if (phase.kind !== "done" && phase.kind !== "launched") return;
-    const timer = setTimeout(() => setPhase({ kind: "idle" }), RESTART_DONE_MS);
-    return () => clearTimeout(timer);
-  }, [phase]);
+  // ✓ 已生效 / 已启动那一窗到点（停留、悬停停表、淡出都在 Toast 里）
+  const dismissDone = useCallback(() => setPhase({ kind: "idle" }), []);
 
   // 浮层开着时：Esc 关闭并把焦点还给模型框；在框与浮层之外按下指针也关闭。
   // 两个都在捕获阶段听：Esc 不被输入框先吃掉；外面那一下只顺手关浮层，不拦截——
@@ -919,6 +939,7 @@ export default function ModelsTab({
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
               }}
               onLaunch={() => void launch(tool)}
+              onDoneDismiss={dismissDone}
               notice={notice}
               onCloseNotice={() => setNotice(null)}
               todos={(() => {
@@ -1028,6 +1049,7 @@ export default function ModelsTab({
                 setConfirmRestart({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
               }}
               onLaunch={() => void launch(MODELS_TOOLS[0])}
+              onDoneDismiss={dismissDone}
             />
           }
           onSave={saveProvider}

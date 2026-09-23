@@ -785,21 +785,25 @@
   stroke-width: 1;
 }
 
-/* ===== 7. 提示条 Toast ===== */
+/* ===== 7. 提示小窗 Toast（DESIGN「反馈的两种形态」）：浮起的一层只表示「会自己消失」 =====
+   文字一律 13（caption）：动词 600、名字 400、数字 mono 12——比表格正文 15 低一档 */
 .ss-toast {
   box-sizing: border-box;
   font-family: var(--font-ui);
-  font-size: var(--size-body);
+  font-size: var(--size-caption);
   line-height: var(--leading-caption);
 }
 
-/* 例行成功：一行墨字直接落在白底上，无框无底（圆角随提示条一档，无阴影——它不是一块） */
+/* 成功：画布底 + layer 圆角 + tip 阴影的白窗，单行高 32。浮在别的内容上，自带底色才读得出是一层 */
 .ss-toast--routine {
-  border-radius: var(--radius-layer);
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: var(--control-h);
+  height: var(--control-h-row);
+  padding: 0 12px;
+  border-radius: var(--radius-layer);
+  background: var(--canvas);
+  box-shadow: var(--elev-tip);
   color: var(--ink);
   white-space: nowrap;
 }
@@ -808,10 +812,26 @@
   display: inline-flex;
 }
 
-/* 悬停不计时的那一档（单格例行一行）到点末尾 120ms 淡出；机械缓动，不是 300ms 渐隐 */
+/* 到点末尾 120ms 淡出（两档同一个）；机械缓动，不是 300ms 渐隐 */
 .ss-toast.is-leaving {
   opacity: 0;
   transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+/* 浮起小窗的外壳（FloatingToast）：fixed，位置由 placeToast 给；比吸顶层、二级页（30）与
+   小浮层（35）高，比确认弹窗（40）低 */
+.ss-floattoast {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 36;
+  display: flex;
+  width: max-content;
+}
+
+/* 右下那一叠里各页挂进来的（CornerToast）：不另占一层，随那一叠排 */
+.ss-toaststack__slot {
+  display: contents;
 }
 
 /* 需要注意：黑显示窗，8 圆角（layer）无外框，浮层阴影 tip，宽 ≤ 400。
@@ -848,6 +868,11 @@
   padding: 10px 6px 10px 12px;
 }
 
+/* 没有键和 × 的（单格失败的一句原因）：右边同左边留 12，字不贴边 */
+.ss-toast__body:not(:has(.ss-toast__actions)) {
+  padding-right: 12px;
+}
+
 .ss-toast__main {
   display: flex;
   align-items: center;
@@ -869,10 +894,11 @@
 .ss-toast__names,
 .ss-toast__reading,
 .ss-toast__reason,
-.ss-toast__message {
+.ss-toast__count {
   white-space: nowrap;
 }
 
+/* 整句（单格失败原因）：放不下就折行，不截断 */
 .ss-toast__message {
   white-space: normal;
 }
@@ -887,6 +913,7 @@
 .ss-toast__more,
 .ss-toast__num {
   font-family: var(--font-mono);
+  font-size: var(--size-micro);
   font-variant-numeric: tabular-nums;
   font-weight: 500;
 }
@@ -1026,6 +1053,11 @@
   gap: var(--space-xs);
   margin-left: var(--space-xs);
   color: var(--ink-mute);
+}
+
+/* 在等、还没过 0.3 秒门槛：键照旧，只是点不动 */
+.ss-noticepanel__actions.is-locked {
+  pointer-events: none;
 }
 
 .ss-noticepanel__actions .ss-btn--link {
@@ -1341,6 +1373,24 @@
 .ss-busy {
   opacity: var(--busy-dim);
   pointer-events: none;
+}
+
+/* 触发键在等、还没过 0.3 秒门槛（BusySlot）：只锁这一颗，外观不变；不另占一层 */
+.ss-locked {
+  display: contents;
+  pointer-events: none;
+}
+
+/* 过了门槛：触发键原位换成 14px 地球绕太阳 + 一句（13 ink-mute） */
+.ss-busyslot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
 }
 
 /* 旧大写档里嵌专名的出口（见 Plain.tsx）。v4 起按钮与页面名都不大写，只剩兼容用途 */

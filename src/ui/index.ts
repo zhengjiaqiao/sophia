@@ -35,10 +35,13 @@ export {
 } from "./Tooltip.tsx";
 export type { TipEvent, TipState, TooltipProps } from "./Tooltip.tsx";
 
-export { Spinner } from "./Spinner.tsx";
-export type { SpinnerProps } from "./Spinner.tsx";
+export { BUSY_DELAY_MS, BusySlot, Spinner, useBusyShown } from "./Spinner.tsx";
+export type { BusySlotProps, SpinnerProps } from "./Spinner.tsx";
 
-export { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } from "./Toast.tsx";
+export { Toast, ToastCount, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } from "./Toast.tsx";
+
+export { CornerToast, FloatingToast, ToastHost, ToastStack } from "./FloatingToast.tsx";
+export type { FloatingToastProps } from "./FloatingToast.tsx";
 export type { ToastAction, ToastAgent, ToastKind, ToastProps } from "./Toast.tsx";
 
 export { ErrorBanner, NoticePanel } from "./ErrorBanner.tsx";

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
-import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
+import { cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
 import { addedOrigins, liveOrigins, newOriginKey, originMatches } from "./originFilter";
@@ -14,7 +14,7 @@ import { skillSourcesModel } from "./pages/sourcesModel";
 import type { DomainRef } from "./pages/sourcesView";
 import { pathsOfKey } from "./issues";
 import { shortDate } from "./dateText";
-import { CELL_TOAST_DWELL_MS, Confirm, Empty, IconPlus, Toast, TOAST_DWELL_MS } from "./ui";
+import { Confirm, CornerToast, Empty, IconPlus, Toast, ToastCount } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import {
   batchBusyText,
@@ -53,6 +53,8 @@ interface KeepPane {
   kept: DomainRow;
   other: DomainRow;
   anchor: ConfirmAnchor;
+  /// 按下那一刻「只留这份」的位置：结果锚在这里
+  at: ConfirmAnchor;
   planId: string;
   /// 两份的来源名（同名来源带区分片段，与原件位置列同一写法）与完整路径
   keptName: OriginName;
@@ -67,7 +69,7 @@ export interface SkillsTabProps {
   overview: Overview | null;
   /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身只在来源管理页管理）
   autoLinks: AutoLink[];
-  busy: boolean;
+  /// 写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
   /// 侧栏选中的 DomainPage.key
   selectedKey: string;
@@ -85,18 +87,17 @@ export interface SkillsTabProps {
 
 /// Skills 页：两行工具行（筛选框 + 来源筛选片）+ 表格（DomainView → Matrix）。
 ///
-/// 反馈的位置（DESIGN「提示条的位置」）：
-/// - 单格：乐观更新 + 格子闪一下；成功再出例行一行（被点的那一行里紧跟名字，一次一条，约 4 秒淡出），
-///   `撤销` 与 ⌘Z 同一条路径、撤后这一行直接消失；失败不出这一行，弹回 + 格下小黑窗说原因
-/// - 批量：一行提示条贴在被按下的键下方，右对齐该键；动词与键一致，键上读数随之翻转
-/// - 只留这份：先出锚定确认；确认后直接删，例行一行贴在留下那一行下方（无撤销）
-/// - 孤链（原件已不在的失效链接，照样成一行）：点格即清除、不确认；例行一行出在那一行里（无撤销）
-/// - 整个文件夹是链接：点该列任一格出锚定确认（锚在那一格上），确认后拆开、重扫；没成格下小黑窗说原因
-/// - 自动规则在背后做了事：右下例行一行，右沿对齐面板右沿 + 撤销
+/// 反馈的位置（DESIGN「反馈的两种形态」「提示条的位置」）：全是浮起的提示小窗，锚在触发处
+/// - 单格：乐观更新 + 格子闪一下；成功浮在被点那一格正下方（不带撤销，⌘Z 照旧，约 4 秒淡出）；
+///   失败弹回，同一个位置出黑窗说原因
+/// - 批量：浮在被按下的键正下方，右对齐该键；动词与键一致，键上读数随之翻转
+/// - 只留这份：先出锚定确认；确认后直接删，结果浮在留下那一行下方（无撤销；没删掉同一个位置）
+/// - 孤链（原件已不在的失效链接，照样成一行）：点格即清除、不确认；结果浮在那一格下（无撤销）
+/// - 整个文件夹是链接：点该列任一格出锚定确认（锚在那一格上），确认后拆开、重扫；没成那一格下说原因
+/// - 自动规则在背后做了事：右下（壳上那一叠）+ 撤销
 export default function SkillsTab({
   overview,
   autoLinks,
-  busy,
   onBusy,
   selectedKey,
   onRefresh,
@@ -120,8 +121,10 @@ export default function SkillsTab({
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录写不进去）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
   const [readOnly, setReadOnly] = useState<Set<string>>(new Set());
-  // 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，触发项旁的忙碌指示 + 一句
+  // 批量写入进行中：按下的那一项（只锁它；过了 0.3 秒门槛旁边出忙碌指示 + 一句）
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
+  // 点了「只留这份」、正在体检的那一行（键原位忙碌）
+  const [keepBusy, setKeepBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
   const [cellNotice, setCellNotice] = useState<{
     rowKey: string;
@@ -129,21 +132,31 @@ export default function SkillsTab({
     text: string;
   } | null>(null);
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
-  // 单格成功的例行一行（出在被点的那一行里）：一个槽位，新的替换旧的（id 变了重挂、计时从头来）
+  // 单格成功（浮在被点那一格下）：一个槽位，新的替换旧的（id 变了重挂、计时从头来）
   const [cellToast, setCellToast] = useState<{
     id: number;
     rowKey: string;
+    columnId: string;
     node: ReactNode;
   } | null>(null);
   const cellToastSeq = useRef(0);
-  const [rowToast, setRowToast] = useState<{ rowKey: string; node: ReactNode } | null>(null);
+  // 一行的结果（只留这份）：锚在按下那一刻「只留这份」的位置
+  const [rowToast, setRowToast] = useState<{
+    rowKey: string;
+    at: ConfirmAnchor;
+    node: ReactNode;
+  } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
-  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；工具行下的例行一行
+  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；新来源片下的那一窗
   const [justAdded, setJustAdded] = useState<CandidateEntry[] | null>(null);
-  const [addedToast, setAddedToast] = useState<{ key: number; parts: string[] } | null>(null);
+  const [addedToast, setAddedToast] = useState<{
+    key: number;
+    parts: string[];
+    origins: string[];
+  } | null>(null);
   // 孤链格：点下去就先画成没有这一格（清除的目标状态），做成重扫后数据自己对上，没成弹回
   const [orphanGone, setOrphanGone] = useState<Set<string>>(new Set());
-  // 刚清完的孤链行：数据里已经没有它了，例行一行还要在它里面待满 4 秒，这期间照原样留着
+  // 刚清完的孤链行：数据里已经没有它了，那一窗还锚在它那一格上待满 4 秒，这期间照原样留着
   const [orphanGhost, setOrphanGhost] = useState<OrphanRow | null>(null);
   // 「只留这份」挂起未提交时藏起来的另一份（行键）
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -194,7 +207,14 @@ export default function SkillsTab({
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
   const dismissCell = useCallback(() => setCellToast(null), []);
+  const dismissNotice = useCallback(() => setCellNotice(null), []);
+  const dismissRow = useCallback(() => setRowToast(null), []);
   const dismissAdded = useCallback(() => setAddedToast(null), []);
+  /// 单格失败：弹回之后同一个位置（那一格正下方）说原因，替掉那一格的成功窗（一次只一条）
+  const failCell = (rowKey: string, columnId: string, text: string) => {
+    setCellToast(null);
+    setCellNotice({ rowKey, columnId, text });
+  };
 
   // 提示与弹层只属于当次选择；选择与筛选跨侧栏切换保留
   useEffect(() => {
@@ -212,7 +232,7 @@ export default function SkillsTab({
   }, [selectedKey]);
 
   // 加完来源滑回主视图（DESIGN「添加来源」）：重扫已完，列表筛到新来源——工具行里它们的片选中
-  // （加了几个选几片，列表是并集），工具行下例行一行 `✓ 已添加 …`；这几片记成 `新`
+  // （加了几个选几片，列表是并集），这几片正下方浮起 `✓ 已添加 …`；这几片记成 `新`
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
@@ -242,7 +262,7 @@ export default function SkillsTab({
         "skill",
       );
     }
-    setAddedToast({ key: Date.now(), parts });
+    setAddedToast({ key: Date.now(), parts, origins: ids });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justAdded, overview]);
 
@@ -251,13 +271,6 @@ export default function SkillsTab({
     // 读数跟着这一轮扫描，文件可能变了
     setDupReadout(new Map());
   }, [overview]);
-
-  // 单格失败的小黑窗 8 秒后收起
-  useEffect(() => {
-    if (!cellNotice) return;
-    const timer = setTimeout(() => setCellNotice(null), TOAST_DWELL_MS.cannot);
-    return () => clearTimeout(timer);
-  }, [cellNotice]);
 
   // ===== 规则：排除 / 恢复 =====
 
@@ -363,17 +376,18 @@ export default function SkillsTab({
       return next;
     });
 
-  // ===== 单格：乐观更新 + 闪一下；成功出例行一行 =====
+  // ===== 单格：乐观更新 + 闪一下；成功浮一窗 =====
 
-  /// 单格成功：被点的那一行里紧跟名字出 `✓ 加到 [Codex]`（行已说明对象，不重复名字），替换上一条。
-  /// 不带撤销（DESIGN「单格操作出例行一行，不带撤销」：再点一下格子就恢复了，⌘Z 照旧可用）；
-  /// 约 4 秒淡出，悬停不停表
+  /// 单格成功：被点那一格正下方浮起 `✓ 加到 [Codex]`（格子所在的行已说明对象，不重复名字），
+  /// 替换上一条。不带撤销（DESIGN「单格操作不带撤销」：再点一下格子就恢复了，⌘Z 照旧可用）；
+  /// 约 4 秒淡出，悬停停表
   const showCellToast = (id: number, op: "link" | "unlink", ref: CellRef) => {
     const text = toastFor(op, { done: toastItems([ref]), omitNames: true });
     setCellToast({
       id,
       rowKey: skillRowKey(ref),
-      node: <Toast {...text} dwellMs={CELL_TOAST_DWELL_MS} fadeOut onDismiss={dismissCell} />,
+      columnId: ref.targetId,
+      node: <Toast {...text} onDismiss={dismissCell} />,
     });
   };
 
@@ -394,7 +408,7 @@ export default function SkillsTab({
           if (stale) await api.applyAll([stale], true);
           const result = await run("link", [ref]);
           if (result.failed.length > 0) {
-            setCellNotice({ rowKey, columnId: ref.targetId, text: result.failed[0].reason });
+            failCell(rowKey, ref.targetId, result.failed[0].reason);
           } else {
             // 重新链接没有可撤销的反面：出一行交代，不带撤销
             undoRef.current = null;
@@ -402,7 +416,7 @@ export default function SkillsTab({
           }
           await onRefresh();
         } catch (e) {
-          setCellNotice({ rowKey, columnId: ref.targetId, text: String(e) });
+          failCell(rowKey, ref.targetId, String(e));
         } finally {
           setOptimisticFor([ref], null);
         }
@@ -418,13 +432,13 @@ export default function SkillsTab({
         const result = await run(op, [ref]);
         noteReadOnly(result.failed, op === "link" ? [ref] : []);
         if (result.failed.length > 0) {
-          // 弹回 + 格下小黑窗说原因
+          // 弹回 + 同一个位置（格子正下方）的黑窗说原因
           setOptimisticFor([ref], null);
-          setCellNotice({ rowKey, columnId: ref.targetId, text: result.failed[0].reason });
+          failCell(rowKey, ref.targetId, result.failed[0].reason);
         } else if (!undoing) {
           const back = op === "link" ? "linked" : "missing";
           const id = ++cellToastSeq.current;
-          // ⌘Z 撤最新这一次；撤了这一行直接消失，不另出「已撤销」
+          // ⌘Z 撤最新这一次；撤了那一窗直接消失，不另出「已撤销」
           const undo = () => {
             if (undoRef.current === undo) undoRef.current = null;
             setCellToast((prev) => (prev?.id === id ? null : prev));
@@ -435,7 +449,7 @@ export default function SkillsTab({
         }
         await onRefresh();
       } catch (e) {
-        setCellNotice({ rowKey, columnId: ref.targetId, text: String(e) });
+        failCell(rowKey, ref.targetId, String(e));
       } finally {
         setOptimisticFor([ref], null);
       }
@@ -477,14 +491,13 @@ export default function SkillsTab({
       const first = failed[0]?.outcome;
       if (first && first.status === "failed") {
         const created = report.entries.filter((e) => e.outcome.status === "created").length;
-        setCellNotice({
-          rowKey: skillRowKey(ref),
-          columnId: ref.targetId,
-          text:
-            created === 0
-              ? `没拆开：${first.reason}`
-              : `拆开了，但有 ${failed.length} 个没复制过来：${first.reason}`,
-        });
+        failCell(
+          skillRowKey(ref),
+          ref.targetId,
+          created === 0
+            ? `没拆开：${first.reason}`
+            : `拆开了，但有 ${failed.length} 个没复制过来：${first.reason}`,
+        );
       }
     } catch (e) {
       onError(String(e));
@@ -508,11 +521,7 @@ export default function SkillsTab({
         const report = await api.applyAll([link.clear], true);
         const bad = report.entries.find((e) => e.outcome.status === "failed");
         if (bad && bad.outcome.status === "failed") {
-          setCellNotice({
-            rowKey: orphan.key,
-            columnId: targetId,
-            text: `没能清除：${bad.outcome.reason}`,
-          });
+          failCell(orphan.key, targetId, `没能清除：${bad.outcome.reason}`);
         } else {
           undoRef.current = null;
           setOrphanGhost({ ...orphan, links: orphan.links.filter((l) => l.targetId !== targetId) });
@@ -523,14 +532,13 @@ export default function SkillsTab({
           setCellToast({
             id: ++cellToastSeq.current,
             rowKey: orphan.key,
-            node: (
-              <Toast {...text} dwellMs={CELL_TOAST_DWELL_MS} holdOnHover onDismiss={dismissCell} />
-            ),
+            columnId: targetId,
+            node: <Toast {...text} onDismiss={dismissCell} />,
           });
         }
         await onRefresh();
       } catch (e) {
-        setCellNotice({ rowKey: orphan.key, columnId: targetId, text: String(e) });
+        failCell(orphan.key, targetId, String(e));
       } finally {
         setOrphanGone((prev) => {
           const next = new Set(prev);
@@ -541,25 +549,27 @@ export default function SkillsTab({
     });
   };
 
-  // ===== 批量：提示条贴在被按下的键下方 =====
+  // ===== 批量：结果浮在被按下的键正下方 =====
 
   const toastItems = (refs: CellRef[]): ToastItem[] =>
     refs.map((ref) => ({ name: ref.skill, agent: agentRef(targetOf(ref.targetId)) }));
 
-  const batch = async ({ keyId, op, cells, reversible }: BatchPress, undoing = false) => {
-    if (cells.length === 0) return;
+  /// 按下一个键：格子同时变成新状态（不闪、不依次点亮），写入排在前面的写入之后（连按几个键
+  /// 一个一个来，不和彼此抢）。只锁按下的那一项；过了 0.3 秒门槛它旁边出忙碌指示 + 一句
+  /// （DESIGN「选择操作条」「反馈的两种形态 › 忙碌」）
+  const batch = (press: BatchPress, undoing = false) => {
+    const { keyId, op, cells } = press;
+    if (cells.length === 0) return Promise.resolve();
     setKeyToast(null);
     setCellToast(null);
     setCellNotice(null);
-    // 格子同时变成新状态，不闪、不依次点亮；真的慢才在触发项旁出忙碌指示 + 一句（DESIGN「选择操作条」）
     setOptimisticFor(cells, op === "link" ? "linked" : "missing");
     const agent = keyId === "all" ? "所有 agent" : (targetOf(keyId)?.label ?? "");
-    const slow = keyId
-      ? setTimeout(
-          () => setKeyBusy({ keyId, label: batchBusyText(op, agent) }),
-          BATCH_BUSY_DELAY_MS,
-        )
-      : undefined;
+    if (keyId) setKeyBusy({ keyId, label: batchBusyText(op, agent) });
+    return enqueue(() => batchWrite(press, undoing));
+  };
+
+  const batchWrite = async ({ keyId, op, cells, reversible }: BatchPress, undoing: boolean) => {
     onBusy(true);
     let result: Awaited<ReturnType<typeof run>> | null = null;
     try {
@@ -568,8 +578,7 @@ export default function SkillsTab({
       onError(String(e));
     } finally {
       onBusy(false);
-      clearTimeout(slow);
-      setKeyBusy(null);
+      setKeyBusy((prev) => (prev?.keyId === keyId ? null : prev));
     }
     if (result !== null) {
       noteReadOnly(result.failed, op === "link" ? cells : []);
@@ -602,9 +611,9 @@ export default function SkillsTab({
         node: (
           <Toast
             {...text}
-            // 键行左侧空白窄：写数量，不逐个写名字（`✓ 加到 ✳ 1 个 · 撤销`）；名字在键的提示框里
+            // 写数量，不逐个写名字（`✓ 加到 ✳ 1 个 · 撤销`）；名字在键的提示框里
             names={text.kind === "success" ? undefined : text.names}
-            reading={text.kind === "success" ? `${done.length} 个` : undefined}
+            reading={text.kind === "success" ? <ToastCount n={done.length} /> : undefined}
             // 再按一次同一个键就恰好撤回时不给 `撤销`（⌘Z 照旧可用）；见 BatchPress.reversible
             action={undo && !reversible ? { label: "撤销", onClick: undo } : undefined}
             onDismiss={dismissKey}
@@ -621,7 +630,12 @@ export default function SkillsTab({
   // DESIGN「页面还是弹层」：删用户的原件先确认（锚在按钮上），确认后直接删、不挂起；
   // 结果是例行一行、不带撤销——废纸篓只找得回文件夹，改指过的链接回不来
 
-  const keepThis = async (kept: DomainRow, other: DomainRow, anchor: ConfirmAnchor) => {
+  const keepThis = async (
+    kept: DomainRow,
+    other: DomainRow,
+    anchor: ConfirmAnchor,
+    at: ConfirmAnchor,
+  ) => {
     const sources = overview?.sources ?? [];
     // 与原件位置列同一套：按本域出现的来源算，同名来源才分得开
     const names = originNames(
@@ -634,24 +648,31 @@ export default function SkillsTab({
       source?.skills.find((k) => k.name === kept.skill)?.path ??
       `${source?.path ?? kept.sourceId}/${kept.skill}`;
     const rowKey = skillRowKey(kept);
+    // 同一行正在体检：这一下不重复发
+    if (keepBusy === rowKey) return;
+    // 点下去到确认框出来之间要体检：键原位忙碌（过了 0.3 秒门槛才出转圈），只锁这一颗
+    setKeepBusy(rowKey);
     let planned;
     try {
       planned = await api.planDeleteSource(other.sourceId, other.skill);
     } catch (e) {
       onError(String(e));
       return;
+    } finally {
+      setKeepBusy((prev) => (prev === rowKey ? null : prev));
     }
     if (planned.plan.inGit !== null) {
       setRowToast({
         rowKey,
+        at,
         node: (
           <Toast
             kind="cannot"
             verb="没删掉"
             names={[other.skill]}
             reason={`另一份在 git 仓库 ${planned.plan.inGit} 里，交给 git 处理更稳妥，这里不代删`}
-            onDismiss={() => setRowToast(null)}
-            onClose={() => setRowToast(null)}
+            onDismiss={dismissRow}
+            onClose={dismissRow}
           />
         ),
       });
@@ -661,6 +682,7 @@ export default function SkillsTab({
       kept,
       other,
       anchor,
+      at,
       planId: planned.planId,
       keptName: nameOf(kept.sourceId),
       otherName: nameOf(other.sourceId),
@@ -690,16 +712,21 @@ export default function SkillsTab({
       }
       const bad = report.entries.find((e) => e.outcome.status === "failed");
       if (bad && bad.outcome.status === "failed") {
-        setGlobalToast(
-          <Toast
-            kind="cannot"
-            verb="没删掉"
-            names={[other.skill]}
-            reason={bad.outcome.reason}
-            onDismiss={dismissGlobal}
-            onClose={dismissGlobal}
-          />,
-        );
+        // 没删掉：同「只留这份」的结果，浮在留下那一行下方
+        setRowToast({
+          rowKey: skillRowKey(kept),
+          at: pane.at,
+          node: (
+            <Toast
+              kind="cannot"
+              verb="没删掉"
+              names={[other.skill]}
+              reason={bad.outcome.reason}
+              onDismiss={dismissRow}
+              onClose={dismissRow}
+            />
+          ),
+        });
       } else ok = true;
     } catch (e) {
       onError(String(e));
@@ -717,7 +744,8 @@ export default function SkillsTab({
     });
     setRowToast({
       rowKey: skillRowKey(kept),
-      node: <Toast {...text} onDismiss={() => setRowToast(null)} />,
+      at: pane.at,
+      node: <Toast {...text} onDismiss={dismissRow} />,
     });
   };
 
@@ -749,7 +777,7 @@ export default function SkillsTab({
       .catch(() => undefined);
   };
 
-  // ===== 自动规则在背后做了事：右下例行一行 + 撤销；格子直接是新状态，不闪 =====
+  // ===== 自动规则在背后做了事：右下（壳上那一叠）+ 撤销；格子直接是新状态，不闪 =====
 
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
@@ -793,7 +821,7 @@ export default function SkillsTab({
         <Toast
           {...text}
           names={items.length > 2 ? undefined : text.names}
-          reading={items.length > 2 ? `${items.length} 个` : undefined}
+          reading={items.length > 2 ? <ToastCount n={items.length} /> : undefined}
           action={undo ? { label: "撤销", onClick: undo } : undefined}
           onDismiss={dismissGlobal}
           onClose={dismissGlobal}
@@ -921,10 +949,10 @@ export default function SkillsTab({
         hiddenRows={hiddenRows}
         dupReadout={dupReadout}
         onDupHover={dupHover}
-        onKeepThis={(kept, other, anchor) => void keepThis(kept, other, anchor)}
+        onKeepThis={(kept, other, anchor, at) => void keepThis(kept, other, anchor, at)}
+        keepBusy={keepBusy}
         orphans={orphans}
         onClearOrphan={clearOrphan}
-        busy={busy}
         filterText={filterText}
         onFilterText={setFilterText}
         onClearFilter={() => {
@@ -948,18 +976,29 @@ export default function SkillsTab({
         shortcuts={!sourcesOpen && !addOpen}
         flash={flash}
         cellNotice={cellNotice}
+        onDismissCellNotice={dismissNotice}
         rowToast={rowToast}
         keyToast={keyToast}
         cellToast={cellToast}
         keyBusy={keyBusy}
-        globalToast={globalToast}
         barToast={
-          addedToast ? (
-            <AddedToast key={addedToast.key} parts={addedToast.parts} onDismiss={dismissAdded} />
-          ) : null
+          addedToast
+            ? {
+                id: addedToast.key,
+                node: (
+                  <AddedToast
+                    key={addedToast.key}
+                    parts={addedToast.parts}
+                    onDismiss={dismissAdded}
+                  />
+                ),
+                origins: addedToast.origins,
+              }
+            : null
         }
         focus={focus}
       />
+      {globalToast ? <CornerToast>{globalToast}</CornerToast> : null}
 
       {keepConfirm && keepPane ? (
         <Confirm

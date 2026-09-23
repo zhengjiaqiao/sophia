@@ -1,5 +1,5 @@
 import type { McpDiff, McpFieldValue } from "./types.ts";
-import { Button, Spinner, Tooltip } from "./ui/index.ts";
+import { Button, Spinner, Tooltip, useBusyShown } from "./ui/index.ts";
 import "./McpDiffPanel.css";
 
 /// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：主视图该服务行就地展开。
@@ -76,16 +76,7 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
       </Button>
     </div>
   ) : null;
-  if (diff === "loading") {
-    return (
-      <div className="mcp-diff">
-        <div className="mcp-diff__note">
-          <Spinner size={14} label="正在比对" />
-          正在比对
-        </div>
-      </div>
-    );
-  }
+  if (diff === "loading") return <Comparing />;
   if (diff instanceof Error) {
     return (
       <div className="mcp-diff">
@@ -137,6 +128,25 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
         </div>
       ) : null}
       {revealLink}
+    </div>
+  );
+}
+
+/// 点开之后在取差异：过了 0.3 秒门槛才出忙碌指示 + 一句（更快取回的什么都不闪）；之前留一行空白占位
+function Comparing() {
+  const shown = useBusyShown(true);
+  return (
+    <div className="mcp-diff">
+      <div className="mcp-diff__note" role="status">
+        {shown ? (
+          <>
+            <Spinner size={14} label="正在比对" />
+            正在比对
+          </>
+        ) : (
+          "\u00a0"
+        )}
+      </div>
     </div>
   );
 }

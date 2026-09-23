@@ -15,6 +15,7 @@ import type { ModelsTool } from "../modelsView.ts";
 import type { GatewayProvider, GatewayState } from "../types.ts";
 import {
   NoticePanel,
+  BusySlot,
   Button,
   Chip,
   Confirm,
@@ -22,7 +23,6 @@ import {
   IconPlus,
   IconTrash,
   ModelChip,
-  Spinner,
   SubPage,
   Tooltip,
 } from "../ui/index.ts";
@@ -187,6 +187,8 @@ export function GatewayBody({
   const [selected, setSelected] = useState<GatewaySelection>(initial ?? first);
   const [editing, setEditing] = useState(initial === "new" || first === "new");
   const [retrying, setRetrying] = useState<string | null>(null);
+  /// 正在删的那一家：垃圾桶锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
+  const [removing, setRemoving] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ConfirmingRemove | null>(null);
   const [error, setError] = useState<string | null>(null);
   /// 新拉到的模型各闪一次：保存 / 再试之前记下已有的，state 更新后差出来
@@ -251,11 +253,14 @@ export function GatewayBody({
   const remove = (provider: GatewayProvider) =>
     void (async () => {
       setConfirming(null);
+      setRemoving(provider.id);
       try {
         await onRemove(provider);
       } catch (e) {
         report(e);
         return;
+      } finally {
+        setRemoving(null);
       }
       const next = state.providers.find((p) => p.id !== provider.id);
       setSelected(next?.id ?? "new");
@@ -394,16 +399,14 @@ export function GatewayBody({
                 <Tooltip content={current.unreachable}>
                   <span className="gw-panel__down">连不上</span>
                 </Tooltip>
-                {retrying === current.id ? (
-                  <span className="gw-panel__busy">
-                    <Spinner size={14} label="正在重连" />
-                    正在重连
-                  </span>
-                ) : (
-                  <Button size="compact" onClick={() => retry(current.id)}>
+                <BusySlot busy={retrying === current.id} label="正在重连">
+                  <Button
+                    size="compact"
+                    onClick={() => retrying !== current.id && retry(current.id)}
+                  >
                     再试一次
                   </Button>
-                )}
+                </BusySlot>
               </>
             ) : (
               <span className="gw-panel__state">{current.hasKey ? "已连" : "还没有密钥"}</span>
@@ -414,15 +417,18 @@ export function GatewayBody({
             </Button>
             <span className="gw-panel__trash">
               {removeProviderBlockedReason(state, current, tool) === null ? (
-                <IconButton
-                  icon={<IconTrash />}
-                  title={`删掉 ${gatewayShortName(current)}`}
-                  onClick={() => {
-                    // 摘要行只有一个垃圾桶（当前这一家）
-                    const el = document.querySelector<HTMLElement>(".gw-panel__trash");
-                    if (el) askRemove(current, el);
-                  }}
-                />
+                <BusySlot busy={removing === current.id} label="正在删掉">
+                  <IconButton
+                    icon={<IconTrash />}
+                    title={`删掉 ${gatewayShortName(current)}`}
+                    onClick={() => {
+                      if (removing === current.id) return;
+                      // 摘要行只有一个垃圾桶（当前这一家）
+                      const el = document.querySelector<HTMLElement>(".gw-panel__trash");
+                      if (el) askRemove(current, el);
+                    }}
+                  />
+                </BusySlot>
               ) : (
                 // 最后一家还在供模型：后端会拒，键上就说清下一步（禁用键自带原因提示框）
                 <IconButton
@@ -436,7 +442,7 @@ export function GatewayBody({
         ) : null}
 
         {error !== null ? (
-          <div className="gw-panel__error">
+          <div className="gw-notice">
             <NoticePanel message={error} />
           </div>
         ) : null}
@@ -478,7 +484,7 @@ export function GatewayBody({
               </div>
             ) : null}
             {notice ? (
-              <div className="gw-panel__notice">
+              <div className="gw-notice">
                 <NoticePanel
                   message={notice.message}
                   reason={notice.reason}
@@ -642,10 +648,10 @@ function GatewayForm({
             </Button>
           </>
         ) : saving ? (
-          <span className="gw-form__busy" role="status">
-            <Spinner size={14} label="正在拉模型" />
-            正在拉模型
-          </span>
+          // 存 + 拉模型：键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
+          <BusySlot busy label="正在拉模型">
+            <Button variant="primary">保存</Button>
+          </BusySlot>
         ) : blank ? (
           <BlankSave />
         ) : busy ? (
@@ -666,7 +672,7 @@ function GatewayForm({
         ) : null}
       </div>
       {error !== null ? (
-        <div className="gw-form__error">
+        <div className="gw-notice">
           <NoticePanel message={error} />
         </div>
       ) : null}

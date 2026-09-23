@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -6,7 +6,17 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { GatewayState, HarnessList, HarnessStatus } from "../types";
 import { parseBackendError, serviceLeftover } from "../modelsView.ts";
-import { AgentIcon, NoticePanel, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
+import {
+  AgentIcon,
+  BusySlot,
+  NoticePanel,
+  Button,
+  Empty,
+  FloatingToast,
+  SubPage,
+  Toast,
+  Tooltip,
+} from "../ui";
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { updateCheckFailure } from "../updateText.ts";
@@ -18,7 +28,7 @@ import "./SettingsPage.css";
 /// 复选框列表，三列「复选框 + 图标 + 名字」，行高 34；默认只列已安装的，其余收在
 /// `显示未安装的 N 个` 后面。**最多显示 4 个**（上限来自 core，`list_harnesses` 带回）：
 /// 勾满时其余已安装项禁用，提示框「最多显示 4 个，先取消一个」。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
-/// **取消勾选那一刻在该行旁出现**，4 秒后淡出（① 信息在对的时间出现）。
+/// **取消勾选那一刻浮在那一项正下方**，约 4 秒淡出（① 信息在对的时间出现）。
 /// 再往下 48：`关于`——版本（等宽）+ `检查更新`（应用内查，不跳 GitHub）。
 ///
 /// 改一个生效一个，返回即走，**没有「保存」按钮**；Esc 与 ← 都回主视图（SubPage 负责）。
@@ -34,13 +44,7 @@ import "./SettingsPage.css";
 /// 其余收在「显示未安装的 N 个」后面。
 type AgentOption = HarnessStatus;
 
-/// 取消勾选时行旁那句话停留多久
-const UNCHECK_NOTE_MS = 4000;
-
 /// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的文字链）
-/// 「已是最新版本」停留多久（例行一行，约 4 秒淡出）
-const LATEST_NOTE_MS = 4000;
-
 const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
 
 /// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内待办条（灰面板）：
@@ -127,13 +131,6 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     if (later) return null;
     switch (update.kind) {
       case "quiet":
-        if (checking)
-          return (
-            <div className="settings-page__note settings-page__checking">
-              <Spinner size={14} label="正在检查" />
-              正在检查
-            </div>
-          );
         if (checkFailed !== null)
           return (
             <div className="settings-page__note">
@@ -145,7 +142,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
               </span>
             </div>
           );
-        return latest ? <div className="settings-page__note">✓ 已是最新版本</div> : null;
+        return null;
       case "downloading":
         return (
           <div className="settings-page__note">
@@ -196,17 +193,12 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     }
   };
 
-  /// 点「检查更新」之后的三种一行字：正在检查 / 已是最新（约 4 秒淡出）/ 检查失败（给去发布页的退路）
-  const [latest, setLatest] = useState(false);
+  /// 点「检查更新」之后：正在检查（键原位忙碌）/ 已是最新（键下方浮起，约 4 秒淡出）/
+  /// 检查失败（一行书面说明 + 去发布页的退路）
+  const [latest, setLatest] = useState(0);
   const [checking, setChecking] = useState(false);
   const [checkFailed, setCheckFailed] = useState<string | null>(null);
-  const latestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (latestTimer.current) clearTimeout(latestTimer.current);
-    },
-    [],
-  );
+  const dismissLatest = useCallback(() => setLatest(0), []);
 
   /// 后台服务（Codex 模型网关的路由服务）那一行：按状态写，不常驻「卸下」。
   /// null＝还没读到、或这台机器不支持（读不到就整行不显示，不打扰）
@@ -236,15 +228,9 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     }
   };
 
-  /// 刚取消勾选的那一行：行旁出一句说明，4 秒后淡出
-  const [unchecked, setUnchecked] = useState<string | null>(null);
-  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (noteTimer.current) clearTimeout(noteTimer.current);
-    },
-    [],
-  );
+  /// 刚取消勾选的那一项：它正下方浮起一句说明，约 4 秒淡出（`at` 让连着取消两次时计时从头来）
+  const [unchecked, setUnchecked] = useState<{ id: string; at: number } | null>(null);
+  const dismissUnchecked = useCallback(() => setUnchecked(null), []);
 
   /// 点一下切换，当场生效。写盘成功后重读一次，界面始终以落盘结果为准
   /// 勾选先画出来再写（同模型页「勾选不闪」）：写失败读回实际状态并说原因
@@ -254,12 +240,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     );
     try {
       await api.setHarnessEnabled(id, enabled);
-      if (noteTimer.current) clearTimeout(noteTimer.current);
-      if (enabled) setUnchecked(null);
-      else {
-        setUnchecked(id);
-        noteTimer.current = setTimeout(() => setUnchecked(null), UNCHECK_NOTE_MS);
-      }
+      setUnchecked(enabled ? null : { id, at: Date.now() });
       await reload();
     } catch (e) {
       onError(String(e));
@@ -270,9 +251,8 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   /// `检查更新`：在应用里查（产品负责人：跳到 GitHub 让用户手动下载太难用）。有新版出待办条
   /// （下载并安装 → 重启），没有就说「已是最新版本」，查不成才给「去发布页 ↗」的退路
   const checkUpdate = async () => {
-    if (latestTimer.current) clearTimeout(latestTimer.current);
     setLater(false);
-    setLatest(false);
+    setLatest(0);
     setCheckFailed(null);
     setChecking(true);
     try {
@@ -280,8 +260,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
       if (found) setUpdate({ kind: "ready", update: found });
       else {
         setUpdate({ kind: "quiet" });
-        setLatest(true);
-        latestTimer.current = setTimeout(() => setLatest(false), LATEST_NOTE_MS);
+        setLatest(Date.now());
       }
     } catch (e) {
       setCheckFailed(updateCheckFailure(e instanceof Error ? e.message : String(e)));
@@ -299,7 +278,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         type="button"
         role="checkbox"
         aria-checked={agent.enabled}
-        className={`settings-page__row${unchecked === agent.id ? " is-noted" : ""}`}
+        className={`settings-page__row${unchecked?.id === agent.id ? " is-noted" : ""}`}
         disabled={blocked}
         onClick={blocked ? undefined : () => void toggle(agent.id, !agent.enabled)}
       >
@@ -317,10 +296,15 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         ) : (
           button
         )}
-        {unchecked === agent.id ? (
-          <span className="settings-page__rownote" role="status">
-            不在列表里显示了，已建好的链接原样留着
-          </span>
+        {unchecked?.id === agent.id ? (
+          <FloatingToast key={unchecked.at} align="start">
+            <Toast
+              kind="success"
+              verb="不在列表里显示了"
+              reason="已建好的链接原样留着"
+              onDismiss={dismissUnchecked}
+            />
+          </FloatingToast>
         ) : null}
       </div>
     );
@@ -382,15 +366,23 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           <span className="settings-page__name">版本</span>
           <span className="settings-page__version">{current ?? "…"}</span>
           <span className="settings-page__check">
-            {checking || update.kind === "downloading" ? (
-              <Button variant="link" disabled disabledReason={checking ? "正在检查" : "正在下载"}>
+            {update.kind === "downloading" ? (
+              <Button variant="link" disabled disabledReason="正在下载">
                 检查更新
               </Button>
             ) : (
-              <Button variant="link" onClick={() => void checkUpdate()}>
-                检查更新
-              </Button>
+              // 查的时候键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 正在检查
+              <BusySlot busy={checking} label="正在检查">
+                <Button variant="link" onClick={() => !checking && void checkUpdate()}>
+                  检查更新
+                </Button>
+              </BusySlot>
             )}
+            {latest ? (
+              <FloatingToast key={latest} align="start">
+                <Toast kind="success" verb="已是最新版本" onDismiss={dismissLatest} />
+              </FloatingToast>
+            ) : null}
           </span>
         </div>
         <div className="settings-page__update">{updateNotice()}</div>
@@ -409,20 +401,15 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
               <span className="settings-page__dot">·</span>
               <span className="settings-page__state">已停用但仍在运行</span>
               <span className="settings-page__dot">·</span>
-              {uninstalling ? (
-                <span className="settings-page__busy">
-                  <Spinner size={14} label="正在卸下后台服务" />
-                  正在卸下
-                </span>
-              ) : (
+              <BusySlot busy={uninstalling} label="正在卸下">
                 <Button
                   variant="link"
                   title="恢复 Codex 设置、卸载后台服务，卸下后不再占用资源"
-                  onClick={() => void uninstall()}
+                  onClick={() => !uninstalling && void uninstall()}
                 >
                   卸下
                 </Button>
-              )}
+              </BusySlot>
             </div>
             {uninstallError !== null ? (
               <div className="settings-page__update">

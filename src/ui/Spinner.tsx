@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+
 /// 忙碌指示：地球绕太阳（DESIGN「忙碌指示：只在用户等的地方，带文字」，画板 Marks / States「忙碌」）。
 ///
 /// 中心一颗实心太阳（`ink`，约占直径 40%），一颗小地球（`ink`）沿一圈细轨道匀速转，1 圈 / 1.2s 线性。
@@ -45,4 +48,55 @@ export function Spinner({ size = 14, label }: SpinnerProps) {
       />
     </svg>
   );
+}
+
+/// 忙碌的统一门槛（DESIGN「反馈的两种形态 › 忙碌」）：0.3 秒内完成就什么都不显示（不闪一下），
+/// 超过才换成转圈 + 一句。全应用只有这一个数
+export const BUSY_DELAY_MS = 300;
+
+/// `busy` 持续超过门槛才为 true；`busy` 一落就立即为 false
+export function useBusyShown(busy: boolean, delay = BUSY_DELAY_MS): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setShown(false);
+      return;
+    }
+    const timer = setTimeout(() => setShown(true), delay);
+    return () => clearTimeout(timer);
+  }, [busy, delay]);
+  return busy && shown;
+}
+
+export interface BusySlotProps {
+  /// 触发的那颗键此刻在等
+  busy: boolean;
+  /// 忙什么：`正在重启 Codex`；同时作读屏文本
+  label: string;
+  /// 触发键本身
+  children: ReactNode;
+  /// 给忙碌那一句换外观时用（默认 13 `ink-mute`）
+  className?: string;
+}
+
+/// 触发键原位忙碌（DESIGN「反馈的两种形态 › 忙碌」）：只锁这颗键——`busy` 一起就点不动，
+/// 过了 0.3 秒门槛才原位换成 14px 地球绕太阳 + 一句；更快完成的什么都不显示
+export function BusySlot({ busy, label, children, className }: BusySlotProps) {
+  const shown = useBusyShown(busy);
+  if (shown) {
+    return (
+      <span className={className ? `ss-busyslot ${className}` : "ss-busyslot"} role="status">
+        <Spinner size={14} label={label} />
+        <span>{label}</span>
+      </span>
+    );
+  }
+  if (busy) {
+    return (
+      <span className="ss-locked" aria-busy="true">
+        {children}
+      </span>
+    );
+  }
+  return <>{children}</>;
 }

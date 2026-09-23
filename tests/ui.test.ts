@@ -29,7 +29,7 @@ const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TIP_DELAY_MS, PINNED_TIP_MS, TIP_IDLE, nextTip } =
   await import("../src/ui/Tooltip.tsx");
-const { Spinner } = await import("../src/ui/Spinner.tsx");
+const { Spinner, BusySlot, BUSY_DELAY_MS } = await import("../src/ui/Spinner.tsx");
 const { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
 const { ErrorBanner, NoticePanel } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
@@ -628,8 +628,10 @@ test("Spinner：地球绕太阳，太阳大地球小、画一圈细轨道、必�
 
 // ===== 提示条 =====
 
-test("Toast notice 成功：黑显示窗，40px 指示窗 ✓ + 动词 + 白图标 + 名字 + 白描边撤销 + ×", () => {
+test("Toast notice：黑显示窗，40px 指示窗 + 动词 + 白图标 + 名字 + 白描边键 + ×", () => {
+  // 成功一律不用黑块（DESIGN「反馈的两种形态」）：黑窗的形制用明确要了 notice 档的来验
   const html = render(Toast, {
+    tier: "notice",
     kind: "success",
     verb: "写进",
     agents: [{ id: "claude-code", name: "Claude Code" }],
@@ -711,6 +713,7 @@ test("Toast 需要注意（新问题一次性提示）：! + 主语加粗 + 半�
 
 test("Toast 展开态：删原件的后果与路径放在副行之下", () => {
   const html = render(Toast, {
+    tier: "notice",
     kind: "success",
     verb: "删到废纸篓",
     names: ["docx"],
@@ -720,9 +723,8 @@ test("Toast 展开态：删原件的后果与路径放在副行之下", () => {
   assert.match(html, /class="ss-toast__detail">示意图</);
 });
 
-test("Toast routine：一行墨字落在白底上，无框无底，撤销是文字链", () => {
+test("Toast 成功：不给档位也是白窗（画布底 + layer 圆角 + tip 阴影，高 32），撤销是文字链；成功不用黑块", () => {
   const html = render(Toast, {
-    tier: "routine",
     kind: "success",
     verb: "写进",
     agents: [{ id: "codex", name: "Codex" }],
@@ -734,21 +736,39 @@ test("Toast routine：一行墨字落在白底上，无框无底，撤销是文�
   assert.match(html, /class="ss-btn ss-btn--link">撤销</);
   assert.doesNotMatch(html, /ss-toast__indicator/);
   const rule = cssRule(uiCss, ".ss-toast--routine");
-  // 无框无底（圆角随提示条一档，但没有底色，所以看不出来，也不加阴影）
-  assert.doesNotMatch(rule, /(^|\s)(background|border)(-(?!radius)[a-z]+)?:/);
-  assert.doesNotMatch(rule, /box-shadow/);
+  assert.match(rule, /background:\s*var\(--canvas\)/);
+  assert.match(rule, /border-radius:\s*var\(--radius-layer\)/);
+  assert.match(rule, /box-shadow:\s*var\(--elev-tip\)/);
+  assert.match(rule, /height:\s*var\(--control-h-row\)/);
+  // 做不成 / 部分失败不给档位时是黑窗
+  assert.match(render(Toast, { kind: "cannot", verb: "没加上" }), /ss-toast--notice/);
 });
 
-test("Toast 单格例行一行：约 4 秒（比批量的 6 秒短），悬停不计时，到点末尾 120ms 淡出、减少动效时直接消失", () => {
+test("Toast 文字一律 13：动词 600、名字 400、数字等宽 12——比表格正文 15 低一档", async () => {
+  assert.match(cssRule(uiCss, ".ss-toast"), /font-size:\s*var\(--size-caption\)/);
+  assert.match(cssRule(uiCss, ".ss-toast__verb"), /font-weight:\s*600/);
+  const num = cssRule(uiCss, ".ss-toast__num");
+  assert.match(num, /font-family:\s*var\(--font-mono\)/);
+  assert.match(num, /font-size:\s*var\(--size-micro\)/);
+  const { ToastCount } = await import("../src/ui/Toast.tsx");
+  // 数量是一整段：flex 的 gap 拆不开「3 个」
+  assert.equal(
+    render(ToastCount, { n: 3 }),
+    '<span class="ss-toast__count"><span class="ss-toast__num">3</span>\u00a0个</span>',
+  );
+  // 单格失败的原因本身是一整句：写在动词的位置，可折行
+  const cell = render(Toast, { kind: "cannot", message: "Codex 的 skills 目录写不进去" });
+  assert.match(cell, /class="ss-toast__message">Codex 的 skills 目录写不进去</);
+  assert.doesNotMatch(cell, /ss-toast__verb/);
+});
+
+test("Toast 停留：成功无动作约 4 秒、带撤销 6 秒、做不成 8 秒；两档都悬停停表，到点末尾 120ms 同一个淡出", () => {
   assert.equal(CELL_TOAST_DWELL_MS, 4000);
   assert.ok(CELL_TOAST_DWELL_MS < TOAST_DWELL_MS.success);
   const html = render(Toast, {
-    tier: "routine",
     kind: "success",
     verb: "加到",
     names: ["excalidraw"],
-    dwellMs: CELL_TOAST_DWELL_MS,
-    holdOnHover: true,
     onDismiss: noop,
   });
   // 刚出现时不在淡出
@@ -758,6 +778,28 @@ test("Toast 单格例行一行：约 4 秒（比批量的 6 秒短），悬停�
   assert.match(leaving, /transition:\s*opacity var\(--motion-fast\) var\(--ease-mech\)/);
   const reduced = uiCss.slice(uiCss.indexOf("@media (prefers-reduced-motion: reduce)"));
   assert.match(reduced, /\.ss-toast\.is-leaving \{\s*transition: none;/);
+  // 淡出与悬停停表不再是两个可选开关：两档同一套（旧的 fadeOut / holdOnHover 已撤）
+  const src = readFileSync(new URL("../src/ui/Toast.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /fadeOut|holdOnHover/);
+});
+
+test("忙碌门槛 0.3 秒：触发键先锁住、外观不变，过了门槛才原位换成转圈 + 一句", () => {
+  assert.equal(BUSY_DELAY_MS, 300);
+  const button = createElement("button", { type: "button" }, "检查更新");
+  // 首帧（门槛之前）：键照旧，只是点不动
+  const early = render(BusySlot, { busy: true, label: "正在检查", children: button });
+  assert.match(
+    early,
+    /^<span class="ss-locked" aria-busy="true"><button type="button">检查更新<\/button>/,
+  );
+  assert.doesNotMatch(early, /ss-spinner/);
+  assert.match(cssRule(uiCss, ".ss-locked"), /pointer-events:\s*none/);
+  assert.match(cssRule(uiCss, ".ss-locked"), /display:\s*contents/);
+  // 不忙：原样
+  assert.equal(
+    render(BusySlot, { busy: false, label: "正在检查", children: button }),
+    '<button type="button">检查更新</button>',
+  );
 });
 
 // ===== 错误横幅与行内待办条：大面积的提示用 surface 灰面板，不用黑 =====
@@ -807,7 +849,16 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认描边键 + 可选文
     /background:\s*var\(--canvas\)/,
   );
   assert.doesNotMatch(uiCss, /ss-noticepanel[^{]*\.ss-spinner/);
-  assert.match(render(NoticePanel, { message: "x", busy: "正在接管" }), /正在接管/);
+  // 正在执行：门槛之前键照旧、点不动（不闪一下忙碌），过了 0.3 秒才换成忙碌指示 + 一句
+  const busy = render(NoticePanel, {
+    message: "x",
+    busy: "正在接管",
+    action: { label: "接管", onClick: noop },
+  });
+  assert.match(busy, /class="ss-noticepanel__actions is-locked"/);
+  assert.match(busy, />接管</);
+  assert.doesNotMatch(busy, /ss-spinner/);
+  assert.match(cssRule(uiCss, ".ss-noticepanel__actions.is-locked"), /pointer-events:\s*none/);
 });
 
 test("NoticePanel 行下失败：原因写全、可折行，给了 onClose 才有右端 ×", () => {

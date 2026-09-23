@@ -1,7 +1,17 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MouseEvent, ReactNode, RefObject } from "react";
 import { Disclosure } from "../Matrix";
-import { Button, NoticePanel, Spinner, Tag, Toast, Tooltip } from "../ui";
+import {
+  BusySlot,
+  Button,
+  FloatingToast,
+  NoticePanel,
+  Spinner,
+  Tag,
+  Toast,
+  Tooltip,
+  useBusyShown,
+} from "../ui";
 import { edgeFades } from "../modelsView";
 import { displayPath } from "../pathText";
 import { CheckMark } from "./CheckMark.tsx";
@@ -262,11 +272,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     };
     let second: ReactNode;
     if (line.kind === "loading") {
-      second = (
-        <span className="add-src__meta">
-          <Spinner label="正在读文件夹" />
-        </span>
-      );
+      second = <ReadingFolder />;
     } else if (line.kind === "message") {
       second = <span className="add-src__meta">{line.text}</span>;
     } else {
@@ -404,19 +410,23 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
       {list}
       <div className="add-src__foot">
         {failure ? (
-          <Toast
-            key={failure.key}
-            tier="notice"
-            {...failure.toast}
-            onDismiss={dismissFailure}
-            onClose={dismissFailure}
-          />
+          // 没加上：浮在触发它的主动作那里（右对齐这一行、放不下就翻到上方），8 秒，悬停停表
+          <FloatingToast key={failure.key} align="end">
+            <Toast
+              tier="notice"
+              {...failure.toast}
+              onDismiss={dismissFailure}
+              onClose={dismissFailure}
+            />
+          </FloatingToast>
         ) : null}
         {adding ? (
-          <span className="add-src__busy">
-            <Spinner label="正在添加" />
-            正在添加
-          </span>
+          // 键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
+          <BusySlot busy label="正在添加" className="add-src__busy">
+            <Button variant="primary" size="row">
+              {addLabel(entries.length)}
+            </Button>
+          </BusySlot>
         ) : entries.length === 0 ? (
           <Button variant="primary" size="row" disabled disabledReason={NOTHING_CHECKED}>
             {addLabel(0)}
@@ -428,5 +438,23 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
         )}
       </div>
     </div>
+  );
+}
+
+/// 选了文件夹、正在读：第二行过了 0.3 秒门槛才出忙碌指示 + 一句（更快读完的什么都不闪）
+function ReadingFolder() {
+  const shown = useBusyShown(true);
+  return (
+    <span className="add-src__meta" role="status">
+      {/* 门槛之前留一个空格占住第二行的高度，出现时不跳 */}
+      {shown ? (
+        <span className="add-src__reading">
+          <Spinner label="正在读文件夹" />
+          正在读文件夹
+        </span>
+      ) : (
+        "\u00a0"
+      )}
+    </span>
   );
 }

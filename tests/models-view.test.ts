@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { render } from "./ui-render.ts";
 import {
   MODELS_TOOLS,
@@ -534,21 +535,31 @@ test("AgentRow 待重启：配置网关之后出紧凑键「重启生效」，�
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
 });
 
-test("AgentRow 重启中：键位原地换成 14px 地球绕太阳 +「正在重启 Codex」；已生效：一行例行成功", () => {
+test("AgentRow 重启中：0.3 秒门槛之前键照旧、点不动（过了门槛原位换成地球绕太阳 +「正在重启 Codex」）；已生效：键的原位下方浮起白窗", () => {
   const busyHtml = render(AgentRow, {
     ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
     phase: { kind: "restarting" },
   });
-  // 重启中用忙碌指示 Spinner（UI v4 第四轮删掉了自创转盘，原来钉 ss-rotor 的断言随之改写）
-  assert.match(busyHtml, /class="ss-spinner" width="14"/);
-  assert.match(busyHtml, /正在重启 Codex/);
-  assert.doesNotMatch(busyHtml, /重启生效<\/button>/);
+  // 首帧（门槛之前）：键锁住、不闪忙碌；门槛之后的转圈 + 一句由 useBusyShown 把关
+  assert.match(
+    busyHtml,
+    /class="models-restart-tip ss-locked" aria-busy="true"[^]*重启生效<\/button>/,
+  );
+  assert.doesNotMatch(busyHtml, /ss-spinner/);
+  const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
+  assert.match(src, /const shown = useBusyShown\(waiting\);\s*if \(waiting && shown\)/);
   const doneHtml = render(AgentRow, {
     ...rowProps(withSelected({ enabled: true })),
     phase: { kind: "done" },
   });
-  assert.match(doneHtml, /models-restart--done/);
+  // 键消失，原位留一个不占宽的锚，`✓ 已生效` 是浮起的白窗（FloatingToast），不是行内一行字
+  assert.match(
+    doneHtml,
+    /class="models-restart models-restart--done"><span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"/,
+  );
   assert.match(doneHtml, /ss-toast--routine[^]*已生效/);
+  const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /models-done-fade|animation/);
 });
 
 test("AgentRow 重启失败：行下灰面板「没重启 Codex」+ 原因 + 再试一次 + ×，不用黑块", () => {
@@ -584,9 +595,9 @@ test("AgentRow 启动 Codex：网关开着、Codex 没在跑才出紧凑键，�
     onLaunch: noop,
     phase: { kind: "launching" },
   });
-  assert.match(launching, /class="ss-spinner" width="14"/);
-  assert.match(launching, /正在启动 Codex/);
-  assert.doesNotMatch(launching, /启动 Codex<\/button>/);
+  // 首帧（门槛之前）：键照旧、点不动
+  assert.match(launching, /ss-locked" aria-busy="true"[^]*启动 Codex<\/button>/);
+  assert.doesNotMatch(launching, /ss-spinner/);
   const launched = render(AgentRow, {
     ...rowProps(
       withSelected({
@@ -597,7 +608,7 @@ test("AgentRow 启动 Codex：网关开着、Codex 没在跑才出紧凑键，�
     onLaunch: noop,
     phase: { kind: "launched" },
   });
-  assert.match(launched, /models-restart--done[^]*ss-toast--routine[^]*已启动/);
+  assert.match(launched, /models-restart--done[^]*ss-floattoast[^]*ss-toast--routine[^]*已启动/);
 });
 
 test("AgentRow 启用不了：开关禁用，原因作为悬停说明", () => {
@@ -946,7 +957,7 @@ test("serviceLeftover：只有停用了、后台服务却还装着才算残留�
   assert.equal(serviceLeftover(state({ enabled: false, router: router(false) })), false);
 });
 
-test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（与重启生效同形），提示框写结果；正在卸下时忙碌指示 + 文字", () => {
+test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（与重启生效同形），提示框写结果；正在卸下时键先锁住（过了门槛换成忙碌指示 + 文字）", () => {
   const leftover = {
     enabled: false,
     router: { installed: true, running: true, port: 1, protocol: "chat", error: "" },
@@ -959,7 +970,8 @@ test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（�
     onUninstall: noop,
     uninstalling: true,
   });
-  assert.match(busyHtml, /class="ss-spinner"[^]*正在卸下后台服务/);
+  assert.match(busyHtml, /class="ss-locked" aria-busy="true"[^]*卸下后台服务<\/button>/);
+  assert.doesNotMatch(busyHtml, /ss-spinner/);
   assert.doesNotMatch(
     render(AgentRow, { ...rowProps(withSelected({ enabled: true })), onUninstall: noop }),
     /卸下后台服务/,

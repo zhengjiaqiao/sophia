@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import Matrix, {
-  BATCH_BUSY_DELAY_MS,
   cellKey,
   type MatrixCellView,
   type MatrixRowView,
@@ -35,12 +34,12 @@ import {
 import {
   AddButton,
   Button,
-  CELL_TOAST_DWELL_MS,
   Confirm,
+  CornerToast,
   Empty,
   Tag,
   Toast,
-  TOAST_DWELL_MS,
+  ToastCount,
   Tooltip,
 } from "./ui";
 import { McpDiffPanel, type McpDiffState } from "./McpDiffPanel";
@@ -73,7 +72,7 @@ import "./McpTab.css";
 export interface McpTabProps {
   selectedKey: string;
   onError: (error: string) => void;
-  busy: boolean;
+  /// 扫描、写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
   refreshKey: number;
   /// 每次扫描完回传一次（壳拿它认新问题、出一次性提示，也拿它算侧栏的项目并集，不用再自己扫一遍）
@@ -146,7 +145,6 @@ const anchorNow = (): ConfirmAnchor | undefined => {
 export default function McpTab({
   selectedKey,
   onError,
-  busy,
   onBusy,
   refreshKey,
   onOverview,
@@ -171,7 +169,7 @@ export default function McpTab({
   const [pick, setPick] = useState<McpPick | null>(null);
   const [optimistic, setOptimistic] = useState<Set<string>>(new Set());
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
-  // 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，触发项旁的忙碌指示 + 一句
+  // 批量写入进行中：按下的那一项（只锁它；过了 0.3 秒门槛旁边出忙碌指示 + 一句）
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
   const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
   const [cellNotice, setCellNotice] = useState<{
@@ -180,17 +178,22 @@ export default function McpTab({
     text: string;
   } | null>(null);
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
-  // 单格写成的例行一行（出在被点的那一行里）：一个槽位，新的替换旧的
+  // 单格写成（浮在被点那一格下）：一个槽位，新的替换旧的
   const [cellToast, setCellToast] = useState<{
     id: number;
     rowKey: string;
+    columnId: string;
     node: ReactNode;
   } | null>(null);
   const cellToastSeq = useRef(0);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
-  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；工具行下的例行一行
+  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；新来源片下的那一窗
   const [justAdded, setJustAdded] = useState<CandidateEntry[] | null>(null);
-  const [addedToast, setAddedToast] = useState<{ key: number; parts: string[] } | null>(null);
+  const [addedToast, setAddedToast] = useState<{
+    key: number;
+    parts: string[];
+    origins: string[];
+  } | null>(null);
   const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
@@ -206,7 +209,19 @@ export default function McpTab({
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
   const dismissCell = useCallback(() => setCellToast(null), []);
+  const dismissNotice = useCallback(() => setCellNotice(null), []);
   const dismissAdded = useCallback(() => setAddedToast(null), []);
+  /// 单格失败：同一个位置（那一格正下方）说原因，替掉那一格的成功窗（一次只一条）
+  const failCell = (rowKey: string, columnId: string, text: string) => {
+    setCellToast(null);
+    setCellNotice({ rowKey, columnId, text });
+  };
+  // 写入排队：连按几个键、连点几格时一个一个写，不和彼此抢同一份配置文件
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const enqueue = (job: () => Promise<void>) => {
+    queue.current = queue.current.then(job, job);
+    return queue.current;
+  };
   const closePick = useCallback(() => setPick(null), []);
 
   const refresh = async () => {
@@ -238,7 +253,7 @@ export default function McpTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  // 自动规则在背后写了：右下例行一行交代一声（⑨⑬）；格子直接是新状态，不闪
+  // 自动规则在背后写了：右下（壳上那一叠）交代一声（⑨⑬）；格子直接是新状态，不闪
   const domainsRef = useRef<McpDomain[]>([]);
   useEffect(() => {
     let disposed = false;
@@ -256,7 +271,7 @@ export default function McpTab({
         <Toast
           {...text}
           names={items.length > 2 ? undefined : text.names}
-          reading={items.length > 2 ? `${items.length} 个` : undefined}
+          reading={items.length > 2 ? <ToastCount n={items.length} /> : undefined}
           onDismiss={dismissGlobal}
           onClose={dismissGlobal}
         />,
@@ -286,16 +301,10 @@ export default function McpTab({
     undoRef.current = null;
   }, [selectedKey]);
 
-  useEffect(() => {
-    if (!cellNotice) return;
-    const timer = setTimeout(() => setCellNotice(null), TOAST_DWELL_MS.cannot);
-    return () => clearTimeout(timer);
-  }, [cellNotice]);
-
   const page: McpDomain | null = domains.find((d) => d.key === selectedKey) ?? null;
 
   // 加完来源滑回主视图（同 Skills）：重扫已完，列表筛到新来源——它们的片选中（几个选几片，
-  // 列表是并集），工具行下例行一行 `✓ 已添加 …`；这几片记成 `新`
+  // 列表是并集），这几片正下方浮起 `✓ 已添加 …`；这几片记成 `新`
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
@@ -333,7 +342,7 @@ export default function McpTab({
         "MCP",
       );
     }
-    setAddedToast({ key: Date.now(), parts });
+    setAddedToast({ key: Date.now(), parts, origins: ids });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justAdded, overview]);
 
@@ -446,29 +455,35 @@ export default function McpTab({
       return { name: e.name, agent: l ? { id: l.harnessId, name: l.label } : undefined };
     });
 
-  /// 写一批（已经确认过或不需要确认）。keyId 给了就把提示条贴在那颗键下
-  const apply = async (preview: McpPreview, allowCrossDomain: boolean, keyId?: string) => {
+  /// 写一批（已经确认过或不需要确认）。keyId 给了就把结果浮在那颗键下。
+  /// 单格：写的时候那一格灰着，写成闪一下。批量（按键）：格子同时变成新状态、不闪；
+  /// 只锁按下的那一项，过了 0.3 秒门槛旁边出忙碌指示 + 一句（DESIGN 冲突表「格子变化要不要闪」）。
+  /// 写入排在前面的写入之后
+  const apply = (preview: McpPreview, allowCrossDomain: boolean, keyId?: string) => {
     const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
-    // 单格：写的时候那一格灰着，写成闪一下。批量（按键）：格子同时变成新状态、不闪，
-    // 真的慢才在触发项旁出忙碌指示 + 一句（DESIGN 冲突表「格子变化要不要闪」）
     const single = keyId === undefined;
     setPane(null);
-    // 批量开始时收起单格那一行：一次只一条，撤销入口不混
+    // 批量开始时收起单格那一窗：一次只一条，撤销入口不混
     if (!single) setCellToast(null);
     setOptimistic((prev) => new Set([...prev, ...keys]));
-    if (single) setPendingCells(new Set(keys));
+    if (single) setPendingCells((prev) => new Set([...prev, ...keys]));
     const agent =
       keyId === "all"
         ? "所有 agent"
         : keyId
           ? ((page ? columnNames(page.targets).get(keyId) : undefined) ?? labelOf(keyId))
           : "";
-    const slow = keyId
-      ? setTimeout(
-          () => setKeyBusy({ keyId, label: batchBusyText("write", agent) }),
-          BATCH_BUSY_DELAY_MS,
-        )
-      : undefined;
+    if (keyId) setKeyBusy({ keyId, label: batchBusyText("write", agent) });
+    return enqueue(() => applyWrite(preview, allowCrossDomain, keys, keyId));
+  };
+
+  const applyWrite = async (
+    preview: McpPreview,
+    allowCrossDomain: boolean,
+    keys: string[],
+    keyId: string | undefined,
+  ) => {
+    const single = keyId === undefined;
     onBusy(true);
     let result: McpReport | null = null;
     try {
@@ -477,9 +492,12 @@ export default function McpTab({
       onError(String(error));
     } finally {
       onBusy(false);
-      setPendingCells(new Set());
-      clearTimeout(slow);
-      setKeyBusy(null);
+      setPendingCells((prev) => {
+        const next = new Set(prev);
+        for (const k of keys) next.delete(k);
+        return next;
+      });
+      setKeyBusy((prev) => (prev?.keyId === keyId ? null : prev));
     }
     if (result !== null) {
       const created = result.entries.filter((e) => e.outcome === "created");
@@ -494,9 +512,12 @@ export default function McpTab({
         })),
       });
       const undoId = result.undoId;
-      // 单格：那一格的键与行键（撤销后闪那一格；撤不了时说明出在那一行）
-      const one = single && created.length > 0 ? { keys, rowKey: created[0].name } : undefined;
-      // 单格那一行已说明对象：只写 `✓ 写进 [Codex] · 撤销`（撤不了时的说明同样不重复服务名）
+      // 单格：那一格的键、行键与列（撤销后闪那一格；撤不了时说明出在那一格下）
+      const one =
+        single && created.length > 0
+          ? { keys, rowKey: created[0].name, columnId: created[0].targetId }
+          : undefined;
+      // 单格所在的行已说明对象：只写 `✓ 写进 [Codex] · 撤销`（撤不了时的说明同样不重复服务名）
       const rowText = one ? toastFor("write", { done: itemsOf(created), omitNames: true }) : text;
       const undo = undoId ? () => void undoWrite(undoId, keyId, rowText, one) : null;
       undoRef.current = undo;
@@ -506,9 +527,9 @@ export default function McpTab({
           node: (
             <Toast
               {...text}
-              // 键行左侧空白窄：写数量（`✓ 写进 ⎔ 2 个`），名字在键的提示框里
+              // 写数量（`✓ 写进 ⎔ 2 个`），名字在键的提示框里
               names={text.kind === "success" ? undefined : text.names}
-              reading={text.kind === "success" ? `${created.length} 个` : undefined}
+              reading={text.kind === "success" ? <ToastCount n={created.length} /> : undefined}
               action={undo ? { label: "撤销", onClick: undo } : undefined}
               onDismiss={dismissKey}
               onClose={text.tier === "notice" ? dismissKey : undefined}
@@ -516,20 +537,20 @@ export default function McpTab({
           ),
         });
       } else if (failed.length > 0) {
-        // 单格失败：不出例行一行，格下小黑窗说原因
+        // 单格失败：不出成功那一窗，同一个位置（格子正下方）黑窗说原因
         const f = failed[0];
-        setCellNotice({ rowKey: f.name, columnId: f.targetId, text: f.message });
+        failCell(f.name, f.targetId, f.message);
       } else if (created.length > 0) {
-        // 单格写成：被点的那一行里紧跟名字出 `✓ 写进 [Codex] · 撤销`（不重复服务名），替换上一条
+        // 单格写成：被点那一格正下方浮起 `✓ 写进 [Codex] · 撤销`（不重复服务名），替换上一条。
+        // MCP 保留撤销：写进之后再点那一格不能移除（只增不删），格子替代不了撤销
         setCellToast({
           id: ++cellToastSeq.current,
           rowKey: created[0].name,
+          columnId: created[0].targetId,
           node: (
             <Toast
               {...rowText}
               action={undo ? { label: "撤销", onClick: undo } : undefined}
-              dwellMs={CELL_TOAST_DWELL_MS}
-              holdOnHover
               onDismiss={dismissCell}
             />
           ),
@@ -546,13 +567,13 @@ export default function McpTab({
 
   /// 撤销一次写入：core 只在文件仍等于写入后的样子时才从快照还原。改过了就撤不了——
   /// 撤销禁用、提示框说原因，另给「在访达中显示备份 ↗」作手动兜底（DESIGN「MCP 写入的撤销」）
-  /// `one`：单格写入的撤销（那一格的键与行键）——撤成了那一行直接消失、格子回原状并闪一下；
-  /// 撤不了时说明也出在那一行里
+  /// `one`：单格写入的撤销（那一格的键、行键与列）——撤成了那一窗直接消失、格子回原状并闪一下；
+  /// 撤不了时说明也出在那一格下
   const undoWrite = async (
     undoId: string,
     keyId: string | undefined,
     text: ToastText,
-    one?: { keys: string[]; rowKey: string },
+    one?: { keys: string[]; rowKey: string; columnId: string },
   ) => {
     const single = one !== undefined;
     undoRef.current = null;
@@ -586,25 +607,36 @@ export default function McpTab({
               ? undefined
               : { label: "在访达中显示备份", onClick: () => void reveal(backup) }
           }
-          onDismiss={single ? dismissCell : dismissKey}
-          dwellMs={single ? CELL_TOAST_DWELL_MS : undefined}
-          holdOnHover={single}
+          onDismiss={single ? dismissCell : keyId !== undefined ? dismissKey : dismissGlobal}
         />
       );
       if (keyId !== undefined) setKeyToast({ keyId, node });
-      else if (one) setCellToast({ id: ++cellToastSeq.current, rowKey: one.rowKey, node });
+      else if (one)
+        setCellToast({
+          id: ++cellToastSeq.current,
+          rowKey: one.rowKey,
+          columnId: one.columnId,
+          node,
+        });
       else setGlobalToast(node);
       return;
     }
-    setGlobalToast(
+    // 没撤成：在撤销的入口那里说（那颗键下 / 那一格下），没有入口的才去右下
+    if (one) {
+      failCell(one.rowKey, one.columnId, `没撤销：${report.message}`);
+      return;
+    }
+    const node = (
       <Toast
         kind="cannot"
         verb="没撤销"
         reason={report.message}
-        onDismiss={dismissGlobal}
-        onClose={dismissGlobal}
-      />,
+        onDismiss={keyId !== undefined ? dismissKey : dismissGlobal}
+        onClose={keyId !== undefined ? dismissKey : dismissGlobal}
+      />
     );
+    if (keyId !== undefined) setKeyToast({ keyId, node });
+    else setGlobalToast(node);
   };
 
   /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）
@@ -623,7 +655,21 @@ export default function McpTab({
       const reason = preview.issues[0]?.message ?? "这些位置上都已经有了，没有要新增的";
       if (keyId === undefined && selections.length === 1) {
         const s = selections[0];
-        setCellNotice({ rowKey: s.name, columnId: s.targetId, text: reason });
+        failCell(s.name, s.targetId, reason);
+      } else if (keyId !== undefined) {
+        // 按键的：浮在那颗键下
+        setKeyToast({
+          keyId,
+          node: (
+            <Toast
+              kind="cannot"
+              verb="没写进"
+              reason={reason}
+              onDismiss={dismissKey}
+              onClose={dismissKey}
+            />
+          ),
+        });
       } else {
         setGlobalToast(
           <Toast
@@ -666,7 +712,7 @@ export default function McpTab({
       const trigger = cellElement(p, rowKey, target.id);
       if (choices.length < 2 || trigger === null) {
         // 走不到挑选（按理不会）：不替用户挑，格下说清为什么没写
-        setCellNotice({ rowKey: row.name, columnId: target.id, text: ambiguousText(row.name) });
+        failCell(row.name, target.id, ambiguousText(row.name));
         return;
       }
       // 有好几份不一样的同名定义：不替用户挑，也不另开页——锚在格子上出小浮层挑一份（再点一下收起）
@@ -1009,23 +1055,33 @@ export default function McpTab({
         allAgents={allAgents}
         columnChecks={columnChecks}
         onUndo={() => undoRef.current?.()}
-        busy={busy}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
         shortcuts={!sourcesOpen && !addOpen && pane === null && pick === null}
         empty={empty}
         flash={flash}
         cellNotice={cellNotice}
+        onDismissCellNotice={dismissNotice}
         keyToast={keyToast}
         cellToast={cellToast}
         keyBusy={keyBusy}
-        globalToast={globalToast}
         barToast={
-          addedToast ? (
-            <AddedToast key={addedToast.key} parts={addedToast.parts} onDismiss={dismissAdded} />
-          ) : null
+          addedToast
+            ? {
+                id: addedToast.key,
+                node: (
+                  <AddedToast
+                    key={addedToast.key}
+                    parts={addedToast.parts}
+                    onDismiss={dismissAdded}
+                  />
+                ),
+                origins: addedToast.origins,
+              }
+            : null
         }
         focus={focus}
       />
+      {globalToast ? <CornerToast>{globalToast}</CornerToast> : null}
 
       {/* 批量与跨域的那一道确认，锚在触发它的键 / 格下面。跳过的项目留在这里——它是做决定所需的信息 */}
       {pane !== null && (

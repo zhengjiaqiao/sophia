@@ -3,7 +3,7 @@
 ///
 /// Skills 与 MCP **共用这一张表**：两边只是内容不同——行是 skill 或 MCP 服务，列是 agent，
 /// 格是同一套状态点。本组件只管形制与交互（两行工具行与来源筛选片、通道条表头、原件位置列、
-/// 十字带、提示框、行内展开、键盘、选择操作条、就地提示的锚点），不碰 api、不认后端状态：调用方把一切折算成
+/// 十字带、提示框、行内展开、键盘、选择操作条、浮起提示小窗的锚点），不碰 api、不认后端状态：调用方把一切折算成
 /// 「记号 + 能不能点 + 一句话」交进来，点了什么再原样交回去。
 ///
 /// 版式（画板的写法直接当 CSS 抄，见 Matrix.css）：
@@ -23,7 +23,7 @@ import {
   Checkbox,
   Chip,
   DOT_LABEL,
-  IconCannot,
+  FloatingToast,
   IconClose,
   IconSearch,
   PINNED_TIP_MS,
@@ -31,7 +31,9 @@ import {
   StateDot,
   TIP_DELAY_MS,
   tipCeiling,
+  Toast,
   Tooltip,
+  useBusyShown,
 } from "./ui/index.ts";
 import { displayPath } from "./pathText.ts";
 import "./Matrix.css";
@@ -43,8 +45,6 @@ const COL_W = 88;
 const TAIL_W = 24;
 /// 点了做不了的格子后，说明停留的时长：与禁用控件按下钉出的提示框同一个（ui/Tooltip）
 export { PINNED_TIP_MS };
-/// 批量写入超过这么久还没完成，触发项旁才出忙碌指示 + 一句；更快的什么都不显示
-export const BATCH_BUSY_DELAY_MS = 500;
 
 /// 按下一格（点击或空格）做什么：能改的交给调用方改数据；做不了的只当即说明，不碰数据
 export const cellPress = (view: Pick<MatrixCellView, "clickable">): "act" | "explain" =>
@@ -111,6 +111,8 @@ export interface MatrixRowView {
   transport?: ReactNode;
   /// 非空＝这一行勾不动，值是原因
   selectDisabledReason?: string;
+  /// `extra` 里的动作正在执行（`只留这份` 在等体检）：不随悬停收起，忙碌指示留在原位
+  extraPinned?: boolean;
 }
 
 /// 选择态下按 agent 的批量操作：工具行里「状态点 + 名字」一项（DESIGN「选择操作条」），与格子同一套记号。
@@ -164,7 +166,6 @@ export interface MatrixProps {
   /// 选择态：工具行第一行每个 agent 一项「● 名字 / ○ 名字」，键为列 id
   columnChecks?: Record<string, ColumnCheck>;
 
-  busy: boolean;
   onCell: (rowKey: string, columnId: string) => void;
   onUndo?: () => void;
   /// 键盘快捷键是否生效（二级页面盖在上面时关掉）
@@ -175,25 +176,28 @@ export interface MatrixProps {
   /// 刚变化的格：播一次 120ms 反色闪，`nonce` 变了才重播。**只给单格**：批量时格子同时变成新状态、
   /// 不闪（DESIGN 冲突表「格子变化要不要闪」）
   flash?: { keys: string[]; nonce: number };
-  /// 批量写入真的慢（> BATCH_BUSY_DELAY_MS）时，工具行里触发的那一项旁出 14px 地球绕太阳 + 一句
-  /// （`正在加到 Codex`）；keyId 同 keyToast（"all" 或列 id）。调用方负责延迟与撤掉
+  /// 批量写入进行中：按下的那一项（"all" 或列 id）当即锁住（只锁它，别的项照常能按、排队执行），
+  /// 过了 0.3 秒门槛才变淡、旁边出 14px 地球绕太阳 + 一句（`正在加到 Codex`）。调用方在按下时给、做完撤掉
   keyBusy?: { keyId: string; label: string } | null;
-  /// 单格失败：格子下方的小黑窗
+  /// 单格失败：被点那一格正下方的黑窗说原因（与成功同一个位置），8 秒，悬停停表
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
-  /// 贴在某一行下方的提示条（只留这份 · 撤销）
-  rowToast?: { rowKey: string; node: ReactNode } | null;
-  /// 批量结果的例行提示条：贴在按下的那一项下方（见 .mx-keytoast）
+  /// 单格失败那一窗到点（或关掉）
+  onDismissCellNotice?: () => void;
+  /// 一行的结果（只留这份）：锚在被按下的那个控件上（`at`：按下那一刻它的位置，左右取控件、
+  /// 上下取整行——不盖住这一行，行被删掉、控件收起之后也还在原处）；不给 `at` 时退回该行名字下方
+  rowToast?: {
+    rowKey: string;
+    at?: { top: number; bottom: number; left: number; right: number };
+    node: ReactNode;
+  } | null;
+  /// 批量结果：浮在按下的那一项正下方 4，右对齐该项、向左展开
   keyToast?: { keyId: string; node: ReactNode } | null;
-  /// 单格加上 / 移除成功后的例行一行：就在被点的那一行里，紧跟名字（有 `×2` 跟在它后面），
-  /// 间距 12；随行滚动，不吸顶。放不下时暂时盖住同一行的原件位置格（行当下的底色），
-  /// 不越过第一个 agent 列；显示期间这一行的悬停动作（`只留这份` `打开 ↗`）让位
-  /// （DESIGN「单格操作出例行一行」）。一次只一条：`id` 变了就重挂，计时从头来
-  cellToast?: { id: number; rowKey: string; node: ReactNode } | null;
-  /// 无关位置的全局事（自动规则）：右下，右沿对齐面板右沿
-  globalToast?: ReactNode;
-  /// 工具行下一行的例行一行（加完来源滑回：`✓ 已添加 WeiboAP · 39 个 skill`）：浮在列头左段上，
-  /// 随列头吸顶，不挤动表格
-  barToast?: ReactNode;
+  /// 单格加上 / 移除成功：浮在被点那一格正下方 4，水平居中于格（靠近面板右沿时右对齐该格），
+  /// 不盖住格子与这一行（DESIGN「反馈的两种形态」）。一次只一条：`id` 变了就重挂，计时从头来
+  cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
+  /// 加完来源滑回（`✓ 已添加 WeiboAP · 39 个 skill`）：浮在工具行第二行、新来源那几片的正下方 4；
+  /// `origins` 是那几片的来源 id（一片都没有时锚在整排来源片的左端）；`id` 变了就是新的一条
+  barToast?: { id: number; node: ReactNode; origins: string[] } | null;
   /// 新问题提示「查看」跳过来：滚到这几行（或这一列的列头）并闪两下（⑦）。`nonce` 变了才重做
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
@@ -229,8 +233,8 @@ function KeyBusy({ label }: { label: string }) {
   );
 }
 
-/// 工具行各项的忙碌外观：不忙无类；忙了先只锁（`mx-locked`，点不动、不变淡），
-/// 忙过 BATCH_BUSY_DELAY_MS 才变淡（`ss-busy`）
+/// 按下的那一项的忙碌外观：不忙无类；忙了先只锁（`mx-locked`，点不动、不变淡），
+/// 忙过 0.3 秒门槛（BUSY_DELAY_MS）才变淡（`ss-busy`）
 export const busyLockClass = (busy: boolean, dim: boolean): string | undefined =>
   !busy ? undefined : dim ? "ss-busy" : "mx-locked";
 
@@ -361,18 +365,17 @@ export default function Matrix(props: MatrixProps) {
     onSelectionChange,
     allAgents,
     columnChecks,
-    busy,
     onCell,
     onUndo,
     shortcuts = true,
     empty,
     flash,
     cellNotice,
+    onDismissCellNotice,
     rowToast,
     keyToast,
     cellToast,
     keyBusy,
-    globalToast,
     barToast,
     focus: jump,
   } = props;
@@ -406,8 +409,6 @@ export default function Matrix(props: MatrixProps) {
   // Shift 区间选择的锚点
   const anchor = useRef<string | null>(null);
   const shift = useRef(false);
-  // 全局提示条的右沿：对齐面板右沿
-  const [toastRight, setToastRight] = useState(32);
   // 吸顶：工具行（勾选时是选择条）在最上面，列头紧贴它下面
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
@@ -586,32 +587,6 @@ export default function Matrix(props: MatrixProps) {
     return () => observer.disconnect();
   }, [width, columns.length]);
 
-  // ---- 单格例行一行放不下：先在名称格里排一次，超出名称格右沿（减去 12 右内边距）就改为跨列盖住
-  // 原件位置格；同一条只量一次（名字宽度在它显示的 4 秒里不变） ----
-  const [coverId, setCoverId] = useState<number | null>(null);
-  const cellToastId = cellToast?.id;
-  useLayoutEffect(() => {
-    if (cellToastId === undefined || coverId === cellToastId) return;
-    const el = rootRef.current?.querySelector<HTMLElement>(".mx-celltoast");
-    const cell = el?.closest<HTMLElement>(".mx-row__name");
-    if (!el || !cell) return;
-    const pad = parseFloat(getComputedStyle(cell).paddingRight) || 0;
-    if (el.getBoundingClientRect().right > cell.getBoundingClientRect().right - pad)
-      setCoverId(cellToastId);
-  }, [cellToastId, coverId]);
-
-  // ---- 全局提示条贴面板右沿 ----
-  useLayoutEffect(() => {
-    if (!globalToast) return;
-    const measure = () => {
-      const rect = panelRef.current?.getBoundingClientRect();
-      if (rect) setToastRight(Math.max(16, window.innerWidth - rect.right));
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [globalToast, width]);
-
   // ---- 选择 ----
   const toggleRow = (row: MatrixRowView) => {
     const want = !selected.has(row.key);
@@ -720,35 +695,17 @@ export default function Matrix(props: MatrixProps) {
     (focusRow !== undefined ? focusRow.dupGroup : undefined);
   const bandIndex = activeCol === null ? -1 : columns.findIndex((c) => c.id === activeCol);
 
-  // ---- 忙碌锁：批量写入一开始工具行各项就锁住（防重复点），超过 BATCH_BUSY_DELAY_MS 还没完成
-  // 才变淡——与触发项旁的忙碌指示同一时刻出现；写得快时先淡再恢复会闪一下 ----
-  const [busyDim, setBusyDim] = useState(false);
-  useEffect(() => {
-    if (!busy) {
-      setBusyDim(false);
-      return;
-    }
-    const timer = setTimeout(() => setBusyDim(true), BATCH_BUSY_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [busy]);
-  const lockClass = busyLockClass(busy, busyDim);
+  // ---- 忙碌锁：只锁按下的那一项（防重复点；别的项照常能按，调用方排队执行），过了 0.3 秒门槛
+  // 才变淡——与它旁边的忙碌指示同一时刻出现；写得快时先淡再恢复会闪一下 ----
+  const busyShown = useBusyShown(keyBusy != null);
+  // 浮起的提示小窗：换一条（调用方给了新对象）就是新出现一次——重挂、重新定位、计时从头来
+  const keyToastKey = useIdentityKey(keyToast);
+  const rowToastKey = useIdentityKey(rowToast);
+  const lockOf = (keyId: string) => busyLockClass(keyBusy?.keyId === keyId, busyShown);
 
   // ---- 工具行 / 选择操作条（同一个 28 槽位） ----
   const selecting = selectedVisible.length > 0;
   const selRef = useRef<HTMLDivElement>(null);
-  // 批量提示条贴在按下的那一项下方、左对齐；越出面板右沿时改为右对齐到那一项
-  const keyToastRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const t = keyToastRef.current;
-    const panel = panelRef.current;
-    if (!t || !panel) return;
-    t.style.left = "";
-    t.style.right = "";
-    if (t.getBoundingClientRect().right > panel.getBoundingClientRect().right) {
-      t.style.left = "auto";
-      t.style.right = "0";
-    }
-  }, [keyToast]);
   // 放不下时的最后手段：「已选 N 个」缩成「N 个」。列数变了从头量
   const [short, setShort] = useState(false);
   useLayoutEffect(() => setShort(false), [columns.length, width]);
@@ -767,30 +724,24 @@ export default function Matrix(props: MatrixProps) {
       {/* 忙时置灰的是各项本身，不是整组：项旁「正在加到 X」那一句要读得清 */}
       <span className="mx-agentitems">
         {allAgents ? (
-          <span className="mx-keywrap">
-            <span className={lockClass}>
-              <AgentItem check={allAgents} name="所有 agent" locked={busy} />
+          <span className="mx-keywrap" data-key="all">
+            <span className={lockOf("all")}>
+              <AgentItem check={allAgents} name="所有 agent" locked={keyBusy?.keyId === "all"} />
             </span>
-            {keyBusy?.keyId === "all" ? <KeyBusy label={keyBusy.label} /> : null}
-            {keyToast?.keyId === "all" ? (
-              <div className="mx-keytoast" ref={keyToastRef}>
-                {keyToast.node}
-              </div>
-            ) : null}
+            {busyShown && keyBusy?.keyId === "all" ? <KeyBusy label={keyBusy.label} /> : null}
           </span>
         ) : null}
         {columns.map((col) =>
           columnChecks?.[col.id] ? (
-            <span key={col.id} className="mx-keywrap">
-              <span className={lockClass}>
-                <AgentItem check={columnChecks[col.id]} name={col.name} locked={busy} />
+            <span key={col.id} className="mx-keywrap" data-key={col.id}>
+              <span className={lockOf(col.id)}>
+                <AgentItem
+                  check={columnChecks[col.id]}
+                  name={col.name}
+                  locked={keyBusy?.keyId === col.id}
+                />
               </span>
-              {keyBusy?.keyId === col.id ? <KeyBusy label={keyBusy.label} /> : null}
-              {keyToast?.keyId === col.id ? (
-                <div className="mx-keytoast" ref={keyToastRef}>
-                  {keyToast.node}
-                </div>
-              ) : null}
+              {busyShown && keyBusy?.keyId === col.id ? <KeyBusy label={keyBusy.label} /> : null}
             </span>
           ) : null,
         )}
@@ -836,9 +787,7 @@ export default function Matrix(props: MatrixProps) {
           </button>
         ) : null}
       </label>
-      {addButton ? (
-        <span className={`mx-toolbar__end${lockClass ? ` ${lockClass}` : ""}`}>{addButton}</span>
-      ) : null}
+      {addButton ? <span className="mx-toolbar__end">{addButton}</span> : null}
     </div>
   );
 
@@ -931,10 +880,7 @@ export default function Matrix(props: MatrixProps) {
     if (isSelected) classes.push("is-selected");
     if (hot) classes.push("is-hot");
     if (flashRows.has(row.key)) classes.push("mx-jump");
-    // 单格例行一行在这一行时：悬停动作让位；放不下时名称格跨到第一个 agent 列前、盖住原件位置
-    const toast = cellToast?.rowKey === row.key ? cellToast : null;
-    const covering = toast !== null && coverId === toast.id;
-    const showExtra = row.extra !== undefined && hot && toast === null;
+    const showExtra = row.extra !== undefined && (hot || row.extraPinned === true);
     const open = expanded === row.key && row.detail !== undefined;
 
     return (
@@ -975,10 +921,7 @@ export default function Matrix(props: MatrixProps) {
               />
             )}
           </div>
-          <div
-            className={`mx-row__name${covering ? " is-covering" : ""}`}
-            style={covering ? { gridColumn: `2 / span ${hasTransport ? 3 : 2}` } : undefined}
-          >
+          <div className="mx-row__name">
             {row.detail !== undefined ? (
               <button
                 type="button"
@@ -994,57 +937,44 @@ export default function Matrix(props: MatrixProps) {
               <span className="mx-name mx-name--plain">{row.name}</span>
             )}
             {row.mark}
-            {toast ? (
-              <span key={toast.id} className="mx-celltoast">
-                {toast.node}
-              </span>
-            ) : null}
             {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
           </div>
-          {hasTransport && !covering ? (
-            <div className="mx-row__transport">{row.transport}</div>
-          ) : null}
+          {hasTransport ? <div className="mx-row__transport">{row.transport}</div> : null}
           {/* 原件位置：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
-          {covering ? null : (
-            <div className="mx-row__origin">
-              <Tooltip
-                content={
-                  <>
-                    <div>{row.origin.label}</div>
-                    <div className="mx-mono">{displayPath(row.origin.path)}</div>
-                  </>
-                }
-                context="table"
+          <div className="mx-row__origin">
+            <Tooltip
+              content={
+                <>
+                  <div>{row.origin.label}</div>
+                  <div className="mx-mono">{displayPath(row.origin.path)}</div>
+                </>
+              }
+              context="table"
+            >
+              <span
+                className={`mx-origin${row.origin.gone ? " is-gone" : ""}${row.origin.split ? " is-split" : ""}`}
+                tabIndex={-1}
               >
-                <span
-                  className={`mx-origin${row.origin.gone ? " is-gone" : ""}${row.origin.split ? " is-split" : ""}`}
-                  tabIndex={-1}
-                >
-                  {row.origin.split ? (
-                    <>
-                      <span className="mx-origin__name">{row.origin.split.name}</span>
-                      {/* 分隔用不换行空格：flex 项之间的普通空白会被吃掉 */}
-                      <span className="mx-origin__seg">{`\u00a0·\u00a0${row.origin.split.seg}`}</span>
-                    </>
-                  ) : (
-                    row.origin.label
-                  )}
-                </span>
-              </Tooltip>
-              {hot && !open && toast === null && !row.origin.gone ? (
-                <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
-              ) : null}
-            </div>
-          )}
+                {row.origin.split ? (
+                  <>
+                    <span className="mx-origin__name">{row.origin.split.name}</span>
+                    {/* 分隔用不换行空格：flex 项之间的普通空白会被吃掉 */}
+                    <span className="mx-origin__seg">{`\u00a0·\u00a0${row.origin.split.seg}`}</span>
+                  </>
+                ) : (
+                  row.origin.label
+                )}
+              </span>
+            </Tooltip>
+            {hot && !open && !row.origin.gone ? (
+              <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
+            ) : null}
+          </div>
           {columns.map((col, c) => {
             const view = row.cells[col.id] ?? null;
             const key = cellKey(row.key, col.id);
             const cellClasses = ["mx-cell"];
             if (flashing.has(key)) cellClasses.push("ss-flash");
-            const notice =
-              cellNotice && cellNotice.rowKey === row.key && cellNotice.columnId === col.id
-                ? cellNotice.text
-                : null;
             const focused = focus.r === r && focus.c === c;
             const enter = () => {
               setHover({ row: row.key, col: col.id });
@@ -1053,6 +983,7 @@ export default function Matrix(props: MatrixProps) {
             return (
               <div
                 key={col.id}
+                data-col={col.id}
                 className={cellClasses.join(" ")}
                 onMouseEnter={enter}
                 onMouseLeave={() => {
@@ -1123,17 +1054,10 @@ export default function Matrix(props: MatrixProps) {
                     ) : null}
                   </span>
                 ) : null}
-                {notice !== null ? (
-                  <span className="mx-cellnotice" role="alert">
-                    <IconCannot size={12} />
-                    {notice}
-                  </span>
-                ) : null}
               </div>
             );
           })}
           <div />
-          {rowToast?.rowKey === row.key ? <div className="mx-rowtoast">{rowToast.node}</div> : null}
         </div>
         {open ? (
           // 就地展开：左沿与名字对齐，不跨进 agent 列
@@ -1169,7 +1093,6 @@ export default function Matrix(props: MatrixProps) {
       <div className="mx-panel" ref={panelRef} style={{ width }}>
         {/* 列头吸顶（连同选择态的键行），紧贴两行工具行下面 */}
         <div className="mx-headwrap" ref={headRef} style={{ top: barH }}>
-          {barToast ? <div className="mx-bartoast">{barToast}</div> : null}
           {header}
         </div>
         <div
@@ -1192,14 +1115,110 @@ export default function Matrix(props: MatrixProps) {
         </div>
         {flat.length === 0 && empty ? <div className="mx-empty">{empty}</div> : null}
       </div>
-      {globalToast ? (
-        <div className="mx-globaltoast" style={{ right: toastRight }}>
-          {globalToast}
-        </div>
+      {/* 浮起的提示小窗（DESIGN「反馈的两种形态」）：挂在表的最外层、按锚点定位，不挂进格 / 行里——
+          挂进去的话，悬停小窗会被当成悬停那一格（十字带、格子提示框跟着出来） */}
+      {keyToast ? (
+        <FloatingToast
+          key={`key:${keyToastKey}`}
+          align="end"
+          anchor={keyAnchor(keyToast.keyId)}
+          bounds={panelBounds}
+        >
+          {keyToast.node}
+        </FloatingToast>
+      ) : null}
+      {cellNotice ? (
+        // 单格：成功与失败同一个位置（格子正下方），一次只一条，失败优先
+        <FloatingToast
+          key={`notice:${cellNotice.rowKey}:${cellNotice.columnId}:${cellNotice.text}`}
+          anchor={cellAnchor(cellNotice.rowKey, cellNotice.columnId)}
+          bounds={panelBounds}
+        >
+          <Toast kind="cannot" message={cellNotice.text} onDismiss={onDismissCellNotice} />
+        </FloatingToast>
+      ) : cellToast ? (
+        <FloatingToast
+          key={`cell:${cellToast.id}`}
+          anchor={cellAnchor(cellToast.rowKey, cellToast.columnId)}
+          bounds={panelBounds}
+        >
+          {cellToast.node}
+        </FloatingToast>
+      ) : null}
+      {rowToast ? (
+        <FloatingToast
+          key={`row:${rowToastKey}`}
+          align="start"
+          anchor={rowToast.at ? () => rowToast.at : rowAnchor(rowToast.rowKey)}
+          bounds={panelBounds}
+        >
+          {rowToast.node}
+        </FloatingToast>
+      ) : null}
+      {barToast ? (
+        <FloatingToast
+          key={`bar:${barToast.id}`}
+          align="start"
+          anchor={chipsAnchor(barToast.origins)}
+        >
+          {barToast.node}
+        </FloatingToast>
       ) : null}
     </div>
   );
 }
+
+/// 同一个对象同一个号，换了对象号加一（渲染里读写 ref：同一个值重渲染多少次都得同一个号）
+function useIdentityKey(value: unknown): number {
+  const ref = useRef<{ value: unknown; n: number }>({ value, n: 0 });
+  if (ref.current.value !== value) ref.current = { value, n: ref.current.n + 1 };
+  return ref.current.n;
+}
+
+const rootOf = (probe: HTMLElement) => probe.closest(".mx");
+const rowEl = (probe: HTMLElement, rowKey: string) =>
+  rootOf(probe)?.querySelector(`.mx-row[data-row="${CSS.escape(rowKey)}"]`);
+/// 浮起的提示小窗水平夹在面板左右沿之内
+const panelBounds = (probe: HTMLElement) => rootOf(probe)?.querySelector(".mx-panel");
+
+/// 批量：按下的那一项
+const keyAnchor = (keyId: string) => (probe: HTMLElement) =>
+  rootOf(probe)?.querySelector(`.mx-keywrap[data-key="${CSS.escape(keyId)}"]`);
+
+/// 单格：被点的那一格
+const cellAnchor = (rowKey: string, columnId: string) => (probe: HTMLElement) =>
+  rowEl(probe, rowKey)?.querySelector(`.mx-cell[data-col="${CSS.escape(columnId)}"]`);
+
+/// 一行的结果浮在该行下方：上下沿取整行，左沿取名字那一格（勾选列之后）
+const rowAnchor = (rowKey: string) => (probe: HTMLElement) => {
+  const row = rowEl(probe, rowKey);
+  const name = row?.querySelector(".mx-row__name");
+  if (!row || !name) return row;
+  const r = row.getBoundingClientRect();
+  const n = name.getBoundingClientRect();
+  return { top: r.top, bottom: r.bottom, left: n.left, right: r.right };
+};
+
+/// 加完来源的那一窗浮在新来源那几片的正下方：取这几片合起来的矩形；一片都没有时锚在整排片上
+const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
+  const group = rootOf(probe)?.querySelector(".mx-sources");
+  const chips = origins
+    .map((id) => group?.querySelector(`[data-origin="${CSS.escape(id)}"]`))
+    .filter((el): el is Element => el != null)
+    .map((el) => el.getBoundingClientRect());
+  if (chips.length === 0) {
+    const first = group?.firstElementChild?.getBoundingClientRect();
+    return first
+      ? { top: first.top, bottom: first.bottom, left: first.left, right: first.right }
+      : group;
+  }
+  return {
+    top: Math.min(...chips.map((c) => c.top)),
+    bottom: Math.max(...chips.map((c) => c.bottom)),
+    left: Math.min(...chips.map((c) => c.left)),
+    right: Math.max(...chips.map((c) => c.right)),
+  };
+};
 
 /// 工具行第二行：来源筛选片平铺（DESIGN「主视图」）。点片＝筛选，再点「全部」恢复
 function SourceChips({
@@ -1242,6 +1261,7 @@ function SourceChips({
         <span
           key={item.id}
           className="mx-sourcechip"
+          data-origin={item.id}
           onMouseEnter={(e) => arm(item.id, e.currentTarget)}
           onMouseLeave={drop}
           onFocus={(e) => arm(item.id, e.currentTarget)}

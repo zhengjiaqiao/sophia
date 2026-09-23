@@ -160,23 +160,7 @@
   display: inline-flex;
 }
 
-/* 批量结果的例行提示条：贴在按下的那一项下方 4，可以暂时盖住来源片；越出面板右沿时改右对齐。
-   它浮在来源片上面，是浮层：自带画布底、layer 圆角与提示级阴影——只有画布底没有边时，
-   被盖住一半的来源片会从两侧露出来，读成字叠在片上（产品负责人真机） */
-.mx-keytoast {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 7;
-  display: flex;
-  padding: 0 12px;
-  border-radius: var(--radius-layer);
-  background: var(--canvas);
-  box-shadow: var(--elev-tip);
-  white-space: nowrap;
-}
-
-/* 批量写入刚开始：工具行各项先只锁住、不变淡；忙过 500ms 才换成 .ss-busy 变淡（Matrix.tsx busyLockClass） */
+/* 批量写入刚开始：按下的那一项先只锁住、不变淡；忙过 0.3 秒门槛才换成 .ss-busy 变淡（Matrix.tsx busyLockClass） */
 .mx-locked {
   pointer-events: none;
 }
@@ -537,31 +521,6 @@
   flex-shrink: 0;
 }
 
-/* 单格的例行一行：就在被点的那一行里，紧跟名字（有 ×2 跟在它后面），间距 12（行内 gap 8 + 4）。
-   13 号、高随行；随行滚动，不吸顶 */
-.mx-celltoast {
-  display: inline-flex;
-  margin-left: 4px;
-}
-
-.mx-celltoast .ss-toast--routine {
-  height: auto;
-  font-size: var(--size-caption);
-}
-
-/* 放不下时名称格跨到第一个 agent 列前（Matrix.tsx 量过才加），原件位置格让出来——底色就是
-   行当下的底色（悬停 / 选中时 surface）；再放不下就截名字，提示条整条保留 */
-.mx-row__name.is-covering > .mx-namebtn,
-.mx-row__name.is-covering > .mx-name {
-  flex-shrink: 1;
-  min-width: 0;
-}
-
-.mx-row__name.is-covering .mx-name {
-  flex-shrink: 1;
-  min-width: 0;
-}
-
 .mx-row__transport {
   font-size: var(--size-micro);
   line-height: var(--leading-caption);
@@ -619,59 +578,8 @@
   z-index: 8;
 }
 
-/* 单格失败：格子下方的小黑窗，说原因 */
-.mx-cellnotice {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 50%;
-  z-index: 7;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-sizing: border-box;
-  width: max-content;
-  max-width: 240px;
-  padding: 6px 8px;
-  background: var(--ink);
-  color: var(--canvas);
-  font-size: var(--size-micro);
-  line-height: var(--leading-caption);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-/* 贴在该行下方的提示条（只留这份的结果、没删掉）。例行档无框无底，
-   盖在下一行上时要自带画布底，否则字叠在下一行的名字上 */
-.mx-rowtoast {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 34px;
-  z-index: 6;
-  display: flex;
-  padding: 0 16px 0 0;
-  background: var(--canvas);
-}
-
 .mx-empty {
   border-bottom: 1px solid var(--hairline);
-}
-
-/* 工具行下一行的例行一行（加完来源）：来源片下 4，浮在列头左段上，随列头吸顶，不挤动表格。
-   盖在列头上要自带画布底（同 .mx-rowtoast）；挂在列头里才压得过它（工具行是更低的一层） */
-.mx-bartoast {
-  position: absolute;
-  top: calc(4px - var(--space-md));
-  left: 0;
-  z-index: 1;
-  display: flex;
-  padding-right: 16px;
-  background: var(--canvas);
-}
-
-.mx-globaltoast {
-  position: fixed;
-  bottom: var(--space-md);
-  z-index: 20;
 }
 
 @media (prefers-reduced-motion: reduce) {

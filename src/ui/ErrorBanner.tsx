@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Button, IconButton } from "./Button.tsx";
 import { IconAttention, IconClose } from "./icons.tsx";
-import { Spinner } from "./Spinner.tsx";
+import { Spinner, useBusyShown } from "./Spinner.tsx";
 
 /// 错误横幅（DESIGN「提示条分两档 › 需要注意 · 大面积」，front-matter `banner-error`）：应用级 / 页级故障，
 /// 放在内容区页边内的 **`surface` 灰面板**（8 圆角、无边无影），不自动消失。大面积不用黑——一整条黑太重。
@@ -59,7 +59,7 @@ export interface NoticePanelProps {
   action?: NoticePanelAction;
   /// 可选的文字链（`稍后`）
   link?: { label: string; onClick: () => void };
-  /// 正在执行：键的位置换成忙碌指示 + 这一句（`正在接管`），不再出键与文字链
+  /// 正在执行：键先锁住，过了 0.3 秒门槛原位换成忙碌指示 + 这一句（`正在接管`），不再出键与文字链
   busy?: string;
   /// 原因（`端口 47328 被别的程序占着`）：跟在主句后同一行写出（`ink-mute`），不藏进悬停——
   /// 原因决定下一步怎么做（端口被占时重启多半还会失败）。写全、放不下就折行，不截断
@@ -71,6 +71,7 @@ export interface NoticePanelProps {
 /// 行内待办条（DESIGN「提示条分两档 › 需要注意 · 大面积」，front-matter `row-notice`）：挂在某一行下面、
 /// 内容宽的 `surface` 灰面板（8 圆角、无边无影），墨色 `!` + 一句 + 默认描边紧凑键 + 可选文字链 + 可选 ×
 export function NoticePanel({ message, action, link, busy, reason, onClose }: NoticePanelProps) {
+  const busyShown = useBusyShown(busy !== undefined);
   return (
     <div className="ss-noticepanel" role="status">
       <span className="ss-noticepanel__mark" title="要你动手" role="img" aria-label="要你动手">
@@ -80,13 +81,13 @@ export function NoticePanel({ message, action, link, busy, reason, onClose }: No
         {message}
         {reason ? <span className="ss-noticepanel__reason"> · {reason}</span> : null}
       </span>
-      {busy ? (
-        <span className="ss-noticepanel__actions">
+      {busy && busyShown ? (
+        <span className="ss-noticepanel__actions" role="status">
           <Spinner size={14} label={busy} />
           <span>{busy}</span>
         </span>
       ) : action || link ? (
-        <span className="ss-noticepanel__actions">
+        <span className={`ss-noticepanel__actions${busy ? " is-locked" : ""}`}>
           {action ? (
             action.disabledReason ? (
               <Button size="compact" disabled disabledReason={action.disabledReason}>

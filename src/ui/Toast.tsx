@@ -4,28 +4,30 @@ import { AgentIcon } from "./AgentMark.tsx";
 import { Button, IconButton } from "./Button.tsx";
 import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 
-/// 提示条（DESIGN「提示条分两档」「提示条的位置」，画板 Feedback「提示条」）。
+/// 提示小窗（DESIGN「反馈的两种形态」「提示条分两档」，画板 Feedback「提示条」）。
 ///
-/// 两档，严重程度决定打断程度（①）：
-/// - `notice` 需要注意：**黑显示窗**。0 圆角无外框，左侧 40px 指示窗（右边 1px `ink-mute`）
-///   放 16px 白线稿 ✓ / ⊘ / !。给做不成、部分失败、自动开启、可撤销的删除、错误
-/// - `routine` 例行成功：一行墨字直接落在白底上，无框无底：`✓ 写进 [图标] 名字 · 撤销`。
-///   结果已由格子闪烁表达，这行只提供撤销入口
+/// **浮起的小窗只表示一件事：会自己消失。** 两档，严重程度决定打断程度（①）：
+/// - `routine` 成功：画布底 + `layer` 圆角 + `tip` 阴影的白窗，单行高 32：`✓ 写进 [图标] 名字 · 撤销`
+/// - `notice` 做不成 / 部分失败 / 新问题一次性提示：**黑显示窗**，左侧 40px 指示窗放 ✓ / ⊘ / !。
+///   成功一律不用黑块：不给 `tier` 时按 `kind` 取（成功白、其余黑）
 ///
-/// 主行 = **动词（600）+ agent 图标 + 名字（400）**。**动词必填**，且与触发它的动作一致；
-/// 失败态动词带否定（`没开启`）——失败里写「开启」会被一眼读成已开启。名字至多两个，
-/// 超过写 `+N`（等宽 15/500）。
+/// 文字一律 13（`caption`）：动词 600、名字 400、数字 `mono` 12——比表格正文 15 低一档，
+/// 反馈永远不比它说的内容更重（②）。主行 = **动词 + agent 图标 + 名字**；动词与触发它的动作一致，
+/// 失败态动词带否定（`没开启`）。单格失败原因本身是一整句时给 `message`，不拆动词。
 ///
-/// **位置由调用方定**：锚在触发控件上（批量贴被按下的键下 4、右对齐该键；单格出在被点的
-/// 那一行里、紧跟名字；二级页贴被处理那一行；无关位置的全局事右下、右沿对齐面板右沿）。
-/// 组件只负责形制，不写 position。
+/// **停留**（⑨）：成功无动作约 4 秒，带 `撤销` / `查看` 约 6 秒，做不成 / 部分失败 8 秒；
+/// 悬停与键盘焦点在里面时停表，移开后重新计满；到点末尾 120ms 同一个淡出。
+/// 不给 `onDismiss` 的不自动消失（新问题一次性提示）。
+///
+/// **位置不归组件管**：浮起的一律经 `FloatingToast`（锚在触发处，`placeToast`）或
+/// `CornerToast`（右下，全应用一套）。带下一步的失败不用它，用内嵌灰面板 `NoticePanel`。
 
 /// `attention`：没有哪个动作做成或没成，是机器发现了要你拿主意的事（新问题的一次性提示）。
 /// 记号同部分失败的 `!`，读屏名是「需要注意」；它不给 onDismiss，不自动消失
 export type ToastKind = "success" | "cannot" | "partial" | "attention";
 
 /// 停留时长：带动作（撤销 / 查看）的成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿；
-/// 没有动作的成功约 4 秒（`CELL_TOAST_DWELL_MS`）
+/// 没有动作的成功约 4 秒（`CELL_TOAST_DWELL_MS`）。悬停 / 焦点在里面时不计时
 export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   success: 6000,
   cannot: 8000,
@@ -33,11 +35,11 @@ export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   attention: 8000,
 };
 
-/// 单格例行一行的停留时长：约 4 秒，比批量的 6 秒短——单格高频，结果格子本身已经画出来
-/// （DESIGN「单格操作出例行一行」）
+/// 没有动作的成功（单格、`✓ 已生效`、`✓ 已是最新版本`……）的停留：约 4 秒，比带撤销的 6 秒短——
+/// 只是交代一声，结果本身已经画出来了
 export const CELL_TOAST_DWELL_MS = 4000;
 
-/// `fadeOut` / `holdOnHover` 到点时末尾这一段淡出，与 `--motion-fast` 同值
+/// 到点时末尾这一段淡出，与 `--motion-fast` 同值
 const LEAVE_MS = 120;
 
 export interface ToastAgent {
@@ -53,13 +55,16 @@ export interface ToastAction {
 }
 
 export interface ToastProps {
-  /// 默认 notice（黑显示窗）
+  /// 不给按 kind 取：成功 routine（白窗），其余 notice（黑窗）
   tier?: "notice" | "routine";
   /// routine 只有 success
   kind: ToastKind;
-  /// **必填**：`写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`。
-  /// `attention` 没有动作可说，这里放句子的主语（`defuddle`）或 `发现`，其余进 `reading`
-  verb: string;
+  /// `写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`。
+  /// `attention` 没有动作可说，这里放句子的主语（`defuddle`）或 `发现`，其余进 `reading`。
+  /// 只有给了整句 `message` 时才可以不给
+  verb?: string;
+  /// 整句（单格失败的原因本身就是一句话：`Codex 的 skills 目录写不进去`），写在动词的位置
+  message?: ReactNode;
   /// 动词后半截，写在 agent 图标之后（带方向的「从 [图标] 移除 名字」）；只有一截动词时不给
   verbTail?: string;
   /// agent 图标组（白 / 墨，随档）。图标自带读屏名
@@ -84,13 +89,8 @@ export interface ToastProps {
   secondary?: ToastAction;
   /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉（新问题的一次性提示）
   onDismiss?: () => void;
-  /// 停留时长（毫秒）；不给按 kind 取 `TOAST_DWELL_MS`。单格例行一行给 `CELL_TOAST_DWELL_MS`
+  /// 停留时长（毫秒）；不给按 kind 与有没有动作取（见 `TOAST_DWELL_MS`）
   dwellMs?: number;
-  /// 只给 routine：到点末尾 120ms 淡出，悬停照常计时。skill 单格例行一行用（不带撤销）
-  fadeOut?: boolean;
-  /// 只给 routine：鼠标停在这一行上（或键盘焦点在里面）时不计时，移开后重新计满；
-  /// 到点末尾 120ms 淡出。MCP 单格写进用，好让人点得到「撤销」
-  holdOnHover?: boolean;
   /// notice 右端的 ×。busy 期间照常可用
   onClose?: () => void;
 }
@@ -123,11 +123,22 @@ function Tally({ done, failed }: { done: number; failed: number }) {
   );
 }
 
+/// 读数里的数量：数字等宽 12，量词随正文（`3 个`）。整段是一个元素，flex 的 gap 拆不开它
+export function ToastCount({ n, unit = "个" }: { n: number; unit?: string }) {
+  return (
+    <span className="ss-toast__count">
+      <span className="ss-toast__num">{n}</span>
+      {`\u00a0${unit}`}
+    </span>
+  );
+}
+
 export function Toast(props: ToastProps) {
   const {
-    tier = "notice",
     kind,
+    tier = kind === "success" ? "routine" : "notice",
     verb,
+    message,
     verbTail,
     agents,
     icons,
@@ -142,8 +153,6 @@ export function Toast(props: ToastProps) {
     onDismiss,
     onClose,
     dwellMs,
-    fadeOut = false,
-    holdOnHover = false,
   } = props;
   // 没有动作（撤销 / 查看）的成功只是一句告知，约 4 秒就走（同单格例行一行）；6 秒是留给点撤销的
   const dwell =
@@ -155,19 +164,19 @@ export function Toast(props: ToastProps) {
   useEffect(() => {
     if (!onDismiss || held) return;
     const timer = setTimeout(onDismiss, dwell);
-    const fade =
-      holdOnHover || fadeOut ? setTimeout(() => setLeaving(true), dwell - LEAVE_MS) : undefined;
+    const fade = setTimeout(() => setLeaving(true), dwell - LEAVE_MS);
     return () => {
       clearTimeout(timer);
       clearTimeout(fade);
     };
-  }, [dwell, onDismiss, held, holdOnHover, fadeOut]);
+  }, [dwell, onDismiss, held]);
 
+  // 悬停与键盘焦点在里面时停表（两档同一套），移开后重新计满
   const hold = (on: boolean) => {
     setHeld(on);
     if (on) setLeaving(false);
   };
-  const holdHandlers = holdOnHover
+  const holdHandlers = onDismiss
     ? {
         onMouseEnter: () => hold(true),
         onMouseLeave: () => hold(false),
@@ -177,10 +186,12 @@ export function Toast(props: ToastProps) {
         },
       }
     : {};
+  const leavingClass = leaving ? " is-leaving" : "";
 
   const main = (
     <>
-      <span className="ss-toast__verb">{verb}</span>
+      {message !== undefined ? <span className="ss-toast__message">{message}</span> : null}
+      {verb ? <span className="ss-toast__verb">{verb}</span> : null}
       {agents && agents.length ? (
         <span className="ss-toast__agents">
           {agents.map((a) => (
@@ -205,7 +216,7 @@ export function Toast(props: ToastProps) {
   if (tier === "routine") {
     return (
       <div
-        className={`ss-toast ss-toast--routine${leaving ? " is-leaving" : ""}`}
+        className={`ss-toast ss-toast--routine${leavingClass}`}
         data-kind={kind}
         role="status"
         {...holdHandlers}
@@ -240,9 +251,10 @@ export function Toast(props: ToastProps) {
   const indicator = INDICATOR[kind];
   return (
     <div
-      className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}`}
+      className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}${leavingClass}`}
       data-kind={kind}
       role={kind === "success" || kind === "attention" ? "status" : "alert"}
+      {...holdHandlers}
     >
       <div
         className="ss-toast__indicator"

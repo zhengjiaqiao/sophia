@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAYER_CAP, LAYER_GAP, LAYER_MARGIN, placeLayer } from "../src/layerPlace.ts";
+import {
+  LAYER_CAP,
+  LAYER_GAP,
+  LAYER_MARGIN,
+  TOAST_GAP,
+  TOAST_MARGIN,
+  placeLayer,
+  placeToast,
+} from "../src/layerPlace.ts";
 
 const view = { width: 1100, height: 720 };
 /// 触发控件：左 32，高 28，按 `top` 放
@@ -57,4 +65,65 @@ test("左右不越出窗口：右边放不下时右沿对齐触发控件，仍�
 test("窗口比浮层还窄：贴左边距，不给负坐标", () => {
   const p = placeLayer(at(100, 50), { width: 400, height: 100 }, { width: 300, height: 720 });
   assert.equal(p.left, LAYER_MARGIN);
+});
+
+// ===== 浮起的提示小窗（DESIGN「浮起小窗的位置」） =====
+
+/// 一格：88 宽、34 高
+const cell = (top: number, left: number) => ({ top, bottom: top + 34, left, right: left + 88 });
+
+test("提示小窗：单格正下方 4、水平居中于格，不盖住格子", () => {
+  const p = placeToast(cell(200, 400), { width: 120, height: 32 }, view);
+  assert.equal(TOAST_GAP, 4);
+  assert.equal(p.side, "below");
+  assert.equal(p.top, 200 + 34 + 4);
+  assert.equal(p.left, 400 + 44 - 60);
+});
+
+test("提示小窗：单格靠近面板右沿放不下时右对齐该格", () => {
+  const bounds = { left: 300, right: 700 };
+  const p = placeToast(cell(200, 612), { width: 200, height: 32 }, view, { bounds });
+  assert.equal(p.left + 200, 612 + 88);
+});
+
+test("提示小窗：一行左对齐名字；批量键右对齐键右沿、向左展开，左边放不下改左对齐", () => {
+  const row = { top: 100, bottom: 134, left: 266, right: 900 };
+  assert.equal(placeToast(row, { width: 240, height: 32 }, view, { align: "start" }).left, 266);
+  const key = { top: 60, bottom: 88, left: 500, right: 560 };
+  const end = placeToast(key, { width: 200, height: 32 }, view, { align: "end" });
+  assert.equal(end.left + 200, 560);
+  assert.equal(end.top, 88 + 4);
+  const first = { top: 60, bottom: 88, left: 280, right: 360 };
+  const flipped = placeToast(first, { width: 200, height: 32 }, view, {
+    align: "end",
+    bounds: { left: 266, right: 900 },
+  });
+  assert.equal(flipped.left, 280);
+});
+
+test("提示小窗：下方放不下才翻到上方——两种都不盖住锚点；两边都放不下仍在下方", () => {
+  const low = placeToast(cell(680, 400), { width: 120, height: 32 }, view);
+  assert.equal(low.side, "above");
+  assert.equal(low.top + 32 + TOAST_GAP, 680);
+  const tiny = { width: 320, height: 60 };
+  const cramped = placeToast(
+    { top: 10, bottom: 40, left: 20, right: 100 },
+    { width: 120, height: 40 },
+    tiny,
+  );
+  assert.equal(cramped.side, "below");
+});
+
+test("提示小窗：夹在窗口边距之内（菜单栏面板 320 宽）", () => {
+  const tray = { width: 320, height: 200 };
+  const p = placeToast(
+    { top: 10, bottom: 34, left: 250, right: 310 },
+    { width: 120, height: 32 },
+    tray,
+    {
+      align: "start",
+    },
+  );
+  assert.ok(p.left + 120 <= 320 - TOAST_MARGIN);
+  assert.ok(p.left >= TOAST_MARGIN);
 });

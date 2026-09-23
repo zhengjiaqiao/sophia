@@ -96,36 +96,6 @@
   white-space: nowrap;
 }
 
-/* 取消勾选那一刻行旁出的一句：12 ink-mute，4 秒后淡出（淡出只在最后 120ms） */
-.settings-page__rownote {
-  position: absolute;
-  top: 0;
-  left: calc(100% + var(--space-sm));
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  height: var(--row-h);
-  padding-right: var(--space-xs);
-  background: var(--canvas);
-  font-family: var(--font-ui);
-  font-size: var(--size-micro);
-  color: var(--ink-mute);
-  white-space: nowrap;
-  animation: settings-note-out var(--motion-fast) var(--ease-mech) 3880ms forwards;
-}
-
-@keyframes settings-note-out {
-  to {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-page__rownote {
-    animation: none;
-  }
-}
-
 .settings-page__more {
   margin-top: var(--space-sm);
   padding-left: var(--space-xs);
@@ -202,12 +172,6 @@
   color: var(--ink-mute);
 }
 
-.settings-page__checking {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-
 .settings-page__fallback {
   margin-left: var(--space-sm);
 }
@@ -227,15 +191,6 @@
 }
 
 .settings-page__state {
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-}
-
-.settings-page__busy {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   color: var(--ink-mute);

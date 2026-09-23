@@ -22,7 +22,15 @@ import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
-import { AddButton, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
+import {
+  AddButton,
+  BusySlot,
+  Button,
+  DupMark,
+  Empty as UiEmpty,
+  Tooltip,
+  type EmptyArt,
+} from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
@@ -57,13 +65,16 @@ export interface DomainViewProps {
   dupReadout: Map<string, string>;
   onDupHover: (row: DomainRow) => void;
   /// 点「只留这份」：anchor 是按钮此刻的矩形，确认框锚在它上面
-  onKeepThis: (row: DomainRow, other: DomainRow, anchor: ConfirmAnchor) => void;
+  /// `at`：按下那一刻「只留这份」的位置（左右取这个文字链、上下取整行）——结果的提示小窗锚在这里，
+  /// 行被删掉、文字链随悬停收起之后也还在原处
+  onKeepThis: (row: DomainRow, other: DomainRow, anchor: ConfirmAnchor, at: ConfirmAnchor) => void;
+  /// 正在为哪一行体检（点了「只留这份」、确认框还没出来）：那一行的键原位忙碌、不随悬停收起
+  keepBusy?: string | null;
   /// 孤链行（原件已不在的失效链接，见 orphanRows.ts）。本页全部，筛选在这里做
   orphans: OrphanRow[];
   /// 点孤链格：清除这条链接
   onClearOrphan: (orphan: OrphanRow, targetId: string) => void;
 
-  busy: boolean;
   filterText: string;
   onFilterText: (text: string) => void;
   onClearFilter: () => void;
@@ -87,16 +98,16 @@ export interface DomainViewProps {
   shortcuts: boolean;
 
   flash?: { keys: string[]; nonce: number };
-  /// 批量写入真的慢时，触发项旁的忙碌指示 + 一句
+  /// 批量写入进行中：按下的那一项（过了 0.3 秒门槛旁边出忙碌指示 + 一句）
   keyBusy?: { keyId: string; label: string } | null;
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
-  rowToast?: { rowKey: string; node: ReactNode } | null;
+  onDismissCellNotice?: () => void;
+  rowToast?: { rowKey: string; at?: ConfirmAnchor; node: ReactNode } | null;
   keyToast?: { keyId: string; node: ReactNode } | null;
-  /// 单格成功的例行一行（在被点的那一行里，紧跟名字）
-  cellToast?: { id: number; rowKey: string; node: ReactNode } | null;
-  globalToast?: ReactNode;
-  /// 工具行下一行的例行一行（加完来源）
-  barToast?: ReactNode;
+  /// 单格成功：浮在被点那一格正下方
+  cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
+  /// 加完来源：浮在新来源那几片正下方
+  barToast?: { id: number; node: ReactNode; origins: string[] } | null;
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
@@ -266,10 +277,12 @@ export default function DomainView(props: DomainViewProps) {
           other === undefined ? undefined : (
             <DupExtra
               onShow={() => props.onDupHover(row)}
-              onKeep={(anchor) => props.onKeepThis(row, other, anchor)}
+              onKeep={(anchor, at) => props.onKeepThis(row, other, anchor, at)}
               label={`只留 ${originOf(row.sourceId)} 的 ${row.skill}`}
+              busy={props.keepBusy === key}
             />
           ),
+        extraPinned: props.keepBusy === key,
       };
     });
 
@@ -428,7 +441,6 @@ export default function DomainView(props: DomainViewProps) {
       onSelectionChange={props.onSelectionChange}
       allAgents={allAgents}
       columnChecks={columnChecks}
-      busy={props.busy}
       onCell={(rowKey, columnId) => {
         const row = page.rows.find((r) => skillRowKey(r) === rowKey);
         if (row) {
@@ -443,11 +455,11 @@ export default function DomainView(props: DomainViewProps) {
       empty={empty}
       flash={props.flash}
       cellNotice={props.cellNotice}
+      onDismissCellNotice={props.onDismissCellNotice}
       rowToast={props.rowToast}
       keyToast={props.keyToast}
       cellToast={props.cellToast}
       keyBusy={props.keyBusy}
-      globalToast={props.globalToast}
       barToast={props.barToast}
       focus={props.focus}
     />
@@ -480,10 +492,13 @@ function DupExtra({
   onShow,
   onKeep,
   label,
+  busy,
 }: {
   onShow: () => void;
-  onKeep: (anchor: ConfirmAnchor) => void;
+  onKeep: (anchor: ConfirmAnchor, at: ConfirmAnchor) => void;
   label: string;
+  /// 点过、正在体检：键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
+  busy: boolean;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -494,18 +509,27 @@ function DupExtra({
   return (
     <Tooltip content="另一份移到废纸篓，先确认">
       <span ref={ref}>
-        <Button
-          variant="link"
-          onClick={() => {
-            // 锚在这一行：确认框出在行下方，遮罩挖出整行（用户看得见自己在决定哪一行）
-            const el = ref.current?.closest(".mx-row") ?? ref.current;
-            const r = el?.getBoundingClientRect();
-            if (r) onKeep({ top: r.top, left: r.left, right: r.right, bottom: r.bottom });
-          }}
-          ariaLabel={label}
-        >
-          只留这份
-        </Button>
+        <BusySlot busy={busy} label="正在核对两份">
+          <Button
+            variant="link"
+            onClick={() => {
+              if (busy) return;
+              // 确认框锚在这一行：出在行下方，遮罩挖出整行（用户看得见自己在决定哪一行）；
+              // 结果的提示小窗锚在被按下的这个文字链上（上下取整行，不盖住这一行）
+              const el = ref.current?.closest(".mx-row") ?? ref.current;
+              const r = el?.getBoundingClientRect();
+              const k = ref.current?.getBoundingClientRect();
+              if (r && k)
+                onKeep(
+                  { top: r.top, left: r.left, right: r.right, bottom: r.bottom },
+                  { top: r.top, left: k.left, right: k.right, bottom: r.bottom },
+                );
+            }}
+            ariaLabel={label}
+          >
+            只留这份
+          </Button>
+        </BusySlot>
       </span>
     </Tooltip>
   );

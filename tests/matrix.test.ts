@@ -53,7 +53,6 @@ const base = {
   selected: new Set<string>(),
   onSelectionChange: () => undefined,
   selectionKeys: [],
-  busy: false,
   onCell: () => undefined,
 };
 
@@ -198,7 +197,7 @@ test("Matrix：工具行第二行来源筛选片——全部 N 在最前默认�
   assert.match(picking, /class="mx-sources"/);
 });
 
-test("Matrix：加完来源一次选中几片（全部不选中）；新来源的片名字后带「新」；工具行下的例行一行挂在列头里", () => {
+test("Matrix：加完来源一次选中几片（全部不选中）；新来源的片名字后带「新」；已添加那一窗浮在新来源片下", () => {
   const html = render(Matrix, {
     ...base,
     sources: {
@@ -211,7 +210,11 @@ test("Matrix：加完来源一次选中几片（全部不选中）；新来源�
         { id: "x", label: "别处", count: 1 },
       ],
     },
-    barToast: createElement("span", { className: "probe" }, "已添加"),
+    barToast: {
+      id: 1,
+      node: createElement("span", { className: "probe" }, "已添加"),
+      origins: ["w"],
+    },
   });
   assert.match(html, /aria-pressed="false"><span class="ss-chip__label">全部</);
   assert.match(html, /aria-pressed="true"><span class="ss-chip__label">通用仓库</);
@@ -225,10 +228,11 @@ test("Matrix：加完来源一次选中几片（全部不选中）；新来源�
   );
   // 只有 WeiboAP 一片带「新」
   assert.equal(html.match(/ss-chip__badge/g)?.length, 1);
-  assert.match(
-    html,
-    /class="mx-headwrap"[^>]*><div class="mx-bartoast"><span class="probe">已添加/,
-  );
+  // 浮起的一窗（FloatingToast）：不再挂进列头，锚点按片的 data-origin 找（出现那一刻定位一次）
+  assert.doesNotMatch(html, /mx-bartoast/);
+  assert.doesNotMatch(html, /class="mx-headwrap"[^>]*>[^]*?class="probe"[^]*?class="mx-head /);
+  assert.match(html, /class="mx-sourcechip" data-origin="w"/);
+  assert.match(html, /class="ss-floattoast"[^>]*><span class="probe">已添加/);
 });
 
 test("点了做不了的格子：只当即说明（提示框立即出现、停约 3 秒），不交给调用方改数据", async () => {
@@ -272,10 +276,11 @@ test("做不了的格子的说明：为什么 + 去哪做", async () => {
   assert.match(mcpOwnTip("Claude Code"), /^这就是原件，不需要写进 · 要从 Claude Code 移除/);
 });
 
-test("批量写入：格子同时变、不依次点亮；真的慢（> 500ms）才在触发项旁出忙碌指示 + 一句", async () => {
-  const { BATCH_BUSY_DELAY_MS } = await import("../src/Matrix.tsx");
+test("批量写入：格子同时变、不依次点亮；只锁按下的那一项，过了 0.3 秒门槛才在它旁出忙碌指示 + 一句", async () => {
+  const { BUSY_DELAY_MS } = await import("../src/ui/Spinner.tsx");
   const { batchBusyText } = await import("../src/toastText.ts");
-  assert.equal(BATCH_BUSY_DELAY_MS, 500);
+  // 全应用一个门槛（取代原来批量专用的 500ms 与各处的零延迟）
+  assert.equal(BUSY_DELAY_MS, 300);
   assert.equal(batchBusyText("link", "Codex"), "正在加到 Codex");
   assert.equal(batchBusyText("unlink", "Codex"), "正在从 Codex 移除");
   assert.equal(batchBusyText("write", "Cursor"), "正在写进 Cursor");
@@ -287,71 +292,81 @@ test("批量写入：格子同时变、不依次点亮；真的慢（> 500ms）�
     allAgents: check("选中的都加到所有 agent"),
     columnChecks: { cc: check("选中的都加到 Claude Code"), cx: check("选中的都加到 Codex") },
   };
-  // 没慢到阈值：什么都不显示
-  assert.doesNotMatch(render(Matrix, props), /mx-keybusy/);
-  // 慢了：忙碌指示 + 句子贴在触发的那一项旁，只这一项
-  const slow = render(Matrix, { ...props, keyBusy: { keyId: "cx", label: "正在加到 Codex" } });
-  assert.equal((slow.match(/class="mx-keybusy"/g) ?? []).length, 1);
-  const at = slow.indexOf('class="mx-keybusy"');
-  assert.ok(at > slow.indexOf('mx-agentitem__name">Codex<'));
-  assert.ok(at > slow.indexOf('mx-agentitem__name">Claude Code<'));
+  assert.doesNotMatch(render(Matrix, props), /mx-keybusy|mx-locked/);
+  // 刚按下（首帧，还没过门槛）：只有按下的那一项锁住，不出忙碌指示、不变淡；别的项照常能按
+  const pressed = render(Matrix, { ...props, keyBusy: { keyId: "cx", label: "正在加到 Codex" } });
+  assert.doesNotMatch(pressed, /mx-keybusy/);
+  assert.doesNotMatch(pressed, /ss-busy/);
+  assert.equal((pressed.match(/<span class="mx-locked">/g) ?? []).length, 1);
+  const lock = pressed.indexOf('<span class="mx-locked">');
+  assert.ok(lock > pressed.indexOf('mx-agentitem__name">Claude Code<'));
+  assert.ok(pressed.indexOf('mx-agentitem__name">Codex<') > lock);
+  // 过了门槛之后那一项旁的忙碌指示 + 句子：只在门槛之后出现（Matrix 里经 useBusyShown 把关）
+  const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
   assert.match(
-    slow.slice(at),
-    /^class="mx-keybusy" role="status">[\s\S]*?<span>正在加到 Codex<\/span>/,
+    src,
+    /busyShown && keyBusy\?\.keyId === col\.id \? <KeyBusy label=\{keyBusy\.label\} \/>/,
   );
 });
 
-test("单格成功的例行一行：出在被点的那一行里，紧跟名字（有 ×2 跟在它后面），不重复名字，不带撤销，一次只一条", async () => {
+test("单格的结果：浮在被点那一格正下方（成功与失败同一个位置），不挂进行里，不重复名字，不带撤销，一次只一条", async () => {
   const { Toast } = await import("../src/ui/Toast.tsx");
   const { toastFor } = await import("../src/toastText.ts");
   const text = toastFor("link", {
     done: [{ name: "docx", agent: { id: "codex", name: "Codex" } }],
     omitNames: true,
   });
-  const node = createElement(Toast, { ...text, dwellMs: 4000, fadeOut: true });
+  const node = createElement(Toast, { ...text });
   // 没有就不占位
-  assert.doesNotMatch(render(Matrix, base), /mx-celltoast/);
-  const rows = [
-    { ...base.rows[0], mark: createElement("span", { className: "dup" }, "×2") },
-    base.rows[1],
-  ];
-  const html = render(Matrix, { ...base, rows, cellToast: { id: 1, rowKey: "u|docx", node } });
-  // 只一条（槽位是单值，新的替换旧的，不排队）
-  assert.equal((html.match(/class="mx-celltoast"/g) ?? []).length, 1);
-  // 列头里没有它（原来的列头行左段挂载点已撤）；在 docx 那一行的名称格里，名字 → ×2 → 提示条
-  const at = html.indexOf('class="mx-celltoast"');
-  assert.ok(at > html.indexOf('data-row="u|docx"'));
-  assert.ok(at > html.indexOf(">docx<") && at > html.indexOf(">×2<"));
-  // 不是别的行：下一行（pdf）在它之后才开始
-  assert.ok(at < html.indexOf('data-row="w|pdf"'));
-  const line = html.slice(at, html.indexOf("</span></div>", at));
-  // `✓ 加到 [Codex]`：造句复用 toastFor（省名字），组件复用例行档，不重复 skill 名；不带撤销
+  assert.doesNotMatch(render(Matrix, base), /ss-floattoast/);
+  const html = render(Matrix, {
+    ...base,
+    cellToast: { id: 1, rowKey: "u|docx", columnId: "cx", node },
+  });
+  // 只一条；锚点按格的 data-col 找，所以格上要有它
+  assert.equal((html.match(/class="ss-floattoast"/g) ?? []).length, 1);
+  assert.match(html, /<div data-col="cx" class="mx-cell"/);
+  // 浮在表的最外层（行、格之后），不在行里：悬停它不会被当成悬停那一格
+  const at = html.indexOf('class="ss-floattoast"');
+  assert.ok(at > html.indexOf('data-row="w|pdf"'));
+  const line = html.slice(at);
+  // `✓ 加到 [Codex]`：造句复用 toastFor（省名字），成功是白窗；不重复 skill 名、不带撤销
   assert.match(line, /ss-toast--routine[\s\S]*?加到/);
   assert.doesNotMatch(line, /撤销/);
   assert.doesNotMatch(line, /docx/);
-  // 名字（或 ×2）后间距 12：行内 gap 8 + 4
+  // 同一格失败时只出黑窗（一次只一条，失败优先），原因是整句
+  const failed = render(Matrix, {
+    ...base,
+    cellToast: { id: 1, rowKey: "u|docx", columnId: "cx", node },
+    cellNotice: { rowKey: "u|docx", columnId: "cx", text: "Codex 的 skills 目录写不进去" },
+  });
+  assert.equal((failed.match(/class="ss-floattoast"/g) ?? []).length, 1);
+  assert.match(failed, /ss-toast--notice" data-kind="cannot" role="alert"/);
+  assert.match(failed, /class="ss-toast__message">Codex 的 skills 目录写不进去</);
+  // 旧的行内一行与格下小黑窗的样式已撤
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  assert.match(css, /\.mx-celltoast \{[^}]*margin-left: 4px;/);
-  assert.doesNotMatch(css, /\.mx-celltoast \{[^}]*position: absolute/);
+  assert.doesNotMatch(
+    css,
+    /mx-celltoast|mx-cellnotice|mx-rowtoast|mx-keytoast|mx-bartoast|mx-globaltoast/,
+  );
 });
 
-test("批量忙碌锁：开始就锁住工具行各项、不变淡；忙过 500ms（与忙碌指示同一时刻）才变淡", async () => {
-  const { busyLockClass, BATCH_BUSY_DELAY_MS } = await import("../src/Matrix.tsx");
+test("批量忙碌锁：只锁按下的那一项、不变淡；过了 0.3 秒门槛（与忙碌指示同一时刻）才变淡；工具行右端不锁", async () => {
+  const { busyLockClass } = await import("../src/Matrix.tsx");
   assert.equal(busyLockClass(false, false), undefined);
   assert.equal(busyLockClass(true, false), "mx-locked");
   assert.equal(busyLockClass(true, true), "ss-busy");
-  assert.equal(BATCH_BUSY_DELAY_MS, 500);
   const noop = () => undefined;
   const check = (label: string) => ({ checked: false, label, tip: label, onToggle: noop });
-  // 刚开始忙（首帧，计时器还没到点）：各项锁住但不淡
+  // 刚开始忙（首帧，计时器还没到点）：按下的「所有 agent」锁住但不淡，其余两项不锁
   const html = render(Matrix, {
     ...base,
-    busy: true,
+    keyBusy: { keyId: "all", label: "正在加到 所有 agent" },
     selected: new Set(["u|docx"]),
     allAgents: check("选中的都加到所有 agent"),
     columnChecks: { cc: check("选中的都加到 Claude Code"), cx: check("选中的都加到 Codex") },
   });
-  assert.equal((html.match(/<span class="mx-locked">/g) ?? []).length, 3);
+  assert.equal((html.match(/<span class="mx-locked">/g) ?? []).length, 1);
   assert.doesNotMatch(html, /ss-busy/);
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
   const locked = css.match(/\.mx-locked \{([^}]*)\}/)?.[1] ?? "";

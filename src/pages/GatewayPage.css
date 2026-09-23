@@ -157,13 +157,6 @@
   text-underline-offset: 3px;
 }
 
-.gw-panel__busy {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  white-space: nowrap;
-}
-
 .gw-panel__trash {
   display: inline-flex;
   margin-left: auto;
@@ -201,8 +194,20 @@
 
 /* 模型勾选列表框：8 圆角（layer），平铺在页面里所以只有 hairline 边、没有阴影 */
 /* 勾选没写成的灰面板：夹在模型片与列表之间 */
-.gw-panel__notice {
+/* 这一页的灰面板（删 / 重连没成、勾选没写成、保存没成）只有一种间距：离上一样东西 8。
+   三处的父级不同（块 / 间距 12 的列 / 间距 8 的列），各自折算成同一个 8；
+   表单里的那一块随表单的键列缩进（缩进属于表单的对齐，不是面板的间距） */
+.gw-notice {
   margin-top: var(--space-xs);
+}
+
+.gw-panel__top > .gw-notice {
+  margin-top: calc(var(--space-xs) - var(--space-sm));
+}
+
+.gw-form > .gw-notice {
+  margin-top: 0;
+  padding-left: calc(36px + var(--space-sm));
 }
 
 .gw-panel__list {
@@ -263,18 +268,6 @@
 .gw-form__ask {
   font-size: var(--size-caption);
   color: var(--ink);
-}
-
-.gw-form__busy {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-}
-
-.gw-form__error {
-  padding-left: calc(36px + var(--space-sm));
 }
 
 .gw-form__facts {

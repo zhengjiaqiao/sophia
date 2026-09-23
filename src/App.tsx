@@ -40,6 +40,7 @@ import { edgeFades, modelIssues } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
 import {
   AddButton,
+  BusySlot,
   Cap,
   ErrorBanner,
   IconButton,
@@ -47,6 +48,8 @@ import {
   IconClose,
   IconSettings,
   Toast,
+  ToastCount,
+  ToastStack,
   Tooltip,
 } from "./ui";
 import { AnimatedWordmark } from "./brand/AnimatedWordmark";
@@ -68,7 +71,11 @@ const TABS: Array<{ id: Tab; label: string }> = [
 
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
+  /// 用户发起的写入正在进行：后台重扫排到它结束之后。**不锁页签、不锁项目切换**——
+  /// 忙碌只锁触发它的那个控件（DESIGN「反馈的两种形态 › 忙碌」），由各页自己管
   const [busy, setBusy] = useState(false);
+  /// 添加 / 移除项目进行中：只锁侧栏的这两处（同一个对象：项目列表）
+  const [projectBusy, setProjectBusy] = useState<"add" | "remove" | null>(null);
   const [selectedKey, setSelectedKey] = useState(DEFAULT_KEY);
   const [error, setError] = useState<string | null>(null);
   /// 二级页面：占满整窗、不渲染侧栏。null＝主视图
@@ -427,7 +434,8 @@ export default function App() {
   const addProject = async () => {
     const path = await api.pickDirectory("选择项目目录");
     if (!path) return;
-    // 用户发起、正在等：锁它影响到的控件（侧栏与页签），做完解锁
+    // 用户发起、正在等：只锁项目列表的增删（键原位忙碌），页签与切换项目照常
+    setProjectBusy("add");
     setBusyState(true);
     try {
       await api.addProject(path);
@@ -436,10 +444,12 @@ export default function App() {
       setError(String(e));
     } finally {
       setBusyState(false);
+      setProjectBusy(null);
     }
   };
 
   const removeProject = async (path: string) => {
+    setProjectBusy("remove");
     setBusyState(true);
     try {
       await api.removeProject(path);
@@ -448,6 +458,7 @@ export default function App() {
       setError(String(e));
     } finally {
       setBusyState(false);
+      setProjectBusy(null);
     }
   };
 
@@ -498,10 +509,10 @@ export default function App() {
   return (
     <div className="app">
       {/* 顶栏独立于侧栏：模型页不要侧栏，字标与页签不能跟着一起消失。
-          系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，上面 28 给红绿灯 */}
+        系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，上面 28 给红绿灯 */}
       <header className="topbar" data-tauri-drag-region>
         {/* 字标用资产不用纯文本：首字母的重影是这个标志的识别点；
-            悬停唤起黑猫、点击敲碎玻璃（DESIGN「壳」） */}
+          悬停唤起黑猫、点击敲碎玻璃（DESIGN「壳」） */}
         <h1 className="topbar__mark">
           <AnimatedWordmark />
         </h1>
@@ -514,7 +525,6 @@ export default function App() {
                 type="button"
                 className={`topbar__tab${active ? " is-active" : ""}`}
                 aria-current={active ? "page" : undefined}
-                disabled={busy}
                 onClick={() => switchTab(tab.id)}
               >
                 <Cap tone="nav">{tab.label}</Cap>
@@ -523,16 +533,16 @@ export default function App() {
           })}
         </nav>
         {/* 右端只有设置；页签上不加计数（问题就地显示，新问题右下提示一次）。
-            **顶栏没有全局忙碌指示**：后台例行读取（刷新、文件监听重扫、网关轮询）
-            不显示忙碌，用户没在等，出现转动只会被读成出了问题（DESIGN「忙碌指示」）。
-            设置是全局的，busy 期间照常可用 */}
+          **顶栏没有全局忙碌指示**：后台例行读取（刷新、文件监听重扫、网关轮询）
+          不显示忙碌，用户没在等，出现转动只会被读成出了问题（DESIGN「忙碌指示」）。
+          写入进行中也不锁页签与项目切换：忙碌只锁触发它的那个控件 */}
         <div className="topbar__end">
           <IconButton icon={<IconSettings />} title="设置" onClick={() => setSubPage("settings")} />
         </div>
       </header>
       {/* 模型页是全局的，没有域也没有项目，侧栏对它没有意义（MODELS_TAB_FULL_BLEED）。
-          **必须整个不渲染**：`.sidebar` 有 `display: flex`，它压得过 `hidden` 属性的
-          UA 样式，写成 `hidden={…}` 侧栏照样显示 */}
+        **必须整个不渲染**：`.sidebar` 有 `display: flex`，它压得过 `hidden` 属性的
+        UA 样式，写成 `hidden={…}` 侧栏照样显示 */}
       {!showModels && (
         <aside className="sidebar">
           {/* 小标题 `项目` + 右端排序下拉；`全局` 固定第一，不参与排序 */}
@@ -543,7 +553,7 @@ export default function App() {
           <ul className="sidebar__list">
             <li
               className={selectedKey === DEFAULT_KEY ? "is-active" : ""}
-              onClick={() => !busy && setSelectedKey(DEFAULT_KEY)}
+              onClick={() => setSelectedKey(DEFAULT_KEY)}
             >
               <span className="sidebar__name">全局</span>
             </li>
@@ -551,7 +561,7 @@ export default function App() {
               <li
                 key={p.key}
                 className={p.key === selectedKey ? "is-active" : ""}
-                onClick={() => !busy && setSelectedKey(p.key)}
+                onClick={() => setSelectedKey(p.key)}
               >
                 <SidebarName
                   label={p.label}
@@ -560,7 +570,7 @@ export default function App() {
                 />
                 {p.manual && (
                   <RemoveProject
-                    busy={busy}
+                    busy={projectBusy !== null}
                     name={p.label}
                     onRemove={() => void removeProject(p.path)}
                   />
@@ -569,11 +579,13 @@ export default function App() {
             ))}
           </ul>
           <div className="sidebar__foot">
-            <AddButton
-              noun="项目"
-              disabledReason={busy ? "正在读取，稍等" : undefined}
-              onClick={() => void addProject()}
-            />
+            <BusySlot busy={projectBusy === "add"} label="正在添加项目">
+              <AddButton
+                noun="项目"
+                disabledReason={projectBusy === "remove" ? "正在移除项目，稍等" : undefined}
+                onClick={() => void addProject()}
+              />
+            </BusySlot>
           </div>
         </aside>
       )}
@@ -593,8 +605,6 @@ export default function App() {
           {showModels ? (
             <ModelsTab
               onError={setError}
-              busy={busy}
-              onBusy={setBusyState}
               onGatewayState={setGatewayState}
               focusProviderId={modelFocus}
               onFocused={clearModelFocus}
@@ -603,7 +613,6 @@ export default function App() {
             <McpTab
               selectedKey={selectedKey}
               onError={setError}
-              busy={busy}
               onBusy={setBusyState}
               refreshKey={refreshKey}
               onOverview={setMcpOverview}
@@ -616,7 +625,6 @@ export default function App() {
             <SkillsTab
               overview={overview}
               autoLinks={autoLinks}
-              busy={busy}
               onBusy={setBusyState}
               selectedKey={selectedKey}
               onRefresh={refresh}
@@ -629,24 +637,24 @@ export default function App() {
           )}
         </main>
       </div>
-      {(backgroundMcpReport || noticeText) && (
-        <div className="app__toast">
-          {backgroundMcpReport && (
-            <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />
-          )}
-          {/* 新问题只提示一次：不自动消失，`查看` 或 `×` 才收起并记为看过；
-              已有提示时又发现新问题，合进这一个窗（改计数），不叠第二个 */}
-          {noticeText && (
-            <Toast
-              kind="attention"
-              verb={noticeText.lead}
-              reading={noticeText.rest}
-              action={{ label: "查看", onClick: viewNotice }}
-              onClose={markNoticeSeen}
-            />
-          )}
-        </div>
-      )}
+      {/* 右下那一叠（DESIGN「浮起小窗的位置」）：不属于任何一处的提示小窗，全应用只有这一套——
+        壳自己的两种在这里，各页的（后台自动规则）经 CornerToast 挂进来 */}
+      <ToastStack className="app__toast">
+        {backgroundMcpReport && (
+          <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />
+        )}
+        {/* 新问题只提示一次：不自动消失，`查看` 或 `×` 才收起并记为看过；
+          已有提示时又发现新问题，合进这一个窗（改计数），不叠第二个 */}
+        {noticeText && (
+          <Toast
+            kind="attention"
+            verb={noticeText.lead}
+            reading={noticeText.rest}
+            action={{ label: "查看", onClick: viewNotice }}
+            onClose={markNoticeSeen}
+          />
+        )}
+      </ToastStack>
     </div>
   );
 }
@@ -772,7 +780,8 @@ function RemoveProject({
   );
 }
 
-/// 停在别的页签时规则在背后添加了 MCP：黑窗提示条交代一声（⑨⑬ 自动发生的事要交代）
+/// 停在别的页签时规则在背后添加了 MCP：右下交代一声（⑨⑬ 自动发生的事要交代）；
+/// 全成是白窗，有没成的是黑窗
 function BackgroundMcpToast({ report, onClose }: { report: McpReport; onClose: () => void }) {
   const created = report.entries.filter((e) => e.outcome === "created");
   const failed = report.entries.filter((e) => e.outcome === "failed");
@@ -795,9 +804,8 @@ function BackgroundMcpToast({ report, onClose }: { report: McpReport; onClose: (
       kind="success"
       verb="自动添加"
       names={names}
-      reading={names.length === 0 ? `${created.length} 个` : undefined}
+      reading={names.length === 0 ? <ToastCount n={created.length} /> : undefined}
       onDismiss={onClose}
-      onClose={onClose}
     />
   );
 }
