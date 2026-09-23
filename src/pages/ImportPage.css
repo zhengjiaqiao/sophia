@@ -397,10 +397,14 @@
 }
 
 /* ---- 底部一行：一组目标 + 规则开关 + 添加 N 个 ---- */
+/* 放不下时整组折到第二行、组内不拆（DESIGN「4 个 agent 是排版上限」）：目标一组、规则开关、
+   主动作各自是不可拆的一块，agent 名不截断 */
 .ss-import__foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-xs);
+  /* 列距 16 就是开关离目标组的 16；折行后第二行靠左对齐，不留外边距 */
+  gap: var(--space-xs) var(--space-md);
   flex-shrink: 0;
   box-sizing: border-box;
   padding: var(--space-sm) var(--space-xxl);
@@ -411,8 +415,8 @@
   display: flex;
   align-items: center;
   gap: 0 var(--space-md);
-  min-width: 0;
-  flex-wrap: wrap;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
 /* 目标一项 = 复选框 + agent 图标 14 + 名字，与列表行同一种勾选写法；整项是命中区，
@@ -462,12 +466,11 @@
   white-space: nowrap;
 }
 
-/* 开关离目标组 16（DESIGN「提示与反馈锚在触发它的控件上」） */
+/* 开关离目标组 16（由 .ss-import__foot 的列距给，DESIGN「提示与反馈锚在触发它的控件上」） */
 .ss-import__rule {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-  margin-left: var(--space-xs);
   flex-shrink: 0;
 }
 

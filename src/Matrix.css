@@ -117,7 +117,8 @@
   font-weight: 500;
 }
 
-/* 选择态第一行：放不下先折行（再不行由 agent 名截断），所以高度随内容 */
+/* 选择态第一行：放不下时折行，「所有 agent + 各 agent 项」整组折到第二行、组内不拆，
+   agent 名不截断；所以高度随内容 */
 .mx-toolbar--select {
   flex-wrap: wrap;
   height: auto;
@@ -131,7 +132,7 @@
 
 .mx-agentitems {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 14px;
   min-width: 0;
@@ -148,10 +149,9 @@
   white-space: nowrap;
 }
 
+/* agent 名是选择的对象，不截断（DESIGN「4 个 agent 是排版上限」） */
 .mx-agentitem__name {
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mx-keywrap {
@@ -269,6 +269,8 @@
   justify-content: center;
   align-self: stretch;
   align-items: flex-end;
+  /* 列宽 88 定死：名字长过列宽时在列内折行，不撑出列外（DESIGN「4 个 agent 是排版上限」） */
+  min-width: 0;
   transition: background-color var(--motion-fast) var(--ease-mech);
 }
 
@@ -282,12 +284,20 @@
   display: inline-flex;
   flex-direction: column;
   align-items: center;
+  box-sizing: border-box;
+  max-width: 100%;
   padding: 0 4px;
   border: 1px solid transparent;
   border-radius: 0;
   background: none;
   color: var(--ink);
   cursor: pointer;
+}
+
+/* 列头名按列宽折行，不截断（Condensed 大写两行，如 GITHUB / COPILOT） */
+.mx-colbtn .ss-mark__name {
+  white-space: normal;
+  overflow-wrap: normal;
 }
 
 /* 这一列的目录还不存在：虚线列头（虚线＝目标不在，添加时顺手建出来） */
