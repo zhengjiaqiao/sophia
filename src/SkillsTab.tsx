@@ -788,7 +788,9 @@ export default function SkillsTab({
         {sourcesOpen && (
           // 这个位置还没有扫描出来的页：名字取项目文件夹名，没有列可当目标
           <SourcesPage
-            domain={{ key: selectedKey, label: folderLabel(selectedKey), targets: [] }}
+            kind="skill"
+            domain={{ key: selectedKey, label: folderLabel(selectedKey) }}
+            targets={[]}
             onClose={() => setSourcesOpen(false)}
             onChange={onRefresh}
           />
@@ -903,7 +905,13 @@ export default function SkillsTab({
       ) : null}
 
       {sourcesOpen && (
-        <SourcesPage domain={page} onClose={() => setSourcesOpen(false)} onChange={onRefresh} />
+        <SourcesPage
+          kind="skill"
+          domain={page}
+          targets={page.targets}
+          onClose={() => setSourcesOpen(false)}
+          onChange={onRefresh}
+        />
       )}
     </section>
   );

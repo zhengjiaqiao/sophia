@@ -1,4 +1,4 @@
-/* 来源管理页（DESIGN「来源管理页」，画板 Import / Sources / ImportEmpty）。
+/* 来源管理页（DESIGN「来源管理页」，画板 Import / Sources / ImportEmpty / McpImport；skill 与 MCP 共用）。
    色值一律 var(--…)，唯一来源是 tokens.css。
 
    与模型页同一种面板（ModelsTab.css 的 .models-panel）：表头 12/600 ink-mute + 2px ink 结构线，
@@ -237,6 +237,11 @@
   white-space: nowrap;
 }
 
+/* MCP 搬不过去的服务：名字再淡一级，行尾 `搬不过去`（画板 McpImport） */
+.src-skill__name.is-dim {
+  color: var(--ink-faint);
+}
+
 /* 列表底部：`+ 来源` 与提示条同一行（提示锚在触发它的控件旁） */
 .src-foot {
   display: flex;
@@ -314,6 +319,15 @@
   height: 1px;
   margin: var(--space-xxs) 0;
   background: var(--hairline);
+}
+
+/* MCP 的 `+ 来源` 一个候选都没有时的一句 */
+.src-menu__none {
+  padding: 6px var(--space-md);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
 }
 
 .src-menu__head {

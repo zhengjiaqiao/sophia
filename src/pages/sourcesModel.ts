@@ -1,0 +1,301 @@
+/// 来源管理页的两种数据源（skill / MCP）：同一套骨架（SourcesPage），这里把两边的命令与造句
+/// 换成同一种行、目标、候选与移除，页面只认这一种形状。不产 JSX。
+import { api } from "../api";
+import type { McpLocation, McpReport, SyncReport, Target } from "../types";
+import type { ToastProps } from "../ui";
+import {
+  candidateGroups,
+  duplicateNames,
+  mcpCandidateGroups,
+  mcpLocationName,
+  mcpOwnRemoveReason,
+  mcpRemoveConfirmBody,
+  mcpSourceLines,
+  mcpSourceSubtitle,
+  mcpSourcesTitle,
+  noMcpSourcesText,
+  noSourcesText,
+  ownRemoveReason,
+  removeConfirmBody,
+  sourceLines,
+  sourceSubtitle,
+  sourcesTitle,
+  stuckTip,
+  type DomainRef,
+} from "./sourcesView.ts";
+
+/// 提示条的内容；到点消失与关闭由页面补上
+export type ToastText = Pick<ToastProps, "tier" | "kind" | "verb" | "names" | "reason" | "tally">;
+
+/// 列表里的一行
+export interface SourceRow {
+  /// 行键，也是移除时交给 core 的来源 id
+  id: string;
+  name: string;
+  /// 第二行整句：`~/.agents/skills · 24 个 skill`、`全局 · 5 个 MCP`
+  sub: string;
+  /// 完整路径，给提示框
+  path: string;
+  /// 这个位置自己的：不能移除
+  own: boolean;
+  /// 展开区：名字，与行尾的标签（`同名` / `搬不过去`）
+  items: { name: string; tag?: { text: string; tip: string }; dim?: boolean }[];
+  /// 规则此刻的目标 id；空＝关着
+  targets: string[];
+  /// 开关打不开的原因（关着时才用）；undefined＝能开
+  switchReason?: string;
+  /// 开关的提示框
+  switchTitle: string;
+  /// 规则认这个来源的什么：skill 是路径，MCP 是位置 id
+  ruleRef: string;
+  /// MCP：来源在别的位置（写过去要允许跨域）
+  crossDomain: boolean;
+}
+
+/// 目标浮层里的一项
+export interface TargetOption {
+  id: string;
+  /// 图标用的 agent id
+  iconId: string;
+  label: string;
+  disabledReason?: string;
+}
+
+/// `+ 来源` 浮层的一组
+export interface CandidateGroup {
+  title: string;
+  items: { ref: string; name: string; sub: string; title?: string }[];
+}
+
+export interface SourcesData {
+  rows: SourceRow[];
+  groups: CandidateGroup[];
+}
+
+export interface SourcesModel {
+  /// 页名：`CardBox 的来源` / `CardBox 的 MCP 来源`
+  title: string;
+  emptyText: string;
+  /// 数量单位与开关的无障碍名里用：skill / MCP
+  noun: string;
+  /// 开关开着时行上写的：`自动加到` / `自动写进`
+  ruleOn: string;
+  /// 目标小框的提示与浮层的名字
+  targetsTitle: string;
+  /// 目标图标认不出来时小框里写 `N 个 agent` / `N 个位置`
+  targetUnit: string;
+  /// 没有能当目标的时，开关打不开的原因
+  noTargetsReason: string;
+  targetsLabel: string;
+  /// 展开区没有东西时写的
+  emptyItems: string;
+  /// 自己的来源 × 禁用的原因
+  ownRemoveReason: string;
+  /// `+ 来源` 里有没有「选择文件夹…」
+  canPickFolder: boolean;
+  /// `+ 来源` 一个候选都没有时写的（有「选择文件夹…」时不用）
+  noCandidates: string;
+  /// 记住上次目标用的 key
+  memoryKey: (rowId: string) => string;
+  load: () => Promise<SourcesData>;
+  /// 这一行的目标浮层
+  targetsFor: (row: SourceRow) => TargetOption[];
+  /// 打开开关时默认目标从这些里挑（先后即优先）
+  pickable: (row: SourceRow) => string[];
+  subscribe: (ref: string) => Promise<void>;
+  /// 选择文件夹：返回选中的路径，取消为 null
+  pickFolder: () => Promise<string | null>;
+  /// 把规则的目标从 `prev` 改成 `next`；`next` 为空＝关掉
+  setTargets: (row: SourceRow, next: string[], prev: string[]) => Promise<void>;
+  /// 移除前的清单：确认框正文，以及确认后要执行的那一步（返回提示条内容，不含名字）
+  planRemove: (row: SourceRow) => Promise<{ body: string; commit: () => Promise<ToastText> }>;
+}
+
+const RULE_TITLE = "只管以后新出现的，现有的不变";
+
+/// 做完一批：全部成了是例行一行；有没成的说几个没成、第一个的原因
+function removalToast(total: number, failed: string[], what: string): ToastText {
+  if (failed.length === 0) return { tier: "routine", kind: "success", verb: "移除" };
+  return {
+    tier: "notice",
+    kind: "partial",
+    verb: "移除",
+    tally: { done: total - failed.length, failed: failed.length },
+    reason: `有 ${failed.length} ${what}：${failed[0]}`,
+  };
+}
+
+/// skill：来源是一个放着 skill 的文件夹，目标是这个位置的 agent 列
+export function skillSourcesModel(domain: DomainRef, targets: Target[]): SourcesModel {
+  const open = targets.filter((t) => t.linkedWholeTo === null);
+  return {
+    title: sourcesTitle(domain),
+    emptyText: noSourcesText(domain),
+    noun: "skill",
+    ruleOn: "自动加到",
+    targetsTitle: "改自动加到的 agent",
+    targetUnit: "个 agent",
+    noTargetsReason: "这里还没有能加到的 agent",
+    targetsLabel: "自动加到的 agent",
+    emptyItems: "文件夹里现在没有 skill",
+    ownRemoveReason: ownRemoveReason(domain),
+    canPickFolder: true,
+    noCandidates: "",
+    memoryKey: (id) => `skill|${domain.key}|${id}`,
+    load: async () => {
+      const list = await api.listSources(domain.key);
+      const dups = duplicateNames(list.subscribed);
+      return {
+        rows: list.subscribed.map((s) => ({
+          id: s.id,
+          name: sourceLines(s, domain).name,
+          sub: sourceSubtitle(s, domain),
+          path: s.path,
+          own: s.own,
+          items: s.skills.map((name) => ({
+            name,
+            tag: dups.has(name)
+              ? { text: "同名", tip: "两份都在列表里，到行上只留一份" }
+              : undefined,
+          })),
+          targets: s.autoLink ? s.autoTargets : [],
+          switchReason: s.canAutoLink ? undefined : "外部来源看不到以后新出现的 skill",
+          switchTitle: RULE_TITLE,
+          ruleRef: s.path,
+          crossDomain: false,
+        })),
+        groups: candidateGroups(list).map((g) => ({
+          title: g.title,
+          items: g.items.map((i) => ({ ref: i.path, name: i.name, sub: i.sub, title: i.path })),
+        })),
+      };
+    },
+    targetsFor: () =>
+      targets.map((t) => ({
+        id: t.id,
+        iconId: t.scope.harnessId,
+        label: t.label,
+        disabledReason:
+          t.linkedWholeTo === null
+            ? undefined
+            : `${t.label} 的 skills 文件夹整个是链接，拆开后才能逐个开关`,
+      })),
+    pickable: () => open.map((t) => t.id),
+    subscribe: (ref) => api.subscribeSource(domain.key, ref),
+    pickFolder: () => api.pickDirectory("选择放着 skill 的文件夹"),
+    setTargets: async (row, next, prev) => {
+      if (next.length === 0) {
+        await api.removeAutoLinkTargets(
+          row.ruleRef,
+          targets.map((t) => t.id),
+        );
+        return;
+      }
+      const added = next.filter((id) => !prev.includes(id));
+      const removed = prev.filter((id) => !next.includes(id));
+      if (added.length > 0) await api.setAutoLink(row.ruleRef, added);
+      if (removed.length > 0) await api.removeAutoLinkTargets(row.ruleRef, removed);
+    },
+    planRemove: async (row) => {
+      const removal = await api.planRemoveSource(domain.key, row.id);
+      return {
+        body: removeConfirmBody(removal.links),
+        commit: async () => {
+          const report: SyncReport = await api.removeSource(domain.key, row.id);
+          const failed = report.entries.flatMap((e) =>
+            e.outcome.status === "failed" ? [e.outcome.reason] : [],
+          );
+          return removalToast(report.entries.length, failed, "条软链没撤掉");
+        },
+      };
+    },
+  };
+}
+
+/// 位置名；主视图里藏起来的那一处（还没建的 .mcp.json）说清点下去会发生什么
+const mcpTargetLabel = (l: McpLocation) =>
+  l.matrixHidden === true && l.selector === undefined
+    ? `${mcpLocationName(l)}（新建 .mcp.json）`
+    : mcpLocationName(l);
+
+/// MCP：来源是一处配置，目标是这个位置的全部配置位置（包含主视图藏起来的；来源自己那处不能当目标）
+export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): SourcesModel {
+  const nameOf = (id: string) => {
+    const l = locations.find((x) => x.id === id);
+    return l ? mcpLocationName(l) : id;
+  };
+  return {
+    title: mcpSourcesTitle(domain),
+    emptyText: noMcpSourcesText(domain),
+    noun: "MCP",
+    ruleOn: "自动写进",
+    targetsTitle: "改自动写进的位置",
+    targetUnit: "个位置",
+    noTargetsReason: "这里还没有能写进的位置",
+    targetsLabel: "自动写进的位置",
+    emptyItems: "配置里现在没有服务",
+    ownRemoveReason: mcpOwnRemoveReason(domain),
+    canPickFolder: false,
+    noCandidates: "别处还没有能加进来的 MCP 配置",
+    memoryKey: (id) => `mcp|${domain.key}|${id}`,
+    load: async () => {
+      const list = await api.listMcpSources(domain.key);
+      return {
+        rows: list.subscribed.map((s) => {
+          const crossDomain = s.domain !== domain.key;
+          return {
+            id: s.id,
+            name: mcpSourceLines(s, domain).name,
+            sub: mcpSourceSubtitle(s, domain),
+            path: s.path,
+            own: s.own,
+            items: s.services.map((x) => ({
+              name: x.name,
+              tag: x.portable ? undefined : { text: "搬不过去", tip: stuckTip(x.name, s.label) },
+              dim: !x.portable,
+            })),
+            targets: s.autoTargets,
+            switchReason: s.unreadable ? "读不到它的配置，先修好再开" : undefined,
+            switchTitle: crossDomain
+              ? `${RULE_TITLE}；写到这里会把请求头和令牌一并复制过来`
+              : RULE_TITLE,
+            ruleRef: s.id,
+            crossDomain,
+          };
+        }),
+        groups: mcpCandidateGroups(list).map((g) => ({
+          title: g.title,
+          items: g.items.map((i) => ({ ref: i.id, name: i.name, sub: i.sub })),
+        })),
+      };
+    },
+    targetsFor: (row) =>
+      locations.map((l) => ({
+        id: l.id,
+        iconId: l.harnessId,
+        label: mcpTargetLabel(l),
+        disabledReason: l.id === row.id ? "这就是来源" : undefined,
+      })),
+    pickable: (row) =>
+      locations.filter((l) => l.matrixHidden !== true && l.id !== row.id).map((l) => l.id),
+    subscribe: (ref) => api.subscribeMcpSource(domain.key, ref),
+    pickFolder: async () => null,
+    setTargets: (row, next) =>
+      next.length === 0
+        ? api.removeMcpAutoImport(row.ruleRef, domain.key)
+        : api.setMcpAutoImport(row.ruleRef, domain.key, next, row.crossDomain),
+    planRemove: async (row) => {
+      const removal = await api.planRemoveMcpSource(domain.key, row.id);
+      return {
+        body: mcpRemoveConfirmBody(removal.items, nameOf),
+        commit: async () => {
+          const report: McpReport = await api.removeMcpSource(domain.key, row.id, removal.items);
+          const failed = report.entries.flatMap((e) =>
+            e.outcome === "removed" ? [] : [`${e.name}（${nameOf(e.targetId)}）${e.message}`],
+          );
+          return removalToast(report.entries.length, failed, "项没拿掉");
+        },
+      };
+    },
+  };
+}
