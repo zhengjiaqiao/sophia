@@ -44,7 +44,7 @@ export const api = {
   deleteSource: (planId: string) => invoke<SyncReport>("delete_source", { planId }),
   /// 把这些问题记为看过（新问题只提示一次，看过即止）；已看过的保持原样。
   /// key 是字符串，两种格式互不相撞（core `store::SeenIssue` 是准）：
-  /// - skill / MCP：`pendingIssues.ts › issueKey(kind, paths)`，即 `<IssueKind>\u001f<位置…>`
+  /// - skill / MCP：`issues.ts › issueKey(kind, paths)`，即 `<IssueKind>\u001f<位置…>`
   /// - 模型：`model\u001f<类别>\u001f<细节…>`，段间都用 `\u001f`：
   ///   `model\u001ftakeover\u001f<baseUrl>`、`model\u001fconfigChanged\u001f<Codex 版本>`、
   ///   `model\u001funreachable\u001f<providerId>\u001f<原因>`

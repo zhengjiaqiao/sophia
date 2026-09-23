@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collectMcpIssues, differingFields, mcpDomains, mcpGroupOf } from "../src/mcpView.ts";
-import { issueKey } from "../src/pages/pendingIssues.ts";
+import { issueKey } from "../src/issues.ts";
 import type { McpCell, McpEntry, McpLocation, McpOverview } from "../src/types.ts";
 
 const loc = (id: string, domain = "global"): McpLocation => ({
@@ -65,11 +65,8 @@ test("collectMcpIssues：两份不一样与读不出来，形状稳定、key 与
   assert.match(one.title, /CLINE 里的 x 这次读不出来/);
 });
 
-test("collectMcpIssues：按域收、滤掉已忽略的", () => {
-  const all = collectMcpIssues(overview());
+test("collectMcpIssues：按域收", () => {
   assert.equal(collectMcpIssues(overview(), { domains: ["project:/p"] }).length, 1);
-  const ignored = new Set([all[0].key]);
-  assert.equal(collectMcpIssues(overview(), { ignored }).length, all.length - 1);
   assert.deepEqual(collectMcpIssues(null), []);
 });
 

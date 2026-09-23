@@ -526,55 +526,52 @@ export function showRouterBanner(state: GatewayState, healAttempted: boolean): b
   return healAttempted && routerUnavailable(state);
 }
 
-// ===== 模型的待处理（顶栏收件箱的「模型」段，T3 的待处理页渲染） =====
+// ===== 模型的问题（就地在 Codex 行 / 网关页显示；新出现时由壳提示一次） =====
 
 /**
- * 模型页里要用户拿主意、且不在某一行上就地出现的事（DESIGN「全局收件箱」）：
- * - `takeover`：Codex 正由 agents-manager 管着 → `接管`
- * - `configChanged`：Codex 升级后 Sophia 写进去的模型列表对不上了，要重新写一次 → `重新写入`
- * - `unreachable`：某家网关连不上 → `再试一次`（网关页那一家同时就地显示）
+ * 模型页里要用户拿主意的事（DESIGN「没有收件箱、待处理页和「忽略」」那张表）：
+ * - `takeover`：Codex 正由 agents-manager 管着 → Codex 行内待办条 `接管`
+ * - `configChanged`：Codex 升级后 Sophia 写进去的设置对不上了 → Codex 行内待办条 `重新写入`
+ * - `unreachable`：某家网关连不上 → 网关页那一家的连接摘要 `再试一次`
  *
- * 「改动要重启 Codex 才生效」不进来——它已在 agent 行上就地出现，一件事只在一处说。
- * 「路由没在跑」也不进来——它影响整页、忽略毫无意义，走模型页页级横幅。
+ * 「改动要重启 Codex 才生效」不进来——它不用拿主意，已在 agent 行上就地出现。
+ * 「路由没在跑」也不进来——它影响整页，走模型页页级横幅。
  *
- * 形状（给待处理页）：
- * - `key`：稳定、可持久化的忽略依据。**状况一变 key 就变**（Codex 升了版本、网关换了失败原因），
- *   忽略过的会自然重新提示——与 skill 的 issueKey 同一思路，但模型的 key 不进 core 的忽略表
- *   （那边的 IssueKind 是跨语言契约），由待处理页自己记
- * - `parts`：句子拆段，`subject: true` 的是对象名（墨色），其余是连接词（灰）
- * - `sentence`：整句，给读屏与提示框
- * - `action`：一个动作；`kind` 决定调哪个命令（App 的 `resolveModelIssue` 照它执行）
- * - `providerId`：只有 `unreachable` 有，给「再试一次」和跳回网关页那一家
+ * 形状：
+ * - `key`：看过表的 key，**状况一变 key 就变**（Codex 升了版本、网关换了失败原因），看过的会再提示一次。
+ *   格式由 core `store::SeenIssue` 钉死：`model\u001f<类别>\u001f<细节…>`，段间都用 `\u001f`
+ * - `subject`：句子的主语（`Codex`、网关名），一次性提示里加粗
+ * - `sentence`：一次性提示只有这一条时说的整句，以 `subject` 开头
+ * - `action`：一个动作；`kind` 决定调哪个命令（Codex 行内待办条照它执行）
+ * - `providerId`：只有 `unreachable` 有，「查看」进网关页选中那一家
  */
 export type ModelIssueKind = "takeover" | "configChanged" | "unreachable";
 
 export interface ModelIssue {
   kind: ModelIssueKind;
   key: string;
-  parts: Array<{ text: string; subject?: boolean }>;
+  subject: string;
   sentence: string;
   action: { kind: "takeover" | "rewrite" | "retry"; label: string };
   providerId?: string;
 }
 
-/// 类别名：待处理页左列记号的提示框
-export const MODEL_ISSUE_LABEL: Record<ModelIssueKind, string> = {
-  takeover: "由别的工具管理",
-  configChanged: "配置被外部改过",
-  unreachable: "网关连不上",
-};
+/// 模型类 key 的段分隔符，与 core `store::MODEL_KEY_PREFIX` 同一个 Unit Separator
+const SEP = "\u001f";
+const modelKey = (...parts: string[]) => ["model", ...parts].join(SEP);
 
 const issue = (
   kind: ModelIssueKind,
   key: string,
-  parts: ModelIssue["parts"],
+  subject: string,
+  rest: string,
   action: ModelIssue["action"],
   providerId?: string,
 ): ModelIssue => ({
   kind,
   key,
-  parts,
-  sentence: parts.map((p) => p.text).join(""),
+  subject,
+  sentence: `${subject} ${rest}`,
   action,
   ...(providerId === undefined ? {} : { providerId }),
 });
@@ -586,13 +583,9 @@ export function modelIssues(state: GatewayState | null, tool: ModelsTool = CODEX
     out.push(
       issue(
         "takeover",
-        `model:takeover:${state.takeover.baseUrl}`,
-        [
-          { text: tool.name, subject: true },
-          { text: " 正由 " },
-          { text: "agents-manager", subject: true },
-          { text: " 管理，接过来才能在这里改" },
-        ],
+        modelKey("takeover", state.takeover.baseUrl),
+        tool.name,
+        "正由 agents-manager 管理",
         { kind: "takeover", label: "接管" },
       ),
     );
@@ -601,11 +594,9 @@ export function modelIssues(state: GatewayState | null, tool: ModelsTool = CODEX
     out.push(
       issue(
         "configChanged",
-        `model:config:${state.codex.version}`,
-        [
-          { text: tool.name, subject: true },
-          { text: ` 升到 ${state.codex.version} 后，Sophia 写进去的模型列表对不上了` },
-        ],
+        modelKey("configChanged", state.codex.version),
+        tool.name,
+        "里 Sophia 写进去的设置被改掉了",
         { kind: "rewrite", label: "重新写入" },
       ),
     );
@@ -615,11 +606,9 @@ export function modelIssues(state: GatewayState | null, tool: ModelsTool = CODEX
     out.push(
       issue(
         "unreachable",
-        `model:unreachable:${provider.id}:${provider.unreachable}`,
-        [
-          { text: providerLabel(provider), subject: true },
-          { text: ` 连不上：${provider.unreachable}` },
-        ],
+        modelKey("unreachable", provider.id, provider.unreachable),
+        providerLabel(provider),
+        "连不上",
         { kind: "retry", label: "再试一次" },
         provider.id,
       ),

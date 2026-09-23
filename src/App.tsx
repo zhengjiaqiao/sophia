@@ -8,11 +8,18 @@ import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
-import { PendingPage, loadModelIgnoredKeys, type PendingSegment } from "./pages/PendingPage";
-import { collectIssues } from "./pages/pendingIssues";
+import { collectIssues } from "./issues";
+import {
+  mcpNotices,
+  modelNotices,
+  noticeLine,
+  skillNotices,
+  unseenNotices,
+  type IssueSegment,
+} from "./issueNotice";
 import { collectMcpIssues } from "./mcpView";
 import { displayPath, loadHome } from "./pathText";
-import { edgeFades, modelIssues, parseBackendError } from "./modelsView";
+import { edgeFades, modelIssues } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
 import {
   AddButton,
@@ -20,7 +27,6 @@ import {
   ErrorBanner,
   IconButton,
   IconClose,
-  IconInbox,
   IconSettings,
   Toast,
   Tooltip,
@@ -29,7 +35,7 @@ import { AnimatedWordmark } from "./brand/AnimatedWordmark";
 import "./App.css";
 
 /// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
-/// 选择操作条的片也会重复；跨域批量的事走待处理页
+/// 选择操作条的片也会重复
 const DEFAULT_KEY = "global";
 /// 文件系统事件与窗口获得焦点后的重扫去抖
 const REFRESH_DELAY = 300;
@@ -49,9 +55,7 @@ export default function App() {
   const [selectedKey, setSelectedKey] = useState(DEFAULT_KEY);
   const [error, setError] = useState<string | null>(null);
   /// 二级页面：占满整窗、不渲染侧栏。null＝主视图
-  const [subPage, setSubPage] = useState<null | "settings" | "pending">(null);
-  /// 待处理页打开时落在哪一段：从哪个页签进就落在哪段（全局收件箱，DESIGN「材料与工艺」）
-  const [pendingSegment, setPendingSegment] = useState<Tab>("skills");
+  const [subPage, setSubPage] = useState<null | "settings">(null);
   /// 启动时后台查一次新版。**必须静默失败**：`plugins.updater.pubkey` 没填之前
   /// check() 一定报错，进横幅的话每次开应用先看见一条错。null＝查过没有 / 没查成
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
@@ -68,14 +72,20 @@ export default function App() {
   // MCP 扫描到的域独立于 skills；例如没有 skill 的 WeiboAP agent 也能在 MCP 页选择。
   const [mcpSidebarDomains, setMcpSidebarDomains] = useState<SidebarDomain[]>([]);
   const [backgroundMcpReport, setBackgroundMcpReport] = useState<McpReport | null>(null);
-  /// 收件箱计数的三份原料：skill 扫描（overview）、MCP 扫描、模型状态；外加已忽略的 key
+  /// 新问题一次性提示的三份原料：skill 扫描（overview）、MCP 扫描、模型状态；外加看过的 key。
+  /// 看过表还没读到（null）就不提示——宁可晚一轮，不能把看过的又提示一遍
   const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
   const [gatewayState, setGatewayState] = useState<GatewayState | null>(null);
-  const [ignored, setIgnored] = useState<string[]>([]);
-  /// 待处理页跳回来要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
+  const [seen, setSeen] = useState<ReadonlySet<string> | null>(null);
+  /// 这次运行里点过 `查看` / `×` 的 key：写进 core 之前就发出去的重扫读回来的看过表里还没有它们，
+  /// 并进去，免得刚关掉的提示又冒出来
+  const markedRef = useRef<Set<string>>(new Set());
+  /// 正在显示的提示里的 key（按显示顺序）：新问题合进来时原来的几条排在前面不动
+  const shownRef = useRef<string[]>([]);
+  /// `查看` 跳过去要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
   const [focus, setFocus] = useState<{ segment: "skills" | "mcp"; key: string } | undefined>();
   const clearFocus = useCallback(() => setFocus(undefined), []);
-  /// 模型页跳回：要进网关页并选中的那一家
+  /// `查看`「网关连不上」：要进网关页并选中的那一家
   const [modelFocus, setModelFocus] = useState<string | undefined>();
   const clearModelFocus = useCallback(() => setModelFocus(undefined), []);
   /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐
@@ -127,7 +137,7 @@ export default function App() {
   /// 重扫：后台那一路，**只更新数据、不置 busy、不锁任何控件**（DESIGN「忙碌指示」「空态与忙碌态」）——
   /// 界面上没有忙碌提示却点不动，用户只会觉得坏了。锁控件只给用户发起、正在等的操作（setBusyState）。
   ///
-  /// 顶栏收件箱是全局入口：不论停在哪个页签，三段都要数得出来，所以 skill 每次都扫。
+  /// 新问题的一次性提示是全局的：不论停在哪个页签，三类问题都要认得出来，所以 skill 每次都扫。
   /// MCP 停在 MCP 页时由 McpTab 扫完回传（onOverview），不重复扫；停在别的页签时这里扫一次，
   /// 缓存到下次聚焦 / 文件变化。扫描可能触发已授权的自动规则；界面以重新扫描的实际结果为准。
   ///
@@ -135,18 +145,18 @@ export default function App() {
   /// 调用方 await 回来时拿到的是最新的
   const scanOnce = async () => {
     try {
-      const [next, projects, rules, ignoredList, mcp] = await Promise.all([
+      const [next, projects, rules, seenList, mcp] = await Promise.all([
         api.scanAll(),
         api.listManualProjects(),
         api.listAutoLinks(),
-        // 计数的原料读不到不挡主流程：少数一个数字，好过整页报错
+        // 提示的原料读不到不挡主流程：少提示一次，好过整页报错
         api.listSeenIssues().catch(() => null),
         activeTabRef.current === "mcp" ? Promise.resolve(null) : api.scanMcp().catch(() => null),
       ]);
       setOverview(next);
       setManualProjects(projects);
       setAutoLinks(rules);
-      if (ignoredList !== null) setIgnored(ignoredList);
+      if (seenList !== null) setSeen(new Set([...seenList, ...markedRef.current]));
       if (mcp !== null) setMcpOverview(mcp);
       setRefreshKey((key) => key + 1);
     } catch (e) {
@@ -174,7 +184,7 @@ export default function App() {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
-  /// 模型状态只为数「模型」段：后台轻查，不显示忙碌
+  /// 模型状态只为认出模型类的新问题：后台轻查，不显示忙碌
   const refreshGateway = useCallback(() => {
     void api.gatewayState().then(
       (state) => setGatewayState(state),
@@ -215,7 +225,7 @@ export default function App() {
         if (activeTabRef.current !== "mcp") setBackgroundMcpReport(payload);
       }),
     );
-    // 菜单栏面板改了模型状态，收件箱的「模型」段跟着重数
+    // 菜单栏面板改了模型状态：模型类的问题跟着重认
     collect(listen("gateway-changed", () => refreshGateway()));
     // 菜单栏面板要求切页；它那边做不成的事也带到这里来说——面板放不下一段解释
     collect(
@@ -268,7 +278,7 @@ export default function App() {
       });
     // 路径显示把主目录写成 ~：主目录启动时读一次，之后 displayPath 同步可用
     void loadHome();
-    // 启动时扫一次：停在模型页也要数得出 Skills 与 MCP 两段
+    // 启动时扫一次：停在模型页也要认得出 Skills 与 MCP 的新问题
     void refresh();
     return () => {
       cancelled = true;
@@ -284,25 +294,51 @@ export default function App() {
   // 域 key → 手动项目路径；自动发现的项目与 agent 域不在其中，因此没有移除按钮
   const manualByKey = new Map(manualProjects.map((p) => [`project:${p}`, p]));
 
-  // ===== 全局收件箱：三段未处理之和 =====
-  // 三段原样交给待处理页（含已忽略的，页面自己按忽略表滤）；顶栏数字扣掉已忽略的
-  const ignoredKeys = useMemo(() => new Set(ignored), [ignored]);
+  // ===== 新问题只提示一次（DESIGN「没有收件箱、待处理页和「忽略」」） =====
+  // 三类扫描结果任一更新都重算：当前问题减去看过的，剩下的进右下那一个黑窗
   const skillIssues = useMemo(() => collectIssues(overview), [overview]);
   const mcpIssues = useMemo(() => collectMcpIssues(mcpOverview), [mcpOverview]);
   const modelIssueList: ModelIssue[] = useMemo(
     () => (modelsSupported ? modelIssues(gatewayState) : []),
     [gatewayState, modelsSupported],
   );
-  // 模型段的忽略不进 core，由待处理页记在本机；回到主视图时（subPage 变了）重读一次
-  const modelIgnoredKeys = useMemo(
-    () => new Set(loadModelIgnoredKeys()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subPage],
+  const notice = useMemo(
+    () =>
+      seen === null
+        ? []
+        : unseenNotices(
+            [
+              ...skillNotices(skillIssues),
+              ...mcpNotices(mcpIssues),
+              ...modelNotices(modelIssueList),
+            ],
+            seen,
+            shownRef.current,
+          ),
+    [skillIssues, mcpIssues, modelIssueList, seen],
   );
-  const inboxCount =
-    skillIssues.filter((i) => !ignoredKeys.has(i.key)).length +
-    mcpIssues.filter((i) => !ignoredKeys.has(i.key)).length +
-    modelIssueList.filter((i) => !modelIgnoredKeys.has(i.key)).length;
+  useEffect(() => {
+    shownRef.current = notice.map((issue) => issue.key);
+  }, [notice]);
+  const noticeText = noticeLine(notice);
+
+  /// `查看` 与 `×` 都把这次提示里的全部 key 记为看过。先在本地记上、提示立刻收起；
+  /// 写进 core 没成就报出来——下次启动它会再提示一次
+  const markNoticeSeen = () => {
+    const keys = notice.map((issue) => issue.key);
+    if (keys.length === 0) return;
+    for (const key of keys) markedRef.current.add(key);
+    setSeen((prev) => new Set([...(prev ?? []), ...keys]));
+    void api.markIssuesSeen(keys).catch((e) => setError(String(e)));
+  };
+
+  /// `查看`：跳到第一条所在的页签和侧栏位置，滚到那一行并闪两下
+  const viewNotice = () => {
+    const first = notice[0];
+    if (first === undefined) return;
+    markNoticeSeen();
+    jumpToRow(first.segment, first.key);
+  };
 
   const updateMcpSidebarDomains = useCallback((next: SidebarDomain[]) => {
     setMcpSidebarDomains((previous) =>
@@ -375,22 +411,16 @@ export default function App() {
     }
   };
 
-  /// 从二级页面返回：重扫一次，因为设置改了 agent 的启用、待处理页改了磁盘
+  /// 从设置页返回：重扫一次，因为设置改了 agent 的启用
   const closeSubPage = () => {
     setSubPage(null);
     void refresh();
     refreshGateway();
   };
 
-  /// 收件箱：全局一个入口，打开时落在当前页签那一段
-  const openInbox = () => {
-    setPendingSegment(showModels ? "models" : activeTab === "mcp" ? "mcp" : "skills");
-    setSubPage("pending");
-  };
-
-  /// 待处理页「跳回」：切到对应页签；这一条属于别的域就先切侧栏；再把 key 交给那一页，
-  /// 它滚到那一行并闪一下，处理完回调 onFocused 清掉（下次跳同一条才会再触发）
-  const jumpToRow = (segment: PendingSegment, key: string) => {
+  /// 跳到一条问题所在的那一行：切到对应页签；这一条属于别的域就先切侧栏；再把 key 交给那一页，
+  /// 它滚到那一行并闪两下，处理完回调 onFocused 清掉（下次跳同一条才会再触发）
+  const jumpToRow = (segment: IssueSegment, key: string) => {
     setSubPage(null);
     if (segment === "models") {
       if (!modelsSupported) return;
@@ -407,7 +437,7 @@ export default function App() {
     setFocus({ segment, key });
   };
 
-  /// skill 待处理属于哪个域：当前侧栏选中的域里有就留在这儿，否则取第一个有它的域
+  /// skill 问题属于哪个域：当前侧栏选中的域里有就留在这儿，否则取第一个有它的域
   const skillDomainOf = (key: string): string | null => {
     const hit = (d: { key: string }) =>
       collectIssues(
@@ -421,37 +451,8 @@ export default function App() {
   const mcpDomainOf = (key: string): string | null =>
     mcpIssues.find((i) => i.key === key)?.domain ?? null;
 
-  /// 待处理页「模型」段的动作：照 `ModelIssue.action.kind` 调对应命令，做完重数。
-  /// 失败原样抛给页面，由它贴在那一行上说
-  const resolveModelIssue = async (issue: ModelIssue): Promise<void> => {
-    try {
-      const next =
-        issue.action.kind === "takeover"
-          ? await api.gatewayTakeover()
-          : issue.action.kind === "rewrite"
-            ? await api.gatewayEnable()
-            : await api.gatewayRetryProvider(issue.providerId ?? "");
-      setGatewayState(next);
-    } catch (e) {
-      throw new Error(parseBackendError(String(e)).message);
-    }
-  };
-
   if (subPage === "settings") {
     return <SettingsPage onBack={closeSubPage} onError={setError} initialUpdate={pendingUpdate} />;
-  }
-  if (subPage === "pending") {
-    return (
-      <PendingPage
-        segments={{ skills: skillIssues, mcp: mcpIssues, models: modelIssueList }}
-        initialSegment={pendingSegment}
-        onBack={closeSubPage}
-        onRefresh={refresh}
-        onError={setError}
-        onJumpToRow={jumpToRow}
-        onResolveModelIssue={resolveModelIssue}
-      />
-    );
   }
 
   return (
@@ -481,12 +482,11 @@ export default function App() {
             );
           })}
         </nav>
-        {/* 右端：收件箱（三段未处理之和，0 时无数字、图标常驻）+ 设置。
-            **顶栏没有全局忙碌指示**：后台例行读取（刷新、文件监听重扫、网关轮询、收件箱计数）
+        {/* 右端只有设置；页签上不加计数（问题就地显示，新问题右下提示一次）。
+            **顶栏没有全局忙碌指示**：后台例行读取（刷新、文件监听重扫、网关轮询）
             不显示忙碌，用户没在等，出现转动只会被读成出了问题（DESIGN「忙碌指示」）。
             设置是全局的，busy 期间照常可用 */}
         <div className="topbar__end">
-          <IconButton icon={<IconInbox />} title="待处理" count={inboxCount} onClick={openInbox} />
           <IconButton icon={<IconSettings />} title="设置" onClick={() => setSubPage("settings")} />
         </div>
       </header>
@@ -598,16 +598,28 @@ export default function App() {
               selectedKey={selectedKey}
               onRefresh={refresh}
               onError={setError}
-              onOpenPending={openInbox}
               focusKey={focus?.segment === "skills" ? focus.key : undefined}
               onFocused={clearFocus}
             />
           )}
         </main>
       </div>
-      {backgroundMcpReport && (
+      {(backgroundMcpReport || noticeText) && (
         <div className="app__toast">
-          <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />
+          {backgroundMcpReport && (
+            <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />
+          )}
+          {/* 新问题只提示一次：不自动消失，`查看` 或 `×` 才收起并记为看过；
+              已有提示时又发现新问题，合进这一个窗（改计数），不叠第二个 */}
+          {noticeText && (
+            <Toast
+              kind="attention"
+              verb={noticeText.lead}
+              reading={noticeText.rest}
+              action={{ label: "查看", onClick: viewNotice }}
+              onClose={markNoticeSeen}
+            />
+          )}
         </div>
       )}
     </div>

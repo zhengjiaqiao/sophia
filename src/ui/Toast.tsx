@@ -21,13 +21,16 @@ import { Tooltip } from "./Tooltip.tsx";
 /// 那一行里、紧跟名字；二级页贴被处理那一行；无关位置的全局事右下、右沿对齐面板右沿）。
 /// 组件只负责形制，不写 position。
 
-export type ToastKind = "success" | "cannot" | "partial";
+/// `attention`：没有哪个动作做成或没成，是机器发现了要你拿主意的事（新问题的一次性提示）。
+/// 记号同部分失败的 `!`，读屏名是「需要注意」；它不给 onDismiss，不自动消失
+export type ToastKind = "success" | "cannot" | "partial" | "attention";
 
 /// 停留时长：成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿
 export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   success: 6000,
   cannot: 8000,
   partial: 8000,
+  attention: 8000,
 };
 
 /// 单格例行一行的停留时长：约 4 秒，比批量的 6 秒短——单格高频，结果格子本身已经画出来
@@ -54,7 +57,8 @@ export interface ToastProps {
   tier?: "notice" | "routine";
   /// routine 只有 success
   kind: ToastKind;
-  /// **必填**：`写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`
+  /// **必填**：`写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`。
+  /// `attention` 没有动作可说，这里放句子的主语（`defuddle`）或 `发现`，其余进 `reading`
   verb: string;
   /// 动词后半截，写在 agent 图标之后（带方向的「从 [图标] 移除 名字」）；只有一截动词时不给
   verbTail?: string;
@@ -78,7 +82,7 @@ export interface ToastProps {
   action?: ToastAction;
   /// 次要的离开 Sophia 的文字链（带 ↗）：`在访达中显示备份 ↗`
   secondary?: ToastAction;
-  /// 给了就到点自动消失
+  /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉（新问题的一次性提示）
   onDismiss?: () => void;
   /// 停留时长（毫秒）；不给按 kind 取 `TOAST_DWELL_MS`。单格例行一行给 `CELL_TOAST_DWELL_MS`
   dwellMs?: number;
@@ -95,6 +99,7 @@ const INDICATOR: Record<ToastKind, { title: string; glyph: ReactNode }> = {
   success: { title: "成功", glyph: <IconCheck /> },
   cannot: { title: "做不成", glyph: <IconCannot /> },
   partial: { title: "部分失败", glyph: <IconAttention /> },
+  attention: { title: "需要注意", glyph: <IconAttention /> },
 };
 
 function Names({ names }: { names: string[] }) {
@@ -239,7 +244,7 @@ export function Toast(props: ToastProps) {
     <div
       className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}`}
       data-kind={kind}
-      role={kind === "success" ? "status" : "alert"}
+      role={kind === "success" || kind === "attention" ? "status" : "alert"}
     >
       <div
         className="ss-toast__indicator"

@@ -12,7 +12,7 @@ import Matrix, {
 import { affectedTip, Empty as TableEmpty, PlusGlyph } from "./DomainView";
 import McpImportPage from "./pages/McpImportPage";
 import { displayPath } from "./pathText";
-import { pathsOfKey } from "./pages/pendingIssues";
+import { pathsOfKey } from "./issues";
 import {
   cellViewOf,
   differingFields,
@@ -69,10 +69,10 @@ export interface McpTabProps {
   busy: boolean;
   onBusy: (busy: boolean) => void;
   refreshKey: number;
-  /// 每次扫描完回传一次（壳拿它数全局收件箱，不用再自己扫一遍）
+  /// 每次扫描完回传一次（壳拿它认新问题、出一次性提示，不用再自己扫一遍）
   onOverview?: (overview: McpOverview) => void;
-  /// 待处理页「跳回」：一条 MCP 待处理的 key（`McpPendingItem.key`，也收服务名）。
-  /// 收到新值就滚到那一行（或读不出来的那一列列头）并闪一下；处理完回调 `onFocused`，
+  /// 新问题提示的「查看」：一条 MCP 问题的 key（`McpIssueItem.key`，也收服务名）。
+  /// 收到新值就滚到那一行（或读不出来的那一列列头）并闪两下；处理完回调 `onFocused`，
   /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
   focusKey?: string;
   onFocused?: () => void;
@@ -314,7 +314,7 @@ export default function McpTab({
     return fields.length > 0 ? `${fields.join("、")} 不同` : "配置不一样";
   };
 
-  // 待处理页跳回：key 里带着位置路径与 `#服务名`（与 core 同公式），认出行或列
+  // 新问题提示「查看」：key 里带着位置路径与 `#服务名`（与 core 同公式），认出行或列
   useEffect(() => {
     if (focusKey === undefined) {
       focusedRef.current = undefined;

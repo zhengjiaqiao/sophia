@@ -369,8 +369,8 @@ test("路由没在跑：先自愈，自愈过仍没起来才出横幅", () => {
 
 test("modelIssues：接管 / 配置被外部改过 / 网关连不上三类，key 随状况变", () => {
   assert.deepEqual(modelIssues(null), []);
-  assert.deepEqual(modelIssues(state()), [], "平时没有待处理");
-  // 「改动要重启」「路由没在跑」都不进收件箱
+  assert.deepEqual(modelIssues(state()), [], "平时没有问题");
+  // 「改动要重启」「路由没在跑」都不算要拿主意的问题
   assert.deepEqual(
     modelIssues(
       state({
@@ -400,17 +400,16 @@ test("modelIssues：接管 / 配置被外部改过 / 网关连不上三类，key
     ],
   );
   const [takeover, config, down] = issues;
-  assert.equal(takeover.key, "model:takeover:https://am.example");
-  assert.equal(config.key, "model:config:0.50.0");
-  assert.equal(down.key, "model:unreachable:a:地址连不上");
+  // 看过表的 key：格式与 core `store::SeenIssue` 钉死，段间是 \u001f
+  assert.equal(takeover.key, "model\u001ftakeover\u001fhttps://am.example");
+  assert.equal(config.key, "model\u001fconfigChanged\u001f0.50.0");
+  assert.equal(down.key, "model\u001funreachable\u001fa\u001f地址连不上");
   assert.equal(down.providerId, "a");
-  assert.equal(down.sentence, "甲 连不上：地址连不上");
-  // 对象名墨色、连接词灰：句子拆段，subject 标出对象
-  assert.deepEqual(
-    down.parts.filter((p) => p.subject).map((p) => p.text),
-    ["甲"],
-  );
-  assert.equal(takeover.parts.map((p) => p.text).join(""), takeover.sentence);
+  // 一次性提示的句子以主语开头
+  assert.equal(takeover.sentence, "Codex 正由 agents-manager 管理");
+  assert.equal(config.sentence, "Codex 里 Sophia 写进去的设置被改掉了");
+  assert.equal(down.subject, "甲");
+  assert.equal(down.sentence, "甲 连不上");
   // 不支持的机器上整段为空
   assert.deepEqual(
     modelIssues(

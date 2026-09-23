@@ -5,7 +5,7 @@ import {
   type McpDotState,
   type McpIssueKind,
 } from "./mcpCellState.ts";
-import { issueKey } from "./pages/pendingIssues.ts";
+import { issueKey } from "./issues.ts";
 import type { McpEntry, McpLocation, McpOverview } from "./types.ts";
 
 export interface McpDomainRow {
@@ -70,7 +70,7 @@ export function cellViewOf(
 
 /**
  * 本行在本域里互不一致的那几处副本（spec R2）。返回位置 id，顺序按行内出现的先后。
- * 非空即在服务名后挂「N 份不一样」的方标签，并进待处理栏。
+ * 非空即在服务名后挂「N 份不一样」，可点就地展开差异。
  */
 export function differingSourceIds(row: McpDomainRow, targetIds: Set<string>): string[] {
   const ids: string[] = [];
@@ -227,9 +227,10 @@ export function differingFields(row: McpDomainRow, targetIds: Set<string>): stri
 export const mcpGroupOf = (row: McpDomainRow): string => row.entries[0]?.sourceId ?? "";
 
 /**
- * MCP 的一条待处理（主视图不再有贴底待处理窗；T3 在全局待处理页渲染它，T2 数它给顶栏收件箱）。
+ * MCP 的一条「要你拿主意」的问题。它就地显示在那一行、那一格上；这里只给新问题的一次性提示
+ * 认出有哪几条（DESIGN「没有收件箱、待处理页和「忽略」」）。
  *
- * 形状是稳定契约：
+ * 形状：
  * - `kind`：`differentCopies`（几个位置各有一份同名定义、内容不一样）/ `invalidLocation`
  *   （某个位置的配置文件、或其中一条这次读不出来）
  * - `key`：与 core `store::issue_key` 同公式（`issueKey(kind, paths)`），拿它比对看过的列表
@@ -237,10 +238,10 @@ export const mcpGroupOf = (row: McpDomainRow): string => row.entries[0]?.sourceI
  * - `detailFields?`：只给 differentCopies——已知不一样的字段名（`["url"]`）；缺省＝说不清是哪个字段
  * - `locations`：涉及的位置（id / 位置名 / 配置文件路径），顺序即行内出现的先后
  * - `name`：服务名；位置整份读不出来时为 null
- * - `domain`：所在域的 key（`global` / `project:<路径>`），跳回对应页用
+ * - `domain`：所在域的 key（`global` / `project:<路径>`），「查看」切侧栏用
  * - `paths`：涉及的位置；key 就是由它算的
  */
-export interface McpPendingItem {
+export interface McpIssueItem {
   kind: McpIssueKind;
   key: string;
   title: string;
@@ -254,12 +255,12 @@ export interface McpPendingItem {
 /**
  * 收出 MCP 页要用户拿主意的事：读不出来的位置 / 条目，以及两份不一样的同名服务。
  *
- * `opts.domains` 只看这几个域（主视图当前域）；不给看全部。`opts.ignored` 给了就滤掉已忽略的 key。
+ * `opts.domains` 只看这几个域；不给看全部。
  */
 export function collectMcpIssues(
   overview: McpOverview | null,
-  opts: { domains?: string[]; ignored?: Set<string> } = {},
-): McpPendingItem[] {
+  opts: { domains?: string[] } = {},
+): McpIssueItem[] {
   if (overview === null) return [];
   const want = (domain: string) => opts.domains === undefined || opts.domains.includes(domain);
   const locationOf = (id: string) => overview.locations.find((l) => l.id === id);
@@ -267,13 +268,13 @@ export function collectMcpIssues(
     const l = locationOf(id);
     return { id, label: l?.label ?? id, path: l?.path ?? id };
   };
-  const out: McpPendingItem[] = [];
+  const out: McpIssueItem[] = [];
 
   for (const issue of overview.issues) {
     const location = locationOf(issue.locationId);
     if (location === undefined || !want(location.domain)) continue;
     // key 必须和 core 的 store::issue_key 同源；条目名并进标识里，否则同一个文件里
-    // 两条不同名的问题会算出同一个 key，忽略一条就把另一条也吞了
+    // 两条不同名的问题会算出同一个 key，看过一条就把另一条也吞了
     // 用加号拼而不是模板串：上面两处带反斜杠的模板串会让 lint-ui 的取文案正则配错对
     const ident = issue.name === null ? location.path : location.path + "#" + issue.name;
     out.push({
@@ -315,5 +316,5 @@ export function collectMcpIssues(
     }
   }
 
-  return opts.ignored ? out.filter((item) => !opts.ignored?.has(item.key)) : out;
+  return out;
 }

@@ -7,7 +7,7 @@ import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
 import ImportPage from "./pages/ImportPage";
-import { pathsOfKey } from "./pages/pendingIssues";
+import { pathsOfKey } from "./issues";
 import { shortDate } from "./dateText";
 import { CELL_TOAST_DWELL_MS, Confirm, Empty, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
@@ -60,9 +60,7 @@ export interface SkillsTabProps {
   selectedKey: string;
   onRefresh: () => Promise<void>;
   onError: (message: string) => void;
-  /// 顶栏收件箱接管了待处理入口；这个口子留给壳，主视图不再有贴底待处理窗
-  onOpenPending?: () => void;
-  /// 待处理页「跳回」：一条待处理的 key（`issueKey(kind, paths)`，也收行键 `来源|skill`）。
+  /// 新问题提示的「查看」：一条问题的 key（`issueKey(kind, paths)`，也收行键 `来源|skill`）。
   /// 收到新值就滚到涉及的那一行（格、或整列的列头）并闪一下；处理完回调 `onFocused`，
   /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
   focusKey?: string;
@@ -727,7 +725,7 @@ export default function SkillsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===== 待处理页跳回：滚到那一行并闪一下 =====
+  // ===== 新问题提示「查看」：滚到那一行并闪两下 =====
 
   useEffect(() => {
     if (focusKey === undefined) {
@@ -749,6 +747,10 @@ export default function SkillsTab({
         rowKeys.push(skillRowKey(row));
         if (cell) columnId = cell.targetId;
       }
+    }
+    // 孤链行：没有原件，靠链接自己的路径认
+    for (const orphan of orphanRows(page)) {
+      if (orphan.links.some((l) => paths.has(l.clear.targetPath))) rowKeys.push(orphan.key);
     }
     if (rowKeys.length === 0) columnId = page.targets.find((t) => paths.has(t.path))?.id;
     // 要跳的行被筛掉了：先清筛选，不然跳过去是空的

@@ -5,10 +5,17 @@ import {
   addLabel,
   columnsOf,
   defaultTargets,
+  joinWords,
   sameSet,
   selectAllState,
   toggleAll,
 } from "../src/pages/importDefaults.ts";
+
+test("按钮里的专名：汉字之间不加空格，中西文之间一个空格", () => {
+  assert.equal(joinWords("只留", "通用仓库", "的"), "只留通用仓库的");
+  assert.equal(joinWords("只留", "WeiboAP", "的"), "只留 WeiboAP 的");
+  assert.equal(joinWords("删", "ego lite", "的"), "删 ego lite 的");
+});
 
 test("默认目标：上次用的（只留现在还在的），没有上次则前两个", () => {
   assert.deepEqual(defaultTargets(["cc", "codex", "cursor"], undefined), ["cc", "codex"]);

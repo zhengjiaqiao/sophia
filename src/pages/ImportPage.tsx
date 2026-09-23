@@ -16,7 +16,6 @@ import foldersArt from "../assets/type-folders.svg";
 import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { TargetCheck } from "./TargetCheck.tsx";
-import { joinWords } from "./pendingIssues.ts";
 import {
   addLabel,
   columnsOf,
@@ -24,6 +23,7 @@ import {
   loadImportMemory,
   saveImportMemory,
   distinguishingSegments,
+  joinWords,
   sameSet,
   selectAllState,
   toggleAll,
@@ -40,7 +40,7 @@ import "./ImportPage.css";
 ///
 /// - **同名在添加时就地解决**（⑩）：勾上同名的行＝替换现有的，行下出一句后果；不勾就是跳过
 ///   （core 不覆盖已有的同名）。全选连同名行一起勾上，主动作写 `添加 N 个（替换 M 个）`。
-///   能在源头消掉的冲突不留到待处理
+///   能在源头消掉的冲突不留到主视图
 /// - **规则只管以后新出现的**（core 建规则时拍 baseline），所以开关不确认；开着时勾上 / 取消
 ///   目标就是给规则加 / 减目标（加目标不重拍 baseline）
 /// - 默认目标（③）：这个来源上次用的目标；没有上次则已安装的前两个

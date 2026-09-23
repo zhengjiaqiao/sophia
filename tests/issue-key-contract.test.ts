@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { issueKey, pathsOfKey } from "../src/pages/pendingIssues.ts";
+import { issueKey, pathsOfKey } from "../src/issues.ts";
 
 /// 跨语言契约：这个串必须和 `crates/core/src/store.rs` 的
 /// `key_format_is_pinned_for_the_frontend` 里那个期望值**逐字节相同**。

@@ -1,5 +1,5 @@
 /// 两张添加页（skill / MCP）共用的纯逻辑：默认目标、记住上次的目标、按列切、同名来源的区分片段、
-/// 全选三态与主动作的字。
+/// 全选三态与主动作的字、专名拼句。
 /// 不碰 api、不产 JSX。
 
 /// 这个来源上次添加时勾上的目标，以及连续几次点的是同一组
@@ -90,4 +90,15 @@ export function toggleAll(pickable: string[], chosen: string[]): string[] {
 /// 主动作的字：含替换时写明这次会替换几个（`添加 38 个（替换 1 个）`），不含时照旧
 export function addLabel(count: number, replacing: number): string {
   return replacing > 0 ? `添加 ${count} 个（替换 ${replacing} 个）` : `添加 ${count} 个`;
+}
+
+/// 按钮与说明里的专名不靠空格断词（DESIGN「按钮」）：汉字之间不加空格，中西文之间一个空格。
+/// `只留通用仓库的`、`只留 WeiboAP 的`
+export function joinWords(...words: string[]): string {
+  const latin = /[A-Za-z0-9]/;
+  return words.reduce((acc, word) => {
+    if (acc === "" || word === "") return acc + word;
+    const gap = latin.test(acc[acc.length - 1]) !== latin.test(word[0]) ? " " : "";
+    return acc + gap + word;
+  }, "");
 }

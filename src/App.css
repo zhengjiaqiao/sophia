@@ -151,7 +151,7 @@ input:focus-visible {
   color: var(--ink);
 }
 
-/* 右端：收件箱 设置，间距 4 */
+/* 右端：只有设置 */
 .topbar__end {
   display: flex;
   align-items: center;
@@ -267,12 +267,17 @@ input:focus-visible {
   margin: 0;
 }
 
-/* 无关位置的全局事（背后自动添加了 MCP）：右下，底 16 */
+/* 无关位置的全局事（背后自动添加了 MCP、新问题的一次性提示）：右下，底 16；
+   两个同时在时竖着排，右沿对齐 */
 .app__toast {
   position: fixed;
   right: var(--space-xxl);
   bottom: var(--space-md);
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-xs);
 }
 
 @media (prefers-reduced-motion: reduce) {
