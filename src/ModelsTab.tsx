@@ -12,7 +12,6 @@ import {
   RESTART_CONSEQUENCE,
   RESTART_DONE_MS,
   RESTART_POLL_MS,
-  RESTART_STILL_STALE,
   RESTART_TIP,
   availableCount,
   effectiveModels,
@@ -24,6 +23,7 @@ import {
   predictEnabled,
   routerUnavailable,
   selectModel,
+  settleAfterRestart,
   shouldPollRestart,
   showLaunchKey,
   showRestartKey,
@@ -708,9 +708,10 @@ export default function ModelsTab({
     let failure: string | null = null;
     try {
       await api.gatewayRestartCodex();
-      const fresh = await api.gatewayState();
-      if (mounted.current) applyState(fresh);
-      if (fresh.needsCodexRestart) failure = RESTART_STILL_STALE;
+      // 结束信号是异步的：等到旧进程退了（不再用旧配置）才算成，上限 15 秒
+      const settled = await settleAfterRestart(api.gatewayState, applyState, () => mounted.current);
+      if (settled === undefined) return;
+      failure = settled;
     } catch (error) {
       failure = describeError(error);
     } finally {

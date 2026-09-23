@@ -486,7 +486,36 @@ export const RESTART_TIP = "重启 Codex 桌面应用让改动生效，进行中
 export const RESTART_CONSEQUENCE = "会结束 Codex 正在运行的进程，进行中的对话会中断";
 
 /// 重启完重读状态，键还在：Codex 还在用旧配置。原样说出来，不假装成功（⑫）
-export const RESTART_STILL_STALE = "Codex 还在用旧配置，稍后再试一次";
+export const RESTART_STILL_STALE = "Codex 15 秒内没换上新配置，稍后再试一次";
+/// 发出结束信号后等旧进程退出、Codex 换上新配置的上限（DESIGN「点了重启生效之后」）。
+/// 信号是异步的：发完立刻读，旧进程多半还在，会把「正在退出」误判成「没重启」
+export const RESTART_SETTLE_TIMEOUT_MS = 15000;
+/// 等的时候多久读一次（本机读一次约 0.1 秒）
+export const RESTART_SETTLE_POLL_MS = 300;
+
+/// 发完结束信号之后等 Codex 换上新配置：每读到一份状态交给 `onState`；不再用旧配置就返回 null，
+/// 等满还在用旧的返回 `RESTART_STILL_STALE`；`alive()` 为假（页面没了）时返回 undefined，调用方什么都别做。
+/// 模型页、网关页页头、菜单栏面板的「重启生效」共用这一段
+export async function settleAfterRestart(
+  read: () => Promise<GatewayState>,
+  onState: (state: GatewayState) => void,
+  alive: () => boolean,
+  timing: { timeoutMs: number; pollMs: number } = {
+    timeoutMs: RESTART_SETTLE_TIMEOUT_MS,
+    pollMs: RESTART_SETTLE_POLL_MS,
+  },
+): Promise<string | null | undefined> {
+  const deadline = Date.now() + timing.timeoutMs;
+  for (;;) {
+    const fresh = await read();
+    if (!alive()) return undefined;
+    onState(fresh);
+    if (!fresh.needsCodexRestart) return null;
+    if (Date.now() >= deadline) return RESTART_STILL_STALE;
+    await new Promise((resolve) => setTimeout(resolve, timing.pollMs));
+    if (!alive()) return undefined;
+  }
+}
 
 /**
  * 「重启生效」那一格（DESIGN「点了重启生效之后」）：

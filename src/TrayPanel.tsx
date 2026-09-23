@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
-import { RESTART_DONE_MS, RESTART_STILL_STALE, parseBackendError } from "./modelsView";
+import { RESTART_DONE_MS, parseBackendError, settleAfterRestart } from "./modelsView";
 import { RESTART_CONSEQUENCE, RESTART_TIP, UNINSTALL_TIP, trayRow } from "./trayView";
 import type { GatewayState } from "./types";
 import { AgentIcon, Button, Spinner, Switch, Toast, Tooltip } from "./ui";
@@ -104,10 +104,11 @@ export default function TrayPanel() {
     let reason: string | null = null;
     try {
       await api.gatewayRestartCodex();
-      const fresh = await api.gatewayState();
-      if (mounted.current) setState(fresh);
-      if (fresh.needsCodexRestart) reason = RESTART_STILL_STALE;
+      // 同模型页：等旧进程退了才算成，上限 15 秒（发完信号立刻读会误判成没重启）
+      const settled = await settleAfterRestart(api.gatewayState, setState, () => mounted.current);
       void emit("gateway-changed");
+      if (settled === undefined) return;
+      reason = settled;
     } catch (error) {
       reason = parseBackendError(String(error)).message;
     } finally {

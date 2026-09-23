@@ -43,6 +43,8 @@ import {
   UNINSTALL_TIP,
   RESTART_TIP,
   predictEnabled,
+  settleAfterRestart,
+  RESTART_STILL_STALE,
 } from "../src/modelsView.ts";
 import type { ModelsTool } from "../src/modelsView.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
@@ -1279,4 +1281,39 @@ test("predictEnabled：拨开关先画做成之后的样子——开时路由在
   );
   assert.equal(off.enabled, false);
   assert.equal(serviceLeftover(off), false);
+});
+
+test("settleAfterRestart：发完结束信号等旧进程退——先读到旧配置不算失败，等到换上才算成；等满才说没换上", async () => {
+  const stale = { ...state(), needsCodexRestart: true };
+  const fresh = { ...state(), needsCodexRestart: false };
+  const timing = { timeoutMs: 1000, pollMs: 1 };
+  const seen: boolean[] = [];
+  const reads = [stale, stale, fresh];
+  const ok = await settleAfterRestart(
+    async () => reads.shift() ?? fresh,
+    (s) => seen.push(s.needsCodexRestart),
+    () => true,
+    timing,
+  );
+  assert.equal(ok, null);
+  assert.deepEqual(seen, [true, true, false]);
+
+  const never = await settleAfterRestart(
+    async () => stale,
+    () => undefined,
+    () => true,
+    {
+      timeoutMs: 5,
+      pollMs: 1,
+    },
+  );
+  assert.equal(never, RESTART_STILL_STALE);
+
+  const gone = await settleAfterRestart(
+    async () => stale,
+    () => undefined,
+    () => false,
+    timing,
+  );
+  assert.equal(gone, undefined);
 });
