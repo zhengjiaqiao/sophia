@@ -178,6 +178,10 @@ export interface MatrixProps {
   /// 批量写入进行中：按下的那一项（"all" 或列 id）当即锁住（只锁它，别的项照常能按、排队执行），
   /// 过了 0.3 秒门槛才变淡、旁边出 14px 地球绕太阳 + 一句（`正在加到 Codex`）。调用方在按下时给、做完撤掉
   keyBusy?: { keyId: string; label: string } | null;
+  /// 点格之后真要等的（拆开整个文件夹链接）：调用方在确认后给、做完撤掉，并自己挡住对同一对象的再次点击。
+  /// 过了 0.3 秒门槛，被点那一格正下方（结果将出现的同一个位置）浮起 14px 地球绕太阳 + 一句
+  /// （`正在拆开 Codex 的 skills 文件夹`）；别的格、别的行照常能点（DESIGN「反馈的两种形态 › 忙碌」）
+  cellBusy?: { rowKey: string; columnId: string; label: string } | null;
   /// 单格失败：被点那一格正下方的黑窗说原因（与成功同一个位置），8 秒，悬停停表
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   /// 单格失败那一窗到点（或关掉）
@@ -375,6 +379,7 @@ export default function Matrix(props: MatrixProps) {
     keyToast,
     cellToast,
     keyBusy,
+    cellBusy,
     barToast,
     focus: jump,
   } = props;
@@ -697,6 +702,7 @@ export default function Matrix(props: MatrixProps) {
   // ---- 忙碌锁：只锁按下的那一项（防重复点；别的项照常能按，调用方排队执行），过了 0.3 秒门槛
   // 才变淡——与它旁边的忙碌指示同一时刻出现；写得快时先淡再恢复会闪一下 ----
   const busyShown = useBusyShown(keyBusy != null);
+  const cellBusyShown = useBusyShown(cellBusy != null);
   // 浮起的提示小窗：换一条（调用方给了新对象）就是新出现一次——重挂、重新定位、计时从头来
   const keyToastKey = useIdentityKey(keyToast);
   const rowToastKey = useIdentityKey(rowToast);
@@ -1126,7 +1132,19 @@ export default function Matrix(props: MatrixProps) {
           {keyToast.node}
         </FloatingToast>
       ) : null}
-      {cellNotice ? (
+      {cellBusy && cellBusyShown ? (
+        // 单格真要等（过了门槛）：结果出现之前，同一个位置先说在忙什么
+        <FloatingToast
+          key={`busy:${cellBusy.rowKey}:${cellBusy.columnId}`}
+          anchor={cellAnchor(cellBusy.rowKey, cellBusy.columnId)}
+          bounds={panelBounds}
+        >
+          <span className="ss-toast ss-toast--routine mx-cellbusy" role="status">
+            <Spinner size={14} label={cellBusy.label} />
+            <span>{cellBusy.label}</span>
+          </span>
+        </FloatingToast>
+      ) : cellNotice ? (
         // 单格：成功与失败同一个位置（格子正下方），一次只一条，失败优先
         <FloatingToast
           key={`notice:${cellNotice.rowKey}:${cellNotice.columnId}:${cellNotice.text}`}

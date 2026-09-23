@@ -98,6 +98,8 @@ export interface DomainViewProps {
   flash?: { keys: string[]; nonce: number };
   /// 批量写入进行中：按下的那一项（过了 0.3 秒门槛旁边出忙碌指示 + 一句）
   keyBusy?: { keyId: string; label: string } | null;
+  /// 点格之后真要等的（拆开）：过了 0.3 秒门槛被点那一格下方出忙碌指示 + 一句
+  cellBusy?: { rowKey: string; columnId: string; label: string } | null;
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   onDismissCellNotice?: () => void;
   rowToast?: { rowKey: string; at?: ConfirmAnchor; node: ReactNode } | null;
@@ -457,6 +459,7 @@ export default function DomainView(props: DomainViewProps) {
       keyToast={props.keyToast}
       cellToast={props.cellToast}
       keyBusy={props.keyBusy}
+      cellBusy={props.cellBusy}
       barToast={props.barToast}
       focus={props.focus}
     />

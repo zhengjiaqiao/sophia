@@ -484,6 +484,12 @@
   white-space: nowrap;
 }
 
+/* 点格之后真要等（拆开）：被点那一格下方的白窗里，14px 忙碌指示 + 一句 13 ink-mute（间距同 .mx-keybusy） */
+.mx-cellbusy {
+  gap: 6px;
+  color: var(--ink-mute);
+}
+
 /* 行悬停时名字后的「打开 ↗」：12 ink-mute，悬停转 ink 加下划线 */
 .mx-reveal {
   white-space: nowrap;

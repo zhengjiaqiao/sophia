@@ -120,6 +120,12 @@ export default function SkillsTab({
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
   // 点了「只留这份」、正在体检的那一行（键原位忙碌）
   const [keepBusy, setKeepBusy] = useState<string | null>(null);
+  // 确认了「拆开」、正在拆的那一格（过了 0.3 秒门槛那一格下方出忙碌指示 + 一句）
+  const [splitBusy, setSplitBusy] = useState<{
+    rowKey: string;
+    columnId: string;
+    label: string;
+  } | null>(null);
   const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
   const [cellNotice, setCellNotice] = useState<{
     rowKey: string;
@@ -466,6 +472,8 @@ export default function SkillsTab({
   // ===== 整个文件夹是链接：点该列任一格 → 锚定确认 → 拆开 =====
 
   const askSplit = (ref: CellRef) => {
+    // 这一列正在拆：同一个文件夹的下一次点击不再弹确认
+    if (splitBusy?.columnId === ref.targetId) return;
     setCellNotice(null);
     const index = page?.targets.findIndex((t) => t.id === ref.targetId) ?? -1;
     const row = document.querySelector(`[data-row="${CSS.escape(skillRowKey(ref))}"]`);
@@ -477,9 +485,19 @@ export default function SkillsTab({
     });
   };
 
-  /// 确认之后拆开；做成了重扫（整列的记号自己变回逐格状态），没成就在被点那一格下说原因
+  /// 确认之后拆开；做成了重扫（整列的记号自己变回逐格状态），没成就在被点那一格下说原因。
+  /// 要复制整个文件夹，可能真要等：只锁这一列的格（再点不弹确认），过了 0.3 秒门槛被点那一格
+  /// 下方出忙碌指示 + 一句；别的列、别的行照常能点
   const confirmSplit = async (ref: CellRef) => {
+    const agent = splitPane?.agent ?? targetOf(ref.targetId)?.label ?? "";
     setSplitPane(null);
+    setCellNotice(null);
+    setCellToast(null);
+    setSplitBusy({
+      rowKey: skillRowKey(ref),
+      columnId: ref.targetId,
+      label: `正在拆开 ${agent} 的 skills 文件夹`,
+    });
     onBusy(true);
     try {
       const report = await api.splitWholeLink(ref.targetId);
@@ -499,6 +517,7 @@ export default function SkillsTab({
       onError(String(e));
     } finally {
       onBusy(false);
+      setSplitBusy(null);
     }
     await onRefresh();
   };
@@ -976,6 +995,7 @@ export default function SkillsTab({
         keyToast={keyToast}
         cellToast={cellToast}
         keyBusy={keyBusy}
+        cellBusy={splitBusy}
         barToast={
           addedToast
             ? {
