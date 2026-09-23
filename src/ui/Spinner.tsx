@@ -1,7 +1,8 @@
 /// 忙碌指示：地球绕太阳（DESIGN「忙碌指示：只在用户等的地方，带文字」，画板 Marks / States「忙碌」）。
 ///
-/// 中心一颗实心太阳（`ink`，约占直径 40%），一颗小地球（`ink`）沿看不见的圆轨道匀速转，
-/// 1 圈 / 1.2s 线性。**不画轨道线**：环 + 中心点是原件记号 ⦿，画出来会撞形。
+/// 中心一颗实心太阳（`ink`，约占直径 40%），一颗小地球（`ink`）沿一圈细轨道匀速转，1 圈 / 1.2s 线性。
+/// **轨道要画**（产品负责人：没有圆环看不懂是在转）：1px `ink-faint`，比原件记号 ⦿ 的 1.4px 墨环
+/// 淡且细，加上地球在环上转、旁边总有一句「正在…」，不会被读成原件。
 /// 只给用户发起、正在等的操作用，**必须带一句忙什么**：`label` 同时作读屏文本；
 /// 可见文字由调用方紧挨着写（`正在重启 Codex`）。后台例行读取不显示任何忙碌。完成即卸载，不做停转动画。
 /// `prefers-reduced-motion` 下地球停在 12 点钟方向，文字后跟 `…` 每 500ms 增减一点（ui.css 末尾）。
@@ -33,6 +34,7 @@ export function Spinner({ size = 14, label }: SpinnerProps) {
       role="img"
       aria-label={label}
     >
+      <circle className="ss-spinner__orbit" cx={c} cy={c} r={c - earth / 2} fill="none" />
       <circle className="ss-spinner__sun" cx={c} cy={c} r={sun / 2} fill="currentColor" />
       <circle
         className="ss-spinner__earth"

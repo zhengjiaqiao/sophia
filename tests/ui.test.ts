@@ -488,7 +488,7 @@ test("Tooltip 时机：表格内 700ms、表格外 400ms", () => {
   assert.equal(TIP_DELAY_MS.default, 400);
 });
 
-test("Spinner：地球绕太阳，太阳大地球小、不画轨道、必带读屏文本；14 / 24 两档", () => {
+test("Spinner：地球绕太阳，太阳大地球小、画一圈细轨道、必带读屏文本；14 / 24 两档", () => {
   const small = render(Spinner, { label: "正在重启 Codex" });
   assert.match(small, /class="ss-spinner"/);
   assert.match(small, /width="14"/);
@@ -496,13 +496,14 @@ test("Spinner：地球绕太阳，太阳大地球小、不画轨道、必带读�
   // 14：太阳直径 5.5 居中，地球直径 2.5 在 12 点钟贴上沿
   assert.match(small, /class="ss-spinner__sun" cx="7" cy="7" r="2.75" fill="currentColor"/);
   assert.match(small, /class="ss-spinner__earth" cx="7" cy="1.25" r="1.25" fill="currentColor"/);
-  // 不画轨道线：没有描边（环 + 中心点会撞原件记号 ⦿）
-  assert.doesNotMatch(small, /stroke/);
+  // 轨道：一圈穿过地球中心的细环，不填充；颜色与线宽在 CSS（1px ink-faint）
+  assert.match(small, /class="ss-spinner__orbit" cx="7" cy="7" r="5.75" fill="none"/);
+  assert.match(cssRule(uiCss, ".ss-spinner__orbit"), /stroke:\s*var\(--ink-faint\);[^}]*stroke-width:\s*1;/);
   const large = render(Spinner, { size: 24, label: "正在读 3 个位置" });
   assert.match(large, /width="24"/);
   assert.match(large, /class="ss-spinner__sun" cx="12" cy="12" r="4.5"/);
   assert.match(large, /class="ss-spinner__earth" cx="12" cy="2" r="2"/);
-  assert.doesNotMatch(large, /stroke/);
+  assert.match(large, /class="ss-spinner__orbit" cx="12" cy="12" r="10"/);
 });
 
 // ===== 提示条 =====

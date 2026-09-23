@@ -742,6 +742,12 @@
   animation: ss-spin var(--motion-spinner) linear infinite;
 }
 
+/* 轨道：1px ink-faint，淡而细，与原件记号 ⦿ 的 1.4px 墨环分得开 */
+.ss-spinner__orbit {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+}
+
 /* ===== 7. 提示条 Toast ===== */
 .ss-toast {
   box-sizing: border-box;
