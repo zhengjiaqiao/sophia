@@ -321,12 +321,6 @@
   color: var(--ink-mute);
 }
 
-/* 替换的结果：例行一行，占「只建链接，不动源文件」那个位置，贴在「添加 N 个」左边 */
-.ss-import__result {
-  margin-left: auto;
-  padding-right: var(--space-xs);
-}
-
 /* ---- 列表最后一行：已添加 N 个 ▸（12 ink-mute，可展开） ---- */
 .ss-import__fold {
   flex-basis: 100%;
@@ -402,7 +396,7 @@
   margin-top: var(--space-xs);
 }
 
-/* ---- 底部一行：一组目标 + 规则开关 + 安全小字 + 添加 N 个 ---- */
+/* ---- 底部一行：一组目标 + 规则开关 + 添加 N 个 ---- */
 .ss-import__foot {
   display: flex;
   align-items: center;
@@ -416,12 +410,59 @@
 .ss-import__keys {
   display: flex;
   align-items: center;
-  gap: var(--space-xs);
+  gap: 0 var(--space-md);
   min-width: 0;
   flex-wrap: wrap;
 }
 
-/* 开关离目标键组 16（DESIGN「提示与反馈锚在触发它的控件上」） */
+/* 目标一项 = 复选框 + agent 图标 14 + 名字，与列表行同一种勾选写法；整项是命中区，
+   高与主动作同为 32。名字照原样写，不用 Condensed 大写 */
+.ss-import__target {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  height: var(--control-h-row);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ss-import__target:hover:not(:disabled) .ss-checkbox {
+  border-color: var(--ink);
+}
+
+.ss-import__target:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 不能勾的（来源自己、整个文件夹是链接）：与 Checkbox 的禁用同形，图标和名字一起退到禁用色 */
+.ss-import__target:disabled {
+  color: var(--disabled);
+  cursor: default;
+}
+
+.ss-import__target:disabled .ss-checkbox {
+  border-color: var(--hairline);
+  cursor: default;
+}
+
+.ss-import__target:disabled .ss-checkbox.is-on {
+  border-color: var(--disabled);
+  background: var(--disabled);
+}
+
+.ss-import__targetname {
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  white-space: nowrap;
+}
+
+/* 开关离目标组 16（DESIGN「提示与反馈锚在触发它的控件上」） */
 .ss-import__rule {
   display: inline-flex;
   align-items: center;
@@ -446,14 +487,13 @@
   white-space: nowrap;
 }
 
-.ss-import__safety {
+/* 右端一组：主动作靠右；替换的结果（例行一行）贴在它左边 16，锚在触发它的控件上 */
+.ss-import__submit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-shrink: 0;
   margin-left: auto;
-  padding-right: var(--space-xs);
-  font-family: var(--font-ui);
-  font-size: var(--size-micro);
-  line-height: var(--leading-caption);
-  color: var(--ink-faint);
-  white-space: nowrap;
 }
 
 .ss-import__hint {

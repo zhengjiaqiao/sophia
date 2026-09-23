@@ -9,20 +9,24 @@ import type {
   SourceKind,
   SyncReport,
 } from "../types";
-import { AddButton, AgentKey, Busy, Button, SubPage, Switch, Toast } from "../ui";
+import { AddButton, Busy, Button, SubPage, Switch, Toast } from "../ui";
 import { displayPath } from "../pathText.ts";
 import { RowTip } from "./RowTip.tsx";
 import foldersArt from "../assets/type-folders.svg";
 import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
+import { TargetCheck } from "./TargetCheck.tsx";
 import { joinWords } from "./pendingIssues.ts";
 import {
+  addLabel,
   columnsOf,
   defaultTargets,
   loadImportMemory,
   saveImportMemory,
   distinguishingSegments,
   sameSet,
+  selectAllState,
+  toggleAll,
 } from "./importDefaults.ts";
 import "./ImportPage.css";
 
@@ -30,13 +34,15 @@ import "./ImportPage.css";
 ///
 /// **两列 + 底部一行**：左栏挑来源（`+ 来源` 固定在栏底，列表在其上独立滚动，可滚时出 hairline）；
 /// 右栏把这个来源里的 skill 全部列出（两竖列，已添加的整行灰 + 弱标签，同名强标签）。
-/// 底部一行 = **一组目标**：agent 图标键一排 + 16 + 行内开关「以后新出现的也加」+ 安全小字 +
-/// `添加 N 个`（row 32 主动作；一个目标都没点亮时禁用带原因）。规则目标 = 本次目标，不另画一排。
+/// 底部一行 = **一组目标**：一排复选框（`☐ + agent 图标 14 + 名字`）+ 行内开关
+/// 「此来源以后新出现的 skill 自动添加」+ `添加 N 个`（row 32 主动作；一个目标都没勾时禁用带原因）。
+/// 规则目标 = 本次目标，不另画一排。
 ///
-/// - **同名在添加时就地解决**（⑩）：同名的行勾上时就地展开 `替换现有的 · 说明 · 跳过`；
-///   不点替换就是跳过（core 不覆盖已有的同名）。能在源头消掉的冲突不留到待处理
-/// - **规则只管以后新出现的**（core 建规则时拍 baseline），所以开关不确认；开着时点亮 / 熄灭
-///   目标键就是给规则加 / 减目标（加目标不重拍 baseline）
+/// - **同名在添加时就地解决**（⑩）：勾上同名的行＝替换现有的，行下出一句后果；不勾就是跳过
+///   （core 不覆盖已有的同名）。全选连同名行一起勾上，主动作写 `添加 N 个（替换 M 个）`。
+///   能在源头消掉的冲突不留到待处理
+/// - **规则只管以后新出现的**（core 建规则时拍 baseline），所以开关不确认；开着时勾上 / 取消
+///   目标就是给规则加 / 减目标（加目标不重拍 baseline）
 /// - 默认目标（③）：这个来源上次用的目标；没有上次则已安装的前两个
 /// - 0 个来源时不分栏：内容区居中三行「还没有来源 / 先添加一个放 skill 的文件夹 / + 来源」
 
@@ -206,10 +212,10 @@ export default function ImportPage({
   /// 列表只列未添加的；多到一列放不下才分两列
   const columns = columnsOf(fresh, fresh.length > 16 ? 2 : 1);
   const added = entries.filter((e) => e.added);
-  /// 全选不带同名的行：同名勾上就是替换现有的（删用户内容），要逐行自己勾
-  const bulk = fresh.filter((e) => e.holder === null);
-  const allSelected = bulk.length > 0 && bulk.every((e) => names.includes(e.name));
-  const someSelected = bulk.some((e) => names.includes(e.name));
+  /// 全选就是全部，**同名行也勾上**（产品负责人真机：单行能勾、全选却勾不上，读成坏了）。
+  /// 安全靠两处写明后果：每个勾上的同名行下方那句后果，和主动作里的「替换 M 个」
+  const freshNames = fresh.map((e) => e.name);
+  const allState = selectAllState(freshNames, names);
 
   const toggleName = (skill: string) => {
     setNames((prev) => (prev.includes(skill) ? prev.filter((n) => n !== skill) : [...prev, skill]));
@@ -240,7 +246,7 @@ export default function ImportPage({
     );
   };
 
-  /// 目标键；规则开着时同时给规则加 / 减这一个目标（加目标是合并，不重拍 baseline）
+  /// 勾选目标；规则开着时同时给规则加 / 减这一个目标（加目标是合并，不重拍 baseline）
   const toggleTarget = (id: string) => {
     const on = targetIds.includes(id);
     const next = on ? targetIds.filter((t) => t !== id) : [...targetIds, id];
@@ -256,7 +262,7 @@ export default function ImportPage({
   /// 函数身份不变：提示条的计时器不会被重渲染重置
   const dismissReplaced = useRef(() => setReplaced(null)).current;
 
-  /// 建链：这些 skill × 点亮的目标里缺的
+  /// 建链：这些 skill × 勾上的目标里缺的
   const link = async (skills: string[]): Promise<SyncReport | null> => {
     const cells: CellRef[] = skills.flatMap((skill) =>
       targetIds.map((targetId) => ({ sourceId: selected, skill, targetId })),
@@ -360,10 +366,12 @@ export default function ImportPage({
   }
 
   const chosen = names.length;
+  /// 勾上的同名行：这次会替换几个
+  const replacing = names.filter((n) => holders.has(n)).length;
   const blocked = busy
     ? "正在处理，等这一下"
     : targetIds.length === 0
-      ? "先点亮至少一个 agent"
+      ? "先勾上至少一个 agent"
       : chosen === 0
         ? "先在列表里勾上要添加的 skill"
         : null;
@@ -380,7 +388,7 @@ export default function ImportPage({
   const ruleReason = !autoable
     ? "外部来源随时可能不在，不给它建规则"
     : targetIds.length === 0
-      ? "先点亮至少一个 agent"
+      ? "先勾上至少一个 agent"
       : undefined;
 
   return (
@@ -396,7 +404,7 @@ export default function ImportPage({
               {sortedSources.map((s) => {
                 const count = s.skills.filter((sk) => notAdded(s.id, sk.name)).length;
                 const seg = distinct.get(s.id);
-                // 开了「以后新出现的也加」规则的来源：名字后小字「自动」，提示框补充目标
+                // 开了自动添加规则的来源：名字后小字「自动」，提示框补充目标
                 const autoTo = page.targets
                   .filter((t) => autoLinks.find((r) => r.source === s.id)?.targets.includes(t.id))
                   .map((t) => t.label);
@@ -486,24 +494,16 @@ export default function ImportPage({
                   <span className="ss-import__headline">
                     {source.label} · <span className="ss-import__num">{source.skills.length}</span>
                   </span>
-                  {bulk.length > 0 ? (
-                    <button
-                      type="button"
-                      role="checkbox"
-                      aria-checked={allSelected ? true : someSelected ? "mixed" : false}
-                      className="ss-import__all"
-                      onClick={() =>
-                        setNames(
-                          allSelected
-                            ? names.filter((n) => !bulk.some((e) => e.name === n))
-                            : [...new Set([...names, ...bulk.map((e) => e.name)])],
-                        )
-                      }
-                    >
-                      <CheckMark on={allSelected} />
-                      全选
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={allState}
+                    className="ss-import__all"
+                    onClick={() => setNames(toggleAll(freshNames, names))}
+                  >
+                    <CheckMark on={allState} />
+                    全选
+                  </button>
                 </div>
 
                 <Busy busy={busy} className="ss-import__grid">
@@ -579,11 +579,11 @@ export default function ImportPage({
                 <span className="ss-import__hint">还没有启用任何 agent，先去设置里开一个</span>
               ) : (
                 page.targets.map((target) => (
-                  <AgentKey
+                  <TargetCheck
                     key={target.id}
-                    id={target.scope.harnessId}
+                    harnessId={target.scope.harnessId}
                     name={target.label}
-                    pressed={targetIds.includes(target.id)}
+                    on={targetIds.includes(target.id)}
                     onToggle={() => toggleTarget(target.id)}
                     disabledReason={
                       target.linkedWholeTo === null
@@ -599,20 +599,20 @@ export default function ImportPage({
                 size="inline"
                 checked={ruleOn}
                 onChange={toggleRule}
-                label={`${source?.label ?? "这个来源"} 以后新出现的也加`}
+                label="此来源以后新出现的 skill 自动添加"
                 title={
-                  source ? `${source.label} 以后新出现的 skill 也自动添加到点亮的 agent` : undefined
+                  source ? `${source.label} 以后新出现的 skill 自动添加到勾上的 agent` : undefined
                 }
                 disabledReason={ruleOn ? undefined : ruleReason}
               />
-              <span className="ss-import__rulelabel">以后新出现的也加</span>
+              <span className="ss-import__rulelabel">此来源以后新出现的 skill 自动添加</span>
               {suggestRule ? (
                 <span className="ss-import__suggest">每次都选这几个？可以打开</span>
               ) : null}
             </span>
-            {replaced !== null ? (
-              // 替换的结果：例行一行，贴在「添加 N 个」左边的结果位置（锚在触发它的控件上）
-              <span className="ss-import__result">
+            {/* 右端一组：替换的结果（例行一行）贴在「添加 N 个」左边，锚在触发它的控件上 */}
+            <span className="ss-import__submit">
+              {replaced !== null ? (
                 <Toast
                   key={replaced.key}
                   tier="routine"
@@ -621,19 +621,17 @@ export default function ImportPage({
                   names={replaced.names}
                   onDismiss={dismissReplaced}
                 />
-              </span>
-            ) : (
-              <span className="ss-import__safety">只建链接，不动源文件</span>
-            )}
-            {blocked ? (
-              <Button size="row" variant="primary" disabled disabledReason={blocked}>
-                {`添加 ${chosen} 个`}
-              </Button>
-            ) : (
-              <Button size="row" variant="primary" onClick={() => void doAdd()}>
-                {`添加 ${chosen} 个`}
-              </Button>
-            )}
+              ) : null}
+              {blocked ? (
+                <Button size="row" variant="primary" disabled disabledReason={blocked}>
+                  {addLabel(chosen, replacing)}
+                </Button>
+              ) : (
+                <Button size="row" variant="primary" onClick={() => void doAdd()}>
+                  {addLabel(chosen, replacing)}
+                </Button>
+              )}
+            </span>
           </Busy>
         )}
       </div>

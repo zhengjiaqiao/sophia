@@ -2,17 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { canSupplement, importedInDomain, mcpDomainLabel, type McpDomain } from "../mcpView";
 import type { McpAutoImportRule, McpEntry, McpLocation, McpOverview, McpPreview } from "../types";
-import { AgentKey, Busy, Button, SubPage, Switch } from "../ui";
+import { Busy, Button, SubPage, Switch } from "../ui";
 import { displayPath } from "../pathText.ts";
 import { RowTip } from "./RowTip.tsx";
 import { AddedFold } from "./AddedFold.tsx";
 import { CheckMark } from "./CheckMark.tsx";
+import { TargetCheck } from "./TargetCheck.tsx";
 import {
+  addLabel,
   defaultTargets,
   distinguishingSegments,
   loadImportMemory,
   saveImportMemory,
   sameSet,
+  selectAllState,
+  toggleAll,
 } from "./importDefaults.ts";
 import "./McpImportPage.css";
 
@@ -23,11 +27,11 @@ import "./McpImportPage.css";
 /// - 左栏是**位置**（`Claude Code · User`），第二行灰字写它在哪（`全局` / `项目 · CardBox`）；
 ///   位置是发现出来的，没有 `+ 来源`
 /// - 列表多一列 `传输`（HTTP / stdio）
-/// - 底部目标键是本域的全部位置，**包含主视图里藏起来的**（`matrixHidden`）——这一页是它们
-///   唯一的入口；**来源自己那个位置的键禁用**，提示「这就是来源」
+/// - 底部目标（复选框 + 图标 + 名字，与 skill 页同一种写法）是本域的全部位置，**包含主视图里
+///   藏起来的**（`matrixHidden`）——这一页是它们唯一的入口；**来源自己那个位置禁用**，提示「这就是来源」
 /// - `添加 N 个` 不直接写：把预览交回 MCP 页，批量或跨域写入在那里确认一道
 ///   （跨域会把请求头和令牌一并复制过去）
-/// - 行内开关「以后新出现的也加」：core 建规则时拍 baseline，只管以后新出现的，所以不确认；
+/// - 行内开关「此来源以后新出现的 MCP 自动添加」：core 建规则时拍 baseline，只管以后新出现的，所以不确认；
 ///   来源读不出来时 core 拒绝建规则，原话挂到壳的错误横幅上
 
 export interface McpImportPageProps {
@@ -81,7 +85,7 @@ export default function McpImportPage({
     [overview.locations],
   );
 
-  /// 这个位置能往本域其余位置补几个（排序与默认选中用：不随当场点亮的目标变）
+  /// 这个位置能往本域其余位置补几个（排序与默认选中用：不随当场勾上的目标变）
   const freshCount = (location: McpLocation) => {
     const others = new Set(domainTargets.filter((t) => t.id !== location.id).map((t) => t.id));
     return overview.entries.filter((e) => e.sourceId === location.id && canSupplement(e, others))
@@ -147,8 +151,8 @@ export default function McpImportPage({
     () => overview.entries.filter((entry) => entry.sourceId === sourceId),
     [overview.entries, sourceId],
   );
-  /// 「未添加」按本域其余全部位置算（不是只按当场点亮的）：否则熄掉几个键，列表就把项
-  /// 收进「已添加」、甚至整页变成「都已添加」而没有底部块去重新点亮
+  /// 「未添加」按本域其余全部位置算（不是只按当场勾上的）：否则取消几个目标，列表就把项
+  /// 收进「已添加」、甚至整页变成「都已添加」而没有底部块去重新勾上
   const otherTargetSet = useMemo(() => new Set(pickableTargets), [pickableTargets.join(",")]);
   const canPick = (entry: McpEntry) => canSupplement(entry, otherTargetSet);
 
@@ -198,7 +202,7 @@ export default function McpImportPage({
     );
   };
 
-  /// 目标键；规则开着时同时改写规则的目标（全熄灭 = 撤掉规则）
+  /// 勾选目标；规则开着时同时改写规则的目标（全取消 = 撤掉规则）
   const toggleTarget = (id: string) => {
     const next = targetIds.includes(id)
       ? targetIds.filter((target) => target !== id)
@@ -260,10 +264,11 @@ export default function McpImportPage({
   const listed = entries.filter((e) => e.pickable || e.unsupported);
   const added = entries.filter((e) => !e.pickable && !e.unsupported);
   const allDone = listed.length === 0 && entries.length > 0;
-  const allSelected = pickable.length > 0 && pickable.every((e) => names.includes(e.name));
-  const someSelected = pickable.some((e) => names.includes(e.name));
+  /// 全选三态照实算（与 skill 页同一份逻辑）。MCP 没有同名替换：同名已有的格子本来就不写
+  const pickableNames = pickable.map((e) => e.name);
+  const allState = selectAllState(pickableNames, names);
 
-  /// 每个来源位置右侧那个数：现在能往点亮的位置里补几个
+  /// 每个来源位置右侧那个数：现在能往勾上的位置里补几个
   const countOf = (location: McpLocation) =>
     overview.entries.filter(
       (entry) => entry.sourceId === location.id && canSupplement(entry, targetIdSet),
@@ -273,7 +278,7 @@ export default function McpImportPage({
   const blocked = busy
     ? "正在处理，等这一下"
     : targetIds.length === 0
-      ? "先点亮至少一个位置"
+      ? "先勾上至少一个位置"
       : chosen === 0
         ? "先在列表里勾上要添加的服务"
         : null;
@@ -323,7 +328,7 @@ export default function McpImportPage({
               {sortedSources.map((location) => {
                 const count = countOf(location);
                 const seg = distinct.get(location.id);
-                // 开了「以后新出现的也加」规则的位置：名字后小字「自动」，提示框补充目标
+                // 开了自动添加规则的位置：名字后小字「自动」，提示框补充目标
                 const autoRule = autoImports.find(
                   (r) => r.source.id === location.id && r.targetDomain === page.key,
                 );
@@ -373,7 +378,7 @@ export default function McpImportPage({
                         </span>
                         <span
                           className={`ss-import__count${count === 0 ? " is-zero" : ""}`}
-                          title="现在能往点亮的位置里补几个"
+                          title="现在能往勾上的位置里补几个"
                         >
                           {count}
                         </span>
@@ -402,11 +407,11 @@ export default function McpImportPage({
                     <button
                       type="button"
                       role="checkbox"
-                      aria-checked={allSelected ? true : someSelected ? "mixed" : false}
+                      aria-checked={allState}
                       className="ss-import__all"
-                      onClick={() => setNames(allSelected ? [] : pickable.map((e) => e.name))}
+                      onClick={() => setNames(toggleAll(pickableNames, names))}
                     >
-                      <CheckMark on={allSelected} />
+                      <CheckMark on={allState} />
                       全选
                     </button>
                   ) : null}
@@ -470,11 +475,11 @@ export default function McpImportPage({
                 </span>
               ) : (
                 domainTargets.map((target) => (
-                  <AgentKey
+                  <TargetCheck
                     key={target.id}
-                    id={target.harnessId}
+                    harnessId={target.harnessId}
                     name={targetLabel(target)}
-                    pressed={targetIds.includes(target.id)}
+                    on={targetIds.includes(target.id)}
                     onToggle={() => toggleTarget(target.id)}
                     disabledReason={target.id === sourceId ? "这就是来源" : undefined}
                   />
@@ -486,27 +491,27 @@ export default function McpImportPage({
                 size="inline"
                 checked={ruleOn}
                 onChange={toggleRule}
-                label={`${source?.label ?? "这个位置"} 以后新出现的也加`}
+                label="此来源以后新出现的 MCP 自动添加"
                 title={
                   source
-                    ? `${source.label} 以后新出现的服务也自动添加到点亮的位置${isCrossDomain ? "；跨域会把请求头和令牌一并复制过去" : ""}`
+                    ? `${source.label} 以后新出现的 MCP 自动添加到勾上的位置${isCrossDomain ? "；跨域会把请求头和令牌一并复制过去" : ""}`
                     : undefined
                 }
-                disabledReason={ruleOn || targetIds.length > 0 ? undefined : "先点亮至少一个位置"}
+                disabledReason={ruleOn || targetIds.length > 0 ? undefined : "先勾上至少一个位置"}
               />
-              <span className="ss-import__rulelabel">以后新出现的也加</span>
+              <span className="ss-import__rulelabel">此来源以后新出现的 MCP 自动添加</span>
               {suggestRule ? (
                 <span className="ss-import__suggest">每次都选这几个？可以打开</span>
               ) : null}
             </span>
-            <span className="ss-import__safety">只新增，不覆盖同名配置</span>
+            <span className="ss-mcp__safety">只新增，不覆盖同名配置</span>
             {blocked ? (
               <Button size="row" variant="primary" disabled disabledReason={blocked}>
-                {`添加 ${chosen} 个`}
+                {addLabel(chosen, 0)}
               </Button>
             ) : (
               <Button size="row" variant="primary" onClick={() => void doAdd()}>
-                {`添加 ${chosen} 个`}
+                {addLabel(chosen, 0)}
               </Button>
             )}
           </Busy>

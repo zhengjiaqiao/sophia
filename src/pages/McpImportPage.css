@@ -49,3 +49,14 @@
   width: 48px;
   white-space: nowrap;
 }
+
+/* 安全小字：只新增、不覆盖同名配置（skill 页没有这一句，那页同名在添加时就地替换） */
+.ss-mcp__safety {
+  margin-left: auto;
+  padding-right: var(--space-xs);
+  font-family: var(--font-ui);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}

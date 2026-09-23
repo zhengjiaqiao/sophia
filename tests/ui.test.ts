@@ -357,7 +357,7 @@ test("Switch page 32×18 / inline 24×14：role=switch，读屏名必填", () =>
     checked: false,
     onChange: noop,
     size: "inline",
-    label: "以后新出现的也加",
+    label: "此来源以后新出现的 skill 自动添加",
   });
   assert.match(inline, /aria-checked="false"/);
   assert.match(inline, /class="ss-switch ss-switch--inline"/);
