@@ -159,15 +159,19 @@
   display: inline-flex;
 }
 
-/* 批量结果的例行提示条：贴在按下的那一项下方 4，可以暂时盖住来源片；越出面板右沿时改右对齐 */
+/* 批量结果的例行提示条：贴在按下的那一项下方 4，可以暂时盖住来源片；越出面板右沿时改右对齐。
+   它浮在来源片上面，是浮层：自带画布底、layer 圆角与提示级阴影——只有画布底没有边时，
+   被盖住一半的来源片会从两侧露出来，读成字叠在片上（产品负责人真机） */
 .mx-keytoast {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   z-index: 7;
   display: flex;
-  padding: 0 16px 0 0;
+  padding: 0 12px;
+  border-radius: var(--radius-layer);
   background: var(--canvas);
+  box-shadow: var(--elev-tip);
   white-space: nowrap;
 }
 
