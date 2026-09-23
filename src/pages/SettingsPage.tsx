@@ -18,7 +18,7 @@ import "./SettingsPage.css";
 /// `显示未安装的 N 个` 后面。**最多显示 4 个**（上限来自 core，`list_harnesses` 带回）：
 /// 勾满时其余已安装项禁用，提示框「最多显示 4 个，先取消一个」。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
 /// **取消勾选那一刻在该行旁出现**，4 秒后淡出（① 信息在对的时间出现）。
-/// 再往下 48：`关于`——版本（等宽）+ `检查更新 ↗`。
+/// 再往下 48：`关于`——版本（等宽）+ `检查更新`（应用内查，不跳 GitHub）。
 ///
 /// 改一个生效一个，返回即走，**没有「保存」按钮**；Esc 与 ← 都回主视图（SubPage 负责）。
 ///
@@ -36,7 +36,10 @@ type AgentOption = HarnessStatus;
 /// 取消勾选时行旁那句话停留多久
 const UNCHECK_NOTE_MS = 4000;
 
-/// 发布页：`检查更新 ↗` 去这里（离开 Sophia 的文字链）
+/// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的文字链）
+/// 「已是最新版本」停留多久（例行一行，约 4 秒淡出）
+const LATEST_NOTE_MS = 4000;
+
 const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
 
 /// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内待办条（灰面板）：
@@ -123,12 +126,30 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     if (later) return null;
     switch (update.kind) {
       case "quiet":
-        return latest ? <div className="settings-page__note">已经是最新版本</div> : null;
+        if (checking)
+          return (
+            <div className="settings-page__note settings-page__checking">
+              <Spinner size={14} label="正在检查" />
+              正在检查
+            </div>
+          );
+        if (checkFailed !== null)
+          return (
+            <div className="settings-page__note">
+              没查成：{checkFailed}
+              <span className="settings-page__fallback">
+                <Button variant="external" onClick={() => void openUrl(RELEASES_URL)}>
+                  去发布页
+                </Button>
+              </span>
+            </div>
+          );
+        return latest ? <div className="settings-page__note">✓ 已是最新版本</div> : null;
       case "downloading":
         return (
           <div className="settings-page__note">
-            正在取 {update.version}
-            {update.percent === null ? "…" : `…${update.percent}%`}
+            正在下载 {update.version}
+            {update.percent === null ? "" : ` · ${update.percent}%`}
           </div>
         );
       case "ready":
@@ -140,7 +161,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
                 出来了
               </>
             }
-            action={{ label: "取回来装上", onClick: () => void install(update.update) }}
+            action={{ label: "下载并安装", onClick: () => void install(update.update) }}
             link={{ label: "稍后", onClick: () => setLater(true) }}
           />
         );
@@ -175,8 +196,17 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     }
   };
 
-  /// 退回应用内检查且没有新版时，版本旁说一句
+  /// 点「检查更新」之后的三种一行字：正在检查 / 已是最新（约 4 秒淡出）/ 没查成（给去发布页的退路）
   const [latest, setLatest] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkFailed, setCheckFailed] = useState<string | null>(null);
+  const latestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (latestTimer.current) clearTimeout(latestTimer.current);
+    },
+    [],
+  );
 
   /// 后台服务（Codex 模型网关的路由服务）那一行：按状态写，不常驻「卸下」。
   /// null＝还没读到、或这台机器不支持（读不到就整行不显示，不打扰）
@@ -232,20 +262,26 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     }
   };
 
-  /// `检查更新 ↗`：去发布页。打不开网页（权限没放行、没有浏览器）就退回在应用里查一次，
-  /// 查到新版照常出待办条——用户要的是「有没有新版」，不是那个网页本身
+  /// `检查更新`：在应用里查（产品负责人：跳到 GitHub 让用户手动下载太难用）。有新版出待办条
+  /// （下载并安装 → 重开），没有就说「已是最新版本」，查不成才给「去发布页 ↗」的退路
   const checkUpdate = async () => {
+    if (latestTimer.current) clearTimeout(latestTimer.current);
+    setLater(false);
+    setLatest(false);
+    setCheckFailed(null);
+    setChecking(true);
     try {
-      await openUrl(RELEASES_URL);
-    } catch {
-      setLater(false);
-      try {
-        const found = await check();
-        if (found) setUpdate({ kind: "ready", update: found });
-        else setLatest(true);
-      } catch (e) {
-        onError(`查不到新版本：${String(e)}`);
+      const found = await check();
+      if (found) setUpdate({ kind: "ready", update: found });
+      else {
+        setUpdate({ kind: "quiet" });
+        setLatest(true);
+        latestTimer.current = setTimeout(() => setLatest(false), LATEST_NOTE_MS);
       }
+    } catch (e) {
+      setCheckFailed(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -341,9 +377,19 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           <span className="settings-page__name">版本</span>
           <span className="settings-page__version">{current ?? "…"}</span>
           <span className="settings-page__check">
-            <Button variant="external" onClick={() => void checkUpdate()}>
-              检查更新
-            </Button>
+            {checking || update.kind === "downloading" ? (
+              <Button
+                variant="link"
+                disabled
+                disabledReason={checking ? "正在检查" : "正在下载"}
+              >
+                检查更新
+              </Button>
+            ) : (
+              <Button variant="link" onClick={() => void checkUpdate()}>
+                检查更新
+              </Button>
+            )}
           </span>
         </div>
         <div className="settings-page__update">{updateNotice()}</div>

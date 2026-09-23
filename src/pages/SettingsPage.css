@@ -202,6 +202,16 @@
   color: var(--ink-mute);
 }
 
+.settings-page__checking {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.settings-page__fallback {
+  margin-left: var(--space-sm);
+}
+
 /* 后台服务那一行：按状态写（使用中 / 已停用但仍在运行 · 卸下），没装不显示 */
 .settings-page__service {
   display: flex;
