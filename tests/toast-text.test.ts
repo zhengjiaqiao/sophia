@@ -145,3 +145,20 @@ test("拆开的确认框：标题问拆哪个 agent 的 skills 文件夹，正�
     body: "把链接换成真文件夹，里面的内容原样复制过来",
   });
 });
+
+test("拆开成功：例行一行 `拆开 [Codex] 的 skills 文件夹`，走 routine，不带撤销（拆开不是可逆的开关）", () => {
+  const t = toastFor("split", { done: [{ name: "的 skills 文件夹", agent: codex }] });
+  assert.equal(t.tier, "routine");
+  assert.equal(t.kind, "success");
+  assert.equal(t.verb, "拆开");
+  assert.deepEqual(t.names, ["的 skills 文件夹"]);
+  assert.deepEqual(
+    t.agents.map((a) => a.id),
+    ["codex"],
+  );
+  // 全部没成时否定动词：没拆开
+  assert.equal(
+    toastFor("split", { done: [], failed: [{ name: "x", reason: "r" }] }).verb,
+    "没拆开",
+  );
+});

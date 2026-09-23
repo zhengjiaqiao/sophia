@@ -512,6 +512,18 @@ export default function SkillsTab({
             ? `没拆开：${first.reason}`
             : `拆开了，但有 ${failed.length} 个没复制过来：${first.reason}`,
         );
+      } else {
+        // 做成了：例行一行 `✓ 拆开 [Codex] 的 skills 文件夹`，浮在被点那一格正下方；
+        // 不带撤销（DESIGN「拆开」不是可逆的开关，撤销挂不上）
+        const text = toastFor("split", {
+          done: [{ name: "的 skills 文件夹", agent: agentRef(targetOf(ref.targetId)) }],
+        });
+        setCellToast({
+          id: ++cellToastSeq.current,
+          rowKey: skillRowKey(ref),
+          columnId: ref.targetId,
+          node: <Toast {...text} onDismiss={dismissCell} />,
+        });
       }
     } catch (e) {
       onError(String(e));
