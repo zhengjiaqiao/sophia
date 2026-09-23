@@ -26,7 +26,7 @@ import {
   modelIssues,
   showRestartKey,
   shouldPollRestart,
-  showRouterBanner,
+  showRouterTodo,
   snapshotOrder,
   showGatewayNames,
   gatewayShortName,
@@ -362,9 +362,9 @@ test("路由没在跑：先自愈，自愈过仍没起来才出横幅", () => {
     enabled: true,
     router: { installed: true, running: false, port: 1, protocol: "chat", error: "x" },
   });
-  assert.equal(showRouterBanner(down, false), false);
-  assert.equal(showRouterBanner(down, true), true);
-  assert.equal(showRouterBanner(state({ enabled: false }), true), false);
+  assert.equal(showRouterTodo(down, false), false);
+  assert.equal(showRouterTodo(down, true), true);
+  assert.equal(showRouterTodo(state({ enabled: false }), true), false);
 });
 
 test("modelIssues：接管 / 配置被外部改过 / 网关连不上三类，key 随状况变", () => {

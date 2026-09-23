@@ -20,7 +20,7 @@ import {
   shouldPollRestart,
   showRestartKey,
   serviceLeftover,
-  showRouterBanner,
+  showRouterTodo,
   UNINSTALL_TIP,
   totalSelected,
 } from "./modelsView.ts";
@@ -36,7 +36,6 @@ import {
   NoticePanel,
   Button,
   Confirm,
-  ErrorBanner,
   ModelChip,
   Spinner,
   Switch,
@@ -65,8 +64,8 @@ import "./ModelsTab.css";
 /// 模型框：模型片（友好名，完整 id 进 title）+ 尾端等宽可选数 + 展开记号；整框可点，
 /// 选择器与框同宽左对齐。第三方分组头带限制说明与 `管理网关 ›`（没有网关时 `还没有网关 · + 网关 ›`）。
 ///
-/// 路由没在跑：启动时先自愈一次（重启路由），还不行才出页级错误横幅 + `重启路由`，
-/// 不可关、恢复后自动收起（⑫ 不给假选项）。
+/// 路由没在跑：启动时先自愈一次（重启路由），还不行才在 Codex 行下出待办条 + `重启路由`，
+/// 原因进 `!` 的提示框；不可关、恢复后自动收起（⑫ 不给假选项）。路由只影响这一行，不用页级横幅。
 ///
 /// 模型页不分项目、不分域，壳在这一页不渲染侧栏（`MODELS_TAB_FULL_BLEED`）。
 ///
@@ -489,7 +488,7 @@ export default function ModelsTab({
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
   /// 行内待办条正在执行的那一条（接管 / 重新写入）：它的键换成忙碌指示
-  const [resolving, setResolving] = useState<"takeover" | "rewrite" | null>(null);
+  const [resolving, setResolving] = useState<"takeover" | "rewrite" | "router" | null>(null);
   /// 启动时的自愈试过了没有：试过仍没起来才出页级横幅
   const [healed, setHealed] = useState(false);
   const [routerFailure, setRouterFailure] = useState<string | null>(null);
@@ -741,6 +740,7 @@ export default function ModelsTab({
   };
 
   const restartRouter = async () => {
+    setResolving("router");
     onBusy(true);
     try {
       const next = await api.gatewayRestart();
@@ -752,6 +752,7 @@ export default function ModelsTab({
       if (mounted.current) setRouterFailure(describeError(error));
     } finally {
       onBusy(false);
+      if (mounted.current) setResolving(null);
     }
   };
 
@@ -783,16 +784,6 @@ export default function ModelsTab({
 
   return (
     <section className="models-page">
-      {showRouterBanner(state, healed) ? (
-        <div className="models-page__banner">
-          <ErrorBanner
-            message="路由没在跑，第三方模型用不了"
-            detail={routerFailure ?? undefined}
-            action={{ label: "重启路由", onClick: () => void restartRouter() }}
-          />
-        </div>
-      ) : null}
-
       <div className="models-page__body">
         <div className="models-panel">
           <div className="models-panel__head">
@@ -824,8 +815,22 @@ export default function ModelsTab({
                     ? [{ key: issue.key, kind: issue.action.kind }]
                     : [],
                 );
-                if (todos.length === 0) return undefined;
-                return todos.map(({ key, kind }) => (
+                // 路由没在跑：只影响这一行的第三方模型，排在最前，原因进 ! 的提示框
+                const router = showRouterTodo(state, healed) ? (
+                  <NoticePanel
+                    key="router"
+                    message="路由没在跑，第三方模型用不了"
+                    reason={routerFailure ?? undefined}
+                    busy={resolving === "router" ? "正在重启路由" : undefined}
+                    action={{
+                      label: "重启路由",
+                      onClick: () => void restartRouter(),
+                      disabledReason: busy ? "正在处理上一步" : undefined,
+                    }}
+                  />
+                ) : null;
+                if (todos.length === 0 && router === null) return undefined;
+                return [router, ...todos.map(({ key, kind }) => (
                   <NoticePanel
                     key={key}
                     message={
@@ -846,7 +851,7 @@ export default function ModelsTab({
                       disabledReason: busy ? "正在处理上一步" : undefined,
                     }}
                   />
-                ));
+                ))];
               })()}
               models={
                 <ModelBox

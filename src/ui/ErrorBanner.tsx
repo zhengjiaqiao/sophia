@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Button, IconButton } from "./Button.tsx";
 import { IconAttention, IconClose } from "./icons.tsx";
 import { Spinner } from "./Spinner.tsx";
+import { Tooltip } from "./Tooltip.tsx";
 
 /// 错误横幅（DESIGN「提示条分两档 › 需要注意 · 大面积」，front-matter `banner-error`）：应用级 / 页级故障，
 /// 放在内容区页边内的 **`surface` 灰面板**（8 圆角、无边无影），不自动消失。大面积不用黑——一整条黑太重。
@@ -61,16 +62,27 @@ export interface NoticePanelProps {
   link?: { label: string; onClick: () => void };
   /// 正在执行：键的位置换成忙碌指示 + 这一句（`正在接管`），不再出键与文字链
   busy?: string;
+  /// 原因（`端口 47328 被别的程序占着`）：进 `!` 的提示框，不占第二行
+  reason?: string;
 }
 
 /// 行内待办条（DESIGN「提示条分两档 › 需要注意 · 大面积」，front-matter `row-notice`）：挂在某一行下面、
 /// 内容宽的 `surface` 灰面板（8 圆角、无边无影），墨色 `!` + 一句 + 默认描边紧凑键 + 可选文字链
-export function NoticePanel({ message, action, link, busy }: NoticePanelProps) {
+export function NoticePanel({ message, action, link, busy, reason }: NoticePanelProps) {
+  const mark = (
+    <span className="ss-noticepanel__mark" title={reason ? undefined : "要你动手"} role="img" aria-label="要你动手">
+      <IconAttention />
+    </span>
+  );
   return (
     <div className="ss-noticepanel" role="status">
-      <span className="ss-noticepanel__mark" title="要你动手" role="img" aria-label="要你动手">
-        <IconAttention />
-      </span>
+      {reason ? (
+        <Tooltip content={reason} focusable>
+          {mark}
+        </Tooltip>
+      ) : (
+        mark
+      )}
       <span className="ss-noticepanel__message">{message}</span>
       {busy ? (
         <span className="ss-noticepanel__actions">

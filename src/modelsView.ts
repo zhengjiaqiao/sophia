@@ -521,8 +521,8 @@ export function availableCount(state: GatewayState): number {
   return state.providers.reduce((sum, provider) => sum + provider.models.length, 0);
 }
 
-/// 路由没在跑、且启动时自愈过一次仍没起来，才出页级横幅（DESIGN「路由服务没在跑」）
-export function showRouterBanner(state: GatewayState, healAttempted: boolean): boolean {
+/// 路由没在跑、且启动时自愈过一次仍没起来，才在 Codex 行下出待办条（DESIGN「路由服务没在跑」）
+export function showRouterTodo(state: GatewayState, healAttempted: boolean): boolean {
   return healAttempted && routerUnavailable(state);
 }
 

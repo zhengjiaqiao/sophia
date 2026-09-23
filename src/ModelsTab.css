@@ -13,10 +13,6 @@
 }
 
 /* 页级错误横幅：页边内的灰面板，左右对齐页边 32，与下面的面板隔 24（面板自己的上边距） */
-.models-page__banner {
-  padding: var(--space-xl) var(--space-xxl) 0;
-}
-
 .models-page__body {
   box-sizing: border-box;
   padding: var(--space-xl) var(--space-xxl) var(--space-huge);
@@ -32,9 +28,7 @@
 }
 
 /* ===== 面板 ===== */
-/* 页级横幅与表同宽：右沿对齐表格横线，不越过去（横幅对齐页边时比表宽出一截） */
-.models-panel,
-.models-page__banner > .ss-banner {
+.models-panel {
   /* 表宽 = agent 324 + 24 + 生效模型框 + 24（真机反馈：框太窄、右边留白太多）。
      框随内容区弹性，最小 360、最大 640；再窄就不再缩，交给内容区横向滚动 */
   --models-agent-w: 324px;
