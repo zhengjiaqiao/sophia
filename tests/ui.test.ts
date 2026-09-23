@@ -82,7 +82,7 @@ test("tokens：七个中性灰、2px 控件圆角、28/24/32 控件高、行高 
     ["canvas", "#ffffff"],
     ["surface", "#f2f2f2"],
     ["hairline", "#e2e2e2"],
-    ["ink", "#000000"],
+    ["ink", "#222222"],
     ["ink-mute", "#5a5a5a"],
     ["ink-faint", "#9a9a9a"],
     ["disabled", "#c8c8c8"],

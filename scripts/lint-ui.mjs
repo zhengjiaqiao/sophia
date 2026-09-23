@@ -8,7 +8,7 @@ import { join, extname, relative } from "node:path";
 /// 唯一的色值来源；tokens.css 之外的地方不许出现字面色值
 const TOKENS = new Set([
   "#ffffff",
-  "#000000",
+  "#222222",
   "#f2f2f2",
   "#e2e2e2",
   "#c8c8c8",
