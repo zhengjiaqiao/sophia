@@ -104,3 +104,11 @@ test("只留这份的确认框：标题问留哪份；正文写哪份进废纸�
   });
   assert.equal(keepThisConfirm({ ...base, relinked: 0 }).body, "WeiboAP 那份移到废纸篓");
 });
+
+test("拆开的确认框：标题问拆哪个 agent 的 skills 文件夹，正文说后果", async () => {
+  const { splitConfirm } = await import("../src/toastText.ts");
+  assert.deepEqual(splitConfirm("Codex"), {
+    title: "拆开 Codex 的 skills 文件夹？",
+    body: "把链接换成真文件夹，里面的内容原样复制过来",
+  });
+});

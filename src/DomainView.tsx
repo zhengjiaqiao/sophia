@@ -100,7 +100,9 @@ const verbOf = (state: CellState, agent: string): string | undefined =>
         ? "点一下重新链接"
         : state === "readOnly"
           ? `${agent} 的 skills 目录写不进去 · 点一下再试一次`
-          : undefined;
+          : state === "wholeLinked"
+            ? `${agent} 的 skills 文件夹整个是链接 · 点一下拆开`
+            : undefined;
 
 /// 按 agent 那一项的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、写不进的注明不受影响
 export function affectedTip(

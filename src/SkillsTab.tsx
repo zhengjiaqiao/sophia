@@ -13,6 +13,7 @@ import type { ConfirmAnchor } from "./ui";
 import {
   batchBusyText,
   keepThisConfirm,
+  splitConfirm,
   toastFor,
   type FailedItem,
   type ToastItem,
@@ -72,6 +73,7 @@ export interface SkillsTabProps {
 /// - 批量：一行提示条贴在被按下的键下方，右对齐该键；动词与键一致，键上读数随之翻转
 /// - 只留这份：先出锚定确认；确认后直接删，例行一行贴在留下那一行下方（无撤销）
 /// - 孤链（原件已不在的失效链接，照样成一行）：点格即清除、不确认；例行一行出在那一行里（无撤销）
+/// - 整个文件夹是链接：点该列任一格出锚定确认（锚在那一格上），确认后拆开、重扫；没成格下小黑窗说原因
 /// - 自动规则在背后做了事：右下例行一行，右沿对齐面板右沿 + 撤销
 export default function SkillsTab({
   overview,
@@ -133,6 +135,12 @@ export default function SkillsTab({
   };
   // 同名两份「只留这份」的确认框：点了按钮、体检过、等用户拍板
   const [keepPane, setKeepPane] = useState<KeepPane | null>(null);
+  // 「拆开」的确认框：点了整个文件夹是链接那一列的某一格（锚在那一格上）
+  const [splitPane, setSplitPane] = useState<{
+    ref: CellRef;
+    agent: string;
+    anchor?: ConfirmAnchor;
+  } | null>(null);
 
   const pages = overview === null ? [] : overview.domains.filter((d) => d.key === selectedKey);
   const page: DomainPage | null = pages[0] ?? null;
@@ -165,6 +173,7 @@ export default function SkillsTab({
   useEffect(() => {
     setImportOpen(false);
     setKeepPane(null);
+    setSplitPane(null);
     setKeyToast(null);
     setCellToast(null);
     setRowToast(null);
@@ -368,6 +377,49 @@ export default function SkillsTab({
     if (state === "linked" || state === "missing" || state === "broken") toggleCell(ref, state);
     // 写不进去：再试一次就是再开一次
     else if (state === "readOnly") toggleCell(ref, "missing");
+    // 整个文件夹是链接：先确认拆开（锚在被点的那一格上）
+    else if (state === "wholeLinked") askSplit(ref);
+  };
+
+  // ===== 整个文件夹是链接：点该列任一格 → 锚定确认 → 拆开 =====
+
+  const askSplit = (ref: CellRef) => {
+    setCellNotice(null);
+    const index = page?.targets.findIndex((t) => t.id === ref.targetId) ?? -1;
+    const row = document.querySelector(`[data-row="${CSS.escape(skillRowKey(ref))}"]`);
+    const r = row?.querySelectorAll(".mx-cell")[index]?.getBoundingClientRect();
+    setSplitPane({
+      ref,
+      agent: targetOf(ref.targetId)?.label ?? "",
+      anchor: r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined,
+    });
+  };
+
+  /// 确认之后拆开；做成了重扫（整列的记号自己变回逐格状态），没成就在被点那一格下说原因
+  const confirmSplit = async (ref: CellRef) => {
+    setSplitPane(null);
+    onBusy(true);
+    try {
+      const report = await api.splitWholeLink(ref.targetId);
+      const failed = report.entries.filter((e) => e.outcome.status === "failed");
+      const first = failed[0]?.outcome;
+      if (first && first.status === "failed") {
+        const created = report.entries.filter((e) => e.outcome.status === "created").length;
+        setCellNotice({
+          rowKey: skillRowKey(ref),
+          columnId: ref.targetId,
+          text:
+            created === 0
+              ? `没拆开：${first.reason}`
+              : `拆开了，但有 ${failed.length} 个没复制过来：${first.reason}`,
+        });
+      }
+    } catch (e) {
+      onError(String(e));
+    } finally {
+      onBusy(false);
+    }
+    await onRefresh();
   };
 
   // ===== 孤链：点格清除，不确认（链接本来就指向空处）；没有撤销——重建一条指向空处的链接没有意义 =====
@@ -784,6 +836,18 @@ export default function SkillsTab({
           anchor={keepPane.anchor}
         >
           {keepThisConfirm({ ...keepPane, skill: keepPane.kept.skill }).body}
+        </Confirm>
+      ) : null}
+
+      {splitPane ? (
+        <Confirm
+          title={splitConfirm(splitPane.agent).title}
+          confirmLabel="拆开"
+          onConfirm={() => void confirmSplit(splitPane.ref)}
+          onCancel={() => setSplitPane(null)}
+          anchor={splitPane.anchor}
+        >
+          {splitConfirm(splitPane.agent).body}
         </Confirm>
       ) : null}
 

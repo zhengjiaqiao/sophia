@@ -195,6 +195,15 @@ export function keepThisConfirm(input: {
   };
 }
 
+/// 「拆开」确认框（DESIGN「没有收件箱、待处理页和「忽略」」表：整个文件夹是链接，点该列任一格）：
+/// 标题问拆哪个 agent 的文件夹，正文说后果
+export function splitConfirm(agent: string): { title: string; body: string } {
+  return {
+    title: `拆开 ${agent} 的 skills 文件夹？`,
+    body: "把链接换成真文件夹，里面的内容原样复制过来",
+  };
+}
+
 /// 批量写入真的慢时触发项旁的那一句（DESIGN「忙碌指示」）：`正在加到 Codex` / `正在从 Codex 移除` /
 /// `正在写进 Codex`。agent 为「所有 agent」时照样拼
 export function batchBusyText(op: "link" | "unlink" | "write", agent: string): string {
