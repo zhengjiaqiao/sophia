@@ -255,11 +255,10 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     const on = !blocked && checked.has(entry.ref);
     const open = !blocked && expanded.has(entry.ref);
     const items = entry.items ?? [];
-    // 点行的任何地方都是勾 / 取消，除了 `▸`（只管看）与不能勾的行
+    // 与来源管理页同一套：点整行 = 展开 / 收起（▸ 只是记号，键盘经它操作）；勾选只归复选框
     const onRowClick = (event: MouseEvent) => {
-      if (blocked || (event.target as HTMLElement).closest(".add-src__caret")) return;
-      setCheck(entry.ref, !on);
-      setFailure(null);
+      if (blocked || (event.target as HTMLElement).closest(".add-src__check")) return;
+      toggleExpand(entry.ref);
     };
     let second: ReactNode;
     if (line.kind === "loading") {
@@ -300,6 +299,10 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
               aria-checked={on}
               aria-label={entry.name}
               className="add-src__check"
+              onClick={() => {
+                setCheck(entry.ref, !on);
+                setFailure(null);
+              }}
             >
               <CheckMark on={on} />
             </button>
@@ -311,7 +314,6 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
             aria-expanded={open}
             aria-label={`${entry.name} 里的 ${model.noun}`}
             disabled={blocked !== null}
-            onClick={() => toggleExpand(entry.ref)}
           >
             <Disclosure open={open} shown={!blocked} />
           </button>

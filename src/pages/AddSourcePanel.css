@@ -90,10 +90,6 @@
   cursor: pointer;
 }
 
-.add-src__row:hover {
-  background: var(--surface);
-}
-
 .add-src__row.is-blocked {
   cursor: default;
 }
@@ -114,7 +110,9 @@
 .add-src__check {
   display: inline-flex;
   flex-shrink: 0;
-  padding: 0;
+  /* 勾选只归方框：命中区放大到 28，负外边距抵掉，排版不动 */
+  padding: 8px;
+  margin: -8px;
   border: 0;
   background: none;
   cursor: pointer;
@@ -122,10 +120,6 @@
 
 .add-src__check:focus-visible {
   outline: none;
-}
-
-.add-src__row:hover .add-src__check .ss-checkbox {
-  border-color: var(--ink);
 }
 
 /* 不能勾的方框：hairline 描边（同禁用的 Checkbox） */
