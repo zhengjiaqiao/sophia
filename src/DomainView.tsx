@@ -391,7 +391,7 @@ export default function DomainView(props: DomainViewProps) {
     <Matrix
       columns={columns}
       rows={matrixRows}
-      originLabel="原件位置"
+      originLabel="来源"
       sources={{
         total: page.rows.length - props.hiddenRows.size + props.orphans.length,
         selected: props.originFilter,
