@@ -6,6 +6,14 @@ import {
   columnRows,
   duplicateNames,
   listNames,
+  mcpCandidateGroups,
+  mcpLocationName,
+  mcpOwnRemoveReason,
+  mcpRemoveConfirmBody,
+  mcpSourceLines,
+  mcpSourceSubtitle,
+  mcpSourcesTitle,
+  noMcpSourcesText,
   noSourcesText,
   ownRemoveReason,
   removeConfirmBody,
@@ -14,8 +22,14 @@ import {
   sourceLines,
   sourceSubtitle,
   sourcesTitle,
+  stuckTip,
 } from "../src/pages/sourcesView.ts";
-import type { CandidateSource, SubscribedSource } from "../src/types.ts";
+import type {
+  CandidateSource,
+  McpCandidateSource,
+  McpSubscribedSource,
+  SubscribedSource,
+} from "../src/types.ts";
 
 const cardbox = { key: "project:/Users/me/CardBox", label: "CardBox" };
 const global = { key: "global", label: "全局" };
@@ -157,4 +171,102 @@ test("展开区两列按列读：行数取一半向上取整，至少一行", ()
   assert.equal(columnRows(7), 4);
   assert.equal(columnRows(1), 1);
   assert.equal(columnRows(0), 1);
+});
+
+// ===== MCP =====
+
+const mcpSub = (over: Partial<McpSubscribedSource>): McpSubscribedSource => ({
+  id: "claude-code",
+  label: "Claude Code · User",
+  harnessId: "claude-code",
+  domain: "global",
+  place: "全局",
+  path: "/h/.claude.json",
+  unreadable: false,
+  services: [],
+  own: false,
+  autoTargets: [],
+  ...over,
+});
+
+const mcpCand = (over: Partial<McpCandidateSource>): McpCandidateSource => ({
+  ...mcpSub({}),
+  usedIn: [],
+  ...over,
+});
+
+test("MCP 页名与空态", () => {
+  assert.equal(mcpSourcesTitle(cardbox), "CardBox 的 MCP 来源");
+  assert.equal(mcpSourcesTitle(global), "全局的 MCP 来源");
+  assert.equal(noMcpSourcesText(cardbox), "CardBox 还没有 MCP 来源");
+});
+
+test("MCP 位置名写成 `Claude Code · User`：去掉 MCPs，只有 agent 名的补作用域，WeiboAP 不补", () => {
+  const at = (label: string, harnessId: string, domain: string) =>
+    mcpLocationName({ label, harnessId, domain });
+  assert.equal(at("Claude Code · User MCPs", "claude-code", "global"), "Claude Code · User");
+  assert.equal(at("Claude Code · Local MCPs", "claude-code", "project:/a"), "Claude Code · Local");
+  assert.equal(at("Codex", "codex", "global"), "Codex · User");
+  assert.equal(at("Cursor", "cursor", "project:/a"), "Cursor · Project");
+  assert.equal(at("WeiboAP", "weiboap", "project:/w/agent_1"), "WeiboAP");
+});
+
+test("MCP 行上两行字：这个项目自己的写「项目里」，其余写它在哪；数服务", () => {
+  const own = mcpSub({
+    own: true,
+    label: "Claude Code · Local",
+    domain: cardbox.key,
+    place: "CardBox",
+    services: [
+      { name: "a", portable: true },
+      { name: "b", portable: false },
+    ],
+  });
+  assert.deepEqual(mcpSourceLines(own, cardbox), { name: "Claude Code · Local", sub: "项目里" });
+  assert.equal(mcpSourceSubtitle(own, cardbox), "项目里 · 2 个 MCP");
+  assert.equal(mcpSourceSubtitle(mcpSub({}), cardbox), "全局 · 0 个 MCP");
+  // 全局里自己的写「全局」
+  assert.equal(mcpSourceLines(mcpSub({ own: true }), global).sub, "全局");
+});
+
+test("MCP 移除：禁用原因、确认正文（服务与位置各自去重；没有时照实说）、搬不过去的提示", () => {
+  assert.equal(
+    mcpOwnRemoveReason(cardbox),
+    "它就是 CardBox 自己的配置，要拿掉里面的服务得去改它本身",
+  );
+  const item = (name: string, targetId: string) => ({ name, targetId, location: targetId });
+  const nameOf = (id: string) => (id === "p" ? "Claude Code · Project" : "Codex · Project");
+  assert.equal(
+    mcpRemoveConfirmBody([item("docs", "p"), item("docs", "c"), item("search", "p")], nameOf),
+    "这 2 个服务在 Claude Code · Project、Codex · Project 里的那份会拿掉：docs、search",
+  );
+  assert.equal(mcpRemoveConfirmBody([], nameOf), "它的服务会从列表里拿掉，没有写进这里的配置要撤");
+  assert.equal(
+    stuckTip("internal-tools", "Codex · User"),
+    "internal-tools 用了只有 Codex · User 认得的写法，搬到别处就不是原来那个了",
+  );
+});
+
+test("MCP `+ 来源` 的分组：其他项目在用的写在哪用，检测到的写在哪与服务数；空组不出现", () => {
+  const groups = mcpCandidateGroups({
+    elsewhere: [
+      mcpCand({ id: "codex", label: "Codex · User", usedIn: [{ key: "p", label: "docs-site" }] }),
+    ],
+    detected: [
+      mcpCand({
+        id: "o",
+        label: "Cursor · Project",
+        place: "other",
+        services: [{ name: "x", portable: true }],
+      }),
+    ],
+  });
+  assert.deepEqual(groups, [
+    {
+      title: "其他项目在用的",
+      items: [{ id: "codex", name: "Codex · User", sub: "docs-site 在用" }],
+    },
+    { title: "检测到的", items: [{ id: "o", name: "Cursor · Project", sub: "other · 1 个 MCP" }] },
+  ]);
+  assert.deepEqual(mcpCandidateGroups({ elsewhere: [], detected: [] }), []);
 });

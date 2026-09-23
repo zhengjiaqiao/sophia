@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canSupplement,
-  importedInDomain,
   mcpDomains,
   sourceForMissing,
   sourceForMissingTarget,
@@ -209,28 +208,8 @@ test("同一端点请求头待核对属于已定义，但绝不当作 equal 自�
     ),
   );
 
-  assert.equal(importedInDomain(page.rows[0].entries[0], page), true);
   assert.equal(sourceForMissingTarget(page.rows[0], "c"), null);
   assert.equal(canSupplement(page.rows[0].entries[0], new Set(["b"])), false);
-});
-
-test("导入状态由本域 own/equal 判定：部分引入已出现、冲突不算引入", () => {
-  const [global, project] = mcpDomains(
-    overview(
-      [location("global-a"), location("project-a", "project:/work/a")],
-      [entry("project-a", "arrived", { "global-a": "missing", "project-a": "own" })],
-    ),
-  );
-  const external = entry("outside", "new-service", {
-    "global-a": "equal",
-    "project-a": "conflict",
-  });
-  const absent = entry("outside", "absent", { "global-a": "missing", "project-a": "missing" });
-
-  assert.equal(importedInDomain(project.rows[0].entries[0], project), true);
-  assert.equal(importedInDomain(external, global), true);
-  assert.equal(importedInDomain(external, project), false);
-  assert.equal(importedInDomain(absent, global), false);
 });
 
 test("部分已引入的来源仍可向选中的缺失目标补齐", () => {
@@ -248,12 +227,11 @@ test("部分已引入的来源仍可向选中的缺失目标补齐", () => {
   );
   const source = result[0].rows[0].entries[0];
 
-  assert.equal(importedInDomain(source, result[0]), true);
   assert.equal(canSupplement(source, new Set(["cursor"])), true);
   assert.equal(canSupplement(source, new Set(["claude", "codex"])), false);
 });
 
-test("共享 agents.db 的 WeiboAP agent 仍是独立域，导入按目标 id 判定", () => {
+test("共享 agents.db 的 WeiboAP agent 仍是独立域", () => {
   const agentsDb = "/Users/me/Library/Application Support/WeiboAP/Data/agents.db";
   const agentOne = {
     id: "project:/Users/me/Library/Application Support/WeiboAP/Data/agents/agent-1::weiboap",
@@ -278,10 +256,6 @@ test("共享 agents.db 的 WeiboAP agent 仍是独立域，导入按目标 id �
       ],
     ),
   );
-  const onlyFirst = entry("outside", "same-service", {
-    [agentOne.id]: "equal",
-    [agentTwo.id]: "missing",
-  });
 
   assert.equal(agentOne.path, agentTwo.path);
   assert.deepEqual([first.key, second.key], [agentOne.domain, agentTwo.domain]);
@@ -290,6 +264,40 @@ test("共享 agents.db 的 WeiboAP agent 仍是独立域，导入按目标 id �
     [first.rows[0].entries[0].sourceId, second.rows[0].entries[0].sourceId],
     [agentOne.id, agentTwo.id],
   );
-  assert.equal(importedInDomain(onlyFirst, first), true);
-  assert.equal(importedInDomain(onlyFirst, second), false);
+});
+
+test("订阅着的别处来源：它的全部服务进本域列表，没写进的是 missing；同名时自己的那份在前", () => {
+  const [global, project, other] = mcpDomains({
+    ...overview(
+      [location("user"), location("proj", "project:/work/a"), location("far", "project:/work/b")],
+      [
+        entry("user", "docs", { user: "own", proj: "equal", far: "missing" }),
+        entry("user", "search", { user: "own", proj: "missing", far: "missing" }),
+        entry("proj", "docs", { user: "equal", proj: "own", far: "missing" }),
+        entry("far", "x", { user: "missing", proj: "missing", far: "own" }),
+      ],
+    ),
+    subscribed: { "project:/work/a": ["user"] },
+  });
+
+  assert.deepEqual(
+    project.rows.map((row) => [row.name, row.entries.map((e) => e.sourceId)]),
+    [
+      ["docs", ["proj", "user"]],
+      ["search", ["user"]],
+    ],
+  );
+  // 格只留本域的列
+  assert.deepEqual(project.rows[1].entries[0].cells, [
+    { targetId: "proj", state: "missing", reason: null },
+  ]);
+  // 没订阅的位置照旧只列自己的
+  assert.deepEqual(
+    global.rows.map((row) => row.name),
+    ["docs", "search"],
+  );
+  assert.deepEqual(
+    other.rows.map((row) => row.name),
+    ["x"],
+  );
 });

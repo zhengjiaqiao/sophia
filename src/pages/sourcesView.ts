@@ -1,6 +1,15 @@
 /// 来源管理页（DESIGN「来源管理页」）的纯逻辑：页名、行上的两行字、同名、移除的提示与确认造句、
 /// `+ 来源` 浮层的分组。不碰 api、不产 JSX。
-import type { CandidateSource, RemovalLink, SourceList, SubscribedSource } from "../types.ts";
+import type {
+  CandidateSource,
+  McpCandidateSource,
+  McpRemovalItem,
+  McpSourceList,
+  McpSubscribedSource,
+  RemovalLink,
+  SourceList,
+  SubscribedSource,
+} from "../types.ts";
 import { joinWords } from "./importDefaults.ts";
 
 /// 位置的最小描述：页面上只用得到 key 与显示名
@@ -141,4 +150,92 @@ export function candidateGroups(
 /// 两列按列读（字母序竖着看）：行数 = 一半向上取整
 export function columnRows(count: number): number {
   return Math.max(1, Math.ceil(count / 2));
+}
+
+// ===== MCP 来源管理页（DESIGN「来源管理页 › MCP 同一套」）：来源＝一处配置 =====
+
+/// 页名：`CardBox 的 MCP 来源`、`全局的 MCP 来源`
+export function mcpSourcesTitle(domain: DomainRef): string {
+  return joinWords(domain.label, "的 MCP 来源");
+}
+
+/// 空态的一句现状：`CardBox 还没有 MCP 来源`
+export function noMcpSourcesText(domain: DomainRef): string {
+  return joinWords(domain.label, "还没有 MCP 来源");
+}
+
+/// 位置名写法 `Claude Code · User`（与 core `mcp::sources::source_label` 同一规则）：
+/// 去掉 `MCPs` 这类泛称；只有 agent 名的补上作用域，全局 `User`、项目 `Project`；WeiboAP 不补
+export function mcpLocationName(location: {
+  label: string;
+  harnessId: string;
+  domain: string;
+}): string {
+  const base = location.label.replace(/ MCPs$/, "");
+  if (base.includes(" · ") || location.harnessId === "weiboap") return base;
+  return `${base} · ${location.domain === "global" ? "User" : "Project"}`;
+}
+
+/// 行上的来源名与第二行灰字（不含 `· N 个 MCP`）：这个项目自己的写 `项目里`，
+/// 其余写它在哪（`全局` / 项目名，同名同处的 core 已带上区分片段）
+export function mcpSourceLines(
+  source: McpSubscribedSource,
+  domain: DomainRef,
+): { name: string; sub: string } {
+  const here = source.own && isProject(domain) && source.harnessId !== "weiboap";
+  return { name: source.label, sub: here ? "项目里" : source.place };
+}
+
+/// 第二行整句：`全局 · 5 个 MCP`
+export function mcpSourceSubtitle(source: McpSubscribedSource, domain: DomainRef): string {
+  return `${mcpSourceLines(source, domain).sub} · ${source.services.length} 个 MCP`;
+}
+
+/// 自己的配置不能移除：× 禁用的原因
+export function mcpOwnRemoveReason(domain: DomainRef): string {
+  return joinWords("它就是", domain.label, "自己的配置，要拿掉里面的服务得去改它本身");
+}
+
+/// 搬不过去的服务：行尾标签的提示框
+export function stuckTip(service: string, source: string): string {
+  return `${service} 用了只有 ${source} 认得的写法，搬到别处就不是原来那个了`;
+}
+
+/// 移除确认的正文：会拿掉哪些配置（服务名 × 位置）。
+/// - `这 2 个服务在 Codex · Project、Claude Code · Project 里的那份会拿掉：docs、search`，多于 5 个写「等 N 个」
+/// - 一项都没有：`它的服务会从列表里拿掉，没有写进这里的配置要撤`
+/// 与来源已经不一样了的那几份不在清单里，也不会动
+export function mcpRemoveConfirmBody(
+  items: McpRemovalItem[],
+  locationName: (targetId: string) => string,
+): string {
+  if (items.length === 0) return "它的服务会从列表里拿掉，没有写进这里的配置要撤";
+  const names = [...new Set(items.map((i) => i.name))];
+  const places = [...new Set(items.map((i) => locationName(i.targetId)))];
+  return `这 ${names.length} 个服务在 ${places.join("、")} 里的那份会拿掉：${listNames(names)}`;
+}
+
+/// `+ 来源` 浮层里的一项（MCP）：订阅时传位置 id
+export interface McpCandidateItem {
+  id: string;
+  name: string;
+  /// 第二行灰字：`CardBox 在用`；检测到的写它在哪与服务数
+  sub: string;
+}
+
+/// `+ 来源` 浮层的候选分组：`其他项目在用的`、`检测到的`；空的组不出现
+export function mcpCandidateGroups(
+  list: Pick<McpSourceList, "elsewhere" | "detected">,
+): { title: string; items: McpCandidateItem[] }[] {
+  const item = (c: McpCandidateSource, sub: string) => ({ id: c.id, name: c.label, sub });
+  return [
+    {
+      title: "其他项目在用的",
+      items: list.elsewhere.map((c) => item(c, `${c.usedIn.map((d) => d.label).join("、")} 在用`)),
+    },
+    {
+      title: "检测到的",
+      items: list.detected.map((c) => item(c, `${c.place} · ${c.services.length} 个 MCP`)),
+    },
+  ].filter((g) => g.items.length > 0);
 }

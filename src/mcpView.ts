@@ -160,6 +160,8 @@ const domainRows = (entries: McpEntry[]): McpDomainRow[] => {
 };
 
 /// 按配置域派生表格内容；同名服务合并为一行，但保留本域每个真实来源。
+/// 行＝本域自己位置里的服务 ∪ 本域订阅着的别处来源（`overview.subscribed`）的**全部**服务；
+/// 同名时自己的那份排在前面（来源列写它）。格只留本域的列
 export function mcpDomains(overview: McpOverview): McpDomain[] {
   const locationsByDomain = new Map<string, McpLocation[]>();
   for (const location of overview.locations) {
@@ -173,6 +175,9 @@ export function mcpDomains(overview: McpOverview): McpDomain[] {
   return keys.map((key) => {
     const targets = (locationsByDomain.get(key) ?? []).filter((location) => !location.matrixHidden);
     const targetIds = new Set(targets.map((target) => target.id));
+    const subscribed = new Set(overview.subscribed?.[key] ?? []);
+    const own = overview.entries.filter((entry) => targetIds.has(entry.sourceId));
+    const foreign = overview.entries.filter((entry) => subscribed.has(entry.sourceId));
     return {
       key,
       label: targets.some((target) => target.harnessId === "weiboap")
@@ -180,12 +185,10 @@ export function mcpDomains(overview: McpOverview): McpDomain[] {
         : mcpDomainLabel(key),
       targets,
       rows: domainRows(
-        overview.entries
-          .filter((entry) => targetIds.has(entry.sourceId))
-          .map((entry) => ({
-            ...entry,
-            cells: entry.cells.filter((cell) => targetIds.has(cell.targetId)),
-          })),
+        [...own, ...foreign].map((entry) => ({
+          ...entry,
+          cells: entry.cells.filter((cell) => targetIds.has(cell.targetId)),
+        })),
       ),
     };
   });
