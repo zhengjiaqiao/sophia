@@ -283,7 +283,7 @@ fn missing_summary(path: &Path, home: &Path) -> SourceSummary {
 /// 同名来源分不清时，挑出每条路径里能区分它的那一级（与前端 `distinguishingSegments` 同一算法）：
 /// 从结尾往前找第一个「别的路径在同一位置（从结尾数）上都不是它」的分量；找不到退回整条路径。
 /// 只有一条时返回空串
-fn distinguishing_segments(paths: &[&Path]) -> Vec<String> {
+pub(crate) fn distinguishing_segments(paths: &[&Path]) -> Vec<String> {
     if paths.len() < 2 {
         return vec![String::new(); paths.len()];
     }

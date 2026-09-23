@@ -12,6 +12,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub mod sources;
 #[cfg(feature = "weiboap")]
 mod weiboap;
 
@@ -111,6 +112,10 @@ pub struct McpOverview {
     pub locations: Vec<McpLocation>,
     pub entries: Vec<McpEntry>,
     pub issues: Vec<McpIssue>,
+    /// 每个位置（域 key）订阅着的、别的位置的来源 id：主视图把它们的全部服务也列成行。
+    /// `scan` 不填，命令层按订阅记录填（见 `sources::attach`）；自己的位置不在里面
+    #[serde(default)]
+    pub subscribed: BTreeMap<String, Vec<String>>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpDiscovery {
@@ -742,6 +747,7 @@ pub fn scan(locations: &[McpLocation]) -> McpOverview {
         locations: locations.to_vec(),
         entries,
         issues,
+        subscribed: BTreeMap::new(),
     }
 }
 

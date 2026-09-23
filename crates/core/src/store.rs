@@ -1,7 +1,7 @@
 //! JSON 持久化：projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
 use crate::{
     codex_models::settings::GatewaySettings,
-    mcp::{McpAutoImportRule, McpOverview},
+    mcp::{sources::McpSubscriptions, McpAutoImportRule, McpOverview},
     models::{AutoLink, Source, Target},
     subscriptions::Subscriptions,
 };
@@ -34,6 +34,9 @@ pub struct Settings {
     /// 每个位置订阅了哪些来源：域 key（`global` / `project:<路径>`）→ 来源路径（normalize 后）。
     /// 旧文件没有这个字段，读成空；第一次扫描由 `subscriptions::adopt` 按老数据补上
     pub subscriptions: Subscriptions,
+    /// 每个位置订阅了哪些 MCP 来源：域 key → 来源位置 id（`McpLocation.id`）。
+    /// 旧文件没有这个字段，读成空；扫描时由 `mcp::sources::adopt` 按老数据补上
+    pub mcp_subscriptions: McpSubscriptions,
     /// 旧版「忽略」表，只读不写：`load_settings` 把它并进 `seen_issues` 后清空，
     /// 下次写盘时这个字段就从文件里消失了
     #[serde(rename = "ignored", skip_serializing)]
@@ -223,6 +226,23 @@ impl Store {
         Ok(settings)
     }
 
+    /// 读设置，顺手把老数据里已经写进各位置的 MCP 来源记进订阅（见 `mcp::sources::adopt`），
+    /// 改过才写回。要扫描结果才能认领，所以只在 MCP 扫描之后用；规则先迁移再认领
+    pub fn load_settings_adopting_mcp_subscriptions(
+        &self,
+        overview: &McpOverview,
+    ) -> io::Result<Settings> {
+        let mut settings = self.load_settings_migrating_mcp_auto_imports(overview)?;
+        if crate::mcp::sources::adopt(
+            &mut settings.mcp_subscriptions,
+            overview,
+            &settings.mcp_auto_imports,
+        ) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
     /// 读设置，顺手按上限整理显示名单（见 `discovery::reconcile_shown`），改过才写回。
     /// `installed` 是已安装的 agent id，按 agent 表的先后
     pub fn load_settings_reconciling_shown(&self, installed: &[String]) -> io::Result<Settings> {
@@ -398,6 +418,12 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            mcp_subscriptions: [(
+                "project:/p".to_string(),
+                ["claude-code".to_string()].into_iter().collect(),
+            )]
+            .into_iter()
+            .collect(),
             legacy_ignored: Vec::new(),
         };
         s.save_settings(&settings).unwrap();
@@ -434,6 +460,7 @@ mod tests {
         assert_eq!(loaded.mcp_auto_imports, Vec::<McpAutoImportRule>::new());
         // 订阅记录是后加的：旧文件读成空，等第一次扫描认领
         assert!(loaded.subscriptions.is_empty());
+        assert!(loaded.mcp_subscriptions.is_empty());
     }
 
     /// 升级前写下的 settings.json：两类规则都没有 baseline。
