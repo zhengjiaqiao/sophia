@@ -1,6 +1,6 @@
 //! 共享类型。serde 统一 camelCase，前端 `src/types.ts` 与之对应。
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -271,6 +271,12 @@ pub struct AutoLink {
     /// 首次扫描由 `skills::migrate_baselines` 取当时的全部名字补上
     #[serde(default)]
     pub baseline: Option<BTreeSet<String>>,
+    /// 规则已生效之后才加进来的目标：各自在加进来那一刻拍的 baseline，优先于 `baseline`。
+    /// 同一来源的规则跨位置共用一条（目标 id 本身带位置），在第二个位置打开开关、或给已开着的
+    /// 规则加一个 agent，都只管从这一刻起新出现的；若沿用整条规则的 `baseline`，建规则之后
+    /// 出现过的 skill 会被当成「新的」补建到新目标上。旧文件没有这个字段，读成空
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub target_baselines: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// 一条指向某本体的链接，以及改指时该怎么写。
@@ -508,6 +514,7 @@ mod tests {
             targets: vec!["claude-code".into()],
             excluded: BTreeSet::from(["x".to_string()]),
             baseline: Some(BTreeSet::from(["y".to_string()])),
+            target_baselines: BTreeMap::new(),
         };
         assert_eq!(
             serde_json::to_value(&rule).unwrap(),
@@ -518,5 +525,6 @@ mod tests {
         assert!(old.excluded.is_empty());
         // 升级前的规则没有 baseline：读成 None，等首次扫描迁移
         assert_eq!(old.baseline, None);
+        assert!(old.target_baselines.is_empty());
     }
 }

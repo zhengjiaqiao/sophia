@@ -335,6 +335,9 @@ mod tests {
                 targets: vec!["claude-code".into()],
                 excluded: ["x".to_string()].into_iter().collect(),
                 baseline: Some(["y".to_string()].into_iter().collect()),
+                target_baselines: [("codex".to_string(), ["z".to_string()].into_iter().collect())]
+                    .into_iter()
+                    .collect(),
             }],
             mcp_auto_imports: vec![McpAutoImportRule {
                 source: crate::mcp::McpLocationRef {

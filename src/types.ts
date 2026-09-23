@@ -178,6 +178,9 @@ export interface AutoLink {
   /// 建规则那一刻本体位置里已有的 skill，规则不补建它们（只管以后新出现的）。
   /// 由 core 拍快照，前端不传；升级前的旧规则在首次扫描迁移前为 null
   baseline?: string[] | null;
+  /// 规则生效之后才加进来的目标，各自在加进来那一刻的 baseline（优先于 baseline）。
+  /// 由 core 拍，前端不传；为空时 core 省略这个字段
+  targetBaselines?: Record<string, string[]>;
 }
 
 export interface HarnessStatus {
