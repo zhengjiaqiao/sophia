@@ -334,17 +334,13 @@ export default function SourcesPage(props: SourcesPageProps) {
 
                   <div className="src-row__rule">
                     {switchReason ? (
-                      // 禁用的开关接不到悬停：提示框挂在包层上（css 让禁用开关不吃指针）
-                      <Tooltip content={switchReason} focusable>
-                        <span className="src-row__switch">
-                          <Switch
-                            checked={on}
-                            onChange={() => undefined}
-                            label={ruleLabel}
-                            disabledReason={switchReason}
-                          />
-                        </span>
-                      </Tooltip>
+                      // 禁用的开关自带原因提示框：悬停出、按下当即出
+                      <Switch
+                        checked={on}
+                        onChange={() => undefined}
+                        label={ruleLabel}
+                        disabledReason={switchReason}
+                      />
                     ) : (
                       <Switch
                         checked={on}
@@ -406,13 +402,12 @@ export default function SourcesPage(props: SourcesPageProps) {
                     ) : null}
                     <span className="src-row__remove">
                       {row.own ? (
-                        <Tooltip content={model.ownRemoveReason} placement="bottom" focusable>
-                          <IconButton
-                            icon={<IconClose />}
-                            title={removeTitle(domain, row.name)}
-                            disabledReason={model.ownRemoveReason}
-                          />
-                        </Tooltip>
+                        <IconButton
+                          icon={<IconClose />}
+                          title={removeTitle(domain, row.name)}
+                          disabledReason={model.ownRemoveReason}
+                          tipPlacement="bottom"
+                        />
                       ) : (
                         <IconButton
                           icon={<IconClose />}

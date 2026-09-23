@@ -291,7 +291,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   };
 
   /// 整行是按钮：命中区是整行，方框只是记号。勾满上限时没勾的行禁用，
-  /// 提示框说为什么点不了（禁用键接不到悬停，提示框挂在包层上）
+  /// 提示框说为什么点不了：悬停出、按下当即出（explain：禁用的行不吃指针，悬停与按下落在包层上）
   const row = (agent: AgentOption) => {
     const blocked = full && !agent.enabled;
     const button = (
@@ -311,7 +311,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     return (
       <div key={agent.id} className="settings-page__cell">
         {blocked ? (
-          <Tooltip content={fullReason} focusable>
+          <Tooltip content={fullReason} focusable explain>
             {button}
           </Tooltip>
         ) : (

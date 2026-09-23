@@ -424,18 +424,12 @@ export function GatewayBody({
                   }}
                 />
               ) : (
-                // 最后一家还在供模型：后端会拒，键上就说清下一步。禁用的键接不到悬停，
-                // 提示框挂在包层上（css 让禁用键不吃指针）
-                <Tooltip
-                  content={`${tool.name} 还在用它的 ${selectedModels(current).length} 个模型，先取消勾选再删`}
-                  focusable
-                >
-                  <IconButton
-                    icon={<IconTrash />}
-                    title={`删掉 ${gatewayShortName(current)}`}
-                    disabledReason={`${tool.name} 还在用它的 ${selectedModels(current).length} 个模型，先取消勾选再删`}
-                  />
-                </Tooltip>
+                // 最后一家还在供模型：后端会拒，键上就说清下一步（禁用键自带原因提示框）
+                <IconButton
+                  icon={<IconTrash />}
+                  title={`删掉 ${gatewayShortName(current)}`}
+                  disabledReason={`${tool.name} 还在用它的 ${selectedModels(current).length} 个模型，先取消勾选再删`}
+                />
               )}
             </span>
           </div>
@@ -525,16 +519,12 @@ interface GatewayFormProps {
   canCancel: boolean;
 }
 
-/// 地址为空时的「保存」：禁用，提示框「先填地址」（禁用键接不到悬停，提示框挂在包层上）
+/// 地址为空时的「保存」：禁用，提示框「先填地址」（禁用键自带原因提示框，按下当即出）
 function BlankSave() {
   return (
-    <span className="gw-form__save">
-      <Tooltip content="先填地址" focusable>
-        <Button variant="primary" disabled disabledReason="先填地址">
-          保存
-        </Button>
-      </Tooltip>
-    </span>
+    <Button variant="primary" disabled disabledReason="先填地址">
+      保存
+    </Button>
   );
 }
 

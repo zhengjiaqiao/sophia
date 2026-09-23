@@ -187,15 +187,6 @@
   color: var(--ink-faint);
 }
 
-/* 禁用的开关接不到悬停：让指针落到包层上，提示框才出得来 */
-.src-row__switch {
-  display: inline-flex;
-}
-
-.src-row__switch .ss-switch:disabled {
-  pointer-events: none;
-}
-
 /* 目标图标组：点开改目标的浮层。静息无底，悬停 / 打开铺 surface（无描边的可点面） */
 .src-row__targets {
   display: inline-flex;
@@ -232,10 +223,6 @@
   display: inline-flex;
   flex-shrink: 0;
   margin-left: auto;
-}
-
-.src-row__remove .ss-iconbtn:disabled {
-  pointer-events: none;
 }
 
 /* 这一句按画板单行显示（不受提示框 240 上限折行）；出窗时 Tooltip 自己改为对齐外侧边 */

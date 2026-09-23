@@ -188,17 +188,13 @@ export function AgentRow({
         <AgentIcon id={tool.id} name={tool.name} size={24} />
         <span className="models-row__name">{tool.name}</span>
         {blocked !== null ? (
-          // 禁用的开关接不到悬停：提示框挂在包层上（css 让禁用开关不吃指针），同来源管理页
-          <Tooltip content={blocked} focusable>
-            <span className="models-row__switch">
-              <Switch
-                checked={false}
-                onChange={() => undefined}
-                label={`启用 ${tool.name} 的第三方模型`}
-                disabledReason={blocked}
-              />
-            </span>
-          </Tooltip>
+          // 禁用的开关自带原因提示框：悬停出、按下当即出
+          <Switch
+            checked={false}
+            onChange={() => undefined}
+            label={`启用 ${tool.name} 的第三方模型`}
+            disabledReason={blocked}
+          />
         ) : (
           <Tooltip
             content={
@@ -207,14 +203,12 @@ export function AgentRow({
                 : `打开：选好的模型进 ${tool.name} 的模型列表`
             }
           >
-            <span className="models-row__switch">
-              <Switch
-                checked={state.enabled}
-                onChange={onToggle}
-                label={`启用 ${tool.name} 的第三方模型`}
-                disabledReason={busy ? "正在处理上一步" : undefined}
-              />
-            </span>
+            <Switch
+              checked={state.enabled}
+              onChange={onToggle}
+              label={`启用 ${tool.name} 的第三方模型`}
+              disabledReason={busy ? "正在处理上一步" : undefined}
+            />
           </Tooltip>
         )}
         {/* 进网关二级页：普通默认键，不带展开记号（DESIGN「网关配置是二级页」） */}

@@ -289,7 +289,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
         <div className="add-src__head-line">
           {blocked ? (
             // 不能勾：方框退到 hairline，悬停说原因（与第二行同一句）
-            <Tooltip content={blocked} focusable>
+            <Tooltip content={blocked} focusable explain>
               <CheckMark on={false} />
             </Tooltip>
           ) : (
