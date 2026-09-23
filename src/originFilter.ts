@@ -29,7 +29,3 @@ export function addedOrigins(added: readonly string[], chips: Iterable<string>):
   const shown = new Set(chips);
   return [...new Set(added)].filter((id) => shown.has(id));
 }
-
-/// 本次运行里刚加的来源（筛选片带 `新`，只在内存里、重启就没了）的记法：按位置记——
-/// 别的位置早就订阅着的同一个来源，在那边不算新
-export const newOriginKey = (domain: string, id: string): string => `${domain}\n${id}`;

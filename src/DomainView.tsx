@@ -81,8 +81,6 @@ export interface DomainViewProps {
   /// 按来源筛选中的来源（工具行第二行的片）；空＝全部。加完来源时可能一次选中几片
   originFilter: readonly string[];
   onOriginFilter: (next: string[]) => void;
-  /// 本次运行里刚加到这个位置的来源：筛选片名字后带 `新`
-  isNewOrigin: (sourceId: string) => boolean;
   /// 行悬停「打开 ↗」：在访达中显示原件
   onReveal: (path: string) => void;
   /// 工具行右端 `管理来源`：进来源管理页
@@ -423,7 +421,6 @@ export default function DomainView(props: DomainViewProps) {
           label: originOf(id),
           full: `${originOf(id)} · ${displayPath(sourceOf(id)?.path ?? id)}`,
           count,
-          isNew: props.isNewOrigin(id),
         })),
       }}
       nameLabel="名称"

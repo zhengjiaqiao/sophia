@@ -13,7 +13,7 @@ import SourcesPage from "./pages/SourcesPage";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
-import { addedOrigins, liveOrigins, newOriginKey, originMatches } from "./originFilter";
+import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
 import { mcpLocationName } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
@@ -82,9 +82,6 @@ export interface McpTabProps {
   /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
   focusKey?: string;
   onFocused?: () => void;
-  /// 本次运行里刚加的来源（`newOriginKey`，壳上记着，切页签不丢）：筛选片带 `新`
-  newOrigins: ReadonlySet<string>;
-  onNewOrigins: (keys: string[]) => void;
 }
 
 /// 行键：同名服务在一个域里合成一行
@@ -150,8 +147,6 @@ export default function McpTab({
   onOverview,
   focusKey,
   onFocused,
-  newOrigins,
-  onNewOrigins,
 }: McpTabProps) {
   const [overview, setOverview] = useState<McpOverview | null>(null);
   // 选中的行：域 key → 行键集合
@@ -304,12 +299,11 @@ export default function McpTab({
   const page: McpDomain | null = domains.find((d) => d.key === selectedKey) ?? null;
 
   // 加完来源滑回主视图（同 Skills）：重扫已完，列表筛到新来源——它们的片选中（几个选几片，
-  // 列表是并集），这几片正下方浮起 `✓ 已添加 …`；这几片记成 `新`
+  // 列表是并集），这几片正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 MCP`（说清楚列表为什么变少了）
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
     if (!page) return;
-    onNewOrigins(justAdded.map((e) => newOriginKey(page.key, e.id)));
     const ids = addedOrigins(
       justAdded.map((e) => e.id),
       page.rows.flatMap((r) => r.entries.map((e) => e.sourceId)),
@@ -331,6 +325,7 @@ export default function McpTab({
           ),
         ).length,
         "MCP",
+        true,
       );
       setFilterText("");
       setOriginFilter(ids);
@@ -340,6 +335,7 @@ export default function McpTab({
         justAdded.map((e) => e.name),
         justAdded.reduce((n, e) => n + e.count, 0),
         "MCP",
+        false,
       );
     }
     setAddedToast({ key: Date.now(), parts, origins: ids });
@@ -1031,7 +1027,6 @@ export default function McpTab({
             label: groupLabel(locationOf(id), id),
             full: `${groupLabel(locationOf(id), id)} · ${displayPath(locationOf(id)?.path ?? id)}`,
             count,
-            isNew: newOrigins.has(newOriginKey(page.key, id)),
           })),
         }}
         rows={rows}
@@ -1147,7 +1142,6 @@ export default function McpTab({
           locations={domainLocations}
           onClose={() => setSourcesOpen(false)}
           onChange={refresh}
-          onSourcesAdded={(ids) => onNewOrigins(ids.map((id) => newOriginKey(page.key, id)))}
         />
       )}
     </section>

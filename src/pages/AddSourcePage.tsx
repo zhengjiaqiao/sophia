@@ -13,7 +13,7 @@ import "./AddSourcePage.css";
 /// - 入口两处进同一页：主视图工具行的 `+ 来源`、来源管理页页头的 `+ 来源`
 /// - ←、Esc 是返回（没有 `取消`）：先播 200ms 滑回，再由调用方卸掉
 /// - 勾的全加上后等调用方重扫 / 重读完，自动滑回进来的那一页，开始滑回时交给调用方 `onAllAdded`：
-///   主视图筛到新来源并例行一行 `✓ 已添加 …`（`AddedToast`），来源管理页让新行闪两下。
+///   主视图筛到新来源并在那几片下浮起 `✓ 已添加 …`（`AddedToast`），来源管理页让新行闪两下。
 ///   有没加上的就留在这一页，由 Panel 说明，不交
 
 /// 转场时长，与 AddSourcePage.css 同值
@@ -70,8 +70,9 @@ export function AddSourcePage({ model, domain, onClose, onAdded, onAllAdded }: A
   );
 }
 
-/// 加完来源滑回主视图时新来源那几片正下方浮起的一窗：`✓ 已添加 WeiboAP · 39 个 skill`
-/// （段由 `addedParts` 给），约 4 秒淡出，不带撤销（移除在来源管理页）。skill 与 MCP 主视图共用
+/// 加完来源滑回主视图时新来源那几片正下方浮起的一窗：`✓ 已添加 WeiboAP · 已筛选出它的 39 个 skill`
+/// （段由 `addedParts` 给，说清楚列表为什么变少了），约 4 秒淡出，不带撤销（移除在来源管理页）；
+/// 提示走了，选中的筛选片照旧说明列表是筛过的。skill 与 MCP 主视图共用
 export function AddedToast({ parts, onDismiss }: { parts: string[]; onDismiss: () => void }) {
   return (
     <Toast

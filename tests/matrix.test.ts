@@ -197,7 +197,7 @@ test("Matrix：工具行第二行来源筛选片——全部 N 在最前默认�
   assert.match(picking, /class="mx-sources"/);
 });
 
-test("Matrix：加完来源一次选中几片（全部不选中）；新来源的片名字后带「新」；已添加那一窗浮在新来源片下", () => {
+test("Matrix：加完来源一次选中几片（全部不选中）；片上不带「新」标记；已添加那一窗浮在新来源片下", () => {
   const html = render(Matrix, {
     ...base,
     sources: {
@@ -206,7 +206,7 @@ test("Matrix：加完来源一次选中几片（全部不选中）；新来源�
       onSelect: () => undefined,
       items: [
         { id: "u", label: "通用仓库", count: 1 },
-        { id: "w", label: "WeiboAP", count: 1, isNew: true },
+        { id: "w", label: "WeiboAP", count: 1 },
         { id: "x", label: "别处", count: 1 },
       ],
     },
@@ -220,14 +220,15 @@ test("Matrix：加完来源一次选中几片（全部不选中）；新来源�
   assert.match(html, /aria-pressed="true"><span class="ss-chip__label">通用仓库</);
   assert.match(
     html,
-    /aria-pressed="true"><span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__badge">新<\/span><span class="ss-chip__count">1</,
+    /aria-pressed="true"><span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__count">1</,
   );
   assert.match(
     html,
     /aria-pressed="false"><span class="ss-chip__label">别处<\/span><span class="ss-chip__count">/,
   );
   // 只有 WeiboAP 一片带「新」
-  assert.equal(html.match(/ss-chip__badge/g)?.length, 1);
+  // 「新」标记已撤回（看起来像永远不会消失）：交代改由浮起的那一窗说「已筛选出它的 N 个」
+  assert.doesNotMatch(html, /ss-chip__badge|>新</);
   // 浮起的一窗（FloatingToast）：不再挂进列头，锚点按片的 data-origin 找（出现那一刻定位一次）
   assert.doesNotMatch(html, /mx-bartoast/);
   assert.doesNotMatch(html, /class="mx-headwrap"[^>]*>[^]*?class="probe"[^]*?class="mx-head /);

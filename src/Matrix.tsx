@@ -136,12 +136,11 @@ export interface MatrixProps {
   /// 工具行第二行的来源筛选片：`全部 N` 在最前、默认选中；每片 `来源名 N`，选中反色。
   /// 放不下折行（不超出面板宽）；片名放不下截断，完整值用同一行右侧的提示框给。
   /// selected 空＝全部；用户点片是单选（originFilter.ts `pickOrigin`），加完来源时调用方可一次选中几片。
-  /// isNew：本次运行里刚加的来源，名字后带 `新`
   sources?: {
     total: number;
     selected: readonly string[];
     onSelect: (next: string[]) => void;
-    items: { id: string; label: string; full?: string; count: number; isNew?: boolean }[];
+    items: { id: string; label: string; full?: string; count: number }[];
   };
   rows: MatrixRowView[];
   /// 名称列头：`名称` / `服务`
@@ -1271,7 +1270,6 @@ function SourceChips({
           <Chip
             selected={selected.includes(item.id)}
             count={item.count}
-            badge={item.isNew ? "新" : undefined}
             onClick={() => onSelect(pickOrigin(selected, item.id))}
           >
             {item.label}

@@ -6,7 +6,7 @@ import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./Domain
 import { cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
-import { addedOrigins, liveOrigins, newOriginKey, originMatches } from "./originFilter";
+import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
 import SourcesPage from "./pages/SourcesPage";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
@@ -80,9 +80,6 @@ export interface SkillsTabProps {
   /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
   focusKey?: string;
   onFocused?: () => void;
-  /// 本次运行里刚加的来源（`newOriginKey`，壳上记着，切页签不丢）：筛选片带 `新`
-  newOrigins: ReadonlySet<string>;
-  onNewOrigins: (keys: string[]) => void;
 }
 
 /// Skills 页：两行工具行（筛选框 + 来源筛选片）+ 表格（DomainView → Matrix）。
@@ -104,8 +101,6 @@ export default function SkillsTab({
   onError,
   focusKey,
   onFocused,
-  newOrigins,
-  onNewOrigins,
 }: SkillsTabProps) {
   // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
@@ -232,12 +227,11 @@ export default function SkillsTab({
   }, [selectedKey]);
 
   // 加完来源滑回主视图（DESIGN「添加来源」）：重扫已完，列表筛到新来源——工具行里它们的片选中
-  // （加了几个选几片，列表是并集），这几片正下方浮起 `✓ 已添加 …`；这几片记成 `新`
+  // （加了几个选几片，列表是并集），这几片正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 skill`（说清楚列表为什么变少了）
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
     if (!page) return;
-    onNewOrigins(justAdded.map((e) => newOriginKey(page.key, e.id)));
     const order = page.rows.map((r) => r.sourceId);
     const ids = addedOrigins(
       justAdded.map((e) => e.id),
@@ -251,6 +245,7 @@ export default function SkillsTab({
         ids.map((id) => originText(names.get(id)!)),
         page.rows.filter((r) => originMatches(ids, [r.sourceId])).length,
         "skill",
+        true,
       );
       setFilterText("");
       setOriginFilter(ids);
@@ -260,6 +255,7 @@ export default function SkillsTab({
         justAdded.map((e) => e.name),
         justAdded.reduce((n, e) => n + e.count, 0),
         "skill",
+        false,
       );
     }
     setAddedToast({ key: Date.now(), parts, origins: ids });
@@ -961,7 +957,6 @@ export default function SkillsTab({
         }}
         originFilter={activeOrigins}
         onOriginFilter={setOriginFilter}
-        isNewOrigin={(id) => newOrigins.has(newOriginKey(page.key, id))}
         onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}
         onSources={() => setSourcesOpen(true)}
         onAddSource={() => setAddOpen(true)}
@@ -1042,7 +1037,6 @@ export default function SkillsTab({
           targets={page.targets}
           onClose={() => setSourcesOpen(false)}
           onChange={onRefresh}
-          onSourcesAdded={(ids) => onNewOrigins(ids.map((id) => newOriginKey(page.key, id)))}
         />
       )}
     </section>

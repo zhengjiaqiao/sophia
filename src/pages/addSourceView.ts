@@ -132,12 +132,21 @@ export const NOTHING_CHECKED = "先勾选要加的来源";
 /// 底部主动作：`添加 3 个来源`；一个没勾时写 `添加来源`（禁用，提示框 NOTHING_CHECKED）
 export const addLabel = (count: number) => (count === 0 ? "添加来源" : `添加 ${count} 个来源`);
 
-/// 全加上、滑回主视图时工具行下的例行一行，动词 `已添加` 之后用 ` · ` 隔开的几段：
-/// 一个来源 `WeiboAP · 39 个 skill`，几个 `2 个来源 · 41 个 skill`（MCP 写 `3 个 MCP`）。
+/// 全加上、滑回主视图时新来源片下浮起的那一窗，动词 `已添加` 之后用 ` · ` 隔开的几段。
+/// 列表筛到了新来源（`filtered`）时要说清楚列表为什么变少了：一个来源
+/// `WeiboAP · 已筛选出它的 39 个 skill`，几个 `2 个来源 · 已筛选出它们的 41 个 skill`
+/// （MCP 写 `3 个 MCP`）；新来源在这个位置下一行都没有、没筛时只交代加上了：`WeiboAP · 39 个 skill`。
 /// names：新来源在筛选片上的名字（与片同一个起名函数）；count：列表里这几片的并集有几行
-export function addedParts(names: string[], count: number, noun: string): string[] {
-  const what = names.length === 1 ? names[0] : `${names.length} 个来源`;
-  return [what, countText(count, noun)];
+export function addedParts(
+  names: string[],
+  count: number,
+  noun: string,
+  filtered: boolean,
+): string[] {
+  const one = names.length === 1;
+  const what = one ? names[0] : `${names.length} 个来源`;
+  const counted = countText(count, noun);
+  return [what, filtered ? `已筛选出${one ? "它" : "它们"}的 ${counted}` : counted];
 }
 
 /// 逐个加完之后的提示条（全成不出提示，直接滑回）：全没成＝做不成，部分成＝部分失败。

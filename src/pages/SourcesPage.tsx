@@ -59,8 +59,6 @@ export type SourcesPageProps = {
   onClose: () => void;
   /// 改动之后让主视图重扫（订阅与移除都会改主列表的行）
   onChange: () => Promise<void>;
-  /// 从这一页的 `+ 来源` 全加上了：加上的来源 id（主视图的筛选片记成 `新`）
-  onSourcesAdded?: (ids: string[]) => void;
 } & (
   | {
       kind: "skill";
@@ -87,7 +85,7 @@ interface PendingRemove {
 }
 
 export default function SourcesPage(props: SourcesPageProps) {
-  const { domain, onClose, onChange, onSourcesAdded } = props;
+  const { domain, onClose, onChange } = props;
   const targetList: (Target | McpLocation)[] =
     props.kind === "skill" ? props.targets : props.locations;
   const targetsKey = targetList.map((t) => t.id).join("|");
@@ -569,7 +567,6 @@ export default function SourcesPage(props: SourcesPageProps) {
           }}
           onAllAdded={(added) => {
             addedIds.current = added.map((e) => e.id);
-            onSourcesAdded?.(addedIds.current);
           }}
         />
       ) : null}

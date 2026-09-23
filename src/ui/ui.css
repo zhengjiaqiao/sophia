@@ -485,12 +485,6 @@
   flex-shrink: 0;
 }
 
-.ss-chip__badge {
-  flex-shrink: 0;
-  font-size: var(--size-micro);
-  font-weight: 600;
-}
-
 .ss-chip__count {
   font-family: var(--font-mono);
   font-size: var(--size-micro);
