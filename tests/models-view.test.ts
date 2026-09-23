@@ -994,7 +994,7 @@ test("ModelList 不再有已选置顶组：已选只由上方模型片表达，�
 test("模型页表宽 = 324 + 24 + 框 + 24：框随内容区弹性 360–640（CSS 实现），行线止于框右沿 + 24", async () => {
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
-  const panel = /\.models-panel \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  const panel = /\.models-panel[,\s][^{]*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(panel, /--models-agent-w:\s*324px/);
   assert.match(panel, /--models-box-min:\s*360px/);
   assert.match(panel, /--models-box-max:\s*640px/);
