@@ -958,6 +958,11 @@
   white-space: nowrap;
 }
 
+/* 原因跟在主句后，灰字同一行：决定下一步的信息不藏进悬停 */
+.ss-noticepanel__reason {
+  color: var(--ink-mute);
+}
+
 .ss-noticepanel__actions {
   display: inline-flex;
   align-items: center;
