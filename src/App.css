@@ -30,6 +30,12 @@ button {
   outline-offset: 2px;
 }
 
+/* 只供程序放焦点的落点（tabindex="-1"：二级页标题给读屏器的起点、托盘面板本身）不是控件，
+   不画焦点框——从托盘打开设置时窗口里还没有过鼠标操作，浏览器会把这次程序焦点当成键盘焦点 */
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 /* 输入框的焦点：描边从 hairline 升到 ink（DESIGN「可点的面」），
    再叠一圈外框就重了，所以这里把外框收掉 */
 input:focus-visible {
