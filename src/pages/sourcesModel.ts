@@ -34,6 +34,10 @@ import {
 export type ToastText = Pick<ToastProps, "tier" | "kind" | "verb" | "names" | "reason" | "tally">;
 
 /// 列表里的一行
+/// MCP 的 `同名`：同名的服务在主视图合成一行（不像 skill 各成一行），两份不一样时行上标 `2 份不一样`
+export const MCP_SAME_NAME_TIP =
+  "这里已有同名的服务，加进来后在主视图同一行；两份不一样时行上会标出来";
+
 export interface SourceRow {
   /// 行键，也是移除时交给 core 的来源 id
   id: string;
@@ -265,17 +269,23 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
     return l ? mcpLocationName(l) : id;
   };
   /// 展开后的一行服务：搬不过去（哪儿都搬不过去，或这里显示的位置一家都接不住）才标签 + 变淡
-  const stuckItem = (x: McpService, source: string, sourceId: string) => {
+  /// 一个服务名与名字后的标签：搬不过去优先（这一份用不上），否则与别的来源同名的挂 `同名`
+  /// （同 skill：添加页候选与来源管理页的行都标；MCP 同名的服务在主视图合成一行）
+  const serviceItem = (
+    x: McpService,
+    source: string,
+    sourceId: string,
+    sameName: (name: string) => boolean,
+  ) => {
     const tip = mcpStuckTip(
       x,
       source,
       locations.filter((l) => l.id !== sourceId),
     );
-    return {
-      name: x.name,
-      tag: tip === null ? undefined : { text: "搬不过去", tip },
-      dim: tip !== null,
-    };
+    if (tip !== null) return { name: x.name, tag: { text: "搬不过去", tip }, dim: true };
+    return sameName(x.name)
+      ? { name: x.name, tag: { text: "同名", tip: MCP_SAME_NAME_TIP } }
+      : { name: x.name };
   };
   return {
     title: mcpSourcesTitle(domain),
@@ -294,6 +304,13 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
     memoryKey: (id) => `mcp|${domain.key}|${id}`,
     load: async () => {
       const list = await api.listMcpSources(domain.key);
+      // 已订阅的来源里每个服务名出现几次：来源之间同名、候选与已订阅同名，都挂 `同名`
+      const seen = new Map<string, number>();
+      for (const s of list.subscribed)
+        for (const name of new Set(s.services.map((x) => x.name)))
+          seen.set(name, (seen.get(name) ?? 0) + 1);
+      const dupAmongSubscribed = (name: string) => (seen.get(name) ?? 0) > 1;
+      const takenBySubscribed = (name: string) => seen.has(name);
       return {
         rows: list.subscribed.map((s) => {
           const crossDomain = s.domain !== domain.key;
@@ -303,7 +320,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             sub: mcpSourceSubtitle(s, domain),
             path: s.path,
             own: s.own,
-            items: s.services.map((x) => stuckItem(x, s.label, s.id)),
+            items: s.services.map((x) => serviceItem(x, s.label, s.id, dupAmongSubscribed)),
             targets: s.autoTargets,
             switchReason: s.unreadable ? "读不到它的配置，先修好再开" : undefined,
             switchTitle: crossDomain
@@ -321,7 +338,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             name: i.name,
             sub: i.sub,
             count: i.services.length,
-            items: i.services.map((x) => stuckItem(x, i.name, i.id)),
+            items: i.services.map((x) => serviceItem(x, i.name, i.id, takenBySubscribed)),
           })),
         })),
       };
