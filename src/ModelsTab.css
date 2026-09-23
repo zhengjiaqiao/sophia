@@ -136,24 +136,11 @@
   display: inline-flex;
 }
 
-/* 右对齐键的右沿向左展开（可以盖住「agent」列头，评审已确认），不居中 */
-.models-restart-tip .ss-tip {
-  left: auto;
-  right: 0;
-  max-width: none;
-  white-space: nowrap;
-  transform: none;
-}
-
-/* 「卸下后台服务」的提示框同样单行；键可能折到第二行、贴着左沿，所以不强制右对齐，
+/* 提示框单行、右对齐键的右沿向左展开：Tooltip 的 `align="end" nowrap`（气泡浮在 body 上，
+   这里的样式够不着它）。「卸下后台服务」同样单行，但键可能折到第二行、贴着左沿，所以不强制右对齐，
    出窗时由 Tooltip 自己改为对齐外侧边 */
 .models-uninstall-tip {
   display: inline-flex;
-}
-
-.models-uninstall-tip .ss-tip {
-  max-width: none;
-  white-space: nowrap;
 }
 
 /* ===== 模型框 ===== */

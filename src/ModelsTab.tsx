@@ -237,7 +237,7 @@ export function AgentRow({
           <BusySlot busy={uninstalling} label="正在卸下后台服务" className="models-restart">
             <span className="models-uninstall-tip">
               {/* 键折到第二行时，上方正是 Codex 这一行：提示框放键下方，不盖住触发它的这一行 */}
-              <Tooltip content={UNINSTALL_TIP} placement="bottom">
+              <Tooltip content={UNINSTALL_TIP} placement="bottom" nowrap>
                 {busy && !uninstalling ? (
                   <Button size="compact" disabled disabledReason="正在处理上一步">
                     卸下后台服务
@@ -326,7 +326,7 @@ function RestartSlot({
   if (onLaunch && showLaunchKey(state, phase)) {
     return (
       <span className="models-restart-tip">
-        <Tooltip content={LAUNCH_TIP}>
+        <Tooltip content={LAUNCH_TIP} align="end" nowrap>
           {busy ? (
             <Button size="compact" disabled disabledReason="正在处理上一步">
               {`启动 ${tool.name}`}
@@ -342,9 +342,10 @@ function RestartSlot({
   }
   if (!showRestartKey(state, phase)) return null;
   return (
-    // 这句提示框按画板单行显示（其余提示框仍是 240 上限），见 css 的 .models-restart-tip
+    // 这句提示框按画板单行显示（其余提示框仍是 240 上限）；右对齐键的右沿向左展开
+    // （可以盖住「agent」列头，评审已确认），不居中
     <span className="models-restart-tip">
-      <Tooltip content={RESTART_TIP}>
+      <Tooltip content={RESTART_TIP} align="end" nowrap>
         {busy ? (
           <Button size="compact" disabled disabledReason="正在处理上一步">
             重启生效

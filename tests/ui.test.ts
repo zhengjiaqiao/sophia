@@ -471,9 +471,9 @@ test("Tooltip：黑窗白字 12，内边距 6 8，最大宽 240；内容作 aria
     html,
     /点一下开启<span class="ss-tip__keyhint"> · <span class="ss-tip__key">空格<\/span><\/span>/,
   );
-  // 快捷键只给键盘：默认不显示，触发控件 :focus-visible（键盘焦点）时才显示
+  // 快捷键只给键盘：默认不显示；打开那一刻触发控件 :focus-visible（键盘焦点）就挂 is-keyed 才显示
   assert.match(cssRule(uiCss, ".ss-tip__keyhint"), /display:\s*none/);
-  assert.match(uiCss, /\.ss-tipwrap:has\(:focus-visible\) \.ss-tip__keyhint \{\s*display: inline;/);
+  assert.match(cssRule(uiCss, ".ss-tip.is-keyed .ss-tip__keyhint"), /display:\s*inline/);
   // 静止时不显示；原生 title 不作唯一说明
   assert.doesNotMatch(html, /is-open/);
   const rule = cssRule(uiCss, ".ss-tip");
@@ -482,6 +482,42 @@ test("Tooltip：黑窗白字 12，内边距 6 8，最大宽 240；内容作 aria
   assert.match(rule, /background:\s*var\(--ink\)/);
   assert.match(rule, /font-size:\s*var\(--size-micro\)/);
   assert.match(cssRule(uiCss, ".ss-tip--top"), /bottom:\s*calc\(100% \+ 6px\)/);
+});
+
+test("Tooltip 图层：打开的气泡浮在 body 上（fixed），盖过侧栏、吸顶区与确认弹窗；收着时留在包层里", () => {
+  // 服务端渲染（收着）：气泡就在包层里，aria-describedby 指得到它
+  const html = render(Tooltip, {
+    content: "computer-use 在这里没有能写进或移除的",
+    children: createElement("button", { type: "button" }, "框"),
+  });
+  const id = html.match(/aria-describedby="([^"]+)"/)?.[1];
+  assert.ok(id);
+  assert.match(html, new RegExp(`<span id="${id}" role="tooltip" class="ss-tip ss-tip--top">`));
+  // 打开时：fixed、位置由 placeTip 写进 top / left，侧位类不再起作用；最大宽让窗口四边各 16
+  const floating = cssRule(uiCss, ".ss-tip.is-floating");
+  assert.match(floating, /position:\s*fixed/);
+  assert.match(floating, /inset:\s*auto/);
+  assert.match(floating, /transform:\s*none/);
+  assert.match(floating, /max-width:\s*min\(240px, calc\(100vw - 32px\)\)/);
+  // z：确认弹窗（40）、浮起小窗（36）、二级页（30）之上
+  const z = (sel: string) => Number(cssRule(uiCss, sel).match(/z-index:\s*(\d+)/)?.[1]);
+  assert.ok(z(".ss-tip") > z(".ss-confirm-layer"));
+  assert.ok(z(".ss-tip") > z(".ss-floattoast"));
+  assert.ok(z(".ss-tip") > z(".ss-subpage"));
+  // 单行的那几句：不受 240 上限，窗口放不下才折行
+  assert.match(
+    render(Tooltip, {
+      content: "重启 Codex 桌面应用让改动生效，进行中的对话会中断",
+      nowrap: true,
+      align: "end",
+      children: createElement("button", { type: "button" }, "重启生效"),
+    }),
+    /class="ss-tip ss-tip--top ss-tip--nowrap"/,
+  );
+  assert.match(
+    cssRule(uiCss, ".ss-tip.ss-tip--nowrap.is-floating"),
+    /max-width:\s*calc\(100vw - 32px\)/,
+  );
 });
 
 test("Tooltip 时机：表格内 700ms、表格外 400ms", () => {
@@ -530,6 +566,17 @@ test("禁用的 Switch / Button / IconButton / AddButton / Checkbox 自带原因
       tipPlacement: "bottom",
     }),
     /class="ss-tip ss-tip--bottom/,
+  );
+  // 来源管理页行尾的 ×：原因一句单行
+  assert.match(
+    render(IconButton, {
+      icon: IconCheck({}),
+      title: "删掉",
+      disabledReason: "它的原件就在 CardBox 里，删掉原件才会消失",
+      tipPlacement: "bottom",
+      tipNowrap: true,
+    }),
+    /class="ss-tip ss-tip--bottom ss-tip--nowrap"/,
   );
 });
 
@@ -604,6 +651,14 @@ test("嵌套：里层是禁用原因时外层让位，同时只出一个", () =>
   assert.match(html, /^<span class="ss-tipwrap"><span class="ss-tipwrap is-explain" tabindex="0"/);
   assert.match(html, new RegExp(`<button [^>]*aria-describedby="${outerId}"[^>]*disabled=""`));
   assert.equal(html.match(/role="tooltip"/g)?.length, 2);
+  // 里层没有原因（控件能点）：外层的描述照样转到 <button> 上，里层不把它清掉
+  const enabled = render(Tooltip, {
+    content: "重启 Codex 桌面应用让改动生效",
+    children: createElement(Button, { size: "compact", onClick: noop }, "重启生效"),
+  });
+  const enabledId = enabled.match(/id="([^"]+)" role="tooltip"/)?.[1];
+  assert.ok(enabledId);
+  assert.match(enabled, new RegExp(`<button [^>]*aria-describedby="${enabledId}"`));
 });
 
 test("Spinner：地球绕太阳，太阳大地球小、画一圈细轨道、必带读屏文本；14 / 24 两档", () => {

@@ -9,7 +9,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { keyboardModality } from "../inputModality.ts";
+import { placeTip, type ToastAlign } from "../layerPlace.ts";
 import type { ReactElement, ReactNode } from "react";
 
 /// 提示框（DESIGN「提示框」，画板 States「提示框」）：文字确定性由它承载，
@@ -20,7 +22,12 @@ import type { ReactElement, ReactNode } from "react";
 /// - 表格格子只一行「动词」；快捷键（` · 空格`）只在键盘焦点唤起时写，鼠标悬停不写
 ///   （`.ss-tip__keyhint` 默认不显示，触发控件 `:focus-visible` 时才显示，见 ui.css）
 /// - 位置：锚在触发控件上，正上方 6、水平居中（≤16px 就近）；上方放不下才放下方，
-///   居中出窗时对齐外侧边。格子的提示框允许盖住上一行邻格，只保护本格与本行
+///   居中出窗时对齐外侧边，夹在窗口四边 16 之内（`placeTip`）。格子的提示框允许盖住上一行邻格，
+///   只保护本格与本行
+/// - 图层：打开时气泡经 portal 挂到 body、fixed 定位，出现那一刻按触发控件的屏幕位置算一次——
+///   不被滚动容器裁掉、不被侧栏和吸顶区盖住（z 50，确认弹窗 40 之上，弹窗里的提示框照样看得见）。
+///   打开期间任何滚动、改窗口大小都当即收起，不跟着漂。收着时气泡留在包层里（display: none），
+///   `aria-describedby` 始终指得到它
 /// - 时机：表格内停留 700ms、表格外 400ms；在格与格之间移动时每格重新计时，所以
 ///   不追着鼠标；移开立即消失；键盘焦点到达同样计时
 /// - 按下：能点的控件按下即收起（按下是决定，结果提示出在旁边，提示框挂着会盖住它）；
@@ -92,6 +99,10 @@ export interface TooltipProps {
   context?: "table" | "default";
   /// 优先方向；放不下时自动翻到另一侧
   placement?: "top" | "bottom";
+  /// 水平对齐：默认居中于触发控件；`end` 右沿对齐、向左展开（行尾的键）。出窗时自动改对齐外侧边
+  align?: ToastAlign;
+  /// 这一句按画板单行显示，不受 240 上限折行；窗口放不下时才折行
+  nowrap?: boolean;
   /// 触发点本身不可聚焦（标签、记号、禁用的控件）时给 true：包裹层接住键盘焦点
   focusable?: boolean;
   /// 触发控件点了做不了（禁用）：按下当即弹出说明、不等延时，再按收起；
@@ -109,7 +120,8 @@ export function isClipped(root: Element | null): boolean {
   return all.some((el) => el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1);
 }
 
-type Align = "center" | "start" | "end";
+/// 打开后算好的位置；`keyed`：这次是键盘焦点唤起的，写快捷键
+type TipPos = { top: number; left: number; side: "top" | "bottom"; keyed: boolean };
 
 /// 这次焦点是不是用户用键盘带来的：看本窗口最近一次操作是按键还是指针（inputModality）。
 /// 不用浏览器的 `:focus-visible`——窗口刚从托盘、原生对话框切回来时，它会把程序放的焦点猜成键盘焦点
@@ -122,6 +134,8 @@ export function Tooltip({
   shortcut,
   context = "default",
   placement = "top",
+  align = "center",
+  nowrap = false,
   focusable,
   explain = false,
   truncated = false,
@@ -131,8 +145,7 @@ export function Tooltip({
   const idle = content === undefined || content === null || content === "";
   const [tip, setTip] = useState<TipState>(TIP_IDLE);
   const state = useRef(tip);
-  const [side, setSide] = useState<"top" | "bottom">(placement);
-  const [align, setAlign] = useState<Align>("center");
+  const [pos, setPos] = useState<TipPos | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bubble = useRef<HTMLSpanElement>(null);
 
@@ -150,10 +163,7 @@ export function Tooltip({
     if (next === state.current) return;
     state.current = next;
     setTip(next);
-    if (!next.open) {
-      setSide(placement);
-      setAlign("center");
-    }
+    if (!next.open) setPos(null);
   };
 
   // 给里层的 nest 要稳定（它是 Provider 的值），通过 ref 调到这一帧的 dispatch
@@ -226,29 +236,77 @@ export function Tooltip({
     [],
   );
 
-  // 出现那一刻量一次：上方出界就翻到下方，左右出窗就对齐外侧边。
-  // 上界见 tipCeiling：顶栏在滚动容器外，往上弹会被容器裁掉；吸顶区也会盖住紧挨它的一行
+  // 出现那一刻量一次（气泡已挂进 body、先藏着）：按触发控件此刻的屏幕位置放，之后不重算。
+  // 快捷键只给键盘焦点唤起的：先把类挂上再量，量到的宽里含 ` · 空格`
   useLayoutEffect(() => {
-    if (!tip.open || !bubble.current) return;
-    const r = bubble.current.getBoundingClientRect();
-    if (side === "top" && r.top < tipCeiling(bubble.current)) setSide("bottom");
-    if (align === "center") {
-      if (r.left < 0) setAlign("start");
-      else if (r.right > window.innerWidth) setAlign("end");
-    }
-  }, [tip.open, side, align]);
+    const el = bubble.current;
+    const w = wrapper.current;
+    if (!tip.open || pos || !el || !w) return;
+    const keyed = w.matches(":focus-visible") || w.querySelector(":focus-visible") !== null;
+    el.classList.toggle("is-keyed", keyed);
+    const r = w.getBoundingClientRect();
+    const p = placeTip(
+      { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
+      { width: el.offsetWidth, height: el.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+      { prefer: placement === "top" ? "above" : "below", align },
+    );
+    setPos({ top: p.top, left: p.left, side: p.side === "above" ? "top" : "bottom", keyed });
+  }, [tip.open, pos, placement, align]);
+
+  // 打开期间滚动（任何一层滚动容器）或改窗口大小：当即收起，不让它离开触发控件漂在原处
+  useEffect(() => {
+    if (!tip.open) return;
+    const close = () => {
+      clear();
+      latest.current("leave");
+    };
+    window.addEventListener("scroll", close, { capture: true, passive: true });
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, { capture: true });
+      window.removeEventListener("resize", close);
+    };
+  }, [tip.open]);
 
   const wrapFocus = focusable && !idle;
+  // 没有内容、只给完整值的：不碰触发控件的 aria-describedby——外层提示框经 Button 等转进来的描述
+  // 要留着（禁用原因撤了的里层包层曾把它清成 undefined，外层的说明读屏就读不到了）
   const trigger =
-    !wrapFocus && isValidElement<{ "aria-describedby"?: string }>(children)
-      ? cloneElement(children, { "aria-describedby": idle || truncated ? undefined : id })
+    !wrapFocus && !idle && !truncated && isValidElement<{ "aria-describedby"?: string }>(children)
+      ? cloneElement(children, { "aria-describedby": id })
       : children;
 
-  const classes = ["ss-tip", `ss-tip--${side}`, `ss-tip--${align}`];
+  // 打开时挂到 body（服务端渲染没有 document，就地画）
+  const floating = tip.open && typeof document !== "undefined";
+  const classes = ["ss-tip", `ss-tip--${pos?.side ?? placement}`];
+  if (nowrap) classes.push("ss-tip--nowrap");
   if (tip.open) classes.push("is-open");
+  if (floating) classes.push("is-floating");
+  if (pos?.keyed) classes.push("is-keyed");
   const wrap = ["ss-tipwrap"];
   if (idle) wrap.push("is-idle");
   else if (explain) wrap.push("is-explain");
+
+  const bubbleEl = (
+    <span
+      ref={bubble}
+      id={id}
+      role="tooltip"
+      className={classes.join(" ")}
+      style={
+        floating ? (pos ? { top: pos.top, left: pos.left } : { visibility: "hidden" }) : undefined
+      }
+    >
+      {content}
+      {shortcut ? (
+        <span className="ss-tip__keyhint">
+          {" · "}
+          <span className="ss-tip__key">{shortcut}</span>
+        </span>
+      ) : null}
+    </span>
+  );
 
   return (
     // 没有内容时把外层的 nest 原样传下去：里层要占的是真正会出提示框的那一层
@@ -283,17 +341,7 @@ export function Tooltip({
         onBlur={idle ? undefined : leave}
       >
         {trigger}
-        {idle ? null : (
-          <span ref={bubble} id={id} role="tooltip" className={classes.join(" ")}>
-            {content}
-            {shortcut ? (
-              <span className="ss-tip__keyhint">
-                {" · "}
-                <span className="ss-tip__key">{shortcut}</span>
-              </span>
-            ) : null}
-          </span>
-        )}
+        {idle ? null : floating ? createPortal(bubbleEl, document.body) : bubbleEl}
       </span>
     </NestContext.Provider>
   );
@@ -306,20 +354,23 @@ export function Tooltip({
 export function ReasonTip({
   reason,
   placement,
+  nowrap,
   children,
 }: {
   reason: string | undefined;
   placement?: "top" | "bottom";
+  nowrap?: boolean;
   children: ReactElement;
 }) {
   return (
-    <Tooltip content={reason} placement={placement} focusable explain>
+    <Tooltip content={reason} placement={placement} nowrap={nowrap} focusable explain>
       {children}
     </Tooltip>
   );
 }
 
-/// 提示框可见区域的上界（视口坐标）：窗口顶，或最近一个会裁切内容的祖先（overflow 非 visible）的顶，
+/// 画在内容流里的提示框（Matrix 格子、行自己画的 `.ss-tip`；`Tooltip` 组件的气泡浮在 body 上，不用它）
+/// 可见区域的上界（视口坐标）：窗口顶，或最近一个会裁切内容的祖先（overflow 非 visible）的顶，
 /// 再加上继承来的 CSS 变量 `--tip-ceiling`（px）——吸顶区（工具行、列头）的底边相对滚动容器顶的距离，
 /// 由拥有吸顶区的组件写在自己根节点上。往上弹的提示框顶边高过它就翻到下方
 export function tipCeiling(el: HTMLElement): number {

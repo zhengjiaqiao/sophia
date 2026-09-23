@@ -225,12 +225,6 @@
   margin-left: auto;
 }
 
-/* 这一句按画板单行显示（不受提示框 240 上限折行）；出窗时 Tooltip 自己改为对齐外侧边 */
-.src-row__remove .ss-tip {
-  max-width: none;
-  white-space: nowrap;
-}
-
 /* 展开区：在这一行的线以内，缩进对齐来源名（▸ 14 + 8），两列按列读，13 ink-mute */
 .src-row__skills {
   display: grid;

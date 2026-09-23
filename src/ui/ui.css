@@ -697,6 +697,22 @@
   display: block;
 }
 
+/* 打开的气泡（Tooltip 组件）挂在 body 上、fixed，位置由 placeTip 写进 top / left：
+   不被滚动容器裁掉、不被侧栏与吸顶区（≤ 20）盖住；z 50 在二级页（30）、小浮层（35）、
+   浮起小窗（36）、确认弹窗（40）之上，弹窗里的提示框照样看得见。
+   最大宽再让窗口一步：窗口四边各留 16（TIP_MARGIN），菜单栏面板这种窄窗口也不出窗 */
+.ss-tip.is-floating {
+  position: fixed;
+  inset: auto;
+  transform: none;
+  max-width: min(240px, calc(100vw - 32px));
+}
+
+/* 按画板单行显示的那几句（`nowrap`）：不受 240 上限，窗口放不下才折行 */
+.ss-tip.ss-tip--nowrap.is-floating {
+  max-width: calc(100vw - 32px);
+}
+
 .ss-tip b,
 .ss-tip strong {
   font-weight: 600;
@@ -724,13 +740,13 @@
 }
 
 /* 快捷键只给键盘（DESIGN「提示框」）：鼠标悬停唤起时不写 ` · 空格`，键盘焦点唤起时才写。
-   `:focus-visible` 只在键盘（方向键、Tab）带来的焦点上成立，鼠标点过的按钮不算 */
+   气泡不在包层里，由 Tooltip 在打开那一刻看包层（或里面的控件）是不是 `:focus-visible`，
+   是就挂 `is-keyed`——`:focus-visible` 只在键盘（方向键、Tab）带来的焦点上成立，鼠标点过的按钮不算 */
 .ss-tip__keyhint {
   display: none;
 }
 
-.ss-tipwrap:focus-visible .ss-tip__keyhint,
-.ss-tipwrap:has(:focus-visible) .ss-tip__keyhint {
+.ss-tip.is-keyed .ss-tip__keyhint {
   display: inline;
 }
 

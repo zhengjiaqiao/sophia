@@ -126,6 +126,8 @@ export interface IconButtonProps {
   disabledReason?: string;
   /// 禁用原因提示框的优先方向（默认上方）
   tipPlacement?: "top" | "bottom";
+  /// 禁用原因按画板单行显示，不受 240 上限折行（来源管理页行尾的 ×）
+  tipNowrap?: boolean;
   /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
   "aria-describedby"?: string;
 }
@@ -139,13 +141,14 @@ export function IconButton({
   onDark,
   disabledReason,
   tipPlacement,
+  tipNowrap,
   "aria-describedby": describedBy,
 }: IconButtonProps) {
   const classes = ["ss-iconbtn"];
   if (onDark) classes.push("is-on-dark");
   const disabled = Boolean(disabledReason);
   return (
-    <ReasonTip reason={disabledReason} placement={tipPlacement}>
+    <ReasonTip reason={disabledReason} placement={tipPlacement} nowrap={tipNowrap}>
       <button
         type="button"
         className={classes.join(" ")}

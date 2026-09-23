@@ -86,19 +86,72 @@ export function placeToast(
     bounds?: { left: number; right: number };
   } = {},
 ): ToastPlacement {
+  return placeFloat(anchor, size, viewport, {
+    ...opts,
+    prefer: "below",
+    gap: opts.gap ?? TOAST_GAP,
+    margin: opts.margin ?? TOAST_MARGIN,
+  });
+}
+
+// ===== 提示框（DESIGN「提示框」） =====
+
+/// 提示框与触发控件的间距：正上方（或正下方）6
+export const TIP_GAP = 6;
+/// 提示框离窗口四边至少留这么多（与 ui.css `.ss-tip.is-floating` 的最大宽同一个数）
+export const TIP_MARGIN = 16;
+
+/// 提示框放哪：默认触发控件正上方 6、水平居中（`prefer` / `align` 可改）；
+/// 优先一侧放不下、另一侧放得下才翻过去；居中出窗时对齐外侧边，最后夹进窗口四边 16 之内。
+/// 只在出现的那一刻算一次（Tooltip），之后滚动即收起，不重算
+export function placeTip(
+  anchor: AnchorRect,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  opts: { prefer?: "above" | "below"; align?: ToastAlign } = {},
+): ToastPlacement {
+  return placeFloat(anchor, size, viewport, {
+    prefer: opts.prefer ?? "above",
+    align: opts.align,
+    gap: TIP_GAP,
+    margin: TIP_MARGIN,
+  });
+}
+
+/// 提示小窗与提示框共用的一套：锚点上 / 下方 `gap`，`prefer` 一侧放不下、另一侧放得下才翻；
+/// 两侧都放不下（窗口太矮）时留在 `prefer` 一侧、夹回窗口里。水平见 `ToastAlign`
+function placeFloat(
+  anchor: AnchorRect,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  opts: {
+    prefer: "above" | "below";
+    align?: ToastAlign;
+    gap: number;
+    margin: number;
+    bounds?: { left: number; right: number };
+  },
+): ToastPlacement {
   const align = opts.align ?? "center";
-  const gap = opts.gap ?? TOAST_GAP;
-  const margin = opts.margin ?? TOAST_MARGIN;
+  const { gap, margin } = opts;
 
   const belowTop = anchor.bottom + gap;
   const aboveTop = anchor.top - gap - size.height;
   const fitsBelow = belowTop + size.height <= viewport.height - margin;
-  const side = !fitsBelow && aboveTop >= margin ? "above" : "below";
-  // 两边都放不下（窗口太矮）：最后一招，夹回窗口里
-  const top =
-    side === "below"
-      ? Math.max(margin, Math.min(belowTop, viewport.height - margin - size.height))
-      : aboveTop;
+  const fitsAbove = aboveTop >= margin;
+  const side =
+    opts.prefer === "below"
+      ? !fitsBelow && fitsAbove
+        ? "above"
+        : "below"
+      : !fitsAbove && fitsBelow
+        ? "below"
+        : "above";
+  // 两边都放不下（窗口太矮）：最后一招，夹回窗口里（顶边优先）
+  const top = Math.max(
+    margin,
+    Math.min(side === "below" ? belowTop : aboveTop, viewport.height - margin - size.height),
+  );
 
   const lo = Math.max(margin, opts.bounds?.left ?? margin);
   const hi = Math.min(viewport.width - margin, opts.bounds?.right ?? viewport.width - margin);

@@ -4,9 +4,12 @@ import {
   LAYER_CAP,
   LAYER_GAP,
   LAYER_MARGIN,
+  TIP_GAP,
+  TIP_MARGIN,
   TOAST_GAP,
   TOAST_MARGIN,
   placeLayer,
+  placeTip,
   placeToast,
 } from "../src/layerPlace.ts";
 
@@ -126,4 +129,61 @@ test("提示小窗：夹在窗口边距之内（菜单栏面板 320 宽）", () 
   );
   assert.ok(p.left + 120 <= 320 - TOAST_MARGIN);
   assert.ok(p.left >= TOAST_MARGIN);
+});
+
+// ===== 提示框（DESIGN「提示框」：气泡浮在 body 上，出现那一刻按触发控件的屏幕位置放） =====
+
+test("提示框：触发控件正上方 6、水平居中（≤16px 就近）", () => {
+  const key = { top: 300, bottom: 328, left: 500, right: 580 };
+  const p = placeTip(key, { width: 200, height: 26 }, view);
+  assert.equal(TIP_GAP, 6);
+  assert.equal(p.side, "above");
+  assert.equal(p.top, 300 - 6 - 26);
+  assert.equal(p.left, 540 - 100);
+});
+
+test("提示框：上方放不下翻到下方；优先下方的放不下翻到上方；两边都放不下夹回窗口", () => {
+  const first = { top: 10, bottom: 38, left: 500, right: 580 };
+  const down = placeTip(first, { width: 200, height: 26 }, view);
+  assert.equal(down.side, "below");
+  assert.equal(down.top, 38 + 6);
+  const last = { top: 690, bottom: 712, left: 500, right: 580 };
+  const up = placeTip(last, { width: 200, height: 26 }, view, { prefer: "below" });
+  assert.equal(up.side, "above");
+  assert.equal(up.top + 26 + TIP_GAP, 690);
+  const tray = { width: 320, height: 80 };
+  const cramped = placeTip(
+    { top: 30, bottom: 58, left: 20, right: 100 },
+    { width: 200, height: 60 },
+    tray,
+  );
+  assert.ok(cramped.top >= TIP_MARGIN);
+});
+
+test("提示框：左沿的复选框（产品负责人报的被侧栏盖住、左边被裁）——居中出窗就对齐外侧边，夹在窗口 16 之内", () => {
+  // 复选框贴着窗口左沿 8：居中会出窗，改左对齐复选框，再夹到 16
+  const box = { top: 300, bottom: 312, left: 8, right: 20 };
+  const p = placeTip(box, { width: 240, height: 44 }, view);
+  assert.equal(p.left, TIP_MARGIN);
+  assert.equal(p.side, "above");
+  // 离左沿 40：居中出窗，对齐复选框左沿
+  const near = placeTip({ ...box, left: 40, right: 52 }, { width: 240, height: 44 }, view);
+  assert.equal(near.left, 40);
+  // 贴右沿：对齐右沿
+  const right = placeTip({ ...box, left: 1060, right: 1072 }, { width: 240, height: 44 }, view);
+  assert.equal(right.left + 240, 1072);
+});
+
+test("提示框：行尾的键右对齐、向左展开；菜单栏面板这种窄窗口不出窗", () => {
+  const key = { top: 300, bottom: 328, left: 900, right: 980 };
+  const end = placeTip(key, { width: 300, height: 26 }, view, { align: "end" });
+  assert.equal(end.left + 300, 980);
+  const tray = { width: 320, height: 240 };
+  const p = placeTip(
+    { top: 120, bottom: 148, left: 200, right: 290 },
+    { width: 288, height: 44 },
+    tray,
+  );
+  assert.equal(p.left, TIP_MARGIN);
+  assert.ok(p.left + 288 <= 320 - TIP_MARGIN);
 });
