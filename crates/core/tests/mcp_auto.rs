@@ -31,7 +31,7 @@ fn rule(source: &McpLocation, target_domain: &str, targets: &[McpLocation]) -> M
         source: location_ref(source),
         target_domain: target_domain.into(),
         targets: targets.iter().map(location_ref).collect(),
-        excluded: BTreeSet::new(),
+        target_excluded: Default::default(),
         allow_cross_domain: true,
         // 手写的规则等同于在来源还空着时建的：来源里的都算新出现的
         baseline: Some(BTreeSet::new()),
@@ -82,7 +82,13 @@ fn auto_imports_only_current_missing_supported_unexcluded_cells() {
         "project:one",
         &[missing.clone(), invalid, conflict],
     );
-    import.excluded.insert("skip".into());
+    for target in ["missing", "invalid", "conflict"] {
+        import
+            .target_excluded
+            .entry(target.into())
+            .or_default()
+            .insert("skip".into());
+    }
 
     assert_eq!(
         auto_selections(&overview, &[import]),
@@ -274,7 +280,11 @@ fn auto_import_rule_only_covers_entries_that_appear_after_it() {
     );
 
     // 排除照旧
-    rules[0].excluded.insert("search".into());
+    rules[0]
+        .target_excluded
+        .entry(target.id.clone())
+        .or_default()
+        .insert("search".into());
     assert!(auto_selections(&scan(&locations), &rules).is_empty());
 
     // 同一来源 + 目标域重新设置（规则已生效）：不重拍，baseline 与排除名单保留
@@ -292,7 +302,7 @@ fn auto_import_rule_only_covers_entries_that_appear_after_it() {
         rules[0].baseline,
         Some(BTreeSet::from(["docs".to_string()]))
     );
-    assert_eq!(rules[0].excluded, BTreeSet::from(["search".to_string()]));
+    assert!(rules[0].is_excluded(&target.id, "search"));
     assert!(auto_selections(&scan(&locations), &rules).is_empty());
 }
 
@@ -424,7 +434,11 @@ fn turning_rule_off_then_on_resnapshots_baseline() {
             "search": {"command": "search"}
         }}),
     );
-    rules[0].excluded.insert("docs".into());
+    rules[0]
+        .target_excluded
+        .entry("target".into())
+        .or_default()
+        .insert("docs".into());
 
     // 关：整条删掉（remove_mcp_auto_import 的做法）
     rules.retain(|rule| rule.source.id != source.id || rule.target_domain != "project:one");
@@ -432,7 +446,7 @@ fn turning_rule_off_then_on_resnapshots_baseline() {
     let both = Some(BTreeSet::from(["docs".to_string(), "search".to_string()]));
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].baseline, both);
-    assert!(rules[0].excluded.is_empty());
+    assert!(rules[0].target_excluded.is_empty());
     assert!(auto_selections(&scan(&locations), &rules).is_empty());
 
     // 关：目标清空也算关
@@ -533,4 +547,88 @@ fn auto_import_rule_is_refused_when_source_config_is_unreadable() {
     .unwrap_err();
     assert_eq!(err, "读不到 source 的配置，先修好再开自动添加");
     assert!(rules.is_empty());
+}
+
+/// 排除按目标记：A 位置排除的服务，B 位置照常自动写入
+#[test]
+fn exclusion_on_one_target_does_not_block_other_targets() {
+    let temp = tempdir().unwrap();
+    let source_path = temp.path().join("source.json");
+    let a_path = temp.path().join("a.json");
+    let b_path = temp.path().join("b.json");
+    json_file(
+        &source_path,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    let source = json_location("source", &source_path, "global");
+    let a = json_location("a", &a_path, "project:one");
+    let b = json_location("b", &b_path, "project:one");
+    let locations = vec![source.clone(), a.clone(), b.clone()];
+    let mut import = rule(&source, "project:one", &[a.clone(), b.clone()]);
+    import
+        .target_excluded
+        .entry(a.id.clone())
+        .or_default()
+        .insert("docs".into());
+
+    assert!(import.is_excluded("a", "docs"));
+    assert!(!import.is_excluded("b", "docs"));
+    assert_eq!(
+        auto_selections(&scan(&locations), &[import]),
+        vec![selection("source", "docs", "b")]
+    );
+}
+
+/// 旧文件里整条的 `excluded`：读进来拆给当时的每个目标，行为不变；写回只有新字段，再读回不变
+#[test]
+fn legacy_rule_wide_excluded_migrates_per_target_and_round_trips() {
+    let temp = tempdir().unwrap();
+    let source_path = temp.path().join("source.json");
+    let a_path = temp.path().join("a.json");
+    let b_path = temp.path().join("b.json");
+    json_file(
+        &source_path,
+        json!({"mcpServers": {"docs": {"command": "docs"}, "web": {"command": "web"}}}),
+    );
+    let source = json_location("source", &source_path, "global");
+    let a = json_location("a", &a_path, "project:one");
+    let b = json_location("b", &b_path, "project:one");
+    let locations = vec![source.clone(), a.clone(), b.clone()];
+    let mut old = serde_json::to_value(rule(&source, "project:one", &[a, b])).unwrap();
+    old["excluded"] = json!(["docs"]);
+    assert!(old.get("targetExcluded").is_none());
+
+    let migrated: McpAutoImportRule = serde_json::from_value(old).unwrap();
+    let docs = BTreeSet::from(["docs".to_string()]);
+    assert_eq!(
+        migrated.target_excluded,
+        [("a".to_string(), docs.clone()), ("b".to_string(), docs)]
+            .into_iter()
+            .collect()
+    );
+    // 行为不变：docs 两处都不补，web 两处都补
+    assert_eq!(
+        auto_selections(&scan(&locations), std::slice::from_ref(&migrated)),
+        vec![
+            selection("source", "web", "a"),
+            selection("source", "web", "b")
+        ]
+    );
+
+    let written = serde_json::to_value(&migrated).unwrap();
+    assert!(written.get("excluded").is_none());
+    assert_eq!(
+        written["targetExcluded"],
+        json!({"a": ["docs"], "b": ["docs"]})
+    );
+    assert_eq!(
+        serde_json::from_value::<McpAutoImportRule>(written).unwrap(),
+        migrated
+    );
+
+    // 空的旧名单、没有目标的旧规则：不留空键
+    let mut targetless = serde_json::to_value(rule(&source, "project:one", &[])).unwrap();
+    targetless["excluded"] = json!(["docs"]);
+    let targetless: McpAutoImportRule = serde_json::from_value(targetless).unwrap();
+    assert!(targetless.target_excluded.is_empty());
 }

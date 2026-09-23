@@ -394,7 +394,12 @@ mod tests {
                     path: PathBuf::from("/a/.codex/config.toml"),
                     selector: None,
                 }],
-                excluded: ["private".to_string()].into_iter().collect(),
+                target_excluded: [(
+                    "target".to_string(),
+                    ["private".to_string()].into_iter().collect(),
+                )]
+                .into_iter()
+                .collect(),
                 allow_cross_domain: true,
                 baseline: Some(["docs".to_string()].into_iter().collect()),
                 target_baselines: [(

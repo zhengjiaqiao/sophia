@@ -360,7 +360,9 @@ export interface McpAutoImportRule {
   source: McpLocationRef;
   targetDomain: string;
   targets: McpLocationRef[];
-  excluded: string[];
+  /// 按目标（位置 id）记的排除名单：在这个目标上不再自动写入的服务名。
+  /// 为空时 core 省略这个字段
+  targetExcluded?: Record<string, string[]>;
   allowCrossDomain: boolean;
   /// 建规则那一刻来源位置里已有的 MCP 名，规则不补它们（只管以后新出现的）。
   /// 由 core 拍快照，前端不传；升级前的旧规则在首次扫描迁移前为 null

@@ -51,14 +51,18 @@ pub struct McpLocationRef {
 }
 
 /// 扫描到当前位置后自动生成“引入”选择的规则。
+/// 读入经 `McpAutoImportRuleFile` 迁移旧的整条 `excluded`；写出只有新结构
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", from = "McpAutoImportRuleFile")]
 pub struct McpAutoImportRule {
     pub source: McpLocationRef,
     pub target_domain: String,
     pub targets: Vec<McpLocationRef>,
-    #[serde(default)]
-    pub excluded: BTreeSet<String>,
+    /// 按目标（位置 id）记的排除名单：在这个目标上不再自动写入的服务名。
+    /// 按目标记，在一个位置排除只影响那一格，别的位置照常补（与 skill 的 `AutoLink` 同一修法）。
+    /// 键可以不在 `targets` 里：目标撤掉后名单留着，再加回来仍然有效。空集合不留键
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub target_excluded: BTreeMap<String, BTreeSet<String>>,
     #[serde(default)]
     pub allow_cross_domain: bool,
     /// 建规则那一刻来源位置里已有的 MCP 名：规则只管之后新出现的，这些不补。
@@ -71,6 +75,61 @@ pub struct McpAutoImportRule {
     /// 旧文件没有这个字段，读成空
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub target_baselines: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl McpAutoImportRule {
+    /// 这个服务在这个目标上是否被排除
+    pub fn is_excluded(&self, target_id: &str, name: &str) -> bool {
+        self.target_excluded
+            .get(target_id)
+            .is_some_and(|names| names.contains(name))
+    }
+}
+
+/// `McpAutoImportRule` 在 settings.json 里的样子，只用于读：多认一个旧字段 `excluded`
+/// （升级前整条规则共用一份排除名单）
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpAutoImportRuleFile {
+    source: McpLocationRef,
+    target_domain: String,
+    targets: Vec<McpLocationRef>,
+    #[serde(default)]
+    excluded: BTreeSet<String>,
+    #[serde(default)]
+    target_excluded: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    allow_cross_domain: bool,
+    #[serde(default)]
+    baseline: Option<BTreeSet<String>>,
+    #[serde(default)]
+    target_baselines: BTreeMap<String, BTreeSet<String>>,
+}
+
+/// 旧的整条 `excluded` 按「对当时的所有目标都生效」拆进各目标的名单，老规则的行为不变。
+/// 当时没有目标的规则没有可落的目标，这部分丢掉（没有目标的规则本来就什么都不写）
+impl From<McpAutoImportRuleFile> for McpAutoImportRule {
+    fn from(file: McpAutoImportRuleFile) -> Self {
+        let mut target_excluded = file.target_excluded;
+        if !file.excluded.is_empty() {
+            for target in &file.targets {
+                target_excluded
+                    .entry(target.id.clone())
+                    .or_default()
+                    .extend(file.excluded.iter().cloned());
+            }
+        }
+        target_excluded.retain(|_, names| !names.is_empty());
+        McpAutoImportRule {
+            source: file.source,
+            target_domain: file.target_domain,
+            targets: file.targets,
+            target_excluded,
+            allow_cross_domain: file.allow_cross_domain,
+            baseline: file.baseline,
+            target_baselines: file.target_baselines,
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -188,7 +247,7 @@ pub fn upsert_auto_import(
                 source: location_ref(source),
                 target_domain,
                 targets,
-                excluded: BTreeSet::new(),
+                target_excluded: BTreeMap::new(),
                 allow_cross_domain,
                 baseline: Some(snapshot()),
                 target_baselines: BTreeMap::new(),
@@ -275,7 +334,7 @@ pub fn auto_selections(overview: &McpOverview, rules: &[McpAutoImportRule]) -> V
                 entry.source_id == source.id
                     && entry.reason.is_none()
                     && is_supported_transport(&entry.transport)
-                    && !rule.excluded.contains(&entry.name)
+                    && !rule.is_excluded(&target.id, &entry.name)
                     && !baseline.contains(&entry.name)
             }) {
                 if entry
