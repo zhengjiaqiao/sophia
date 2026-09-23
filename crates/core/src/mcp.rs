@@ -1283,8 +1283,12 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
     };
     let bytes = match merge_group(old, &group) {
         Ok(bytes) => bytes,
-        Err(_) => {
-            fail(report, "配置无法安全写回");
+        Err(error) => {
+            // 文本级追加核对不过时带上原因
+            match error.get_ref().and_then(|e| e.downcast_ref::<Refused>()) {
+                Some(reason) => fail(report, &format!("配置无法安全写回：{reason}")),
+                None => fail(report, "配置无法安全写回"),
+            }
             return;
         }
     };
@@ -2248,72 +2252,211 @@ fn insert_root(bytes: &mut Vec<u8>, start: usize, end: usize, object: &[u8]) -> 
     bytes.splice(at..at, add);
     Ok(())
 }
+/// 合并被拒绝的原因（给用户看的一句中文），随 `io::Error` 带到 `execute_group` 显示
+#[derive(Debug)]
+struct Refused(String);
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for Refused {}
+fn refused(reason: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, Refused(reason.into()))
+}
+
+/// 往 TOML 配置（Codex 的 `config.toml`）里追加 MCP 服务。**不重新序列化整份文件**：
+/// 原文逐字节保留（BOM、换行风格、注释、排版都不动），只在末尾追加 `[mcp_servers.<名>]` 表；
+/// `mcp_servers` 本身写成内联表时，只在它的花括号里补成员。换行跟随原文件（有 CRLF 就用 CRLF），
+/// 原文末行没有换行的先补一个。追加后重新解析核对：原有内容一个值都没变、新增项读回来与要写的
+/// 一致，对不上就拒绝写。同名已存在沿用「不覆盖」：返回 `AlreadyExists`
 fn merge_toml(existing: Option<&[u8]>, additions: &[(&str, &Canonical)]) -> io::Result<Vec<u8>> {
     let text = existing
         .map(std::str::from_utf8)
         .transpose()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "utf8"))?
+        .map_err(|_| refused("配置不是 UTF-8 文本"))?
         .unwrap_or("");
-    let mut doc = text
-        .parse::<toml_edit::DocumentMut>()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "toml"))?;
-    if doc.get("mcp_servers").is_none() {
-        doc["mcp_servers"] = toml_edit::table();
-    }
-    let table = doc["mcp_servers"]
-        .as_table_like_mut()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "servers"))?;
-    for (name, def) in additions {
-        if table.contains_key(name) {
+    let doc = toml_edit::Document::parse(text).map_err(|_| refused("配置不是合法的 TOML"))?;
+    let servers = doc.get("mcp_servers");
+    for (name, _) in additions {
+        if servers
+            .and_then(toml_edit::Item::as_table_like)
+            .is_some_and(|table| table.contains_key(name))
+        {
             return Err(io::Error::new(io::ErrorKind::AlreadyExists, "exists"));
         }
-        let mut server = toml_edit::Table::new();
-        if def.transport == "stdio" {
-            server["command"] = toml_edit::value(
-                def.command
-                    .clone()
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "command"))?,
-            );
-            if !def.args.is_empty() {
-                let mut args = toml_edit::Array::new();
-                for arg in &def.args {
-                    args.push(arg.as_str());
-                }
-                server["args"] = toml_edit::value(args);
-            }
-            if !def.env.is_empty() {
-                server["env"] = toml_edit::value(inline(&def.env));
-            }
-        } else {
-            server["url"] = toml_edit::value(
-                def.url
-                    .clone()
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "url"))?,
-            );
-            if !def.headers.is_empty() {
-                server["http_headers"] = toml_edit::value(inline(&def.headers));
-            }
-        }
-        for (key, raw) in &def.client_fields {
-            let parsed = format!("value = {raw}")
-                .parse::<toml_edit::DocumentMut>()
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "client field"))?;
-            let value = parsed
-                .get("value")
-                .cloned()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "client field"))?;
-            server.insert(key, value);
-        }
-        table.insert(name, toml_edit::Item::Table(server));
     }
-    Ok(doc.to_string().into_bytes())
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let out = match servers {
+        None | Some(toml_edit::Item::Table(_)) => append_toml_tables(text, additions, eol)?,
+        Some(item) => match item.as_inline_table() {
+            Some(table) => insert_inline_servers(text, table, additions)?,
+            None => return Err(refused("mcp_servers 不是表，没法往里追加")),
+        },
+    };
+    verify_toml_merge(text, &out, additions)?;
+    Ok(out.into_bytes())
+}
+
+/// 一条服务要写的字段，按固定顺序：command / args / env 或 url / http_headers，再是 Codex 客户端字段
+fn toml_server(def: &Canonical) -> io::Result<toml_edit::InlineTable> {
+    let mut server = toml_edit::InlineTable::new();
+    if def.transport == "stdio" {
+        let command = def
+            .command
+            .as_deref()
+            .ok_or_else(|| refused("缺少 command"))?;
+        server.insert("command", basic_string(command));
+        if !def.args.is_empty() {
+            let args: toml_edit::Array = def.args.iter().map(|arg| basic_string(arg)).collect();
+            server.insert("args", args.into());
+        }
+        if !def.env.is_empty() {
+            server.insert("env", inline(&def.env).into());
+        }
+    } else {
+        let url = def.url.as_deref().ok_or_else(|| refused("缺少 url"))?;
+        server.insert("url", basic_string(url));
+        if !def.headers.is_empty() {
+            server.insert("http_headers", inline(&def.headers).into());
+        }
+    }
+    for (key, raw) in &def.client_fields {
+        let value = client_value(raw).ok_or_else(|| refused(format!("字段 {key} 的值无效")))?;
+        server.insert(key, value);
+    }
+    Ok(server)
+}
+
+/// Codex 客户端字段的原始写法（取自来源文件，可能带着空格、行尾注释）→ 去掉装饰的值
+fn client_value(raw: &str) -> Option<toml_edit::Value> {
+    let parsed = format!("value = {raw}")
+        .parse::<toml_edit::DocumentMut>()
+        .ok()?;
+    let mut value = parsed.get("value")?.as_value()?.clone();
+    value.decor_mut().clear();
+    Some(value)
+}
+
+/// TOML 键：能裸写就裸写，否则按 TOML 规则加引号转义
+fn toml_key(name: &str) -> String {
+    toml_edit::Key::new(name).display_repr().into_owned()
+}
+
+fn append_toml_tables(
+    text: &str,
+    additions: &[(&str, &Canonical)],
+    eol: &str,
+) -> io::Result<String> {
+    let mut out = text.to_owned();
+    let blank = text.trim_start_matches('\u{feff}').is_empty();
+    if !blank && !out.ends_with('\n') {
+        out.push_str(eol);
+    }
+    for (index, (name, def)) in additions.iter().enumerate() {
+        // 新表与上文之间空一行；空文件开头不空
+        if !blank || index > 0 {
+            out.push_str(eol);
+        }
+        out.push_str(&format!("[mcp_servers.{}]{eol}", toml_key(name)));
+        for (key, value) in toml_server(def)?.iter() {
+            out.push_str(&format!("{} = {value}{eol}", toml_key(key)));
+        }
+    }
+    Ok(out)
+}
+
+/// `mcp_servers = { … }`：内联表不能再用表头扩展，只能在花括号里补成员
+fn insert_inline_servers(
+    text: &str,
+    table: &toml_edit::InlineTable,
+    additions: &[(&str, &Canonical)],
+) -> io::Result<String> {
+    let span = table
+        .span()
+        .ok_or_else(|| refused("找不到 mcp_servers 在文件里的位置"))?;
+    if span.end == 0 || text.as_bytes().get(span.end - 1) != Some(&b'}') {
+        return Err(refused("找不到 mcp_servers 在文件里的位置"));
+    }
+    let inner = &text[span.start + 1..span.end - 1];
+    let kept = inner.trim_end();
+    let at = span.start + 1 + kept.len();
+    let members = additions
+        .iter()
+        .map(|(name, def)| Ok(format!("{} = {}", toml_key(name), toml_server(def)?)))
+        .collect::<io::Result<Vec<_>>>()?
+        .join(", ");
+    let lead = if kept.trim().is_empty() || kept.ends_with(',') {
+        " "
+    } else {
+        ", "
+    };
+    let tail = if text[at..].starts_with('}') { " " } else { "" };
+    Ok(format!(
+        "{}{lead}{members}{tail}{}",
+        &text[..at],
+        &text[at..]
+    ))
+}
+
+/// 追加结果的语义核对：原有的每个值都在、一个没变；新增的每项都读得回来，且连接字段与客户端字段
+/// 和要写的一致。字节层面「原文是结果的前缀」由写法保证，这里核对的是解析后的意思
+fn verify_toml_merge(
+    before: &str,
+    after: &str,
+    additions: &[(&str, &Canonical)],
+) -> io::Result<()> {
+    let old = before
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| refused("配置不是合法的 TOML"))?;
+    let new = after
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| refused("追加之后的配置解析不了，没有写"))?;
+    let mut actual = sources::plain_table(new.as_table());
+    let Some(Value::Object(servers)) = actual.get_mut("mcp_servers") else {
+        return Err(refused("追加之后读不到 mcp_servers，没有写"));
+    };
+    for (name, def) in additions {
+        if servers.remove(*name).is_none() {
+            return Err(refused(format!("追加之后读不回 {name}，没有写")));
+        }
+        let written = canon_toml(&new["mcp_servers"][*name]);
+        let same_clients = written.client_fields.len() == def.client_fields.len()
+            && def.client_fields.iter().all(|(key, raw)| {
+                let render = |raw: &str| client_value(raw).map(|value| value.to_string());
+                written
+                    .client_fields
+                    .get(key)
+                    .is_some_and(|got| render(got).is_some() && render(got) == render(raw))
+            });
+        if !written.connection_eq(def) || !same_clients {
+            return Err(refused(format!(
+                "追加之后读回的 {name} 和要写的不一样，没有写"
+            )));
+        }
+    }
+    let expected = sources::plain_table(old.as_table());
+    if !expected.contains_key("mcp_servers") && servers.is_empty() {
+        actual.remove("mcp_servers");
+    }
+    if actual != expected {
+        return Err(refused("追加会改动文件里原有的内容，没有写"));
+    }
+    Ok(())
 }
 fn inline(values: &BTreeMap<String, String>) -> toml_edit::InlineTable {
     let mut table = toml_edit::InlineTable::new();
     for (key, value) in values {
-        table.insert(key, toml_edit::Value::from(value.as_str()));
+        table.insert(key, basic_string(value));
     }
     table
+}
+/// 单行基本字符串：toml_edit 默认会把含换行的值写成 `"""` 多行串，
+/// 那样追加的内容里就混进了裸 LF（CRLF 文件里换行风格不一致）
+fn basic_string(value: &str) -> toml_edit::Value {
+    crate::codex_models::config::toml_string(value)
+        .parse()
+        .expect("转义后的基本字符串总能解析")
 }
 fn toml(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str()) == Some("toml")
@@ -2538,6 +2681,148 @@ mod tests {
         let parsed = parse_toml(&output, State::Missing);
         assert!(parsed.values.contains_key("old") && parsed.values.contains_key("new"));
     }
+    fn stdio(command: &str) -> Canonical {
+        Canonical {
+            transport: "stdio".into(),
+            command: Some(command.into()),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            url: None,
+            headers: BTreeMap::new(),
+            client_fields: BTreeMap::new(),
+            reason: None,
+            unsupported: false,
+            helper_only: false,
+        }
+    }
+
+    /// 追加结果按语义核对：原有的值一个不差，新增项读回来和要写的一样
+    fn assert_appended(before: &[u8], after: &[u8], added: &[(&str, &Canonical)]) {
+        let old = std::str::from_utf8(before)
+            .unwrap()
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        let new = std::str::from_utf8(after)
+            .unwrap()
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        let mut actual = sources::plain_table(new.as_table());
+        let servers = actual["mcp_servers"].as_object_mut().unwrap();
+        for (name, def) in added {
+            assert!(servers.remove(*name).is_some(), "{name} 读得回来");
+            let written = canon_toml(&new["mcp_servers"][*name]);
+            assert!(written.connection_eq(def), "{name} 的连接字段一致");
+        }
+        let expected = sources::plain_table(old.as_table());
+        if !expected.contains_key("mcp_servers") {
+            assert_eq!(
+                actual.remove("mcp_servers"),
+                Some(Value::Object(Default::default()))
+            );
+        }
+        assert_eq!(actual, expected, "原有内容不变");
+    }
+
+    #[test]
+    fn toml_append_keeps_bom_crlf_comments_and_layout_byte_for_byte() {
+        // 带 BOM、CRLF、注释、怪排版，末行没有换行
+        let existing = "\u{feff}# Codex 配置\r\nmodel = \"gpt-5\"   # 行尾注释\r\n\r\n\
+            [mcp_servers.old]\r\ncommand = \"old\"\r\nargs = [ \"-y\",\"x\" ]\r\n\r\n\
+            [profiles.fast]   # 档位\r\nmodel = \"o4\"";
+        let mut def = stdio("npx");
+        def.args = vec!["-y".into(), "a \"quoted\" arg\\path".into()];
+        def.env = [("API KEY".to_string(), "tok\nen".to_string())].into();
+        def.client_fields = [("startup_timeout_sec".to_string(), " 30 # 注释".to_string())].into();
+        let http = Canonical {
+            transport: "http".into(),
+            command: None,
+            url: Some("https://example.com/mcp".into()),
+            headers: [("Authorization".to_string(), "Bearer x".to_string())].into(),
+            ..stdio("")
+        };
+        let added = [("my server.v2", &def), ("文档", &http)];
+        let output = merge_toml(Some(existing.as_bytes()), &added).unwrap();
+
+        assert!(
+            output.starts_with(existing.as_bytes()),
+            "原文逐字节是结果的前缀"
+        );
+        let tail = std::str::from_utf8(&output[existing.len()..]).unwrap();
+        // 末行没有换行：只补一个把它结束掉，接着是空一行和新表
+        assert!(
+            tail.starts_with("\r\n\r\n[mcp_servers.\"my server.v2\"]\r\n"),
+            "{tail:?}"
+        );
+        assert!(
+            tail.contains("[mcp_servers.文档]\r\n") || tail.contains("[mcp_servers.\"文档\"]\r\n")
+        );
+        assert_eq!(
+            tail.matches('\n').count(),
+            tail.matches("\r\n").count(),
+            "追加部分全是 CRLF：{tail:?}"
+        );
+        assert!(tail.ends_with("\r\n"));
+        assert_appended(existing.as_bytes(), &output, &added);
+        let parsed = parse_toml(&output, State::Missing);
+        assert!(parsed.issue.is_none());
+        assert_eq!(parsed.values["my server.v2"].client_fields.len(), 1);
+    }
+
+    #[test]
+    fn toml_append_follows_lf_and_keeps_existing_header() {
+        let existing = "[mcp_servers]\n\n[mcp_servers.old]\ncommand = \"old\"\n";
+        let def = stdio("new");
+        let output = merge_toml(Some(existing.as_bytes()), &[("new", &def)]).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&output).unwrap(),
+            format!("{existing}\n[mcp_servers.new]\ncommand = \"new\"\n")
+        );
+        assert_appended(existing.as_bytes(), &output, &[("new", &def)]);
+    }
+
+    #[test]
+    fn toml_append_to_missing_or_empty_file() {
+        let def = stdio("new");
+        let expected = "[mcp_servers.new]\ncommand = \"new\"\n";
+        assert_eq!(
+            merge_toml(None, &[("new", &def)]).unwrap(),
+            expected.as_bytes()
+        );
+        let bom = "\u{feff}";
+        assert_eq!(
+            merge_toml(Some(bom.as_bytes()), &[("new", &def)]).unwrap(),
+            format!("{bom}{expected}").as_bytes()
+        );
+    }
+
+    #[test]
+    fn toml_inline_servers_get_member_in_place() {
+        let existing = "\u{feff}model = \"x\"\r\nmcp_servers = { old = { command = \"old\" } } # 内联\r\nz = 1";
+        let def = stdio("new");
+        let output = merge_toml(Some(existing.as_bytes()), &[("new", &def)]).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&output).unwrap(),
+            "\u{feff}model = \"x\"\r\nmcp_servers = { old = { command = \"old\" }, new = { command = \"new\" } } # 内联\r\nz = 1"
+        );
+        assert_appended(existing.as_bytes(), &output, &[("new", &def)]);
+        let empty = "mcp_servers = {}\n";
+        let output = merge_toml(Some(empty.as_bytes()), &[("new", &def)]).unwrap();
+        assert_appended(empty.as_bytes(), &output, &[("new", &def)]);
+    }
+
+    #[test]
+    fn toml_existing_name_is_not_overwritten_and_bad_shapes_are_refused() {
+        let def = stdio("new");
+        let existing = b"[mcp_servers.new]\ncommand = \"mine\"\n";
+        let error = merge_toml(Some(existing), &[("new", &def)]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        for bad in ["mcp_servers = 1\n", "[[mcp_servers]]\nx = 1\n"] {
+            let error = merge_toml(Some(bad.as_bytes()), &[("new", &def)]).unwrap_err();
+            let reason = error.get_ref().and_then(|e| e.downcast_ref::<Refused>());
+            assert!(reason.is_some_and(|r| r.0.contains("mcp_servers")), "{bad}");
+        }
+    }
+
     #[test]
     fn blank_codex_home_falls_back_to_home_directory() {
         let harness = Harness {
@@ -2711,6 +2996,24 @@ mod undo_tests {
         assert_eq!(result.outcome, "undone");
         assert_eq!(fs::read(&first).unwrap(), ORIGINAL);
         assert!(fs::symlink_metadata(&second).is_err());
+    }
+
+    #[test]
+    fn toml_target_is_appended_in_place_and_undo_restores_bytes() {
+        let tree = TempTree::new();
+        let target = tree.root().join("config.toml");
+        let original: &[u8] =
+            b"\xef\xbb\xbf# mine\r\nmodel = \"gpt-5\" # keep\r\n\r\n[profiles.x]\r\nmodel = \"o4\"";
+        fs::write(&target, original).unwrap();
+        let (_, undo) = write(&tree, &[&target]);
+        let written = fs::read(&target).unwrap();
+        assert!(written.starts_with(original), "原文逐字节保留");
+        assert_eq!(
+            &written[original.len()..],
+            b"\r\n\r\n[mcp_servers.docs]\r\ncommand = \"docs\"\r\n"
+        );
+        assert_eq!(undo_write(&undo).outcome, "undone");
+        assert_eq!(fs::read(&target).unwrap(), original);
     }
 
     #[test]

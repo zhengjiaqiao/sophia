@@ -831,7 +831,7 @@ fn remove_toml_server(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
 }
 
 /// TOML 的值换成不带格式的 JSON 值，只为比较语义
-fn plain_table(table: &dyn toml_edit::TableLike) -> serde_json::Map<String, Value> {
+pub(super) fn plain_table(table: &dyn toml_edit::TableLike) -> serde_json::Map<String, Value> {
     table
         .iter()
         .filter(|(_, item)| !item.is_none())
