@@ -14,7 +14,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// 不显示名单：不在列表里显示的 agent id（见 `discovery::reconcile_shown`）
     pub disabled_harnesses: Vec<String>,
+    /// 上次整理显示名单时已安装的 agent id。不在其中的已安装 agent 算新装的——
+    /// 只有它们受「显示不满 4 个才自动出现」管。旧文件没有这个字段，读成空：
+    /// 已安装的全算新装，正好按 agent 表先后留前 4 个
+    pub known_installed: Vec<String>,
     pub manual_sources: Vec<PathBuf>,
     pub auto_links: Vec<AutoLink>,
     pub mcp_auto_imports: Vec<McpAutoImportRule>,
@@ -195,6 +200,16 @@ impl Store {
         Ok(settings)
     }
 
+    /// 读设置，顺手按上限整理显示名单（见 `discovery::reconcile_shown`），改过才写回。
+    /// `installed` 是已安装的 agent id，按 agent 表的先后
+    pub fn load_settings_reconciling_shown(&self, installed: &[String]) -> io::Result<Settings> {
+        let mut settings = self.load_settings()?;
+        if crate::discovery::reconcile_shown(installed, &mut settings) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
     /// 把这些 key 记为看过；已在表里的保持原样（不刷新 at），空串跳过。没有新增就不写盘
     pub fn mark_seen(&self, keys: &[String]) -> io::Result<()> {
         let mut settings = self.load_settings()?;
@@ -280,6 +295,7 @@ mod tests {
         assert_eq!(s.load_settings().unwrap(), Settings::default());
         let settings = Settings {
             disabled_harnesses: vec!["a".into(), "b".into()],
+            known_installed: vec!["a".into(), "c".into()],
             manual_sources: vec![PathBuf::from("/a/skills")],
             auto_links: vec![AutoLink {
                 source: PathBuf::from("/a/skills"),
@@ -403,6 +419,28 @@ mod tests {
         let loaded = Store::new(dir).load_settings().unwrap();
         assert_eq!(loaded.disabled_harnesses, vec!["codex".to_string()]);
         assert_eq!(loaded.seen_issues, Vec::<SeenIssue>::new());
+    }
+
+    #[test]
+    fn old_settings_over_four_shown_are_trimmed_and_written_back() {
+        // 升级前的文件：没有 knownInstalled，5 个已安装全在显示
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"disabledHarnesses":[],"manualSources":[],"autoLinks":[]}"#,
+        )
+        .unwrap();
+        let s = Store::new(dir);
+        let installed: Vec<String> = ["claude-code", "codex", "cursor", "cline", "gemini-cli"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect();
+        let loaded = s.load_settings_reconciling_shown(&installed).unwrap();
+        assert_eq!(loaded.disabled_harnesses, vec!["gemini-cli".to_string()]);
+        let reread = s.load_settings().unwrap();
+        assert_eq!(reread, loaded);
+        assert_eq!(reread.known_installed, installed);
     }
 
     #[test]

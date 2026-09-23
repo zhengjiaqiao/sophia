@@ -601,6 +601,95 @@ pub fn enabled(installed: Vec<Harness>, settings: &Settings) -> Vec<Harness> {
         .collect()
 }
 
+/// 列表里最多显示几个 agent（DESIGN「设置页 › 最多 4 个」）：矩阵、工具行、添加页底部都按
+/// 4 个排版，再多就挤出窗口。唯一定义处，前端经 `list_harnesses` 拿到，不另写一个 4
+pub const MAX_SHOWN: usize = 4;
+
+/// 显示中的 agent 数：已安装且不在不显示名单里
+fn shown_count(installed: &[String], settings: &Settings) -> usize {
+    installed
+        .iter()
+        .filter(|id| !settings.disabled_harnesses.contains(id))
+        .count()
+}
+
+/// 按上限整理显示名单，返回是否改动。`installed` 按 agent 表的先后。
+/// - 新装的（不在 `known_installed` 里、也不在不显示名单里）：显示不满 `MAX_SHOWN` 个时照常出现，
+///   已满就记进不显示名单——不挤掉用户已经在看的
+/// - 新用户与升级上来的老数据 `known_installed` 为空，已安装的全算新装，于是按表先后留前 4 个
+/// - 兜底：仍超出（比如文件被手改过）就按表先后留前 4 个
+///
+/// 最后把 `known_installed` 换成这次的已安装集合：卸载了的从中移除，重装时再按新装算
+pub fn reconcile_shown(installed: &[String], settings: &mut Settings) -> bool {
+    let before = (
+        settings.disabled_harnesses.clone(),
+        settings.known_installed.clone(),
+    );
+    let mut shown = installed
+        .iter()
+        .filter(|id| {
+            settings.known_installed.contains(id) && !settings.disabled_harnesses.contains(id)
+        })
+        .count();
+    for id in installed {
+        if settings.known_installed.contains(id) || settings.disabled_harnesses.contains(id) {
+            continue;
+        }
+        if shown < MAX_SHOWN {
+            shown += 1;
+        } else {
+            settings.disabled_harnesses.push(id.clone());
+        }
+    }
+    let mut kept = 0;
+    for id in installed {
+        if settings.disabled_harnesses.contains(id) {
+            continue;
+        }
+        kept += 1;
+        if kept > MAX_SHOWN {
+            settings.disabled_harnesses.push(id.clone());
+        }
+    }
+    settings.known_installed = installed.to_vec();
+    before.0 != settings.disabled_harnesses || before.1 != settings.known_installed
+}
+
+/// 已显示满 `MAX_SHOWN` 个时再勾一个已安装的
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShownLimitReached;
+
+impl std::fmt::Display for ShownLimitReached {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "最多显示 {MAX_SHOWN} 个，先取消一个")
+    }
+}
+
+impl std::error::Error for ShownLimitReached {}
+
+/// 设置页勾选 / 取消勾选一个 agent。勾上已安装的而显示已满时拒绝，名单不动。
+/// 未安装的「恢复」（从不显示名单移除）不占名额：装上时再按新装的规则判
+pub fn set_shown(
+    installed: &[String],
+    settings: &mut Settings,
+    id: &str,
+    shown: bool,
+) -> Result<(), ShownLimitReached> {
+    let hidden = settings.disabled_harnesses.iter().any(|x| x == id);
+    if shown
+        && hidden
+        && installed.iter().any(|x| x == id)
+        && shown_count(installed, settings) >= MAX_SHOWN
+    {
+        return Err(ShownLimitReached);
+    }
+    settings.disabled_harnesses.retain(|x| x != id);
+    if !shown {
+        settings.disabled_harnesses.push(id.to_string());
+    }
+    Ok(())
+}
+
 /// 探测目录里至少要有一个条目不在通往 `global_dir` 的路径上。
 /// `npx skills add --agent '*'` 会给未安装的工具也建出 `~/.xxx/skills`，
 /// 这类只含 skills 路径的目录不算已安装。没有 global_dir 时存在即可
@@ -753,6 +842,166 @@ mod tests {
             ))
         );
         assert_eq!(h.project_dir, None);
+    }
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn shown(installed: &[String], settings: &Settings) -> Vec<String> {
+        installed
+            .iter()
+            .filter(|id| !settings.disabled_harnesses.contains(id))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn new_user_shows_first_four_installed_in_table_order() {
+        let installed = ids(&[
+            "claude-code",
+            "codex",
+            "cursor",
+            "cline",
+            "gemini-cli",
+            "amp",
+        ]);
+        let mut settings = Settings::default();
+        assert!(reconcile_shown(&installed, &mut settings));
+        assert_eq!(
+            shown(&installed, &settings),
+            ids(&["claude-code", "codex", "cursor", "cline"])
+        );
+        assert_eq!(settings.disabled_harnesses, ids(&["gemini-cli", "amp"]));
+        assert_eq!(settings.known_installed, installed);
+        // 再整理一次不动
+        assert!(!reconcile_shown(&installed, &mut settings));
+    }
+
+    #[test]
+    fn old_data_over_four_keeps_first_four_and_hides_the_rest() {
+        // 升级上来：没有 known_installed，已显示 6 个，其中 codex 早被用户关掉
+        let installed = ids(&[
+            "claude-code",
+            "codex",
+            "cursor",
+            "cline",
+            "gemini-cli",
+            "github-copilot",
+            "amp",
+        ]);
+        let mut settings = Settings {
+            disabled_harnesses: ids(&["codex"]),
+            ..Default::default()
+        };
+        assert!(reconcile_shown(&installed, &mut settings));
+        assert_eq!(
+            shown(&installed, &settings),
+            ids(&["claude-code", "cursor", "cline", "gemini-cli"])
+        );
+        assert_eq!(
+            settings.disabled_harnesses,
+            ids(&["codex", "github-copilot", "amp"])
+        );
+    }
+
+    #[test]
+    fn old_data_within_four_is_left_alone() {
+        let installed = ids(&["claude-code", "codex", "cursor"]);
+        let mut settings = Settings {
+            disabled_harnesses: ids(&["kiro-cli"]),
+            ..Default::default()
+        };
+        reconcile_shown(&installed, &mut settings);
+        assert_eq!(shown(&installed, &settings), installed);
+        assert_eq!(settings.disabled_harnesses, ids(&["kiro-cli"]));
+    }
+
+    #[test]
+    fn newly_installed_appears_only_while_under_four() {
+        let mut settings = Settings::default();
+        let three = ids(&["claude-code", "codex", "cline"]);
+        reconcile_shown(&three, &mut settings);
+        // 不满 4 个：新装的 cursor 自动出现
+        let four = ids(&["claude-code", "codex", "cursor", "cline"]);
+        assert!(reconcile_shown(&four, &mut settings));
+        assert_eq!(shown(&four, &settings), four);
+        // 已满：新装的 amp 排在表的前面也不挤掉已显示的，记进不显示名单
+        let five = ids(&["claude-code", "codex", "cursor", "amp", "cline"]);
+        assert!(reconcile_shown(&five, &mut settings));
+        assert_eq!(shown(&five, &settings), four);
+        assert_eq!(settings.disabled_harnesses, ids(&["amp"]));
+    }
+
+    #[test]
+    fn uninstalled_then_reinstalled_counts_as_new() {
+        let mut settings = Settings::default();
+        let four = ids(&["claude-code", "codex", "cursor", "cline"]);
+        reconcile_shown(&four, &mut settings);
+        // 卸掉 cursor：不再算已知
+        let three = ids(&["claude-code", "codex", "cline"]);
+        reconcile_shown(&three, &mut settings);
+        assert_eq!(settings.known_installed, three);
+        // 这期间用户勾上了 gemini-cli，满 4 个
+        let with_gemini = ids(&["claude-code", "codex", "cline", "gemini-cli"]);
+        reconcile_shown(&with_gemini, &mut settings);
+        // cursor 重装：已满，不自动出现
+        let all = ids(&["claude-code", "codex", "cursor", "cline", "gemini-cli"]);
+        reconcile_shown(&all, &mut settings);
+        assert_eq!(shown(&all, &settings), with_gemini);
+    }
+
+    #[test]
+    fn hand_edited_known_list_over_four_is_trimmed_in_table_order() {
+        let installed = ids(&["claude-code", "codex", "cursor", "cline", "amp"]);
+        let mut settings = Settings {
+            known_installed: installed.clone(),
+            ..Default::default()
+        };
+        assert!(reconcile_shown(&installed, &mut settings));
+        assert_eq!(shown(&installed, &settings).len(), MAX_SHOWN);
+        assert_eq!(settings.disabled_harnesses, ids(&["amp"]));
+    }
+
+    #[test]
+    fn set_shown_refuses_a_fifth_and_allows_after_unchecking_one() {
+        let installed = ids(&["claude-code", "codex", "cursor", "cline", "amp"]);
+        let mut settings = Settings::default();
+        reconcile_shown(&installed, &mut settings);
+        let before = settings.clone();
+        let refused = set_shown(&installed, &mut settings, "amp", true);
+        assert_eq!(refused, Err(ShownLimitReached));
+        assert_eq!(
+            refused.unwrap_err().to_string(),
+            "最多显示 4 个，先取消一个"
+        );
+        assert_eq!(settings, before);
+        // 勾一个已显示的：不算加一个
+        set_shown(&installed, &mut settings, "codex", true).unwrap();
+        assert_eq!(settings, before);
+        // 取消一个再勾
+        set_shown(&installed, &mut settings, "codex", false).unwrap();
+        set_shown(&installed, &mut settings, "amp", true).unwrap();
+        assert_eq!(
+            shown(&installed, &settings),
+            ids(&["claude-code", "cursor", "cline", "amp"])
+        );
+    }
+
+    #[test]
+    fn restoring_an_uninstalled_agent_does_not_take_a_slot() {
+        let installed = ids(&["claude-code", "codex", "cursor", "cline"]);
+        let mut settings = Settings {
+            disabled_harnesses: ids(&["kiro-cli"]),
+            ..Default::default()
+        };
+        reconcile_shown(&installed, &mut settings);
+        set_shown(&installed, &mut settings, "kiro-cli", true).unwrap();
+        assert!(settings.disabled_harnesses.is_empty());
+        // 装上时已满：照新装的规则，不自动出现
+        let five = ids(&["claude-code", "codex", "cursor", "cline", "kiro-cli"]);
+        reconcile_shown(&five, &mut settings);
+        assert_eq!(shown(&five, &settings), installed);
     }
 
     #[test]
