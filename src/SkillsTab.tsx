@@ -904,7 +904,7 @@ export default function SkillsTab({
     ) : null;
 
   if (!overview) {
-    return <Empty kind="scanning" description="正在读 skill 目录" art="horizon" />;
+    return <Empty kind="scanning" description="正在读 skill 目录" art="scanning" />;
   }
   if (page === null) {
     return (
@@ -913,7 +913,7 @@ export default function SkillsTab({
           kind="noAgentDirs"
           description="这个项目下还没有 agent 的 skill 目录"
           primary={{ label: "来源", icon: <IconPlus size={12} />, onClick: () => setAddOpen(true) }}
-          art="folders"
+          art="noDirs"
         />
         {/* 这个位置还没有扫描出来的页：名字取项目文件夹名，没有列可当目标 */}
         {addPage({ key: selectedKey, label: folderLabel(selectedKey) }, [])}

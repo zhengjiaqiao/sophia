@@ -317,7 +317,7 @@ export default function SourcesPage(props: SourcesPageProps) {
         <Empty
           kind="noSkills"
           description={model.emptyText}
-          art="folders"
+          art="emptyFolder"
           primary={{
             label: "来源",
             icon: <IconPlus size={12} />,

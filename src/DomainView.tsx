@@ -404,9 +404,9 @@ export default function DomainView(props: DomainViewProps) {
         action={{ label: "清除筛选", onClick: props.onClearFilter }}
       />
     ) : noAgentDirs ? (
-      <Empty text={`${page.label} 下还没有 agent 的 skill 目录`} art="folders" />
+      <Empty text={`${page.label} 下还没有 agent 的 skill 目录`} art="noDirs" />
     ) : (
-      <Empty text={`${page.label} 里还没有 skill`} art="links" />
+      <Empty text={`${page.label} 里还没有 skill`} art="emptyFolder" />
     );
 
   return (
@@ -467,7 +467,7 @@ export default function DomainView(props: DomainViewProps) {
 }
 
 /// 表格里的空态：一句现状，筛选无结果时再加 `清除筛选`（表头照常在上面）。`+ 来源` 在工具行，不在这里重复。
-/// 图按 DESIGN「图像」：没有 agent 目录 folders、一个都没有 links；筛选无结果不放图
+/// 图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；筛选无结果不放图
 export function Empty({
   text,
   action,
@@ -479,7 +479,7 @@ export function Empty({
 }) {
   return (
     <UiEmpty
-      kind={art === "folders" ? "noAgentDirs" : art === "links" ? "noSkills" : "noMatch"}
+      kind={art === "noDirs" ? "noAgentDirs" : art === "emptyFolder" ? "noSkills" : "noMatch"}
       description={text}
       primary={action}
       art={art}

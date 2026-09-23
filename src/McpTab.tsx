@@ -907,7 +907,7 @@ export default function McpTab({
 
   // ===== 渲染 =====
 
-  if (!overview) return <Empty kind="scanning" description="正在读 MCP 配置" art="horizon" />;
+  if (!overview) return <Empty kind="scanning" description="正在读 MCP 配置" art="scanning" />;
 
   if (overview.locations.length === 0) {
     return (
@@ -915,7 +915,7 @@ export default function McpTab({
         kind="noAgentDirs"
         description="没找到 Claude Code、Codex 或 Cursor 的 MCP 配置文件"
         hint="只看文件里的配置；Claude.ai 的连接器和内置 MCP 不在其中"
-        art="folders"
+        art="noDirs"
       />
     );
   }
@@ -929,7 +929,7 @@ export default function McpTab({
           selectedKey === "global" ? "这个位置下还没有可用的 MCP 配置位置" : "这个项目里还没有 MCP"
         }
         hint="装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置"
-        art="folders"
+        art="noDirs"
       />
     );
   }
@@ -1195,13 +1195,13 @@ export default function McpTab({
         }}
       />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
-      <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="links" />
+      <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="emptyFolder" />
     ) : (
       <TableEmpty
         text={
           page.key === "global" ? `${page.label} 还没有自己的 MCP 配置` : "这个项目里还没有 MCP"
         }
-        art="links"
+        art="emptyFolder"
       />
     );
 

@@ -1121,13 +1121,13 @@ test("Empty 两个动作里只有一个是按钮，另一个降文字链", () =>
 test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首次扫描有图时忙碌指示跟在句子前", () => {
   const folders = render(Empty, {
     kind: "noAgentDirs",
-    art: "folders",
+    art: "noDirs",
     primary: { label: "添加 skill", onClick: noop },
   });
   assert.match(folders, /class="ss-empty ss-empty--noAgentDirs has-art"/);
   assert.match(
     folders,
-    /<img class="ss-empty__art ss-empty__art--folders" src="type-folders\.svg" alt="" aria-hidden="true"\/>/,
+    /<img class="ss-empty__art ss-empty__art--noDirs" src="empty-no-dirs\.png" alt="" aria-hidden="true"\/>/,
   );
   // 顺序：图 → 一句现状 → 动作
   assert.ok(folders.indexOf("ss-empty__art") < folders.indexOf("ss-empty__description"));
@@ -1135,15 +1135,23 @@ test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首�
 
   const scanning = render(Empty, {
     kind: "scanning",
-    art: "horizon",
+    art: "scanning",
     description: "正在读 3 个位置",
   });
-  assert.match(scanning, /src="horizon\.jpg"/);
+  assert.match(scanning, /src="empty-scanning\.png"/);
   assert.match(scanning, /class="ss-empty__busy"><svg class="ss-spinner" width="14"/);
 
   // 不给 art 就不放图（筛选无结果）
   assert.doesNotMatch(render(Empty, { kind: "noMatch" }), /<img/);
-  assert.match(cssRule(uiCss, ".ss-empty__art--horizon"), /object-fit:\s*cover/);
+  assert.match(render(Empty, { kind: "noSkills", art: "emptyFolder" }), /src="empty-folder\.png"/);
+  // 小黑猫三张都按显示尺寸原样画（2x 资源），不裁切
+  const scanRule = cssRule(uiCss, ".ss-empty__art--scanning");
+  assert.match(scanRule, /width:\s*472px/);
+  assert.match(scanRule, /height:\s*150px/);
+  assert.doesNotMatch(uiCss, /ss-empty__art[^{]*\{[^}]*object-fit/);
+  const smallRule = cssRule(uiCss, ".ss-empty__art--emptyFolder");
+  assert.match(smallRule, /width:\s*250px/);
+  assert.match(smallRule, /height:\s*110px/);
 });
 
 test("刚变化的格子闪一下：120ms 反色再回落，减少动效时退化为无", () => {

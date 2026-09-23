@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
 import { Spinner } from "./Spinner.tsx";
-import horizon from "../assets/horizon.jpg";
-import folders from "../assets/type-folders.svg";
-import links from "../assets/type-links.svg";
+import scanning from "../assets/empty-scanning.png";
+import noDirs from "../assets/empty-no-dirs.png";
+import emptyFolder from "../assets/empty-folder.png";
 
 /// 空态与忙碌态（DESIGN「空态与忙碌态」「转盘」）。
 ///
@@ -12,13 +12,16 @@ import links from "../assets/type-links.svg";
 ///
 /// 图像（DESIGN「图像」）：只用在没有数据、等待、刚开始的时刻；筛选无结果不放图。
 /// 图在上、不带边框，下面依次是现状一句、动作（间距 16 / 8 / 16），整体居中；图是装饰，
-/// `alt=""` + `aria-hidden`。`horizon` 地平线照片（仅首次启动 / 首次扫描，472×200 cover）；
-/// `folders` / `links` 类型学线稿（原尺寸 250 宽）。有图时首次扫描的忙碌指示跟在那句话前面
+/// `alt=""` + `aria-hidden`。一种风格：品牌小黑猫配线稿文件夹，三张各对一个时刻（2x 资源，原样显示不裁切）。
+/// 有图时首次扫描的忙碌指示跟在那句话前面
 
-/// 空态图像：地平线照片与两张类型学线稿
-export type EmptyArt = "horizon" | "folders" | "links";
+/// 空态图像，按时刻命名：
+/// - `scanning` 扫描中：猫走在一排文件夹顶上（472×150）
+/// - `noDirs` 没有 agent 目录：猫伸爪碰一个虚线文件夹——还不存在、添加时会建出来（250×110）
+/// - `emptyFolder` 这里还没有东西：猫扒着空文件夹的沿往里看（250×110）
+export type EmptyArt = "scanning" | "noDirs" | "emptyFolder";
 
-const ART_SRC: Record<EmptyArt, string> = { horizon, folders, links };
+const ART_SRC: Record<EmptyArt, string> = { scanning, noDirs, emptyFolder };
 
 export type EmptyKind =
   /// 首次扫描中：24px 忙碌指示 + 一句忙什么

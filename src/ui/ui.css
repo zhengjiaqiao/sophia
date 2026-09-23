@@ -1336,16 +1336,16 @@
   margin-bottom: var(--space-md);
 }
 
-.ss-empty__art--horizon {
+/* 三张都是 2x 资源，按显示尺寸原样画出、不裁切：扫描中 472×150，另两张 250×110 */
+.ss-empty__art--scanning {
   width: 472px;
-  height: 200px;
-  object-fit: cover;
+  height: 150px;
 }
 
-.ss-empty__art--folders,
-.ss-empty__art--links {
+.ss-empty__art--noDirs,
+.ss-empty__art--emptyFolder {
   width: 250px;
-  height: auto;
+  height: 110px;
 }
 
 .ss-empty.has-art .ss-empty__hint {
