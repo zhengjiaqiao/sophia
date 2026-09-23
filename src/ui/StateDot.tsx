@@ -8,8 +8,6 @@ import { Tooltip } from "./Tooltip.tsx";
 /// 失效＝虚线环（4 段、段间 1.5，虚线在空态里已教过「目标不在」）、写不进＝斜杠环、
 /// 同名被挡＝环内短横、整个文件夹是链接＝环内向右箭头（箭头不穿出环，否则读成 ♂）。
 ///
-/// 16px 版给待处理页左列：与格内同形，类别名进 title，三处只学一次。
-///
 /// 悬停光晕（DESIGN「格子悬停光晕」）：可点的点悬停 / 键盘聚焦时，**点本身一点不变**，
 /// 只在点的下层出一圈直径 22 的圆形 hairline 光晕，说「能点」，不预告结果（结果由提示框的动词说）。
 /// 原件 / 无此格 / 异常格点了不是开关，不出光晕。
@@ -31,7 +29,7 @@ export const DOT_LABEL: Record<Dot, string> = {
 
 export interface StateDotProps {
   dot: Dot;
-  /// 10：表格格子（默认）；16：待处理页与说明里的大一号记号
+  /// 10：表格格子（默认）；16：说明里的大一号记号
   size?: 10 | 16;
   /// 画在实心黑上：刚点亮那 120ms 的反色闪（格底由调用方铺黑），记号转白
   inverse?: boolean;
@@ -227,8 +225,8 @@ export function StateDot({
 export interface DupMarkProps {
   /// 份数，默认 2
   count?: number;
-  /// row：表格名字后，等宽 12 `ink-faint`；strong：待处理页记号列，墨色 13/600
-  tone?: "row" | "strong";
+  /// row：表格名字后，等宽 12 `ink-faint`（目前只有这一档）
+  tone?: "row";
   /// 给了就挂提示框（点状下划线，不可点），并去掉原生 title——主视图放不下越界读数时，
   /// 在这里同时列两份的读数
   tip?: ReactNode;

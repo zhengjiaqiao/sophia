@@ -56,7 +56,6 @@ export {
   IconChevronRight,
   IconClose,
   IconEdit,
-  IconInbox,
   IconPlus,
   IconSearch,
   IconSettings,

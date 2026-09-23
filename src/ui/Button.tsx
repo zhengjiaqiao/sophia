@@ -114,39 +114,27 @@ export interface IconButtonProps {
   /// **必填**：同时作 `aria-label`。图标不替代文案，文案挪到这里
   title: string;
   onClick?: () => void;
-  /// 跟在图标右侧 4px 的等宽计数（顶栏收件箱）。0 或不给时不显示
-  count?: number;
   onDark?: boolean;
   /// 给了就禁用，并作为悬停说明（禁用必带原因）
   disabledReason?: string;
 }
 
 /// 图标按钮（DESIGN「图标按钮」）：16px 图形、1.4 描边、28×28 命中区、无描边无底，
-/// 悬停 `surface` 底 2px 圆角。顶栏的收件箱与设置齿轮是同一个组件、同一个尺寸
-export function IconButton({
-  icon,
-  title,
-  onClick,
-  count,
-  onDark,
-  disabledReason,
-}: IconButtonProps) {
+/// 悬停 `surface` 底 2px 圆角。顶栏的设置齿轮、提示条与侧栏的 × 都是它
+export function IconButton({ icon, title, onClick, onDark, disabledReason }: IconButtonProps) {
   const classes = ["ss-iconbtn"];
   if (onDark) classes.push("is-on-dark");
-  if (count) classes.push("has-count");
   const disabled = Boolean(disabledReason);
-  const label = count ? `${title}（${count}）` : title;
   return (
     <button
       type="button"
       className={classes.join(" ")}
       title={disabled ? disabledReason : title}
-      aria-label={label}
+      aria-label={title}
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
     >
       <span className="ss-iconbtn__glyph">{icon}</span>
-      {count ? <span className="ss-iconbtn__count">{count}</span> : null}
     </button>
   );
 }

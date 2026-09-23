@@ -173,7 +173,7 @@ test("StateDot 异常：失效＝4 段虚线环、写不进＝斜杠环、同名
   );
 });
 
-test("StateDot 16px 版：给待处理页左列，与格内同形", () => {
+test("StateDot 16px 版：与格内同形", () => {
   const html = render(StateDot, { dot: "broken", size: 16, title: "链接失效" });
   assert.match(html, /width="16" height="16" viewBox="0 0 16 16"/);
   assert.match(html, /stroke-dasharray="8\.4 1\.5"/);
@@ -237,15 +237,12 @@ test("StateDot 反色闪与禁用灰：inverse 转白、muted 转 disabled", () 
   );
 });
 
-test("DupMark：名字后 ×2；待处理记号列那一档是墨色粗体", () => {
+test("DupMark：名字后 ×2", () => {
   const row = render(DupMark, {});
   assert.match(row, /class="ss-dup ss-dup--row"/);
   assert.match(row, />×2</);
   assert.match(row, /aria-label="同名：有 2 份"/);
-  assert.match(
-    render(DupMark, { tone: "strong", count: 3 }),
-    /class="ss-dup ss-dup--strong"[^>]*>×3</,
-  );
+  assert.match(render(DupMark, { count: 3 }), />×3</);
 });
 
 // ===== 按钮 =====
@@ -318,24 +315,14 @@ test("Button 黑面上：白描边键", () => {
   assert.match(cssRule(uiCss, ".ss-btn.is-on-dark"), /border-color:\s*var\(--canvas\)/);
 });
 
-test("IconButton：28×28，title 必填且同时作 aria-label；收件箱计数等宽跟在右侧", () => {
+test("IconButton：28×28，title 必填且同时作 aria-label；不带计数", () => {
   const html = render(IconButton, { icon: IconCheck({}), title: "设置", onClick: noop });
   assert.match(html, /class="ss-iconbtn"/);
   assert.match(html, /title="设置"/);
   assert.match(html, /aria-label="设置"/);
-  const inbox = render(IconButton, {
-    icon: IconCheck({}),
-    title: "待处理",
-    count: 3,
-    onClick: noop,
-  });
-  assert.match(inbox, /class="ss-iconbtn__count">3</);
-  assert.match(inbox, /aria-label="待处理（3）"/);
-  // 0 时不显示数字、图标仍在
-  assert.doesNotMatch(
-    render(IconButton, { icon: IconCheck({}), title: "待处理", count: 0 }),
-    /ss-iconbtn__count/,
-  );
+  // 顶栏只剩设置；页签上、图标上都不挂计数（常驻的数字会一直催处理不了的事）
+  assert.doesNotMatch(html, /ss-iconbtn__count/);
+  assert.doesNotMatch(uiCss, /\.ss-iconbtn__count|\.ss-iconbtn\.has-count/);
 });
 
 test("AddButton：开始一个添加流程只有「+ 名词」这一种长相", () => {
@@ -583,6 +570,22 @@ test("Toast 部分失败：! + 2 ✓ · 1 ⊘ 读数 + 查看，停 8 秒", () =
   assert.match(html, /aria-label="2 个成功，1 个没成"/);
   assert.match(html, />查看</);
   assert.equal(TOAST_DWELL_MS.partial, 8000);
+});
+
+test("Toast 需要注意（新问题一次性提示）：! + 主语加粗 + 半句 + 查看 + ×，读屏名不是「部分失败」", () => {
+  const html = render(Toast, {
+    kind: "attention",
+    verb: "defuddle",
+    reading: "有两份",
+    action: { label: "查看", onClick: noop },
+    onClose: noop,
+  });
+  assert.match(html, /class="ss-toast ss-toast--notice" data-kind="attention" role="status"/);
+  assert.match(html, /title="需要注意"/);
+  assert.match(html, /class="ss-toast__verb">defuddle</);
+  assert.match(html, /class="ss-toast__reading">有两份</);
+  assert.match(html, />查看</);
+  assert.match(html, /aria-label="关闭"/);
 });
 
 test("Toast 展开态：删原件的后果与路径放在副行之下", () => {
@@ -1009,7 +1012,7 @@ test("返回时找回触发它的那颗键：主视图重挂过也按读屏名�
   });
   const gear = btn("设置", "");
   const key = triggerKey(gear);
-  const fresh = [btn("待处理（3）", "3"), btn("设置", ""), btn(null, "+ skill")];
+  const fresh = [btn("关闭", ""), btn("设置", ""), btn(null, "+ skill")];
   assert.equal(pickTrigger(fresh, key), 1);
   assert.equal(pickTrigger(fresh, triggerKey(btn(null, " + skill "))), 2);
   assert.equal(pickTrigger(fresh, triggerKey(btn(null, "配置网关"))), -1);

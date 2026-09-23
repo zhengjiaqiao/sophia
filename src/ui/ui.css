@@ -224,10 +224,6 @@
   transition: background-color var(--motion-fast) var(--ease-mech);
 }
 
-.ss-iconbtn.has-count {
-  padding: 0 6px;
-}
-
 .ss-iconbtn:hover:not(:disabled) {
   background: var(--surface);
 }
@@ -252,12 +248,6 @@
 .ss-iconbtn__glyph {
   display: inline-flex;
   transition: transform var(--motion-fast) var(--ease-mech);
-}
-
-.ss-iconbtn__count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ===== 2. 开关 Switch =====
@@ -634,7 +624,7 @@
   cursor: pointer;
 }
 
-/* 同名 ×2：表格行里等宽 12 ink-faint；待处理记号列墨色 13/600 */
+/* 同名 ×2：表格行里等宽 12 ink-faint */
 .ss-dup {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -645,12 +635,6 @@
 .ss-dup--row {
   font-size: var(--size-micro);
   color: var(--ink-faint);
-}
-
-.ss-dup--strong {
-  font-size: var(--size-caption);
-  font-weight: 600;
-  color: var(--ink);
 }
 
 /* ===== 5. 提示框 Tooltip：黑窗白字 12，内边距 6 8，圆角 6（control），浮层阴影 tip，最大宽 240 ===== */

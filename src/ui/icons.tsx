@@ -95,16 +95,6 @@ export function IconSearch(props: IconProps) {
   );
 }
 
-/// 待处理：收件箱。顶栏的全局入口
-export function IconInbox(props: IconProps) {
-  return (
-    <Glyph {...props}>
-      <path d="M2.5 9.5h3.2l.9 1.7h2.8l.9-1.7h3.2" />
-      <path d="M4.3 3.5h7.4l1.8 6v3h-11v-3z" />
-    </Glyph>
-  );
-}
-
 /// 添加：+（图标按钮里 16px）。`AddButton` 里的是 12px 的同形
 export function IconPlus(props: IconProps) {
   return (
