@@ -80,8 +80,9 @@ export interface MatrixCellView {
 export interface MatrixRowView {
   key: string;
   name: string;
-  /// 原件位置 / 来源位置格：来源名（同名来源用区分片段）+ 完整路径；悬停出路径提示框与 `打开 ↗`
-  origin: { id: string; label: string; path: string; onReveal: () => void };
+  /// 原件位置 / 来源位置格：来源名（同名来源用区分片段）+ 完整路径；悬停出路径提示框与 `打开 ↗`。
+  /// `gone`：原件已经不在了（孤链行），名字用 `ink-faint`，不出 `打开 ↗`
+  origin: { id: string; label: string; path: string; onReveal: () => void; gone?: boolean };
   /// 列 id → 格；null＝这一行在这一列没有格（短横，不可点）
   cells: Record<string, MatrixCellView | null>;
   /// 名字后的标注：`×2`（提示框同时列两份读数）、`2 份不一样`、`Codex 不支持`
@@ -988,11 +989,11 @@ export default function Matrix(props: MatrixProps) {
                 }
                 context="table"
               >
-                <span className="mx-origin" tabIndex={-1}>
+                <span className={`mx-origin${row.origin.gone ? " is-gone" : ""}`} tabIndex={-1}>
                   {row.origin.label}
                 </span>
               </Tooltip>
-              {hot && !open && toast === null ? (
+              {hot && !open && toast === null && !row.origin.gone ? (
                 <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
               ) : null}
             </div>

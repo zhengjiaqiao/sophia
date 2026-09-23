@@ -361,6 +361,11 @@
   white-space: nowrap;
 }
 
+/* 孤链行：原件已经不在了，位置格写「不在了」 */
+.mx-origin.is-gone {
+  color: var(--ink-faint);
+}
+
 /* 动作链不折行：「打开 ↗」整体一行不缩，旁边的来源名按列宽截断（完整值在提示框里） */
 .mx-row__origin > .ss-tipwrap:first-child {
   flex: 0 1 auto;

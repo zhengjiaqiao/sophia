@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
-import { BATCH_BUSY_DELAY_MS } from "./Matrix";
+import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
+import { orphanRows, type OrphanRow } from "./orphanRows";
 import ImportPage from "./pages/ImportPage";
 import { pathsOfKey } from "./pages/pendingIssues";
 import { shortDate } from "./dateText";
@@ -70,6 +71,7 @@ export interface SkillsTabProps {
 ///   `撤销` 与 ⌘Z 同一条路径、撤后这一行直接消失；失败不出这一行，弹回 + 格下小黑窗说原因
 /// - 批量：一行提示条贴在被按下的键下方，右对齐该键；动词与键一致，键上读数随之翻转
 /// - 只留这份：先出锚定确认；确认后直接删，例行一行贴在留下那一行下方（无撤销）
+/// - 孤链（原件已不在的失效链接，照样成一行）：点格即清除、不确认；例行一行出在那一行里（无撤销）
 /// - 自动规则在背后做了事：右下例行一行，右沿对齐面板右沿 + 撤销
 export default function SkillsTab({
   overview,
@@ -111,6 +113,10 @@ export default function SkillsTab({
   const cellToastSeq = useRef(0);
   const [rowToast, setRowToast] = useState<{ rowKey: string; node: ReactNode } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
+  // 孤链格：点下去就先画成没有这一格（清除的目标状态），做成重扫后数据自己对上，没成弹回
+  const [orphanGone, setOrphanGone] = useState<Set<string>>(new Set());
+  // 刚清完的孤链行：数据里已经没有它了，例行一行还要在它里面待满 4 秒，这期间照原样留着
+  const [orphanGhost, setOrphanGhost] = useState<OrphanRow | null>(null);
   // 「只留这份」挂起未提交时藏起来的另一份（行键）
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [dupReadout, setDupReadout] = useState<Map<string, string>>(new Map());
@@ -362,6 +368,53 @@ export default function SkillsTab({
     if (state === "linked" || state === "missing" || state === "broken") toggleCell(ref, state);
     // 写不进去：再试一次就是再开一次
     else if (state === "readOnly") toggleCell(ref, "missing");
+  };
+
+  // ===== 孤链：点格清除，不确认（链接本来就指向空处）；没有撤销——重建一条指向空处的链接没有意义 =====
+
+  const clearOrphan = (orphan: OrphanRow, targetId: string) => {
+    const link = orphan.links.find((l) => l.targetId === targetId);
+    if (!link) return;
+    const key = cellKey(orphan.key, targetId);
+    setCellNotice(null);
+    setOrphanGone((prev) => new Set(prev).add(key));
+    setFlash({ keys: [key], nonce: Date.now() });
+    void enqueue(async () => {
+      try {
+        const report = await api.applyAll([link.clear], true);
+        const bad = report.entries.find((e) => e.outcome.status === "failed");
+        if (bad && bad.outcome.status === "failed") {
+          setCellNotice({
+            rowKey: orphan.key,
+            columnId: targetId,
+            text: `没能清除：${bad.outcome.reason}`,
+          });
+        } else {
+          undoRef.current = null;
+          setOrphanGhost({ ...orphan, links: orphan.links.filter((l) => l.targetId !== targetId) });
+          const text = toastFor("clear", {
+            done: [{ name: orphan.skill, agent: agentRef(targetOf(targetId)) }],
+            omitNames: true,
+          });
+          setCellToast({
+            id: ++cellToastSeq.current,
+            rowKey: orphan.key,
+            node: (
+              <Toast {...text} dwellMs={CELL_TOAST_DWELL_MS} holdOnHover onDismiss={dismissCell} />
+            ),
+          });
+        }
+        await onRefresh();
+      } catch (e) {
+        setCellNotice({ rowKey: orphan.key, columnId: targetId, text: String(e) });
+      } finally {
+        setOrphanGone((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    });
   };
 
   // ===== 批量：提示条贴在被按下的键下方 =====
@@ -666,6 +719,18 @@ export default function SkillsTab({
       (originFilter === null || row.sourceId === originFilter),
   );
   const hiddenRows = hidden;
+  // 孤链行：点过的格先去掉；刚清完、数据里已没有的那一行，例行一行还在时照留
+  const liveOrphans = orphanRows(page).map((o) => ({
+    ...o,
+    links: o.links.filter((l) => !orphanGone.has(cellKey(o.key, l.targetId))),
+  }));
+  const ghost =
+    orphanGhost !== null &&
+    cellToast?.rowKey === orphanGhost.key &&
+    !liveOrphans.some((o) => o.key === orphanGhost.key)
+      ? orphanGhost
+      : null;
+  const orphans = ghost ? [...liveOrphans, ghost] : liveOrphans;
 
   return (
     <section className="mx-page">
@@ -678,6 +743,8 @@ export default function SkillsTab({
         dupReadout={dupReadout}
         onDupHover={dupHover}
         onKeepThis={(kept, other, anchor) => void keepThis(kept, other, anchor)}
+        orphans={orphans}
+        onClearOrphan={clearOrphan}
         busy={busy}
         filterText={filterText}
         onFilterText={setFilterText}

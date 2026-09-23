@@ -6,7 +6,8 @@
 ///
 /// 「原件位置」列恢复、按来源分组撤销（DESIGN「产品裁决」冲突表）：位置信息常驻视线；
 /// 点这一列列头文字按位置排序。自动添加规则只在添加页管理，主视图不放规则入口。
-/// 说明横幅、「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接）。
+/// 说明横幅、「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接；
+/// 原件已不在的孤链照样成一行，点那一格就是清除）。
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import Matrix, {
@@ -20,6 +21,7 @@ import { distinguishingSegments } from "./pages/importDefaults";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
+import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
 import { AddButton, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
@@ -52,6 +54,10 @@ export interface DomainViewProps {
   onDupHover: (row: DomainRow) => void;
   /// 点「只留这份」：anchor 是按钮此刻的矩形，确认框锚在它上面
   onKeepThis: (row: DomainRow, other: DomainRow, anchor: ConfirmAnchor) => void;
+  /// 孤链行（原件已不在的失效链接，见 orphanRows.ts）。本页全部，筛选在这里做
+  orphans: OrphanRow[];
+  /// 点孤链格：清除这条链接
+  onClearOrphan: (orphan: OrphanRow, targetId: string) => void;
 
   busy: boolean;
   filterText: string;
@@ -266,6 +272,34 @@ export default function DomainView(props: DomainViewProps) {
       };
     });
 
+  // ---- 孤链行：名字 + 原件位置「不在了」，有孤链的格虚线环、点一下清除；勾不动 ----
+  const orphanQuery = props.filterText.trim().toLowerCase();
+  const orphans = props.orphans.filter(
+    (o) =>
+      props.originFilter === null &&
+      (orphanQuery === "" || o.skill.toLowerCase().includes(orphanQuery)),
+  );
+  for (const orphan of orphans) {
+    const cells: Record<string, MatrixCellView | null> = {};
+    for (const target of page.targets) {
+      const link = orphan.links.find((l) => l.targetId === target.id);
+      cells[target.id] = link ? { dot: "broken", clickable: true, tip: ORPHAN_TIP } : null;
+    }
+    matrixRows.push({
+      key: orphan.key,
+      name: orphan.skill,
+      origin: {
+        id: orphan.key,
+        label: ORPHAN_ORIGIN,
+        path: orphan.pointedTo,
+        onReveal: () => undefined,
+        gone: true,
+      },
+      cells,
+      selectDisabledReason: ORPHAN_SELECT_REASON,
+    });
+  }
+
   // ---- 选择操作条：已选的 × 每个 agent，写出按下会产生的增量 ----
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
@@ -367,7 +401,7 @@ export default function DomainView(props: DomainViewProps) {
       rows={matrixRows}
       originLabel="原件位置"
       sources={{
-        total: page.rows.length - props.hiddenRows.size,
+        total: page.rows.length - props.hiddenRows.size + props.orphans.length,
         selected: props.originFilter,
         onSelect: props.onOriginFilter,
         items: [...counts].map(([id, count]) => ({
@@ -390,7 +424,12 @@ export default function DomainView(props: DomainViewProps) {
       busy={props.busy}
       onCell={(rowKey, columnId) => {
         const row = page.rows.find((r) => skillRowKey(r) === rowKey);
-        if (row) props.onCell({ sourceId: row.sourceId, skill: row.skill, targetId: columnId });
+        if (row) {
+          props.onCell({ sourceId: row.sourceId, skill: row.skill, targetId: columnId });
+          return;
+        }
+        const orphan = props.orphans.find((o) => o.key === rowKey);
+        if (orphan) props.onClearOrphan(orphan, columnId);
       }}
       onUndo={props.onUndo}
       shortcuts={props.shortcuts}
