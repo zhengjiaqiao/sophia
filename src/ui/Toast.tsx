@@ -25,7 +25,8 @@ import { Tooltip } from "./Tooltip.tsx";
 /// 记号同部分失败的 `!`，读屏名是「需要注意」；它不给 onDismiss，不自动消失
 export type ToastKind = "success" | "cannot" | "partial" | "attention";
 
-/// 停留时长：成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿
+/// 停留时长：带动作（撤销 / 查看）的成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿；
+/// 没有动作的成功约 4 秒（`CELL_TOAST_DWELL_MS`）
 export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   success: 6000,
   cannot: 8000,
@@ -145,7 +146,9 @@ export function Toast(props: ToastProps) {
     fadeOut = false,
     holdOnHover = false,
   } = props;
-  const dwell = dwellMs ?? TOAST_DWELL_MS[kind];
+  // 没有动作（撤销 / 查看）的成功只是一句告知，约 4 秒就走（同单格例行一行）；6 秒是留给点撤销的
+  const dwell =
+    dwellMs ?? (kind === "success" && !action ? CELL_TOAST_DWELL_MS : TOAST_DWELL_MS[kind]);
   // 悬停 / 焦点在里面：停表；到点前最后 120ms：淡出中
   const [held, setHeld] = useState(false);
   const [leaving, setLeaving] = useState(false);
