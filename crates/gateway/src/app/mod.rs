@@ -15,6 +15,8 @@ use symsync_core::codex_models::config::{self, ConfigError, Managed};
 use symsync_core::codex_models::settings::{self, GatewaySettings, ProviderSettings, SavedModel};
 
 pub const SERVICE_LABEL: &str = "com.zhengjiaqiao.symsync.gateway";
+/// Sophia 的 bundle identifier（tauri.conf.json 的 `identifier`）：路由后台服务挂在它名下
+pub const APP_BUNDLE_ID: &str = "com.zhengjiaqiao.symsync";
 /// 本功能放在 Codex 目录下的文件统一用这个前缀，恢复时据此精确清理
 pub const OWN_FILE_PREFIX: &str = "symsync-";
 const CATALOG_FILE: &str = "symsync-models.json";
@@ -803,6 +805,7 @@ impl App {
             .collect(),
             log_path: Some(log_dir.join("service.log").to_string_lossy().into_owned()),
             env: Default::default(),
+            associated_bundle: Some(APP_BUNDLE_ID.to_owned()),
         };
         let was_loaded = (self.deps.service_status)(SERVICE_LABEL)
             .map(|s| s.loaded)

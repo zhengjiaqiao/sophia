@@ -348,6 +348,8 @@ fn enable_starts_router_before_writing_config() {
     let world = f.world.lock().unwrap();
     let spec = world.installed.as_ref().unwrap();
     assert_eq!(spec.label, SERVICE_LABEL);
+    // 后台活动通知与登录项里显示 Sophia，而不是可执行文件名 symsync
+    assert_eq!(spec.associated_bundle.as_deref(), Some(APP_BUNDLE_ID));
     assert_eq!(
         spec.program,
         f.root.join("data/bin/symsync").to_string_lossy()
