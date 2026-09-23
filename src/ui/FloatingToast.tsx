@@ -59,8 +59,11 @@ export function FloatingToast({ children, align = "center", anchor, bounds }: Fl
     const probe = probeRef.current;
     const layer = layerRef.current;
     if (!probe || !layer || !host || placed !== null) return;
+    // 锚点此刻被二级页盖着（加完来源、二级页还在滑回）：先不定，等盖着的那一层收起再量——
+    // 在这里判成「不出现」的话，滑回之后这一窗就永远看不见了（产品负责人：根本看不见）
+    if (covered || probe.closest("[inert]")) return;
     const target = anchor ? anchor(probe) : probe.parentElement;
-    if (!target || probe.closest("[inert]")) {
+    if (!target) {
       setPlaced("hidden");
       return;
     }
@@ -81,12 +84,13 @@ export function FloatingToast({ children, align = "center", anchor, bounds }: Fl
       { align, bounds: box ? { left: box.left, right: box.right } : undefined },
     );
     setPlaced({ top: p.top, left: p.left });
-  }, [host, placed, anchor, bounds, align]);
+  }, [host, placed, anchor, bounds, align, covered]);
 
   useEffect(() => {
     const probe = probeRef.current;
     if (!host || !probe || typeof MutationObserver === "undefined") return;
     const check = () => setCovered(probe.closest("[inert]") !== null);
+    check();
     const observer = new MutationObserver(check);
     observer.observe(document.documentElement, {
       attributes: true,

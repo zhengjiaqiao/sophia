@@ -22,7 +22,8 @@ import {
 import type { ConfirmAnchor } from "../ui";
 import { edgeFades } from "../modelsView";
 import { placeLayer, type AnchorRect, type LayerPlacement, type ToastAlign } from "../layerPlace";
-import { AddSourcePage } from "./AddSourcePage.tsx";
+import { AddedToast, AddSourcePage } from "./AddSourcePage.tsx";
+import { addedParts, type CandidateEntry } from "./addSourceView.ts";
 import { CheckMark } from "./CheckMark.tsx";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./importDefaults.ts";
 import { columnRows, removeConfirmTitle, removeTitle, type DomainRef } from "./sourcesView.ts";
@@ -269,13 +270,32 @@ export default function SourcesPage(props: SourcesPageProps) {
   const back = pending ? () => undefined : onClose;
   /// 加完滑回：新加的行 surface 行带闪两下（同跳转定位）。等添加页滑走、卸掉之后再闪，
   /// 不然前一两拍闪在滑走的页底下
-  const addedIds = useRef<string[]>([]);
+  const addedEntries = useRef<CandidateEntry[]>([]);
   const [jumpIds, setJumpIds] = useState<Set<string>>(new Set());
+  /// 滑回这一页之后在第一条新行下浮起 `✓ 已添加 WeiboAP · 39 个 skill`（添加页那颗键已经不在了，
+  /// 锚在它带来的结果上）；新行照旧闪两下
+  const [addedNote, setAddedNote] = useState<{
+    key: number;
+    firstId: string;
+    parts: string[];
+  } | null>(null);
   const closeAdd = useCallback(() => {
     setAdding(false);
-    if (addedIds.current.length > 0) setJumpIds(new Set(addedIds.current));
-    addedIds.current = [];
-  }, []);
+    const added = addedEntries.current;
+    addedEntries.current = [];
+    if (added.length === 0) return;
+    setJumpIds(new Set(added.map((e) => e.id)));
+    setAddedNote({
+      key: Date.now(),
+      firstId: added[0].id,
+      parts: addedParts(
+        added.map((e) => e.name),
+        added.reduce((sum, e) => sum + e.count, 0),
+        model.noun,
+        false,
+      ),
+    });
+  }, [model.noun]);
   useEffect(() => {
     if (jumpIds.size === 0) return;
     const first = data?.rows.find((r) => jumpIds.has(r.id));
@@ -462,6 +482,7 @@ export default function SourcesPage(props: SourcesPageProps) {
                           title={removeTitle(domain, row.name)}
                           disabledReason={model.ownRemoveReason}
                           tipPlacement="bottom"
+                          tipNowrap
                         />
                       ) : (
                         <BusySlot
@@ -565,6 +586,15 @@ export default function SourcesPage(props: SourcesPageProps) {
       {body}
       {/* 提示小窗锚在按下那一刻记下的控件位置上（不挂进行里：行可能已被移除） */}
       {toastNode}
+      {addedNote ? (
+        <FloatingToast
+          key={addedNote.key}
+          align="start"
+          anchor={() => rowEls.current.get(addedNote.firstId)}
+        >
+          <AddedToast parts={addedNote.parts} onDismiss={() => setAddedNote(null)} />
+        </FloatingToast>
+      ) : null}
       {adding ? (
         // 加好后主视图重扫、这一页重读，再滑回这一页
         <AddSourcePage
@@ -575,7 +605,7 @@ export default function SourcesPage(props: SourcesPageProps) {
             await settle();
           }}
           onAllAdded={(added) => {
-            addedIds.current = added.map((e) => e.id);
+            addedEntries.current = added;
           }}
         />
       ) : null}
