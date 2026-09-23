@@ -6,7 +6,7 @@ import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./Domain
 import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
-import { addedOrigins, newOriginKey, originMatches } from "./originFilter";
+import { addedOrigins, liveOrigins, newOriginKey, originMatches } from "./originFilter";
 import SourcesPage from "./pages/SourcesPage";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
@@ -881,10 +881,14 @@ export default function SkillsTab({
       })
     : null;
 
+  const activeOrigins = liveOrigins(
+    originFilter,
+    page.rows.map((row) => row.sourceId),
+  );
   const visible = page.rows.filter(
     (row) =>
       (query === "" || row.skill.toLowerCase().includes(query)) &&
-      originMatches(originFilter, [row.sourceId]),
+      originMatches(activeOrigins, [row.sourceId]),
   );
   const hiddenRows = hidden;
   // 孤链行：点过的格先去掉；刚清完、数据里已没有的那一行，例行一行还在时照留
@@ -920,7 +924,7 @@ export default function SkillsTab({
           setFilterText("");
           setOriginFilter([]);
         }}
-        originFilter={originFilter}
+        originFilter={activeOrigins}
         onOriginFilter={setOriginFilter}
         isNewOrigin={(id) => newOrigins.has(newOriginKey(page.key, id))}
         onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}

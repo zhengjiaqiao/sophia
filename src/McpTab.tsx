@@ -14,7 +14,7 @@ import SourcesPage from "./pages/SourcesPage";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
-import { addedOrigins, newOriginKey, originMatches } from "./originFilter";
+import { addedOrigins, liveOrigins, newOriginKey, originMatches } from "./originFilter";
 import { mcpLocationName } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
@@ -38,7 +38,6 @@ import {
   CELL_TOAST_DWELL_MS,
   Confirm,
   Empty,
-  IconPlus,
   Tag,
   Toast,
   TOAST_DWELL_MS,
@@ -740,11 +739,15 @@ export default function McpTab({
   const targetIds = new Set(page.targets.map((t) => t.id));
   const names = columnNames(page.targets);
   const query = filterText.trim().toLowerCase();
+  const activeOrigins = liveOrigins(
+    originFilter,
+    page.rows.flatMap((row) => row.entries.map((e) => e.sourceId)),
+  );
   const visible = page.rows.filter(
     (row) =>
       (query === "" || row.name.toLowerCase().includes(query)) &&
       originMatches(
-        originFilter,
+        activeOrigins,
         row.entries.map((e) => e.sourceId),
       ),
   );
@@ -937,8 +940,7 @@ export default function McpTab({
 
   const openSources = () => setSourcesOpen(true);
   const openAdd = () => setAddOpen(true);
-  // 空态：一个来源都没有，动作是 `+ 来源`（直接进添加来源页）
-  const addAction = { label: "来源", icon: <IconPlus size={12} />, onClick: openAdd };
+  // 空态只说现状：`+ 来源` 就在正上方的工具行里，空态里再放一个是重复（产品负责人）
   const domainRef = { key: page.key, label: placeName(page) };
   const domainLocations = overview.locations.filter((l) => l.domain === page.key);
   const empty =
@@ -954,17 +956,12 @@ export default function McpTab({
         }}
       />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
-      <TableEmpty
-        text="这里没有能复制的完整定义，从别处添加一份过来"
-        action={addAction}
-        art="links"
-      />
+      <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="links" />
     ) : (
       <TableEmpty
         text={
           page.key === "global" ? `${page.label} 还没有自己的 MCP 配置` : "这个项目里还没有 MCP"
         }
-        action={addAction}
         art="links"
       />
     );
@@ -981,7 +978,7 @@ export default function McpTab({
         originLabel="来源"
         sources={{
           total: page.rows.length,
-          selected: originFilter,
+          selected: activeOrigins,
           onSelect: setOriginFilter,
           items: [...sourceCounts].map(([id, count]) => ({
             id,

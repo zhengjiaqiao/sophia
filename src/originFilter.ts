@@ -15,6 +15,14 @@ export function pickOrigin(filter: readonly string[], id: string | null): string
   return [id];
 }
 
+/// 此刻真正生效的筛选：只留工具行上还有这一片的 id。筛过的来源被移除、换了项目、重扫后没了行，
+/// 留着它就会筛出空表且 `全部` 也不亮——那就回到全部
+export function liveOrigins(filter: readonly string[], chips: Iterable<string>): string[] {
+  if (filter.length === 0) return [];
+  const shown = new Set(chips);
+  return filter.filter((id) => shown.has(id));
+}
+
 /// 加完来源之后要选中的片：新加的来源里，重扫后工具行真有这一片的（去重，按加的先后）。
 /// 一个都没有（新来源在这个位置下一行都没有）时是空＝不筛
 export function addedOrigins(added: readonly string[], chips: Iterable<string>): string[] {

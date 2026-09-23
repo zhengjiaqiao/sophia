@@ -22,15 +22,7 @@ import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
-import {
-  AddButton,
-  Button,
-  DupMark,
-  Empty as UiEmpty,
-  IconPlus,
-  Tooltip,
-  type EmptyArt,
-} from "./ui";
+import { AddButton, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
@@ -387,8 +379,7 @@ export default function DomainView(props: DomainViewProps) {
   // ---- 空态：一句现状 + 一个动作（DESIGN「空态与忙碌态」） ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
   const query = props.filterText.trim();
-  // 空态：一个来源都没有，动作是 `+ 来源`（直接进添加来源页）
-  const addAction = { label: "来源", icon: <IconPlus size={12} />, onClick: props.onAddSource };
+  // 空态只说现状：`+ 来源` 就在正上方的工具行里，空态里再放一个是重复（产品负责人）
   const empty =
     query !== "" ? (
       <Empty
@@ -396,9 +387,9 @@ export default function DomainView(props: DomainViewProps) {
         action={{ label: "清除筛选", onClick: props.onClearFilter }}
       />
     ) : noAgentDirs ? (
-      <Empty text={`${page.label} 下还没有 agent 的 skill 目录`} action={addAction} art="folders" />
+      <Empty text={`${page.label} 下还没有 agent 的 skill 目录`} art="folders" />
     ) : (
-      <Empty text={`${page.label} 里还没有 skill`} action={addAction} art="links" />
+      <Empty text={`${page.label} 里还没有 skill`} art="links" />
     );
 
   return (
@@ -459,7 +450,7 @@ export default function DomainView(props: DomainViewProps) {
   );
 }
 
-/// 表格里的空态：一句现状 + 一个按钮（表头照常在上面——列在，用户才有入口把目录建出来）。
+/// 表格里的空态：一句现状，筛选无结果时再加 `清除筛选`（表头照常在上面）。`+ 来源` 在工具行，不在这里重复。
 /// 图按 DESIGN「图像」：没有 agent 目录 folders、一个都没有 links；筛选无结果不放图
 export function Empty({
   text,
@@ -467,7 +458,7 @@ export function Empty({
   art,
 }: {
   text: string;
-  action: { label: string; onClick: () => void; icon?: ReactNode };
+  action?: { label: string; onClick: () => void; icon?: ReactNode };
   art?: EmptyArt;
 }) {
   return (

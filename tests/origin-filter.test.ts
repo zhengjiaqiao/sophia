@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { addedOrigins, newOriginKey, originMatches, pickOrigin } from "../src/originFilter.ts";
+import {
+  liveOrigins,
+  addedOrigins,
+  newOriginKey,
+  originMatches,
+  pickOrigin,
+} from "../src/originFilter.ts";
 
 test("来源筛选：空＝全部；选中几片时列表是并集（MCP 一行几份定义有一份被选中就算）", () => {
   assert.equal(originMatches([], ["a"]), true);
@@ -32,4 +38,11 @@ test("加完来源要选中的片：只取重扫后工具行真有的，去重�
 test("「新」按位置记：同一个来源在另一个位置不算新", () => {
   assert.notEqual(newOriginKey("global", "/s"), newOriginKey("project:/p", "/s"));
   assert.equal(newOriginKey("global", "/s"), newOriginKey("global", "/s"));
+});
+
+test("liveOrigins：筛过的来源没了片（被移除、换了项目），回到全部，不筛出空表", () => {
+  assert.deepEqual(liveOrigins([], ["a", "b"]), []);
+  assert.deepEqual(liveOrigins(["a"], ["a", "b"]), ["a"]);
+  assert.deepEqual(liveOrigins(["gone"], ["a", "b"]), []);
+  assert.deepEqual(liveOrigins(["gone", "b"], ["a", "b"]), ["b"]);
 });
