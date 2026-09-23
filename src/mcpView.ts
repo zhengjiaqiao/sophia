@@ -1,4 +1,5 @@
 import {
+  copyView,
   differentCopiesMessage,
   viewOf,
   type McpCellView,
@@ -6,7 +7,14 @@ import {
   type McpIssueKind,
 } from "./mcpCellState.ts";
 import { issueKey } from "./issues.ts";
-import type { McpDiff, McpEntry, McpFieldValue, McpLocation, McpOverview } from "./types.ts";
+import type {
+  McpDiff,
+  McpEntry,
+  McpFieldValue,
+  McpLocation,
+  McpOverview,
+  McpReportEntry,
+} from "./types.ts";
 
 export interface McpDomainRow {
   name: string;
@@ -22,13 +30,12 @@ export interface McpDomain {
 }
 
 /**
- * 一行在一列上的圆点。同名服务合并成一行后，这一列上每个来源各有一个格，
- * 要合成一个圆点：先看「来源就是这一列」，再看「这儿也有一份一样的」，
- * 再看「这儿还没有」，最后才是两种不可点的异常。
- *
- * `conflict` 不参与（spec R2）：它说的是「这一列自己也持有同名条目」，
- * 而那一列自己的条目就在同一行里、带着 `own`，圆点由它画。差异是行级事实，
- * 交给 `differingSourceIds` 做成方标签。
+ * 一行在一列上的圆点。同名服务合并成一行后，这一列上每个来源各有一个格，要合成一个圆点：
+ * - 这一列就是本行的来源（`mcpGroupOf`，「来源」列写的那一处）：原件环，不能点
+ * - 这一列自己也有一份定义（它自己的条目带 `own`，或别的来源看它是 `equal` / `sameEndpoint` /
+ *   `conflict`）：副本，实心、可点（点＝从这个位置移除）。和来源那份一不一样不影响能不能移除——
+ *   差异是行级事实，交给 `differingSourceIds` 做成 `2 份不一样`；移除一份不一样的副本才给撤销
+ * - 再看「这儿还没有」，最后才是两种不可点的异常
  */
 export function cellViewOf(
   row: McpDomainRow,
@@ -41,31 +48,28 @@ export function cellViewOf(
   });
   // 无格态：这一行在这一列没有格，例如来源属于另一个域
   if (cells.length === 0) return null;
-  // conflict 在这里就被摘掉，类型上也进不了 viewOf
+  const ctx = {
+    service: row.name,
+    location: labelOf(targetId),
+    source: labelOf(mcpGroupOf(row)),
+  };
+  if (targetId === mcpGroupOf(row)) return viewOf("own", ctx);
+  const holds = cells.some(
+    (cell) =>
+      cell.state === "own" ||
+      cell.state === "equal" ||
+      cell.state === "sameEndpoint" ||
+      cell.state === "conflict",
+  );
+  if (holds) return copyView();
+  // 剩下的这一列上都还没有定义；conflict 已在上面摘掉，类型上也进不了 viewOf
   const dots = cells.filter(
     (cell): cell is { sourceId: string; state: McpDotState } => cell.state !== "conflict",
   );
   const pick = (...states: McpDotState[]) => dots.find((cell) => states.includes(cell.state));
-  const found =
-    pick("own") ??
-    pick("equal", "sameEndpoint") ??
-    pick("missing") ??
-    pick("invalid", "unsupported");
-  if (found === undefined) {
-    // 只剩 conflict：说明这一列自己持有一份不一样的定义。扫描保证它自己那条
-    // 带 own 的条目也在同一行里，走不到这儿；真走到了也照 own 画，别画成「还没有」
-    return {
-      dot: "own",
-      clickable: false,
-      reason: `${labelOf(targetId)} 里也有一份 ${row.name}，只是和别处那份不一样`,
-      issue: "differentCopies",
-    };
-  }
-  return viewOf(found.state, {
-    service: row.name,
-    location: labelOf(targetId),
-    source: labelOf(found.sourceId),
-  });
+  const found = pick("missing") ?? pick("invalid", "unsupported");
+  if (found === undefined) return null;
+  return viewOf(found.state, { ...ctx, source: labelOf(found.sourceId) });
 }
 
 /**
@@ -257,6 +261,22 @@ export function differingFields(row: McpDomainRow, targetIds: Set<string>): stri
   }
   // 有一处说不清是哪个字段，就不能只报 url——那等于说其余都一样
   return unknown ? [] : [...fields];
+}
+
+/**
+ * 一次写进 / 移除的结果提示条给不给 `撤销`（DESIGN「撤销按钮与 skill 同一条规则」）：
+ * 再点一次格子、再按一次同一个键就是准确反操作时不给（`⌘Z` 始终可用，不看这里）。
+ * - `reversible`：再按一次恰好撤回——单格一律是；批量写进时选中的里原本一份副本都没有才是
+ * - 移除了一份**与来源原版不一样**的副本（`identical === false`）：再点只能写回原版，
+ *   改过的内容回不来，只有撤销（从快照原样还原）是准确的退路
+ */
+export function mcpUndoShown(
+  op: "write" | "remove",
+  entries: McpReportEntry[],
+  reversible: boolean,
+): boolean {
+  if (!reversible) return true;
+  return op === "remove" && entries.some((e) => e.outcome === "removed" && e.identical === false);
 }
 
 /// 行的来源位置（「来源」列写它）：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）

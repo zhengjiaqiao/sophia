@@ -15,6 +15,6 @@ export function blockedTipOf(
   return fallback;
 }
 
-/// MCP 的原件格：定义就写在这个位置里
-export const mcpOwnTip = (location: string) =>
-  `这就是原件，不需要写进 · 要从 ${location} 移除，只能到它的配置里删掉`;
+/// MCP 的原件格：本行的来源就写在这个位置里，不能在格子上移除（DESIGN「原件格不能点」）。
+/// 与 core `mcp::removal::ORIGINAL_MESSAGE` 同一句：点了原件格，core 拒绝时说的也是它
+export const MCP_OWN_TIP = "这是原件所在的位置，从这里移除等于删掉原件——到来源管理页移除这个来源";

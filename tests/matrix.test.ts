@@ -259,7 +259,7 @@ test("点了做不了的格子：只当即说明（提示框立即出现、停�
 });
 
 test("做不了的格子的说明：为什么 + 去哪做", async () => {
-  const { blockedTipOf, mcpOwnTip } = await import("../src/cellTip.ts");
+  const { blockedTipOf, MCP_OWN_TIP } = await import("../src/cellTip.ts");
   assert.equal(
     blockedTipOf("own", "Claude Code", "docx", ""),
     "这就是原件，不需要链接 · 要从 Claude Code 移除，只能删掉原件",
@@ -274,7 +274,13 @@ test("做不了的格子的说明：为什么 + 去哪做", async () => {
   );
   // 整个文件夹是链接：沿用 cellState 的原因
   assert.equal(blockedTipOf("wholeLinked", "Cursor", "docx", "原句"), "原句");
-  assert.match(mcpOwnTip("Claude Code"), /^这就是原件，不需要写进 · 要从 Claude Code 移除/);
+  // MCP 原件格：与 core 拒绝原件格时说的同一句（mcp::removal::ORIGINAL_MESSAGE）
+  assert.equal(MCP_OWN_TIP, "这是原件所在的位置，从这里移除等于删掉原件——到来源管理页移除这个来源");
+  const removal = readFileSync(
+    new URL("../crates/core/src/mcp/removal.rs", import.meta.url),
+    "utf8",
+  );
+  assert.ok(removal.includes(`"${MCP_OWN_TIP}"`), "前端原件格提示与 core ORIGINAL_MESSAGE 不一致");
 });
 
 test("批量写入：格子同时变、不依次点亮；只锁按下的那一项，过了 0.3 秒门槛才在它旁出忙碌指示 + 一句", async () => {

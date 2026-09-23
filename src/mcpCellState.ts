@@ -5,9 +5,11 @@
 /// 一次操作只汇总成一句，「每个格自己的成功文案」从构造上就是错的。
 ///
 /// 语义是从 skill 平移过来的，不是照搬（spec R1）：
-/// **环**＝本行的「来源位置」就是这一列；**实心**＝这儿也有一份、连的是同一个服务；
+/// **环**＝本行的「来源位置」就是这一列（原件）；**实心**＝这儿有一份副本；
 /// **空心**＝这儿还没有。和 skill 最大的不同是这里没有软链——每一处都是别人配置
-/// 文件里的一段真实内容，所以写入只有一个方向：只新增，从不覆盖也不删除。
+/// 文件里的一段真实内容。格子同样是开关（DESIGN「MCP 格子同样是开关：能写进，也能移除」）：
+/// 点空心＝写进一份（只新增，不覆盖已有的同名条目）；点实心＝从那个位置移除这份副本；
+/// 原件格不能点。
 import type { Dot } from "./cellState";
 import type { McpCellState } from "./types";
 
@@ -23,8 +25,10 @@ export type McpIssueKind = "invalidLocation" | "differentCopies";
 
 export interface McpCellView {
   dot: Dot;
-  /// 点下去会真的往那份配置里写一段；false 表示点击只说明情况
+  /// 点下去会真的改那份配置（写进一段 / 移除一份副本）；false 表示点击只说明情况
   clickable: boolean;
+  /// 这一格是一份副本（这一列自己也有一份定义，但它不是本行的来源）：点它＝从这个位置移除
+  copy?: boolean;
   /// 给提示条用的**完整句子**。**只在 `clickable === false` 时有值**
   reason?: string;
   /// 非空表示这是要用户拿主意的问题（就地常显，新出现时提示一次）
@@ -42,29 +46,24 @@ export interface McpCellContext {
   source: string;
 }
 
-/// 逐条对应 spec R1 的映射表
+/// 副本格：实心、可点（点＝从这个位置移除）。可点的不带 reason，移除之后要说的那句由调用方汇总
+export const copyView = (): McpCellView => ({ dot: "linked", clickable: true, copy: true });
+
+/// 逐条对应 spec R1 的映射表。`own` 只给本行来源那一列（`cellViewOf` 判定）；
+/// 别的列自己也有一份定义时，不管和来源一样不一样，都是副本（`copyView`）
 export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
   switch (state) {
     case "own":
-      // 这一列就是本行的来源；没有可撤的东西，点击只说明这件事
+      // 这一列就是本行的来源（原件）：不能在格子上移除，点击只说明这件事
       return {
         dot: "own",
         clickable: false,
         reason: `这份 ${ctx.service} 就写在 ${ctx.location} 里，写到别处去的就是它`,
       };
     case "equal":
-      return {
-        dot: "linked",
-        clickable: false,
-        reason: `${ctx.location} 里这份 ${ctx.service} 和来源那份连的是同一个服务`,
-      };
     case "sameEndpoint":
-      // 端点相同、认证头动态生成：说清为什么只能比到这一步，别假装比过了全部
-      return {
-        dot: "linked",
-        clickable: false,
-        reason: "两边连的是同一个地址；认证头要到运行时才生成，没法逐字比对",
-      };
+      // 这儿有一份副本（同一个服务 / 同一个地址）：点＝移除
+      return copyView();
     case "missing":
       // 可点的唯一一种，所以没有 reason：写进去之后要说的那句由调用方汇总
       return { dot: "missing", clickable: true };

@@ -823,6 +823,23 @@ test("忙碌门槛 0.3 秒：触发键先锁住、外观不变，过了门槛才
   );
 });
 
+test("提示小窗的动作在等（MCP 撤销）：只锁那颗文字链，门槛前外观不变", () => {
+  const onClick = () => undefined;
+  const busy = render(Toast, {
+    kind: "success",
+    verb: "写进",
+    action: { label: "撤销", onClick, busy: "正在撤销" },
+  });
+  assert.match(
+    busy,
+    /<span class="ss-locked" aria-busy="true">(<span[^>]*>)?<button[^>]*>撤销<\/button>/,
+  );
+  assert.doesNotMatch(busy, /ss-spinner/);
+  // 不在等：原样，不包一层
+  const idle = render(Toast, { kind: "success", verb: "写进", action: { label: "撤销", onClick } });
+  assert.doesNotMatch(idle, /ss-locked/);
+});
+
 // ===== 错误横幅与行内待办条：大面积的提示用 surface 灰面板，不用黑 =====
 
 test("ErrorBanner：surface 灰面板 + 墨色 !，不自动消失；默认描边键（canvas 底）与 ×", () => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FocusEvent, ReactNode } from "react";
 import { AgentIcon } from "./AgentMark.tsx";
 import { Button, IconButton } from "./Button.tsx";
+import { BusySlot } from "./Spinner.tsx";
 import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 
 /// 提示小窗（DESIGN「反馈的两种形态」「提示条分两档」，画板 Feedback「提示条」）。
@@ -52,6 +53,9 @@ export interface ToastAction {
   onClick: () => void;
   /// 给了就禁用，原因进提示框（MCP 撤销：写入之后文件又被改过）
   disabledReason?: string;
+  /// 点下去之后在等（MCP 撤销要等 core 从快照还原）：只锁这一颗，过了 0.3 秒门槛原位换成
+  /// 转圈 + 这一句（`正在撤销`，见 `BusySlot`）
+  busy?: string;
 }
 
 export interface ToastProps {
@@ -233,9 +237,11 @@ export function Toast(props: ToastProps) {
                 {action.label}
               </Button>
             ) : (
-              <Button variant="link" onClick={action.onClick}>
-                {action.label}
-              </Button>
+              <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
+                <Button variant="link" onClick={action.onClick}>
+                  {action.label}
+                </Button>
+              </BusySlot>
             )}
           </>
         ) : null}
@@ -270,9 +276,11 @@ export function Toast(props: ToastProps) {
           {action || onClose ? (
             <span className="ss-toast__actions">
               {action ? (
-                <Button size="compact" onDark onClick={action.onClick}>
-                  {action.label}
-                </Button>
+                <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
+                  <Button size="compact" onDark onClick={action.onClick}>
+                    {action.label}
+                  </Button>
+                </BusySlot>
               ) : null}
               {onClose ? (
                 <IconButton icon={<IconClose />} title="关闭" onDark onClick={onClose} />

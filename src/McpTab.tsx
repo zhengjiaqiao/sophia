@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
@@ -24,6 +32,7 @@ import {
   differingSourceIds,
   mcpDomains,
   mcpGroupOf,
+  mcpUndoShown,
   pickChoices,
   pickTip,
   sourceForMissing,
@@ -43,9 +52,10 @@ import {
   Tooltip,
 } from "./ui";
 import { McpDiffPanel, type McpDiffState } from "./McpDiffPanel";
-import type { ConfirmAnchor } from "./ui";
+import type { ConfirmAnchor, ToastProps } from "./ui";
 import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
-import { mcpOwnTip } from "./cellTip";
+import { MCP_OWN_TIP } from "./cellTip";
+import type { Dot } from "./cellState";
 import type {
   McpUndoReport,
   McpEntry,
@@ -61,13 +71,15 @@ import "./McpTab.css";
 /// 行是 MCP 服务，列是配置位置，格是同一套状态点。
 ///
 /// MCP 特有的差异：
-/// 1. **格是单向的**——只有「写进去」，没有「拿掉」（core 只新增、不删条目）。
-///    所以选择条上的键只有 `+N`；已经都有了的键禁用，不写 `−N`
-/// 2. **实心不是一条链接，是一份独立副本**——写入后 core 留快照：写完没人改过就能撤销，
-///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底
+/// 1. **格同样是开关，但只有副本能拿掉**——点空心写进一份，点实心（副本）从那个位置移除；
+///    本行来源那一列是原件，不能在格子上移除（DESIGN「MCP 格子同样是开关：能写进，也能移除」）。
+///    选择条上的键同 skill：未全有＝写进缺的，全有（打勾）＝全部移除
+/// 2. **实心不是一条链接，是一份独立副本**——写进、移除都经 core 留快照：没人改过就能撤销，
+///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底。撤销按钮只在再点一次不能准确撤回时给
+///    （`mcpUndoShown`）：移除了一份与原版不一样的副本、批量写进时选中的里原本已有一部分；`⌘Z` 始终可用
 /// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（文字链，提示框给差异字段名）；
 ///    点它这一行就地展开不同的字段，再点收起
-/// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格不确认
+/// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格写入、移除都不确认
 
 export interface McpTabProps {
   selectedKey: string;
@@ -123,12 +135,31 @@ const placeName = (page: McpDomain): string =>
 /// 一个空格上有好几份不一样的同名定义能写：不替用户挑
 const ambiguousText = (name: string) => `有好几份不一样的同名 ${name}，没法替你挑用哪一份`;
 
+/// WeiboAP 里的副本不在格子上移除（core 同样拒绝）
+const WEIBO_REMOVE = "WeiboAP 里的配置要到 WeiboAP 里删";
+
 /// 待确认的一次写入：批量与跨域确认，同域单格不确认
 interface Pane {
   preview: McpPreview;
   crossDomain: boolean;
   anchor?: ConfirmAnchor;
   keyId?: string;
+  /// 写完再按一次同一个键恰好撤回（见 `mcpUndoShown`）
+  reversible: boolean;
+}
+
+/// 正在撤销的那一次（undoId）：带撤销的那一窗读它，按下的 `撤销` 原位忙碌
+/// （过了 0.3 秒门槛才换成转圈 + 一句）。提示小窗在状态里存的是元素，靠 context 才看得到后来的变化
+const UndoBusy = createContext<string | null>(null);
+
+/// 带 `撤销` 的提示小窗：撤销在等 core 从快照还原时，只锁这颗文字链
+function UndoToast({ undoId, ...props }: ToastProps & { undoId: string | null }) {
+  const busy = useContext(UndoBusy);
+  const action =
+    props.action && undoId !== null && busy === undoId
+      ? { ...props.action, busy: "正在撤销" }
+      : props.action;
+  return <Toast {...props} action={action} />;
 }
 
 /// 触发控件此刻的位置：点下去的那颗键 / 那一格还拿着焦点
@@ -162,7 +193,10 @@ export default function McpTab({
   const [pane, setPane] = useState<Pane | null>(null);
   // 同名多份的空格：点它出的挑选浮层（锚在那一格上）
   const [pick, setPick] = useState<McpPick | null>(null);
-  const [optimistic, setOptimistic] = useState<Set<string>>(new Set());
+  // 乐观更新：格键 → 点下去之后该画成的圆点（写进＝实心、移除＝空心）；重扫回来后撤掉
+  const [optimistic, setOptimistic] = useState<Map<string, Dot>>(new Map());
+  // 正在撤销的那一次（undoId）
+  const [undoBusy, setUndoBusy] = useState<string | null>(null);
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
   // 批量写入进行中：按下的那一项（只锁它；过了 0.3 秒门槛旁边出忙碌指示 + 一句）
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
@@ -218,6 +252,15 @@ export default function McpTab({
     return queue.current;
   };
   const closePick = useCallback(() => setPick(null), []);
+  const setOptimisticFor = (keys: string[], dot: Dot | null) =>
+    setOptimistic((prev) => {
+      const next = new Map(prev);
+      for (const k of keys) {
+        if (dot === null) next.delete(k);
+        else next.set(k, dot);
+      }
+      return next;
+    });
 
   const refresh = async () => {
     const version = ++refreshVersion.current;
@@ -431,11 +474,14 @@ export default function McpTab({
   /// 这一行为什么勾不动。空值表示可勾
   const blockedOf = (p: McpDomain, row: McpDomainRow): string | undefined => {
     if (sourceForMissing(row, p.targets) !== null) return undefined;
+    // 有能移除的副本也能勾（选择条上打勾的键＝全部移除）
+    if (p.targets.some((t) => t.harnessId !== "weiboap" && cellViewOf(row, t.id, labelOf)?.copy))
+      return undefined;
     const targetIds = new Set(p.targets.map((target) => target.id));
     const anyMissing = row.entries.some((entry) =>
       entry.cells.some((cell) => targetIds.has(cell.targetId) && cell.state === "missing"),
     );
-    if (!anyMissing) return `${row.name} 在这里的每个位置上都已经有了`;
+    if (!anyMissing) return `${row.name} 在这里没有能写进或移除的位置`;
     // 「不支持」那行整行不可选：搬过去就不是原来那个了
     if (row.entries.every((entry) => entry.transport === "unsupported" || entry.reason !== null)) {
       return `${row.name} 用了只有 ${labelOf(row.entries[0].sourceId)} 认得的写法，搬到别处就不是原来那个了`;
@@ -451,26 +497,31 @@ export default function McpTab({
       return { name: e.name, agent: l ? { id: l.harnessId, name: l.label } : undefined };
     });
 
+  /// 按键忙碌那一句里的位置名：「所有 agent」或那一列的列头名
+  const keyAgent = (keyId: string) =>
+    keyId === "all"
+      ? "所有 agent"
+      : ((page ? columnNames(page.targets).get(keyId) : undefined) ?? labelOf(keyId));
+
   /// 写一批（已经确认过或不需要确认）。keyId 给了就把结果浮在那颗键下。
   /// 单格：写的时候那一格灰着，写成闪一下。批量（按键）：格子同时变成新状态、不闪；
   /// 只锁按下的那一项，过了 0.3 秒门槛旁边出忙碌指示 + 一句（DESIGN 冲突表「格子变化要不要闪」）。
-  /// 写入排在前面的写入之后
-  const apply = (preview: McpPreview, allowCrossDomain: boolean, keyId?: string) => {
+  /// 写入排在前面的写入之后。`reversible`：写完再按一次同一个键恰好撤回（单格一律是）
+  const apply = (
+    preview: McpPreview,
+    allowCrossDomain: boolean,
+    keyId?: string,
+    reversible = true,
+  ) => {
     const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
     const single = keyId === undefined;
     setPane(null);
     // 批量开始时收起单格那一窗：一次只一条，撤销入口不混
     if (!single) setCellToast(null);
-    setOptimistic((prev) => new Set([...prev, ...keys]));
+    setOptimisticFor(keys, "linked");
     if (single) setPendingCells((prev) => new Set([...prev, ...keys]));
-    const agent =
-      keyId === "all"
-        ? "所有 agent"
-        : keyId
-          ? ((page ? columnNames(page.targets).get(keyId) : undefined) ?? labelOf(keyId))
-          : "";
-    if (keyId) setKeyBusy({ keyId, label: batchBusyText("write", agent) });
-    return enqueue(() => applyWrite(preview, allowCrossDomain, keys, keyId));
+    if (keyId) setKeyBusy({ keyId, label: batchBusyText("write", keyAgent(keyId)) });
+    return enqueue(() => applyWrite(preview, allowCrossDomain, keys, keyId, reversible));
   };
 
   const applyWrite = async (
@@ -478,6 +529,7 @@ export default function McpTab({
     allowCrossDomain: boolean,
     keys: string[],
     keyId: string | undefined,
+    reversible: boolean,
   ) => {
     const single = keyId === undefined;
     onBusy(true);
@@ -521,12 +573,18 @@ export default function McpTab({
         setKeyToast({
           keyId,
           node: (
-            <Toast
+            <UndoToast
+              undoId={undoId}
               {...text}
               // 写数量（`✓ 写进 ⎔ 2 个`），名字在键的提示框里
               names={text.kind === "success" ? undefined : text.names}
               reading={text.kind === "success" ? <ToastCount n={created.length} /> : undefined}
-              action={undo ? { label: "撤销", onClick: undo } : undefined}
+              // 再按一次同一个键就恰好撤回时不给 `撤销`（⌘Z 照旧可用）
+              action={
+                undo && mcpUndoShown("write", result.entries, reversible)
+                  ? { label: "撤销", onClick: undo }
+                  : undefined
+              }
               onDismiss={dismissKey}
               onClose={text.tier === "notice" ? dismissKey : undefined}
             />
@@ -537,28 +595,112 @@ export default function McpTab({
         const f = failed[0];
         failCell(f.name, f.targetId, f.message);
       } else if (created.length > 0) {
-        // 单格写成：被点那一格正下方浮起 `✓ 写进 [Codex] · 撤销`（不重复服务名），替换上一条。
-        // MCP 保留撤销：写进之后再点那一格不能移除（只增不删），格子替代不了撤销
+        // 单格写成：被点那一格正下方浮起 `✓ 写进 [Codex]`（不重复服务名），替换上一条。
+        // 不带撤销：再点那一格就是移除刚写的那一份（⌘Z 照旧可用）
         setCellToast({
           id: ++cellToastSeq.current,
           rowKey: created[0].name,
           columnId: created[0].targetId,
-          node: (
-            <Toast
-              {...rowText}
-              action={undo ? { label: "撤销", onClick: undo } : undefined}
-              onDismiss={dismissCell}
-            />
-          ),
+          node: <Toast {...rowText} onDismiss={dismissCell} />,
         });
       }
     }
     await refresh();
-    setOptimistic((prev) => {
-      const next = new Set(prev);
-      for (const k of keys) next.delete(k);
-      return next;
-    });
+    setOptimisticFor(keys, null);
+  };
+
+  /// 从格子上移除副本（单格或按键）。不确认（⑪ 能撤销就不打断）：格子先画成空心，
+  /// 单格闪一下；没移除的弹回，原因出在那一格 / 那颗键下。与写进排同一个队
+  const removeCopies = (selections: McpSelection[], keyId?: string) => {
+    if (selections.length === 0) return Promise.resolve();
+    const keys = selections.map((sel) => cellKey(sel.name, sel.targetId));
+    const single = keyId === undefined;
+    setCellNotice(null);
+    if (!single) setCellToast(null);
+    setOptimisticFor(keys, "missing");
+    if (single) setFlash({ keys, nonce: Date.now() });
+    if (keyId) setKeyBusy({ keyId, label: batchBusyText("unlink", keyAgent(keyId)) });
+    return enqueue(() => removeWrite(selections, keys, keyId));
+  };
+
+  const removeWrite = async (
+    selections: McpSelection[],
+    keys: string[],
+    keyId: string | undefined,
+  ) => {
+    const single = keyId === undefined;
+    onBusy(true);
+    let result: McpReport | null = null;
+    try {
+      result = await api.removeMcpCopies(selections);
+    } catch (error) {
+      setOptimisticFor(keys, null);
+      if (single) failCell(selections[0].name, selections[0].targetId, String(error));
+      else onError(String(error));
+    } finally {
+      onBusy(false);
+      setKeyBusy((prev) => (prev?.keyId === keyId ? null : prev));
+    }
+    if (result !== null) {
+      const removed = result.entries.filter((e) => e.outcome === "removed");
+      // 原件格、单独拿不掉的写法等以 skipped + 原因回来：和失败一样弹回、说原因
+      const failed = result.entries.filter((e) => e.outcome !== "removed");
+      setOptimisticFor(
+        failed.map((e) => cellKey(e.name, e.targetId)),
+        null,
+      );
+      const text = toastFor("unlink", {
+        done: itemsOf(removed),
+        failed: itemsOf(failed).map((item, i) => ({ ...item, reason: failed[i].message })),
+      });
+      const undoId = result.undoId;
+      const one =
+        single && removed.length > 0
+          ? { keys, rowKey: removed[0].name, columnId: removed[0].targetId }
+          : undefined;
+      // 单格：`✓ 从 [Codex] 移除`（这一行已说明对象，不重复服务名）
+      const rowText = one ? toastFor("unlink", { done: itemsOf(removed), omitNames: true }) : text;
+      const undo =
+        undoId && removed.length > 0 ? () => void undoWrite(undoId, keyId, rowText, one) : null;
+      undoRef.current = undo;
+      // 只有移除了一份与原版不一样的副本才给 `撤销`：再点只能写回原版（⌘Z 照旧可用）
+      const action =
+        undo && mcpUndoShown("remove", result.entries, true)
+          ? { label: "撤销", onClick: undo }
+          : undefined;
+      if (keyId !== undefined) {
+        setKeyToast({
+          keyId,
+          node: (
+            <UndoToast
+              undoId={undoId}
+              {...text}
+              names={text.kind === "success" ? undefined : text.names}
+              reading={text.kind === "success" ? <ToastCount n={removed.length} /> : undefined}
+              action={action}
+              onDismiss={dismissKey}
+              onClose={text.tier === "notice" ? dismissKey : undefined}
+            />
+          ),
+        });
+      } else if (one === undefined) {
+        const f = failed[0];
+        failCell(
+          f?.name ?? selections[0].name,
+          f?.targetId ?? selections[0].targetId,
+          f?.message ?? "没移除",
+        );
+      } else {
+        setCellToast({
+          id: ++cellToastSeq.current,
+          rowKey: one.rowKey,
+          columnId: one.columnId,
+          node: <UndoToast undoId={undoId} {...rowText} action={action} onDismiss={dismissCell} />,
+        });
+      }
+    }
+    await refresh();
+    setOptimisticFor(keys, null);
   };
 
   /// 撤销一次写入：core 只在文件仍等于写入后的样子时才从快照还原。改过了就撤不了——
@@ -573,12 +715,16 @@ export default function McpTab({
   ) => {
     const single = one !== undefined;
     undoRef.current = null;
+    // 按下的 `撤销` 原位忙碌（过了 0.3 秒门槛才出转圈 + 一句）；⌘Z 撤的也一样
+    setUndoBusy(undoId);
     let report: McpUndoReport;
     try {
       report = await api.mcpUndoWrite(undoId);
     } catch (error) {
       onError(String(error));
       return;
+    } finally {
+      setUndoBusy((prev) => (prev === undoId ? null : prev));
     }
     if (report.outcome === "undone") {
       setKeyToast(null);
@@ -635,16 +781,21 @@ export default function McpTab({
     else setGlobalToast(node);
   };
 
-  /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）
-  const write = async (selections: McpSelection[], keyId?: string) => {
+  /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）。
+  /// `reversible`：写完再按一次同一个键恰好撤回（见 `mcpUndoShown`）
+  const write = async (selections: McpSelection[], keyId?: string, reversible = true) => {
     if (selections.length === 0) return;
     const anchor = anchorNow();
+    // 按键的：确认框出来之前要先算影响——只锁按下的那一项，过了 0.3 秒门槛旁边出忙碌指示 + 一句
+    if (keyId !== undefined) setKeyBusy({ keyId, label: "正在查看影响" });
     let preview: McpPreview;
     try {
       preview = await api.proposeMcpSync(selections);
     } catch (error) {
       onError(String(error));
       return;
+    } finally {
+      if (keyId !== undefined) setKeyBusy((prev) => (prev?.keyId === keyId ? null : prev));
     }
     if (preview.actions.length === 0) {
       // 动作为空不等于「都已经有了」：同名已存在、来源读不出、格式搬不过去也都是空动作
@@ -681,14 +832,14 @@ export default function McpTab({
     }
     const crossDomain = preview.actions.some((action) => action.crossDomain);
     if (keyId !== undefined || crossDomain) {
-      setPane({ preview, crossDomain, anchor, keyId });
+      setPane({ preview, crossDomain, anchor, keyId, reversible });
       return;
     }
     // 同域单格：乐观点亮 + 闪一下，不确认；写成出例行一行（被点的那一行里，紧跟名字）
     await apply(preview, false);
   };
 
-  /// 点一个空心格：同域单格直接写
+  /// 点一格：空心＝写进（同域单格直接写），实心副本＝移除
   const onCell = (p: McpDomain, rowKey: string, targetId: string) => {
     const row = p.rows.find((r) => rowKeyOf(r) === rowKey);
     const target = p.targets.find((t) => t.id === targetId);
@@ -702,6 +853,11 @@ export default function McpTab({
     }
     if (!view.clickable) return;
     setCellNotice(null);
+    // 实心（副本）：从这个位置移除；行的来源是原件（core 同样拒绝原件格）
+    if (view.copy) {
+      void removeCopies([{ sourceId: mcpGroupOf(row), name: row.name, targetId: target.id }]);
+      return;
+    }
     const source = sourceForMissingTarget(row, target.id);
     if (source === null) {
       const choices = pickChoices(row, target.id);
@@ -801,13 +957,17 @@ export default function McpTab({
     }
   }
 
-  /// 格此刻画成什么：乐观点亮的画实心
+  /// 格此刻画成什么：乐观更新的画成点下去之后的样子（写进实心、移除空心），落定前不再可点。
+  /// WeiboAP 里的副本不在格子上移除
   const viewAt = (row: McpDomainRow, targetId: string) => {
     const view = cellViewOf(row, targetId, labelOf);
     if (view === null) return null;
-    return optimistic.has(cellKey(rowKeyOf(row), targetId))
-      ? { ...view, dot: "linked" as const, clickable: false, reason: undefined }
-      : view;
+    const dot = optimistic.get(cellKey(rowKeyOf(row), targetId));
+    if (dot !== undefined)
+      return { ...view, dot, clickable: false, copy: undefined, reason: undefined };
+    if (view.copy && locationOf(targetId)?.harnessId === "weiboap")
+      return { ...view, clickable: false, reason: WEIBO_REMOVE };
+    return view;
   };
 
   // ---- 列：第三层是这个位置下能用的条数 ----
@@ -849,11 +1009,13 @@ export default function McpTab({
         tip: invalid
           ? `${view.reason ?? ""} · 点一下在访达中显示`
           : view.clickable
-            ? choiceCount(row, target.id) > 1
-              ? pickTip(row.name, choiceCount(row, target.id))
-              : "点一下写进"
+            ? view.copy
+              ? `从 ${names.get(target.id) ?? target.label} 移除`
+              : choiceCount(row, target.id) > 1
+                ? pickTip(row.name, choiceCount(row, target.id))
+                : "点一下写进"
             : view.dot === "own" && view.issue === undefined
-              ? mcpOwnTip(names.get(target.id) ?? target.label)
+              ? MCP_OWN_TIP
               : (view.reason ?? ""),
         pending: pendingCells.has(cellKey(key, target.id)),
       };
@@ -923,17 +1085,27 @@ export default function McpTab({
     chosen.flatMap((row) => {
       const view = viewAt(row, targetId);
       const source = sourceForMissingTarget(row, targetId);
-      return view?.clickable === true && source !== null
+      return view?.clickable === true && view.copy !== true && source !== null
         ? [{ sourceId: source.sourceId, name: row.name, targetId }]
         : [];
     });
-  // 选择态：工具行里每个位置一项「● / ○ 名字」。MCP 只能写进、不能删条目——● （都有了）后禁用，
-  // 提示框「都已写进」
+  /// 选中的行里这一列上能移除的副本（原件、WeiboAP 里的、正在落定的都不算）
+  const copiesAt = (targetId: string): McpSelection[] =>
+    chosen.flatMap((row) =>
+      viewAt(row, targetId)?.copy === true && viewAt(row, targetId)?.clickable === true
+        ? [{ sourceId: mcpGroupOf(row), name: row.name, targetId }]
+        : [],
+    );
+  // 选择态：工具行里每个位置一项「● / ○ 名字」，同 skill（DESIGN「MCP 格子同样是开关」）：
+  // 点 ○ 写进缺的，点 ●（选中的都有了）全部移除。原件、写不过去的格不计入
   const columnChecks: Record<string, ColumnCheck> = {};
+  const enabledPresses: { add: McpSelection[]; remove: McpSelection[]; checked: boolean }[] = [];
   for (const target of page.targets) {
     const cells = missingAt(target.id);
+    const copies = copiesAt(target.id);
     const present = chosen.filter((row) => viewAt(row, target.id)?.dot === "linked").length;
     const own = chosen.filter((row) => viewAt(row, target.id)?.dot === "own").map((r) => r.name);
+    // 还没有、又写不过去的；已经有了、却移除不了的（WeiboAP 里的）
     const cant = chosen
       .filter((row) => {
         const v = viewAt(row, target.id);
@@ -945,39 +1117,64 @@ export default function McpTab({
         );
       })
       .map((r) => r.name);
+    const stuck = chosen
+      .filter(
+        (row) =>
+          viewAt(row, target.id)?.dot === "linked" && !copies.some((c) => c.name === row.name),
+      )
+      .map((r) => r.name);
     const checked = cells.length === 0 && present > 0;
+    const notes = [
+      { names: own, why: "是原件" },
+      checked ? { names: stuck, why: "这里移除不了" } : { names: cant, why: "写不过去" },
+    ];
+    const disabledReason =
+      (checked ? copies.length : cells.length) > 0
+        ? undefined
+        : checked
+          ? "都已写进，这里移除不了"
+          : cant.length > 0
+            ? "这几个都写不过去"
+            : "这几个就定义在这里";
+    if (disabledReason === undefined) enabledPresses.push({ add: cells, remove: copies, checked });
     columnChecks[target.id] = {
       checked,
-      label: `选中的都写进 ${target.label}`,
-      tip: affectedTip(
-        `写进 ${target.label}`,
-        cells.map((c) => c.name),
-        [
-          { names: own, why: "就定义在这里" },
-          { names: cant, why: "写不过去" },
-        ],
-      ),
-      disabledReason:
-        cells.length > 0
-          ? undefined
-          : checked
-            ? "都已写进"
-            : cant.length > 0
-              ? "这几个都写不过去"
-              : "这几个就定义在这里",
-      onToggle: () => void write(cells, target.id),
+      label: checked ? `选中的都从 ${target.label} 移除` : `选中的都写进 ${target.label}`,
+      tip: checked
+        ? affectedTip(
+            `从 ${target.label} 移除`,
+            copies.map((c) => c.name),
+            notes,
+          )
+        : affectedTip(
+            `写进 ${target.label}`,
+            cells.map((c) => c.name),
+            notes,
+          ),
+      disabledReason,
+      onToggle: () =>
+        void (checked
+          ? removeCopies(copies, target.id)
+          : // 选中的里这一列原本就有副本时，再按会连原有的一起移除：只有撤销是准确的退路
+            write(cells, target.id, copies.length === 0)),
     };
   }
-  const allMissing = page.targets.flatMap((t) => missingAt(t.id));
-  const allWritten = allMissing.length === 0 && Object.values(columnChecks).some((c) => c.checked);
+  // 「所有位置」：每个能改的位置都全有才打勾；点空框全部写进，点打勾全部移除
+  const allChecked = enabledPresses.length > 0 && enabledPresses.every((p) => p.checked);
+  const allAdd = enabledPresses.flatMap((p) => p.add);
+  const allRemove = enabledPresses.flatMap((p) => p.remove);
+  const uniqNames = (cells: McpSelection[]) => [...new Set(cells.map((c) => c.name))];
   const allAgents: ColumnCheck = {
-    checked: allWritten,
-    label: "选中的都写进所有位置",
-    tip: affectedTip(`写进所有还缺它的位置 · ${allMissing.length} 处`, [
-      ...new Set(allMissing.map((c) => c.name)),
-    ]),
-    disabledReason: allMissing.length > 0 ? undefined : allWritten ? "都已写进" : "没有能写进的",
-    onToggle: () => void write(allMissing, "all"),
+    checked: allChecked,
+    label: allChecked ? "选中的都从所有位置移除" : "选中的都写进所有位置",
+    tip: allChecked
+      ? affectedTip(`从所有位置移除 · ${allRemove.length} 处`, uniqNames(allRemove))
+      : affectedTip(`写进所有还缺它的位置 · ${allAdd.length} 处`, uniqNames(allAdd)),
+    disabledReason: enabledPresses.length === 0 ? "没有能写进或移除的" : undefined,
+    onToggle: () =>
+      void (allChecked
+        ? removeCopies(allRemove, "all")
+        : write(allAdd, "all", allRemove.length === 0)),
   };
 
   const openSources = () => setSourcesOpen(true);
@@ -1013,7 +1210,8 @@ export default function McpTab({
     pane !== null &&
     pane.preview.actions.some((action) => locationOf(action.targetId)?.harnessId === "weiboap");
 
-  return (
+  // 带撤销的提示小窗读 UndoBusy（按下的 `撤销` 原位忙碌）
+  const content = (
     <section className="mx-page mcp-tab">
       <Matrix
         columns={columns}
@@ -1089,7 +1287,7 @@ export default function McpTab({
               : "已经存在的同名配置不会被覆盖；写进已有文件前会先备份"
           }
           confirmLabel="写进去"
-          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId)}
+          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId, pane.reversible)}
           onCancel={() => setPane(null)}
         >
           <ul className="mcp-confirm-list">
@@ -1146,4 +1344,5 @@ export default function McpTab({
       )}
     </section>
   );
+  return <UndoBusy.Provider value={undoBusy}>{content}</UndoBusy.Provider>;
 }
