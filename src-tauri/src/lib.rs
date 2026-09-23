@@ -594,6 +594,78 @@ fn delete_source(plan_id: String, state: tauri::State<'_, AppState>) -> Result<S
     Ok(sync::delete_source(&plan))
 }
 
+/// 来源管理页：这个位置（`DomainPage.key`）已订阅的来源，以及 `+ 来源` 的两组候选。只读
+#[tauri::command]
+fn list_sources(
+    domain: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<subscriptions::SourceList, String> {
+    let (sources, targets) = discover(&state)?;
+    let settings = subscribed_settings(&state, &sources, &targets)?;
+    let home = runtime_env()?.home;
+    Ok(subscriptions::list(
+        &domain,
+        &sources,
+        &targets,
+        &settings.subscriptions,
+        &settings.auto_links,
+        &home,
+    ))
+}
+
+/// 在这个位置订阅一个来源：路径来自候选，或来自用户选的文件夹。只记订阅，不建链
+#[tauri::command]
+fn subscribe_source(
+    domain: String,
+    path: PathBuf,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let (sources, targets) = discover(&state)?;
+    let mut settings = subscribed_settings(&state, &sources, &targets)?;
+    subscriptions::subscribe(
+        &mut settings.subscriptions,
+        &domain,
+        &path,
+        &sources,
+        &targets,
+    )?;
+    state.store.save_settings(&settings).map_err(err)
+}
+
+/// 移除来源前的只读清单：会撤掉的软链（skill × agent），给确认框列出。
+/// 原件在这个位置里的来源返回拒绝的原因
+#[tauri::command]
+fn plan_remove_source(
+    domain: String,
+    source_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<subscriptions::SourceRemoval, String> {
+    let (sources, targets) = discover(&state)?;
+    subscriptions::plan_remove(&domain, &source_id, &sources, &targets)
+}
+
+/// 从这个位置移除来源：撤掉它在这里的软链（删前重校验），再删订阅记录与规则里本位置的目标。
+/// 执行时按当下的文件系统重新算清单，不沿用确认框那一份
+#[tauri::command]
+fn remove_source(
+    domain: String,
+    source_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncReport, String> {
+    let (sources, targets) = discover(&state)?;
+    let mut settings = subscribed_settings(&state, &sources, &targets)?;
+    let report = subscriptions::remove(
+        &domain,
+        &source_id,
+        &sources,
+        &targets,
+        &mut settings.subscriptions,
+        &mut settings.auto_links,
+    )?;
+    state.store.save_settings(&settings).map_err(err)?;
+    Ok(report)
+}
+
 /// 把这些问题记为看过（新问题只提示一次，看过即止）。key 由前端算好，格式见 core `store::SeenIssue`；
 /// 已看过的保持原样
 #[tauri::command]
@@ -903,6 +975,10 @@ pub fn run() {
             split_whole_link,
             plan_delete_source,
             delete_source,
+            list_sources,
+            subscribe_source,
+            plan_remove_source,
+            remove_source,
             mark_issues_seen,
             list_seen_issues,
             list_manual_sources,

@@ -11,6 +11,8 @@ import type {
   Overview,
   PlannedAction,
   PlannedDeletion,
+  SourceList,
+  SourceRemoval,
   SyncReport,
   McpOverview,
   McpPreview,
@@ -43,6 +45,17 @@ export const api = {
     invoke<PlannedDeletion>("plan_delete_source", { sourceId, skill }),
   /// 执行用户已确认的删除计划；planId 用后即弃，不能重放
   deleteSource: (planId: string) => invoke<SyncReport>("delete_source", { planId }),
+  /// 来源管理页：这个位置（DomainPage.key）已订阅的来源与 `+ 来源` 的两组候选。只读
+  listSources: (domain: string) => invoke<SourceList>("list_sources", { domain }),
+  /// 在这个位置订阅一个来源（候选的 path，或用户选的文件夹）；只记订阅，不建链
+  subscribeSource: (domain: string, path: string) =>
+    invoke<void>("subscribe_source", { domain, path }),
+  /// 移除前的只读清单：会撤掉的软链。原件在这个位置里的来源 reject，错误信息就是给用户看的原因
+  planRemoveSource: (domain: string, sourceId: string) =>
+    invoke<SourceRemoval>("plan_remove_source", { domain, sourceId }),
+  /// 撤掉软链、删订阅记录与规则里本位置的目标；原件不动。执行时按当下重新算清单
+  removeSource: (domain: string, sourceId: string) =>
+    invoke<SyncReport>("remove_source", { domain, sourceId }),
   /// 把这些问题记为看过（新问题只提示一次，看过即止）；已看过的保持原样。
   /// key 是字符串，两种格式互不相撞（core `store::SeenIssue` 是准）：
   /// - skill / MCP：`issues.ts › issueKey(kind, paths)`，即 `<IssueKind>\u001f<位置…>`

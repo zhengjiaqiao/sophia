@@ -183,6 +183,70 @@ export interface AutoLink {
   targetBaselines?: Record<string, string[]>;
 }
 
+/// 来源管理页一行的共同部分（core `subscriptions::SourceSummary`）
+export interface SourceSummary {
+  /// 与 Source.id 相同；记录里有、这次没发现的来源用记录的路径
+  id: string;
+  /// 完整路径，给提示框
+  path: string;
+  label: string;
+  /// 同名来源的区分片段；不重名、或片段就是名字本身时为空串
+  segment: string;
+  /// 主目录写成 `~` 的路径
+  shortPath: string;
+  /// 按名排序
+  skills: string[];
+  skillCount: number;
+}
+
+/// 这个位置已订阅的一个来源
+export interface SubscribedSource extends SourceSummary {
+  /// 原件就在这个位置里：永远算已订阅，不能移除
+  own: boolean;
+  /// 能不能开「以后新出现的自动添加」（外部位置不能）
+  canAutoLink: boolean;
+  /// 规则在这个位置开着；开关与改目标沿用 setAutoLink / removeAutoLinkTargets（source 传 path）
+  autoLink: boolean;
+  /// 规则在这个位置的目标 id（Target.id）
+  autoTargets: string[];
+}
+
+export interface DomainName {
+  key: string;
+  label: string;
+}
+
+/// `+ 来源` 里的一个候选
+export interface CandidateSource extends SourceSummary {
+  /// 在哪些位置订阅着（只有「其他项目在用的」有）
+  usedIn: DomainName[];
+}
+
+/// `list_sources` 的返回
+export interface SourceList {
+  /// 已订阅的来源：自己的在前，其余按名
+  subscribed: SubscribedSource[];
+  /// 其他项目在用的：别的位置订阅过、这里还没有的
+  elsewhere: CandidateSource[];
+  /// 检测到的其余来源
+  detected: CandidateSource[];
+}
+
+/// 移除来源时会撤掉的一条软链
+export interface RemovalLink {
+  /// null：这个 agent 的整个 skill 目录就是指向该来源的一条软链
+  skill: string | null;
+  targetId: string;
+  /// agent 名（Target.label）
+  agent: string;
+}
+
+/// `plan_remove_source` 的返回；links 为空表示一条都没链
+export interface SourceRemoval {
+  sourceId: string;
+  links: RemovalLink[];
+}
+
 export interface HarnessStatus {
   id: string;
   displayName: string;
