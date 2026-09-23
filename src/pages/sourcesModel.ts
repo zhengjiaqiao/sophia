@@ -1,7 +1,7 @@
 /// 来源管理页的两种数据源（skill / MCP）：同一套骨架（SourcesPage），这里把两边的命令与造句
 /// 换成同一种行、目标、候选与移除，页面只认这一种形状。不产 JSX。
 import { api } from "../api";
-import type { McpLocation, McpReport, SyncReport, Target } from "../types";
+import type { McpLocation, McpReport, McpService, SyncReport, Target } from "../types";
 import type { ToastProps } from "../ui";
 import {
   NO_SKILL_CANDIDATES,
@@ -26,7 +26,7 @@ import {
   sourceNames,
   sourceSubtitle,
   sourcesTitle,
-  stuckTip,
+  mcpStuckTip,
   type DomainRef,
 } from "./sourcesView.ts";
 
@@ -264,6 +264,19 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
     const l = locations.find((x) => x.id === id);
     return l ? mcpLocationName(l) : id;
   };
+  /// 展开后的一行服务：搬不过去（哪儿都搬不过去，或这里显示的位置一家都接不住）才标签 + 变淡
+  const stuckItem = (x: McpService, source: string, sourceId: string) => {
+    const tip = mcpStuckTip(
+      x,
+      source,
+      locations.filter((l) => l.id !== sourceId),
+    );
+    return {
+      name: x.name,
+      tag: tip === null ? undefined : { text: "搬不过去", tip },
+      dim: tip !== null,
+    };
+  };
   return {
     title: mcpSourcesTitle(domain),
     addTitle: addSourceTitle(domain, "mcp"),
@@ -290,11 +303,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             sub: mcpSourceSubtitle(s, domain),
             path: s.path,
             own: s.own,
-            items: s.services.map((x) => ({
-              name: x.name,
-              tag: x.portable ? undefined : { text: "搬不过去", tip: stuckTip(x.name, s.label) },
-              dim: !x.portable,
-            })),
+            items: s.services.map((x) => stuckItem(x, s.label, s.id)),
             targets: s.autoTargets,
             switchReason: s.unreadable ? "读不到它的配置，先修好再开" : undefined,
             switchTitle: crossDomain
@@ -312,11 +321,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             name: i.name,
             sub: i.sub,
             count: i.services.length,
-            items: i.services.map((x) => ({
-              name: x.name,
-              tag: x.portable ? undefined : { text: "搬不过去", tip: stuckTip(x.name, i.name) },
-              dim: !x.portable,
-            })),
+            items: i.services.map((x) => stuckItem(x, i.name, i.id)),
           })),
         })),
       };

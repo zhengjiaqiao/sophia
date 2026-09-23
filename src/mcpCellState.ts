@@ -44,6 +44,9 @@ export interface McpCellContext {
   location: string;
   /// 本行这一份定义写在哪个位置里
   source: string;
+  /// core 给这一格的原因。条目带 `onlyHarnesses`（只有几家 agent 接得住）时才传：
+  /// 那时搬不过去是按目标 agent 判断的（「Cursor 不支持用命令生成请求头」），不是来源独有的写法
+  cellReason?: string;
 }
 
 /// 副本格：实心、可点（点＝从这个位置移除）。可点的不带 reason，移除之后要说的那句由调用方汇总
@@ -81,7 +84,9 @@ export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
       return {
         dot: "blocked",
         clickable: false,
-        reason: `${ctx.service} 用了只有 ${ctx.source} 认得的写法，搬到别处就不是原来那个了`,
+        reason:
+          ctx.cellReason ??
+          `${ctx.service} 用了只有 ${ctx.source} 认得的写法，搬到别处就不是原来那个了`,
       };
   }
 }

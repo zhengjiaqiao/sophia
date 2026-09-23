@@ -217,6 +217,24 @@ export function stuckTip(service: string, source: string): string {
   return `${service} 用了只有 ${source} 认得的写法，搬到别处就不是原来那个了`;
 }
 
+/// 一个 MCP 服务在这里搬不搬得过去（DESIGN「「搬不过去」按目标 agent 判断，不按服务一刀切」）：
+/// 哪儿都搬不过去（`!portable`），或者只有几家接得住（`onlyHarnesses`）而显示的目标里一家都接不住，
+/// 才标 `搬不过去`。返回标签的提示框；搬得过去返回 null。
+/// `targets`：这里能写进的位置（来源自己那一处不算）；名字取 agent 那一段（`Cursor · User` → `Cursor`）
+export function mcpStuckTip(
+  service: { name: string; portable: boolean; onlyHarnesses?: string[] },
+  source: string,
+  targets: { label: string; harnessId: string; domain: string }[],
+): string | null {
+  if (!service.portable) return stuckTip(service.name, source);
+  const only = service.onlyHarnesses;
+  if (only === undefined || targets.some((t) => only.includes(t.harnessId))) return null;
+  const agents = [...new Set(targets.map((t) => mcpLocationName(t).split(" · ")[0]))];
+  return agents.length > 0
+    ? `${agents.join("、")} 不支持 ${service.name} 的写法，搬不过去`
+    : `这里没有能接住 ${service.name} 的位置，搬不过去`;
+}
+
 /// 移除确认的正文：会拿掉哪些配置（服务名 × 位置）。
 /// - `这 2 个服务在 Codex · Project、Claude Code · Project 里的那份会拿掉：docs、search`，多于 5 个写「等 N 个」
 /// - 一项都没有：`它的服务会从列表里拿掉，没有写进这里的配置要撤`

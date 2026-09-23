@@ -44,7 +44,17 @@ export function cellViewOf(
 ): McpCellView | null {
   const cells = row.entries.flatMap((entry) => {
     const cell = entry.cells.find((candidate) => candidate.targetId === targetId);
-    return cell === undefined ? [] : [{ sourceId: entry.sourceId, state: cell.state }];
+    return cell === undefined
+      ? []
+      : [
+          {
+            sourceId: entry.sourceId,
+            state: cell.state,
+            // 只有几家接得住的条目：搬不过去按目标 agent 判断，原因用 core 给这一格的那句
+            cellReason:
+              entry.onlyHarnesses !== undefined && cell.reason !== null ? cell.reason : undefined,
+          },
+        ];
   });
   // 无格态：这一行在这一列没有格，例如来源属于另一个域
   if (cells.length === 0) return null;
@@ -64,12 +74,16 @@ export function cellViewOf(
   if (holds) return copyView();
   // 剩下的这一列上都还没有定义；conflict 已在上面摘掉，类型上也进不了 viewOf
   const dots = cells.filter(
-    (cell): cell is { sourceId: string; state: McpDotState } => cell.state !== "conflict",
+    (cell): cell is (typeof cells)[number] & { state: McpDotState } => cell.state !== "conflict",
   );
   const pick = (...states: McpDotState[]) => dots.find((cell) => states.includes(cell.state));
   const found = pick("missing") ?? pick("invalid", "unsupported");
   if (found === undefined) return null;
-  return viewOf(found.state, { ...ctx, source: labelOf(found.sourceId) });
+  return viewOf(found.state, {
+    ...ctx,
+    source: labelOf(found.sourceId),
+    cellReason: found.cellReason,
+  });
 }
 
 /**

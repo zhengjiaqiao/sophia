@@ -192,3 +192,39 @@ test("撤销按钮：移除一份与原版一样的副本不给，不一样的�
   // 后端没带 identical（旧报告）时不猜成「不一样」
   assert.equal(mcpUndoShown("remove", [reported("removed")], true), false);
 });
+
+/// 只有几家 agent 接得住的条目（用命令生成请求头）：接不住的那一格原因用 core 给的那句，
+/// 不说「只有来源认得的写法」——换一家 agent 就搬得过去
+test("unsupported：条目带 onlyHarnesses 时原因用 core 给这一格的那句", () => {
+  const helper: McpEntry = {
+    sourceId: "codex",
+    name: "gh",
+    transport: "http",
+    reason: null,
+    onlyHarnesses: ["claude-code", "codex"],
+    cells: [
+      { targetId: "codex", state: "own", reason: null },
+      { targetId: "claude-code", state: "missing", reason: null },
+      { targetId: "cursor", state: "unsupported", reason: "Cursor 不支持用命令生成请求头" },
+    ],
+  };
+  const labels = (id: string) =>
+    ({ codex: "Codex", "claude-code": "Claude Code", cursor: "Cursor" })[id] ?? id;
+  const view = cellViewOf({ name: "gh", entries: [helper] }, "cursor", labels);
+  assert.deepEqual(view, {
+    dot: "blocked",
+    clickable: false,
+    reason: "Cursor 不支持用命令生成请求头",
+  });
+  // 接得住的那一家照常可写
+  assert.equal(
+    cellViewOf({ name: "gh", entries: [helper] }, "claude-code", labels)?.clickable,
+    true,
+  );
+  // 没有 onlyHarnesses 的：照旧是「只有来源认得的写法」
+  const plain: McpEntry = { ...helper, onlyHarnesses: undefined, name: "notion" };
+  assert.equal(
+    cellViewOf({ name: "notion", entries: [plain] }, "cursor", labels)?.reason,
+    "notion 用了只有 Codex 认得的写法，搬到别处就不是原来那个了",
+  );
+});

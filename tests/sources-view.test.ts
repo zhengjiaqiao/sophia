@@ -23,6 +23,7 @@ import {
   sourceSubtitle,
   sourcesTitle,
   stuckTip,
+  mcpStuckTip,
 } from "../src/pages/sourcesView.ts";
 import type {
   CandidateSource,
@@ -327,4 +328,30 @@ test("MCP 添加来源弹窗的分组：其他项目在用的写在哪用，检�
     },
   ]);
   assert.deepEqual(mcpCandidateGroups({ elsewhere: [], detected: [] }), []);
+});
+
+/// DESIGN「「搬不过去」按目标 agent 判断，不按服务一刀切」：只有几家接得住的服务（用命令生成请求头），
+/// 显示的位置里有一家接得住就不标；一家都接不住才标，并说清是哪几家接不住
+test("MCP 搬不过去按目标 agent 判断：哪儿都搬不过去照旧；只有几家接得住时看这里显示的位置", () => {
+  const loc = (harnessId: string, label: string) => ({ harnessId, label, domain: "global" });
+  const codex = loc("codex", "Codex · User");
+  const cursor = loc("cursor", "Cursor · User");
+  const cursorProject = loc("cursor", "Cursor · Project");
+  const gemini = loc("gemini", "Gemini CLI · User");
+  // 哪儿都搬不过去：沿用原来那句
+  assert.equal(
+    mcpStuckTip({ name: "internal-tools", portable: false }, "Codex · User", [cursor]),
+    stuckTip("internal-tools", "Codex · User"),
+  );
+  // 谁都接得住：不标
+  assert.equal(mcpStuckTip({ name: "docs", portable: true }, "Codex · User", [cursor]), null);
+  const helper = { name: "gh", portable: true, onlyHarnesses: ["claude-code", "codex"] };
+  // 显示的位置里有一家接得住：不标
+  assert.equal(mcpStuckTip(helper, "Claude Code · User", [codex, cursor]), null);
+  // 一家都接不住：标，说清是哪几家（agent 名去重）
+  assert.equal(
+    mcpStuckTip(helper, "Claude Code · User", [cursor, cursorProject, gemini]),
+    "Cursor、Gemini CLI 不支持 gh 的写法，搬不过去",
+  );
+  assert.equal(mcpStuckTip(helper, "Claude Code · User", []), "这里没有能接住 gh 的位置，搬不过去");
 });
