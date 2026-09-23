@@ -607,6 +607,7 @@ fn source_list_serializes_flat_and_camel_case() {
             services: vec![McpService {
                 name: "lint".into(),
                 portable: false,
+                only_harnesses: None,
             }],
         },
         own: false,

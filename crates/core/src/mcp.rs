@@ -12,6 +12,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod helper_tests;
 mod removal;
 pub mod sources;
 #[cfg(feature = "weiboap")]
@@ -143,6 +145,11 @@ pub struct McpEntry {
     pub name: String,
     pub transport: String,
     pub reason: Option<String>,
+    /// 只有这几个 agent（harness id）接得住它；缺省＝谁都接得住（`reason` 为空时）。
+    /// 目前只有用命令生成请求头的服务有：`["claude-code", "codex"]`。
+    /// 接不住的那一列，格子是 `Unsupported`，`reason` 写「Cursor 不支持用命令生成请求头」
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only_harnesses: Option<Vec<String>>,
     pub cells: Vec<McpCell>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -555,8 +562,23 @@ pub(super) struct Canonical {
     /// 不含配置值的诊断，供 DTO 与预览显示。
     pub(super) reason: Option<String>,
     pub(super) unsupported: bool,
-    /// 仅 `http_headers_helper` 使该 HTTP 定义无法完整静态比较。
-    pub(super) helper_only: bool,
+    /// 用命令生成请求头：命令往标准输出写一个「请求头名 → 字符串」的 JSON 对象。
+    /// Codex 叫 `http_headers_helper`、Claude Code 叫 `headersHelper`，两家都用 `sh -c` 跑，
+    /// 语义一致，只在这两家之间搬（见 `HELPER_HARNESSES`）。只出现在 HTTP 定义上
+    pub(super) headers_helper: Option<String>,
+}
+
+/// 认得「用命令生成请求头」的 agent（harness id）。别的 agent 写不进这种定义：
+/// 丢掉命令就是一份没有凭据的坏配置，所以整条拒绝，不静默丢字段
+const HELPER_HARNESSES: [&str; 2] = ["claude-code", "codex"];
+
+/// 位置名里的 agent 名：`Claude Code · Local MCPs` → `Claude Code`
+fn agent_name(location: &McpLocation) -> &str {
+    location
+        .label
+        .split(" · ")
+        .next()
+        .unwrap_or(&location.label)
 }
 
 impl Canonical {
@@ -567,26 +589,41 @@ impl Canonical {
             && self.env == other.env
             && self.url == other.url
             && headers_eq(&self.headers, &other.headers)
+            && self.headers_helper == other.headers_helper
             && !self.unsupported
             && !other.unsupported
     }
 
+    /// 只有 `HELPER_HARNESSES` 里的 agent 接得住时为这几家；谁都接得住（或哪儿都搬不过去）为 None
+    pub(super) fn only_harnesses(&self) -> Option<Vec<String>> {
+        (self.headers_helper.is_some() && !self.unsupported)
+            .then(|| HELPER_HARNESSES.iter().map(|h| h.to_string()).collect())
+    }
+
+    /// 这份定义写不进 `target` 的原因（与目标里已有什么无关，只看目标 agent 认不认得这种写法）
+    pub(super) fn refusal_for(&self, target: &McpLocation) -> Option<String> {
+        (self.headers_helper.is_some() && !HELPER_HARNESSES.contains(&target.harness_id.as_str()))
+            .then(|| format!("{} 不支持用命令生成请求头", agent_name(target)))
+    }
+
+    /// 同一个 URL，恰好一边用命令生成请求头：命令运行时写出什么没法静态确认，
+    /// 与另一边的静态请求头比不出一不一样。两边都用命令的照常比（命令字符串相同即相同）
     fn same_endpoint_with_dynamic_auth(&self, other: &Self) -> bool {
-        self.has_comparable_http_endpoint()
-            && other.has_comparable_http_endpoint()
-            && (self.helper_only || other.helper_only)
-            && self.url == other.url
+        self.mixed_dynamic_auth(other) && self.url == other.url
     }
 
     fn different_endpoint_with_dynamic_auth(&self, other: &Self) -> bool {
+        self.mixed_dynamic_auth(other) && self.url != other.url
+    }
+
+    fn mixed_dynamic_auth(&self, other: &Self) -> bool {
         self.has_comparable_http_endpoint()
             && other.has_comparable_http_endpoint()
-            && (self.helper_only || other.helper_only)
-            && self.url != other.url
+            && self.headers_helper.is_some() != other.headers_helper.is_some()
     }
 
     fn has_comparable_http_endpoint(&self) -> bool {
-        self.transport == "http" && self.url.is_some() && (self.helper_only || !self.unsupported)
+        self.transport == "http" && self.url.is_some() && !self.unsupported
     }
 }
 
@@ -764,6 +801,7 @@ pub fn scan(locations: &[McpLocation]) -> McpOverview {
                 name: name.clone(),
                 transport: def.transport.clone(),
                 reason: def.reason.clone(),
+                only_harnesses: def.only_harnesses(),
                 cells: Vec::new(),
             });
         }
@@ -795,7 +833,10 @@ pub fn scan(locations: &[McpLocation]) -> McpOverview {
                         McpCellState::Unsupported,
                         Some("来源条目无法无损转换".into()),
                     ),
-                    None => (McpCellState::Missing, None),
+                    None => match source.refusal_for(target) {
+                        Some(reason) => (McpCellState::Unsupported, Some(reason)),
+                        None => (McpCellState::Missing, None),
+                    },
                     Some(def) if def.unsupported => (
                         McpCellState::Unsupported,
                         Some("目标条目无法无损转换".into()),
@@ -837,7 +878,7 @@ pub enum McpFieldValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpFieldDiff {
-    /// `url` `command` `args` `transport` `env.NAME` `headers.Name`
+    /// `url` `command` `args` `transport` `headersHelper` `env.NAME` `headers.Name`
     pub field: String,
     pub values: Vec<McpFieldValue>,
 }
@@ -851,7 +892,8 @@ pub struct McpDiff {
     pub location_ids: Vec<String>,
     /// 只列不同的字段；相同的不出现
     pub fields: Vec<McpFieldDiff>,
-    /// 有一边的认证头要到运行时才生成（`http_headers_helper`），请求头没法逐字比对
+    /// 有的位置用命令生成请求头、有的没有：那几份的认证头要到运行时才生成，请求头没法逐字比对，
+    /// `headers.*` 整组不列。全都用命令的不算（命令与静态请求头照常逐项比）
     pub dynamic_auth: bool,
     /// 读不出来、或这一份用了没法逐项比较的写法的位置
     pub unreadable: Vec<String>,
@@ -1037,7 +1079,7 @@ pub fn diff_fields(locations: &[McpLocation], name: &str, location_ids: &[String
                 .map(parse)
                 .and_then(|parsed| parsed.values.get(name).cloned());
             match def {
-                // 「没法无损迁移」的定义字段照样在（变量引用、动态请求头）；只有连字段都
+                // 「没法无损迁移」的定义字段照样在（如变量引用）；只有连字段都
                 // 取不出来的（`unsupported_with`，传输记作 unsupported）才算读不出来
                 Some(def) if def.transport != "unsupported" => Some(def),
                 _ => {
@@ -1047,7 +1089,16 @@ pub fn diff_fields(locations: &[McpLocation], name: &str, location_ids: &[String
             }
         })
         .collect();
-    let dynamic_auth = defs.iter().flatten().any(|def| def.helper_only);
+    // 恰好一部分用命令生成请求头：那几份的请求头要到运行时才有，和别处的静态请求头逐字比没有意义。
+    // 全都用命令的照常比（命令字符串 + 静态请求头）
+    let dynamic_auth = {
+        let mut helpers = defs
+            .iter()
+            .flatten()
+            .map(|def| def.headers_helper.is_some());
+        let first = helpers.next();
+        first.is_some_and(|first| helpers.any(|other| other != first))
+    };
 
     // (字段名, 比较用的原值, 显示用的值)；None = 这一处没有这个字段
     type Cell = Option<(String, McpFieldValue)>;
@@ -1108,6 +1159,18 @@ pub fn diff_fields(locations: &[McpLocation], name: &str, location_ids: &[String
             .collect(),
     );
 
+    // 生成请求头的命令里可能直接嵌着令牌（`echo '{"Authorization":"Bearer …"}'`），按凭据脱敏
+    push(
+        "headersHelper".into(),
+        defs.iter()
+            .map(|d| {
+                d.as_ref()
+                    .and_then(|d| d.headers_helper.clone())
+                    .map(|c| (c.clone(), secret_value(&c)))
+            })
+            .collect(),
+    );
+
     let mut env_names = BTreeSet::new();
     for def in defs.iter().flatten() {
         env_names.extend(def.env.keys().cloned());
@@ -1125,7 +1188,7 @@ pub fn diff_fields(locations: &[McpLocation], name: &str, location_ids: &[String
         );
     }
 
-    // 请求头：动态认证那一边的静态请求头不完整，逐字比对没有意义，整组不列
+    // 请求头：只有一部分用命令生成请求头时，那几份的静态请求头不完整，逐字比对没有意义，整组不列
     if !dynamic_auth {
         let mut header_names: Vec<String> = Vec::new();
         for def in defs.iter().flatten() {
@@ -1229,6 +1292,10 @@ pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> Prepar
                     "目标已有冲突定义"
                 },
             ));
+            continue;
+        }
+        if let Some(reason) = definition.refusal_for(target_location) {
+            issues.push(issue(selection, &reason));
             continue;
         }
         if source_location.harness_id != target_location.harness_id
@@ -1513,7 +1580,12 @@ fn parse(location: &McpLocation) -> Parsed {
             state,
         },
         State::Present(snap) if toml(&location.path) => parse_toml(&snap.bytes, state),
-        State::Present(snap) => parse_json(&snap.bytes, state, location.selector.as_deref()),
+        State::Present(snap) => parse_json(
+            &snap.bytes,
+            state,
+            location.selector.as_deref(),
+            json_helper_key(location),
+        ),
         #[cfg(feature = "weiboap")]
         State::Weibo(_) => unreachable!("WeiboAP is handled before generic parsing"),
     }
@@ -1629,7 +1701,12 @@ fn same(path: &Path, expected: &State) -> bool {
     }
 }
 
-fn parse_json(bytes: &[u8], state: State, selector: Option<&str>) -> Parsed {
+fn parse_json(
+    bytes: &[u8],
+    state: State,
+    selector: Option<&str>,
+    helper_key: Option<&str>,
+) -> Parsed {
     if serde_json::from_slice::<NoDuplicates>(bytes).is_err() {
         return Parsed {
             values: BTreeMap::new(),
@@ -1663,7 +1740,7 @@ fn parse_json(bytes: &[u8], state: State, selector: Option<&str>) -> Parsed {
         None => BTreeMap::new(),
         Some(Value::Object(servers)) => servers
             .iter()
-            .map(|(name, value)| (name.clone(), canon_json(value)))
+            .map(|(name, value)| (name.clone(), canon_json(value, helper_key)))
             .collect(),
         Some(_) => {
             return Parsed {
@@ -1686,13 +1763,16 @@ fn invalid_json_scope(state: State, message: &str) -> Parsed {
         state,
     }
 }
-fn canon_json(value: &Value) -> Canonical {
+fn canon_json(value: &Value, helper_key: Option<&str>) -> Canonical {
     let Some(object) = value.as_object() else {
         return unsupported_with("MCP 定义不是对象");
     };
     let mut reason = object
         .keys()
-        .find(|key| !["type", "command", "args", "env", "url", "headers"].contains(&key.as_str()))
+        .find(|key| {
+            !["type", "command", "args", "env", "url", "headers"].contains(&key.as_str())
+                && Some(key.as_str()) != helper_key
+        })
         .map(|key| format!("不支持迁移字段 {key}"));
     let mut bad = reason.is_some();
     let command = json_string(object.get("command"), &mut bad);
@@ -1777,6 +1857,16 @@ fn canon_json(value: &Value) -> Canonical {
         bad = true;
         reason.get_or_insert_with(|| "字段 headers 含大小写重复名称".into());
     }
+    let headers_helper = match helper_key {
+        Some(key) => headers_helper(
+            object.get(key).map(Value::as_str),
+            key,
+            transport,
+            &mut bad,
+            &mut reason,
+        ),
+        None => None,
+    };
     Canonical {
         transport: transport.into(),
         command,
@@ -1787,8 +1877,14 @@ fn canon_json(value: &Value) -> Canonical {
         client_fields: BTreeMap::new(),
         reason: bad.then(|| reason.unwrap_or_else(|| "连接字段类型无效".into())),
         unsupported: bad,
-        helper_only: false,
+        headers_helper,
     }
+}
+
+/// 这个 agent 的 JSON 配置里「用命令生成请求头」的字段名；不认得这种写法的为 None，
+/// 那边的同名字段按不认识的字段处理（搬不过去）
+fn json_helper_key(location: &McpLocation) -> Option<&'static str> {
+    (location.harness_id == "claude-code").then_some("headersHelper")
 }
 fn json_string(value: Option<&Value>, bad: &mut bool) -> Option<String> {
     match value {
@@ -1882,15 +1978,17 @@ fn canon_toml(item: &toml_edit::Item) -> Canonical {
     let Some(table) = item.as_table_like() else {
         return unsupported_with("MCP 定义不是表");
     };
-    const CONNECTION: [&str; 5] = ["command", "args", "env", "url", "http_headers"];
+    const CONNECTION: [&str; 6] = [
+        "command",
+        "args",
+        "env",
+        "url",
+        "http_headers",
+        "http_headers_helper",
+    ];
     const CLIENT: [&str; 3] = ["enabled", "startup_timeout_sec", "tool_timeout_sec"];
-    let has_headers_helper = table.contains_key("http_headers_helper");
-    let headers_helper_valid = table
-        .get("http_headers_helper")
-        .and_then(|value| value.as_str())
-        .is_some_and(|value| !value.trim().is_empty());
     let mut reason = table.iter().find_map(|(key, _)| {
-        (!CONNECTION.contains(&key) && !CLIENT.contains(&key) && key != "http_headers_helper")
+        (!CONNECTION.contains(&key) && !CLIENT.contains(&key))
             .then(|| format!("Codex 不支持迁移字段 {key}"))
     });
     let mut bad = reason.is_some();
@@ -1970,16 +2068,13 @@ fn canon_toml(item: &toml_edit::Item) -> Canonical {
         bad = true;
         reason.get_or_insert_with(|| "字段 http_headers 含大小写重复名称".into());
     }
-    if has_headers_helper && !headers_helper_valid {
-        bad = true;
-        reason.get_or_insert_with(|| "字段 http_headers_helper 必须是非空字符串".into());
-    }
-    let helper_only = has_headers_helper && !bad;
-    if has_headers_helper {
-        reason.get_or_insert_with(|| {
-            "动态请求头 http_headers_helper，无法静态比较/跨工具迁移".into()
-        });
-    }
+    let headers_helper = headers_helper(
+        table.get("http_headers_helper").map(|item| item.as_str()),
+        "http_headers_helper",
+        transport,
+        &mut bad,
+        &mut reason,
+    );
     Canonical {
         transport: transport.into(),
         command,
@@ -1988,11 +2083,36 @@ fn canon_toml(item: &toml_edit::Item) -> Canonical {
         url,
         headers,
         client_fields,
-        reason: (bad || has_headers_helper)
-            .then(|| reason.unwrap_or_else(|| "连接字段类型无效".into())),
-        unsupported: bad || has_headers_helper,
-        helper_only,
+        reason: bad.then(|| reason.unwrap_or_else(|| "连接字段类型无效".into())),
+        unsupported: bad,
+        headers_helper,
     }
+}
+
+/// 生成请求头的命令（`value`：字段不在为 None，在但不是字符串为 `Some(None)`）。
+/// 必须是非空字符串、不含变量引用（两家对 `${…}` 的展开不一样）、只配 HTTP
+fn headers_helper(
+    value: Option<Option<&str>>,
+    field: &str,
+    transport: &str,
+    bad: &mut bool,
+    reason: &mut Option<String>,
+) -> Option<String> {
+    let value = value?;
+    let Some(command) = value.filter(|v| !v.trim().is_empty()) else {
+        *bad = true;
+        reason.get_or_insert_with(|| format!("字段 {field} 必须是非空字符串"));
+        return None;
+    };
+    if transport != "http" {
+        *bad = true;
+        reason.get_or_insert_with(|| "连接字段不适用于该传输类型".into());
+    }
+    if reference(command) {
+        *bad = true;
+        reason.get_or_insert_with(|| format!("字段 {field} 包含变量引用"));
+    }
+    Some(command.to_owned())
 }
 
 fn codex_client_fields(
@@ -2089,7 +2209,7 @@ fn unsupported_with(reason: &str) -> Canonical {
         client_fields: BTreeMap::new(),
         reason: Some(reason.into()),
         unsupported: true,
-        helper_only: false,
+        headers_helper: None,
     }
 }
 fn reference(value: &str) -> bool {
@@ -2126,12 +2246,16 @@ fn merge(
     if toml(&location.path) {
         merge_toml(existing, additions)
     } else if let Some(project) = location.selector.as_deref() {
-        merge_claude_local_json(existing, additions, project)
+        merge_claude_local_json(existing, additions, project, json_helper_key(location))
     } else {
-        merge_json(existing, additions)
+        merge_json(existing, additions, json_helper_key(location))
     }
 }
-fn merge_json(existing: Option<&[u8]>, additions: &[(&str, &Canonical)]) -> io::Result<Vec<u8>> {
+fn merge_json(
+    existing: Option<&[u8]>,
+    additions: &[(&str, &Canonical)],
+    helper_key: Option<&str>,
+) -> io::Result<Vec<u8>> {
     let mut bytes = existing.unwrap_or(b"{}").to_vec();
     if serde_json::from_slice::<NoDuplicates>(&bytes).is_err() {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "json"));
@@ -2139,7 +2263,7 @@ fn merge_json(existing: Option<&[u8]>, additions: &[(&str, &Canonical)]) -> io::
     let (root_start, root_end, server_range) = raw_json_ranges(&bytes)?;
     let fields: Vec<_> = additions
         .iter()
-        .map(|(name, def)| Ok((*name, json_server(def)?)))
+        .map(|(name, def)| Ok((*name, json_server(def, helper_key)?)))
         .collect::<io::Result<_>>()?;
     if let Some((start, end)) = server_range {
         if bytes.get(start) != Some(&b'{') {
@@ -2158,6 +2282,7 @@ fn merge_claude_local_json(
     existing: Option<&[u8]>,
     additions: &[(&str, &Canonical)],
     project: &str,
+    helper_key: Option<&str>,
 ) -> io::Result<Vec<u8>> {
     let mut bytes = existing.unwrap_or(b"{}").to_vec();
     if serde_json::from_slice::<NoDuplicates>(&bytes).is_err() {
@@ -2165,7 +2290,7 @@ fn merge_claude_local_json(
     }
     let fields: Vec<_> = additions
         .iter()
-        .map(|(name, def)| Ok((*name, json_server(def)?)))
+        .map(|(name, def)| Ok((*name, json_server(def, helper_key)?)))
         .collect::<io::Result<_>>()?;
     let (root_start, root_end, root) = raw_object_members(&bytes)?;
     let Some(projects) = root.get("projects").copied() else {
@@ -2233,7 +2358,8 @@ fn insert_raw_members(
     bytes.splice(at..at, add);
     Ok(())
 }
-fn json_server(def: &Canonical) -> io::Result<Vec<u8>> {
+/// 一条服务的 JSON 写法。`helper_key` 是目标 agent 里「用命令生成请求头」的字段名（见 `json_helper_key`）
+fn json_server(def: &Canonical, helper_key: Option<&str>) -> io::Result<Vec<u8>> {
     let mut object = serde_json::Map::new();
     object.insert("type".into(), Value::String(def.transport.clone()));
     if def.transport == "stdio" {
@@ -2281,6 +2407,11 @@ fn json_server(def: &Canonical) -> io::Result<Vec<u8>> {
                         .collect(),
                 ),
             );
+        }
+        if let Some(command) = &def.headers_helper {
+            // 计划阶段已按目标 agent 拒绝（`Canonical::refusal_for`）；这里再挡一次，绝不丢字段写
+            let key = helper_key.ok_or_else(|| refused("目标 agent 不支持用命令生成请求头"))?;
+            object.insert(key.into(), Value::String(command.clone()));
         }
     }
     serde_json::to_vec(&Value::Object(object)).map_err(io::Error::other)
@@ -2367,7 +2498,7 @@ fn merge_toml(existing: Option<&[u8]>, additions: &[(&str, &Canonical)]) -> io::
     Ok(out.into_bytes())
 }
 
-/// 一条服务要写的字段，按固定顺序：command / args / env 或 url / http_headers，再是 Codex 客户端字段
+/// 一条服务要写的字段，按固定顺序：command / args / env 或 url / http_headers / http_headers_helper，再是 Codex 客户端字段
 fn toml_server(def: &Canonical) -> io::Result<toml_edit::InlineTable> {
     let mut server = toml_edit::InlineTable::new();
     if def.transport == "stdio" {
@@ -2388,6 +2519,9 @@ fn toml_server(def: &Canonical) -> io::Result<toml_edit::InlineTable> {
         server.insert("url", basic_string(url));
         if !def.headers.is_empty() {
             server.insert("http_headers", inline(&def.headers).into());
+        }
+        if let Some(command) = &def.headers_helper {
+            server.insert("http_headers_helper", basic_string(command));
         }
     }
     for (key, raw) in &def.client_fields {
@@ -2725,7 +2859,7 @@ mod tests {
     #[test]
     fn transport_specific_fields_are_not_migratable() {
         let json: Value = serde_json::json!({"command":"x", "headers": {"A":"b"}});
-        assert!(canon_json(&json).unsupported);
+        assert!(canon_json(&json, None).unsupported);
         let toml = "[mcp_servers.x]\nurl = \"https://x\"\nenv = { A = \"b\" }"
             .parse::<toml_edit::DocumentMut>()
             .unwrap();
@@ -2744,7 +2878,7 @@ mod tests {
             client_fields: BTreeMap::new(),
             reason: None,
             unsupported: false,
-            helper_only: false,
+            headers_helper: None,
         };
         let output = merge_toml(Some(existing), &[("new", &def)]).unwrap();
         let parsed = parse_toml(&output, State::Missing);
@@ -2761,7 +2895,7 @@ mod tests {
             client_fields: BTreeMap::new(),
             reason: None,
             unsupported: false,
-            helper_only: false,
+            headers_helper: None,
         }
     }
 

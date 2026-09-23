@@ -12,9 +12,10 @@
 //! 文件是文本级手术：JSON 只切掉那一个成员，TOML 只删属于它的那几行，写前按语义核对
 //! 「除了拿掉的那一项，其余一模一样」，对不上整个文件不写。
 use super::{
-    backup, is_supported_transport, location_unreadable, parse_json, parse_toml, raw_json_ranges,
-    raw_object_members, raw_object_members_at, read, skip, toml, Canonical, McpAutoImportRule,
-    McpLocation, McpOverview, McpReport, McpReportEntry, NoDuplicates, Parsed, State,
+    backup, is_supported_transport, json_helper_key, location_unreadable, parse_json, parse_toml,
+    raw_json_ranges, raw_object_members, raw_object_members_at, read, skip, toml, Canonical,
+    McpAutoImportRule, McpLocation, McpOverview, McpReport, McpReportEntry, NoDuplicates, Parsed,
+    State,
 };
 use crate::atomicfile::{self, FileState};
 use crate::fs::normalize;
@@ -35,8 +36,13 @@ const GLOBAL: &str = "global";
 #[serde(rename_all = "camelCase")]
 pub struct McpService {
     pub name: String,
-    /// 能不能写到别处；false＝搬不过去（用了只有来源认得的写法）
+    /// 至少有 agent 接得住；false＝哪儿都搬不过去（用了只有来源认得的写法）
     pub portable: bool,
+    /// `portable` 时只有这几个 agent（harness id）接得住；缺省＝谁都接得住。
+    /// 用命令生成请求头的服务为 `["claude-code", "codex"]`。显示的 agent 里一家都接不住，
+    /// 才标 `搬不过去`（见 `McpEntry.only_harnesses`）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub only_harnesses: Option<Vec<String>>,
 }
 
 /// 来源管理页一行的共同部分
@@ -266,6 +272,7 @@ fn summary(location: &McpLocation, overview: &McpOverview) -> McpSourceSummary {
         .map(|e| McpService {
             name: e.name.clone(),
             portable: e.reason.is_none() && is_supported_transport(&e.transport),
+            only_harnesses: e.only_harnesses.clone(),
         })
         .collect();
     services.sort_by(|a, b| a.name.cmp(&b.name));
@@ -587,7 +594,12 @@ fn remove_group(
         let parsed = if toml(path) {
             parse_toml(&snap.bytes, state.clone())
         } else {
-            parse_json(&snap.bytes, state.clone(), target.selector.as_deref())
+            parse_json(
+                &snap.bytes,
+                state.clone(),
+                target.selector.as_deref(),
+                json_helper_key(target),
+            )
         };
         let skipped = |report: &mut McpReport, message: &str| {
             report.entries.push(entry(item, "skipped", message, None));

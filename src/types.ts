@@ -285,6 +285,10 @@ export interface McpEntry {
   name: string;
   transport: "stdio" | "http" | "unsupported";
   reason: string | null;
+  /// 只有这几个 agent（harness id）接得住它；缺省＝谁都接得住。目前只有用命令生成请求头的
+  /// 服务有（`["claude-code", "codex"]`）。接不住的那一列格子是 `unsupported`，`cell.reason`
+  /// 是「Cursor 不支持用命令生成请求头」
+  onlyHarnesses?: string[];
   cells: McpCell[];
 }
 export interface McpIssue {
@@ -377,8 +381,11 @@ export interface McpAutoImportRule {
 /// MCP 来源里的一个服务（core `mcp::sources::McpService`）
 export interface McpService {
   name: string;
-  /// false：搬不过去（用了只有来源认得的写法）
+  /// false：哪儿都搬不过去（用了只有来源认得的写法）
   portable: boolean;
+  /// `portable` 时只有这几个 agent（harness id）接得住；缺省＝谁都接得住。
+  /// 显示的 agent 里一家都接不住才标 `搬不过去`
+  onlyHarnesses?: string[];
 }
 
 /// MCP 来源管理页一行的共同部分：来源＝一处配置
@@ -512,8 +519,10 @@ export interface McpDiff {
   name: string;
   /// 与请求同序；`fields[i].values[j]` 对应 `locationIds[j]`
   locationIds: string[];
+  /// `field`：`transport` `url` `command` `args` `headersHelper`（生成请求头的命令，按凭据脱敏）
+  /// `env.NAME` `headers.Name`
   fields: { field: string; values: McpFieldValue[] }[];
-  /// 有一边的认证头要到运行时才生成，请求头没法逐字比对
+  /// 有的位置用命令生成请求头、有的没有：请求头没法逐字比对（`headers.*` 不列）。都用命令的照常比
   dynamicAuth: boolean;
   /// 读不出来的位置
   unreadable: string[];

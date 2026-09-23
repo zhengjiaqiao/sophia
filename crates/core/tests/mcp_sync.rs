@@ -305,10 +305,9 @@ fn dynamic_codex_headers_report_same_endpoint_in_both_directions_without_exposur
         .iter()
         .find(|entry| entry.source_id == "codex")
         .unwrap();
-    assert_eq!(
-        entry.reason.as_deref(),
-        Some("动态请求头 http_headers_helper，无法静态比较/跨工具迁移")
-    );
+    // 2026-09-24 起用命令生成请求头的服务能在 Codex 与 Claude Code 间互搬，条目本身不再带原因；
+    // 只有一边用命令、另一边是静态请求头时，仍然没法静态确认一致
+    assert_eq!(entry.reason, None);
     assert_eq!(entry.cells[1].state, McpCellState::SameEndpoint);
     assert_eq!(
         entry.cells[1].reason.as_deref(),
@@ -322,18 +321,17 @@ fn dynamic_codex_headers_report_same_endpoint_in_both_directions_without_exposur
         cell(&overview, "claude", "codex").reason.as_deref(),
         Some("同一 HTTP URL；动态请求头无法静态确认一致")
     );
+    // 写到还没有它的 Claude Code 照常可写（换成 headersHelper）
     let source_plan = prepare(&locations, &[sel("codex", "search", "claude-new")]);
-    assert!(source_plan.actions.is_empty());
-    assert!(source_plan
-        .issues
-        .iter()
-        .any(|issue| issue.message.contains("http_headers_helper")));
+    assert_eq!(source_plan.actions.len(), 1);
+    assert!(source_plan.issues.is_empty());
+    // 目标已有一份不一样的：不覆盖
     let plan = prepare(&locations, &[sel("claude", "search", "codex")]);
     assert!(plan.actions.is_empty());
     assert!(plan
         .issues
         .iter()
-        .any(|issue| issue.message.contains("http_headers_helper")));
+        .any(|issue| issue.message == "目标已有冲突定义"));
     assert!(!serde_json::to_string(&overview)
         .unwrap()
         .contains("fixture-secret"));
