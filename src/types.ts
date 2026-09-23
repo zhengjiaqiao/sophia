@@ -296,6 +296,8 @@ export interface McpOverview {
   locations: McpLocation[];
   entries: McpEntry[];
   issues: McpIssue[];
+  /// 每个位置（域 key）订阅着的、别的位置的来源 id：主视图把它们的全部服务也列成行
+  subscribed?: Record<string, string[]>;
 }
 export interface McpSelection {
   sourceId: string;
@@ -318,7 +320,8 @@ export interface McpPreview {
 export interface McpReportEntry {
   name: string;
   targetId: string;
-  outcome: "created" | "skipped" | "failed";
+  /// `removed` 只出现在移除 MCP 来源的报告里
+  outcome: "created" | "removed" | "skipped" | "failed";
   message: string;
   backupPath: string | null;
 }
@@ -362,6 +365,67 @@ export interface McpAutoImportRule {
   /// 建规则那一刻来源位置里已有的 MCP 名，规则不补它们（只管以后新出现的）。
   /// 由 core 拍快照，前端不传；升级前的旧规则在首次扫描迁移前为 null
   baseline?: string[] | null;
+  /// 规则生效之后才加进来的目标各自的 baseline（位置 id → 名字）
+  targetBaselines?: Record<string, string[]>;
+}
+
+/// MCP 来源里的一个服务（core `mcp::sources::McpService`）
+export interface McpService {
+  name: string;
+  /// false：搬不过去（用了只有来源认得的写法）
+  portable: boolean;
+}
+
+/// MCP 来源管理页一行的共同部分：来源＝一处配置
+export interface McpSourceSummary {
+  /// 位置 id（McpLocation.id）
+  id: string;
+  /// `Claude Code · User`、`Cursor · Project`
+  label: string;
+  harnessId: string;
+  domain: string;
+  /// 它在哪：`全局` / 项目文件夹名（同名同处的带区分片段）
+  place: string;
+  /// 配置文件完整路径，给提示框
+  path: string;
+  /// 整份配置这次读不出来
+  unreadable: boolean;
+  /// 按名排序
+  services: McpService[];
+}
+
+/// 这个位置已订阅的一处 MCP 配置
+export interface McpSubscribedSource extends McpSourceSummary {
+  /// 这个位置自己的配置：永远算已订阅，不能移除
+  own: boolean;
+  /// 「以后新出现的自动写进」在这个位置的目标 id；空＝关着。开关与改目标沿用 setMcpAutoImport
+  autoTargets: string[];
+}
+
+export interface McpCandidateSource extends McpSourceSummary {
+  /// 在哪些位置订阅着（只有「其他项目在用的」有）
+  usedIn: DomainName[];
+}
+
+/// `list_mcp_sources` 的返回
+export interface McpSourceList {
+  subscribed: McpSubscribedSource[];
+  elsewhere: McpCandidateSource[];
+  detected: McpCandidateSource[];
+}
+
+/// 移除 MCP 来源时会拿掉的一项
+export interface McpRemovalItem {
+  name: string;
+  targetId: string;
+  /// 位置名（McpLocation.label）
+  location: string;
+}
+
+/// `plan_remove_mcp_source` 的返回；items 为空表示没有写进这里的配置要撤
+export interface McpSourceRemoval {
+  sourceId: string;
+  items: McpRemovalItem[];
 }
 
 export const actionId = (a: PlannedAction): string => `${a.kind}|${a.targetPath}`;

@@ -21,6 +21,9 @@ import type {
   McpSelection,
   McpAutoImportRule,
   McpDiff,
+  McpRemovalItem,
+  McpSourceList,
+  McpSourceRemoval,
   ProjectTimes,
 } from "./types";
 
@@ -121,6 +124,17 @@ export const api = {
     }),
   removeMcpAutoImport: (sourceId: string, targetDomain: string) =>
     invoke<void>("remove_mcp_auto_import", { sourceId, targetDomain }),
+  /// MCP 来源管理页：这个位置（域 key）已订阅的来源与 `+ 来源` 的两组候选。只读
+  listMcpSources: (domain: string) => invoke<McpSourceList>("list_mcp_sources", { domain }),
+  /// 在这个位置订阅一处 MCP 配置（位置 id）；只记订阅，不写配置
+  subscribeMcpSource: (domain: string, sourceId: string) =>
+    invoke<void>("subscribe_mcp_source", { domain, sourceId }),
+  /// 移除前的只读清单：本位置与它一致的那几份（服务名 × 位置）。自己的配置 reject，错误信息就是原因
+  planRemoveMcpSource: (domain: string, sourceId: string) =>
+    invoke<McpSourceRemoval>("plan_remove_mcp_source", { domain, sourceId }),
+  /// 只拿掉确认过的那几项（执行前逐项重校验，改过的跳过），再删订阅记录与往这里写的规则
+  removeMcpSource: (domain: string, sourceId: string, items: McpRemovalItem[]) =>
+    invoke<McpReport>("remove_mcp_source", { domain, sourceId, items }),
   gatewayState: () => invoke<GatewayState>("gateway_state"),
   /// key 为空表示不改密钥；带新密钥时后端先向网关校验
   gatewaySaveProvider: (baseUrl: string, key: string) =>

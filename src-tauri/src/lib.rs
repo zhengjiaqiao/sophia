@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use symsync_core::discovery::{self, Env};
 use symsync_core::fs::normalize;
+use symsync_core::mcp::sources as mcp_sources;
 use symsync_core::models::*;
 use symsync_core::skills;
 use symsync_core::store::Store;
@@ -300,6 +301,12 @@ fn scan_mcp(
         overview = symsync_core::mcp::scan(&discovery.locations);
         overview.issues.extend(discovery.issues);
     }
+    // 老数据认领进订阅记录，再把各位置订阅着的来源填进结果：主视图把它们的全部服务列成行
+    let settings = state
+        .store
+        .load_settings_adopting_mcp_subscriptions(&overview)
+        .map_err(err)?;
+    mcp_sources::attach(&mut overview, &settings.mcp_subscriptions);
     // `scan_mcp` 也可能是用户最后一次扫描，故重建为包含两类位置的并集。
     if let Ok(skills_overview) = self::overview(&state) {
         resync_watchers(&app, &state, &skills_overview);
@@ -666,6 +673,97 @@ fn remove_source(
     Ok(report)
 }
 
+/// MCP 扫描一次，并读设置、认领订阅：来源管理页的命令都从这一步开始
+fn mcp_scanned(
+    state: &AppState,
+) -> Result<
+    (
+        symsync_core::mcp::McpDiscovery,
+        symsync_core::mcp::McpOverview,
+        symsync_core::store::Settings,
+    ),
+    String,
+> {
+    let discovery = discover_mcp(state)?;
+    let mut overview = symsync_core::mcp::scan(&discovery.locations);
+    overview.issues.extend(discovery.issues.iter().cloned());
+    let settings = state
+        .store
+        .load_settings_adopting_mcp_subscriptions(&overview)
+        .map_err(err)?;
+    Ok((discovery, overview, settings))
+}
+
+/// MCP 来源管理页：这个位置（域 key）已订阅的来源，以及 `+ 来源` 的两组候选。只读
+#[tauri::command]
+fn list_mcp_sources(
+    domain: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<mcp_sources::McpSourceList, String> {
+    let (_, overview, settings) = mcp_scanned(&state)?;
+    Ok(mcp_sources::list(
+        &domain,
+        &overview,
+        &settings.mcp_subscriptions,
+        &settings.mcp_auto_imports,
+    ))
+}
+
+/// 在这个位置订阅一处 MCP 配置（位置 id）。只记订阅，不写配置
+#[tauri::command]
+fn subscribe_mcp_source(
+    domain: String,
+    source_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let (_, overview, mut settings) = mcp_scanned(&state)?;
+    mcp_sources::subscribe(
+        &mut settings.mcp_subscriptions,
+        &domain,
+        &source_id,
+        &overview,
+    )?;
+    state.store.save_settings(&settings).map_err(err)
+}
+
+/// 移除 MCP 来源前的只读清单：本位置哪几处有一份与它一致的（服务名 × 位置），给确认框列出。
+/// 这个位置自己的配置返回拒绝的原因
+#[tauri::command]
+fn plan_remove_mcp_source(
+    domain: String,
+    source_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<mcp_sources::McpSourceRemoval, String> {
+    let discovery = discover_mcp(&state)?;
+    mcp_sources::plan_remove(&domain, &source_id, &discovery.locations)
+}
+
+/// 从这个位置移除 MCP 来源：只拿掉确认过的那几项，执行前逐项重校验仍与来源一致，
+/// 改过的跳过；再删订阅记录与往这里写的规则。来源本身不动
+#[tauri::command]
+fn remove_mcp_source(
+    domain: String,
+    source_id: String,
+    items: Vec<mcp_sources::McpRemovalItem>,
+    state: tauri::State<'_, AppState>,
+) -> Result<symsync_core::mcp::McpReport, String> {
+    let (discovery, _, mut settings) = mcp_scanned(&state)?;
+    let report = {
+        // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 auto_import_mcp）
+        let _config_guard = state.config_lock.blocking_lock();
+        mcp_sources::remove(
+            &domain,
+            &source_id,
+            &items,
+            &discovery.locations,
+            &mut settings.mcp_subscriptions,
+            &mut settings.mcp_auto_imports,
+        )?
+    };
+    state.store.save_settings(&settings).map_err(err)?;
+    Ok(report)
+}
+
 /// 把这些问题记为看过（新问题只提示一次，看过即止）。key 由前端算好，格式见 core `store::SeenIssue`；
 /// 已看过的保持原样
 #[tauri::command]
@@ -979,6 +1077,10 @@ pub fn run() {
             subscribe_source,
             plan_remove_source,
             remove_source,
+            list_mcp_sources,
+            subscribe_mcp_source,
+            plan_remove_mcp_source,
+            remove_mcp_source,
             mark_issues_seen,
             list_seen_issues,
             list_manual_sources,
