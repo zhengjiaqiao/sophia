@@ -45,8 +45,8 @@ export type { SubPageProps } from "./SubPage.tsx";
 export { Cap, capRuns } from "./Cap.tsx";
 export type { CapProps } from "./Cap.tsx";
 
-export { AgentIcon, AgentKey, AgentMark, agentInitial, hasAgentIcon } from "./AgentMark.tsx";
-export type { AgentIconProps, AgentKeyProps, AgentMarkProps } from "./AgentMark.tsx";
+export { AgentIcon, AgentMark, agentInitial, hasAgentIcon } from "./AgentMark.tsx";
+export type { AgentIconProps, AgentMarkProps } from "./AgentMark.tsx";
 
 export {
   IconArrowLeft,

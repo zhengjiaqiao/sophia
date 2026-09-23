@@ -145,38 +145,3 @@ export function AgentMark({ id, name, layout = "inline", count, dim, title }: Ag
     </span>
   );
 }
-
-export interface AgentKeyProps {
-  id: string;
-  name: string;
-  /// 点亮＝选中（反色）
-  pressed: boolean;
-  onToggle?: (next: boolean) => void;
-  /// 给了就禁用（MCP 添加页：来源自己那个键「这就是来源」）
-  disabledReason?: string;
-}
-
-/// agent 图标键（DESIGN「添加页」，画板 States「agent 图标键」）：高 32，图标 14 +
-/// Condensed 大写名字同一行，宽随内容，2px 圆角。未选 1px `hairline` 描边、`ink-mute`；
-/// **点亮 `ink` 底白字**（黑色小键＝已按下）。一排横放，就是这次添加的一组目标
-export function AgentKey({ id, name, pressed, onToggle, disabledReason }: AgentKeyProps) {
-  const disabled = Boolean(disabledReason);
-  const classes = ["ss-agentkey"];
-  if (pressed) classes.push("is-pressed");
-  return (
-    <button
-      type="button"
-      className={classes.join(" ")}
-      aria-pressed={pressed}
-      aria-label={name}
-      title={disabled ? disabledReason : name}
-      disabled={disabled}
-      onClick={disabled ? undefined : () => onToggle?.(!pressed)}
-    >
-      <AgentIcon id={id} name={name} size={14} />
-      <span className="ss-agentkey__name">
-        <Cap>{name}</Cap>
-      </span>
-    </button>
-  );
-}

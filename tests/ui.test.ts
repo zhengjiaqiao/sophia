@@ -34,7 +34,7 @@ const { ErrorBanner, NoticePanel } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
 const { SubPage, holdInert, pickTrigger, triggerKey } = await import("../src/ui/SubPage.tsx");
 const { Cap, capRuns } = await import("../src/ui/Cap.tsx");
-const { AgentIcon, AgentKey, AgentMark, agentInitial, hasAgentIcon } =
+const { AgentIcon, AgentMark, agentInitial, hasAgentIcon } =
   await import("../src/ui/AgentMark.tsx");
 const { Busy, Empty } = await import("../src/ui/Empty.tsx");
 const { IconCheck } = await import("../src/ui/icons.tsx");
@@ -62,7 +62,6 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "Cap",
     "AgentMark",
     "AgentIcon",
-    "AgentKey",
     "Empty",
     "Busy",
   ];
@@ -854,31 +853,6 @@ test("AgentMark 禁用取色：形状不变，整体退到弱文字色", () => {
     render(AgentMark, { id: "cursor", name: "Cursor", dim: true }),
     /class="ss-mark ss-mark--inline is-dim"/,
   );
-});
-
-test("AgentKey：高 32，图标 14 + 大写名同一行；未选 / 点亮反色 / 禁用带原因", () => {
-  const off = render(AgentKey, {
-    id: "claude-code",
-    name: "Claude Code",
-    pressed: false,
-    onToggle: noop,
-  });
-  assert.match(off, /class="ss-agentkey" aria-pressed="false" aria-label="Claude Code"/);
-  assert.match(off, /width="13" height="13"/);
-  assert.match(
-    render(AgentKey, { id: "codex", name: "Codex", pressed: true, onToggle: noop }),
-    /class="ss-agentkey is-pressed"/,
-  );
-  const src = render(AgentKey, {
-    id: "codex",
-    name: "Codex",
-    pressed: false,
-    disabledReason: "这就是来源",
-  });
-  assert.match(src, /disabled=""/);
-  assert.match(src, /title="这就是来源"/);
-  assert.match(cssRule(uiCss, ".ss-agentkey"), /height:\s*var\(--control-h-row\)/);
-  assert.match(cssRule(uiCss, ".ss-agentkey.is-pressed"), /background:\s*var\(--ink\)/);
 });
 
 // ===== 空态与忙碌态 =====

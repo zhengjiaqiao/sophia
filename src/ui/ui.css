@@ -13,7 +13,6 @@
 .ss-dot-btn:focus-visible,
 .ss-switch:focus-visible,
 .ss-checkbox:focus-visible,
-.ss-agentkey:focus-visible,
 .ss-modelchip__remove:focus-visible,
 .ss-tipwrap[tabindex]:focus-visible {
   outline: 1px solid var(--ink);
@@ -1144,7 +1143,7 @@
   letter-spacing: var(--track-nav);
 }
 
-/* ===== 12. agent 图标 AgentMark / AgentKey ===== */
+/* ===== 12. agent 图标 AgentMark ===== */
 .ss-mark {
   display: inline-flex;
   align-items: center;
@@ -1208,54 +1207,6 @@
   font-variant-numeric: tabular-nums;
   line-height: 1.5;
   color: var(--ink-faint);
-}
-
-/* 图标键：高 32，图标 14 + 名字同一行；未选 hairline + ink-mute，点亮 ink 底白字 */
-.ss-agentkey {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  height: var(--control-h-row);
-  padding: 0 14px 0 12px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-control);
-  background: var(--canvas);
-  color: var(--ink-mute);
-  cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease-mech),
-    color var(--motion-fast) var(--ease-mech),
-    border-color var(--motion-fast) var(--ease-mech),
-    transform var(--motion-fast) var(--ease-mech);
-}
-
-.ss-agentkey:hover:not(:disabled) {
-  border-color: var(--ink);
-  color: var(--ink);
-}
-
-.ss-agentkey:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.ss-agentkey.is-pressed,
-.ss-agentkey.is-pressed:hover:not(:disabled) {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--canvas);
-}
-
-.ss-agentkey:disabled {
-  color: var(--disabled);
-  cursor: default;
-}
-
-.ss-agentkey__name {
-  font-size: var(--size-micro);
-  font-weight: 600;
-  line-height: 1.1;
-  white-space: nowrap;
 }
 
 /* ===== 13. 空态与忙碌态 ===== */
@@ -1383,7 +1334,6 @@
   .ss-switch,
   .ss-switch__knob,
   .ss-checkbox,
-  .ss-agentkey,
   .ss-dot__halo {
     transition: none;
   }
@@ -1393,7 +1343,6 @@
   }
 
   .ss-btn:active:not(:disabled),
-  .ss-agentkey:active:not(:disabled),
   .ss-iconbtn:active:not(:disabled) .ss-iconbtn__glyph {
     transform: none;
   }
