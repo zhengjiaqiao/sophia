@@ -598,7 +598,13 @@ export default function McpTab({
     const target = p.targets.find((t) => t.id === targetId);
     if (!row || !target) return;
     const view = cellViewOf(row, target.id, labelOf);
-    if (view === null || !view.clickable) return;
+    if (view === null) return;
+    // 位置无效（整份配置读不出来）：点格＝在访达中显示那个配置文件，交给用户自己去看
+    if (view.issue === "invalidLocation") {
+      void reveal(target.path);
+      return;
+    }
+    if (!view.clickable) return;
     setCellNotice(null);
     const source = sourceForMissingTarget(row, target.id);
     if (source === null) {
@@ -688,14 +694,18 @@ export default function McpTab({
         continue;
       }
       if (view.dot === "none") unsupportedAt.push(names.get(target.id) ?? target.label);
+      // 位置无效：原因 + 点一下在访达中显示那个配置文件
+      const invalid = view.issue === "invalidLocation";
       cells[target.id] = {
         dot: view.dot,
-        clickable: view.clickable,
-        tip: view.clickable
-          ? "点一下写进"
-          : view.dot === "own" && view.issue === undefined
-            ? mcpOwnTip(names.get(target.id) ?? target.label)
-            : (view.reason ?? ""),
+        clickable: view.clickable || invalid,
+        tip: invalid
+          ? `${view.reason ?? ""} · 点一下在访达中显示`
+          : view.clickable
+            ? "点一下写进"
+            : view.dot === "own" && view.issue === undefined
+              ? mcpOwnTip(names.get(target.id) ?? target.label)
+              : (view.reason ?? ""),
         pending: pendingCells.has(cellKey(key, target.id)),
       };
     }
