@@ -7,7 +7,7 @@ import type {
   GatewayProviderSaved,
   GatewaySelectedModel,
   GatewayState,
-  HarnessStatus,
+  HarnessList,
   Overview,
   PlannedAction,
   PlannedDeletion,
@@ -70,7 +70,7 @@ export const api = {
     invoke<void>("exclude_auto_link", { source, skill }),
   includeAutoLink: (source: string, skill: string) =>
     invoke<void>("include_auto_link", { source, skill }),
-  listHarnesses: () => invoke<HarnessStatus[]>("list_harnesses"),
+  listHarnesses: () => invoke<HarnessList>("list_harnesses"),
   setHarnessEnabled: (id: string, enabled: boolean) =>
     invoke<void>("set_harness_enabled", { id, enabled }),
   /// 系统目录选择框；取消返回 null

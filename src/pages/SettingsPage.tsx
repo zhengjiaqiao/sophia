@@ -4,7 +4,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
-import type { GatewayState, HarnessStatus } from "../types";
+import type { GatewayState, HarnessList, HarnessStatus } from "../types";
 import { parseBackendError, serviceLeftover } from "../modelsView.ts";
 import { AgentIcon, BlackNotice, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
 import { AbsentAgents } from "./AbsentAgents.tsx";
@@ -15,7 +15,8 @@ import "./SettingsPage.css";
 /// 它只回答一个问题——**这个 agent 出不出现在列表里**。
 ///
 /// 复选框列表，三列「复选框 + 图标 + 名字」，行高 34；默认只列已安装的，其余收在
-/// `显示未安装的 N 个` 后面。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
+/// `显示未安装的 N 个` 后面。**最多显示 4 个**（上限来自 core，`list_harnesses` 带回）：
+/// 勾满时其余已安装项禁用，提示框「最多显示 4 个，先取消一个」。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
 /// **取消勾选那一刻在该行旁出现**，4 秒后淡出（① 信息在对的时间出现）。
 /// 再往下 48：`关于`——版本（等宽）+ `检查更新 ↗`。
 ///
@@ -29,7 +30,7 @@ import "./SettingsPage.css";
 ///   是正确性判断不是口味问题（§14）。
 
 /// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
-/// 其余收在「显示未安装的 N 个」后面——没装的也能预先开启，所以要给入口。
+/// 其余收在「显示未安装的 N 个」后面。
 type AgentOption = HarnessStatus;
 
 /// 取消勾选时行旁那句话停留多久
@@ -57,12 +58,13 @@ export interface SettingsPageProps {
 
 export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPageProps) {
   /// null＝还没读回来，与「一个 agent 都没有」是两回事
-  const [agents, setAgents] = useState<AgentOption[] | null>(null);
+  const [list, setList] = useState<HarnessList | null>(null);
+  const agents: AgentOption[] | null = list?.harnesses ?? null;
   const [showAbsent, setShowAbsent] = useState(false);
 
   const reload = async () => {
     try {
-      setAgents(await api.listHarnesses());
+      setList(await api.listHarnesses());
     } catch (e) {
       onError(String(e));
     }
@@ -247,46 +249,66 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     }
   };
 
-  /// 整行是按钮：命中区是整行，方框只是记号
-  const row = (agent: AgentOption) => (
-    <div key={agent.id} className="settings-page__cell">
+  /// 整行是按钮：命中区是整行，方框只是记号。勾满上限时没勾的行禁用，
+  /// 提示框说为什么点不了（禁用键接不到悬停，提示框挂在包层上）
+  const row = (agent: AgentOption) => {
+    const blocked = full && !agent.enabled;
+    const button = (
       <button
         type="button"
         role="checkbox"
         aria-checked={agent.enabled}
         className={`settings-page__row${unchecked === agent.id ? " is-noted" : ""}`}
-        onClick={() => void toggle(agent.id, !agent.enabled)}
+        disabled={blocked}
+        onClick={blocked ? undefined : () => void toggle(agent.id, !agent.enabled)}
       >
         <CheckMark on={agent.enabled} />
         <AgentIcon id={agent.id} name={agent.displayName} />
         <span className="settings-page__name">{agent.displayName}</span>
       </button>
-      {unchecked === agent.id ? (
-        <span className="settings-page__rownote" role="status">
-          不在列表里显示了，已建好的链接原样留着
-        </span>
-      ) : null}
-    </div>
-  );
+    );
+    return (
+      <div key={agent.id} className="settings-page__cell">
+        {blocked ? (
+          <Tooltip content={fullReason} focusable>
+            {button}
+          </Tooltip>
+        ) : (
+          button
+        )}
+        {unchecked === agent.id ? (
+          <span className="settings-page__rownote" role="status">
+            不在列表里显示了，已建好的链接原样留着
+          </span>
+        ) : null}
+      </div>
+    );
+  };
 
   /// 三列、按列读（字母序竖着看）：行数取总数的三分之一向上取整
-  const grid = (list: AgentOption[]) => (
+  const grid = (items: AgentOption[]) => (
     <div
       className="settings-page__grid"
-      style={{ gridTemplateRows: `repeat(${Math.max(1, Math.ceil(list.length / 3))}, auto)` }}
+      style={{ gridTemplateRows: `repeat(${Math.max(1, Math.ceil(items.length / 3))}, auto)` }}
     >
-      {list.map(row)}
+      {items.map(row)}
     </div>
   );
 
   const present = (agents ?? []).filter((a) => a.installed);
   const absent = (agents ?? []).filter((a) => !a.installed);
+  const maxShown = list?.maxShown ?? 0;
+  /// 已显示满上限：其余已安装项不能再勾
+  const full = list !== null && present.filter((a) => a.enabled).length >= maxShown;
+  const fullReason = `最多显示 ${maxShown} 个，先取消一个`;
 
   return (
     <SubPage title="设置" onBack={onBack}>
       <div className="settings-page">
         {/* 区块小标：贴 1px ink 分组线下沿 6（DESIGN「刻字」）；句子里的 agent 不大写 */}
-        <div className="settings-page__section">哪些 agent 出现在列表里</div>
+        <div className="settings-page__section">
+          哪些 agent 出现在列表里{list ? ` · 最多 ${maxShown} 个` : ""}
+        </div>
 
         {agents === null ? (
           <Empty kind="scanning" description="读取中" />

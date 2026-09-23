@@ -12,13 +12,13 @@ const agent = (id: string, displayName: string, enabled: boolean) => ({
   installed: false,
 });
 
-test("设置页未安装那一节：信息不是设置——不渲染复选框，小标题说装上后会出现", () => {
+test("设置页未安装那一节：信息不是设置——不渲染复选框，小标题说装上后可以在这里勾选", () => {
   const html = render(AbsentAgents, {
     agents: [agent("amp", "Amp", true), agent("droid", "Droid", true)],
     onRestore: () => {},
   });
   assert.doesNotMatch(html, /checkbox/);
-  assert.match(html, /未安装的 2 个 · 装上后会自动出现在列表里/);
+  assert.match(html, /未安装的 2 个 · 装上后可以在这里勾选显示/);
   assert.match(html, />Amp</);
   assert.doesNotMatch(html, /恢复/);
 });

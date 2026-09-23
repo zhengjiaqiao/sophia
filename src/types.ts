@@ -175,8 +175,14 @@ export interface HarnessStatus {
   displayName: string;
   enabled: boolean;
   /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」
-  /// 后面——没装的也能预先开启，所以后端返回全部 41 个而不只是已安装的
+  /// 后面——所以后端返回全部 41 个而不只是已安装的
   installed: boolean;
+}
+
+/// `list_harnesses` 的返回：全部 agent，外加列表里最多显示几个（core 的 `MAX_SHOWN`）
+export interface HarnessList {
+  maxShown: number;
+  harnesses: HarnessStatus[];
 }
 
 export interface McpLocation {

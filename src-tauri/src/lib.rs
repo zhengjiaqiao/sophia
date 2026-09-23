@@ -48,8 +48,16 @@ struct HarnessStatus {
     display_name: String,
     enabled: bool,
     /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」后面——
-    /// 没装的也能预先开启，所以要带出来，不能只返回已安装的那些
+    /// 未安装的也要带出来（只列名字，不在不显示名单里的给「恢复」），不能只返回已安装的那些
     installed: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HarnessList {
+    /// 列表里最多显示几个（core 的 `discovery::MAX_SHOWN`，前端不另写）
+    max_shown: usize,
+    harnesses: Vec<HarnessStatus>,
 }
 
 fn err<E: std::fmt::Display>(e: E) -> String {
@@ -86,11 +94,25 @@ pub(crate) fn runtime_store_dir() -> Result<PathBuf, String> {
     Ok(Store::default_dir())
 }
 
+/// 已安装的 harness（按 agent 表先后）与设置；读设置时顺手按显示上限整理不显示名单
+/// （新用户取前 4 个、老数据超出的记进名单、新装的只在不满时出现，见 `discovery::reconcile_shown`）
+fn installed_and_settings(
+    state: &AppState,
+    env: &Env,
+) -> Result<(Vec<Harness>, symsync_core::store::Settings), String> {
+    let installed = discovery::installed(env);
+    let ids: Vec<String> = installed.iter().map(|h| h.id.clone()).collect();
+    let settings = state
+        .store
+        .load_settings_reconciling_shown(&ids)
+        .map_err(err)?;
+    Ok((installed, settings))
+}
+
 fn discover_mcp(state: &AppState) -> Result<symsync_core::mcp::McpDiscovery, String> {
     let env = runtime_env()?;
-    let settings = state.store.load_settings().map_err(err)?;
     #[cfg_attr(not(feature = "weiboap"), allow(unused_mut))]
-    let mut candidates = discovery::installed(&env);
+    let (mut candidates, settings) = installed_and_settings(state, &env)?;
     #[cfg(feature = "weiboap")]
     if !candidates.iter().any(|h| h.id == "weiboap") {
         if let Some(weiboap) = discovery::all_harnesses(&env)
@@ -121,8 +143,8 @@ struct McpPreview {
 /// 目标目录里指向已知位置之外的软链再合成出外部本体位置
 fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = runtime_env()?;
-    let settings = state.store.load_settings().map_err(err)?;
-    let harnesses = discovery::enabled(discovery::installed(&env), &settings);
+    let (installed, settings) = installed_and_settings(state, &env)?;
+    let harnesses = discovery::enabled(installed, &settings);
     let manual_projects = state.store.load_projects().map_err(err)?;
     let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
     let mut sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
@@ -726,17 +748,15 @@ fn update_auto_links(
     state.store.save_settings(&settings).map_err(err)
 }
 
-/// 全部 harness 及其启用、安装状态。返回全部而不只是已安装的：
-/// 设置页要给出「显示未安装的 N 个」的入口，没装的也能预先开启
+/// 全部 harness 及其启用、安装状态，外加显示上限。返回全部而不只是已安装的：
+/// 设置页要列出「未安装的 N 个」，其中不显示名单里的给「恢复」入口
 #[tauri::command]
-fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<Vec<HarnessStatus>, String> {
-    let settings = state.store.load_settings().map_err(err)?;
+fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<HarnessList, String> {
     let env = runtime_env()?;
-    let installed: std::collections::HashSet<String> = discovery::installed(&env)
-        .into_iter()
-        .map(|h| h.id)
-        .collect();
-    Ok(discovery::all_harnesses(&env)
+    let (installed, settings) = installed_and_settings(&state, &env)?;
+    let installed: std::collections::HashSet<String> =
+        installed.into_iter().map(|h| h.id).collect();
+    let harnesses = discovery::all_harnesses(&env)
         .into_iter()
         .map(|h| HarnessStatus {
             enabled: !settings.disabled_harnesses.contains(&h.id),
@@ -744,20 +764,24 @@ fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<Vec<HarnessStatus
             id: h.id,
             display_name: h.display_name,
         })
-        .collect())
+        .collect();
+    Ok(HarnessList {
+        max_shown: discovery::MAX_SHOWN,
+        harnesses,
+    })
 }
 
+/// 勾选 / 取消勾选；显示已满时勾第 5 个会被拒，错误信息就是给用户看的那句
 #[tauri::command]
 fn set_harness_enabled(
     id: String,
     enabled: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut settings = state.store.load_settings().map_err(err)?;
-    settings.disabled_harnesses.retain(|x| x != &id);
-    if !enabled {
-        settings.disabled_harnesses.push(id);
-    }
+    let env = runtime_env()?;
+    let (installed, mut settings) = installed_and_settings(&state, &env)?;
+    let ids: Vec<String> = installed.into_iter().map(|h| h.id).collect();
+    discovery::set_shown(&ids, &mut settings, &id, enabled).map_err(err)?;
     state.store.save_settings(&settings).map_err(err)
 }
 

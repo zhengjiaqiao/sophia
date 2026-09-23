@@ -22,7 +22,7 @@ export function AbsentAgents({
   return (
     <div className="settings-page__absent">
       <div className="settings-page__absent-head">
-        未安装的 {agents.length} 个 · 装上后会自动出现在列表里
+        未安装的 {agents.length} 个 · 装上后可以在这里勾选显示
       </div>
       <div className="settings-page__grid" style={{ gridTemplateRows: `repeat(${rows}, auto)` }}>
         {ordered.map((agent) => (

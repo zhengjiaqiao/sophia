@@ -70,6 +70,25 @@
   outline-offset: -1px;
 }
 
+/* 勾满上限时没勾的已安装项：与添加页禁用目标同形，图标（currentColor）和名字一起退到禁用色；
+   提示框包层占满格宽，整行都能悬停出说明 */
+.settings-page__cell > .ss-tipwrap {
+  width: 100%;
+}
+
+.settings-page__row:disabled {
+  color: var(--disabled);
+  cursor: default;
+}
+
+.settings-page__row:disabled:hover {
+  background: none;
+}
+
+.settings-page__row:disabled .ss-checkbox {
+  border-color: var(--hairline);
+}
+
 .settings-page__name {
   font-family: var(--font-ui);
   font-size: var(--size-body);
