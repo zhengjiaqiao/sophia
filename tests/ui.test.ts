@@ -692,7 +692,7 @@ test("Confirm：白板 460 + 1px 墨线描边，canvas 80% 遮罩；主动作反
   assert.match(veil, /opacity:\s*var\(--veil-opacity\)/);
 });
 
-test("Confirm 锚在触发行下方 6px，遮罩挖出那一行，用户看得见正在决定的那一行", () => {
+test("Confirm 锚在触发行下方 6px，遮罩整面压暗、不挖触发行", () => {
   const html = render(Confirm, {
     title: "把 notion 写进 Codex · User？",
     confirmLabel: "写进去",
@@ -701,9 +701,9 @@ test("Confirm 锚在触发行下方 6px，遮罩挖出那一行，用户看得�
     anchor: { top: 200, left: 40, right: 640, bottom: 234 },
   });
   assert.match(html, /class="ss-confirm-layer is-anchored"/);
-  // 四块遮罩 + 一个透明接收层（行本身露出来）
-  assert.equal(html.match(/class="ss-confirm-veil"/g)?.length, 4);
-  assert.match(html, /class="ss-confirm-hole" style="top:200px;left:40px;width:600px;height:34px"/);
+  // 一整块遮罩，不挖触发行
+  assert.equal(html.match(/class="ss-confirm-veil ss-confirm-veil--full"/g)?.length, 1);
+  assert.doesNotMatch(html, /ss-confirm-hole/);
   assert.match(html, /style="position:absolute;top:240px;/);
   assert.match(html, /class="ss-confirm__safety">会把请求头和令牌一并复制过去</);
 });

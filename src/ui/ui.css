@@ -1003,11 +1003,6 @@
   inset: 0;
 }
 
-/* 触发行上的透明接收层：行看得见，点它等同取消 */
-.ss-confirm-hole {
-  position: absolute;
-}
-
 .ss-confirm {
   position: relative;
   box-sizing: border-box;
