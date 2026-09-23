@@ -262,23 +262,72 @@
 }
 
 /* ===== 小浮层：layer 圆角 + 浮层阴影，无黑框（与侧栏排序下拉同一写法） ===== */
+/* 外框只管位置、圆角与阴影；最大高度由定位规则给（`placeLayer`），超出的在里面的滚动区滚 */
 .src-layer {
   position: fixed;
   z-index: 35;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
+  overflow: hidden;
   border-radius: var(--radius-layer);
   background: var(--canvas);
   box-shadow: var(--elev-layer);
 }
 
-/* `+ 来源`：三组，组间 hairline，组头 12 ink-faint；超出窗口高度在自身范围内滚动 */
+/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从 canvas 白渐隐到透明（功能性渐变，同模型列表） */
+.src-layer__viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.src-layer__viewport::before,
+.src-layer__viewport::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: var(--fade-edge);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.src-layer__viewport::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--canvas), transparent);
+}
+
+.src-layer__viewport::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--canvas), transparent);
+}
+
+.src-layer__viewport[data-fade-top]::before,
+.src-layer__viewport[data-fade-bottom]::after {
+  opacity: 1;
+}
+
+.src-layer__scroll {
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 滚动区被压矮时，里面的项不跟着压扁（1px 的组间 hairline 会被压成 0） */
+.src-layer__scroll > * {
+  flex-shrink: 0;
+}
+
+/* `+ 来源`：三组，组间 hairline，组头 12 ink-faint */
 .src-menu {
   display: flex;
   flex-direction: column;
   width: 260px;
-  max-height: calc(100vh - 32px);
   padding: var(--space-xs) 0;
-  overflow-y: auto;
 }
 
 .src-menu__item {

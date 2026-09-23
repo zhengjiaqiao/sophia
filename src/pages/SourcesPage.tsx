@@ -27,6 +27,8 @@ import {
   Tooltip,
 } from "../ui";
 import type { ConfirmAnchor } from "../ui";
+import { edgeFades } from "../modelsView";
+import { placeLayer, type LayerPlacement } from "../layerPlace";
 import { CheckMark } from "./CheckMark.tsx";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./importDefaults.ts";
 import { columnRows, removeConfirmTitle, removeTitle, type DomainRef } from "./sourcesView.ts";
@@ -559,8 +561,11 @@ export default function SourcesPage(props: SourcesPageProps) {
   );
 }
 
-/// 小浮层（与侧栏排序下拉、模型选择器同一写法：layer 圆角 + 浮层阴影，无黑框）：
-/// 锚在触发它的控件下方 6、左对齐；下方放不下就翻到上方。点外面、Esc、滚动都关，不铺透明罩。
+/// 小浮层（与侧栏排序下拉、模型选择器同一写法：layer 圆角 + 浮层阴影，无黑框）。
+/// 目标浮层、`+ 来源`、MCP 同名挑选浮层共用。定位规则见 `placeLayer`：默认在触发控件下方 6 展开，
+/// 下方放不下、上方放得下才往上翻；最大高度取朝向那一侧的剩余空间与 360 中较小的，
+/// 超出在浮层内部滚动，滚动边缘渐隐（DESIGN「渐变只用于功能」）。
+/// 点外面、Esc、页面滚动都关，不铺透明罩。
 /// 用 fixed 定位：空态里的 `+ 来源` 在 Empty 里面，没法给它包一个定位容器
 export function FloatingLayer({
   trigger,
@@ -571,23 +576,54 @@ export function FloatingLayer({
 }: {
   trigger: HTMLElement;
   onClose: () => void;
+  /// 挂在滚动区上：宽度、内边距、纵向排列由它定
   className: string;
   label: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<LayerPlacement | null>(null);
+  const [fade, setFade] = useState({ start: false, end: false });
 
+  // 每次渲染后重量一次：内容变了（MCP 差异取回来、勾选改了行）也按新尺寸放。
+  // 自然高度＝外框高 − 滚动区可见高 + 滚动区内容高，不受当前最大高度影响；位置没变就不 setState
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    const scroll = scrollRef.current;
+    if (!el || !scroll) return;
     const a = trigger.getBoundingClientRect();
-    const h = el.offsetHeight;
-    const w = el.offsetWidth;
-    const below = a.bottom + 6;
-    const top = below + h > window.innerHeight - 16 && a.top - 6 - h >= 16 ? a.top - 6 - h : below;
-    setPos({ top, left: Math.max(16, Math.min(a.left, window.innerWidth - w - 16)) });
-  }, [trigger]);
+    const next = placeLayer(
+      { top: a.top, bottom: a.bottom, left: a.left, right: a.right },
+      {
+        width: el.offsetWidth,
+        height: el.offsetHeight - scroll.clientHeight + scroll.scrollHeight,
+      },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPos((prev) =>
+      prev &&
+      prev.top === next.top &&
+      prev.left === next.left &&
+      prev.maxHeight === next.maxHeight &&
+      prev.side === next.side
+        ? prev
+        : next,
+    );
+  });
+
+  /// 滚动边缘渐隐：上面 / 下面还有被裁掉的行时，那一边出 16px 渐隐（与模型列表同一写法）
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const next = edgeFades(el.scrollTop, el.clientHeight, el.scrollHeight);
+      setFade((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    return () => el.removeEventListener("scroll", update);
+  });
 
   useEffect(() => {
     const inside = (target: EventTarget | null) =>
@@ -621,12 +657,22 @@ export function FloatingLayer({
   return (
     <div
       ref={ref}
-      className={`src-layer ${className}`}
+      className="src-layer"
       role="menu"
       aria-label={label}
-      style={pos ? { top: pos.top, left: pos.left } : { visibility: "hidden" }}
+      style={
+        pos ? { top: pos.top, left: pos.left, maxHeight: pos.maxHeight } : { visibility: "hidden" }
+      }
     >
-      {children}
+      <div
+        className="src-layer__viewport"
+        data-fade-top={fade.start || undefined}
+        data-fade-bottom={fade.end || undefined}
+      >
+        <div ref={scrollRef} className={`src-layer__scroll ${className}`}>
+          {children}
+        </div>
+      </div>
     </div>
   );
 }
