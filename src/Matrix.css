@@ -584,9 +584,7 @@
   z-index: 8;
 }
 
-.mx-empty {
-  border-bottom: 1px solid var(--hairline);
-}
+/* 空态不收一条行线：一行数据都没有，线不分隔任何东西（产品负责人：这条线是否必要） */
 
 @media (prefers-reduced-motion: reduce) {
   .mx-filter,
