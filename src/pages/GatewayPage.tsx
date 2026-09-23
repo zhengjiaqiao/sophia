@@ -480,7 +480,7 @@ export function GatewayBody({
                     key={model.id}
                     name={label}
                     id={model.slug || model.id}
-                    onRemove={busy ? undefined : () => onToggleModel(current, model.id)}
+                    onRemove={() => onToggleModel(current, model.id)}
                   />
                 ))}
               </div>

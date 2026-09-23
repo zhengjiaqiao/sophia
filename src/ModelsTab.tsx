@@ -366,7 +366,6 @@ export interface ModelBoxProps {
   tool: ModelsTool;
   state: GatewayState;
   open: boolean;
-  busy: boolean;
   onToggleOpen: () => void;
   onRemoveModel: (provider: GatewayProvider, model: GatewayProviderModel) => void;
   /// 选择器浮层。挂在框外层，浮层里的点击不会冒泡回框上再把它开关一次
@@ -383,7 +382,6 @@ export function ModelBox({
   tool,
   state,
   open,
-  busy,
   onToggleOpen,
   onRemoveModel,
   children,
@@ -426,7 +424,7 @@ export function ModelBox({
                 <ModelChip
                   name={label}
                   id={model.slug || model.id}
-                  onRemove={busy ? undefined : () => onRemoveModel(provider, model)}
+                  onRemove={() => onRemoveModel(provider, model)}
                 />
               </span>
             ))}
@@ -987,7 +985,6 @@ export default function ModelsTab({
                   tool={tool}
                   state={state}
                   open={picker === tool.id}
-                  busy={busy}
                   onToggleOpen={() => (picker === tool.id ? closePicker() : openPicker(tool))}
                   onRemoveModel={removeModel}
                 >
