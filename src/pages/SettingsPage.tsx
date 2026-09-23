@@ -9,6 +9,7 @@ import { parseBackendError, serviceLeftover } from "../modelsView.ts";
 import { AgentIcon, NoticePanel, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
+import { updateCheckFailure } from "../updateText.ts";
 import "./SettingsPage.css";
 
 /// 设置页（DESIGN「产品裁决 › 设置页」，画板 Settings）：占满整窗的二级页面，不渲染侧栏。
@@ -43,7 +44,7 @@ const LATEST_NOTE_MS = 4000;
 const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
 
 /// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内待办条（灰面板）：
-/// 有新版、装好了等重开、没装上。查的过程和下载的过程都不要用户决定什么。
+/// 有新版、已安装等重启、安装失败。查的过程和下载的过程都不要用户决定什么。
 type UpdateState =
   | { kind: "quiet" }
   | { kind: "ready"; update: Update }
@@ -136,7 +137,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         if (checkFailed !== null)
           return (
             <div className="settings-page__note">
-              没查成：{checkFailed}
+              {checkFailed}
               <span className="settings-page__fallback">
                 <Button variant="external" onClick={() => void openUrl(RELEASES_URL)}>
                   去发布页
@@ -170,18 +171,17 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           <NoticePanel
             message={
               <>
-                <span className="settings-page__version">{update.version}</span>{" "}
-                装好了，重开一次就用上它
+                <span className="settings-page__version">{update.version}</span> 已安装，重启后生效
               </>
             }
-            action={{ label: "重开", onClick: () => void relaunch() }}
+            action={{ label: "重启", onClick: () => void relaunch() }}
             link={{ label: "稍后", onClick: () => setLater(true) }}
           />
         );
       case "failed":
         return (
           <NoticePanel
-            message={`${update.version} 没装上：${update.reason}`}
+            message={`${update.version} 安装失败：${update.reason}`}
             action={{
               label: "再试一次",
               onClick: () =>
@@ -196,7 +196,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     }
   };
 
-  /// 点「检查更新」之后的三种一行字：正在检查 / 已是最新（约 4 秒淡出）/ 没查成（给去发布页的退路）
+  /// 点「检查更新」之后的三种一行字：正在检查 / 已是最新（约 4 秒淡出）/ 检查失败（给去发布页的退路）
   const [latest, setLatest] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkFailed, setCheckFailed] = useState<string | null>(null);
@@ -263,7 +263,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   };
 
   /// `检查更新`：在应用里查（产品负责人：跳到 GitHub 让用户手动下载太难用）。有新版出待办条
-  /// （下载并安装 → 重开），没有就说「已是最新版本」，查不成才给「去发布页 ↗」的退路
+  /// （下载并安装 → 重启），没有就说「已是最新版本」，查不成才给「去发布页 ↗」的退路
   const checkUpdate = async () => {
     if (latestTimer.current) clearTimeout(latestTimer.current);
     setLater(false);
@@ -279,7 +279,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         latestTimer.current = setTimeout(() => setLatest(false), LATEST_NOTE_MS);
       }
     } catch (e) {
-      setCheckFailed(e instanceof Error ? e.message : String(e));
+      setCheckFailed(updateCheckFailure(e instanceof Error ? e.message : String(e)));
     } finally {
       setChecking(false);
     }
