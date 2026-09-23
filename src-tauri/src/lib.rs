@@ -16,7 +16,7 @@ use symsync_core::discovery::{self, Env};
 use symsync_core::fs::normalize;
 use symsync_core::models::*;
 use symsync_core::skills;
-use symsync_core::store::{IgnoredIssue, IssueKind, Store};
+use symsync_core::store::Store;
 use symsync_core::sync;
 use tauri::Emitter;
 
@@ -552,28 +552,17 @@ fn delete_source(plan_id: String, state: tauri::State<'_, AppState>) -> Result<S
     Ok(sync::delete_source(&plan))
 }
 
-/// 忽略一条待处理问题；`at` 由 core 生成。返回落盘的 key，撤销时原样传给 `unignore_issue`
+/// 把这些问题记为看过（新问题只提示一次，看过即止）。key 由前端算好，格式见 core `store::SeenIssue`；
+/// 已看过的保持原样
 #[tauri::command]
-fn ignore_issue(
-    kind: IssueKind,
-    paths: Vec<PathBuf>,
-    state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
-    let issue = IgnoredIssue::new(kind, &paths);
-    let key = issue.key.clone();
-    state.store.ignore(issue).map_err(err)?;
-    Ok(key)
+fn mark_issues_seen(keys: Vec<String>, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.store.mark_seen(&keys).map_err(err)
 }
 
+/// 看过的全部问题 key；不在里面的就是新问题，要提示一次
 #[tauri::command]
-fn unignore_issue(key: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.store.unignore(&key).map_err(err)
-}
-
-/// 已忽略的问题全表；待处理页据此判断哪条要隐藏、哪条能恢复
-#[tauri::command]
-fn list_ignored(state: tauri::State<'_, AppState>) -> Result<Vec<IgnoredIssue>, String> {
-    Ok(state.store.load_settings().map_err(err)?.ignored)
+fn list_seen_issues(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    state.store.seen_keys().map_err(err)
 }
 
 #[tauri::command]
@@ -837,9 +826,8 @@ pub fn run() {
             split_whole_link,
             plan_delete_source,
             delete_source,
-            ignore_issue,
-            unignore_issue,
-            list_ignored,
+            mark_issues_seen,
+            list_seen_issues,
             list_manual_sources,
             add_manual_source,
             remove_manual_source,

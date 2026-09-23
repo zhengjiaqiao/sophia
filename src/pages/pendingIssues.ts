@@ -17,10 +17,10 @@ import type {
 /// key 里的分隔符，与 `store.rs` 的 `KEY_SEP` 是同一个 Unit Separator：路径里不会出现它
 const KEY_SEP = "\u001f";
 
-/// 类别 + 全部位置排序后拼接，与 `IgnoredIssue::key_for` 同规则。
+/// 类别 + 全部位置排序后拼接，与 core `store::issue_key` 同规则。
 ///
 /// 两边必须同源：这既是本页的去重依据（同一条状况会被多个格命中），
-/// 也是「这条是不是已经忽略过」的判断依据。路径任一变化 → key 变化 → 自然重新提示。
+/// 也是「这条是不是已经看过」的判断依据（`api.markIssuesSeen` / `listSeenIssues` 存的就是它）。路径任一变化 → key 变化 → 自然重新提示。
 export function issueKey(kind: IssueKind, paths: string[]): string {
   return [kind, ...[...paths].sort()].join(KEY_SEP);
 }
@@ -74,7 +74,7 @@ export interface PendingIssue {
   kind: IssueKind;
   /// 见 `issueKey`
   key: string;
-  /// 涉及的全部位置，原样传给 `ignore_issue`
+  /// 涉及的全部位置；key 就是由它算的
   paths: string[];
   /// 主行开头的等宽名字（skill 名）；这一条说的是目录而不是某个 skill 时为 null
   subject: string | null;

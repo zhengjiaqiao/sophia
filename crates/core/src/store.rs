@@ -19,12 +19,15 @@ pub struct Settings {
     pub auto_links: Vec<AutoLink>,
     pub mcp_auto_imports: Vec<McpAutoImportRule>,
     pub codex_gateway: GatewaySettings,
-    /// 被用户忽略的待处理问题；旧文件没有这个字段
-    #[serde(default)]
-    pub ignored: Vec<IgnoredIssue>,
+    /// 用户已经看过的问题（新问题只提示一次，看过即止）；旧文件没有这个字段
+    pub seen_issues: Vec<SeenIssue>,
+    /// 旧版「忽略」表，只读不写：`load_settings` 把它并进 `seen_issues` 后清空，
+    /// 下次写盘时这个字段就从文件里消失了
+    #[serde(rename = "ignored", skip_serializing)]
+    pub(crate) legacy_ignored: Vec<SeenIssue>,
 }
 
-/// 待处理栏里四类需要用户拿主意的问题；待处理页按它分动作，一类一种动作
+/// skill / MCP 上需要用户拿主意的几类问题；key 的第一段就是它（见 `issue_key`）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum IssueKind {
@@ -56,45 +59,50 @@ impl IssueKind {
     }
 }
 
-/// 忽略的是"这一条具体状况"而不是某个 skill：涉及的位置一变，key 就变，界面自然重新提示
+/// 看过的一条问题。记的是"这一条具体状况"而不是某个 skill：涉及的位置一变，key 就变，
+/// 界面把它当新问题再提示一次。
+///
+/// key 是不透明字符串，由前端算好传进来，core 只负责存。两种来源、两种格式，互不相撞：
+/// - skill / MCP：`issue_key` 的公式，`<IssueKind>` + `\u{1f}` + 涉及位置（规范化、排序）逐个拼接，
+///   如 `duplicateSource\u{1f}/a/skills/x\u{1f}/b/skills/x`。与前端 `pendingIssues.ts › issueKey`
+///   两边钉死（`key_format_is_pinned_for_the_frontend` / `tests/issue-key-contract.test.ts`）
+/// - 模型：以 `MODEL_KEY_PREFIX`（`model\u{1f}`）开头，后接类别与能区分状况的细节，段间同样用 `\u{1f}`：
+///   - `model\u{1f}takeover\u{1f}<接管方的 baseUrl>`
+///   - `model\u{1f}configChanged\u{1f}<Codex 版本>`
+///   - `model\u{1f}unreachable\u{1f}<providerId>\u{1f}<连不上的原因>`
+///
+///   `IssueKind` 里没有叫 `model` 的类别，所以模型 key 不会与 skill / MCP 的撞
+///   （`model_keys_cannot_collide_with_issue_keys` 钉住）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IgnoredIssue {
-    pub kind: IssueKind,
+pub struct SeenIssue {
     pub key: String,
-    /// 忽略时间，RFC 3339 的 UTC 写法，可直接按字典序排
+    /// 标为看过的时间，RFC 3339 的 UTC 写法，可直接按字典序排。
+    /// 旧「忽略」记录另带一个 `kind` 字段，读的时候直接丢掉
     pub at: String,
 }
 
 /// key 内部的分隔符：Unit Separator，路径里不会出现
 const KEY_SEP: char = '\u{1f}';
 
-impl IgnoredIssue {
-    /// 现在忽略这一条
-    pub fn new(kind: IssueKind, paths: &[PathBuf]) -> Self {
-        Self {
-            kind,
-            key: Self::key_for(kind, paths),
-            at: now_rfc3339(),
-        }
-    }
+/// 模型类问题 key 的前缀，格式见 `SeenIssue`
+pub const MODEL_KEY_PREFIX: &str = "model\u{1f}";
 
-    /// 类别 + 全部路径（规范化后排序）拼成的 key。
-    /// 排序是为了让路径的先后顺序不影响结果；不取摘要，直接留可读的路径串，
-    /// 这样 settings.json 里的记录能看懂，也不依赖任何跨版本不保证稳定的 hash。
-    pub fn key_for(kind: IssueKind, paths: &[PathBuf]) -> String {
-        let mut parts: Vec<String> = paths
-            .iter()
-            .map(|p| crate::fs::normalize(p).to_string_lossy().into_owned())
-            .collect();
-        parts.sort();
-        let mut key = String::from(kind.as_str());
-        for p in parts {
-            key.push(KEY_SEP);
-            key.push_str(&p);
-        }
-        key
+/// skill / MCP 问题的 key：类别 + 全部路径（规范化后排序）拼接。
+/// 排序是为了让路径的先后顺序不影响结果；不取摘要，直接留可读的路径串，
+/// 这样 settings.json 里的记录能看懂，也不依赖任何跨版本不保证稳定的 hash。
+pub fn issue_key(kind: IssueKind, paths: &[PathBuf]) -> String {
+    let mut parts: Vec<String> = paths
+        .iter()
+        .map(|p| crate::fs::normalize(p).to_string_lossy().into_owned())
+        .collect();
+    parts.sort();
+    let mut key = String::from(kind.as_str());
+    for p in parts {
+        key.push(KEY_SEP);
+        key.push_str(&p);
     }
+    key
 }
 
 fn now_rfc3339() -> String {
@@ -149,8 +157,15 @@ impl Store {
         save_json(&self.dir.join("projects.json"), &projects)
     }
 
+    /// 读设置；旧版「忽略」表在这里并进「看过」表（忽略过的就是看过的），不单独写回
     pub fn load_settings(&self) -> io::Result<Settings> {
-        load_json(&self.dir.join("settings.json"))
+        let mut settings: Settings = load_json(&self.dir.join("settings.json"))?;
+        for issue in std::mem::take(&mut settings.legacy_ignored) {
+            if !settings.seen_issues.iter().any(|i| i.key == issue.key) {
+                settings.seen_issues.push(issue);
+            }
+        }
+        Ok(settings)
     }
 
     pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
@@ -180,29 +195,34 @@ impl Store {
         Ok(settings)
     }
 
-    /// 记下一条忽略；同一个 key 已经在里面就保持原样（不刷新 at）
-    pub fn ignore(&self, issue: IgnoredIssue) -> io::Result<()> {
+    /// 把这些 key 记为看过；已在表里的保持原样（不刷新 at），空串跳过。没有新增就不写盘
+    pub fn mark_seen(&self, keys: &[String]) -> io::Result<()> {
         let mut settings = self.load_settings()?;
-        if settings.ignored.iter().any(|i| i.key == issue.key) {
+        let before = settings.seen_issues.len();
+        let at = now_rfc3339();
+        for key in keys {
+            if key.is_empty() || settings.seen_issues.iter().any(|i| &i.key == key) {
+                continue;
+            }
+            settings.seen_issues.push(SeenIssue {
+                key: key.clone(),
+                at: at.clone(),
+            });
+        }
+        if settings.seen_issues.len() == before {
             return Ok(());
         }
-        settings.ignored.push(issue);
         self.save_settings(&settings)
     }
 
-    /// 恢复提示；key 不在里面就什么都不做
-    pub fn unignore(&self, key: &str) -> io::Result<()> {
-        let mut settings = self.load_settings()?;
-        let before = settings.ignored.len();
-        settings.ignored.retain(|i| i.key != key);
-        if settings.ignored.len() == before {
-            return Ok(());
-        }
-        self.save_settings(&settings)
-    }
-
-    pub fn is_ignored(&self, key: &str) -> io::Result<bool> {
-        Ok(self.load_settings()?.ignored.iter().any(|i| i.key == key))
+    /// 看过的全部 key，按记下的先后
+    pub fn seen_keys(&self) -> io::Result<Vec<String>> {
+        Ok(self
+            .load_settings()?
+            .seen_issues
+            .into_iter()
+            .map(|i| i.key)
+            .collect())
     }
 }
 
@@ -288,10 +308,11 @@ mod tests {
                 baseline: Some(["docs".to_string()].into_iter().collect()),
             }],
             codex_gateway: GatewaySettings::default(),
-            ignored: vec![IgnoredIssue::new(
-                IssueKind::BrokenLink,
-                &[PathBuf::from("/a/skills/x")],
-            )],
+            seen_issues: vec![SeenIssue {
+                key: issue_key(IssueKind::BrokenLink, &[PathBuf::from("/a/skills/x")]),
+                at: "2026-09-23T00:00:00Z".into(),
+            }],
+            legacy_ignored: Vec::new(),
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
@@ -371,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_without_ignored_still_loads() {
+    fn settings_without_seen_issues_still_loads() {
         let t = TempTree::new();
         let dir = t.dir("data/SymSync");
         std::fs::write(
@@ -381,7 +402,7 @@ mod tests {
         .unwrap();
         let loaded = Store::new(dir).load_settings().unwrap();
         assert_eq!(loaded.disabled_harnesses, vec!["codex".to_string()]);
-        assert_eq!(loaded.ignored, Vec::<IgnoredIssue>::new());
+        assert_eq!(loaded.seen_issues, Vec::<SeenIssue>::new());
     }
 
     #[test]
@@ -389,8 +410,8 @@ mod tests {
         let a = PathBuf::from("/a/skills/x");
         let b = PathBuf::from("/b/skills/x");
         assert_eq!(
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &[a.clone(), b.clone()]),
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &[b, a])
+            issue_key(IssueKind::DuplicateSource, &[a.clone(), b.clone()]),
+            issue_key(IssueKind::DuplicateSource, &[b, a])
         );
     }
 
@@ -399,8 +420,8 @@ mod tests {
         let base = [PathBuf::from("/a/skills/x"), PathBuf::from("/b/skills/x")];
         let moved = [PathBuf::from("/a/skills/x"), PathBuf::from("/c/skills/x")];
         assert_ne!(
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &base),
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &moved)
+            issue_key(IssueKind::DuplicateSource, &base),
+            issue_key(IssueKind::DuplicateSource, &moved)
         );
         // 多一个位置也算变化
         let more = [
@@ -409,8 +430,8 @@ mod tests {
             PathBuf::from("/c/skills/x"),
         ];
         assert_ne!(
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &base),
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &more)
+            issue_key(IssueKind::DuplicateSource, &base),
+            issue_key(IssueKind::DuplicateSource, &more)
         );
     }
 
@@ -426,15 +447,13 @@ mod tests {
             IssueKind::DifferentCopies,
             IssueKind::InvalidLocation,
         ];
-        let keys: std::collections::BTreeSet<String> = kinds
-            .iter()
-            .map(|k| IgnoredIssue::key_for(*k, &paths))
-            .collect();
+        let keys: std::collections::BTreeSet<String> =
+            kinds.iter().map(|k| issue_key(*k, &paths)).collect();
         assert_eq!(keys.len(), kinds.len(), "{keys:?}");
         // ./ 与 .. 只是写法差异，不该算成另一条状况
         assert_eq!(
-            IgnoredIssue::key_for(IssueKind::BrokenLink, &paths),
-            IgnoredIssue::key_for(
+            issue_key(IssueKind::BrokenLink, &paths),
+            issue_key(
                 IssueKind::BrokenLink,
                 &[PathBuf::from("/a/./b/../skills/x")]
             )
@@ -442,45 +461,147 @@ mod tests {
     }
 
     #[test]
-    fn ignore_unignore_round_trip() {
+    fn mark_seen_round_trip() {
         let t = TempTree::new();
-        let dir = t.root().join("data/SymSync");
-        let s = Store::new(dir);
-        let issue = IgnoredIssue::new(IssueKind::BrokenLink, &[PathBuf::from("/a/skills/x")]);
-        let key = issue.key.clone();
+        let s = Store::new(t.root().join("data/SymSync"));
+        let broken = issue_key(IssueKind::BrokenLink, &[PathBuf::from("/a/skills/x")]);
+        let model = format!("{MODEL_KEY_PREFIX}configChanged\u{1f}0.50.0");
 
-        assert!(!s.is_ignored(&key).unwrap());
-        s.ignore(issue.clone()).unwrap();
-        assert!(s.is_ignored(&key).unwrap());
-        // 重复忽略不会写进第二条
-        s.ignore(issue.clone()).unwrap();
-        assert_eq!(s.load_settings().unwrap().ignored, vec![issue]);
+        assert_eq!(s.seen_keys().unwrap(), Vec::<String>::new());
+        s.mark_seen(&[broken.clone(), model.clone()]).unwrap();
+        assert_eq!(s.seen_keys().unwrap(), vec![broken.clone(), model.clone()]);
+        let first_at = s.load_settings().unwrap().seen_issues[0].at.clone();
 
-        s.unignore(&key).unwrap();
-        assert!(!s.is_ignored(&key).unwrap());
-        // 不存在的 key 也不报错
-        s.unignore(&key).unwrap();
+        // 重复标、同一批里重复、空串都不会多写一条
+        s.mark_seen(&[broken.clone(), broken.clone(), String::new()])
+            .unwrap();
+        let loaded = s.load_settings().unwrap();
+        assert_eq!(loaded.seen_issues.len(), 2);
+        assert_eq!(loaded.seen_issues[0].at, first_at);
+        // 空列表不报错
+        s.mark_seen(&[]).unwrap();
+    }
+
+    /// 升级前写下的 settings.json：只有旧的 `ignored` 表，每条带 kind / key / at。
+    /// 读进来要当作看过，旧字段在下次写盘时消失，不再写回
+    #[test]
+    fn legacy_ignored_file_loads_as_seen() {
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        let dup = issue_key(
+            IssueKind::DuplicateSource,
+            &[PathBuf::from("/a/skills/x"), PathBuf::from("/b/skills/x")],
+        );
+        let old = serde_json::json!({
+            "disabledHarnesses": ["codex"],
+            "ignored": [
+                {"kind": "duplicateSource", "key": dup, "at": "2026-09-01T08:00:00Z"},
+                {"kind": "invalidLocation", "key": "invalidLocation\u{1f}/p/mcp.json#notion", "at": "2026-09-02T08:00:00Z"}
+            ]
+        });
+        std::fs::write(dir.join("settings.json"), old.to_string()).unwrap();
+        let s = Store::new(dir.clone());
+
+        let loaded = s.load_settings().unwrap();
+        assert_eq!(loaded.disabled_harnesses, vec!["codex".to_string()]);
+        assert_eq!(
+            loaded.seen_issues,
+            vec![
+                SeenIssue {
+                    key: dup.clone(),
+                    at: "2026-09-01T08:00:00Z".into()
+                },
+                SeenIssue {
+                    key: "invalidLocation\u{1f}/p/mcp.json#notion".into(),
+                    at: "2026-09-02T08:00:00Z".into()
+                },
+            ]
+        );
+        assert!(loaded.legacy_ignored.is_empty());
+
+        // 已在旧表里的再标一次不重复；新标的一条触发写盘，旧字段随之消失
+        let model = format!("{MODEL_KEY_PREFIX}takeover\u{1f}http://127.0.0.1:9000");
+        s.mark_seen(&[dup.clone(), model.clone()]).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap();
+        assert!(raw.get("ignored").is_none(), "{raw}");
+        assert_eq!(raw["seenIssues"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            s.seen_keys().unwrap(),
+            vec![
+                dup,
+                "invalidLocation\u{1f}/p/mcp.json#notion".to_string(),
+                model
+            ]
+        );
+    }
+
+    /// 新旧两个字段同时在（例如装回旧版又升回来），也照样读，按 key 去重
+    #[test]
+    fn legacy_and_new_tables_together_merge_without_duplicates() {
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{
+                "seenIssues": [{"key": "brokenLink\u001f/a", "at": "2026-09-03T00:00:00Z"}],
+                "ignored": [
+                    {"kind": "brokenLink", "key": "brokenLink\u001f/a", "at": "2026-09-01T00:00:00Z"},
+                    {"kind": "brokenLink", "key": "brokenLink\u001f/b", "at": "2026-09-02T00:00:00Z"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let keys = Store::new(dir).seen_keys().unwrap();
+        assert_eq!(
+            keys,
+            vec![
+                "brokenLink\u{1f}/a".to_string(),
+                "brokenLink\u{1f}/b".to_string()
+            ]
+        );
     }
 
     #[test]
-    fn ignored_survives_a_save_load_round_trip() {
+    fn seen_survives_a_save_load_round_trip() {
         let t = TempTree::new();
-        let dir = t.root().join("data/SymSync");
-        let s = Store::new(dir);
-        let issue = IgnoredIssue::new(
+        let s = Store::new(t.root().join("data/SymSync"));
+        let key = issue_key(
             IssueKind::DuplicateSource,
             &[PathBuf::from("/b/skills/x"), PathBuf::from("/a/skills/x")],
         );
-        s.ignore(issue.clone()).unwrap();
+        s.mark_seen(std::slice::from_ref(&key)).unwrap();
         let loaded = s.load_settings().unwrap();
-        assert_eq!(loaded.ignored, vec![issue]);
+        assert_eq!(loaded.seen_issues.len(), 1);
         assert_eq!(
-            loaded.ignored[0].key,
-            IgnoredIssue::key_for(
+            loaded.seen_issues[0].key,
+            issue_key(
                 IssueKind::DuplicateSource,
                 &[PathBuf::from("/a/skills/x"), PathBuf::from("/b/skills/x")]
             )
         );
+        let at = &loaded.seen_issues[0].at;
+        assert!(at.len() == 20 && at.ends_with('Z'), "at = {at}");
+    }
+
+    /// 模型 key 的前缀不能是任何一类 skill / MCP 问题的 key 开头，否则两张表会互相吞
+    #[test]
+    fn model_keys_cannot_collide_with_issue_keys() {
+        let kinds = [
+            IssueKind::DuplicateSource,
+            IssueKind::BrokenLink,
+            IssueKind::ReadOnlyTarget,
+            IssueKind::WholeLinkedTarget,
+            IssueKind::DifferentCopies,
+            IssueKind::InvalidLocation,
+        ];
+        for kind in kinds {
+            for paths in [vec![], vec![PathBuf::from("/a")]] {
+                let key = issue_key(kind, &paths);
+                assert!(!key.starts_with(MODEL_KEY_PREFIX), "{key:?}");
+            }
+            assert_ne!(kind.as_str(), "model");
+        }
     }
 
     #[test]
@@ -492,7 +613,7 @@ mod tests {
         assert_eq!(rfc3339_utc(1_767_225_599), "2025-12-31T23:59:59Z");
         // 字典序就是时间序
         assert!(rfc3339_utc(0) < rfc3339_utc(1_700_000_000));
-        let at = IgnoredIssue::new(IssueKind::BrokenLink, &[]).at;
+        let at = now_rfc3339();
         assert!(at.len() == 20 && at.ends_with('Z'), "at = {at}");
     }
 
@@ -509,7 +630,7 @@ mod tests {
     /// 改这条时必须同步改 `tests/issue-key-contract.test.ts` 里的同名期望值。
     #[test]
     fn key_format_is_pinned_for_the_frontend() {
-        let key = IgnoredIssue::key_for(
+        let key = issue_key(
             IssueKind::DuplicateSource,
             &[
                 PathBuf::from("/b/skills/defuddle"),

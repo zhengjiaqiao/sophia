@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { api, type IgnoredIssue } from "../api.ts";
+import { api } from "../api.ts";
 import type { IssueKind, McpDiff, McpFieldValue, Overview, SyncReport } from "../types.ts";
 import {
   Busy,
@@ -459,8 +459,8 @@ export function PendingPage({
 }: PendingPageProps) {
   const [segment, setSegment] = useState<PendingSegment>(initialSegment);
   const [showIgnored, setShowIgnored] = useState(false);
-  /// null = 还没读回来
-  const [ignored, setIgnored] = useState<IgnoredIssue[] | null>(null);
+  /// null = 还没读回来。过渡期：core 的忽略表已改成「看过」表，只剩 key，kind 从 key 的第一段取回
+  const [ignored, setIgnored] = useState<{ kind: IssueKind; key: string }[] | null>(null);
   const [modelIgnored, setModelIgnored] = useState<ModelIgnored[]>(loadModelIgnored);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Done[]>([]);
@@ -483,7 +483,12 @@ export function PendingPage({
 
   const reloadIgnored = useCallback(async () => {
     try {
-      setIgnored(await api.listIgnored());
+      const keys = await api.listSeenIssues();
+      setIgnored(
+        keys
+          .map((key) => ({ kind: key.split("\u001f")[0] as IssueKind, key }))
+          .filter((i) => i.kind in KIND_LABEL),
+      );
     } catch (e) {
       onError(String(e));
     }
@@ -560,15 +565,22 @@ export function PendingPage({
         setModelIgnored(next);
         saveModelIgnored(next);
       } else {
-        await api.unignoreIssue(key);
+        // 过渡期：「看过」不能撤销，core 已没有 unignore；这里只刷新一次
         await reloadIgnored();
       }
       dismiss(key);
     });
 
-  const ignoreCore = (key: string, index: number, kind: IssueKind, paths: string[], name: string) =>
+  const ignoreCore = (
+    key: string,
+    index: number,
+    _kind: IssueKind,
+    _paths: string[],
+    name: string,
+  ) =>
     void run(async () => {
-      const stored = await api.ignoreIssue(kind, paths);
+      await api.markIssuesSeen([key]);
+      const stored = key;
       await reloadIgnored();
       settle(key, index, {
         tier: "routine",

@@ -2,14 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
-import type {
-  AutoLink,
-  GatewayState,
-  IgnoredIssue,
-  McpOverview,
-  McpReport,
-  Overview,
-} from "./types";
+import type { AutoLink, GatewayState, McpOverview, McpReport, Overview } from "./types";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import ModelsTab from "./ModelsTab";
@@ -78,7 +71,7 @@ export default function App() {
   /// 收件箱计数的三份原料：skill 扫描（overview）、MCP 扫描、模型状态；外加已忽略的 key
   const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
   const [gatewayState, setGatewayState] = useState<GatewayState | null>(null);
-  const [ignored, setIgnored] = useState<IgnoredIssue[]>([]);
+  const [ignored, setIgnored] = useState<string[]>([]);
   /// 待处理页跳回来要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
   const [focus, setFocus] = useState<{ segment: "skills" | "mcp"; key: string } | undefined>();
   const clearFocus = useCallback(() => setFocus(undefined), []);
@@ -147,7 +140,7 @@ export default function App() {
         api.listManualProjects(),
         api.listAutoLinks(),
         // 计数的原料读不到不挡主流程：少数一个数字，好过整页报错
-        api.listIgnored().catch(() => null),
+        api.listSeenIssues().catch(() => null),
         activeTabRef.current === "mcp" ? Promise.resolve(null) : api.scanMcp().catch(() => null),
       ]);
       setOverview(next);
@@ -293,7 +286,7 @@ export default function App() {
 
   // ===== 全局收件箱：三段未处理之和 =====
   // 三段原样交给待处理页（含已忽略的，页面自己按忽略表滤）；顶栏数字扣掉已忽略的
-  const ignoredKeys = useMemo(() => new Set(ignored.map((i) => i.key)), [ignored]);
+  const ignoredKeys = useMemo(() => new Set(ignored), [ignored]);
   const skillIssues = useMemo(() => collectIssues(overview), [overview]);
   const mcpIssues = useMemo(() => collectMcpIssues(mcpOverview), [mcpOverview]);
   const modelIssueList: ModelIssue[] = useMemo(

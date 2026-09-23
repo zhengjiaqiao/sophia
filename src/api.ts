@@ -8,8 +8,6 @@ import type {
   GatewaySelectedModel,
   GatewayState,
   HarnessStatus,
-  IgnoredIssue,
-  IssueKind,
   Overview,
   PlannedAction,
   PlannedDeletion,
@@ -23,9 +21,9 @@ import type {
   McpDiff,
 } from "./types";
 
-// PlannedDeletion 与 IgnoredIssue 定义在 types.ts（与 serde 一一对应）；
+// PlannedDeletion 定义在 types.ts（与 serde 一一对应）；
 // 这里再导出一次，调用方从 api.ts 或 types.ts 引都行
-export type { PlannedDeletion, IgnoredIssue } from "./types";
+export type { PlannedDeletion } from "./types";
 
 /// 结束了几个 Codex 后台进程（与 Rust 的 RestartReport 一一对应）
 export type GatewayRestartReport = { terminated: number; pids: number[] };
@@ -44,11 +42,15 @@ export const api = {
     invoke<PlannedDeletion>("plan_delete_source", { sourceId, skill }),
   /// 执行用户已确认的删除计划；planId 用后即弃，不能重放
   deleteSource: (planId: string) => invoke<SyncReport>("delete_source", { planId }),
-  /// 忽略一条待处理问题，返回撤销用的 key
-  ignoreIssue: (kind: IssueKind, paths: string[]) =>
-    invoke<string>("ignore_issue", { kind, paths }),
-  unignoreIssue: (key: string) => invoke<void>("unignore_issue", { key }),
-  listIgnored: () => invoke<IgnoredIssue[]>("list_ignored"),
+  /// 把这些问题记为看过（新问题只提示一次，看过即止）；已看过的保持原样。
+  /// key 是字符串，两种格式互不相撞（core `store::SeenIssue` 是准）：
+  /// - skill / MCP：`pendingIssues.ts › issueKey(kind, paths)`，即 `<IssueKind>\u001f<位置…>`
+  /// - 模型：`model\u001f<类别>\u001f<细节…>`，段间都用 `\u001f`：
+  ///   `model\u001ftakeover\u001f<baseUrl>`、`model\u001fconfigChanged\u001f<Codex 版本>`、
+  ///   `model\u001funreachable\u001f<providerId>\u001f<原因>`
+  markIssuesSeen: (keys: string[]) => invoke<void>("mark_issues_seen", { keys }),
+  /// 看过的全部 key；不在里面的就是新问题
+  listSeenIssues: () => invoke<string[]>("list_seen_issues"),
   listManualSources: () => invoke<string[]>("list_manual_sources"),
   addManualSource: (path: string) => invoke<void>("add_manual_source", { path }),
   removeManualSource: (path: string) => invoke<void>("remove_manual_source", { path }),

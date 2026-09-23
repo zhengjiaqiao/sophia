@@ -232,13 +232,13 @@ export const mcpGroupOf = (row: McpDomainRow): string => row.entries[0]?.sourceI
  * 形状是稳定契约：
  * - `kind`：`differentCopies`（几个位置各有一份同名定义、内容不一样）/ `invalidLocation`
  *   （某个位置的配置文件、或其中一条这次读不出来）
- * - `key`：与 core `IgnoredIssue::key_for` 同公式（`issueKey(kind, paths)`），拿它比对已忽略列表
+ * - `key`：与 core `store::issue_key` 同公式（`issueKey(kind, paths)`），拿它比对看过的列表
  * - `title`：一句完整的话（行视角），直接显示
  * - `detailFields?`：只给 differentCopies——已知不一样的字段名（`["url"]`）；缺省＝说不清是哪个字段
  * - `locations`：涉及的位置（id / 位置名 / 配置文件路径），顺序即行内出现的先后
  * - `name`：服务名；位置整份读不出来时为 null
  * - `domain`：所在域的 key（`global` / `project:<路径>`），跳回对应页用
- * - `paths`：原样传给 `api.ignoreIssue(kind, paths)`；key 就是由它算的
+ * - `paths`：涉及的位置；key 就是由它算的
  */
 export interface McpPendingItem {
   kind: McpIssueKind;
@@ -272,7 +272,7 @@ export function collectMcpIssues(
   for (const issue of overview.issues) {
     const location = locationOf(issue.locationId);
     if (location === undefined || !want(location.domain)) continue;
-    // key 必须和 core 的 IgnoredIssue::key_for 同源；条目名并进标识里，否则同一个文件里
+    // key 必须和 core 的 store::issue_key 同源；条目名并进标识里，否则同一个文件里
     // 两条不同名的问题会算出同一个 key，忽略一条就把另一条也吞了
     // 用加号拼而不是模板串：上面两处带反斜杠的模板串会让 lint-ui 的取文案正则配错对
     const ident = issue.name === null ? location.path : location.path + "#" + issue.name;

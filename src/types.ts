@@ -145,13 +145,6 @@ export interface PlannedDeletion {
   plan: DeleteSourcePlan;
 }
 
-/// 与 store.rs 的 IgnoredIssue 对应
-export interface IgnoredIssue {
-  kind: IssueKind;
-  key: string;
-  /// 忽略时间，RFC 3339 的 UTC 写法，可直接按字典序排
-  at: string;
-}
 export type Outcome =
   | { status: "created" }
   | { status: "skipped" }

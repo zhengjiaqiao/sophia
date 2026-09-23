@@ -6,9 +6,9 @@ import { issueKey, pathsOfKey } from "../src/pages/pendingIssues.ts";
 /// 跨语言契约：这个串必须和 `crates/core/src/store.rs` 的
 /// `key_format_is_pinned_for_the_frontend` 里那个期望值**逐字节相同**。
 ///
-/// 忽略项的 key 由前端算一份、后端算一份，两边同源才对得上：
-/// 界面据此判断「这条是不是已经忽略过」，后端据此落盘。任一边悄悄改了
-/// 格式，忽略就会静默失效——用户看到已经忽略过的问题又冒出来，而不会
+/// 「看过」表里的 key 由前端算好交给 core 落盘；升级前的「忽略」记录是 core 算的，
+/// 读进来直接当看过用。两边同源才对得上：界面据此判断「这条是不是已经看过」。
+/// 任一边悄悄改了格式，看过就会静默失效——用户看过的问题又冒出来，而不会
 /// 有任何报错。所以两边各钉一条同输入同期望的测试。
 /// 分隔符写成显式转义，不要直接嵌不可见字符——那样谁碰掉一个都看不出来。
 const SEP = "\u001f";
@@ -48,9 +48,9 @@ test("pathsOfKey 能把位置取回来", () => {
 });
 
 test("MCP 那两类的 key 也走同一个公式", () => {
-  // 忽略要能跨重启生效，前端算的 key 必须和 core 写盘那个一致。
+  // 看过要能跨重启生效，前端算的 key 必须和 core 写盘那个一致。
   // 这两类的标识里带了 # 后缀（条目名 / 服务名）——光靠路径会让同一个文件、
-  // 同一组位置上的不同条目撞成一个 key，忽略一条就把另一条也吞了
+  // 同一组位置上的不同条目撞成一个 key，看过一条就把另一条也吞了
   const a = issueKey("invalidLocation", ["/p/mcp.json#notion"]);
   const b = issueKey("invalidLocation", ["/p/mcp.json#figma"]);
   assert.notEqual(a, b, "同一个文件里两条不同名的问题必须是两个 key");
