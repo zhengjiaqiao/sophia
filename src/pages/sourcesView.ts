@@ -10,6 +10,7 @@ import type {
   SourceList,
   SubscribedSource,
 } from "../types.ts";
+import { originNames, originText } from "../originName.ts";
 import { joinWords } from "./importDefaults.ts";
 
 /// 位置的最小描述：页面上只用得到 key 与显示名
@@ -31,23 +32,21 @@ export function noSourcesText(domain: DomainRef): string {
   return joinWords(domain.label, "还没有来源");
 }
 
-/// 行上的来源名与第二行灰字（不含 `· N 个 skill`）。
-/// 项目自己的 skill 写成 `CardBox 自己的 skill` / `项目里`：它的来源名（`CardBox · 通用仓库`）
-/// 读不出「这就是项目自己的」；全局里自己的来源（通用仓库、各 agent 的全局目录）照常写名字和路径。
-/// 同名来源第二行写区分片段，否则写 `~` 开头的短路径
-export function sourceLines(
-  source: SubscribedSource,
-  domain: DomainRef,
-): { name: string; sub: string } {
-  if (source.own && isProject(domain)) {
-    return { name: joinWords(domain.label, "自己的 skill"), sub: "项目里" };
-  }
-  return { name: source.label, sub: source.segment || source.shortPath };
+/// 行名：与主视图同一个起名函数（`originNames`），按这个位置已订阅的来源成组——
+/// 主视图的行也正是这些来源的 skill，同名来源的区分片段两处一样（`WeiboAP · 1776…`）。
+/// 项目自己的仓库就写它的来源名 `CardBox · 通用仓库`
+export function sourceNames(subscribed: SubscribedSource[]): Map<string, string> {
+  const names = originNames(
+    subscribed.map((s) => s.id),
+    subscribed,
+  );
+  return new Map(subscribed.map((s) => [s.id, originText(names.get(s.id)!)]));
 }
 
-/// 第二行整句：`~/.agents/skills · 24 个 skill`
-export function sourceSubtitle(source: SubscribedSource, domain: DomainRef): string {
-  return `${sourceLines(source, domain).sub} · ${source.skillCount} 个 skill`;
+/// 第二行：短路径与数量两段（`~/.agents/skills` · `24 个 skill`）。区分片段已在行名里，不放第二行。
+/// 拆成两段给页面：路径长了只截路径，数量完整保留
+export function sourceSubtitle(source: SubscribedSource): { where: string; count: string } {
+  return { where: source.shortPath, count: `${source.skillCount} 个 skill` };
 }
 
 /// 在两个以上已订阅来源里都有的 skill 名：展开区里这些名字后面挂 `同名`
@@ -124,12 +123,18 @@ export interface CandidateGroup {
   items: CandidateItem[];
 }
 
-const candidateName = (c: CandidateSource) => (c.segment ? `${c.label} · ${c.segment}` : c.label);
-
-/// `+ 来源` 浮层的候选分组：`其他项目在用的`、`检测到的`；空的组不出现
+/// `+ 来源` 浮层的候选分组：`其他项目在用的`、`检测到的`；空的组不出现。
+/// 候选名用同一个起名函数，按页面上的全部来源（已订阅的连同候选）成组：
+/// 已订阅了一个 WeiboAP 时，候选里的另一个也带上区分片段
 export function candidateGroups(
-  list: Pick<SourceList, "elsewhere" | "detected">,
+  list: Pick<SourceList, "subscribed" | "elsewhere" | "detected">,
 ): CandidateGroup[] {
+  const all = [...list.subscribed, ...list.elsewhere, ...list.detected];
+  const names = originNames(
+    all.map((s) => s.id),
+    all,
+  );
+  const candidateName = (c: CandidateSource) => originText(names.get(c.id)!);
   const groups: CandidateGroup[] = [
     {
       title: "其他项目在用的",
@@ -186,9 +191,12 @@ export function mcpSourceLines(
   return { name: source.label, sub: here ? "项目里" : source.place };
 }
 
-/// 第二行整句：`全局 · 5 个 MCP`
-export function mcpSourceSubtitle(source: McpSubscribedSource, domain: DomainRef): string {
-  return `${mcpSourceLines(source, domain).sub} · ${source.services.length} 个 MCP`;
+/// 第二行两段：`全局` · `5 个 MCP`（与 skill 那边同一种形状）
+export function mcpSourceSubtitle(
+  source: McpSubscribedSource,
+  domain: DomainRef,
+): { where: string; count: string } {
+  return { where: mcpSourceLines(source, domain).sub, count: `${source.services.length} 个 MCP` };
 }
 
 /// 自己的配置不能移除：× 禁用的原因

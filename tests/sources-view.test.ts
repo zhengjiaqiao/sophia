@@ -19,7 +19,7 @@ import {
   removeConfirmBody,
   removeConfirmTitle,
   removeTitle,
-  sourceLines,
+  sourceNames,
   sourceSubtitle,
   sourcesTitle,
   stuckTip,
@@ -38,7 +38,6 @@ const sub = (over: Partial<SubscribedSource>): SubscribedSource => ({
   id: "/s",
   path: "/s",
   label: "通用仓库",
-  segment: "",
   shortPath: "~/.agents/skills",
   skills: [],
   skillCount: 0,
@@ -53,7 +52,6 @@ const cand = (over: Partial<CandidateSource>): CandidateSource => ({
   id: "/c",
   path: "/c",
   label: "c",
-  segment: "",
   shortPath: "~/c",
   skills: [],
   skillCount: 0,
@@ -68,17 +66,44 @@ test("页名：专名与汉字之间一个空格，汉字之间不加", () => {
   assert.equal(noSourcesText(global), "全局还没有来源");
 });
 
-test("行上两行字：项目自己的写成「X 自己的 skill / 项目里」，同名写区分片段，否则短路径", () => {
-  const own = sub({ own: true, label: "CardBox · 通用仓库", skillCount: 12 });
-  assert.deepEqual(sourceLines(own, cardbox), { name: "CardBox 自己的 skill", sub: "项目里" });
-  assert.equal(sourceSubtitle(own, cardbox), "项目里 · 12 个 skill");
-  // 全局里自己的来源照常写名字和路径
-  assert.deepEqual(sourceLines(sub({ own: true }), global), {
-    name: "通用仓库",
-    sub: "~/.agents/skills",
+const WA = "/Users/me/Library/Application Support/WeiboAP";
+
+test("行名与主视图同一个起名函数：项目自己的仓库写来源名，同名来源带去掉共有开头的区分片段", () => {
+  const own = sub({
+    id: "/cb",
+    path: "/Users/me/CardBox/.agents/skills",
+    own: true,
+    label: "CardBox · 通用仓库",
+    shortPath: "~/CardBox/.agents/skills",
+    skillCount: 12,
   });
-  const weibo = sub({ label: "WeiboAP", segment: "agent_1776a9c3e2f4", skillCount: 29 });
-  assert.equal(sourceSubtitle(weibo, cardbox), "agent_1776a9c3e2f4 · 29 个 skill");
+  const a = sub({
+    id: "a",
+    path: `${WA}/agent_1776847465710_d5z6cowep/skills`,
+    label: "WeiboAP",
+    shortPath: "~/Library/Application Support/WeiboAP/agent_1776847465710_d5z6cowep/skills",
+    skillCount: 29,
+  });
+  const b = sub({ id: "b", path: `${WA}/agent_1787890675056_m9ac9h594/skills`, label: "WeiboAP" });
+  const names = sourceNames([own, a, b, sub({ id: "u" })]);
+  assert.deepEqual(
+    [...names],
+    [
+      ["/cb", "CardBox · 通用仓库"],
+      ["a", "WeiboAP · 1776…"],
+      ["b", "WeiboAP · 1787…"],
+      ["u", "通用仓库"],
+    ],
+  );
+  // 第二行只写短路径与数量，项目自己的也一样
+  assert.deepEqual(sourceSubtitle(own), {
+    where: "~/CardBox/.agents/skills",
+    count: "12 个 skill",
+  });
+  assert.deepEqual(sourceSubtitle(a), {
+    where: "~/Library/Application Support/WeiboAP/agent_1776847465710_d5z6cowep/skills",
+    count: "29 个 skill",
+  });
 });
 
 test("同名：在两个以上已订阅来源里都有的名字；同一来源里重复不算", () => {
@@ -130,8 +155,12 @@ test("移除确认正文：skill 与 agent 各自去重；一条都没有时照�
 
 test("`+ 来源` 的分组：其他项目在用的写在哪用，检测到的写短路径；空组不出现", () => {
   const groups = candidateGroups({
+    subscribed: [
+      sub({ id: "/sa", path: `${WA}/agent_1776847465710_d5z6cowep/skills`, label: "WeiboAP" }),
+    ],
     elsewhere: [
       cand({
+        id: "/w",
         path: "/w",
         label: "weibo_mini_program",
         usedIn: [
@@ -141,12 +170,13 @@ test("`+ 来源` 的分组：其他项目在用的写在哪用，检测到的写
       }),
     ],
     detected: [
-      cand({ path: "/x/codex", label: "Codex", shortPath: "~/.codex/skills" }),
+      cand({ id: "/x/codex", path: "/x/codex", label: "Codex", shortPath: "~/.codex/skills" }),
+      // 已订阅了一个 WeiboAP：候选里的这个与它同名，带上区分片段
       cand({
-        path: "/x/wa",
+        id: "/x/wa",
+        path: `${WA}/agent_1787890675056_m9ac9h594/skills`,
         label: "WeiboAP",
-        segment: "agent_1",
-        shortPath: "~/W/agent_1/skills",
+        shortPath: "~/W/agent_1787890675056_m9ac9h594/skills",
       }),
     ],
   });
@@ -159,11 +189,15 @@ test("`+ 来源` 的分组：其他项目在用的写在哪用，检测到的写
       title: "检测到的",
       items: [
         { path: "/x/codex", name: "Codex", sub: "~/.codex/skills" },
-        { path: "/x/wa", name: "WeiboAP · agent_1", sub: "~/W/agent_1/skills" },
+        {
+          path: `${WA}/agent_1787890675056_m9ac9h594/skills`,
+          name: "WeiboAP · 1787…",
+          sub: "~/W/agent_1787890675056_m9ac9h594/skills",
+        },
       ],
     },
   ]);
-  assert.deepEqual(candidateGroups({ elsewhere: [], detected: [] }), []);
+  assert.deepEqual(candidateGroups({ subscribed: [], elsewhere: [], detected: [] }), []);
 });
 
 test("展开区两列按列读：行数取一半向上取整，至少一行", () => {
@@ -223,8 +257,8 @@ test("MCP 行上两行字：这个项目自己的写「项目里」，其余写�
     ],
   });
   assert.deepEqual(mcpSourceLines(own, cardbox), { name: "Claude Code · Local", sub: "项目里" });
-  assert.equal(mcpSourceSubtitle(own, cardbox), "项目里 · 2 个 MCP");
-  assert.equal(mcpSourceSubtitle(mcpSub({}), cardbox), "全局 · 0 个 MCP");
+  assert.deepEqual(mcpSourceSubtitle(own, cardbox), { where: "项目里", count: "2 个 MCP" });
+  assert.deepEqual(mcpSourceSubtitle(mcpSub({}), cardbox), { where: "全局", count: "0 个 MCP" });
   // 全局里自己的写「全局」
   assert.equal(mcpSourceLines(mcpSub({ own: true }), global).sub, "全局");
 });

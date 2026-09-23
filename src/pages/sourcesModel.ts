@@ -17,7 +17,7 @@ import {
   noSourcesText,
   ownRemoveReason,
   removeConfirmBody,
-  sourceLines,
+  sourceNames,
   sourceSubtitle,
   sourcesTitle,
   stuckTip,
@@ -32,8 +32,9 @@ export interface SourceRow {
   /// 行键，也是移除时交给 core 的来源 id
   id: string;
   name: string;
-  /// 第二行整句：`~/.agents/skills · 24 个 skill`、`全局 · 5 个 MCP`
-  sub: string;
+  /// 第二行：在哪（`~/.agents/skills`、`全局`）与数量（`24 个 skill`、`5 个 MCP`）；
+  /// 放不下只截前一段
+  sub: { where: string; count: string };
   /// 完整路径，给提示框
   path: string;
   /// 这个位置自己的：不能移除
@@ -145,11 +146,12 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
     load: async () => {
       const list = await api.listSources(domain.key);
       const dups = duplicateNames(list.subscribed);
+      const names = sourceNames(list.subscribed);
       return {
         rows: list.subscribed.map((s) => ({
           id: s.id,
-          name: sourceLines(s, domain).name,
-          sub: sourceSubtitle(s, domain),
+          name: names.get(s.id) ?? s.label,
+          sub: sourceSubtitle(s),
           path: s.path,
           own: s.own,
           items: s.skills.map((name) => ({

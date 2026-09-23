@@ -371,7 +371,10 @@ export default function SourcesPage(props: SourcesPageProps) {
                     <span className="src-row__text">
                       <span className="src-row__label">{row.name}</span>
                       <Tooltip content={row.path}>
-                        <span className="src-row__sub">{row.sub}</span>
+                        <span className="src-row__sub">
+                          <span className="src-row__where">{row.sub.where}</span>
+                          <span className="src-row__count">{`\u00a0·\u00a0${row.sub.count}`}</span>
+                        </span>
                       </Tooltip>
                     </span>
                   </button>

@@ -190,9 +190,8 @@ export interface SourceSummary {
   id: string;
   /// 完整路径，给提示框
   path: string;
+  /// 来源名；同名来源的区分片段由前端 `originNames` 算（与主视图同一个起名函数）
   label: string;
-  /// 同名来源的区分片段；不重名、或片段就是名字本身时为空串
-  segment: string;
   /// 主目录写成 `~` 的路径
   shortPath: string;
   /// 按名排序

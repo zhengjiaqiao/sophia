@@ -34,10 +34,9 @@ pub struct SourceSummary {
     pub id: String,
     /// 完整路径，给提示框
     pub path: PathBuf,
-    /// 来源名
+    /// 来源名。同名来源的区分片段由前端算（`src/originName.ts`，与主视图同一个起名函数），
+    /// core 不再给：两处各算一份就会像从前那样写法不一致
     pub label: String,
-    /// 同名来源的区分片段（路径里能区分它们的那一级）；不重名、或片段就是名字本身时为空串
-    pub segment: String,
     /// 主目录写成 `~` 的路径
     pub short_path: String,
     /// 按名排序
@@ -260,7 +259,6 @@ fn summary(source: &Source, home: &Path) -> SourceSummary {
         id: source.id.clone(),
         path: source.path.clone(),
         label: source.label.clone(),
-        segment: String::new(),
         short_path: short_path(&source.path, home),
         skills: source.skills.iter().map(|k| k.name.clone()).collect(),
         skill_count: source.skills.len(),
@@ -273,16 +271,15 @@ fn missing_summary(path: &Path, home: &Path) -> SourceSummary {
         id: path.to_string_lossy().into_owned(),
         path: path.to_path_buf(),
         label: folder_label(path),
-        segment: String::new(),
         short_path: short_path(path, home),
         skills: Vec::new(),
         skill_count: 0,
     }
 }
 
-/// 同名来源分不清时，挑出每条路径里能区分它的那一级（与前端 `distinguishingSegments` 同一算法）：
+/// 同名的几条路径分不清时，挑出每条路径里能区分它的那一级（与前端 `distinguishingSegments` 同一算法）：
 /// 从结尾往前找第一个「别的路径在同一位置（从结尾数）上都不是它」的分量；找不到退回整条路径。
-/// 只有一条时返回空串
+/// 只有一条时返回空串。现在只给 MCP 来源页区分同名项目的 `place` 用；skill 来源的区分片段在前端算
 pub(crate) fn distinguishing_segments(paths: &[&Path]) -> Vec<String> {
     if paths.len() < 2 {
         return vec![String::new(); paths.len()];
@@ -315,21 +312,6 @@ pub(crate) fn distinguishing_segments(paths: &[&Path]) -> Vec<String> {
                 .unwrap_or_else(|| paths[i].display().to_string())
         })
         .collect()
-}
-
-/// 给页面上出现的全部来源填区分片段：同名的一组各取能区分它的那一级
-fn fill_segments(all: &mut [&mut SourceSummary]) {
-    let mut by_label: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    for (i, s) in all.iter().enumerate() {
-        by_label.entry(s.label.clone()).or_default().push(i);
-    }
-    for (label, group) in by_label {
-        let paths: Vec<PathBuf> = group.iter().map(|&i| all[i].path.clone()).collect();
-        let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-        for (&i, seg) in group.iter().zip(distinguishing_segments(&refs)) {
-            all[i].segment = if seg == label { String::new() } else { seg };
-        }
-    }
 }
 
 /// 来源管理页：这个位置已订阅的来源，以及 `+ 来源` 的两组候选。只读。
@@ -429,14 +411,6 @@ pub fn list(
     };
     elsewhere.sort_by(by_name);
     detected.sort_by(by_name);
-
-    let mut all: Vec<&mut SourceSummary> = subscribed_list
-        .iter_mut()
-        .map(|s| &mut s.source)
-        .chain(elsewhere.iter_mut().map(|c| &mut c.source))
-        .chain(detected.iter_mut().map(|c| &mut c.source))
-        .collect();
-    fill_segments(&mut all);
 
     SourceList {
         subscribed: subscribed_list,
@@ -1026,10 +1000,6 @@ mod tests {
             vec![sources[3].id.clone(), sources[0].id.clone()]
         );
 
-        // 同名的两个 team 各取能区分的那一级；不重名的为空
-        assert_eq!(page.elsewhere[0].source.segment, "alpha");
-        assert_eq!(page.detected[0].source.segment, "beta");
-        assert_eq!(page.detected[1].source.segment, "");
         assert_eq!(page.detected[0].source.short_path, "~/team/beta/skills");
         assert_eq!(page.detected[1].source.short_path, "~/.agents/skills");
         assert_eq!(ego.source.short_path, normalize(&ext).display().to_string());
@@ -1042,7 +1012,6 @@ mod tests {
                 id: "/a".into(),
                 path: PathBuf::from("/a"),
                 label: "a".into(),
-                segment: String::new(),
                 short_path: "/a".into(),
                 skills: vec!["x".into()],
                 skill_count: 1,
@@ -1055,7 +1024,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&entry).unwrap(),
             serde_json::json!({
-                "id": "/a", "path": "/a", "label": "a", "segment": "", "shortPath": "/a",
+                "id": "/a", "path": "/a", "label": "a", "shortPath": "/a",
                 "skills": ["x"], "skillCount": 1, "own": false, "canAutoLink": true,
                 "autoLink": false, "autoTargets": []
             })

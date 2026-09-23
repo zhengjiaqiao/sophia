@@ -114,14 +114,24 @@
   white-space: nowrap;
 }
 
+/* 第二行：路径 + 数量两段。路径长了只截路径，数量完整保留（`~/Library/…/agent_17… · 2 个 skill`） */
 .src-row__sub {
-  display: block;
-  overflow: hidden;
+  display: flex;
+  min-width: 0;
   font-size: var(--size-micro);
   line-height: 1.4;
   color: var(--ink-faint);
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.src-row__where {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.src-row__count {
+  flex-shrink: 0;
 }
 
 .src-row__text > .ss-tipwrap {
