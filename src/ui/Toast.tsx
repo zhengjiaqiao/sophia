@@ -3,7 +3,6 @@ import type { FocusEvent, ReactNode } from "react";
 import { AgentIcon } from "./AgentMark.tsx";
 import { Button, IconButton } from "./Button.tsx";
 import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
-import { Tooltip } from "./Tooltip.tsx";
 
 /// 提示条（DESIGN「提示条分两档」「提示条的位置」，画板 Feedback「提示条」）。
 ///
@@ -219,13 +218,9 @@ export function Toast(props: ToastProps) {
           <>
             <span className="ss-toast__sep">·</span>
             {action.disabledReason ? (
-              <Tooltip content={action.disabledReason}>
-                <span className="ss-toast__disabled" tabIndex={0}>
-                  <Button variant="link" disabled disabledReason={action.disabledReason}>
-                    {action.label}
-                  </Button>
-                </span>
-              </Tooltip>
+              <Button variant="link" disabled disabledReason={action.disabledReason}>
+                {action.label}
+              </Button>
             ) : (
               <Button variant="link" onClick={action.onClick}>
                 {action.label}

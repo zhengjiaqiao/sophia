@@ -27,7 +27,8 @@ const { Button, IconButton, AddButton } = await import("../src/ui/Button.tsx");
 const { Switch, Checkbox } = await import("../src/ui/Switch.tsx");
 const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
-const { Tooltip, TIP_DELAY_MS } = await import("../src/ui/Tooltip.tsx");
+const { Tooltip, TIP_DELAY_MS, PINNED_TIP_MS, TIP_IDLE, nextTip } =
+  await import("../src/ui/Tooltip.tsx");
 const { Spinner } = await import("../src/ui/Spinner.tsx");
 const { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
 const { ErrorBanner, NoticePanel } = await import("../src/ui/ErrorBanner.tsx");
@@ -485,6 +486,123 @@ test("Tooltip：黑窗白字 12，内边距 6 8，最大宽 240；内容作 aria
 test("Tooltip 时机：表格内 700ms、表格外 400ms", () => {
   assert.equal(TIP_DELAY_MS.table, 700);
   assert.equal(TIP_DELAY_MS.default, 400);
+});
+
+// ===== 点了做不了的控件，按下当即说明原因（DESIGN「提示框」） =====
+
+/// 禁用控件自带的原因包层：接住焦点、挂 aria-describedby、气泡里是原因
+function assertReasonWrap(html: string, reason: string) {
+  const id = html.match(
+    /^<span class="ss-tipwrap is-explain" tabindex="0" aria-describedby="([^"]+)">/,
+  )?.[1];
+  assert.ok(id, `禁用控件要自带可聚焦的原因包层：${html}`);
+  assert.match(
+    html,
+    new RegExp(`id="${id}" role="tooltip" class="ss-tip [^"]*">${reason}</span></span>$`),
+  );
+}
+
+test("禁用的 Switch / Button / IconButton / AddButton / Checkbox 自带原因提示框包层", () => {
+  assertReasonWrap(
+    render(Switch, { checked: false, onChange: noop, label: "x", disabledReason: "先勾选模型" }),
+    "先勾选模型",
+  );
+  assertReasonWrap(
+    render(Button, { children: "保存", disabled: true, disabledReason: "先填地址" }),
+    "先填地址",
+  );
+  assertReasonWrap(
+    render(IconButton, { icon: IconCheck({}), title: "删掉", disabledReason: "还在用" }),
+    "还在用",
+  );
+  assertReasonWrap(render(AddButton, { noun: "项目", disabledReason: "正在读取" }), "正在读取");
+  assertReasonWrap(
+    render(Checkbox, { checked: false, label: "全选", disabledReason: "没有可以勾选的行" }),
+    "没有可以勾选的行",
+  );
+  // 方向可选：来源管理页行尾的 × 放下方
+  assert.match(
+    render(IconButton, {
+      icon: IconCheck({}),
+      title: "删掉",
+      disabledReason: "还在用",
+      tipPlacement: "bottom",
+    }),
+    /class="ss-tip ss-tip--bottom/,
+  );
+});
+
+test("能点的控件：包层不占盒、不出提示框、不抢焦点（禁用 / 解禁是同一棵树，控件不重挂）", () => {
+  const html = render(Switch, { checked: true, onChange: noop, label: "x" });
+  assert.match(html, /^<span class="ss-tipwrap is-idle"><button [^>]*role="switch"/);
+  assert.doesNotMatch(html, /role="tooltip"|tabindex|aria-describedby/);
+  assert.match(cssRule(uiCss, ".ss-tipwrap.is-idle"), /display:\s*contents !important/);
+});
+
+test("禁用的控件不吃指针，悬停与按下落在包层上；复选框的 24 命中区挪到包层", () => {
+  assert.match(cssRule(uiCss, ".ss-tipwrap.is-explain > :disabled"), /pointer-events:\s*none/);
+  assert.match(
+    cssRule(uiCss, ".ss-tipwrap.is-explain:has(> .ss-checkbox)::before"),
+    /inset:\s*-6px/,
+  );
+  // 文字链的负外边距挪到包层上：包层与键同宽，版面不变
+  assert.match(cssRule(uiCss, ".ss-tipwrap.is-explain:has(> .ss-btn--link)"), /margin:\s*0 -6px/);
+  assert.match(cssRule(uiCss, ".ss-tipwrap.is-explain > .ss-btn--link"), /margin:\s*0/);
+});
+
+test("按下做不了的控件：当即弹出、不等延时，再按收起；钉出的停约 3 秒", () => {
+  const opt = { explain: true, yielded: false };
+  const pinned = nextTip(TIP_IDLE, "press", opt);
+  assert.deepEqual(pinned, { open: true, pinned: true, pressed: false });
+  // 再按一下：收起，移开再进来之前不再出
+  const closed = nextTip(pinned, "press", opt);
+  assert.equal(closed.open, false);
+  assert.equal(nextTip(closed, "delay", opt).open, false);
+  // 悬停已出的，按下是钉住，不是收起（用户报的：悬停出了、一点就没了）
+  const hovered = nextTip(TIP_IDLE, "delay", opt);
+  assert.equal(hovered.open, true);
+  assert.deepEqual(nextTip(hovered, "press", opt), { open: true, pinned: true, pressed: false });
+  // 停够了收起，同样移开前不再出；移开复位
+  const expired = nextTip(pinned, "expire", opt);
+  assert.equal(expired.open, false);
+  assert.equal(nextTip(expired, "delay", opt).open, false);
+  assert.equal(nextTip(nextTip(expired, "leave", opt), "delay", opt).open, true);
+  // 与格子同一个停留时长
+  assert.equal(PINNED_TIP_MS, 3000);
+});
+
+test("按下能点的控件：提示框即收起，移开再进来之前不再出", () => {
+  const opt = { explain: false, yielded: false };
+  const open = nextTip(TIP_IDLE, "delay", opt);
+  const pressed = nextTip(open, "press", opt);
+  assert.equal(pressed.open, false);
+  assert.equal(nextTip(pressed, "delay", opt).open, false);
+  assert.equal(nextTip(pressed, "press", opt).open, false);
+  assert.equal(nextTip(nextTip(pressed, "leave", opt), "delay", opt).open, true);
+});
+
+test("嵌套：里层是禁用原因时外层让位，同时只出一个", () => {
+  // 外层（「重启生效」的说明、「打开：…」）被里层占住：悬停到点、按下都不出，已开的收起
+  const opt = { explain: false, yielded: true };
+  assert.equal(nextTip(TIP_IDLE, "delay", opt).open, false);
+  assert.equal(nextTip(TIP_IDLE, "press", opt).open, false);
+  const outerOpen = nextTip(TIP_IDLE, "delay", { explain: false, yielded: false });
+  assert.equal(nextTip(outerOpen, "yield", { explain: false, yielded: true }).open, false);
+  // 结构：外层包层里是禁用开关自带的原因包层；外层的 aria-describedby 转到 <button> 上
+  const html = render(Tooltip, {
+    content: "打开：选好的模型进 Codex 的模型列表",
+    children: createElement(Switch, {
+      checked: false,
+      onChange: noop,
+      label: "x",
+      disabledReason: "正在处理上一步",
+    }),
+  });
+  const outerId = html.match(/id="([^"]+)" role="tooltip" class="[^"]*">打开/)?.[1];
+  assert.ok(outerId);
+  assert.match(html, /^<span class="ss-tipwrap"><span class="ss-tipwrap is-explain" tabindex="0"/);
+  assert.match(html, new RegExp(`<button [^>]*aria-describedby="${outerId}"[^>]*disabled=""`));
+  assert.equal(html.match(/role="tooltip"/g)?.length, 2);
 });
 
 test("Spinner：地球绕太阳，太阳大地球小、画一圈细轨道、必带读屏文本；14 / 24 两档", () => {

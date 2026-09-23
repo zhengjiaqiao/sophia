@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ReasonTip } from "./Tooltip.tsx";
 
 /// 开关（DESIGN「开关」「控件有行程」）：一个**当场生效**的布尔状态，对象就是它所在的那一行。
 /// 开关旁边不写「已启用」——它自己就是状态。不需要确认。
@@ -19,8 +20,13 @@ export interface SwitchProps {
   label: string;
   /// 悬停说明（「只管以后新出现的，现有的不变」）
   title?: string;
-  /// 给了就禁用，并作为悬停说明
+  /// 给了就禁用。原因提示框悬停出、**按下当即出**（DESIGN「所有点了做不了的控件，按下当即说明原因」：
+  /// 它是开关，用户一定会去点）；外面再包的提示框（「打开：…」）禁用期间让给它
   disabledReason?: string;
+  /// 禁用原因提示框的优先方向（默认上方）
+  tipPlacement?: "top" | "bottom";
+  /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
+  "aria-describedby"?: string;
 }
 
 export function Switch({
@@ -30,6 +36,8 @@ export function Switch({
   label,
   title,
   disabledReason,
+  tipPlacement,
+  "aria-describedby": describedBy,
 }: SwitchProps) {
   // 拨动后的那一次过冲动画：animationend 时清掉，免得重挂载时再播
   const [moved, setMoved] = useState(false);
@@ -39,25 +47,28 @@ export function Switch({
   if (moved) classes.push("is-moved");
 
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      className={classes.join(" ")}
-      title={disabled ? disabledReason : title}
-      disabled={disabled}
-      onClick={
-        disabled
-          ? undefined
-          : () => {
-              setMoved(true);
-              onChange(!checked);
-            }
-      }
-    >
-      <span className="ss-switch__knob" onAnimationEnd={() => setMoved(false)} />
-    </button>
+    <ReasonTip reason={disabledReason} placement={tipPlacement}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        aria-describedby={describedBy}
+        className={classes.join(" ")}
+        title={disabled ? disabledReason : title}
+        disabled={disabled}
+        onClick={
+          disabled
+            ? undefined
+            : () => {
+                setMoved(true);
+                onChange(!checked);
+              }
+        }
+      >
+        <span className="ss-switch__knob" onAnimationEnd={() => setMoved(false)} />
+      </button>
+    </ReasonTip>
   );
 }
 
@@ -67,7 +78,7 @@ export interface CheckboxProps {
   onChange?: (next: boolean) => void;
   /// 读屏名，**必填**：视觉上复选框挨着的名字常常不在同一个元素里
   label: string;
-  /// 给了就是「不可选」：`hairline` 描边，悬停说明原因（已添加的行）
+  /// 给了就是「不可选」：`hairline` 描边，原因提示框悬停出、按下当即出（已添加的行）
   disabledReason?: string;
 }
 
@@ -79,42 +90,44 @@ export function Checkbox({ checked, onChange, label, disabledReason }: CheckboxP
   if (checked === true) classes.push("is-on");
   if (checked === "mixed") classes.push("is-mixed");
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked === "mixed" ? "mixed" : checked}
-      aria-label={label}
-      className={classes.join(" ")}
-      title={disabledReason}
-      disabled={disabled}
-      onClick={disabled ? undefined : () => onChange?.(checked !== true)}
-    >
-      {checked === true ? (
-        <svg
-          width="8"
-          height="8"
-          viewBox="0 0 8 8"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          aria-hidden="true"
-        >
-          <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
-        </svg>
-      ) : null}
-      {checked === "mixed" ? (
-        <svg
-          width="8"
-          height="8"
-          viewBox="0 0 8 8"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          aria-hidden="true"
-        >
-          <path d="M1.5 4h5" />
-        </svg>
-      ) : null}
-    </button>
+    <ReasonTip reason={disabledReason}>
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={checked === "mixed" ? "mixed" : checked}
+        aria-label={label}
+        className={classes.join(" ")}
+        title={disabledReason}
+        disabled={disabled}
+        onClick={disabled ? undefined : () => onChange?.(checked !== true)}
+      >
+        {checked === true ? (
+          <svg
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            aria-hidden="true"
+          >
+            <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
+          </svg>
+        ) : null}
+        {checked === "mixed" ? (
+          <svg
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            aria-hidden="true"
+          >
+            <path d="M1.5 4h5" />
+          </svg>
+        ) : null}
+      </button>
+    </ReasonTip>
   );
 }

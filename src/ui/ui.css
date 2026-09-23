@@ -646,6 +646,38 @@
   display: inline-flex;
 }
 
+/* 此刻没有提示框（禁用原因撤了）：包层不占盒，控件原地不动。important：页面里
+   `.x > .ss-tipwrap { display: … }` 之类的规则不能把它撑回来 */
+.ss-tipwrap.is-idle {
+  display: contents !important;
+}
+
+/* 点了做不了的控件（DESIGN「所有点了做不了的控件，按下当即说明原因」）：原生禁用的控件
+   接不到指针，让它不吃指针，悬停和按下都落在包层上 */
+.ss-tipwrap.is-explain {
+  cursor: default;
+}
+
+.ss-tipwrap.is-explain > :disabled {
+  pointer-events: none;
+}
+
+/* 文字链命中区左右各伸 6（负外边距）：挪到包层上，包层的盒与键同宽，版面不变 */
+.ss-tipwrap.is-explain:has(> .ss-btn--link) {
+  margin: 0 -6px;
+}
+
+.ss-tipwrap.is-explain > .ss-btn--link {
+  margin: 0;
+}
+
+/* 复选框视觉 12、命中区 24：禁用时由包层撑命中区 */
+.ss-tipwrap.is-explain:has(> .ss-checkbox)::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+
 .ss-tip {
   position: absolute;
   z-index: 50;

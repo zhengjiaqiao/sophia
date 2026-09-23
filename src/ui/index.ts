@@ -24,8 +24,16 @@ export type { ChipProps, ModelChipProps } from "./Chip.tsx";
 export { Tag } from "./Tag.tsx";
 export type { TagProps } from "./Tag.tsx";
 
-export { Tooltip, TIP_DELAY_MS, tipCeiling } from "./Tooltip.tsx";
-export type { TooltipProps } from "./Tooltip.tsx";
+export {
+  Tooltip,
+  ReasonTip,
+  TIP_DELAY_MS,
+  PINNED_TIP_MS,
+  TIP_IDLE,
+  nextTip,
+  tipCeiling,
+} from "./Tooltip.tsx";
+export type { TipEvent, TipState, TooltipProps } from "./Tooltip.tsx";
 
 export { Spinner } from "./Spinner.tsx";
 export type { SpinnerProps } from "./Spinner.tsx";

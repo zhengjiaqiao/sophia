@@ -132,6 +132,15 @@ test("Matrix：选择态——第一行 已选 N 个 + 所有 agent + 每个 age
     html,
     /class="ss-dot-btn mx-agentitem is-disabled" aria-label="选中的都加到 Codex：这几个都写不进"/,
   );
+  // 禁用项点了做不了：按下当即说明原因（explain 包层），能点的项按下即收起（普通包层）
+  assert.match(
+    html,
+    /<span class="ss-tipwrap is-explain"><button type="button" class="ss-dot-btn mx-agentitem is-disabled"/,
+  );
+  assert.match(
+    html,
+    /<span class="ss-tipwrap"><button type="button" class="ss-dot-btn mx-agentitem" aria-label="选中的都从 Claude Code 移除"/,
+  );
   assert.match(html, /取消选择/);
   // 列头复选框属于已退役的行为：列头回到只有图标、名字、计数
   assert.doesNotMatch(html, /mx-colcheck|选中的都加到 Claude Code/);

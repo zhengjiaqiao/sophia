@@ -26,6 +26,7 @@ import {
   IconCannot,
   IconClose,
   IconSearch,
+  PINNED_TIP_MS,
   Spinner,
   StateDot,
   TIP_DELAY_MS,
@@ -40,8 +41,8 @@ const CHECK_W = 34;
 const NAME_W = 246;
 const COL_W = 88;
 const TAIL_W = 24;
-/// 点了做不了的格子后，说明停留的时长
-export const PINNED_TIP_MS = 3000;
+/// 点了做不了的格子后，说明停留的时长：与禁用控件按下钉出的提示框同一个（ui/Tooltip）
+export { PINNED_TIP_MS };
 /// 批量写入超过这么久还没完成，触发项旁才出忙碌指示 + 一句；更快的什么都不显示
 export const BATCH_BUSY_DELAY_MS = 500;
 
@@ -314,7 +315,8 @@ function AgentItem({
     </button>
   );
   return (
-    <Tooltip content={check.disabledReason ?? check.tip} placement="bottom">
+    // 禁用的项点了做不了：按下当即说明原因（同禁用的键），不是按下即收起
+    <Tooltip content={check.disabledReason ?? check.tip} placement="bottom" explain={disabled}>
       {button}
     </Tooltip>
   );

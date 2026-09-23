@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ReasonTip } from "./Tooltip.tsx";
 
 /// 按钮（DESIGN「Components › 按钮」「控件有行程」，画板 States 的「控件四态」）。
 ///
@@ -16,6 +17,10 @@ import type { ReactNode } from "react";
 /// focus 外 2px 处 1px 环。全部在 ui.css，时长 120ms 机械缓动。
 ///
 /// 破坏性不涂红：分量由信息和按钮文案承担（`删到废纸篓`，不写「确定」）。
+///
+/// 禁用（给了 `disabledReason`）：自带原因提示框，悬停出、**按下（点击、空格、回车）当即出**
+/// （DESIGN「所有点了做不了的控件，按下当即说明原因」），页面不必再包一层。
+/// 外面再包的提示框（「重启生效」的说明）在禁用期间让给原因，同时只出一个。
 
 export type ButtonVariant = "primary" | "default" | "link" | "external";
 export type ButtonSize = "regular" | "compact" | "row";
@@ -29,6 +34,8 @@ interface ButtonBase {
   icon?: ReactNode;
   /// 放在实心黑面上：默认键变白描边键、文字链变 `ink-faint`
   onDark?: boolean;
+  /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
+  "aria-describedby"?: string;
 }
 
 /// 禁用必须同时给出原因（DESIGN：禁用必须同时给 title 说明原因，类型上强制）
@@ -76,6 +83,7 @@ export function Button(props: ButtonProps) {
     onDark,
     disabled,
     disabledReason,
+    "aria-describedby": describedBy,
   } = props;
 
   const classes = ["ss-btn"];
@@ -88,19 +96,22 @@ export function Button(props: ButtonProps) {
   if (icon && children === undefined) classes.push("ss-btn--icon");
 
   return (
-    <button
-      type="button"
-      className={classes.join(" ")}
-      // 禁用时把原因挂在 title 上，鼠标停住就知道为什么按不动
-      title={disabled ? disabledReason : title}
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onClick={disabled ? undefined : onClick}
-    >
-      {icon ? <span className="ss-btn__icon">{icon}</span> : null}
-      {variant === "external" ? <span className="ss-btn__text">{children}</span> : children}
-      {variant === "external" ? <ExternalArrow /> : null}
-    </button>
+    <ReasonTip reason={disabled ? disabledReason : undefined}>
+      <button
+        type="button"
+        className={classes.join(" ")}
+        // 禁用原因同时挂在 title 上，作 aria 兜底
+        title={disabled ? disabledReason : title}
+        aria-label={ariaLabel}
+        aria-describedby={describedBy}
+        disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+      >
+        {icon ? <span className="ss-btn__icon">{icon}</span> : null}
+        {variant === "external" ? <span className="ss-btn__text">{children}</span> : children}
+        {variant === "external" ? <ExternalArrow /> : null}
+      </button>
+    </ReasonTip>
   );
 }
 
@@ -111,27 +122,42 @@ export interface IconButtonProps {
   title: string;
   onClick?: () => void;
   onDark?: boolean;
-  /// 给了就禁用，并作为悬停说明（禁用必带原因）
+  /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
   disabledReason?: string;
+  /// 禁用原因提示框的优先方向（默认上方）
+  tipPlacement?: "top" | "bottom";
+  /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
+  "aria-describedby"?: string;
 }
 
 /// 图标按钮（DESIGN「图标按钮」）：16px 图形、1.4 描边、28×28 命中区、无描边无底，
 /// 悬停 `surface` 底 2px 圆角。顶栏的设置齿轮、提示条与侧栏的 × 都是它
-export function IconButton({ icon, title, onClick, onDark, disabledReason }: IconButtonProps) {
+export function IconButton({
+  icon,
+  title,
+  onClick,
+  onDark,
+  disabledReason,
+  tipPlacement,
+  "aria-describedby": describedBy,
+}: IconButtonProps) {
   const classes = ["ss-iconbtn"];
   if (onDark) classes.push("is-on-dark");
   const disabled = Boolean(disabledReason);
   return (
-    <button
-      type="button"
-      className={classes.join(" ")}
-      title={disabled ? disabledReason : title}
-      aria-label={title}
-      disabled={disabled}
-      onClick={disabled ? undefined : onClick}
-    >
-      <span className="ss-iconbtn__glyph">{icon}</span>
-    </button>
+    <ReasonTip reason={disabledReason} placement={tipPlacement}>
+      <button
+        type="button"
+        className={classes.join(" ")}
+        title={disabled ? disabledReason : title}
+        aria-label={title}
+        aria-describedby={describedBy}
+        disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+      >
+        <span className="ss-iconbtn__glyph">{icon}</span>
+      </button>
+    </ReasonTip>
   );
 }
 
@@ -142,7 +168,7 @@ export interface AddButtonProps {
   /// 默认「添加 <noun>」
   title?: string;
   size?: "regular" | "compact";
-  /// 给了就禁用，并作为悬停说明（禁用必带原因）
+  /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
   disabledReason?: string;
 }
 
@@ -174,16 +200,18 @@ export function AddButton({
   if (size === "compact") classes.push("ss-btn--compact");
   const disabled = Boolean(disabledReason);
   return (
-    <button
-      type="button"
-      className={classes.join(" ")}
-      title={disabled ? disabledReason : (title ?? `添加 ${noun}`)}
-      aria-label={title ?? `添加 ${noun}`}
-      disabled={disabled}
-      onClick={disabled ? undefined : onClick}
-    >
-      {plus}
-      {noun}
-    </button>
+    <ReasonTip reason={disabledReason}>
+      <button
+        type="button"
+        className={classes.join(" ")}
+        title={disabled ? disabledReason : (title ?? `添加 ${noun}`)}
+        aria-label={title ?? `添加 ${noun}`}
+        disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+      >
+        {plus}
+        {noun}
+      </button>
+    </ReasonTip>
   );
 }
