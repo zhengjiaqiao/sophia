@@ -12,6 +12,7 @@ import { IconArrowLeft } from "./icons.tsx";
 /// **盖住主视图**：二级页挂到 `document.body` 上（portal），不留在主视图的 DOM 里——
 /// 否则主视图里吸顶的工具行、列头（带正 z-index）会叠到二级页上面。打开期间主视图的根节点
 /// `#root` 加 `inert`：读屏和 Tab 键都进不去（`holdInert`，多个二级页叠开时按引用计数）。
+/// **叠开**（来源管理页里再进添加来源页）：下面那一页同样 inert，Esc 只归最上面那一页。
 
 export interface SubPageProps {
   /// 页面名，原样写（专名不再需要 <Plain> 包：这一档本来就不大写）
@@ -92,18 +93,28 @@ export function holdInert(target: InertTarget): () => void {
 
 export function SubPage({ title, onBack, aside, className, children }: SubPageProps) {
   // Esc 等同返回
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  // Esc 等同返回；叠开时只归最上面那一页（后挂上的在 body 里排在后面）
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onBack();
+      if (event.key !== "Escape") return;
+      const pages = document.querySelectorAll(".ss-subpage");
+      if (pageRef.current && pages[pages.length - 1] !== pageRef.current) return;
+      onBack();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onBack]);
 
-  // 打开期间主视图 inert：读屏与 Tab 键都进不去
+  // 打开期间主视图（和叠在下面的二级页）inert：读屏与 Tab 键都进不去
   useEffect(() => {
     const root = document.getElementById("root");
-    return root ? holdInert(root) : undefined;
+    const below = Array.from(document.querySelectorAll<HTMLElement>(".ss-subpage")).filter(
+      (el) => el !== pageRef.current,
+    );
+    const releases = [...(root ? [root] : []), ...below].map((el) => holdInert(el));
+    return () => releases.forEach((release) => release());
   }, []);
 
   // 打开：焦点移到页标题；返回：焦点回到触发它的那颗按钮（它被重挂过就按读屏名 / 文字认回）
@@ -135,7 +146,7 @@ export function SubPage({ title, onBack, aside, className, children }: SubPagePr
   }, []);
 
   const page = (
-    <div className={className ? `ss-subpage ${className}` : "ss-subpage"}>
+    <div ref={pageRef} className={className ? `ss-subpage ${className}` : "ss-subpage"}>
       <div className="ss-subpage__bar" data-tauri-drag-region>
         <IconButton icon={<IconArrowLeft />} title="返回" onClick={onBack} />
         <div className="ss-subpage__title" tabIndex={-1} ref={titleRef}>
