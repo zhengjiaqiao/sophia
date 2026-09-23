@@ -561,13 +561,20 @@ export default function Matrix(props: MatrixProps) {
   }, [barH, width, columns.length]);
 
   // ---- 吸顶的列头高度、面板右侧余量 ----
+  // 工具行的高度不只随窗口变：切位置后来源片从两行变一行、选择条出现或折行，都会改高度。
+  // 只在 resize 时量，列头就停在旧高度上，行从工具行和列头之间的缝里漏出来（产品负责人真机）
   useLayoutEffect(() => {
-    const measure = () => {
-      if (barRef.current) setBarH(barRef.current.offsetHeight);
-    };
+    const bar = barRef.current;
+    if (!bar) return;
+    const measure = () => setBarH(bar.offsetHeight);
     measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
   }, [width, columns.length]);
 
   // ---- 单格例行一行放不下：先在名称格里排一次，超出名称格右沿（减去 12 右内边距）就改为跨列盖住
