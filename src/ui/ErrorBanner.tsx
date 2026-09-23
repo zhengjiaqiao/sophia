@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Button, IconButton } from "./Button.tsx";
 import { IconAttention, IconClose } from "./icons.tsx";
+import { Spinner } from "./Spinner.tsx";
 
 /// 错误横幅（DESIGN「反馈：四个地方会说话」，画板 Feedback「错误横幅」）：应用级故障，
 /// 顶栏之下通栏**实心黑显示窗**，不自动消失。左侧 40px 指示窗放 `!`，与提示条同一写法。
@@ -57,18 +58,25 @@ export interface BlackNoticeProps {
   action?: BlackNoticeAction;
   /// 可选的文字链（`稍后`），黑面上 `ink-faint`
   link?: { label: string; onClick: () => void };
+  /// 正在执行：键的位置换成忙碌指示 + 这一句（`正在接管`），不再出键与文字链
+  busy?: string;
 }
 
 /// 行内黑窗（画板 Models / Tray「待重启」）：挂在某一行下面、内容宽、高 32 的实心黑块，
 /// `!` + 一句 + 白描边键 + 可选文字链
-export function BlackNotice({ message, action, link }: BlackNoticeProps) {
+export function BlackNotice({ message, action, link, busy }: BlackNoticeProps) {
   return (
     <div className="ss-blacknotice" role="status">
       <span className="ss-blacknotice__mark" title="要你动手" role="img" aria-label="要你动手">
         <IconAttention />
       </span>
       <span className="ss-blacknotice__message">{message}</span>
-      {action || link ? (
+      {busy ? (
+        <span className="ss-blacknotice__actions">
+          <Spinner size={14} label={busy} />
+          <span>{busy}</span>
+        </span>
+      ) : action || link ? (
         <span className="ss-blacknotice__actions">
           {action ? (
             action.disabledReason ? (

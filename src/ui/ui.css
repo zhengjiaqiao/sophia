@@ -971,6 +971,11 @@
   margin-left: 2px;
 }
 
+/* 正在执行：键的位置换成忙碌指示，黑面上的地球与太阳用 canvas */
+.ss-blacknotice__actions .ss-spinner {
+  color: var(--canvas);
+}
+
 /* ===== 9. 确认弹窗 Confirm：白板 460，12 圆角（dialog）+ 浮层阴影 layer，无黑框；黑 18% 遮罩，触发行留在罩上 ===== */
 .ss-confirm-layer {
   position: fixed;

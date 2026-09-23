@@ -99,6 +99,15 @@
   grid-column: 1 / -1;
 }
 
+/* 行内待办条（接管 / 重新写入）同样挂在整行下面，左对齐 agent 格；两条上下排，间距 8 */
+.models-row__todos {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  grid-column: 1 / -1;
+}
+
 /* ===== 重启生效那一格 ===== */
 .models-restart {
   display: inline-flex;

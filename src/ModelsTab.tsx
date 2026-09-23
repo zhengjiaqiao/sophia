@@ -14,6 +14,7 @@ import {
   effectiveModels,
   emptyEffectiveText,
   enableDisabledReason,
+  modelIssues,
   parseBackendError,
   routerUnavailable,
   shouldPollRestart,
@@ -32,6 +33,7 @@ import type {
 } from "./types.ts";
 import {
   AgentIcon,
+  BlackNotice,
   Button,
   Confirm,
   ErrorBanner,
@@ -68,8 +70,9 @@ import "./ModelsTab.css";
 ///
 /// 模型页不分项目、不分域，壳在这一页不渲染侧栏（`MODELS_TAB_FULL_BLEED`）。
 ///
-/// 模型的待处理（接管、配置被外部改过、网关连不上）不在这一页就地出现，进顶栏收件箱
-/// （`modelsView.modelIssues`）。
+/// 要你拿主意的两件事挂在 Codex 行下，是行内待办条（`BlackNotice`）：正由 agents-manager 管理 → `接管`，
+/// Sophia 写进去的设置被改掉了 → `重新写入`。判断照 `modelsView.modelIssues`；不给「稍后」，
+/// 问题解决自动消失；执行时键换成忙碌指示。网关连不上在网关页那一家就地显示。
 
 /// 模型页不分项目、不分域，左边那条侧栏对它没有意义。App.tsx 用这个常量做条件
 export const MODELS_TAB_FULL_BLEED = true;
@@ -139,6 +142,8 @@ export interface AgentRowProps {
   onRestart: (row: HTMLElement) => void;
   notice?: RowNoticeState | null;
   onCloseNotice?: () => void;
+  /// 挂在整行下面的行内待办条（接管 / 重新写入）
+  todos?: ReactNode;
   /// 生效模型那一格
   models: ReactNode;
   /// 停用后服务仍在时的 `卸下后台服务`（按钮即状态）；正在卸下时原位忙碌指示 + 文字
@@ -156,6 +161,7 @@ export function AgentRow({
   onRestart,
   notice,
   onCloseNotice,
+  todos,
   models,
   uninstalling = false,
   onUninstall,
@@ -229,6 +235,7 @@ export function AgentRow({
         ) : null}
       </div>
       <div className="models-row__models">{models}</div>
+      {todos ? <div className="models-row__todos">{todos}</div> : null}
       {notice ? (
         <div className="models-row__notice">
           <Toast
@@ -481,6 +488,8 @@ export default function ModelsTab({
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
   const [notice, setNotice] = useState<RowNoticeState | null>(null);
+  /// 行内待办条正在执行的那一条（接管 / 重新写入）：它的键换成忙碌指示
+  const [resolving, setResolving] = useState<"takeover" | "rewrite" | null>(null);
   /// 启动时的自愈试过了没有：试过仍没起来才出页级横幅
   const [healed, setHealed] = useState(false);
   const [routerFailure, setRouterFailure] = useState<string | null>(null);
@@ -721,6 +730,16 @@ export default function ModelsTab({
     return () => clearTimeout(timer);
   }, [flashProvider]);
 
+  /// 行内待办条的动作：接管 / 重新写入。做成了用返回的状态刷新，条随问题一起消失；
+  /// 做不成走同一个行下黑块说原因
+  const resolveTodo = async (kind: "takeover" | "rewrite") => {
+    setResolving(kind);
+    await run(kind === "takeover" ? "没接管" : "没写入", () =>
+      kind === "takeover" ? api.gatewayTakeover() : api.gatewayEnable(),
+    );
+    if (mounted.current) setResolving(null);
+  };
+
   const restartRouter = async () => {
     onBusy(true);
     try {
@@ -797,6 +816,36 @@ export default function ModelsTab({
               }}
               notice={notice}
               onCloseNotice={() => setNotice(null)}
+              todos={(() => {
+                const todos = modelIssues(state, tool).flatMap((issue) =>
+                  issue.action.kind === "takeover" || issue.action.kind === "rewrite"
+                    ? [{ key: issue.key, kind: issue.action.kind }]
+                    : [],
+                );
+                if (todos.length === 0) return undefined;
+                return todos.map(({ key, kind }) => (
+                  <BlackNotice
+                    key={key}
+                    message={
+                      kind === "takeover"
+                        ? `${tool.name} 正由 agents-manager 管理`
+                        : "Sophia 写进去的设置被改掉了"
+                    }
+                    busy={
+                      resolving === kind
+                        ? kind === "takeover"
+                          ? "正在接管"
+                          : "正在重新写入"
+                        : undefined
+                    }
+                    action={{
+                      label: kind === "takeover" ? "接管" : "重新写入",
+                      onClick: () => void resolveTodo(kind),
+                      disabledReason: busy ? "正在处理上一步" : undefined,
+                    }}
+                  />
+                ));
+              })()}
               models={
                 <ModelBox
                   tool={tool}
