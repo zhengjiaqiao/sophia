@@ -11,6 +11,7 @@ import Matrix, {
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty } from "./DomainView";
 import SourcesPage from "./pages/SourcesPage";
+import { mcpLocationName } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
 import { pathsOfKey } from "./issues";
@@ -98,12 +99,10 @@ const columnNames = (targets: McpLocation[]): Map<string, string> => {
   return out;
 };
 
-/// 组名（「来源」列）：定义所在的位置名，去掉 `MCPs` 这类泛称；全局位置补上 `User`（画板 Mcp「Claude Code · User」）
-const groupLabel = (l: McpLocation | undefined, id: string): string => {
-  if (!l) return id;
-  const label = l.label.replace(/ MCPs$/, "");
-  return l.domain === "global" && !label.includes(" · ") ? `${label} · User` : label;
-};
+/// 组名（「来源」列与筛选片）：定义所在的位置名，与 MCP 来源页同一个写法（`mcpLocationName`：
+/// `Claude Code · User`、`Codex · Project`）
+const groupLabel = (l: McpLocation | undefined, id: string): string =>
+  l ? mcpLocationName(l) : id;
 
 /// 来源管理页的位置名：全局 / 项目文件夹名（`CardBox 的 MCP 来源`）；WeiboAP agent 沿用侧栏的名字
 const placeName = (page: McpDomain): string =>
