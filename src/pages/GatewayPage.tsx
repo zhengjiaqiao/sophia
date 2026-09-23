@@ -144,6 +144,9 @@ export interface GatewayBodyProps {
   onCollapse: () => void;
   /// 新问题提示「查看」定位的那一家：它的分段片用 surface 带闪两下
   flashProviderId?: string | null;
+  /// 勾选没写成：就在「从这个网关选模型」这一段里说（灰面板，原因写全、可关），不必回模型页才看到
+  notice?: { message: string; reason: string } | null;
+  onCloseNotice?: () => void;
 }
 
 /// 删网关的确认：删的是哪一家、锚在哪（垃圾桶所在的那一行）
@@ -177,6 +180,8 @@ export function GatewayBody({
   askDiscard,
   onCollapse,
   flashProviderId,
+  notice,
+  onCloseNotice,
 }: GatewayBodyProps) {
   const first = state.providers[0]?.id ?? "new";
   const [selected, setSelected] = useState<GatewaySelection>(initial ?? first);
@@ -476,6 +481,15 @@ export function GatewayBody({
                     onRemove={busy ? undefined : () => onToggleModel(current, model.id)}
                   />
                 ))}
+              </div>
+            ) : null}
+            {notice ? (
+              <div className="gw-panel__notice">
+                <NoticePanel
+                  message={notice.message}
+                  reason={notice.reason}
+                  onClose={onCloseNotice}
+                />
               </div>
             ) : null}
             <div className="gw-panel__list">

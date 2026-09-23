@@ -1024,6 +1024,8 @@ export default function ModelsTab({
           onRemove={(p) => runOrThrow(() => api.gatewayRemoveProvider(p.id))}
           onToggleModel={toggleModel}
           flashProviderId={flashProvider}
+          notice={notice}
+          onCloseNotice={() => setNotice(null)}
         />
       ) : null}
 

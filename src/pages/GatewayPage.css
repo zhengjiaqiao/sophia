@@ -210,6 +210,11 @@
 }
 
 /* 模型勾选列表框：8 圆角（layer），平铺在页面里所以只有 hairline 边、没有阴影 */
+/* 勾选没写成的灰面板：夹在模型片与列表之间 */
+.gw-panel__notice {
+  margin-top: var(--space-xs);
+}
+
 .gw-panel__list {
   margin-top: var(--space-xs);
   overflow: hidden;
