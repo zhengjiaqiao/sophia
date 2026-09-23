@@ -62,13 +62,15 @@ export interface NoticePanelProps {
   /// 正在执行：键的位置换成忙碌指示 + 这一句（`正在接管`），不再出键与文字链
   busy?: string;
   /// 原因（`端口 47328 被别的程序占着`）：跟在主句后同一行写出（`ink-mute`），不藏进悬停——
-  /// 原因决定下一步怎么做（端口被占时重启多半还会失败）
+  /// 原因决定下一步怎么做（端口被占时重启多半还会失败）。写全、放不下就折行，不截断
   reason?: string;
+  /// 可关的才给右端 ×（行下失败原因可关；接管 / 重新写入这类待办不可关，问题解决自动消失）
+  onClose?: () => void;
 }
 
 /// 行内待办条（DESIGN「提示条分两档 › 需要注意 · 大面积」，front-matter `row-notice`）：挂在某一行下面、
-/// 内容宽的 `surface` 灰面板（8 圆角、无边无影），墨色 `!` + 一句 + 默认描边紧凑键 + 可选文字链
-export function NoticePanel({ message, action, link, busy, reason }: NoticePanelProps) {
+/// 内容宽的 `surface` 灰面板（8 圆角、无边无影），墨色 `!` + 一句 + 默认描边紧凑键 + 可选文字链 + 可选 ×
+export function NoticePanel({ message, action, link, busy, reason, onClose }: NoticePanelProps) {
   return (
     <div className="ss-noticepanel" role="status">
       <span className="ss-noticepanel__mark" title="要你动手" role="img" aria-label="要你动手">
@@ -101,6 +103,11 @@ export function NoticePanel({ message, action, link, busy, reason }: NoticePanel
               {link.label}
             </Button>
           ) : null}
+        </span>
+      ) : null}
+      {onClose ? (
+        <span className="ss-noticepanel__close">
+          <IconButton icon={<IconClose />} title="关闭" onClick={onClose} />
         </span>
       ) : null}
     </div>

@@ -692,6 +692,27 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认描边键 + 可选文
   assert.match(render(NoticePanel, { message: "x", busy: "正在接管" }), /正在接管/);
 });
 
+test("NoticePanel 行下失败：原因写全、可折行，给了 onClose 才有右端 ×", () => {
+  const reason = "已启用时至少要保留一个模型；如需全部移除请先恢复";
+  const html = render(NoticePanel, {
+    message: "没重启 Codex",
+    reason,
+    action: { label: "再试一次", onClick: noop },
+    onClose: noop,
+  });
+  assert.match(
+    html,
+    new RegExp(`没重启 Codex<span class="ss-noticepanel__reason"> · ${reason}</span>`),
+  );
+  assert.match(html, /再试一次<\/button>[^]*class="ss-noticepanel__close"[^]*aria-label="关闭"/);
+  // 原因折行、不截断：不省略号、不 nowrap
+  const reasonRule = cssRule(uiCss, ".ss-noticepanel__reason");
+  assert.match(reasonRule, /white-space:\s*normal/);
+  assert.doesNotMatch(reasonRule, /ellipsis|overflow:\s*hidden/);
+  // 待办条（不可关）没有 ×
+  assert.doesNotMatch(render(NoticePanel, { message: "x" }), /关闭/);
+});
+
 // ===== 确认弹窗 =====
 
 test("Confirm：白板 460 + 1px 墨线描边，canvas 80% 遮罩；主动作反色、取消是文字链", () => {

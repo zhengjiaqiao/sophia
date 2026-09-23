@@ -963,9 +963,16 @@
   white-space: nowrap;
 }
 
-/* 原因跟在主句后，灰字同一行：决定下一步的信息不藏进悬停 */
+/* 原因跟在主句后，灰字同一行：决定下一步的信息不藏进悬停；写全，放不下就折行（不截断） */
 .ss-noticepanel__reason {
   color: var(--ink-mute);
+  white-space: normal;
+}
+
+.ss-noticepanel__close {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: -6px;
 }
 
 .ss-noticepanel__actions {
@@ -988,7 +995,8 @@
 
 .ss-banner .ss-btn:not(.ss-btn--link):hover:not(:disabled),
 .ss-noticepanel .ss-btn:not(.ss-btn--link):hover:not(:disabled),
-.ss-banner .ss-iconbtn:hover:not(:disabled) {
+.ss-banner .ss-iconbtn:hover:not(:disabled),
+.ss-noticepanel .ss-iconbtn:hover:not(:disabled) {
   background: var(--hairline);
 }
 
