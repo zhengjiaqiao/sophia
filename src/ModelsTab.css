@@ -73,6 +73,15 @@
 }
 
 /* agent 格：图标 + 名字 + 开关 + 配置网关 + [重启生效]，一组，间距 12 */
+/* 开关包层：禁用的开关不吃指针，悬停落到包层上，提示框才出得来 */
+.models-row__switch {
+  display: inline-flex;
+}
+
+.models-row__switch .ss-switch:disabled {
+  pointer-events: none;
+}
+
 .models-row__agent {
   display: flex;
   flex-wrap: wrap;
