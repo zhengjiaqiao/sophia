@@ -12,6 +12,11 @@
 }
 
 /* ---- 顶部：`选择文件夹…`（高 32）+ 右侧灰字 ---- */
+/* 键与它的做不成浮窗的锚点（选的文件夹加不进来时，浮窗出在键下方、左对齐键） */
+.add-src__pickbtn {
+  display: inline-flex;
+}
+
 .add-src__pick {
   display: flex;
   align-items: center;

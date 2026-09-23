@@ -14,7 +14,6 @@ import {
   useBusyShown,
 } from "../ui";
 import { edgeFades } from "../modelsView";
-import { displayPath } from "../pathText";
 import { CheckMark } from "./CheckMark.tsx";
 import {
   NOTHING_CHECKED,
@@ -121,6 +120,15 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     key: number;
     toast: NonNullable<ReturnType<typeof addFailureToast>>;
   } | null>(null);
+  /// 选的文件夹加不进来（没有 skill、已经在来源里、读不到）：不进列表，浮在 `选择文件夹…` 下方说原因
+  /// （DESIGN「反馈的两种形态」：做不成＝浮起黑窗，锚在按下的控件上；列表里只放能加的来源）
+  const [pickNotice, setPickNotice] = useState<{
+    key: number;
+    name: string;
+    reason: string;
+  } | null>(null);
+  /// 正在读选好的文件夹：忙碌在 `选择文件夹…` 原位（0.3 秒门槛），不在列表里先插一行占位
+  const [reading, setReading] = useState(false);
   const rowEls = useRef(new Map<string, HTMLDivElement>());
   const alive = useRef(true);
   useEffect(() => {
@@ -201,9 +209,10 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
       return;
     }
     dropPicked();
-    const base = { ref: path, name: folderName(path), sub: displayPath(path) };
-    setPicked({ status: "loading", ...base });
-    setReveal({ ref: path, top: true });
+    setPickNotice(null);
+    const name = folderName(path);
+    const cannot = (reason: string) => setPickNotice({ key: Date.now(), name, reason });
+    setReading(true);
     try {
       const entry = await model.previewFolder(path, data?.rows ?? []);
       if (!alive.current) return;
@@ -217,10 +226,18 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
       }
       const already = (data?.rows ?? []).some((r) => r.id === entry.id);
       const next: PickedState = { status: "ready", entry, already };
+      const blocked = pickedBlocked(next, domain);
+      if (blocked !== null) {
+        cannot(blocked);
+        return;
+      }
       setPicked(next);
-      if (pickedBlocked(next, domain) === null) setCheck(entry.ref, true);
+      setCheck(entry.ref, true);
+      setReveal({ ref: entry.ref, top: true });
     } catch (e) {
-      if (alive.current) setPicked({ status: "failed", ...base, reason: String(e) });
+      if (alive.current) cannot(`读不到这个文件夹：${String(e)}`);
+    } finally {
+      if (alive.current) setReading(false);
     }
   };
 
@@ -409,9 +426,30 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     <div className="add-src">
       {model.canPickFolder ? (
         <div className="add-src__pick">
-          <Button size="row" onClick={() => void pickFolder()}>
-            选择文件夹…
-          </Button>
+          <span className="add-src__pickbtn">
+            {reading ? (
+              <BusySlot busy label="正在读文件夹">
+                <Button size="row">选择文件夹…</Button>
+              </BusySlot>
+            ) : (
+              <Button size="row" onClick={() => void pickFolder()}>
+                选择文件夹…
+              </Button>
+            )}
+            {pickNotice ? (
+              <FloatingToast key={pickNotice.key} align="start">
+                <Toast
+                  tier="notice"
+                  kind="cannot"
+                  verb="没加进来"
+                  names={[pickNotice.name]}
+                  reason={pickNotice.reason}
+                  onDismiss={() => setPickNotice(null)}
+                  onClose={() => setPickNotice(null)}
+                />
+              </FloatingToast>
+            ) : null}
+          </span>
           <span className="add-src__hint">{PICK_HINT}</span>
         </div>
       ) : null}
