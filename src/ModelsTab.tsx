@@ -794,6 +794,18 @@ export default function ModelsTab({
     if (model) setModel(provider.id, id, !model.selected);
   };
 
+  /// 开关与勾选同一套（DESIGN「勾选不闪」）：先拨过去，后台排队写，不锁页；失败回滚并在行下说。
+  /// 实测启用一次约 0.25 秒（装服务、等路由就绪、写配置、读回状态），等它回来再拨就是一下停顿
+  const toggleGateway = (tool: ModelsTool, next: boolean) => {
+    const current = shown.current;
+    if (!current) return;
+    writer.write(
+      `${next ? "没打开" : "没关掉"} ${tool.name} 的第三方模型`,
+      { ...current, enabled: next },
+      () => (next ? api.gatewayEnable() : api.gatewayRestore()),
+    );
+  };
+
   const removeModel = (provider: GatewayProvider, model: GatewayProviderModel) =>
     setModel(provider.id, model.id, false);
 
@@ -903,11 +915,7 @@ export default function ModelsTab({
               state={state}
               busy={busy}
               phase={phase}
-              onToggle={(next) =>
-                void run(`${next ? "没打开" : "没关掉"} ${tool.name} 的第三方模型`, () =>
-                  next ? api.gatewayEnable() : api.gatewayRestore(),
-                )
-              }
+              onToggle={(next) => toggleGateway(tool, next)}
               onConfigure={() => openGateway(null)}
               onRestart={(row) => {
                 const r = row.getBoundingClientRect();
