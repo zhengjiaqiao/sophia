@@ -849,7 +849,6 @@ test("ModelList：超过 8 行出筛选框；新模型各闪一次；行尾 id �
   });
   const html = render(ModelList, {
     entries,
-    busy: false,
     onToggle: noop,
     flashKeys: ["g|azure/m3"],
   });
@@ -1099,9 +1098,15 @@ test("拆不出服务商时组头用网关短名（与分段片、行尾一致�
 
 test("ModelList 不再有已选置顶组：已选只由上方模型片表达，每行只在服务商分组里出现一次", () => {
   const seven = Array.from({ length: 9 }, (_, i) => pe(`azure/m${i}`, i < 7));
-  const html = render(ModelList, { entries: seven, busy: false, onToggle: noop });
+  const html = render(ModelList, { entries: seven, onToggle: noop });
   assert.doesNotMatch(html, /model-list__group--pinned|>已选<|model-list__more/);
   assert.equal((html.match(/role="option"/g) ?? []).length, 9);
+});
+
+test("ModelList 不整体变暗：不再有 busy 能加上的 ss-busy（DESIGN「忙碌」只锁触发它的那个控件，不把整页/整块变暗）", () => {
+  const entries = [pe("azure/a", true), pe("azure/b", false)];
+  const html = render(ModelList, { entries, onToggle: noop });
+  assert.doesNotMatch(html, /ss-busy/);
 });
 
 test("模型页表宽 = 324 + 24 + 框 + 24：框随内容区弹性 360–640（CSS 实现），行线止于框右沿 + 24", async () => {
@@ -1187,7 +1192,7 @@ test("行尾网关短名：entries 跨 ≥2 个网关才写，id 在前、网关
   ];
   assert.equal(showGatewayNames(two), true);
   assert.equal(showGatewayNames(two.slice(0, 1)), false);
-  const html = render(ModelList, { entries: two, busy: false, onToggle: noop });
+  const html = render(ModelList, { entries: two, onToggle: noop });
   // 已选组已删，每行只在服务商分组里出现一次
   assert.equal((html.match(/models-option__gateway">openrouter</g) ?? []).length, 1);
   assert.match(html, /models-option__gateway">ap-gateway</);
@@ -1196,7 +1201,7 @@ test("行尾网关短名：entries 跨 ≥2 个网关才写，id 在前、网关
     /models-option__id">deepseek-chat<\/span><span class="models-option__gateway">openrouter</,
   );
   assert.match(html, /aria-label="gpt-4\.1，ap-gateway"/);
-  const one = render(ModelList, { entries: two.slice(1), busy: false, onToggle: noop });
+  const one = render(ModelList, { entries: two.slice(1), onToggle: noop });
   assert.doesNotMatch(one, /models-option__gateway/);
 });
 
@@ -1205,7 +1210,7 @@ test("模型列表：底部不再有「已选 N 个模型」；滚动区的容�
   const css = readFileSync(new URL("../src/ModelList.css", import.meta.url), "utf8");
   const rule = (sel: string) =>
     new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-  const html = render(ModelList, { entries: [pe("azure/a", true)], busy: false, onToggle: noop });
+  const html = render(ModelList, { entries: [pe("azure/a", true)], onToggle: noop });
   assert.doesNotMatch(html, /model-list__foot/);
   assert.doesNotMatch(css, /model-list__foot/);
   const viewport = rule(".model-list__viewport");

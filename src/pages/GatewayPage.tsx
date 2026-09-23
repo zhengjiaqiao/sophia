@@ -499,7 +499,6 @@ export function GatewayBody({
                 // 换一家网关就是「重新打开」这份列表：重排一次序
                 key={current.id}
                 entries={current.models.map((model) => ({ provider: current, model }))}
-                busy={busy}
                 onToggle={onToggleModel}
                 flashKeys={flashKeys}
               />

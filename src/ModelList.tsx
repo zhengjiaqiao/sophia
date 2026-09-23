@@ -21,7 +21,6 @@ import "./ModelList.css";
 export interface ModelListProps {
   /// 要列的模型：下拉是全部网关的全部模型，网关页只是本网关的
   entries: ModelEntry[];
-  busy: boolean;
   onToggle: (provider: GatewayProvider, modelId: string) => void;
   /// 筛选框与列表之间的一段（下拉里的「第三方」组头）
   header?: ReactNode;
@@ -41,7 +40,7 @@ export const entryKey = modelEntryKey;
  * 打开（挂载）时排一次序（组内已选在前），之后勾选 / 取消不挪位置，下次打开再重排。
  * 勾选当场写盘；超过约 8 行时出筛选框，列表在自身范围内滚动。
  */
-export function ModelList({ entries, busy, onToggle, header, flashKeys, empty }: ModelListProps) {
+export function ModelList({ entries, onToggle, header, flashKeys, empty }: ModelListProps) {
   const [query, setQuery] = useState("");
   /// 打开那一刻的排序：之后勾选只改状态、不挪位置
   const [snap] = useState(() => snapshotOrder(entries));
@@ -80,9 +79,7 @@ export function ModelList({ entries, busy, onToggle, header, flashKeys, empty }:
     const name = modelRowLabel(model);
     const gateway = gatewayNames ? gatewayShortName(provider) : null;
     const i = order++;
-    const toggle = () => {
-      if (!busy) onToggle(provider, model.id);
-    };
+    const toggle = () => onToggle(provider, model.id);
     // 行上不放提示框也不设 title：挑模型时完整 id 没有意义，还会盖住正在看的那一行（真机反馈）；
     // 读屏名只写名称，跨网关时补上来源网关（同名模型可能来自两家）
     return (
@@ -168,7 +165,7 @@ export function ModelList({ entries, busy, onToggle, header, flashKeys, empty }:
         >
           <div
             ref={scrollRef}
-            className={`model-list__scroll${busy ? " ss-busy" : ""}`}
+            className="model-list__scroll"
             role="listbox"
             aria-multiselectable="true"
           >

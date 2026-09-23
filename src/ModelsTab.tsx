@@ -449,7 +449,6 @@ export function ModelBox({
 export interface ModelPickerProps {
   tool: ModelsTool;
   state: GatewayState;
-  busy: boolean;
   onToggleModel: (provider: GatewayProvider, modelId: string) => void;
   /// `管理网关 ›` / `+ 网关 ›`：收起下拉，进网关二级页
   onManageGateways: () => void;
@@ -462,13 +461,7 @@ export interface ModelPickerProps {
  * 第三方组头 = `第三方` + 限制说明（只在挑模型时有用，① 放在这里，不截断）+ 末尾 `管理网关 ›`；
  * 没有网关时 `还没有网关 · + 网关 ›`。
  */
-export function ModelPicker({
-  tool,
-  state,
-  busy,
-  onToggleModel,
-  onManageGateways,
-}: ModelPickerProps) {
+export function ModelPicker({ tool, state, onToggleModel, onManageGateways }: ModelPickerProps) {
   const hasProviders = state.providers.length > 0;
   const entries = state.providers.flatMap((provider) =>
     provider.models.map((model) => ({ provider, model })),
@@ -497,7 +490,6 @@ export function ModelPicker({
       {hasProviders ? (
         <ModelList
           entries={entries}
-          busy={busy}
           onToggle={onToggleModel}
           header={header}
           empty="还没拉到模型——在网关里存好地址和密钥就会拉"
@@ -1003,7 +995,6 @@ export default function ModelsTab({
                     <ModelPicker
                       tool={tool}
                       state={state}
-                      busy={busy}
                       onToggleModel={toggleModel}
                       onManageGateways={() =>
                         openGateway(state.providers.length === 0 ? "new" : null)
