@@ -33,8 +33,8 @@ export type { SpinnerProps } from "./Spinner.tsx";
 export { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } from "./Toast.tsx";
 export type { ToastAction, ToastAgent, ToastKind, ToastProps } from "./Toast.tsx";
 
-export { ErrorBanner, BlackNotice } from "./ErrorBanner.tsx";
-export type { ErrorBannerProps, BlackNoticeAction, BlackNoticeProps } from "./ErrorBanner.tsx";
+export { ErrorBanner, NoticePanel } from "./ErrorBanner.tsx";
+export type { ErrorBannerProps, NoticePanelAction, NoticePanelProps } from "./ErrorBanner.tsx";
 
 export { Confirm } from "./Confirm.tsx";
 export type { ConfirmAnchor, ConfirmProps } from "./Confirm.tsx";

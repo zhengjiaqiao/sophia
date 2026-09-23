@@ -12,6 +12,11 @@
   min-height: 0;
 }
 
+/* 页级错误横幅：页边内的灰面板，左右对齐页边 32，与下面的面板隔 24（面板自己的上边距） */
+.models-page__banner {
+  padding: var(--space-xl) var(--space-xxl) 0;
+}
+
 .models-page__body {
   box-sizing: border-box;
   padding: var(--space-xl) var(--space-xxl) var(--space-huge);

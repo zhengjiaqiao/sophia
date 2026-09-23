@@ -258,13 +258,15 @@ input:focus-visible {
   border-top: 1px solid var(--hairline);
 }
 
-/* 应用级故障：内容区顶上通栏黑窗，不自动消失 */
+/* 应用级故障：内容区顶上、页边内的灰面板（DESIGN「提示条分两档」），左右对齐页边 32，不自动消失。
+   内容区上下内边距是 0，顶上的 24 由它自己给 */
 .content__banner {
-  margin: 0 calc(-1 * var(--space-xxl));
+  padding-top: var(--space-xl);
 }
 
+/* 模型页的内容区不出页边（页面自己出），横幅自己补上左右 32 */
 .content--bleed .content__banner {
-  margin: 0;
+  padding: var(--space-xl) var(--space-xxl) 0;
 }
 
 /* 无关位置的全局事（背后自动添加了 MCP、新问题的一次性提示）：右下，底 16；

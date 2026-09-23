@@ -30,7 +30,7 @@ const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TIP_DELAY_MS } = await import("../src/ui/Tooltip.tsx");
 const { Spinner } = await import("../src/ui/Spinner.tsx");
 const { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
-const { ErrorBanner, BlackNotice } = await import("../src/ui/ErrorBanner.tsx");
+const { ErrorBanner, NoticePanel } = await import("../src/ui/ErrorBanner.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
 const { SubPage, holdInert, pickTrigger, triggerKey } = await import("../src/ui/SubPage.tsx");
 const { Cap, capRuns } = await import("../src/ui/Cap.tsx");
@@ -56,7 +56,7 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "Spinner",
     "Toast",
     "ErrorBanner",
-    "BlackNotice",
+    "NoticePanel",
     "Confirm",
     "SubPage",
     "Cap",
@@ -639,9 +639,9 @@ test("Toast 单格例行一行：约 4 秒（比批量的 6 秒短），悬停�
   assert.match(reduced, /\.ss-toast\.is-leaving \{\s*transition: none;/);
 });
 
-// ===== 错误横幅与行内黑窗 =====
+// ===== 错误横幅与行内待办条：大面积的提示用 surface 灰面板，不用黑 =====
 
-test("ErrorBanner：通栏实心黑 + 40px 指示窗 !，不自动消失；可带白描边键与 ×", () => {
+test("ErrorBanner：surface 灰面板 + 墨色 !，不自动消失；默认描边键（canvas 底）与 ×", () => {
   const html = render(ErrorBanner, {
     message: "读不到网关列表",
     detail: "配置文件没有读权限",
@@ -649,28 +649,44 @@ test("ErrorBanner：通栏实心黑 + 40px 指示窗 !，不自动消失；可�
     onClose: noop,
   });
   assert.match(html, /class="ss-banner" role="alert"/);
-  assert.match(html, /class="ss-banner__indicator" title="故障" role="img" aria-label="故障"/);
+  assert.match(html, /class="ss-banner__mark" title="故障" role="img" aria-label="故障"/);
   assert.match(html, /class="ss-banner__detail">配置文件没有读权限</);
-  assert.match(html, /class="ss-btn ss-btn--compact is-on-dark">再试一次</);
+  assert.match(html, /class="ss-btn ss-btn--compact">再试一次</);
   assert.match(html, /aria-label="关闭"/);
-  assert.match(cssRule(uiCss, ".ss-banner"), /background:\s*var\(--ink\)/);
+  assert.doesNotMatch(html, /is-on-dark/);
+  const rule = cssRule(uiCss, ".ss-banner");
+  assert.match(rule, /background:\s*var\(--surface\)/);
+  assert.match(rule, /color:\s*var\(--ink\)/);
+  assert.match(rule, /border-radius:\s*var\(--radius-layer\)/);
+  assert.doesNotMatch(rule, /(^|\s)border:|box-shadow/);
+  assert.match(cssRule(uiCss, ".ss-banner__detail"), /color:\s*var\(--ink-mute\)/);
   // 页级「路由没在跑」不可关
   assert.doesNotMatch(render(ErrorBanner, { message: "路由没在跑" }), /关闭/);
 });
 
-test("BlackNotice：! + 一句 + 白描边键 + 可选文字链，替代白底线框的 RowNotice", () => {
-  const html = render(BlackNotice, {
+test("NoticePanel：surface 灰面板，! + 一句 + 默认描边键 + 可选文字链；忙碌指示用墨色", () => {
+  const html = render(NoticePanel, {
     message: "改动要重启 Codex 才生效",
     action: { label: "重启", onClick: noop },
     link: { label: "稍后", onClick: noop },
   });
-  assert.match(html, /class="ss-blacknotice"/);
+  assert.match(html, /class="ss-noticepanel"/);
   assert.match(html, /aria-label="要你动手"/);
-  assert.match(html, /class="ss-btn ss-btn--compact is-on-dark">重启</);
-  assert.match(html, /class="ss-btn ss-btn--link is-on-dark">稍后</);
-  const rule = cssRule(uiCss, ".ss-blacknotice");
-  assert.match(rule, /background:\s*var\(--ink\)/);
-  assert.match(rule, /min-height:\s*var\(--control-h-row\)/);
+  assert.match(html, /class="ss-btn ss-btn--compact">重启</);
+  assert.match(html, /class="ss-btn ss-btn--link">稍后</);
+  assert.doesNotMatch(html, /is-on-dark/);
+  const rule = cssRule(uiCss, ".ss-noticepanel");
+  assert.match(rule, /background:\s*var\(--surface\)/);
+  assert.match(rule, /color:\s*var\(--ink\)/);
+  assert.match(rule, /border-radius:\s*var\(--radius-layer\)/);
+  assert.doesNotMatch(rule, /(^|\s)border:|box-shadow/);
+  // 灰面上的键是 canvas 底；忙碌指示不再被改成 canvas（沿用 Spinner 自己的墨色）
+  assert.match(
+    cssRule(uiCss, ".ss-noticepanel .ss-btn:not(.ss-btn--link)"),
+    /background:\s*var\(--canvas\)/,
+  );
+  assert.doesNotMatch(uiCss, /ss-noticepanel[^{]*\.ss-spinner/);
+  assert.match(render(NoticePanel, { message: "x", busy: "正在接管" }), /正在接管/);
 });
 
 // ===== 确认弹窗 =====
@@ -1038,12 +1054,12 @@ test("Confirm align=end：触发控件在行尾时对话框右沿对齐触发行
   assert.match(start, /left:min\(32px, calc\(100vw - 476px\)\)/);
 });
 
-test("提示框：6 圆角 + 浮层阴影 tip；平铺的横幅仍是直角、无阴影", () => {
+test("提示框：6 圆角 + 浮层阴影 tip；平铺在页面流里的横幅不浮起、无阴影", () => {
   const tip = cssRule(uiCss, ".ss-tip");
   assert.match(tip, /border-radius:\s*var\(--radius-control\)/);
   assert.match(tip, /box-shadow:\s*var\(--elev-tip\)/);
   const banner = cssRule(uiCss, ".ss-banner");
-  assert.doesNotMatch(banner, /border-radius|box-shadow/);
+  assert.doesNotMatch(banner, /box-shadow/);
 });
 
 test("阴影只有两个 token：src 里凡是 box-shadow 都是 var(--elev-layer) / var(--elev-tip) / none", async () => {

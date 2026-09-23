@@ -14,7 +14,7 @@ import {
 import type { ModelsTool } from "../modelsView.ts";
 import type { GatewayProvider, GatewayState } from "../types.ts";
 import {
-  BlackNotice,
+  NoticePanel,
   Button,
   Chip,
   Confirm,
@@ -438,7 +438,7 @@ export function GatewayBody({
 
         {error !== null ? (
           <div className="gw-panel__error">
-            <BlackNotice message={error} />
+            <NoticePanel message={error} />
           </div>
         ) : null}
 
@@ -663,7 +663,7 @@ function GatewayForm({
       </div>
       {error !== null ? (
         <div className="gw-form__error">
-          <BlackNotice message={error} />
+          <NoticePanel message={error} />
         </div>
       ) : null}
       {/* 只读事实：端口与协议不做成可改 */}

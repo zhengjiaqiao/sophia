@@ -21,9 +21,7 @@
 }
 
 .is-on-dark:focus-visible,
-.ss-toast--notice .ss-btn:focus-visible,
-.ss-banner .ss-btn:focus-visible,
-.ss-blacknotice .ss-btn:focus-visible {
+.ss-toast--notice .ss-btn:focus-visible {
   outline-color: var(--canvas);
 }
 
@@ -880,39 +878,43 @@
   border-top: 1px solid var(--ink-mute);
 }
 
-/* ===== 8. 错误横幅 ErrorBanner：通栏实心黑，左侧 40px 指示窗 ===== */
+/* ===== 8. 错误横幅 ErrorBanner：内容区页边内的 surface 灰面板（DESIGN「提示条分两档 › 需要注意 · 大面积」） =====
+   大面积不用黑：surface 实底、layer 8 圆角、无边无影；在页面流里，不浮起。 */
 .ss-banner {
   display: flex;
+  align-items: center;
+  gap: var(--space-sm);
   box-sizing: border-box;
   width: 100%;
-  background: var(--ink);
-  color: var(--canvas);
+  padding: 12px 16px;
+  border-radius: var(--radius-layer);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
 }
 
-.ss-banner__indicator {
-  display: flex;
+.ss-banner__mark {
+  display: inline-flex;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  border-right: 1px solid var(--ink-mute);
 }
 
 .ss-banner__body {
   display: flex;
   flex-grow: 1;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
   min-width: 0;
-  min-height: 44px;
-  box-sizing: border-box;
-  padding: 8px 6px 8px 12px;
+}
+
+/* 文字占满中段，键与 × 落在右端 */
+.ss-banner__text {
+  flex-grow: 1;
+  min-width: 0;
 }
 
 .ss-banner__message {
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
 }
 
 .ss-banner__message b {
@@ -920,56 +922,64 @@
 }
 
 .ss-banner__detail {
-  font-size: var(--size-micro);
+  font-size: var(--size-caption);
   line-height: var(--leading-caption);
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
 .ss-banner__close {
   display: inline-flex;
-  margin-left: auto;
+  margin-right: -6px;
 }
 
-/* ===== 8.1 行内黑窗 BlackNotice：内容宽、高 32 ===== */
-.ss-blacknotice {
+/* ===== 8.1 行内待办条 NoticePanel：内容宽的 surface 灰面板 ===== */
+.ss-noticepanel {
   display: inline-flex;
   align-self: flex-start;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-xs);
   box-sizing: border-box;
-  min-height: var(--control-h-row);
-  padding: 0 10px;
+  padding: 8px 12px;
   /* 提示条一档 8 圆角；它在页面流里（挂在某一行下面），不浮起，所以没有阴影 */
   border-radius: var(--radius-layer);
-  background: var(--ink);
-  color: var(--canvas);
+  background: var(--surface);
+  color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   line-height: var(--leading-caption);
 }
 
-.ss-blacknotice__mark {
+.ss-noticepanel__mark {
   display: inline-flex;
+  flex-shrink: 0;
 }
 
-.ss-blacknotice__message {
+.ss-noticepanel__message {
   white-space: nowrap;
 }
 
-.ss-blacknotice__actions {
+.ss-noticepanel__actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-left: 8px;
+  gap: var(--space-xs);
+  margin-left: var(--space-xs);
+  color: var(--ink-mute);
 }
 
-.ss-blacknotice__actions .ss-btn--link {
+.ss-noticepanel__actions .ss-btn--link {
   margin-left: 2px;
 }
 
-/* 正在执行：键的位置换成忙碌指示，黑面上的地球与太阳用 canvas */
-.ss-blacknotice__actions .ss-spinner {
-  color: var(--canvas);
+/* 灰面板上的键：canvas 底才读得出是一颗键；默认键悬停的 surface 在这里看不见，退到 hairline（「可点的面」按下那一档） */
+.ss-banner .ss-btn:not(.ss-btn--link),
+.ss-noticepanel .ss-btn:not(.ss-btn--link) {
+  background: var(--canvas);
+}
+
+.ss-banner .ss-btn:not(.ss-btn--link):hover:not(:disabled),
+.ss-noticepanel .ss-btn:not(.ss-btn--link):hover:not(:disabled),
+.ss-banner .ss-iconbtn:hover:not(:disabled) {
+  background: var(--hairline);
 }
 
 /* ===== 9. 确认弹窗 Confirm：白板 460，12 圆角（dialog）+ 浮层阴影 layer，无黑框；黑 18% 遮罩，触发行留在罩上 ===== */

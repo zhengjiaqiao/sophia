@@ -6,7 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { GatewayState, HarnessList, HarnessStatus } from "../types";
 import { parseBackendError, serviceLeftover } from "../modelsView.ts";
-import { AgentIcon, BlackNotice, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
+import { AgentIcon, NoticePanel, Button, Empty, Spinner, SubPage, Tooltip } from "../ui";
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import "./SettingsPage.css";
@@ -39,7 +39,7 @@ const UNCHECK_NOTE_MS = 4000;
 /// 发布页：`检查更新 ↗` 去这里（离开 Sophia 的文字链）
 const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
 
-/// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内黑窗：
+/// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内待办条（灰面板）：
 /// 有新版、装好了等重开、没装上。查的过程和下载的过程都不要用户决定什么。
 type UpdateState =
   | { kind: "quiet" }
@@ -133,7 +133,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         );
       case "ready":
         return (
-          <BlackNotice
+          <NoticePanel
             message={
               <>
                 Sophia <span className="settings-page__version">{update.update.version}</span>{" "}
@@ -146,7 +146,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         );
       case "installed":
         return (
-          <BlackNotice
+          <NoticePanel
             message={
               <>
                 <span className="settings-page__version">{update.version}</span>{" "}
@@ -159,7 +159,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
         );
       case "failed":
         return (
-          <BlackNotice
+          <NoticePanel
             message={`${update.version} 没装上：${update.reason}`}
             action={{
               label: "再试一次",
@@ -233,7 +233,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   };
 
   /// `检查更新 ↗`：去发布页。打不开网页（权限没放行、没有浏览器）就退回在应用里查一次，
-  /// 查到新版照常出黑窗——用户要的是「有没有新版」，不是那个网页本身
+  /// 查到新版照常出待办条——用户要的是「有没有新版」，不是那个网页本身
   const checkUpdate = async () => {
     try {
       await openUrl(RELEASES_URL);
@@ -379,7 +379,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
             </div>
             {uninstallError !== null ? (
               <div className="settings-page__update">
-                <BlackNotice message={`没卸下：${uninstallError}`} />
+                <NoticePanel message={`没卸下：${uninstallError}`} />
               </div>
             ) : null}
           </>

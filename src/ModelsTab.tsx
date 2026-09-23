@@ -33,7 +33,7 @@ import type {
 } from "./types.ts";
 import {
   AgentIcon,
-  BlackNotice,
+  NoticePanel,
   Button,
   Confirm,
   ErrorBanner,
@@ -70,7 +70,7 @@ import "./ModelsTab.css";
 ///
 /// 模型页不分项目、不分域，壳在这一页不渲染侧栏（`MODELS_TAB_FULL_BLEED`）。
 ///
-/// 要你拿主意的两件事挂在 Codex 行下，是行内待办条（`BlackNotice`）：正由 agents-manager 管理 → `接管`，
+/// 要你拿主意的两件事挂在 Codex 行下，是行内待办条（`NoticePanel`，灰面板）：正由 agents-manager 管理 → `接管`，
 /// Sophia 写进去的设置被改掉了 → `重新写入`。判断照 `modelsView.modelIssues`；不给「稍后」，
 /// 问题解决自动消失；执行时键换成忙碌指示。网关连不上在网关页那一家就地显示。
 
@@ -784,11 +784,13 @@ export default function ModelsTab({
   return (
     <section className="models-page">
       {showRouterBanner(state, healed) ? (
-        <ErrorBanner
-          message="路由没在跑，第三方模型用不了"
-          detail={routerFailure ?? undefined}
-          action={{ label: "重启路由", onClick: () => void restartRouter() }}
-        />
+        <div className="models-page__banner">
+          <ErrorBanner
+            message="路由没在跑，第三方模型用不了"
+            detail={routerFailure ?? undefined}
+            action={{ label: "重启路由", onClick: () => void restartRouter() }}
+          />
+        </div>
       ) : null}
 
       <div className="models-page__body">
@@ -824,7 +826,7 @@ export default function ModelsTab({
                 );
                 if (todos.length === 0) return undefined;
                 return todos.map(({ key, kind }) => (
-                  <BlackNotice
+                  <NoticePanel
                     key={key}
                     message={
                       kind === "takeover"
