@@ -631,14 +631,11 @@
   }
 }
 
-/* 刚变化的格子闪的是**目标状态**：闪烁那 120ms 里不画悬停预览——否则鼠标还停在格上，
-   刚开启的格会被预览成淡到 40% 的点、刚关掉的格环内会出 40% 实心，都不是目标状态 */
-.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-preview] {
-  opacity: 1;
-}
-
-.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-preview] .ss-dot__preview {
+/* 刚变化的格子闪的是实心黑底上的目标状态：闪烁那 120ms 里不出悬停光晕——鼠标还停在格上时，
+   黑底上会冒出一圈浅灰 */
+.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-hoverable] .ss-dot__halo {
   opacity: 0;
+  transition: none;
 }
 
 /* 从待处理页跳回：surface 行带闪两次（不用反色——实心黑只有「机器在说话 / 已按下」两个意思）。

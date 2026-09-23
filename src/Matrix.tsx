@@ -267,8 +267,8 @@ export function RevealLink({ path, onReveal }: { path: string; onReveal: () => v
   );
 }
 
-/// 工具行里按 agent 的一项：10px 状态点（● / ○）+ 正文名字，无图标无框。悬停预览点下去之后的样子
-/// （与格子同一套 preview），提示框列受影响的名字；禁用时点和字都用 disabled 色、提示框写原因。
+/// 工具行里按 agent 的一项：10px 状态点（● / ○）+ 正文名字，无图标无框。悬停时点不变、只出光晕
+/// （与格子同一套 hoverable），提示框列受影响的名字；禁用时点和字都用 disabled 色、提示框写原因。
 /// 名字放不下时截断，完整名在提示框里（提示框第一句就带着 agent 名）
 function AgentItem({
   check,
@@ -291,7 +291,7 @@ function AgentItem({
     >
       <StateDot
         dot={check.checked ? "linked" : "missing"}
-        preview={!disabled}
+        hoverable={!disabled}
         muted={disabled}
         title=""
         label={check.checked ? "已加上" : "未加上"}
@@ -1065,7 +1065,7 @@ export default function Matrix(props: MatrixProps) {
                   >
                     <StateDot
                       dot={view.dot}
-                      preview={view.clickable && !view.pending}
+                      hoverable={view.clickable && !view.pending}
                       muted={view.pending}
                       title=""
                       label={DOT_TEXT[view.dot]}
