@@ -4,6 +4,12 @@ import { api } from "../api";
 import type { McpLocation, McpReport, SyncReport, Target } from "../types";
 import type { ToastProps } from "../ui";
 import {
+  NO_SKILL_CANDIDATES,
+  addSourceTitle,
+  sameNameItems,
+  type CandidateEntry,
+} from "./addSourceView.ts";
+import {
   candidateGroups,
   duplicateNames,
   mcpCandidateGroups,
@@ -62,10 +68,10 @@ export interface TargetOption {
   disabledReason?: string;
 }
 
-/// `+ 来源` 浮层的一组
+/// 添加来源页 `建议的来源` 的一组
 export interface CandidateGroup {
   title: string;
-  items: { ref: string; name: string; sub: string; title?: string }[];
+  items: CandidateEntry[];
 }
 
 export interface SourcesData {
@@ -76,6 +82,8 @@ export interface SourcesData {
 export interface SourcesModel {
   /// 页名：`CardBox 的来源` / `CardBox 的 MCP 来源`
   title: string;
+  /// 添加来源页的页名：`添加来源到「CardBox」` / `添加 MCP 来源到「CardBox」`
+  addTitle: string;
   emptyText: string;
   /// 数量单位与开关的无障碍名里用：skill / MCP
   noun: string;
@@ -92,9 +100,9 @@ export interface SourcesModel {
   emptyItems: string;
   /// 自己的来源 × 禁用的原因
   ownRemoveReason: string;
-  /// `+ 来源` 里有没有「选择文件夹…」
+  /// 添加来源页里有没有「选择文件夹…」
   canPickFolder: boolean;
-  /// `+ 来源` 一个候选都没有时写的（有「选择文件夹…」时不用）
+  /// 添加来源页没有建议的来源时，`建议的来源` 下写的
   noCandidates: string;
   /// 记住上次目标用的 key
   memoryKey: (rowId: string) => string;
@@ -106,6 +114,9 @@ export interface SourcesModel {
   subscribe: (ref: string) => Promise<void>;
   /// 选择文件夹：返回选中的路径，取消为 null
   pickFolder: () => Promise<string | null>;
+  /// 选好的文件夹订阅之前的只读预览；`rows` 是已订阅的来源（标 `同名` 用）。
+  /// `id` 是 core 认出的来源 id：与已订阅的某行相同＝已经在这里了
+  previewFolder: (path: string, rows: SourceRow[]) => Promise<CandidateEntry & { id: string }>;
   /// 把规则的目标从 `prev` 改成 `next`；`next` 为空＝关掉
   setTargets: (row: SourceRow, next: string[], prev: string[]) => Promise<void>;
   /// 移除前的清单：确认框正文，以及确认后要执行的那一步（返回提示条内容，不含名字）
@@ -131,6 +142,7 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
   const open = targets.filter((t) => t.linkedWholeTo === null);
   return {
     title: sourcesTitle(domain),
+    addTitle: addSourceTitle(domain, "skill"),
     emptyText: noSourcesText(domain),
     noun: "skill",
     ruleOn: "自动加到",
@@ -141,12 +153,13 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
     emptyItems: "文件夹里现在没有 skill",
     ownRemoveReason: ownRemoveReason(domain),
     canPickFolder: true,
-    noCandidates: "",
+    noCandidates: NO_SKILL_CANDIDATES,
     memoryKey: (id) => `skill|${domain.key}|${id}`,
     load: async () => {
       const list = await api.listSources(domain.key);
       const dups = duplicateNames(list.subscribed);
       const names = sourceNames(list.subscribed);
+      const taken = list.subscribed.map((s) => s.skills);
       return {
         rows: list.subscribed.map((s) => ({
           id: s.id,
@@ -168,7 +181,14 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
         })),
         groups: candidateGroups(list).map((g) => ({
           title: g.title,
-          items: g.items.map((i) => ({ ref: i.path, name: i.name, sub: i.sub, title: i.path })),
+          items: g.items.map((i) => ({
+            ref: i.path,
+            name: i.name,
+            sub: i.sub,
+            title: i.path,
+            count: i.skills.length,
+            items: sameNameItems(i.skills, taken),
+          })),
         })),
       };
     },
@@ -185,6 +205,21 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
     pickable: () => open.map((t) => t.id),
     subscribe: (ref) => api.subscribeSource(domain.key, ref),
     pickFolder: () => api.pickDirectory("选择放着 skill 的文件夹"),
+    previewFolder: async (path, rows) => {
+      const s = await api.previewSourceFolder(path);
+      return {
+        id: s.id,
+        ref: path,
+        name: s.label,
+        sub: s.shortPath,
+        title: s.path,
+        count: s.skills.length,
+        items: sameNameItems(
+          s.skills,
+          rows.map((r) => r.items.map((i) => i.name)),
+        ),
+      };
+    },
     setTargets: async (row, next, prev) => {
       if (next.length === 0) {
         await api.removeAutoLinkTargets(
@@ -228,6 +263,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
   };
   return {
     title: mcpSourcesTitle(domain),
+    addTitle: addSourceTitle(domain, "mcp"),
     emptyText: noMcpSourcesText(domain),
     noun: "MCP",
     ruleOn: "自动写进",
@@ -267,7 +303,17 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
         }),
         groups: mcpCandidateGroups(list).map((g) => ({
           title: g.title,
-          items: g.items.map((i) => ({ ref: i.id, name: i.name, sub: i.sub })),
+          items: g.items.map((i) => ({
+            ref: i.id,
+            name: i.name,
+            sub: i.sub,
+            count: i.services.length,
+            items: i.services.map((x) => ({
+              name: x.name,
+              tag: x.portable ? undefined : { text: "搬不过去", tip: stuckTip(x.name, i.name) },
+              dim: !x.portable,
+            })),
+          })),
         })),
       };
     },
@@ -282,6 +328,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
       locations.filter((l) => l.matrixHidden !== true && l.id !== row.id).map((l) => l.id),
     subscribe: (ref) => api.subscribeMcpSource(domain.key, ref),
     pickFolder: async () => null,
+    previewFolder: () => Promise.reject(new Error("MCP 来源不从文件夹添加")),
     setTargets: (row, next) =>
       next.length === 0
         ? api.removeMcpAutoImport(row.ruleRef, domain.key)

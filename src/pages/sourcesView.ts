@@ -1,5 +1,5 @@
 /// 来源管理页（DESIGN「来源管理页」）的纯逻辑：页名、行上的两行字、同名、移除的提示与确认造句、
-/// `+ 来源` 浮层的分组。不碰 api、不产 JSX。
+/// 添加来源页的候选分组。不碰 api、不产 JSX。
 import type {
   CandidateSource,
   McpCandidateSource,
@@ -108,7 +108,7 @@ export function removeConfirmBody(links: RemovalLink[]): string {
   return parts.length > 0 ? parts.join("；") : "它的 skill 会从列表里拿掉，没有软链要撤";
 }
 
-/// `+ 来源` 浮层里的一项
+/// 添加来源页 `建议的来源` 里的一行
 export interface CandidateItem {
   /// 订阅时传给 core 的路径
   path: string;
@@ -116,6 +116,8 @@ export interface CandidateItem {
   name: string;
   /// 第二行灰字：`weibo_assistant 在用`；检测到的写短路径
   sub: string;
+  /// 行里外露 / 展开的：它的全部 skill 名（按名排序）
+  skills: string[];
 }
 
 export interface CandidateGroup {
@@ -123,7 +125,7 @@ export interface CandidateGroup {
   items: CandidateItem[];
 }
 
-/// `+ 来源` 浮层的候选分组：`其他项目在用的`、`检测到的`；空的组不出现。
+/// 添加来源页 `建议的来源` 的分组：`其他项目在用的`、`检测到的`；空的组不出现。
 /// 候选名用同一个起名函数，按页面上的全部来源（已订阅的连同候选）成组：
 /// 已订阅了一个 WeiboAP 时，候选里的另一个也带上区分片段
 export function candidateGroups(
@@ -142,11 +144,17 @@ export function candidateGroups(
         path: c.path,
         name: candidateName(c),
         sub: `${c.usedIn.map((d) => d.label).join("、")} 在用`,
+        skills: c.skills,
       })),
     },
     {
       title: "检测到的",
-      items: list.detected.map((c) => ({ path: c.path, name: candidateName(c), sub: c.shortPath })),
+      items: list.detected.map((c) => ({
+        path: c.path,
+        name: candidateName(c),
+        sub: c.shortPath,
+        skills: c.skills,
+      })),
     },
   ];
   return groups.filter((g) => g.items.length > 0);
@@ -223,19 +231,26 @@ export function mcpRemoveConfirmBody(
   return `这 ${names.length} 个服务在 ${places.join("、")} 里的那份会拿掉：${listNames(names)}`;
 }
 
-/// `+ 来源` 浮层里的一项（MCP）：订阅时传位置 id
+/// 添加 MCP 来源页 `建议的来源` 里的一行：订阅时传位置 id
 export interface McpCandidateItem {
   id: string;
   name: string;
-  /// 第二行灰字：`CardBox 在用`；检测到的写它在哪与服务数
+  /// 第二行灰字：`CardBox 在用`；检测到的写它在哪
   sub: string;
+  /// 行里外露 / 展开的：它的全部服务
+  services: McpCandidateSource["services"];
 }
 
-/// `+ 来源` 浮层的候选分组：`其他项目在用的`、`检测到的`；空的组不出现
+/// 添加 MCP 来源页 `建议的来源` 的分组：`其他项目在用的`、`检测到的`；空的组不出现
 export function mcpCandidateGroups(
   list: Pick<McpSourceList, "elsewhere" | "detected">,
 ): { title: string; items: McpCandidateItem[] }[] {
-  const item = (c: McpCandidateSource, sub: string) => ({ id: c.id, name: c.label, sub });
+  const item = (c: McpCandidateSource, sub: string) => ({
+    id: c.id,
+    name: c.label,
+    sub,
+    services: c.services,
+  });
   return [
     {
       title: "其他项目在用的",
@@ -243,7 +258,8 @@ export function mcpCandidateGroups(
     },
     {
       title: "检测到的",
-      items: list.detected.map((c) => item(c, `${c.place} · ${c.services.length} 个 MCP`)),
+      // 服务数写在行右端，第二行只写在哪
+      items: list.detected.map((c) => item(c, c.place)),
     },
   ].filter((g) => g.items.length > 0);
 }

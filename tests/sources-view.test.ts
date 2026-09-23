@@ -153,7 +153,7 @@ test("移除确认正文：skill 与 agent 各自去重；一条都没有时照�
   assert.equal(removeConfirmBody([]), "它的 skill 会从列表里拿掉，没有软链要撤");
 });
 
-test("`+ 来源` 的分组：其他项目在用的写在哪用，检测到的写短路径；空组不出现", () => {
+test("添加来源弹窗的分组：其他项目在用的写在哪用，检测到的写短路径，带上 skill 给来源行外露；空组不出现", () => {
   const groups = candidateGroups({
     subscribed: [
       sub({ id: "/sa", path: `${WA}/agent_1776847465710_d5z6cowep/skills`, label: "WeiboAP" }),
@@ -170,7 +170,13 @@ test("`+ 来源` 的分组：其他项目在用的写在哪用，检测到的写
       }),
     ],
     detected: [
-      cand({ id: "/x/codex", path: "/x/codex", label: "Codex", shortPath: "~/.codex/skills" }),
+      cand({
+        id: "/x/codex",
+        path: "/x/codex",
+        label: "Codex",
+        shortPath: "~/.codex/skills",
+        skills: ["a", "b"],
+      }),
       // 已订阅了一个 WeiboAP：候选里的这个与它同名，带上区分片段
       cand({
         id: "/x/wa",
@@ -183,16 +189,24 @@ test("`+ 来源` 的分组：其他项目在用的写在哪用，检测到的写
   assert.deepEqual(groups, [
     {
       title: "其他项目在用的",
-      items: [{ path: "/w", name: "weibo_mini_program", sub: "weibo_assistant、docs-site 在用" }],
+      items: [
+        {
+          path: "/w",
+          name: "weibo_mini_program",
+          sub: "weibo_assistant、docs-site 在用",
+          skills: [],
+        },
+      ],
     },
     {
       title: "检测到的",
       items: [
-        { path: "/x/codex", name: "Codex", sub: "~/.codex/skills" },
+        { path: "/x/codex", name: "Codex", sub: "~/.codex/skills", skills: ["a", "b"] },
         {
           path: `${WA}/agent_1787890675056_m9ac9h594/skills`,
           name: "WeiboAP · 1787…",
           sub: "~/W/agent_1787890675056_m9ac9h594/skills",
+          skills: [],
         },
       ],
     },
@@ -281,7 +295,7 @@ test("MCP 移除：禁用原因、确认正文（服务与位置各自去重；�
   );
 });
 
-test("MCP `+ 来源` 的分组：其他项目在用的写在哪用，检测到的写在哪与服务数；空组不出现", () => {
+test("MCP 添加来源弹窗的分组：其他项目在用的写在哪用，检测到的写在哪（服务数在行右端），带上服务给来源行外露；空组不出现", () => {
   const groups = mcpCandidateGroups({
     elsewhere: [
       mcpCand({ id: "codex", label: "Codex · User", usedIn: [{ key: "p", label: "docs-site" }] }),
@@ -298,9 +312,19 @@ test("MCP `+ 来源` 的分组：其他项目在用的写在哪用，检测到�
   assert.deepEqual(groups, [
     {
       title: "其他项目在用的",
-      items: [{ id: "codex", name: "Codex · User", sub: "docs-site 在用" }],
+      items: [{ id: "codex", name: "Codex · User", sub: "docs-site 在用", services: [] }],
     },
-    { title: "检测到的", items: [{ id: "o", name: "Cursor · Project", sub: "other · 1 个 MCP" }] },
+    {
+      title: "检测到的",
+      items: [
+        {
+          id: "o",
+          name: "Cursor · Project",
+          sub: "other",
+          services: [{ name: "x", portable: true }],
+        },
+      ],
+    },
   ]);
   assert.deepEqual(mcpCandidateGroups({ elsewhere: [], detected: [] }), []);
 });

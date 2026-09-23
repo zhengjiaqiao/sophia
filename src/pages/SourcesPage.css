@@ -252,7 +252,7 @@
   color: var(--ink-faint);
 }
 
-/* 列表底部：`+ 来源` 与提示条同一行（提示锚在触发它的控件旁） */
+/* 列表底部：这一页的提示条（移除、改规则的结果） */
 .src-foot {
   display: flex;
   flex-wrap: wrap;
@@ -322,7 +322,7 @@
   flex-shrink: 0;
 }
 
-/* `+ 来源`：三组，组间 hairline，组头 12 ink-faint */
+/* 列表式小浮层（MCP 同名挑选）：一项两行，组头 12 ink-faint */
 .src-menu {
   display: flex;
   flex-direction: column;
@@ -372,21 +372,6 @@
   font-size: var(--size-micro);
   line-height: 1.4;
   color: var(--ink-faint);
-}
-
-.src-menu__sep {
-  height: 1px;
-  margin: var(--space-xxs) 0;
-  background: var(--hairline);
-}
-
-/* MCP 的 `+ 来源` 一个候选都没有时的一句 */
-.src-menu__none {
-  padding: 6px var(--space-md);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-faint);
-  white-space: nowrap;
 }
 
 .src-menu__head {

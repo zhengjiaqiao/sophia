@@ -149,7 +149,7 @@ export interface MatrixProps {
 
   filterText: string;
   onFilterText: (text: string) => void;
-  /// 工具行右端的 `来源`（skill）/ `+ MCP`，右沿对齐面板右沿
+  /// 工具行右端的 `管理来源` `+ 来源` 两个默认按钮，右沿对齐面板右沿
   addButton?: ReactNode;
 
   /// 选中的行键

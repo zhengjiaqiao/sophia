@@ -22,7 +22,15 @@ import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
-import { Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
+import {
+  AddButton,
+  Button,
+  DupMark,
+  Empty as UiEmpty,
+  IconPlus,
+  Tooltip,
+  type EmptyArt,
+} from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
@@ -68,8 +76,10 @@ export interface DomainViewProps {
   onOriginFilter: (sourceId: string | null) => void;
   /// 行悬停「打开 ↗」：在访达中显示原件
   onReveal: (path: string) => void;
-  /// 工具行右端 `来源`：进来源管理页
+  /// 工具行右端 `管理来源`：进来源管理页
   onSources: () => void;
+  /// 工具行 / 空态的 `+ 来源`：进添加来源页
+  onAddSource: () => void;
 
   selected: Set<string>;
   onSelectionChange: (next: Set<string>) => void;
@@ -373,8 +383,8 @@ export default function DomainView(props: DomainViewProps) {
   // ---- 空态：一句现状 + 一个动作（DESIGN「空态与忙碌态」） ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
   const query = props.filterText.trim();
-  // 空态里的动作同工具行：进来源管理页（管理入口，不带 `+`）
-  const addAction = { label: "来源", onClick: props.onSources };
+  // 空态：一个来源都没有，动作是 `+ 来源`（直接进添加来源页）
+  const addAction = { label: "来源", icon: <IconPlus size={12} />, onClick: props.onAddSource };
   const empty =
     query !== "" ? (
       <Empty
@@ -408,7 +418,12 @@ export default function DomainView(props: DomainViewProps) {
       nameCount={matrixRows.length}
       filterText={props.filterText}
       onFilterText={props.onFilterText}
-      addButton={<Button onClick={props.onSources}>来源</Button>}
+      addButton={
+        <>
+          <Button onClick={props.onSources}>管理来源</Button>
+          <AddButton noun="来源" onClick={props.onAddSource} />
+        </>
+      }
       selected={props.selected}
       onSelectionChange={props.onSelectionChange}
       allAgents={allAgents}

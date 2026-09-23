@@ -1,12 +1,4 @@
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Disclosure } from "../Matrix";
 import type { McpLocation, Target } from "../types";
@@ -29,6 +21,7 @@ import {
 import type { ConfirmAnchor } from "../ui";
 import { edgeFades } from "../modelsView";
 import { placeLayer, type LayerPlacement } from "../layerPlace";
+import { AddSourcePage } from "./AddSourcePage.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./importDefaults.ts";
 import { columnRows, removeConfirmTitle, removeTitle, type DomainRef } from "./sourcesView.ts";
@@ -54,8 +47,9 @@ import "./SourcesPage.css";
 ///   不补历史，所以开关都不确认；打开时的目标：这个来源上次用的，没有上次就可选的前两个
 /// - **×**＝从这个位置移除：先取清单，再出锚定确认写明会撤掉的（skill 的软链、MCP 写进来的那几份）；
 ///   这个位置自己的来源不能移除，× 禁用并说原因
-/// - 列表底部 `+ 来源`：小浮层——选择文件夹…（只有 skill）、其他项目在用的、检测到的；点一项就加进来
-/// - 反馈（DESIGN「反馈」）：二级页自己渲染提示条，贴在 `+ 来源` 那一行；成功是例行一行，做不成走黑窗
+/// - 页头右端 `+ 来源`（跟随列表的话列表长了就找不到）：推入添加来源页（`AddSourcePage`，
+///   与主视图工具行的 `+ 来源` 同一页）；加好后滑回这一页，新来源已在列表里，不另出提示
+/// - 反馈（DESIGN「反馈」）：二级页自己渲染提示条，接在列表下方；成功是例行一行，做不成走黑窗
 
 export type SourcesPageProps = {
   /// 这个位置：key（`global` / `project:<路径>`）与显示名（`全局` / `CardBox`）
@@ -76,9 +70,8 @@ export type SourcesPageProps = {
     }
 );
 
-/// 打开着的小浮层：`+ 来源`，或某一行的目标
-type Layer =
-  { kind: "add"; trigger: HTMLElement } | { kind: "targets"; id: string; trigger: HTMLElement };
+/// 打开着的小浮层：某一行的目标
+type Layer = { kind: "targets"; id: string; trigger: HTMLElement };
 
 interface PendingRemove {
   row: SourceRow;
@@ -86,13 +79,6 @@ interface PendingRemove {
   commit: () => Promise<ToastText>;
   anchor: ConfirmAnchor;
 }
-
-/// 文件夹名：选完文件夹后提示条里写它
-const folderName = (path: string) =>
-  path
-    .split(/[/\\]+/)
-    .filter(Boolean)
-    .pop() ?? path;
 
 export default function SourcesPage(props: SourcesPageProps) {
   const { domain, onClose, onChange } = props;
@@ -114,6 +100,8 @@ export default function SourcesPage(props: SourcesPageProps) {
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [layer, setLayer] = useState<Layer | null>(null);
+  /// 添加来源页（页头 / 空态的 `+ 来源`）开着没有
+  const [adding, setAdding] = useState(false);
   const [pending, setPending] = useState<PendingRemove | null>(null);
   const [toast, setToast] = useState<{ key: number; text: ToastText } | null>(null);
   /// 刚拨过的开关 / 刚改过的目标：重读回来之前先按点下去的样子画（开关不回弹）。值是目标 id，空＝关
@@ -128,8 +116,6 @@ export default function SourcesPage(props: SourcesPageProps) {
     if (trigger) setLayer({ kind: "targets", id: openTargetsOf, trigger });
     setOpenTargetsOf(null);
   }, [openTargetsOf]);
-  const addWrap = useRef<HTMLSpanElement>(null);
-  const emptyWrap = useRef<HTMLDivElement>(null);
 
   /// 函数身份不变：提示条的计时器不会被重渲染重置
   const dismissToast = useCallback(() => setToast(null), []);
@@ -156,25 +142,6 @@ export default function SourcesPage(props: SourcesPageProps) {
   const settle = () => Promise.all([onChange(), load()]);
 
   const targetsOf = (row: SourceRow) => optimistic.get(row.id) ?? row.targets;
-
-  const subscribe = async (ref: string, name: string) => {
-    setLayer(null);
-    setBusy(true);
-    try {
-      await model.subscribe(ref);
-      await settle();
-      say({ tier: "routine", kind: "success", verb: "添加", names: [name] });
-    } catch (e) {
-      cannot("没添加", e, [name]);
-    }
-    setBusy(false);
-  };
-
-  const pickFolder = async () => {
-    setLayer(null);
-    const path = await model.pickFolder();
-    if (path) await subscribe(path, folderName(path));
-  };
 
   /// 改规则：打开 / 关掉 / 加减一个目标都当场生效，不确认；失败时开关回到原样并说一声
   const changeRule = async (row: SourceRow, next: string[], failVerb: string) => {
@@ -241,7 +208,9 @@ export default function SourcesPage(props: SourcesPageProps) {
   };
 
   /// 浮层开着时 Esc 由浮层接走；确认框开着时 Esc 只取消确认，不退出这一页
+  /// （叠在上面的添加来源页开着时，Esc 由 SubPage 只交给最上面那一页）
   const back = pending ? () => undefined : onClose;
+  const closeAdd = useCallback(() => setAdding(false), []);
 
   const toastNode = toast ? (
     <Toast
@@ -251,55 +220,6 @@ export default function SourcesPage(props: SourcesPageProps) {
       onClose={toast.text.tier === "notice" ? dismissToast : undefined}
     />
   ) : null;
-
-  const openAdd = (trigger: HTMLElement | null | undefined) => {
-    if (!trigger) return;
-    setLayer((prev) => (prev?.kind === "add" ? null : { kind: "add", trigger }));
-  };
-
-  const addLayer =
-    layer?.kind === "add" && data ? (
-      <FloatingLayer
-        trigger={layer.trigger}
-        onClose={closeLayer}
-        className="src-menu"
-        label="添加来源"
-      >
-        {model.canPickFolder ? (
-          <button
-            type="button"
-            role="menuitem"
-            className="src-menu__item"
-            onClick={() => void pickFolder()}
-          >
-            <span className="src-menu__name">选择文件夹…</span>
-          </button>
-        ) : data.groups.length === 0 ? (
-          <div className="src-menu__none">{model.noCandidates}</div>
-        ) : null}
-        {data.groups.map((group, i) => (
-          <Fragment key={group.title}>
-            {model.canPickFolder || i > 0 ? (
-              <div className="src-menu__sep" role="separator" />
-            ) : null}
-            <div className="src-menu__head">{group.title}</div>
-            {group.items.map((item) => (
-              <button
-                key={item.ref}
-                type="button"
-                role="menuitem"
-                className="src-menu__item"
-                title={item.title}
-                onClick={() => void subscribe(item.ref, item.name)}
-              >
-                <span className="src-menu__name">{item.name}</span>
-                <span className="src-menu__sub">{item.sub}</span>
-              </button>
-            ))}
-          </Fragment>
-        ))}
-      </FloatingLayer>
-    ) : null;
 
   let body: ReactNode;
   if (data === null) {
@@ -311,9 +231,9 @@ export default function SourcesPage(props: SourcesPageProps) {
       <Empty kind="scanning" description="正在读来源" />
     );
   } else if (data.rows.length === 0) {
-    // 空态：一句现状 + `+ 来源`（点开同一个小浮层）
+    // 空态：一句现状 + `+ 来源`（进同一个添加来源页）
     body = (
-      <div className="src-page__empty" ref={emptyWrap}>
+      <div className="src-page__empty">
         <Empty
           kind="noSkills"
           description={model.emptyText}
@@ -321,7 +241,7 @@ export default function SourcesPage(props: SourcesPageProps) {
           primary={{
             label: "来源",
             icon: <IconPlus size={12} />,
-            onClick: () => openAdd(emptyWrap.current?.querySelector("button")),
+            onClick: () => setAdding(true),
           }}
         />
         {toastNode}
@@ -527,25 +447,36 @@ export default function SourcesPage(props: SourcesPageProps) {
             );
           })}
         </Busy>
-        <div className="src-foot">
-          <span ref={addWrap}>
-            <Busy busy={busy}>
-              <AddButton
-                noun="来源"
-                onClick={() => openAdd(addWrap.current?.querySelector("button"))}
-              />
-            </Busy>
-          </span>
-          {toastNode}
-        </div>
+        {toastNode ? <div className="src-foot">{toastNode}</div> : null}
       </div>
     );
   }
 
   return (
-    <SubPage title={model.title} onBack={back}>
+    <SubPage
+      title={model.title}
+      onBack={back}
+      aside={
+        // 页头右端固定（DESIGN：跟随列表的话列表长了就找不到）；空态里已有同一个动作，不重复
+        data !== null && data.rows.length > 0 ? (
+          <Busy busy={busy}>
+            <AddButton noun="来源" onClick={() => setAdding(true)} />
+          </Busy>
+        ) : null
+      }
+    >
       {body}
-      {addLayer}
+      {adding ? (
+        // 加好后主视图重扫、这一页重读，再滑回这一页
+        <AddSourcePage
+          model={model}
+          domain={domain}
+          onClose={closeAdd}
+          onAdded={async () => {
+            await settle();
+          }}
+        />
+      ) : null}
       {pending ? (
         <Confirm
           title={removeConfirmTitle(domain, pending.row.name)}
@@ -562,11 +493,11 @@ export default function SourcesPage(props: SourcesPageProps) {
 }
 
 /// 小浮层（与侧栏排序下拉、模型选择器同一写法：layer 圆角 + 浮层阴影，无黑框）。
-/// 目标浮层、`+ 来源`、MCP 同名挑选浮层共用。定位规则见 `placeLayer`：默认在触发控件下方 6 展开，
+/// 目标浮层、MCP 同名挑选浮层共用。定位规则见 `placeLayer`：默认在触发控件下方 6 展开，
 /// 下方放不下、上方放得下才往上翻；最大高度取朝向那一侧的剩余空间与 360 中较小的，
 /// 超出在浮层内部滚动，滚动边缘渐隐（DESIGN「渐变只用于功能」）。
 /// 点外面、Esc、页面滚动都关，不铺透明罩。
-/// 用 fixed 定位：空态里的 `+ 来源` 在 Empty 里面，没法给它包一个定位容器
+/// 用 fixed 定位：触发控件在滚动的列表里，没法给它包一个定位容器
 export function FloatingLayer({
   trigger,
   onClose,

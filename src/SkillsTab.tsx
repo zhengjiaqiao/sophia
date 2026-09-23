@@ -7,9 +7,12 @@ import { BATCH_BUSY_DELAY_MS, cellKey } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
 import SourcesPage from "./pages/SourcesPage";
+import { AddSourcePage } from "./pages/AddSourcePage";
+import { skillSourcesModel } from "./pages/sourcesModel";
+import type { DomainRef } from "./pages/sourcesView";
 import { pathsOfKey } from "./issues";
 import { shortDate } from "./dateText";
-import { CELL_TOAST_DWELL_MS, Confirm, Empty, Toast, TOAST_DWELL_MS } from "./ui";
+import { CELL_TOAST_DWELL_MS, Confirm, Empty, IconPlus, Toast, TOAST_DWELL_MS } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import {
   batchBusyText,
@@ -103,6 +106,9 @@ export default function SkillsTab({
   // 按来源筛选（工具行第二行的来源片）；null＝全部
   const [originFilter, setOriginFilter] = useState<string | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  // 添加来源页（工具行 / 空态的 `+ 来源`）开着没有
+  const [addOpen, setAddOpen] = useState(false);
+  const closeAdd = useCallback(() => setAddOpen(false), []);
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录写不进去）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
@@ -788,6 +794,17 @@ export default function SkillsTab({
 
   // ===== 渲染 =====
 
+  /// 添加来源页：加好后主视图重扫（新来源的 skill 以 ○ 行出现），滑回主视图，不另出提示
+  const addPage = (domain: DomainRef, targets: Target[]) =>
+    addOpen ? (
+      <AddSourcePage
+        model={skillSourcesModel(domain, targets)}
+        domain={domain}
+        onClose={closeAdd}
+        onAdded={onRefresh}
+      />
+    ) : null;
+
   if (!overview) {
     return <Empty kind="scanning" description="正在读 skill 目录" art="horizon" />;
   }
@@ -797,19 +814,11 @@ export default function SkillsTab({
         <Empty
           kind="noAgentDirs"
           description="这个项目下还没有 agent 的 skill 目录"
-          primary={{ label: "来源", onClick: () => setSourcesOpen(true) }}
+          primary={{ label: "来源", icon: <IconPlus size={12} />, onClick: () => setAddOpen(true) }}
           art="folders"
         />
-        {sourcesOpen && (
-          // 这个位置还没有扫描出来的页：名字取项目文件夹名，没有列可当目标
-          <SourcesPage
-            kind="skill"
-            domain={{ key: selectedKey, label: folderLabel(selectedKey) }}
-            targets={[]}
-            onClose={() => setSourcesOpen(false)}
-            onChange={onRefresh}
-          />
-        )}
+        {/* 这个位置还没有扫描出来的页：名字取项目文件夹名，没有列可当目标 */}
+        {addPage({ key: selectedKey, label: folderLabel(selectedKey) }, [])}
       </>
     );
   }
@@ -867,6 +876,7 @@ export default function SkillsTab({
         onOriginFilter={setOriginFilter}
         onReveal={(path) => void api.revealInDir(path).catch((e) => onError(String(e)))}
         onSources={() => setSourcesOpen(true)}
+        onAddSource={() => setAddOpen(true)}
         selected={selected}
         onSelectionChange={(next) => {
           setSelected(next);
@@ -875,7 +885,7 @@ export default function SkillsTab({
         onCell={onCell}
         onBatch={(press) => void batch(press)}
         onUndo={() => undoRef.current?.()}
-        shortcuts={!sourcesOpen}
+        shortcuts={!sourcesOpen && !addOpen}
         flash={flash}
         cellNotice={cellNotice}
         rowToast={rowToast}
@@ -918,6 +928,8 @@ export default function SkillsTab({
           {splitConfirm(splitPane.agent).body}
         </Confirm>
       ) : null}
+
+      {addPage(page, page.targets)}
 
       {sourcesOpen && (
         <SourcesPage

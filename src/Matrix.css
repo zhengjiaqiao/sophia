@@ -40,6 +40,7 @@
   padding-left: var(--space-xl);
   display: inline-flex;
   align-items: center;
+  gap: var(--space-xs);
   flex-shrink: 0;
 }
 

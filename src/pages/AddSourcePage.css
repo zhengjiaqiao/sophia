@@ -1,0 +1,61 @@
+/* 添加来源二级页的容器（DESIGN「来源管理页 › 添加：二级页」）：内容铺满页宽，
+   左沿对齐页头标题（页边 32 + ← 28 + 间距 12 = 72），右边距同左；只有列表区滚动，
+   底部一行贴底。内容排版在 AddSourcePanel.css。色值一律 var(--…)。 */
+@import "../tokens.css";
+
+/* 转场：从右侧推入、返回滑回，200ms 机械缓动（同网关页）；reduced-motion 下直接切换 */
+.ss-subpage.add-src-page {
+  animation: add-src-page-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.ss-subpage.add-src-page.is-leaving {
+  animation: add-src-page-out 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes add-src-page-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes add-src-page-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 页身不整页滚：Panel 自己的列表区滚 */
+.ss-subpage.add-src-page .ss-subpage__body {
+  display: flex;
+  overflow: hidden;
+}
+
+.add-src-page__body {
+  --add-src-inset: calc(var(--space-xxl) + 28px + var(--space-sm));
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-xl) var(--add-src-inset) 0;
+}
+
+/* 贴底一行：hairline 分开列表，下留 24 */
+.add-src-page__body .add-src__foot {
+  margin-top: 0;
+  padding: var(--space-md) 0 var(--space-xl);
+  border-top: 1px solid var(--hairline);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-subpage.add-src-page,
+  .ss-subpage.add-src-page.is-leaving {
+    animation: none;
+  }
+}

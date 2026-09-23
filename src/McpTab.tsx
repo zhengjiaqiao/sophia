@@ -11,6 +11,8 @@ import Matrix, {
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty } from "./DomainView";
 import SourcesPage from "./pages/SourcesPage";
+import { AddSourcePage } from "./pages/AddSourcePage";
+import { mcpSourcesModel } from "./pages/sourcesModel";
 import { mcpLocationName } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
@@ -29,10 +31,12 @@ import {
   type McpDomainRow,
 } from "./mcpView";
 import {
+  AddButton,
   Button,
   CELL_TOAST_DWELL_MS,
   Confirm,
   Empty,
+  IconPlus,
   Tag,
   Toast,
   TOAST_DWELL_MS,
@@ -151,8 +155,11 @@ export default function McpTab({
   const [filterText, setFilterText] = useState("");
   // 按来源筛选（工具行第二行的来源片）；null＝全部
   const [originFilter, setOriginFilter] = useState<string | null>(null);
-  // 来源管理页（工具行 `来源`）开着没有
+  // 来源管理页（工具行 `管理来源`）开着没有
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  // 添加来源页（工具行 / 空态的 `+ 来源`）开着没有
+  const [addOpen, setAddOpen] = useState(false);
+  const closeAdd = useCallback(() => setAddOpen(false), []);
   const [pane, setPane] = useState<Pane | null>(null);
   // 同名多份的空格：点它出的挑选浮层（锚在那一格上）
   const [pick, setPick] = useState<McpPick | null>(null);
@@ -871,8 +878,11 @@ export default function McpTab({
   };
 
   const openSources = () => setSourcesOpen(true);
-  // 空态里的动作同工具行：进来源管理页（管理入口，不带 `+`）
-  const addAction = { label: "来源", onClick: openSources };
+  const openAdd = () => setAddOpen(true);
+  // 空态：一个来源都没有，动作是 `+ 来源`（直接进添加来源页）
+  const addAction = { label: "来源", icon: <IconPlus size={12} />, onClick: openAdd };
+  const domainRef = { key: page.key, label: placeName(page) };
+  const domainLocations = overview.locations.filter((l) => l.domain === page.key);
   const empty =
     query !== "" ? (
       <TableEmpty
@@ -929,7 +939,12 @@ export default function McpTab({
         transportLabel="传输"
         filterText={filterText}
         onFilterText={setFilterText}
-        addButton={<Button onClick={openSources}>来源</Button>}
+        addButton={
+          <>
+            <Button onClick={openSources}>管理来源</Button>
+            <AddButton noun="来源" onClick={openAdd} />
+          </>
+        }
         selected={selected}
         onSelectionChange={(next) => {
           setSelected(next);
@@ -940,7 +955,7 @@ export default function McpTab({
         onUndo={() => undoRef.current?.()}
         busy={busy}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
-        shortcuts={!sourcesOpen && pane === null && pick === null}
+        shortcuts={!sourcesOpen && !addOpen && pane === null && pick === null}
         empty={empty}
         flash={flash}
         cellNotice={cellNotice}
@@ -997,11 +1012,21 @@ export default function McpTab({
         />
       )}
 
+      {addOpen && (
+        // 加好后主视图重扫（新来源的服务以 ○ 行出现），滑回主视图，不另出提示
+        <AddSourcePage
+          model={mcpSourcesModel(domainRef, domainLocations)}
+          domain={domainRef}
+          onClose={closeAdd}
+          onAdded={refresh}
+        />
+      )}
+
       {sourcesOpen && (
         <SourcesPage
           kind="mcp"
-          domain={{ key: page.key, label: placeName(page) }}
-          locations={overview.locations.filter((l) => l.domain === page.key)}
+          domain={domainRef}
+          locations={domainLocations}
           onClose={() => setSourcesOpen(false)}
           onChange={refresh}
         />

@@ -1,0 +1,224 @@
+/* 添加来源的内容（DESIGN「来源管理页 › 添加」）：单栏，自上而下——顶部 `选择文件夹…`，
+   下面一列来源行（可滚、边缘渐隐），底部一行。只管内容；标题、遮罩、白板尺寸在容器
+   （AddSourcePage.css）。色值一律 var(--…)。
+   滚动渐隐沿用小浮层的 `.src-layer__viewport` / `.src-layer__scroll`（SourcesPage.css）。 */
+@import "../tokens.css";
+
+.add-src {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---- 顶部：`选择文件夹…`（高 32）+ 右侧灰字 ---- */
+.add-src__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  padding-bottom: var(--space-md);
+}
+
+.add-src__hint {
+  min-width: 0;
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+/* ---- 来源列表：独立滚动 ---- */
+.add-src__fade {
+  flex: 1 1 auto;
+}
+
+.add-src__scroll {
+  flex: 1 1 auto;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+/* 区域标签 `建议的来源`：同设置页区块小标——贴 1px ink 分组线下沿 6，12/600 ink-mute */
+.add-src__label {
+  margin-top: var(--space-md);
+  padding: 6px 0 0 var(--space-xs);
+  border-top: 1px solid var(--ink);
+  font-size: var(--size-micro);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.add-src__label:first-child {
+  margin-top: 0;
+}
+
+/* 没有顶部 `选择文件夹…`（MCP）时，标题下的 hairline 已经分好组，不再叠一道 ink 线 */
+.add-src__fade:first-child .add-src__label:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* 组小标题：`你选的文件夹` `其他项目在用的` `检测到的`；下面第一行的上沿补一道 hairline */
+.add-src__head {
+  padding: 12px var(--space-xs) 4px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.add-src__head:first-child {
+  padding-top: 0;
+}
+
+.add-src__none {
+  padding: 8px var(--space-xs) 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* ---- 来源行：一个复选框项，长相同来源管理页的行（DESIGN「来源管理页 › 添加」）----
+   两行高，行间 hairline，行内上下 10。整行可点＝勾 / 取消；勾上不改底色（方框就是状态），
+   悬停铺 surface 带。▸、展开区沿用来源管理页的 `.src-row__caret` `.src-row__skills` `.src-skill` */
+.add-src__row {
+  --add-src-indent: calc(12px + var(--space-sm) + 14px + var(--space-xs));
+  padding: 10px var(--space-xs);
+  border-bottom: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.add-src__row:hover {
+  background: var(--surface);
+}
+
+.add-src__row.is-blocked {
+  cursor: default;
+}
+
+.add-src__row:has(.add-src__check:focus-visible) {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+/* 第一行：方框 12 + ▸ 14 + 名字 */
+.add-src__head-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.add-src__check {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.add-src__check:focus-visible {
+  outline: none;
+}
+
+.add-src__row:hover .add-src__check .ss-checkbox {
+  border-color: var(--ink);
+}
+
+/* 不能勾的方框：hairline 描边（同禁用的 Checkbox） */
+.add-src__row.is-blocked .ss-checkbox {
+  border-color: var(--hairline);
+}
+
+/* ▸ 按钮：管理页的 14 格，这里对齐名字行居中；与名字间距 8（同管理页） */
+.add-src__caret {
+  margin-top: 0;
+  margin-right: calc(var(--space-xs) - var(--space-sm));
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.add-src__caret:disabled {
+  cursor: default;
+}
+
+.add-src__caret:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 名字：同管理页 `.src-row__label`（body，不加粗） */
+.add-src__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第二行：左沿对齐名字，12 ink-mute，一行放不下以 … 截断 */
+.add-src__second {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 18px;
+  padding-left: var(--add-src-indent);
+}
+
+.add-src__second > .ss-tipwrap {
+  display: block;
+  min-width: 0;
+}
+
+.add-src__meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--size-micro);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 展开区：缩进对齐名字，行底留 2（行本身已有下内边距 10） */
+.add-src__row .add-src__skills {
+  padding: var(--space-xxs) 0 2px var(--add-src-indent);
+}
+
+.add-src__loading {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.add-src__notice {
+  flex: 1 1 auto;
+}
+
+/* ---- 底部一行：只有右端主动作（没加上的提示条在它左边）；添加中换成忙碌指示 ---- */
+.add-src__foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  margin-top: var(--space-md);
+}
+
+.add-src__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 32px;
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
