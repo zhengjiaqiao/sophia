@@ -7,7 +7,6 @@ import { visibleAgents } from "./shell/agentRegistry.ts";
 import type { ComponentType } from "react";
 import type { AgentEntry, AgentState, TrayRowProps } from "./shell/agentRegistry.ts";
 import {
-  effectiveModels,
   enableDisabledReason,
   serviceLeftover,
   showLaunchKey,
@@ -78,52 +77,4 @@ export function trayRow(state: GatewayState): TrayRow {
     showLaunch: showLaunchKey(state, { kind: "idle" }),
     showUninstall: serviceLeftover(state) && !state.needsCodexRestart,
   };
-}
-
-// ===== 在用的模型一行 =====
-
-/// 在用的一个模型：名字（与 agent 页模型片同一个取名）+ 同名时的网关短名（不同名为 null）
-export interface TrayModel {
-  key: string;
-  name: string;
-  gateway: string | null;
-}
-
-/// 开着时 Codex 里在用的第三方模型，按网关顺序摊平。关着是空（这一行不出）。
-/// 名字与同名后缀直接取 `effectiveModels`（agent 页模型片读的同一份）：友好名优先、跨服务商时保留前缀；
-/// **只有两家网关的已选模型同名时**才在那个名字后加 ` · 网关短名`（core 给的 `shortName`，与 Codex 目录里同一个）——
-/// `·` 只表示「这个名字的出处」，模型之间用 `、` 分（DESIGN「托盘面板」）
-export function trayModels(state: GatewayState): TrayModel[] {
-  if (!state.enabled) return [];
-  return effectiveModels(state).map((m) => ({
-    key: `${m.provider.id}|${m.model.id}`,
-    name: m.name,
-    gateway: m.suffix,
-  }));
-}
-
-/// 模型名之间的分隔
-export const MODEL_SEPARATOR = "、";
-
-/// 一行放得下前几个名字：`widths` 是各名字（含同名后缀）的宽，`sep` 是 `、` 的宽，
-/// `more(n)` 是末尾 `+n` 的宽（含它前面的间距），`max` 是行宽。全放得下就全放；
-/// 放不下就尽量多放、末尾写 `+剩下的个数`。至少放一个（一个都放不下时由 CSS 截断那一个）
-export function fitModelCount(
-  widths: readonly number[],
-  sep: number,
-  more: (n: number) => number,
-  max: number,
-): number {
-  const total = widths.reduce((sum, w, i) => sum + w + (i > 0 ? sep : 0), 0);
-  if (total <= max) return widths.length;
-  let used = 0;
-  let fit = 0;
-  for (let i = 0; i < widths.length; i++) {
-    const next = used + widths[i] + (i > 0 ? sep : 0);
-    const rest = widths.length - (i + 1);
-    if (next + (rest > 0 ? more(rest) : 0) > max) break;
-    used = next;
-    fit = i + 1;
-  }
-  return Math.max(1, fit);
 }

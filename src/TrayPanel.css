@@ -25,14 +25,16 @@
   padding-top: 6px;
 }
 
-/* 块头：高 30、左右 14；16px 图标 + 8 + 名字（body 15 / 600，原样），不放控件 */
+/* 一条左沿 16（2026-09-25）：块头图标、能力行的名字、菜单项的字（外距 6 + 内距 10）都从面板内 16 起 */
+
+/* 块头：高 30、左右 16；16px 图标 + 8 + 名字（body 15 / 600，原样），不放控件 */
 .tray__head {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
   box-sizing: border-box;
   height: 30px;
-  padding: 0 14px;
+  padding: 0 var(--space-md);
 }
 
 .tray__name {
@@ -41,19 +43,29 @@
   line-height: var(--leading-body);
 }
 
-/* 能力行：左沿对齐名字（14 + 16 + 8 = 38），13 ink；右端开关（指示点在左，Switch 自带） */
+/* 能力行：高 32、左右 16（名字与块头图标同一条左沿），13 ink；右端 [键位 12 开关] */
 .tray__cap {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
   box-sizing: border-box;
-  height: 28px;
-  padding: 0 14px 0 38px;
+  height: 32px;
+  padding: 0 var(--space-md);
 }
 
 .tray__cap-title {
   flex: 1;
   min-width: 0;
+}
+
+/* 行尾一组：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位，在开关左边 12（与 Codex 页节头同一关系）。
+   高 24（紧凑键的高）：键消失后 ✓ 已生效 仍浮在键原来的下沿之下 4 */
+.tray__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 24px;
+  white-space: nowrap;
 }
 
 /* 开关那一格：开关 / 写配置超过 0.3 秒时原位转圈 +「正在添加」 */
@@ -62,77 +74,7 @@
   align-items: center;
 }
 
-/* 在用的模型：紧跟能力行，左沿对齐名字，12 ink-mute、行高 1.5；一行，放不下末尾 +N */
-.tray__models {
-  padding: 0 14px 0 38px;
-  font-size: var(--size-label);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-}
-
-.tray__models-box {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-/* 一个名字都放不下时截断那一个（极少：320 宽里一个模型名很难超过 268） */
-.tray__models-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tray__models-gw {
-  color: var(--ink-mute);
-}
-
-/* `+2`：计数，tabular；前面让 6（用内边距，量尺量得到） */
-.tray__models-more {
-  flex: none;
-  padding-left: 6px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 量尺：同字体同字号，看不见、不占位、不撑出滚动（子项仍量得出自身宽） */
-.tray__models-ruler {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.tray__models-ruler > span {
-  position: absolute;
-  white-space: nowrap;
-}
-
-/* 键位（条件）：左沿对齐名字，上 8 下 4；重启生效 / 启动 Codex / 卸下后台服务占同一位 */
-.tray__keys {
-  display: flex;
-  align-items: center;
-  padding: 8px 14px 4px 38px;
-  white-space: nowrap;
-}
-
-/* 键已消失、结果浮在原位：只留一个不占高的锚 */
-.tray__keys--anchor {
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.tray__keys-anchor {
-  display: inline-block;
-  width: 0;
-  height: 0;
-}
-
-/* 确认当场展开：面板内一块凹面（recess、face 12 圆角、内边距 10 12、左右外距 10）；
+/* 确认在能力行下当场展开：面板内一块凹面（recess、face 12 圆角、内边距 10 12、左右外距 10）；
    标题 13 / 600 ink，后果 12 ink-mute；右对齐的 取消（默认键紧凑）与主动作墨键（紧凑） */
 .tray__confirm {
   margin: 8px 10px 2px;
@@ -163,7 +105,7 @@
   margin-top: var(--space-xs);
 }
 
-/* 失败：键位原位换成灰面板（同确认的左右外距，原因写全、折行不截断） */
+/* 失败：键位让出、能力行下换成灰面板（同确认的外距，原因写全、折行不截断） */
 .tray__notice {
   margin: 8px 10px 2px;
 }

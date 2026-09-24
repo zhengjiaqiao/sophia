@@ -3,17 +3,15 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import {
-  fitModelCount,
   trayAgentState,
   trayBlocks,
-  trayModels,
   trayRow,
   RESTART_CONSEQUENCE,
   RESTART_TIP,
 } from "../src/trayView.ts";
 import { enableDisabledReason } from "../src/modelsView.ts";
 import type { AgentEntry } from "../src/shell/agentRegistry.ts";
-import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
+import type { GatewayProviderModel, GatewayState } from "../src/types.ts";
 import { render } from "./ui-render.ts";
 
 const { AGENTS } = await import("../src/shell/agents.tsx");
@@ -230,69 +228,27 @@ test("「启动 Codex」：开着、Codex 没在跑、不等重启时出现；�
   );
 });
 
-// ===== 在用的模型一行 =====
-
-/// `shortName` 是 core 算好给过来的网关短名（settings.rs `short_name`）；不给就等于显示名
-const gw = (
-  id: string,
-  name: string,
-  baseUrl: string,
-  models: GatewayProviderModel[],
-  shortName = name,
-) => ({ id, name, shortName, baseUrl, hasKey: true, models }) as unknown as GatewayProvider;
-
-const named = (id: string, displayName: string): GatewayProviderModel => ({
-  id,
-  slug: id,
-  displayName,
-  selected: true,
-});
-
-test("在用的模型：开着时按网关顺序列已选的；关着是空（这一行不出）", () => {
-  const p = gw("a", "openrouter", "https://openrouter.ai/api/v1", [
-    named("moonshotai/kimi-k2", "Kimi K2"),
-    named("z-ai/glm-4.6", "GLM-4.6"),
-    { ...named("x/off", "Off"), selected: false },
-  ]);
-  const on = state({ enabled: true, provider: p, providers: [p] });
-  assert.deepEqual(
-    trayModels(on).map((m) => [m.name, m.gateway]),
-    [
-      ["Kimi K2", null],
-      ["GLM-4.6", null],
-    ],
+// 2026-09-25 简化（DESIGN「托盘面板」）：不列在用的模型；键位在能力行里、开关左边，不另起一行
+test("能力行一行说完：`重启生效` 在同一行、开关左边；不列在用的模型", async () => {
+  const { TrayAgents } = await import("../src/TrayPanel.tsx");
+  const running = { version: "26.0", running: true, catalogVersion: "1", drift: false };
+  const agentState = trayAgentState(
+    withModels(2, { enabled: true, needsCodexRestart: true, codex: running }),
   );
-  assert.deepEqual(trayModels({ ...on, enabled: false }), []);
-});
-
-test("同名才加网关短名：两家都选了 GLM-4.6，只那两个名字后写短名，其余不写", () => {
-  const a = gw(
-    "a",
-    "openrouter.ai",
-    "https://openrouter.ai/api/v1",
-    [named("z-ai/glm-4.6", "GLM-4.6"), named("moonshotai/kimi-k2", "Kimi K2")],
-    "openrouter",
-  );
-  const b = gw("b", "", "https://api.zhipu.example.com/v1", [named("glm-4.6", "GLM-4.6")], "zhipu");
-  const on = state({ enabled: true, provider: a, providers: [a, b] });
-  assert.deepEqual(
-    trayModels(on).map((m) => [m.name, m.gateway]),
-    [
-      ["GLM-4.6", "openrouter"],
-      ["Kimi K2", null],
-      ["GLM-4.6", "zhipu"],
-    ],
-  );
-});
-
-test("一行放不下：尽量多放，末尾留 +N 的位置", () => {
-  const more = (n: number) => (n < 10 ? 20 : 26);
-  // 全放得下：三个
-  assert.equal(fitModelCount([60, 60, 60], 12, more, 204), 3);
-  // 放不下第三个：前两个 + `+1`（60 + 12 + 60 + 20 = 152 ≤ 160）
-  assert.equal(fitModelCount([60, 60, 60], 12, more, 160), 2);
-  // 第二个后面留不下 `+N`：只放一个
-  assert.equal(fitModelCount([60, 60, 60], 12, more, 140), 1);
-  // 一个都放不下也放一个（由 CSS 截断）
-  assert.equal(fitModelCount([300, 60], 12, more, 100), 1);
+  const host = {
+    applyGateway: () => undefined,
+    idle: async () => undefined,
+    alive: () => true,
+    openedAt: 0,
+    failOver: () => undefined,
+  };
+  const html = render(TrayAgents, {
+    blocks: trayBlocks(AGENTS, agentState),
+    state: agentState,
+    host,
+  });
+  const cap = html.match(/<div class="tray__cap">[^]*<\/div>/)?.[0] ?? "";
+  assert.match(cap, /tray__end">[^]*重启生效[^]*tray__switch/);
+  assert.doesNotMatch(html, /tray__models|tray__keys/);
+  assert.doesNotMatch(html, />m0|m0、m1/, "模型名不进托盘");
 });

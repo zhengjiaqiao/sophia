@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "./api.ts";
 import {
   CODEX,
@@ -13,14 +13,10 @@ import {
 import type { TrayRowProps } from "./shell/agentRegistry.ts";
 import {
   LAUNCH_TIP,
-  MODEL_SEPARATOR,
   RESTART_CONSEQUENCE,
   RESTART_TIP,
   UNINSTALL_TIP,
-  fitModelCount,
-  trayModels,
   trayRow,
-  type TrayModel,
 } from "./trayView.ts";
 import type { GatewayState } from "./types.ts";
 import {
@@ -36,6 +32,10 @@ import {
 /// 托盘面板里「第三方模型」一行（DESIGN「托盘面板」）：agent 注册表里这一节的 `trayRow` 画法，
 /// 面板（TrayPanel）按注册表把它排进 Codex 那一块，面板自己不认得这一节。样式在 TrayPanel.css。
 ///
+/// 一行高 32：名字（13 `ink`）+ 右端开关（标准 34 × 20，不点指示点）；键位在同一行里、开关左边 12
+/// （与 Codex 页节头同一个位置关系），不另起一行。不列在用的模型（2026-09-25：在 Codex 页的模型片上看）。
+/// 重启确认、做不成的灰面板都在这一行下当场展开。
+///
 /// 与 Codex 页同一段逻辑（modelsView）：
 /// - 开关＝配置里开没开：拨了就写、不确认，乐观翻转（滑块当即过去，写超过 0.3 秒原位转圈 +「正在添加 / 正在移除」）；
 ///   写成了要重启才生效时键位出 `重启生效`（Codex 没在跑出 `启动 Codex`）；没写成连配置一起撤回、滑块滑回，
@@ -43,6 +43,9 @@ import {
 /// - 键位 `重启生效` / `启动 Codex` / `卸下后台服务` 占同一位（默认键紧凑），规则同 Codex 页
 /// - 卸下后台服务做不成：把主窗口带到 Codex 页，由那里说原因——面板放不下一段解释
 /// - Esc：重启确认开着先收回那一问（在捕获阶段接住，面板自己的 Esc 收起就不再收到）；面板每次弹出，上次没答的确认作废
+
+/// `✓ 已生效 / 已启动` 的锚：能力行右端那一组（键位 + 开关）
+const endOf = (probe: HTMLElement) => probe.closest(".tray__end");
 
 /// 键位那一处在做什么：重启生效的确认 / 重启中 / 已生效；启动中 / 已启动；拨了开关、正在写配置
 type Phase =
@@ -73,6 +76,8 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
   /// 此刻画在面板上的状态（点下去那一刻读它）
   const shown = useRef<GatewayState | null>(gateway);
   shown.current = gateway;
+  /// 重启确认那一块（`重启生效` 的 aria-controls 指向它）
+  const confirmId = useId();
 
   // 面板每次弹出：收起时没答的确认作废；正在做的（重启、启动、拨开关）照常做完
   useEffect(() => {
@@ -222,7 +227,7 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
 
   /// 确认在面板里当场展开（一块凹面）：标题 + 一句后果 + `取消`（默认键）与主动作墨键，都紧凑
   const confirmPanel = (title: string, body: string, label: string, onConfirm: () => void) => (
-    <div className="tray__confirm" role="dialog" aria-label={title}>
+    <div className="tray__confirm" id={confirmId} role="dialog" aria-label={title}>
       <div className="tray__confirm-title">{title}</div>
       <div className="tray__confirm-body">{body}</div>
       <div className="tray__confirm-foot">
@@ -251,38 +256,46 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
       );
     }
     if (phase.kind === "done" || phase.kind === "launched") {
-      // 键已消失：原位留一个不占高的锚，结果浮在它正下方 4
+      // 键已消失：结果浮在原来那颗键的正下方 4、右沿对齐开关（锚＝行尾那一组：键位 + 开关，高 24）
       return (
-        <span className="tray__keys-anchor">
-          <FloatingToast align="start">
-            <Toast
-              kind="success"
-              verb={phase.kind === "done" ? "已生效" : "已启动"}
-              onDismiss={dismissDone}
-            />
-          </FloatingToast>
-        </span>
+        <FloatingToast align="end" anchor={endOf}>
+          <Toast
+            kind="success"
+            verb={phase.kind === "done" ? "已生效" : "已启动"}
+            onDismiss={dismissDone}
+          />
+        </FloatingToast>
       );
     }
     const blocked = busy ? "正在处理上一步" : undefined;
-    const key = (label: string, tip: string, onClick: () => void) => (
+    const key = (label: string, tip: string, onClick: () => void, expanded?: boolean) => (
       <Tooltip content={tip} placement="bottom">
         {blocked ? (
           <Button size="compact" disabled disabledReason={blocked}>
             {label}
           </Button>
         ) : (
-          <Button size="compact" onClick={onClick}>
+          <Button
+            size="compact"
+            onClick={onClick}
+            ariaExpanded={expanded}
+            ariaControls={expanded ? confirmId : undefined}
+          >
             {label}
           </Button>
         )}
       </Tooltip>
     );
     if (row.showRestart)
-      return key("重启生效", RESTART_TIP, () => {
-        setNotice(null);
-        setPhase({ kind: "confirming" });
-      });
+      return key(
+        "重启生效",
+        RESTART_TIP,
+        () => {
+          setNotice(null);
+          setPhase({ kind: "confirming" });
+        },
+        phase.kind === "confirming",
+      );
     if (row.showLaunch) return key(`启动 ${CODEX.name}`, LAUNCH_TIP, () => void launchCodex());
     if (row.showUninstall)
       return (
@@ -303,13 +316,12 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
     return null;
   };
 
-  /// `第三方模型` 一行：名字 + 右端开关（指示点在左）→ 在用的模型 → 键位 → 确认 / 灰面板
+  /// `第三方模型` 一行：名字 + 右端 [键位 12 开关] → 行下当场展开的确认 / 灰面板
   const draw = (current: GatewayState) => {
     const row = trayRow(current);
     const switching = phase.kind === "switching" ? phase.next : null;
     /// 乐观翻转：写的时候滑块已经在拨过去的那一侧
     const on = switching ?? row.toggle.on;
-    const models = trayModels(current);
     // 灰面板跟着它那颗键：键消失（问题解决了）就一起走
     const noticeLive =
       notice !== null &&
@@ -318,50 +330,48 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
         (notice.for === "restart" && row.showRestart) ||
         (notice.for === "launch" && row.showLaunch));
     const slot = noticeLive ? null : keySlot(current);
-    const anchorOnly = phase.kind === "done" || phase.kind === "launched";
     return (
       <>
         <div className="tray__cap">
           <span className="tray__cap-title">{title}</span>
-          {/* 开关＝配置里开没开：拨了就写，滑块当即过去；没写成滑回 */}
-          <span className="tray__switch">
-            {row.toggle.disabledReason !== null && switching === null ? (
-              // 禁用的开关自带原因提示框：悬停出、按下当即出（同 Codex 页）
-              <Switch
-                checked={false}
-                onChange={() => undefined}
-                label={`启用 ${CODEX.name} 的${title}`}
-                disabledReason={row.toggle.disabledReason}
-                tipPlacement="bottom"
-              />
-            ) : (
-              <BusySlot
-                busy={switching !== null}
-                label={gatewaySwitchText(switching ?? true).busy}
-              >
-                <Tooltip
-                  content={
-                    on
-                      ? `关掉后，${CODEX.name} 只保留官方模型`
-                      : `打开后，选好的模型会出现在 ${CODEX.name} 的模型列表里`
-                  }
-                  placement="bottom"
+          <span className="tray__end">
+            {slot}
+            {/* 开关＝配置里开没开：拨了就写，滑块当即过去；没写成滑回 */}
+            <span className="tray__switch">
+              {row.toggle.disabledReason !== null && switching === null ? (
+                // 禁用的开关自带原因提示框：悬停出、按下当即出（同 Codex 页）
+                <Switch
+                  checked={false}
+                  onChange={() => undefined}
+                  label={`启用 ${CODEX.name} 的${title}`}
+                  disabledReason={row.toggle.disabledReason}
+                  tipPlacement="bottom"
+                />
+              ) : (
+                <BusySlot
+                  busy={switching !== null}
+                  label={gatewaySwitchText(switching ?? true).busy}
                 >
-                  <Switch
-                    checked={on}
-                    onChange={(next) => void toggle(next)}
-                    label={`启用 ${CODEX.name} 的${title}`}
-                    disabledReason={busy && switching === null ? "正在处理上一步" : undefined}
-                  />
-                </Tooltip>
-              </BusySlot>
-            )}
+                  <Tooltip
+                    content={
+                      on
+                        ? `关掉后，${CODEX.name} 只保留官方模型`
+                        : `打开后，选好的模型会出现在 ${CODEX.name} 的模型列表里`
+                    }
+                    placement="bottom"
+                  >
+                    <Switch
+                      checked={on}
+                      onChange={(next) => void toggle(next)}
+                      label={`启用 ${CODEX.name} 的${title}`}
+                      disabledReason={busy && switching === null ? "正在处理上一步" : undefined}
+                    />
+                  </Tooltip>
+                </BusySlot>
+              )}
+            </span>
           </span>
         </div>
-        {models.length > 0 ? <ModelsLine models={models} /> : null}
-        {slot !== null ? (
-          <div className={`tray__keys${anchorOnly ? " tray__keys--anchor" : ""}`}>{slot}</div>
-        ) : null}
         {phase.kind === "confirming"
           ? confirmPanel(
               `重启 ${CODEX.name}？`,
@@ -371,7 +381,7 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
             )
           : null}
         {noticeLive && notice ? (
-          // 带下一步的失败：键位原位灰面板，不会自己走（DESIGN「反馈的两种形态」）
+          // 带下一步的失败：能力行下灰面板（键位原位让给它），不会自己走（DESIGN「反馈的两种形态」）
           <div className="tray__notice">
             <NoticePanel
               message={notice.message}
@@ -386,72 +396,4 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
   };
 
   return gateway ? draw(gateway) : null;
-}
-
-/// 在用的模型一行：名字之间 `、`，同名的后面 ` · 网关短名`；一行放不下末尾写 `+N`。
-/// 先在一层看不见的量尺里量出每个名字、`、`、`+9` / `+99` 的宽，再按行宽算放得下几个（fitModelCount）
-function ModelsLine({ models }: { models: TrayModel[] }) {
-  const boxRef = useRef<HTMLDivElement>(null);
-  const rulerRef = useRef<HTMLSpanElement>(null);
-  const [count, setCount] = useState(models.length);
-  const signature = models.map((m) => `${m.key}\t${m.name}\t${m.gateway ?? ""}`).join("\n");
-
-  useLayoutEffect(() => {
-    const measure = () => {
-      const box = boxRef.current;
-      const ruler = rulerRef.current;
-      if (!box || !ruler) return;
-      const width = (el: Element | null) => (el ? el.getBoundingClientRect().width : 0);
-      const items = [...ruler.querySelectorAll("[data-item]")].map(width);
-      const sep = width(ruler.querySelector("[data-sep]"));
-      const one = width(ruler.querySelector("[data-more='1']"));
-      const two = width(ruler.querySelector("[data-more='2']"));
-      setCount(fitModelCount(items, sep, (n) => (n < 10 ? one : two), box.clientWidth));
-    };
-    measure();
-    // 字体晚到会改宽度：到了再量一次
-    let alive = true;
-    void document.fonts?.ready.then(() => alive && measure());
-    return () => {
-      alive = false;
-    };
-  }, [signature]);
-
-  const name = (m: TrayModel) => (
-    <>
-      {m.name}
-      {m.gateway ? <span className="tray__models-gw"> · {m.gateway}</span> : null}
-    </>
-  );
-  const shown = models.slice(0, count);
-  const rest = models.length - shown.length;
-  return (
-    <div className="tray__models">
-      <div className="tray__models-box" ref={boxRef}>
-        <span className="tray__models-text">
-          {shown.map((m, i) => (
-            <Fragment key={m.key}>
-              {i > 0 ? MODEL_SEPARATOR : null}
-              {name(m)}
-            </Fragment>
-          ))}
-        </span>
-        {rest > 0 ? <span className="tray__models-more">+{rest}</span> : null}
-        <span className="tray__models-ruler" ref={rulerRef} aria-hidden="true">
-          {models.map((m) => (
-            <span key={m.key} data-item="">
-              {name(m)}
-            </span>
-          ))}
-          <span data-sep="">{MODEL_SEPARATOR}</span>
-          <span className="tray__models-more" data-more="1">
-            +9
-          </span>
-          <span className="tray__models-more" data-more="2">
-            +99
-          </span>
-        </span>
-      </div>
-    </div>
-  );
 }
