@@ -1875,8 +1875,8 @@ macOS 用户会对行点右键；原来点了什么都没有。**只作加速器
 
 **设计画板（.superpowers/design/*.dc.html + lint-artboards.mjs）**
 - `lint-artboards.mjs` 的 `TOKENS` `FONTS` `RADII` `ELEV` 与 `lint-ui.mjs` 同步（最好抽成共享模块）→ 两处集合比较无差异（2026-09-24 物性后：`TOKENS` 14 个、`RADII` 六个、层次九个）。
-- 在用画板（`canvas.json` 登记的，除 `RamsDirections*` 与 `_pre-live/`）换成 V4 token、Barlow / Barlow Condensed、结构词 Condensed 大写 + 字距（只给拉丁 `span`）→ `node .superpowers/design/lint-artboards.mjs` 零报错。
-- `RamsDirections*.dc.html` 保留为探索板、lint 豁免 → 豁免名单逐个写文件名、不用通配。
+- 在用画板＝`canvas.json` 里 `page-tone` 页上的画板（2026-09-24 起只有 `V4Layouts.dc.html`，它覆盖全部 15 屏）：V4 token、Barlow / Barlow Condensed、结构词 Condensed 大写 + 字距（只给拉丁 `span`）→ `node .superpowers/design/lint-artboards.mjs` 零报错。V4 之前的各屏画板移到 `page-archive`「V4 之前（历史，不再维护）」，不再逐张改——它们画的是被 D1–D14 取代的布局，改色改字也不会让它们变成现行规范（①）。
+- `RamsDirections*.dc.html` 保留为探索板，移到 `page-2`「方向探索（已定）」；lint 只查 `page-tone`，不需要豁免名单 → `canvas.json` 里 `page-tone` 只剩 `V4Layouts.dc.html`。
 - 画板里的字标与图标（`V4Layouts` 的侧栏字标、托盘图标，`Marks.dc.html`）一律是 `assets/logo/` 原资产的 SVG 内容 → 画板与 `assets/logo/` 同一份轮廓、同一组颜色。
 
 **断言旧视觉的测试**
