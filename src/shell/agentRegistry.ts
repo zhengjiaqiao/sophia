@@ -1,7 +1,7 @@
 /// agent 注册表的类型与取用（DESIGN「侧栏 › agent 段」「agent 页」「扩展预留：用量与会话」）。
 ///
 /// **两个扩展点之一**（另一个是 domains.ts 的位置页 domain 表）：一张表生成侧栏的 `agent` 段、
-/// agent 页的节，以后还有托盘的块（托盘不归外壳，届时读同一张表）。每一项：
+/// agent 页的节、托盘面板的块与行（节带 `trayRow` 画法，面板按表画，不认得具体哪一节）。每一项：
 /// id、名字（原样大小写）、图标（`AgentIcon` 按 id 取）、指示点条件、能力节列表。
 /// **只列有能力节的 agent**（可配的如第三方模型，可看的如以后的用量）：节列表为空、或此刻不可用的，
 /// 侧栏不列、也不灰着列。
@@ -30,6 +30,29 @@ export interface AgentSectionProps {
   onFocused?: () => void;
 }
 
+/// 托盘面板给每一行的面板级共用（TrayPanel 持有）
+export interface TrayHost {
+  /// 后端给的新模型状态：画到面板上并广播给主窗口
+  applyGateway: (next: GatewayState) => void;
+  /// 排在还没写完的写入后面（都写 Codex 设置，先后要和点的顺序一致）
+  idle: () => Promise<void>;
+  /// 面板还在不在（异步回来之前被卸下就什么都不做）
+  alive: () => boolean;
+  /// 第几次弹出：行据此收回上次没答的确认
+  openedAt: number;
+  /// 做不成、面板放不下一段解释：主窗口到前面、切过去、把原话带过去
+  failOver: (error: unknown) => void;
+}
+
+/// 托盘面板里一节的那一行拿到的
+export interface TrayRowProps {
+  /// 节名（`第三方模型`），行首写它
+  title: string;
+  /// 面板读回来的只读状态（与侧栏同一种 AgentState）
+  state: AgentState;
+  tray: TrayHost;
+}
+
 /// agent 页的一节（一种能力）：节头、开关、内容都归节组件自己画；页只负责按表的先后排、节间 48
 export interface AgentSection {
   /// 稳定标识（`third-party-models`、以后的 `usage`）
@@ -37,6 +60,8 @@ export interface AgentSection {
   /// 节名（`第三方模型`），托盘的能力行也用它
   title: string;
   Component: ComponentType<AgentSectionProps>;
+  /// 托盘面板里这一节的一行怎么画（DESIGN「托盘面板」一种能力一行）。不给就不进托盘
+  trayRow?: ComponentType<TrayRowProps>;
 }
 
 export interface AgentEntry {

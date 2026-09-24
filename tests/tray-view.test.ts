@@ -13,7 +13,7 @@ import {
 import { enableDisabledReason } from "../src/modelsView.ts";
 import type { AgentEntry } from "../src/shell/agentRegistry.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
-import "./ui-render.ts";
+import { render } from "./ui-render.ts";
 
 const { AGENTS } = await import("../src/shell/agents.tsx");
 
@@ -108,46 +108,65 @@ test("已启用时永远能关：哪怕密钥没了、模型清空了", () => {
 
 // ===== 块与行从 agent 注册表生成（DESIGN「托盘面板」「扩展预留：用量与会话」） =====
 
-const DRAWABLE = new Set(["third-party-models"]);
-
-test("块从注册表生成：今天 Codex 一块、一行 `第三方模型`；这台机器不支持时整块不出现", () => {
-  assert.deepEqual(trayBlocks(AGENTS, trayAgentState(state()), DRAWABLE), [
-    { id: "codex", name: "Codex", rows: [{ id: "third-party-models", title: "第三方模型" }] },
-  ]);
-  assert.deepEqual(trayBlocks(AGENTS, trayAgentState(state({ supported: false })), DRAWABLE), []);
+test("块从注册表生成：今天 Codex 一块、一行 `第三方模型`（画法是注册表里那一节的 trayRow）；这台机器不支持时整块不出现", () => {
+  const blocks = trayBlocks(AGENTS, trayAgentState(state()));
+  assert.deepEqual(
+    blocks.map((b) => [b.id, b.name, b.rows.map((r) => [r.id, r.title])]),
+    [["codex", "Codex", [["third-party-models", "第三方模型"]]]],
+  );
+  assert.equal(blocks[0].rows[0].Row, AGENTS[0].sections[0].trayRow);
+  assert.deepEqual(trayBlocks(AGENTS, trayAgentState(state({ supported: false }))), []);
   // 状态还没读回来：先不出块（只剩菜单）
-  assert.deepEqual(trayBlocks(AGENTS, trayAgentState(null), DRAWABLE), []);
+  assert.deepEqual(trayBlocks(AGENTS, trayAgentState(null)), []);
 });
 
-test("往注册表加一个 agent、给 Codex 加一节 `用量`：面板按表的先后成块成行，不改面板的生成逻辑", () => {
+test("往注册表加一个 agent、给 Codex 加一节带 trayRow 的 `用量`：面板按表的先后成块成行、画出那一行，面板代码不改", async () => {
+  const { TrayAgents } = await import("../src/TrayPanel.tsx");
   const Section = () => createElement("p");
+  const UsageRow = ({ title }: { title: string }) =>
+    createElement("div", { className: "fake-usage" }, `${title} 42%`);
   const codex = AGENTS[0];
+  const usage = { id: "usage", title: "用量", Component: Section, trayRow: UsageRow };
   const registry: AgentEntry[] = [
-    { ...codex, sections: [{ id: "usage", title: "用量", Component: Section }, ...codex.sections] },
+    { ...codex, sections: [usage, ...codex.sections] },
     {
       id: "claude-code",
       name: "Claude Code",
       available: () => true,
       indicator: () => false,
+      sections: [usage],
+    },
+    // 有节、但没有一节带托盘画法：不成块（不留空块头）
+    {
+      id: "cursor",
+      name: "Cursor",
+      available: () => true,
+      indicator: () => false,
       sections: [{ id: "usage", title: "用量", Component: Section }],
     },
   ];
-  const drawable = new Set(["usage", "third-party-models"]);
+  const agentState = trayAgentState(state());
+  const blocks = trayBlocks(registry, agentState);
   assert.deepEqual(
-    trayBlocks(registry, trayAgentState(state()), drawable).map((b) => [
-      b.name,
-      b.rows.map((r) => r.title),
-    ]),
+    blocks.map((b) => [b.name, b.rows.map((r) => r.title)]),
     [
       ["Codex", ["用量", "第三方模型"]],
       ["Claude Code", ["用量"]],
     ],
   );
-  // 面板还不会画的节不出行；一行都画不出的 agent 不成块（不留空块头）
-  assert.deepEqual(
-    trayBlocks(registry, trayAgentState(state()), DRAWABLE).map((b) => b.name),
-    ["Codex"],
-  );
+  // 真的画出来：TrayPanel 的块渲染按注册表把假节的 trayRow 画进 Codex 与 Claude Code 两块
+  const host = {
+    applyGateway: () => undefined,
+    idle: async () => undefined,
+    alive: () => true,
+    openedAt: 0,
+    failOver: () => undefined,
+  };
+  const html = render(TrayAgents, { blocks, state: agentState, host });
+  assert.equal((html.match(/class="fake-usage">用量 42%</g) ?? []).length, 2);
+  assert.match(html, /aria-label="Codex"[^]*fake-usage[^]*tray__cap-title">第三方模型</);
+  assert.match(html, /aria-label="Claude Code"[^]*fake-usage/);
+  assert.doesNotMatch(html, /Cursor/);
 });
 
 test("AC4 重启 Codex 的后果句：说会发生什么，不写「确定吗」；提示框写明只管桌面应用", () => {

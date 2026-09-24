@@ -4,7 +4,8 @@
 /// 与侧栏 `agent` 段、agent 页的节同一份名单与顺序；托盘不自己写一份 Codex 名单。
 /// 能力行的文案与判断一律取自 modelsView，面板与 Codex 页说同一句话。
 import { visibleAgents } from "./shell/agentRegistry.ts";
-import type { AgentEntry, AgentState } from "./shell/agentRegistry.ts";
+import type { ComponentType } from "react";
+import type { AgentEntry, AgentState, TrayRowProps } from "./shell/agentRegistry.ts";
 import {
   effectiveModels,
   enableDisabledReason,
@@ -22,25 +23,21 @@ export { LAUNCH_TIP, RESTART_CONSEQUENCE, RESTART_TIP, UNINSTALL_TIP } from "./m
 export interface TrayBlock {
   id: string;
   name: string;
-  /// 能力行：注册表里这个 agent 的节，按节序；只留面板有画法的（`drawable`）
-  rows: { id: string; title: string }[];
+  /// 能力行：注册表里这个 agent 的节，按节序；只留带 `trayRow` 画法的
+  rows: { id: string; title: string; Row: ComponentType<TrayRowProps> }[];
 }
 
-/// 注册表 → 面板的块。`drawable` 是面板会画的能力行（按节 id，今天只有 `third-party-models`；
-/// 以后的 `usage` 在面板里加一种画法即可）。可用且有节的 agent 才成块（同侧栏的入选条件），
+/// 注册表 → 面板的块。行的画法就在注册表的节上（`trayRow`，今天只有 `third-party-models`；
+/// 以后的 `usage` 给那一节配一个即可，面板不改）。可用且有节的 agent 才成块（同侧栏的入选条件），
 /// 一行都画不出的 agent 不成块（空块头是噪音）
-export function trayBlocks(
-  registry: ReadonlyArray<AgentEntry>,
-  s: AgentState,
-  drawable: ReadonlySet<string>,
-): TrayBlock[] {
+export function trayBlocks(registry: ReadonlyArray<AgentEntry>, s: AgentState): TrayBlock[] {
   return visibleAgents(registry, s)
     .agents.map((agent) => ({
       id: agent.id,
       name: agent.name,
-      rows: agent.sections
-        .filter((section) => drawable.has(section.id))
-        .map((section) => ({ id: section.id, title: section.title })),
+      rows: agent.sections.flatMap((section) =>
+        section.trayRow ? [{ id: section.id, title: section.title, Row: section.trayRow }] : [],
+      ),
     }))
     .filter((block) => block.rows.length > 0);
 }
