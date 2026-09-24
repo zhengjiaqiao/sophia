@@ -20,7 +20,7 @@ import "./SettingsPage.css";
 /// 行高 36；默认只列已安装的，其余收在「显示未安装的 N 个」（安静键）后面。**最多显示 4 个**（上限来自 core，
 /// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
 /// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
-/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（安静键，应用内查，不跳 GitHub）。
+/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24：单独出现的动作不用安静键，应用内查，不跳 GitHub）。
 /// 应用菜单「关于 Sophia」「检查更新…」停在这一节（`aboutRequest`）。
 ///
 /// 改一个生效一个，**没有「保存」按钮**。
@@ -310,12 +310,12 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
         ) : (
           <>
             {grid(present)}
-            {/* 没装的收在一颗安静键后面：列出来只是噪音，但要留入口——
+            {/* 没装的收在一颗默认键（紧凑）后面：列出来只是噪音，但要留入口——
                 用户可能想预先恢复，装上之后就直接在列表里了 */}
             {absent.length > 0 ? (
               <>
                 <div className="settings-page__more">
-                  <Button variant="quiet" onClick={() => setShowAbsent(!showAbsent)}>
+                  <Button size="compact" onClick={() => setShowAbsent(!showAbsent)}>
                     {showAbsent
                       ? `收起未安装的 ${absent.length} 个`
                       : `显示未安装的 ${absent.length} 个`}
@@ -337,13 +337,13 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
           <span className="settings-page__version">{current ?? "…"}</span>
           <span className="settings-page__check">
             {update.kind === "downloading" ? (
-              <Button variant="quiet" disabled disabledReason="正在下载">
+              <Button size="compact" disabled disabledReason="正在下载">
                 检查更新
               </Button>
             ) : (
               // 查的时候键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 正在检查
               <BusySlot busy={checking} label="正在检查">
-                <Button variant="quiet" onClick={() => !checking && void checkUpdate()}>
+                <Button size="compact" onClick={() => !checking && void checkUpdate()}>
                   检查更新
                 </Button>
               </BusySlot>

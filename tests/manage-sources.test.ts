@@ -1,4 +1,4 @@
-/// 位置页 `管理来源`（裁决 15）：来源片那一行末尾的开关式安静键，展开「全部来源」列表
+/// 位置页 `管理来源`（裁决 15）：来源片那一行末尾的开关式默认键（紧凑），展开「全部来源」列表
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -71,11 +71,12 @@ const model = {
 };
 const domain = { key: "project:/Users/me/code/CardBox", label: "CardBox" };
 
-test("管理来源：安静键、开关式（aria-expanded / aria-controls）；一个来源都没订阅时不出", () => {
+test("管理来源：默认键（紧凑，单独出现的动作不用安静键）、开关式（aria-expanded / aria-controls）；一个来源都没订阅时不出", () => {
   const rows = [row("u", "通用仓库"), row("w", "WeiboAP")];
   const closed = render(ManageSourcesKey, { state: stubState(rows, false) as never });
   assert.match(closed, /class="srcmanage"/);
-  assert.match(closed, /class="ss-btn ss-btn--quiet ss-btn--compact"/);
+  assert.match(closed, /class="ss-btn ss-btn--compact"/);
+  assert.doesNotMatch(closed, /ss-btn--quiet/);
   assert.match(closed, /aria-expanded="false"/);
   assert.doesNotMatch(closed, /aria-controls/);
   assert.match(closed, />管理来源<\/button>/);

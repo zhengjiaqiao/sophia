@@ -11,7 +11,7 @@
 /// 规则状态（片首橙点与这一行的开关同一帧变）与移除流程由 `useSources` 持有：来源片的右键菜单
 /// 「移除来源…」走同一个确认，所以移除不能跟着这一行挂载。skill 与 MCP 只差数据源（`SourcesModel`）。
 ///
-/// 来源片那一行末尾的 `管理来源`（裁决 15）：开关式安静键，按下片下展开「全部来源」——订阅的每个来源
+/// 来源片那一行末尾的 `管理来源`（裁决 15）：开关式默认键（紧凑），按下片下展开「全部来源」——订阅的每个来源
 /// 一行，每行就是这里的来源行、行首多一列来源名。开合也由 `useSources` 持有（片、右键菜单、Esc 都要收它）。
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
@@ -307,13 +307,12 @@ export function useSources({
   };
 }
 
-/// 来源片那一行末尾的 `管理来源` / `收起`（安静键，左距 8）。一个来源都没订阅时不出（空态已有 `+ 来源`）
+/// 来源片那一行末尾的 `管理来源` / `收起`（默认键紧凑 24，左距 8：单独出现的动作不用安静键——静止时像一行灰字）。一个来源都没订阅时不出（空态已有 `+ 来源`）
 export function ManageSourcesKey({ state }: { state: SourcesState }) {
   if ((state.data?.rows.length ?? 0) === 0) return null;
   return (
     <span className="srcmanage" ref={state.keyRef}>
       <Button
-        variant="quiet"
         size="compact"
         ariaExpanded={state.listOpen}
         ariaControls={state.listOpen ? state.listId : undefined}
