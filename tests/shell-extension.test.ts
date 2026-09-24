@@ -115,25 +115,61 @@ test("domain 列表：今天 skills、mcp；加第三项，页签、⌘ 数字�
   );
 });
 
-test("`+ 项目` 在侧栏滚动区里吸底：项目少时紧跟最后一项，多到要滚时停在可见区底边；底色 shell，吸住时上沿 16 渐隐", async () => {
+test("`+ 项目` 在侧栏滚动区里吸底：项目少时紧跟最后一项，多到要滚时停在可见区底边；底色 shell，吸住时上沿 1px row-line（不再渐隐）", async () => {
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
   assert.match(
     css,
     /\.sidebar__add \{[^}]*position: sticky;[^}]*bottom: 0;[^}]*background: var\(--shell\);/,
   );
-  // 渐隐只在吸住（下面还有项目）时画，不淡掉紧跟着的最后一个项目名
+  // 线只在吸住（下面还有项目）时画，左右与侧栏项同宽（外距 10）
   assert.match(
     css,
-    /\.sidebar__add\[data-stuck\]::before \{[^}]*height: 16px;[^}]*linear-gradient\(to top, var\(--shell\), transparent\)/,
+    /\.sidebar__add\[data-stuck\]::before \{[^}]*right: 10px;[^}]*left: 10px;[^}]*border-top: var\(--border-row\);/,
   );
+  // 2026-09-25 改用线替代渐隐：`+ 项目` 的规则里不再有渐变
+  const addRules = css.match(/\.sidebar__add[^{]*\{[^}]*\}/g) ?? [];
+  assert.ok(addRules.length > 0);
+  for (const rule of addRules) assert.doesNotMatch(rule, /linear-gradient/);
   const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
-  // 仍在滚动区（nav）里、是项目列表的最后一项，不挪到贴底区
+  // 仍在滚动区（nav）里、是项目列表的最后一项，不挪到贴底区；哨兵紧跟在它原位之后
   assert.match(
     tsx,
-    /<nav\s+className="sidebar__nav"[^]*className="sidebar__add" data-stuck=[^]*<\/nav>/,
+    /<nav\s+className="sidebar__nav"[^]*className="sidebar__add" data-stuck=[^]*ref=\{addEndRef\}[^]*<\/nav>/,
   );
-  assert.match(tsx, /nav\.scrollTop \+ nav\.clientHeight < nav\.scrollHeight - 1/);
+  // 是否吸住由哨兵的 IntersectionObserver 判断（跨线才回调），不在滚动事件里逐帧算
+  assert.match(tsx, /new IntersectionObserver\(/);
+  assert.doesNotMatch(tsx, /nav\.scrollTop \+ nav\.clientHeight/);
+});
+
+test("`+ 项目` 是侧栏的一行，不是键：14px + 图标 + `项目`，同项目行的 side-item", () => {
+  const side = render(Sidebar, sidebarProps([]));
+  const add = side.slice(side.indexOf('class="sidebar__add"'));
+  assert.match(
+    add,
+    /^class="sidebar__add"><div class="side-item side-item--add">(?:<span class="ss-tipwrap[^"]*">)?<button type="button" class="side-item__main"[^>]*><span class="side-item__icon"><svg width="14" height="14"[^]*?<\/svg><\/span><span class="side-item__name">项目<\/span><\/button>/,
+  );
+  // 没吸住时不带 data-stuck；不是键、不带省略号
+  assert.doesNotMatch(add.slice(0, 40), /data-stuck/);
+  assert.doesNotMatch(add.slice(0, add.indexOf("</button>")), /ss-btn/);
+  assert.doesNotMatch(side, /项目…/);
+});
+
+test("`+ 项目` 忙着时禁用：正在移除时带原因", () => {
+  const locked = render(Sidebar, { ...sidebarProps([]), projectBusy: "remove" as const });
+  assert.match(locked, /class="side-item__main" title="正在移除项目，稍等" disabled=""/);
+});
+
+test("agent 页整页（页面头连同各节）限宽 776：外框包住页面头", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+  assert.match(css, /\.agent-page \{[^}]*max-width: 776px;/);
+  const page = render(AgentPage, {
+    entry: fake,
+    onError: () => undefined,
+    onGatewayState: () => undefined,
+  });
+  assert.match(page, /^<div class="agent-page"><div class="page-head/);
 });
 
 test("侧栏滚动区往下滚过之后上沿 16 渐隐：滚过去的项目不在字标带下面硬切", async () => {

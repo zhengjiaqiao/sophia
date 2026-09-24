@@ -323,29 +323,42 @@ input:focus-visible {
   opacity: 1;
 }
 
-/* `+ 项目`：项目列表的最后一项，默认键紧凑 24，左沿对齐项目名（20）。
+/* `+ 项目`：项目列表的最后一项，长相是侧栏的一行（`.side-item--add`，不是键）。
    列表长了它不跟着滚走：吸在滚动区底边（`设置` 上方），底色 shell 盖住滚过去的项目；
-   吸住时（下面还有项目，data-stuck）上沿 16 渐隐，提示列表还在往下延伸 */
+   吸住时（下面还有项目，data-stuck）上沿出 1px row-line，左右与侧栏项同宽（外距 10）——
+   只在吸住时出现，项目少、它紧跟最后一项时和列表之间没有分隔。不用渐隐 */
 .sidebar__add {
   position: sticky;
   bottom: 0;
   z-index: 1;
-  display: flex;
-  align-items: center;
-  height: 34px;
-  padding: 0 20px;
   background: var(--shell);
 }
 
 .sidebar__add[data-stuck]::before {
   content: "";
   position: absolute;
-  right: 0;
-  bottom: 100%;
-  left: 0;
-  height: 16px;
-  background: linear-gradient(to top, var(--shell), transparent);
+  top: 0;
+  right: 10px;
+  left: 10px;
+  border-top: var(--border-row);
   pointer-events: none;
+}
+
+/* 禁用原因提示框的包层接过行里的弹性占位（没有原因时它 display: contents，不占盒） */
+.side-item--add > .ss-tipwrap {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+}
+
+/* 忙着（正在添加 / 正在移除）：行不回应悬停，字退到 ink-faint（同禁用的键）；
+   正在添加时原位的「转圈 + 一句」自带 ink-mute */
+.side-item--add:has(.side-item__main:disabled) {
+  background: none;
+}
+
+.side-item--add:has(.side-item__main:disabled) .side-item__main {
+  color: var(--ink-faint);
 }
 
 /* 滚动区上沿：往下滚过之后画 16 渐隐（shell → 透明），滚过去的项目不在字标带下面硬切。
@@ -442,6 +455,12 @@ input:focus-visible {
 
 .page-head__actions:empty {
   display: none;
+}
+
+/* agent 页（shell/AgentPage.tsx）：页面头连同各节整页限宽 776，左沿＝机面内左沿——与位置页的表同宽、
+   同一条左右沿（DESIGN「agent 页 › 第三方模型」：一条左沿、一列控件）。页内怎么排归各节 */
+.agent-page {
+  max-width: 776px;
 }
 
 /* agent 页的节（shell/AgentPage.tsx 把每一节包一层）：页面头下 24，节与节之间 48（DESIGN「agent 页」）。

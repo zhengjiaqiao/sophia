@@ -6,7 +6,6 @@ import { PROJECT_SORTS, type ProjectSort, type SidebarProject } from "../sidebar
 import { contextMenuHandler } from "../contextMenu.ts";
 import type { AnchorRect } from "../layerPlace.ts";
 import {
-  AddButton,
   AgentIcon,
   BusySlot,
   Cap,
@@ -14,8 +13,10 @@ import {
   IconButton,
   IconCheck,
   IconClose,
+  IconPlus,
   IconSettings,
   Indicator,
+  ReasonTip,
   Toast,
   Tooltip,
 } from "../ui/index.ts";
@@ -75,29 +76,39 @@ export function Sidebar(props: SidebarProps) {
   /// 右键菜单开着的那一行：`surface` 行带，菜单关掉即摘
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
-  /// `+ 项目` 吸在滚动区底边时（下面还有没滚到的项目）才画上沿的渐隐：项目少、它紧跟最后一项时不画，
-  /// 免得把最后一个项目名的下半截也淡掉
   const navRef = useRef<HTMLElement>(null);
-  const [addStuck, setAddStuck] = useState(false);
   /// 往下滚过了（上面有项目被字标带挡住）：滚动区上沿画 16 渐隐，不让半截项目名硬切在字标下面
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
-    const update = () => {
-      setAddStuck(nav.scrollTop + nav.clientHeight < nav.scrollHeight - 1);
-      setScrolled(nav.scrollTop > 0);
-    };
+    const update = () => setScrolled(nav.scrollTop > 0);
     update();
     nav.addEventListener("scroll", update, { passive: true });
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-    observer?.observe(nav);
-    for (const child of Array.from(nav.children)) observer?.observe(child);
-    return () => {
-      nav.removeEventListener("scroll", update);
-      observer?.disconnect();
-    };
-  }, [props.projects.length, props.agents.length]);
+    return () => nav.removeEventListener("scroll", update);
+  }, []);
+
+  /// `+ 项目` 吸在滚动区底边时（下面还有没滚到的项目）上沿才出 1px row-line；项目少、它紧跟最后一项时不画。
+  /// 判断靠哨兵：它排在 `+ 项目` 的原位末端（不随 sticky 移动），原位露在可见区里＝没吸住，
+  /// 被挤到可见区下面＝吸住了。IntersectionObserver 只在跨线时回调，不逐帧算；
+  /// 可见区底边按 nav 的下内边距内缩——sticky 的 bottom: 0 也是量到内边距里面
+  const addEndRef = useRef<HTMLDivElement>(null);
+  const [addStuck, setAddStuck] = useState(false);
+  useEffect(() => {
+    const nav = navRef.current;
+    const end = addEndRef.current;
+    if (!nav || !end || typeof IntersectionObserver === "undefined") return;
+    const inset = parseFloat(getComputedStyle(nav).paddingBottom) || 0;
+    const observer = new IntersectionObserver(
+      ([entry]) => setAddStuck(!entry.isIntersecting),
+      { root: nav, rootMargin: `0px 0px ${-inset}px 0px` },
+    );
+    observer.observe(end);
+    return () => observer.disconnect();
+  }, []);
+
+  const addBusy = props.projectBusy === "add";
+  const addLocked = props.projectBusy === "remove" ? "正在移除项目，稍等" : undefined;
 
   const remove = (p: SidebarProject, row: Element | null) => {
     const x = row?.querySelector(".side-item__remove") ?? row;
@@ -223,18 +234,32 @@ export function Sidebar(props: SidebarProps) {
             </div>
           );
         })}
-        {/* `+ 项目` 是项目列表的最后一项：默认键紧凑 24，左沿对齐项目名。列表长了它吸在滚动区底边、
-          不跟着滚走（DESIGN「项目」段），吸住时上沿 16 渐隐 */}
+        {/* `+ 项目` 是项目列表的最后一项，长相是侧栏的一行（不是键）：14px `+` + `项目`，ink-mute，
+          行高、左沿、悬停 surface 带都同项目行。列表长了它吸在滚动区底边、不跟着滚走（DESIGN「项目」段），
+          只在吸住时上沿出 1px row-line */}
         <div className="sidebar__add" data-stuck={addStuck || undefined}>
-          <BusySlot busy={props.projectBusy === "add"} label="正在添加项目">
-            <AddButton
-              noun="项目"
-              size="compact"
-              disabledReason={props.projectBusy === "remove" ? "正在移除项目，稍等" : undefined}
-              onClick={props.onAddProject}
-            />
-          </BusySlot>
+          <div className="side-item side-item--add">
+            <ReasonTip reason={addLocked}>
+              <button
+                type="button"
+                className="side-item__main"
+                title={addLocked}
+                disabled={addBusy || addLocked !== undefined}
+                aria-busy={addBusy || undefined}
+                onClick={props.onAddProject}
+              >
+                <BusySlot busy={addBusy} label="正在添加项目">
+                  <span className="side-item__icon">
+                    <IconPlus size={14} />
+                  </span>
+                  <span className="side-item__name">项目</span>
+                </BusySlot>
+              </button>
+            </ReasonTip>
+          </div>
         </div>
+        {/* 吸底哨兵：`+ 项目` 原位的末端，不占高 */}
+        <div ref={addEndRef} className="sidebar__add-end" aria-hidden="true" />
         {props.removed && (
           <FloatingToast key={props.removed.at} align="start" anchor={() => props.removed?.anchor}>
             <Toast
