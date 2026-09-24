@@ -52,11 +52,10 @@ const base = {
   onFilterText: () => undefined,
   selected: new Set<string>(),
   onSelectionChange: () => undefined,
-  selectionKeys: [],
   onCell: () => undefined,
 };
 
-test("Matrix：通道条表头 + 原件位置列（120，来源名），没有分组组头", () => {
+test("Matrix：通道条表头 + 来源列（120，来源名），没有分组组头；列头名经 Cap、结构线不用墨", () => {
   const html = render(Matrix, base);
   assert.match(html, /class="mx-grid mx-head"/);
   // 原件位置列恢复：点列头文字按位置排序（没有 ▾ 下拉）；格里写来源名
@@ -65,10 +64,20 @@ test("Matrix：通道条表头 + 原件位置列（120，来源名），没有�
   assert.match(html, /class="mx-origin"[^>]*>WeiboAP</);
   // 按来源分组已撤销（退役行为）：没有组头、没有组头上的规则开关
   assert.doesNotMatch(html, /mx-group|以后新出现的/);
-  // 目录还不存在的列：虚线列头
+  // 目录还不存在的列：图标外一圈虚线、计数空
   assert.match(html, /mx-colbtn is-missing/);
-  // 列宽：勾选 34 + 名字 246 + 原件位置 120 + 88 × 2 + 尾 24
-  assert.match(html, /grid-template-columns:34px minmax\(246px, 1fr\) 120px 88px 88px 24px/);
+  // 列头名经 Cap（Condensed 大写只给拉丁 run）
+  assert.match(
+    html,
+    /class="mx-colbtn__name"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">Claude Code<\/span>/,
+  );
+  // 列宽：勾选 34 + 名字（吸收余下，4 列时 246）+ 来源 120 + 88 × 2 + 尾 24；面板定宽 776
+  assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 120px 88px 88px 24px/);
+  assert.match(html, /class="mx-panel" style="width:776px"/);
+  // V4：没有 2px 墨线，没有列带（D23）
+  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /2px solid var\(--ink\)|mx-band/);
+  assert.doesNotMatch(css, /cursor: pointer|dotted/);
   // 默认名称升序
   assert.ok(html.indexOf(">docx<") < html.indexOf(">pdf<"));
   // 行内忙碌指示 + 句子属于退役行为：批量时格子同时变、不在行里转
@@ -78,7 +87,7 @@ test("Matrix：通道条表头 + 原件位置列（120，来源名），没有�
 test("MCP 格的读屏名不说「软链」：linked＝已写进 · 副本，own＝原件（这两个域共用一张表，词不能照抄 skill 的）", () => {
   const mcpProps = {
     ...base,
-    transportLabel: "传输",
+    dotWords: "mcp" as const,
     rows: [
       {
         ...base.rows[0],
@@ -118,11 +127,10 @@ test("Matrix：原件位置列头只排序——没有 ▾ 下拉、没有规则
   assert.match(html, /class="mx-head__origin"><button type="button" class="mx-headbtn">原件位置/);
 });
 
-test("Matrix：选择态——第一行 已选 N 个 + 所有 agent + 每个 agent 一项「● / ○ 名字」+ 取消选择", () => {
+test("Matrix：选择行（D4）——表头下一条，用表格同一套列：已选 N 个 + 取消 ｜ 所有 agent ● ｜ 每个 agent 列正下方一点", () => {
   const noop = () => undefined;
   const html = render(Matrix, {
     ...base,
-    transportLabel: "传输",
     selected: new Set(["u|docx"]),
     allAgents: {
       checked: false,
@@ -146,36 +154,40 @@ test("Matrix：选择态——第一行 已选 N 个 + 所有 agent + 每个 age
       },
     },
   });
-  assert.match(html, /grid-template-columns:34px minmax\(246px, 1fr\) 72px 120px 88px 88px 24px/);
-  assert.match(html, /已选 <span class="mx-mono">1<\/span> 个/);
-  assert.match(html, /aria-label="选中的都加到所有 agent"/);
-  assert.match(html, /class="mx-agentitem__name">所有 agent</);
-  // 每一项是 button：状态点（● linked / ○ missing，与格子同一套，悬停出光晕）+ 正文名字
+  // 选择行在列头里（吸在列头下），同一套列
+  const head = html.slice(html.indexOf('class="mx-headwrap"'), html.indexOf('class="mx-body"'));
   assert.match(
-    html,
+    head,
+    /class="mx-grid mx-selrow" style="grid-template-columns:34px minmax\(0, 1fr\) 120px 88px 88px 24px"/,
+  );
+  assert.match(head, /class="mx-selcount">已选 1 个</);
+  assert.match(head, /class="ss-btn ss-btn--quiet"[^>]*>取消</);
+  // 来源列：所有 agent + 点
+  assert.match(
+    head,
+    /class="mx-selrow__alllabel">所有 agent<[\s\S]*?aria-label="选中的都加到所有 agent"/,
+  );
+  // 每个 agent 列正下方一点：● linked / ○ missing，与格子同一套，悬停出光晕
+  assert.match(
+    head,
     /aria-label="选中的都从 Claude Code 移除"[^>]*>[\s\S]*?data-dot="linked" data-hoverable=""/,
   );
-  assert.match(html, /class="mx-agentitem__name">Claude Code</);
-  // 禁用：点和字都用 disabled 色，读屏带原因
+  // 没有可改的格子：点 ink-faint，读屏带原因；按下当即说明原因（explain 包层），能点的按下即收起
   assert.match(
-    html,
-    /class="ss-dot-btn mx-agentitem is-disabled" aria-label="选中的都加到 Codex：这几个都写不进"/,
-  );
-  // 禁用项点了做不了：按下当即说明原因（explain 包层），能点的项按下即收起（普通包层）
-  assert.match(
-    html,
-    /<span class="ss-tipwrap is-explain"><button type="button" class="ss-dot-btn mx-agentitem is-disabled"/,
+    head,
+    /<span class="ss-tipwrap is-explain"><button type="button" class="ss-dot-btn mx-seldot is-disabled" aria-label="选中的都加到 Codex：这几个都写不进"/,
   );
   assert.match(
-    html,
-    /<span class="ss-tipwrap"><button type="button" class="ss-dot-btn mx-agentitem" aria-label="选中的都从 Claude Code 移除"/,
+    head,
+    /<span class="ss-tipwrap"><button type="button" class="ss-dot-btn mx-seldot" aria-label="选中的都从 Claude Code 移除"/,
   );
-  assert.match(html, /取消选择/);
-  // 列头复选框属于已退役的行为：列头回到只有图标、名字、计数
-  assert.doesNotMatch(html, /mx-colcheck|选中的都加到 Claude Code/);
-  // 名称列头左边的「全选」框是选行用的，照旧半选
+  // 选择行里不写 agent 名（点就在自己的列里）；列头不出任何选择控件
+  assert.doesNotMatch(html, /mx-agentitem|mx-colcheck|选中的都加到 Claude Code/);
+  // 名称列头左边的「全选」框是选行用的，照旧半选；选择行复选列空着（同一件事不放两个框）
   assert.match(html, /aria-checked="mixed" aria-label="全选"/);
-  assert.doesNotMatch(html, /placeholder="筛选"/);
+  assert.equal((head.match(/aria-label="全选"/g) ?? []).length, 1);
+  // 没有顶替工具行的选择条
+  assert.doesNotMatch(html, /mx-toolbar/);
 });
 
 test("clampFocus：筛选让行变少、列数变了之后，焦点格夹回最近的有效格；表为空时不设", async () => {
@@ -203,26 +215,22 @@ test("Matrix：名称列头带总数，没有来源筛选片", () => {
   assert.doesNotMatch(html, /ss-chip/);
 });
 
-test("Matrix：工具行第二行来源筛选片——全部 N 在最前默认选中；选择条只顶替第一行，来源片仍在", () => {
+test("Matrix：来源筛选片——`全部` 在最前、默认选中、不带数（D12）；规则开着的片首橙点；勾选期间来源片仍在", () => {
   const sources = {
-    total: 2,
     selected: [],
     onSelect: () => undefined,
     items: [
       { id: "u", label: "通用仓库", count: 1 },
-      { id: "w", label: "WeiboAP", count: 1 },
+      { id: "w", label: "WeiboAP", count: 1, rule: true },
     ],
   };
   const idle = render(Matrix, { ...base, sources });
   assert.match(idle, /class="mx-sources"/);
-  assert.match(
-    idle,
-    /aria-pressed="true"><span class="ss-chip__label">全部<\/span><span class="ss-chip__count">2</,
-  );
-  assert.match(idle, /placeholder="筛选"/);
+  assert.match(idle, /aria-pressed="true"><span class="ss-chip__label">全部<\/span><\/button>/);
+  // 开着自动规则的来源：片首 6px 橙点（Indicator），其余片没有
+  assert.match(idle, /class="mx-sourcechip has-rule" data-origin="w"[\s\S]*?ss-indicator is-on/);
+  assert.match(idle, /class="mx-sourcechip" data-origin="u"/);
   const picking = render(Matrix, { ...base, sources, selected: new Set(["u|docx"]) });
-  // 第一行换成选择条，第二行来源片保留
-  assert.doesNotMatch(picking, /placeholder="筛选"/);
   assert.match(picking, /已选/);
   assert.match(picking, /class="mx-sources"/);
 });
@@ -231,7 +239,6 @@ test("Matrix：加完来源一次选中几片（全部不选中）；片上不�
   const html = render(Matrix, {
     ...base,
     sources: {
-      total: 3,
       selected: ["u", "w"],
       onSelect: () => undefined,
       items: [
@@ -296,16 +303,20 @@ test("做不了的格子的说明：为什么 + 去哪做", async () => {
   );
   assert.equal(
     blockedTipOf("duplicate", "Cursor", "docx", ""),
-    "Cursor 下已有一个同名的 docx，不是这一份",
+    "Cursor 里已有一个同名的 docx，不是这一份",
   );
+  // 同名占位（⊘，D22）：占着这一格的是表格里另一行的来源时说出它，并指到这一行上的「只留这份」
   assert.equal(
-    blockedTipOf("foreign", "Cursor", "docx", ""),
-    "Cursor 下已有一个同名的 docx，不是这一份",
+    blockedTipOf("foreign", "Claude Code", "defuddle", "", "WeiboAP"),
+    "Claude Code 里已有 WeiboAP 那份同名的 defuddle · 在这一行上只留一份",
   );
   // 整个文件夹是链接：沿用 cellState 的原因
   assert.equal(blockedTipOf("wholeLinked", "Cursor", "docx", "原句"), "原句");
   // MCP 原件格：与 core 拒绝原件格时说的同一句（mcp::removal::ORIGINAL_MESSAGE）
-  assert.equal(MCP_OWN_TIP, "这是原件所在的位置，从这里移除等于删掉原件——到来源管理页移除这个来源");
+  assert.equal(
+    MCP_OWN_TIP,
+    "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，选中这个来源的片，在来源行上移除这个来源",
+  );
   const removal = readFileSync(
     new URL("../crates/core/src/mcp/removal.rs", import.meta.url),
     "utf8",
@@ -332,18 +343,17 @@ test("批量写入：格子同时变、不依次点亮；只锁按下的那一�
   assert.doesNotMatch(render(Matrix, props), /mx-keybusy|mx-locked/);
   // 刚按下（首帧，还没过门槛）：只有按下的那一项锁住，不出忙碌指示、不变淡；别的项照常能按
   const pressed = render(Matrix, { ...props, keyBusy: { keyId: "cx", label: "正在加到 Codex" } });
-  assert.doesNotMatch(pressed, /mx-keybusy/);
+  assert.doesNotMatch(pressed, /mx-selbusy/);
   assert.doesNotMatch(pressed, /ss-busy/);
   assert.equal((pressed.match(/<span class="mx-locked">/g) ?? []).length, 1);
+  // 锁住的是 Codex 那一列的点
   const lock = pressed.indexOf('<span class="mx-locked">');
-  assert.ok(lock > pressed.indexOf('mx-agentitem__name">Claude Code<'));
-  assert.ok(pressed.indexOf('mx-agentitem__name">Codex<') > lock);
-  // 过了门槛之后那一项旁的忙碌指示 + 句子：只在门槛之后出现（Matrix 里经 useBusyShown 把关）
+  assert.ok(lock > pressed.indexOf('aria-label="选中的都加到 Claude Code"'));
+  assert.ok(pressed.indexOf('aria-label="选中的都加到 Codex"') > lock);
+  // 过了门槛之后：被按的点原位换成辐条、`已选 N 个` 后接一句——只在门槛之后（经 useBusyShown 把关）
   const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
-  assert.match(
-    src,
-    /busyShown && keyBusy\?\.keyId === col\.id \? <KeyBusy label=\{keyBusy\.label\} \/>/,
-  );
+  assert.match(src, /busy=\{busyShown && busyKey === col\.id\}/);
+  assert.match(src, /busyShown && keyBusy \? \(\s*<span className="mx-selbusy"/);
 });
 
 test("单格的结果：浮在被点那一格正下方（成功与失败同一个位置），不挂进行里，不重复名字，不带撤销，一次只一条", async () => {
@@ -424,6 +434,62 @@ test("格子提示框的 · 空格 只给键盘：鼠标悬停不写，格子按
   );
 });
 
-test("Skills 与 MCP 同一个固定面板宽度：工具行、表格都是 848，agent 少时多出的给名称列（DESIGN「三个主视图怎么对齐」）", () => {
-  assert.equal(PANEL_W, 848);
+test("Skills 与 MCP 同一个固定面板宽度 776（34 + 246 + 120 + 4 × 88 + 24）；页面头、来源片与表格同一条右沿", () => {
+  assert.equal(PANEL_W, 776);
+  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  // 页面头（壳渲染）在位置页里限宽到同一条右沿，并与来源片、列头一起吸顶
+  assert.match(
+    css,
+    /\.face__scroll > \.page-head:has\(~ \.mx-page\) \{[^}]*position: sticky;[^}]*max-width: 776px;/,
+  );
+  assert.match(css, /\.mx-bar \{[^}]*position: sticky;[^}]*width: 776px;/);
+});
+
+test("MCP 5 列时名称列让到 158、面板宽不变：名称列吸收余下的宽度", () => {
+  const five = ["a", "b", "c", "d", "e"].map((id) => ({
+    id,
+    agentId: "codex",
+    name: "Codex",
+    count: 0,
+    tip: "Codex",
+  }));
+  const html = render(Matrix, { ...base, columns: five, rows: [] });
+  assert.match(
+    html,
+    /grid-template-columns:34px minmax\(0, 1fr\) 120px 88px 88px 88px 88px 88px 24px/,
+  );
+  assert.equal(776 - 34 - 120 - 5 * 88 - 24, 158);
+});
+
+test("MCP 列头第二行 LOCAL / PROJECT 经 Cap；没有 `传输` 列（D7：挪进行详情）", () => {
+  const html = render(Matrix, {
+    ...base,
+    dotWords: "mcp" as const,
+    columns: [
+      { id: "l", agentId: "claude-code", name: "Claude Code", scope: "local", count: 1, tip: "x" },
+      {
+        id: "p",
+        agentId: "claude-code",
+        name: "Claude Code",
+        scope: "project",
+        count: 0,
+        tip: "y",
+      },
+    ],
+    rows: [],
+  });
+  assert.match(
+    html,
+    /class="mx-colbtn__scope"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">local</,
+  );
+  assert.doesNotMatch(html, /传输|mx-row__transport/);
+});
+
+test("来源行：短路径中段省略（前段截断、末两级完整）", async () => {
+  const { splitPath } = await import("../src/SourceRow.tsx");
+  assert.deepEqual(splitPath("/Users/me/Library/Application Support/WeiboAP/skills"), {
+    head: "/Users/me/Library/Application Support/",
+    tail: "WeiboAP/skills",
+  });
+  assert.deepEqual(splitPath("~/skills"), { head: "", tail: "~/skills" });
 });

@@ -103,7 +103,7 @@ test("readOnly：只有写失败后才会构造出来", () => {
   assert.deepEqual(view("readOnly"), {
     dot: "readOnly",
     clickable: false,
-    reason: "Codex 的 skills 目录写不进去，obsidian-cli 没能开启",
+    reason: "无法写入 Codex 的 skills 目录，obsidian-cli 没加上",
     issue: "readOnlyTarget",
   });
 });

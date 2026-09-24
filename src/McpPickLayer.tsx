@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
-import { FloatingLayer } from "./pages/SourcesPage";
+import { FloatingLayer } from "./ui/FloatingLayer.tsx";
 import { pickDiffText, pickTitle } from "./mcpView";
 import type { McpDiff, McpEntry } from "./types";
 
@@ -17,7 +17,7 @@ export interface McpPick {
 const ITEM = '[role="menuitem"]';
 
 /// MCP 同名多份时的挑选浮层（DESIGN「MCP 同名多份时就地挑一份写进去」）：锚在被点的格子上，
-/// 与来源管理页的目标浮层 / `+ 来源` 同一写法。每项一行＝来源位置名 + 与其他几份差在哪几个字段
+/// 与来源行的目标浮层同一写法（`FloatingLayer`）。每项一行＝来源位置名 + 与其他几份差在哪几个字段
 /// （只给字段名，不出现令牌、密钥的值）；点一项就把那一份写进这一格。
 /// 键盘：打开即聚焦第一项，方向键上下移动，回车选中，Esc 关掉并把焦点还给格子
 export function McpPickLayer({
@@ -69,22 +69,22 @@ export function McpPickLayer({
     <FloatingLayer
       trigger={pick.trigger}
       onClose={onClose}
-      className="src-menu mcp-pick"
+      className="ss-menu mcp-pick"
       label={title}
     >
-      <div className="src-menu__head mcp-pick__title">{title}</div>
+      <div className="ss-menu__head mcp-pick__title">{title}</div>
       <div ref={listRef} className="mcp-pick__list">
         {pick.choices.map((entry) => (
           <button
             key={entry.sourceId}
             type="button"
             role="menuitem"
-            className="src-menu__item"
+            className="ss-menu__item"
             onKeyDown={move}
             onClick={() => onPick(entry.sourceId)}
           >
-            <span className="src-menu__name">{labelOf(entry.sourceId)}</span>
-            <span className="src-menu__sub">
+            <span className="ss-menu__name">{labelOf(entry.sourceId)}</span>
+            <span className="ss-menu__sub">
               {pick.diff === undefined ? "正在比对" : pickDiffText(pick.diff, entry.sourceId)}
             </span>
           </button>

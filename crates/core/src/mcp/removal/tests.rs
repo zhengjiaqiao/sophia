@@ -354,3 +354,15 @@ fn batch_removes_what_it_can_and_says_why_for_the_rest() {
     assert_eq!(undo_write(&undo).outcome, "undone");
     assert_eq!(fs::read(&cursor).unwrap(), cursor_original);
 }
+
+/// 原件格被拒时说的话与前端 `src/cellTip.ts` 的 `MCP_OWN_TIP` 是同一句（DESIGN「文案语域」D24）：
+/// 来源管理页已删，去处写成选中这个来源的片、在来源行上移除；文案语域是「无法 + 动词」
+#[test]
+fn 原件格与拿不掉的说法_按_d24_写全() {
+    assert_eq!(
+        ORIGINAL_MESSAGE,
+        "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，选中这个来源的片，在来源行上移除这个来源"
+    );
+    assert!(!ORIGINAL_MESSAGE.contains("来源管理页"));
+    assert_eq!(CANNOT_CUT, "这一项的写法无法安全地单独拿掉，没有改动");
+}

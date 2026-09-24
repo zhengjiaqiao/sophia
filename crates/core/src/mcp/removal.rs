@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 /// 点了原件格：来源自己那一处的定义是原件，不能在格子上移除
 pub const ORIGINAL_MESSAGE: &str =
-    "这是原件所在的位置，从这里移除等于删掉原件——到来源管理页移除这个来源";
-const CANNOT_CUT: &str = "这一项的写法没法安全地单独拿掉，没动";
+    "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，选中这个来源的片，在来源行上移除这个来源";
+const CANNOT_CUT: &str = "这一项的写法无法安全地单独拿掉，没有改动";
 
 /// 要移除的一份副本
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

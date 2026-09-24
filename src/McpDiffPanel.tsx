@@ -7,6 +7,7 @@ import "./McpDiffPanel.css";
 /// - 只列**不同的字段**：字段名 ｜ 位置 A 的值 ｜ 位置 B 的值，三列对齐；值用等宽，不同的那一段加粗
 ///   （不用反色，反色已是「刚变化」）
 /// - headers、env 里的令牌与密钥不显示原值，只写「不同 · 末 4 位」，悬停「出于安全不显示原值」
+/// - 值可以选中拷走（D23：路径、id、命令放开文字选取）
 /// - 认证头运行时才生成的，如实说比不了，不假装比过
 /// - `在访达中显示 ↗` 是展开区末尾的次要文字链
 ///
@@ -60,7 +61,7 @@ function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, numb
   const text = value.text;
   const mid = text.slice(pre, text.length - suf);
   return (
-    <span className="mcp-diff__mono">
+    <span className="mcp-diff__mono ss-selectable">
       {text.slice(0, pre)}
       {mid ? <b>{mid}</b> : null}
       {text.slice(text.length - suf)}
@@ -80,7 +81,7 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
   if (diff instanceof Error) {
     return (
       <div className="mcp-diff">
-        <div className="mcp-diff__note">没比成：{diff.message}</div>
+        <div className="mcp-diff__note">无法比对：{diff.message}</div>
         {revealLink}
       </div>
     );
@@ -116,15 +117,15 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
         </div>
       ) : diff.dynamicAuth ? null : (
         <div className="mcp-diff__note">
-          连接字段逐项看都一样，不一样的是只有某个 agent 认得的写法
+          连接字段逐项看都一样，不一样的是只有某个 agent 支持的写法
         </div>
       )}
       {diff.dynamicAuth ? (
-        <div className="mcp-diff__note">认证头要到运行时才生成，没法逐字比对</div>
+        <div className="mcp-diff__note">认证头要到运行时才生成，无法逐字比对</div>
       ) : null}
       {diff.unreadable.length > 0 ? (
         <div className="mcp-diff__note">
-          {diff.unreadable.map(labelOf).join("、")} 这次读不出来，没法比
+          {diff.unreadable.map(labelOf).join("、")} 这次无法读取，没有比对
         </div>
       ) : null}
       {revealLink}

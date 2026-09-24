@@ -1,5 +1,5 @@
-/// 来源管理页的两种数据源（skill / MCP）：同一套骨架（SourcesPage），这里把两边的命令与造句
-/// 换成同一种行、目标、候选与移除，页面只认这一种形状。不产 JSX。
+/// 位置页来源的两种数据源（skill / MCP）：来源行（`SourceRow.tsx`）与添加来源页同一套骨架，
+/// 这里把两边的命令与造句换成同一种行、目标、候选与移除，页面只认这一种形状。不产 JSX。
 import { api } from "../api";
 import type { McpLocation, McpReport, McpService, SyncReport, Target } from "../types";
 import type { ToastProps } from "../ui";
@@ -131,7 +131,7 @@ const RULE_TITLE = "只管以后新出现的，现有的不变";
 
 /// 做完一批：全部成了是例行一行；有没成的说几个没成、第一个的原因
 function removalToast(total: number, failed: string[], what: string): ToastText {
-  if (failed.length === 0) return { tier: "routine", kind: "success", verb: "移除" };
+  if (failed.length === 0) return { tier: "routine", kind: "success", verb: "已移除" };
   return {
     tier: "notice",
     kind: "partial",
@@ -282,7 +282,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
       source,
       locations.filter((l) => l.id !== sourceId),
     );
-    if (tip !== null) return { name: x.name, tag: { text: "搬不过去", tip }, dim: true };
+    if (tip !== null) return { name: x.name, tag: { text: "不支持", tip }, dim: true };
     return sameName(x.name)
       ? { name: x.name, tag: { text: "同名", tip: MCP_SAME_NAME_TIP } }
       : { name: x.name };
@@ -322,7 +322,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             own: s.own,
             items: s.services.map((x) => serviceItem(x, s.label, s.id, dupAmongSubscribed)),
             targets: s.autoTargets,
-            switchReason: s.unreadable ? "读不到它的配置，先修好再开" : undefined,
+            switchReason: s.unreadable ? "无法读取它的配置，修好之后才能打开" : undefined,
             switchTitle: crossDomain
               ? `${RULE_TITLE}；写到这里会把请求头和令牌一并复制过来`
               : RULE_TITLE,

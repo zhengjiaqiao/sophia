@@ -1,0 +1,181 @@
+/* 来源行（SourceRow.tsx，DESIGN「位置页 › 来源行」）：高 40、13 号字、底 1px row-line，纯文字行无底色。
+   左短路径 + `打开 ↗`；右 `以后新出现的自动加到` + 8 + 目标框 + 8 + 紧凑开关；最右 × 图标键（左距 6）。
+   色值一律 var(--…)，唯一来源是 tokens.css */
+@import "./tokens.css";
+
+.srcrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  height: 40px;
+  border-bottom: var(--border-row);
+  font-size: var(--size-caption);
+}
+
+.srcrow__where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.srcrow__where > .ss-tipwrap:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.srcrow__where > .ss-tipwrap:last-child,
+.srcrow__where > .mx-reveal {
+  flex-shrink: 0;
+}
+
+/* 短路径：mono 12 ink-faint；可选中拷走（D23）。放不下时前段截断、末两级完整（中段省略） */
+.srcrow__path {
+  display: flex;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.srcrow__head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.srcrow__tail {
+  flex-shrink: 0;
+}
+
+.srcrow__rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
+.srcrow__label {
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.srcrow__label.is-disabled {
+  color: var(--ink-faint);
+}
+
+/* 目标框：高 24、paper 面、1px ctl-border、control 7；里面目标 agent 的 13px 图标 + ▾，看得出能点开改。
+   有边的块：悬停描边升一档（ctl-edge），底色不变 */
+.srcrow__targets {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  height: var(--control-h-compact);
+  padding: 0 6px 0 8px;
+  border: var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  cursor: default;
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.srcrow__targets:hover,
+.srcrow__targets.is-open {
+  border-color: var(--ctl-edge);
+}
+
+/* 规则关着时框里写 `选目标 ▾`（ink-faint） */
+.srcrow__pick {
+  color: var(--ink-faint);
+}
+
+.srcrow__chevron {
+  flex-shrink: 0;
+  color: var(--ink-mute);
+}
+
+.srcrow__remove {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: calc(6px - var(--space-xs));
+}
+
+/* 目标浮层：一行 = 复选框 + 图标 14 + 名字，整行可点；没勾的名字 ink-mute；高亮行 surface、control 7、左右内缩 4 */
+.srcrow-targets {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  padding: var(--space-xxs) 0;
+}
+
+.srcrow-target {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 30px;
+  margin: 0 var(--space-xxs);
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: default;
+}
+
+.srcrow-target:hover:not(:disabled),
+.srcrow-target:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+.srcrow-target:hover:not(:disabled) .ss-checkbox {
+  border-color: var(--ink);
+}
+
+.srcrow-target__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.srcrow-target__name {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.srcrow-target.is-on .srcrow-target__name {
+  color: var(--ink);
+}
+
+/* 点不了的原因：名字下面一行，12 ink-mute，可折行（原因要写全） */
+.srcrow-target__why {
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: normal;
+}
+
+.srcrow-target:disabled .srcrow-target__name {
+  color: var(--ink-faint);
+}
+
+.srcrow-target:disabled .ss-checkbox {
+  border-color: var(--hairline);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .srcrow__targets {
+    transition: none;
+  }
+}

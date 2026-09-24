@@ -1,12 +1,12 @@
-/// Skills 的一个域（全局或某项目）→ 共享表格 `Matrix` 的视图（DESIGN「主视图」「表格 = 面板」）。
+/// Skills 的一个位置（全局或某项目）→ 共享表格 `Matrix` 的视图（DESIGN「位置页：skills ｜ mcp」）。
 ///
-/// 只做折算：把 DomainPage 的行 × 目标折成「行 + 原件位置 + 格 + 选择键」，点了什么
+/// 只做折算：把 DomainPage 的行 × 目标折成「行 + 来源 + 格 + 选择行的点」，点了什么
 /// 原样交回 SkillsTab（写操作、乐观更新、提示条都在那里）。格的语义取自 `cellState.viewOf`，
 /// 不在这里另写一份。
 ///
-/// 「原件位置」列恢复、按来源分组撤销（DESIGN「产品裁决」冲突表）：位置信息常驻视线；
-/// 点这一列列头文字按位置排序。自动添加规则只在来源管理页管理，主视图不放规则入口。
-/// 说明横幅、「清除失效的」总按钮仍不回来（失效画在那一格上，点那一格就是重新链接；
+/// 来源片是这个位置订阅的来源（D3：管理一个来源＝选中它的片，来源行由 SkillsTab 给）；
+/// 一个 skill 都没有的已订阅来源也有片（计数 0），选中它才找得到它的来源行。
+/// 说明横幅、「清除失效的」总按钮不回来（失效画在那一格上，点那一格就是重新链接；
 /// 原件已不在的孤链照样成一行，点那一格就是清除）。
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
@@ -16,7 +16,9 @@ import Matrix, {
   type MatrixCellView,
   type MatrixRowView,
   type ColumnCheck,
+  type SourceChipItem,
 } from "./Matrix";
+import type { ContextMenuItem } from "./contextMenu";
 import { originNames, originText } from "./originName";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
@@ -78,14 +80,22 @@ export interface DomainViewProps {
   filterText: string;
   onFilterText: (text: string) => void;
   onClearFilter: () => void;
-  /// 按来源筛选中的来源（工具行第二行的片）；空＝全部。加完来源时可能一次选中几片
+  /// 按来源筛选中的来源（来源片）；空＝全部。加完来源时可能一次选中几片
   originFilter: readonly string[];
   onOriginFilter: (next: string[]) => void;
+  /// 这个位置已订阅、但表格里一行都没有的来源（id 与名字）：照样成片（计数 0）
+  emptySources: { id: string; name: string }[];
+  /// 这个来源开着「以后新出现的自动加到」（片首橙点）
+  ruleOn: (id: string) => boolean;
+  /// 来源片的右键菜单（在访达中显示 · 移除来源…）
+  chipMenu: (id: string, chip: HTMLElement) => ContextMenuItem[];
+  /// 恰好选中一个来源片时的来源行
+  sourceRow?: ReactNode;
   /// 行悬停「打开 ↗」：在访达中显示原件
   onReveal: (path: string) => void;
-  /// 工具行右端 `管理来源`：进来源管理页
-  onSources: () => void;
-  /// 工具行 / 空态的 `+ 来源`：进添加来源页
+  /// 右键「拷贝路径」
+  onCopyPath: (path: string) => void;
+  /// 页面头的 `+ 来源`：进添加来源页
   onAddSource: () => void;
 
   selected: Set<string>;
@@ -93,6 +103,8 @@ export interface DomainViewProps {
   onCell: (ref: CellRef) => void;
   onBatch: (press: BatchPress) => void;
   onUndo: () => void;
+  /// 此刻有没有可撤销的操作（菜单「撤销」亮不亮）
+  canUndo: boolean;
   shortcuts: boolean;
 
   flash?: { keys: string[]; nonce: number };
@@ -121,7 +133,7 @@ const verbOf = (state: CellState, agent: string): string | undefined =>
       : state === "broken"
         ? "点一下重新链接"
         : state === "readOnly"
-          ? `${agent} 的 skills 目录写不进去 · 点一下再试一次`
+          ? `无法写入 ${agent} 的 skills 目录 · 点一下再试一次`
           : state === "wholeLinked"
             ? `${agent} 的 skills 文件夹整个是链接 · 点一下拆开`
             : undefined;
@@ -183,9 +195,11 @@ export default function DomainView(props: DomainViewProps) {
     return stateOf({ sourceId: row.sourceId, skill: row.skill, targetId }, cell.state);
   };
 
-  // ---- 列：通道条表头，第三层是这个 agent 下能用的格数 ----
+  // ---- 列：通道条表头，第三层是这个 agent 下已加上的格数（● 与 ⦿ 都算），与 `名称 N` 同一范围
+  // （随当前筛选，DESIGN「计数口径」） ----
   const columns = page.targets.map((target) => {
-    const n = page.rows.filter((row) => {
+    const n = visible.filter((row) => {
+      if (props.hiddenRows.has(skillRowKey(row))) return false;
       const s = stateAt(row, target.id);
       return s === "linked" || s === "own";
     }).length;
@@ -199,10 +213,30 @@ export default function DomainView(props: DomainViewProps) {
     };
   });
 
-  // ---- 原件位置：来源名；同名来源用路径里能区分它们的那一级 ----
-  const names = originNames(counts.keys(), overview.sources);
-  const nameOf = (id: string) => names.get(id) ?? { name: labelOf(id), seg: "" };
+  // 已订阅、但一行都没有的来源：照样成片（计数 0），排在后面
+  const emptySources = props.emptySources.filter((s) => !counts.has(s.id));
+
+  // ---- 来源名：同名来源用路径里能区分它们的那一级（与片、确认框同一个起名函数） ----
+  const names = originNames(
+    [...counts.keys(), ...emptySources.map((s) => s.id).filter((id) => sourceOf(id))],
+    overview.sources,
+  );
+  const nameOf = (id: string) =>
+    names.get(id) ?? {
+      name: props.emptySources.find((s) => s.id === id)?.name ?? labelOf(id),
+      seg: "",
+    };
   const originOf = (id: string) => originText(nameOf(id));
+
+  /// 同名占位（⊘）的那一格被表格里哪一行的来源占着：同名的另一份在这一列是加上的那一份
+  const occupantAt = (row: DomainRow, targetId: string): string | undefined => {
+    const holder = (copies.get(row.skill) ?? []).find(
+      (r) =>
+        r.sourceId !== row.sourceId &&
+        (stateAt(r, targetId) === "linked" || stateAt(r, targetId) === "own"),
+    );
+    return holder ? originOf(holder.sourceId) : undefined;
+  };
 
   // ---- 行 ----
   const matrixRows: MatrixRowView[] = visible
@@ -223,7 +257,15 @@ export default function DomainView(props: DomainViewProps) {
         cells[target.id] = {
           dot: view.dot,
           clickable: verb !== undefined,
-          tip: verb ?? blockedTipOf(state, target.label, row.skill, view.reason ?? ""),
+          tip:
+            verb ??
+            blockedTipOf(
+              state,
+              target.label,
+              row.skill,
+              view.reason ?? "",
+              occupantAt(row, target.id),
+            ),
         };
       }
       const dup = copies.get(row.skill) ?? [];
@@ -287,6 +329,30 @@ export default function DomainView(props: DomainViewProps) {
             />
           ),
         extraPinned: props.keepBusy === key,
+        // 右键菜单：在访达中显示原件（＝`打开 ↗`）、拷贝路径（＝展开区里可选中的路径）、
+        // 只留这份…（只在同名行，走同一个锚定确认）
+        menu: (el) => [
+          { label: "在访达中显示原件", run: () => props.onReveal(path) },
+          { label: "拷贝路径", run: () => props.onCopyPath(path) },
+          "separator",
+          ...(other !== undefined && props.keepBusy !== key
+            ? [
+                {
+                  label: "只留这份…",
+                  run: () => {
+                    const r = el.getBoundingClientRect();
+                    const n = el.querySelector(".mx-row__name")?.getBoundingClientRect() ?? r;
+                    props.onKeepThis(
+                      row,
+                      other,
+                      { top: r.top, left: r.left, right: r.right, bottom: r.bottom },
+                      { top: r.top, left: n.left, right: n.right, bottom: r.bottom },
+                    );
+                  },
+                },
+              ]
+            : []),
+        ],
       };
     });
 
@@ -318,12 +384,12 @@ export default function DomainView(props: DomainViewProps) {
     });
   }
 
-  // ---- 选择操作条：已选的 × 每个 agent，写出按下会产生的增量 ----
+  // ---- 选择行（D4）：已选的 × 每个 agent 一点 ----
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
-  // 选择态：工具行里每个 agent 一项「● / ○ 名字」——● ＝选中的在这里（按能改的格算）全都有，否则 ○；
-  // 点 ○ 补齐缺的，点 ● 全部移除。原件、写不进、同名被挡的格不计入（DESIGN「选择操作条」）
+  // 每个 agent 列正下方一点：● ＝选中的在这里（按能改的格算）全都有，否则 ○；
+  // 点 ○ 补齐缺的，点 ● 全部移除。原件、受阻（无法写入、同名占位）的格不计入（DESIGN「选择行」）
   const columnChecks: Record<string, ColumnCheck> = {};
   const enabledPresses: { add: CellRef[]; remove: CellRef[]; checked: boolean }[] = [];
   for (const target of page.targets) {
@@ -342,7 +408,7 @@ export default function DomainView(props: DomainViewProps) {
     const checked = missing.length === 0 && linked.length > 0;
     const notes = [
       { names: own, why: `原件就在 ${target.label} 里` },
-      { names: blocked, why: `${target.label} 里写不进` },
+      { names: blocked, why: `无法加到 ${target.label}` },
     ];
     const disabledReason =
       target.linkedWholeTo !== null
@@ -350,8 +416,8 @@ export default function DomainView(props: DomainViewProps) {
         : linked.length + missing.length > 0
           ? undefined
           : own.length > 0 && blocked.length === 0
-            ? "这几个都是原件，改不了"
-            : "这几个都写不进";
+            ? "这几个都是原件，不能在这里加上或移除"
+            : `这几个都无法加到 ${target.label}`;
     if (disabledReason === undefined)
       enabledPresses.push({ add: missing, remove: linked, checked });
     columnChecks[target.id] = {
@@ -397,21 +463,37 @@ export default function DomainView(props: DomainViewProps) {
       ),
   };
 
-  // ---- 空态：一句现状 + 一个动作（DESIGN「空态与忙碌态」） ----
+  // ---- 空态（DESIGN「位置页 › 空态」）：动作已在页面头的（`+ 来源`）不重复，只说现状 ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
   const query = props.filterText.trim();
-  // 空态只说现状：`+ 来源` 就在正上方的工具行里，空态里再放一个是重复（产品负责人）
+  const onlySource = props.originFilter.length === 1 ? props.originFilter[0] : null;
   const empty =
     query !== "" ? (
       <Empty
         text={`没有名字里带「${query}」的 skill`}
         action={{ label: "清除筛选", onClick: props.onClearFilter }}
       />
+    ) : onlySource !== null && !counts.has(onlySource) ? (
+      // 选中的来源里一个 skill 都没有：来源行照常在上面（`打开 ↗` 就在那里，这里不放第二个）
+      <Empty text={`${originOf(onlySource)} 里还没有 skill`} art="emptyFolder" />
     ) : noAgentDirs ? (
-      <Empty text={`${page.label} 下还没有 agent 的 skill 目录`} art="noDirs" />
+      <Empty
+        text={`${page.label} 下还没有 agent 的 skill 目录`}
+        hint="加上第一个 skill 时会自动创建"
+        art="noDirs"
+      />
     ) : (
       <Empty text={`${page.label} 里还没有 skill`} art="emptyFolder" />
     );
+
+  const chip = (id: string, count: number): SourceChipItem => ({
+    id,
+    label: originOf(id),
+    full: `${originOf(id)} · ${displayPath(sourceOf(id)?.path ?? id)}`,
+    count,
+    rule: props.ruleOn(id),
+    menu: (el) => props.chipMenu(id, el),
+  });
 
   return (
     <Matrix
@@ -419,27 +501,21 @@ export default function DomainView(props: DomainViewProps) {
       rows={matrixRows}
       originLabel="来源"
       sources={{
-        total: page.rows.length - props.hiddenRows.size + props.orphans.length,
         selected: props.originFilter,
         onSelect: props.onOriginFilter,
-        items: [...counts].map(([id, count]) => ({
-          id,
-          label: originOf(id),
-          full: `${originOf(id)} · ${displayPath(sourceOf(id)?.path ?? id)}`,
-          count,
-        })),
+        items: [
+          ...[...counts].map(([id, count]) => chip(id, count)),
+          ...emptySources.map((s) => chip(s.id, 0)),
+        ],
       }}
+      sourceRow={props.sourceRow}
       nameLabel="名称"
       nameTip="列表里只出现两种 skill：原件就在这个位置下的，和在某个 agent 下有链接的"
       nameCount={matrixRows.length}
+      dotWords="skill"
       filterText={props.filterText}
       onFilterText={props.onFilterText}
-      addButton={
-        <>
-          <Button onClick={props.onSources}>管理来源</Button>
-          <AddButton noun="来源" onClick={props.onAddSource} />
-        </>
-      }
+      headActions={<AddButton noun="来源" onClick={props.onAddSource} />}
       selected={props.selected}
       onSelectionChange={props.onSelectionChange}
       allAgents={allAgents}
@@ -454,6 +530,7 @@ export default function DomainView(props: DomainViewProps) {
         if (orphan) props.onClearOrphan(orphan, columnId);
       }}
       onUndo={props.onUndo}
+      canUndo={props.canUndo}
       shortcuts={props.shortcuts}
       empty={empty}
       flash={props.flash}
@@ -470,14 +547,17 @@ export default function DomainView(props: DomainViewProps) {
   );
 }
 
-/// 表格里的空态：一句现状，筛选无结果时再加 `清除筛选`（表头照常在上面）。`+ 来源` 在工具行，不在这里重复。
+/// 表格里的空态：一句现状（表头照常在上面）；筛选无结果时句后 `清除筛选`（安静键，次要入口——
+/// 筛选框内的 ✕ 是主入口）。`+ 来源` 在页面头，不在这里重复。
 /// 图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；筛选无结果不放图
 export function Empty({
   text,
+  hint,
   action,
   art,
 }: {
   text: string;
+  hint?: string;
   action?: { label: string; onClick: () => void; icon?: ReactNode };
   art?: EmptyArt;
 }) {
@@ -485,7 +565,8 @@ export function Empty({
     <UiEmpty
       kind={art === "noDirs" ? "noAgentDirs" : art === "emptyFolder" ? "noSkills" : "noMatch"}
       description={text}
-      primary={action}
+      hint={hint}
+      secondary={action}
       art={art}
     />
   );
@@ -563,7 +644,7 @@ function SkillDetail({
     <>
       {description ? <div className="mx-detail__desc">{description}</div> : null}
       <div className="mx-detail__path">
-        <span className="mx-mono">{displayPath(path)}</span>
+        <span className="mx-mono ss-selectable">{displayPath(path)}</span>
         <RevealLink path={path} onReveal={onReveal} />
       </div>
       {readout ? <div>{readout}</div> : null}

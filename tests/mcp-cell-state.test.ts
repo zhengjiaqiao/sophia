@@ -52,7 +52,7 @@ test("invalid：整份文件读不出来，画斜杠环，不写，算要拿主�
   assert.deepEqual(viewOf("invalid", ctx), {
     dot: "readOnly",
     clickable: false,
-    reason: "Codex 的配置这次读不出来，什么都没往里写",
+    reason: "这次无法读取 Codex 的配置，没有往里写",
     issue: "invalidLocation",
   });
 });
@@ -62,7 +62,7 @@ test("unsupported：搬过去就不是原来那个了，画受阻记号（与 sk
   assert.deepEqual(view, {
     dot: "blocked",
     clickable: false,
-    reason: "notion 用了只有 Claude Code 认得的写法，搬到别处就不是原来那个了",
+    reason: "notion 用了只有 Claude Code 支持的写法，写到别处就不是原来那个了",
   });
   assert.equal(view.issue, undefined);
 });
@@ -225,6 +225,6 @@ test("unsupported：条目带 onlyHarnesses 时原因用 core 给这一格的那
   const plain: McpEntry = { ...helper, onlyHarnesses: undefined, name: "notion" };
   assert.equal(
     cellViewOf({ name: "notion", entries: [plain] }, "cursor", labels)?.reason,
-    "notion 用了只有 Codex 认得的写法，搬到别处就不是原来那个了",
+    "notion 用了只有 Codex 支持的写法，写到别处就不是原来那个了",
   );
 });

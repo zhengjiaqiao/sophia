@@ -386,6 +386,6 @@ test("差异摘要：取不到、读不出来或比不了时说清楚", () => {
   assert.equal(pickDiffText(diff(["a", "b"], [], { unreadable: ["a"] }), "a"), "配置不一样");
   assert.equal(
     pickDiffText(diff(["a", "b"], [], { dynamicAuth: true }), "a"),
-    "认证头要到运行时才生成，没法逐字比对",
+    "认证头要到运行时才生成，无法逐字比对",
   );
 });

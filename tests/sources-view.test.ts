@@ -292,7 +292,7 @@ test("MCP 移除：禁用原因、确认正文（服务与位置各自去重；�
   assert.equal(mcpRemoveConfirmBody([], nameOf), "它的服务会从列表里拿掉，没有写进这里的配置要撤");
   assert.equal(
     stuckTip("internal-tools", "Codex · User"),
-    "internal-tools 用了只有 Codex · User 认得的写法，搬到别处就不是原来那个了",
+    "internal-tools 用了只有 Codex · User 支持的写法，写到别处就不是原来那个了",
   );
 });
 
@@ -348,10 +348,10 @@ test("MCP 搬不过去按目标 agent 判断：哪儿都搬不过去照旧；只
   const helper = { name: "gh", portable: true, onlyHarnesses: ["claude-code", "codex"] };
   // 显示的位置里有一家接得住：不标
   assert.equal(mcpStuckTip(helper, "Claude Code · User", [codex, cursor]), null);
-  // 一家都接不住：标，说清是哪几家（agent 名去重）
+  // 一家都接不住：标，提示框照 DESIGN 写原因（D24：不支持）
   assert.equal(
     mcpStuckTip(helper, "Claude Code · User", [cursor, cursorProject, gemini]),
-    "Cursor、Gemini CLI 不支持 gh 的写法，搬不过去",
+    "显示的 agent 都不支持用命令生成请求头",
   );
-  assert.equal(mcpStuckTip(helper, "Claude Code · User", []), "这里没有能接住 gh 的位置，搬不过去");
+  assert.equal(mcpStuckTip(helper, "Claude Code · User", []), "这里没有能写进 gh 的位置");
 });

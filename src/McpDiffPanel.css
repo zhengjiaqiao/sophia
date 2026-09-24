@@ -54,15 +54,13 @@
   font-weight: 600;
 }
 
-/* 令牌与密钥：可悬停不可点 → 点状下划线，提示框「出于安全不显示原值」 */
+/* 令牌与密钥：可悬停不可点 → 纯文字（D21 删点状下划线），提示框「出于安全不显示原值」 */
 .mcp-diff__secret {
-  text-decoration: underline dotted var(--ink-faint);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  cursor: default;
 }
 
 .mcp-diff__absent {
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
 .mcp-diff__note {

@@ -62,7 +62,7 @@ test("collectMcpIssues：两份不一样与读不出来，形状稳定、key 与
   const one = items.find((i) => i.kind === "invalidLocation" && i.name === "x");
   assert.ok(one);
   assert.deepEqual(one.paths, ["/cline.json#x"]);
-  assert.match(one.title, /CLINE 里的 x 这次读不出来/);
+  assert.match(one.title, /CLINE 里的 x 这次无法读取/);
 });
 
 test("collectMcpIssues：按域收", () => {

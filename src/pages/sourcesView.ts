@@ -1,4 +1,4 @@
-/// 来源管理页（DESIGN「来源管理页」）的纯逻辑：页名、行上的两行字、同名、移除的提示与确认造句、
+/// 位置页来源（来源片、来源行、添加来源页）的纯逻辑：行上的两行字、同名、移除的提示与确认造句、
 /// 添加来源页的候选分组。不碰 api、不产 JSX。
 import type {
   CandidateSource,
@@ -212,14 +212,15 @@ export function mcpOwnRemoveReason(domain: DomainRef): string {
   return joinWords("它就是", domain.label, "自己的配置，要拿掉里面的服务得去改它本身");
 }
 
-/// 搬不过去的服务：行尾标签的提示框
+/// 不支持的服务（哪儿都放不过去）：行尾 `不支持` 标签的提示框
 export function stuckTip(service: string, source: string): string {
-  return `${service} 用了只有 ${source} 认得的写法，搬到别处就不是原来那个了`;
+  return `${service} 用了只有 ${source} 支持的写法，写到别处就不是原来那个了`;
 }
 
-/// 一个 MCP 服务在这里搬不搬得过去（DESIGN「「搬不过去」按目标 agent 判断，不按服务一刀切」）：
-/// 哪儿都搬不过去（`!portable`），或者只有几家接得住（`onlyHarnesses`）而显示的目标里一家都接不住，
-/// 才标 `搬不过去`。返回标签的提示框；搬得过去返回 null。
+/// 一个 MCP 服务在这里放不放得过去（DESIGN「「不支持」按目标 agent 判断，不按服务一刀切」，D24 起
+/// 界面词由 `搬不过去` 改为 `不支持`）：哪儿都放不过去（`!portable`），或者只有几家接得住
+/// （`onlyHarnesses`，用命令生成请求头的服务）而显示的目标里一家都接不住，才标 `不支持`。
+/// 返回标签的提示框；放得过去返回 null。
 /// `targets`：这里能写进的位置（来源自己那一处不算）；名字取 agent 那一段（`Cursor · User` → `Cursor`）
 export function mcpStuckTip(
   service: { name: string; portable: boolean; onlyHarnesses?: string[] },
@@ -231,8 +232,8 @@ export function mcpStuckTip(
   if (only === undefined || targets.some((t) => only.includes(t.harnessId))) return null;
   const agents = [...new Set(targets.map((t) => mcpLocationName(t).split(" · ")[0]))];
   return agents.length > 0
-    ? `${agents.join("、")} 不支持 ${service.name} 的写法，搬不过去`
-    : `这里没有能接住 ${service.name} 的位置，搬不过去`;
+    ? "显示的 agent 都不支持用命令生成请求头"
+    : `这里没有能写进 ${service.name} 的位置`;
 }
 
 /// 移除确认的正文：会拿掉哪些配置（服务名 × 位置）。

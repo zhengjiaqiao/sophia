@@ -1,15 +1,30 @@
-/* 添加来源二级页的容器（DESIGN「来源管理页 › 添加：二级页」）：内容铺满页宽，
-   左沿对齐页头标题（页边 32 + ← 28 + 间距 12 = 72），右边距同左；只有列表区滚动，
-   底部一行贴底。内容排版在 AddSourcePanel.css。色值一律 var(--…)。 */
+/* 添加来源页的容器（DESIGN「来源：订阅、来源行、添加来源 › 添加来源」）：只替换机面——盖在机面上，
+   侧栏不动。内边距同机面（左右 24，含机面 1px 边）；页面头同位置页（上 15、高 34）；内容定宽 776，
+   只有候选列表滚动，贴底一行 60 高、上 1px hairline（横贯机面）。内容排版在 AddSourcePanel.css。
+   色值一律 var(--…)。 */
 @import "../tokens.css";
 
-/* 转场：从右侧推入、返回滑回，200ms 机械缓动（同网关页）；reduced-motion 下直接切换 */
-.ss-subpage.add-src-page {
-  animation: add-src-page-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.add-src-page {
+  position: absolute;
+  inset: 0;
+  /* 高过位置页吸顶的页面头（7），低过机面边缘的渐隐（9） */
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 0 calc(var(--space-xl) - 1px);
+  background: var(--face);
+  /* 在机面里从右推入、返回滑回，200ms（reduced-motion 下直接切换） */
+  animation: add-src-page-in 200ms var(--ease-mech) both;
 }
 
-.ss-subpage.add-src-page.is-leaving {
-  animation: add-src-page-out 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.add-src-page.is-leaving {
+  animation: add-src-page-out 200ms var(--ease-mech) both;
+}
+
+/* 程序放焦点的落点，不画框 */
+.add-src-page:focus {
+  outline: none;
 }
 
 @keyframes add-src-page-in {
@@ -30,32 +45,30 @@
   }
 }
 
-/* 页身不整页滚：Panel 自己的列表区滚 */
-.ss-subpage.add-src-page .ss-subpage__body {
-  display: flex;
-  overflow: hidden;
+/* 页面头：`←` 图标键 28 + 10 + 页面名 */
+.add-src-page .page-head {
+  flex-shrink: 0;
+  max-width: 776px;
 }
 
+.add-src-page__lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 页面头下的内容：自己铺满余下的高度（只有候选列表滚动）；内容定宽 776 在 AddSourcePanel.css */
 .add-src-page__body {
-  --add-src-inset: calc(var(--space-xxl) + 28px + var(--space-sm));
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  padding: var(--space-xl) var(--add-src-inset) 0;
-}
-
-/* 贴底一行：hairline 分开列表，下留 24 */
-.add-src-page__body .add-src__foot {
-  margin-top: 0;
-  padding: var(--space-md) 0 var(--space-xl);
-  border-top: 1px solid var(--hairline);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ss-subpage.add-src-page,
-  .ss-subpage.add-src-page.is-leaving {
+  .add-src-page,
+  .add-src-page.is-leaving {
     animation: none;
   }
 }

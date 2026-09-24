@@ -55,8 +55,8 @@ export function mcpNotices(issues: McpIssueItem[]): NoticeIssue[] {
     }
     const where = issue.locations[0]?.label ?? "";
     return issue.name === null
-      ? { ...at, subject: where, rest: "的配置文件读不出来" }
-      : { ...at, subject: issue.name, rest: `在 ${where} 里读不出来` };
+      ? { ...at, subject: where, rest: "的配置文件无法读取" }
+      : { ...at, subject: issue.name, rest: `在 ${where} 里无法读取` };
   });
 }
 
@@ -92,10 +92,10 @@ export function unseenNotices(
   return [...kept, ...[...fresh.values()].filter((issue) => !keptKeys.has(issue.key))];
 }
 
-/// 提示窗的主行：一条时按类别造句（`defuddle 有两份`），多条时 `发现 N 处要你拿主意`。
+/// 提示窗的主行：一条时按类别造句（`defuddle 有两份`），多条时 `发现 N 处需要你处理`。
 /// `lead` 加粗（主语，或多条时的动词「发现」），`rest` 常规字重
 export function noticeLine(issues: NoticeIssue[]): { lead: string; rest: string } | null {
   if (issues.length === 0) return null;
   if (issues.length === 1) return { lead: issues[0].subject, rest: issues[0].rest };
-  return { lead: "发现", rest: `${issues.length} 处要你拿主意` };
+  return { lead: "发现", rest: `${issues.length} 处需要你处理` };
 }

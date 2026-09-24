@@ -75,7 +75,7 @@ export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
       return {
         dot: "readOnly",
         clickable: false,
-        reason: `${ctx.location} 的配置这次读不出来，什么都没往里写`,
+        reason: `这次无法读取 ${ctx.location} 的配置，没有往里写`,
         issue: "invalidLocation",
       };
     case "unsupported":
@@ -86,7 +86,7 @@ export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
         clickable: false,
         reason:
           ctx.cellReason ??
-          `${ctx.service} 用了只有 ${ctx.source} 认得的写法，搬到别处就不是原来那个了`,
+          `${ctx.service} 用了只有 ${ctx.source} 支持的写法，写到别处就不是原来那个了`,
       };
   }
 }

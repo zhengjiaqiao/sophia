@@ -14,6 +14,7 @@ import {
   useBusyShown,
 } from "../ui";
 import { edgeFades } from "../modelsView";
+import { FadeViewport } from "../ui/FloatingLayer.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import {
   NOTHING_CHECKED,
@@ -31,24 +32,24 @@ import {
   type PickedState,
   type SourceLine,
 } from "./addSourceView.ts";
-import { columnRows, type DomainRef } from "./sourcesView.ts";
+import type { DomainRef } from "./sourcesView.ts";
 import type { SourcesData, SourcesModel } from "./sourcesModel.ts";
-import "./SourcesPage.css";
 import "./AddSourcePanel.css";
 
-/// 添加来源的**内容**（DESIGN「来源管理页 › 添加」）：单栏，自上而下——顶部 `选择文件夹…`，
-/// 下面一列来源行（选的文件夹在最前，再是 `建议的来源` 两组），贴底 `添加 N 个来源`。
+/// 添加来源的**内容**（DESIGN「来源：订阅、来源行、添加来源 › 添加来源」，画板 V4Layouts add-source）：
+/// 单栏，自上而下——第一步 `选择文件夹…`（D13：留在列表最上方）+ 灰字，下面一列候选来源
+/// （选的文件夹在最前，再是 `建议的来源` 两组），贴底 `添加 N 个来源`。
 /// skill 与 MCP 只差数据源（`SourcesModel`）：MCP 没有 `选择文件夹…`，行里外露的是服务名。
 ///
-/// 不管容器：标题、返回、转场、页边都归外面那层（现在是二级页 `AddSourcePage`；换成弹窗时
-/// 只换那一层）。Panel 自己铺满容器给它的高度，只有列表区滚动。
+/// 不管容器：标题、返回、转场、页边都归外面那层（`AddSourcePage`）。Panel 自己铺满容器给它的高度，
+/// 只有列表区滚动（边缘渐隐）。
 ///
-/// - 来源行＝一个复选框项，可多选，长相与来源管理页的行相同：第一行 方框 + `▸ / ▾` + 名字；
-///   第二行与管理页第二行一字不差（`~/.claude/skills · 2 个 skill`），尾部接外露的 skill 名，一行放不下截断。
-///   点 `▸` 就地展开管理页同一个展开区（两列只读名字，`同名` / `搬不过去` 照标），只管看、不改勾选；
-///   点行的其余部分＝勾 / 取消，勾上不改底色，悬停铺 surface
-/// - 默认一个都不勾；选的文件夹读好后自动勾上。它没有 skill、读不到、已经订阅过时方框禁用，
-///   第二行与提示框写原因
+/// - 来源行＝一个复选框项，可多选，两行高：复选 22 ｜ `▸ / ▾` 16 ｜ 内容。第一行名字，第二行
+///   `出处 · 39 个 skill · ` + 外露的前几个名字，一行放不下截断
+/// - **点整行＝展开 / 收起**（`▸` 只是记号）：行下就地列出全部名字（只读、四列各 160），`同名` / `不支持`
+///   是纯弱标识 + 提示框（D21）。**勾选只归行首方框**（命中区 28）；行不设悬停底色，勾上不改底色
+/// - 默认一个都不勾；选的文件夹读好后自动勾上。加不进来的（没有 skill、已经在来源里、读不到）不进列表，
+///   浮窗说原因
 /// - 逐个加：全成＝交给容器收尾（滑回）；有没成的就留在这一页，底部说哪几个没加上，
 ///   已加上的从列表里消失，没加上的保持勾着
 
@@ -84,20 +85,16 @@ function useEdgeFades(ref: RefObject<HTMLElement | null>) {
   return fade;
 }
 
-/// 带渐隐的滚动区：外层定位渐隐，里层滚
+/// 带渐隐的滚动区：外层定位渐隐（机面上从 face 渐隐），里层滚
 function FadeScroll({ children, label }: { children: ReactNode; label?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const fade = useEdgeFades(ref);
   return (
-    <div
-      className="src-layer__viewport add-src__fade"
-      data-fade-top={fade.start || undefined}
-      data-fade-bottom={fade.end || undefined}
-    >
-      <div ref={ref} className="src-layer__scroll add-src__scroll" role="group" aria-label={label}>
+    <FadeViewport fade={fade} tone="face" className="add-src__fade">
+      <div ref={ref} className="ss-layer__scroll add-src__scroll" role="group" aria-label={label}>
         <div>{children}</div>
       </div>
-    </div>
+    </FadeViewport>
   );
 }
 
@@ -235,7 +232,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
       setCheck(entry.ref, true);
       setReveal({ ref: entry.ref, top: true });
     } catch (e) {
-      if (alive.current) cannot(`读不到这个文件夹：${String(e)}`);
+      if (alive.current) cannot(`无法读取这个文件夹：${String(e)}`);
     } finally {
       if (alive.current) setReading(false);
     }
@@ -274,7 +271,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
 
   const dismissFailure = useCallback(() => setFailure(null), []);
 
-  /// 一个来源行。items：展开区列的名字；blocked：方框为什么不能勾（选的文件夹没 skill 等），此时也不给 ▸
+  /// 一个来源行。items：展开区列的名字；blocked：方框为什么不能勾（选的文件夹没 skill 等），此时也不展开
   const row = (
     entry: { ref: string; name: string; title?: string; items?: CandidateEntry["items"] },
     line: SourceLine,
@@ -283,9 +280,10 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     const on = !blocked && checked.has(entry.ref);
     const open = !blocked && expanded.has(entry.ref);
     const items = entry.items ?? [];
-    // 与来源管理页同一套：点整行 = 展开 / 收起（▸ 只是记号，键盘经它操作）；勾选只归复选框
+    // 点整行 = 展开 / 收起（▸ 只是记号，键盘经它操作）；勾选只归方框
     const onRowClick = (event: MouseEvent) => {
-      if (blocked || (event.target as HTMLElement).closest(".add-src__check")) return;
+      if (blocked || (event.target as HTMLElement).closest(".add-src__check, .add-src__caret"))
+        return;
       toggleExpand(entry.ref);
     };
     let second: ReactNode;
@@ -317,7 +315,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
         className={`add-src__row${blocked ? " is-blocked" : ""}${open ? " is-open" : ""}`}
         onClick={onRowClick}
       >
-        <div className="add-src__head-line">
+        <span className="add-src__checkcell">
           {blocked ? (
             // 不能勾：方框退到 hairline，悬停说原因（与第二行同一句）
             <Tooltip content={blocked} focusable explain>
@@ -338,37 +336,43 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
               <CheckMark on={on} />
             </button>
           )}
-          {/* ▸ 与来源管理页同一个记号、同一个位置；不能勾的行占位不显示，名字不跳 */}
-          <button
-            type="button"
-            className="src-row__caret add-src__caret"
-            aria-expanded={open}
-            aria-label={`${entry.name} 里的 ${model.noun}`}
-            disabled={blocked !== null}
-          >
-            <Disclosure open={open} shown={!blocked} />
-          </button>
+        </span>
+        {/* ▸ 是记号，也是键盘入口；不能勾的行占位不显示，名字不跳 */}
+        <button
+          type="button"
+          className="add-src__caret"
+          aria-expanded={open}
+          aria-label={`${entry.name} 里的 ${model.noun}`}
+          disabled={blocked !== null}
+          onClick={() => toggleExpand(entry.ref)}
+        >
+          <Disclosure open={open} shown={!blocked} />
+        </button>
+        <span className="add-src__content">
           <span className="add-src__name">{entry.name}</span>
-        </div>
-        <div className="add-src__second">{second}</div>
-        {open ? (
-          // 展开区：与来源管理页同一个（两列只读名字，13 ink-mute）
-          items.length === 0 ? (
-            <div className="src-row__none add-src__skills">{model.emptyItems}</div>
-          ) : (
-            <div
-              className="src-row__skills add-src__skills"
-              style={{ gridTemplateRows: `repeat(${columnRows(items.length)}, auto)` }}
-            >
-              {items.map((item) => (
-                <div className="src-skill" key={item.name}>
-                  <span className={`src-skill__name${item.dim ? " is-dim" : ""}`}>{item.name}</span>
-                  {item.tag ? <Tag tip={item.tag.tip}>{item.tag.text}</Tag> : null}
-                </div>
-              ))}
-            </div>
-          )
-        ) : null}
+          <span className="add-src__second">{second}</span>
+          {open ? (
+            // 展开区：全部名字，只读，四列各 160；`同名` / `不支持` 是纯弱标识 + 提示框（D21）
+            items.length === 0 ? (
+              <span className="add-src__none add-src__items">{model.emptyItems}</span>
+            ) : (
+              <span className="add-src__items">
+                {items.map((item) => (
+                  <span className="add-src__item" key={item.name}>
+                    <span className={`add-src__itemname${item.dim ? " is-dim" : ""}`}>
+                      {item.name}
+                    </span>
+                    {item.tag ? (
+                      <Tag tone="weak" tip={item.tag.tip}>
+                        {item.tag.text}
+                      </Tag>
+                    ) : null}
+                  </span>
+                ))}
+              </span>
+            )
+          ) : null}
+        </span>
       </div>
     );
   };
@@ -378,7 +382,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     const entry = picked.status === "ready" ? picked.entry : picked;
     pickedRow = (
       <>
-        <div className="add-src__head">{PICKED_HEAD}</div>
+        <div className="add-src__group">{PICKED_HEAD}</div>
         {row(entry, pickedLine(picked, domain, model.noun), pickedBlocked(picked, domain))}
       </>
     );
@@ -388,7 +392,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
   if (loadError && data === null) {
     list = (
       <div className="add-src__notice">
-        <NoticePanel message="读不到来源" reason={loadError} />
+        <NoticePanel message="无法读取来源" reason={loadError} />
       </div>
     );
   } else if (data === null) {
@@ -407,7 +411,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
         ) : (
           groups.map((group) => (
             <Fragment key={group.title}>
-              <div className="add-src__head">{group.title}</div>
+              <div className="add-src__group">{group.title}</div>
               {group.items.map((item) =>
                 row(
                   item,
@@ -428,6 +432,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
         <div className="add-src__pick">
           <span className="add-src__pickbtn">
             {reading ? (
+              // 读文件夹时忙碌在 `选择文件夹…` 原位（0.3 秒门槛）
               <BusySlot busy label="正在读文件夹">
                 <Button size="row">选择文件夹…</Button>
               </BusySlot>

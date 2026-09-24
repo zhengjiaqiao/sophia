@@ -37,9 +37,9 @@ const entry = (ref: string, count = 1): CandidateEntry => ({
 });
 
 test("页名与固定文案：skill 与 MCP 两种，全局写「全局」", () => {
-  assert.equal(addSourceTitle(cardbox, "skill"), "添加来源到「CardBox」");
-  assert.equal(addSourceTitle(global, "skill"), "添加来源到「全局」");
-  assert.equal(addSourceTitle(cardbox, "mcp"), "添加 MCP 来源到「CardBox」");
+  assert.equal(addSourceTitle(cardbox, "skill"), "添加来源到 CardBox");
+  assert.equal(addSourceTitle(global, "skill"), "添加来源到全局");
+  assert.equal(addSourceTitle(cardbox, "mcp"), "添加 MCP 来源到 CardBox");
   assert.equal(alreadySubscribedText(cardbox), "它已经在 CardBox 的来源里");
   assert.equal(PICK_HINT, "选 skill 所在的文件夹，只认带 SKILL.md 的子目录");
   assert.equal(PICKED_HEAD, "你选的文件夹");
@@ -92,10 +92,10 @@ test("选的文件夹那一行：读的时候转圈；读不到 / 已订阅 / �
     sub: "~/p",
     reason: "没有权限",
   };
-  assert.equal(pickedBlocked(failed, cardbox), "读不到这个文件夹：没有权限");
+  assert.equal(pickedBlocked(failed, cardbox), "无法读取这个文件夹：没有权限");
   assert.deepEqual(pickedLine(failed, cardbox, "skill"), {
     kind: "message",
-    text: "读不到这个文件夹：没有权限",
+    text: "无法读取这个文件夹：没有权限",
   });
 
   const already: PickedState = { status: "ready", entry: entry("/p", 2), already: true };

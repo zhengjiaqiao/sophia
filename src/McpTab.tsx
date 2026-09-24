@@ -12,17 +12,22 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import Matrix, {
   cellKey,
+  LocationActions,
+  RevealLink,
   type MatrixCellView,
   type MatrixRowView,
   type ColumnCheck,
+  type SourceChipItem,
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty } from "./DomainView";
-import SourcesPage from "./pages/SourcesPage";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
+import { SourceRowView, useSources } from "./SourceRow";
+import type { ContextMenuItem } from "./contextMenu";
+import { usePageCommand } from "./shell/menuBus";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
 import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
-import { mcpLocationName } from "./pages/sourcesView";
+import { mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
 import { pathsOfKey } from "./issues";
@@ -40,17 +45,7 @@ import {
   type McpDomain,
   type McpDomainRow,
 } from "./mcpView";
-import {
-  AddButton,
-  Button,
-  Confirm,
-  CornerToast,
-  Empty,
-  Tag,
-  Toast,
-  ToastCount,
-  Tooltip,
-} from "./ui";
+import { AddButton, Confirm, CornerToast, Empty, Tag, Toast, ToastCount, Tooltip } from "./ui";
 import { McpDiffPanel, type McpDiffState } from "./McpDiffPanel";
 import type { ConfirmAnchor, ToastProps } from "./ui";
 import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
@@ -77,8 +72,8 @@ import "./McpTab.css";
 /// 2. **实心不是一条链接，是一份独立副本**——写进、移除都经 core 留快照：没人改过就能撤销，
 ///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底。撤销按钮只在再点一次不能准确撤回时给
 ///    （`mcpUndoShown`）：移除了一份与原版不一样的副本、批量写进时选中的里原本已有一部分；`⌘Z` 始终可用
-/// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（文字链，提示框给差异字段名）；
-///    点它这一行就地展开不同的字段，再点收起
+/// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（安静键，提示框给差异字段名，D21）；
+///    点它这一行就地展开不同的字段，再点收起。传输方式是服务的属性，在点服务名展开的行详情里（D7）
 /// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格写入、移除都不确认
 
 export interface McpTabProps {
@@ -103,24 +98,34 @@ const rowKeyOf = (row: McpDomainRow) => row.name;
 const transportText = (entry: McpEntry): string | null =>
   entry.transport === "stdio" ? "stdio" : entry.transport === "http" ? "HTTP" : null;
 
-/// 列头名：位置名里 agent 那一段。同一页里两列撞名（Claude Code 的 Local / Project）才带上作用域
-const columnNames = (targets: McpLocation[]): Map<string, string> => {
+/// 列头：位置名里 agent 那一段；同一页里两列撞名（项目位置里 Claude Code 的 Local / Project）才有
+/// 第二行作用域（列头经 `Cap` 显示为 `LOCAL` / `PROJECT`）。全局位置 scope 恒为 User，只写 agent 名一行
+const columnHeads = (targets: McpLocation[]): Map<string, { name: string; scope?: string }> => {
   const head = (l: McpLocation) => l.label.split(" · ")[0];
-  const out = new Map<string, string>();
+  const out = new Map<string, { name: string; scope?: string }>();
   for (const t of targets) {
     const clash = targets.filter((o) => head(o) === head(t)).length > 1;
     const scope = t.label.split(" · ")[1]?.replace(/ MCPs$/, "");
-    out.set(t.id, clash && scope ? `${head(t)} ${scope}` : head(t));
+    out.set(
+      t.id,
+      clash && scope ? { name: head(t), scope: scope.toLowerCase() } : { name: head(t) },
+    );
   }
   return out;
 };
+
+/// 列在句子里的名字（提示框、提示条、读屏）：`Claude Code local` / `Codex`
+const columnNames = (targets: McpLocation[]): Map<string, string> =>
+  new Map(
+    [...columnHeads(targets)].map(([id, h]) => [id, h.scope ? `${h.name} ${h.scope}` : h.name]),
+  );
 
 /// 组名（「来源」列与筛选片）：定义所在的位置名，与 MCP 来源页同一个写法（`mcpLocationName`：
 /// `Claude Code · User`、`Codex · Project`）
 const groupLabel = (l: McpLocation | undefined, id: string): string =>
   l ? mcpLocationName(l) : id;
 
-/// 来源管理页的位置名：全局 / 项目文件夹名（`CardBox 的 MCP 来源`）；WeiboAP agent 沿用侧栏的名字
+/// 位置名：全局 / 项目文件夹名（`添加 MCP 来源到 CardBox`）；WeiboAP agent 沿用侧栏的名字
 const placeName = (page: McpDomain): string =>
   page.key === "global"
     ? "全局"
@@ -132,8 +137,18 @@ const placeName = (page: McpDomain): string =>
           .filter(Boolean)
           .pop() ?? page.label);
 
+/// 还没有页的位置的名字：全局 / 项目文件夹名
+const keyName = (key: string): string =>
+  key === "global"
+    ? "全局"
+    : (key
+        .replace(/^project:/, "")
+        .split(/[/\\]+/)
+        .filter(Boolean)
+        .pop() ?? key);
+
 /// 一个空格上有好几份不一样的同名定义能写：不替用户挑
-const ambiguousText = (name: string) => `有好几份不一样的同名 ${name}，没法替你挑用哪一份`;
+const ambiguousText = (name: string) => `有好几份不一样的同名 ${name}，无法替你决定用哪一份`;
 
 /// WeiboAP 里的副本不在格子上移除（core 同样拒绝）
 const WEIBO_REMOVE = "WeiboAP 里的配置要到 WeiboAP 里删";
@@ -185,11 +200,10 @@ export default function McpTab({
   const [filterText, setFilterText] = useState("");
   // 按来源筛选（工具行第二行的来源片）；空＝全部。点片单选，加完来源时一次选中新加的几片
   const [originFilter, setOriginFilter] = useState<string[]>([]);
-  // 来源管理页（工具行 `管理来源`）开着没有
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  // 添加来源页（工具行 / 空态的 `+ 来源`）开着没有
+  // 添加来源页（页面头的 `+ 来源`、菜单「添加来源…」）开着没有
   const [addOpen, setAddOpen] = useState(false);
   const closeAdd = useCallback(() => setAddOpen(false), []);
+  usePageCommand("add-source", () => setAddOpen(true));
   const [pane, setPane] = useState<Pane | null>(null);
   // 同名多份的空格：点它出的挑选浮层（锚在那一格上）
   const [pick, setPick] = useState<McpPick | null>(null);
@@ -230,8 +244,13 @@ export default function McpTab({
   // 点开了 `2 份不一样` 的那几行（服务名 → 比对结果）：就地展开字段级差异，再点收起
   const [openDiffs, setOpenDiffs] = useState<Map<string, McpDiffState>>(new Map());
   const focusedRef = useRef<string | undefined>(undefined);
-  // 最近一次可撤销的写入（⌘Z 与提示条「撤销」走同一个）
+  // 最近一次可撤销的写入（⌘Z、菜单「撤销」与提示条「撤销」走同一个）；有没有可撤的同时报给菜单
   const undoRef = useRef<(() => void) | null>(null);
+  const [canUndo, setCanUndo] = useState(false);
+  const setUndo = useCallback((fn: (() => void) | null) => {
+    undoRef.current = fn;
+    setCanUndo(fn !== null);
+  }, []);
   const refreshVersion = useRef(0);
   const mounted = useRef(true);
 
@@ -324,9 +343,8 @@ export default function McpTab({
   const domains = useMemo(() => (overview ? mcpDomains(overview) : []), [overview]);
   domainsRef.current = domains;
 
-  // 提示与二级页面只属于当次选择；选择与筛选跨侧栏切换保留
+  // 提示与弹层只属于当次选择；换一个位置时勾选与来源筛选清空
   useEffect(() => {
-    setSourcesOpen(false);
     setPane(null);
     setPick(null);
     setKeyToast(null);
@@ -336,10 +354,34 @@ export default function McpTab({
     // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
     setSelected(new Set());
     setOriginFilter([]);
-    undoRef.current = null;
+    setUndo(null);
   }, [selectedKey]);
 
   const page: McpDomain | null = domains.find((d) => d.key === selectedKey) ?? null;
+
+  // ---- 这个位置订阅的 MCP 来源：片首橙点、来源行（规则 + 移除）、添加来源页的候选 ----
+  const domainRef: DomainRef = page
+    ? { key: page.key, label: placeName(page) }
+    : { key: selectedKey, label: keyName(selectedKey) };
+  const domainLocations = useMemo(
+    () => (overview?.locations ?? []).filter((l) => l.domain === domainRef.key),
+    [overview, domainRef.key],
+  );
+  const locationsKey = domainLocations.map((l) => `${l.id}:${l.matrixHidden ? 1 : 0}`).join("|");
+  const model = useMemo(
+    () => mcpSourcesModel(domainRef, domainLocations),
+    // 位置按 id 比：重扫回来内容没变时不换模型，不重读
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [domainRef.key, domainRef.label, locationsKey],
+  );
+  const sources = useSources({
+    model,
+    domain: domainRef,
+    version: overview,
+    onChange: refresh,
+    // 移除之后筛选回到 `全部`
+    onRemoved: () => setOriginFilter([]),
+  });
 
   // 加完来源滑回主视图（同 Skills）：重扫已完，列表筛到新来源——它们的片选中（几个选几片，
   // 列表是并集），这几片正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 MCP`（说清楚列表为什么变少了）
@@ -470,6 +512,9 @@ export default function McpTab({
       onError(String(e));
     }
   };
+  /// 右键「拷贝路径」：完整路径进剪贴板（展开区里的路径同样能选中 ⌘C）
+  const copyPath = (path: string) =>
+    void navigator.clipboard?.writeText(path).catch((e) => onError(String(e)));
 
   /// 这一行为什么勾不动。空值表示可勾
   const blockedOf = (p: McpDomain, row: McpDomainRow): string | undefined => {
@@ -484,7 +529,7 @@ export default function McpTab({
     if (!anyMissing) return `${row.name} 在这里没有能写进或移除的位置`;
     // 「不支持」那行整行不可选：搬过去就不是原来那个了
     if (row.entries.every((entry) => entry.transport === "unsupported" || entry.reason !== null)) {
-      return `${row.name} 用了只有 ${labelOf(row.entries[0].sourceId)} 认得的写法，搬到别处就不是原来那个了`;
+      return `${row.name} 用了只有 ${labelOf(row.entries[0].sourceId)} 支持的写法，写到别处就不是原来那个了`;
     }
     return ambiguousText(row.name);
   };
@@ -568,7 +613,7 @@ export default function McpTab({
       // 单格所在的行已说明对象：只写 `✓ 写进 [Codex] · 撤销`（撤不了时的说明同样不重复服务名）
       const rowText = one ? toastFor("write", { done: itemsOf(created), omitNames: true }) : text;
       const undo = undoId ? () => void undoWrite(undoId, keyId, rowText, one) : null;
-      undoRef.current = undo;
+      setUndo(undo);
       if (keyId !== undefined) {
         setKeyToast({
           keyId,
@@ -662,7 +707,7 @@ export default function McpTab({
       const rowText = one ? toastFor("unlink", { done: itemsOf(removed), omitNames: true }) : text;
       const undo =
         undoId && removed.length > 0 ? () => void undoWrite(undoId, keyId, rowText, one) : null;
-      undoRef.current = undo;
+      setUndo(undo);
       // 只有移除了一份与原版不一样的副本才给 `撤销`：再点只能写回原版（⌘Z 照旧可用）
       const action =
         undo && mcpUndoShown("remove", result.entries, true)
@@ -714,7 +759,7 @@ export default function McpTab({
     one?: { keys: string[]; rowKey: string; columnId: string },
   ) => {
     const single = one !== undefined;
-    undoRef.current = null;
+    setUndo(null);
     // 按下的 `撤销` 原位忙碌（过了 0.3 秒门槛才出转圈 + 一句）；⌘Z 撤的也一样
     setUndoBusy(undoId);
     let report: McpUndoReport;
@@ -742,7 +787,7 @@ export default function McpTab({
           action={{
             label: "撤销",
             onClick: () => undefined,
-            disabledReason: "写入之后文件又被改过，没法安全撤销",
+            disabledReason: "写入之后文件又被改过，无法安全撤销",
           }}
           secondary={
             backup === null
@@ -907,40 +952,80 @@ export default function McpTab({
 
   // ===== 渲染 =====
 
-  if (!overview) return <Empty kind="scanning" description="正在读 MCP 配置" art="scanning" />;
+  const openAdd = () => setAddOpen(true);
+  /// 页面头右端：筛选框 + `+ 来源`（表格还没有时也照常放，切页签、扫描完时页面头不跳）
+  const headActions = (
+    <LocationActions
+      filterText={filterText}
+      onFilterText={setFilterText}
+      actions={<AddButton noun="来源" onClick={openAdd} />}
+      enabled={!addOpen}
+    />
+  );
+  /// 添加来源页：在机面里推入（侧栏留着）；加好后重扫，滑回；全加上时列表筛到新来源 + 那几片下一窗
+  const addPage = addOpen ? (
+    <AddSourcePage
+      model={model}
+      domain={domainRef}
+      onClose={closeAdd}
+      onAdded={refresh}
+      onAllAdded={setJustAdded}
+    />
+  ) : null;
+
+  if (!overview)
+    return (
+      <>
+        {headActions}
+        <Empty kind="scanning" description="正在读 MCP 配置" art="scanning" />
+      </>
+    );
 
   if (overview.locations.length === 0) {
     return (
-      <Empty
-        kind="noAgentDirs"
-        description="没找到 Claude Code、Codex 或 Cursor 的 MCP 配置文件"
-        hint="只看文件里的配置；Claude.ai 的连接器和内置 MCP 不在其中"
-        art="noDirs"
-      />
+      <>
+        {headActions}
+        <Empty
+          kind="noAgentDirs"
+          description="没找到 Claude Code、Codex 或 Cursor 的 MCP 配置文件"
+          hint="只看文件里的配置；Claude.ai 的连接器和内置 MCP 不在其中"
+          art="noDirs"
+        />
+      </>
     );
   }
 
   // 侧栏是 Skills 与 MCP 的并集：选中的项目在 MCP 这边可能一个配置位置都没有（没开能写 MCP 的 agent）
   if (page === null) {
     return (
-      <Empty
-        kind="noAgentDirs"
-        description={
-          selectedKey === "global" ? "这个位置下还没有可用的 MCP 配置位置" : "这个项目里还没有 MCP"
-        }
-        hint="装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置"
-        art="noDirs"
-      />
+      <>
+        {headActions}
+        <Empty
+          kind="noAgentDirs"
+          description={
+            selectedKey === "global"
+              ? "这个位置下还没有可用的 MCP 配置位置"
+              : "这个项目里还没有 MCP"
+          }
+          hint="装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置"
+          art="noDirs"
+        />
+        {addPage}
+      </>
     );
   }
 
   const targetIds = new Set(page.targets.map((t) => t.id));
   const names = columnNames(page.targets);
+  const heads = columnHeads(page.targets);
   const query = filterText.trim().toLowerCase();
-  const activeOrigins = liveOrigins(
-    originFilter,
-    page.rows.flatMap((row) => row.entries.map((e) => e.sourceId)),
-  );
+  // 来源片＝有行的来源 + 已订阅但一个服务都没有的来源（选中它才找得到它的来源行）
+  const rowOrigins = page.rows.flatMap((row) => row.entries.map((e) => e.sourceId));
+  const subscribedEmpty = (sources.data?.rows ?? []).filter((r) => !rowOrigins.includes(r.id));
+  const activeOrigins = liveOrigins(originFilter, [
+    ...rowOrigins,
+    ...subscribedEmpty.map((r) => r.id),
+  ]);
   const visible = page.rows.filter(
     (row) =>
       (query === "" || row.name.toLowerCase().includes(query)) &&
@@ -971,15 +1056,17 @@ export default function McpTab({
   };
 
   // ---- 列：第三层是这个位置下能用的条数 ----
+  // 第三层与 `名称 N` 同一范围：随当前筛选（DESIGN「计数口径」）
   const columns = page.targets.map((target) => {
-    const n = page.rows.filter(
+    const n = visible.filter(
       (row) => viewAt(row, target.id)?.dot === "linked" || viewAt(row, target.id)?.dot === "own",
     ).length;
-    const name = names.get(target.id) ?? target.label;
+    const head = heads.get(target.id) ?? { name: target.label };
     return {
       id: target.id,
       agentId: target.harnessId,
-      name,
+      name: head.name,
+      scope: head.scope,
       count: n,
       tip: `${target.label} · ${n} 个已加上`,
     };
@@ -994,13 +1081,17 @@ export default function McpTab({
     const key = rowKeyOf(row);
     const cells: Record<string, MatrixCellView | null> = {};
     const unsupportedAt: string[] = [];
+    const unsupportedWhy = new Set<string>();
     for (const target of page.targets) {
       const view = viewAt(row, target.id);
       if (view === null) {
         cells[target.id] = null;
         continue;
       }
-      if (view.dot === "blocked") unsupportedAt.push(names.get(target.id) ?? target.label);
+      if (view.dot === "blocked") {
+        unsupportedAt.push(names.get(target.id) ?? target.label);
+        if (view.reason) unsupportedWhy.add(view.reason);
+      }
       // 位置无效：原因 + 点一下在访达中显示那个配置文件
       const invalid = view.issue === "invalidLocation";
       cells[target.id] = {
@@ -1038,7 +1129,8 @@ export default function McpTab({
         onReveal: () => void reveal(originPath),
       },
       cells,
-      // 差异是行级事实，不进格：文字链，提示框给差异字段名；点它这一行就地展开字段级差异
+      // 差异是行级事实，不进格：安静键（能点，D21），提示框给差异字段名；点它这一行就地展开字段级差异。
+      // 某列不支持只说明、不能点：纯弱标识 + 提示框（原因同那一格：`Cursor 不支持用命令生成请求头`）
       mark:
         differing.length > 0 ? (
           <span
@@ -1057,8 +1149,19 @@ export default function McpTab({
             </Tooltip>
           </span>
         ) : unsupportedAt.length > 0 ? (
-          <Tag tone="weak" tip={`${unsupportedAt.join("、")} 不支持 ${row.name} 的接入方式`}>
-            {`${unsupportedAt.join("、")} 不支持`}
+          <Tag
+            tone="weak"
+            tip={
+              unsupportedWhy.size > 0
+                ? [...unsupportedWhy].join("；")
+                : `${unsupportedAt.join("、")} 不支持 ${row.name} 的写法`
+            }
+          >
+            {/* 一列写 agent 名（`Codex 不支持`）；几列时只写处数，名字与原因在提示框里——
+                158 宽的名称列放不下一串名字，截掉的会是「不支持」本身 */}
+            {unsupportedAt.length === 1
+              ? `${unsupportedAt[0]} 不支持`
+              : `${unsupportedAt.length} 处不支持`}
           </Tag>
         ) : undefined,
       panel: (() => {
@@ -1074,7 +1177,23 @@ export default function McpTab({
           />
         );
       })(),
-      transport: transports.join(" / "),
+      // 点服务名就地展开：传输（D7：服务的属性，不回答「能不能在这个 agent 用」）、原件 + 打开 ↗
+      detail: (
+        <div className="mx-kv">
+          <span className="mx-kv__key">传输</span>
+          <span className="mx-kv__value">{transports.join(" / ") || "不支持的写法"}</span>
+          <span className="mx-kv__key">原件</span>
+          <span className="mx-kv__value">
+            <span className="mx-mono ss-selectable">{displayPath(originPath)}</span>
+            <RevealLink path={originPath} onReveal={() => void reveal(originPath)} />
+          </span>
+        </div>
+      ),
+      // 右键菜单：在访达中显示原件（＝`打开 ↗`）、拷贝路径（＝展开区里可选中的路径）
+      menu: () => [
+        { label: "在访达中显示原件", run: () => void reveal(originPath) },
+        { label: "拷贝路径", run: () => copyPath(originPath) },
+      ],
       selectDisabledReason: blockedOf(page, row),
     };
   });
@@ -1127,16 +1246,16 @@ export default function McpTab({
     const notes = [
       { names: own, why: `原件就在 ${target.label} 里` },
       checked
-        ? { names: stuck, why: `${target.label} 里移除不了` }
-        : { names: cant, why: `写不到 ${target.label}` },
+        ? { names: stuck, why: `无法从 ${target.label} 移除` }
+        : { names: cant, why: `无法写进 ${target.label}` },
     ];
     const disabledReason =
       (checked ? copies.length : cells.length) > 0
         ? undefined
         : checked
-          ? "都已写进，这里移除不了"
+          ? `都已写进，但无法从 ${target.label} 移除`
           : cant.length > 0
-            ? "这几个都写不过去"
+            ? `这几个都无法写进 ${target.label}`
             : "这几个就定义在这里";
     if (disabledReason === undefined) enabledPresses.push({ add: cells, remove: copies, checked });
     columnChecks[target.id] = {
@@ -1179,11 +1298,8 @@ export default function McpTab({
         : write(allAdd, "all", allRemove.length === 0)),
   };
 
-  const openSources = () => setSourcesOpen(true);
-  const openAdd = () => setAddOpen(true);
-  // 空态只说现状：`+ 来源` 就在正上方的工具行里，空态里再放一个是重复（产品负责人）
-  const domainRef = { key: page.key, label: placeName(page) };
-  const domainLocations = overview.locations.filter((l) => l.domain === page.key);
+  // 空态（DESIGN「位置页 › 空态」）：`+ 来源` 已在页面头，空态里不重复，只说现状
+  const onlySource = activeOrigins.length === 1 ? activeOrigins[0] : null;
   const empty =
     query !== "" ? (
       <TableEmpty
@@ -1196,6 +1312,11 @@ export default function McpTab({
           },
         }}
       />
+    ) : onlySource !== null && !sourceCounts.has(onlySource) ? (
+      <TableEmpty
+        text={`${groupLabel(locationOf(onlySource), onlySource)} 里还没有 MCP`}
+        art="emptyFolder"
+      />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
       <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="emptyFolder" />
     ) : (
@@ -1206,6 +1327,38 @@ export default function McpTab({
         art="emptyFolder"
       />
     );
+
+  // 恰好选中一个来源片：片下出它的来源行（规则与移除；D3）
+  const rowSource = onlySource !== null ? sources.rowOf(onlySource) : undefined;
+  const sourceRow = rowSource ? (
+    <SourceRowView
+      state={sources}
+      row={rowSource}
+      model={model}
+      domain={domainRef}
+      onReveal={(path) => void reveal(path)}
+    />
+  ) : undefined;
+  /// 来源片的右键菜单（D18）：在访达中显示（＝来源行 `打开 ↗`）· 移除来源…（＝来源行 `×`）
+  const chipMenu = (id: string, chip: HTMLElement): ContextMenuItem[] => {
+    const row = sources.rowOf(id);
+    const path = row?.path ?? locationOf(id)?.path;
+    return [
+      ...(path ? [{ label: "在访达中显示", run: () => void reveal(path) }] : []),
+      "separator",
+      ...(row && !row.own
+        ? [{ label: "移除来源…", run: () => void sources.askRemove(row, chip, chip, "start") }]
+        : []),
+    ];
+  };
+  const chip = (id: string, count: number): SourceChipItem => ({
+    id,
+    label: groupLabel(locationOf(id), id),
+    full: `${groupLabel(locationOf(id), id)} · ${displayPath(locationOf(id)?.path ?? id)}`,
+    count,
+    rule: sources.ruleOn(id),
+    menu: (el) => chipMenu(id, el),
+  });
 
   // 写进 WeiboAP 的那几处要额外说一句：它只收下定义，启用是它自己的事
   const paneHasWeibo =
@@ -1219,29 +1372,22 @@ export default function McpTab({
         columns={columns}
         originLabel="来源"
         sources={{
-          total: page.rows.length,
           selected: activeOrigins,
           onSelect: setOriginFilter,
-          items: [...sourceCounts].map(([id, count]) => ({
-            id,
-            label: groupLabel(locationOf(id), id),
-            full: `${groupLabel(locationOf(id), id)} · ${displayPath(locationOf(id)?.path ?? id)}`,
-            count,
-          })),
+          items: [
+            ...[...sourceCounts].map(([id, count]) => chip(id, count)),
+            ...subscribedEmpty.map((r) => chip(r.id, 0)),
+          ],
         }}
+        sourceRow={sourceRow}
         rows={rows}
-        nameLabel="服务"
+        nameLabel="名称"
         nameTip="定义住在哪一格由原件环表示"
         nameCount={rows.length}
-        transportLabel="传输"
+        dotWords="mcp"
         filterText={filterText}
         onFilterText={setFilterText}
-        addButton={
-          <>
-            <Button onClick={openSources}>管理来源</Button>
-            <AddButton noun="来源" onClick={openAdd} />
-          </>
-        }
+        headActions={<AddButton noun="来源" onClick={openAdd} />}
         selected={selected}
         onSelectionChange={(next) => {
           setSelected(next);
@@ -1250,8 +1396,9 @@ export default function McpTab({
         allAgents={allAgents}
         columnChecks={columnChecks}
         onUndo={() => undoRef.current?.()}
+        canUndo={canUndo}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
-        shortcuts={!sourcesOpen && !addOpen && pane === null && pick === null}
+        shortcuts={!addOpen && pane === null && pick === null}
         empty={empty}
         flash={flash}
         cellNotice={cellNotice}
@@ -1324,26 +1471,8 @@ export default function McpTab({
         />
       )}
 
-      {addOpen && (
-        // 加好后主视图重扫，滑回主视图；全加上时列表筛到新来源 + 例行一行（见上）
-        <AddSourcePage
-          model={mcpSourcesModel(domainRef, domainLocations)}
-          domain={domainRef}
-          onClose={closeAdd}
-          onAdded={refresh}
-          onAllAdded={setJustAdded}
-        />
-      )}
-
-      {sourcesOpen && (
-        <SourcesPage
-          kind="mcp"
-          domain={domainRef}
-          locations={domainLocations}
-          onClose={() => setSourcesOpen(false)}
-          onChange={refresh}
-        />
-      )}
+      {sources.host}
+      {addPage}
     </section>
   );
   return <UndoBusy.Provider value={undoBusy}>{content}</UndoBusy.Provider>;

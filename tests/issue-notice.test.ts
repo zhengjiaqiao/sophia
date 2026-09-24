@@ -80,8 +80,8 @@ test("MCP 造句：两份不一样写「在两处」，更多写数字；读不�
     [
       "notion 在两处不一样",
       "figma 在 3 处不一样",
-      "Cline 的配置文件读不出来",
-      "x 在 Cline 里读不出来",
+      "Cline 的配置文件无法读取",
+      "x 在 Cline 里无法读取",
     ],
   );
   assert.ok(out.every((i) => i.segment === "mcp"));
@@ -126,11 +126,11 @@ test("合并：已有提示时新问题接在后面，原来的顺序不动；�
   assert.deepEqual(unseenNotices([n("c"), n("b")], new Set(["b", "c"]), ["b", "c"]), []);
 });
 
-test("主行：一条按类别造句，多条写「发现 N 处要你拿主意」，没有就不出", () => {
+test("主行：一条按类别造句，多条写「发现 N 处需要你处理」，没有就不出", () => {
   assert.equal(noticeLine([]), null);
   assert.deepEqual(noticeLine([n("defuddle")]), { lead: "defuddle", rest: "有两份" });
   assert.deepEqual(noticeLine([n("a"), n("b"), n("c")]), {
     lead: "发现",
-    rest: "3 处要你拿主意",
+    rest: "3 处需要你处理",
   });
 });

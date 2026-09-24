@@ -1,0 +1,137 @@
+/* 小浮层（FloatingLayer.tsx）：paper + 1px hairline 边、float 12 圆角 + float 投影。
+   外框只管位置、圆角与阴影；最大高度由定位规则给（placeLayer），超出的在里面的滚动区滚。
+   色值一律 var(--…)，唯一来源是 tokens.css */
+@import "../tokens.css";
+
+.ss-layer {
+  position: fixed;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: var(--radius-float);
+  border: var(--border-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+}
+
+/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从底色渐隐到透明（功能性渐变） */
+.ss-layer__viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ss-layer__viewport::before,
+.ss-layer__viewport::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: var(--fade-edge);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.ss-layer__viewport::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--paper), transparent);
+}
+
+.ss-layer__viewport::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--paper), transparent);
+}
+
+/* 机面上的滚动区（添加来源页的候选列表）：从 face 渐隐 */
+.ss-layer__viewport--face::before {
+  background: linear-gradient(to bottom, var(--face), transparent);
+}
+
+.ss-layer__viewport--face::after {
+  background: linear-gradient(to top, var(--face), transparent);
+}
+
+.ss-layer__viewport[data-fade-top]::before,
+.ss-layer__viewport[data-fade-bottom]::after {
+  opacity: 1;
+}
+
+.ss-layer__scroll {
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 滚动区被压矮时，里面的项不跟着压扁（1px 的组间 hairline 会被压成 0） */
+.ss-layer__scroll > * {
+  flex-shrink: 0;
+}
+
+/* 列表式小浮层（MCP 同名挑选）：一项两行；高亮行 surface、control 7、左右内缩 4 */
+.ss-menu {
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  padding: var(--space-xxs) 0;
+}
+
+.ss-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 0 var(--space-xxs);
+  padding: 6px var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: default;
+}
+
+.ss-menu__item:hover,
+.ss-menu__item:focus-visible {
+  background: var(--surface);
+  outline: none;
+}
+
+.ss-menu__name,
+.ss-menu__sub {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-menu__name {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+}
+
+.ss-menu__sub {
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.ss-menu__head {
+  padding: 6px var(--space-md) 2px;
+  font-size: var(--size-label);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-layer__viewport::before,
+  .ss-layer__viewport::after {
+    transition: none;
+  }
+}

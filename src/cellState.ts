@@ -4,7 +4,7 @@
 /// 凭动作数组为空就统一说一句话，对它们全是错的。所以先判状态，再决定画什么、说什么。
 ///
 /// UI v4 起异常态**在格里画得出来**（DESIGN「视觉优先」）：同一个 10px 环骨架，
-/// 失效＝虚线环、写不进＝斜杠环、同名被挡＝环内短横、整个文件夹是链接＝环内向右箭头。
+/// 失效＝虚线环、无法写入与同名占位＝斜杠环 ⊘（D22）、整个文件夹是链接＝环内向右箭头。
 import type { Cell, IssueKind, Target } from "./types";
 
 /// 格里的记号。前三种是常驻状态；`none` 是「这一行在这一列没有格」；
@@ -80,7 +80,7 @@ export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: st
       return {
         dot: "readOnly",
         clickable: false,
-        reason: `${agentLabel} 的 skills 目录写不进去，${skill} 没能开启`,
+        reason: `无法写入 ${agentLabel} 的 skills 目录，${skill} 没加上`,
         issue: "readOnlyTarget",
       };
   }

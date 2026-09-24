@@ -195,7 +195,7 @@ const sameValue = (a: McpFieldValue, b: McpFieldValue) => JSON.stringify(a) === 
  * 退回列出全部不同的字段。只给字段名，令牌、密钥的值一概不出现。
  */
 export function pickDiffText(diff: McpDiff | null, sourceId: string): string {
-  const fallback = diff?.dynamicAuth ? "认证头要到运行时才生成，没法逐字比对" : "配置不一样";
+  const fallback = diff?.dynamicAuth ? "认证头要到运行时才生成，无法逐字比对" : "配置不一样";
   if (diff === null) return fallback;
   const index = diff.locationIds.indexOf(sourceId);
   if (index < 0 || diff.unreadable.includes(sourceId)) return fallback;
@@ -353,7 +353,7 @@ export function collectMcpIssues(
       title:
         issue.name === null
           ? (viewOf("invalid", { service: "", location: location.label, source: "" }).reason ?? "")
-          : location.label + " 里的 " + issue.name + " 这次读不出来：" + issue.message,
+          : location.label + " 里的 " + issue.name + " 这次无法读取：" + issue.message,
       locations: [refOf(location.id)],
       name: issue.name,
       domain: location.domain,

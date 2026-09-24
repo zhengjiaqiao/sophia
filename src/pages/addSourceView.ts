@@ -1,13 +1,14 @@
-/// 添加来源（DESIGN「来源管理页 › 添加：二级页 `添加来源到「CardBox」`」）的纯逻辑：标题与造句、
+/// 添加来源（DESIGN「来源：订阅、来源行、添加来源 › 添加来源」）的纯逻辑：标题与造句、
 /// 同名标记、第二行写什么、选的文件夹那一行能不能勾、勾了哪些要加、`添加 N 个来源`、
 /// 加完的提示。不碰 api、不产 JSX。
 /// 内容（AddSourcePanel）与容器（现在是二级页 AddSourcePage）共用这里的造句。
 import { joinWords } from "./importDefaults.ts";
 import type { DomainRef } from "./sourcesView.ts";
 
-/// 页名：`添加来源到「CardBox」`、`添加来源到「全局」`、`添加 MCP 来源到「CardBox」`
+/// 页名：`添加来源到 CardBox`、`添加来源到全局`、`添加 MCP 来源到 CardBox`（专名与汉字之间一个空格，
+/// 汉字之间不加：`joinWords`）
 export function addSourceTitle(domain: DomainRef, kind: "skill" | "mcp"): string {
-  return `${kind === "mcp" ? "添加 MCP 来源到" : "添加来源到"}「${domain.label}」`;
+  return joinWords(kind === "mcp" ? "添加 MCP 来源到" : "添加来源到", domain.label);
 }
 
 /// 顶部 `选择文件夹…` 右侧的灰字
@@ -91,7 +92,7 @@ export type SourceLine =
 /// 选的文件夹那一行的复选框为什么不能勾（第二行与提示框写同一句）；能勾时 null
 export function pickedBlocked(picked: PickedState, domain: DomainRef): string | null {
   if (picked.status === "loading") return "正在读文件夹";
-  if (picked.status === "failed") return `读不到这个文件夹：${picked.reason}`;
+  if (picked.status === "failed") return `无法读取这个文件夹：${picked.reason}`;
   if (picked.already) return alreadySubscribedText(domain);
   if (picked.entry.count === 0) return FOLDER_WITHOUT_SKILLS;
   return null;
