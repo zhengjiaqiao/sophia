@@ -479,6 +479,12 @@ input:focus-visible {
   gap: var(--space-xs);
 }
 
+/* 页面贴底有一行动作（添加来源页的 60 高贴底行）时，右下那一叠抬到它上面：
+   提示不盖住这一页的主动作（② 就近不遮挡） */
+.app:has(.add-src__foot) .app__toast {
+  bottom: calc(10px + 60px + var(--space-md));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .face::before,
   .face::after,
