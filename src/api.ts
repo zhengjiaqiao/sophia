@@ -87,6 +87,12 @@ export const api = {
   listHarnesses: () => invoke<HarnessList>("list_harnesses"),
   setHarnessEnabled: (id: string, enabled: boolean) =>
     invoke<void>("set_harness_enabled", { id, enabled }),
+  /// 看过的新手提示 id（存在 settings.json 的 seenHints；旧文件没有＝空）
+  listSeenHints: () => invoke<string[]>("list_seen_hints"),
+  /// 记下一条看过的新手提示；core 去重、空串忽略
+  markHintSeen: (id: string) => invoke<void>("mark_hint_seen", { id }),
+  /// 清空看过表：新手提示会重新出现
+  resetSeenHints: () => invoke<void>("reset_seen_hints"),
   /// 系统目录选择框；取消返回 null
   pickDirectory: async (title: string): Promise<string | null> => {
     const picked = await open({ directory: true, multiple: false, title });

@@ -1044,6 +1044,24 @@ fn remove_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<()
     state.store.forget_project_added(&path).map_err(err)
 }
 
+/// 看过的新手提示 id（前端 `src/hints.ts` 登记）
+#[tauri::command]
+fn list_seen_hints(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    state.store.seen_hints().map_err(err)
+}
+
+/// 记下一条看过的新手提示（关掉或学会）；去重、空串忽略
+#[tauri::command]
+fn mark_hint_seen(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.store.mark_hint_seen(&id).map_err(err)
+}
+
+/// 设置 › 重新显示新手提示：清空看过表
+#[tauri::command]
+fn reset_seen_hints(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.store.reset_seen_hints().map_err(err)
+}
+
 /// 侧栏排序用的项目时间（最近活跃 / 最近创建），按传入顺序返回。只读元数据，不写盘
 #[tauri::command]
 fn project_times(
@@ -1142,6 +1160,9 @@ pub fn run() {
             remove_mcp_auto_import,
             list_harnesses,
             set_harness_enabled,
+            list_seen_hints,
+            mark_hint_seen,
+            reset_seen_hints,
             gateway::gateway_state,
             gateway::gateway_save_provider,
             gateway::gateway_upsert_provider,

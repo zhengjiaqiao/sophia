@@ -34,6 +34,9 @@ pub struct Settings {
     /// 每个位置订阅了哪些 MCP 来源：域 key → 来源位置 id（`McpLocation.id`）。
     /// 旧文件没有这个字段，读成空；扫描时由 `mcp::sources::adopt` 按老数据补上
     pub mcp_subscriptions: McpSubscriptions,
+    /// 看过的新手提示 id（关掉或学会的那几条，前端 `src/hints.ts` 登记）。
+    /// 旧文件没有这个字段，读成空：每条提示都还没看过
+    pub seen_hints: Vec<String>,
 }
 
 pub struct Store {
@@ -157,6 +160,31 @@ impl Store {
         {
             return Ok(());
         }
+        self.save_settings(&settings)
+    }
+
+    /// 看过的新手提示 id，按记下的先后
+    pub fn seen_hints(&self) -> io::Result<Vec<String>> {
+        Ok(self.load_settings()?.seen_hints)
+    }
+
+    /// 记下一条看过的新手提示；已记过或空串不写盘
+    pub fn mark_hint_seen(&self, id: &str) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if id.is_empty() || settings.seen_hints.iter().any(|x| x == id) {
+            return Ok(());
+        }
+        settings.seen_hints.push(id.to_string());
+        self.save_settings(&settings)
+    }
+
+    /// 清空看过的新手提示（设置 › 重新显示新手提示）；本来就空时不写盘
+    pub fn reset_seen_hints(&self) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if settings.seen_hints.is_empty() {
+            return Ok(());
+        }
+        settings.seen_hints.clear();
         self.save_settings(&settings)
     }
 }
@@ -283,6 +311,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            seen_hints: vec!["first-scan-skills".into()],
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
@@ -518,6 +547,58 @@ mod tests {
         let reread = s.load_settings().unwrap();
         assert_eq!(reread, loaded);
         assert_eq!(reread.known_installed, installed);
+    }
+
+    /// 新手提示看过表：旧文件没有字段读成空；记一个去重、空串忽略；存盘字段名 `seenHints`；清空后为空
+    #[test]
+    fn seen_hints_mark_dedupe_and_reset() {
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"disabledHarnesses":["codex"],"manualSources":["/a/skills"]}"#,
+        )
+        .unwrap();
+        let s = Store::new(dir.clone());
+        assert!(s.seen_hints().unwrap().is_empty());
+
+        s.mark_hint_seen("first-scan-skills").unwrap();
+        s.mark_hint_seen("first-codex").unwrap();
+        s.mark_hint_seen("first-scan-skills").unwrap();
+        s.mark_hint_seen("").unwrap();
+        assert_eq!(
+            s.seen_hints().unwrap(),
+            vec!["first-scan-skills".to_string(), "first-codex".to_string()]
+        );
+        // 真实文件里是 camelCase 的 seenHints；别的字段原样留着
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(
+            raw["seenHints"],
+            serde_json::json!(["first-scan-skills", "first-codex"])
+        );
+        assert_eq!(raw["disabledHarnesses"], serde_json::json!(["codex"]));
+        assert_eq!(raw["manualSources"], serde_json::json!(["/a/skills"]));
+
+        s.reset_seen_hints().unwrap();
+        assert!(s.seen_hints().unwrap().is_empty());
+        let reread = s.load_settings().unwrap();
+        assert_eq!(reread.disabled_harnesses, vec!["codex".to_string()]);
+        // 清空后再记照常
+        s.mark_hint_seen("first-scan-empty").unwrap();
+        assert_eq!(s.seen_hints().unwrap(), vec!["first-scan-empty".to_string()]);
+    }
+
+    /// 没有 settings.json 时：读成空，空串不建文件，清空也不建文件
+    #[test]
+    fn seen_hints_without_settings_file() {
+        let t = TempTree::new();
+        let dir = t.root().join("data/SymSync");
+        let s = Store::new(dir.clone());
+        assert!(s.seen_hints().unwrap().is_empty());
+        s.mark_hint_seen("").unwrap();
+        s.reset_seen_hints().unwrap();
+        assert!(!dir.join("settings.json").exists());
     }
 
     #[test]
