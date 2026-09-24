@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { relativeTime, shortDate } from "../src/dateText.ts";
+import { lastAutoText, relativeTime, shortDate } from "../src/dateText.ts";
 
 test("shortDate：今年只写月日，跨年写全年份", () => {
   const now = new Date(2026, 8, 22);
@@ -18,4 +18,11 @@ test("relativeTime：分钟 / 小时 / 天，30 天以上写日期", () => {
   assert.equal(ago(3 * 3_600_000), "3 小时前");
   assert.equal(ago(3 * 86_400_000), "3 天前");
   assert.equal(relativeTime(new Date(2026, 7, 1).getTime(), now), "8月1日");
+});
+
+test("lastAutoText：相对时间 · 动词 N 个", () => {
+  const now = new Date(2026, 8, 23, 12);
+  const at = now.getTime() - 2 * 60_000;
+  assert.equal(lastAutoText({ at, added: 3 }, "加到", now), "2 分钟前 · 加到 3 个");
+  assert.equal(lastAutoText({ at: now.getTime(), added: 1 }, "写进", now), "刚刚 · 写进 1 个");
 });

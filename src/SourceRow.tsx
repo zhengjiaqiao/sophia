@@ -49,6 +49,7 @@ import type {
   ToastText,
 } from "./pages/sourcesModel.ts";
 import type { AnchorRect, ToastAlign } from "./layerPlace.ts";
+import { lastAutoText } from "./dateText.ts";
 import { displayPath } from "./pathText.ts";
 import "./SourceRow.css";
 
@@ -476,11 +477,11 @@ function useRuleControls(
   const box = (
     <Tooltip
       content={
-        layerOpen
+        layerOpen || !on
           ? undefined
-          : on
-            ? `${model.ruleOn} ${shown.map((t) => t.label).join("、")}`
-            : undefined
+          : row.lastAuto
+            ? lastAutoText(row.lastAuto, model.ranVerb)
+            : `${model.ruleOn} ${shown.map((t) => t.label).join("、")}`
       }
     >
       <button

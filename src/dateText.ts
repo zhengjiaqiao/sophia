@@ -18,3 +18,13 @@ export function relativeTime(ms: number, now: Date = new Date()): string {
   if (days < 30) return `${days} 天前`;
   return shortDate(ms, now);
 }
+
+/// 自动规则最近一次执行的读数：「2 分钟前 · 加到 3 个」（MCP 的动词是「写进」）。
+/// 纯函数，`now` 由调用方传（测试用）
+export function lastAutoText(
+  run: { at: number; added: number },
+  verb: string,
+  now: Date = new Date(),
+): string {
+  return `${relativeTime(run.at, now)} · ${verb} ${run.added} 个`;
+}

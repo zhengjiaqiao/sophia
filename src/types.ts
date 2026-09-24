@@ -170,6 +170,14 @@ export interface AutoLink {
   /// 规则生效之后才加进来的目标，各自在加进来那一刻的 baseline（优先于 baseline）。
   /// 由 core 拍，前端不传；为空时 core 省略这个字段
   targetBaselines?: Record<string, string[]>;
+  /// 按位置（域 key）记的最近一次真正建上了链的自动执行。由 core 记，前端不传；为空时省略
+  lastAuto?: Record<string, AutoRun>;
+}
+
+/// 自动规则一次执行的结果（core `models::AutoRun`）：什么时候（毫秒时间戳）、加上了几格
+export interface AutoRun {
+  at: number;
+  added: number;
 }
 
 /// 来源管理页一行的共同部分（core `subscriptions::SourceSummary`）
@@ -197,6 +205,8 @@ export interface SubscribedSource extends SourceSummary {
   autoLink: boolean;
   /// 规则在这个位置的目标 id（Target.id）
   autoTargets: string[];
+  /// 规则在这个位置最近一次真正加上了链的执行；从没加上过为 null
+  lastAuto: AutoRun | null;
 }
 
 export interface DomainName {
@@ -364,6 +374,8 @@ export interface McpAutoImportRule {
   baseline?: string[] | null;
   /// 规则生效之后才加进来的目标各自的 baseline（位置 id → 名字）
   targetBaselines?: Record<string, string[]>;
+  /// 最近一次真正写进去了东西的自动执行。由 core 记，前端不传；没有时省略
+  lastAuto?: AutoRun;
 }
 
 /// MCP 来源里的一个服务（core `mcp::sources::McpService`）
@@ -400,6 +412,8 @@ export interface McpSubscribedSource extends McpSourceSummary {
   own: boolean;
   /// 「以后新出现的自动写进」在这个位置的目标 id；空＝关着。开关与改目标沿用 setMcpAutoImport
   autoTargets: string[];
+  /// 这个位置的规则最近一次真正写进去了东西的执行；从没写进过为 null
+  lastAuto: AutoRun | null;
 }
 
 export interface McpCandidateSource extends McpSourceSummary {

@@ -1,7 +1,7 @@
 /// 位置页来源的两种数据源（skill / MCP）：来源行（`SourceRow.tsx`）与添加来源页同一套骨架，
 /// 这里把两边的命令与造句换成同一种行、目标、候选与移除，页面只认这一种形状。不产 JSX。
 import { api } from "../api";
-import type { McpLocation, McpReport, McpService, SyncReport, Target } from "../types";
+import type { AutoRun, McpLocation, McpReport, McpService, SyncReport, Target } from "../types";
 import type { ToastProps } from "../ui";
 import {
   NO_SKILL_CANDIDATES,
@@ -53,6 +53,8 @@ export interface SourceRow {
   items: { name: string; tag?: { text: string; tip: string }; dim?: boolean }[];
   /// 规则此刻的目标 id；空＝关着
   targets: string[];
+  /// 规则在这个位置最近一次真正加上 / 写进了东西的执行；没有为 null（目标框的提示框写它）
+  lastAuto: AutoRun | null;
   /// 开关打不开的原因（关着时才用）；undefined＝能开
   switchReason?: string;
   /// 开关的提示框
@@ -93,6 +95,8 @@ export interface SourcesModel {
   noun: string;
   /// 开关开着时行上写的：`自动加到` / `自动写进`
   ruleOn: string;
+  /// 最近一次自动执行的动词：`2 分钟前 · 加到 3 个` / `… · 写进 3 个`
+  ranVerb: string;
   /// 目标小框的提示与浮层的名字
   targetsTitle: string;
   /// 目标图标认不出来时小框里写 `N 个 agent` / `N 个位置`
@@ -150,6 +154,7 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
     emptyText: noSourcesText(domain),
     noun: "skill",
     ruleOn: "自动加到",
+    ranVerb: "加到",
     targetsTitle: "改自动加到的 agent",
     targetUnit: "个 agent",
     noTargetsReason: "这里还没有能加到的 agent",
@@ -180,6 +185,7 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
               : undefined,
           })),
           targets: s.autoLink ? s.autoTargets : [],
+          lastAuto: s.lastAuto ?? null,
           switchReason: s.canAutoLink ? undefined : "外部来源看不到以后新出现的 skill",
           switchTitle: RULE_TITLE,
           ruleRef: s.path,
@@ -293,6 +299,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
     emptyText: noMcpSourcesText(domain),
     noun: "MCP",
     ruleOn: "自动写进",
+    ranVerb: "写进",
     targetsTitle: "改自动写进的位置",
     targetUnit: "个位置",
     noTargetsReason: "这里还没有能写进的位置",
@@ -322,6 +329,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             own: s.own,
             items: s.services.map((x) => serviceItem(x, s.label, s.id, dupAmongSubscribed)),
             targets: s.autoTargets,
+            lastAuto: s.lastAuto ?? null,
             switchReason: s.unreadable ? "无法读取它的配置，修好之后才能打开" : undefined,
             switchTitle: crossDomain
               ? `${RULE_TITLE}；写到这里会把请求头和令牌一并复制过来`
