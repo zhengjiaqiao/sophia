@@ -12,7 +12,7 @@ import table from "./locationDomains.json" with { type: "json" };
 export interface LocationDomain {
   /// 稳定的标识：落点记忆、菜单命令 `tab-<id>` 都用它
   id: string;
-  /// 页签与菜单项上的字，原样写
+  /// 页签上的字，原样写（界面经 `Cap`、菜单经 `domainMenuLabel` 显示为大写）
   label: string;
 }
 
@@ -40,14 +40,18 @@ export function domainShortcut(index: number): string | null {
   return index < 9 ? `CmdOrCtrl+${index + 1}` : null;
 }
 
+/// 菜单项上的名字：与页签显示的一样写大写（`SKILLS` `MCP`）。原生菜单用系统字体、没有 `Cap`，
+/// 所以直接转大写（DESIGN「应用菜单」：名字与界面上同一个命令同名）
+export const domainMenuLabel = (d: LocationDomain): string => d.label.toUpperCase();
+
 /// 应用菜单「显示」里的页签项（与 `src-tauri/src/menu.rs` 的 `tab_item` 同一条规则）：
-/// 命令 `tab-<id>`、名字即页签上的字、第 N 项 ⌘N
+/// 命令 `tab-<id>`、名字即页签上显示的字（大写）、第 N 项 ⌘N
 export function domainMenuItems(
   domains: ReadonlyArray<LocationDomain> = LOCATION_DOMAINS,
 ): Array<{ command: string; label: string; accelerator: string | null }> {
   return domains.map((d, i) => ({
     command: tabCommand(d.id),
-    label: d.label,
+    label: domainMenuLabel(d),
     accelerator: domainShortcut(i),
   }));
 }

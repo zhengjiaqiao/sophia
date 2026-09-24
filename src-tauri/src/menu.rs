@@ -64,7 +64,7 @@ pub const ITEMS: [&Item; 9] = [
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Domain {
     pub id: String,
-    /// 页签上的字，菜单项同名（`skills` `mcp` 与页签同写小写）
+    /// 页签上的字，原样小写写（`skills` `mcp`）；页签经 `Cap` 显示为大写，菜单项在 `tab_item` 里转大写
     pub label: String,
 }
 
@@ -75,10 +75,12 @@ pub fn domains() -> Vec<Domain> {
     serde_json::from_str(DOMAINS_JSON).expect("src/shell/locationDomains.json 格式不对")
 }
 
-/// 第 i 个 domain 的菜单项：命令 `tab-<id>`，快捷键 ⌘(i+1)（第 10 项起不给）
+/// 第 i 个 domain 的菜单项：命令 `tab-<id>`，名字＝页签上显示的字（大写，`SKILLS` `MCP`），
+/// 快捷键 ⌘(i+1)（第 10 项起不给）。原生菜单用系统字体、没有 `Cap`，所以在这里直接转大写——
+/// 与前端 `domainMenuItems` 同一条规则（DESIGN「应用菜单」：名字与界面上同一个命令同名）
 pub fn tab_item(i: usize, d: &Domain) -> (String, String, Option<String>) {
     let accelerator = (i < 9).then(|| format!("CmdOrCtrl+{}", i + 1));
-    (format!("tab-{}", d.id), d.label.clone(), accelerator)
+    (format!("tab-{}", d.id), d.label.to_uppercase(), accelerator)
 }
 
 /// 菜单事件的 id 是不是应用菜单的自定义项；是就返回要发给前端的命令名
@@ -263,10 +265,12 @@ mod tests {
             items[0],
             (
                 "tab-skills".into(),
-                "skills".into(),
+                "SKILLS".into(),
                 Some("CmdOrCtrl+1".into())
             )
         );
+        // 菜单项与页签显示的字同写大写
+        assert_eq!(items[1].1, "MCP");
         assert_eq!(items[1].2.as_deref(), Some("CmdOrCtrl+2"));
         // 表里加第三项（以后的 sessions）：自动得到 ⌘3
         let third = Domain {
@@ -277,7 +281,7 @@ mod tests {
             tab_item(2, &third),
             (
                 "tab-sessions".into(),
-                "sessions".into(),
+                "SESSIONS".into(),
                 Some("CmdOrCtrl+3".into())
             )
         );

@@ -5,7 +5,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, extname, relative } from "node:path";
 
-/// 唯一的色值来源（V4 的 15 个色 token）；tokens.css 之外的地方不许出现字面色值，
+/// 唯一的色值来源（V4 的 14 个色 token；ink-edge 随 2026-09-24 物性删除）；tokens.css 之外的地方不许出现字面色值，
 /// tokens.css 里也不许出现这之外的值（旧的 #222222 #f2f2f2 #c8c8c8 一写就报）
 const TOKENS = new Set([
   "#f4f4f2", // shell
@@ -19,7 +19,6 @@ const TOKENS = new Set([
   "#bdbdb7", // ctl-edge
   "#dcdcd7", // track
   "#1c1c1a", // ink
-  "#000000", // ink-edge
   "#4e4e4a", // ink-mute
   "#6f6f6a", // ink-faint
   "#e0652a", // accent
@@ -29,23 +28,26 @@ const FONTS = ["Barlow", "Barlow Condensed", "IBM Plex Mono"];
 /// 圆角随尺寸（DESIGN「Shapes」）：刻条 2、记号与滑块 4、开关槽 5、控件 7、页签槽 10、
 /// 面与浮层 12、胶囊 999、圆点 50%，平铺结构 0。3px、6px、8px、32px 都是旧值
 const RADII = new Set(["0", "0px", "2px", "4px", "5px", "7px", "10px", "12px", "999px", "50%"]);
-/// 层次 token（DESIGN「Elevation & Depth」）：浮（唯一的投影）、行程（1px 底边）、凹（内凹）。
-/// box-shadow 只能是它们、或它们用逗号连起来
+/// 层次 token（DESIGN「Elevation & Depth」）：投影只说离机面多高，四档——凹（recess-*）/ 平（无）/
+/// 抬起（raise*，只给键、页签滑块、开关滑块）/ 浮（elev-float）。box-shadow 只能是它们、或它们用逗号连起来
 const ELEVATIONS = new Set([
-  "var(--elev-float)",
-  "var(--key-edge)",
-  "var(--key-edge-ink)",
   "var(--recess-input)",
   "var(--recess-tabs)",
-  "var(--recess-pressed)",
   "var(--recess-track)",
+  "var(--raise)",
+  "var(--raise-hover)",
+  "var(--raise-pressed)",
+  "var(--raise-ink)",
+  "var(--raise-ink-pressed)",
+  "var(--elev-float)",
 ]);
 /// 功能性渐变只能从底色过渡到透明（滚动边缘渐隐），不做装饰：机面上从 face，
 /// 纸浮层（下拉、选择器）里从 paper
 const FADE_STOPS = new Set(["var(--face)", "var(--paper)", "transparent"]);
 
 /// tokens.css 里层次 token 的定义行：只有这几行可以出现 rgba 字面值
-const ELEV_DEF = /^\s*--(?:elev-float|recess-(?:input|tabs|pressed|track))\s*:.*$/gm;
+const ELEV_DEF =
+  /^\s*--(?:elev-float|recess-(?:input|tabs|track)|raise(?:-hover|-pressed|-ink|-ink-pressed)?)\s*:.*$/gm;
 
 /// 大写与正字距只经 Cap（DESIGN「字距：汉字永远 0」）：只有这些选择器里能写
 /// text-transform: uppercase、非 0 letter-spacing、var(--track-*)
@@ -128,7 +130,7 @@ const rules = [
   },
   {
     id: "elevation",
-    desc: "层次只用 token：投影只给浮层（--elev-float），行程与内凹用 --key-edge* / --recess-*；渐变只做滚动边缘渐隐",
+    desc: "层次只用 token：凹 --recess-*、抬起 --raise*、浮 --elev-float；渐变只做滚动边缘渐隐",
     run(src) {
       const out = [];
       for (const m of src.matchAll(/box-?[Ss]hadow\s*[:=]\s*["']?([^;"'}\n]+)/g)) {

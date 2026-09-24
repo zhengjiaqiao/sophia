@@ -14,19 +14,18 @@
 @import "@fontsource/ibm-plex-mono/latin-500.css";
 
 :root {
-  /* ---- 色（DESIGN「Colors」）：十四个同一温度的中性值 + 一个强调色，强调色只有一个意思 ---- */
+  /* ---- 色（DESIGN「Colors」）：十三个同一温度的中性值 + 一个强调色，强调色只有一个意思 ---- */
   --shell: #f4f4f2; /* 机壳：窗体、顶栏、侧栏、二级页头的底 */
   --face: #fcfcfb; /* 机面：内容区；墨面上的主字、墨键的字 */
   --paper: #ffffff; /* 按键面与浮层：默认键、页签滑块、开关滑块、模型片、复选框底、下拉、确认框、成功提示条 */
   --recess: #f2f2ef; /* 凹面：输入框、模型框；不可用的开关滑块 */
-  --surface: #efefec; /* 悬停行、下拉高亮项、按下的键面、灰面板、勾选中的行 */
-  --hairline: #e3e3df; /* 边线：机面与浮层的边、表头底、输入框边、页签槽底、禁用边 */
+  --surface: #efefec; /* 悬停行、下拉高亮项、按下的键面、页签槽、灰面板、勾选中的行 */
+  --hairline: #e3e3df; /* 边线：机面与浮层的边、表头底、输入框边、禁用边 */
   --row-line: #ededea; /* 行线 */
-  --ctl-border: #d4d4cf; /* 控件边：键、未选中的片、滑块的环；关着的指示点；墨面上的次字 */
-  --ctl-edge: #bdbdb7; /* 按键底边＝行程；键的悬停描边；开关防滑纹与关态刻条 */
+  --ctl-border: #d4d4cf; /* 控件边：未选中的片；关着的指示点；墨面上的次字（键与滑块的边由 --raise 的环给） */
+  --ctl-edge: #bdbdb7; /* 边升一档：片与输入框的悬停描边；开关关态刻条 */
   --track: #dcdcd7; /* 开关凹槽 */
   --ink: #1c1c1a; /* 主文字、墨键、墨窗、实心格点、复选框勾上、焦点环（不用纯黑：16.6:1 已够） */
-  --ink-edge: #000000; /* 只给墨键的 1px 底边：墨上再画墨看不出来。从不成面、从不成字 */
   --ink-mute: #4e4e4a; /* 次要文字、文字链、占位字、图标按钮图形、输入框聚焦边；墨面上的分隔线 */
   --ink-faint: #6f6f6a; /* 文字里只给计数、等宽读数与不可用的字；复选框边、无格短横、忙碌轨道 */
   --accent: #e0652a; /* 只表示「开着 / 在生效」：开关刻条 + 指示点。别处出现都是缺陷 */
@@ -87,23 +86,30 @@
   --border-float: 1px solid var(--hairline); /* 浮层的边（墨窗无边） */
   --border-structure: 1px solid var(--hairline); /* 表头底、展开区边界 */
   --border-row: 1px solid var(--row-line); /* 行与行 */
-  --border-control: 1px solid var(--ctl-border); /* 能按的键、未选中的片 */
-  --border-disabled: 1px solid var(--hairline); /* 不可用：平贴、实线、无底边（裁决 D20，不再用虚线） */
+  --border-control: 1px solid var(--ctl-border); /* 未选中的片（键不画描边：边由 --raise 的环给） */
+  --border-disabled: 1px solid var(--hairline); /* 不可用：平贴、实线、无投影（裁决 D20，不再用虚线） */
 
-  /* ---- 层次（DESIGN「Elevation & Depth」）：平 / 行程 / 凹 / 浮，各管一件事。
+  /* ---- 层次（DESIGN「Elevation & Depth」）：投影只说离机面多高，四档——凹 / 平（无投影）/ 抬起 / 浮。
+     抬起只给手会碰的三样：键、页签滑块、开关滑块；它们的 1px 环由 --raise* 的第一层给，不另画描边。
      rgba 只能出现在这几行定义里（lint-ui 的 elevation 规则） ---- */
   /* prettier-ignore */
-  --elev-float: 0 12px 32px rgba(28,28,26,.12); /* 唯一的投影：这层浮在页面上面 */
-  --key-edge: 0 1px 0 var(--ctl-edge); /* 行程：能按的键、页签滑块、开关滑块的 1px 底边 */
-  --key-edge-ink: 0 1px 0 var(--ink-edge); /* 墨键的行程 */
+  --recess-input: inset 0 1px 0 rgba(28,28,26,.06); /* 凹：输入框、模型框 */
   /* prettier-ignore */
-  --recess-input: inset 0 1px 0 rgba(28,28,26,.06); /* 输入框、模型框 */
+  --recess-tabs: inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04); /* 凹：页签槽 */
   /* prettier-ignore */
-  --recess-tabs: inset 0 1px 1px rgba(28,28,26,.10); /* 页签滑槽 */
+  --recess-track: inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04); /* 凹：开关槽 */
   /* prettier-ignore */
-  --recess-pressed: inset 0 1px 1px rgba(28,28,26,.12); /* 按下的默认键 */
+  --raise: 0 0 0 1px rgba(28,28,26,.07), 0 1px 2px rgba(28,28,26,.10), 0 2px 6px rgba(28,28,26,.05); /* 抬起：默认键、页签滑块、开关滑块 */
   /* prettier-ignore */
-  --recess-track: inset 0 1px 2px rgba(28,28,26,.20); /* 开关凹槽 */
+  --raise-hover: 0 0 0 1px rgba(28,28,26,.09), 0 1px 2px rgba(28,28,26,.12), 0 3px 8px rgba(28,28,26,.07); /* 手靠近：影子略重、不位移 */
+  /* prettier-ignore */
+  --raise-pressed: 0 0 0 1px rgba(28,28,26,.09), 0 0.5px 1px rgba(28,28,26,.10); /* 按下：贴近机面，影子收紧 */
+  /* prettier-ignore */
+  --raise-ink: 0 1px 2px rgba(28,28,26,.28), 0 2px 6px rgba(28,28,26,.14); /* 墨键，静止与悬停 */
+  /* prettier-ignore */
+  --raise-ink-pressed: 0 0.5px 1px rgba(28,28,26,.30); /* 墨键按下 */
+  /* prettier-ignore */
+  --elev-float: 0 12px 32px rgba(28,28,26,.12); /* 浮：下拉、确认框、提示框、提示条 */
   /* 确认框的遮罩：ink 16%（opacity 层，底色用 ink），整面压暗一档 */
   --veil-opacity: 0.16;
 
@@ -119,10 +125,19 @@
   /* 命中区下限（DESIGN「命中区与视觉尺寸是两回事」） */
   --hit-min: 24px;
 
-  /* ---- 动效（DESIGN「控件有行程」「忙碌指示」）：机械式缓动，不要弹性果冻、不要 300ms 淡入淡出。
+  /* ---- 动效（DESIGN「控件有重量」「状态与动效」）：会移动的实物用阻尼弹簧，颜色不用弹簧。
      prefers-reduced-motion 下全部退化为即时状态变化（ui.css 末尾） ---- */
-  --motion-fast: 120ms; /* 一切状态变化：开关位移、页签滑块、刚点亮反色、悬停 */
-  --ease-mech: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-fast: 120ms; /* 颜色、底色、透明度、悬停时影子变重、刻条换色、刚点亮反色 */
+  --ease-mech: cubic-bezier(0.2, 0.8, 0.2, 1); /* 配 --motion-fast；也用于按下过程 */
+  --dur-press: 70ms; /* 按下：影子收成 pressed、按压变形、默认键底色转 surface（--ease-mech） */
+  --dur-release: 180ms; /* 松开：变形用 --spring-slide 回位 */
+  --dur-slide-tab: 260ms; /* 页签滑块的位移与变宽（宽的东西慢一点） */
+  --dur-slide-knob: 200ms; /* 开关滑块位移：点击与拖动松手后的停靠 */
+  /* 阻尼比 0.8、响应 0.25s 的弹簧阶跃响应，0.32s 窗口取 24 点：过冲 1.5%、末端残差 < 0.2%（停稳不弹）。
+     同一条曲线按不同时长播放：越重越慢 */
+  /* prettier-ignore */
+  --spring-slide: linear(0, 0.018 2.5%, 0.065 5%, 0.131 7.5%, 0.209 10%, 0.293 12.5%, 0.378 15%, 0.461 17.5%, 0.54 20%, 0.613 22.5%, 0.679 25%, 0.749 28%, 0.809 31%, 0.859 34%, 0.899 37%, 0.941 41%, 0.97 45%, 0.994 50%, 1.008 55%, 1.014 61%, 1.015 68%, 1.012 76%, 1.007 86%, 1);
+  --press-transform: translateY(0.5px) scale(0.985); /* 键、滑块按下：贴近机面并微缩 */
   --motion-spinner: 1s; /* 辐条转一圈，8 步阶跃 */
   --motion-dots: 500ms; /* 减少动效时文字后的 `…` 每步增减一点 */
 
@@ -151,4 +166,16 @@
   /* 界面文字不可拖选（裁决 D23）：路径、id、命令与输入框除外，见 ui.css 的 .ss-selectable */
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* 减少动效（DESIGN「控件有重量 › prefers-reduced-motion」）：按下、松开、滑块位移全部即时，没有按压变形。
+   拖动时滑块照样跟手（那是直接操作，不是动画），松手即时落位 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-press: 0ms;
+    --dur-release: 0ms;
+    --dur-slide-tab: 0ms;
+    --dur-slide-knob: 0ms;
+    --press-transform: none;
+  }
 }

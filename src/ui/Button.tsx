@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { ReasonTip } from "./Tooltip.tsx";
 
-/// 按键（DESIGN「按钮」「控件有行程」，视觉 V4）。
+/// 按键（DESIGN「按钮」「控件有重量」，视觉 V4）。
 ///
 /// 控件矩形（`control` 7），Barlow / 苹方 13 / 600，**原样大小写、字距 0**。键的阶梯（D14）：
-/// - `primary` 墨键：`ink` 底、`face` 字、1px `ink-edge` 底边。一个面里至多一个（`添加 N 个` `保存` 确认框主动作）
-/// - `default` 默认键：`paper` 面、1px `ctl-border` 边、1px `ctl-edge` 底边（`重启` `配置网关` `清除` 确认框的 `取消`）
-/// - `quiet` 安静键：无底无边、13 `ink-mute`；悬停出 `surface` 圆角带，按下下沉 1px。
+/// - `primary` 墨键：`ink` 底、`face` 字、抬起 `raise-ink`。一个面里至多一个（`添加 N 个` `保存` 确认框主动作）
+/// - `default` 默认键：`paper` 面、抬起 `raise`（边由投影的 1px 环给，不画描边）（`重启` `配置网关` `清除` 确认框的 `取消`）
+/// - `quiet` 安静键：无底无边、13 `ink-mute`；悬停出 `surface` 圆角带，按下有按压变形、不抬起。
 ///   取代应用内的下划线文字链（`撤销` `稍后` `编辑` `只留这份` `检查更新`），命中区高 24、左右各 6（视觉不变）
 /// - `external` 离开 Sophia 的链接（`button-link`）：13 `ink-mute` 下划线 + 10px `↗`（`打开 ↗` `在访达中显示 ↗`）。
 ///   全应用只有它带下划线、只有它用手形光标
@@ -14,12 +14,13 @@ import { ReasonTip } from "./Tooltip.tsx";
 /// 三个尺寸按所在那一行选，不按重要性选：`regular` 28（工具行）、`compact` 24（表格行、
 /// 提示条、灰面板）、`row` 32（确认框与页面级提交）。
 ///
-/// 行程：能按的键有 1px 底边；hover 默认键描边转 `ctl-edge`、墨键内沿加 1px `ink-mute`；
-/// pressed 底边消失、下沉 1px（默认键键面转 `surface` 并内凹）；focus 外 2px 处 1px 环。全部在 ui.css。
+/// 重量：静止抬起一点；悬停手靠近，影子略重、不位移（墨键在内沿加 1px `ink-mute`）；按下 70ms 贴近机面
+/// （影子收紧、下沉 0.5px 并微缩，默认键键面转 `surface`）；松开 180ms 弹簧回位；focus 外 2px 处 1px 环。
+/// 全部在 ui.css。
 ///
 /// 破坏性不涂红：分量由信息和按钮文案承担（`删到废纸篓`，不写「确定」）。
 ///
-/// 禁用（给了 `disabledReason`）：平贴、实线 `hairline`、`ink-faint` 字，无底边无行程（D20）；
+/// 禁用（给了 `disabledReason`）：平贴、实线 `hairline`、`ink-faint` 字，无投影、按下不动（D20）；
 /// 自带原因提示框，悬停出、**按下（点击、空格、回车）当即出**，页面不必再包一层。
 /// 外面再包的提示框（「重启生效」的说明）在禁用期间让给原因，同时只出一个。
 
@@ -33,7 +34,7 @@ interface ButtonBase {
   title?: string;
   /// 图标在文字左边（`AddButton` 的 `+` 就是这么来的）
   icon?: ReactNode;
-  /// 放在墨窗上：默认键变浅描边键（1px `face` 边与字、无行程），安静键变 `ctl-border` 字
+  /// 放在墨窗上：默认键变浅描边键（1px `face` 边与字、不抬起），安静键变 `ctl-border` 字
   onDark?: boolean;
   /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
   "aria-describedby"?: string;
@@ -134,7 +135,7 @@ export interface IconButtonProps {
 }
 
 /// 图标按钮（DESIGN「图标按钮」）：16px 图形、1.4 描边、28×28 命中区、无描边无底，图形 `ink-mute`；
-/// 悬停 `surface` 底（`control` 7）、图形转 `ink`。它是工具不是键，没有行程。
+/// 悬停 `surface` 底（`control` 7）、图形转 `ink`。它是工具不是键：不抬起、按下不动。
 /// 设置齿轮、提示条与侧栏的 × 都是它
 export function IconButton({
   icon,

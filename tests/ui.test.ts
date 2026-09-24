@@ -83,7 +83,7 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
 
 // ===== 设计变量 =====
 
-test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/24/32 控件高、行高 34、机械缓动", () => {
+test("tokens：V4 的 14 个色、六档字号、V4 圆角、层次 token、28/24/32 控件高、行高 34、机械缓动", () => {
   for (const [name, value] of [
     ["shell", "#f4f4f2"],
     ["face", "#fcfcfb"],
@@ -96,7 +96,6 @@ test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/2
     ["ctl-edge", "#bdbdb7"],
     ["track", "#dcdcd7"],
     ["ink", "#1c1c1a"],
-    ["ink-edge", "#000000"],
     ["ink-mute", "#4e4e4a"],
     ["ink-faint", "#6f6f6a"],
     ["accent", "#e0652a"],
@@ -115,6 +114,11 @@ test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/2
     /--elev-(layer|tip)\b/,
     /--size-(wordmark|micro|nav)\b/,
     /--leading-micro\b/,
+    // 2026-09-24 物性：墨键底边色、1px 底边式行程与按下内凹，由抬起投影取代
+    /--ink-edge\b/,
+    /#000000/,
+    /--key-edge/,
+    /--recess-pressed\b/,
   ]) {
     assert.doesNotMatch(tokensCss, gone, String(gone));
   }
@@ -177,14 +181,27 @@ test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/2
   ]) {
     assert.match(tokensCss, new RegExp(`--radius-${name}:\\s*${value};`), name);
   }
-  // 层次：唯一的投影、行程、四种内凹，逐字；遮罩 ink 16%
-  assert.match(tokensCss, /--elev-float: 0 12px 32px rgba\(28,28,26,\.12\);/);
-  assert.match(tokensCss, /--key-edge: 0 1px 0 var\(--ctl-edge\);/);
-  assert.match(tokensCss, /--key-edge-ink: 0 1px 0 var\(--ink-edge\);/);
-  assert.match(tokensCss, /--recess-input: inset 0 1px 0 rgba\(28,28,26,\.06\);/);
-  assert.match(tokensCss, /--recess-tabs: inset 0 1px 1px rgba\(28,28,26,\.10\);/);
-  assert.match(tokensCss, /--recess-pressed: inset 0 1px 1px rgba\(28,28,26,\.12\);/);
-  assert.match(tokensCss, /--recess-track: inset 0 1px 2px rgba\(28,28,26,\.20\);/);
+  // 层次：投影只说离机面多高，四档九个值，逐字（凹 / 抬起 / 浮；平无投影）；遮罩 ink 16%
+  for (const [name, value] of [
+    ["recess-input", "inset 0 1px 0 rgba(28,28,26,.06)"],
+    ["recess-tabs", "inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04)"],
+    ["recess-track", "inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04)"],
+    [
+      "raise",
+      "0 0 0 1px rgba(28,28,26,.07), 0 1px 2px rgba(28,28,26,.10), 0 2px 6px rgba(28,28,26,.05)",
+    ],
+    [
+      "raise-hover",
+      "0 0 0 1px rgba(28,28,26,.09), 0 1px 2px rgba(28,28,26,.12), 0 3px 8px rgba(28,28,26,.07)",
+    ],
+    ["raise-pressed", "0 0 0 1px rgba(28,28,26,.09), 0 0.5px 1px rgba(28,28,26,.10)"],
+    ["raise-ink", "0 1px 2px rgba(28,28,26,.28), 0 2px 6px rgba(28,28,26,.14)"],
+    ["raise-ink-pressed", "0 0.5px 1px rgba(28,28,26,.30)"],
+    ["elev-float", "0 12px 32px rgba(28,28,26,.12)"],
+  ]) {
+    const esc = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(tokensCss, new RegExp(`--${name}: ${esc};`), name);
+  }
   assert.match(tokensCss, /--veil-opacity:\s*0\.16;/);
   // 禁用边：实线 hairline（D20）
   assert.match(tokensCss, /--border-disabled: 1px solid var\(--hairline\);/);
@@ -194,6 +211,32 @@ test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/2
   assert.match(tokensCss, /--row-h:\s*34px;/);
   assert.match(tokensCss, /--motion-fast:\s*120ms;/);
   assert.match(tokensCss, /--ease-mech:\s*cubic-bezier\(0\.2, 0\.8, 0\.2, 1\);/);
+  // 重量与惯性：按下 70ms、松开 180ms、页签滑块 260ms、开关滑块 200ms；阻尼比 0.8 的弹簧（front-matter
+  // motion.spring-slide 原样）；按压变形下沉 0.5px 并微缩
+  assert.match(tokensCss, /--dur-press:\s*70ms;/);
+  assert.match(tokensCss, /--dur-release:\s*180ms;/);
+  assert.match(tokensCss, /--dur-slide-tab:\s*260ms;/);
+  assert.match(tokensCss, /--dur-slide-knob:\s*200ms;/);
+  assert.match(
+    tokensCss,
+    /--spring-slide: linear\(0, 0\.018 2\.5%, 0\.065 5%, 0\.131 7\.5%, 0\.209 10%, 0\.293 12\.5%, 0\.378 15%, 0\.461 17\.5%, 0\.54 20%, 0\.613 22\.5%, 0\.679 25%, 0\.749 28%, 0\.809 31%, 0\.859 34%, 0\.899 37%, 0\.941 41%, 0\.97 45%, 0\.994 50%, 1\.008 55%, 1\.014 61%, 1\.015 68%, 1\.012 76%, 1\.007 86%, 1\);/,
+  );
+  assert.match(tokensCss, /--press-transform: translateY\(0\.5px\) scale\(0\.985\);/);
+  // 弹簧停稳不弹：曲线单调爬到峰值、过冲 ≤ 3%，末端落回 1
+  const stops = [...tokensCss.match(/--spring-slide: linear\(([^;]+)\);/)![1].split(",")].map((p) =>
+    Number(p.trim().split(" ")[0]),
+  );
+  assert.equal(stops[0], 0);
+  assert.equal(stops.at(-1), 1);
+  assert.ok(Math.max(...stops) <= 1.03, "过冲超过 3%");
+  // 减少动效：按下、松开、滑块位移全部即时，没有按压变形
+  const reducedTokens = tokensCss.slice(
+    tokensCss.indexOf("@media (prefers-reduced-motion: reduce)"),
+  );
+  for (const name of ["dur-press", "dur-release", "dur-slide-tab", "dur-slide-knob"]) {
+    assert.match(reducedTokens, new RegExp(`--${name}: 0ms;`), name);
+  }
+  assert.match(reducedTokens, /--press-transform: none;/);
   assert.match(tokensCss, /--motion-spinner:\s*1s;/);
   assert.match(tokensCss, /--motion-dots:\s*500ms;/);
   // 自创转盘已删，它的时长 token 不该回来
@@ -210,19 +253,25 @@ test("光标：控件一律箭头，手形只给离开应用的链接（D23）",
   assert.deepEqual(pointers, [".ss-btn--external"]);
 });
 
-test("动效：状态变化走 120ms 机械缓动，不退化成默认 transition；减少动效时关掉", () => {
-  // 每一条 transition 声明都必须带 --ease-mech（默认 ease 是 300ms 淡入淡出的那种手感）
+test("动效：颜色与影子走 120ms 机械缓动，按下 70ms，位移与回位走弹簧；不退化成默认 transition；减少动效时关掉", async () => {
+  // 每一段 transition 都必须是这几种之一（默认 ease 是 300ms 淡入淡出的那种手感）：
+  // 颜色、底色、透明度、影子 120ms --ease-mech；按下 70ms --ease-mech；
+  // 会移动的实物（滑块位移、松开回位）--spring-slide 配 260 / 200 / 180ms
+  const allowed =
+    /var\(--(motion-fast|dur-press)\) var\(--ease-mech\)|var\(--(dur-slide-tab|dur-slide-knob|dur-release)\) var\(--spring-slide\)/;
   for (const m of uiCss.matchAll(/transition:([^;]+);/g)) {
     const decl = m[1].trim();
     if (decl === "none") continue;
     for (const part of decl.split(/,(?![^(]*\))/)) {
-      assert.match(
-        part,
-        /var\(--motion-fast\) var\(--ease-mech\)/,
-        `transition 没用机械缓动：${part}`,
-      );
+      assert.match(part, allowed, `transition 没用规定的缓动：${part}`);
+      // 颜色、透明度不用弹簧
+      if (/^\s*(color|background-color|opacity|border-color)\b/.test(part)) {
+        assert.doesNotMatch(part, /spring-slide/, part);
+      }
     }
   }
+  // 缓动曲线只在 tokens.css 里定义：组件样式引用 token，不写 cubic-bezier / linear()
+  assert.doesNotMatch(uiCss, /cubic-bezier\(|[^-]linear\(/);
   assert.match(uiCss, /@media \(prefers-reduced-motion: reduce\)/);
   // 辐条转圈：1 圈 / 1s，8 步阶跃（关键帧 ss-spin，整颗 svg 绕中心转）；自创转盘的样式已删
   assert.match(
@@ -357,28 +406,34 @@ test("DupMark：名字后 ×2", () => {
 
 // ===== 按钮 =====
 
-test("Button 默认键：paper 面 + ctl-border 边 + ctl-edge 底边（行程），原样大小写、字距 0、Barlow 13/600", () => {
+test("Button 默认键：paper 面 + raise 抬起（不画描边），原样大小写、字距 0、Barlow 13/600；四态", () => {
   const html = render(Button, { children: "配置网关", onClick: noop });
   assert.match(html, /class="ss-btn"/);
   const rule = cssRule(uiCss, ".ss-btn");
-  assert.match(rule, /border:\s*var\(--border-control\)/);
+  // 边由投影的 1px 环给，不另画 ctl-border 描边
+  assert.match(rule, /border:\s*0/);
   assert.match(rule, /background:\s*var\(--paper\)/);
-  assert.match(rule, /box-shadow:\s*var\(--key-edge\)/);
+  assert.match(rule, /box-shadow:\s*var\(--raise\)/);
   assert.match(rule, /border-radius:\s*var\(--radius-control\)/);
   assert.match(rule, /font-family:\s*var\(--font-ui\)/);
   assert.match(rule, /font-weight:\s*600/);
   assert.match(rule, /letter-spacing:\s*0/);
   assert.doesNotMatch(rule, /text-transform/);
   assert.match(rule, /height:\s*var\(--control-h\)/);
-  // 悬停描边升一档，底色不变
+  // 松开：按压变形 180ms 弹簧回位；影子与底色 120ms 机械缓动
+  assert.match(rule, /transform var\(--dur-release\) var\(--spring-slide\)/);
+  assert.match(rule, /box-shadow var\(--motion-fast\) var\(--ease-mech\)/);
+  assert.match(rule, /background-color var\(--motion-fast\) var\(--ease-mech\)/);
+  // 悬停：手靠近，影子略重、不位移，底色不变
   const hover = cssRule(uiCss, ".ss-btn:hover:not(:disabled)");
-  assert.match(hover, /border-color:\s*var\(--ctl-edge\)/);
-  assert.doesNotMatch(hover, /background/);
-  // 按下：键面 surface + 内凹、底边消失、下沉 1px（不再压扁高度）
+  assert.match(hover, /box-shadow:\s*var\(--raise-hover\)/);
+  assert.doesNotMatch(hover, /background|transform/);
+  // 按下：贴近机面——键面 surface、影子收紧、下沉 0.5px 并微缩，70ms（不压扁高度）
   const pressed = cssRule(uiCss, ".ss-btn:active:not(:disabled)");
   assert.match(pressed, /background:\s*var\(--surface\)/);
-  assert.match(pressed, /box-shadow:\s*var\(--recess-pressed\)/);
-  assert.match(pressed, /transform:\s*translateY\(1px\)/);
+  assert.match(pressed, /box-shadow:\s*var\(--raise-pressed\)/);
+  assert.match(pressed, /transform:\s*var\(--press-transform\)/);
+  assert.match(pressed, /transform var\(--dur-press\) var\(--ease-mech\)/);
   assert.doesNotMatch(pressed, /height/);
 });
 
@@ -395,20 +450,23 @@ test("Button 三个尺寸：regular 28 / compact 24 / row 32", () => {
   assert.match(cssRule(uiCss, ".ss-btn--row"), /height:\s*var\(--control-h-row\)/);
 });
 
-test("Button 墨键：ink 底 face 字 + ink-edge 底边；hover 内沿 1px ink-mute；按下底边消失", () => {
+test("Button 墨键：ink 底 face 字 + raise-ink 抬起；hover 内沿 1px ink-mute、影子不变；按下影子收紧、底色不变", () => {
   const html = render(Button, { children: "保存", variant: "primary", onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--primary"/);
   const rule = cssRule(uiCss, ".ss-btn--primary");
   assert.match(rule, /background:\s*var\(--ink\)/);
   assert.match(rule, /color:\s*var\(--face\)/);
-  assert.match(rule, /box-shadow:\s*var\(--key-edge-ink\)/);
+  assert.match(rule, /box-shadow:\s*var\(--raise-ink\)/);
   const hover = cssRule(uiCss, ".ss-btn--primary:hover:not(:disabled)");
+  assert.match(hover, /box-shadow:\s*var\(--raise-ink\)/);
   assert.match(hover, /outline:\s*1px solid var\(--ink-mute\)/);
   assert.match(hover, /outline-offset:\s*-2px/);
-  assert.match(cssRule(uiCss, ".ss-btn--primary:active:not(:disabled)"), /box-shadow:\s*none/);
+  const pressed = cssRule(uiCss, ".ss-btn--primary:active:not(:disabled)");
+  assert.match(pressed, /box-shadow:\s*var\(--raise-ink-pressed\)/);
+  assert.match(pressed, /background:\s*var\(--ink\)/);
 });
 
-test("Button 禁用：必须同时给原因，挂在 title 上；平贴、实线 hairline、ink-faint 字、无底边（D20）", () => {
+test("Button 禁用：必须同时给原因，挂在 title 上；平贴、实线 hairline、ink-faint 字、无投影（D20）", () => {
   const html = render(Button, {
     children: "添加 0 个",
     variant: "primary",
@@ -418,14 +476,20 @@ test("Button 禁用：必须同时给原因，挂在 title 上；平贴、实线
   assert.match(html, /disabled=""/);
   assert.match(html, /title="先点亮一个 agent"/);
   const rule = cssRule(uiCss, ".ss-btn:disabled");
-  assert.match(rule, /border:\s*var\(--border-disabled\)/);
+  // 线画在键的外沿（与抬起键的投影环同位）：启用 ↔ 禁用时键不变宽
+  assert.match(rule, /outline:\s*var\(--border-disabled\)/);
+  assert.match(rule, /outline-offset:\s*0/);
   assert.match(rule, /background:\s*transparent/);
   assert.match(rule, /box-shadow:\s*none/);
   assert.match(rule, /color:\s*var\(--ink-faint\)/);
   assert.doesNotMatch(uiCss, /dashed/);
+  // 按不下的东西不离开机面：悬停与按下的规则都排除了禁用
+  for (const m of uiCss.matchAll(/\n(\.ss-btn[^{\n]*:(?:hover|active)[^{\n]*)\{/g)) {
+    assert.match(m[1], /:not\(:disabled\)/, m[1]);
+  }
 });
 
-test("Button 安静键（D14）：无底无边、ink-mute 13；悬停 surface 圆角带、按下下沉 1px；命中区高 24、左右各 6", () => {
+test("Button 安静键（D14）：无底无边、ink-mute 13；悬停 surface 圆角带、按下按压变形不抬起；命中区高 24、左右各 6", () => {
   const html = render(Button, { children: "撤销", variant: "quiet", onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--quiet">撤销</);
   const rule = cssRule(uiCss, ".ss-btn--quiet");
@@ -442,10 +506,11 @@ test("Button 安静键（D14）：无底无边、ink-mute 13；悬停 surface �
   assert.match(hover, /background:\s*var\(--surface\)/);
   // 圆角带沿用键的 control 7（基础规则给的），安静键不另改圆角
   assert.doesNotMatch(rule, /border-radius/);
-  assert.match(
-    cssRule(uiCss, ".ss-btn--quiet:active:not(:disabled)"),
-    /transform:\s*translateY\(1px\)/,
-  );
+  // 按下：按压变形由基础规则给（--press-transform），安静键不抬起、按下也无投影
+  assert.match(hover, /box-shadow:\s*none/);
+  const quietPressed = cssRule(uiCss, ".ss-btn--quiet:active:not(:disabled)");
+  assert.match(quietPressed, /box-shadow:\s*none/);
+  assert.doesNotMatch(quietPressed, /transform/);
   // 不可用的安静键：只剩 ink-faint 字，没有悬停带
   const off = render(Button, {
     children: "撤销",
@@ -477,13 +542,16 @@ test("Button 外链（button-link）：只给离开 Sophia 的链接——下划
   assert.deepEqual(underlines, [".ss-btn--external .ss-btn__text"]);
 });
 
-test("Button 墨窗上：浅描边键——1px face 边与字、透明底、无行程", () => {
+test("Button 墨窗上：浅描边键——1px face 边与字、透明底、不抬起", () => {
   const html = render(Button, { children: "撤销", size: "compact", onDark: true, onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--compact is-on-dark"/);
   const rule = cssRule(uiCss, ".ss-btn.is-on-dark");
-  assert.match(rule, /border-color:\s*var\(--face\)/);
+  assert.match(rule, /border:\s*1px solid var\(--face\)/);
   assert.match(rule, /color:\s*var\(--face\)/);
   assert.match(rule, /box-shadow:\s*none/);
+  assert.match(cssRule(uiCss, ".ss-btn.is-on-dark:hover:not(:disabled)"), /box-shadow:\s*none/);
+  // 安静键、外链在墨面上仍然没有框
+  assert.match(cssRule(uiCss, ".ss-btn--quiet.is-on-dark"), /border:\s*0/);
 });
 
 test("IconButton：28×28，title 必填且同时作 aria-label；不带计数", () => {
@@ -514,7 +582,7 @@ test("AddButton：开始一个添加流程只有「+ 名词」这一种长相", 
 
 // ===== 开关与复选框 =====
 
-test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；指示点 + 槽 + 两条刻条 + 带三道防滑纹的滑块", () => {
+test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；指示点 + 槽 + 两条刻条 + 抬起的滑块（三道平的防滑纹）", () => {
   const regular = render(Switch, {
     checked: true,
     onChange: noop,
@@ -553,17 +621,25 @@ test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；�
   assert.match(small, /--knob-h:\s*12px/);
   assert.match(small, /--scribe-w:\s*9px/);
   assert.match(small, /--scribe-h:\s*4px/);
-  // 槽：track 底、5 圆角、内凹；滑块：paper、4 圆角、ctl-border 环 + ctl-edge 底边
+  // 槽：track 底、5 圆角、内凹；滑块：paper、4 圆角、raise 抬起（边由投影的环给，不画描边）
   const track = cssRule(uiCss, ".ss-switch__track");
   assert.match(track, /background:\s*var\(--track\)/);
   assert.match(track, /border-radius:\s*var\(--radius-track\)/);
   assert.match(track, /box-shadow:\s*var\(--recess-track\)/);
   const knob = cssRule(uiCss, ".ss-switch__knob");
   assert.match(knob, /background:\s*var\(--paper\)/);
-  assert.match(knob, /border:\s*var\(--border-control\)/);
+  assert.doesNotMatch(knob, /border:/);
   assert.match(knob, /border-radius:\s*var\(--radius-knob\)/);
-  assert.match(knob, /box-shadow:\s*var\(--key-edge\)/);
-  assert.match(cssRule(uiCss, ".ss-switch__grip"), /background:\s*var\(--ctl-edge\)/);
+  assert.match(knob, /box-shadow:\s*var\(--raise\)/);
+  // 三道防滑纹：平的 1px 实线（标准 1×7、紧凑 1×5、间距 2），无高光、不投影——滑块能拖，纹说「可以抓」
+  const grip = cssRule(uiCss, ".ss-switch__grip");
+  assert.match(grip, /width:\s*1px/);
+  assert.match(grip, /height:\s*var\(--grip-h\)/);
+  assert.match(grip, /background:\s*var\(--ctl-edge\)/);
+  assert.doesNotMatch(grip, /shadow|gradient/);
+  assert.match(base, /--grip-h:\s*7px/);
+  assert.match(small, /--grip-h:\s*5px/);
+  assert.match(knob, /gap:\s*2px/);
   // 刻条：开＝橙露在左，关＝灰露在右
   assert.match(cssRule(uiCss, ".ss-switch__scribe--on"), /background:\s*var\(--accent\)/);
   assert.match(cssRule(uiCss, ".ss-switch__scribe--off"), /background:\s*var\(--ctl-edge\)/);
@@ -601,29 +677,49 @@ test("Indicator：6px 圆，开＝橙、关＝ctl-border，不可用空心；橙
   }
 });
 
-test("Switch 行程：120ms 机械缓动 + 末端 1px 过冲；按下滑块底边消失、下沉 1px；只在拨动后播", () => {
+test("Switch 重量：位置 translate 200ms 弹簧停靠；悬停影子略重；按住 / 拖动中贴近槽底；刻条判定后 120ms 换色", () => {
+  const knob = cssRule(uiCss, ".ss-switch__knob");
+  assert.match(knob, /translate var\(--dur-slide-knob\) var\(--spring-slide\)/);
+  assert.match(knob, /transform var\(--dur-release\) var\(--spring-slide\)/);
+  assert.match(knob, /box-shadow var\(--motion-fast\) var\(--ease-mech\)/);
+  assert.match(cssRule(uiCss, ".ss-switch.is-on .ss-switch__knob"), /translate:\s*var\(--travel\)/);
+  // 旧的 120ms 过冲关键帧已由弹簧取代
+  assert.doesNotMatch(uiCss, /ss-knob-(on|off)|is-moved/);
+  assert.match(
+    cssRule(uiCss, ".ss-switch:hover:not(:disabled) .ss-switch__knob"),
+    /box-shadow:\s*var\(--raise-hover\)/,
+  );
+  const pressed = cssRule(uiCss, ".ss-switch:active:not(:disabled) .ss-switch__knob");
+  assert.match(pressed, /box-shadow:\s*var\(--raise-pressed\)/);
+  assert.match(pressed, /transform:\s*var\(--press-transform\)/);
+  assert.match(pressed, /transform var\(--dur-press\) var\(--ease-mech\)/);
   assert.match(
     uiCss,
-    /\.ss-switch\.is-moved \.ss-switch__knob \{\s*animation: ss-knob-off var\(--motion-fast\) var\(--ease-mech\);/,
+    /\.ss-switch:active:not\(:disabled\) \.ss-switch__knob,\s*\.ss-switch\.is-dragging \.ss-switch__knob \{/,
   );
-  assert.match(uiCss, /75% \{\s*transform: translateX\(calc\(var\(--travel\) \+ 1px\)\);/);
-  const pressed = cssRule(uiCss, ".ss-switch:active:not(:disabled) .ss-switch__knob");
-  assert.match(pressed, /box-shadow:\s*none/);
-  assert.match(pressed, /transform:\s*translateY\(1px\)/);
+  // 拖动中滑块跟手，位移不走弹簧
+  // 取最后一条：前一条是与 :active 分组的那条，后一条才是拖动单独的过渡
+  const dragging = [
+    ...uiCss.matchAll(/\n\.ss-switch\.is-dragging \.ss-switch__knob \{([^}]*)\}/g),
+  ].at(-1)?.[1];
+  assert.ok(dragging);
+  assert.doesNotMatch(dragging, /translate/);
+  // 刻条只露当前状态那一条，换色 120ms 机械缓动（颜色不用弹簧）
+  const scribe = cssRule(uiCss, ".ss-switch__scribe");
+  assert.match(scribe, /opacity:\s*0/);
+  assert.match(scribe, /transition:\s*opacity var\(--motion-fast\) var\(--ease-mech\)/);
   assert.match(
-    cssRule(uiCss, ".ss-switch.is-on:active:not(:disabled) .ss-switch__knob"),
-    /transform:\s*translate\(var\(--travel\), 1px\)/,
+    uiCss,
+    /\.ss-switch\.is-on \.ss-switch__scribe--on,\s*\.ss-switch:not\(\.is-on\) \.ss-switch__scribe--off \{\s*opacity: 1;/,
   );
-  // hover：槽外缘 1px ctl-edge
-  assert.match(
-    cssRule(uiCss, ".ss-switch:hover:not(:disabled) .ss-switch__track"),
-    /outline:\s*1px solid var\(--ctl-edge\)/,
-  );
-  // 挂载时不带 is-moved：空闲时界面静止
-  assert.doesNotMatch(render(Switch, { checked: true, onChange: noop, label: "x" }), /is-moved/);
+  // 槽上可拖：触控不让浏览器拿去滚动
+  assert.match(cssRule(uiCss, ".ss-switch__track"), /touch-action:\s*none/);
+  // 静态渲染：没在拖，不带 is-dragging、没有内联位移
+  const html = render(Switch, { checked: true, onChange: noop, label: "x" });
+  assert.doesNotMatch(html, /is-dragging|style=/);
 });
 
-test("Switch 禁用：带原因", () => {
+test("Switch 禁用：带原因；平贴、无投影、不响应悬停按住与拖", () => {
   const html = render(Switch, {
     checked: false,
     onChange: noop,
@@ -639,7 +735,17 @@ test("Switch 禁用：带原因", () => {
   assert.match(track, /outline:\s*1px solid var\(--hairline\)/);
   const knob = cssRule(uiCss, ".ss-switch:disabled .ss-switch__knob");
   assert.match(knob, /background:\s*var\(--recess\)/);
+  assert.match(knob, /border:\s*var\(--border-disabled\)/);
+  // 平贴：无投影；不响应悬停、按住（规则都排除了 :disabled）
   assert.match(knob, /box-shadow:\s*none/);
+  assert.match(
+    cssRule(uiCss, ".ss-switch:disabled .ss-switch__grip"),
+    /background:\s*var\(--hairline\)/,
+  );
+  // 拖不动：槽上不挂指针处理（静态渲染看不到事件，这里看规则：悬停与按住都带 :not(:disabled)）
+  for (const m of uiCss.matchAll(/\n(\.ss-switch:(?:hover|active)[^{\n]*)[{,]/g)) {
+    assert.match(m[1], /:not\(:disabled\)/, m[1]);
+  }
 });
 
 test("Checkbox 13px：未选 / 已选 / 半选 / 不可选；与 CheckMark 同一个记号", async () => {
@@ -677,7 +783,7 @@ test("Checkbox 13px：未选 / 已选 / 半选 / 不可选；与 CheckMark 同�
 
 // ===== 页签滑槽 =====
 
-test("Tabs：hairline 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页签高 28、左右 16、Condensed 15/700 ink-mute、经 Cap 大写、选中同重", () => {
+test("Tabs：surface 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页签高 28、左右 16、Condensed 15/700 ink-mute、经 Cap 大写、选中同重", () => {
   const html = render(Tabs, {
     items: [
       { id: "skills", label: "skills" },
@@ -699,7 +805,7 @@ test("Tabs：hairline 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页�
     /<button type="button" class="ss-tabs__tab"><span class="ss-cap-wrap ss-cap-wrap--nav"><span class="ss-cap">MCP<\/span>/,
   );
   const track = cssRule(uiCss, ".ss-tabs");
-  assert.match(track, /background:\s*var\(--hairline\)/);
+  assert.match(track, /background:\s*var\(--surface\)/);
   assert.match(track, /box-shadow:\s*var\(--recess-tabs\)/);
   assert.match(track, /border-radius:\s*var\(--radius-tab-track\)/);
   assert.match(track, /padding:\s*3px/);
@@ -720,23 +826,30 @@ test("Tabs：hairline 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页�
   assert.doesNotMatch(on, /font-weight/);
 });
 
-test("Tabs 滑块：paper + ctl-border 环 + ctl-edge 底边，沿槽平移 120ms；按下底边消失、下沉 1px；量到之前由选中页签自己画", () => {
+test("Tabs 滑块：paper + raise 抬起、7 圆角；位移与变宽 260ms 弹簧；悬停影子略重；按住贴近槽底；量到之前由选中页签自己画", () => {
   const thumb = cssRule(uiCss, ".ss-tabs__thumb");
   assert.match(thumb, /background:\s*var\(--paper\)/);
-  assert.match(thumb, /border:\s*var\(--border-control\)/);
+  assert.doesNotMatch(thumb, /border:/);
   assert.match(thumb, /border-radius:\s*var\(--radius-control\)/);
-  assert.match(thumb, /box-shadow:\s*var\(--key-edge\)/);
-  assert.match(thumb, /transform:\s*translateX\(var\(--thumb-x, 0\)\)/);
-  assert.match(thumb, /transform var\(--motion-fast\) var\(--ease-mech\)/);
-  const pressed = cssRule(uiCss, ".ss-tabs:has(.ss-tabs__tab.is-on:active) .ss-tabs__thumb");
-  assert.match(pressed, /box-shadow:\s*none/);
-  assert.match(pressed, /translate\(var\(--thumb-x, 0\), 1px\)/);
-  // 没量到：不画滑块，选中页签自己带纸面 + 环 + 底边——首帧不闪
+  assert.match(thumb, /box-shadow:\s*var\(--raise\)/);
+  // 位置用 translate，按压用 transform，互不打架
+  assert.match(thumb, /translate:\s*var\(--thumb-x, 0\)/);
+  assert.match(thumb, /translate var\(--dur-slide-tab\) var\(--spring-slide\)/);
+  assert.match(thumb, /width var\(--dur-slide-tab\) var\(--spring-slide\)/);
+  assert.match(thumb, /transform var\(--dur-release\) var\(--spring-slide\)/);
+  assert.match(
+    cssRule(uiCss, ".ss-tabs:has(.ss-tabs__tab.is-on:hover) .ss-tabs__thumb"),
+    /box-shadow:\s*var\(--raise-hover\)/,
+  );
+  const pressed = cssRule(uiCss, ".ss-tabs:has(.ss-tabs__tab:active) .ss-tabs__thumb");
+  assert.match(pressed, /box-shadow:\s*var\(--raise-pressed\)/);
+  assert.match(pressed, /transform:\s*var\(--press-transform\)/);
+  assert.match(pressed, /transform var\(--dur-press\) var\(--ease-mech\)/);
+  // 没量到：不画滑块，选中页签自己带纸面 + 抬起——首帧不闪
   assert.match(cssRule(uiCss, ".ss-tabs:not(.has-thumb) .ss-tabs__thumb"), /display:\s*none/);
   const fallback = cssRule(uiCss, ".ss-tabs:not(.has-thumb) .ss-tabs__tab.is-on");
   assert.match(fallback, /background:\s*var\(--paper\)/);
-  assert.match(fallback, /border-color:\s*var\(--ctl-border\)/);
-  assert.match(fallback, /box-shadow:\s*var\(--key-edge\)/);
+  assert.match(fallback, /box-shadow:\s*var\(--raise\)/);
   // 页签之间没有竖线、没有下划线
   assert.doesNotMatch(tab(), /border-(left|right|bottom):/);
   // 减少动效：滑块即时到位
@@ -1804,7 +1917,7 @@ test("提示框：墨窗 face 字、control 7 圆角 + 浮层投影；平铺在�
   assert.doesNotMatch(banner, /box-shadow/);
 });
 
-test("层次只用 token：src 里凡是 box-shadow 都是浮层投影 / 行程 / 内凹 token（或它们的组合）/ none", async () => {
+test("层次只用 token：src 里凡是 box-shadow 都是凹 / 抬起 / 浮 token（或它们的组合）/ none", async () => {
   const { readdirSync, statSync } = await import("node:fs");
   const walk = (dir: URL): URL[] =>
     readdirSync(dir).flatMap((name) => {
@@ -1816,7 +1929,7 @@ test("层次只用 token：src 里凡是 box-shadow 都是浮层投影 / 行程 
     const src = readFileSync(u, "utf8");
     for (const m of src.matchAll(/box-shadow:\s*([^;]+);/g)) {
       const allowed =
-        /^var\(--(elev-float|key-edge|key-edge-ink|recess-(input|tabs|pressed|track))\)$/;
+        /^var\(--(elev-float|recess-(input|tabs|track)|raise(-hover|-pressed|-ink|-ink-pressed)?)\)$/;
       assert.ok(
         m[1].trim() === "none" || m[1].split(",").every((part) => allowed.test(part.trim())),
         `${u.pathname}: box-shadow: ${m[1]}`,

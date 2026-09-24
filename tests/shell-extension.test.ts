@@ -97,9 +97,10 @@ test("domain 列表：今天 skills、mcp；加第三项，页签、⌘ 数字�
   );
   const more = [...LOCATION_DOMAINS, { id: "sessions", label: "sessions" }];
   assert.deepEqual(domainMenuItems(more), [
-    { command: "tab-skills", label: "skills", accelerator: "CmdOrCtrl+1" },
-    { command: "tab-mcp", label: "mcp", accelerator: "CmdOrCtrl+2" },
-    { command: "tab-sessions", label: "sessions", accelerator: "CmdOrCtrl+3" },
+    // 菜单项与页签显示的字同写大写（原生菜单没有 Cap）；与 menu.rs 的 tab_item 同一条规则
+    { command: "tab-skills", label: "SKILLS", accelerator: "CmdOrCtrl+1" },
+    { command: "tab-mcp", label: "MCP", accelerator: "CmdOrCtrl+2" },
+    { command: "tab-sessions", label: "SESSIONS", accelerator: "CmdOrCtrl+3" },
   ]);
   const tabs = render(Tabs, {
     items: more,
