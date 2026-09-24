@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { edgeFades } from "../modelsView.ts";
 import { placeLayer, type LayerPlacement } from "../layerPlace.ts";
 import "./FloatingLayer.css";
@@ -10,7 +11,8 @@ import "./FloatingLayer.css";
 ///
 /// 定位规则见 `placeLayer`：默认在触发控件下方 6 展开，下方放不下、上方放得下才往上翻；最大高度取
 /// 朝向那一侧的剩余空间与 360 中较小的，超出在浮层内部滚动，滚动边缘渐隐（DESIGN「渐变只用于功能」）。
-/// 点外面、Esc、页面滚动都关，不铺透明罩。用 fixed 定位：触发控件在滚动的列表里，没法给它包一个定位容器
+/// 点外面、Esc、页面滚动都关，不铺透明罩。用 fixed 定位、挂到 body 上：触发控件在滚动的列表里、
+/// 还可能在吸顶块里（来源行在来源片那一块里，那一块有自己的层叠上下文，挂在原处会被下面吸顶的列头盖住）
 export function FloatingLayer({
   trigger,
   onClose,
@@ -98,7 +100,7 @@ export function FloatingLayer({
     };
   }, [trigger, onClose]);
 
-  return (
+  const layer = (
     <div
       ref={ref}
       className="ss-layer"
@@ -115,6 +117,7 @@ export function FloatingLayer({
       </FadeViewport>
     </div>
   );
+  return typeof document === "undefined" ? layer : createPortal(layer, document.body);
 }
 
 /// 带渐隐的外层：上 / 下还有被裁掉的内容时，那一边 16px 渐隐（从 paper 或 face，由 `tone` 定）
