@@ -348,6 +348,20 @@ input:focus-visible {
   pointer-events: none;
 }
 
+/* 滚动区上沿：往下滚过之后画 16 渐隐（shell → 透明），滚过去的项目不在字标带下面硬切。
+   吸在滚动区顶上、不占位（负外距抵掉自身高度） */
+.sidebar__nav[data-fade-top]::before {
+  content: "";
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: block;
+  height: var(--fade-edge);
+  margin-bottom: calc(-1 * var(--fade-edge));
+  background: linear-gradient(to bottom, var(--shell), transparent);
+  pointer-events: none;
+}
+
 /* 设置：贴侧栏底，底距 10 */
 .sidebar__foot {
   flex-shrink: 0;

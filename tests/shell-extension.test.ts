@@ -131,7 +131,19 @@ test("`+ 项目` 在侧栏滚动区里吸底：项目少时紧跟最后一项，
   // 仍在滚动区（nav）里、是项目列表的最后一项，不挪到贴底区
   assert.match(
     tsx,
-    /<nav className="sidebar__nav"[^]*className="sidebar__add" data-stuck=[^]*<\/nav>/,
+    /<nav\s+className="sidebar__nav"[^]*className="sidebar__add" data-stuck=[^]*<\/nav>/,
   );
   assert.match(tsx, /nav\.scrollTop \+ nav\.clientHeight < nav\.scrollHeight - 1/);
+});
+
+test("侧栏滚动区往下滚过之后上沿 16 渐隐：滚过去的项目不在字标带下面硬切", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+  assert.match(
+    css,
+    /\.sidebar__nav\[data-fade-top\]::before \{[^}]*position: sticky;[^}]*top: 0;[^}]*height: var\(--fade-edge\);[^}]*linear-gradient\(to bottom, var\(--shell\), transparent\)/,
+  );
+  const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
+  assert.match(tsx, /setScrolled\(nav\.scrollTop > 0\)/);
+  assert.match(tsx, /data-fade-top=\{scrolled \? "" : undefined\}/);
 });

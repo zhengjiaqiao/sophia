@@ -79,10 +79,15 @@ export function Sidebar(props: SidebarProps) {
   /// 免得把最后一个项目名的下半截也淡掉
   const navRef = useRef<HTMLElement>(null);
   const [addStuck, setAddStuck] = useState(false);
+  /// 往下滚过了（上面有项目被字标带挡住）：滚动区上沿画 16 渐隐，不让半截项目名硬切在字标下面
+  const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
-    const update = () => setAddStuck(nav.scrollTop + nav.clientHeight < nav.scrollHeight - 1);
+    const update = () => {
+      setAddStuck(nav.scrollTop + nav.clientHeight < nav.scrollHeight - 1);
+      setScrolled(nav.scrollTop > 0);
+    };
     update();
     nav.addEventListener("scroll", update, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
@@ -111,7 +116,12 @@ export function Sidebar(props: SidebarProps) {
         </h1>
       </div>
 
-      <nav className="sidebar__nav" aria-label="导航" ref={navRef}>
+      <nav
+        className="sidebar__nav"
+        aria-label="导航"
+        ref={navRef}
+        data-fade-top={scrolled ? "" : undefined}
+      >
         {props.agents.length > 0 && (
           <>
             <div className="sidebar__head">
