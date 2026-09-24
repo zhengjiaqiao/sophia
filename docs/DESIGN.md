@@ -252,6 +252,7 @@ components:
     height: 24px
     padding: 0 7px 0 10px
     removeMark: "9px {colors.ink-mute}，hover {colors.ink}，间距 6px"
+    note: "2026-09-25 已删：界面上不再有模型片（见 agent 页：Codex）；实现时删掉这个组件"
   tag:
     textColor: "{colors.ink}"
     fontSize: 12px
