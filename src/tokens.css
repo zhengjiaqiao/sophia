@@ -155,6 +155,10 @@
   /* 窗体是机壳 */
   background: var(--shell);
 
+  /* 折行不留孤字：确认框、灰面板、提示框里一句话折成两行时，末行不只剩一个字（「会中断」→「会中 / 断」）。
+     text-wrap-style 可继承，放在根上全应用生效；nowrap 的元素不受影响 */
+  text-wrap: pretty;
+
   /* 数字等宽：计数跳动时字面宽度不变，一列数字也能对齐。
      Barlow 是比例字体，不加这条时 1 比 0 窄一截 */
   font-variant-numeric: tabular-nums;
