@@ -14,6 +14,7 @@ import Matrix, {
   cellKey,
   LocationActions,
   RevealLink,
+  SourceKeys,
   type MatrixCellView,
   type MatrixRowView,
   type ColumnCheck,
@@ -21,13 +22,14 @@ import Matrix, {
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty } from "./DomainView";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
-import { ManageSourcesKey, SourceListView, SourceRowView, useSources } from "./SourceRow";
+import { SourcesPage } from "./pages/SourcesPage";
+import { useSources } from "./SourceRow";
 import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
-import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
-import { MANAGE_SOURCES, mcpLocationName, sourceSlot, type DomainRef } from "./pages/sourcesView";
+import { addedOrigins, dropOrigin, liveOrigins, originMatches } from "./originFilter";
+import { MANAGE_SOURCES, mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
 import {
@@ -44,7 +46,7 @@ import {
   type McpDomain,
   type McpDomainRow,
 } from "./mcpView";
-import { AddButton, Confirm, CornerToast, Empty, Tag, Toast, ToastCount, Tooltip } from "./ui";
+import { Button, Confirm, CornerToast, Empty, Tag, Toast, ToastCount, Tooltip } from "./ui";
 import { McpDiffPanel, McpEndpointRow, type McpDiffState } from "./McpDiffPanel";
 import type { ConfirmAnchor, ToastProps } from "./ui";
 import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
@@ -70,9 +72,9 @@ import "./McpTab.css";
 ///    选择条上的键同 skill：未全有＝写进缺的，全有（打勾）＝全部移除
 /// 2. **实心不是一条链接，是一份独立副本**——写进、移除都经 core 留快照：没人改过就能撤销，
 ///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底。撤销按钮只在再点一次不能准确撤回时给
-///    （`mcpUndoShown`）：移除了一份与原版不一样的副本、批量写进时选中的里原本已有一部分；`⌘Z` 始终可用
-/// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（安静键，提示框给差异字段名，D21）；
-///    点它这一行就地展开不同的字段，再点收起。传输方式是服务的属性，在点服务名展开的行详情里（D7）
+///    （`mcpUndoShown`）：移除了一份与原版不一样的副本；批量一律不给；`⌘Z` 始终可用
+/// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（默认键紧凑，提示框给差异字段名，D21）；
+///    点它这一行拉出一格抽屉列出不同的字段，再点收起。传输方式是服务的属性，在行详情抽屉里（D7）
 /// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格写入、移除都不确认
 
 export interface McpTabProps {
@@ -153,12 +155,10 @@ interface Pane {
   crossDomain: boolean;
   anchor?: ConfirmAnchor;
   keyId?: string;
-  /// 写完再按一次同一个键恰好撤回（见 `mcpUndoShown`）
-  reversible: boolean;
 }
 
 /// 正在撤销的那一次（undoId）：带撤销的那一窗读它，按下的 `撤销` 原位忙碌
-/// （过了 0.3 秒门槛才换成转圈 + 一句）。提示小窗在状态里存的是元素，靠 context 才看得到后来的变化
+/// （过了 0.3 秒门槛才换成刻度 + 一句）。提示小窗在状态里存的是元素，靠 context 才看得到后来的变化
 const UndoBusy = createContext<string | null>(null);
 
 /// 带 `撤销` 的提示小窗：撤销在等 core 从快照还原时，只锁这颗文字链
@@ -190,12 +190,33 @@ export default function McpTab({
   // 选中的行：域 key → 行键集合
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  // 按来源筛选（工具行第二行的来源片）；空＝全部。点片单选，加完来源时一次选中新加的几片
+  // 来源筛选；空＝全部。多选纳入式，加完来源时一次选中新加的几个
   const [originFilter, setOriginFilter] = useState<string[]>([]);
-  // 添加来源页（页面头的 `+ 来源`、菜单「添加来源…」）开着没有
+  // 添加来源页（页面头的 `+ 来源`、菜单「添加来源…」、来源管理页的 `+ 来源`）开着没有；
+  // 从来源管理页进去的，返回时回到来源管理页（同 Skills）
   const [addOpen, setAddOpen] = useState(false);
-  const closeAdd = useCallback(() => setAddOpen(false), []);
-  usePageCommand("add-source", () => setAddOpen(true));
+  const addFromManage = useRef(false);
+  // 来源管理页（页面头的 `管理来源`、来源项右键「管理来源」）开着没有；回到它时新来源那几行闪一下
+  const [manageOpen, setManageOpen] = useState(false);
+  const [manageFlash, setManageFlash] = useState<string[]>([]);
+  const openAdd = useCallback(() => {
+    addFromManage.current = false;
+    setAddOpen(true);
+  }, []);
+  const closeAdd = useCallback(() => {
+    setAddOpen(false);
+    if (addFromManage.current) {
+      addFromManage.current = false;
+      setManageOpen(true);
+    }
+  }, []);
+  const closeManage = useCallback(() => setManageOpen(false), []);
+  const addFromManagePage = useCallback(() => {
+    setManageOpen(false);
+    addFromManage.current = true;
+    setAddOpen(true);
+  }, []);
+  usePageCommand("add-source", openAdd);
   const [pane, setPane] = useState<Pane | null>(null);
   // 同名多份的空格：点它出的挑选浮层（锚在那一格上）
   const [pick, setPick] = useState<McpPick | null>(null);
@@ -222,7 +243,7 @@ export default function McpTab({
   } | null>(null);
   const cellToastSeq = useRef(0);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
-  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；新来源片下的那一窗
+  // 加完来源、开始滑回位置页：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；新来源那几项下的那一窗
   const [justAdded, setJustAdded] = useState<CandidateEntry[] | null>(null);
   const [addedToast, setAddedToast] = useState<{
     key: number;
@@ -333,8 +354,9 @@ export default function McpTab({
   const domains = useMemo(() => (overview ? mcpDomains(overview) : []), [overview]);
   domainsRef.current = domains;
 
-  // 提示与弹层只属于当次选择；换一个位置时勾选与来源筛选清空
+  // 提示与弹层只属于当次选择；换一个位置时勾选与来源筛选清空、收起来源管理页
   useEffect(() => {
+    setManageOpen(false);
     setPane(null);
     setPick(null);
     setKeyToast(null);
@@ -349,7 +371,7 @@ export default function McpTab({
 
   const page: McpDomain | null = domains.find((d) => d.key === selectedKey) ?? null;
 
-  // ---- 这个位置订阅的 MCP 来源：片首橙点、来源行（规则 + 移除）、添加来源页的候选 ----
+  // ---- 这个位置订阅的 MCP 来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
   const domainRef: DomainRef = page
     ? { key: page.key, label: placeName(page) }
     : { key: selectedKey, label: keyName(selectedKey) };
@@ -369,16 +391,21 @@ export default function McpTab({
     domain: domainRef,
     version: overview,
     onChange: refresh,
-    // 移除之后筛选回到 `全部`
-    onRemoved: () => setOriginFilter([]),
-    keys: !addOpen && pane === null && pick === null,
+    // 移除之后：正勾着它就从筛选里去掉，其余勾着的照旧
+    onRemoved: (id) => setOriginFilter((prev) => dropOrigin(prev, id)),
+    keys: !addOpen && !manageOpen && pane === null && pick === null,
   });
 
-  // 加完来源滑回主视图（同 Skills）：重扫已完，列表筛到新来源——它们的片选中（几个选几片，
-  // 列表是并集），这几片正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 MCP`（说清楚列表为什么变少了）
+  // 加完来源滑回位置页（同 Skills）：重扫已完，列表筛到新来源——来源筛选里它们被选中（几个选几个，
+  // 列表是并集），这几项正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 MCP`（说清楚列表为什么变少了）。
+  // 从来源管理页进去加的回到来源管理页，新来源那几行闪一下，位置页的筛选不动
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
+    if (addFromManage.current) {
+      setManageFlash(justAdded.map((e) => e.id));
+      return;
+    }
     if (!page) return;
     const ids = addedOrigins(
       justAdded.map((e) => e.id),
@@ -386,7 +413,7 @@ export default function McpTab({
     );
     let parts: string[];
     if (ids.length > 0) {
-      // 名字与片同一个写法（groupLabel）；数量＝列表里并集的行数
+      // 名字与来源筛选同一个写法（groupLabel）；数量＝列表里并集的行数
       parts = addedParts(
         ids.map((id) =>
           groupLabel(
@@ -406,7 +433,7 @@ export default function McpTab({
       setFilterText("");
       setOriginFilter(ids);
     } else {
-      // 新来源在这个位置下一行都没有：没有片可选，只交代加上了
+      // 新来源在这个位置下一行都没有：来源筛选里没有它可选，只交代加上了
       parts = addedParts(
         justAdded.map((e) => e.name),
         justAdded.reduce((n, e) => n + e.count, 0),
@@ -437,17 +464,14 @@ export default function McpTab({
       .catch(() => setDiffs((prev) => new Map(prev).set(name, null)));
   };
 
-  /// 点 `2 份不一样`：展开就懒取一次字段级差异，已展开就收起
+  /// 点 `2 份不一样`：拉开就懒取一次字段级差异，已拉开就收起。表格一次只开一格：拉开这一行的，
+  /// 别的行的差异收起
   const toggleDiff = (name: string, locationIds: string[]) => {
     if (openDiffs.has(name)) {
-      setOpenDiffs((prev) => {
-        const next = new Map(prev);
-        next.delete(name);
-        return next;
-      });
+      setOpenDiffs(new Map());
       return;
     }
-    setOpenDiffs((prev) => new Map(prev).set(name, "loading"));
+    setOpenDiffs(new Map([[name, "loading"]]));
     // 取回来时这一行已经收起了就不再展开
     const settle = (value: McpDiffState) =>
       setOpenDiffs((prev) => (prev.has(name) ? new Map(prev).set(name, value) : prev));
@@ -513,13 +537,8 @@ export default function McpTab({
   /// 写一批（已经确认过或不需要确认）。keyId 给了就把结果浮在那颗键下。
   /// 单格：写的时候那一格灰着，写成闪一下。批量（按键）：格子同时变成新状态、不闪；
   /// 只锁按下的那一项，过了 0.3 秒门槛旁边出忙碌指示 + 一句（DESIGN 冲突表「格子变化要不要闪」）。
-  /// 写入排在前面的写入之后。`reversible`：写完再按一次同一个键恰好撤回（单格一律是）
-  const apply = (
-    preview: McpPreview,
-    allowCrossDomain: boolean,
-    keyId?: string,
-    reversible = true,
-  ) => {
+  /// 写入排在前面的写入之后
+  const apply = (preview: McpPreview, allowCrossDomain: boolean, keyId?: string) => {
     const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
     const single = keyId === undefined;
     setPane(null);
@@ -528,7 +547,7 @@ export default function McpTab({
     setOptimisticFor(keys, "linked");
     if (single) setPendingCells((prev) => new Set([...prev, ...keys]));
     if (keyId) setKeyBusy({ keyId, label: batchBusyText("write", keyAgent(keyId)) });
-    return enqueue(() => applyWrite(preview, allowCrossDomain, keys, keyId, reversible));
+    return enqueue(() => applyWrite(preview, allowCrossDomain, keys, keyId));
   };
 
   const applyWrite = async (
@@ -536,7 +555,6 @@ export default function McpTab({
     allowCrossDomain: boolean,
     keys: string[],
     keyId: string | undefined,
-    reversible: boolean,
   ) => {
     const single = keyId === undefined;
     onBusy(true);
@@ -567,11 +585,10 @@ export default function McpTab({
         })),
       });
       const undoId = result.undoId;
-      // 单格：那一格的键、行键与列（撤销后闪那一格；撤不了时说明出在那一格下）
-      const one =
-        single && created.length > 0
-          ? { keys, rowKey: created[0].name, columnId: created[0].targetId }
-          : undefined;
+      // 单格：那一格的键、行键与列（撤销后闪那一格；撤不了时说明出在那一格下）。一份都没写成时
+      // 仍锚在被点的那一格上（撤销的结果不落右下）
+      const at = created[0] ?? preview.actions[0];
+      const one = single && at ? { keys, rowKey: at.name, columnId: at.targetId } : undefined;
       // 单格所在的行已说明对象：只写 `✓ 写进 [Codex] · 撤销`（撤不了时的说明同样不重复服务名）
       const rowText = one ? toastFor("write", { done: itemsOf(created), omitNames: true }) : text;
       const undo = undoId ? () => void undoWrite(undoId, keyId, rowText, one) : null;
@@ -583,12 +600,12 @@ export default function McpTab({
             <UndoToast
               undoId={undoId}
               {...text}
-              // 写数量（`✓ 写进 ⎔ 2 个`），名字在键的提示框里
+              // 写数量（`✓ 写进 ⎔ 2 个`），名字在点的提示框里
               names={text.kind === "success" ? undefined : text.names}
               reading={text.kind === "success" ? <ToastCount n={created.length} /> : undefined}
-              // 再按一次同一个键就恰好撤回时不给 `撤销`（⌘Z 照旧可用）
+              // 批量写进一律不给 `撤销`：再按一次同一个点就是移除（⌘Z 照旧可用）
               action={
-                undo && mcpUndoShown("write", result.entries, reversible)
+                undo && mcpUndoShown("write", result.entries)
                   ? { label: "撤销", onClick: undo }
                   : undefined
               }
@@ -672,7 +689,7 @@ export default function McpTab({
       setUndo(undo);
       // 只有移除了一份与原版不一样的副本才给 `撤销`：再点只能写回原版（⌘Z 照旧可用）
       const action =
-        undo && mcpUndoShown("remove", result.entries, true)
+        undo && mcpUndoShown("remove", result.entries)
           ? { label: "撤销", onClick: undo }
           : undefined;
       if (keyId !== undefined) {
@@ -713,7 +730,8 @@ export default function McpTab({
   /// 撤销一次写入：core 只在文件仍等于写入后的样子时才从快照还原。改过了就撤不了——
   /// 撤销禁用、提示框说原因，另给「在访达中显示备份 ↗」作手动兜底（DESIGN「MCP 写入的撤销」）
   /// `one`：单格写入的撤销（那一格的键、行键与列）——撤成了那一窗直接消失、格子回原状并闪一下；
-  /// 撤不了时说明也出在那一格下
+  /// 撤不了时说明也出在那一格下。批量的锚在选择行里被按的那个点下（选择行已收起时 Matrix 退到那一列的列头）；
+  /// 撤销的结果都有触发处，不落右下（右下只给后台自动规则）
   const undoWrite = async (
     undoId: string,
     keyId: string | undefined,
@@ -722,7 +740,7 @@ export default function McpTab({
   ) => {
     const single = one !== undefined;
     setUndo(null);
-    // 按下的 `撤销` 原位忙碌（过了 0.3 秒门槛才出转圈 + 一句）；⌘Z 撤的也一样
+    // 按下的 `撤销` 原位忙碌（过了 0.3 秒门槛才出刻度 + 一句）；⌘Z 撤的也一样
     setUndoBusy(undoId);
     let report: McpUndoReport;
     try {
@@ -736,7 +754,6 @@ export default function McpTab({
     if (report.outcome === "undone") {
       setKeyToast(null);
       setCellToast(null);
-      setGlobalToast(null);
       await refresh();
       if (one) setFlash({ keys: one.keys, nonce: Date.now() });
       return;
@@ -756,41 +773,40 @@ export default function McpTab({
               ? undefined
               : { label: "在访达中显示备份", onClick: () => void reveal(backup) }
           }
-          onDismiss={single ? dismissCell : keyId !== undefined ? dismissKey : dismissGlobal}
+          onDismiss={single ? dismissCell : dismissKey}
         />
       );
-      if (keyId !== undefined) setKeyToast({ keyId, node });
-      else if (one)
+      if (one)
         setCellToast({
           id: ++cellToastSeq.current,
           rowKey: one.rowKey,
           columnId: one.columnId,
           node,
         });
-      else setGlobalToast(node);
+      else setKeyToast({ keyId: keyId ?? "all", node });
       return;
     }
-    // 没撤成：在撤销的入口那里说（那颗键下 / 那一格下），没有入口的才去右下
+    // 没撤成：在撤销的入口那里说（那一格下 / 那个点下）
     if (one) {
       failCell(one.rowKey, one.columnId, `没撤销：${report.message}`);
       return;
     }
-    const node = (
-      <Toast
-        kind="cannot"
-        verb="没撤销"
-        reason={report.message}
-        onDismiss={keyId !== undefined ? dismissKey : dismissGlobal}
-        onClose={keyId !== undefined ? dismissKey : dismissGlobal}
-      />
-    );
-    if (keyId !== undefined) setKeyToast({ keyId, node });
-    else setGlobalToast(node);
+    setKeyToast({
+      keyId: keyId ?? "all",
+      node: (
+        <Toast
+          kind="cannot"
+          verb="没撤销"
+          reason={report.message}
+          onDismiss={dismissKey}
+          onClose={dismissKey}
+        />
+      ),
+    });
   };
 
-  /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）。
-  /// `reversible`：写完再按一次同一个键恰好撤回（见 `mcpUndoShown`）
-  const write = async (selections: McpSelection[], keyId?: string, reversible = true) => {
+  /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）
+  const write = async (selections: McpSelection[], keyId?: string) => {
     if (selections.length === 0) return;
     const anchor = anchorNow();
     // 按键的：确认框出来之前要先算影响——只锁按下的那一项，过了 0.3 秒门槛旁边出忙碌指示 + 一句
@@ -807,11 +823,12 @@ export default function McpTab({
     if (preview.actions.length === 0) {
       // 动作为空不等于「都已经有了」：同名已存在、来源读不出、格式搬不过去也都是空动作
       const reason = preview.issues[0]?.message ?? "这些位置上都已经有了，没有要新增的";
-      if (keyId === undefined && selections.length === 1) {
+      if (keyId === undefined) {
+        // 点格（含挑选浮层里挑了一份）：同一个位置（被点那一格正下方）说原因
         const s = selections[0];
         failCell(s.name, s.targetId, reason);
-      } else if (keyId !== undefined) {
-        // 按键的：浮在那颗键下
+      } else {
+        // 按选择行里的点：浮在那个点下
         setKeyToast({
           keyId,
           node: (
@@ -824,22 +841,12 @@ export default function McpTab({
             />
           ),
         });
-      } else {
-        setGlobalToast(
-          <Toast
-            kind="cannot"
-            verb="没写进"
-            reason={reason}
-            onDismiss={dismissGlobal}
-            onClose={dismissGlobal}
-          />,
-        );
       }
       return;
     }
     const crossDomain = preview.actions.some((action) => action.crossDomain);
     if (keyId !== undefined || crossDomain) {
-      setPane({ preview, crossDomain, anchor, keyId, reversible });
+      setPane({ preview, crossDomain, anchor, keyId });
       return;
     }
     // 同域单格：乐观点亮 + 闪一下，不确认；写成出例行一行（被点的那一行里，紧跟名字）
@@ -914,16 +921,35 @@ export default function McpTab({
 
   // ===== 渲染 =====
 
-  const openAdd = () => setAddOpen(true);
-  /// 页面头右端：筛选框 + `+ 来源`（表格还没有时也照常放，切页签、扫描完时页面头不跳）
+  /// 这个位置订阅了来源才有 `管理来源`（一个都没订阅时不出：空态已有 `+ 来源`）
+  const subscribed = (sources.data?.rows.length ?? 0) > 0;
+  const openManage = subscribed
+    ? () => {
+        setManageFlash([]);
+        setManageOpen(true);
+      }
+    : undefined;
+  const sourceKeys = <SourceKeys onManage={openManage} onAdd={openAdd} />;
+  /// 页面头右端：筛选框 + `管理来源` + `+ 来源`（表格还没有时也照常放，切页签、扫描完时页面头不跳）
   const headActions = (
     <LocationActions
       filterText={filterText}
       onFilterText={setFilterText}
-      actions={<AddButton noun="来源" onClick={openAdd} />}
-      enabled={!addOpen}
+      actions={sourceKeys}
+      enabled={!addOpen && !manageOpen}
     />
   );
+  /// 来源管理页（二级页，同添加来源页的骨架）：来源的路径、规则、移除都在这里
+  const managePage = manageOpen ? (
+    <SourcesPage
+      sources={sources}
+      domain="mcp"
+      placeName={domainRef.label}
+      onClose={closeManage}
+      onAdd={addFromManagePage}
+      flashIds={manageFlash}
+    />
+  ) : null;
   /// 添加来源页：在机面里推入（侧栏留着）；加好后重扫，滑回；全加上时列表筛到新来源 + 那几片下一窗
   const addPage = addOpen ? (
     <AddSourcePage
@@ -972,6 +998,8 @@ export default function McpTab({
           hint="装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置"
           art="noDirs"
         />
+        {sources.host}
+        {managePage}
         {addPage}
       </>
     );
@@ -981,7 +1009,7 @@ export default function McpTab({
   const names = columnNames(page.targets);
   const heads = columnHeads(page.targets);
   const query = filterText.trim().toLowerCase();
-  // 来源片＝有行的来源 + 已订阅但一个服务都没有的来源（选中它才找得到它的来源行）
+  // 来源筛选＝有行的来源 + 已订阅但一个服务都没有的来源（选中它，空态里有 `在访达中显示 ↗`）
   const rowOrigins = page.rows.flatMap((row) => row.entries.map((e) => e.sourceId));
   const subscribedEmpty = (sources.data?.rows ?? []).filter((r) => !rowOrigins.includes(r.id));
   const activeOrigins = liveOrigins(originFilter, [
@@ -996,7 +1024,7 @@ export default function McpTab({
         row.entries.map((e) => e.sourceId),
       ),
   );
-  // 来源片：每个位置 · 这里有它的一份定义的行数（一行几份定义各算一次）
+  // 每个来源在这里有几行（一行几份定义各算一次）：来源筛选的顺序、空态判断用
   const sourceCounts = new Map<string, number>();
   for (const row of page.rows) {
     for (const id of new Set(row.entries.map((e) => e.sourceId))) {
@@ -1091,26 +1119,28 @@ export default function McpTab({
         onReveal: () => void reveal(originPath),
       },
       cells,
-      // 差异是行级事实，不进格：安静键（能点，D21），提示框给差异字段名；点它这一行就地展开字段级差异。
-      // 某列不支持只说明、不能点：纯弱标识 + 提示框（原因同那一格：`Cursor 不支持用命令生成请求头`）
-      mark:
+      // 差异是行级事实，不进格：行内键 `2 份不一样`（默认键紧凑，排在拉手之后，D21），提示框给差异字段名；
+      // 点它这一行拉出一格抽屉列出字段级差异
+      keys:
         differing.length > 0 ? (
           <span
             onMouseEnter={() => loadDiff(row.name, differing)}
             onFocus={() => loadDiff(row.name, differing)}
           >
             <Tooltip content={diffTip(row.name, fields)}>
-              <button
-                type="button"
-                className="ss-btn ss-btn--quiet mcp-difftoggle"
-                aria-expanded={openDiffs.has(row.name)}
+              <Button
+                size="compact"
+                ariaExpanded={openDiffs.has(row.name)}
                 onClick={() => toggleDiff(row.name, differing)}
               >
                 {`${differing.length} 份不一样`}
-              </button>
+              </Button>
             </Tooltip>
           </span>
-        ) : unsupportedAt.length > 0 ? (
+        ) : undefined,
+      // 某列不支持只说明、不能点：纯弱标识 + 提示框（原因同那一格：`Cursor 不支持用命令生成请求头`）
+      mark:
+        differing.length === 0 && unsupportedAt.length > 0 ? (
           <Tag
             tone="weak"
             tip={
@@ -1139,7 +1169,7 @@ export default function McpTab({
           />
         );
       })(),
-      // 点服务名就地展开：传输（D7：服务的属性，不回答「能不能在这个 agent 用」）、命令或地址、原件 + 打开 ↗
+      // 点服务名 / 拉手拉开抽屉：传输（D7：服务的属性，不回答「能不能在这个 agent 用」）、命令或地址、原件 + 打开 ↗
       detail: (
         <div className="mx-kv">
           <span className="mx-kv__key">传输</span>
@@ -1236,11 +1266,7 @@ export default function McpTab({
             notes,
           ),
       disabledReason,
-      onToggle: () =>
-        void (checked
-          ? removeCopies(copies, target.id)
-          : // 选中的里这一列原本就有副本时，再按会连原有的一起移除：只有撤销是准确的退路
-            write(cells, target.id, copies.length === 0)),
+      onToggle: () => void (checked ? removeCopies(copies, target.id) : write(cells, target.id)),
     };
   }
   // 「所有位置」：每个能改的位置都全有才打勾；点空框全部写进，点打勾全部移除
@@ -1255,10 +1281,7 @@ export default function McpTab({
       ? affectedTip("从所有位置移除", uniqNames(allRemove), [], allRemove.length)
       : affectedTip("写进所有还缺它的位置", uniqNames(allAdd), [], allAdd.length),
     disabledReason: enabledPresses.length === 0 ? "没有能写进或移除的" : undefined,
-    onToggle: () =>
-      void (allChecked
-        ? removeCopies(allRemove, "all")
-        : write(allAdd, "all", allRemove.length === 0)),
+    onToggle: () => void (allChecked ? removeCopies(allRemove, "all") : write(allAdd, "all")),
   };
 
   // 空态（DESIGN「位置页 › 空态」）：`+ 来源` 已在页面头，空态里不重复，只说现状
@@ -1276,10 +1299,19 @@ export default function McpTab({
         }}
       />
     ) : onlySource !== null && !sourceCounts.has(onlySource) ? (
+      // 只选了这一个来源、它里面一个服务都没有：往这份配置里放的入口就在这里（`在访达中显示 ↗`，浅键）
       <TableEmpty
         text={`${groupLabel(locationOf(onlySource), onlySource)} 里还没有 MCP`}
         art="emptyFolder"
+        action={(() => {
+          const path = locationOf(onlySource)?.path ?? sources.rowOf(onlySource)?.path;
+          return path
+            ? { label: "在访达中显示", leave: true, onClick: () => void reveal(path) }
+            : undefined;
+        })()}
       />
+    ) : activeOrigins.length > 1 && activeOrigins.every((id) => !sourceCounts.has(id)) ? (
+      <TableEmpty text="选中的来源里还没有 MCP" art="emptyFolder" />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
       <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="emptyFolder" />
     ) : (
@@ -1291,39 +1323,13 @@ export default function McpTab({
       />
     );
 
-  // 片下那一块（sourceSlot）：`管理来源` 展开着出全部来源；否则恰好选中一个来源片出它的来源行（D3）
-  const slot = sourceSlot(
-    sources.listOpen,
-    (sources.data?.rows ?? []).map((r) => r.id),
-    activeOrigins,
-  );
-  const rowSource = slot?.kind === "row" ? sources.rowOf(slot.id) : undefined;
-  const sourceRow =
-    slot?.kind === "list" ? (
-      <SourceListView
-        state={sources}
-        model={model}
-        domain={domainRef}
-        onReveal={(path) => void reveal(path)}
-      />
-    ) : rowSource ? (
-      <SourceRowView
-        state={sources}
-        row={rowSource}
-        model={model}
-        domain={domainRef}
-        onReveal={(path) => void reveal(path)}
-      />
-    ) : undefined;
-  /// 来源片的右键菜单（D18）：管理来源（＝片后的 `管理来源`，列表已展开时不出）· 在访达中显示
-  /// （＝来源行 `打开 ↗`）· 移除来源…（＝来源行 `×`）
+  /// 来源项的右键菜单（D18）：管理来源（＝页面头的 `管理来源`）· 在访达中显示（＝来源管理页那一行的
+  /// `打开 ↗`）· 移除来源…（＝那一行的 `×`，来源自己那一处没有这一项）
   const chipMenu = (id: string, chip: HTMLElement): ContextMenuItem[] => {
     const row = sources.rowOf(id);
     const path = row?.path ?? locationOf(id)?.path;
     return [
-      ...((sources.data?.rows.length ?? 0) > 0 && !sources.listOpen
-        ? [{ label: MANAGE_SOURCES, run: () => sources.setListOpen(true) }]
-        : []),
+      ...(openManage ? [{ label: MANAGE_SOURCES, run: openManage }] : []),
       ...(path ? [{ label: "在访达中显示", run: () => void reveal(path) }] : []),
       "separator",
       ...(row && !row.own
@@ -1331,12 +1337,10 @@ export default function McpTab({
         : []),
     ];
   };
-  const chip = (id: string, count: number): SourceChipItem => ({
+  const chip = (id: string): SourceChipItem => ({
     id,
     label: groupLabel(locationOf(id), id),
-    path: locationOf(id)?.path,
-    count,
-    rule: sources.ruleOn(id),
+    path: locationOf(id)?.path ?? sources.rowOf(id)?.path,
     menu: (el) => chipMenu(id, el),
   });
 
@@ -1353,18 +1357,9 @@ export default function McpTab({
         originLabel="来源"
         sources={{
           selected: activeOrigins,
-          onSelect: (next) => {
-            // 点任意一片：收起全部来源，回到「选中一片出这一行」
-            sources.setListOpen(false);
-            setOriginFilter(next);
-          },
-          items: [
-            ...[...sourceCounts].map(([id, count]) => chip(id, count)),
-            ...subscribedEmpty.map((r) => chip(r.id, 0)),
-          ],
-          tail: <ManageSourcesKey state={sources} />,
+          onSelect: setOriginFilter,
+          items: [...sourceCounts.keys(), ...subscribedEmpty.map((r) => r.id)].map(chip),
         }}
-        sourceRow={sourceRow}
         rows={rows}
         nameLabel="名称"
         nameTip="定义住在哪一格由原件环表示"
@@ -1372,7 +1367,7 @@ export default function McpTab({
         dotWords="mcp"
         filterText={filterText}
         onFilterText={setFilterText}
-        headActions={<AddButton noun="来源" onClick={openAdd} />}
+        headActions={sourceKeys}
         selected={selected}
         onSelectionChange={(next) => {
           setSelected(next);
@@ -1383,7 +1378,7 @@ export default function McpTab({
         onUndo={() => undoRef.current?.()}
         canUndo={canUndo}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
-        shortcuts={!addOpen && pane === null && pick === null}
+        shortcuts={!addOpen && !manageOpen && pane === null && pick === null}
         empty={empty}
         flash={flash}
         cellNotice={cellNotice}
@@ -1420,7 +1415,7 @@ export default function McpTab({
               : "已经存在的同名配置不会被覆盖；写进已有文件前会先备份"
           }
           confirmLabel="写进去"
-          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId, pane.reversible)}
+          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId)}
           onCancel={() => setPane(null)}
         >
           <ul className="mcp-confirm-list">
@@ -1456,6 +1451,7 @@ export default function McpTab({
       )}
 
       {sources.host}
+      {managePage}
       {addPage}
     </section>
   );

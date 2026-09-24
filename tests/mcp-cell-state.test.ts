@@ -171,26 +171,19 @@ const reported = (outcome: McpReportEntry["outcome"], identical?: boolean): McpR
 });
 
 /// 撤销按钮与 skill 同一条规则：再点 / 再按一次就是准确反操作时不给（⌘Z 不看这里，始终可用）
-test("撤销按钮：写进之后再点就是移除，单格与「原本一份都没有」的批量不给", () => {
-  assert.equal(mcpUndoShown("write", [reported("created")], true), false);
-  // 选中的里这一列原本已有一部分：再按会连原有的一起移除，只有撤销准确
-  assert.equal(mcpUndoShown("write", [reported("created")], false), true);
+test("撤销按钮：写进之后再点就是移除——单格与批量都不给（批量一律不给撤销）", () => {
+  assert.equal(mcpUndoShown("write", [reported("created")]), false);
+  assert.equal(mcpUndoShown("write", [reported("created"), reported("created")]), false);
 });
 
 test("撤销按钮：移除一份与原版一样的副本不给，不一样的才给", () => {
-  assert.equal(mcpUndoShown("remove", [reported("removed", true)], true), false);
-  assert.equal(mcpUndoShown("remove", [reported("removed", false)], true), true);
+  assert.equal(mcpUndoShown("remove", [reported("removed", true)]), false);
+  assert.equal(mcpUndoShown("remove", [reported("removed", false)]), true);
   // 批量里只要有一份不一样就给；没移除成的那几项不算
-  assert.equal(
-    mcpUndoShown("remove", [reported("removed", true), reported("removed", false)], true),
-    true,
-  );
-  assert.equal(
-    mcpUndoShown("remove", [reported("removed", true), reported("skipped", false)], true),
-    false,
-  );
+  assert.equal(mcpUndoShown("remove", [reported("removed", true), reported("removed", false)]), true);
+  assert.equal(mcpUndoShown("remove", [reported("removed", true), reported("skipped", false)]), false);
   // 后端没带 identical（旧报告）时不猜成「不一样」
-  assert.equal(mcpUndoShown("remove", [reported("removed")], true), false);
+  assert.equal(mcpUndoShown("remove", [reported("removed")]), false);
 });
 
 /// 只有几家 agent 接得住的条目（用命令生成请求头）：接不住的那一格原因用 core 给的那句，

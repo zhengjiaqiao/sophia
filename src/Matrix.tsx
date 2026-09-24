@@ -3,8 +3,9 @@
 ///
 /// Skills 与 MCP **共用这一张表**：两边只是内容不同——行是 skill 或 MCP 服务，列是 agent，
 /// 格是同一套状态点（以后 `sessions` 页签也沿用它，所以这里不认任何 skill / MCP 专有字段）。
-/// 本组件只管形制与交互：页面头右端的筛选框、来源筛选片、来源行的槽位、通道条表头、来源列、
-/// 行带、提示框、行内展开、键盘与菜单命令、右键菜单、表格里的选择行、浮起提示小窗的锚点。
+/// 本组件只管形制与交互：页面头右端的筛选框与管来源的两颗键、来源筛选、通道条表头、来源列、
+/// 行带、提示框、行详情抽屉、键盘与菜单命令、右键菜单、表格里的选择行、浮起提示小窗的锚点、
+/// 新手提示条的两个插槽（来源筛选下、空态上）。位置页上没有来源行：管来源进二级页「来源管理页」。
 /// 不碰 api、不认后端状态：调用方把一切折算成「记号 + 能不能点 + 一句话」交进来，点了什么再原样交回去。
 ///
 /// 版式（Matrix.css）：
@@ -13,7 +14,7 @@
 /// - 表头底 1px `hairline` 结构线；行与行 1px `row-line`；行高 34
 /// - 悬停只出行带，不出列带（D23）
 /// - 格子提示框：一行动词，格子正上方 6，停留 700ms；格间移动每格重新计时，所以不追着鼠标
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -22,18 +23,20 @@ import type {
 } from "react";
 import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
-import { pickOrigin } from "./originFilter.ts";
+import { toggleOrigin } from "./originFilter.ts";
 import {
+  AddButton,
   AgentIcon,
   Button,
   Cap,
   Checkbox,
   Chip,
   DOT_LABEL,
+  Drawer,
+  DrawerHandle,
   FloatingToast,
   IconClose,
   IconSearch,
-  Indicator,
   PINNED_TIP_MS,
   Spinner,
   StateDot,
@@ -58,7 +61,7 @@ const TAIL_W = 24;
 /// 列表里最多显示几个 agent（core 的 `MAX_SHOWN`，DESIGN「设置页 · 最多 4 个」）
 const MAX_AGENTS = 4;
 /// Skills 与 MCP 同一个固定面板宽度（DESIGN「位置页 › 面板宽度」）：页面头右端的筛选框与 `+ 来源`、
-/// 来源片、来源行、表格右沿同一条线，切页签不跳。Matrix.css 里页面头的 `max-width` 与它同值
+/// 来源筛选、表格右沿同一条线，切页签不跳。Matrix.css 里页面头的 `max-width` 与它同值
 export const PANEL_W = CHECK_W + NAME_W + ORIGIN_W + MAX_AGENTS * COL_W + TAIL_W;
 
 /// 点了做不了的格子后，说明停留的时长：与禁用控件按下钉出的提示框同一个（ui/Tooltip）
@@ -114,15 +117,18 @@ export interface MatrixRowView {
   };
   /// 列 id → 格；null＝这一行在这一列没有格（短横，不可点）
   cells: Record<string, MatrixCellView | null>;
-  /// 名字后的标注：`×2`、`2 份不一样`（安静键）、`Codex 不支持`（弱标识）
+  /// 名字后的标注，算名字的一部分：`×2`、`Codex 不支持`（弱标识）。排在拉手之前
   mark?: ReactNode;
+  /// 行内键（`2 份不一样`，默认键紧凑）：常显，排在拉手之后——顺序是「名字 ×2 ˅ [键]」
+  keys?: ReactNode;
   /// 同名组：悬停（或键盘焦点）任一行，同组的行一起亮，并出 `extra`
   dupGroup?: string;
   /// 同名行悬停时的动作（`只留这份`），在名称格里，不越过面板右沿
   extra?: ReactNode;
-  /// 点名字就地展开的详情（skill：描述 / 路径 + 打开 ↗ / 改于 …；MCP：传输 / 原件）；不给就不能展开
+  /// 行详情，收在这一行下面的抽屉里（skill：描述 / 路径 + 打开 ↗ / 改于 …；MCP：传输 / 命令 / 原件）：
+  /// 名字后跟拉手，点名字或拉手拉开；不给就没有拉手、不能拉开
   detail?: ReactNode;
-  /// 调用方控制开合的就地展开区（MCP 点 `2 份不一样` 展开的字段差异）：给了就出在这一行下面，
+  /// 调用方控制开合的第二格抽屉（MCP 点 `2 份不一样` 拉出的字段差异）：给了就拉开，
   /// 从名字左沿铺到最后一列；不给就收着
   panel?: ReactNode;
   /// 非空＝这一行勾不动，值是原因
@@ -147,19 +153,15 @@ export interface ColumnCheck {
   onToggle: () => void;
 }
 
-/// 一片来源筛选片
+/// 来源筛选里的一项（一颗胶囊）：只写名字，不带计数、不点灯（DESIGN「来源筛选」）
 export interface SourceChipItem {
   id: string;
   label: string;
-  /// 提示框第一行的完整名（片名是最短区分片段、放不下还会截断）；不给就用 label
+  /// 提示框第一行的完整名（项上是最短区分片段、放不下还会截断）；不给就用 label
   full?: string;
   /// 提示框第二行的路径（原值；显示时写成短路径 `~/…`，mono）
   path?: string;
-  /// 这个来源在表格里的行数
-  count: number;
-  /// 这个来源开着「以后新出现的自动加到」：片首一颗 6px 橙点（⑪⑮ 规则在背后做事，开着要看得见）
-  rule?: boolean;
-  /// 右键菜单（在访达中显示 · 移除来源…）；右键那一刻才取。`chip` 是这一片此刻的元素
+  /// 右键菜单（管理来源 · 在访达中显示 · 移除来源…）；右键那一刻才取。`chip` 是这一项此刻的元素
   menu?: (chip: HTMLElement) => ContextMenuItem[];
 }
 
@@ -167,18 +169,18 @@ export interface MatrixProps {
   columns: MatrixColumn[];
   /// 「来源」列的列头文字
   originLabel: string;
-  /// 来源筛选片：`全部`（不带数，D12）在最前、默认选中；每片 `来源名 N`，选中为墨片。
-  /// 放不下折行（不超出面板宽）；片名放不下截断，完整值用同一行右侧的提示框给。
-  /// selected 空＝全部；用户点片是单选（originFilter.ts `pickOrigin`），加完来源时调用方可一次选中几片
+  /// 来源筛选：行首 `来源` 标签 + 每个来源一颗胶囊（只写名字），选中的是墨色。没有 `全部` 项；
+  /// 放不下折行（不超出面板宽）；名字放不下截断，完整值在提示框里。一项都没有时整行不出。
+  /// selected 空＝全部；多选纳入式（originFilter.ts `toggleOrigin`），加完来源时调用方一次选中新加的几个
   sources?: {
     selected: readonly string[];
     onSelect: (next: string[]) => void;
     items: SourceChipItem[];
-    /// 片后同一行末尾的东西（`管理来源`，裁决 15）：跟着片折行
-    tail?: ReactNode;
   };
-  /// 来源行（恰好选中一个来源片时由调用方给）：片下 6，表格上距随之从 14 改为 10
-  sourceRow?: ReactNode;
+  /// 新手提示条的插槽：来源筛选下、表头上（上下各 16，推动表格）。接入归新手提示那一组
+  hint?: ReactNode;
+  /// 新手提示条的插槽：空态上方（一行都没有时才出）
+  emptyHint?: ReactNode;
   rows: MatrixRowView[];
   /// 名称列头：`名称`
   nameLabel: string;
@@ -191,7 +193,7 @@ export interface MatrixProps {
 
   filterText: string;
   onFilterText: (text: string) => void;
-  /// 页面头右端、筛选框右边的动作（`+ 来源`）
+  /// 页面头右端、筛选框右边的动作（`管理来源` `+ 来源`，见 `SourceKeys`）
   headActions?: ReactNode;
 
   /// 选中的行键
@@ -214,9 +216,9 @@ export interface MatrixProps {
   /// 刚变化的格：播一次 120ms 反色闪，`nonce` 变了才重播。**只给单格**：批量时格子同时变成新状态、不闪
   flash?: { keys: string[]; nonce: number };
   /// 批量写入进行中：按下的那一点（"all" 或列 id）当即锁住（只锁它，别的点照常能按、排队执行），
-  /// 过了 0.3 秒门槛那一点原位换成 14px 辐条转圈，`已选 N 个` 后面接一句（`· 正在加到 Codex`）
+  /// 过了 0.3 秒门槛那一点原位换成 14 宽刻度，`已选 N 个` 后面接一句（`· 正在加到 Codex`）
   keyBusy?: { keyId: string; label: string } | null;
-  /// 点格之后真要等的（拆开整个文件夹链接）：过了 0.3 秒门槛，被点那一格正下方浮起转圈 + 一句
+  /// 点格之后真要等的（拆开整个文件夹链接）：过了 0.3 秒门槛，被点那一格正下方浮起刻度 + 一句
   cellBusy?: { rowKey: string; columnId: string; label: string } | null;
   /// 单格失败：被点那一格正下方的墨窗说原因（与成功同一个位置），8 秒，悬停停表
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
@@ -231,7 +233,7 @@ export interface MatrixProps {
   keyToast?: { keyId: string; node: ReactNode } | null;
   /// 单格加上 / 移除成功：浮在被点那一格正下方 4。一次只一条：`id` 变了就重挂，计时从头来
   cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
-  /// 加完来源滑回：浮在新来源那几片的正下方 4；`id` 变了就是新的一条
+  /// 加完来源滑回：浮在新来源那几项的正下方 4；`id` 变了就是新的一条
   barToast?: { id: number; node: ReactNode; origins: string[] } | null;
 }
 
@@ -253,7 +255,11 @@ const MCP_DOT_TEXT: Record<Dot, string> = {
   own: "原件",
 };
 
-/// 把键盘焦点格夹回当前表的范围：取最近的有效行和列。表为空（没有行或没有列）时返回 null
+/// 键盘焦点所在的列：`NAME_COL`（-1）是名字（行本身：空格加选、回车拉开抽屉），0 起是 agent 列的格
+export const NAME_COL = -1;
+
+/// 把键盘焦点格夹回当前表的范围：取最近的有效行和列（名字那一列 `NAME_COL` 也算）。
+/// 表为空（没有行或没有列）时返回 null
 export function clampFocus(
   focus: { r: number; c: number },
   rows: number,
@@ -262,7 +268,7 @@ export function clampFocus(
   if (rows <= 0 || cols <= 0) return null;
   return {
     r: Math.max(0, Math.min(rows - 1, focus.r)),
-    c: Math.max(0, Math.min(cols - 1, focus.c)),
+    c: Math.max(NAME_COL, Math.min(cols - 1, focus.c)),
   };
 }
 
@@ -271,7 +277,8 @@ export function clampFocus(
 export const busyLockClass = (busy: boolean, dim: boolean): string | undefined =>
   !busy ? undefined : dim ? "ss-busy" : "mx-locked";
 
-/// 展开记号：12px 实心三角，▸ 收起 / ▾ 展开。不在悬停也没展开时占位不显示（名字不跳）
+/// 展开记号：12px 实心三角，▸ 收起 / ▾ 展开。不在悬停也没展开时占位不显示（名字不跳）。
+/// @deprecated 位置页已换成组件层的抽屉拉手（`DrawerHandle`）；其余页迁完后删
 export function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
   return (
     <svg
@@ -290,13 +297,13 @@ export function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
   );
 }
 
-/// `打开 ↗`：离开 Sophia 的外链（在访达中显示）。提示框是完整路径
+/// `打开 ↗`：离开 Sophia 的动作（在访达中显示），浅键、↗ 由组件画。提示框是完整路径
 export function RevealLink({ path, onReveal }: { path: string; onReveal: () => void }) {
   return (
     <Tooltip content={<span className="mx-mono">{displayPath(path)}</span>}>
       <span className="mx-reveal">
         <Button
-          variant="external"
+          variant="quiet"
           ariaLabel={`在访达中显示 ${displayPath(path)}`}
           onClick={onReveal}
         >
@@ -367,7 +374,19 @@ export function FilterBox({
   );
 }
 
-/// 页面头右端：筛选框 + 这一页的动作（`+ 来源`），间距 8。表格还没有的时候（扫描中、这个位置
+/// 页面头右端管来源的两颗键（DESIGN「位置页 › 页面头」）：`管理来源`（默认键 28）+ 8 + `+ 来源`（最右端）——
+/// 两件管来源的事并排（① 就近）。这个位置一个来源都没订阅时不给 `onManage`，`管理来源` 不出（空态已有 `+ 来源`）。
+/// skills 与 mcp 同一处，切页签不跳
+export function SourceKeys({ onManage, onAdd }: { onManage?: () => void; onAdd: () => void }) {
+  return (
+    <>
+      {onManage ? <Button onClick={onManage}>管理来源</Button> : null}
+      <AddButton noun="来源" onClick={onAdd} />
+    </>
+  );
+}
+
+/// 页面头右端：筛选框 + 这一页的动作（`管理来源` `+ 来源`），间距 8。表格还没有的时候（扫描中、这个位置
 /// 没有页）也照常放，页面头不跳
 export function LocationActions({
   filterText,
@@ -401,7 +420,7 @@ function SelDot({
   check: ColumnCheck;
   /// 批量写入进行中：点不动（键盘的空格 / 回车也不行）
   locked?: boolean;
-  /// 过了 0.3 秒门槛：点原位换成 14px 辐条转圈
+  /// 过了 0.3 秒门槛：点原位换成 14 宽刻度
   busy?: boolean;
 }) {
   const disabled = check.disabledReason !== undefined;
@@ -461,7 +480,8 @@ export default function Matrix(props: MatrixProps) {
     columns,
     originLabel,
     sources,
-    sourceRow,
+    hint,
+    emptyHint,
     rows,
     nameLabel,
     nameTip,
@@ -491,6 +511,7 @@ export default function Matrix(props: MatrixProps) {
   } = props;
 
   const tipId = useId();
+  const drawerId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -518,12 +539,13 @@ export default function Matrix(props: MatrixProps) {
   // Shift 区间选择的锚点
   const anchor = useRef<string | null>(null);
   const shift = useRef(false);
-  // 吸顶：来源片（+ 来源行）在页面头下，列头（+ 选择行）紧贴它下面
+  // 吸顶：来源筛选在页面头下，列头（+ 选择行）紧贴它下面
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(0);
-  // 就地展开详情的那一行（一次只展开一行）
+  // 拉开了行详情抽屉的那一行（一次只开一格）
   const [expanded, setExpanded] = useState<string | null>(null);
+  const toggleDetail = (key: string) => setExpanded((prev) => (prev === key ? null : key));
 
   const dotText = dotWords === "mcp" ? MCP_DOT_TEXT : SKILL_DOT_TEXT;
   const template = [
@@ -654,8 +676,8 @@ export default function Matrix(props: MatrixProps) {
   }, [barH, width, columns.length]);
 
   // ---- 吸顶区的高度 ----
-  // 来源片折行、来源行出现 / 消失都会改高度：只在 resize 时量，列头就停在旧高度上，
-  // 行从来源片和列头之间的缝里漏出来（产品负责人真机）
+  // 来源筛选折行、出现 / 消失都会改高度：只在 resize 时量，列头就停在旧高度上，
+  // 行从来源筛选和列头之间的缝里漏出来（产品负责人真机）
   useLayoutEffect(() => {
     const bar = barRef.current;
     if (!bar) return;
@@ -696,10 +718,10 @@ export default function Matrix(props: MatrixProps) {
     onSelectionChange(next);
   };
 
-  // ---- 键盘：方向键在格间移动，焦点环在格上，行带跟随 ----
+  // ---- 键盘：方向键在格间移动，焦点环在格上，行带跟随；最左一格是名字（行本身）----
   const focusCell = (r: number, c: number) => {
     const rr = Math.max(0, Math.min(flat.length - 1, r));
-    const cc = Math.max(0, Math.min(columns.length - 1, c));
+    const cc = Math.max(NAME_COL, Math.min(columns.length - 1, c));
     setFocus({ r: rr, c: cc });
     const el = bodyRef.current?.querySelector<HTMLElement>(`[data-cell="${rr}:${cc}"]`);
     el?.focus();
@@ -792,7 +814,7 @@ export default function Matrix(props: MatrixProps) {
     (focusRow !== undefined ? focusRow.dupGroup : undefined);
 
   // ---- 忙碌锁：只锁按下的那一点（防重复点；别的点照常能按，调用方排队执行），过了 0.3 秒门槛
-  // 才变淡、原位换成转圈 ----
+  // 才变淡、原位换成刻度 ----
   const busyShown = useBusyShown(keyBusy != null);
   const cellBusyShown = useBusyShown(cellBusy != null);
   // 浮起的提示小窗：换一条（调用方给了新对象）就是新出现一次——重挂、重新定位、计时从头来
@@ -882,7 +904,7 @@ export default function Matrix(props: MatrixProps) {
       <div className="mx-selrow__name">
         <span className="mx-selcount">{`已选 ${selectedVisible.length} 个`}</span>
         {/* 取消选择是 busy 的豁免项：它不写磁盘；等于 Esc */}
-        <Button variant="quiet" onClick={() => onSelectionChange(new Set())}>
+        <Button size="compact" onClick={() => onSelectionChange(new Set())}>
           取消
         </Button>
         {busyShown && keyBusy ? (
@@ -936,13 +958,17 @@ export default function Matrix(props: MatrixProps) {
     if (hot) classes.push("is-hot");
     const showExtra = row.extra !== undefined && (hot || row.extraPinned === true);
     const open = expanded === row.key && row.detail !== undefined;
+    if (open) classes.push("is-open");
+    const selectable = row.selectDisabledReason === undefined;
+    const detailId = `${drawerId}-d${r}`;
+    const nameFocused = focus.r === r && focus.c === NAME_COL;
     // 右键菜单（D18）：只作加速器，每一项在界面上都另有入口；不改变勾选
     const menuItems = (el: HTMLElement): ContextMenuItem[] => [
       ...(row.detail !== undefined
         ? [
             {
               label: open ? "收起详情" : "展开详情",
-              run: () => setExpanded(open ? null : row.key),
+              run: () => toggleDetail(row.key),
             },
           ]
         : []),
@@ -951,13 +977,26 @@ export default function Matrix(props: MatrixProps) {
     ];
 
     return (
-      <Fragment key={row.key}>
+      <div key={row.key} className="mx-rowgroup">
         <div
           data-row={row.key}
+          // 行悬停钩子：勾选框进「手靠近」态、名字后的拉手出现（组件层 ui.css）
+          data-checkrow=""
+          data-drawer-row=""
           className={classes.join(" ")}
           style={gridStyle}
           onMouseEnter={() => setHover({ row: row.key, col: null })}
           onMouseLeave={() => setHover(null)}
+          // `⌘` 点行＝加选 / 去掉这一行（DESIGN「勾选框」）：点在格子、名字上也是，不再执行格子自己的动作；
+          // 不带 ⌘ 时点行的其余地方不勾选（表格里勾选只经由行首那颗框）
+          onClickCapture={(e) => {
+            if (!(e.metaKey || e.ctrlKey)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (!selectable) return;
+            shift.current = false;
+            toggleRow(row);
+          }}
           onContextMenu={(e) => {
             const el = e.currentTarget;
             contextMenuHandler(() => menuItems(el), {
@@ -986,22 +1025,46 @@ export default function Matrix(props: MatrixProps) {
               />
             )}
           </div>
+          {/* 名字 ×2 ˅ [键]：拉手跟在名字（和 ×2）后面，悬停这一行才出、拉开的常显；行内键在拉手之后 */}
           <div className="mx-row__name">
-            {row.detail !== undefined ? (
-              <button
-                type="button"
-                className="mx-namebtn"
-                aria-expanded={open}
-                aria-label={`${row.name}，${open ? "收起详情" : "展开详情"}`}
-                onClick={() => setExpanded(open ? null : row.key)}
-              >
-                <Disclosure open={open} shown={open || hot} />
-                <span className="mx-name">{row.name}</span>
-              </button>
-            ) : (
-              <span className="mx-name mx-name--plain">{row.name}</span>
-            )}
+            {/* 名字也是这一行的键盘落点（方向键从第一格再往左）：空格加选、回车拉开抽屉；鼠标点名字拉开抽屉 */}
+            <span
+              className={`mx-name${row.detail !== undefined ? " is-toggle" : ""}`}
+              role="button"
+              data-cell={`${r}:${NAME_COL}`}
+              tabIndex={nameFocused ? 0 : -1}
+              aria-label={
+                row.detail !== undefined
+                  ? `${row.name}：空格勾选，回车${open ? "收起" : "拉开"}详情`
+                  : `${row.name}：空格勾选`
+              }
+              aria-expanded={row.detail !== undefined ? open : undefined}
+              onFocus={() => setFocus({ r, c: NAME_COL })}
+              onClick={row.detail !== undefined ? () => toggleDetail(row.key) : undefined}
+              onKeyDown={(e) => {
+                if (e.key === " ") {
+                  e.preventDefault();
+                  if (!selectable) return;
+                  shift.current = e.shiftKey;
+                  toggleRow(row);
+                } else if (e.key === "Enter" && row.detail !== undefined) {
+                  e.preventDefault();
+                  toggleDetail(row.key);
+                }
+              }}
+            >
+              {row.name}
+            </span>
             {row.mark}
+            {row.detail !== undefined ? (
+              <DrawerHandle
+                open={open}
+                onToggle={() => toggleDetail(row.key)}
+                label={`${row.name} 的详情`}
+                controls={detailId}
+              />
+            ) : null}
+            {row.keys}
             {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
           </div>
           {/* 来源：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
@@ -1125,22 +1188,14 @@ export default function Matrix(props: MatrixProps) {
           })}
           <div />
         </div>
-        {open ? (
-          // 就地展开：左沿与名字对齐，不跨进 agent 列
-          <div className="mx-grid mx-detail" style={gridStyle}>
-            <div className="mx-detail__body" style={{ gridColumn: "2 / span 2" }}>
-              {row.detail}
-            </div>
-          </div>
+        {/* 行详情抽屉：左沿对齐名字、不跨进 agent 列（Matrix.css 按 --mx-agents 让出右边）；Esc 收起 */}
+        {row.detail !== undefined ? (
+          <Drawer open={open} id={detailId} className="mx-drawer">
+            {row.detail}
+          </Drawer>
         ) : null}
-        {row.panel ? (
-          <div className="mx-grid mx-detail" style={gridStyle}>
-            <div className="mx-detail__body" style={{ gridColumn: "2 / -1" }}>
-              {row.panel}
-            </div>
-          </div>
-        ) : null}
-      </Fragment>
+        <PanelDrawer panel={row.panel} />
+      </div>
     );
   };
 
@@ -1153,13 +1208,14 @@ export default function Matrix(props: MatrixProps) {
         inputRef={filterRef}
         enabled={shortcuts}
       />
-      {/* 来源片与来源行吸在页面头下；表格上距在这一块的下内边距里（有来源行时 10，否则 14） */}
-      <div className={`mx-bar${sourceRow ? " has-sourcerow" : ""}`} ref={barRef}>
+      {/* 来源筛选吸在页面头下；表格上距在这一块的下内边距里。没有来源时整行不出，只留上下距 */}
+      <div className="mx-bar" ref={barRef}>
         {sources ? <SourceChips {...sources} width={width} /> : null}
-        {sourceRow ? <div className="mx-sourcerow-slot">{sourceRow}</div> : null}
       </div>
+      {/* 新手提示条的插槽：来源筛选下、表头上，随页面滚走（不吸顶） */}
+      {hint ? <div className="mx-hint">{hint}</div> : null}
       <div className="mx-panel" ref={panelRef} style={{ width }}>
-        {/* 列头连同结构线与选择行吸顶，紧贴来源片（+ 来源行）下面 */}
+        {/* 列头连同结构线与选择行吸顶，紧贴来源筛选下面 */}
         <div
           className="mx-headwrap"
           ref={headRef}
@@ -1171,6 +1227,8 @@ export default function Matrix(props: MatrixProps) {
         <div
           className="mx-body"
           ref={bodyRef}
+          // 抽屉右沿让出 agent 列与尾列（不跨进 agent 列）
+          style={{ "--mx-agents": `${columns.length * COL_W + TAIL_W}px` } as CSSProperties}
           onKeyDown={onBodyKey}
           onFocus={(e) => {
             // 行带只跟随键盘焦点：鼠标点过的格子留着焦点，但鼠标移开后不该再亮着
@@ -1183,7 +1241,13 @@ export default function Matrix(props: MatrixProps) {
         >
           {flat.map(renderRow)}
         </div>
-        {flat.length === 0 && empty ? <div className="mx-empty">{empty}</div> : null}
+        {flat.length === 0 && empty ? (
+          <div className="mx-empty">
+            {/* 新手提示条的插槽：空态上方 */}
+            {emptyHint ? <div className="mx-hint">{emptyHint}</div> : null}
+            {empty}
+          </div>
+        ) : null}
       </div>
       {/* 浮起的提示小窗（DESIGN「反馈的两种形态」）：挂在表的最外层、按锚点定位，不挂进格 / 行里——
           挂进去的话，悬停小窗会被当成悬停那一格（行带、格子提示框跟着出来） */}
@@ -1262,9 +1326,18 @@ const rowEl = (probe: HTMLElement, rowKey: string) =>
 /// 浮起的提示小窗水平夹在面板左右沿之内
 const panelBounds = (probe: HTMLElement) => rootOf(probe)?.querySelector(".mx-panel");
 
-/// 批量：选择行里被按的那一点所在的列（居中于该列；靠右沿时右对齐，由 placeToast 夹进面板）
-const keyAnchor = (keyId: string) => (probe: HTMLElement) =>
-  rootOf(probe)?.querySelector(`.mx-keywrap[data-key="${CSS.escape(keyId)}"]`);
+/// 批量：选择行里被按的那一点所在的列（居中于该列；靠右沿时右对齐，由 placeToast 夹进面板）。
+/// 选择行已经收起（取消了勾选之后再 ⌘Z）：退到同一列的列头下（「所有 agent」退到来源列头），
+/// 结果仍出在那一列上，不落右下、也不因为找不到锚点而看不见
+const keyAnchor = (keyId: string) => (probe: HTMLElement) => {
+  const root = rootOf(probe);
+  return (
+    root?.querySelector(`.mx-keywrap[data-key="${CSS.escape(keyId)}"]`) ??
+    (keyId === "all"
+      ? root?.querySelector(".mx-head__origin")
+      : root?.querySelector(`.mx-head__col[data-col="${CSS.escape(keyId)}"]`))
+  );
+};
 
 /// 单格：被点的那一格
 const cellAnchor = (rowKey: string, columnId: string) => (probe: HTMLElement) =>
@@ -1280,7 +1353,7 @@ const rowAnchor = (rowKey: string) => (probe: HTMLElement) => {
   return { top: r.top, bottom: r.bottom, left: n.left, right: r.right };
 };
 
-/// 加完来源的那一窗浮在新来源那几片的正下方：取这几片合起来的矩形；一片都没有时锚在整排片上
+/// 加完来源的那一窗浮在新来源那几项的正下方：取这几项合起来的矩形；一项都没有时锚在整排上
 const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
   const group = rootOf(probe)?.querySelector(".mx-sources");
   const chips = origins
@@ -1301,53 +1374,63 @@ const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
   };
 };
 
-/// 来源筛选片平铺（DESIGN「位置页 › 来源筛选片」）。点片＝只看这个来源（单选），再点 `全部` 恢复。
-/// `全部` 不带数：总数在 `名称 N` 上（D12）。开着自动规则的来源片首一颗橙点
+/// 第二格抽屉（MCP `2 份不一样` 的差异）：内容由调用方给、给了就拉开。收起时内容留到滑完（最后一次给的），
+/// 不在滑回途中变空
+function PanelDrawer({ panel }: { panel?: ReactNode }) {
+  const last = useRef<ReactNode>(panel);
+  if (panel !== undefined) last.current = panel;
+  if (last.current === undefined) return null;
+  return (
+    <Drawer open={panel !== undefined} className="mx-drawer mx-drawer--wide">
+      {last.current}
+    </Drawer>
+  );
+}
+
+/// 来源筛选（DESIGN「位置页 › 来源筛选」「选择片 Chip」）：行首 `来源` 标签（12 / 500 `ink-mute`）+ 8 +
+/// 每个来源一颗浅胶囊，只写名字；选中的是墨色。**多选、纳入式**：点一颗＝纳入，再点＝去掉，一个都不选＝全部
+/// （没有 `全部` 项，总数在列头 `名称 N` 上）。项上不点灯。一项都没有（这个位置还没有来源）时整行不出
 function SourceChips({
   selected,
   onSelect,
   items,
-  tail,
   width,
 }: NonNullable<MatrixProps["sources"]> & { width: number }) {
+  if (items.length === 0) return null;
   return (
-    <div className="mx-sources" style={{ maxWidth: width }} role="group" aria-label="按来源筛选">
-      {/* `全部` 片没有提示框，也没有右键菜单；格子、列头右键同样没有（DESIGN「右键菜单」） */}
-      <Chip selected={selected.length === 0} onClick={() => onSelect([])}>
-        全部
-      </Chip>
-      {items.map((item) => (
-        <span
-          key={item.id}
-          className={`mx-sourcechip${item.rule ? " has-rule" : ""}`}
-          data-origin={item.id}
-          onContextMenu={(e) => {
-            const el = e.currentTarget;
-            if (item.menu) contextMenuHandler(() => item.menu?.(el) ?? [])(e);
-          }}
-        >
-          <Tooltip content={<SourceChipTip item={item} />}>
-            <Chip
-              selected={selected.includes(item.id)}
-              count={item.count}
-              icon={
-                item.rule ? <Indicator on label="以后新出现的会自动加上，规则开着" /> : undefined
-              }
-              onClick={() => onSelect(pickOrigin(selected, item.id))}
-            >
-              {item.label}
-            </Chip>
-          </Tooltip>
-        </span>
-      ))}
-      {tail}
+    <div className="mx-filterrow" style={{ maxWidth: width }}>
+      <span className="mx-filterrow__label" aria-hidden="true">
+        来源
+      </span>
+      <div className="mx-sources" role="group" aria-label="按来源筛选">
+        {items.map((item) => (
+          <span
+            key={item.id}
+            className="mx-sourcechip"
+            data-origin={item.id}
+            onContextMenu={(e) => {
+              const el = e.currentTarget;
+              if (item.menu) contextMenuHandler(() => item.menu?.(el) ?? [])(e);
+            }}
+          >
+            <Tooltip content={<SourceChipTip item={item} />}>
+              <Chip
+                selected={selected.includes(item.id)}
+                onClick={() => onSelect(toggleOrigin(selected, item.id))}
+              >
+                {item.label}
+              </Chip>
+            </Tooltip>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
 
-/// 来源片悬停的提示框（DESIGN「来源筛选片」）：完整名 + 短路径 + 选中后能做什么。来源行只在恰好选中一片时
-/// 出现，入口要让人看得见（⑧）；路径与这句都是片上没有的信息，不算重复
-export const SOURCE_CHIP_HINT = "选中后在下方设置自动添加或移除";
+/// 来源项悬停的提示框（DESIGN「来源筛选」）：完整名 + 短路径 + 自动添加与移除去哪里设。
+/// 路径与这句都是项上没有的信息，不算重复（⑧）
+export const SOURCE_CHIP_HINT = "在管理来源里设置自动添加或移除";
 
 export function SourceChipTip({ item }: { item: Pick<SourceChipItem, "label" | "full" | "path"> }) {
   return (

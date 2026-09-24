@@ -82,29 +82,38 @@
   color: var(--ink);
 }
 
-/* ===== 来源片 + 来源行：吸在页面头下；页面头下 10，表格上距 14（有来源行时 10）===== */
+/* ===== 来源筛选：吸在页面头下；页面头下 10，表格上距 18（y 70–94，表格上沿 y 112）=====
+   位置页上没有来源行：勾一个、几个来源，表头都不下移 */
 .mx-bar {
   position: sticky;
   top: var(--mx-top);
   z-index: 5;
   width: 776px;
-  padding: 10px 0 14px;
+  padding: 10px 0 18px;
   background: var(--face);
 }
 
-.mx-bar.has-sourcerow {
-  padding-bottom: 10px;
+/* 行首 `来源` 标签（label 12 / 500 ink-mute）+ 8 + 胶囊；折行时胶囊对齐胶囊，不钻到标签下面 */
+.mx-filterrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-.mx-sourcerow-slot {
-  margin-top: 6px;
+.mx-filterrow__label {
+  flex-shrink: 0;
+  font-size: var(--size-label);
+  font-weight: 500;
+  line-height: 26px;
+  color: var(--ink-mute);
 }
 
-/* 来源片平铺：片间 6、行间 8；放不下折行，不超出面板宽 */
+/* 胶囊平铺：间距 6、行间 8；放不下折行，不超出面板宽 */
 .mx-sources {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 6px;
+  min-width: 0;
 }
 
 .mx-sourcechip {
@@ -114,7 +123,7 @@
   max-width: 100%;
 }
 
-/* 片名太长（同名来源的区分片段也放不下）时截断，完整值在同一行右侧的提示框里 */
+/* 名字太长（同名来源的区分片段也放不下）时截断，完整值在提示框里 */
 .mx-sourcechip .ss-chip {
   max-width: 100%;
 }
@@ -126,16 +135,18 @@
   white-space: nowrap;
 }
 
-/* 开着自动规则的来源：片首 6px 橙点（Indicator），片的左内距让出 3，点与名字间距 6 */
-.mx-sourcechip.has-rule .ss-chip {
-  padding-left: 9px;
+/* 新手提示条的插槽（来源筛选下、表头上；空态上）：上下各 16，推动表格。来源筛选的下内边距已有 18，
+   这里上边不再加 */
+.mx-hint {
+  width: 776px;
+  margin-bottom: 16px;
 }
 
-.mx-sourcechip.has-rule .ss-chip__icon {
-  width: 6px;
+.mx-empty > .mx-hint {
+  margin-top: 16px;
 }
 
-/* 来源片提示框里的短路径：mono 没有断点，放不下时照样折行，不溢出提示框 */
+/* 来源项提示框里的短路径：mono 没有断点，放不下时照样折行，不溢出提示框 */
 .mx-chiptip__path {
   overflow-wrap: anywhere;
 }
@@ -152,7 +163,7 @@
 /* 列头吸顶（连同结构线与选择行）；不加阴影，靠 face 底色盖住下面的行 */
 .mx-headwrap {
   position: sticky;
-  /* 比来源片高一层：选择行上的提示框向下弹，列头的向下弹，都要盖在行上 */
+  /* 比来源筛选高一层：选择行上的提示框向下弹，列头的向下弹，都要盖在行上 */
   z-index: 6;
   background: var(--face);
 }
@@ -314,9 +325,9 @@
   white-space: nowrap;
 }
 
-/* `已选 3 个` 13 / 600，与 `取消` 间距 10（安静键的命中区左右各伸 6，这里只让 4） */
+/* `已选 3 个` 13 / 600，与 `取消`（默认键紧凑）间距 10：flex 间距 4 + 这里 6 */
 .mx-selcount {
-  margin-right: 4px;
+  margin-right: 6px;
   font-size: var(--size-caption);
   font-weight: 600;
   line-height: var(--leading-caption);
@@ -383,19 +394,19 @@
 }
 
 /* 最后一行不画行线 */
-.mx-body > :last-child {
+.mx-body > .mx-rowgroup:last-child > .mx-row {
   border-bottom: 0;
+}
+
+/* 拉开了抽屉的行：行线让给抽屉下沿那一条（抽屉下 1px row-line） */
+.mx-row.is-open {
+  border-bottom-color: transparent;
 }
 
 /* 行带（悬停、键盘焦点、右键菜单开着）与勾选中的行：surface；不出列带（D23） */
 .mx-row.is-hot,
 .mx-row.is-selected {
   background: var(--surface);
-}
-
-/* 行复选框常驻细框（D8）：鼠标在这一行上时边转 ink */
-.mx-row:hover .ss-checkbox:not(:disabled) {
-  border-color: var(--ink);
 }
 
 /* 来源格：来源名 ink-mute；悬停出 `打开 ↗` */
@@ -450,36 +461,11 @@
   flex-shrink: 0;
 }
 
-/* 来源格里的 `打开 ↗`：外链 12 */
-.mx-row__origin .mx-reveal .ss-btn--external {
-  font-size: var(--size-label);
-}
-
 .mx-reveal {
   display: inline-flex;
 }
 
-/* 名字是展开详情的按钮：前面 12px ▸ / ▾（不悬停时占位不显示） */
-.mx-namebtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: default;
-}
-
-.mx-name--plain {
-  margin-left: 16px;
-}
-
+/* 旧的 ▸ / ▾ 展开记号（Disclosure）：位置页已换成抽屉拉手，别的页迁走之前留着 */
 .mx-disclosure {
   display: block;
   flex-shrink: 0;
@@ -487,10 +473,11 @@
   transition: transform var(--motion-fast) var(--ease-mech);
 }
 
+/* 名字 ×2 ˅ [键]：名字 + 6 + 拉手（DrawerHandle 悬停这一行才出、拉开的常显），行内键在拉手之后 */
 .mx-row__name {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   padding-right: 12px;
 }
@@ -504,17 +491,21 @@
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
+  color: var(--ink);
   font-size: var(--size-body);
   line-height: var(--leading-caption);
   text-overflow: ellipsis;
   white-space: nowrap;
+  outline: 0;
 }
 
-.mx-row__name > .mx-namebtn {
-  flex-shrink: 1;
+/* 名字是这一行的键盘落点（空格加选、回车拉开抽屉）：键盘焦点时 1px ink 外框，同其他控件 */
+.mx-name:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
 }
 
-/* 同名行悬停：名称格里出安静键「只留这份」；读数在 ×2 的提示框里，不越过面板右沿 */
+/* 同名行悬停：名称格里出默认键紧凑「只留这份」；读数在 ×2 的提示框里，不越过面板右沿 */
 .mx-extra {
   display: inline-flex;
   align-items: center;
@@ -524,22 +515,22 @@
   white-space: nowrap;
 }
 
-/* 就地展开的详情：左沿与名字对齐（▸ 12 + 间距 4），不跨进 agent 列；上 8 下 12，底 1px row-line */
-.mx-detail {
-  position: relative;
-  border-bottom: var(--border-row);
-  background: var(--face);
-}
-
-.mx-detail__body {
+/* 行详情抽屉（组件层 Drawer：凹槽、上 6 下 10、下沿 row-line）：左沿对齐名字（复选列 34 之后），
+   右沿让出 agent 列与尾列（--mx-agents，Matrix.tsx 按列数给），不跨进 agent 列 */
+.mx-drawer .ss-drawer__well {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-  padding: 8px 12px 12px 16px;
+  margin: 0 var(--mx-agents, 376px) 0 34px;
   font-size: var(--size-caption);
   line-height: var(--leading-caption);
   color: var(--ink-mute);
+}
+
+/* `2 份不一样` 的差异要并排几份值：从名字左沿铺到最后一列，只让出尾列 */
+.mx-drawer--wide .ss-drawer__well {
+  margin-right: 24px;
 }
 
 .mx-detail__desc {
@@ -554,11 +545,10 @@
 }
 
 .mx-detail__path .mx-mono {
-  overflow: hidden;
+  min-width: 0;
   color: var(--ink-faint);
   font-size: var(--size-label);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* MCP 行详情：键值三行，键 12 ink-faint 定宽 36，值 13（传输 / 命令或地址 / 原件） */
@@ -584,12 +574,12 @@
   color: var(--ink);
 }
 
+/* 命令与路径放不下时折行，不截断（DESIGN「抽屉」） */
 .mx-kv__value .mx-mono {
-  overflow: hidden;
+  min-width: 0;
   color: var(--ink-faint);
   font-size: var(--size-label);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* 点格之后真要等（拆开）：被点那一格下方的纸窗里，14px 忙碌指示 + 一句 13 ink-mute */

@@ -3,19 +3,20 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
-import { cellKey, LocationActions } from "./Matrix";
+import { cellKey, LocationActions, SourceKeys } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
-import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
+import { addedOrigins, dropOrigin, liveOrigins, originMatches } from "./originFilter";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
+import { SourcesPage } from "./pages/SourcesPage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { skillSourcesModel } from "./pages/sourcesModel";
-import { MANAGE_SOURCES, sourceSlot, type DomainRef } from "./pages/sourcesView";
-import { ManageSourcesKey, SourceListView, SourceRowView, useSources } from "./SourceRow";
+import { MANAGE_SOURCES, type DomainRef } from "./pages/sourcesView";
+import { useSources } from "./SourceRow";
 import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { shortDate } from "./dateText";
-import { AddButton, Confirm, CornerToast, Empty, Toast, ToastCount } from "./ui";
+import { Confirm, CornerToast, Empty, Toast, ToastCount } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import {
   batchBusyText,
@@ -70,7 +71,7 @@ interface KeepPane {
 
 export interface SkillsTabProps {
   overview: Overview | null;
-  /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身在来源行上管理）
+  /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身在来源管理页上管理）
   autoLinks: AutoLink[];
   /// 写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
@@ -80,8 +81,9 @@ export interface SkillsTabProps {
   onError: (message: string) => void;
 }
 
-/// 位置页的 skills 页签：页面头右端筛选框 + `+ 来源`，来源片、来源行（选中恰好一个来源片时）、
-/// 表格（DomainView → Matrix）。添加来源在机面里推入一页（侧栏留着）。
+/// 位置页的 skills 页签：页面头右端筛选框 + `管理来源` + `+ 来源`，来源筛选、表格（DomainView → Matrix）。
+/// 添加来源页与来源管理页都在机面里推入一页（侧栏留着），位置页在下面不卸载——回来时筛选、滚动、
+/// 拉开的抽屉照旧。
 ///
 /// 反馈的位置（DESIGN「反馈的两种形态」「提示条的位置」）：全是浮起的提示小窗，锚在触发处
 /// - 单格：乐观更新 + 格子闪一下；成功浮在被点那一格正下方（不带撤销，⌘Z 照旧，约 4 秒淡出）；
@@ -103,12 +105,35 @@ export default function SkillsTab({
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  // 按来源筛选（工具行第二行的来源片）；空＝全部。点片单选，加完来源时一次选中新加的几片
+  // 来源筛选；空＝全部。多选纳入式，加完来源时一次选中新加的几个
   const [originFilter, setOriginFilter] = useState<string[]>([]);
-  // 添加来源页（页面头的 `+ 来源`、菜单「添加来源…」）开着没有
+  // 添加来源页（页面头的 `+ 来源`、菜单「添加来源…」、来源管理页的 `+ 来源`）开着没有；
+  // 从来源管理页进去的，返回时回到来源管理页
   const [addOpen, setAddOpen] = useState(false);
-  const closeAdd = useCallback(() => setAddOpen(false), []);
-  usePageCommand("add-source", () => setAddOpen(true));
+  const addFromManage = useRef(false);
+  // 来源管理页（页面头的 `管理来源`、来源项右键「管理来源」）开着没有
+  const [manageOpen, setManageOpen] = useState(false);
+  // 从来源管理页进去加完、回到来源管理页时，新来源那几行闪一下
+  const [manageFlash, setManageFlash] = useState<string[]>([]);
+  const openAdd = useCallback(() => {
+    addFromManage.current = false;
+    setAddOpen(true);
+  }, []);
+  const closeAdd = useCallback(() => {
+    setAddOpen(false);
+    if (addFromManage.current) {
+      addFromManage.current = false;
+      setManageOpen(true);
+    }
+  }, []);
+  const closeManage = useCallback(() => setManageOpen(false), []);
+  /// 来源管理页里按 `+ 来源`：收起它、推入添加来源页；加完（或返回）回到来源管理页
+  const addFromManagePage = useCallback(() => {
+    setManageOpen(false);
+    addFromManage.current = true;
+    setAddOpen(true);
+  }, []);
+  usePageCommand("add-source", openAdd);
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录无法写入）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
@@ -145,7 +170,7 @@ export default function SkillsTab({
     node: ReactNode;
   } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
-  // 加完来源、开始滑回主视图：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；新来源片下的那一窗
+  // 加完来源、开始滑回位置页：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；新来源那几项下的那一窗
   const [justAdded, setJustAdded] = useState<CandidateEntry[] | null>(null);
   const [addedToast, setAddedToast] = useState<{
     key: number;
@@ -186,7 +211,7 @@ export default function SkillsTab({
   const pages = overview === null ? [] : overview.domains.filter((d) => d.key === selectedKey);
   const page: DomainPage | null = pages[0] ?? null;
 
-  // ---- 这个位置订阅的来源：片首橙点、来源行（规则 + 移除）、添加来源页的候选 ----
+  // ---- 这个位置订阅的来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
   // 还没扫描出页的位置：名字取项目文件夹名，没有列可当目标
   const domainRef: DomainRef = page
     ? { key: page.key, label: page.label }
@@ -204,9 +229,9 @@ export default function SkillsTab({
     domain: domainRef,
     version: overview,
     onChange: onRefresh,
-    // 移除之后筛选回到 `全部`（这个来源的片没了，不筛出空表）
-    onRemoved: () => setOriginFilter([]),
-    keys: !addOpen,
+    // 移除之后：正勾着它就从筛选里去掉，其余勾着的照旧
+    onRemoved: (id) => setOriginFilter((prev) => dropOrigin(prev, id)),
+    keys: !addOpen && !manageOpen,
   });
 
   const targetOf = (targetId: string): Target | null =>
@@ -241,8 +266,9 @@ export default function SkillsTab({
     setCellNotice({ rowKey, columnId, text });
   };
 
-  // 提示与弹层只属于当次选择；换一个位置时勾选与来源筛选清空
+  // 提示与弹层只属于当次选择；换一个位置时勾选与来源筛选清空、收起来源管理页
   useEffect(() => {
+    setManageOpen(false);
     setKeepPane(null);
     setSplitPane(null);
     setKeyToast(null);
@@ -255,11 +281,16 @@ export default function SkillsTab({
     setUndo(null);
   }, [selectedKey]);
 
-  // 加完来源滑回主视图（DESIGN「添加来源」）：重扫已完，列表筛到新来源——工具行里它们的片选中
-  // （加了几个选几片，列表是并集），这几片正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 skill`（说清楚列表为什么变少了）
+  // 加完来源滑回位置页（DESIGN「添加来源」）：重扫已完，列表筛到新来源——来源筛选里它们被选中
+  // （加了几个选几个，列表是并集），这几项正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 skill`（说清楚列表为什么变少了）。
+  // 从来源管理页进去加的回到来源管理页，位置页的筛选不动
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
+    if (addFromManage.current) {
+      setManageFlash(justAdded.map((e) => e.id));
+      return;
+    }
     if (!page) return;
     const order = page.rows.map((r) => r.sourceId);
     const ids = addedOrigins(
@@ -268,7 +299,7 @@ export default function SkillsTab({
     );
     let parts: string[];
     if (ids.length > 0) {
-      // 名字与片同一个起名函数、同一组来源（DomainView 的筛选片）；数量＝列表里并集的行数
+      // 名字与来源筛选同一个起名函数、同一组来源（DomainView）；数量＝列表里并集的行数
       const names = originNames(order, overview.sources);
       parts = addedParts(
         ids.map((id) => originText(names.get(id)!)),
@@ -279,7 +310,7 @@ export default function SkillsTab({
       setFilterText("");
       setOriginFilter(ids);
     } else {
-      // 新来源在这个位置下一行都没有：没有片可选，只交代加上了
+      // 新来源在这个位置下一行都没有：来源筛选里没有它可选，只交代加上了
       parts = addedParts(
         justAdded.map((e) => e.name),
         justAdded.reduce((n, e) => n + e.count, 0),
@@ -619,7 +650,7 @@ export default function SkillsTab({
     return enqueue(() => batchWrite(press, undoing));
   };
 
-  const batchWrite = async ({ keyId, op, cells, reversible }: BatchPress, undoing: boolean) => {
+  const batchWrite = async ({ keyId, op, cells }: BatchPress, undoing: boolean) => {
     onBusy(true);
     let result: Awaited<ReturnType<typeof run>> | null = null;
     try {
@@ -645,32 +676,30 @@ export default function SkillsTab({
           reason: f.reason,
         })),
       });
+      // 批量一律不给 `撤销` 键（再按一次同一个点就是反操作）；`⌘Z` 照旧撤这一次
       const undo =
         done.length > 0 && !undoing
           ? () => {
               setUndo(null);
-              void batch(
-                { keyId, op: op === "link" ? "unlink" : "link", cells: done, reversible: true },
-                true,
-              );
+              void batch({ keyId, op: op === "link" ? "unlink" : "link", cells: done }, true);
             }
           : null;
       setUndo(undo);
-      setKeyToast({
-        keyId,
-        node: (
-          <Toast
-            {...text}
-            // 写数量，不逐个写名字（`✓ 加到 ✳ 1 个 · 撤销`）；名字在键的提示框里
-            names={text.kind === "success" ? undefined : text.names}
-            reading={text.kind === "success" ? <ToastCount n={done.length} /> : undefined}
-            // 再按一次同一个键就恰好撤回时不给 `撤销`（⌘Z 照旧可用）；见 BatchPress.reversible
-            action={undo && !reversible ? { label: "撤销", onClick: undo } : undefined}
-            onDismiss={dismissKey}
-            onClose={text.tier === "notice" ? dismissKey : undefined}
-          />
-        ),
-      });
+      // 结果锚在触发处：选择行里被按的那个点；撤销右下那一窗里的自动规则（keyId 空）的，仍出在右下
+      const corner = keyId === "";
+      const dismiss = corner ? dismissGlobal : dismissKey;
+      const node = (
+        <Toast
+          {...text}
+          // 写数量，不逐个写名字（`✓ 加到 ✳ 1 个`）；名字在点的提示框里
+          names={text.kind === "success" ? undefined : text.names}
+          reading={text.kind === "success" ? <ToastCount n={done.length} /> : undefined}
+          onDismiss={dismiss}
+          onClose={text.tier === "notice" ? dismiss : undefined}
+        />
+      );
+      if (corner) setGlobalToast(node);
+      else setKeyToast({ keyId, node });
     }
     await onRefresh();
     setOptimisticFor(cells, null);
@@ -700,7 +729,7 @@ export default function SkillsTab({
     const rowKey = skillRowKey(kept);
     // 同一行正在体检：这一下不重复发
     if (keepBusy === rowKey) return;
-    // 点下去到确认框出来之间要体检：键原位忙碌（过了 0.3 秒门槛才出转圈），只锁这一颗
+    // 点下去到确认框出来之间要体检：键原位忙碌（过了 0.3 秒门槛才出刻度），只锁这一颗
     setKeepBusy(rowKey);
     let planned;
     try {
@@ -859,10 +888,7 @@ export default function SkillsTab({
           ? () => {
               setUndo(null);
               setGlobalToast(null);
-              void batchRef.current(
-                { keyId: "", op: "unlink", cells: refs, reversible: true },
-                true,
-              );
+              void batchRef.current({ keyId: "", op: "unlink", cells: refs }, true);
             }
           : null;
       setUndo(undo);
@@ -888,7 +914,7 @@ export default function SkillsTab({
 
   // ===== 渲染 =====
 
-  /// 添加来源页：在机面里推入（侧栏留着）；加好后位置页重扫，滑回；全加上时列表筛到新来源 + 那几片下一窗
+  /// 添加来源页：在机面里推入（侧栏留着）；加好后位置页重扫，滑回；全加上时列表筛到新来源 + 那几项下一窗
   const addPage = addOpen ? (
     <AddSourcePage
       model={model}
@@ -898,8 +924,28 @@ export default function SkillsTab({
       onAllAdded={setJustAdded}
     />
   ) : null;
-  /// 页面头右端：筛选框 + `+ 来源`（表格还没有时也照常放，页面头不跳）
-  const addButton = <AddButton noun="来源" onClick={() => setAddOpen(true)} />;
+  /// 这个位置订阅了来源才有 `管理来源`（一个都没订阅时不出：空态已有 `+ 来源`）
+  const subscribed = (sources.data?.rows.length ?? 0) > 0;
+  const openManage = subscribed
+    ? () => {
+        setManageFlash([]);
+        setManageOpen(true);
+      }
+    : undefined;
+  /// 来源管理页（二级页，同添加来源页的骨架）：来源的路径、规则、移除都在这里。
+  /// 开着时最后一个来源被移除，它自己出空态，不跟着收起
+  const managePage = manageOpen ? (
+    <SourcesPage
+      sources={sources}
+      domain="skills"
+      placeName={domainRef.label}
+      onClose={closeManage}
+      onAdd={addFromManagePage}
+      flashIds={manageFlash}
+    />
+  ) : null;
+  /// 页面头右端：筛选框 + `管理来源` + `+ 来源`（表格还没有时也照常放，页面头不跳）
+  const sourceKeys = <SourceKeys onManage={openManage} onAdd={openAdd} />;
 
   if (!overview) {
     return (
@@ -907,8 +953,8 @@ export default function SkillsTab({
         <LocationActions
           filterText={filterText}
           onFilterText={setFilterText}
-          actions={addButton}
-          enabled={!addOpen}
+          actions={sourceKeys}
+          enabled={!addOpen && !manageOpen}
         />
         <Empty kind="scanning" description="正在读 skill 目录" art="scanning" />
       </>
@@ -921,8 +967,8 @@ export default function SkillsTab({
         <LocationActions
           filterText={filterText}
           onFilterText={setFilterText}
-          actions={addButton}
-          enabled={!addOpen}
+          actions={sourceKeys}
+          enabled={!addOpen && !manageOpen}
         />
         <Empty
           kind="noAgentDirs"
@@ -930,6 +976,8 @@ export default function SkillsTab({
           hint="加上第一个 skill 时会自动创建"
           art="noDirs"
         />
+        {sources.host}
+        {managePage}
         {addPage}
       </>
     );
@@ -945,44 +993,22 @@ export default function SkillsTab({
       })
     : null;
 
-  // 来源片＝表格里有行的来源 + 已订阅但一行都没有的来源（选中它才找得到它的来源行）
+  // 来源筛选＝表格里有行的来源 + 已订阅但一行都没有的来源（选中它，空态里有 `在访达中显示 ↗`）
   const subscribedEmpty = (sources.data?.rows ?? [])
     .filter((r) => !page.rows.some((row) => row.sourceId === r.id))
-    .map((r) => ({ id: r.id, name: r.name }));
+    .map((r) => ({ id: r.id, name: r.name, path: r.path }));
   const activeOrigins = liveOrigins(originFilter, [
     ...page.rows.map((row) => row.sourceId),
     ...subscribedEmpty.map((r) => r.id),
   ]);
   const reveal = (path: string) => void api.revealInDir(path).catch((e) => onError(String(e)));
-  // 片下那一块（sourceSlot）：`管理来源` 展开着出全部来源；否则恰好选中一个来源片出它的来源行（D3）
-  const slot = sourceSlot(
-    sources.listOpen,
-    (sources.data?.rows ?? []).map((r) => r.id),
-    activeOrigins,
-  );
-  const rowSource = slot?.kind === "row" ? sources.rowOf(slot.id) : undefined;
-  const sourceRow =
-    slot?.kind === "list" ? (
-      <SourceListView state={sources} model={model} domain={domainRef} onReveal={reveal} />
-    ) : rowSource ? (
-      <SourceRowView
-        state={sources}
-        row={rowSource}
-        model={model}
-        domain={domainRef}
-        onReveal={reveal}
-      />
-    ) : undefined;
-  /// 来源片的右键菜单（D18）：管理来源（＝片后的 `管理来源`，列表已展开时不出）· 在访达中显示
-  /// （＝来源行 `打开 ↗`）· 移除来源…（＝来源行 `×`，原件在这个位置里的来源没有这一项）；
-  /// 确认锚在被右键的那一片上
+  /// 来源项的右键菜单（D18）：管理来源（＝页面头的 `管理来源`）· 在访达中显示（＝来源管理页那一行的
+  /// `打开 ↗`）· 移除来源…（＝那一行的 `×`，原件在这个位置里的来源没有这一项）；确认锚在被右键的那一项上
   const chipMenu = (id: string, chip: HTMLElement): ContextMenuItem[] => {
     const row = sources.rowOf(id);
     const path = row?.path ?? overview.sources.find((x) => x.id === id)?.path;
     return [
-      ...((sources.data?.rows.length ?? 0) > 0 && !sources.listOpen
-        ? [{ label: MANAGE_SOURCES, run: () => sources.setListOpen(true) }]
-        : []),
+      ...(openManage ? [{ label: MANAGE_SOURCES, run: openManage }] : []),
       ...(path ? [{ label: "在访达中显示", run: () => reveal(path) }] : []),
       "separator",
       ...(row && !row.own
@@ -1030,19 +1056,13 @@ export default function SkillsTab({
           setOriginFilter([]);
         }}
         originFilter={activeOrigins}
-        onOriginFilter={(next) => {
-          // 点任意一片：收起全部来源，回到「选中一片出这一行」
-          sources.setListOpen(false);
-          setOriginFilter(next);
-        }}
+        onOriginFilter={setOriginFilter}
         emptySources={subscribedEmpty}
-        ruleOn={sources.ruleOn}
         chipMenu={chipMenu}
-        sourceRow={sourceRow}
-        sourcesTail={<ManageSourcesKey state={sources} />}
         onReveal={reveal}
         onCopyPath={(path) => void api.copyText(path).catch((e) => onError(String(e)))}
-        onAddSource={() => setAddOpen(true)}
+        onAddSource={openAdd}
+        onManageSources={openManage}
         selected={selected}
         onSelectionChange={(next) => {
           setSelected(next);
@@ -1052,7 +1072,7 @@ export default function SkillsTab({
         onBatch={(press) => void batch(press)}
         onUndo={() => undoRef.current?.()}
         canUndo={canUndo}
-        shortcuts={!addOpen}
+        shortcuts={!addOpen && !manageOpen}
         flash={flash}
         cellNotice={cellNotice}
         onDismissCellNotice={dismissNotice}
@@ -1113,6 +1133,7 @@ export default function SkillsTab({
       ) : null}
 
       {sources.host}
+      {managePage}
       {addPage}
     </section>
   );

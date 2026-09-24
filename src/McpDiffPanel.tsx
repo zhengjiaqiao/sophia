@@ -3,14 +3,14 @@ import type { McpDiff, McpEndpoint, McpFieldValue } from "./types.ts";
 import { Button, Spinner, Tooltip, TruncTip, useBusyShown } from "./ui/index.ts";
 import "./McpDiffPanel.css";
 
-/// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：主视图该服务行就地展开。
+/// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：该服务行下拉出的一格抽屉里。
 ///
 /// - 只列**不同的字段**：字段名 ｜ 位置 A 的值 ｜ 位置 B 的值，三列对齐；值用等宽，不同的那一段加粗
 ///   （不用反色，反色已是「刚变化」）
 /// - headers、env 里的令牌与密钥不显示原值，只写「不同 · 末 4 位」，悬停「出于安全不显示原值」
 /// - 值可以选中拷走（D23：路径、id、命令放开文字选取）
 /// - 认证头运行时才生成的，如实说比不了，不假装比过
-/// - `在访达中显示 ↗` 是展开区末尾的次要文字链
+/// - `在访达中显示 ↗` 在抽屉末尾：离开 Sophia，浅键（↗ 由组件画）
 ///
 /// 不碰 api：比对结果由调用方懒取（`api.mcpFieldDiff`）后传进来。
 export type McpDiffState = McpDiff | "loading" | Error;
@@ -73,7 +73,7 @@ function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, numb
 export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPanelProps) {
   const revealLink = revealPath ? (
     <div className="mcp-diff__foot">
-      <Button variant="external" onClick={() => onReveal(revealPath)}>
+      <Button variant="quiet" onClick={() => onReveal(revealPath)}>
         在访达中显示
       </Button>
     </div>

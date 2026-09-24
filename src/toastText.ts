@@ -77,7 +77,7 @@ export interface ToastInput {
   failed?: FailedItem[];
   /// keepThis：留下的那份所在的来源名，拼进名字里（`通用仓库 的 defuddle`）
   keepLabel?: string;
-  /// 对象已经写在旁边时省掉名字（单格例行一行出在被点的那一行里：`✓ 加到 [Codex] · 撤销`）
+  /// 对象已经写在旁边时省掉名字（单格的一窗浮在被点那一格下，行已说明对象：`✓ 加到 [Codex]`）
   omitNames?: boolean;
 }
 

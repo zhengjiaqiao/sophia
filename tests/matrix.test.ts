@@ -161,7 +161,8 @@ test("Matrix：选择行（D4）——表头下一条，用表格同一套列：
     /class="mx-grid mx-selrow" style="grid-template-columns:34px minmax\(0, 1fr\) 120px 88px 88px 24px"/,
   );
   assert.match(head, /class="mx-selcount">已选 1 个</);
-  assert.match(head, /class="ss-btn ss-btn--quiet"[^>]*>取消</);
+  // `取消` 是默认键紧凑（浅键只给离开 Sophia 的动作）
+  assert.match(head, /class="ss-btn ss-btn--compact"[^>]*>取消</);
   // 来源列：所有 agent + 点
   assert.match(
     head,
@@ -215,29 +216,39 @@ test("Matrix：名称列头带总数，没有来源筛选片", () => {
   assert.doesNotMatch(html, /ss-chip/);
 });
 
-test("Matrix：来源筛选片——`全部` 在最前、默认选中、不带数（D12）；规则开着的片首橙点；勾选期间来源片仍在", () => {
+test("Matrix：来源筛选——行首 `来源` 标签 + 每个来源一颗胶囊；没有 `全部`、不带计数、不点灯；勾选期间来源筛选仍在", () => {
   const sources = {
     selected: [],
     onSelect: () => undefined,
     items: [
-      { id: "u", label: "通用仓库", count: 1 },
-      { id: "w", label: "WeiboAP", count: 1, rule: true },
+      { id: "u", label: "通用仓库" },
+      { id: "w", label: "WeiboAP" },
     ],
   };
   const idle = render(Matrix, { ...base, sources });
-  assert.match(idle, /class="mx-sources"/);
-  assert.match(idle, /aria-pressed="true"><span class="ss-chip__label">全部<\/span><\/button>/);
-  // 开着自动规则的来源：片首 6px 橙点（Indicator），其余片没有
-  assert.match(idle, /class="mx-sourcechip has-rule" data-origin="w"[\s\S]*?ss-indicator is-on/);
+  assert.match(
+    idle,
+    /class="mx-filterrow"[^>]*><span class="mx-filterrow__label" aria-hidden="true">来源<\/span><div class="mx-sources" role="group" aria-label="按来源筛选">/,
+  );
+  // 没有 `全部` 项（一个都不选就是全部），项上只写名字：没有计数、没有橙点
+  assert.doesNotMatch(idle, />全部</);
+  assert.doesNotMatch(idle, /ss-chip__count|ss-indicator|has-rule/);
   assert.match(idle, /class="mx-sourcechip" data-origin="u"/);
+  assert.match(idle, /aria-pressed="false"><span class="ss-chip__label">WeiboAP<\/span><\/button>/);
   const picking = render(Matrix, { ...base, sources, selected: new Set(["u|docx"]) });
   assert.match(picking, /已选/);
   assert.match(picking, /class="mx-sources"/);
+  // 这个位置还没有来源：整行不出
+  const none = render(Matrix, { ...base, sources: { ...sources, items: [] } });
+  assert.doesNotMatch(none, /mx-filterrow|按来源筛选/);
+  // 位置页上没有来源行、来源筛选行末尾没有 `管理来源`（它在页面头，与 `+ 来源` 并排）
+  const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /sourceRow|\btail\b/);
 });
 
-test("来源片悬停出提示框：完整名 + 短路径 + 选中后能做什么；`全部` 片没有提示框（DESIGN「来源筛选片」）", async () => {
+test("来源项悬停出提示框：完整名 + 短路径 + 自动添加与移除去管理来源里设（DESIGN「来源筛选」）", async () => {
   const { SourceChipTip, SOURCE_CHIP_HINT } = await import("../src/Matrix.tsx");
-  assert.equal(SOURCE_CHIP_HINT, "选中后在下方设置自动添加或移除");
+  assert.equal(SOURCE_CHIP_HINT, "在管理来源里设置自动添加或移除");
   const tip = render(SourceChipTip, {
     item: {
       label: "WeiboAP · 1776…",
@@ -248,42 +259,38 @@ test("来源片悬停出提示框：完整名 + 短路径 + 选中后能做什�
   // 短路径：主目录还没读到时照原样取开头两级 + … + 末两级（读到之后开头是 ~）
   assert.equal(
     tip,
-    'WeiboAP · agent_1776847465710_a<br/><span class="mx-mono mx-chiptip__path">/Users/…/agent_1776847465710_a/skills</span><br/>选中后在下方设置自动添加或移除',
+    'WeiboAP · agent_1776847465710_a<br/><span class="mx-mono mx-chiptip__path">/Users/…/agent_1776847465710_a/skills</span><br/>在管理来源里设置自动添加或移除',
   );
-  // 没给完整名就用片名；读不到路径时不空出一行
+  // 没给完整名就用项上的名字；读不到路径时不空出一行
   assert.equal(
     render(SourceChipTip, { item: { label: "WeiboAP" } }),
-    "WeiboAP<br/>选中后在下方设置自动添加或移除",
+    "WeiboAP<br/>在管理来源里设置自动添加或移除",
   );
   const html = render(Matrix, {
     ...base,
     sources: {
       selected: [],
       onSelect: () => undefined,
-      items: [{ id: "u", label: "通用仓库", count: 1, path: "~/u" }],
+      items: [{ id: "u", label: "通用仓库", path: "~/u" }],
     },
   });
-  // 来源片包在 ui 的 Tooltip 里（ss-tipwrap）；`全部` 片直接是按钮
+  // 来源项包在 ui 的 Tooltip 里（ss-tipwrap）
   assert.match(
     html,
     /class="mx-sourcechip" data-origin="u"><span class="ss-tipwrap[^"]*"[^>]*><button/,
   );
-  assert.match(
-    html,
-    /aria-label="按来源筛选"><button type="button" class="ss-chip[^"]*" aria-pressed="true"><span class="ss-chip__label">全部/,
-  );
 });
 
-test("Matrix：加完来源一次选中几片（全部不选中）；片上不带「新」标记；已添加那一窗浮在新来源片下", () => {
+test("Matrix：多选纳入式——选中的几项都是墨色；片上不带「新」标记；已添加那一窗浮在新来源那几项下", () => {
   const html = render(Matrix, {
     ...base,
     sources: {
       selected: ["u", "w"],
       onSelect: () => undefined,
       items: [
-        { id: "u", label: "通用仓库", count: 1 },
-        { id: "w", label: "WeiboAP", count: 1 },
-        { id: "x", label: "别处", count: 1 },
+        { id: "u", label: "通用仓库" },
+        { id: "w", label: "WeiboAP" },
+        { id: "x", label: "别处" },
       ],
     },
     barToast: {
@@ -292,24 +299,84 @@ test("Matrix：加完来源一次选中几片（全部不选中）；片上不�
       origins: ["w"],
     },
   });
-  assert.match(html, /aria-pressed="false"><span class="ss-chip__label">全部</);
   assert.match(html, /aria-pressed="true"><span class="ss-chip__label">通用仓库</);
-  assert.match(
-    html,
-    /aria-pressed="true"><span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__count">1</,
-  );
-  assert.match(
-    html,
-    /aria-pressed="false"><span class="ss-chip__label">别处<\/span><span class="ss-chip__count">/,
-  );
-  // 只有 WeiboAP 一片带「新」
+  assert.match(html, /aria-pressed="true"><span class="ss-chip__label">WeiboAP<\/span><\/button>/);
+  assert.match(html, /aria-pressed="false"><span class="ss-chip__label">别处<\/span><\/button>/);
   // 「新」标记已撤回（看起来像永远不会消失）：交代改由浮起的那一窗说「已筛选出它的 N 个」
   assert.doesNotMatch(html, /ss-chip__badge|>新</);
-  // 浮起的一窗（FloatingToast）：不再挂进列头，锚点按片的 data-origin 找（出现那一刻定位一次）
+  // 浮起的一窗（FloatingToast）：不挂进列头，锚点按项的 data-origin 找（出现那一刻定位一次）
   assert.doesNotMatch(html, /mx-bartoast/);
   assert.doesNotMatch(html, /class="mx-headwrap"[^>]*>[^]*?class="probe"[^]*?class="mx-head /);
   assert.match(html, /class="mx-sourcechip" data-origin="w"/);
   assert.match(html, /class="ss-floattoast"[^>]*><span class="probe">已添加/);
+});
+
+test("行详情是抽屉：名字 ×2 ˅ [键]——拉手跟在名字与 ×2 后、行内键在拉手后；行带悬停钩子；抽屉左沿对齐名字、不跨进 agent 列", () => {
+  const html = render(Matrix, {
+    ...base,
+    rows: [
+      {
+        ...base.rows[0],
+        mark: createElement("span", { className: "probe-mark" }, "×2"),
+        keys: createElement("span", { className: "probe-key" }, "2 份不一样"),
+        detail: createElement("span", { className: "probe-detail" }, "描述"),
+      },
+      base.rows[1],
+    ],
+  });
+  const row = html.slice(html.indexOf('data-row="u|docx"'), html.indexOf('data-row="w|pdf"'));
+  // 行元素挂勾选框与拉手的行悬停钩子（组件层 ui.css）
+  assert.match(html, /data-row="u\|docx" data-checkrow="" data-drawer-row=""/);
+  // 顺序：名字 → ×2 → 拉手 → 行内键
+  const at = (needle: string) => row.indexOf(needle);
+  assert.ok(at(">docx<") < at("probe-mark"));
+  assert.ok(at("probe-mark") < at("ss-drawerhandle"));
+  assert.ok(at("ss-drawerhandle") < at("probe-key"));
+  assert.match(row, /class="ss-drawerhandle" aria-label="docx 的详情" aria-expanded="false"/);
+  // 收着：抽屉外层在（第一次拉开也有动效），内容还没挂
+  assert.match(row, /class="ss-drawer mx-drawer"[^>]*inert=""/);
+  assert.doesNotMatch(row, /probe-detail/);
+  // 旧的 ▸ / ▾ 展开记号与平的展开区都不在位置页上了
+  assert.doesNotMatch(html, /mx-disclosure|mx-namebtn|mx-detail__body/);
+  // 没有详情的行没有拉手
+  const pdf = html.slice(html.indexOf('data-row="w|pdf"'));
+  assert.doesNotMatch(pdf, /ss-drawerhandle/);
+  // 抽屉左沿对齐名字（复选列 34 之后）、右沿让出 agent 列与尾列
+  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.match(css, /\.mx-drawer \.ss-drawer__well \{[^}]*margin: 0 var\(--mx-agents, 376px\) 0 34px;/);
+  assert.match(html, /class="mx-body" style="--mx-agents:200px"/);
+  // 位置页里自己的勾选框悬停覆盖删掉，改用组件层的行悬停钩子
+  assert.doesNotMatch(css, /\.mx-row:hover \.ss-checkbox/);
+});
+
+test("`⌘` 点行加选、名字上按空格加选（键盘焦点在行上）；点行其余地方不勾选", () => {
+  const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  // ⌘ 点行：捕获阶段拦下（不再执行格子自己的动作），只切这一行的勾选
+  assert.match(
+    src,
+    /onClickCapture=\{\(e\) => \{\s*if \(!\(e\.metaKey \|\| e\.ctrlKey\)\) return;\s*e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*if \(!selectable\) return;\s*shift\.current = false;\s*toggleRow\(row\);/,
+  );
+  // 名字是这一行的键盘落点：空格加选、回车拉开抽屉
+  assert.match(src, /if \(e\.key === " "\) \{\s*e\.preventDefault\(\);\s*if \(!selectable\) return;/);
+  const html = render(Matrix, base);
+  assert.match(html, /class="mx-name" role="button" data-cell="0:-1" tabindex="-1" aria-label="docx：空格勾选"/);
+});
+
+test("新手提示条的两个插槽：来源筛选下 / 表头上，与空态上方", () => {
+  const hint = createElement("span", { className: "probe-hint" }, "第一次用");
+  const html = render(Matrix, { ...base, hint });
+  assert.ok(html.indexOf("probe-hint") > html.indexOf('class="mx-bar"'));
+  assert.ok(html.indexOf("probe-hint") < html.indexOf('class="mx-panel"'));
+  const empty = render(Matrix, {
+    ...base,
+    rows: [],
+    empty: createElement("span", { className: "probe-empty" }, "还没有 skill"),
+    emptyHint: hint,
+  });
+  assert.match(empty, /class="mx-empty"><div class="mx-hint"><span class="probe-hint">/);
+  assert.ok(empty.indexOf("probe-hint") < empty.indexOf("probe-empty"));
+  // 没给就不占位
+  assert.doesNotMatch(render(Matrix, base), /mx-hint/);
 });
 
 test("点了做不了的格子：只当即说明（提示框立即出现、停约 3 秒），不交给调用方改数据", async () => {

@@ -1,9 +1,6 @@
-/* MCP「N 份不一样」就地展开的字段级差异（McpDiffPanel）。色值一律 var(--…)，唯一来源是 tokens.css */
+/* MCP「N 份不一样」的字段级差异（McpDiffPanel），装在行下拉出的抽屉里（上下留白归抽屉）。
+   色值一律 var(--…)，唯一来源是 tokens.css */
 @import "./tokens.css";
-
-.mcp-diff {
-  padding-top: var(--space-sm);
-}
 
 .mcp-diff__grid {
   display: grid;

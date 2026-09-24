@@ -270,18 +270,13 @@ export function differingFields(row: McpDomainRow, targetIds: Set<string>): stri
 }
 
 /**
- * 一次写进 / 移除的结果提示条给不给 `撤销`（DESIGN「撤销按钮与 skill 同一条规则」）：
- * 再点一次格子、再按一次同一个键就是准确反操作时不给（`⌘Z` 始终可用，不看这里）。
- * - `reversible`：再按一次恰好撤回——单格一律是；批量写进时选中的里原本一份副本都没有才是
+ * 一次写进 / 移除的结果提示条给不给 `撤销`（DESIGN「提示条的位置」）：再点一次格子、再按一次同一个点
+ * 就是准确反操作时不给（`⌘Z` 始终可用，不看这里）。单格与批量同一条：
+ * - 写进：一律不给——再点 / 再按就是移除刚写的
  * - 移除了一份**与来源原版不一样**的副本（`identical === false`）：再点只能写回原版，
- *   改过的内容回不来，只有撤销（从快照原样还原）是准确的退路
+ *   改过的内容回不来，只有撤销（从快照原样还原）是准确的退路——只有这一支给
  */
-export function mcpUndoShown(
-  op: "write" | "remove",
-  entries: McpReportEntry[],
-  reversible: boolean,
-): boolean {
-  if (!reversible) return true;
+export function mcpUndoShown(op: "write" | "remove", entries: McpReportEntry[]): boolean {
   return op === "remove" && entries.some((e) => e.outcome === "removed" && e.identical === false);
 }
 
