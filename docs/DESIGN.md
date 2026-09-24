@@ -96,8 +96,12 @@ borders:
 
 rounded:
   none: 0
+  scribe: 2px
   mark: 4px
+  knob: 4px
+  track: 5px
   control: 7px
+  tab-track: 10px
   face: 12px
   float: 12px
   pill: 999px
@@ -202,22 +206,22 @@ components:
     stroke: 1.4
     hover: "底 {colors.surface}、图形转 {colors.ink}"
   tabs:
-    track: "胶囊槽：底 {colors.surface}、{elevation.recess-tabs}、圆角 {rounded.pill}、内边距 3px、高 34"
-    tab: "高 28、左右 16、圆角 {rounded.pill}、{typography.nav}、字 {colors.ink-mute}"
-    tab-on: "滑块：底 {colors.paper}、{elevation.raise}、圆角 {rounded.pill}；字 {colors.ink} 700（同重）"
+    track: "槽：底 {colors.surface}、{elevation.recess-tabs}、圆角 {rounded.tab-track}、内边距 3px、高 34"
+    tab: "高 28、左右 16、圆角 {rounded.control}、{typography.nav}、字 {colors.ink-mute}"
+    tab-on: "滑块：底 {colors.paper}、{elevation.raise}、圆角 {rounded.control}；字 {colors.ink} 700（同重）"
     hover: "未选中字转 {colors.ink}；指针在滑块上 {elevation.raise-hover}"
     pressed: "按下即切：滑块弹簧滑到按下的页签，按住期间 {elevation.raise-pressed} + {motion.press-transform}"
     motion: "滑块位移与变宽 {motion.slide-tab} {motion.spring-slide}；字色 {motion.fast} {motion.ease-mech}；不能拖"
   switch:
-    track: "胶囊槽 40×20、底 {colors.track}、圆角 {rounded.pill}、{elevation.recess-track}"
-    knob: "16×16 圆（圆角 {rounded.pill}）、底 {colors.paper}、{elevation.raise}、上 2；面上无纹"
-    scribe: "刻条 12×6 短胶囊（圆角 {rounded.pill}）、上 7：开＝{colors.accent} 露在左（left 6）、关＝{colors.ctl-edge} 露在右（left 22）"
+    track: "槽 40×20、底 {colors.track}、圆角 {rounded.track}、{elevation.recess-track}"
+    knob: "19×16、圆角 {rounded.knob}、底 {colors.paper}、{elevation.raise}、上 2；面上无纹"
+    scribe: "刻条 12×6、圆角 {rounded.scribe}、上 7，在滑块让出的那段槽里居中：开＝{colors.accent} 露在左、关＝{colors.ctl-edge} 露在右"
     indicator: "开关左侧 7px 处 6px 圆点：开＝{colors.accent}、关＝{colors.ctl-border}，不发光"
     off: "滑块在左（left 2）"
     on: "滑块在右（left 22）"
     hover: "滑块 {elevation.raise-hover}"
     pressed: "按住：滑块 {elevation.raise-pressed} + {motion.press-transform}"
-    drag: "按住滑块或槽横移 > 3px 进入拖动，滑块 1:1 跟手、夹在两端；松手前 50ms 的速度 ≥ 0.3px/ms 按速度方向落，否则滑块移过全程一半（标准 10 / 紧凑 8）落对侧，否则回原位；落到对侧＝切换"
+    drag: "按住滑块或槽横移 > 3px 进入拖动，滑块 1:1 跟手、夹在两端；松手前 50ms 的速度 ≥ 0.3px/ms 按速度方向落，否则滑块移过全程一半（标准 8.5 / 紧凑 6.5）落对侧，否则回原位；落到对侧＝切换"
     disabled: "槽透明 + 1px {colors.hairline} 环；滑块 {colors.recess} + 1px {colors.hairline} 环、无投影（平贴）；刻条 {colors.hairline}；指示点空心；不响应悬停、按住、拖"
     motion: "滑块位移 {motion.slide-knob} {motion.spring-slide}（点、拖都用它停靠）；刻条换色在切换判定后 {motion.fast} {motion.ease-mech}"
   switch-compact:
@@ -463,7 +467,7 @@ components:
 | 近中性 + 一个强调色一个意思（橙＝开着 / 在生效）；渐变只用于功能；投影＝离机面的高度 | ③（强调只靠三档，橙不当强调）；⑤（橙一义两形——开关刻条与指示点；投影一义多量：离机面多高，凹 / 平 / 抬起 / 浮）；⑥（橙不读成告警）；① 的「值得」；⑱（性格来自一以贯之的一个橙，不另加装饰） |
 | 字号六档、留白往大了给 | ③ |
 | 汉字零字距、大写与字距只经 `Cap` 给自写的拉丁结构词与 agent 列头 | ⑤ ⑥ |
-| 形状语义（矩形＝动作、胶囊＝选择与状态切换、圆＝状态、直角＝平铺结构）、有框的都能点、抬起＝能按 | ⑤ ⑧ |
+| 形状语义（矩形＝动作、胶囊＝可切换 / 可移除的片、槽＝手会拨的实物、圆＝状态、直角＝平铺结构）、有框的都能点、抬起＝能按 | ⑤ ⑧ |
 | 按钮只写动词、能画的动作不写字、图标词表 | ⑧ ⑥ |
 | 什么时候才有按钮（改动当场生效） | ⑩ ⑬ |
 | 反馈四处说、一件事只说一次 | ① ⑤ |
@@ -523,8 +527,8 @@ components:
 **物性给会被手碰的三样：键、页签、开关**（①③⑧⑪⑰）。它们像实物一样有高度、重量与惯性：
 
 1. **键**：默认键与墨键**抬起**一点（`raise` / `raise-ink` 柔和投影，边由投影的 1px 环给出）；悬停＝手靠近，影子略重、不位移；按下＝贴近机面，影子收紧、键面下沉 0.5px 并微缩；松开由弹簧回位。
-2. **页签**：页签装在一条凹下去的**胶囊槽**里（`surface` 底、`recess-tabs` 内凹），选中的那一页是槽里一枚抬起的**胶囊滑块**（`paper` + `raise`）。位置＝当前页；切换时滑块被阻尼弹簧带过去、停稳。
-3. **开关**：胶囊槽 + 抬起的圆滑块；滑块位置、露出的刻条、旁边的指示点三重表达开 / 关；滑块可点可拖，弹簧停靠（见「开关」）。
+2. **页签**：页签装在一条凹下去的**槽**里（`surface` 底、`recess-tabs` 内凹、`tab-track` 10 圆角），选中的那一页是槽里一枚抬起的**滑块**（`paper` + `raise`、`control` 7 圆角）。位置＝当前页；切换时滑块被阻尼弹簧带过去、停稳。
+3. **开关**：圆角矩形槽 + 抬起的方滑块；滑块位置、露出的刻条、旁边的指示点三重表达开 / 关；滑块可点可拖，弹簧停靠（见「开关」）。
 
 除此之外全平：机面、行、片、格点、灰面板、表格都不投影、不凹下；**格点不加凹坑**（56×4 个凹坑会成纹理，③）。**按不下的东西不离开机面**：禁用的键与开关平贴、无投影。
 
@@ -751,14 +755,14 @@ components:
 |---|---|---|---|---|
 | 主动作键（墨键） | `ink` 底、`face` 字、`raise-ink` | 键面内缩 1px 的 `ink-mute` 内描边（墨已最深，影子不变） | `raise-ink-pressed` + 按压变形 | 外 2px 处 1px `ink` 环 |
 | 默认键 | `paper` 面、`raise`（不画描边） | `raise-hover` | `surface` 面 + `raise-pressed` + 按压变形 | 同上 |
-| 页签 | 未选中：槽里的字；选中：`paper` 胶囊滑块 + `raise` | 未选中字转 `ink`；指针在滑块上 `raise-hover` | 按下即切：滑块弹簧滑到按下的页签，按住期间 `raise-pressed` + 按压变形 | 同上 |
-| 开关 | 见「开关」：圆滑块 `raise` | 滑块 `raise-hover` | 按住：滑块 `raise-pressed` + 按压变形；可拖 | 同上 |
+| 页签 | 未选中：槽里的字；选中：`paper` 滑块 + `raise` | 未选中字转 `ink`；指针在滑块上 `raise-hover` | 按下即切：滑块弹簧滑到按下的页签，按住期间 `raise-pressed` + 按压变形 | 同上 |
+| 开关 | 见「开关」：滑块 `raise` | 滑块 `raise-hover` | 按住：滑块 `raise-pressed` + 按压变形；可拖 | 同上 |
 | 安静键 | 无底无边、`ink-mute` 字 | `surface` 带、字转 `ink` | 按压变形（不抬起、无投影） | 同上 |
 | 复选框 | 13 方、1px `ink-faint` 边 | 边转 `ink` | `surface` 底 | 同上 |
 | 不可用 | **平贴**：1px 实线 `hairline`、`ink-faint` 字、透明底、**无投影**、按下不动（D20：不用虚线——虚线在本产品是「目标不在」） | 不变 | 不动（按下即出原因，见「提示框」） | 同上 |
 
 - **紧凑开关 32×16**（滑块 12 圆、刻条 10×4）给行内的规则状态——来源行上的「以后新出现的自动加到」。它是一条规则的状态，不是本页主角；标准 40×20 只给能力的总开关（Codex 页「第三方模型」、托盘）。
-- **开关保持一眼认得出是开关的形态**：胶囊槽 + 圆滑块，位置＝状态（⑥ macOS / iOS 的开关惯例）；物性做在重量、拖动与停靠上，不做在纹理上。
+- **开关保持一眼认得出是开关的形态**：横向滑槽 + 滑块，位置＝状态（⑥）；物性做在重量、拖动与停靠上，不做在纹理上。
 
 **重量与惯性（动效）**：
 - **会移动的实物用阻尼弹簧**：页签滑块、开关滑块的位移用 `--spring-slide`——阻尼比 0.8 的弹簧（过冲 1.5%，≤ 位移的 3%；肉眼是「停稳」不是「弹」），用 CSS `linear()` 近似。**越重越慢**：页签滑块（宽）`--dur-slide-tab` 260ms，开关滑块（小）`--dur-slide-knob` 200ms——同一条曲线、不同时长。
@@ -947,14 +951,14 @@ components:
 
 | 档 | 规格（色一律 `rgba(28,28,26,…)`） | 给谁 |
 |---|---|---|
-| **凹**：低于机面 | `recess-input`：inset 0 1px 0 .06；`recess-tabs` / `recess-track`：inset 0 1px 2px .06 + inset 0 0 0 1px .04 | 输入框、模型框（`recess-input`）；页签胶囊槽（`recess-tabs`）；开关胶囊槽（`recess-track`） |
+| **凹**：低于机面 | `recess-input`：inset 0 1px 0 .06；`recess-tabs` / `recess-track`：inset 0 1px 2px .06 + inset 0 0 0 1px .04 | 输入框、模型框（`recess-input`）；页签槽（`recess-tabs`）；开关槽（`recess-track`） |
 | **平**：在机面上，无投影 | `hairline` / `row-line` / `ctl-border` 的 1px 边 | 机面、行、片、格点、灰面板、表格——**一切平铺的东西**；禁用的键与开关（按不下的东西不离开机面） |
 | **抬起**：离机面一点点，手能碰 | `raise`：0 0 0 1px .07, 0 1px 2px .10, 0 2px 6px .05<br>`raise-hover`：0 0 0 1px .09, 0 1px 2px .12, 0 3px 8px .07<br>`raise-pressed`：0 0 0 1px .09, 0 0.5px 1px .10<br>`raise-ink`：0 1px 2px .28, 0 2px 6px .14<br>`raise-ink-pressed`：0 0.5px 1px .30 | 默认键、墨键、页签选中滑块、开关滑块。静止 / 悬停（手靠近，影子略重、不位移）/ 按下（贴近机面，影子收紧）三态；`raise` 的 1px 环替代 `ctl-border` 描边——边由投影给，不再单画 |
 | **浮**：最高 | `float`：0 12px 32px .12 + 1px `hairline` 边（墨窗无边） | 下拉 / 选择器、确认框、提示框、提示条（成功与墨窗） |
 
 - **平铺的内容一律无投影**：机面是高度的基准面，不投影（V2 的凸起机面让机面也离开了自己，「高度」失去基准，已否）；片、行、表格、灰面板都在机面上。
 - **抬起只给手会碰、会动的三样**（键、页签滑块、开关滑块）：投影在这里说「它离机面有一点高度，能被按下去」（⑧ 可供性），不说「重要」。片是平的——片与键并排时靠形状与抬起区分（胶囊平贴＝选择，矩形抬起＝动作）。
-- **凹与抬起配对出现**：页签滑块在凹槽里抬起，开关滑块在凹槽里抬起——同一件实物的两面（参考：浅灰胶囊槽里一枚带柔和投影的白色胶囊）。
+- **凹与抬起配对出现**：页签滑块在凹槽里抬起，开关滑块在凹槽里抬起——同一件实物的两面（参考：浅灰槽里一枚带柔和投影的白色滑块）。
 - **`rgba()` 只能出现在这些 elevation token 的定义里**；别处一律引用 token。
 - **渐变只用于功能，不做装饰**：可滚动区域被裁掉的边缘 16px 渐隐（`face` → 透明），提示那边还有内容。开关滑块、按键、机面都不用渐变、高光或内发光。
 - 确认框的遮罩是 **`ink` 16%，整面压暗**（见「材料与工艺 › 对话框」）。
@@ -967,12 +971,13 @@ components:
 |---|---|---|---|
 | 控件矩形 | `control` 7 | 按键、输入框、模型框、图标按钮的悬停底、侧栏选中项、下拉高亮行、提示框 | **点了会执行一个动作 / 在这儿输入** |
 | 面与浮层 | `face` 12 / `float` 12 | 机面、灰面板；下拉、确认框、提示条、墨窗、托盘面板 | 一块面（平的或浮起的，由有无投影区分） |
-| 胶囊 | `pill` 999 | 来源筛选片、模型片；页签槽与滑块；开关槽、滑块与刻条 | **选择：一个可切换 / 可移除的状态** |
+| 槽 | `tab-track` 10（滑块 `control` 7）；开关 `track` 5 / 滑块 `knob` 4 / 刻条 `scribe` 2 | 页签滑槽；开关 | 手会拨的实物 |
+| 胶囊 | `pill` 999 | 来源筛选片、模型片 | **一个可切换 / 可移除的状态** |
 | 圆 | `dot` 50% | 状态点、开关指示点、格子悬停光晕 | 只读状态 |
 | 小方 | `mark` 4 | 复选框、首字母方块 | 记号 |
 | 直角 | `none` 0 | 表格行、行带、分隔线、刚点亮的格子反色 | 平铺的结构，不是一块 |
 
-**不在这张表里的值不用**（lint `radius`）。**动作＝圆角矩形，选择＝胶囊**（⑤ 形状仍承担语义；⑥ 胶囊开关与分段控件是系统惯例）：页签与开关是选择类控件，和筛选片、模型片同属胶囊家族；按键保持 `control` 7。开关滑块在 20 高的槽里是 16 的圆，按 `pill` 画（圆的胶囊），不归 `dot`——`dot` 是只读状态，滑块是能拨的东西。（2026-09-24 物性删 `tab-track` 10、`track` 5、`knob` 4、`scribe` 2。）
+**不在这张表里的值不用**（lint `radius`）。**页签与开关维持圆角矩形的槽与滑块**（2026-09-24 产品负责人看过物性样张：「圆角我还是喜欢这个」——物性只改投影、按压、弹簧与拖动，不改形状；⑦ 尊重已学会的）：它们是手会拨的实物，形状与胶囊片不同，片与槽不混（⑤）。
 
 **有框的都能点。** 不可点的标识（`同名` `Codex 不支持` `无法连接` `已添加`）是**没有框的 12px 文字**，也不加任何装饰线（D21）：强的 `ink` 600，弱的 `ink-mute` 400。第 2 轮评审指出，靠圆角区分「标签」和「按钮」不成立——带框的 `同名` 和行内按钮 `清除` 肉眼不可分。
 
@@ -1012,7 +1017,7 @@ components:
 
 ### 页签 `Tabs`（物性之二）
 
-位置页里切换两张表的是一条**页签滑槽**：浅灰**胶囊槽**——`surface` 底、`recess-tabs` 内凹、`pill` 圆角、内边距 3、连槽高 34；每个页签高 28、左右 16、`pill`、`nav` Condensed 15 / 700 `ink-mute`、经 `Cap` 大写 + 1.17px（`SKILLS` `MCP`）；选中的页签是槽里一枚**抬起的胶囊滑块**：`paper` 面 + `raise`（不画描边）、字 `ink`，**字重不变（仍 700）**——选中靠滑块与墨色区分，字重不跳，切换时字宽不抖。
+位置页里切换两张表的是一条**页签滑槽**：浅灰**槽**——`surface` 底、`recess-tabs` 内凹、`tab-track` 10 圆角、内边距 3、连槽高 34；每个页签高 28、左右 16、`control` 7、`nav` Condensed 15 / 700 `ink-mute`、经 `Cap` 大写 + 1.17px（`SKILLS` `MCP`）；选中的页签是槽里一枚**抬起的滑块**：`paper` 面 + `raise`（不画描边）、字 `ink`，**字重不变（仍 700）**——选中靠滑块与墨色区分，字重不跳，切换时字宽不抖。
 
 - **切换**：按下即切（⑰ 按下即响应；切页签天然可逆，不需要「移开取消」）——滑块被阻尼弹簧带到按下的页签，位移与变宽同一条 `--spring-slide`、260ms（`--dur-slide-tab`），停稳时过冲 1.5%；两个页签的字色 120ms 机械缓动换过来。按住期间滑块 `raise-pressed` + 按压变形，松开 180ms 弹簧回到 `raise`。
 - **悬停**：未选中的字转 `ink`；指针在滑块上时滑块 `raise-hover`。
@@ -1025,18 +1030,18 @@ components:
 
 **一个当场生效的布尔状态，对象就是它所在的那一行**，用开关，不用「启用 / 已启用」两态按钮。**开关旁边不写「已启用」**——它自己就是状态。
 
-胶囊槽里一枚抬起的圆滑块（选择类控件＝胶囊家族，与页签、筛选片同族，⑤；⑥ 是用户在系统里天天拨的开关形）：
-- **槽** 40×20、`track` 底、`pill`、`recess-track` 内凹。
-- **滑块** 16×16 圆（`pill`）、`paper` 面、`raise`（不画描边），上 2；关在 left 2、开在 left 22，移动距离 20。**面上无纹**（原三道防滑纹是过度拟物，删）。
-- **刻条** 12×6 短胶囊（`pill`）、上 7：滑块让开的那一侧露出来——**开：滑块在右，左边露出 `accent` 橙刻条（left 6）；关：滑块在左，右边露出 `ctl-edge` 灰刻条（left 22）**。刻条在让出的那段槽里居中。
+实物滑动开关，槽里一枚抬起的滑块（形状维持原来的圆角矩形；物性只加在投影、按压、弹簧与拖动上）：
+- **槽** 40×20、`track` 底、`track` 5 圆角、`recess-track` 内凹。
+- **滑块** 19×16、`knob` 4 圆角、`paper` 面、`raise`（不画描边），上 2；关在 left 2、开在 left 19，移动距离 17。**面上无纹**（原三道防滑纹是过度拟物，删）。
+- **刻条** 12×6、`scribe` 2 圆角、上 7：滑块让开的那一侧露出来——**开：滑块在右，左边露出 `accent` 橙刻条；关：滑块在左，右边露出 `ctl-edge` 灰刻条**。刻条在让出的那段槽里居中。
 - **指示点** 6px 圆，在开关左侧 7px：开 `accent`，关 `ctl-border`；不发光、无投影。
 - **三重表达**（⑧⑪）：滑块位置 + 刻条颜色 + 指示点——色弱用户靠位置不丢信息。橙的意思不变。
 - **悬停**：滑块 `raise-hover`。**按住**：滑块 `raise-pressed` + 按压变形（手按着它，它贴近槽底）。
 - **点**：点槽或滑块任一处（没拖动）＝切换，滑块用 `--spring-slide` 200ms（`--dur-slide-knob`）滑到另一端停稳。
-- **拖**：按住滑块或槽、横移超过 3px 进入拖动，滑块 1:1 跟手、夹在两端之间；**松手判定**：取松手前 50ms 的平均速度，|v| ≥ 0.3px/ms（300px/s，快速甩）按速度方向落；否则看位置——滑块移过全程一半（标准 10 / 紧凑 8）落到对侧，没过就回原位；再从松手处用同一条弹簧、200ms 停靠。落到对侧＝一次切换，与点击同一条路径（Codex「第三方模型」在 Codex 在跑时照样先确认，取消则滑回原位）。拖动期间刻条颜色不跟手，判定后 120ms 换色。
+- **拖**：按住滑块或槽、横移超过 3px 进入拖动，滑块 1:1 跟手、夹在两端之间；**松手判定**：取松手前 50ms 的平均速度，|v| ≥ 0.3px/ms（300px/s，快速甩）按速度方向落；否则看位置——滑块移过全程一半（标准 8.5 / 紧凑 6.5）落到对侧，没过就回原位；再从松手处用同一条弹簧、200ms 停靠。落到对侧＝一次切换，与点击同一条路径（Codex「第三方模型」在 Codex 在跑时照样先确认，取消则滑回原位）。拖动期间刻条颜色不跟手，判定后 120ms 换色。
 - **不可用**：槽透明 + 1px `hairline` 环；滑块 `recess` 面 + 1px `hairline` 环、**无投影**（平贴：按不下的东西不离开机面）；刻条 `hairline`；指示点空心（1px `hairline` 环）；不响应悬停、按住与拖。按下即出原因提示框。
 - **reduced-motion**：点击即时到位；拖动时仍跟手，松手即时落位。
-- 紧凑版 32×16（滑块 12 圆，关 left 2 / 开 left 18，移动距离 16；刻条 10×4、上 6，开 left 5 / 关 left 17；指示点 5），见「控件有重量」。
+- 紧凑版 32×16（滑块 15×12，关 left 2 / 开 left 15，移动距离 13；刻条 9×4、上 6，在让出的那段里居中；指示点 5），见「控件有重量」。
 
 用在哪：agent 页里能力的总开关（Codex「第三方模型」）与托盘里同一个开关、来源行的「以后新出现的自动加到」规则。**不用在哪**：选择（那是 13px 方形复选框——方＝我选的，开关＝它开着）、需要一次提交的多输入。
 
@@ -1792,7 +1797,7 @@ macOS 用户会对行点右键；原来点了什么都没有。**只作加速器
 **tokens.css + 字体**
 - 色 token 换成 front-matter 的 14 个（`--shell` … `--accent`；`--ink-edge` 随 2026-09-24 物性删除）→ `tests/ui.test.ts` 的 token 表断言逐值通过。
 - 删 `--canvas` `--disabled` → `grep -rn "var(--canvas)\|var(--disabled)" src` 为空。字族 token 回到 `--font-ui`（Barlow）/ `--font-cond`（Barlow Condensed）/ `--font-mono`；正字距 token 只留三个：`--track-nav: 1.17px` `--track-label: 0.96px` `--track-head: 1.1px`（2026-09-24 字体回到原设计），`--track-display` `--track-title` 不恢复（页面名字距 0）→ `grep -rn -- "--track-" src` 只出现这三个名字，且只在 `Cap` 的样式里被引用。
-- 圆角 token 换成 `--radius-mark 4 / control 7 / face 12 / float 12 / pill 999px / dot 50%`，删 `--radius-layer` `--radius-dialog` 与 2026-09-24 物性删掉的 `--radius-scribe` `--radius-knob` `--radius-track` `--radius-tab-track` → `grep -rn -- "--radius-\(layer\|dialog\|scribe\|knob\|track\|tab-track\)" src` 为空。
+- 圆角 token：`--radius-scribe 2 / mark 4 / knob 4 / track 5 / control 7 / tab-track 10 / face 12 / float 12 / pill 999px / dot 50%`，删 `--radius-layer` `--radius-dialog` → `grep -rn -- "--radius-\(layer\|dialog\)" src` 为空。
 - 层次 token 换成四档（2026-09-24 物性）：凹 `--recess-input` `--recess-tabs` `--recess-track`，抬起 `--raise` `--raise-hover` `--raise-pressed` `--raise-ink` `--raise-ink-pressed`，浮 `--elev-float`，值照 front-matter `elevation`；删 `--key-edge` `--key-edge-ink` `--recess-pressed` `--elev-layer` `--elev-tip`，`--veil-opacity: 0.16` → `grep -rn "key-edge\|recess-pressed\|elev-layer\|elev-tip" src` 为空，`rgba(` 只出现在这些定义行。
 - 动效 token（2026-09-24 物性）：`--motion-fast: 120ms`、`--ease-mech`、`--dur-press: 70ms`、`--dur-release: 180ms`、`--dur-slide-tab: 260ms`、`--dur-slide-knob: 200ms`、`--spring-slide`（front-matter `motion.spring-slide` 的 `linear()` 原样）、`--press-transform: translateY(0.5px) scale(.985)` → 页签滑块与开关滑块的 `transition` 引用 `--spring-slide`，颜色 / 底色 / 透明度的 `transition` 引用 `--ease-mech`；`grep -rn "cubic-bezier\|linear(" src` 只出现在 tokens.css 的定义行；reduced-motion 块把这些时长全置 0。
 - 字号 token：28 / 20 / 16 / 15 / 13 / 12，行高按「层级」表，删 `--size-wordmark` 与 `--leading-micro: 2` → tokens.css 里没有 14px、没有 2.0 行高。
@@ -1813,7 +1818,7 @@ macOS 用户会对行点右键；原来点了什么都没有。**只作加速器
 - `Button`：默认键 `paper` + `--raise`（无 `ctl-border` 描边），悬停 `--raise-hover`，按下 `surface` 面 + `--raise-pressed` + `--press-transform`（70ms 按下、180ms 弹簧松开）；主动作墨键 + `--raise-ink` + `face` 字，按下 `--raise-ink-pressed`；禁用平贴（实线 `hairline`、无投影、按下不动，D20）；文字链拆成安静键与外链（见「二 · 通用组件」）→ 1x 截图里默认键四周有一圈淡环、下沿有柔和的影、看得出离开机面；悬停影子略重、键不动；按住时影子收紧、键略缩；禁用键与它并排时平贴无影。
 - `Button` 的 `is-on-dark` 变体改为墨面上的浅描边键（`face` 边与字）→ 墨窗里的 `撤销` 键在 1x 下边线清楚。
 - `IconButton`（在 `Button.tsx` / `icons.tsx`）：图形 `ink-mute`，悬停 `surface` 底、图形 `ink`，不抬起、按下不动 → 图标键悬停只变底、没有投影、按下不缩。
-- `Switch`：胶囊槽 + 抬起的圆滑块（无防滑纹）+ 短胶囊刻条 + 指示点，含紧凑版与不可用态，尺寸与位置照「开关」→ 开＝滑块在右 + 左侧橙刻条 + 橙点，关＝滑块在左 + 右侧灰刻条 + 灰点；滑块 `--raise`、悬停 `--raise-hover`、按住 `--raise-pressed`；点击滑块 200ms `--spring-slide` 停靠；按住横移 > 3px 进入拖动、滑块跟手，松手速度 ≥ 0.3px/ms 按方向落、否则过半落对侧、否则回原位（单元测试覆盖这三支与 3px 门槛）；不可用平贴无投影、拖不动；reduced-motion 下无位移动画、拖动仍跟手。
+- `Switch`：圆角矩形槽（`track` 5）+ 抬起的滑块（`knob` 4，无防滑纹）+ 刻条（`scribe` 2） + 指示点，含紧凑版与不可用态，尺寸与位置照「开关」→ 开＝滑块在右 + 左侧橙刻条 + 橙点，关＝滑块在左 + 右侧灰刻条 + 灰点；滑块 `--raise`、悬停 `--raise-hover`、按住 `--raise-pressed`；点击滑块 200ms `--spring-slide` 停靠；按住横移 > 3px 进入拖动、滑块跟手，松手速度 ≥ 0.3px/ms 按方向落、否则过半落对侧、否则回原位（单元测试覆盖这三支与 3px 门槛）；不可用平贴无投影、拖不动；reduced-motion 下无位移动画、拖动仍跟手。
 - `Chip`：未选中透明底 + `ctl-border`，选中墨片 + `face` 字 + `ctl-border` 计数，不可选实线 `hairline`（D20）→ 选中片与主动作键并排时，片平贴无投影、键抬起有投影。
 - 复选框（`Switch.tsx` 里的 `Checkbox`、`.ss-checkbox`，`src/pages/CheckMark.tsx` 共用）：13 方、4 圆角、`ink-faint` 边、勾上墨底 → 全应用复选框量出来都是 13×13。
 - `StateDot`：四种都 10px（无格 8×1.5），未加上是 1.5px `ink` 环，无凹坑 → 与画板 V4 列的格子 2x 截图逐像素对齐（±1px）。
@@ -1831,7 +1836,7 @@ macOS 用户会对行点右键；原来点了什么都没有。**只作加速器
 **应用壳（App.tsx / App.css）**
 - 窗体底色 `shell`，删侧栏右线、侧栏底线（顶栏随 D1 整条删除）→ 截图里壳上没有任何 1px 线。
 - 内容区包成一块机面（`face` + 1px `hairline` + 12 圆角 + 无投影），现值内缩 4 / 16 / 16 / 4 → 机面四角圆、四边有线、没有投影。
-- 页签改为滑槽组件，`SKILLS` `MCP`（经 `Cap`，Condensed 15 / 700 / 1.17px，选中同重；D1 起在位置页页面头）：`surface` 胶囊槽 + `--recess-tabs`，选中滑块 `paper` 胶囊 + `--raise`（2026-09-24 物性）→ 选中滑块四周淡环、下沿柔影、没有描边与底边；按下即切，滑块 260ms `--spring-slide` 滑过去、停稳时无肉眼可见的回弹；切换前后页签字宽不变；拖不动。
+- 页签改为滑槽组件，`SKILLS` `MCP`（经 `Cap`，Condensed 15 / 700 / 1.17px，选中同重；D1 起在位置页页面头）：`surface` 槽（`tab-track` 10）+ `--recess-tabs`，选中滑块 `paper`（`control` 7）+ `--raise`（2026-09-24 物性）→ 选中滑块四周淡环、下沿柔影、没有描边与底边；按下即切，滑块 260ms `--spring-slide` 滑过去、停稳时无肉眼可见的回弹；切换前后页签字宽不变；拖不动。
 - 侧栏项：15 `ink-mute`，选中 `face` 底 + `hairline` 环 + `ink` 600，悬停 `surface` → 选中项读作一小块机面。
 - 侧栏字标用原资产 `assets/logo/wordmark.svg`（大写 `SOPHIA`、首字母左下重影），框高 26 → 在侧栏字标带（高 44）里垂直居中（窗口 y 37–63），主体 `S` 左沿 x 20、重影左沿 x 15（见「壳 › 字标在侧栏顶」）。
 - 吸顶行与滚动渐隐的底色改 `face` → 滚动时吸顶行下面不露出别的颜色。
@@ -2013,6 +2018,7 @@ macOS 用户会对行点右键；原来点了什么都没有。**只作加速器
 
 **V4 之前的条目是历史**：其中的视觉描述（零色彩、`#222`、2px 墨色结构线、3 / 6 / 8 / 12 / 32 圆角、`layer` / `tip` 阴影、白面板与实心黑体块、黑窗 / 黑块、胶囊开关、12px 复选框、micro 行高 2.0 与字号档、TP-7 定调）已被 2026-09-24 V4 取代；其中的**行为与交互裁决仍然有效**。**例外：字族、大小写与字距规则、标志（大写 SOPHIA 字标与大写 S 图标、左下重影）在 2026-09-24 回到原设计**，那些条目里关于字体与标志的描述重新有效（字号档仍按 V4 六档），见「字体与标志回到原设计」。
 
+- **2026-09-24 · 页签与开关维持原来的圆角**（产品负责人看物性样张后：页签「圆角我还是喜欢这个」，开关「这个圆角也是」；「圆角可以维持之前的设计，只是之前过于拟物」）：撤回物性一条里「页签与开关改胶囊」与删 `tab-track` `track` `knob` `scribe` 四个圆角；形状回到槽 10 / 滑块 7、开关槽 5 / 滑块 4 / 刻条 2。物性的其余部分（抬起投影三态、按下贴近、弹簧停靠、开关可拖、删防滑纹、删 `key-edge` 与 `ink-edge`）不变。
 - **2026-09-24 · 控件表现得像真实材料（物性）**（产品负责人，附参考图：浅灰胶囊槽里两个选项，选中的是一枚带柔和投影的白色胶囊滑块。原话：「按钮的立体风格往参考图的方向靠——不一定『看起来像』皮革和木头，而是让界面『表现得像』真实材料：有重量、有惯性、有层次、做出物理上合理的反应；不过度追求拟物，同时依然提供可供性。」）协调方按五支柱十八条裁决：⑰ 操作要有手感、⑧ 可供性被感知直接支持；克制（地基）要求不加纹理、渐变、高光；⑤ 要求投影只有一个意思——所以把「投影＝浮在页面上」改成**「投影＝离机面的高度」**，高度分档、同义不同量。
   - **取代**：Elevation 的「平 / 行程 / 凹 / 浮」→ **凹 / 平 / 抬起 / 浮**；1px 硬底边（`key-edge` `key-edge-ink`）→ 柔和抬起投影 `raise` 三态（静止 / 悬停 / 按下）与墨键 `raise-ink` 两态，`raise` 的 1px 环替代键与滑块的 `ctl-border` 描边；按下「底边消失、下沉 1px、`recess-pressed` 内凹」→ 按下「贴近机面」：影子收紧、`translateY(0.5px) scale(.985)`；`recess-tabs` `recess-track` 改为 inset 0 1px 2px .06 + inset 0 0 0 1px .04；页签槽 `hairline` 底 10 圆角 → `surface` 底胶囊槽，滑块 7 圆角 → 胶囊；开关方槽方滑块 → 胶囊槽圆滑块、删三道防滑纹（过度拟物）、刻条改短胶囊；「所有状态变化 80–120ms 机械缓动，不要弹性」→ 会移动的实物（页签滑块、开关滑块）与按下后的回位用阻尼比 0.8 的弹簧（`--spring-slide`，过冲 1.5%；页签 260ms、开关 200ms，越重越慢），颜色、透明度、底色仍 120ms 机械缓动；开关新增可拖（过半或快甩即切换，弹簧停靠）。删 token：`key-edge` `key-edge-ink` `recess-pressed`；圆角 `tab-track` 10、`track` 5、`knob` 4，以及随之没有用处的 `scribe` 2 与色 `ink-edge`（它只给墨键底边）。「底边＝能按」→「抬起＝能按，平贴＝按不下」。V4 选定时「胶囊开关 → 滑槽开关」的那一半随之回到胶囊（保留刻条与指示点，所以仍不是 V4 前的旧开关）。
   - **保留**：机面、行、片、格点、灰面板、表格仍平、不投影；浮层 `float` 不变；输入框 `recess-input` 不变；按键仍是 `control` 7 圆角矩形（动作＝圆角矩形、选择＝胶囊，形状仍承担语义）；禁用平贴（D20，现在读作「按不下的东西不离开机面」）；开关的「开」仍是橙刻条露出 + 指示点，橙的意思不变；焦点环、刚点亮反色 120ms、辐条忙碌、`prefers-reduced-motion` 全部即时。
