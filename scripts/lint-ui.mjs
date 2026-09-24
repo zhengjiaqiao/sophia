@@ -188,7 +188,7 @@ const rules = [
   },
   {
     id: "verb-direction",
-    // skill 与 agent 的关系用带方向的动词（DESIGN 冲突表「⑤⑥：skill 与 agent 的关系用什么动词」）：
+    // skill 与 agent 的关系用带方向的动词（DESIGN 冲突表「⑥⑧：skill 与 agent 的关系用什么动词」）：
     // 「开启 Claude Code」「关闭 Codex」会被读成操作应用本身，写「加到 X」「从 X 移除」
     desc: "动词：可见文案里「开启 / 关闭 / 已开启 / 未开启」不紧跟 agent 名或图标",
     run(src) {
