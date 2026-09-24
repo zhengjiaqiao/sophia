@@ -633,7 +633,8 @@ test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；�
   assert.match(knob, /box-shadow:\s*var\(--raise\)/);
   // 三道防滑纹：平的 1px 实线（标准 1×7、紧凑 1×5、间距 2），无高光、不投影——滑块能拖，纹说「可以抓」
   const grip = cssRule(uiCss, ".ss-switch__grip");
-  assert.match(grip, /width:\s*1px/);
+  assert.match(grip, /width:\s*2px/);
+  assert.match(grip, /border-radius:\s*var\(--radius-scribe\)/);
   assert.match(grip, /height:\s*var\(--grip-h\)/);
   assert.match(grip, /background:\s*var\(--ctl-edge\)/);
   assert.doesNotMatch(grip, /shadow|gradient/);

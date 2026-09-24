@@ -214,7 +214,7 @@ components:
     motion: "滑块位移与变宽 {motion.slide-tab} {motion.spring-slide}；字色 {motion.fast} {motion.ease-mech}；不能拖"
   switch:
     track: "槽 40×20、底 {colors.track}、圆角 {rounded.track}、{elevation.recess-track}"
-    knob: "19×16、圆角 {rounded.knob}、底 {colors.paper}、{elevation.raise}、上 2；面上一道平的防滑纹 1×8 {colors.ctl-edge}、居中（无高光无凹凸）"
+    knob: "19×16、圆角 {rounded.knob}、底 {colors.paper}、{elevation.raise}、上 2；面上一道平的防滑纹 2×8、圆角 {rounded.scribe}、{colors.ctl-edge}、居中（无高光无凹凸）"
     scribe: "刻条 12×6、圆角 {rounded.scribe}、上 7，在滑块让出的那段槽里居中：开＝{colors.accent} 露在左、关＝{colors.ctl-edge} 露在右"
     indicator: "开关左侧 7px 处 6px 圆点：开＝{colors.accent}、关＝{colors.ctl-border}，不发光"
     off: "滑块在左（left 2）"
@@ -1032,7 +1032,7 @@ components:
 
 实物滑动开关，槽里一枚抬起的滑块（形状维持原来的圆角矩形；物性只加在投影、按压、弹簧与拖动上）：
 - **槽** 40×20、`track` 底、`track` 5 圆角、`recess-track` 内凹。
-- **滑块** 19×16、`knob` 4 圆角、`paper` 面、`raise`（不画描边），上 2；关在 left 2、开在 left 19，移动距离 17。**面上一道防滑纹**：1×8、`ctl-edge`、居中，**平的**——实线，不画高光、凹凸或投影（原来的问题是整体过于拟物，不在纹本身；滑块可以拖，纹说「这里能抓住」，⑧）。紧凑版 1×6。**一道而不是三道**（产品负责人：三条杠是不是多了）：三道读成菜单图标「≡」的竖版、两道读成暂停「‖」（⑤ 同形异义），一道是滑块上的一条脊；它只负责说「能抓住」，不和刻条、指示点抢（③ 克制）。
+- **滑块** 19×16、`knob` 4 圆角、`paper` 面、`raise`（不画描边），上 2；关在 left 2、开在 left 19，移动距离 17。**面上一道防滑纹**：2×8、`scribe` 2 圆角（两端圆）、`ctl-edge`、居中，**平的**——实线，不画高光、凹凸或投影（原来的问题是整体过于拟物，不在纹本身；滑块可以拖，纹说「这里能抓住」，⑧）。紧凑版 2×6。1px 太细（产品负责人：一道太细了），读成一根发丝；2px 与刻条同一类笔画。**一道而不是三道**（产品负责人：三条杠是不是多了）：三道读成菜单图标「≡」的竖版、两道读成暂停「‖」（⑤ 同形异义），一道是滑块上的一条脊；它只负责说「能抓住」，不和刻条、指示点抢（③ 克制）。
 - **刻条** 12×6、`scribe` 2 圆角、上 7：滑块让开的那一侧露出来——**开：滑块在右，左边露出 `accent` 橙刻条；关：滑块在左，右边露出 `ctl-edge` 灰刻条**。刻条在让出的那段槽里居中。
 - **指示点** 6px 圆，在开关左侧 7px：开 `accent`，关 `ctl-border`；不发光、无投影。
 - **三重表达**（⑧⑪）：滑块位置 + 刻条颜色 + 指示点——色弱用户靠位置不丢信息。橙的意思不变。

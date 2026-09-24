@@ -491,12 +491,13 @@ textarea,
     box-shadow var(--motion-fast) var(--ease-mech);
 }
 
-/* 一道 1px 防滑纹（标准 1×8、紧凑 1×6，居中）：平的实线，无高光、无凹凸、不投影。
+/* 一道防滑纹（标准 2×8、紧凑 2×6，两端圆，居中）：平的实线，无高光、无凹凸、不投影；1px 太细，读成一根发丝。
    三道像菜单图标、两道像暂停，一道是滑块上的一条脊：说「能抓住」，又不和刻条抢 */
 .ss-switch__grip {
   display: block;
-  width: 1px;
+  width: 2px;
   height: var(--grip-h);
+  border-radius: var(--radius-scribe);
   background: var(--ctl-edge);
 }
 
