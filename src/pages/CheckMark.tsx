@@ -1,6 +1,6 @@
 import { CheckboxGlyph } from "../ui/index.ts";
 
-/// 画出来的 13px 复选方框（与 ui 的 `Checkbox` 同一套 `.ss-checkbox` 样式、同一个记号）。
+/// 画出来的 16px 勾选框（与 ui 的 `Checkbox` 同一套 `.ss-checkbox` 样式、同一个记号）。
 ///
 /// 给「整行是按钮」的列表用：命中区是整行（DESIGN「命中区与视觉尺寸是两回事」：列表行里
 /// 的选择记号只是告诉你点了会发生什么），方框本身不再是一个按钮——按钮里套按钮不合法。

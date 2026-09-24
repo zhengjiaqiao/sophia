@@ -1,18 +1,20 @@
-/// 来源行（DESIGN「位置页 › 来源行」「来源：订阅、来源行、添加来源」，裁决 D3）：取代来源管理页。
-/// 恰好选中一个来源片时，片下出这一来源的一行：
+/// 来源行（DESIGN「位置页 › 来源行（只在来源管理页）」「来源管理页（按下 `管理来源` 时）」）：来源管理页
+/// （`pages/SourcesPage.tsx`）里一个来源的一行——
 ///
-///   ~/Library/…/WeiboAP/skills  打开 ↗            以后新出现的自动加到 [✳ ⎔ ▾]  •[开关]   ×
+///   通用仓库 26 ｜ ~/.agents/skills  打开 ↗ ｜ [✳ ⎔ ▾] [开关] ｜ ×
 ///
-/// - 左：短路径（mono 12 `ink-faint`，`~` 开头，放不下中段省略，截断才出完整路径的提示框）+ `打开 ↗`
-/// - 右：规则 `以后新出现的自动加到`（MCP：`自动写进`）+ 目标框 + 紧凑开关；打开开关当场展开选目标的浮层；
-///   开 / 关都不确认（只管以后新出现的，不补链现有的）
-/// - 最右：`×` 移除这个来源（锚定确认列出会撤掉的）；原件在这个位置里的来源 × 禁用、按下即说原因
+/// - 来源名 13 `ink` + 8 + skill 数 12 tabular `ink-faint`
+/// - 短路径（mono 12 `ink-faint`，`~` 开头，放不下中段省略，截断才出完整路径的提示框）+ `打开 ↗`（浅键）
+/// - 目标框 + 8 + 紧凑开关（旁边不点指示点）；打开开关当场展开选目标的浮层；开 / 关都不确认
+///   （只管以后新出现的，不补链现有的）。规则句「以后新出现的自动加到」只在页面的列头说一次
+/// - 最右：`×` 移除这个来源（锚定确认写明会撤掉的）；原件在这个位置里的来源 × 禁用、按下即说原因
 ///
-/// 规则状态（片首橙点与这一行的开关同一帧变）与移除流程由 `useSources` 持有：来源片的右键菜单
-/// 「移除来源…」走同一个确认，所以移除不能跟着这一行挂载。skill 与 MCP 只差数据源（`SourcesModel`）。
+/// 规则状态与移除流程由 `useSources` 持有：来源项的右键菜单「移除来源…」走同一个确认，所以移除不能
+/// 跟着这一行挂载。skill 与 MCP 只差数据源（`SourcesModel`）。
 ///
-/// 来源片那一行末尾的 `管理来源`（裁决 15）：开关式默认键（紧凑），按下片下展开「全部来源」——订阅的每个来源
-/// 一行，每行就是这里的来源行、行首多一列来源名。开合也由 `useSources` 持有（片、右键菜单、Esc 都要收它）。
+/// 片首橙点（D1 / D3）已撤回（2026-09-25）：开没开规则只在来源管理页每行的开关上说。
+/// 位置页上的来源行、`管理来源` 开关键与原地展开的「全部来源」（`SourceRowView`、`ManageSourcesKey`、
+/// `SourceListView`、`listOpen` 一套）已被二级页取代：位置页不再引用后删（deprecated）。
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import {
@@ -72,9 +74,13 @@ interface PendingRemove {
 
 export interface SourcesState {
   data: SourcesData | null;
+  /// 数据源与位置（来源管理页用来画行、造句）
+  model: SourcesModel;
+  domain: DomainRef;
   /// 这一行此刻的目标（点过开关、还没重读回来时按点下去的样子）；空＝规则关着
   targetsOf: (row: SourceRowData) => string[];
-  /// 这个来源的规则开着没有（片首橙点）
+  /// 这个来源的规则开着没有。
+  /// @deprecated 片首橙点已撤回（2026-09-25），位置页不再用它；开没开只在来源管理页的开关上说
   ruleOn: (id: string) => boolean;
   rowOf: (id: string) => SourceRowData | undefined;
   /// 改规则：打开 / 关掉 / 加减一个目标都当场生效；没成回到原样，在 `at` 下说一声
@@ -88,11 +94,19 @@ export interface SourcesState {
   ) => Promise<void>;
   /// 正在为哪一个来源查看影响 / 移除
   removeBusy: { id: string; kind: "planning" | "removing" } | null;
-  /// 确认框与结果提示小窗：由页面挂在表格旁边（不跟着来源行挂载）
+  /// 确认框与结果提示小窗：由页面挂在表格旁边（不跟着来源行挂载）。来源管理页开着时它让出来
+  /// （`claimHost`），由那一页画 `pageHost`，同一个确认不画两份
   host: ReactNode;
+  /// 来源管理页画的那一份（同 `host` 的内容）
+  pageHost: ReactNode;
+  /// 来源管理页挂上时认领确认框与结果小窗；返回放手
+  claimHost: () => () => void;
+  /// 移除确认开着：Esc 先归它（来源管理页的返回让一步）
+  confirming: boolean;
   /// 在 `at` 下浮起一窗（规则没改成）
   say: (text: ToastText, at: AnchorRect | null, align: ToastAlign) => void;
-  /// 「全部来源」列表展开着没有（没订阅任何来源时恒为 false）；不记忆，换位置、重新进来都收着
+  /// 「全部来源」列表展开着没有（没订阅任何来源时恒为 false）；不记忆，换位置、重新进来都收着。
+  /// @deprecated 原地展开已由来源管理页取代；连同 `setListOpen` `keyRef` `listRef` `listId` 位置页不再引用后删
   listOpen: boolean;
   setListOpen: (open: boolean) => void;
   /// `管理来源` 键外的包层与列表：Esc 收起时焦点在列表里就还给键
@@ -259,7 +273,19 @@ export function useSources({
     }
   };
 
-  const host = (
+  /// 来源管理页开着时由它画确认框与结果小窗（位置页那一份让出来）
+  const [claims, setClaims] = useState(0);
+  const claimHost = useCallback(() => {
+    setClaims((n) => n + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      setClaims((n) => n - 1);
+    };
+  }, []);
+
+  const hostNode = (
     <>
       {toast ? (
         <FloatingToast key={toast.key} align={toast.align} anchor={() => toast.at}>
@@ -288,6 +314,8 @@ export function useSources({
 
   return {
     data,
+    model,
+    domain,
     targetsOf,
     ruleOn: (id) => {
       const row = rowOf(id);
@@ -297,7 +325,10 @@ export function useSources({
     setRule,
     askRemove,
     removeBusy,
-    host,
+    host: claims > 0 ? null : hostNode,
+    pageHost: claims > 0 ? hostNode : null,
+    claimHost,
+    confirming,
     say,
     listOpen,
     setListOpen,
@@ -307,7 +338,8 @@ export function useSources({
   };
 }
 
-/// 来源片那一行末尾的 `管理来源` / `收起`（默认键紧凑 24，左距 8：单独出现的动作不用安静键——静止时像一行灰字）。一个来源都没订阅时不出（空态已有 `+ 来源`）
+/// 来源片那一行末尾的 `管理来源` / `收起`（默认键紧凑 24，左距 8）。一个来源都没订阅时不出。
+/// @deprecated `管理来源` 挪到位置页页面头、按下进来源管理页（`pages/SourcesPage.tsx`）；位置页不再引用后删
 export function ManageSourcesKey({ state }: { state: SourcesState }) {
   if ((state.data?.rows.length ?? 0) === 0) return null;
   return (
@@ -324,8 +356,8 @@ export function ManageSourcesKey({ state }: { state: SourcesState }) {
   );
 }
 
-/// 「全部来源」：这个位置订阅的每个来源一行＝来源名（13 `ink`，最宽 160，截断才提示）+ 来源行。
-/// 名字列按最长的名字定宽（至多 160），各行的路径对齐；行间 1px `row-line`（来源行自己的底线）
+/// 「全部来源」：这个位置订阅的每个来源一行＝来源名 + 来源行（原地展开）。
+/// @deprecated 由来源管理页（`pages/SourcesPage.tsx`）取代；位置页不再引用后删
 export function SourceListView({
   state,
   model,
@@ -366,25 +398,18 @@ export function SourceListView({
   );
 }
 
-/// 来源行的规则句：skill `以后新出现的自动加到`，MCP `以后新出现的自动写进`
-const ruleText = (model: SourcesModel) => `以后新出现的${model.ruleOn}`;
+/// 规则句：skill `以后新出现的自动加到`，MCP `以后新出现的自动写进`（来源管理页只在列头说一次）
+export const ruleText = (model: Pick<SourcesModel, "ruleOn">) => `以后新出现的${model.ruleOn}`;
 
-export function SourceRowView({
-  state,
-  row,
-  model,
-  domain,
-  onReveal,
-}: {
-  state: SourcesState;
-  row: SourceRowData;
-  model: SourcesModel;
-  domain: DomainRef;
-  onReveal: (path: string) => void;
-}) {
-  const lineRef = useRef<HTMLDivElement>(null);
+/// 一行的规则控件：目标框 + 紧凑开关 + 选目标浮层（浮层挂在 body 上）。
+/// `lineRef`：这一行——出错的小窗上下取这一行、不盖住它
+function useRuleControls(
+  state: SourcesState,
+  row: SourceRowData,
+  lineRef: RefObject<HTMLElement | null>,
+): { box: ReactNode; toggle: ReactNode; layer: ReactNode; disabled: boolean } {
+  const model = state.model;
   const boxRef = useRef<HTMLButtonElement>(null);
-  const removeRef = useRef<HTMLSpanElement>(null);
   const [layerOpen, setLayerOpen] = useState(false);
   const closeLayer = useCallback(() => setLayerOpen(false), []);
   /// 打开开关后当场把选目标的浮层开在目标框上（默认目标只是起点，要让人看见、能改）
@@ -447,9 +472,174 @@ export function SourceRowView({
     }
     state.setRule(row, next, "没改", pressedAt(el));
   };
-  const path = splitPath(row.path);
-  const busy = state.removeBusy?.id === row.id ? state.removeBusy.kind : null;
 
+  const box = (
+    <Tooltip
+      content={
+        layerOpen
+          ? undefined
+          : on
+            ? `${model.ruleOn} ${shown.map((t) => t.label).join("、")}`
+            : undefined
+      }
+    >
+      <button
+        type="button"
+        ref={boxRef}
+        className={`srcrow__targets${layerOpen ? " is-open" : ""}${on ? "" : " is-off"}`}
+        aria-haspopup="menu"
+        aria-expanded={layerOpen}
+        aria-label={`${row.name} ${model.targetsTitle}`}
+        onClick={() => setLayerOpen((v) => !v)}
+      >
+        <span className="srcrow__shown">
+          {on ? (
+            shown.length > 0 ? (
+              shown.map((t) => (
+                <AgentIcon key={t.id} id={t.iconId} name={t.label} size={13} labelled />
+              ))
+            ) : (
+              `${targets.length} ${model.targetUnit}`
+            )
+          ) : (
+            <span className="srcrow__pick">选目标</span>
+          )}
+        </span>
+        {/* 下拉记号：看得出这组图标能点开改（⑧ 外观说明如何操作） */}
+        <svg
+          className="srcrow__chevron"
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M2.5 4 5 6.5 7.5 4" />
+        </svg>
+      </button>
+    </Tooltip>
+  );
+
+  const toggle = switchReason ? (
+    <Switch
+      size="compact"
+      checked={on}
+      onChange={() => undefined}
+      label={ruleLabel}
+      disabledReason={switchReason}
+    />
+  ) : (
+    <Switch
+      size="compact"
+      checked={on}
+      onChange={toggleRule}
+      label={ruleLabel}
+      title={row.switchTitle}
+    />
+  );
+
+  const layer =
+    layerOpen && boxRef.current ? (
+      <FloatingLayer
+        trigger={boxRef.current}
+        onClose={closeLayer}
+        className="srcrow-targets"
+        label={model.targetsLabel}
+      >
+        {options.map((t) => {
+          const checked = checkedIds.includes(t.id);
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={checked}
+              className={`srcrow-target${checked ? " is-on" : ""}`}
+              data-checkrow={t.disabledReason === undefined ? true : undefined}
+              aria-describedby={t.disabledReason ? `${row.id}-${t.id}-why` : undefined}
+              disabled={t.disabledReason !== undefined}
+              onClick={(e) => toggleTarget(t.id, e.currentTarget)}
+            >
+              <CheckMark on={checked} />
+              <AgentIcon id={t.iconId} name={t.label} size={14} />
+              <span className="srcrow-target__text">
+                <span className="srcrow-target__name">{t.label}</span>
+                {/* 点不了的那一项：原因就写在这一行里（浮层会滚动裁切，悬停提示框放不进去） */}
+                {t.disabledReason ? (
+                  <span className="srcrow-target__why" id={`${row.id}-${t.id}-why`}>
+                    {t.disabledReason}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
+      </FloatingLayer>
+    ) : null;
+
+  return { box, toggle, layer, disabled: switchReason !== undefined };
+}
+
+/// 最右的 `×`：移除这个来源（图标键 28）。原件在这个位置里的来源禁用、按下即说原因；
+/// 查看影响 / 移除时原位忙碌，只锁这一颗
+function RemoveKey({
+  state,
+  row,
+  lineRef,
+}: {
+  state: SourcesState;
+  row: SourceRowData;
+  lineRef: RefObject<HTMLElement | null>;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const busy = state.removeBusy?.id === row.id ? state.removeBusy.kind : null;
+  const title = removeTitle(state.domain, row.name);
+  return (
+    <span className="srcrow__remove" ref={ref}>
+      {row.own ? (
+        <IconButton
+          icon={<IconClose />}
+          title={title}
+          disabledReason={state.model.ownRemoveReason}
+          tipPlacement="bottom"
+        />
+      ) : (
+        <BusySlot busy={busy !== null} label={busy === "removing" ? "正在移除" : "正在查看影响"}>
+          <IconButton
+            icon={<IconClose />}
+            title={title}
+            onClick={() => {
+              const x = ref.current?.querySelector("button");
+              if (x && lineRef.current) void state.askRemove(row, x, lineRef.current);
+            }}
+          />
+        </BusySlot>
+      )}
+    </span>
+  );
+}
+
+/// 位置页上一个来源的一行（短路径 + 打开 ↗ ｜ 规则句 + 目标框 + 开关 ｜ ×）。
+/// @deprecated 位置页不再有来源行（2026-09-25），来源管理页用 `SourceLine`；位置页不再引用后删
+export function SourceRowView({
+  state,
+  row,
+  onReveal,
+}: {
+  state: SourcesState;
+  row: SourceRowData;
+  /// 旧调用点还在传；现在取 `state.model` / `state.domain`
+  model?: SourcesModel;
+  domain?: DomainRef;
+  onReveal: (path: string) => void;
+}) {
+  const lineRef = useRef<HTMLDivElement>(null);
+  const { box, toggle, layer, disabled } = useRuleControls(state, row, lineRef);
+  const path = splitPath(row.path);
   return (
     <div className="srcrow" ref={lineRef}>
       <div className="srcrow__where">
@@ -462,130 +652,88 @@ export function SourceRowView({
         <RevealLink path={row.path} onReveal={() => onReveal(row.path)} />
       </div>
       <div className="srcrow__rule">
-        <span className={`srcrow__label${switchReason ? " is-disabled" : ""}`}>
-          {ruleText(model)}
+        <span className={`srcrow__label${disabled ? " is-disabled" : ""}`}>
+          {ruleText(state.model)}
         </span>
-        <Tooltip
-          content={
-            layerOpen
-              ? undefined
-              : on
-                ? `${model.ruleOn} ${shown.map((t) => t.label).join("、")}`
-                : undefined
-          }
-        >
-          <button
-            type="button"
-            ref={boxRef}
-            className={`srcrow__targets${layerOpen ? " is-open" : ""}${on ? "" : " is-off"}`}
-            aria-haspopup="menu"
-            aria-expanded={layerOpen}
-            aria-label={model.targetsTitle}
-            onClick={() => setLayerOpen((v) => !v)}
-          >
-            {on ? (
-              shown.length > 0 ? (
-                shown.map((t) => (
-                  <AgentIcon key={t.id} id={t.iconId} name={t.label} size={13} labelled />
-                ))
-              ) : (
-                `${targets.length} ${model.targetUnit}`
-              )
-            ) : (
-              <span className="srcrow__pick">选目标</span>
-            )}
-            {/* 下拉记号：看得出这组图标能点开改（⑧ 外观说明如何操作） */}
-            <svg
-              className="srcrow__chevron"
-              width="10"
-              height="10"
-              viewBox="0 0 10 10"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M2.5 4 5 6.5 7.5 4" />
-            </svg>
-          </button>
-        </Tooltip>
-        {switchReason ? (
-          <Switch
-            size="compact"
-            checked={on}
-            onChange={() => undefined}
-            label={ruleLabel}
-            disabledReason={switchReason}
-          />
-        ) : (
-          <Switch
-            size="compact"
-            checked={on}
-            onChange={toggleRule}
-            label={ruleLabel}
-            title={row.switchTitle}
-          />
-        )}
+        {box}
+        {toggle}
       </div>
-      <span className="srcrow__remove" ref={removeRef}>
-        {row.own ? (
-          <IconButton
-            icon={<IconClose />}
-            title={removeTitle(domain, row.name)}
-            disabledReason={model.ownRemoveReason}
-            tipPlacement="bottom"
-          />
-        ) : (
-          <BusySlot busy={busy !== null} label={busy === "removing" ? "正在移除" : "正在查看影响"}>
-            <IconButton
-              icon={<IconClose />}
-              title={removeTitle(domain, row.name)}
-              onClick={() => {
-                const x = removeRef.current?.querySelector("button");
-                if (x && lineRef.current) void state.askRemove(row, x, lineRef.current);
-              }}
-            />
-          </BusySlot>
-        )}
+      <RemoveKey state={state} row={row} lineRef={lineRef} />
+      {layer}
+    </div>
+  );
+}
+
+/// 来源管理页里一个来源的一行（行元素本身是页面表格的一行，各格对齐列头）：
+/// 来源名 + skill 数 ｜ 短路径 ｜ `打开 ↗` ｜（空）｜ 目标框 ｜ 紧凑开关 ｜ `×`。
+/// `leaving`：刚移除、正在收起的那一行（只画、不接操作）；`flash`：刚加进来，行带闪一下
+export function SourceLine({
+  state,
+  row,
+  onReveal,
+  leaving = false,
+  flash = false,
+}: {
+  state: SourcesState;
+  row: SourceRowData;
+  onReveal: (path: string, at: Element) => void;
+  leaving?: boolean;
+  flash?: boolean;
+}) {
+  const lineRef = useRef<HTMLDivElement>(null);
+  const { box, toggle, layer } = useRuleControls(state, row, lineRef);
+  const path = splitPath(row.path);
+  const classes = ["srcline"];
+  if (leaving) classes.push("is-leaving");
+  if (flash) classes.push("is-flash");
+  return (
+    <div
+      className={classes.join(" ")}
+      ref={lineRef}
+      role="row"
+      data-source={row.id}
+      inert={leaving}
+      aria-hidden={leaving || undefined}
+    >
+      <span className="srcline__name" role="cell">
+        <TruncTip content={row.name}>
+          <span className="srcline__label">{row.name}</span>
+        </TruncTip>
+        <span className="srcline__count" aria-label={`${row.items.length} 个 ${state.model.noun}`}>
+          {row.items.length}
+        </span>
       </span>
-      {layerOpen && boxRef.current ? (
-        <FloatingLayer
-          trigger={boxRef.current}
-          onClose={closeLayer}
-          className="srcrow-targets"
-          label={model.targetsLabel}
+      <span className="srcline__where" role="cell">
+        <TruncTip content={<span className="mx-mono">{displayPath(row.path)}</span>}>
+          <span className="srcrow__path ss-selectable">
+            {path.head ? <span className="srcrow__head">{path.head}</span> : null}
+            <span className="srcrow__tail">{path.tail}</span>
+          </span>
+        </TruncTip>
+      </span>
+      <span className="srcline__open" role="cell">
+        <Button
+          variant="quiet"
+          ariaLabel={`在访达中显示 ${displayPath(row.path)}`}
+          onClick={() => {
+            const key = lineRef.current?.querySelector(".srcline__open button");
+            if (key) onReveal(row.path, key);
+          }}
         >
-          {options.map((t) => {
-            const checked = checkedIds.includes(t.id);
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={checked}
-                className={`srcrow-target${checked ? " is-on" : ""}`}
-                aria-describedby={t.disabledReason ? `${row.id}-${t.id}-why` : undefined}
-                disabled={t.disabledReason !== undefined}
-                onClick={(e) => toggleTarget(t.id, e.currentTarget)}
-              >
-                <CheckMark on={checked} />
-                <AgentIcon id={t.iconId} name={t.label} size={14} />
-                <span className="srcrow-target__text">
-                  <span className="srcrow-target__name">{t.label}</span>
-                  {/* 点不了的那一项：原因就写在这一行里（浮层会滚动裁切，悬停提示框放不进去） */}
-                  {t.disabledReason ? (
-                    <span className="srcrow-target__why" id={`${row.id}-${t.id}-why`}>
-                      {t.disabledReason}
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
-        </FloatingLayer>
-      ) : null}
+          打开
+        </Button>
+      </span>
+      <span className="srcline__gap" aria-hidden="true" />
+      <span className="srcline__targets" role="cell">
+        {box}
+      </span>
+      <span className="srcline__switch" role="cell">
+        {toggle}
+      </span>
+      <span className="srcline__remove" role="cell">
+        <RemoveKey state={state} row={row} lineRef={lineRef} />
+      </span>
+      {leaving ? null : layer}
     </div>
   );
 }

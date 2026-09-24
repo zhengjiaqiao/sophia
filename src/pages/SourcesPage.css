@@ -1,0 +1,57 @@
+/* 来源管理页（SourcesPage.tsx，DESIGN「位置页 › 来源管理页」，画板 03B）。容器（盖在机面上、推入滑回、
+   页面头）与添加来源页同一套：`.add-src-page`（AddSourcePage.css）。这里只排页面头下的列表：
+   内容定宽 776；列头一行 `来源 ｜ 位置 ｜ 以后新出现的自动加到`（label 12 ink-mute）+ 1px hairline；
+   每个来源一行（SourceRow.css `.srcline`，行高 40、行间 row-line）。色值一律 var(--…)。 */
+@import "../tokens.css";
+
+.srcpage__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: 776px;
+  overflow-y: auto;
+}
+
+/* 列：名字（按最长定宽）｜ 路径（按最长定宽）｜ 打开 ↗ ｜ 撑开 ｜ 目标框 ｜ 开关 ｜ ×。
+   各行是 subgrid，格子对齐列头；定宽上限在格子里（名字 160、路径 240） */
+.srcpage__table {
+  display: grid;
+  grid-template-columns:
+    max-content max-content max-content minmax(0, 1fr)
+    max-content max-content max-content;
+  margin-top: var(--space-xs);
+}
+
+.srcpage__head {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  box-sizing: border-box;
+  height: 32px;
+  border-bottom: var(--border-structure);
+}
+
+.srcpage__col {
+  font-size: var(--size-label);
+  font-weight: 600;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.srcpage__col--name {
+  grid-column: 1;
+}
+
+.srcpage__col--where {
+  grid-column: 2 / 5;
+}
+
+.srcpage__col--rule {
+  grid-column: 5 / -1;
+}
+
+.srcpage__loading {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--space-huge);
+}

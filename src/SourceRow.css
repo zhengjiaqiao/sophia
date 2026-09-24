@@ -1,5 +1,6 @@
-/* 来源行（SourceRow.tsx，DESIGN「位置页 › 来源行」）：高 40、13 号字、底 1px row-line，纯文字行无底色。
-   左短路径 + `打开 ↗`；右 `以后新出现的自动加到` + 8 + 目标框 + 8 + 紧凑开关；最右 × 图标键（左距 6）。
+/* 来源行（SourceRow.tsx，DESIGN「位置页 › 来源行（只在来源管理页）」）：高 40、13 号字、底 1px row-line，
+   纯文字行无底色。来源管理页的一行是 `.srcline`（各格对齐页面列头，见文末）；`.srcrow` / `.srcmanage` /
+   `.srclist` 是位置页旧来源行与原地展开的「全部来源」，位置页不再引用后删（deprecated）。
    色值一律 var(--…)，唯一来源是 tokens.css */
 @import "./tokens.css";
 
@@ -91,6 +92,13 @@
   border-color: var(--ctl-edge);
 }
 
+.srcrow__shown {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 /* 规则关着时框里写 `选目标 ▾`（ink-faint） */
 .srcrow__pick {
   color: var(--ink-faint);
@@ -180,10 +188,6 @@
   outline: none;
 }
 
-.srcrow-target:hover:not(:disabled) .ss-checkbox {
-  border-color: var(--ink);
-}
-
 .srcrow-target__text {
   display: flex;
   flex-direction: column;
@@ -213,12 +217,134 @@
   color: var(--ink-faint);
 }
 
-.srcrow-target:disabled .ss-checkbox {
-  border-color: var(--hairline);
+/* ===== 来源管理页的一行（SourceLine）=====
+   行元素是页面表格（pages/SourcesPage.css `.srcpage__table`）的一行，用 subgrid 让各格对齐列头：
+   来源名 + 8 + 数 ｜ 短路径 ｜ 打开 ↗ ｜（撑开）｜ 目标框 ｜ 8 + 紧凑开关 ｜ 6 + ×。
+   行高 40、行间 1px row-line，纯文字行无底色 */
+.srcline {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  box-sizing: border-box;
+  height: 40px;
+  border-bottom: var(--border-row);
+  font-size: var(--size-caption);
+}
+
+/* 名字列：按最长的名字定宽，字至多 160，右留 16；数 12 tabular ink-faint，离名字 8 */
+.srcline__name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
+  padding-right: 16px;
+}
+
+.srcline__name > .ss-tipwrap {
+  min-width: 0;
+  max-width: 160px;
+}
+
+.srcline__label {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.srcline__count {
+  flex-shrink: 0;
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+/* 位置列：按最长的路径定宽，至多 240，放不下中段省略（末两级完整）；右留 16，`打开 ↗` 在各行成一列 */
+.srcline__where {
+  display: flex;
+  min-width: 0;
+  padding-right: 16px;
+}
+
+.srcline__where > .ss-tipwrap {
+  min-width: 0;
+  max-width: 240px;
+}
+
+.srcline__open {
+  display: flex;
+}
+
+/* 目标框：这一页里定宽（整列一样宽，按最宽的那一个，至少放得下「选目标 ▾」） */
+.srcline__targets {
+  display: flex;
+  min-width: 0;
+}
+
+.srcline__targets > .ss-tipwrap,
+.srcline__targets .srcrow__targets {
+  width: 100%;
+}
+
+.srcline__targets .srcrow__targets {
+  justify-content: space-between;
+}
+
+.srcline__switch {
+  display: flex;
+  padding-left: var(--space-xs);
+}
+
+.srcline__remove {
+  display: flex;
+}
+
+.srcline .srcrow__remove {
+  margin-left: 6px;
+}
+
+/* 刚移除的那一行：收起（高 40 → 0、淡出），下面的行跟着平移上来，不跳位 */
+.srcline.is-leaving {
+  overflow: hidden;
+  animation: srcline-leave 200ms var(--ease-mech) forwards;
+}
+
+@keyframes srcline-leave {
+  from {
+    height: 40px;
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+    border-bottom-width: 0;
+  }
+}
+
+/* 刚加进来的那一行：surface 行带闪一下 */
+.srcline.is-flash {
+  animation: srcline-flash 900ms var(--ease-mech);
+}
+
+@keyframes srcline-flash {
+  0%,
+  60% {
+    background: var(--surface);
+  }
+  100% {
+    background: transparent;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .srcrow__targets {
     transition: none;
+  }
+
+  .srcline.is-leaving,
+  .srcline.is-flash {
+    animation: none;
   }
 }
