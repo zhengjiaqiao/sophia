@@ -34,7 +34,7 @@ export function AbsentAgents({
                 <span className="settings-page__hidden-note">
                   {/* flex 容器会吃掉文字间的空白：间距用 gap，不靠空格 */}
                   <span>装上后也不显示 ·</span>
-                  <Button variant="link" onClick={() => onRestore(agent.id)}>
+                  <Button variant="quiet" onClick={() => onRestore(agent.id)}>
                     恢复
                   </Button>
                 </span>

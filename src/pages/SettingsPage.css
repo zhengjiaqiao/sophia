@@ -14,7 +14,7 @@
   padding: 6px 0 0 var(--space-xs);
   border-top: 1px solid var(--ink);
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 600;
   line-height: var(--leading-caption);
   color: var(--ink-mute);
@@ -77,7 +77,7 @@
 }
 
 .settings-page__row:disabled {
-  color: var(--disabled);
+  color: var(--ink-faint);
   cursor: default;
 }
 
@@ -109,9 +109,9 @@
 .settings-page__absent-head {
   padding-left: var(--space-xs);
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 600;
-  line-height: var(--leading-micro);
+  line-height: var(--leading-label);
   color: var(--ink-mute);
 }
 
@@ -136,7 +136,7 @@
   /* 文字链命中区左右各外扩 6（负外边距），gap 6 看起来约一个空格宽 */
   gap: 6px;
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   color: var(--ink-mute);
 }
 
@@ -152,7 +152,7 @@
 /* 版本号是标识符，等宽 */
 .settings-page__version {
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
@@ -186,7 +186,7 @@
 }
 
 .settings-page__dot {
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   color: var(--ink-faint);
 }
 

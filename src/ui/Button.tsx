@@ -1,28 +1,29 @@
 import type { ReactNode } from "react";
 import { ReasonTip } from "./Tooltip.tsx";
 
-/// 按钮（DESIGN「Components › 按钮」「控件有行程」，画板 States 的「控件四态」）。
+/// 按键（DESIGN「按钮」「控件有行程」，视觉 V4）。
 ///
-/// 2px 描边矩形，Barlow / 苹方 13 / 600，**不大写、字距 0**（界面是中文，按钮几乎都含汉字）。
-/// 四个变体：
-/// - `primary` 主动作：`ink` 底 `canvas` 字。一个面里至多一个（`添加 N 个` `保存` 确认弹窗主动作）
-/// - `default` 默认：1px `ink` 描边、透明底（`重启` `配置网关` `清除`）
-/// - `link` 文字链：13 `ink-mute` 下划线，命中区高 24、左右各 6（视觉不变）——退路与次级
-/// - `external` 离开 Sophia 的文字链：同上 + 10px `↗`（`打开目录` `去发布页`）
+/// 控件矩形（`control` 7），Inter / 苹方 13 / 600，**原样大小写、字距 0**。键的阶梯（D14）：
+/// - `primary` 墨键：`ink` 底、`face` 字、1px `ink-edge` 底边。一个面里至多一个（`添加 N 个` `保存` 确认框主动作）
+/// - `default` 默认键：`paper` 面、1px `ctl-border` 边、1px `ctl-edge` 底边（`重启` `配置网关` `清除` 确认框的 `取消`）
+/// - `quiet` 安静键：无底无边、13 `ink-mute`；悬停出 `surface` 圆角带，按下下沉 1px。
+///   取代应用内的下划线文字链（`撤销` `稍后` `编辑` `只留这份` `检查更新`），命中区高 24、左右各 6（视觉不变）
+/// - `external` 离开 Sophia 的链接（`button-link`）：13 `ink-mute` 下划线 + 10px `↗`（`打开 ↗` `在访达中显示 ↗`）。
+///   全应用只有它带下划线、只有它用手形光标
 ///
 /// 三个尺寸按所在那一行选，不按重要性选：`regular` 28（工具行）、`compact` 24（表格行、
-/// 提示条、行内待办条）、`row` 32（添加页底部那一行）。
+/// 提示条、灰面板）、`row` 32（确认框与页面级提交）。
 ///
-/// 行程：hover 主动作键面内缩 1px 白描边、默认键铺 `surface`；pressed 下移 1px 并压扁 1px；
-/// focus 外 2px 处 1px 环。全部在 ui.css，时长 120ms 机械缓动。
+/// 行程：能按的键有 1px 底边；hover 默认键描边转 `ctl-edge`、墨键内沿加 1px `ink-mute`；
+/// pressed 底边消失、下沉 1px（默认键键面转 `surface` 并内凹）；focus 外 2px 处 1px 环。全部在 ui.css。
 ///
 /// 破坏性不涂红：分量由信息和按钮文案承担（`删到废纸篓`，不写「确定」）。
 ///
-/// 禁用（给了 `disabledReason`）：自带原因提示框，悬停出、**按下（点击、空格、回车）当即出**
-/// （DESIGN「所有点了做不了的控件，按下当即说明原因」），页面不必再包一层。
+/// 禁用（给了 `disabledReason`）：平贴、实线 `hairline`、`ink-faint` 字，无底边无行程（D20）；
+/// 自带原因提示框，悬停出、**按下（点击、空格、回车）当即出**，页面不必再包一层。
 /// 外面再包的提示框（「重启生效」的说明）在禁用期间让给原因，同时只出一个。
 
-export type ButtonVariant = "primary" | "default" | "link" | "external";
+export type ButtonVariant = "primary" | "default" | "quiet" | "external";
 export type ButtonSize = "regular" | "compact" | "row";
 
 interface ButtonBase {
@@ -32,7 +33,7 @@ interface ButtonBase {
   title?: string;
   /// 图标在文字左边（`AddButton` 的 `+` 就是这么来的）
   icon?: ReactNode;
-  /// 放在实心黑面上：默认键变白描边键、文字链变 `ink-faint`
+  /// 放在墨窗上：默认键变浅描边键（1px `face` 边与字、无行程），安静键变 `ctl-border` 字
   onDark?: boolean;
   /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
   "aria-describedby"?: string;
@@ -88,8 +89,8 @@ export function Button(props: ButtonProps) {
 
   const classes = ["ss-btn"];
   if (variant === "primary") classes.push("ss-btn--primary");
-  if (variant === "link") classes.push("ss-btn--link");
-  if (variant === "external") classes.push("ss-btn--link", "ss-btn--external");
+  if (variant === "quiet") classes.push("ss-btn--quiet");
+  if (variant === "external") classes.push("ss-btn--external");
   if (size === "compact") classes.push("ss-btn--compact");
   if (size === "row") classes.push("ss-btn--row");
   if (onDark) classes.push("is-on-dark");
@@ -132,8 +133,9 @@ export interface IconButtonProps {
   "aria-describedby"?: string;
 }
 
-/// 图标按钮（DESIGN「图标按钮」）：16px 图形、1.4 描边、28×28 命中区、无描边无底，
-/// 悬停 `surface` 底 2px 圆角。顶栏的设置齿轮、提示条与侧栏的 × 都是它
+/// 图标按钮（DESIGN「图标按钮」）：16px 图形、1.4 描边、28×28 命中区、无描边无底，图形 `ink-mute`；
+/// 悬停 `surface` 底（`control` 7）、图形转 `ink`。它是工具不是键，没有行程。
+/// 设置齿轮、提示条与侧栏的 × 都是它
 export function IconButton({
   icon,
   title,

@@ -347,7 +347,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
             {absent.length > 0 ? (
               <>
                 <div className="settings-page__more">
-                  <Button variant="link" onClick={() => setShowAbsent(!showAbsent)}>
+                  <Button variant="quiet" onClick={() => setShowAbsent(!showAbsent)}>
                     {showAbsent
                       ? `收起未安装的 ${absent.length} 个`
                       : `显示未安装的 ${absent.length} 个`}
@@ -367,13 +367,13 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           <span className="settings-page__version">{current ?? "…"}</span>
           <span className="settings-page__check">
             {update.kind === "downloading" ? (
-              <Button variant="link" disabled disabledReason="正在下载">
+              <Button variant="quiet" disabled disabledReason="正在下载">
                 检查更新
               </Button>
             ) : (
               // 查的时候键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 正在检查
               <BusySlot busy={checking} label="正在检查">
-                <Button variant="link" onClick={() => !checking && void checkUpdate()}>
+                <Button variant="quiet" onClick={() => !checking && void checkUpdate()}>
                   检查更新
                 </Button>
               </BusySlot>
@@ -403,7 +403,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
               <span className="settings-page__dot">·</span>
               <BusySlot busy={uninstalling} label="正在卸下">
                 <Button
-                  variant="link"
+                  variant="quiet"
                   title="恢复 Codex 设置、卸载后台服务，卸下后不再占用资源"
                   onClick={() => !uninstalling && void uninstall()}
                 >

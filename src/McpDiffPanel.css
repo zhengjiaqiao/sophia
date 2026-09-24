@@ -18,7 +18,7 @@
 .mcp-diff__place {
   height: 22px;
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
   white-space: nowrap;
@@ -34,14 +34,14 @@
 
 .mcp-diff__field {
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 600;
   color: var(--ink-mute);
 }
 
 .mcp-diff__value {
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   color: var(--ink);
 }
 

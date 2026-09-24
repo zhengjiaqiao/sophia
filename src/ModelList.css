@@ -48,7 +48,7 @@
   outline: none;
 }
 
-/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从 canvas 白渐隐到透明（功能性渐变） */
+/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从浮层的 paper 白渐隐到透明（功能性渐变） */
 /* 自己也是纵向 flex：外层（下拉浮层 max-height 420）压矮它时，滚动区跟着变矮，
    最后一行能完整滚出来，而不是溢出到浮层底边外被裁掉 */
 .model-list__viewport {
@@ -73,12 +73,12 @@
 
 .model-list__viewport::before {
   top: 0;
-  background: linear-gradient(to bottom, var(--canvas), transparent);
+  background: linear-gradient(to bottom, var(--paper), transparent);
 }
 
 .model-list__viewport::after {
   bottom: 0;
-  background: linear-gradient(to top, var(--canvas), transparent);
+  background: linear-gradient(to top, var(--paper), transparent);
 }
 
 .model-list__viewport[data-fade-top]::before,
@@ -110,7 +110,7 @@
   align-items: baseline;
   gap: 6px;
   padding: var(--space-xs) var(--space-sm) 2px;
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
 }
 
@@ -173,7 +173,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
   line-height: var(--leading-caption);
   color: var(--ink-faint);
@@ -186,7 +186,7 @@
   margin-left: auto;
   flex-shrink: 0;
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
   white-space: nowrap;

@@ -4,9 +4,10 @@ import { createPortal } from "react-dom";
 import { IconButton } from "./Button.tsx";
 import { IconArrowLeft } from "./icons.tsx";
 
-/// 二级页面（DESIGN「Layout › 壳」）：占满整窗，**不渲染侧栏**。
-/// 头高 84 = 28（红绿灯那一排，只当拖动区）+ 56，底 hairline；56 里 `←` 图标按钮 28×28、
-/// 间距 12、页面名 28/700 **不大写、字距 0**（`添加 skill 到「全局」` `Codex 的网关` 原样写）。
+/// 二级页面（DESIGN「Layout › 壳：机壳与机面」）：占满整窗，**不渲染侧栏**。
+/// 头落在机壳上、没有分隔线：高 84 = 28（红绿灯那一排，只当拖动区）+ 56；56 里 `←` 图标按钮 28×28、
+/// 间距 12、页面名 `display` 28/600 原样写、字距 0（`添加 skill 到「全局」` `Codex 的网关`）。
+/// 内容进一块机面：`face` 底、1px `hairline` 边、12 圆角、无投影。
 /// 返回即保存，没有「保存」按钮；Esc 等同返回。
 ///
 /// **盖住主视图**：二级页挂到 `document.body` 上（portal），不留在主视图的 DOM 里——
@@ -15,7 +16,7 @@ import { IconArrowLeft } from "./icons.tsx";
 /// **叠开**（来源管理页里再进添加来源页）：下面那一页同样 inert，Esc 只归最上面那一页。
 
 export interface SubPageProps {
-  /// 页面名，原样写（专名不再需要 <Plain> 包：这一档本来就不大写）
+  /// 页面名，原样写
   title: ReactNode;
   onBack: () => void;
   /// 头右侧的一句副标题，可选

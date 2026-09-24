@@ -1,5 +1,5 @@
 /// 展示组件库：只吃 props，不碰 api，不含业务逻辑。
-/// 实现依据是 docs/DESIGN.md，视觉对照是 .superpowers/design 的 States / Marks / Feedback 画板。
+/// 实现依据是 docs/DESIGN.md（视觉 V4），视觉对照是 V4 画板。
 /// 样式与 token 在这里一次性引进来，用组件的页面不必自己 import css。
 import "./ui.css";
 
@@ -15,8 +15,11 @@ export type {
   AddButtonProps,
 } from "./Button.tsx";
 
-export { Switch, Checkbox } from "./Switch.tsx";
-export type { SwitchProps, CheckboxProps } from "./Switch.tsx";
+export { Switch, Checkbox, CheckboxGlyph, Indicator } from "./Switch.tsx";
+export type { SwitchProps, SwitchSize, CheckboxProps, IndicatorProps } from "./Switch.tsx";
+
+export { Tabs } from "./Tabs.tsx";
+export type { TabItem, TabsProps } from "./Tabs.tsx";
 
 export { Chip, ModelChip } from "./Chip.tsx";
 export type { ChipProps, ModelChipProps } from "./Chip.tsx";
@@ -55,9 +58,6 @@ export type { ConfirmAnchor, ConfirmProps } from "./Confirm.tsx";
 export { SubPage } from "./SubPage.tsx";
 export type { SubPageProps } from "./SubPage.tsx";
 
-export { Cap, capRuns } from "./Cap.tsx";
-export type { CapProps } from "./Cap.tsx";
-
 export { AgentIcon, AgentMark, agentInitial, hasAgentIcon } from "./AgentMark.tsx";
 export type { AgentIconProps, AgentMarkProps } from "./AgentMark.tsx";
 
@@ -78,5 +78,3 @@ export type { IconProps } from "./icons.tsx";
 
 export { Empty } from "./Empty.tsx";
 export type { EmptyAction, EmptyArt, EmptyKind, EmptyProps } from "./Empty.tsx";
-
-export { Plain } from "./Plain.tsx";

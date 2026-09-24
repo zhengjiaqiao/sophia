@@ -6,11 +6,13 @@ import { Button } from "./Button.tsx";
 ///
 /// **只给两件真正不可逆的事**：MCP 的批量或跨域写入、重启 Codex（⑪ 能撤销就不弹确认）。
 ///
-/// - 无外框白板，内边距 24 28，宽 460；标题 15/600（head-cap 档，汉字字距 0）
-/// - 遮罩：黑 18%（`ink` 底 + opacity 层）；白板 12 圆角 + 浮层阴影，无黑框
+/// - 纸浮层：`paper` + 1px `hairline` 边、`float` 12 圆角 + 浮层投影，内边距 20 20 16，宽 384；
+///   标题 `head` 16/600，正文 `body` 15 `ink-mute`
+/// - 遮罩：`ink` 16%（`ink` 底 + opacity 层），整面压暗
 /// - **锚在触发它的那一行下方 6px**，不盖住那一行（⑦）；遮罩整面压暗，不挖出那一行——
 ///   标题已写明对象，挖出的白带在压暗的页面上像出错了
-/// - 主动作反色、只写动词（`重启` `写进去`）；`取消` 是文字链
+/// - 键高 32、间距 8、右对齐：`取消` 是默认键（D14，macOS 惯例），主动作墨键在右、只写动词
+///   （`重启` `写进去`）——两颗键都有底边，主次靠墨与纸分开
 /// - **承载后果与安全信息的句子必须留**（`safetyNote`）——那是功能
 /// - 背景点击与 Esc 等同取消
 
@@ -27,7 +29,7 @@ export interface ConfirmProps {
   title: ReactNode;
   /// 正文插槽：一句后果、或后果示意图
   children?: ReactNode;
-  /// 路径铭牌：`ink` 底、等宽 12 白字、内边距 10 12；`meta` 是第二行 `ink-faint`
+  /// 路径铭牌：凹面（`recess` 底 + 内凹）、等宽 12 `ink` 字、内边距 10 12，路径可拖选；`meta` 是第二行 `ink-faint`
   nameplate?: { path: string; meta?: ReactNode };
   /// 一句安全信息（13 `ink-mute`）：`会把请求头和令牌一并复制过去`
   safetyNote?: ReactNode;
@@ -46,7 +48,7 @@ export interface ConfirmProps {
 }
 
 const GAP = 6;
-const WIDTH = 460;
+const WIDTH = 384;
 
 export function Confirm({
   title,
@@ -93,21 +95,26 @@ export function Confirm({
         {children ? <div className="ss-confirm__body">{children}</div> : null}
         {nameplate ? (
           <div className="ss-confirm__nameplate">
-            <div className="ss-confirm__path">{nameplate.path}</div>
+            <div className="ss-confirm__path ss-selectable">{nameplate.path}</div>
             {nameplate.meta ? <div className="ss-confirm__meta">{nameplate.meta}</div> : null}
           </div>
         ) : null}
         {safetyNote ? <div className="ss-confirm__safety">{safetyNote}</div> : null}
         <div className="ss-confirm__foot">
-          <Button variant="link" onClick={onCancel}>
+          <Button size="row" onClick={onCancel}>
             {cancelLabel}
           </Button>
           {disabled ? (
-            <Button variant="primary" disabled disabledReason={confirmDisabledReason as string}>
+            <Button
+              variant="primary"
+              size="row"
+              disabled
+              disabledReason={confirmDisabledReason as string}
+            >
               {confirmLabel}
             </Button>
           ) : (
-            <Button variant="primary" onClick={onConfirm}>
+            <Button variant="primary" size="row" onClick={onConfirm}>
               {confirmLabel}
             </Button>
           )}

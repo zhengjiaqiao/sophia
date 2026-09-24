@@ -242,7 +242,7 @@ export default function TrayPanel() {
       <div className="tray__confirm-title">{title}</div>
       <div className="tray__confirm-body">{body}</div>
       <div className="tray__confirm-foot">
-        <Button variant="link" onClick={() => setRestart({ kind: "idle" })}>
+        <Button variant="quiet" onClick={() => setRestart({ kind: "idle" })}>
           取消
         </Button>
         <Button variant="primary" size="compact" onClick={onConfirm}>

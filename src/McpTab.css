@@ -7,7 +7,7 @@
   padding: 0;
   list-style: none;
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
 }
 
@@ -24,7 +24,7 @@
 
 /* 服务名后的 `2 份不一样`：可点的文字链（点它这一行就地展开差异），与名字后的标注同为 12 */
 .mcp-difftoggle {
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
 }
 
 /* 同名多份时点格子出的挑选浮层：外壳与项沿用来源管理页的 `.src-menu` 写法，

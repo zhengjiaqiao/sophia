@@ -5,8 +5,9 @@ import { Tooltip } from "./Tooltip.tsx";
 /// 格回答两件事：**填充＝这个 agent 能不能用它，外环＝它在这儿是原件还是一条软链。**
 /// 三种常驻状态外径一致 10px，中心对准列头中线；「无此格」是 8px 短横，不是状态。
 /// 异常画在**同一个 10px 环骨架**上，一个视觉词只学一次：
-/// 失效＝虚线环（4 段、段间 1.5，虚线在空态里已教过「目标不在」）、写不进＝斜杠环、
-/// 同名被挡＝环内短横、整个文件夹是链接＝环内向右箭头（箭头不穿出环，否则读成 ♂）。
+/// 失效＝虚线环（4 段、段间 1.5，虚线在空态里已教过「目标不在」）、放不进去＝斜杠环 ⊘
+/// （写不进与同名被挡同一个记号，裁决 D22：该行已有 `×2`，原因由提示框说）、
+/// 整个文件夹是链接＝环内向右箭头（箭头不穿出环，否则读成 ♂）。
 ///
 /// 悬停光晕（DESIGN「格子悬停光晕」）：可点的点悬停 / 键盘聚焦时，**点本身一点不变**，
 /// 只在点的下层出一圈直径 22 的圆形 hairline 光晕，说「能点」，不预告结果（结果由提示框的动词说）。
@@ -31,9 +32,9 @@ export interface StateDotProps {
   dot: Dot;
   /// 10：表格格子（默认）；16：说明里的大一号记号
   size?: 10 | 16;
-  /// 画在实心黑上：刚点亮那 120ms 的反色闪（格底由调用方铺黑），记号转白
+  /// 画在墨上：刚点亮那 120ms 的反色闪（格底由调用方铺 `ink`），记号转 `face`
   inverse?: boolean;
-  /// 禁用灰：选择条里「已选的都是原件」那颗禁用键上的灰色原件环
+  /// 禁用：选择条里「已选的都是原件」那颗禁用键上的原件环，退到 `ink-faint`
   muted?: boolean;
   /// 鼠标悬停的系统兜底说明。**不作唯一说明**——格子的文字确定性由 Tooltip 承载
   title?: string;
@@ -81,18 +82,13 @@ function Glyph10({ dot }: { dot: Dot }) {
           transform="rotate(-45 5 5)"
         />
       );
+    // 同名被挡与写不进同画 ⊘（D22）
     case "readOnly":
-      return (
-        <>
-          <circle cx="5" cy="5" r="4.25" />
-          <path d="M2 8 L8 2" />
-        </>
-      );
     case "blocked":
       return (
         <>
           <circle cx="5" cy="5" r="4.25" />
-          <path d="M3 5 H7" />
+          <path d="M2 8 L8 2" />
         </>
       );
     case "wholeLinked":
@@ -136,18 +132,13 @@ function Glyph16({ dot }: { dot: Dot }) {
           transform="rotate(-45 8 8)"
         />
       );
+    // 同名被挡与写不进同画 ⊘（D22）
     case "readOnly":
-      return (
-        <>
-          <circle cx="8" cy="8" r="6.3" />
-          <path d="M3.6 12.4 L12.4 3.6" />
-        </>
-      );
     case "blocked":
       return (
         <>
           <circle cx="8" cy="8" r="6.3" />
-          <path d="M5 8 H11" />
+          <path d="M3.6 12.4 L12.4 3.6" />
         </>
       );
     case "wholeLinked":
@@ -225,7 +216,7 @@ export function StateDot({
 export interface DupMarkProps {
   /// 份数，默认 2
   count?: number;
-  /// row：表格名字后，等宽 12 `ink-faint`（目前只有这一档）
+  /// row：表格名字后，12 tabular `ink-faint`（目前只有这一档）
   tone?: "row";
   /// 给了就挂提示框（点状下划线，不可点），并去掉原生 title——主视图放不下越界读数时，
   /// 在这里同时列两份的读数
@@ -239,12 +230,7 @@ export function DupMark({ count = 2, tone = "row", tip }: DupMarkProps) {
   if (tip !== undefined && tip !== null) {
     return (
       <Tooltip content={tip}>
-        <span
-          className={`ss-dup ss-dup--${tone} has-tip`}
-          role="img"
-          aria-label={text}
-          tabIndex={0}
-        >
+        <span className={`ss-dup ss-dup--${tone}`} role="img" aria-label={text} tabIndex={0}>
           ×{count}
         </span>
       </Tooltip>

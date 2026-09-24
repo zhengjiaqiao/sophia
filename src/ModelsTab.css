@@ -56,7 +56,7 @@
   align-items: end;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--ink);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 600;
   line-height: var(--leading-caption);
   color: var(--ink-mute);
@@ -83,8 +83,8 @@
 
 /* 名字：Condensed 20/700，**不大写、字距 0**——被谈论的对象（DESIGN「大写是结构的语言」） */
 .models-row__name {
-  font-family: var(--font-cond);
-  font-size: var(--size-wordmark);
+  font-family: var(--font-ui);
+  font-size: var(--size-title);
   font-weight: 700;
   line-height: var(--leading-display);
   letter-spacing: 0;
@@ -216,7 +216,7 @@
 
 .models-box__count {
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
   line-height: var(--leading-caption);
   color: var(--ink-faint);
@@ -234,9 +234,10 @@
   box-sizing: border-box;
   max-height: 420px;
   overflow: hidden;
-  border-radius: var(--radius-layer);
-  background: var(--canvas);
-  box-shadow: var(--elev-layer);
+  border-radius: var(--radius-float);
+  border: var(--border-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
 }
 
 /* 第三方分组头：`第三方` 12/600 ink-mute + 限制说明 12 ink-faint + 末尾 `管理网关 ›` */
@@ -248,7 +249,7 @@
   min-height: 28px;
   padding: var(--space-xs) var(--space-sm) 0;
   border-top: 1px solid var(--hairline);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
 }
 
@@ -289,7 +290,7 @@
   background: none;
   color: var(--ink-mute);
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   white-space: nowrap;
   cursor: pointer;

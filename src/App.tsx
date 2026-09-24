@@ -41,7 +41,6 @@ import type { ModelIssue } from "./modelsView";
 import {
   AddButton,
   BusySlot,
-  Cap,
   ErrorBanner,
   IconButton,
   IconCheck,
@@ -65,8 +64,8 @@ type Tab = "skills" | "mcp" | "models";
 /// 顶栏页签：顺序即高频程度。`Cap` 只给拉丁 run 套 Condensed 大写 + 字距，汉字原样
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "models", label: "模型" },
-  { id: "skills", label: "Skills" },
-  { id: "mcp", label: "MCP" },
+  { id: "skills", label: "skills" },
+  { id: "mcp", label: "mcp" },
 ];
 
 export default function App() {
@@ -515,7 +514,7 @@ export default function App() {
                 aria-current={active ? "page" : undefined}
                 onClick={() => switchTab(tab.id)}
               >
-                <Cap tone="nav">{tab.label}</Cap>
+                {tab.label}
               </button>
             );
           })}

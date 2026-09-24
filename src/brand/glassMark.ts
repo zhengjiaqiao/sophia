@@ -4,7 +4,7 @@
    - 静止时画布是空的，显示的是原来的 <img> 字标；只有猫出现、裂开、碎开、复原期间画布才接管，
      那时把 <img> 调成透明（不用 visibility，读屏还要读它的 alt）。
    - rAF 只在悬停和复原期间跑；回到静止就停。
-   - 色值取自 tokens.css 的变量（--ink / --canvas / --ink-mute）。字标位图由 SVG 资产的源码
+   - 色值取自 tokens.css 的变量（--ink / --paper / --ink-mute）。字标位图由 SVG 资产的源码
      逐条路径填出来，和 <img> 同源，灰影的色值只在 SVG 里。不直接 drawImage(<img>)：
      没写宽高的 SVG 在各引擎里的固有尺寸不一致，画进画布会变形。
    - 本文件的纯函数（rng / fracture / labelShards / packShards）不碰 DOM，
@@ -690,7 +690,7 @@ export class GlassMark {
 
     const root = getComputedStyle(document.documentElement);
     const v = (name: string) => root.getPropertyValue(name).trim();
-    this.col = { ink: v("--ink"), paper: v("--canvas"), mute: v("--ink-mute") };
+    this.col = { ink: v("--ink"), paper: v("--paper"), mute: v("--ink-mute") };
 
     // 字标位图：按 SVG 的路径、填色与裁切逐条填出来
     this.shapes ??= parseWordmark(this.svg);

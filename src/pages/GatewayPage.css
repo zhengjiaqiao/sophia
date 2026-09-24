@@ -125,7 +125,7 @@
 
 /* 限制说明 12 ink-faint（不截断） */
 .gw-row__note {
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
 }
@@ -161,7 +161,7 @@
   margin-top: var(--space-xs);
   overflow: hidden;
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-layer);
+  border-radius: var(--radius-float);
 }
 
 /* ===== 连接表单：地址、密钥；保存才生效、保存即拉取 ===== */
@@ -191,7 +191,8 @@
   padding: 0 10px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
-  background: var(--canvas);
+  background: var(--recess);
+  box-shadow: var(--recess-input);
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--size-caption);
@@ -223,7 +224,7 @@
   gap: 2px var(--space-sm);
   margin: 0;
   padding-left: calc(36px + var(--space-sm));
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   color: var(--ink-faint);
 }
 

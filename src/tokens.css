@@ -1,56 +1,56 @@
-/* 界面 token：色与字的唯一来源（docs/DESIGN.md front-matter）。
+/* 界面 token：色与字的唯一来源（docs/DESIGN.md front-matter，视觉 V4 · 拉姆斯 / Braun）。
    全项目只有这个文件可以写字面色值，别处一律 var(--…)——scripts/lint-ui.mjs 强制这一条。
 
-   字体只引用到的 latin 子集与字重：Barlow 400/600（600 给按钮与提示条动词）、
-   Barlow Condensed 600/700、IBM Plex Mono 400/500（500 给提示条里的 +N 读数）。
-   整包各约 2MB（含全字重与西里尔/越南语等子集），桌面应用不该为没用上的字形付体积。
-   字体文件打进应用，不走 CDN（§1.2.1）。 */
-@import "@fontsource/barlow/latin-400.css";
-@import "@fontsource/barlow/latin-600.css";
-@import "@fontsource/barlow-condensed/latin-600.css";
-@import "@fontsource/barlow-condensed/latin-700.css";
+   字体只引用到的 latin 子集与字重：Inter 400/500/600/700（tabular-nums）、
+   IBM Plex Mono 400/500（只给 id、路径、版本号）。整包含全字重与西里尔 / 越南语等子集，
+   桌面应用不该为没用上的字形付体积。字体文件打进应用，不走 CDN（DESIGN「Typography › 字族」）。 */
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
+@import "@fontsource/inter/latin-700.css";
 @import "@fontsource/ibm-plex-mono/latin-400.css";
 @import "@fontsource/ibm-plex-mono/latin-500.css";
 
 :root {
-  /* ---- 色（§1.1）：整个界面零色彩，强调只有「次要文字 → 加粗 → 反色」三档 ---- */
-  --canvas: #ffffff; /* 画布 */
-  /* 七个中性灰（R=G=B）。第一版照搬 SpaceX 的偏蓝灰，是「零色彩」里唯一的色相，已换中性。
-     反色面上的空心描边那一档（ink-faint-inverse）删了：勾选行用 surface 不反色 */
-  --surface: #f2f2f2; /* 次级面：悬停、勾选行、确认遮罩下的底 */
-  --hairline: #e2e2e2; /* 刻度线：行与行、顶栏底 */
-  --ink: #222222; /* 主文字、结构线、实心黑体块（不用纯黑：对白底 21:1 刺眼，#222 约 15.9:1） */
-  --ink-mute: #5a5a5a; /* 次要文字、文字链；黑面上的分隔线 */
-  --ink-faint: #9a9a9a; /* 弱文字；黑面上的次字 */
-  --disabled: #c8c8c8; /* 禁用描边与文字 */
+  /* ---- 色（DESIGN「Colors」）：十四个同一温度的中性值 + 一个强调色，强调色只有一个意思 ---- */
+  --shell: #f4f4f2; /* 机壳：窗体、顶栏、侧栏、二级页头的底 */
+  --face: #fcfcfb; /* 机面：内容区；墨面上的主字、墨键的字 */
+  --paper: #ffffff; /* 按键面与浮层：默认键、页签滑块、开关滑块、模型片、复选框底、下拉、确认框、成功提示条 */
+  --recess: #f2f2ef; /* 凹面：输入框、模型框；不可用的开关滑块 */
+  --surface: #efefec; /* 悬停行、下拉高亮项、按下的键面、灰面板、勾选中的行 */
+  --hairline: #e3e3df; /* 边线：机面与浮层的边、表头底、输入框边、页签槽底、禁用边 */
+  --row-line: #ededea; /* 行线 */
+  --ctl-border: #d4d4cf; /* 控件边：键、未选中的片、滑块的环；关着的指示点；墨面上的次字 */
+  --ctl-edge: #bdbdb7; /* 按键底边＝行程；键的悬停描边；开关防滑纹与关态刻条 */
+  --track: #dcdcd7; /* 开关凹槽 */
+  --ink: #1c1c1a; /* 主文字、墨键、墨窗、实心格点、复选框勾上、焦点环（不用纯黑：16.6:1 已够） */
+  --ink-edge: #000000; /* 只给墨键的 1px 底边：墨上再画墨看不出来。从不成面、从不成字 */
+  --ink-mute: #4e4e4a; /* 次要文字、文字链、占位字、图标按钮图形、输入框聚焦边；墨面上的分隔线 */
+  --ink-faint: #6f6f6a; /* 文字里只给计数、等宽读数与不可用的字；复选框边、无格短横、忙碌轨道 */
+  --accent: #e0652a; /* 只表示「开着 / 在生效」：开关刻条 + 指示点。别处出现都是缺陷 */
 
-  /* ---- 字（§1.2）：三个字族都没有中文字形，CJK 回退栈显式写全（§1.2.1） ---- */
-  --font-ui: Barlow, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-cond: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* ---- 字（DESIGN「Typography」）：Inter + 苹方，等宽只给 id。两个字族都没有中文字形，CJK 回退栈写全 ---- */
+  --font-ui: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "PingFang SC", monospace;
 
-  /* 五档字号（DESIGN「Typography → 层级」）：相邻至少差一倍的视觉重量。
-     第一版把 20/15/14/13/12 挤在 8px 里，14 与 15、13 与 12 眼睛分不出来，
-     整页读起来像一张密排的表。所以砍掉 14，页面名拉到 28。 */
+  /* 六档字号（DESIGN「层级：六档」）。14 仍然不用：14 与 15 眼睛分不出来。
+     nav（页签）是 body 的变体（15 / 500，选中 600），不是第七档；字标是 SVG 资产，不是字 */
   --size-display: 28px; /* 二级页面名、区域大标题 */
-  --size-wordmark: 20px; /* 顶栏 wordmark */
-  --size-nav: 15px; /* 顶栏页签：一级导航，比按钮高半档 */
-  --size-body: 15px; /* 表格、说明、skill 名、选择片文字 */
-  --size-caption: 13px; /* 按钮；副行、文字链、提示条副行 */
-  --size-micro: 12px; /* 区域标签、列头、方标签；路径与计数 */
+  --size-title: 20px; /* 模型页、托盘里的 agent 名 */
+  --size-head: 16px; /* 确认框标题、区域小标题 */
+  --size-body: 15px; /* 表格、说明、条目名、确认框正文 */
+  --size-caption: 13px; /* 按钮；副行、文字链、选择片、提示条 */
+  --size-label: 12px; /* 列头与区域标签；计数；id 与路径 */
 
-  /* 行高：小字靠行高撑出呼吸感，不靠字号。
-     12px 的标签占 24px 高（--leading-micro: 2），这是层级读得出来的关键。 */
-  --leading-display: 1.1;
+  --leading-display: 1.2;
+  --leading-title: 1.3;
+  --leading-head: 1.4;
   --leading-body: 1.6;
   --leading-caption: 1.5;
-  --leading-micro: 2;
+  --leading-label: 1.6;
 
-  --track-display: 1.4px;
-  --track-title: 1.9px;
-  --track-head: 1.1px;
-  --track-nav: 1.17px; /* 顶栏拉丁页签 */
-  --track-label: 0.96px;
+  /* 负字距只给纯拉丁的大字（模型页 agent 名）；汉字永远 0，V4 没有正字距 */
+  --tracking-title: -0.3px;
 
   /* ---- 间距（DESIGN「Layout」）：基准 8px，留白往大了给 ---- */
   --space-xxs: 4px;
@@ -58,75 +58,88 @@
   --space-sm: 12px; /* 行内：同一行里元素之间 */
   --space-md: 16px;
   --space-lg: 18px;
-  --space-xl: 24px; /* 组之间：筛选行与表格、表单字段之间 */
-  --space-xxl: 32px; /* 页边：内容区左右内边距 */
+  --space-xl: 24px; /* 组之间；机面内边距 */
+  --space-xxl: 32px; /* 没有机面时的页边 */
   --space-huge: 48px; /* 区域之间：页面里的大区块 */
 
-  /* ---- 形（DESIGN「Shapes」）：圆角随尺寸变大，比例一致——记号 3 → 控件 6 → 浮层 8 → 弹窗 12；
-     片与开关胶囊、只读状态圆点 50%；表格、分隔线、黑色体块直角。不在这张表里的值不用 ---- */
-  --radius-mark: 3px; /* 复选框、首字母方块 */
-  --radius-control: 6px; /* 按钮、输入框、图标按钮的悬停底、提示框、行悬停底 */
-  --radius-layer: 8px; /* 下拉与选择器浮层、模型勾选列表框、提示条 */
-  --radius-dialog: 12px; /* 确认弹窗 */
-  --radius-pill: 32px; /* 片、开关 */
+  /* ---- 形（DESIGN「Shapes」）：形状承担语义，圆角随尺寸变大。不在这张表里的值不用 ---- */
+  --radius-scribe: 2px; /* 开关刻条 */
+  --radius-mark: 4px; /* 复选框、首字母方块 */
+  --radius-knob: 4px; /* 开关滑块 */
+  --radius-track: 5px; /* 开关凹槽 */
+  --radius-control: 7px; /* 按键、输入框、模型框、页签滑块、图标按钮悬停底、侧栏选中项、下拉高亮行、提示框 */
+  --radius-tab-track: 10px; /* 页签滑槽 */
+  --radius-face: 12px; /* 机面、灰面板 */
+  --radius-float: 12px; /* 下拉、确认框、提示条、墨窗、托盘面板 */
+  --radius-pill: 999px; /* 来源筛选片、模型片 */
+  --radius-dot: 50%; /* 状态点、指示点、格子悬停光晕 */
 
-  /* ---- 浮层阴影（DESIGN「Elevation & Depth」）：阴影只有一个意思——这层浮在页面上面。
-     只给浮层：弹窗、下拉 / 选择器用 layer（一圈 8% 墨描边 + 柔和投影 + 近投影）；
-     提示框、黑色提示条用 tip。平铺内容一律无阴影 ---- */
-  /* prettier-ignore */
-  --elev-layer: 0 0 0 1px rgba(0,0,0,.08), 0 12px 32px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.06);
-  /* prettier-ignore */
-  --elev-tip: 0 4px 12px rgba(0,0,0,.14);
-  /* 确认弹窗的遮罩：黑 18%（opacity 层，底色用 ink），页面压暗一档、弹窗自然浮起 */
-  --veil-opacity: 0.18;
+  /* ---- 线（DESIGN front-matter `borders`、「线：两档灰，不用墨」）---- */
+  --border-face: 1px solid var(--hairline); /* 机面的边 */
+  --border-float: 1px solid var(--hairline); /* 浮层的边（墨窗无边） */
+  --border-structure: 1px solid var(--hairline); /* 表头底、展开区边界 */
+  --border-row: 1px solid var(--row-line); /* 行与行 */
+  --border-control: 1px solid var(--ctl-border); /* 能按的键、未选中的片 */
+  --border-disabled: 1px solid var(--hairline); /* 不可用：平贴、实线、无底边（裁决 D20，不再用虚线） */
 
-  /* ---- 功能性渐变：可滚动区域被裁掉的边缘 16px 渐隐（canvas → 透明），提示那边还有内容 ---- */
+  /* ---- 层次（DESIGN「Elevation & Depth」）：平 / 行程 / 凹 / 浮，各管一件事。
+     rgba 只能出现在这几行定义里（lint-ui 的 elevation 规则） ---- */
+  /* prettier-ignore */
+  --elev-float: 0 12px 32px rgba(28,28,26,.12); /* 唯一的投影：这层浮在页面上面 */
+  --key-edge: 0 1px 0 var(--ctl-edge); /* 行程：能按的键、页签滑块、开关滑块的 1px 底边 */
+  --key-edge-ink: 0 1px 0 var(--ink-edge); /* 墨键的行程 */
+  /* prettier-ignore */
+  --recess-input: inset 0 1px 0 rgba(28,28,26,.06); /* 输入框、模型框 */
+  /* prettier-ignore */
+  --recess-tabs: inset 0 1px 1px rgba(28,28,26,.10); /* 页签滑槽 */
+  /* prettier-ignore */
+  --recess-pressed: inset 0 1px 1px rgba(28,28,26,.12); /* 按下的默认键 */
+  /* prettier-ignore */
+  --recess-track: inset 0 1px 2px rgba(28,28,26,.20); /* 开关凹槽 */
+  /* 确认框的遮罩：ink 16%（opacity 层，底色用 ink），整面压暗一档 */
+  --veil-opacity: 0.16;
+
+  /* ---- 功能性渐变：可滚动区域被裁掉的边缘 16px 渐隐（face → 透明），提示那边还有内容 ---- */
   --fade-edge: 16px;
 
-  /* ---- 可点元素的定高：一律偶数 ----
-     实测（Chrome 无头渲染 + 逐像素比对，见 PR 说明）：按钮原先靠 9px/5px 内边距
-     凑出 33 / 25 的奇数高，在 1x 屏上有两处代价——
-     ① 在 56px 定高的顶栏里 align-items:center，盒子被吸附后上 12 下 11，整枚按钮偏心一个设备像素；
-     ② pill 端帽最外侧那一列像素只有 75% 覆盖（灰度 64），而上下直边是纯黑 0，
-        一圈轮廓忽深忽浅，看着就是「毛边」。
-     钉成偶数高后：偏心 0，端帽覆盖 95%（灰度 12）。定高也让同一行里的控件天然对齐，
-     不再靠各自的内边距凑。 */
-  --control-h: 28px; /* 工具行、选择操作条：输入框、片、图标按钮、按钮同高 */
-  --control-h-compact: 24px; /* 表格行、提示条、行内待办条里的按钮与模型片 */
-  --control-h-row: 32px; /* 添加页底部那一行：图标键、主动作 */
+  /* ---- 可点元素的定高：一律偶数（奇数高在 1x 屏上偏心一个设备像素，端帽只有 75% 覆盖） ---- */
+  --control-h: 28px; /* 工具行、选择操作条：输入框、片、图标按钮、按键同高 */
+  --control-h-compact: 24px; /* 表格行、提示条、行内待办条里的按键与模型片 */
+  --control-h-row: 32px; /* 确认框与页面级提交 */
   /* 表格行高：一屏多看几行是功能，整格仍是命中区 */
   --row-h: 34px;
-  /* 命中区下限（§3「命中区与视觉尺寸是两回事」） */
+  /* 命中区下限（DESIGN「命中区与视觉尺寸是两回事」） */
   --hit-min: 24px;
 
   /* ---- 动效（DESIGN「控件有行程」「忙碌指示」）：机械式缓动，不要弹性果冻、不要 300ms 淡入淡出。
      prefers-reduced-motion 下全部退化为即时状态变化（ui.css 末尾） ---- */
-  --motion-fast: 120ms; /* 一切状态变化：开关位移、刚点亮反色、悬停 */
+  --motion-fast: 120ms; /* 一切状态变化：开关位移、页签滑块、刚点亮反色、悬停 */
   --ease-mech: cubic-bezier(0.2, 0.8, 0.2, 1);
   --motion-spinner: 1.2s; /* 地球绕太阳匀速一圈 */
   --motion-dots: 500ms; /* 减少动效时文字后的 `…` 每步增减一点 */
 
-  /* busy 时受影响控件的不透明度（§6） */
+  /* busy 时受影响控件的不透明度 */
   --busy-dim: 0.45;
 
-  /* ---- 壳：系统标题栏隐藏（Overlay），红绿灯浮在左上那 28px 里。那一排留空只当
-     拖动区，内容在下面的 56px 里。主视图顶栏与二级页面的头都要让出这 28px ---- */
+  /* ---- 壳：系统标题栏隐藏（Overlay），红绿灯浮在左上那 28px 里 ---- */
   --titlestrip: 28px;
   --topbar: 56px;
 
   font-family: var(--font-ui);
   font-size: var(--size-body);
-  /* 正文行高 1.6：整页「文字很密集」的观感，一半是行高压出来的 */
   line-height: var(--leading-body);
   color: var(--ink);
-  background: var(--canvas);
+  /* 窗体是机壳 */
+  background: var(--shell);
 
-  /* 数字等宽：计数（「已选 3 个」「12 条待建」）跳动时字面宽度不变，一列数字也能对齐。
-     Barlow 是比例字体，不加这条时 1 比 0 窄一截。 */
+  /* 数字等宽：计数跳动时字面宽度不变，一列数字也能对齐（Inter 自带 tnum） */
   font-variant-numeric: tabular-nums;
 
-  /* macOS 默认的次像素渲染会给黑字加一圈彩边（零色彩界面里尤其扎眼），
-     且让 Barlow Condensed 700 在 13px 上显得糊。改灰度抗锯齿，笔画更干净。 */
+  /* macOS 默认的次像素渲染会给黑字加一圈彩边，改灰度抗锯齿 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* 界面文字不可拖选（裁决 D23）：路径、id、命令与输入框除外，见 ui.css 的 .ss-selectable */
+  user-select: none;
+  -webkit-user-select: none;
 }

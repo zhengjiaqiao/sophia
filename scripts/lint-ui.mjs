@@ -5,29 +5,53 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, extname, relative } from "node:path";
 
-/// 唯一的色值来源；tokens.css 之外的地方不许出现字面色值
+/// 唯一的色值来源（V4 的 15 个色 token）；tokens.css 之外的地方不许出现字面色值，
+/// tokens.css 里也不许出现这之外的值（旧的 #222222 #f2f2f2 #c8c8c8 一写就报）
 const TOKENS = new Set([
-  "#ffffff",
-  "#222222",
-  "#f2f2f2",
-  "#e2e2e2",
-  "#c8c8c8",
-  "#9a9a9a",
-  "#5a5a5a",
+  "#f4f4f2", // shell
+  "#fcfcfb", // face
+  "#ffffff", // paper
+  "#f2f2ef", // recess
+  "#efefec", // surface
+  "#e3e3df", // hairline
+  "#ededea", // row-line
+  "#d4d4cf", // ctl-border
+  "#bdbdb7", // ctl-edge
+  "#dcdcd7", // track
+  "#1c1c1a", // ink
+  "#000000", // ink-edge
+  "#4e4e4a", // ink-mute
+  "#6f6f6a", // ink-faint
+  "#e0652a", // accent
 ]);
-const FONTS = ["Barlow Condensed", "Barlow", "IBM Plex Mono"];
-/// 圆角随尺寸：记号 3、控件 6、浮层 8、弹窗 12、片与开关 32、圆点 50%，平铺结构 0（DESIGN「Shapes」）
-const RADII = new Set(["0", "0px", "3px", "6px", "8px", "12px", "32px", "50%"]);
-/// 浮层阴影只用这两个 token（DESIGN「Elevation & Depth」）
-const ELEVATIONS = new Set(["var(--elev-layer)", "var(--elev-tip)"]);
-/// 功能性渐变只能从 canvas 白过渡到透明（滚动边缘渐隐），不做装饰
-const FADE_STOPS = new Set(["var(--canvas)", "#fff", "#ffffff", "transparent"]);
+/// Inter + 苹方，等宽只给 id（DESIGN「Typography › 字族」）；Barlow 一族已移除
+const FONTS = ["Inter", "IBM Plex Mono"];
+/// 圆角随尺寸（DESIGN「Shapes」）：刻条 2、记号与滑块 4、开关槽 5、控件 7、页签槽 10、
+/// 面与浮层 12、胶囊 999、圆点 50%，平铺结构 0。3px、6px、8px、32px 都是旧值
+const RADII = new Set(["0", "0px", "2px", "4px", "5px", "7px", "10px", "12px", "999px", "50%"]);
+/// 层次 token（DESIGN「Elevation & Depth」）：浮（唯一的投影）、行程（1px 底边）、凹（内凹）。
+/// box-shadow 只能是它们、或它们用逗号连起来
+const ELEVATIONS = new Set([
+  "var(--elev-float)",
+  "var(--key-edge)",
+  "var(--key-edge-ink)",
+  "var(--recess-input)",
+  "var(--recess-tabs)",
+  "var(--recess-pressed)",
+  "var(--recess-track)",
+]);
+/// 功能性渐变只能从底色过渡到透明（滚动边缘渐隐），不做装饰：机面上从 face，
+/// 纸浮层（下拉、选择器）里从 paper
+const FADE_STOPS = new Set(["var(--face)", "var(--paper)", "transparent"]);
 
-/// tokens.css 里阴影 token 的定义行：只有这两行可以出现 rgba 字面值
-const ELEV_DEF = /^\s*--elev-(?:layer|tip)\s*:.*$/gm;
+/// tokens.css 里层次 token 的定义行：只有这几行可以出现 rgba 字面值
+const ELEV_DEF = /^\s*--(?:elev-float|recess-(?:input|tabs|pressed|track))\s*:.*$/gm;
 
-/// 一个 linear-gradient(...) 的参数是不是只有「方向 + canvas / 透明 + 位置」
-function isEdgeFade(args) {
+/// 橙只表示「开着 / 在生效」，形态只有两种：开关刻条与指示点（裁决「橙的两种形态」）
+const ACCENT_SELECTOR = /\.ss-switch|\.ss-indicator/;
+
+/// 按顶层逗号切参数（括号里的逗号不算）
+function splitTop(args) {
   const parts = [];
   let depth = 0;
   let cur = "";
@@ -40,6 +64,12 @@ function isEdgeFade(args) {
     } else cur += ch;
   }
   parts.push(cur.trim());
+  return parts;
+}
+
+/// 一个 linear-gradient(...) 的参数是不是只有「方向 + 底色 / 透明 + 位置」
+function isEdgeFade(args) {
+  const parts = splitTop(args);
   const stops = parts.filter((p) => !/^(to\s|-?[\d.]+(deg|turn|rad)$)/.test(p));
   return (
     stops.length >= 2 &&
@@ -76,7 +106,7 @@ const rules = [
   },
   {
     id: "no-color-fn",
-    desc: "§1.1 零色彩：不出现 oklch / rgb / hsl / 具名色（tokens.css 的阴影 token 除外）",
+    desc: "§1.1 色只来自 token：不出现 oklch / rgb / hsl / 具名色（tokens.css 的层次 token 除外）",
     run(src, path) {
       const out = [];
       const body = path === TOKEN_FILE ? src.replace(ELEV_DEF, "") : src;
@@ -94,18 +124,19 @@ const rules = [
   },
   {
     id: "elevation",
-    desc: "§1.3 阴影只给浮层（var(--elev-layer) / var(--elev-tip)）；渐变只做滚动边缘渐隐",
+    desc: "层次只用 token：投影只给浮层（--elev-float），行程与内凹用 --key-edge* / --recess-*；渐变只做滚动边缘渐隐",
     run(src) {
       const out = [];
       for (const m of src.matchAll(/box-?[Ss]hadow\s*[:=]\s*["']?([^;"'}\n]+)/g)) {
         const v = m[1].trim();
-        if (v !== "none" && !ELEVATIONS.has(v)) out.push(`box-shadow: ${v}`);
+        if (v === "none") continue;
+        if (!splitTop(v).every((p) => ELEVATIONS.has(p))) out.push(`box-shadow: ${v}`);
       }
       if (/text-?[Ss]hadow\s*[:=]\s*["']?(?!none)/.test(src)) out.push("text-shadow");
       if (/\b(?:radial|conic|repeating-linear)-gradient\s*\(/.test(src)) out.push("装饰性渐变");
       for (const m of src.matchAll(/\blinear-gradient\s*\(((?:[^()]|\([^()]*\))*)\)/g)) {
         if (!isEdgeFade(m[1]))
-          out.push(`linear-gradient(${m[1]})（只允许 canvas → transparent 的边缘渐隐）`);
+          out.push(`linear-gradient(${m[1]})（只允许 face / paper → transparent 的边缘渐隐）`);
       }
       if (/filter\s*[:=]\s*["']?[^;"'}]*blur/.test(src)) out.push("blur");
       return out;
@@ -113,12 +144,12 @@ const rules = [
   },
   {
     id: "radius",
-    desc: "§1.3 圆角只有 0 / 3 / 6 / 8 / 12 / 32px / 50% 或 var(--radius-*)",
+    desc: "圆角只有 0 / 2 / 4 / 5 / 7 / 10 / 12 / 999px / 50% 或 var(--radius-*)",
     run(src) {
       const out = [];
       for (const m of src.matchAll(/border-?[Rr]adius\s*[:=]\s*["']?([^;"'}\n]+)/g)) {
         const v = m[1].trim().replace(/["']$/, "");
-        if (/^var\(--radius-[a-z]+\)$/.test(v)) continue;
+        if (/^var\(--radius-[a-z-]+\)$/.test(v)) continue;
         if (!v.split(/\s+/).every((p) => RADII.has(p))) out.push(v);
       }
       return [...new Set(out)];
@@ -126,11 +157,11 @@ const rules = [
   },
   {
     id: "font",
-    desc: "§1.2 只用三个字族，且 CJK 回退栈要写全",
+    desc: "只用 Inter 与 IBM Plex Mono 两个字族，且 CJK 回退栈要写全",
     run(src, path) {
       const out = [];
       // 两处曾经让这条规则空转：①只认 font-family，而 token 写作 --font-ui
-      // ②捕获组在第一个引号处截断，`Barlow, "PingFang SC"` 只捕到 `Barlow, `，
+      // ②捕获组在第一个引号处截断，`Inter, "PingFang SC"` 只捕到 `Inter, `，
       // 于是正确写法反而被判违规、缺 CJK 回退的反而放过。
       for (const m of src.matchAll(/(?:font-?[Ff]amily|--font-[a-z-]+)\s*[:=]\s*([^;}\n]+)/g)) {
         const decl = m[1].trim().replace(/^["']|["']$/g, "");
@@ -140,10 +171,10 @@ const rules = [
           .trim()
           .replace(/^['"]|['"]$/g, "");
         if (!FONTS.includes(head) && !["monospace", "inherit", "ui-monospace"].includes(head)) {
-          out.push(`${head}（不在三个字族里）`);
+          out.push(`${head}（不在 Inter / IBM Plex Mono 里）`);
         } else if (path === TOKEN_FILE && !/PingFang|YaHei/.test(decl)) {
-          // §1.2.1：三个字族都没有中文字形，CJK 回退必须显式写出来
-          out.push(`${head} 的回退栈缺 CJK（见 §1.2.1）`);
+          // 两个字族都没有中文字形，CJK 回退必须显式写出来
+          out.push(`${head} 的回退栈缺 CJK（PingFang SC）`);
         }
       }
       return [...new Set(out)];
@@ -220,8 +251,8 @@ const rules = [
   },
   {
     id: "size-14",
-    // 字号只有 28 / 20 / 15 / 13 / 12：14 与 15、13 与 12 眼睛分不出来，已砍掉
-    desc: "字号只有 28 / 20 / 15 / 13 / 12，不出现 14px",
+    // 字号只有六档 28 / 20 / 16 / 15 / 13 / 12：14 与 15 眼睛分不出来，已砍掉
+    desc: "字号只有 28 / 20 / 16 / 15 / 13 / 12，不出现 14px",
     run(src) {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
       const n = (
@@ -232,7 +263,7 @@ const rules = [
   },
   {
     id: "framed-tag",
-    // 有框的都能点：不可点的标签是纯文字（强 ink 600 / 弱 ink-faint 400），
+    // 有框的都能点：不可点的标签是纯文字（强 ink 600 / 弱 ink-mute 400），
     // 旧方标签的写法是 padding 1px 6px + 1px 描边，同一条规则块里两样都有就报
     desc: "有框的都能点：不可点的标签不带框（旧方标签 padding 1px 6px + border）",
     run(src, path) {
@@ -244,6 +275,55 @@ const rules = [
           out.push(m[1].trim());
       }
       return out;
+    },
+  },
+  {
+    id: "accent-scope",
+    // 橙的含义只有一个「开着 / 在生效」，形态只有开关刻条与指示点两种。
+    // 用在按钮、文字、焦点环、选中、格点、图标上都是第二种意思（⑤）
+    desc: "橙：var(--accent) 只出现在开关（.ss-switch…）与指示点（.ss-indicator）的规则里",
+    run(src, path) {
+      if (!src.includes("var(--accent)")) return [];
+      if (!path.endsWith(".css"))
+        return ["组件代码里直接用了 var(--accent)（用 <Switch> / <Indicator>）"];
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ");
+      const out = [];
+      for (const m of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (!m[2].includes("var(--accent)")) continue;
+        const selectors = m[1].split(",").map((x) => x.trim());
+        for (const sel of selectors) if (!ACCENT_SELECTOR.test(sel)) out.push(sel);
+      }
+      return out;
+    },
+  },
+  {
+    id: "no-uppercase",
+    // 全应用没有大写变换：我们自己写的拉丁结构词小写，内容原样（DESIGN「小写是结构的语言」）
+    desc: "不出现 text-transform: uppercase",
+    run(src) {
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+      const n = (
+        code.match(/text-transform\s*:\s*uppercase|textTransform\s*:\s*["']uppercase["']/g) || []
+      ).length;
+      return n ? [`${n} 处大写变换`] : [];
+    },
+  },
+  {
+    id: "tracking",
+    // V4 没有正字距（它原是给 Condensed 大写的）；负字距只给纯拉丁的大字，走 --tracking-* token。
+    // 汉字字距永远 0（DESIGN「字距：汉字永远 0」）
+    desc: "字距只有 0 或 var(--tracking-*)，不写正字距",
+    run(src) {
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+      const out = [];
+      for (const m of code.matchAll(
+        /(?:letter-spacing|letterSpacing)\s*[:=]\s*["']?([^;"'}\n,]+)/g,
+      )) {
+        const v = m[1].trim();
+        if (/^(0|0px|normal|inherit)$/.test(v) || /^var\(--tracking-[a-z-]+\)$/.test(v)) continue;
+        out.push(`letter-spacing: ${v}`);
+      }
+      return [...new Set(out)];
     },
   },
   {

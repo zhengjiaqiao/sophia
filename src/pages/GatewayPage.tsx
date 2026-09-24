@@ -351,7 +351,7 @@ export function GatewayPage({
         </BusySlot>
       ) : null}
       {isEditing ? null : (
-        <Button variant="link" onClick={() => choose(p.id)}>
+        <Button variant="quiet" onClick={() => choose(p.id)}>
           编辑
         </Button>
       )}
@@ -682,7 +682,7 @@ function GatewayForm({
               </Button>
             )}
             <Button
-              variant="link"
+              variant="quiet"
               onClick={() => {
                 onDirtyChange(false);
                 ask.onDone();
@@ -710,7 +710,7 @@ function GatewayForm({
           </Tooltip>
         )}
         {ask === null ? (
-          <Button variant="link" onClick={onCancel}>
+          <Button variant="quiet" onClick={onCancel}>
             取消
           </Button>
         ) : null}

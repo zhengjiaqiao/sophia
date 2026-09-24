@@ -515,7 +515,7 @@ function DupExtra({
       <span ref={ref}>
         <BusySlot busy={busy} label="正在核对两份">
           <Button
-            variant="link"
+            variant="quiet"
             onClick={() => {
               if (busy) return;
               // 确认框锚在这一行：出在行下方，遮罩挖出整行（用户看得见自己在决定哪一行）；

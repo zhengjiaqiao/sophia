@@ -112,8 +112,8 @@ input:focus-visible {
   pointer-events: none;
 }
 
-/* 页签：字标后 32，彼此 24。拉丁 run 由 <Cap tone="nav"> 套 Condensed 大写 + 字距，
-   汉字 Barlow / 苹方 15/700、字距 0（DESIGN「三个字族都没有中文字形」） */
+/* 页签：字标后 32，彼此 24。文案是我们自己写的结构词，拉丁一律小写（`模型` `skills` `mcp`），
+   字距 0（DESIGN「小写是结构的语言」）。V4 的滑槽样式见 ui 的 Tabs，壳换上它之前沿用这里 */
 .topbar__tabs {
   display: flex;
   align-items: center;
@@ -133,7 +133,7 @@ input:focus-visible {
   background: none;
   color: var(--ink-mute);
   font-family: var(--font-ui);
-  font-size: var(--size-nav);
+  font-size: var(--size-body);
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0;
@@ -194,9 +194,9 @@ input:focus-visible {
 }
 
 .sidebar__label {
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 600;
-  line-height: var(--leading-micro);
+  line-height: var(--leading-label);
   color: var(--ink-mute);
 }
 
@@ -212,8 +212,8 @@ input:focus-visible {
   background: none;
   color: var(--ink-mute);
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
-  line-height: var(--leading-micro);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -234,9 +234,10 @@ input:focus-visible {
   box-sizing: border-box;
   min-width: 120px;
   padding: var(--space-xxs);
-  border-radius: var(--radius-layer);
-  background: var(--canvas);
-  box-shadow: var(--elev-layer);
+  border-radius: var(--radius-float);
+  border: var(--border-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
 }
 
 .sidebar__sort-item {
@@ -250,7 +251,7 @@ input:focus-visible {
   background: none;
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -381,7 +382,7 @@ input:focus-visible {
   }
 }
 
-/* 内容区外壳：横向放不下时被裁掉的左 / 右边缘 16px 从 canvas 白渐隐到透明（功能性渐变）。
+/* 内容区外壳：横向放不下时被裁掉的左 / 右边缘 16px 从 face 渐隐到透明（功能性渐变）。
    渐隐盖在滚动容器外面，不随内容滚走 */
 .content-shell {
   position: relative;
@@ -406,12 +407,12 @@ input:focus-visible {
 
 .content-shell::before {
   left: 0;
-  background: linear-gradient(to right, var(--canvas), transparent);
+  background: linear-gradient(to right, var(--face), transparent);
 }
 
 .content-shell::after {
   right: 0;
-  background: linear-gradient(to left, var(--canvas), transparent);
+  background: linear-gradient(to left, var(--face), transparent);
 }
 
 .content-shell[data-fade-left]::before,

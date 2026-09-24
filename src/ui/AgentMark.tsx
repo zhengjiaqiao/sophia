@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Cap } from "./Cap.tsx";
 
 /// agent 图标（DESIGN「agent 图标 AgentMark」，画板 Marks「agent 图标」）。
 ///
@@ -11,7 +10,7 @@ import { Cap } from "./Cap.tsx";
 ///   六段逐段旋转 60° 的交织；第一版六瓣软轮廓在 16px 下读成云 / 齿轮，已换
 /// - Cursor：立方体线稿；Gemini CLI：实心四角星
 ///
-/// 其余降级成**首字母方块**（14px，hairline 描边）。它是图标缺席时的占位，
+/// 其余降级成**首字母方块**（14px、4 圆角、1px `ctl-border` 边、11/600）。它是图标缺席时的占位，
 /// **永远和名字一起出现**：已安装的 9 个里首字母就撞了 3 个 C、2 个 G。
 
 const OPENAI_KNOT =
@@ -75,7 +74,7 @@ export function AgentIcon({ id, name, size = 16, labelled }: AgentIconProps) {
   const drawn = ICONS[id];
 
   if (!drawn) {
-    // 降级：14px 零圆角方框 + 大写首字母
+    // 降级：14px 首字母方块（首字母随专名原样取大写）
     return (
       <span className="ss-mark__box" title={labelled ? name : undefined} {...a11y}>
         {agentInitial(name)}
@@ -117,13 +116,14 @@ export interface AgentMarkProps {
   id: string;
   /// 显示名，原样写
   name: string;
-  /// inline：图标 + 名字横排（设置页、句子里，名字不大写）；
+  /// inline：图标 + 名字横排（设置页、句子里）；
   /// stacked：图标在上名字在下（旧列头）；
-  /// header：表格列头三层——16px 图标 / Condensed 大写名 / 等宽计数（`ink-faint`）
+  /// header：表格列头三层——16px 图标 / 名字（`label` 12/500 `ink`）/ 计数（12 tabular `ink-faint`）。
+  /// agent 名是专名，处处原样大小写（含列头）
   layout?: "inline" | "stacked" | "header";
   /// header 的第三层：这个 agent 下开着几个（只写分子、不零填充）
   count?: number;
-  /// 没装这个 agent、或整行禁用：图标跟着文字一起退到弱文字色，形状不变
+  /// 没装这个 agent、或整行禁用：图标跟着名字一起退到 `ink-mute`，形状不变
   dim?: boolean;
   title?: string;
 }
@@ -131,14 +131,13 @@ export interface AgentMarkProps {
 export function AgentMark({ id, name, layout = "inline", count, dim, title }: AgentMarkProps) {
   const classes = ["ss-mark", `ss-mark--${layout}`];
   if (dim) classes.push("is-dim");
-  const upper = layout !== "inline";
 
   return (
     <span className={classes.join(" ")} title={title}>
       <span className="ss-mark__icon">
         <AgentIcon id={id} name={name} />
       </span>
-      <span className="ss-mark__name">{upper ? <Cap>{name}</Cap> : name}</span>
+      <span className="ss-mark__name">{name}</span>
       {layout === "header" && count !== undefined ? (
         <span className="ss-mark__count">{count}</span>
       ) : null}

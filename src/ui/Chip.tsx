@@ -1,14 +1,16 @@
 import type { ReactNode } from "react";
 
-/// 选择片（DESIGN「选择片 Chip」）：胶囊，高 28，文字 13（不大写，内容是专名），
-/// 计数等宽 12。未选 hairline 描边，选中**反色**，不可选灰描边灰字。图标 14 在左，间距 6。
-/// 用在：来源筛选片、分段片。胶囊＝一个可切换的状态（DESIGN「Shapes」）。
+/// 选择片（DESIGN「选择片 Chip」）：胶囊，高 28，文字 13（原样大小写，内容是专名），
+/// 计数 12 tabular。未选：透明底（透出机面）+ 1px `ctl-border`、计数 `ink-faint`；
+/// **选中＝墨片**：`ink` 底、`face` 字、计数 `ctl-border`；不可选：`hairline` 边、`ink-faint` 字。
+/// 片不投影、没有底边——它是切换状态，不是按一下执行动作的键。图标 14 在左，间距 6。
+/// 用在：来源筛选片。胶囊＝一个可切换的状态（DESIGN「Shapes」）。
 
 interface ChipBase {
   children: ReactNode;
   /// 14px 图标在左
   icon?: ReactNode;
-  /// 等宽 tabular 计数，跟在名字后面；不零填充
+  /// 12 tabular 计数，跟在名字后面；不零填充
   count?: number;
   selected?: boolean;
   onClick?: () => void;
@@ -51,8 +53,9 @@ export interface ModelChipProps {
   onRemove?: () => void;
 }
 
-/// 模型片（DESIGN front-matter `chip-compact`）：高 24 胶囊，hairline 描边，末尾 9px 的 ×
-/// （`ink-mute`，悬停转 `ink`）。× 的视觉 9，命中区 24
+/// 模型片（DESIGN front-matter `model-chip`）：高 24 胶囊，`paper` 面 + 1px `hairline` 环，
+/// 末尾 9px 的 ×（`ink-mute`，悬停转 `ink`，间距 6）。与筛选片形状一样、材质不同：无墨、无底边。
+/// × 的视觉 9，命中区 25
 export function ModelChip({ name, id, onRemove }: ModelChipProps) {
   return (
     <span className="ss-modelchip" title={id}>

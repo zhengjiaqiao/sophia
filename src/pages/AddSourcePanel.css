@@ -27,7 +27,7 @@
 
 .add-src__hint {
   min-width: 0;
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
 }
@@ -48,7 +48,7 @@
   margin-top: var(--space-md);
   padding: 6px 0 0 var(--space-xs);
   border-top: 1px solid var(--ink);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 600;
   line-height: var(--leading-caption);
   color: var(--ink-mute);
@@ -68,7 +68,7 @@
 .add-src__head {
   padding: 12px var(--space-xs) 4px;
   border-bottom: 1px solid var(--hairline);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
   white-space: nowrap;
@@ -179,7 +179,7 @@
   display: block;
   min-width: 0;
   overflow: hidden;
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink-mute);
   text-overflow: ellipsis;

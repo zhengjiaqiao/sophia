@@ -506,14 +506,14 @@ const withSelected = (overrides: Partial<GatewayState> = {}) => ({
   ...overrides,
 });
 
-test("AgentRow：图标 + 名字（不大写）+ page 开关 + 配置网关，一组；生效模型在第二格", () => {
+test("AgentRow：图标 + 名字（不大写）+ regular 开关 + 配置网关，一组；生效模型在第二格", () => {
   const html = render(AgentRow, rowProps(withSelected({ enabled: true })));
   assert.match(html, /<svg[^>]*width="24" height="24"/);
   assert.match(html, /class="models-row__name">Codex</);
   assert.doesNotMatch(html, /CODEX/);
   assert.match(
     html,
-    /role="switch" aria-checked="true"[^>]*class="ss-switch ss-switch--page is-on"/,
+    /role="switch" aria-checked="true"[^>]*class="ss-switch ss-switch--regular is-on"/,
   );
   assert.match(html, />配置网关</);
   const agent = html.indexOf("models-row__agent");

@@ -7,11 +7,11 @@ import emptyFolder from "../assets/empty-folder.png";
 
 /// 空态与忙碌态（DESIGN「空态与忙碌态」「转盘」）。
 ///
-/// **空态里若有两个动作，只有一个是按钮**，另一个降为文字链。
+/// **空态里若有两个动作，只有一个是按钮**，另一个降为安静键。
 /// 首次扫描：24px 忙碌指示居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
 ///
 /// 图像（DESIGN「图像」）：只用在没有数据、等待、刚开始的时刻；筛选无结果不放图。
-/// 图在上、不带边框，下面依次是现状一句、动作（间距 16 / 8 / 16），整体居中；图是装饰，
+/// 图在上、不带边框、底透明，直接落在机面上看不出方框；下面依次是现状一句、动作（间距 16 / 8 / 16），整体居中；图是装饰，
 /// `alt=""` + `aria-hidden`。一种风格：品牌小黑猫配线稿文件夹，三张各对一个时刻（2x 资源，原样显示不裁切）。
 /// 有图时首次扫描的忙碌指示跟在那句话前面
 
@@ -55,7 +55,7 @@ export interface EmptyProps {
   hint?: ReactNode;
   /// 按钮动作，一个就够
   primary?: EmptyAction;
-  /// 文字链动作
+  /// 安静键动作
   secondary?: EmptyAction;
   /// 图在上（装饰）；不给就不放图
   art?: EmptyArt;
@@ -96,7 +96,7 @@ export function Empty({ kind, description, hint, primary, secondary, art }: Empt
             </Button>
           ) : null}
           {secondary ? (
-            <Button variant="link" icon={secondary.icon} onClick={secondary.onClick}>
+            <Button variant="quiet" icon={secondary.icon} onClick={secondary.onClick}>
               {secondary.label}
             </Button>
           ) : null}

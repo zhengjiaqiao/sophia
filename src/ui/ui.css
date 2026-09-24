@@ -1,18 +1,19 @@
-/* 展示组件的样式（docs/DESIGN.md；写法对照画板 States / Marks / Feedback）。
-   色值一律 var(--…)，唯一来源是 tokens.css。零色彩、零阴影、零渐变、零 rgba；
-   圆角只有 0 / 2px / 32px / 50%：2px 矩形＝动作与输入、胶囊＝片与开关、圆＝只读状态、直角＝容器。
+/* 展示组件的样式（docs/DESIGN.md「材料与工艺」「Components」，视觉 V4 · 拉姆斯 / Braun）。
+   色值一律 var(--…)，唯一来源是 tokens.css。层次只有四种手段：平（1px 边）、行程（1px 底边）、
+   凹（内凹）、浮（唯一的投影，只给浮层）。橙只在开关刻条与指示点上。
+   光标：控件与格子一律箭头，手形只给离开应用的链接（裁决 D23）。
    动效只有一档 120ms 机械缓动（--ease-mech），末尾统一处理 prefers-reduced-motion。 */
 @import "../tokens.css";
 
-/* ===== 0. 键盘焦点 =====
-   只认 :focus-visible：1px ink 外框、偏移 2px。系统默认的蓝色聚焦环是零色彩界面里
-   唯一闯进来的彩色。黑面上转 canvas。 */
+/* ===== 0. 键盘焦点与可选文字 =====
+   只认 :focus-visible：1px ink 外框、偏移 2px；墨面上转 face。不用橙、不要系统蓝环。 */
 .ss-btn:focus-visible,
 .ss-iconbtn:focus-visible,
 .ss-chip:focus-visible,
 .ss-dot-btn:focus-visible,
 .ss-switch:focus-visible,
 .ss-checkbox:focus-visible,
+.ss-tabs__tab:focus-visible,
 .ss-modelchip__remove:focus-visible,
 .ss-tipwrap[tabindex]:focus-visible {
   outline: 1px solid var(--ink);
@@ -21,12 +22,21 @@
 
 .is-on-dark:focus-visible,
 .ss-toast--notice .ss-btn:focus-visible {
-  outline-color: var(--canvas);
+  outline-color: var(--face);
 }
 
-/* ===== 1. 按钮 Button =====
-   2px 描边矩形；Barlow / 苹方 13 / 600，不大写、字距 0。高度定死、内边距只管左右，
-   一律偶数高（奇数高在 1x 屏上偏心一个设备像素）。 */
+/* 界面文字不可拖选（tokens.css 的 :root），路径、id、命令与输入框除外（裁决 D23） */
+.ss-selectable,
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ===== 1. 按键 Button（DESIGN「按钮」「控件有行程」）=====
+   阶梯：墨键（主动作）→ 默认键（纸面）→ 安静键（D14）；下划线 + ↗ 只给离开应用的链接。
+   能按的键底下 1px 底边＝行程；按下时底边消失、键面下沉 1px。高度定死、内边距只管左右，一律偶数高。 */
 .ss-btn {
   display: inline-flex;
   align-items: center;
@@ -34,10 +44,11 @@
   gap: 6px;
   box-sizing: border-box;
   height: var(--control-h);
-  padding: 0 14px;
-  border: 1px solid var(--ink);
+  padding: 0 12px;
+  border: var(--border-control);
   border-radius: var(--radius-control);
-  background: none;
+  background: var(--paper);
+  box-shadow: var(--key-edge);
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--size-caption);
@@ -47,14 +58,13 @@
   /* 按钮里嵌专名时文字会被拆成几个匿名 flex item，item 间的空白会被 flex 吃掉
      （「删 WeiboAP 的」渲染成「删WeiboAP的」）。pre 让那个空格留下，按钮本来就不换行 */
   white-space: pre;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
+  cursor: default;
   transition:
     background-color var(--motion-fast) var(--ease-mech),
+    border-color var(--motion-fast) var(--ease-mech),
+    box-shadow var(--motion-fast) var(--ease-mech),
     color var(--motion-fast) var(--ease-mech),
-    transform var(--motion-fast) var(--ease-mech),
-    height var(--motion-fast) var(--ease-mech);
+    transform var(--motion-fast) var(--ease-mech);
 }
 
 .ss-btn--compact {
@@ -62,68 +72,70 @@
   padding: 0 10px;
 }
 
+/* 确认框与页面级提交：高 32、左右 16 */
 .ss-btn--row {
   height: var(--control-h-row);
   padding: 0 16px;
 }
 
-/* 默认键：描边已经到顶，悬停改底（DESIGN「可点的面」第三行） */
+/* 默认键：悬停描边升一档（ctl-border → ctl-edge），底色不变 */
 .ss-btn:hover:not(:disabled) {
-  background: var(--surface);
+  border-color: var(--ctl-edge);
 }
 
-/* 按下：键帽下移 1px 并压扁 1px（height 少 1，translateY 1：底边不动、顶边下沉 1——
-   这里取「整体下移 1 + 高度少 1」，与画板 States 的 pressed 一致） */
+/* 按下：键面转 surface 并内凹，底边消失、整键下沉 1px */
 .ss-btn:active:not(:disabled) {
+  background: var(--surface);
+  box-shadow: var(--recess-pressed);
   transform: translateY(1px);
-  height: calc(var(--control-h) - 1px);
 }
 
-.ss-btn--compact:active:not(:disabled) {
-  height: calc(var(--control-h-compact) - 1px);
-}
-
-.ss-btn--row:active:not(:disabled) {
-  height: calc(var(--control-h-row) - 1px);
-}
-
+/* 不可用（裁决 D20）：平贴、实线 hairline、ink-faint 字、透明底，无底边无行程。
+   必须同时给原因（disabledReason，类型上强制），按下即出原因 */
 .ss-btn:disabled {
-  border-color: var(--disabled);
-  color: var(--disabled);
-  cursor: default;
+  border: var(--border-disabled);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-faint);
 }
 
-/* 主动作：实心黑。hover 键面内缩 1px 的白内描边（键帽边缘反光，不用 box-shadow） */
+/* 主动作（墨键）：一个面里至多一个。行程是 ink-edge 底边（墨上再画墨看不出来） */
 .ss-btn--primary {
+  border-color: var(--ink);
   background: var(--ink);
-  color: var(--canvas);
+  box-shadow: var(--key-edge-ink);
+  color: var(--face);
 }
 
+/* 墨面已经到顶，不能再深：悬停在键面内沿加一圈 ink-mute（键帽边缘反光） */
 .ss-btn--primary:hover:not(:disabled) {
-  background: var(--ink);
-  outline: 1px solid var(--canvas);
-  outline-offset: -3px;
+  border-color: var(--ink);
+  outline: 1px solid var(--ink-mute);
+  outline-offset: -2px;
 }
 
-/* 按下时键帽已压下，边缘反光收起（画板 States pressed 列） */
 .ss-btn--primary:active:not(:disabled) {
+  background: var(--ink);
+  box-shadow: none;
   outline: none;
 }
 
-.ss-btn--primary:disabled {
-  border-color: var(--disabled);
-  background: none;
-  color: var(--disabled);
-}
-
-/* 黑面上的白描边键 */
+/* 墨窗里的浅描边键：1px face 描边、face 字、透明底、无行程 */
 .ss-btn.is-on-dark {
-  border-color: var(--canvas);
-  color: var(--canvas);
+  border-color: var(--face);
+  background: transparent;
+  box-shadow: none;
+  color: var(--face);
 }
 
 .ss-btn.is-on-dark:hover:not(:disabled) {
+  border-color: var(--face);
   background: var(--ink-mute);
+}
+
+.ss-btn.is-on-dark:active:not(:disabled) {
+  background: var(--ink-mute);
+  box-shadow: none;
 }
 
 .ss-btn.is-on-dark:disabled {
@@ -131,48 +143,57 @@
   color: var(--ink-mute);
 }
 
-/* 文字链：13 ink-mute 下划线；命中区高 24、左右各 6（负外边距吃回去，视觉位置不变） */
-.ss-btn--link,
-.ss-btn--link.ss-btn--compact,
-.ss-btn--link.ss-btn--row {
+/* 安静键（D14）：无底无边、ink-mute 13；悬停出 surface 圆角带，按下下沉 1px。
+   命中区高 24、左右各 6（负外边距吃回去）：静止时与纯文字无异、位置不变 */
+.ss-btn--quiet,
+.ss-btn--quiet.ss-btn--compact,
+.ss-btn--quiet.ss-btn--row,
+.ss-btn--external,
+.ss-btn--external.ss-btn--compact,
+.ss-btn--external.ss-btn--row {
   height: var(--hit-min);
   margin: 0 -6px;
   padding: 0 6px;
   border: 0;
-  border-radius: 0;
-  background: none;
+  background: transparent;
+  box-shadow: none;
   color: var(--ink-mute);
   font-weight: 400;
   line-height: var(--leading-caption);
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
-.ss-btn--link:hover:not(:disabled),
-.ss-btn--link:active:not(:disabled) {
-  height: var(--hit-min);
-  background: none;
+.ss-btn--quiet:hover:not(:disabled) {
+  background: var(--surface);
   color: var(--ink);
-  transform: none;
 }
 
-.ss-btn--link:disabled {
-  color: var(--disabled);
+.ss-btn--quiet:active:not(:disabled) {
+  background: var(--surface);
+  box-shadow: none;
+  transform: translateY(1px);
 }
 
-.ss-btn--link.is-on-dark {
+/* 不可用的安静键只剩 ink-faint 字，没有悬停带 */
+.ss-btn--quiet:disabled,
+.ss-btn--external:disabled {
+  border: 0;
+  background: transparent;
   color: var(--ink-faint);
 }
 
-.ss-btn--link.is-on-dark:hover:not(:disabled) {
-  background: none;
-  color: var(--canvas);
-}
-
-/* 离开 Sophia 的文字链：下划线只在字上，↗ 不划线，左间距 3 */
+/* 离开 Sophia 的链接（button-link）：下划线只在字上，末尾 10px ↗（1.4 描边、左间距 3）。
+   全应用只有它用手形光标、只有它带下划线 */
 .ss-btn--external {
   gap: 3px;
-  text-decoration: none;
+  cursor: pointer;
+}
+
+.ss-btn--external:hover:not(:disabled),
+.ss-btn--external:active:not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  transform: none;
 }
 
 .ss-btn--external .ss-btn__text {
@@ -184,6 +205,20 @@
   flex-shrink: 0;
 }
 
+.ss-btn--quiet.is-on-dark,
+.ss-btn--external.is-on-dark {
+  color: var(--ctl-border);
+}
+
+.ss-btn--quiet.is-on-dark:hover:not(:disabled) {
+  background: var(--ink-mute);
+  color: var(--face);
+}
+
+.ss-btn--external.is-on-dark:hover:not(:disabled) {
+  color: var(--face);
+}
+
 /* 开始一个添加流程：+ 与名词间距 6，左右内边距 12 */
 .ss-btn--add {
   padding: 0 12px;
@@ -193,7 +228,6 @@
 .ss-btn--icon {
   width: var(--control-h);
   padding: 0;
-  border-color: transparent;
 }
 
 .ss-btn__icon {
@@ -203,7 +237,8 @@
   flex-shrink: 0;
 }
 
-/* ===== 1.1 图标按钮 IconButton：28×28，无描边无底，悬停 surface ===== */
+/* ===== 1.1 图标按钮 IconButton（DESIGN「图标按钮」）=====
+   工具，不是键：28×28、无边无底、图形 ink-mute；悬停 surface 底（control 7）、图形转 ink；没有行程 */
 .ss-iconbtn {
   display: inline-flex;
   align-items: center;
@@ -215,87 +250,234 @@
   padding: 0;
   border: 0;
   border-radius: var(--radius-control);
-  background: none;
-  color: var(--ink);
-  cursor: pointer;
-  transition: background-color var(--motion-fast) var(--ease-mech);
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: default;
+  transition:
+    background-color var(--motion-fast) var(--ease-mech),
+    color var(--motion-fast) var(--ease-mech);
 }
 
 .ss-iconbtn:hover:not(:disabled) {
   background: var(--surface);
-}
-
-.ss-iconbtn:active:not(:disabled) .ss-iconbtn__glyph {
-  transform: translateY(1px);
+  color: var(--ink);
 }
 
 .ss-iconbtn:disabled {
-  color: var(--disabled);
-  cursor: default;
+  color: var(--ctl-edge);
 }
 
 .ss-iconbtn.is-on-dark {
-  color: var(--canvas);
+  color: var(--ctl-border);
 }
 
 .ss-iconbtn.is-on-dark:hover:not(:disabled) {
   background: var(--ink-mute);
+  color: var(--face);
 }
 
 .ss-iconbtn__glyph {
   display: inline-flex;
-  transition: transform var(--motion-fast) var(--ease-mech);
 }
 
-/* ===== 2. 开关 Switch =====
-   page 32×18 旋钮 12；inline 24×14 旋钮 8。关＝白底 ink 描边、旋钮 ink 在左；
-   开＝ink 底、旋钮 canvas 在右。旋钮绝对定位，行程 = 轨内宽 − 旋钮 */
-.ss-switch {
-  --knob: 12px;
-  --travel: 14px;
-  --squash: 2px;
+/* ===== 2. 页签滑槽 Tabs（DESIGN「页签」，物件感一）=====
+   槽：hairline 底、recess-tabs 内凹、10 圆角、内边距 3。页签高 28、左右 16、15/500 ink-mute、小写；
+   选中的是槽里一枚纸面滑块（paper + ctl-border 环 + ctl-edge 底边），字 ink 600。
+   切换时滑块沿槽平移 120ms；量到位置之前（首帧、静态渲染）由选中的页签自己画滑块 */
+.ss-tabs {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
   flex-shrink: 0;
-  box-sizing: border-box;
-  width: 32px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius-pill);
-  background: var(--canvas);
-  cursor: pointer;
-  transition: background-color var(--motion-fast) var(--ease-mech);
+  padding: 3px;
+  border-radius: var(--radius-tab-track);
+  background: var(--hairline);
+  box-shadow: var(--recess-tabs);
 }
 
-.ss-switch--inline {
-  --knob: 8px;
-  --travel: 10px;
-  --squash: 2px;
-  width: 24px;
-  height: 14px;
+.ss-tabs__thumb {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  box-sizing: border-box;
+  width: var(--thumb-w, 0);
+  height: var(--control-h);
+  border: var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  box-shadow: var(--key-edge);
+  transform: translateX(var(--thumb-x, 0));
+  transition:
+    transform var(--motion-fast) var(--ease-mech),
+    width var(--motion-fast) var(--ease-mech),
+    box-shadow var(--motion-fast) var(--ease-mech);
+}
+
+/* 还没量到：不画滑块，选中的页签自己带面 */
+.ss-tabs:not(.has-thumb) .ss-tabs__thumb {
+  display: none;
+}
+
+.ss-tabs__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--control-h);
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1;
+  /* 页签是我们自己写的结构词：拉丁一律小写，汉字不受影响（DESIGN「小写是结构的语言」） */
+  text-transform: lowercase;
+  white-space: nowrap;
+  cursor: default;
+  transition: color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-tabs__tab:hover:not(.is-on) {
+  color: var(--ink);
+}
+
+.ss-tabs__tab.is-on {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ss-tabs:not(.has-thumb) .ss-tabs__tab.is-on {
+  border-color: var(--ctl-border);
+  background: var(--paper);
+  box-shadow: var(--key-edge);
+}
+
+/* 字重 500 → 600 不许改宽：用一份看不见的 600 撑住宽度，滑块量出来的宽也稳定 */
+.ss-tabs__label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ss-tabs__label::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
+}
+
+/* 按下选中的那一枚：滑块底边消失、下沉 1px */
+.ss-tabs:has(.ss-tabs__tab.is-on:active) .ss-tabs__thumb {
+  box-shadow: none;
+  transform: translate(var(--thumb-x, 0), 1px);
+}
+
+.ss-tabs:not(.has-thumb) .ss-tabs__tab.is-on:active {
+  box-shadow: none;
+  transform: translateY(1px);
+}
+
+/* ===== 3. 开关 Switch（DESIGN「开关」，物件感二）=====
+   指示点 + 凹槽 + 带三道防滑纹的滑块。刻条印在槽上，滑块盖住一条、露出另一条：
+   开＝滑块在右、左边露橙刻条、橙点；关＝滑块在左、右边露灰刻条、灰点——位置、刻条、点三重表达。
+   regular 40×20（滑块 19×16、刻条 12×6、点 6）；compact 32×16（15×12、9×4、点 5） */
+.ss-switch {
+  --track-w: 40px;
+  --track-h: 20px;
+  --knob-w: 19px;
+  --knob-h: 16px;
+  --scribe-w: 12px;
+  --scribe-h: 6px;
+  --scribe-on: 5px;
+  --scribe-off: 23px;
+  --grip-h: 7px;
+  --travel: 17px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.ss-switch--compact {
+  --track-w: 32px;
+  --track-h: 16px;
+  --knob-w: 15px;
+  --knob-h: 12px;
+  --scribe-w: 9px;
+  --scribe-h: 4px;
+  --scribe-on: 4px;
+  --scribe-off: 19px;
+  --grip-h: 5px;
+  --travel: 13px;
+  gap: 6px;
+}
+
+.ss-switch__track {
+  position: relative;
+  display: block;
+  width: var(--track-w);
+  height: var(--track-h);
+  border-radius: var(--radius-track);
+  background: var(--track);
+  box-shadow: var(--recess-track);
+}
+
+.ss-switch__scribe {
+  position: absolute;
+  top: calc((var(--track-h) - var(--scribe-h)) / 2);
+  width: var(--scribe-w);
+  height: var(--scribe-h);
+  border-radius: var(--radius-scribe);
+}
+
+.ss-switch__scribe--on {
+  left: var(--scribe-on);
+  background: var(--accent);
+}
+
+.ss-switch__scribe--off {
+  left: var(--scribe-off);
+  background: var(--ctl-edge);
 }
 
 .ss-switch__knob {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: var(--knob);
-  height: var(--knob);
-  border-radius: 50%;
-  background: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  box-sizing: border-box;
+  width: var(--knob-w);
+  height: var(--knob-h);
+  border: var(--border-control);
+  border-radius: var(--radius-knob);
+  background: var(--paper);
+  box-shadow: var(--key-edge);
   transition:
     transform var(--motion-fast) var(--ease-mech),
-    width var(--motion-fast) var(--ease-mech),
-    background-color var(--motion-fast) var(--ease-mech);
+    box-shadow var(--motion-fast) var(--ease-mech);
 }
 
-.ss-switch.is-on {
-  background: var(--ink);
+/* 三道 1×7 防滑纹，间距 2 */
+.ss-switch__grip {
+  display: block;
+  width: 1px;
+  height: var(--grip-h);
+  background: var(--ctl-edge);
 }
 
 .ss-switch.is-on .ss-switch__knob {
-  background: var(--canvas);
   transform: translateX(var(--travel));
 }
 
@@ -332,49 +514,71 @@
   }
 }
 
-/* hover：轨外缘 1px ink-mute */
-.ss-switch:hover:not(:disabled) {
-  outline: 1px solid var(--ink-mute);
-  outline-offset: 1px;
+/* hover：槽外缘 1px ctl-edge */
+.ss-switch:hover:not(:disabled) .ss-switch__track {
+  outline: 1px solid var(--ctl-edge);
 }
 
-.ss-switch:active:not(:disabled) {
-  outline: none;
-}
-
-.ss-switch:focus-visible:hover {
-  outline: 1px solid var(--ink);
-  outline-offset: 2px;
-}
-
-/* 按下：旋钮压扁（横向变宽）；开着时往左长，右缘不动 */
+/* 按下：滑块底边消失、下沉 1px */
 .ss-switch:active:not(:disabled) .ss-switch__knob {
-  width: calc(var(--knob) + var(--squash));
+  box-shadow: none;
+  transform: translateY(1px);
 }
 
 .ss-switch.is-on:active:not(:disabled) .ss-switch__knob {
-  transform: translateX(calc(var(--travel) - var(--squash)));
+  transform: translate(var(--travel), 1px);
 }
 
-.ss-switch:disabled {
-  border-color: var(--disabled);
-  background: var(--canvas);
-  cursor: default;
+/* 不可用：槽透明 + 1px hairline 环；滑块 recess 面 + hairline 环、无底边；
+   刻条与防滑纹 hairline；指示点空心 */
+.ss-switch:disabled .ss-switch__track {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px solid var(--hairline);
+  outline-offset: -1px;
 }
 
 .ss-switch:disabled .ss-switch__knob {
-  background: var(--disabled);
+  border-color: var(--hairline);
+  background: var(--recess);
+  box-shadow: none;
 }
 
-.ss-switch.is-on:disabled {
-  background: var(--disabled);
+.ss-switch:disabled .ss-switch__scribe,
+.ss-switch:disabled .ss-switch__grip {
+  background: var(--hairline);
 }
 
-.ss-switch.is-on:disabled .ss-switch__knob {
-  background: var(--canvas);
+/* ===== 3.1 指示点 Indicator：6px 圆，开＝橙、关＝ctl-border；不发光、无投影 =====
+   橙的唯一含义「开着 / 在生效」的第二种形态（裁决：开关刻条 + 指示点）。
+   开关左侧 7px 那颗是它；侧栏 `Codex` 后、开着规则的来源片片首也是它 */
+.ss-indicator {
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-dot);
+  background: var(--ctl-border);
 }
 
-/* ===== 2.1 复选框 Checkbox：12 方，直角；命中区用伪元素撑到 24，不动 border ===== */
+.ss-indicator--compact {
+  width: 5px;
+  height: 5px;
+}
+
+.ss-indicator.is-on {
+  background: var(--accent);
+}
+
+.ss-indicator.is-disabled {
+  border: 1px solid var(--hairline);
+  background: transparent;
+}
+
+/* ===== 3.2 复选框 Checkbox（DESIGN「复选框」）=====
+   13 方、4 圆角：关＝paper 底 + 1px ink-faint 边；开＝ink 底 + face 对勾；半选＝ink 底 + face 短横。
+   视觉 13、命中区用伪元素撑到 25，不动 border；全应用只有这一个尺寸 */
 .ss-checkbox {
   position: relative;
   display: inline-flex;
@@ -382,14 +586,14 @@
   justify-content: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   padding: 0;
   border: 1px solid var(--ink-faint);
   border-radius: var(--radius-mark);
-  background: var(--canvas);
-  color: var(--canvas);
-  cursor: pointer;
+  background: var(--paper);
+  color: var(--face);
+  cursor: default;
   transition:
     border-color var(--motion-fast) var(--ease-mech),
     background-color var(--motion-fast) var(--ease-mech);
@@ -419,15 +623,18 @@
 
 .ss-checkbox:disabled {
   border-color: var(--hairline);
-  cursor: default;
+  background: transparent;
 }
 
-.ss-checkbox.is-on:disabled {
-  border-color: var(--disabled);
-  background: var(--disabled);
+.ss-checkbox.is-on:disabled,
+.ss-checkbox.is-mixed:disabled {
+  border-color: var(--ctl-border);
+  background: var(--ctl-border);
 }
 
-/* ===== 3. 选择片 Chip：胶囊 28，文字 13，计数等宽 12 ===== */
+/* ===== 4. 选择片 Chip（DESIGN「选择片」）=====
+   胶囊 28，文字 13 原样，计数 12 tabular。未选：透明底（透出机面）+ ctl-border；
+   选中＝墨片：ink 底、face 字、计数 ctl-border。片不投影、没有底边——它是切换状态，不是键 */
 .ss-chip {
   display: inline-flex;
   align-items: center;
@@ -435,45 +642,43 @@
   box-sizing: border-box;
   height: var(--control-h);
   padding: 0 12px;
-  border: 1px solid var(--hairline);
+  border: var(--border-control);
   border-radius: var(--radius-pill);
-  background: var(--canvas);
+  background: transparent;
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   line-height: 1;
   white-space: pre;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
+  cursor: default;
   transition:
     border-color var(--motion-fast) var(--ease-mech),
     background-color var(--motion-fast) var(--ease-mech),
     color var(--motion-fast) var(--ease-mech);
 }
 
-/* 描边的块：悬停把 hairline 推到 ink，底色不动 */
+/* 有边的块：悬停描边升一档，底色不动 */
 .ss-chip:hover:not(:disabled) {
-  border-color: var(--ink);
+  border-color: var(--ctl-edge);
 }
 
 .ss-chip.is-selected {
   border-color: var(--ink);
   background: var(--ink);
-  color: var(--canvas);
+  color: var(--face);
 }
 
-/* 反色档已经在阶梯顶端，悬停只能往回退一格 */
+/* 墨片已经到顶：悬停在内沿加一圈 ink-mute */
 .ss-chip.is-selected:hover:not(:disabled) {
-  border-color: var(--ink-mute);
-  background: var(--ink-mute);
+  border-color: var(--ink);
+  outline: 1px solid var(--ink-mute);
+  outline-offset: -2px;
 }
 
 .ss-chip:disabled {
-  border-color: var(--hairline);
-  background: var(--canvas);
+  border: var(--border-disabled);
+  background: transparent;
   color: var(--ink-faint);
-  cursor: default;
 }
 
 .ss-chip__icon {
@@ -486,27 +691,28 @@
 }
 
 .ss-chip__count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink-faint);
 }
 
 .ss-chip.is-selected .ss-chip__count {
-  color: var(--canvas);
+  color: var(--ctl-border);
 }
 
-/* ===== 3.1 模型片 ModelChip：胶囊 24，hairline，末尾 9px × ===== */
+/* ===== 4.1 模型片 ModelChip：胶囊 24，paper 面 + 1px hairline 环，末尾 9px × =====
+   与筛选片形状一样、材质不同：片无墨、无底边 */
 .ss-modelchip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
   height: var(--control-h-compact);
-  padding: 0 6px 0 10px;
+  padding: 0 7px 0 10px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-pill);
-  background: var(--canvas);
+  background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--size-caption);
@@ -525,10 +731,10 @@
   border: 0;
   background: none;
   color: var(--ink-mute);
-  cursor: pointer;
+  cursor: default;
 }
 
-/* 视觉 9，命中区 24 */
+/* 视觉 9，命中区 25 */
 .ss-modelchip__remove::before {
   content: "";
   position: absolute;
@@ -539,10 +745,10 @@
   color: var(--ink);
 }
 
-/* ===== 3.2 标签 Tag：无框的 12px 文字 ===== */
+/* ===== 4.2 标签 Tag：无框的 12px 文字（有框的都能点） ===== */
 .ss-tag {
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   white-space: nowrap;
 }
@@ -554,19 +760,17 @@
 
 .ss-tag--weak {
   font-weight: 400;
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
-/* 可悬停但不可点：点状下划线（abbr 惯例）；实线下划线只属于文字链 */
+/* 可悬停读更多、但不可点：不加装饰线（裁决 D21：点状下划线是网页 abbr 惯例，macOS 上没人认得），
+   提示框照出。能点的（`2 份不一样`）用安静键 */
 .ss-tag.has-tip {
-  text-decoration: underline dotted var(--ink-faint);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
   cursor: default;
 }
 
-/* ===== 4. 状态点 StateDot =====
-   10px 家族同一个环骨架（1.5 描边）；16px 版 1.4 描边。颜色走 currentColor */
+/* ===== 5. 状态点 StateDot（DESIGN「状态点」）=====
+   10px 家族同一个环骨架（1.5 描边）；16px 版 1.4 描边。颜色走 currentColor；不凹、不上色 */
 .ss-dot {
   display: block;
   flex-shrink: 0;
@@ -579,17 +783,15 @@
 }
 
 .ss-dot.is-inverse {
-  color: var(--canvas);
+  color: var(--face);
 }
 
 .ss-dot.is-muted {
-  color: var(--disabled);
+  color: var(--ink-faint);
 }
 
-/* 悬停光晕：点本身一点不变（点的颜色或填充一变就被读成已经点了），只在点的下层出一圈
-   直径 22 的圆形实底，说「能点」，不预告结果。用 hairline 不用 surface：悬停格正落在
-   surface 的行带与列带交叉处，surface 光晕在那里看不出来（实测同为 242）。
-   光晕是 svg 里先画的圆，溢出 viewBox，不占布局 */
+/* 悬停光晕：点本身一点不变，只在点的下层出一圈直径 22 的 hairline 圆形实底，说「能点」，
+   不预告结果。用 hairline 不用 surface：悬停格正落在 surface 的行带上，surface 光晕看不出来 */
 .ss-dot__halo {
   fill: var(--hairline);
   opacity: 0;
@@ -618,23 +820,23 @@
   border: 0;
   border-radius: 0;
   background: none;
-  cursor: pointer;
+  cursor: default;
 }
 
-/* 同名 ×2：表格行里等宽 12 ink-faint */
+/* 同名 ×2：12 tabular ink-faint（计数，不用等宽字族） */
 .ss-dup {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   line-height: var(--leading-caption);
   white-space: nowrap;
 }
 
 .ss-dup--row {
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   color: var(--ink-faint);
 }
 
-/* ===== 5. 提示框 Tooltip：黑窗白字 12，内边距 6 8，圆角 6（control），浮层阴影 tip，最大宽 240 ===== */
+/* ===== 6. 提示框 Tooltip（DESIGN「浮层」）：墨窗 face 字 12，内边距 6 8，control 7，浮层投影，最大宽 240 ===== */
 .ss-tipwrap {
   position: relative;
   display: inline-flex;
@@ -656,16 +858,18 @@
   pointer-events: none;
 }
 
-/* 文字链命中区左右各伸 6（负外边距）：挪到包层上，包层的盒与键同宽，版面不变 */
-.ss-tipwrap.is-explain:has(> .ss-btn--link) {
+/* 安静键与外链的命中区左右各伸 6（负外边距）：挪到包层上，包层的盒与键同宽，版面不变 */
+.ss-tipwrap.is-explain:has(> .ss-btn--quiet),
+.ss-tipwrap.is-explain:has(> .ss-btn--external) {
   margin: 0 -6px;
 }
 
-.ss-tipwrap.is-explain > .ss-btn--link {
+.ss-tipwrap.is-explain > .ss-btn--quiet,
+.ss-tipwrap.is-explain > .ss-btn--external {
   margin: 0;
 }
 
-/* 复选框视觉 12、命中区 24：禁用时由包层撑命中区 */
+/* 复选框视觉 13、命中区 25：禁用时由包层撑命中区 */
 .ss-tipwrap.is-explain:has(> .ss-checkbox)::before {
   content: "";
   position: absolute;
@@ -682,10 +886,10 @@
   padding: 6px 8px;
   border-radius: var(--radius-control);
   background: var(--ink);
-  color: var(--canvas);
-  box-shadow: var(--elev-tip);
+  color: var(--face);
+  box-shadow: var(--elev-float);
   font-family: var(--font-ui);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 400;
   line-height: var(--leading-caption);
   text-align: left;
@@ -750,13 +954,14 @@
   display: inline;
 }
 
+/* 墨面上的次字：ctl-border */
 .ss-tip__key {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  color: var(--ink-faint);
+  color: var(--ctl-border);
 }
 
-/* ===== 6. 旋转关键帧：忙碌指示 Spinner 用 ===== */
+/* ===== 7. 旋转关键帧：忙碌指示 Spinner 用 ===== */
 @keyframes ss-spin {
   to {
     transform: rotate(360deg);
@@ -779,8 +984,8 @@
   }
 }
 
-/* ===== 6b. 忙碌指示「地球绕太阳」：1 圈 / 1.2s 线性（Spinner.tsx）；只在用户等的地方、带文字。
-   整颗 svg 绕中心转：太阳居中、转了也不变，看上去只有地球在走；不画轨道线 ===== */
+/* ===== 7.1 忙碌指示「地球绕太阳」：1 圈 / 1.2s 线性（Spinner.tsx）；只在用户等的地方、带文字。
+   整颗 svg 绕中心转：太阳居中、转了也不变，看上去只有地球在走。不用橙：忙碌不是「在生效」 ===== */
 .ss-spinner {
   display: block;
   flex-shrink: 0;
@@ -789,14 +994,14 @@
   animation: ss-spin var(--motion-spinner) linear infinite;
 }
 
-/* 轨道：1px ink-faint，淡而细，与原件记号 ⦿ 的 1.4px 墨环分得开 */
+/* 轨道：1px ink-faint，淡而细，与原件记号 ⦿ 的 1.5px 墨环分得开 */
 .ss-spinner__orbit {
   stroke: var(--ink-faint);
   stroke-width: 1;
 }
 
-/* ===== 7. 提示小窗 Toast（DESIGN「反馈的两种形态」）：浮起的一层只表示「会自己消失」 =====
-   文字一律 13（caption）：动词 600、名字 400、数字 mono 12——比表格正文 15 低一档 */
+/* ===== 8. 提示小窗 Toast（DESIGN「反馈的两种形态」）：浮起的一层只表示「会自己消失」 =====
+   成功是纸、需要注意是墨。文字一律 13（caption）：动词 600、名字 400、数字 12 tabular */
 .ss-toast {
   box-sizing: border-box;
   font-family: var(--font-ui);
@@ -804,16 +1009,17 @@
   line-height: var(--leading-caption);
 }
 
-/* 成功：画布底 + layer 圆角 + tip 阴影的白窗，单行高 32。浮在别的内容上，自带底色才读得出是一层 */
+/* 成功：纸窗（paper + 1px hairline 边 + float 12 圆角 + 浮层投影），单行高 32 */
 .ss-toast--routine {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   height: var(--control-h-row);
   padding: 0 12px;
-  border-radius: var(--radius-layer);
-  background: var(--canvas);
-  box-shadow: var(--elev-tip);
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
   color: var(--ink);
   white-space: nowrap;
 }
@@ -844,16 +1050,16 @@
   display: contents;
 }
 
-/* 需要注意：黑显示窗，8 圆角（layer）无外框，浮层阴影 tip，宽 ≤ 400。
-   里面没有自带底色的块，不必裁切（裁切会把放不下的撤销键切掉） */
+/* 需要注意：墨窗——ink 实心板、float 12 圆角、无外框、浮层投影，宽 ≤ 400。
+   墨面上的字：主 face、次 ctl-border；分隔线 ink-mute 1px */
 .ss-toast--notice {
   display: flex;
   width: max-content;
   max-width: 400px;
-  border-radius: var(--radius-layer);
+  border-radius: var(--radius-float);
   background: var(--ink);
-  color: var(--canvas);
-  box-shadow: var(--elev-tip);
+  box-shadow: var(--elev-float);
+  color: var(--face);
 }
 
 .ss-toast__indicator {
@@ -920,10 +1126,11 @@
   gap: 8px;
 }
 
+/* 数字：12 tabular（Inter 自带等宽数字，不换等宽字族） */
 .ss-toast__more,
 .ss-toast__num {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
   font-weight: 500;
 }
@@ -939,7 +1146,7 @@
 }
 
 .ss-toast--notice .ss-toast__sep {
-  color: var(--ink-mute);
+  color: var(--ctl-border);
 }
 
 .ss-toast__actions {
@@ -950,13 +1157,18 @@
   padding-left: 12px;
 }
 
+/* 副行：路径与条数，等宽 12；墨面上是次字 ctl-border */
 .ss-toast__stats {
   margin-top: -2px;
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
   color: var(--ink-faint);
   white-space: nowrap;
+}
+
+.ss-toast--notice .ss-toast__stats {
+  color: var(--ctl-border);
 }
 
 .ss-toast__detail {
@@ -965,8 +1177,9 @@
   border-top: 1px solid var(--ink-mute);
 }
 
-/* ===== 8. 错误横幅 ErrorBanner：内容区页边内的 surface 灰面板（DESIGN「提示条分两档 › 需要注意 · 大面积」） =====
-   大面积不用黑：surface 实底、layer 8 圆角、无边无影；在页面流里，不浮起。 */
+/* ===== 9. 灰面板：错误横幅 ErrorBanner 与行内待办条 NoticePanel（DESIGN「灰面板」）=====
+   内嵌、不会自己走：surface 实底、face 12 圆角、无边无投影；左侧 !，主句 ink + 副句 ink-mute，
+   动作是默认键（紧凑 24，纸面在灰上读得出是一颗键）。与悬停行同色但形状不同（圆角、内缩、有内边距） */
 .ss-banner {
   display: flex;
   align-items: center;
@@ -974,7 +1187,7 @@
   box-sizing: border-box;
   width: 100%;
   padding: 12px 16px;
-  border-radius: var(--radius-layer);
+  border-radius: var(--radius-face);
   background: var(--surface);
   color: var(--ink);
   font-family: var(--font-ui);
@@ -1019,7 +1232,6 @@
   margin-right: -6px;
 }
 
-/* ===== 8.1 行内待办条 NoticePanel：内容宽的 surface 灰面板 ===== */
 .ss-noticepanel {
   display: inline-flex;
   align-self: flex-start;
@@ -1027,8 +1239,7 @@
   gap: var(--space-xs);
   box-sizing: border-box;
   padding: 8px 12px;
-  /* 提示条一档 8 圆角；它在页面流里（挂在某一行下面），不浮起，所以没有阴影 */
-  border-radius: var(--radius-layer);
+  border-radius: var(--radius-face);
   background: var(--surface);
   color: var(--ink);
   font-family: var(--font-ui);
@@ -1070,24 +1281,22 @@
   pointer-events: none;
 }
 
-.ss-noticepanel__actions .ss-btn--link {
+.ss-noticepanel__actions .ss-btn--quiet {
   margin-left: 2px;
 }
 
-/* 灰面板上的键：canvas 底才读得出是一颗键；默认键悬停的 surface 在这里看不见，退到 hairline（「可点的面」按下那一档） */
-.ss-banner .ss-btn:not(.ss-btn--link),
-.ss-noticepanel .ss-btn:not(.ss-btn--link) {
-  background: var(--canvas);
-}
-
-.ss-banner .ss-btn:not(.ss-btn--link):hover:not(:disabled),
-.ss-noticepanel .ss-btn:not(.ss-btn--link):hover:not(:disabled),
+/* 灰面板上的安静键与图标按钮：悬停带 surface 在灰上看不见，退一档到 hairline */
+.ss-banner .ss-btn--quiet:hover:not(:disabled),
+.ss-noticepanel .ss-btn--quiet:hover:not(:disabled),
 .ss-banner .ss-iconbtn:hover:not(:disabled),
 .ss-noticepanel .ss-iconbtn:hover:not(:disabled) {
   background: var(--hairline);
 }
 
-/* ===== 9. 确认弹窗 Confirm：白板 460，12 圆角（dialog）+ 浮层阴影 layer，无黑框；黑 18% 遮罩，触发行留在罩上 ===== */
+/* ===== 10. 确认框 Confirm（DESIGN「浮层」「材料与工艺 › 对话框」）=====
+   纸浮层（paper + 1px hairline 边）、float 12 圆角、浮层投影，宽 384、内边距 20 20 16；
+   遮罩 ink 16% 整面压暗。标题 head 16/600，正文 body 15 ink-mute；键高 32、左右 16、间距 8、上距 18，
+   `取消` 是默认键（D14，macOS 惯例），主动作墨键在右 */
 .ss-confirm-layer {
   position: fixed;
   inset: 0;
@@ -1116,43 +1325,45 @@
 .ss-confirm {
   position: relative;
   box-sizing: border-box;
-  width: 460px;
+  width: 384px;
   max-width: calc(100vw - 32px);
-  padding: 24px 28px;
-  border-radius: var(--radius-dialog);
-  background: var(--canvas);
+  padding: 20px 20px 16px;
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
   color: var(--ink);
-  /* 浮层阴影（一圈 8% 墨描边 + 柔和投影）替掉原来的 1px 黑框 */
-  box-shadow: var(--elev-layer);
 }
 
-/* 标题 head-cap 档：15/600，汉字字距 0 */
 .ss-confirm__title {
-  font-family: var(--font-cond);
-  font-size: var(--size-body);
+  font-family: var(--font-ui);
+  font-size: var(--size-head);
   font-weight: 600;
   letter-spacing: 0;
-  line-height: 1.4;
+  line-height: var(--leading-head);
 }
 
 .ss-confirm__body {
-  margin-top: 12px;
+  margin-top: var(--space-xs);
   font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
   color: var(--ink-mute);
 }
 
-/* 路径铭牌：黑底等宽 12 白字，内边距 10 12 */
+/* 路径铭牌：凹面（recess 底、recess-input 内凹、control 7），等宽 12 ink 字，内边距 10 12。
+   V4 不再用墨底铭牌——墨面只有两义 */
 .ss-confirm__nameplate {
-  margin-top: 16px;
+  margin-top: var(--space-sm);
   padding: 10px 12px;
-  background: var(--ink);
-  color: var(--canvas);
+  border-radius: var(--radius-control);
+  background: var(--recess);
+  box-shadow: var(--recess-input);
+  color: var(--ink);
   font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
-  line-height: var(--leading-caption);
+  line-height: var(--leading-label);
 }
 
 .ss-confirm__path {
@@ -1165,7 +1376,7 @@
 }
 
 .ss-confirm__safety {
-  margin-top: 12px;
+  margin-top: var(--space-sm);
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   line-height: var(--leading-caption);
@@ -1176,11 +1387,12 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 16px;
-  padding-top: 20px;
+  gap: var(--space-xs);
+  padding-top: var(--space-lg);
 }
 
-/* ===== 10. 二级页面 SubPage：头 84 = 28 + 56，底 hairline ===== */
+/* ===== 11. 二级页面 SubPage（DESIGN「壳：机壳与机面」）=====
+   头（← + 页面名 display）落在机壳上、没有分隔线；内容进一块机面（face + 1px hairline + 12 圆角、无投影） */
 .ss-subpage {
   position: fixed;
   inset: 0;
@@ -1188,7 +1400,7 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
-  background: var(--canvas);
+  background: var(--shell);
 }
 
 .ss-subpage__bar {
@@ -1198,17 +1410,16 @@
   box-sizing: border-box;
   /* padding-top 必须写在 padding 简写之后，否则被它归零 */
   height: calc(var(--titlestrip) + var(--topbar));
-  padding: 0 var(--space-xxl);
+  padding: 0 var(--space-md);
   padding-top: var(--titlestrip);
-  border-bottom: 1px solid var(--hairline);
   flex-shrink: 0;
 }
 
-/* 页面名 display 28/700：不大写、字距 0；拉丁落到 Barlow Condensed，汉字落到苹方 */
+/* 页面名 display 28/600：原样写、字距 0 */
 .ss-subpage__title {
-  font-family: var(--font-cond);
+  font-family: var(--font-ui);
   font-size: var(--size-display);
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: var(--leading-display);
   white-space: nowrap;
@@ -1224,21 +1435,15 @@
 .ss-subpage__body {
   flex-grow: 1;
   min-height: 0;
+  margin: 0 var(--space-md) var(--space-md);
   overflow: auto;
+  border: var(--border-face);
+  border-radius: var(--radius-face);
+  background: var(--face);
 }
 
-/* ===== 11. Cap：只给拉丁 run 套 Condensed 大写 + 字距 ===== */
-.ss-cap {
-  font-family: var(--font-cond);
-  text-transform: uppercase;
-  letter-spacing: var(--track-label);
-}
-
-.ss-cap-wrap--nav .ss-cap {
-  letter-spacing: var(--track-nav);
-}
-
-/* ===== 12. agent 图标 AgentMark ===== */
+/* ===== 12. agent 图标 AgentMark（DESIGN「agent 图标」「矩阵列头」）=====
+   agent 名是专名，处处原样大小写（含列头，裁决「小写范围」） */
 .ss-mark {
   display: inline-flex;
   align-items: center;
@@ -1247,7 +1452,7 @@
 }
 
 .ss-mark.is-dim {
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
 .ss-mark__icon,
@@ -1258,7 +1463,13 @@
   flex-shrink: 0;
 }
 
-/* 首字母方块：图标缺席时的占位，永远和名字一起出现 */
+/* 图标位固定 16：14px 的首字母方块与 16px 图标同高同中线，列头名字不因此上移 */
+.ss-mark__icon {
+  min-width: 16px;
+  min-height: 16px;
+}
+
+/* 首字母方块：图标缺席时的占位，永远和名字一起出现。14 方、4 圆角、1px ctl-border 边、11/600 */
 .ss-mark__box {
   display: inline-flex;
   align-items: center;
@@ -1267,10 +1478,10 @@
   box-sizing: border-box;
   width: 14px;
   height: 14px;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--ctl-border);
   border-radius: var(--radius-mark);
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
+  font-family: var(--font-ui);
+  font-size: 11px;
   font-weight: 600;
   line-height: 1;
 }
@@ -1280,7 +1491,7 @@
   font-size: var(--size-body);
 }
 
-/* 列头：图标在上、Condensed 大写名 12/600（拉丁 run 才大写），计数等宽 12 ink-faint */
+/* 列头：图标在上、名字（label 12/500 ink）在中、计数（12 tabular ink-faint）在下 */
 .ss-mark--stacked,
 .ss-mark--header {
   flex-direction: column;
@@ -1289,18 +1500,18 @@
 
 .ss-mark--stacked .ss-mark__name,
 .ss-mark--header .ss-mark__name {
-  font-size: var(--size-micro);
-  font-weight: 600;
-  line-height: 1.5;
+  font-size: var(--size-label);
+  font-weight: 500;
+  line-height: var(--leading-caption);
   text-align: center;
   white-space: nowrap;
 }
 
 .ss-mark__count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
-  line-height: 1.5;
+  line-height: var(--leading-caption);
   color: var(--ink-faint);
 }
 
@@ -1341,7 +1552,7 @@
   gap: var(--space-md);
 }
 
-/* 空态图像（DESIGN「图像」）：图在上、不带边框；图 16 → 一句 8 → 次要说明 16 → 动作 */
+/* 空态图像（DESIGN「图像」）：图在上、不带边框、底透明，直接落在机面上；图 16 → 一句 8 → 次要说明 16 → 动作 */
 .ss-empty.has-art {
   gap: 0;
 }
@@ -1403,13 +1614,8 @@
   white-space: nowrap;
 }
 
-/* 旧大写档里嵌专名的出口（见 Plain.tsx）。v4 起按钮与页面名都不大写，只剩兼容用途 */
-.ss-plain {
-  text-transform: none;
-}
-
-/* ===== 13.1 刚变化的格子闪一下：120ms 反色再回落（DESIGN「视觉优先」）=====
-   格子（或任何刚变化的块）加上 .ss-flash 即播一次；里面的 StateDot 跟着 currentColor 转白。
+/* ===== 13.1 刚变化的格子闪一下：120ms 反色再回落（ink 底、点转 face）=====
+   格子（或任何刚变化的块）加上 .ss-flash 即播一次；里面的 StateDot 跟着 currentColor 转 face。
    调用方在 animationend 时拿掉这个类，下次变化再加 */
 .ss-flash {
   animation: ss-flash var(--motion-fast) var(--ease-mech);
@@ -1419,7 +1625,7 @@
   0%,
   60% {
     background-color: var(--ink);
-    color: var(--canvas);
+    color: var(--face);
   }
   100% {
     background-color: transparent;
@@ -1433,7 +1639,7 @@
 @keyframes ss-flash-dot {
   0%,
   60% {
-    color: var(--canvas);
+    color: var(--face);
   }
 }
 
@@ -1442,11 +1648,11 @@
 @media (prefers-reduced-motion: reduce) {
   .ss-btn,
   .ss-iconbtn,
-  .ss-iconbtn__glyph,
   .ss-chip,
-  .ss-switch,
   .ss-switch__knob,
   .ss-checkbox,
+  .ss-tabs__thumb,
+  .ss-tabs__tab,
   .ss-dot__halo {
     transition: none;
   }
@@ -1455,8 +1661,7 @@
     animation: none;
   }
 
-  .ss-btn:active:not(:disabled),
-  .ss-iconbtn:active:not(:disabled) .ss-iconbtn__glyph {
+  .ss-btn:active:not(:disabled) {
     transform: none;
   }
 

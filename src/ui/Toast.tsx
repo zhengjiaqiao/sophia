@@ -8,11 +8,13 @@ import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 /// 提示小窗（DESIGN「反馈的两种形态」「提示条分两档」，画板 Feedback「提示条」）。
 ///
 /// **浮起的小窗只表示一件事：会自己消失。** 两档，严重程度决定打断程度（①）：
-/// - `routine` 成功：画布底 + `layer` 圆角 + `tip` 阴影的白窗，单行高 32：`✓ 写进 [图标] 名字 · 撤销`
-/// - `notice` 做不成 / 部分失败 / 新问题一次性提示：**黑显示窗**，左侧 40px 指示窗放 ✓ / ⊘ / !。
-///   成功一律不用黑块：不给 `tier` 时按 `kind` 取（成功白、其余黑）
+/// - `routine` 成功：纸窗（`paper` + 1px `hairline` 边 + `float` 12 圆角 + 浮层投影），单行高 32：
+///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是安静键）
+/// - `notice` 做不成 / 部分失败 / 新问题一次性提示：**墨窗**（`ink` 实心、无边、浮层投影），
+///   左侧 40px 指示窗放 ✓ / ⊘ / !；动作是浅描边键。
+///   成功是纸、需要注意是墨：不给 `tier` 时按 `kind` 取（成功纸窗、其余墨窗）
 ///
-/// 文字一律 13（`caption`）：动词 600、名字 400、数字 `mono` 12——比表格正文 15 低一档，
+/// 文字一律 13（`caption`）：动词 600、名字 400、数字 12 tabular——比表格正文 15 低一档，
 /// 反馈永远不比它说的内容更重（②）。主行 = **动词 + agent 图标 + 名字**；动词与触发它的动作一致，
 /// 失败态动词带否定（`没开启`）。单格失败原因本身是一整句时给 `message`，不拆动词。
 ///
@@ -59,7 +61,7 @@ export interface ToastAction {
 }
 
 export interface ToastProps {
-  /// 不给按 kind 取：成功 routine（白窗），其余 notice（黑窗）
+  /// 不给按 kind 取：成功 routine（纸窗），其余 notice（墨窗）
   tier?: "notice" | "routine";
   /// routine 只有 success
   kind: ToastKind;
@@ -71,7 +73,7 @@ export interface ToastProps {
   message?: ReactNode;
   /// 动词后半截，写在 agent 图标之后（带方向的「从 [图标] 移除 名字」）；只有一截动词时不给
   verbTail?: string;
-  /// agent 图标组（白 / 墨，随档）。图标自带读屏名
+  /// agent 图标组（墨窗上 `face`、纸窗上 `ink`，随档）。图标自带读屏名
   agents?: ToastAgent[];
   /// 动词与名字之间的其他记号（删原件那个白色小方块）
   icons?: ReactNode;
@@ -83,13 +85,13 @@ export interface ToastProps {
   tally?: { done: number; failed: number };
   /// 做不成 / 部分失败的一句能行动的原因，接在主行 ` · ` 后
   reason?: string;
-  /// 副行：等宽 12 `ink-faint` 读数（路径、条数）
+  /// 副行：等宽 12 读数（路径、条数；纸窗 `ink-faint`、墨窗 `ctl-border`），可拖选
   stats?: string;
   /// 副行之下的展开内容（删原件的后果示意图与铭牌）；只给 notice
   detail?: ReactNode;
-  /// notice：白描边紧凑键；routine：文字链。`撤销` `查看`
+  /// notice：浅描边紧凑键；routine：安静键。`撤销` `查看`
   action?: ToastAction;
-  /// 次要的离开 Sophia 的文字链（带 ↗）：`在访达中显示备份 ↗`
+  /// 次要的离开 Sophia 的链接（下划线 + ↗）：`在访达中显示备份 ↗`
   secondary?: ToastAction;
   /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉（新问题的一次性提示）
   onDismiss?: () => void;
@@ -233,12 +235,12 @@ export function Toast(props: ToastProps) {
           <>
             <span className="ss-toast__sep">·</span>
             {action.disabledReason ? (
-              <Button variant="link" disabled disabledReason={action.disabledReason}>
+              <Button variant="quiet" disabled disabledReason={action.disabledReason}>
                 {action.label}
               </Button>
             ) : (
               <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
-                <Button variant="link" onClick={action.onClick}>
+                <Button variant="quiet" onClick={action.onClick}>
                   {action.label}
                 </Button>
               </BusySlot>
@@ -288,7 +290,7 @@ export function Toast(props: ToastProps) {
             </span>
           ) : null}
         </div>
-        {stats ? <div className="ss-toast__stats">{stats}</div> : null}
+        {stats ? <div className="ss-toast__stats ss-selectable">{stats}</div> : null}
         {detail ? <div className="ss-toast__detail">{detail}</div> : null}
       </div>
     </div>

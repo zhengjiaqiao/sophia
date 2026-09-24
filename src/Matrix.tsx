@@ -773,7 +773,7 @@ export default function Matrix(props: MatrixProps) {
       {/* 取消选择是 busy 的豁免项：它不写磁盘 */}
       <button
         type="button"
-        className="ss-btn ss-btn--link mx-clear"
+        className="ss-btn ss-btn--quiet mx-clear"
         onClick={() => onSelectionChange(new Set())}
       >
         取消选择

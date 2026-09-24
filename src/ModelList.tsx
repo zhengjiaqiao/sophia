@@ -165,7 +165,7 @@ export function ModelList({ entries, onToggle, header, empty }: ModelListProps) 
             {groups.length === 0 ? (
               <p className="model-list__empty">
                 没有匹配的模型
-                <Button variant="link" onClick={() => setQuery("")}>
+                <Button variant="quiet" onClick={() => setQuery("")}>
                   清除筛选
                 </Button>
               </p>

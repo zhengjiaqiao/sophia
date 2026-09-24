@@ -1048,7 +1048,7 @@ export default function McpTab({
             <Tooltip content={diffTip(row.name, fields)}>
               <button
                 type="button"
-                className="ss-btn ss-btn--link mcp-difftoggle"
+                className="ss-btn ss-btn--quiet mcp-difftoggle"
                 aria-expanded={openDiffs.has(row.name)}
                 onClick={() => toggleDiff(row.name, differing)}
               >

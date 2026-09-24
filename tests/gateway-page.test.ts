@@ -124,7 +124,7 @@ test("行：▸ + 短名；第二行 `地址 · 已连 · 已选 1 / 2 个模型
   assert.doesNotMatch(first, /gw-row__url[^]*aria-describedby/);
   assert.match(
     first,
-    /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--link"[^>]*>编辑</,
+    /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--quiet"[^>]*>编辑</,
   );
   assert.match(first, /aria-label="删掉 ap-gateway"/);
   // 没拉到模型时不写「已选」

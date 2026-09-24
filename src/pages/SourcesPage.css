@@ -40,7 +40,7 @@
   align-items: end;
   padding-bottom: 6px;
   border-bottom: 2px solid var(--ink);
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   font-weight: 600;
   line-height: var(--leading-caption);
   color: var(--ink-mute);
@@ -148,7 +148,7 @@
 .src-row__sub {
   display: flex;
   min-width: 0;
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: 1.4;
   color: var(--ink-faint);
   white-space: nowrap;
@@ -274,12 +274,13 @@
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden;
-  border-radius: var(--radius-layer);
-  background: var(--canvas);
-  box-shadow: var(--elev-layer);
+  border-radius: var(--radius-float);
+  border: var(--border-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
 }
 
-/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从 canvas 白渐隐到透明（功能性渐变，同模型列表） */
+/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从浮层的 paper 白渐隐到透明（功能性渐变，同模型列表） */
 .src-layer__viewport {
   position: relative;
   display: flex;
@@ -302,12 +303,12 @@
 
 .src-layer__viewport::before {
   top: 0;
-  background: linear-gradient(to bottom, var(--canvas), transparent);
+  background: linear-gradient(to bottom, var(--paper), transparent);
 }
 
 .src-layer__viewport::after {
   bottom: 0;
-  background: linear-gradient(to top, var(--canvas), transparent);
+  background: linear-gradient(to top, var(--paper), transparent);
 }
 
 .src-layer__viewport[data-fade-top]::before,
@@ -373,14 +374,14 @@
 }
 
 .src-menu__sub {
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: 1.4;
   color: var(--ink-faint);
 }
 
 .src-menu__head {
   padding: 6px var(--space-md) 2px;
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: 1.6;
   color: var(--ink-faint);
 }
@@ -424,7 +425,7 @@
 
 /* 点不了的原因：名字下面一行，12 ink-faint，可折行（原因要写全） */
 .src-target__why {
-  font-size: var(--size-micro);
+  font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink-faint);
   white-space: normal;
@@ -443,12 +444,12 @@
 }
 
 .src-target:disabled {
-  color: var(--disabled);
+  color: var(--ink-faint);
   cursor: default;
 }
 
 .src-target:disabled .src-target__name {
-  color: var(--disabled);
+  color: var(--ink-faint);
 }
 
 .src-target:disabled .ss-checkbox {
