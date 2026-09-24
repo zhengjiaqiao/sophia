@@ -3,7 +3,7 @@ import { ReasonTip } from "./Tooltip.tsx";
 
 /// 按键（DESIGN「按钮」「控件有行程」，视觉 V4）。
 ///
-/// 控件矩形（`control` 7），Inter / 苹方 13 / 600，**原样大小写、字距 0**。键的阶梯（D14）：
+/// 控件矩形（`control` 7），Barlow / 苹方 13 / 600，**原样大小写、字距 0**。键的阶梯（D14）：
 /// - `primary` 墨键：`ink` 底、`face` 字、1px `ink-edge` 底边。一个面里至多一个（`添加 N 个` `保存` 确认框主动作）
 /// - `default` 默认键：`paper` 面、1px `ctl-border` 边、1px `ctl-edge` 底边（`重启` `配置网关` `清除` 确认框的 `取消`）
 /// - `quiet` 安静键：无底无边、13 `ink-mute`；悬停出 `surface` 圆角带，按下下沉 1px。

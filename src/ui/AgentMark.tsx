@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Cap } from "./Cap.tsx";
 
 /// agent 图标（DESIGN「agent 图标 AgentMark」，画板 Marks「agent 图标」）。
 ///
@@ -10,7 +11,7 @@ import type { ReactNode } from "react";
 ///   六段逐段旋转 60° 的交织；第一版六瓣软轮廓在 16px 下读成云 / 齿轮，已换
 /// - Cursor：立方体线稿；Gemini CLI：实心四角星
 ///
-/// 其余降级成**首字母方块**（14px、4 圆角、1px `ctl-border` 边、11/600）。它是图标缺席时的占位，
+/// 其余降级成**首字母方块**（14px、4 圆角、1px `ctl-border` 边、Condensed 11/600，字母经 `Cap` 大写）。它是图标缺席时的占位，
 /// **永远和名字一起出现**：已安装的 9 个里首字母就撞了 3 个 C、2 个 G。
 
 const OPENAI_KNOT =
@@ -74,10 +75,10 @@ export function AgentIcon({ id, name, size = 16, labelled }: AgentIconProps) {
   const drawn = ICONS[id];
 
   if (!drawn) {
-    // 降级：14px 首字母方块（首字母随专名原样取大写）
+    // 降级：14px 首字母方块（专名首字母取大写，经 Cap 的 mark 档套 Condensed）
     return (
       <span className="ss-mark__box" title={labelled ? name : undefined} {...a11y}>
-        {agentInitial(name)}
+        <Cap tone="mark">{agentInitial(name)}</Cap>
       </span>
     );
   }
@@ -116,10 +117,11 @@ export interface AgentMarkProps {
   id: string;
   /// 显示名，原样写
   name: string;
-  /// inline：图标 + 名字横排（设置页、句子里）；
+  /// inline：图标 + 名字横排（设置页、句子里，名字原样）；
   /// stacked：图标在上名字在下（旧列头）；
-  /// header：表格列头三层——16px 图标 / 名字（`label` 12/500 `ink`）/ 计数（12 tabular `ink-faint`）。
-  /// agent 名是专名，处处原样大小写（含列头）
+  /// header：表格列头三层——16px 图标 / 名字（`label` Condensed 12/600 `ink`）/ 计数（12 tabular `ink-faint`）。
+  /// 列头（stacked / header）里的名字经 `Cap` 显示为大写（`CLAUDE CODE`：列头是 agent 身份）；
+  /// 列头之外 agent 名是专名，原样大小写
   layout?: "inline" | "stacked" | "header";
   /// header 的第三层：这个 agent 下开着几个（只写分子、不零填充）
   count?: number;
@@ -131,13 +133,14 @@ export interface AgentMarkProps {
 export function AgentMark({ id, name, layout = "inline", count, dim, title }: AgentMarkProps) {
   const classes = ["ss-mark", `ss-mark--${layout}`];
   if (dim) classes.push("is-dim");
+  const upper = layout !== "inline";
 
   return (
     <span className={classes.join(" ")} title={title}>
       <span className="ss-mark__icon">
         <AgentIcon id={id} name={name} />
       </span>
-      <span className="ss-mark__name">{name}</span>
+      <span className="ss-mark__name">{upper ? <Cap>{name}</Cap> : name}</span>
       {layout === "header" && count !== undefined ? (
         <span className="ss-mark__count">{count}</span>
       ) : null}

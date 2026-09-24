@@ -110,6 +110,6 @@ test("domain 列表：今天 skills、mcp；加第三项，页签、⌘ 数字�
   assert.equal(tabs.match(/class="ss-tabs__tab/g)?.length, 3);
   assert.match(
     tabs,
-    /aria-current="page"[^>]*><span class="ss-tabs__label" data-label="sessions">/,
+    /aria-current="page"[^>]*><span class="ss-cap-wrap ss-cap-wrap--nav"><span class="ss-cap">sessions</,
   );
 });

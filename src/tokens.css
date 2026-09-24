@@ -1,13 +1,15 @@
 /* 界面 token：色与字的唯一来源（docs/DESIGN.md front-matter，视觉 V4 · 拉姆斯 / Braun）。
    全项目只有这个文件可以写字面色值，别处一律 var(--…)——scripts/lint-ui.mjs 强制这一条。
 
-   字体只引用到的 latin 子集与字重：Inter 400/500/600/700（tabular-nums）、
+   字体只引用到的 latin 子集与字重：Barlow 400/500/600（正文、按钮、计数 tabular-nums）、
+   Barlow Condensed 600/700（页面名、区域小标题、页签、区块小标、列头）、
    IBM Plex Mono 400/500（只给 id、路径、版本号）。整包含全字重与西里尔 / 越南语等子集，
    桌面应用不该为没用上的字形付体积。字体文件打进应用，不走 CDN（DESIGN「Typography › 字族」）。 */
-@import "@fontsource/inter/latin-400.css";
-@import "@fontsource/inter/latin-500.css";
-@import "@fontsource/inter/latin-600.css";
-@import "@fontsource/inter/latin-700.css";
+@import "@fontsource/barlow/latin-400.css";
+@import "@fontsource/barlow/latin-500.css";
+@import "@fontsource/barlow/latin-600.css";
+@import "@fontsource/barlow-condensed/latin-600.css";
+@import "@fontsource/barlow-condensed/latin-700.css";
 @import "@fontsource/ibm-plex-mono/latin-400.css";
 @import "@fontsource/ibm-plex-mono/latin-500.css";
 
@@ -29,18 +31,21 @@
   --ink-faint: #6f6f6a; /* 文字里只给计数、等宽读数与不可用的字；复选框边、无格短横、忙碌轨道 */
   --accent: #e0652a; /* 只表示「开着 / 在生效」：开关刻条 + 指示点。别处出现都是缺陷 */
 
-  /* ---- 字（DESIGN「Typography」）：Inter + 苹方，等宽只给 id。两个字族都没有中文字形，CJK 回退栈写全 ---- */
-  --font-ui: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* ---- 字（DESIGN「Typography」）：Barlow + Barlow Condensed + 苹方，等宽只给 id。
+     三个字族都没有中文字形，CJK 回退栈写全 ---- */
+  --font-ui: Barlow, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-cond: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "PingFang SC", monospace;
 
   /* 六档字号（DESIGN「层级：六档」）。14 仍然不用：14 与 15 眼睛分不出来。
-     nav（页签）是 body 的变体（15 / 500，选中 600），不是第七档；字标是 SVG 资产，不是字 */
-  --size-display: 28px; /* 二级页面名、区域大标题 */
-  --size-title: 20px; /* 模型页、托盘里的 agent 名 */
-  --size-head: 16px; /* 确认框标题、区域小标题 */
-  --size-body: 15px; /* 表格、说明、条目名、确认框正文 */
-  --size-caption: 13px; /* 按钮；副行、文字链、选择片、提示条 */
-  --size-label: 12px; /* 列头与区域标签；计数；id 与路径 */
+     nav（页签）是 body 的变体（Condensed 15 / 700，选中同重，经 Cap 大写），不是第七档；
+     字标是 SVG 资产，不是字 */
+  --size-display: 28px; /* Condensed 700：区域大标题（各屏暂未用上，留作档位） */
+  --size-title: 20px; /* Condensed 700：页面名（Codex、设置、添加来源到 CardBox），原样、字距 0 */
+  --size-head: 16px; /* Condensed 600：确认框标题、区域小标题、能力节名 */
+  --size-body: 15px; /* Barlow 400：表格、说明、条目名、确认框正文；页签 Condensed 700 */
+  --size-caption: 13px; /* Barlow：按钮 600；副行、安静键、外链、选择片、提示条 400 */
+  --size-label: 12px; /* 列头与区块小标 Condensed 600；计数 Barlow tabular；id 与路径 Plex Mono */
 
   --leading-display: 1.2;
   --leading-title: 1.3;
@@ -49,8 +54,11 @@
   --leading-caption: 1.5;
   --leading-label: 1.6;
 
-  /* 负字距只给纯拉丁的大字（模型页 agent 名）；汉字永远 0，V4 没有正字距 */
-  --tracking-title: -0.3px;
+  /* 正字距只给经 Cap 的拉丁 run（页签、区块小标、列头 agent 名、结构词标题），只在 ui.css 的
+     .ss-cap 规则里引用（lint-ui 的 cap-only）。汉字永远 0；页面名原样、字距 0；没有负字距 */
+  --track-nav: 1.17px;
+  --track-label: 0.96px;
+  --track-head: 1.1px;
 
   /* ---- 间距（DESIGN「Layout」）：基准 8px，留白往大了给 ---- */
   --space-xxs: 4px;
@@ -132,7 +140,8 @@
   /* 窗体是机壳 */
   background: var(--shell);
 
-  /* 数字等宽：计数跳动时字面宽度不变，一列数字也能对齐（Inter 自带 tnum） */
+  /* 数字等宽：计数跳动时字面宽度不变，一列数字也能对齐。
+     Barlow 是比例字体，不加这条时 1 比 0 窄一截 */
   font-variant-numeric: tabular-nums;
 
   /* macOS 默认的次像素渲染会给黑字加一圈彩边，改灰度抗锯齿 */

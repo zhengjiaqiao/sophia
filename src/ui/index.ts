@@ -18,6 +18,9 @@ export type {
 export { Switch, Checkbox, CheckboxGlyph, Indicator } from "./Switch.tsx";
 export type { SwitchProps, SwitchSize, CheckboxProps, IndicatorProps } from "./Switch.tsx";
 
+export { Cap, capRuns } from "./Cap.tsx";
+export type { CapProps, CapTone } from "./Cap.tsx";
+
 export { Tabs } from "./Tabs.tsx";
 export type { TabItem, TabsProps } from "./Tabs.tsx";
 

@@ -26,6 +26,7 @@ const { StateDot, DupMark, DOT_LABEL } = await import("../src/ui/StateDot.tsx");
 const { Button, IconButton, AddButton } = await import("../src/ui/Button.tsx");
 const { Switch, Checkbox, Indicator } = await import("../src/ui/Switch.tsx");
 const { Tabs } = await import("../src/ui/Tabs.tsx");
+const { Cap } = await import("../src/ui/Cap.tsx");
 const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TruncTip, isClipped, TIP_DELAY_MS, PINNED_TIP_MS, TIP_IDLE, nextTip } =
@@ -66,6 +67,7 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "AgentMark",
     "AgentIcon",
     "Empty",
+    "Cap",
   ];
   for (const name of exported) {
     assert.equal(typeof (ui as Record<string, unknown>)[name], "function", name);
@@ -75,8 +77,7 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
   assert.equal((ui as Record<string, unknown>).PendingWindow, undefined);
   // 已删：整块变暗的 Busy（单一对象的操作不许整片变暗，忙碌只落在按下的那颗键上，见 BusySlot）
   assert.equal((ui as Record<string, unknown>).Busy, undefined);
-  // 已删：Condensed 大写的 Cap 与它的出口 Plain（V4 全应用没有大写变换）
-  assert.equal((ui as Record<string, unknown>).Cap, undefined);
+  // Cap 已恢复（2026-09-24 字体回到原设计）；它的出口 Plain 不恢复（大写只经 Cap 这一条路）
   assert.equal((ui as Record<string, unknown>).Plain, undefined);
 });
 
@@ -102,17 +103,18 @@ test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/2
   ]) {
     assert.match(tokensCss, new RegExp(`--${name}:\\s*${value};`), name);
   }
-  // V4 删掉的：画布白、禁用灰、Condensed 字族、正字距、旧圆角与旧阴影
+  // 已删的：画布白、禁用灰、大字的正字距与负字距、V4 一度换上的字族、旧圆角与旧阴影
   for (const gone of [
     /--canvas\b/,
     /--disabled\b/,
-    /--font-cond\b/,
-    /--track-(display|title|head|nav|label)\b/,
+    /--track-(display|title)\b/,
+    /--tracking-/,
+    /\bInter\b/,
+    /@fontsource\/inter/,
     /--radius-(layer|dialog)\b/,
     /--elev-(layer|tip)\b/,
     /--size-(wordmark|micro|nav)\b/,
     /--leading-micro\b/,
-    /Barlow/,
   ]) {
     assert.doesNotMatch(tokensCss, gone, String(gone));
   }
@@ -129,9 +131,38 @@ test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/2
   }
   assert.doesNotMatch(tokensCss, /\b14px/);
   assert.doesNotMatch(tokensCss, /--leading-[a-z]+:\s*2;/);
-  // 字族：Inter + 苹方，等宽只给 id
-  assert.match(tokensCss, /--font-ui: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;/);
-  assert.match(tokensCss, /@import "@fontsource\/inter\/latin-(400|500|600|700)\.css";/);
+  // 字族：Barlow + Barlow Condensed + 苹方，等宽只给 id（2026-09-24 回到原设计）
+  assert.match(tokensCss, /--font-ui: Barlow, "PingFang SC", "Microsoft YaHei", sans-serif;/);
+  assert.match(
+    tokensCss,
+    /--font-cond: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", sans-serif;/,
+  );
+  assert.match(tokensCss, /--font-mono: "IBM Plex Mono", ui-monospace, "PingFang SC", monospace;/);
+  // 字体包只收 latin 子集与用到的字重：Barlow 400/500/600、Condensed 600/700、Plex Mono 400/500
+  const imports = [
+    ...tokensCss.matchAll(/@import "@fontsource\/([a-z-]+)\/latin-(\d+)\.css";/g),
+  ].map((m) => `${m[1]} ${m[2]}`);
+  assert.deepEqual(imports, [
+    "barlow 400",
+    "barlow 500",
+    "barlow 600",
+    "barlow-condensed 600",
+    "barlow-condensed 700",
+    "ibm-plex-mono 400",
+    "ibm-plex-mono 500",
+  ]);
+  // 正字距只留三个，只给经 Cap 的拉丁 run
+  for (const [name, value] of [
+    ["nav", "1.17px"],
+    ["label", "0.96px"],
+    ["head", "1.1px"],
+  ]) {
+    assert.match(tokensCss, new RegExp(`--track-${name}:\\s*${value};`), name);
+  }
+  assert.deepEqual(
+    [...tokensCss.matchAll(/--track-([a-z]+):/g)].map((m) => m[1]),
+    ["nav", "label", "head"],
+  );
   // 圆角：刻条 2 / 记号 4 / 滑块 4 / 槽 5 / 控件 7 / 页签槽 10 / 面 12 / 浮层 12 / 胶囊 999
   for (const [name, value] of [
     ["scribe", "2px"],
@@ -194,7 +225,10 @@ test("动效：状态变化走 120ms 机械缓动，不退化成默认 transitio
   }
   assert.match(uiCss, /@media \(prefers-reduced-motion: reduce\)/);
   // 辐条转圈：1 圈 / 1s，8 步阶跃（关键帧 ss-spin，整颗 svg 绕中心转）；自创转盘的样式已删
-  assert.match(cssRule(uiCss, ".ss-spinner"), /ss-spin var\(--motion-spinner\) steps\(8\) infinite/);
+  assert.match(
+    cssRule(uiCss, ".ss-spinner"),
+    /ss-spin var\(--motion-spinner\) steps\(8\) infinite/,
+  );
   // 减少动效：不转（渐变静止），文字后的三点每 500ms 增减一点
   const reduced = uiCss.slice(uiCss.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
   assert.match(reduced, /\.ss-spinner \{\s*animation: none;/);
@@ -323,7 +357,7 @@ test("DupMark：名字后 ×2", () => {
 
 // ===== 按钮 =====
 
-test("Button 默认键：paper 面 + ctl-border 边 + ctl-edge 底边（行程），原样大小写、字距 0、Inter 13/600", () => {
+test("Button 默认键：paper 面 + ctl-border 边 + ctl-edge 底边（行程），原样大小写、字距 0、Barlow 13/600", () => {
   const html = render(Button, { children: "配置网关", onClick: noop });
   assert.match(html, /class="ss-btn"/);
   const rule = cssRule(uiCss, ".ss-btn");
@@ -505,16 +539,16 @@ test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；�
   assert.match(compact, /class="ss-switch ss-switch--compact"/);
   assert.match(compact, /class="ss-indicator ss-indicator--compact"/);
   const base = cssRule(uiCss, ".ss-switch");
-  assert.match(base, /--track-w:\s*40px/);
-  assert.match(base, /--track-h:\s*20px/);
+  assert.match(base, /--groove-w:\s*40px/);
+  assert.match(base, /--groove-h:\s*20px/);
   assert.match(base, /--knob-w:\s*19px/);
   assert.match(base, /--knob-h:\s*16px/);
   assert.match(base, /--scribe-w:\s*12px/);
   assert.match(base, /--scribe-h:\s*6px/);
   assert.match(base, /gap:\s*7px/);
   const small = cssRule(uiCss, ".ss-switch--compact");
-  assert.match(small, /--track-w:\s*32px/);
-  assert.match(small, /--track-h:\s*16px/);
+  assert.match(small, /--groove-w:\s*32px/);
+  assert.match(small, /--groove-h:\s*16px/);
   assert.match(small, /--knob-w:\s*15px/);
   assert.match(small, /--knob-h:\s*12px/);
   assert.match(small, /--scribe-w:\s*9px/);
@@ -643,7 +677,7 @@ test("Checkbox 13px：未选 / 已选 / 半选 / 不可选；与 CheckMark 同�
 
 // ===== 页签滑槽 =====
 
-test("Tabs：hairline 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页签高 28、左右 16、15/500 ink-mute、小写", () => {
+test("Tabs：hairline 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页签高 28、左右 16、Condensed 15/700 ink-mute、经 Cap 大写、选中同重", () => {
   const html = render(Tabs, {
     items: [
       { id: "skills", label: "skills" },
@@ -658,11 +692,11 @@ test("Tabs：hairline 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页�
   assert.match(html, /<span class="ss-tabs__thumb" aria-hidden="true"><\/span>/);
   assert.match(
     html,
-    /<button type="button" class="ss-tabs__tab is-on" aria-current="page"><span class="ss-tabs__label" data-label="skills">skills<\/span><\/button>/,
+    /<button type="button" class="ss-tabs__tab is-on" aria-current="page"><span class="ss-cap-wrap ss-cap-wrap--nav"><span class="ss-cap">skills<\/span><\/span><\/button>/,
   );
   assert.match(
     html,
-    /<button type="button" class="ss-tabs__tab"><span class="ss-tabs__label" data-label="MCP">MCP<\/span>/,
+    /<button type="button" class="ss-tabs__tab"><span class="ss-cap-wrap ss-cap-wrap--nav"><span class="ss-cap">MCP<\/span>/,
   );
   const track = cssRule(uiCss, ".ss-tabs");
   assert.match(track, /background:\s*var\(--hairline\)/);
@@ -673,16 +707,17 @@ test("Tabs：hairline 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页�
   assert.match(tab, /height:\s*var\(--control-h\)/);
   assert.match(tab, /padding:\s*0 16px/);
   assert.match(tab, /font-size:\s*var\(--size-body\)/);
-  assert.match(tab, /font-weight:\s*500/);
+  assert.match(tab, /font-family:\s*var\(--font-cond\)/);
+  assert.match(tab, /font-weight:\s*700/);
   assert.match(tab, /color:\s*var\(--ink-mute\)/);
-  // 拉丁结构词小写（`MCP` 显示为 `mcp`），数据本身不改
-  assert.match(tab, /text-transform:\s*lowercase/);
+  // 大写与字距不写在页签上：经 Cap 只作用于拉丁 run（`skills` 显示为 `SKILLS`），数据本身不改
+  assert.doesNotMatch(tab, /text-transform/);
+  assert.match(tab, /letter-spacing:\s*0;/);
   assert.match(cssRule(uiCss, ".ss-tabs__tab:hover:not(.is-on)"), /color:\s*var\(--ink\)/);
   const on = cssRule(uiCss, ".ss-tabs__tab.is-on");
   assert.match(on, /color:\s*var\(--ink\)/);
-  assert.match(on, /font-weight:\s*600/);
-  // 选中字重变粗不改宽：看不见的 600 撑住宽度
-  assert.match(cssRule(uiCss, ".ss-tabs__label::after"), /content:\s*attr\(data-label\)/);
+  // 选中同重 700：靠滑块与墨色区分，切换前后字宽不变
+  assert.doesNotMatch(on, /font-weight/);
 });
 
 test("Tabs 滑块：paper + ctl-border 环 + ctl-edge 底边，沿槽平移 120ms；按下底边消失、下沉 1px；量到之前由选中页签自己画", () => {
@@ -1347,10 +1382,12 @@ test("Confirm：纸浮层 384（paper + hairline 边 + float 12 + 浮层投影�
   assert.match(board, /box-shadow:\s*var\(--elev-float\)/);
   assert.match(board, /width:\s*384px/);
   assert.match(board, /padding:\s*20px 20px 16px/);
-  // 标题 head 16/600，正文 body 15 ink-mute（不是 14）
+  // 标题 head Condensed 16/600、原样字距 0，正文 body 15 ink-mute（不是 14）
   const title = cssRule(uiCss, ".ss-confirm__title");
+  assert.match(title, /font-family:\s*var\(--font-cond\)/);
   assert.match(title, /font-size:\s*var\(--size-head\)/);
   assert.match(title, /font-weight:\s*600/);
+  assert.match(title, /letter-spacing:\s*0;/);
   const body = cssRule(uiCss, ".ss-confirm__body");
   assert.match(body, /font-size:\s*var\(--size-body\)/);
   assert.match(body, /color:\s*var\(--ink-mute\)/);
@@ -1408,7 +1445,7 @@ test("Confirm 铭牌：凹面等宽 ink 字、路径可拖选；主动作禁用�
 
 // ===== 二级页面 =====
 
-test("SubPage：头落在机壳上（← + 页面名 display 28/600、字距 0、无分隔线），内容进机面，头 84 = 28 + 56", () => {
+test("SubPage：头落在机壳上（← + 页面名 display Condensed 28/700、字距 0、无分隔线），内容进机面，头 84 = 28 + 56", () => {
   const html = render(SubPage, { title: "添加 skill 到「全局」", onBack: noop, children: "内容" });
   assert.match(html, /class="ss-subpage"/);
   assert.match(html, /class="ss-iconbtn" title="返回" aria-label="返回"/);
@@ -1416,8 +1453,9 @@ test("SubPage：头落在机壳上（← + 页面名 display 28/600、字距 0�
   assert.match(html, /class="ss-subpage__title" tabindex="-1">添加 skill 到「全局」</);
   assert.match(html, /class="ss-subpage__body">内容</);
   const title = cssRule(uiCss, ".ss-subpage__title");
+  assert.match(title, /font-family:\s*var\(--font-cond\)/);
   assert.match(title, /font-size:\s*var\(--size-display\)/);
-  assert.match(title, /font-weight:\s*600/);
+  assert.match(title, /font-weight:\s*700/);
   assert.match(title, /letter-spacing:\s*0/);
   assert.doesNotMatch(title, /text-transform/);
   const bar = cssRule(uiCss, ".ss-subpage__bar");
@@ -1431,26 +1469,66 @@ test("SubPage：头落在机壳上（← + 页面名 display 28/600、字距 0�
   assert.doesNotMatch(body, /box-shadow/);
 });
 
-// ===== 大小写 =====
+// ===== 大小写：大写与正字距只经 Cap =====
 
-test("全应用没有大写变换：Cap / Plain 已删，拉丁结构词只在页签上小写，agent 名原样", async () => {
+test("Cap：按脚本切 run，只给含字母的拉丁 run 套 Condensed 大写 + 字距，汉字 run 原样、字距 0", () => {
+  const html = render(Cap, { children: "Claude Code 用户" });
+  assert.equal(
+    html,
+    '<span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">Claude Code </span>用户</span>',
+  );
+  // 四档：nav / label（默认）/ head / mark
+  for (const tone of ["nav", "label", "head", "mark"]) {
+    assert.match(render(Cap, { children: "AGENT", tone }), new RegExp(`ss-cap-wrap--${tone}`));
+  }
+  const cap = cssRule(uiCss, ".ss-cap");
+  assert.match(cap, /font-family:\s*var\(--font-cond\)/);
+  assert.match(cap, /text-transform:\s*uppercase/);
+  assert.match(cap, /letter-spacing:\s*var\(--track-label\)/);
+  assert.match(cssRule(uiCss, ".ss-cap-wrap--nav .ss-cap"), /letter-spacing:\s*var\(--track-nav\)/);
+  assert.match(
+    cssRule(uiCss, ".ss-cap-wrap--head .ss-cap"),
+    /letter-spacing:\s*var\(--track-head\)/,
+  );
+  // 首字母方块里单个字母只大写：字距会把它挤出方块中线
+  assert.match(cssRule(uiCss, ".ss-cap-wrap--mark .ss-cap"), /letter-spacing:\s*0;/);
+  // 包层自己不变换、不加字距：汉字 run 落在包层里，只继承位置给的字号字重
+  assert.throws(() => cssRule(uiCss, ".ss-cap-wrap"));
+});
+
+test("全应用的大写变换与正字距只在 Cap 的样式里，没有小写变换；--track-* 只被 Cap 引用", async () => {
   const { readdirSync, statSync } = await import("node:fs");
   const walk = (dir: URL): URL[] =>
     readdirSync(dir).flatMap((name) => {
       const u = new URL(name, dir.href.endsWith("/") ? dir : new URL(dir.href + "/"));
       return statSync(u).isDirectory() ? walk(new URL(u.href + "/")) : [u];
     });
+  const upperRules: string[] = [];
+  const trackRules: string[] = [];
   for (const u of walk(new URL("../src/", import.meta.url))) {
     if (!/\.(css|tsx?|html)$/.test(u.pathname)) continue;
-    const src = readFileSync(u, "utf8");
-    assert.doesNotMatch(src, /uppercase/, u.pathname);
-    assert.doesNotMatch(src, /ss-cap|ss-plain|--font-cond|--track-(label|nav)/, u.pathname);
+    const src = readFileSync(u, "utf8").replace(/\/\*[\s\S]*?\*\//g, " ");
+    assert.doesNotMatch(src, /text-?[Tt]ransform\s*[:=]\s*["']?lower/, u.pathname);
+    assert.doesNotMatch(src, /ss-plain/, u.pathname);
+    if (!u.pathname.endsWith(".css")) {
+      assert.doesNotMatch(src, /uppercase|letterSpacing|--track-/, u.pathname);
+      continue;
+    }
+    if (u.pathname.endsWith("/tokens.css")) continue;
+    for (const m of src.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const sel = m[1].trim();
+      if (/uppercase/.test(m[2])) upperRules.push(sel);
+      const spacing = m[2].match(/letter-spacing:\s*([^;]+);/);
+      if (spacing && !/^(0|0px|normal)$/.test(spacing[1].trim())) trackRules.push(sel);
+      else if (/--track-/.test(m[2])) trackRules.push(sel);
+    }
   }
-  // 小写只作用于页签（我们自己写的结构词）
-  const lowered = [...uiCss.matchAll(/([^{}]+)\{[^}]*text-transform:\s*lowercase/g)].map((m) =>
-    m[1].replace(/\/\*[\s\S]*?\*\//g, "").trim(),
-  );
-  assert.deepEqual(lowered, [".ss-tabs__tab"]);
+  assert.deepEqual(upperRules, [".ss-cap"]);
+  assert.deepEqual(trackRules, [
+    ".ss-cap",
+    ".ss-cap-wrap--nav .ss-cap",
+    ".ss-cap-wrap--head .ss-cap",
+  ]);
 });
 
 // ===== agent 图标 =====
@@ -1487,7 +1565,11 @@ test("AgentIcon labelled：旁边没有名字时自己带 title 与读屏名", (
 test("AgentMark：没图标的降级成首字母方块，且永远和名字一起出现", () => {
   const html = render(AgentMark, { id: "windsurf", name: "Windsurf" });
   assert.equal(hasAgentIcon("windsurf"), false);
-  assert.match(html, /class="ss-mark__box"[^>]*>W</);
+  // 首字母经 Cap（mark 档：Condensed 大写、字距 0）
+  assert.match(
+    html,
+    /class="ss-mark__box"[^>]*><span class="ss-cap-wrap ss-cap-wrap--mark"><span class="ss-cap">W<\/span><\/span>/,
+  );
   assert.match(html, /class="ss-mark__name">Windsurf</);
   assert.equal(agentInitial("amp"), "A");
 });
@@ -1498,7 +1580,7 @@ test("AgentMark inline：agent 名不大写，原样渲染", () => {
   assert.match(html, /class="ss-mark__name">Claude Code</);
 });
 
-test("AgentMark header：列头三层——图标 / 名字（label 12/500，专名原样）/ 12 tabular 计数，没有灯", () => {
+test("AgentMark header：列头三层——图标 / 名字（label Condensed 12/600，经 Cap 大写）/ 12 tabular 计数，没有灯", () => {
   const html = render(AgentMark, {
     id: "claude-code",
     name: "Claude Code",
@@ -1506,18 +1588,26 @@ test("AgentMark header：列头三层——图标 / 名字（label 12/500，专�
     count: 41,
   });
   assert.match(html, /class="ss-mark ss-mark--header"/);
-  assert.match(html, /class="ss-mark__name">Claude Code</);
+  // 列头是 agent 身份：名字经 Cap（`CLAUDE CODE`），数据本身不改
+  assert.match(
+    html,
+    /class="ss-mark__name"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">Claude Code<\/span><\/span></,
+  );
   assert.match(html, /class="ss-mark__count">41</);
   assert.doesNotMatch(html, /ss-lamp/);
   const name = cssRule(uiCss, ".ss-mark--header .ss-mark__name");
+  assert.match(name, /font-family:\s*var\(--font-cond\)/);
   assert.match(name, /font-size:\s*var\(--size-label\)/);
-  assert.match(name, /font-weight:\s*500/);
+  assert.match(name, /font-weight:\s*600/);
   assert.doesNotMatch(name, /text-transform/);
   const count = cssRule(uiCss, ".ss-mark__count");
   assert.match(count, /font-family:\s*var\(--font-ui\)/);
   assert.match(count, /color:\s*var\(--ink-faint\)/);
-  // 首字母方块：14 方、mark 4 圆角、ctl-border 边
+  // 首字母方块：14 方、mark 4 圆角、ctl-border 边、Condensed 11/600
   const box = cssRule(uiCss, ".ss-mark__box");
+  assert.match(box, /font-family:\s*var\(--font-cond\)/);
+  assert.match(box, /font-size:\s*11px/);
+  assert.match(box, /font-weight:\s*600/);
   assert.match(box, /border:\s*1px solid var\(--ctl-border\)/);
   assert.match(box, /border-radius:\s*var\(--radius-mark\)/);
 });

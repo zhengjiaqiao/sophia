@@ -281,8 +281,9 @@ textarea,
 }
 
 /* ===== 2. 页签滑槽 Tabs（DESIGN「页签」，物件感一）=====
-   槽：hairline 底、recess-tabs 内凹、10 圆角、内边距 3。页签高 28、左右 16、15/500 ink-mute、小写；
-   选中的是槽里一枚纸面滑块（paper + ctl-border 环 + ctl-edge 底边），字 ink 600。
+   槽：hairline 底、recess-tabs 内凹、10 圆角、内边距 3。页签高 28、左右 16、nav Condensed 15/700 ink-mute，
+   标签经 Cap（nav 档）大写 + 1.17px；选中的是槽里一枚纸面滑块（paper + ctl-border 环 + ctl-edge 底边），
+   字转 ink、字重不变（选中同重：切换前后字宽不跳，滑块不必重量）。
    切换时滑块沿槽平移 120ms；量到位置之前（首帧、静态渲染）由选中的页签自己画滑块 */
 .ss-tabs {
   position: relative;
@@ -328,13 +329,11 @@ textarea,
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--ink-mute);
-  font-family: var(--font-ui);
+  font-family: var(--font-cond);
   font-size: var(--size-body);
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: 0;
   line-height: 1;
-  /* 页签是我们自己写的结构词：拉丁一律小写，汉字不受影响（DESIGN「小写是结构的语言」） */
-  text-transform: lowercase;
   white-space: nowrap;
   cursor: default;
   transition: color var(--motion-fast) var(--ease-mech);
@@ -346,28 +345,12 @@ textarea,
 
 .ss-tabs__tab.is-on {
   color: var(--ink);
-  font-weight: 600;
 }
 
 .ss-tabs:not(.has-thumb) .ss-tabs__tab.is-on {
   border-color: var(--ctl-border);
   background: var(--paper);
   box-shadow: var(--key-edge);
-}
-
-/* 字重 500 → 600 不许改宽：用一份看不见的 600 撑住宽度，滑块量出来的宽也稳定 */
-.ss-tabs__label {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.ss-tabs__label::after {
-  content: attr(data-label);
-  height: 0;
-  overflow: hidden;
-  visibility: hidden;
-  font-weight: 600;
 }
 
 /* 按下选中的那一枚：滑块底边消失、下沉 1px */
@@ -384,10 +367,11 @@ textarea,
 /* ===== 3. 开关 Switch（DESIGN「开关」，物件感二）=====
    指示点 + 凹槽 + 带三道防滑纹的滑块。刻条印在槽上，滑块盖住一条、露出另一条：
    开＝滑块在右、左边露橙刻条、橙点；关＝滑块在左、右边露灰刻条、灰点——位置、刻条、点三重表达。
-   regular 40×20（滑块 19×16、刻条 12×6、点 6）；compact 32×16（15×12、9×4、点 5） */
+   regular 40×20（滑块 19×16、刻条 12×6、点 6）；compact 32×16（15×12、9×4、点 5）。
+   槽的尺寸变量叫 groove：track 前缀留给 Cap 的字距 token */
 .ss-switch {
-  --track-w: 40px;
-  --track-h: 20px;
+  --groove-w: 40px;
+  --groove-h: 20px;
   --knob-w: 19px;
   --knob-h: 16px;
   --scribe-w: 12px;
@@ -408,8 +392,8 @@ textarea,
 }
 
 .ss-switch--compact {
-  --track-w: 32px;
-  --track-h: 16px;
+  --groove-w: 32px;
+  --groove-h: 16px;
   --knob-w: 15px;
   --knob-h: 12px;
   --scribe-w: 9px;
@@ -424,8 +408,8 @@ textarea,
 .ss-switch__track {
   position: relative;
   display: block;
-  width: var(--track-w);
-  height: var(--track-h);
+  width: var(--groove-w);
+  height: var(--groove-h);
   border-radius: var(--radius-track);
   background: var(--track);
   box-shadow: var(--recess-track);
@@ -433,7 +417,7 @@ textarea,
 
 .ss-switch__scribe {
   position: absolute;
-  top: calc((var(--track-h) - var(--scribe-h)) / 2);
+  top: calc((var(--groove-h) - var(--scribe-h)) / 2);
   width: var(--scribe-w);
   height: var(--scribe-h);
   border-radius: var(--radius-scribe);
@@ -1121,7 +1105,7 @@ textarea,
   gap: 8px;
 }
 
-/* 数字：12 tabular（Inter 自带等宽数字，不换等宽字族） */
+/* 数字：12 tabular（Barlow 的等宽数字，不换等宽字族） */
 .ss-toast__more,
 .ss-toast__num {
   font-family: var(--font-ui);
@@ -1330,8 +1314,9 @@ textarea,
   color: var(--ink);
 }
 
+/* 标题 head：Condensed 16/600，原样、字距 0（确认框标题是汉字与专名，不经 Cap） */
 .ss-confirm__title {
-  font-family: var(--font-ui);
+  font-family: var(--font-cond);
   font-size: var(--size-head);
   font-weight: 600;
   letter-spacing: 0;
@@ -1410,11 +1395,11 @@ textarea,
   flex-shrink: 0;
 }
 
-/* 页面名 display 28/600：原样写、字距 0 */
+/* 页面名 display Condensed 28/700：原样写、字距 0 */
 .ss-subpage__title {
-  font-family: var(--font-ui);
+  font-family: var(--font-cond);
   font-size: var(--size-display);
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0;
   line-height: var(--leading-display);
   white-space: nowrap;
@@ -1438,7 +1423,8 @@ textarea,
 }
 
 /* ===== 12. agent 图标 AgentMark（DESIGN「agent 图标」「矩阵列头」）=====
-   agent 名是专名，处处原样大小写（含列头，裁决「小写范围」） */
+   agent 名是专名，列头之外处处原样大小写；列头里（stacked / header）经 Cap 显示为 Condensed 大写
+   （`CLAUDE CODE`：列头是 agent 身份，自成一组） */
 .ss-mark {
   display: inline-flex;
   align-items: center;
@@ -1464,7 +1450,8 @@ textarea,
   min-height: 16px;
 }
 
-/* 首字母方块：图标缺席时的占位，永远和名字一起出现。14 方、4 圆角、1px ctl-border 边、11/600 */
+/* 首字母方块：图标缺席时的占位，永远和名字一起出现。14 方、4 圆角、1px ctl-border 边、
+   Condensed 11/600，字母经 Cap（mark 档）大写 */
 .ss-mark__box {
   display: inline-flex;
   align-items: center;
@@ -1475,7 +1462,7 @@ textarea,
   height: 14px;
   border: 1px solid var(--ctl-border);
   border-radius: var(--radius-mark);
-  font-family: var(--font-ui);
+  font-family: var(--font-cond);
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
@@ -1486,7 +1473,8 @@ textarea,
   font-size: var(--size-body);
 }
 
-/* 列头：图标在上、名字（label 12/500 ink）在中、计数（12 tabular ink-faint）在下 */
+/* 列头：图标在上、名字（label Condensed 12/600 ink，经 Cap 大写 + 0.96px）在中、
+   计数（Barlow 12 tabular ink-faint）在下 */
 .ss-mark--stacked,
 .ss-mark--header {
   flex-direction: column;
@@ -1495,8 +1483,9 @@ textarea,
 
 .ss-mark--stacked .ss-mark__name,
 .ss-mark--header .ss-mark__name {
+  font-family: var(--font-cond);
   font-size: var(--size-label);
-  font-weight: 500;
+  font-weight: 600;
   line-height: var(--leading-caption);
   text-align: center;
   white-space: nowrap;
@@ -1508,6 +1497,28 @@ textarea,
   font-variant-numeric: tabular-nums;
   line-height: var(--leading-caption);
   color: var(--ink-faint);
+}
+
+/* ===== 12.1 Cap：只给拉丁 run 套 Condensed + 大写 + 字距（DESIGN「字距：汉字永远 0」）=====
+   全应用的 text-transform: uppercase 与正字距只许出现在这几条规则里（lint-ui 的 cap-only）。
+   字号字重由所在位置给；汉字 run 不进 .ss-cap，字距 0、不变换 */
+.ss-cap {
+  font-family: var(--font-cond);
+  text-transform: uppercase;
+  letter-spacing: var(--track-label);
+}
+
+.ss-cap-wrap--nav .ss-cap {
+  letter-spacing: var(--track-nav);
+}
+
+.ss-cap-wrap--head .ss-cap {
+  letter-spacing: var(--track-head);
+}
+
+/* 首字母方块里单个字母：只大写，字距 0（加字距会把字母挤出方块中线） */
+.ss-cap-wrap--mark .ss-cap {
+  letter-spacing: 0;
 }
 
 /* ===== 13. 空态与忙碌态 ===== */

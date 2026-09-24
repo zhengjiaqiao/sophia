@@ -9,6 +9,7 @@ import {
   AddButton,
   AgentIcon,
   BusySlot,
+  Cap,
   FloatingToast,
   IconButton,
   IconCheck,
@@ -23,7 +24,7 @@ import { GLOBAL_KEY, type SidebarSelection } from "./place.ts";
 import type { SidebarAgent } from "./agentRegistry.ts";
 
 /// 侧栏（DESIGN「壳：侧栏 + 一块机面 › 侧栏」，裁决 D1）：208 宽、全高、落在机壳上、不画线。
-/// 自上而下：红绿灯行 28（留空、可拖窗）→ 字标带 44 → `agent` 段 → `项目` 段 → 贴底 `设置`。
+/// 自上而下：红绿灯行 28（留空、可拖窗）→ 字标带 44 → `AGENT` 段（小标经 `Cap`） → `项目` 段 → 贴底 `设置`。
 /// 三段是**同一种项、同一个选中**：全侧栏一次只有一项选中，它就是机面里正在显示的那一页。
 ///
 /// **拖窗区**（D17）：整条侧栏标 `deep`，项都是 `<button>`（自己挡掉拖动），字标标 `false`；
@@ -95,7 +96,9 @@ export function Sidebar(props: SidebarProps) {
         {props.agents.length > 0 && (
           <>
             <div className="sidebar__head">
-              <span className="sidebar__label">agent</span>
+              <span className="sidebar__label">
+                <Cap>agent</Cap>
+              </span>
             </div>
             {props.agents.map((a) => {
               const on = selection.kind === "agent" && selection.id === a.id;

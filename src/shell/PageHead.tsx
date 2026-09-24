@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 
 /// 页面头（DESIGN「壳：侧栏 + 一块机面 › 页面头」）：机面顶上一行，高 34（容得下 28 高的页签外加
 /// 槽的上下各 3），宽同内容。左端是这一页的主控件或页面名，右端是这一页的动作。
-/// 页面名一律 `title` 20 / 600（纯拉丁 −0.3px）。
+/// 页面名一律 `title` Condensed 20 / 700，原样、字距 0（不经 `Cap`：页面名是内容，不是结构词）。
 ///
 /// **拖窗区**（D17）：这一行里没有控件的地方能拖窗、双击按系统设置缩放（`data-tauri-drag-region="deep"`：
 /// 控件——按钮、输入框——自己挡掉拖动，不必逐个标）。页签滑槽是 `<nav>`，槽里按钮之间的缝不是按钮，
@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 const SlotContext = createContext<HTMLElement | null>(null);
 
 export interface PageHeadProps {
-  /// 左端：主控件（位置页的 `skills ｜ mcp`）或页面名（用 `PageTitle`）
+  /// 左端：主控件（位置页的 `SKILLS ｜ MCP` 页签）或页面名（用 `PageTitle`）
   lead: ReactNode;
   /// 右端的动作；页面也可以经 `PageHeadActions` 从树里别处放进来
   actions?: ReactNode;
@@ -41,7 +41,7 @@ export function PageHead({ lead, actions, children }: PageHeadProps) {
   );
 }
 
-/// 页面名：`title` 20 / 600。它是文字不是控件——外层的 false 只挡拖窗，页面名本身照样能拖
+/// 页面名：`title` Condensed 20 / 700，原样。它是文字不是控件——外层的 false 只挡拖窗，页面名本身照样能拖
 export function PageTitle({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
   return (
     <h1 className="page-head__title" data-tauri-drag-region="deep">

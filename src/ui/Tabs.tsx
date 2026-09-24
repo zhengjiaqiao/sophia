@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { Cap } from "./Cap.tsx";
 
 /// 页签滑槽（DESIGN「页签 Tabs」，物件感一）。
 ///
 /// 一条凹下去的槽（`hairline` 底、`recess-tabs` 内凹、`tab-track` 10 圆角、内边距 3），
 /// 选中的那一页是槽里一枚纸面滑块（`paper` + 1px `ctl-border` 环 + `ctl-edge` 底边）——**位置＝当前页**。
-/// 页签高 28、左右 16、15 / 500 `ink-mute`，选中 `ink` 600；拉丁一律小写（`skills` `mcp`：
-/// 我们自己写的结构词）。页签之间没有竖线、没有下划线。
+/// 页签高 28、左右 16、`nav` Condensed 15 / 700 `ink-mute`，选中 `ink`、**字重不变**（靠滑块区分，
+/// 切换前后字宽不跳）；标签经 `Cap`（nav 档）以大写 + 1.17px 显示（`SKILLS` `MCP`：我们自己写的
+/// 结构词，汉字 run 原样）。页签之间没有竖线、没有下划线。
 ///
 /// 切换时滑块沿槽平移 120ms（机械缓动；reduced-motion 即时）；按下选中的那一枚时滑块底边消失、下沉 1px。
 /// 滑块的位置量自选中页签的盒子；量到之前（首帧、静态渲染）由选中的页签自己画滑块，所以没有闪烁。
@@ -16,7 +18,7 @@ import type { CSSProperties } from "react";
 
 export interface TabItem<T extends string> {
   id: T;
-  /// 原样写；拉丁由样式转小写
+  /// 原样写（`skills`）；拉丁 run 经 `Cap` 显示为大写
   label: string;
 }
 
@@ -76,9 +78,7 @@ export function Tabs<T extends string>({ items, value, onChange, label }: TabsPr
               if (!on) onChange(item.id);
             }}
           >
-            <span className="ss-tabs__label" data-label={item.label}>
-              {item.label}
-            </span>
+            <Cap tone="nav">{item.label}</Cap>
           </button>
         );
       })}

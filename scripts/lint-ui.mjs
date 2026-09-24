@@ -24,8 +24,8 @@ const TOKENS = new Set([
   "#6f6f6a", // ink-faint
   "#e0652a", // accent
 ]);
-/// Inter + 苹方，等宽只给 id（DESIGN「Typography › 字族」）；Barlow 一族已移除
-const FONTS = ["Inter", "IBM Plex Mono"];
+/// Barlow + Barlow Condensed + 苹方，等宽只给 id（DESIGN「Typography › 字族」，2026-09-24 回到原设计）
+const FONTS = ["Barlow", "Barlow Condensed", "IBM Plex Mono"];
 /// 圆角随尺寸（DESIGN「Shapes」）：刻条 2、记号与滑块 4、开关槽 5、控件 7、页签槽 10、
 /// 面与浮层 12、胶囊 999、圆点 50%，平铺结构 0。3px、6px、8px、32px 都是旧值
 const RADII = new Set(["0", "0px", "2px", "4px", "5px", "7px", "10px", "12px", "999px", "50%"]);
@@ -46,6 +46,10 @@ const FADE_STOPS = new Set(["var(--face)", "var(--paper)", "transparent"]);
 
 /// tokens.css 里层次 token 的定义行：只有这几行可以出现 rgba 字面值
 const ELEV_DEF = /^\s*--(?:elev-float|recess-(?:input|tabs|pressed|track))\s*:.*$/gm;
+
+/// 大写与正字距只经 Cap（DESIGN「字距：汉字永远 0」）：只有这些选择器里能写
+/// text-transform: uppercase、非 0 letter-spacing、var(--track-*)
+const CAP_SELECTOR = /\.ss-cap\b/;
 
 /// 橙只表示「开着 / 在生效」，形态只有两种：开关刻条与指示点（裁决「橙的两种形态」）
 const ACCENT_SELECTOR = /\.ss-switch|\.ss-indicator/;
@@ -157,11 +161,11 @@ const rules = [
   },
   {
     id: "font",
-    desc: "只用 Inter 与 IBM Plex Mono 两个字族，且 CJK 回退栈要写全",
+    desc: "只用 Barlow / Barlow Condensed / IBM Plex Mono 三个字族，且 CJK 回退栈要写全",
     run(src, path) {
       const out = [];
       // 两处曾经让这条规则空转：①只认 font-family，而 token 写作 --font-ui
-      // ②捕获组在第一个引号处截断，`Inter, "PingFang SC"` 只捕到 `Inter, `，
+      // ②捕获组在第一个引号处截断，`Barlow, "PingFang SC"` 只捕到 `Barlow, `，
       // 于是正确写法反而被判违规、缺 CJK 回退的反而放过。
       for (const m of src.matchAll(/(?:font-?[Ff]amily|--font-[a-z-]+)\s*[:=]\s*([^;}\n]+)/g)) {
         const decl = m[1].trim().replace(/^["']|["']$/g, "");
@@ -171,9 +175,9 @@ const rules = [
           .trim()
           .replace(/^['"]|['"]$/g, "");
         if (!FONTS.includes(head) && !["monospace", "inherit", "ui-monospace"].includes(head)) {
-          out.push(`${head}（不在 Inter / IBM Plex Mono 里）`);
+          out.push(`${head}（不在 Barlow / Barlow Condensed / IBM Plex Mono 里）`);
         } else if (path === TOKEN_FILE && !/PingFang|YaHei/.test(decl)) {
-          // 两个字族都没有中文字形，CJK 回退必须显式写出来
+          // 三个字族都没有中文字形，CJK 回退必须显式写出来
           out.push(`${head} 的回退栈缺 CJK（PingFang SC）`);
         }
       }
@@ -297,33 +301,51 @@ const rules = [
     },
   },
   {
-    id: "no-uppercase",
-    // 全应用没有大写变换：我们自己写的拉丁结构词小写，内容原样（DESIGN「小写是结构的语言」）
-    desc: "不出现 text-transform: uppercase",
-    run(src) {
+    id: "cap-only",
+    // 大写是结构的语言：我们自己写的纯拉丁结构词经 <Cap> 按脚本切 run，只给拉丁 run 套
+    // Condensed + 大写 + 字距；套到汉字上字字散开、窄体大写挨着常宽苹方像两套系统。
+    // 所以大写变换、正字距、--track-* 只许出现在 Cap 的样式（.ss-cap…）里，组件代码里一律不写
+    // （原画板 lint 的 cjk-tracking；DESIGN「字距：汉字永远 0」）
+    desc: "text-transform: uppercase、非 0 letter-spacing 与 var(--track-*) 只许出现在 Cap 的样式（.ss-cap）里",
+    run(src, path) {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
-      const n = (
-        code.match(/text-transform\s*:\s*uppercase|textTransform\s*:\s*["']uppercase["']/g) || []
-      ).length;
-      return n ? [`${n} 处大写变换`] : [];
+      const isUpper = (body) =>
+        /text-transform\s*:\s*uppercase|textTransform\s*:\s*["']uppercase["']/.test(body);
+      const tracked = (body) =>
+        [...body.matchAll(/(?:letter-spacing|letterSpacing)\s*[:=]\s*["']?([^;"'}\n,]+)/g)]
+          .map((m) => m[1].trim())
+          .filter((v) => !/^(0|0px|normal|inherit)$/.test(v));
+      const usesTrack = (body) => /var\(--track-/.test(body);
+      const out = [];
+      if (!path.endsWith(".css")) {
+        if (isUpper(code)) out.push("组件代码里写了大写变换（用 <Cap>）");
+        for (const v of tracked(code)) out.push(`组件代码里写了字距 ${v}（用 <Cap>）`);
+        if (usesTrack(code)) out.push("组件代码里引用了 --track-*（用 <Cap>）");
+        return [...new Set(out)];
+      }
+      if (path === TOKEN_FILE) return [];
+      for (const m of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const body = m[2];
+        const bad = [];
+        if (isUpper(body)) bad.push("uppercase");
+        for (const v of tracked(body)) bad.push(`letter-spacing: ${v}`);
+        if (usesTrack(body)) bad.push("var(--track-*)");
+        if (!bad.length) continue;
+        const selectors = m[1].split(",").map((x) => x.trim());
+        for (const sel of selectors)
+          if (!CAP_SELECTOR.test(sel)) out.push(`${sel}：${bad.join("、")}`);
+      }
+      return [...new Set(out)];
     },
   },
   {
-    id: "tracking",
-    // V4 没有正字距（它原是给 Condensed 大写的）；负字距只给纯拉丁的大字，走 --tracking-* token。
-    // 汉字字距永远 0（DESIGN「字距：汉字永远 0」）
-    desc: "字距只有 0 或 var(--tracking-*)，不写正字距",
+    id: "no-lower",
+    // 小写变换是 V4 一度用过、已撤回的做法：结构词大写经 Cap，内容原样，没有第三种
+    desc: "不出现小写变换（text-transform 取 lower 开头的值）",
     run(src) {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
-      const out = [];
-      for (const m of code.matchAll(
-        /(?:letter-spacing|letterSpacing)\s*[:=]\s*["']?([^;"'}\n,]+)/g,
-      )) {
-        const v = m[1].trim();
-        if (/^(0|0px|normal|inherit)$/.test(v) || /^var\(--tracking-[a-z-]+\)$/.test(v)) continue;
-        out.push(`letter-spacing: ${v}`);
-      }
-      return [...new Set(out)];
+      const n = (code.match(/text-?[Tt]ransform\s*[:=]\s*["']?lower/g) || []).length;
+      return n ? [`${n} 处小写变换`] : [];
     },
   },
   {

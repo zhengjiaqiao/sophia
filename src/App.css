@@ -141,7 +141,8 @@ input:focus-visible {
   padding-bottom: var(--space-xs);
 }
 
-/* 区块小标：label 12 / 500 ink-mute，小写拉丁结构词；行高 26、左右 20、上距 14 */
+/* 区块小标：label Condensed 12 / 600 ink-mute；拉丁结构词经 Cap 大写 + 0.96px（`AGENT`），
+   汉字（`项目`）字距 0、不变换；行高 26、左右 20、上距 14 */
 .sidebar__head {
   display: flex;
   align-items: center;
@@ -153,8 +154,9 @@ input:focus-visible {
 }
 
 .sidebar__label {
+  font-family: var(--font-cond);
   font-size: var(--size-label);
-  font-weight: 500;
+  font-weight: 600;
   line-height: var(--leading-label);
   color: var(--ink-mute);
 }
@@ -397,14 +399,15 @@ input:focus-visible {
   display: none;
 }
 
-/* 页面名一律 title 20 / 600 */
+/* 页面名一律 title Condensed 20 / 700，原样、字距 0 */
 .page-head__title {
   display: flex;
   align-items: center;
   gap: 10px;
   margin: 0;
+  font-family: var(--font-cond);
   font-size: var(--size-title);
-  font-weight: 600;
+  font-weight: 700;
   line-height: var(--leading-title);
 }
 

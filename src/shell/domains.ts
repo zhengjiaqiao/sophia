@@ -4,7 +4,7 @@
 /// （第 N 项＝⌘N，`src-tauri/src/menu.rs` 用 include_str! 读同一个文件）、菜单命令 `tab-<id>`
 /// 都由它生成。落点记忆存 domain 的 id，不存序号——表里插一项，记着的落点不会错位。
 ///
-/// 加一个 domain：往 JSON 里加一行 `{ id, label }`（label 是页签上的字，拉丁结构词小写），
+/// 加一个 domain：往 JSON 里加一行 `{ id, label }`（label 是页签上的字，原样小写写，界面上经 `Cap` 显示为大写），
 /// 再在 App.tsx 的 `LOCATION_PAGES` 里给这个 id 配一页。
 
 import table from "./locationDomains.json" with { type: "json" };
