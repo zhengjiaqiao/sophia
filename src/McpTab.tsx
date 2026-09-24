@@ -46,7 +46,7 @@ import {
   type McpDomainRow,
 } from "./mcpView";
 import { AddButton, Confirm, CornerToast, Empty, Tag, Toast, ToastCount, Tooltip } from "./ui";
-import { McpDiffPanel, type McpDiffState } from "./McpDiffPanel";
+import { McpDiffPanel, McpEndpointRow, type McpDiffState } from "./McpDiffPanel";
 import type { ConfirmAnchor, ToastProps } from "./ui";
 import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
 import { MCP_OWN_TIP } from "./cellTip";
@@ -1177,11 +1177,12 @@ export default function McpTab({
           />
         );
       })(),
-      // 点服务名就地展开：传输（D7：服务的属性，不回答「能不能在这个 agent 用」）、原件 + 打开 ↗
+      // 点服务名就地展开：传输（D7：服务的属性，不回答「能不能在这个 agent 用」）、命令或地址、原件 + 打开 ↗
       detail: (
         <div className="mx-kv">
           <span className="mx-kv__key">传输</span>
           <span className="mx-kv__value">{transports.join(" / ") || "不支持的写法"}</span>
+          <McpEndpointRow name={row.name} locationId={originId} load={api.mcpEndpoint} />
           <span className="mx-kv__key">原件</span>
           <span className="mx-kv__value">
             <span className="mx-mono ss-selectable">{displayPath(originPath)}</span>

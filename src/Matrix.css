@@ -569,7 +569,7 @@
   white-space: nowrap;
 }
 
-/* MCP 行详情：键值三行，键 12 ink-faint 定宽 36，值 13（传输 / 原件） */
+/* MCP 行详情：键值三行，键 12 ink-faint 定宽 36，值 13（传输 / 命令或地址 / 原件） */
 .mx-kv {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);

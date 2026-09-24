@@ -530,3 +530,9 @@ export interface McpDiff {
   /// 读不出来的位置
   unreadable: string[];
 }
+/// MCP 行详情 `命令` / `地址` 那一行（`mcp_endpoint`）：服务在一处的定义怎么连。凭据已在 core 脱敏
+export interface McpEndpoint {
+  /// `command`：stdio 的命令 + 参数；`url`：HTTP 的地址
+  kind: "command" | "url";
+  text: string;
+}

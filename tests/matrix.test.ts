@@ -486,6 +486,30 @@ test("MCP 列头第二行 LOCAL / PROJECT 经 Cap；没有 `传输` 列（D7：�
   assert.doesNotMatch(html, /传输|mx-row__transport/);
 });
 
+test("MCP 行详情第二行 `命令` / `地址`：core 取单份定义（mcp_endpoint，凭据已脱敏）、展开时才读；读回之前不写占位", async () => {
+  const { McpEndpointRow } = await import("../src/McpDiffPanel.tsx");
+  // 静态渲染不跑副作用＝还没读回：这一行什么都不画（不写「读取中」）
+  const pending = render(McpEndpointRow, {
+    name: "excalidraw",
+    locationId: "claude",
+    load: async () => ({ kind: "command" as const, text: "npx -y @excalidraw/mcp" }),
+  });
+  assert.equal(pending, "");
+  const tab = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
+  // 键值三行的顺序：传输 → 命令或地址 → 原件；读的是行的原件那一处
+  assert.match(
+    tab,
+    /mx-kv__key">传输<[^]*<McpEndpointRow name=\{row\.name\} locationId=\{originId\} load=\{api\.mcpEndpoint\} \/>[^]*mx-kv__key">原件</,
+  );
+  const panel = readFileSync(new URL("../src/McpDiffPanel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /endpoint\.kind === "url" \? "地址" : "命令"/);
+  const api = readFileSync(new URL("../src/api.ts", import.meta.url), "utf8");
+  assert.match(api, /invoke<McpEndpoint \| null>\("mcp_endpoint", \{ name, locationId \}\)/);
+  const lib = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  assert.match(lib, /fn mcp_endpoint\(/);
+  assert.match(lib, /\n\s+mcp_endpoint,\n/);
+});
+
 test("来源行：短路径中段省略（前段截断、末两级完整）", async () => {
   const { splitPath } = await import("../src/SourceRow.tsx");
   assert.deepEqual(splitPath("/Users/me/Library/Application Support/WeiboAP/skills"), {

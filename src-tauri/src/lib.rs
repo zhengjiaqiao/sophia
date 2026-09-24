@@ -330,6 +330,21 @@ fn mcp_field_diff(
     ))
 }
 
+/// MCP 行详情的 `命令` / `地址`：服务在它原件那一处的定义怎么连。只读；凭据在 core 里就脱敏了
+#[tauri::command]
+fn mcp_endpoint(
+    name: String,
+    location_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<symsync_core::mcp::McpEndpoint>, String> {
+    let discovery = discover_mcp(&state)?;
+    Ok(symsync_core::mcp::endpoint(
+        &discovery.locations,
+        &name,
+        &location_id,
+    ))
+}
+
 #[tauri::command]
 fn propose_mcp_sync(
     selections: Vec<symsync_core::mcp::McpSelection>,
@@ -1100,6 +1115,7 @@ pub fn run() {
             scan_all,
             scan_mcp,
             mcp_field_diff,
+            mcp_endpoint,
             propose_mcp_sync,
             apply_mcp,
             remove_mcp_copies,

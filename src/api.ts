@@ -21,6 +21,7 @@ import type {
   McpUndoReport,
   McpSelection,
   McpDiff,
+  McpEndpoint,
   McpRemovalItem,
   McpSourceList,
   McpSourceRemoval,
@@ -105,6 +106,10 @@ export const api = {
   /// 同名服务在这几个位置上哪些字段不一样（只读；凭据已在 core 脱敏）
   mcpFieldDiff: (name: string, locationIds: string[]) =>
     invoke<McpDiff>("mcp_field_diff", { name, locationIds }),
+  /// 行详情的 `命令` / `地址`：服务 `name` 在 `locationId` 那一处的定义（只读；凭据已在 core 脱敏）。
+  /// 读不出来是 null，那一行不写
+  mcpEndpoint: (name: string, locationId: string) =>
+    invoke<McpEndpoint | null>("mcp_endpoint", { name, locationId }),
   proposeMcpSync: (selections: McpSelection[]) =>
     invoke<McpPreview>("propose_mcp_sync", { selections }),
   applyMcp: (planId: string, allowCrossDomain: boolean) =>

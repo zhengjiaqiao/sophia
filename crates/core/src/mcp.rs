@@ -1064,6 +1064,45 @@ fn args_without_secrets(args: &[String]) -> String {
     out.join(" ")
 }
 
+/// 行详情里 `命令` 或 `地址` 那一行（DESIGN「位置页 › 表格 › 点名字展开」MCP 键值三行）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpEndpoint {
+    /// `command`（stdio：命令 + 参数）或 `url`（HTTP：地址）
+    pub kind: String,
+    /// 显示用的值：参数里的凭据、地址查询里的凭据都已脱敏（同 `diff_fields`），DTO 里不含凭据原文
+    pub text: String,
+}
+
+/// 服务 `name` 在 `location_id` 这一处的定义怎么连：stdio 给命令 + 参数，HTTP 给地址。只读。
+/// 这一处不在、没有这个名字、或写法读不出来（传输记作 unsupported）时为 None——行详情那一行就不写
+pub fn endpoint(locations: &[McpLocation], name: &str, location_id: &str) -> Option<McpEndpoint> {
+    let def = locations
+        .iter()
+        .find(|location| location.id == location_id)
+        .map(parse)
+        .and_then(|parsed| parsed.values.get(name).cloned())?;
+    if def.transport == "unsupported" {
+        return None;
+    }
+    if let Some(url) = def.url.as_deref() {
+        return Some(McpEndpoint {
+            kind: "url".into(),
+            text: url_without_secrets(url),
+        });
+    }
+    let command = def.command.as_deref()?;
+    let text = if def.args.is_empty() {
+        command.to_owned()
+    } else {
+        format!("{command} {}", args_without_secrets(&def.args))
+    };
+    Some(McpEndpoint {
+        kind: "command".into(),
+        text,
+    })
+}
+
 /// 同名服务 `name` 在 `location_ids` 这几个位置上哪些字段不一样。
 ///
 /// 比较的是**原值**（凭据也按原值比，不一样才列），显示的是脱敏后的值；DTO 里不含任何凭据原文。
@@ -3045,6 +3084,83 @@ mod tests {
         assert_eq!(
             locations(&env, &[harness], &[])[0].path,
             PathBuf::from("/tmp/home/.codex/config.toml")
+        );
+    }
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+    use crate::test_support::TempTree;
+
+    fn loc(id: &str, harness_id: &str, path: PathBuf) -> McpLocation {
+        McpLocation {
+            id: id.into(),
+            label: id.into(),
+            harness_id: harness_id.into(),
+            domain: "global".into(),
+            path,
+            selector: None,
+            matrix_hidden: false,
+        }
+    }
+
+    /// 行详情的 `命令` / `地址`：取单份定义，stdio 写命令 + 参数，HTTP 写地址；凭据一律脱敏，
+    /// 找不到的位置、名字都不写这一行
+    #[test]
+    fn endpoint_reads_one_definition_and_masks_secrets() {
+        let t = TempTree::new();
+        let root = t.root();
+        let claude = root.join("claude.json");
+        let codex = root.join("config.toml");
+        fs::write(
+            &claude,
+            serde_json::to_vec(&serde_json::json!({"mcpServers": {
+                "excalidraw": {"command": "npx", "args": ["-y", "@excalidraw/mcp", "--api-key", "sk-live-123456"]},
+                "bare": {"command": "uvx"},
+                "remote": {"type": "http", "url": "https://mcp.example.test/v1?token=abcd1234efgh&team=core"},
+            }}))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            &codex,
+            "[mcp_servers.github]\nurl = \"https://api.githubcopilot.com/mcp/\"\n",
+        )
+        .unwrap();
+        let locations = vec![
+            loc("claude", "claude-code", claude),
+            loc("codex", "codex", codex),
+        ];
+
+        let stdio = endpoint(&locations, "excalidraw", "claude").unwrap();
+        assert_eq!(stdio.kind, "command");
+        assert_eq!(stdio.text, "npx -y @excalidraw/mcp --api-key …");
+        assert!(!serde_json::to_string(&stdio).unwrap().contains("sk-live"));
+
+        let bare = endpoint(&locations, "bare", "claude").unwrap();
+        assert_eq!((bare.kind.as_str(), bare.text.as_str()), ("command", "uvx"));
+
+        let remote = endpoint(&locations, "remote", "claude").unwrap();
+        assert_eq!(remote.kind, "url");
+        assert!(remote.text.starts_with("https://mcp.example.test/v1"));
+        assert!(!remote.text.contains("abcd1234efgh"), "{}", remote.text);
+
+        let toml = endpoint(&locations, "github", "codex").unwrap();
+        assert_eq!(
+            (toml.kind.as_str(), toml.text.as_str()),
+            ("url", "https://api.githubcopilot.com/mcp/")
+        );
+
+        assert_eq!(
+            endpoint(&locations, "github", "claude"),
+            None,
+            "这一处没有这个名字"
+        );
+        assert_eq!(
+            endpoint(&locations, "excalidraw", "nowhere"),
+            None,
+            "没有这一处"
         );
     }
 }

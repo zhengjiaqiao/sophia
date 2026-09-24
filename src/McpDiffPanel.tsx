@@ -1,5 +1,6 @@
-import type { McpDiff, McpFieldValue } from "./types.ts";
-import { Button, Spinner, Tooltip, useBusyShown } from "./ui/index.ts";
+import { useEffect, useState } from "react";
+import type { McpDiff, McpEndpoint, McpFieldValue } from "./types.ts";
+import { Button, Spinner, Tooltip, TruncTip, useBusyShown } from "./ui/index.ts";
 import "./McpDiffPanel.css";
 
 /// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：主视图该服务行就地展开。
@@ -149,5 +150,43 @@ function Comparing() {
         )}
       </div>
     </div>
+  );
+}
+
+/// 行详情的 `命令` / `地址` 一行（DESIGN「点名字展开 › MCP 键值三行」）：展开时才挂上，挂上时读一次
+/// 原件那一处的定义（`mcp_endpoint`，只读，凭据已在 core 脱敏）。读回来之前、读不出来时不写这一行，
+/// 不写「读取中」「未知」——读本机文件是毫秒级，闪一下占位是噪音。值 mono、可选中、截断才提示
+export function McpEndpointRow({
+  name,
+  locationId,
+  load,
+}: {
+  name: string;
+  locationId: string;
+  /// 读单份定义（调用方给 `api.mcpEndpoint`；这个文件不碰 api）
+  load: (name: string, locationId: string) => Promise<McpEndpoint | null>;
+}) {
+  const [endpoint, setEndpoint] = useState<McpEndpoint | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setEndpoint(null);
+    load(name, locationId).then(
+      (found) => alive && setEndpoint(found),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [name, locationId, load]);
+  if (endpoint === null) return null;
+  return (
+    <>
+      <span className="mx-kv__key">{endpoint.kind === "url" ? "地址" : "命令"}</span>
+      <span className="mx-kv__value">
+        <TruncTip content={<span className="mx-mono">{endpoint.text}</span>}>
+          <span className="mx-mono ss-selectable">{endpoint.text}</span>
+        </TruncTip>
+      </span>
+    </>
   );
 }
