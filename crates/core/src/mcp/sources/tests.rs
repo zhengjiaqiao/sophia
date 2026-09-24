@@ -612,14 +612,24 @@ fn source_list_serializes_flat_and_camel_case() {
         },
         own: false,
         auto_targets: Vec::new(),
+        last_auto: None,
     };
     assert_eq!(
         serde_json::to_value(&entry).unwrap(),
         json!({
             "id": "codex", "label": "Codex · User", "harnessId": "codex", "domain": "global",
             "place": "全局", "path": "/h/.codex/config.toml", "unreadable": false,
-            "services": [{"name": "lint", "portable": false}], "own": false, "autoTargets": []
+            "services": [{"name": "lint", "portable": false}], "own": false, "autoTargets": [],
+            "lastAuto": null
         })
+    );
+    let ran = McpSubscribedSource {
+        last_auto: Some(crate::models::AutoRun { at: 7, added: 2 }),
+        ..entry
+    };
+    assert_eq!(
+        serde_json::to_value(&ran).unwrap()["lastAuto"],
+        json!({"at": 7, "added": 2})
     );
     let item: McpRemovalItem =
         serde_json::from_value(json!({"name": "a", "targetId": "codex"})).unwrap();

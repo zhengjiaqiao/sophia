@@ -5,9 +5,10 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use symsync_core::mcp::{
-    auto_selections, execute, location_ref, migrate_baselines, prepare, scan, upsert_auto_import,
-    McpAutoImportRule, McpLocation, McpSelection,
+    auto_selections, execute, location_ref, migrate_baselines, prepare, record_auto_runs, scan,
+    upsert_auto_import, McpAutoImportRule, McpLocation, McpSelection,
 };
+use symsync_core::models::AutoRun;
 use tempfile::tempdir;
 
 fn json_location(id: &str, path: &Path, domain: &str) -> McpLocation {
@@ -36,6 +37,7 @@ fn rule(source: &McpLocation, target_domain: &str, targets: &[McpLocation]) -> M
         // 手写的规则等同于在来源还空着时建的：来源里的都算新出现的
         baseline: Some(BTreeSet::new()),
         target_baselines: Default::default(),
+        last_auto: None,
     }
 }
 
@@ -136,20 +138,38 @@ fn auto_imports_execute_once_then_pick_up_later_source_additions() {
     let source = json_location("source", &source_path, "project:one");
     let target = json_location("target", &target_path, "project:one");
     let locations = vec![source.clone(), target.clone()];
-    let import = rule(&source, "project:one", std::slice::from_ref(&target));
+    let mut import = rule(&source, "project:one", std::slice::from_ref(&target));
+    // 同一来源写到别的位置的规则：这一轮的写入不算到它头上
+    let elsewhere = rule(&source, "project:two", &[]);
 
     let first = auto_selections(&scan(&locations), std::slice::from_ref(&import));
     assert_eq!(first, vec![selection("source", "docs", "target")]);
     let first_plan = prepare(&locations, &first);
     assert!(first_plan.issues.is_empty(), "{:#?}", first_plan.issues);
+    let first_actions = first_plan.actions.clone();
     let first_report = execute(first_plan, false);
     assert_eq!(first_report.entries.len(), 1);
     assert_eq!(first_report.entries[0].outcome, "created");
     assert!(target_path.with_extension("mcp.bak").is_file());
+    // 真写进去了：记成这条规则最近一次执行
+    let mut rules = vec![import.clone(), elsewhere];
+    assert!(record_auto_runs(
+        &mut rules,
+        &first_actions,
+        &first_report,
+        10
+    ));
+    assert_eq!(rules[0].last_auto, Some(AutoRun { at: 10, added: 1 }));
+    assert_eq!(rules[1].last_auto, None);
+    import = rules[0].clone();
 
     let repeated = auto_selections(&scan(&locations), std::slice::from_ref(&import));
     assert!(repeated.is_empty());
     assert!(!target_path.with_extension("mcp.1.bak").exists());
+    // 什么都没写的一轮：不改，上一次留着
+    let idle = execute(prepare(&locations, &repeated), false);
+    assert!(!record_auto_runs(&mut rules, &[], &idle, 20));
+    assert_eq!(rules[0].last_auto, Some(AutoRun { at: 10, added: 1 }));
 
     json_file(
         &source_path,
@@ -160,10 +180,29 @@ fn auto_imports_execute_once_then_pick_up_later_source_additions() {
     );
     let later = auto_selections(&scan(&locations), std::slice::from_ref(&import));
     assert_eq!(later, vec![selection("source", "search", "target")]);
-    let later_report = execute(prepare(&locations, &later), false);
+    let later_plan = prepare(&locations, &later);
+    let later_actions = later_plan.actions.clone();
+    let later_report = execute(later_plan, false);
     assert_eq!(later_report.entries.len(), 1);
     assert_eq!(later_report.entries[0].outcome, "created");
     assert!(target_path.with_extension("mcp.1.bak").is_file());
+    assert!(record_auto_runs(
+        &mut rules,
+        &later_actions,
+        &later_report,
+        30
+    ));
+    assert_eq!(rules[0].last_auto, Some(AutoRun { at: 30, added: 1 }));
+    // 旧 settings 里的规则没有这个字段：照常读，写出也不带
+    let mut legacy = serde_json::to_value(&rules[0]).unwrap();
+    assert_eq!(legacy["lastAuto"], json!({"at": 30, "added": 1}));
+    legacy.as_object_mut().unwrap().remove("lastAuto");
+    let legacy: McpAutoImportRule = serde_json::from_value(legacy).unwrap();
+    assert_eq!(legacy.last_auto, None);
+    assert!(serde_json::to_value(&legacy)
+        .unwrap()
+        .get("lastAuto")
+        .is_none());
 
     let written: serde_json::Value =
         serde_json::from_slice(&fs::read(&target_path).unwrap()).unwrap();

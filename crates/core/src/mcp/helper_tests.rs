@@ -270,6 +270,7 @@ fn agents_without_helpers_refuse_that_pair_only() {
         allow_cross_domain: false,
         baseline: Some(BTreeSet::new()),
         target_baselines: BTreeMap::new(),
+        last_auto: None,
     };
     assert_eq!(
         auto_selections(&overview, &[rule]),

@@ -2,7 +2,7 @@
 use crate::atomicfile::{self, unsafe_parent, FileState, ReadError, Snapshot};
 use crate::discovery::Env;
 use crate::fs::normalize;
-use crate::models::Harness;
+use crate::models::{AutoRun, Harness};
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -82,6 +82,10 @@ pub struct McpAutoImportRule {
     /// 旧文件没有这个字段，读成空
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub target_baselines: BTreeMap<String, BTreeSet<String>>,
+    /// 最近一次真正写进去了东西的自动执行（规则本身就按位置分条，不必再按位置记）。
+    /// 一项没写进去的执行不记、不覆盖上一次（见 `record_auto_runs`）。旧文件没有这个字段，读成 `None`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_auto: Option<AutoRun>,
 }
 
 impl McpAutoImportRule {
@@ -111,6 +115,8 @@ struct McpAutoImportRuleFile {
     baseline: Option<BTreeSet<String>>,
     #[serde(default)]
     target_baselines: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    last_auto: Option<AutoRun>,
 }
 
 /// 旧的整条 `excluded` 按「对当时的所有目标都生效」拆进各目标的名单，老规则的行为不变。
@@ -135,6 +141,7 @@ impl From<McpAutoImportRuleFile> for McpAutoImportRule {
             allow_cross_domain: file.allow_cross_domain,
             baseline: file.baseline,
             target_baselines: file.target_baselines,
+            last_auto: file.last_auto,
         }
     }
 }
@@ -263,10 +270,45 @@ pub fn upsert_auto_import(
                 allow_cross_domain,
                 baseline: Some(snapshot()),
                 target_baselines: BTreeMap::new(),
+                last_auto: None,
             });
         }
     }
     Ok(())
+}
+
+/// 自动写入执行完，把真正写进去的（`created`）按规则记成最近一次执行（`last_auto`）。
+/// 报告条目只有服务名与目标，来源从产出这批写入的动作 `actions`（`prepare` 的那份）里按
+/// (服务名, 目标) 认；规则 = 这个来源、目标里有这一处的那条（规则按目标位置分条）。
+/// 一项没写进去的规则不动，上一次的记录留着。返回是否改动过
+pub fn record_auto_runs(
+    rules: &mut [McpAutoImportRule],
+    actions: &[McpAction],
+    report: &McpReport,
+    at_ms: u64,
+) -> bool {
+    let mut added: BTreeMap<usize, usize> = BTreeMap::new();
+    for entry in report.entries.iter().filter(|e| e.outcome == "created") {
+        let Some(action) = actions
+            .iter()
+            .find(|a| a.name == entry.name && a.target_id == entry.target_id)
+        else {
+            continue;
+        };
+        let Some(i) = rules.iter().position(|r| {
+            r.source.id == action.source_id && r.targets.iter().any(|t| t.id == action.target_id)
+        }) else {
+            continue;
+        };
+        *added.entry(i).or_default() += 1;
+    }
+    for (&i, &n) in &added {
+        rules[i].last_auto = Some(AutoRun {
+            at: at_ms,
+            added: n,
+        });
+    }
+    !added.is_empty()
 }
 
 /// 升级迁移：给没有 baseline 的旧规则补上来源位置当前的全部 MCP 名，于是旧规则从这一刻起

@@ -283,6 +283,19 @@ pub struct AutoLink {
     /// 出现过的 skill 会被当成「新的」补建到新目标上。旧文件没有这个字段，读成空
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub target_baselines: BTreeMap<String, BTreeSet<String>>,
+    /// 最近一次真正建上了链的自动执行，按位置（域 key，`global` / `project:<路径>`）记：
+    /// 规则跨位置共用一条，来源管理页按位置看——在某个项目里加上的不该算到全局那一行上。
+    /// 一格没建上的执行不记、不覆盖上一次（见 `skills::record_auto_runs`）。旧文件没有这个字段，读成空
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub last_auto: BTreeMap<String, AutoRun>,
+}
+
+/// 一次自动执行的结果：什么时候（毫秒时间戳）、加上了几格
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRun {
+    pub at: u64,
+    pub added: usize,
 }
 
 impl AutoLink {
@@ -309,6 +322,8 @@ struct AutoLinkFile {
     baseline: Option<BTreeSet<String>>,
     #[serde(default)]
     target_baselines: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    last_auto: BTreeMap<String, AutoRun>,
 }
 
 /// 旧的整条 `excluded` 按「对当时的所有目标都生效」拆进各目标的名单，老规则的行为不变。
@@ -332,6 +347,7 @@ impl From<AutoLinkFile> for AutoLink {
             target_excluded,
             baseline: f.baseline,
             target_baselines: f.target_baselines,
+            last_auto: f.last_auto,
         }
     }
 }
@@ -575,6 +591,7 @@ mod tests {
             )]),
             baseline: Some(BTreeSet::from(["y".to_string()])),
             target_baselines: BTreeMap::new(),
+            last_auto: BTreeMap::new(),
         };
         let value = serde_json::to_value(&rule).unwrap();
         assert_eq!(
@@ -589,6 +606,28 @@ mod tests {
         // 升级前的规则没有 baseline：读成 None，等首次扫描迁移
         assert_eq!(old.baseline, None);
         assert!(old.target_baselines.is_empty());
+        // 旧文件没有最近一次执行：读成空，写出也不出这个键
+        assert!(old.last_auto.is_empty());
+        assert!(serde_json::to_value(&old)
+            .unwrap()
+            .get("lastAuto")
+            .is_none());
+
+        // 有记录时按位置写成 camelCase，读回相同
+        let mut ran = old.clone();
+        ran.last_auto.insert(
+            "global".into(),
+            AutoRun {
+                at: 1_700_000_000_000,
+                added: 3,
+            },
+        );
+        let value = serde_json::to_value(&ran).unwrap();
+        assert_eq!(
+            value["lastAuto"],
+            json!({"global": {"at": 1_700_000_000_000u64, "added": 3}})
+        );
+        assert_eq!(serde_json::from_value::<AutoLink>(value).unwrap(), ran);
     }
 
     #[test]

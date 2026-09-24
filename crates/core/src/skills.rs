@@ -252,6 +252,51 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
     out
 }
 
+/// 自动同步执行完，把真正建上的链（`Created`）按规则、按位置记成最近一次执行（`AutoLink.last_auto`）。
+/// 建链动作的 `source_path` 是本体位置里的 skill 路径、`target` 是目标目录，都取自同一次扫描的
+/// `sources` / `targets`：前者认出来源（即规则），后者认出位置。一格没建上的位置不动，
+/// 上一次的记录留着。返回是否改动过
+pub fn record_auto_runs(
+    rules: &mut [AutoLink],
+    sources: &[Source],
+    targets: &[Target],
+    report: &SyncReport,
+    at_ms: u64,
+) -> bool {
+    let mut added: BTreeMap<(PathBuf, String), usize> = BTreeMap::new();
+    for entry in &report.entries {
+        if entry.action.kind != ActionKind::Create || entry.outcome != Outcome::Created {
+            continue;
+        }
+        let Some(source) = sources
+            .iter()
+            .find(|s| s.skills.iter().any(|k| k.path == entry.action.source_path))
+        else {
+            continue;
+        };
+        let Some(target) = targets.iter().find(|t| t.path == entry.action.target) else {
+            continue;
+        };
+        *added
+            .entry((normalize(&source.path), domain_key(&target.scope)))
+            .or_default() += 1;
+    }
+    let mut changed = false;
+    for ((source, key), n) in added {
+        if let Some(rule) = rules.iter_mut().find(|r| r.source == source) {
+            rule.last_auto.insert(
+                key,
+                AutoRun {
+                    at: at_ms,
+                    added: n,
+                },
+            );
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// 新建或合并一条规则：同一本体位置已有规则则并入目标（排除名单不动，解除排除走 `include`）。
 /// 规则从无到有（新建，或原先只剩排除名单、没有目标）时拍 baseline：`sources` 里该位置
 /// 当前的全部 skill 名；位置不在 `sources` 里即一个都没有。已生效的规则并入新目标时，
@@ -274,6 +319,7 @@ pub fn upsert_auto_link(
                 target_excluded: BTreeMap::new(),
                 baseline: None,
                 target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
             });
             rules.last_mut().expect("刚 push 过")
         }
@@ -333,6 +379,7 @@ pub fn exclude(rules: &mut Vec<AutoLink>, source: &Path, target: &str, skill: &s
                 target_excluded: BTreeMap::new(),
                 baseline: Some(BTreeSet::new()),
                 target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
             });
             rules.len() - 1
         }
@@ -1173,6 +1220,87 @@ mod tests {
         assert_eq!(acts[0].source_path, universal.join("a"));
     }
 
+    /// 自动执行真正建上的链按位置记成最近一次；没建上的（原地已有、失败、别的来源）不算，
+    /// 一格没建上的执行不覆盖上一次
+    #[test]
+    fn record_auto_runs_counts_created_links_per_domain_and_keeps_last_when_idle() {
+        let tree = TempTree::new();
+        let universal = tree.dir("universal");
+        let other = tree.dir("other");
+        for s in ["a", "b"] {
+            tree.dir(&format!("universal/{s}"));
+        }
+        tree.dir("other/z");
+        let proj = tree.dir("work/app");
+        let claude = tree.dir("home/.claude/skills");
+        let codex = tree.dir("work/app/.codex/skills");
+        // claude 里原地已有一份 b：这一格不是 Missing，不建
+        tree.dir("home/.claude/skills/b");
+        let targets = vec![
+            global("claude-code", &claude),
+            project(&proj, "codex", &codex),
+        ];
+        let mut sources = vec![source(&universal, &["a", "b"]), source(&other, &["z"])];
+        let target_ids = [targets[0].id.clone(), targets[1].id.clone()];
+        let mut rules = Vec::new();
+        upsert_auto_link(&mut rules, &[], &universal, &target_ids);
+
+        let run = |sources: &[Source], rules: &[AutoLink]| {
+            let cells = auto_link_cells(sources, &targets, rules);
+            let actions = propose_links(sources, &targets, &cells);
+            crate::sync::execute(&actions, false, LinkStyle::Absolute)
+        };
+        let mut report = run(&sources, &rules);
+        assert_eq!(report.entries.len(), 3);
+        // 别的来源（没有规则）建上的、失败的都不算到这条规则上
+        report.entries.push(ReportEntry {
+            action: PlannedAction {
+                kind: ActionKind::Create,
+                item_name: "z".into(),
+                source_path: normalize(&other).join("z"),
+                target_path: claude.join("z"),
+                target: normalize(&claude),
+            },
+            outcome: Outcome::Created,
+        });
+        report.entries.push(ReportEntry {
+            action: report.entries[0].action.clone(),
+            outcome: Outcome::Failed("不能写".into()),
+        });
+        assert!(record_auto_runs(
+            &mut rules, &sources, &targets, &report, 100
+        ));
+        assert_eq!(
+            rules[0].last_auto,
+            BTreeMap::from([
+                ("global".to_string(), AutoRun { at: 100, added: 1 }),
+                (project_key(&proj), AutoRun { at: 100, added: 2 }),
+            ])
+        );
+        assert_eq!(rules.len(), 1);
+
+        // 再跑一轮什么都没缺：不改，上一次的记录留着
+        let idle = run(&sources, &rules);
+        assert!(idle.entries.is_empty());
+        assert!(!record_auto_runs(
+            &mut rules, &sources, &targets, &idle, 200
+        ));
+        assert_eq!(rules[0].last_auto[&project_key(&proj)].at, 100);
+
+        // 来源里新出现一个：两处各加上一个，时间换成这一次
+        tree.dir("universal/c");
+        sources[0] = source(&universal, &["a", "b", "c"]);
+        let next = run(&sources, &rules);
+        assert!(record_auto_runs(&mut rules, &sources, &targets, &next, 300));
+        assert_eq!(
+            rules[0].last_auto,
+            BTreeMap::from([
+                ("global".to_string(), AutoRun { at: 300, added: 1 }),
+                (project_key(&proj), AutoRun { at: 300, added: 1 }),
+            ])
+        );
+    }
+
     #[test]
     fn auto_link_cells_expands_rules_and_skips_excluded_missing_source_or_target() {
         let tree = TempTree::new();
@@ -1195,6 +1323,7 @@ mod tests {
                 )]),
                 baseline: Some(BTreeSet::new()),
                 target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
             },
             // 本体位置不存在：整条跳过
             AutoLink {
@@ -1203,6 +1332,7 @@ mod tests {
                 target_excluded: BTreeMap::new(),
                 baseline: Some(BTreeSet::new()),
                 target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
             },
         ];
         let cells = auto_link_cells(&sources, &targets, &rules);
@@ -1644,6 +1774,7 @@ mod tests {
             target_excluded: BTreeMap::new(),
             baseline: Some(BTreeSet::new()),
             target_baselines: BTreeMap::new(),
+            last_auto: BTreeMap::new(),
         }];
         assert!(auto_link_cells(&sources, &targets, &rules).is_empty());
     }

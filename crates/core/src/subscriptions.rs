@@ -58,6 +58,8 @@ pub struct SubscribedSource {
     pub auto_link: bool,
     /// 规则在这个位置的目标 id（`Target.id`）
     pub auto_targets: Vec<String>,
+    /// 规则在这个位置最近一次真正加上了链的执行；从没加上过为 `None`（序列化成 `null`）
+    pub last_auto: Option<AutoRun>,
 }
 
 /// 一个位置的 key 与显示名
@@ -351,9 +353,8 @@ pub fn list(
         .filter(|s| subscribed(s, key, &d_targets, subs))
         .map(|s| {
             let path = normalize(&s.path);
-            let auto_targets: Vec<String> = rules
-                .iter()
-                .find(|r| r.source == path)
+            let rule = rules.iter().find(|r| r.source == path);
+            let auto_targets: Vec<String> = rule
                 .map(|r| {
                     r.targets
                         .iter()
@@ -368,6 +369,7 @@ pub fn list(
                 can_auto_link: s.kind != SourceKind::External,
                 auto_link: !auto_targets.is_empty(),
                 auto_targets,
+                last_auto: rule.and_then(|r| r.last_auto.get(key).copied()),
             }
         })
         .collect();
@@ -380,6 +382,7 @@ pub fn list(
                 can_auto_link: true,
                 auto_link: false,
                 auto_targets: Vec::new(),
+                last_auto: None,
             });
         }
     }
@@ -1013,6 +1016,12 @@ mod tests {
             &ext,
             &[targets[0].id.clone(), targets[1].id.clone()],
         );
+        // 最近一次执行按位置记：这一页只报这个位置的那一次
+        let here = AutoRun { at: 20, added: 3 };
+        rules[0].last_auto = BTreeMap::from([
+            (f.key(), here),
+            ("global".to_string(), AutoRun { at: 30, added: 1 }),
+        ]);
 
         let page = list(&f.key(), &sources, &targets, &subs, &rules, &home);
         let ids = |v: Vec<&SourceSummary>| v.into_iter().map(|s| s.id.clone()).collect::<Vec<_>>();
@@ -1028,6 +1037,9 @@ mod tests {
         assert!(!ego.can_auto_link);
         assert!(ego.auto_link);
         assert_eq!(ego.auto_targets, vec![targets[1].id.clone()]);
+        assert_eq!(ego.last_auto, Some(here));
+        // 没有规则的来源没有记录
+        assert_eq!(page.subscribed[0].last_auto, None);
 
         assert_eq!(
             ids(page.elsewhere.iter().map(|c| &c.source).collect()),
@@ -1071,14 +1083,23 @@ mod tests {
             can_auto_link: true,
             auto_link: false,
             auto_targets: Vec::new(),
+            last_auto: None,
         };
         assert_eq!(
             serde_json::to_value(&entry).unwrap(),
             serde_json::json!({
                 "id": "/a", "path": "/a", "label": "a", "shortPath": "/a",
                 "skills": ["x"], "skillCount": 1, "own": false, "canAutoLink": true,
-                "autoLink": false, "autoTargets": []
+                "autoLink": false, "autoTargets": [], "lastAuto": null
             })
+        );
+        let ran = SubscribedSource {
+            last_auto: Some(AutoRun { at: 5, added: 3 }),
+            ..entry
+        };
+        assert_eq!(
+            serde_json::to_value(&ran).unwrap()["lastAuto"],
+            serde_json::json!({"at": 5, "added": 3})
         );
         assert_eq!(
             serde_json::to_value(RemovalLink {

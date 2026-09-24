@@ -19,6 +19,7 @@ use super::{
 };
 use crate::atomicfile::{self, FileState};
 use crate::fs::normalize;
+use crate::models::AutoRun;
 use crate::subscriptions::{distinguishing_segments, DomainName};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -75,6 +76,8 @@ pub struct McpSubscribedSource {
     pub own: bool,
     /// 「以后新出现的自动写进」在这个位置的目标 id；空＝关着
     pub auto_targets: Vec<String>,
+    /// 这个位置的规则最近一次真正写进去了东西的执行；从没写进过为 `None`（序列化成 `null`）
+    pub last_auto: Option<AutoRun>,
 }
 
 /// `+ 来源` 里的一个候选
@@ -331,10 +334,13 @@ pub fn list(
         .map(|l| l.id.as_str())
         .collect();
     let has_services = |l: &McpLocation| overview.entries.iter().any(|e| e.source_id == l.id);
-    let targets_of = |l: &McpLocation| -> Vec<String> {
+    let rule_of = |l: &McpLocation| {
         rules
             .iter()
             .find(|r| r.source.id == l.id && r.target_domain == key)
+    };
+    let targets_of = |l: &McpLocation| -> Vec<String> {
+        rule_of(l)
             .map(|r| {
                 r.targets
                     .iter()
@@ -357,6 +363,7 @@ pub fn list(
                 source: summary(l, overview),
                 own,
                 auto_targets,
+                last_auto: rule_of(l).and_then(|r| r.last_auto),
             })
         })
         .collect();

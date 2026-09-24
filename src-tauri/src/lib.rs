@@ -206,8 +206,14 @@ fn auto_import_mcp(
     // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
     // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
+    let actions = plan.actions.clone();
     let mut report = symsync_core::mcp::execute(plan, true);
     register_mcp_undo(state, &mut report)?;
+    // 来源管理页目标框的提示框写「最近一次自动操作」：真写进去了才记
+    state
+        .store
+        .record_mcp_auto_import_runs(&actions, &report, now_ms())
+        .map_err(err)?;
     Ok(Some(report))
 }
 
@@ -455,7 +461,13 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     if actions.is_empty() {
         return Ok(None);
     }
-    Ok(Some(execute_grouped(scanned, &actions, false)))
+    let report = execute_grouped(scanned, &actions, false);
+    // 来源管理页目标框的提示框写「最近一次自动操作」：真建上了才记，按规则、按位置
+    state
+        .store
+        .record_auto_link_runs(&scanned.sources, &targets, &report, now_ms())
+        .map_err(err)?;
+    Ok(Some(report))
 }
 
 /// 扫描 → 跑一轮自动同步（只做一轮，不循环）→ 建过链就再扫一次 → 按最终目录集合重建监视
@@ -1028,11 +1040,15 @@ fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), S
     }
     state.store.save_projects(&list).map_err(err)?;
     // 侧栏「最近创建」在取不到文件夹创建时间时用加入时间
-    let now = std::time::SystemTime::now()
+    state.store.mark_project_added(&path, now_ms()).map_err(err)
+}
+
+/// 此刻的毫秒时间戳；时钟早于 1970 时记 0
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    state.store.mark_project_added(&path, now).map_err(err)
+        .unwrap_or(0)
 }
 
 #[tauri::command]

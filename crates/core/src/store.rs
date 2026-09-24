@@ -85,6 +85,28 @@ impl Store {
         Ok(settings)
     }
 
+    /// 自动同步执行完，记下各规则在各位置最近一次真正建上的链（见 `skills::record_auto_runs`）；
+    /// 一格没建上就不写盘。`sources` / `targets` 要是产出这批动作的那次扫描
+    pub fn record_auto_link_runs(
+        &self,
+        sources: &[Source],
+        targets: &[Target],
+        report: &crate::models::SyncReport,
+        at_ms: u64,
+    ) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if crate::skills::record_auto_runs(
+            &mut settings.auto_links,
+            sources,
+            targets,
+            report,
+            at_ms,
+        ) {
+            self.save_settings(&settings)?;
+        }
+        Ok(())
+    }
+
     /// 读设置，顺手把此刻有软链的来源写进各位置的订阅记录（见 `subscriptions::adopt`；
     /// 第一次扫描时认领老数据），改过才写回。要发现结果才能认领，所以只在发现之后用
     pub fn load_settings_adopting_subscriptions(
@@ -110,6 +132,21 @@ impl Store {
             self.save_settings(&settings)?;
         }
         Ok(settings)
+    }
+
+    /// MCP 自动写入执行完，记下各规则最近一次真正写进去的（见 `mcp::record_auto_runs`）；
+    /// 一项没写进去就不写盘。`actions` 是产出这批写入的计划动作
+    pub fn record_mcp_auto_import_runs(
+        &self,
+        actions: &[crate::mcp::McpAction],
+        report: &crate::mcp::McpReport,
+        at_ms: u64,
+    ) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if crate::mcp::record_auto_runs(&mut settings.mcp_auto_imports, actions, report, at_ms) {
+            self.save_settings(&settings)?;
+        }
+        Ok(())
     }
 
     /// 读设置，顺手把老数据里已经写进各位置的 MCP 来源记进订阅（见 `mcp::sources::adopt`），
@@ -263,6 +300,15 @@ mod tests {
                 target_baselines: [("codex".to_string(), ["z".to_string()].into_iter().collect())]
                     .into_iter()
                     .collect(),
+                last_auto: [(
+                    "global".to_string(),
+                    crate::models::AutoRun {
+                        at: 1_700_000_000_000,
+                        added: 2,
+                    },
+                )]
+                .into_iter()
+                .collect(),
             }],
             mcp_auto_imports: vec![McpAutoImportRule {
                 source: crate::mcp::McpLocationRef {
@@ -294,6 +340,10 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
+                last_auto: Some(crate::models::AutoRun {
+                    at: 1_700_000_000_000,
+                    added: 1,
+                }),
             }],
             codex_gateway: GatewaySettings::default(),
             project_added_at: [("/a".to_string(), 1_700_000_000_000)]
@@ -348,6 +398,73 @@ mod tests {
         // 订阅记录是后加的：旧文件读成空，等第一次扫描认领
         assert!(loaded.subscriptions.is_empty());
         assert!(loaded.mcp_subscriptions.is_empty());
+    }
+
+    /// 旧 settings.json 的规则没有 `lastAuto`：照常读；自动执行建上了链才写回记录，
+    /// 一格没建上不写盘、不动上一次
+    #[test]
+    fn auto_link_runs_are_recorded_into_legacy_settings() {
+        use crate::models::{LinkStyle, SyncReport, TargetScope};
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        let store_dir = t.dir("store");
+        let claude = t.dir("home/.claude/skills");
+        let file = dir.join("settings.json");
+        std::fs::write(
+            &file,
+            serde_json::json!({"autoLinks": [
+                {"source": store_dir, "targets": ["claude-code"], "baseline": []}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let s = Store::new(dir);
+        let loaded = s.load_settings().unwrap();
+        assert!(loaded.auto_links[0].last_auto.is_empty());
+
+        // 建规则之后来源里出现了 a：自动执行真的把它链进 claude
+        t.dir("store/a");
+        let env = crate::discovery::Env {
+            home: t.dir("home"),
+            vars: Default::default(),
+        };
+        let sources = crate::discovery::sources(&env, &[], &[], std::slice::from_ref(&store_dir));
+        let targets = vec![Target {
+            id: "claude-code".into(),
+            label: "Claude Code".into(),
+            path: claude.clone(),
+            scope: TargetScope::Global {
+                harness_id: "claude-code".into(),
+            },
+            exists: true,
+            linked_whole_to: None,
+        }];
+        let cells = crate::skills::auto_link_cells(&sources, &targets, &loaded.auto_links);
+        let actions = crate::skills::propose_links(&sources, &targets, &cells);
+        let report = crate::sync::execute(&actions, false, LinkStyle::Absolute);
+        assert!(matches!(
+            crate::fs::entry_kind(&claude.join("a")),
+            crate::fs::EntryKind::Symlink(_)
+        ));
+        s.record_auto_link_runs(&sources, &targets, &report, 42)
+            .unwrap();
+        let ran = crate::models::AutoRun { at: 42, added: 1 };
+        assert_eq!(
+            s.load_settings().unwrap().auto_links[0]
+                .last_auto
+                .get("global"),
+            Some(&ran)
+        );
+        let written = std::fs::read_to_string(&file).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(
+            raw["autoLinks"][0]["lastAuto"],
+            serde_json::json!({"global": {"at": 42, "added": 1}})
+        );
+        // 空的一轮：不写盘，记录不变
+        s.record_auto_link_runs(&sources, &targets, &SyncReport::default(), 99)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), written);
     }
 
     /// 升级前写下的 settings.json：两类规则都没有 baseline。
@@ -586,7 +703,10 @@ mod tests {
         assert_eq!(reread.disabled_harnesses, vec!["codex".to_string()]);
         // 清空后再记照常
         s.mark_hint_seen("first-scan-empty").unwrap();
-        assert_eq!(s.seen_hints().unwrap(), vec!["first-scan-empty".to_string()]);
+        assert_eq!(
+            s.seen_hints().unwrap(),
+            vec!["first-scan-empty".to_string()]
+        );
     }
 
     /// 没有 settings.json 时：读成空，空串不建文件，清空也不建文件
