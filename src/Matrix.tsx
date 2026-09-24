@@ -233,23 +233,19 @@ export interface MatrixProps {
   focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
-/// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着）；受阻统称「受阻」（D22），
-/// 写失败说「无法写入」（D24）。skill 与 MCP 共用这张表，但 `linked`（这儿有一份）在两边不是同一件事——
+/// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着）；受阻统称「受阻」（D22）、
+/// 写失败说「无法写入」（D24）——这两个就是 ui 的 `DOT_LABEL`，不在这里另写一份。
+/// skill 与 MCP 共用 `DOT_LABEL`，但 `linked`（这儿有一份）在两边不是同一件事——
 /// skill 是一条软链，MCP 是一份独立配置副本（DESIGN「MCP 格子同样是开关」）：读屏词不能说反
-const BASE_DOT_TEXT: Record<Dot, string> = {
-  ...DOT_LABEL,
-  readOnly: "无法写入",
-  blocked: "受阻",
-};
 const SKILL_DOT_TEXT: Record<Dot, string> = {
-  ...BASE_DOT_TEXT,
+  ...DOT_LABEL,
   linked: "已加上 · 软链",
   missing: "未加上",
   own: "已加上 · 原件",
 };
 /// MCP 用词与格子提示框、原件格提示框同一套（`MCP_OWN_TIP`）：原件不说「已加上」
 const MCP_DOT_TEXT: Record<Dot, string> = {
-  ...BASE_DOT_TEXT,
+  ...DOT_LABEL,
   linked: "已写进 · 副本",
   missing: "未加上",
   own: "原件",

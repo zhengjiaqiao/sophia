@@ -42,9 +42,9 @@ export type CellState =
   | "broken"
   | "foreign"
   | "duplicate"
-  /// 目标整个目录链接到别的本体位置，逐项写不进去。**不是**「目录只读」
+  /// 目标整个目录链接到别的本体位置，逐项都无法写入。**不是**「目录只读」
   | "wholeLinked"
-  /// 目标目录存在但写不进去。**扫描永远不产出这个状态**：判定它要实际试写一次，
+  /// 目标目录存在但无法写入。**扫描永远不产出这个状态**：判定它要实际试写一次，
   /// 每轮扫描都试写代价太大。只在上层真的写失败之后由上层构造
   | "readOnly";
 export interface Cell {
@@ -459,7 +459,7 @@ export interface GatewayProvider {
   protocol: string;
   hasKey: boolean;
   models: GatewayProviderModel[];
-  /** 上次拉取模型失败的原因（「地址连不上」「密钥不对」…）；null / 缺省表示上次成功或还没拉过 */
+  /** 上次拉取模型失败的原因（「地址无法访问」「密钥无效，请换一个密钥」…）；null / 缺省表示上次成功或还没拉过 */
   unreachable?: string | null;
 }
 export interface GatewayRouter {

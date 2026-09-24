@@ -24,7 +24,7 @@ export interface NoticeIssue {
 /// 两份写「在两处」，更多写数字（中西文之间一个空格）
 const inPlaces = (n: number) => (n === 2 ? "在两处" : `在 ${n} 处`);
 
-/// skill 问题 → 提示条目。**写不进不算**：它只由写入失败当场产生，当场已经报过
+/// skill 问题 → 提示条目。**无法写入不算**：它只由写入失败当场产生，当场已经报过
 export function skillNotices(issues: SkillIssue[]): NoticeIssue[] {
   return issues.flatMap((issue): NoticeIssue[] => {
     const at = { key: issue.key, segment: "skills" as const, subject: issue.subject };

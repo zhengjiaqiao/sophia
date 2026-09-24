@@ -311,14 +311,14 @@ test("StateDot 10px 家族：八种各自一个记号，默认带读屏名与 ti
   }
 });
 
-test("StateDot 异常：失效＝4 段虚线环、放不进去＝斜杠环 ⊘（写不进与同名被挡同一个，D22）、整个文件夹是链接＝环内箭头", () => {
+test("StateDot 异常：失效＝4 段虚线环、放不进去＝斜杠环 ⊘（无法写入与同名占位同一个，D22）、整个文件夹是链接＝环内箭头", () => {
   assert.match(render(StateDot, { dot: "broken" }), /stroke-dasharray="5\.2 1\.5"/);
   assert.match(render(StateDot, { dot: "readOnly" }), /d="M2 8 L8 2"/);
-  // ⊝ 删了：同名被挡画 ⊘，读屏名仍说「同名被挡」
+  // ⊝ 删了：同名占位画 ⊘，读屏名说「受阻」（D22，与 Matrix 同一处）
   const blocked = render(StateDot, { dot: "blocked" });
   assert.match(blocked, /d="M2 8 L8 2"/);
   assert.doesNotMatch(blocked, /d="M3 5 H7"/);
-  assert.match(blocked, /aria-label="同名被挡"/);
+  assert.match(blocked, /aria-label="受阻"/);
   assert.match(render(StateDot, { dot: "blocked", size: 16 }), /d="M3\.6 12\.4 L12\.4 3\.6"/);
   assert.match(
     render(StateDot, { dot: "wholeLinked" }),
@@ -1120,7 +1120,7 @@ test("嵌套：里层是禁用原因时外层让位，同时只出一个", () =>
   assert.equal(nextTip(outerOpen, "yield", { explain: false, yielded: true }).open, false);
   // 结构：外层包层里是禁用开关自带的原因包层；外层的 aria-describedby 转到 <button> 上
   const html = render(Tooltip, {
-    content: "打开：选好的模型进 Codex 的模型列表",
+    content: "打开后，选好的模型会出现在 Codex 的模型列表里",
     children: createElement(Switch, {
       checked: false,
       onChange: noop,
@@ -1254,7 +1254,7 @@ test("Toast 部分失败：! + 2 ✓ · 1 ⊘ 读数 + 查看，停 8 秒", () =
     kind: "partial",
     verb: "开启",
     tally: { done: 2, failed: 1 },
-    reason: "Cline 写不进",
+    reason: "无法写入 Cline",
     action: { label: "查看", onClick: noop },
   });
   assert.match(html, /title="部分失败"/);
@@ -1327,8 +1327,8 @@ test("Toast 文字一律 13：动词 600、名字 400、数字 12 tabular（不�
     '<span class="ss-toast__count"><span class="ss-toast__num">3</span>\u00a0个</span>',
   );
   // 单格失败的原因本身是一整句：写在动词的位置，可折行
-  const cell = render(Toast, { kind: "cannot", message: "Codex 的 skills 目录写不进去" });
-  assert.match(cell, /class="ss-toast__message">Codex 的 skills 目录写不进去</);
+  const cell = render(Toast, { kind: "cannot", message: "无法写入 Codex 的 skills 目录" });
+  assert.match(cell, /class="ss-toast__message">无法写入 Codex 的 skills 目录</);
   assert.doesNotMatch(cell, /ss-toast__verb/);
 });
 
@@ -1750,7 +1750,7 @@ test("Empty 这个域没有 agent 目录：说「添加」不说「导入」+ �
     primary: { label: "添加 skill", onClick: noop },
   });
   assert.match(html, /data-kind="noAgentDirs"/);
-  assert.match(html, /添加时会顺手建出来/);
+  assert.match(html, /添加时会自动创建/);
   assert.doesNotMatch(html, /导入/);
   assert.match(html, /class="ss-btn">添加 skill</);
 });

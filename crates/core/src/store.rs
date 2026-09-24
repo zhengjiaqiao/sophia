@@ -51,7 +51,7 @@ pub enum IssueKind {
     DuplicateSource,
     /// 链接指向不存在的位置
     BrokenLink,
-    /// 目标位置写不进去 → 再试一次
+    /// 目标位置无法写入 → 再试一次
     ReadOnlyTarget,
     /// 目标整个目录链到了别的本体 → 拆开
     WholeLinkedTarget,
@@ -85,7 +85,7 @@ impl IssueKind {
 /// - 模型：以 `MODEL_KEY_PREFIX`（`model\u{1f}`）开头，后接类别与能区分状况的细节，段间同样用 `\u{1f}`：
 ///   - `model\u{1f}takeover\u{1f}<接管方的 baseUrl>`
 ///   - `model\u{1f}configChanged\u{1f}<Codex 版本>`
-///   - `model\u{1f}unreachable\u{1f}<providerId>\u{1f}<连不上的原因>`
+///   - `model\u{1f}unreachable\u{1f}<providerId>\u{1f}<无法连接的原因>`
 ///
 ///   `IssueKind` 里没有叫 `model` 的类别，所以模型 key 不会与 skill / MCP 的撞
 ///   （`model_keys_cannot_collide_with_issue_keys` 钉住）

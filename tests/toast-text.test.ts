@@ -48,7 +48,7 @@ test("单格例行一行省名字：行里已写着对象，只写动词 + agent
 test("全部没成：黑窗 + 否定动词 + 一句原因（失败里写「加到」会被读成已加上）", () => {
   const t = toastFor("link", {
     done: [],
-    failed: [{ name: "defuddle", agent: codex, reason: "Codex 的 skills 目录写不进去" }],
+    failed: [{ name: "defuddle", agent: codex, reason: "无法写入 Codex 的 skills 目录" }],
   });
   assert.equal(t.tier, "notice");
   assert.equal(t.kind, "cannot");
@@ -57,7 +57,7 @@ test("全部没成：黑窗 + 否定动词 + 一句原因（失败里写「加�
     toastFor("unlink", { done: [], failed: [{ name: "x", reason: "r" }] }).verb,
     "没移除",
   );
-  assert.equal(t.reason, "Codex 的 skills 目录写不进去");
+  assert.equal(t.reason, "无法写入 Codex 的 skills 目录");
   assert.deepEqual(t.names, ["defuddle"]);
 });
 

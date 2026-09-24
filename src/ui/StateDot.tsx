@@ -6,7 +6,7 @@ import { Tooltip } from "./Tooltip.tsx";
 /// 三种常驻状态外径一致 10px，中心对准列头中线；「无此格」是 8px 短横，不是状态。
 /// 异常画在**同一个 10px 环骨架**上，一个视觉词只学一次：
 /// 失效＝虚线环（4 段、段间 1.5，虚线在空态里已教过「目标不在」）、放不进去＝斜杠环 ⊘
-/// （写不进与同名被挡同一个记号，裁决 D22：该行已有 `×2`，原因由提示框说）、
+/// （无法写入与同名占位同一个记号，裁决 D22：该行已有 `×2`，原因由提示框说）、
 /// 整个文件夹是链接＝环内向右箭头（箭头不穿出环，否则读成 ♂）。
 ///
 /// 悬停光晕（DESIGN「格子悬停光晕」）：可点的点悬停 / 键盘聚焦时，**点本身一点不变**，
@@ -23,8 +23,8 @@ export const DOT_LABEL: Record<Dot, string> = {
   missing: "未加上",
   none: "无此格",
   broken: "链接失效",
-  readOnly: "写不进",
-  blocked: "同名被挡",
+  readOnly: "无法写入",
+  blocked: "受阻",
   wholeLinked: "整个文件夹是链接",
 };
 
@@ -82,7 +82,7 @@ function Glyph10({ dot }: { dot: Dot }) {
           transform="rotate(-45 5 5)"
         />
       );
-    // 同名被挡与写不进同画 ⊘（D22）
+    // 同名占位与无法写入同画 ⊘（D22）
     case "readOnly":
     case "blocked":
       return (
@@ -132,7 +132,7 @@ function Glyph16({ dot }: { dot: Dot }) {
           transform="rotate(-45 8 8)"
         />
       );
-    // 同名被挡与写不进同画 ⊘（D22）
+    // 同名占位与无法写入同画 ⊘（D22）
     case "readOnly":
     case "blocked":
       return (

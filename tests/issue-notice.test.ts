@@ -25,7 +25,7 @@ const skill = (over: Partial<SkillIssue>): SkillIssue => ({
 
 const n = (key: string): NoticeIssue => ({ key, segment: "skills", subject: key, rest: "有两份" });
 
-test("skill 造句：同名 / 孤链 / 原件还在的失效链接 / 整个文件夹是链接；写不进不算", () => {
+test("skill 造句：同名 / 孤链 / 原件还在的失效链接 / 整个文件夹是链接；无法写入不算", () => {
   const out = skillNotices([
     skill({ key: "a" }),
     skill({ key: "b", kind: "brokenLink", subject: "old-notes", gone: true }),

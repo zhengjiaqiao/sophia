@@ -44,7 +44,7 @@ export interface SkillIssue {
   key: string;
   /// 涉及的全部位置；key 就是由它算的
   paths: string[];
-  /// 句子的主语：说 skill 的几类是 skill 名，说目录的（整个文件夹是链接、写不进）是 agent 名
+  /// 句子的主语：说 skill 的几类是 skill 名，说目录的（整个文件夹是链接、无法写入）是 agent 名
   subject: string;
   /// 相关 agent 的显示名；认不出列时为 null
   agent: string | null;
@@ -67,7 +67,7 @@ const make = (
 /// 遍历当前 overview 的所有格，收出需要用户拿主意的事。
 ///
 /// **去重按 key 做**（类别 + 位置排序后拼接），和 core 的看过表对得上：同名本体会在
-/// 每个 agent 下各命中一次，目录写不进去会在每个 skill 上各命中一次，只该算一条。
+/// 每个 agent 下各命中一次，目录无法写入会在每个 skill 上各命中一次，只该算一条。
 ///
 /// `domains` 用来只看其中几个域（「查看」要找这一条在哪个侧栏位置里）；不传看全部。
 export function collectIssues(overview: Overview | null, domains?: DomainPage[]): SkillIssue[] {

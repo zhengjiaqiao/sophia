@@ -158,7 +158,7 @@ export const api = {
   gatewayFetchModelsOf: (providerId: string) =>
     invoke<GatewayState>("gateway_fetch_models", { providerId }),
   /** 「再试一次」：按 id 重拉这一家。拉取本身失败（auth / network）不抛错——原因已记在
-   *  这一家的 unreachable 上，返回最新状态让那一行显示「连不上」；其余错误照常抛 */
+   *  这一家的 unreachable 上，返回最新状态让那一行显示「无法连接」；其余错误照常抛 */
   gatewayRetryProvider: async (providerId: string): Promise<GatewayState> => {
     try {
       return await invoke<GatewayState>("gateway_fetch_models", { providerId });

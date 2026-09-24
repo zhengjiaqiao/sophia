@@ -1063,7 +1063,7 @@ fn enabling_then_disabling_without_a_codex_restart_in_between_needs_no_restart()
 }
 
 /// 反过来这种必须提示：Codex 已经在用注入的配置，这时停用，路由随之卸载，
-/// 那个 Codex 连官方模型都连不上，得重启。
+/// 那个 Codex 连官方模型都无法连接，得重启。
 #[test]
 fn disabling_while_codex_runs_with_the_injected_config_needs_a_restart() {
     let f = fixture();
@@ -1677,23 +1677,23 @@ fn enable_brings_the_router_up_before_writing_the_routing_catalog() {
 fn a_failed_fetch_marks_the_provider_unreachable_until_the_next_success() {
     let f = fixture();
     let (a, _) = two_providers(&f);
-    f.app.record_unreachable_for(&a, "地址连不上").unwrap();
+    f.app.record_unreachable_for(&a, "地址无法访问").unwrap();
 
     // 落盘：设置里有，重新读出的状态里也有
     {
         let world = f.world.lock().unwrap();
         let saved = world.settings.provider(&a).unwrap();
-        assert_eq!(saved.unreachable.as_deref(), Some("地址连不上"));
+        assert_eq!(saved.unreachable.as_deref(), Some("地址无法访问"));
         let json = serde_json::to_value(&world.settings).unwrap();
-        assert_eq!(json["providers"][0]["unreachable"], "地址连不上");
+        assert_eq!(json["providers"][0]["unreachable"], "地址无法访问");
     }
     let view = &f.app.state().providers[0];
-    assert_eq!(view.unreachable.as_deref(), Some("地址连不上"));
+    assert_eq!(view.unreachable.as_deref(), Some("地址无法访问"));
     assert_eq!(view.models.len(), 2, "失败不丢模型列表");
     assert!(view.models.iter().any(|m| m.selected), "失败不丢勾选");
     let json = serde_json::to_value(view).unwrap();
     assert_eq!(
-        json["unreachable"], "地址连不上",
+        json["unreachable"], "地址无法访问",
         "界面字段名是 unreachable"
     );
 
@@ -1716,8 +1716,8 @@ fn a_failed_fetch_marks_the_provider_unreachable_until_the_next_success() {
 fn retrying_one_provider_leaves_the_others_alone() {
     let f = fixture();
     let (a, b) = two_providers(&f);
-    f.app.record_unreachable_for(&a, "地址连不上").unwrap();
-    f.app.record_unreachable_for(&b, "密钥不对").unwrap();
+    f.app.record_unreachable_for(&a, "地址无法访问").unwrap();
+    f.app.record_unreachable_for(&b, "密钥无效，请换一个密钥").unwrap();
 
     f.app
         .merge_fetched_models_for(&b, vec!["deepseek/v4".into()], "")
@@ -1725,38 +1725,38 @@ fn retrying_one_provider_leaves_the_others_alone() {
     let state = f.app.state();
     assert_eq!(
         state.providers[0].unreachable.as_deref(),
-        Some("地址连不上")
+        Some("地址无法访问")
     );
     assert_eq!(state.providers[1].unreachable, None);
 
-    f.app.record_unreachable_for(&b, "密钥不对").unwrap();
+    f.app.record_unreachable_for(&b, "密钥无效，请换一个密钥").unwrap();
     f.app
         .merge_fetched_models(vec!["glm-5".into()], "")
         .unwrap();
     let state = f.app.state();
     assert_eq!(state.providers[0].unreachable, None, "旧命令作用在第一家");
-    assert_eq!(state.providers[1].unreachable.as_deref(), Some("密钥不对"));
+    assert_eq!(state.providers[1].unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
 
-    f.app.record_unreachable("地址连不上").unwrap();
+    f.app.record_unreachable("地址无法访问").unwrap();
     assert_eq!(
         f.app.state().providers[0].unreachable.as_deref(),
-        Some("地址连不上")
+        Some("地址无法访问")
     );
     assert_eq!(code(f.app.record_unreachable_for("nope", "x")), "invalid");
 }
 
-/// 换了地址，「连不上」是对旧地址的结论，一并清掉；只改名不清
+/// 换了地址，「无法连接」是对旧地址的结论，一并清掉；只改名不清
 #[test]
 fn changing_the_address_forgets_the_old_unreachable_verdict() {
     let f = fixture();
     let (a, _) = two_providers(&f);
-    f.app.record_unreachable_for(&a, "地址连不上").unwrap();
+    f.app.record_unreachable_for(&a, "地址无法访问").unwrap();
     f.app
         .upsert_provider(Some(&a), Some("WeCode 2"), "https://wecode.example/openai")
         .unwrap();
     assert_eq!(
         f.app.state().providers[0].unreachable.as_deref(),
-        Some("地址连不上")
+        Some("地址无法访问")
     );
     f.app
         .upsert_provider(Some(&a), None, "https://wecode2.example/openai")

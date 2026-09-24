@@ -234,8 +234,8 @@ export function SectionSwitch({
           <Tooltip
             content={
               state.enabled
-                ? `关掉：${tool.name} 只剩官方模型`
-                : `打开：选好的模型进 ${tool.name} 的模型列表`
+                ? `关掉后，${tool.name} 只保留官方模型`
+                : `打开后，选好的模型会出现在 ${tool.name} 的模型列表里`
             }
             placement="bottom"
           >

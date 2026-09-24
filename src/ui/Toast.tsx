@@ -69,7 +69,7 @@ export interface ToastProps {
   /// `attention` 没有动作可说，这里放句子的主语（`defuddle`）或 `发现`，其余进 `reading`。
   /// 只有给了整句 `message` 时才可以不给
   verb?: string;
-  /// 整句（单格失败的原因本身就是一句话：`Codex 的 skills 目录写不进去`），写在动词的位置
+  /// 整句（单格失败的原因本身就是一句话：`无法写入 Codex 的 skills 目录`），写在动词的位置
   message?: ReactNode;
   /// 动词后半截，写在 agent 图标之后（带方向的「从 [图标] 移除 名字」）；只有一截动词时不给
   verbTail?: string;

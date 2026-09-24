@@ -185,7 +185,7 @@ pub async fn gateway_fetch_models(
             .await?;
         }
         Err(failure) => {
-            // 连不上是那一家的状态：先把原因记下来（界面重读 state 就能在那一行显示），再照旧报错
+            // 无法连接是那一家的状态：先把原因记下来（界面重读 state 就能在那一行显示），再照旧报错
             if let Some(reason) = failure.unreachable {
                 blocking(move || match provider_id {
                     Some(id) => worker.record_unreachable_for(&id, reason),

@@ -149,7 +149,7 @@ test("Matrix：选择行（D4）——表头下一条，用表格同一套列：
         checked: false,
         label: "选中的都加到 Codex",
         tip: "加到 Codex",
-        disabledReason: "这几个都写不进",
+        disabledReason: "这几个都无法写入",
         onToggle: noop,
       },
     },
@@ -175,7 +175,7 @@ test("Matrix：选择行（D4）——表头下一条，用表格同一套列：
   // 没有可改的格子：点 ink-faint，读屏带原因；按下当即说明原因（explain 包层），能点的按下即收起
   assert.match(
     head,
-    /<span class="ss-tipwrap is-explain"><button type="button" class="ss-dot-btn mx-seldot is-disabled" aria-label="选中的都加到 Codex：这几个都写不进"/,
+    /<span class="ss-tipwrap is-explain"><button type="button" class="ss-dot-btn mx-seldot is-disabled" aria-label="选中的都加到 Codex：这几个都无法写入"/,
   );
   assert.match(
     head,
@@ -385,11 +385,11 @@ test("单格的结果：浮在被点那一格正下方（成功与失败同一�
   const failed = render(Matrix, {
     ...base,
     cellToast: { id: 1, rowKey: "u|docx", columnId: "cx", node },
-    cellNotice: { rowKey: "u|docx", columnId: "cx", text: "Codex 的 skills 目录写不进去" },
+    cellNotice: { rowKey: "u|docx", columnId: "cx", text: "无法写入 Codex 的 skills 目录" },
   });
   assert.equal((failed.match(/class="ss-floattoast"/g) ?? []).length, 1);
   assert.match(failed, /ss-toast--notice" data-kind="cannot" role="alert"/);
-  assert.match(failed, /class="ss-toast__message">Codex 的 skills 目录写不进去</);
+  assert.match(failed, /class="ss-toast__message">无法写入 Codex 的 skills 目录</);
   // 旧的行内一行与格下小黑窗的样式已撤
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
   assert.doesNotMatch(

@@ -126,7 +126,7 @@ pub struct ProviderView {
     pub protocol: String,
     pub has_key: bool,
     pub models: Vec<ModelView>,
-    /// 上次拉取模型失败的原因（「地址连不上」「密钥不对」…）；None 表示上次成功或还没拉过
+    /// 上次拉取模型失败的原因（「地址无法访问」「密钥无效，请换一个密钥」…）；None 表示上次成功或还没拉过
     pub unreachable: Option<String>,
 }
 
@@ -364,7 +364,7 @@ impl App {
                 provider.base_url = cleaned;
                 if changed {
                     provider.api_base = None; // 旧地址探明的接口基址作废
-                    provider.unreachable = None; // 连不上是对旧地址的结论
+                    provider.unreachable = None; // 无法连接是对旧地址的结论
                 }
                 if let Some(name) = name {
                     provider.name = name.to_owned();

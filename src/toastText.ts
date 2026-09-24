@@ -68,7 +68,7 @@ export interface ToastItem {
 }
 
 export interface FailedItem extends ToastItem {
-  /// 一句能行动的原因（「Codex 的 skills 目录写不进去」），不是错误码
+  /// 一句能行动的原因（「无法写入 Codex 的 skills 目录」），不是错误码
   reason: string;
 }
 

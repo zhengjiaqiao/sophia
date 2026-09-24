@@ -121,7 +121,7 @@ export default function App() {
   /// `查看` 跳过去要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
   const [focus, setFocus] = useState<{ segment: "skills" | "mcp"; key: string } | undefined>();
   const clearFocus = useCallback(() => setFocus(undefined), []);
-  /// `查看`「网关连不上」：要进网关页并选中的那一家
+  /// `查看`「网关无法连接」：要进网关页并选中的那一家
   const [modelFocus, setModelFocus] = useState<string | undefined>();
   const clearModelFocus = useCallback(() => setModelFocus(undefined), []);
   /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐

@@ -159,7 +159,7 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
   assert.match(down, /gw-row__label">openrouter</);
   assert.match(down, /gw-row__down">无法连接</);
   assert.match(down, new RegExp(`gw-row__reason">${reason}<`));
-  assert.doesNotMatch(down, /已连接|连不上/);
+  assert.doesNotMatch(down, /已连接/);
   assert.match(
     down,
     /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*>编辑</,

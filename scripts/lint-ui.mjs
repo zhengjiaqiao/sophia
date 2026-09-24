@@ -93,6 +93,25 @@ const TOKEN_FILE = "src/tokens.css";
 /// 否则新写的文件会悄悄落进豁免里。
 const LEGACY = [];
 
+/// D24 旧词表（DESIGN「文案语域」的「旧」一列，外加同一轮走查改掉的说法）
+const OLD_WORDS = [
+  "写不进",
+  "搬不过去",
+  "连不上",
+  "出来了",
+  "探明",
+  "顺手",
+  "换一把",
+  "拿主意",
+  "没法",
+  "来源管理页",
+  "同名被挡",
+  "密钥不对",
+  "回滚也没成",
+  "删了找不回来",
+  "管理网关",
+];
+
 const rules = [
   {
     id: "color",
@@ -348,6 +367,16 @@ const rules = [
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
       const n = (code.match(/text-?[Tt]ransform\s*[:=]\s*["']?lower/g) || []).length;
       return n ? [`${n} 处小写变换`] : [];
+    },
+  },
+  {
+    id: "copy-register",
+    // DESIGN「文案语域：平实、完整」（D24）的旧词表：状态词与失败原因用「无法 + 动词」，句子写完整，
+    // 不指向已删的页面。表左列写回界面字符串即报错（注释与标识符不算）
+    desc: "D24 文案语域：界面字符串里不出现旧词",
+    run(src) {
+      const text = visibleText(src);
+      return OLD_WORDS.filter((w) => text.includes(w)).map((w) => `「${w}」`);
     },
   },
   {

@@ -455,7 +455,7 @@ test("modelIssues：接管 / 配置被外部改过 / 网关无法连接三类，
       takeover: { baseUrl: "https://am.example", selectedCount: 2 },
       codex: { version: "0.50.0", running: true, catalogVersion: "0.43.0", drift: true },
       providers: [
-        provider({ id: "a", name: "甲", unreachable: "地址连不上" }),
+        provider({ id: "a", name: "甲", unreachable: "地址无法访问" }),
         provider({ id: "b", name: "乙" }),
       ],
     }),
@@ -472,7 +472,7 @@ test("modelIssues：接管 / 配置被外部改过 / 网关无法连接三类，
   // 看过表的 key：格式与 core `store::SeenIssue` 钉死，段间是 \u001f
   assert.equal(takeover.key, "model\u001ftakeover\u001fhttps://am.example");
   assert.equal(config.key, "model\u001fconfigChanged\u001f0.50.0");
-  assert.equal(down.key, "model\u001funreachable\u001fa\u001f地址连不上");
+  assert.equal(down.key, "model\u001funreachable\u001fa\u001f地址无法访问");
   assert.equal(down.providerId, "a");
   // 一次性提示的句子以主语开头
   assert.equal(takeover.sentence, "Codex 正由 agents-manager 管理");
@@ -524,7 +524,7 @@ test("SectionSwitch：标准开关（指示点在左）；状态＝Codex 正在�
   assert.match(on, /ss-indicator is-on/);
   const off = render(SectionSwitch, switchProps(withSelected()));
   assert.match(off, /role="switch" aria-checked="false"/);
-  assert.match(off, /role="tooltip"[^>]*>打开：选好的模型进 Codex 的模型列表</);
+  assert.match(off, /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里</);
 });
 
 test("SectionSwitch 待定：拨过去等确认 / 等生效时滑块停在那一侧（包层 data-pending），橙不亮（仍是真实状态）", () => {
@@ -1132,11 +1132,11 @@ test("switchGateway 15 秒内没换上：撤回刚写的（打开的反向是恢
   assert.equal(h.painted.at(-1), actual, "开关画成真实状态");
 });
 
-test("switchGateway 写不进：原因原样返回，并尽力撤回（关掉的反向是再启用）；撤回也没成就在原因后说一声", async () => {
+test("switchGateway 无法写入：原因原样返回，并尽力撤回（关掉的反向是再启用）；撤回也没成就在原因后说一声", async () => {
   const enabled = state({ enabled: true });
   const h = switchIo({ writes: [new Error("配置文件被改过"), enabled], reads: [enabled] });
   assert.equal(await switchGateway(false, true, h.io, fastSettle), "配置文件被改过");
-  assert.deepEqual(h.calls, ["restore", "enable", "read"], "写不进就不重启");
+  assert.deepEqual(h.calls, ["restore", "enable", "read"], "无法写入就不重启");
 
   const both = switchIo({
     writes: [new Error("路由起不来"), new Error("还是起不来")],

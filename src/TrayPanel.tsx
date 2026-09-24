@@ -429,8 +429,8 @@ export default function TrayPanel() {
                 <Tooltip
                   content={
                     row.toggle.on
-                      ? `关掉：${CODEX.name} 只剩官方模型`
-                      : `打开：选好的模型进 ${CODEX.name} 的模型列表`
+                      ? `关掉后，${CODEX.name} 只保留官方模型`
+                      : `打开后，选好的模型会出现在 ${CODEX.name} 的模型列表里`
                   }
                   placement="bottom"
                 >

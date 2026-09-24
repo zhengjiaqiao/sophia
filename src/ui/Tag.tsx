@@ -3,7 +3,7 @@ import { Tooltip } from "./Tooltip.tsx";
 
 export interface TagProps {
   children: ReactNode;
-  /// strong：`ink` 600（`同名` `连不上`）；weak：`ink-mute` 400（`已添加` `未安装`）
+  /// strong：`ink` 600（`同名` `无法连接`）；weak：`ink-mute` 400（`已添加` `未安装`）
   tone?: "strong" | "weak";
   /// 悬停可以读到更多：给了就挂提示框。不加装饰线（裁决 D21：点状下划线是网页 abbr 惯例，
   /// macOS 上没人认得）。能点的（`2 份不一样`）不是标签，用安静键

@@ -58,7 +58,7 @@ pub fn clamp_panel_height(height: f64) -> f64 {
     }
 }
 
-/// 第一次调用返回 true 并留下标记，之后一律 false。标记写不进去时宁可每次都不提示，也不要每次都提示。
+/// 第一次调用返回 true 并留下标记，之后一律 false。标记写入失败时宁可每次都不提示，也不要每次都提示。
 pub fn take_close_hint(store_dir: &Path) -> bool {
     let marker = store_dir.join(CLOSE_HINT_MARKER);
     if marker.exists() {

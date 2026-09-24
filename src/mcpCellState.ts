@@ -71,7 +71,7 @@ export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
       // 可点的唯一一种，所以没有 reason：写进去之后要说的那句由调用方汇总
       return { dot: "missing", clickable: true };
     case "invalid":
-      // 整份文件读不出来，这一列都写不进去：画斜杠环（与 skill 的「写不进」同形）
+      // 整份文件读不出来，这一列都无法写入：画斜杠环（与 skill 的「无法写入」同形）
       return {
         dot: "readOnly",
         clickable: false,
@@ -80,7 +80,7 @@ export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
       };
     case "unsupported":
       // 搬过去就不是原来那个了，所以整行都不给点——给点的机会等于给犯错的机会。
-      // 画成与 skill「同名被挡」同一个受阻记号（环 + 短横）：这一格放不进去，不另造一种样式
+      // 画成与 skill「同名占位」同一个受阻记号（环 + 短横）：这一格放不进去，不另造一种样式
       return {
         dot: "blocked",
         clickable: false,

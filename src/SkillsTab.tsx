@@ -119,7 +119,7 @@ export default function SkillsTab({
   usePageCommand("add-source", () => setAddOpen(true));
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
-  // 写失败（目录写不进去）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
+  // 写失败（目录无法写入）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
   const [readOnly, setReadOnly] = useState<Set<string>>(new Set());
   // 批量写入进行中：按下的那一项（只锁它；过了 0.3 秒门槛旁边出忙碌指示 + 一句）
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);

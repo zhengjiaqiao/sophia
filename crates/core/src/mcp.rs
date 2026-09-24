@@ -568,7 +568,7 @@ pub(super) struct Canonical {
     pub(super) headers_helper: Option<String>,
 }
 
-/// 认得「用命令生成请求头」的 agent（harness id）。别的 agent 写不进这种定义：
+/// 认得「用命令生成请求头」的 agent（harness id）。别的 agent 无法写入这种定义：
 /// 丢掉命令就是一份没有凭据的坏配置，所以整条拒绝，不静默丢字段
 const HELPER_HARNESSES: [&str; 2] = ["claude-code", "codex"];
 
@@ -600,7 +600,7 @@ impl Canonical {
             .then(|| HELPER_HARNESSES.iter().map(|h| h.to_string()).collect())
     }
 
-    /// 这份定义写不进 `target` 的原因（与目标里已有什么无关，只看目标 agent 认不认得这种写法）
+    /// 这份定义无法写入 `target` 的原因（与目标里已有什么无关，只看目标 agent 认不认得这种写法）
     pub(super) fn refusal_for(&self, target: &McpLocation) -> Option<String> {
         (self.headers_helper.is_some() && !HELPER_HARNESSES.contains(&target.harness_id.as_str()))
             .then(|| format!("{} 不支持用命令生成请求头", agent_name(target)))

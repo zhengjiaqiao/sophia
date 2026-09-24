@@ -123,7 +123,7 @@ test("四种异常态各说各的，都不再说那句统一文案", () => {
 });
 
 /// UI v4：异常在它发生的那一格看得见（DESIGN「视觉优先」），不再一律画成空心。
-/// 同名被挡的两种（foreign / duplicate）对用户是同一件事，画同一个记号
+/// 同名占位的两种（foreign / duplicate）对用户是同一件事，画同一个记号
 test("异常态各有自己的格内记号，没有一种退回空心", () => {
   const dots = (["broken", "foreign", "duplicate", "wholeLinked", "readOnly"] as const).map(
     (s) => view(s).dot,
