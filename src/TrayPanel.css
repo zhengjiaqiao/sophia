@@ -1,12 +1,15 @@
-/* 菜单栏面板（DESIGN「托盘面板」，画板 Tray）：宽 320，1px hairline 描边、零圆角、无阴影。
+/* 菜单栏面板（DESIGN「托盘面板」，画板 Tray）：宽 320，1px hairline 描边、圆角 12（同确认弹窗；
+   原生窗口按同一圆角裁切，见 tray.rs 的 style_panel）、无阴影。
    与主窗口共用 tokens.css 与组件库——开关、键、提示框、转盘、提示条都是同一份。 */
 @import "./tokens.css";
 
 .tray {
   box-sizing: border-box;
+  outline: none; /* 面板本身接焦点只为不让第一个控件抢到，不画焦点框 */
   display: flex;
   flex-direction: column;
   border: 1px solid var(--hairline);
+  border-radius: var(--radius-dialog);
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-ui);
@@ -37,6 +40,12 @@
   font-weight: 600;
 }
 
+/* 开关那一格：开关 / 原位转圈 +「正在添加」；也是 `✓ 已添加到 Codex` 那一窗的锚 */
+.tray__switch {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* 开关后 12 出重启那一格（gap 10 + 2） */
 .tray__restart-tip,
 .tray__restart {
@@ -47,25 +56,7 @@
   display: inline-flex;
 }
 
-/* 「重启生效」的提示框按画板单行显示（其余提示框仍是 240 上限）。这句约 305 宽，面板只有 320：
-   锚在键上居中会出窗，所以改锚在这一行上、左对齐面板内边距 12，贴行下沿（键下 6） */
-.tray__row {
-  position: relative;
-}
-
-.tray__restart-tip .ss-tipwrap {
-  position: static;
-}
-
-.tray__restart-tip .ss-tip {
-  top: calc(100% - 4px);
-  bottom: auto;
-  left: var(--space-sm);
-  right: auto;
-  max-width: none;
-  white-space: nowrap;
-  transform: none;
-}
+/* 提示框气泡挂在 body 上、按窗口夹边定位（src/ui/Tooltip.tsx），面板里不再单独改它的位置 */
 
 .tray__restart {
   display: inline-flex;
@@ -75,28 +66,9 @@
   white-space: nowrap;
 }
 
-.tray__restart-text {
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-}
-
+/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在它正下方 4（FloatingToast） */
 .tray__restart--done {
-  animation: tray-done-fade 4s var(--ease-mech) forwards;
-}
-
-.tray__restart--done .ss-toast--routine {
-  height: var(--control-h-compact);
-  font-size: var(--size-caption);
-}
-
-@keyframes tray-done-fade {
-  0%,
-  97% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
+  width: 0;
 }
 
 /* 确认当场展开在那一行下面：无外框，标题 15/600，一句后果 13 ink-mute，取消（链）+ 重启（主动作） */
@@ -127,7 +99,7 @@
   padding: 0 var(--space-sm) var(--space-sm);
 }
 
-.tray__notice .ss-toast--notice {
+.tray__notice .ss-noticepanel {
   max-width: 100%;
 }
 
@@ -166,8 +138,5 @@
 @media (prefers-reduced-motion: reduce) {
   .tray__item {
     transition: none;
-  }
-  .tray__restart--done {
-    animation: none;
   }
 }

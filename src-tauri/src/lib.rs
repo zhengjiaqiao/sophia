@@ -1069,7 +1069,11 @@ fn project_times(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // 托盘面板要做成不激活应用的 NSPanel（tray.rs），面板登记表由这个插件管
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         // 应用内更新：查清单、下载、验签、装都在插件里，前端只负责问与决定。

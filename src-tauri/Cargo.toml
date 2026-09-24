@@ -38,5 +38,14 @@ notify-debouncer-mini = "0.4"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+# 托盘面板的原生窗口细节（去掉弹出时从中心放大的动画、圆角）：tauri 自己就依赖这两个，版本随它
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSResponder", "NSColor", "NSGraphics", "NSEvent", "NSScreen"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSGeometry"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
+# 托盘面板换成不激活应用的 NSPanel：点图标、点面板里的控件都不把应用（和它的主窗口）提到前台
+tauri-nspanel = "2.1"
+
 [dev-dependencies]
 tempfile = "3"
