@@ -1,4 +1,4 @@
-/// MCP 格状态 → 圆点 + 点击行为 + 文案。矩阵、导入页与新问题的一次性提示共用这一份映射。
+/// MCP 格状态 → 圆点 + 点击行为 + 文案。矩阵与导入页共用这一份映射。
 ///
 /// 契约与 `cellState.ts` 完全一致（组件规范 §8.1）：`reason` **只在不可点时有值**，
 /// 装的是「为什么不能点」；成功句由调用方在操作结果处聚合，不由格提供——按 §4.1
@@ -19,7 +19,7 @@ import type { McpCellState } from "./types";
 /// 事实塞进格里，必然自相矛盾。所以类型上就不让它走到这儿来。
 export type McpDotState = Exclude<McpCellState, "conflict">;
 
-/// MCP 页需要用户拿主意的两类。和 skill 的 `IssueKind` 不共用：
+/// MCP 页需要用户拿主意的两类。和 skill 的 `SkillIssueKind` 不共用：
 /// 那四类说的是软链，这两类一个是文件读不出来、一个是两份定义不一致
 export type McpIssueKind = "invalidLocation" | "differentCopies";
 

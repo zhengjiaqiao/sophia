@@ -674,7 +674,7 @@ export function showRouterTodo(state: GatewayState, healAttempted: boolean): boo
   return healAttempted && routerUnavailable(state);
 }
 
-// ===== 模型的问题（就地在 Codex 页「第三方模型」节里显示；新出现时由壳提示一次） =====
+// ===== 模型的问题（就地在 Codex 页「第三方模型」节里显示） =====
 
 /**
  * 第三方模型里要用户处理的事（DESIGN「没有收件箱、待处理页和「忽略」」那张表）：
@@ -686,81 +686,45 @@ export function showRouterTodo(state: GatewayState, healAttempted: boolean): boo
  * 「路由没在跑」也不进来——它由节里的行内待办条就地说，不打扰别处。
  *
  * 形状：
- * - `key`：看过表的 key，**状况一变 key 就变**（Codex 升了版本、网关换了失败原因），看过的会再提示一次。
- *   格式由 core `store::SeenIssue` 钉死：`model\u001f<类别>\u001f<细节…>`，段间都用 `\u001f`
- * - `subject`：句子的主语（`Codex`、网关名），一次性提示里加粗
- * - `sentence`：一次性提示只有这一条时说的整句，以 `subject` 开头
+ * - `key`：这一条状况的标识（节里渲染待办条时当 React key），`model\u001f<类别>\u001f<细节…>`
  * - `action`：一个动作；`kind` 决定调哪个命令（节里的行内待办条照它执行）
- * - `providerId`：只有 `unreachable` 有，「查看」到 Codex 页展开那一家网关行
  */
 export type ModelIssueKind = "takeover" | "configChanged" | "unreachable";
 
 export interface ModelIssue {
   kind: ModelIssueKind;
   key: string;
-  subject: string;
-  sentence: string;
   action: { kind: "takeover" | "rewrite" | "retry"; label: string };
-  providerId?: string;
 }
 
-/// 模型类 key 的段分隔符，与 core `store::MODEL_KEY_PREFIX` 同一个 Unit Separator
+/// key 的段分隔符：Unit Separator，地址、版本号与失败原因里都不会出现
 const SEP = "\u001f";
 const modelKey = (...parts: string[]) => ["model", ...parts].join(SEP);
 
-const issue = (
-  kind: ModelIssueKind,
-  key: string,
-  subject: string,
-  rest: string,
-  action: ModelIssue["action"],
-  providerId?: string,
-): ModelIssue => ({
-  kind,
-  key,
-  subject,
-  sentence: `${subject} ${rest}`,
-  action,
-  ...(providerId === undefined ? {} : { providerId }),
-});
-
-export function modelIssues(state: GatewayState | null, tool: ModelsTool = CODEX): ModelIssue[] {
+export function modelIssues(state: GatewayState | null): ModelIssue[] {
   if (state === null || !state.supported) return [];
   const out: ModelIssue[] = [];
   if (state.takeover !== null) {
-    out.push(
-      issue(
-        "takeover",
-        modelKey("takeover", state.takeover.baseUrl),
-        tool.name,
-        "正由 agents-manager 管理",
-        { kind: "takeover", label: "接管" },
-      ),
-    );
+    out.push({
+      kind: "takeover",
+      key: modelKey("takeover", state.takeover.baseUrl),
+      action: { kind: "takeover", label: "接管" },
+    });
   }
   if (state.codex.drift) {
-    out.push(
-      issue(
-        "configChanged",
-        modelKey("configChanged", state.codex.version),
-        tool.name,
-        "里 Sophia 写进去的设置被改掉了",
-        { kind: "rewrite", label: "重新写入" },
-      ),
-    );
+    out.push({
+      kind: "configChanged",
+      key: modelKey("configChanged", state.codex.version),
+      action: { kind: "rewrite", label: "重新写入" },
+    });
   }
   for (const provider of state.providers) {
     if (!provider.unreachable) continue;
-    out.push(
-      issue(
-        "unreachable",
-        modelKey("unreachable", provider.id, provider.unreachable),
-        providerLabel(provider),
-        "无法连接",
-        { kind: "retry", label: "再试一次" },
-        provider.id,
-      ),
-    );
+    out.push({
+      kind: "unreachable",
+      key: modelKey("unreachable", provider.id, provider.unreachable),
+      action: { kind: "retry", label: "再试一次" },
+    });
   }
   return out;
 }

@@ -10,7 +10,7 @@ import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 /// **浮起的小窗只表示一件事：会自己消失。** 两档，严重程度决定打断程度（①）：
 /// - `routine` 成功：纸窗（`paper` + 1px `hairline` 边 + `float` 12 圆角 + 浮层投影），单行高 32：
 ///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是安静键）
-/// - `notice` 做不成 / 部分失败 / 新问题一次性提示：**墨窗**（`ink` 实心、无边、浮层投影），
+/// - `notice` 做不成 / 部分失败：**墨窗**（`ink` 实心、无边、浮层投影），
 ///   左侧 40px 指示窗放 ✓ / ⊘ / !；动作是浅描边键。
 ///   成功是纸、需要注意是墨：不给 `tier` 时按 `kind` 取（成功纸窗、其余墨窗）
 ///
@@ -20,14 +20,12 @@ import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 ///
 /// **停留**（⑨）：成功无动作约 4 秒，带 `撤销` / `查看` 约 6 秒，做不成 / 部分失败 8 秒；
 /// 悬停与键盘焦点在里面时停表，移开后重新计满；到点末尾 120ms 同一个淡出。
-/// 不给 `onDismiss` 的不自动消失（新问题一次性提示）。
+/// 不给 `onDismiss` 的不自动消失。
 ///
 /// **位置不归组件管**：浮起的一律经 `FloatingToast`（锚在触发处，`placeToast`）或
 /// `CornerToast`（右下，全应用一套）。带下一步的失败不用它，用内嵌灰面板 `NoticePanel`。
 
-/// `attention`：没有哪个动作做成或没成，是机器发现了要你拿主意的事（新问题的一次性提示）。
-/// 记号同部分失败的 `!`，读屏名是「需要注意」；它不给 onDismiss，不自动消失
-export type ToastKind = "success" | "cannot" | "partial" | "attention";
+export type ToastKind = "success" | "cannot" | "partial";
 
 /// 停留时长：带动作（撤销 / 查看）的成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿；
 /// 没有动作的成功约 4 秒（`CELL_TOAST_DWELL_MS`）。悬停 / 焦点在里面时不计时
@@ -35,7 +33,6 @@ export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   success: 6000,
   cannot: 8000,
   partial: 8000,
-  attention: 8000,
 };
 
 /// 没有动作的成功（单格、`✓ 已生效`、`✓ 已是最新版本`……）的停留：约 4 秒，比带撤销的 6 秒短——
@@ -66,7 +63,6 @@ export interface ToastProps {
   /// routine 只有 success
   kind: ToastKind;
   /// `写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`。
-  /// `attention` 没有动作可说，这里放句子的主语（`defuddle`）或 `发现`，其余进 `reading`。
   /// 只有给了整句 `message` 时才可以不给
   verb?: string;
   /// 整句（单格失败的原因本身就是一句话：`无法写入 Codex 的 skills 目录`），写在动词的位置
@@ -93,7 +89,7 @@ export interface ToastProps {
   action?: ToastAction;
   /// 次要的离开 Sophia 的链接（下划线 + ↗）：`在访达中显示备份 ↗`
   secondary?: ToastAction;
-  /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉（新问题的一次性提示）
+  /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉
   onDismiss?: () => void;
   /// 停留时长（毫秒）；不给按 kind 与有没有动作取（见 `TOAST_DWELL_MS`）
   dwellMs?: number;
@@ -105,7 +101,6 @@ const INDICATOR: Record<ToastKind, { title: string; glyph: ReactNode }> = {
   success: { title: "成功", glyph: <IconCheck /> },
   cannot: { title: "做不成", glyph: <IconCannot /> },
   partial: { title: "部分失败", glyph: <IconAttention /> },
-  attention: { title: "需要注意", glyph: <IconAttention /> },
 };
 
 function Names({ names }: { names: string[] }) {
@@ -261,7 +256,7 @@ export function Toast(props: ToastProps) {
     <div
       className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}${leavingClass}`}
       data-kind={kind}
-      role={kind === "success" || kind === "attention" ? "status" : "alert"}
+      role={kind === "success" ? "status" : "alert"}
       {...holdHandlers}
     >
       <div

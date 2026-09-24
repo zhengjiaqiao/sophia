@@ -280,19 +280,11 @@ export function InUseRow({
 
 export interface ModelsTabProps {
   onError: (message: string) => void;
-  /// 每次拿到新状态都报给壳：侧栏 Codex 后的指示点、新问题的一次性提示都要它
+  /// 每次拿到新状态都报给壳：侧栏 Codex 后的指示点要它
   onGatewayState?: (state: GatewayState) => void;
-  /// 新问题提示「查看」网关无法连接：展开这一家、行带闪两下；处理完回调 onFocused，壳在那里清回 undefined
-  focusProviderId?: string;
-  onFocused?: () => void;
 }
 
-export default function ModelsTab({
-  onError,
-  onGatewayState,
-  focusProviderId,
-  onFocused,
-}: ModelsTabProps) {
+export default function ModelsTab({ onError, onGatewayState }: ModelsTabProps) {
   const tool = MODELS_TOOLS[0];
   const [state, setState] = useState<GatewayState | null>(null);
   /// 这一节正在做一件写 Codex 设置的事（重启、接管、重启路由、存网关……）：对同一对象的下一次操作
@@ -301,8 +293,6 @@ export default function ModelsTab({
   const [uninstalling, setUninstalling] = useState(false);
   /// 网关行展开着的那几家（进这一页时都收着）
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  /// 跳回定位的那一家：行带闪两下（480ms）后清掉
-  const [flashProvider, setFlashProvider] = useState<string | null>(null);
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
   const [notice, setNotice] = useState<SectionNoticeState | null>(null);
@@ -603,24 +593,6 @@ export default function ModelsTab({
     });
   const expand = (id: string) => setExpanded((prev) => new Set(prev).add(id));
 
-  // 新问题提示「查看」网关无法连接：状态读回来、且这一家还在，就展开它、行带闪两下
-  useEffect(() => {
-    if (focusProviderId === undefined || state === null) return;
-    if (state.providers.some((p) => p.id === focusProviderId)) {
-      expand(focusProviderId);
-      setFlashProvider(focusProviderId);
-    }
-    onFocused?.();
-    // expand 只写本地状态
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusProviderId, state === null]);
-
-  useEffect(() => {
-    if (flashProvider === null) return;
-    const timer = setTimeout(() => setFlashProvider(null), 960);
-    return () => clearTimeout(timer);
-  }, [flashProvider]);
-
   /// 行内待办条的动作：接管 / 重新写入。做成了用返回的状态刷新，条随问题一起消失；
   /// 做不成走同一个节头下灰面板说原因
   const resolveTodo = async (kind: "takeover" | "rewrite") => {
@@ -756,7 +728,6 @@ export default function ModelsTab({
           onRetry={(id) => runOrThrow(() => api.gatewayRetryProvider(id))}
           onRemove={(p) => runOrThrow(() => api.gatewayRemoveProvider(p.id))}
           onToggleModel={toggleModel}
-          flashProviderId={flashProvider}
           notice={rowNotice}
           onCloseNotice={() => setNotice(null)}
         />
@@ -814,7 +785,7 @@ export function sectionTodos({
       />,
     );
   }
-  for (const issue of modelIssues(state, tool)) {
+  for (const issue of modelIssues(state)) {
     const kind = issue.action.kind;
     if (kind !== "takeover" && kind !== "rewrite") continue;
     out.push(

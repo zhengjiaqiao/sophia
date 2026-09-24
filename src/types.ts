@@ -135,18 +135,6 @@ export interface DeleteSourcePlan {
   modified?: number | null;
 }
 
-/// 需要用户拿主意的问题类别，与 store.rs 的 IssueKind 一一对应。
-/// 「整目录链到别处」与「目录只读」必须分开：前者的动作是拆开，后者是再试一次
-export type IssueKind =
-  | "duplicateSource"
-  | "brokenLink"
-  | "readOnlyTarget"
-  | "wholeLinkedTarget"
-  /// MCP：几个位置各有一份同名配置、连的地址不一样 → 看两边差在哪
-  | "differentCopies"
-  /// MCP：某个位置的配置文件这次读不出来 → 去看看
-  | "invalidLocation";
-
 /// 服务端存着的删除计划：plan 只用来渲染确认弹窗，执行凭 planId。
 /// 计划不经前端往返——in_git（仓库里的不代删）是道安全闸门，
 /// 让它在前端转一圈就等于可以被改掉

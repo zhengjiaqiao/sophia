@@ -36,7 +36,7 @@ import { ModelList } from "./ModelList.tsx";
 ///   （地址放不下才截断、截断才提示）；无法连接：`地址 · 无法连接 · 原因`（原因写全），行尾出 `再试一次`
 /// - 行尾 `编辑`（安静键）+ 垃圾桶（锚在垃圾桶下的确认，地址与钥匙串里的密钥一起删）
 /// - **点整行展开＝从这家挑模型**：限制说明 → 440 宽勾选列表；几行可以同时展开，各自独立；
-///   进这一页时每行都收着，只有刚新增成功的、从新问题提示「查看」跳过来的那一行自动展开
+///   进这一页时每行都收着，只有刚新增成功的那一行自动展开
 /// - `编辑` / `+ 网关`：表单在行里就地展开（新网关插在最上面，名字位写 `新网关`）；保存成功、
 ///   拉到模型后新网关变成普通行并自动展开，模型整批出现不逐个闪，这一行 surface 行带闪两下
 /// - 右键网关行：`编辑` · `删掉…`（D18，与行尾两个入口同一条命令）
@@ -76,8 +76,6 @@ export interface GatewayBlockProps {
   /// 删掉这一家（地址与钥匙串里的密钥一起删，删除后无法恢复）：确认之后才调。失败时抛出原话
   onRemove: (provider: GatewayProvider) => Promise<void>;
   onToggleModel: (provider: GatewayProvider, modelId: string) => void;
-  /// 新问题提示「查看」定位的那一家：滚到这一行，行带 surface 闪两下
-  flashProviderId?: string | null;
   notice?: RowNotice | null;
   onCloseNotice?: () => void;
   /// 表单开着且有没保存的改动（ModelsTab 据此拦下离开）
@@ -101,7 +99,6 @@ export function GatewayBlock({
   onRetry,
   onRemove,
   onToggleModel,
-  flashProviderId,
   notice,
   onCloseNotice,
   onDirtyChange,
@@ -154,9 +151,9 @@ export function GatewayBlock({
     }
   }, [editing, providers, trackDirty]);
 
-  // 新问题提示「查看」定位、刚新增成功：滚到那一行（行本身 surface 闪两下，见 is-jump）。
+  // 刚新增成功：滚到那一行（行本身 surface 闪两下，见 is-jump）。
   // 新增的那一行在状态回来之后才有：等它挂上再滚
-  const jumpTo = addedId ?? flashProviderId ?? null;
+  const jumpTo = addedId;
   const jumpMounted = jumpTo !== null && providers.some((p) => p.id === jumpTo);
   useEffect(() => {
     if (jumpTo === null || !jumpMounted) return;
@@ -365,7 +362,7 @@ export function GatewayBlock({
     const short = gatewayShortName(p);
     const classes = ["gw-row"];
     if (open || isEditing) classes.push("is-open");
-    if (flashProviderId === p.id || addedId === p.id) classes.push("is-jump");
+    if (addedId === p.id) classes.push("is-jump");
     if (menuRow === p.id) classes.push("is-menu");
     return (
       <div

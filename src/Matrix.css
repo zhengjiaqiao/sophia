@@ -655,30 +655,6 @@
   transition: none;
 }
 
-/* 新问题提示「查看」跳过来：surface 行带闪两次（不用反色——墨只有「需要注意 / 已按下」两个意思）。
-   整列定位时列头同样闪两次 */
-.mx-jump {
-  animation: mx-jump calc(var(--motion-fast) * 4) var(--ease-mech);
-}
-
-@keyframes mx-jump {
-  0%,
-  25% {
-    background-color: var(--surface);
-  }
-  26%,
-  50% {
-    background-color: transparent;
-  }
-  51%,
-  75% {
-    background-color: var(--surface);
-  }
-  100% {
-    background-color: transparent;
-  }
-}
-
 /* 「只留这份」确认框标题下的两行：留下 / 移到废纸篓 + 那份的完整路径。
    标签列对齐；路径等宽 12、不截断，太长就折行（决定删哪份的依据） */
 .mx-keeppaths {
@@ -711,9 +687,5 @@
   .mx-filter,
   .mx-disclosure {
     transition: none;
-  }
-
-  .mx-jump {
-    animation: none;
   }
 }

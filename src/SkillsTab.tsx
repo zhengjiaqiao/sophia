@@ -14,7 +14,6 @@ import { MANAGE_SOURCES, sourceSlot, type DomainRef } from "./pages/sourcesView"
 import { ManageSourcesKey, SourceListView, SourceRowView, useSources } from "./SourceRow";
 import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
-import { pathsOfKey } from "./issues";
 import { shortDate } from "./dateText";
 import { AddButton, Confirm, CornerToast, Empty, Toast, ToastCount } from "./ui";
 import type { ConfirmAnchor } from "./ui";
@@ -79,11 +78,6 @@ export interface SkillsTabProps {
   selectedKey: string;
   onRefresh: () => Promise<void>;
   onError: (message: string) => void;
-  /// 新问题提示的「查看」：一条问题的 key（`issueKey(kind, paths)`，也收行键 `来源|skill`）。
-  /// 收到新值就滚到涉及的那一行（格、或整列的列头）并闪一下；处理完回调 `onFocused`，
-  /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
-  focusKey?: string;
-  onFocused?: () => void;
 }
 
 /// 位置页的 skills 页签：页面头右端筛选框 + `+ 来源`，来源片、来源行（选中恰好一个来源片时）、
@@ -104,8 +98,6 @@ export default function SkillsTab({
   selectedKey,
   onRefresh,
   onError,
-  focusKey,
-  onFocused,
 }: SkillsTabProps) {
   // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
@@ -167,8 +159,6 @@ export default function SkillsTab({
   // 「只留这份」挂起未提交时藏起来的另一份（行键）
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [dupReadout, setDupReadout] = useState<Map<string, string>>(new Map());
-  const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
-  const focusedRef = useRef<string | undefined>(undefined);
 
   // 最近一次可撤销的操作（⌘Z、菜单「撤销」与提示条里的「撤销」走同一个）；
   // 有没有可撤的同时报给菜单（没有时「撤销」灰着）
@@ -896,44 +886,6 @@ export default function SkillsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===== 新问题提示「查看」：滚到那一行并闪两下 =====
-
-  useEffect(() => {
-    if (focusKey === undefined) {
-      focusedRef.current = undefined;
-      return;
-    }
-    if (!overview || !page || focusedRef.current === focusKey) return;
-    focusedRef.current = focusKey;
-    // key 里带着涉及的全部路径（与 core 同公式、不取摘要）：原件路径 / 格路径认行，目标路径认列
-    const paths = new Set(pathsOfKey(focusKey));
-    const rowKeys: string[] = [];
-    let columnId: string | undefined;
-    for (const row of page.rows) {
-      const own = overview.sources
-        .find((s) => s.id === row.sourceId)
-        ?.skills.find((k) => k.name === row.skill)?.path;
-      const cell = row.cells.find((c) => paths.has(c.path));
-      if (skillRowKey(row) === focusKey || (own !== undefined && paths.has(own)) || cell) {
-        rowKeys.push(skillRowKey(row));
-        if (cell) columnId = cell.targetId;
-      }
-    }
-    // 孤链行：没有原件，靠链接自己的路径认
-    for (const orphan of orphanRows(page)) {
-      if (orphan.links.some((l) => paths.has(l.clear.targetPath))) rowKeys.push(orphan.key);
-    }
-    if (rowKeys.length === 0) columnId = page.targets.find((t) => paths.has(t.path))?.id;
-    // 要跳的行被筛掉了：先清筛选，不然跳过去是空的
-    if (rowKeys.length > 0) {
-      setFilterText("");
-      setOriginFilter([]);
-    }
-    setFocus({ rowKeys, columnId, nonce: Date.now() });
-    onFocused?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusKey, overview, page?.key]);
-
   // ===== 渲染 =====
 
   /// 添加来源页：在机面里推入（侧栏留着）；加好后位置页重扫，滑回；全加上时列表筛到新来源 + 那几片下一窗
@@ -1124,7 +1076,6 @@ export default function SkillsTab({
               }
             : null
         }
-        focus={focus}
       />
       {globalToast ? <CornerToast>{globalToast}</CornerToast> : null}
 

@@ -466,7 +466,7 @@ input:focus-visible {
   line-height: var(--leading-title);
 }
 
-/* 右下提示（后台自动规则、新问题一次性提示、后台 MCP）：右沿对齐机面右沿向内 16、底 16。
+/* 右下提示（后台自动规则、后台 MCP）：右沿对齐机面右沿向内 16、底 16。
    两个同时在时竖着排，右沿对齐 */
 .app__toast {
   position: fixed;

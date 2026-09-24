@@ -54,7 +54,7 @@ test("changesPage：目的地、agent、位置、页签变了才算离开；只�
   assert.equal(changesPage(settings, goSettings(settings)), false);
 });
 
-test("壳里所有换页的路都经 navigate / requestLeave：侧栏、页签、托盘跳转、应用菜单（含 ⌘[）、查看", () => {
+test("壳里所有换页的路都经 navigate / requestLeave：侧栏、页签、托盘跳转、应用菜单（含 ⌘[）", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(
     app,

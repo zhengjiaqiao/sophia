@@ -20,7 +20,7 @@ import { placeToast, type AnchorRect, type ToastAlign } from "../layerPlace.ts";
 ///   **出现的那一刻定位一次，之后钉在窗口上**（产品负责人：新提示不应该随页面滑动）：
 ///   浮层走 portal 挂到 body、fixed 定位，不跟着滚动、不被滚动容器裁掉；锚点滚走了它也留在原处，
 ///   到点淡出；改窗口大小也不挪。锚点在出现那一刻不在窗口里、或被二级页盖住（inert）时不出现
-/// - `CornerToast`：不属于任何一处的（后台自动规则、新问题一次性提示、后台 MCP）：
+/// - `CornerToast`：不属于任何一处的（后台自动规则、后台 MCP）：
 ///   右下，壳上一处 `ToastStack`，主视图不再另有一套
 ///
 /// 各页不再自写 absolute / fixed 偏移。换一条内容就是新出现一次：调用方换 `key`。
@@ -137,7 +137,7 @@ export function ToastHost({ children }: { children: ReactNode }) {
 }
 
 /// 右下那一叠（壳上一处）：右沿对齐内容区右沿、底 16，新的在下面。
-/// `children` 是壳自己的（新问题一次性提示、后台 MCP），各页经 `CornerToast` 挂进来
+/// `children` 是壳自己的（后台 MCP），各页经 `CornerToast` 挂进来
 export function ToastStack({ className, children }: { className: string; children?: ReactNode }) {
   // setEl 是 useState 的，身份不变：ref 只在挂上 / 卸下时各叫一次
   const setEl = useContext(HostContext)?.setEl;

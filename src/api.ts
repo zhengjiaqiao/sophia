@@ -63,15 +63,6 @@ export const api = {
   /// 撤掉软链、删订阅记录与规则里本位置的目标；原件不动。执行时按当下重新算清单
   removeSource: (domain: string, sourceId: string) =>
     invoke<SyncReport>("remove_source", { domain, sourceId }),
-  /// 把这些问题记为看过（新问题只提示一次，看过即止）；已看过的保持原样。
-  /// key 是字符串，两种格式互不相撞（core `store::SeenIssue` 是准）：
-  /// - skill / MCP：`issues.ts › issueKey(kind, paths)`，即 `<IssueKind>\u001f<位置…>`
-  /// - 模型：`model\u001f<类别>\u001f<细节…>`，段间都用 `\u001f`：
-  ///   `model\u001ftakeover\u001f<baseUrl>`、`model\u001fconfigChanged\u001f<Codex 版本>`、
-  ///   `model\u001funreachable\u001f<providerId>\u001f<原因>`
-  markIssuesSeen: (keys: string[]) => invoke<void>("mark_issues_seen", { keys }),
-  /// 看过的全部 key；不在里面的就是新问题
-  listSeenIssues: () => invoke<string[]>("list_seen_issues"),
   listManualSources: () => invoke<string[]>("list_manual_sources"),
   addManualSource: (path: string) => invoke<void>("add_manual_source", { path }),
   removeManualSource: (path: string) => invoke<void>("remove_manual_source", { path }),

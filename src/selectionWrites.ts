@@ -13,7 +13,7 @@
 export interface SelectionWriterIo<S> {
   /// 画到页面上（乐观状态与后端状态都走这里）
   paint: (state: S) => void;
-  /// 每一份后端给的状态都报一声（壳要拿它认模型类的新问题）
+  /// 每一份后端给的状态都报一声（壳拿它更新侧栏 Codex 后的指示点）
   report: (state: S) => void;
   /// 写失败后读后端此刻的实际状态
   reread: () => Promise<S>;

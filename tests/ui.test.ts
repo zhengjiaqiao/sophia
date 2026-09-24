@@ -1251,22 +1251,6 @@ test("Toast 部分失败：! + 2 ✓ · 1 ⊘ 读数 + 查看，停 8 秒", () =
   assert.equal(TOAST_DWELL_MS.partial, 8000);
 });
 
-test("Toast 需要注意（新问题一次性提示）：! + 主语加粗 + 半句 + 查看 + ×，读屏名不是「部分失败」", () => {
-  const html = render(Toast, {
-    kind: "attention",
-    verb: "defuddle",
-    reading: "有两份",
-    action: { label: "查看", onClick: noop },
-    onClose: noop,
-  });
-  assert.match(html, /class="ss-toast ss-toast--notice" data-kind="attention" role="status"/);
-  assert.match(html, /title="需要注意"/);
-  assert.match(html, /class="ss-toast__verb">defuddle</);
-  assert.match(html, /class="ss-toast__reading">有两份</);
-  assert.match(html, />查看</);
-  assert.match(html, /aria-label="关闭"/);
-});
-
 test("Toast 展开态：删原件的后果与路径放在副行之下", () => {
   const html = render(Toast, {
     tier: "notice",

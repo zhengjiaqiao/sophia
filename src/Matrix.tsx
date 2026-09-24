@@ -233,8 +233,6 @@ export interface MatrixProps {
   cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
   /// 加完来源滑回：浮在新来源那几片的正下方 4；`id` 变了就是新的一条
   barToast?: { id: number; node: ReactNode; origins: string[] } | null;
-  /// 新问题提示「查看」跳过来：滚到这几行（或这一列的列头）并闪两下。`nonce` 变了才重做
-  focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
 /// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着）；受阻统称「受阻」（D22）、
@@ -490,7 +488,6 @@ export default function Matrix(props: MatrixProps) {
     keyBusy,
     cellBusy,
     barToast,
-    focus: jump,
   } = props;
 
   const tipId = useId();
@@ -573,30 +570,6 @@ export default function Matrix(props: MatrixProps) {
     // 只跟 nonce：同一批 keys 的数组身份每次渲染都会变
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flashNonce]);
-  // ---- 跳回：滚到那一行并闪一下 ----
-  const [flashRows, setFlashRows] = useState<Set<string>>(new Set());
-  const [flashCol, setFlashCol] = useState<string | null>(null);
-  const jumpNonce = jump?.nonce;
-  useEffect(() => {
-    if (!jump) return;
-    setFlashRows(new Set(jump.rowKeys));
-    setFlashCol(jump.rowKeys.length === 0 ? (jump.columnId ?? null) : null);
-    scrollToJump(jump);
-    // 只跟 nonce
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jumpNonce]);
-  const scrollToJump = (target: { rowKeys: string[]; columnId?: string }) => {
-    const root = rootRef.current;
-    const first = target.rowKeys[0];
-    const el =
-      first !== undefined
-        ? root?.querySelector(`[data-row="${CSS.escape(first)}"]`)
-        : target.columnId !== undefined
-          ? root?.querySelector(`[data-col="${CSS.escape(target.columnId)}"]`)
-          : null;
-    el?.scrollIntoView({ block: "center" });
-  };
-
   const endFlash = (key: string) =>
     setFlashing((prev) => {
       if (!prev.has(key)) return prev;
@@ -870,12 +843,7 @@ export default function Matrix(props: MatrixProps) {
         </button>
       </div>
       {columns.map((col) => (
-        <div
-          key={col.id}
-          data-col={col.id}
-          onAnimationEnd={() => setFlashCol(null)}
-          className={`mx-head__col${flashCol === col.id ? " mx-jump" : ""}`}
-        >
+        <div key={col.id} data-col={col.id} className="mx-head__col">
           {/* 列头只排序；悬停只出提示框，不出列带（D23） */}
           <Tooltip content={col.tip} context="table" placement="bottom">
             <button
@@ -966,7 +934,6 @@ export default function Matrix(props: MatrixProps) {
     const classes = ["mx-grid", "mx-row"];
     if (isSelected) classes.push("is-selected");
     if (hot) classes.push("is-hot");
-    if (flashRows.has(row.key)) classes.push("mx-jump");
     const showExtra = row.extra !== undefined && (hot || row.extraPinned === true);
     const open = expanded === row.key && row.detail !== undefined;
     // 右键菜单（D18）：只作加速器，每一项在界面上都另有入口；不改变勾选
@@ -989,15 +956,6 @@ export default function Matrix(props: MatrixProps) {
           data-row={row.key}
           className={classes.join(" ")}
           style={gridStyle}
-          onAnimationEnd={(e) => {
-            if (e.target === e.currentTarget)
-              setFlashRows((prev) => {
-                if (!prev.has(row.key)) return prev;
-                const next = new Set(prev);
-                next.delete(row.key);
-                return next;
-              });
-          }}
           onMouseEnter={() => setHover({ row: row.key, col: null })}
           onMouseLeave={() => setHover(null)}
           onContextMenu={(e) => {

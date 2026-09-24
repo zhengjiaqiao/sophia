@@ -122,7 +122,6 @@ export interface DomainViewProps {
   cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
   /// 加完来源：浮在新来源那几片正下方
   barToast?: { id: number; node: ReactNode; origins: string[] } | null;
-  focus?: { rowKeys: string[]; columnId?: string; nonce: number } | null;
 }
 
 /// 提示框里的动词：格子只写「动词 · 快捷键」，动词带方向（`加到 Claude Code` / `从 Claude Code 移除`）——
@@ -549,7 +548,6 @@ export default function DomainView(props: DomainViewProps) {
       keyBusy={props.keyBusy}
       cellBusy={props.cellBusy}
       barToast={props.barToast}
-      focus={props.focus}
     />
   );
 }

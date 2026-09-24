@@ -188,17 +188,6 @@ test("没有网关：小标下一句「还没有网关，先加一家」，不�
   assert.equal(ADD_GATEWAY_BLOCKED, "先保存或取消正在添加的网关");
 });
 
-test("跳回定位：那一行 surface 行带闪两下（is-jump），只有它", () => {
-  const html = block(
-    { providers: [ap(), or("地址无法连接")] },
-    { expanded: new Set(["or"]), flashProviderId: "or" },
-  );
-  assert.equal((html.match(/is-jump/g) ?? []).length, 1);
-  const [first, second] = rows(html);
-  assert.match(second, /^<div class="gw-row is-open is-jump"/);
-  assert.match(first, /aria-expanded="false"/);
-});
-
 test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（安静键）；只读 `本机端口 47328` `协议 拉取模型时识别`", () => {
   const html = render(GatewayForm, {
     state: state(),

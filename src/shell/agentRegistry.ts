@@ -20,14 +20,11 @@ export interface AgentState {
   modelsSupported: boolean | null;
 }
 
-/// 节组件拿到的：壳的回调与跳转定位（节自己的数据自己读）
+/// 节组件拿到的：壳的回调（节自己的数据自己读）
 export interface AgentSectionProps {
   onError: (message: string) => void;
-  /// 节改了模型状态：侧栏指示点、新问题提示跟着更新
+  /// 节改了模型状态：侧栏指示点跟着更新
   onGatewayState: (state: GatewayState) => void;
-  /// 新问题提示 `查看` 带过来的定位（网关 id）；节处理完调 onFocused 清掉
-  focusProviderId?: string;
-  onFocused?: () => void;
 }
 
 /// 托盘面板给每一行的面板级共用（TrayPanel 持有）

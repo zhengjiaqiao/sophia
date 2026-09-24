@@ -30,7 +30,6 @@ import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
 import { MANAGE_SOURCES, mcpLocationName, sourceSlot, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
-import { pathsOfKey } from "./issues";
 import {
   cellViewOf,
   differingFields,
@@ -82,13 +81,8 @@ export interface McpTabProps {
   /// 扫描、写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
   refreshKey: number;
-  /// 每次扫描完回传一次（壳拿它认新问题、出一次性提示，也拿它算侧栏的项目并集，不用再自己扫一遍）
+  /// 每次扫描完回传一次（壳拿它算侧栏的项目并集，不用再自己扫一遍）
   onOverview?: (overview: McpOverview) => void;
-  /// 新问题提示的「查看」：一条 MCP 问题的 key（`McpIssueItem.key`，也收服务名）。
-  /// 收到新值就滚到那一行（或读不出来的那一列列头）并闪两下；处理完回调 `onFocused`，
-  /// 壳在那里把它清回 undefined，下次跳同一条才会再触发
-  focusKey?: string;
-  onFocused?: () => void;
 }
 
 /// 行键：同名服务在一个域里合成一行
@@ -191,8 +185,6 @@ export default function McpTab({
   onBusy,
   refreshKey,
   onOverview,
-  focusKey,
-  onFocused,
 }: McpTabProps) {
   const [overview, setOverview] = useState<McpOverview | null>(null);
   // 选中的行：域 key → 行键集合
@@ -237,13 +229,11 @@ export default function McpTab({
     parts: string[];
     origins: string[];
   } | null>(null);
-  const [focus, setFocus] = useState<{ rowKeys: string[]; columnId?: string; nonce: number }>();
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
   const diffAsked = useRef<Set<string>>(new Set());
   // 点开了 `2 份不一样` 的那几行（服务名 → 比对结果）：就地展开字段级差异，再点收起
   const [openDiffs, setOpenDiffs] = useState<Map<string, McpDiffState>>(new Map());
-  const focusedRef = useRef<string | undefined>(undefined);
   // 最近一次可撤销的写入（⌘Z、菜单「撤销」与提示条「撤销」走同一个）；有没有可撤的同时报给菜单
   const undoRef = useRef<(() => void) | null>(null);
   const [canUndo, setCanUndo] = useState(false);
@@ -474,34 +464,6 @@ export default function McpTab({
     return fields.length > 0 ? `${fields.join("、")} 不同` : "配置不一样";
   };
 
-  // 新问题提示「查看」：key 里带着位置路径与 `#服务名`（与 core 同公式），认出行或列
-  useEffect(() => {
-    if (focusKey === undefined) {
-      focusedRef.current = undefined;
-      return;
-    }
-    if (!page || focusedRef.current === focusKey) return;
-    focusedRef.current = focusKey;
-    const paths = pathsOfKey(focusKey);
-    const names = new Set(
-      paths.flatMap((p) => {
-        const i = p.lastIndexOf("#");
-        return i >= 0 ? [p.slice(i + 1)] : [];
-      }),
-    );
-    const rowKeys = page.rows
-      .filter((row) => row.name === focusKey || names.has(row.name))
-      .map(rowKeyOf);
-    const columnId =
-      rowKeys.length === 0 ? page.targets.find((t) => paths.includes(t.path))?.id : undefined;
-    if (rowKeys.length > 0) {
-      setFilterText("");
-      setOriginFilter([]);
-    }
-    setFocus({ rowKeys, columnId, nonce: Date.now() });
-    onFocused?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusKey, page]);
   const locationOf = (id: string): McpLocation | undefined =>
     overview?.locations.find((location) => location.id === id);
   const labelOf = (id: string) => locationOf(id)?.label ?? id;
@@ -1444,7 +1406,6 @@ export default function McpTab({
               }
             : null
         }
-        focus={focus}
       />
       {globalToast ? <CornerToast>{globalToast}</CornerToast> : null}
 

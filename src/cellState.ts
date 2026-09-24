@@ -1,11 +1,16 @@
-/// 格状态 → 圆点 + 点击行为 + 文案。矩阵、导入页与新问题的一次性提示共用这一份映射。
+/// 格状态 → 圆点 + 点击行为 + 文案。矩阵与导入页共用这一份映射。
 ///
 /// 存在的理由：后端 `CellState` 有八种，`propose_links` 对四种异常态都返回空动作数组，
 /// 凭动作数组为空就统一说一句话，对它们全是错的。所以先判状态，再决定画什么、说什么。
 ///
 /// UI v4 起异常态**在格里画得出来**（DESIGN「视觉优先」）：同一个 10px 环骨架，
 /// 失效＝虚线环、无法写入与同名占位＝斜杠环 ⊘（D22）、整个文件夹是链接＝环内向右箭头。
-import type { Cell, IssueKind, Target } from "./types";
+import type { Cell, Target } from "./types";
+
+/// skill 格上需要用户拿主意的问题类别。
+/// 「整目录链到别处」与「目录只读」必须分开：前者的动作是拆开，后者是再试一次
+export type SkillIssueKind =
+  "duplicateSource" | "brokenLink" | "readOnlyTarget" | "wholeLinkedTarget";
 
 /// 格里的记号。前三种是常驻状态；`none` 是「这一行在这一列没有格」；
 /// 后四种是异常，画在同一个环骨架上（`foreign` 与 `duplicate` 都画成 `blocked`：
@@ -21,8 +26,8 @@ export interface CellView {
   /// 为什么不能点。成功句不在这里——按 §4.1，一次批量操作只汇总成一句，
   /// 「每个格自己的成功文案」从构造上就是错的，由调用方在操作结果处聚合（§8.1）
   reason?: string;
-  /// 非空表示这是要用户拿主意的问题（就地常显，新出现时提示一次）
-  issue?: IssueKind;
+  /// 非空表示这是要用户拿主意的问题（就地常显）
+  issue?: SkillIssueKind;
 }
 
 /// 逐状态的映射表。`agentLabel` 是列头给用户看的 agent 名，

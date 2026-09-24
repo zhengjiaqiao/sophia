@@ -14,16 +14,7 @@ import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
-import { collectIssues } from "./issues";
-import {
-  mcpNotices,
-  modelNotices,
-  noticeLine,
-  skillNotices,
-  unseenNotices,
-  type IssueSegment,
-} from "./issueNotice";
-import { collectMcpIssues, mcpDomains } from "./mcpView";
+import { mcpDomains } from "./mcpView";
 import { loadHome } from "./pathText";
 import {
   loadProjectSort,
@@ -34,8 +25,7 @@ import {
   type ProjectSort,
   type SidebarProject,
 } from "./sidebarProjects";
-import { edgeFades, modelIssues } from "./modelsView";
-import type { ModelIssue } from "./modelsView";
+import { edgeFades } from "./modelsView";
 import { ErrorBanner, Tabs, Toast, ToastCount, ToastStack } from "./ui";
 import type { AnchorRect } from "./layerPlace";
 import { Sidebar, type RemovedProject } from "./shell/Sidebar";
@@ -109,22 +99,9 @@ export default function App() {
   // 自动同步规则；扫描时顺带取回，域页与添加页都用它
   const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
   const [backgroundMcpReport, setBackgroundMcpReport] = useState<McpReport | null>(null);
-  /// 新问题一次性提示的三份原料：skill 扫描（overview）、MCP 扫描、模型状态；外加看过的 key。
-  /// 看过表还没读到（null）就不提示——宁可晚一轮，不能把看过的又提示一遍
+  /// MCP 扫描结果（侧栏项目列表要它）与模型状态（侧栏 agent 指示点要它）
   const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
   const [gatewayState, setGatewayState] = useState<GatewayState | null>(null);
-  const [seen, setSeen] = useState<ReadonlySet<string> | null>(null);
-  /// 这次运行里点过 `查看` / `×` 的 key：写进 core 之前就发出去的重扫读回来的看过表里还没有它们，
-  /// 并进去，免得刚关掉的提示又冒出来
-  const markedRef = useRef<Set<string>>(new Set());
-  /// 正在显示的提示里的 key（按显示顺序）：新问题合进来时原来的几条排在前面不动
-  const shownRef = useRef<string[]>([]);
-  /// `查看` 跳过去要聚焦的那一行；那一页处理完回调 onFocused 清回 undefined
-  const [focus, setFocus] = useState<{ segment: "skills" | "mcp"; key: string } | undefined>();
-  const clearFocus = useCallback(() => setFocus(undefined), []);
-  /// `查看`「网关无法连接」：要进网关页并选中的那一家
-  const [modelFocus, setModelFocus] = useState<string | undefined>();
-  const clearModelFocus = useCallback(() => setModelFocus(undefined), []);
   /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐
   const contentRef = useRef<HTMLElement>(null);
   const [contentFade, setContentFade] = useState({ start: false, end: false });
@@ -188,7 +165,7 @@ export default function App() {
   /// 重扫：后台那一路，**只更新数据、不置 busy、不锁任何控件**（DESIGN「忙碌指示」「空态与忙碌态」）——
   /// 界面上没有忙碌提示却点不动，用户只会觉得坏了。锁控件只给用户发起、正在等的操作（setBusyState）。
   ///
-  /// 新问题的一次性提示是全局的：不论停在哪个页签，三类问题都要认得出来，所以 skill 每次都扫。
+  /// 侧栏项目列表是 skill 与 MCP 两边发现的并集，与当前页签无关，所以 skill 每次都扫。
   /// MCP 停在 MCP 页时由 McpTab 扫完回传（onOverview），不重复扫；停在别的页签时这里扫一次，
   /// 缓存到下次聚焦 / 文件变化。扫描可能触发已授权的自动规则；界面以重新扫描的实际结果为准。
   ///
@@ -196,18 +173,15 @@ export default function App() {
   /// 调用方 await 回来时拿到的是最新的
   const scanOnce = async () => {
     try {
-      const [next, projects, rules, seenList, mcp] = await Promise.all([
+      const [next, projects, rules, mcp] = await Promise.all([
         api.scanAll(),
         api.listManualProjects(),
         api.listAutoLinks(),
-        // 提示的原料读不到不挡主流程：少提示一次，好过整页报错
-        api.listSeenIssues().catch(() => null),
         activeTabRef.current === "mcp" ? Promise.resolve(null) : api.scanMcp().catch(() => null),
       ]);
       setOverview(next);
       setManualProjects(projects);
       setAutoLinks(rules);
-      if (seenList !== null) setSeen(new Set([...seenList, ...markedRef.current]));
       if (mcp !== null) setMcpOverview(mcp);
       setRefreshKey((key) => key + 1);
     } catch (e) {
@@ -235,7 +209,7 @@ export default function App() {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
-  /// 模型状态只为认出模型类的新问题：后台轻查，不显示忙碌
+  /// 模型状态只为侧栏 Codex 后的指示点：后台轻查，不显示忙碌
   const refreshGateway = useCallback(() => {
     void api.gatewayState().then(
       (state) => setGatewayState(state),
@@ -322,7 +296,7 @@ export default function App() {
       });
     // 路径显示把主目录写成 ~：主目录启动时读一次，之后 displayPath 同步可用
     void loadHome();
-    // 启动时扫一次：停在 Codex 页也要认得出 Skills 与 MCP 的新问题
+    // 启动时扫一次：停在 Codex 页，侧栏也要列出 Skills 与 MCP 两边发现的项目
     void refresh();
     return () => {
       cancelled = true;
@@ -410,52 +384,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [place]);
 
-  // ===== 新问题只提示一次（DESIGN「没有收件箱、待处理页和「忽略」」） =====
-  // 三类扫描结果任一更新都重算：当前问题减去看过的，剩下的进右下那一个黑窗
-  const skillIssues = useMemo(() => collectIssues(overview), [overview]);
-  const mcpIssues = useMemo(() => collectMcpIssues(mcpOverview), [mcpOverview]);
-  const modelIssueList: ModelIssue[] = useMemo(
-    () => (modelsSupported ? modelIssues(gatewayState) : []),
-    [gatewayState, modelsSupported],
-  );
-  const notice = useMemo(
-    () =>
-      seen === null
-        ? []
-        : unseenNotices(
-            [
-              ...skillNotices(skillIssues),
-              ...mcpNotices(mcpIssues),
-              ...modelNotices(modelIssueList),
-            ],
-            seen,
-            shownRef.current,
-          ),
-    [skillIssues, mcpIssues, modelIssueList, seen],
-  );
-  useEffect(() => {
-    shownRef.current = notice.map((issue) => issue.key);
-  }, [notice]);
-  const noticeText = noticeLine(notice);
-
-  /// `查看` 与 `×` 都把这次提示里的全部 key 记为看过。先在本地记上、提示立刻收起；
-  /// 写进 core 没成就报出来——下次启动它会再提示一次
-  const markNoticeSeen = () => {
-    const keys = notice.map((issue) => issue.key);
-    if (keys.length === 0) return;
-    for (const key of keys) markedRef.current.add(key);
-    setSeen((prev) => new Set([...(prev ?? []), ...keys]));
-    void api.markIssuesSeen(keys).catch((e) => setError(String(e)));
-  };
-
-  /// `查看`：跳到第一条所在的页签和侧栏位置，滚到那一行并闪两下
-  const viewNotice = () => {
-    const first = notice[0];
-    if (first === undefined) return;
-    markNoticeSeen();
-    jumpToRow(first.segment, first.key);
-  };
-
   const addProject = async () => {
     const path = await api.pickDirectory("选择项目目录");
     if (!path) return;
@@ -511,46 +439,6 @@ export default function App() {
     }
   };
   const clearRemoved = useCallback(() => setRemoved(null), []);
-
-  /// 跳到一条问题所在的那一行：切到对应页签；这一条属于别的域就先切侧栏；再把 key 交给那一页，
-  /// 它滚到那一行并闪两下，处理完回调 onFocused 清掉（下次跳同一条才会再触发）
-  const jumpToRow = (segment: IssueSegment, key: string) => {
-    if (segment === "models") {
-      if (!modelsSupported) return;
-      // 「网关无法连接」那一条：选中那一家；别的类别只切到 Codex 页
-      const providerId = modelIssueList.find((i) => i.key === key)?.providerId;
-      navigate(
-        (p) => goAgent(p, "codex"),
-        () => {
-          if (providerId !== undefined) setModelFocus(providerId);
-          refreshGateway();
-        },
-      );
-      return;
-    }
-    const domain = segment === "mcp" ? mcpDomainOf(key) : skillDomainOf(key);
-    navigate(
-      (p) => {
-        const next = goTab(p, segment);
-        return domain !== null ? goLocation(next, domain) : next;
-      },
-      () => setFocus({ segment, key }),
-    );
-  };
-
-  /// skill 问题属于哪个域：当前侧栏选中的域里有就留在这儿，否则取第一个有它的域
-  const skillDomainOf = (key: string): string | null => {
-    const hit = (d: { key: string }) =>
-      collectIssues(
-        overview,
-        domains.filter((x) => x.key === d.key),
-      ).some((i) => i.key === key);
-    if (domains.some((d) => d.key === selectedKey && hit(d))) return selectedKey;
-    return domains.find(hit)?.key ?? null;
-  };
-
-  const mcpDomainOf = (key: string): string | null =>
-    mcpIssues.find((i) => i.key === key)?.domain ?? null;
 
   // ===== 应用菜单（D15）：菜单栏按下一项 → 换目的地 / 交给设置页 / 作用于输入框 / 交给当前页 =====
   const addProjectRef = useRef(addProject);
@@ -619,8 +507,6 @@ export default function App() {
         selectedKey={selectedKey}
         onRefresh={refresh}
         onError={setError}
-        focusKey={focus?.segment === "skills" ? focus.key : undefined}
-        onFocused={clearFocus}
       />
     ),
     mcp: () => (
@@ -630,8 +516,6 @@ export default function App() {
         onBusy={setBusyState}
         refreshKey={refreshKey}
         onOverview={setMcpOverview}
-        focusKey={focus?.segment === "mcp" ? focus.key : undefined}
-        onFocused={clearFocus}
       />
     ),
   };
@@ -680,13 +564,7 @@ export default function App() {
               aboutRequest={aboutRequest ?? undefined}
             />
           ) : agentEntry ? (
-            <AgentPage
-              entry={agentEntry}
-              onError={setError}
-              onGatewayState={setGatewayState}
-              focusProviderId={modelFocus}
-              onFocused={clearModelFocus}
-            />
+            <AgentPage entry={agentEntry} onError={setError} onGatewayState={setGatewayState} />
           ) : (
             // 位置页：页面头左端 `skills ｜ mcp` 滑槽，右端留给页面自己的动作（PageHeadActions）
             <PageHead
@@ -706,21 +584,10 @@ export default function App() {
         </main>
       </div>
       {/* 右下那一叠（DESIGN「浮起小窗的位置」）：不属于任何一处的提示小窗，全应用只有这一套——
-        壳自己的两种在这里，各页的（后台自动规则）经 CornerToast 挂进来 */}
+        壳自己的（别的页签上规则在背后添加了 MCP）在这里，各页的（后台自动规则）经 CornerToast 挂进来 */}
       <ToastStack className="app__toast">
         {backgroundMcpReport && (
           <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />
-        )}
-        {/* 新问题只提示一次：不自动消失，`查看` 或 `×` 才收起并记为看过；
-          已有提示时又发现新问题，合进这一个窗（改计数），不叠第二个 */}
-        {noticeText && (
-          <Toast
-            kind="attention"
-            verb={noticeText.lead}
-            reading={noticeText.rest}
-            action={{ label: "查看", onClick: viewNotice }}
-            onClose={markNoticeSeen}
-          />
         )}
       </ToastStack>
     </div>

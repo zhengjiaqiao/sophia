@@ -134,7 +134,7 @@
   border-bottom: 1px solid var(--row-line);
 }
 
-/* 刚新增成功 / 从「查看」跳过来：surface 行带亮 → 灭 → 亮 → 灭，各 120ms（不用反色） */
+/* 刚新增成功：surface 行带亮 → 灭 → 亮 → 灭，各 120ms（不用反色） */
 .gw-row.is-jump {
   animation: gw-jump calc(var(--motion-fast) * 4) var(--ease-mech);
 }

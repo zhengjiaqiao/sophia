@@ -469,16 +469,10 @@ test("modelIssues：接管 / 配置被外部改过 / 网关无法连接三类，
     ],
   );
   const [takeover, config, down] = issues;
-  // 看过表的 key：格式与 core `store::SeenIssue` 钉死，段间是 \u001f
+  // key：这一条状况的标识，段间是 \u001f
   assert.equal(takeover.key, "model\u001ftakeover\u001fhttps://am.example");
   assert.equal(config.key, "model\u001fconfigChanged\u001f0.50.0");
   assert.equal(down.key, "model\u001funreachable\u001fa\u001f地址无法访问");
-  assert.equal(down.providerId, "a");
-  // 一次性提示的句子以主语开头
-  assert.equal(takeover.sentence, "Codex 正由 agents-manager 管理");
-  assert.equal(config.sentence, "Codex 里 Sophia 写进去的设置被改掉了");
-  assert.equal(down.subject, "甲");
-  assert.equal(down.sentence, "甲 无法连接");
   // 不支持的机器上整段为空
   assert.deepEqual(
     modelIssues(
