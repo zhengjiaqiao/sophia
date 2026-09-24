@@ -666,6 +666,7 @@ export default function App() {
           ) : (
             // 位置页：页面头左端 `skills ｜ mcp` 滑槽，右端留给页面自己的动作（PageHeadActions）
             <PageHead
+              location
               lead={
                 <Tabs
                   items={LOCATION_DOMAINS}

@@ -688,7 +688,7 @@ test("InUseRow 两家网关同名：片名后加 ` · 网关短名`，短名单�
   );
   assert.match(html, /ss-modelchip__name">Kimi K2<\/span>/);
   assert.match(html, /aria-label="移除 GPT-4\.1 · azure"/);
-  const css = readFileSync(new URL("../src/ui/ModelChip.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../src/ui/ui.css", import.meta.url), "utf8");
   assert.match(css, /\.ss-modelchip__suffix \{\s*color: var\(--ink-mute\);/);
 });
 

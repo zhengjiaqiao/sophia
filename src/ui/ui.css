@@ -744,6 +744,11 @@ textarea,
   color: var(--ink);
 }
 
+/* 网关后缀（DESIGN「在用」：同名才加 ` · 网关短名`，短名 ink-mute） */
+.ss-modelchip__suffix {
+  color: var(--ink-mute);
+}
+
 /* ===== 4.2 标签 Tag：无框的 12px 文字（有框的都能点） ===== */
 .ss-tag {
   font-family: var(--font-ui);

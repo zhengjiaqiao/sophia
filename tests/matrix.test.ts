@@ -437,11 +437,12 @@ test("格子提示框的 · 空格 只给键盘：鼠标悬停不写，格子按
 test("Skills 与 MCP 同一个固定面板宽度 776（34 + 246 + 120 + 4 × 88 + 24）；页面头、来源片与表格同一条右沿", () => {
   assert.equal(PANEL_W, 776);
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  // 页面头（壳渲染）在位置页里限宽到同一条右沿，并与来源片、列头一起吸顶
-  assert.match(
-    css,
-    /\.face__scroll > \.page-head:has\(~ \.mx-page\) \{[^}]*position: sticky;[^}]*max-width: 776px;/,
-  );
+  // 页面头（壳渲染）在位置页里限宽到同一条右沿，并与来源片、列头一起吸顶：壳自己定（App.css）
+  const shell = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+  assert.match(shell, /\.page-head--location \{[^}]*position: sticky;[^}]*max-width: 776px;/);
+  assert.doesNotMatch(css, /\.page-head/, "Matrix.css 不改壳的页面头");
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /<PageHead\s+location\s/);
   assert.match(css, /\.mx-bar \{[^}]*position: sticky;[^}]*width: 776px;/);
 });
 

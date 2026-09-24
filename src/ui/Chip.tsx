@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import "./ModelChip.css";
 
 /// 选择片（DESIGN「选择片 Chip」）：胶囊，高 28，文字 13（原样大小写，内容是专名），
 /// 计数 12 tabular。未选：透明底（透出机面）+ 1px `ctl-border`、计数 `ink-faint`；

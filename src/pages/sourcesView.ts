@@ -160,11 +160,6 @@ export function candidateGroups(
   return groups.filter((g) => g.items.length > 0);
 }
 
-/// 两列按列读（字母序竖着看）：行数 = 一半向上取整
-export function columnRows(count: number): number {
-  return Math.max(1, Math.ceil(count / 2));
-}
-
 // ===== MCP 来源管理页（DESIGN「来源管理页 › MCP 同一套」）：来源＝一处配置 =====
 
 /// 页名：`CardBox 的 MCP 来源`、`全局的 MCP 来源`

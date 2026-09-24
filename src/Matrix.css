@@ -3,24 +3,10 @@
    行与行 1px row-line（V4 没有墨色结构线）。色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
-/* 吸顶的落点：页面头（上距 15 + 高 34）之下 */
+/* 吸顶的落点：页面头（上距 15 + 高 34）之下；页面头本身的吸顶归壳（App.css 的 page-head--location）*/
 .mx {
   --mx-top: 49px;
   padding-bottom: var(--space-huge);
-}
-
-/* 位置页的页面头连同来源片、来源行、列头一起吸顶（DESIGN「位置页 › 表格 › 吸顶」）；
-   宽度与表格同一条右沿（776，= Matrix.tsx 的 PANEL_W），切页签时右端的筛选框与 `+ 来源` 不跳。
-   页面头由壳渲染：这里只在它后面跟着位置页时改它——上距换成同高的内边距，吸顶后上面不留缝 */
-.face__scroll > .page-head:has(~ .mx-page) {
-  position: sticky;
-  top: 0;
-  z-index: 7;
-  max-width: 776px;
-  height: var(--mx-top);
-  margin-top: 0;
-  padding-top: 15px;
-  background: var(--face);
 }
 
 .mx-mono {

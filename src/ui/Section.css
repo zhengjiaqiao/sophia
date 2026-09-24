@@ -1,13 +1,6 @@
 /* agent 页的节（Section.tsx，DESIGN「agent 页 › 第三方模型（一节）」的通用骨架）。
-   节头：节名 head 16 / 600 + 12 + 总开关，右端一格动作；页面头下 24，节与节之间 48 */
-.ss-section {
-  padding-top: var(--space-xl);
-}
-
-/* 节与节之间 48：外壳把每一节包在 `.agent-page__section` 里（shell/AgentPage.tsx） */
-.agent-page__section + .agent-page__section > .ss-section {
-  padding-top: var(--space-huge);
-}
+   节头：节名 head 16 / 600 + 12 + 总开关，右端一格动作。节在页里的间距（页面头下 24、节与节之间 48）
+   归外壳（App.css 的 agent-page__section） */
 
 .ss-section__head {
   display: flex;

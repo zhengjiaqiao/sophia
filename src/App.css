@@ -382,6 +382,20 @@ input:focus-visible {
   margin-top: var(--space-md);
 }
 
+/* 位置页的页面头连同来源片、来源行、列头一起吸顶（DESIGN「位置页 › 表格 › 吸顶」）；
+   宽度与表格同一条右沿（776，= Matrix.tsx 的 PANEL_W），切页签时右端的筛选框与 `+ 来源` 不跳。
+   上距换成同高的内边距（15 + 34 = 49，= Matrix.css 的 --mx-top），吸顶后上面不留缝 */
+.page-head--location {
+  position: sticky;
+  top: 0;
+  z-index: 7;
+  max-width: 776px;
+  height: 49px;
+  margin-top: 0;
+  padding-top: 15px;
+  background: var(--face);
+}
+
 .page-head__lead {
   display: flex;
   align-items: center;
@@ -397,6 +411,16 @@ input:focus-visible {
 
 .page-head__actions:empty {
   display: none;
+}
+
+/* agent 页的节（shell/AgentPage.tsx 把每一节包一层）：页面头下 24，节与节之间 48（DESIGN「agent 页」）。
+   间距归壳，节组件（ui/Section）自己不带外距 */
+.agent-page__section {
+  padding-top: var(--space-xl);
+}
+
+.agent-page__section + .agent-page__section {
+  padding-top: var(--space-huge);
 }
 
 /* 页面名一律 title Condensed 20 / 700，原样、字距 0 */

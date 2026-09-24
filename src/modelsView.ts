@@ -15,9 +15,6 @@ export interface ModelsTool {
   /// 用这个工具的第三方模型要知道的事（全文，不截断）。只在挑模型时有用：网关行展开区的第一行
   /// （DESIGN「agent 页 › 点整行展开＝从这家挑模型」）
   limitations: string;
-  /// 旧网关二级页（src/pages/GatewayPage.tsx）还在读它；那个文件由协调方在集成时删，删时一并删掉这一项
-  /// 与下面的 `gatewaySelectedChips`
-  pickerNote?: string;
 }
 
 export const CODEX: ModelsTool = {
@@ -125,15 +122,6 @@ export function effectiveModels(state: GatewayState): EffectiveModel[] {
     const suffix = (times.get(name) ?? 0) > 1 ? gatewayShortName(row.provider) : null;
     return { ...row, name, suffix, label: suffix === null ? name : `${name} · ${suffix}` };
   });
-}
-
-/** @deprecated 只剩旧网关二级页在用，随 src/pages/GatewayPage.tsx 一起删 */
-export function gatewaySelectedChips(
-  provider: GatewayProvider,
-): { model: GatewayProviderModel; label: string }[] {
-  const models = selectedModels(provider);
-  const keepVendor = new Set(models.map((m) => splitModelId(m.id).vendor ?? "")).size > 1;
-  return models.map((model) => ({ model, label: chipLabel(model, keepVendor) }));
 }
 
 // ===== 模型列表的写法（DESIGN「模型列表的写法」：网关行展开区里的勾选列表） =====

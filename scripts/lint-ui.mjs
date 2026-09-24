@@ -357,10 +357,10 @@ const rules = [
     // 只管 MCP 那几个文件：skill 页的「自动同步」是名副其实的双向维护，不受此限
     desc: "MCP 页的文案不出现「同步」（R3）",
     run(src, path) {
-      // 来源管理页 skill 与 MCP 共用一套文案文件，一并管
+      // 来源行与添加来源页 skill 与 MCP 共用一套文案文件，一并管
       const mcp =
         /^src\/[Mm]cp[A-Za-z]*\.(tsx|ts|css)$/.test(path) ||
-        /^src\/pages\/(SourcesPage\.tsx|sourcesModel\.ts|sourcesView\.ts)$/.test(path);
+        /^src\/pages\/(sourcesModel\.ts|sourcesView\.ts)$/.test(path);
       if (!mcp) return [];
       return visibleText(src).includes("同步") ? ["MCP 页的可见文案里出现了「同步」"] : [];
     },

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 
 import {
   candidateGroups,
-  columnRows,
   duplicateNames,
   listNames,
   mcpCandidateGroups,
@@ -213,13 +212,6 @@ test("添加来源弹窗的分组：其他项目在用的写在哪用，检测�
     },
   ]);
   assert.deepEqual(candidateGroups({ subscribed: [], elsewhere: [], detected: [] }), []);
-});
-
-test("展开区两列按列读：行数取一半向上取整，至少一行", () => {
-  assert.equal(columnRows(6), 3);
-  assert.equal(columnRows(7), 4);
-  assert.equal(columnRows(1), 1);
-  assert.equal(columnRows(0), 1);
 });
 
 // ===== MCP =====

@@ -22,13 +22,18 @@ export interface PageHeadProps {
   actions?: ReactNode;
   /// 页面头下面的这一页内容：`PageHeadActions` 在这棵树里都能找到这个页面头
   children?: ReactNode;
+  /// 位置页的页面头：吸顶、与表格同宽（App.css `.page-head--location`）。吸顶与限宽由壳定，页面不改页面头
+  location?: boolean;
 }
 
-export function PageHead({ lead, actions, children }: PageHeadProps) {
+export function PageHead({ lead, actions, children, location = false }: PageHeadProps) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   return (
     <SlotContext.Provider value={slot}>
-      <div className="page-head" data-tauri-drag-region="deep">
+      <div
+        className={`page-head${location ? " page-head--location" : ""}`}
+        data-tauri-drag-region="deep"
+      >
         <div className="page-head__lead" data-tauri-drag-region="false">
           {lead}
         </div>
