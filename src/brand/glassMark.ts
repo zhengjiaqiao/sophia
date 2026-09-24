@@ -7,7 +7,7 @@
    - 字标位图的颜色是标志资产自己的（DESIGN「标志」：标志不随界面 token 换色）：由 SVG 源码
      逐条路径填出来，和 <img> 同源，灰影的色值只在 SVG 里。不直接 drawImage(<img>)：
      没写宽高的 SVG 在各引擎里的固有尺寸不一致，画进画布会变形。
-   - 猫与裂纹的取色读 tokens.css 的变量（--ink / --paper / --ink-mute / --ctl-edge），不写字面值。
+   - 猫与裂纹的取色读 tokens.css 的变量（--ink / --paper / --ink-mute），不写字面值；裂纹用 --paper。
    - 画布只盖侧栏的字标带（宿主外面带 data-brand-band 的那一块，208 × 44）：不盖红绿灯行、
      不盖导航项；碎片落在字标带的下沿（看不见的地面），左右不出侧栏。
    - 本文件的纯函数（rng / fracture / labelShards / packShards）不碰 DOM，
@@ -454,7 +454,6 @@ interface Palette {
   ink: string;
   paper: string;
   mute: string;
-  edge: string; // --ctl-edge：次级裂纹
 }
 
 const newCat = (): Cat => ({
@@ -511,7 +510,7 @@ export class GlassMark {
   private ox = 0;
   private oy = 0;
   private baseline = 0;
-  private col: Palette = { ink: "", paper: "", mute: "", edge: "" };
+  private col: Palette = { ink: "", paper: "", mute: "" };
   private base!: HTMLCanvasElement;
   private data!: Uint8ClampedArray;
   private layer!: HTMLCanvasElement;
@@ -700,7 +699,6 @@ export class GlassMark {
       ink: v("--ink"),
       paper: v("--paper"),
       mute: v("--ink-mute"),
-      edge: v("--ctl-edge"),
     };
 
     // 字标位图：按 SVG 的路径、填色与裁切逐条填出来
@@ -773,9 +771,10 @@ export class GlassMark {
     g.lineJoin = "round";
     const W = [1.3, 0.95, 0.75],
       A = [0.95, 0.82, 0.66];
-    // 主裂纹 --ink-mute，次级裂纹 --ctl-edge（DESIGN「敲玻璃」）
+    // 裂纹是白的（--paper）：黑字上的裂痕要亮才看得见。V4 一度改成 --ink-mute / --ctl-edge，
+    // 深灰画在墨字上几乎看不出，随字标回到原设计一起改回（DESIGN「敲玻璃」）
+    g.strokeStyle = this.col.paper;
     for (const main of [true, false]) {
-      g.strokeStyle = main ? this.col.mute : this.col.edge;
       for (let b = 0; b < 3; b++) {
         g.globalAlpha = A[b] * alpha * (main ? 1 : 0.85);
         g.lineWidth = Math.max(0.7, base * W[b] * (main ? 1 : 0.55));

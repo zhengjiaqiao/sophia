@@ -143,7 +143,7 @@ test("碎片图集：每块一格、都在图集里，格与格、格与边至�
     }
 });
 
-test("浅灰重影上的深色裂纹同样切得开（V4 起裂纹是 ink-mute，比资产里的重影灰更深）", () => {
+test("浅灰重影上的深色裂纹同样切得开（判定按差值绝对值，深浅裂纹都认）", () => {
   const rw = 40,
     rh = 20;
   // 浅灰重影（资产里的重影灰），整块不透明
@@ -155,4 +155,11 @@ test("浅灰重影上的深色裂纹同样切得开（V4 起裂纹是 ink-mute�
   const { lab, regions } = labelShards(base, ck, rw, rh, 5);
   assert.equal(regions.length, 2);
   assertCovers(base, lab, new Set(regions.map((r) => r.id)));
+});
+
+test("裂纹画成白色（--paper）：黑字上看得清；主次裂纹同色，靠粗细与透明度分", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../src/brand/glassMark.ts", import.meta.url), "utf8");
+  assert.match(src, /g\.strokeStyle = this\.col\.paper;\n    for \(const main of \[true, false\]\)/);
+  assert.doesNotMatch(src, /main \? this\.col\.mute : this\.col\.edge/);
 });
