@@ -595,7 +595,7 @@ test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；�
   assert.match(regular, /<span class="ss-indicator is-on" aria-hidden="true"><\/span>/);
   assert.match(
     regular,
-    /<span class="ss-switch__track" aria-hidden="true"><span class="ss-switch__scribe ss-switch__scribe--on"><\/span><span class="ss-switch__scribe ss-switch__scribe--off"><\/span><span class="ss-switch__knob">(<span class="ss-switch__grip"><\/span>){3}<\/span><\/span>/,
+    /<span class="ss-switch__track" aria-hidden="true"><span class="ss-switch__scribe ss-switch__scribe--on"><\/span><span class="ss-switch__scribe ss-switch__scribe--off"><\/span><span class="ss-switch__knob"><span class="ss-switch__grip"><\/span><\/span><\/span>/,
   );
   const compact = render(Switch, {
     checked: false,
@@ -637,8 +637,8 @@ test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；�
   assert.match(grip, /height:\s*var\(--grip-h\)/);
   assert.match(grip, /background:\s*var\(--ctl-edge\)/);
   assert.doesNotMatch(grip, /shadow|gradient/);
-  assert.match(base, /--grip-h:\s*7px/);
-  assert.match(small, /--grip-h:\s*5px/);
+  assert.match(base, /--grip-h:\s*8px/);
+  assert.match(small, /--grip-h:\s*6px/);
   assert.match(knob, /gap:\s*2px/);
   // 刻条：开＝橙露在左，关＝灰露在右
   assert.match(cssRule(uiCss, ".ss-switch__scribe--on"), /background:\s*var\(--accent\)/);

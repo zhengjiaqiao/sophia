@@ -404,7 +404,7 @@ textarea,
   --scribe-h: 6px;
   --scribe-on: 5px;
   --scribe-off: 23px;
-  --grip-h: 7px;
+  --grip-h: 8px;
   --travel: 17px;
   position: relative;
   display: inline-flex;
@@ -426,7 +426,7 @@ textarea,
   --scribe-h: 4px;
   --scribe-on: 4px;
   --scribe-off: 19px;
-  --grip-h: 5px;
+  --grip-h: 6px;
   --travel: 13px;
   gap: 6px;
 }
@@ -491,7 +491,8 @@ textarea,
     box-shadow var(--motion-fast) var(--ease-mech);
 }
 
-/* 三道 1px 防滑纹（标准 1×7、紧凑 1×5，间距 2，居中）：平的实线，无高光、无凹凸、不投影 */
+/* 一道 1px 防滑纹（标准 1×8、紧凑 1×6，居中）：平的实线，无高光、无凹凸、不投影。
+   三道像菜单图标、两道像暂停，一道是滑块上的一条脊：说「能抓住」，又不和刻条抢 */
 .ss-switch__grip {
   display: block;
   width: 1px;

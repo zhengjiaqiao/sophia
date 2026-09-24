@@ -139,8 +139,6 @@ export function Switch({
           <span className="ss-switch__scribe ss-switch__scribe--off" />
           <span className="ss-switch__knob" style={knobStyle}>
             <span className="ss-switch__grip" />
-            <span className="ss-switch__grip" />
-            <span className="ss-switch__grip" />
           </span>
         </span>
       </button>
