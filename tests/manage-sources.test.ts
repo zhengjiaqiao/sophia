@@ -40,7 +40,6 @@ const stubState = (rows: ReturnType<typeof row>[] | null, m = model()) => ({
   model: m,
   domain,
   targetsOf: (r: { targets: string[] }) => r.targets,
-  ruleOn: () => false,
   rowOf: (id: string) => rows?.find((r) => r.id === id),
   setRule: () => undefined,
   askRemove: async () => undefined,
@@ -50,11 +49,6 @@ const stubState = (rows: ReturnType<typeof row>[] | null, m = model()) => ({
   claimHost: () => () => undefined,
   confirming: false,
   say: () => undefined,
-  listOpen: false,
-  setListOpen: () => undefined,
-  keyRef: { current: null },
-  listRef: { current: null },
-  listId: "srclist-1",
 });
 
 const page = (state: ReturnType<typeof stubState>, kind: "skills" | "mcp" = "skills") =>

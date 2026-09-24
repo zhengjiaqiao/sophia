@@ -12,10 +12,8 @@
 /// 规则状态与移除流程由 `useSources` 持有：来源项的右键菜单「移除来源…」走同一个确认，所以移除不能
 /// 跟着这一行挂载。skill 与 MCP 只差数据源（`SourcesModel`）。
 ///
-/// 片首橙点（D1 / D3）已撤回（2026-09-25）：开没开规则只在来源管理页每行的开关上说。
-/// 位置页上的来源行、`管理来源` 开关键与原地展开的「全部来源」（`SourceRowView`、`ManageSourcesKey`、
-/// `SourceListView`、`listOpen` 一套）已被二级页取代：位置页不再引用后删（deprecated）。
-import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
+/// 片首橙点（D1 / D3）已撤回（2026-09-25）：开没开规则只在来源管理页每行的开关上说。位置页上没有来源行。
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import {
   AgentIcon,
@@ -32,16 +30,9 @@ import {
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
 import { FloatingLayer } from "./ui/FloatingLayer.tsx";
-import { RevealLink } from "./Matrix.tsx";
 import { CheckMark } from "./pages/CheckMark.tsx";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./pages/importDefaults.ts";
-import {
-  ALL_SOURCES,
-  manageSourcesLabel,
-  removeConfirmTitle,
-  removeTitle,
-  type DomainRef,
-} from "./pages/sourcesView.ts";
+import { removeConfirmTitle, removeTitle, type DomainRef } from "./pages/sourcesView.ts";
 import type {
   SourceRow as SourceRowData,
   SourcesData,
@@ -80,9 +71,6 @@ export interface SourcesState {
   domain: DomainRef;
   /// 这一行此刻的目标（点过开关、还没重读回来时按点下去的样子）；空＝规则关着
   targetsOf: (row: SourceRowData) => string[];
-  /// 这个来源的规则开着没有。
-  /// @deprecated 片首橙点已撤回（2026-09-25），位置页不再用它；开没开只在来源管理页的开关上说
-  ruleOn: (id: string) => boolean;
   rowOf: (id: string) => SourceRowData | undefined;
   /// 改规则：打开 / 关掉 / 加减一个目标都当场生效；没成回到原样，在 `at` 下说一声
   setRule: (row: SourceRowData, next: string[], failVerb: string, at: AnchorRect | null) => void;
@@ -106,32 +94,23 @@ export interface SourcesState {
   confirming: boolean;
   /// 在 `at` 下浮起一窗（规则没改成）
   say: (text: ToastText, at: AnchorRect | null, align: ToastAlign) => void;
-  /// 「全部来源」列表展开着没有（没订阅任何来源时恒为 false）；不记忆，换位置、重新进来都收着。
-  /// @deprecated 原地展开已由来源管理页取代；连同 `setListOpen` `keyRef` `listRef` `listId` 位置页不再引用后删
-  listOpen: boolean;
-  setListOpen: (open: boolean) => void;
-  /// `管理来源` 键外的包层与列表：Esc 收起时焦点在列表里就还给键
-  keyRef: RefObject<HTMLSpanElement | null>;
-  listRef: RefObject<HTMLDivElement | null>;
-  listId: string;
 }
 
 /// 这个位置已订阅的来源与它们的规则、移除。`version` 变了就重读（位置页每次重扫都给一个新值）；
-/// `onChange`：改了规则 / 移除之后让位置页重扫；`onRemoved`：移除确认后（筛选回到 `全部`）
+/// `onChange`：改了规则 / 移除之后让位置页重扫；`onRemoved`：移除确认后（这个来源从来源筛选里去掉）
 export function useSources({
   model,
   domain,
   version,
   onChange,
   onRemoved,
-  keys = true,
 }: {
   model: SourcesModel;
   domain: DomainRef;
   version: unknown;
   onChange: () => Promise<void>;
   onRemoved: (id: string) => void;
-  /// 页面此刻接不接 Esc（添加来源页、确认框、浮层开着时由它们接）
+  /// 旧参数：原地展开的列表收起时接 Esc 用；列表已删，现在不读（调用方的传参随下次改动删）
   keys?: boolean;
 }): SourcesState {
   const [data, setData] = useState<SourcesData | null>(null);
@@ -172,31 +151,7 @@ export function useSources({
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 
-  const [listWanted, setListOpen] = useState(false);
-  const keyRef = useRef<HTMLSpanElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const listId = useId();
-  // 换了位置：收起（展开状态不记忆）
-  useEffect(() => setListOpen(false), [domain.key]);
-  const listOpen = listWanted && (data?.rows.length ?? 0) > 0;
-  // Esc 收起：浮层（捕获阶段）、表格（展开的行、选中的行）先接走的不再算；输入框里的归输入框；
-  // 移除确认开着时 Esc 只取消确认
   const confirming = pending !== null;
-  useEffect(() => {
-    if (!listOpen || !keys || confirming) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
-      event.preventDefault();
-      if (listRef.current?.contains(document.activeElement)) {
-        keyRef.current?.querySelector("button")?.focus();
-      }
-      setListOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [listOpen, keys, confirming]);
 
   const targetsOf = (row: SourceRowData) => optimistic.get(row.id) ?? row.targets;
   const rowOf = (id: string) => data?.rows.find((r) => r.id === id);
@@ -318,10 +273,6 @@ export function useSources({
     model,
     domain,
     targetsOf,
-    ruleOn: (id) => {
-      const row = rowOf(id);
-      return row !== undefined && targetsOf(row).length > 0;
-    },
     rowOf,
     setRule,
     askRemove,
@@ -331,72 +282,7 @@ export function useSources({
     claimHost,
     confirming,
     say,
-    listOpen,
-    setListOpen,
-    keyRef,
-    listRef,
-    listId,
   };
-}
-
-/// 来源片那一行末尾的 `管理来源` / `收起`（默认键紧凑 24，左距 8）。一个来源都没订阅时不出。
-/// @deprecated `管理来源` 挪到位置页页面头、按下进来源管理页（`pages/SourcesPage.tsx`）；位置页不再引用后删
-export function ManageSourcesKey({ state }: { state: SourcesState }) {
-  if ((state.data?.rows.length ?? 0) === 0) return null;
-  return (
-    <span className="srcmanage" ref={state.keyRef}>
-      <Button
-        size="compact"
-        ariaExpanded={state.listOpen}
-        ariaControls={state.listOpen ? state.listId : undefined}
-        onClick={() => state.setListOpen(!state.listOpen)}
-      >
-        {manageSourcesLabel(state.listOpen)}
-      </Button>
-    </span>
-  );
-}
-
-/// 「全部来源」：这个位置订阅的每个来源一行＝来源名 + 来源行（原地展开）。
-/// @deprecated 由来源管理页（`pages/SourcesPage.tsx`）取代；位置页不再引用后删
-export function SourceListView({
-  state,
-  model,
-  domain,
-  onReveal,
-}: {
-  state: SourcesState;
-  model: SourcesModel;
-  domain: DomainRef;
-  onReveal: (path: string) => void;
-}) {
-  const rows = state.data?.rows ?? [];
-  return (
-    <div
-      className="srclist"
-      id={state.listId}
-      ref={state.listRef}
-      role="group"
-      aria-label={ALL_SOURCES}
-    >
-      {rows.map((row) => (
-        <Fragment key={row.id}>
-          <div className="srclist__name">
-            <TruncTip content={row.name}>
-              <span className="srclist__label">{row.name}</span>
-            </TruncTip>
-          </div>
-          <SourceRowView
-            state={state}
-            row={row}
-            model={model}
-            domain={domain}
-            onReveal={onReveal}
-          />
-        </Fragment>
-      ))}
-    </div>
-  );
 }
 
 /// 规则句：skill `以后新出现的自动加到`，MCP `以后新出现的自动写进`（来源管理页只在列头说一次）
@@ -621,47 +507,6 @@ function RemoveKey({
         </BusySlot>
       )}
     </span>
-  );
-}
-
-/// 位置页上一个来源的一行（短路径 + 打开 ↗ ｜ 规则句 + 目标框 + 开关 ｜ ×）。
-/// @deprecated 位置页不再有来源行（2026-09-25），来源管理页用 `SourceLine`；位置页不再引用后删
-export function SourceRowView({
-  state,
-  row,
-  onReveal,
-}: {
-  state: SourcesState;
-  row: SourceRowData;
-  /// 旧调用点还在传；现在取 `state.model` / `state.domain`
-  model?: SourcesModel;
-  domain?: DomainRef;
-  onReveal: (path: string) => void;
-}) {
-  const lineRef = useRef<HTMLDivElement>(null);
-  const { box, toggle, layer, disabled } = useRuleControls(state, row, lineRef);
-  const path = splitPath(row.path);
-  return (
-    <div className="srcrow" ref={lineRef}>
-      <div className="srcrow__where">
-        <TruncTip content={<span className="mx-mono">{displayPath(row.path)}</span>}>
-          <span className="srcrow__path ss-selectable">
-            {path.head ? <span className="srcrow__head">{path.head}</span> : null}
-            <span className="srcrow__tail">{path.tail}</span>
-          </span>
-        </TruncTip>
-        <RevealLink path={row.path} onReveal={() => onReveal(row.path)} />
-      </div>
-      <div className="srcrow__rule">
-        <span className={`srcrow__label${disabled ? " is-disabled" : ""}`}>
-          {ruleText(state.model)}
-        </span>
-        {box}
-        {toggle}
-      </div>
-      <RemoveKey state={state} row={row} lineRef={lineRef} />
-      {layer}
-    </div>
   );
 }
 

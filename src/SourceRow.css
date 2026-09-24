@@ -1,72 +1,8 @@
 /* 来源行（SourceRow.tsx，DESIGN「位置页 › 来源行（只在来源管理页）」）：高 40、13 号字、底 1px row-line，
-   纯文字行无底色。来源管理页的一行是 `.srcline`（各格对齐页面列头，见文末）；`.srcrow` / `.srcmanage` /
-   `.srclist` 是位置页旧来源行与原地展开的「全部来源」，位置页不再引用后删（deprecated）。
+   纯文字行无底色。来源管理页的一行是 `.srcline`（各格对齐页面列头，见文末）；`.srcrow__*` / `.srcrow-target*`
+   是一行里的规则控件（目标框、选目标浮层）与 × 键。
    色值一律 var(--…)，唯一来源是 tokens.css */
 @import "./tokens.css";
-
-.srcrow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  box-sizing: border-box;
-  height: 40px;
-  border-bottom: var(--border-row);
-  font-size: var(--size-caption);
-}
-
-.srcrow__where {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.srcrow__where > .ss-tipwrap:first-child {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-.srcrow__where > .ss-tipwrap:last-child,
-.srcrow__where > .mx-reveal {
-  flex-shrink: 0;
-}
-
-/* 短路径：mono 12 ink-faint；可选中拷走（D23）。放不下时前段截断、末两级完整（中段省略） */
-.srcrow__path {
-  display: flex;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: var(--size-label);
-  color: var(--ink-faint);
-  white-space: nowrap;
-}
-
-.srcrow__head {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.srcrow__tail {
-  flex-shrink: 0;
-}
-
-.srcrow__rule {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  flex-shrink: 0;
-}
-
-.srcrow__label {
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-
-.srcrow__label.is-disabled {
-  color: var(--ink-faint);
-}
 
 /* 目标框：高 24、paper 面、1px ctl-border、control 7；里面目标 agent 的 13px 图标 + ▾，看得出能点开改。
    有边的块：悬停描边升一档（ctl-edge），底色不变 */
@@ -113,49 +49,6 @@
   display: inline-flex;
   flex-shrink: 0;
   margin-left: calc(6px - var(--space-xs));
-}
-
-/* 来源片那一行末尾的 `管理来源` / `收起`（安静键 13 ink-mute）：与片同一行、字离最后一片 8
-   （片间距 6 + 2；安静键的命中区左右各吃回 6，字的位置不变），放不下时跟着片折到末尾 */
-.srcmanage {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  margin-left: 2px;
-}
-
-/* 「全部来源」：两列——来源名（按最长的名字定宽，字至多 160，右留 16）｜ 来源行。
-   名字格与来源行同高 40、同一条底线，行间就是一条 1px row-line */
-.srclist {
-  display: grid;
-  grid-template-columns: fit-content(176px) minmax(0, 1fr);
-}
-
-.srclist__name {
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
-  min-width: 0;
-  height: 40px;
-  padding-right: 16px;
-  border-bottom: var(--border-row);
-}
-
-.srclist__name > .ss-tipwrap {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.srclist__label {
-  overflow: hidden;
-  font-size: var(--size-caption);
-  color: var(--ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.srclist > .srcrow {
-  min-width: 0;
 }
 
 /* 目标浮层：一行 = 复选框 + 图标 14 + 名字，整行可点；没勾的名字 ink-mute；高亮行 surface、control 7、左右内缩 4 */
