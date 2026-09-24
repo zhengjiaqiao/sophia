@@ -70,16 +70,18 @@ export function listNames(names: string[], max = LISTED_MAX): string {
   return names.length > max ? `${head} 等 ${names.length} 个` : head;
 }
 
-/// 来源片那一行末尾的开关式安静键（裁决 15：来源管理的入口要看得见，⑧）：
-/// 收着写 `管理来源`，展开「全部来源」列表时写 `收起`
+/// 位置页页面头的 `管理来源`（按下进来源管理页）与来源项右键菜单的第一项
 export const MANAGE_SOURCES = "管理来源";
-/// 展开的列表的读屏名
+/// 原地展开的列表的读屏名。
+/// @deprecated 原地展开已由来源管理页取代；位置页不再引用后删
 export const ALL_SOURCES = "全部来源";
 
+/// @deprecated 同上：`管理来源` 不再是开关式的键
 export function manageSourcesLabel(open: boolean): string {
   return open ? "收起" : MANAGE_SOURCES;
 }
 
+/// @deprecated 位置页上不再有来源行与原地展开（2026-09-25）；位置页不再引用后删。
 /// 来源片下那一块出什么：
 /// - 这个位置一个来源都没订阅：什么都不出，也没有 `管理来源`（空态已有 `+ 来源`）
 /// - 展开着：全部来源（每个订阅的来源一行；恰好选中一片时它那一行并在列表里）

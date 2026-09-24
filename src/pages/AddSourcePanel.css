@@ -82,35 +82,38 @@
   color: var(--ink-mute);
 }
 
-/* ---- 来源行：一个复选框项，两行高；行内上下 10，行间 1px row-line；三列：复选 22 ｜ ▸ 16 ｜ 内容 ----
-   点整行＝展开 / 收起；行不设悬停底色，勾上不改底色（方框就是状态） */
-.add-src__row {
-  display: grid;
-  grid-template-columns: 22px 16px minmax(0, 1fr);
-  column-gap: 8px;
-  align-items: start;
-  padding: 10px 0;
+/* ---- 来源行：一个勾选框项，两行高；行内上下 10；两列：勾选框 24 ｜ 内容（名字后跟拉手，悬停才出） ----
+   点整行＝拉开 / 收起抽屉；行不设悬停底色，勾上不改底色（勾选框就是状态）。
+   行间 1px row-line 画在「行 + 抽屉」这一组的底下：抽屉属于它上面那一行，中间不隔线 */
+.add-src__entry {
   border-bottom: var(--border-row);
 }
 
-.add-src__row:last-child {
+.add-src__entry:last-child {
   border-bottom: 0;
 }
 
-.add-src__checkcell,
-.add-src__caret {
+.add-src__row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  padding: 10px 0;
+}
+
+.add-src__checkcell {
   display: flex;
   align-items: center;
   justify-content: center;
   height: calc(var(--size-body) * var(--leading-caption));
 }
 
-/* 勾选只归方框：命中区放大到 28，负外边距抵掉，排版不动 */
+/* 勾选只归方框：命中区放大到 28，负外边距抵掉，排版不动。手靠近这 28 方（data-checkrow）方框就抬起 */
 .add-src__check {
   display: inline-flex;
   flex-shrink: 0;
-  padding: 7px;
-  margin: -7px;
+  padding: 6px;
+  margin: -6px;
   border: 0;
   background: none;
   cursor: default;
@@ -118,33 +121,30 @@
 
 .add-src__check:focus-visible {
   outline: 1px solid var(--ink);
-  outline-offset: -5px;
+  outline-offset: -4px;
 }
 
-/* 方框悬停不变色（DESIGN：勾选框就是状态，行与框都不出悬停回应） */
-.add-src__check .ss-checkbox:not(.is-on):hover {
-  border-color: var(--ink-faint);
-}
-
-/* 不能勾的方框：hairline 描边（同禁用的复选框） */
+/* 不能勾的方框：hairline 描边（同禁用的勾选框） */
 .add-src__row.is-blocked .ss-checkbox {
   border-color: var(--hairline);
 }
 
-.add-src__caret {
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: default;
+/* 第一行：名字 + 6 + 拉手（名字放不下截断，拉手跟在省略号后面） */
+.add-src__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.add-src__caret:focus-visible {
-  outline: 1px solid var(--ink);
-  outline-offset: 2px;
+/* 抽屉：左沿对齐名字（勾选框 24 + 8）；抽屉的底线由这一组的行间线代替 */
+.add-src__drawer .ss-drawer__room {
+  padding-top: 0;
+  border-bottom: 0;
 }
 
-.add-src__caret .mx-disclosure {
-  color: var(--ink);
+.add-src__drawer .ss-drawer__well {
+  margin-left: 32px;
 }
 
 .add-src__content {
@@ -155,6 +155,7 @@
 
 /* 第一行名字：body 15，放不下截断 */
 .add-src__name {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   font-size: var(--size-body);
@@ -187,12 +188,11 @@
   white-space: nowrap;
 }
 
-/* 展开区：全部名字，只读，四列各 160，13 ink-mute，缩进对齐名字 */
+/* 抽屉里：全部名字，只读，四列各 160，13 ink-mute */
 .add-src__items {
   display: grid;
   grid-template-columns: repeat(4, 160px);
   column-gap: 12px;
-  padding-top: 8px;
 }
 
 .add-src__item {
@@ -265,4 +265,9 @@
   font-size: var(--size-caption);
   color: var(--ink-mute);
   white-space: nowrap;
+}
+
+.add-src__drawer .add-src__none {
+  display: block;
+  padding-top: 0;
 }

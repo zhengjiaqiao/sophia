@@ -29,11 +29,13 @@ test("在不显示名单里又卸载了的：排在最前，写「装上后也�
     onRestore: () => {},
   });
   assert.ok(html.indexOf("Kiro") < html.indexOf("Amp"), "不显示名单里的排在最前");
+  // `恢复` 是应用内的动作：默认键紧凑 24（浅键只给离开 Sophia 的）。
   // 键外那层 is-idle 包层是 Button 自带的原因提示框层，没禁用时不占盒（display: contents）
   assert.match(
     html,
-    /装上后也不显示 ·<\/span><span class="ss-tipwrap is-idle"><button[^>]*class="ss-btn ss-btn--quiet"[^>]*>恢复<\/button><\/span>/,
+    /装上后也不显示 ·<\/span><span class="ss-tipwrap is-idle"><button[^>]*class="ss-btn ss-btn--compact"[^>]*>恢复<\/button><\/span>/,
   );
+  assert.doesNotMatch(html, /ss-btn--quiet/);
   assert.equal(html.match(/恢复/g)?.length, 1);
   assert.doesNotMatch(html, /checkbox/);
 });

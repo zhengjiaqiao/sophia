@@ -1,0 +1,16 @@
+/* 整行是按钮的列表里画出来的勾选框（CheckMark.tsx）：方框本身是 span，吃不到 `:disabled`。
+   行（按钮）禁用时方框同 `Checkbox` 的禁用——平贴：1px hairline、透明底、无投影；勾上的退到 ctl-border 底。
+   各页不再各写一份覆盖。色值一律 var(--…) */
+@import "../tokens.css";
+
+:disabled > .pages-checkmark {
+  border-color: var(--hairline);
+  background: transparent;
+  box-shadow: none;
+}
+
+:disabled > .pages-checkmark.is-on,
+:disabled > .pages-checkmark.is-mixed {
+  border-color: transparent;
+  background: var(--ctl-border);
+}

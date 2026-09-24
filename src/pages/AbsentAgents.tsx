@@ -6,7 +6,7 @@ import { AgentIcon, Button } from "../ui/index.ts";
 /// 打勾却不在列表里是说谎；看着能点、点了没效果也不行。
 ///
 /// 例外：曾在已安装时被取消勾选、后来卸载了的 agent（在不显示名单里、且未安装）排在最前，
-/// 名字后写 `装上后也不显示 · 恢复`；`恢复` 是安静键＝从不显示名单里移除。
+/// 名字后写 `装上后也不显示 · 恢复`；`恢复` 是默认键紧凑 24（应用内的动作）＝从不显示名单里移除。
 export function AbsentAgents({
   agents,
   onRestore,
@@ -33,7 +33,7 @@ export function AbsentAgents({
                 <span className="settings-page__hidden-note">
                   {/* flex 容器会吃掉文字间的空白：间距用 gap，不靠空格 */}
                   <span>装上后也不显示 ·</span>
-                  <Button variant="quiet" onClick={() => onRestore(agent.id)}>
+                  <Button size="compact" onClick={() => onRestore(agent.id)}>
                     恢复
                   </Button>
                 </span>

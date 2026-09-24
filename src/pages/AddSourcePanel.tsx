@@ -1,9 +1,10 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MouseEvent, ReactNode, RefObject } from "react";
-import { Disclosure } from "../Matrix";
 import {
   BusySlot,
   Button,
+  Drawer,
+  DrawerHandle,
   FloatingToast,
   NoticePanel,
   Spinner,
@@ -44,10 +45,11 @@ import "./AddSourcePanel.css";
 /// 不管容器：标题、返回、转场、页边都归外面那层（`AddSourcePage`）。Panel 自己铺满容器给它的高度，
 /// 只有列表区滚动（边缘渐隐）。
 ///
-/// - 来源行＝一个复选框项，可多选，两行高：复选 22 ｜ `▸ / ▾` 16 ｜ 内容。第一行名字，第二行
-///   `出处 · 39 个 skill · ` + 外露的前几个名字，一行放不下截断
-/// - **点整行＝展开 / 收起**（`▸` 只是记号）：行下就地列出全部名字（只读、四列各 160），`同名` / `不支持`
-///   是纯弱标识 + 提示框（D21）。**勾选只归行首方框**（命中区 28）；行不设悬停底色，勾上不改底色
+/// - 来源行＝一个勾选框项，可多选，两行高：勾选框 24 ｜ 内容（名字后跟抽屉拉手，悬停这一行才出）。
+///   第一行名字，第二行 `出处 · 39 个 skill · ` + 外露的前几个名字，一行放不下截断
+/// - **点整行＝拉开 / 收起抽屉**（拉手只是记号，也是键盘入口）：行下一格凹槽就地列出全部名字（只读、四列
+///   各 160、左沿对齐名字），`同名` / `不支持` 是纯弱标识 + 提示框（D21）；Esc 收起。
+///   **勾选只归行首方框**（命中区 28，手靠近这 28 方框才抬起）；行不设悬停底色，勾上不改底色
 /// - 默认一个都不勾；选的文件夹读好后自动勾上。加不进来的（没有 skill、已经在来源里、读不到）不进列表，
 ///   浮窗说原因
 /// - 逐个加：全成＝交给容器收尾（滑回）；有没成的就留在这一页，底部说哪几个没加上，
@@ -188,6 +190,21 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
       return next;
     });
 
+  // Esc 先收起拉开的抽屉（捕获阶段接走，页面不把它当返回）；输入框里的 Esc 归输入框
+  const anyOpen = expanded.size > 0;
+  useEffect(() => {
+    if (!anyOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      event.preventDefault();
+      setExpanded(new Set());
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [anyOpen]);
+
   const pickFolder = async () => {
     const path = await model.pickFolder();
     if (!path || !alive.current) return;
@@ -271,7 +288,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
 
   const dismissFailure = useCallback(() => setFailure(null), []);
 
-  /// 一个来源行。items：展开区列的名字；blocked：方框为什么不能勾（选的文件夹没 skill 等），此时也不展开
+  /// 一个来源行。items：抽屉里列的名字；blocked：方框为什么不能勾（选的文件夹没 skill 等），此时也不展开
   const row = (
     entry: { ref: string; name: string; title?: string; items?: CandidateEntry["items"] },
     line: SourceLine,
@@ -280,10 +297,9 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
     const on = !blocked && checked.has(entry.ref);
     const open = !blocked && expanded.has(entry.ref);
     const items = entry.items ?? [];
-    // 点整行 = 展开 / 收起（▸ 只是记号，键盘经它操作）；勾选只归方框
+    // 点整行 = 拉开 / 收起抽屉（拉手只是记号，键盘经它操作）；勾选只归方框
     const onRowClick = (event: MouseEvent) => {
-      if (blocked || (event.target as HTMLElement).closest(".add-src__check, .add-src__caret"))
-        return;
+      if (blocked || (event.target as HTMLElement).closest(".add-src__check")) return;
       toggleExpand(entry.ref);
     };
     let second: ReactNode;
@@ -305,56 +321,63 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
           </TruncTip>
         );
     }
+    const drawerId = `add-src-drawer-${encodeURIComponent(entry.ref)}`;
     return (
-      <div
-        key={entry.ref}
-        ref={(el) => {
-          if (el) rowEls.current.set(entry.ref, el);
-          else rowEls.current.delete(entry.ref);
-        }}
-        className={`add-src__row${blocked ? " is-blocked" : ""}${open ? " is-open" : ""}`}
-        onClick={onRowClick}
-      >
-        <span className="add-src__checkcell">
-          {blocked ? (
-            // 不能勾：方框退到 hairline，悬停说原因（与第二行同一句）
-            <Tooltip content={blocked} focusable explain>
-              <CheckMark on={false} />
-            </Tooltip>
-          ) : (
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={on}
-              aria-label={entry.name}
-              className="add-src__check"
-              onClick={() => {
-                setCheck(entry.ref, !on);
-                setFailure(null);
-              }}
-            >
-              <CheckMark on={on} />
-            </button>
-          )}
-        </span>
-        {/* ▸ 是记号，也是键盘入口；不能勾的行占位不显示，名字不跳 */}
-        <button
-          type="button"
-          className="add-src__caret"
-          aria-expanded={open}
-          aria-label={`${entry.name} 里的 ${model.noun}`}
-          disabled={blocked !== null}
-          onClick={() => toggleExpand(entry.ref)}
+      <div key={entry.ref} className="add-src__entry">
+        <div
+          ref={(el) => {
+            if (el) rowEls.current.set(entry.ref, el);
+            else rowEls.current.delete(entry.ref);
+          }}
+          className={`add-src__row${blocked ? " is-blocked" : ""}${open ? " is-open" : ""}`}
+          data-drawer-row={blocked ? undefined : true}
+          onClick={onRowClick}
         >
-          <Disclosure open={open} shown={!blocked} />
-        </button>
-        <span className="add-src__content">
-          <span className="add-src__name">{entry.name}</span>
-          <span className="add-src__second">{second}</span>
-          {open ? (
-            // 展开区：全部名字，只读，四列各 160；`同名` / `不支持` 是纯弱标识 + 提示框（D21）
-            items.length === 0 ? (
-              <span className="add-src__none add-src__items">{model.emptyItems}</span>
+          <span className="add-src__checkcell">
+            {blocked ? (
+              // 不能勾：方框退到 hairline，悬停说原因（与第二行同一句）
+              <Tooltip content={blocked} focusable explain>
+                <CheckMark on={false} />
+              </Tooltip>
+            ) : (
+              // 手靠近这 28 方的命中区，方框就抬起（data-checkrow）；行的其余地方归抽屉
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={on}
+                aria-label={entry.name}
+                className="add-src__check"
+                data-checkrow
+                onClick={() => {
+                  setCheck(entry.ref, !on);
+                  setFailure(null);
+                }}
+              >
+                <CheckMark on={on} />
+              </button>
+            )}
+          </span>
+          <span className="add-src__content">
+            <span className="add-src__title">
+              <span className="add-src__name">{entry.name}</span>
+              {/* 名字 + 6 + 拉手：悬停这一行（或键盘焦点在这一行上）才出，拉开的常显；不能勾的行没有抽屉 */}
+              {blocked ? null : (
+                <DrawerHandle
+                  open={open}
+                  onToggle={() => toggleExpand(entry.ref)}
+                  label={`${entry.name} 里的 ${model.noun}`}
+                  controls={drawerId}
+                />
+              )}
+            </span>
+            <span className="add-src__second">{second}</span>
+          </span>
+        </div>
+        {blocked ? null : (
+          // 抽屉：全部名字，只读，四列各 160；`同名` / `不支持` 是纯弱标识 + 提示框（D21）
+          <Drawer open={open} id={drawerId} className="add-src__drawer">
+            {items.length === 0 ? (
+              <span className="add-src__none">{model.emptyItems}</span>
             ) : (
               <span className="add-src__items">
                 {items.map((item) => (
@@ -370,9 +393,9 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
                   </span>
                 ))}
               </span>
-            )
-          ) : null}
-        </span>
+            )}
+          </Drawer>
+        )}
       </div>
     );
   };

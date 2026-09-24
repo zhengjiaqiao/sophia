@@ -123,7 +123,7 @@ export function AddSourcePage({ model, domain, onClose, onAdded, onAllAdded }: A
 }
 
 /// 加完来源滑回位置页时新来源那几片正下方浮起的一窗：`✓ 已添加 WeiboAP · 已筛选出它的 39 个 skill`
-/// （段由 `addedParts` 给，说清楚列表为什么变少了），约 4 秒淡出，不带撤销（移除在来源行上）；
+/// （段由 `addedParts` 给，说清楚列表为什么变少了），约 4 秒淡出，不带撤销（移除在 `管理来源` 里）；
 /// 提示走了，选中的筛选片照旧说明列表是筛过的。skill 与 MCP 共用
 export function AddedToast({ parts, onDismiss }: { parts: string[]; onDismiss: () => void }) {
   return (

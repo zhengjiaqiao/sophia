@@ -1,4 +1,5 @@
 import { CheckboxGlyph } from "../ui/index.ts";
+import "./CheckMark.css";
 
 /// 画出来的 16px 勾选框（与 ui 的 `Checkbox` 同一套 `.ss-checkbox` 样式、同一个记号）。
 ///
@@ -6,6 +7,7 @@ import { CheckboxGlyph } from "../ui/index.ts";
 /// 的选择记号只是告诉你点了会发生什么），方框本身不再是一个按钮——按钮里套按钮不合法。
 /// 读屏状态由外层行的 `role="checkbox"` + `aria-checked` 说，这里 aria-hidden。
 /// `"mixed"`＝半选（全选框在部分勾上时），画一道短横，与 `Checkbox` 一致。
+/// 行悬停时方框「手靠近」：行元素加 `data-checkrow`（行禁用时别加）；行禁用时方框的样子在 CheckMark.css。
 export function CheckMark({ on }: { on: boolean | "mixed" }) {
   const classes = ["ss-checkbox", "pages-checkmark"];
   if (on === true) classes.push("is-on");
