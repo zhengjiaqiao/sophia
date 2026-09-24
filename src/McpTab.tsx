@@ -513,8 +513,7 @@ export default function McpTab({
     }
   };
   /// 右键「拷贝路径」：完整路径进剪贴板（展开区里的路径同样能选中 ⌘C）
-  const copyPath = (path: string) =>
-    void navigator.clipboard?.writeText(path).catch((e) => onError(String(e)));
+  const copyPath = (path: string) => void api.copyText(path).catch((e) => onError(String(e)));
 
   /// 这一行为什么勾不动。空值表示可勾
   const blockedOf = (p: McpDomain, row: McpDomainRow): string | undefined => {

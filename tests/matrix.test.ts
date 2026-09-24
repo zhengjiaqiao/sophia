@@ -552,3 +552,21 @@ test("来源行：短路径中段省略（前段截断、末两级完整）", as
   });
   assert.deepEqual(splitPath("~/skills"), { head: "", tail: "~/skills" });
 });
+
+test("右键「拷贝路径」走原生剪贴板插件：菜单项在原生菜单关掉之后才执行，不在网页手势里，navigator.clipboard 会被 WKWebView 拒绝", () => {
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  for (const file of ["../src/SkillsTab.tsx", "../src/McpTab.tsx"]) {
+    const src = read(file);
+    assert.match(src, /api\.copyText\(path\)/, file);
+    assert.doesNotMatch(src, /navigator\.clipboard/, file);
+  }
+  assert.match(read("../src/api.ts"), /copyText: \(text: string\) => writeText\(text\)/);
+  assert.match(
+    read("../src-tauri/src/lib.rs"),
+    /\.plugin\(tauri_plugin_clipboard_manager::init\(\)\)/,
+  );
+  assert.match(
+    read("../src-tauri/capabilities/default.json"),
+    /"clipboard-manager:allow-write-text"/,
+  );
+});

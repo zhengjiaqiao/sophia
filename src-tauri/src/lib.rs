@@ -1099,6 +1099,9 @@ pub fn run() {
         // 重启交给 process 插件——装完不重启，用户还在跑旧的那一份。
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // 右键「拷贝路径」：选中项在原生菜单关掉之后才执行，已不在网页的用户手势里，
+        // WKWebView 的 navigator.clipboard 会拒绝（NotAllowedError）；走原生剪贴板
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState {
             config_lock: Default::default(),
             gateway: gateway::build(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),

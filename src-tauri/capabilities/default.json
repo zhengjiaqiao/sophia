@@ -20,6 +20,7 @@
     },
     "updater:default",
     "process:allow-restart",
+    "clipboard-manager:allow-write-text",
     "core:window:allow-start-dragging"
   ]
 }

@@ -37,6 +37,7 @@ notify-debouncer-mini = "0.4"
 # 两个都只有桌面端有实现——这个应用本来就只有桌面端（托盘、launchd、软链）。
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-clipboard-manager = "2"
 
 # 托盘面板的原生窗口细节（去掉弹出时从中心放大的动画、圆角）：tauri 自己就依赖这两个，版本随它
 [target.'cfg(target_os = "macos")'.dependencies]

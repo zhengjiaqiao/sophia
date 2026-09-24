@@ -1071,9 +1071,7 @@ export default function SkillsTab({
         chipMenu={chipMenu}
         sourceRow={sourceRow}
         onReveal={reveal}
-        onCopyPath={(path) =>
-          void navigator.clipboard?.writeText(path).catch((e) => onError(String(e)))
-        }
+        onCopyPath={(path) => void api.copyText(path).catch((e) => onError(String(e)))}
         onAddSource={() => setAddOpen(true)}
         selected={selected}
         onSelectionChange={(next) => {

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import type {
   AutoLink,
   CellRef,
@@ -102,6 +103,9 @@ export const api = {
   },
   /// 在系统文件管理器里定位并选中该路径
   revealInDir: (path: string) => revealItemInDir(path),
+  /// 文字进系统剪贴板（右键「拷贝路径」）。不用 navigator.clipboard：原生右键菜单的项在菜单关掉之后才执行，
+  /// 已不在网页的用户手势里，WKWebView 会拒绝写入；原生剪贴板插件没有这个限制
+  copyText: (text: string) => writeText(text),
   scanMcp: () => invoke<McpOverview>("scan_mcp"),
   /// 同名服务在这几个位置上哪些字段不一样（只读；凭据已在 core 脱敏）
   mcpFieldDiff: (name: string, locationIds: string[]) =>
