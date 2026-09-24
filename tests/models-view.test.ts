@@ -533,7 +533,7 @@ test("AgentRow 待重启：配置网关之后出紧凑键「重启生效」，�
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
 });
 
-test("AgentRow 重启中：0.3 秒门槛之前键照旧、点不动（过了门槛原位换成地球绕太阳 +「正在重启 Codex」）；已生效：键的原位下方浮起白窗", () => {
+test("AgentRow 重启中：0.3 秒门槛之前键照旧、点不动（过了门槛原位换成辐条转圈 +「正在重启 Codex」）；已生效：键的原位下方浮起白窗", () => {
   const busyHtml = render(AgentRow, {
     ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
     phase: { kind: "restarting" },

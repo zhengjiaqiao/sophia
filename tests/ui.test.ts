@@ -163,7 +163,7 @@ test("tokens：V4 的 15 个色、六档字号、V4 圆角、层次 token、28/2
   assert.match(tokensCss, /--row-h:\s*34px;/);
   assert.match(tokensCss, /--motion-fast:\s*120ms;/);
   assert.match(tokensCss, /--ease-mech:\s*cubic-bezier\(0\.2, 0\.8, 0\.2, 1\);/);
-  assert.match(tokensCss, /--motion-spinner:\s*1\.2s;/);
+  assert.match(tokensCss, /--motion-spinner:\s*1s;/);
   assert.match(tokensCss, /--motion-dots:\s*500ms;/);
   // 自创转盘已删，它的时长 token 不该回来
   assert.doesNotMatch(tokensCss, /--motion-rotor/);
@@ -193,9 +193,9 @@ test("动效：状态变化走 120ms 机械缓动，不退化成默认 transitio
     }
   }
   assert.match(uiCss, /@media \(prefers-reduced-motion: reduce\)/);
-  // 地球绕太阳：1.2s 线性匀速（关键帧 ss-spin，整颗 svg 绕中心转）；自创转盘的样式已删
-  assert.match(cssRule(uiCss, ".ss-spinner"), /ss-spin var\(--motion-spinner\) linear infinite/);
-  // 减少动效：不转（地球停在 12 点钟），文字后的三点每 500ms 增减一点
+  // 辐条转圈：1 圈 / 1s，8 步阶跃（关键帧 ss-spin，整颗 svg 绕中心转）；自创转盘的样式已删
+  assert.match(cssRule(uiCss, ".ss-spinner"), /ss-spin var\(--motion-spinner\) steps\(8\) infinite/);
+  // 减少动效：不转（渐变静止），文字后的三点每 500ms 增减一点
   const reduced = uiCss.slice(uiCss.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
   assert.match(reduced, /\.ss-spinner \{\s*animation: none;/);
   assert.match(
@@ -994,25 +994,26 @@ test("嵌套：里层是禁用原因时外层让位，同时只出一个", () =>
   assert.match(enabled, new RegExp(`<button [^>]*aria-describedby="${enabledId}"`));
 });
 
-test("Spinner：地球绕太阳，太阳大地球小、画一圈细轨道、必带读屏文本；14 / 24 两档", () => {
+test("Spinner：macOS 式辐条，8 根、逐根变淡、ink-mute、必带读屏文本；14 / 24 两档", () => {
   const small = render(Spinner, { label: "正在重启 Codex" });
   assert.match(small, /class="ss-spinner"/);
   assert.match(small, /width="14"/);
   assert.match(small, /aria-label="正在重启 Codex"/);
-  // 14：太阳直径 5.5 居中，地球直径 2.5 在 12 点钟贴上沿
-  assert.match(small, /class="ss-spinner__sun" cx="7" cy="7" r="2.75" fill="currentColor"/);
-  assert.match(small, /class="ss-spinner__earth" cx="7" cy="1.25" r="1.25" fill="currentColor"/);
-  // 轨道：一圈穿过地球中心的细环，不填充；颜色与线宽在 CSS（1px ink-faint）
-  assert.match(small, /class="ss-spinner__orbit" cx="7" cy="7" r="5.75" fill="none"/);
-  assert.match(
-    cssRule(uiCss, ".ss-spinner__orbit"),
-    /stroke:\s*var\(--ink-faint\);[^}]*stroke-width:\s*1;/,
-  );
+  const spokes = small.match(/<line [^>]*>/g) ?? [];
+  assert.equal(spokes.length, 8);
+  // 14：内径 3、外端 6.25、粗 1.5；第 0 根在 12 点钟最实，最后一根 0.2
+  assert.match(spokes[0], /x1="7" y1="4" x2="7" y2="0.75"/);
+  assert.match(spokes[0], /stroke-width="1.5"/);
+  assert.match(spokes[0], /stroke-linecap="round"/);
+  assert.match(spokes[0], /opacity="1"/);
+  assert.match(spokes[7], /opacity="0.2"/);
+  assert.match(cssRule(uiCss, ".ss-spinner"), /color:\s*var\(--ink-mute\);/);
+  // 没有太阳、地球、轨道了
+  assert.doesNotMatch(small, /ss-spinner__/);
   const large = render(Spinner, { size: 24, label: "正在读 3 个位置" });
   assert.match(large, /width="24"/);
-  assert.match(large, /class="ss-spinner__sun" cx="12" cy="12" r="4.5"/);
-  assert.match(large, /class="ss-spinner__earth" cx="12" cy="2" r="2"/);
-  assert.match(large, /class="ss-spinner__orbit" cx="12" cy="12" r="10"/);
+  assert.match(large, /x1="12" y1="7" x2="12" y2="1"/);
+  assert.match(large, /stroke-width="2"/);
 });
 
 test("TruncTip：内容只是触发文字的完整值，文字真被截断才出；读屏不重复挂描述", () => {

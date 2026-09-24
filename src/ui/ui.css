@@ -984,20 +984,15 @@ textarea,
   }
 }
 
-/* ===== 7.1 忙碌指示「地球绕太阳」：1 圈 / 1.2s 线性（Spinner.tsx）；只在用户等的地方、带文字。
-   整颗 svg 绕中心转：太阳居中、转了也不变，看上去只有地球在走。不用橙：忙碌不是「在生效」 ===== */
+/* ===== 7.1 忙碌指示：macOS 式辐条转圈（Spinner.tsx）；只在用户等的地方、带文字。
+   8 根辐条、不透明度逐根递减，整颗 svg 按 8 步阶跃转 1 圈 / 1s（同系统转圈的节奏）。
+   颜色跟旁边那句一样是 ink-mute。不用橙：忙碌不是「在生效」 ===== */
 .ss-spinner {
   display: block;
   flex-shrink: 0;
-  color: var(--ink);
+  color: var(--ink-mute);
   transform-origin: 50% 50%;
-  animation: ss-spin var(--motion-spinner) linear infinite;
-}
-
-/* 轨道：1px ink-faint，淡而细，与原件记号 ⦿ 的 1.5px 墨环分得开 */
-.ss-spinner__orbit {
-  stroke: var(--ink-faint);
-  stroke-width: 1;
+  animation: ss-spin var(--motion-spinner) steps(8) infinite;
 }
 
 /* ===== 8. 提示小窗 Toast（DESIGN「反馈的两种形态」）：浮起的一层只表示「会自己消失」 =====
@@ -1602,7 +1597,7 @@ textarea,
   pointer-events: none;
 }
 
-/* 过了门槛：触发键原位换成 14px 地球绕太阳 + 一句（13 ink-mute） */
+/* 过了门槛：触发键原位换成 14px 辐条转圈 + 一句（13 ink-mute） */
 .ss-busyslot {
   display: inline-flex;
   align-items: center;
@@ -1644,7 +1639,7 @@ textarea,
 }
 
 /* ===== 14. 减少动效：状态变化即时发生，信息不减 =====
-   忙碌指示不转（地球停在 12 点钟），改由文字后的 `…` 每 500ms 增减一点表示还在忙 */
+   忙碌指示不转（辐条渐变静止），改由文字后的 `…` 每 500ms 增减一点表示还在忙 */
 @media (prefers-reduced-motion: reduce) {
   .ss-btn,
   .ss-iconbtn,

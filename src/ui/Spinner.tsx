@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-/// 忙碌指示：地球绕太阳（DESIGN「忙碌指示：只在用户等的地方，带文字」，画板 Marks / States「忙碌」）。
+/// 忙碌指示：macOS 式辐条转圈（DESIGN「忙碌指示：只在用户等的地方，带文字」；2026-09-24 重新裁决 D19）。
 ///
-/// 中心一颗实心太阳（`ink`，约占直径 40%），一颗小地球（`ink`）沿一圈细轨道匀速转，1 圈 / 1.2s 线性。
-/// **轨道要画**（产品负责人：没有圆环看不懂是在转）：1px `ink-faint`，比原件记号 ⦿ 的 1.4px 墨环
-/// 淡且细，加上地球在环上转、旁边总有一句「正在…」，不会被读成原件。
+/// 8 根圆头辐条围成一圈，`ink-mute`，不透明度从 1 往逆时针方向递减到 0.2（淡的拖在转动后面）；整圈按 8 步阶跃顺时针转，1 圈 / 1s。
+/// 换掉地球绕太阳的理由：「一环 + 一点」与原件记号 ⦿ 同形异义；辐条是系统惯例，不用学。
 /// 只给用户发起、正在等的操作用，**必须带一句忙什么**：`label` 同时作读屏文本；
 /// 可见文字由调用方紧挨着写（`正在重启 Codex`）。后台例行读取不显示任何忙碌。完成即卸载，不做停转动画。
-/// `prefers-reduced-motion` 下地球停在 12 点钟方向，文字后跟 `…` 每 500ms 增减一点（ui.css 末尾）。
+/// `prefers-reduced-motion` 下不转、渐变静止，文字后跟 `…` 每 500ms 增减一点（ui.css 末尾）。
 
 export interface SpinnerProps {
   /// 14：行内、按钮内；24：内容区居中（首次扫描）
@@ -17,17 +16,19 @@ export interface SpinnerProps {
   label: string;
 }
 
-/// 两档的太阳 / 地球直径（DESIGN：14 → 5.5 / 2.5，24 → 9 / 4）
-const BODIES: Record<14 | 24, { sun: number; earth: number }> = {
-  14: { sun: 5.5, earth: 2.5 },
-  24: { sun: 9, earth: 4 },
+/// 两档的辐条几何（DESIGN：14 → 内径 3、外端 6.25、粗 1.5；24 → 5 / 11 / 2）
+const SPOKE: Record<14 | 24, { inner: number; outer: number; width: number }> = {
+  14: { inner: 3, outer: 6.25, width: 1.5 },
+  24: { inner: 5, outer: 11, width: 2 },
 };
 
+/// 辐条根数；ui.css 的 `steps(8)` 与之对应
+export const SPOKES = 8;
+
 export function Spinner({ size = 14, label }: SpinnerProps) {
-  const { sun, earth } = BODIES[size];
+  const { inner, outer, width } = SPOKE[size];
   const c = size / 2;
-  // 地球画在 12 点钟、贴着 viewBox 上沿；整颗 svg 绕中心转，太阳居中转了也不变，
-  // 所以只有地球在动。减少动效时不转，地球就停在 12 点钟
+  // 第 0 根在 12 点钟、最实，往逆时针方向逐根变淡；整颗 svg 按 8 步阶跃转，看上去实的那根在走
   return (
     <svg
       className="ss-spinner"
@@ -37,15 +38,20 @@ export function Spinner({ size = 14, label }: SpinnerProps) {
       role="img"
       aria-label={label}
     >
-      <circle className="ss-spinner__orbit" cx={c} cy={c} r={c - earth / 2} fill="none" />
-      <circle className="ss-spinner__sun" cx={c} cy={c} r={sun / 2} fill="currentColor" />
-      <circle
-        className="ss-spinner__earth"
-        cx={c}
-        cy={earth / 2}
-        r={earth / 2}
-        fill="currentColor"
-      />
+      {Array.from({ length: SPOKES }, (_, i) => (
+        <line
+          key={i}
+          x1={c}
+          y1={c - inner}
+          x2={c}
+          y2={c - outer}
+          stroke="currentColor"
+          strokeWidth={width}
+          strokeLinecap="round"
+          opacity={+(1 - (0.8 * i) / (SPOKES - 1)).toFixed(3)}
+          transform={`rotate(${(-360 / SPOKES) * i} ${c} ${c})`}
+        />
+      ))}
     </svg>
   );
 }
@@ -80,7 +86,7 @@ export interface BusySlotProps {
 }
 
 /// 触发键原位忙碌（DESIGN「反馈的两种形态 › 忙碌」）：只锁这颗键——`busy` 一起就点不动，
-/// 过了 0.3 秒门槛才原位换成 14px 地球绕太阳 + 一句；更快完成的什么都不显示
+/// 过了 0.3 秒门槛才原位换成 14px 辐条转圈 + 一句；更快完成的什么都不显示
 export function BusySlot({ busy, label, children, className }: BusySlotProps) {
   const shown = useBusyShown(busy);
   if (shown) {

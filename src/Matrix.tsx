@@ -183,10 +183,10 @@ export interface MatrixProps {
   /// 不闪（DESIGN 冲突表「格子变化要不要闪」）
   flash?: { keys: string[]; nonce: number };
   /// 批量写入进行中：按下的那一项（"all" 或列 id）当即锁住（只锁它，别的项照常能按、排队执行），
-  /// 过了 0.3 秒门槛才变淡、旁边出 14px 地球绕太阳 + 一句（`正在加到 Codex`）。调用方在按下时给、做完撤掉
+  /// 过了 0.3 秒门槛才变淡、旁边出 14px 辐条转圈 + 一句（`正在加到 Codex`）。调用方在按下时给、做完撤掉
   keyBusy?: { keyId: string; label: string } | null;
   /// 点格之后真要等的（拆开整个文件夹链接）：调用方在确认后给、做完撤掉，并自己挡住对同一对象的再次点击。
-  /// 过了 0.3 秒门槛，被点那一格正下方（结果将出现的同一个位置）浮起 14px 地球绕太阳 + 一句
+  /// 过了 0.3 秒门槛，被点那一格正下方（结果将出现的同一个位置）浮起 14px 辐条转圈 + 一句
   /// （`正在拆开 Codex 的 skills 文件夹`）；别的格、别的行照常能点（DESIGN「反馈的两种形态 › 忙碌」）
   cellBusy?: { rowKey: string; columnId: string; label: string } | null;
   /// 单格失败：被点那一格正下方的黑窗说原因（与成功同一个位置），8 秒，悬停停表
@@ -243,7 +243,7 @@ export function clampFocus(
   };
 }
 
-/// 批量写入真的慢时触发项旁的忙碌：14px 地球绕太阳 + 一句，句子同时进读屏（DESIGN「忙碌指示」）
+/// 批量写入真的慢时触发项旁的忙碌：14px 辐条转圈 + 一句，句子同时进读屏（DESIGN「忙碌指示」）
 function KeyBusy({ label }: { label: string }) {
   return (
     <span className="mx-keybusy" role="status">
