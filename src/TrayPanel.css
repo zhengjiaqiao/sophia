@@ -1,5 +1,5 @@
-/* 菜单栏面板（DESIGN「托盘面板」，画板 Tray）：宽 320，1px hairline 描边、圆角 12（同确认弹窗；
-   原生窗口按同一圆角裁切，见 tray.rs 的 style_panel）、无阴影。
+/* 菜单栏面板（DESIGN「托盘面板」，画板 V4Layouts-tray）：宽 320，paper 底、1px hairline、float 12 圆角、
+   不画投影（它是系统窗口；原生窗口按同一圆角裁切，见 tray.rs 的 style_panel）；内边距上 12、下 6。
    与主窗口共用 tokens.css 与组件库——开关、键、提示框、转盘、提示条都是同一份。 */
 @import "./tokens.css";
 
@@ -8,36 +8,52 @@
   outline: none; /* 面板本身接焦点只为不让第一个控件抢到，不画焦点框 */
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--hairline);
+  padding: 12px 0 6px;
+  border: var(--border-float);
   border-radius: var(--radius-float);
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: var(--size-body);
+  font-size: var(--size-caption);
   line-height: var(--leading-caption);
   user-select: none;
   cursor: default;
 }
 
-.tray__agent {
-  border-bottom: 1px solid var(--hairline);
+/* 一块都没有（这台机器不支持、状态没读回来）：只剩菜单，上下都是 6 */
+.tray--bare {
+  padding-top: 6px;
 }
 
-/* Codex 那一行：高 44，图标 16 + 名字 + 开关 + [重启生效]，与模型页 agent 格同一组 */
-.tray__row {
+/* 块头：高 30、左右 14；16px 图标 + 8 + 名字（body 15 / 600，原样），不放控件 */
+.tray__head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-xs);
   box-sizing: border-box;
-  height: 44px;
-  padding: 0 var(--space-sm);
+  height: 30px;
+  padding: 0 14px;
 }
 
-/* agent 名是被谈论的对象，不大写 */
 .tray__name {
-  margin-right: 2px;
   font-size: var(--size-body);
   font-weight: 600;
+  line-height: var(--leading-body);
+}
+
+/* 能力行：左沿对齐名字（14 + 16 + 8 = 38），13 ink；右端开关（指示点在左，Switch 自带） */
+.tray__cap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 14px 0 38px;
+}
+
+.tray__cap-title {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 开关那一格：开关 / 原位转圈 +「正在添加」；也是 `✓ 已添加到 Codex` 那一窗的锚 */
@@ -46,45 +62,97 @@
   align-items: center;
 }
 
-/* 开关后 12 出重启那一格（gap 10 + 2） */
-.tray__restart-tip,
-.tray__restart {
-  margin-left: 2px;
+/* 在用的模型：紧跟能力行，左沿对齐名字，12 ink-mute、行高 1.5；一行，放不下末尾 +N */
+.tray__models {
+  padding: 0 14px 0 38px;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
 }
 
-.tray__restart-tip {
-  display: inline-flex;
-}
-
-/* 提示框气泡挂在 body 上、按窗口夹边定位（src/ui/Tooltip.tsx），面板里不再单独改它的位置 */
-
-.tray__restart {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  height: var(--control-h-compact);
+.tray__models-box {
+  position: relative;
+  display: flex;
+  min-width: 0;
   white-space: nowrap;
 }
 
-/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在它正下方 4（FloatingToast） */
-.tray__restart--done {
-  width: 0;
+/* 一个名字都放不下时截断那一个（极少：320 宽里一个模型名很难超过 268） */
+.tray__models-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* 确认当场展开在那一行下面：无外框，标题 15/600，一句后果 13 ink-mute，取消（链）+ 重启（主动作） */
+.tray__models-gw {
+  color: var(--ink-mute);
+}
+
+/* `+2`：计数，tabular；前面让 6（用内边距，量尺量得到） */
+.tray__models-more {
+  flex: none;
+  padding-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 量尺：同字体同字号，看不见、不占位、不撑出滚动（子项仍量得出自身宽） */
+.tray__models-ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.tray__models-ruler > span {
+  position: absolute;
+  white-space: nowrap;
+}
+
+/* 键位（条件）：左沿对齐名字，上 8 下 4；重启生效 / 启动 Codex / 卸下后台服务占同一位 */
+.tray__keys {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px 4px 38px;
+  white-space: nowrap;
+}
+
+/* 键已消失、结果浮在原位：只留一个不占高的锚 */
+.tray__keys--anchor {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.tray__keys-anchor {
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+/* 确认当场展开：面板内一块凹面（recess、face 12 圆角、内边距 10 12、左右外距 10）；
+   标题 13 / 600 ink，后果 12 ink-mute；右对齐的 取消（默认键紧凑）与主动作墨键（紧凑） */
 .tray__confirm {
-  padding: 4px var(--space-sm) var(--space-sm);
+  margin: 8px 10px 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-face);
+  background: var(--recess);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
 }
 
 .tray__confirm-title {
-  font-size: var(--size-body);
+  font-size: var(--size-caption);
   font-weight: 600;
+  color: var(--ink);
 }
 
+/* 后果句在 276 宽里常折成两行：均衡折行，不让最后一行只剩一个字 */
 .tray__confirm-body {
-  margin-top: 4px;
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
+  text-wrap: balance;
 }
 
 .tray__confirm-foot {
@@ -92,33 +160,40 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-sm);
-  margin-top: var(--space-sm);
+  margin-top: var(--space-xs);
 }
 
+/* 失败：键位原位换成灰面板（同确认的左右外距，原因写全、折行不截断） */
 .tray__notice {
-  padding: 0 var(--space-sm) var(--space-sm);
+  margin: 8px 10px 2px;
 }
 
 .tray__notice .ss-noticepanel {
   max-width: 100%;
 }
 
+/* 分隔：1px row-line，上 10 下 6 */
+.tray__rule {
+  margin: 10px 0 6px;
+  border: 0;
+  border-top: var(--border-row);
+}
+
 .tray__menu {
   margin: 0;
-  padding: 4px 0;
+  padding: 0;
   list-style: none;
 }
 
-/* 菜单行：高 34，无描边，悬停 surface 底（DESIGN「可点的面」） */
+/* 菜单两项：高 30、左右外距 6、内距 10、13 号字，悬停 surface（control 7）；光标箭头 */
 .tray__item {
   display: flex;
   align-items: center;
-  /* 菜单行悬停底 6 圆角（control），左右各让 4；文字起点不变（12 = 4 + 8） */
-  width: calc(100% - 2 * var(--space-xxs));
-  margin: 0 var(--space-xxs);
-  height: var(--row-h);
+  width: calc(100% - 12px);
+  margin: 0 6px;
+  height: 30px;
   box-sizing: border-box;
-  padding: 0 var(--space-xs);
+  padding: 0 10px;
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
@@ -129,10 +204,17 @@
   transition: background-color var(--motion-fast) var(--ease-mech);
 }
 
-.tray__item:hover,
-.tray__item:focus-visible {
+.tray__item:hover {
   background: var(--surface);
+}
+
+.tray__item:focus-visible {
   outline: none;
+}
+
+/* 焦点只回应键盘（src/inputModality.ts）：程序放的焦点不画 */
+html[data-input="keyboard"] .tray__item:focus-visible {
+  background: var(--surface);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4,42 +4,33 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
-import type { GatewayState, HarnessList, HarnessStatus } from "../types";
-import { parseBackendError, serviceLeftover } from "../modelsView.ts";
-import {
-  AgentIcon,
-  BusySlot,
-  NoticePanel,
-  Button,
-  Empty,
-  FloatingToast,
-  SubPage,
-  Toast,
-  Tooltip,
-} from "../ui";
+import type { HarnessList, HarnessStatus } from "../types";
+import { AgentIcon, BusySlot, NoticePanel, Button, FloatingToast, Toast, Tooltip } from "../ui";
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { updateCheckFailure } from "../updateText.ts";
 import { ShellPage } from "../shell/PageHead.tsx";
 import "./SettingsPage.css";
 
-/// 设置页（DESIGN「产品裁决 › 设置页」，画板 Settings）：占满整窗的二级页面，不渲染侧栏。
+/// 设置页（DESIGN「产品裁决 › 设置」，画板 V4Layouts-settings）：侧栏底的 `设置`（或 `⌘,`）落到这里，
+/// **只替换机面，侧栏不消失**（D6）。页面头 `设置`，右端没有动作。
 /// 它只回答一个问题——**这个 agent 出不出现在列表里**。
 ///
-/// 复选框列表，三列「复选框 + 图标 + 名字」，行高 34；默认只列已安装的，其余收在
-/// `显示未安装的 N 个` 后面。**最多显示 4 个**（上限来自 core，`list_harnesses` 带回）：
-/// 勾满时其余已安装项禁用，提示框「最多显示 4 个，先取消一个」。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
-/// **取消勾选那一刻浮在那一项正下方**，约 4 秒淡出（① 信息在对的时间出现）。
-/// 再往下 48：`关于`——版本（等宽）+ `检查更新`（应用内查，不跳 GitHub）。
+/// `列表里的 agent · 最多 4 个`：复选框列表，三列等分、按行读，一行＝13px 复选框 + 10 + 16px 图标 + 10 + 名字，
+/// 行高 36；默认只列已安装的，其余收在「显示未安装的 N 个」（安静键）后面。**最多显示 4 个**（上限来自 core，
+/// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
+/// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
+/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（安静键，应用内查，不跳 GitHub）。
+/// 应用菜单「关于 Sophia」「检查更新…」停在这一节（`aboutRequest`）。
 ///
-/// 改一个生效一个，返回即走，**没有「保存」按钮**；Esc 与 ← 都回主视图（SubPage 负责）。
+/// 改一个生效一个，**没有「保存」按钮**。
 ///
-/// 三件故意不做的事：
-/// - **不展示路径**。用户要做的判断只有一个，路径是我们的实现细节（§13.1）。
-/// - 不提「目录不存在，开启任一 skill 时会建出来」——那是开启 skill 那一刻的事，
-///   写在设置里是提前解释一件用户还没做的事（§13.1）。
-/// - 不给「链接方式（相对 / 绝对）」开关：它按「本体是否在目标项目内」自动判，
-///   是正确性判断不是口味问题（§14）。
+/// 故意不做的事：
+/// - **不展示路径**。用户要做的判断只有一个，路径是我们的实现细节。
+/// - 不提「目录不存在，开启任一 skill 时会建出来」——那是开启 skill 那一刻的事。
+/// - 不给「链接方式（相对 / 绝对）」开关：它按「本体是否在目标项目内」自动判，是正确性判断不是口味问题。
+/// - **没有「后台服务 · 使用中」**（D10）：它只转述 Codex 开关的状态、自己不能操作；
+///   后台服务残留时的 `卸下后台服务` 在 Codex 页「第三方模型」节头与托盘。
 
 /// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
 /// 其余收在「显示未安装的 N 个」后面。
@@ -48,8 +39,8 @@ type AgentOption = HarnessStatus;
 /// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的文字链）
 const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
 
-/// 更新这件事的五种处境。只有需要用户拿主意的三种会长出行内待办条（灰面板）：
-/// 有新版、已安装等重启、安装失败。查的过程和下载的过程都不要用户决定什么。
+/// 更新这件事的五种处境。需要用户处理的三种（有新版、已安装等重启、安装失败）与下载中
+/// 都在「关于」下的行内待办条（灰面板）里；查的过程只在 `检查更新` 键原位。
 type UpdateState =
   | { kind: "quiet" }
   | { kind: "ready"; update: Update }
@@ -58,24 +49,19 @@ type UpdateState =
   | { kind: "failed"; version: string; reason: string };
 
 export interface SettingsPageProps {
-  onBack: () => void;
+  /// 旧整窗二级页的返回（已删）：侧栏目的地没有返回，壳仍可传，不用
+  onBack?: () => void;
   /// 应用启动时查到的新版；`undefined` 表示壳没查过（比如测试里），页面自己再查一次。
   /// 查在启动时做而不是打开设置时做——用户不进设置也该有机会知道有新版
   initialUpdate?: Update | null;
   onError: (message: string) => void;
-  /// 壳接线（V4 外壳，D6）：放在机面里、侧栏留着，而不是盖满整窗的二级页
+  /// 旧接线（V4 外壳过渡期区分整窗 / 机面）：整窗二级页已删，页面总在机面里，壳仍可传，不用
   inShell?: boolean;
   /// 壳接线（应用菜单「关于 Sophia」「检查更新…」，D15）：停在「关于」；`check` 时同时开始检查
   aboutRequest?: { at: number; check: boolean };
 }
 
-export function SettingsPage({
-  onBack,
-  onError,
-  initialUpdate,
-  inShell,
-  aboutRequest,
-}: SettingsPageProps) {
+export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsPageProps) {
   /// null＝还没读回来，与「一个 agent 都没有」是两回事
   const [list, setList] = useState<HarnessList | null>(null);
   const agents: AgentOption[] | null = list?.harnesses ?? null;
@@ -137,51 +123,46 @@ export function SettingsPage({
     }
   };
 
-  /// 三种要用户拿主意的处境各自一条行内待办条；查和下载的过程只是一行字
+  /// 要用户处理的三种处境各自一条行内待办条；下载中是同一条待办条，键位原地换成忙碌 + `正在下载 0.2.0 · 43%`
   const updateNotice = () => {
     if (later) return null;
     switch (update.kind) {
       case "quiet":
+        // 检查失败：一行书面说明 + 外链 `去发布页 ↗`（离开 Sophia，唯一还会去 GitHub 的地方）
         if (checkFailed !== null)
           return (
             <div className="settings-page__note">
               {checkFailed}
-              <span className="settings-page__fallback">
-                <Button variant="external" onClick={() => void openUrl(RELEASES_URL)}>
-                  去发布页
-                </Button>
-              </span>
+              <Button variant="external" onClick={() => void openUrl(RELEASES_URL)}>
+                去发布页
+              </Button>
             </div>
           );
         return null;
-      case "downloading":
-        return (
-          <div className="settings-page__note">
-            正在下载 {update.version}
-            {update.percent === null ? "" : ` · ${update.percent}%`}
-          </div>
-        );
       case "ready":
+      case "downloading": {
+        const version = update.kind === "ready" ? update.update.version : update.version;
+        const busy =
+          update.kind === "downloading"
+            ? "正在下载 " + version + (update.percent === null ? "" : " · " + update.percent + "%")
+            : undefined;
         return (
           <NoticePanel
-            message={
-              <>
-                Sophia <span className="settings-page__version">{update.update.version}</span>{" "}
-                出来了
-              </>
+            message={`有新版本：Sophia ${version}`}
+            busy={busy}
+            action={
+              update.kind === "ready"
+                ? { label: "下载并安装", onClick: () => void install(update.update) }
+                : { label: "下载并安装", onClick: () => undefined }
             }
-            action={{ label: "下载并安装", onClick: () => void install(update.update) }}
             link={{ label: "稍后", onClick: () => setLater(true) }}
           />
         );
+      }
       case "installed":
         return (
           <NoticePanel
-            message={
-              <>
-                <span className="settings-page__version">{update.version}</span> 已安装，重启后生效
-              </>
-            }
+            message={`${update.version} 已安装，重启后生效`}
             action={{ label: "重启", onClick: () => void relaunch() }}
             link={{ label: "稍后", onClick: () => setLater(true) }}
           />
@@ -210,34 +191,6 @@ export function SettingsPage({
   const [checking, setChecking] = useState(false);
   const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const dismissLatest = useCallback(() => setLatest(0), []);
-
-  /// 后台服务（Codex 模型网关的路由服务）那一行：按状态写，不常驻「卸下」。
-  /// null＝还没读到、或这台机器不支持（读不到就整行不显示，不打扰）
-  const [gateway, setGateway] = useState<GatewayState | null>(null);
-  const [uninstalling, setUninstalling] = useState(false);
-  const [uninstallError, setUninstallError] = useState<string | null>(null);
-  useEffect(() => {
-    void api.gatewayState().then(
-      (state) => setGateway(state.supported ? state : null),
-      () => setGateway(null),
-    );
-  }, []);
-  /// 停用了但服务还在（自动卸下失败或旧版遗留）。与 Codex 行「卸下后台服务」同一个判断
-  const leftover = gateway !== null && serviceLeftover(gateway);
-  const inUse = gateway !== null && gateway.enabled;
-
-  /// 卸下：恢复 Codex 设置、卸载后台服务。完成后这一行随状态消失；失败就在这一行说原因
-  const uninstall = async () => {
-    setUninstalling(true);
-    setUninstallError(null);
-    try {
-      setGateway(await api.gatewayRestore());
-    } catch (e) {
-      setUninstallError(parseBackendError(String(e)).message);
-    } finally {
-      setUninstalling(false);
-    }
-  };
 
   /// 刚取消勾选的那一项：它正下方浮起一句说明，约 4 秒淡出（`at` 让连着取消两次时计时从头来）
   const [unchecked, setUnchecked] = useState<{ id: string; at: number } | null>(null);
@@ -330,14 +283,9 @@ export function SettingsPage({
     );
   };
 
-  /// 三列、按列读（字母序竖着看）：行数取总数的三分之一向上取整
+  /// 三列等分、按行读（与 agent 表的先后一致：默认显示的前 4 个就是第一行起的前 4 个）
   const grid = (items: AgentOption[]) => (
-    <div
-      className="settings-page__grid"
-      style={{ gridTemplateRows: `repeat(${Math.max(1, Math.ceil(items.length / 3))}, auto)` }}
-    >
-      {items.map(row)}
-    </div>
+    <div className="settings-page__grid">{items.map(row)}</div>
   );
 
   const present = (agents ?? []).filter((a) => a.installed);
@@ -347,24 +295,23 @@ export function SettingsPage({
   const full = list !== null && present.filter((a) => a.enabled).length >= maxShown;
   const fullReason = `最多显示 ${maxShown} 个，先取消一个`;
 
-  const Frame = inShell ? ShellPage : SubPage;
+  const notice = updateNotice();
   return (
-    <Frame title="设置" onBack={onBack}>
+    <ShellPage title="设置">
       <div className="settings-page">
-        {/* 区块小标：贴 1px ink 分组线下沿 6（DESIGN「刻字」）；句子里的 agent 不大写 */}
+        {/* 区块小标：label Condensed 12 / 600 ink-mute，下 7 一条 hairline；句子里的 agent 是词不是结构词，不经 Cap */}
         <div className="settings-page__section">
-          哪些 agent 出现在列表里{list ? ` · 最多 ${maxShown} 个` : ""}
+          列表里的 agent{list ? ` · 最多 ${maxShown} 个` : ""}
         </div>
 
-        {agents === null ? (
-          <Empty kind="scanning" description="读取中" />
-        ) : agents.length === 0 ? (
-          <div className="settings-page__note">本机上还没有发现任何 agent。</div>
+        {/* 读回来之前什么都不画：本机读取很快，闪一下忙碌只是噪音（后台例行读取不显示忙碌） */}
+        {agents === null ? null : agents.length === 0 ? (
+          <div className="settings-page__note">本机上还没有发现任何 agent</div>
         ) : (
           <>
             {grid(present)}
-            {/* 没装的收在一行文字链后面：列出来只是噪音，但要留入口——
-                用户可能想预先开启，装上之后就直接在列表里了 */}
+            {/* 没装的收在一颗安静键后面：列出来只是噪音，但要留入口——
+                用户可能想预先恢复，装上之后就直接在列表里了 */}
             {absent.length > 0 ? (
               <>
                 <div className="settings-page__more">
@@ -386,7 +333,7 @@ export function SettingsPage({
           关于
         </div>
         <div className="settings-page__about">
-          <span className="settings-page__name">版本</span>
+          <span className="settings-page__label">版本</span>
           <span className="settings-page__version">{current ?? "…"}</span>
           <span className="settings-page__check">
             {update.kind === "downloading" ? (
@@ -408,41 +355,9 @@ export function SettingsPage({
             ) : null}
           </span>
         </div>
-        <div className="settings-page__update">{updateNotice()}</div>
-        {inUse ? (
-          <div className="settings-page__service">
-            <span className="settings-page__name">后台服务</span>
-            <span className="settings-page__dot">·</span>
-            <Tooltip content="要停用，请在模型页关掉 Codex 的开关" focusable>
-              <span className="settings-page__state has-tip">使用中</span>
-            </Tooltip>
-          </div>
-        ) : leftover ? (
-          <>
-            <div className="settings-page__service">
-              <span className="settings-page__name">后台服务</span>
-              <span className="settings-page__dot">·</span>
-              <span className="settings-page__state">已停用但仍在运行</span>
-              <span className="settings-page__dot">·</span>
-              <BusySlot busy={uninstalling} label="正在卸下">
-                <Button
-                  variant="quiet"
-                  title="恢复 Codex 设置、卸载后台服务，卸下后不再占用资源"
-                  onClick={() => !uninstalling && void uninstall()}
-                >
-                  卸下
-                </Button>
-              </BusySlot>
-            </div>
-            {uninstallError !== null ? (
-              <div className="settings-page__update">
-                <NoticePanel message={`没卸下：${uninstallError}`} />
-              </div>
-            ) : null}
-          </>
-        ) : null}
+        {notice === null ? null : <div className="settings-page__update">{notice}</div>}
       </div>
-    </Frame>
+    </ShellPage>
   );
 }
 
