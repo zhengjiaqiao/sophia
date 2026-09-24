@@ -114,3 +114,24 @@ test("domain 列表：今天 skills、mcp；加第三项，页签、⌘ 数字�
     /aria-current="page"[^>]*><span class="ss-cap-wrap ss-cap-wrap--nav"><span class="ss-cap">sessions</,
   );
 });
+
+test("`+ 项目` 在侧栏滚动区里吸底：项目少时紧跟最后一项，多到要滚时停在可见区底边；底色 shell，吸住时上沿 16 渐隐", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+  assert.match(
+    css,
+    /\.sidebar__add \{[^}]*position: sticky;[^}]*bottom: 0;[^}]*background: var\(--shell\);/,
+  );
+  // 渐隐只在吸住（下面还有项目）时画，不淡掉紧跟着的最后一个项目名
+  assert.match(
+    css,
+    /\.sidebar__add\[data-stuck\]::before \{[^}]*height: 16px;[^}]*linear-gradient\(to top, var\(--shell\), transparent\)/,
+  );
+  const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
+  // 仍在滚动区（nav）里、是项目列表的最后一项，不挪到贴底区
+  assert.match(
+    tsx,
+    /<nav className="sidebar__nav"[^]*className="sidebar__add" data-stuck=[^]*<\/nav>/,
+  );
+  assert.match(tsx, /nav\.scrollTop \+ nav\.clientHeight < nav\.scrollHeight - 1/);
+});

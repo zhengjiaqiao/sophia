@@ -42,8 +42,8 @@ const ELEVATIONS = new Set([
   "var(--elev-float)",
 ]);
 /// 功能性渐变只能从底色过渡到透明（滚动边缘渐隐），不做装饰：机面上从 face，
-/// 纸浮层（下拉、选择器）里从 paper
-const FADE_STOPS = new Set(["var(--face)", "var(--paper)", "transparent"]);
+/// 纸浮层（下拉、选择器）里从 paper，侧栏里从 shell（`+ 项目` 吸底时的上沿）
+const FADE_STOPS = new Set(["var(--face)", "var(--paper)", "var(--shell)", "transparent"]);
 
 /// tokens.css 里层次 token 的定义行：只有这几行可以出现 rgba 字面值
 const ELEV_DEF =

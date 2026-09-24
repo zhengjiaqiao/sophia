@@ -323,12 +323,29 @@ input:focus-visible {
   opacity: 1;
 }
 
-/* `+ 项目`：项目列表的最后一项，默认键紧凑 24，左沿对齐项目名（20） */
+/* `+ 项目`：项目列表的最后一项，默认键紧凑 24，左沿对齐项目名（20）。
+   列表长了它不跟着滚走：吸在滚动区底边（`设置` 上方），底色 shell 盖住滚过去的项目；
+   吸住时（下面还有项目，data-stuck）上沿 16 渐隐，提示列表还在往下延伸 */
 .sidebar__add {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   height: 34px;
   padding: 0 20px;
+  background: var(--shell);
+}
+
+.sidebar__add[data-stuck]::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 16px;
+  background: linear-gradient(to top, var(--shell), transparent);
+  pointer-events: none;
 }
 
 /* 设置：贴侧栏底，底距 10 */

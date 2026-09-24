@@ -75,6 +75,25 @@ export function Sidebar(props: SidebarProps) {
   /// 右键菜单开着的那一行：`surface` 行带，菜单关掉即摘
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
+  /// `+ 项目` 吸在滚动区底边时（下面还有没滚到的项目）才画上沿的渐隐：项目少、它紧跟最后一项时不画，
+  /// 免得把最后一个项目名的下半截也淡掉
+  const navRef = useRef<HTMLElement>(null);
+  const [addStuck, setAddStuck] = useState(false);
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const update = () => setAddStuck(nav.scrollTop + nav.clientHeight < nav.scrollHeight - 1);
+    update();
+    nav.addEventListener("scroll", update, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(nav);
+    for (const child of Array.from(nav.children)) observer?.observe(child);
+    return () => {
+      nav.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [props.projects.length, props.agents.length]);
+
   const remove = (p: SidebarProject, row: Element | null) => {
     const x = row?.querySelector(".side-item__remove") ?? row;
     const anchor = x ? rectOf(x) : { top: 0, bottom: 0, left: 0, right: 0 };
@@ -92,7 +111,7 @@ export function Sidebar(props: SidebarProps) {
         </h1>
       </div>
 
-      <nav className="sidebar__nav" aria-label="导航">
+      <nav className="sidebar__nav" aria-label="导航" ref={navRef}>
         {props.agents.length > 0 && (
           <>
             <div className="sidebar__head">
@@ -194,8 +213,9 @@ export function Sidebar(props: SidebarProps) {
             </div>
           );
         })}
-        {/* `+ 项目` 是项目列表的最后一项：默认键紧凑 24，左沿对齐项目名 */}
-        <div className="sidebar__add">
+        {/* `+ 项目` 是项目列表的最后一项：默认键紧凑 24，左沿对齐项目名。列表长了它吸在滚动区底边、
+          不跟着滚走（DESIGN「项目」段），吸住时上沿 16 渐隐 */}
+        <div className="sidebar__add" data-stuck={addStuck || undefined}>
           <BusySlot busy={props.projectBusy === "add"} label="正在添加项目">
             <AddButton
               noun="项目"
