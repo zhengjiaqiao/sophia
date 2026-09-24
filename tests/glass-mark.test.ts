@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  fracture,
-  labelShards,
-  packShards,
-  rng,
-  tokenizeWordmark,
-} from "../src/brand/glassMark.ts";
+import { fracture, labelShards, packShards, rng } from "../src/brand/glassMark.ts";
 
 /// 字标动效的纯逻辑：裂纹生成可复现、碎片切分恰好铺满、碎片图集的格子互不挨着。
 /// 画布那一半（绘制、物理）在浏览器里验，这里不 mock canvas
@@ -149,28 +143,16 @@ test("碎片图集：每块一格、都在图集里，格与格、格与边至�
     }
 });
 
-test("浅色重影上的深色裂纹同样切得开（V4：裂纹 ink-mute，重影 ctl-border）", () => {
+test("浅灰重影上的深色裂纹同样切得开（V4 起裂纹是 ink-mute，比资产里的重影灰更深）", () => {
   const rw = 40,
     rh = 20;
-  // 浅灰重影：#D4D4CF，整块不透明
+  // 浅灰重影（资产里的重影灰），整块不透明
   const base = new Uint8ClampedArray(rw * rh * 4);
-  for (let i = 0; i < rw * rh; i++) base.set([0xd4, 0xd4, 0xcf, 255], i * 4);
+  for (let i = 0; i < rw * rh; i++) base.set([0xc8, 0xc8, 0xd0, 255], i * 4);
   // 一条竖向深色裂纹 #4E4E4A
   const ck = base.slice();
   for (let y = 0; y < rh; y++) ck.set([0x4e, 0x4e, 0x4a, 255], (y * rw + 20) * 4);
   const { lab, regions } = labelShards(base, ck, rw, rh, 5);
   assert.equal(regions.length, 2);
   assertCovers(base, lab, new Set(regions.map((r) => r.id)));
-});
-
-test("静止字标换成 token 色：第一条是重影、裁切组里是重合处、其余是主体（与画布同一套角色）", () => {
-  const hex = (n: number) => "#" + n.toString(16).padStart(6, "0");
-  const svg =
-    `<svg><path d="M0 0" fill="${hex(0xc8c8d0)}"/><path d="M1 1" fill="${hex(0)}"/>` +
-    `<path d="M2 2" fill="${hex(0)}"/><defs><clipPath id="c"><path d="M1 1"/></clipPath></defs>` +
-    `<g clip-path="url(#c)"><path d="M0 0" fill="${hex(0x9a9aa2)}"/></g></svg>`;
-  const out = tokenizeWordmark(svg);
-  assert.doesNotMatch(out, /fill="#/);
-  const fills = [...out.matchAll(/fill:var\((--[a-z-]+)\)/g)].map((m) => m[1]);
-  assert.deepEqual(fills, ["--ctl-border", "--ink", "--ink", "--ctl-edge"]);
 });

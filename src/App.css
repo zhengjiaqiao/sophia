@@ -86,8 +86,9 @@ input:focus-visible {
   flex-shrink: 0;
 }
 
-/* 字标带：高 44；字标（沿用原字标，高 26）垂直居中，主体 S 左沿约 22、重影落在它左边。
-   画布只盖这一块（data-brand-band），碎片落在它的下沿 */
+/* 字标带：高 44；字标（标志资产原样，高 26）上下各留 9（窗口 y 37–63）。
+   对齐取主体不取重影：主体 S 左沿落在 20（与红绿灯、侧栏文字同一条左沿），左下重影挂在它左边、
+   左沿 15。画布只盖这一块（data-brand-band），碎片落在它的下沿 */
 .sidebar__brand {
   position: relative;
   display: flex;
@@ -102,16 +103,18 @@ input:focus-visible {
   margin: 0;
 }
 
-/* 静止字标是内联 SVG：高 26，宽按 viewBox 3304:916 算死（内联 SVG 的 auto 宽各引擎不一致） */
-.wordmark,
-.wordmark svg {
+/* 高 26、宽随 3304:916（93.8）。框内主体 S 左沿在 6.9、重影左沿在 1.8：图往左让 2，
+   主体落在 20；让出去的那 2 不在命中区里（指针穿过图、落在外层的盒上） */
+.sidebar__mark .wordmark {
   display: block;
   height: 26px;
-  width: calc(26px * 3304 / 916);
+  width: auto;
+  margin-left: -2px;
+  pointer-events: none;
 }
 
-/* 字标框＝命中区：含左上重影，右到末字母右沿 + 4。这一块不当拖窗区。
-   画布由 GlassMark 按字标带定位与定尺寸，不接指针事件，事件都落在这层 */
+/* 字标框＝命中区：窗口 x 15–109（重影左沿到 A 右沿 105.4 + 4）、y 37–63。这一块不当拖窗区。
+   画布由 GlassMark 按字标带定位与定尺寸，不接指针事件 */
 .brandmark {
   position: relative;
   display: block;
