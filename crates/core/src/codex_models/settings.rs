@@ -45,8 +45,29 @@ pub struct ProviderSettings {
     pub protocol: String,
     pub models: Vec<SavedModel>,
     /// 上次拉取模型失败的原因（短句，如「地址无法访问」「密钥无效，请换一个密钥」）；拉取成功或换地址后清空
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_unreachable"
+    )]
     pub unreachable: Option<String>,
+}
+
+/// 旧版写进 settings.json 的失败原因（2026-09-24 文案语域 D24 之前）换成现在的说法：
+/// 不然要等下一次拉取模型，界面上才不再出现旧词
+fn deserialize_unreachable<'de, D>(de: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(de)?;
+    Ok(raw.map(|reason| {
+        match reason.as_str() {
+            "密钥不对" => "密钥无效，请换一个密钥",
+            "地址连不上" => "地址无法访问",
+            "地址不对，没拿到模型列表" => "地址有误，无法获取模型列表",
+            other => other,
+        }
+        .to_string()
+    }))
 }
 
 impl Default for ProviderSettings {
@@ -487,6 +508,35 @@ mod tests {
             models,
             ..ProviderSettings::default()
         }
+    }
+
+    #[test]
+    fn legacy_unreachable_reasons_read_as_current_wording() {
+        let settings: GatewaySettings = serde_json::from_value(json!({
+            "providers": [
+                {"id": "a", "name": "a", "baseUrl": "https://a.test", "unreachable": "地址连不上"},
+                {"id": "b", "name": "b", "baseUrl": "https://b.test", "unreachable": "密钥不对"},
+                {"id": "c", "name": "c", "baseUrl": "https://c.test", "unreachable": "地址不对，没拿到模型列表"},
+                {"id": "d", "name": "d", "baseUrl": "https://d.test", "unreachable": "超时"},
+                {"id": "e", "name": "e", "baseUrl": "https://e.test"}
+            ]
+        }))
+        .expect("json");
+        let reasons: Vec<Option<&str>> = settings
+            .providers
+            .iter()
+            .map(|p| p.unreachable.as_deref())
+            .collect();
+        assert_eq!(
+            reasons,
+            vec![
+                Some("地址无法访问"),
+                Some("密钥无效，请换一个密钥"),
+                Some("地址有误，无法获取模型列表"),
+                Some("超时"),
+                None
+            ]
+        );
     }
 
     #[test]
