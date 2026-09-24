@@ -46,7 +46,7 @@ import {
 import { PageHeadActions } from "./shell/PageHead.tsx";
 import { useMenuFlag, usePageCommand } from "./shell/menuBus.ts";
 import { canPopup, contextMenuHandler, type ContextMenuItem } from "./contextMenu.ts";
-import { displayPath } from "./pathText.ts";
+import { displayPath, shortPath } from "./pathText.ts";
 import "./Matrix.css";
 
 /// 版式常量，与 Matrix.css 同值
@@ -153,7 +153,7 @@ export interface SourceChipItem {
   label: string;
   /// 提示框第一行的完整名（片名是最短区分片段、放不下还会截断）；不给就用 label
   full?: string;
-  /// 提示框第二行的路径（`~/…`，mono）
+  /// 提示框第二行的路径（原值；显示时写成短路径 `~/…`，mono）
   path?: string;
   /// 这个来源在表格里的行数
   count: number;
@@ -1394,7 +1394,7 @@ export function SourceChipTip({ item }: { item: Pick<SourceChipItem, "label" | "
       {item.path ? (
         <>
           <br />
-          <span className="mx-mono">{item.path}</span>
+          <span className="mx-mono mx-chiptip__path">{shortPath(item.path)}</span>
         </>
       ) : null}
       <br />

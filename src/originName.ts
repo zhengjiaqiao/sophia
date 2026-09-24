@@ -79,6 +79,28 @@ export function originNames(
   return out;
 }
 
+/// 不截短的完整名（来源片提示框第一行）：同名的一组带上完整的区分片段（`WeiboAP · agent_1776847465710_a`），
+/// 片上截成 `1776…` 的那段在这里写全；不重名时就是来源名
+export function originFullNames(
+  ids: Iterable<string>,
+  sources: { id: string; label: string; path: string }[],
+): Map<string, string> {
+  const sourceOf = (id: string) => sources.find((s) => s.id === id);
+  const byLabel = new Map<string, string[]>();
+  for (const id of new Set(ids)) {
+    const label = sourceOf(id)?.label ?? id;
+    byLabel.set(label, [...(byLabel.get(label) ?? []), id]);
+  }
+  const out = new Map<string, string>();
+  for (const [label, group] of byLabel) {
+    const segs = distinguishingSegments(group.map((id) => sourceOf(id)?.path ?? id));
+    group.forEach((id, i) =>
+      out.set(id, segs[i] && segs[i] !== label ? `${label} · ${segs[i]}` : label),
+    );
+  }
+  return out;
+}
+
 /// 一整段的写法：`ego lite · 0.5.0.32`；不重名时就是来源名
 export function originText(n: OriginName): string {
   return n.seg ? `${n.name} · ${n.seg}` : n.name;

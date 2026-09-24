@@ -20,6 +20,16 @@ export async function loadHome(): Promise<void> {
   }
 }
 
+/// 提示框里的短路径：主目录写成 ~；超过四级时留开头两级与末两级、中段写 …
+/// （`~/Library/…/agent_1776/skills`，与来源行「中段省略、末两级完整」同一个意思，只是不按宽度量）
+export function shortPath(path: string): string {
+  const shown = displayPath(path);
+  const sep = shown.includes("\\") && !shown.includes("/") ? "\\" : "/";
+  const parts = shown.split(sep);
+  if (parts.length <= 5) return shown;
+  return [...parts.slice(0, 2), "…", ...parts.slice(-2)].join(sep);
+}
+
 export function displayPath(path: string): string {
   if (!home) return path;
   if (path === home) return "~";

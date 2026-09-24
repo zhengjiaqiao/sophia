@@ -135,6 +135,11 @@
   width: 6px;
 }
 
+/* 来源片提示框里的短路径：mono 没有断点，放不下时照样折行，不溢出提示框 */
+.mx-chiptip__path {
+  overflow-wrap: anywhere;
+}
+
 /* ===== 面板 ===== */
 .mx-panel {
   position: relative;

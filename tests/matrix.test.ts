@@ -239,11 +239,16 @@ test("来源片悬停出提示框：完整名 + 短路径 + 选中后能做什�
   const { SourceChipTip, SOURCE_CHIP_HINT } = await import("../src/Matrix.tsx");
   assert.equal(SOURCE_CHIP_HINT, "选中后在下方设置自动添加或移除");
   const tip = render(SourceChipTip, {
-    item: { label: "skills · …", full: "skills · agents-kit", path: "~/code/agents-kit/skills" },
+    item: {
+      label: "WeiboAP · 1776…",
+      full: "WeiboAP · agent_1776847465710_a",
+      path: "/Users/me/Library/Application Support/WeiboAP/agent_1776847465710_a/skills",
+    },
   });
+  // 短路径：主目录还没读到时照原样取开头两级 + … + 末两级（读到之后开头是 ~）
   assert.equal(
     tip,
-    'skills · agents-kit<br/><span class="mx-mono">~/code/agents-kit/skills</span><br/>选中后在下方设置自动添加或移除',
+    'WeiboAP · agent_1776847465710_a<br/><span class="mx-mono mx-chiptip__path">/Users/…/agent_1776847465710_a/skills</span><br/>选中后在下方设置自动添加或移除',
   );
   // 没给完整名就用片名；读不到路径时不空出一行
   assert.equal(

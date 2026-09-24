@@ -19,7 +19,7 @@ import Matrix, {
   type SourceChipItem,
 } from "./Matrix";
 import type { ContextMenuItem } from "./contextMenu";
-import { originNames, originText } from "./originName";
+import { originFullNames, originNames, originText } from "./originName";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
@@ -217,10 +217,13 @@ export default function DomainView(props: DomainViewProps) {
   const emptySources = props.emptySources.filter((s) => !counts.has(s.id));
 
   // ---- 来源名：同名来源用路径里能区分它们的那一级（与片、确认框同一个起名函数） ----
-  const names = originNames(
-    [...counts.keys(), ...emptySources.map((s) => s.id).filter((id) => sourceOf(id))],
-    overview.sources,
-  );
+  const namedIds = [
+    ...counts.keys(),
+    ...emptySources.map((s) => s.id).filter((id) => sourceOf(id)),
+  ];
+  const names = originNames(namedIds, overview.sources);
+  /// 片的提示框第一行：不截短的完整名
+  const fullNames = originFullNames(namedIds, overview.sources);
   const nameOf = (id: string) =>
     names.get(id) ?? {
       name: props.emptySources.find((s) => s.id === id)?.name ?? labelOf(id),
@@ -489,8 +492,8 @@ export default function DomainView(props: DomainViewProps) {
   const chip = (id: string, count: number): SourceChipItem => ({
     id,
     label: originOf(id),
-    full: originOf(id),
-    path: sourceOf(id) ? displayPath(sourceOf(id)?.path ?? "") : undefined,
+    full: fullNames.get(id) ?? originOf(id),
+    path: sourceOf(id)?.path,
     count,
     rule: props.ruleOn(id),
     menu: (el) => props.chipMenu(id, el),

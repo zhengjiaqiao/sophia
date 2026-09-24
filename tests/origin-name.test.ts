@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { originNames, originText, shortSegments } from "../src/originName.ts";
+import { originFullNames, originNames, originText, shortSegments } from "../src/originName.ts";
 
 const base = "/Users/jia/Library/Application Support/ego lite";
 
@@ -67,4 +67,16 @@ test("原件位置显示名：区分片段就是名字本身时不重复写；�
 
 test("原件位置显示名：查不到的来源 id 原样当名字", () => {
   assert.deepEqual(originNames(["ghost"], []).get("ghost"), { name: "ghost", seg: "" });
+});
+
+test("originFullNames：来源片提示框的完整名——同名一组带完整区分片段，不截短；不重名就是来源名", () => {
+  const sources = [
+    { id: "a", label: "WeiboAP", path: "/u/WeiboAP/agent_1776847465710_a/skills" },
+    { id: "b", label: "WeiboAP", path: "/u/WeiboAP/agent_1787890675056_b/skills" },
+    { id: "c", label: "通用仓库", path: "/u/.agents/skills" },
+  ];
+  const full = originFullNames(["a", "b", "c"], sources);
+  assert.equal(full.get("a"), "WeiboAP · agent_1776847465710_a");
+  assert.equal(full.get("b"), "WeiboAP · agent_1787890675056_b");
+  assert.equal(full.get("c"), "通用仓库");
 });
