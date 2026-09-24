@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
@@ -12,7 +12,6 @@ import type {
 } from "./types";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
-import ModelsTab from "./ModelsTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { check as checkUpdate, type Update } from "@tauri-apps/plugin-updater";
 import { collectIssues } from "./issues";
@@ -25,48 +24,55 @@ import {
   type IssueSegment,
 } from "./issueNotice";
 import { collectMcpIssues, mcpDomains } from "./mcpView";
-import { displayPath, loadHome } from "./pathText";
-import { relativeTime } from "./dateText";
+import { loadHome } from "./pathText";
 import {
   loadProjectSort,
-  PROJECT_SORTS,
   projectName,
   saveProjectSort,
   sortProjects,
   unionProjects,
   type ProjectSort,
+  type SidebarProject,
 } from "./sidebarProjects";
 import { edgeFades, modelIssues } from "./modelsView";
 import type { ModelIssue } from "./modelsView";
+import { ErrorBanner, Tabs, Toast, ToastCount, ToastStack } from "./ui";
+import type { AnchorRect } from "./layerPlace";
+import { Sidebar, type RemovedProject } from "./shell/Sidebar";
+import { AGENTS } from "./shell/agents";
+import { AgentPage } from "./shell/AgentPage";
+import { sidebarAgentsOf, visibleAgents, type AgentState } from "./shell/agentRegistry";
+import { LOCATION_DOMAINS } from "./shell/domains";
+import { PageHead } from "./shell/PageHead";
 import {
-  AddButton,
-  BusySlot,
-  ErrorBanner,
-  IconButton,
-  IconCheck,
-  IconClose,
-  IconSettings,
-  Toast,
-  ToastCount,
-  ToastStack,
-  Tooltip,
-} from "./ui";
-import { AnimatedWordmark } from "./brand/AnimatedWordmark";
+  GLOBAL_KEY,
+  goAgent,
+  goLocation,
+  goSettings,
+  goTab,
+  loadPlace,
+  resolvePlace,
+  savePlace,
+  selectionOf,
+  type LocationTab,
+  type Place,
+} from "./shell/place";
+import { isMenuCommand, menuState, routeMenuCommand } from "./shell/menuCommands";
+import { dispatchPageCommand, useMenuFlags } from "./shell/menuBus";
+import { canPopup } from "./contextMenu";
 import "./App.css";
 
-/// 侧栏默认落在「全局」。没有「全部」域——多域并排时同名 agent 会出现多列，
-/// 选择操作条的片也会重复
-const DEFAULT_KEY = "global";
 /// 文件系统事件与窗口获得焦点后的重扫去抖
 const REFRESH_DELAY = 300;
-type Tab = "skills" | "mcp" | "models";
 
-/// 顶栏页签：顺序即高频程度。`Cap` 只给拉丁 run 套 Condensed 大写 + 字距，汉字原样
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "models", label: "模型" },
-  { id: "skills", label: "skills" },
-  { id: "mcp", label: "mcp" },
-];
+/// 焦点在不在能打字的框里：菜单的撤销 / 全选此时作用于文字
+const isEditable = (el: Element | null): el is HTMLElement =>
+  el instanceof HTMLTextAreaElement ||
+  (el instanceof HTMLInputElement &&
+    !["checkbox", "radio", "button", "submit", "reset", "range", "color", "file"].includes(
+      el.type,
+    )) ||
+  (el instanceof HTMLElement && el.isContentEditable);
 
 export default function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -75,18 +81,23 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   /// 添加 / 移除项目进行中：只锁侧栏的这两处（同一个对象：项目列表）
   const [projectBusy, setProjectBusy] = useState<"add" | "remove" | null>(null);
-  const [selectedKey, setSelectedKey] = useState(DEFAULT_KEY);
+  /// 你在哪（D1 D2）：侧栏选中项 + 位置页的页签。首次 `全局 · skills`，之后记住上次停在哪
+  const [place, setPlace] = useState<Place>(loadPlace);
+  const selectedKey = place.locationKey;
   const [error, setError] = useState<string | null>(null);
-  /// 二级页面：占满整窗、不渲染侧栏。null＝主视图
-  const [subPage, setSubPage] = useState<null | "settings">(null);
+  /// 应用菜单「关于 Sophia」「检查更新…」：设置页停在「关于」一节，`check` 时同时开始检查。
+  /// `at` 让同一个请求再发一次也算新的
+  const [aboutRequest, setAboutRequest] = useState<{ at: number; check: boolean } | null>(null);
+  /// 刚从侧栏移除的手动项目：`×` 原位下方的 `✓ 已移除 X · 撤销`（D11）
+  const [removed, setRemoved] = useState<(RemovedProject & { wasSelected: boolean }) | null>(null);
   /// 启动时后台查一次新版。**必须静默失败**：`plugins.updater.pubkey` 没填之前
   /// check() 一定报错，进横幅的话每次开应用先看见一条错。null＝查过没有 / 没查成
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
-  /// 模型路由比 skill、MCP 都高频，所以它排第一个 tab，也是启动默认页。
-  /// 后端说不支持（非 macOS）时这一页根本不存在，届时退回 Skills，见 applyModelsSupported
-  const [activeTab, setActiveTab] = useState<Tab>("models");
-  // 「模型」标签页只在后端确认支持（当前只有 macOS）时才出现；读取失败时静默隐藏
-  const [modelsSupported, setModelsSupported] = useState(false);
+  /// 位置页此刻显示哪张表；不在位置页时为 null
+  const activeTab: LocationTab | null = place.view === "location" ? place.tab : null;
+  /// Codex 页（agent 段）只在后端确认支持（当前只有 macOS）时才有；null＝还没问出来。
+  /// 读取失败时当作不支持，agent 段不出
+  const [modelsSupported, setModelsSupported] = useState<boolean | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   // 手动添加的项目路径：侧栏并集的一份，也用来判断哪些项目可以移除
   const [manualProjects, setManualProjects] = useState<string[]>([]);
@@ -143,8 +154,10 @@ export default function App() {
   const scanningRef = useRef<Promise<void> | null>(null);
   const timerRef = useRef<number | null>(null);
   const activeTabRef = useRef(activeTab);
+  const placeRef = useRef(place);
   busyRef.current = busy;
   activeTabRef.current = activeTab;
+  placeRef.current = place;
 
   const setBusyState = (next: boolean) => {
     busyRef.current = next;
@@ -257,11 +270,8 @@ export default function App() {
       listen<{ page: "models" | "settings" | null; error: string | null }>(
         "tray-navigate",
         ({ payload }) => {
-          if (payload.page === "settings") setSubPage("settings");
-          if (payload.page === "models") {
-            setSubPage(null);
-            setActiveTab("models");
-          }
+          if (payload.page === "settings") setPlace((p) => goSettings(p));
+          if (payload.page === "models") setPlace((p) => goAgent(p, "codex"));
           if (payload.error) setError(payload.error);
         },
       ),
@@ -281,12 +291,8 @@ export default function App() {
     };
   }, [requestRefresh, refreshGateway]);
 
-  /// 模型页是默认页，可它在非 macOS 上并不存在：一问出「不支持」就把默认页退回 Skills，
-  /// 否则主视图会停在一个既没有标签页也没有内容的空壳上
-  const applyModelsSupported = (supported: boolean) => {
-    setModelsSupported(supported);
-    if (!supported) setActiveTab((tab) => (tab === "models" ? "skills" : tab));
-  };
+  /// Codex 页在非 macOS 上并不存在：一问出「不支持」，记着停在 Codex 页的落点由 resolvePlace 退回位置页
+  const applyModelsSupported = (supported: boolean) => setModelsSupported(supported);
 
   useEffect(() => {
     let cancelled = false;
@@ -298,12 +304,12 @@ export default function App() {
         applyModelsSupported(state.supported);
       })
       .catch(() => {
-        // 读不到就当作不支持，标签页保持隐藏
+        // 读不到就当作不支持，agent 段不出
         if (!cancelled) applyModelsSupported(false);
       });
     // 路径显示把主目录写成 ~：主目录启动时读一次，之后 displayPath 同步可用
     void loadHome();
-    // 启动时扫一次：停在模型页也要认得出 Skills 与 MCP 的新问题
+    // 启动时扫一次：停在 Codex 页也要认得出 Skills 与 MCP 的新问题
     void refresh();
     return () => {
       cancelled = true;
@@ -312,9 +318,7 @@ export default function App() {
   }, []);
 
   const domains = overview?.domains ?? [];
-  // 模型页当前是否真的在显示：还没问出支不支持时按不支持算，落回 Skills（见下方主视图分支）
-  const showModels = activeTab === "models" && modelsSupported;
-  // 侧栏（DESIGN「侧栏：Skills 与 MCP 共用同一个」）：skill 与 MCP 两边发现的项目 ∪ 手动添加的，
+  // 侧栏（DESIGN「侧栏」）：skill 与 MCP 两边发现的项目 ∪ 手动添加的，
   // 与当前页签无关，切页签时列表与选中都不变。例如没有 skill 的 WeiboAP agent 也在里面
   const mcpDomainList = useMemo(
     () =>
@@ -356,6 +360,42 @@ export default function App() {
     setProjectSort(sort);
     saveProjectSort(sort);
   };
+
+  /// agent 段与 agent 页都由注册表生成（shell/agents.tsx）：今天只有 Codex，只在 macOS 上有。
+  /// 名字后的橙点＝有能力开着（第三方模型），与 Codex 页开关、托盘开关读同一份状态，同一帧亮灭
+  const agentState: AgentState = { gateway: gatewayState, modelsSupported };
+  const visible = visibleAgents(AGENTS, agentState);
+  const agents = sidebarAgentsOf(visible.agents, agentState);
+  const agentEntry =
+    place.view === "agent" ? visible.agents.find((a) => a.id === place.agentId) : undefined;
+
+  // ===== 落点（D2）：记住上次停在哪；记着的项目 / agent 不在了就落回去 =====
+  useEffect(() => savePlace(place), [place]);
+  // 项目列表「知道了」才判断记着的项目还在不在：停在 MCP 页时要等 MCP 扫描回来（只在 MCP 里出现的项目）
+  const projectsKnown = overview !== null && (mcpOverview !== null || activeTab !== "mcp");
+  const projectKeyList = projectsKnown ? projects.map((p) => p.key) : null;
+  const agentIdList = visible.known ? agents.map((a) => a.id) : null;
+  useEffect(() => {
+    const next = resolvePlace(place, projectKeyList, agentIdList);
+    if (next !== place) setPlace(next);
+    // projectKeyList / agentIdList 每次渲染是新数组，按内容比
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [place, projectKeyList?.join("\n"), agentIdList?.join("\n")]);
+
+  /// 换目的地之后的例行重读：回到 Skills 表重扫一次（MCP 页由自身 refreshKey 驱动）；
+  /// 离开设置时重扫一次，因为设置改了 agent 的启用
+  const prevPlace = useRef(place);
+  useEffect(() => {
+    const prev = prevPlace.current;
+    prevPlace.current = place;
+    const wasSkills = prev.view === "location" && prev.tab === "skills";
+    const isSkills = place.view === "location" && place.tab === "skills";
+    if (prev.view === "settings" && place.view !== "settings") {
+      void refresh();
+      refreshGateway();
+    } else if (isSkills && !wasSkills) void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [place]);
 
   // ===== 新问题只提示一次（DESIGN「没有收件箱、待处理页和「忽略」」） =====
   // 三类扫描结果任一更新都重算：当前问题减去看过的，剩下的进右下那一个黑窗
@@ -403,21 +443,6 @@ export default function App() {
     jumpToRow(first.segment, first.key);
   };
 
-  // 选中的项目从侧栏消失（移除了、不再存在）时回落到「全局」。列表是两边的并集，与页签无关
-  useEffect(() => {
-    if (!overview) return;
-    if (selectedKey !== DEFAULT_KEY && !projects.some((p) => p.key === selectedKey)) {
-      setSelectedKey(DEFAULT_KEY);
-    }
-  }, [overview, projects, selectedKey]);
-
-  const switchTab = (tab: Tab) => {
-    if (tab === activeTab) return;
-    setActiveTab(tab);
-    // 切回 Skills 时显式重扫；MCP 页由自身 refreshKey 驱动扫描
-    if (tab === "skills") void refresh();
-  };
-
   const addProject = async () => {
     const path = await api.pickDirectory("选择项目目录");
     if (!path) return;
@@ -435,11 +460,16 @@ export default function App() {
     }
   };
 
-  const removeProject = async (path: string) => {
+  /// 从侧栏移除手动项目（D11）：不确认——只从侧栏拿掉、不动磁盘；移除后 `×` 原位下方浮起
+  /// `✓ 已移除 X · 撤销`。移除的正是当前选中的项目时选中落到 `全局`
+  const removeProject = async (project: SidebarProject, anchor: AnchorRect) => {
+    const wasSelected = place.view === "location" && place.locationKey === project.key;
     setProjectBusy("remove");
     setBusyState(true);
     try {
-      await api.removeProject(path);
+      await api.removeProject(project.path);
+      if (wasSelected) setPlace((p) => goLocation(p, GLOBAL_KEY));
+      setRemoved({ path: project.path, name: project.label, anchor, at: Date.now(), wasSelected });
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -449,29 +479,43 @@ export default function App() {
     }
   };
 
-  /// 从设置页返回：重扫一次，因为设置改了 agent 的启用
-  const closeSubPage = () => {
-    setSubPage(null);
-    void refresh();
-    refreshGateway();
+  /// `撤销`：把它放回侧栏（排位由排序决定，与移除前同一处）；移除前选中着它就重新选中
+  const undoRemove = async () => {
+    const r = removed;
+    if (!r) return;
+    setRemoved(null);
+    setProjectBusy("add");
+    setBusyState(true);
+    try {
+      await api.addProject(r.path);
+      await refresh();
+      if (r.wasSelected) setPlace((p) => goLocation(p, `project:${r.path}`));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyState(false);
+      setProjectBusy(null);
+    }
   };
+  const clearRemoved = useCallback(() => setRemoved(null), []);
 
   /// 跳到一条问题所在的那一行：切到对应页签；这一条属于别的域就先切侧栏；再把 key 交给那一页，
   /// 它滚到那一行并闪两下，处理完回调 onFocused 清掉（下次跳同一条才会再触发）
   const jumpToRow = (segment: IssueSegment, key: string) => {
-    setSubPage(null);
     if (segment === "models") {
       if (!modelsSupported) return;
-      switchTab("models");
-      // 「网关连不上」那一条：进网关二级页、选中那一家；别的类别只切到模型页
+      setPlace((p) => goAgent(p, "codex"));
+      // 「网关无法连接」那一条：选中那一家；别的类别只切到 Codex 页
       const providerId = modelIssueList.find((i) => i.key === key)?.providerId;
       if (providerId !== undefined) setModelFocus(providerId);
       refreshGateway();
       return;
     }
     const domain = segment === "mcp" ? mcpDomainOf(key) : skillDomainOf(key);
-    switchTab(segment);
-    if (domain !== null) setSelectedKey(domain);
+    setPlace((p) => {
+      const next = goTab(p, segment);
+      return domain !== null ? goLocation(next, domain) : next;
+    });
     setFocus({ segment, key });
   };
 
@@ -489,134 +533,150 @@ export default function App() {
   const mcpDomainOf = (key: string): string | null =>
     mcpIssues.find((i) => i.key === key)?.domain ?? null;
 
-  if (subPage === "settings") {
-    return <SettingsPage onBack={closeSubPage} onError={setError} initialUpdate={pendingUpdate} />;
-  }
+  // ===== 应用菜单（D15）：菜单栏按下一项 → 换目的地 / 交给设置页 / 作用于输入框 / 交给当前页 =====
+  const addProjectRef = useRef(addProject);
+  addProjectRef.current = addProject;
+  useEffect(() => {
+    let disposed = false;
+    let un: (() => void) | null = null;
+    void listen<string>("menu-command", ({ payload }) => {
+      if (!isMenuCommand(payload)) return;
+      const active = document.activeElement;
+      const editing = isEditable(active);
+      const route = routeMenuCommand(payload, placeRef.current, editing);
+      if (route.place !== placeRef.current) setPlace(route.place);
+      if (route.settings) setAboutRequest({ at: Date.now(), check: route.settings.check });
+      if (route.shell === "add-project") void addProjectRef.current();
+      if (route.text === "undo") document.execCommand("undo");
+      if (route.text === "select-all") {
+        if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
+          active.select();
+        else document.execCommand("selectAll");
+      }
+      // 换了目的地的（添加来源回到位置页）等页面挂上再交（menuBus 留着这一条）
+      if (route.page) dispatchPageCommand(route.page);
+    }).then((fn) => (disposed ? fn() : (un = fn)));
+    return () => {
+      disposed = true;
+      un?.();
+    };
+  }, []);
+
+  // 菜单里跟着界面灰 / 亮的三项：撤销（当前页有可撤销的操作，或正在输入）、筛选（在位置页）、
+  // 返回（在添加来源页）。只在状态真的变了时报给后端
+  const flags = useMenuFlags();
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    const update = () => setEditing(isEditable(document.activeElement));
+    // 失焦那一刻 activeElement 还没换好，下一拍再读
+    const later = () => setTimeout(update, 0);
+    document.addEventListener("focusin", update);
+    document.addEventListener("focusout", later);
+    return () => {
+      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusout", later);
+    };
+  }, []);
+  const menu = menuState(place, flags, editing);
+  useEffect(() => {
+    if (!canPopup()) return;
+    void api.setMenuState(menu).catch(() => undefined);
+  }, [menu.undo, menu.filter, menu.back]);
+
+  const selection = selectionOf(place);
+
+  /// 位置页每个 domain（页签，见 shell/domains.ts）对应的一页。表里加一个 domain，在这里配一页
+  const locationPages: Record<string, () => ReactNode> = {
+    skills: () => (
+      <SkillsTab
+        overview={overview}
+        autoLinks={autoLinks}
+        onBusy={setBusyState}
+        selectedKey={selectedKey}
+        onRefresh={refresh}
+        onError={setError}
+        focusKey={focus?.segment === "skills" ? focus.key : undefined}
+        onFocused={clearFocus}
+      />
+    ),
+    mcp: () => (
+      <McpTab
+        selectedKey={selectedKey}
+        onError={setError}
+        onBusy={setBusyState}
+        refreshKey={refreshKey}
+        onOverview={setMcpOverview}
+        focusKey={focus?.segment === "mcp" ? focus.key : undefined}
+        onFocused={clearFocus}
+      />
+    ),
+  };
 
   return (
     <div className="app">
-      {/* 顶栏独立于侧栏：模型页不要侧栏，字标与页签不能跟着一起消失。
-        系统标题栏隐藏了（DESIGN「壳」），顶栏自己当标题栏：整条可拖动，上面 28 给红绿灯 */}
-      <header className="topbar" data-tauri-drag-region>
-        {/* 字标用资产不用纯文本：首字母的重影是这个标志的识别点；
-          悬停唤起黑猫、点击敲碎玻璃（DESIGN「壳」） */}
-        <h1 className="topbar__mark">
-          <AnimatedWordmark />
-        </h1>
-        <nav className="topbar__tabs" aria-label="功能">
-          {TABS.filter((tab) => tab.id !== "models" || modelsSupported).map((tab) => {
-            const active = tab.id === "models" ? showModels : activeTab === tab.id && !showModels;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                className={`topbar__tab${active ? " is-active" : ""}`}
-                aria-current={active ? "page" : undefined}
-                onClick={() => switchTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </nav>
-        {/* 右端只有设置；页签上不加计数（问题就地显示，新问题右下提示一次）。
-          **顶栏没有全局忙碌指示**：后台例行读取（刷新、文件监听重扫、网关轮询）
-          不显示忙碌，用户没在等，出现转动只会被读成出了问题（DESIGN「忙碌指示」）。
-          写入进行中也不锁页签与项目切换：忙碌只锁触发它的那个控件 */}
-        <div className="topbar__end">
-          <IconButton icon={<IconSettings />} title="设置" onClick={() => setSubPage("settings")} />
-        </div>
-      </header>
-      {/* 模型页是全局的，没有域也没有项目，侧栏对它没有意义（MODELS_TAB_FULL_BLEED）。
-        **必须整个不渲染**：`.sidebar` 有 `display: flex`，它压得过 `hidden` 属性的
-        UA 样式，写成 `hidden={…}` 侧栏照样显示 */}
-      {!showModels && (
-        <aside className="sidebar">
-          {/* 小标题 `项目` + 右端排序下拉；`全局` 固定第一，不参与排序 */}
-          <div className="sidebar__head">
-            <span className="sidebar__label">项目</span>
-            <SortMenu value={projectSort} onChange={chooseSort} />
-          </div>
-          <ul className="sidebar__list">
-            <li
-              className={selectedKey === DEFAULT_KEY ? "is-active" : ""}
-              onClick={() => setSelectedKey(DEFAULT_KEY)}
-            >
-              <span className="sidebar__name">全局</span>
-            </li>
-            {sortedProjects.map((p) => (
-              <li
-                key={p.key}
-                className={p.key === selectedKey ? "is-active" : ""}
-                onClick={() => setSelectedKey(p.key)}
-              >
-                <SidebarName
-                  label={p.label}
-                  path={p.path}
-                  lastActive={projectTimes.get(p.path)?.lastActive ?? null}
-                />
-                {p.manual && (
-                  <RemoveProject
-                    busy={projectBusy !== null}
-                    name={p.label}
-                    onRemove={() => void removeProject(p.path)}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-          <div className="sidebar__foot">
-            <BusySlot busy={projectBusy === "add"} label="正在添加项目">
-              <AddButton
-                noun="项目"
-                disabledReason={projectBusy === "remove" ? "正在移除项目，稍等" : undefined}
-                onClick={() => void addProject()}
-              />
-            </BusySlot>
-          </div>
-        </aside>
-      )}
-      {/* 内容区外面包一层：表格横向放不下时，被裁掉的左 / 右边缘出 16px 渐隐（DESIGN「渐变只用于功能」） */}
+      {/* 机面上方那条 10 高的机壳：整窗宽都能拖窗（D17） */}
+      <div className="app__drag" data-tauri-drag-region />
+      <Sidebar
+        agents={agents}
+        projects={sortedProjects}
+        projectTimes={projectTimes}
+        selection={selection}
+        onSelectLocation={(key) => setPlace((p) => goLocation(p, key))}
+        onSelectAgent={(id) => setPlace((p) => goAgent(p, id))}
+        onSelectSettings={() => setPlace((p) => goSettings(p))}
+        sort={projectSort}
+        onSort={chooseSort}
+        projectBusy={projectBusy}
+        onAddProject={() => void addProject()}
+        onRemoveProject={(p, anchor) => void removeProject(p, anchor)}
+        removed={removed}
+        onUndoRemove={() => void undoRemove()}
+        onRemovedGone={clearRemoved}
+      />
+      {/* 内容是一块机面：所有页面都只替换机面的内容，侧栏始终在（D1 D6）。
+        表格横向放不下时，被裁掉的左 / 右边缘出 16px 渐隐（DESIGN「渐变只用于功能」） */}
       <div
-        className="content-shell"
+        className="face"
         data-fade-left={contentFade.start || undefined}
         data-fade-right={contentFade.end || undefined}
       >
-        <main ref={contentRef} className={showModels ? "content content--bleed" : "content"}>
+        <main ref={contentRef} className="face__scroll">
+          {/* 应用级故障：机面顶上、页面头之上，满内容宽 */}
           {error && (
-            <div className="content__banner">
+            <div className="face__banner">
               <ErrorBanner message={error} onClose={() => setError(null)} />
             </div>
           )}
-          {/* 还没问出模型页支不支持的那一瞬间也落在 Skills 上：宁可闪一下扫描中，不能白屏 */}
-          {showModels ? (
-            <ModelsTab
+          {place.view === "settings" ? (
+            <SettingsPage
+              inShell
+              onBack={() => undefined}
+              onError={setError}
+              initialUpdate={pendingUpdate}
+              aboutRequest={aboutRequest ?? undefined}
+            />
+          ) : agentEntry ? (
+            <AgentPage
+              entry={agentEntry}
               onError={setError}
               onGatewayState={setGatewayState}
               focusProviderId={modelFocus}
               onFocused={clearModelFocus}
             />
-          ) : activeTab === "mcp" ? (
-            <McpTab
-              selectedKey={selectedKey}
-              onError={setError}
-              onBusy={setBusyState}
-              refreshKey={refreshKey}
-              onOverview={setMcpOverview}
-              focusKey={focus?.segment === "mcp" ? focus.key : undefined}
-              onFocused={clearFocus}
-            />
           ) : (
-            <SkillsTab
-              overview={overview}
-              autoLinks={autoLinks}
-              onBusy={setBusyState}
-              selectedKey={selectedKey}
-              onRefresh={refresh}
-              onError={setError}
-              focusKey={focus?.segment === "skills" ? focus.key : undefined}
-              onFocused={clearFocus}
-            />
+            // 位置页：页面头左端 `skills ｜ mcp` 滑槽，右端留给页面自己的动作（PageHeadActions）
+            <PageHead
+              lead={
+                <Tabs
+                  items={LOCATION_DOMAINS}
+                  value={place.tab}
+                  onChange={(tab) => setPlace((p) => goTab(p, tab))}
+                  label="这个位置的哪张表"
+                />
+              }
+            >
+              {locationPages[place.tab]?.() ?? null}
+            </PageHead>
           )}
         </main>
       </div>
@@ -639,127 +699,6 @@ export default function App() {
         )}
       </ToastStack>
     </div>
-  );
-}
-
-/// 侧栏项目名：放不下截断；提示框给完整路径（主目录写成 ~）和「活跃于 3 天前」。
-/// 时间不写在侧栏上（DESIGN：侧栏只放名字）
-function SidebarName({
-  label,
-  path,
-  lastActive,
-}: {
-  label: string;
-  path: string;
-  lastActive: number | null;
-}) {
-  const tip = (
-    <>
-      {displayPath(path)}
-      {lastActive !== null && (
-        <>
-          <br />
-          活跃于 {relativeTime(lastActive)}
-        </>
-      )}
-    </>
-  );
-  return (
-    <Tooltip content={tip}>
-      <span className="sidebar__name">{label}</span>
-    </Tooltip>
-  );
-}
-
-/// 小标题行右端的排序下拉：`最近活跃 ▾`，点开两项的小浮层，当前项前打 ✓。
-/// 浮层与模型选择器同一写法（layer 圆角 + 浮层阴影）；点外面、按 Esc 关闭，不铺透明罩
-function SortMenu({
-  value,
-  onChange,
-}: {
-  value: ProjectSort;
-  onChange: (sort: ProjectSort) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLSpanElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpen(false);
-      button.current?.focus();
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && wrap.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      document.removeEventListener("pointerdown", onPointerDown, true);
-    };
-  }, [open]);
-  const current = PROJECT_SORTS.find((s) => s.id === value) ?? PROJECT_SORTS[0];
-  return (
-    <span ref={wrap} className="sidebar__sort">
-      <button
-        ref={button}
-        type="button"
-        className="sidebar__sort-button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {current.label} ▾
-      </button>
-      {open && (
-        <div className="sidebar__sort-menu" role="menu" aria-label="项目排序">
-          {PROJECT_SORTS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={s.id === value}
-              className="sidebar__sort-item"
-              onClick={() => {
-                onChange(s.id);
-                setOpen(false);
-              }}
-            >
-              <span className="sidebar__sort-check">
-                {s.id === value && <IconCheck size={12} />}
-              </span>
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
-  );
-}
-
-/// 侧栏里手动添加的项目才有移除键：16px ×，行内右端
-function RemoveProject({
-  busy,
-  name,
-  onRemove,
-}: {
-  busy: boolean;
-  name: string;
-  onRemove: () => void;
-}) {
-  return (
-    <span className="sidebar__remove" onClick={(e) => e.stopPropagation()}>
-      <IconButton
-        icon={<IconClose />}
-        title={`从侧栏移除 ${name}（不动磁盘上的文件）`}
-        disabledReason={busy ? "正在读取，稍等" : undefined}
-        onClick={onRemove}
-      />
-    </span>
   );
 }
 

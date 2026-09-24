@@ -1,5 +1,6 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
 mod gateway;
+mod menu;
 mod tray;
 mod watch;
 
@@ -1073,6 +1074,9 @@ pub fn run() {
     // 托盘面板要做成不激活应用的 NSPanel（tray.rs），面板登记表由这个插件管
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_nspanel::init());
+    // 原生应用菜单（D15）：只在 macOS 上装，别的系统上菜单栏会画进窗口里
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(menu::build).on_menu_event(menu::on_event);
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -1149,13 +1153,15 @@ pub fn run() {
             tray::tray_open_main,
             tray::tray_set_height,
             tray::tray_hide,
-            tray::tray_quit
+            tray::tray_quit,
+            menu::set_menu_state
         ])
         .setup(|_app| {
             // 菜单栏入口只在 macOS 上有：模型注入本身只支持 macOS
             #[cfg(target_os = "macos")]
             {
                 tray::setup(_app)?;
+                menu::after_setup(_app.handle());
                 // 后台线程里预热：复制程序、让系统做完首次校验，启用时就不用等这几秒
                 use tauri::Manager;
                 if let Some(gateway) = _app.state::<AppState>().gateway.clone() {

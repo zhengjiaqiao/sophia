@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -20,6 +20,7 @@ import {
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { updateCheckFailure } from "../updateText.ts";
+import { ShellPage } from "../shell/PageHead.tsx";
 import "./SettingsPage.css";
 
 /// 设置页（DESIGN「产品裁决 › 设置页」，画板 Settings）：占满整窗的二级页面，不渲染侧栏。
@@ -62,9 +63,19 @@ export interface SettingsPageProps {
   /// 查在启动时做而不是打开设置时做——用户不进设置也该有机会知道有新版
   initialUpdate?: Update | null;
   onError: (message: string) => void;
+  /// 壳接线（V4 外壳，D6）：放在机面里、侧栏留着，而不是盖满整窗的二级页
+  inShell?: boolean;
+  /// 壳接线（应用菜单「关于 Sophia」「检查更新…」，D15）：停在「关于」；`check` 时同时开始检查
+  aboutRequest?: { at: number; check: boolean };
 }
 
-export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPageProps) {
+export function SettingsPage({
+  onBack,
+  onError,
+  initialUpdate,
+  inShell,
+  aboutRequest,
+}: SettingsPageProps) {
   /// null＝还没读回来，与「一个 agent 都没有」是两回事
   const [list, setList] = useState<HarnessList | null>(null);
   const agents: AgentOption[] | null = list?.harnesses ?? null;
@@ -269,6 +280,15 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
     }
   };
 
+  // 应用菜单「关于 Sophia」「检查更新…」：停在「关于」一节，检查更新时同时开始检查（同点 `检查更新`）
+  const aboutRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!aboutRequest) return;
+    aboutRef.current?.scrollIntoView({ block: "start" });
+    if (aboutRequest.check && !checking) void checkUpdate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aboutRequest?.at]);
+
   /// 整行是按钮：命中区是整行，方框只是记号。勾满上限时没勾的行禁用，
   /// 提示框说为什么点不了：悬停出、按下当即出（explain：禁用的行不吃指针，悬停与按下落在包层上）
   const row = (agent: AgentOption) => {
@@ -327,8 +347,9 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
   const full = list !== null && present.filter((a) => a.enabled).length >= maxShown;
   const fullReason = `最多显示 ${maxShown} 个，先取消一个`;
 
+  const Frame = inShell ? ShellPage : SubPage;
   return (
-    <SubPage title="设置" onBack={onBack}>
+    <Frame title="设置" onBack={onBack}>
       <div className="settings-page">
         {/* 区块小标：贴 1px ink 分组线下沿 6（DESIGN「刻字」）；句子里的 agent 不大写 */}
         <div className="settings-page__section">
@@ -361,7 +382,9 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           </>
         )}
 
-        <div className="settings-page__section settings-page__section--later">关于</div>
+        <div ref={aboutRef} className="settings-page__section settings-page__section--later">
+          关于
+        </div>
         <div className="settings-page__about">
           <span className="settings-page__name">版本</span>
           <span className="settings-page__version">{current ?? "…"}</span>
@@ -419,7 +442,7 @@ export function SettingsPage({ onBack, onError, initialUpdate }: SettingsPagePro
           </>
         ) : null}
       </div>
-    </SubPage>
+    </Frame>
   );
 }
 

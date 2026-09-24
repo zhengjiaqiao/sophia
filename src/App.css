@@ -1,7 +1,7 @@
-/* 外壳（顶栏 · 侧栏 · 内容区）的版式。组件在 src/ui/，表格在 Matrix.css，这里只管整窗怎么摆。
+/* 外壳（侧栏 · 机面）的版式。组件在 src/ui/，表格在 Matrix.css，这里只管整窗怎么摆。
 
-   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变；
-   圆角只有 0 / 2px / 32px / 50%。scripts/lint-ui.mjs 逐条拦。 */
+   色值一律 var(--…)，唯一来源是 tokens.css；圆角、层次只用 token 表里的值。
+   scripts/lint-ui.mjs 逐条拦。 */
 @import "./tokens.css";
 
 /* ===== 基础 ===== */
@@ -50,55 +50,72 @@ input:focus-visible {
   border-color: var(--ink);
 }
 
-/* ===== 外壳（DESIGN「壳」，画板 Main 顶栏与侧栏） =====
-   系统标题栏隐藏了（titleBarStyle: Overlay），红绿灯浮在窗口左上角那 28px 里。
-   那一排**留空**，只当拖动区；字标与页签在它下面的 56px 里。顶栏总高 84 = 28 空 + 56 内容，
-   底边 hairline（顶栏不是面板）。顶栏是自己的盒子，不挂在侧栏下面：模型页不要侧栏，
-   字标与页签不能跟着一起消失。 */
+/* ===== 外壳（DESIGN「壳：侧栏 + 一块机面」，裁决 D1 D17） =====
+   没有顶栏：一条全高侧栏（208，落在机壳上、不画线）做全部导航，右边一块机面放当前这一页。
+   系统标题栏隐藏了（titleBarStyle: Overlay），红绿灯内缩到侧栏顶那 28 里（trafficLightPosition）。 */
 .app {
   position: relative;
   box-sizing: border-box;
   display: flex;
   height: 100vh;
-  padding-top: calc(var(--titlestrip) + var(--topbar));
 }
 
-.topbar {
+/* 机面上方那条 10 高的机壳：整窗宽的拖窗区（D17）。盖在侧栏之上也无妨——侧栏那一段本来就能拖 */
+.app__drag {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  height: calc(var(--titlestrip) + var(--topbar));
-  padding: var(--titlestrip) var(--space-xxl) 0;
-  border-bottom: 1px solid var(--hairline);
+  height: 10px;
+  z-index: 1;
 }
 
-.topbar__mark {
+/* ---- 侧栏 ---- */
+.sidebar {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 208px;
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+/* 红绿灯行：高 28，留空、可拖窗 */
+.sidebar__lights {
+  height: 28px;
+  flex-shrink: 0;
+}
+
+/* 字标带：高 44；字标（沿用原字标，高 26）垂直居中，主体 S 左沿约 22、重影落在它左边。
+   画布只盖这一块（data-brand-band），碎片落在它的下沿 */
+.sidebar__brand {
+  position: relative;
   display: flex;
   align-items: center;
+  height: 44px;
   flex-shrink: 0;
+  padding-left: 15px;
+}
+
+.sidebar__mark {
+  display: flex;
   margin: 0;
 }
 
-/* 字标高 26：20px 时首字母后面那层灰影只有 1px 位移，读起来像套印错位（DESIGN「壳」）。
-   宽随 3304:916 的比例；重影的三档灰在 SVG 里，不进 src 的色值检查 */
-.topbar__mark .wordmark {
+/* 静止字标是内联 SVG：高 26，宽按 viewBox 3304:916 算死（内联 SVG 的 auto 宽各引擎不一致） */
+.wordmark,
+.wordmark svg {
   display: block;
   height: 26px;
-  width: auto;
+  width: calc(26px * 3304 / 916);
 }
 
-/* 字标动效（DESIGN「字标动效：黑猫与玻璃」）：外层四周各多 6px 的命中区（padding 撑开、
-   负 margin 收回，排版不变），这一块不当拖窗区。画布由 GlassMark 定位与定尺寸，
-   向左右各伸 24px、上下伸到顶栏内容区的顶和底线；它不接指针事件，事件都落在外层 */
+/* 字标框＝命中区：含左上重影，右到末字母右沿 + 4。这一块不当拖窗区。
+   画布由 GlassMark 按字标带定位与定尺寸，不接指针事件，事件都落在这层 */
 .brandmark {
   position: relative;
   display: block;
-  padding: 6px;
-  margin: -6px;
+  padding-right: 3px;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -112,90 +129,29 @@ input:focus-visible {
   pointer-events: none;
 }
 
-/* 页签：字标后 32，彼此 24。文案是我们自己写的结构词，拉丁一律小写（`模型` `skills` `mcp`），
-   字距 0（DESIGN「小写是结构的语言」）。V4 的滑槽样式见 ui 的 Tabs，壳换上它之前沿用这里 */
-.topbar__tabs {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xl);
-  margin-left: var(--space-xxl);
-}
-
-.topbar__tab {
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
-  height: 32px;
-  padding: 0;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  border-radius: 0;
-  background: none;
-  color: var(--ink-mute);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0;
-  cursor: pointer;
-  transition:
-    color var(--motion-fast) var(--ease-mech),
-    border-color var(--motion-fast) var(--ease-mech);
-}
-
-.topbar__tab:hover:not(:disabled),
-.topbar__tab.is-active {
-  color: var(--ink);
-}
-
-.topbar__tab.is-active {
-  border-bottom-color: var(--ink);
-}
-
-/* 忙时页签不能切（切页会丢掉进行中的那一轮），但字色不降档：它们只是暂时按不动 */
-.topbar__tab:disabled {
-  border-color: transparent;
-  color: var(--ink-mute);
-  cursor: default;
-}
-
-.topbar__tab.is-active:disabled {
-  border-bottom-color: var(--ink);
-  color: var(--ink);
-}
-
-/* 右端：只有设置 */
-.topbar__end {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xxs);
-  margin-left: auto;
-}
-
-/* 侧栏：白，186 宽 + 1px hairline 分隔；顶部区块小标「位置」，项高 36，
-   选中 surface 底 + ink 字、其余 ink-mute；底部 48 一格放 `+ 项目` */
-.sidebar {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  width: 186px;
-  flex-shrink: 0;
+/* agent 段、项目段：可滚动的中段；设置贴底 */
+.sidebar__nav {
+  flex: 1;
   min-height: 0;
-  border-right: 1px solid var(--hairline);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: var(--space-xs);
 }
 
-/* 小标题行：左 `项目`，右端排序下拉 */
+/* 区块小标：label 12 / 500 ink-mute，小写拉丁结构词；行高 26、左右 20、上距 14 */
 .sidebar__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-xs);
-  padding: var(--space-md) var(--space-md) 0;
+  height: 26px;
+  margin-top: 14px;
+  padding: 0 20px;
 }
 
 .sidebar__label {
   font-size: var(--size-label);
-  font-weight: 600;
+  font-weight: 500;
   line-height: var(--leading-label);
   color: var(--ink-mute);
 }
@@ -215,7 +171,6 @@ input:focus-visible {
   font-size: var(--size-label);
   line-height: var(--leading-label);
   white-space: nowrap;
-  cursor: pointer;
 }
 
 .sidebar__sort-button:hover,
@@ -223,7 +178,7 @@ input:focus-visible {
   color: var(--ink);
 }
 
-/* 两项的小浮层：与模型选择器同一写法，8 圆角（layer）+ 浮层阴影，无黑框 */
+/* 两项的小浮层：纸浮层（paper + hairline 边 + float 12 + 浮层投影） */
 .sidebar__sort-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -254,7 +209,6 @@ input:focus-visible {
   font-size: var(--size-label);
   text-align: left;
   white-space: nowrap;
-  cursor: pointer;
 }
 
 .sidebar__sort-item:hover {
@@ -269,54 +223,72 @@ input:focus-visible {
   flex-shrink: 0;
 }
 
-.sidebar__list {
-  flex: 1;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  overflow: auto;
-}
-
-.sidebar__list li {
-  box-sizing: border-box;
+/* 项：高 34，左右外距 10、内距 10（文字左沿 20，与区块小标对齐），图标与字间距 8；15 ink-mute。
+   选中：ink 600、一小块机面（face 底 + 1px hairline 环、control 7）；悬停 surface。
+   三段同一种项、同一个选中 */
+.side-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-xxs);
-  height: 36px;
-  /* 行悬停 / 选中底 6 圆角（control），左右各让 8；文字起点不变（16 = 8 + 8） */
-  margin: 0 var(--space-xs);
-  padding: 0 var(--space-xxs) 0 var(--space-xs);
+  box-sizing: border-box;
+  height: 34px;
+  margin: 0 10px;
+  /* 环常备、平时透明：选中时只换色，文字不挪（文字左沿 = 外距 10 + 边 1 + 内距 9 = 20） */
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.side-item:hover,
+.side-item.is-menu {
+  background: var(--surface);
+}
+
+.side-item.is-on {
+  border-color: var(--hairline);
+  background: var(--face);
+}
+
+.side-item__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
   color: var(--ink-mute);
+  font-family: var(--font-ui);
   font-size: var(--size-body);
   line-height: var(--leading-caption);
-  cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease-mech),
-    color var(--motion-fast) var(--ease-mech);
+  text-align: left;
 }
 
-.sidebar__list li:hover {
+.side-item:hover .side-item__main,
+.side-item.is-on .side-item__main {
   color: var(--ink);
 }
 
-.sidebar__list li.is-active {
-  background: var(--surface);
-  color: var(--ink);
+.side-item.is-on .side-item__main {
+  font-weight: 600;
+}
+
+.side-item__icon {
+  display: inline-flex;
+  flex-shrink: 0;
 }
 
 /* 项目名带提示框时，包层接过弹性占位，名字照样能截断 */
-.sidebar__list li > .ss-tipwrap {
+.side-item__main > .ss-tipwrap {
   flex: 1;
   min-width: 0;
 }
 
-.sidebar__list li > .ss-tipwrap > .sidebar__name {
-  min-width: 0;
-}
-
-.sidebar__name {
+.side-item__name {
+  display: block;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -324,47 +296,121 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-/* 手动项目的移除键只在悬停 / 选中 / 键盘聚焦时出现：静止时不和名字抢（① 回应只由用户唤起） */
-.sidebar__remove {
+/* agent 名后的 6px 指示点：右端，与移除键同一条右沿 */
+.side-item__dot {
   display: inline-flex;
   flex-shrink: 0;
+  margin-left: auto;
+  padding-right: 4px;
+}
+
+/* 手动项目的移除键：只在悬停 / 键盘聚焦时出现（① 回应只由用户唤起）；行尾右内距 3 */
+.side-item__remove {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: 2px;
   opacity: 0;
   transition: opacity var(--motion-fast) var(--ease-mech);
 }
 
-.sidebar__list li:hover .sidebar__remove,
-.sidebar__list li.is-active .sidebar__remove,
-.sidebar__remove:focus-within {
+.side-item:hover .side-item__remove,
+.side-item__remove:focus-within {
   opacity: 1;
 }
 
-.sidebar__foot {
+/* `+ 项目`：项目列表的最后一项，默认键紧凑 24，左沿对齐项目名（20） */
+.sidebar__add {
   display: flex;
   align-items: center;
+  height: 34px;
+  padding: 0 20px;
+}
+
+/* 设置：贴侧栏底，底距 10 */
+.sidebar__foot {
   flex-shrink: 0;
+  padding: var(--space-xs) 0 10px;
+}
+
+/* ---- 机面 ---- */
+/* 一块机面：face 底、1px hairline 边、12 圆角、无投影；上右下离窗沿 10，左沿紧贴侧栏。
+   1100 宽时机面宽 882。滚动边缘的渐隐也用 face */
+.face {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  margin: 10px 10px 10px 0;
+  border: var(--border-face);
+  border-radius: var(--radius-face);
+  background: var(--face);
+  overflow: hidden;
+}
+
+/* 机面内边距 16 24 0（量到机面外沿，含 1px 边）。**滚动容器上下内边距为 0**：sticky 的落点按
+   滚动容器的内容盒算，上内边距会让吸顶行离顶留一道缝、滚过去的内容从缝里漏出来——上面的 16 由页面头
+   （或错误横幅）自己的上外距给 */
+.face__scroll {
+  flex: 1;
+  min-width: 0;
   box-sizing: border-box;
-  height: 48px;
-  padding: 0 var(--space-md);
-  border-top: 1px solid var(--hairline);
+  padding: 0 calc(var(--space-xl) - 1px) 0;
+  overflow: auto;
 }
 
-/* 应用级故障：内容区顶上、页边内的灰面板（DESIGN「提示条分两档」），左右对齐页边 32，不自动消失。
-   内容区上下内边距是 0，顶上的 24 由它自己给 */
-.content__banner {
-  padding-top: var(--space-xl);
+/* 应用级故障：机面顶上、页面头之上的灰面板，满内容宽 */
+.face__banner {
+  padding-top: 15px;
 }
 
-/* 模型页的内容区不出页边（页面自己出），横幅自己补上左右 32 */
-.content--bleed .content__banner {
-  padding: var(--space-xl) var(--space-xxl) 0;
+/* 页面头：高 34，上距 16（含机面 1px 边）；左主控件或页面名，右这一页的动作。空白处可拖窗 */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: 34px;
+  margin-top: 15px;
 }
 
-/* 无关位置的全局事（背后自动添加了 MCP、新问题的一次性提示）：右下，底 16；
+.face__banner + .page-head {
+  margin-top: var(--space-md);
+}
+
+.page-head__lead {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.page-head__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+}
+
+.page-head__actions:empty {
+  display: none;
+}
+
+/* 页面名一律 title 20 / 600 */
+.page-head__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--size-title);
+  font-weight: 600;
+  line-height: var(--leading-title);
+}
+
+/* 右下提示（后台自动规则、新问题一次性提示、后台 MCP）：右沿对齐机面右沿向内 16、底 16。
    两个同时在时竖着排，右沿对齐 */
 .app__toast {
   position: fixed;
-  right: var(--space-xxl);
-  bottom: var(--space-md);
+  right: calc(10px + var(--space-md));
+  bottom: calc(10px + var(--space-md));
   z-index: 10;
   display: flex;
   flex-direction: column;
@@ -373,31 +419,23 @@ input:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .content-shell::before,
-  .content-shell::after,
-  .topbar__tab,
-  .sidebar__list li,
-  .sidebar__remove {
+  .face::before,
+  .face::after,
+  .side-item,
+  .side-item__remove {
     transition: none;
   }
 }
 
-/* 内容区外壳：横向放不下时被裁掉的左 / 右边缘 16px 从 face 渐隐到透明（功能性渐变）。
+/* 横向放不下时被裁掉的左 / 右边缘 16px 从 face 渐隐到透明（功能性渐变）。
    渐隐盖在滚动容器外面，不随内容滚走 */
-.content-shell {
-  position: relative;
-  display: flex;
-  flex: 1;
-  min-width: 0;
-}
-
-.content-shell::before,
-.content-shell::after {
+.face::before,
+.face::after {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  /* 高过 Matrix 的吸顶工具行与列头（最高 8），低过二级页（30）与浮层 */
+  /* 高过 Matrix 的吸顶工具行与列头（最高 8），低过浮层 */
   z-index: 9;
   width: var(--fade-edge);
   pointer-events: none;
@@ -405,33 +443,17 @@ input:focus-visible {
   transition: opacity var(--motion-fast) var(--ease-mech);
 }
 
-.content-shell::before {
+.face::before {
   left: 0;
   background: linear-gradient(to right, var(--face), transparent);
 }
 
-.content-shell::after {
+.face::after {
   right: 0;
   background: linear-gradient(to left, var(--face), transparent);
 }
 
-.content-shell[data-fade-left]::before,
-.content-shell[data-fade-right]::after {
+.face[data-fade-left]::before,
+.face[data-fade-right]::after {
   opacity: 1;
-}
-
-/* 页边 32（DESIGN「Layout」）。**上下内边距必须是 0**：sticky 的落点按滚动容器的内容盒算，
-   padding-top 16px 时吸顶的选择操作条离顶正好 16px，滚过去的内容从这道缝里漏出来。
-   上下留白归页面自己给，不由滚动容器给。 */
-.content {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-  padding: 0 var(--space-xxl) 0;
-  overflow: auto;
-}
-
-/* 模型页自己出页边（48/32），内容区再叠一层左右就成了 64 */
-.content--bleed {
-  padding: 0;
 }

@@ -19,6 +19,15 @@ registerHooks({
     if (url.endsWith(".css")) {
       return { format: "module", shortCircuit: true, source: "export default {};" };
     }
+    // `?raw`（vite 里 import 得到文件原文）：原文照给
+    if (url.endsWith("?raw")) {
+      const text = readFileSync(fileURLToPath(url.slice(0, -"?raw".length)), "utf8");
+      return {
+        format: "module",
+        shortCircuit: true,
+        source: `export default ${JSON.stringify(text)};`,
+      };
+    }
     // 图像资源（vite 里 import 得到 URL）：换成文件名字符串，断言用得上
     const asset = /\/([^/]+\.(?:jpe?g|png|svg))$/.exec(url);
     if (asset) {

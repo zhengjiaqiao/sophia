@@ -1609,8 +1609,9 @@ test("刚变化的格子闪一下：120ms 反色再回落，减少动效时退�
 
 // ===== 内容区的滚动容器（DESIGN「Layout」）=====
 //
-// 样式断言：吸顶的选择操作条落点全由 App.css 的 .content 决定，组件层看不见。
-// 在 WebKit 里量过：sticky 的落点按滚动容器的**内容盒**算，.content 上下内边距是多少，
+// 样式断言：吸顶的选择操作条落点全由 App.css 的滚动容器决定，组件层看不见。
+// V4 起滚动容器是机面里的 .face__scroll（D1 删顶栏，内容进一块机面）。
+// 在 WebKit 里量过：sticky 的落点按滚动容器的**内容盒**算，它上下内边距是多少，
 // 吸顶的条就离边多少，滚过去的内容从缝里漏出来。
 // （UI v4 删掉了贴底待处理窗，原来钉 .skills-tab / .pending-bar 贴底的两条断言随之退役）
 
@@ -1626,14 +1627,14 @@ function ruleOf(selector: string): string {
 }
 
 test("内容区：滚动容器上下不留内边距，否则吸顶条的落点被顶开，内容从缝里漏出来", () => {
-  const content = ruleOf(".content");
+  const content = ruleOf(".face__scroll");
   assert.match(content, /overflow:\s*auto/);
   const padding = content.match(/\bpadding:\s*([^;]+);/);
-  assert.ok(padding, ".content 要显式写 padding");
+  assert.ok(padding, ".face__scroll 要显式写 padding");
   const sides = padding[1].trim().split(/\s+(?![^(]*\))/);
-  assert.equal(sides.length, 3, ".content 的 padding 写成「上 左右 下」三段，好看出上下是 0");
-  assert.equal(sides[0], "0", ".content 的上内边距必须是 0");
-  assert.equal(sides[2], "0", ".content 的下内边距必须是 0");
+  assert.equal(sides.length, 3, ".face__scroll 的 padding 写成「上 左右 下」三段，好看出上下是 0");
+  assert.equal(sides[0], "0", ".face__scroll 的上内边距必须是 0");
+  assert.equal(sides[2], "0", ".face__scroll 的下内边距必须是 0");
   // 贴底待处理窗已取消，它的样式不该回来
   assert.doesNotMatch(appCss, /\.pending-bar\b/);
 });

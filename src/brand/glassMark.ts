@@ -1,12 +1,15 @@
 /* 字标动效「黑猫与玻璃」：绘制与物理（DESIGN「壳 → 字标动效：黑猫与玻璃」）。
-   移植自产品负责人定稿的原型（第 21 版）的顶栏变体：纯 Canvas 2D，不依赖 React。
+   移植自产品负责人定稿的原型（第 21 版），V4 起落在侧栏顶的字标带里：纯 Canvas 2D，不依赖 React。
 
-   - 静止时画布是空的，显示的是原来的 <img> 字标；只有猫出现、裂开、碎开、复原期间画布才接管，
-     那时把 <img> 调成透明（不用 visibility，读屏还要读它的 alt）。
+   - 静止时画布是空的，显示的是静止字标（下文仍称 <img>：V4 起是换了 token 色的内联 SVG）；
+     只有猫出现、裂开、碎开、复原期间画布才接管，那时把它调成透明（不用 visibility，读屏还要读它的名字）。
    - rAF 只在悬停和复原期间跑；回到静止就停。
-   - 色值取自 tokens.css 的变量（--ink / --paper / --ink-mute）。字标位图由 SVG 资产的源码
-     逐条路径填出来，和 <img> 同源，灰影的色值只在 SVG 里。不直接 drawImage(<img>)：
-     没写宽高的 SVG 在各引擎里的固有尺寸不一致，画进画布会变形。
+   - 色值一律读 tokens.css 的变量（--ink / --paper / --ink-mute / --ctl-border / --ctl-edge），
+     不写字面值。字标位图由 SVG 资产的源码逐条路径填出来，按路径的角色取色：主体 --ink、
+     首字母重影 --ctl-border、重影与主体重合处 --ctl-edge——与静止时内联的字标（AnimatedWordmark
+     按同样的角色换色）一致。不直接 drawImage：SVG 在各引擎里的固有尺寸不一致，画进画布会变形。
+   - 画布只盖侧栏的字标带（宿主外面带 data-brand-band 的那一块，208 × 44）：不盖红绿灯行、
+     不盖导航项；碎片落在字标带的下沿（看不见的地面），左右不出侧栏。
    - 本文件的纯函数（rng / fracture / labelShards / packShards）不碰 DOM，
      tests/glass-mark.test.ts 直接测。 */
 
@@ -188,8 +191,11 @@ export function labelShards(
   const solid = new Uint8Array(N);
   for (let i = 0, p = 0; i < N; i++, p += 4) {
     if (base[p + 3] <= 24) continue;
-    if (crack[p] + crack[p + 1] + crack[p + 2] - (base[p] + base[p + 1] + base[p + 2]) > 60)
-      continue; // 裂纹像素
+    // 裂纹像素：与完整字标差得够多（墨上的裂纹更浅、浅灰重影上的裂纹更深，取绝对值）
+    if (
+      Math.abs(crack[p] + crack[p + 1] + crack[p + 2] - (base[p] + base[p + 1] + base[p + 2])) > 60
+    )
+      continue;
     solid[i] = 1;
   }
   const lab = new Int32Array(N).fill(-1);
@@ -337,9 +343,12 @@ const VIEW_W = 3304,
   VIEW_H = 916,
   BASELINE = 808;
 
+/** 路径的角色：首字母重影 / 主体字母 / 重影与主体重合的那一块（裁切组里的） */
+export type WordmarkRole = "ghost" | "body" | "overlap";
+
 interface Shape {
   path: Path2D;
-  tone: string; // 填色，原样取自 SVG 的 fill
+  role: WordmarkRole;
   clip: Path2D | null;
 }
 
@@ -357,7 +366,7 @@ function parseTransform(t: string | null): DOMMatrix {
   return m;
 }
 
-/** 把字标 SVG 拆成「路径 + 填色 + 裁切」，按文档顺序画出来就是 <img> 的样子 */
+/** 把字标 SVG 拆成「路径 + 角色 + 裁切」，按文档顺序画出来就是静止字标的样子 */
 function parseWordmark(svg: string): Shape[] {
   const root = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
   const toPath = (el: Element) => {
@@ -376,14 +385,33 @@ function parseWordmark(svg: string): Shape[] {
     if (el.closest("clipPath")) continue;
     const ref = el.closest("[clip-path]")?.getAttribute("clip-path") ?? "";
     const id = /url\(#([^)]+)\)/.exec(ref)?.[1];
-    const tone = el.closest("[fill]")?.getAttribute("fill") ?? "";
-    shapes.push({ path: toPath(el), tone, clip: id ? (clips.get(id) ?? null) : null });
+    const role: WordmarkRole = id ? "overlap" : shapes.length === 0 ? "ghost" : "body";
+    shapes.push({ path: toPath(el), role, clip: id ? (clips.get(id) ?? null) : null });
   }
   return shapes;
 }
 
-/** 顶栏变体：画布左右各伸出 24px 给猫进出；上下伸到顶栏内容区的顶和底线 */
+/** 静止时内联显示的字标：按同样的角色把 SVG 里写死的填色换成 token（第一条路径是重影、
+    裁切组里的是重合处、其余是主体），静止的字标与动效画布同一套色 */
+export function tokenizeWordmark(svg: string): string {
+  const clipAt = svg.indexOf("<g clip-path");
+  let n = 0;
+  return svg.replace(/ fill="#[0-9a-fA-F]{6}"/g, (_m, offset: number) => {
+    const role: WordmarkRole =
+      clipAt >= 0 && offset > clipAt ? "overlap" : n++ === 0 ? "ghost" : "body";
+    return ` style="fill:var(${ROLE_TOKEN[role]})"`;
+  });
+}
+
+const ROLE_TOKEN: Record<WordmarkRole, string> = {
+  ghost: "--ctl-border",
+  body: "--ink",
+  overlap: "--ctl-edge",
+};
+
+/** 找不到字标带时（单独渲染字标）的退路：画布左右各伸出 24px、上下各 15px */
 const PAD_X = 24;
+const PAD_Y = 15;
 const HOVER_DELAY = 0.4; // 秒：停这么久猫才出来，扫过去不惊动它
 
 type Mode = "rest" | "armed" | "cracked" | "crack" | "heal" | "fall" | "rebuild" | "mend";
@@ -447,6 +475,8 @@ interface Palette {
   ink: string;
   paper: string;
   mute: string;
+  ghost: string; // --ctl-border：首字母重影
+  edge: string; // --ctl-edge：重合处、次级裂纹
 }
 
 const newCat = (): Cat => ({
@@ -483,11 +513,11 @@ const ctx2d = (c: HTMLCanvasElement) => {
   return g;
 };
 
-/** 一个字标的动效。host 收指针事件（字标四周各宽 6px），img 是静止时显示的字标，
+/** 一个字标的动效。host 收指针事件（字标框：含重影，右到末字母右沿 + 4），img 是静止时显示的字标，
     canvas 叠在 img 上方、不接指针事件 */
 export class GlassMark {
   private readonly host: HTMLElement;
-  private readonly img: HTMLImageElement;
+  private readonly img: HTMLElement;
   private readonly c: HTMLCanvasElement;
   private readonly svg: string;
   private shapes: Shape[] | null = null;
@@ -503,7 +533,7 @@ export class GlassMark {
   private ox = 0;
   private oy = 0;
   private baseline = 0;
-  private col: Palette = { ink: "", paper: "", mute: "" };
+  private col: Palette = { ink: "", paper: "", mute: "", ghost: "", edge: "" };
   private base!: HTMLCanvasElement;
   private data!: Uint8ClampedArray;
   private layer!: HTMLCanvasElement;
@@ -538,7 +568,7 @@ export class GlassMark {
   private leftAt = 0;
   private pendingRebuild = false;
 
-  constructor(host: HTMLElement, img: HTMLImageElement, canvas: HTMLCanvasElement, svg: string) {
+  constructor(host: HTMLElement, img: HTMLElement, canvas: HTMLCanvasElement, svg: string) {
     this.host = host;
     this.img = img;
     this.c = canvas;
@@ -661,22 +691,20 @@ export class GlassMark {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const ir = this.img.getBoundingClientRect(),
       hr = this.host.getBoundingClientRect();
-    // 画布上下伸到顶栏内容区的顶和底线：碎片落在顶栏底线上
-    let padT = 15,
-      padB = 15;
-    const bar = this.host.closest("header");
-    if (bar) {
-      const br = bar.getBoundingClientRect(),
-        cs = getComputedStyle(bar);
-      padT = ir.top - (br.top + parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop));
-      padB = br.bottom - ir.bottom;
-    }
+    // 画布只盖字标带：左右到侧栏两沿，上下到字标带的上下沿（碎片落在下沿上）
+    const band = this.host.closest<HTMLElement>("[data-brand-band]")?.getBoundingClientRect();
+    const box = band ?? {
+      left: ir.left - PAD_X,
+      right: ir.right + PAD_X,
+      top: ir.top - PAD_Y,
+      bottom: ir.bottom + PAD_Y,
+    };
     // 画布尺寸取整到设备像素，CSS 尺寸反算回来，画布不做缩放
-    this.c.width = Math.round((ir.width + PAD_X * 2) * dpr);
-    this.c.height = Math.round((padT + ir.height + padB) * dpr);
+    this.c.width = Math.round((box.right - box.left) * dpr);
+    this.c.height = Math.round((box.bottom - box.top) * dpr);
     const s = this.c.style;
-    s.left = `${ir.left - hr.left - PAD_X}px`;
-    s.top = `${ir.top - hr.top - padT}px`;
+    s.left = `${box.left - hr.left}px`;
+    s.top = `${box.top - hr.top}px`;
     s.width = `${this.c.width / dpr}px`;
     s.height = `${this.c.height / dpr}px`;
     this.dpr = dpr;
@@ -685,12 +713,23 @@ export class GlassMark {
     const mw = Math.round(ir.width * dpr);
     this.rw = mw;
     this.rh = Math.round(ir.height * dpr);
-    this.ox = Math.round(PAD_X * dpr);
-    this.oy = Math.round(padT * dpr);
+    this.ox = Math.round((ir.left - box.left) * dpr);
+    this.oy = Math.round((ir.top - box.top) * dpr);
 
     const root = getComputedStyle(document.documentElement);
     const v = (name: string) => root.getPropertyValue(name).trim();
-    this.col = { ink: v("--ink"), paper: v("--paper"), mute: v("--ink-mute") };
+    this.col = {
+      ink: v("--ink"),
+      paper: v("--paper"),
+      mute: v("--ink-mute"),
+      ghost: v("--ctl-border"),
+      edge: v("--ctl-edge"),
+    };
+    const tone: Record<WordmarkRole, string> = {
+      ghost: this.col.ghost,
+      body: this.col.ink,
+      overlap: this.col.edge,
+    };
 
     // 字标位图：按 SVG 的路径、填色与裁切逐条填出来
     this.shapes ??= parseWordmark(this.svg);
@@ -702,7 +741,7 @@ export class GlassMark {
     for (const sh of this.shapes) {
       bg.save();
       if (sh.clip) bg.clip(sh.clip);
-      bg.fillStyle = sh.tone;
+      bg.fillStyle = tone[sh.role];
       bg.fill(sh.path);
       bg.restore();
     }
@@ -760,10 +799,11 @@ export class GlassMark {
     g.globalCompositeOperation = "source-atop";
     g.lineCap = "round";
     g.lineJoin = "round";
-    g.strokeStyle = this.col.paper;
     const W = [1.3, 0.95, 0.75],
       A = [0.95, 0.82, 0.66];
+    // 主裂纹 --ink-mute，次级裂纹 --ctl-edge（DESIGN「敲玻璃」）
     for (const main of [true, false]) {
+      g.strokeStyle = main ? this.col.mute : this.col.edge;
       for (let b = 0; b < 3; b++) {
         g.globalAlpha = A[b] * alpha * (main ? 1 : 0.85);
         g.lineWidth = Math.max(0.7, base * W[b] * (main ? 1 : 0.55));

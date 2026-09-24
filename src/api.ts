@@ -187,4 +187,7 @@ export const api = {
   trayHide: () => invoke<void>("tray_hide"),
   trayQuit: () => invoke<void>("tray_quit"),
   gatewayTakeover: () => invoke<GatewayState>("gateway_takeover"),
+  /// 应用菜单里跟着界面灰 / 亮的三项（`撤销` `筛选` `返回`，DESIGN「应用菜单」）
+  setMenuState: (state: { undo: boolean; filter: boolean; back: boolean }) =>
+    invoke<void>("set_menu_state", { state }),
 };

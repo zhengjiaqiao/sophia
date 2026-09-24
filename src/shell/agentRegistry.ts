@@ -1,0 +1,79 @@
+/// agent 注册表的类型与取用（DESIGN「侧栏 › agent 段」「agent 页」「扩展预留：用量与会话」）。
+///
+/// **两个扩展点之一**（另一个是 domains.ts 的位置页 domain 表）：一张表生成侧栏的 `agent` 段、
+/// agent 页的节，以后还有托盘的块（托盘不归外壳，届时读同一张表）。每一项：
+/// id、名字（原样大小写）、图标（`AgentIcon` 按 id 取）、指示点条件、能力节列表。
+/// **只列有能力节的 agent**（可配的如第三方模型，可看的如以后的用量）：节列表为空、或此刻不可用的，
+/// 侧栏不列、也不灰着列。
+///
+/// 加一个 agent / 一种能力＝往 `agents.tsx` 的表里加一项 / 一节，写一个节组件；外壳、路由都不改。
+/// 这里只放类型与纯函数（不产 JSX），tests/shell-agents.test.ts 直接测。
+
+import type { ComponentType } from "react";
+import type { GatewayState } from "../types.ts";
+
+/// 判断「在不在、开没开」用的只读状态（壳持有，逐项往里加）
+export interface AgentState {
+  /// 模型状态（第三方模型）；还没读回来是 null
+  gateway: GatewayState | null;
+  /// 后端支不支持第三方模型（只有 macOS 支持）；还没问出来是 null
+  modelsSupported: boolean | null;
+}
+
+/// 节组件拿到的：壳的回调与跳转定位（节自己的数据自己读）
+export interface AgentSectionProps {
+  onError: (message: string) => void;
+  /// 节改了模型状态：侧栏指示点、新问题提示跟着更新
+  onGatewayState: (state: GatewayState) => void;
+  /// 新问题提示 `查看` 带过来的定位（网关 id）；节处理完调 onFocused 清掉
+  focusProviderId?: string;
+  onFocused?: () => void;
+}
+
+/// agent 页的一节（一种能力）：节头、开关、内容都归节组件自己画；页只负责按表的先后排、节间 48
+export interface AgentSection {
+  /// 稳定标识（`third-party-models`、以后的 `usage`）
+  id: string;
+  /// 节名（`第三方模型`），托盘的能力行也用它
+  title: string;
+  Component: ComponentType<AgentSectionProps>;
+}
+
+export interface AgentEntry {
+  /// 与 harness id 一致（`codex`），`AgentIcon` 按它取图标，落点记忆存它
+  id: string;
+  /// 原样大小写（专名）
+  name: string;
+  /// 此刻有没有这一页：true 列出、false 不列；null＝还不知道（状态没读回来），先不列、也不据此改落点
+  available: (s: AgentState) => boolean | null;
+  /// 名字后画不画 6px 橙点：这个 agent 上有能力开着、在生效
+  indicator: (s: AgentState) => boolean;
+  /// 能力节，按页内先后（以后 `用量` 排在 `第三方模型` 上面）
+  sections: ReadonlyArray<AgentSection>;
+}
+
+/// 侧栏 agent 段的一项
+export interface SidebarAgent {
+  id: string;
+  name: string;
+  on: boolean;
+}
+
+/// 此刻列出的 agent：可用且有节的，按表的先后。`known` 为假时（有一项还不知道）
+/// 落点不据此退回——免得状态没读回来就把记着的 Codex 页当成不在了
+export function visibleAgents(
+  registry: ReadonlyArray<AgentEntry>,
+  s: AgentState,
+): { agents: AgentEntry[]; known: boolean } {
+  let known = true;
+  const agents: AgentEntry[] = [];
+  for (const entry of registry) {
+    const on = entry.available(s);
+    if (on === null) known = false;
+    if (on === true && entry.sections.length > 0) agents.push(entry);
+  }
+  return { agents, known };
+}
+
+export const sidebarAgentsOf = (agents: ReadonlyArray<AgentEntry>, s: AgentState): SidebarAgent[] =>
+  agents.map((a) => ({ id: a.id, name: a.name, on: a.indicator(s) }));
