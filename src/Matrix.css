@@ -135,19 +135,6 @@
   width: 6px;
 }
 
-/* 提示框放在同一行右侧，不放到上一行 */
-.mx-rowtip {
-  top: 50%;
-  left: calc(100% + 8px);
-  overflow-wrap: anywhere;
-  transform: translateY(-50%);
-}
-
-.mx-rowtip--left {
-  right: calc(100% + 8px);
-  left: auto;
-}
-
 /* ===== 面板 ===== */
 .mx-panel {
   position: relative;

@@ -235,6 +235,40 @@ test("Matrix：来源筛选片——`全部` 在最前、默认选中、不带�
   assert.match(picking, /class="mx-sources"/);
 });
 
+test("来源片悬停出提示框：完整名 + 短路径 + 选中后能做什么；`全部` 片没有提示框（DESIGN「来源筛选片」）", async () => {
+  const { SourceChipTip, SOURCE_CHIP_HINT } = await import("../src/Matrix.tsx");
+  assert.equal(SOURCE_CHIP_HINT, "选中后在下方设置自动添加或移除");
+  const tip = render(SourceChipTip, {
+    item: { label: "skills · …", full: "skills · agents-kit", path: "~/code/agents-kit/skills" },
+  });
+  assert.equal(
+    tip,
+    'skills · agents-kit<br/><span class="mx-mono">~/code/agents-kit/skills</span><br/>选中后在下方设置自动添加或移除',
+  );
+  // 没给完整名就用片名；读不到路径时不空出一行
+  assert.equal(
+    render(SourceChipTip, { item: { label: "WeiboAP" } }),
+    "WeiboAP<br/>选中后在下方设置自动添加或移除",
+  );
+  const html = render(Matrix, {
+    ...base,
+    sources: {
+      selected: [],
+      onSelect: () => undefined,
+      items: [{ id: "u", label: "通用仓库", count: 1, path: "~/u" }],
+    },
+  });
+  // 来源片包在 ui 的 Tooltip 里（ss-tipwrap）；`全部` 片直接是按钮
+  assert.match(
+    html,
+    /class="mx-sourcechip" data-origin="u"><span class="ss-tipwrap[^"]*"[^>]*><button/,
+  );
+  assert.match(
+    html,
+    /aria-label="按来源筛选"><button type="button" class="ss-chip[^"]*" aria-pressed="true"><span class="ss-chip__label">全部/,
+  );
+});
+
 test("Matrix：加完来源一次选中几片（全部不选中）；片上不带「新」标记；已添加那一窗浮在新来源片下", () => {
   const html = render(Matrix, {
     ...base,

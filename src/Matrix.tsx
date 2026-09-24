@@ -151,8 +151,10 @@ export interface ColumnCheck {
 export interface SourceChipItem {
   id: string;
   label: string;
-  /// 截断时提示框里的完整值
+  /// 提示框第一行的完整名（片名是最短区分片段、放不下还会截断）；不给就用 label
   full?: string;
+  /// 提示框第二行的路径（`~/…`，mono）
+  path?: string;
   /// 这个来源在表格里的行数
   count: number;
   /// 这个来源开着「以后新出现的自动加到」：片首一颗 6px 橙点（⑪⑮ 规则在背后做事，开着要看得见）
@@ -1347,33 +1349,9 @@ function SourceChips({
   items,
   width,
 }: NonNullable<MatrixProps["sources"]> & { width: number }) {
-  const [tipFor, setTipFor] = useState<string | null>(null);
-  // 窗口右边放不下时提示框改放同一行左侧，不出窗
-  const [tipLeft, setTipLeft] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tipId = useId();
-  // 只有片名真被截断时才给完整值；提示框放在同一行右侧
-  const arm = (id: string, el: HTMLElement) => {
-    if (timer.current) clearTimeout(timer.current);
-    const label = el.querySelector<HTMLElement>(".ss-chip__label");
-    const item = items.find((x) => x.id === id);
-    // 片名被截断（按片宽，或区分片段本身就截成了「…」）时才给完整值
-    const clipped =
-      (label !== null && label.scrollWidth > label.clientWidth + 1) ||
-      (item?.label.endsWith("…") ?? false);
-    if (!clipped) return;
-    setTipLeft(window.innerWidth - el.getBoundingClientRect().right < 260);
-    timer.current = setTimeout(() => setTipFor(id), TIP_DELAY_MS.default);
-  };
-  const drop = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    setTipFor(null);
-  };
-  useEffect(() => drop, []);
   return (
     <div className="mx-sources" style={{ maxWidth: width }} role="group" aria-label="按来源筛选">
-      {/* `全部` 片、格子、列头右键没有菜单（DESIGN「右键菜单」） */}
+      {/* `全部` 片没有提示框，也没有右键菜单；格子、列头右键同样没有（DESIGN「右键菜单」） */}
       <Chip selected={selected.length === 0} onClick={() => onSelect([])}>
         全部
       </Chip>
@@ -1382,35 +1360,45 @@ function SourceChips({
           key={item.id}
           className={`mx-sourcechip${item.rule ? " has-rule" : ""}`}
           data-origin={item.id}
-          onMouseEnter={(e) => arm(item.id, e.currentTarget)}
-          onMouseLeave={drop}
-          onFocus={(e) => arm(item.id, e.currentTarget)}
-          onBlur={drop}
           onContextMenu={(e) => {
             const el = e.currentTarget;
             if (item.menu) contextMenuHandler(() => item.menu?.(el) ?? [])(e);
           }}
-          aria-describedby={tipFor === item.id ? `${tipId}-${item.id}` : undefined}
         >
-          <Chip
-            selected={selected.includes(item.id)}
-            count={item.count}
-            icon={item.rule ? <Indicator on label="以后新出现的会自动加上，规则开着" /> : undefined}
-            onClick={() => onSelect(pickOrigin(selected, item.id))}
-          >
-            {item.label}
-          </Chip>
-          {tipFor === item.id ? (
-            <span
-              id={`${tipId}-${item.id}`}
-              role="tooltip"
-              className={`ss-tip mx-rowtip${tipLeft ? " mx-rowtip--left" : ""} is-open`}
+          <Tooltip content={<SourceChipTip item={item} />}>
+            <Chip
+              selected={selected.includes(item.id)}
+              count={item.count}
+              icon={
+                item.rule ? <Indicator on label="以后新出现的会自动加上，规则开着" /> : undefined
+              }
+              onClick={() => onSelect(pickOrigin(selected, item.id))}
             >
-              {item.full ?? item.label}
-            </span>
-          ) : null}
+              {item.label}
+            </Chip>
+          </Tooltip>
         </span>
       ))}
     </div>
+  );
+}
+
+/// 来源片悬停的提示框（DESIGN「来源筛选片」）：完整名 + 短路径 + 选中后能做什么。来源行只在恰好选中一片时
+/// 出现，入口要让人看得见（⑧）；路径与这句都是片上没有的信息，不算重复
+export const SOURCE_CHIP_HINT = "选中后在下方设置自动添加或移除";
+
+export function SourceChipTip({ item }: { item: Pick<SourceChipItem, "label" | "full" | "path"> }) {
+  return (
+    <>
+      {item.full ?? item.label}
+      {item.path ? (
+        <>
+          <br />
+          <span className="mx-mono">{item.path}</span>
+        </>
+      ) : null}
+      <br />
+      {SOURCE_CHIP_HINT}
+    </>
   );
 }

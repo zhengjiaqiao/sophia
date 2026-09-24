@@ -489,7 +489,8 @@ export default function DomainView(props: DomainViewProps) {
   const chip = (id: string, count: number): SourceChipItem => ({
     id,
     label: originOf(id),
-    full: `${originOf(id)} · ${displayPath(sourceOf(id)?.path ?? id)}`,
+    full: originOf(id),
+    path: sourceOf(id) ? displayPath(sourceOf(id)?.path ?? "") : undefined,
     count,
     rule: props.ruleOn(id),
     menu: (el) => props.chipMenu(id, el),

@@ -1355,7 +1355,7 @@ export default function McpTab({
   const chip = (id: string, count: number): SourceChipItem => ({
     id,
     label: groupLabel(locationOf(id), id),
-    full: `${groupLabel(locationOf(id), id)} · ${displayPath(locationOf(id)?.path ?? id)}`,
+    path: locationOf(id) ? displayPath(locationOf(id)?.path ?? "") : undefined,
     count,
     rule: sources.ruleOn(id),
     menu: (el) => chipMenu(id, el),
