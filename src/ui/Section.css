@@ -1,0 +1,41 @@
+/* agent 页的节（Section.tsx，DESIGN「agent 页 › 第三方模型（一节）」的通用骨架）。
+   节头：节名 head 16 / 600 + 12 + 总开关，右端一格动作；页面头下 24，节与节之间 48 */
+.ss-section {
+  padding-top: var(--space-xl);
+}
+
+/* 节与节之间 48：外壳把每一节包在 `.agent-page__section` 里（shell/AgentPage.tsx） */
+.agent-page__section + .agent-page__section > .ss-section {
+  padding-top: var(--space-huge);
+}
+
+.ss-section__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: var(--control-h);
+}
+
+/* 节名是 `head` 档（Condensed 16 / 600）；汉字落到苹方、字距 0。节名是内容（原样），不经 Cap */
+.ss-section__title {
+  margin: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-head);
+  font-weight: 600;
+  line-height: var(--leading-head);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.ss-section__control {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ss-section__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-left: auto;
+}

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import "./ModelChip.css";
 
 /// 选择片（DESIGN「选择片 Chip」）：胶囊，高 28，文字 13（原样大小写，内容是专名），
 /// 计数 12 tabular。未选：透明底（透出机面）+ 1px `ctl-border`、计数 `ink-faint`；
@@ -51,21 +52,27 @@ export interface ModelChipProps {
   id: string;
   /// 给了才有 ×
   onRemove?: () => void;
+  /// 两家网关的同名模型都选上时片名后的 ` · 网关短名`（DESIGN「在用」）：短名 `ink-mute`，只在撞名时给
+  suffix?: string | null;
 }
 
 /// 模型片（DESIGN front-matter `model-chip`）：高 24 胶囊，`paper` 面 + 1px `hairline` 环，
 /// 末尾 9px 的 ×（`ink-mute`，悬停转 `ink`，间距 6）。与筛选片形状一样、材质不同：无墨、平贴不抬起。
 /// × 的视觉 9，命中区 25
-export function ModelChip({ name, id, onRemove }: ModelChipProps) {
+export function ModelChip({ name, id, onRemove, suffix }: ModelChipProps) {
+  const full = suffix ? `${name} · ${suffix}` : name;
   return (
     <span className="ss-modelchip" title={id}>
-      <span className="ss-modelchip__name">{name}</span>
+      <span className="ss-modelchip__name">
+        {name}
+        {suffix ? <span className="ss-modelchip__suffix">{` · ${suffix}`}</span> : null}
+      </span>
       {onRemove ? (
         <button
           type="button"
           className="ss-modelchip__remove"
           title="移除"
-          aria-label={`移除 ${name}`}
+          aria-label={`移除 ${full}`}
           onClick={onRemove}
         >
           <svg

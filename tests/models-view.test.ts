@@ -6,7 +6,6 @@ import {
   MODELS_TOOLS,
   canRestore,
   effectiveModels,
-  emptyEffectiveText,
   enableDisabledReason,
   modelLabel,
   parseBackendError,
@@ -23,7 +22,6 @@ import {
   chipLabel,
   modelGroups,
   totalSelected,
-  availableCount,
   modelIssues,
   showRestartKey,
   shouldPollRestart,
@@ -32,9 +30,7 @@ import {
   LAUNCH_TIP,
   showRouterTodo,
   snapshotOrder,
-  showGatewayNames,
   gatewayShortName,
-  gatewaySelectedChips,
   frozenGroups,
   serviceLeftover,
   UNINSTALL_TIP,
@@ -87,8 +83,7 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
 };
 
 const { ModelList } = await import("../src/ModelList.tsx");
-const { AgentRow, ModelBox, ModelPicker, MODELS_TAB_FULL_BLEED } =
-  await import("../src/ModelsTab.tsx");
+const { InUseRow, RestartSlot, SectionSwitch, sectionTodos } = await import("../src/ModelsTab.tsx");
 
 const noop = () => {};
 
@@ -146,8 +141,9 @@ test("enableDisabledReason 按优先级返回原因：待接管 > 冲突 > 没�
     enableDisabledReason(state({ conflict: "已有 model_provider = custom" }), 1),
     "已有 model_provider = custom",
   );
-  assert.equal(enableDisabledReason(state({ providers: [] }), 1), "先添加一个网关");
-  assert.equal(enableDisabledReason(state(), 0), "请先勾选至少一个模型");
+  // 没有网关、一个模型都没选：同一句（DESIGN「没有网关、或一个模型都没选时开关禁用」）
+  assert.equal(enableDisabledReason(state({ providers: [] }), 1), "先加一家网关、选好模型再打开");
+  assert.equal(enableDisabledReason(state(), 0), "先加一家网关、选好模型再打开");
   // 缺密钥只挡着「有模型要发布」的那几家，所以要点名是哪一家
   assert.equal(
     enableDisabledReason(
@@ -277,18 +273,6 @@ test("providerCatalogHint 只说「还有多少可挑」，不重复数已选的
   );
 });
 
-test("emptyEffectiveText：三种空是三件事，各说各的下一步", () => {
-  assert.match(emptyEffectiveText(state({ providers: [provider({ hasKey: false })] })), /密钥/);
-  assert.match(
-    emptyEffectiveText(state({ providers: [provider({ hasKey: true })] })),
-    /还没拉到模型列表/,
-  );
-  assert.equal(
-    emptyEffectiveText(state({ providers: [provider({ models: [model({ id: "m1" })] })] })),
-    "还没选模型",
-  );
-});
-
 test("effectiveModels 摊平全部网关的已选模型；两家撞名时照抄后端的「 · 网关名」", () => {
   const one = provider({
     id: "a",
@@ -307,6 +291,25 @@ test("effectiveModels 摊平全部网关的已选模型；两家撞名时照抄�
   assert.deepEqual(
     rows.map((r) => r.label),
     ["GPT-5 · 甲", "GPT-5 · 乙", "只此一家"],
+  );
+  // 片上分两段画：名字 + 只在撞名时有的网关短名（短名 ink-mute）
+  assert.deepEqual(
+    rows.map((r) => [r.name, r.suffix]),
+    [
+      ["GPT-5", "甲"],
+      ["GPT-5", "乙"],
+      ["只此一家", null],
+    ],
+  );
+  // 后缀是网关短名（与网关行同一个取法）：显示名像主机名时取主体
+  const host = provider({
+    id: "h",
+    name: "openrouter.ai",
+    models: [model({ id: "m9", displayName: "GPT-5", selected: true })],
+  });
+  assert.deepEqual(
+    effectiveModels(state({ providers: [one, host] })).map((r) => r.label),
+    ["GPT-5 · 甲", "GPT-5 · openrouter"],
   );
   // 归属不能丢：片上的 title 和去掉某一个时都要知道它是哪家的
   assert.deepEqual(
@@ -330,12 +333,8 @@ test("removeProviderBlockedReason：已启用时删不掉最后一家还在发�
   // 已启用、它是最后一家在发模型的：后端会拒，界面提前说清下一步
   assert.match(
     removeProviderBlockedReason(state({ enabled: true, providers: [a, b] }), a) ?? "",
-    /先点「已启用」停用/,
+    /^Codex 还在用它的 1 个模型，先关掉第三方模型再删$/,
   );
-});
-
-test("MODELS_TAB_FULL_BLEED：模型页不分域，壳在这一页不渲染侧栏", () => {
-  assert.equal(MODELS_TAB_FULL_BLEED, true);
 });
 
 test("MODELS_TOOLS：版面按工具分块；今天只有 Codex，但名字一律从表里取", () => {
@@ -343,7 +342,11 @@ test("MODELS_TOOLS：版面按工具分块；今天只有 Codex，但名字一�
   const codex = MODELS_TOOLS[0];
   assert.equal(codex.id, "codex");
   assert.equal(codex.name, "Codex");
-  assert.match(codex.limitations, /会话标题/);
+  // 限制说明全文（网关行展开区第一行，不截断）
+  assert.equal(
+    codex.limitations,
+    "只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了",
+  );
 });
 
 // ===== 重启生效、选择器导航、路由自愈（纯逻辑） =====
@@ -433,7 +436,7 @@ test("路由没在跑：先自愈，自愈过仍没起来才出横幅", () => {
   assert.equal(showRouterTodo(state({ enabled: false }), true), false);
 });
 
-test("modelIssues：接管 / 配置被外部改过 / 网关连不上三类，key 随状况变", () => {
+test("modelIssues：接管 / 配置被外部改过 / 网关无法连接三类，key 随状况变", () => {
   assert.deepEqual(modelIssues(null), []);
   assert.deepEqual(modelIssues(state()), [], "平时没有问题");
   // 「改动要重启」「路由没在跑」都不算要拿主意的问题
@@ -475,7 +478,7 @@ test("modelIssues：接管 / 配置被外部改过 / 网关连不上三类，key
   assert.equal(takeover.sentence, "Codex 正由 agents-manager 管理");
   assert.equal(config.sentence, "Codex 里 Sophia 写进去的设置被改掉了");
   assert.equal(down.subject, "甲");
-  assert.equal(down.sentence, "甲 连不上");
+  assert.equal(down.sentence, "甲 无法连接");
   // 不支持的机器上整段为空
   assert.deepEqual(
     modelIssues(
@@ -488,57 +491,119 @@ test("modelIssues：接管 / 配置被外部改过 / 网关连不上三类，key
   );
 });
 
-// ===== 渲染：agent 行 =====
-
-const rowProps = (overrides: Partial<GatewayState> = {}) => ({
-  tool: MODELS_TOOLS[0],
-  state: state(overrides),
-  busy: false,
-  phase: { kind: "idle" } as const,
-  onToggle: noop,
-  onConfigure: noop,
-  onRestart: noop,
-  models: "MODELS-SLOT",
-});
+// ===== 渲染：节头开关、页面头右端的键、在用行、行内待办条 =====
 
 const withSelected = (overrides: Partial<GatewayState> = {}) => ({
   providers: [provider({ models: [model({ id: "m1", selected: true })] })],
   ...overrides,
 });
 
-test("AgentRow：图标 + 名字（不大写）+ regular 开关 + 配置网关，一组；生效模型在第二格", () => {
-  const html = render(AgentRow, rowProps(withSelected({ enabled: true })));
-  assert.match(html, /<svg[^>]*width="24" height="24"/);
-  assert.match(html, /class="models-row__name">Codex</);
-  assert.doesNotMatch(html, /CODEX/);
+const switchProps = (overrides: Partial<GatewayState> = {}) => ({
+  tool: MODELS_TOOLS[0],
+  state: state(overrides),
+  busy: false,
+  phase: { kind: "idle" } as const,
+  pending: null,
+  onToggle: noop,
+});
+
+const slotProps = (overrides: Partial<GatewayState> = {}) => ({
+  tool: MODELS_TOOLS[0],
+  state: state(overrides),
+  busy: false,
+  phase: { kind: "idle" } as const,
+  onRestart: noop,
+});
+
+test("SectionSwitch：标准开关（指示点在左）；状态＝Codex 正在用的状态；关着时提示框写打开的结果", () => {
+  const on = render(SectionSwitch, switchProps(withSelected({ enabled: true })));
   assert.match(
-    html,
+    on,
     /role="switch" aria-checked="true"[^>]*class="ss-switch ss-switch--regular is-on"/,
   );
-  assert.match(html, />配置网关</);
-  const agent = html.indexOf("models-row__agent");
-  const slot = html.indexOf("MODELS-SLOT");
-  assert.ok(agent < slot);
-  // 没有状态句、版本、路由这些内部事实（DESIGN「模型页」）
-  assert.doesNotMatch(html, /路由|models-tool__sentence|已启用 ·/);
-  // 不需要重启时没有重启键
-  assert.doesNotMatch(html, /重启生效/);
+  assert.match(on, /ss-indicator is-on/);
+  const off = render(SectionSwitch, switchProps(withSelected()));
+  assert.match(off, /role="switch" aria-checked="false"/);
+  assert.match(off, /role="tooltip"[^>]*>打开：选好的模型进 Codex 的模型列表</);
 });
 
-test("AgentRow 待重启：配置网关之后出紧凑键「重启生效」，提示框写后果与代价（不用原生 title）", () => {
-  const html = render(AgentRow, rowProps(withSelected({ enabled: true, needsCodexRestart: true })));
-  // 「配置网关」是进网关二级页的普通默认键，不带展开记号（v84）
-  assert.match(html, /配置网关<\/button>.*重启生效<\/button>/s);
+test("SectionSwitch 待定：拨过去等确认 / 等生效时滑块停在那一侧（包层 data-pending），橙不亮（仍是真实状态）", () => {
+  const html = render(SectionSwitch, { ...switchProps(withSelected()), pending: true });
+  assert.match(html, /class="ss-pending-switch" data-pending="on"/);
+  assert.match(html, /aria-checked="false"/);
+  assert.doesNotMatch(html, /ss-indicator is-on/);
+  // 待定与真实状态相同（已落定）时不再是待定
+  const settled = render(SectionSwitch, {
+    ...switchProps(withSelected({ enabled: true })),
+    pending: true,
+  });
+  assert.match(settled, /class="ss-pending-switch">/);
+  const css = readFileSync(new URL("../src/ui/PendingSwitch.css", import.meta.url), "utf8");
+  assert.match(
+    css,
+    /\[data-pending="on"\] \.ss-switch \.ss-switch__knob \{\s*translate: var\(--travel\);/,
+  );
+  assert.match(
+    css,
+    /\[data-pending="off"\] \.ss-switch\.is-on \.ss-switch__knob \{\s*translate: 0;/,
+  );
+});
+
+test("SectionSwitch 没有网关 / 没选模型：开关禁用，按下即出「先加一家网关、选好模型再打开」", () => {
+  const html = render(SectionSwitch, switchProps({ providers: [] }));
+  assert.match(
+    html,
+    /role="switch" aria-checked="false"[^>]*title="先加一家网关、选好模型再打开" disabled=""/,
+  );
+  assert.match(
+    render(SectionSwitch, switchProps()),
+    /title="先加一家网关、选好模型再打开" disabled=""/,
+  );
+});
+
+test("SectionSwitch 拨开关之后：开关原位锁住（过了 0.3 秒门槛换成转圈 +「正在添加」），不画成禁用", () => {
+  const html = render(SectionSwitch, {
+    ...switchProps(withSelected({ enabled: false })),
+    busy: true,
+    pending: true,
+    phase: { kind: "switching", next: true },
+  });
+  assert.match(
+    html,
+    /class="models-switch"><span class="ss-locked" aria-busy="true">[^]*data-pending="on"[^]*role="switch"/,
+  );
+  assert.doesNotMatch(html, /title="正在处理上一步"/);
+  assert.doesNotMatch(html, /ss-spinner/);
+});
+
+test("SectionSwitch 拨开关成了：开关正下方浮起白窗 `✓ 已添加到 Codex`", () => {
+  const html = render(SectionSwitch, {
+    ...switchProps(withSelected({ enabled: true })),
+    switchDone: "已添加到 Codex",
+    onSwitchDoneDismiss: noop,
+  });
+  assert.match(
+    html,
+    /class="models-switch">[^]*role="switch"[^]*<span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"[^]*ss-toast--routine[^]*已添加到 Codex/,
+  );
+});
+
+test("RestartSlot（页面头右端）：待重启出默认键「重启生效」（28，不是紧凑），提示框写后果与代价", () => {
+  const html = render(
+    RestartSlot,
+    slotProps(withSelected({ enabled: true, needsCodexRestart: true })),
+  );
+  assert.match(html, /class="ss-btn"[^>]*>重启生效</);
+  assert.doesNotMatch(html, /ss-btn--compact/);
   assert.match(html, /role="tooltip"[^>]*>重启 Codex 桌面应用让改动生效，进行中的对话会中断</);
-  assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
+  assert.equal(render(RestartSlot, slotProps(withSelected({ enabled: true }))), "");
 });
 
-test("AgentRow 重启中：0.3 秒门槛之前键照旧、点不动（过了门槛原位换成辐条转圈 +「正在重启 Codex」）；已生效：键的原位下方浮起白窗", () => {
-  const busyHtml = render(AgentRow, {
-    ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
+test("RestartSlot 重启中：0.3 秒门槛之前键照旧、点不动；已生效：键的原位下方浮起白窗", () => {
+  const busyHtml = render(RestartSlot, {
+    ...slotProps(withSelected({ enabled: true, needsCodexRestart: true })),
     phase: { kind: "restarting" },
   });
-  // 首帧（门槛之前）：键锁住、不闪忙碌；门槛之后的转圈 + 一句由 useBusyShown 把关
   assert.match(
     busyHtml,
     /class="models-restart-tip ss-locked" aria-busy="true"[^]*重启生效<\/button>/,
@@ -546,207 +611,115 @@ test("AgentRow 重启中：0.3 秒门槛之前键照旧、点不动（过了门�
   assert.doesNotMatch(busyHtml, /ss-spinner/);
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
   assert.match(src, /const shown = useBusyShown\(waiting\);\s*if \(waiting && shown\)/);
-  const doneHtml = render(AgentRow, {
-    ...rowProps(withSelected({ enabled: true })),
+  const doneHtml = render(RestartSlot, {
+    ...slotProps(withSelected({ enabled: true })),
     phase: { kind: "done" },
   });
-  // 键消失，原位留一个不占宽的锚，`✓ 已生效` 是浮起的白窗（FloatingToast），不是行内一行字
   assert.match(
     doneHtml,
     /class="models-restart models-restart--done"><span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"/,
   );
   assert.match(doneHtml, /ss-toast--routine[^]*已生效/);
-  const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
-  assert.doesNotMatch(css, /models-done-fade|animation/);
 });
 
-test("AgentRow 重启失败：行下灰面板「没重启 Codex」+ 原因 + 再试一次 + ×，不用黑块", () => {
-  const html = render(AgentRow, {
-    ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
-    notice: {
-      message: "没重启 Codex",
-      reason: "Codex 还在用旧配置",
-      action: { label: "再试一次", onClick: noop },
-    },
-    onCloseNotice: noop,
-  });
-  assert.match(
-    html,
-    /models-row__notice[^]*ss-noticepanel[^]*没重启 Codex[^]*Codex 还在用旧配置[^]*再试一次[^]*关闭/,
-  );
-  // 大面积不用黑（DESIGN「提示条分两档」）
-  assert.doesNotMatch(html, /ss-toast--notice|ss-toast--cannot/);
-});
-
-test("AgentRow 启动 Codex：网关开着、Codex 没在跑才出紧凑键，提示框写结果；网关关着不出", () => {
-  const html = render(AgentRow, {
-    ...rowProps(withSelected({ enabled: true })),
+test("RestartSlot 启动 Codex：开着、Codex 没在跑才出键，提示框写结果；关着不出", () => {
+  const html = render(RestartSlot, {
+    ...slotProps(withSelected({ enabled: true })),
     onLaunch: noop,
   });
-  assert.match(html, /配置网关<\/button>.*启动 Codex<\/button>/s);
+  assert.match(html, />启动 Codex<\/button>/);
   assert.match(html, /role="tooltip"[^>]*>打开 Codex 桌面应用，它会用上现在的模型设置</);
-  assert.doesNotMatch(html, /重启生效/);
-  const off = render(AgentRow, { ...rowProps(withSelected({ enabled: false })), onLaunch: noop });
-  assert.doesNotMatch(off, /启动 Codex/);
-  const launching = render(AgentRow, {
-    ...rowProps(withSelected({ enabled: true })),
+  assert.doesNotMatch(
+    render(RestartSlot, { ...slotProps(withSelected()), onLaunch: noop }),
+    /启动 Codex/,
+  );
+  const launching = render(RestartSlot, {
+    ...slotProps(withSelected({ enabled: true })),
     onLaunch: noop,
     phase: { kind: "launching" },
   });
-  // 首帧（门槛之前）：键照旧、点不动
   assert.match(launching, /ss-locked" aria-busy="true"[^]*启动 Codex<\/button>/);
-  assert.doesNotMatch(launching, /ss-spinner/);
-  const launched = render(AgentRow, {
-    ...rowProps(
-      withSelected({
-        enabled: true,
-        codex: { version: "26.0", running: true, catalogVersion: "1", drift: false },
-      }),
-    ),
+  const launched = render(RestartSlot, {
+    ...slotProps(withSelected({ enabled: true })),
     onLaunch: noop,
     phase: { kind: "launched" },
   });
-  assert.match(launched, /models-restart--done[^]*ss-floattoast[^]*ss-toast--routine[^]*已启动/);
+  assert.match(launched, /models-restart--done[^]*ss-toast--routine[^]*已启动/);
 });
 
-test("AgentRow 启用不了：开关禁用，原因作为悬停说明", () => {
-  const html = render(AgentRow, rowProps({ providers: [] }));
-  assert.match(html, /role="switch" aria-checked="false"[^>]*title="先添加一个网关" disabled=""/);
+test("InUseRow：开着写「在用」、关着写「已选」；片可 ×；一个都没选时整行不出", () => {
+  const sel = withSelected();
+  const on = render(InUseRow, { state: state({ ...sel, enabled: true }), onRemove: noop });
+  assert.match(on, /models-inuse__label">在用</);
+  assert.match(on, /class="ss-modelchip" title="gpt-x"[^]*ss-modelchip__remove/);
+  const off = render(InUseRow, { state: state(sel), onRemove: noop });
+  assert.match(off, /models-inuse__label">已选</);
+  assert.equal(render(InUseRow, { state: state(), onRemove: noop }), "");
+  // 没有汇总下拉（原框尾 103 ▾）：这一行只管看和去掉
+  assert.doesNotMatch(on, /models-box|aria-haspopup/);
 });
 
-// ===== 渲染：模型框与选择器 =====
-
-const boxProps = (overrides: Partial<GatewayState> = {}, open = false) => ({
-  tool: MODELS_TOOLS[0],
-  state: state(overrides),
-  open,
-  busy: false,
-  onToggleOpen: noop,
-  onRemoveModel: noop,
-});
-
-test("ModelBox：模型片友好名（id 进 title）+ 尾端等宽可选数 + 展开记号；整框可点", () => {
-  const html = render(
-    ModelBox,
-    boxProps({
-      providers: [
-        provider({
-          models: [
-            model({ id: "m1", slug: "wecode-gpt-5", displayName: "GPT 5", selected: true }),
-            model({ id: "m2", displayName: "Claude", selected: true }),
-            model({ id: "m3" }),
-          ],
-        }),
-      ],
-    }),
+test("InUseRow 两家网关同名：片名后加 ` · 网关短名`，短名单独一段（ink-mute）；不撞名的片不加", () => {
+  const a = provider({
+    id: "a",
+    name: "",
+    baseUrl: "https://openrouter.ai/api/v1",
+    models: [model({ id: "openai/gpt-4.1", displayName: "GPT-4.1", selected: true })],
+  });
+  const b = provider({
+    id: "b",
+    name: "azure",
+    models: [
+      model({ id: "gpt-4.1", displayName: "GPT-4.1", selected: true }),
+      model({ id: "kimi", displayName: "Kimi K2", selected: true }),
+    ],
+  });
+  const html = render(InUseRow, {
+    state: state({ providers: [a, b], enabled: true }),
+    onRemove: noop,
+  });
+  assert.match(
+    html,
+    /ss-modelchip__name">GPT-4\.1<span class="ss-modelchip__suffix"> · openrouter<\/span>/,
   );
   assert.match(
     html,
-    /class="ss-modelchip" title="wecode-gpt-5"><span class="ss-modelchip__name">GPT 5</,
+    /ss-modelchip__name">GPT-4\.1<span class="ss-modelchip__suffix"> · azure<\/span>/,
   );
-  assert.match(html, /aria-label="移除 Claude"/);
-  assert.match(html, /class="models-box" role="button" tabindex="0" aria-expanded="false"/);
-  assert.match(html, /class="models-box__count"[^>]*>3</);
-  assert.match(html, /role="tooltip"[^>]*>3 个可用模型</);
-  // 网关本身（地址、密钥）不在主页面上
-  assert.doesNotMatch(html, /https:\/\/example\.com/);
+  assert.match(html, /ss-modelchip__name">Kimi K2<\/span>/);
+  assert.match(html, /aria-label="移除 GPT-4\.1 · azure"/);
+  const css = readFileSync(new URL("../src/ui/ModelChip.css", import.meta.url), "utf8");
+  assert.match(css, /\.ss-modelchip__suffix \{\s*color: var\(--ink-mute\);/);
 });
 
-test("ModelBox 两家网关撞名：片上照抄后端会加的「 · 网关名」", () => {
+test("sectionTodos：路由没在跑排最前、原因同一行；接管 / 重新写入；都不给「稍后」", () => {
   const html = render(
-    ModelBox,
-    boxProps({
-      providers: [
-        provider({
-          id: "a",
-          name: "甲",
-          models: [model({ id: "m1", displayName: "GPT-5", selected: true })],
+    () =>
+      sectionTodos({
+        tool: MODELS_TOOLS[0],
+        state: state({
+          enabled: true,
+          takeover: { baseUrl: "x", selectedCount: 1 },
+          codex: { version: "26.0", running: true, catalogVersion: "1", drift: true },
         }),
-        provider({
-          id: "b",
-          name: "乙",
-          models: [model({ id: "m2", displayName: "GPT-5", selected: true })],
-        }),
-      ],
-    }),
+        healed: true,
+        routerFailure: "端口 47328 被别的程序占着",
+        resolving: null,
+        busy: false,
+        onRestartRouter: noop,
+        onResolve: noop,
+      }),
+    {},
   );
-  assert.match(html, /GPT-5 · 甲/);
-  assert.match(html, /GPT-5 · 乙/);
-});
-
-test("ModelBox 空：没有网关说「还没有网关」；有网关没选说清为什么空", () => {
-  assert.match(
-    render(ModelBox, boxProps({ providers: [] })),
-    /class="models-box__hint">还没有网关</,
-  );
-  assert.match(
-    render(ModelBox, boxProps({ providers: [provider({ models: [model({ id: "m1" })] })] })),
-    /class="models-box__hint">还没选模型</,
-  );
-});
-
-const pickerProps = (overrides: Partial<GatewayState> = {}) => ({
-  tool: MODELS_TOOLS[0],
-  state: state(overrides),
-  busy: false,
-  onToggleModel: noop,
-  onManageGateways: noop,
-});
-
-test("ModelPicker：第三方组头带限制说明与「管理网关 ›」；按服务商分小组头；不出已选组；底部不再写「已选 N 个模型」", () => {
-  const html = render(
-    ModelPicker,
-    pickerProps({
-      providers: [
-        provider({
-          models: [
-            model({
-              id: "azure/gpt-4.1",
-              slug: "wecode-azure/gpt-4.1",
-              displayName: "azure/gpt-4.1",
-            }),
-            model({
-              id: "azure/o3-mini",
-              slug: "wecode-azure/o3-mini",
-              displayName: "azure/o3-mini",
-              selected: true,
-            }),
-          ],
-        }),
-      ],
-    }),
-  );
-  assert.match(html, /models-picker__group-name">第三方</);
-  assert.match(html, /只支持文本与工具调用，不支持图片/);
-  assert.match(html, /管理网关<\/span>/);
-  // 组头 `azure · 2`，行内去掉重复前缀，完整 id 进提示框
-  assert.match(html, /model-list__vendor">azure</);
-  assert.match(html, /model-list__count">2</);
-  assert.match(html, /models-option__name">o3-mini</);
-  // 行上不放提示框也不设 title（真机反馈：挑模型时完整 id 没有意义，还会盖住正在看的那一行）；
-  // 读屏名只写名称
-  assert.doesNotMatch(html, /models-option[^>]*title=/);
-  assert.doesNotMatch(html, /role="tooltip"[^>]*>wecode-azure/);
+  const router = html.indexOf("路由没在跑，第三方模型用不了");
+  assert.ok(router >= 0 && router < html.indexOf("Codex 正由 agents-manager 管理"));
   assert.match(
     html,
-    /role="option"[^>]*aria-label="gpt-4\.1"|aria-label="gpt-4\.1"[^>]*role="option"/,
+    /路由没在跑，第三方模型用不了<span class="ss-noticepanel__reason"> · 端口 47328 被别的程序占着/,
   );
-  // 已选由框里的模型片表达，下拉里不另列已选组（DESIGN d9d87d1）；组内仍是打开时已选在前
-  assert.doesNotMatch(html, /model-list__group--pinned|>已选</);
-  assert.ok(html.indexOf(">o3-mini<") < html.indexOf(">gpt-4.1<"), "组内已选在前");
-  // 底部计数与已选组头重复，已删（DESIGN a4fede3）
-  assert.doesNotMatch(html, /model-list__foot|个模型/);
-  // 只有一个网关：行尾不写网关名
-  assert.doesNotMatch(html, /models-option__gateway/);
-  // 不超过 8 行不出筛选框
-  assert.doesNotMatch(html, /model-list__search/);
-});
-
-test("ModelPicker 没有网关：组头是「还没有网关 · + 网关 ›」", () => {
-  const html = render(ModelPicker, pickerProps({ providers: [] }));
-  assert.match(html, /还没有网关/);
-  assert.match(html, /\+ 网关<\/span>/);
-  assert.doesNotMatch(html, /管理网关/);
+  assert.match(html, /Sophia 写进去的设置被改掉了/);
+  assert.match(html, />重启路由<[^]*>接管<[^]*>重新写入</);
+  assert.doesNotMatch(html, /稍后/);
 });
 
 // ===== 模型列表的写法 =====
@@ -849,8 +822,13 @@ test("ModelList：超过 8 行出筛选框；新拉到的模型整批出现不�
   assert.match(html, /model-list__search/);
   // 批量不闪、不依次点亮（DESIGN 2026-09-24）：行上没有逐个闪的动画
   assert.doesNotMatch(html, /is-flash|animation-delay/);
-  assert.equal((html.match(/models-option__id"/g) ?? []).length, 1);
-  assert.match(html, /models-option__id">deepseek-chat</);
+  assert.equal((html.match(/models-option__id ss-selectable"/g) ?? []).length, 1);
+  // 模型 id 能选中拷走（D23）
+  assert.match(html, /models-option__id ss-selectable">deepseek-chat</);
+  // 筛选框写出这一家有几个模型；每行 13px 复选框（全应用同一个记号），行尾不写网关短名
+  assert.match(html, /placeholder="筛选 10 个模型"/);
+  assert.match(html, /ss-checkbox models-option__check/);
+  assert.doesNotMatch(html, /models-option__gateway/);
 });
 
 test("serviceLeftover：只有停用了、后台服务却还装着才算残留（关开关本身会卸下）", () => {
@@ -864,27 +842,6 @@ test("serviceLeftover：只有停用了、后台服务却还装着才算残留�
   assert.equal(serviceLeftover(state({ enabled: false, router: router(true) })), true);
   assert.equal(serviceLeftover(state({ enabled: true, router: router(true) })), false);
   assert.equal(serviceLeftover(state({ enabled: false, router: router(false) })), false);
-});
-
-test("AgentRow 停用后服务仍在：出紧凑键「卸下后台服务」（与重启生效同形），提示框写结果；正在卸下时键先锁住（过了门槛换成忙碌指示 + 文字）", () => {
-  const leftover = {
-    enabled: false,
-    router: { installed: true, running: true, port: 1, protocol: "chat", error: "" },
-  };
-  const html = render(AgentRow, { ...rowProps(withSelected(leftover)), onUninstall: noop });
-  assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>卸下后台服务</);
-  assert.match(html, new RegExp(`role="tooltip"[^>]*>${UNINSTALL_TIP}<`));
-  const busyHtml = render(AgentRow, {
-    ...rowProps(withSelected(leftover)),
-    onUninstall: noop,
-    uninstalling: true,
-  });
-  assert.match(busyHtml, /class="ss-locked" aria-busy="true"[^]*卸下后台服务<\/button>/);
-  assert.doesNotMatch(busyHtml, /ss-spinner/);
-  assert.doesNotMatch(
-    render(AgentRow, { ...rowProps(withSelected({ enabled: true })), onUninstall: noop }),
-    /卸下后台服务/,
-  );
 });
 
 // ===== 勾选不挪位置 =====
@@ -952,22 +909,6 @@ test("ModelList 不整体变暗：不再有 busy 能加上的 ss-busy（DESIGN�
   assert.doesNotMatch(html, /ss-busy/);
 });
 
-test("模型页表宽 = 324 + 24 + 框 + 24：框随内容区弹性 360–640（CSS 实现），行线止于框右沿 + 24", async () => {
-  const { readFileSync } = await import("node:fs");
-  const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
-  const panel = /\.models-panel[,\s][^{]*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(panel, /--models-agent-w:\s*324px/);
-  assert.match(panel, /--models-box-min:\s*360px/);
-  assert.match(panel, /--models-box-max:\s*640px/);
-  assert.match(
-    panel.replace(/\s+/g, " "),
-    /width: clamp\( calc\(var\(--models-agent-w\) \+ var\(--space-xl\) \* 2 \+ var\(--models-box-min\)\), 100%, calc\(var\(--models-agent-w\) \+ var\(--space-xl\) \* 2 \+ var\(--models-box-max\)\) \)/,
-  );
-  const row = /\.models-panel__head,\s*\.models-row \{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(row, /grid-template-columns:\s*var\(--models-agent-w\) minmax\(0, 1fr\)/);
-  assert.match(row, /padding-right:\s*var\(--space-xl\)/);
-});
-
 test("网关短名：显示名优先；否则主机名去掉 api. / www. 与顶级域；localhost、IP 原样", () => {
   const gw = (name: string, baseUrl: string) => provider({ id: "x", name, baseUrl });
   assert.equal(gatewayShortName(gw("ap-gateway", "https://api.openai.com/v1")), "ap-gateway");
@@ -1000,39 +941,6 @@ test("网关短名：显示名像主机名时也走短名规则；多级子域�
   assert.equal(gatewayShortName(gw("ap-gateway")), "ap-gateway");
 });
 
-test("行尾网关短名：entries 跨 ≥2 个网关才写，id 在前、网关名在后；单网关不写", () => {
-  const a = provider({ id: "a", name: "", baseUrl: "https://openrouter.ai/api/v1" });
-  const b = provider({ id: "b", name: "ap-gateway", baseUrl: "https://x.example.com" });
-  const two = [
-    {
-      provider: a,
-      model: model({
-        id: "deepseek-chat",
-        slug: "deepseek-chat",
-        displayName: "DeepSeek V3.2",
-        selected: true,
-      }),
-    },
-    {
-      provider: b,
-      model: model({ id: "azure/gpt-4.1", slug: "azure/gpt-4.1", displayName: "azure/gpt-4.1" }),
-    },
-  ];
-  assert.equal(showGatewayNames(two), true);
-  assert.equal(showGatewayNames(two.slice(0, 1)), false);
-  const html = render(ModelList, { entries: two, onToggle: noop });
-  // 已选组已删，每行只在服务商分组里出现一次
-  assert.equal((html.match(/models-option__gateway">openrouter</g) ?? []).length, 1);
-  assert.match(html, /models-option__gateway">ap-gateway</);
-  assert.match(
-    html,
-    /models-option__id">deepseek-chat<\/span><span class="models-option__gateway">openrouter</,
-  );
-  assert.match(html, /aria-label="gpt-4\.1，ap-gateway"/);
-  const one = render(ModelList, { entries: two.slice(1), onToggle: noop });
-  assert.doesNotMatch(one, /models-option__gateway/);
-});
-
 test("模型列表：底部不再有「已选 N 个模型」；滚动区的容器是纵向 flex，外层压矮时滚动区跟着变矮", async () => {
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/ModelList.css", import.meta.url), "utf8");
@@ -1046,32 +954,10 @@ test("模型列表：底部不再有「已选 N 个模型」；滚动区的容�
   assert.match(viewport, /flex-direction:\s*column/);
   assert.match(viewport, /min-height:\s*0/);
   assert.match(rule(".model-list__scroll"), /min-height:\s*0/);
-  assert.match(rule(".models-option__gateway"), /color:\s*var\(--ink-faint\)/);
-});
-
-test("gatewaySelectedChips：只这一家已选的；同一服务商省前缀，跨服务商保留", () => {
-  const one = provider({
-    models: [
-      model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true }),
-      model({ id: "azure/o3", displayName: "azure/o3", selected: true }),
-      model({ id: "zhipu/glm-4.6", displayName: "zhipu/glm-4.6" }),
-    ],
-  });
-  assert.deepEqual(
-    gatewaySelectedChips(one).map((c) => c.label),
-    ["gpt-4.1", "o3"],
-  );
-  const mixed = provider({
-    models: [
-      model({ id: "azure/gpt-4.1", displayName: "azure/gpt-4.1", selected: true }),
-      model({ id: "zhipu/glm-4.6", displayName: "zhipu/glm-4.6", selected: true }),
-    ],
-  });
-  assert.deepEqual(
-    gatewaySelectedChips(mixed).map((c) => c.label),
-    ["azure/gpt-4.1", "zhipu/glm-4.6"],
-  );
-  assert.deepEqual(gatewaySelectedChips(provider({ models: [model({ id: "a" })] })), []);
+  // 行尾网关短名随汇总下拉删掉（每个列表只列一家）；组头计数 tabular、不用等宽（一种数字）
+  assert.doesNotMatch(css, /models-option__gateway/);
+  assert.match(rule(".model-list__count"), /font-variant-numeric:\s*tabular-nums/);
+  assert.doesNotMatch(rule(".model-list__count"), /font-mono/);
 });
 
 test("predictEnabled：先画做成之后的样子（Codex 没在跑时删掉最后一个模型那一支）——开时路由在跑、关时服务已卸，提示不闪", () => {
@@ -1195,7 +1081,13 @@ const switchIo = (opts: {
   };
   return { io, calls, painted };
 };
-const fastSettle = { timeoutMs: 5, pollMs: 1 };
+/// 假时钟：每睡一次时间前进 pollMs，读几次与机器快慢无关（原来用真实时间，快的机器上 5ms 里能读够
+/// 7 次、读到夹具末尾的新状态，「15 秒内没换上」偶发变成成功）
+const fakeClock = () => {
+  let t = 0;
+  return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+};
+const fastSettle = { timeoutMs: 5, pollMs: 1, clock: fakeClock() };
 
 test("switchGateway 在跑时：写配置 → 重启 Codex → 等到换上，成了返回 null、不回滚", async () => {
   const on = state({ enabled: true, needsCodexRestart: true });
@@ -1254,7 +1146,7 @@ test("switchGateway 写不进：原因原样返回，并尽力撤回（关掉的
     await switchGateway(true, true, both.io, fastSettle),
     `路由起不来${SWITCH_ROLLBACK_FAILED}`,
   );
-  assert.equal(SWITCH_ROLLBACK_FAILED, "；回滚也没成");
+  assert.equal(SWITCH_ROLLBACK_FAILED, "；回滚也失败了");
   assert.deepEqual(both.calls, ["enable", "restore", "read"]);
 });
 
@@ -1273,37 +1165,15 @@ test("switchGateway 重启发不出：同样撤回；页面没了返回 undefine
   assert.deepEqual(gone.painted, [], "页面没了不再画");
 });
 
-test("AgentRow 拨开关之后：开关原位锁住（过了 0.3 秒门槛换成转圈 +「正在添加」），这一格的重启键不跟着闪出来", () => {
-  const html = render(AgentRow, {
-    ...rowProps(withSelected({ enabled: true, needsCodexRestart: true })),
-    busy: true,
-    phase: { kind: "switching", next: true },
-  });
-  // 首帧（门槛之前）：开关照旧、点不动，不画成禁用
-  assert.match(
-    html,
-    /class="models-switch"><span class="ss-locked" aria-busy="true">[^]*role="switch"/,
-  );
-  assert.doesNotMatch(html, /title="正在处理上一步"/);
-  assert.doesNotMatch(html, /重启生效/);
-  assert.doesNotMatch(html, /ss-spinner/);
-});
-
-test("AgentRow 拨开关成了：开关原位下方浮起白窗 `✓ 已添加到 Codex`（同 ✓ 已生效）", () => {
-  const html = render(AgentRow, {
-    ...rowProps(withSelected({ enabled: true })),
-    switchDone: "已添加到 Codex",
-    onSwitchDoneDismiss: noop,
-  });
-  assert.match(
-    html,
-    /class="models-switch">[^]*role="switch"[^]*<span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"[^]*ss-toast--routine[^]*已添加到 Codex/,
-  );
-});
-
-test("开关不再乐观翻转：模型页拨开关走确认 / switchGateway，不经勾选的写队列", () => {
+test("开关不再乐观翻转：第三方模型节拨开关走确认 / switchGateway，不经勾选的写队列；滑块待定期间停在拨过去的那一侧", () => {
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /predictEnabled|toggleGateway/);
-  assert.match(src, /gatewayConfirmText\(state, confirmSwitch\.next\)/);
-  assert.match(src, /switchGateway\(next, restart,/);
+  assert.match(src, /gatewayConfirmText\(state, confirmSwitch\.next, tool\)/);
+  assert.match(src, /switchGateway\(next, restartCodex,/);
+  assert.match(
+    src,
+    /const pending = confirmSwitch\?\.next \?\? \(phase\.kind === "switching" \? phase\.next : null\);/,
+  );
+  // D5：不再有网关二级页、配置网关、汇总下拉
+  assert.doesNotMatch(src, /GatewayPage|配置网关|ModelPicker|ModelBox/);
 });

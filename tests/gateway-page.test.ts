@@ -2,11 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { render } from "./ui-render.ts";
-import { MODELS_TOOLS, switchNeedsConfirm, unsavedText } from "../src/modelsView.ts";
+import {
+  ADD_GATEWAY_BLOCKED,
+  MODELS_TOOLS,
+  gatewayFacts,
+  protocolText,
+  switchNeedsConfirm,
+  unsavedText,
+} from "../src/modelsView.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
 
-// 网关页（DESIGN「网关配置是二级页」2026-09-24 改版）：与来源管理页同一套骨架——
-// 一家一行、点整行展开选模型、表单在行里就地展开、`+ 网关` 在页头右端
+// 网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进 Codex 页「第三方模型」一节）：
+// 小标 `网关` + `+ 网关`、一家一行、点整行展开挑模型、表单在行里就地展开
 
 const model = (overrides: Partial<GatewayProviderModel> = {}): GatewayProviderModel => ({
   id: "gpt-x",
@@ -42,23 +49,23 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
   };
 };
 
-const { GatewayPage, ADD_GATEWAY_BLOCKED } = await import("../src/pages/GatewayPage.tsx");
+const { GatewayBlock, GatewayForm, displayUrl } = await import("../src/ModelsGateways.tsx");
 
 const noop = () => {};
 
-const page = (overrides: Partial<GatewayState> = {}, extra: Record<string, unknown> = {}) =>
-  render(GatewayPage, {
+const block = (overrides: Partial<GatewayState> = {}, extra: Record<string, unknown> = {}) =>
+  render(GatewayBlock, {
     tool: MODELS_TOOLS[0],
     state: state(overrides),
     busy: false,
-    initial: null,
+    expanded: new Set<string>(),
+    onToggleRow: noop,
+    onExpand: noop,
     onSave: async () => "x",
     onFetchModels: async () => {},
     onRetry: async () => {},
     onRemove: async () => {},
     onToggleModel: noop,
-    leaving: false,
-    onLeave: noop,
     ...extra,
   });
 
@@ -67,60 +74,33 @@ const ap = (models: GatewayProviderModel[] = []) =>
 const or = (unreachable?: string) =>
   provider({ id: "or", name: "", baseUrl: "https://openrouter.ai/api/v1", unreachable });
 
-/// 每一行（src-row）的 HTML 片段，按出现顺序
-const rows = (html: string) => html.split(/(?=<div class="src-row gw-row)/).slice(1);
+/// 每一行的 HTML 片段，按出现顺序
+const rows = (html: string) => html.split(/(?=<div class="gw-row[" ])/).slice(1);
 
-test("骨架：← Codex 的网关 + 标题后的页头动作 + 右端 `+ 网关`；表头 `网关`，一家一行，不再有分段片", () => {
-  const html = page({ providers: [ap(), or()] }, { headerAction: "RESTART-SLOT" });
-  assert.match(html, /class="ss-subpage gw-page-sub"/);
-  assert.match(html, /gw-page__title">Codex 的网关(<!-- -->)?RESTART-SLOT/);
-  assert.match(html, /aria-label="返回"/);
-  // 页头右端 `+ 网关`：与来源管理页 `+ 来源` 同一个组件（AddButton），可点
+test("骨架：小标 `网关` + 右端 `+ 网关`（默认键），一家一行；没有二级页的 ← 与页头", () => {
+  const html = block({ providers: [ap(), or()] });
   assert.match(
     html,
-    /ss-subpage__aside">(<span[^>]*>)?<button type="button" class="ss-btn ss-btn--add"[^>]*aria-label="添加 网关">/,
+    /gw-block__head"><span class="gw-block__label">网关<\/span>[^]*ss-btn--add[^]*网关/,
   );
-  assert.doesNotMatch(html, /ss-btn--add"[^>]*disabled/);
-  // 与来源管理页同一套表头、行
-  assert.match(html, /class="src-panel"><div class="src-panel__head"><span>网关<\/span><\/div>/);
   assert.equal(rows(html).length, 2);
-  assert.doesNotMatch(html, /ss-chip|gw-panel/);
-  assert.match(
-    render(GatewayPage, {
-      tool: MODELS_TOOLS[0],
-      state: state(),
-      busy: false,
-      initial: null,
-      onSave: async () => "x",
-      onFetchModels: async () => {},
-      onRetry: async () => {},
-      onRemove: async () => {},
-      onToggleModel: noop,
-      leaving: true,
-      onLeave: noop,
-    }),
-    /class="ss-subpage gw-page-sub is-leaving"/,
-  );
+  assert.doesNotMatch(html, /ss-subpage|Codex 的网关|src-row/);
 });
 
-test("行：▸ + 短名；第二行 `地址 · 已连 · 已选 1 / 2 个模型`（地址截断才提示）；行尾 `编辑` + 垃圾桶", () => {
-  const html = page({
+test("行：▸ + 短名；第二行 `地址 · 已连接 · 已选 1 / 2`（地址去掉协议头，截断才提示）；行尾 `编辑` + 垃圾桶", () => {
+  const html = block({
     providers: [
       ap([model({ id: "azure/gpt-4.1", selected: true }), model({ id: "azure/o3" })]),
       provider({ id: "ds", name: "", baseUrl: "https://api.deepseek.com" }),
     ],
   });
   const [first, second] = rows(html);
-  // 名字格整块是展开键（点整行展开）；进来时每行都收着（同来源管理页）
-  assert.match(
-    first,
-    /<button type="button" class="src-row__name gw-row__name" aria-expanded="false">/,
-  );
+  // 名字格整块是展开键（点整行展开）；进这一页时每行都收着
+  assert.match(first, /<button type="button" class="gw-row__name" aria-expanded="false">/);
   assert.doesNotMatch(html, /gw-row__body|is-open/);
-  assert.match(first, /src-row__label">ap-gateway</);
-  assert.match(first, /gw-row__url">https:\/\/ap-gateway\.example\.com\/v1</);
-  assert.match(first, /gw-row__fact"> · 已连 · 已选 1 \/ 2 个模型</);
-  // 地址是 TruncTip：完整显示着就不出提示框，读屏不重复挂描述
+  assert.match(first, /gw-row__label">ap-gateway</);
+  assert.match(first, /gw-row__url">ap-gateway\.example\.com\/v1</);
+  assert.match(first, /gw-row__fact"> · 已连接 · 已选 1 \/ 2</);
   assert.doesNotMatch(first, /gw-row__url[^]*aria-describedby/);
   assert.match(
     first,
@@ -128,13 +108,14 @@ test("行：▸ + 短名；第二行 `地址 · 已连 · 已选 1 / 2 个模型
   );
   assert.match(first, /aria-label="删掉 ap-gateway"/);
   // 没拉到模型时不写「已选」
-  assert.match(second, /src-row__label">deepseek</);
-  assert.match(second, /gw-row__fact"> · 已连<\/span>/);
+  assert.match(second, /gw-row__label">deepseek</);
+  assert.match(second, /gw-row__fact"> · 已连接<\/span>/);
   assert.doesNotMatch(html, /再试一次/);
+  assert.equal(displayUrl("https://openrouter.ai/api/v1/"), "openrouter.ai/api/v1");
 });
 
-test("展开区＝从这个网关选模型：限制说明 → 已选模型片（× 可移除）→ 勾选列表；勾选没写成的灰面板在这一段里", () => {
-  const html = page(
+test("展开区＝从这家挑模型：限制说明（全文）→ 勾选列表；勾选没写成的灰面板在这一段里；没有已选片（已选由在用行表达）", () => {
+  const html = block(
     {
       enabled: true,
       providers: [
@@ -146,83 +127,108 @@ test("展开区＝从这个网关选模型：限制说明 → 已选模型片（
         or(),
       ],
     },
-    { initial: "ap", notice: { message: "没勾上 o3", reason: "配置写不进" } },
+    {
+      expanded: new Set(["ap"]),
+      notice: { providerId: "ap", message: "没加上 o3", reason: "无法写入" },
+    },
   );
-  const [first] = rows(html);
+  const [first, second] = rows(html);
+  assert.match(first, /^<div class="gw-row is-open"/);
   const note = first.indexOf("gw-row__note");
-  const chosen = first.indexOf("gw-row__chosen");
-  const notice = first.indexOf("没勾上 o3");
+  const notice = first.indexOf("没加上 o3");
   const list = first.indexOf("gw-row__list");
-  assert.ok(note > 0 && note < chosen && chosen < notice && notice < list);
-  assert.match(first, /gw-row__note">只支持文本与工具调用，不支持图片</);
-  assert.match(first, /ss-modelchip__name">azure\/gpt-4\.1</);
-  assert.match(first, /aria-label="移除 zhipu\/glm-4\.6"/);
-  assert.doesNotMatch(first, /ss-modelchip__name">azure\/o3</);
+  assert.ok(note > 0 && note < notice && notice < list);
+  assert.match(
+    first,
+    /gw-row__note">只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了</,
+  );
+  assert.doesNotMatch(first, /ss-modelchip|gw-row__chosen/);
   assert.equal((first.match(/role="option"/g) ?? []).length, 3);
-  // 网关页只列本网关：行尾不写网关短名
   assert.doesNotMatch(first, /models-option__gateway/);
-  // ap 是最后一家还在供模型的：垃圾桶禁用，提示框说原因
-  assert.match(first, /role="tooltip"[^>]*>Codex 还在用它的 2 个模型，先取消勾选再删</);
-  // 一个都没选时模型片那一行不出
-  const none = page({ providers: [ap([model({ id: "azure/o3" })])] }, { initial: "ap" });
-  assert.doesNotMatch(none, /gw-row__chosen/);
+  // ap 是最后一家还在供模型的：垃圾桶禁用，按下即出原因
+  assert.match(first, /role="tooltip"[^>]*>Codex 还在用它的 2 个模型，先关掉第三方模型再删</);
+  // 各自独立：没展开的那一行收着
+  assert.match(second, /aria-expanded="false"/);
+  assert.doesNotMatch(second, /gw-row__body/);
 });
 
-test("连不上：`地址 · 连不上 · 原因`（原因写全，不藏进悬停），行尾动作列出 `再试一次`", () => {
-  const reason = "鉴权失败：密钥不对，或者这个密钥没有列模型的权限";
-  const html = page({ providers: [ap(), or(reason)] });
+test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏进悬停），行尾动作列出 `再试一次`；展开区说还没拉到模型", () => {
+  const reason = "密钥无效，请到 DeepSeek 控制台换一个密钥";
+  const html = block({ providers: [ap(), or(reason)] }, { expanded: new Set(["or"]) });
   const [, down] = rows(html);
-  assert.match(down, /src-row__label">openrouter</);
-  assert.match(down, /gw-row__down">连不上</);
+  assert.match(down, /gw-row__label">openrouter</);
+  assert.match(down, /gw-row__down">无法连接</);
   assert.match(down, new RegExp(`gw-row__reason">${reason}<`));
-  assert.doesNotMatch(down, /已连/);
+  assert.doesNotMatch(down, /已连接|连不上/);
   assert.match(
     down,
-    /gw-row__actions">(<span[^>]*>)*<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*>编辑</,
+    /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*>编辑</,
   );
+  assert.match(down, /gw-row__none">无法连接，还没拉到模型</);
+  assert.deepEqual(gatewayFacts(or(reason)), {
+    url: "https://openrouter.ai/api/v1",
+    status: "无法连接",
+    reason,
+    picked: null,
+  });
 });
 
-test("新网关：插在最上面，名字位是普通字 `新网关`（不是反色片），表单开着；页头 `+ 网关` 禁用并说原因", () => {
-  const html = page({ providers: [ap(), or()] }, { initial: "new" });
-  const [draft, ...rest] = rows(html);
-  assert.equal(rest.length, 2);
-  assert.match(draft, /src-row__label gw-row__draft">新网关</);
-  assert.doesNotMatch(html, /ss-chip/);
-  assert.match(draft, /class="gw-form"/);
-  assert.match(draft, /placeholder="https:\/\/example.com\/openai\/v1"/);
-  assert.match(draft, /role="tooltip"[^>]*>先填地址</);
-  assert.match(draft, /title="先填地址" disabled=""/);
-  assert.match(draft, />取消</);
-  assert.match(draft, /<dd>47328<\/dd>/);
-  assert.match(draft, /拉模型时探明/);
-  // 草稿在时 `+ 网关` 禁用（从源头防止两个草稿），提示框说原因
-  assert.equal(ADD_GATEWAY_BLOCKED, "先保存或取消正在添加的网关");
-  assert.match(html, new RegExp(`ss-btn--add" title="${ADD_GATEWAY_BLOCKED}"[^>]*disabled=""`));
-  // 一家都没有时从「还没有网关 · + 网关 ›」进来：直接是新网关那一行，不是空态
-  const fresh = page({ providers: [] }, { initial: "new" });
-  assert.equal(rows(fresh).length, 1);
-  assert.match(fresh, /新网关/);
-  assert.doesNotMatch(fresh, /还没有网关/);
-});
-
-test("没有网关：列表位置是空态一句「还没有网关」，不重复按钮；动作是页头的 `+ 网关`", () => {
-  const html = page({ providers: [] });
-  assert.match(html, /ss-empty__description">还没有网关</);
-  assert.doesNotMatch(html, /ss-empty__actions/);
-  assert.doesNotMatch(html, /src-panel/);
+test("没有网关：小标下一句「还没有网关，先加一家」，不重复按钮；`+ 网关` 可按", () => {
+  const html = block({ providers: [] });
+  assert.match(html, /gw-block__empty">还没有网关，先加一家</);
+  assert.doesNotMatch(html, /ss-empty|gw-list/);
   assert.match(html, /ss-btn--add"[^>]*aria-label="添加 网关">/);
   assert.doesNotMatch(html, /ss-btn--add"[^>]*disabled/);
+  assert.equal(ADD_GATEWAY_BLOCKED, "先保存或取消正在添加的网关");
 });
 
-test("跳回定位：那一行带来源管理页同一种跳转闪（src-row is-jump），并且展开", () => {
-  const html = page(
-    { providers: [ap(), or("地址连不上")] },
-    { initial: "or", flashProviderId: "or" },
+test("跳回定位：那一行 surface 行带闪两下（is-jump），只有它", () => {
+  const html = block(
+    { providers: [ap(), or("地址无法连接")] },
+    { expanded: new Set(["or"]), flashProviderId: "or" },
   );
   assert.equal((html.match(/is-jump/g) ?? []).length, 1);
   const [first, second] = rows(html);
-  assert.match(second, /^<div class="src-row gw-row is-open is-jump"/);
+  assert.match(second, /^<div class="gw-row is-open is-jump"/);
   assert.match(first, /aria-expanded="false"/);
+});
+
+test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（安静键）；只读 `本机端口 47328` `协议 拉取模型时识别`", () => {
+  const html = render(GatewayForm, {
+    state: state(),
+    provider: null,
+    busy: false,
+    onSave: async () => "x",
+    onFetchModels: async () => {},
+    onSaved: noop,
+    onCancel: noop,
+    onDirtyChange: noop,
+    ask: null,
+  });
+  assert.match(html, /gw-form__label">地址<[^]*placeholder="https:\/\/example.com\/openai\/v1"/);
+  assert.match(html, /gw-form__label">密钥<[^]*placeholder="粘贴密钥，存进钥匙串"/);
+  assert.match(html, /title="先填地址" disabled=""/);
+  assert.match(html, /class="ss-btn ss-btn--quiet"[^>]*>取消</);
+  assert.match(html, /本机端口 <span class="gw-form__value">47328<\/span>/);
+  assert.match(html, /协议 <span class="gw-form__value">拉取模型时识别<\/span>/);
+  assert.equal(protocolText("chat"), "Responses → Chat Completions");
+  // 离开 / 换一行时有没保存的改动：就地一句 + 保存 / 丢弃
+  const ask = render(GatewayForm, {
+    state: state(),
+    provider: ap(),
+    busy: false,
+    onSave: async () => "x",
+    onFetchModels: async () => {},
+    onSaved: noop,
+    onCancel: noop,
+    onDirtyChange: noop,
+    ask: { text: "地址改动没保存", onDone: noop },
+  });
+  assert.match(
+    ask,
+    /gw-form__ask" role="status">地址改动没保存<[^]*>保存<[^]*ss-btn--quiet[^>]*>丢弃</,
+  );
+  assert.doesNotMatch(ask, />取消</);
 });
 
 test("换一行编辑 / 离开前：表单有没保存的改动才拦下问；新网关与改地址说法不同", () => {
@@ -234,10 +240,14 @@ test("换一行编辑 / 离开前：表单有没保存的改动才拦下问；�
   assert.equal(unsavedText("ap"), "地址改动没保存");
 });
 
-test("样式与来源管理页同一套：GatewayPage 引入 SourcesPage.css，自己不再有分段片与三段式的规则", () => {
-  const tsx = readFileSync(new URL("../src/pages/GatewayPage.tsx", import.meta.url), "utf8");
-  assert.match(tsx, /import "\.\/SourcesPage\.css";/);
-  const css = readFileSync(new URL("../src/pages/GatewayPage.css", import.meta.url), "utf8");
-  assert.doesNotMatch(css, /gw-panel|chipwrap|gw-jump/);
-  assert.match(css, /\.gw-row \.src-row__main \{\s*grid-template-columns: minmax\(0, 1fr\) auto;/);
+test("网关行右键（D18）与离开拦截：用外壳的 contextMenuHandler；拦的是侧栏导航项；样式不再依赖来源管理页", () => {
+  const tsx = readFileSync(new URL("../src/ModelsGateways.tsx", import.meta.url), "utf8");
+  assert.match(tsx, /onContextMenu=\{contextMenuHandler\(/);
+  assert.match(tsx, /\{ label: "编辑", run: \(\) => choose\(p\.id\) \}/);
+  assert.match(tsx, /\{ label: "删掉…", run: \(\) => askRemove\(p\) \}/);
+  assert.match(tsx, /const LEAVE_TARGET = "\.sidebar \.side-item__main";/);
+  assert.doesNotMatch(tsx, /SourcesPage|src-row|GatewayPage/);
+  const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /cubic-bezier|cursor:\s*pointer/);
+  assert.match(css, /\.gw-row\.is-menu \.gw-row__main \{\s*background: var\(--surface\);/);
 });

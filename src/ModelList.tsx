@@ -4,26 +4,23 @@ import {
   MODEL_FILTER_THRESHOLD,
   edgeFades,
   frozenGroups,
-  gatewayShortName,
   modelEntryKey,
+  modelFilterPlaceholder,
   modelRowId,
   modelRowLabel,
-  showGatewayNames,
   snapshotOrder,
 } from "./modelsView.ts";
 import type { ModelEntry } from "./modelsView.ts";
 import type { GatewayProvider } from "./types.ts";
-import { Button } from "./ui/index.ts";
+import { Button, CheckboxGlyph } from "./ui/index.ts";
 import "./ModelList.css";
 
-/// 模型列表：模型下拉与网关页同一组件（DESIGN「模型列表的写法」）
+/// 模型勾选列表：Codex 页网关行展开区里的那一框（DESIGN「模型列表的写法」）。每个列表只列一家网关
 
 export interface ModelListProps {
-  /// 要列的模型：下拉是全部网关的全部模型，网关页只是本网关的
+  /// 要列的模型：这一家网关的全部模型
   entries: ModelEntry[];
   onToggle: (provider: GatewayProvider, modelId: string) => void;
-  /// 筛选框与列表之间的一段（下拉里的「第三方」组头）
-  header?: ReactNode;
   /// 列表为空时的一句
   empty?: ReactNode;
 }
@@ -32,13 +29,12 @@ export const entryKey = modelEntryKey;
 
 /**
  * 默认一列名称，行上没有提示框；友好名与 id 明显不同时行尾才写 id（`modelRowId`）。
- * 按服务商分小组头 `azure · 12`，一家一个也有；行内去掉重复前缀。
- * 列表跨 ≥2 个网关时（模型页下拉），每行行尾右对齐写来源网关短名；网关页只列本网关，不写。
- * 已选不在列表里另列一组：两处都由列表上方的模型片表达（DESIGN「已选用模型片表达」）。
+ * 按服务商分小组头 `azure · 12`，一家一个也有；行内去掉重复前缀；行尾不写网关短名（只列一家）。
+ * 已选不在列表里另列一组：已选由「在用」一行的模型片表达。
  * 打开（挂载）时排一次序（组内已选在前），之后勾选 / 取消不挪位置，下次打开再重排。
- * 勾选当场写盘；超过约 8 行时出筛选框，列表在自身范围内滚动。
+ * 勾选当场写盘；超过约 8 行时框顶出筛选框（`筛选 40 个模型`），列表在框内滚动、底边渐隐。
  */
-export function ModelList({ entries, onToggle, header, empty }: ModelListProps) {
+export function ModelList({ entries, onToggle, empty }: ModelListProps) {
   const [query, setQuery] = useState("");
   /// 打开那一刻的排序：之后勾选只改状态、不挪位置
   const [snap] = useState(() => snapshotOrder(entries));
@@ -64,7 +60,6 @@ export function ModelList({ entries, onToggle, header, empty }: ModelListProps) 
   const withFilter = entries.length > MODEL_FILTER_THRESHOLD;
   const term = withFilter ? query : "";
   const groups = frozenGroups(entries, snap, term);
-  const gatewayNames = showGatewayNames(entries);
 
   /// 一行：整行是命中区；组头已给出服务商，行内去掉重复前缀
   const row = (entry: ModelEntry) => {
@@ -72,15 +67,13 @@ export function ModelList({ entries, onToggle, header, empty }: ModelListProps) 
     const key = entryKey(entry);
     const id = modelRowId(model);
     const name = modelRowLabel(model);
-    const gateway = gatewayNames ? gatewayShortName(provider) : null;
     const toggle = () => onToggle(provider, model.id);
-    // 行上不放提示框也不设 title：挑模型时完整 id 没有意义，还会盖住正在看的那一行（真机反馈）；
-    // 读屏名只写名称，跨网关时补上来源网关（同名模型可能来自两家）
+    // 行上不放提示框也不设 title：挑模型时完整 id 没有意义，还会盖住正在看的那一行（真机反馈）
     return (
       <div
         key={key}
         className="models-option"
-        aria-label={gateway === null ? name : `${name}，${gateway}`}
+        aria-label={name}
         role="option"
         aria-selected={model.selected}
         tabIndex={0}
@@ -92,27 +85,15 @@ export function ModelList({ entries, onToggle, header, empty }: ModelListProps) 
           }
         }}
       >
-        {/* 12px 方框只画状态（方＝我选的）；命中区是整行，读屏走 aria-selected */}
+        {/* 13px 方框只画状态（方＝我选的，全应用同一个记号）；命中区是整行，读屏走 aria-selected */}
         <span
           className={`ss-checkbox models-option__check${model.selected ? " is-on" : ""}`}
           aria-hidden="true"
         >
-          {model.selected ? (
-            <svg
-              width="8"
-              height="8"
-              viewBox="0 0 8 8"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.4"
-            >
-              <path d="M1.2 4.2l1.9 1.9L6.8 1.9" />
-            </svg>
-          ) : null}
+          <CheckboxGlyph checked={model.selected} />
         </span>
         <span className="models-option__name">{name}</span>
-        {id !== null ? <span className="models-option__id">{id}</span> : null}
-        {gateway !== null ? <span className="models-option__gateway">{gateway}</span> : null}
+        {id !== null ? <span className="models-option__id ss-selectable">{id}</span> : null}
       </div>
     );
   };
@@ -122,8 +103,8 @@ export function ModelList({ entries, onToggle, header, empty }: ModelListProps) 
       {withFilter ? (
         <div className="model-list__search">
           <svg
-            width="12"
-            height="12"
+            width="16"
+            height="16"
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"
@@ -138,14 +119,13 @@ export function ModelList({ entries, onToggle, header, empty }: ModelListProps) 
           <input
             type="text"
             className="model-list__input"
-            placeholder="筛选"
+            placeholder={modelFilterPlaceholder(entries.length)}
             aria-label="筛选模型"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
       ) : null}
-      {header}
       {entries.length === 0 ? (
         empty ? (
           <p className="model-list__empty">{empty}</p>

@@ -12,21 +12,22 @@ export interface ModelsTool {
   id: string;
   /// 显示名，**不大写**——它是被谈论的对象（DESIGN §1.2）
   name: string;
-  /// 用这个工具的第三方模型要知道的事（全文）。只在挑模型时有用：进模型下拉第三方分组头的提示框
+  /// 用这个工具的第三方模型要知道的事（全文，不截断）。只在挑模型时有用：网关行展开区的第一行
+  /// （DESIGN「agent 页 › 点整行展开＝从这家挑模型」）
   limitations: string;
-  /// 第三方分组头上那一句短的（DESIGN「模型页」：限制说明放进下拉的第三方组头）
-  pickerNote: string;
+  /// 旧网关二级页（src/pages/GatewayPage.tsx）还在读它；那个文件由协调方在集成时删，删时一并删掉这一项
+  /// 与下面的 `gatewaySelectedChips`
+  pickerNote?: string;
 }
 
 export const CODEX: ModelsTool = {
   id: "codex",
   name: "Codex",
   limitations:
-    "Codex 仍会用官方模型生成会话标题，第一条消息会发给官方；自动审阅在第三方会话里用不了；网页搜索这类工具在第三方模型上也用不了。",
-  pickerNote: "只支持文本与工具调用，不支持图片",
+    "只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了",
 };
 
-/// 页面按这张表一个工具一块。今天只有一个，但版面不假设只有一个
+/// 文案按这张表取名字。今天只有 Codex；别的 agent 用上网关时，它自己的 agent 页有同样一节
 export const MODELS_TOOLS: ModelsTool[] = [CODEX];
 
 export interface ParsedBackendError {
@@ -72,7 +73,7 @@ export function selectedModels(provider: GatewayProvider): GatewayProviderModel[
   return provider.models.filter((model) => model.selected);
 }
 
-/// 全部网关加起来已选了几个模型。启动页那句人话与「启用」的可用性都按这个数算
+/// 全部网关加起来已选了几个模型。开关的可用性与确认框里的数量都按这个数算
 export function totalSelected(state: GatewayState): number {
   return state.providers.reduce((sum, provider) => sum + selectedModels(provider).length, 0);
 }
@@ -85,22 +86,26 @@ export function providerCatalogHint(provider: GatewayProvider): string {
   return provider.models.length === 0 ? "" : `${provider.models.length} 个可选`;
 }
 
-/// 主页面「生效的模型」里的一条：这个模型、它属于哪一家网关、以及它在工具里显示成什么
+/// 「在用」一行里的一条：这个模型、它属于哪一家网关、以及它在工具里显示成什么
 export interface EffectiveModel {
   provider: GatewayProvider;
   model: GatewayProviderModel;
   /**
    * 工具的模型选择器里**实际**显示的名字。
    * 两家网关的已选模型显示名相同时，后端会自动加上「 · 网关名」
-   * （docs/gateway-commands.md）；这一页叫「生效的模型」，那就得照抄那条规则，
-   * 否则页面上写的和 Codex 里看到的对不上。
+   * （docs/gateway-commands.md）；片上写的得照抄那条规则，否则和 Codex 里看到的对不上。
+   * ＝ `name` 或 `name · suffix`
    */
   label: string;
+  /// 片上的名字（不含网关后缀）
+  name: string;
+  /// 只在两家网关撞名时有：网关短名（DESIGN「在用」：` · 网关短名`，短名 `ink-mute`）；不撞名为 null
+  suffix: string | null;
 }
 
 /**
- * 全部网关里已选的模型，按网关顺序摊平。主页面只展示它——
- * 网关本身（地址、密钥、增删）搬去配置页了（第三轮反馈）。
+ * 全部网关里已选的模型，按网关顺序摊平：Codex 页「在用」一行的模型片、托盘的在用行都读它。
+ * 撞名时的后缀用网关短名（与网关行的名字同一个取法，DESIGN「模型列表的写法」）
  */
 export function effectiveModels(state: GatewayState): EffectiveModel[] {
   const rows = state.providers.flatMap((provider) =>
@@ -117,15 +122,12 @@ export function effectiveModels(state: GatewayState): EffectiveModel[] {
   }
   return rows.map((row) => {
     const name = nameOf(row);
-    const collides = (times.get(name) ?? 0) > 1;
-    return { ...row, label: collides ? `${name} · ${providerLabel(row.provider)}` : name };
+    const suffix = (times.get(name) ?? 0) > 1 ? gatewayShortName(row.provider) : null;
+    return { ...row, name, suffix, label: suffix === null ? name : `${name} · ${suffix}` };
   });
 }
 
-/**
- * 网关页列表上方那一行已选模型片：只这一家已选的，按网关给的顺序；前缀规则与模型页的片相同
- * （这一家已选的都来自同一服务商时省前缀，跨服务商并存时保留）。一个都没选时是空数组（整行不渲染）
- */
+/** @deprecated 只剩旧网关二级页在用，随 src/pages/GatewayPage.tsx 一起删 */
 export function gatewaySelectedChips(
   provider: GatewayProvider,
 ): { model: GatewayProviderModel; label: string }[] {
@@ -134,7 +136,7 @@ export function gatewaySelectedChips(
   return models.map((model) => ({ model, label: chipLabel(model, keepVendor) }));
 }
 
-// ===== 模型列表的写法（DESIGN「模型列表的写法」：下拉与网关页同一组件） =====
+// ===== 模型列表的写法（DESIGN「模型列表的写法」：网关行展开区里的勾选列表） =====
 
 /// 列表超过这么多行才出筛选框
 export const MODEL_FILTER_THRESHOLD = 8;
@@ -274,12 +276,7 @@ function byFrozen(order: string[]) {
     (rank.get(modelEntryKey(b)) ?? Number.MAX_SAFE_INTEGER);
 }
 
-// ===== 跨网关时行尾写网关短名（DESIGN「模型列表的写法」） =====
-
-/// 列表跨几个网关：≥2 个时每行行尾写来源网关短名；只有一个（含网关页）不写
-export function showGatewayNames(entries: ModelEntry[]): boolean {
-  return new Set(entries.map((e) => e.provider.id)).size >= 2;
-}
+// ===== 网关短名（DESIGN「模型列表的写法」：网关行的名字、同名模型片的后缀） =====
 
 const IP_HOST = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])$/i;
 
@@ -331,24 +328,11 @@ export function frozenGroups(entries: ModelEntry[], snap: ModelOrder, query = ""
 }
 
 /**
- * 「生效的模型」那块空着时说清**为什么空、下一步做什么**，而不是一律「还没选模型」。
- * 三种空是三件不同的事，混成一句用户就不知道该去哪儿（DESIGN「说结果，不说机制」）。
- * 一家网关都没有那一种不走这里——那时整块换成空态，直接把人送去配置页。
- */
-export function emptyEffectiveText(state: GatewayState): string {
-  const pulled = state.providers.some((provider) => provider.models.length > 0);
-  if (pulled) return "还没选模型";
-  return state.providers.some((provider) => provider.hasKey)
-    ? "还没拉到模型列表——到「配置网关」里再存一次就会拉"
-    : "网关还没有密钥——到「配置网关」里填上就能拉到模型列表";
-}
-
-/**
  * 这一家现在删不得的原因；能删则返回 null。
  *
  * 已启用时删掉**最后一家还在发布模型**的网关，后端会拒（`invalid`，见
  * docs/gateway-commands.md 的 `gateway_remove_provider`）。与其让用户按完确认才撞上
- * 一句错误，不如在确认弹窗里就把下一步说清楚——禁用的动作必须同时给出原因（§3）。
+ * 一句错误，不如在垃圾桶上就把下一步说清楚——禁用的动作必须同时给出原因（按下即出）。
  */
 export function removeProviderBlockedReason(
   state: GatewayState,
@@ -362,11 +346,14 @@ export function removeProviderBlockedReason(
   );
   return others
     ? null
-    : `它是最后一家还在给 ${tool.name} 发模型的网关；先点「已启用」停用，再回来删`;
+    : `${tool.name} 还在用它的 ${selectedModels(provider).length} 个模型，先关掉第三方模型再删`;
 }
 
+/// 没有网关、或一个模型都没选时开关按下即出的那一句（DESIGN「agent 页 › 第三方模型」）
+export const ENABLE_NEEDS_MODELS = "先加一家网关、选好模型再打开";
+
 /**
- * 「启用」按钮不可用时的原因；可用则返回 null。
+ * 「第三方模型」开关不可用时的原因；可用则返回 null。
  * 优先级：待接管 > 冲突 > 一家网关都没有 > 一个密钥都没存 > 未选模型 > 选了模型的那几家缺密钥。
  *
  * 最后那条排在选模型之后是没办法的事：多家网关时，缺密钥只挡着**有模型要发布**的那几家
@@ -378,9 +365,9 @@ export function removeProviderBlockedReason(
 export function enableDisabledReason(state: GatewayState, selectedCount: number): string | null {
   if (state.takeover !== null) return "本机当前由 agents-manager 启用，请先接管";
   if (state.conflict) return state.conflict;
-  if (state.providers.length === 0) return "先添加一个网关";
+  if (state.providers.length === 0) return ENABLE_NEEDS_MODELS;
   if (!state.providers.some((provider) => provider.hasKey)) return "请先保存网关密钥";
-  if (selectedCount === 0) return "请先勾选至少一个模型";
+  if (selectedCount === 0) return ENABLE_NEEDS_MODELS;
   const noKey = state.providers.filter(
     (provider) => selectedModels(provider).length > 0 && !provider.hasKey,
   );
@@ -396,7 +383,7 @@ export function canRestore(state: GatewayState): boolean {
 /**
  * 后台服务残留：已经停用、服务却还装着（自动卸下失败，或旧版本遗留）。
  * 关开关时的 gatewayRestore 本身就会卸下服务，所以手动入口只在这种状态下出现——
- * Codex 行（与托盘那一行）按状态出现紧凑键 `卸下后台服务`，设置页「关于」下方也用它判断
+ * Codex 页「第三方模型」节头右端（与托盘那一块）按状态出现紧凑键 `卸下后台服务`
  * （DESIGN「停用即卸下后台服务」）。
  */
 export function serviceLeftover(state: GatewayState): boolean {
@@ -406,7 +393,7 @@ export function serviceLeftover(state: GatewayState): boolean {
 /// 「卸下后台服务」键的提示框：只写点下去的结果
 export const UNINSTALL_TIP = "停用后后台服务还在运行，卸下后不再占用资源";
 
-// ===== 网关页的行内表单（DESIGN「网关配置是二级页 › 编辑 / 新增」） =====
+// ===== 网关行里的表单（DESIGN「agent 页 › 编辑 / 新增：表单在行里就地展开」） =====
 
 /// 表单开在哪一行；"new" 是最上面那一行正在加的新网关
 export type GatewayChoice = string | "new";
@@ -422,6 +409,51 @@ export function switchNeedsConfirm(
 ): boolean {
   return dirty && next !== current;
 }
+
+/// 网关行第二行（DESIGN「网关」：`地址 · 已连接 · 已选 2 / 103`；无法连接时 `地址 · 无法连接 · 原因`，原因写全）
+export interface GatewayFacts {
+  /// 地址；还没填时一句话
+  url: string;
+  status: "已连接" | "无法连接" | "还没有密钥";
+  /// 无法连接的原因（写全，不藏进悬停）
+  reason: string | null;
+  /// `已选 2 / 103`；还没拉到模型、或无法连接时为 null
+  picked: string | null;
+}
+
+export function gatewayFacts(provider: GatewayProvider): GatewayFacts {
+  const url = provider.baseUrl || "还没填地址";
+  if (provider.unreachable) {
+    return { url, status: "无法连接", reason: provider.unreachable, picked: null };
+  }
+  return {
+    url,
+    status: provider.hasKey ? "已连接" : "还没有密钥",
+    reason: null,
+    picked:
+      provider.models.length > 0
+        ? `已选 ${selectedModels(provider).length} / ${provider.models.length}`
+        : null,
+  };
+}
+
+/// 「在用」一行的标签：开关关着时写「已选」——选了、还没在用，写「在用」就是说谎（DESIGN「在用」）
+export function inUseLabel(state: GatewayState): "在用" | "已选" {
+  return state.enabled ? "在用" : "已选";
+}
+
+/// 勾选列表框顶上的筛选框：`筛选 40 个模型`
+export const modelFilterPlaceholder = (count: number) => `筛选 ${count} 个模型`;
+
+/// 编辑表单里只读的协议：本机路由收 Responses，转给网关时说它的协议；还没拉过模型时写「拉取模型时识别」
+export function protocolText(protocol: string | undefined): string {
+  if (protocol === "chat") return "Responses → Chat Completions";
+  if (protocol === "responses") return "Responses";
+  return "拉取模型时识别";
+}
+
+/// 草稿存在期间 `+ 网关` 禁用的原因（从源头防止两个草稿）
+export const ADD_GATEWAY_BLOCKED = "先保存或取消正在添加的网关";
 
 /// 就地拦截那一句：草稿没保存与改动没保存说法不同
 export function unsavedText(current: GatewayChoice): string {
@@ -453,7 +485,7 @@ export function sortAndFilterModels(
   return [...filtered].sort((a, b) => Number(b.selected) - Number(a.selected));
 }
 
-// ===== 重启生效（DESIGN「模型页」：按钮即状态） =====
+// ===== 重启生效（DESIGN「改动待生效：重启生效与启动 Codex」：按钮即状态） =====
 
 /// 「重启生效」键的提示框：只写点击的后果与代价。
 /// 检测只认 Codex 桌面应用（与编辑器插件）拉起的后台进程，终端里的 `codex` 不认也不重启，
@@ -471,26 +503,45 @@ export const RESTART_SETTLE_TIMEOUT_MS = 15000;
 /// 等的时候多久读一次（本机读一次约 0.1 秒）
 export const RESTART_SETTLE_POLL_MS = 300;
 
+/// 等待用的时钟：默认是真实时间；测试注入假时钟，等多久、读几次与机器快慢无关
+export interface SettleClock {
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export const REAL_CLOCK: SettleClock = {
+  now: () => Date.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
+export interface SettleTiming {
+  timeoutMs: number;
+  pollMs: number;
+  /// 不给就用真实时间
+  clock?: SettleClock;
+}
+
 /// 发完结束信号之后等 Codex 换上新配置：每读到一份状态交给 `onState`；不再用旧配置就返回 null，
 /// 等满还在用旧的返回 `RESTART_STILL_STALE`；`alive()` 为假（页面没了）时返回 undefined，调用方什么都别做。
-/// 模型页、网关页页头、菜单栏面板的「重启生效」共用这一段
+/// Codex 页页面头与菜单栏面板的「重启生效」、拨开关共用这一段
 export async function settleAfterRestart(
   read: () => Promise<GatewayState>,
   onState: (state: GatewayState) => void,
   alive: () => boolean,
-  timing: { timeoutMs: number; pollMs: number } = {
+  timing: SettleTiming = {
     timeoutMs: RESTART_SETTLE_TIMEOUT_MS,
     pollMs: RESTART_SETTLE_POLL_MS,
   },
 ): Promise<string | null | undefined> {
-  const deadline = Date.now() + timing.timeoutMs;
+  const clock = timing.clock ?? REAL_CLOCK;
+  const deadline = clock.now() + timing.timeoutMs;
   for (;;) {
     const fresh = await read();
     if (!alive()) return undefined;
     onState(fresh);
     if (!fresh.needsCodexRestart) return null;
-    if (Date.now() >= deadline) return RESTART_STILL_STALE;
-    await new Promise((resolve) => setTimeout(resolve, timing.pollMs));
+    if (clock.now() >= deadline) return RESTART_STILL_STALE;
+    await clock.sleep(timing.pollMs);
     if (!alive()) return undefined;
   }
 }
@@ -498,7 +549,7 @@ export async function settleAfterRestart(
 // ===== 开关的状态＝Codex 正在用的状态（DESIGN 同名一条） =====
 
 /// 没成之后撤回刚写的配置也没成：接在原因后面
-export const SWITCH_ROLLBACK_FAILED = "；回滚也没成";
+export const SWITCH_ROLLBACK_FAILED = "；回滚也失败了";
 
 /// Codex 在跑时拨开关那一道确认：标题写结果（添加 / 移除，打开时写出数量），主动作写「重启并…」。
 /// 正文：进行中的对话数查不到（同 `RESTART_CONSEQUENCE`），写通用的后果
@@ -521,7 +572,7 @@ export function gatewayConfirmText(
       };
 }
 
-/// 开关那一格的几句话：忙碌（原位转圈旁那一句）、成功（原位下方浮起的白窗）、没成（行下灰面板的主句）。
+/// 开关那一格的几句话：忙碌（原位转圈旁那一句）、成功（原位下方浮起的白窗）、没成（节头下灰面板的主句）。
 /// `restarted` 为假是 Codex 没在跑、直接写的那一支：打开时补一句「下次打开就能用」
 export function gatewaySwitchText(
   next: boolean,
@@ -563,7 +614,7 @@ export async function switchGateway(
   next: boolean,
   restart: boolean,
   io: GatewaySwitchIo,
-  timing?: { timeoutMs: number; pollMs: number },
+  timing?: SettleTiming,
 ): Promise<string | null | undefined> {
   let reason: string | null = null;
   try {
@@ -606,7 +657,7 @@ export async function switchGateway(
  * - switching：拨了开关、正在写配置 / 重启 Codex / 等它换上（`switchGateway`）。开关原位转圈，
  *   这一格空着——写完配置到 Codex 换上之间状态会说「要重启」「没在跑」，键不能跟着闪出来
  *
- * 失败不是这一格的状态：灰面板「没重启 Codex」/「没启动 Codex」+ 原因 + `再试一次` 挂在整行下面，
+ * 失败不是这一格的状态：灰面板「没重启 Codex」/「没启动 Codex」+ 原因 + `再试一次` 挂在「第三方模型」节头下，
  * 格子回到 idle（键还在就还能点）
  */
 export type RestartPhase =
@@ -648,7 +699,7 @@ export function shouldPollRestart(state: GatewayState | null, phase: RestartPhas
   return state !== null && (showRestartKey(state, phase) || showLaunchKey(state, phase));
 }
 
-// ===== 模型框与选择器 =====
+// ===== 在用的模型与勾选 =====
 
 /// 关掉之后先画的「做成之后」的样子（只剩 Codex 没在跑时删掉最后一个生效模型那一支用它，见 selectModel；
 /// 开关本身不再乐观翻转）：只翻 enabled 会让依赖它的提示在等结果的那一下闪出来——开时「路由没在跑」
@@ -693,34 +744,29 @@ export function selectModel(
   return { next: turnsOff ? predictEnabled(moved, false) : moved, turnsOff };
 }
 
-/// 模型框尾端的等宽读数：全部网关一共拉到几个可选模型
-export function availableCount(state: GatewayState): number {
-  return state.providers.reduce((sum, provider) => sum + provider.models.length, 0);
-}
-
-/// 路由没在跑、且启动时自愈过一次仍没起来，才在 Codex 行下出待办条（DESIGN「路由服务没在跑」）
+/// 路由没在跑、且启动时自愈过一次仍没起来，才在「第三方模型」节里出待办条（DESIGN「路由没在跑」）
 export function showRouterTodo(state: GatewayState, healAttempted: boolean): boolean {
   return healAttempted && routerUnavailable(state);
 }
 
-// ===== 模型的问题（就地在 Codex 行 / 网关页显示；新出现时由壳提示一次） =====
+// ===== 模型的问题（就地在 Codex 页「第三方模型」节里显示；新出现时由壳提示一次） =====
 
 /**
- * 模型页里要用户拿主意的事（DESIGN「没有收件箱、待处理页和「忽略」」那张表）：
- * - `takeover`：Codex 正由 agents-manager 管着 → Codex 行内待办条 `接管`
- * - `configChanged`：Codex 升级后 Sophia 写进去的设置对不上了 → Codex 行内待办条 `重新写入`
- * - `unreachable`：某家网关连不上 → 网关页那一家的连接摘要 `再试一次`
+ * 第三方模型里要用户处理的事（DESIGN「没有收件箱、待处理页和「忽略」」那张表）：
+ * - `takeover`：Codex 正由 agents-manager 管着 → 节里的行内待办条 `接管`
+ * - `configChanged`：Codex 升级后 Sophia 写进去的设置对不上了 → 节里的行内待办条 `重新写入`
+ * - `unreachable`：某家网关无法连接 → 那一家网关行的第二行与行尾 `再试一次`
  *
- * 「改动要重启 Codex 才生效」不进来——它不用拿主意，已在 agent 行上就地出现。
- * 「路由没在跑」也不进来——它影响整页，走模型页页级横幅。
+ * 「改动要重启 Codex 才生效」不进来——它不用处理，页面头的 `重启生效` 就地表达。
+ * 「路由没在跑」也不进来——它由节里的行内待办条就地说，不打扰别处。
  *
  * 形状：
  * - `key`：看过表的 key，**状况一变 key 就变**（Codex 升了版本、网关换了失败原因），看过的会再提示一次。
  *   格式由 core `store::SeenIssue` 钉死：`model\u001f<类别>\u001f<细节…>`，段间都用 `\u001f`
  * - `subject`：句子的主语（`Codex`、网关名），一次性提示里加粗
  * - `sentence`：一次性提示只有这一条时说的整句，以 `subject` 开头
- * - `action`：一个动作；`kind` 决定调哪个命令（Codex 行内待办条照它执行）
- * - `providerId`：只有 `unreachable` 有，「查看」进网关页选中那一家
+ * - `action`：一个动作；`kind` 决定调哪个命令（节里的行内待办条照它执行）
+ * - `providerId`：只有 `unreachable` 有，「查看」到 Codex 页展开那一家网关行
  */
 export type ModelIssueKind = "takeover" | "configChanged" | "unreachable";
 
@@ -785,7 +831,7 @@ export function modelIssues(state: GatewayState | null, tool: ModelsTool = CODEX
         "unreachable",
         modelKey("unreachable", provider.id, provider.unreachable),
         providerLabel(provider),
-        "连不上",
+        "无法连接",
         { kind: "retry", label: "再试一次" },
         provider.id,
       ),

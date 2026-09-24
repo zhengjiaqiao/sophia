@@ -1,5 +1,5 @@
-/* 模型列表（DESIGN「模型列表的写法」）：模型下拉与网关页同一组件。
-   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零渐变。 */
+/* 模型勾选列表（DESIGN「模型列表的写法」）：Codex 页网关行展开区里的那一框，一个列表只列一家网关。
+   色值一律 var(--…)，唯一来源是 tokens.css。框本身（paper 面、hairline 边、12 圆角、宽 440）在 ModelsTab.css */
 @import "./tokens.css";
 
 .model-list {
@@ -8,24 +8,26 @@
   min-height: 0;
 }
 
-/* 筛选框：超过约 8 行才出现 */
+/* 筛选框（DESIGN「输入框」凹面）：框顶，超过约 8 行才出现；放大镜 16 在框内左侧 */
 .model-list__search {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
   flex-shrink: 0;
-  margin: var(--space-xs) var(--space-sm);
+  margin: var(--space-xs) var(--space-xs) var(--space-xxs);
   height: var(--control-h);
   box-sizing: border-box;
   padding: 0 10px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
-  color: var(--ink-faint);
+  background: var(--recess);
+  box-shadow: var(--recess-input);
+  color: var(--ink-mute);
   transition: border-color var(--motion-fast) var(--ease-mech);
 }
 
 .model-list__search:focus-within {
-  border-color: var(--ink);
+  border-color: var(--ink-mute);
 }
 
 .model-list__input {
@@ -40,7 +42,7 @@
 }
 
 .model-list__input::placeholder {
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
 .model-list__input:focus,
@@ -48,9 +50,8 @@
   outline: none;
 }
 
-/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从浮层的 paper 白渐隐到透明（功能性渐变） */
-/* 自己也是纵向 flex：外层（下拉浮层 max-height 420）压矮它时，滚动区跟着变矮，
-   最后一行能完整滚出来，而不是溢出到浮层底边外被裁掉 */
+/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从框的 paper 白渐隐到透明（功能性渐变）。
+   自己也是纵向 flex：外层压矮它时滚动区跟着变矮，最后一行能完整滚出来 */
 .model-list__viewport {
   position: relative;
   display: flex;
@@ -101,10 +102,10 @@
   margin: 0;
   padding: var(--space-xs) var(--space-sm);
   font-size: var(--size-caption);
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
-/* 服务商小组头 `azure · 12`：与分段 / 组头同一套字——12/600 ink-mute + 等宽计数 ink-faint */
+/* 服务商小组头 `azure · 12`：12 ink-mute，服务商名 600，计数 tabular（一种数字，不用等宽） */
 .model-list__group-head {
   display: flex;
   align-items: baseline;
@@ -120,16 +121,15 @@
 }
 
 .model-list__dot {
-  color: var(--ink-faint);
+  color: var(--ink-mute);
 }
 
 .model-list__count {
-  font-family: var(--font-mono);
+  color: var(--ink-mute);
   font-variant-numeric: tabular-nums;
-  color: var(--ink-faint);
 }
 
-/* 一个模型一行：高 34，整行是命中区，悬停 surface */
+/* 一个模型一行：高 34 = 13px 复选框 + 模型名（body），整行是命中区，悬停 surface */
 .models-option {
   display: flex;
   flex: 1;
@@ -141,7 +141,6 @@
   margin: 0 var(--space-xxs);
   padding: 0 var(--space-xs);
   border-radius: var(--radius-control);
-  cursor: pointer;
   transition: background-color var(--motion-fast) var(--ease-mech);
 }
 
@@ -164,6 +163,7 @@
   font-size: var(--size-body);
   line-height: var(--leading-caption);
   white-space: nowrap;
+  color: var(--ink);
 }
 
 /* 行尾 id：只有友好名与 id 明显不同才出现；它是标识，放不下可以截断 */
@@ -178,22 +178,6 @@
   line-height: var(--leading-caption);
   color: var(--ink-faint);
   white-space: nowrap;
-}
-
-/* 行尾网关短名：只在列表跨多个网关时出现；12 ink-faint UI 字体，不截断，右对齐。
-   有行尾 id 时排在 id 之后，间距是行内 gap 12 */
-.models-option__gateway {
-  margin-left: auto;
-  flex-shrink: 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-label);
-  line-height: var(--leading-caption);
-  color: var(--ink-faint);
-  white-space: nowrap;
-}
-
-.models-option__id + .models-option__gateway {
-  margin-left: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,0 +1,5 @@
+/* 模型片的网关后缀（DESIGN「在用」：同名才加 ` · 网关短名`，短名 ink-mute）。
+   片的其余样式在 ui.css「4.1 模型片」；第二波并行期间 ui.css 不动，这一条先放在这里 */
+.ss-modelchip__suffix {
+  color: var(--ink-mute);
+}

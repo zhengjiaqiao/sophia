@@ -1,0 +1,14 @@
+/* 带待定位置的开关（PendingSwitch.tsx）：只动滑块的位移，刻条与指示点仍跟着真实状态。
+   位移的过渡仍是 Switch 自己那条 200ms 弹簧（--spring-slide），这里不另写动效。
+   选择器比 `.ss-switch.is-on .ss-switch__knob` 多一层，压得过它；拖动中的内联位移又压过这里 */
+.ss-pending-switch {
+  display: inline-flex;
+}
+
+.ss-pending-switch[data-pending="on"] .ss-switch .ss-switch__knob {
+  translate: var(--travel);
+}
+
+.ss-pending-switch[data-pending="off"] .ss-switch.is-on .ss-switch__knob {
+  translate: 0;
+}
