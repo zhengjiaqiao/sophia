@@ -1,0 +1,80 @@
+/* ===== 新手提示条 HintStrip（DESIGN「组件 › 新手提示条 HintStrip」，画板 17 / 18 / 19）=====
+   嵌在页面流里：shell 底（比灰面板的 surface 浅一档）、face 12 圆角、无边无投影；高 40（两行自适应，
+   内边距 10 14），宽随容器；上下外距 16 由组件自带。小标 第一次用（12 / 500 ink-mute）+ 12 + 说明句（13 ink），
+   右端 × 图标键。出现 / 收起：淡入淡出 + 高度 0 ↔ 40 + 外距 0 ↔ 16，260ms --ease-mech，推动下方内容 */
+.ss-hint {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 100%;
+  margin-block: 0;
+  opacity: 0;
+  /* 260ms 与 HintStrip.tsx 的 SLIDE_MS 一致（到时卸下） */
+  transition:
+    grid-template-rows 260ms var(--ease-mech),
+    margin-block 260ms var(--ease-mech),
+    opacity 260ms var(--ease-mech);
+}
+
+.ss-hint.is-open {
+  grid-template-rows: 1fr;
+  margin-block: var(--space-md);
+  opacity: 1;
+}
+
+/* 高度动画的裁切层：行轨道从 0fr 到 1fr，里面的条按自身高度（40 或两行）走 */
+.ss-hint__clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ss-hint__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 10px 14px;
+  border-radius: var(--radius-face);
+  background: var(--shell);
+  font-family: var(--font-ui);
+}
+
+.ss-hint__label {
+  flex-shrink: 0;
+  color: var(--ink-mute);
+  font-size: var(--size-label);
+  font-weight: 500;
+  line-height: var(--leading-caption);
+}
+
+.ss-hint__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+}
+
+/* 句中的真记号：与字同行，略微下沉对齐字心，左右各让 1 */
+.ss-hint__text .ss-dot-wrap {
+  display: inline-block;
+  margin: 0 1px;
+  vertical-align: -0.5px;
+}
+
+.ss-hint__text .ss-dot-wrap > svg {
+  display: block;
+}
+
+/* × 图标键 28 高：上下各让 4，条仍是 40；右沿让 6，图形与内边距对齐 */
+.ss-hint__close {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin: -4px -6px -4px auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-hint {
+    transition: none;
+  }
+}
