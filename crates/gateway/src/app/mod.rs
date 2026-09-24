@@ -121,6 +121,9 @@ pub struct ProviderView {
     /// 创建后不变；新命令用它指明操作哪一家
     pub id: String,
     pub name: String,
+    /// 网关短名（`ProviderSettings::short_name`）：网关行的名字，也是撞名模型在 Codex 目录里的后缀。
+    /// 界面只读它，不自己再算一份，Sophia 与 Codex 里看到的是同一个名字
+    pub short_name: String,
     pub base_url: String,
     /// "chat" 或 "responses"
     pub protocol: String,
@@ -1153,6 +1156,7 @@ impl App {
             .map(|provider| ProviderView {
                 id: provider.id.clone(),
                 name: provider.name.clone(),
+                short_name: provider.short_name(),
                 base_url: provider.base_url.clone(),
                 protocol: provider.protocol().to_owned(),
                 has_key: (self.deps.get_key)(&provider.id).is_ok_and(|k| !k.trim().is_empty()),

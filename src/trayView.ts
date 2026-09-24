@@ -6,13 +6,10 @@
 import { visibleAgents } from "./shell/agentRegistry.ts";
 import type { AgentEntry, AgentState } from "./shell/agentRegistry.ts";
 import {
-  chipLabel,
+  effectiveModels,
   enableDisabledReason,
-  gatewayShortName,
-  selectedModels,
   serviceLeftover,
   showLaunchKey,
-  splitModelId,
   totalSelected,
 } from "./modelsView.ts";
 import type { GatewayState } from "./types.ts";
@@ -96,21 +93,15 @@ export interface TrayModel {
 }
 
 /// 开着时 Codex 里在用的第三方模型，按网关顺序摊平。关着是空（这一行不出）。
-/// 名字取法同 agent 页的模型片：友好名优先；跨服务商时保留前缀。**只有两家网关的已选模型同名时**
-/// 才在那个名字后加 ` · 网关短名`——`·` 只表示「这个名字的出处」，模型之间用 `、` 分（DESIGN「托盘面板」）
+/// 名字与同名后缀直接取 `effectiveModels`（agent 页模型片读的同一份）：友好名优先、跨服务商时保留前缀；
+/// **只有两家网关的已选模型同名时**才在那个名字后加 ` · 网关短名`（core 给的 `shortName`，与 Codex 目录里同一个）——
+/// `·` 只表示「这个名字的出处」，模型之间用 `、` 分（DESIGN「托盘面板」）
 export function trayModels(state: GatewayState): TrayModel[] {
   if (!state.enabled) return [];
-  const rows = state.providers.flatMap((provider) =>
-    selectedModels(provider).map((model) => ({ provider, model })),
-  );
-  const keepVendor = new Set(rows.map((row) => splitModelId(row.model.id).vendor ?? "")).size > 1;
-  const named = rows.map((row) => ({ ...row, name: chipLabel(row.model, keepVendor) }));
-  const times = new Map<string, number>();
-  for (const row of named) times.set(row.name, (times.get(row.name) ?? 0) + 1);
-  return named.map((row) => ({
-    key: `${row.provider.id}|${row.model.id}`,
-    name: row.name,
-    gateway: (times.get(row.name) ?? 0) > 1 ? gatewayShortName(row.provider) : null,
+  return effectiveModels(state).map((m) => ({
+    key: `${m.provider.id}|${m.model.id}`,
+    name: m.name,
+    gateway: m.suffix,
   }));
 }
 

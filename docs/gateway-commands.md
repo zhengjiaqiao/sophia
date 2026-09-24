@@ -12,11 +12,14 @@ interface GatewayProvider {
   id: string;
   /** 显示名，可以随时改 */
   name: string;
+  /** 网关短名（core `ProviderSettings::short_name`）：显示名优先，显示名像主机名或为空时取主机名主体
+   *  （`openrouter.ai` → `openrouter`）。界面的网关行、同名模型片后缀都读它，与 Codex 目录里的后缀同一个名字 */
+  shortName: string;
   baseUrl: string;
   /** "chat" 或 "responses"，拉取模型时探明 */
   protocol: string;
   hasKey: boolean;
-  /** 上次拉取模型失败的原因：「地址连不上」「密钥不对」「地址不对，没拿到模型列表」；
+  /** 上次拉取模型失败的原因：「地址无法访问」「密钥无效，请换一个密钥」「地址有误，无法获取模型列表」；
    *  null 表示上次成功或还没拉过。拉取成功、或改了地址时清空 */
   unreachable: string | null;
   /** slug 是这个模型在 Codex 里的标识，固定为「网关 id-模型名」：两家都有同名模型也不相撞 */
@@ -60,7 +63,7 @@ interface GatewayState {
 
 几条界面需要知道的行为：
 
-- 两家的已选模型显示名相同时，写进 Codex 选择器的名字会自动加上「 · 网关名」；`models[].displayName` 仍是用户填的原值。
+- 两家的已选模型显示名相同时，写进 Codex 选择器的名字会自动加上「 · 网关短名」（即 `shortName`）；`models[].displayName` 仍是用户填的原值。
 - 已启用时改勾选、改地址、删网关，都会先确认后台路由是当前版本再写清单；路由起不来时返回 `router_down`，改动不保存。
 - 模型标识带网关前缀，所以旧的单网关设置升级后标识会变（`x` 变成 `default-x`）。旧标识进停用名单，Codex 重启前请求它们会得到「请重启 Codex」的提示；Codex 的默认模型若指向旧标识，会被改回启用前的值。
 

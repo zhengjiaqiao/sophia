@@ -301,10 +301,11 @@ test("effectiveModels 摊平全部网关的已选模型；两家撞名时照抄�
       ["只此一家", null],
     ],
   );
-  // 后缀是网关短名（与网关行同一个取法）：显示名像主机名时取主体
+  // 后缀是 core 给的网关短名（`shortName`，与网关行、Codex 目录里同一个）：显示名像主机名时它取主体
   const host = provider({
     id: "h",
     name: "openrouter.ai",
+    shortName: "openrouter",
     models: [model({ id: "m9", displayName: "GPT-5", selected: true })],
   });
   assert.deepEqual(
@@ -663,6 +664,7 @@ test("InUseRow 两家网关同名：片名后加 ` · 网关短名`，短名单�
   const a = provider({
     id: "a",
     name: "",
+    shortName: "openrouter",
     baseUrl: "https://openrouter.ai/api/v1",
     models: [model({ id: "openai/gpt-4.1", displayName: "GPT-4.1", selected: true })],
   });
@@ -888,7 +890,7 @@ test("按筛选词过滤各组；打开后才出现的新模型排到组尾", ()
 });
 
 test("拆不出服务商时组头用网关短名（与分段片、行尾一致）", () => {
-  const p = provider({ id: "or", name: "openrouter.ai" });
+  const p = provider({ id: "or", name: "openrouter.ai", shortName: "openrouter" });
   const groups = modelGroups([{ provider: p, model: model({ id: "deepseek-chat" }) }]);
   assert.deepEqual(
     groups.map((g) => g.vendor),
@@ -909,36 +911,15 @@ test("ModelList 不整体变暗：不再有 busy 能加上的 ss-busy（DESIGN�
   assert.doesNotMatch(html, /ss-busy/);
 });
 
-test("网关短名：显示名优先；否则主机名去掉 api. / www. 与顶级域；localhost、IP 原样", () => {
-  const gw = (name: string, baseUrl: string) => provider({ id: "x", name, baseUrl });
-  assert.equal(gatewayShortName(gw("ap-gateway", "https://api.openai.com/v1")), "ap-gateway");
-  assert.equal(gatewayShortName(gw("", "https://openrouter.ai/api/v1")), "openrouter");
-  assert.equal(gatewayShortName(gw("", "https://api.deepseek.com")), "deepseek");
-  assert.equal(gatewayShortName(gw("", "https://www.example.com/v1")), "example");
-  assert.equal(gatewayShortName(gw("", "localhost:4000")), "localhost");
-  assert.equal(gatewayShortName(gw("", "http://localhost:4000/v1")), "localhost");
-  assert.equal(gatewayShortName(gw("", "http://192.168.1.20:8080/v1")), "192.168.1.20");
-  assert.equal(gatewayShortName(gw("", "10.0.0.2:4000")), "10.0.0.2");
-  assert.equal(gatewayShortName(gw("  ", "")), "x", "什么都取不到时退到 id");
-});
-
-test("网关短名：显示名像主机名时也走短名规则；多级子域取去掉 api. / www. 后的第一段", () => {
-  const gw = (name: string, baseUrl = "") => provider({ id: "x", name, baseUrl });
-  // core 迁移来的网关被命名为完整主机名（settings.rs legacy_name）
-  assert.equal(gatewayShortName(gw("openrouter.ai")), "openrouter");
-  assert.equal(gatewayShortName(gw("api.deepseek.com")), "deepseek");
-  assert.equal(gatewayShortName(gw("ap-gateway.internal.example.com")), "ap-gateway");
-  assert.equal(gatewayShortName(gw("127.0.0.1:8080")), "127.0.0.1");
+test("网关短名只读 core 给的 shortName（取法与测试表在 core settings.rs `short_name`）；缺省时退到显示名、再退到 id", () => {
   assert.equal(
-    gatewayShortName(gw("", "https://ap-gateway.internal.example.com/v1")),
-    "ap-gateway",
+    gatewayShortName(provider({ name: "openrouter.ai", shortName: "openrouter" })),
+    "openrouter",
   );
-  assert.equal(gatewayShortName(gw("", "https://api.deepseek.com")), "deepseek");
-  assert.equal(gatewayShortName(gw("", "http://localhost:4000")), "localhost");
-  assert.equal(gatewayShortName(gw("", "http://10.0.0.2:4000")), "10.0.0.2");
-  // 不像主机名的显示名原样：含空格、不含点
-  assert.equal(gatewayShortName(gw("My Gateway v1.2")), "My Gateway v1.2");
-  assert.equal(gatewayShortName(gw("ap-gateway")), "ap-gateway");
+  assert.equal(gatewayShortName(provider({ id: "x", name: " WeCode " })), "WeCode");
+  assert.equal(gatewayShortName(provider({ id: "x", name: "  " })), "x");
+  const src = readFileSync(new URL("../src/modelsView.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /HOST_LIKE|function hostOf/, "界面不再自己从主机名取短名");
 });
 
 test("模型列表：底部不再有「已选 N 个模型」；滚动区的容器是纵向 flex，外层压矮时滚动区跟着变矮", async () => {

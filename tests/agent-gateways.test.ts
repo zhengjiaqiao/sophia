@@ -72,7 +72,13 @@ const block = (overrides: Partial<GatewayState> = {}, extra: Record<string, unkn
 const ap = (models: GatewayProviderModel[] = []) =>
   provider({ id: "ap", name: "ap-gateway", baseUrl: "https://ap-gateway.example.com/v1", models });
 const or = (unreachable?: string) =>
-  provider({ id: "or", name: "", baseUrl: "https://openrouter.ai/api/v1", unreachable });
+  provider({
+    id: "or",
+    name: "",
+    shortName: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    unreachable,
+  });
 
 /// 每一行的 HTML 片段，按出现顺序
 const rows = (html: string) => html.split(/(?=<div class="gw-row[" ])/).slice(1);
@@ -91,7 +97,7 @@ test("行：▸ + 短名；第二行 `地址 · 已连接 · 已选 1 / 2`（地
   const html = block({
     providers: [
       ap([model({ id: "azure/gpt-4.1", selected: true }), model({ id: "azure/o3" })]),
-      provider({ id: "ds", name: "", baseUrl: "https://api.deepseek.com" }),
+      provider({ id: "ds", name: "", shortName: "deepseek", baseUrl: "https://api.deepseek.com" }),
     ],
   });
   const [first, second] = rows(html);

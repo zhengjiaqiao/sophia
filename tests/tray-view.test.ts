@@ -201,8 +201,14 @@ test("「启动 Codex」：开着、Codex 没在跑、不等重启时出现；�
 
 // ===== 在用的模型一行 =====
 
-const gw = (id: string, name: string, baseUrl: string, models: GatewayProviderModel[]) =>
-  ({ id, name, baseUrl, hasKey: true, models }) as unknown as GatewayProvider;
+/// `shortName` 是 core 算好给过来的网关短名（settings.rs `short_name`）；不给就等于显示名
+const gw = (
+  id: string,
+  name: string,
+  baseUrl: string,
+  models: GatewayProviderModel[],
+  shortName = name,
+) => ({ id, name, shortName, baseUrl, hasKey: true, models }) as unknown as GatewayProvider;
 
 const named = (id: string, displayName: string): GatewayProviderModel => ({
   id,
@@ -229,11 +235,14 @@ test("在用的模型：开着时按网关顺序列已选的；关着是空（�
 });
 
 test("同名才加网关短名：两家都选了 GLM-4.6，只那两个名字后写短名，其余不写", () => {
-  const a = gw("a", "openrouter.ai", "https://openrouter.ai/api/v1", [
-    named("z-ai/glm-4.6", "GLM-4.6"),
-    named("moonshotai/kimi-k2", "Kimi K2"),
-  ]);
-  const b = gw("b", "", "https://api.zhipu.example.com/v1", [named("glm-4.6", "GLM-4.6")]);
+  const a = gw(
+    "a",
+    "openrouter.ai",
+    "https://openrouter.ai/api/v1",
+    [named("z-ai/glm-4.6", "GLM-4.6"), named("moonshotai/kimi-k2", "Kimi K2")],
+    "openrouter",
+  );
+  const b = gw("b", "", "https://api.zhipu.example.com/v1", [named("glm-4.6", "GLM-4.6")], "zhipu");
   const on = state({ enabled: true, provider: a, providers: [a, b] });
   assert.deepEqual(
     trayModels(on).map((m) => [m.name, m.gateway]),

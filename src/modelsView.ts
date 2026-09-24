@@ -89,8 +89,8 @@ export interface EffectiveModel {
   model: GatewayProviderModel;
   /**
    * 工具的模型选择器里**实际**显示的名字。
-   * 两家网关的已选模型显示名相同时，后端会自动加上「 · 网关名」
-   * （docs/gateway-commands.md）；片上写的得照抄那条规则，否则和 Codex 里看到的对不上。
+   * 两家网关的已选模型显示名相同时，后端会自动加上「 · 网关短名」
+   * （docs/gateway-commands.md）；后缀取 core 给的同一个 `shortName`，与 Codex 里看到的对得上。
    * ＝ `name` 或 `name · suffix`
    */
   label: string;
@@ -102,7 +102,7 @@ export interface EffectiveModel {
 
 /**
  * 全部网关里已选的模型，按网关顺序摊平：Codex 页「在用」一行的模型片、托盘的在用行都读它。
- * 撞名时的后缀用网关短名（与网关行的名字同一个取法，DESIGN「模型列表的写法」）
+ * 撞名时的后缀是网关短名（core 算的 `shortName`：网关行的名字、Codex 目录里的后缀都是它）
  */
 export function effectiveModels(state: GatewayState): EffectiveModel[] {
   const rows = state.providers.flatMap((provider) =>
@@ -266,40 +266,14 @@ function byFrozen(order: string[]) {
 
 // ===== 网关短名（DESIGN「模型列表的写法」：网关行的名字、同名模型片的后缀） =====
 
-const IP_HOST = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])$/i;
-
-/// 显示名本身像主机名（迁移来的网关被 core 命名为完整主机名，`openrouter.ai`）：不含空格、含点、能按主机名解析
-const HOST_LIKE = /^[a-z0-9.-]+(:\d+)?$/i;
-
 /**
- * 行尾的网关短名：显示名优先；显示名本身像主机名、或没有显示名时，按主机名取短名——
- * 去掉开头的 `api.` / `www.` 后取第一段（`ap-gateway.internal.example.com` → `ap-gateway`，
- * `https://openrouter.ai/api/v1` → `openrouter`，`localhost:4000` → `localhost`），IP 原样
+ * 网关短名：网关行的名字，也是两家撞名时模型片后缀、Codex 模型目录里「 · 网关名」的那个名字。
+ * **由 core 一处算**（`ProviderSettings::short_name`，经状态的 `shortName` 给过来），界面不再自己取——
+ * 否则 Sophia 与 Codex 里会看到两个名字（DESIGN「在用」⑤⑨）。取法：显示名优先；显示名像主机名或为空时
+ * 取主机名主体（`openrouter.ai` → `openrouter`）。`shortName` 缺省只会出现在测试样例里
  */
 export function gatewayShortName(provider: GatewayProvider): string {
-  const name = provider.name.trim();
-  if (name && !(name.includes(".") && HOST_LIKE.test(name) && hostOf(name))) return name;
-  const host = hostOf(name || provider.baseUrl);
-  if (!host) return provider.id;
-  if (IP_HOST.test(host)) return host;
-  const labels = host.split(".").filter(Boolean);
-  while (labels.length > 1 && (labels[0] === "api" || labels[0] === "www")) labels.shift();
-  return labels[0] || provider.id;
-}
-
-/// 地址里的主机名（小写）；没写协议的（`localhost:4000`）补上再解析
-function hostOf(baseUrl: string): string {
-  const raw = baseUrl.trim();
-  if (!raw) return "";
-  for (const candidate of [raw, `http://${raw}`]) {
-    try {
-      const host = new URL(candidate).hostname;
-      if (host) return host.toLowerCase();
-    } catch {
-      // 换下一种写法
-    }
-  }
-  return "";
+  return provider.shortName?.trim() || provider.name.trim() || provider.id;
 }
 
 /// 各服务商分组：组与组内的先后都按冻结的顺序，勾选变化不挪位置；按筛选词过滤，空组不出现

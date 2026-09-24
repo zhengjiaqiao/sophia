@@ -94,6 +94,94 @@ impl ProviderSettings {
     pub fn slug_of(&self, model_id: &str) -> String {
         provider_slug(&self.id, model_id)
     }
+
+    /// 网关短名（DESIGN「模型列表的写法 › 网关短名」）：Sophia 网关行上的名字，也是两家撞名时
+    /// 写进 Codex 模型目录的「 · 网关名」后缀——用户在两边看到同一个名字（⑤⑨），所以只在这里算一次，
+    /// 界面经状态里的 `shortName` 读它，不另写一份。
+    ///
+    /// 显示名优先；显示名本身像主机名（新建时没填名字、或旧格式迁移来的，都是完整主机名
+    /// `openrouter.ai`）或是空的，就按主机名取短名：去掉开头的 `api.` / `www.` 后取第一段
+    /// （`ap-gateway.internal.example.com` → `ap-gateway`，`https://openrouter.ai/api/v1` → `openrouter`），
+    /// IP 原样；什么都取不到时退到 id
+    pub fn short_name(&self) -> String {
+        let name = self.name.trim();
+        let host_like = name.contains('.') && is_host_like(name) && !host_of(name).is_empty();
+        if !name.is_empty() && !host_like {
+            return name.to_owned();
+        }
+        let host = host_of(if name.is_empty() {
+            &self.base_url
+        } else {
+            name
+        });
+        if host.is_empty() {
+            return self.id.clone();
+        }
+        if is_ip_host(&host) {
+            return host;
+        }
+        let mut labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
+        while labels.len() > 1 && matches!(labels[0], "api" | "www") {
+            labels.remove(0);
+        }
+        labels
+            .first()
+            .map_or_else(|| self.id.clone(), |l| (*l).to_owned())
+    }
+}
+
+/// 名字本身像主机名：只有字母数字、点、连字符，可带 `:端口`（不含空格、不含路径）
+fn is_host_like(name: &str) -> bool {
+    let (host, port) = match name.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (name, None),
+    };
+    let host_ok = !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    let port_ok = port.is_none_or(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+    host_ok && port_ok
+}
+
+/// 地址（或像地址的名字）里的主机名，小写；没写协议的（`localhost:4000`）也认。取不到是空串
+fn host_of(raw: &str) -> String {
+    let rest = raw.trim();
+    let rest = rest.split_once("://").map_or(rest, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, a)| a);
+    let host = if authority.starts_with('[') {
+        // IPv6 字面量带方括号原样保留（`[::1]`）
+        match authority.find(']') {
+            Some(end) => &authority[..=end],
+            None => return String::new(),
+        }
+    } else {
+        match authority.rsplit_once(':') {
+            Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host,
+            Some(_) => return String::new(),
+            None => authority,
+        }
+    };
+    let valid = host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '[' | ']' | ':'));
+    if host.is_empty() || !valid {
+        return String::new();
+    }
+    host.to_ascii_lowercase()
+}
+
+/// IPv4 四段数字，或方括号里的 IPv6
+fn is_ip_host(host: &str) -> bool {
+    if host.starts_with('[') && host.ends_with(']') {
+        return host.len() > 2;
+    }
+    let parts: Vec<&str> = host.split('.').collect();
+    parts.len() == 4
+        && parts
+            .iter()
+            .all(|p| (1..=3).contains(&p.len()) && p.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// 模型标识一律是「provider id - 模型名」：两家都提供同名模型也不会撞，
@@ -332,8 +420,9 @@ impl GatewaySettings {
             })
             .collect();
 
-        // 两家都有同名模型时，Codex 选择器里两行会一模一样：给撞名的加上网关名。
-        // 只看“跨网关”的撞名——同一家里的重名加了网关名也区分不了。标识不受影响。
+        // 两家都有同名模型时，Codex 选择器里两行会一模一样：给撞名的加上网关短名（与 Sophia 网关行、
+        // 模型片后缀同一个名字，`short_name`）。只看“跨网关”的撞名——同一家里的重名加了网关名也区分不了。
+        // 标识不受影响。
         let shown = |p: &Published| -> String {
             match p.model.display_name.as_deref().map(str::trim) {
                 Some(name) if !name.is_empty() => name.to_owned(),
@@ -354,10 +443,7 @@ impl GatewaySettings {
             }
             let provider_name = self
                 .provider(&published.provider)
-                .map(|provider| provider.name.trim())
-                .filter(|name| !name.is_empty())
-                .unwrap_or(&published.provider)
-                .to_owned();
+                .map_or_else(|| published.provider.clone(), ProviderSettings::short_name);
             published.model.display_name = Some(format!("{} · {provider_name}", shown(published)));
         }
         list
@@ -512,6 +598,122 @@ mod tests {
         );
         // 标识不受显示名影响
         assert_eq!(settings.published()[0].slug, "wecode-deepseek-v4");
+    }
+
+    /// 网关短名：显示名优先；否则主机名去掉 api. / www. 与顶级域；localhost、IP 原样。
+    /// 这张表原在前端（tests/models-view.test.ts），短名改由 core 一处算之后搬到这里
+    #[test]
+    fn short_name_prefers_the_display_name_then_the_host() {
+        let gw = |name: &str, base_url: &str| ProviderSettings {
+            id: "x".into(),
+            name: name.into(),
+            base_url: base_url.into(),
+            ..ProviderSettings::default()
+        };
+        let cases = [
+            ("ap-gateway", "https://api.openai.com/v1", "ap-gateway"),
+            ("", "https://openrouter.ai/api/v1", "openrouter"),
+            ("", "https://api.deepseek.com", "deepseek"),
+            ("", "https://www.example.com/v1", "example"),
+            ("", "localhost:4000", "localhost"),
+            ("", "http://localhost:4000/v1", "localhost"),
+            ("", "http://192.168.1.20:8080/v1", "192.168.1.20"),
+            ("", "10.0.0.2:4000", "10.0.0.2"),
+            (
+                "",
+                "https://ap-gateway.internal.example.com/v1",
+                "ap-gateway",
+            ),
+            ("", "http://[::1]:4000/v1", "[::1]"),
+            // 显示名像主机名（新建时没填名字、旧格式迁移来的都是完整主机名）也走短名规则
+            ("openrouter.ai", "", "openrouter"),
+            ("api.deepseek.com", "", "deepseek"),
+            ("ap-gateway.internal.example.com", "", "ap-gateway"),
+            ("127.0.0.1:8080", "", "127.0.0.1"),
+            // 不像主机名的显示名原样：含空格、不含点
+            ("My Gateway v1.2", "", "My Gateway v1.2"),
+            ("ap-gateway", "", "ap-gateway"),
+            ("  WeCode  ", "", "WeCode"),
+            // 什么都取不到时退到 id
+            ("  ", "", "x"),
+        ];
+        for (name, base_url, want) in cases {
+            assert_eq!(
+                gw(name, base_url).short_name(),
+                want,
+                "{name:?} / {base_url:?}"
+            );
+        }
+    }
+
+    /// 撞名后缀＝网关短名，与 Sophia 网关行、模型片后缀同一个名字（DESIGN「在用」⑤⑨）。
+    /// 旧格式迁移来的一家名字是完整主机名：后缀取短名，不是 `· ap-gateway.example`
+    #[test]
+    fn clash_suffix_is_the_short_name_also_for_migrated_and_unnamed_providers() {
+        let mut settings: GatewaySettings = serde_json::from_value(json!({
+            "baseUrl": "https://ap-gateway.example/openai",
+            "models": [{"id": "glm-5", "displayName": "GLM-5", "selected": true}]
+        }))
+        .expect("json");
+        let mut other = saved("glm-5", true);
+        other.model.display_name = Some("GLM-5".into());
+        settings.providers.push(ProviderSettings {
+            id: "openrouter-ai".into(),
+            // 新建时没填名字：core 用地址的主机名当显示名（gateway upsert_provider）
+            name: "openrouter.ai".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            models: vec![other],
+            ..ProviderSettings::default()
+        });
+        let names: Vec<Option<String>> = settings
+            .published()
+            .into_iter()
+            .map(|p| p.model.display_name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                Some("GLM-5 · ap-gateway".to_owned()),
+                Some("GLM-5 · openrouter".to_owned()),
+            ]
+        );
+    }
+
+    /// 升级后读已有的设置：存下的内容不变、不需要迁移——后缀只在写目录时算，
+    /// 目录指纹（判断要不要重启 Codex）仍是上次写的那份，读一遍状态不会平白提示重启
+    #[test]
+    fn existing_settings_read_back_unchanged_after_the_suffix_rule_moved_to_short_names() {
+        let stored = json!({
+            "providers": [
+                {"id": "wecode", "name": "WeCode", "baseUrl": "https://a.example",
+                 "models": [{"id": "glm", "selected": true}]},
+                {"id": "openrouter-ai", "name": "openrouter.ai", "baseUrl": "https://openrouter.ai/api/v1",
+                 "models": [{"id": "glm", "selected": true}]}
+            ],
+            "port": 47328,
+            "publishedSlugs": ["wecode-glm", "openrouter-ai-glm"],
+            "catalogFingerprint": "abc",
+            "history": [{"at": 10, "enabled": true, "catalog": "abc"}]
+        });
+        let settings: GatewaySettings = serde_json::from_value(stored.clone()).expect("json");
+        assert_eq!(
+            settings.providers[1].name, "openrouter.ai",
+            "显示名原样，不改写"
+        );
+        assert_eq!(settings.catalog_fingerprint, "abc");
+        assert_eq!(settings.needs_codex_restart(20), Some(false));
+        // 标识不受后缀影响：已选模型在 Codex 里不会失效
+        let slugs: Vec<String> = settings.published().into_iter().map(|p| p.slug).collect();
+        assert_eq!(slugs, ["wecode-glm", "openrouter-ai-glm"]);
+        // 再存一次写回的名字、地址与读进来的一样：没有要迁移的字段
+        let value = serde_json::to_value(&settings).expect("json");
+        for (i, provider) in stored["providers"].as_array().unwrap().iter().enumerate() {
+            for key in ["id", "name", "baseUrl"] {
+                assert_eq!(value["providers"][i][key], provider[key], "{key}");
+            }
+        }
+        let back: GatewaySettings = serde_json::from_value(value).expect("json");
+        assert_eq!(back, settings);
     }
 
     /// 同一家里两个模型起了同样的显示名，加网关名也区分不了，就不动它

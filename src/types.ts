@@ -454,6 +454,9 @@ export interface GatewayProvider {
   id: string;
   /** 显示名，可以改 */
   name: string;
+  /** 网关短名（core `ProviderSettings::short_name`）：网关行的名字，也是撞名模型的后缀——与 Codex 目录里同一个。
+   *  界面经 `gatewayShortName` 读它，不自己算 */
+  shortName: string;
   baseUrl: string;
   /** 这家网关的协议："chat" 或 "responses" */
   protocol: string;

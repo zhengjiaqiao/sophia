@@ -1271,6 +1271,66 @@ fn two_providers_coexist_with_their_own_ids_keys_and_prefixed_slugs() {
     assert!(!saved.contains("sk-wecode") && !saved.contains("sk-other"));
 }
 
+/// 撞名模型在 Codex 目录里的后缀与状态里的 `short_name` 是同一个名字（界面网关行、模型片后缀都读它）：
+/// 新建时没填名字的那家，显示名是完整主机名，两边都写短名 `other`，不是 `other.example`
+#[test]
+fn the_catalog_suffix_for_clashing_models_is_the_short_name_the_ui_shows() {
+    let f = fixture();
+    f.world.lock().unwrap().key = None;
+    let a = f
+        .app
+        .commit_verified_provider_for(
+            None,
+            Some("WeCode"),
+            "https://wecode.example/openai",
+            "sk-wecode-key-123456",
+            vec!["deepseek/v4".into()],
+            "https://wecode.example/openai/v1",
+        )
+        .unwrap();
+    let b = f
+        .app
+        .commit_verified_provider_for(
+            None,
+            None,
+            "https://api.other.example/v1",
+            "sk-other-key-1234567",
+            vec!["deepseek/v4".into()],
+            "",
+        )
+        .unwrap();
+    f.app.set_models_for(&a, vec![pick("deepseek/v4")]).unwrap();
+    f.app.set_models_for(&b, vec![pick("deepseek/v4")]).unwrap();
+    f.app.enable().unwrap();
+
+    let state = f.app.state();
+    assert_eq!(state.providers[1].name, "api.other.example", "显示名原样");
+    let short: Vec<&str> = state
+        .providers
+        .iter()
+        .map(|p| p.short_name.as_str())
+        .collect();
+    assert_eq!(short, ["WeCode", "other"]);
+
+    let doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(f.codex().join("symsync-models.json")).unwrap())
+            .unwrap();
+    let names: Vec<&str> = doc["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(1) // 官方模型
+        .map(|m| m["display_name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            format!("deepseek/v4 · {}", short[0]),
+            format!("deepseek/v4 · {}", short[1])
+        ]
+    );
+}
+
 #[test]
 fn state_lists_every_provider_and_keeps_the_first_one_for_the_old_ui() {
     let f = fixture();
@@ -1717,7 +1777,9 @@ fn retrying_one_provider_leaves_the_others_alone() {
     let f = fixture();
     let (a, b) = two_providers(&f);
     f.app.record_unreachable_for(&a, "地址无法访问").unwrap();
-    f.app.record_unreachable_for(&b, "密钥无效，请换一个密钥").unwrap();
+    f.app
+        .record_unreachable_for(&b, "密钥无效，请换一个密钥")
+        .unwrap();
 
     f.app
         .merge_fetched_models_for(&b, vec!["deepseek/v4".into()], "")
@@ -1729,13 +1791,18 @@ fn retrying_one_provider_leaves_the_others_alone() {
     );
     assert_eq!(state.providers[1].unreachable, None);
 
-    f.app.record_unreachable_for(&b, "密钥无效，请换一个密钥").unwrap();
+    f.app
+        .record_unreachable_for(&b, "密钥无效，请换一个密钥")
+        .unwrap();
     f.app
         .merge_fetched_models(vec!["glm-5".into()], "")
         .unwrap();
     let state = f.app.state();
     assert_eq!(state.providers[0].unreachable, None, "旧命令作用在第一家");
-    assert_eq!(state.providers[1].unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
+    assert_eq!(
+        state.providers[1].unreachable.as_deref(),
+        Some("密钥无效，请换一个密钥")
+    );
 
     f.app.record_unreachable("地址无法访问").unwrap();
     assert_eq!(
