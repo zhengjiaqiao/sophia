@@ -15,7 +15,7 @@ import type { GatewayProvider } from "./types.ts";
 import { Button, CheckboxGlyph } from "./ui/index.ts";
 import "./ModelList.css";
 
-/// 模型勾选列表：Codex 页网关行展开区里的那一框（DESIGN「模型列表的写法」）。每个列表只列一家网关
+/// 模型勾选列表：Codex 页网关行抽屉里的那一框（DESIGN「模型列表的写法」）。每个列表只列一家网关
 
 export interface ModelListProps {
   /// 要列的模型：这一家网关的全部模型
@@ -30,7 +30,7 @@ export const entryKey = modelEntryKey;
 /**
  * 默认一列名称，行上没有提示框；友好名与 id 明显不同时行尾才写 id（`modelRowId`）。
  * 按服务商分小组头 `azure · 12`，一家一个也有；行内去掉重复前缀；行尾不写网关短名（只列一家）。
- * 已选不在列表里另列一组：已选由「在用」一行的模型片表达。
+ * 已选不在列表里另列一组：已选由列表上方这一家的 `已选` 模型片（与节头 `在用` 同一种片）表达。
  * 打开（挂载）时排一次序（组内已选在前），之后勾选 / 取消不挪位置，下次打开再重排。
  * 勾选当场写盘；超过约 8 行时框顶出筛选框（`筛选 40 个模型`），列表在框内滚动、底边渐隐。
  */
@@ -73,6 +73,8 @@ export function ModelList({ entries, onToggle, empty }: ModelListProps) {
       <div
         key={key}
         className="models-option"
+        // 行悬停时方框进「手靠近」态（ui 的统一钩子）
+        data-checkrow=""
         aria-label={name}
         role="option"
         aria-selected={model.selected}
@@ -85,7 +87,7 @@ export function ModelList({ entries, onToggle, empty }: ModelListProps) {
           }
         }}
       >
-        {/* 13px 方框只画状态（方＝我选的，全应用同一个记号）；命中区是整行，读屏走 aria-selected */}
+        {/* 16px 勾选框只画状态（勾上＝墨底白勾，全应用同一个记号）；命中区是整行，读屏走 aria-selected */}
         <span
           className={`ss-checkbox models-option__check${model.selected ? " is-on" : ""}`}
           aria-hidden="true"
@@ -145,7 +147,7 @@ export function ModelList({ entries, onToggle, empty }: ModelListProps) {
             {groups.length === 0 ? (
               <p className="model-list__empty">
                 没有匹配的模型
-                <Button variant="quiet" onClick={() => setQuery("")}>
+                <Button size="compact" onClick={() => setQuery("")}>
                   清除筛选
                 </Button>
               </p>

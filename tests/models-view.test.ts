@@ -508,13 +508,13 @@ const slotProps = (overrides: Partial<GatewayState> = {}) => ({
   onRestart: noop,
 });
 
-test("SectionSwitch：标准开关（指示点在左）；开关＝配置里开没开；关着时提示框写打开的结果", () => {
+test("SectionSwitch：标准开关（旁边不点指示点，开着由刻线说）；开关＝配置里开没开；关着时提示框写打开的结果", () => {
   const on = render(SectionSwitch, switchProps(withSelected({ enabled: true })));
   assert.match(
     on,
     /role="switch" aria-checked="true"[^>]*class="ss-switch ss-switch--regular is-on"/,
   );
-  assert.match(on, /ss-indicator is-on/);
+  assert.doesNotMatch(on, /ss-indicator/);
   const off = render(SectionSwitch, switchProps(withSelected()));
   assert.match(off, /role="switch" aria-checked="false"/);
   assert.match(off, /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里</);
@@ -526,8 +526,10 @@ test("SectionSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去
     busy: true,
     phase: { kind: "switching", next: true },
   });
-  assert.match(on, /role="switch" aria-checked="true"/);
-  assert.match(on, /ss-indicator is-on/);
+  assert.match(
+    on,
+    /role="switch" aria-checked="true"[^>]*class="ss-switch ss-switch--regular is-on"/,
+  );
   assert.match(on, /role="tooltip"[^>]*>关掉后，Codex 只保留官方模型</);
   const off = render(SectionSwitch, {
     ...switchProps(withSelected({ enabled: true })),
@@ -566,7 +568,7 @@ test("SectionSwitch 拨开关之后：开关原位锁住（过了 0.3 秒门槛�
   assert.doesNotMatch(html, /ss-spinner/);
 });
 
-test("RestartSlot（节头里紧跟开关）：待重启出紧凑键「重启生效」（与节头里的 卸下后台服务 同高），提示框写后果与代价、左对齐键", () => {
+test("RestartSlot（节头里开关左边 12）：待重启出紧凑键「重启生效」（与 卸下后台服务 同位同高），提示框写后果与代价、右对齐", () => {
   const html = render(
     RestartSlot,
     slotProps(withSelected({ enabled: true, needsCodexRestart: true })),
@@ -575,25 +577,34 @@ test("RestartSlot（节头里紧跟开关）：待重启出紧凑键「重启生
   assert.match(html, /role="tooltip"[^>]*>重启 Codex 桌面应用让改动生效，进行中的对话会中断</);
   assert.equal(render(RestartSlot, slotProps(withSelected({ enabled: true }))), "");
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
-  const slot = src.slice(src.indexOf("export function RestartSlot"), src.indexOf("// ===== 节头：开关"));
-  assert.doesNotMatch(slot, /align="end"/, "键在开关右边：提示框、✓ 已生效都左对齐键");
-  assert.match(slot, /<FloatingToast align="start">/);
+  const slot = src.slice(
+    src.indexOf("export function RestartSlot"),
+    src.indexOf("// ===== 节头：开关"),
+  );
+  assert.doesNotMatch(slot, /align="start"/, "键在右端控件列：提示框、✓ 已生效都右对齐");
+  assert.match(slot, /<FloatingToast align="end" anchor=\{controlsOf\}>/);
 });
 
-test("第三方模型节头：开关 + 16 + 重启生效 / 启动 Codex 成组（不在页面头右端）；重启确认锚在键下、左对齐", () => {
+test("第三方模型节头：右端开关，开关左边 12 是 重启生效 / 启动 Codex / 卸下后台服务（同一位）；重启确认锚在键下、右对齐开关", () => {
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(src, /PageHeadActions/);
+  assert.doesNotMatch(src, /PageHeadActions|models-headctl/);
   assert.match(
     src,
-    /control=\{[^]*<span className="models-headctl">\s*<SectionSwitch[^]*<RestartSlot[^]*<\/span>\s*\}\s*actions=/,
+    /control=\{[^}]*<SectionSwitch[^]*actions=\{[^]*<RestartSlot[^]*\{uninstallKey\}/,
   );
   assert.match(
     src,
-    /onRestart=\{\(\) => setConfirmRestart\(anchorOf\(keyEl\.current\) \?\? null\)\}/,
+    /onRestart=\{\(\) => setConfirmRestart\(restartAnchor\(keyEl\.current\) \?\? null\)\}/,
   );
-  assert.match(src, /anchor=\{confirmRestart\}\s*onConfirm=/, "不再传 align=end：默认左对齐");
-  const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
-  assert.match(css, /\.models-headctl \{[^}]*gap: var\(--space-md\);/);
+  assert.match(src, /anchor=\{confirmRestart\}\s*align="end"\s*onConfirm=/);
+  // 节头骨架：右端控件列（键 12 开关，开关在最右）
+  const section = readFileSync(new URL("../src/ui/Section.tsx", import.meta.url), "utf8");
+  assert.match(
+    section,
+    /ss-section__end" data-section-controls="">[^]*ss-section__actions[^]*ss-section__control/,
+  );
+  const css = readFileSync(new URL("../src/ui/Section.css", import.meta.url), "utf8");
+  assert.match(css, /\.ss-section__end \{[^}]*gap: var\(--space-sm\);[^}]*margin-left: auto;/);
 });
 
 test("RestartSlot 重启中：0.3 秒门槛之前键照旧、点不动；已生效：键的原位下方浮起白窗", () => {

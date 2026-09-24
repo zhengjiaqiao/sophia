@@ -1,5 +1,6 @@
 /* 模型勾选列表（DESIGN「模型列表的写法」）：Codex 页网关行展开区里的那一框，一个列表只列一家网关。
-   色值一律 var(--…)，唯一来源是 tokens.css。框本身（paper 面、hairline 边、12 圆角、宽 440）在 ModelsTab.css */
+   色值一律 var(--…)，唯一来源是 tokens.css。框本身（paper 面、hairline 边、12 圆角、宽 440）在 ModelsTab.css，
+   它放在网关行的抽屉（recess 凹槽）里 */
 @import "./tokens.css";
 
 .model-list {
@@ -129,7 +130,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 一个模型一行：高 34 = 13px 复选框 + 模型名（body），整行是命中区，悬停 surface */
+/* 一个模型一行：高 34 = 16px 勾选框 + 模型名（body），整行是命中区，悬停 surface（勾选框随行进「手靠近」） */
 .models-option {
   display: flex;
   flex: 1;

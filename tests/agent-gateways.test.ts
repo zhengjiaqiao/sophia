@@ -13,7 +13,7 @@ import {
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
 
 // 网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进 Codex 页「第三方模型」一节）：
-// 小标 `网关` + `+ 网关`、一家一行、点整行展开挑模型、表单在行里就地展开
+// 小标 `网关` + `+ 网关`、一家一行（两列 内容 ｜ 行尾动作）、点整行拉开抽屉挑模型、表单在行的抽屉里就地展开
 
 const model = (overrides: Partial<GatewayProviderModel> = {}): GatewayProviderModel => ({
   id: "gpt-x",
@@ -93,7 +93,7 @@ test("骨架：小标 `网关` + 右端 `+ 网关`（默认键），一家一行
   assert.doesNotMatch(html, /ss-subpage|Codex 的网关|src-row/);
 });
 
-test("行：▸ + 短名；第二行 `地址 · 已连接 · 已选 1 / 2`（地址去掉协议头，截断才提示）；行尾 `编辑` + 垃圾桶", () => {
+test("行：短名 + 拉手（悬停才出）；第二行 `地址 · 已连接 · 已选 1 / 2`（地址去掉协议头，截断才提示）；行尾铅笔 + 垃圾桶（一对图标键）", () => {
   const html = block({
     providers: [
       ap([model({ id: "azure/gpt-4.1", selected: true }), model({ id: "azure/o3" })]),
@@ -101,18 +101,21 @@ test("行：▸ + 短名；第二行 `地址 · 已连接 · 已选 1 / 2`（地
     ],
   });
   const [first, second] = rows(html);
-  // 名字格整块是展开键（点整行展开）；进这一页时每行都收着
-  assert.match(first, /<button type="button" class="gw-row__name" aria-expanded="false">/);
-  assert.doesNotMatch(html, /gw-row__body|is-open/);
-  assert.match(first, /gw-row__label">ap-gateway</);
+  // 点整行拉开抽屉：行是拉手的悬停钩子；名字 + 拉手（收着朝下）；进这一页时每行都收着
+  assert.match(first, /<div class="gw-row__main" data-drawer-row="">/);
+  assert.match(
+    first,
+    /gw-row__title"><span class="gw-row__label">ap-gateway<\/span><button type="button" class="ss-drawerhandle" aria-label="ap-gateway 的模型" aria-expanded="false" aria-controls="gw-drawer-ap">/,
+  );
+  assert.doesNotMatch(html, /gw-row__body|is-open|gw-row__caret|gw-row__name/);
   assert.match(first, /gw-row__url">ap-gateway\.example\.com\/v1</);
   assert.match(first, /gw-row__fact"> · 已连接 · 已选 1 \/ 2</);
   assert.doesNotMatch(first, /gw-row__url[^]*aria-describedby/);
   assert.match(
     first,
-    /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--quiet"[^>]*>编辑</,
+    /gw-row__actions">(<span[^>]*>)?<button type="button" class="ss-iconbtn" title="编辑" aria-label="编辑">[^]*aria-label="删掉 ap-gateway"/,
   );
-  assert.match(first, /aria-label="删掉 ap-gateway"/);
+  assert.doesNotMatch(html, /ss-btn--quiet/);
   // 没拉到模型时不写「已选」
   assert.match(second, /gw-row__label">deepseek</);
   assert.match(second, /gw-row__fact"> · 已连接<\/span>/);
@@ -120,7 +123,7 @@ test("行：▸ + 短名；第二行 `地址 · 已连接 · 已选 1 / 2`（地
   assert.equal(displayUrl("https://openrouter.ai/api/v1/"), "openrouter.ai/api/v1");
 });
 
-test("展开区＝从这家挑模型：限制说明（全文）→ 勾选列表；勾选没写成的灰面板在这一段里；没有已选片（已选由在用行表达）", () => {
+test("抽屉＝从这家挑模型：限制说明（全文）→ 这一家的 `已选` 模型片 → 勾选列表；勾选没写成的灰面板在这一段里", () => {
   const html = block(
     {
       enabled: true,
@@ -140,22 +143,36 @@ test("展开区＝从这家挑模型：限制说明（全文）→ 勾选列表�
   );
   const [first, second] = rows(html);
   assert.match(first, /^<div class="gw-row is-open"/);
+  assert.match(first, /class="ss-drawer is-open gw-row__drawer" id="gw-drawer-ap"/);
+  assert.match(first, /ss-drawerhandle is-open"[^>]*aria-expanded="true"/);
   const note = first.indexOf("gw-row__note");
+  const chosen = first.indexOf("gw-row__chosen");
   const notice = first.indexOf("没加上 o3");
   const list = first.indexOf("gw-row__list");
-  assert.ok(note > 0 && note < notice && notice < list);
+  assert.ok(note > 0 && note < chosen && chosen < notice && notice < list);
   assert.match(
     first,
     /gw-row__note">只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了</,
   );
-  assert.doesNotMatch(first, /ss-modelchip|gw-row__chosen/);
+  // 已选：与节头 `在用` 同一种片（白胶囊带 ×），只列这一家已选的两个
+  assert.match(first, /gw-row__chosen"><span class="models-inuse__label">已选<\/span>/);
+  assert.equal((first.match(/class="ss-modelchip"/g) ?? []).length, 2);
+  assert.match(first, /aria-label="移除 azure\/gpt-4\.1"[^]*aria-label="移除 zhipu\/glm-4\.6"/);
   assert.equal((first.match(/role="option"/g) ?? []).length, 3);
+  assert.equal((first.match(/data-checkrow=""/g) ?? []).length, 3, "勾选框行挂悬停钩子");
   assert.doesNotMatch(first, /models-option__gateway/);
   // ap 是最后一家还在供模型的：垃圾桶禁用，按下即出原因
   assert.match(first, /role="tooltip"[^>]*>Codex 还在用它的 2 个模型，先关掉第三方模型再删</);
   // 各自独立：没展开的那一行收着
   assert.match(second, /aria-expanded="false"/);
-  assert.doesNotMatch(second, /gw-row__body/);
+  assert.doesNotMatch(second, /gw-row__body|gw-row__chosen/);
+  // 一个都没选的一家：抽屉里没有 `已选` 这一行
+  const none = block(
+    { providers: [ap([model({ id: "azure/o3" })])] },
+    { expanded: new Set(["ap"]) },
+  );
+  assert.match(none, /gw-row__note/);
+  assert.doesNotMatch(none, /gw-row__chosen|ss-modelchip/);
 });
 
 test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏进悬停），行尾动作列出 `再试一次`；展开区说还没拉到模型", () => {
@@ -168,7 +185,7 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
   assert.doesNotMatch(down, /已连接/);
   assert.match(
     down,
-    /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*>编辑</,
+    /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*class="ss-iconbtn" title="编辑"/,
   );
   assert.match(down, /gw-row__none">无法连接，还没拉到模型</);
   assert.deepEqual(gatewayFacts(or(reason)), {
@@ -188,7 +205,7 @@ test("没有网关：小标下一句「还没有网关，先加一家」，不�
   assert.equal(ADD_GATEWAY_BLOCKED, "先保存或取消正在添加的网关");
 });
 
-test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（安静键）；只读 `本机端口 47328` `协议 拉取模型时识别`", () => {
+test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默认键，抽屉里紧凑）；只读 `本机端口 47328` `协议 拉取模型时识别`", () => {
   const html = render(GatewayForm, {
     state: state(),
     provider: null,
@@ -203,7 +220,9 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（安
   assert.match(html, /gw-form__label">地址<[^]*placeholder="https:\/\/example.com\/openai\/v1"/);
   assert.match(html, /gw-form__label">密钥<[^]*placeholder="粘贴密钥，存进钥匙串"/);
   assert.match(html, /title="先填地址" disabled=""/);
-  assert.match(html, /class="ss-btn ss-btn--quiet"[^>]*>取消</);
+  assert.match(html, /class="ss-btn ss-btn--primary ss-btn--compact"[^>]*>保存</);
+  assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>取消</);
+  assert.doesNotMatch(html, /ss-btn--quiet/);
   assert.match(html, /本机端口 <span class="gw-form__value">47328<\/span>/);
   assert.match(html, /协议 <span class="gw-form__value">拉取模型时识别<\/span>/);
   assert.equal(protocolText("chat"), "Responses → Chat Completions");
@@ -221,7 +240,7 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（安
   });
   assert.match(
     ask,
-    /gw-form__ask" role="status">地址改动没保存<[^]*>保存<[^]*ss-btn--quiet[^>]*>丢弃</,
+    /gw-form__ask" role="status">地址改动没保存<[^]*>保存<[^]*class="ss-btn ss-btn--compact"[^>]*>丢弃</,
   );
   assert.doesNotMatch(ask, />取消</);
 });

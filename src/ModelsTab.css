@@ -1,6 +1,7 @@
-/* Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，画板 V4Layouts-models*）。
-   节的骨架（节头、页面头下 24、节间 48）在 ui/Section.css；这里是这一节自己的东西：
-   开关那一格与紧跟它的 重启生效 / 启动 Codex、在用行、行内待办条、网关小区块与网关行里的表单。
+/* Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，画板 06 / 07 / 08 / 19）。
+   节的骨架（节头：左节名、右端控件列＝开关 + 开关左边 12 的键）在 ui/Section.css；页宽 776 与节间距归外壳。
+   这里是这一节自己的东西：开关与它左边的 重启生效 / 启动 Codex / 卸下后台服务、在用行、行内待办条、
+   网关小区块、网关行的抽屉与表单。一条左沿、一列控件：所有控件的右沿在同一条竖线上。
    色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
@@ -13,14 +14,7 @@
   color: var(--ink-mute);
 }
 
-/* ===== 节头：开关 + 16 + 重启生效 / 启动 Codex（手刚拨完开关，下一步就在它旁边） ===== */
-.models-headctl {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-md);
-}
-
-/* 节头里的开关：开关 / 写配置超过 0.3 秒时原位转圈 +「正在添加」 */
+/* 节头右端的开关：开关 / 写配置超过 0.3 秒时原位刻度 +「正在添加」 */
 .models-switch {
   display: inline-flex;
   align-items: center;
@@ -32,7 +26,7 @@
   color: var(--ink-mute);
 }
 
-/* ===== 紧跟开关的 重启生效 / 启动 Codex、节头右端的 卸下后台服务（都是紧凑 24）：忙碌时原位转圈 + 一句 ===== */
+/* ===== 开关左边 12：重启生效 / 启动 Codex / 卸下后台服务（同一位，都是紧凑 24）：忙碌时原位刻度 + 一句 ===== */
 .models-restart {
   display: inline-flex;
   align-items: center;
@@ -47,7 +41,7 @@
   color: var(--ink-mute);
 }
 
-/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在它正下方 4、左沿对齐原来的键 */
+/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在节头控件列正下方 4、右沿对齐开关 */
 .models-restart--done {
   display: inline-block;
   width: 0;
@@ -58,33 +52,44 @@
   display: inline-flex;
 }
 
-/* ===== 节里的灰面板：节头下（开关、重启、启动、卸下没成），在用行下（行内待办条） ===== */
-.models-notice {
-  display: flex;
-  margin-top: var(--space-sm);
-}
-
+/* ===== 节里的灰面板：节头下（开关、重启、启动、卸下没成），在用行下（行内待办条）。
+   满宽 776、键在右端控件列（主句占满中间，键被推到右沿），节头下 12 ===== */
+.models-notice,
 .models-todos {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+}
+
+.models-notice .ss-noticepanel,
+.models-todos .ss-noticepanel {
+  display: flex;
+  align-self: stretch;
+}
+
+.models-notice .ss-noticepanel__message,
+.models-todos .ss-noticepanel__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+}
+
+/* ===== 在用：`在用`（12 / 500 ink-mute）+ 8 + 模型片（白胶囊高 26，片间 6，折行不藏）。节头下 12 ===== */
+.models-inuse {
+  display: flex;
   align-items: flex-start;
   gap: var(--space-xs);
   margin-top: var(--space-sm);
 }
 
-/* ===== 在用：`在用`（12 / 500 ink-mute，定宽 36）+ 模型片（高 24，片间 8，折行不藏） ===== */
-.models-inuse {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-sm);
-  margin-top: var(--space-sm);
-}
-
+/* 标签与第一行片同高居中（片高 26） */
 .models-inuse__label {
-  flex: 0 0 36px;
+  flex: none;
   font-size: var(--size-label);
   font-weight: 500;
-  line-height: var(--control-h-compact);
+  line-height: 26px;
   color: var(--ink-mute);
   white-space: nowrap;
 }
@@ -92,7 +97,7 @@
 .models-inuse__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-xs);
+  gap: 6px;
   min-width: 0;
 }
 
@@ -129,7 +134,7 @@
   color: var(--ink-mute);
 }
 
-/* ===== 一家网关一行：行间 1px row-line；三列 ▸ 20 ｜ 内容 ｜ 行尾动作（间距 12） ===== */
+/* ===== 一家网关一行：行间 1px row-line；两列 内容 ｜ 行尾动作（间距 4）。网关名在页面唯一的左沿上 ===== */
 .gw-row {
   border-bottom: 1px solid var(--row-line);
 }
@@ -175,40 +180,18 @@
   background: var(--surface);
 }
 
-/* 名字格整块可点（点整行展开）：▸ + 名字 + 第二行灰字 */
-.gw-row__name {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: start;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-ui);
-  text-align: left;
-}
-
-.gw-row__name:focus-visible {
-  outline: 1px solid var(--ink);
-  outline-offset: 2px;
-}
-
-html[data-input="pointer"] .gw-row__name:focus-visible {
-  outline: none;
-}
-
-/* ▸ 与主视图展开记号同一个（Matrix 的 Disclosure），对齐名字第一行 */
-.gw-row__caret {
-  display: flex;
-  align-items: center;
-  height: calc(var(--size-body) * 1.5);
-  color: var(--ink);
-}
-
+/* 内容格（点整行拉开抽屉）：名字 + 6 + 拉手，第二行灰字 */
 .gw-row__text {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+/* 名字被截断时拉手跟在省略号后面 */
+.gw-row__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -216,6 +199,7 @@ html[data-input="pointer"] .gw-row__name:focus-visible {
   overflow: hidden;
   font-size: var(--size-body);
   line-height: 1.5;
+  color: var(--ink);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -264,33 +248,25 @@ html[data-input="pointer"] .gw-row__name:focus-visible {
 .gw-row__actions {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-xxs);
 }
 
 .gw-row__trash {
   display: inline-flex;
 }
 
-/* 展开区与行里的表单：在这一行的线以内，左沿对齐网关名（▸ 列 20），上距 10、行底 12 */
-.gw-row__body,
-.gw-row__form {
-  padding: 10px 0 var(--space-sm) 20px;
-}
-
+/* 抽屉（ui/Drawer 的凹槽）：左沿对齐网关名（名字就在左沿上，不另缩进），距第二行 10（4 + 抽屉上 6）。
+   行线归这一行（.gw-row 的下边），抽屉自己不再画一条 */
 .gw-row.is-open .gw-row__main {
-  padding-bottom: 0;
+  padding-bottom: var(--space-xxs);
 }
 
-/* 编辑中：名字位不是展开键，行也不出悬停带 */
-.gw-row__name.is-static {
-  pointer-events: none;
+.gw-row__drawer .ss-drawer__room {
+  border-bottom: 0;
 }
 
+/* 拉开着、或表单开着：这一行不出悬停带 */
 .gw-row.is-open .gw-row__main:hover {
-  background: none;
-}
-
-.gw-row__main:hover:has(.gw-row__name.is-static) {
   background: none;
 }
 
@@ -320,6 +296,11 @@ html[data-input="pointer"] .gw-row__name:focus-visible {
   color: var(--ink-mute);
 }
 
+/* 这一家的 `已选`（与节头 `在用` 同一种片）：上下 10 */
+.models-inuse.gw-row__chosen {
+  margin: 10px 0 0;
+}
+
 /* 勾选没写成 / 删 / 重连没成的灰面板 */
 .gw-row__panel {
   display: flex;
@@ -327,7 +308,7 @@ html[data-input="pointer"] .gw-row__name:focus-visible {
 }
 
 .gw-row__panel--error {
-  padding: 0 0 var(--space-sm) 20px;
+  padding-bottom: var(--space-sm);
 }
 
 /* ===== 编辑 / 新增：表单在行里就地展开。`地址` `密钥`（12 ink-mute 定宽 44）+ 输入框 360 × 28 凹面 ===== */
