@@ -38,7 +38,8 @@
   min-width: 0;
 }
 
-/* 一行 = 复选框 13 + 10 + 图标 16 + 10 + 名字（body），行高 36；整行是命中区，悬停 surface 底 */
+/* 一行 = 勾选框 16 + 10 + 图标 16 + 10 + 名字（body），行高 36；整行是命中区，悬停 surface 底，
+   方框随行「手靠近」（data-checkrow，样子在组件里） */
 .settings-page__row {
   display: flex;
   align-items: center;
@@ -59,10 +60,6 @@
 .settings-page__row:hover,
 .settings-page__row.is-noted {
   background: var(--surface);
-}
-
-.settings-page__row:hover .ss-checkbox {
-  border-color: var(--ink);
 }
 
 .settings-page__row:focus-visible {
@@ -89,10 +86,6 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   background: none;
 }
 
-.settings-page__row:disabled .ss-checkbox {
-  border-color: var(--hairline);
-}
-
 .settings-page__name {
   overflow: hidden;
   font-size: var(--size-body);
@@ -101,7 +94,7 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* `显示未安装的 32 个`：安静键，上 10 */
+/* `显示未安装的 32 个`：默认键紧凑，上 10 */
 .settings-page__more {
   margin-top: 10px;
 }
@@ -133,13 +126,12 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
 .settings-page__hidden-note {
   display: inline-flex;
   align-items: center;
-  /* 安静键命中区左右各外扩 6（负外边距），gap 6 看起来约一个空格宽 */
-  gap: 6px;
+  gap: var(--space-xs);
   font-size: var(--size-caption);
   color: var(--ink-mute);
 }
 
-/* 关于：版本 + 0.1.0（mono ink-faint）+ 14 + 检查更新（安静键） */
+/* 关于：版本 + 0.1.0（mono ink-faint）+ 14 + 检查更新（默认键紧凑） */
 .settings-page__about {
   display: flex;
   align-items: center;
@@ -160,10 +152,16 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   user-select: text;
 }
 
-/* 键与它下方浮起的 `✓ 已是最新版本` 的锚（安静键自带 -6 外边距，字与版本号正好隔 14） */
+/* 键与它下方浮起的 `✓ 已是最新版本` 的锚 */
 .settings-page__check {
   position: relative;
   display: inline-flex;
+}
+
+/* `重新显示新手提示`：检查更新那一行下、左对齐 */
+.settings-page__hints {
+  display: flex;
+  margin-top: 10px;
 }
 
 /* 更新待办条：关于下，上距 14 */

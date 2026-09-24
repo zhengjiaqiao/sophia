@@ -9,6 +9,7 @@ import { AgentIcon, BusySlot, NoticePanel, Button, FloatingToast, Toast, Tooltip
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { updateCheckFailure } from "../updateText.ts";
+import { resetHints, useHasAnySeen } from "../hints.ts";
 import { ShellPage } from "../shell/PageHead.tsx";
 import "./SettingsPage.css";
 
@@ -16,11 +17,12 @@ import "./SettingsPage.css";
 /// **只替换机面，侧栏不消失**（D6）。页面头 `设置`，右端没有动作。
 /// 它只回答一个问题——**这个 agent 出不出现在列表里**。
 ///
-/// `列表里的 agent · 最多 4 个`：复选框列表，三列等分、按行读，一行＝13px 复选框 + 10 + 16px 图标 + 10 + 名字，
-/// 行高 36；默认只列已安装的，其余收在「显示未安装的 N 个」（安静键）后面。**最多显示 4 个**（上限来自 core，
+/// `列表里的 agent · 最多 4 个`：勾选框列表，三列等分、按行读，一行＝16px 勾选框 + 10 + 16px 图标 + 10 + 名字，
+/// 行高 36；默认只列已安装的，其余收在「显示未安装的 N 个」（默认键紧凑）后面。**最多显示 4 个**（上限来自 core，
 /// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
 /// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
-/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24：单独出现的动作不用安静键，应用内查，不跳 GitHub）。
+/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24，应用内查，不跳 GitHub）；
+/// 下一行 `重新显示新手提示`（默认键紧凑，只在有提示被关掉或学会过时出现）。
 /// 应用菜单「关于 Sophia」「检查更新…」停在这一节（`aboutRequest`）。
 ///
 /// 改一个生效一个，**没有「保存」按钮**。
@@ -36,7 +38,7 @@ import "./SettingsPage.css";
 /// 其余收在「显示未安装的 N 个」后面。
 type AgentOption = HarnessStatus;
 
-/// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的文字链）
+/// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的浅键）
 const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
 
 /// 更新这件事的五种处境。需要用户处理的三种（有新版、已安装等重启、安装失败）与下载中
@@ -133,7 +135,7 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
           return (
             <div className="settings-page__note">
               {checkFailed}
-              <Button variant="external" onClick={() => void openUrl(RELEASES_URL)}>
+              <Button variant="quiet" onClick={() => void openUrl(RELEASES_URL)}>
                 去发布页
               </Button>
             </div>
@@ -191,6 +193,21 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
   const [checking, setChecking] = useState(false);
   const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const dismissLatest = useCallback(() => setLatest(0), []);
+
+  /// `重新显示新手提示`：看过表非空才出；点完清空，键下方浮起 `✓ 新手提示会重新出现`（浮着的这几秒
+  /// 键还留着，不让纸窗的锚一点就没了）；没清成在同一处说原因
+  const anySeen = useHasAnySeen();
+  const [hintsNote, setHintsNote] = useState<{ at: number; failed?: string } | null>(null);
+  const dismissHintsNote = useCallback(() => setHintsNote(null), []);
+  const showHints = async () => {
+    setHintsNote(null);
+    try {
+      await resetHints();
+      setHintsNote({ at: Date.now() });
+    } catch (e) {
+      setHintsNote({ at: Date.now(), failed: String(e) });
+    }
+  };
 
   /// 刚取消勾选的那一项：它正下方浮起一句说明，约 4 秒淡出（`at` 让连着取消两次时计时从头来）
   const [unchecked, setUnchecked] = useState<{ id: string; at: number } | null>(null);
@@ -252,6 +269,8 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
         role="checkbox"
         aria-checked={agent.enabled}
         className={`settings-page__row${unchecked?.id === agent.id ? " is-noted" : ""}`}
+        // 整行是命中区：悬停这一行方框就「手靠近」（禁用的行不回应）
+        data-checkrow={blocked ? undefined : true}
         disabled={blocked}
         onClick={blocked ? undefined : () => void toggle(agent.id, !agent.enabled)}
       >
@@ -355,7 +374,33 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
             ) : null}
           </span>
         </div>
+        {/* 检查更新的结果（待办条 / 查不成的一句）紧跟在 `检查更新` 那一行下（② 就近），新手提示那一行在它后面 */}
         {notice === null ? null : <div className="settings-page__update">{notice}</div>}
+        {anySeen || hintsNote ? (
+          <div className="settings-page__hints">
+            <span className="settings-page__check">
+              <Button size="compact" onClick={() => void showHints()}>
+                重新显示新手提示
+              </Button>
+              {hintsNote ? (
+                <FloatingToast key={hintsNote.at} align="start">
+                  {hintsNote.failed === undefined ? (
+                    <Toast kind="success" verb="新手提示会重新出现" onDismiss={dismissHintsNote} />
+                  ) : (
+                    <Toast
+                      tier="notice"
+                      kind="cannot"
+                      verb="没清掉看过的新手提示"
+                      reason={hintsNote.failed}
+                      onDismiss={dismissHintsNote}
+                      onClose={dismissHintsNote}
+                    />
+                  )}
+                </FloatingToast>
+              ) : null}
+            </span>
+          </div>
+        ) : null}
       </div>
     </ShellPage>
   );
