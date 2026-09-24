@@ -595,7 +595,7 @@ test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；�
   assert.match(regular, /<span class="ss-indicator is-on" aria-hidden="true"><\/span>/);
   assert.match(
     regular,
-    /<span class="ss-switch__track" aria-hidden="true"><span class="ss-switch__scribe ss-switch__scribe--on"><\/span><span class="ss-switch__scribe ss-switch__scribe--off"><\/span><span class="ss-switch__knob"><span class="ss-switch__grip"><\/span><\/span><\/span>/,
+    /<span class="ss-switch__track" aria-hidden="true"><span class="ss-switch__scribe ss-switch__scribe--on"><\/span><span class="ss-switch__scribe ss-switch__scribe--off"><\/span><span class="ss-switch__knob"><\/span><\/span>/,
   );
   const compact = render(Switch, {
     checked: false,
@@ -631,16 +631,8 @@ test("Switch regular 40×20 / compact 32×16：role=switch，读屏名必填；�
   assert.doesNotMatch(knob, /border:/);
   assert.match(knob, /border-radius:\s*var\(--radius-knob\)/);
   assert.match(knob, /box-shadow:\s*var\(--raise\)/);
-  // 三道防滑纹：平的 1px 实线（标准 1×7、紧凑 1×5、间距 2），无高光、不投影——滑块能拖，纹说「可以抓」
-  const grip = cssRule(uiCss, ".ss-switch__grip");
-  assert.match(grip, /width:\s*2px/);
-  assert.match(grip, /border-radius:\s*var\(--radius-scribe\)/);
-  assert.match(grip, /height:\s*var\(--grip-h\)/);
-  assert.match(grip, /background:\s*var\(--ctl-edge\)/);
-  assert.doesNotMatch(grip, /shadow|gradient/);
-  assert.match(base, /--grip-h:\s*8px/);
-  assert.match(small, /--grip-h:\s*6px/);
-  assert.match(knob, /gap:\s*2px/);
+  // 滑块面上不画纹（产品负责人：竖线去掉）——一块干净的白滑块，可拖靠抬起的投影与位置说明
+  assert.doesNotMatch(uiCss, /ss-switch__grip|--grip-h/);
   // 刻条：开＝橙露在左，关＝灰露在右
   assert.match(cssRule(uiCss, ".ss-switch__scribe--on"), /background:\s*var\(--accent\)/);
   assert.match(cssRule(uiCss, ".ss-switch__scribe--off"), /background:\s*var\(--ctl-edge\)/);
@@ -739,10 +731,6 @@ test("Switch 禁用：带原因；平贴、无投影、不响应悬停按住与�
   assert.match(knob, /border:\s*var\(--border-disabled\)/);
   // 平贴：无投影；不响应悬停、按住（规则都排除了 :disabled）
   assert.match(knob, /box-shadow:\s*none/);
-  assert.match(
-    cssRule(uiCss, ".ss-switch:disabled .ss-switch__grip"),
-    /background:\s*var\(--hairline\)/,
-  );
   // 拖不动：槽上不挂指针处理（静态渲染看不到事件，这里看规则：悬停与按住都带 :not(:disabled)）
   for (const m of uiCss.matchAll(/\n(\.ss-switch:(?:hover|active)[^{\n]*)[{,]/g)) {
     assert.match(m[1], /:not\(:disabled\)/, m[1]);

@@ -404,7 +404,6 @@ textarea,
   --scribe-h: 6px;
   --scribe-on: 5px;
   --scribe-off: 23px;
-  --grip-h: 8px;
   --travel: 17px;
   position: relative;
   display: inline-flex;
@@ -426,7 +425,6 @@ textarea,
   --scribe-h: 4px;
   --scribe-on: 4px;
   --scribe-off: 19px;
-  --grip-h: 6px;
   --travel: 13px;
   gap: 6px;
 }
@@ -474,10 +472,7 @@ textarea,
   position: absolute;
   top: 2px;
   left: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
+  display: block;
   box-sizing: border-box;
   width: var(--knob-w);
   height: var(--knob-h);
@@ -489,16 +484,6 @@ textarea,
     translate var(--dur-slide-knob) var(--spring-slide),
     transform var(--dur-release) var(--spring-slide),
     box-shadow var(--motion-fast) var(--ease-mech);
-}
-
-/* 一道防滑纹（标准 2×8、紧凑 2×6，两端圆，居中）：平的实线，无高光、无凹凸、不投影；1px 太细，读成一根发丝。
-   三道像菜单图标、两道像暂停，一道是滑块上的一条脊：说「能抓住」，又不和刻条抢 */
-.ss-switch__grip {
-  display: block;
-  width: 2px;
-  height: var(--grip-h);
-  border-radius: var(--radius-scribe);
-  background: var(--ctl-edge);
 }
 
 .ss-switch.is-on .ss-switch__knob {
@@ -543,8 +528,7 @@ textarea,
   box-shadow: none;
 }
 
-.ss-switch:disabled .ss-switch__scribe,
-.ss-switch:disabled .ss-switch__grip {
+.ss-switch:disabled .ss-switch__scribe {
   background: var(--hairline);
 }
 
