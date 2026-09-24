@@ -7,8 +7,9 @@ import emptyFolder from "../assets/empty-folder.png";
 
 /// 空态与忙碌态（DESIGN「空态与忙碌态」「转盘」）。
 ///
-/// **空态里若有两个动作，只有一个是按钮**，另一个降为安静键。
-/// 首次扫描：24px 忙碌指示居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
+/// 空态里的动作都是默认键；离开 Sophia 的（`在访达中显示 ↗`）给 `leave`，画成浅键（末尾自动带 ↗）。
+/// 动作已在页面头的（`+ 来源` `+ 网关`）空态里不重复。
+/// 首次扫描：24 宽忙碌刻度居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
 ///
 /// 图像（DESIGN「图像」）：只用在没有数据、等待、刚开始的时刻；筛选无结果不放图。
 /// 图在上、不带边框、底透明，直接落在机面上看不出方框；下面依次是现状一句、动作（间距 16 / 8 / 16），整体居中；图是装饰，
@@ -24,7 +25,7 @@ export type EmptyArt = "scanning" | "noDirs" | "emptyFolder";
 const ART_SRC: Record<EmptyArt, string> = { scanning, noDirs, emptyFolder };
 
 export type EmptyKind =
-  /// 首次扫描中：24px 忙碌指示 + 一句忙什么
+  /// 首次扫描中：24 宽忙碌刻度 + 一句忙什么
   | "scanning"
   /// 这个域没有 agent 目录：agent 列照常显示，灯全为空心
   | "noAgentDirs"
@@ -45,6 +46,8 @@ export interface EmptyAction {
   onClick: () => void;
   /// 可选的图标。空态里文字是主角，图标只作陪
   icon?: ReactNode;
+  /// 这一下会离开 Sophia（在访达中显示……）：画成浅键，末尾自动带 ↗；label 只写动词，不写 ↗
+  leave?: boolean;
 }
 
 export interface EmptyProps {
@@ -53,9 +56,9 @@ export interface EmptyProps {
   description?: ReactNode;
   /// 第二行次要说明
   hint?: ReactNode;
-  /// 按钮动作，一个就够
+  /// 第一个动作（默认键；`leave` 时浅键）
   primary?: EmptyAction;
-  /// 安静键动作
+  /// 第二个动作（同上）
   secondary?: EmptyAction;
   /// 图在上（装饰）；不给就不放图
   art?: EmptyArt;
@@ -90,18 +93,22 @@ export function Empty({ kind, description, hint, primary, secondary, art }: Empt
       {hint ? <div className="ss-empty__hint">{hint}</div> : null}
       {primary || secondary ? (
         <div className="ss-empty__actions">
-          {primary ? (
-            <Button icon={primary.icon} onClick={primary.onClick}>
-              {primary.label}
-            </Button>
-          ) : null}
-          {secondary ? (
-            <Button variant="quiet" icon={secondary.icon} onClick={secondary.onClick}>
-              {secondary.label}
-            </Button>
-          ) : null}
+          {primary ? <EmptyButton action={primary} /> : null}
+          {secondary ? <EmptyButton action={secondary} /> : null}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function EmptyButton({ action }: { action: EmptyAction }) {
+  return (
+    <Button
+      variant={action.leave ? "quiet" : "default"}
+      icon={action.icon}
+      onClick={action.onClick}
+    >
+      {action.label}
+    </Button>
   );
 }

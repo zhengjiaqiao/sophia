@@ -17,18 +17,20 @@
   /* ---- 色（DESIGN「Colors」）：十三个同一温度的中性值 + 一个强调色，强调色只有一个意思 ---- */
   --shell: #f4f4f2; /* 机壳：窗体、顶栏、侧栏、二级页头的底 */
   --face: #fcfcfb; /* 机面：内容区；墨面上的主字、墨键的字 */
-  --paper: #ffffff; /* 按键面与浮层：默认键、页签滑块、开关滑块、模型片、复选框底、下拉、确认框、成功提示条 */
-  --recess: #f2f2ef; /* 凹面：输入框、模型框；不可用的开关滑块 */
-  --surface: #efefec; /* 悬停行、下拉高亮项、按下的键面、页签槽、灰面板、勾选中的行 */
+  --paper: #ffffff; /* 按键面与浮层：默认键、页签滑块、开关滑块、模型片、勾选框悬停面、浅键悬停面、下拉、确认框、成功提示条 */
+  --recess: #f2f2ef; /* 凹面：输入框、开关槽、来源筛选胶囊、抽屉；不可用的开关滑块 */
+  --surface: #efefec; /* 悬停行、下拉高亮项、按下的键面、页签槽、灰面板、勾选中的行、浅键面、未勾的勾选框 */
   --hairline: #e3e3df; /* 边线：机面与浮层的边、表头底、输入框边、禁用边 */
   --row-line: #ededea; /* 行线 */
-  --ctl-border: #d4d4cf; /* 控件边：未选中的片；关着的指示点；墨面上的次字（键与滑块的边由 --raise 的环给） */
-  --ctl-edge: #bdbdb7; /* 边升一档：片与输入框的悬停描边；开关关态刻条 */
-  --track: #dcdcd7; /* 开关凹槽 */
-  --ink: #1c1c1a; /* 主文字、墨键、墨窗、实心格点、复选框勾上、焦点环（不用纯黑：16.6:1 已够） */
-  --ink-mute: #4e4e4a; /* 次要文字、文字链、占位字、图标按钮图形、输入框聚焦边；墨面上的分隔线 */
-  --ink-faint: #6f6f6a; /* 文字里只给计数、等宽读数与不可用的字；复选框边、无格短横、忙碌轨道 */
+  --ctl-border: #d4d4cf; /* 忙碌刻度的静止刻线；墨面上的次字（键与滑块的边由 --raise 的环给） */
+  --ctl-edge: #bdbdb7; /* 边升一档：输入框的悬停描边；禁用的图标按钮 */
+  --track: #dcdcd7; /* 深一档的灰（开关槽 2026-09-25 起改 recess，这里只剩页面里的个别用处） */
+  --ink: #1c1c1a; /* 主文字、墨键、墨窗、实心格点、勾选框勾上、选中的来源胶囊、忙碌刻度亮的那根、焦点环（不用纯黑：16.6:1 已够） */
+  --ink-mute: #4e4e4a; /* 次要文字、浅键字、占位字、图标按钮图形、拉手箭头、状态点的环、输入框聚焦边；墨面上的分隔线 */
+  --ink-faint: #6f6f6a; /* 文字里只给计数、等宽读数与不可用的字；勾选框内环、无格短横 */
   --accent: #e0652a; /* 只表示「开着 / 在生效」：开关刻条 + 指示点。别处出现都是缺陷 */
+  /* prettier-ignore */
+  --accent-halo: rgba(224, 101, 42, 0.14); /* 指示点外一圈 2px 的灯罩环：同一个橙的 14%，平的色环、不发光（只给 .ss-indicator） */
 
   /* ---- 字（DESIGN「Typography」）：Barlow + Barlow Condensed + 苹方，等宽只给 id。
      三个字族都没有中文字形，CJK 回退栈写全 ---- */
@@ -43,7 +45,7 @@
   --size-title: 20px; /* Condensed 700：页面名（Codex、设置、添加来源到 CardBox），原样、字距 0 */
   --size-head: 16px; /* Condensed 600：确认框标题、区域小标题、能力节名 */
   --size-body: 15px; /* Barlow 400：表格、说明、条目名、确认框正文；页签 Condensed 700 */
-  --size-caption: 13px; /* Barlow：按钮 600；副行、安静键、外链、选择片、提示条 400 */
+  --size-caption: 13px; /* Barlow：按钮 600；副行、浅键、来源胶囊、模型片、提示条 400 */
   --size-label: 12px; /* 列头与区块小标 Condensed 600；计数 Barlow tabular；id 与路径 Plex Mono */
 
   --leading-display: 1.2;
@@ -70,11 +72,11 @@
   --space-huge: 48px; /* 区域之间：页面里的大区块 */
 
   /* ---- 形（DESIGN「Shapes」）：形状承担语义，圆角随尺寸变大。不在这张表里的值不用 ---- */
-  --radius-scribe: 2px; /* 开关刻条 */
-  --radius-mark: 4px; /* 复选框、首字母方块 */
+  --radius-scribe: 1px; /* 开关刻线（8×2 的一道线） */
+  --radius-mark: 4px; /* 勾选框、首字母方块 */
   --radius-knob: 4px; /* 开关滑块 */
   --radius-track: 5px; /* 开关凹槽 */
-  --radius-control: 7px; /* 按键、输入框、模型框、页签滑块、图标按钮悬停底、侧栏选中项、下拉高亮行、提示框 */
+  --radius-control: 7px; /* 按键、浅键、输入框、页签滑块、图标按钮悬停底、侧栏选中项、下拉高亮行、提示框、抽屉 */
   --radius-tab-track: 10px; /* 页签滑槽 */
   --radius-face: 12px; /* 机面、灰面板 */
   --radius-float: 12px; /* 下拉、确认框、提示条、墨窗、托盘面板 */
@@ -86,7 +88,7 @@
   --border-float: 1px solid var(--hairline); /* 浮层的边（墨窗无边） */
   --border-structure: 1px solid var(--hairline); /* 表头底、展开区边界 */
   --border-row: 1px solid var(--row-line); /* 行与行 */
-  --border-control: 1px solid var(--ctl-border); /* 未选中的片（键不画描边：边由 --raise 的环给） */
+  --border-control: 1px solid var(--ctl-border); /* 控件边（键不画描边：边由 --raise 的环给；来源胶囊无边） */
   --border-disabled: 1px solid var(--hairline); /* 不可用：平贴、实线、无投影（裁决 D20，不再用虚线） */
 
   /* ---- 层次（DESIGN「Elevation & Depth」）：投影只说离机面多高，四档——凹 / 平（无投影）/ 抬起 / 浮。
@@ -133,12 +135,13 @@
   --dur-release: 180ms; /* 松开：变形用 --spring-slide 回位 */
   --dur-slide-tab: 260ms; /* 页签滑块的位移与变宽（宽的东西慢一点） */
   --dur-slide-knob: 200ms; /* 开关滑块位移：点击与拖动松手后的停靠 */
+  --dur-drawer: 260ms; /* 抽屉：高度 0 ↔ auto（--ease-mech）；拉手箭头翻转（--spring-slide） */
   /* 阻尼比 0.8、响应 0.25s 的弹簧阶跃响应，0.32s 窗口取 24 点：过冲 1.5%、末端残差 < 0.2%（停稳不弹）。
      同一条曲线按不同时长播放：越重越慢 */
   /* prettier-ignore */
   --spring-slide: linear(0, 0.018 2.5%, 0.065 5%, 0.131 7.5%, 0.209 10%, 0.293 12.5%, 0.378 15%, 0.461 17.5%, 0.54 20%, 0.613 22.5%, 0.679 25%, 0.749 28%, 0.809 31%, 0.859 34%, 0.899 37%, 0.941 41%, 0.97 45%, 0.994 50%, 1.008 55%, 1.014 61%, 1.015 68%, 1.012 76%, 1.007 86%, 1);
   --press-transform: translateY(0.5px) scale(0.985); /* 键、滑块按下：贴近机面并微缩 */
-  --motion-spinner: 1s; /* 辐条转一圈，8 步阶跃 */
+  --motion-spinner: 0.8s; /* 忙碌刻度：亮的那根从左走到右一趟，按格阶跃 */
   --motion-dots: 500ms; /* 减少动效时文字后的 `…` 每步增减一点 */
 
   /* busy 时受影响控件的不透明度 */
@@ -180,6 +183,7 @@
     --dur-release: 0ms;
     --dur-slide-tab: 0ms;
     --dur-slide-knob: 0ms;
+    --dur-drawer: 0ms;
     --press-transform: none;
   }
 }

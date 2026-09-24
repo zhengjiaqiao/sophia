@@ -12,7 +12,7 @@ import {
   settleSide,
 } from "../src/ui/switchDrag.ts";
 
-const TRAVEL = 17; // 标准开关的滑块行程（ui.css 的 --travel）
+const TRAVEL = 14; // 标准开关的滑块行程（ui.css 的 --travel；2026-09-25 槽 34 宽、滑块 16 → 14）
 
 /// 从 (x0, t0) 起按给定的 [dx, dt] 逐步移动
 function walk(from: boolean, steps: Array<[number, number]>, x0 = 100, t0 = 1000) {
@@ -63,15 +63,15 @@ test("横移超过 3px 进入拖动，滑块 1:1 跟手、夹在两端之间，�
 });
 
 test("慢慢拖过一半落到对侧（切换），没过一半回原位", () => {
-  // 停住 100ms 再松手：窗口里速度为 0，只看位置
+  // 停住 100ms 再松手：窗口里速度为 0，只看位置（行程 14，一半是 7）
   const past = walk(false, [
-    [9, 200],
+    [8, 200],
     [0, 100],
   ]);
-  assert.equal(past.d.offset, 9);
+  assert.equal(past.d.offset, 8);
   assert.equal(dragEnd(past.d, past.x, past.t), true);
   const short = walk(false, [
-    [8, 200],
+    [7, 200],
     [0, 100],
   ]);
   assert.equal(dragEnd(short.d, short.x, short.t), false);

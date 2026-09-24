@@ -3,13 +3,13 @@ import type { FocusEvent, ReactNode } from "react";
 import { AgentIcon } from "./AgentMark.tsx";
 import { Button, IconButton } from "./Button.tsx";
 import { BusySlot } from "./Spinner.tsx";
-import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
+import { IconAttention, IconCannot, IconClose, IconTick } from "./icons.tsx";
 
 /// 提示小窗（DESIGN「反馈的两种形态」「提示条分两档」，画板 Feedback「提示条」）。
 ///
 /// **浮起的小窗只表示一件事：会自己消失。** 两档，严重程度决定打断程度（①）：
 /// - `routine` 成功：纸窗（`paper` + 1px `hairline` 边 + `float` 12 圆角 + 浮层投影），单行高 32：
-///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是安静键）
+///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是默认键紧凑 24；句首 ✓ 是勾选框里同一枚对勾 `IconTick`）
 /// - `notice` 做不成 / 部分失败：**墨窗**（`ink` 实心、无边、浮层投影），
 ///   左侧 40px 指示窗放 ✓ / ⊘ / !；动作是浅描边键。
 ///   成功是纸、需要注意是墨：不给 `tier` 时按 `kind` 取（成功纸窗、其余墨窗）
@@ -18,7 +18,7 @@ import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 /// 反馈永远不比它说的内容更重（②）。主行 = **动词 + agent 图标 + 名字**；动词与触发它的动作一致，
 /// 失败态动词带否定（`没开启`）。单格失败原因本身是一整句时给 `message`，不拆动词。
 ///
-/// **停留**（⑨）：成功无动作约 4 秒，带 `撤销` / `查看` 约 6 秒，做不成 / 部分失败 8 秒；
+/// **停留**（⑨）：成功无动作约 4 秒，带 `撤销` 约 6 秒，做不成 / 部分失败 8 秒；
 /// 悬停与键盘焦点在里面时停表，移开后重新计满；到点末尾 120ms 同一个淡出。
 /// 不给 `onDismiss` 的不自动消失。
 ///
@@ -27,7 +27,7 @@ import { IconAttention, IconCannot, IconCheck, IconClose } from "./icons.tsx";
 
 export type ToastKind = "success" | "cannot" | "partial";
 
-/// 停留时长：带动作（撤销 / 查看）的成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿；
+/// 停留时长：带动作（撤销）的成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿；
 /// 没有动作的成功约 4 秒（`CELL_TOAST_DWELL_MS`）。悬停 / 焦点在里面时不计时
 export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   success: 6000,
@@ -53,7 +53,7 @@ export interface ToastAction {
   /// 给了就禁用，原因进提示框（MCP 撤销：写入之后文件又被改过）
   disabledReason?: string;
   /// 点下去之后在等（MCP 撤销要等 core 从快照还原）：只锁这一颗，过了 0.3 秒门槛原位换成
-  /// 转圈 + 这一句（`正在撤销`，见 `BusySlot`）
+  /// 忙碌刻度 + 这一句（`正在撤销`，见 `BusySlot`）
   busy?: string;
 }
 
@@ -85,9 +85,9 @@ export interface ToastProps {
   stats?: string;
   /// 副行之下的展开内容（删原件的后果示意图与铭牌）；只给 notice
   detail?: ReactNode;
-  /// notice：浅描边紧凑键；routine：安静键。`撤销` `查看`
+  /// notice：浅描边紧凑键；routine：默认键紧凑 24。`撤销`
   action?: ToastAction;
-  /// 次要的离开 Sophia 的链接（下划线 + ↗）：`在访达中显示备份 ↗`
+  /// 次要的离开 Sophia 的动作：浅键，末尾自动带 ↗（`在访达中显示备份`）
   secondary?: ToastAction;
   /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉
   onDismiss?: () => void;
@@ -98,7 +98,7 @@ export interface ToastProps {
 }
 
 const INDICATOR: Record<ToastKind, { title: string; glyph: ReactNode }> = {
-  success: { title: "成功", glyph: <IconCheck /> },
+  success: { title: "成功", glyph: <IconTick /> },
   cannot: { title: "做不成", glyph: <IconCannot /> },
   partial: { title: "部分失败", glyph: <IconAttention /> },
 };
@@ -116,7 +116,7 @@ function Tally({ done, failed }: { done: number; failed: number }) {
   return (
     <span className="ss-toast__tally" aria-label={`${done} 个成功，${failed} 个没成`}>
       <span className="ss-toast__num">{done}</span>
-      <IconCheck size={12} />
+      <IconTick />
       <span className="ss-toast__sep">·</span>
       <span className="ss-toast__num">{failed}</span>
       <IconCannot size={12} />
@@ -155,7 +155,7 @@ export function Toast(props: ToastProps) {
     onClose,
     dwellMs,
   } = props;
-  // 没有动作（撤销 / 查看）的成功只是一句告知，约 4 秒就走（同单格例行一行）；6 秒是留给点撤销的
+  // 没有动作（撤销）的成功只是一句告知，约 4 秒就走（同单格例行一行）；6 秒是留给点撤销的
   const dwell =
     dwellMs ?? (kind === "success" && !action ? CELL_TOAST_DWELL_MS : TOAST_DWELL_MS[kind]);
   // 悬停 / 焦点在里面：停表；到点前最后 120ms：淡出中
@@ -223,19 +223,19 @@ export function Toast(props: ToastProps) {
         {...holdHandlers}
       >
         <span className="ss-toast__mark" title="成功" aria-hidden="true">
-          <IconCheck />
+          <IconTick />
         </span>
         {main}
         {action ? (
           <>
             <span className="ss-toast__sep">·</span>
             {action.disabledReason ? (
-              <Button variant="quiet" disabled disabledReason={action.disabledReason}>
+              <Button size="compact" disabled disabledReason={action.disabledReason}>
                 {action.label}
               </Button>
             ) : (
               <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
-                <Button variant="quiet" onClick={action.onClick}>
+                <Button size="compact" onClick={action.onClick}>
                   {action.label}
                 </Button>
               </BusySlot>
@@ -243,7 +243,7 @@ export function Toast(props: ToastProps) {
           </>
         ) : null}
         {secondary ? (
-          <Button variant="external" onClick={secondary.onClick}>
+          <Button variant="quiet" onClick={secondary.onClick}>
             {secondary.label}
           </Button>
         ) : null}

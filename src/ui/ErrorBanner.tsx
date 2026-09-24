@@ -57,9 +57,9 @@ export interface NoticePanelProps {
   message: ReactNode;
   /// 默认键，紧凑 24（纸面在灰上读得出是一颗键）
   action?: NoticePanelAction;
-  /// 可选的安静键（`稍后`）
+  /// 可选的第二颗键（`稍后`）：同样是默认键紧凑 24——应用内能点的一律默认键
   link?: { label: string; onClick: () => void };
-  /// 正在执行：键先锁住，过了 0.3 秒门槛原位换成忙碌指示 + 这一句（`正在接管`），不再出键与安静键
+  /// 正在执行：键先锁住，过了 0.3 秒门槛原位换成忙碌指示 + 这一句（`正在接管`），不再出两颗键
   busy?: string;
   /// 原因（`端口 47328 被别的程序占着`）：跟在主句后同一行写出（`ink-mute`），不藏进悬停——
   /// 原因决定下一步怎么做（端口被占时重启多半还会失败）。写全、放不下就折行，不截断
@@ -70,7 +70,7 @@ export interface NoticePanelProps {
 
 /// 行内待办条（DESIGN「灰面板 NoticePanel」，front-matter `notice-panel`）：挂在某一行下面、
 /// 内容宽的 `surface` 灰面板（`face` 12 圆角、内边距 8 12、无边无投影），
-/// 墨色 `!` + 一句 + 默认键（紧凑 24）+ 可选安静键 + 可选 ×
+/// 墨色 `!` + 一句 + 默认键（紧凑 24）+ 可选第二颗默认键（`稍后`）+ 可选 ×
 export function NoticePanel({ message, action, link, busy, reason, onClose }: NoticePanelProps) {
   const busyShown = useBusyShown(busy !== undefined);
   return (
@@ -101,7 +101,7 @@ export function NoticePanel({ message, action, link, busy, reason, onClose }: No
             )
           ) : null}
           {link ? (
-            <Button variant="quiet" onClick={link.onClick}>
+            <Button size="compact" onClick={link.onClick}>
               {link.label}
             </Button>
           ) : null}

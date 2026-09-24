@@ -1,9 +1,11 @@
-import type { ReactNode } from "react";
+import type { ReactNode, SVGProps } from "react";
 import { Tooltip } from "./Tooltip.tsx";
 /// 状态点（DESIGN「表格 = 面板 › 指示灯」「视觉优先」，画板 States / Marks）。
 ///
 /// 格回答两件事：**填充＝这个 agent 能不能用它，外环＝它在这儿是原件还是一条软链。**
 /// 三种常驻状态外径一致 10px，中心对准列头中线；「无此格」是 8px 短横，不是状态。
+/// 环一律 1.3 `ink-mute`（未加上的 ○ 比实心 ● 退后一层，一整表的 ○ 不和 ● 抢眼）；实心、原件的 4px 芯、
+/// ⊘ 的斜线是 `ink`。
 /// 异常画在**同一个 10px 环骨架**上，一个视觉词只学一次：
 /// 失效＝虚线环（4 段、段间 1.5，虚线在空态里已教过「目标不在」）、放不进去＝斜杠环 ⊘
 /// （无法写入与同名占位同一个记号，裁决 D22：该行已有 `×2`，原因由提示框说）、
@@ -50,52 +52,56 @@ export interface StateDotProps {
 /// 只有这两种点下去是开关，才出悬停光晕
 const TOGGLES = new Set<Dot>(["linked", "missing"]);
 
+/// 10px 家族：外径 10，环 1.3（r 4.35）`ink-mute`（`.ss-dot__ring`）；实心、芯、斜线、箭头 `ink`（currentColor）
+const R10 = 4.35;
+const W10 = 1.3;
+
 function Glyph10({ dot }: { dot: Dot }) {
+  const ring = (extra?: SVGProps<SVGCircleElement>) => (
+    <circle className="ss-dot__ring" cx="5" cy="5" r={R10} strokeWidth={W10} {...extra} />
+  );
   switch (dot) {
     case "linked":
-      // 环打底、实心盖在上面
+      // 环打底、实心盖在上面（外径 10）
       return (
         <>
-          <circle cx="5" cy="5" r="4.25" />
+          {ring()}
           <circle className="ss-dot__fill" cx="5" cy="5" r="5" stroke="none" fill="currentColor" />
         </>
       );
     case "missing":
-      return <circle cx="5" cy="5" r="4.25" />;
+      return ring();
     case "own":
+      // 环 + 4px 实心芯
       return (
         <>
-          <circle cx="5" cy="5" r="4.25" />
+          {ring()}
           <circle cx="5" cy="5" r="2" stroke="none" fill="currentColor" />
         </>
       );
     case "none":
-      return <path d="M1 5H9" />;
+      // 8×1.5 短横，颜色由 .ss-dot--none 给（ink-faint）
+      return <path d="M1 5H9" strokeWidth="1.5" />;
     case "broken":
-      return (
-        <circle
-          cx="5"
-          cy="5"
-          r="4.25"
-          strokeLinecap="butt"
-          strokeDasharray="5.2 1.5"
-          transform="rotate(-45 5 5)"
-        />
-      );
-    // 同名占位与无法写入同画 ⊘（D22）
+      return ring({
+        strokeLinecap: "butt",
+        strokeDasharray: "5.33 1.5",
+        transform: "rotate(-45 5 5)",
+      });
+    // 同名占位与无法写入同画 ⊘（D22）：环 ink-mute、斜线 ink——「受阻」靠斜线说，不靠加粗整个记号
     case "readOnly":
     case "blocked":
       return (
         <>
-          <circle cx="5" cy="5" r="4.25" />
-          <path d="M2 8 L8 2" />
+          {ring()}
+          <path d="M2 8 L8 2" strokeWidth={W10} />
         </>
       );
     case "wholeLinked":
       return (
         <>
-          <circle cx="5" cy="5" r="4.25" />
-          <path d="M2.9 5 H7.1 M5.3 3.2 L7.1 5 L5.3 6.8" />
+          {ring()}
+          <path d="M2.9 5 H7.1 M5.3 3.2 L7.1 5 L5.3 6.8" strokeWidth={W10} />
         </>
       );
   }
@@ -106,16 +112,16 @@ function Glyph16({ dot }: { dot: Dot }) {
     case "linked":
       return (
         <>
-          <circle cx="8" cy="8" r="6.3" />
+          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
           <circle className="ss-dot__fill" cx="8" cy="8" r="7" stroke="none" fill="currentColor" />
         </>
       );
     case "missing":
-      return <circle cx="8" cy="8" r="6.3" />;
+      return <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />;
     case "own":
       return (
         <>
-          <circle cx="8" cy="8" r="6.3" />
+          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
           <circle cx="8" cy="8" r="3" stroke="none" fill="currentColor" />
         </>
       );
@@ -124,6 +130,7 @@ function Glyph16({ dot }: { dot: Dot }) {
     case "broken":
       return (
         <circle
+          className="ss-dot__ring"
           cx="8"
           cy="8"
           r="6.3"
@@ -137,14 +144,14 @@ function Glyph16({ dot }: { dot: Dot }) {
     case "blocked":
       return (
         <>
-          <circle cx="8" cy="8" r="6.3" />
+          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
           <path d="M3.6 12.4 L12.4 3.6" />
         </>
       );
     case "wholeLinked":
       return (
         <>
-          <circle cx="8" cy="8" r="6.3" />
+          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
           <path d="M4.9 8 H11.1 M8.4 5.3 L11.1 8 L8.4 10.7" />
         </>
       );
@@ -178,7 +185,7 @@ export function StateDot({
       viewBox={size === 16 ? "0 0 16 16" : "0 0 10 10"}
       fill="none"
       stroke="currentColor"
-      strokeWidth={size === 16 ? 1.4 : 1.5}
+      strokeWidth={size === 16 ? 1.4 : W10}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

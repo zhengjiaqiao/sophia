@@ -3,16 +3,19 @@ import { ReasonTip } from "./Tooltip.tsx";
 
 /// 按键（DESIGN「按钮」「控件有重量」，视觉 V4）。
 ///
-/// 控件矩形（`control` 7），Barlow / 苹方 13 / 600，**原样大小写、字距 0**。键的阶梯（D14）：
-/// - `primary` 墨键：`ink` 底、`face` 字、抬起 `raise-ink`。一个面里至多一个（`添加 N 个` `保存` 确认框主动作）
-/// - `default` 默认键：`paper` 面、抬起 `raise`（边由投影的 1px 环给，不画描边）（`重启` `配置网关` `清除` 确认框的 `取消`）
-/// - `quiet` 安静键：无底无边、13 `ink-mute`；悬停出 `surface` 圆角带，按下有按压变形、不抬起。
-///   取代应用内的下划线文字链（`撤销` `稍后` `编辑` `只留这份` `检查更新`），命中区高 24、左右各 6（视觉不变）
-/// - `external` 离开 Sophia 的链接（`button-link`）：13 `ink-mute` 下划线 + 10px `↗`（`打开 ↗` `在访达中显示 ↗`）。
-///   全应用只有它带下划线、只有它用手形光标
+/// 控件矩形（`control` 7），Barlow / 苹方 13 / 600，**原样大小写、字距 0**。键分三档，每档一个意思：
+/// - `primary` 墨键＝这一面的主动作：`ink` 底、`face` 字、抬起 `raise-ink`。一个面里至多一个
+///   （`添加 N 个来源` `保存` 确认框主动作）
+/// - `default` 默认键＝在 Sophia 里做一件事：`paper` 面、抬起 `raise`（边由投影的 1px 环给，不画描边）。
+///   其余一切能点的字都是它，**含 `取消` `稍后` `撤销` `只留这份` `2 份不一样` `清除筛选` `恢复`**
+/// - `quiet` 浅键＝离开 Sophia（2026-09-25）：静止是平贴的一小块 `surface` 键面、无边无投影、13 `ink-mute`、
+///   高 24、左右 8；手靠近 `paper` + `raise`、字转 `ink`；按下 `raise-pressed` + 按压变形。
+///   **末尾一律 10px `↗`，组件自动画**，调用方只写动词（`打开` `在访达中显示` `去发布页`）。
+///   只给会跳到 Sophia 外面的动作；`size` 对它不起作用（固定 24）。在灰面板、抽屉里键面自动换 `paper`
+/// - `external`：`quiet` 的旧名，同一个样子（没有下划线、没有手形）。阶段 3 删，新代码写 `quiet`
 ///
 /// 三个尺寸按所在那一行选，不按重要性选：`regular` 28（工具行）、`compact` 24（表格行、
-/// 提示条、灰面板）、`row` 32（确认框与页面级提交）。
+/// 提示条、灰面板、纸窗、抽屉）、`row` 32（确认框与页面级提交）。
 ///
 /// 重量：静止抬起一点；悬停手靠近，影子略重、不位移（墨键在内沿加 1px `ink-mute`）；按下 70ms 贴近机面
 /// （影子收紧、下沉 0.5px 并微缩，默认键键面转 `surface`）；松开 180ms 弹簧回位；focus 外 2px 处 1px 环。
@@ -34,7 +37,7 @@ interface ButtonBase {
   title?: string;
   /// 图标在文字左边（`AddButton` 的 `+` 就是这么来的）
   icon?: ReactNode;
-  /// 放在墨窗上：默认键变浅描边键（1px `face` 边与字、不抬起），安静键变 `ctl-border` 字
+  /// 放在墨窗上：默认键变浅描边键（1px `face` 边与字、不抬起）。墨窗里只有这一种键
   onDark?: boolean;
   /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
   "aria-describedby"?: string;
@@ -55,8 +58,8 @@ type LabelProps =
 
 export type ButtonProps = ButtonBase & DisabledProps & LabelProps;
 
-/// 10px 的 ↗：1.4 描边、`currentColor`、左间距 3
-function ExternalArrow() {
+/// 10px 的 ↗：1.4 描边、`currentColor`、左间距 3（浅键的 gap）
+function LeaveArrow() {
   return (
     <svg
       className="ss-btn__external"
@@ -95,10 +98,11 @@ export function Button(props: ButtonProps) {
 
   const classes = ["ss-btn"];
   if (variant === "primary") classes.push("ss-btn--primary");
-  if (variant === "quiet") classes.push("ss-btn--quiet");
-  if (variant === "external") classes.push("ss-btn--external");
-  if (size === "compact") classes.push("ss-btn--compact");
-  if (size === "row") classes.push("ss-btn--row");
+  // 浅键（离开 Sophia）固定 24 高：尺寸不叠加
+  const leave = variant === "quiet" || variant === "external";
+  if (leave) classes.push("ss-btn--quiet");
+  if (size === "compact" && !leave) classes.push("ss-btn--compact");
+  if (size === "row" && !leave) classes.push("ss-btn--row");
   if (onDark) classes.push("is-on-dark");
   if (icon && children === undefined) classes.push("ss-btn--icon");
 
@@ -117,8 +121,8 @@ export function Button(props: ButtonProps) {
         onClick={disabled ? undefined : onClick}
       >
         {icon ? <span className="ss-btn__icon">{icon}</span> : null}
-        {variant === "external" ? <span className="ss-btn__text">{children}</span> : children}
-        {variant === "external" ? <ExternalArrow /> : null}
+        {children}
+        {leave ? <LeaveArrow /> : null}
       </button>
     </ReasonTip>
   );

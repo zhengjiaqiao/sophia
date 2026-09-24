@@ -25,9 +25,9 @@ const TOKENS = new Set([
 ]);
 /// Barlow + Barlow Condensed + 苹方，等宽只给 id（DESIGN「Typography › 字族」，2026-09-24 回到原设计）
 const FONTS = ["Barlow", "Barlow Condensed", "IBM Plex Mono"];
-/// 圆角随尺寸（DESIGN「Shapes」）：刻条 2、记号与滑块 4、开关槽 5、控件 7、页签槽 10、
-/// 面与浮层 12、胶囊 999、圆点 50%，平铺结构 0。3px、6px、8px、32px 都是旧值
-const RADII = new Set(["0", "0px", "2px", "4px", "5px", "7px", "10px", "12px", "999px", "50%"]);
+/// 圆角随尺寸（DESIGN「Shapes」）：刻线 1、记号与滑块 4、开关槽 5、控件 7、页签槽 10、
+/// 面与浮层 12、胶囊 999、圆点 50%，平铺结构 0。2px（旧刻条）、3px、6px、8px、32px 都是旧值
+const RADII = new Set(["0", "0px", "1px", "4px", "5px", "7px", "10px", "12px", "999px", "50%"]);
 /// 层次 token（DESIGN「Elevation & Depth」）：投影只说离机面多高，四档——凹（recess-*）/ 平（无）/
 /// 抬起（raise*，只给键、页签滑块、开关滑块）/ 浮（elev-float）。box-shadow 只能是它们、或它们用逗号连起来
 const ELEVATIONS = new Set([
@@ -45,15 +45,20 @@ const ELEVATIONS = new Set([
 /// 纸浮层（下拉、选择器）里从 paper，侧栏里从 shell（`+ 项目` 吸底时的上沿）
 const FADE_STOPS = new Set(["var(--face)", "var(--paper)", "var(--shell)", "transparent"]);
 
-/// tokens.css 里层次 token 的定义行：只有这几行可以出现 rgba 字面值
+/// tokens.css 里层次 token 与指示点灯罩色的定义行：只有这几行可以出现 rgba 字面值
 const ELEV_DEF =
-  /^\s*--(?:elev-float|recess-(?:input|tabs|track)|raise(?:-hover|-pressed|-ink|-ink-pressed)?)\s*:.*$/gm;
+  /^\s*--(?:elev-float|recess-(?:input|tabs|track)|raise(?:-hover|-pressed|-ink|-ink-pressed)?|accent-halo)\s*:.*$/gm;
+
+/// 指示点的灯罩环（DESIGN「开关 › 指示点」）：一圈 2px 同色 14% 的平色环。
+/// 它不是层次（不说离机面多高），只许出现在指示点的规则里
+const HALO = "0 0 0 2px var(--accent-halo)";
+const HALO_SELECTOR = /\.ss-indicator/;
 
 /// 大写与正字距只经 Cap（DESIGN「字距：汉字永远 0」）：只有这些选择器里能写
 /// text-transform: uppercase、非 0 letter-spacing、var(--track-*)
 const CAP_SELECTOR = /\.ss-cap\b/;
 
-/// 橙只表示「开着 / 在生效」，形态只有两种：开关刻条与指示点（裁决「橙的两种形态」）
+/// 橙只表示「开着 / 在生效」，形态只有两种：开关刻线与指示点（裁决「橙的两种形态」）
 const ACCENT_SELECTOR = /\.ss-switch|\.ss-indicator/;
 
 /// 按顶层逗号切参数（括号里的逗号不算）
@@ -149,12 +154,24 @@ const rules = [
   },
   {
     id: "elevation",
-    desc: "层次只用 token：凹 --recess-*、抬起 --raise*、浮 --elev-float；渐变只做滚动边缘渐隐",
+    desc: "层次只用 token：凹 --recess-*、抬起 --raise*、浮 --elev-float（指示点的灯罩环除外）；渐变只做滚动边缘渐隐",
     run(src) {
       const out = [];
+      // 灯罩环只在指示点的规则块里放行：先认出这些块里的那一句，其余地方照常查
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ");
+      let haloOk = 0;
+      for (const m of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (!m[2].includes(HALO)) continue;
+        const selectors = m[1].split(",").map((x) => x.trim());
+        if (selectors.every((sel) => HALO_SELECTOR.test(sel))) haloOk++;
+      }
       for (const m of src.matchAll(/box-?[Ss]hadow\s*[:=]\s*["']?([^;"'}\n]+)/g)) {
         const v = m[1].trim();
         if (v === "none") continue;
+        if (v === HALO && haloOk > 0) {
+          haloOk--;
+          continue;
+        }
         if (!splitTop(v).every((p) => ELEVATIONS.has(p))) out.push(`box-shadow: ${v}`);
       }
       if (/text-?[Ss]hadow\s*[:=]\s*["']?(?!none)/.test(src)) out.push("text-shadow");
@@ -169,7 +186,7 @@ const rules = [
   },
   {
     id: "radius",
-    desc: "圆角只有 0 / 2 / 4 / 5 / 7 / 10 / 12 / 999px / 50% 或 var(--radius-*)",
+    desc: "圆角只有 0 / 1 / 4 / 5 / 7 / 10 / 12 / 999px / 50% 或 var(--radius-*)",
     run(src) {
       const out = [];
       for (const m of src.matchAll(/border-?[Rr]adius\s*[:=]\s*["']?([^;"'}\n]+)/g)) {
@@ -306,18 +323,42 @@ const rules = [
     id: "accent-scope",
     // 橙的含义只有一个「开着 / 在生效」，形态只有开关刻条与指示点两种。
     // 用在按钮、文字、焦点环、选中、格点、图标上都是第二种意思（⑤）
-    desc: "橙：var(--accent) 只出现在开关（.ss-switch…）与指示点（.ss-indicator）的规则里",
+    desc: "橙：var(--accent) 只出现在开关（.ss-switch…）与指示点（.ss-indicator，侧栏 agent 名后）的规则里；灯罩色 var(--accent-halo) 只在指示点上",
     run(src, path) {
-      if (!src.includes("var(--accent)")) return [];
+      if (!/var\(--accent(?:-halo)?\)/.test(src)) return [];
       if (!path.endsWith(".css"))
-        return ["组件代码里直接用了 var(--accent)（用 <Switch> / <Indicator>）"];
+        return [
+          "组件代码里直接用了 var(--accent) / var(--accent-halo)（用 <Switch> / <Indicator>）",
+        ];
       const code = src.replace(/\/\*[\s\S]*?\*\//g, " ");
       const out = [];
       for (const m of code.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        if (!m[2].includes("var(--accent)")) continue;
+        const accent = m[2].includes("var(--accent)");
+        const halo = m[2].includes("var(--accent-halo)");
+        if (!accent && !halo) continue;
         const selectors = m[1].split(",").map((x) => x.trim());
-        for (const sel of selectors) if (!ACCENT_SELECTOR.test(sel)) out.push(sel);
+        for (const sel of selectors) {
+          if (accent && !ACCENT_SELECTOR.test(sel)) out.push(sel);
+          else if (halo && !HALO_SELECTOR.test(sel)) out.push(`${sel}（灯罩色只给指示点）`);
+        }
       }
+      return out;
+    },
+  },
+  {
+    id: "no-web-link",
+    // DESIGN「光标与文字选取」「按钮」：全应用一律箭头光标、没有下划线——手形与下划线是网页超链接的语言，
+    // 离开 Sophia 只由浅键末尾的 ↗ 说（2026-09-25 外链并入浅键）
+    desc: "光标与下划线：不出现 cursor: pointer、text-decoration: underline（含 JSX 的 style 写法）",
+    run(src) {
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+      const out = [];
+      const pointer = (code.match(/cursor\s*:\s*["']?pointer\b/g) || []).length;
+      if (pointer) out.push(`${pointer} 处 cursor: pointer（一律箭头）`);
+      const underline = (
+        code.match(/text-?[Dd]ecoration(?:-line|Line)?\s*:\s*["']?[^;"'}\n]*\bunderline\b/g) || []
+      ).length;
+      if (underline) out.push(`${underline} 处下划线（离开 Sophia 由浅键的 ↗ 说）`);
       return out;
     },
   },

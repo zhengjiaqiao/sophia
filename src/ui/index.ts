@@ -24,6 +24,9 @@ export type { CapProps, CapTone } from "./Cap.tsx";
 export { Tabs } from "./Tabs.tsx";
 export type { TabItem, TabsProps } from "./Tabs.tsx";
 
+export { Drawer, DrawerHandle, DRAWER_MS } from "./Drawer.tsx";
+export type { DrawerProps, DrawerHandleProps } from "./Drawer.tsx";
+
 export { Chip, ModelChip } from "./Chip.tsx";
 export type { ChipProps, ModelChipProps } from "./Chip.tsx";
 
@@ -43,7 +46,7 @@ export {
 } from "./Tooltip.tsx";
 export type { TipEvent, TipState, TooltipProps } from "./Tooltip.tsx";
 
-export { BUSY_DELAY_MS, BusySlot, Spinner, useBusyShown } from "./Spinner.tsx";
+export { BUSY_DELAY_MS, BusySlot, Spinner, SWEEP, useBusyShown } from "./Spinner.tsx";
 export type { BusySlotProps, SpinnerProps } from "./Spinner.tsx";
 
 export { Toast, ToastCount, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } from "./Toast.tsx";
@@ -75,13 +78,13 @@ export {
   IconPlus,
   IconSearch,
   IconSettings,
+  IconTick,
   IconTrash,
 } from "./icons.tsx";
 export type { IconProps } from "./icons.tsx";
 
 export { Section } from "./Section.tsx";
 export type { SectionProps } from "./Section.tsx";
-
 
 export { FloatingLayer, FadeViewport } from "./FloatingLayer.tsx";
 

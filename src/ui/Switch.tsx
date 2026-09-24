@@ -1,26 +1,26 @@
 import { useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { ReasonTip } from "./Tooltip.tsx";
+import { IconTick } from "./icons.tsx";
 import { dragEnd, dragMove, dragStart, type SwitchDrag } from "./switchDrag.ts";
 
 /// 开关（DESIGN「开关」「控件有重量」，物性之三）：一个**当场生效**的布尔状态，对象就是它所在的那一行。
 /// 开关旁边不写「已启用」——它自己就是状态。不需要确认。
 ///
-/// 实物滑动开关：左侧 7px 一颗指示点 + 凹槽 + 抬起的纸面滑块（`raise`）。滑块面上三道平的 1px 防滑纹
-/// （无高光、无凹凸、不投影）：滑块能拖，纹告诉用户「这里可以抓住拖」。刻条印在槽上，
-/// 滑块让开的那一侧露出来——开＝滑块在右、左边露出橙刻条、橙点；关＝滑块在左、右边露出灰刻条、灰点。
-/// 位置 + 刻条 + 指示点三重表达，色弱用户靠位置不丢信息。**橙只在这里（和指示点）**。
+/// 实物滑动开关：`recess` 凹槽 + 抬起的纸面滑块（`raise`，面上无纹）。刻线印在槽上：
+/// 开＝滑块在右、左边露出一道 8×2 的橙线；关＝滑块在左、盖住它。位置 + 刻线两重表达，
+/// 色弱用户靠位置不丢信息。**开关旁不再点指示点**（紧挨开关的灯是同一件事说两遍）；橙只在这里和指示点上。
 ///
 /// 两档，按角色选不按重要性选：
-/// - `regular` 40×20（滑块 19×16、刻条 12×6、点 6）：页面级（模型页、托盘的启用）
-/// - `compact` 32×16（滑块 15×12、刻条 9×4、点 5）：行内的规则状态（来源行「以后新出现的自动加到」）
+/// - `regular` 34×20（滑块 16、行程 14、刻线 8×2）：能力的总开关（Codex「第三方模型」、托盘）
+/// - `compact` 28×16（滑块 12、行程 12、刻线 6×2）：行内的规则状态（来源管理页「以后新出现的自动加到」）
 ///
 /// 物性做在重量、拖动与停靠上：悬停滑块影子略重；按住滑块贴近槽底（`raise-pressed` + 按压变形）；
 /// 点一下或拖过去，滑块由阻尼弹簧停靠（200ms `--spring-slide`），刻条在判定后 120ms 换色。
 /// 可拖：在槽或滑块上按住横移 > 3px 进入拖动，滑块 1:1 跟手；松手按速度或位置判定（`switchDrag.ts`）。
 /// 落到对侧与点击走同一条路（`onChange`）；开关是受控的，父级不接受这次切换时滑块弹回原位。
 /// 键盘（空格、回车）与读屏照旧是一次点击。
-/// 不可用：槽透明 + `hairline` 环、滑块 `recess` 平贴无投影、刻条与防滑纹 `hairline`、指示点空心；拖不动。
+/// 不可用：槽透明 + `hairline` 环、滑块 `recess` 平贴无投影、刻线 `hairline`；拖不动。
 
 export type SwitchSize = "regular" | "compact";
 
@@ -126,7 +126,6 @@ export function Switch({
               }
         }
       >
-        <Indicator on={checked} size={size} disabled={disabled} />
         <span
           className="ss-switch__track"
           aria-hidden="true"
@@ -135,8 +134,7 @@ export function Switch({
           onPointerUp={disabled ? undefined : onPointerUp}
           onPointerCancel={disabled ? undefined : onPointerCancel}
         >
-          <span className="ss-switch__scribe ss-switch__scribe--on" />
-          <span className="ss-switch__scribe ss-switch__scribe--off" />
+          <span className="ss-switch__scribe" />
           <span className="ss-switch__knob" style={knobStyle} />
         </span>
       </button>
@@ -145,28 +143,27 @@ export function Switch({
 }
 
 export interface IndicatorProps {
-  /// 开着 / 在生效
+  /// 开着 / 在生效。指示点只剩「开」这一态：关着就不画
   on: boolean;
-  /// regular 6px（默认）；compact 5px（紧凑开关旁）
+  /// @deprecated 已不分档（只剩侧栏那一种）；传了也不起作用，阶段 3 删
   size?: SwitchSize;
-  /// 不可用：空心（1px `hairline` 环）
+  /// @deprecated 已没有不可用态；传了也不起作用，阶段 3 删
   disabled?: boolean;
-  /// 读屏名。不给就当装饰（旁边的开关或名字已经说了状态）
+  /// 读屏名。不给就当装饰（旁边的名字已经说了状态）
   label?: string;
 }
 
-/// 指示点（DESIGN「开关」，裁决「橙的两种形态」）：6px 圆，开＝`accent` 橙、关＝`ctl-border`；
-/// 不发光、无投影。橙的**含义**只有一个「开着 / 在生效」，形态有两种：开关刻条与这颗点。
-/// 用在：开关左侧 7px；侧栏 `Codex` 后（第三方模型开着才画）；开着规则的来源片片首
-export function Indicator({ on, size = "regular", disabled, label }: IndicatorProps) {
-  const classes = ["ss-indicator"];
-  if (size === "compact") classes.push("ss-indicator--compact");
-  if (on) classes.push("is-on");
-  if (disabled) classes.push("is-disabled");
+/// 指示点（DESIGN「开关 › 指示点」，裁决「橙的两种形态」）：6px `accent` 圆点，外一圈 2px 同色 14% 的
+/// 灯罩环（`--accent-halo`，平的色环，不模糊、不发光）。橙的**含义**只有一个「开着 / 在生效」，
+/// 形态有两种：开关刻线与这颗点。**只在看不到开关的地方出现**：侧栏 agent 名后（这个 agent 上有能力开着）。
+/// 关着不画——没有灰点
+export function Indicator({ on, label }: IndicatorProps) {
+  if (!on) return null;
+  // `is-on` 留在类名上：只剩这一态，样式不靠它；页面与测试据它认「开着的灯」
   return label ? (
-    <span className={classes.join(" ")} role="img" aria-label={label} title={label} />
+    <span className="ss-indicator is-on" role="img" aria-label={label} title={label} />
   ) : (
-    <span className={classes.join(" ")} aria-hidden="true" />
+    <span className="ss-indicator is-on" aria-hidden="true" />
   );
 }
 
@@ -174,15 +171,19 @@ export interface CheckboxProps {
   /// `"mixed"`＝半选（全选框在部分选中时）
   checked: boolean | "mixed";
   onChange?: (next: boolean) => void;
-  /// 读屏名，**必填**：视觉上复选框挨着的名字常常不在同一个元素里
+  /// 读屏名，**必填**：视觉上勾选框挨着的名字常常不在同一个元素里
   label: string;
   /// 给了就是「不可选」：`hairline` 边、透明底，原因提示框悬停出、按下当即出（已添加的行）
   disabledReason?: string;
 }
 
-/// 复选框（DESIGN「复选框」「命中区与视觉尺寸是两回事」）：13 方、`mark` 4 圆角——
-/// 方＝我选的，开关＝它开着。关＝`paper` 底 + 1px `ink-faint` 边；开＝`ink` 底 + `face` 对勾；
-/// 半选＝`ink` 底 + `face` 短横。视觉 13，命中区用伪元素撑到 25，不动 border；全应用只有这一个尺寸
+/// 勾选框（DESIGN「勾选框」「命中区与视觉尺寸是两回事」）：16 方、`mark` 4 圆角——
+/// 方＝我选的，开关＝它开着。未勾＝平贴的 `surface` 浅面 + 1px `ink-faint` 内环；手靠近＝`paper` + `raise-hover`；
+/// 勾上＝墨底白勾（`ink` 底、中心 10px `face` 对勾）；半选＝同墨底 + 8×2 `face` 短横。
+/// 视觉 16，命中区用伪元素撑到 24，不动 border；全应用只有这一个尺寸。
+///
+/// 行悬停钩子：列表 / 表格的行元素加 `data-checkrow`，悬停这一行时它里面的勾选框进「手靠近」态
+/// （ui.css `[data-checkrow]:hover .ss-checkbox`），页面不必各写一份覆盖
 export function Checkbox({ checked, onChange, label, disabledReason }: CheckboxProps) {
   const disabled = Boolean(disabledReason);
   const classes = ["ss-checkbox"];
@@ -206,23 +207,24 @@ export function Checkbox({ checked, onChange, label, disabledReason }: CheckboxP
   );
 }
 
-/// 复选框里的记号：勾上＝对勾，半选＝短横，没勾＝不画。`Checkbox` 与整行是按钮的列表
-/// （`pages/CheckMark.tsx`）共用这一份，同一个记号在全应用里只有一个画法
+/// 勾选框里的记号：勾上＝统一对勾 `IconTick`（10px、1.8），半选＝8×2 短横，没勾＝不画。
+/// `Checkbox` 与整行是按钮的列表（`pages/CheckMark.tsx`、模型勾选列表）共用这一份，
+/// 同一个记号在全应用里只有一个画法
 export function CheckboxGlyph({ checked }: { checked: boolean | "mixed" }) {
   if (checked === false) return null;
+  if (checked === true) return <IconTick />;
   return (
     <svg
-      width="9"
-      height="9"
-      viewBox="0 0 9 9"
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      strokeWidth="2"
       aria-hidden="true"
+      focusable="false"
     >
-      <path d={checked === true ? "M1.6 4.7l1.9 1.9L7.4 2.4" : "M2 4.5h5"} />
+      <path d="M1 5h8" />
     </svg>
   );
 }

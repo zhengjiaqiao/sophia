@@ -115,16 +115,37 @@ export function IconSettings(props: IconProps) {
   );
 }
 
-// ---- 显示窗里的三个状态记号：只跟在一句话或一个读数前面，不给命中区 ----
+// ---- 对勾：全应用只有这一种画法 ----
 
-/// 成功：✓
-export function IconCheck(props: IconProps) {
+/// ✓（DESIGN「✓ 只有一种画法」，2026-09-25）：10px 视框、1.8 描边、圆头圆角，`currentColor`。
+/// 勾选框里的对勾、提示条句首的 ✓、读数里的 `2 ✓`、菜单的当前项都用它，不用字体里的 ✓ 字符，
+/// 也不按 16px 图标的画法另画一枚。尺寸固定 10，不随处缩放
+export function IconTick() {
   return (
-    <Glyph {...props}>
-      <path d="M3 8.4l3.2 3.2L13 4.8" />
-    </Glyph>
+    <svg
+      className="ss-tick"
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M2 5.3 4.1 7.4 8 2.8" />
+    </svg>
   );
 }
+
+/// @deprecated 旧名：已经画成统一的 `IconTick`（`size` 不再起作用）。调用方改用 `IconTick` 后删掉
+export function IconCheck(_props: IconProps = {}) {
+  return <IconTick />;
+}
+
+// ---- 显示窗里的另两个状态记号：只跟在一句话或一个读数前面，不给命中区 ----
 
 /// 做不成：⊘
 export function IconCannot(props: IconProps) {
