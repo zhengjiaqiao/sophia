@@ -82,8 +82,6 @@ export type { IconProps } from "./icons.tsx";
 export { Section } from "./Section.tsx";
 export type { SectionProps } from "./Section.tsx";
 
-export { PendingSwitch } from "./PendingSwitch.tsx";
-export type { PendingSwitchProps } from "./PendingSwitch.tsx";
 
 export { FloatingLayer, FadeViewport } from "./FloatingLayer.tsx";
 

@@ -47,7 +47,7 @@ import {
   useBusyShown,
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
-import { PendingSwitch } from "./ui/PendingSwitch.tsx";
+import { Switch } from "./ui/Switch.tsx";
 import { Section } from "./ui/Section.tsx";
 import { PageHeadActions } from "./shell/PageHead.tsx";
 import { GatewayBlock } from "./ModelsGateways.tsx";
@@ -189,23 +189,21 @@ export interface SectionSwitchProps {
   /// 这一节正在做别的写 Codex 设置的事（重启、接管……）：开关先不接新的一拨
   busy: boolean;
   phase: RestartPhase;
-  /// 拨过去、还在等确认或等生效的那一侧（滑块停在那儿；橙等生效了才亮）
-  pending: boolean | null;
   onToggle: (next: boolean) => void;
   /// 拨开关成了：开关正下方浮起的那一窗（`✓ 已添加到 Codex`）；到点调 onSwitchDoneDismiss
   switchDone?: string | null;
   onSwitchDoneDismiss?: () => void;
 }
 
-/// 节头里的开关（DESIGN「开关的状态＝Codex 正在用的状态」）：不乐观翻转——拨过去滑块留在那一侧，
-/// 等确认、等生效；成了刻条与指示点才换色、原位下方浮起一窗；取消或没成滑块滑回。
+/// 节头里的开关（DESIGN「开关的状态＝Codex 正在用的状态」）：不乐观翻转——滑块始终停在 Codex
+/// 正在用的那一侧：点了先确认（Codex 在跑时），确认、写好、生效了才滑过去、亮橙，原位下方浮起一窗；
+/// 取消或没成就不动（拖过去的松手即回原位）。
 /// 写配置、重启 Codex 超过 0.3 秒时开关原位换成转圈 +「正在添加 / 正在移除」
 export function SectionSwitch({
   tool,
   state,
   busy,
   phase,
-  pending,
   onToggle,
   switchDone,
   onSwitchDoneDismiss,
@@ -216,9 +214,9 @@ export function SectionSwitch({
   const label = `${tool.name} 的第三方模型`;
   return (
     <span className="models-switch">
-      {blocked !== null && switching === null && pending === null ? (
+      {blocked !== null && switching === null ? (
         // 禁用的开关自带原因提示框：悬停出、按下当即出
-        <PendingSwitch
+        <Switch
           checked={false}
           onChange={() => undefined}
           label={label}
@@ -239,13 +237,12 @@ export function SectionSwitch({
             }
             placement="bottom"
           >
-            <PendingSwitch
+            <Switch
               checked={state.enabled}
-              pending={pending}
               onChange={onToggle}
               label={label}
               disabledReason={
-                busy && switching === null && pending === null ? "正在处理上一步" : undefined
+                busy && switching === null ? "正在处理上一步" : undefined
               }
             />
           </Tooltip>
@@ -721,8 +718,6 @@ export default function ModelsTab({
 
   /// 拨开关的确认（Codex 在跑时）：标题写结果，主动作「重启并添加 / 重启并移除」，锚在节头下方
   const switchText = confirmSwitch ? gatewayConfirmText(state, confirmSwitch.next, tool) : null;
-  /// 滑块停在哪一侧：确认期间、写配置与等生效期间都在用户拨过去的那一侧
-  const pending = confirmSwitch?.next ?? (phase.kind === "switching" ? phase.next : null);
 
   /// 这一节的灰面板：勾选在展开着的那一家列表里没写成的，出在那一行里；其余出在节头下
   const rowNotice: RowNotice | null =
@@ -767,7 +762,6 @@ export default function ModelsTab({
             state={state}
             busy={busy}
             phase={phase}
-            pending={pending}
             onToggle={(next) => requestSwitch(next)}
             switchDone={switchDone}
             onSwitchDoneDismiss={dismissSwitchDone}

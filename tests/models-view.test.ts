@@ -504,7 +504,6 @@ const switchProps = (overrides: Partial<GatewayState> = {}) => ({
   state: state(overrides),
   busy: false,
   phase: { kind: "idle" } as const,
-  pending: null,
   onToggle: noop,
 });
 
@@ -528,26 +527,12 @@ test("SectionSwitch：标准开关（指示点在左）；状态＝Codex 正在�
   assert.match(off, /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里</);
 });
 
-test("SectionSwitch 待定：拨过去等确认 / 等生效时滑块停在那一侧（包层 data-pending），橙不亮（仍是真实状态）", () => {
-  const html = render(SectionSwitch, { ...switchProps(withSelected()), pending: true });
-  assert.match(html, /class="ss-pending-switch" data-pending="on"/);
+test("SectionSwitch 等确认 / 等生效期间滑块不动：开关的位置＝Codex 正在用的状态，没有待定位置", () => {
+  const html = render(SectionSwitch, switchProps(withSelected()));
   assert.match(html, /aria-checked="false"/);
-  assert.doesNotMatch(html, /ss-indicator is-on/);
-  // 待定与真实状态相同（已落定）时不再是待定
-  const settled = render(SectionSwitch, {
-    ...switchProps(withSelected({ enabled: true })),
-    pending: true,
-  });
-  assert.match(settled, /class="ss-pending-switch">/);
-  const css = readFileSync(new URL("../src/ui/PendingSwitch.css", import.meta.url), "utf8");
-  assert.match(
-    css,
-    /\[data-pending="on"\] \.ss-switch \.ss-switch__knob \{\s*translate: var\(--travel\);/,
-  );
-  assert.match(
-    css,
-    /\[data-pending="off"\] \.ss-switch\.is-on \.ss-switch__knob \{\s*translate: 0;/,
-  );
+  assert.doesNotMatch(html, /data-pending|ss-pending-switch/);
+  const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /PendingSwitch|pending=\{/);
 });
 
 test("SectionSwitch 没有网关 / 没选模型：开关禁用，按下即出「先加一家网关、选好模型再打开」", () => {
@@ -566,12 +551,11 @@ test("SectionSwitch 拨开关之后：开关原位锁住（过了 0.3 秒门槛�
   const html = render(SectionSwitch, {
     ...switchProps(withSelected({ enabled: false })),
     busy: true,
-    pending: true,
     phase: { kind: "switching", next: true },
   });
   assert.match(
     html,
-    /class="models-switch"><span class="ss-locked" aria-busy="true">[^]*data-pending="on"[^]*role="switch"/,
+    /class="models-switch"><span class="ss-locked" aria-busy="true">[^]*role="switch" aria-checked="false"/,
   );
   assert.doesNotMatch(html, /title="正在处理上一步"/);
   assert.doesNotMatch(html, /ss-spinner/);
@@ -1146,15 +1130,12 @@ test("switchGateway 重启发不出：同样撤回；页面没了返回 undefine
   assert.deepEqual(gone.painted, [], "页面没了不再画");
 });
 
-test("开关不再乐观翻转：第三方模型节拨开关走确认 / switchGateway，不经勾选的写队列；滑块待定期间停在拨过去的那一侧", () => {
+test("开关不再乐观翻转：第三方模型节拨开关走确认 / switchGateway，不经勾选的写队列；生效前滑块不动", () => {
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /predictEnabled|toggleGateway/);
   assert.match(src, /gatewayConfirmText\(state, confirmSwitch\.next, tool\)/);
   assert.match(src, /switchGateway\(next, restartCodex,/);
-  assert.match(
-    src,
-    /const pending = confirmSwitch\?\.next \?\? \(phase\.kind === "switching" \? phase\.next : null\);/,
-  );
+  assert.doesNotMatch(src, /const pending =/);
   // D5：不再有网关二级页、配置网关、汇总下拉
   assert.doesNotMatch(src, /GatewayPage|配置网关|ModelPicker|ModelBox/);
 });
