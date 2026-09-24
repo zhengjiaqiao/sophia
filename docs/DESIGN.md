@@ -226,7 +226,7 @@ components:
     rounded: "{rounded.mark}"
     off: "底 {colors.surface}、1px {colors.ink-faint} 内环（平贴；环对机面 ≥ 3:1，D8）"
     hover: "底 {colors.paper}、{elevation.raise-hover}"
-    on: "按下锁住：底 {colors.recess}、{elevation.recess-tabs}、下移 0.5px；中心 {colors.ink} 对勾（10px、1.6 描边）"
+    on: "按下锁住：底 {colors.track}（比未勾的 surface 深一档）、{elevation.recess-tabs}、下移 0.5px；中心 {colors.ink} 对勾（10px、1.8 描边）"
     mixed: "同勾上的沉下去，中心 {colors.ink} 8×2 短横（只给表头全选框）"
     note: "勾选框（2026-09-25 定稿）：与锁键同材质——未勾平贴的浅面，勾上沉下去、中心墨色对勾；不用墨底"
   chip:
@@ -1053,7 +1053,7 @@ components:
 
 - **未勾**：平贴的浅面——`surface` 底 + 1px `ink-faint` 内环，不抬起。环用 `ink-faint` 而不是更浅的 `ctl-border`：行首这一列要让人看得出能多选，边对机面至少 3:1（WCAG 1.4.11，D8 ⑧ 优先于 ③）；
 - **手靠近**：底转 `paper`、`raise-hover`（抬起迎手）；
-- **勾上**：沉下去——`recess` 底 + `recess-tabs` 内凹、下移 0.5px，中心一枚 10px `ink` 对勾（1.6 描边）。对勾是勾选的惯例记号（⑥），不用墨底；
+- **勾上**：沉下去——`track` 底（比未勾的 `surface` **深一档**：沉下去的一定比平贴的暗；2026-09-25 产品负责人：「选中太不明显了」——当时用的 `recess` 反而比未勾更浅）+ `recess-tabs` 内凹、下移 0.5px，中心一枚 10px `ink` 对勾（1.8 描边）。对勾是勾选的惯例记号（⑥），不用墨底；
 - **半选**（只有表头的全选框）：同样沉下去，中心 8×2 `ink` 短横。
 
 记号用对勾而不是圆点：● ○ 在格子里说的是「加没加上」（⑤）。视觉 16、命中区 ≥ 24（见「命中区与视觉尺寸是两回事」），**全应用只有这一个尺寸**：表格行首、表头全选、设置页的 agent 列表、添加来源页的候选行、模型勾选列表都用它。
