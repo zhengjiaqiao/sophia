@@ -354,7 +354,7 @@ test("做不了的格子的说明：为什么 + 去哪做", async () => {
   // MCP 原件格：与 core 拒绝原件格时说的同一句（mcp::removal::ORIGINAL_MESSAGE）
   assert.equal(
     MCP_OWN_TIP,
-    "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，选中这个来源的片，在来源行上移除这个来源",
+    "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，在管理来源里移除这个来源",
   );
   const removal = readFileSync(
     new URL("../crates/core/src/mcp/removal.rs", import.meta.url),
