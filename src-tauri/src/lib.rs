@@ -808,19 +808,6 @@ fn remove_mcp_source(
     Ok(report)
 }
 
-/// 把这些问题记为看过（新问题只提示一次，看过即止）。key 由前端算好，格式见 core `store::SeenIssue`；
-/// 已看过的保持原样
-#[tauri::command]
-fn mark_issues_seen(keys: Vec<String>, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.store.mark_seen(&keys).map_err(err)
-}
-
-/// 看过的全部问题 key；不在里面的就是新问题，要提示一次
-#[tauri::command]
-fn list_seen_issues(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    state.store.seen_keys().map_err(err)
-}
-
 #[tauri::command]
 fn list_manual_sources(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
     Ok(state.store.load_settings().map_err(err)?.manual_sources)
@@ -1138,8 +1125,6 @@ pub fn run() {
             subscribe_mcp_source,
             plan_remove_mcp_source,
             remove_mcp_source,
-            mark_issues_seen,
-            list_seen_issues,
             list_manual_sources,
             add_manual_source,
             remove_manual_source,
