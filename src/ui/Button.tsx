@@ -38,6 +38,9 @@ interface ButtonBase {
   onDark?: boolean;
   /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
   "aria-describedby"?: string;
+  /// 开关式的键（`管理来源` / `收起`）：展开着没有、展开的是哪一块
+  ariaExpanded?: boolean;
+  ariaControls?: string;
 }
 
 /// 禁用必须同时给出原因（DESIGN：禁用必须同时给 title 说明原因，类型上强制）
@@ -86,6 +89,8 @@ export function Button(props: ButtonProps) {
     disabled,
     disabledReason,
     "aria-describedby": describedBy,
+    ariaExpanded,
+    ariaControls,
   } = props;
 
   const classes = ["ss-btn"];
@@ -106,6 +111,8 @@ export function Button(props: ButtonProps) {
         title={disabled ? disabledReason : title}
         aria-label={ariaLabel}
         aria-describedby={describedBy}
+        aria-expanded={ariaExpanded}
+        aria-controls={ariaControls}
         disabled={disabled}
         onClick={disabled ? undefined : onClick}
       >

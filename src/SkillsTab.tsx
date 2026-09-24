@@ -10,8 +10,8 @@ import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { skillSourcesModel } from "./pages/sourcesModel";
-import type { DomainRef } from "./pages/sourcesView";
-import { SourceRowView, useSources } from "./SourceRow";
+import { MANAGE_SOURCES, sourceSlot, type DomainRef } from "./pages/sourcesView";
+import { ManageSourcesKey, SourceListView, SourceRowView, useSources } from "./SourceRow";
 import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { pathsOfKey } from "./issues";
@@ -216,6 +216,7 @@ export default function SkillsTab({
     onChange: onRefresh,
     // 移除之后筛选回到 `全部`（这个来源的片没了，不筛出空表）
     onRemoved: () => setOriginFilter([]),
+    keys: !addOpen,
   });
 
   const targetOf = (targetId: string): Target | null =>
@@ -1001,23 +1002,35 @@ export default function SkillsTab({
     ...subscribedEmpty.map((r) => r.id),
   ]);
   const reveal = (path: string) => void api.revealInDir(path).catch((e) => onError(String(e)));
-  // 恰好选中一个来源片：片下出它的来源行（规则与移除；D3）
-  const rowSource = activeOrigins.length === 1 ? sources.rowOf(activeOrigins[0]) : undefined;
-  const sourceRow = rowSource ? (
-    <SourceRowView
-      state={sources}
-      row={rowSource}
-      model={model}
-      domain={domainRef}
-      onReveal={reveal}
-    />
-  ) : undefined;
-  /// 来源片的右键菜单（D18）：在访达中显示（＝来源行 `打开 ↗`）· 移除来源…（＝来源行 `×`，
-  /// 原件在这个位置里的来源没有这一项）；确认锚在被右键的那一片上
+  // 片下那一块（sourceSlot）：`管理来源` 展开着出全部来源；否则恰好选中一个来源片出它的来源行（D3）
+  const slot = sourceSlot(
+    sources.listOpen,
+    (sources.data?.rows ?? []).map((r) => r.id),
+    activeOrigins,
+  );
+  const rowSource = slot?.kind === "row" ? sources.rowOf(slot.id) : undefined;
+  const sourceRow =
+    slot?.kind === "list" ? (
+      <SourceListView state={sources} model={model} domain={domainRef} onReveal={reveal} />
+    ) : rowSource ? (
+      <SourceRowView
+        state={sources}
+        row={rowSource}
+        model={model}
+        domain={domainRef}
+        onReveal={reveal}
+      />
+    ) : undefined;
+  /// 来源片的右键菜单（D18）：管理来源（＝片后的 `管理来源`，列表已展开时不出）· 在访达中显示
+  /// （＝来源行 `打开 ↗`）· 移除来源…（＝来源行 `×`，原件在这个位置里的来源没有这一项）；
+  /// 确认锚在被右键的那一片上
   const chipMenu = (id: string, chip: HTMLElement): ContextMenuItem[] => {
     const row = sources.rowOf(id);
     const path = row?.path ?? overview.sources.find((x) => x.id === id)?.path;
     return [
+      ...((sources.data?.rows.length ?? 0) > 0 && !sources.listOpen
+        ? [{ label: MANAGE_SOURCES, run: () => sources.setListOpen(true) }]
+        : []),
       ...(path ? [{ label: "在访达中显示", run: () => reveal(path) }] : []),
       "separator",
       ...(row && !row.own
@@ -1065,11 +1078,16 @@ export default function SkillsTab({
           setOriginFilter([]);
         }}
         originFilter={activeOrigins}
-        onOriginFilter={setOriginFilter}
+        onOriginFilter={(next) => {
+          // 点任意一片：收起全部来源，回到「选中一片出这一行」
+          sources.setListOpen(false);
+          setOriginFilter(next);
+        }}
         emptySources={subscribedEmpty}
         ruleOn={sources.ruleOn}
         chipMenu={chipMenu}
         sourceRow={sourceRow}
+        sourcesTail={<ManageSourcesKey state={sources} />}
         onReveal={reveal}
         onCopyPath={(path) => void api.copyText(path).catch((e) => onError(String(e)))}
         onAddSource={() => setAddOpen(true)}

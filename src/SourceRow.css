@@ -107,6 +107,49 @@
   margin-left: calc(6px - var(--space-xs));
 }
 
+/* 来源片那一行末尾的 `管理来源` / `收起`（安静键 13 ink-mute）：与片同一行、字离最后一片 8
+   （片间距 6 + 2；安静键的命中区左右各吃回 6，字的位置不变），放不下时跟着片折到末尾 */
+.srcmanage {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+/* 「全部来源」：两列——来源名（按最长的名字定宽，字至多 160，右留 16）｜ 来源行。
+   名字格与来源行同高 40、同一条底线，行间就是一条 1px row-line */
+.srclist {
+  display: grid;
+  grid-template-columns: fit-content(176px) minmax(0, 1fr);
+}
+
+.srclist__name {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 40px;
+  padding-right: 16px;
+  border-bottom: var(--border-row);
+}
+
+.srclist__name > .ss-tipwrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.srclist__label {
+  overflow: hidden;
+  font-size: var(--size-caption);
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.srclist > .srcrow {
+  min-width: 0;
+}
+
 /* 目标浮层：一行 = 复选框 + 图标 14 + 名字，整行可点；没勾的名字 ink-mute；高亮行 surface、control 7、左右内缩 4 */
 .srcrow-targets {
   display: flex;

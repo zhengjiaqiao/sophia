@@ -89,8 +89,10 @@ export interface DomainViewProps {
   ruleOn: (id: string) => boolean;
   /// 来源片的右键菜单（在访达中显示 · 移除来源…）
   chipMenu: (id: string, chip: HTMLElement) => ContextMenuItem[];
-  /// 恰好选中一个来源片时的来源行
+  /// 恰好选中一个来源片时的来源行；展开「全部来源」时是那张列表
   sourceRow?: ReactNode;
+  /// 来源片那一行末尾的 `管理来源`
+  sourcesTail?: ReactNode;
   /// 行悬停「打开 ↗」：在访达中显示原件
   onReveal: (path: string) => void;
   /// 右键「拷贝路径」
@@ -511,6 +513,7 @@ export default function DomainView(props: DomainViewProps) {
           ...[...counts].map(([id, count]) => chip(id, count)),
           ...emptySources.map((s) => chip(s.id, 0)),
         ],
+        tail: props.sourcesTail,
       }}
       sourceRow={props.sourceRow}
       nameLabel="名称"

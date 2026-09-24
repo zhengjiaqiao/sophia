@@ -70,6 +70,33 @@ export function listNames(names: string[], max = LISTED_MAX): string {
   return names.length > max ? `${head} 等 ${names.length} 个` : head;
 }
 
+/// 来源片那一行末尾的开关式安静键（裁决 15：来源管理的入口要看得见，⑧）：
+/// 收着写 `管理来源`，展开「全部来源」列表时写 `收起`
+export const MANAGE_SOURCES = "管理来源";
+/// 展开的列表的读屏名
+export const ALL_SOURCES = "全部来源";
+
+export function manageSourcesLabel(open: boolean): string {
+  return open ? "收起" : MANAGE_SOURCES;
+}
+
+/// 来源片下那一块出什么：
+/// - 这个位置一个来源都没订阅：什么都不出，也没有 `管理来源`（空态已有 `+ 来源`）
+/// - 展开着：全部来源（每个订阅的来源一行；恰好选中一片时它那一行并在列表里）
+/// - 恰好选中一个订阅了的来源：它这一行（D3）
+export type SourceSlot = { kind: "list" } | { kind: "row"; id: string } | null;
+
+export function sourceSlot(
+  listOpen: boolean,
+  subscribed: readonly string[],
+  active: readonly string[],
+): SourceSlot {
+  if (subscribed.length === 0) return null;
+  if (listOpen) return { kind: "list" };
+  if (active.length === 1 && subscribed.includes(active[0])) return { kind: "row", id: active[0] };
+  return null;
+}
+
 /// × 的提示框：`从 CardBox 移除 WeiboAP（不动原件）`
 export function removeTitle(domain: DomainRef, name: string): string {
   return `${joinWords("从", domain.label, "移除", name)}（不动原件）`;

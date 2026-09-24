@@ -174,6 +174,8 @@ export interface MatrixProps {
     selected: readonly string[];
     onSelect: (next: string[]) => void;
     items: SourceChipItem[];
+    /// 片后同一行末尾的东西（`管理来源`，裁决 15）：跟着片折行
+    tail?: ReactNode;
   };
   /// 来源行（恰好选中一个来源片时由调用方给）：片下 6，表格上距随之从 14 改为 10
   sourceRow?: ReactNode;
@@ -1347,6 +1349,7 @@ function SourceChips({
   selected,
   onSelect,
   items,
+  tail,
   width,
 }: NonNullable<MatrixProps["sources"]> & { width: number }) {
   return (
@@ -1379,6 +1382,7 @@ function SourceChips({
           </Tooltip>
         </span>
       ))}
+      {tail}
     </div>
   );
 }

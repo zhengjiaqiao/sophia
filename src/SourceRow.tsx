@@ -10,11 +10,15 @@
 ///
 /// 规则状态（片首橙点与这一行的开关同一帧变）与移除流程由 `useSources` 持有：来源片的右键菜单
 /// 「移除来源…」走同一个确认，所以移除不能跟着这一行挂载。skill 与 MCP 只差数据源（`SourcesModel`）。
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+///
+/// 来源片那一行末尾的 `管理来源`（裁决 15）：开关式安静键，按下片下展开「全部来源」——订阅的每个来源
+/// 一行，每行就是这里的来源行、行首多一列来源名。开合也由 `useSources` 持有（片、右键菜单、Esc 都要收它）。
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   AgentIcon,
   BusySlot,
+  Button,
   Confirm,
   FloatingToast,
   IconButton,
@@ -29,7 +33,13 @@ import { FloatingLayer } from "./ui/FloatingLayer.tsx";
 import { RevealLink } from "./Matrix.tsx";
 import { CheckMark } from "./pages/CheckMark.tsx";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./pages/importDefaults.ts";
-import { removeConfirmTitle, removeTitle, type DomainRef } from "./pages/sourcesView.ts";
+import {
+  ALL_SOURCES,
+  manageSourcesLabel,
+  removeConfirmTitle,
+  removeTitle,
+  type DomainRef,
+} from "./pages/sourcesView.ts";
 import type {
   SourceRow as SourceRowData,
   SourcesData,
@@ -82,6 +92,13 @@ export interface SourcesState {
   host: ReactNode;
   /// 在 `at` 下浮起一窗（规则没改成）
   say: (text: ToastText, at: AnchorRect | null, align: ToastAlign) => void;
+  /// 「全部来源」列表展开着没有（没订阅任何来源时恒为 false）；不记忆，换位置、重新进来都收着
+  listOpen: boolean;
+  setListOpen: (open: boolean) => void;
+  /// `管理来源` 键外的包层与列表：Esc 收起时焦点在列表里就还给键
+  keyRef: RefObject<HTMLSpanElement | null>;
+  listRef: RefObject<HTMLDivElement | null>;
+  listId: string;
 }
 
 /// 这个位置已订阅的来源与它们的规则、移除。`version` 变了就重读（位置页每次重扫都给一个新值）；
@@ -92,12 +109,15 @@ export function useSources({
   version,
   onChange,
   onRemoved,
+  keys = true,
 }: {
   model: SourcesModel;
   domain: DomainRef;
   version: unknown;
   onChange: () => Promise<void>;
   onRemoved: (id: string) => void;
+  /// 页面此刻接不接 Esc（添加来源页、确认框、浮层开着时由它们接）
+  keys?: boolean;
 }): SourcesState {
   const [data, setData] = useState<SourcesData | null>(null);
   const [optimistic, setOptimistic] = useState<Map<string, string[]>>(new Map());
@@ -136,6 +156,32 @@ export function useSources({
     if (at) setToast({ key: Date.now(), text, at, align });
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
+
+  const [listWanted, setListOpen] = useState(false);
+  const keyRef = useRef<HTMLSpanElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  // 换了位置：收起（展开状态不记忆）
+  useEffect(() => setListOpen(false), [domain.key]);
+  const listOpen = listWanted && (data?.rows.length ?? 0) > 0;
+  // Esc 收起：浮层（捕获阶段）、表格（展开的行、选中的行）先接走的不再算；输入框里的归输入框；
+  // 移除确认开着时 Esc 只取消确认
+  const confirming = pending !== null;
+  useEffect(() => {
+    if (!listOpen || !keys || confirming) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+      event.preventDefault();
+      if (listRef.current?.contains(document.activeElement)) {
+        keyRef.current?.querySelector("button")?.focus();
+      }
+      setListOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [listOpen, keys, confirming]);
 
   const targetsOf = (row: SourceRowData) => optimistic.get(row.id) ?? row.targets;
   const rowOf = (id: string) => data?.rows.find((r) => r.id === id);
@@ -253,7 +299,72 @@ export function useSources({
     removeBusy,
     host,
     say,
+    listOpen,
+    setListOpen,
+    keyRef,
+    listRef,
+    listId,
   };
+}
+
+/// 来源片那一行末尾的 `管理来源` / `收起`（安静键，左距 8）。一个来源都没订阅时不出（空态已有 `+ 来源`）
+export function ManageSourcesKey({ state }: { state: SourcesState }) {
+  if ((state.data?.rows.length ?? 0) === 0) return null;
+  return (
+    <span className="srcmanage" ref={state.keyRef}>
+      <Button
+        variant="quiet"
+        size="compact"
+        ariaExpanded={state.listOpen}
+        ariaControls={state.listOpen ? state.listId : undefined}
+        onClick={() => state.setListOpen(!state.listOpen)}
+      >
+        {manageSourcesLabel(state.listOpen)}
+      </Button>
+    </span>
+  );
+}
+
+/// 「全部来源」：这个位置订阅的每个来源一行＝来源名（13 `ink`，最宽 160，截断才提示）+ 来源行。
+/// 名字列按最长的名字定宽（至多 160），各行的路径对齐；行间 1px `row-line`（来源行自己的底线）
+export function SourceListView({
+  state,
+  model,
+  domain,
+  onReveal,
+}: {
+  state: SourcesState;
+  model: SourcesModel;
+  domain: DomainRef;
+  onReveal: (path: string) => void;
+}) {
+  const rows = state.data?.rows ?? [];
+  return (
+    <div
+      className="srclist"
+      id={state.listId}
+      ref={state.listRef}
+      role="group"
+      aria-label={ALL_SOURCES}
+    >
+      {rows.map((row) => (
+        <Fragment key={row.id}>
+          <div className="srclist__name">
+            <TruncTip content={row.name}>
+              <span className="srclist__label">{row.name}</span>
+            </TruncTip>
+          </div>
+          <SourceRowView
+            state={state}
+            row={row}
+            model={model}
+            domain={domain}
+            onReveal={onReveal}
+          />
+        </Fragment>
+      ))}
+    </div>
+  );
 }
 
 /// 来源行的规则句：skill `以后新出现的自动加到`，MCP `以后新出现的自动写进`

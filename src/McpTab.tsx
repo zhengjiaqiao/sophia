@@ -21,13 +21,13 @@ import Matrix, {
 } from "./Matrix";
 import { affectedTip, Empty as TableEmpty } from "./DomainView";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
-import { SourceRowView, useSources } from "./SourceRow";
+import { ManageSourcesKey, SourceListView, SourceRowView, useSources } from "./SourceRow";
 import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
 import { addedOrigins, liveOrigins, originMatches } from "./originFilter";
-import { mcpLocationName, type DomainRef } from "./pages/sourcesView";
+import { MANAGE_SOURCES, mcpLocationName, sourceSlot, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
 import { pathsOfKey } from "./issues";
@@ -381,6 +381,7 @@ export default function McpTab({
     onChange: refresh,
     // 移除之后筛选回到 `全部`
     onRemoved: () => setOriginFilter([]),
+    keys: !addOpen && pane === null && pick === null,
   });
 
   // 加完来源滑回主视图（同 Skills）：重扫已完，列表筛到新来源——它们的片选中（几个选几片，
@@ -1328,22 +1329,39 @@ export default function McpTab({
       />
     );
 
-  // 恰好选中一个来源片：片下出它的来源行（规则与移除；D3）
-  const rowSource = onlySource !== null ? sources.rowOf(onlySource) : undefined;
-  const sourceRow = rowSource ? (
-    <SourceRowView
-      state={sources}
-      row={rowSource}
-      model={model}
-      domain={domainRef}
-      onReveal={(path) => void reveal(path)}
-    />
-  ) : undefined;
-  /// 来源片的右键菜单（D18）：在访达中显示（＝来源行 `打开 ↗`）· 移除来源…（＝来源行 `×`）
+  // 片下那一块（sourceSlot）：`管理来源` 展开着出全部来源；否则恰好选中一个来源片出它的来源行（D3）
+  const slot = sourceSlot(
+    sources.listOpen,
+    (sources.data?.rows ?? []).map((r) => r.id),
+    activeOrigins,
+  );
+  const rowSource = slot?.kind === "row" ? sources.rowOf(slot.id) : undefined;
+  const sourceRow =
+    slot?.kind === "list" ? (
+      <SourceListView
+        state={sources}
+        model={model}
+        domain={domainRef}
+        onReveal={(path) => void reveal(path)}
+      />
+    ) : rowSource ? (
+      <SourceRowView
+        state={sources}
+        row={rowSource}
+        model={model}
+        domain={domainRef}
+        onReveal={(path) => void reveal(path)}
+      />
+    ) : undefined;
+  /// 来源片的右键菜单（D18）：管理来源（＝片后的 `管理来源`，列表已展开时不出）· 在访达中显示
+  /// （＝来源行 `打开 ↗`）· 移除来源…（＝来源行 `×`）
   const chipMenu = (id: string, chip: HTMLElement): ContextMenuItem[] => {
     const row = sources.rowOf(id);
     const path = row?.path ?? locationOf(id)?.path;
     return [
+      ...((sources.data?.rows.length ?? 0) > 0 && !sources.listOpen
+        ? [{ label: MANAGE_SOURCES, run: () => sources.setListOpen(true) }]
+        : []),
       ...(path ? [{ label: "在访达中显示", run: () => void reveal(path) }] : []),
       "separator",
       ...(row && !row.own
@@ -1373,11 +1391,16 @@ export default function McpTab({
         originLabel="来源"
         sources={{
           selected: activeOrigins,
-          onSelect: setOriginFilter,
+          onSelect: (next) => {
+            // 点任意一片：收起全部来源，回到「选中一片出这一行」
+            sources.setListOpen(false);
+            setOriginFilter(next);
+          },
           items: [
             ...[...sourceCounts].map(([id, count]) => chip(id, count)),
             ...subscribedEmpty.map((r) => chip(r.id, 0)),
           ],
+          tail: <ManageSourcesKey state={sources} />,
         }}
         sourceRow={sourceRow}
         rows={rows}
