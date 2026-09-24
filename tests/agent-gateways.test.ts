@@ -246,13 +246,14 @@ test("换一行编辑 / 离开前：表单有没保存的改动才拦下问；�
   assert.equal(unsavedText("ap"), "地址改动没保存");
 });
 
-test("网关行右键（D18）与离开拦截：用外壳的 contextMenuHandler；拦的是侧栏导航项；样式不再依赖来源管理页", () => {
+test("网关行右键（D18）与离开拦截：用外壳的 contextMenuHandler 与 useLeaveGuard；样式不再依赖来源管理页", () => {
   const tsx = readFileSync(new URL("../src/ModelsGateways.tsx", import.meta.url), "utf8");
   assert.match(tsx, /onContextMenu=\{contextMenuHandler\(/);
   assert.match(tsx, /\{ label: "编辑", run: \(\) => choose\(p\.id\) \}/);
   assert.match(tsx, /\{ label: "删掉…", run: \(\) => askRemove\(p\) \}/);
-  assert.match(tsx, /const LEAVE_TARGET = "\.sidebar \.side-item__main";/);
-  assert.doesNotMatch(tsx, /SourcesPage|src-row|GatewayPage/);
+  // 离开前询问走外壳的统一接口（tests/shell-leave.test.ts 测接口本身与壳里的各条路）
+  assert.match(tsx, /useLeaveGuard\(formDirty && editing !== null/);
+  assert.doesNotMatch(tsx, /src-row/);
   const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /cubic-bezier|cursor:\s*pointer/);
   assert.match(css, /\.gw-row\.is-menu \.gw-row__main \{\s*background: var\(--surface\);/);

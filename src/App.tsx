@@ -59,6 +59,7 @@ import {
 } from "./shell/place";
 import { isMenuCommand, menuState, routeMenuCommand } from "./shell/menuCommands";
 import { dispatchPageCommand, useMenuFlags } from "./shell/menuBus";
+import { changesPage, requestLeave } from "./shell/leaveGuard";
 import { canPopup } from "./contextMenu";
 import "./App.css";
 
@@ -158,6 +159,18 @@ export default function App() {
   busyRef.current = busy;
   activeTabRef.current = activeTab;
   placeRef.current = place;
+
+  /// 用户换页的唯一入口（侧栏、页签、⌘, ⌘1…、应用菜单、托盘跳转、`查看`）：会换掉机面里这一页时先经
+  /// 「离开前询问」（shell/leaveGuard.ts）——那一页有没保存的改动就由它就地问，问完才走；`then` 是
+  /// 走到之后要做的事（停在「关于」、把命令交给新的页）。不换页的（只改记着的页签）当场走
+  const navigate = useCallback((to: (p: Place) => Place, then?: () => void) => {
+    const go = () => {
+      setPlace(to);
+      then?.();
+    };
+    if (changesPage(placeRef.current, to(placeRef.current))) requestLeave(go);
+    else go();
+  }, []);
 
   const setBusyState = (next: boolean) => {
     busyRef.current = next;
@@ -270,8 +283,8 @@ export default function App() {
       listen<{ page: "models" | "settings" | null; error: string | null }>(
         "tray-navigate",
         ({ payload }) => {
-          if (payload.page === "settings") setPlace((p) => goSettings(p));
-          if (payload.page === "models") setPlace((p) => goAgent(p, "codex"));
+          if (payload.page === "settings") navigate(goSettings);
+          if (payload.page === "models") navigate((p) => goAgent(p, "codex"));
           if (payload.error) setError(payload.error);
         },
       ),
@@ -289,7 +302,7 @@ export default function App() {
       unlistens.forEach((un) => un());
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
-  }, [requestRefresh, refreshGateway]);
+  }, [requestRefresh, refreshGateway, navigate]);
 
   /// Codex 页在非 macOS 上并不存在：一问出「不支持」，记着停在 Codex 页的落点由 resolvePlace 退回位置页
   const applyModelsSupported = (supported: boolean) => setModelsSupported(supported);
@@ -504,19 +517,25 @@ export default function App() {
   const jumpToRow = (segment: IssueSegment, key: string) => {
     if (segment === "models") {
       if (!modelsSupported) return;
-      setPlace((p) => goAgent(p, "codex"));
       // 「网关无法连接」那一条：选中那一家；别的类别只切到 Codex 页
       const providerId = modelIssueList.find((i) => i.key === key)?.providerId;
-      if (providerId !== undefined) setModelFocus(providerId);
-      refreshGateway();
+      navigate(
+        (p) => goAgent(p, "codex"),
+        () => {
+          if (providerId !== undefined) setModelFocus(providerId);
+          refreshGateway();
+        },
+      );
       return;
     }
     const domain = segment === "mcp" ? mcpDomainOf(key) : skillDomainOf(key);
-    setPlace((p) => {
-      const next = goTab(p, segment);
-      return domain !== null ? goLocation(next, domain) : next;
-    });
-    setFocus({ segment, key });
+    navigate(
+      (p) => {
+        const next = goTab(p, segment);
+        return domain !== null ? goLocation(next, domain) : next;
+      },
+      () => setFocus({ segment, key }),
+    );
   };
 
   /// skill 问题属于哪个域：当前侧栏选中的域里有就留在这儿，否则取第一个有它的域
@@ -544,8 +563,6 @@ export default function App() {
       const active = document.activeElement;
       const editing = isEditable(active);
       const route = routeMenuCommand(payload, placeRef.current, editing);
-      if (route.place !== placeRef.current) setPlace(route.place);
-      if (route.settings) setAboutRequest({ at: Date.now(), check: route.settings.check });
       if (route.shell === "add-project") void addProjectRef.current();
       if (route.text === "undo") document.execCommand("undo");
       if (route.text === "select-all") {
@@ -553,14 +570,21 @@ export default function App() {
           active.select();
         else document.execCommand("selectAll");
       }
-      // 换了目的地的（添加来源回到位置页）等页面挂上再交（menuBus 留着这一条）
-      if (route.page) dispatchPageCommand(route.page);
+      // 停在「关于」、交给页面的命令：换了目的地的（添加来源回到位置页）等页面挂上再交（menuBus 留着这一条）
+      const act = () => {
+        if (route.settings) setAboutRequest({ at: Date.now(), check: route.settings.check });
+        if (route.page) dispatchPageCommand(route.page);
+      };
+      // 换目的地的（⌘, ⌘1… 设置 / 关于 / 添加来源）与 ⌘[ 返回都要先经离开前询问
+      if (route.place !== placeRef.current) navigate(() => route.place, act);
+      else if (route.page === "back") requestLeave(act);
+      else act();
     }).then((fn) => (disposed ? fn() : (un = fn)));
     return () => {
       disposed = true;
       un?.();
     };
-  }, []);
+  }, [navigate]);
 
   // 菜单里跟着界面灰 / 亮的三项：撤销（当前页有可撤销的操作，或正在输入）、筛选（在位置页）、
   // 返回（在添加来源页）。只在状态真的变了时报给后端
@@ -621,9 +645,9 @@ export default function App() {
         projects={sortedProjects}
         projectTimes={projectTimes}
         selection={selection}
-        onSelectLocation={(key) => setPlace((p) => goLocation(p, key))}
-        onSelectAgent={(id) => setPlace((p) => goAgent(p, id))}
-        onSelectSettings={() => setPlace((p) => goSettings(p))}
+        onSelectLocation={(key) => navigate((p) => goLocation(p, key))}
+        onSelectAgent={(id) => navigate((p) => goAgent(p, id))}
+        onSelectSettings={() => navigate(goSettings)}
         sort={projectSort}
         onSort={chooseSort}
         projectBusy={projectBusy}
@@ -671,7 +695,7 @@ export default function App() {
                 <Tabs
                   items={LOCATION_DOMAINS}
                   value={place.tab}
-                  onChange={(tab) => setPlace((p) => goTab(p, tab))}
+                  onChange={(tab) => navigate((p) => goTab(p, tab))}
                   label="这个位置的哪张表"
                 />
               }

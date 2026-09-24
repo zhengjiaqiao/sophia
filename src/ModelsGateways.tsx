@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Disclosure } from "./Matrix.tsx";
 import { contextMenuHandler } from "./contextMenu.ts";
+import { useLeaveGuard } from "./shell/leaveGuard.ts";
 import type { ContextMenuItem } from "./contextMenu.ts";
 import {
   ADD_GATEWAY_BLOCKED,
@@ -39,7 +40,8 @@ import { ModelList } from "./ModelList.tsx";
 /// - `编辑` / `+ 网关`：表单在行里就地展开（新网关插在最上面，名字位写 `新网关`）；保存成功、
 ///   拉到模型后新网关变成普通行并自动展开，模型整批出现不逐个闪，这一行 surface 行带闪两下
 /// - 右键网关行：`编辑` · `删掉…`（D18，与行尾两个入口同一条命令）
-/// - 离开这一页（点侧栏别处）时表单有没保存的改动：拦下，在那一行里就地问「保存 / 丢弃」
+/// - 离开这一页（侧栏、⌘, ⌘1…、应用菜单、托盘跳转、⌘[，都经外壳的 `useLeaveGuard`）时表单有没保存的改动：
+///   拦下，在那一行里就地问「保存 / 丢弃」，问完再走
 ///
 /// 勾选与模型片读的是 ModelsTab 持有的同一个 GatewayState：勾选 / 取消 / 点在用片的 × 三处实时联动
 
@@ -87,9 +89,6 @@ export function displayUrl(url: string): string {
   return url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/\/$/, "");
 }
 
-/// 点在侧栏的导航项上：这一下要离开 Codex 页
-const LEAVE_TARGET = ".sidebar .side-item__main";
-
 export function GatewayBlock({
   tool,
   state,
@@ -112,8 +111,8 @@ export function GatewayBlock({
   const [editing, setEditing] = useState<GatewayChoice | null>(null);
   /// 表单里有没保存的改动：离开 / 换一行编辑之前先问
   const [formDirty, setFormDirty] = useState(false);
-  /// 想离开但表单还有改动：被拦下的那一下（侧栏里的导航项），问完再替用户点一次
-  const [leaveTo, setLeaveTo] = useState<HTMLElement | null>(null);
+  /// 想离开但表单还有改动：外壳交过来的「问完之后继续走」
+  const [leaveTo, setLeaveTo] = useState<(() => void) | null>(null);
   /// 表单有改动时又点了别的 `编辑` / `+ 网关`：就地问完再换过去
   const [switchTo, setSwitchTo] = useState<GatewayChoice | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
@@ -128,8 +127,6 @@ export function GatewayBlock({
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowEls = useRef(new Map<string, HTMLDivElement>());
   const formEl = useRef<HTMLDivElement | null>(null);
-  /// 问完之后替用户再点那一下：这一次不再拦
-  const bypass = useRef(false);
 
   const trackDirty = useCallback(
     (dirty: boolean) => {
@@ -143,22 +140,11 @@ export function GatewayBlock({
     [onDirtyChange],
   );
 
-  // 离开这一页（点侧栏别处）时表单有没保存的改动：拦下，在那一行里就地问一句（⑬⑭）。
-  // 捕获阶段在 document 上听，早于 React 的根监听，这一下点击不会被路由接到
-  useEffect(() => {
-    if (!formDirty || editing === null) return;
-    const onClick = (event: MouseEvent) => {
-      if (bypass.current) return;
-      const target = event.target instanceof Element ? event.target.closest(LEAVE_TARGET) : null;
-      if (!(target instanceof HTMLElement)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setLeaveTo(target);
-      formEl.current?.scrollIntoView?.({ block: "nearest" });
-    };
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, [formDirty, editing]);
+  // 离开这一页时表单有没保存的改动：外壳的换页都经这里（useLeaveGuard），拦下，在那一行里就地问一句（⑬⑭）
+  useLeaveGuard(formDirty && editing !== null, (proceed) => {
+    setLeaveTo(() => proceed);
+    formEl.current?.scrollIntoView?.({ block: "nearest" });
+  });
 
   // 正在编辑的那一家消失了（被删、外部变化）：收起表单
   useEffect(() => {
@@ -240,14 +226,10 @@ export function GatewayBlock({
       startEditing(switchTo);
       return;
     }
-    const target = leaveTo;
+    const proceed = leaveTo;
     trackDirty(false);
     if (key === "new") setEditing(null);
-    if (target) {
-      bypass.current = true;
-      target.click();
-      bypass.current = false;
-    }
+    proceed?.();
   };
 
   /// 这一行的表单（编辑 / 新网关）
