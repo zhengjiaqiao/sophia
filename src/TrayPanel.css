@@ -56,7 +56,7 @@
   min-width: 0;
 }
 
-/* 开关那一格：开关 / 原位转圈 +「正在添加」；也是 `✓ 已添加到 Codex` 那一窗的锚 */
+/* 开关那一格：开关 / 写配置超过 0.3 秒时原位转圈 +「正在添加」 */
 .tray__switch {
   display: inline-flex;
   align-items: center;

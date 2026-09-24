@@ -1,6 +1,6 @@
 /* Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，画板 V4Layouts-models*）。
    节的骨架（节头、页面头下 24、节间 48）在 ui/Section.css；这里是这一节自己的东西：
-   开关那一格、页面头右端的 重启生效 / 启动 Codex、在用行、行内待办条、网关小区块与网关行里的表单。
+   开关那一格与紧跟它的 重启生效 / 启动 Codex、在用行、行内待办条、网关小区块与网关行里的表单。
    色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
@@ -13,7 +13,14 @@
   color: var(--ink-mute);
 }
 
-/* ===== 节头里的开关：开关 / 原位转圈 +「正在添加」；也是 `✓ 已添加到 Codex` 的锚（浮在它正下方 4） ===== */
+/* ===== 节头：开关 + 16 + 重启生效 / 启动 Codex（手刚拨完开关，下一步就在它旁边） ===== */
+.models-headctl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+/* 节头里的开关：开关 / 写配置超过 0.3 秒时原位转圈 +「正在添加」 */
 .models-switch {
   display: inline-flex;
   align-items: center;
@@ -25,7 +32,7 @@
   color: var(--ink-mute);
 }
 
-/* ===== 页面头右端：重启生效 / 启动 Codex（默认键 28），卸下后台服务（节头右端，紧凑 24） ===== */
+/* ===== 紧跟开关的 重启生效 / 启动 Codex、节头右端的 卸下后台服务（都是紧凑 24）：忙碌时原位转圈 + 一句 ===== */
 .models-restart {
   display: inline-flex;
   align-items: center;
@@ -40,7 +47,7 @@
   color: var(--ink-mute);
 }
 
-/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在它正下方 4、右沿对齐原来的键 */
+/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在它正下方 4、左沿对齐原来的键 */
 .models-restart--done {
   display: inline-block;
   width: 0;

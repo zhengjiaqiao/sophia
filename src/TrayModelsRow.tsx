@@ -5,7 +5,6 @@ import {
   LAUNCH_POLL_MS,
   LAUNCH_TIMEOUT,
   LAUNCH_TIMEOUT_MS,
-  gatewayConfirmText,
   gatewaySwitchText,
   parseBackendError,
   settleAfterRestart,
@@ -38,15 +37,14 @@ import {
 /// 面板（TrayPanel）按注册表把它排进 Codex 那一块，面板自己不认得这一节。样式在 TrayPanel.css。
 ///
 /// 与 Codex 页同一段逻辑（modelsView）：
-/// - 开关不乐观翻转：Codex 在跑先在面板里确认（`重启并添加` / `重启并移除`），取消什么都不写；确认后开关
-///   原位转圈 +「正在添加 / 正在移除」，成了落到新状态、开关下方浮起 `✓ 已添加到 Codex`；没成则连配置一起撤回，
-///   键位原位灰面板 + `再试一次`
+/// - 开关＝配置里开没开：拨了就写、不确认，乐观翻转（滑块当即过去，写超过 0.3 秒原位转圈 +「正在添加 / 正在移除」）；
+///   写成了要重启才生效时键位出 `重启生效`（Codex 没在跑出 `启动 Codex`）；没写成连配置一起撤回、滑块滑回，
+///   键位原位灰面板 + `再试一次`。打断对话的是重启，确认只在 `重启生效` 上
 /// - 键位 `重启生效` / `启动 Codex` / `卸下后台服务` 占同一位（默认键紧凑），规则同 Codex 页
 /// - 卸下后台服务做不成：把主窗口带到 Codex 页，由那里说原因——面板放不下一段解释
-/// - Esc：确认开着先收回那一问（在捕获阶段接住，面板自己的 Esc 收起就不再收到）；面板每次弹出，上次没答的确认作废
+/// - Esc：重启确认开着先收回那一问（在捕获阶段接住，面板自己的 Esc 收起就不再收到）；面板每次弹出，上次没答的确认作废
 
-/// 键位那一处在做什么：重启生效的确认 / 重启中 / 已生效；启动中 / 已启动；
-/// 拨开关的确认 / 写配置到 Codex 换上 / 成了那一窗
+/// 键位那一处在做什么：重启生效的确认 / 重启中 / 已生效；启动中 / 已启动；拨了开关、正在写配置
 type Phase =
   | { kind: "idle" }
   | { kind: "confirming" }
@@ -54,9 +52,7 @@ type Phase =
   | { kind: "done" }
   | { kind: "launching" }
   | { kind: "launched" }
-  | { kind: "confirmSwitch"; next: boolean }
-  | { kind: "switching"; next: boolean }
-  | { kind: "switched"; text: string };
+  | { kind: "switching"; next: boolean };
 
 /// 键位原位的灰面板：主句 + 原因 + `再试一次`。`for` 说它跟着哪颗键：那颗键消失（问题解决了）就一起走
 interface TrayNotice {
@@ -89,7 +85,7 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
 
   // Esc：确认开着先收回那一问。捕获阶段接住并停下，面板自己「Esc 收起」的监听就收不到这一下
   useEffect(() => {
-    if (phase.kind !== "confirming" && phase.kind !== "confirmSwitch") return;
+    if (phase.kind !== "confirming") return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
@@ -99,29 +95,20 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [phase.kind]);
 
-  // ✓ 已生效 / 已启动 / 已添加那一窗到点（停留、悬停停表、淡出都在 Toast 里）
+  // ✓ 已生效 / 已启动那一窗到点（停留、悬停停表、淡出都在 Toast 里）
   const dismissDone = useCallback(() => setPhase({ kind: "idle" }), []);
 
-  /// 拨开关：Codex 在跑先在面板里确认（要重启，进行中的对话会中断）；没在跑直接写
-  const toggle = (next: boolean) => {
-    const current = shown.current;
-    if (!current) return;
-    setNotice(null);
-    if (current.codex.running) setPhase({ kind: "confirmSwitch", next });
-    else void runSwitch(next, false);
-  };
-
-  /// 写配置 →（在跑时）重启 Codex → 等它换上（最多 15 秒）；没成则撤回刚写的（同 Codex 页，switchGateway）
-  const runSwitch = async (next: boolean, restart: boolean) => {
+  /// 拨开关（同 Codex 页）：不确认，直接写配置；滑块当即过去（乐观翻转）。写成了键位按状态出
+  /// `重启生效` / `启动 Codex`；没写成 switchGateway 撤回刚写的、滑块滑回，键位原位灰面板 + `再试一次`
+  const toggle = async (next: boolean) => {
     setNotice(null);
     setPhase({ kind: "switching", next });
     setBusy(true);
     let reason: string | null | undefined;
     try {
       await tray.idle();
-      reason = await switchGateway(next, restart, {
+      reason = await switchGateway(next, {
         write: (on) => (on ? api.gatewayEnable() : api.gatewayRestore()),
-        restartCodex: api.gatewayRestartCodex,
         read: api.gatewayState,
         onState: tray.applyGateway,
         alive: tray.alive,
@@ -131,13 +118,14 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
       if (tray.alive()) setBusy(false);
     }
     if (reason === undefined || !tray.alive()) return;
-    const text = gatewaySwitchText(next, restart);
-    if (reason === null) {
-      setPhase({ kind: "switched", text: text.done });
-      return;
-    }
     setPhase({ kind: "idle" });
-    setNotice({ message: text.failed, reason, retry: () => toggle(next), for: "switch" });
+    if (reason === null) return;
+    setNotice({
+      message: gatewaySwitchText(next).failed,
+      reason,
+      retry: () => void toggle(next),
+      for: "switch",
+    });
   };
 
   /// 停用后服务仍在：卸下它。做不成就把主窗口带到 Codex 页说原因（面板放不下一段解释）
@@ -251,7 +239,7 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
   /// 键位：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位；做的时候原位忙碌，成了原位下方浮起一窗
   const keySlot = (current: GatewayState) => {
     const row = trayRow(current);
-    // 拨开关写完配置到 Codex 换上之间，状态会说「要重启」「没在跑」：键不能跟着闪出来
+    // 拨开关写配置期间：写完了才知道要不要重启，键等写完再出来
     if (phase.kind === "switching") return null;
     if (phase.kind === "restarting" || phase.kind === "launching") {
       // 键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
@@ -319,6 +307,8 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
   const draw = (current: GatewayState) => {
     const row = trayRow(current);
     const switching = phase.kind === "switching" ? phase.next : null;
+    /// 乐观翻转：写的时候滑块已经在拨过去的那一侧
+    const on = switching ?? row.toggle.on;
     const models = trayModels(current);
     // 灰面板跟着它那颗键：键消失（问题解决了）就一起走
     const noticeLive =
@@ -333,7 +323,7 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
       <>
         <div className="tray__cap">
           <span className="tray__cap-title">{title}</span>
-          {/* 开关不乐观翻转：等确认、等生效，成了才落到新状态，原位下方浮起一窗 */}
+          {/* 开关＝配置里开没开：拨了就写，滑块当即过去；没写成滑回 */}
           <span className="tray__switch">
             {row.toggle.disabledReason !== null && switching === null ? (
               // 禁用的开关自带原因提示框：悬停出、按下当即出（同 Codex 页）
@@ -347,30 +337,25 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
             ) : (
               <BusySlot
                 busy={switching !== null}
-                label={gatewaySwitchText(switching ?? true, true).busy}
+                label={gatewaySwitchText(switching ?? true).busy}
               >
                 <Tooltip
                   content={
-                    row.toggle.on
+                    on
                       ? `关掉后，${CODEX.name} 只保留官方模型`
                       : `打开后，选好的模型会出现在 ${CODEX.name} 的模型列表里`
                   }
                   placement="bottom"
                 >
                   <Switch
-                    checked={row.toggle.on}
-                    onChange={toggle}
+                    checked={on}
+                    onChange={(next) => void toggle(next)}
                     label={`启用 ${CODEX.name} 的${title}`}
                     disabledReason={busy && switching === null ? "正在处理上一步" : undefined}
                   />
                 </Tooltip>
               </BusySlot>
             )}
-            {phase.kind === "switched" ? (
-              <FloatingToast align="end">
-                <Toast kind="success" verb={phase.text} onDismiss={dismissDone} />
-              </FloatingToast>
-            ) : null}
           </span>
         </div>
         {models.length > 0 ? <ModelsLine models={models} /> : null}
@@ -384,18 +369,6 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
               "重启",
               () => void restartCodex(),
             )
-          : null}
-        {phase.kind === "confirmSwitch"
-          ? (() => {
-              const text = gatewayConfirmText(current, phase.next);
-              const next = phase.next;
-              return confirmPanel(
-                text.title,
-                text.body,
-                text.confirmLabel,
-                () => void runSwitch(next, true),
-              );
-            })()
           : null}
         {noticeLive && notice ? (
           // 带下一步的失败：键位原位灰面板，不会自己走（DESIGN「反馈的两种形态」）

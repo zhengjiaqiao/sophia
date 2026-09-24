@@ -7,7 +7,7 @@ import "./Section.css";
 export interface SectionProps {
   /// 节名（`第三方模型`、`用量`），原样
   title: ReactNode;
-  /// 紧跟节名的总开关（没有总开关的节不给）
+  /// 紧跟节名的总开关，以及紧跟开关的、它引起的下一步（Codex 的 `重启生效`）；没有总开关的节不给
   control?: ReactNode;
   /// 节头右端这一节自己的动作（`卸下后台服务`）；没有时这一格空着
   actions?: ReactNode;

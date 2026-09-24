@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import {
   fitModelCount,
@@ -195,6 +196,17 @@ test("R4 刚启用、Codex 还开着旧配置：出现「重启生效」", () =>
 test("R4 刚停用也一样：Codex 的列表要重启才会变回去", () => {
   const row = trayRow(withModels(2, { enabled: false, needsCodexRestart: true }));
   assert.equal(row.showRestart, true);
+});
+
+test("托盘拨开关：拨了就写（switchGateway，不确认、不重启），滑块当即过去；确认只在「重启生效」上（同 Codex 页）", () => {
+  const src = readFileSync(new URL("../src/TrayModelsRow.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /confirmSwitch|gatewayConfirmText|重启并|switched/);
+  assert.match(src, /reason = await switchGateway\(next, \{/);
+  assert.match(src, /const on = switching \?\? row\.toggle\.on;/);
+  assert.match(src, /checked=\{on\}/);
+  // 面板里只剩一种确认：重启 Codex
+  assert.equal(src.match(/confirmPanel\(/g)?.length, 1);
+  assert.match(src, /confirmPanel\(\s*`重启 \$\{CODEX\.name\}？`,\s*RESTART_CONSEQUENCE,/);
 });
 
 test("托盘「卸下后台服务」：停用后服务仍在才出现；和「重启生效」同时该出现时让位给重启（一行放不下两颗键）", () => {

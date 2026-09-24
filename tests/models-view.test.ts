@@ -38,7 +38,6 @@ import {
   predictEnabled,
   settleAfterRestart,
   RESTART_STILL_STALE,
-  gatewayConfirmText,
   gatewaySwitchText,
   switchGateway,
   SWITCH_ROLLBACK_FAILED,
@@ -492,7 +491,7 @@ test("modelIssues：接管 / 配置被外部改过 / 网关无法连接三类，
   );
 });
 
-// ===== 渲染：节头开关、页面头右端的键、在用行、行内待办条 =====
+// ===== 渲染：节头开关与紧跟它的键、在用行、行内待办条 =====
 
 const withSelected = (overrides: Partial<GatewayState> = {}) => ({
   providers: [provider({ models: [model({ id: "m1", selected: true })] })],
@@ -515,7 +514,7 @@ const slotProps = (overrides: Partial<GatewayState> = {}) => ({
   onRestart: noop,
 });
 
-test("SectionSwitch：标准开关（指示点在左）；状态＝Codex 正在用的状态；关着时提示框写打开的结果", () => {
+test("SectionSwitch：标准开关（指示点在左）；开关＝配置里开没开；关着时提示框写打开的结果", () => {
   const on = render(SectionSwitch, switchProps(withSelected({ enabled: true })));
   assert.match(
     on,
@@ -527,12 +526,24 @@ test("SectionSwitch：标准开关（指示点在左）；状态＝Codex 正在�
   assert.match(off, /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里</);
 });
 
-test("SectionSwitch 等确认 / 等生效期间滑块不动：开关的位置＝Codex 正在用的状态，没有待定位置", () => {
-  const html = render(SectionSwitch, switchProps(withSelected()));
-  assert.match(html, /aria-checked="false"/);
-  assert.doesNotMatch(html, /data-pending|ss-pending-switch/);
+test("SectionSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去的那一侧、亮橙；没有待定位置、没有拨开关的确认", () => {
+  const on = render(SectionSwitch, {
+    ...switchProps(withSelected({ enabled: false })),
+    busy: true,
+    phase: { kind: "switching", next: true },
+  });
+  assert.match(on, /role="switch" aria-checked="true"/);
+  assert.match(on, /ss-indicator is-on/);
+  assert.match(on, /role="tooltip"[^>]*>关掉后，Codex 只保留官方模型</);
+  const off = render(SectionSwitch, {
+    ...switchProps(withSelected({ enabled: true })),
+    busy: true,
+    phase: { kind: "switching", next: false },
+  });
+  assert.match(off, /role="switch" aria-checked="false"/);
+  assert.doesNotMatch(on + off, /data-pending|ss-pending-switch/);
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(src, /PendingSwitch|pending=\{/);
+  assert.doesNotMatch(src, /PendingSwitch|pending=\{|confirmSwitch|gatewayConfirmText|重启并/);
 });
 
 test("SectionSwitch 没有网关 / 没选模型：开关禁用，按下即出「先加一家网关、选好模型再打开」", () => {
@@ -555,33 +566,40 @@ test("SectionSwitch 拨开关之后：开关原位锁住（过了 0.3 秒门槛�
   });
   assert.match(
     html,
-    /class="models-switch"><span class="ss-locked" aria-busy="true">[^]*role="switch" aria-checked="false"/,
+    /class="models-switch"><span class="ss-locked" aria-busy="true">[^]*role="switch" aria-checked="true"/,
   );
   assert.doesNotMatch(html, /title="正在处理上一步"/);
   assert.doesNotMatch(html, /ss-spinner/);
 });
 
-test("SectionSwitch 拨开关成了：开关正下方浮起白窗 `✓ 已添加到 Codex`", () => {
-  const html = render(SectionSwitch, {
-    ...switchProps(withSelected({ enabled: true })),
-    switchDone: "已添加到 Codex",
-    onSwitchDoneDismiss: noop,
-  });
-  assert.match(
-    html,
-    /class="models-switch">[^]*role="switch"[^]*<span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"[^]*ss-toast--routine[^]*已添加到 Codex/,
-  );
-});
-
-test("RestartSlot（页面头右端）：待重启出默认键「重启生效」（28，不是紧凑），提示框写后果与代价", () => {
+test("RestartSlot（节头里紧跟开关）：待重启出紧凑键「重启生效」（与节头里的 卸下后台服务 同高），提示框写后果与代价、左对齐键", () => {
   const html = render(
     RestartSlot,
     slotProps(withSelected({ enabled: true, needsCodexRestart: true })),
   );
-  assert.match(html, /class="ss-btn"[^>]*>重启生效</);
-  assert.doesNotMatch(html, /ss-btn--compact/);
+  assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
   assert.match(html, /role="tooltip"[^>]*>重启 Codex 桌面应用让改动生效，进行中的对话会中断</);
   assert.equal(render(RestartSlot, slotProps(withSelected({ enabled: true }))), "");
+  const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
+  const slot = src.slice(src.indexOf("export function RestartSlot"), src.indexOf("// ===== 节头：开关"));
+  assert.doesNotMatch(slot, /align="end"/, "键在开关右边：提示框、✓ 已生效都左对齐键");
+  assert.match(slot, /<FloatingToast align="start">/);
+});
+
+test("第三方模型节头：开关 + 16 + 重启生效 / 启动 Codex 成组（不在页面头右端）；重启确认锚在键下、左对齐", () => {
+  const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /PageHeadActions/);
+  assert.match(
+    src,
+    /control=\{[^]*<span className="models-headctl">\s*<SectionSwitch[^]*<RestartSlot[^]*<\/span>\s*\}\s*actions=/,
+  );
+  assert.match(
+    src,
+    /onRestart=\{\(\) => setConfirmRestart\(anchorOf\(keyEl\.current\) \?\? null\)\}/,
+  );
+  assert.match(src, /anchor=\{confirmRestart\}\s*onConfirm=/, "不再传 align=end：默认左对齐");
+  const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
+  assert.match(css, /\.models-headctl \{[^}]*gap: var\(--space-md\);/);
 });
 
 test("RestartSlot 重启中：0.3 秒门槛之前键照旧、点不动；已生效：键的原位下方浮起白窗", () => {
@@ -976,50 +994,17 @@ test("settleAfterRestart：发完结束信号等旧进程退——先读到旧�
   assert.equal(gone, undefined);
 });
 
-// ===== 开关的状态＝Codex 正在用的状态（DESIGN 同名一条） =====
+// ===== 开关＝配置里开没开，拨了就写（DESIGN「第三方模型（一节）」） =====
 
-test("gatewayConfirmText：打开写出数量与「添加」，关掉写「移除」；正文说要重启、对话会中断；主动作「重启并…」", () => {
-  const three = state({
-    providers: [
-      provider({
-        id: "a",
-        models: [model({ id: "m1", selected: true }), model({ id: "m2", selected: true })],
-      }),
-      provider({ id: "b", models: [model({ id: "m1", selected: true }), model({ id: "m3" })] }),
-    ],
-  });
-  assert.deepEqual(gatewayConfirmText(three, true), {
-    title: "把 3 个第三方模型添加到 Codex？",
-    body: "要重启 Codex 才生效，进行中的对话会中断",
-    confirmLabel: "重启并添加",
-  });
-  assert.deepEqual(gatewayConfirmText({ ...three, enabled: true }, false), {
-    title: "从 Codex 移除第三方模型？",
-    body: "要重启 Codex 才生效，进行中的对话会中断",
-    confirmLabel: "重启并移除",
-  });
-});
-
-test("gatewaySwitchText：忙碌「正在添加 / 正在移除」；成了 ✓ 已添加到 / 已从 Codex 移除，没在跑补一句；没成的主句", () => {
-  assert.deepEqual(gatewaySwitchText(true, true), {
-    busy: "正在添加",
-    done: "已添加到 Codex",
-    failed: "没添加到 Codex",
-  });
-  assert.equal(gatewaySwitchText(true, false).done, "已添加到 Codex，下次打开就能用");
-  assert.deepEqual(gatewaySwitchText(false, true), {
-    busy: "正在移除",
-    done: "已从 Codex 移除",
-    failed: "没从 Codex 移除",
-  });
-  assert.equal(gatewaySwitchText(false, false).done, "已从 Codex 移除");
+test("gatewaySwitchText：忙碌「正在添加 / 正在移除」；没成的主句（成了不说话：滑块、橙与旁边的键就是结果）", () => {
+  assert.deepEqual(gatewaySwitchText(true), { busy: "正在添加", failed: "没添加到 Codex" });
+  assert.deepEqual(gatewaySwitchText(false), { busy: "正在移除", failed: "没从 Codex 移除" });
 });
 
 /// switchGateway 的假依赖：记下调用顺序；`writes` 按次序给每次写的结果（Error 即抛出）
 const switchIo = (opts: {
   writes: Array<GatewayState | Error>;
   reads: GatewayState[];
-  restartError?: Error;
   alive?: () => boolean;
 }) => {
   const calls: string[] = [];
@@ -1032,10 +1017,6 @@ const switchIo = (opts: {
       if (next instanceof Error) throw next;
       return next;
     },
-    restartCodex: async () => {
-      calls.push("restartCodex");
-      if (opts.restartError) throw opts.restartError;
-    },
     read: async () => {
       calls.push("read");
       return opts.reads.shift() ?? opts.reads[opts.reads.length - 1] ?? state();
@@ -1046,95 +1027,49 @@ const switchIo = (opts: {
   };
   return { io, calls, painted };
 };
-/// 假时钟：每睡一次时间前进 pollMs，读几次与机器快慢无关（原来用真实时间，快的机器上 5ms 里能读够
-/// 7 次、读到夹具末尾的新状态，「15 秒内没换上」偶发变成成功）
-const fakeClock = () => {
-  let t = 0;
-  return { now: () => t, sleep: async (ms: number) => void (t += ms) };
-};
-const fastSettle = { timeoutMs: 5, pollMs: 1, clock: fakeClock() };
 
-test("switchGateway 在跑时：写配置 → 重启 Codex → 等到换上，成了返回 null、不回滚", async () => {
+test("switchGateway：只写配置、不重启不等；成了返回 null，画上写回来的状态（在跑时它说要重启，键随之出来）", async () => {
   const on = state({ enabled: true, needsCodexRestart: true });
-  const settled = state({ enabled: true, needsCodexRestart: false });
-  const h = switchIo({ writes: [on], reads: [on, settled] });
-  const result = await switchGateway(true, true, h.io, { timeoutMs: 1000, pollMs: 1 });
-  assert.equal(result, null);
-  assert.deepEqual(h.calls, ["enable", "restartCodex", "read", "read"]);
-  assert.equal(h.painted.at(-1), settled, "开关落到新状态");
-});
+  const h = switchIo({ writes: [on], reads: [] });
+  assert.equal(await switchGateway(true, h.io), null);
+  assert.deepEqual(h.calls, ["enable"]);
+  assert.deepEqual(h.painted, [on]);
 
-test("switchGateway 没在跑：直接写，不重启、不等", async () => {
   const off = state({ enabled: false });
-  const h = switchIo({ writes: [off], reads: [] });
-  assert.equal(await switchGateway(false, false, h.io), null);
-  assert.deepEqual(h.calls, ["restore"]);
-  assert.deepEqual(h.painted, [off]);
+  const h2 = switchIo({ writes: [off], reads: [] });
+  assert.equal(await switchGateway(false, h2.io), null);
+  assert.deepEqual(h2.calls, ["restore"]);
 });
 
-test("switchGateway 15 秒内没换上：撤回刚写的（打开的反向是恢复），再重读一次画真实状态，返回原因", async () => {
-  const stale = state({ enabled: true, needsCodexRestart: true });
-  const back = state({ enabled: false });
-  const actual = state({ enabled: false, needsCodexRestart: false });
-  const h = switchIo({ writes: [stale, back], reads: [stale, stale, stale, stale, stale, stale] });
-  // 等待里一直读到旧配置：最后一次读（回滚后的重读）换成真实状态
-  h.io.read = (() => {
-    const inner = h.io.read;
-    return async () => {
-      const last = h.calls.at(-1);
-      if (last === "restore") {
-        h.calls.push("read");
-        return actual;
-      }
-      return inner();
-    };
-  })();
-  const result = await switchGateway(true, true, h.io, fastSettle);
-  assert.equal(result, RESTART_STILL_STALE);
-  const afterRestart = h.calls.slice(h.calls.indexOf("restartCodex") + 1);
-  assert.deepEqual(afterRestart.slice(-2), ["restore", "read"], "先撤回、再重读");
-  assert.equal(h.calls[0], "enable");
-  assert.equal(h.painted.at(-1), actual, "开关画成真实状态");
-});
-
-test("switchGateway 无法写入：原因原样返回，并尽力撤回（关掉的反向是再启用）；撤回也没成就在原因后说一声", async () => {
+test("switchGateway 没写成：原因原样返回，并尽力撤回（关掉的反向是再启用），再重读一次画真实状态；撤回也没成就在原因后说一声", async () => {
   const enabled = state({ enabled: true });
   const h = switchIo({ writes: [new Error("配置文件被改过"), enabled], reads: [enabled] });
-  assert.equal(await switchGateway(false, true, h.io, fastSettle), "配置文件被改过");
-  assert.deepEqual(h.calls, ["restore", "enable", "read"], "无法写入就不重启");
+  assert.equal(await switchGateway(false, h.io), "配置文件被改过");
+  assert.deepEqual(h.calls, ["restore", "enable", "read"]);
+  assert.equal(h.painted.at(-1), enabled, "开关画成真实状态");
 
   const both = switchIo({
     writes: [new Error("路由起不来"), new Error("还是起不来")],
     reads: [state()],
   });
-  assert.equal(
-    await switchGateway(true, true, both.io, fastSettle),
-    `路由起不来${SWITCH_ROLLBACK_FAILED}`,
-  );
+  assert.equal(await switchGateway(true, both.io), `路由起不来${SWITCH_ROLLBACK_FAILED}`);
   assert.equal(SWITCH_ROLLBACK_FAILED, "；回滚也失败了");
   assert.deepEqual(both.calls, ["enable", "restore", "read"]);
 });
 
-test("switchGateway 重启发不出：同样撤回；页面没了返回 undefined（调用方什么都别做）", async () => {
-  const on = state({ enabled: true, needsCodexRestart: true });
-  const h = switchIo({
-    writes: [on, state()],
-    reads: [state()],
-    restartError: new Error("结束不了进程"),
-  });
-  assert.equal(await switchGateway(true, true, h.io, fastSettle), "结束不了进程");
-  assert.deepEqual(h.calls, ["enable", "restartCodex", "restore", "read"]);
-
+test("switchGateway 页面没了：返回 undefined，不再画（调用方什么都别做）", async () => {
+  const on = state({ enabled: true });
   const gone = switchIo({ writes: [on], reads: [on], alive: () => false });
-  assert.equal(await switchGateway(true, true, gone.io, fastSettle), undefined);
+  assert.equal(await switchGateway(true, gone.io), undefined);
   assert.deepEqual(gone.painted, [], "页面没了不再画");
 });
 
-test("开关不再乐观翻转：第三方模型节拨开关走确认 / switchGateway，不经勾选的写队列；生效前滑块不动", () => {
+test("开关拨了就写：第三方模型节拨开关直接走 switchGateway（不确认、不重启），不经勾选的写队列；去掉最后一个模型也直接关", () => {
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(src, /predictEnabled|toggleGateway/);
-  assert.match(src, /gatewayConfirmText\(state, confirmSwitch\.next, tool\)/);
-  assert.match(src, /switchGateway\(next, restartCodex,/);
+  assert.doesNotMatch(src, /predictEnabled|toggleGateway|requestSwitch|runSwitch/);
+  assert.match(src, /onToggle=\{\(next\) => void toggleSwitch\(next\)\}/);
+  assert.match(src, /failure = await switchGateway\(next, \{/);
+  assert.doesNotMatch(src, /turnsOff && base\.codex\.running/);
   assert.doesNotMatch(src, /const pending =/);
   // D5：不再有网关二级页、配置网关、汇总下拉
   assert.doesNotMatch(src, /GatewayPage|配置网关|ModelPicker|ModelBox/);

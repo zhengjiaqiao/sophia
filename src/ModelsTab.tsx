@@ -15,7 +15,6 @@ import {
   UNINSTALL_TIP,
   effectiveModels,
   enableDisabledReason,
-  gatewayConfirmText,
   gatewaySwitchText,
   inUseLabel,
   modelIssues,
@@ -49,7 +48,6 @@ import {
 import type { ConfirmAnchor } from "./ui/index.ts";
 import { Switch } from "./ui/Switch.tsx";
 import { Section } from "./ui/Section.tsx";
-import { PageHeadActions } from "./shell/PageHead.tsx";
 import { GatewayBlock } from "./ModelsGateways.tsx";
 import type { RowNotice } from "./ModelsGateways.tsx";
 import { createSelectionWriter } from "./selectionWrites.ts";
@@ -58,11 +56,10 @@ import "./ModelsTab.css";
 /// Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，D5：原模型页与网关二级页合并成这一节）。
 ///
 /// agent 页的外框（页面头的图标 + `Codex`、节与节之间的距离）由外壳按 agent 注册表画；这一节画：
-/// - **页面头右端的 agent 级动作**（经 `PageHeadActions`）：`重启生效` / `启动 Codex`，按钮即状态——
-///   `needsCodexRestart` 比的是 Codex 启动时加载的配置与现在，用户用任何方式重启 Codex 键都会自己消失；
-///   所以窗口获得焦点时重读，键显示着时每 5 秒轻查一次，键消失即停。**从不自动重启**
-/// - **节头**：`第三方模型` + 开关（状态＝Codex 正在用的状态：Codex 在跑时先确认、等生效才落定）+
-///   右端 `卸下后台服务`（只在关着而服务还装着时）
+/// - **节头**：`第三方模型` + 开关（＝配置里开没开：拨了就写、不确认，乐观翻转，没写成滑回）+ 16 +
+///   `重启生效` / `启动 Codex`（紧跟开关：手刚拨完，下一步就在旁边）+ 右端 `卸下后台服务`（只在关着而服务还装着时）。
+///   键即状态——`needsCodexRestart` 比的是 Codex 启动时加载的配置与现在，用户用任何方式重启 Codex 键都会自己消失；
+///   所以窗口获得焦点时重读，键显示着时每 5 秒轻查一次，键消失即停。**从不自动重启**；重启要确认（打断对话）
 /// - **在用**：模型片（关着时标签写 `已选`），片上 × 与网关行里的勾选实时联动
 /// - **行内待办条**：路由没在跑 / 正由 agents-manager 管理 / 设置被改掉了，挂在这一节里，问题解决自动收起
 /// - **网关**：一家一行、点整行展开挑模型，编辑与新增就地展开（ModelsGateways.tsx）
@@ -91,10 +88,10 @@ export interface SectionNoticeState {
   providerId?: string;
 }
 
-// ===== 页面头右端：重启生效 / 启动 Codex =====
+// ===== 节头里紧跟开关：重启生效 / 启动 Codex =====
 
-/// 页面头右端那一格（DESIGN「改动待生效：重启生效与启动 Codex」）：键 / 忙碌指示 + 正在重启 / 键消失、
-/// 原位下方浮起 `✓ 已生效`（约 4 秒淡出）。Codex 没在跑时同一格换成 `启动 Codex`（同一套）。
+/// 开关旁那一格（DESIGN「改动待生效：重启生效与启动 Codex」）：键（紧凑 24，与节头里的 `卸下后台服务` 同高）/
+/// 忙碌指示 + 正在重启 / 键消失、原位下方浮起 `✓ 已生效`（约 4 秒淡出，左沿对齐原来的键）。Codex 没在跑时同一格换成 `启动 Codex`（同一套）。
 /// 忙碌过了 0.3 秒门槛才出现，之前键照旧、点不动。失败的灰面板不在这里——挂在节头下，键照常留着可以再点
 export function RestartSlot({
   tool,
@@ -113,7 +110,7 @@ export function RestartSlot({
   onRestart: () => void;
   onLaunch?: () => void;
   onDoneDismiss?: () => void;
-  /// 键的包层：重启确认锚在它下面（右沿对齐）
+  /// 键的包层：重启确认锚在它下面（左沿对齐）
   keyRef?: Ref<HTMLSpanElement>;
 }) {
   const waiting = phase.kind === "restarting" || phase.kind === "launching";
@@ -132,15 +129,15 @@ export function RestartSlot({
     const label = phase.kind === "restarting" ? "重启生效" : `启动 ${tool.name}`;
     return (
       <span className="models-restart-tip ss-locked" aria-busy="true">
-        <Button>{label}</Button>
+        <Button size="compact">{label}</Button>
       </span>
     );
   }
   if (phase.kind === "done" || phase.kind === "launched") {
-    // 键已消失：原来那颗键的位置留一个不占宽的锚，结果浮在它正下方 4
+    // 键已消失：原来那颗键的位置留一个不占宽的锚，结果浮在它正下方 4、左沿对齐
     return (
       <span className="models-restart models-restart--done">
-        <FloatingToast align="end">
+        <FloatingToast align="start">
           <Toast
             kind="success"
             verb={phase.kind === "done" ? "已生效" : "已启动"}
@@ -153,13 +150,15 @@ export function RestartSlot({
   if (onLaunch && showLaunchKey(state, phase)) {
     return (
       <span className="models-restart-tip" ref={keyRef}>
-        <Tooltip content={LAUNCH_TIP} align="end" nowrap>
+        <Tooltip content={LAUNCH_TIP} placement="bottom" align="start" nowrap>
           {busy ? (
-            <Button disabled disabledReason="正在处理上一步">
+            <Button size="compact" disabled disabledReason="正在处理上一步">
               {`启动 ${tool.name}`}
             </Button>
           ) : (
-            <Button onClick={onLaunch}>{`启动 ${tool.name}`}</Button>
+            <Button size="compact" onClick={onLaunch}>
+              {`启动 ${tool.name}`}
+            </Button>
           )}
         </Tooltip>
       </span>
@@ -168,13 +167,15 @@ export function RestartSlot({
   if (!showRestartKey(state, phase)) return null;
   return (
     <span className="models-restart-tip" ref={keyRef}>
-      <Tooltip content={RESTART_TIP} align="end" nowrap>
+      <Tooltip content={RESTART_TIP} placement="bottom" align="start" nowrap>
         {busy ? (
-          <Button disabled disabledReason="正在处理上一步">
+          <Button size="compact" disabled disabledReason="正在处理上一步">
             重启生效
           </Button>
         ) : (
-          <Button onClick={onRestart}>重启生效</Button>
+          <Button size="compact" onClick={onRestart}>
+            重启生效
+          </Button>
         )}
       </Tooltip>
     </span>
@@ -190,27 +191,17 @@ export interface SectionSwitchProps {
   busy: boolean;
   phase: RestartPhase;
   onToggle: (next: boolean) => void;
-  /// 拨开关成了：开关正下方浮起的那一窗（`✓ 已添加到 Codex`）；到点调 onSwitchDoneDismiss
-  switchDone?: string | null;
-  onSwitchDoneDismiss?: () => void;
 }
 
-/// 节头里的开关（DESIGN「开关的状态＝Codex 正在用的状态」）：不乐观翻转——滑块始终停在 Codex
-/// 正在用的那一侧：点了先确认（Codex 在跑时），确认、写好、生效了才滑过去、亮橙，原位下方浮起一窗；
-/// 取消或没成就不动（拖过去的松手即回原位）。
-/// 写配置、重启 Codex 超过 0.3 秒时开关原位换成转圈 +「正在添加 / 正在移除」
-export function SectionSwitch({
-  tool,
-  state,
-  busy,
-  phase,
-  onToggle,
-  switchDone,
-  onSwitchDoneDismiss,
-}: SectionSwitchProps) {
+/// 节头里的开关（DESIGN「第三方模型（一节）」）：开关＝配置里开没开，拨了就写、不确认。乐观翻转——
+/// 拨下去滑块当即过去、亮橙，写超过 0.3 秒原位换成转圈 +「正在添加 / 正在移除」；没写成滑回，
+/// 节头下灰面板。要重启才生效时不另加颜色，由旁边的 `重启生效` 说「还没生效」
+export function SectionSwitch({ tool, state, busy, phase, onToggle }: SectionSwitchProps) {
   // 开着时永远能关：停用不依赖密钥和模型还在不在
   const blocked = state.enabled ? null : enableDisabledReason(state, totalSelected(state));
   const switching = phase.kind === "switching" ? phase.next : null;
+  /// 乐观翻转：写的时候滑块已经在拨过去的那一侧
+  const on = switching ?? state.enabled;
   const label = `${tool.name} 的第三方模型`;
   return (
     <span className="models-switch">
@@ -226,19 +217,19 @@ export function SectionSwitch({
       ) : (
         <BusySlot
           busy={switching !== null}
-          label={gatewaySwitchText(switching ?? true, true, tool).busy}
+          label={gatewaySwitchText(switching ?? true, tool).busy}
           className="models-switch__busy"
         >
           <Tooltip
             content={
-              state.enabled
+              on
                 ? `关掉后，${tool.name} 只保留官方模型`
                 : `打开后，选好的模型会出现在 ${tool.name} 的模型列表里`
             }
             placement="bottom"
           >
             <Switch
-              checked={state.enabled}
+              checked={on}
               onChange={onToggle}
               label={label}
               disabledReason={
@@ -248,11 +239,6 @@ export function SectionSwitch({
           </Tooltip>
         </BusySlot>
       )}
-      {switchDone ? (
-        <FloatingToast align="start">
-          <Toast kind="success" verb={switchDone} onDismiss={onSwitchDoneDismiss} />
-        </FloatingToast>
-      ) : null}
     </span>
   );
 }
@@ -319,14 +305,6 @@ export default function ModelsTab({
   const [flashProvider, setFlashProvider] = useState<string | null>(null);
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
-  /// Codex 在跑时拨开关的那一道确认：拨向哪边、锚在哪；`afterOff` 是去掉最后一个模型那一支——关成了再清那一个勾选
-  const [confirmSwitch, setConfirmSwitch] = useState<{
-    next: boolean;
-    anchor?: ConfirmAnchor;
-    afterOff?: () => void;
-  } | null>(null);
-  /// 拨开关成了：开关正下方浮起的那一句（`已添加到 Codex`），到点清掉
-  const [switchDone, setSwitchDone] = useState<string | null>(null);
   const [notice, setNotice] = useState<SectionNoticeState | null>(null);
   /// 行内待办条正在执行的那一条（接管 / 重新写入 / 重启路由）：它的键换成忙碌指示
   const [resolving, setResolving] = useState<"takeover" | "rewrite" | "router" | null>(null);
@@ -336,7 +314,6 @@ export default function ModelsTab({
   const mounted = useRef(true);
   const reportState = useRef(onGatewayState);
   reportState.current = onGatewayState;
-  const headEl = useRef<HTMLDivElement | null>(null);
   const keyEl = useRef<HTMLSpanElement | null>(null);
   /// 最近一次勾选是在哪一家网关的列表里点的（null＝点的是在用片上的 ×）：写失败的灰面板出在那里
   const toggledIn = useRef<string | null>(null);
@@ -433,7 +410,6 @@ export default function ModelsTab({
 
   // ✓ 已生效 / 已启动那一窗到点（停留、悬停停表、淡出都在 Toast 里）
   const dismissDone = useCallback(() => setPhase({ kind: "idle" }), []);
-  const dismissSwitchDone = useCallback(() => setSwitchDone(null), []);
 
   /// 调命令 → 用返回的最新状态刷新；做不成就在节头下灰面板就地说。
   /// 开关、接管这类用户在等的操作才走这里；勾选不走这里，见 writer
@@ -547,37 +523,20 @@ export default function ModelsTab({
     setPhase(failure === null ? { kind: "launched" } : { kind: "idle" });
   };
 
-  /// 拨开关的确认锚在节头下方，不盖节头
-  const switchAnchor = () => anchorOf(headEl.current);
-
-  /// 拨开关：开关不乐观翻转。Codex 在跑时先确认（要重启，进行中的对话会中断），
-  /// 取消则什么都不写、滑块滑回；没在跑直接写，开关落到新状态
-  const requestSwitch = (next: boolean, afterOff?: () => void) => {
-    const current = shown.current;
-    if (!current) return;
-    if (current.codex.running) {
-      setConfirmSwitch({ next, anchor: switchAnchor(), afterOff });
-      return;
-    }
-    void runSwitch(next, false, afterOff);
-  };
-
-  /// 确认之后（或 Codex 没在跑）：开关原位转圈 +「正在添加 / 正在移除」（0.3 秒门槛，不锁页）→
-  /// 写配置 →（在跑时）重启 Codex → 等它换上（最多 15 秒）。成了开关落到新状态、正下方浮起一窗；
-  /// 没成则开关与配置一起回到原样（switchGateway 撤回刚写的），节头下灰面板 + `再试一次`
-  const runSwitch = async (next: boolean, restartCodex: boolean, afterOff?: () => void) => {
-    setConfirmSwitch(null);
+  /// 拨开关（DESIGN「第三方模型（一节）」）：不确认，直接写配置——打断对话的是重启，不是拨开关。
+  /// 滑块当即过去（phase switching，乐观翻转；写超过 0.3 秒原位转圈）；写成了用返回的状态刷新，
+  /// 要重启才生效时旁边出 `重启生效`，Codex 没在跑出 `启动 Codex`。没写成：switchGateway 撤回刚写的、
+  /// 滑块滑回，节头下灰面板 + `再试一次`
+  const toggleSwitch = async (next: boolean) => {
     setNotice(null);
-    setSwitchDone(null);
     setPhase({ kind: "switching", next });
     onBusy(true);
     let failure: string | null | undefined;
     try {
       // 排在还没写完的勾选后面：两边都写 Codex 设置，谁先谁后要和点的顺序一致
       await writer.idle();
-      failure = await switchGateway(next, restartCodex, {
+      failure = await switchGateway(next, {
         write: (on) => (on ? api.gatewayEnable() : api.gatewayRestore()),
-        restartCodex: api.gatewayRestartCodex,
         read: api.gatewayState,
         onState: applyState,
         alive: () => mounted.current,
@@ -588,23 +547,17 @@ export default function ModelsTab({
     }
     if (failure === undefined || !mounted.current) return;
     setPhase({ kind: "idle" });
-    const text = gatewaySwitchText(next, restartCodex, tool);
-    if (failure === null) {
-      setSwitchDone(text.done);
-      afterOff?.();
-      return;
-    }
+    if (failure === null) return;
     setNotice({
-      message: text.failed,
+      message: gatewaySwitchText(next, tool).failed,
       reason: failure,
-      action: { label: "再试一次", onClick: () => requestSwitch(next, afterOff) },
+      action: { label: "再试一次", onClick: () => void toggleSwitch(next) },
     });
   };
 
-  /// 勾上 / 取消一个模型。开着时去掉的是最后一个在用模型 → 等同关掉开关：
-  /// Codex 在跑时走开关「关掉」的同一条路（先确认，关成了再清这一个勾选；取消则片还在）；
-  /// 没在跑时直接写——先恢复（`gateway_restore` 不动勾选），再把这一家的勾选清空，
-  /// 两步都完成才是「开关关、没有片」
+  /// 勾上 / 取消一个模型。开着时去掉的是最后一个在用模型 → 等同关掉开关（同拨开关，不确认）：
+  /// 直接写——先恢复（`gateway_restore` 不动勾选），再把这一家的勾选清空，两步都完成才是
+  /// 「开关关、没有片」；Codex 在跑时写完出 `重启生效`
   const setModel = (providerId: string, modelId: string, selected: boolean) => {
     const base = shown.current;
     const model = base?.providers
@@ -612,10 +565,6 @@ export default function ModelsTab({
       ?.models.find((m) => m.id === modelId);
     if (!base || !model || model.selected === selected) return;
     const { next, turnsOff } = selectModel(base, providerId, modelId, selected);
-    if (turnsOff && base.codex.running) {
-      requestSwitch(false, () => setModel(providerId, modelId, false));
-      return;
-    }
     const models = next.providers.find((p) => p.id === providerId)?.models ?? [];
     const payload = selectedPayload(models);
     writer.write(
@@ -716,9 +665,6 @@ export default function ModelsTab({
     );
   }
 
-  /// 拨开关的确认（Codex 在跑时）：标题写结果，主动作「重启并添加 / 重启并移除」，锚在节头下方
-  const switchText = confirmSwitch ? gatewayConfirmText(state, confirmSwitch.next, tool) : null;
-
   /// 这一节的灰面板：勾选在展开着的那一家列表里没写成的，出在那一行里；其余出在节头下
   const rowNotice: RowNotice | null =
     notice?.providerId !== undefined && expanded.has(notice.providerId)
@@ -739,36 +685,33 @@ export default function ModelsTab({
 
   return (
     <>
-      <PageHeadActions>
-        <RestartSlot
-          tool={tool}
-          state={state}
-          phase={phase}
-          busy={busy}
-          keyRef={keyEl}
-          onRestart={() => setConfirmRestart(anchorOf(keyEl.current) ?? null)}
-          onLaunch={() => void launch()}
-          onDoneDismiss={dismissDone}
-        />
-      </PageHeadActions>
       <Section
         title="第三方模型"
-        headRef={(el) => {
-          headEl.current = el;
-        }}
         control={
-          <SectionSwitch
-            tool={tool}
-            state={state}
-            busy={busy}
-            phase={phase}
-            onToggle={(next) => requestSwitch(next)}
-            switchDone={switchDone}
-            onSwitchDoneDismiss={dismissSwitchDone}
-          />
+          // 开关 + 16 + 它引起的下一步（重启生效 / 启动 Codex）：手刚拨完开关，下一步就在它旁边（②）
+          <span className="models-headctl">
+            <SectionSwitch
+              tool={tool}
+              state={state}
+              busy={busy}
+              phase={phase}
+              onToggle={(next) => void toggleSwitch(next)}
+            />
+            <RestartSlot
+              tool={tool}
+              state={state}
+              phase={phase}
+              busy={busy}
+              keyRef={keyEl}
+              onRestart={() => setConfirmRestart(anchorOf(keyEl.current) ?? null)}
+              onLaunch={() => void launch()}
+              onDoneDismiss={dismissDone}
+            />
+          </span>
         }
         actions={
-          serviceLeftover(state) ? (
+          // 拨开关写配置期间滑块已在新的一侧：只属于「关着」的这颗键先不出
+          serviceLeftover(state) && phase.kind !== "switching" ? (
             // 按钮即状态：关着而服务还装着才出现，卸下即消失；卸下中原位忙碌 + 一句
             <BusySlot busy={uninstalling} label="正在卸下后台服务" className="models-restart">
               <Tooltip content={UNINSTALL_TIP} placement="bottom" align="end" nowrap>
@@ -819,23 +762,11 @@ export default function ModelsTab({
         />
       </Section>
 
-      {confirmSwitch !== null && switchText !== null ? (
-        <Confirm
-          title={switchText.title}
-          confirmLabel={switchText.confirmLabel}
-          anchor={confirmSwitch.anchor}
-          onConfirm={() => void runSwitch(confirmSwitch.next, true, confirmSwitch.afterOff)}
-          onCancel={() => setConfirmSwitch(null)}
-        >
-          {switchText.body}
-        </Confirm>
-      ) : null}
       {confirmRestart !== null ? (
         <Confirm
           title={`重启 ${tool.name}？`}
           confirmLabel="重启"
           anchor={confirmRestart}
-          align="end"
           onConfirm={() => void restart()}
           onCancel={() => setConfirmRestart(null)}
         >

@@ -485,7 +485,7 @@ export interface SettleTiming {
 
 /// 发完结束信号之后等 Codex 换上新配置：每读到一份状态交给 `onState`；不再用旧配置就返回 null，
 /// 等满还在用旧的返回 `RESTART_STILL_STALE`；`alive()` 为假（页面没了）时返回 undefined，调用方什么都别做。
-/// Codex 页页面头与菜单栏面板的「重启生效」、拨开关共用这一段
+/// Codex 页节头与菜单栏面板的「重启生效」共用这一段
 export async function settleAfterRestart(
   read: () => Promise<GatewayState>,
   onState: (state: GatewayState) => void,
@@ -508,53 +508,25 @@ export async function settleAfterRestart(
   }
 }
 
-// ===== 开关的状态＝Codex 正在用的状态（DESIGN 同名一条） =====
+// ===== 开关＝配置里开没开（DESIGN「第三方模型（一节）」） =====
 
 /// 没成之后撤回刚写的配置也没成：接在原因后面
 export const SWITCH_ROLLBACK_FAILED = "；回滚也失败了";
 
-/// Codex 在跑时拨开关那一道确认：标题写结果（添加 / 移除，打开时写出数量），主动作写「重启并…」。
-/// 正文：进行中的对话数查不到（同 `RESTART_CONSEQUENCE`），写通用的后果
-export function gatewayConfirmText(
-  state: GatewayState,
-  next: boolean,
-  tool: ModelsTool = CODEX,
-): { title: string; body: string; confirmLabel: string } {
-  const body = `要重启 ${tool.name} 才生效，进行中的对话会中断`;
-  return next
-    ? {
-        title: `把 ${totalSelected(state)} 个第三方模型添加到 ${tool.name}？`,
-        body,
-        confirmLabel: "重启并添加",
-      }
-    : {
-        title: `从 ${tool.name} 移除第三方模型？`,
-        body,
-        confirmLabel: "重启并移除",
-      };
-}
-
-/// 开关那一格的几句话：忙碌（原位转圈旁那一句）、成功（原位下方浮起的白窗）、没成（节头下灰面板的主句）。
-/// `restarted` 为假是 Codex 没在跑、直接写的那一支：打开时补一句「下次打开就能用」
+/// 开关那一格的两句话：忙碌（写配置超过 0.3 秒时原位转圈旁那一句）、没成（节头下灰面板的主句）。
+/// 成了不说话：滑块与橙就是结果，要重启才生效时旁边出 `重启生效`（与改选模型同一个模式）
 export function gatewaySwitchText(
   next: boolean,
-  restarted: boolean,
   tool: ModelsTool = CODEX,
-): { busy: string; done: string; failed: string } {
+): { busy: string; failed: string } {
   return next
-    ? {
-        busy: "正在添加",
-        done: restarted ? `已添加到 ${tool.name}` : `已添加到 ${tool.name}，下次打开就能用`,
-        failed: `没添加到 ${tool.name}`,
-      }
-    : { busy: "正在移除", done: `已从 ${tool.name} 移除`, failed: `没从 ${tool.name} 移除` };
+    ? { busy: "正在添加", failed: `没添加到 ${tool.name}` }
+    : { busy: "正在移除", failed: `没从 ${tool.name} 移除` };
 }
 
 export interface GatewaySwitchIo {
   /// 写配置：true → `gatewayEnable`，false → `gatewayRestore`。回滚也走它（反向）
   write: (enabled: boolean) => Promise<GatewayState>;
-  /// 结束 Codex 的后台进程（`gatewayRestartCodex`）
-  restartCodex: () => Promise<unknown>;
   read: () => Promise<GatewayState>;
   /// 每拿到一份后端状态都交给它（页面据此画开关）
   onState: (state: GatewayState) => void;
@@ -563,35 +535,27 @@ export interface GatewaySwitchIo {
 }
 
 /**
- * 拨开关（DESIGN「开关的状态＝Codex 正在用的状态」）：写配置 →（Codex 在跑时）重启 Codex →
- * 等它换上新配置（`settleAfterRestart`，最多 15 秒）。成了返回 null。
+ * 拨开关（DESIGN「第三方模型（一节）」：开关＝配置里开没开，拨了就写）：只写配置，不重启 Codex、不确认——
+ * 打断对话的是重启，那一道确认在 `重启生效` 上。成了返回 null。
  *
- * 没成（无法写入、重启发不出、15 秒内没换上）：**撤回刚写的配置**——打开的反向是恢复、关掉的反向是
- * 再启用，尽力而为；撤回也没成就在原因后面说一声。最后重读一次，开关画成真实状态。返回原因。
+ * 没写成：**撤回刚写的**——打开的反向是恢复、关掉的反向是再启用（写可能做了一半），尽力而为；
+ * 撤回也没成就在原因后面说一声。最后重读一次，开关画成真实状态。返回原因。
  *
- * 页面没了（`alive()` 为假）返回 undefined，调用方什么都别做；等待中途页面没了不再回滚（结果不明，
- * 下次读到的状态自会说清：`重启生效` 键照常出现）
+ * 页面没了（`alive()` 为假）返回 undefined，调用方什么都别做
  */
 export async function switchGateway(
   next: boolean,
-  restart: boolean,
   io: GatewaySwitchIo,
-  timing?: SettleTiming,
 ): Promise<string | null | undefined> {
-  let reason: string | null = null;
+  let reason: string;
   try {
     const written = await io.write(next);
-    if (io.alive()) io.onState(written);
-    if (restart) {
-      await io.restartCodex();
-      const settled = await settleAfterRestart(io.read, io.onState, io.alive, timing);
-      if (settled === undefined) return undefined;
-      reason = settled;
-    }
+    if (!io.alive()) return undefined;
+    io.onState(written);
+    return null;
   } catch (error) {
     reason = io.describe(error);
   }
-  if (reason === null) return io.alive() ? null : undefined;
   try {
     const back = await io.write(!next);
     if (io.alive()) io.onState(back);
@@ -616,8 +580,8 @@ export async function switchGateway(
  * - launching：`启动 Codex` 点下去之后，键位换成忙碌指示 + 「正在启动 Codex」，等到检测到它在跑
  * - launched：一行例行成功 `✓ 已启动`，约 4 秒后淡出
  *
- * - switching：拨了开关、正在写配置 / 重启 Codex / 等它换上（`switchGateway`）。开关原位转圈，
- *   这一格空着——写完配置到 Codex 换上之间状态会说「要重启」「没在跑」，键不能跟着闪出来
+ * - switching：拨了开关、正在写配置（`switchGateway`）。滑块已经过去（乐观翻转），写超过 0.3 秒开关原位转圈；
+ *   这一格空着——写完了才知道要不要重启，键等写完再出来
  *
  * 失败不是这一格的状态：灰面板「没重启 Codex」/「没启动 Codex」+ 原因 + `再试一次` 挂在「第三方模型」节头下，
  * 格子回到 idle（键还在就还能点）
@@ -663,8 +627,7 @@ export function shouldPollRestart(state: GatewayState | null, phase: RestartPhas
 
 // ===== 在用的模型与勾选 =====
 
-/// 关掉之后先画的「做成之后」的样子（只剩 Codex 没在跑时删掉最后一个生效模型那一支用它，见 selectModel；
-/// 开关本身不再乐观翻转）：只翻 enabled 会让依赖它的提示在等结果的那一下闪出来——开时「路由没在跑」
+/// 关掉之后先画的「做成之后」的样子（删掉最后一个生效模型那一支用它，见 selectModel）：只翻 enabled 会让依赖它的提示在等结果的那一下闪出来——开时「路由没在跑」
 /// 待办条（启用成功时后端已等到路由就绪），关时 `卸下后台服务` 键（恢复会一并卸掉路由服务）。
 /// 做不成时整份回滚到后端给的状态，所以这里只预测成功
 export function predictEnabled(state: GatewayState, enabled: boolean): GatewayState {
@@ -678,8 +641,8 @@ export function predictEnabled(state: GatewayState, enabled: boolean): GatewaySt
  * 写盘在后台完成。只改这一家这一个模型的 `selected`；兼容字段 `provider` 跟着换。
  *
  * 网关开着时去掉的是最后一个生效模型（全部网关加起来一个不剩）：`turnsOff` 为真、开关随之画成关——
- * 等同把开关关掉（DESIGN「开关的状态＝Codex 正在用的状态」）。Codex 在跑时页面不用这份预测，
- * 先走开关「关掉」的确认；没在跑时照这份直接写
+ * 等同把开关关掉（DESIGN「第三方模型（一节）› 移除最后一个 = 关掉」）：照这份直接写、不确认，
+ * Codex 在跑时写完出 `重启生效`（同拨开关）
  */
 export function selectModel(
   state: GatewayState,
