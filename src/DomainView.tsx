@@ -129,7 +129,7 @@ const verbOf = (state: CellState, agent: string): string | undefined =>
     : state === "missing"
       ? `加到 ${agent}`
       : state === "broken"
-        ? "点一下重新链接"
+        ? "链接失效，原件还在 · 点一下重新链接"
         : state === "readOnly"
           ? `无法写入 ${agent} 的 skills 目录 · 点一下再试一次`
           : state === "wholeLinked"
