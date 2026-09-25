@@ -1368,7 +1368,7 @@ export default function McpTab({
         }}
         rows={rows}
         nameLabel="名称"
-        nameTip="定义住在哪一格由原件环表示"
+        nameTip="定义住在哪一格由原件环表示。agent 自带的和插件带的 MCP 不在这里"
         nameCount={rows.length}
         dotWords="mcp"
         filterText={filterText}
