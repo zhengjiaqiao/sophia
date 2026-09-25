@@ -558,8 +558,6 @@ export default function App() {
           )}
           {place.view === "settings" ? (
             <SettingsPage
-              inShell
-              onBack={() => undefined}
               onError={setError}
               initialUpdate={pendingUpdate}
               aboutRequest={aboutRequest ?? undefined}

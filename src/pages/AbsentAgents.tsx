@@ -1,5 +1,5 @@
 import type { HarnessStatus } from "../types.ts";
-import { AgentIcon, Button } from "../ui/index.ts";
+import { AgentIcon, Button, SectionLabel } from "../ui/index.ts";
 
 /// 设置页「› 未安装的 N 个」展开后的那一节（DESIGN「设置页」）：**它是信息，不是设置**——
 /// 不放复选框，只列名字（`ink-mute`，带图标 / 首字母方块，三列按行读，同已安装那一节）。
@@ -20,7 +20,7 @@ export function AbsentAgents({
   const ordered = [...hidden, ...plain];
   return (
     <div className="settings-page__absent">
-      <div className="settings-page__absent-head">装上后可以在这里勾选显示</div>
+      <SectionLabel>装上后可以在这里勾选显示</SectionLabel>
       <div className="settings-page__grid">
         {ordered.map((agent) => (
           <div key={agent.id} className="settings-page__cell">

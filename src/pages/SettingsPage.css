@@ -8,17 +8,9 @@
   padding-bottom: var(--space-huge);
 }
 
-/* 区块小标：label Condensed 12 / 600 ink-mute，下 7 一条 1px hairline（页面头下 24）。
-   汉字字距 0、不变换；句子里的 agent 是词不是结构词，原样 */
+/* 区块小标（ui 的 SectionLabel rule）的位置：页面头下 24 */
 .settings-page__section {
   margin-top: var(--space-xl);
-  padding-bottom: 7px;
-  border-bottom: var(--border-structure);
-  font-family: var(--font-cond);
-  font-size: var(--size-label);
-  font-weight: 600;
-  line-height: var(--leading-label);
-  color: var(--ink-mute);
 }
 
 /* 关于：上距 48 */
@@ -26,7 +18,7 @@
   margin-top: var(--space-huge);
 }
 
-/* 三列等分、按行读；行的悬停带左右各外扩 8，复选框仍与区块小标左沿对齐 */
+/* 三列等分、按行读；勾选行（CheckRow grid）的悬停带左右各外扩 8，复选框仍与区块小标左沿对齐 */
 .settings-page__grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -38,54 +30,7 @@
   min-width: 0;
 }
 
-/* 一行 = 勾选框 16 + 10 + 图标 16 + 10 + 名字（body），行高 36；整行是命中区，悬停 surface 底，
-   方框随行「手靠近」（data-checkrow，样子在组件里） */
-.settings-page__row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  box-sizing: border-box;
-  width: 100%;
-  height: 36px;
-  padding: 0 var(--space-xs);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  transition: background-color var(--motion-fast) var(--ease-mech);
-}
-
-.settings-page__row:hover,
-.settings-page__row.is-noted {
-  background: var(--surface);
-}
-
-.settings-page__row:focus-visible {
-  outline: none;
-}
-
-/* 焦点框只回应键盘（src/inputModality.ts）：外 2px 处 1px ink 环收进行内 */
-html[data-input="keyboard"] .settings-page__row:focus-visible {
-  outline: 1px solid var(--ink);
-  outline-offset: -1px;
-}
-
-/* 勾满上限时没勾的已安装项：图标（currentColor）和名字一起退到 ink-faint（不可用的字）、复选框平贴；
-   提示框包层占满格宽，整行都能悬停出说明 */
-.settings-page__cell > .ss-tipwrap {
-  width: 100%;
-}
-
-.settings-page__row:disabled {
-  color: var(--ink-faint);
-}
-
-.settings-page__row:disabled:hover {
-  background: none;
-}
-
+/* 未安装那一节的名字：放不下截断 */
 .settings-page__name {
   overflow: hidden;
   font-size: var(--size-body);
@@ -117,14 +62,6 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   margin-top: var(--space-sm);
 }
 
-.settings-page__absent-head {
-  font-family: var(--font-cond);
-  font-size: var(--size-label);
-  font-weight: 600;
-  line-height: var(--leading-label);
-  color: var(--ink-mute);
-}
-
 .settings-page__info {
   display: flex;
   align-items: center;
@@ -144,7 +81,7 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   color: var(--ink-mute);
 }
 
-/* 关于：版本 + 0.1.0（mono ink-faint）+ 14 + 检查更新（默认键紧凑） */
+/* 关于：版本 + 0.1.0（ui 的 Mono：等宽 ink-faint、可选中）+ 14 + 检查更新（默认键紧凑） */
 .settings-page__about {
   display: flex;
   align-items: center;
@@ -157,29 +94,13 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   line-height: var(--leading-body);
 }
 
-/* 版本号是标识符：等宽、ink-faint、可选中复制 */
-.settings-page__version {
-  font-family: var(--font-mono);
-  font-size: var(--size-label);
-  color: var(--ink-faint);
-  user-select: text;
-}
-
 /* 键与它下方浮起的 `✓ 已是最新版本` 的锚 */
 .settings-page__check {
   position: relative;
   display: inline-flex;
 }
 
-/* 更新待办条：关于下，上距 14 */
+/* 更新待办条（灰面板 section）/ 检查失败的一句（Note）：关于下，上距 14 */
 .settings-page__update {
   margin-top: 14px;
-}
-
-.settings-page__note {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
 }

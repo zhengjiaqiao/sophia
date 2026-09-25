@@ -18,7 +18,8 @@ test("设置页未安装那一节：信息不是设置——不渲染复选框�
     onRestore: () => {},
   });
   assert.doesNotMatch(html, /checkbox/);
-  assert.match(html, /absent-head">装上后可以在这里勾选显示</); // 「未安装的 N 个」已在展开行上说过（①）
+  // 小标是组件库的区块小标（与「列表里的 agent」同一种）；「未安装的 N 个」已在展开行上说过（①）
+  assert.match(html, /class="ss-sectionlabel"><span class="ss-sectionlabel__text">装上后可以在这里勾选显示</);
   assert.match(html, />Amp</);
   assert.doesNotMatch(html, /恢复/);
 });
