@@ -169,36 +169,40 @@ test("删除 skill 原件的确认框：标题一问，正文写废纸篓与链�
   const { deleteOriginalConfirm } = await import("../src/toastText.ts");
   const { setHome } = await import("../src/pathText.ts");
   setHome("/Users/jia");
-  const base = { skill: "defuddle", path: "/Users/jia/.agents/skills/defuddle", agents: [] };
-  const relink = deleteOriginalConfirm({ ...base, links: 3, relinkTo: "通用仓库" });
-  assert.equal(relink.title, "删除 defuddle 的原件？");
-  assert.equal(relink.body, "移到废纸篓，可以从访达找回；3 条链接改指到 通用仓库 的那份");
-  assert.deepEqual(relink.paths, [{ label: "移到废纸篓", path: "~/.agents/skills/defuddle" }]);
-  // 别处没有同名原件：链接一起清掉，写出在哪几个 agent 里
+  const base = {
+    skill: "graduate",
+    path: "/Users/jia/.agents/skills/graduate",
+    ownAgents: ["Codex"],
+  };
+  // 别处没有同名原件：谁不能再用它、链接一并删除、能找回什么
+  const gone = deleteOriginalConfirm({ ...base, links: 2, linkAgents: ["Claude Code"] });
+  assert.equal(gone.title, "删除 graduate？");
   assert.equal(
-    deleteOriginalConfirm({ ...base, links: 3, agents: ["Claude Code", "Cursor"] }).body,
-    "移到废纸篓，可以从访达找回；Claude Code、Cursor 里的 3 条链接一起清掉",
+    gone.body,
+    "删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除。原件可以从废纸篓找回，链接不会自动恢复",
   );
-  // 没有链接不写后半句
-  assert.equal(deleteOriginalConfirm({ ...base, links: 0 }).body, "移到废纸篓，可以从访达找回");
+  assert.deepEqual(gone.paths, [{ label: "移到废纸篓", path: "~/.agents/skills/graduate" }]);
+  // 别处有同名原件：有链接的 agent 改用那一份，直接读原件目录的 agent 不能再用
+  assert.equal(
+    deleteOriginalConfirm({ ...base, links: 2, linkAgents: ["Claude Code"], relinkTo: "通用仓库" })
+      .body,
+    "删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它。原件可以从废纸篓找回",
+  );
+  // 没有链接：只说谁不能再用
+  assert.equal(
+    deleteOriginalConfirm({ ...base, links: 0, linkAgents: [] }).body,
+    "删除后 Codex 不能再用它。原件可以从废纸篓找回",
+  );
+  // 在 git 仓库里：说具体后果，不说「它在 git 仓库里」
+  assert.equal(
+    deleteOriginalConfirm({ ...base, links: 0, linkAgents: [], repo: "CardBox" }).body,
+    "删除后 Codex 不能再用它。原件可以从废纸篓找回。CardBox 是 git 仓库，这次删除会出现在它的未提交改动里",
+  );
   setHome(null);
 });
 
-test("删除 skill 原件：git 仓库里的照样可删、确认框写明 git 的后果；删完例行一行不带撤销", async () => {
-  const { deleteOriginalConfirm, deletedOriginalToast } = await import("../src/toastText.ts");
-  const { setHome } = await import("../src/pathText.ts");
-  setHome("/Users/jia");
-  assert.equal(
-    deleteOriginalConfirm({
-      skill: "graduate",
-      path: "/Users/jia/x/.agents/skills/graduate",
-      links: 0,
-      agents: [],
-      inGit: "/Users/jia/x",
-    }).body,
-    "移到废纸篓，可以从访达找回。它在 git 仓库 ~/x 里，删掉后 git 会显示这个目录被删除",
-  );
-  setHome(null);
+test("删除 skill 原件：删完例行一行不带撤销", async () => {
+  const { deletedOriginalToast } = await import("../src/toastText.ts");
   const t = deletedOriginalToast("defuddle");
   assert.equal(t.tier, "routine");
   assert.equal(t.kind, "success");

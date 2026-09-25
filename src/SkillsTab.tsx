@@ -812,7 +812,7 @@ export default function SkillsTab({
   // 删用户的原件先确认（锚在那一格下）；确认后直接删、不挂起；结果是例行一行、不带撤销——
   // 原件从废纸篓找回，确认框已说清；清掉或改指过的链接回不来
 
-  /// 点原件格：先体检（这一格过了 0.3 秒门槛才出忙碌），在 git 仓库里就格下说做不成、不弹确认框
+  /// 点原件格：先体检（这一格过了 0.3 秒门槛才出忙碌），再弹确认框说清后果（DESIGN「删除原件」）
   const askDeleteOriginal = async (ref: CellRef) => {
     const rowKey = skillRowKey(ref);
     // 这一格正在体检：这一下不重复发
@@ -846,13 +846,22 @@ export default function SkillsTab({
             relinkId,
           );
     const allTargets = overview?.domains.flatMap((d) => d.targets) ?? [];
-    const agents = [
+    const linkAgents = [
       ...new Set(
         plan.affected.flatMap((link) => {
           const dir = link.path.replace(/[/\\][^/\\]*$/, "");
           const label = allTargets.find((t) => t.path === dir)?.label;
           return label ? [label] : [];
         }),
+      ),
+    ];
+    // 直接读原件所在目录的 agent：这一行里画 ⦿ 的列
+    const row = page?.rows.find((r) => r.sourceId === ref.sourceId && r.skill === ref.skill);
+    const ownAgents = [
+      ...new Set(
+        (row?.cells ?? [])
+          .filter((c) => c.state === "own")
+          .flatMap((c) => page?.targets.find((t) => t.id === c.targetId)?.label ?? []),
       ),
     ];
     setDeletePane({
@@ -867,8 +876,15 @@ export default function SkillsTab({
         links: plan.affected.length,
         relinkTo:
           plan.relinkTo === null ? undefined : relinkName ? originText(relinkName) : plan.relinkTo,
-        agents,
-        inGit: plan.inGit ?? undefined,
+        ownAgents,
+        linkAgents,
+        repo:
+          plan.inGit === null
+            ? undefined
+            : plan.inGit
+                .replace(/[/\\]+$/, "")
+                .split(/[/\\]/)
+                .pop(),
       }),
     });
   };
@@ -900,7 +916,12 @@ export default function SkillsTab({
         // 重检却在仓库里，就不能替用户认这个后果——照旧不代删
         const again = await api.planDeleteSource(ref.sourceId, ref.skill);
         if (again.plan.inGit !== null && !pane.inGit)
-          node = cannot(`它在 git 仓库 ${again.plan.inGit} 里，确认时没有说到这一点，这次没删`);
+          node = cannot(
+            `${again.plan.inGit
+              .replace(/[/\\]+$/, "")
+              .split(/[/\\]/)
+              .pop()} 是 git 仓库，删除会出现在它的未提交改动里——确认时没说到这一点，这次没删，再点一次看清后果`,
+          );
         else report = await api.deleteSource(again.planId, true);
       }
       if (report !== null) {

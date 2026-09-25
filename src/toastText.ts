@@ -204,36 +204,49 @@ export function keepThisConfirm(input: {
   };
 }
 
-/// 删除 skill 原件的确认框（DESIGN「删除原件」）：标题一问；正文说进废纸篓、能找回，再接链接的后果——
-/// 别处有同名原件时 `；3 条链接改指到 通用仓库 的那份`（`relinkTo` 是那一份的来源名），没有时
-/// `；Claude Code、Cursor 里的 3 条链接一起清掉`，没有链接不写。`paths` 一行：`移到废纸篓` + 完整路径
-/// （主目录写 `~`，不截断），与「只留这份」同一种路径行
+/// 删除 skill 原件的确认框（DESIGN「删除原件」）：说后果，不说机制——删了之后哪些 agent 用不了它、
+/// 链接怎么处理、能不能找回。
+/// - 别处没有同名原件：`删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除。原件可以从废纸篓找回，链接不会自动恢复`
+/// - 别处有：`删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它。原件可以从废纸篓找回`
+/// - 原件在 git 仓库里再接一句：`CardBox 是 git 仓库，这次删除会出现在它的未提交改动里`
+/// `ownAgents` 是直接读原件所在目录的 agent（这一行里画 ⦿ 的列）；`linkAgents` 是有链接指向它的 agent。
+/// `paths` 一行：`移到废纸篓` + 完整路径（主目录写 `~`，不截断），与「只留这份」同一种路径行
 export function deleteOriginalConfirm(input: {
   skill: string;
   path: string;
   /// 指向它的链接条数
   links: number;
-  /// 别处同名原件的来源名；没有就是链接一起清掉
+  /// 别处同名原件的来源名；没有就是链接一并删除
   relinkTo?: string;
-  /// 这些链接所在的 agent（去重、保序）；链接一起清掉时写进后果句
-  agents: string[];
-  /// 原件所在的 git 仓库根；在仓库里时正文末尾说清 git 那边会怎样
-  inGit?: string;
+  /// 直接读原件所在目录的 agent（去重、保序）
+  ownAgents: string[];
+  /// 有链接指向它的 agent（去重、保序）
+  linkAgents: string[];
+  /// 原件所在 git 仓库的文件夹名
+  repo?: string;
 }): { title: string; body: string; paths: { label: string; path: string }[] } {
-  const where = input.agents.length > 0 ? `${input.agents.join("、")} 里的 ` : "";
-  const links =
-    input.links === 0
-      ? ""
-      : input.relinkTo !== undefined
-        ? `；${input.links} 条链接改指到 ${input.relinkTo} 的那份`
-        : `；${where}${input.links} 条链接一起清掉`;
+  const list = (names: string[]) => names.join("、");
+  const lose = (names: string[]) =>
+    names.length > 1 ? `${list(names)} 都不能再用它` : `${list(names)} 不能再用它`;
+  const sentences: string[] = [];
+  if (input.relinkTo !== undefined && input.links > 0) {
+    const moved = `删除后 ${list(input.linkAgents)} 改用 ${input.relinkTo} 里的同名 ${input.skill}（${input.links} 条软链接改指过去）`;
+    const own = input.ownAgents.filter((a) => !input.linkAgents.includes(a));
+    sentences.push(own.length > 0 ? `${moved}；${lose(own)}` : moved);
+    sentences.push("原件可以从废纸篓找回");
+  } else {
+    const all = [...new Set([...input.ownAgents, ...input.linkAgents])];
+    const head = all.length > 0 ? `删除后 ${lose(all)}` : "";
+    sentences.push(input.links > 0 ? `${head}：指向它的 ${input.links} 条软链接一并删除` : head);
+    sentences.push(
+      input.links > 0 ? "原件可以从废纸篓找回，链接不会自动恢复" : "原件可以从废纸篓找回",
+    );
+  }
+  if (input.repo !== undefined)
+    sentences.push(`${input.repo} 是 git 仓库，这次删除会出现在它的未提交改动里`);
   return {
-    title: `删除 ${input.skill} 的原件？`,
-    body:
-      `移到废纸篓，可以从访达找回${links}` +
-      (input.inGit === undefined
-        ? ""
-        : `。它在 git 仓库 ${displayPath(input.inGit)} 里，删掉后 git 会显示这个目录被删除`),
+    title: `删除 ${input.skill}？`,
+    body: sentences.filter((x) => x !== "").join("。"),
     paths: [{ label: "移到废纸篓", path: displayPath(input.path) }],
   };
 }
