@@ -1,9 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api.ts";
-import { AddButton, Empty, IconArrowLeft, IconButton, Spinner } from "../ui/index.ts";
-import { holdInert } from "../ui/PushedPage.tsx";
-import { PageHead, PageTitle } from "../shell/PageHead.tsx";
+import { AddButton, Empty, PushedPage, useBusyShown, usePushedPage } from "../ui/index.ts";
 import { useMenuFlag, usePageCommand } from "../shell/menuBus.ts";
 import { SourceLine, ruleText, type SourcesState } from "../SourceRow.tsx";
 import {
@@ -14,11 +12,10 @@ import {
   type DomainRef,
 } from "./sourcesView.ts";
 import type { SourceRow } from "./sourcesModel.ts";
-import "./AddSourcePage.css";
 import "./SourcesPage.css";
 
-/// 来源管理页（DESIGN「位置页 › 来源管理页（按下 `管理来源` 时）」，画板 03B）：二级页，**骨架与添加来源页
-/// 相同**——只替换机面，侧栏留着、当前位置仍选中；在机面里从右推入，`←` / Esc / 菜单「返回」滑回
+/// 来源管理页（DESIGN「位置页 › 来源管理页（按下 `管理来源` 时）」，画板 03B）：推入页 `PushedPage`，**骨架与
+/// 添加来源页相同**——只替换机面，侧栏留着、当前位置仍选中；在机面里从右推入，`←` / Esc / 菜单「返回」滑回
 /// （200ms，reduced-motion 即时）。位置页在它下面 `inert`、不卸载，回来时筛选、滚动、抽屉照旧。
 ///
 /// ```
@@ -39,8 +36,6 @@ import "./SourcesPage.css";
 /// - 一个来源都没有：空态「CardBox 还没有来源」+ 猫（`+ 来源` 已在页面头，空态不重复）
 /// - 读屏：`role=region`、名同标题；返回键 `aria-label=返回`。Esc：浮层（捕获阶段）与移除确认先接，其次返回
 
-/// 转场时长，与 AddSourcePage.css 同值
-const MOTION_MS = 200;
 /// 刚移除的那一行收起的时长，与 SourceRow.css `srcline-leave` 同值
 const LEAVE_MS = 200;
 
@@ -73,61 +68,15 @@ export function SourcesPage({
   const title = domain === "mcp" ? mcpSourcesTitle(place) : sourcesTitle(place);
   const emptyText = domain === "mcp" ? noMcpSourcesText(place) : noSourcesText(place);
 
-  const [leaving, setLeaving] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pageRef = useRef<HTMLDivElement>(null);
-  // 挂到机面上（盖住位置页，侧栏不动）；没有机面（测试、预览）时就地画
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => setHost(document.querySelector<HTMLElement>(".face")), []);
-
-  // 位置页在这一页下面：读屏与 Tab 都进不去；滑回卸掉时放开。
-  // 焦点：打开时落到这一页上，返回时还给进来之前拿着焦点的那颗键（`管理来源`）
-  useEffect(() => {
-    const under = document.querySelector<HTMLElement>(".face__scroll");
-    const release = under ? holdInert(under) : undefined;
-    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    pageRef.current?.focus({ preventScroll: true });
-    return () => {
-      release?.();
-      if (before && before.isConnected) before.focus({ preventScroll: true });
-    };
-  }, [host]);
+  // 推入页外框（挂到机面、下层 inert、焦点进出、`←` / Esc 返回、推入滑回）归 `PushedPage`；
+  // 菜单「返回」（⌘[）归页面：同一个 leave，只在这一页开着时亮
+  const page = usePushedPage(onClose);
+  usePageCommand("back", page.leave);
+  useMenuFlag("back", !page.leaving);
 
   // 移除确认与结果小窗：这一页开着时由这一页画（位置页被盖着，而且 inert）
   const { claimHost } = sources;
   useEffect(() => claimHost(), [claimHost]);
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  const leave = () => {
-    if (leaving) return;
-    setLeaving(true);
-    timer.current = setTimeout(onClose, reducedMotion() ? 0 : MOTION_MS);
-  };
-  const live = useRef(leave);
-  live.current = leave;
-  const confirming = useRef(sources.confirming);
-  confirming.current = sources.confirming;
-
-  // 返回：`←`、Esc、菜单「返回」（⌘[）是同一条路；菜单「返回」只在这一页开着时亮
-  usePageCommand("back", () => live.current());
-  useMenuFlag("back", !leaving);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      // 浮层在捕获阶段先接走自己的 Esc；移除确认开着时 Esc 只取消确认；输入框里的 Esc 归输入框
-      if (event.key !== "Escape" || event.defaultPrevented || confirming.current) return;
-      const target = event.target as HTMLElement | null;
-      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
-      live.current();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
 
   // 刚从列表里消失的行（移除了）：在原处留一会儿、收起，下面的行跟着平移上来
   const rows = sources.data?.rows ?? [];
@@ -171,15 +120,13 @@ export function SourcesPage({
     });
   };
 
+  // 读取中：过了 0.3 秒门槛才出刻度 + 一句（更快读完的什么都不闪；没有文字的转动不允许）
+  const loadingShown = useBusyShown(sources.data === null);
   let body;
   if (sources.data === null) {
-    body = (
-      <div className="srcpage__loading">
-        <Spinner label="正在读来源" />
-      </div>
-    );
+    body = loadingShown ? <Empty busy description="正在读来源" /> : null;
   } else if (shown.length === 0) {
-    body = <Empty kind="noSkills" description={emptyText} art="emptyFolder" />;
+    body = <Empty description={emptyText} art="emptyFolder" />;
   } else {
     body = (
       <div className="srcpage__table" role="table" aria-label={title}>
@@ -208,28 +155,6 @@ export function SourcesPage({
     );
   }
 
-  const page = (
-    <div
-      ref={pageRef}
-      className={`add-src-page srcpage${leaving ? " is-leaving" : ""}`}
-      role="region"
-      aria-label={title}
-      // 只供程序放焦点的落点（打开时焦点落在这一页上）
-      tabIndex={-1}
-    >
-      <PageHead
-        lead={
-          <span className="add-src-page__lead">
-            <IconButton icon={<IconArrowLeft />} title="返回" onClick={leave} />
-            <PageTitle>{title}</PageTitle>
-          </span>
-        }
-        actions={<AddButton noun="来源" onClick={onAdd} />}
-      >
-        <div className="srcpage__body">{body}</div>
-      </PageHead>
-    </div>
-  );
   // 确认框与结果小窗挂到 body 上：这一页推入时带着 transform，fixed 的遮罩放在它里面会跟着页面走
   const layers =
     sources.pageHost && typeof document !== "undefined"
@@ -237,7 +162,17 @@ export function SourcesPage({
       : sources.pageHost;
   return (
     <>
-      {host ? createPortal(page, host) : page}
+      <PushedPage
+        {...page}
+        title={title}
+        actions={<AddButton noun="来源" onClick={onAdd} />}
+        host={() => document.querySelector(".face")}
+        covers={() => document.querySelector(".face__scroll")}
+        // 移除确认开着时 Esc 只取消确认，不返回
+        escape={!sources.confirming}
+      >
+        <div className="srcpage__body">{body}</div>
+      </PushedPage>
       {layers}
     </>
   );

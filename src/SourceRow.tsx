@@ -23,10 +23,14 @@ import {
   BusySlot,
   Button,
   Confirm,
+  FloatingLayer,
   FloatingToast,
   IconButton,
   IconChevronDown,
   IconClose,
+  Menu,
+  MenuItem,
+  Mono,
   Switch,
   ReasonTip,
   Toast,
@@ -34,8 +38,6 @@ import {
   TruncTip,
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
-import { FloatingLayer } from "./ui/FloatingLayer.tsx";
-import { CheckMark } from "./pages/CheckMark.tsx";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./pages/importDefaults.ts";
 import { removeConfirmTitle, removeTitle, type DomainRef } from "./pages/sourcesView.ts";
 import type {
@@ -432,42 +434,24 @@ function useRuleControls(
     />
   );
 
+  // 选目标：浮层里的多选菜单（菜单项 30 / 13，最宽 280，点不了的那一项原因写在它自己的副行里）
   const layer =
     layerOpen && boxRef.current ? (
-      <FloatingLayer
-        trigger={boxRef.current}
-        onClose={closeLayer}
-        className="srcrow-targets"
-        label={model.targetsLabel}
-      >
-        {options.map((t) => {
-          const checked = checkedIds.includes(t.id);
-          return (
-            <button
+      <FloatingLayer trigger={boxRef.current} onClose={closeLayer} label={model.targetsLabel}>
+        <Menu maxWidth={280}>
+          {options.map((t) => (
+            <MenuItem
               key={t.id}
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={checked}
-              className={`srcrow-target${checked ? " is-on" : ""}`}
-              data-checkrow={t.disabledReason === undefined ? true : undefined}
-              aria-describedby={t.disabledReason ? `${row.id}-${t.id}-why` : undefined}
-              disabled={t.disabledReason !== undefined}
-              onClick={(e) => toggleTarget(t.id, e.currentTarget)}
+              kind="check"
+              checked={checkedIds.includes(t.id)}
+              icon={<AgentIcon id={t.iconId} name={t.label} size={14} />}
+              disabledReason={t.disabledReason}
+              onSelect={(el) => toggleTarget(t.id, el)}
             >
-              <CheckMark on={checked} />
-              <AgentIcon id={t.iconId} name={t.label} size={14} />
-              <span className="srcrow-target__text">
-                <span className="srcrow-target__name">{t.label}</span>
-                {/* 点不了的那一项：原因就写在这一行里（浮层会滚动裁切，悬停提示框放不进去） */}
-                {t.disabledReason ? (
-                  <span className="srcrow-target__why" id={`${row.id}-${t.id}-why`}>
-                    {t.disabledReason}
-                  </span>
-                ) : null}
-              </span>
-            </button>
-          );
-        })}
+              {t.label}
+            </MenuItem>
+          ))}
+        </Menu>
       </FloatingLayer>
     ) : null;
 
@@ -557,20 +541,33 @@ export function SourceLine({
       }}
     >
       <span className="srcline__name" role="cell">
-        <TruncTip content={row.name}>
-          <span className="srcline__label">{row.name}</span>
-        </TruncTip>
+        <span className="srcline__fit srcline__fit--name">
+          <TruncTip content={row.name}>
+            <span className="srcline__label">{row.name}</span>
+          </TruncTip>
+        </span>
         <span className="srcline__count" aria-label={`${row.items.length} 个 ${state.model.noun}`}>
           {row.items.length}
         </span>
       </span>
       <span className="srcline__where" role="cell">
-        <TruncTip content={<span className="mx-mono">{displayPath(row.path)}</span>}>
-          <span className="srcrow__path ss-selectable">
-            {path.head ? <span className="srcrow__head">{path.head}</span> : null}
-            <span className="srcrow__tail">{path.tail}</span>
-          </span>
-        </TruncTip>
+        <span className="srcline__fit srcline__fit--where">
+          <TruncTip
+            content={
+              <Mono path inherit>
+                {row.path}
+              </Mono>
+            }
+          >
+            {/* 前段放不下以 … 截断，末两级完整保留 */}
+            <span className="srcrow__path">
+              {path.head ? <Mono truncate>{path.head}</Mono> : null}
+              <span className="srcrow__tail">
+                <Mono>{path.tail}</Mono>
+              </span>
+            </span>
+          </TruncTip>
+        </span>
       </span>
       <span className={`srcline__open${openShown ? " is-shown" : ""}`} role="cell">
         <Button

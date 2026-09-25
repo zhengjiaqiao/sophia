@@ -87,16 +87,21 @@ test("每行：来源名 + skill 数 ｜ 中段省略的短路径 ｜ 浅键 `�
   assert.match(html, /class="srcline__open" role="cell"/);
   assert.doesNotMatch(html, /srcline__open is-shown/);
   const css = readFileSync(new URL("../src/SourceRow.css", import.meta.url), "utf8");
-  assert.match(css, /\.srcline__open \.ss-btn \{[^}]*opacity: 0;/);
-  assert.match(css, /\.srcline__open\.is-shown \.ss-btn \{[^}]*opacity: 1;/);
+  // 藏的是这一格（页面不碰键的内部类）
+  assert.match(css, /\.srcline__open \{[^}]*opacity: 0;/);
+  assert.match(css, /\.srcline__open\.is-shown \{[^}]*opacity: 1;/);
+  assert.doesNotMatch(css, /\.ss-[a-z]/);
   const src = readFileSync(new URL("../src/SourceRow.tsx", import.meta.url), "utf8");
   // 与表格来源格同一条规则：鼠标悬停，或键盘焦点（鼠标点过留下的焦点不算）
   assert.match(src, /const openShown = !leaving && \(hovered \|\| keyFocus\);/);
   assert.match(src, /setKeyFocus\(\(e\.target as HTMLElement\)\.matches\(":focus-visible"\)\)/);
   assert.match(html, /srcline__label">WeiboAP<\/span>/);
   assert.match(html, /srcline__count"[^>]*>27<\/span>/);
-  // 末两级完整，前段可截
-  assert.match(html, /srcrow__head">[^<]*<\/span><span class="srcrow__tail">w\/skills<\/span>/);
+  // 末两级完整，前段可截（路径用组件库的等宽 Mono：前段 truncate，末两级不截）
+  assert.match(
+    html,
+    /srcrow__path"><span class="ss-mono ss-selectable ss-mono--truncate">[^<]*<\/span><span class="srcrow__tail"><span class="ss-mono ss-selectable">w\/skills<\/span>/,
+  );
   assert.match(html, /ss-btn--quiet[^>]*>[\s\S]*?打开[\s\S]*?ss-btn__external/);
   assert.doesNotMatch(html, /打开 ↗|打开↗/);
   assert.match(html, /srcrow__pick">选目标</);
@@ -142,9 +147,13 @@ test("样式：各行 subgrid 对齐列头；名字至多 160、路径至多 240
     rowCss,
     /\.srcline \{[^}]*grid-template-columns: subgrid;[^}]*height: 40px;[^}]*border-bottom: var\(--border-row\);/,
   );
-  assert.match(rowCss, /\.srcline__name > \.ss-tipwrap \{[^}]*max-width: 160px;/);
-  assert.match(rowCss, /\.srcline__where > \.ss-tipwrap \{[^}]*max-width: 240px;/);
+  assert.match(rowCss, /\.srcline__fit--name \{[^}]*max-width: 160px;/);
+  assert.match(rowCss, /\.srcline__fit--where \{[^}]*max-width: 240px;/);
   assert.match(pageCss, /\.srcpage__head \{[^}]*border-bottom: var\(--border-structure\);/);
-  // 目标浮层里的勾选框随组件：页面不再覆盖它的悬停
-  assert.doesNotMatch(rowCss, /\.srcrow-target[^{]*\.ss-checkbox/);
+  // 目标浮层是组件库的多选菜单：页面不再写一套浮层项，也不覆盖组件的内部类
+  assert.doesNotMatch(rowCss, /\.srcrow-target/);
+  assert.doesNotMatch(rowCss, /\.ss-[a-z]/);
+  const rowTsx = readFileSync(new URL("../src/SourceRow.tsx", import.meta.url), "utf8");
+  assert.match(rowTsx, /<Menu maxWidth=\{280\}>/);
+  assert.match(rowTsx, /<MenuItem[^>]*kind="check"/);
 });

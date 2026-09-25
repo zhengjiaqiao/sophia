@@ -1,20 +1,3 @@
-import { CheckboxGlyph } from "../ui/index.ts";
-import "./CheckMark.css";
-
-/// 画出来的 14px 勾选框（与 ui 的 `Checkbox` 同一套 `.ss-checkbox` 样式、同一个记号）。
-///
-/// 给「整行是按钮」的列表用：命中区是整行（DESIGN「命中区与视觉尺寸是两回事」：列表行里
-/// 的选择记号只是告诉你点了会发生什么），方框本身不再是一个按钮——按钮里套按钮不合法。
-/// 读屏状态由外层行的 `role="checkbox"` + `aria-checked` 说，这里 aria-hidden。
-/// `"mixed"`＝半选（全选框在部分勾上时），画一道短横，与 `Checkbox` 一致。
-/// 行悬停时方框「手靠近」：行元素加 `data-checkrow`（行禁用时别加）；行禁用时方框的样子在 CheckMark.css。
-export function CheckMark({ on }: { on: boolean | "mixed" }) {
-  const classes = ["ss-checkbox", "pages-checkmark"];
-  if (on === true) classes.push("is-on");
-  if (on === "mixed") classes.push("is-mixed");
-  return (
-    <span className={classes.join(" ")} aria-hidden="true">
-      <CheckboxGlyph checked={on} />
-    </span>
-  );
-}
+/// 转出：画出来的勾选框已收进组件库（`src/ui` 的 `CheckMark` / `CheckRow`），页面不再用这个路径。
+/// 只留给 tests/ui.test.ts 还在 import 的旧路径；那一处改指向 ui 之后删掉这个文件
+export { CheckMark } from "../ui/index.ts";

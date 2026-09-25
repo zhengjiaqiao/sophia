@@ -1,6 +1,6 @@
 /* 来源行（SourceRow.tsx，DESIGN「位置页 › 来源行（只在来源管理页）」）：高 40、13 号字、底 1px row-line，
-   纯文字行无底色。来源管理页的一行是 `.srcline`（各格对齐页面列头，见文末）；`.srcrow__*` / `.srcrow-target*`
-   是一行里的规则控件（目标框、选目标浮层）与 × 键。
+   纯文字行无底色。来源管理页的一行是 `.srcline`（各格对齐页面列头，见文末）；`.srcrow__*`
+   是一行里的规则控件（目标框）与 × 键。选目标浮层是组件库的 `Menu`（多选项）。
    色值一律 var(--…)，唯一来源是 tokens.css */
 @import "./tokens.css";
 
@@ -9,10 +9,10 @@
 .srcrow__targets {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xxs);
   box-sizing: border-box;
   height: var(--control-h-compact);
-  padding: 0 6px 0 8px;
+  padding: 0 6px 0 var(--space-xs);
   border: var(--border-control);
   border-radius: var(--radius-control);
   background: var(--paper);
@@ -31,7 +31,7 @@
 .srcrow__shown {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xxs);
   min-width: 0;
 }
 
@@ -63,68 +63,6 @@
   margin-left: calc(6px - var(--space-xs));
 }
 
-/* 目标浮层：一行 = 复选框 + 图标 14 + 名字，整行可点；没勾的名字 ink-mute；高亮行 surface、control 7、左右内缩 4。
-   宽随内容（最宽 280，点不了的原因在里面折行）：菜单类浮层不设定宽，定宽 220 配两个短名字时右边空一大块
-   （2026-09-25 真机走查；见 DESIGN「色块：要不要、多大」——菜单是一组可点的项，随字） */
-.srcrow-targets {
-  display: flex;
-  flex-direction: column;
-  width: max-content;
-  max-width: 280px;
-  padding: var(--space-xxs) 0;
-}
-
-.srcrow-target {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  min-height: 30px;
-  margin: 0 var(--space-xxs);
-  padding: 4px 8px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-ui);
-  text-align: left;
-  cursor: default;
-}
-
-.srcrow-target:hover:not(:disabled),
-.srcrow-target:focus-visible {
-  background: var(--surface);
-  outline: none;
-}
-
-.srcrow-target__text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.srcrow-target__name {
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-
-.srcrow-target.is-on .srcrow-target__name {
-  color: var(--ink);
-}
-
-/* 点不了的原因：名字下面一行，12 ink-mute，可折行（原因要写全） */
-.srcrow-target__why {
-  font-size: var(--size-label);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-  white-space: normal;
-}
-
-.srcrow-target:disabled .srcrow-target__name {
-  color: var(--ink-faint);
-}
-
 /* ===== 来源管理页的一行（SourceLine）=====
    行元素是页面表格（pages/SourcesPage.css `.srcpage__table`）的一行，用 subgrid 让各格对齐列头：
    来源名 + 8 + 数 ｜ 短路径 ｜ 打开 ↗ ｜（撑开）｜ 目标框 ｜ 8 + 紧凑开关 ｜ 6 + ×。
@@ -146,16 +84,28 @@
   align-items: baseline;
   gap: var(--space-xs);
   min-width: 0;
-  padding-right: 16px;
+  padding-right: var(--space-md);
 }
 
-.srcline__name > .ss-tipwrap {
+/* 名字与路径的外框：按内容定宽、有上限、放得下时不占多余；放不下时里面截断。
+   grid 的一列 minmax(0, 1fr) 把里面的提示框包层拉到这一框的宽（而不是按文字撑开），文字才截得断 */
+.srcline__fit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
+}
+
+.srcline__fit--name {
   max-width: 160px;
+}
+
+.srcline__fit--where {
+  max-width: 240px;
 }
 
 .srcline__label {
   display: block;
+  min-width: 0;
   overflow: hidden;
   color: var(--ink);
   text-overflow: ellipsis;
@@ -173,62 +123,43 @@
 .srcline__where {
   display: flex;
   min-width: 0;
-  padding-right: 16px;
+  padding-right: var(--space-md);
 }
 
-.srcline__where > .ss-tipwrap {
-  min-width: 0;
-  max-width: 240px;
-}
-
-/* 短路径：mono 12 ink-faint，一行；前段放不下以 … 截断，末两级（tail）完整保留 */
+/* 短路径（等宽 Mono，12 ink-faint），一行；前段放不下以 … 截断（Mono truncate），末两级（tail）完整保留 */
 .srcrow__path {
   display: flex;
   min-width: 0;
-  font-family: var(--font-mono);
-  font-size: var(--size-label);
-  color: var(--ink-faint);
   white-space: nowrap;
 }
 
-.srcrow__head {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .srcrow__tail {
+  display: flex;
   flex-shrink: 0;
 }
 
+/* `打开 ↗` 悬停这一行（或键盘焦点在这一行）才出（SourceLine 给 is-shown）：键一直占着这一列，
+   各行对齐；其余时候整格看不见（opacity，不用 visibility——Tab 还要走得到它）。即时出没，同表格来源格 */
 .srcline__open {
   display: flex;
-}
-
-/* `打开 ↗` 悬停这一行（或键盘焦点在这一行）才出（SourceLine 给 is-shown）：键一直占着这一列，
-   各行对齐；其余时候看不见（opacity，不用 visibility——Tab 还要走得到它）。即时出没，同表格来源格；
-   不另写 transition，免得盖掉键自己的悬停过渡 */
-.srcline__open .ss-btn {
   opacity: 0;
 }
 
-.srcline__open.is-shown .ss-btn {
+.srcline__open.is-shown {
   opacity: 1;
 }
 
-/* 目标框：这一页里定宽（整列一样宽，按最宽的那一个，至少放得下「选目标 ▾」） */
+/* 目标框：这一页里定宽（整列一样宽，按最宽的那一个，至少放得下「选目标 ▾」）。
+   grid 一列：框外的提示框包层被拉满这一格，框再占满包层 */
 .srcline__targets {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-}
-
-.srcline__targets > .ss-tipwrap,
-.srcline__targets .srcrow__targets {
-  width: 100%;
 }
 
 .srcline__targets .srcrow__targets {
   justify-content: space-between;
+  width: 100%;
 }
 
 .srcline__switch {
