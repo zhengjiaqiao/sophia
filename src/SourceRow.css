@@ -166,6 +166,26 @@
   max-width: 240px;
 }
 
+/* 短路径：mono 12 ink-faint，一行；前段放不下以 … 截断，末两级（tail）完整保留 */
+.srcrow__path {
+  display: flex;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.srcrow__head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.srcrow__tail {
+  flex-shrink: 0;
+}
+
 .srcline__open {
   display: flex;
 }
