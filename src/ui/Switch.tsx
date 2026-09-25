@@ -145,10 +145,6 @@ export function Switch({
 export interface IndicatorProps {
   /// 开着 / 在生效。指示点只剩「开」这一态：关着就不画
   on: boolean;
-  /// @deprecated 已不分档（只剩侧栏那一种）；传了也不起作用，阶段 3 删
-  size?: SwitchSize;
-  /// @deprecated 已没有不可用态；传了也不起作用，阶段 3 删
-  disabled?: boolean;
   /// 读屏名。不给就当装饰（旁边的名字已经说了状态）
   label?: string;
 }

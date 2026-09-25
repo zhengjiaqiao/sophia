@@ -140,11 +140,6 @@ export function IconTick() {
   );
 }
 
-/// @deprecated 旧名：已经画成统一的 `IconTick`（`size` 不再起作用）。调用方改用 `IconTick` 后删掉
-export function IconCheck(_props: IconProps = {}) {
-  return <IconTick />;
-}
-
 // ---- 显示窗里的另两个状态记号：只跟在一句话或一个读数前面，不给命中区 ----
 
 /// 做不成：⊘

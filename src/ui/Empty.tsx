@@ -7,7 +7,8 @@ import emptyFolder from "../assets/empty-folder.png";
 
 /// 空态与忙碌态（DESIGN「空态与忙碌态」「转盘」）。
 ///
-/// 空态里的动作都是默认键；离开 Sophia 的（`在访达中显示 ↗`）给 `leave`，画成浅键（末尾自动带 ↗）。
+/// 空态里的动作都是默认键（表头下一句后的 `清除筛选` 给 `compact`，紧凑 24）；离开 Sophia 的
+/// （`在访达中显示 ↗`）给 `leave`，画成浅键（末尾自动带 ↗）。
 /// 动作已在页面头的（`+ 来源` `+ 网关`）空态里不重复。
 /// 首次扫描：24 宽忙碌刻度居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
 ///
@@ -48,6 +49,8 @@ export interface EmptyAction {
   icon?: ReactNode;
   /// 这一下会离开 Sophia（在访达中显示……）：画成浅键，末尾自动带 ↗；label 只写动词，不写 ↗
   leave?: boolean;
+  /// 默认键紧凑 24（表头下一句后的 `清除筛选`）；浅键本来就是 24，不受它影响
+  compact?: boolean;
 }
 
 export interface EmptyProps {
@@ -105,6 +108,7 @@ function EmptyButton({ action }: { action: EmptyAction }) {
   return (
     <Button
       variant={action.leave ? "quiet" : "default"}
+      size={action.compact ? "compact" : "regular"}
       icon={action.icon}
       onClick={action.onClick}
     >

@@ -129,7 +129,8 @@ export interface MatrixRowView {
   /// 名字后跟拉手，点名字或拉手拉开；不给就没有拉手、不能拉开
   detail?: ReactNode;
   /// 调用方控制开合的第二格抽屉（MCP 点 `2 份不一样` 拉出的字段差异）：给了就拉开，
-  /// 从名字左沿铺到最后一列；不给就收着
+  /// 从名字左沿铺到最后一列；不给就收着。表格一次只开一格：它拉开时行详情收起，
+  /// 行详情拉开（或按 Esc）时经 `onClosePanels` 请调用方收起它
   panel?: ReactNode;
   /// 非空＝这一行勾不动，值是原因
   selectDisabledReason?: string;
@@ -213,6 +214,8 @@ export interface MatrixProps {
 
   /// 一行都没有时，表头下面放什么（空态）
   empty?: ReactNode;
+  /// 收起调用方控制的第二格抽屉（行的 `panel`）：拉开行详情、按 Esc 时调用（表格一次只开一格）
+  onClosePanels?: () => void;
   /// 刚变化的格：播一次 120ms 反色闪，`nonce` 变了才重播。**只给单格**：批量时格子同时变成新状态、不闪
   flash?: { keys: string[]; nonce: number };
   /// 批量写入进行中：按下的那一点（"all" 或列 id）当即锁住（只锁它，别的点照常能按、排队执行），
@@ -276,26 +279,6 @@ export function clampFocus(
 /// 忙过 0.3 秒门槛（BUSY_DELAY_MS）才变淡（`ss-busy`）
 export const busyLockClass = (busy: boolean, dim: boolean): string | undefined =>
   !busy ? undefined : dim ? "ss-busy" : "mx-locked";
-
-/// 展开记号：12px 实心三角，▸ 收起 / ▾ 展开。不在悬停也没展开时占位不显示（名字不跳）。
-/// @deprecated 位置页已换成组件层的抽屉拉手（`DrawerHandle`）；其余页迁完后删
-export function Disclosure({ open, shown }: { open: boolean; shown: boolean }) {
-  return (
-    <svg
-      className="mx-disclosure"
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-      style={{
-        transform: open ? "rotate(90deg)" : undefined,
-        visibility: shown ? "visible" : "hidden",
-      }}
-    >
-      <path d="M4 2.5 8.5 6 4 9.5Z" fill="currentColor" />
-    </svg>
-  );
-}
 
 /// `打开 ↗`：离开 Sophia 的动作（在访达中显示），浅键、↗ 由组件画。提示框是完整路径
 export function RevealLink({ path, onReveal }: { path: string; onReveal: () => void }) {
@@ -508,6 +491,7 @@ export default function Matrix(props: MatrixProps) {
     keyBusy,
     cellBusy,
     barToast,
+    onClosePanels,
   } = props;
 
   const tipId = useId();
@@ -543,9 +527,19 @@ export default function Matrix(props: MatrixProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(0);
-  // 拉开了行详情抽屉的那一行（一次只开一格）
+  // 拉开了行详情抽屉的那一行。表格一次只开一格（DESIGN「抽屉」）：拉开行详情时请调用方收起第二格抽屉，
+  // 第二格抽屉换到别的行拉开时行详情收起
   const [expanded, setExpanded] = useState<string | null>(null);
-  const toggleDetail = (key: string) => setExpanded((prev) => (prev === key ? null : key));
+  const toggleDetail = (key: string) => {
+    if (expanded !== key) onClosePanels?.();
+    setExpanded((prev) => (prev === key ? null : key));
+  };
+  const panelRow = rows.find((row) => row.panel !== undefined)?.key ?? null;
+  const [panelSeen, setPanelSeen] = useState(panelRow);
+  if (panelRow !== panelSeen) {
+    setPanelSeen(panelRow);
+    if (panelRow !== null) setExpanded(null);
+  }
 
   const dotText = dotWords === "mcp" ? MCP_DOT_TEXT : SKILL_DOT_TEXT;
   const template = [
@@ -742,8 +736,26 @@ export default function Matrix(props: MatrixProps) {
   // ---- 菜单命令（DESIGN「应用菜单」）：⌘F 聚焦筛选框（FilterBox 自己接）、⌘A 勾选当前筛选的
   // 全部行、⌘Z 撤销最近一次可撤销的操作（没有就无操作，菜单项灰着）。输入框聚焦时壳把全选 / 撤销
   // 作用于文字，不会发到这里 ----
-  const live = useRef({ onUndo, onSelectionChange, selected, flat, expanded, shortcuts });
-  live.current = { onUndo, onSelectionChange, selected, flat, expanded, shortcuts };
+  const live = useRef({
+    onUndo,
+    onSelectionChange,
+    selected,
+    flat,
+    expanded,
+    shortcuts,
+    panelRow,
+    onClosePanels,
+  });
+  live.current = {
+    onUndo,
+    onSelectionChange,
+    selected,
+    flat,
+    expanded,
+    shortcuts,
+    panelRow,
+    onClosePanels,
+  };
   const selectAllVisible = () => {
     const s = live.current;
     if (!s.shortcuts || s.flat.length === 0) return;
@@ -758,7 +770,7 @@ export default function Matrix(props: MatrixProps) {
   usePageCommand("undo", undoLast);
   useMenuFlag("undo", shortcuts && canUndo);
 
-  // 键盘直达：Esc 先收起展开的行，再取消选择。在 Tauri 里 ⌘F / ⌘Z / ⌘A 由菜单栏接走（上面的
+  // 键盘直达：Esc 先收起拉开的抽屉，再取消选择。在 Tauri 里 ⌘F / ⌘Z / ⌘A 由菜单栏接走（上面的
   // 页面命令）；不在 Tauri 里（浏览器预览）没有菜单栏，这里照同样的行为接按键
   useEffect(() => {
     if (!shortcuts) return;
@@ -793,6 +805,11 @@ export default function Matrix(props: MatrixProps) {
       if (e.key === "Escape" && s.expanded !== null) {
         e.preventDefault();
         setExpanded(null);
+        return;
+      }
+      if (e.key === "Escape" && s.panelRow !== null && s.onClosePanels) {
+        e.preventDefault();
+        s.onClosePanels();
         return;
       }
       if (e.key === "Escape" && s.selected.size > 0) {

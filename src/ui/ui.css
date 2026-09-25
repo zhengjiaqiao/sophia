@@ -157,7 +157,7 @@ textarea,
 /* 浅键 button-quiet（2026-09-25）：只给离开 Sophia 的动作，末尾一律 10px ↗（1.4 描边、左间距 3）。
    静止是平贴在机面上的一小块键面：surface 底、无边无投影、13 ink-mute、高 24、左右 8、control 7；
    手靠近才抬起（paper + raise、字转 ink）；按下 raise-pressed + 按压变形。没有下划线、没有手形。
-   高度固定 24，不叠加 compact / row（Button 不给它挂尺寸类）；`external` 是它的旧名，渲染成同一个类 */
+   高度固定 24，不叠加 compact / row（Button 不给它挂尺寸类） */
 .ss-btn--quiet {
   gap: 3px;
   height: var(--control-h-compact);

@@ -363,6 +363,28 @@ const rules = [
     },
   },
   {
+    id: "no-retired-ui",
+    // 阶段 3 收口（2026-09-25）：外链变体 `external` 并入浅键后已删；浅键只经 <Button variant="quiet"> 画
+    // （组件自动带 ↗），页面里不直写 `ss-btn--quiet` 类名；`▸ / ▾` 展开记号（Disclosure）换成了抽屉拉手；
+    // 界面上的 ✓ 一律是 IconTick 图形，文案里不写字体 ✓ 字符
+    desc: '已删的写法：variant="external"、ss-btn--external、页面直写 ss-btn--quiet、Disclosure / mx-disclosure、文案里的 ✓ ▸',
+    run(src, path) {
+      const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+      const out = [];
+      if (/variant\s*=\s*\{?\s*["']external["']/.test(code))
+        out.push('variant="external"（写 variant="quiet"）');
+      if (/ss-btn--external/.test(code)) out.push("ss-btn--external");
+      if (!path.startsWith("src/ui/") && /ss-btn--quiet/.test(code))
+        out.push('页面里直写 ss-btn--quiet（用 <Button variant="quiet">）');
+      if (/\bDisclosure\b|mx-disclosure/.test(code))
+        out.push("Disclosure / mx-disclosure（用 DrawerHandle + Drawer）");
+      const text = visibleText(src);
+      if (text.includes("✓")) out.push("文案里的字体 ✓（用 IconTick）");
+      if (text.includes("▸")) out.push("文案里的 ▸（用 DrawerHandle）");
+      return out;
+    },
+  },
+  {
     id: "cap-only",
     // 大写是结构的语言：我们自己写的纯拉丁结构词经 <Cap> 按脚本切 run，只给拉丁 run 套
     // Condensed + 大写 + 字距；套到汉字上字字散开、窄体大写挨着常宽苹方像两套系统。

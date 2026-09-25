@@ -11,10 +11,10 @@ import {
   Cap,
   FloatingToast,
   IconButton,
-  IconCheck,
   IconClose,
   IconPlus,
   IconSettings,
+  IconTick,
   Indicator,
   ReasonTip,
   Toast,
@@ -296,7 +296,7 @@ export function Sidebar(props: SidebarProps) {
 const rowOf = (key: string): Element | null =>
   document.querySelector(`.side-item[data-project="${CSS.escape(key)}"]`);
 
-/// 小标题行右端的排序下拉：`最近活跃 ▾`，点开两项的小浮层，当前项前打 ✓。
+/// 小标题行右端的排序下拉：`最近活跃 ▾`，点开两项的小浮层，当前项前打对勾（`IconTick`，与勾选框同一枚）。
 /// 点外面、按 Esc 关闭，不铺透明罩。选择记在本机，下次打开照旧
 function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: ProjectSort) => void }) {
   const [open, setOpen] = useState(false);
@@ -348,9 +348,7 @@ function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: Proje
                 setOpen(false);
               }}
             >
-              <span className="sidebar__sort-check">
-                {s.id === value && <IconCheck size={12} />}
-              </span>
+              <span className="sidebar__sort-check">{s.id === value && <IconTick />}</span>
               {s.label}
             </button>
           ))}

@@ -12,7 +12,6 @@ import { ReasonTip } from "./Tooltip.tsx";
 ///   高 24、左右 8；手靠近 `paper` + `raise`、字转 `ink`；按下 `raise-pressed` + 按压变形。
 ///   **末尾一律 10px `↗`，组件自动画**，调用方只写动词（`打开` `在访达中显示` `去发布页`）。
 ///   只给会跳到 Sophia 外面的动作；`size` 对它不起作用（固定 24）。在灰面板、抽屉里键面自动换 `paper`
-/// - `external`：`quiet` 的旧名，同一个样子（没有下划线、没有手形）。阶段 3 删，新代码写 `quiet`
 ///
 /// 三个尺寸按所在那一行选，不按重要性选：`regular` 28（工具行）、`compact` 24（表格行、
 /// 提示条、灰面板、纸窗、抽屉）、`row` 32（确认框与页面级提交）。
@@ -27,7 +26,7 @@ import { ReasonTip } from "./Tooltip.tsx";
 /// 自带原因提示框，悬停出、**按下（点击、空格、回车）当即出**，页面不必再包一层。
 /// 外面再包的提示框（「重启生效」的说明）在禁用期间让给原因，同时只出一个。
 
-export type ButtonVariant = "primary" | "default" | "quiet" | "external";
+export type ButtonVariant = "primary" | "default" | "quiet";
 export type ButtonSize = "regular" | "compact" | "row";
 
 interface ButtonBase {
@@ -99,7 +98,7 @@ export function Button(props: ButtonProps) {
   const classes = ["ss-btn"];
   if (variant === "primary") classes.push("ss-btn--primary");
   // 浅键（离开 Sophia）固定 24 高：尺寸不叠加
-  const leave = variant === "quiet" || variant === "external";
+  const leave = variant === "quiet";
   if (leave) classes.push("ss-btn--quiet");
   if (size === "compact" && !leave) classes.push("ss-btn--compact");
   if (size === "row" && !leave) classes.push("ss-btn--row");

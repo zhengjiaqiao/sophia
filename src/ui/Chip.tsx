@@ -7,10 +7,6 @@ import type { ReactNode } from "react";
 
 interface ChipBase {
   children: ReactNode;
-  /// @deprecated 片上不再放图标（不点灯）：传了也不画，阶段 3 删
-  icon?: ReactNode;
-  /// @deprecated 片上不再带计数（选中后表头 `名称 N` 给数）：传了也不画，阶段 3 删
-  count?: number;
   selected?: boolean;
   onClick?: () => void;
   title?: string;

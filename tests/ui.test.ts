@@ -40,7 +40,7 @@ const { AgentIcon, AgentMark, agentInitial, hasAgentIcon } =
   await import("../src/ui/AgentMark.tsx");
 const { Empty } = await import("../src/ui/Empty.tsx");
 const { Drawer, DrawerHandle, DRAWER_MS } = await import("../src/ui/Drawer.tsx");
-const { IconCheck, IconTick } = await import("../src/ui/icons.tsx");
+const { IconTick } = await import("../src/ui/icons.tsx");
 
 test("index 把组件和样式一起交出去，用的人不必自己 import css", async () => {
   const ui = await import("../src/ui/index.ts");
@@ -570,7 +570,7 @@ test("Button 禁用：必须同时给原因，挂在 title 上；平贴、实线
 });
 
 // 2026-09-25 键的三档各有一个意思：安静键（应用内次级、无底无边）与下划线外链（手形光标）都已删，
-// `quiet` 改义为浅键＝离开 Sophia（必带 ↗），`external` 只是它的旧名。原来这两条钉的是被取代的规范
+// `quiet` 改义为浅键＝离开 Sophia（必带 ↗）；旧名 `external` 已删。原来这两条钉的是被取代的规范
 test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mute、高 24 左右 8、末尾一律 10px ↗；悬停 paper + raise；按下 raise-pressed", () => {
   const html = render(Button, { children: "打开", variant: "quiet", onClick: noop });
   // ↗ 由组件画，调用方只写动词；没有下划线的包层
@@ -620,11 +620,6 @@ test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mu
   assert.doesNotMatch(uiCss, /ss-btn--link|ss-btn--quiet:disabled|ss-btn--external/);
 });
 
-test("Button external：浅键的旧名——同一个类、同一个 ↗，没有下划线与手形", () => {
-  const ext = render(Button, { children: "去发布页", variant: "external", onClick: noop });
-  assert.equal(ext, render(Button, { children: "去发布页", variant: "quiet", onClick: noop }));
-});
-
 test("Button 墨窗上：浅描边键——1px face 边与字、透明底、不抬起", () => {
   const html = render(Button, { children: "撤销", size: "compact", onDark: true, onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--compact is-on-dark"/);
@@ -638,7 +633,7 @@ test("Button 墨窗上：浅描边键——1px face 边与字、透明底、不�
 });
 
 test("IconButton：28×28，title 必填且同时作 aria-label；不带计数", () => {
-  const html = render(IconButton, { icon: IconCheck({}), title: "设置", onClick: noop });
+  const html = render(IconButton, { icon: IconTick(), title: "设置", onClick: noop });
   assert.match(html, /class="ss-iconbtn"/);
   assert.match(html, /title="设置"/);
   assert.match(html, /aria-label="设置"/);
@@ -892,13 +887,11 @@ test("Checkbox 16px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 Che
   assert.match(cssRule(uiCss, ".ss-checkbox::before"), /inset:\s*-4px/);
 });
 
-test("✓ 只有一种画法：IconTick 10px / 1.8；旧名 IconCheck 画同一枚，不再按 16px 另画", () => {
+test("✓ 只有一种画法：IconTick 10px / 1.8（旧名 IconCheck 已删），不再按 16px 另画", () => {
   const tick = render(IconTick, {});
   assert.match(tick, /viewBox="0 0 10 10"/);
   assert.match(tick, /stroke-width="1\.8"/);
   assert.match(tick, /d="M2 5\.3 4\.1 7\.4 8 2\.8"/);
-  assert.equal(render(IconCheck, { size: 12 }), tick);
-  assert.equal(render(IconCheck, {}), tick);
 });
 
 // ===== 页签滑槽 =====
@@ -985,17 +978,13 @@ test("Tabs 滑块：paper + raise 抬起、7 圆角；位移与变宽 260ms 弹�
 // 2026-09-25 来源筛选＝一排浅胶囊，选中的是墨色：recess 底、无边、高 26、不带计数与图标。
 // 原用例钉的透明底 + ctl-border、28 高、计数是被取代的规范
 test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边无投影；悬停 surface + ink；选中墨色（字重不跳），再悬停内沿 1px ink-mute；不带计数与图标", () => {
-  const html = render(Chip, { children: "WeiboAP", count: 29, onClick: noop });
+  const html = render(Chip, { children: "WeiboAP", onClick: noop });
   assert.match(html, /class="ss-chip"/);
   assert.match(html, /aria-pressed="false"/);
-  // count / icon 还收着（兼容旧调用），但不画
+  // 只写名字：没有计数、没有图标（count / icon 两个 prop 已删）
   assert.equal(
     html,
     '<button type="button" class="ss-chip" aria-pressed="false"><span class="ss-chip__label">WeiboAP</span></button>',
-  );
-  assert.doesNotMatch(
-    render(Chip, { children: "WeiboAP", icon: "●", selected: true, onClick: noop }),
-    /ss-chip__icon|●/,
   );
   assert.match(
     render(Chip, { children: "WeiboAP", selected: true, onClick: noop }),
@@ -1171,7 +1160,7 @@ test("禁用的 Switch / Button / IconButton / AddButton / Checkbox 自带原因
     "先填地址",
   );
   assertReasonWrap(
-    render(IconButton, { icon: IconCheck({}), title: "删掉", disabledReason: "还在用" }),
+    render(IconButton, { icon: IconTick(), title: "删掉", disabledReason: "还在用" }),
     "还在用",
   );
   assertReasonWrap(render(AddButton, { noun: "项目", disabledReason: "正在读取" }), "正在读取");
@@ -1182,7 +1171,7 @@ test("禁用的 Switch / Button / IconButton / AddButton / Checkbox 自带原因
   // 方向可选：来源管理页行尾的 × 放下方
   assert.match(
     render(IconButton, {
-      icon: IconCheck({}),
+      icon: IconTick(),
       title: "删掉",
       disabledReason: "还在用",
       tipPlacement: "bottom",
@@ -1192,7 +1181,7 @@ test("禁用的 Switch / Button / IconButton / AddButton / Checkbox 自带原因
   // 来源管理页行尾的 ×：原因一句单行
   assert.match(
     render(IconButton, {
-      icon: IconCheck({}),
+      icon: IconTick(),
       title: "删掉",
       disabledReason: "它的原件就在 CardBox 里，删掉原件才会消失",
       tipPlacement: "bottom",

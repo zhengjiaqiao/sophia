@@ -1292,6 +1292,7 @@ export default function McpTab({
         text={`没有名字里带「${filterText.trim()}」的服务`}
         action={{
           label: "清除筛选",
+          compact: true,
           onClick: () => {
             setFilterText("");
             setOriginFilter([]);
@@ -1380,6 +1381,7 @@ export default function McpTab({
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
         shortcuts={!addOpen && !manageOpen && pane === null && pick === null}
         empty={empty}
+        onClosePanels={() => setOpenDiffs((prev) => (prev.size > 0 ? new Map() : prev))}
         flash={flash}
         cellNotice={cellNotice}
         onDismissCellNotice={dismissNotice}

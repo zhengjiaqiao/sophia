@@ -476,7 +476,7 @@ export default function DomainView(props: DomainViewProps) {
     query !== "" ? (
       <Empty
         text={`没有名字里带「${query}」的 skill`}
-        action={{ label: "清除筛选", onClick: props.onClearFilter }}
+        action={{ label: "清除筛选", compact: true, onClick: props.onClearFilter }}
       />
     ) : onlySource !== null && !counts.has(onlySource) ? (
       // 只选了这一个来源、它里面一个 skill 都没有：位置页上没有来源行，往这个文件夹放 skill 的入口
@@ -559,7 +559,7 @@ export default function DomainView(props: DomainViewProps) {
   );
 }
 
-/// 表格里的空态：一句现状（表头照常在上面）；筛选无结果时句后 `清除筛选`（默认键，次要入口——
+/// 表格里的空态：一句现状（表头照常在上面）；筛选无结果时句后 `清除筛选`（默认键紧凑，次要入口——
 /// 筛选框内的 ✕ 是主入口）；来源里还没有 skill 时 `在访达中显示 ↗`（浅键，`leave`）。
 /// `+ 来源` 在页面头，不在这里重复。
 /// 图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；筛选无结果不放图
@@ -571,7 +571,13 @@ export function Empty({
 }: {
   text: string;
   hint?: string;
-  action?: { label: string; onClick: () => void; icon?: ReactNode; leave?: boolean };
+  action?: {
+    label: string;
+    onClick: () => void;
+    icon?: ReactNode;
+    leave?: boolean;
+    compact?: boolean;
+  };
   art?: EmptyArt;
 }) {
   return (
