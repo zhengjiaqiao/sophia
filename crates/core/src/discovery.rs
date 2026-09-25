@@ -415,8 +415,9 @@ pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec
             if !matches!(entry_kind(&path), EntryKind::Symlink(_)) {
                 continue;
             }
-            // 坏链解析不出真实路径，指向文件的也不是 skill
-            let Some(real) = real_path(&path).filter(|r| r.is_dir()) else {
+            // 坏链解析不出真实路径；指向文件的、指向不带 `SKILL.md` 的目录的都不是 skill
+            // （与 `skills_in` 同一条规则：位置里的 skill 只认带 `SKILL.md` 的目录）
+            let Some(real) = real_path(&path).filter(|r| r.join("SKILL.md").is_file()) else {
                 continue;
             };
             if inside.iter().any(|k| real.starts_with(k)) {
@@ -1601,6 +1602,9 @@ mod tests {
         t.link(&claude.join("own"), &own); // 指向已知本体位置 → 不合成
         t.link(&claude.join("rotten"), &home.join("gone")); // 坏链 → 不合成
         t.file(&claude, "notes.md"); // 真实文件 → 不合成
+                                     // 指向不带 SKILL.md 的目录（同步工具的文件夹之类）→ 不是 skill，不合成
+        let not_skill = t.dir("opt/sync-bucket");
+        t.link(&claude.join("synced"), &not_skill);
 
         let e = env(&home, &[]);
         let all = all_harnesses(&e);
