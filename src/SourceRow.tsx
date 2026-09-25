@@ -7,7 +7,9 @@
 /// - 短路径（mono 12 `ink-faint`，`~` 开头，放不下中段省略，截断才出完整路径的提示框）+ `打开 ↗`（浅键）：
 ///   悬停这一行（或键盘焦点在这一行）才出，列位置保留、各行对齐（同表格来源格的 `打开 ↗`）
 /// - 目标框 + 8 + 紧凑开关（旁边不点指示点）；打开开关当场展开选目标的浮层；开 / 关都不确认
-///   （只管以后新出现的，不补链现有的）。规则句「以后新出现的自动加到」只在页面的列头说一次
+///   （只管以后新出现的，不补链现有的）。规则关着时目标框 `选目标 ▾` 禁用、按下说「先打开规则」——
+///   在那里选目标只记下、不会顺带打开规则，看起来能点却不生效就是骗人（DESIGN 2026-09-25 评审第二轮）。
+///   规则句「以后新出现的自动加到」只在页面的列头说一次
 /// - 最右：`×` 移除这个来源（锚定确认写明会撤掉的）；原件在这个位置里的来源 × 禁用、按下即说原因
 ///
 /// 规则状态与移除流程由 `useSources` 持有：来源项的右键菜单「移除来源…」走同一个确认，所以移除不能
@@ -26,6 +28,7 @@ import {
   IconChevronDown,
   IconClose,
   Switch,
+  ReasonTip,
   Toast,
   Tooltip,
   TruncTip,
@@ -287,6 +290,9 @@ export function useSources({
   };
 }
 
+/// 规则关着时目标框的原因：选目标不会顺带打开规则
+export const RULE_OFF_REASON = "先打开规则";
+
 /// 规则句：skill `以后新出现的自动加到`，MCP `以后新出现的自动写进`（来源管理页只在列头说一次）
 export const ruleText = (model: Pick<SourcesModel, "ruleOn">) => `以后新出现的${model.ruleOn}`;
 
@@ -362,10 +368,26 @@ function useRuleControls(
     state.setRule(row, next, "没改", pressedAt(el));
   };
 
-  const box = (
+  // 规则关着：选目标不会顺带打开规则（只记下打开时用哪几个），所以目标框禁用、按下即说原因；
+  // 打开开关时浮层当场展开，目标在那时选
+  const box = !on ? (
+    <ReasonTip reason={RULE_OFF_REASON}>
+      <button
+        type="button"
+        className="srcrow__targets is-off"
+        disabled
+        aria-label={`${row.name} ${model.targetsTitle}`}
+      >
+        <span className="srcrow__shown">
+          <span className="srcrow__pick">选目标</span>
+        </span>
+        <IconChevronDown className="srcrow__chevron" />
+      </button>
+    </ReasonTip>
+  ) : (
     <Tooltip
       content={
-        layerOpen || !on
+        layerOpen
           ? undefined
           : row.lastAuto
             ? lastAutoText(row.lastAuto, model.ranVerb)
@@ -375,24 +397,18 @@ function useRuleControls(
       <button
         type="button"
         ref={boxRef}
-        className={`srcrow__targets${layerOpen ? " is-open" : ""}${on ? "" : " is-off"}`}
+        className={`srcrow__targets${layerOpen ? " is-open" : ""}`}
         aria-haspopup="menu"
         aria-expanded={layerOpen}
         aria-label={`${row.name} ${model.targetsTitle}`}
         onClick={() => setLayerOpen((v) => !v)}
       >
         <span className="srcrow__shown">
-          {on ? (
-            shown.length > 0 ? (
-              shown.map((t) => (
+          {shown.length > 0
+            ? shown.map((t) => (
                 <AgentIcon key={t.id} id={t.iconId} name={t.label} size={13} labelled />
               ))
-            ) : (
-              `${targets.length} ${model.targetUnit}`
-            )
-          ) : (
-            <span className="srcrow__pick">选目标</span>
-          )}
+            : `${targets.length} ${model.targetUnit}`}
         </span>
         {/* 下拉记号：看得出这组图标能点开改（⑧ 外观说明如何操作） */}
         <IconChevronDown className="srcrow__chevron" />

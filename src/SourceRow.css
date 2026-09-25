@@ -40,6 +40,18 @@
   color: var(--ink-faint);
 }
 
+/* 规则关着：目标框禁用（选目标不会顺带打开规则，按下说「先打开规则」）——平贴、1px hairline、
+   透明底、字与记号 ink-faint（D20 禁用样子）；原生禁用不吃指针，悬停与按下落在提示框的包层上 */
+.srcrow__targets:disabled {
+  border: var(--border-disabled);
+  background: transparent;
+  color: var(--ink-faint);
+}
+
+.srcrow__targets:disabled .srcrow__chevron {
+  color: var(--ink-faint);
+}
+
 .srcrow__chevron {
   flex-shrink: 0;
   color: var(--ink-mute);

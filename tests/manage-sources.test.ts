@@ -106,6 +106,20 @@ test("每行：来源名 + skill 数 ｜ 中段省略的短路径 ｜ 浅键 `�
   assert.doesNotMatch(html, /ss-indicator/);
 });
 
+test("规则关着：目标框 `选目标 ▾` 禁用、按下即说「先打开规则」（在那里选目标不会顺带打开规则）；开着时能点", () => {
+  const off = page(stubState([row("w", "WeiboAP", false, 27)]));
+  assert.match(
+    off,
+    /<button type="button" class="srcrow__targets is-off" disabled="" aria-label="WeiboAP 改自动加到的 agent"[^>]*>/,
+  );
+  assert.match(off, /role="tooltip"[^>]*>先打开规则</);
+  const on = page(stubState([{ ...row("w", "WeiboAP", false, 27), targets: ["claude"] }]));
+  assert.match(on, /<button type="button" class="srcrow__targets" aria-haspopup="menu"/);
+  assert.doesNotMatch(on, /先打开规则/);
+  const css = readFileSync(new URL("../src/SourceRow.css", import.meta.url), "utf8");
+  assert.match(css, /\.srcrow__targets:disabled \{[^}]*border: var\(--border-disabled\);/);
+});
+
 test("原件在这个位置的来源：× 禁用并说原因", () => {
   const html = page(stubState([row("own", "CardBox · 通用仓库", true, 3)]));
   assert.match(html, /它的原件就在 CardBox 里，删掉原件才会消失/);
