@@ -1623,9 +1623,10 @@ textarea,
 }
 
 /* ===== 13.2 抽屉（DESIGN「抽屉（展开与收起）」）=====
-   拉手 DrawerHandle：跟在名字后面的一枚 10px 线形箭头（1.4 描边、ink-mute），没有键面、不抬起；
-   命中区 18 方（看不见）。平时不画，悬停这一行（data-drawer-row）、键盘焦点在这一行上、已拉开时才出；
-   收起朝下 ˅，拉开时 260ms 弹簧翻转 180° 朝上 ˄ */
+   拉手 DrawerHandle：名字前自成一列的一枚 10px 线形箭头（1.4 描边、ink-mute），没有键面、不抬起；
+   命中区 18 方（看不见）。收起朝右 ›，拉开时 260ms 弹簧转 90° 朝下 ˅（全应用一个方向）。
+   有勾选框的行平时不画，悬停这一行（data-drawer-row）、键盘焦点在这一行上、已拉开时才出；
+   没有勾选框的行（网关行，is-always）常显 */
 .ss-drawerhandle {
   display: inline-flex;
   align-items: center;
@@ -1648,29 +1649,19 @@ textarea,
 html:not([data-input="pointer"]) [data-drawer-row]:focus-visible .ss-drawerhandle,
 html:not([data-input="pointer"]) [data-drawer-row]:has(:focus-visible) .ss-drawerhandle,
 html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
-.ss-drawerhandle.is-open {
+.ss-drawerhandle.is-open,
+.ss-drawerhandle.is-always {
   opacity: 1;
 }
 
+/* 图形本是 ˅：收起转成 ›，拉开回到 ˅ */
 .ss-drawerhandle__glyph {
   display: block;
+  transform: rotate(-90deg);
   transition: transform var(--dur-drawer) var(--spring-slide);
 }
 
 .ss-drawerhandle.is-open .ss-drawerhandle__glyph {
-  transform: rotate(180deg);
-}
-
-/* 行首没有勾选框的行（网关行）：拉手常显、放在名字前；收起朝右 ›、拉开转 90° 朝下 ˅（访达惯例） */
-.ss-drawerhandle.is-lead {
-  opacity: 1;
-}
-
-.ss-drawerhandle.is-lead .ss-drawerhandle__glyph {
-  transform: rotate(-90deg);
-}
-
-.ss-drawerhandle.is-lead.is-open .ss-drawerhandle__glyph {
   transform: none;
 }
 

@@ -105,7 +105,7 @@ test("行：拉手（常显，在名字前）+ 短名；第二行 `地址 · 已
   assert.match(first, /<div class="gw-row__main" data-drawer-row="">/);
   assert.match(
     first,
-    /gw-row__title"><button type="button" class="ss-drawerhandle is-lead" aria-label="ap-gateway 的模型" aria-expanded="false" aria-controls="gw-drawer-ap">[^]*?<\/button><span class="gw-row__label">ap-gateway<\/span>/,
+    /gw-row__title"><button type="button" class="ss-drawerhandle is-always" aria-label="ap-gateway 的模型" aria-expanded="false" aria-controls="gw-drawer-ap">[^]*?<\/button><span class="gw-row__label">ap-gateway<\/span>/,
   );
   assert.doesNotMatch(html, /gw-row__body|is-open|gw-row__caret|gw-row__name/);
   assert.match(first, /gw-row__url">ap-gateway\.example\.com\/v1</);
@@ -144,7 +144,7 @@ test("抽屉＝从这家挑模型：限制说明（全文）→ 勾选列表（�
   const [first, second] = rows(html);
   assert.match(first, /^<div class="gw-row is-open"/);
   assert.match(first, /class="ss-drawer is-open gw-row__drawer" id="gw-drawer-ap"/);
-  assert.match(first, /ss-drawerhandle is-lead is-open"[^>]*aria-expanded="true"/);
+  assert.match(first, /ss-drawerhandle is-always is-open"[^>]*aria-expanded="true"/);
   const note = first.indexOf("gw-row__note");
   const notice = first.indexOf("没加上 o3");
   const list = first.indexOf("gw-row__list");

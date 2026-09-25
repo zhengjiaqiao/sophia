@@ -311,7 +311,7 @@ test("Matrix：多选纳入式——选中的几项都是墨色；片上不带�
   assert.match(html, /class="ss-floattoast"[^>]*><span class="probe">已添加/);
 });
 
-test("行详情是抽屉：名称格只放「名字 ×2 ˅」——记号是纯文字、点它拉开抽屉，行内动作在抽屉里；行带悬停钩子；抽屉左沿对齐名字、不跨进 agent 列", () => {
+test("行详情是抽屉：名称格只放「› 名字 ×2」——拉手在名字前自成一列，记号是纯文字、点它拉开抽屉，行内动作在抽屉里；行带悬停钩子；抽屉左沿对齐名字、不跨进 agent 列", () => {
   const html = render(Matrix, {
     ...base,
     rows: [
@@ -326,10 +326,15 @@ test("行详情是抽屉：名称格只放「名字 ×2 ˅」——记号是纯�
   const row = html.slice(html.indexOf('data-row="u|docx"'), html.indexOf('data-row="w|pdf"'));
   // 行元素挂勾选框与拉手的行悬停钩子（组件层 ui.css）
   assert.match(html, /data-row="u\|docx" data-checkrow="" data-drawer-row=""/);
-  // 顺序：名字 → ×2 → 拉手；名称格里没有别的（行内键、悬停出的动作都挪进了抽屉，名字不被键挤成省略号）
+  // 顺序：拉手（名字前自成一列）→ 名字 → ×2；名称格里没有别的（行内键、悬停出的动作都挪进了抽屉，
+  // 名字不被键挤成省略号）
   const at = (needle: string) => row.indexOf(needle);
+  assert.ok(at("ss-drawerhandle") < at(">docx<"));
   assert.ok(at(">docx<") < at("probe-mark"));
-  assert.ok(at("probe-mark") < at("ss-drawerhandle"));
+  assert.match(
+    row,
+    /class="mx-row__name"><span class="mx-handle"><button type="button" class="ss-drawerhandle"/,
+  );
   const nameCell = row.slice(at('class="mx-row__name"'), at('class="mx-row__origin"'));
   assert.doesNotMatch(nameCell, /ss-btn|mx-extra/);
   // 记号包在 mx-mark 里（点它与点名字一样拉开抽屉）
@@ -350,18 +355,37 @@ test("行详情是抽屉：名称格只放「名字 ×2 ˅」——记号是纯�
   assert.doesNotMatch(row, /probe-detail/);
   // 旧的 ▸ / ▾ 展开记号与平的展开区都不在位置页上了
   assert.doesNotMatch(html, /mx-disclosure|mx-namebtn|mx-detail__body/);
-  // 没有详情的行没有拉手
+  // 没有详情的行没有拉手，但拉手列照样留着（各行名字对齐）
   const pdf = html.slice(html.indexOf('data-row="w|pdf"'));
   assert.doesNotMatch(pdf, /ss-drawerhandle/);
-  // 抽屉左沿对齐名字（复选列 34 之后）、右沿让出 agent 列
+  assert.match(pdf, /class="mx-row__name"><span class="mx-handle"><\/span>/);
+  // 抽屉左沿对齐名字（复选列 34 + 拉手列 24 之后）、右沿让出 agent 列；列头「名称」与选择行让出拉手列
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.match(css, /--mx-handle-col: 24px;/);
+  assert.match(css, /\.mx-handle \{[^}]*width: 18px;/);
   assert.match(
     css,
-    /\.mx-drawer \.ss-drawer__well \{[^}]*margin: 0 var\(--mx-agents, 376px\) 0 34px;/,
+    /\.mx-drawer \.ss-drawer__well \{[^}]*margin: 0 var\(--mx-agents, 376px\) 0 calc\(34px \+ var\(--mx-handle-col\)\);/,
+  );
+  assert.match(
+    css,
+    /\.mx-head__name,\s*\.mx-selrow__name \{\s*padding-left: var\(--mx-handle-col\);/,
   );
   assert.match(html, /class="mx-body" style="--mx-agents:176px"/);
   // 位置页里自己的勾选框悬停覆盖删掉，改用组件层的行悬停钩子
   assert.doesNotMatch(css, /\.mx-row:hover \.ss-checkbox/);
+});
+
+test("添加来源候选行：勾选框 ｜ 拉手列 18 + 6 ｜ 名字，不能勾的行拉手格留空；抽屉左沿对齐名字", () => {
+  const tsx = readFileSync(new URL("../src/pages/AddSourcePanel.tsx", import.meta.url), "utf8");
+  assert.match(
+    tsx,
+    /add-src__checkcell[^]*add-src__handlecell[^]*<DrawerHandle[^]*add-src__content[^]*add-src__name/,
+  );
+  assert.doesNotMatch(tsx, /add-src__name">\{entry\.name\}<\/span>\s*\{[^}]*<DrawerHandle/);
+  const css = readFileSync(new URL("../src/pages/AddSourcePanel.css", import.meta.url), "utf8");
+  assert.match(css, /grid-template-columns: 24px 8px 18px 6px minmax\(0, 1fr\);/);
+  assert.match(css, /\.add-src__drawer \.ss-drawer__well \{\s*margin-left: 56px;/);
 });
 
 test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号（不是键），差异是这一行抽屉里的一段；skill 的 `只留这份` 在抽屉里", async () => {

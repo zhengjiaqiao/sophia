@@ -420,7 +420,7 @@ export function GatewayBlock({
     onToggleRow(p.id);
   };
 
-  /// 拉手 + 6 + 名字：网关行前面没有勾选框，拉手常显、放在名字前（收起 ›、拉开 ˅）。
+  /// 拉手 + 6 + 名字：网关行前面没有勾选框，拉手常显（收起 ›、拉开 ˅，与表格同一个形与方向）。
   /// 表单开着时拉手朝下，推回去＝收起表单（有改动先问）
   const title = (
     label: string,
@@ -431,7 +431,7 @@ export function GatewayBlock({
   ) => (
     <span className="gw-row__title">
       <DrawerHandle
-        lead
+        always
         open={open}
         onToggle={onToggle}
         label={form ? `${label} 的地址与密钥` : `${label} 的模型`}

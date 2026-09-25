@@ -1959,7 +1959,7 @@ test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首�
 
 // ===== 抽屉（2026-09-25，取代 ▸ / ▾ 字符）=====
 
-test("DrawerHandle：名字后一枚 10px 线形箭头（1.4、ink-mute），无键面、命中 18；平时不画，行悬停 / 键盘焦点 / 拉开时出；拉开翻转朝上", () => {
+test("DrawerHandle：名字前一枚 10px 线形箭头（1.4、ink-mute），无键面、命中 18；平时不画，行悬停 / 键盘焦点 / 拉开时出，`always` 常显；收起朝右 ›、拉开转 90° 朝下 ˅", () => {
   const closed = render(DrawerHandle, {
     open: false,
     onToggle: noop,
@@ -1974,6 +1974,12 @@ test("DrawerHandle：名字后一枚 10px 线形箭头（1.4、ink-mute），无
     render(DrawerHandle, { open: true, onToggle: noop, label: "x" }),
     /class="ss-drawerhandle is-open" aria-label="x" aria-expanded="true"/,
   );
+  // 没有勾选框的行（网关行）常显；`lead`（名字前 + 另一套方向）已并入统一的形与方向
+  assert.match(
+    render(DrawerHandle, { open: false, onToggle: noop, label: "x", always: true }),
+    /class="ss-drawerhandle is-always"/,
+  );
+  assert.doesNotMatch(uiCss, /is-lead/);
   const rule = cssRule(uiCss, ".ss-drawerhandle");
   assert.match(rule, /width:\s*18px/);
   assert.match(rule, /height:\s*18px/);
@@ -1984,16 +1990,15 @@ test("DrawerHandle：名字后一枚 10px 线形箭头（1.4、ink-mute），无
   // 出现的几种情形：悬停这一行、键盘焦点在这一行（只认键盘模式）、拉手自己有键盘焦点、已拉开
   assert.match(
     uiCss,
-    /\[data-drawer-row\]:hover \.ss-drawerhandle,\s*html:not\(\[data-input="pointer"\]\) \[data-drawer-row\]:focus-visible \.ss-drawerhandle,\s*html:not\(\[data-input="pointer"\]\) \[data-drawer-row\]:has\(:focus-visible\) \.ss-drawerhandle,\s*html:not\(\[data-input="pointer"\]\) \.ss-drawerhandle:focus-visible,\s*\.ss-drawerhandle\.is-open \{\s*opacity: 1;/,
+    /\[data-drawer-row\]:hover \.ss-drawerhandle,\s*html:not\(\[data-input="pointer"\]\) \[data-drawer-row\]:focus-visible \.ss-drawerhandle,\s*html:not\(\[data-input="pointer"\]\) \[data-drawer-row\]:has\(:focus-visible\) \.ss-drawerhandle,\s*html:not\(\[data-input="pointer"\]\) \.ss-drawerhandle:focus-visible,\s*\.ss-drawerhandle\.is-open,\s*\.ss-drawerhandle\.is-always \{\s*opacity: 1;/,
   );
-  // 翻转 180°，260ms 弹簧
+  // 图形本是 ˅：收起转成 ›，拉开回到 ˅（转 90°），260ms 弹簧
+  const glyph = cssRule(uiCss, ".ss-drawerhandle__glyph");
+  assert.match(glyph, /transform:\s*rotate\(-90deg\)/);
+  assert.match(glyph, /transition:\s*transform var\(--dur-drawer\) var\(--spring-slide\)/);
   assert.match(
     cssRule(uiCss, ".ss-drawerhandle.is-open .ss-drawerhandle__glyph"),
-    /transform:\s*rotate\(180deg\)/,
-  );
-  assert.match(
-    cssRule(uiCss, ".ss-drawerhandle__glyph"),
-    /transition:\s*transform var\(--dur-drawer\) var\(--spring-slide\)/,
+    /transform:\s*none/,
   );
 });
 

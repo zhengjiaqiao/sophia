@@ -5,18 +5,19 @@ import { IconChevronDown } from "./icons.tsx";
 /// 抽屉（DESIGN「抽屉（展开与收起）」，2026-09-25 取代 `▸ / ▾` 字符）：展开＝从机面里拉出一格抽屉。
 ///
 /// 两件：
-/// - `DrawerHandle` 拉手：跟在名字后面（名字 + 6 + 拉手；有 `×2` 这类记号时跟在记号之后；
-///   名称格里不放键，行内的动作在抽屉里）。
+/// - `DrawerHandle` 拉手：**全应用一个形、一个位置**（2026-09-25 评审第二轮，⑤ 同一个动作只学一次）——
+///   在名字前自成一列（拉手 18 + 6 + 名字；调用方给没有抽屉的行留空，各行名字对齐），`×2` 这类记号跟在名字后。
 ///   只有一枚 10px 线形箭头（1.4 描边、`ink-mute`），没有键面、不抬起；命中区 18 方。
-///   **平时不画**：悬停这一行、键盘焦点在这一行上、已拉开时才出——行元素加 `data-drawer-row` 作钩子。
-///   收起朝下 ˅，拉开时 260ms 弹簧翻转朝上 ˄。点它只切换抽屉，不冒泡到行（行自己的点击另有用处）。
+///   收起朝右 ›，拉开时 260ms 弹簧转 90° 朝下 ˅（访达列表的展开三角惯例）。
+///   **有勾选框的行平时不画**：悬停这一行、键盘焦点在这一行上、已拉开时才出——行元素加 `data-drawer-row` 作钩子。
+///   点它只切换抽屉，不冒泡到行（行自己的点击另有用处）。
 /// - `Drawer` 抽屉：这一行下面的一格平的浅灰槽（`recess` 底、不画内凹阴影、`control` 7、内边距 10 12），
 ///   上 6 下 10、下沿 1px `row-line`；高度 0 ↔ 内容高 260ms 机械缓动，`prefers-reduced-motion` 下即时。
 ///   左沿对齐这一行的名字，由调用方给 `.ss-drawer__well` 加左外边距（经 `className` 挂自己的类）。
 ///
-/// **行首没有勾选框的行**（网关行）用 `lead`：拉手常显、放在名字前面（拉手 + 6 + 名字），收起朝右 ›、
-/// 拉开转 90° 朝下 ˅（访达列表的展开三角惯例）——前面没有勾选框，拉手不会和它挤在一起，常显也不重复
+/// **行首没有勾选框的行**（网关行）用 `always`：拉手常显——前面没有勾选框，拉手不会和它挤在一起
 /// （2026-09-25 产品负责人真机：「前面没有选择框的时候，展开按钮不需要悬浮才出现，可以直接展示在文字前面」）。
+/// 只有出现时机随行不同，形与方向处处一样。
 ///
 /// 谁开抽屉、Esc 收起、表格一次只开一格，都是调用方的状态；这里只管长相与动效。
 
@@ -30,11 +31,17 @@ export interface DrawerHandleProps {
   label: string;
   /// 抽屉的 id（`Drawer` 的 `id`），给 aria-controls
   controls?: string;
-  /// 常显、放在名字前（行首没有勾选框的行）：收起 ›、拉开 ˅
-  lead?: boolean;
+  /// 常显（行首没有勾选框的行）；不给就只在悬停 / 键盘焦点到这一行、或已拉开时出
+  always?: boolean;
 }
 
-export function DrawerHandle({ open, onToggle, label, controls, lead = false }: DrawerHandleProps) {
+export function DrawerHandle({
+  open,
+  onToggle,
+  label,
+  controls,
+  always = false,
+}: DrawerHandleProps) {
   const onClick = (e: MouseEvent<HTMLButtonElement>) => {
     // 行本身点了也拉开（点名字、点整行）：别让这一下再冒到行上切第二次
     e.stopPropagation();
@@ -43,7 +50,7 @@ export function DrawerHandle({ open, onToggle, label, controls, lead = false }: 
   return (
     <button
       type="button"
-      className={`ss-drawerhandle${lead ? " is-lead" : ""}${open ? " is-open" : ""}`}
+      className={`ss-drawerhandle${always ? " is-always" : ""}${open ? " is-open" : ""}`}
       aria-label={label}
       aria-expanded={open}
       aria-controls={controls}

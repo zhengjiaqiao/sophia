@@ -95,13 +95,15 @@
 
 .add-src__row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  column-gap: 8px;
+  /* 勾选框 24 ｜ 8 ｜ 拉手 18 ｜ 6 ｜ 名字（拉手列全应用同一个位置，DESIGN「抽屉」） */
+  grid-template-columns: 24px 8px 18px 6px minmax(0, 1fr);
+  column-gap: 0;
   align-items: start;
   padding: 10px 0;
 }
 
 .add-src__checkcell {
+  grid-column: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -129,7 +131,15 @@
   border-color: var(--hairline);
 }
 
-/* 第一行：名字 + 6 + 拉手（名字放不下截断，拉手跟在省略号后面） */
+/* 拉手列：与第一行名字同高、居中 */
+.add-src__handlecell {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  height: calc(var(--size-body) * var(--leading-caption));
+}
+
+/* 第一行：名字（放不下截断） */
 .add-src__title {
   display: flex;
   align-items: center;
@@ -137,17 +147,18 @@
   min-width: 0;
 }
 
-/* 抽屉：左沿对齐名字（勾选框 24 + 8）；抽屉的底线由这一组的行间线代替 */
+/* 抽屉：左沿对齐名字（勾选框 24 + 8 + 拉手 18 + 6）；抽屉的底线由这一组的行间线代替 */
 .add-src__drawer .ss-drawer__room {
   padding-top: 0;
   border-bottom: 0;
 }
 
 .add-src__drawer .ss-drawer__well {
-  margin-left: 32px;
+  margin-left: 56px;
 }
 
 .add-src__content {
+  grid-column: 5;
   display: flex;
   flex-direction: column;
   min-width: 0;

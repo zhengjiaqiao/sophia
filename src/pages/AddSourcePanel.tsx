@@ -357,18 +357,21 @@ export function AddSourcePanel({ model, domain, onChanged, onDone }: AddSourcePa
               </button>
             )}
           </span>
+          {/* 拉手在名字前自成一列（18 + 6）：悬停这一行（或键盘焦点在这一行上）才出，拉开的常显；
+              不能勾的行没有抽屉，这一格留空，各行名字照样对齐 */}
+          <span className="add-src__handlecell">
+            {blocked ? null : (
+              <DrawerHandle
+                open={open}
+                onToggle={() => toggleExpand(entry.ref)}
+                label={`${entry.name} 里的 ${model.noun}`}
+                controls={drawerId}
+              />
+            )}
+          </span>
           <span className="add-src__content">
             <span className="add-src__title">
               <span className="add-src__name">{entry.name}</span>
-              {/* 名字 + 6 + 拉手：悬停这一行（或键盘焦点在这一行上）才出，拉开的常显；不能勾的行没有抽屉 */}
-              {blocked ? null : (
-                <DrawerHandle
-                  open={open}
-                  onToggle={() => toggleExpand(entry.ref)}
-                  label={`${entry.name} 里的 ${model.noun}`}
-                  controls={drawerId}
-                />
-              )}
             </span>
             <span className="add-src__second">{second}</span>
           </span>

@@ -1014,9 +1014,20 @@ export default function Matrix(props: MatrixProps) {
               />
             )}
           </div>
-          {/* 名字 ×2 ˅：名称格只放名字与记号，拉手跟在后面（悬停这一行才出、拉开的常显）；
-              行内的动作都在抽屉里，名字不会被键挤成省略号——只有列宽真不够时才截断 */}
+          {/* › 名字 ×2：名称格只放拉手、名字与记号。拉手在名字前自成一列（18 + 6，没有抽屉的行留空，
+              各行名字对齐），悬停这一行（或键盘焦点在这一行）才出、拉开的常显；行内的动作都在抽屉里，
+              名字不会被键挤成省略号——只有列宽真不够时才截断 */}
           <div className="mx-row__name">
+            <span className="mx-handle">
+              {row.detail !== undefined ? (
+                <DrawerHandle
+                  open={open}
+                  onToggle={() => toggleDetail(row.key)}
+                  label={`${row.name} 的详情`}
+                  controls={detailId}
+                />
+              ) : null}
+            </span>
             {/* 名字也是这一行的键盘落点（方向键从第一格再往左）：空格加选、回车拉开抽屉；鼠标点名字拉开抽屉 */}
             <span
               className={`mx-name${row.detail !== undefined ? " is-toggle" : ""}`}
@@ -1053,14 +1064,6 @@ export default function Matrix(props: MatrixProps) {
               >
                 {row.mark}
               </span>
-            ) : null}
-            {row.detail !== undefined ? (
-              <DrawerHandle
-                open={open}
-                onToggle={() => toggleDetail(row.key)}
-                label={`${row.name} 的详情`}
-                controls={detailId}
-              />
             ) : null}
           </div>
           {/* 来源：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
