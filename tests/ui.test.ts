@@ -976,15 +976,29 @@ test("Tabs 滑块：paper + raise 抬起、7 圆角；位移与变宽 260ms 弹�
 
 // 2026-09-25 来源筛选＝一排浅胶囊，选中的是墨色：recess 底、无边、高 26、不带计数与图标。
 // 原用例钉的透明底 + ctl-border、28 高、计数是被取代的规范
-test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边无投影；悬停 surface + ink；选中墨色（字重不跳），再悬停内沿 1px ink-mute；不带计数与图标", () => {
+test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边无投影；悬停 surface + ink；选中墨色（字重不跳），再悬停内沿 1px ink-mute；可带计数（12 tabular，选中 ctl-border），不带图标", () => {
   const html = render(Chip, { children: "WeiboAP", onClick: noop });
   assert.match(html, /class="ss-chip"/);
   assert.match(html, /aria-pressed="false"/);
-  // 只写名字：没有计数、没有图标（count / icon 两个 prop 已删）
+  // 不给计数就只写名字（`全部`）；没有图标
   assert.equal(
     html,
     '<button type="button" class="ss-chip" aria-pressed="false"><span class="ss-chip__label">WeiboAP</span></button>',
   );
+  // 计数跟在名字后：12 tabular，没选 ink-faint、选中 ctl-border；名字与数间距 6
+  assert.match(
+    render(Chip, { children: "WeiboAP", count: 27, onClick: noop }),
+    /<span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__count">27<\/span>/,
+  );
+  const count = cssRule(uiCss, ".ss-chip__count");
+  assert.match(count, /font-size:\s*var\(--size-label\)/);
+  assert.match(count, /font-variant-numeric:\s*tabular-nums/);
+  assert.match(count, /color:\s*var\(--ink-faint\)/);
+  assert.match(
+    cssRule(uiCss, ".ss-chip.is-selected .ss-chip__count"),
+    /color:\s*var\(--ctl-border\)/,
+  );
+  assert.match(cssRule(uiCss, ".ss-chip"), /gap:\s*6px/);
   assert.match(
     render(Chip, { children: "WeiboAP", selected: true, onClick: noop }),
     /class="ss-chip is-selected" aria-pressed="true"/,
@@ -1011,7 +1025,7 @@ test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边�
   assert.match(selectedHover, /outline:\s*1px solid var\(--ink-mute\)/);
   assert.match(selectedHover, /outline-offset:\s*-2px/);
   assert.match(selectedHover, /background:\s*var\(--ink\)/);
-  assert.doesNotMatch(uiCss, /ss-chip__count|ss-chip__icon/);
+  assert.doesNotMatch(uiCss, /ss-chip__icon/);
 });
 
 test("Chip 不可选：实线 hairline、ink-faint 字，并给出原因", () => {

@@ -23,7 +23,7 @@ import type {
 } from "react";
 import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
-import { toggleOrigin } from "./originFilter.ts";
+import { pickOrigin } from "./originFilter.ts";
 import {
   AddButton,
   AgentIcon,
@@ -150,10 +150,12 @@ export interface ColumnCheck {
   onToggle: () => void;
 }
 
-/// 来源筛选里的一项（一颗胶囊）：只写名字，不带计数、不点灯（DESIGN「来源筛选」）
+/// 来源筛选里的一项（一颗胶囊）：名字 + 这个来源在这个位置的行数，不点灯（DESIGN「来源筛选」）
 export interface SourceChipItem {
   id: string;
   label: string;
+  /// 胶囊里的计数（12 tabular）：这个来源在这个位置下有几行（不随筛选变）
+  count?: number;
   /// 提示框第一行的完整名（项上是最短区分片段、放不下还会截断）；不给就用 label
   full?: string;
   /// 提示框第二行的路径（原值；显示时写成短路径 `~/…`，mono）
@@ -166,9 +168,9 @@ export interface MatrixProps {
   columns: MatrixColumn[];
   /// 「来源」列的列头文字
   originLabel: string;
-  /// 来源筛选：行首 `来源` 标签 + 每个来源一颗胶囊（只写名字），选中的是墨色。没有 `全部` 项；
+  /// 来源筛选：行首 `来源` 标签 + 第一颗 `全部`（不带数）+ 每个来源一颗胶囊（名字 + 计数），选中的是墨色；
   /// 放不下折行（不超出面板宽）；名字放不下截断，完整值在提示框里。一项都没有时整行不出。
-  /// selected 空＝全部；多选纳入式（originFilter.ts `toggleOrigin`），加完来源时调用方一次选中新加的几个
+  /// selected 空＝全部；单选（originFilter.ts `pickOrigin`）：点一颗只看它，点 `全部` 回到全部
   sources?: {
     selected: readonly string[];
     onSelect: (next: string[]) => void;
@@ -1381,8 +1383,9 @@ const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
 };
 
 /// 来源筛选（DESIGN「位置页 › 来源筛选」「选择片 Chip」）：行首 `来源` 标签（12 / 500 `ink-mute`）+ 8 +
-/// 每个来源一颗浅胶囊，只写名字；选中的是墨色。**多选、纳入式**：点一颗＝纳入，再点＝去掉，一个都不选＝全部
-/// （没有 `全部` 项，总数在列头 `名称 N` 上）。项上不点灯。一项都没有（这个位置还没有来源）时整行不出
+/// 第一颗 `全部`（默认选中、不带数）+ 每个来源一颗浅胶囊（名字 + 计数）；选中的是墨色。**单选**：点一颗＝
+/// 只看这个来源，点 `全部` 回到全部——任何时候都有一颗亮着说出当前状态。项上不点灯。一项都没有（这个位置
+/// 还没有来源）时整行不出
 function SourceChips({
   selected,
   onSelect,
@@ -1396,6 +1399,11 @@ function SourceChips({
         来源
       </span>
       <div className="mx-sources" role="group" aria-label="按来源筛选">
+        <span className="mx-sourcechip">
+          <Chip selected={selected.length === 0} onClick={() => onSelect(pickOrigin(null))}>
+            全部
+          </Chip>
+        </span>
         {items.map((item) => (
           <span
             key={item.id}
@@ -1409,7 +1417,8 @@ function SourceChips({
             <Tooltip content={<SourceChipTip item={item} />}>
               <Chip
                 selected={selected.includes(item.id)}
-                onClick={() => onSelect(toggleOrigin(selected, item.id))}
+                count={item.count}
+                onClick={() => onSelect(pickOrigin(item.id))}
               >
                 {item.label}
               </Chip>

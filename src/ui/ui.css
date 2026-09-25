@@ -560,10 +560,12 @@ textarea,
 /* ===== 4. 来源筛选胶囊 Chip（DESIGN「选择片」）=====
    一排浅胶囊：recess 底、13 ink-mute、高 26、左右 10、pill，无边无投影、平贴——不是键。
    悬停 surface 底 + ink 字；选中＝墨色胶囊（ink 底 face 字，字重不跳），选中再悬停在内沿加 1px ink-mute
-   （同墨键悬停）。不带计数、不带图标（片上不点灯）；不可选实线 hairline、ink-faint 字 */
+   （同墨键悬停）。名字后可带计数（12 tabular，间距 6；没选 ink-faint、选中 ctl-border）；不带图标
+   （片上不点灯）；不可选实线 hairline、ink-faint 字 */
 .ss-chip {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   box-sizing: border-box;
   height: 26px;
   padding: 0 10px;
@@ -598,6 +600,16 @@ textarea,
   color: var(--face);
   outline: 1px solid var(--ink-mute);
   outline-offset: -2px;
+}
+
+.ss-chip__count {
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+.ss-chip.is-selected .ss-chip__count {
+  color: var(--ctl-border);
 }
 
 .ss-chip:disabled {

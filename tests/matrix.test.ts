@@ -216,13 +216,13 @@ test("Matrix：名称列头带总数，没有来源筛选片", () => {
   assert.doesNotMatch(html, /ss-chip/);
 });
 
-test("Matrix：来源筛选——行首 `来源` 标签 + 每个来源一颗胶囊；没有 `全部`、不带计数、不点灯；勾选期间来源筛选仍在", () => {
+test("Matrix：来源筛选——行首 `来源` 标签 + 第一颗 `全部`（默认选中、不带数）+ 每个来源一颗胶囊（名字 + 计数）；不点灯；勾选期间来源筛选仍在", () => {
   const sources = {
     selected: [],
     onSelect: () => undefined,
     items: [
-      { id: "u", label: "通用仓库" },
-      { id: "w", label: "WeiboAP" },
+      { id: "u", label: "通用仓库", count: 26 },
+      { id: "w", label: "WeiboAP", count: 0 },
     ],
   };
   const idle = render(Matrix, { ...base, sources });
@@ -230,11 +230,32 @@ test("Matrix：来源筛选——行首 `来源` 标签 + 每个来源一颗胶�
     idle,
     /class="mx-filterrow"[^>]*><span class="mx-filterrow__label" aria-hidden="true">来源<\/span><div class="mx-sources" role="group" aria-label="按来源筛选">/,
   );
-  // 没有 `全部` 项（一个都不选就是全部），项上只写名字：没有计数、没有橙点
-  assert.doesNotMatch(idle, />全部</);
-  assert.doesNotMatch(idle, /ss-chip__count|ss-indicator|has-rule/);
+  // 第一颗 `全部`：什么都不筛时它亮着（任何时候都有一颗说出当前状态），不带数
+  assert.match(
+    idle,
+    /aria-label="按来源筛选"><span class="mx-sourcechip"><button type="button" class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">全部<\/span><\/button><\/span>/,
+  );
+  // 每个来源：名字 + 计数（0 也写），没有橙点
+  assert.doesNotMatch(idle, /ss-indicator|has-rule/);
   assert.match(idle, /class="mx-sourcechip" data-origin="u"/);
-  assert.match(idle, /aria-pressed="false"><span class="ss-chip__label">WeiboAP<\/span><\/button>/);
+  assert.match(
+    idle,
+    /aria-pressed="false"><span class="ss-chip__label">通用仓库<\/span><span class="ss-chip__count">26<\/span><\/button>/,
+  );
+  assert.match(
+    idle,
+    /aria-pressed="false"><span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__count">0<\/span><\/button>/,
+  );
+  // 选了一个来源：它亮，`全部` 灭；点一颗只看它、点 `全部` 回到全部（单选，originFilter.pickOrigin）
+  const one = render(Matrix, { ...base, sources: { ...sources, selected: ["w"] } });
+  assert.match(one, /class="ss-chip" aria-pressed="false"><span class="ss-chip__label">全部</);
+  assert.match(
+    one,
+    /class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">WeiboAP</,
+  );
+  const src0 = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  assert.match(src0, /onClick=\{\(\) => onSelect\(pickOrigin\(null\)\)\}/);
+  assert.match(src0, /onClick=\{\(\) => onSelect\(pickOrigin\(item\.id\)\)\}/);
   const picking = render(Matrix, { ...base, sources, selected: new Set(["u|docx"]) });
   assert.match(picking, /已选/);
   assert.match(picking, /class="mx-sources"/);
@@ -281,11 +302,11 @@ test("来源项悬停出提示框：完整名 + 短路径 + 自动添加与移�
   );
 });
 
-test("Matrix：多选纳入式——选中的几项都是墨色；片上不带「新」标记；已添加那一窗浮在新来源那几项下", () => {
+test("Matrix：选中的来源是墨色、其余不亮；片上不带「新」标记；已添加那一窗浮在新来源那一项下", () => {
   const html = render(Matrix, {
     ...base,
     sources: {
-      selected: ["u", "w"],
+      selected: ["w"],
       onSelect: () => undefined,
       items: [
         { id: "u", label: "通用仓库" },
@@ -299,7 +320,7 @@ test("Matrix：多选纳入式——选中的几项都是墨色；片上不带�
       origins: ["w"],
     },
   });
-  assert.match(html, /aria-pressed="true"><span class="ss-chip__label">通用仓库</);
+  assert.match(html, /aria-pressed="false"><span class="ss-chip__label">通用仓库</);
   assert.match(html, /aria-pressed="true"><span class="ss-chip__label">WeiboAP<\/span><\/button>/);
   assert.match(html, /aria-pressed="false"><span class="ss-chip__label">别处<\/span><\/button>/);
   // 「新」标记已撤回（看起来像永远不会消失）：交代改由浮起的那一窗说「已筛选出它的 N 个」

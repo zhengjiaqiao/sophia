@@ -482,8 +482,6 @@ export default function DomainView(props: DomainViewProps) {
             : undefined
         }
       />
-    ) : props.originFilter.length > 1 && props.originFilter.every((id) => !counts.has(id)) ? (
-      <Empty text="选中的来源里还没有 skill" art="emptyFolder" />
     ) : noAgentDirs ? (
       <Empty
         text={`${page.label} 下还没有 agent 的 skill 目录`}
@@ -497,6 +495,7 @@ export default function DomainView(props: DomainViewProps) {
   const chip = (id: string): SourceChipItem => ({
     id,
     label: originOf(id),
+    count: counts.get(id) ?? 0,
     full: fullNames.get(id) ?? originOf(id),
     path: pathOfSource(id),
     menu: (el) => props.chipMenu(id, el),

@@ -6,7 +6,13 @@ import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./Domain
 import { cellKey, LocationActions, SourceKeys } from "./Matrix";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
-import { addedOrigins, dropOrigin, liveOrigins, originMatches } from "./originFilter";
+import {
+  addedOrigins,
+  dropOrigin,
+  filterAfterAdd,
+  liveOrigins,
+  originMatches,
+} from "./originFilter";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { SourcesPage } from "./pages/SourcesPage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
@@ -310,9 +316,9 @@ export default function SkillsTab({
     setUndo(null);
   }, [selectedKey]);
 
-  // 加完来源滑回位置页（DESIGN「添加来源」）：重扫已完，列表筛到新来源——来源筛选里它们被选中
-  // （加了几个选几个，列表是并集），这几项正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 skill`（说清楚列表为什么变少了）。
-  // 从来源管理页进去加的回到来源管理页，位置页的筛选不动
+  // 加完来源滑回位置页（DESIGN「添加来源」）：重扫已完。只加了一个就选中它（列表筛到它），它正下方浮起
+  // `✓ 已添加 … · 已筛选出它的 N 个 skill`（说清楚列表为什么变少了）；加了几个就停在 `全部`，新行的格闪一下，
+  // 浮起 `✓ 已添加 N 个来源 · M 个 skill`。从来源管理页进去加的回到来源管理页，位置页的筛选不动
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
@@ -328,16 +334,28 @@ export default function SkillsTab({
     );
     let parts: string[];
     if (ids.length > 0) {
-      // 名字与来源筛选同一个起名函数、同一组来源（DomainView）；数量＝列表里并集的行数
+      // 名字与来源筛选同一个起名函数、同一组来源（DomainView）；数量＝新来源的行数
       const names = originNames(order, overview.sources);
+      const added = page.rows.filter((r) => originMatches(ids, [r.sourceId]));
+      const pick = filterAfterAdd(ids);
       parts = addedParts(
         ids.map((id) => originText(names.get(id)!)),
-        page.rows.filter((r) => originMatches(ids, [r.sourceId])).length,
+        added.length,
         "skill",
-        true,
+        pick.length > 0,
       );
       setFilterText("");
-      setOriginFilter(ids);
+      setOriginFilter(pick);
+      // 停在 `全部`：新行混在全部里，格闪一下交代「就是这些」
+      if (pick.length === 0)
+        setFlash({
+          keys: added.flatMap((r) =>
+            page.targets.map((t) =>
+              skillCellKey({ sourceId: r.sourceId, skill: r.skill, targetId: t.id }),
+            ),
+          ),
+          nonce: Date.now(),
+        });
     } else {
       // 新来源在这个位置下一行都没有：来源筛选里没有它可选，只交代加上了
       parts = addedParts(

@@ -28,7 +28,13 @@ import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
-import { addedOrigins, dropOrigin, liveOrigins, originMatches } from "./originFilter";
+import {
+  addedOrigins,
+  dropOrigin,
+  filterAfterAdd,
+  liveOrigins,
+  originMatches,
+} from "./originFilter";
 import { MANAGE_SOURCES, mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { displayPath } from "./pathText";
@@ -394,8 +400,8 @@ export default function McpTab({
     keys: !addOpen && !manageOpen && pane === null && pick === null,
   });
 
-  // 加完来源滑回位置页（同 Skills）：重扫已完，列表筛到新来源——来源筛选里它们被选中（几个选几个，
-  // 列表是并集），这几项正下方浮起 `✓ 已添加 … · 已筛选出它的 N 个 MCP`（说清楚列表为什么变少了）。
+  // 加完来源滑回位置页（同 Skills）：重扫已完。只加了一个就选中它（列表筛到它），它正下方浮起
+  // `✓ 已添加 … · 已筛选出它的 N 个 MCP`；加了几个就停在 `全部`，新行的格闪一下。
   // 从来源管理页进去加的回到来源管理页，新来源那几行闪一下，位置页的筛选不动
   useEffect(() => {
     if (justAdded === null || !overview) return;
@@ -411,7 +417,14 @@ export default function McpTab({
     );
     let parts: string[];
     if (ids.length > 0) {
-      // 名字与来源筛选同一个写法（groupLabel）；数量＝列表里并集的行数
+      // 名字与来源筛选同一个写法（groupLabel）；数量＝新来源的行数
+      const added = page.rows.filter((r) =>
+        originMatches(
+          ids,
+          r.entries.map((e) => e.sourceId),
+        ),
+      );
+      const pick = filterAfterAdd(ids);
       parts = addedParts(
         ids.map((id) =>
           groupLabel(
@@ -419,17 +432,18 @@ export default function McpTab({
             id,
           ),
         ),
-        page.rows.filter((r) =>
-          originMatches(
-            ids,
-            r.entries.map((e) => e.sourceId),
-          ),
-        ).length,
+        added.length,
         "MCP",
-        true,
+        pick.length > 0,
       );
       setFilterText("");
-      setOriginFilter(ids);
+      setOriginFilter(pick);
+      // 停在 `全部`：新行混在全部里，格闪一下交代「就是这些」
+      if (pick.length === 0)
+        setFlash({
+          keys: added.flatMap((r) => page.targets.map((t) => cellKey(rowKeyOf(r), t.id))),
+          nonce: Date.now(),
+        });
     } else {
       // 新来源在这个位置下一行都没有：来源筛选里没有它可选，只交代加上了
       parts = addedParts(
@@ -1286,8 +1300,6 @@ export default function McpTab({
             : undefined;
         })()}
       />
-    ) : activeOrigins.length > 1 && activeOrigins.every((id) => !sourceCounts.has(id)) ? (
-      <TableEmpty text="选中的来源里还没有 MCP" art="emptyFolder" />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
       <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="emptyFolder" />
     ) : (
@@ -1316,6 +1328,7 @@ export default function McpTab({
   const chip = (id: string): SourceChipItem => ({
     id,
     label: groupLabel(locationOf(id), id),
+    count: sourceCounts.get(id) ?? 0,
     path: locationOf(id)?.path ?? sources.rowOf(id)?.path,
     menu: (el) => chipMenu(id, el),
   });
