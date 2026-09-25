@@ -121,7 +121,8 @@ test("skill 格的读屏名不受 MCP 影响：linked 仍是「已加上 · 软�
 test("Matrix：当前排序依据列常显 ↑（默认名称升序也显示），其余列不画", () => {
   const html = render(Matrix, base);
   assert.equal((html.match(/class="mx-sort is-active"/g) ?? []).length, 1);
-  assert.match(html, /名称<svg class="mx-sort is-active"[^>]*aria-label="升序"/);
+  // 图形是词表里的 IconSortArrow（页面不自画 SVG），读屏名挂在外层
+  assert.match(html, /名称<span class="mx-sort is-active" role="img" aria-label="升序"><svg /);
 });
 
 test("Matrix：原件位置列头只排序——没有 ▾ 下拉、没有规则入口", () => {
@@ -248,42 +249,43 @@ test("Matrix：来源筛选——行首 `来源` 标签 + 第一颗 `全部`（�
     ],
   };
   const idle = render(Matrix, { ...base, sources });
+  // 胶囊行是组件库的 ChipRow（行首 `来源`，与 Codex 的 `在用` 同一种写法）
   assert.match(
     idle,
-    /class="mx-filterrow"[^>]*><span class="mx-filterrow__label" aria-hidden="true">来源<\/span><div class="mx-sources" role="group" aria-label="按来源筛选">/,
+    /class="ss-chiprow"><span class="ss-chiprow__label">来源<\/span><div class="ss-chiprow__chips" role="list" aria-label="按来源筛选">/,
   );
   // 第一颗 `全部`：什么都不筛时它亮着（任何时候都有一颗说出当前状态），不带数
   assert.match(
     idle,
-    /aria-label="按来源筛选"><span class="mx-sourcechip"><button type="button" class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">全部<\/span><\/button><\/span>/,
+    /aria-label="按来源筛选"><span class="ss-chiprow__chip" role="listitem"><span class="mx-sourcechip"><button type="button" class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">全部<\/span><\/button><\/span>/,
   );
   // 每个来源：名字 + 计数（0 也写），没有橙点
   assert.doesNotMatch(idle, /ss-indicator|has-rule/);
   assert.match(idle, /class="mx-sourcechip" data-origin="u"/);
   assert.match(
     idle,
-    /aria-pressed="false"><span class="ss-chip__label">通用仓库<\/span><span class="ss-chip__count">26<\/span><\/button>/,
+    /aria-pressed="false"><span class="ss-chip__label"><span class="mx-chiplabel">通用仓库<\/span><\/span><span class="ss-chip__count">26<\/span><\/button>/,
   );
   assert.match(
     idle,
-    /aria-pressed="false"><span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__count">0<\/span><\/button>/,
+    /aria-pressed="false"><span class="ss-chip__label"><span class="mx-chiplabel">WeiboAP<\/span><\/span><span class="ss-chip__count">0<\/span><\/button>/,
   );
   // 选了一个来源：它亮，`全部` 灭；点一颗只看它、点 `全部` 回到全部（单选，originFilter.pickOrigin）
   const one = render(Matrix, { ...base, sources: { ...sources, selected: ["w"] } });
   assert.match(one, /class="ss-chip" aria-pressed="false"><span class="ss-chip__label">全部</);
   assert.match(
     one,
-    /class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">WeiboAP</,
+    /class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label"><span class="mx-chiplabel">WeiboAP</,
   );
   const src0 = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
   assert.match(src0, /onClick=\{\(\) => onSelect\(pickOrigin\(null\)\)\}/);
   assert.match(src0, /onClick=\{\(\) => onSelect\(pickOrigin\(item\.id\)\)\}/);
   const picking = render(Matrix, { ...base, sources, selected: new Set(["u|docx"]) });
   assert.match(picking, /已选/);
-  assert.match(picking, /class="mx-sources"/);
+  assert.match(picking, /aria-label="按来源筛选"/);
   // 这个位置还没有来源：整行不出
   const none = render(Matrix, { ...base, sources: { ...sources, items: [] } });
-  assert.doesNotMatch(none, /mx-filterrow|按来源筛选/);
+  assert.doesNotMatch(none, /ss-chiprow|按来源筛选/);
   // 位置页上没有来源行、来源筛选行末尾没有 `管理来源`（它在页面头，与 `+ 来源` 并排）
   const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /sourceRow|\btail\b/);
@@ -302,7 +304,7 @@ test("来源项悬停出提示框：完整名 + 短路径 + 自动添加与移�
   // 短路径：主目录还没读到时照原样取开头两级 + … + 末两级（读到之后开头是 ~）
   assert.equal(
     tip,
-    'WeiboAP · agent_1776847465710_a<br/><span class="mx-mono mx-chiptip__path">/Users/…/agent_1776847465710_a/skills</span><br/>在管理来源里设置自动添加或移除',
+    'WeiboAP · agent_1776847465710_a<br/><span class="ss-mono ss-selectable ss-mono--inherit">/Users/…/agent_1776847465710_a/skills</span><br/>在管理来源里设置自动添加或移除',
   );
   // 没给完整名就用项上的名字；读不到路径时不空出一行
   assert.equal(
@@ -342,9 +344,11 @@ test("Matrix：选中的来源是墨色、其余不亮；片上不带「新」�
       origins: ["w"],
     },
   });
-  assert.match(html, /aria-pressed="false"><span class="ss-chip__label">通用仓库</);
-  assert.match(html, /aria-pressed="true"><span class="ss-chip__label">WeiboAP<\/span><\/button>/);
-  assert.match(html, /aria-pressed="false"><span class="ss-chip__label">别处<\/span><\/button>/);
+  const label = (name: string) =>
+    `<span class="ss-chip__label"><span class="mx-chiplabel">${name}</span></span>`;
+  assert.ok(html.includes(`aria-pressed="false">${label("通用仓库")}`));
+  assert.ok(html.includes(`aria-pressed="true">${label("WeiboAP")}</button>`));
+  assert.ok(html.includes(`aria-pressed="false">${label("别处")}</button>`));
   // 「新」标记已撤回（看起来像永远不会消失）：交代改由浮起的那一窗说「已筛选出它的 N 个」
   assert.doesNotMatch(html, /ss-chip__badge|>新</);
   // 浮起的一窗（FloatingToast）：不挂进列头，锚点按项的 data-origin 找（出现那一刻定位一次）
@@ -394,7 +398,7 @@ test("行详情是抽屉：名称格只放「› 名字 ×2」——拉手在名
   );
   assert.match(row, /class="ss-drawerhandle" aria-label="docx 的详情" aria-expanded="false"/);
   // 收着：抽屉外层在（第一次拉开也有动效），内容还没挂
-  assert.match(row, /class="ss-drawer mx-drawer"[^>]*inert=""/);
+  assert.match(row, /class="ss-drawer"[^>]*inert=""/);
   assert.doesNotMatch(row, /probe-detail/);
   // 旧的 ▸ / ▾ 展开记号与平的展开区都不在位置页上了
   assert.doesNotMatch(html, /mx-disclosure|mx-namebtn|mx-detail__body/);
@@ -406,15 +410,18 @@ test("行详情是抽屉：名称格只放「› 名字 ×2」——拉手在名
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
   assert.match(css, /--mx-handle-col: 24px;/);
   assert.match(css, /\.mx-handle \{[^}]*width: 18px;/);
+  // 让位交给 Drawer 的 inset（页面不再覆盖抽屉的内部类）
+  assert.doesNotMatch(css, /\.ss-drawer/);
   assert.match(
-    css,
-    /\.mx-drawer \.ss-drawer__well \{[^}]*margin: 0 var\(--mx-agents, 376px\) 0 calc\(34px \+ var\(--mx-handle-col\)\);/,
+    src,
+    /inset=\{\{\s*start: CHECK_W \+ HANDLE_W,\s*end: row\.detailWide \? WIDE_DETAIL_END : columns\.length \* COL_W,\s*\}\}/,
   );
+  assert.match(src, /const HANDLE_W = 24;/);
   assert.match(
     css,
     /\.mx-head__name,\s*\.mx-selrow__name \{\s*padding-left: var\(--mx-handle-col\);/,
   );
-  assert.match(html, /class="mx-body" style="--mx-agents:176px"/);
+  assert.match(html, /class="mx-body"/);
   // 位置页里自己的勾选框悬停覆盖删掉，改用组件层的行悬停钩子
   assert.doesNotMatch(css, /\.mx-row:hover \.ss-checkbox/);
 });
@@ -455,12 +462,9 @@ test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号�
     onReveal: () => undefined,
   });
   assert.match(section, /class="mcp-diff-section"><div class="mcp-diff__title">2 份不一样<\/div>/);
-  // 宽抽屉的类由行视图给
-  const wide = render(Matrix, {
-    ...base,
-    rows: [{ ...base.rows[0], detail: "x", detailWide: true }, base.rows[1]],
-  });
-  assert.match(wide, /class="ss-drawer mx-drawer mx-drawer--wide"/);
+  // 宽抽屉由行视图说（detailWide），右沿只让出尾列：让位走 Drawer 的 inset
+  const mx = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  assert.match(mx, /end: row\.detailWide \? WIDE_DETAIL_END : columns\.length \* COL_W/);
   // skill：`只留这份` 是抽屉末尾的一颗键（SkillDetail 的 keep），名称格里没有；确认框锚在这颗键下
   const dv = readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(dv, /\bextra:|extraPinned|DupExtra/);
@@ -504,6 +508,12 @@ test("新手提示条的两个插槽：来源筛选下 / 表头上，与空态�
   assert.ok(empty.indexOf("probe-hint") < empty.indexOf("probe-empty"));
   // 没给就不占位
   assert.doesNotMatch(render(Matrix, base), /mx-hint/);
+  // 提示条开着：来源筛选到提示条让成提示条自带的上外距（页面不碰提示条的内部类）
+  assert.match(render(Matrix, { ...base, hint, hintOpen: true }), /class="mx is-hinting"/);
+  assert.match(render(Matrix, { ...base, hint, hintOpen: false }), /^<div class="mx">/);
+  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
+  assert.match(css, /\.mx\.is-hinting > \.mx-bar \{\s*padding-bottom: 0;/);
+  assert.doesNotMatch(css, /\.ss-hint/);
 });
 
 test("点了做不了的格子：只当即说明（提示框立即出现、停约 3 秒），不交给调用方改数据", async () => {
@@ -563,14 +573,15 @@ test("批量写入：格子同时变、不依次点亮；只锁按下的那一�
     allAgents: check("选中的都加到所有 agent"),
     columnChecks: { cc: check("选中的都加到 Claude Code"), cx: check("选中的都加到 Codex") },
   };
-  assert.doesNotMatch(render(Matrix, props), /mx-keybusy|mx-locked/);
+  assert.doesNotMatch(render(Matrix, props), /mx-keybusy|is-locked/);
   // 刚按下（首帧，还没过门槛）：只有按下的那一项锁住，不出忙碌指示、不变淡；别的项照常能按
   const pressed = render(Matrix, { ...props, keyBusy: { keyId: "cx", label: "正在加到 Codex" } });
   assert.doesNotMatch(pressed, /mx-selbusy/);
-  assert.doesNotMatch(pressed, /ss-busy/);
-  assert.equal((pressed.match(/<span class="mx-locked">/g) ?? []).length, 1);
+  assert.doesNotMatch(pressed, /is-dim/);
+  const locked = '<span class="ss-busyslot-dim is-locked" aria-busy="true">';
+  assert.equal(pressed.split(locked).length - 1, 1);
   // 锁住的是 Codex 那一列的点
-  const lock = pressed.indexOf('<span class="mx-locked">');
+  const lock = pressed.indexOf(locked);
   assert.ok(lock > pressed.indexOf('aria-label="选中的都加到 Claude Code"'));
   assert.ok(pressed.indexOf('aria-label="选中的都加到 Codex"') > lock);
   // 过了门槛之后：被按的点原位换成辐条、`已选 N 个` 后接一句——只在门槛之后（经 useBusyShown 把关）
@@ -595,7 +606,7 @@ test("单格的结果：浮在被点那一格正下方（成功与失败同一�
   });
   // 只一条；锚点按格的 data-col 找，所以格上要有它
   assert.equal((html.match(/class="ss-floattoast"/g) ?? []).length, 1);
-  assert.match(html, /<div data-col="cx" class="mx-cell"/);
+  assert.match(html, /<div data-col="cx" data-cellkey="[^"]*" class="mx-cell"/);
   // 浮在表的最外层（行、格之后），不在行里：悬停它不会被当成悬停那一格
   const at = html.indexOf('class="ss-floattoast"');
   assert.ok(at > html.indexOf('data-row="w|pdf"'));
@@ -621,11 +632,7 @@ test("单格的结果：浮在被点那一格正下方（成功与失败同一�
   );
 });
 
-test("批量忙碌锁：只锁按下的那一项、不变淡；过了 0.3 秒门槛（与忙碌指示同一时刻）才变淡；工具行右端不锁", async () => {
-  const { busyLockClass } = await import("../src/Matrix.tsx");
-  assert.equal(busyLockClass(false, false), undefined);
-  assert.equal(busyLockClass(true, false), "mx-locked");
-  assert.equal(busyLockClass(true, true), "ss-busy");
+test("批量忙碌锁：只锁按下的那一项、不变淡；过了 0.3 秒门槛（与忙碌指示同一时刻）才变淡——走 BusySlot 的 dim 形态", () => {
   const noop = () => undefined;
   const check = (label: string) => ({ checked: false, label, tip: label, onToggle: noop });
   // 刚开始忙（首帧，计时器还没到点）：按下的「所有 agent」锁住但不淡，其余两项不锁
@@ -636,25 +643,28 @@ test("批量忙碌锁：只锁按下的那一项、不变淡；过了 0.3 秒门
     allAgents: check("选中的都加到所有 agent"),
     columnChecks: { cc: check("选中的都加到 Claude Code"), cx: check("选中的都加到 Codex") },
   });
-  assert.equal((html.match(/<span class="mx-locked">/g) ?? []).length, 1);
-  assert.doesNotMatch(html, /ss-busy/);
-  const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  const locked = css.match(/\.mx-locked \{([^}]*)\}/)?.[1] ?? "";
-  assert.match(locked, /pointer-events: none/);
-  assert.doesNotMatch(locked, /opacity/);
+  assert.equal((html.match(/class="ss-busyslot-dim is-locked"/g) ?? []).length, 1);
+  assert.equal((html.match(/class="ss-busyslot-dim"/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /is-dim|ss-busy"/);
+  // 门槛与变淡归组件：页面不再自己组合锁 / 淡的类
+  const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /busyLockClass|mx-locked|"ss-busy"/);
+  assert.match(src, /<BusySlot mode="dim" busy=\{busyKey === col\.id\}/);
 });
 
-test("格子提示框的 · 空格 只给键盘：鼠标悬停不写，格子按钮 :focus-visible 时才写", () => {
+test("格子提示框走 Tooltip 的受控写法：表自己数何时出（700ms / 按下钉出），快捷键 · 空格 只在键盘焦点唤起时写", () => {
   const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  // 不再手拼提示框的内部类
+  assert.doesNotMatch(src, /ss-tip/);
   assert.match(
     src,
-    /<span className="ss-tip__keyhint">\s*\{" · "\}\s*<span className="ss-tip__key">空格<\/span>/,
+    /<Tooltip\s+content=\{view\.tip\}\s+context="table"\s+open=\{tip === key\}\s+ceiling\s+placement=\{r === 0 \? "bottom" : "top"\}\s+shortcut=\{view\.clickable \? "空格" : undefined\}/,
   );
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  assert.match(
-    css,
-    /\.mx-cell:has\(\.mx-cellbtn:focus-visible\) \.ss-tip__keyhint \{\s*display: inline;/,
-  );
+  assert.doesNotMatch(css, /\.ss-tip/);
+  // 表格格子：受控时悬停不触发组件自己的计时——格子上的提示框只在表说开时出
+  const html = render(Matrix, base);
+  assert.doesNotMatch(html, /class="ss-tip[^"]*is-open/);
 });
 
 test("Skills 与 MCP 同一个固定面板宽度 776（34 + 246 + 144 + 4 × 88）；页面头、来源筛选与表格同一条右沿", () => {

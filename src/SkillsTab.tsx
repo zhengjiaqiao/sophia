@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
-import { cellKey, LocationActions, SourceKeys } from "./Matrix";
+import { cellKey, SourceKeys } from "./Matrix";
+import { LocationFrame } from "./LocationFrame";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
 import {
@@ -22,7 +23,7 @@ import { useSources } from "./SourceRow";
 import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { shortDate } from "./dateText";
-import { Confirm, CornerToast, Empty, HintStrip, Toast, ToastCount } from "./ui";
+import { Confirm, CornerToast, HintStrip, Mono, Toast, ToastCount } from "./ui";
 import { HINTS, useHint } from "./hints";
 import type { ConfirmAnchor } from "./ui";
 import {
@@ -98,7 +99,9 @@ const confirmPaths = (text: { body: string; paths?: { label: string; path: strin
         {text.paths.map((p) => (
           <div key={p.label} className="mx-keeppaths__row">
             <span className="mx-keeppaths__label">{p.label}</span>
-            <span className="mx-keeppaths__path">{p.path}</span>
+            <span className="mx-keeppaths__path">
+              <Mono inherit>{p.path}</Mono>
+            </span>
           </div>
         ))}
       </div>
@@ -1248,42 +1251,38 @@ export default function SkillsTab({
 
   if (!overview) {
     return (
-      <>
-        <LocationActions
-          filterText={filterText}
-          onFilterText={setFilterText}
-          actions={sourceKeys}
-          enabled={!addOpen && !manageOpen}
-        />
-        <Empty kind="scanning" description="正在读 skill 目录" art="scanning" />
-      </>
+      <LocationFrame
+        filterText={filterText}
+        onFilterText={setFilterText}
+        actions={sourceKeys}
+        enabled={!addOpen && !manageOpen}
+        empty={{ description: "正在读 skill 目录", busy: true, art: "scanning" }}
+      />
     );
   }
   if (page === null) {
     // 这个位置还没有扫描出来的页（没有 agent 目录）：`+ 来源` 已在页面头，空态不重复
     return (
-      <>
-        <LocationActions
-          filterText={filterText}
-          onFilterText={setFilterText}
-          actions={sourceKeys}
-          enabled={!addOpen && !manageOpen}
-        />
-        <div className="mx-hint">
+      <LocationFrame
+        filterText={filterText}
+        onFilterText={setFilterText}
+        actions={sourceKeys}
+        enabled={!addOpen && !manageOpen}
+        empty={{
+          description: `${domainRef.label} 下还没有 agent 的 skill 目录`,
+          hint: "加上第一个 skill 时会自动创建",
+          art: "noDirs",
+        }}
+        hint={
           <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
             {HINTS["first-scan-empty"](hintCtx)}
           </HintStrip>
-        </div>
-        <Empty
-          kind="noAgentDirs"
-          description={`${domainRef.label} 下还没有 agent 的 skill 目录`}
-          hint="加上第一个 skill 时会自动创建"
-          art="noDirs"
-        />
+        }
+      >
         {sources.host}
         {managePage}
         {addPage}
-      </>
+      </LocationFrame>
     );
   }
 
@@ -1385,6 +1384,7 @@ export default function SkillsTab({
         cellToast={cellToast}
         keyBusy={keyBusy}
         cellBusy={splitBusy ?? originBusy}
+        hintOpen={skillsHint.visible}
         hint={
           <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss}>
             {HINTS["first-scan-skills"](hintCtx)}

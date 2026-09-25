@@ -23,9 +23,8 @@ import type { ContextMenuItem } from "./contextMenu";
 import { originFullNames, originNames, originText } from "./originName";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
-import { displayPath } from "./pathText";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
-import { BusySlot, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
+import { BusySlot, Button, DupMark, Empty, Mono, Note, Tooltip, type EmptyArt } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
@@ -90,6 +89,8 @@ export interface DomainViewProps {
   onManageSources?: () => void;
   /// 新手提示条的插槽：来源筛选下、表头上
   hint?: ReactNode;
+  /// 插槽里的提示条此刻开着
+  hintOpen?: boolean;
   /// 新手提示条的插槽：空态上方
   emptyHint?: ReactNode;
 
@@ -472,14 +473,14 @@ export default function DomainView(props: DomainViewProps) {
   const onlyPath = onlySource !== null ? pathOfSource(onlySource) : undefined;
   const empty =
     query !== "" ? (
-      <Empty
+      <TableEmpty
         text={`没有名字里带「${query}」的 skill`}
-        action={{ label: "清除筛选", compact: true, onClick: props.onClearFilter }}
+        action={{ label: "清除筛选", onClick: props.onClearFilter }}
       />
     ) : onlySource !== null && !counts.has(onlySource) ? (
       // 只选了这一个来源、它里面一个 skill 都没有：位置页上没有来源行，往这个文件夹放 skill 的入口
       // 就在这里（`在访达中显示 ↗`，浅键）
-      <Empty
+      <TableEmpty
         text={`${originOf(onlySource)} 里还没有 skill`}
         art="emptyFolder"
         action={
@@ -489,13 +490,13 @@ export default function DomainView(props: DomainViewProps) {
         }
       />
     ) : noAgentDirs ? (
-      <Empty
+      <TableEmpty
         text={`${page.label} 下还没有 agent 的 skill 目录`}
         hint="加上第一个 skill 时会自动创建"
         art="noDirs"
       />
     ) : (
-      <Empty text="还没有 skill" art="emptyFolder" />
+      <TableEmpty text="还没有 skill" art="emptyFolder" />
     );
 
   const chip = (id: string): SourceChipItem => ({
@@ -518,6 +519,7 @@ export default function DomainView(props: DomainViewProps) {
         items: [...counts.keys(), ...emptySources.map((s) => s.id)].map(chip),
       }}
       hint={props.hint}
+      hintOpen={props.hintOpen}
       emptyHint={props.emptyHint}
       nameLabel="名称"
       nameTip="列出这个位置各个来源里的全部 skill，agent 自带的和插件带的不在这里。已经链接到这里的来源会自动加进来，在「管理来源」里增删"
@@ -556,11 +558,12 @@ export default function DomainView(props: DomainViewProps) {
   );
 }
 
-/// 表格里的空态：一句现状（表头照常在上面）；筛选无结果时句后 `清除筛选`（默认键紧凑，次要入口——
-/// 筛选框内的 ✕ 是主入口）；来源里还没有 skill 时 `在访达中显示 ↗`（浅键，`leave`）。
-/// `+ 来源` 在页面头，不在这里重复。
-/// 图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；筛选无结果不放图
-export function Empty({
+/// 表格里的空态（表头照常在上面）：
+/// - 筛选无结果不放图：表头下一句灰字（`Note`），句后 `清除筛选`（默认键紧凑，次要入口——筛选框内的 ✕ 是主入口）
+/// - 其余是图 + 一句现状（`Empty`）；来源里还没有 skill 时 `在访达中显示 ↗`（浅键，`leave`）。
+///   图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；图的上沿按空态表落在表头下（Matrix.css）
+/// `+ 来源` 在页面头，不在这里重复
+export function TableEmpty({
   text,
   hint,
   action,
@@ -568,23 +571,20 @@ export function Empty({
 }: {
   text: string;
   hint?: string;
-  action?: {
-    label: string;
-    onClick: () => void;
-    icon?: ReactNode;
-    leave?: boolean;
-    compact?: boolean;
-  };
+  action?: { label: string; onClick: () => void; leave?: boolean };
   art?: EmptyArt;
 }) {
+  if (!art) {
+    return (
+      <div className="mx-note">
+        <Note action={action}>{text}</Note>
+      </div>
+    );
+  }
   return (
-    <UiEmpty
-      kind={art === "noDirs" ? "noAgentDirs" : art === "emptyFolder" ? "noSkills" : "noMatch"}
-      description={text}
-      hint={hint}
-      secondary={action}
-      art={art}
-    />
+    <div className={`mx-emptyart--${art}`}>
+      <Empty description={text} hint={hint} secondary={action} art={art} />
+    </div>
   );
 }
 
@@ -649,7 +649,7 @@ function SkillDetail({
     <>
       {description ? <div className="mx-detail__desc">{description}</div> : null}
       <div className="mx-detail__path">
-        <span className="mx-mono ss-selectable">{displayPath(path)}</span>
+        <Mono path>{path}</Mono>
         <RevealLink path={path} onReveal={onReveal} />
       </div>
       {readout ? <div>{readout}</div> : null}

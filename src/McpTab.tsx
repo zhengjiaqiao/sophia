@@ -12,7 +12,6 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import Matrix, {
   cellKey,
-  LocationActions,
   RevealLink,
   SourceKeys,
   type MatrixCellView,
@@ -20,7 +19,7 @@ import Matrix, {
   type ColumnCheck,
   type SourceChipItem,
 } from "./Matrix";
-import { affectedTip, Empty as TableEmpty } from "./DomainView";
+import { affectedTip, TableEmpty } from "./DomainView";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { SourcesPage } from "./pages/SourcesPage";
 import { useSources } from "./SourceRow";
@@ -37,7 +36,7 @@ import {
 } from "./originFilter";
 import { MANAGE_SOURCES, mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
-import { displayPath } from "./pathText";
+import { LocationFrame } from "./LocationFrame";
 import {
   cellViewOf,
   differingFields,
@@ -51,7 +50,7 @@ import {
   type McpDomain,
   type McpDomainRow,
 } from "./mcpView";
-import { Confirm, CornerToast, Empty, Tag, Toast, ToastCount } from "./ui";
+import { Confirm, CornerToast, Mono, Tag, Toast, ToastCount } from "./ui";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
 import type { ConfirmAnchor, ToastProps } from "./ui";
 import {
@@ -1075,15 +1074,13 @@ export default function McpTab({
       }
     : undefined;
   const sourceKeys = <SourceKeys onManage={openManage} onAdd={openAdd} />;
-  /// 页面头右端：筛选框 + `管理来源` + `+ 来源`（表格还没有时也照常放，切页签、扫描完时页面头不跳）
-  const headActions = (
-    <LocationActions
-      filterText={filterText}
-      onFilterText={setFilterText}
-      actions={sourceKeys}
-      enabled={!addOpen && !manageOpen}
-    />
-  );
+  /// 表格还没有时的外框：页面头右端照常放筛选框 + `管理来源` + `+ 来源`（切页签、扫描完时页面头不跳）+ 一块空态
+  const frame = {
+    filterText,
+    onFilterText: setFilterText,
+    actions: sourceKeys,
+    enabled: !addOpen && !manageOpen,
+  };
   /// 来源管理页（二级页，同添加来源页的骨架）：来源的路径、规则、移除都在这里
   const managePage = manageOpen ? (
     <SourcesPage
@@ -1108,45 +1105,43 @@ export default function McpTab({
 
   if (!overview)
     return (
-      <>
-        {headActions}
-        <Empty kind="scanning" description="正在读 MCP 配置" art="scanning" />
-      </>
+      <LocationFrame
+        {...frame}
+        empty={{ description: "正在读 MCP 配置", busy: true, art: "scanning" }}
+      />
     );
 
   if (overview.locations.length === 0) {
     return (
-      <>
-        {headActions}
-        <Empty
-          kind="noAgentDirs"
-          description="没找到 Claude Code、Codex 或 Cursor 的 MCP 配置文件"
-          hint="只看文件里的配置；Claude.ai 的连接器和内置 MCP 不在其中"
-          art="noDirs"
-        />
-      </>
+      <LocationFrame
+        {...frame}
+        empty={{
+          description: "没找到 Claude Code、Codex 或 Cursor 的 MCP 配置文件",
+          hint: "只看文件里的配置；Claude.ai 的连接器和内置 MCP 不在其中",
+          art: "noDirs",
+        }}
+      />
     );
   }
 
   // 侧栏是 Skills 与 MCP 的并集：选中的项目在 MCP 这边可能一个配置位置都没有（没开能写 MCP 的 agent）
   if (page === null) {
     return (
-      <>
-        {headActions}
-        <Empty
-          kind="noAgentDirs"
-          description={
+      <LocationFrame
+        {...frame}
+        empty={{
+          description:
             selectedKey === "global"
               ? "这个位置下还没有可用的 MCP 配置位置"
-              : "这个项目里还没有 MCP"
-          }
-          hint="装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置"
-          art="noDirs"
-        />
+              : "这个项目里还没有 MCP",
+          hint: "装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置",
+          art: "noDirs",
+        }}
+      >
         {sources.host}
         {managePage}
         {addPage}
-      </>
+      </LocationFrame>
     );
   }
 
@@ -1300,7 +1295,7 @@ export default function McpTab({
             <McpEndpointRow name={row.name} locationId={originId} load={api.mcpEndpoint} />
             <span className="mx-kv__key">原件</span>
             <span className="mx-kv__value">
-              <span className="mx-mono ss-selectable">{displayPath(originPath)}</span>
+              <Mono path>{originPath}</Mono>
               <RevealLink path={originPath} onReveal={() => void reveal(originPath)} />
             </span>
           </div>
@@ -1424,7 +1419,6 @@ export default function McpTab({
         text={`没有名字里带「${filterText.trim()}」的服务`}
         action={{
           label: "清除筛选",
-          compact: true,
           onClick: () => {
             setFilterText("");
             setOriginFilter([]);

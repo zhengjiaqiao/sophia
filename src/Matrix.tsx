@@ -18,6 +18,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   ReactNode,
   RefObject,
 } from "react";
@@ -27,26 +28,28 @@ import { pickOrigin } from "./originFilter.ts";
 import {
   AddButton,
   AgentIcon,
+  BusySlot,
   Button,
   Cap,
   Checkbox,
   Chip,
+  ChipRow,
   DOT_LABEL,
   Drawer,
   DrawerHandle,
   FloatingToast,
-  IconClose,
-  IconSearch,
+  IconSortArrow,
+  Mono,
+  PageHeadActions,
   PINNED_TIP_MS,
   Spinner,
   StateDot,
+  TextField,
   TIP_DELAY_MS,
-  tipCeiling,
   Toast,
   Tooltip,
   useBusyShown,
 } from "./ui/index.ts";
-import { PageHeadActions } from "./shell/PageHead.tsx";
 import { useMenuFlag, usePageCommand } from "./shell/menuBus.ts";
 import { canPopup, contextMenuHandler, type ContextMenuItem } from "./contextMenu.ts";
 import { displayPath, shortPath } from "./pathText.ts";
@@ -57,6 +60,10 @@ const CHECK_W = 34;
 const NAME_W = 246;
 const ORIGIN_W = 144;
 const COL_W = 88;
+/// 名字前的拉手列：拉手 18 + 6（Matrix.css 的 `--mx-handle-col` 同值）
+const HANDLE_W = 24;
+/// 抽屉要并排几份值（MCP 的字段差异）时右沿只让出这么多
+const WIDE_DETAIL_END = 24;
 /// 悬停状态里「来源格」的列标记（agent 列用 target id，不会撞上）
 const ORIGIN_COL = "\u0000origin";
 /// 列表里最多显示几个 agent（core 的 `MAX_SHOWN`，DESIGN「设置页 · 最多 4 个」）
@@ -178,6 +185,9 @@ export interface MatrixProps {
   };
   /// 新手提示条的插槽：来源筛选下、表头上（上下各 16，推动表格）。接入归新手提示那一组
   hint?: ReactNode;
+  /// 插槽里的提示条此刻开着（`HintStrip` 的 `open`）：来源筛选到提示条让成 16（提示条自带的上外距），
+  /// 收起后回到表格上距 18
+  hintOpen?: boolean;
   /// 新手提示条的插槽：空态上方（一行都没有时才出）
   emptyHint?: ReactNode;
   rows: MatrixRowView[];
@@ -270,27 +280,29 @@ export function clampFocus(
   };
 }
 
-/// 按下的那一点的忙碌外观：不忙无类；忙了先只锁（`mx-locked`，点不动、不变淡），
-/// 忙过 0.3 秒门槛（BUSY_DELAY_MS）才变淡（`ss-busy`）
-export const busyLockClass = (busy: boolean, dim: boolean): string | undefined =>
-  !busy ? undefined : dim ? "ss-busy" : "mx-locked";
-
-/// `打开 ↗`：离开 Sophia 的动作（在访达中显示），浅键、↗ 由组件画。提示框是完整路径
+/// `打开 ↗`：离开 Sophia 的动作（在访达中显示），浅键、↗ 由组件画。提示框是完整路径。
+/// 外层是动作链的一格：整体一行不缩，旁边的名字、路径按列宽截断或折行
 export function RevealLink({ path, onReveal }: { path: string; onReveal: () => void }) {
   return (
-    <Tooltip content={<span className="mx-mono">{displayPath(path)}</span>}>
-      <span className="mx-reveal">
+    <span className="mx-reveal">
+      <Tooltip
+        content={
+          <Mono path inherit>
+            {path}
+          </Mono>
+        }
+      >
         <Button variant="quiet" ariaLabel={`在访达中显示 ${displayPath(path)}`} onClick={onReveal}>
           打开
         </Button>
-      </span>
-    </Tooltip>
+      </Tooltip>
+    </span>
   );
 }
 
-/// 页面头右端的筛选框（DESIGN「位置页 › 页面头」）：定宽 200、高 28 的凹面，放大镜在框内左侧，
-/// 占位 `筛选`，框内右端写 `⌘F`（熟练路径看得见，⑩）；有字时右端换成 ✕ 清除（8px 内）。
-/// 菜单「筛选」（⌘F）聚焦它；`enabled` 为 false（添加来源页盖在上面）时不接
+/// 页面头右端的筛选框（DESIGN「位置页 › 页面头」）：输入框的搜索形态，定宽 200、占位 `筛选`、框内右端写 `⌘F`
+/// （熟练路径看得见，⑩）；有字时换成 ✕ 清除、框里 Esc 先清空——长相与清除都归 `TextField`。
+/// 这里只接菜单「筛选」（⌘F）：聚焦并全选；`enabled` 为 false（添加来源页盖在上面）时不接
 export function FilterBox({
   value,
   onChange,
@@ -310,41 +322,16 @@ export function FilterBox({
     ref.current?.select();
   });
   return (
-    <label className="mx-filter">
-      <IconSearch size={16} />
-      <input
-        ref={ref}
-        type="text"
-        placeholder="筛选"
-        aria-label="筛选"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape" && value !== "") {
-            e.stopPropagation();
-            onChange("");
-          }
-        }}
-      />
-      {value !== "" ? (
-        <button
-          type="button"
-          className="mx-filter__clear"
-          title="清除筛选"
-          aria-label="清除筛选"
-          onClick={() => {
-            onChange("");
-            ref.current?.focus();
-          }}
-        >
-          <IconClose size={12} />
-        </button>
-      ) : (
-        <span className="mx-filter__key" aria-hidden="true">
-          ⌘F
-        </span>
-      )}
-    </label>
+    <TextField
+      search
+      shortcut="⌘F"
+      width={200}
+      label="筛选"
+      placeholder="筛选"
+      value={value}
+      onChange={onChange}
+      inputRef={ref}
+    />
   );
 }
 
@@ -430,25 +417,18 @@ function SelDot({
   );
 }
 
-/// 排序箭头 ↑ / ↓：只在当前的排序依据列常显（默认名称升序时也显示，Finder 惯例）；其余列不占眼
+/// 排序箭头 ↑ / ↓：只在当前的排序依据列常显（默认名称升序时也显示，Finder 惯例）；其余列不占眼。
+/// 图形是词表里的 `IconSortArrow`，读屏名（升序 / 降序）挂在外层
 function SortArrow({ active, desc }: { active: boolean; desc: boolean }) {
   return (
-    <svg
+    <span
       className={`mx-sort${active ? " is-active" : ""}`}
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
       role={active ? "img" : undefined}
       aria-label={active ? (desc ? "降序" : "升序") : undefined}
       aria-hidden={active ? undefined : true}
     >
-      <path d={desc ? "M5 1.5v7M2 5.5l3 3 3-3" : "M5 8.5v-7M2 4.5l3-3 3 3"} />
-    </svg>
+      <IconSortArrow desc={desc} />
+    </span>
   );
 }
 
@@ -458,6 +438,7 @@ export default function Matrix(props: MatrixProps) {
     originLabel,
     sources,
     hint,
+    hintOpen = false,
     emptyHint,
     rows,
     nameLabel,
@@ -487,7 +468,6 @@ export default function Matrix(props: MatrixProps) {
     barToast,
   } = props;
 
-  const tipId = useId();
   const drawerId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -504,10 +484,8 @@ export default function Matrix(props: MatrixProps) {
   // 键盘焦点（roving tabindex）存的原值；用时一律经 clampFocus 夹回当前表的范围
   const [focusRaw, setFocus] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
   const [focusWithin, setFocusWithin] = useState(false);
-  // 提示框：停够 700ms 的那一格
+  // 提示框：停够 700ms 的那一格（整张表同一时刻只出一格，画与放归 `Tooltip` 的受控写法）
   const [tip, setTip] = useState<string | null>(null);
-  // 这一格的提示框因上方被吸顶区盖住而翻到了下方
-  const [tipFlip, setTipFlip] = useState<string | null>(null);
   // 这一格的提示框是点出来的（做不了的格子），不是悬停出来的
   const [tipPinned, setTipPinned] = useState(false);
   const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -580,7 +558,6 @@ export default function Matrix(props: MatrixProps) {
   const armTip = (key: string) => {
     if (tipTimer.current) clearTimeout(tipTimer.current);
     setTip(null);
-    setTipFlip(null);
     setTipPinned(false);
     tipTimer.current = setTimeout(() => setTip(key), TIP_DELAY_MS.table);
   };
@@ -588,40 +565,29 @@ export default function Matrix(props: MatrixProps) {
     if (tipTimer.current) clearTimeout(tipTimer.current);
     tipTimer.current = null;
     setTip(null);
-    setTipFlip(null);
     setTipPinned(false);
   };
   useEffect(() => () => dropTip(), []);
   // 点了做不了的格子（或空格）：不等 700ms，当即弹出这一格的提示框，停约 3 秒；移开、点别处即消
   const pinTip = (key: string) => {
     if (tipTimer.current) clearTimeout(tipTimer.current);
-    if (tip !== key) {
-      setTipFlip(null);
-      setTip(key);
-    }
+    setTip(key);
     setTipPinned(true);
     tipTimer.current = setTimeout(dropTip, PINNED_TIP_MS);
   };
+  // 钉出来的说明：按在别处（不是这一格）即收起；再按这一格由它自己的点击重新钉住
   useEffect(() => {
-    if (!tipPinned) return;
+    if (!tipPinned || tip === null) return;
     const away = (e: PointerEvent) => {
-      const cell = (e.target as Element | null)?.closest?.(".mx-cell");
-      if (!cell || !cell.contains(document.getElementById(`${tipId}-tip`))) dropTip();
+      const cell = (e.target as Element | null)?.closest?.("[data-cellkey]");
+      if (cell?.getAttribute("data-cellkey") !== tip) dropTip();
     };
     document.addEventListener("pointerdown", away, true);
     return () => document.removeEventListener("pointerdown", away, true);
-  }, [tipPinned, tipId]);
+  }, [tipPinned, tip]);
 
-  // 格子提示框默认向上（第一行向下）；上方被吸顶区盖住时翻到格子下方
-  useLayoutEffect(() => {
-    if (tip === null) return;
-    const el = document.getElementById(`${tipId}-tip`);
-    if (el?.classList.contains("ss-tip--top") && el.getBoundingClientRect().top < tipCeiling(el)) {
-      setTipFlip(tip);
-    }
-  }, [tip, tipId]);
-
-  // 吸顶区底边相对滚动容器顶的距离写进 `--tip-ceiling`，所有往上弹的提示框据此决定要不要翻到下方
+  // 吸顶区底边相对滚动容器顶的距离写进 `--tip-ceiling`：格子与列头的提示框（`Tooltip ceiling`）往上弹
+  // 会钻到吸顶区底下时翻到下方
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -804,13 +770,13 @@ export default function Matrix(props: MatrixProps) {
     (focusRow !== undefined ? focusRow.dupGroup : undefined);
 
   // ---- 忙碌锁：只锁按下的那一点（防重复点；别的点照常能按，调用方排队执行），过了 0.3 秒门槛
-  // 才变淡、原位换成刻度 ----
+  // 才变淡（`BusySlot dim`）、原位换成刻度、`已选 N 个` 后面接一句 ----
   const busyShown = useBusyShown(keyBusy != null);
+  // 单格真要等时，过了门槛格子下方浮起的那一句（`BusySlot float`）顶替这一格的结果提示
   const cellBusyShown = useBusyShown(cellBusy != null);
   // 浮起的提示小窗：换一条（调用方给了新对象）就是新出现一次——重挂、重新定位、计时从头来
   const keyToastKey = useIdentityKey(keyToast);
   const rowToastKey = useIdentityKey(rowToast);
-  const lockOf = (keyId: string) => busyLockClass(keyBusy?.keyId === keyId, busyShown);
 
   const selecting = selectedVisible.length > 0;
 
@@ -907,14 +873,14 @@ export default function Matrix(props: MatrixProps) {
           <>
             <span className="mx-selrow__alllabel">所有 agent</span>
             <span className="mx-keywrap" data-key="all">
-              <span className={lockOf("all")}>
+              <BusySlot mode="dim" busy={busyKey === "all"} label={keyBusy?.label ?? ""}>
                 <SelDot
                   check={allAgents}
                   on={dotWords === "mcp" ? "own" : "linked"}
                   locked={busyKey === "all"}
                   busy={busyShown && busyKey === "all"}
                 />
-              </span>
+              </BusySlot>
             </span>
           </>
         ) : null}
@@ -923,14 +889,14 @@ export default function Matrix(props: MatrixProps) {
         <div key={col.id} className="mx-selrow__col">
           {columnChecks?.[col.id] ? (
             <span className="mx-keywrap" data-key={col.id}>
-              <span className={lockOf(col.id)}>
+              <BusySlot mode="dim" busy={busyKey === col.id} label={keyBusy?.label ?? ""}>
                 <SelDot
                   check={columnChecks[col.id]}
                   on={dotWords === "mcp" ? "own" : "linked"}
                   locked={busyKey === col.id}
                   busy={busyShown && busyKey === col.id}
                 />
-              </span>
+              </BusySlot>
             </span>
           ) : null}
         </div>
@@ -980,7 +946,9 @@ export default function Matrix(props: MatrixProps) {
           data-drawer-row=""
           className={classes.join(" ")}
           style={gridStyle}
-          onMouseEnter={() => setHover({ row: row.key, col: null })}
+          onMouseEnter={(e) => {
+            if (inside(e)) setHover({ row: row.key, col: null });
+          }}
           onMouseLeave={() => setHover(null)}
           // `⌘` 点行＝加选 / 去掉这一行（DESIGN「勾选框」）：点在格子、名字上也是，不再执行格子自己的动作；
           // 不带 ⌘ 时点行的其余地方不勾选（表格里勾选只经由行首那颗框）
@@ -993,6 +961,7 @@ export default function Matrix(props: MatrixProps) {
             toggleRow(row);
           }}
           onContextMenu={(e) => {
+            if (!inside(e)) return;
             const el = e.currentTarget;
             contextMenuHandler(() => menuItems(el), {
               onOpen: () => setMenuRow(row.key),
@@ -1078,30 +1047,37 @@ export default function Matrix(props: MatrixProps) {
             onMouseEnter={() => setHover({ row: row.key, col: ORIGIN_COL })}
             onMouseLeave={() => setHover({ row: row.key, col: null })}
           >
-            <Tooltip
-              content={
-                <>
-                  <div>{row.origin.label}</div>
-                  <div className="mx-mono">{displayPath(row.origin.path)}</div>
-                </>
-              }
-              context="table"
-            >
-              <span
-                className={`mx-origin${row.origin.gone ? " is-gone" : ""}${row.origin.split ? " is-split" : ""}`}
-                tabIndex={-1}
-              >
-                {row.origin.split ? (
+            {/* 来源名这一格可收窄：`打开 ↗` 出来时名字按列宽截断，完整值在提示框里 */}
+            <span className="mx-origin__slot">
+              <Tooltip
+                content={
                   <>
-                    <span className="mx-origin__name">{row.origin.split.name}</span>
-                    {/* 分隔用不换行空格：flex 项之间的普通空白会被吃掉 */}
-                    <span className="mx-origin__seg">{` · ${row.origin.split.seg}`}</span>
+                    <div>{row.origin.label}</div>
+                    <div>
+                      <Mono path inherit>
+                        {row.origin.path}
+                      </Mono>
+                    </div>
                   </>
-                ) : (
-                  row.origin.label
-                )}
-              </span>
-            </Tooltip>
+                }
+                context="table"
+              >
+                <span
+                  className={`mx-origin${row.origin.gone ? " is-gone" : ""}${row.origin.split ? " is-split" : ""}`}
+                  tabIndex={-1}
+                >
+                  {row.origin.split ? (
+                    <>
+                      <span className="mx-origin__name">{row.origin.split.name}</span>
+                      {/* 分隔用不换行空格：flex 项之间的普通空白会被吃掉 */}
+                      <span className="mx-origin__seg">{` · ${row.origin.split.seg}`}</span>
+                    </>
+                  ) : (
+                    row.origin.label
+                  )}
+                </span>
+              </Tooltip>
+            </span>
             {revealShown ? (
               <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
             ) : null}
@@ -1112,14 +1088,18 @@ export default function Matrix(props: MatrixProps) {
             const cellClasses = ["mx-cell"];
             if (flashing.has(key)) cellClasses.push("ss-flash");
             const focused = focus.r === r && focus.c === c;
-            const enter = () => {
+            const enter = (e: ReactMouseEvent<HTMLElement>) => {
+              // 格子下方浮起的忙碌一句挂在 body 上，但在 React 树里是这一格的子孙：指针进它不算进这一格
+              if (!inside(e)) return;
               setHover({ row: row.key, col: col.id });
               armTip(key);
             };
+            const busyHere = cellBusy?.rowKey === row.key && cellBusy.columnId === col.id;
             return (
               <div
                 key={col.id}
                 data-col={col.id}
+                data-cellkey={key}
                 className={cellClasses.join(" ")}
                 onMouseEnter={enter}
                 onMouseLeave={() => {
@@ -1146,65 +1126,70 @@ export default function Matrix(props: MatrixProps) {
                     <StateDot dot="none" title="" label="无此格" />
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    className={`ss-dot-btn mx-cellbtn${view.clickable ? "" : " is-inert"}`}
-                    data-cell={`${r}:${c}`}
-                    tabIndex={focused ? 0 : -1}
-                    aria-label={`${row.name} · ${col.name}：${dotText[view.dot]}。${view.tip}`}
-                    aria-describedby={tip === key ? `${tipId}-tip` : undefined}
-                    onFocus={() => {
-                      setFocus({ r, c });
-                      armTip(key);
-                    }}
-                    onBlur={dropTip}
-                    onClick={() => {
-                      if (cellPress(view) === "explain") {
-                        pinTip(key);
-                        return;
-                      }
-                      dropTip();
-                      onCell(row.key, col.id);
-                    }}
+                  // 点格之后真要等的（拆开）：过了门槛，格子下方浮起刻度 + 一句（靠右沿的列右对齐，不越过表格右沿）
+                  <BusySlot
+                    mode="float"
+                    busy={busyHere}
+                    label={busyHere ? cellBusy.label : ""}
+                    align={c === columns.length - 1 ? "end" : "center"}
                   >
-                    <StateDot
-                      dot={view.dot}
-                      hoverable={view.clickable && !view.pending}
-                      muted={view.pending}
-                      title=""
-                      label={dotText[view.dot]}
-                    />
-                  </button>
+                    {/* 提示框一行动词，格子正上方 6（第一行放下方；往上会钻到吸顶区底下时也翻到下方）；
+                        快捷键 ` · 空格` 只在键盘焦点唤起时写。何时出由表自己数（armTip / pinTip） */}
+                    <Tooltip
+                      content={view.tip}
+                      context="table"
+                      open={tip === key}
+                      ceiling
+                      placement={r === 0 ? "bottom" : "top"}
+                      shortcut={view.clickable ? "空格" : undefined}
+                    >
+                      <button
+                        type="button"
+                        className={`ss-dot-btn mx-cellbtn${view.clickable ? "" : " is-inert"}`}
+                        data-cell={`${r}:${c}`}
+                        tabIndex={focused ? 0 : -1}
+                        aria-label={`${row.name} · ${col.name}：${dotText[view.dot]}。${view.tip}`}
+                        onFocus={() => {
+                          setFocus({ r, c });
+                          armTip(key);
+                        }}
+                        onBlur={dropTip}
+                        onClick={() => {
+                          if (cellPress(view) === "explain") {
+                            pinTip(key);
+                            return;
+                          }
+                          dropTip();
+                          onCell(row.key, col.id);
+                        }}
+                      >
+                        <StateDot
+                          dot={view.dot}
+                          hoverable={view.clickable && !view.pending}
+                          muted={view.pending}
+                          title=""
+                          label={dotText[view.dot]}
+                        />
+                      </button>
+                    </Tooltip>
+                  </BusySlot>
                 )}
-                {tip === key && view !== null ? (
-                  <span
-                    id={`${tipId}-tip`}
-                    role="tooltip"
-                    className={`ss-tip ${r === 0 || tipFlip === key ? "ss-tip--bottom" : "ss-tip--top"} ss-tip--center is-open`}
-                  >
-                    {view.tip}
-                    {/* 快捷键只给键盘：格子 :focus-visible 时才显示（Matrix.css） */}
-                    {view.clickable ? (
-                      <span className="ss-tip__keyhint">
-                        {" · "}
-                        <span className="ss-tip__key">空格</span>
-                      </span>
-                    ) : null}
-                  </span>
-                ) : null}
               </div>
             );
           })}
         </div>
-        {/* 行详情抽屉：左沿对齐名字、不跨进 agent 列（Matrix.css 按 --mx-agents 让出右边；要并排几份值的
-            铺到最后一列）；Esc 收起 */}
+        {/* 行详情抽屉：左沿对齐名字（复选列 + 拉手列之后）、右沿让出 agent 列（要并排几份值的铺到最后一列，
+            只让出尾列）；Esc 收起 */}
         {row.detail !== undefined ? (
           <Drawer
             open={open}
             id={detailId}
-            className={`mx-drawer${row.detailWide ? " mx-drawer--wide" : ""}`}
+            inset={{
+              start: CHECK_W + HANDLE_W,
+              end: row.detailWide ? WIDE_DETAIL_END : columns.length * COL_W,
+            }}
           >
-            {row.detail}
+            <div className="mx-detail">{row.detail}</div>
           </Drawer>
         ) : null}
       </div>
@@ -1212,7 +1197,7 @@ export default function Matrix(props: MatrixProps) {
   };
 
   return (
-    <div className="mx" ref={rootRef}>
+    <div className={hint && hintOpen ? "mx is-hinting" : "mx"} ref={rootRef}>
       <LocationActions
         filterText={filterText}
         onFilterText={onFilterText}
@@ -1222,7 +1207,7 @@ export default function Matrix(props: MatrixProps) {
       />
       {/* 来源筛选吸在页面头下；表格上距在这一块的下内边距里。没有来源时整行不出，只留上下距 */}
       <div className="mx-bar" ref={barRef}>
-        {sources ? <SourceChips {...sources} width={width} /> : null}
+        {sources ? <SourceChips {...sources} /> : null}
       </div>
       {/* 新手提示条的插槽：来源筛选下、表头上，随页面滚走（不吸顶） */}
       {hint ? <div className="mx-hint">{hint}</div> : null}
@@ -1239,8 +1224,6 @@ export default function Matrix(props: MatrixProps) {
         <div
           className="mx-body"
           ref={bodyRef}
-          // 抽屉右沿让出 agent 列（不跨进 agent 列）
-          style={{ "--mx-agents": `${columns.length * COL_W}px` } as CSSProperties}
           onKeyDown={onBodyKey}
           onFocus={(e) => {
             // 行带只跟随键盘焦点：鼠标点过的格子留着焦点，但鼠标移开后不该再亮着
@@ -1272,19 +1255,7 @@ export default function Matrix(props: MatrixProps) {
           {keyToast.node}
         </FloatingToast>
       ) : null}
-      {cellBusy && cellBusyShown ? (
-        // 单格真要等（过了门槛）：结果出现之前，同一个位置先说在忙什么
-        <FloatingToast
-          key={`busy:${cellBusy.rowKey}:${cellBusy.columnId}`}
-          anchor={cellAnchor(cellBusy.rowKey, cellBusy.columnId)}
-          bounds={panelBounds}
-        >
-          <span className="ss-toast ss-toast--routine mx-cellbusy" role="status">
-            <Spinner size={14} label={cellBusy.label} />
-            <span>{cellBusy.label}</span>
-          </span>
-        </FloatingToast>
-      ) : cellNotice ? (
+      {cellBusy && cellBusyShown ? null : cellNotice ? ( // 单格真要等（过了门槛）：格子下方已浮起在忙的那一句（格子里的 BusySlot），结果出来之前不出别的
         // 单格：成功与失败同一个位置（格子正下方），一次只一条，失败优先
         <FloatingToast
           key={`notice:${cellNotice.rowKey}:${cellNotice.columnId}:${cellNotice.text}`}
@@ -1332,6 +1303,10 @@ function useIdentityKey(value: unknown): number {
   return ref.current.n;
 }
 
+/// 事件真发生在这个元素的 DOM 里（不是经 portal 挂在 body 上、只在 React 树里算它子孙的浮窗）
+const inside = (e: { currentTarget: Element; target: EventTarget }) =>
+  e.target instanceof Node && e.currentTarget.contains(e.target);
+
 const rootOf = (probe: HTMLElement) => probe.closest(".mx");
 const rowEl = (probe: HTMLElement, rowKey: string) =>
   rootOf(probe)?.querySelector(`.mx-row[data-row="${CSS.escape(rowKey)}"]`);
@@ -1367,13 +1342,13 @@ const rowAnchor = (rowKey: string) => (probe: HTMLElement) => {
 
 /// 加完来源的那一窗浮在新来源那几项的正下方：取这几项合起来的矩形；一项都没有时锚在整排上
 const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
-  const group = rootOf(probe)?.querySelector(".mx-sources");
+  const group = rootOf(probe)?.querySelector(".mx-bar");
   const chips = origins
     .map((id) => group?.querySelector(`[data-origin="${CSS.escape(id)}"]`))
     .filter((el): el is Element => el != null)
     .map((el) => el.getBoundingClientRect());
   if (chips.length === 0) {
-    const first = group?.firstElementChild?.getBoundingClientRect();
+    const first = group?.querySelector(".mx-sourcechip")?.getBoundingClientRect();
     return first
       ? { top: first.top, bottom: first.bottom, left: first.left, right: first.right }
       : group;
@@ -1386,51 +1361,42 @@ const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
   };
 };
 
-/// 来源筛选（DESIGN「位置页 › 来源筛选」「选择片 Chip」）：行首 `来源` 标签（12 / 500 `ink-mute`）+ 8 +
+/// 来源筛选（DESIGN「位置页 › 来源筛选」「选择片 Chip」）：胶囊行 `ChipRow`（行首 `来源`）+
 /// 第一颗 `全部`（默认选中、不带数）+ 每个来源一颗浅胶囊（名字 + 计数）；选中的是墨色。**单选**：点一颗＝
 /// 只看这个来源，点 `全部` 回到全部——任何时候都有一颗亮着说出当前状态。项上不点灯。一项都没有（这个位置
 /// 还没有来源）时整行不出
-function SourceChips({
-  selected,
-  onSelect,
-  items,
-  width,
-}: NonNullable<MatrixProps["sources"]> & { width: number }) {
+function SourceChips({ selected, onSelect, items }: NonNullable<MatrixProps["sources"]>) {
   if (items.length === 0) return null;
   return (
-    <div className="mx-filterrow" style={{ maxWidth: width }}>
-      <span className="mx-filterrow__label" aria-hidden="true">
-        来源
+    <ChipRow label="来源" listLabel="按来源筛选">
+      <span className="mx-sourcechip">
+        <Chip selected={selected.length === 0} onClick={() => onSelect(pickOrigin(null))}>
+          全部
+        </Chip>
       </span>
-      <div className="mx-sources" role="group" aria-label="按来源筛选">
-        <span className="mx-sourcechip">
-          <Chip selected={selected.length === 0} onClick={() => onSelect(pickOrigin(null))}>
-            全部
-          </Chip>
+      {items.map((item) => (
+        <span
+          key={item.id}
+          className="mx-sourcechip"
+          data-origin={item.id}
+          onContextMenu={(e) => {
+            const el = e.currentTarget;
+            if (item.menu) contextMenuHandler(() => item.menu?.(el) ?? [])(e);
+          }}
+        >
+          <Tooltip content={<SourceChipTip item={item} />}>
+            <Chip
+              selected={selected.includes(item.id)}
+              count={item.count}
+              onClick={() => onSelect(pickOrigin(item.id))}
+            >
+              {/* 名字太长（同名来源的区分片段也放不下）时截断，完整值在提示框里 */}
+              <span className="mx-chiplabel">{item.label}</span>
+            </Chip>
+          </Tooltip>
         </span>
-        {items.map((item) => (
-          <span
-            key={item.id}
-            className="mx-sourcechip"
-            data-origin={item.id}
-            onContextMenu={(e) => {
-              const el = e.currentTarget;
-              if (item.menu) contextMenuHandler(() => item.menu?.(el) ?? [])(e);
-            }}
-          >
-            <Tooltip content={<SourceChipTip item={item} />}>
-              <Chip
-                selected={selected.includes(item.id)}
-                count={item.count}
-                onClick={() => onSelect(pickOrigin(item.id))}
-              >
-                {item.label}
-              </Chip>
-            </Tooltip>
-          </span>
-        ))}
-      </div>
-    </div>
+      ))}
+    </ChipRow>
   );
 }
 
@@ -1445,7 +1411,7 @@ export function SourceChipTip({ item }: { item: Pick<SourceChipItem, "label" | "
       {item.path ? (
         <>
           <br />
-          <span className="mx-mono mx-chiptip__path">{shortPath(item.path)}</span>
+          <Mono inherit>{shortPath(item.path)}</Mono>
         </>
       ) : null}
       <br />
