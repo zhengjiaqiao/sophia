@@ -25,8 +25,8 @@ import "./SourcesPage.css";
 /// ←  CardBox 的来源                                                       [+ 来源]
 /// 来源            位置                                以后新出现的自动加到
 /// ──────────────────────────────────────────────────────────────────────── hairline
-/// 通用仓库  26   ~/.agents/skills            打开 ↗   [✳ ⎔ ▾]    [开关]   ×
-/// WeiboAP   27   ~/Library/…/WeiboAP/skills  打开 ↗   [选目标 ▾]  [开关]   ×
+/// 通用仓库  26   ~/.agents/skills            打开 ↗   [开关] [✳ ⎔ ▾]      ×
+/// WeiboAP   27   ~/Library/…/WeiboAP/skills  打开 ↗   [开关] [选目标 ▾]    ×
 /// ```
 ///
 /// - 页面头：`←` + 10 + `CardBox 的来源`（MCP：`CardBox 的 MCP 来源`），右端 `+ 来源`（交给调用方：

@@ -230,7 +230,7 @@
 
 .srcline__switch {
   display: flex;
-  padding-left: var(--space-xs);
+  padding-right: var(--space-xs);
 }
 
 .srcline__remove {

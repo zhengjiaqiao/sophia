@@ -1,7 +1,7 @@
 /// 来源行（DESIGN「位置页 › 来源行（只在来源管理页）」「来源管理页（按下 `管理来源` 时）」）：来源管理页
 /// （`pages/SourcesPage.tsx`）里一个来源的一行——
 ///
-///   通用仓库 26 ｜ ~/.agents/skills  打开 ↗ ｜ [✳ ⎔ ▾] [开关] ｜ ×
+///   通用仓库 26 ｜ ~/.agents/skills  打开 ↗ ｜ [开关] [✳ ⎔ ▾] ｜ ×
 ///
 /// - 来源名 13 `ink` + 8 + skill 数 12 tabular `ink-faint`
 /// - 短路径（mono 12 `ink-faint`，`~` 开头，放不下中段省略，截断才出完整路径的提示框）+ `打开 ↗`（浅键）：
@@ -587,11 +587,13 @@ export function SourceLine({
         </Button>
       </span>
       <span className="srcline__gap" aria-hidden="true" />
-      <span className="srcline__targets" role="cell">
-        {box}
-      </span>
+      {/* 开关在前、目标框在后：先打开规则才能选目标，从左到右就是先后（2026-09-25 产品负责人：
+          「既然要先打开，开关是不是应该放在左边？」） */}
       <span className="srcline__switch" role="cell">
         {toggle}
+      </span>
+      <span className="srcline__targets" role="cell">
+        {box}
       </span>
       <span className="srcline__remove" role="cell">
         <RemoveKey state={state} row={row} lineRef={lineRef} />
