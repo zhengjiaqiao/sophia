@@ -217,6 +217,8 @@ export function deleteOriginalConfirm(input: {
   relinkTo?: string;
   /// 这些链接所在的 agent（去重、保序）；链接一起清掉时写进后果句
   agents: string[];
+  /// 原件所在的 git 仓库根；在仓库里时正文末尾说清 git 那边会怎样
+  inGit?: string;
 }): { title: string; body: string; paths: { label: string; path: string }[] } {
   const where = input.agents.length > 0 ? `${input.agents.join("、")} 里的 ` : "";
   const links =
@@ -227,14 +229,13 @@ export function deleteOriginalConfirm(input: {
         : `；${where}${input.links} 条链接一起清掉`;
   return {
     title: `删除 ${input.skill} 的原件？`,
-    body: `移到废纸篓，可以从访达找回${links}`,
+    body:
+      `移到废纸篓，可以从访达找回${links}` +
+      (input.inGit === undefined
+        ? ""
+        : `。它在 git 仓库 ${displayPath(input.inGit)} 里，删掉后 git 会显示这个目录被删除`),
     paths: [{ label: "移到废纸篓", path: displayPath(input.path) }],
   };
-}
-
-/// 原件在 git 仓库里：不弹确认框，格下直接说做不成（`没删掉 defuddle · 它在 git 仓库 ~/x 里，…`）
-export function originalInGitReason(repo: string): string {
-  return `它在 git 仓库 ${displayPath(repo)} 里，交给 git 处理更稳妥，这里不代删`;
 }
 
 /// 删完 skill 原件的例行一行：`✓ 已删除 defuddle · 在废纸篓里`。不带撤销——从废纸篓找回，确认框已说清

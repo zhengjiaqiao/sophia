@@ -278,6 +278,43 @@ pub fn upsert_auto_import(
     Ok(())
 }
 
+/// 手动从这些位置拿掉了这些服务（移除副本、删原件，报告里 `removed` 的那几条）：凡是会往这个位置
+/// 自动写入的规则，都在这个位置上排除这个名字。不记的话，紧接着的那轮扫描规则就把它写回去——
+/// 提示条说「已移除」，格子却还是实心（与 skill 的 `skills::exclude` 同一修法）。返回是否改动过
+pub fn exclude_removed(rules: &mut [McpAutoImportRule], report: &McpReport) -> bool {
+    let mut changed = false;
+    for entry in report.entries.iter().filter(|e| e.outcome == "removed") {
+        for rule in rules
+            .iter_mut()
+            .filter(|r| r.targets.iter().any(|t| t.id == entry.target_id))
+        {
+            changed |= rule
+                .target_excluded
+                .entry(entry.target_id.clone())
+                .or_default()
+                .insert(entry.name.clone());
+        }
+    }
+    changed
+}
+
+/// 手动写进了这些（报告里 `created` 的）：撤掉这些 (位置, 名字) 上的排除，规则照常接管。
+/// 返回是否改动过
+pub fn include_written(rules: &mut [McpAutoImportRule], report: &McpReport) -> bool {
+    let mut changed = false;
+    for entry in report.entries.iter().filter(|e| e.outcome == "created") {
+        for rule in rules.iter_mut() {
+            if let Some(names) = rule.target_excluded.get_mut(&entry.target_id) {
+                changed |= names.remove(&entry.name);
+                if names.is_empty() {
+                    rule.target_excluded.remove(&entry.target_id);
+                }
+            }
+        }
+    }
+    changed
+}
+
 /// 自动写入执行完，把真正写进去的（`created`）按规则记成最近一次执行（`last_auto`）。
 /// 报告条目只有服务名与目标，来源从产出这批写入的动作 `actions`（`prepare` 的那份）里按
 /// (服务名, 目标) 认；规则 = 这个来源、目标里有这一处的那条（规则按目标位置分条）。
@@ -2920,6 +2957,71 @@ fn rtrim(bytes: &[u8], mut p: usize, low: usize) -> usize {
         p -= 1;
     }
     p
+}
+
+#[cfg(test)]
+mod exclusion_tests {
+    use super::*;
+
+    fn loc(id: &str) -> McpLocationRef {
+        McpLocationRef {
+            id: id.into(),
+            harness_id: "codex".into(),
+            domain: "global".into(),
+            path: PathBuf::from("/x"),
+            selector: None,
+        }
+    }
+
+    fn rule(source: &str, targets: &[&str]) -> McpAutoImportRule {
+        McpAutoImportRule {
+            source: loc(source),
+            target_domain: "global".into(),
+            targets: targets.iter().map(|t| loc(t)).collect(),
+            target_excluded: BTreeMap::new(),
+            allow_cross_domain: false,
+            baseline: Some(BTreeSet::new()),
+            target_baselines: BTreeMap::new(),
+            last_auto: None,
+        }
+    }
+
+    fn report(entries: &[(&str, &str, &str)]) -> McpReport {
+        McpReport {
+            entries: entries
+                .iter()
+                .map(|(name, target, outcome)| McpReportEntry {
+                    name: (*name).into(),
+                    target_id: (*target).into(),
+                    outcome: (*outcome).into(),
+                    message: String::new(),
+                    backup_path: None,
+                    identical: None,
+                })
+                .collect(),
+            ..McpReport::default()
+        }
+    }
+
+    /// 手动移除之后，覆盖这个位置的规则不再把它写回去；写回来之后排除撤掉，规则照常接管
+    #[test]
+    fn manual_removal_excludes_and_manual_write_restores() {
+        let mut rules = vec![rule("claude", &["codex"]), rule("claude", &["cursor"])];
+        let removed = report(&[
+            ("weibo-search", "codex", "removed"),
+            ("other", "codex", "skipped"),
+        ]);
+        assert!(exclude_removed(&mut rules, &removed));
+        assert!(rules[0].is_excluded("codex", "weibo-search"));
+        assert!(!rules[0].is_excluded("codex", "other"), "没拿掉的不排除");
+        assert!(rules[1].target_excluded.is_empty(), "别的位置照常补");
+        assert!(!exclude_removed(&mut rules, &removed), "再记一次没有改动");
+
+        let written = report(&[("weibo-search", "codex", "created")]);
+        assert!(include_written(&mut rules, &written));
+        assert!(rules[0].target_excluded.is_empty(), "空集合不留键");
+        assert!(!include_written(&mut rules, &written));
+    }
 }
 
 #[cfg(test)]

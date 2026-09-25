@@ -49,7 +49,9 @@ export const api = {
   planDeleteSource: (sourceId: string, skill: string) =>
     invoke<PlannedDeletion>("plan_delete_source", { sourceId, skill }),
   /// 执行用户已确认的删除计划；planId 用后即弃，不能重放
-  deleteSource: (planId: string) => invoke<SyncReport>("delete_source", { planId }),
+  /// `inGitConfirmed`：删原件的确认框已写明原件在 git 仓库里、用户仍确认了（只留这份不传，仓库里的不代删）
+  deleteSource: (planId: string, inGitConfirmed = false) =>
+    invoke<SyncReport>("delete_source", { planId, inGitConfirmed }),
   /// 来源管理页：这个位置（DomainPage.key）已订阅的来源与 `+ 来源` 的两组候选。只读
   listSources: (domain: string) => invoke<SourceList>("list_sources", { domain }),
   /// 在这个位置订阅一个来源（候选的 path，或用户选的文件夹）；只记订阅，不建链

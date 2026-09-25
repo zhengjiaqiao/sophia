@@ -30,7 +30,6 @@ import {
   deletedOriginalToast,
   deleteOriginalConfirm,
   keepThisConfirm,
-  originalInGitReason,
   splitConfirm,
   toastFor,
   type FailedItem,
@@ -87,6 +86,8 @@ interface DeletePane {
   planId: string;
   /// 链接是改指到别处的同名原件（否则是一起清掉）
   relink: boolean;
+  /// 确认框写明了原件在 git 仓库里：确认就是也认了这个后果
+  inGit: boolean;
   text: ReturnType<typeof deleteOriginalConfirm>;
 }
 
@@ -832,23 +833,6 @@ export default function SkillsTab({
       );
     }
     const { plan } = planned;
-    if (plan.inGit !== null) {
-      setRowToast({
-        rowKey,
-        at: anchor,
-        node: (
-          <Toast
-            kind="cannot"
-            verb="没删掉"
-            names={[ref.skill]}
-            reason={originalInGitReason(plan.inGit)}
-            onDismiss={dismissRow}
-            onClose={dismissRow}
-          />
-        ),
-      });
-      return;
-    }
     // 链接的后果：改指到哪个来源的那份；或一起清掉的链接在哪几个 agent 里（按链接所在目录认列）
     const sources = overview?.sources ?? [];
     const relinkId =
@@ -876,6 +860,7 @@ export default function SkillsTab({
       anchor,
       planId: planned.planId,
       relink: plan.relinkTo !== null,
+      inGit: plan.inGit !== null,
       text: deleteOriginalConfirm({
         skill: ref.skill,
         path: plan.path,
@@ -883,6 +868,7 @@ export default function SkillsTab({
         relinkTo:
           plan.relinkTo === null ? undefined : relinkName ? originText(relinkName) : plan.relinkTo,
         agents,
+        inGit: plan.inGit ?? undefined,
       }),
     });
   };
@@ -907,12 +893,15 @@ export default function SkillsTab({
     try {
       let report: SyncReport | null = null;
       try {
-        report = await api.deleteSource(pane.planId);
+        // 确认框已写明在不在 git 仓库里：确认了就是也同意删仓库里的
+        report = await api.deleteSource(pane.planId, true);
       } catch {
-        // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删（仓库里的照旧不代删）
+        // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删。确认时说的是「不在仓库里」、
+        // 重检却在仓库里，就不能替用户认这个后果——照旧不代删
         const again = await api.planDeleteSource(ref.sourceId, ref.skill);
-        if (again.plan.inGit !== null) node = cannot(originalInGitReason(again.plan.inGit));
-        else report = await api.deleteSource(again.planId);
+        if (again.plan.inGit !== null && !pane.inGit)
+          node = cannot(`它在 git 仓库 ${again.plan.inGit} 里，确认时没有说到这一点，这次没删`);
+        else report = await api.deleteSource(again.planId, true);
       }
       if (report !== null) {
         const [first, ...links] = report.entries;

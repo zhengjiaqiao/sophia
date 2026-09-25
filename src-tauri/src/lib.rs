@@ -399,7 +399,23 @@ fn apply_mcp(
     let _config_guard = state.config_lock.blocking_lock();
     let mut report = symsync_core::mcp::execute(plan, allow_cross_domain);
     register_mcp_undo(&state, &mut report)?;
+    // 手动写进来的：之前手动移除时记下的排除撤掉，自动规则照常接管
+    update_mcp_rules(&state, |rules| {
+        symsync_core::mcp::include_written(rules, &report)
+    })?;
     Ok(report)
+}
+
+/// 改 MCP 自动规则（settings.json 的 `mcpAutoImports`），有改动才写回
+fn update_mcp_rules(
+    state: &AppState,
+    edit: impl FnOnce(&mut Vec<symsync_core::mcp::McpAutoImportRule>) -> bool,
+) -> Result<(), String> {
+    let mut settings = state.store.load_settings().map_err(err)?;
+    if edit(&mut settings.mcp_auto_imports) {
+        state.store.save_settings(&settings).map_err(err)?;
+    }
+    Ok(())
 }
 
 /// 从格子上移除 MCP 副本（可批量）：每项是 (行的来源＝原件, 服务名, 副本所在位置)。
@@ -416,6 +432,10 @@ fn remove_mcp_copies(
     let plan = symsync_core::mcp::prepare_removal(&discovery.locations, &selections);
     let mut report = symsync_core::mcp::execute_removal(plan);
     register_mcp_undo(&state, &mut report)?;
+    // 手动拿掉的：自动规则不再往这个位置写回它（不记的话下一轮扫描就写回去了）
+    update_mcp_rules(&state, |rules| {
+        symsync_core::mcp::exclude_removed(rules, &report)
+    })?;
     Ok(report)
 }
 
@@ -434,6 +454,9 @@ fn delete_mcp_original(
         symsync_core::mcp::prepare_original_removal(&discovery.locations, &location_id, &name);
     let mut report = symsync_core::mcp::execute_removal(plan);
     register_mcp_undo(&state, &mut report)?;
+    update_mcp_rules(&state, |rules| {
+        symsync_core::mcp::exclude_removed(rules, &report)
+    })?;
     Ok(report)
 }
 
@@ -649,8 +672,15 @@ fn plan_delete_source(
 
 /// 执行服务端存着的那份删除计划。单独成命令，是为了把用户确认卡在两次调用之间；
 /// 计划用后即弃，同一个 `plan_id` 不能重放
+///
+/// `in_git_confirmed`：删原件的确认框已经写明「它在 git 仓库里」、用户仍点了删除（DESIGN「删除原件」）——
+/// 只有这时才放过仓库这道闸；只留这份不传它，仓库里的照旧不代删
 #[tauri::command]
-fn delete_source(plan_id: String, state: tauri::State<'_, AppState>) -> Result<SyncReport, String> {
+fn delete_source(
+    plan_id: String,
+    in_git_confirmed: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncReport, String> {
     let plan = {
         let mut cache = state
             .delete_plan
@@ -661,6 +691,10 @@ fn delete_source(plan_id: String, state: tauri::State<'_, AppState>) -> Result<S
             _ => return Err("删除计划不存在或已过期，请重新确认".into()),
         }
     };
+    let mut plan = plan;
+    if in_git_confirmed == Some(true) {
+        plan.in_git = None;
+    }
     Ok(sync::delete_source(&plan))
 }
 

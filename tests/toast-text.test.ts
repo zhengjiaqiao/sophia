@@ -184,13 +184,19 @@ test("删除 skill 原件的确认框：标题一问，正文写废纸篓与链�
   setHome(null);
 });
 
-test("删除 skill 原件：git 仓库里的不代删，删完例行一行不带撤销", async () => {
-  const { originalInGitReason, deletedOriginalToast } = await import("../src/toastText.ts");
+test("删除 skill 原件：git 仓库里的照样可删、确认框写明 git 的后果；删完例行一行不带撤销", async () => {
+  const { deleteOriginalConfirm, deletedOriginalToast } = await import("../src/toastText.ts");
   const { setHome } = await import("../src/pathText.ts");
   setHome("/Users/jia");
   assert.equal(
-    originalInGitReason("/Users/jia/x"),
-    "它在 git 仓库 ~/x 里，交给 git 处理更稳妥，这里不代删",
+    deleteOriginalConfirm({
+      skill: "graduate",
+      path: "/Users/jia/x/.agents/skills/graduate",
+      links: 0,
+      agents: [],
+      inGit: "/Users/jia/x",
+    }).body,
+    "移到废纸篓，可以从访达找回。它在 git 仓库 ~/x 里，删掉后 git 会显示这个目录被删除",
   );
   setHome(null);
   const t = deletedOriginalToast("defuddle");
