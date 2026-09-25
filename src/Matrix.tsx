@@ -58,6 +58,8 @@ const NAME_W = 246;
 const ORIGIN_W = 120;
 const COL_W = 88;
 const TAIL_W = 24;
+/// 悬停状态里「来源格」的列标记（agent 列用 target id，不会撞上）
+const ORIGIN_COL = "\u0000origin";
 /// 列表里最多显示几个 agent（core 的 `MAX_SHOWN`，DESIGN「设置页 · 最多 4 个」）
 const MAX_AGENTS = 4;
 /// Skills 与 MCP 同一个固定面板宽度（DESIGN「位置页 › 面板宽度」）：页面头右端的筛选框与 `+ 来源`、
@@ -504,7 +506,7 @@ export default function Matrix(props: MatrixProps) {
   // 默认排序：名称升序，同名两份天然相邻（DESIGN「默认值」）；当前排序依据列常显箭头
   const [sortState, setSort] = useState<SortState | null>(null);
   const sort: SortState = sortState ?? { key: "name", dir: "asc" };
-  // 悬停的行（行带）
+  // 悬停的行（行带）；col 是悬停的那一格：agent 列的 id，来源格是 ORIGIN_COL
   const [hover, setHover] = useState<{ row: string; col: string | null } | null>(null);
   // 右键菜单开着的那一行：出 surface 行带，菜单关掉即消失
   const [menuRow, setMenuRow] = useState<string | null>(null);
@@ -978,6 +980,12 @@ export default function Matrix(props: MatrixProps) {
     if (open) classes.push("is-open");
     const selectable = row.selectDisabledReason === undefined;
     const detailId = `${drawerId}-d${r}`;
+    // 来源格的 `打开 ↗`：鼠标悬停在这一格时才出（DESIGN「来源」列：悬停该格）；没有鼠标悬停时
+    // 跟着键盘焦点 / 右键菜单所在的行，键盘也够得着
+    const revealShown =
+      !open &&
+      !row.origin.gone &&
+      (hover ? hover.row === row.key && hover.col === ORIGIN_COL : activeRow === row.key);
     const nameFocused = focus.r === r && focus.c === NAME_COL;
     // 右键菜单（D18）：只作加速器，每一项在界面上都另有入口；不改变勾选
     const menuItems = (el: HTMLElement): ContextMenuItem[] => [
@@ -1085,7 +1093,11 @@ export default function Matrix(props: MatrixProps) {
             {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
           </div>
           {/* 来源：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
-          <div className="mx-row__origin">
+          <div
+            className="mx-row__origin"
+            onMouseEnter={() => setHover({ row: row.key, col: ORIGIN_COL })}
+            onMouseLeave={() => setHover({ row: row.key, col: null })}
+          >
             <Tooltip
               content={
                 <>
@@ -1110,7 +1122,7 @@ export default function Matrix(props: MatrixProps) {
                 )}
               </span>
             </Tooltip>
-            {hot && !open && !row.origin.gone ? (
+            {revealShown ? (
               <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
             ) : null}
           </div>
