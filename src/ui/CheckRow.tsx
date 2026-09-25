@@ -31,7 +31,7 @@ export interface CheckRowProps {
   disabledReason?: string;
   /// 这一行此刻被点名（取消勾选后行下浮起提示的那一会儿）：保持悬停底
   highlighted?: boolean;
-  /// list（默认）：列表里一行 34（`--row-h`），框 → 名字 12；grid：设置页的三列网格一格 36，框 → 图标 → 名字各 10
+  /// list（默认）：列表里一行 34（`--row-h`，模型列表）；grid：设置页的三列网格一格 36。框 → 图标 → 名字各 10
   size?: "list" | "grid";
   /// 读屏名；不给就用名字的文字
   label?: string;

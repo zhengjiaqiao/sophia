@@ -1710,6 +1710,22 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
   min-height: 0;
 }
 
+/* 贴底一行：高 60、上 1px hairline（横贯机面：抵掉机面左右内边距 23）、face 底；
+   主动作右对齐到内容右沿 776（百分比内边距按推入页内容宽算） */
+.ss-pushed__foot {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: 60px;
+  margin: 0 calc(1px - var(--space-xl));
+  padding: 0 calc(100% - 776px + var(--space-xl) - 1px) 0 calc(var(--space-xl) - 1px);
+  border-top: var(--border-structure);
+  background: var(--face);
+}
+
 /* ===== 16. 输入框 TextField（DESIGN「输入框」）=====
    凹面：recess 底、1px hairline 边、control 7、高 28、左右 10、13 号字、占位 ink-mute；聚焦边转 ink-mute。
    搜索形态：放大镜 16 在框内左侧（间距 8），右端空着写快捷键提示（12 tabular ink-faint）、有字换成 ✕ 清除（命中 24） */
@@ -1910,12 +1926,12 @@ html:not([data-input="pointer"]) .ss-menuitem:focus-visible {
   background: var(--ctl-border);
 }
 
-/* 整行是命中区：list 一行 34、框 → 名字 12；grid（设置的三列）一格 36、框 → 图标 → 名字各 10。
+/* 整行是命中区：list 一行 34（模型列表）、grid 一格 36（设置的三列）；框 → 图标 → 名字各 10。
    悬停 surface 底（control 7，左右内距 8——行的底比文字左沿外扩 8，放它的容器负责让出）；方框随行「手靠近」 */
 .ss-checkrow {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  gap: 10px;
   box-sizing: border-box;
   width: 100%;
   height: var(--row-h);
@@ -1931,7 +1947,6 @@ html:not([data-input="pointer"]) .ss-menuitem:focus-visible {
 }
 
 .ss-checkrow--grid {
-  gap: 10px;
   height: 36px;
 }
 
@@ -1977,7 +1992,7 @@ html:not([data-input="pointer"]) .ss-menuitem:focus-visible {
 }
 
 /* ===== 19. 列表行 ListRow（DESIGN「网关」「添加来源」同一骨架）=====
-   [勾选 24 · 8] [拉手 18 · 6] 名字 15 / 第二行 12 ink-mute（上距 3）[行尾动作列，键间 4、左距 12]；
+   [勾选 24] [拉手 18 · 6] 名字 15 / 第二行 12 ink-mute（上距 3）[行尾动作列，键间 4、左距 12]；
    上下 10。整行可点（有抽屉时）：悬停 surface 行带，左右各外扩 8、文字起点不变、control 7；拉开着不出悬停带。
    行与行之间 1px row-line，画在「行 + 抽屉」这一组的底下（最后一行不画） */
 .ss-listrow {
@@ -2020,7 +2035,6 @@ html:not([data-input="pointer"]) .ss-menuitem:focus-visible {
 .ss-listrow__check {
   justify-content: center;
   width: 24px;
-  margin-right: var(--space-xs);
 }
 
 .ss-listrow__handle {

@@ -252,7 +252,7 @@ test("CheckMark：画出来的 14 方（与 Checkbox 同一套样式、同一个
   assert.match(cssRule(uiCss, ":disabled > .ss-checkmark"), /border-color:\s*var\(--hairline\)/);
 });
 
-test("CheckRow：整行是命中区（role=checkbox），勾选框 + 图标 + 名字 + 行尾；list 34 / grid 36；悬停 surface、方框随行手靠近", () => {
+test("CheckRow：整行是命中区（role=checkbox），勾选框 + 10 + 图标 + 10 + 名字 + 行尾；list 34 / grid 36；悬停 surface、方框随行手靠近", () => {
   const html = render(CheckRow, {
     checked: true,
     onChange: noop,
@@ -269,6 +269,7 @@ test("CheckRow：整行是命中区（role=checkbox），勾选框 + 图标 + �
     /ss-checkmark is-on[^]*class="ss-checkrow__icon"[^]*class="ss-checkrow__name">Claude Code</,
   );
   assert.match(cssRule(uiCss, ".ss-checkrow"), /height:\s*var\(--row-h\)/);
+  assert.match(cssRule(uiCss, ".ss-checkrow"), /gap:\s*10px/);
   assert.match(cssRule(uiCss, ".ss-checkrow--grid"), /height:\s*36px/);
   assert.match(
     uiCss,
@@ -335,7 +336,7 @@ test("ListRow：拉手 18 + 6 + 名字 / 第二行 + 行尾动作列；有抽屉
   assert.match(plain, /<div class="ss-listrow__main"><span class="ss-listrow__handle"><\/span>/);
 });
 
-test("ListRow 有勾选格：勾选 24 + 8 在最前，拉手平时不画（悬停这一行才出），抽屉左沿让到 56", () => {
+test("ListRow 有勾选格：勾选 24 在最前，拉手平时不画（悬停这一行才出），抽屉左沿让到 48", () => {
   const html = render(ListRow, {
     title: "superpowers",
     sub: "检测到的 · 6 个 skill",
@@ -349,7 +350,7 @@ test("ListRow 有勾选格：勾选 24 + 8 在最前，拉手平时不画（悬�
   assert.match(html, /class="ss-listrow__check"><button type="button" role="checkbox"/);
   assert.match(html, /class="ss-drawerhandle is-open"/);
   assert.doesNotMatch(html, /is-always/);
-  assert.match(html, /class="ss-drawer__well" style="margin-inline-start:56px">brainstorming/);
+  assert.match(html, /class="ss-drawer__well" style="margin-inline-start:48px">brainstorming/);
 });
 
 // ===== 区块小标（裁决：Condensed 12 / 600 ink-mute，可选下 7 一条 hairline）=====

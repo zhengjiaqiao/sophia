@@ -56,8 +56,16 @@ export function ContainersFamily() {
         name="PushedPage"
         guide="有起止的多步任务在机面里推入一页（来源管理、添加来源）｜ 能就地拉开完成的用抽屉"
       >
-        <Specimen label="推入（只替换机面，←、Esc 返回）" frame="stage" width={720} height={260}>
+        <Specimen label="推入（只替换机面，←、Esc 返回）" frame="stage" width={840} height={220}>
           <PushedDemo />
+        </Specimen>
+        <Specimen
+          label="带贴底一行（主动作右对齐到内容右沿）"
+          frame="stage"
+          width={840}
+          height={260}
+        >
+          <PushedDemo footer />
         </Specimen>
       </Block>
 
@@ -211,16 +219,28 @@ export function ContainersFamily() {
   );
 }
 
-function PushedDemo() {
-  const [key, setKey] = useState(0);
-  const page = usePushedPage(() => setKey((k) => k + 1));
-  return (
+/// 返回滑回播完就重新推入一次（样张里没有下面那一页可回）
+function PushedDemo({ footer = false }: { footer?: boolean }) {
+  const [round, setRound] = useState(0);
+  return <PushedRound key={round} footer={footer} onClose={() => setRound((r) => r + 1)} />;
+}
+
+function PushedRound({ footer, onClose }: { footer: boolean; onClose: () => void }) {
+  const page = usePushedPage(onClose);
+  return footer ? (
     <PushedPage
-      key={key}
       {...page}
-      title="CardBox 的来源"
-      actions={<AddButton noun="来源" onClick={noop} />}
+      title="添加来源到 CardBox"
+      footer={
+        <Button variant="primary" size="row" onClick={noop}>
+          添加 2 个来源
+        </Button>
+      }
     >
+      <div className="gallery-note">候选来源列表（内容由页面给，只有这一块滚动）</div>
+    </PushedPage>
+  ) : (
+    <PushedPage {...page} title="CardBox 的来源" actions={<AddButton noun="来源" onClick={noop} />}>
       <div className="gallery-note">来源 ｜ 位置 ｜ 以后新出现的自动加到（内容由页面给）</div>
     </PushedPage>
   );

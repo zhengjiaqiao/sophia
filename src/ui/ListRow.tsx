@@ -4,7 +4,7 @@ import { Drawer, DrawerHandle } from "./Drawer.tsx";
 /// 列表行（DESIGN「网关」「添加来源」：两者同一骨架，⑤）：**两行、整行可点**的列表项，下挂一格抽屉。
 ///
 /// ```
-/// [勾选 24 · 8] [拉手 18 · 6] 名字（15 ink，放不下截断）              [行尾动作列]
+/// [勾选 24] [拉手 18 · 6] 名字（15 ink，放不下截断）              [行尾动作列]
 ///                              第二行（12 ink-mute，上距 3）
 ///   ↳ 抽屉：左沿对齐名字
 /// ```
@@ -23,7 +23,7 @@ export interface ListRowProps {
   title: ReactNode;
   /// 第二行：12 `ink-mute`（`地址 · 已连接 · 已选 2 / 103`），怎么截断由内容自己定
   sub?: ReactNode;
-  /// 行首勾选格（24 宽 + 8）：通常是 `Checkbox`。给了拉手就平时隐藏
+  /// 行首勾选格（24 宽）：通常是 `Checkbox`。给了拉手就平时隐藏
   check?: ReactNode;
   /// 行尾动作列（键间 4）：`再试一次`、铅笔、垃圾桶
   actions?: ReactNode;
@@ -130,8 +130,8 @@ export function ListRow({
       </div>
       {notice ? <div className="ss-listrow__notice">{notice}</div> : null}
       {hasDrawer ? (
-        // 抽屉左沿对齐名字：勾选格 24 + 8、拉手 18 + 6
-        <Drawer open={open} id={drawerId} inset={hasCheck ? 56 : 24} rule={false} flush>
+        // 抽屉左沿对齐名字：勾选格 24、拉手 18 + 6
+        <Drawer open={open} id={drawerId} inset={hasCheck ? 48 : 24} rule={false} flush>
           {drawer}
         </Drawer>
       ) : null}

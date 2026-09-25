@@ -1921,6 +1921,20 @@ test("PushedPage：只替换机面——壳的页面头（← + 页面名 title 
   assert.match(html, /class="page-head__title"[^>]*>CardBox 的来源</);
   assert.match(html, /class="page-head__actions"[^>]*><button type="button">\+ 来源</);
   assert.match(html, /class="ss-pushed__body">内容</);
+  // 可选贴底一行：主动作右对齐到内容右沿
+  assert.match(
+    render(PushedPage, {
+      title: "添加来源到 CardBox",
+      leaving: false,
+      leave: noop,
+      children: "",
+      footer: createElement("button", { type: "button" }, "添加 2 个来源"),
+    }),
+    /<div class="ss-pushed__foot"><button type="button">添加 2 个来源<\/button><\/div>/,
+  );
+  const foot = cssRule(uiCss, ".ss-pushed__foot");
+  assert.match(foot, /height:\s*60px/);
+  assert.match(foot, /border-top:\s*var\(--border-structure\)/);
   assert.match(
     render(PushedPage, { title: "x", leaving: true, leave: noop, children: "" }),
     /class="ss-pushed is-leaving"/,

@@ -13,6 +13,8 @@ import { motionMs } from "./motion.ts";
 ///   进不去）、不卸载——返回时筛选、滚动、抽屉、勾选都还在
 /// - 从右推入、返回滑回，`--dur-push`（200ms）机械缓动；减少动效时即时
 /// - 页面头＝壳的 `PageHead`：`←`（图标键 28）+ 10 + 页面名（`title` 20 / 700，原样），右端页面动作（`+ 来源`）
+/// - 可选贴底一行（`footer`）：高 60、上 1px `hairline`、`face` 底、横贯机面，主动作右对齐到内容右沿 776；
+///   内容区在它上面滚动（添加来源页的 `添加 N 个来源`）
 /// - 焦点：打开时落到这一页上（只供程序放焦点的落点，不画框），返回时还给进来之前拿着焦点的那颗键（`管理来源`）
 /// - 返回：`←`、Esc、菜单「返回」（⌘[）是同一条路。`←` 与 Esc 由这里接（浮层、确认框在捕获阶段先接走自己的 Esc，
 ///   输入框里的 Esc 归输入框；`escape={false}` 时这一页暂不接，比如移除确认开着）；菜单总线归页面：
@@ -95,6 +97,8 @@ export interface PushedPageProps extends PushedPageState {
   escape?: boolean;
   /// 页面头下的内容：铺满余下的高度，自己决定哪一块滚动
   children: ReactNode;
+  /// 贴底一行（主动作，右对齐到内容右沿）；不给就没有
+  footer?: ReactNode;
 }
 
 export function PushedPage({
@@ -107,6 +111,7 @@ export function PushedPage({
   covers,
   escape = true,
   children,
+  footer,
 }: PushedPageProps) {
   const pageRef = useRef<HTMLDivElement>(null);
   const [host, setHost] = useState<Element | null>(null);
@@ -160,6 +165,7 @@ export function PushedPage({
         actions={actions}
       >
         <div className="ss-pushed__body">{children}</div>
+        {footer ? <div className="ss-pushed__foot">{footer}</div> : null}
       </PageHead>
     </div>
   );
