@@ -46,8 +46,8 @@ import {
   type McpDomain,
   type McpDomainRow,
 } from "./mcpView";
-import { Button, Confirm, CornerToast, Empty, Tag, Toast, ToastCount, Tooltip } from "./ui";
-import { McpDiffPanel, McpEndpointRow, type McpDiffState } from "./McpDiffPanel";
+import { Confirm, CornerToast, Empty, Tag, Toast, ToastCount } from "./ui";
+import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
 import type { ConfirmAnchor, ToastProps } from "./ui";
 import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
 import { MCP_OWN_TIP } from "./cellTip";
@@ -73,8 +73,8 @@ import "./McpTab.css";
 /// 2. **实心不是一条链接，是一份独立副本**——写进、移除都经 core 留快照：没人改过就能撤销，
 ///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底。撤销按钮只在再点一次不能准确撤回时给
 ///    （`mcpUndoShown`）：移除了一份与原版不一样的副本；批量一律不给；`⌘Z` 始终可用
-/// 3. **差异是行级、不是格级**——`2 份不一样` 挂在服务名后（默认键紧凑，提示框给差异字段名，D21）；
-///    点它这一行拉出一格抽屉列出不同的字段，再点收起。传输方式是服务的属性，在行详情抽屉里（D7）
+/// 3. **差异是行级、不是格级**——`2 份不一样` 是服务名后的纯文字记号（不是键，提示框给差异字段名）；
+///    点它（或名字、拉手）拉开这一行的抽屉，不同的字段是抽屉里的一段。传输方式是服务的属性，也在抽屉里（D7）
 /// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格写入、移除都不确认
 
 export interface McpTabProps {
@@ -253,8 +253,6 @@ export default function McpTab({
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
   const diffAsked = useRef<Set<string>>(new Set());
-  // 点开了 `2 份不一样` 的那几行（服务名 → 比对结果）：就地展开字段级差异，再点收起
-  const [openDiffs, setOpenDiffs] = useState<Map<string, McpDiffState>>(new Map());
   // 最近一次可撤销的写入（⌘Z、菜单「撤销」与提示条「撤销」走同一个）；有没有可撤的同时报给菜单
   const undoRef = useRef<(() => void) | null>(null);
   const [canUndo, setCanUndo] = useState(false);
@@ -462,23 +460,6 @@ export default function McpTab({
         ),
       )
       .catch(() => setDiffs((prev) => new Map(prev).set(name, null)));
-  };
-
-  /// 点 `2 份不一样`：拉开就懒取一次字段级差异，已拉开就收起。表格一次只开一格：拉开这一行的，
-  /// 别的行的差异收起
-  const toggleDiff = (name: string, locationIds: string[]) => {
-    if (openDiffs.has(name)) {
-      setOpenDiffs(new Map());
-      return;
-    }
-    setOpenDiffs(new Map([[name, "loading"]]));
-    // 取回来时这一行已经收起了就不再展开
-    const settle = (value: McpDiffState) =>
-      setOpenDiffs((prev) => (prev.has(name) ? new Map(prev).set(name, value) : prev));
-    api.mcpFieldDiff(name, locationIds).then(
-      (diff) => settle(diff),
-      (e) => settle(new Error(String(e))),
-    );
   };
 
   /// 提示框：列出不同的字段名；没加载完或读不到时用扫描里认得出的（url），都没有就写「配置不一样」
@@ -1119,28 +1100,20 @@ export default function McpTab({
         onReveal: () => void reveal(originPath),
       },
       cells,
-      // 差异是行级事实，不进格：行内键 `2 份不一样`（默认键紧凑，排在拉手之后，D21），提示框给差异字段名；
-      // 点它这一行拉出一格抽屉列出字段级差异
-      keys:
+      // 差异是行级事实，不进格：名字后的纯文字记号 `2 份不一样`（12 ink-mute，不是键），提示框给差异字段名；
+      // 点它拉开这一行的抽屉，字段级差异是抽屉里的一段。
+      // 某列不支持只说明：同样是纯弱标识 + 提示框（原因同那一格：`Cursor 不支持用命令生成请求头`）
+      mark:
         differing.length > 0 ? (
           <span
             onMouseEnter={() => loadDiff(row.name, differing)}
             onFocus={() => loadDiff(row.name, differing)}
           >
-            <Tooltip content={diffTip(row.name, fields)}>
-              <Button
-                size="compact"
-                ariaExpanded={openDiffs.has(row.name)}
-                onClick={() => toggleDiff(row.name, differing)}
-              >
-                {`${differing.length} 份不一样`}
-              </Button>
-            </Tooltip>
+            <Tag tone="weak" tip={diffTip(row.name, fields)}>
+              {`${differing.length} 份不一样`}
+            </Tag>
           </span>
-        ) : undefined,
-      // 某列不支持只说明、不能点：纯弱标识 + 提示框（原因同那一格：`Cursor 不支持用命令生成请求头`）
-      mark:
-        differing.length === 0 && unsupportedAt.length > 0 ? (
+        ) : unsupportedAt.length > 0 ? (
           <Tag
             tone="weak"
             tip={
@@ -1156,32 +1129,34 @@ export default function McpTab({
               : `${unsupportedAt.length} 处不支持`}
           </Tag>
         ) : undefined,
-      panel: (() => {
-        const diff = differing.length > 0 ? openDiffs.get(row.name) : undefined;
-        if (diff === undefined) return undefined;
-        const revealPath = locationOf(differing[0])?.path;
-        return (
-          <McpDiffPanel
-            diff={diff}
-            labelOf={labelOf}
-            revealPath={revealPath}
-            onReveal={(path) => void reveal(path)}
-          />
-        );
-      })(),
-      // 点服务名 / 拉手拉开抽屉：传输（D7：服务的属性，不回答「能不能在这个 agent 用」）、命令或地址、原件 + 打开 ↗
+      // 点服务名 / 记号 / 拉手拉开抽屉：传输（D7：服务的属性，不回答「能不能在这个 agent 用」）、命令或地址、
+      // 原件 + 打开 ↗；几份不一样时末尾一段字段级差异（拉开时比对一次，要并排几份值，抽屉铺到最后一列）。
+      // 表格一次只开一格，差异不再另开一格抽屉
       detail: (
-        <div className="mx-kv">
-          <span className="mx-kv__key">传输</span>
-          <span className="mx-kv__value">{transports.join(" / ") || "不支持的写法"}</span>
-          <McpEndpointRow name={row.name} locationId={originId} load={api.mcpEndpoint} />
-          <span className="mx-kv__key">原件</span>
-          <span className="mx-kv__value">
-            <span className="mx-mono ss-selectable">{displayPath(originPath)}</span>
-            <RevealLink path={originPath} onReveal={() => void reveal(originPath)} />
-          </span>
-        </div>
+        <>
+          <div className="mx-kv">
+            <span className="mx-kv__key">传输</span>
+            <span className="mx-kv__value">{transports.join(" / ") || "不支持的写法"}</span>
+            <McpEndpointRow name={row.name} locationId={originId} load={api.mcpEndpoint} />
+            <span className="mx-kv__key">原件</span>
+            <span className="mx-kv__value">
+              <span className="mx-mono ss-selectable">{displayPath(originPath)}</span>
+              <RevealLink path={originPath} onReveal={() => void reveal(originPath)} />
+            </span>
+          </div>
+          {differing.length > 0 ? (
+            <McpDiffSection
+              name={row.name}
+              locationIds={differing}
+              load={api.mcpFieldDiff}
+              labelOf={labelOf}
+              revealPath={locationOf(differing[0])?.path}
+              onReveal={(path) => void reveal(path)}
+            />
+          ) : null}
+        </>
       ),
+      detailWide: differing.length > 0,
       // 右键菜单：在访达中显示原件（＝`打开 ↗`）、拷贝路径（＝展开区里可选中的路径）
       menu: () => [
         { label: "在访达中显示原件", run: () => void reveal(originPath) },
@@ -1381,7 +1356,6 @@ export default function McpTab({
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
         shortcuts={!addOpen && !manageOpen && pane === null && pick === null}
         empty={empty}
-        onClosePanels={() => setOpenDiffs((prev) => (prev.size > 0 ? new Map() : prev))}
         flash={flash}
         cellNotice={cellNotice}
         onDismissCellNotice={dismissNotice}

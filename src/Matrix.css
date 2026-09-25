@@ -480,7 +480,8 @@
   display: inline-flex;
 }
 
-/* 名字 ×2 ˅ [键]：名字 + 6 + 拉手（DrawerHandle 悬停这一行才出、拉开的常显），行内键在拉手之后 */
+/* 名字 ×2 ˅：名称格只放名字与记号 + 6 + 拉手（DrawerHandle 悬停这一行才出、拉开的常显）。
+   行内的动作（只留这份、看差异）在抽屉里——名字只在列宽真不够时才截断，不会被键挤成省略号 */
 .mx-row__name {
   display: flex;
   align-items: center;
@@ -512,14 +513,11 @@
   outline-offset: 2px;
 }
 
-/* 同名行悬停：名称格里出默认键紧凑「只留这份」；读数在 ×2 的提示框里，不越过面板右沿 */
-.mx-extra {
+/* 名字后的记号（`×2` `2 份不一样` `Codex 不支持`）：纯文字 12，不是键；点它与点名字一样拉开抽屉 */
+.mx-mark {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-  white-space: nowrap;
+  cursor: default;
 }
 
 /* 行详情抽屉（组件层 Drawer：凹槽、上 6 下 10、下沿 row-line）：左沿对齐名字（复选列 34 之后），
@@ -535,13 +533,19 @@
   color: var(--ink-mute);
 }
 
-/* `2 份不一样` 的差异要并排几份值：从名字左沿铺到最后一列，只让出尾列 */
+/* 抽屉里有 `2 份不一样` 的字段差异（要并排几份值）：从名字左沿铺到最后一列，只让出尾列 */
 .mx-drawer--wide .ss-drawer__well {
   margin-right: 24px;
 }
 
 .mx-detail__desc {
   white-space: pre-line;
+}
+
+/* 同名行抽屉末尾的 `只留这份`（默认键紧凑）：与上面几行隔开一点，自成一行 */
+.mx-detail__keep {
+  display: flex;
+  margin-top: 2px;
 }
 
 .mx-detail__path {

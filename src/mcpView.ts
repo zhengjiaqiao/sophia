@@ -80,7 +80,7 @@ export function cellViewOf(
 
 /**
  * 本行在本域里互不一致的那几处副本（spec R2）。返回位置 id，顺序按行内出现的先后。
- * 非空即在服务名后挂「N 份不一样」，可点就地展开差异。
+ * 非空即在服务名后挂纯文字记号「N 份不一样」，点它拉开这一行的抽屉看差异。
  */
 export function differingSourceIds(row: McpDomainRow, targetIds: Set<string>): string[] {
   const ids: string[] = [];

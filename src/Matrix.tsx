@@ -118,25 +118,20 @@ export interface MatrixRowView {
   };
   /// 列 id → 格；null＝这一行在这一列没有格（短横，不可点）
   cells: Record<string, MatrixCellView | null>;
-  /// 名字后的标注，算名字的一部分：`×2`、`Codex 不支持`（弱标识）。排在拉手之前
+  /// 名字后的记号，算名字的一部分：`×2`、`2 份不一样`、`Codex 不支持`——都是纯文字（12 号），不是键。
+  /// 名称格里只有「名字 记号 ˅」，行内的动作（只留这份、看差异）都在这一行的抽屉里；
+  /// 点记号与点名字一样拉开抽屉
   mark?: ReactNode;
-  /// 行内键（`2 份不一样`，默认键紧凑）：常显，排在拉手之后——顺序是「名字 ×2 ˅ [键]」
-  keys?: ReactNode;
-  /// 同名组：悬停（或键盘焦点）任一行，同组的行一起亮，并出 `extra`
+  /// 同名组：悬停（或键盘焦点）任一行，同组的行一起亮
   dupGroup?: string;
-  /// 同名行悬停时的动作（`只留这份`），在名称格里，不越过面板右沿
-  extra?: ReactNode;
-  /// 行详情，收在这一行下面的抽屉里（skill：描述 / 路径 + 打开 ↗ / 改于 …；MCP：传输 / 命令 / 原件）：
-  /// 名字后跟拉手，点名字或拉手拉开；不给就没有拉手、不能拉开
+  /// 行详情，收在这一行下面的抽屉里（skill：描述 / 路径 + 打开 ↗ / 改于 … / 同名时 `只留这份`；
+  /// MCP：传输 / 命令 / 原件 / 几份不一样时的字段差异）：名字后跟拉手，点名字、记号或拉手拉开；
+  /// 不给就没有拉手、不能拉开。表格一次只开一格
   detail?: ReactNode;
-  /// 调用方控制开合的第二格抽屉（MCP 点 `2 份不一样` 拉出的字段差异）：给了就拉开，
-  /// 从名字左沿铺到最后一列；不给就收着。表格一次只开一格：它拉开时行详情收起，
-  /// 行详情拉开（或按 Esc）时经 `onClosePanels` 请调用方收起它
-  panel?: ReactNode;
+  /// 抽屉要并排几份值（MCP 的字段差异）：从名字左沿铺到最后一列，只让出尾列
+  detailWide?: boolean;
   /// 非空＝这一行勾不动，值是原因
   selectDisabledReason?: string;
-  /// `extra` 里的动作正在执行（`只留这份` 在等体检）：不随悬停收起，忙碌指示留在原位
-  extraPinned?: boolean;
   /// 右键菜单里「展开详情」之后的项（在访达中显示原件、拷贝路径、只留这份…）。
   /// 右键那一刻才取；`row` 是这一行此刻的元素（要确认的项锚在它上面）
   menu?: (row: HTMLElement) => ContextMenuItem[];
@@ -215,8 +210,6 @@ export interface MatrixProps {
 
   /// 一行都没有时，表头下面放什么（空态）
   empty?: ReactNode;
-  /// 收起调用方控制的第二格抽屉（行的 `panel`）：拉开行详情、按 Esc 时调用（表格一次只开一格）
-  onClosePanels?: () => void;
   /// 刚变化的格：播一次 120ms 反色闪，`nonce` 变了才重播。**只给单格**：批量时格子同时变成新状态、不闪
   flash?: { keys: string[]; nonce: number };
   /// 批量写入进行中：按下的那一点（"all" 或列 id）当即锁住（只锁它，别的点照常能按、排队执行），
@@ -488,7 +481,6 @@ export default function Matrix(props: MatrixProps) {
     keyBusy,
     cellBusy,
     barToast,
-    onClosePanels,
   } = props;
 
   const tipId = useId();
@@ -524,19 +516,9 @@ export default function Matrix(props: MatrixProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(0);
-  // 拉开了行详情抽屉的那一行。表格一次只开一格（DESIGN「抽屉」）：拉开行详情时请调用方收起第二格抽屉，
-  // 第二格抽屉换到别的行拉开时行详情收起
+  // 拉开了行详情抽屉的那一行。表格一次只开一格（DESIGN「抽屉」）：拉开另一行，这一行收起
   const [expanded, setExpanded] = useState<string | null>(null);
-  const toggleDetail = (key: string) => {
-    if (expanded !== key) onClosePanels?.();
-    setExpanded((prev) => (prev === key ? null : key));
-  };
-  const panelRow = rows.find((row) => row.panel !== undefined)?.key ?? null;
-  const [panelSeen, setPanelSeen] = useState(panelRow);
-  if (panelRow !== panelSeen) {
-    setPanelSeen(panelRow);
-    if (panelRow !== null) setExpanded(null);
-  }
+  const toggleDetail = (key: string) => setExpanded((prev) => (prev === key ? null : key));
 
   const dotText = dotWords === "mcp" ? MCP_DOT_TEXT : SKILL_DOT_TEXT;
   const template = [
@@ -739,8 +721,6 @@ export default function Matrix(props: MatrixProps) {
     flat,
     expanded,
     shortcuts,
-    panelRow,
-    onClosePanels,
   });
   live.current = {
     onUndo,
@@ -749,8 +729,6 @@ export default function Matrix(props: MatrixProps) {
     flat,
     expanded,
     shortcuts,
-    panelRow,
-    onClosePanels,
   };
   const selectAllVisible = () => {
     const s = live.current;
@@ -801,11 +779,6 @@ export default function Matrix(props: MatrixProps) {
       if (e.key === "Escape" && s.expanded !== null) {
         e.preventDefault();
         setExpanded(null);
-        return;
-      }
-      if (e.key === "Escape" && s.panelRow !== null && s.onClosePanels) {
-        e.preventDefault();
-        s.onClosePanels();
         return;
       }
       if (e.key === "Escape" && s.selected.size > 0) {
@@ -967,7 +940,6 @@ export default function Matrix(props: MatrixProps) {
     const classes = ["mx-grid", "mx-row"];
     if (isSelected) classes.push("is-selected");
     if (hot) classes.push("is-hot");
-    const showExtra = row.extra !== undefined && (hot || row.extraPinned === true);
     const open = expanded === row.key && row.detail !== undefined;
     if (open) classes.push("is-open");
     const selectable = row.selectDisabledReason === undefined;
@@ -1042,7 +1014,8 @@ export default function Matrix(props: MatrixProps) {
               />
             )}
           </div>
-          {/* 名字 ×2 ˅ [键]：拉手跟在名字（和 ×2）后面，悬停这一行才出、拉开的常显；行内键在拉手之后 */}
+          {/* 名字 ×2 ˅：名称格只放名字与记号，拉手跟在后面（悬停这一行才出、拉开的常显）；
+              行内的动作都在抽屉里，名字不会被键挤成省略号——只有列宽真不够时才截断 */}
           <div className="mx-row__name">
             {/* 名字也是这一行的键盘落点（方向键从第一格再往左）：空格加选、回车拉开抽屉；鼠标点名字拉开抽屉 */}
             <span
@@ -1072,7 +1045,15 @@ export default function Matrix(props: MatrixProps) {
             >
               {row.name}
             </span>
-            {row.mark}
+            {row.mark !== undefined ? (
+              // 记号是纯文字，点它与点名字一样拉开抽屉（键盘走名字上的回车或拉手）
+              <span
+                className="mx-mark"
+                onClick={row.detail !== undefined ? () => toggleDetail(row.key) : undefined}
+              >
+                {row.mark}
+              </span>
+            ) : null}
             {row.detail !== undefined ? (
               <DrawerHandle
                 open={open}
@@ -1081,8 +1062,6 @@ export default function Matrix(props: MatrixProps) {
                 controls={detailId}
               />
             ) : null}
-            {row.keys}
-            {showExtra ? <span className="mx-extra">{row.extra}</span> : null}
           </div>
           {/* 来源：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
           <div
@@ -1208,13 +1187,17 @@ export default function Matrix(props: MatrixProps) {
             );
           })}
         </div>
-        {/* 行详情抽屉：左沿对齐名字、不跨进 agent 列（Matrix.css 按 --mx-agents 让出右边）；Esc 收起 */}
+        {/* 行详情抽屉：左沿对齐名字、不跨进 agent 列（Matrix.css 按 --mx-agents 让出右边；要并排几份值的
+            铺到最后一列）；Esc 收起 */}
         {row.detail !== undefined ? (
-          <Drawer open={open} id={detailId} className="mx-drawer">
+          <Drawer
+            open={open}
+            id={detailId}
+            className={`mx-drawer${row.detailWide ? " mx-drawer--wide" : ""}`}
+          >
             {row.detail}
           </Drawer>
         ) : null}
-        <PanelDrawer panel={row.panel} />
       </div>
     );
   };
@@ -1393,19 +1376,6 @@ const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
     right: Math.max(...chips.map((c) => c.right)),
   };
 };
-
-/// 第二格抽屉（MCP `2 份不一样` 的差异）：内容由调用方给、给了就拉开。收起时内容留到滑完（最后一次给的），
-/// 不在滑回途中变空
-function PanelDrawer({ panel }: { panel?: ReactNode }) {
-  const last = useRef<ReactNode>(panel);
-  if (panel !== undefined) last.current = panel;
-  if (last.current === undefined) return null;
-  return (
-    <Drawer open={panel !== undefined} className="mx-drawer mx-drawer--wide">
-      {last.current}
-    </Drawer>
-  );
-}
 
 /// 来源筛选（DESIGN「位置页 › 来源筛选」「选择片 Chip」）：行首 `来源` 标签（12 / 500 `ink-mute`）+ 8 +
 /// 每个来源一颗浅胶囊，只写名字；选中的是墨色。**多选、纳入式**：点一颗＝纳入，再点＝去掉，一个都不选＝全部

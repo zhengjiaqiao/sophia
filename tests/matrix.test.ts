@@ -311,14 +311,13 @@ test("Matrix：多选纳入式——选中的几项都是墨色；片上不带�
   assert.match(html, /class="ss-floattoast"[^>]*><span class="probe">已添加/);
 });
 
-test("行详情是抽屉：名字 ×2 ˅ [键]——拉手跟在名字与 ×2 后、行内键在拉手后；行带悬停钩子；抽屉左沿对齐名字、不跨进 agent 列", () => {
+test("行详情是抽屉：名称格只放「名字 ×2 ˅」——记号是纯文字、点它拉开抽屉，行内动作在抽屉里；行带悬停钩子；抽屉左沿对齐名字、不跨进 agent 列", () => {
   const html = render(Matrix, {
     ...base,
     rows: [
       {
         ...base.rows[0],
         mark: createElement("span", { className: "probe-mark" }, "×2"),
-        keys: createElement("span", { className: "probe-key" }, "2 份不一样"),
         detail: createElement("span", { className: "probe-detail" }, "描述"),
       },
       base.rows[1],
@@ -327,11 +326,24 @@ test("行详情是抽屉：名字 ×2 ˅ [键]——拉手跟在名字与 ×2 �
   const row = html.slice(html.indexOf('data-row="u|docx"'), html.indexOf('data-row="w|pdf"'));
   // 行元素挂勾选框与拉手的行悬停钩子（组件层 ui.css）
   assert.match(html, /data-row="u\|docx" data-checkrow="" data-drawer-row=""/);
-  // 顺序：名字 → ×2 → 拉手 → 行内键
+  // 顺序：名字 → ×2 → 拉手；名称格里没有别的（行内键、悬停出的动作都挪进了抽屉，名字不被键挤成省略号）
   const at = (needle: string) => row.indexOf(needle);
   assert.ok(at(">docx<") < at("probe-mark"));
   assert.ok(at("probe-mark") < at("ss-drawerhandle"));
-  assert.ok(at("ss-drawerhandle") < at("probe-key"));
+  const nameCell = row.slice(at('class="mx-row__name"'), at('class="mx-row__origin"'));
+  assert.doesNotMatch(nameCell, /ss-btn|mx-extra/);
+  // 记号包在 mx-mark 里（点它与点名字一样拉开抽屉）
+  assert.match(nameCell, /class="mx-mark"><span class="probe-mark">×2<\/span><\/span>/);
+  const src = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /className="mx-mark"\s*onClick=\{row\.detail !== undefined \? \(\) => toggleDetail\(row\.key\) : undefined\}/,
+  );
+  // 行视图不再有行内键、悬停动作与第二格抽屉：差异、只留这份都进这一行的抽屉，一次只开一格
+  assert.doesNotMatch(
+    src,
+    /\bkeys\?: ReactNode|\bextra\?: ReactNode|\bpanel\?: ReactNode|PanelDrawer|onClosePanels/,
+  );
   assert.match(row, /class="ss-drawerhandle" aria-label="docx 的详情" aria-expanded="false"/);
   // 收着：抽屉外层在（第一次拉开也有动效），内容还没挂
   assert.match(row, /class="ss-drawer mx-drawer"[^>]*inert=""/);
@@ -350,6 +362,47 @@ test("行详情是抽屉：名字 ×2 ˅ [键]——拉手跟在名字与 ×2 �
   assert.match(html, /class="mx-body" style="--mx-agents:176px"/);
   // 位置页里自己的勾选框悬停覆盖删掉，改用组件层的行悬停钩子
   assert.doesNotMatch(css, /\.mx-row:hover \.ss-checkbox/);
+});
+
+test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号（不是键），差异是这一行抽屉里的一段；skill 的 `只留这份` 在抽屉里", async () => {
+  const tab = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
+  // 记号：弱标识 Tag（12 ink-mute），提示框给差异字段名；不再是默认键、不再另开一格差异抽屉
+  assert.match(
+    tab,
+    /<Tag tone="weak" tip=\{diffTip\(row\.name, fields\)\}>\s*\{`\$\{differing\.length\} 份不一样`\}/,
+  );
+  assert.doesNotMatch(tab, /toggleDiff|openDiffs|panel:|onClosePanels/);
+  // 差异在行详情抽屉里，接在键值几行之后；有差异时抽屉铺到最后一列
+  assert.match(tab, /mx-kv__key">原件<[^]*<McpDiffSection[^]*load=\{api\.mcpFieldDiff\}/);
+  assert.match(tab, /detailWide: differing\.length > 0/);
+  const { McpDiffSection } = await import("../src/McpDiffPanel.tsx");
+  const section = render(McpDiffSection, {
+    name: "notion",
+    locationIds: ["a", "b"],
+    load: async () => ({
+      name: "notion",
+      locationIds: ["a", "b"],
+      fields: [],
+      unreadable: [],
+      dynamicAuth: false,
+    }),
+    labelOf: (id: string) => id,
+    onReveal: () => undefined,
+  });
+  assert.match(section, /class="mcp-diff-section"><div class="mcp-diff__title">2 份不一样<\/div>/);
+  // 宽抽屉的类由行视图给
+  const wide = render(Matrix, {
+    ...base,
+    rows: [{ ...base.rows[0], detail: "x", detailWide: true }, base.rows[1]],
+  });
+  assert.match(wide, /class="ss-drawer mx-drawer mx-drawer--wide"/);
+  // skill：`只留这份` 是抽屉末尾的一颗键（SkillDetail 的 keep），名称格里没有；确认框锚在这颗键下
+  const dv = readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(dv, /\bextra:|extraPinned|DupExtra/);
+  assert.match(dv, /keep=\{\s*other === undefined \? undefined : \(\s*<KeepKey/);
+  assert.match(dv, /\{keep \? <div className="mx-detail__keep">\{keep\}<\/div> : null\}/);
+  // 右键菜单里的「只留这份…」快捷路保留
+  assert.match(dv, /label: "只留这份…"/);
 });
 
 test("`⌘` 点行加选、名字上按空格加选（键盘焦点在行上）；点行其余地方不勾选", () => {

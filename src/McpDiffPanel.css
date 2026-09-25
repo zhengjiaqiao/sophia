@@ -1,6 +1,18 @@
-/* MCP「N 份不一样」的字段级差异（McpDiffPanel），装在行下拉出的抽屉里（上下留白归抽屉）。
+/* MCP「N 份不一样」的字段级差异（McpDiffPanel），是行详情抽屉里的一段（上下留白归抽屉）。
    色值一律 var(--…)，唯一来源是 tokens.css */
 @import "./tokens.css";
+
+/* 抽屉里接在键值几行之后：上面空一档与键值分开；段首小标 12 ink-faint（同键值的键） */
+.mcp-diff-section {
+  margin-top: var(--space-xs);
+}
+
+.mcp-diff__title {
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
 
 .mcp-diff__grid {
   display: grid;

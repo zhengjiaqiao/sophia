@@ -25,14 +25,7 @@ import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { displayPath } from "./pathText";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
-import {
-  BusySlot,
-  Button,
-  DupMark,
-  Empty as UiEmpty,
-  Tooltip,
-  type EmptyArt,
-} from "./ui";
+import { BusySlot, Button, DupMark, Empty as UiEmpty, Tooltip, type EmptyArt } from "./ui";
 import type { ConfirmAnchor } from "./ui";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
@@ -63,9 +56,8 @@ export interface DomainViewProps {
   /// 同名行悬停读数（`3 个文件`）；没取到时为 undefined
   dupReadout: Map<string, string>;
   onDupHover: (row: DomainRow) => void;
-  /// 点「只留这份」：anchor 是按钮此刻的矩形，确认框锚在它上面
-  /// `at`：按下那一刻「只留这份」的位置（左右取这个文字链、上下取整行）——结果的提示小窗锚在这里，
-  /// 行被删掉、文字链随悬停收起之后也还在原处
+  /// 点「只留这份」（抽屉里的键，或右键菜单）：确认框锚在 `anchor` 下面
+  /// `at`：按下那一刻触发控件的位置——结果的提示小窗锚在这里，抽屉收起、行重排之后也还在原处
   onKeepThis: (row: DomainRow, other: DomainRow, anchor: ConfirmAnchor, at: ConfirmAnchor) => void;
   /// 正在为哪一行体检（点了「只留这份」、确认框还没出来）：那一行的键原位忙碌、不随悬停收起
   keepBusy?: string | null;
@@ -291,7 +283,7 @@ export default function DomainView(props: DomainViewProps) {
         },
         cells,
         // 判断用的读数不越过面板右沿：进 ×2 的提示框，两份同时列出（DESIGN「表格 = 面板」）。
-        // ×2 算名字的一部分，排在拉手之前
+        // ×2 是名字后的纯文字记号，排在拉手之前；点它拉开抽屉，`只留这份` 在抽屉里
         mark:
           dup.length > 1 ? (
             <span onMouseEnter={() => props.onDupHover(row)} onFocus={() => props.onDupHover(row)}>
@@ -311,7 +303,8 @@ export default function DomainView(props: DomainViewProps) {
             </span>
           ) : undefined,
         dupGroup: dup.length > 1 ? row.skill : undefined,
-        // 点名字 / 拉手拉开抽屉：描述、路径 + 打开 ↗、改于 … · N 个文件（读不到描述不写那一行）
+        // 点名字 / ×2 / 拉手拉开抽屉：描述、路径 + 打开 ↗、改于 … · N 个文件（读不到描述不写那一行）；
+        // 同名行末尾一颗 `只留这份`（名称格里不放键，名字不被挤成省略号）
         detail: (
           <SkillDetail
             description={description}
@@ -319,18 +312,17 @@ export default function DomainView(props: DomainViewProps) {
             readout={readout}
             onShow={() => props.onDupHover(row)}
             onReveal={() => props.onReveal(path)}
+            keep={
+              other === undefined ? undefined : (
+                <KeepKey
+                  onKeep={(anchor, at) => props.onKeepThis(row, other, anchor, at)}
+                  label={`只留 ${originOf(row.sourceId)} 的 ${row.skill}`}
+                  busy={props.keepBusy === key}
+                />
+              )
+            }
           />
         ),
-        extra:
-          other === undefined ? undefined : (
-            <DupExtra
-              onShow={() => props.onDupHover(row)}
-              onKeep={(anchor, at) => props.onKeepThis(row, other, anchor, at)}
-              label={`只留 ${originOf(row.sourceId)} 的 ${row.skill}`}
-              busy={props.keepBusy === key}
-            />
-          ),
-        extraPinned: props.keepBusy === key,
         // 右键菜单：在访达中显示原件（＝`打开 ↗`）、拷贝路径（＝展开区里可选中的路径）、
         // 只留这份…（只在同名行，走同一个锚定确认）
         menu: (el) => [
@@ -591,25 +583,18 @@ export function Empty({
   );
 }
 
-/// 同名行悬停时出现的「只留这份」。出现那一刻去取两份的读数（取过的不再取），给 ×2 的提示框用
-function DupExtra({
-  onShow,
+/// 同名行抽屉里的「只留这份」（两份的读数由抽屉拉开时去取，见 SkillDetail）
+function KeepKey({
   onKeep,
   label,
   busy,
 }: {
-  onShow: () => void;
   onKeep: (anchor: ConfirmAnchor, at: ConfirmAnchor) => void;
   label: string;
   /// 点过、正在体检：键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
   busy: boolean;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    onShow();
-    // 只在出现时取一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   return (
     <Tooltip content="另一份移到废纸篓，先确认">
       <span ref={ref}>
@@ -618,16 +603,12 @@ function DupExtra({
             size="compact"
             onClick={() => {
               if (busy) return;
-              // 确认框锚在这一行：出在行下方，遮罩挖出整行（用户看得见自己在决定哪一行）；
-              // 结果的提示小窗锚在被按下的这个文字链上（上下取整行，不盖住这一行）
-              const el = ref.current?.closest(".mx-row") ?? ref.current;
-              const r = el?.getBoundingClientRect();
+              // 确认框与结果的提示小窗都锚在被按下的这颗键上：出在它正下方（DESIGN「锚在被按下的那个控件」）
               const k = ref.current?.getBoundingClientRect();
-              if (r && k)
-                onKeep(
-                  { top: r.top, left: r.left, right: r.right, bottom: r.bottom },
-                  { top: r.top, left: k.left, right: k.right, bottom: r.bottom },
-                );
+              if (k) {
+                const at = { top: k.top, left: k.left, right: k.right, bottom: k.bottom };
+                onKeep(at, at);
+              }
             }}
             ariaLabel={label}
           >
@@ -640,19 +621,22 @@ function DupExtra({
 }
 
 /// 抽屉里的行详情：描述（ink-mute 13，不截断；读不到不写）、路径（等宽 ink-faint）+ 打开 ↗、
-/// 改于 … · N 个文件。拉开那一刻去取读数
+/// 改于 … · N 个文件；同名行末尾 `只留这份`。拉开那一刻去取读数（同名时两份一起取，给 ×2 的提示框用）
 function SkillDetail({
   description,
   path,
   readout,
   onShow,
   onReveal,
+  keep,
 }: {
   description?: string;
   path: string;
   readout?: string;
   onShow: () => void;
   onReveal: () => void;
+  /// 同名行的 `只留这份`
+  keep?: ReactNode;
 }) {
   useEffect(() => {
     onShow();
@@ -667,6 +651,7 @@ function SkillDetail({
         <RevealLink path={path} onReveal={onReveal} />
       </div>
       {readout ? <div>{readout}</div> : null}
+      {keep ? <div className="mx-detail__keep">{keep}</div> : null}
     </>
   );
 }

@@ -3,7 +3,8 @@ import type { McpDiff, McpEndpoint, McpFieldValue } from "./types.ts";
 import { Button, Spinner, Tooltip, TruncTip, useBusyShown } from "./ui/index.ts";
 import "./McpDiffPanel.css";
 
-/// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：该服务行下拉出的一格抽屉里。
+/// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：该服务行的抽屉里的一段
+/// （2026-09-25 评审：名称格只放名字与记号，看差异挪进这一行的抽屉，不再另开一格）。
 ///
 /// - 只列**不同的字段**：字段名 ｜ 位置 A 的值 ｜ 位置 B 的值，三列对齐；值用等宽，不同的那一段加粗
 ///   （不用反色，反色已是「刚变化」）
@@ -130,6 +131,46 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
         </div>
       ) : null}
       {revealLink}
+    </div>
+  );
+}
+
+/// 行详情抽屉里「N 份不一样」的那一段：抽屉拉开时挂上，挂上时比对一次（调用方给 `api.mcpFieldDiff`；
+/// 这个文件不碰 api）。段首一行小标说这一段是什么，下面是 `McpDiffPanel`
+export function McpDiffSection({
+  name,
+  locationIds,
+  load,
+  labelOf,
+  revealPath,
+  onReveal,
+}: {
+  name: string;
+  /// 定义不一样的那几处位置
+  locationIds: string[];
+  load: (name: string, locationIds: string[]) => Promise<McpDiff>;
+  labelOf: (locationId: string) => string;
+  revealPath?: string;
+  onReveal: (path: string) => void;
+}) {
+  const [diff, setDiff] = useState<McpDiffState>("loading");
+  // 数组每次渲染都是新的：按内容比
+  const ids = locationIds.join("\n");
+  useEffect(() => {
+    let alive = true;
+    setDiff("loading");
+    load(name, ids.split("\n")).then(
+      (found) => alive && setDiff(found),
+      (e) => alive && setDiff(new Error(String(e))),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [name, ids, load]);
+  return (
+    <div className="mcp-diff-section">
+      <div className="mcp-diff__title">{`${locationIds.length} 份不一样`}</div>
+      <McpDiffPanel diff={diff} labelOf={labelOf} revealPath={revealPath} onReveal={onReveal} />
     </div>
   );
 }
