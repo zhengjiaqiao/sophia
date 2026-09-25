@@ -600,7 +600,7 @@ test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mu
   // 灰面板、抽屉上键面换 paper、仍平贴
   assert.match(
     uiCss,
-    /\.ss-banner \.ss-btn--quiet:not\(:disabled\),\s*\.ss-noticepanel \.ss-btn--quiet:not\(:disabled\),\s*\.ss-drawer \.ss-btn--quiet:not\(:disabled\) \{\s*background: var\(--paper\);\s*\}/,
+    /\.ss-banner \.ss-btn--quiet:not\(:disabled\),\s*\.ss-noticepanel \.ss-btn--quiet:not\(:disabled\) \{\s*background: var\(--paper\);\s*\}/,
   );
   // 固定 24：不叠尺寸类
   assert.match(
@@ -1674,7 +1674,7 @@ test("Confirm 锚在触发行下方 6px，遮罩整面压暗、不挖触发行",
   assert.match(html, /class="ss-confirm__safety">会把请求头和令牌一并复制过去</);
 });
 
-test("Confirm 铭牌：凹面等宽 ink 字、路径可拖选；主动作禁用时带原因", () => {
+test("Confirm 路径：等宽 ink 字、不垫色块、路径可拖选；主动作禁用时带原因", () => {
   const html = render(Confirm, {
     title: "删掉 docx 的原件？",
     nameplate: {
@@ -1693,11 +1693,9 @@ test("Confirm 铭牌：凹面等宽 ink 字、路径可拖选；主动作禁用�
   assert.match(html, /disabled=""/);
   assert.match(html, /title="原件在 git 仓库里，请在仓库里删掉并提交"/);
   const plate = cssRule(uiCss, ".ss-confirm__nameplate");
-  // V4 不再用墨底铭牌：墨面只有两义
-  assert.match(plate, /background:\s*var\(--recess\)/);
-  assert.doesNotMatch(plate, /box-shadow/, "铭牌是平的浅灰面：阴影只给浮在上面的东西");
+  // V4 不再用墨底铭牌；也不垫底色块：等宽字已经把路径和正文分开（2026-09-25 色块审视）
+  assert.doesNotMatch(plate, /background|box-shadow|border-radius/);
   assert.match(plate, /color:\s*var\(--ink\)/);
-  assert.match(plate, /padding:\s*10px 12px/);
   assert.match(plate, /font-family:\s*var\(--font-mono\)/);
 });
 
@@ -1999,7 +1997,7 @@ test("DrawerHandle：名字后一枚 10px 线形箭头（1.4、ink-mute），无
   );
 });
 
-test("Drawer：一格平的浅灰槽（recess 底、不画内凹阴影、control 7、内边距 10 12），上 6 下 10、下沿 row-line；高度 0 ↔ 内容高 260ms 机械缓动", () => {
+test("Drawer：行下的详情，不垫色块、左沿对齐名字，上 6 下 12、下沿 row-line；高度 0 ↔ 内容高 260ms 机械缓动", () => {
   const open = render(Drawer, { open: true, id: "d1", children: "传输 stdio" });
   assert.equal(
     open,
@@ -2017,17 +2015,14 @@ test("Drawer：一格平的浅灰槽（recess 底、不画内凹阴影、control
   assert.match(cssRule(uiCss, ".ss-drawer.is-open"), /grid-template-rows:\s*1fr/);
   assert.match(cssRule(uiCss, ".ss-drawer__clip"), /overflow:\s*hidden/);
   const room = cssRule(uiCss, ".ss-drawer__room");
-  assert.match(room, /padding:\s*6px 0 10px/);
+  assert.match(room, /padding:\s*6px 0 12px/);
   assert.match(room, /border-bottom:\s*var\(--border-row\)/);
   const well = cssRule(uiCss, ".ss-drawer__well");
-  assert.match(well, /background:\s*var\(--recess\)/);
   assert.doesNotMatch(
     well,
-    /box-shadow/,
-    "抽屉不靠阴影分层：拉开在行下、左沿对齐名字，关系已经清楚",
+    /background|box-shadow|border-radius|padding/,
+    "抽屉不垫色块：详情缩进到名字、夹在这一行与下一条行线之间，归属已经清楚",
   );
-  assert.match(well, /border-radius:\s*var\(--radius-control\)/);
-  assert.match(well, /padding:\s*10px 12px/);
   assert.equal(DRAWER_MS, 260);
   // 减少动效：即时
   const reduced = uiCss.slice(uiCss.lastIndexOf("@media (prefers-reduced-motion: reduce)"));

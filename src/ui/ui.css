@@ -179,10 +179,9 @@ textarea,
   box-shadow: var(--raise-pressed);
 }
 
-/* 放在 surface / recess 底上（灰面板、抽屉）：键面改 paper、仍平贴——同色的浅面看不出是一颗键 */
+/* 放在 surface 底上（灰面板）：键面改 paper、仍平贴——同色的浅面看不出是一颗键 */
 .ss-banner .ss-btn--quiet:not(:disabled),
-.ss-noticepanel .ss-btn--quiet:not(:disabled),
-.ss-drawer .ss-btn--quiet:not(:disabled) {
+.ss-noticepanel .ss-btn--quiet:not(:disabled) {
   background: var(--paper);
 }
 
@@ -1294,13 +1293,10 @@ textarea,
   color: var(--ink-mute);
 }
 
-/* 路径铭牌：平的浅灰面（recess 底、不画内凹阴影、control 7），等宽 12 ink 字，内边距 10 12。
+/* 路径：等宽 12 ink 字，不垫底色块——等宽字已经把它和正文分开（2026-09-25 真机走查，色块审视）。
    V4 不再用墨底铭牌——墨面只有两义 */
 .ss-confirm__nameplate {
   margin-top: var(--space-sm);
-  padding: 10px 12px;
-  border-radius: var(--radius-control);
-  background: var(--recess);
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--size-label);
@@ -1663,9 +1659,10 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
   transform: none;
 }
 
-/* 抽屉 Drawer：这一行下面拉出的一格凹槽。外层管高度（0 ↔ 内容高，260ms 机械缓动；grid 行 0fr ↔ 1fr
-   让「auto 高」也能过渡），里层是槽本身：平的 recess 底（不画内凹阴影——阴影只在必要处表示层次，2026-09-25 真机走查）、control 7、内边距 10 12。
-   上 6 下 10，抽屉下 1px row-line。左沿由调用方对齐这一行的名字（给 .ss-drawer__well 加左外边距） */
+/* 抽屉 Drawer：这一行下面拉出来的详情。外层管高度（0 ↔ 内容高，260ms 机械缓动；grid 行 0fr ↔ 1fr
+   让「auto 高」也能过渡），里层是详情本身：**不画底色块**——详情缩进到名字的左沿、夹在这一行和下一条
+   行线之间，归属已经清楚，灰块只是装饰（2026-09-25 真机走查：色块只给能操作的东西与要从正文里拎出来的话）。
+   上 6 下 12，抽屉下 1px row-line。左沿由调用方对齐这一行的名字（给 .ss-drawer__well 加左外边距） */
 .ss-drawer {
   display: grid;
   grid-template-rows: 0fr;
@@ -1682,14 +1679,12 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
 }
 
 .ss-drawer__room {
-  padding: 6px 0 10px;
+  padding: 6px 0 12px;
   border-bottom: var(--border-row);
 }
 
 .ss-drawer__well {
-  padding: 10px 12px;
-  border-radius: var(--radius-control);
-  background: var(--recess);
+  min-width: 0;
 }
 
 /* ===== 14. 减少动效：状态变化即时发生，信息不减 =====
