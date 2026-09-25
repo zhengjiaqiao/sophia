@@ -4,7 +4,8 @@
 ///   通用仓库 26 ｜ ~/.agents/skills  打开 ↗ ｜ [✳ ⎔ ▾] [开关] ｜ ×
 ///
 /// - 来源名 13 `ink` + 8 + skill 数 12 tabular `ink-faint`
-/// - 短路径（mono 12 `ink-faint`，`~` 开头，放不下中段省略，截断才出完整路径的提示框）+ `打开 ↗`（浅键）
+/// - 短路径（mono 12 `ink-faint`，`~` 开头，放不下中段省略，截断才出完整路径的提示框）+ `打开 ↗`（浅键）：
+///   悬停这一行（或键盘焦点在这一行）才出，列位置保留、各行对齐（同表格来源格的 `打开 ↗`）
 /// - 目标框 + 8 + 紧凑开关（旁边不点指示点）；打开开关当场展开选目标的浮层；开 / 关都不确认
 ///   （只管以后新出现的，不补链现有的）。规则句「以后新出现的自动加到」只在页面的列头说一次
 /// - 最右：`×` 移除这个来源（锚定确认写明会撤掉的）；原件在这个位置里的来源 × 禁用、按下即说原因
@@ -499,7 +500,7 @@ function RemoveKey({
 }
 
 /// 来源管理页里一个来源的一行（行元素本身是页面表格的一行，各格对齐列头）：
-/// 来源名 + skill 数 ｜ 短路径 ｜ `打开 ↗` ｜（空）｜ 目标框 ｜ 紧凑开关 ｜ `×`。
+/// 来源名 + skill 数 ｜ 短路径 ｜ `打开 ↗`（悬停这一行 / 键盘焦点在这一行才出）｜（空）｜ 目标框 ｜ 紧凑开关 ｜ `×`。
 /// `leaving`：刚移除、正在收起的那一行（只画、不接操作）；`flash`：刚加进来，行带闪一下
 export function SourceLine({
   state,
@@ -516,6 +517,12 @@ export function SourceLine({
 }) {
   const lineRef = useRef<HTMLDivElement>(null);
   const { box, toggle, layer } = useRuleControls(state, row, lineRef);
+  // `打开 ↗`：鼠标悬停这一行、或键盘焦点在这一行时才出（同表格来源格，d438a83）。键一直在
+  // 文档里（占着列宽，各行对齐；Tab 照样走得到，走到它这一行就亮），只是其余时候看不见。
+  // 鼠标点过留下的焦点不算：鼠标移开就收
+  const [hovered, setHovered] = useState(false);
+  const [keyFocus, setKeyFocus] = useState(false);
+  const openShown = !leaving && (hovered || keyFocus);
   const path = splitPath(row.path);
   const classes = ["srcline"];
   if (leaving) classes.push("is-leaving");
@@ -528,6 +535,12 @@ export function SourceLine({
       data-source={row.id}
       inert={leaving}
       aria-hidden={leaving || undefined}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={(e) => setKeyFocus((e.target as HTMLElement).matches(":focus-visible"))}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setKeyFocus(false);
+      }}
     >
       <span className="srcline__name" role="cell">
         <TruncTip content={row.name}>
@@ -545,7 +558,7 @@ export function SourceLine({
           </span>
         </TruncTip>
       </span>
-      <span className="srcline__open" role="cell">
+      <span className={`srcline__open${openShown ? " is-shown" : ""}`} role="cell">
         <Button
           variant="quiet"
           ariaLabel={`在访达中显示 ${displayPath(row.path)}`}

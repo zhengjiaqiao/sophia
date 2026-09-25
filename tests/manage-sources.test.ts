@@ -81,8 +81,18 @@ test("列头一行 来源 ｜ 位置 ｜ 以后新出现的自动加到；规则
   assert.equal(html.match(/class="srcline"/g)?.length, 2);
 });
 
-test("每行：来源名 + skill 数 ｜ 中段省略的短路径 ｜ 浅键 `打开`（↗ 组件画）｜ 目标框 ｜ 紧凑开关 ｜ ×", () => {
+test("每行：来源名 + skill 数 ｜ 中段省略的短路径 ｜ 浅键 `打开`（↗ 组件画，悬停这一行才出）｜ 目标框 ｜ 紧凑开关 ｜ ×", () => {
   const html = page(stubState([row("w", "WeiboAP", false, 27)]));
+  // `打开 ↗` 悬停这一行（或键盘焦点在这一行）才出：静止时键仍在（占着列、各行对齐，Tab 走得到），只是看不见
+  assert.match(html, /class="srcline__open" role="cell"/);
+  assert.doesNotMatch(html, /srcline__open is-shown/);
+  const css = readFileSync(new URL("../src/SourceRow.css", import.meta.url), "utf8");
+  assert.match(css, /\.srcline__open \.ss-btn \{[^}]*opacity: 0;/);
+  assert.match(css, /\.srcline__open\.is-shown \.ss-btn \{[^}]*opacity: 1;/);
+  const src = readFileSync(new URL("../src/SourceRow.tsx", import.meta.url), "utf8");
+  // 与表格来源格同一条规则：鼠标悬停，或键盘焦点（鼠标点过留下的焦点不算）
+  assert.match(src, /const openShown = !leaving && \(hovered \|\| keyFocus\);/);
+  assert.match(src, /setKeyFocus\(\(e\.target as HTMLElement\)\.matches\(":focus-visible"\)\)/);
   assert.match(html, /srcline__label">WeiboAP<\/span>/);
   assert.match(html, /srcline__count"[^>]*>27<\/span>/);
   // 末两级完整，前段可截

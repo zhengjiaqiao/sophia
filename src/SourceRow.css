@@ -190,6 +190,17 @@
   display: flex;
 }
 
+/* `打开 ↗` 悬停这一行（或键盘焦点在这一行）才出（SourceLine 给 is-shown）：键一直占着这一列，
+   各行对齐；其余时候看不见（opacity，不用 visibility——Tab 还要走得到它）。即时出没，同表格来源格；
+   不另写 transition，免得盖掉键自己的悬停过渡 */
+.srcline__open .ss-btn {
+  opacity: 0;
+}
+
+.srcline__open.is-shown .ss-btn {
+  opacity: 1;
+}
+
 /* 目标框：这一页里定宽（整列一样宽，按最宽的那一个，至少放得下「选目标 ▾」） */
 .srcline__targets {
   display: flex;
