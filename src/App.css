@@ -196,7 +196,8 @@ input:focus-visible {
   transform: rotate(180deg);
 }
 
-/* 两项的小浮层：纸浮层（paper + hairline 边 + float 12 + 浮层投影） */
+/* 两项的小浮层：纸浮层（paper + hairline 边 + float 12 + 浮层投影）。宽随内容、不设最小宽——
+   四个字的项配 120 最小宽，右边空出一大块（2026-09-25 真机走查）；对勾在左（macOS 菜单惯例） */
 .sidebar__sort-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -205,7 +206,6 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  min-width: 120px;
   padding: var(--space-xxs);
   border-radius: var(--radius-float);
   border: var(--border-float);
@@ -218,7 +218,8 @@ input:focus-visible {
   align-items: center;
   gap: var(--space-xxs);
   height: 28px;
-  padding: 0 var(--space-xs) 0 var(--space-xxs);
+  /* 左右留白对称：左边 8 + 对勾格里 3 的空 ≈ 右边 12，字两侧看起来一样宽 */
+  padding: 0 12px 0 var(--space-xs);
   border: 0;
   border-radius: var(--radius-control);
   background: none;
