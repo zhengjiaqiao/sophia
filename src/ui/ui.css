@@ -1621,7 +1621,8 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
 }
 
 /* ===== 13.3 滚动边缘渐隐 FadeViewport（EdgeFade.tsx；DESIGN「渐变只用于功能」）=====
-   上 / 下还有被裁掉的内容时，那一边 16px 从底色渐隐到透明（功能性渐变）；浮层里从 paper，机面上从 face */
+   上 / 下还有被裁掉的内容时，那一边 16px 从底色渐隐到透明（功能性渐变）；浮层里从 paper，机面上从 face，
+   侧栏里从 shell */
 .ss-layer__viewport {
   position: relative;
   display: flex;
@@ -1659,6 +1660,15 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
 
 .ss-layer__viewport--face::after {
   background: linear-gradient(to top, var(--face), transparent);
+}
+
+/* 侧栏（机壳）上的滚动区：从 shell 渐隐 */
+.ss-layer__viewport--shell::before {
+  background: linear-gradient(to bottom, var(--shell), transparent);
+}
+
+.ss-layer__viewport--shell::after {
+  background: linear-gradient(to top, var(--shell), transparent);
 }
 
 .ss-layer__viewport[data-fade-top]::before,

@@ -31,7 +31,9 @@ export function placeLayer(
   /// 浮层不设高度上限时的自然尺寸
   size: { width: number; height: number },
   viewport: { width: number; height: number },
-  opts: { gap?: number; margin?: number; cap?: number } = {},
+  /// `align`：`start`（默认）左沿对齐触发控件、右边放不下改右对齐；`end` 右沿对齐触发控件、向左展开
+  /// （行尾、小标题行右端的触发键），左边放不下改左对齐。最后都夹在窗口左右边距之内
+  opts: { gap?: number; margin?: number; cap?: number; align?: "start" | "end" } = {},
 ): LayerPlacement {
   const gap = opts.gap ?? LAYER_GAP;
   const margin = opts.margin ?? LAYER_MARGIN;
@@ -46,8 +48,14 @@ export function placeLayer(
   const top = side === "below" ? anchor.bottom + gap : anchor.top - gap - height;
 
   const right = viewport.width - margin;
-  let left = anchor.left;
-  if (left + size.width > right) left = anchor.right - size.width;
+  let left: number;
+  if (opts.align === "end") {
+    left = anchor.right - size.width;
+    if (left < margin) left = anchor.left;
+  } else {
+    left = anchor.left;
+    if (left + size.width > right) left = anchor.right - size.width;
+  }
   left = Math.max(margin, Math.min(left, right - size.width));
   return { top, left, maxHeight, side };
 }

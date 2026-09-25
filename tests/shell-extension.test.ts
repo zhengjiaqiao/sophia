@@ -174,16 +174,22 @@ test("agent 页整页（页面头连同各节）限宽 776：外框包住页面�
 
 test("侧栏滚动区往下滚过之后上沿 16 渐隐：滚过去的项目不在字标带下面硬切", async () => {
   const { readFileSync } = await import("node:fs");
-  const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
-  assert.match(
-    css,
-    /\.sidebar__nav\[data-fade-top\]::before \{[^}]*position: sticky;[^}]*top: 0;[^}]*height: var\(--fade-edge\);[^}]*linear-gradient\(to bottom, var\(--shell\), transparent\)/,
-  );
-  // 量归 ui 的 useEdgeFades（全应用只有这一份监听），侧栏只取上沿
+  // 量与画都归 ui：useEdgeFades（全应用只有这一份监听）+ FadeViewport tone="shell"；侧栏只取上沿
   const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
   assert.match(tsx, /const scrolled = useEdgeFades\(navRef\)\.start;/);
+  assert.match(tsx, /const navFade = \{ start: scrolled, end: false \};/);
+  assert.match(tsx, /<FadeViewport fade=\{navFade\} tone="shell"/);
   assert.doesNotMatch(tsx, /addEventListener\("scroll"/);
-  assert.match(tsx, /data-fade-top=\{scrolled \? "" : undefined\}/);
+  // 壳不再自己画渐隐
+  const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /data-fade-top|linear-gradient\(to bottom, var\(--shell\)/);
+  const ui = readFileSync(new URL("../src/ui/ui.css", import.meta.url), "utf8");
+  assert.match(
+    ui,
+    /\.ss-layer__viewport--shell::before \{\s*background: linear-gradient\(to bottom, var\(--shell\), transparent\);/,
+  );
+  const side = render(Sidebar, sidebarProps([]));
+  assert.match(side, /<div class="ss-layer__viewport ss-layer__viewport--shell sidebar__scroll"><nav class="sidebar__nav"/);
 });
 
 test("侧栏区块小标与排序下拉走组件库：SectionLabel（`AGENT` 经 Cap）、排序是 FloatingLayer 里的单选 Menu，不再自写定位", async () => {
@@ -198,7 +204,7 @@ test("侧栏区块小标与排序下拉走组件库：SectionLabel（`AGENT` 经
     /<div class="ss-sectionlabel has-action"><span class="ss-sectionlabel__text">项目<\/span><span class="ss-sectionlabel__action"><button type="button" class="sidebar__sort-button" aria-haspopup="menu" aria-expanded="false">最近活跃/,
   );
   const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
-  assert.match(tsx, /<FloatingLayer trigger=\{button\.current\} onClose=\{close\} label="项目排序">/);
+  assert.match(tsx, /<FloatingLayer\s+trigger=\{button\.current\}\s+onClose=\{close\}\s+label="项目排序"\s+align="end"\s*>/);
   assert.match(tsx, /<MenuItem\s+key=\{s\.id\}\s+kind="radio"/);
   const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /\.sidebar__sort-menu|\.sidebar__sort-item|\.sidebar__label/);

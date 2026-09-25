@@ -25,10 +25,14 @@ export function FloatingLayer({
   onClose,
   className,
   label,
+  align = "start",
   children,
 }: {
   trigger: HTMLElement;
   onClose: () => void;
+  /// 水平对齐触发控件：`start`（默认）左沿对齐；`end` 右沿对齐、向左展开——触发键在行尾或小标题行右端时
+  /// （侧栏的排序下拉），浮层留在触发键所在的那一栏里，不伸到旁边去
+  align?: "start" | "end";
   /// 挂在滚动区上：宽度、内边距、纵向排列由它定（里面是 `Menu` 时不用给，Menu 自己定）
   className?: string;
   label: string;
@@ -54,6 +58,7 @@ export function FloatingLayer({
         height: el.offsetHeight - scroll.clientHeight + scroll.scrollHeight,
       },
       { width: window.innerWidth, height: window.innerHeight },
+      { align },
     );
     setPos((prev) =>
       prev &&

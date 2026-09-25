@@ -9,6 +9,7 @@ import {
   AgentIcon,
   BusySlot,
   Cap,
+  FadeViewport,
   FloatingLayer,
   FloatingToast,
   IconButton,
@@ -85,6 +86,7 @@ export function Sidebar(props: SidebarProps) {
   /// 往下滚过了（上面有项目被字标带挡住）：滚动区上沿画 16 渐隐，不让半截项目名硬切在字标下面。
   /// 只用上沿：下沿有吸底的 `+ 项目` 与它的线（不用渐隐）
   const scrolled = useEdgeFades(navRef).start;
+  const navFade = { start: scrolled, end: false };
 
   /// `+ 项目` 吸在滚动区底边时（下面还有没滚到的项目）上沿才出 1px row-line；项目少、它紧跟最后一项时不画。
   /// 判断靠哨兵：它排在 `+ 项目` 的原位末端（不随 sticky 移动），原位露在可见区里＝没吸住，
@@ -125,153 +127,154 @@ export function Sidebar(props: SidebarProps) {
         </h1>
       </div>
 
-      <nav
-        className="sidebar__nav"
-        aria-label="导航"
-        ref={navRef}
-        data-fade-top={scrolled ? "" : undefined}
-      >
-        {props.agents.length > 0 && (
-          <>
-            <div className="sidebar__head">
-              <SectionLabel>
-                <Cap>agent</Cap>
-              </SectionLabel>
-            </div>
-            {props.agents.map((a) => {
-              const on = selection.kind === "agent" && selection.id === a.id;
-              return (
-                <div key={a.id} className={`side-item${on ? " is-on" : ""}`}>
-                  <button
-                    type="button"
-                    className="side-item__main"
-                    aria-current={on ? "page" : undefined}
-                    onClick={() => props.onSelectAgent(a.id)}
-                  >
-                    <span className="side-item__icon">
-                      <AgentIcon id={a.id} name={a.name} size={15} />
-                    </span>
-                    <span className="side-item__name">{a.name}</span>
-                    {a.on && (
-                      <span className="side-item__dot">
-                        <Indicator on label="有能力开着、在生效" />
+      <FadeViewport fade={navFade} tone="shell" className="sidebar__scroll">
+        <nav className="sidebar__nav" aria-label="导航" ref={navRef}>
+          {props.agents.length > 0 && (
+            <>
+              <div className="sidebar__head">
+                <SectionLabel>
+                  <Cap>agent</Cap>
+                </SectionLabel>
+              </div>
+              {props.agents.map((a) => {
+                const on = selection.kind === "agent" && selection.id === a.id;
+                return (
+                  <div key={a.id} className={`side-item${on ? " is-on" : ""}`}>
+                    <button
+                      type="button"
+                      className="side-item__main"
+                      aria-current={on ? "page" : undefined}
+                      onClick={() => props.onSelectAgent(a.id)}
+                    >
+                      <span className="side-item__icon">
+                        <AgentIcon id={a.id} name={a.name} size={15} />
                       </span>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
-          </>
-        )}
-
-        {/* 小标题 `项目` + 右端排序下拉；`全局` 固定第一，不参与排序 */}
-        <div className="sidebar__head">
-          <SectionLabel action={<SortMenu value={props.sort} onChange={props.onSort} />}>
-            项目
-          </SectionLabel>
-        </div>
-        <div className={`side-item${isLocation(GLOBAL_KEY) ? " is-on" : ""}`}>
-          <button
-            type="button"
-            className="side-item__main"
-            aria-current={isLocation(GLOBAL_KEY) ? "page" : undefined}
-            onClick={() => props.onSelectLocation(GLOBAL_KEY)}
-          >
-            <span className="side-item__name">全局</span>
-          </button>
-        </div>
-        {props.projects.map((p) => {
-          const on = isLocation(p.key);
-          const lastActive = props.projectTimes.get(p.path)?.lastActive ?? null;
-          return (
-            <div
-              key={p.key}
-              className={`side-item${on ? " is-on" : ""}${menuFor === p.key ? " is-menu" : ""}`}
-              // 右键菜单只挂在手动添加的项目上，只有「从侧栏移除」（D18）；自动发现的没有菜单
-              onContextMenu={contextMenuHandler(
-                () =>
-                  p.manual && props.projectBusy === null
-                    ? [{ label: "从侧栏移除", run: () => remove(p, rowOf(p.key)) }]
-                    : [],
-                { onOpen: () => setMenuFor(p.key), onClose: () => setMenuFor(null) },
-              )}
-              data-project={p.key}
-            >
-              <button
-                type="button"
-                className="side-item__main"
-                aria-current={on ? "page" : undefined}
-                onClick={() => props.onSelectLocation(p.key)}
-              >
-                {/* 时间不写在侧栏上（侧栏只放名字）：悬停给完整路径和「活跃于 3 天前」 */}
-                <Tooltip
-                  fit="grow"
-                  content={
-                    <>
-                      {displayPath(p.path)}
-                      {lastActive !== null && (
-                        <>
-                          <br />
-                          活跃于 {relativeTime(lastActive)}
-                        </>
+                      <span className="side-item__name">{a.name}</span>
+                      {a.on && (
+                        <span className="side-item__dot">
+                          <Indicator on label="有能力开着、在生效" />
+                        </span>
                       )}
-                    </>
-                  }
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {/* 小标题 `项目` + 右端排序下拉；`全局` 固定第一，不参与排序 */}
+          <div className="sidebar__head">
+            <SectionLabel action={<SortMenu value={props.sort} onChange={props.onSort} />}>
+              项目
+            </SectionLabel>
+          </div>
+          <div className={`side-item${isLocation(GLOBAL_KEY) ? " is-on" : ""}`}>
+            <button
+              type="button"
+              className="side-item__main"
+              aria-current={isLocation(GLOBAL_KEY) ? "page" : undefined}
+              onClick={() => props.onSelectLocation(GLOBAL_KEY)}
+            >
+              <span className="side-item__name">全局</span>
+            </button>
+          </div>
+          {props.projects.map((p) => {
+            const on = isLocation(p.key);
+            const lastActive = props.projectTimes.get(p.path)?.lastActive ?? null;
+            return (
+              <div
+                key={p.key}
+                className={`side-item${on ? " is-on" : ""}${menuFor === p.key ? " is-menu" : ""}`}
+                // 右键菜单只挂在手动添加的项目上，只有「从侧栏移除」（D18）；自动发现的没有菜单
+                onContextMenu={contextMenuHandler(
+                  () =>
+                    p.manual && props.projectBusy === null
+                      ? [{ label: "从侧栏移除", run: () => remove(p, rowOf(p.key)) }]
+                      : [],
+                  { onOpen: () => setMenuFor(p.key), onClose: () => setMenuFor(null) },
+                )}
+                data-project={p.key}
+              >
+                <button
+                  type="button"
+                  className="side-item__main"
+                  aria-current={on ? "page" : undefined}
+                  onClick={() => props.onSelectLocation(p.key)}
                 >
-                  <span className="side-item__name">{p.label}</span>
-                </Tooltip>
-              </button>
-              {p.manual && (
-                <span className="side-item__remove">
-                  <IconButton
-                    icon={<IconClose />}
-                    title="从侧栏移除 · 不动磁盘上的文件"
-                    disabledReason={props.projectBusy !== null ? "正在读取，稍等" : undefined}
-                    onClick={() => remove(p, rowOf(p.key))}
-                  />
-                </span>
-              )}
-            </div>
-          );
-        })}
-        {/* `+ 项目` 是项目列表的最后一项，长相是侧栏的一行（不是键）：14px `+` + `项目`，ink-mute，
+                  {/* 时间不写在侧栏上（侧栏只放名字）：悬停给完整路径和「活跃于 3 天前」 */}
+                  <Tooltip
+                    fit="grow"
+                    content={
+                      <>
+                        {displayPath(p.path)}
+                        {lastActive !== null && (
+                          <>
+                            <br />
+                            活跃于 {relativeTime(lastActive)}
+                          </>
+                        )}
+                      </>
+                    }
+                  >
+                    <span className="side-item__name">{p.label}</span>
+                  </Tooltip>
+                </button>
+                {p.manual && (
+                  <span className="side-item__remove">
+                    <IconButton
+                      icon={<IconClose />}
+                      title="从侧栏移除 · 不动磁盘上的文件"
+                      disabledReason={props.projectBusy !== null ? "正在读取，稍等" : undefined}
+                      onClick={() => remove(p, rowOf(p.key))}
+                    />
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          {/* `+ 项目` 是项目列表的最后一项，长相是侧栏的一行（不是键）：14px `+` + `项目`，ink-mute，
           行高、左沿、悬停 surface 带都同项目行。列表长了它吸在滚动区底边、不跟着滚走（DESIGN「项目」段），
           只在吸住时上沿出 1px row-line */}
-        <div className="sidebar__add" data-stuck={addStuck || undefined}>
-          <div className="side-item side-item--add">
-            <ReasonTip reason={addLocked} fit="grow">
-              <button
-                type="button"
-                className="side-item__main"
-                title={addLocked}
-                disabled={addBusy || addLocked !== undefined}
-                aria-busy={addBusy || undefined}
-                onClick={props.onAddProject}
-              >
-                <BusySlot busy={addBusy} label="正在添加项目">
-                  <span className="side-item__icon">
-                    <IconPlus size={14} />
-                  </span>
-                  <span className="side-item__name">项目</span>
-                </BusySlot>
-              </button>
-            </ReasonTip>
+          <div className="sidebar__add" data-stuck={addStuck || undefined}>
+            <div className="side-item side-item--add">
+              <ReasonTip reason={addLocked} fit="grow">
+                <button
+                  type="button"
+                  className="side-item__main"
+                  title={addLocked}
+                  disabled={addBusy || addLocked !== undefined}
+                  aria-busy={addBusy || undefined}
+                  onClick={props.onAddProject}
+                >
+                  <BusySlot busy={addBusy} label="正在添加项目">
+                    <span className="side-item__icon">
+                      <IconPlus size={14} />
+                    </span>
+                    <span className="side-item__name">项目</span>
+                  </BusySlot>
+                </button>
+              </ReasonTip>
+            </div>
           </div>
-        </div>
-        {/* 吸底哨兵：`+ 项目` 原位的末端，不占高 */}
-        <div ref={addEndRef} className="sidebar__add-end" aria-hidden="true" />
-        {props.removed && (
-          <FloatingToast key={props.removed.at} align="start" anchor={() => props.removed?.anchor}>
-            <Toast
-              kind="success"
-              verb="已移除"
-              names={[props.removed.name]}
-              action={{ label: "撤销", onClick: props.onUndoRemove }}
-              onDismiss={props.onRemovedGone}
-            />
-          </FloatingToast>
-        )}
-      </nav>
+          {/* 吸底哨兵：`+ 项目` 原位的末端，不占高 */}
+          <div ref={addEndRef} className="sidebar__add-end" aria-hidden="true" />
+          {props.removed && (
+            <FloatingToast
+              key={props.removed.at}
+              align="start"
+              anchor={() => props.removed?.anchor}
+            >
+              <Toast
+                kind="success"
+                verb="已移除"
+                names={[props.removed.name]}
+                action={{ label: "撤销", onClick: props.onUndoRemove }}
+                onDismiss={props.onRemovedGone}
+              />
+            </FloatingToast>
+          )}
+        </nav>
+      </FadeViewport>
 
       {/* 贴侧栏底：设置（⌘, 与应用菜单「设置…」直达） */}
       <div className="sidebar__foot">
@@ -318,7 +321,7 @@ function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: Proje
         <IconChevronDown className="sidebar__sort-chevron" />
       </button>
       {open && button.current ? (
-        <FloatingLayer trigger={button.current} onClose={close} label="项目排序">
+        <FloatingLayer trigger={button.current} onClose={close} label="项目排序" align="end">
           <Menu autoFocus>
             {PROJECT_SORTS.map((s) => (
               <MenuItem

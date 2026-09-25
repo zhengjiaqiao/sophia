@@ -65,6 +65,17 @@ test("左右不越出窗口：右边放不下时右沿对齐触发控件，仍�
   assert.equal(leftEdge.left, LAYER_MARGIN);
 });
 
+test("align end：右沿对齐触发控件、向左展开（侧栏排序下拉留在侧栏里）；左边放不下改左对齐", () => {
+  // 侧栏右端的 `最近活跃 ˅`（x 230–340）：菜单 180 宽，右沿对齐 340，不伸进右边的机面
+  const end = placeLayer(at(100, 230, 110), { width: 180, height: 80 }, view, { align: "end" });
+  assert.equal(end.left + 180, 340);
+  // 默认（start）左沿对齐同一颗键：会伸出侧栏
+  assert.equal(placeLayer(at(100, 230, 110), { width: 180, height: 80 }, view).left, 230);
+  // 触发键太靠左：右对齐会出窗，改左对齐它
+  const tight = placeLayer(at(100, 20, 40), { width: 180, height: 80 }, view, { align: "end" });
+  assert.equal(tight.left, 20);
+});
+
 test("窗口比浮层还窄：贴左边距，不给负坐标", () => {
   const p = placeLayer(at(100, 50), { width: 400, height: 100 }, { width: 300, height: 720 });
   assert.equal(p.left, LAYER_MARGIN);

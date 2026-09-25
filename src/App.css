@@ -136,6 +136,12 @@ input:focus-visible {
 /* agent 段、项目段：可滚动的中段；设置贴底。
    不留下内边距：sticky 的 bottom: 0 量到内边距里面，`+ 项目` 吸底时下面那一条会露出滚过去的项目。
    列表与 `设置` 之间的 8 挪到 .sidebar__foot 的上内边距 */
+/* 滚动区上沿：往下滚过之后画 16 渐隐（shell → 透明），滚过去的项目不在字标带下面硬切。
+   量与画都归 ui（useEdgeFades + FadeViewport tone="shell"），只要上沿；这一层只占满余下的高度 */
+.sidebar__scroll {
+  flex: 1;
+}
+
 .sidebar__nav {
   flex: 1;
   min-height: 0;
@@ -302,20 +308,6 @@ input:focus-visible {
 
 .side-item--add:has(.side-item__main:disabled) .side-item__main {
   color: var(--ink-faint);
-}
-
-/* 滚动区上沿：往下滚过之后画 16 渐隐（shell → 透明），滚过去的项目不在字标带下面硬切。
-   量归 ui 的 useEdgeFades，画归壳（侧栏底色是 shell）。吸在滚动区顶上、不占位（负外距抵掉自身高度） */
-.sidebar__nav[data-fade-top]::before {
-  content: "";
-  position: sticky;
-  top: 0;
-  z-index: var(--z-fade);
-  display: block;
-  height: var(--fade-edge);
-  margin-bottom: calc(-1 * var(--fade-edge));
-  background: linear-gradient(to bottom, var(--shell), transparent);
-  pointer-events: none;
 }
 
 /* 设置：贴侧栏底，底距 10 */

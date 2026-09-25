@@ -5,7 +5,8 @@ import { edgeFades, NO_FADE, type EdgeFade } from "./edgeFades.ts";
 /// 滚动边缘渐隐（DESIGN「渐变只用于功能」）：可滚动区域哪一边还有被裁掉的内容，那一边出 16px 渐隐
 /// （`--fade-edge`，从底色渐到透明）。两件：
 /// - `useEdgeFades` 量：哪一边此刻有被裁掉的内容（滚动、容器改尺寸、内容变了都重量）
-/// - `FadeViewport` 画：包在滚动区外面，按量到的结果在上 / 下沿出渐隐（浮层里从 `paper`，机面上从 `face`）
+/// - `FadeViewport` 画：包在滚动区外面，按量到的结果在上 / 下沿出渐隐（浮层里从 `paper`，机面上从 `face`，
+///   侧栏里从 `shell`）。只要一边时调用方把另一边给 false（侧栏只要上沿：下沿有吸底的 `+ 项目`）
 /// 横向的（机面左右沿）只用得上量：画法归外壳。全应用只有这一份监听，页面不再各写一份
 
 export { edgeFades, NO_FADE } from "./edgeFades.ts";
@@ -49,8 +50,9 @@ export function useEdgeFades(ref: RefObject<HTMLElement | null>, axis: "y" | "x"
   return fade;
 }
 
-/// 带渐隐的外层：上 / 下还有被裁掉的内容时，那一边 16px 渐隐（从 paper 或 face，由 `tone` 定）。
-/// 滚动的是里面那一层（调用方的元素，挂 `useEdgeFades` 的 ref）
+/// 带渐隐的外层：上 / 下还有被裁掉的内容时，那一边 16px 渐隐（从 paper、face 或 shell，由 `tone` 定）。
+/// 滚动的是里面那一层（调用方的元素，挂 `useEdgeFades` 的 ref）。外层是纵向 flex、`min-height: 0`；
+/// 要它在父级的纵向 flex 里占满余下的高度，调用方经 `className` 给 `flex: 1`
 export function FadeViewport({
   fade,
   tone = "paper",
@@ -58,14 +60,14 @@ export function FadeViewport({
   children,
 }: {
   fade: EdgeFade;
-  /// 渐隐从哪种底色开始：浮层里是 paper，机面上是 face
-  tone?: "paper" | "face";
+  /// 渐隐从哪种底色开始：浮层里是 paper，机面上是 face，侧栏（机壳）上是 shell
+  tone?: "paper" | "face" | "shell";
   className?: string;
   children: ReactNode;
 }) {
   return (
     <div
-      className={`ss-layer__viewport${tone === "face" ? " ss-layer__viewport--face" : ""}${className ? ` ${className}` : ""}`}
+      className={`ss-layer__viewport${tone === "paper" ? "" : ` ss-layer__viewport--${tone}`}${className ? ` ${className}` : ""}`}
       data-fade-top={fade.start || undefined}
       data-fade-bottom={fade.end || undefined}
     >
