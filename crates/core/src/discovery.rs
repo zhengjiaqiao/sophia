@@ -24,6 +24,12 @@ struct HarnessSpec {
     global_dir: Vec<String>,
     #[serde(default)]
     detect_dir: Vec<String>,
+    /// agent 自带 skill 的目录（Codex 的 `skills/.system`）：只报数，不成来源
+    #[serde(default)]
+    system_skills_dir: Vec<String>,
+    /// 插件缓存：`<市场>/<插件>/<版本>/skills/<skill>/SKILL.md`：只报数，不成来源
+    #[serde(default)]
+    plugin_cache_dir: Vec<String>,
     #[serde(default)]
     universal: bool,
     /// 每个 agent 一个项目的 skill 目录模板，允许单个路径分量为 `*`
@@ -628,6 +634,20 @@ pub fn targets(
 /// 全部 harness，路径已按当前环境解析
 pub fn all_harnesses(env: &Env) -> Vec<Harness> {
     specs().iter().map(|s| resolve(s, env).0).collect()
+}
+
+/// harness 表里登记的「自带 skill 目录」与「插件缓存目录」（没登记的 agent 两个都是 None）
+pub fn outside_dirs(env: &Env, harness_id: &str) -> (Option<PathBuf>, Option<PathBuf>) {
+    specs()
+        .into_iter()
+        .find(|s| s.id == harness_id)
+        .map(|s| {
+            (
+                resolve_template(&s.system_skills_dir, env),
+                resolve_template(&s.plugin_cache_dir, env),
+            )
+        })
+        .unwrap_or((None, None))
 }
 
 /// 探测目录（detect_dir，缺省 global_dir）存在，且不是只装着通往 skills 的空壳

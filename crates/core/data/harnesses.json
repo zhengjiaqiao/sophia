@@ -1,8 +1,8 @@
 {
   "_notice": "Harness 目录表整理自 vercel-labs/skills (MIT, Copyright (c) Vercel, Inc.)，见仓库 NOTICE。",
   "harnesses": [
-    { "id": "claude-code", "display_name": "Claude Code", "project_dir": ".claude/skills", "global_dir": ["$CLAUDE_CONFIG_DIR/skills", "~/.claude/skills"], "detect_dir": ["$CLAUDE_CONFIG_DIR", "~/.claude"], "universal": false },
-    { "id": "codex", "display_name": "Codex", "project_dir": ".agents/skills", "global_dir": ["$CODEX_HOME/skills", "~/.codex/skills"], "detect_dir": ["$CODEX_HOME", "~/.codex"], "universal": true },
+    { "id": "claude-code", "display_name": "Claude Code", "project_dir": ".claude/skills", "global_dir": ["$CLAUDE_CONFIG_DIR/skills", "~/.claude/skills"], "detect_dir": ["$CLAUDE_CONFIG_DIR", "~/.claude"], "plugin_cache_dir": ["$CLAUDE_CONFIG_DIR/plugins/cache", "~/.claude/plugins/cache"], "universal": false },
+    { "id": "codex", "display_name": "Codex", "project_dir": ".agents/skills", "global_dir": ["$CODEX_HOME/skills", "~/.codex/skills"], "detect_dir": ["$CODEX_HOME", "~/.codex"], "system_skills_dir": ["$CODEX_HOME/skills/.system", "~/.codex/skills/.system"], "plugin_cache_dir": ["$CODEX_HOME/plugins/cache", "~/.codex/plugins/cache"], "universal": true },
     { "id": "cursor", "display_name": "Cursor", "project_dir": ".agents/skills", "global_dir": ["~/.cursor/skills"], "detect_dir": ["~/.cursor"], "universal": true },
     { "id": "opencode", "display_name": "OpenCode", "project_dir": ".agents/skills", "global_dir": ["$XDG_CONFIG_HOME/opencode/skills", "$APPDATA/opencode/skills", "~/.config/opencode/skills"], "detect_dir": ["$XDG_CONFIG_HOME/opencode", "$APPDATA/opencode", "~/.config/opencode"], "universal": true },
     { "id": "cline", "display_name": "Cline", "project_dir": ".agents/skills", "global_dir": ["~/.agents/skills"], "detect_dir": ["~/.cline"], "universal": true },

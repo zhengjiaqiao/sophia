@@ -88,6 +88,10 @@ export interface MatrixColumn {
   count: number;
   /// 列头提示框：`Claude Code · 41 个已加上`
   tip: string;
+  /// 列表外的 skill（自带、插件）个数：计数后跟 `+N`；不给就不出
+  more?: number;
+  /// 提示框在 `tip` 之后多出的几行（列表外的 skill 分类报数）
+  tipLines?: string[];
   /// 这一列的目录还不存在：图标外一圈虚线、名字退到 `ink-faint`、计数空（加上第一个时会自动创建）
   missing?: boolean;
 }
@@ -855,11 +859,29 @@ export default function Matrix(props: MatrixProps) {
       {columns.map((col) => (
         <div key={col.id} data-col={col.id} className="mx-head__col">
           {/* 列头只排序；悬停只出提示框，不出列带（D23） */}
-          <Tooltip content={col.tip} context="table" placement="bottom">
+          <Tooltip
+            content={
+              col.tipLines ? (
+                <>
+                  {col.tip}
+                  {col.tipLines.map((line) => (
+                    <span key={line}>
+                      <br />
+                      {line}
+                    </span>
+                  ))}
+                </>
+              ) : (
+                col.tip
+              )
+            }
+            context="table"
+            placement="bottom"
+          >
             <button
               type="button"
               className={`mx-colbtn${col.missing ? " is-missing" : ""}`}
-              aria-label={`${col.tip}，按这一列排序`}
+              aria-label={`${[col.tip, ...(col.tipLines ?? [])].join("；")}，按这一列排序`}
               onClick={() => sortBy(col.id)}
             >
               <span className="mx-colbtn__icon">
@@ -873,7 +895,10 @@ export default function Matrix(props: MatrixProps) {
                   <Cap>{col.scope}</Cap>
                 </span>
               ) : null}
-              <span className="mx-colbtn__count">{col.missing ? "" : col.count}</span>
+              <span className="mx-colbtn__count">
+                {col.missing ? "" : col.count}
+                {col.more ? <span className="mx-colbtn__more">+{col.more}</span> : null}
+              </span>
               <SortArrow active={sort.key === col.id} desc={sort.dir === "desc"} />
             </button>
           </Tooltip>

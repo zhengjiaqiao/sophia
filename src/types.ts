@@ -77,6 +77,13 @@ export interface DomainPage {
   broken: PlannedAction[];
 }
 
+/// 列表外的 skill 个数（core `outside_skills::OutsideSkills`）：agent 自带的、插件带的，只报数
+export interface OutsideSkills {
+  harnessId: string;
+  system: number;
+  plugin: number;
+}
+
 export interface Overview {
   domains: DomainPage[];
   sources: Source[];

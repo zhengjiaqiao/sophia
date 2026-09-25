@@ -39,6 +39,7 @@ import type {
   CellState,
   DomainPage,
   DomainRow,
+  OutsideSkills,
   Overview,
   SyncReport,
   Target,
@@ -78,6 +79,8 @@ interface KeepPane {
 
 export interface SkillsTabProps {
   overview: Overview | null;
+  /// 各 agent 自带的、插件带的 skill 个数：全局位置的列头报 `+N`
+  outsideSkills: OutsideSkills[];
   /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身在来源管理页上管理）
   autoLinks: AutoLink[];
   /// 写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
@@ -104,6 +107,7 @@ export interface SkillsTabProps {
 /// - 自动规则在背后做了事：右下（壳上那一叠）+ 撤销
 export default function SkillsTab({
   overview,
+  outsideSkills,
   autoLinks,
   onBusy,
   selectedKey,
@@ -1106,6 +1110,7 @@ export default function SkillsTab({
     <section className="mx-page">
       <DomainView
         overview={overview}
+        outsideSkills={outsideSkills}
         page={page}
         rows={visible}
         stateOf={stateOf}

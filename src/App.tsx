@@ -7,6 +7,7 @@ import type {
   GatewayState,
   McpOverview,
   McpReport,
+  OutsideSkills,
   Overview,
   ProjectTimes,
 } from "./types";
@@ -98,6 +99,8 @@ export default function App() {
   const [projectTimes, setProjectTimes] = useState<ReadonlyMap<string, ProjectTimes>>(new Map());
   // 自动同步规则；扫描时顺带取回，域页与添加页都用它
   const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
+  /// 各 agent 自带的、插件带的 skill 个数（位置页列头的 `+N`）；扫描时顺带取回，读不到就当没有
+  const [outsideSkills, setOutsideSkills] = useState<OutsideSkills[]>([]);
   const [backgroundMcpReport, setBackgroundMcpReport] = useState<McpReport | null>(null);
   /// MCP 扫描结果（侧栏项目列表要它）与模型状态（侧栏 agent 指示点要它）
   const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
@@ -173,13 +176,15 @@ export default function App() {
   /// 调用方 await 回来时拿到的是最新的
   const scanOnce = async () => {
     try {
-      const [next, projects, rules, mcp] = await Promise.all([
+      const [next, projects, rules, mcp, outside] = await Promise.all([
         api.scanAll(),
         api.listManualProjects(),
         api.listAutoLinks(),
         activeTabRef.current === "mcp" ? Promise.resolve(null) : api.scanMcp().catch(() => null),
+        api.outsideSkills().catch(() => []),
       ]);
       setOverview(next);
+      setOutsideSkills(outside);
       setManualProjects(projects);
       setAutoLinks(rules);
       if (mcp !== null) setMcpOverview(mcp);
@@ -502,6 +507,7 @@ export default function App() {
     skills: () => (
       <SkillsTab
         overview={overview}
+        outsideSkills={outsideSkills}
         autoLinks={autoLinks}
         onBusy={setBusyState}
         selectedKey={selectedKey}
