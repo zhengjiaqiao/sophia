@@ -8,7 +8,7 @@
   outline: none; /* 面板本身接焦点只为不让第一个控件抢到，不画焦点框 */
   display: flex;
   flex-direction: column;
-  padding: 12px 0 6px;
+  padding: var(--space-sm) 0 6px;
   border: var(--border-float);
   border-radius: var(--radius-float);
   background: var(--paper);

@@ -252,7 +252,7 @@ input:focus-visible {
   display: inline-flex;
   flex-shrink: 0;
   margin-left: auto;
-  padding-right: 4px;
+  padding-right: var(--space-xxs);
 }
 
 /* 手动项目的移除键：只在悬停 / 键盘聚焦时出现（① 回应只由用户唤起）；行尾右内距 3 */
