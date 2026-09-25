@@ -568,7 +568,7 @@ test("SectionSwitch 拨开关之后：开关原位锁住（过了 0.3 秒门槛�
   assert.doesNotMatch(html, /ss-spinner/);
 });
 
-test("RestartSlot（节头里开关左边 12）：待重启出紧凑键「重启生效」（与 卸下后台服务 同位同高），提示框写后果与代价、右对齐", () => {
+test("RestartSlot（节头里开关右边 12）：待重启出紧凑键「重启生效」（与 卸下后台服务 同位同高），提示框写后果与代价、左对齐键", () => {
   const html = render(
     RestartSlot,
     slotProps(withSelected({ enabled: true, needsCodexRestart: true })),
@@ -581,11 +581,11 @@ test("RestartSlot（节头里开关左边 12）：待重启出紧凑键「重启
     src.indexOf("export function RestartSlot"),
     src.indexOf("// ===== 节头：开关"),
   );
-  assert.doesNotMatch(slot, /align="start"/, "键在右端控件列：提示框、✓ 已生效都右对齐");
-  assert.match(slot, /<FloatingToast align="end" anchor=\{controlsOf\}>/);
+  assert.doesNotMatch(slot, /align="end"/, "键紧跟开关：提示框、✓ 已生效都左对齐键");
+  assert.match(slot, /<FloatingToast align="start">/);
 });
 
-test("第三方模型节头：右端开关，开关左边 12 是 重启生效 / 启动 Codex / 卸下后台服务（同一位）；重启确认锚在键下、右对齐开关", () => {
+test("第三方模型节头：开关紧跟节名，开关右边 12 是 重启生效 / 启动 Codex / 卸下后台服务（同一位）；重启确认锚在键下、左对齐键", () => {
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /PageHeadActions|models-headctl/);
   assert.match(
@@ -596,15 +596,14 @@ test("第三方模型节头：右端开关，开关左边 12 是 重启生效 / 
     src,
     /onRestart=\{\(\) => setConfirmRestart\(restartAnchor\(keyEl\.current\) \?\? null\)\}/,
   );
-  assert.match(src, /anchor=\{confirmRestart\}\s*align="end"\s*onConfirm=/);
-  // 节头骨架：右端控件列（键 12 开关，开关在最右）
+  assert.match(src, /anchor=\{confirmRestart\}\s*onConfirm=/);
+  // 节头骨架：节名 + 12 + 开关 + 12 + 键（开关紧跟节名，不推到右端）
   const section = readFileSync(new URL("../src/ui/Section.tsx", import.meta.url), "utf8");
-  assert.match(
-    section,
-    /ss-section__end" data-section-controls="">[^]*ss-section__actions[^]*ss-section__control/,
-  );
+  assert.match(section, /ss-section__title[^]*ss-section__control[^]*ss-section__actions/);
+  assert.doesNotMatch(section, /data-section-controls/);
   const css = readFileSync(new URL("../src/ui/Section.css", import.meta.url), "utf8");
-  assert.match(css, /\.ss-section__end \{[^}]*gap: var\(--space-sm\);[^}]*margin-left: auto;/);
+  assert.match(css, /\.ss-section__head \{[^}]*gap: var\(--space-sm\);/);
+  assert.doesNotMatch(css, /margin-left: auto/);
 });
 
 test("RestartSlot 重启中：0.3 秒门槛之前键照旧、点不动；已生效：键的原位下方浮起白窗", () => {

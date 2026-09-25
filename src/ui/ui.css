@@ -490,10 +490,10 @@ textarea,
 }
 
 /* ===== 3.2 勾选框 Checkbox（DESIGN「勾选框」）=====
-   16 方、mark 4 圆角。未勾：平贴的 paper 白面 + 1px ink-faint 内环（2026-09-25 真机：灰底 + 深环在字旁像一块灰砖，
+   14 方、mark 4 圆角（2026-09-25 真机：16 在 15 号字旁偏大，改 14，同 macOS 勾选框）。未勾：平贴的 paper 白面 + 1px ink-faint 内环（2026-09-25 真机：灰底 + 深环在字旁像一块灰砖，
    和文字不协调——白面细环是 macOS 勾选框的样子，只剩一道线）；手靠近：raise-hover 抬起；
    勾上：墨底白勾（ink 底、无内环、平贴，中心 10px face 对勾 1.8）；半选：同墨底 + 8×2 face 短横。
-   视觉 16、命中区用伪元素撑到 24，不动 border；全应用只有这一个尺寸。
+   视觉 14、命中区用伪元素撑到 24，不动 border；全应用只有这一个尺寸。
    行悬停钩子：行元素加 data-checkrow，悬停这一行时它里面的勾选框进「手靠近」态 */
 .ss-checkbox {
   position: relative;
@@ -502,8 +502,8 @@ textarea,
   justify-content: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   padding: 0;
   border: 1px solid var(--ink-faint);
   border-radius: var(--radius-mark);
@@ -520,7 +520,7 @@ textarea,
 .ss-checkbox::before {
   content: "";
   position: absolute;
-  inset: -4px;
+  inset: -5px;
 }
 
 /* 手靠近（悬停它自己，或悬停它所在的行）：抬起迎手 */
@@ -786,7 +786,7 @@ textarea,
 .ss-tipwrap.is-explain:has(> .ss-checkbox)::before {
   content: "";
   position: absolute;
-  inset: -4px;
+  inset: -5px;
 }
 
 .ss-tip {
@@ -1294,14 +1294,13 @@ textarea,
   color: var(--ink-mute);
 }
 
-/* 路径铭牌：凹面（recess 底、recess-input 内凹、control 7），等宽 12 ink 字，内边距 10 12。
+/* 路径铭牌：平的浅灰面（recess 底、不画内凹阴影、control 7），等宽 12 ink 字，内边距 10 12。
    V4 不再用墨底铭牌——墨面只有两义 */
 .ss-confirm__nameplate {
   margin-top: var(--space-sm);
   padding: 10px 12px;
   border-radius: var(--radius-control);
   background: var(--recess);
-  box-shadow: var(--recess-input);
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: var(--size-label);
@@ -1651,8 +1650,21 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
   transform: rotate(180deg);
 }
 
+/* 行首没有勾选框的行（网关行）：拉手常显、放在名字前；收起朝右 ›、拉开转 90° 朝下 ˅（访达惯例） */
+.ss-drawerhandle.is-lead {
+  opacity: 1;
+}
+
+.ss-drawerhandle.is-lead .ss-drawerhandle__glyph {
+  transform: rotate(-90deg);
+}
+
+.ss-drawerhandle.is-lead.is-open .ss-drawerhandle__glyph {
+  transform: none;
+}
+
 /* 抽屉 Drawer：这一行下面拉出的一格凹槽。外层管高度（0 ↔ 内容高，260ms 机械缓动；grid 行 0fr ↔ 1fr
-   让「auto 高」也能过渡），里层是凹槽本身：recess 底 + recess-tabs 内凹、control 7、内边距 10 12。
+   让「auto 高」也能过渡），里层是槽本身：平的 recess 底（不画内凹阴影——阴影只在必要处表示层次，2026-09-25 真机走查）、control 7、内边距 10 12。
    上 6 下 10，抽屉下 1px row-line。左沿由调用方对齐这一行的名字（给 .ss-drawer__well 加左外边距） */
 .ss-drawer {
   display: grid;
@@ -1678,7 +1690,6 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
   padding: 10px 12px;
   border-radius: var(--radius-control);
   background: var(--recess);
-  box-shadow: var(--recess-tabs);
 }
 
 /* ===== 14. 减少动效：状态变化即时发生，信息不减 =====

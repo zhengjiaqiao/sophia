@@ -188,7 +188,6 @@ test("tokens：V4 的 14 个色、六档字号、V4 圆角、层次 token、28/2
   }
   // 层次：投影只说离机面多高，四档九个值，逐字（凹 / 抬起 / 浮；平无投影）；遮罩 ink 16%
   for (const [name, value] of [
-    ["recess-input", "inset 0 1px 0 rgba(28,28,26,.06)"],
     ["recess-tabs", "inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04)"],
     ["recess-track", "inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04)"],
     [
@@ -821,9 +820,9 @@ test("Switch 禁用：带原因；平贴、无投影、不响应悬停按住与�
   }
 });
 
-// 2026-09-25 勾选框定稿：16 方、未勾平贴 paper 白面 + ink-faint 内环（真机走查后由 surface 改白）、手靠近 raise-hover、勾上墨底白勾
+// 2026-09-25 勾选框定稿：14 方（真机走查由 16 改小）、未勾平贴 paper 白面 + ink-faint 内环（真机走查后由 surface 改白）、手靠近 raise-hover、勾上墨底白勾
 // （10px / 1.8 统一对勾）、半选 8×2 短横，命中区 24。原用例钉的 13 方、paper 底是被取代的规范
-test("Checkbox 16px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 CheckMark 同一个记号；行悬停钩子 data-checkrow", async () => {
+test("Checkbox 14px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 CheckMark 同一个记号；行悬停钩子 data-checkrow", async () => {
   assert.match(
     render(Checkbox, { checked: false, label: "defuddle" }),
     /role="checkbox" aria-checked="false"/,
@@ -843,8 +842,8 @@ test("Checkbox 16px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 Che
   assert.match(off, /disabled=""/);
   assert.match(off, /title="已添加"/);
   const rule = cssRule(uiCss, ".ss-checkbox");
-  assert.match(rule, /width:\s*16px/);
-  assert.match(rule, /height:\s*16px/);
+  assert.match(rule, /width:\s*14px/);
+  assert.match(rule, /height:\s*14px/);
   // 勾选框是记号：mark 4 圆角；未勾＝平贴的 paper 白面 + 1px ink-faint 内环；对勾是 face
   assert.match(rule, /border-radius:\s*var\(--radius-mark\)/);
   assert.match(rule, /border:\s*1px solid var\(--ink-faint\)/);
@@ -883,8 +882,8 @@ test("Checkbox 16px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 Che
     glyph(render(CheckMark, { on: "mixed" })),
     glyph(render(Checkbox, { checked: "mixed", label: "x" })),
   );
-  // 命中区用伪元素撑到 24（16 + 4 × 2），不动 border
-  assert.match(cssRule(uiCss, ".ss-checkbox::before"), /inset:\s*-4px/);
+  // 命中区用伪元素撑到 24（14 + 5 × 2），不动 border
+  assert.match(cssRule(uiCss, ".ss-checkbox::before"), /inset:\s*-5px/);
 });
 
 test("✓ 只有一种画法：IconTick 10px / 1.8（旧名 IconCheck 已删），不再按 16px 另画", () => {
@@ -1200,10 +1199,10 @@ test("能点的控件：包层不占盒、不出提示框、不抢焦点（禁�
 
 test("禁用的控件不吃指针，悬停与按下落在包层上；复选框的命中区挪到包层", () => {
   assert.match(cssRule(uiCss, ".ss-tipwrap.is-explain > :disabled"), /pointer-events:\s*none/);
-  // 勾选框视觉 16、命中区 24：禁用时包层撑出 4
+  // 勾选框视觉 14、命中区 24：禁用时包层撑出 5
   assert.match(
     cssRule(uiCss, ".ss-tipwrap.is-explain:has(> .ss-checkbox)::before"),
-    /inset:\s*-4px/,
+    /inset:\s*-5px/,
   );
   // 浅键是一颗有键面的键，不再用负外边距伸命中区：包层上也不用挪
   assert.doesNotMatch(uiCss, /\.ss-tipwrap\.is-explain:has\(> \.ss-btn--quiet\)/);
@@ -1696,7 +1695,7 @@ test("Confirm 铭牌：凹面等宽 ink 字、路径可拖选；主动作禁用�
   const plate = cssRule(uiCss, ".ss-confirm__nameplate");
   // V4 不再用墨底铭牌：墨面只有两义
   assert.match(plate, /background:\s*var\(--recess\)/);
-  assert.match(plate, /box-shadow:\s*var\(--recess-input\)/);
+  assert.doesNotMatch(plate, /box-shadow/, "铭牌是平的浅灰面：阴影只给浮在上面的东西");
   assert.match(plate, /color:\s*var\(--ink\)/);
   assert.match(plate, /padding:\s*10px 12px/);
   assert.match(plate, /font-family:\s*var\(--font-mono\)/);
@@ -2000,7 +1999,7 @@ test("DrawerHandle：名字后一枚 10px 线形箭头（1.4、ink-mute），无
   );
 });
 
-test("Drawer：一格凹槽（recess + recess-tabs、control 7、内边距 10 12），上 6 下 10、下沿 row-line；高度 0 ↔ 内容高 260ms 机械缓动", () => {
+test("Drawer：一格平的浅灰槽（recess 底、不画内凹阴影、control 7、内边距 10 12），上 6 下 10、下沿 row-line；高度 0 ↔ 内容高 260ms 机械缓动", () => {
   const open = render(Drawer, { open: true, id: "d1", children: "传输 stdio" });
   assert.equal(
     open,
@@ -2022,7 +2021,11 @@ test("Drawer：一格凹槽（recess + recess-tabs、control 7、内边距 10 12
   assert.match(room, /border-bottom:\s*var\(--border-row\)/);
   const well = cssRule(uiCss, ".ss-drawer__well");
   assert.match(well, /background:\s*var\(--recess\)/);
-  assert.match(well, /box-shadow:\s*var\(--recess-tabs\)/);
+  assert.doesNotMatch(
+    well,
+    /box-shadow/,
+    "抽屉不靠阴影分层：拉开在行下、左沿对齐名字，关系已经清楚",
+  );
   assert.match(well, /border-radius:\s*var\(--radius-control\)/);
   assert.match(well, /padding:\s*10px 12px/);
   assert.equal(DRAWER_MS, 260);

@@ -9,9 +9,13 @@ import { IconChevronDown } from "./icons.tsx";
 ///   只有一枚 10px 线形箭头（1.4 描边、`ink-mute`），没有键面、不抬起；命中区 18 方。
 ///   **平时不画**：悬停这一行、键盘焦点在这一行上、已拉开时才出——行元素加 `data-drawer-row` 作钩子。
 ///   收起朝下 ˅，拉开时 260ms 弹簧翻转朝上 ˄。点它只切换抽屉，不冒泡到行（行自己的点击另有用处）。
-/// - `Drawer` 抽屉：这一行下面的一格凹槽（`recess` 底 + `recess-tabs` 内凹、`control` 7、内边距 10 12），
+/// - `Drawer` 抽屉：这一行下面的一格平的浅灰槽（`recess` 底、不画内凹阴影、`control` 7、内边距 10 12），
 ///   上 6 下 10、下沿 1px `row-line`；高度 0 ↔ 内容高 260ms 机械缓动，`prefers-reduced-motion` 下即时。
 ///   左沿对齐这一行的名字，由调用方给 `.ss-drawer__well` 加左外边距（经 `className` 挂自己的类）。
+///
+/// **行首没有勾选框的行**（网关行）用 `lead`：拉手常显、放在名字前面（拉手 + 6 + 名字），收起朝右 ›、
+/// 拉开转 90° 朝下 ˅（访达列表的展开三角惯例）——前面没有勾选框，拉手不会和它挤在一起，常显也不重复
+/// （2026-09-25 产品负责人真机：「前面没有选择框的时候，展开按钮不需要悬浮才出现，可以直接展示在文字前面」）。
 ///
 /// 谁开抽屉、Esc 收起、表格一次只开一格，都是调用方的状态；这里只管长相与动效。
 
@@ -25,9 +29,11 @@ export interface DrawerHandleProps {
   label: string;
   /// 抽屉的 id（`Drawer` 的 `id`），给 aria-controls
   controls?: string;
+  /// 常显、放在名字前（行首没有勾选框的行）：收起 ›、拉开 ˅
+  lead?: boolean;
 }
 
-export function DrawerHandle({ open, onToggle, label, controls }: DrawerHandleProps) {
+export function DrawerHandle({ open, onToggle, label, controls, lead = false }: DrawerHandleProps) {
   const onClick = (e: MouseEvent<HTMLButtonElement>) => {
     // 行本身点了也拉开（点名字、点整行）：别让这一下再冒到行上切第二次
     e.stopPropagation();
@@ -36,7 +42,7 @@ export function DrawerHandle({ open, onToggle, label, controls }: DrawerHandlePr
   return (
     <button
       type="button"
-      className={open ? "ss-drawerhandle is-open" : "ss-drawerhandle"}
+      className={`ss-drawerhandle${lead ? " is-lead" : ""}${open ? " is-open" : ""}`}
       aria-label={label}
       aria-expanded={open}
       aria-controls={controls}

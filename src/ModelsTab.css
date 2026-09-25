@@ -296,11 +296,6 @@
   color: var(--ink-mute);
 }
 
-/* 这一家的 `已选`（与节头 `在用` 同一种片）：上下 10 */
-.models-inuse.gw-row__chosen {
-  margin: 10px 0 0;
-}
-
 /* 勾选没写成 / 删 / 重连没成的灰面板 */
 .gw-row__panel {
   display: flex;
@@ -338,7 +333,6 @@
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
   background: var(--recess);
-  box-shadow: var(--recess-input);
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--size-caption);

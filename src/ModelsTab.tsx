@@ -91,21 +91,13 @@ export interface SectionNoticeState {
   providerId?: string;
 }
 
-// ===== 节头里开关左边 12：重启生效 / 启动 Codex =====
+// ===== 节头里开关右边 12：重启生效 / 启动 Codex =====
 
-/// 节头右端的控件列（ui/Section 的 `data-section-controls`）：右沿＝开关右沿。不在节头里（单独渲染）时退到自己的父元素
-const controlsOf = (el: Element): Element | null =>
-  el.closest("[data-section-controls]") ?? el.parentElement;
+/// 重启确认的锚：那颗键（确认框出在键正下方、左沿对齐键——键紧跟在开关后面）
+const restartAnchor = (key: Element | null): ConfirmAnchor | undefined => anchorOf(key);
 
-/// 重启确认的锚：上下沿取那颗键（确认框出在键正下方），右沿取控件列（＝开关右沿）
-const restartAnchor = (key: Element | null): ConfirmAnchor | undefined => {
-  const a = anchorOf(key);
-  if (!a || !key) return a;
-  return { ...a, right: anchorOf(controlsOf(key))?.right ?? a.right };
-};
-
-/// 开关左边 12 那一格（DESIGN「改动待生效：重启生效与启动 Codex」）：键（紧凑 24，与 `卸下后台服务` 同位同高）/
-/// 刻度 + 正在重启 / 键消失、原位下方浮起 `✓ 已生效`（约 4 秒淡出，右沿对齐开关：键在右端控件列）。
+/// 开关右边 12 那一格（DESIGN「改动待生效：重启生效与启动 Codex」）：键（紧凑 24，与 `卸下后台服务` 同位同高）/
+/// 刻度 + 正在重启 / 键消失、原位下方浮起 `✓ 已生效`（约 4 秒淡出，左沿对齐原来的键）。
 /// Codex 没在跑时同一格换成 `启动 Codex`（同一套）。
 /// 忙碌过了 0.3 秒门槛才出现，之前键照旧、点不动。失败的灰面板不在这里——挂在节头下，键照常留着可以再点
 export function RestartSlot({
@@ -125,7 +117,7 @@ export function RestartSlot({
   onRestart: () => void;
   onLaunch?: () => void;
   onDoneDismiss?: () => void;
-  /// 键的包层：重启确认锚在它下面（右沿对齐开关）
+  /// 键的包层：重启确认锚在它下面（左沿对齐键）
   keyRef?: Ref<HTMLSpanElement>;
 }) {
   const waiting = phase.kind === "restarting" || phase.kind === "launching";
@@ -149,10 +141,10 @@ export function RestartSlot({
     );
   }
   if (phase.kind === "done" || phase.kind === "launched") {
-    // 键已消失：原来那颗键的位置留一个不占宽的锚，结果浮在节头控件列正下方 4、右沿对齐开关
+    // 键已消失：原来那颗键的位置留一个不占宽的锚，结果浮在它正下方 4、左沿对齐
     return (
       <span className="models-restart models-restart--done">
-        <FloatingToast align="end" anchor={controlsOf}>
+        <FloatingToast align="start">
           <Toast
             kind="success"
             verb={phase.kind === "done" ? "已生效" : "已启动"}
@@ -165,7 +157,7 @@ export function RestartSlot({
   if (onLaunch && showLaunchKey(state, phase)) {
     return (
       <span className="models-restart-tip" ref={keyRef}>
-        <Tooltip content={LAUNCH_TIP} placement="bottom" align="end" nowrap>
+        <Tooltip content={LAUNCH_TIP} placement="bottom" align="start" nowrap>
           {busy ? (
             <Button size="compact" disabled disabledReason="正在处理上一步">
               {`启动 ${tool.name}`}
@@ -182,7 +174,7 @@ export function RestartSlot({
   if (!showRestartKey(state, phase)) return null;
   return (
     <span className="models-restart-tip" ref={keyRef}>
-      <Tooltip content={RESTART_TIP} placement="bottom" align="end" nowrap>
+      <Tooltip content={RESTART_TIP} placement="bottom" align="start" nowrap>
         {busy ? (
           <Button size="compact" disabled disabledReason="正在处理上一步">
             重启生效
@@ -686,7 +678,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   const uninstallKey =
     serviceLeftover(state) && phase.kind !== "switching" ? (
       <BusySlot busy={uninstalling} label="正在卸下后台服务" className="models-restart">
-        <Tooltip content={UNINSTALL_TIP} placement="bottom" align="end" nowrap>
+        <Tooltip content={UNINSTALL_TIP} placement="bottom" align="start" nowrap>
           {busy && !uninstalling ? (
             <Button size="compact" disabled disabledReason="正在处理上一步">
               卸下后台服务
@@ -768,7 +760,6 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
           title={`重启 ${tool.name}？`}
           confirmLabel="重启"
           anchor={confirmRestart}
-          align="end"
           onConfirm={() => void restart()}
           onCancel={() => setConfirmRestart(null)}
         >

@@ -93,7 +93,7 @@ test("骨架：小标 `网关` + 右端 `+ 网关`（默认键），一家一行
   assert.doesNotMatch(html, /ss-subpage|Codex 的网关|src-row/);
 });
 
-test("行：短名 + 拉手（悬停才出）；第二行 `地址 · 已连接 · 已选 1 / 2`（地址去掉协议头，截断才提示）；行尾铅笔 + 垃圾桶（一对图标键）", () => {
+test("行：拉手（常显，在名字前）+ 短名；第二行 `地址 · 已连接 · 已选 1 / 2`（地址去掉协议头，截断才提示）；行尾铅笔 + 垃圾桶（一对图标键）", () => {
   const html = block({
     providers: [
       ap([model({ id: "azure/gpt-4.1", selected: true }), model({ id: "azure/o3" })]),
@@ -101,11 +101,11 @@ test("行：短名 + 拉手（悬停才出）；第二行 `地址 · 已连接 �
     ],
   });
   const [first, second] = rows(html);
-  // 点整行拉开抽屉：行是拉手的悬停钩子；名字 + 拉手（收着朝下）；进这一页时每行都收着
+  // 点整行拉开抽屉；前面没有勾选框：拉手常显、在名字前（收着朝右）；进这一页时每行都收着
   assert.match(first, /<div class="gw-row__main" data-drawer-row="">/);
   assert.match(
     first,
-    /gw-row__title"><span class="gw-row__label">ap-gateway<\/span><button type="button" class="ss-drawerhandle" aria-label="ap-gateway 的模型" aria-expanded="false" aria-controls="gw-drawer-ap">/,
+    /gw-row__title"><button type="button" class="ss-drawerhandle is-lead" aria-label="ap-gateway 的模型" aria-expanded="false" aria-controls="gw-drawer-ap">[^]*?<\/button><span class="gw-row__label">ap-gateway<\/span>/,
   );
   assert.doesNotMatch(html, /gw-row__body|is-open|gw-row__caret|gw-row__name/);
   assert.match(first, /gw-row__url">ap-gateway\.example\.com\/v1</);
@@ -123,7 +123,7 @@ test("行：短名 + 拉手（悬停才出）；第二行 `地址 · 已连接 �
   assert.equal(displayUrl("https://openrouter.ai/api/v1/"), "openrouter.ai/api/v1");
 });
 
-test("抽屉＝从这家挑模型：限制说明（全文）→ 这一家的 `已选` 模型片 → 勾选列表；勾选没写成的灰面板在这一段里", () => {
+test("抽屉＝从这家挑模型：限制说明（全文）→ 勾选列表（不再列这一家的 `已选` 片：与节头 `在用` 重复）；勾选没写成的灰面板在这一段里", () => {
   const html = block(
     {
       enabled: true,
@@ -144,20 +144,17 @@ test("抽屉＝从这家挑模型：限制说明（全文）→ 这一家的 `�
   const [first, second] = rows(html);
   assert.match(first, /^<div class="gw-row is-open"/);
   assert.match(first, /class="ss-drawer is-open gw-row__drawer" id="gw-drawer-ap"/);
-  assert.match(first, /ss-drawerhandle is-open"[^>]*aria-expanded="true"/);
+  assert.match(first, /ss-drawerhandle is-lead is-open"[^>]*aria-expanded="true"/);
   const note = first.indexOf("gw-row__note");
-  const chosen = first.indexOf("gw-row__chosen");
   const notice = first.indexOf("没加上 o3");
   const list = first.indexOf("gw-row__list");
-  assert.ok(note > 0 && note < chosen && chosen < notice && notice < list);
+  assert.ok(note > 0 && note < notice && notice < list);
   assert.match(
     first,
     /gw-row__note">只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了</,
   );
-  // 已选：与节头 `在用` 同一种片（白胶囊带 ×），只列这一家已选的两个
-  assert.match(first, /gw-row__chosen"><span class="models-inuse__label">已选<\/span>/);
-  assert.equal((first.match(/class="ss-modelchip"/g) ?? []).length, 2);
-  assert.match(first, /aria-label="移除 azure\/gpt-4\.1"[^]*aria-label="移除 zhipu\/glm-4\.6"/);
+  // 抽屉里没有 `已选` 片（节头的 `在用` 已经列了）
+  assert.doesNotMatch(first, /gw-row__chosen|ss-modelchip/);
   assert.equal((first.match(/role="option"/g) ?? []).length, 3);
   assert.equal((first.match(/data-checkrow=""/g) ?? []).length, 3, "勾选框行挂悬停钩子");
   assert.doesNotMatch(first, /models-option__gateway/);
@@ -165,14 +162,7 @@ test("抽屉＝从这家挑模型：限制说明（全文）→ 这一家的 `�
   assert.match(first, /role="tooltip"[^>]*>Codex 还在用它的 2 个模型，先关掉第三方模型再删</);
   // 各自独立：没展开的那一行收着
   assert.match(second, /aria-expanded="false"/);
-  assert.doesNotMatch(second, /gw-row__body|gw-row__chosen/);
-  // 一个都没选的一家：抽屉里没有 `已选` 这一行
-  const none = block(
-    { providers: [ap([model({ id: "azure/o3" })])] },
-    { expanded: new Set(["ap"]) },
-  );
-  assert.match(none, /gw-row__note/);
-  assert.doesNotMatch(none, /gw-row__chosen|ss-modelchip/);
+  assert.doesNotMatch(second, /gw-row__body/);
 });
 
 test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏进悬停），行尾动作列出 `再试一次`；展开区说还没拉到模型", () => {

@@ -22,7 +22,6 @@
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
   background: var(--recess);
-  box-shadow: var(--recess-input);
   color: var(--ink-mute);
   transition: border-color var(--motion-fast) var(--ease-mech);
 }

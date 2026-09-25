@@ -5,7 +5,6 @@ import { useLeaveGuard } from "./shell/leaveGuard.ts";
 import type { ContextMenuItem } from "./contextMenu.ts";
 import {
   ADD_GATEWAY_BLOCKED,
-  effectiveModels,
   gatewayFacts,
   gatewayShortName,
   parseBackendError,
@@ -390,17 +389,11 @@ export function GatewayBlock({
     );
   };
 
-  /// 抽屉里＝从这家挑模型：限制说明（不截断）→ 这一家的 `已选` 模型片（上下 10，没选不出；× 与节头
-  /// `在用` 同一件事）→ 勾选列表。抽屉左沿对齐网关名
+  /// 抽屉里＝从这家挑模型：限制说明（不截断）→ 勾选列表。抽屉左沿对齐网关名。
+  /// 不再列这一家的 `已选` 片：与节头 `在用` 重复（2026-09-25 产品负责人真机：「确实重复了和上面的」）
   const body = (p: GatewayProvider) => (
     <div className="gw-row__body">
       <p className="gw-row__note">{tool.limitations}</p>
-      <ModelChipRow
-        label="已选"
-        className="gw-row__chosen"
-        rows={effectiveModels(state).filter((r) => r.provider.id === p.id)}
-        onRemove={(provider, model) => onToggleModel(provider, model.id)}
-      />
       {notice && notice.providerId === p.id ? (
         <div className="gw-row__panel">
           <NoticePanel message={notice.message} reason={notice.reason} onClose={onCloseNotice} />
@@ -427,7 +420,8 @@ export function GatewayBlock({
     onToggleRow(p.id);
   };
 
-  /// 名字 + 6 + 拉手。表单开着时拉手常显朝上，推回去＝收起表单（有改动先问）
+  /// 拉手 + 6 + 名字：网关行前面没有勾选框，拉手常显、放在名字前（收起 ›、拉开 ˅）。
+  /// 表单开着时拉手朝下，推回去＝收起表单（有改动先问）
   const title = (
     label: string,
     form: boolean,
@@ -436,13 +430,14 @@ export function GatewayBlock({
     drawerId: string,
   ) => (
     <span className="gw-row__title">
-      <span className="gw-row__label">{label}</span>
       <DrawerHandle
+        lead
         open={open}
         onToggle={onToggle}
         label={form ? `${label} 的地址与密钥` : `${label} 的模型`}
         controls={drawerId}
       />
+      <span className="gw-row__label">{label}</span>
     </span>
   );
 

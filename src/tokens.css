@@ -95,7 +95,6 @@
      抬起只给手会碰的三样：键、页签滑块、开关滑块；它们的 1px 环由 --raise* 的第一层给，不另画描边。
      rgba 只能出现在这几行定义里（lint-ui 的 elevation 规则） ---- */
   /* prettier-ignore */
-  --recess-input: inset 0 1px 0 rgba(28,28,26,.06); /* 凹：输入框、模型框 */
   /* prettier-ignore */
   --recess-tabs: inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04); /* 凹：页签槽 */
   /* prettier-ignore */

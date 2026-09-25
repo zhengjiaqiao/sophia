@@ -14,7 +14,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ===== 页面头右端：筛选框（定宽 200、高 28 的凹面）===== */
+/* ===== 页面头右端：筛选框（定宽 200、高 28；recess 底 + 1px hairline 边，不画内凹阴影）===== */
 .mx-filter {
   display: flex;
   align-items: center;
@@ -26,7 +26,6 @@
   border: 1px solid var(--hairline);
   border-radius: var(--radius-control);
   background: var(--recess);
-  box-shadow: var(--recess-input);
   color: var(--ink-mute);
   cursor: text;
   transition: border-color var(--motion-fast) var(--ease-mech);

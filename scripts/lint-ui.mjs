@@ -31,7 +31,6 @@ const RADII = new Set(["0", "0px", "1px", "4px", "5px", "7px", "10px", "12px", "
 /// 层次 token（DESIGN「Elevation & Depth」）：投影只说离机面多高，四档——凹（recess-*）/ 平（无）/
 /// 抬起（raise*，只给键、页签滑块、开关滑块）/ 浮（elev-float）。box-shadow 只能是它们、或它们用逗号连起来
 const ELEVATIONS = new Set([
-  "var(--recess-input)",
   "var(--recess-tabs)",
   "var(--recess-track)",
   "var(--raise)",
