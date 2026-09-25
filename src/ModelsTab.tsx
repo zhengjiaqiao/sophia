@@ -336,7 +336,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   });
   const hint = (
     <HintStrip open={codexHint.visible} onDismiss={codexHint.dismiss}>
-      {HINTS["first-codex"].sentence}
+      {HINTS["first-codex"]({ agents: [], skills: 0 })}
     </HintStrip>
   );
 

@@ -57,7 +57,9 @@ async function loadedStore(initial: string[] = []) {
 
 // ---- 登记表 ----
 
-test("登记表三条，句子与 DESIGN 表逐字一致", () => {
+const EXAMPLE = { agents: ["Claude Code", "Codex", "OpenCode"], skills: 31 };
+
+test("登记表三条，句子（用 DESIGN 表头的例子数据）与 DESIGN 表逐字一致", () => {
   const design = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8");
   assert.deepEqual(Object.keys(HINTS).sort(), [...HINT_ORDER].sort());
   assert.equal(HINT_ORDER.length, 3);
@@ -66,28 +68,27 @@ test("登记表三条，句子与 DESIGN 表逐字一致", () => {
     assert.ok(row, `DESIGN 表里没有 ${id}`);
     const cells = row.split("|").map((c) => c.trim());
     // | id | 位置 | 何时出 | 说明句 | 做了就算学会 |
-    assert.equal(cells[4], `\`${HINTS[id].text}\``, id);
+    assert.equal(cells[4], `\`${HINTS[id](EXAMPLE)}\``, id);
   }
+});
+
+test("句子只说不确定的事：扫描说读了哪些目录、找到几个、没有改动文件；不复述界面、不写小标", () => {
+  const scan = HINTS["first-scan-skills"](EXAMPLE);
+  assert.match(
+    scan,
+    /^读了 Claude Code、Codex、OpenCode 的 skill 目录，找到 31 个 skill，没有改动任何文件。/,
+  );
+  assert.match(scan, /链接[^]*原件不动/);
+  assert.doesNotMatch(scan, /一行一个|一列一个|第一次用/);
+  assert.equal(
+    HINTS["first-scan-empty"]({ agents: [], skills: 0 }),
+    "读了本机的 skill 目录，没有找到 skill，没有改动任何文件。",
+  );
+  assert.match(HINTS["first-codex"](EXAMPLE), /config\.toml[^]*关掉就原样删掉[^]*重启 Codex/);
 });
 
 test("登记表顺序：首次扫描两条在前，Codex 页在后", () => {
   assert.deepEqual(HINT_ORDER, ["first-scan-skills", "first-scan-empty", "first-codex"]);
-});
-
-test("句中的 ● ○ 画成表格里的真记号（已加上 / 没加上），文字不丢", () => {
-  const html = renderToStaticMarkup(
-    createElement(Fragment, null, HINTS["first-scan-skills"].sentence),
-  );
-  const dots = [...html.matchAll(/data-dot="([a-z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(dots, ["linked", "missing"]);
-  assert.ok(!html.includes("●") && !html.includes("○"), "字形 ● ○ 不该留在句子里");
-  const words = html.replace(/<[^>]+>/g, "");
-  assert.equal(words, HINTS["first-scan-skills"].text.replace(/[●○]/g, ""));
-});
-
-test("没有记号的句子原样是字符串", () => {
-  assert.equal(HINTS["first-scan-empty"].sentence, HINTS["first-scan-empty"].text);
-  assert.equal(HINTS["first-codex"].sentence, HINTS["first-codex"].text);
 });
 
 // ---- 纯规则 ----
@@ -294,16 +295,16 @@ const strip = (open: boolean, over: Record<string, unknown> = {}) =>
   render(HintStrip, {
     open,
     onDismiss: () => {},
-    children: HINTS["first-scan-skills"].sentence,
+    children: HINTS["first-scan-skills"](EXAMPLE),
     ...over,
   });
 
-test("提示条：小标 第一次用 + 说明句 + × 图标键（知道了，不再提示）", () => {
+test("提示条：只有说明句 + × 图标键（知道了，不再提示），没有小标", () => {
   const html = strip(true);
   assert.match(html, /class="ss-hint"/);
   assert.match(html, /role="note"/);
-  assert.match(html, /<span class="ss-hint__label">第一次用<\/span>/);
-  assert.match(html, /class="ss-hint__text">一行一个 skill，一列一个 agent。/);
+  assert.doesNotMatch(html, /ss-hint__label|第一次用/);
+  assert.match(html, /class="ss-hint__text">读了 Claude Code、Codex、OpenCode 的 skill 目录/);
   assert.match(
     html,
     /class="ss-iconbtn"[^>]*title="知道了，不再提示"[^>]*aria-label="知道了，不再提示"/,
@@ -318,10 +319,6 @@ test("提示条：挂上时是收起态，展开由下一帧加 is-open（过渡
 
 test("提示条：open=false 挂上时什么都不画", () => {
   assert.equal(strip(false), "");
-});
-
-test("提示条：小标可换", () => {
-  assert.match(strip(true, { label: "试试" }), /ss-hint__label">试试</);
 });
 
 test("提示条样式：shell 底、face 12 圆角、无边无投影、高 40 内边距 10 14、上下 16、260ms ease-mech、减少动效即时", () => {
@@ -341,8 +338,6 @@ test("提示条样式：shell 底、face 12 圆角、无边无投影、高 40 �
   assert.match(block(".ss-hint"), /grid-template-rows 260ms var\(--ease-mech\)/);
   assert.match(block(".ss-hint"), /opacity 260ms var\(--ease-mech\)/);
   assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.ss-hint \{\s*transition: none;/);
-  assert.match(block(".ss-hint__label"), /font-size: var\(--size-label\)/);
-  assert.match(block(".ss-hint__label"), /color: var\(--ink-mute\)/);
   assert.match(block(".ss-hint__text"), /font-size: var\(--size-caption\)/);
   assert.match(block(".ss-hint__text"), /color: var\(--ink\);/);
 });

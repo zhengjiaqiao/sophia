@@ -1,4 +1,4 @@
-/// 新手提示（DESIGN「组件 › 新手提示条 HintStrip」「设置 › 关于」）。
+/// 新手提示（DESIGN「组件 › 新手提示条 HintStrip」）。
 ///
 /// 第一次走到某处时在内容上方铺一条说明；关掉（×）或做了它教的事就不再出。
 /// 看过的 id 存 core（`settings.json` 的 `seenHints`），这里是全应用共用的一个模块级小 store：
@@ -9,9 +9,7 @@
 /// - `×` 关掉＝记看过；首次扫描两条互斥，关掉其中一条＝两条都记看过（用户不要引导）
 /// - 学会（做了它教的事）＝只记它自己，并收起
 /// - 页面上已有灰面板 / 确认时让位（调用方传 `blocked`）：这次到访不再出，下次再出
-import { createElement, useEffect, useState, useSyncExternalStore } from "react";
-import type { ReactNode } from "react";
-import { StateDot } from "./ui/StateDot.tsx";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { api } from "./api.ts";
 
 export type HintId = "first-scan-skills" | "first-scan-empty" | "first-codex";
@@ -23,39 +21,28 @@ export const HINT_ORDER: readonly HintId[] = [
   "first-codex",
 ];
 
-export interface HintEntry {
-  /// 说明句原文，照 DESIGN 表逐字；● ○ 在渲染时换成表格里的真记号
-  text: string;
-  /// 渲染用：句中 ● ○ 换成 `StateDot`
-  sentence: ReactNode;
+/// 句子要用到的现场数据：这一轮读了哪些 agent 的目录、找到几个 skill
+export interface HintContext {
+  /// 有目录、这一轮读过的 agent 名（`Claude Code`、`Codex`）
+  agents: readonly string[];
+  /// 表里的 skill 数（＝列头 `名称 N`）
+  skills: number;
 }
 
-/// 句中的 ● ○ 画成表格里的真记号（已加上 / 没加上），其余原样
-function withMarks(text: string): ReactNode {
-  const parts = text.split(/([●○])/);
-  if (parts.length === 1) return text;
-  return parts.map((part, i) => {
-    if (part === "●") return createElement(StateDot, { key: i, dot: "linked", label: "实心点" });
-    if (part === "○") return createElement(StateDot, { key: i, dot: "missing", label: "空心环" });
-    return part;
-  });
-}
+/// 「读了」后面那一截：agent 名是西文，前面空一格；没有有目录的 agent 时写「本机的」
+const readWhat = (agents: readonly string[]) =>
+  agents.length > 0 ? ` ${agents.join("、")} 的 skill 目录` : "本机的 skill 目录";
 
-function entry(text: string): HintEntry {
-  return { text, sentence: withMarks(text) };
-}
-
-/// 今天的三条（DESIGN「今天有三条」）。以后加新的，同一个组件、同一套规则，并在 DESIGN 的表里登记
-export const HINTS: Record<HintId, HintEntry> = {
-  "first-scan-skills": entry(
-    "一行一个 skill，一列一个 agent。● 已加上，○ 没加上——点一下格子就加上或移除。",
-  ),
-  "first-scan-empty": entry(
-    "Sophia 把各个 agent 的 skill 放在一张表里。先按右上角 + 来源，加一个 skill 文件夹。",
-  ),
-  "first-codex": entry(
-    "打开第三方模型，Codex 就能用你在下面网关里选的模型；改了之后重启 Codex 才生效。",
-  ),
+/// 今天的三条（DESIGN「今天有三条」）。句子只说用户此刻不确定的事——刚才做了什么、动没动我的文件、
+/// 点下去会发生什么——不复述界面上看得见的东西（⑧ 文字提供确定性；2026-09-25 产品负责人真机：
+/// 「不应该写显而易见的事情，应该提示的是让用户感到不确定的东西」）。以后加新的，同一个组件、同一套规则，
+/// 并在 DESIGN 的表里登记
+export const HINTS: Record<HintId, (ctx: HintContext) => string> = {
+  "first-scan-skills": ({ agents, skills }) =>
+    `读了${readWhat(agents)}，找到 ${skills} 个 skill，没有改动任何文件。点格子加上的是指向原件的链接，再点一下就拿掉，原件不动。`,
+  "first-scan-empty": ({ agents }) => `读了${readWhat(agents)}，没有找到 skill，没有改动任何文件。`,
+  "first-codex": () =>
+    "打开后，Sophia 在 ~/.codex/config.toml 里加两行设置，请求经本机转给你在网关里选的模型；关掉就原样删掉。改了之后要重启 Codex 才生效。",
 };
 
 /// 首次扫描那两条互斥：关掉其中一条，两条都记看过

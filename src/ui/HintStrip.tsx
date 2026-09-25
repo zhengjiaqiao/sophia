@@ -9,8 +9,9 @@ import "./HintStrip.css";
 /// 嵌在页面流里的一条浅灰条：`shell` 底、`face` 12 圆角、无边无投影；高 40（两行自适应，内边距 10 14），
 /// 宽由调用方的容器给（776，左沿对齐表格），组件 `width: 100%`。**上下外距 16 由组件自带**：
 /// 收起时外距与高度一起滑回 0，下方内容回到原位，调用方不要再给它留间距。
-/// 左端小标 `第一次用`（12 ink-mute）+ 12 + 说明句（13 ink），右端 × 图标键（提示框「知道了，不再提示」）。
-/// 与灰面板（`surface` + `!` + 动作键）靠颜色、左端记号、右端动作三处分开；不用橙、猫、图标。
+/// 只有说明句（13 ink）+ 右端 × 图标键（提示框「知道了，不再提示」）；不写「第一次用」之类的小标
+/// （2026-09-25 产品负责人真机：不需要）。与灰面板（`surface` + `!` + 动作键）靠颜色、左端记号、右端动作分开；
+/// 不用橙、猫、图标。
 ///
 /// 出现 / 收起：淡入淡出 + 高度 0 ↔ 40，260ms `--ease-mech`，推动下方内容；减少动效时即时。
 /// 何时出由 `src/hints.ts` 的 `useHint` 决定，这里只管长相与进出。
@@ -18,11 +19,9 @@ import "./HintStrip.css";
 export interface HintStripProps {
   /// 显示与否；变 false 时先收起、动画走完再卸下
   open: boolean;
-  /// 左端小标，默认 `第一次用`
-  label?: string;
   /// 点 ×：知道了，不再提示
   onDismiss: () => void;
-  /// 说明句，一句话、不超过两行；句中的记号用 `StateDot`
+  /// 说明句，不超过两行：只说用户此刻不确定的事（刚才做了什么、动没动文件、点下去会怎样）
   children: ReactNode;
 }
 
@@ -37,7 +36,7 @@ function reducedMotion(): boolean {
   );
 }
 
-export function HintStrip({ open, label = "第一次用", onDismiss, children }: HintStripProps) {
+export function HintStrip({ open, onDismiss, children }: HintStripProps) {
   /// 在不在 DOM 里：收起动画期间仍在
   const [mounted, setMounted] = useState(open);
   /// 展开态：先以收起态挂上，再加上它，过渡才有起点
@@ -72,14 +71,13 @@ export function HintStrip({ open, label = "第一次用", onDismiss, children }:
       ref={ref}
       className={shown ? "ss-hint is-open" : "ss-hint"}
       role="note"
-      aria-label={label}
+      aria-label="提示"
       aria-hidden={open ? undefined : true}
       // 收起途中不再可点、不可聚焦
       inert={!open}
     >
       <div className="ss-hint__clip">
         <div className="ss-hint__bar">
-          <span className="ss-hint__label">{label}</span>
           <span className="ss-hint__text">{children}</span>
           <span className="ss-hint__close">
             <IconButton

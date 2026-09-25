@@ -257,6 +257,11 @@ export default function SkillsTab({
     blocked: hintBlocked,
   });
   const learnedCell = skillsHint.learned;
+  // 提示句用的现场数据：这一轮读了哪些 agent 的目录（有目录的列）、表里几个 skill（＝列头 `名称 N`）
+  const hintCtx = {
+    agents: targets.filter((t) => t.exists).map((t) => t.label),
+    skills: page?.rows.length ?? 0,
+  };
 
   const targetOf = (targetId: string): Target | null =>
     pages.flatMap((p) => p.targets).find((t) => t.id === targetId) ?? null;
@@ -1004,7 +1009,7 @@ export default function SkillsTab({
         />
         <div className="mx-hint">
           <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
-            {HINTS["first-scan-empty"].sentence}
+            {HINTS["first-scan-empty"](hintCtx)}
           </HintStrip>
         </div>
         <Empty
@@ -1120,12 +1125,12 @@ export default function SkillsTab({
         cellBusy={splitBusy}
         hint={
           <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss}>
-            {HINTS["first-scan-skills"].sentence}
+            {HINTS["first-scan-skills"](hintCtx)}
           </HintStrip>
         }
         emptyHint={
           <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
-            {HINTS["first-scan-empty"].sentence}
+            {HINTS["first-scan-empty"](hintCtx)}
           </HintStrip>
         }
         barToast={
