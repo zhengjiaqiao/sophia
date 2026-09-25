@@ -158,12 +158,6 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   display: inline-flex;
 }
 
-/* `重新显示新手提示`：检查更新那一行下、左对齐 */
-.settings-page__hints {
-  display: flex;
-  margin-top: 10px;
-}
-
 /* 更新待办条：关于下，上距 14 */
 .settings-page__update {
   margin-top: 14px;

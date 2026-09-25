@@ -2,7 +2,7 @@
 ///
 /// 第一次走到某处时在内容上方铺一条说明；关掉（×）或做了它教的事就不再出。
 /// 看过的 id 存 core（`settings.json` 的 `seenHints`），这里是全应用共用的一个模块级小 store：
-/// 读一次、乐观更新后写 core。页面用 `useHint`，设置页用 `useHasAnySeen` / `resetHints`，不进 App。
+/// 读一次、乐观更新后写 core。页面用 `useHint`，不进 App。
 ///
 /// 规则（DESIGN 表下那一段）：
 /// - 一次只出一条：整个应用同一时刻最多一条可见，几条同时有资格时按登记表顺序取第一条
@@ -85,11 +85,10 @@ export function pickHint(
 export interface HintPersist {
   list(): Promise<string[]>;
   mark(id: string): Promise<void>;
-  reset(): Promise<void>;
 }
 
 export interface HintSnapshot {
-  /// 看过表读到了没有（没读到时一条都不出，`hasAnySeen` 为 false）
+  /// 看过表读到了没有（没读到时一条都不出）
   loaded: boolean;
   /// 看过的 id（读到的 ∪ 这次运行里记下的）
   seen: ReadonlySet<string>;
@@ -108,9 +107,6 @@ export interface HintStore {
   dismiss(id: HintId): void;
   /// 做了它教的事；已看过时什么也不做（点格子这种高频动作可以放心每次都调）
   learn(id: HintId): void;
-  hasAnySeen(): boolean;
-  /// 清空看过表（设置 › 关于 `重新显示新手提示`）。先清本地、再写 core；写失败回滚并抛出
-  reset(): Promise<void>;
 }
 
 export function createHintStore(persist: HintPersist): HintStore {
@@ -184,23 +180,6 @@ export function createHintStore(persist: HintPersist): HintStore {
     },
     dismiss: (id) => mark(dismissIds(id)),
     learn: (id) => mark(learnIds(id)),
-    hasAnySeen: () => snapshot.seen.size > 0,
-    async reset() {
-      await store.load();
-      const prevLoaded = loaded;
-      const prevMarked = marked;
-      loaded = new Set();
-      marked = new Set();
-      emit();
-      try {
-        await persist.reset();
-      } catch (err) {
-        loaded = prevLoaded;
-        marked = prevMarked;
-        emit();
-        throw err;
-      }
-    },
   };
   return store;
 }
@@ -209,7 +188,6 @@ export function createHintStore(persist: HintPersist): HintStore {
 export const hintStore: HintStore = createHintStore({
   list: () => api.listSeenHints(),
   mark: (id) => api.markHintSeen(id),
-  reset: () => api.resetSeenHints(),
 });
 
 export interface UseHintOptions {
@@ -274,23 +252,4 @@ export function useHint(id: HintId, { eligible, blocked = false }: UseHintOption
     dismiss: () => hintStore.dismiss(id),
     learned: () => hintStore.learn(id),
   };
-}
-
-/// 设置页决定出不出 `重新显示新手提示`：看过表非空才出
-export function hasAnySeen(): boolean {
-  return hintStore.hasAnySeen();
-}
-
-/// 同上，订阅变化并触发读取：清空后那一行随之消失
-export function useHasAnySeen(): boolean {
-  const snap = useSyncExternalStore(hintStore.subscribe, hintStore.getSnapshot);
-  useEffect(() => {
-    void hintStore.load();
-  }, []);
-  return snap.seen.size > 0;
-}
-
-/// 清空看过表，之后每条提示在它的位置再出一次。失败时抛出（界面照旧，由调用方说）
-export function resetHints(): Promise<void> {
-  return hintStore.reset();
 }

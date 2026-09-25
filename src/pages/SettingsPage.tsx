@@ -9,7 +9,6 @@ import { AgentIcon, BusySlot, NoticePanel, Button, FloatingToast, Toast, Tooltip
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { updateCheckFailure } from "../updateText.ts";
-import { resetHints, useHasAnySeen } from "../hints.ts";
 import { ShellPage } from "../shell/PageHead.tsx";
 import "./SettingsPage.css";
 
@@ -21,8 +20,7 @@ import "./SettingsPage.css";
 /// 行高 36；默认只列已安装的，其余收在「显示未安装的 N 个」（默认键紧凑）后面。**最多显示 4 个**（上限来自 core，
 /// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
 /// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
-/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24，应用内查，不跳 GitHub）；
-/// 下一行 `重新显示新手提示`（默认键紧凑，只在有提示被关掉或学会过时出现）。
+/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24，应用内查，不跳 GitHub）。
 /// 应用菜单「关于 Sophia」「检查更新…」停在这一节（`aboutRequest`）。
 ///
 /// 改一个生效一个，**没有「保存」按钮**。
@@ -194,21 +192,6 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
   const [checkFailed, setCheckFailed] = useState<string | null>(null);
   const dismissLatest = useCallback(() => setLatest(0), []);
 
-  /// `重新显示新手提示`：看过表非空才出；点完清空，键下方浮起 `✓ 新手提示会重新出现`（浮着的这几秒
-  /// 键还留着，不让纸窗的锚一点就没了）；没清成在同一处说原因
-  const anySeen = useHasAnySeen();
-  const [hintsNote, setHintsNote] = useState<{ at: number; failed?: string } | null>(null);
-  const dismissHintsNote = useCallback(() => setHintsNote(null), []);
-  const showHints = async () => {
-    setHintsNote(null);
-    try {
-      await resetHints();
-      setHintsNote({ at: Date.now() });
-    } catch (e) {
-      setHintsNote({ at: Date.now(), failed: String(e) });
-    }
-  };
-
   /// 刚取消勾选的那一项：它正下方浮起一句说明，约 4 秒淡出（`at` 让连着取消两次时计时从头来）
   const [unchecked, setUnchecked] = useState<{ id: string; at: number } | null>(null);
   const dismissUnchecked = useCallback(() => setUnchecked(null), []);
@@ -374,33 +357,8 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
             ) : null}
           </span>
         </div>
-        {/* 检查更新的结果（待办条 / 查不成的一句）紧跟在 `检查更新` 那一行下（② 就近），新手提示那一行在它后面 */}
+        {/* 检查更新的结果（待办条 / 查不成的一句）紧跟在 `检查更新` 那一行下（② 就近） */}
         {notice === null ? null : <div className="settings-page__update">{notice}</div>}
-        {anySeen || hintsNote ? (
-          <div className="settings-page__hints">
-            <span className="settings-page__check">
-              <Button size="compact" onClick={() => void showHints()}>
-                重新显示新手提示
-              </Button>
-              {hintsNote ? (
-                <FloatingToast key={hintsNote.at} align="start">
-                  {hintsNote.failed === undefined ? (
-                    <Toast kind="success" verb="新手提示会重新出现" onDismiss={dismissHintsNote} />
-                  ) : (
-                    <Toast
-                      tier="notice"
-                      kind="cannot"
-                      verb="没清掉看过的新手提示"
-                      reason={hintsNote.failed}
-                      onDismiss={dismissHintsNote}
-                      onClose={dismissHintsNote}
-                    />
-                  )}
-                </FloatingToast>
-              ) : null}
-            </span>
-          </div>
-        ) : null}
       </div>
     </ShellPage>
   );

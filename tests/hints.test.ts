@@ -18,13 +18,12 @@ const {
 } = await import("../src/hints.ts");
 const { HintStrip } = await import("../src/ui/HintStrip.tsx");
 
-/// 假的 core：记下每次调用；list / mark / reset 的结果可控
+/// 假的 core：记下每次调用；list / mark 的结果可控
 function fakePersist(initial: string[] = []) {
   const calls: string[] = [];
   let stored = [...initial];
   let failList = false;
   let failMark = false;
-  let failReset = false;
   const persist = {
     async list() {
       calls.push("list");
@@ -36,11 +35,6 @@ function fakePersist(initial: string[] = []) {
       if (failMark) throw new Error("写不进");
       if (!stored.includes(id)) stored.push(id);
     },
-    async reset() {
-      calls.push("reset");
-      if (failReset) throw new Error("清不掉");
-      stored = [];
-    },
   };
   return {
     persist,
@@ -48,7 +42,6 @@ function fakePersist(initial: string[] = []) {
     stored: () => stored,
     failList: (v: boolean) => (failList = v),
     failMark: (v: boolean) => (failMark = v),
-    failReset: (v: boolean) => (failReset = v),
   };
 }
 
@@ -293,46 +286,6 @@ test("订阅者在出现 / 收起时收到通知", async () => {
   off();
   store.claim("first-codex");
   assert.equal(n, 2);
-});
-
-test("hasAnySeen：没读到、看过表为空都是 false；关掉或学会后 true", async () => {
-  const f = fakePersist();
-  const store = createHintStore(f.persist);
-  assert.equal(store.hasAnySeen(), false);
-  await store.load();
-  assert.equal(store.hasAnySeen(), false);
-  store.learn("first-codex");
-  assert.equal(store.hasAnySeen(), true);
-  const { store: s2 } = await loadedStore(["first-scan-empty"]);
-  assert.equal(s2.hasAnySeen(), true);
-});
-
-test("重新显示：清空看过表、写 core，之后每条提示再出一次", async () => {
-  const { store, calls, stored } = await loadedStore(["first-codex", "first-scan-empty"]);
-  store.claim("first-codex");
-  assert.equal(store.getSnapshot().visible, null);
-  await store.reset();
-  assert.equal(store.hasAnySeen(), false);
-  assert.equal(store.getSnapshot().visible, "first-codex");
-  assert.deepEqual(stored(), []);
-  assert.equal(calls.at(-1), "reset");
-});
-
-test("重新显示写 core 失败：回滚到原来的看过表并抛出", async () => {
-  const { store, failReset } = await loadedStore(["first-codex"]);
-  store.learn("first-scan-skills");
-  failReset(true);
-  await assert.rejects(store.reset(), /清不掉/);
-  assert.deepEqual([...store.getSnapshot().seen].sort(), ["first-codex", "first-scan-skills"]);
-  assert.equal(store.hasAnySeen(), true);
-});
-
-test("重新显示先等看过表读到，读到的旧记录不会在清空后又回来", async () => {
-  const f = fakePersist(["first-codex"]);
-  const store = createHintStore(f.persist);
-  await store.reset();
-  assert.equal(store.hasAnySeen(), false);
-  assert.deepEqual(f.calls, ["list", "reset"]);
 });
 
 // ---- 提示条 ----

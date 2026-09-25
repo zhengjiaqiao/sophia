@@ -214,16 +214,6 @@ impl Store {
         settings.seen_hints.push(id.to_string());
         self.save_settings(&settings)
     }
-
-    /// 清空看过的新手提示（设置 › 重新显示新手提示）；本来就空时不写盘
-    pub fn reset_seen_hints(&self) -> io::Result<()> {
-        let mut settings = self.load_settings()?;
-        if settings.seen_hints.is_empty() {
-            return Ok(());
-        }
-        settings.seen_hints.clear();
-        self.save_settings(&settings)
-    }
 }
 
 /// `project_added_at` 的 key：规范化后的路径文本
@@ -668,7 +658,7 @@ mod tests {
 
     /// 新手提示看过表：旧文件没有字段读成空；记一个去重、空串忽略；存盘字段名 `seenHints`；清空后为空
     #[test]
-    fn seen_hints_mark_dedupe_and_reset() {
+    fn seen_hints_mark_dedupe() {
         let t = TempTree::new();
         let dir = t.dir("data/SymSync");
         std::fs::write(
@@ -696,20 +686,9 @@ mod tests {
         );
         assert_eq!(raw["disabledHarnesses"], serde_json::json!(["codex"]));
         assert_eq!(raw["manualSources"], serde_json::json!(["/a/skills"]));
-
-        s.reset_seen_hints().unwrap();
-        assert!(s.seen_hints().unwrap().is_empty());
-        let reread = s.load_settings().unwrap();
-        assert_eq!(reread.disabled_harnesses, vec!["codex".to_string()]);
-        // 清空后再记照常
-        s.mark_hint_seen("first-scan-empty").unwrap();
-        assert_eq!(
-            s.seen_hints().unwrap(),
-            vec!["first-scan-empty".to_string()]
-        );
     }
 
-    /// 没有 settings.json 时：读成空，空串不建文件，清空也不建文件
+    /// 没有 settings.json 时：读成空，空串不建文件
     #[test]
     fn seen_hints_without_settings_file() {
         let t = TempTree::new();
@@ -717,7 +696,6 @@ mod tests {
         let s = Store::new(dir.clone());
         assert!(s.seen_hints().unwrap().is_empty());
         s.mark_hint_seen("").unwrap();
-        s.reset_seen_hints().unwrap();
         assert!(!dir.join("settings.json").exists());
     }
 
