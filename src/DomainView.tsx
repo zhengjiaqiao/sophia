@@ -528,7 +528,7 @@ export default function DomainView(props: DomainViewProps) {
       hint={props.hint}
       emptyHint={props.emptyHint}
       nameLabel="名称"
-      nameTip="列表里只出现两种 skill：原件就在这个位置下的，和在某个 agent 下有链接的"
+      nameTip="列出这个位置各个来源里的全部 skill。已经链接到这里的来源会自动加进来，在「管理来源」里增删"
       nameCount={matrixRows.length}
       dotWords="skill"
       filterText={props.filterText}
