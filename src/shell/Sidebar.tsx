@@ -14,6 +14,7 @@ import {
   IconClose,
   IconPlus,
   IconSettings,
+  IconChevronDown,
   IconTick,
   Indicator,
   ReasonTip,
@@ -99,10 +100,10 @@ export function Sidebar(props: SidebarProps) {
     const end = addEndRef.current;
     if (!nav || !end || typeof IntersectionObserver === "undefined") return;
     const inset = parseFloat(getComputedStyle(nav).paddingBottom) || 0;
-    const observer = new IntersectionObserver(
-      ([entry]) => setAddStuck(!entry.isIntersecting),
-      { root: nav, rootMargin: `0px 0px ${-inset}px 0px` },
-    );
+    const observer = new IntersectionObserver(([entry]) => setAddStuck(!entry.isIntersecting), {
+      root: nav,
+      rootMargin: `0px 0px ${-inset}px 0px`,
+    });
     observer.observe(end);
     return () => observer.disconnect();
   }, []);
@@ -296,7 +297,7 @@ export function Sidebar(props: SidebarProps) {
 const rowOf = (key: string): Element | null =>
   document.querySelector(`.side-item[data-project="${CSS.escape(key)}"]`);
 
-/// 小标题行右端的排序下拉：`最近活跃 ▾`，点开两项的小浮层，当前项前打对勾（`IconTick`，与勾选框同一枚）。
+/// 小标题行右端的排序下拉：`最近活跃 ˅`（记号是统一的线形箭头 `IconChevronDown`），点开两项的小浮层，当前项前打对勾（`IconTick`，与勾选框同一枚）。
 /// 点外面、按 Esc 关闭，不铺透明罩。选择记在本机，下次打开照旧
 function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: ProjectSort) => void }) {
   const [open, setOpen] = useState(false);
@@ -332,7 +333,8 @@ function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: Proje
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        {current.label} ▾
+        {current.label}
+        <IconChevronDown className="sidebar__sort-chevron" />
       </button>
       {open && (
         <div className="sidebar__sort-menu" role="menu" aria-label="项目排序">

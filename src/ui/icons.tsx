@@ -140,6 +140,29 @@ export function IconTick() {
   );
 }
 
+/// 下拉 / 展开的记号：全应用只有这一枚（2026-09-25 产品负责人：「这种展开的按钮，箭头应该保持一致」）——
+/// 10px 线形 ˅、1.4 描边、圆头圆角，与勾选框的对勾同一套画法。抽屉拉手、目标框、排序下拉都用它；
+/// 不用排版字符 ▾ ▸（字形随字体变、粗细对不上）。朝向由调用方转（拉开时抽屉翻转 180°）
+export function IconChevronDown({ className }: { className?: string } = {}) {
+  return (
+    <svg
+      className={className ? `ss-chevron ${className}` : "ss-chevron"}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M1.5 3.5 5 7 8.5 3.5" />
+    </svg>
+  );
+}
+
 // ---- 显示窗里的另两个状态记号：只跟在一句话或一个读数前面，不给命中区 ----
 
 /// 做不成：⊘

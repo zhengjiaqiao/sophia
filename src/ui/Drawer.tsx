@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
+import { IconChevronDown } from "./icons.tsx";
 
 /// 抽屉（DESIGN「抽屉（展开与收起）」，2026-09-25 取代 `▸ / ▾` 字符）：展开＝从机面里拉出一格抽屉。
 ///
@@ -41,21 +42,7 @@ export function DrawerHandle({ open, onToggle, label, controls }: DrawerHandlePr
       aria-controls={controls}
       onClick={onClick}
     >
-      <svg
-        className="ss-drawerhandle__glyph"
-        width="10"
-        height="10"
-        viewBox="0 0 10 10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <path d="M1.5 3.5 5 7 8.5 3.5" />
-      </svg>
+      <IconChevronDown className="ss-drawerhandle__glyph" />
     </button>
   );
 }

@@ -22,6 +22,7 @@ import {
   Confirm,
   FloatingToast,
   IconButton,
+  IconChevronDown,
   IconClose,
   Switch,
   Toast,
@@ -393,20 +394,7 @@ function useRuleControls(
           )}
         </span>
         {/* 下拉记号：看得出这组图标能点开改（⑧ 外观说明如何操作） */}
-        <svg
-          className="srcrow__chevron"
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M2.5 4 5 6.5 7.5 4" />
-        </svg>
+        <IconChevronDown className="srcrow__chevron" />
       </button>
     </Tooltip>
   );

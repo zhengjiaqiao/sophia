@@ -168,6 +168,9 @@ input:focus-visible {
 }
 
 .sidebar__sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 0;
   border: 0;
   background: none;
@@ -181,6 +184,15 @@ input:focus-visible {
 .sidebar__sort-button:hover,
 .sidebar__sort-button[aria-expanded="true"] {
   color: var(--ink);
+}
+
+/* 下拉记号：统一的 10px 线形箭头（IconChevronDown）；打开时翻转朝上，与抽屉拉手同一个动作 */
+.sidebar__sort-chevron {
+  transition: transform var(--dur-drawer) var(--ease-mech);
+}
+
+.sidebar__sort-button[aria-expanded="true"] .sidebar__sort-chevron {
+  transform: rotate(180deg);
 }
 
 /* 两项的小浮层：纸浮层（paper + hairline 边 + float 12 + 浮层投影） */

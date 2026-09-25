@@ -821,7 +821,7 @@ test("Switch 禁用：带原因；平贴、无投影、不响应悬停按住与�
   }
 });
 
-// 2026-09-25 勾选框定稿：16 方、未勾平贴 surface + ink-faint 内环、手靠近 paper + raise-hover、勾上墨底白勾
+// 2026-09-25 勾选框定稿：16 方、未勾平贴 paper 白面 + ink-faint 内环（真机走查后由 surface 改白）、手靠近 raise-hover、勾上墨底白勾
 // （10px / 1.8 统一对勾）、半选 8×2 短横，命中区 24。原用例钉的 13 方、paper 底是被取代的规范
 test("Checkbox 16px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 CheckMark 同一个记号；行悬停钩子 data-checkrow", async () => {
   assert.match(
@@ -845,10 +845,10 @@ test("Checkbox 16px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 Che
   const rule = cssRule(uiCss, ".ss-checkbox");
   assert.match(rule, /width:\s*16px/);
   assert.match(rule, /height:\s*16px/);
-  // 勾选框是记号：mark 4 圆角；未勾＝平贴的 surface 浅面 + 1px ink-faint 内环；对勾是 face
+  // 勾选框是记号：mark 4 圆角；未勾＝平贴的 paper 白面 + 1px ink-faint 内环；对勾是 face
   assert.match(rule, /border-radius:\s*var\(--radius-mark\)/);
   assert.match(rule, /border:\s*1px solid var\(--ink-faint\)/);
-  assert.match(rule, /background:\s*var\(--surface\)/);
+  assert.match(rule, /background:\s*var\(--paper\)/);
   assert.match(rule, /color:\s*var\(--face\)/);
   // 未勾平贴：不投影（影子只在手靠近时出）
   assert.doesNotMatch(rule, /box-shadow:/);
@@ -1971,7 +1971,7 @@ test("DrawerHandle：名字后一枚 10px 线形箭头（1.4、ink-mute），无
   });
   assert.match(
     closed,
-    /^<button type="button" class="ss-drawerhandle" aria-label="defuddle 的详情" aria-expanded="false" aria-controls="d1"><svg class="ss-drawerhandle__glyph" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1\.4"[^>]*><path d="M1\.5 3\.5 5 7 8\.5 3\.5"><\/path><\/svg><\/button>$/,
+    /^<button type="button" class="ss-drawerhandle" aria-label="defuddle 的详情" aria-expanded="false" aria-controls="d1"><svg class="ss-chevron ss-drawerhandle__glyph" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1\.4"[^>]*><path d="M1\.5 3\.5 5 7 8\.5 3\.5"><\/path><\/svg><\/button>$/,
   );
   assert.match(
     render(DrawerHandle, { open: true, onToggle: noop, label: "x" }),

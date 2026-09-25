@@ -71,6 +71,7 @@ export {
   IconArrowLeft,
   IconAttention,
   IconCannot,
+  IconChevronDown,
   IconChevronRight,
   IconClose,
   IconEdit,
