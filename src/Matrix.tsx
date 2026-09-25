@@ -9,7 +9,7 @@
 /// 不碰 api、不认后端状态：调用方把一切折算成「记号 + 能不能点 + 一句话」交进来，点了什么再原样交回去。
 ///
 /// 版式（Matrix.css）：
-/// - 面板定宽 776 = 复选 34 + 名称 246 + 来源 120 + 4 × 88 + 尾 24；agent 少时多出的给名称列，
+/// - 面板定宽 776 = 复选 34 + 名称 246 + 来源 144 + 4 × 88；agent 少时多出的给名称列，
 ///   多于 4 列（MCP 项目位置的 5 列）时名称列让到 158，面板宽不变——切页签时右端的键不跳（⑦）
 /// - 表头底 1px `hairline` 结构线；行与行 1px `row-line`；行高 34
 /// - 悬停只出行带，不出列带（D23）
@@ -55,16 +55,15 @@ import "./Matrix.css";
 /// 版式常量，与 Matrix.css 同值
 const CHECK_W = 34;
 const NAME_W = 246;
-const ORIGIN_W = 120;
+const ORIGIN_W = 144;
 const COL_W = 88;
-const TAIL_W = 24;
 /// 悬停状态里「来源格」的列标记（agent 列用 target id，不会撞上）
 const ORIGIN_COL = "\u0000origin";
 /// 列表里最多显示几个 agent（core 的 `MAX_SHOWN`，DESIGN「设置页 · 最多 4 个」）
 const MAX_AGENTS = 4;
 /// Skills 与 MCP 同一个固定面板宽度（DESIGN「位置页 › 面板宽度」）：页面头右端的筛选框与 `+ 来源`、
 /// 来源筛选、表格右沿同一条线，切页签不跳。Matrix.css 里页面头的 `max-width` 与它同值
-export const PANEL_W = CHECK_W + NAME_W + ORIGIN_W + MAX_AGENTS * COL_W + TAIL_W;
+export const PANEL_W = CHECK_W + NAME_W + ORIGIN_W + MAX_AGENTS * COL_W;
 
 /// 点了做不了的格子后，说明停留的时长：与禁用控件按下钉出的提示框同一个（ui/Tooltip）
 export { PINNED_TIP_MS };
@@ -287,11 +286,7 @@ export function RevealLink({ path, onReveal }: { path: string; onReveal: () => v
   return (
     <Tooltip content={<span className="mx-mono">{displayPath(path)}</span>}>
       <span className="mx-reveal">
-        <Button
-          variant="quiet"
-          ariaLabel={`在访达中显示 ${displayPath(path)}`}
-          onClick={onReveal}
-        >
+        <Button variant="quiet" ariaLabel={`在访达中显示 ${displayPath(path)}`} onClick={onReveal}>
           打开
         </Button>
       </span>
@@ -550,7 +545,6 @@ export default function Matrix(props: MatrixProps) {
     "minmax(0, 1fr)",
     `${ORIGIN_W}px`,
     ...columns.map(() => `${COL_W}px`),
-    `${TAIL_W}px`,
   ].join(" ");
   const width = PANEL_W;
   const gridStyle: CSSProperties = { gridTemplateColumns: template };
@@ -910,7 +904,6 @@ export default function Matrix(props: MatrixProps) {
           </Tooltip>
         </div>
       ))}
-      <div />
     </div>
   );
 
@@ -963,7 +956,6 @@ export default function Matrix(props: MatrixProps) {
           ) : null}
         </div>
       ))}
-      <div />
     </div>
   ) : null;
 
@@ -1215,7 +1207,6 @@ export default function Matrix(props: MatrixProps) {
               </div>
             );
           })}
-          <div />
         </div>
         {/* 行详情抽屉：左沿对齐名字、不跨进 agent 列（Matrix.css 按 --mx-agents 让出右边）；Esc 收起 */}
         {row.detail !== undefined ? (
@@ -1256,8 +1247,8 @@ export default function Matrix(props: MatrixProps) {
         <div
           className="mx-body"
           ref={bodyRef}
-          // 抽屉右沿让出 agent 列与尾列（不跨进 agent 列）
-          style={{ "--mx-agents": `${columns.length * COL_W + TAIL_W}px` } as CSSProperties}
+          // 抽屉右沿让出 agent 列（不跨进 agent 列）
+          style={{ "--mx-agents": `${columns.length * COL_W}px` } as CSSProperties}
           onKeyDown={onBodyKey}
           onFocus={(e) => {
             // 行带只跟随键盘焦点：鼠标点过的格子留着焦点，但鼠标移开后不该再亮着

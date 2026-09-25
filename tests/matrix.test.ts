@@ -55,7 +55,7 @@ const base = {
   onCell: () => undefined,
 };
 
-test("Matrix：通道条表头 + 来源列（120，来源名），没有分组组头；列头名经 Cap、结构线不用墨", () => {
+test("Matrix：通道条表头 + 来源列（144，来源名；尾列已并进来），没有分组组头；列头名经 Cap、结构线不用墨", () => {
   const html = render(Matrix, base);
   assert.match(html, /class="mx-grid mx-head"/);
   // 原件位置列恢复：点列头文字按位置排序（没有 ▾ 下拉）；格里写来源名
@@ -72,7 +72,7 @@ test("Matrix：通道条表头 + 来源列（120，来源名），没有分组�
     /class="mx-colbtn__name"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">Claude Code<\/span>/,
   );
   // 列宽：勾选 34 + 名字（吸收余下，4 列时 246）+ 来源 120 + 88 × 2 + 尾 24；面板定宽 776
-  assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 120px 88px 88px 24px/);
+  assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 144px 88px 88px/);
   assert.match(html, /class="mx-panel" style="width:776px"/);
   // V4：没有 2px 墨线，没有列带（D23）
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
@@ -158,7 +158,7 @@ test("Matrix：选择行（D4）——表头下一条，用表格同一套列：
   const head = html.slice(html.indexOf('class="mx-headwrap"'), html.indexOf('class="mx-body"'));
   assert.match(
     head,
-    /class="mx-grid mx-selrow" style="grid-template-columns:34px minmax\(0, 1fr\) 120px 88px 88px 24px"/,
+    /class="mx-grid mx-selrow" style="grid-template-columns:34px minmax\(0, 1fr\) 144px 88px 88px"/,
   );
   assert.match(head, /class="mx-selcount">已选 1 个</);
   // `取消` 是默认键紧凑（浅键只给离开 Sophia 的动作）
@@ -341,10 +341,13 @@ test("行详情是抽屉：名字 ×2 ˅ [键]——拉手跟在名字与 ×2 �
   // 没有详情的行没有拉手
   const pdf = html.slice(html.indexOf('data-row="w|pdf"'));
   assert.doesNotMatch(pdf, /ss-drawerhandle/);
-  // 抽屉左沿对齐名字（复选列 34 之后）、右沿让出 agent 列与尾列
+  // 抽屉左沿对齐名字（复选列 34 之后）、右沿让出 agent 列
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  assert.match(css, /\.mx-drawer \.ss-drawer__well \{[^}]*margin: 0 var\(--mx-agents, 376px\) 0 34px;/);
-  assert.match(html, /class="mx-body" style="--mx-agents:200px"/);
+  assert.match(
+    css,
+    /\.mx-drawer \.ss-drawer__well \{[^}]*margin: 0 var\(--mx-agents, 376px\) 0 34px;/,
+  );
+  assert.match(html, /class="mx-body" style="--mx-agents:176px"/);
   // 位置页里自己的勾选框悬停覆盖删掉，改用组件层的行悬停钩子
   assert.doesNotMatch(css, /\.mx-row:hover \.ss-checkbox/);
 });
@@ -357,9 +360,15 @@ test("`⌘` 点行加选、名字上按空格加选（键盘焦点在行上）�
     /onClickCapture=\{\(e\) => \{\s*if \(!\(e\.metaKey \|\| e\.ctrlKey\)\) return;\s*e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*if \(!selectable\) return;\s*shift\.current = false;\s*toggleRow\(row\);/,
   );
   // 名字是这一行的键盘落点：空格加选、回车拉开抽屉
-  assert.match(src, /if \(e\.key === " "\) \{\s*e\.preventDefault\(\);\s*if \(!selectable\) return;/);
+  assert.match(
+    src,
+    /if \(e\.key === " "\) \{\s*e\.preventDefault\(\);\s*if \(!selectable\) return;/,
+  );
   const html = render(Matrix, base);
-  assert.match(html, /class="mx-name" role="button" data-cell="0:-1" tabindex="-1" aria-label="docx：空格勾选"/);
+  assert.match(
+    html,
+    /class="mx-name" role="button" data-cell="0:-1" tabindex="-1" aria-label="docx：空格勾选"/,
+  );
 });
 
 test("新手提示条的两个插槽：来源筛选下 / 表头上，与空态上方", () => {
@@ -540,7 +549,7 @@ test("格子提示框的 · 空格 只给键盘：鼠标悬停不写，格子按
   );
 });
 
-test("Skills 与 MCP 同一个固定面板宽度 776（34 + 246 + 120 + 4 × 88 + 24）；页面头、来源片与表格同一条右沿", () => {
+test("Skills 与 MCP 同一个固定面板宽度 776（34 + 246 + 144 + 4 × 88）；页面头、来源筛选与表格同一条右沿", () => {
   assert.equal(PANEL_W, 776);
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
   // 页面头（壳渲染）在位置页里限宽到同一条右沿，并与来源片、列头一起吸顶：壳自己定（App.css）
@@ -561,10 +570,7 @@ test("MCP 5 列时名称列让到 158、面板宽不变：名称列吸收余下�
     tip: "Codex",
   }));
   const html = render(Matrix, { ...base, columns: five, rows: [] });
-  assert.match(
-    html,
-    /grid-template-columns:34px minmax\(0, 1fr\) 120px 88px 88px 88px 88px 88px 24px/,
-  );
+  assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 144px 88px 88px 88px 88px 88px/);
   assert.equal(776 - 34 - 120 - 5 * 88 - 24, 158);
 });
 
