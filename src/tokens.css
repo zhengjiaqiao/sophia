@@ -15,17 +15,17 @@
 
 :root {
   /* ---- 色（DESIGN「Colors」）：十三个同一温度的中性值 + 一个强调色，强调色只有一个意思 ---- */
-  --shell: #f4f4f2; /* 机壳：窗体、顶栏、侧栏、二级页头的底 */
+  --shell: #f4f4f2; /* 机壳：窗体、侧栏、新手提示条的底 */
   --face: #fcfcfb; /* 机面：内容区；墨面上的主字、墨键的字 */
-  --paper: #ffffff; /* 按键面与浮层：默认键、页签滑块、开关滑块、模型片、勾选框悬停面、浅键悬停面、下拉、确认框、成功提示条 */
-  --recess: #f2f2ef; /* 凹面：输入框、开关槽、来源筛选胶囊、抽屉；不可用的开关滑块 */
-  --surface: #efefec; /* 悬停行、下拉高亮项、按下的键面、页签槽、灰面板、勾选中的行、浅键面、未勾的勾选框 */
+  --paper: #ffffff; /* 按键面与浮层：默认键、页签滑块、开关滑块、模型片、勾选框（未勾）、浅键悬停面、下拉、确认框、提示条（成功与失败一律纸） */
+  --recess: #f2f2ef; /* 凹面：输入框、开关槽、来源筛选胶囊、窄面板里的就地确认；不可用的开关滑块 */
+  --surface: #efefec; /* 悬停行、下拉高亮项、按下的键面、页签槽、灰面板、浅键面 */
   --hairline: #e3e3df; /* 边线：机面与浮层的边、表头底、输入框边、禁用边 */
   --row-line: #ededea; /* 行线 */
-  --ctl-border: #d4d4cf; /* 忙碌刻度的静止刻线；墨面上的次字（键与滑块的边由 --raise 的环给） */
-  --ctl-edge: #bdbdb7; /* 边升一档：输入框的悬停描边；禁用的图标按钮 */
-  --track: #dcdcd7; /* 深一档的灰（开关槽 2026-09-25 起改 recess，这里只剩页面里的个别用处） */
-  --ink: #1c1c1a; /* 主文字、墨键、墨窗、实心格点、勾选框勾上、选中的来源胶囊、忙碌刻度亮的那根、焦点环（不用纯黑：16.6:1 已够） */
+  --ctl-border: #d4d4cf; /* 忙碌刻度的静止刻线；首字母方块的边；勾上且禁用的勾选框底；墨面上的次字（键与滑块的边由 --raise 的环给） */
+  --ctl-edge: #bdbdb7; /* 边升一档：有边的块（目标框）悬停时的边、还不存在的列的虚线；禁用的图标按钮的图形 */
+  --track: #dcdcd7; /* 深一档的灰：surface 底（选择行）上的格子悬停光晕——hairline 在 surface 上看不见 */
+  --ink: #1c1c1a; /* 主文字、墨键、提示框（唯一的墨窗）、实心格点、勾选框勾上、选中的来源胶囊、忙碌刻度亮的那根、焦点环（不用纯黑：16.6:1 已够） */
   --ink-mute: #4e4e4a; /* 次要文字、浅键字、占位字、图标按钮图形、拉手箭头、状态点的环、输入框聚焦边；墨面上的分隔线 */
   --ink-faint: #6f6f6a; /* 文字里只给计数、等宽读数与不可用的字；勾选框内环、无格短横 */
   --accent: #e0652a; /* 只表示「开着 / 在生效」：开关刻条 + 指示点。别处出现都是缺陷 */
@@ -38,17 +38,16 @@
   --font-cond: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "PingFang SC", monospace;
 
-  /* 六档字号（DESIGN「层级：六档」）。14 仍然不用：14 与 15 眼睛分不出来。
+  /* 字号（DESIGN「层级：六档」）：在用五档；display 28 随整窗二级页（SubPage）一起删了，规范里留作档位、
+     真用上时再加回来。14 仍然不用：14 与 15 眼睛分不出来。
      nav（页签）是 body 的变体（Condensed 15 / 700，选中同重，经 Cap 大写），不是第七档；
      字标是 SVG 资产，不是字 */
-  --size-display: 28px; /* Condensed 700：区域大标题（各屏暂未用上，留作档位） */
   --size-title: 20px; /* Condensed 700：页面名（Codex、设置、添加来源到 CardBox），原样、字距 0 */
   --size-head: 16px; /* Condensed 600：确认框标题、区域小标题、能力节名 */
   --size-body: 15px; /* Barlow 400：表格、说明、条目名、确认框正文；页签 Condensed 700 */
   --size-caption: 13px; /* Barlow：按钮 600；副行、浅键、来源胶囊、模型片、提示条 400 */
   --size-label: 12px; /* 列头与区块小标 Condensed 600；计数 Barlow tabular；id 与路径 Plex Mono */
 
-  --leading-display: 1.2;
   --leading-title: 1.3;
   --leading-head: 1.4;
   --leading-body: 1.6;
@@ -68,7 +67,6 @@
   --space-md: 16px;
   --space-lg: 18px;
   --space-xl: 24px; /* 组之间；机面内边距 */
-  --space-xxl: 32px; /* 没有机面时的页边 */
   --space-huge: 48px; /* 区域之间：页面里的大区块 */
 
   /* ---- 形（DESIGN「Shapes」）：形状承担语义，圆角随尺寸变大。不在这张表里的值不用 ---- */
@@ -76,16 +74,16 @@
   --radius-mark: 4px; /* 勾选框、首字母方块 */
   --radius-knob: 4px; /* 开关滑块 */
   --radius-track: 5px; /* 开关凹槽 */
-  --radius-control: 7px; /* 按键、浅键、输入框、页签滑块、图标按钮悬停底、侧栏选中项、下拉高亮行、提示框、抽屉 */
+  --radius-control: 7px; /* 按键、浅键、输入框、页签滑块、图标按钮悬停底、侧栏选中项、下拉高亮行、列表行悬停带、提示框 */
   --radius-tab-track: 10px; /* 页签滑槽 */
   --radius-face: 12px; /* 机面、灰面板 */
-  --radius-float: 12px; /* 下拉、确认框、提示条、墨窗、托盘面板 */
+  --radius-float: 12px; /* 下拉、确认框、提示条、托盘面板 */
   --radius-pill: 999px; /* 来源筛选片、模型片 */
   --radius-dot: 50%; /* 状态点、指示点、格子悬停光晕 */
 
   /* ---- 线（DESIGN front-matter `borders`、「线：两档灰，不用墨」）---- */
   --border-face: 1px solid var(--hairline); /* 机面的边 */
-  --border-float: 1px solid var(--hairline); /* 浮层的边（墨窗无边） */
+  --border-float: 1px solid var(--hairline); /* 浮层的边（提示框无边） */
   --border-structure: 1px solid var(--hairline); /* 表头底、展开区边界 */
   --border-row: 1px solid var(--row-line); /* 行与行 */
   --border-control: 1px solid var(--ctl-border); /* 控件边（键不画描边：边由 --raise 的环给；来源胶囊无边） */
@@ -94,7 +92,6 @@
   /* ---- 层次（DESIGN「Elevation & Depth」）：投影只说离机面多高，四档——凹 / 平（无投影）/ 抬起 / 浮。
      抬起只给手会碰的三样：键、页签滑块、开关滑块；它们的 1px 环由 --raise* 的第一层给，不另画描边。
      rgba 只能出现在这几行定义里（lint-ui 的 elevation 规则） ---- */
-  /* prettier-ignore */
   /* prettier-ignore */
   --recess-tabs: inset 0 1px 2px rgba(28,28,26,.06), inset 0 0 0 1px rgba(28,28,26,.04); /* 凹：页签槽 */
   /* prettier-ignore */
@@ -119,7 +116,8 @@
 
   /* ---- 可点元素的定高：一律偶数（奇数高在 1x 屏上偏心一个设备像素，端帽只有 75% 覆盖） ---- */
   --control-h: 28px; /* 工具行、选择操作条：输入框、片、图标按钮、按键同高 */
-  --control-h-compact: 24px; /* 表格行、提示条、行内待办条里的按键与模型片 */
+  --control-h-compact: 24px; /* 表格行、提示条、灰面板、抽屉里的按键；浅键 */
+  --control-h-chip: 26px; /* 来源筛选胶囊与模型片：胶囊比同一行的键矮一档 */
   --control-h-row: 32px; /* 确认框与页面级提交 */
   /* 表格行高：一屏多看几行是功能，整格仍是命中区 */
   --row-h: 34px;
@@ -127,7 +125,8 @@
   --hit-min: 24px;
 
   /* ---- 动效（DESIGN「控件有重量」「状态与动效」）：会移动的实物用阻尼弹簧，颜色不用弹簧。
-     prefers-reduced-motion 下全部退化为即时状态变化（ui.css 末尾） ---- */
+     prefers-reduced-motion 下全部退化为即时状态变化（ui.css 末尾）。
+     JS 要等一段过渡播完再卸载 / 淡出的地方经 ui/motion.ts 的 motionMs() 读这里的值，不另写一份常量 ---- */
   --motion-fast: 120ms; /* 颜色、底色、透明度、悬停时影子变重、刻条换色、刚点亮反色 */
   --ease-mech: cubic-bezier(0.2, 0.8, 0.2, 1); /* 配 --motion-fast；也用于按下过程 */
   --dur-press: 70ms; /* 按下：影子收成 pressed、按压变形、默认键底色转 surface（--ease-mech） */
@@ -135,6 +134,7 @@
   --dur-slide-tab: 260ms; /* 页签滑块的位移与变宽（宽的东西慢一点） */
   --dur-slide-knob: 200ms; /* 开关滑块位移：点击与拖动松手后的停靠 */
   --dur-drawer: 260ms; /* 抽屉：高度 0 ↔ auto（--ease-mech）；拉手箭头翻转（--spring-slide） */
+  --dur-push: 200ms; /* 机面里推入一页、返回滑回（PushedPage，--ease-mech） */
   /* 阻尼比 0.8、响应 0.25s 的弹簧阶跃响应，0.32s 窗口取 24 点：过冲 1.5%、末端残差 < 0.2%（停稳不弹）。
      同一条曲线按不同时长播放：越重越慢 */
   /* prettier-ignore */
@@ -143,12 +143,18 @@
   --motion-spinner: 0.8s; /* 忙碌刻度：亮的那根从左走到右一趟，按格阶跃 */
   --motion-dots: 500ms; /* 减少动效时文字后的 `…` 每步增减一点 */
 
-  /* busy 时受影响控件的不透明度 */
+  /* 忙过 0.3 秒门槛、原位不换刻度的那颗键变淡到多少（BusySlot 的 dim 形态） */
   --busy-dim: 0.45;
 
-  /* ---- 壳：系统标题栏隐藏（Overlay），红绿灯浮在左上那 28px 里 ---- */
-  --titlestrip: 28px;
-  --topbar: 56px;
+  /* ---- 层（z-index）：从低到高一条梯子，组件只引用这里。
+     页面自己的吸顶层在各页 CSS 里，都不高过 --z-pushed 上下这一段：位置页来源筛选 5 / 列头 6 / 格子提示框 8、
+     页面头 7、机面边缘渐隐 9、右下提示叠 10 ---- */
+  --z-fade: 1; /* 滚动区边缘的渐隐：压在同一滚动区的内容上 */
+  --z-pushed: 8; /* 机面里推入的一页（PushedPage）：高过位置页吸顶的页面头（7），低过机面边缘渐隐（9） */
+  --z-layer: 35; /* 小浮层：下拉、菜单、选择器 */
+  --z-toast: 36; /* 浮起小窗：高过小浮层，低过确认框 */
+  --z-confirm: 40; /* 确认框与遮罩 */
+  --z-tip: 50; /* 提示框：最高，确认框与浮层里的提示框照样看得见 */
 
   font-family: var(--font-ui);
   font-size: var(--size-body);
@@ -183,6 +189,7 @@
     --dur-slide-tab: 0ms;
     --dur-slide-knob: 0ms;
     --dur-drawer: 0ms;
+    --dur-push: 0ms;
     --press-transform: none;
   }
 }

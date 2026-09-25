@@ -10,7 +10,7 @@ import emptyFolder from "../assets/empty-folder.png";
 /// 空态里的动作都是默认键（表头下一句后的 `清除筛选` 给 `compact`，紧凑 24）；离开 Sophia 的
 /// （`在访达中显示 ↗`）给 `leave`，画成浅键（末尾自动带 ↗）。
 /// 动作已在页面头的（`+ 来源` `+ 网关`）空态里不重复。
-/// 首次扫描：24 宽忙碌刻度居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
+/// 首次扫描（`busy`）：24 宽忙碌刻度居中 + 下面一句「忙什么」（还没有格子可亮，句子保留）。
 ///
 /// 图像（DESIGN「图像」）：只用在没有数据、等待、刚开始的时刻；筛选无结果不放图。
 /// 图在上、不带边框、底透明，直接落在机面上看不出方框；下面依次是现状一句、动作（间距 16 / 8 / 16），整体居中；图是装饰，
@@ -25,21 +25,18 @@ export type EmptyArt = "scanning" | "noDirs" | "emptyFolder";
 
 const ART_SRC: Record<EmptyArt, string> = { scanning, noDirs, emptyFolder };
 
-export type EmptyKind =
-  /// 首次扫描中：24 宽忙碌刻度 + 一句忙什么
-  | "scanning"
-  /// 这个域没有 agent 目录：agent 列照常显示，灯全为空心
-  | "noAgentDirs"
-  /// 筛选无结果：筛选行留在原位，一眼看出空是筛出来的
-  | "noMatch"
-  /// 一个 skill 都没有：先说清空的是哪个目录，再给补上的路
-  | "noSkills";
+/// **已废弃，页面迁移后删**：旧的「哪种空」轴与 `art` 大量重合，只剩默认文案与要不要转圈两个作用——
+/// 现在写 `description` 与 `busy`。暂留给还没迁完的页面，映射见 `KIND_DEFAULTS`
+export type EmptyKind = "scanning" | "noAgentDirs" | "noMatch" | "noSkills";
 
-const DEFAULT_DESCRIPTION: Record<EmptyKind, string> = {
-  scanning: "正在读 skill 目录",
-  noAgentDirs: "这个项目下还没有任何 agent 的 skill 目录。添加时会自动创建。",
-  noMatch: "没有匹配的 skill",
-  noSkills: "这个来源里还没有 skill。",
+const KIND_DEFAULTS: Record<EmptyKind, { description: string; busy: boolean }> = {
+  scanning: { description: "正在读 skill 目录", busy: true },
+  noAgentDirs: {
+    description: "这个项目下还没有任何 agent 的 skill 目录。添加时会自动创建。",
+    busy: false,
+  },
+  noMatch: { description: "没有匹配的 skill", busy: false },
+  noSkills: { description: "这个来源里还没有 skill。", busy: false },
 };
 
 export interface EmptyAction {
@@ -54,9 +51,12 @@ export interface EmptyAction {
 }
 
 export interface EmptyProps {
-  kind: EmptyKind;
-  /// 覆盖默认说明。要嵌路径、来源名时传进来
+  /// 现状一句（要嵌路径、来源名时传节点）；`busy` 时它就是「忙什么」
   description?: ReactNode;
+  /// 首次扫描中：句子前（有图时）或上（没图时 24 宽）出忙碌刻度
+  busy?: boolean;
+  /// **已废弃**：见 `EmptyKind`
+  kind?: EmptyKind;
   /// 第二行次要说明
   hint?: ReactNode;
   /// 第一个动作（默认键；`leave` 时浅键）
@@ -67,13 +67,26 @@ export interface EmptyProps {
   art?: EmptyArt;
 }
 
-export function Empty({ kind, description, hint, primary, secondary, art }: EmptyProps) {
-  const busyLabel = typeof description === "string" ? description : DEFAULT_DESCRIPTION.scanning;
-  const text = (
-    <div className="ss-empty__description">{description ?? DEFAULT_DESCRIPTION[kind]}</div>
-  );
+export function Empty({
+  kind,
+  description: given,
+  busy: givenBusy,
+  hint,
+  primary,
+  secondary,
+  art,
+}: EmptyProps) {
+  const fallback = kind ? KIND_DEFAULTS[kind] : undefined;
+  const description = given ?? fallback?.description;
+  const busy = givenBusy ?? fallback?.busy ?? false;
+  const busyLabel =
+    typeof description === "string" ? description : KIND_DEFAULTS.scanning.description;
+  const text = <div className="ss-empty__description">{description}</div>;
+  const classes = ["ss-empty"];
+  if (busy) classes.push("is-busy");
+  if (art) classes.push("has-art");
   return (
-    <div className={`ss-empty ss-empty--${kind}${art ? " has-art" : ""}`} data-kind={kind}>
+    <div className={classes.join(" ")}>
       {art ? (
         <img
           className={`ss-empty__art ss-empty__art--${art}`}
@@ -82,14 +95,14 @@ export function Empty({ kind, description, hint, primary, secondary, art }: Empt
           aria-hidden="true"
         />
       ) : null}
-      {kind === "scanning" && art ? (
+      {busy && art ? (
         <div className="ss-empty__busy">
           <Spinner size={14} label={busyLabel} />
           {text}
         </div>
       ) : (
         <>
-          {kind === "scanning" ? <Spinner size={24} label={busyLabel} /> : null}
+          {busy ? <Spinner size={24} label={busyLabel} /> : null}
           {text}
         </>
       )}

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 
 /// 忙碌指示：刻度扫过（DESIGN「忙碌指示：只在用户等的地方，带文字」，2026-09-25 取代辐条）。
 ///
@@ -76,37 +75,4 @@ export function useBusyShown(busy: boolean, delay = BUSY_DELAY_MS): boolean {
     return () => clearTimeout(timer);
   }, [busy, delay]);
   return busy && shown;
-}
-
-export interface BusySlotProps {
-  /// 触发的那颗键此刻在等
-  busy: boolean;
-  /// 忙什么：`正在重启 Codex`；同时作读屏文本
-  label: string;
-  /// 触发键本身
-  children: ReactNode;
-  /// 给忙碌那一句换外观时用（默认 13 `ink-mute`）
-  className?: string;
-}
-
-/// 触发键原位忙碌（DESIGN「反馈的两种形态 › 忙碌」）：只锁这颗键——`busy` 一起就点不动，
-/// 过了 0.3 秒门槛才原位换成 14 宽刻度 + 一句；更快完成的什么都不显示
-export function BusySlot({ busy, label, children, className }: BusySlotProps) {
-  const shown = useBusyShown(busy);
-  if (shown) {
-    return (
-      <span className={className ? `ss-busyslot ${className}` : "ss-busyslot"} role="status">
-        <Spinner size={14} label={label} />
-        <span>{label}</span>
-      </span>
-    );
-  }
-  if (busy) {
-    return (
-      <span className="ss-locked" aria-busy="true">
-        {children}
-      </span>
-    );
-  }
-  return <>{children}</>;
 }

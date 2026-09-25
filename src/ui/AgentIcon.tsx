@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Cap } from "./Cap.tsx";
 
-/// agent 图标（DESIGN「agent 图标 AgentMark」，画板 Marks「agent 图标」）。
+/// agent 图标（DESIGN「agent 图标」，画板 Marks「agent 图标」）。旁边的名字由调用方写（原来的 `AgentMark`
+/// 图标 + 名字组合没人用，2026-09-25 删了；矩阵列头由表格自己排）。
 ///
 /// 一律单色 inline SVG，`currentColor` 取色：常态主文字色，未启用 / 禁用退到弱文字色。
 /// **不用品牌色**。实现时用各项目官方 SVG 转单色，不手画；**所有出现处走这一个定义**。
@@ -109,41 +110,6 @@ export function AgentIcon({ id, name, size = 16, labelled }: AgentIconProps) {
       {...(labelled ? { role: "img" as const, "aria-label": name } : {})}
     >
       {svg}
-    </span>
-  );
-}
-
-export interface AgentMarkProps {
-  id: string;
-  /// 显示名，原样写
-  name: string;
-  /// inline：图标 + 名字横排（设置页、句子里，名字原样）；
-  /// stacked：图标在上名字在下（旧列头）；
-  /// header：表格列头三层——16px 图标 / 名字（`label` Condensed 12/600 `ink`）/ 计数（12 tabular `ink-faint`）。
-  /// 列头（stacked / header）里的名字经 `Cap` 显示为大写（`CLAUDE CODE`：列头是 agent 身份）；
-  /// 列头之外 agent 名是专名，原样大小写
-  layout?: "inline" | "stacked" | "header";
-  /// header 的第三层：这个 agent 下开着几个（只写分子、不零填充）
-  count?: number;
-  /// 没装这个 agent、或整行禁用：图标跟着名字一起退到 `ink-mute`，形状不变
-  dim?: boolean;
-  title?: string;
-}
-
-export function AgentMark({ id, name, layout = "inline", count, dim, title }: AgentMarkProps) {
-  const classes = ["ss-mark", `ss-mark--${layout}`];
-  if (dim) classes.push("is-dim");
-  const upper = layout !== "inline";
-
-  return (
-    <span className={classes.join(" ")} title={title}>
-      <span className="ss-mark__icon">
-        <AgentIcon id={id} name={name} />
-      </span>
-      <span className="ss-mark__name">{upper ? <Cap>{name}</Cap> : name}</span>
-      {layout === "header" && count !== undefined ? (
-        <span className="ss-mark__count">{count}</span>
-      ) : null}
     </span>
   );
 }

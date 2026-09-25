@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { IconLeave, IconPlus } from "./icons.tsx";
 import { ReasonTip } from "./Tooltip.tsx";
 
 /// 按键（DESIGN「按钮」「控件有重量」，视觉 V4）。
@@ -47,34 +48,14 @@ interface ButtonBase {
 type DisabledProps =
   { disabled: true; disabledReason: string } | { disabled?: false; disabledReason?: never };
 
-/// 纯图标按钮请用 `IconButton`。这里保留无文字的写法只为还没改完的页面：
-/// 没有 children 时 `ariaLabel` 与 `title` 都是必填
-type LabelProps =
-  | { children: ReactNode; ariaLabel?: string }
-  | { children?: never; icon: ReactNode; ariaLabel: string; title: string };
+/// 键一定有字；纯图标的工具走 `IconButton`（旧的无字写法已删，2026-09-25）。
+/// `ariaLabel` 给读屏补全字面没说全的对象（`打开` → `在访达中显示 ~/code/CardBox`）
+interface LabelProps {
+  children: ReactNode;
+  ariaLabel?: string;
+}
 
 export type ButtonProps = ButtonBase & DisabledProps & LabelProps;
-
-/// 10px 的 ↗：1.4 描边、`currentColor`、左间距 3（浅键的 gap）
-function LeaveArrow() {
-  return (
-    <svg
-      className="ss-btn__external"
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M3 7l4-4M3.6 3H7v3.4" />
-    </svg>
-  );
-}
 
 export function Button(props: ButtonProps) {
   const {
@@ -99,7 +80,6 @@ export function Button(props: ButtonProps) {
   if (leave) classes.push("ss-btn--quiet");
   if (size === "compact" && !leave) classes.push("ss-btn--compact");
   if (size === "row" && !leave) classes.push("ss-btn--row");
-  if (icon && children === undefined) classes.push("ss-btn--icon");
 
   return (
     <ReasonTip reason={disabled ? disabledReason : undefined}>
@@ -117,7 +97,7 @@ export function Button(props: ButtonProps) {
       >
         {icon ? <span className="ss-btn__icon">{icon}</span> : null}
         {children}
-        {leave ? <LeaveArrow /> : null}
+        {leave ? <IconLeave className="ss-btn__external" /> : null}
       </button>
     </ReasonTip>
   );
@@ -176,49 +156,25 @@ export interface AddButtonProps {
   onClick?: () => void;
   /// 默认「添加 <noun>」
   title?: string;
-  size?: "regular" | "compact";
   /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
   disabledReason?: string;
 }
 
 /// 「开始一个添加流程」只有这一种长相（DESIGN「添加只有两种长相」）：
-/// 默认按钮 + 12px `+` + 名词。不是灰色文字链，也不是光秃秃的图标按钮
-export function AddButton({
-  noun,
-  onClick,
-  title,
-  size = "regular",
-  disabledReason,
-}: AddButtonProps) {
-  const plus = (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 12 12"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M6 1.5v9M1.5 6h9" />
-    </svg>
-  );
-  const classes = ["ss-btn", "ss-btn--add"];
-  if (size === "compact") classes.push("ss-btn--compact");
+/// 默认按钮（工具行 28）+ 12px `+`（词表里的 `IconPlus`）+ 名词。不是灰色文字链，也不是光秃秃的图标按钮
+export function AddButton({ noun, onClick, title, disabledReason }: AddButtonProps) {
   const disabled = Boolean(disabledReason);
   return (
     <ReasonTip reason={disabledReason}>
       <button
         type="button"
-        className={classes.join(" ")}
+        className="ss-btn ss-btn--add"
         title={disabled ? disabledReason : (title ?? `添加 ${noun}`)}
         aria-label={title ?? `添加 ${noun}`}
         disabled={disabled}
         onClick={disabled ? undefined : onClick}
       >
-        {plus}
+        <IconPlus size={12} />
         {noun}
       </button>
     </ReasonTip>

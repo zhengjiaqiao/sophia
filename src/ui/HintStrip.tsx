@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { IconButton } from "./Button.tsx";
 import { IconClose } from "./icons.tsx";
+import { motionMs } from "./motion.ts";
 import "./HintStrip.css";
 
 /// 新手提示条（DESIGN「组件 › 新手提示条 HintStrip」，画板 17 / 18 / 19）。
@@ -13,7 +14,7 @@ import "./HintStrip.css";
 /// （2026-09-25 产品负责人真机：不需要）。与灰面板（`surface` + `!` + 动作键）靠颜色、左端记号、右端动作分开；
 /// 不用橙、猫、图标。
 ///
-/// 出现 / 收起：淡入淡出 + 高度 0 ↔ 40，260ms `--ease-mech`，推动下方内容；减少动效时即时。
+/// 出现 / 收起：淡入淡出 + 高度 0 ↔ 40，`--dur-drawer`（260ms）`--ease-mech`，推动下方内容；减少动效时即时。
 /// 何时出由 `src/hints.ts` 的 `useHint` 决定，这里只管长相与进出。
 
 export interface HintStripProps {
@@ -23,17 +24,6 @@ export interface HintStripProps {
   onDismiss: () => void;
   /// 说明句，不超过两行：只说用户此刻不确定的事（刚才做了什么、动没动文件、点下去会怎样）
   children: ReactNode;
-}
-
-/// 与 HintStrip.css 的过渡时长一致
-const SLIDE_MS = 260;
-
-function reducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
 }
 
 export function HintStrip({ open, onDismiss, children }: HintStripProps) {
@@ -49,11 +39,13 @@ export function HintStrip({ open, onDismiss, children }: HintStripProps) {
       return;
     }
     setShown(false);
-    if (reducedMotion()) {
+    // 收起动画走完再卸：时长与 HintStrip.css 同取 `--dur-drawer`（减少动效时是 0，即时卸）
+    const ms = motionMs("--dur-drawer");
+    if (ms === 0) {
       setMounted(false);
       return;
     }
-    const t = window.setTimeout(() => setMounted(false), SLIDE_MS);
+    const t = window.setTimeout(() => setMounted(false), ms);
     return () => window.clearTimeout(t);
   }, [open]);
 

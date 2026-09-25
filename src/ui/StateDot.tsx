@@ -11,6 +11,8 @@ import { Tooltip } from "./Tooltip.tsx";
 /// （无法写入与同名占位同一个记号，裁决 D22：该行已有 `×2`，原因由提示框说）、
 /// 整个文件夹是链接＝环内向右箭头（箭头不穿出环，否则读成 ♂）。
 ///
+/// 只有 10px 一档（16px 版、反色、自带按钮这三个分支没人用，2026-09-25 删了；刚点亮的反色闪走 `.ss-flash`）。
+///
 /// 悬停光晕（DESIGN「格子悬停光晕」）：可点的点悬停 / 键盘聚焦时，**点本身一点不变**，
 /// 只在点的下层出一圈直径 22 的圆形 hairline 光晕，说「能点」，不预告结果（结果由提示框的动词说）。
 /// 原件点了是删原件（先确认），照常出光晕；无此格 / 异常格点了不是开关，不出光晕。
@@ -32,20 +34,14 @@ export const DOT_LABEL: Record<Dot, string> = {
 
 export interface StateDotProps {
   dot: Dot;
-  /// 10：表格格子（默认）；16：说明里的大一号记号
-  size?: 10 | 16;
-  /// 画在墨上：刚点亮那 120ms 的反色闪（格底由调用方铺 `ink`），记号转 `face`
-  inverse?: boolean;
   /// 禁用：选择条里「已选的都是原件」那颗禁用键上的原件环，退到 `ink-faint`
   muted?: boolean;
   /// 鼠标悬停的系统兜底说明。**不作唯一说明**——格子的文字确定性由 Tooltip 承载
   title?: string;
   /// 读屏名；不给就用 title，再不给用 DOT_LABEL
   label?: string;
-  /// 给了才渲染成可点的按钮（整格命中区由调用方撑，这里至少 24×24）
-  onClick?: () => void;
-  /// 调用方自己渲染外层按钮（`.ss-dot-btn`，表格要整格命中与键盘焦点）时给 true：
-  /// 表示这颗点可点，不带 onClick 也出悬停光晕
+  /// 这颗点可点：外层按钮（`.ss-dot-btn`，整格命中与键盘焦点）**由调用方渲染**，组件只画记号；
+  /// 给 true 时悬停 / 键盘聚焦外层按钮出光晕（只有开 / 关两种与原件出）
   hoverable?: boolean;
 }
 
@@ -107,116 +103,36 @@ function Glyph10({ dot }: { dot: Dot }) {
   }
 }
 
-function Glyph16({ dot }: { dot: Dot }) {
-  switch (dot) {
-    case "linked":
-      return (
-        <>
-          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
-          <circle className="ss-dot__fill" cx="8" cy="8" r="7" stroke="none" fill="currentColor" />
-        </>
-      );
-    case "missing":
-      return <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />;
-    case "own":
-      return (
-        <>
-          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
-          <circle cx="8" cy="8" r="3" stroke="none" fill="currentColor" />
-        </>
-      );
-    case "none":
-      return <path d="M3 8H13" />;
-    case "broken":
-      return (
-        <circle
-          className="ss-dot__ring"
-          cx="8"
-          cy="8"
-          r="6.3"
-          strokeLinecap="butt"
-          strokeDasharray="8.4 1.5"
-          transform="rotate(-45 8 8)"
-        />
-      );
-    // 同名占位与无法写入同画 ⊘（D22）
-    case "readOnly":
-    case "blocked":
-      return (
-        <>
-          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
-          <path d="M3.6 12.4 L12.4 3.6" />
-        </>
-      );
-    case "wholeLinked":
-      return (
-        <>
-          <circle className="ss-dot__ring" cx="8" cy="8" r="6.3" />
-          <path d="M4.9 8 H11.1 M8.4 5.3 L11.1 8 L8.4 10.7" />
-        </>
-      );
-  }
-}
-
-export function StateDot({
-  dot,
-  size = 10,
-  inverse,
-  muted,
-  title,
-  label,
-  onClick,
-  hoverable: forceHoverable,
-}: StateDotProps) {
+export function StateDot({ dot, muted, title, label, hoverable: canHover }: StateDotProps) {
   const text = label ?? title ?? DOT_LABEL[dot];
   const classes = ["ss-dot", `ss-dot--${dot}`];
-  if (inverse) classes.push("is-inverse");
   if (muted) classes.push("is-muted");
-  const hoverable = (Boolean(onClick) || Boolean(forceHoverable)) && TOGGLES.has(dot);
-  const center = size === 16 ? 8 : 5;
-
-  const glyph = (
-    <svg
-      className={classes.join(" ")}
-      data-dot={dot}
-      data-hoverable={hoverable ? "" : undefined}
-      width={size}
-      height={size}
-      viewBox={size === 16 ? "0 0 16 16" : "0 0 10 10"}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={size === 16 ? 1.4 : W10}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {hoverable && (
-        // 光晕先画、压在点下层；溢出 viewBox（svg overflow: visible），不占布局
-        <circle className="ss-dot__halo" cx={center} cy={center} r="11" stroke="none" />
-      )}
-      {size === 16 ? <Glyph16 dot={dot} /> : <Glyph10 dot={dot} />}
-    </svg>
-  );
-
-  if (!onClick) {
-    return (
-      <span className="ss-dot-wrap" title={title ?? text} role="img" aria-label={text}>
-        {glyph}
-      </span>
-    );
-  }
+  const hoverable = Boolean(canHover) && TOGGLES.has(dot);
 
   return (
-    <button
-      type="button"
-      className="ss-dot-btn"
-      title={title ?? text}
-      aria-label={text}
-      onClick={onClick}
-    >
-      {glyph}
-    </button>
+    <span className="ss-dot-wrap" title={title ?? text} role="img" aria-label={text}>
+      <svg
+        className={classes.join(" ")}
+        data-dot={dot}
+        data-hoverable={hoverable ? "" : undefined}
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={W10}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {hoverable && (
+          // 光晕先画、压在点下层；溢出 viewBox（svg overflow: visible），不占布局
+          <circle className="ss-dot__halo" cx="5" cy="5" r="11" stroke="none" />
+        )}
+        <Glyph10 dot={dot} />
+      </svg>
+    </span>
   );
 }
 

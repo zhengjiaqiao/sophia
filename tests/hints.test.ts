@@ -339,8 +339,10 @@ test("提示条样式：shell 底、face 12 圆角、无边无投影、高 40 �
   assert.match(bar, /padding: 10px 14px/);
   assert.doesNotMatch(css, /box-shadow|border:/);
   assert.match(block(".ss-hint.is-open"), /margin-block: var\(--space-md\)/);
-  assert.match(block(".ss-hint"), /grid-template-rows 260ms var\(--ease-mech\)/);
-  assert.match(block(".ss-hint"), /opacity 260ms var\(--ease-mech\)/);
+  // 260ms 只在 tokens.css 写一次（--dur-drawer），组件的 CSS 与 JS 都从那里取
+  assert.match(block(".ss-hint"), /grid-template-rows var\(--dur-drawer\) var\(--ease-mech\)/);
+  assert.match(block(".ss-hint"), /opacity var\(--dur-drawer\) var\(--ease-mech\)/);
+  assert.doesNotMatch(css, /\b260ms\b/);
   assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.ss-hint \{\s*transition: none;/);
   assert.match(block(".ss-hint__text"), /font-size: var\(--size-caption\)/);
   assert.match(block(".ss-hint__text"), /color: var\(--ink\);/);

@@ -1,18 +1,18 @@
 /* ===== 新手提示条 HintStrip（DESIGN「组件 › 新手提示条 HintStrip」，画板 17 / 18 / 19）=====
    嵌在页面流里：shell 底（比灰面板的 surface 浅一档）、face 12 圆角、无边无投影；高 40（两行自适应，
    内边距 10 14），宽随容器；上下外距 16 由组件自带。只有说明句（13 ink）+ 右端 × 图标键（不写小标）。
-  出现 / 收起：淡入淡出 + 高度 0 ↔ 40 + 外距 0 ↔ 16，260ms --ease-mech，推动下方内容 */
+  出现 / 收起：淡入淡出 + 高度 0 ↔ 40 + 外距 0 ↔ 16，--dur-drawer --ease-mech，推动下方内容 */
 .ss-hint {
   display: grid;
   grid-template-rows: 0fr;
   width: 100%;
   margin-block: 0;
   opacity: 0;
-  /* 260ms 与 HintStrip.tsx 的 SLIDE_MS 一致（到时卸下） */
+  /* 时长 --dur-drawer：HintStrip.tsx 读同一个 token，到时卸下 */
   transition:
-    grid-template-rows 260ms var(--ease-mech),
-    margin-block 260ms var(--ease-mech),
-    opacity 260ms var(--ease-mech);
+    grid-template-rows var(--dur-drawer) var(--ease-mech),
+    margin-block var(--dur-drawer) var(--ease-mech),
+    opacity var(--dur-drawer) var(--ease-mech);
 }
 
 .ss-hint.is-open {

@@ -31,15 +31,16 @@ const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TruncTip, isClipped, TIP_DELAY_MS, PINNED_TIP_MS, TIP_IDLE, nextTip } =
   await import("../src/ui/Tooltip.tsx");
-const { Spinner, BusySlot, BUSY_DELAY_MS } = await import("../src/ui/Spinner.tsx");
+const { Spinner, BUSY_DELAY_MS } = await import("../src/ui/Spinner.tsx");
+const { BusySlot, BusyToast } = await import("../src/ui/BusySlot.tsx");
 const { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
-const { ErrorBanner, NoticePanel } = await import("../src/ui/ErrorBanner.tsx");
+const { ErrorBanner } = await import("../src/ui/ErrorBanner.tsx");
+const { NoticePanel } = await import("../src/ui/NoticePanel.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
-const { SubPage, holdInert, pickTrigger, triggerKey } = await import("../src/ui/SubPage.tsx");
-const { AgentIcon, AgentMark, agentInitial, hasAgentIcon } =
-  await import("../src/ui/AgentMark.tsx");
+const { PushedPage, holdInert } = await import("../src/ui/PushedPage.tsx");
+const { AgentIcon, agentInitial, hasAgentIcon } = await import("../src/ui/AgentIcon.tsx");
 const { Empty } = await import("../src/ui/Empty.tsx");
-const { Drawer, DrawerHandle, DRAWER_MS } = await import("../src/ui/Drawer.tsx");
+const { Drawer, DrawerHandle } = await import("../src/ui/Drawer.tsx");
 const { IconTick } = await import("../src/ui/icons.tsx");
 
 test("index 把组件和样式一起交出去，用的人不必自己 import css", async () => {
@@ -61,11 +62,24 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "ErrorBanner",
     "NoticePanel",
     "Confirm",
-    "SubPage",
+    "PushedPage",
     "Tabs",
     "Indicator",
     "CheckboxGlyph",
-    "AgentMark",
+    "CheckMark",
+    "CheckRow",
+    "Menu",
+    "MenuItem",
+    "TextField",
+    "ListRow",
+    "SectionLabel",
+    "ChipRow",
+    "Note",
+    "Mono",
+    "FadeViewport",
+    "useEdgeFades",
+    "BusySlot",
+    "BusyToast",
     "AgentIcon",
     "Empty",
     "Cap",
@@ -83,6 +97,10 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
   assert.equal((ui as Record<string, unknown>).Busy, undefined);
   // Cap 已恢复（2026-09-24 字体回到原设计）；它的出口 Plain 不恢复（大写只经 Cap 这一条路）
   assert.equal((ui as Record<string, unknown>).Plain, undefined);
+  // 2026-09-25 设计系统梳理删掉的死件：整窗二级页、没人用的 agent 标记、第二枚 ›、JS 里镜像 CSS 的时长
+  for (const gone of ["SubPage", "AgentMark", "IconChevronRight", "DRAWER_MS"]) {
+    assert.equal((ui as Record<string, unknown>)[gone], undefined, gone);
+  }
 });
 
 // ===== 设计变量 =====
@@ -126,9 +144,8 @@ test("tokens：V4 的 14 个色、六档字号、V4 圆角、层次 token、28/2
   ]) {
     assert.doesNotMatch(tokensCss, gone, String(gone));
   }
-  // 六档字号，没有 14px；行高没有 2.0
+  // 字号在用五档（display 28 随整窗二级页删了），没有 14px；行高没有 2.0
   for (const [name, value] of [
-    ["display", "28px"],
     ["title", "20px"],
     ["head", "16px"],
     ["body", "15px"],
@@ -138,6 +155,27 @@ test("tokens：V4 的 14 个色、六档字号、V4 圆角、层次 token、28/2
     assert.match(tokensCss, new RegExp(`--size-${name}:\\s*${value};`), name);
   }
   assert.doesNotMatch(tokensCss, /\b14px/);
+  // 死 token（2026-09-25 设计系统梳理）：没有机面的页边、整窗二级页的头高与 display 档
+  for (const gone of [
+    /--space-xxl\b/,
+    /--titlestrip\b/,
+    /--topbar\b/,
+    /--size-display\b/,
+    /--leading-display\b/,
+  ]) {
+    assert.doesNotMatch(tokensCss, gone, String(gone));
+  }
+  // 胶囊（来源筛选片、模型片）的高度补成 token
+  assert.match(tokensCss, /--control-h-chip:\s*26px;/);
+  // z-index 一条梯子：渐隐 < 推入页 < 小浮层 < 浮起小窗 < 确认框 < 提示框
+  const zOf = (name: string) => Number(tokensCss.match(new RegExp(`--z-${name}:\\s*(\\d+);`))?.[1]);
+  const ladder = ["fade", "pushed", "layer", "toast", "confirm", "tip"].map(zOf);
+  assert.ok(ladder.every(Number.isFinite), "z token 齐全");
+  assert.deepEqual(
+    [...ladder].sort((a, b) => a - b),
+    ladder,
+    "z token 从低到高",
+  );
   assert.doesNotMatch(tokensCss, /--leading-[a-z]+:\s*2;/);
   // 字族：Barlow + Barlow Condensed + 苹方，等宽只给 id（2026-09-24 回到原设计）
   assert.match(tokensCss, /--font-ui: Barlow, "PingFang SC", "Microsoft YaHei", sans-serif;/);
@@ -223,8 +261,9 @@ test("tokens：V4 的 14 个色、六档字号、V4 圆角、层次 token、28/2
   assert.match(tokensCss, /--dur-release:\s*180ms;/);
   assert.match(tokensCss, /--dur-slide-tab:\s*260ms;/);
   assert.match(tokensCss, /--dur-slide-knob:\s*200ms;/);
-  // 抽屉：高度 0 ↔ auto 与拉手翻转都是 260ms
+  // 抽屉：高度 0 ↔ auto 与拉手翻转都是 260ms；推入页 200ms
   assert.match(tokensCss, /--dur-drawer:\s*260ms;/);
+  assert.match(tokensCss, /--dur-push:\s*200ms;/);
   assert.match(
     tokensCss,
     /--spring-slide: linear\(0, 0\.018 2\.5%, 0\.065 5%, 0\.131 7\.5%, 0\.209 10%, 0\.293 12\.5%, 0\.378 15%, 0\.461 17\.5%, 0\.54 20%, 0\.613 22\.5%, 0\.679 25%, 0\.749 28%, 0\.809 31%, 0\.859 34%, 0\.899 37%, 0\.941 41%, 0\.97 45%, 0\.994 50%, 1\.008 55%, 1\.014 61%, 1\.015 68%, 1\.012 76%, 1\.007 86%, 1\);/,
@@ -247,6 +286,7 @@ test("tokens：V4 的 14 个色、六档字号、V4 圆角、层次 token、28/2
     "dur-slide-tab",
     "dur-slide-knob",
     "dur-drawer",
+    "dur-push",
   ]) {
     assert.match(reducedTokens, new RegExp(`--${name}: 0ms;`), name);
   }
@@ -359,7 +399,6 @@ test("StateDot 异常：失效＝4 段虚线环、放不进去＝斜杠环 ⊘�
   assert.match(blocked, /d="M2 8 L8 2"/);
   assert.doesNotMatch(blocked, /d="M3 5 H7"/);
   assert.match(blocked, /aria-label="受阻"/);
-  assert.match(render(StateDot, { dot: "blocked", size: 16 }), /d="M3\.6 12\.4 L12\.4 3\.6"/);
   assert.match(
     render(StateDot, { dot: "wholeLinked" }),
     /d="M2\.9 5 H7\.1 M5\.3 3\.2 L7\.1 5 L5\.3 6\.8"/,
@@ -401,43 +440,41 @@ test("StateDot 10px：环 1.3 ink-mute、外径 10；实心 / 芯 / 斜线 ink�
   // 反色闪、禁用：环跟着记号一起转色
   assert.match(
     uiCss,
-    /\.ss-dot\.is-inverse \.ss-dot__ring,\s*\.ss-dot\.is-muted \.ss-dot__ring,\s*\.ss-flash \.ss-dot__ring \{\s*stroke: currentColor;/,
+    /\.ss-dot\.is-muted \.ss-dot__ring,\s*\.ss-flash \.ss-dot__ring \{\s*stroke: currentColor;/,
   );
 });
 
-test("StateDot 16px 版：与格内同形", () => {
-  const html = render(StateDot, { dot: "broken", size: 16, title: "链接失效" });
-  assert.match(html, /width="16" height="16" viewBox="0 0 16 16"/);
-  assert.match(html, /stroke-dasharray="8\.4 1\.5"/);
-});
-
-test("StateDot 可点：渲染成按钮；开 / 关两种与原件（点了是删原件）出悬停光晕", () => {
-  const linked = render(StateDot, { dot: "linked", onClick: noop, title: "点一下关闭" });
-  assert.match(linked, /<button type="button" class="ss-dot-btn"/);
+// 2026-09-25 设计系统梳理：16px 版、反色、自带按钮三个分支没人用，删了——外层按钮由表格自己渲染（整格命中）
+test("StateDot 只有 10px 一档；可点时外层按钮由调用方给，hoverable 的开 / 关两种与原件出悬停光晕", () => {
+  const src = readFileSync(new URL("../src/ui/StateDot.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /size\?:|inverse|onClick|Glyph16|ss-dot-btn"/);
+  assert.doesNotMatch(uiCss, /is-inverse/);
+  const linked = render(StateDot, { dot: "linked", hoverable: true, title: "点一下关闭" });
+  assert.doesNotMatch(linked, /<button/);
+  assert.match(linked, /^<span class="ss-dot-wrap" title="点一下关闭" role="img"/);
   assert.match(linked, /data-hoverable=""/);
   assert.match(linked, /class="ss-dot__fill"/);
-  const missing = render(StateDot, { dot: "missing", onClick: noop });
-  assert.match(missing, /data-hoverable=""/);
+  const missing = render(StateDot, { dot: "missing", hoverable: true });
   // 光晕：直径 22 的圆，先画、压在点下层
   assert.match(missing, /data-hoverable=""[^>]*><circle class="ss-dot__halo" cx="5" cy="5" r="11"/);
-  // 调用方自己渲染外层按钮：hoverable 让不带 onClick 的点也出光晕
-  assert.match(render(StateDot, { dot: "missing", hoverable: true }), /class="ss-dot__halo"/);
   // 原件点了是删原件（DESIGN「删除原件」）：照常出光晕
-  assert.match(render(StateDot, { dot: "own", onClick: noop }), /data-hoverable=""/);
+  assert.match(render(StateDot, { dot: "own", hoverable: true }), /data-hoverable=""/);
   // 异常点了不是开关：不出光晕
   for (const dot of ["broken", "readOnly", "blocked", "wholeLinked"] as const) {
-    const html = render(StateDot, { dot, onClick: noop });
+    const html = render(StateDot, { dot, hoverable: true });
     assert.doesNotMatch(html, /data-hoverable|ss-dot__halo/);
   }
   // 不可点的不出光晕
   assert.doesNotMatch(render(StateDot, { dot: "missing" }), /data-hoverable|ss-dot__halo/);
+  // 外层按钮（.ss-dot-btn）的命中区与悬停光晕的规则仍在组件库里
+  assert.match(cssRule(uiCss, ".ss-dot-btn"), /min-width:\s*var\(--hit-min\)/);
 });
 
 // 悬停时改点本身的两代做法都已退役（真机反馈：点一变就被读成已经点了）——
 // 先是 ● 褪成空环，后是 40% 浓度（○ 环内填 40%、● 整颗淡到 40%）
 test("StateDot 悬停：点本身不变，只在下层出 hairline 光晕（surface 行带上也看得出）", () => {
   // 未加上的环内不再藏一颗预览实心
-  assert.doesNotMatch(render(StateDot, { dot: "missing", onClick: noop }), /ss-dot__preview/);
+  assert.doesNotMatch(render(StateDot, { dot: "missing", hoverable: true }), /ss-dot__preview/);
   assert.doesNotMatch(uiCss, /ss-dot__preview|data-preview/);
   // 悬停 / 键盘聚焦时，选到点（.ss-dot，不含外层按钮 .ss-dot-btn）的规则只许动光晕
   const css = uiCss.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -460,16 +497,11 @@ test("StateDot 悬停：点本身不变，只在下层出 hairline 光晕（surf
   );
 });
 
-test("StateDot 反色闪与禁用：inverse 转 face、muted 退到 ink-faint", () => {
-  assert.match(
-    render(StateDot, { dot: "linked", inverse: true }),
-    /class="ss-dot ss-dot--linked is-inverse"/,
-  );
+test("StateDot 禁用：muted 退到 ink-faint（刚点亮的反色闪走 .ss-flash）", () => {
   assert.match(
     render(StateDot, { dot: "own", muted: true }),
     /class="ss-dot ss-dot--own is-muted"/,
   );
-  assert.match(cssRule(uiCss, ".ss-dot.is-inverse"), /color:\s*var\(--face\)/);
   assert.match(cssRule(uiCss, ".ss-dot.is-muted"), /color:\s*var\(--ink-faint\)/);
 });
 
@@ -583,7 +615,7 @@ test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mu
   const rule = cssRule(uiCss, ".ss-btn--quiet");
   assert.match(rule, /gap:\s*3px/);
   assert.match(rule, /height:\s*var\(--control-h-compact\)/);
-  assert.match(rule, /padding:\s*0 8px/);
+  assert.match(rule, /padding:\s*0 var\(--space-xs\)/);
   assert.match(rule, /background:\s*var\(--surface\)/);
   assert.match(rule, /box-shadow:\s*none/);
   assert.match(rule, /color:\s*var\(--ink-mute\)/);
@@ -602,7 +634,7 @@ test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mu
   // 灰面板、抽屉上键面换 paper、仍平贴
   assert.match(
     uiCss,
-    /\.ss-banner \.ss-btn--quiet:not\(:disabled\),\s*\.ss-noticepanel \.ss-btn--quiet:not\(:disabled\) \{\s*background: var\(--paper\);\s*\}/,
+    /\n\.ss-noticepanel \.ss-btn--quiet:not\(:disabled\) \{\s*background: var\(--paper\);\s*\}/,
   );
   // 固定 24：不叠尺寸类
   assert.match(
@@ -649,11 +681,28 @@ test("IconButton：28×28，title 必填且同时作 aria-label；不带计数",
   assert.doesNotMatch(uiCss, /\.ss-iconbtn:active/);
 });
 
-test("AddButton：开始一个添加流程只有「+ 名词」这一种长相", () => {
+test("AddButton：开始一个添加流程只有「+ 名词」这一种长相；+ 是词表里的 IconPlus 缩到 12，不另画一枚", () => {
   const html = render(AddButton, { noun: "skill", onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--add"/);
   assert.match(html, /title="添加 skill"/);
-  assert.match(html, /<path d="M6 1\.5v9M1\.5 6h9"><\/path><\/svg>skill</);
+  assert.match(
+    html,
+    /<svg width="12" height="12" viewBox="0 0 16 16"[^>]*><path d="M8 2\.6v10\.8M2\.6 8h10\.8"><\/path><\/svg>skill</,
+  );
+  // 尺寸只有工具行 28 一档（没人用的 size 删了）
+  assert.doesNotMatch(
+    readFileSync(new URL("../src/ui/Button.tsx", import.meta.url), "utf8"),
+    /size\?: "regular" \| "compact"/,
+  );
+});
+
+// 2026-09-25：纯图标的工具只走 IconButton，Button 的无字写法删了
+test("Button 一定有字：没有纯图标变体", () => {
+  assert.doesNotMatch(uiCss, /ss-btn--icon/);
+  assert.doesNotMatch(
+    readFileSync(new URL("../src/ui/Button.tsx", import.meta.url), "utf8"),
+    /ss-btn--icon|children\?: never/,
+  );
 });
 
 // ===== 开关与复选框 =====
@@ -922,7 +971,7 @@ test("Tabs：surface 槽 + recess-tabs 内凹 + 10 圆角、内边距 3；页签
   assert.match(track, /padding:\s*3px/);
   const tab = cssRule(uiCss, ".ss-tabs__tab");
   assert.match(tab, /height:\s*var\(--control-h\)/);
-  assert.match(tab, /padding:\s*0 16px/);
+  assert.match(tab, /padding:\s*0 var\(--space-md\)/);
   assert.match(tab, /font-size:\s*var\(--size-body\)/);
   assert.match(tab, /font-family:\s*var\(--font-cond\)/);
   assert.match(tab, /font-weight:\s*700/);
@@ -1004,7 +1053,7 @@ test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边�
   );
   const rule = cssRule(uiCss, ".ss-chip");
   assert.match(rule, /border-radius:\s*var\(--radius-pill\)/);
-  assert.match(rule, /height:\s*26px/);
+  assert.match(rule, /height:\s*var\(--control-h-chip\)/);
   assert.match(rule, /padding:\s*0 10px/);
   assert.match(rule, /border:\s*0/);
   assert.match(rule, /background:\s*var\(--recess\)/);
@@ -1052,14 +1101,16 @@ test("ModelChip：白胶囊高 26、左 10 右 8，paper + 1px hairline 环；×
   assert.match(html, /class="ss-modelchip" title="anthropic\/claude-opus-4-6"/);
   assert.match(html, />Opus 4\.6</);
   assert.match(html, /aria-label="移除 Opus 4\.6"/);
-  assert.match(html, /width="9" height="9"[^>]*stroke-width="1\.4"/);
+  // × 是词表里的 IconClose 缩到 9（线宽按比例反算，画出来仍是 1.4），不另画一枚
+  assert.match(html, /width="9" height="9" viewBox="0 0 16 16"[^>]*stroke-width="2\.48/);
+  assert.match(html, /<path d="M3\.6 3\.6l8\.8 8\.8M12\.4 3\.6l-8\.8 8\.8">/);
   const rule = cssRule(uiCss, ".ss-modelchip");
-  assert.match(rule, /height:\s*26px/);
+  assert.match(rule, /height:\s*var\(--control-h-chip\)/);
   assert.match(rule, /gap:\s*6px/);
   // paper 面 + 1px hairline 环：与来源胶囊是两种样子
   assert.match(rule, /background:\s*var\(--paper\)/);
   assert.match(rule, /border:\s*1px solid var\(--hairline\)/);
-  assert.match(rule, /padding:\s*0 8px 0 10px/);
+  assert.match(rule, /padding:\s*0 var\(--space-xs\) 0 10px/);
   assert.doesNotMatch(rule, /box-shadow/);
 });
 
@@ -1101,7 +1152,7 @@ test("Tooltip：黑窗白字 12，内边距 6 8，最大宽 240；内容作 aria
   // 静止时不显示；原生 title 不作唯一说明
   assert.doesNotMatch(html, /is-open/);
   const rule = cssRule(uiCss, ".ss-tip");
-  assert.match(rule, /padding:\s*6px 8px/);
+  assert.match(rule, /padding:\s*6px var\(--space-xs\)/);
   assert.match(rule, /max-width:\s*240px/);
   assert.match(rule, /background:\s*var\(--ink\)/);
   assert.match(rule, /font-size:\s*var\(--size-label\)/);
@@ -1123,11 +1174,13 @@ test("Tooltip 图层：打开的气泡浮在 body 上（fixed），盖过侧栏�
   assert.match(floating, /inset:\s*auto/);
   assert.match(floating, /transform:\s*none/);
   assert.match(floating, /max-width:\s*min\(240px, calc\(100vw - 32px\)\)/);
-  // z：确认弹窗（40）、浮起小窗（36）、二级页（30）之上
-  const z = (sel: string) => Number(cssRule(uiCss, sel).match(/z-index:\s*(\d+)/)?.[1]);
-  assert.ok(z(".ss-tip") > z(".ss-confirm-layer"));
-  assert.ok(z(".ss-tip") > z(".ss-floattoast"));
-  assert.ok(z(".ss-tip") > z(".ss-subpage"));
+  // z：最高一层——层级只从 tokens.css 的梯子取，组件里不写数字
+  assert.match(cssRule(uiCss, ".ss-tip"), /z-index:\s*var\(--z-tip\)/);
+  assert.match(cssRule(uiCss, ".ss-confirm-layer"), /z-index:\s*var\(--z-confirm\)/);
+  assert.match(cssRule(uiCss, ".ss-floattoast"), /z-index:\s*var\(--z-toast\)/);
+  assert.match(cssRule(uiCss, ".ss-pushed"), /z-index:\s*var\(--z-pushed\)/);
+  const layerCss = readFileSync(new URL("../src/ui/FloatingLayer.css", import.meta.url), "utf8");
+  for (const css of [uiCss, layerCss]) assert.doesNotMatch(css, /z-index:\s*\d/);
   // 单行的那几句：不受 240 上限，窗口放不下才折行
   assert.match(
     render(Tooltip, {
@@ -1528,6 +1581,67 @@ test("忙碌门槛 0.3 秒：触发键先锁住、外观不变，过了门槛才
   );
 });
 
+// 2026-09-25 设计系统梳理：门槛的几份实现（Matrix 的 busyLockClass、表格格子的浮起忙碌条、灰面板自带的一份）
+// 收到 BusySlot 的两种形态上
+test("BusySlot 变淡（dim）：包层一直在、忙了就锁，过了门槛变淡到 --busy-dim，不换字", () => {
+  const dot = createElement("button", { type: "button" }, "●");
+  // 空闲：包层在、不带样子（键不因忙闲重挂）
+  assert.equal(
+    render(BusySlot, { busy: false, label: "正在写入", mode: "dim", children: dot }),
+    '<span class="ss-busyslot-dim"><button type="button">●</button></span>',
+  );
+  // 门槛之前：只锁
+  assert.equal(
+    render(BusySlot, { busy: true, label: "正在写入", mode: "dim", children: dot }),
+    '<span class="ss-busyslot-dim is-locked" aria-busy="true"><button type="button">●</button></span>',
+  );
+  assert.match(cssRule(uiCss, ".ss-busyslot-dim.is-dim"), /opacity:\s*var\(--busy-dim\)/);
+  assert.match(
+    uiCss,
+    /\.ss-busyslot-dim\.is-locked,\s*\.ss-busyslot-float\.is-locked \{\s*pointer-events: none;/,
+  );
+});
+
+test("BusySlot 浮起（float）：键照旧锁着，过了门槛一句话浮在键下方——纸窗单行、句首 14 宽刻度", () => {
+  const cell = createElement("button", { type: "button" }, "○");
+  const early = render(BusySlot, { busy: true, label: "正在拆开", mode: "float", children: cell });
+  assert.equal(
+    early,
+    '<span class="ss-busyslot-float is-locked" aria-busy="true"><button type="button">○</button></span>',
+  );
+  // 浮窗本体：同成功提示条的纸窗、单行，刻度 + 一句 13 ink-mute
+  const toast = render(BusyToast, { label: "正在拆开" });
+  assert.match(
+    toast,
+    /^<div class="ss-toast ss-toast--routine ss-toast--busy" role="status"><svg class="ss-spinner ss-spinner--14"[^]*<span>正在拆开<\/span><\/div>$/,
+  );
+  // Toast 的忙碌形态画的就是它
+  assert.equal(render(Toast, { busy: "正在拆开" }), toast);
+  const busy = cssRule(uiCss, ".ss-toast--busy");
+  assert.match(busy, /gap:\s*6px/);
+  assert.match(busy, /color:\s*var\(--ink-mute\)/);
+});
+
+// 2026-09-25 设计系统梳理：notice 档原来丢掉次要键（在访达中显示备份）和撤销的禁用原因
+test("Toast notice 与 routine 同样画次要的浅键，撤销不可用时带原因", () => {
+  const html = render(Toast, {
+    kind: "partial",
+    verb: "写进",
+    tally: { done: 2, failed: 1 },
+    action: { label: "撤销", onClick: noop, disabledReason: "写入之后文件又被改过，无法安全撤销" },
+    secondary: { label: "在访达中显示备份", onClick: noop },
+    onClose: noop,
+  });
+  assert.match(html, /class="ss-toast ss-toast--notice"/);
+  assert.match(
+    html,
+    /class="ss-btn ss-btn--compact" title="写入之后文件又被改过，无法安全撤销"[^>]*disabled="">撤销</,
+  );
+  assert.match(html, /class="ss-btn ss-btn--quiet">在访达中显示备份<svg class="ss-btn__external"/);
+  // 键在 × 前面
+  assert.ok(html.indexOf("在访达中显示备份") < html.indexOf('aria-label="关闭"'));
+});
+
 test("提示小窗的动作在等（MCP 撤销）：只锁那颗键，门槛前外观不变", () => {
   const onClick = () => undefined;
   const busy = render(Toast, {
@@ -1547,27 +1661,45 @@ test("提示小窗的动作在等（MCP 撤销）：只锁那颗键，门槛前�
 
 // ===== 错误横幅与行内待办条：大面积的提示用 surface 灰面板，不用黑 =====
 
-test("ErrorBanner：surface 灰面板（face 12 圆角、无边无投影）+ 墨色 !，不自动消失；默认键紧凑 24 与 ×", () => {
-  const html = render(ErrorBanner, {
+// 2026-09-25 设计系统梳理：错误横幅并进灰面板（scope="app"），ErrorBanner 只剩转接层
+test("NoticePanel 应用级（原 ErrorBanner）：满内容宽、主句 15 + 第二行 13 ink-mute、内边距 12 16；ErrorBanner 原样转过来", () => {
+  const props = {
     message: "读不到网关列表",
     detail: "配置文件没有读权限",
     action: { label: "再试一次", onClick: noop },
     onClose: noop,
-  });
-  assert.match(html, /class="ss-banner" role="alert"/);
-  assert.match(html, /class="ss-banner__mark" title="故障" role="img" aria-label="故障"/);
-  assert.match(html, /class="ss-banner__detail">配置文件没有读权限</);
+  };
+  const html = render(NoticePanel, { scope: "app", ...props });
+  assert.equal(render(ErrorBanner, props), html);
+  assert.match(html, /class="ss-noticepanel ss-noticepanel--app" role="alert"/);
+  assert.match(html, /class="ss-noticepanel__mark" title="故障" role="img" aria-label="故障"/);
+  assert.match(html, /class="ss-noticepanel__detail">配置文件没有读权限</);
   assert.match(html, /class="ss-btn ss-btn--compact">再试一次</);
   assert.match(html, /aria-label="关闭"/);
-  assert.doesNotMatch(html, /is-on-dark/);
-  const rule = cssRule(uiCss, ".ss-banner");
-  assert.match(rule, /background:\s*var\(--surface\)/);
-  assert.match(rule, /color:\s*var\(--ink\)/);
-  assert.match(rule, /border-radius:\s*var\(--radius-face\)/);
-  assert.doesNotMatch(rule, /(^|\s)border:|box-shadow/);
-  assert.match(cssRule(uiCss, ".ss-banner__detail"), /color:\s*var\(--ink-mute\)/);
+  const app = cssRule(uiCss, ".ss-noticepanel--app");
+  assert.match(app, /width:\s*100%/);
+  assert.match(app, /padding:\s*var\(--space-sm\) var\(--space-md\)/);
+  assert.match(app, /font-size:\s*var\(--size-body\)/);
+  assert.match(cssRule(uiCss, ".ss-noticepanel__detail"), /color:\s*var\(--ink-mute\)/);
+  assert.doesNotMatch(uiCss, /\.ss-banner/);
   // 页级「路由没在跑」不可关
   assert.doesNotMatch(render(ErrorBanner, { message: "路由没在跑" }), /关闭/);
+});
+
+test("NoticePanel 节：满这一节的宽，主句占满中间、可折行，键推到右端", () => {
+  const html = render(NoticePanel, {
+    scope: "section",
+    message: "路由没在跑",
+    action: { label: "重启路由", onClick: noop },
+  });
+  assert.match(html, /class="ss-noticepanel ss-noticepanel--section" role="status"/);
+  const section = cssRule(uiCss, ".ss-noticepanel--section");
+  assert.match(section, /display:\s*flex/);
+  assert.match(section, /align-self:\s*stretch/);
+  assert.match(
+    uiCss,
+    /\.ss-noticepanel--section \.ss-noticepanel__message,\s*\.ss-noticepanel--app \.ss-noticepanel__message \{\s*flex: 1 1 auto;\s*min-width: 0;\s*white-space: normal;/,
+  );
 });
 
 // 2026-09-25：`稍后` 也是默认键紧凑（应用内能点的一律默认键），不再是安静键
@@ -1575,9 +1707,19 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认键紧凑（纸面）
   const html = render(NoticePanel, {
     message: "改动要重启 Codex 才生效",
     action: { label: "重启", onClick: noop },
-    link: { label: "稍后", onClick: noop },
+    secondary: { label: "稍后", onClick: noop },
   });
-  assert.match(html, /class="ss-noticepanel"/);
+  // 不给范围就是挂在一行下面（row）
+  assert.match(html, /class="ss-noticepanel ss-noticepanel--row" role="status"/);
+  // 第二颗键的旧名 link 还认（页面迁移后删）
+  assert.equal(
+    render(NoticePanel, {
+      message: "改动要重启 Codex 才生效",
+      action: { label: "重启", onClick: noop },
+      link: { label: "稍后", onClick: noop },
+    }),
+    html,
+  );
   assert.match(html, /aria-label="要你动手"/);
   assert.match(html, /class="ss-btn ss-btn--compact">重启</);
   assert.match(html, /class="ss-btn ss-btn--compact">稍后</);
@@ -1587,7 +1729,7 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认键紧凑（纸面）
   assert.match(rule, /background:\s*var\(--surface\)/);
   assert.match(rule, /color:\s*var\(--ink\)/);
   assert.match(rule, /border-radius:\s*var\(--radius-face\)/);
-  assert.match(rule, /padding:\s*8px 12px/);
+  assert.match(rule, /padding:\s*var\(--space-xs\) var\(--space-sm\)/);
   assert.doesNotMatch(rule, /(^|\s)border:|box-shadow/);
   // 灰面上的默认键本来就是纸面，不再单独改底；图标按钮的悬停带在灰上退一档到 hairline
   assert.doesNotMatch(uiCss, /\.ss-noticepanel \.ss-btn:not/);
@@ -1596,16 +1738,21 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认键紧凑（纸面）
     /background:\s*var\(--hairline\)/,
   );
   assert.doesNotMatch(uiCss, /ss-noticepanel[^{]*\.ss-spinner/);
-  // 正在执行：门槛之前键照旧、点不动（不闪一下忙碌），过了 0.3 秒才换成忙碌指示 + 一句
+  // 正在执行：走 BusySlot——门槛之前键照旧、点不动（不闪一下忙碌），过了 0.3 秒才换成忙碌指示 + 一句
   const busy = render(NoticePanel, {
     message: "x",
     busy: "正在接管",
     action: { label: "接管", onClick: noop },
   });
-  assert.match(busy, /class="ss-noticepanel__actions is-locked"/);
-  assert.match(busy, />接管</);
+  assert.match(
+    busy,
+    /<span class="ss-locked" aria-busy="true"><span class="ss-noticepanel__actions">[^]*>接管</,
+  );
   assert.doesNotMatch(busy, /ss-spinner/);
-  assert.match(cssRule(uiCss, ".ss-noticepanel__actions.is-locked"), /pointer-events:\s*none/);
+  // 过了门槛的那一句与键同一个位置、同样的间距
+  const after = cssRule(uiCss, ".ss-noticepanel .ss-busyslot");
+  assert.match(after, /gap:\s*var\(--space-xs\)/);
+  assert.match(after, /margin-left:\s*var\(--space-xs\)/);
 });
 
 test("NoticePanel 行下失败：原因写全、可折行，给了 onClose 才有右端 ×", () => {
@@ -1639,8 +1786,8 @@ test("Confirm：纸浮层 384（paper + hairline 边 + float 12 + 浮层投影�
     onConfirm: noop,
     onCancel: noop,
   });
-  assert.match(html, /role="dialog" aria-modal="true"/);
-  assert.match(html, /class="ss-confirm__title">重启 Codex？</);
+  assert.match(html, /role="dialog" aria-modal="true" aria-labelledby="([^"]+)"/);
+  assert.match(html, /class="ss-confirm__title" id="[^"]+">重启 Codex？</);
   // 取消在左、主动作在右，两颗都有底边，主次靠墨与纸分开（D14）
   assert.match(
     html,
@@ -1653,7 +1800,7 @@ test("Confirm：纸浮层 384（paper + hairline 边 + float 12 + 浮层投影�
   assert.match(board, /border-radius:\s*var\(--radius-float\)/);
   assert.match(board, /box-shadow:\s*var\(--elev-float\)/);
   assert.match(board, /width:\s*384px/);
-  assert.match(board, /padding:\s*20px 20px 16px/);
+  assert.match(board, /padding:\s*20px 20px var\(--space-md\)/);
   // 标题 head Condensed 16/600、原样字距 0，正文 body 15 ink-mute（不是 14）
   const title = cssRule(uiCss, ".ss-confirm__title");
   assert.match(title, /font-family:\s*var\(--font-cond\)/);
@@ -1719,30 +1866,78 @@ test("Confirm 路径：等宽 ink 字、不垫色块、路径可拖选；主动�
   assert.match(plate, /font-family:\s*var\(--font-mono\)/);
 });
 
-// ===== 二级页面 =====
+// 2026-09-25 设计系统梳理：窄面板形态收编托盘里就地展开的确认
+test("Confirm 窄面板：行下当场展开的一块凹面（recess、face 12、内边距 10 12），无遮罩；标题 13 / 600、后果 12 均衡折行；键紧凑、间 12", () => {
+  const html = render(Confirm, {
+    inline: true,
+    id: "tray-confirm",
+    title: "重启 Codex？",
+    children: "进行中的对话会中断",
+    confirmLabel: "重启",
+    onConfirm: noop,
+    onCancel: noop,
+  });
+  assert.match(
+    html,
+    /^<div class="ss-confirm ss-confirm--inline" id="tray-confirm" role="dialog" aria-labelledby=/,
+  );
+  assert.doesNotMatch(html, /ss-confirm-layer|ss-confirm-veil|aria-modal/);
+  assert.match(
+    html,
+    /class="ss-btn ss-btn--compact">取消<\/button>.*class="ss-btn ss-btn--primary ss-btn--compact">重启</,
+  );
+  const panel = cssRule(uiCss, ".ss-confirm--inline");
+  assert.match(panel, /background:\s*var\(--recess\)/);
+  assert.match(panel, /border-radius:\s*var\(--radius-face\)/);
+  assert.match(panel, /padding:\s*10px var\(--space-sm\)/);
+  assert.match(panel, /box-shadow:\s*none/);
+  assert.match(
+    cssRule(uiCss, ".ss-confirm--inline .ss-confirm__title"),
+    /font-size:\s*var\(--size-caption\)/,
+  );
+  assert.match(cssRule(uiCss, ".ss-confirm--inline .ss-confirm__body"), /text-wrap:\s*balance/);
+  assert.match(cssRule(uiCss, ".ss-confirm--inline .ss-confirm__foot"), /gap:\s*var\(--space-sm\)/);
+});
 
-test("SubPage：头落在机壳上（← + 页面名 display Condensed 28/700、字距 0、无分隔线），内容进机面，头 84 = 28 + 56", () => {
-  const html = render(SubPage, { title: "添加 skill 到「全局」", onBack: noop, children: "内容" });
-  assert.match(html, /class="ss-subpage"/);
-  assert.match(html, /class="ss-iconbtn" title="返回" aria-label="返回"/);
-  // 页标题可被程序聚焦（打开时焦点移过去），但不进 Tab 序列
-  assert.match(html, /class="ss-subpage__title" tabindex="-1">添加 skill 到「全局」</);
-  assert.match(html, /class="ss-subpage__body">内容</);
-  const title = cssRule(uiCss, ".ss-subpage__title");
-  assert.match(title, /font-family:\s*var\(--font-cond\)/);
-  assert.match(title, /font-size:\s*var\(--size-display\)/);
-  assert.match(title, /font-weight:\s*700/);
-  assert.match(title, /letter-spacing:\s*0/);
-  assert.doesNotMatch(title, /text-transform/);
-  const bar = cssRule(uiCss, ".ss-subpage__bar");
-  assert.match(bar, /height:\s*calc\(var\(--titlestrip\) \+ var\(--topbar\)\)/);
-  assert.doesNotMatch(bar, /border(-bottom)?:/);
-  assert.match(cssRule(uiCss, ".ss-subpage"), /background:\s*var\(--shell\)/);
-  const body = cssRule(uiCss, ".ss-subpage__body");
-  assert.match(body, /background:\s*var\(--face\)/);
-  assert.match(body, /border:\s*var\(--border-face\)/);
-  assert.match(body, /border-radius:\s*var\(--radius-face\)/);
-  assert.doesNotMatch(body, /box-shadow/);
+// ===== 推入页（2026-09-25 取代整窗二级页 SubPage）=====
+
+test("PushedPage：只替换机面——壳的页面头（← + 页面名 title 20），盖在机面上、从右推入 / 滑回 --dur-push，下层 inert", () => {
+  const html = render(PushedPage, {
+    title: "CardBox 的来源",
+    leaving: false,
+    leave: noop,
+    actions: createElement("button", { type: "button" }, "+ 来源"),
+    children: "内容",
+  });
+  assert.match(
+    html,
+    /^<div class="ss-pushed" role="region" aria-label="CardBox 的来源" tabindex="-1">/,
+  );
+  assert.match(html, /class="page-head"/);
+  assert.match(
+    html,
+    /class="ss-pushed__lead"><span[^>]*><button type="button" class="ss-iconbtn" title="返回" aria-label="返回"/,
+  );
+  assert.match(html, /class="page-head__title"[^>]*>CardBox 的来源</);
+  assert.match(html, /class="page-head__actions"[^>]*><button type="button">\+ 来源</);
+  assert.match(html, /class="ss-pushed__body">内容</);
+  assert.match(
+    render(PushedPage, { title: "x", leaving: true, leave: noop, children: "" }),
+    /class="ss-pushed is-leaving"/,
+  );
+  const page = cssRule(uiCss, ".ss-pushed");
+  assert.match(page, /position:\s*absolute/);
+  assert.match(page, /background:\s*var\(--face\)/);
+  assert.match(page, /animation:\s*ss-push-in var\(--dur-push\) var\(--ease-mech\) both/);
+  assert.match(
+    cssRule(uiCss, ".ss-pushed.is-leaving"),
+    /animation:\s*ss-push-out var\(--dur-push\) var\(--ease-mech\) both/,
+  );
+  // 整窗二级页的一切都不在了
+  assert.doesNotMatch(uiCss, /ss-subpage|--titlestrip|--topbar|--size-display/);
+  // 减少动效：直接切换
+  const reduced = uiCss.slice(uiCss.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.match(reduced, /\.ss-pushed,\s*\.ss-pushed\.is-leaving \{\s*animation: none;/);
 });
 
 // ===== 大小写：大写与正字距只经 Cap =====
@@ -1809,10 +2004,10 @@ test("全应用的大写变换与正字距只在 Cap 的样式里，没有小写
 
 // ===== agent 图标 =====
 
-test("AgentMark：四个画得出的用真图标，单色 currentColor", () => {
+test("AgentIcon：四个画得出的用真图标，单色 currentColor", () => {
   for (const id of ["claude-code", "codex", "cursor", "gemini-cli"]) {
     assert.equal(hasAgentIcon(id), true, id);
-    const html = render(AgentMark, { id, name: id });
+    const html = render(AgentIcon, { id, name: id });
     assert.match(html, /<svg/, id);
     assert.match(html, /currentColor/, id);
     assert.doesNotMatch(html, /ss-mark__box/, id);
@@ -1838,69 +2033,32 @@ test("AgentIcon labelled：旁边没有名字时自己带 title 与读屏名", (
   );
 });
 
-test("AgentMark：没图标的降级成首字母方块，且永远和名字一起出现", () => {
-  const html = render(AgentMark, { id: "windsurf", name: "Windsurf" });
+test("AgentIcon：没图标的降级成首字母方块（14 方、mark 4 圆角、ctl-border 边、Condensed 11/600，字母经 Cap）", () => {
+  const html = render(AgentIcon, { id: "windsurf", name: "Windsurf" });
   assert.equal(hasAgentIcon("windsurf"), false);
   // 首字母经 Cap（mark 档：Condensed 大写、字距 0）
   assert.match(
     html,
     /class="ss-mark__box"[^>]*><span class="ss-cap-wrap ss-cap-wrap--mark"><span class="ss-cap">W<\/span><\/span>/,
   );
-  assert.match(html, /class="ss-mark__name">Windsurf</);
   assert.equal(agentInitial("amp"), "A");
-});
-
-test("AgentMark inline：agent 名不大写，原样渲染", () => {
-  const html = render(AgentMark, { id: "claude-code", name: "Claude Code" });
-  assert.match(html, /class="ss-mark ss-mark--inline"/);
-  assert.match(html, /class="ss-mark__name">Claude Code</);
-});
-
-test("AgentMark header：列头三层——图标 / 名字（label Condensed 12/600，经 Cap 大写）/ 12 tabular 计数，没有灯", () => {
-  const html = render(AgentMark, {
-    id: "claude-code",
-    name: "Claude Code",
-    layout: "header",
-    count: 41,
-  });
-  assert.match(html, /class="ss-mark ss-mark--header"/);
-  // 列头是 agent 身份：名字经 Cap（`CLAUDE CODE`），数据本身不改
-  assert.match(
-    html,
-    /class="ss-mark__name"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">Claude Code<\/span><\/span></,
-  );
-  assert.match(html, /class="ss-mark__count">41</);
-  assert.doesNotMatch(html, /ss-lamp/);
-  const name = cssRule(uiCss, ".ss-mark--header .ss-mark__name");
-  assert.match(name, /font-family:\s*var\(--font-cond\)/);
-  assert.match(name, /font-size:\s*var\(--size-label\)/);
-  assert.match(name, /font-weight:\s*600/);
-  assert.doesNotMatch(name, /text-transform/);
-  const count = cssRule(uiCss, ".ss-mark__count");
-  assert.match(count, /font-family:\s*var\(--font-ui\)/);
-  assert.match(count, /color:\s*var\(--ink-faint\)/);
-  // 首字母方块：14 方、mark 4 圆角、ctl-border 边、Condensed 11/600
   const box = cssRule(uiCss, ".ss-mark__box");
   assert.match(box, /font-family:\s*var\(--font-cond\)/);
   assert.match(box, /font-size:\s*11px/);
   assert.match(box, /font-weight:\s*600/);
   assert.match(box, /border:\s*1px solid var\(--ctl-border\)/);
   assert.match(box, /border-radius:\s*var\(--radius-mark\)/);
-});
-
-test("AgentMark 禁用取色：形状不变，整体退到 ink-mute", () => {
-  assert.match(
-    render(AgentMark, { id: "cursor", name: "Cursor", dim: true }),
-    /class="ss-mark ss-mark--inline is-dim"/,
-  );
-  assert.match(cssRule(uiCss, ".ss-mark.is-dim"), /color:\s*var\(--ink-mute\)/);
+  // 图标 + 名字的组合件 AgentMark 没人用，删了（名字由调用方写；矩阵列头由表格自己排）
+  assert.doesNotMatch(uiCss, /\.ss-mark(--|__name|__count|__icon|\.is-dim|\s*\{)/);
 });
 
 // ===== 空态与忙碌态 =====
 
-test("Empty 首次扫描：24 宽忙碌刻度 + 一句忙什么（自创转盘已删）", () => {
-  const html = render(Empty, { kind: "scanning" });
-  assert.match(html, /class="ss-empty ss-empty--scanning"/);
+test("Empty 首次扫描（busy）：24 宽忙碌刻度 + 一句忙什么（自创转盘已删）", () => {
+  const html = render(Empty, { busy: true, description: "正在读 skill 目录" });
+  assert.match(html, /class="ss-empty is-busy"/);
+  // 旧的 kind 轴只剩转接：scanning 等于 busy + 默认那一句
+  assert.equal(render(Empty, { kind: "scanning" }), html);
   assert.match(html, /class="ss-spinner ss-spinner--24" width="24"/);
   assert.match(html, /正在读 skill 目录</);
   assert.doesNotMatch(html, /ss-empty__actions/);
@@ -1908,10 +2066,10 @@ test("Empty 首次扫描：24 宽忙碌刻度 + 一句忙什么（自创转盘�
 
 test("Empty 这个域没有 agent 目录：说「添加」不说「导入」+ 一个按钮", () => {
   const html = render(Empty, {
-    kind: "noAgentDirs",
+    description: "CardBox 下还没有 agent 的 skill 目录。添加时会自动创建。",
     primary: { label: "添加 skill", onClick: noop },
   });
-  assert.match(html, /data-kind="noAgentDirs"/);
+  assert.doesNotMatch(html, /data-kind|ss-empty--/);
   assert.match(html, /添加时会自动创建/);
   assert.doesNotMatch(html, /导入/);
   assert.match(html, /class="ss-btn">添加 skill</);
@@ -1921,7 +2079,6 @@ test("Empty 这个域没有 agent 目录：说「添加」不说「导入」+ �
 // 是被取代的规范
 test("Empty 动作：都是默认键；离开 Sophia 的给 leave，画成浅键（自动带 ↗）", () => {
   const html = render(Empty, {
-    kind: "noSkills",
     description: "通用仓库（~/repos/common-skills）里还没有 skill。",
     hint: "把 skill 目录放进去，或者从别的地方添加一个。",
     primary: { label: "添加 skill", onClick: noop },
@@ -1931,7 +2088,6 @@ test("Empty 动作：都是默认键；离开 Sophia 的给 leave，画成浅键
   assert.equal(html.match(/class="ss-btn"/g)?.length, 2);
   assert.doesNotMatch(html, /ss-btn--quiet/);
   const leave = render(Empty, {
-    kind: "noSkills",
     description: "WeiboAP 里还没有 skill",
     primary: { label: "在访达中显示", onClick: noop, leave: true },
   });
@@ -1940,11 +2096,11 @@ test("Empty 动作：都是默认键；离开 Sophia 的给 leave，画成浅键
 
 test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首次扫描有图时忙碌指示跟在句子前", () => {
   const folders = render(Empty, {
-    kind: "noAgentDirs",
+    description: "CardBox 下还没有 agent 的 skill 目录",
     art: "noDirs",
     primary: { label: "添加 skill", onClick: noop },
   });
-  assert.match(folders, /class="ss-empty ss-empty--noAgentDirs has-art"/);
+  assert.match(folders, /class="ss-empty has-art"/);
   assert.match(
     folders,
     /<img class="ss-empty__art ss-empty__art--noDirs" src="empty-no-dirs\.png" alt="" aria-hidden="true"\/>/,
@@ -1954,7 +2110,7 @@ test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首�
   assert.ok(folders.indexOf("ss-empty__description") < folders.indexOf("ss-empty__actions"));
 
   const scanning = render(Empty, {
-    kind: "scanning",
+    busy: true,
     art: "scanning",
     description: "正在读 3 个位置",
   });
@@ -1965,8 +2121,11 @@ test("Empty 空态图像：图在上、装饰（alt 空 + aria-hidden）；首�
   );
 
   // 不给 art 就不放图（筛选无结果）
-  assert.doesNotMatch(render(Empty, { kind: "noMatch" }), /<img/);
-  assert.match(render(Empty, { kind: "noSkills", art: "emptyFolder" }), /src="empty-folder\.png"/);
+  assert.doesNotMatch(render(Empty, { description: "没有匹配的 skill" }), /<img/);
+  assert.match(
+    render(Empty, { description: "还没有 skill", art: "emptyFolder" }),
+    /src="empty-folder\.png"/,
+  );
   // 小黑猫三张都按显示尺寸原样画（2x 资源），不裁切
   const scanRule = cssRule(uiCss, ".ss-empty__art--scanning");
   assert.match(scanRule, /width:\s*472px/);
@@ -2040,7 +2199,7 @@ test("Drawer：行下的详情，不垫色块、左沿对齐名字，上 6 下 1
   assert.match(cssRule(uiCss, ".ss-drawer.is-open"), /grid-template-rows:\s*1fr/);
   assert.match(cssRule(uiCss, ".ss-drawer__clip"), /overflow:\s*hidden/);
   const room = cssRule(uiCss, ".ss-drawer__room");
-  assert.match(room, /padding:\s*6px 0 12px/);
+  assert.match(room, /padding:\s*6px 0 var\(--space-sm\)/);
   assert.match(room, /border-bottom:\s*var\(--border-row\)/);
   const well = cssRule(uiCss, ".ss-drawer__well");
   assert.doesNotMatch(
@@ -2048,13 +2207,26 @@ test("Drawer：行下的详情，不垫色块、左沿对齐名字，上 6 下 1
     /background|box-shadow|border-radius|padding/,
     "抽屉不垫色块：详情缩进到名字、夹在这一行与下一条行线之间，归属已经清楚",
   );
-  assert.equal(DRAWER_MS, 260);
+  // 收起后等滑完再卸内容：JS 不另存 260，读 tokens.css 的 --dur-drawer
+  const drawerSrc = readFileSync(new URL("../src/ui/Drawer.tsx", import.meta.url), "utf8");
+  assert.match(drawerSrc, /motionMs\("--dur-drawer"\)/);
+  assert.doesNotMatch(drawerSrc, /\b260\b/);
   // 减少动效：即时
   const reduced = uiCss.slice(uiCss.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.match(reduced, /\.ss-drawerhandle,\s*\.ss-drawerhandle__glyph,\s*\.ss-drawer,/);
+});
+
+// 2026-09-25：页面不再覆盖 .ss-drawer__well / __room 来对齐左沿、去掉行线
+test("Drawer inset / rule / flush：左沿（和右沿）让位写在 well 上，行线与上内边距可以交给行", () => {
+  const html = render(Drawer, { open: true, inset: 56, rule: false, flush: true, children: "x" });
+  assert.match(html, /class="ss-drawer is-open is-bare is-flush"/);
+  assert.match(html, /class="ss-drawer__well" style="margin-inline-start:56px">x</);
   assert.match(
-    reduced,
-    /\.ss-drawerhandle,\s*\.ss-drawerhandle__glyph,\s*\.ss-drawer \{\s*transition: none;/,
+    render(Drawer, { open: true, inset: { start: "calc(34px + 24px)", end: 24 }, children: "x" }),
+    /style="margin-inline-start:calc\(34px \+ 24px\);margin-inline-end:24px"/,
   );
+  assert.match(cssRule(uiCss, ".ss-drawer.is-bare .ss-drawer__room"), /border-bottom:\s*0/);
+  assert.match(cssRule(uiCss, ".ss-drawer.is-flush .ss-drawer__room"), /padding-top:\s*0/);
 });
 
 test("刚变化的格子闪一下：120ms 反色再回落，减少动效时退化为无", () => {
@@ -2096,21 +2268,24 @@ test("内容区：滚动容器上下不留内边距，否则吸顶条的落点�
   assert.doesNotMatch(appCss, /\.pending-bar\b/);
 });
 
-// ===== 二级页盖住主视图（真窗口走查：添加 skill 页上叠着主视图的吸顶工具行与列头） =====
+// ===== 推入页盖住下面那一页（真窗口走查：添加来源页上叠着位置页吸顶的页面头）=====
 
-test("二级页的层级高过主视图里所有吸顶元素（Matrix.css 最高的 z-index），确认框与提示框仍在它上面", () => {
+test("推入页的层级高过位置页里所有吸顶元素（Matrix.css 的 z-index），确认框与提示框仍在它上面", () => {
   const matrixCss = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  const zs = [...matrixCss.matchAll(/z-index:\s*(\d+)/g)].map((m) => Number(m[1]));
-  const sub = Number(/z-index:\s*(\d+)/.exec(cssRule(uiCss, ".ss-subpage"))?.[1]);
+  const zOf = (name: string) => Number(tokensCss.match(new RegExp(`--z-${name}:\\s*(\\d+);`))?.[1]);
+  // 格子提示框（在内容流里、只在表内比高低）之外的吸顶层
+  const sticky = [...matrixCss.matchAll(/([^{}]+)\{[^}]*z-index:\s*(\d+)/g)]
+    .filter(([, sel]) => !/\.ss-tip/.test(sel))
+    .map((m) => Number(m[2]));
   assert.ok(
-    sub > Math.max(...zs),
-    `.ss-subpage 的 z-index ${sub} 要高过 Matrix 的 ${Math.max(...zs)}`,
+    zOf("pushed") > Math.max(...sticky),
+    `--z-pushed ${zOf("pushed")} 要高过 Matrix 的 ${Math.max(...sticky)}`,
   );
-  const confirm = Number(/z-index:\s*(\d+)/.exec(cssRule(uiCss, ".ss-confirm-layer"))?.[1]);
-  assert.ok(confirm > sub, "确认框要在二级页上面");
+  assert.ok(zOf("confirm") > zOf("pushed"), "确认框要在推入页上面");
+  assert.ok(zOf("tip") > zOf("confirm"), "提示框要在确认框上面");
 });
 
-test("holdInert：打开二级页时主视图根节点加 inert，多个同时持有时最后一个释放才摘掉", () => {
+test("holdInert：推入页打开时下面那一页加 inert，多页同时持有时最后一个释放才摘掉", () => {
   const attrs = new Map<string, string>();
   const root = {
     setAttribute: (n: string, v: string) => void attrs.set(n, v),
@@ -2120,24 +2295,11 @@ test("holdInert：打开二级页时主视图根节点加 inert，多个同时�
   assert.equal(attrs.get("inert"), "");
   const b = holdInert(root);
   a();
-  assert.equal(attrs.has("inert"), true, "还有一个二级页开着");
+  assert.equal(attrs.has("inert"), true, "还有一页推入页开着");
   a();
   assert.equal(attrs.has("inert"), true, "同一个释放函数调两次只算一次");
   b();
   assert.equal(attrs.has("inert"), false);
-});
-
-test("返回时找回触发它的那颗键：主视图重挂过也按读屏名、再按文字认回", () => {
-  const btn = (label: string | null, text: string) => ({
-    getAttribute: (n: string) => (n === "aria-label" ? label : null),
-    textContent: text,
-  });
-  const gear = btn("设置", "");
-  const key = triggerKey(gear);
-  const fresh = [btn("关闭", ""), btn("设置", ""), btn(null, "+ skill")];
-  assert.equal(pickTrigger(fresh, key), 1);
-  assert.equal(pickTrigger(fresh, triggerKey(btn(null, " + skill "))), 2);
-  assert.equal(pickTrigger(fresh, triggerKey(btn(null, "配置网关"))), -1);
 });
 
 test("提示框：墨窗 face 字、control 7 圆角 + 浮层投影；平铺在页面流里的灰面板不浮起、无阴影", () => {
@@ -2146,8 +2308,8 @@ test("提示框：墨窗 face 字、control 7 圆角 + 浮层投影；平铺在�
   assert.match(tip, /color:\s*var\(--face\)/);
   assert.match(tip, /border-radius:\s*var\(--radius-control\)/);
   assert.match(tip, /box-shadow:\s*var\(--elev-float\)/);
-  const banner = cssRule(uiCss, ".ss-banner");
-  assert.doesNotMatch(banner, /box-shadow/);
+  const panel = cssRule(uiCss, ".ss-noticepanel");
+  assert.doesNotMatch(panel, /box-shadow/);
 });
 
 test("层次只用 token：src 里凡是 box-shadow 都是凹 / 抬起 / 浮 token（或它们的组合）/ none；指示点的灯罩环只在 .ss-indicator 上", async () => {

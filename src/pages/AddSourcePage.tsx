@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconArrowLeft, IconButton, Toast } from "../ui";
-import { holdInert } from "../ui/SubPage.tsx";
+import { holdInert } from "../ui/PushedPage.tsx";
 import { PageHead, PageTitle } from "../shell/PageHead.tsx";
 import { useMenuFlag, usePageCommand } from "../shell/menuBus.ts";
 import { AddSourcePanel } from "./AddSourcePanel.tsx";

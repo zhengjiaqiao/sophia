@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
 
 /// 确认弹窗（DESIGN「页面还是弹层」「材料与工艺 › 对话框」，画板 Feedback「确认」）。
 ///
-/// **只给两件真正不可逆的事**：MCP 的批量或跨域写入、重启 Codex（⑪ 能撤销就不弹确认）。
+/// **只给真正不可逆、或会打断别处的决定**（⑪ 能撤销就不弹确认）：删原件、只留这份、删 MCP 最后一份、删网关、
+/// 移除来源、MCP 的批量或跨域写入、重启 Codex。
 ///
 /// - 纸浮层：`paper` + 1px `hairline` 边、`float` 12 圆角 + 浮层投影，内边距 20 20 16，宽 384；
 ///   标题 `head` 16/600，正文 `body` 15 `ink-mute`
@@ -16,7 +17,14 @@ import { Button } from "./Button.tsx";
 ///   （`重启` `写进去`）——两颗键都抬起，主次靠墨与纸分开
 /// - **承载后果与安全信息的句子必须留**（`safetyNote`）——那是功能
 /// - 背景点击与 Esc 等同取消
+///
+/// **窄面板形态**（`inline`，托盘面板这种放不下居中弹窗、也不该压暗整窗的地方）：在触发它的那一行下面当场展开
+/// 一块凹面（`recess`、`face` 12 圆角、内边距 10 12，无边无投影、无遮罩），标题 13 / 600 `ink` + 一句后果 12
+/// `ink-mute`（均衡折行），右对齐 `取消`（默认键紧凑 24）与主动作墨键（紧凑 24），键间 12。不接 Esc（Esc 归面板本身），
+/// 外距由调用方的那一行给。触发键用 `ariaControls` 指向它的 `id`
 
+/// **已不是确认框的参数**（确认框一律居中）：页面仍拿它当「视口里的一个矩形」用，页面迁移时换成
+/// `layerPlace.ts` 的 `AnchorRect` 后删掉
 export interface ConfirmAnchor {
   /// 触发行在视口里的矩形（`getBoundingClientRect()` 的结果即可）
   top: number;
@@ -30,7 +38,7 @@ export interface ConfirmProps {
   title: ReactNode;
   /// 正文插槽：一句后果、或后果示意图
   children?: ReactNode;
-  /// 路径铭牌：凹面（`recess` 底 + 内凹）、等宽 12 `ink` 字、内边距 10 12，路径可拖选；`meta` 是第二行 `ink-faint`
+  /// 路径铭牌：等宽 12 `ink` 字、不垫底色块，路径可拖选；`meta` 是第二行 `ink-faint`
   nameplate?: { path: string; meta?: ReactNode };
   /// 一句安全信息（13 `ink-mute`）：`会把请求头和令牌一并复制过去`
   safetyNote?: ReactNode;
@@ -42,6 +50,10 @@ export interface ConfirmProps {
   /// 默认「取消」
   cancelLabel?: string;
   onCancel: () => void;
+  /// 窄面板形态：在触发它的那一行下面当场展开的一块凹面（托盘），见上
+  inline?: boolean;
+  /// 窄面板形态的 id（触发键的 `aria-controls`）
+  id?: string;
 }
 
 export function Confirm({
@@ -54,51 +66,80 @@ export function Confirm({
   confirmDisabledReason,
   cancelLabel = "取消",
   onCancel,
+  inline = false,
+  id,
 }: ConfirmProps) {
-  // Esc 等同取消
+  const titleId = useId();
+  // Esc 等同取消（窄面板不接：Esc 归它所在的面板）
   useEffect(() => {
+    if (inline) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onCancel();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
+  }, [onCancel, inline]);
 
   const disabled = Boolean(confirmDisabledReason);
+  const size = inline ? "compact" : "row";
+  const keys = (
+    <>
+      <Button size={size} onClick={onCancel}>
+        {cancelLabel}
+      </Button>
+      {disabled ? (
+        <Button
+          variant="primary"
+          size={size}
+          disabled
+          disabledReason={confirmDisabledReason as string}
+        >
+          {confirmLabel}
+        </Button>
+      ) : (
+        <Button variant="primary" size={size} onClick={onConfirm}>
+          {confirmLabel}
+        </Button>
+      )}
+    </>
+  );
+
+  const content = (
+    <>
+      <div className="ss-confirm__title" id={titleId}>
+        {title}
+      </div>
+      {children ? <div className="ss-confirm__body">{children}</div> : null}
+      {nameplate ? (
+        <div className="ss-confirm__nameplate">
+          <div className="ss-confirm__path ss-selectable">{nameplate.path}</div>
+          {nameplate.meta ? <div className="ss-confirm__meta">{nameplate.meta}</div> : null}
+        </div>
+      ) : null}
+      {safetyNote ? <div className="ss-confirm__safety">{safetyNote}</div> : null}
+      <div className="ss-confirm__foot">{keys}</div>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div
+        className="ss-confirm ss-confirm--inline"
+        id={id}
+        role="dialog"
+        aria-labelledby={titleId}
+      >
+        {content}
+      </div>
+    );
+  }
 
   return (
     <div className="ss-confirm-layer" role="presentation">
       {/* 遮罩整面压暗：标题已写明对象（删掉 openrouter？） */}
       <div className="ss-confirm-veil ss-confirm-veil--full" onClick={onCancel} />
-      <div className="ss-confirm" role="dialog" aria-modal="true">
-        <div className="ss-confirm__title">{title}</div>
-        {children ? <div className="ss-confirm__body">{children}</div> : null}
-        {nameplate ? (
-          <div className="ss-confirm__nameplate">
-            <div className="ss-confirm__path ss-selectable">{nameplate.path}</div>
-            {nameplate.meta ? <div className="ss-confirm__meta">{nameplate.meta}</div> : null}
-          </div>
-        ) : null}
-        {safetyNote ? <div className="ss-confirm__safety">{safetyNote}</div> : null}
-        <div className="ss-confirm__foot">
-          <Button size="row" onClick={onCancel}>
-            {cancelLabel}
-          </Button>
-          {disabled ? (
-            <Button
-              variant="primary"
-              size="row"
-              disabled
-              disabledReason={confirmDisabledReason as string}
-            >
-              {confirmLabel}
-            </Button>
-          ) : (
-            <Button variant="primary" size="row" onClick={onConfirm}>
-              {confirmLabel}
-            </Button>
-          )}
-        </div>
+      <div className="ss-confirm" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        {content}
       </div>
     </div>
   );

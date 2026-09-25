@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import type { FocusEvent, ReactNode } from "react";
-import { AgentIcon } from "./AgentMark.tsx";
+import { AgentIcon } from "./AgentIcon.tsx";
 import { Button, IconButton } from "./Button.tsx";
-import { BusySlot } from "./Spinner.tsx";
+import { BusySlot, BusyToast } from "./BusySlot.tsx";
 import { IconAttention, IconCannot, IconClose, IconTick } from "./icons.tsx";
+import { motionMs } from "./motion.ts";
 
 /// 提示小窗（DESIGN「反馈的两种形态」「提示条分两档」，画板 Feedback「提示条」）。
 ///
@@ -22,6 +23,9 @@ import { IconAttention, IconCannot, IconClose, IconTick } from "./icons.tsx";
 /// 悬停与键盘焦点在里面时停表，移开后重新计满；到点末尾 120ms 同一个淡出。
 /// 不给 `onDismiss` 的不自动消失。
 ///
+/// **忙碌形态**（`<Toast busy="正在拆开" />`）：结果出来之前，同一个位置先说在忙什么——同成功的单行纸窗，
+/// 句首 14 宽刻度（`BusyToast`）；不计时、不自己走，忙完由调用方换成结果那一窗。门槛（0.3 秒）归调用方或 `BusySlot`。
+///
 /// **位置不归组件管**：浮起的一律经 `FloatingToast`（锚在触发处，`placeToast`）或
 /// `CornerToast`（右下，全应用一套）。带下一步的失败不用它，用内嵌灰面板 `NoticePanel`。
 
@@ -38,9 +42,6 @@ export const TOAST_DWELL_MS: Record<ToastKind, number> = {
 /// 没有动作的成功（单格、`✓ 已生效`、`✓ 已是最新版本`……）的停留：约 4 秒，比带撤销的 6 秒短——
 /// 只是交代一声，结果本身已经画出来了
 export const CELL_TOAST_DWELL_MS = 4000;
-
-/// 到点时末尾这一段淡出，与 `--motion-fast` 同值
-const LEAVE_MS = 120;
 
 export interface ToastAgent {
   id: string;
@@ -134,7 +135,49 @@ export function ToastCount({ n, unit = "个" }: { n: number; unit?: string }) {
   );
 }
 
-export function Toast(props: ToastProps) {
+/// 忙碌形态：只有一句「在忙什么」
+export interface ToastBusyProps {
+  busy: string;
+}
+
+export function Toast(props: ToastProps | ToastBusyProps) {
+  if ("busy" in props) return <BusyToast label={props.busy} />;
+  return <ResultToast {...props} />;
+}
+
+/// 键区：动作（默认键紧凑 24；禁用带原因；在等时原位忙碌）+ 次要的离开 Sophia 的浅键。两档共用
+function ActionKeys({ action, secondary }: Pick<ToastProps, "action" | "secondary">) {
+  return (
+    <>
+      {action ? (
+        action.disabledReason ? (
+          <Button size="compact" disabled disabledReason={action.disabledReason}>
+            {action.label}
+          </Button>
+        ) : (
+          <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
+            <Button size="compact" onClick={action.onClick}>
+              {action.label}
+            </Button>
+          </BusySlot>
+        )
+      ) : null}
+      {secondary ? (
+        secondary.disabledReason ? (
+          <Button variant="quiet" disabled disabledReason={secondary.disabledReason}>
+            {secondary.label}
+          </Button>
+        ) : (
+          <Button variant="quiet" onClick={secondary.onClick}>
+            {secondary.label}
+          </Button>
+        )
+      ) : null}
+    </>
+  );
+}
+
+function ResultToast(props: ToastProps) {
   const {
     kind,
     tier = kind === "success" ? "routine" : "notice",
@@ -165,7 +208,8 @@ export function Toast(props: ToastProps) {
   useEffect(() => {
     if (!onDismiss || held) return;
     const timer = setTimeout(onDismiss, dwell);
-    const fade = setTimeout(() => setLeaving(true), dwell - LEAVE_MS);
+    // 末尾这一段淡出，时长取 `--motion-fast`（tokens.css 一处）
+    const fade = setTimeout(() => setLeaving(true), dwell - motionMs("--motion-fast"));
     return () => {
       clearTimeout(timer);
       clearTimeout(fade);
@@ -226,27 +270,8 @@ export function Toast(props: ToastProps) {
           <IconTick />
         </span>
         {main}
-        {action ? (
-          <>
-            <span className="ss-toast__sep">·</span>
-            {action.disabledReason ? (
-              <Button size="compact" disabled disabledReason={action.disabledReason}>
-                {action.label}
-              </Button>
-            ) : (
-              <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
-                <Button size="compact" onClick={action.onClick}>
-                  {action.label}
-                </Button>
-              </BusySlot>
-            )}
-          </>
-        ) : null}
-        {secondary ? (
-          <Button variant="quiet" onClick={secondary.onClick}>
-            {secondary.label}
-          </Button>
-        ) : null}
+        {action ? <span className="ss-toast__sep">·</span> : null}
+        <ActionKeys action={action} secondary={secondary} />
       </div>
     );
   }
@@ -270,15 +295,9 @@ export function Toast(props: ToastProps) {
       <div className="ss-toast__body">
         <div className="ss-toast__main">
           {main}
-          {action || onClose ? (
+          {action || secondary || onClose ? (
             <span className="ss-toast__actions">
-              {action ? (
-                <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
-                  <Button size="compact" onClick={action.onClick}>
-                    {action.label}
-                  </Button>
-                </BusySlot>
-              ) : null}
+              <ActionKeys action={action} secondary={secondary} />
               {onClose ? <IconButton icon={<IconClose />} title="关闭" onClick={onClose} /> : null}
             </span>
           ) : null}

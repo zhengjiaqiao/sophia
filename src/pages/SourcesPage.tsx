@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api.ts";
 import { AddButton, Empty, IconArrowLeft, IconButton, Spinner } from "../ui/index.ts";
-import { holdInert } from "../ui/SubPage.tsx";
+import { holdInert } from "../ui/PushedPage.tsx";
 import { PageHead, PageTitle } from "../shell/PageHead.tsx";
 import { useMenuFlag, usePageCommand } from "../shell/menuBus.ts";
 import { SourceLine, ruleText, type SourcesState } from "../SourceRow.tsx";

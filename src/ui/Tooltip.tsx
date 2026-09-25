@@ -17,8 +17,8 @@ import type { ReactElement, ReactNode } from "react";
 /// 提示框（DESIGN「提示框」，画板 States「提示框」）：文字确定性由它承载，
 /// **原生 title 不作唯一说明**（系统灰底小框、约 1 秒延迟、位置不受控），只作 aria 兜底。
 ///
-/// - 材质：黑窗白字 12/400，重点词 600（调用方用 <b> 包）；圆角 0、无阴影无箭头；
-///   内边距 6 8；最大宽 240，超出换行
+/// - 材质：墨窗（全应用唯一的墨色浮窗）白字 12/400，重点词 600（调用方用 <b> 包）；`control` 7 圆角、
+///   浮层投影、无箭头；内边距 6 8；最大宽 240，超出换行
 /// - 表格格子只一行「动词」；快捷键（` · 空格`）只在键盘焦点唤起时写，鼠标悬停不写
 ///   （`.ss-tip__keyhint` 默认不显示，触发控件 `:focus-visible` 时才显示，见 ui.css）
 /// - 位置：锚在触发控件上，正上方 6、水平居中（≤16px 就近）；上方放不下才放下方，
@@ -37,6 +37,9 @@ import type { ReactElement, ReactNode } from "react";
 /// - **只说屏幕上没说的**：内容只是触发文字的完整值时用 `TruncTip`——悬停 / 焦点那一刻量一次，
 ///   文字真被截断才出，完整显示着就不出（DESIGN「提示框只说屏幕上没说的」）
 /// - 可访问性：内容同时作 `aria-describedby`，不依赖悬停
+/// - **表格格子**（`context="table"` + `open` + `ceiling`）：整张表同一时刻只出一个格子的提示框，何时出由表自己数
+///   （每进一格重新计 700ms、按下做不了的格子当即钉出 3 秒）——给 `open` 就是受控，组件只管画、放、滚动时收起；
+///   `ceiling`：往上弹会钻到吸顶区（工具行、列头，`--tip-ceiling`）底下时翻到下方。快捷键同样只在键盘焦点唤起时写
 
 export const TIP_DELAY_MS = { table: 700, default: 400 } as const;
 /// 点了做不了的控件（或格子）按下后，说明停留的时长
@@ -110,6 +113,10 @@ export interface TooltipProps {
   explain?: boolean;
   /// 内容就是触发文字的完整值：只在它此刻真被截断时出（见 `TruncTip`）
   truncated?: boolean;
+  /// 受控：给了就由调用方决定开没开（表格格子，见上），组件不再自己计时、不接悬停与按下
+  open?: boolean;
+  /// 往上弹时不钻到吸顶区底下（`tipCeiling`：最近的滚动容器顶 + 继承来的 `--tip-ceiling`），钻到就翻到下方
+  ceiling?: boolean;
   children: ReactElement;
 }
 
@@ -139,11 +146,16 @@ export function Tooltip({
   focusable,
   explain = false,
   truncated = false,
+  open,
+  ceiling = false,
   children,
 }: TooltipProps) {
   const id = useId();
   const idle = content === undefined || content === null || content === "";
+  const controlled = open !== undefined;
   const [tip, setTip] = useState<TipState>(TIP_IDLE);
+  // 受控时打开期间滚动 / 改窗口大小：先收起，等调用方把 open 落下再说
+  const [suppressed, setSuppressed] = useState(false);
   const state = useRef(tip);
   const [pos, setPos] = useState<TipPos | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -215,6 +227,14 @@ export function Tooltip({
   };
 
   const wrapper = useRef<HTMLSpanElement>(null);
+  /// 此刻画不画：受控看 open，否则看自己的状态
+  const shown = controlled ? Boolean(open) && !idle && !suppressed : tip.open;
+  useEffect(() => {
+    if (!open) setSuppressed(false);
+  }, [open]);
+  useEffect(() => {
+    if (!shown) setPos(null);
+  }, [shown]);
   // 内容撤掉（禁用解除）时：停计时、收起、把外层还回去。
   // 内容给上（刚禁用）时指针正停在上面：外层先让出来（禁用原因优先），自己不计时——
   // 多半是刚按下它才忙起来的，按下之后移开之前不出提示框
@@ -241,23 +261,32 @@ export function Tooltip({
   useLayoutEffect(() => {
     const el = bubble.current;
     const w = wrapper.current;
-    if (!tip.open || pos || !el || !w) return;
+    if (!shown || pos || !el || !w) return;
     const keyed = w.matches(":focus-visible") || w.querySelector(":focus-visible") !== null;
     el.classList.toggle("is-keyed", keyed);
     const r = w.getBoundingClientRect();
-    const p = placeTip(
-      { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
-      { width: el.offsetWidth, height: el.offsetHeight },
-      { width: window.innerWidth, height: window.innerHeight },
-      { prefer: placement === "top" ? "above" : "below", align },
-    );
+    const anchor = { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+    const size = { width: el.offsetWidth, height: el.offsetHeight };
+    const view = { width: window.innerWidth, height: window.innerHeight };
+    let p = placeTip(anchor, size, view, {
+      prefer: placement === "top" ? "above" : "below",
+      align,
+    });
+    // 往上弹会钻到吸顶区底下：翻到下方
+    if (ceiling && p.side === "above" && p.top < tipCeiling(w)) {
+      p = placeTip(anchor, size, view, { prefer: "below", align });
+    }
     setPos({ top: p.top, left: p.left, side: p.side === "above" ? "top" : "bottom", keyed });
-  }, [tip.open, pos, placement, align]);
+  }, [shown, pos, placement, align, ceiling]);
 
   // 打开期间滚动（任何一层滚动容器）或改窗口大小：当即收起，不让它离开触发控件漂在原处
   useEffect(() => {
-    if (!tip.open) return;
+    if (!shown) return;
     const close = () => {
+      if (controlled) {
+        setSuppressed(true);
+        return;
+      }
       clear();
       latest.current("leave");
     };
@@ -267,7 +296,7 @@ export function Tooltip({
       window.removeEventListener("scroll", close, { capture: true });
       window.removeEventListener("resize", close);
     };
-  }, [tip.open]);
+  }, [shown, controlled]);
 
   const wrapFocus = focusable && !idle;
   // 没有内容、只给完整值的：不碰触发控件的 aria-describedby——外层提示框经 Button 等转进来的描述
@@ -278,12 +307,14 @@ export function Tooltip({
       : children;
 
   // 打开时挂到 body（服务端渲染没有 document，就地画）
-  const floating = tip.open && typeof document !== "undefined";
+  const floating = shown && typeof document !== "undefined";
   const classes = ["ss-tip", `ss-tip--${pos?.side ?? placement}`];
   if (nowrap) classes.push("ss-tip--nowrap");
-  if (tip.open) classes.push("is-open");
+  if (shown) classes.push("is-open");
   if (floating) classes.push("is-floating");
   if (pos?.keyed) classes.push("is-keyed");
+  // 受控时悬停、按下、焦点都归调用方：包层只是个锚
+  const passive = idle || controlled;
   const wrap = ["ss-tipwrap"];
   if (idle) wrap.push("is-idle");
   else if (explain) wrap.push("is-explain");
@@ -316,11 +347,11 @@ export function Tooltip({
         className={wrap.join(" ")}
         tabIndex={wrapFocus ? 0 : undefined}
         aria-describedby={wrapFocus ? id : undefined}
-        onMouseEnter={idle ? undefined : arm}
-        onMouseLeave={idle ? undefined : leave}
-        onPointerDown={idle ? undefined : press}
+        onMouseEnter={passive ? undefined : arm}
+        onMouseLeave={passive ? undefined : leave}
+        onPointerDown={passive ? undefined : press}
         onKeyDown={
-          idle
+          passive
             ? undefined
             : (e) => {
                 if (e.key !== " " && e.key !== "Enter") return;
@@ -332,13 +363,13 @@ export function Tooltip({
         // 只有用户用键盘带来的焦点才弹（inputModality）：从二级页返回把焦点还给入口键、面板弹出时
         // 把焦点放进来，这些是程序放的焦点，用户没在看这颗键，弹出来就是无端冒提示（产品负责人）
         onFocus={
-          idle
+          passive
             ? undefined
             : () => {
                 if (isKeyboardFocus()) arm();
               }
         }
-        onBlur={idle ? undefined : leave}
+        onBlur={passive ? undefined : leave}
       >
         {trigger}
         {idle ? null : floating ? createPortal(bubbleEl, document.body) : bubbleEl}
@@ -369,10 +400,10 @@ export function ReasonTip({
   );
 }
 
-/// 画在内容流里的提示框（Matrix 格子、行自己画的 `.ss-tip`；`Tooltip` 组件的气泡浮在 body 上，不用它）
 /// 可见区域的上界（视口坐标）：窗口顶，或最近一个会裁切内容的祖先（overflow 非 visible）的顶，
 /// 再加上继承来的 CSS 变量 `--tip-ceiling`（px）——吸顶区（工具行、列头）的底边相对滚动容器顶的距离，
-/// 由拥有吸顶区的组件写在自己根节点上。往上弹的提示框顶边高过它就翻到下方
+/// 由拥有吸顶区的组件写在自己根节点上。往上弹的提示框顶边高过它就翻到下方（`Tooltip ceiling`；
+/// 表格格子迁到 `Tooltip` 之前，Matrix 画在内容流里的那一份也用它）
 export function tipCeiling(el: HTMLElement): number {
   const inset = parseFloat(getComputedStyle(el).getPropertyValue("--tip-ceiling")) || 0;
   for (let p = el.parentElement; p; p = p.parentElement) {

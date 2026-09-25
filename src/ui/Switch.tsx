@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { ReasonTip } from "./Tooltip.tsx";
-import { IconTick } from "./icons.tsx";
+import { IconDash, IconTick } from "./icons.tsx";
 import { dragEnd, dragMove, dragStart, type SwitchDrag } from "./switchDrag.ts";
 
 /// 开关（DESIGN「开关」「控件有重量」，物性之三）：一个**当场生效**的布尔状态，对象就是它所在的那一行。
@@ -143,8 +143,9 @@ export function Switch({
 }
 
 export interface IndicatorProps {
-  /// 开着 / 在生效。指示点只剩「开」这一态：关着就不画
-  on: boolean;
+  /// **已废弃，别再传**：指示点只剩「开」这一态，关着由调用方不渲染它。
+  /// 暂留给还没迁完的侧栏（`<Indicator on …/>`），页面迁移后删掉；传 false 仍什么都不画
+  on?: boolean;
   /// 读屏名。不给就当装饰（旁边的名字已经说了状态）
   label?: string;
 }
@@ -152,8 +153,8 @@ export interface IndicatorProps {
 /// 指示点（DESIGN「开关 › 指示点」，裁决「橙的两种形态」）：6px `accent` 圆点，外一圈 2px 同色 14% 的
 /// 灯罩环（`--accent-halo`，平的色环，不模糊、不发光）。橙的**含义**只有一个「开着 / 在生效」，
 /// 形态有两种：开关刻线与这颗点。**只在看不到开关的地方出现**：侧栏 agent 名后（这个 agent 上有能力开着）。
-/// 关着不画——没有灰点
-export function Indicator({ on, label }: IndicatorProps) {
+/// 关着不画——没有灰点，是否渲染由调用方的条件决定
+export function Indicator({ on = true, label }: IndicatorProps) {
   if (!on) return null;
   // `is-on` 留在类名上：只剩这一态，样式不靠它；页面与测试据它认「开着的灯」
   return label ? (
@@ -173,10 +174,10 @@ export interface CheckboxProps {
   disabledReason?: string;
 }
 
-/// 勾选框（DESIGN「勾选框」「命中区与视觉尺寸是两回事」）：16 方、`mark` 4 圆角——
-/// 方＝我选的，开关＝它开着。未勾＝平贴的 `surface` 浅面 + 1px `ink-faint` 内环；手靠近＝`paper` + `raise-hover`；
+/// 勾选框（DESIGN「勾选框」「命中区与视觉尺寸是两回事」）：14 方、`mark` 4 圆角（裁决：14，同 macOS）——
+/// 方＝我选的，开关＝它开着。未勾＝平贴的 `paper` 白面 + 1px `ink-faint` 内环；手靠近＝`raise-hover` 抬起；
 /// 勾上＝墨底白勾（`ink` 底、中心 10px `face` 对勾）；半选＝同墨底 + 8×2 `face` 短横。
-/// 视觉 16，命中区用伪元素撑到 24，不动 border；全应用只有这一个尺寸。
+/// 视觉 14，命中区用伪元素撑到 24，不动 border；全应用只有这一个尺寸。
 ///
 /// 行悬停钩子：列表 / 表格的行元素加 `data-checkrow`，悬停这一行时它里面的勾选框进「手靠近」态
 /// （ui.css `[data-checkrow]:hover .ss-checkbox`），页面不必各写一份覆盖
@@ -203,24 +204,11 @@ export function Checkbox({ checked, onChange, label, disabledReason }: CheckboxP
   );
 }
 
-/// 勾选框里的记号：勾上＝统一对勾 `IconTick`（10px、1.8），半选＝8×2 短横，没勾＝不画。
-/// `Checkbox` 与整行是按钮的列表（`pages/CheckMark.tsx`、模型勾选列表）共用这一份，
-/// 同一个记号在全应用里只有一个画法
+/// 勾选框里的记号：勾上＝统一对勾 `IconTick`（10px、1.8），半选＝8×2 短横 `IconDash`，没勾＝不画。
+/// `Checkbox` 与画出来的方框 `CheckMark`（CheckRow.tsx）共用这一份，同一个记号在全应用里只有一个画法。
+/// 页面不直接用它：整行是按钮的列表用 `CheckRow` / `CheckMark`（`pages/CheckMark.tsx`、模型列表迁完后收回公开面）
 export function CheckboxGlyph({ checked }: { checked: boolean | "mixed" }) {
   if (checked === false) return null;
   if (checked === true) return <IconTick />;
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M1 5h8" />
-    </svg>
-  );
+  return <IconDash />;
 }

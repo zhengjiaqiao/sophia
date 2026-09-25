@@ -15,11 +15,19 @@ import type { ReactNode } from "react";
 export interface IconProps {
   /// 默认 16。改尺寸不改线宽
   size?: number;
+  /// 挂在 <svg> 上（调用方据此转朝向、改色）
+  className?: string;
 }
 
-function Glyph({ size = 16, children }: IconProps & { children: ReactNode }) {
+/// 固定尺寸的小记号（✓ ˅ ↗ ↑↓ 短横）：10px 视框，只收 className——同一个记号在全应用只有一个尺寸
+export interface MarkProps {
+  className?: string;
+}
+
+function Glyph({ size = 16, className, children }: IconProps & { children: ReactNode }) {
   return (
     <svg
+      className={className}
       width={size}
       height={size}
       viewBox="0 0 16 16"
@@ -36,7 +44,7 @@ function Glyph({ size = 16, children }: IconProps & { children: ReactNode }) {
   );
 }
 
-/// 关掉 / 移除一片：×
+/// 关掉 / 移除一片：×（图标键 16、筛选框清除 12、新手提示条 10、模型片 9，同一枚按比例缩）
 export function IconClose(props: IconProps) {
   return (
     <Glyph {...props}>
@@ -67,16 +75,7 @@ export function IconEdit(props: IconProps) {
   );
 }
 
-/// 下一条 / 进到里面去：右向角标。它指的是「进到里面去」，不是「跳到外部」
-export function IconChevronRight(props: IconProps) {
-  return (
-    <Glyph {...props}>
-      <path d="M6.2 3.4L10.8 8l-4.6 4.6" />
-    </Glyph>
-  );
-}
-
-/// 返回：二级页面头那支左箭头
+/// 返回：推入页（PushedPage）页面头那支左箭头
 export function IconArrowLeft(props: IconProps) {
   return (
     <Glyph {...props}>
@@ -85,7 +84,7 @@ export function IconArrowLeft(props: IconProps) {
   );
 }
 
-/// 搜索：放大镜（只在输入框内用）
+/// 搜索：放大镜（只在输入框内用，`TextField` 的搜索形态）
 export function IconSearch(props: IconProps) {
   return (
     <Glyph {...props}>
@@ -95,7 +94,7 @@ export function IconSearch(props: IconProps) {
   );
 }
 
-/// 添加：+（图标按钮里 16px）。`AddButton` 里的是 12px 的同形
+/// 添加：+（侧栏 `+ 项目` 14px；`AddButton` 里 12px，同一枚按比例缩）
 export function IconPlus(props: IconProps) {
   return (
     <Glyph {...props}>
@@ -104,7 +103,7 @@ export function IconPlus(props: IconProps) {
   );
 }
 
-/// 设置：顶栏右端那个入口。**必须是有齿圈的齿轮**——第一版画成圆心加八根
+/// 设置：侧栏底部那个入口。**必须是有齿圈的齿轮**——第一版画成圆心加八根
 /// 放射线，那是太阳，用户看成了「切换日间模式」
 export function IconSettings(props: IconProps) {
   return (
@@ -120,10 +119,10 @@ export function IconSettings(props: IconProps) {
 /// ✓（DESIGN「✓ 只有一种画法」，2026-09-25）：10px 视框、1.8 描边、圆头圆角，`currentColor`。
 /// 勾选框里的对勾、提示条句首的 ✓、读数里的 `2 ✓`、菜单的当前项都用它，不用字体里的 ✓ 字符，
 /// 也不按 16px 图标的画法另画一枚。尺寸固定 10，不随处缩放
-export function IconTick() {
+export function IconTick({ className }: MarkProps = {}) {
   return (
     <svg
-      className="ss-tick"
+      className={className ? `ss-tick ${className}` : "ss-tick"}
       width="10"
       height="10"
       viewBox="0 0 10 10"
@@ -142,8 +141,8 @@ export function IconTick() {
 
 /// 下拉 / 展开的记号：全应用只有这一枚（2026-09-25 产品负责人：「这种展开的按钮，箭头应该保持一致」）——
 /// 10px 线形 ˅、1.4 描边、圆头圆角，与勾选框的对勾同一套画法。抽屉拉手、目标框、排序下拉都用它；
-/// 不用排版字符 ▾ ▸（字形随字体变、粗细对不上）。朝向由调用方转（拉开时抽屉翻转 180°）
-export function IconChevronDown({ className }: { className?: string } = {}) {
+/// 不用排版字符 ▾ ▸（字形随字体变、粗细对不上）。朝向由调用方转：抽屉拉手收起时转 -90° 成 ›（没有另一枚 ›）
+export function IconChevronDown({ className }: MarkProps = {}) {
   return (
     <svg
       className={className ? `ss-chevron ${className}` : "ss-chevron"}
@@ -159,6 +158,68 @@ export function IconChevronDown({ className }: { className?: string } = {}) {
       focusable="false"
     >
       <path d="M1.5 3.5 5 7 8.5 3.5" />
+    </svg>
+  );
+}
+
+/// 离开 Sophia：↗（浅键末尾，`Button variant="quiet"` 自动画；左间距 3 由键的 gap 给）。10px、1.4 描边
+export function IconLeave({ className }: MarkProps = {}) {
+  return (
+    <svg
+      className={className}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M3 7l4-4M3.6 3H7v3.4" />
+    </svg>
+  );
+}
+
+/// 排序方向：↑ 升序 / ↓ 降序（表格列头，Finder 惯例）。10px、1.4 描边，与 ˅ 同一套画法。
+/// 读屏名由调用方给（只在当前排序列上读）；这里只画
+export function IconSortArrow({ desc = false, className }: MarkProps & { desc?: boolean }) {
+  return (
+    <svg
+      className={className}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d={desc ? "M5 1.5v7M2 5.5l3 3 3-3" : "M5 8.5v-7M2 4.5l3-3 3 3"} />
+    </svg>
+  );
+}
+
+/// 半选：8×2 短横（勾选框半选时画在墨底上，`CheckboxGlyph`）。10px 视框、2 描边、平头
+export function IconDash({ className }: MarkProps = {}) {
+  return (
+    <svg
+      className={className}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M1 5h8" />
     </svg>
   );
 }

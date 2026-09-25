@@ -733,14 +733,6 @@ export function modelIssues(state: GatewayState | null): ModelIssue[] {
   return out;
 }
 
-// ===== 功能性渐变：滚动边缘渐隐（DESIGN「渐变只用于功能」） =====
-
-/// 可滚动区域哪一边有被裁掉的内容：那一边出 16px 渐隐。留 1px 容差，免得小数像素误判
-export function edgeFades(
-  offset: number,
-  viewport: number,
-  content: number,
-): { start: boolean; end: boolean } {
-  if (content - viewport <= 1) return { start: false, end: false };
-  return { start: offset > 1, end: offset + viewport < content - 1 };
-}
+// ===== 功能性渐变：滚动边缘渐隐 =====
+// 判定挪进了组件库（ui/edgeFades.ts）；这里转出去，页面迁移改用 `useEdgeFades` 后删掉
+export { edgeFades } from "./ui/edgeFades.ts";
