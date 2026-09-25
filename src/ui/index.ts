@@ -66,6 +66,8 @@ export { TextField } from "./TextField.tsx";
 export type { TextFieldProps } from "./TextField.tsx";
 
 // ---- 容器与层 ----
+export { PageHead, PageTitle, PageHeadActions } from "./PageHead.tsx";
+export type { PageHeadProps } from "./PageHead.tsx";
 export { PushedPage, usePushedPage, holdInert } from "./PushedPage.tsx";
 export type { PushedPageProps, PushedPageState } from "./PushedPage.tsx";
 export { Section } from "./Section.tsx";

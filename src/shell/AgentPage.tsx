@@ -1,6 +1,5 @@
-import { AgentIcon } from "../ui/index.ts";
+import { AgentIcon, PageHead, PageTitle } from "../ui/index.ts";
 import type { AgentEntry, AgentSectionProps } from "./agentRegistry.ts";
-import { PageHead, PageTitle } from "./PageHead.tsx";
 
 /// agent 页（DESIGN「agent 页」）：一个 agent 一页，页内按能力分节。外框只有两样：
 /// 页面头（24px 图标 + 10 + 名字 `title` Condensed 20 / 700；右端留给 agent 级动作，节经 PageHeadActions 放进来）

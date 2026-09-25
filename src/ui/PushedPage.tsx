@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { PageHead, PageTitle } from "../shell/PageHead.tsx";
+import { PageHead, PageTitle } from "./PageHead.tsx";
 import { IconButton } from "./Button.tsx";
 import { IconArrowLeft } from "./icons.tsx";
 import { motionMs } from "./motion.ts";
@@ -12,7 +12,7 @@ import { motionMs } from "./motion.ts";
 /// - **只替换机面**：挂到机面上（`host`）盖住下面那一页，侧栏不动；下面那一页 `inert`（`covers`，读屏与 Tab 都
 ///   进不去）、不卸载——返回时筛选、滚动、抽屉、勾选都还在
 /// - 从右推入、返回滑回，`--dur-push`（200ms）机械缓动；减少动效时即时
-/// - 页面头＝壳的 `PageHead`：`←`（图标键 28）+ 10 + 页面名（`title` 20 / 700，原样），右端页面动作（`+ 来源`）
+/// - 页面头＝`PageHead`：`←`（图标键 28）+ 10 + 页面名（`title` 20 / 700，原样），右端页面动作（`+ 来源`）
 /// - 可选贴底一行（`footer`）：高 60、上 1px `hairline`、`face` 底、横贯机面，主动作右对齐到内容右沿 776；
 ///   内容区在它上面滚动（添加来源页的 `添加 N 个来源`）
 /// - 焦点：打开时落到这一页上（只供程序放焦点的落点，不画框），返回时还给进来之前拿着焦点的那颗键（`管理来源`）
