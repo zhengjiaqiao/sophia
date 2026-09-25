@@ -1475,8 +1475,8 @@ mod tests {
     fn auto_link_rule_only_covers_skills_that_appear_after_it() {
         let tree = TempTree::new();
         let store = tree.dir("store");
-        tree.dir("store/a");
-        tree.dir("store/b");
+        tree.skill("store/a");
+        tree.skill("store/b");
         let claude = tree.dir("home/.claude/skills");
         let t = global("claude-code", &claude);
         let mut rules: Vec<AutoLink> = Vec::new();
@@ -1495,7 +1495,7 @@ mod tests {
         assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
 
         // 新出现的 c 建，且只建它
-        tree.dir("store/c");
+        tree.skill("store/c");
         let acts = auto_actions(&tree, &store, &t, &rules);
         assert_eq!(acts, vec!["c"]);
         tree.link(&claude.join("c"), &store.join("c"));
@@ -1510,13 +1510,13 @@ mod tests {
         assert!(!rules[0].baseline.as_ref().unwrap().contains("c"));
 
         // 排除名单照旧生效
-        tree.dir("store/d");
+        tree.skill("store/d");
         exclude(&mut rules, &store, &t.id, "d");
         assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
 
         // 删掉规则再建：baseline 重拍成此刻的全部
         remove_auto_link(&mut rules, &store);
-        tree.dir("store/e");
+        tree.skill("store/e");
         upsert_auto_link(
             &mut rules,
             &scan_sources(&tree, &store),
@@ -1528,7 +1528,7 @@ mod tests {
             Some(["a", "b", "c", "d", "e"].map(String::from).into())
         );
         assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
-        tree.dir("store/f");
+        tree.skill("store/f");
         assert_eq!(auto_actions(&tree, &store, &t, &rules), vec!["f"]);
     }
 
@@ -1537,12 +1537,12 @@ mod tests {
     fn exclude_only_rule_snapshots_baseline_when_it_gains_targets() {
         let tree = TempTree::new();
         let store = tree.dir("store");
-        tree.dir("store/a");
+        tree.skill("store/a");
         let claude = tree.dir("home/.claude/skills");
         let t = global("claude-code", &claude);
         let mut rules: Vec<AutoLink> = Vec::new();
         exclude(&mut rules, &store, &t.id, "x");
-        tree.dir("store/b");
+        tree.skill("store/b");
         upsert_auto_link(
             &mut rules,
             &scan_sources(&tree, &store),
@@ -1563,7 +1563,7 @@ mod tests {
     fn target_added_to_a_live_rule_only_covers_skills_after_it_joined() {
         let tree = TempTree::new();
         let store = tree.dir("store");
-        tree.dir("store/a");
+        tree.skill("store/a");
         let claude = tree.dir("home/.claude/skills");
         let proj = tree.dir("proj");
         let proj_claude = tree.dir("proj/.claude/skills");
@@ -1588,7 +1588,7 @@ mod tests {
             std::slice::from_ref(&g.id),
         );
         // 建规则之后出现的 b：补到全局
-        tree.dir("store/b");
+        tree.skill("store/b");
         assert_eq!(run(&rules), vec![("b".to_string(), claude.clone())]);
         tree.link(&claude.join("b"), &store.join("b"));
 
@@ -1603,7 +1603,7 @@ mod tests {
         assert!(run(&rules).is_empty());
 
         // 之后新出现的 c：两处都加
-        tree.dir("store/c");
+        tree.skill("store/c");
         assert_eq!(
             run(&rules),
             vec![
@@ -1630,7 +1630,7 @@ mod tests {
     fn excluding_at_one_location_keeps_auto_linking_elsewhere() {
         let tree = TempTree::new();
         let store = tree.dir("store");
-        tree.dir("store/a");
+        tree.skill("store/a");
         let pa = tree.dir("pa");
         let pa_claude = tree.dir("pa/.claude/skills");
         let pb = tree.dir("pb");
@@ -1656,7 +1656,7 @@ mod tests {
             &[a.id.clone(), b.id.clone()],
         );
         // 新出现的 n 自动补到两处；用户在 A 手动撤掉它
-        tree.dir("store/n");
+        tree.skill("store/n");
         assert_eq!(
             run(&rules),
             vec![
@@ -1692,8 +1692,8 @@ mod tests {
     fn legacy_rule_without_baseline_migrates_to_current_skills() {
         let tree = TempTree::new();
         let store = tree.dir("store");
-        tree.dir("store/a");
-        tree.dir("store/b");
+        tree.skill("store/a");
+        tree.skill("store/b");
         let claude = tree.dir("home/.claude/skills");
         let t = global("claude-code", &claude);
         let json = format!(
@@ -1717,7 +1717,7 @@ mod tests {
         // 迁移只做一次
         assert!(!migrate_baselines(&mut rules, &scan_sources(&tree, &store)));
         assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
-        tree.dir("store/c");
+        tree.skill("store/c");
         assert_eq!(auto_actions(&tree, &store, &t, &rules), vec!["c"]);
     }
 

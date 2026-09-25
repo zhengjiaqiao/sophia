@@ -189,7 +189,9 @@ fn dir_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// 位置里的 skill：直接子项中非隐藏的真实目录，按名排序。
+/// 位置里的 skill：直接子项中非隐藏、**带 `SKILL.md`** 的真实目录，按名排序。
+/// 不带 `SKILL.md` 的目录不是 skill（agent 不会加载它）——同步工具、备份留下的文件夹（如
+/// `~/.claude/skills/synced`）不该出现在表里；与订阅来源「只认带 `SKILL.md` 的子目录」同一条规则。
 /// 软链一律不算——它是指向别处本体的链接，不是这个位置自己的 skill
 fn skills_in(dir: &Path) -> Vec<Skill> {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -198,7 +200,11 @@ fn skills_in(dir: &Path) -> Vec<Skill> {
     let mut names = BTreeSet::new();
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if !name.starts_with('.') && entry_kind(&e.path()) == EntryKind::Dir {
+        let path = e.path();
+        if !name.starts_with('.')
+            && entry_kind(&path) == EntryKind::Dir
+            && path.join("SKILL.md").is_file()
+        {
             names.insert(name);
         }
     }
@@ -466,10 +472,7 @@ pub fn subscribed_sources<'a>(
         if keys.contains(&key) || known.iter().any(|s| normalize(&s.path) == normalize(dir)) {
             continue;
         }
-        let skills: Vec<Skill> = skills_in(dir)
-            .into_iter()
-            .filter(|s| s.path.join("SKILL.md").is_file())
-            .collect();
+        let skills: Vec<Skill> = skills_in(dir);
         if skills.is_empty() {
             continue;
         }
@@ -1250,7 +1253,7 @@ mod tests {
         // weiboap 的托管目录：有真实 skill
         let custom =
             t.dir("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom");
-        t.dir("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom/official-a");
+        t.skill("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom/official-a");
         let e = env(&home, &[]);
         let hs = vec![all_harnesses(&e)
             .into_iter()
@@ -1278,7 +1281,7 @@ mod tests {
         let dir = t.dir(
             "Library/Application Support/WeiboAP/Data/agents/agent_1776/.internal-plugins/skills",
         );
-        t.dir(
+        t.skill(
             "Library/Application Support/WeiboAP/Data/agents/agent_1776/.internal-plugins/skills/x",
         );
         // 另一个助手不在库里 → 降级为目录名
@@ -1324,7 +1327,9 @@ mod tests {
         let home = t.root();
         let wap = t.dir("Library/Application Support/WeiboAP");
         t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills");
-        t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/x");
+        t.skill(
+            "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/x",
+        );
         let e = env(&home, &[]);
         let hs = vec![all_harnesses(&e)
             .into_iter()
@@ -1366,19 +1371,19 @@ mod tests {
     fn sources_cover_every_kind_and_skip_empty_locations() {
         let t = TempTree::new();
         let home = t.root();
-        t.dir(".agents/skills/uni-skill");
-        t.dir(".claude/skills/claude-skill");
+        t.skill(".agents/skills/uni-skill");
+        t.skill(".claude/skills/claude-skill");
         t.dir(".codex/skills"); // 没有 skill → 不产出
         let agent_root = t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1");
         let agent_dir = t.dir(
             "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
         );
-        t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
+        t.skill("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
         let project = t.dir("Project/app");
-        t.dir("Project/app/.agents/skills/proj-skill");
+        t.skill("Project/app/.agents/skills/proj-skill");
         let manual = t.dir("Manual/box");
-        t.dir("Manual/box/manual-skill");
-        t.dir("Manual/box/.hidden"); // 隐藏目录不是 skill
+        t.skill("Manual/box/manual-skill");
+        t.skill("Manual/box/.hidden"); // 隐藏目录不是 skill
         t.file(&manual, "README.md"); // 文件不是 skill
 
         let e = env(&home, &[]);
@@ -1465,9 +1470,9 @@ mod tests {
     fn sources_count_only_real_directories_as_skills() {
         let t = TempTree::new();
         let home = t.root();
-        let outside = t.dir("Applications/ego-skills/ego-browser");
+        let outside = t.skill("Applications/ego-skills/ego-browser");
         let store = t.dir(".agents/skills");
-        t.dir(".agents/skills/real-skill");
+        t.skill(".agents/skills/real-skill");
         t.link(&store.join("ego-browser"), &outside); // 软链不是自己的 skill
         t.link(&store.join("rotten"), &home.join("gone"));
         // harness 全局目录满是软链（消费目录），一个真实目录都没有 → 不是本体位置
@@ -1498,11 +1503,11 @@ mod tests {
         let agent_dir = t.dir(
             "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
         );
-        let agent_skill = t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
-        let outside = t.dir("Applications/ego-skills/ego-browser");
+        let agent_skill = t.skill("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
+        let outside = t.skill("Applications/ego-skills/ego-browser");
         let project = t.dir("Project/app");
         let store = t.dir("Project/app/.agents/skills");
-        t.dir("Project/app/.agents/skills/own");
+        t.skill("Project/app/.agents/skills/own");
         t.link(&store.join("from-agent"), &agent_skill); // 指向别的本体位置
         t.link(&store.join("external"), &outside); // 指向外部目录
 
@@ -1550,18 +1555,44 @@ mod tests {
     }
 
     #[test]
+    fn location_counts_only_directories_with_skill_md_as_skills() {
+        let t = TempTree::new();
+        let home = t.root();
+        let claude = t.dir(".claude/skills");
+        let mine = t.skill(".claude/skills/mine");
+        // 同步工具留下的文件夹：有内容，但没有 SKILL.md → 不是 skill
+        let synced = t.dir(".claude/skills/synced");
+        t.file(&synced, "state.json");
+        t.skill(".claude/skills/synced/nested");
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let hs = vec![all.iter().find(|h| h.id == "claude-code").unwrap().clone()];
+        let got = sources(&e, &hs, &[], &[]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, claude);
+        assert_eq!(
+            got[0].skills,
+            vec![Skill {
+                name: "mine".into(),
+                path: mine,
+                description: None,
+            }]
+        );
+    }
+
+    #[test]
     fn external_sources_group_outside_links_by_their_real_parent() {
         let t = TempTree::new();
         let home = t.dir("h");
         // 不在应用包里 → label 用最后一级目录名；两条链接同父目录 → 合并成一处
         let ego = t.dir("opt/ego-skills");
-        let browser = t.dir("opt/ego-skills/ego-browser");
-        let writer = t.dir("opt/ego-skills/ego-writer");
+        let browser = t.skill("opt/ego-skills/ego-browser");
+        let writer = t.skill("opt/ego-skills/ego-writer");
         // home 下也一样取目录名，不用 ~ 缩写
         let pack = t.dir("h/Applications/pack");
-        let far = t.dir("h/Applications/pack/far-skill");
+        let far = t.skill("h/Applications/pack/far-skill");
         let store = t.dir("h/.agents/skills");
-        let own = t.dir("h/.agents/skills/own");
+        let own = t.skill("h/.agents/skills/own");
 
         let claude = t.dir("h/.claude/skills");
         t.link(&claude.join("ego-browser"), &browser);
@@ -1621,8 +1652,8 @@ mod tests {
         let t = TempTree::new();
         let home = t.dir("h");
         let ego = t.dir("opt/ego-skills");
-        t.dir("opt/ego-skills/ego-browser");
-        let outside = t.dir("opt/other/far-skill");
+        t.skill("opt/ego-skills/ego-browser");
+        let outside = t.skill("opt/other/far-skill");
         t.link(&ego.join("far-skill"), &outside); // ego 里还链着更外面的目录
                                                   // 项目的 .claude/skills 整个是指向 ego 的软链：读进去就是本体位置
         let proj = t.dir("h/proj");
@@ -1650,7 +1681,7 @@ mod tests {
     fn sources_dedupe_by_real_path_keeping_the_first() {
         let t = TempTree::new();
         let home = t.root();
-        t.dir(".agents/skills/uni-skill");
+        t.skill(".agents/skills/uni-skill");
         let alias = t.root().join("alias");
         t.link(&alias, &home.join(".agents/skills"));
         let e = env(&home, &[]);
@@ -1789,7 +1820,7 @@ mod tests {
         let t = TempTree::new();
         let home = t.root();
         let store = t.dir("Store/skills");
-        t.dir("Store/skills/a-skill");
+        t.skill("Store/skills/a-skill");
         let project = t.dir("Project/app");
         t.dir("Project/app/.claude"); // .claude/skills 整个是软链
         t.link(&project.join(".claude/skills"), &store);
@@ -1817,7 +1848,7 @@ mod tests {
         let t = TempTree::new();
         let home = t.root();
         let store = t.dir("Store/skills");
-        t.dir("Store/skills/a-skill");
+        t.skill("Store/skills/a-skill");
         // 项目的 .agents/skills 整个是指向 store 的软链，codex 与 cursor 共用它
         let project = t.dir("Project/app");
         t.dir("Project/app/.agents");
@@ -1856,7 +1887,7 @@ mod tests {
         let agent_dir = t.dir(&format!(
             "{weiboap}/Data/agents/agent_1/.internal-plugins/skills"
         ));
-        t.dir(&format!(
+        t.skill(&format!(
             "{weiboap}/Data/agents/agent_1/.internal-plugins/skills/a-skill"
         ));
         // 项目的 .claude/skills 整个是指向那个 agent 目录的软链

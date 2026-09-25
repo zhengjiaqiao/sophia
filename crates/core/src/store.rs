@@ -413,7 +413,7 @@ mod tests {
         assert!(loaded.auto_links[0].last_auto.is_empty());
 
         // 建规则之后来源里出现了 a：自动执行真的把它链进 claude
-        t.dir("store/a");
+        t.skill("store/a");
         let env = crate::discovery::Env {
             home: t.dir("home"),
             vars: Default::default(),
@@ -464,8 +464,8 @@ mod tests {
         let t = TempTree::new();
         let dir = t.root().join("data/SymSync");
         let store_dir = t.dir("store");
-        t.dir("store/a");
-        t.dir("store/b");
+        t.skill("store/a");
+        t.skill("store/b");
         let mcp_path = t.root().join("mcp.json");
         std::fs::write(&mcp_path, r#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
         std::fs::create_dir_all(&dir).unwrap();
@@ -493,7 +493,7 @@ mod tests {
         let names = |v: &[&str]| Some(v.iter().map(|n| n.to_string()).collect());
         assert_eq!(migrated.auto_links[0].baseline, names(&["a", "b"]));
         // 写回了：之后普通读取也带着 baseline，新增的名字不会被并进去
-        t.dir("store/c");
+        t.skill("store/c");
         assert_eq!(
             s.load_settings().unwrap().auto_links[0].baseline,
             names(&["a", "b"])
@@ -526,7 +526,7 @@ mod tests {
         let t = TempTree::new();
         let dir = t.root().join("data/SymSync");
         let store_dir = t.dir("store");
-        t.dir("store/a");
+        t.skill("store/a");
         let claude = t.dir("home/.claude/skills");
         let proj = t.dir("proj");
         let proj_codex = t.dir("proj/.codex/skills");
@@ -564,8 +564,8 @@ mod tests {
         });
         std::fs::write(dir.join("settings.json"), old.to_string()).unwrap();
         // 建规则之后出现的 x（被排除）与 y
-        t.dir("store/x");
-        t.dir("store/y");
+        t.skill("store/x");
+        t.skill("store/y");
 
         let s = Store::new(dir.clone());
         let loaded = s.load_settings().unwrap();
