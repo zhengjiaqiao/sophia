@@ -1539,6 +1539,21 @@ textarea,
   height: 110px;
 }
 
+/* 图的上沿离机面上沿的距离（DESIGN「位置页 › 空态」表）：扫描中 190、没有 agent 目录 230、
+   来源里还没有 skill 270。这里按空态紧跟在页面头（占 50）下面算；落在表头下的（.mx-empty）
+   由 Matrix.css 再减去表头与来源筛选 */
+.ss-empty.has-art:has(> .ss-empty__art--scanning) {
+  padding-top: calc(190px - 50px);
+}
+
+.ss-empty.has-art:has(> .ss-empty__art--noDirs) {
+  padding-top: calc(230px - 50px);
+}
+
+.ss-empty.has-art:has(> .ss-empty__art--emptyFolder) {
+  padding-top: calc(270px - 50px);
+}
+
 .ss-empty.has-art .ss-empty__hint {
   margin-top: var(--space-xs);
 }

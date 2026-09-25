@@ -390,6 +390,16 @@
   position: relative;
 }
 
+/* 表头下的空态：图上沿离机面上沿仍按 DESIGN 空态表（230 / 270），上面已占的是页面头 + 表头 145，
+   有来源筛选时再加一行到 171（ui.css 的默认值只算了页面头） */
+.mx-empty > .ss-empty.has-art:has(> .ss-empty__art--noDirs) {
+  padding-top: calc(230px - 145px);
+}
+
+.mx-empty > .ss-empty.has-art:has(> .ss-empty__art--emptyFolder) {
+  padding-top: calc(270px - 171px);
+}
+
 .mx-row {
   position: relative;
   align-items: center;
