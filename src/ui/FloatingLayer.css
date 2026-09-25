@@ -72,11 +72,13 @@
   flex-shrink: 0;
 }
 
-/* 列表式小浮层（MCP 同名挑选）：一项两行；高亮行 surface、control 7、左右内缩 4 */
+/* 列表式小浮层（MCP 同名挑选）：一项两行；高亮行 surface、control 7、左右内缩 4。
+   宽随内容、最宽 320（第二行差异说明在里面折行）：菜单类浮层不设定宽（2026-09-25） */
 .ss-menu {
   display: flex;
   flex-direction: column;
-  width: 260px;
+  width: max-content;
+  max-width: 320px;
   padding: var(--space-xxs) 0;
 }
 

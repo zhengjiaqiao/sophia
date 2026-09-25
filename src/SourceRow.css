@@ -63,11 +63,14 @@
   margin-left: calc(6px - var(--space-xs));
 }
 
-/* 目标浮层：一行 = 复选框 + 图标 14 + 名字，整行可点；没勾的名字 ink-mute；高亮行 surface、control 7、左右内缩 4 */
+/* 目标浮层：一行 = 复选框 + 图标 14 + 名字，整行可点；没勾的名字 ink-mute；高亮行 surface、control 7、左右内缩 4。
+   宽随内容（最宽 280，点不了的原因在里面折行）：菜单类浮层不设定宽，定宽 220 配两个短名字时右边空一大块
+   （2026-09-25 真机走查；见 DESIGN「色块：要不要、多大」——菜单是一组可点的项，随字） */
 .srcrow-targets {
   display: flex;
   flex-direction: column;
-  width: 220px;
+  width: max-content;
+  max-width: 280px;
   padding: var(--space-xxs) 0;
 }
 
