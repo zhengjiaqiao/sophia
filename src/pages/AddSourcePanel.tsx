@@ -286,12 +286,12 @@ export function AddSourcePanel({ model, domain, onChanged, onDone, frame }: AddS
       second =
         entry.title !== undefined ? (
           // 第二行只写短路径：提示框补完整路径（屏幕上没有的）
-          <Tooltip content={entry.title}>
+          <Tooltip content={entry.title} fit="grow">
             <span className="add-src__meta">{line.text}</span>
           </Tooltip>
         ) : (
           // 没有别的可补：只在这一行放不下被截断时给全文
-          <TruncTip content={line.text}>
+          <TruncTip content={line.text} fit="grow">
             <span className="add-src__meta">{line.text}</span>
           </TruncTip>
         );
@@ -305,8 +305,8 @@ export function AddSourcePanel({ model, domain, onChanged, onDone, frame }: AddS
           else rowEls.current.delete(entry.ref);
         }}
         title={entry.name}
-        // 第二行一行放不下以 … 截断（外层给截断留出宽度）
-        sub={<span className="add-src__sub">{second}</span>}
+        // 第二行一行放不下以 … 截断（提示框 fit="grow" 撑满这一行、随它收窄）
+        sub={second}
         check={
           blocked ? (
             // 不能勾：方框平贴，悬停 / 按下说原因（与第二行同一句）

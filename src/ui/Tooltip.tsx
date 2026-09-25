@@ -117,8 +117,17 @@ export interface TooltipProps {
   open?: boolean;
   /// 往上弹时不钻到吸顶区底下（`tipCeiling`：最近的滚动容器顶 + 继承来的 `--tip-ceiling`），钻到就翻到下方
   ceiling?: boolean;
+  /// 包层在 flex 行里怎么占位（触发文字要能截断时给，页面不再为此另包一层）：
+  /// - 不给：随触发控件的大小（行内）
+  /// - `shrink`：按内容定宽、放不下时跟着收窄（第二行里的地址、来源格里的来源名）
+  /// - `grow`：撑满这一行余下的宽（侧栏项目名、整格宽的目标框）
+  /// 两种都让里面的触发控件随包层收窄（`min-width: 0`），它自己写好截断（overflow + ellipsis）就截得断
+  fit?: TipFit;
   children: ReactElement;
 }
+
+/// 提示框包层在 flex 行里的占位方式，见 `TooltipProps.fit`
+export type TipFit = "shrink" | "grow";
 
 /// 包层里有没有哪一段文字此刻被截断（横向溢出）；行内元素量不出宽度，不算
 export function isClipped(root: Element | null): boolean {
@@ -148,6 +157,7 @@ export function Tooltip({
   truncated = false,
   open,
   ceiling = false,
+  fit,
   children,
 }: TooltipProps) {
   const id = useId();
@@ -316,6 +326,7 @@ export function Tooltip({
   // 受控时悬停、按下、焦点都归调用方：包层只是个锚
   const passive = idle || controlled;
   const wrap = ["ss-tipwrap"];
+  if (fit) wrap.push(`ss-tipwrap--${fit}`);
   if (idle) wrap.push("is-idle");
   else if (explain) wrap.push("is-explain");
 
@@ -386,15 +397,18 @@ export function ReasonTip({
   reason,
   placement,
   nowrap,
+  fit,
   children,
 }: {
   reason: string | undefined;
   placement?: "top" | "bottom";
   nowrap?: boolean;
+  /// 同 `Tooltip fit`：禁用的控件占着一行余下的宽时（侧栏 `+ 项目`、整格宽的目标框）给 `grow`
+  fit?: TipFit;
   children: ReactElement;
 }) {
   return (
-    <Tooltip content={reason} placement={placement} nowrap={nowrap} focusable explain>
+    <Tooltip content={reason} placement={placement} nowrap={nowrap} fit={fit} focusable explain>
       {children}
     </Tooltip>
   );

@@ -726,6 +726,26 @@ textarea,
   display: inline-flex;
 }
 
+/* 在 flex 行里占位（Tooltip fit）：包层成单列网格（minmax(0, 1fr)），里面的触发控件随它收窄，
+   文字才截得断——页面不必为此另包一层。shrink 按内容定宽、放不下时收窄；grow 撑满这一行余下的宽、
+   与行同高，触发控件在里面上下居中 */
+.ss-tipwrap--shrink,
+.ss-tipwrap--grow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+}
+
+.ss-tipwrap--shrink {
+  flex: 0 1 auto;
+}
+
+.ss-tipwrap--grow {
+  flex: 1 1 auto;
+  align-self: stretch;
+}
+
 /* 此刻没有提示框（禁用原因撤了）：包层不占盒，控件原地不动。important：页面里
    `.x > .ss-tipwrap { display: … }` 之类的规则不能把它撑回来 */
 .ss-tipwrap.is-idle {

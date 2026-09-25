@@ -275,11 +275,9 @@ export function GatewayBlock({
     return (
       <>
         {/* 地址占满放得下的宽度，放不下才截断；截断了才给完整值 */}
-        <span className="gw-row__urlbox">
-          <TruncTip content={p.baseUrl || facts.url}>
-            <span className="gw-row__url">{url}</span>
-          </TruncTip>
-        </span>
+        <TruncTip content={p.baseUrl || facts.url} fit="shrink">
+          <span className="gw-row__url">{url}</span>
+        </TruncTip>
         <span className="gw-row__fact">
           {" · "}
           {facts.status === "无法连接" ? (

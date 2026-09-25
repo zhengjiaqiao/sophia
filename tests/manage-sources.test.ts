@@ -147,8 +147,10 @@ test("样式：各行 subgrid 对齐列头；名字至多 160、路径至多 240
     rowCss,
     /\.srcline \{[^}]*grid-template-columns: subgrid;[^}]*height: 40px;[^}]*border-bottom: var\(--border-row\);/,
   );
-  assert.match(rowCss, /\.srcline__fit--name \{[^}]*max-width: 160px;/);
-  assert.match(rowCss, /\.srcline__fit--where \{[^}]*max-width: 240px;/);
+  // 上限写在截断的那一段自己身上：提示框包层 fit="shrink" 随它收窄，页面不再另包一层
+  assert.match(rowCss, /\.srcline__label \{[^}]*max-width: 160px;/);
+  assert.match(rowCss, /\.srcrow__path \{[^}]*max-width: 240px;/);
+  assert.doesNotMatch(rowCss, /srcline__fit/);
   assert.match(pageCss, /\.srcpage__head \{[^}]*border-bottom: var\(--border-structure\);/);
   // 目标浮层是组件库的多选菜单：页面不再写一套浮层项，也不覆盖组件的内部类
   assert.doesNotMatch(rowCss, /\.srcrow-target/);

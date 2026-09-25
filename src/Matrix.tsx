@@ -1047,9 +1047,9 @@ export default function Matrix(props: MatrixProps) {
             onMouseEnter={() => setHover({ row: row.key, col: ORIGIN_COL })}
             onMouseLeave={() => setHover({ row: row.key, col: null })}
           >
-            {/* 来源名这一格可收窄：`打开 ↗` 出来时名字按列宽截断，完整值在提示框里 */}
-            <span className="mx-origin__slot">
-              <Tooltip
+            {/* 来源名这一格可收窄（fit="shrink"）：`打开 ↗` 出来时名字按列宽截断，完整值在提示框里 */}
+            <Tooltip
+                fit="shrink"
                 content={
                   <>
                     <div>{row.origin.label}</div>
@@ -1077,7 +1077,6 @@ export default function Matrix(props: MatrixProps) {
                   )}
                 </span>
               </Tooltip>
-            </span>
             {revealShown ? (
               <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
             ) : null}

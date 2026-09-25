@@ -242,12 +242,6 @@ input:focus-visible {
   flex-shrink: 0;
 }
 
-/* 项目名带提示框时，包层接过弹性占位，名字照样能截断 */
-.side-item__main > .ss-tipwrap {
-  flex: 1;
-  min-width: 0;
-}
-
 .side-item__name {
   display: block;
   flex: 1;
@@ -298,13 +292,6 @@ input:focus-visible {
   left: 10px;
   border-top: var(--border-row);
   pointer-events: none;
-}
-
-/* 禁用原因提示框的包层接过行里的弹性占位（没有原因时它 display: contents，不占盒） */
-.side-item--add > .ss-tipwrap {
-  flex: 1;
-  align-self: stretch;
-  min-width: 0;
 }
 
 /* 忙着（正在添加 / 正在移除）：行不回应悬停，字退到 ink-faint（同禁用的键）；

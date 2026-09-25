@@ -86,15 +86,7 @@
 
 /* ---- 候选行＝列表行 ListRow：勾选框 24 ｜ 拉手 18 + 6 ｜ 名字 / 第二行；行、悬停带、抽屉、行线都归组件 ---- */
 
-/* 第二行：12 ink-mute（组件给），一行放不下以 … 截断。外层 grid 的一列 minmax(0, 1fr)：
-   里面的提示框包层被拉到这一列的宽（而不是按文字撑开），文字才截得断 */
-.add-src__sub {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0;
-}
-
+/* 第二行：12 ink-mute（组件给），一行放不下以 … 截断（提示框 fit="grow" 撑满这一行、随它收窄） */
 .add-src__meta {
   display: block;
   min-width: 0;

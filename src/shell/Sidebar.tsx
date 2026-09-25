@@ -205,6 +205,7 @@ export function Sidebar(props: SidebarProps) {
               >
                 {/* 时间不写在侧栏上（侧栏只放名字）：悬停给完整路径和「活跃于 3 天前」 */}
                 <Tooltip
+                  fit="grow"
                   content={
                     <>
                       {displayPath(p.path)}
@@ -238,7 +239,7 @@ export function Sidebar(props: SidebarProps) {
           只在吸住时上沿出 1px row-line */}
         <div className="sidebar__add" data-stuck={addStuck || undefined}>
           <div className="side-item side-item--add">
-            <ReasonTip reason={addLocked}>
+            <ReasonTip reason={addLocked} fit="grow">
               <button
                 type="button"
                 className="side-item__main"

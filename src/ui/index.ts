@@ -25,7 +25,7 @@ export {
   nextTip,
   tipCeiling,
 } from "./Tooltip.tsx";
-export type { TipEvent, TipState, TooltipProps } from "./Tooltip.tsx";
+export type { TipEvent, TipFit, TipState, TooltipProps } from "./Tooltip.tsx";
 
 export { Toast, ToastCount, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } from "./Toast.tsx";
 export type { ToastAction, ToastAgent, ToastBusyProps, ToastKind, ToastProps } from "./Toast.tsx";

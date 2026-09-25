@@ -63,15 +63,8 @@
   }
 }
 
-/* 第二行（ListRow 的副行里）：地址占满放得下的宽度，放不下才截断；无法连接的原因写全，窄了折行。
-   地址外包一层单列网格：提示框包层随它压窄，地址才截得出省略号 */
-.gw-row__urlbox {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
+/* 第二行（ListRow 的副行里）：地址占满放得下的宽度，放不下才截断（提示框 fit="shrink" 随它收窄）；
+   无法连接的原因写全，窄了折行 */
 .gw-row__url {
   display: block;
   overflow: hidden;

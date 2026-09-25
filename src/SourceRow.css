@@ -87,25 +87,12 @@
   padding-right: var(--space-md);
 }
 
-/* 名字与路径的外框：按内容定宽、有上限、放得下时不占多余；放不下时里面截断。
-   grid 的一列 minmax(0, 1fr) 把里面的提示框包层拉到这一框的宽（而不是按文字撑开），文字才截得断 */
-.srcline__fit {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0;
-}
-
-.srcline__fit--name {
-  max-width: 160px;
-}
-
-.srcline__fit--where {
-  max-width: 240px;
-}
-
+/* 名字与路径：按内容定宽、有上限（名字 160、路径 240）、放得下时不占多余；放不下时截断
+   （提示框 fit="shrink" 随它收窄） */
 .srcline__label {
   display: block;
   min-width: 0;
+  max-width: 160px;
   overflow: hidden;
   color: var(--ink);
   text-overflow: ellipsis;
@@ -130,6 +117,7 @@
 .srcrow__path {
   display: flex;
   min-width: 0;
+  max-width: 240px;
   white-space: nowrap;
 }
 
@@ -150,10 +138,9 @@
 }
 
 /* 目标框：这一页里定宽（整列一样宽，按最宽的那一个，至少放得下「选目标 ▾」）。
-   grid 一列：框外的提示框包层被拉满这一格，框再占满包层 */
+   框外的提示框包层（fit="grow"）撑满这一格，框再占满包层 */
 .srcline__targets {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
   min-width: 0;
 }
 

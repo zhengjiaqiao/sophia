@@ -371,7 +371,7 @@ function useRuleControls(
   // 规则关着：选目标不会顺带打开规则（只记下打开时用哪几个），所以目标框禁用、按下即说原因；
   // 打开开关时浮层当场展开，目标在那时选
   const box = !on ? (
-    <ReasonTip reason={RULE_OFF_REASON}>
+    <ReasonTip reason={RULE_OFF_REASON} fit="grow">
       <button
         type="button"
         className="srcrow__targets is-off"
@@ -386,6 +386,7 @@ function useRuleControls(
     </ReasonTip>
   ) : (
     <Tooltip
+      fit="grow"
       content={
         layerOpen
           ? undefined
@@ -541,33 +542,30 @@ export function SourceLine({
       }}
     >
       <span className="srcline__name" role="cell">
-        <span className="srcline__fit srcline__fit--name">
-          <TruncTip content={row.name}>
-            <span className="srcline__label">{row.name}</span>
-          </TruncTip>
-        </span>
+        <TruncTip content={row.name} fit="shrink">
+          <span className="srcline__label">{row.name}</span>
+        </TruncTip>
         <span className="srcline__count" aria-label={`${row.items.length} 个 ${state.model.noun}`}>
           {row.items.length}
         </span>
       </span>
       <span className="srcline__where" role="cell">
-        <span className="srcline__fit srcline__fit--where">
-          <TruncTip
-            content={
-              <Mono path inherit>
-                {row.path}
-              </Mono>
-            }
-          >
-            {/* 前段放不下以 … 截断，末两级完整保留 */}
-            <span className="srcrow__path">
-              {path.head ? <Mono truncate>{path.head}</Mono> : null}
-              <span className="srcrow__tail">
-                <Mono>{path.tail}</Mono>
-              </span>
+        <TruncTip
+          fit="shrink"
+          content={
+            <Mono path inherit>
+              {row.path}
+            </Mono>
+          }
+        >
+          {/* 前段放不下以 … 截断，末两级完整保留 */}
+          <span className="srcrow__path">
+            {path.head ? <Mono truncate>{path.head}</Mono> : null}
+            <span className="srcrow__tail">
+              <Mono>{path.tail}</Mono>
             </span>
-          </TruncTip>
-        </span>
+          </span>
+        </TruncTip>
       </span>
       <span className={`srcline__open${openShown ? " is-shown" : ""}`} role="cell">
         <Button
