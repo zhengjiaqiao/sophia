@@ -94,9 +94,22 @@ html[data-input="keyboard"] .settings-page__row:focus-visible {
   text-overflow: ellipsis;
 }
 
-/* `显示未安装的 32 个`：默认键紧凑，上 10 */
+/* `› 未安装的 32 个`：一行展开（拉手常显在前 + 6 + 13 ink-mute 字），上 10；点字也拉开 */
 .settings-page__more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 10px;
+}
+
+.settings-page__more-label {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.settings-page__more-label:hover {
+  color: var(--ink);
 }
 
 /* 未安装那一节：信息不是设置——没有复选框，名字 ink-mute，悬停没有反馈 */

@@ -5,7 +5,16 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { HarnessList, HarnessStatus } from "../types";
-import { AgentIcon, BusySlot, NoticePanel, Button, FloatingToast, Toast, Tooltip } from "../ui";
+import {
+  AgentIcon,
+  BusySlot,
+  DrawerHandle,
+  NoticePanel,
+  Button,
+  FloatingToast,
+  Toast,
+  Tooltip,
+} from "../ui";
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { CheckMark } from "./CheckMark.tsx";
 import { updateCheckFailure } from "../updateText.ts";
@@ -17,7 +26,7 @@ import "./SettingsPage.css";
 /// 它只回答一个问题——**这个 agent 出不出现在列表里**。
 ///
 /// `列表里的 agent · 最多 4 个`：勾选框列表，三列等分、按行读，一行＝16px 勾选框 + 10 + 16px 图标 + 10 + 名字，
-/// 行高 36；默认只列已安装的，其余收在「显示未安装的 N 个」（默认键紧凑）后面。**最多显示 4 个**（上限来自 core，
+/// 行高 36；默认只列已安装的，其余收在一行展开「› 未安装的 N 个」里。**最多显示 4 个**（上限来自 core，
 /// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
 /// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
 /// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24，应用内查，不跳 GitHub）。
@@ -33,7 +42,7 @@ import "./SettingsPage.css";
 ///   后台服务残留时的 `卸下后台服务` 在 Codex 页「第三方模型」节头与托盘。
 
 /// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
-/// 其余收在「显示未安装的 N 个」后面。
+/// 其余收在「› 未安装的 N 个」展开里。
 type AgentOption = HarnessStatus;
 
 /// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的浅键）
@@ -312,19 +321,30 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
         ) : (
           <>
             {grid(present)}
-            {/* 没装的收在一颗默认键（紧凑）后面：列出来只是噪音，但要留入口——
-                用户可能想预先恢复，装上之后就直接在列表里了 */}
+            {/* 没装的收在一行展开里：它不做事，只是在原地把列表拉开，所以是展开的样子（拉手在前、
+                收起 › 拉开 ˅，与网关行同一种），不是一颗键（2026-09-25 产品负责人真机：「感觉是个展开？」）。
+                列出来只是噪音，但要留入口——用户可能想预先恢复，装上之后就直接在列表里了 */}
             {absent.length > 0 ? (
               <>
                 <div className="settings-page__more">
-                  <Button size="compact" onClick={() => setShowAbsent(!showAbsent)}>
-                    {showAbsent
-                      ? `收起未安装的 ${absent.length} 个`
-                      : `显示未安装的 ${absent.length} 个`}
-                  </Button>
+                  <DrawerHandle
+                    always
+                    open={showAbsent}
+                    onToggle={() => setShowAbsent(!showAbsent)}
+                    label={`未安装的 ${absent.length} 个`}
+                    controls="settings-absent"
+                  />
+                  <span
+                    className="settings-page__more-label"
+                    onClick={() => setShowAbsent(!showAbsent)}
+                  >
+                    未安装的 {absent.length} 个
+                  </span>
                 </div>
                 {showAbsent ? (
-                  <AbsentAgents agents={absent} onRestore={(id) => void toggle(id, true)} />
+                  <div id="settings-absent">
+                    <AbsentAgents agents={absent} onRestore={(id) => void toggle(id, true)} />
+                  </div>
                 ) : null}
               </>
             ) : null}
