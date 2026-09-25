@@ -4,7 +4,9 @@
 //! `execute_removal` 重校验快照没变，按文件分组，每个文件一次备份、一次原子写（`atomicfile`），
 //! 留下与写入同一种撤销记录（`McpUndo`，撤销走 `undo_write`）。
 //!
-//! 只有副本能移除：格子所在行的来源（`McpSelection.source_id`）那一处是原件，拒绝。
+//! 批量移除只移除副本：格子所在行的来源（`McpSelection.source_id`）那一处是原件，拒绝。
+//! 原件要点那一格、确认之后单独删（`prepare_original_removal`，DESIGN「删除原件」），
+//! 与副本走同一条通道：同一份快照、重校验、备份、原子写、撤销记录。
 //! 文件是文本级手术，复用来源移除的 `remove_json_server` / `remove_toml_server`：JSON 只切掉
 //! 那一个成员，TOML 只删属于它的那几行，其余字节原样（BOM、CRLF、末行换行都不动），
 //! 写前按语义核对「除了拿掉的这一项，其余一模一样」。单独拿不掉的写法（根上的内联
@@ -20,12 +22,12 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// 点了原件格：来源自己那一处的定义是原件，不能在格子上移除
-pub const ORIGINAL_MESSAGE: &str =
-    "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，在管理来源里移除这个来源";
+/// 批量移除碰到原件：来源自己那一处的定义是原件，批量不删它；要删点那一格（与前端 `MCP_OWN_TIP` 同一句）
+pub const ORIGINAL_MESSAGE: &str = "这是原件所在的位置，批量移除不删它 · 要删掉，点这一格";
 const CANNOT_CUT: &str = "这一项的写法无法安全地单独拿掉，没有改动";
+const WEIBO_MESSAGE: &str = "WeiboAP 里的配置要到 WeiboAP 里删";
 
-/// 要移除的一份副本
+/// 要移除的一份定义（副本；删原件时 `source_id` 与 `target_id` 是同一个位置）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpRemoveAction {
@@ -35,7 +37,8 @@ pub struct McpRemoveAction {
     pub target_id: String,
     pub name: String,
     pub target_path: PathBuf,
-    /// 副本与来源原版一致（见 `sources::same_copy`）：再点一次写回的就是同样的内容
+    /// 副本与来源原版一致（见 `sources::same_copy`）：再点一次写回的就是同样的内容。
+    /// 删原件时恒为 false：再点什么都写不回它
     pub identical: bool,
 }
 
@@ -98,7 +101,7 @@ pub fn prepare_removal(locations: &[McpLocation], selections: &[McpSelection]) -
             continue;
         }
         if target.harness_id == "weiboap" {
-            refuse("WeiboAP 里的配置要到 WeiboAP 里删");
+            refuse(WEIBO_MESSAGE);
             continue;
         }
         let from = read(source);
@@ -111,30 +114,13 @@ pub fn prepare_removal(locations: &[McpLocation], selections: &[McpSelection]) -
             continue;
         };
         let here = read(target);
-        if here.issue.is_some() {
-            refuse("目标配置无法解析或不安全");
+        if let Err(message) = cuttable(target, &here, &selection.name) {
+            refuse(message);
             continue;
         }
-        let (State::Present(snap), Some(copy)) = (&here.state, here.values.get(&selection.name))
-        else {
-            refuse("这里已经没有它了");
+        let Some(copy) = here.values.get(&selection.name) else {
             continue;
         };
-        if unsafe_parent(&target.path) {
-            refuse("目标父目录是软链接，已拒绝写入");
-            continue;
-        }
-        if cut(
-            &target.path,
-            target.selector.as_deref(),
-            &snap.bytes,
-            &selection.name,
-        )
-        .is_none()
-        {
-            refuse(CANNOT_CUT);
-            continue;
-        }
         let identical = same_copy(source, def, target, copy);
         let key = (scope_key(target), selection.name.clone());
         if let Some(pending) = chosen.get_mut(&key) {
@@ -166,6 +152,69 @@ pub fn prepare_removal(locations: &[McpLocation], selections: &[McpSelection]) -
         actions: private.iter().map(|p| p.action.clone()).collect(),
         issues,
         private,
+    }
+}
+
+/// 这个位置里的 `name` 能不能单独切掉：读得出、还在、父目录不是软链、写法拿得掉
+fn cuttable(target: &McpLocation, here: &Parsed, name: &str) -> Result<(), &'static str> {
+    if here.issue.is_some() {
+        return Err("目标配置无法解析或不安全");
+    }
+    let (State::Present(snap), true) = (&here.state, here.values.contains_key(name)) else {
+        return Err("这里已经没有它了");
+    };
+    if unsafe_parent(&target.path) {
+        return Err("目标父目录是软链接，已拒绝写入");
+    }
+    if cut(&target.path, target.selector.as_deref(), &snap.bytes, name).is_none() {
+        return Err(CANNOT_CUT);
+    }
+    Ok(())
+}
+
+/// 只读：删原件（点原件格、确认之后）——从 `location_id` 这个位置里删掉 `name` 的定义本身，
+/// 别的位置里的同名定义不动。判定与副本同一套（`cuttable`），不需要来源可比；
+/// 计划交给 `execute_removal` 执行，撤销同副本（`undo_write`）
+pub fn prepare_original_removal(
+    locations: &[McpLocation],
+    location_id: &str,
+    name: &str,
+) -> McpRemovalPlan {
+    let refuse = |message: &str| McpRemovalPlan {
+        actions: Vec::new(),
+        issues: vec![McpIssue {
+            location_id: location_id.into(),
+            name: Some(name.into()),
+            message: message.into(),
+        }],
+        private: Vec::new(),
+    };
+    let Some(location) = locations.iter().find(|location| location.id == location_id) else {
+        return refuse("这个位置已经不在了");
+    };
+    if location.harness_id == "weiboap" {
+        return refuse(WEIBO_MESSAGE);
+    }
+    let here = parse(location);
+    if let Err(message) = cuttable(location, &here, name) {
+        return refuse(message);
+    }
+    let action = McpRemoveAction {
+        source_id: location.id.clone(),
+        target_id: location.id.clone(),
+        name: name.into(),
+        target_path: location.path.clone(),
+        identical: false,
+    };
+    McpRemovalPlan {
+        actions: vec![action.clone()],
+        issues: Vec::new(),
+        private: vec![PendingRemoval {
+            action,
+            selector: location.selector.clone(),
+            sources: Vec::new(),
+            target: here.state,
+        }],
     }
 }
 

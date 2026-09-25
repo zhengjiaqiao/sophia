@@ -24,12 +24,9 @@ const target = (linkedWholeTo: string | null = null): Target => ({
 const view = (state: CellState, t: Target = target(), pointsTo: string | null = null) =>
   viewOf(cell(state, pointsTo), t, "Codex", "obsidian-cli");
 
-test("own：原件环，关不掉，点了只说明它不是链接", () => {
-  assert.deepEqual(view("own"), {
-    dot: "own",
-    clickable: false,
-    reason: "原件就在这儿，不是链接",
-  });
+/// DESIGN「删除原件」（2026-09-25 取代「原件格不能点」）：点了是删原件（先确认），可点的不带 reason
+test("own：原件环，可点（确认后删原件），不自带文案", () => {
+  assert.deepEqual(view("own"), { dot: "own", clickable: true });
 });
 
 /// §8.1：可点的两种不带 reason——成功句由调用方汇总，一次批量操作只出一句

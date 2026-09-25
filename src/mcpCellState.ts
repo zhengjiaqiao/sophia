@@ -9,7 +9,7 @@
 /// **空心**＝这儿还没有。和 skill 最大的不同是这里没有软链——每一处都是别人配置
 /// 文件里的一段真实内容。格子同样是开关（DESIGN「MCP 格子同样是开关：能写进，也能移除」）：
 /// 点空心＝写进一份（只新增，不覆盖已有的同名条目）；点实心＝从那个位置移除这份副本；
-/// 原件格不能点。
+/// 点原件格＝确认之后删掉原件（DESIGN「删除原件」）。
 import type { Dot } from "./cellState";
 import type { McpCellState } from "./types";
 
@@ -25,7 +25,7 @@ export type McpIssueKind = "invalidLocation" | "differentCopies";
 
 export interface McpCellView {
   dot: Dot;
-  /// 点下去会真的改那份配置（写进一段 / 移除一份副本）；false 表示点击只说明情况
+  /// 点下去会真的改那份配置（写进一段 / 移除一份副本 / 确认后删原件）；false 表示点击只说明情况
   clickable: boolean;
   /// 这一格是一份副本（这一列自己也有一份定义，但它不是本行的来源）：点它＝从这个位置移除
   copy?: boolean;
@@ -57,12 +57,8 @@ export const copyView = (): McpCellView => ({ dot: "linked", clickable: true, co
 export function viewOf(state: McpDotState, ctx: McpCellContext): McpCellView {
   switch (state) {
     case "own":
-      // 这一列就是本行的来源（原件）：不能在格子上移除，点击只说明这件事
-      return {
-        dot: "own",
-        clickable: false,
-        reason: `这份 ${ctx.service} 就写在 ${ctx.location} 里，写到别处去的就是它`,
-      };
+      // 这一列就是本行的来源（原件）：点了是删原件，先确认；可点的不带 reason
+      return { dot: "own", clickable: true };
     case "equal":
     case "sameEndpoint":
       // 这儿有一份副本（同一个服务 / 同一个地址）：点＝移除

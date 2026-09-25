@@ -498,7 +498,11 @@ test("点了做不了的格子：只当即说明（提示框立即出现、停�
       {
         ...base.rows[0],
         cells: {
-          cc: { dot: "own" as const, clickable: false, tip: "这就是原件" },
+          cc: {
+            dot: "blocked" as const,
+            clickable: false,
+            tip: "Claude Code 里已有一个同名的 docx",
+          },
           cx: { dot: "missing" as const, clickable: true, tip: "加到 Codex" },
         },
       },
@@ -511,10 +515,6 @@ test("点了做不了的格子：只当即说明（提示框立即出现、停�
 test("做不了的格子的说明：为什么 + 去哪做", async () => {
   const { blockedTipOf, MCP_OWN_TIP } = await import("../src/cellTip.ts");
   assert.equal(
-    blockedTipOf("own", "Claude Code", "docx", ""),
-    "这就是原件，不需要链接 · 要从 Claude Code 移除，只能删掉原件",
-  );
-  assert.equal(
     blockedTipOf("duplicate", "Cursor", "docx", ""),
     "Cursor 里已有一个同名的 docx，不是这一份",
   );
@@ -525,11 +525,8 @@ test("做不了的格子的说明：为什么 + 去哪做", async () => {
   );
   // 整个文件夹是链接：沿用 cellState 的原因
   assert.equal(blockedTipOf("wholeLinked", "Cursor", "docx", "原句"), "原句");
-  // MCP 原件格：与 core 拒绝原件格时说的同一句（mcp::removal::ORIGINAL_MESSAGE）
-  assert.equal(
-    MCP_OWN_TIP,
-    "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，在管理来源里移除这个来源",
-  );
+  // MCP 原件：批量移除跳过它时说的话，与 core 跳过时说的同一句（mcp::removal::ORIGINAL_MESSAGE）
+  assert.equal(MCP_OWN_TIP, "这是原件所在的位置，批量移除不删它 · 要删掉，点这一格");
   const removal = readFileSync(
     new URL("../crates/core/src/mcp/removal.rs", import.meta.url),
     "utf8",
@@ -766,4 +763,28 @@ test("批量撤销按条件给：加上时选中的里这一列原本已有一�
   assert.match(mcp, /write\(cells, target\.id, copies\.length === 0\)/);
   assert.match(mcp, /write\(allAdd, "all", allRemove\.length === 0\)/);
   assert.match(mcp, /mcpUndoShown\("write", result\.entries, reversible\)/);
+});
+
+test("原件格可点（DESIGN「删除原件」）：提示框是带 … 的动词，点了先确认；批量不删原件", () => {
+  const dv = readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8");
+  const skills = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
+  const mcp = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
+  assert.match(dv, /state === "own"\s*\?\s*"删除原件…"/);
+  assert.match(skills, /else if \(state === "own"\) void askDeleteOriginal\(ref\)/);
+  assert.match(
+    skills,
+    /confirmLabel="删除"\s*onConfirm=\{\(\) => void confirmDeleteOriginal\(deletePane\)\}/,
+  );
+  assert.match(mcp, /`从 \$\{names\.get\(target\.id\) \?\? target\.label\} 删除…`/);
+  assert.match(
+    mcp,
+    /confirmLabel="删除"\s*onConfirm=\{\(\) => void deleteOriginal\(deletePane\)\}/,
+  );
+  assert.match(mcp, /api\.deleteMcpOriginal\(del\.targetId, del\.name\)/);
+  // 批量：能移除的只有副本，能写进的不含原件
+  assert.match(
+    mcp,
+    /viewAt\(row, targetId\)\?\.copy === true && viewAt\(row, targetId\)\?\.clickable === true/,
+  );
+  assert.match(mcp, /view\.copy !== true && view\.dot !== "own" && source !== null/);
 });

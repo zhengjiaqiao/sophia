@@ -20,7 +20,7 @@ export type Dot =
 
 export interface CellView {
   dot: Dot;
-  /// 点下去会真的建链或删链；false 表示点击只说明情况
+  /// 点下去会真的建链或删链（原件格：先确认、再删原件）；false 表示点击只说明情况
   clickable: boolean;
   /// 给提示条用的**完整句子**，不是错误码。**只在 `clickable === false` 时有值**：
   /// 为什么不能点。成功句不在这里——按 §4.1，一次批量操作只汇总成一句，
@@ -35,9 +35,9 @@ export interface CellView {
 export function viewOf(cell: Cell, target: Target, agentLabel: string, skill: string): CellView {
   switch (cell.state) {
     case "own":
-      // 原件就摆在这个目录里，没有链接可关，点击只说明这件事
-      return { dot: "own", clickable: false, reason: "原件就在这儿，不是链接" };
-    // 可点的两种不给 reason：关掉/开启之后要说的那句由调用方汇总，见 CellView.reason
+      // 原件就摆在这个目录里：点了是删原件（先确认，DESIGN「删除原件」），可点就不给 reason
+      return { dot: "own", clickable: true };
+    // 可点的几种不给 reason：关掉/开启之后要说的那句由调用方汇总，见 CellView.reason
     case "linked":
       return { dot: "linked", clickable: true };
     case "missing":

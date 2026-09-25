@@ -411,7 +411,7 @@ test("StateDot 16px 版：与格内同形", () => {
   assert.match(html, /stroke-dasharray="8\.4 1\.5"/);
 });
 
-test("StateDot 可点：渲染成按钮；只有开 / 关两种出悬停光晕", () => {
+test("StateDot 可点：渲染成按钮；开 / 关两种与原件（点了是删原件）出悬停光晕", () => {
   const linked = render(StateDot, { dot: "linked", onClick: noop, title: "点一下关闭" });
   assert.match(linked, /<button type="button" class="ss-dot-btn"/);
   assert.match(linked, /data-hoverable=""/);
@@ -422,8 +422,10 @@ test("StateDot 可点：渲染成按钮；只有开 / 关两种出悬停光晕",
   assert.match(missing, /data-hoverable=""[^>]*><circle class="ss-dot__halo" cx="5" cy="5" r="11"/);
   // 调用方自己渲染外层按钮：hoverable 让不带 onClick 的点也出光晕
   assert.match(render(StateDot, { dot: "missing", hoverable: true }), /class="ss-dot__halo"/);
-  // 原件与异常点了不是开关：不出光晕
-  for (const dot of ["own", "broken"] as const) {
+  // 原件点了是删原件（DESIGN「删除原件」）：照常出光晕
+  assert.match(render(StateDot, { dot: "own", onClick: noop }), /data-hoverable=""/);
+  // 异常点了不是开关：不出光晕
+  for (const dot of ["broken", "readOnly", "blocked", "wholeLinked"] as const) {
     const html = render(StateDot, { dot, onClick: noop });
     assert.doesNotMatch(html, /data-hoverable|ss-dot__halo/);
   }

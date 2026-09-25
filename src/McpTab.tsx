@@ -55,7 +55,15 @@ import {
 import { Confirm, CornerToast, Empty, Tag, Toast, ToastCount } from "./ui";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
 import type { ConfirmAnchor, ToastProps } from "./ui";
-import { batchBusyText, toastFor, type ToastItem, type ToastText } from "./toastText";
+import {
+  batchBusyText,
+  deletedMcpOriginalToast,
+  deleteMcpOriginalConfirm,
+  toastFor,
+  type ToastAgentRef,
+  type ToastItem,
+  type ToastText,
+} from "./toastText";
 import { MCP_OWN_TIP } from "./cellTip";
 import type { Dot } from "./cellState";
 import type {
@@ -73,9 +81,9 @@ import "./McpTab.css";
 /// 行是 MCP 服务，列是配置位置，格是同一套状态点。
 ///
 /// MCP 特有的差异：
-/// 1. **格同样是开关，但只有副本能拿掉**——点空心写进一份，点实心（副本）从那个位置移除；
-///    本行来源那一列是原件，不能在格子上移除（DESIGN「MCP 格子同样是开关：能写进，也能移除」）。
-///    选择条上的键同 skill：未全有＝写进缺的，全有（打勾）＝全部移除
+/// 1. **格同样是开关**——点空心写进一份，点实心（副本）从那个位置移除；
+///    本行来源那一列是原件，点它先确认、再从那个 agent 的配置里删掉（DESIGN「删除原件」）。
+///    选择条上的键同 skill：未全有＝写进缺的，全有（打勾）＝全部移除（只移除副本，原件跳过）
 /// 2. **实心不是一条链接，是一份独立副本**——写进、移除都经 core 留快照：没人改过就能撤销，
 ///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底。撤销按钮只在再点一次不能准确撤回时给
 ///    （`mcpUndoShown`）：移除了一份与原版不一样的副本、批量写进时选中的里这一列原本已有一部分；
@@ -166,6 +174,15 @@ interface Pane {
   reversible: boolean;
 }
 
+/// 待确认的删原件：点了原件格（锚在那一格下）
+interface DeletePane {
+  name: string;
+  targetId: string;
+  agent?: ToastAgentRef;
+  anchor?: ConfirmAnchor;
+  text: ReturnType<typeof deleteMcpOriginalConfirm>;
+}
+
 /// 正在撤销的那一次（undoId）：带撤销的那一窗读它，按下的 `撤销` 原位忙碌
 /// （过了 0.3 秒门槛才换成刻度 + 一句）。提示小窗在状态里存的是元素，靠 context 才看得到后来的变化
 const UndoBusy = createContext<string | null>(null);
@@ -227,6 +244,8 @@ export default function McpTab({
   }, []);
   usePageCommand("add-source", openAdd);
   const [pane, setPane] = useState<Pane | null>(null);
+  // 删原件的确认框（点了原件格）
+  const [deletePane, setDeletePane] = useState<DeletePane | null>(null);
   // 同名多份的空格：点它出的挑选浮层（锚在那一格上）
   const [pick, setPick] = useState<McpPick | null>(null);
   // 乐观更新：格键 → 点下去之后该画成的圆点（写进＝实心、移除＝空心）；重扫回来后撤掉
@@ -251,6 +270,12 @@ export default function McpTab({
     node: ReactNode;
   } | null>(null);
   const cellToastSeq = useRef(0);
+  // 删原件的结果：锚在按下那一刻那一格的位置（删完这一行可能就没了，不能再去找格子）
+  const [rowToast, setRowToast] = useState<{
+    rowKey: string;
+    at?: ConfirmAnchor;
+    node: ReactNode;
+  } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
   // 加完来源、开始滑回位置页：加上的那几个（等这一轮渲染拿到重扫后的页再筛）；新来源那几项下的那一窗
   const [justAdded, setJustAdded] = useState<CandidateEntry[] | null>(null);
@@ -275,6 +300,7 @@ export default function McpTab({
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
   const dismissCell = useCallback(() => setCellToast(null), []);
+  const dismissRow = useCallback(() => setRowToast(null), []);
   const dismissNotice = useCallback(() => setCellNotice(null), []);
   const dismissAdded = useCallback(() => setAddedToast(null), []);
   /// 单格失败：同一个位置（那一格正下方）说原因，替掉那一格的成功窗（一次只一条）
@@ -365,9 +391,11 @@ export default function McpTab({
   useEffect(() => {
     setManageOpen(false);
     setPane(null);
+    setDeletePane(null);
     setPick(null);
     setKeyToast(null);
     setCellToast(null);
+    setRowToast(null);
     setCellNotice(null);
     setAddedToast(null);
     // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
@@ -400,7 +428,7 @@ export default function McpTab({
     onChange: refresh,
     // 移除之后：正勾着它就从筛选里去掉，其余勾着的照旧
     onRemoved: (id) => setOriginFilter((prev) => dropOrigin(prev, id)),
-    keys: !addOpen && !manageOpen && pane === null && pick === null,
+    keys: !addOpen && !manageOpen && pane === null && deletePane === null && pick === null,
   });
 
   // 加完来源滑回位置页（同 Skills）：重扫已完。只加了一个就选中它（列表筛到它），它正下方浮起
@@ -734,15 +762,17 @@ export default function McpTab({
   /// 撤销一次写入：core 只在文件仍等于写入后的样子时才从快照还原。改过了就撤不了——
   /// 撤销禁用、提示框说原因，另给「在访达中显示备份 ↗」作手动兜底（DESIGN「MCP 写入的撤销」）
   /// `one`：单格写入的撤销（那一格的键、行键与列）——撤成了那一窗直接消失、格子回原状并闪一下；
-  /// 撤不了时说明也出在那一格下。批量的锚在选择行里被按的那个点下（选择行已收起时 Matrix 退到那一列的列头）；
+  /// 撤不了时说明也出在那一格下（删原件的撤销给了 `at`：说明出在按下那一刻那一格的位置，那一行可能已不在）。
+  /// 批量的锚在选择行里被按的那个点下（选择行已收起时 Matrix 退到那一列的列头）；
   /// 撤销的结果都有触发处，不落右下（右下只给后台自动规则）
   const undoWrite = async (
     undoId: string,
     keyId: string | undefined,
     text: ToastText,
-    one?: { keys: string[]; rowKey: string; columnId: string },
+    one?: { keys: string[]; rowKey: string; columnId: string; at?: ConfirmAnchor },
   ) => {
     const single = one !== undefined;
+    const at = one?.at;
     setUndo(null);
     // 按下的 `撤销` 原位忙碌（过了 0.3 秒门槛才出刻度 + 一句）；⌘Z 撤的也一样
     setUndoBusy(undoId);
@@ -758,6 +788,7 @@ export default function McpTab({
     if (report.outcome === "undone") {
       setKeyToast(null);
       setCellToast(null);
+      if (at) setRowToast(null);
       await refresh();
       if (one) setFlash({ keys: one.keys, nonce: Date.now() });
       return;
@@ -777,10 +808,11 @@ export default function McpTab({
               ? undefined
               : { label: "在访达中显示备份", onClick: () => void reveal(backup) }
           }
-          onDismiss={single ? dismissCell : dismissKey}
+          onDismiss={at ? dismissRow : single ? dismissCell : dismissKey}
         />
       );
-      if (one)
+      if (one && at) setRowToast({ rowKey: one.rowKey, at, node });
+      else if (one)
         setCellToast({
           id: ++cellToastSeq.current,
           rowKey: one.rowKey,
@@ -791,6 +823,21 @@ export default function McpTab({
       return;
     }
     // 没撤成：在撤销的入口那里说（那一格下 / 那个点下）
+    if (one && at) {
+      setRowToast({
+        rowKey: one.rowKey,
+        at,
+        node: (
+          <Toast
+            kind="cannot"
+            message={`没撤销：${report.message}`}
+            onDismiss={dismissRow}
+            onClose={dismissRow}
+          />
+        ),
+      });
+      return;
+    }
     if (one) {
       failCell(one.rowKey, one.columnId, `没撤销：${report.message}`);
       return;
@@ -858,7 +905,107 @@ export default function McpTab({
     await apply(preview, false);
   };
 
-  /// 点一格：空心＝写进（同域单格直接写），实心副本＝移除
+  // ===== 原件格：确认之后从那个 agent 的配置里删掉（DESIGN「删除原件」） =====
+
+  /// 点原件格：锚在那一格下出确认框。这个位置别的 agent 里还有同名定义时，正文说它们不受影响
+  const askDeleteOriginal = (p: McpDomain, row: McpDomainRow, target: McpLocation) => {
+    const names = columnNames(p.targets);
+    const agent = names.get(target.id) ?? target.label;
+    const others = p.targets
+      .filter((t) => t.id !== target.id && cellViewOf(row, t.id, labelOf)?.copy === true)
+      .map((t) => names.get(t.id) ?? t.label);
+    const r = cellElement(p, rowKeyOf(row), target.id)?.getBoundingClientRect();
+    // Claude Local：同一个 ~/.claude.json 里按项目存放，路径后接项目名
+    const project = target.selector
+      ? target.selector
+          .split(/[/\\]+/)
+          .filter(Boolean)
+          .pop()
+      : undefined;
+    setDeletePane({
+      name: row.name,
+      targetId: target.id,
+      agent: { id: target.harnessId, name: target.label },
+      anchor: r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined,
+      text: deleteMcpOriginalConfirm({
+        agent,
+        name: row.name,
+        others: [...new Set(others)],
+        path: target.path,
+        project,
+      }),
+    });
+  };
+
+  /// 确认之后删原件：写的时候那一格灰着；删成了出例行一行 + `撤销`（从快照原样还原），
+  /// 没删成在同一个位置说原因。与写进、移除排同一个队
+  const deleteOriginal = (del: DeletePane) => {
+    setDeletePane(null);
+    setCellNotice(null);
+    setCellToast(null);
+    const key = cellKey(del.name, del.targetId);
+    // 删的时候那一格灰着、不再可点（乐观态仍画原件），落定后撤掉
+    setOptimisticFor([key], "own");
+    setPendingCells((prev) => new Set([...prev, key]));
+    const cannot = (reason: string) =>
+      setRowToast({
+        rowKey: del.name,
+        at: del.anchor,
+        node: (
+          <Toast
+            kind="cannot"
+            verb="没删掉"
+            names={[del.name]}
+            reason={reason}
+            onDismiss={dismissRow}
+            onClose={dismissRow}
+          />
+        ),
+      });
+    return enqueue(async () => {
+      onBusy(true);
+      let result: McpReport | null = null;
+      try {
+        result = await api.deleteMcpOriginal(del.targetId, del.name);
+      } catch (error) {
+        cannot(String(error));
+      } finally {
+        onBusy(false);
+        setPendingCells((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+      if (result !== null) {
+        if (!result.entries.some((e) => e.outcome === "removed")) {
+          cannot(result.entries[0]?.message ?? "没有改动");
+        } else {
+          const text = deletedMcpOriginalToast(del.name, del.agent);
+          const undoId = result.undoId;
+          const one = { keys: [key], rowKey: del.name, columnId: del.targetId, at: del.anchor };
+          const undo = undoId ? () => void undoWrite(undoId, undefined, text, one) : null;
+          setUndo(undo);
+          setRowToast({
+            rowKey: del.name,
+            at: del.anchor,
+            node: (
+              <UndoToast
+                undoId={undoId}
+                {...text}
+                action={undo ? { label: "撤销", onClick: undo } : undefined}
+                onDismiss={dismissRow}
+              />
+            ),
+          });
+        }
+      }
+      await refresh();
+      setOptimisticFor([key], null);
+    });
+  };
+
+  /// 点一格：空心＝写进（同域单格直接写），实心副本＝移除，原件＝确认后删原件
   const onCell = (p: McpDomain, rowKey: string, targetId: string) => {
     const row = p.rows.find((r) => rowKeyOf(r) === rowKey);
     const target = p.targets.find((t) => t.id === targetId);
@@ -872,7 +1019,12 @@ export default function McpTab({
     }
     if (!view.clickable) return;
     setCellNotice(null);
-    // 实心（副本）：从这个位置移除；行的来源是原件（core 同样拒绝原件格）
+    // 原件：先确认，再从这个位置删掉（批量移除不删它，core 同样跳过）
+    if (view.dot === "own") {
+      askDeleteOriginal(p, row, target);
+      return;
+    }
+    // 实心（副本）：从这个位置移除
     if (view.copy) {
       void removeCopies([{ sourceId: mcpGroupOf(row), name: row.name, targetId: target.id }]);
       return;
@@ -1038,14 +1190,14 @@ export default function McpTab({
   }
 
   /// 格此刻画成什么：乐观更新的画成点下去之后的样子（写进实心、移除空心），落定前不再可点。
-  /// WeiboAP 里的副本不在格子上移除
+  /// WeiboAP 里的副本、原件不在格子上移除
   const viewAt = (row: McpDomainRow, targetId: string) => {
     const view = cellViewOf(row, targetId, labelOf);
     if (view === null) return null;
     const dot = optimistic.get(cellKey(rowKeyOf(row), targetId));
     if (dot !== undefined)
       return { ...view, dot, clickable: false, copy: undefined, reason: undefined };
-    if (view.copy && locationOf(targetId)?.harnessId === "weiboap")
+    if ((view.copy || view.dot === "own") && locationOf(targetId)?.harnessId === "weiboap")
       return { ...view, clickable: false, reason: WEIBO_REMOVE };
     return view;
   };
@@ -1095,14 +1247,14 @@ export default function McpTab({
         tip: invalid
           ? `${view.reason ?? ""} · 点一下在访达中显示`
           : view.clickable
-            ? view.copy
-              ? `从 ${names.get(target.id) ?? target.label} 移除`
-              : choiceCount(row, target.id) > 1
-                ? pickTip(row.name, choiceCount(row, target.id))
-                : "点一下写进"
-            : view.dot === "own" && view.issue === undefined
-              ? MCP_OWN_TIP
-              : (view.reason ?? ""),
+            ? view.dot === "own"
+              ? `从 ${names.get(target.id) ?? target.label} 删除…`
+              : view.copy
+                ? `从 ${names.get(target.id) ?? target.label} 移除`
+                : choiceCount(row, target.id) > 1
+                  ? pickTip(row.name, choiceCount(row, target.id))
+                  : "点一下写进"
+            : (view.reason ?? ""),
         pending: pendingCells.has(cellKey(key, target.id)),
       };
     }
@@ -1196,7 +1348,8 @@ export default function McpTab({
     chosen.flatMap((row) => {
       const view = viewAt(row, targetId);
       const source = sourceForMissingTarget(row, targetId);
-      return view?.clickable === true && view.copy !== true && source !== null
+      // 原件格可点是删原件，不是写进：不算缺的
+      return view?.clickable === true && view.copy !== true && view.dot !== "own" && source !== null
         ? [{ sourceId: source.sourceId, name: row.name, targetId }]
         : [];
     });
@@ -1236,7 +1389,8 @@ export default function McpTab({
       .map((r) => r.name);
     const checked = cells.length === 0 && present > 0;
     const notes = [
-      { names: own, why: `原件就在 ${target.label} 里` },
+      // 批量移除跳过原件：与 core 跳过时说的同一句（`MCP_OWN_TIP`）
+      { names: own, why: checked ? MCP_OWN_TIP : `原件就在 ${target.label} 里` },
       checked
         ? { names: stuck, why: `无法从 ${target.label} 移除` }
         : { names: cant, why: `无法写进 ${target.label}` },
@@ -1384,13 +1538,14 @@ export default function McpTab({
         onUndo={() => undoRef.current?.()}
         canUndo={canUndo}
         onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
-        shortcuts={!addOpen && !manageOpen && pane === null && pick === null}
+        shortcuts={!addOpen && !manageOpen && pane === null && deletePane === null && pick === null}
         empty={empty}
         flash={flash}
         cellNotice={cellNotice}
         onDismissCellNotice={dismissNotice}
         keyToast={keyToast}
         cellToast={cellToast}
+        rowToast={rowToast}
         keyBusy={keyBusy}
         barToast={
           addedToast
@@ -1444,6 +1599,27 @@ export default function McpTab({
               跳过 {issue.name ?? labelOf(issue.locationId)}：{issue.message}
             </div>
           ))}
+        </Confirm>
+      )}
+
+      {deletePane !== null && (
+        <Confirm
+          title={deletePane.text.title}
+          confirmLabel="删除"
+          onConfirm={() => void deleteOriginal(deletePane)}
+          onCancel={() => setDeletePane(null)}
+          anchor={deletePane.anchor}
+        >
+          {/* 标题下的路径行（同「只留这份」）：删的是哪个文件里的这一项 */}
+          <div className="mx-keeppaths">
+            {deletePane.text.paths.map((p) => (
+              <div key={p.label} className="mx-keeppaths__row">
+                <span className="mx-keeppaths__label">{p.label}</span>
+                <span className="mx-keeppaths__path">{p.path}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mx-keeppaths__body">{deletePane.text.body}</div>
         </Confirm>
       )}
 

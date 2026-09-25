@@ -1,5 +1,5 @@
 //! 执行动作：逐项独立，每条动作自己成败，互不影响
-use crate::fs::{create_link, entry_kind, remove_link, same_real, EntryKind};
+use crate::fs::{create_link, entry_kind, real_path, remove_link, same_real, EntryKind};
 use crate::models::*;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -76,7 +76,8 @@ pub fn trash(path: &Path) -> io::Result<()> {
 
 /// 删本体：目录移进废纸篓，再把指向它的链接逐条改指到 `plan.relink_to`。
 /// 本体在 git 仓库内时什么都不动，只回一条失败；
-/// 没有 `relink_to` 时受影响的链接原样留下——它们就此成为断链，逐条如实上报，不偷偷跳过
+/// 没有 `relink_to` 时受影响的链接一起清掉（DESIGN「删除原件」：不留一排断链给用户收尾），
+/// 删前逐条重校验仍是软链、仍指进被删的原件；每条结果逐条如实上报，不偷偷跳过
 pub fn delete_source(plan: &DeleteSourcePlan) -> SyncReport {
     let delete = PlannedAction {
         kind: ActionKind::DeleteSource,
@@ -97,6 +98,15 @@ pub fn delete_source(plan: &DeleteSourcePlan) -> SyncReport {
             repo.display()
         )));
     }
+    // 原件进了废纸篓之后就无从判断链接指不指进它：删之前先记下每条链接此刻指向哪里、是否指进原件
+    let before: Vec<Option<PathBuf>> = match (&plan.relink_to, real_path(&plan.path)) {
+        (None, Some(body)) => plan
+            .affected
+            .iter()
+            .map(|link| pointing_into(&link.path, &body))
+            .collect(),
+        _ => Vec::new(),
+    };
     if let Err(e) = trash(&plan.path) {
         return one(Outcome::Failed(e.to_string()));
     }
@@ -104,37 +114,69 @@ pub fn delete_source(plan: &DeleteSourcePlan) -> SyncReport {
         action: delete,
         outcome: Outcome::Removed,
     }];
-    entries.extend(
-        plan.affected
-            .iter()
-            .map(|link| relink(link, plan.relink_to.as_deref())),
-    );
+    match plan.relink_to.as_deref() {
+        Some(to) => entries.extend(plan.affected.iter().map(|link| relink(link, to))),
+        None => entries.extend(
+            plan.affected
+                .iter()
+                .enumerate()
+                .map(|(i, link)| clear(&link.path, before.get(i).cloned().flatten())),
+        ),
+    }
     SyncReport { entries }
 }
 
-/// 一条受影响的链接：有别处的同名本体就改指过去，没有就原样留下（已是断链）。
-/// 写法用体检时记下的 `link.style`，项目内的相对链接改指后仍是相对的，不因改指丢掉可移植性
-fn relink(affected: &AffectedLink, to: Option<&Path>) -> ReportEntry {
-    let link = affected.path.as_path();
+/// 链接此刻指进 `body`（real_path 之后按路径分量比较，两侧同源）时，返回它写着的目标
+fn pointing_into(link: &Path, body: &Path) -> Option<PathBuf> {
+    let EntryKind::Symlink(dest) = entry_kind(link) else {
+        return None;
+    };
+    real_path(link)
+        .is_some_and(|real| real.starts_with(body))
+        .then_some(dest)
+}
+
+/// 没有别处可改指：清掉这条链接。`before` 是删原件之前它指进原件时写着的目标；
+/// 删前重校验：仍是软链、目标没被改写、且已指不到东西（原件刚进了废纸篓），才删
+fn clear(link: &Path, before: Option<PathBuf>) -> ReportEntry {
     let kind = entry_kind(link);
     let dest = match &kind {
         EntryKind::Symlink(dest) => dest.clone(),
         _ => link.to_path_buf(),
     };
-    let action = |action_kind: ActionKind, source_path: PathBuf| PlannedAction {
-        kind: action_kind,
+    let action = PlannedAction {
+        kind: ActionKind::Unlink,
         item_name: file_name(link),
-        source_path,
+        source_path: before.clone().unwrap_or_else(|| dest.clone()),
         target_path: link.to_path_buf(),
         target: parent_of(link),
     };
-    let Some(to) = to else {
-        return ReportEntry {
-            action: action(ActionKind::BrokenLink, dest),
-            outcome: Outcome::Skipped,
-        };
+    let still = matches!(kind, EntryKind::Symlink(_))
+        && before.as_ref() == Some(&dest)
+        && real_path(link).is_none();
+    let outcome = if !still {
+        Outcome::Failed("不再是指向该原件的软链接，已跳过".into())
+    } else {
+        match remove_link(link) {
+            Ok(()) => Outcome::Removed,
+            Err(e) => Outcome::Failed(e.to_string()),
+        }
     };
-    let create = action(ActionKind::Create, to.to_path_buf());
+    ReportEntry { action, outcome }
+}
+
+/// 一条受影响的链接：改指到别处的同名本体。
+/// 写法用体检时记下的 `link.style`，项目内的相对链接改指后仍是相对的，不因改指丢掉可移植性
+fn relink(affected: &AffectedLink, to: &Path) -> ReportEntry {
+    let link = affected.path.as_path();
+    let kind = entry_kind(link);
+    let create = PlannedAction {
+        kind: ActionKind::Create,
+        item_name: file_name(link),
+        source_path: to.to_path_buf(),
+        target_path: link.to_path_buf(),
+        target: parent_of(link),
+    };
     // 体检到执行之间可能已被换掉：必须仍是软链才动它
     if !matches!(kind, EntryKind::Symlink(_)) {
         return ReportEntry {
@@ -549,35 +591,86 @@ mod tests {
         assert!(same_real(&in_proj, &kept) && same_real(&global_link, &kept));
     }
 
-    /// 没有别处的同名本体时，受影响的链接就此成为断链：原样留下并逐条上报，不偷偷跳过。
+    /// 没有别处的同名本体时，指向它的链接一起清掉，不留断链（DESIGN「删除原件」），逐条上报。
     /// 这条测试会真的往系统废纸篓里放一个目录
     #[test]
-    fn delete_source_leaves_links_broken_when_no_other_body_remains() {
+    fn delete_source_clears_links_when_no_other_body_remains() {
         let t = TempTree::new();
         let store = t.dir("store");
-        let body = t.dir("store/symsync-test-broken");
+        let body = t.dir("store/symsync-test-clear");
+        t.file(&body, "SKILL.md");
         let claude = t.dir("home/.claude/skills");
-        let link = claude.join("symsync-test-broken");
+        let cursor = t.dir("home/.cursor/skills");
+        let link = claude.join("symsync-test-clear");
+        // 指进原件内部的链接同样算受影响
+        let inner = cursor.join("symsync-test-clear");
         t.link(&link, &body);
+        t.link(&inner, &body.join("SKILL.md"));
 
-        let sources = vec![source_at(&store, &["symsync-test-broken"])];
-        let targets = vec![target_at("claude-code", &claude)];
+        let sources = vec![source_at(&store, &["symsync-test-clear"])];
+        let targets = vec![
+            target_at("claude-code", &claude),
+            target_at("cursor", &cursor),
+        ];
         let plan =
             crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
         assert_eq!(plan.relink_to, None);
-        assert_eq!(plan.affected, vec![absolute(&link)]);
+        assert_eq!(plan.affected, vec![absolute(&link), absolute(&inner)]);
 
         let r = delete_source(&plan);
-        assert_eq!(r.entries.len(), 2);
-        assert_eq!(r.entries[0].outcome, Outcome::Removed);
-        // 如实记成一条断链，链接没被动过
-        assert_eq!(r.entries[1].action.kind, ActionKind::BrokenLink);
+        assert_eq!(
+            outcomes(&r),
+            vec![Outcome::Removed, Outcome::Removed, Outcome::Removed]
+        );
+        assert_eq!(r.entries[1].action.kind, ActionKind::Unlink);
         assert_eq!(r.entries[1].action.target_path, link);
         assert_eq!(r.entries[1].action.source_path, body);
-        assert_eq!(r.entries[1].outcome, Outcome::Skipped);
-        assert!(matches!(entry_kind(&link), EntryKind::Symlink(_)));
-        assert_eq!(crate::fs::real_path(&link), None);
+        assert_eq!(r.entries[2].action.target_path, inner);
+        assert_eq!(entry_kind(&link), EntryKind::Missing);
+        assert_eq!(entry_kind(&inner), EntryKind::Missing);
         assert_eq!(entry_kind(&body), EntryKind::Missing);
+        // 目标目录本身不动
+        assert_eq!(entry_kind(&claude), EntryKind::Dir);
+    }
+
+    /// 体检之后链接被换掉（改指到别处、换成真实目录）：删前重校验不过，跳过并如实上报，不误删。
+    /// 这条测试会真的往系统废纸篓里放一个目录
+    #[test]
+    fn delete_source_skips_links_that_changed_since_the_plan() {
+        let t = TempTree::new();
+        let store = t.dir("store");
+        let body = t.dir("store/symsync-test-changed");
+        let elsewhere = t.dir("elsewhere/symsync-test-changed");
+        let claude = t.dir("home/.claude/skills");
+        let codex = t.dir("home/.codex/skills");
+        let moved = claude.join("symsync-test-changed");
+        let replaced = codex.join("symsync-test-changed");
+        t.link(&moved, &body);
+        t.link(&replaced, &body);
+
+        let sources = vec![source_at(&store, &["symsync-test-changed"])];
+        let targets = vec![
+            target_at("claude-code", &claude),
+            target_at("codex", &codex),
+        ];
+        let plan =
+            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
+        assert_eq!(plan.affected.len(), 2);
+        std::fs::remove_file(&moved).unwrap();
+        t.link(&moved, &elsewhere);
+        std::fs::remove_file(&replaced).unwrap();
+        std::fs::create_dir(&replaced).unwrap();
+
+        let r = delete_source(&plan);
+        assert_eq!(r.entries[0].outcome, Outcome::Removed);
+        for entry in &r.entries[1..] {
+            assert_eq!(
+                entry.outcome,
+                Outcome::Failed("不再是指向该原件的软链接，已跳过".into())
+            );
+        }
+        assert!(same_real(&moved, &elsewhere));
+        assert_eq!(entry_kind(&replaced), EntryKind::Dir);
     }
 
     #[test]

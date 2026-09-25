@@ -27,7 +27,10 @@ import { HINTS, useHint } from "./hints";
 import type { ConfirmAnchor } from "./ui";
 import {
   batchBusyText,
+  deletedOriginalToast,
+  deleteOriginalConfirm,
   keepThisConfirm,
+  originalInGitReason,
   splitConfirm,
   toastFor,
   type FailedItem,
@@ -76,6 +79,32 @@ interface KeepPane {
   relinked: number;
 }
 
+/// 删除原件的确认框（DESIGN「删除原件」）：点原件格、体检过、等用户拍板
+interface DeletePane {
+  ref: CellRef;
+  /// 按下那一刻那一格的位置：确认框与结果都锚在这里（删完这一行就没了，不能再去找格子）
+  anchor?: ConfirmAnchor;
+  planId: string;
+  /// 链接是改指到别处的同名原件（否则是一起清掉）
+  relink: boolean;
+  text: ReturnType<typeof deleteOriginalConfirm>;
+}
+
+/// 确认框里标题下的路径行（`留下` / `移到废纸篓` + 完整路径，不截断、太长就折行）与一句后果
+const confirmPaths = (text: { body: string; paths: { label: string; path: string }[] }) => (
+  <>
+    <div className="mx-keeppaths">
+      {text.paths.map((p) => (
+        <div key={p.label} className="mx-keeppaths__row">
+          <span className="mx-keeppaths__label">{p.label}</span>
+          <span className="mx-keeppaths__path">{p.path}</span>
+        </div>
+      ))}
+    </div>
+    <div className="mx-keeppaths__body">{text.body}</div>
+  </>
+);
+
 export interface SkillsTabProps {
   overview: Overview | null;
   /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身在来源管理页上管理）
@@ -99,6 +128,7 @@ export interface SkillsTabProps {
 ///   失败弹回，同一个位置出黑窗说原因
 /// - 批量：浮在被按下的键正下方，右对齐该键；动词与键一致，键上读数随之翻转
 /// - 只留这份：先出锚定确认；确认后直接删，结果浮在留下那一行下方（无撤销；没删掉同一个位置）
+/// - 原件格：先体检、出锚定确认（锚在那一格下）；确认后删原件，结果浮在那一格原来的位置下（无撤销）
 /// - 孤链（原件已不在的失效链接，照样成一行）：点格即清除、不确认；结果浮在那一格下（无撤销）
 /// - 整个文件夹是链接：点该列任一格出锚定确认（锚在那一格上），确认后拆开、重扫；没成那一格下说原因
 /// - 自动规则在背后做了事：右下（壳上那一叠）+ 撤销
@@ -152,6 +182,12 @@ export default function SkillsTab({
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: string } | null>(null);
   // 点了「只留这份」、正在体检的那一行（键原位忙碌）
   const [keepBusy, setKeepBusy] = useState<string | null>(null);
+  // 点了原件格、正在体检的那一格（过了 0.3 秒门槛那一格下方出忙碌指示 + 一句）
+  const [originBusy, setOriginBusy] = useState<{
+    rowKey: string;
+    columnId: string;
+    label: string;
+  } | null>(null);
   // 确认了「拆开」、正在拆的那一格（过了 0.3 秒门槛那一格下方出忙碌指示 + 一句）
   const [splitBusy, setSplitBusy] = useState<{
     rowKey: string;
@@ -173,10 +209,10 @@ export default function SkillsTab({
     node: ReactNode;
   } | null>(null);
   const cellToastSeq = useRef(0);
-  // 一行的结果（只留这份）：锚在按下那一刻「只留这份」的位置
+  // 一行的结果（只留这份、删原件）：锚在按下那一刻「只留这份」/ 那一格的位置
   const [rowToast, setRowToast] = useState<{
     rowKey: string;
-    at: ConfirmAnchor;
+    at?: ConfirmAnchor;
     node: ReactNode;
   } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
@@ -211,6 +247,8 @@ export default function SkillsTab({
   };
   // 同名两份「只留这份」的确认框：点了按钮、体检过、等用户拍板
   const [keepPane, setKeepPane] = useState<KeepPane | null>(null);
+  // 删除原件的确认框：点了原件格（锚在那一格下）
+  const [deletePane, setDeletePane] = useState<DeletePane | null>(null);
   // 「拆开」的确认框：点了整个文件夹是链接那一列的某一格（锚在那一格上）
   const [splitPane, setSplitPane] = useState<{
     ref: CellRef;
@@ -253,7 +291,8 @@ export default function SkillsTab({
     overview !== null &&
     (page === null || (page.rows.length === 0 && orphanRows(page).length === 0));
   // 让位：壳的错误横幅、确认框（只留这份、拆开、移除来源）开着
-  const hintBlocked = banner || keepPane !== null || splitPane !== null || sources.confirming;
+  const hintBlocked =
+    banner || keepPane !== null || deletePane !== null || splitPane !== null || sources.confirming;
   const skillsHint = useHint("first-scan-skills", {
     eligible: onPage && hasSkills,
     blocked: hintBlocked,
@@ -305,6 +344,7 @@ export default function SkillsTab({
   useEffect(() => {
     setManageOpen(false);
     setKeepPane(null);
+    setDeletePane(null);
     setSplitPane(null);
     setKeyToast(null);
     setCellToast(null);
@@ -571,6 +611,16 @@ export default function SkillsTab({
     else if (state === "readOnly") toggleCell(ref, "missing");
     // 整个文件夹是链接：先确认拆开（锚在被点的那一格上）
     else if (state === "wholeLinked") askSplit(ref);
+    // 原件：先体检、再确认删原件（锚在被点的那一格下）
+    else if (state === "own") void askDeleteOriginal(ref);
+  };
+
+  /// 那一格此刻在视口里的矩形（确认框、结果的锚）
+  const cellAnchorOf = (ref: CellRef): ConfirmAnchor | undefined => {
+    const index = page?.targets.findIndex((t) => t.id === ref.targetId) ?? -1;
+    const row = document.querySelector(`[data-row="${CSS.escape(skillRowKey(ref))}"]`);
+    const r = row?.querySelectorAll(".mx-cell")[index]?.getBoundingClientRect();
+    return r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined;
   };
 
   // ===== 整个文件夹是链接：点该列任一格 → 锚定确认 → 拆开 =====
@@ -579,13 +629,10 @@ export default function SkillsTab({
     // 这一列正在拆：同一个文件夹的下一次点击不再弹确认
     if (splitBusy?.columnId === ref.targetId) return;
     setCellNotice(null);
-    const index = page?.targets.findIndex((t) => t.id === ref.targetId) ?? -1;
-    const row = document.querySelector(`[data-row="${CSS.escape(skillRowKey(ref))}"]`);
-    const r = row?.querySelectorAll(".mx-cell")[index]?.getBoundingClientRect();
     setSplitPane({
       ref,
       agent: targetOf(ref.targetId)?.label ?? "",
-      anchor: r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined,
+      anchor: cellAnchorOf(ref),
     });
   };
 
@@ -758,6 +805,144 @@ export default function SkillsTab({
     }
     await onRefresh();
     setOptimisticFor(cells, null);
+  };
+
+  // ===== 原件格：删原件（DESIGN「删除原件」） =====
+  // 删用户的原件先确认（锚在那一格下）；确认后直接删、不挂起；结果是例行一行、不带撤销——
+  // 原件从废纸篓找回，确认框已说清；清掉或改指过的链接回不来
+
+  /// 点原件格：先体检（这一格过了 0.3 秒门槛才出忙碌），在 git 仓库里就格下说做不成、不弹确认框
+  const askDeleteOriginal = async (ref: CellRef) => {
+    const rowKey = skillRowKey(ref);
+    // 这一格正在体检：这一下不重复发
+    if (originBusy?.rowKey === rowKey && originBusy.columnId === ref.targetId) return;
+    setCellNotice(null);
+    setCellToast(null);
+    const anchor = cellAnchorOf(ref);
+    setOriginBusy({ rowKey, columnId: ref.targetId, label: "正在查看影响" });
+    let planned;
+    try {
+      planned = await api.planDeleteSource(ref.sourceId, ref.skill);
+    } catch (e) {
+      onError(String(e));
+      return;
+    } finally {
+      setOriginBusy((prev) =>
+        prev?.rowKey === rowKey && prev.columnId === ref.targetId ? null : prev,
+      );
+    }
+    const { plan } = planned;
+    if (plan.inGit !== null) {
+      setRowToast({
+        rowKey,
+        at: anchor,
+        node: (
+          <Toast
+            kind="cannot"
+            verb="没删掉"
+            names={[ref.skill]}
+            reason={originalInGitReason(plan.inGit)}
+            onDismiss={dismissRow}
+            onClose={dismissRow}
+          />
+        ),
+      });
+      return;
+    }
+    // 链接的后果：改指到哪个来源的那份；或一起清掉的链接在哪几个 agent 里（按链接所在目录认列）
+    const sources = overview?.sources ?? [];
+    const relinkId =
+      plan.relinkTo === null
+        ? undefined
+        : sources.find((s) => s.skills.some((k) => k.path === plan.relinkTo))?.id;
+    const relinkName =
+      relinkId === undefined
+        ? undefined
+        : originNames([...(page?.rows ?? []).map((r) => r.sourceId), relinkId], sources).get(
+            relinkId,
+          );
+    const allTargets = overview?.domains.flatMap((d) => d.targets) ?? [];
+    const agents = [
+      ...new Set(
+        plan.affected.flatMap((link) => {
+          const dir = link.path.replace(/[/\\][^/\\]*$/, "");
+          const label = allTargets.find((t) => t.path === dir)?.label;
+          return label ? [label] : [];
+        }),
+      ),
+    ];
+    setDeletePane({
+      ref,
+      anchor,
+      planId: planned.planId,
+      relink: plan.relinkTo !== null,
+      text: deleteOriginalConfirm({
+        skill: ref.skill,
+        path: plan.path,
+        links: plan.affected.length,
+        relinkTo:
+          plan.relinkTo === null ? undefined : relinkName ? originText(relinkName) : plan.relinkTo,
+        agents,
+      }),
+    });
+  };
+
+  /// 确认之后：这一行先藏起来、删完重扫再放开；结果浮在那一格原来的位置下
+  const confirmDeleteOriginal = async (pane: DeletePane) => {
+    setDeletePane(null);
+    const { ref } = pane;
+    const rowKey = skillRowKey(ref);
+    setHidden((prev) => new Set(prev).add(rowKey));
+    const cannot = (reason: string) => (
+      <Toast
+        kind="cannot"
+        verb="没删掉"
+        names={[ref.skill]}
+        reason={reason}
+        onDismiss={dismissRow}
+        onClose={dismissRow}
+      />
+    );
+    let node: ReactNode = null;
+    try {
+      let report: SyncReport | null = null;
+      try {
+        report = await api.deleteSource(pane.planId);
+      } catch {
+        // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删（仓库里的照旧不代删）
+        const again = await api.planDeleteSource(ref.sourceId, ref.skill);
+        if (again.plan.inGit !== null) node = cannot(originalInGitReason(again.plan.inGit));
+        else report = await api.deleteSource(again.planId);
+      }
+      if (report !== null) {
+        const [first, ...links] = report.entries;
+        const failed = links.filter((e) => e.outcome.status === "failed");
+        const bad = failed[0]?.outcome;
+        if (first?.outcome.status === "failed") node = cannot(first.outcome.reason);
+        else if (bad && bad.status === "failed")
+          // 原件已进废纸篓，但有链接没处理好：逐条上报的结果汇成一句，不偷偷跳过
+          node = (
+            <Toast
+              kind="partial"
+              verb="已删除"
+              names={[ref.skill]}
+              reason={`在废纸篓里，${failed.length} 条链接没${pane.relink ? "改指" : "清掉"}：${bad.reason}`}
+              onDismiss={dismissRow}
+              onClose={dismissRow}
+            />
+          );
+        else node = <Toast {...deletedOriginalToast(ref.skill)} onDismiss={dismissRow} />;
+      }
+    } catch (e) {
+      node = cannot(String(e));
+    }
+    await onRefresh();
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.delete(rowKey);
+      return next;
+    });
+    if (node !== null) setRowToast({ rowKey, at: pane.anchor, node });
   };
 
   // ===== 同名：只留这份 =====
@@ -1147,7 +1332,7 @@ export default function SkillsTab({
         keyToast={keyToast}
         cellToast={cellToast}
         keyBusy={keyBusy}
-        cellBusy={splitBusy}
+        cellBusy={splitBusy ?? originBusy}
         hint={
           <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss}>
             {HINTS["first-scan-skills"](hintCtx)}
@@ -1185,15 +1370,19 @@ export default function SkillsTab({
           anchor={keepPane.anchor}
         >
           {/* 标题下两行路径：决定删哪份的依据，不截断、太长就折行 */}
-          <div className="mx-keeppaths">
-            {keepConfirm.paths.map((p) => (
-              <div key={p.label} className="mx-keeppaths__row">
-                <span className="mx-keeppaths__label">{p.label}</span>
-                <span className="mx-keeppaths__path">{p.path}</span>
-              </div>
-            ))}
-          </div>
-          <div className="mx-keeppaths__body">{keepConfirm.body}</div>
+          {confirmPaths(keepConfirm)}
+        </Confirm>
+      ) : null}
+
+      {deletePane ? (
+        <Confirm
+          title={deletePane.text.title}
+          confirmLabel="删除"
+          onConfirm={() => void confirmDeleteOriginal(deletePane)}
+          onCancel={() => setDeletePane(null)}
+          anchor={deletePane.anchor}
+        >
+          {confirmPaths(deletePane.text)}
         </Confirm>
       ) : null}
 

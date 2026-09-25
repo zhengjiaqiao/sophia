@@ -355,14 +355,143 @@ fn batch_removes_what_it_can_and_says_why_for_the_rest() {
     assert_eq!(fs::read(&cursor).unwrap(), cursor_original);
 }
 
-/// 原件格被拒时说的话与前端 `src/cellTip.ts` 的 `MCP_OWN_TIP` 是同一句（DESIGN「文案语域」D24）：
-/// 去处写成在管理来源里移除这个来源（用户看到的是入口键「管理来源」，句子不说页名「来源管理页」）；文案语域是「无法 + 动词」
+/// 批量移除跳过原件时说的话与前端 `src/cellTip.ts` 的 `MCP_OWN_TIP` 是同一句（DESIGN「文案语域」、
+/// 「删除原件」）：原件格可删之后，去处写成点这一格；文案语域是「无法 + 动词」
 #[test]
 fn 原件格与拿不掉的说法_按_d24_写全() {
     assert_eq!(
         ORIGINAL_MESSAGE,
-        "这是原件所在的位置，从这里移除等于删掉原件 · 要移除，在管理来源里移除这个来源"
+        "这是原件所在的位置，批量移除不删它 · 要删掉，点这一格"
     );
     assert!(!ORIGINAL_MESSAGE.contains("来源管理页"));
     assert_eq!(CANNOT_CUT, "这一项的写法无法安全地单独拿掉，没有改动");
+}
+
+fn delete_original(locations: &[McpLocation], location: &str, name: &str) -> McpReport {
+    execute_removal(prepare_original_removal(locations, location, name))
+}
+
+/// 删原件（DESIGN「删除原件」）：只切掉这个位置里的这一项，其余字节原样；别的位置里的同名定义不动；
+/// 留撤销记录，撤销逐字节还原
+#[test]
+fn the_original_is_cut_out_of_its_own_location_and_can_be_undone() {
+    let tree = TempTree::new();
+    let copy = br#"{"mcpServers":{"docs":{"command":"docs","env":{"TOKEN":"abc"}}}}"#;
+    let (locations, target) = json_tree(&tree, copy);
+    let source = locations[0].path.clone();
+
+    let plan = prepare_original_removal(&locations, "source", "docs");
+    assert_eq!(plan.actions.len(), 1);
+    assert_eq!(plan.actions[0].source_id, "source");
+    assert_eq!(plan.actions[0].target_id, "source");
+    assert!(!plan.actions[0].identical);
+    let mut report = execute_removal(plan);
+    let entry = outcome(&report, "source", "docs");
+    assert_eq!(entry.outcome, "removed", "{}", entry.message);
+    assert_eq!(entry.identical, Some(false));
+    let backup = entry.backup_path.clone().expect("删前先备份");
+    assert_eq!(fs::read(backup).unwrap(), SOURCE_JSON);
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        br#"{"mcpServers":{"fmt":{"command":"fmt"}}}"#
+    );
+    // 别的 agent 里的同名定义不受影响
+    assert_eq!(fs::read(&target).unwrap(), copy);
+
+    let undo = report.take_undo().expect("删原件同样可撤销");
+    assert_eq!(undo_write(&undo).outcome, "undone");
+    assert_eq!(fs::read(&source).unwrap(), SOURCE_JSON);
+}
+
+#[test]
+fn the_original_in_toml_and_claude_local_keeps_the_rest_byte_for_byte() {
+    let tree = TempTree::new();
+    let codex = tree.root().join("config.toml");
+    let original =
+        "\u{feff}model = \"gpt-5\"\r\n\r\n[mcp_servers.docs]\r\ncommand = \"docs\"\r\n\r\n\
+        [mcp_servers.mine]\r\ncommand = \"mine\"";
+    fs::write(&codex, original).unwrap();
+    let claude = tree.root().join(".claude.json");
+    let shared = r#"{
+  "mcpServers": {"docs": {"command": "docs"}},
+  "projects": {"/p": {"mcpServers": {"docs": {"command": "local"}, "keep": {"command": "k"}}}}
+}
+"#;
+    fs::write(&claude, shared).unwrap();
+    let locations = vec![
+        loc("codex", "codex", &codex, None),
+        loc("user", "claude-code", &claude, None),
+        loc("local", "claude-code", &claude, Some("/p")),
+    ];
+
+    let report = delete_original(&locations, "codex", "docs");
+    assert_eq!(outcome(&report, "codex", "docs").outcome, "removed");
+    assert_eq!(
+        fs::read_to_string(&codex).unwrap(),
+        "\u{feff}model = \"gpt-5\"\r\n\r\n[mcp_servers.mine]\r\ncommand = \"mine\""
+    );
+
+    // Claude Local：只动这个项目作用域里的那一项，同一个文件里 User 的同名定义不动
+    let report = delete_original(&locations, "local", "docs");
+    assert_eq!(outcome(&report, "local", "docs").outcome, "removed");
+    assert_eq!(
+        fs::read_to_string(&claude).unwrap(),
+        r#"{
+  "mcpServers": {"docs": {"command": "docs"}},
+  "projects": {"/p": {"mcpServers": {"keep": {"command": "k"}}}}
+}
+"#
+    );
+}
+
+/// 拿不掉的写法、已经不在的、WeiboAP 里的、不存在的位置：如实拒绝，文件一个字节都不动
+#[test]
+fn deleting_an_original_refuses_honestly_and_touches_nothing() {
+    let tree = TempTree::new();
+    let inline = tree.root().join("inline.toml");
+    let inline_original =
+        "mcp_servers = { fmt = { command = \"fmt\" }, x = { command = \"x\" } }\n";
+    fs::write(&inline, inline_original).unwrap();
+    let weibo = tree.root().join("weibo.json");
+    fs::write(&weibo, br#"{"mcpServers":{"fmt":{"command":"fmt"}}}"#).unwrap();
+    let locations = vec![
+        loc("inline", "codex", &inline, None),
+        loc("weibo", "weiboap", &weibo, None),
+    ];
+    for (location, name, message) in [
+        ("inline", "fmt", CANNOT_CUT),
+        ("inline", "gone", "这里已经没有它了"),
+        ("weibo", "fmt", WEIBO_MESSAGE),
+        ("nowhere", "fmt", "这个位置已经不在了"),
+    ] {
+        let plan = prepare_original_removal(&locations, location, name);
+        assert!(plan.actions.is_empty());
+        let mut report = execute_removal(plan);
+        let entry = outcome(&report, location, name);
+        assert_eq!(entry.outcome, "skipped");
+        assert_eq!(entry.message, message);
+        assert!(report.take_undo().is_none());
+    }
+    assert_eq!(fs::read_to_string(&inline).unwrap(), inline_original);
+    assert_eq!(
+        fs::read(&weibo).unwrap(),
+        br#"{"mcpServers":{"fmt":{"command":"fmt"}}}"#
+    );
+}
+
+/// 体检之后文件被别的程序改过：执行时拒绝，不覆盖别人的改动
+#[test]
+fn deleting_an_original_refuses_when_the_file_changed_after_the_check() {
+    let tree = TempTree::new();
+    let (locations, _) = json_tree(&tree, b"{}");
+    let source = locations[0].path.clone();
+    let plan = prepare_original_removal(&locations, "source", "docs");
+    let edited = br#"{"mcpServers":{"docs":{"command":"docs"},"fmt":{"command":"fmt"}},"x":1}"#;
+    fs::write(&source, edited).unwrap();
+    let mut report = execute_removal(plan);
+    let entry = outcome(&report, "source", "docs");
+    assert_eq!(entry.outcome, "failed");
+    assert_eq!(entry.message, "配置在预览后发生变化");
+    assert!(report.take_undo().is_none());
+    assert_eq!(fs::read(&source).unwrap(), edited);
 }

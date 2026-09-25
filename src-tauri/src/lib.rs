@@ -404,7 +404,7 @@ fn apply_mcp(
 
 /// 从格子上移除 MCP 副本（可批量）：每项是 (行的来源＝原件, 服务名, 副本所在位置)。
 /// 判定与执行一次做完（格子是开关，没有预览这一步），拒绝的项以 `skipped` + 原因进报告；
-/// 撤销与写入共用 `mcp_undo_write`。原件那一格 core 拒绝
+/// 撤销与写入共用 `mcp_undo_write`。原件那一格 core 拒绝（删原件走 `delete_mcp_original`）
 #[tauri::command]
 fn remove_mcp_copies(
     selections: Vec<symsync_core::mcp::McpSelection>,
@@ -414,6 +414,24 @@ fn remove_mcp_copies(
     // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 apply_mcp）
     let _config_guard = state.config_lock.blocking_lock();
     let plan = symsync_core::mcp::prepare_removal(&discovery.locations, &selections);
+    let mut report = symsync_core::mcp::execute_removal(plan);
+    register_mcp_undo(&state, &mut report)?;
+    Ok(report)
+}
+
+/// 删掉 MCP 原件（点原件格、确认之后）：只删 `location_id` 这个位置里 `name` 的定义，
+/// 别的位置里的同名定义不动。与移除副本同一条安全通道，撤销同样走 `mcp_undo_write`
+#[tauri::command]
+fn delete_mcp_original(
+    location_id: String,
+    name: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<symsync_core::mcp::McpReport, String> {
+    let discovery = discover_mcp(&state)?;
+    // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 apply_mcp）
+    let _config_guard = state.config_lock.blocking_lock();
+    let plan =
+        symsync_core::mcp::prepare_original_removal(&discovery.locations, &location_id, &name);
     let mut report = symsync_core::mcp::execute_removal(plan);
     register_mcp_undo(&state, &mut report)?;
     Ok(report)
@@ -1137,6 +1155,7 @@ pub fn run() {
             propose_mcp_sync,
             apply_mcp,
             remove_mcp_copies,
+            delete_mcp_original,
             mcp_undo_write,
             propose_links,
             propose_unlinks,

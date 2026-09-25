@@ -246,7 +246,7 @@ const SKILL_DOT_TEXT: Record<Dot, string> = {
   missing: "未加上",
   own: "已加上 · 原件",
 };
-/// MCP 用词与格子提示框、原件格提示框同一套（`MCP_OWN_TIP`）：原件不说「已加上」
+/// MCP 用词与格子提示框同一套：原件不说「已加上」
 const MCP_DOT_TEXT: Record<Dot, string> = {
   ...DOT_LABEL,
   linked: "已写进 · 副本",

@@ -13,7 +13,7 @@ import { Tooltip } from "./Tooltip.tsx";
 ///
 /// 悬停光晕（DESIGN「格子悬停光晕」）：可点的点悬停 / 键盘聚焦时，**点本身一点不变**，
 /// 只在点的下层出一圈直径 22 的圆形 hairline 光晕，说「能点」，不预告结果（结果由提示框的动词说）。
-/// 原件 / 无此格 / 异常格点了不是开关，不出光晕。
+/// 原件点了是删原件（先确认），照常出光晕；无此格 / 异常格点了不是开关，不出光晕。
 
 export type Dot =
   "own" | "linked" | "missing" | "none" | "broken" | "readOnly" | "blocked" | "wholeLinked";
@@ -49,8 +49,8 @@ export interface StateDotProps {
   hoverable?: boolean;
 }
 
-/// 只有这两种点下去是开关，才出悬停光晕
-const TOGGLES = new Set<Dot>(["linked", "missing"]);
+/// 这两种点下去是开关，原件点下去是删原件（DESIGN「删除原件」）：出悬停光晕
+const TOGGLES = new Set<Dot>(["linked", "missing", "own"]);
 
 /// 10px 家族：外径 10，环 1.3（r 4.35）`ink-mute`（`.ss-dot__ring`）；实心、芯、斜线、箭头 `ink`（currentColor）
 const R10 = 4.35;

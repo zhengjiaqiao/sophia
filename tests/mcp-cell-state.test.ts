@@ -25,12 +25,9 @@ const entry = (sourceId: string, states: Record<string, McpCellState>): McpEntry
 const row = (...entries: McpEntry[]) => ({ name: "notion", entries });
 const labelOf = (id: string) => (id === "claude-code" ? "Claude Code" : "Codex");
 
-test("own：来源就写在这一列，画本体环，点了只说明它是来源", () => {
-  assert.deepEqual(viewOf("own", ctx), {
-    dot: "own",
-    clickable: false,
-    reason: "这份 notion 就写在 Codex 里，写到别处去的就是它",
-  });
+/// DESIGN「删除原件」（2026-09-25 取代「原件格不能点」）：点了是确认后删原件，可点的不带 reason
+test("own：来源就写在这一列，画本体环，可点（确认后删原件）", () => {
+  assert.deepEqual(viewOf("own", ctx), { dot: "own", clickable: true });
 });
 
 /// 这儿有一份副本（和来源连的是同一个服务 / 同一个地址）：实心、可点，点＝从这个位置移除。
@@ -67,14 +64,14 @@ test("unsupported：搬过去就不是原来那个了，画受阻记号（与 sk
   assert.equal(view.issue, undefined);
 });
 
-/// 这个映射存在的理由：原件与两种异常画出来都不可点，但说的不是同一件事。
+/// 这个映射存在的理由：两种异常画出来都不可点，但说的不是同一件事。
 /// 凭动作数组为空就统一说一句话，对它们全是错的
 test("不可点的几种各说各的，可点的那几种一句都不说", () => {
-  const states: McpDotState[] = ["own", "invalid", "unsupported"];
+  const states: McpDotState[] = ["invalid", "unsupported"];
   const reasons = states.map((state) => viewOf(state, ctx).reason ?? "");
   for (const reason of reasons) assert.ok(reason.length > 0);
   assert.equal(new Set(reasons).size, states.length, "每一种的文案必须各不相同");
-  for (const state of ["missing", "equal", "sameEndpoint"] as McpDotState[]) {
+  for (const state of ["own", "missing", "equal", "sameEndpoint"] as McpDotState[]) {
     assert.equal(viewOf(state, ctx).clickable, true);
     assert.equal(viewOf(state, ctx).reason, undefined);
   }
@@ -102,8 +99,7 @@ test("两处冲突：来源那一列画原件环，另一处是可移除的副�
   );
   assert.deepEqual(cellViewOf(conflicting, "claude-code", labelOf), {
     dot: "own",
-    clickable: false,
-    reason: "这份 notion 就写在 Claude Code 里，写到别处去的就是它",
+    clickable: true,
   });
   assert.deepEqual(cellViewOf(conflicting, "codex", labelOf), copyView());
   assert.deepEqual(differingSourceIds(conflicting, new Set(["claude-code", "codex"])), [
@@ -124,7 +120,7 @@ test("没有冲突的行不挂标记，缺的那一列照常可点", () => {
   assert.equal(cellViewOf(plain, "cursor", labelOf), null);
 });
 
-/// 只有行的来源那一列是原件（DESIGN「原件格不能点」）；别的列自己也有一份定义就是副本，
+/// 只有行的来源那一列是原件（DESIGN「删除原件」：点了是确认后删原件）；别的列自己也有一份定义就是副本，
 /// 不管它自己的条目带 own、还是别的来源看它是 equal / sameEndpoint——以前每一列自己的定义都算原件，
 /// 结果实心格一个都点不了
 test("原件与副本：只有行的来源那一列画原件环，其余有定义的列都是可移除的副本", () => {
@@ -138,7 +134,8 @@ test("原件与副本：只有行的来源那一列画原件环，其余有定�
     ),
   };
   assert.equal(cellViewOf(shared, "a", labels)?.dot, "own");
-  assert.equal(cellViewOf(shared, "a", labels)?.clickable, false);
+  // 原件格可点（确认后删原件），但不是副本：不进批量移除
+  assert.deepEqual(cellViewOf(shared, "a", labels), { dot: "own", clickable: true });
   for (const id of ["b", "c"]) assert.deepEqual(cellViewOf(shared, id, labels), copyView());
   // 还没有的那一列照常可写，不是副本
   assert.deepEqual(cellViewOf(shared, "d", labels), { dot: "missing", clickable: true });
@@ -154,7 +151,7 @@ test("原件与副本：只剩别处来源（订阅进来的）时，本域里�
   assert.equal(cellViewOf(foreign, "b", labelOf)?.dot, "missing");
 });
 
-test("原件与副本：来源那一列哪怕只剩 conflict，也照原件画、不给点", () => {
+test("原件与副本：来源那一列哪怕只剩 conflict，也照原件画（点了是删原件）", () => {
   const onlyConflict = row(entry("claude-code", { "claude-code": "own", codex: "conflict" }));
   assert.equal(cellViewOf(onlyConflict, "claude-code", labelOf)?.dot, "own");
   // codex 自己的条目不在这一行里，但 conflict 说明它那儿有一份：照样是副本

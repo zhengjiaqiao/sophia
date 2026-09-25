@@ -162,3 +162,73 @@ test("拆开成功：例行一行 `拆开 [Codex] 的 skills 文件夹`，走 ro
     "没拆开",
   );
 });
+
+// ---- 删除原件（DESIGN「删除原件」，2026-09-25） ----
+
+test("删除 skill 原件的确认框：标题一问，正文写废纸篓与链接后果，路径行主目录写 ~", async () => {
+  const { deleteOriginalConfirm } = await import("../src/toastText.ts");
+  const { setHome } = await import("../src/pathText.ts");
+  setHome("/Users/jia");
+  const base = { skill: "defuddle", path: "/Users/jia/.agents/skills/defuddle", agents: [] };
+  const relink = deleteOriginalConfirm({ ...base, links: 3, relinkTo: "通用仓库" });
+  assert.equal(relink.title, "删除 defuddle 的原件？");
+  assert.equal(relink.body, "移到废纸篓，可以从访达找回；3 条链接改指到 通用仓库 的那份");
+  assert.deepEqual(relink.paths, [{ label: "移到废纸篓", path: "~/.agents/skills/defuddle" }]);
+  // 别处没有同名原件：链接一起清掉，写出在哪几个 agent 里
+  assert.equal(
+    deleteOriginalConfirm({ ...base, links: 3, agents: ["Claude Code", "Cursor"] }).body,
+    "移到废纸篓，可以从访达找回；Claude Code、Cursor 里的 3 条链接一起清掉",
+  );
+  // 没有链接不写后半句
+  assert.equal(deleteOriginalConfirm({ ...base, links: 0 }).body, "移到废纸篓，可以从访达找回");
+  setHome(null);
+});
+
+test("删除 skill 原件：git 仓库里的不代删，删完例行一行不带撤销", async () => {
+  const { originalInGitReason, deletedOriginalToast } = await import("../src/toastText.ts");
+  const { setHome } = await import("../src/pathText.ts");
+  setHome("/Users/jia");
+  assert.equal(
+    originalInGitReason("/Users/jia/x"),
+    "它在 git 仓库 ~/x 里，交给 git 处理更稳妥，这里不代删",
+  );
+  setHome(null);
+  const t = deletedOriginalToast("defuddle");
+  assert.equal(t.tier, "routine");
+  assert.equal(t.kind, "success");
+  assert.equal(t.verb, "已删除");
+  assert.deepEqual(t.names, ["defuddle"]);
+  assert.equal(t.reason, "在废纸篓里");
+});
+
+test("删除 MCP 原件的确认框：别的 agent 里的同名定义不受影响；Claude Local 路径后接项目名", async () => {
+  const { deleteMcpOriginalConfirm, deletedMcpOriginalToast } = await import("../src/toastText.ts");
+  const { setHome } = await import("../src/pathText.ts");
+  setHome("/Users/jia");
+  const codexDel = deleteMcpOriginalConfirm({
+    agent: "Codex",
+    name: "weibo-search",
+    others: ["Claude Code"],
+    path: "/Users/jia/.codex/config.toml",
+  });
+  assert.equal(codexDel.title, "从 Codex 删除 weibo-search？");
+  assert.equal(codexDel.body, "删掉 Codex 配置里的这份定义，Claude Code 里的那份不受影响");
+  assert.deepEqual(codexDel.paths, [{ label: "配置", path: "~/.codex/config.toml" }]);
+  const local = deleteMcpOriginalConfirm({
+    agent: "Claude Code local",
+    name: "weibo-search",
+    others: [],
+    path: "/Users/jia/.claude.json",
+    project: "CardBox",
+  });
+  assert.equal(local.body, "删掉 Claude Code local 配置里的这份定义");
+  assert.deepEqual(local.paths, [{ label: "配置", path: "~/.claude.json · CardBox" }]);
+  setHome(null);
+  // 删完：`✓ 已从 [Codex] 删除 weibo-search`（撤销由调用方给）
+  const t = deletedMcpOriginalToast("weibo-search", codex);
+  assert.equal(t.tier, "routine");
+  assert.equal(t.verb, "已从");
+  assert.equal(t.verbTail, "删除");
+  assert.deepEqual(t.names, ["weibo-search"]);
+  assert.deepEqual(t.agents, [codex]);
+});

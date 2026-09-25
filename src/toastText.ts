@@ -204,6 +204,84 @@ export function keepThisConfirm(input: {
   };
 }
 
+/// 删除 skill 原件的确认框（DESIGN「删除原件」）：标题一问；正文说进废纸篓、能找回，再接链接的后果——
+/// 别处有同名原件时 `；3 条链接改指到 通用仓库 的那份`（`relinkTo` 是那一份的来源名），没有时
+/// `；Claude Code、Cursor 里的 3 条链接一起清掉`，没有链接不写。`paths` 一行：`移到废纸篓` + 完整路径
+/// （主目录写 `~`，不截断），与「只留这份」同一种路径行
+export function deleteOriginalConfirm(input: {
+  skill: string;
+  path: string;
+  /// 指向它的链接条数
+  links: number;
+  /// 别处同名原件的来源名；没有就是链接一起清掉
+  relinkTo?: string;
+  /// 这些链接所在的 agent（去重、保序）；链接一起清掉时写进后果句
+  agents: string[];
+}): { title: string; body: string; paths: { label: string; path: string }[] } {
+  const where = input.agents.length > 0 ? `${input.agents.join("、")} 里的 ` : "";
+  const links =
+    input.links === 0
+      ? ""
+      : input.relinkTo !== undefined
+        ? `；${input.links} 条链接改指到 ${input.relinkTo} 的那份`
+        : `；${where}${input.links} 条链接一起清掉`;
+  return {
+    title: `删除 ${input.skill} 的原件？`,
+    body: `移到废纸篓，可以从访达找回${links}`,
+    paths: [{ label: "移到废纸篓", path: displayPath(input.path) }],
+  };
+}
+
+/// 原件在 git 仓库里：不弹确认框，格下直接说做不成（`没删掉 defuddle · 它在 git 仓库 ~/x 里，…`）
+export function originalInGitReason(repo: string): string {
+  return `它在 git 仓库 ${displayPath(repo)} 里，交给 git 处理更稳妥，这里不代删`;
+}
+
+/// 删完 skill 原件的例行一行：`✓ 已删除 defuddle · 在废纸篓里`。不带撤销——从废纸篓找回，确认框已说清
+export function deletedOriginalToast(skill: string): ToastText {
+  return {
+    tier: "routine",
+    kind: "success",
+    verb: "已删除",
+    names: [skill],
+    agents: [],
+    reason: "在废纸篓里",
+  };
+}
+
+/// 删除 MCP 原件的确认框（DESIGN「删除原件」）：标题 `从 Codex 删除 weibo-search？`；正文
+/// `删掉 Codex 配置里的这份定义`，这个位置别的 agent 里还有同名定义时接 `，Claude Code 里的那份不受影响`；
+/// `paths` 一行：`配置` + 配置文件路径，Claude Local 后接项目名（`~/.claude.json · CardBox`）
+export function deleteMcpOriginalConfirm(input: {
+  agent: string;
+  name: string;
+  /// 这个位置里还有同名定义的别的 agent（去重、保序）
+  others: string[];
+  path: string;
+  /// 同一个文件里分项目存放的（Claude Local）：项目名
+  project?: string;
+}): { title: string; body: string; paths: { label: string; path: string }[] } {
+  const others = input.others.length > 0 ? `，${input.others.join("、")} 里的那份不受影响` : "";
+  const path = displayPath(input.path) + (input.project ? ` · ${input.project}` : "");
+  return {
+    title: `从 ${input.agent} 删除 ${input.name}？`,
+    body: `删掉 ${input.agent} 配置里的这份定义${others}`,
+    paths: [{ label: "配置", path }],
+  };
+}
+
+/// 删完 MCP 原件的例行一行：`✓ 已从 [Codex] 删除 weibo-search`（调用方另给 `撤销`）
+export function deletedMcpOriginalToast(name: string, agent?: ToastAgentRef): ToastText {
+  return {
+    tier: "routine",
+    kind: "success",
+    verb: "已从",
+    verbTail: "删除",
+    names: [name],
+    agents: agent ? [agent] : [],
+  };
+}
+
 /// 「拆开」确认框（DESIGN「没有收件箱、待处理页和「忽略」」表：整个文件夹是链接，点该列任一格）：
 /// 标题问拆哪个 agent 的文件夹，正文说后果
 export function splitConfirm(agent: string): { title: string; body: string } {

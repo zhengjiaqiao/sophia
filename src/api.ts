@@ -118,6 +118,10 @@ export const api = {
   /// 撤销（`undoId`）交给 `mcpUndoWrite`
   removeMcpCopies: (selections: McpSelection[]) =>
     invoke<McpReport>("remove_mcp_copies", { selections }),
+  /// 删掉 MCP 原件：只删这个位置（locationId）里 name 的定义，别处的同名定义不动。
+  /// 拿不掉的以 skipped + 原因回来；撤销（`undoId`）同样交给 `mcpUndoWrite`
+  deleteMcpOriginal: (locationId: string, name: string) =>
+    invoke<McpReport>("delete_mcp_original", { locationId, name }),
   /// 撤销一次 MCP 写入；id 不存在或已过期时 reject「撤销记录不存在或已过期」
   mcpUndoWrite: (undoId: string) => invoke<McpUndoReport>("mcp_undo_write", { undoId }),
   setMcpAutoImport: (

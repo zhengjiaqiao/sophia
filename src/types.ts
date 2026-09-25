@@ -129,7 +129,7 @@ export interface DeleteSourcePlan {
   affected: AffectedLink[];
   /// 所在 git 仓库的根；null 表示不在仓库里。非 null 时一律不代删
   inGit: string | null;
-  /// 别处同名的另一个本体；删完把 affected 改指到它。null 表示没有别处可指
+  /// 别处同名的另一个本体；删完把 affected 改指到它。null 表示没有别处可指——affected 一起清掉
   relinkTo: string | null;
   /// 目录里普通文件最新的修改时间（Unix 毫秒）；没有文件或读不到时为 null
   modified?: number | null;

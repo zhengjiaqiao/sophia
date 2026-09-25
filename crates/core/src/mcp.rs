@@ -20,7 +20,8 @@ pub mod sources;
 mod weiboap;
 
 pub use removal::{
-    execute_removal, prepare_removal, McpRemovalPlan, McpRemoveAction, ORIGINAL_MESSAGE,
+    execute_removal, prepare_original_removal, prepare_removal, McpRemovalPlan, McpRemoveAction,
+    ORIGINAL_MESSAGE,
 };
 
 const SUPPORTED: [&str; 3] = ["claude-code", "codex", "cursor"];

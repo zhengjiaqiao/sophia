@@ -118,19 +118,21 @@ export interface DomainViewProps {
 }
 
 /// 提示框里的动词：格子只写「动词 · 快捷键」，动词带方向（`加到 Claude Code` / `从 Claude Code 移除`）——
-/// 「开启 Claude Code」会读成操作应用本身（DESIGN 冲突表）
+/// 「开启 Claude Code」会读成操作应用本身（DESIGN 冲突表）。原件格 `删除原件…`：`…` 表示还要确认一步
 const verbOf = (state: CellState, agent: string): string | undefined =>
-  state === "linked"
-    ? `从 ${agent} 移除`
-    : state === "missing"
-      ? `加到 ${agent}`
-      : state === "broken"
-        ? "链接失效，原件还在 · 点一下重新链接"
-        : state === "readOnly"
-          ? `无法写入 ${agent} 的 skills 目录 · 点一下再试一次`
-          : state === "wholeLinked"
-            ? `${agent} 的 skills 文件夹整个是链接 · 点一下拆开`
-            : undefined;
+  state === "own"
+    ? "删除原件…"
+    : state === "linked"
+      ? `从 ${agent} 移除`
+      : state === "missing"
+        ? `加到 ${agent}`
+        : state === "broken"
+          ? "链接失效，原件还在 · 点一下重新链接"
+          : state === "readOnly"
+            ? `无法写入 ${agent} 的 skills 目录 · 点一下再试一次`
+            : state === "wholeLinked"
+              ? `${agent} 的 skills 文件夹整个是链接 · 点一下拆开`
+              : undefined;
 
 /// 按 agent 那一项的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、无法写入的注明不受影响
 export function affectedTip(
