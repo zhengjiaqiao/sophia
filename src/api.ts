@@ -20,6 +20,7 @@ import type {
   McpPreview,
   McpReport,
   McpUndoReport,
+  McpRemoveItem,
   McpSelection,
   McpDiff,
   McpEndpoint,
@@ -50,8 +51,14 @@ export const api = {
     invoke<PlannedDeletion>("plan_delete_source", { sourceId, skill }),
   /// 执行用户已确认的删除计划；planId 用后即弃，不能重放
   /// `inGitConfirmed`：删原件的确认框已写明原件在 git 仓库里、用户仍确认了（只留这份不传，仓库里的不代删）
+  /// 结果带撤销 id：原件挪进了暂存处才有（跨磁盘退回直接进废纸篓时为 null）
   deleteSource: (planId: string, inGitConfirmed = false) =>
-    invoke<SyncReport>("delete_source", { planId, inGitConfirmed }),
+    invoke<{ report: SyncReport; undoId: string | null }>("delete_source", {
+      planId,
+      inGitConfirmed,
+    }),
+  /// 撤销最近一次删原件：原件放回原处、链接复原；过期（又删了别的、重开过）时报错
+  undoDeleteSource: (undoId: string) => invoke<SyncReport>("undo_delete_source", { undoId }),
   /// 来源管理页：这个位置（DomainPage.key）已订阅的来源与 `+ 来源` 的两组候选。只读
   listSources: (domain: string) => invoke<SourceList>("list_sources", { domain }),
   /// 在这个位置订阅一个来源（候选的 path，或用户选的文件夹）；只记订阅，不建链
@@ -115,15 +122,10 @@ export const api = {
     invoke<McpPreview>("propose_mcp_sync", { selections }),
   applyMcp: (planId: string, allowCrossDomain: boolean) =>
     invoke<McpReport>("apply_mcp", { planId, allowCrossDomain }),
-  /// 从格子上移除 MCP 副本（可批量）：`sourceId` 是行的来源（原件），`targetId` 是副本所在位置。
-  /// 原件那一格、单独拿不掉的写法等以 `skipped` + 原因返回；成功的条目带 `identical`，
-  /// 撤销（`undoId`）交给 `mcpUndoWrite`
-  removeMcpCopies: (selections: McpSelection[]) =>
-    invoke<McpReport>("remove_mcp_copies", { selections }),
-  /// 删掉 MCP 原件：只删这个位置（locationId）里 name 的定义，别处的同名定义不动。
-  /// 拿不掉的以 skipped + 原因回来；撤销（`undoId`）同样交给 `mcpUndoWrite`
-  deleteMcpOriginal: (locationId: string, name: string) =>
-    invoke<McpReport>("delete_mcp_original", { locationId, name }),
+  /// 从 agent 的配置里删掉 MCP 定义（单格或批量）：每项只删那个位置（locationId）里 name 的定义，
+  /// 别处的同名定义不动。拿不掉的以 skipped + 原因回来；一批一个撤销（`undoId`），交给 `mcpUndoWrite`
+  deleteMcpOriginal: (items: McpRemoveItem[]) =>
+    invoke<McpReport>("delete_mcp_original", { items }),
   /// 撤销一次 MCP 写入；id 不存在或已过期时 reject「撤销记录不存在或已过期」
   mcpUndoWrite: (undoId: string) => invoke<McpUndoReport>("mcp_undo_write", { undoId }),
   setMcpAutoImport: (

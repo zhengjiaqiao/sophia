@@ -565,7 +565,6 @@ fn entry(
         outcome: outcome.into(),
         message: message.into(),
         backup_path,
-        identical: None,
     }
 }
 

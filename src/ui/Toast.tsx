@@ -10,9 +10,9 @@ import { IconAttention, IconCannot, IconClose, IconTick } from "./icons.tsx";
 /// **浮起的小窗只表示一件事：会自己消失。** 两档，严重程度决定打断程度（①）：
 /// - `routine` 成功：纸窗（`paper` + 1px `hairline` 边 + `float` 12 圆角 + 浮层投影），单行高 32：
 ///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是默认键紧凑 24；句首 ✓ 是勾选框里同一枚对勾 `IconTick`）
-/// - `notice` 做不成 / 部分失败：**墨窗**（`ink` 实心、无边、浮层投影），
-///   左侧 40px 指示窗放 ✓ / ⊘ / !；动作是浅描边键。
-///   成功是纸、需要注意是墨：不给 `tier` 时按 `kind` 取（成功纸窗、其余墨窗）
+/// - `notice` 做不成 / 部分失败：同一种纸窗，左侧 40px 记号栏放 ✓ / ⊘ / !；动作是默认键紧凑。
+///   墨色浮窗只给提示框（2026-09-25 起）：失败与成功靠句首记号与否定动词分，不靠颜色。
+///   不给 `tier` 时按 `kind` 取（成功单行纸窗、其余带记号栏）
 ///
 /// 文字一律 13（`caption`）：动词 600、名字 400、数字 12 tabular——比表格正文 15 低一档，
 /// 反馈永远不比它说的内容更重（②）。主行 = **动词 + agent 图标 + 名字**；动词与触发它的动作一致，
@@ -58,7 +58,7 @@ export interface ToastAction {
 }
 
 export interface ToastProps {
-  /// 不给按 kind 取：成功 routine（纸窗），其余 notice（墨窗）
+  /// 不给按 kind 取：成功 routine（单行纸窗），其余 notice（带记号栏的纸窗）
   tier?: "notice" | "routine";
   /// routine 只有 success
   kind: ToastKind;
@@ -69,7 +69,7 @@ export interface ToastProps {
   message?: ReactNode;
   /// 动词后半截，写在 agent 图标之后（带方向的「从 [图标] 移除 名字」）；只有一截动词时不给
   verbTail?: string;
-  /// agent 图标组（墨窗上 `face`、纸窗上 `ink`，随档）。图标自带读屏名
+  /// agent 图标组（`ink`）。图标自带读屏名
   agents?: ToastAgent[];
   /// 动词与名字之间的其他记号（删原件那个白色小方块）
   icons?: ReactNode;
@@ -81,11 +81,11 @@ export interface ToastProps {
   tally?: { done: number; failed: number };
   /// 做不成 / 部分失败的一句能行动的原因，接在主行 ` · ` 后
   reason?: string;
-  /// 副行：等宽 12 读数（路径、条数；纸窗 `ink-faint`、墨窗 `ctl-border`），可拖选
+  /// 副行：等宽 12 读数（路径、条数，`ink-faint`），可拖选
   stats?: string;
   /// 副行之下的展开内容（删原件的后果示意图与铭牌）；只给 notice
   detail?: ReactNode;
-  /// notice：浅描边紧凑键；routine：默认键紧凑 24。`撤销`
+  /// 默认键紧凑 24。`撤销`
   action?: ToastAction;
   /// 次要的离开 Sophia 的动作：浅键，末尾自动带 ↗（`在访达中显示备份`）
   secondary?: ToastAction;
@@ -274,14 +274,12 @@ export function Toast(props: ToastProps) {
             <span className="ss-toast__actions">
               {action ? (
                 <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
-                  <Button size="compact" onDark onClick={action.onClick}>
+                  <Button size="compact" onClick={action.onClick}>
                     {action.label}
                   </Button>
                 </BusySlot>
               ) : null}
-              {onClose ? (
-                <IconButton icon={<IconClose />} title="关闭" onDark onClick={onClose} />
-              ) : null}
+              {onClose ? <IconButton icon={<IconClose />} title="关闭" onClick={onClose} /> : null}
             </span>
           ) : null}
         </div>

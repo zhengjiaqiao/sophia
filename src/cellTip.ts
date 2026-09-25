@@ -19,7 +19,3 @@ export function blockedTipOf(
       : `${agent} 里已有一个同名的 ${skill}，不是这一份`;
   return fallback;
 }
-
-/// MCP 的原件：批量移除（选择行）不删它，被跳过时说这一句；要删就点那一格（DESIGN「删除原件」）。
-/// 与 core `mcp::removal::ORIGINAL_MESSAGE` 同一句：批量移除碰到原件、core 跳过时说的也是它
-export const MCP_OWN_TIP = "这是原件所在的位置，批量移除不删它 · 要删掉，点这一格";

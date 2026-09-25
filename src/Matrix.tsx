@@ -187,7 +187,7 @@ export interface MatrixProps {
   nameTip?: string;
   /// 名称列头后的总数（`名称 58`）：随当前筛选
   nameCount?: number;
-  /// 读屏词用哪一套：skill 的「已加上 · 软链」，或 MCP 的「已写进 · 副本」（两边 linked 不是同一件事）
+  /// 读屏词与选择行全有的画法用哪一套：skill 的「已加上 · 软链」●，或 MCP 的「已写进」⦿
   dotWords?: "skill" | "mcp";
 
   filterText: string;
@@ -238,20 +238,19 @@ export interface MatrixProps {
 
 /// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着）；受阻统称「受阻」（D22）、
 /// 写失败说「无法写入」（D24）——这两个就是 ui 的 `DOT_LABEL`，不在这里另写一份。
-/// skill 与 MCP 共用 `DOT_LABEL`，但 `linked`（这儿有一份）在两边不是同一件事——
-/// skill 是一条软链，MCP 是一份独立配置副本（DESIGN「MCP 格子同样是开关」）：读屏词不能说反
+/// skill 与 MCP 共用 `DOT_LABEL`，但「有」在两边不是同一件事——skill 分软链 ● 与原件 ⦿，
+/// MCP 只有 ⦿（一份独立定义，DESIGN「MCP 格子只有两种」）：读屏词不能说反
 const SKILL_DOT_TEXT: Record<Dot, string> = {
   ...DOT_LABEL,
   linked: "已加上 · 软链",
   missing: "未加上",
   own: "已加上 · 原件",
 };
-/// MCP 用词与格子提示框同一套：原件不说「已加上」
+/// MCP 用词与格子提示框同一套：格子只有 ⦿ 有、○ 没有（DESIGN「MCP 格子只有两种」），不分原件副本
 const MCP_DOT_TEXT: Record<Dot, string> = {
   ...DOT_LABEL,
-  linked: "已写进 · 副本",
   missing: "未加上",
-  own: "原件",
+  own: "已写进",
 };
 
 /// 键盘焦点所在的列：`NAME_COL`（-1）是名字（行本身：空格加选、回车拉开抽屉），0 起是 agent 列的格
@@ -384,15 +383,18 @@ export function LocationActions({
   );
 }
 
-/// 选择行里的一点：10px 状态点（● / ○），与格子同形、同列、同行为。悬停时点不变、下层出光晕
+/// 选择行里的一点：10px 状态点（● / ○；MCP 全有时画 ⦿，同它的格子），与格子同形、同列、同行为。悬停时点不变、下层出光晕
 /// （选择行底已是 surface，光晕用 track，见 Matrix.css）；提示框列受影响的名字；
 /// 没有可改的格子时点 `ink-faint`、不出光晕，按下即说原因
 function SelDot({
   check,
+  on,
   locked = false,
   busy = false,
 }: {
   check: ColumnCheck;
+  /// 全有（打勾）时画成哪一种：skill 是 ●，MCP 是 ⦿（DESIGN「MCP 格子只有两种」）
+  on: Dot;
   /// 批量写入进行中：点不动（键盘的空格 / 回车也不行）
   locked?: boolean;
   /// 过了 0.3 秒门槛：点原位换成 14 宽刻度
@@ -411,7 +413,7 @@ function SelDot({
         <Spinner size={14} label={check.label} />
       ) : (
         <StateDot
-          dot={check.checked ? "linked" : "missing"}
+          dot={check.checked ? on : "missing"}
           hoverable={!disabled}
           muted={disabled}
           title=""
@@ -908,6 +910,7 @@ export default function Matrix(props: MatrixProps) {
               <span className={lockOf("all")}>
                 <SelDot
                   check={allAgents}
+                  on={dotWords === "mcp" ? "own" : "linked"}
                   locked={busyKey === "all"}
                   busy={busyShown && busyKey === "all"}
                 />
@@ -923,6 +926,7 @@ export default function Matrix(props: MatrixProps) {
               <span className={lockOf(col.id)}>
                 <SelDot
                   check={columnChecks[col.id]}
+                  on={dotWords === "mcp" ? "own" : "linked"}
                   locked={busyKey === col.id}
                   busy={busyShown && busyKey === col.id}
                 />

@@ -160,11 +160,6 @@ fn codex_and_claude_round_trip_with_the_rest_byte_identical() {
             "{source} → {target}"
         );
     }
-
-    // 副本与原版一致：格子上移除时不给撤销
-    let removal = prepare_removal(&locations, &[sel("codex", "search", "claude")]);
-    assert!(removal.issues.is_empty(), "{:?}", removal.issues);
-    assert!(removal.actions[0].identical);
 }
 
 #[test]

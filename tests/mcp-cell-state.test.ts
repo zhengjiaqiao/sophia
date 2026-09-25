@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  copyView,
   differentCopiesMessage,
   differentCopiesTag,
   differentCopiesTitle,
+  presentView,
   viewOf,
   type McpDotState,
 } from "../src/mcpCellState.ts";
-import { cellViewOf, differingSourceIds, mcpUndoShown } from "../src/mcpView.ts";
-import type { McpCellState, McpEntry, McpReportEntry } from "../src/types.ts";
+import { cellViewOf, differingSourceIds } from "../src/mcpView.ts";
+import type { McpCellState, McpEntry } from "../src/types.ts";
 
 const ctx = { service: "notion", location: "Codex", source: "Claude Code" };
 
@@ -25,17 +25,13 @@ const entry = (sourceId: string, states: Record<string, McpCellState>): McpEntry
 const row = (...entries: McpEntry[]) => ({ name: "notion", entries });
 const labelOf = (id: string) => (id === "claude-code" ? "Claude Code" : "Codex");
 
-/// DESIGN「删除原件」（2026-09-25 取代「原件格不能点」）：点了是确认后删原件，可点的不带 reason
-test("own：来源就写在这一列，画本体环，可点（确认后删原件）", () => {
-  assert.deepEqual(viewOf("own", ctx), { dot: "own", clickable: true });
-});
-
-/// 这儿有一份副本（和来源连的是同一个服务 / 同一个地址）：实心、可点，点＝从这个位置移除。
-/// 可点的不带 reason（§8.1）：移除之后那一句由调用方汇总
-test("equal / sameEndpoint：实心副本，可点（移除），不自带文案", () => {
-  assert.deepEqual(viewOf("equal", ctx), { dot: "linked", clickable: true, copy: true });
-  assert.deepEqual(viewOf("sameEndpoint", ctx), { dot: "linked", clickable: true, copy: true });
-  assert.deepEqual(copyView(), { dot: "linked", clickable: true, copy: true });
+/// DESIGN「MCP 格子只有两种：⦿ 有、○ 没有」（2026-09-25）：这一列的配置里有这一项就是 ⦿，
+/// 不管它是不是本行的来源、和来源一样不一样；可点（确认后从这个 agent 删掉），不带 reason（§8.1）
+test("own / equal / sameEndpoint：都是 ⦿，可点（确认后删掉），不自带文案，没有「副本」之分", () => {
+  for (const state of ["own", "equal", "sameEndpoint"] as McpDotState[]) {
+    assert.deepEqual(viewOf(state, ctx), { dot: "own", clickable: true }, state);
+  }
+  assert.deepEqual(presentView(), { dot: "own", clickable: true });
 });
 
 /// §8.1：可点的那种不带 reason——成功句由调用方汇总，一次操作只出一句
@@ -91,17 +87,14 @@ test("conflict 做成行级标记，说清是同一对而不是各自又多出�
 });
 
 /// 两个位置各有一份同名但地址不同的配置：scan 为每个位置各建一条条目。合成一行后
-/// 只有行的来源（第一份）画原件环，另一处是副本（能移除）；差异挂在行上（AC4）
-test("两处冲突：来源那一列画原件环，另一处是可移除的副本，行上有一个标记，格里没有第四种形", () => {
+/// 两处都是 ⦿（都能确认后删掉）；差异挂在行上（AC4）
+test("两处冲突：两列都画 ⦿，行上有一个标记，格里没有第四种形", () => {
   const conflicting = row(
     entry("claude-code", { "claude-code": "own", codex: "conflict" }),
     entry("codex", { "claude-code": "conflict", codex: "own" }),
   );
-  assert.deepEqual(cellViewOf(conflicting, "claude-code", labelOf), {
-    dot: "own",
-    clickable: true,
-  });
-  assert.deepEqual(cellViewOf(conflicting, "codex", labelOf), copyView());
+  assert.deepEqual(cellViewOf(conflicting, "claude-code", labelOf), presentView());
+  assert.deepEqual(cellViewOf(conflicting, "codex", labelOf), presentView());
   assert.deepEqual(differingSourceIds(conflicting, new Set(["claude-code", "codex"])), [
     "claude-code",
     "codex",
@@ -120,10 +113,9 @@ test("没有冲突的行不挂标记，缺的那一列照常可点", () => {
   assert.equal(cellViewOf(plain, "cursor", labelOf), null);
 });
 
-/// 只有行的来源那一列是原件（DESIGN「删除原件」：点了是确认后删原件）；别的列自己也有一份定义就是副本，
-/// 不管它自己的条目带 own、还是别的来源看它是 equal / sameEndpoint——以前每一列自己的定义都算原件，
-/// 结果实心格一个都点不了
-test("原件与副本：只有行的来源那一列画原件环，其余有定义的列都是可移除的副本", () => {
+/// 有 ＝ ⦿、没有 ＝ ○（DESIGN「MCP 格子只有两种」）：不管这一列自己的条目带 own、
+/// 还是别的来源看它是 equal / sameEndpoint，都是同一种可点的 ⦿；还没有的那一列是可写的 ○
+test("有就是 ⦿、没有就是 ○：来源那一列与别的有定义的列画法、行为都一样", () => {
   const labels = (id: string) =>
     ({ a: "Claude Code", b: "Codex", c: "Cursor", d: "Gemini" })[id] ?? id;
   const shared = {
@@ -133,62 +125,28 @@ test("原件与副本：只有行的来源那一列画原件环，其余有定�
       entry("c", { a: "sameEndpoint", b: "sameEndpoint", c: "own", d: "missing" }),
     ),
   };
-  assert.equal(cellViewOf(shared, "a", labels)?.dot, "own");
-  // 原件格可点（确认后删原件），但不是副本：不进批量移除
-  assert.deepEqual(cellViewOf(shared, "a", labels), { dot: "own", clickable: true });
-  for (const id of ["b", "c"]) assert.deepEqual(cellViewOf(shared, id, labels), copyView());
-  // 还没有的那一列照常可写，不是副本
+  for (const id of ["a", "b", "c"]) {
+    assert.deepEqual(cellViewOf(shared, id, labels), { dot: "own", clickable: true }, id);
+  }
+  // 还没有的那一列：○，点了写进
   assert.deepEqual(cellViewOf(shared, "d", labels), { dot: "missing", clickable: true });
 });
 
-test("原件与副本：只剩别处来源（订阅进来的）时，本域里的每一份定义都是副本", () => {
-  // 行的来源 x 不在本域的列里：a、b 两列都只是副本
+test("行的来源在别处（订阅进来的）时，本域里有定义的列照样是 ⦿", () => {
+  // 行的来源 x 不在本域的列里：a 有一份就是 ⦿，b 还没有
   const foreign = row(
     entry("x", { a: "equal", b: "missing" }),
     entry("a", { a: "own", b: "missing" }),
   );
-  assert.deepEqual(cellViewOf(foreign, "a", labelOf), copyView());
+  assert.deepEqual(cellViewOf(foreign, "a", labelOf), presentView());
   assert.equal(cellViewOf(foreign, "b", labelOf)?.dot, "missing");
 });
 
-test("原件与副本：来源那一列哪怕只剩 conflict，也照原件画（点了是删原件）", () => {
+test("只剩 conflict 也说明那一列有一份：画 ⦿、可点", () => {
   const onlyConflict = row(entry("claude-code", { "claude-code": "own", codex: "conflict" }));
-  assert.equal(cellViewOf(onlyConflict, "claude-code", labelOf)?.dot, "own");
-  // codex 自己的条目不在这一行里，但 conflict 说明它那儿有一份：照样是副本
-  assert.deepEqual(cellViewOf(onlyConflict, "codex", labelOf), copyView());
-});
-
-const reported = (outcome: McpReportEntry["outcome"], identical?: boolean): McpReportEntry => ({
-  name: "notion",
-  targetId: "codex",
-  outcome,
-  message: "",
-  backupPath: null,
-  identical,
-});
-
-/// 撤销按钮与 skill 同一条规则：再点 / 再按一次就是准确反操作时不给（⌘Z 不看这里，始终可用）
-test("撤销按钮：写进之后再点就是移除——单格与「原本一份都没有」的批量不给；原本已有一部分的批量给", () => {
-  assert.equal(mcpUndoShown("write", [reported("created")], true), false);
-  assert.equal(mcpUndoShown("write", [reported("created"), reported("created")], true), false);
-  // 选中的里这一列原本已有一部分：再按会连原有的一起移除，回不到原样，只有撤销准确
-  assert.equal(mcpUndoShown("write", [reported("created")], false), true);
-});
-
-test("撤销按钮：移除一份与原版一样的副本不给，不一样的才给", () => {
-  assert.equal(mcpUndoShown("remove", [reported("removed", true)], true), false);
-  assert.equal(mcpUndoShown("remove", [reported("removed", false)], true), true);
-  // 批量里只要有一份不一样就给；没移除成的那几项不算
-  assert.equal(
-    mcpUndoShown("remove", [reported("removed", true), reported("removed", false)], true),
-    true,
-  );
-  assert.equal(
-    mcpUndoShown("remove", [reported("removed", true), reported("skipped", false)], true),
-    false,
-  );
-  // 后端没带 identical（旧报告）时不猜成「不一样」
-  assert.equal(mcpUndoShown("remove", [reported("removed")], true), false);
+  assert.deepEqual(cellViewOf(onlyConflict, "claude-code", labelOf), presentView());
+  // codex 自己的条目不在这一行里，但 conflict 说明它那儿有一份
+  assert.deepEqual(cellViewOf(onlyConflict, "codex", labelOf), presentView());
 });
 
 /// 只有几家 agent 接得住的条目（用命令生成请求头）：接不住的那一格原因用 core 给的那句，

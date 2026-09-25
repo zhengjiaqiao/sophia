@@ -20,8 +20,7 @@ pub mod sources;
 mod weiboap;
 
 pub use removal::{
-    execute_removal, prepare_original_removal, prepare_removal, McpRemovalPlan, McpRemoveAction,
-    ORIGINAL_MESSAGE,
+    execute_removal, prepare_original_removal, McpRemovalPlan, McpRemoveAction, McpRemoveItem,
 };
 
 const SUPPORTED: [&str; 3] = ["claude-code", "codex", "cursor"];
@@ -623,10 +622,6 @@ pub struct McpReportEntry {
     pub outcome: String,
     pub message: String,
     pub backup_path: Option<PathBuf>,
-    /// 只在从格子上移除副本（`execute_removal`）成功的条目上有：移除的那份与来源原版是否一样。
-    /// 一样时再点一次写回的就是同样的内容，前端不给撤销；不一样才给
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identical: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1666,7 +1661,6 @@ fn entry(
         outcome: outcome.into(),
         message: message.into(),
         backup_path,
-        identical: None,
     }
 }
 
@@ -2996,7 +2990,6 @@ mod exclusion_tests {
                     outcome: (*outcome).into(),
                     message: String::new(),
                     backup_path: None,
-                    identical: None,
                 })
                 .collect(),
             ..McpReport::default()

@@ -7,7 +7,7 @@
 /// ```ts
 /// toastFor(op: ToastOp, input: ToastInput): ToastText
 ///
-/// type ToastOp = "link" | "unlink" | "write" | "clear" | "split" | "keepThis"
+/// type ToastOp = "link" | "unlink" | "write" | "delete" | "clear" | "split" | "keepThis"
 ///              | "autoLink" | "autoWrite"
 /// interface ToastInput {
 ///   done: ToastItem[];      // 做成了的：每项一个名字 + 可选 agent
@@ -43,11 +43,13 @@ export type ToastOp =
   | "unlink"
   /// MCP：把一份定义写进某个位置（只新增）
   | "write"
+  /// MCP：从某个 agent 的配置里删掉一项（确认过，结果带撤销）
+  | "delete"
   /// 清掉失效的链接
   | "clear"
   /// 把整个文件夹是链接的目录拆开
   | "split"
-  /// 同名两份：只留这份，另一份进废纸篓（先确认，结果不带撤销）
+  /// 同名两份：只留这份，另一份删掉（先确认，结果带撤销，见「删除原件」）
   | "keepThis"
   /// 自动规则在背后加上了几个（⑨⑬ 自动发生的事要交代）
   | "autoLink"
@@ -100,6 +102,7 @@ const VERB: Record<ToastOp, string> = {
   link: "加到",
   unlink: "从",
   write: "写进",
+  delete: "已从",
   clear: "清除",
   split: "拆开",
   keepThis: "只留",
@@ -112,6 +115,7 @@ const NOT_VERB: Record<ToastOp, string> = {
   link: "没加上",
   unlink: "没移除",
   write: "没写进",
+  delete: "没删掉",
   clear: "没清除",
   split: "没拆开",
   keepThis: "没删掉",
@@ -123,11 +127,12 @@ const NOT_VERB: Record<ToastOp, string> = {
 const PARTIAL_VERB: Partial<Record<ToastOp, string>> = {
   link: "加上",
   unlink: "移除",
+  delete: "删除",
   autoLink: "自动加上",
 };
 
-/// 带方向的动词后半截：`从 [图标] 移除`
-const VERB_TAIL: Partial<Record<ToastOp, string>> = { unlink: "移除" };
+/// 带方向的动词后半截：`从 [图标] 移除` / `已从 [图标] 删除`
+const VERB_TAIL: Partial<Record<ToastOp, string>> = { unlink: "移除", delete: "删除" };
 
 const uniq = (xs: string[]) => [...new Set(xs)];
 
@@ -247,48 +252,110 @@ export function deleteOriginalConfirm(input: {
 }
 
 /// 删完 skill 原件的例行一行：`✓ 已删除 defuddle · 在废纸篓里`。不带撤销——从废纸篓找回，确认框已说清
-export function deletedOriginalToast(skill: string): ToastText {
+export function deletedOriginalToast(skill: string, undoable = false): ToastText {
   return {
     tier: "routine",
     kind: "success",
     verb: "已删除",
     names: [skill],
     agents: [],
-    reason: "在废纸篓里",
+    // 能撤销时后面跟 `撤销`，不再说去处；挪不进暂存处（跨磁盘）直接进了废纸篓，照实说
+    ...(undoable ? {} : { reason: "在废纸篓里" }),
   };
 }
 
-/// 删除 MCP 原件的确认框（DESIGN「删除原件」）：标题 `从 Codex 删除 weibo-search？`；正文
-/// `删掉 Codex 配置里的这份定义`，这个位置别的 agent 里还有同名定义时接 `，Claude Code 里的那份不受影响`；
-/// `paths` 一行：`配置` + 配置文件路径，Claude Local 后接项目名（`~/.claude.json · CardBox`）
-export function deleteMcpOriginalConfirm(input: {
-  agent: string;
-  name: string;
-  /// 这个位置里还有同名定义的别的 agent（去重、保序）
-  others: string[];
+/// 撤销删原件之后的一行：全回来了 `✓ 已恢复 defuddle`；原件回来了、有链接没回来是部分失败；
+/// 原件都没放回是做不成。`failed` 是撤销报告里没成的那几步的原因（第一条是原件本身时 `bodyBack` 为 false）
+export function restoredOriginalToast(
+  skill: string,
+  input: { bodyBack: boolean; failed: string[] },
+): ToastText {
+  if (!input.bodyBack)
+    return {
+      tier: "notice",
+      kind: "cannot",
+      verb: "没恢复",
+      names: [skill],
+      agents: [],
+      reason: input.failed[0] ?? "",
+    };
+  if (input.failed.length > 0)
+    return {
+      tier: "notice",
+      kind: "partial",
+      verb: "已恢复",
+      names: [skill],
+      agents: [],
+      reason: `${input.failed.length} 条链接没恢复：${input.failed[0]}`,
+    };
+  return { tier: "routine", kind: "success", verb: "已恢复", names: [skill], agents: [] };
+}
+
+/// MCP 配置文件在确认框路径行里的写法：主目录写 `~`；Claude Local 后接项目名（`~/.claude.json · CardBox`）
+export interface McpConfigPath {
   path: string;
   /// 同一个文件里分项目存放的（Claude Local）：项目名
   project?: string;
-}): { title: string; body: string; paths: { label: string; path: string }[] } {
-  const others = input.others.length > 0 ? `，${input.others.join("、")} 里的那份不受影响` : "";
-  const path = displayPath(input.path) + (input.project ? ` · ${input.project}` : "");
+}
+const configPath = (p: McpConfigPath) => displayPath(p.path) + (p.project ? ` · ${p.project}` : "");
+
+/// 点 ⦿ 的确认框（DESIGN「删除原件」MCP；MCP 格子不分原件副本，点哪一格 ⦿ 都是它）：
+/// 标题 `从 Codex 删除 weibo-search？`；正文说后果 `删除后 Codex 不能再用它`，这个位置别的 agent 里
+/// 还有同名定义时接 `；Claude Code 里的那份不受影响`，没有时接 `；这个位置里就没有它了`，再接 `。可以撤销`；
+/// `paths` 一行：`配置` + 配置文件路径
+export function deleteMcpOriginalConfirm(
+  input: {
+    agent: string;
+    name: string;
+    /// 这个位置里还有同名定义的别的 agent（去重、保序）
+    others: string[];
+  } & McpConfigPath,
+): { title: string; body: string; paths: { label: string; path: string }[] } {
+  const after =
+    input.others.length > 0
+      ? `${input.others.join("、")} 里的那份不受影响`
+      : "这个位置里就没有它了";
   return {
     title: `从 ${input.agent} 删除 ${input.name}？`,
-    body: `删掉 ${input.agent} 配置里的这份定义${others}`,
-    paths: [{ label: "配置", path }],
+    body: `删除后 ${input.agent} 不能再用它；${after}。可以撤销`,
+    paths: [{ label: "配置", path: configPath(input) }],
   };
 }
 
-/// 删完 MCP 原件的例行一行：`✓ 已从 [Codex] 删除 weibo-search`（调用方另给 `撤销`）
-export function deletedMcpOriginalToast(name: string, agent?: ToastAgentRef): ToastText {
+/// 批量删除时正文里最多列几个名字，其余写 `等 N 个`（标题已有总数）
+const BATCH_NAMES = 12;
+
+/// 选择行全有（⦿）时按下的确认框（DESIGN「表格」MCP 条「选择行」）：确认一次删一批。
+/// 标题 `从 Codex 删除 3 个 MCP？`；正文先列名字，再说后果（同单格：`删除后 Codex 不能再用它们`，
+/// 这个位置别的 agent 里还有其中哪个的同名定义时接 `；Claude Code 里的同名定义不受影响`，
+/// 都没有时接 `；这个位置里就没有它们了`，再接 `。可以撤销`）；路径行每个配置文件一行
+export function deleteMcpBatchConfirm(input: {
+  /// 要从哪几个 agent 删（去重、保序；按「所有位置」时不止一个）
+  agents: string[];
+  /// 要删的服务名（去重、保序）
+  names: string[];
+  /// 这个位置里还留着其中某个同名定义的别的 agent（去重、保序）
+  others: string[];
+  paths: McpConfigPath[];
+}): { title: string; body: string; paths: { label: string; path: string }[] } {
+  const agents = input.agents.join("、");
+  const shown =
+    input.names.slice(0, BATCH_NAMES).join("、") +
+    (input.names.length > BATCH_NAMES ? ` 等 ${input.names.length} 个` : "");
+  const after =
+    input.others.length > 0
+      ? `${input.others.join("、")} 里的同名定义不受影响`
+      : "这个位置里就没有它们了";
   return {
-    tier: "routine",
-    kind: "success",
-    verb: "已从",
-    verbTail: "删除",
-    names: [name],
-    agents: agent ? [agent] : [],
+    title: `从 ${agents} 删除 ${input.names.length} 个 MCP？`,
+    body: `${shown}。删除后 ${agents} 不能再用它们；${after}。可以撤销`,
+    paths: uniq(input.paths.map(configPath)).map((path) => ({ label: "配置", path })),
   };
+}
+
+/// 删完一项 MCP 定义的例行一行：`✓ 已从 [Codex] 删除 weibo-search`（调用方另给 `撤销`，一律给）
+export function deletedMcpOriginalToast(name: string, agent?: ToastAgentRef): ToastText {
+  return toastFor("delete", { done: [{ name, agent }] });
 }
 
 /// 「拆开」确认框（DESIGN「没有收件箱、待处理页和「忽略」」表：整个文件夹是链接，点该列任一格）：
@@ -301,8 +368,9 @@ export function splitConfirm(agent: string): { title: string; body: string } {
 }
 
 /// 批量写入真的慢时触发项旁的那一句（DESIGN「忙碌指示」）：`正在加到 Codex` / `正在从 Codex 移除` /
-/// `正在写进 Codex`。agent 为「所有 agent」时照样拼
-export function batchBusyText(op: "link" | "unlink" | "write", agent: string): string {
+/// `正在写进 Codex` / `正在从 Codex 删除`（MCP）。agent 为「所有 agent」时照样拼
+export function batchBusyText(op: "link" | "unlink" | "write" | "delete", agent: string): string {
   if (op === "unlink") return `正在从 ${agent} 移除`;
+  if (op === "delete") return `正在从 ${agent} 删除`;
   return `正在${op === "link" ? "加到" : "写进"} ${agent}`;
 }

@@ -37,6 +37,9 @@ struct AppState {
     /// 让它在前端转一圈就等于可以被改掉
     delete_plan: Mutex<Option<(String, DeleteSourcePlan)>>,
     next_delete_plan: AtomicU64,
+    /// 最近一次删原件的撤销记录（DESIGN「删除原件」撤销怎么做到）：前端只拿 id。
+    /// 只留一条：下一次删原件时上一次暂存的原件移进废纸篓，撤销机会随之过去
+    delete_undo: Mutex<Option<(String, sync::DeleteUndo)>>,
     /// 同一进程里写 ~/.codex/config.toml 的路径（MCP 同步、模型页）共用这把锁，避免互相撞出“配置已变化”。
     /// 跨进程仍靠 atomicfile 的写前写后校验兜底。
     config_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
@@ -418,42 +421,21 @@ fn update_mcp_rules(
     Ok(())
 }
 
-/// 从格子上移除 MCP 副本（可批量）：每项是 (行的来源＝原件, 服务名, 副本所在位置)。
-/// 判定与执行一次做完（格子是开关，没有预览这一步），拒绝的项以 `skipped` + 原因进报告；
-/// 撤销与写入共用 `mcp_undo_write`。原件那一格 core 拒绝（删原件走 `delete_mcp_original`）
+/// 从 agent 的配置里删掉 MCP 定义（点 ⦿、或选择行全有时按下，确认之后；可批量）：每项是
+/// (位置, 服务名)，只删那个位置里的那一项，别的位置里的同名定义不动。拒绝的项以 `skipped` + 原因
+/// 进报告；一批一个撤销记录，与写入共用 `mcp_undo_write`
 #[tauri::command]
-fn remove_mcp_copies(
-    selections: Vec<symsync_core::mcp::McpSelection>,
+fn delete_mcp_original(
+    items: Vec<symsync_core::mcp::McpRemoveItem>,
     state: tauri::State<'_, AppState>,
 ) -> Result<symsync_core::mcp::McpReport, String> {
     let discovery = discover_mcp(&state)?;
     // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 apply_mcp）
     let _config_guard = state.config_lock.blocking_lock();
-    let plan = symsync_core::mcp::prepare_removal(&discovery.locations, &selections);
+    let plan = symsync_core::mcp::prepare_original_removal(&discovery.locations, &items);
     let mut report = symsync_core::mcp::execute_removal(plan);
     register_mcp_undo(&state, &mut report)?;
     // 手动拿掉的：自动规则不再往这个位置写回它（不记的话下一轮扫描就写回去了）
-    update_mcp_rules(&state, |rules| {
-        symsync_core::mcp::exclude_removed(rules, &report)
-    })?;
-    Ok(report)
-}
-
-/// 删掉 MCP 原件（点原件格、确认之后）：只删 `location_id` 这个位置里 `name` 的定义，
-/// 别的位置里的同名定义不动。与移除副本同一条安全通道，撤销同样走 `mcp_undo_write`
-#[tauri::command]
-fn delete_mcp_original(
-    location_id: String,
-    name: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<symsync_core::mcp::McpReport, String> {
-    let discovery = discover_mcp(&state)?;
-    // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 apply_mcp）
-    let _config_guard = state.config_lock.blocking_lock();
-    let plan =
-        symsync_core::mcp::prepare_original_removal(&discovery.locations, &location_id, &name);
-    let mut report = symsync_core::mcp::execute_removal(plan);
-    register_mcp_undo(&state, &mut report)?;
     update_mcp_rules(&state, |rules| {
         symsync_core::mcp::exclude_removed(rules, &report)
     })?;
@@ -680,7 +662,7 @@ fn delete_source(
     plan_id: String,
     in_git_confirmed: Option<bool>,
     state: tauri::State<'_, AppState>,
-) -> Result<SyncReport, String> {
+) -> Result<DeleteResult, String> {
     let plan = {
         let mut cache = state
             .delete_plan
@@ -695,7 +677,56 @@ fn delete_source(
     if in_git_confirmed == Some(true) {
         plan.in_git = None;
     }
-    Ok(sync::delete_source(&plan))
+    let hold_root = held_dir()?;
+    let mut undo_slot = state
+        .delete_undo
+        .lock()
+        .map_err(|_| "撤销记录已损坏".to_string())?;
+    // 新的一次删除：上一次的撤销机会过去，暂存的原件移进废纸篓
+    undo_slot.take();
+    sync::release_held(&hold_root);
+    let (report, undo) = sync::delete_source_holding(&plan, Some(&hold_root));
+    let undo_id = undo.map(|undo| {
+        let id = state
+            .next_delete_plan
+            .fetch_add(1, Ordering::Relaxed)
+            .to_string();
+        *undo_slot = Some((id.clone(), undo));
+        id
+    });
+    Ok(DeleteResult { report, undo_id })
+}
+
+/// 删原件的结果：逐项报告 + 撤销 id（原件挪进了暂存处才有；跨磁盘退回直接进废纸篓时没有）
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteResult {
+    report: SyncReport,
+    undo_id: Option<String>,
+}
+
+/// 删原件时暂存原件的地方：应用数据目录下，与主目录多半同一磁盘，挪进去是一次改名
+fn held_dir() -> Result<PathBuf, String> {
+    Ok(runtime_store_dir()?.join("held"))
+}
+
+/// 撤销最近一次删原件：原件放回原处、链接复原。记录用过即删；撤不回的步骤逐条如实上报
+#[tauri::command]
+fn undo_delete_source(
+    undo_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncReport, String> {
+    let undo = {
+        let mut slot = state
+            .delete_undo
+            .lock()
+            .map_err(|_| "撤销记录已损坏".to_string())?;
+        match slot.as_ref() {
+            Some((id, _)) if id == &undo_id => slot.take().expect("刚判过是 Some").1,
+            _ => return Err("撤销已过期：原件已经移进废纸篓，可以从访达找回".into()),
+        }
+    };
+    Ok(sync::undo_delete(&undo))
 }
 
 /// 来源管理页：这个位置（`DomainPage.key`）已订阅的来源，以及 `+ 来源` 的两组候选。只读
@@ -1180,6 +1211,7 @@ pub fn run() {
             next_mcp_undo: AtomicU64::new(1),
             delete_plan: Mutex::new(None),
             next_delete_plan: AtomicU64::new(1),
+            delete_undo: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             scan_all,
@@ -1188,7 +1220,6 @@ pub fn run() {
             mcp_endpoint,
             propose_mcp_sync,
             apply_mcp,
-            remove_mcp_copies,
             delete_mcp_original,
             mcp_undo_write,
             propose_links,
@@ -1197,6 +1228,7 @@ pub fn run() {
             split_whole_link,
             plan_delete_source,
             delete_source,
+            undo_delete_source,
             list_sources,
             subscribe_source,
             preview_source_folder,
@@ -1244,6 +1276,10 @@ pub fn run() {
             menu::set_menu_state
         ])
         .setup(|_app| {
+            // 上次运行里删掉、还暂存着的原件：撤销机会已随上次运行过去，移进废纸篓
+            if let Ok(dir) = held_dir() {
+                sync::release_held(&dir);
+            }
             // 菜单栏入口只在 macOS 上有：模型注入本身只支持 macOS
             #[cfg(target_os = "macos")]
             {

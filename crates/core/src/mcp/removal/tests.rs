@@ -15,16 +15,16 @@ fn loc(id: &str, harness: &str, path: &Path, selector: Option<&str>) -> McpLocat
     }
 }
 
-fn sel(source: &str, name: &str, target: &str) -> McpSelection {
-    McpSelection {
-        source_id: source.into(),
+fn item(location: &str, name: &str) -> McpRemoveItem {
+    McpRemoveItem {
+        location_id: location.into(),
         name: name.into(),
-        target_id: target.into(),
     }
 }
 
-fn remove(locations: &[McpLocation], selections: &[McpSelection]) -> McpReport {
-    execute_removal(prepare_removal(locations, selections))
+/// 单格与批量同一个入口（DESIGN「删除原件」MCP：删哪一处都走 `prepare_original_removal`）
+fn remove(locations: &[McpLocation], items: &[McpRemoveItem]) -> McpReport {
+    execute_removal(prepare_original_removal(locations, items))
 }
 
 fn outcome<'a>(report: &'a McpReport, target: &str, name: &str) -> &'a McpReportEntry {
@@ -38,7 +38,7 @@ fn outcome<'a>(report: &'a McpReport, target: &str, name: &str) -> &'a McpReport
 const SOURCE_JSON: &[u8] =
     br#"{"mcpServers":{"docs":{"command":"docs","env":{"TOKEN":"abc"}},"fmt":{"command":"fmt"}}}"#;
 
-/// 来源 source.json（Claude Code 写法）+ 一个 Cursor 的副本文件
+/// source.json（Claude Code 写法）+ 一个 Cursor 的 mcp.json，两处各有一份独立的定义
 fn json_tree(tree: &TempTree, target_bytes: &[u8]) -> (Vec<McpLocation>, PathBuf) {
     let source = tree.root().join("source.json");
     let target = tree.root().join("mcp.json");
@@ -54,16 +54,15 @@ fn json_tree(tree: &TempTree, target_bytes: &[u8]) -> (Vec<McpLocation>, PathBuf
 }
 
 #[test]
-fn json_copy_is_cut_out_and_the_rest_is_byte_for_byte() {
+fn json_definition_is_cut_out_and_the_rest_is_byte_for_byte() {
     let tree = TempTree::new();
     // CRLF、四格缩进、别的根字段、末行没有换行
     let original = "{\r\n    \"theme\": \"dark\",\r\n    \"mcpServers\": {\r\n        \"docs\": {\"command\": \"docs\", \"env\": {\"TOKEN\": \"abc\"}},\r\n        \"mine\": {\"command\": \"mine\"}\r\n    },\r\n    \"z\": [1, 2]\r\n}";
     let (locations, target) = json_tree(&tree, original.as_bytes());
 
-    let report = remove(&locations, &[sel("source", "docs", "target")]);
+    let report = remove(&locations, &[item("target", "docs")]);
     let entry = outcome(&report, "target", "docs");
     assert_eq!(entry.outcome, "removed", "{}", entry.message);
-    assert_eq!(entry.identical, Some(true));
     assert_eq!(
         fs::read_to_string(&target).unwrap(),
         "{\r\n    \"theme\": \"dark\",\r\n    \"mcpServers\": {\r\n        \"mine\": {\"command\": \"mine\"}\r\n    },\r\n    \"z\": [1, 2]\r\n}"
@@ -71,12 +70,12 @@ fn json_copy_is_cut_out_and_the_rest_is_byte_for_byte() {
     // 备份就是移除前的原样
     let backup = entry.backup_path.clone().expect("有备份");
     assert_eq!(fs::read(backup).unwrap(), original.as_bytes());
-    // 来源一个字节没动
+    // 别的位置里的同名定义一个字节没动
     assert_eq!(fs::read(&locations[0].path).unwrap(), SOURCE_JSON);
 }
 
 #[test]
-fn toml_copy_keeps_bom_crlf_comments_and_missing_final_newline() {
+fn toml_definition_keeps_bom_crlf_comments_and_missing_final_newline() {
     let tree = TempTree::new();
     let source = tree.root().join("source.json");
     let target = tree.root().join("config.toml");
@@ -90,10 +89,9 @@ fn toml_copy_keeps_bom_crlf_comments_and_missing_final_newline() {
         loc("codex", "codex", &target, None),
     ];
 
-    let report = remove(&locations, &[sel("source", "docs", "codex")]);
+    let report = remove(&locations, &[item("codex", "docs")]);
     let entry = outcome(&report, "codex", "docs");
     assert_eq!(entry.outcome, "removed", "{}", entry.message);
-    assert_eq!(entry.identical, Some(true));
     assert_eq!(
         fs::read_to_string(&target).unwrap(),
         "\u{feff}# Codex 配置\r\nmodel = \"gpt-5\"   # 行尾注释\r\n\r\n\
@@ -102,7 +100,7 @@ fn toml_copy_keeps_bom_crlf_comments_and_missing_final_newline() {
 }
 
 #[test]
-fn claude_local_copy_is_removed_from_the_shared_file_only_in_its_scope() {
+fn claude_local_definition_is_removed_from_the_shared_file_only_in_its_scope() {
     let tree = TempTree::new();
     let claude = tree.root().join(".claude.json");
     let original = r#"{
@@ -117,7 +115,7 @@ fn claude_local_copy_is_removed_from_the_shared_file_only_in_its_scope() {
         loc("user", "claude-code", &claude, None),
         loc("local", "claude-code", &claude, Some("/p")),
     ];
-    let report = remove(&locations, &[sel("user", "docs", "local")]);
+    let report = remove(&locations, &[item("local", "docs")]);
     assert_eq!(outcome(&report, "local", "docs").outcome, "removed");
     assert_eq!(
         fs::read_to_string(&claude).unwrap(),
@@ -132,110 +130,12 @@ fn claude_local_copy_is_removed_from_the_shared_file_only_in_its_scope() {
 }
 
 #[test]
-fn the_original_cannot_be_removed() {
-    let tree = TempTree::new();
-    let (mut locations, target) =
-        json_tree(&tree, br#"{"mcpServers":{"docs":{"command":"docs"}}}"#);
-    // 另一个 id 指着同一个文件的同一个作用域：还是原件
-    let alias = loc("alias", "claude-code", &locations[0].path.clone(), None);
-    locations.push(alias);
-    let mut report = remove(
-        &locations,
-        &[
-            sel("source", "docs", "source"),
-            sel("source", "docs", "alias"),
-        ],
-    );
-    for id in ["source", "alias"] {
-        let entry = outcome(&report, id, "docs");
-        assert_eq!(entry.outcome, "skipped");
-        assert_eq!(entry.message, ORIGINAL_MESSAGE);
-    }
-    assert!(report.take_undo().is_none());
-    assert_eq!(fs::read(&locations[0].path).unwrap(), SOURCE_JSON);
-    assert_eq!(
-        fs::read(&target).unwrap(),
-        br#"{"mcpServers":{"docs":{"command":"docs"}}}"#
-    );
-}
-
-#[test]
-fn identical_flag_follows_the_source_version() {
-    let tree = TempTree::new();
-    let source = tree.root().join("source.json");
-    let same = tree.root().join("same.json");
-    let token = tree.root().join("token.json");
-    let codex_source = tree.root().join("codex-src.toml");
-    let codex_copy = tree.root().join("codex-copy.toml");
-    fs::write(&source, SOURCE_JSON).unwrap();
-    // 键的顺序、缩进不同，内容一样
-    fs::write(
-        &same,
-        b"{ \"mcpServers\": { \"docs\": { \"env\": {\"TOKEN\": \"abc\"}, \"command\": \"docs\" } } }",
-    )
-    .unwrap();
-    // 在那个位置手改过令牌：`2 份不一样`
-    fs::write(
-        &token,
-        br#"{"mcpServers":{"docs":{"command":"docs","env":{"TOKEN":"xyz"}}}}"#,
-    )
-    .unwrap();
-    // 同 agent（Codex）：连接一样，但客户端设置改过，再写回也回不来
-    fs::write(
-        &codex_source,
-        "[mcp_servers.fmt]\ncommand = \"fmt\"\nstartup_timeout_sec = 10\n",
-    )
-    .unwrap();
-    fs::write(
-        &codex_copy,
-        "[mcp_servers.fmt]\ncommand = \"fmt\"\nstartup_timeout_sec = 60\n",
-    )
-    .unwrap();
-    let locations = vec![
-        loc("source", "claude-code", &source, None),
-        loc("same", "cursor", &same, None),
-        loc("token", "cursor", &token, None),
-        loc("codex-src", "codex", &codex_source, None),
-        loc("codex-copy", "codex", &codex_copy, None),
-    ];
-    let plan = prepare_removal(
-        &locations,
-        &[
-            sel("source", "docs", "same"),
-            sel("source", "docs", "token"),
-            sel("codex-src", "fmt", "codex-copy"),
-        ],
-    );
-    let identical: BTreeMap<&str, bool> = plan
-        .actions
-        .iter()
-        .map(|a| (a.target_id.as_str(), a.identical))
-        .collect();
-    assert_eq!(
-        identical,
-        [("codex-copy", false), ("same", true), ("token", false)].into()
-    );
-    // 与「N 份不一样」同一个事实：令牌那份的字段级差异不为空，一样的那份为空
-    let diff =
-        |id: &str| crate::mcp::diff_fields(&locations, "docs", &["source".into(), id.into()]);
-    assert!(diff("same").fields.is_empty());
-    assert_eq!(diff("token").fields[0].field, "env.TOKEN");
-
-    let report = execute_removal(plan);
-    assert_eq!(outcome(&report, "same", "docs").identical, Some(true));
-    assert_eq!(outcome(&report, "token", "docs").identical, Some(false));
-    assert_eq!(outcome(&report, "codex-copy", "fmt").identical, Some(false));
-    let json = serde_json::to_value(outcome(&report, "token", "docs")).unwrap();
-    assert_eq!(json["identical"], false);
-}
-
-#[test]
-fn undo_restores_the_removed_copy_byte_for_byte() {
+fn undo_restores_the_removed_definition_byte_for_byte() {
     let tree = TempTree::new();
     let original = "{\n  \"mcpServers\": {\n    \"docs\": {\"command\": \"docs\", \"env\": {\"TOKEN\": \"xyz\"}}\n  }\n}\n";
     let (locations, target) = json_tree(&tree, original.as_bytes());
-    let mut report = remove(&locations, &[sel("source", "docs", "target")]);
-    assert_eq!(outcome(&report, "target", "docs").identical, Some(false));
+    let mut report = remove(&locations, &[item("target", "docs")]);
+    assert_eq!(outcome(&report, "target", "docs").outcome, "removed");
     assert_eq!(
         fs::read_to_string(&target).unwrap(),
         "{\n  \"mcpServers\": {}\n}\n"
@@ -260,7 +160,7 @@ fn undo_is_refused_after_the_file_changed() {
         loc("source", "claude-code", &source, None),
         loc("codex", "codex", &target, None),
     ];
-    let mut report = remove(&locations, &[sel("source", "fmt", "codex")]);
+    let mut report = remove(&locations, &[item("codex", "fmt")]);
     assert_eq!(outcome(&report, "codex", "fmt").outcome, "removed");
     let undo = report.take_undo().unwrap();
     fs::write(&target, "model = \"edited\"\r\n").unwrap();
@@ -300,19 +200,22 @@ fn batch_removes_what_it_can_and_says_why_for_the_rest() {
         loc("inline", "codex", &inline, None),
         loc("stale", "cursor", &stale, None),
     ];
-    let plan = prepare_removal(
+    let plan = prepare_original_removal(
         &locations,
         &[
             // 同一个文件里的两项：一次备份、一次写
-            sel("source", "docs", "cursor"),
-            sel("source", "fmt", "cursor"),
-            sel("source", "fmt", "inline"),
-            sel("source", "fmt", "source"),
-            sel("source", "gone", "cursor"),
-            sel("source", "fmt", "stale"),
+            item("cursor", "docs"),
+            item("cursor", "fmt"),
+            // 同一项选了两次只删一次
+            item("cursor", "docs"),
+            item("inline", "fmt"),
+            // 哪一行的来源都一样能删：不再有「批量不删原件」
+            item("source", "fmt"),
+            item("cursor", "gone"),
+            item("stale", "fmt"),
         ],
     );
-    assert_eq!(plan.actions.len(), 3);
+    assert_eq!(plan.actions.len(), 4);
     // 预览之后被别的程序改过：执行时整组拒绝，别的文件照常
     fs::write(&stale, br#"{"mcpServers":{"fmt":{"command":"fmt"}},"x":1}"#).unwrap();
     let mut report = execute_removal(plan);
@@ -334,45 +237,42 @@ fn batch_removes_what_it_can_and_says_why_for_the_rest() {
     assert_eq!(inline_entry.message, CANNOT_CUT);
     assert_eq!(fs::read_to_string(&inline).unwrap(), inline_original);
 
-    assert_eq!(outcome(&report, "source", "fmt").message, ORIGINAL_MESSAGE);
-    assert!(outcome(&report, "cursor", "gone")
-        .message
-        .contains("来源里已经没有它了"));
+    assert_eq!(outcome(&report, "source", "fmt").outcome, "removed");
+    assert_eq!(
+        fs::read(&source).unwrap(),
+        br#"{"mcpServers":{"docs":{"command":"docs","env":{"TOKEN":"abc"}}}}"#
+    );
+    let gone = outcome(&report, "cursor", "gone");
+    assert_eq!(gone.outcome, "skipped");
+    assert_eq!(gone.message, "这里已经没有它了");
 
     let stale_entry = outcome(&report, "stale", "fmt");
     assert_eq!(stale_entry.outcome, "failed");
     assert_eq!(stale_entry.message, "配置在预览后发生变化");
-    assert_eq!(stale_entry.identical, None);
     assert_eq!(report.entries.len(), 6);
 
-    // 撤销只涉及真的写了的那个文件
+    // 一批一个撤销记录，只涉及真的写了的那几个文件
     let undo = report.take_undo().unwrap();
-    assert_eq!(
-        undo.target_paths().collect::<Vec<_>>(),
-        vec![cursor.as_path()]
-    );
+    let mut paths: Vec<&Path> = undo.target_paths().collect();
+    paths.sort();
+    assert_eq!(paths, vec![cursor.as_path(), source.as_path()]);
     assert_eq!(undo_write(&undo).outcome, "undone");
     assert_eq!(fs::read(&cursor).unwrap(), cursor_original);
+    assert_eq!(fs::read(&source).unwrap(), SOURCE_JSON);
 }
 
-/// 批量移除跳过原件时说的话与前端 `src/cellTip.ts` 的 `MCP_OWN_TIP` 是同一句（DESIGN「文案语域」、
-/// 「删除原件」）：原件格可删之后，去处写成点这一格；文案语域是「无法 + 动词」
+/// 拿不掉的说法（DESIGN「文案语域」：「无法 + 动词」）
 #[test]
-fn 原件格与拿不掉的说法_按_d24_写全() {
-    assert_eq!(
-        ORIGINAL_MESSAGE,
-        "这是原件所在的位置，批量移除不删它 · 要删掉，点这一格"
-    );
-    assert!(!ORIGINAL_MESSAGE.contains("来源管理页"));
+fn 拿不掉的说法_按_d24_写全() {
     assert_eq!(CANNOT_CUT, "这一项的写法无法安全地单独拿掉，没有改动");
 }
 
 fn delete_original(locations: &[McpLocation], location: &str, name: &str) -> McpReport {
-    execute_removal(prepare_original_removal(locations, location, name))
+    remove(locations, &[item(location, name)])
 }
 
-/// 删原件（DESIGN「删除原件」）：只切掉这个位置里的这一项，其余字节原样；别的位置里的同名定义不动；
-/// 留撤销记录，撤销逐字节还原
+/// 行的来源那一处也一样删（DESIGN「删除原件」MCP）：只切掉这个位置里的这一项，其余字节原样；
+/// 别的位置里的同名定义不动；留撤销记录，撤销逐字节还原
 #[test]
 fn the_original_is_cut_out_of_its_own_location_and_can_be_undone() {
     let tree = TempTree::new();
@@ -380,15 +280,12 @@ fn the_original_is_cut_out_of_its_own_location_and_can_be_undone() {
     let (locations, target) = json_tree(&tree, copy);
     let source = locations[0].path.clone();
 
-    let plan = prepare_original_removal(&locations, "source", "docs");
+    let plan = prepare_original_removal(&locations, &[item("source", "docs")]);
     assert_eq!(plan.actions.len(), 1);
-    assert_eq!(plan.actions[0].source_id, "source");
     assert_eq!(plan.actions[0].target_id, "source");
-    assert!(!plan.actions[0].identical);
     let mut report = execute_removal(plan);
     let entry = outcome(&report, "source", "docs");
     assert_eq!(entry.outcome, "removed", "{}", entry.message);
-    assert_eq!(entry.identical, Some(false));
     let backup = entry.backup_path.clone().expect("删前先备份");
     assert_eq!(fs::read(backup).unwrap(), SOURCE_JSON);
     assert_eq!(
@@ -464,7 +361,7 @@ fn deleting_an_original_refuses_honestly_and_touches_nothing() {
         ("weibo", "fmt", WEIBO_MESSAGE),
         ("nowhere", "fmt", "这个位置已经不在了"),
     ] {
-        let plan = prepare_original_removal(&locations, location, name);
+        let plan = prepare_original_removal(&locations, &[item(location, name)]);
         assert!(plan.actions.is_empty());
         let mut report = execute_removal(plan);
         let entry = outcome(&report, location, name);
@@ -485,7 +382,7 @@ fn deleting_an_original_refuses_when_the_file_changed_after_the_check() {
     let tree = TempTree::new();
     let (locations, _) = json_tree(&tree, b"{}");
     let source = locations[0].path.clone();
-    let plan = prepare_original_removal(&locations, "source", "docs");
+    let plan = prepare_original_removal(&locations, &[item("source", "docs")]);
     let edited = br#"{"mcpServers":{"docs":{"command":"docs"},"fmt":{"command":"fmt"}},"x":1}"#;
     fs::write(&source, edited).unwrap();
     let mut report = execute_removal(plan);

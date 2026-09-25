@@ -84,7 +84,8 @@ test("Matrix：通道条表头 + 来源列（144，来源名；尾列已并进�
   assert.doesNotMatch(html, /mx-busy|正在开启/);
 });
 
-test("MCP 格的读屏名不说「软链」：linked＝已写进 · 副本，own＝原件（这两个域共用一张表，词不能照抄 skill 的）", () => {
+/// DESIGN「MCP 格子只有两种：⦿ 有、○ 没有」：⦿ 读「已写进」，不说「软链」也不说「原件 / 副本」
+test("MCP 格的读屏名：⦿＝已写进，不说软链、原件、副本（这两个域共用一张表，词不能照抄 skill 的）", () => {
   const mcpProps = {
     ...base,
     dotWords: "mcp" as const,
@@ -92,20 +93,23 @@ test("MCP 格的读屏名不说「软链」：linked＝已写进 · 副本，own
       {
         ...base.rows[0],
         cells: {
-          cc: { dot: "linked" as const, clickable: true, tip: "从 Claude Code 移除" },
+          cc: { dot: "own" as const, clickable: true, tip: "从 Claude Code 删除…" },
           cx: { dot: "missing" as const, clickable: true, tip: "写进 Codex" },
         },
       },
       {
         ...base.rows[1],
-        cells: { cc: { dot: "own" as const, clickable: false, tip: "原件就在这儿" }, cx: null },
+        cells: {
+          cc: { dot: "own" as const, clickable: true, tip: "从 Claude Code 删除…" },
+          cx: null,
+        },
       },
     ],
   };
   const html = render(Matrix, mcpProps);
-  assert.doesNotMatch(html, /软链/);
-  assert.match(html, /aria-label="docx · Claude Code：已写进 · 副本。从 Claude Code 移除"/);
-  assert.match(html, /aria-label="pdf · Claude Code：原件。原件就在这儿"/);
+  assert.doesNotMatch(html, /aria-label="[^"]*(软链|原件|副本)/);
+  assert.match(html, /aria-label="docx · Claude Code：已写进。从 Claude Code 删除…"/);
+  assert.match(html, /aria-label="pdf · Claude Code：已写进。从 Claude Code 删除…"/);
 });
 
 test("skill 格的读屏名不受 MCP 影响：linked 仍是「已加上 · 软链」，own 仍是「已加上 · 原件」", () => {
@@ -189,6 +193,24 @@ test("Matrix：选择行（D4）——表头下一条，用表格同一套列：
   assert.equal((head.match(/aria-label="全选"/g) ?? []).length, 1);
   // 没有顶替工具行的选择条
   assert.doesNotMatch(html, /mx-toolbar/);
+});
+
+/// DESIGN「MCP 格子只有两种」选择行：全有时的点与格子同形，画 ⦿，不是 skill 的 ●
+test("Matrix：MCP 选择行全有时画 ⦿", () => {
+  const noop = () => undefined;
+  const html = render(Matrix, {
+    ...base,
+    dotWords: "mcp" as const,
+    selected: new Set(["u|docx"]),
+    allAgents: { checked: true, label: "选中的都从所有位置删除", tip: "", onToggle: noop },
+    columnChecks: {
+      cc: { checked: true, label: "选中的都从 Claude Code 删除", tip: "", onToggle: noop },
+    },
+  });
+  const head = html.slice(html.indexOf('class="mx-headwrap"'), html.indexOf('class="mx-body"'));
+  assert.match(head, /aria-label="选中的都从 Claude Code 删除"[^>]*>[\s\S]*?data-dot="own"/);
+  assert.match(head, /aria-label="选中的都从所有位置删除"[^>]*>[\s\S]*?data-dot="own"/);
+  assert.doesNotMatch(head, /data-dot="linked"/);
 });
 
 test("clampFocus：筛选让行变少、列数变了之后，焦点格夹回最近的有效格；表为空时不设", async () => {
@@ -513,7 +535,7 @@ test("点了做不了的格子：只当即说明（提示框立即出现、停�
 });
 
 test("做不了的格子的说明：为什么 + 去哪做", async () => {
-  const { blockedTipOf, MCP_OWN_TIP } = await import("../src/cellTip.ts");
+  const { blockedTipOf } = await import("../src/cellTip.ts");
   assert.equal(
     blockedTipOf("duplicate", "Cursor", "docx", ""),
     "Cursor 里已有一个同名的 docx，不是这一份",
@@ -525,13 +547,6 @@ test("做不了的格子的说明：为什么 + 去哪做", async () => {
   );
   // 整个文件夹是链接：沿用 cellState 的原因
   assert.equal(blockedTipOf("wholeLinked", "Cursor", "docx", "原句"), "原句");
-  // MCP 原件：批量移除跳过它时说的话，与 core 跳过时说的同一句（mcp::removal::ORIGINAL_MESSAGE）
-  assert.equal(MCP_OWN_TIP, "这是原件所在的位置，批量移除不删它 · 要删掉，点这一格");
-  const removal = readFileSync(
-    new URL("../crates/core/src/mcp/removal.rs", import.meta.url),
-    "utf8",
-  );
-  assert.ok(removal.includes(`"${MCP_OWN_TIP}"`), "前端原件格提示与 core ORIGINAL_MESSAGE 不一致");
 });
 
 test("批量写入：格子同时变、不依次点亮；只锁按下的那一项，过了 0.3 秒门槛才在它旁出忙碌指示 + 一句", async () => {
@@ -760,12 +775,15 @@ test("批量撤销按条件给：加上时选中的里这一列原本已有一�
     /action=\{undo && !reversible \? \{ label: "撤销", onClick: undo \} : undefined\}/,
   );
   const mcp = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
-  assert.match(mcp, /write\(cells, target\.id, copies\.length === 0\)/);
+  assert.match(mcp, /write\(cells, target\.id, deletable\.length === 0\)/);
   assert.match(mcp, /write\(allAdd, "all", allRemove\.length === 0\)/);
-  assert.match(mcp, /mcpUndoShown\("write", result\.entries, reversible\)/);
+  assert.match(
+    mcp,
+    /action=\{undo && !reversible \? \{ label: "撤销", onClick: undo \} : undefined\}/,
+  );
 });
 
-test("原件格可点（DESIGN「删除原件」）：提示框是带 … 的动词，点了先确认；批量不删原件", () => {
+test("原件格与 MCP 的 ⦿ 可点（DESIGN「删除原件」）：提示框是带 … 的动词，点了先确认；MCP 选择行全有时也是确认一次再删", () => {
   const dv = readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8");
   const skills = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
   const mcp = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
@@ -780,11 +798,12 @@ test("原件格可点（DESIGN「删除原件」）：提示框是带 … 的动
     mcp,
     /confirmLabel="删除"\s*onConfirm=\{\(\) => void deleteOriginal\(deletePane\)\}/,
   );
-  assert.match(mcp, /api\.deleteMcpOriginal\(del\.targetId, del\.name\)/);
-  // 批量：能移除的只有副本，能写进的不含原件
-  assert.match(
-    mcp,
-    /viewAt\(row, targetId\)\?\.copy === true && viewAt\(row, targetId\)\?\.clickable === true/,
-  );
-  assert.match(mcp, /view\.copy !== true && view\.dot !== "own" && source !== null/);
+  // 单格与批量同一个入口：按位置 + 名字删，不看是不是这一行的来源
+  assert.match(mcp, /api\.deleteMcpOriginal\(del\.items\)/);
+  // 选择行全有（⦿）：先出确认框（某一列 / 所有位置），不再直接移除、也不再跳过哪一格
+  assert.match(mcp, /askDeleteBatch\(page, deletable, target\.id\)/);
+  assert.match(mcp, /askDeleteBatch\(page, allRemove, "all"\)/);
+  assert.doesNotMatch(mcp, /removeCopies|MCP_OWN_TIP|\.copy\b/);
+  // 能写进的不含 ⦿（点 ⦿ 是删）
+  assert.match(mcp, /view\.dot !== "own" && source !== null/);
 });

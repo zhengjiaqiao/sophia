@@ -22,11 +22,6 @@
   outline-offset: 2px;
 }
 
-.is-on-dark:focus-visible,
-.ss-toast--notice .ss-btn:focus-visible {
-  outline-color: var(--face);
-}
-
 /* 界面文字不可拖选（tokens.css 的 :root），路径、id、命令与输入框除外（裁决 D23） */
 .ss-selectable,
 input,
@@ -130,30 +125,6 @@ textarea,
   outline: none;
 }
 
-/* 墨窗里的浅描边键：1px face 描边、face 字、透明底、不抬起（墨面上投影看不见）；按下同样有按压变形 */
-.ss-btn.is-on-dark {
-  border: 1px solid var(--face);
-  background: transparent;
-  box-shadow: none;
-  color: var(--face);
-}
-
-.ss-btn.is-on-dark:hover:not(:disabled) {
-  background: var(--ink-mute);
-  box-shadow: none;
-}
-
-.ss-btn.is-on-dark:active:not(:disabled) {
-  background: var(--ink-mute);
-  box-shadow: none;
-}
-
-.ss-btn.is-on-dark:disabled {
-  border-color: var(--ink-mute);
-  outline: none;
-  color: var(--ink-mute);
-}
-
 /* 浅键 button-quiet（2026-09-25）：只给离开 Sophia 的动作，末尾一律 10px ↗（1.4 描边、左间距 3）。
    静止是平贴在机面上的一小块键面：surface 底、无边无投影、13 ink-mute、高 24、左右 8、control 7；
    手靠近才抬起（paper + raise、字转 ink）；按下 raise-pressed + 按压变形。没有下划线、没有手形。
@@ -235,15 +206,6 @@ textarea,
 
 .ss-iconbtn:disabled {
   color: var(--ctl-edge);
-}
-
-.ss-iconbtn.is-on-dark {
-  color: var(--ctl-border);
-}
-
-.ss-iconbtn.is-on-dark:hover:not(:disabled) {
-  background: var(--ink-mute);
-  color: var(--face);
 }
 
 .ss-iconbtn__glyph {
@@ -959,7 +921,7 @@ textarea,
 }
 
 /* ===== 8. 提示小窗 Toast（DESIGN「反馈的两种形态」）：浮起的一层只表示「会自己消失」 =====
-   成功是纸、需要注意是墨。文字一律 13（caption）：动词 600、名字 400、数字 12 tabular */
+   提示条一律是纸（2026-09-25 起，墨色浮窗只给提示框）：失败与成功靠句首记号与否定动词分。文字一律 13（caption）：动词 600、名字 400、数字 12 tabular */
 .ss-toast {
   box-sizing: border-box;
   font-family: var(--font-ui);
@@ -1008,16 +970,17 @@ textarea,
   display: contents;
 }
 
-/* 需要注意：墨窗——ink 实心板、float 12 圆角、无外框、浮层投影，宽 ≤ 400。
-   墨面上的字：主 face、次 ctl-border；分隔线 ink-mute 1px */
+/* 需要注意（做不成、部分失败）：同成功的纸窗（paper + 1px hairline 边 + float 12 圆角 + 浮层投影），
+   宽 ≤ 400；左侧 40 全高记号栏放 ⊘ / !（ink 线稿），与正文隔一道 hairline */
 .ss-toast--notice {
   display: flex;
   width: max-content;
   max-width: 400px;
+  border: var(--border-float);
   border-radius: var(--radius-float);
-  background: var(--ink);
+  background: var(--paper);
   box-shadow: var(--elev-float);
-  color: var(--face);
+  color: var(--ink);
 }
 
 .ss-toast__indicator {
@@ -1026,7 +989,7 @@ textarea,
   align-items: center;
   justify-content: center;
   width: 40px;
-  border-right: 1px solid var(--ink-mute);
+  border-right: 1px solid var(--hairline);
 }
 
 /* 有展开内容时记号钉在主行那一格，不随整块居中 */
@@ -1103,10 +1066,6 @@ textarea,
   color: var(--ink-faint);
 }
 
-.ss-toast--notice .ss-toast__sep {
-  color: var(--ctl-border);
-}
-
 .ss-toast__actions {
   display: inline-flex;
   align-items: center;
@@ -1115,7 +1074,7 @@ textarea,
   padding-left: 12px;
 }
 
-/* 副行：路径与条数，等宽 12；墨面上是次字 ctl-border */
+/* 副行：路径与条数，等宽 12 ink-faint */
 .ss-toast__stats {
   margin-top: -2px;
   font-family: var(--font-mono);
@@ -1125,14 +1084,10 @@ textarea,
   white-space: nowrap;
 }
 
-.ss-toast--notice .ss-toast__stats {
-  color: var(--ctl-border);
-}
-
 .ss-toast__detail {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid var(--ink-mute);
+  border-top: 1px solid var(--hairline);
 }
 
 /* ===== 9. 灰面板：错误横幅 ErrorBanner 与行内待办条 NoticePanel（DESIGN「灰面板」）=====

@@ -29,6 +29,7 @@ import {
   batchBusyText,
   deletedOriginalToast,
   deleteOriginalConfirm,
+  restoredOriginalToast,
   keepThisConfirm,
   splitConfirm,
   toastFor,
@@ -897,34 +898,49 @@ export default function SkillsTab({
     );
     let node: ReactNode = null;
     try {
-      let report: SyncReport | null = null;
+      let result: Awaited<ReturnType<typeof api.deleteSource>>;
       try {
         // 用户在确认框里确认了删它：原件在不在 git 仓库里都删（DESIGN「删除原件」）
-        report = await api.deleteSource(pane.planId, true);
+        result = await api.deleteSource(pane.planId, true);
       } catch {
         // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删
         const again = await api.planDeleteSource(ref.sourceId, ref.skill);
-        report = await api.deleteSource(again.planId, true);
+        result = await api.deleteSource(again.planId, true);
       }
-      if (report !== null) {
-        const [first, ...links] = report.entries;
-        const failed = links.filter((e) => e.outcome.status === "failed");
-        const bad = failed[0]?.outcome;
-        if (first?.outcome.status === "failed") node = cannot(first.outcome.reason);
-        else if (bad && bad.status === "failed")
-          // 原件已进废纸篓，但有链接没处理好：逐条上报的结果汇成一句，不偷偷跳过
-          node = (
-            <Toast
-              kind="partial"
-              verb="已删除"
-              names={[ref.skill]}
-              reason={`在废纸篓里，${failed.length} 条链接没${pane.relink ? "改指" : "清掉"}：${bad.reason}`}
-              onDismiss={dismissRow}
-              onClose={dismissRow}
-            />
-          );
-        else node = <Toast {...deletedOriginalToast(ref.skill)} onDismiss={dismissRow} />;
-      }
+      const { report, undoId } = result;
+      const [first, ...links] = report.entries;
+      const failed = links.filter((e) => e.outcome.status === "failed");
+      const bad = failed[0]?.outcome;
+      // 界面上没有别的退路：能撤销就给 `撤销`（DESIGN「删除原件」）
+      const undo =
+        undoId === null
+          ? undefined
+          : {
+              label: "撤销",
+              onClick: () => void undoDeleteOriginal(undoId, ref.skill, rowKey, pane.anchor),
+            };
+      if (first?.outcome.status === "failed") node = cannot(first.outcome.reason);
+      else if (bad && bad.status === "failed")
+        // 原件已删，但有链接没处理好：逐条上报的结果汇成一句，不偷偷跳过
+        node = (
+          <Toast
+            kind="partial"
+            verb="已删除"
+            names={[ref.skill]}
+            reason={`${undoId === null ? "在废纸篓里，" : ""}${failed.length} 条链接没${pane.relink ? "改指" : "清掉"}：${bad.reason}`}
+            action={undo}
+            onDismiss={dismissRow}
+            onClose={dismissRow}
+          />
+        );
+      else
+        node = (
+          <Toast
+            {...deletedOriginalToast(ref.skill, undoId !== null)}
+            action={undo}
+            onDismiss={dismissRow}
+          />
+        );
     } catch (e) {
       node = cannot(String(e));
     }
@@ -937,9 +953,44 @@ export default function SkillsTab({
     if (node !== null) setRowToast({ rowKey, at: pane.anchor, node });
   };
 
+  /// 撤销删原件（删原件与只留这份共用）：原件放回原处、链接复原，重扫后在原来那一格下说结果
+  const undoDeleteOriginal = async (
+    undoId: string,
+    skill: string,
+    rowKey: string,
+    at: ConfirmAnchor | undefined,
+  ) => {
+    dismissRow();
+    let text: ReturnType<typeof restoredOriginalToast>;
+    try {
+      const report = await api.undoDeleteSource(undoId);
+      const [first, ...links] = report.entries;
+      const reasons = (entries: typeof links) =>
+        entries.flatMap((e) => (e.outcome.status === "failed" ? [e.outcome.reason] : []));
+      text = restoredOriginalToast(skill, {
+        bodyBack: first?.outcome.status !== "failed",
+        failed: first?.outcome.status === "failed" ? reasons([first]) : reasons(links),
+      });
+    } catch (e) {
+      text = restoredOriginalToast(skill, { bodyBack: false, failed: [String(e)] });
+    }
+    await onRefresh();
+    setRowToast({
+      rowKey,
+      at,
+      node: (
+        <Toast
+          {...text}
+          onDismiss={dismissRow}
+          onClose={text.kind === "success" ? undefined : dismissRow}
+        />
+      ),
+    });
+  };
+
   // ===== 同名：只留这份 =====
   // DESIGN「页面还是弹层」：删用户的原件先确认（锚在按钮上），确认后直接删、不挂起；
-  // 结果是例行一行、不带撤销——废纸篓只找得回文件夹，改指过的链接回不来
+  // 结果是例行一行 + `撤销`（2026-09-25 起：另一份放回原处、改指过的链接指回去）
 
   const keepThis = async (
     kept: DomainRow,
@@ -1010,16 +1061,17 @@ export default function SkillsTab({
     const otherKey = skillRowKey(other);
     setHidden((prev) => new Set(prev).add(otherKey));
     let ok = false;
+    let undoId: string | null = null;
     try {
       let report: SyncReport;
       try {
-        report = await api.deleteSource(pane.planId);
+        ({ report, undoId } = await api.deleteSource(pane.planId));
       } catch {
         // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删（仓库里的照旧不代删）
         const again = await api.planDeleteSource(other.sourceId, other.skill);
         if (again.plan.inGit !== null)
           throw new Error(`它在 git 仓库 ${again.plan.inGit} 里，这里不代删`);
-        report = await api.deleteSource(again.planId);
+        ({ report, undoId } = await api.deleteSource(again.planId));
       }
       const bad = report.entries.find((e) => e.outcome.status === "failed");
       if (bad && bad.outcome.status === "failed") {
@@ -1053,10 +1105,25 @@ export default function SkillsTab({
       done: [{ name: kept.skill }],
       keepLabel: originText(pane.keptName),
     });
+    const keptKey = skillRowKey(kept);
+    const id = undoId;
     setRowToast({
-      rowKey: skillRowKey(kept),
+      rowKey: keptKey,
       at: pane.at,
-      node: <Toast {...text} onDismiss={dismissRow} />,
+      node: (
+        <Toast
+          {...text}
+          action={
+            id === null
+              ? undefined
+              : {
+                  label: "撤销",
+                  onClick: () => void undoDeleteOriginal(id, other.skill, keptKey, pane.at),
+                }
+          }
+          onDismiss={dismissRow}
+        />
+      ),
     });
   };
 

@@ -621,16 +621,13 @@ test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mu
   assert.doesNotMatch(uiCss, /ss-btn--link|ss-btn--quiet:disabled|ss-btn--external/);
 });
 
-test("Button 墨窗上：浅描边键——1px face 边与字、透明底、不抬起", () => {
-  const html = render(Button, { children: "撤销", size: "compact", onDark: true, onClick: noop });
-  assert.match(html, /class="ss-btn ss-btn--compact is-on-dark"/);
-  const rule = cssRule(uiCss, ".ss-btn.is-on-dark");
-  assert.match(rule, /border:\s*1px solid var\(--face\)/);
-  assert.match(rule, /color:\s*var\(--face\)/);
-  assert.match(rule, /box-shadow:\s*none/);
-  assert.match(cssRule(uiCss, ".ss-btn.is-on-dark:hover:not(:disabled)"), /box-shadow:\s*none/);
-  // 墨窗里只有这一种键：安静键、外链的墨面写法随它们一起删了
-  assert.doesNotMatch(uiCss, /\.ss-btn--(quiet|external)\.is-on-dark/);
+// 2026-09-25 提示条一律是纸、墨色浮窗只给提示框：墨面上的浅描边键随墨窗一起删掉
+test("没有墨面浅描边键：Button / IconButton 不再有 onDark，样式里没有 is-on-dark", () => {
+  assert.doesNotMatch(uiCss, /is-on-dark/);
+  assert.doesNotMatch(
+    readFileSync(new URL("../src/ui/Button.tsx", import.meta.url), "utf8"),
+    /onDark/,
+  );
 });
 
 test("IconButton：28×28，title 必填且同时作 aria-label；不带计数", () => {
@@ -1343,8 +1340,8 @@ test("TruncTip：内容只是触发文字的完整值，文字真被截断才出
 
 // ===== 提示条 =====
 
-test("Toast notice：墨窗，40px 指示窗 + 动词 + 图标 + 名字 + 浅描边键 + ×", () => {
-  // 成功是纸、需要注意是墨（DESIGN「反馈的两种形态」）：墨窗的形制用明确要了 notice 档的来验
+test("Toast notice：纸窗（paper + hairline 边），40px 记号栏 + 动词 + 图标 + 名字 + 默认键紧凑 + ×；不用墨", () => {
+  // 2026-09-25：提示条一律是纸，失败与成功靠句首记号与否定动词分（DESIGN「失败提示」）
   const html = render(Toast, {
     tier: "notice",
     kind: "success",
@@ -1362,24 +1359,24 @@ test("Toast notice：墨窗，40px 指示窗 + 动词 + 图标 + 名字 + 浅描
   assert.match(html, /class="ss-toast__verb">写进</);
   assert.match(html, /role="img" aria-label="Claude Code"/);
   assert.match(html, /class="ss-toast__names">excalidraw、notion</);
-  assert.match(html, /class="ss-btn ss-btn--compact is-on-dark">撤销</);
+  assert.match(html, /class="ss-btn ss-btn--compact">撤销</);
   assert.match(html, /aria-label="关闭"/);
   assert.equal(TOAST_DWELL_MS.success, 6000);
   const rule = cssRule(uiCss, ".ss-toast--notice");
-  assert.match(rule, /background:\s*var\(--ink\)/);
+  assert.match(rule, /background:\s*var\(--paper\)/);
+  assert.match(rule, /border:\s*var\(--border-float\)/);
   assert.match(rule, /max-width:\s*400px/);
-  assert.match(rule, /color:\s*var\(--face\)/);
-  // 墨窗无外框；float 12 圆角 + 唯一的浮层投影
-  assert.doesNotMatch(rule, /(^|\s)border(-(?!radius)[a-z]+)?:/);
+  assert.match(rule, /color:\s*var\(--ink\)/);
+  assert.doesNotMatch(rule, /var\(--ink\);[^}]*background|background:\s*var\(--ink\)/);
   assert.match(rule, /border-radius:\s*var\(--radius-float\)/);
   assert.match(rule, /box-shadow:\s*var\(--elev-float\)/);
-  // 墨面上的次字 ctl-border，分隔线 ink-mute
-  assert.match(cssRule(uiCss, ".ss-toast--notice .ss-toast__sep"), /color:\s*var\(--ctl-border\)/);
   assert.match(
     cssRule(uiCss, ".ss-toast__indicator"),
-    /border-right:\s*1px solid var\(--ink-mute\)/,
+    /border-right:\s*1px solid var\(--hairline\)/,
   );
   assert.match(cssRule(uiCss, ".ss-toast__indicator"), /width:\s*40px/);
+  // 墨色浮窗只剩提示框：没有哪一种提示条是墨底
+  assert.doesNotMatch(uiCss, /\.ss-toast[^{]*\{[^}]*background:\s*var\(--ink\)/);
 });
 
 test("Toast 名字超过两个写 +N，不逐个列", () => {
@@ -1468,7 +1465,7 @@ test("Toast 成功：不给档位也是纸窗（paper + hairline 边 + float 12 
   assert.match(rule, /border-radius:\s*var\(--radius-float\)/);
   assert.match(rule, /box-shadow:\s*var\(--elev-float\)/);
   assert.match(rule, /height:\s*var\(--control-h-row\)/);
-  // 做不成 / 部分失败不给档位时是墨窗
+  // 做不成 / 部分失败不给档位时是带记号栏的纸窗（notice 档）
   assert.match(render(Toast, { kind: "cannot", verb: "没加上" }), /ss-toast--notice/);
 });
 

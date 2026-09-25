@@ -36,8 +36,6 @@ interface ButtonBase {
   title?: string;
   /// 图标在文字左边（`AddButton` 的 `+` 就是这么来的）
   icon?: ReactNode;
-  /// 放在墨窗上：默认键变浅描边键（1px `face` 边与字、不抬起）。墨窗里只有这一种键
-  onDark?: boolean;
   /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
   "aria-describedby"?: string;
   /// 开关式的键（`管理来源` / `收起`）：展开着没有、展开的是哪一块
@@ -87,7 +85,6 @@ export function Button(props: ButtonProps) {
     title,
     icon,
     ariaLabel,
-    onDark,
     disabled,
     disabledReason,
     "aria-describedby": describedBy,
@@ -102,7 +99,6 @@ export function Button(props: ButtonProps) {
   if (leave) classes.push("ss-btn--quiet");
   if (size === "compact" && !leave) classes.push("ss-btn--compact");
   if (size === "row" && !leave) classes.push("ss-btn--row");
-  if (onDark) classes.push("is-on-dark");
   if (icon && children === undefined) classes.push("ss-btn--icon");
 
   return (
@@ -133,7 +129,6 @@ export interface IconButtonProps {
   /// **必填**：同时作 `aria-label`。图标不替代文案，文案挪到这里
   title: string;
   onClick?: () => void;
-  onDark?: boolean;
   /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
   disabledReason?: string;
   /// 禁用原因提示框的优先方向（默认上方）
@@ -151,14 +146,12 @@ export function IconButton({
   icon,
   title,
   onClick,
-  onDark,
   disabledReason,
   tipPlacement,
   tipNowrap,
   "aria-describedby": describedBy,
 }: IconButtonProps) {
   const classes = ["ss-iconbtn"];
-  if (onDark) classes.push("is-on-dark");
   const disabled = Boolean(disabledReason);
   return (
     <ReasonTip reason={disabledReason} placement={tipPlacement} nowrap={tipNowrap}>

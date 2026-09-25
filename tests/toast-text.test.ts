@@ -196,17 +196,39 @@ test("删除 skill 原件的确认框：标题一问，正文写废纸篓与链�
   setHome(null);
 });
 
-test("删除 skill 原件：删完例行一行不带撤销", async () => {
+test("删除 skill 原件：能撤销时一行 ✓ 已删除（撤销键由调用方挂）；进了废纸篓才说在废纸篓里", async () => {
   const { deletedOriginalToast } = await import("../src/toastText.ts");
-  const t = deletedOriginalToast("defuddle");
-  assert.equal(t.tier, "routine");
-  assert.equal(t.kind, "success");
-  assert.equal(t.verb, "已删除");
-  assert.deepEqual(t.names, ["defuddle"]);
-  assert.equal(t.reason, "在废纸篓里");
+  const held = deletedOriginalToast("defuddle", true);
+  assert.equal(held.tier, "routine");
+  assert.equal(held.kind, "success");
+  assert.equal(held.verb, "已删除");
+  assert.deepEqual(held.names, ["defuddle"]);
+  assert.equal(held.reason, undefined);
+  assert.equal(deletedOriginalToast("defuddle").reason, "在废纸篓里");
 });
 
-test("删除 MCP 原件的确认框：别的 agent 里的同名定义不受影响；Claude Local 路径后接项目名", async () => {
+test("撤销删原件：全回来 ✓ 已恢复；链接没回来是部分失败；原件没放回是做不成", async () => {
+  const { restoredOriginalToast } = await import("../src/toastText.ts");
+  const ok = restoredOriginalToast("defuddle", { bodyBack: true, failed: [] });
+  assert.equal(ok.kind, "success");
+  assert.equal(ok.verb, "已恢复");
+  const part = restoredOriginalToast("defuddle", {
+    bodyBack: true,
+    failed: ["链接之后又被改过，没有指回去"],
+  });
+  assert.equal(part.kind, "partial");
+  assert.equal(part.reason, "1 条链接没恢复：链接之后又被改过，没有指回去");
+  const no = restoredOriginalToast("defuddle", {
+    bodyBack: false,
+    failed: ["原处已经有同名的东西，没有放回"],
+  });
+  assert.equal(no.kind, "cannot");
+  assert.equal(no.verb, "没恢复");
+  assert.equal(no.reason, "原处已经有同名的东西，没有放回");
+});
+
+/// DESIGN「删除原件」MCP：点任何一格 ⦿ 都先确认，正文说后果（不能再用 + 别处怎样 + 可以撤销）
+test("点 ⦿ 的确认框：说后果——别的 agent 里有同名的不受影响、没有就说这个位置里就没有它了；Claude Local 路径后接项目名", async () => {
   const { deleteMcpOriginalConfirm, deletedMcpOriginalToast } = await import("../src/toastText.ts");
   const { setHome } = await import("../src/pathText.ts");
   setHome("/Users/jia");
@@ -217,7 +239,7 @@ test("删除 MCP 原件的确认框：别的 agent 里的同名定义不受影�
     path: "/Users/jia/.codex/config.toml",
   });
   assert.equal(codexDel.title, "从 Codex 删除 weibo-search？");
-  assert.equal(codexDel.body, "删掉 Codex 配置里的这份定义，Claude Code 里的那份不受影响");
+  assert.equal(codexDel.body, "删除后 Codex 不能再用它；Claude Code 里的那份不受影响。可以撤销");
   assert.deepEqual(codexDel.paths, [{ label: "配置", path: "~/.codex/config.toml" }]);
   const local = deleteMcpOriginalConfirm({
     agent: "Claude Code local",
@@ -226,14 +248,94 @@ test("删除 MCP 原件的确认框：别的 agent 里的同名定义不受影�
     path: "/Users/jia/.claude.json",
     project: "CardBox",
   });
-  assert.equal(local.body, "删掉 Claude Code local 配置里的这份定义");
+  assert.equal(local.title, "从 Claude Code local 删除 weibo-search？");
+  assert.equal(local.body, "删除后 Claude Code local 不能再用它；这个位置里就没有它了。可以撤销");
   assert.deepEqual(local.paths, [{ label: "配置", path: "~/.claude.json · CardBox" }]);
   setHome(null);
-  // 删完：`✓ 已从 [Codex] 删除 weibo-search`（撤销由调用方给）
+  // 删完：`✓ 已从 [Codex] 删除 weibo-search`（撤销由调用方给，一律给）
   const t = deletedMcpOriginalToast("weibo-search", codex);
   assert.equal(t.tier, "routine");
+  assert.equal(t.kind, "success");
   assert.equal(t.verb, "已从");
   assert.equal(t.verbTail, "删除");
   assert.deepEqual(t.names, ["weibo-search"]);
   assert.deepEqual(t.agents, [codex]);
+});
+
+/// DESIGN「表格」MCP 条「选择行」：全有（⦿）时按下确认一次，标题带数量，正文先列名字再说后果
+test("选择行批量删除的确认框：标题 `从 Codex 删除 3 个 MCP？`，正文先列名字，后果同单格", async () => {
+  const { deleteMcpBatchConfirm } = await import("../src/toastText.ts");
+  const { setHome } = await import("../src/pathText.ts");
+  setHome("/Users/jia");
+  const some = deleteMcpBatchConfirm({
+    agents: ["Codex"],
+    names: ["weibo-search", "notion", "fmt"],
+    others: ["Claude Code"],
+    paths: [{ path: "/Users/jia/.codex/config.toml" }],
+  });
+  assert.equal(some.title, "从 Codex 删除 3 个 MCP？");
+  assert.equal(
+    some.body,
+    "weibo-search、notion、fmt。删除后 Codex 不能再用它们；Claude Code 里的同名定义不受影响。可以撤销",
+  );
+  assert.deepEqual(some.paths, [{ label: "配置", path: "~/.codex/config.toml" }]);
+  // 「所有位置」：几个 agent 一起写；别处都没有了；同一个文件的几个作用域各一行，完全相同的路径只写一行
+  const all = deleteMcpBatchConfirm({
+    agents: ["Codex", "Claude Code local"],
+    names: ["notion", "fmt"],
+    others: [],
+    paths: [
+      { path: "/Users/jia/.codex/config.toml" },
+      { path: "/Users/jia/.claude.json", project: "CardBox" },
+      { path: "/Users/jia/.codex/config.toml" },
+    ],
+  });
+  assert.equal(all.title, "从 Codex、Claude Code local 删除 2 个 MCP？");
+  assert.equal(
+    all.body,
+    "notion、fmt。删除后 Codex、Claude Code local 不能再用它们；这个位置里就没有它们了。可以撤销",
+  );
+  assert.deepEqual(all.paths, [
+    { label: "配置", path: "~/.codex/config.toml" },
+    { label: "配置", path: "~/.claude.json · CardBox" },
+  ]);
+  setHome(null);
+  // 名字太多：列前 12 个，其余写 `等 N 个`（标题已有总数）
+  const many = deleteMcpBatchConfirm({
+    agents: ["Codex"],
+    names: Array.from({ length: 14 }, (_, i) => `m${i + 1}`),
+    others: [],
+    paths: [],
+  });
+  assert.equal(many.title, "从 Codex 删除 14 个 MCP？");
+  assert.ok(many.body.startsWith("m1、m2、m3、m4、m5、m6、m7、m8、m9、m10、m11、m12 等 14 个。"));
+});
+
+test("批量删除的结果：`✓ 已从 [Codex] 删除`（调用方写数量、给撤销）；全没删掉用否定动词；部分失败带计数", async () => {
+  const { toastFor, batchBusyText } = await import("../src/toastText.ts");
+  const ok = toastFor("delete", {
+    done: [
+      { name: "notion", agent: codex },
+      { name: "fmt", agent: codex },
+    ],
+  });
+  assert.equal(ok.tier, "routine");
+  assert.equal(ok.kind, "success");
+  assert.equal(ok.verb, "已从");
+  assert.equal(ok.verbTail, "删除");
+  assert.deepEqual(ok.agents, [codex]);
+  const none = toastFor("delete", {
+    done: [],
+    failed: [{ name: "fmt", agent: codex, reason: "这一项的写法无法安全地单独拿掉，没有改动" }],
+  });
+  assert.equal(none.kind, "cannot");
+  assert.equal(none.verb, "没删掉");
+  const partial = toastFor("delete", {
+    done: [{ name: "notion", agent: codex }],
+    failed: [{ name: "fmt", agent: codex, reason: "配置在预览后发生变化" }],
+  });
+  assert.equal(partial.kind, "partial");
+  assert.equal(partial.verb, "删除");
+  assert.deepEqual(partial.tally, { done: 1, failed: 1 });
+  assert.equal(batchBusyText("delete", "Codex"), "正在从 Codex 删除");
 });

@@ -1,12 +1,5 @@
-import { copyView, viewOf, type McpCellView, type McpDotState } from "./mcpCellState.ts";
-import type {
-  McpDiff,
-  McpEntry,
-  McpFieldValue,
-  McpLocation,
-  McpOverview,
-  McpReportEntry,
-} from "./types.ts";
+import { presentView, viewOf, type McpCellView, type McpDotState } from "./mcpCellState.ts";
+import type { McpDiff, McpEntry, McpFieldValue, McpLocation, McpOverview } from "./types.ts";
 
 export interface McpDomainRow {
   name: string;
@@ -23,10 +16,10 @@ export interface McpDomain {
 
 /**
  * 一行在一列上的圆点。同名服务合并成一行后，这一列上每个来源各有一个格，要合成一个圆点：
- * - 这一列就是本行的来源（`mcpGroupOf`，「来源」列写的那一处）：原件环，不能点
- * - 这一列自己也有一份定义（它自己的条目带 `own`，或别的来源看它是 `equal` / `sameEndpoint` /
- *   `conflict`）：副本，实心、可点（点＝从这个位置移除）。和来源那份一不一样不影响能不能移除——
- *   差异是行级事实，交给 `differingSourceIds` 做成 `2 份不一样`；移除一份不一样的副本才给撤销
+ * - 这一列自己有一份定义（它是本行的来源 `mcpGroupOf`，或它自己的条目带 `own`，或别的来源看它是
+ *   `equal` / `sameEndpoint` / `conflict`）：⦿、可点（点＝确认后从这个 agent 的配置里删掉）。
+ *   是不是来源、和来源那份一不一样都不影响（DESIGN「MCP 格子只有两种：⦿ 有、○ 没有」）——
+ *   差异是行级事实，交给 `differingSourceIds` 做成 `2 份不一样`
  * - 再看「这儿还没有」，最后才是两种不可点的异常
  */
 export function cellViewOf(
@@ -55,7 +48,6 @@ export function cellViewOf(
     location: labelOf(targetId),
     source: labelOf(mcpGroupOf(row)),
   };
-  if (targetId === mcpGroupOf(row)) return viewOf("own", ctx);
   const holds = cells.some(
     (cell) =>
       cell.state === "own" ||
@@ -63,7 +55,7 @@ export function cellViewOf(
       cell.state === "sameEndpoint" ||
       cell.state === "conflict",
   );
-  if (holds) return copyView();
+  if (targetId === mcpGroupOf(row) || holds) return presentView();
   // 剩下的这一列上都还没有定义；conflict 已在上面摘掉，类型上也进不了 viewOf
   const dots = cells.filter(
     (cell): cell is (typeof cells)[number] & { state: McpDotState } => cell.state !== "conflict",
@@ -267,23 +259,6 @@ export function differingFields(row: McpDomainRow, targetIds: Set<string>): stri
   }
   // 有一处说不清是哪个字段，就不能只报 url——那等于说其余都一样
   return unknown ? [] : [...fields];
-}
-
-/**
- * 一次写进 / 移除的结果提示条给不给 `撤销`（DESIGN「提示条的位置」「撤销按钮与 skill 同一条规则」）：
- * 再点一次格子、再按一次同一个点就是准确反操作时不给（`⌘Z` 始终可用，不看这里）。
- * - `reversible`：再按一次恰好撤回——单格一律是；批量写进时选中的里这一列原本一份副本都没有才是。
- *   原本已有一部分时再按会连原有的一起移除、回不到原来有有无无的样子，给（2026-09-25 评审第二轮）
- * - 移除了一份**与来源原版不一样**的副本（`identical === false`）：再点只能写回原版，
- *   改过的内容回不来，只有撤销（从快照原样还原）是准确的退路
- */
-export function mcpUndoShown(
-  op: "write" | "remove",
-  entries: McpReportEntry[],
-  reversible: boolean,
-): boolean {
-  if (!reversible) return true;
-  return op === "remove" && entries.some((e) => e.outcome === "removed" && e.identical === false);
 }
 
 /// 行的来源位置（「来源」列写它）：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）
