@@ -512,7 +512,8 @@ test("新手提示条的两个插槽：来源筛选下 / 表头上，与空态�
   assert.match(render(Matrix, { ...base, hint, hintOpen: true }), /class="mx is-hinting"/);
   assert.match(render(Matrix, { ...base, hint, hintOpen: false }), /^<div class="mx">/);
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  assert.match(css, /\.mx\.is-hinting > \.mx-bar \{\s*padding-bottom: 0;/);
+  assert.match(css, /\.mx\.is-hinting > \.mx-bar \{\s*padding-bottom: var\(--space-md\);/);
+  assert.match(css, /\.mx\.is-hinting > \.mx-hint \{\s*margin-top: calc\(-1 \* var\(--space-md\)\);/);
   assert.doesNotMatch(css, /\.ss-hint/);
 });
 

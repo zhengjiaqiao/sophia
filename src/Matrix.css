@@ -44,10 +44,19 @@
   width: 776px;
 }
 
-/* 提示条开着（Matrix 的 hintOpen）：来源筛选到提示条就是提示条自带的上外距 16，来源筛选的下内边距让成 0；
-   收起后回到表格上距 18。两边同一时长、同一缓动，合起来 18 ↔ 16，表头不跳 */
+/* 提示条开着（Matrix 的 hintOpen）：来源筛选到提示条 16、提示条到表头 16。来源筛选的下内边距收成 16
+   （吸顶区的高度随它，列头吸在它下面）；提示条自带的上外距 16 由插槽的 -16 抵掉（两者折叠成 0）。
+   三处同一时长、同一缓动，收起后回到表格上距 18 */
 .mx.is-hinting > .mx-bar {
-  padding-bottom: 0;
+  padding-bottom: var(--space-md);
+}
+
+.mx > .mx-hint {
+  transition: margin-top var(--dur-drawer) var(--ease-mech);
+}
+
+.mx.is-hinting > .mx-hint {
+  margin-top: calc(-1 * var(--space-md));
 }
 
 /* ===== 面板 ===== */
