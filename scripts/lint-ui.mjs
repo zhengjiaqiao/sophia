@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 界面规范检查：把 docs/DESIGN.md 的硬性约束变成可执行的断言。
+// 界面规范检查：把 docs/DESIGN.md（token、原则、视觉语言）与 docs/DESIGN-components.md（组件规格）的
+// 硬性约束变成可执行的断言；规则背后的裁决记在 docs/DESIGN-decisions.md。
 // 画稿版在 .superpowers/design/lint-artboards.mjs，规则同源。
 // 用法：node scripts/lint-ui.mjs [文件或目录...]，不传则检查 src/。
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
@@ -48,7 +49,7 @@ const FADE_STOPS = new Set(["var(--face)", "var(--paper)", "var(--shell)", "tran
 const ELEV_DEF =
   /^\s*--(?:elev-float|recess-(?:input|tabs|track)|raise(?:-hover|-pressed|-ink|-ink-pressed)?|accent-halo)\s*:.*$/gm;
 
-/// 指示点的灯罩环（DESIGN「开关 › 指示点」）：一圈 2px 同色 14% 的平色环。
+/// 指示点的灯罩环（DESIGN-components「指示点 Indicator」）：一圈 2px 同色 14% 的平色环。
 /// 它不是层次（不说离机面多高），只许出现在指示点的规则里
 const HALO = "0 0 0 2px var(--accent-halo)";
 const HALO_SELECTOR = /\.ss-indicator/;

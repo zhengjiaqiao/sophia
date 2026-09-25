@@ -37,7 +37,6 @@ import {
   Tooltip,
   TruncTip,
 } from "./ui/index.ts";
-import type { ConfirmAnchor } from "./ui/index.ts";
 import { defaultTargets, loadImportMemory, saveImportMemory } from "./pages/importDefaults.ts";
 import { removeConfirmTitle, removeTitle, type DomainRef } from "./pages/sourcesView.ts";
 import type {
@@ -65,7 +64,7 @@ interface PendingRemove {
   row: SourceRowData;
   body: string;
   commit: () => Promise<ToastText>;
-  anchor: ConfirmAnchor;
+  anchor: AnchorRect;
   /// 按下那一刻触发控件的位置：结果锚在这里（行被移除之后也还在原处）
   at: AnchorRect;
   align: ToastAlign;

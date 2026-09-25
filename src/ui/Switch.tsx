@@ -143,9 +143,6 @@ export function Switch({
 }
 
 export interface IndicatorProps {
-  /// **已废弃，别再传**：指示点只剩「开」这一态，关着由调用方不渲染它。
-  /// 暂留给还没迁完的侧栏（`<Indicator on …/>`），页面迁移后删掉；传 false 仍什么都不画
-  on?: boolean;
   /// 读屏名。不给就当装饰（旁边的名字已经说了状态）
   label?: string;
 }
@@ -154,8 +151,7 @@ export interface IndicatorProps {
 /// 灯罩环（`--accent-halo`，平的色环，不模糊、不发光）。橙的**含义**只有一个「开着 / 在生效」，
 /// 形态有两种：开关刻线与这颗点。**只在看不到开关的地方出现**：侧栏 agent 名后（这个 agent 上有能力开着）。
 /// 关着不画——没有灰点，是否渲染由调用方的条件决定
-export function Indicator({ on = true, label }: IndicatorProps) {
-  if (!on) return null;
+export function Indicator({ label }: IndicatorProps) {
   // `is-on` 留在类名上：只剩这一态，样式不靠它；页面与测试据它认「开着的灯」
   return label ? (
     <span className="ss-indicator is-on" role="img" aria-label={label} title={label} />
@@ -206,7 +202,7 @@ export function Checkbox({ checked, onChange, label, disabledReason }: CheckboxP
 
 /// 勾选框里的记号：勾上＝统一对勾 `IconTick`（10px、1.8），半选＝8×2 短横 `IconDash`，没勾＝不画。
 /// `Checkbox` 与画出来的方框 `CheckMark`（CheckRow.tsx）共用这一份，同一个记号在全应用里只有一个画法。
-/// 页面不直接用它：整行是按钮的列表用 `CheckRow` / `CheckMark`（`pages/CheckMark.tsx`、模型列表迁完后收回公开面）
+/// 不在公开面上：页面用 `Checkbox`，整行是按钮的列表用 `CheckRow` / `CheckMark`
 export function CheckboxGlyph({ checked }: { checked: boolean | "mixed" }) {
   if (checked === false) return null;
   if (checked === true) return <IconTick />;

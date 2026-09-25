@@ -1,4 +1,5 @@
-/// 展示组件的渲染断言（UI v4：docs/DESIGN.md「材料与工艺」及其下各节，画板 States / Marks / Feedback）。
+/// 展示组件的渲染断言（UI v4：docs/DESIGN.md「材料与工艺」、组件规格 docs/DESIGN-components.md、
+/// 裁决 docs/DESIGN-decisions.md；画板 States / Marks / Feedback）。
 /// 渲染方式见 ui-render.ts（node:test + typescript 转 JSX + react-dom/server）。
 ///
 /// 旧断言里钉住 v3 设计的那几条（ghost pill 按钮、反色按钮当开关、带框方标签、
@@ -22,19 +23,19 @@ function cssRule(css: string, selector: string): string {
   return match[1];
 }
 
-const { StateDot, DupMark, DOT_LABEL } = await import("../src/ui/StateDot.tsx");
+const { StateDot, DOT_LABEL } = await import("../src/ui/StateDot.tsx");
 const { Button, IconButton, AddButton } = await import("../src/ui/Button.tsx");
 const { Switch, Checkbox, Indicator } = await import("../src/ui/Switch.tsx");
 const { Tabs } = await import("../src/ui/Tabs.tsx");
 const { Cap } = await import("../src/ui/Cap.tsx");
-const { Chip, ModelChip } = await import("../src/ui/Chip.tsx");
+const { Chip } = await import("../src/ui/Chip.tsx");
+const { ModelChip } = await import("../src/ui/ModelChip.tsx");
 const { Tag } = await import("../src/ui/Tag.tsx");
 const { Tooltip, TruncTip, isClipped, TIP_DELAY_MS, PINNED_TIP_MS, TIP_IDLE, nextTip } =
   await import("../src/ui/Tooltip.tsx");
 const { Spinner, BUSY_DELAY_MS } = await import("../src/ui/Spinner.tsx");
 const { BusySlot, BusyToast } = await import("../src/ui/BusySlot.tsx");
 const { Toast, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } = await import("../src/ui/Toast.tsx");
-const { ErrorBanner } = await import("../src/ui/ErrorBanner.tsx");
 const { NoticePanel } = await import("../src/ui/NoticePanel.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
 const { PushedPage, holdInert } = await import("../src/ui/PushedPage.tsx");
@@ -47,7 +48,6 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
   const ui = await import("../src/ui/index.ts");
   const exported = [
     "StateDot",
-    "DupMark",
     "Button",
     "IconButton",
     "AddButton",
@@ -59,13 +59,11 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "Tooltip",
     "Spinner",
     "Toast",
-    "ErrorBanner",
     "NoticePanel",
     "Confirm",
     "PushedPage",
     "Tabs",
     "Indicator",
-    "CheckboxGlyph",
     "CheckMark",
     "CheckRow",
     "Menu",
@@ -97,8 +95,17 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
   assert.equal((ui as Record<string, unknown>).Busy, undefined);
   // Cap 已恢复（2026-09-24 字体回到原设计）；它的出口 Plain 不恢复（大写只经 Cap 这一条路）
   assert.equal((ui as Record<string, unknown>).Plain, undefined);
-  // 2026-09-25 设计系统梳理删掉的死件：整窗二级页、没人用的 agent 标记、第二枚 ›、JS 里镜像 CSS 的时长
-  for (const gone of ["SubPage", "AgentMark", "IconChevronRight", "DRAWER_MS"]) {
+  // 2026-09-25 设计系统梳理删掉的死件：整窗二级页、没人用的 agent 标记、第二枚 ›、JS 里镜像 CSS 的时长；
+  // 四路迁完之后删掉的转接：错误横幅（并进 NoticePanel scope="app"）、勾选框记号（CheckRow 内部用）
+  for (const gone of [
+    "SubPage",
+    "AgentMark",
+    "IconChevronRight",
+    "DRAWER_MS",
+    "ErrorBanner",
+    "CheckboxGlyph",
+    "DupMark",
+  ]) {
     assert.equal((ui as Record<string, unknown>)[gone], undefined, gone);
   }
 });
@@ -245,7 +252,7 @@ test("tokens：V4 的 14 个色、六档字号、V4 圆角、层次 token、28/2
     assert.match(tokensCss, new RegExp(`--${name}: ${esc};`), name);
   }
   assert.match(tokensCss, /--veil-opacity:\s*0\.16;/);
-  // 指示点的灯罩环：accent 的 14%（DESIGN「开关 › 指示点」，2026-09-25 取自拉姆斯版原型）
+  // 指示点的灯罩环：accent 的 14%（DESIGN-components「指示点 Indicator」，2026-09-25 取自拉姆斯版原型）
   assert.match(tokensCss, /--accent-halo: rgba\(224, 101, 42, 0\.14\);/);
   // 禁用边：实线 hairline（D20）
   assert.match(tokensCss, /--border-disabled: 1px solid var\(--hairline\);/);
@@ -510,16 +517,31 @@ test("StateDot 禁用：muted 退到 ink-faint（刚点亮的反色闪走格子�
   assert.match(cssRule(uiCss, ".ss-dot.is-muted"), /color:\s*var\(--ink-faint\)/);
 });
 
-test("DupMark：名字后 ×2", () => {
-  const row = render(DupMark, {});
-  assert.match(row, /class="ss-dup ss-dup--row"/);
-  assert.match(row, />×2</);
-  assert.match(row, /aria-label="同名：有 2 份"/);
-  assert.match(render(DupMark, { count: 3 }), />×3</);
+// 2026-09-26：同名 ×2 并进 Tag 的 count 一档（原 DupMark）
+test("Tag count：名字后 ×2——12 tabular ink-faint，读屏读「同名：有 2 份」", () => {
+  const row = render(Tag, { tone: "count", label: "同名：有 2 份", children: "×2" });
+  assert.equal(
+    row,
+    '<span class="ss-tag ss-tag--count" title="同名：有 2 份" role="img" aria-label="同名：有 2 份">×2</span>',
+  );
   // 计数：12 tabular，不换等宽字族
-  const rule = cssRule(uiCss, ".ss-dup");
-  assert.match(rule, /font-family:\s*var\(--font-ui\)/);
+  assert.match(cssRule(uiCss, ".ss-tag"), /font-family:\s*var\(--font-ui\)/);
+  assert.match(cssRule(uiCss, ".ss-tag"), /font-size:\s*var\(--size-label\)/);
+  const rule = cssRule(uiCss, ".ss-tag--count");
   assert.match(rule, /font-variant-numeric:\s*tabular-nums/);
+  assert.match(rule, /color:\s*var\(--ink-faint\)/);
+  // 带提示框：包层接住焦点，title 让给提示框
+  const tipped = render(Tag, {
+    tone: "count",
+    label: "同名：有 2 份",
+    tip: "这份 8 KB",
+    children: "×2",
+  });
+  assert.match(
+    tipped,
+    /<span class="ss-tipwrap" tabindex="0"[^>]*><span class="ss-tag ss-tag--count has-tip" role="img" aria-label="同名：有 2 份">×2/,
+  );
+  assert.doesNotMatch(uiCss, /\.ss-dup/);
 });
 
 // ===== 按钮 =====
@@ -782,14 +804,16 @@ test("Switch regular 34×20 / compact 28×16：role=switch，读屏名必填；�
 });
 
 // 2026-09-25：指示点只剩「开」一态（侧栏 agent 名后），外一圈 2px 灯罩环；关态灰点、不可用空心、紧凑档都删了
-test("Indicator：6px accent 圆点 + 2px 灯罩环（--accent-halo）；关着不画；橙只出现在开关与指示点", () => {
-  assert.equal(render(Indicator, { on: false }), "");
+test("Indicator：6px accent 圆点 + 2px 灯罩环（--accent-halo）；关着由调用方不渲染；橙只出现在开关与指示点", () => {
+  // 只剩「开」一态：没有 on 这个参数，关着就不渲染它
+  const src = readFileSync(new URL("../src/ui/Switch.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /on\?: boolean/);
   assert.equal(
-    render(Indicator, { on: true }),
+    render(Indicator, {}),
     '<span class="ss-indicator is-on" aria-hidden="true"></span>',
   );
   assert.match(
-    render(Indicator, { on: true, label: "第三方模型开着" }),
+    render(Indicator, { label: "第三方模型开着" }),
     /class="ss-indicator is-on" role="img" aria-label="第三方模型开着"/,
   );
   const rule = cssRule(uiCss, ".ss-indicator");
@@ -926,7 +950,7 @@ test("Checkbox 14px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 Che
   assert.match(disabled, /border-color:\s*var\(--hairline\)/);
   assert.match(disabled, /background:\s*transparent/);
   // 整行是按钮的列表画出来的方框与 Checkbox 同一个记号
-  const { CheckMark } = await import("../src/pages/CheckMark.tsx");
+  const { CheckMark } = await import("../src/ui/CheckRow.tsx");
   const drawn = render(CheckMark, { on: true });
   const glyph = (html: string) => html.match(/<svg[\s\S]*<\/svg>/)?.[0];
   assert.ok(glyph(on));
@@ -1208,7 +1232,7 @@ test("Tooltip 时机：表格内 700ms、表格外 400ms", () => {
   assert.equal(TIP_DELAY_MS.default, 400);
 });
 
-// ===== 点了做不了的控件，按下当即说明原因（DESIGN「提示框」） =====
+// ===== 点了做不了的控件，按下当即说明原因（DESIGN-components「提示框 Tooltip」） =====
 
 /// 禁用控件自带的原因包层：接住焦点、挂 aria-describedby、气泡里是原因
 function assertReasonWrap(html: string, reason: string) {
@@ -1400,7 +1424,7 @@ test("TruncTip：内容只是触发文字的完整值，文字真被截断才出
 // ===== 提示条 =====
 
 test("Toast notice：纸窗（paper + hairline 边），40px 记号栏 + 动词 + 图标 + 名字 + 默认键紧凑 + ×；不用墨", () => {
-  // 2026-09-25：提示条一律是纸，失败与成功靠句首记号与否定动词分（DESIGN「失败提示」）。
+  // 2026-09-25：提示条一律是纸，失败与成功靠句首记号与否定动词分（DESIGN-decisions「黑条提示全部改纸窗」）。
   // 哪一档只由 kind 定（成功单行、其余带记号栏），没有 tier 这第二个开关
   const html = render(Toast, {
     kind: "partial",
@@ -1666,8 +1690,8 @@ test("提示小窗的动作在等（MCP 撤销）：只锁那颗键，门槛前�
 
 // ===== 错误横幅与行内待办条：大面积的提示用 surface 灰面板，不用黑 =====
 
-// 2026-09-25 设计系统梳理：错误横幅并进灰面板（scope="app"），ErrorBanner 只剩转接层
-test("NoticePanel 应用级（原 ErrorBanner）：满内容宽、主句 15 + 第二行 13 ink-mute、内边距 12 16；ErrorBanner 原样转过来", () => {
+// 2026-09-25 设计系统梳理：错误横幅并进灰面板（scope="app"）；四路迁完后转接层 ErrorBanner 已删
+test("NoticePanel 应用级（原 ErrorBanner）：满内容宽、主句 15 + 第二行 13 ink-mute、内边距 12 16", () => {
   const props = {
     message: "读不到网关列表",
     detail: "配置文件没有读权限",
@@ -1675,7 +1699,6 @@ test("NoticePanel 应用级（原 ErrorBanner）：满内容宽、主句 15 + �
     onClose: noop,
   };
   const html = render(NoticePanel, { scope: "app", ...props });
-  assert.equal(render(ErrorBanner, props), html);
   assert.match(html, /class="ss-noticepanel ss-noticepanel--app" role="alert"/);
   assert.match(html, /class="ss-noticepanel__mark" title="故障" role="img" aria-label="故障"/);
   assert.match(html, /class="ss-noticepanel__detail">配置文件没有读权限</);
@@ -1688,7 +1711,7 @@ test("NoticePanel 应用级（原 ErrorBanner）：满内容宽、主句 15 + �
   assert.match(cssRule(uiCss, ".ss-noticepanel__detail"), /color:\s*var\(--ink-mute\)/);
   assert.doesNotMatch(uiCss, /\.ss-banner/);
   // 页级「路由没在跑」不可关
-  assert.doesNotMatch(render(ErrorBanner, { message: "路由没在跑" }), /关闭/);
+  assert.doesNotMatch(render(NoticePanel, { scope: "app", message: "路由没在跑" }), /关闭/);
 });
 
 test("NoticePanel 节：满这一节的宽，主句占满中间、可折行，键推到右端", () => {
@@ -1716,14 +1739,10 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认键紧凑（纸面）
   });
   // 不给范围就是挂在一行下面（row）
   assert.match(html, /class="ss-noticepanel ss-noticepanel--row" role="status"/);
-  // 第二颗键的旧名 link 还认（页面迁移后删）
-  assert.equal(
-    render(NoticePanel, {
-      message: "改动要重启 Codex 才生效",
-      action: { label: "重启", onClick: noop },
-      link: { label: "稍后", onClick: noop },
-    }),
-    html,
+  // 第二颗键的旧名 link 已删（四路迁完）
+  assert.doesNotMatch(
+    readFileSync(new URL("../src/ui/NoticePanel.tsx", import.meta.url), "utf8"),
+    /\blink\?:/,
   );
   assert.match(html, /aria-label="要你动手"/);
   assert.match(html, /class="ss-btn ss-btn--compact">重启</);
@@ -2079,8 +2098,11 @@ test("AgentIcon：没图标的降级成首字母方块（14 方、mark 4 圆角�
 test("Empty 首次扫描（busy）：24 宽忙碌刻度 + 一句忙什么（自创转盘已删）", () => {
   const html = render(Empty, { busy: true, description: "正在读 skill 目录" });
   assert.match(html, /class="ss-empty is-busy"/);
-  // 旧的 kind 轴只剩转接：scanning 等于 busy + 默认那一句
-  assert.equal(render(Empty, { kind: "scanning" }), html);
+  // 旧的 kind 轴已删（四路迁完）：现状一句与忙不忙各由 description / busy 说
+  assert.doesNotMatch(
+    readFileSync(new URL("../src/ui/Empty.tsx", import.meta.url), "utf8"),
+    /EmptyKind|KIND_DEFAULTS|kind\?:/,
+  );
   assert.match(html, /class="ss-spinner ss-spinner--24" width="24"/);
   assert.match(html, /正在读 skill 目录</);
   assert.doesNotMatch(html, /ss-empty__actions/);

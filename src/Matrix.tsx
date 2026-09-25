@@ -227,7 +227,7 @@ export interface MatrixProps {
   keyBusy?: { keyId: string; label: string } | null;
   /// 点格之后真要等的（拆开整个文件夹链接）：过了 0.3 秒门槛，被点那一格正下方浮起刻度 + 一句
   cellBusy?: { rowKey: string; columnId: string; label: string } | null;
-  /// 单格失败：被点那一格正下方的墨窗说原因（与成功同一个位置），8 秒，悬停停表
+  /// 单格失败：被点那一格正下方的提示条（纸窗 + 记号栏）说原因（与成功同一个位置），8 秒，悬停停表
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   onDismissCellNotice?: () => void;
   /// 一行的结果（只留这份）：锚在被按下的那个控件上（`at`：按下那一刻它的位置）

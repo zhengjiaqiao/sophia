@@ -24,8 +24,8 @@ import { originFullNames, originNames, originText } from "./originName";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
-import { BusySlot, Button, DupMark, Empty, Mono, Note, Tooltip, type EmptyArt } from "./ui";
-import type { ConfirmAnchor } from "./ui";
+import { BusySlot, Button, Empty, Mono, Note, Tag, Tooltip, type EmptyArt } from "./ui";
+import type { AnchorRect } from "./layerPlace.ts";
 import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
 
 /// 行键：本体位置 + skill（一页只显示一个域）
@@ -61,7 +61,7 @@ export interface DomainViewProps {
   onDupHover: (row: DomainRow) => void;
   /// 点「只留这份」（抽屉里的键，或右键菜单）：确认框锚在 `anchor` 下面
   /// `at`：按下那一刻触发控件的位置——结果的提示小窗锚在这里，抽屉收起、行重排之后也还在原处
-  onKeepThis: (row: DomainRow, other: DomainRow, at: ConfirmAnchor) => void;
+  onKeepThis: (row: DomainRow, other: DomainRow, at: AnchorRect) => void;
   /// 正在为哪一行体检（点了「只留这份」、确认框还没出来）：那一行的键原位忙碌、不随悬停收起
   keepBusy?: string | null;
   /// 孤链行（原件已不在的失效链接，见 orphanRows.ts）。本页全部，筛选在这里做
@@ -109,7 +109,7 @@ export interface DomainViewProps {
   cellBusy?: { rowKey: string; columnId: string; label: string } | null;
   cellNotice?: { rowKey: string; columnId: string; text: string } | null;
   onDismissCellNotice?: () => void;
-  rowToast?: { rowKey: string; at?: ConfirmAnchor; node: ReactNode } | null;
+  rowToast?: { rowKey: string; at?: AnchorRect; node: ReactNode } | null;
   keyToast?: { keyId: string; node: ReactNode } | null;
   /// 单格成功：浮在被点那一格正下方
   cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
@@ -293,8 +293,9 @@ export default function DomainView(props: DomainViewProps) {
         mark:
           dup.length > 1 ? (
             <span onMouseEnter={() => props.onDupHover(row)} onFocus={() => props.onDupHover(row)}>
-              <DupMark
-                count={dup.length}
+              <Tag
+                tone="count"
+                label={`同名：有 ${dup.length} 份`}
                 tip={
                   other === undefined ? undefined : (
                     <>
@@ -305,7 +306,9 @@ export default function DomainView(props: DomainViewProps) {
                     </>
                   )
                 }
-              />
+              >
+                ×{dup.length}
+              </Tag>
             </span>
           ) : undefined,
         dupGroup: dup.length > 1 ? row.skill : undefined,
@@ -601,7 +604,7 @@ function KeepKey({
   label,
   busy,
 }: {
-  onKeep: (at: ConfirmAnchor) => void;
+  onKeep: (at: AnchorRect) => void;
   label: string;
   /// 点过、正在体检：键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
   busy: boolean;

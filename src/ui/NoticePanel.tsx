@@ -39,8 +39,6 @@ export interface NoticePanelProps {
   action?: NoticePanelAction;
   /// 可选的第二颗键（`稍后`）：同样是默认键紧凑 24——应用内能点的一律默认键
   secondary?: { label: string; onClick: () => void };
-  /// **已废弃**：`secondary` 的旧名，页面迁移后删掉
-  link?: { label: string; onClick: () => void };
   /// 正在执行：`正在接管`
   busy?: string;
   /// 可关的才给右端 ×（行下失败原因可关；接管 / 重新写入这类待办不可关，问题解决自动消失）
@@ -54,11 +52,10 @@ export function NoticePanel({
   detail,
   action,
   secondary,
-  link,
   busy,
   onClose,
 }: NoticePanelProps) {
-  const second = secondary ?? link;
+  const second = secondary;
   const app = scope === "app";
   const keys =
     action || second ? (

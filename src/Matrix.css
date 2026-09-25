@@ -16,7 +16,8 @@
 .mx-bar {
   position: sticky;
   top: var(--mx-top);
-  z-index: 5;
+  /* 低过列头（token 梯子：来源筛选 5 < 列头 6 < 吸顶页面头 7 < 推入页 8） */
+  z-index: calc(var(--z-pushed) - 3);
   width: 776px;
   padding: 10px 0 var(--space-lg);
   background: var(--face);
@@ -56,7 +57,7 @@
 .mx-headwrap {
   position: sticky;
   /* 比来源筛选高一层：选择行上的提示框向下弹，列头的向下弹，都要盖在行上 */
-  z-index: 6;
+  z-index: calc(var(--z-pushed) - 2);
   background: var(--face);
 }
 

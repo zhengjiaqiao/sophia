@@ -1,4 +1,4 @@
-import { DOT_LABEL, DupMark, Indicator, StateDot, Tag } from "../index.ts";
+import { DOT_LABEL, Indicator, StateDot, Tag } from "../index.ts";
 import type { Dot } from "../index.ts";
 import { Block, Family, Specimen } from "./Gallery.tsx";
 
@@ -33,10 +33,7 @@ export function MarksFamily() {
         </Specimen>
       </Block>
 
-      <Block
-        name="Tag · DupMark"
-        guide="名字后的不可点纯文字标识（同名、Codex 不支持、×2）｜ 能点的动作用键"
-      >
+      <Block name="Tag" guide="名字后的不可点纯文字标识（同名、Codex 不支持、×2）｜ 能点的动作用键">
         <Specimen label="strong">
           <Tag>同名</Tag>
         </Specimen>
@@ -48,9 +45,12 @@ export function MarksFamily() {
         <Specimen label="weak">
           <Tag tone="weak">Codex 不支持</Tag>
         </Specimen>
-        <Specimen label="DupMark ×2">
+        <Specimen label="count ×2（同名）">
           <span className="gallery-row">
-            defuddle <DupMark />
+            defuddle{" "}
+            <Tag tone="count" label="同名：有 2 份">
+              ×2
+            </Tag>
           </span>
         </Specimen>
       </Block>

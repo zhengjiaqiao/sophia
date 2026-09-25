@@ -1,4 +1,5 @@
-/* 界面 token：色与字的唯一来源（docs/DESIGN.md front-matter，视觉 V4 · 拉姆斯 / Braun）。
+/* 界面 token：色与字的唯一来源（docs/DESIGN.md front-matter，视觉 V4 · 拉姆斯 / Braun；组件怎么用它们见
+   docs/DESIGN-components.md，为什么这样定见 docs/DESIGN-decisions.md）。
    全项目只有这个文件可以写字面色值，别处一律 var(--…)——scripts/lint-ui.mjs 强制这一条。
 
    字体只引用到的 latin 子集与字重：Barlow 400/500/600（正文、按钮、计数 tabular-nums）、
@@ -30,7 +31,7 @@
   --ink-faint: #6f6f6a; /* 文字里只给计数、等宽读数与不可用的字；勾选框内环、无格短横 */
   --accent: #e0652a; /* 只表示「开着 / 在生效」：开关刻条 + 指示点。别处出现都是缺陷 */
   /* prettier-ignore */
-  --accent-halo: rgba(224, 101, 42, 0.14); /* 指示点外一圈 2px 的灯罩环：同一个橙的 14%，平的色环、不发光（只给 .ss-indicator） */
+  --accent-halo: rgba(224, 101, 42, 0.14); /* 指示点外一圈 2px 的灯罩环：同一个橙的 14%，平的色环、不发光（只给指示点 Indicator） */
 
   /* ---- 字（DESIGN「Typography」）：Barlow + Barlow Condensed + 苹方，等宽只给 id。
      三个字族都没有中文字形，CJK 回退栈写全 ---- */
@@ -54,8 +55,8 @@
   --leading-caption: 1.5;
   --leading-label: 1.6;
 
-  /* 正字距只给经 Cap 的拉丁 run（页签、区块小标、列头 agent 名、结构词标题），只在 ui.css 的
-     .ss-cap 规则里引用（lint-ui 的 cap-only）。汉字永远 0；页面名原样、字距 0；没有负字距 */
+  /* 正字距只给经 Cap 的拉丁 run（页签、区块小标、列头 agent 名、结构词标题），只在 ui.css 里
+     Cap 的规则里引用（lint-ui 的 cap-only）。汉字永远 0；页面名原样、字距 0；没有负字距 */
   --track-nav: 1.17px;
   --track-label: 0.96px;
   --track-head: 1.1px;
@@ -124,7 +125,7 @@
   /* 命中区下限（DESIGN「命中区与视觉尺寸是两回事」） */
   --hit-min: 24px;
 
-  /* ---- 动效（DESIGN「控件有重量」「状态与动效」）：会移动的实物用阻尼弹簧，颜色不用弹簧。
+  /* ---- 动效（DESIGN-components「控件有重量：抬起的东西三态」「尺寸、焦点与动效」）：会移动的实物用阻尼弹簧，颜色不用弹簧。
      prefers-reduced-motion 下全部退化为即时状态变化（ui.css 末尾）。
      JS 要等一段过渡播完再卸载 / 淡出的地方经 ui/motion.ts 的 motionMs() 读这里的值，不另写一份常量 ---- */
   --motion-fast: 120ms; /* 颜色、底色、透明度、悬停时影子变重、刻条换色、刚点亮反色 */
@@ -148,9 +149,9 @@
   /* 忙过 0.3 秒门槛、原位不换刻度的那颗键变淡到多少（BusySlot 的 dim 形态） */
   --busy-dim: 0.45;
 
-  /* ---- 层（z-index）：从低到高一条梯子，组件只引用这里。
-     页面自己的吸顶层在各页 CSS 里，都不高过 --z-pushed 上下这一段：位置页来源筛选 5 / 列头 6 / 格子提示框 8、
-     页面头 7、机面边缘渐隐 9、右下提示叠 10 ---- */
+  /* ---- 层（z-index）：从低到高一条梯子，组件与页面都只引用这里（lint-ui 的 z-index 规则）。
+     页面自己的吸顶层写成相对 --z-pushed 的 calc，都不高过它上下这一段：位置页来源筛选 −3（5）/ 列头 −2（6）、
+     吸顶页面头 −1（7）、机面边缘渐隐 +1（9）；右下提示叠同浮起小窗（--z-toast） ---- */
   --z-fade: 1; /* 滚动区边缘的渐隐：压在同一滚动区的内容上 */
   --z-pushed: 8; /* 机面里推入的一页（PushedPage）：高过位置页吸顶的页面头（7），低过机面边缘渐隐（9） */
   --z-layer: 35; /* 小浮层：下拉、菜单、选择器 */
@@ -177,12 +178,12 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* 界面文字不可拖选（裁决 D23）：路径、id、命令与输入框除外，见 ui.css 的 .ss-selectable */
+  /* 界面文字不可拖选（裁决 D23）：路径、id、命令与输入框除外，见 ui.css 第 0 节（Mono 自带可拖选） */
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* 减少动效（DESIGN「控件有重量 › prefers-reduced-motion」）：按下、松开、滑块位移全部即时，没有按压变形。
+/* 减少动效（DESIGN-components「控件有重量：抬起的东西三态」里的 prefers-reduced-motion）：按下、松开、滑块位移全部即时，没有按压变形。
    拖动时滑块照样跟手（那是直接操作，不是动画），松手即时落位 */
 @media (prefers-reduced-motion: reduce) {
   :root {

@@ -1,4 +1,4 @@
-/* 展示组件的样式（docs/DESIGN.md「材料与工艺」「Components」，视觉 V4 · 拉姆斯 / Braun）。
+/* 展示组件的样式（docs/DESIGN.md「材料与工艺」、组件规格 docs/DESIGN-components.md，视觉 V4 · 拉姆斯 / Braun）。
    色值一律 var(--…)，唯一来源是 tokens.css。投影只说离机面多高：凹（槽与输入框）、平（1px 边）、
    抬起（键、页签滑块、开关滑块）、浮（浮层）。橙只在开关刻条与指示点上。
    光标：全应用一律箭头，没有手形；也没有下划线（裁决 D23，2026-09-25 外链并入浅键）。
@@ -663,6 +663,13 @@ textarea,
   color: var(--ink-mute);
 }
 
+/* 计数记号（同名 ×2）：12 tabular ink-faint，不换等宽字族 */
+.ss-tag--count {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
 /* 可悬停读更多、但不可点：不加装饰线（裁决 D21：点状下划线是网页 abbr 惯例，macOS 上没人认得），
    提示框照出。`2 份不一样` 也是这种纯文字记号（点它拉开这一行的抽屉，动作在抽屉里） */
 .ss-tag.has-tip {
@@ -735,20 +742,7 @@ textarea,
   cursor: default;
 }
 
-/* 同名 ×2：12 tabular ink-faint（计数，不用等宽字族） */
-.ss-dup {
-  font-family: var(--font-ui);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--leading-caption);
-  white-space: nowrap;
-}
-
-.ss-dup--row {
-  font-size: var(--size-label);
-  color: var(--ink-faint);
-}
-
-/* ===== 6. 提示框 Tooltip（DESIGN「浮层」）：墨窗 face 字 12，内边距 6 8，control 7，浮层投影，最大宽 240 ===== */
+/* ===== 6. 提示框 Tooltip（DESIGN「浮层」）：墨底 face 字 12（全应用唯一的墨色浮窗），内边距 6 8，control 7，浮层投影，最大宽 240 ===== */
 .ss-tipwrap {
   position: relative;
   display: inline-flex;
@@ -849,19 +843,6 @@ textarea,
 
 .ss-tip--bottom {
   top: calc(100% + 6px);
-}
-
-.ss-tip--center {
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.ss-tip--start {
-  left: 0;
-}
-
-.ss-tip--end {
-  right: 0;
 }
 
 /* 快捷键只给键盘（DESIGN「提示框」）：鼠标悬停唤起时不写 ` · 空格`，键盘焦点唤起时才写。
@@ -1530,12 +1511,6 @@ textarea,
 /* 浮起的「在忙」一窗不接指针：它在 React 树里是触发键（格子）的子孙，接了指针，悬停、右键就会经 portal
    冒回那一格——指针落在它上面时，事件落到下面真正的那一格 */
 .ss-floattoast:has(> .ss-toast--busy) {
-  pointer-events: none;
-}
-
-/* 过渡期：Matrix 的批量键还自己组合这个类（busyLockClass），页面迁到 BusySlot mode="dim" 后删 */
-.ss-busy {
-  opacity: var(--busy-dim);
   pointer-events: none;
 }
 

@@ -52,7 +52,8 @@ import {
 } from "./mcpView";
 import { Confirm, CornerToast, Mono, Tag, Toast, ToastCount } from "./ui";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
-import type { ConfirmAnchor, ToastProps } from "./ui";
+import type { ToastProps } from "./ui";
+import type { AnchorRect } from "./layerPlace.ts";
 import {
   batchBusyText,
   deletedMcpOriginalToast,
@@ -166,7 +167,7 @@ const WEIBO_REMOVE = "WeiboAP 里的配置要到 WeiboAP 里删";
 interface Pane {
   preview: McpPreview;
   crossDomain: boolean;
-  anchor?: ConfirmAnchor;
+  anchor?: AnchorRect;
   keyId?: string;
   /// 写完再按一次同一个点恰好撤回：是就不给 `撤销`（批量写进时选中的里这一列原本已有一部分才不是）
   reversible: boolean;
@@ -180,7 +181,7 @@ interface DeletePane {
   keyId?: string;
   /// 单格：那一列的 agent（提示条的图标）
   agent?: ToastAgentRef;
-  anchor?: ConfirmAnchor;
+  anchor?: AnchorRect;
   text: ReturnType<typeof deleteMcpOriginalConfirm>;
   /// 删完给不给 `撤销`：删到这个位置里的最后一份、或这一行各份不一样（再点 ○ 写回的是别的版本）才给；
   /// 别处还有一样的，再点 ○ 就是准确反操作，不给（DESIGN「表格」MCP 条）
@@ -202,7 +203,7 @@ function UndoToast({ undoId, ...props }: ToastProps & { undoId: string | null })
 }
 
 /// 触发控件此刻的位置：点下去的那颗键 / 那一格还拿着焦点
-const anchorNow = (): ConfirmAnchor | undefined => {
+const anchorNow = (): AnchorRect | undefined => {
   const el = document.activeElement;
   if (!(el instanceof HTMLElement) || el === document.body) return undefined;
   const r = el.getBoundingClientRect();
@@ -277,7 +278,7 @@ export default function McpTab({
   // 单格删除的结果：锚在按下那一刻那一格的位置（删完这一行可能就没了，不能再去找格子）
   const [rowToast, setRowToast] = useState<{
     rowKey: string;
-    at?: ConfirmAnchor;
+    at?: AnchorRect;
     node: ReactNode;
   } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
@@ -679,7 +680,7 @@ export default function McpTab({
     undoId: string,
     keyId: string | undefined,
     text: ToastText,
-    one?: { keys: string[]; rowKey: string; columnId: string; at?: ConfirmAnchor },
+    one?: { keys: string[]; rowKey: string; columnId: string; at?: AnchorRect },
   ) => {
     const single = one !== undefined;
     const at = one?.at;

@@ -216,13 +216,11 @@ test("侧栏区块小标与排序下拉走组件库：SectionLabel（`AGENT` 经
   assert.doesNotMatch(css, /\.sidebar__sort-menu|\.sidebar__sort-item|\.sidebar__label/);
 });
 
-test("PageHead 在组件库里：旧的 shell 路径只是转出，壳与 agent 页从 ui 取", async () => {
-  const { readFileSync } = await import("node:fs");
+test("PageHead 在组件库里：旧的 shell 转出已删，壳与 agent 页从 ui 取", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
   const ui = await import("../src/ui/index.ts");
-  const old = await import("../src/shell/PageHead.tsx");
-  assert.equal(old.PageHead, ui.PageHead);
-  assert.equal(old.PageTitle, ui.PageTitle);
-  assert.equal(old.PageHeadActions, ui.PageHeadActions);
+  assert.equal(typeof ui.PageHead, "function");
+  assert.equal(existsSync(new URL("../src/shell/PageHead.tsx", import.meta.url)), false);
   for (const file of [
     "../src/App.tsx",
     "../src/shell/AgentPage.tsx",

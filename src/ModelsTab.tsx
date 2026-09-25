@@ -25,10 +25,16 @@ import {
 } from "./modelsView.ts";
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "./types.ts";
-import { ChipRow, Confirm, ModelChip, NoticePanel, Spinner } from "./ui/index.ts";
-import { HintStrip } from "./ui/HintStrip.tsx";
+import {
+  ChipRow,
+  Confirm,
+  HintStrip,
+  ModelChip,
+  NoticePanel,
+  Section,
+  Spinner,
+} from "./ui/index.ts";
 import { HINTS, useHint } from "./hints.ts";
-import { Section } from "./ui/Section.tsx";
 import { CodexKeySlot, CodexSwitch } from "./codexControls.tsx";
 import { GatewayBlock } from "./ModelsGateways.tsx";
 import type { RowNotice } from "./ModelsGateways.tsx";
@@ -39,8 +45,9 @@ import "./ModelsTab.css";
 ///
 /// agent 页的外框（页面头的图标 + `Codex`、节与节之间的距离、整页限宽 776）由外壳按 agent 注册表画；这一节画：
 /// - **新手提示条** `first-codex`：页面头下、节头上方；拨过开关或加过一家网关就算学会
-/// - **节头**：左 `第三方模型`；右端开关（＝配置里开没开：拨了就写、不确认，乐观翻转，没写成滑回），
-///   开关左边 12 条件出现 `重启生效` / `启动 Codex` / `卸下后台服务`（同一位，不会同时出现）——
+/// - **节头**：`第三方模型` + 紧跟节名的开关（＝配置里开没开：拨了就写、不确认，乐观翻转，没写成滑回），
+///   开关右边 12 那一位只出一颗键：`重启生效` / `启动 Codex` / `卸下后台服务`（重启优先于启动、启动优先于卸下，
+///   codexKeyKind）——
 ///   一条左沿、一列控件：开关、待办条的键、`+ 网关`、网关行尾动作的右沿在同一条竖线上。
 ///   键即状态——`needsCodexRestart` 比的是 Codex 启动时加载的配置与现在，用户用任何方式重启 Codex 键都会自己消失；
 ///   所以窗口获得焦点时重读，键显示着时每 5 秒轻查一次，键消失即停。**从不自动重启**；重启要确认（打断对话）

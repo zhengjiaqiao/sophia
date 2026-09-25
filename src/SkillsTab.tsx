@@ -25,7 +25,7 @@ import { usePageCommand } from "./shell/menuBus";
 import { shortDate } from "./dateText";
 import { Confirm, CornerToast, HintStrip, Mono, Toast, ToastCount } from "./ui";
 import { HINTS, useHint } from "./hints";
-import type { ConfirmAnchor } from "./ui";
+import type { AnchorRect } from "./layerPlace.ts";
 import {
   batchBusyText,
   deletedOriginalToast,
@@ -68,7 +68,7 @@ interface KeepPane {
   kept: DomainRow;
   other: DomainRow;
   /// 按下那一刻「只留这份」的位置：结果锚在这里
-  at: ConfirmAnchor;
+  at: AnchorRect;
   planId: string;
   /// 两份的来源名（同名来源带区分片段，与原件位置列同一写法）与完整路径
   keptName: OriginName;
@@ -83,7 +83,7 @@ interface KeepPane {
 interface DeletePane {
   ref: CellRef;
   /// 按下那一刻那一格的位置：确认框与结果都锚在这里（删完这一行就没了，不能再去找格子）
-  anchor?: ConfirmAnchor;
+  anchor?: AnchorRect;
   planId: string;
   /// 链接是改指到别处的同名原件（否则是一起清掉）
   relink: boolean;
@@ -217,7 +217,7 @@ export default function SkillsTab({
   // 一行的结果（只留这份、删原件）：锚在按下那一刻「只留这份」/ 那一格的位置
   const [rowToast, setRowToast] = useState<{
     rowKey: string;
-    at?: ConfirmAnchor;
+    at?: AnchorRect;
     node: ReactNode;
   } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
@@ -620,7 +620,7 @@ export default function SkillsTab({
   };
 
   /// 那一格此刻在视口里的矩形（确认框、结果的锚）
-  const cellAnchorOf = (ref: CellRef): ConfirmAnchor | undefined => {
+  const cellAnchorOf = (ref: CellRef): AnchorRect | undefined => {
     const index = page?.targets.findIndex((t) => t.id === ref.targetId) ?? -1;
     const row = document.querySelector(`[data-row="${CSS.escape(skillRowKey(ref))}"]`);
     const r = row?.querySelectorAll(".mx-cell")[index]?.getBoundingClientRect();
@@ -960,7 +960,7 @@ export default function SkillsTab({
     undoId: string,
     skill: string,
     rowKey: string,
-    at: ConfirmAnchor | undefined,
+    at: AnchorRect | undefined,
   ) => {
     dismissRow();
     let text: ReturnType<typeof restoredOriginalToast>;
@@ -994,7 +994,7 @@ export default function SkillsTab({
   // DESIGN「页面还是弹层」：删用户的原件先确认（锚在按钮上），确认后直接删、不挂起；
   // 结果是例行一行 + `撤销`（2026-09-25 起：另一份放回原处、改指过的链接指回去）
 
-  const keepThis = async (kept: DomainRow, other: DomainRow, at: ConfirmAnchor) => {
+  const keepThis = async (kept: DomainRow, other: DomainRow, at: AnchorRect) => {
     const sources = overview?.sources ?? [];
     // 与原件位置列同一套：按本域出现的来源算，同名来源才分得开
     const names = originNames(

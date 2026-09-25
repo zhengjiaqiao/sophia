@@ -34,15 +34,12 @@ export type { FloatingToastProps } from "./FloatingToast.tsx";
 
 export { NoticePanel } from "./NoticePanel.tsx";
 export type { NoticePanelAction, NoticePanelProps, NoticeScope } from "./NoticePanel.tsx";
-/// 转接层：已并进 `NoticePanel scope="app"`，页面迁移完删
-export { ErrorBanner } from "./ErrorBanner.tsx";
-export type { ErrorBannerProps } from "./ErrorBanner.tsx";
 
 export { HintStrip } from "./HintStrip.tsx";
 export type { HintStripProps } from "./HintStrip.tsx";
 
 export { Confirm } from "./Confirm.tsx";
-export type { ConfirmAnchor, ConfirmProps } from "./Confirm.tsx";
+export type { ConfirmProps } from "./Confirm.tsx";
 
 export { BUSY_DELAY_MS, Spinner, SWEEP, useBusyShown } from "./Spinner.tsx";
 export type { SpinnerProps } from "./Spinner.tsx";
@@ -50,14 +47,16 @@ export { BusySlot, BusyToast } from "./BusySlot.tsx";
 export type { BusyMode, BusySlotProps } from "./BusySlot.tsx";
 
 // ---- 选择 ----
-export { Switch, Checkbox, CheckboxGlyph, Indicator } from "./Switch.tsx";
+export { Switch, Checkbox, Indicator } from "./Switch.tsx";
 export type { SwitchProps, SwitchSize, CheckboxProps, IndicatorProps } from "./Switch.tsx";
 export { CheckMark, CheckRow } from "./CheckRow.tsx";
 export type { CheckRowProps } from "./CheckRow.tsx";
 export { Tabs } from "./Tabs.tsx";
 export type { TabItem, TabsProps } from "./Tabs.tsx";
-export { Chip, ModelChip } from "./Chip.tsx";
-export type { ChipProps, ModelChipProps } from "./Chip.tsx";
+export { Chip } from "./Chip.tsx";
+export type { ChipProps } from "./Chip.tsx";
+export { ModelChip } from "./ModelChip.tsx";
+export type { ModelChipProps } from "./ModelChip.tsx";
 export { Menu, MenuItem } from "./Menu.tsx";
 export type { MenuItemKind, MenuItemProps, MenuProps } from "./Menu.tsx";
 
@@ -84,13 +83,13 @@ export { FloatingLayer } from "./FloatingLayer.tsx";
 export { FadeViewport, useEdgeFades, edgeFades } from "./EdgeFade.tsx";
 export type { EdgeFade } from "./EdgeFade.tsx";
 export { Empty } from "./Empty.tsx";
-export type { EmptyAction, EmptyArt, EmptyKind, EmptyProps } from "./Empty.tsx";
+export type { EmptyAction, EmptyArt, EmptyProps } from "./Empty.tsx";
 export { Note } from "./Note.tsx";
 export type { NoteProps } from "./Note.tsx";
 
 // ---- 状态记号 ----
-export { StateDot, DupMark, DOT_LABEL } from "./StateDot.tsx";
-export type { Dot, StateDotProps, DupMarkProps } from "./StateDot.tsx";
+export { StateDot, DOT_LABEL } from "./StateDot.tsx";
+export type { Dot, StateDotProps } from "./StateDot.tsx";
 export { StateDotButton } from "./StateDotButton.tsx";
 export type { StateDotButtonProps } from "./StateDotButton.tsx";
 export { Tag } from "./Tag.tsx";

@@ -23,16 +23,6 @@ import { Button } from "./Button.tsx";
 /// `ink-mute`（均衡折行），右对齐 `取消`（默认键紧凑 24）与主动作墨键（紧凑 24），键间 12。不接 Esc（Esc 归面板本身），
 /// 外距由调用方的那一行给。触发键用 `ariaControls` 指向它的 `id`
 
-/// **已不是确认框的参数**（确认框一律居中）：页面仍拿它当「视口里的一个矩形」用，页面迁移时换成
-/// `layerPlace.ts` 的 `AnchorRect` 后删掉
-export interface ConfirmAnchor {
-  /// 触发行在视口里的矩形（`getBoundingClientRect()` 的结果即可）
-  top: number;
-  left: number;
-  right: number;
-  bottom: number;
-}
-
 export interface ConfirmProps {
   /// 标题：`重启 Codex？` `把 notion 写进 Codex · User？`
   title: ReactNode;

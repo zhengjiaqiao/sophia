@@ -152,7 +152,7 @@ export function Sidebar(props: SidebarProps) {
                       <span className="side-item__name">{a.name}</span>
                       {a.on && (
                         <span className="side-item__dot">
-                          <Indicator on label="有能力开着、在生效" />
+                          <Indicator label="有能力开着、在生效" />
                         </span>
                       )}
                     </button>

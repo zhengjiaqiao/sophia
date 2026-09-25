@@ -5,9 +5,6 @@ import { placeLayer, type LayerPlacement } from "../layerPlace.ts";
 import { FadeViewport, useEdgeFades } from "./EdgeFade.tsx";
 import "./FloatingLayer.css";
 
-/// 旧的深引用（`from "../ui/FloatingLayer.tsx"`）还在用它；新代码从 index 或 EdgeFade.tsx 取
-export { FadeViewport } from "./EdgeFade.tsx";
-
 /// 浮层已经是 `role="menu"` 并带着读屏名：里面的 `Menu` 据此不再自己叠一层 menu
 export const InLayerContext = createContext(false);
 

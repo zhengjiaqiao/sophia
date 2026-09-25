@@ -25,20 +25,6 @@ export type EmptyArt = "scanning" | "noDirs" | "emptyFolder";
 
 const ART_SRC: Record<EmptyArt, string> = { scanning, noDirs, emptyFolder };
 
-/// **已废弃，页面迁移后删**：旧的「哪种空」轴与 `art` 大量重合，只剩默认文案与要不要转圈两个作用——
-/// 现在写 `description` 与 `busy`。暂留给还没迁完的页面，映射见 `KIND_DEFAULTS`
-export type EmptyKind = "scanning" | "noAgentDirs" | "noMatch" | "noSkills";
-
-const KIND_DEFAULTS: Record<EmptyKind, { description: string; busy: boolean }> = {
-  scanning: { description: "正在读 skill 目录", busy: true },
-  noAgentDirs: {
-    description: "这个项目下还没有任何 agent 的 skill 目录。添加时会自动创建。",
-    busy: false,
-  },
-  noMatch: { description: "没有匹配的 skill", busy: false },
-  noSkills: { description: "这个来源里还没有 skill。", busy: false },
-};
-
 export interface EmptyAction {
   label: string;
   onClick: () => void;
@@ -55,8 +41,6 @@ export interface EmptyProps {
   description?: ReactNode;
   /// 首次扫描中：句子前（有图时）或上（没图时 24 宽）出忙碌刻度
   busy?: boolean;
-  /// **已废弃**：见 `EmptyKind`
-  kind?: EmptyKind;
   /// 第二行次要说明
   hint?: ReactNode;
   /// 第一个动作（默认键；`leave` 时浅键）
@@ -72,20 +56,16 @@ export interface EmptyProps {
 }
 
 export function Empty({
-  kind,
-  description: given,
-  busy: givenBusy,
+  description,
+  busy = false,
   hint,
   primary,
   secondary,
   art,
   above,
 }: EmptyProps) {
-  const fallback = kind ? KIND_DEFAULTS[kind] : undefined;
-  const description = given ?? fallback?.description;
-  const busy = givenBusy ?? fallback?.busy ?? false;
-  const busyLabel =
-    typeof description === "string" ? description : KIND_DEFAULTS.scanning.description;
+  // 忙碌刻度的读屏名：那一句本身；传的是节点时退回一句通用的
+  const busyLabel = typeof description === "string" ? description : "正在读";
   const text = <div className="ss-empty__description">{description}</div>;
   const classes = ["ss-empty"];
   if (busy) classes.push("is-busy");
