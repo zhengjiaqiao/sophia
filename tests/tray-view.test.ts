@@ -200,11 +200,19 @@ test("托盘拨开关：拨了就写（switchGateway，不确认、不重启）�
   const src = readFileSync(new URL("../src/TrayModelsRow.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /confirmSwitch|gatewayConfirmText|重启并|switched/);
   assert.match(src, /reason = await switchGateway\(next, \{/);
-  assert.match(src, /const on = switching \?\? row\.toggle\.on;/);
-  assert.match(src, /checked=\{on\}/);
-  // 面板里只剩一种确认：重启 Codex
-  assert.equal(src.match(/confirmPanel\(/g)?.length, 1);
-  assert.match(src, /confirmPanel\(\s*`重启 \$\{CODEX\.name\}？`,\s*RESTART_CONSEQUENCE,/);
+  // 开关与 Codex 页同一份（codexControls）：写配置期间滑块已在拨过去的那一侧
+  assert.match(
+    src,
+    /<CodexSwitch[^>]*switching=\{phase\.kind === "switching" \? phase\.next : null\}/,
+  );
+  const shared = readFileSync(new URL("../src/codexControls.tsx", import.meta.url), "utf8");
+  assert.match(shared, /const on = switching \?\? state\.enabled;/);
+  assert.match(shared, /checked=\{on\}/);
+  // 面板里只剩一种确认：重启 Codex，用组件库确认框的窄面板形态
+  assert.equal(src.match(/<Confirm\b/g)?.length, 1);
+  assert.match(src, /<Confirm\s+inline\s+id=\{confirmId\}\s+title=\{`重启 \$\{CODEX\.name\}？`\}/);
+  assert.match(src, /\{RESTART_CONSEQUENCE\}\s*<\/Confirm>/);
+  assert.doesNotMatch(src, /confirmPanel|tray__confirm-/);
 });
 
 test("托盘「卸下后台服务」：停用后服务仍在才出现；和「重启生效」同时该出现时让位给重启（一行放不下两颗键）", () => {
@@ -248,7 +256,24 @@ test("能力行一行说完：`重启生效` 在同一行、开关左边；不�
     host,
   });
   const cap = html.match(/<div class="tray__cap">[^]*<\/div>/)?.[0] ?? "";
-  assert.match(cap, /tray__end">[^]*重启生效[^]*tray__switch/);
+  assert.match(cap, /tray__end">[^]*重启生效[^]*codex-switch/);
   assert.doesNotMatch(html, /tray__models|tray__keys/);
   assert.doesNotMatch(html, />m0|m0、m1/, "模型名不进托盘");
+});
+
+test("托盘面板只用组件库：菜单两项是 Menu（面板形态），确认是 Confirm 窄面板，失败是 NoticePanel section；不再覆盖内部类", async () => {
+  const { default: TrayPanel } = await import("../src/TrayPanel.tsx");
+  const html = render(TrayPanel, {});
+  assert.match(
+    html,
+    /class="ss-menulist ss-menulist--panel" role="menu" aria-label="Sophia"[^]*role="menuitem"[^]*>打开 Sophia<[^]*role="menuitem"[^]*>退出</,
+  );
+  assert.doesNotMatch(html, /⌘Q/);
+  for (const file of ["TrayPanel.tsx", "TrayPanel.css", "TrayModelsRow.tsx"]) {
+    const src = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /\bss-[a-z]/, file);
+    assert.doesNotMatch(src, /<svg/, file);
+  }
+  const row = readFileSync(new URL("../src/TrayModelsRow.tsx", import.meta.url), "utf8");
+  assert.match(row, /<NoticePanel\s+scope="section"/);
 });

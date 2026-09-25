@@ -528,6 +528,17 @@ export function gatewaySwitchText(
     : { busy: "正在移除", failed: `没从 ${tool.name} 移除` };
 }
 
+/// 开关的提示框：先说拨下去的结果；`withFile` 时再说改的是哪个文件（Codex 页；托盘面板窄，只说结果）。
+/// 新手提示只说结果，机制留给悬停（DESIGN 2026-09-25 评审第二轮）
+export function gatewaySwitchTip(on: boolean, tool: ModelsTool = CODEX, withFile = true): string {
+  if (on) {
+    const result = `关掉后，${tool.name} 只保留官方模型`;
+    return withFile ? `${result}；从 ${tool.configPath} 里删掉那两行` : result;
+  }
+  const result = `打开后，选好的模型会出现在 ${tool.name} 的模型列表里`;
+  return withFile ? `${result}；会在 ${tool.configPath} 里加两行` : result;
+}
+
 export interface GatewaySwitchIo {
   /// 写配置：true → `gatewayEnable`，false → `gatewayRestore`。回滚也走它（反向）
   write: (enabled: boolean) => Promise<GatewayState>;
@@ -612,6 +623,23 @@ export function showRestartKey(state: GatewayState, phase: RestartPhase): boolea
 /// 没在跑、且此刻空闲。网关关着时不出现——那时 Codex 用自己的模型，启动它与这一页无关
 export function showLaunchKey(state: GatewayState, phase: RestartPhase): boolean {
   return state.enabled && !state.codex.running && !state.needsCodexRestart && phase.kind === "idle";
+}
+
+/// 开关旁那一位此刻放哪颗键（DESIGN「第三方模型（一节）」「托盘面板」：`重启生效` / `启动 Codex` /
+/// `卸下后台服务` 同一位，不会同时出现）。Codex 页节头与托盘能力行同一个判断：
+/// 等重启 > Codex 没在跑（开着）> 关着而后台服务还装着；拨开关写配置、重启、启动期间都不出键
+export type CodexKeyKind = "restart" | "launch" | "uninstall";
+
+export function codexKeyKind(state: GatewayState, phase: RestartPhase): CodexKeyKind | null {
+  if (showRestartKey(state, phase)) return "restart";
+  if (showLaunchKey(state, phase)) return "launch";
+  if (phase.kind === "idle" && serviceLeftover(state)) return "uninstall";
+  return null;
+}
+
+/// 开关按不动的原因（能按为 null）：开着时永远能关——停用不依赖密钥和模型还在不在。Codex 页与托盘同一句
+export function switchDisabledReason(state: GatewayState): string | null {
+  return state.enabled ? null : enableDisabledReason(state, totalSelected(state));
 }
 
 /// `启动 Codex` 的提示框：点击的结果，不打断任何东西，所以不确认
@@ -732,7 +760,3 @@ export function modelIssues(state: GatewayState | null): ModelIssue[] {
   }
   return out;
 }
-
-// ===== 功能性渐变：滚动边缘渐隐 =====
-// 判定挪进了组件库（ui/edgeFades.ts）；这里转出去，页面迁移改用 `useEdgeFades` 后删掉
-export { edgeFades } from "./ui/edgeFades.ts";

@@ -68,50 +68,11 @@
   white-space: nowrap;
 }
 
-/* 开关那一格：开关 / 写配置超过 0.3 秒时原位转圈 +「正在添加」 */
-.tray__switch {
-  display: inline-flex;
-  align-items: center;
-}
-
-/* 确认在能力行下当场展开：面板内一块凹面（recess、face 12 圆角、内边距 10 12、左右外距 10）；
-   标题 13 / 600 ink，后果 12 ink-mute；右对齐的 取消（默认键紧凑）与主动作墨键（紧凑） */
-.tray__confirm {
-  margin: 8px 10px 2px;
-  padding: 10px 12px;
-  border-radius: var(--radius-face);
-  background: var(--recess);
-  font-size: var(--size-label);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-}
-
-.tray__confirm-title {
-  font-size: var(--size-caption);
-  font-weight: 600;
-  color: var(--ink);
-}
-
-/* 后果句在 276 宽里常折成两行：均衡折行，不让最后一行只剩一个字 */
-.tray__confirm-body {
-  text-wrap: balance;
-}
-
-.tray__confirm-foot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-sm);
-  margin-top: var(--space-xs);
-}
-
-/* 失败：键位让出、能力行下换成灰面板（同确认的外距，原因写全、折行不截断） */
+/* 确认（ui Confirm 的窄面板形态）与失败的灰面板（NoticePanel scope="section"）在能力行下当场展开：
+   左右外距 10、上 8 下 2（面板内的凹面与灰面板，外距归这一行） */
+.tray__confirm,
 .tray__notice {
-  margin: 8px 10px 2px;
-}
-
-.tray__notice .ss-noticepanel {
-  max-width: 100%;
+  margin: var(--space-xs) 10px 2px;
 }
 
 /* 分隔：1px row-line，上 10 下 6 */
@@ -119,48 +80,4 @@
   margin: 10px 0 6px;
   border: 0;
   border-top: var(--border-row);
-}
-
-.tray__menu {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* 菜单两项：高 30、左右外距 6、内距 10、13 号字，悬停 surface（control 7）；光标箭头 */
-.tray__item {
-  display: flex;
-  align-items: center;
-  width: calc(100% - 12px);
-  margin: 0 6px;
-  height: 30px;
-  box-sizing: border-box;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: default;
-  transition: background-color var(--motion-fast) var(--ease-mech);
-}
-
-.tray__item:hover {
-  background: var(--surface);
-}
-
-.tray__item:focus-visible {
-  outline: none;
-}
-
-/* 焦点只回应键盘（src/inputModality.ts）：程序放的焦点不画 */
-html[data-input="keyboard"] .tray__item:focus-visible {
-  background: var(--surface);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tray__item {
-    transition: none;
-  }
 }

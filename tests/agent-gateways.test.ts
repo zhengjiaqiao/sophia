@@ -13,7 +13,8 @@ import {
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
 
 // 网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进 Codex 页「第三方模型」一节）：
-// 小标 `网关` + `+ 网关`、一家一行（两列 内容 ｜ 行尾动作）、点整行拉开抽屉挑模型、表单在行的抽屉里就地展开
+// 小标 `网关` + `+ 网关`（SectionLabel）、一家一行（列表行 ListRow：拉手 ｜ 名字 + 副行 ｜ 行尾动作）、
+// 点整行拉开抽屉挑模型、表单在行的抽屉里就地展开
 
 const model = (overrides: Partial<GatewayProviderModel> = {}): GatewayProviderModel => ({
   id: "gpt-x",
@@ -81,13 +82,13 @@ const or = (unreachable?: string) =>
   });
 
 /// 每一行的 HTML 片段，按出现顺序
-const rows = (html: string) => html.split(/(?=<div class="gw-row[" ])/).slice(1);
+const rows = (html: string) => html.split(/(?=<div class="ss-listrow[" ])/).slice(1);
 
 test("骨架：小标 `网关` + 右端 `+ 网关`（默认键），一家一行；没有二级页的 ← 与页头", () => {
   const html = block({ providers: [ap(), or()] });
   assert.match(
     html,
-    /gw-block__head"><span class="gw-block__label">网关<\/span>[^]*ss-btn--add[^]*网关/,
+    /class="ss-sectionlabel has-rule has-action"><span class="ss-sectionlabel__text">网关<\/span>[^]*ss-btn--add[^]*网关/,
   );
   assert.equal(rows(html).length, 2);
   assert.doesNotMatch(html, /ss-subpage|Codex 的网关|src-row/);
@@ -102,10 +103,10 @@ test("行：拉手（常显，在名字前）+ 短名；第二行 `地址 · 已
   });
   const [first, second] = rows(html);
   // 点整行拉开抽屉；前面没有勾选框：拉手常显、在名字前（收着朝右）；进这一页时每行都收着
-  assert.match(first, /<div class="gw-row__main" data-drawer-row="">/);
+  assert.match(first, /<div class="ss-listrow__main" data-drawer-row="">/);
   assert.match(
     first,
-    /gw-row__title"><button type="button" class="ss-drawerhandle is-always" aria-label="ap-gateway 的模型" aria-expanded="false" aria-controls="gw-drawer-ap">[^]*?<\/button><span class="gw-row__label">ap-gateway<\/span>/,
+    /ss-listrow__handle"><button type="button" class="ss-drawerhandle is-always" aria-label="ap-gateway 的模型" aria-expanded="false" aria-controls="gw-drawer-ap">[^]*?<\/button><\/span><span class="ss-listrow__content"><span class="ss-listrow__title">ap-gateway<\/span>/,
   );
   assert.doesNotMatch(html, /gw-row__body|is-open|gw-row__caret|gw-row__name/);
   assert.match(first, /gw-row__url">ap-gateway\.example\.com\/v1</);
@@ -113,11 +114,11 @@ test("行：拉手（常显，在名字前）+ 短名；第二行 `地址 · 已
   assert.doesNotMatch(first, /gw-row__url[^]*aria-describedby/);
   assert.match(
     first,
-    /gw-row__actions">(<span[^>]*>)?<button type="button" class="ss-iconbtn" title="编辑" aria-label="编辑">[^]*aria-label="删掉 ap-gateway"/,
+    /ss-listrow__actions">(<span[^>]*>)?<button type="button" class="ss-iconbtn" title="编辑" aria-label="编辑">[^]*aria-label="删掉 ap-gateway"/,
   );
   assert.doesNotMatch(html, /ss-btn--quiet/);
   // 没拉到模型时不写「已选」
-  assert.match(second, /gw-row__label">deepseek</);
+  assert.match(second, /ss-listrow__title">deepseek</);
   assert.match(second, /gw-row__fact"> · 已连接<\/span>/);
   assert.doesNotMatch(html, /再试一次/);
   assert.equal(displayUrl("https://openrouter.ai/api/v1/"), "openrouter.ai/api/v1");
@@ -142,8 +143,10 @@ test("抽屉＝从这家挑模型：限制说明（全文）→ 勾选列表（�
     },
   );
   const [first, second] = rows(html);
-  assert.match(first, /^<div class="gw-row is-open"/);
-  assert.match(first, /class="ss-drawer is-open gw-row__drawer" id="gw-drawer-ap"/);
+  assert.match(first, /^<div class="ss-listrow is-open"/);
+  // 抽屉左沿对齐网关名：ListRow 让出拉手列 24，页面不再覆盖抽屉的内部类
+  assert.match(first, /class="ss-drawer is-open is-bare is-flush" id="gw-drawer-ap"/);
+  assert.match(first, /class="ss-drawer__well" style="margin-inline-start:24px"/);
   assert.match(first, /ss-drawerhandle is-always is-open"[^>]*aria-expanded="true"/);
   const note = first.indexOf("gw-row__note");
   const notice = first.indexOf("没加上 o3");
@@ -155,7 +158,7 @@ test("抽屉＝从这家挑模型：限制说明（全文）→ 勾选列表（�
   );
   // 抽屉里没有 `已选` 片（节头的 `在用` 已经列了）
   assert.doesNotMatch(first, /gw-row__chosen|ss-modelchip/);
-  assert.equal((first.match(/role="option"/g) ?? []).length, 3);
+  assert.equal((first.match(/role="checkbox"/g) ?? []).length, 3);
   assert.equal((first.match(/data-checkrow=""/g) ?? []).length, 3, "勾选框行挂悬停钩子");
   assert.doesNotMatch(first, /models-option__gateway/);
   // ap 是最后一家还在供模型的：垃圾桶禁用，按下即出原因
@@ -169,15 +172,18 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
   const reason = "密钥无效，请到 DeepSeek 控制台换一个密钥";
   const html = block({ providers: [ap(), or(reason)] }, { expanded: new Set(["or"]) });
   const [, down] = rows(html);
-  assert.match(down, /gw-row__label">openrouter</);
+  assert.match(down, /ss-listrow__title">openrouter</);
   assert.match(down, /gw-row__down">无法连接</);
   assert.match(down, new RegExp(`gw-row__reason">${reason}<`));
   assert.doesNotMatch(down, /已连接/);
   assert.match(
     down,
-    /gw-row__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*class="ss-iconbtn" title="编辑"/,
+    /ss-listrow__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*class="ss-iconbtn" title="编辑"/,
   );
-  assert.match(down, /gw-row__none">无法连接，还没拉到模型</);
+  assert.match(
+    down,
+    /gw-row__none"><p class="ss-note"><span class="ss-note__text">无法连接，还没拉到模型</,
+  );
   assert.deepEqual(gatewayFacts(or(reason)), {
     url: "https://openrouter.ai/api/v1",
     status: "无法连接",
@@ -188,7 +194,10 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
 
 test("没有网关：小标下一句「还没有网关，先加一家」，不重复按钮；`+ 网关` 可按", () => {
   const html = block({ providers: [] });
-  assert.match(html, /gw-block__empty">还没有网关，先加一家</);
+  assert.match(
+    html,
+    /gw-block__empty"><p class="ss-note"><span class="ss-note__text">还没有网关，先加一家</,
+  );
   assert.doesNotMatch(html, /ss-empty|gw-list/);
   assert.match(html, /ss-btn--add"[^>]*aria-label="添加 网关">/);
   assert.doesNotMatch(html, /ss-btn--add"[^>]*disabled/);
@@ -207,8 +216,15 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默
     onDirtyChange: noop,
     ask: null,
   });
-  assert.match(html, /gw-form__label">地址<[^]*placeholder="https:\/\/example.com\/openai\/v1"/);
-  assert.match(html, /gw-form__label">密钥<[^]*placeholder="粘贴密钥，存进钥匙串"/);
+  // 输入框是组件库的 TextField（凹面、聚焦只转边色）；可见标签 12 ink-mute 定宽 44，读屏名在输入框上
+  assert.match(
+    html,
+    /gw-form__label" aria-hidden="true">地址<[^]*class="ss-textfield"[^]*placeholder="https:\/\/example.com\/openai\/v1" aria-label="地址"/,
+  );
+  assert.match(
+    html,
+    /gw-form__label" aria-hidden="true">密钥<[^]*type="password"[^]*placeholder="粘贴密钥，存进钥匙串" aria-label="密钥"/,
+  );
   assert.match(html, /title="先填地址" disabled=""/);
   assert.match(html, /class="ss-btn ss-btn--primary ss-btn--compact"[^>]*>保存</);
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>取消</);
@@ -254,5 +270,7 @@ test("网关行右键（D18）与离开拦截：用外壳的 contextMenuHandler 
   assert.doesNotMatch(tsx, /src-row/);
   const css = readFileSync(new URL("../src/ModelsTab.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /cubic-bezier|cursor:\s*pointer/);
-  assert.match(css, /\.gw-row\.is-menu \.gw-row__main \{\s*background: var\(--surface\);/);
+  // 右键菜单开着时行带亮着：交给 ListRow 的 highlighted，页面不再自写行与悬停带
+  assert.match(tsx, /highlighted=\{menuRow === p\.id\}/);
+  assert.doesNotMatch(css, /gw-row__main|:hover/);
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode, Ref } from "react";
+import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api.ts";
@@ -7,14 +7,10 @@ import {
   LAUNCH_POLL_MS,
   LAUNCH_TIMEOUT,
   LAUNCH_TIMEOUT_MS,
-  LAUNCH_TIP,
   MODELS_TOOLS,
   RESTART_CONSEQUENCE,
   RESTART_POLL_MS,
-  RESTART_TIP,
-  UNINSTALL_TIP,
   effectiveModels,
-  enableDisabledReason,
   gatewaySwitchText,
   inUseLabel,
   modelIssues,
@@ -22,33 +18,19 @@ import {
   parseBackendError,
   routerUnavailable,
   selectModel,
-  serviceLeftover,
   settleAfterRestart,
   shouldPollRestart,
-  showLaunchKey,
-  showRestartKey,
   showRouterTodo,
   switchGateway,
-  totalSelected,
 } from "./modelsView.ts";
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "./types.ts";
-import {
-  BusySlot,
-  Button,
-  Confirm,
-  FloatingToast,
-  NoticePanel,
-  Spinner,
-  Toast,
-  Tooltip,
-  useBusyShown,
-} from "./ui/index.ts";
+import { ChipRow, Confirm, ModelChip, NoticePanel, Spinner } from "./ui/index.ts";
 import { HintStrip } from "./ui/HintStrip.tsx";
 import { HINTS, useHint } from "./hints.ts";
-import { Switch } from "./ui/Switch.tsx";
 import { Section } from "./ui/Section.tsx";
-import { GatewayBlock, ModelChipRow } from "./ModelsGateways.tsx";
+import { CodexKeySlot, CodexSwitch } from "./codexControls.tsx";
+import { GatewayBlock } from "./ModelsGateways.tsx";
 import type { RowNotice } from "./ModelsGateways.tsx";
 import { createSelectionWriter } from "./selectionWrites.ts";
 import "./ModelsTab.css";
@@ -83,166 +65,11 @@ export interface SectionNoticeState {
   providerId?: string;
 }
 
-// ===== 节头里开关右边 12：重启生效 / 启动 Codex =====
-
-/// 开关右边 12 那一格（DESIGN「改动待生效：重启生效与启动 Codex」）：键（紧凑 24，与 `卸下后台服务` 同位同高）/
-/// 刻度 + 正在重启 / 键消失、原位下方浮起 `✓ 已生效`（约 4 秒淡出，左沿对齐原来的键）。
-/// Codex 没在跑时同一格换成 `启动 Codex`（同一套）。
-/// 忙碌过了 0.3 秒门槛才出现，之前键照旧、点不动。失败的灰面板不在这里——挂在节头下，键照常留着可以再点
-export function RestartSlot({
-  tool,
-  state,
-  phase,
-  busy,
-  onRestart,
-  onLaunch,
-  onDoneDismiss,
-  keyRef,
-}: {
-  tool: ModelsTool;
-  state: GatewayState;
-  phase: RestartPhase;
-  busy: boolean;
-  onRestart: () => void;
-  onLaunch?: () => void;
-  onDoneDismiss?: () => void;
-  /// 键的包层：重启确认锚在它下面（左沿对齐键）
-  keyRef?: Ref<HTMLSpanElement>;
-}) {
-  const waiting = phase.kind === "restarting" || phase.kind === "launching";
-  const shown = useBusyShown(waiting);
-  if (waiting && shown) {
-    const text = `${phase.kind === "restarting" ? "正在重启" : "正在启动"} ${tool.name}`;
-    return (
-      <span className="models-restart models-restart--busy" role="status">
-        <Spinner size={14} label={text} />
-        <span className="models-restart__text">{text}</span>
-      </span>
-    );
-  }
-  if (waiting) {
-    // 还没过门槛：键照旧、点不动（不闪一下忙碌）
-    const label = phase.kind === "restarting" ? "重启生效" : `启动 ${tool.name}`;
-    return (
-      <span className="models-restart-tip ss-locked" aria-busy="true">
-        <Button size="compact">{label}</Button>
-      </span>
-    );
-  }
-  if (phase.kind === "done" || phase.kind === "launched") {
-    // 键已消失：原来那颗键的位置留一个不占宽的锚，结果浮在它正下方 4、左沿对齐
-    return (
-      <span className="models-restart models-restart--done">
-        <FloatingToast align="start">
-          <Toast
-            kind="success"
-            verb={phase.kind === "done" ? "已生效" : "已启动"}
-            onDismiss={onDoneDismiss}
-          />
-        </FloatingToast>
-      </span>
-    );
-  }
-  if (onLaunch && showLaunchKey(state, phase)) {
-    return (
-      <span className="models-restart-tip" ref={keyRef}>
-        <Tooltip content={LAUNCH_TIP} placement="bottom" align="start" nowrap>
-          {busy ? (
-            <Button size="compact" disabled disabledReason="正在处理上一步">
-              {`启动 ${tool.name}`}
-            </Button>
-          ) : (
-            <Button size="compact" onClick={onLaunch}>
-              {`启动 ${tool.name}`}
-            </Button>
-          )}
-        </Tooltip>
-      </span>
-    );
-  }
-  if (!showRestartKey(state, phase)) return null;
-  return (
-    <span className="models-restart-tip" ref={keyRef}>
-      <Tooltip content={RESTART_TIP} placement="bottom" align="start" nowrap>
-        {busy ? (
-          <Button size="compact" disabled disabledReason="正在处理上一步">
-            重启生效
-          </Button>
-        ) : (
-          <Button size="compact" onClick={onRestart}>
-            重启生效
-          </Button>
-        )}
-      </Tooltip>
-    </span>
-  );
-}
-
-// ===== 节头：开关 =====
-
-export interface SectionSwitchProps {
-  tool: ModelsTool;
-  state: GatewayState;
-  /// 这一节正在做别的写 Codex 设置的事（重启、接管……）：开关先不接新的一拨
-  busy: boolean;
-  phase: RestartPhase;
-  onToggle: (next: boolean) => void;
-}
-
-/// 节头里的开关（DESIGN「第三方模型（一节）」）：开关＝配置里开没开，拨了就写、不确认。乐观翻转——
-/// 拨下去滑块当即过去、橙刻线亮，写超过 0.3 秒原位换成刻度 +「正在添加 / 正在移除」；没写成滑回，
-/// 节头下灰面板。旁边不点指示点（开着由刻线说）；要重启才生效时不另加颜色，由左边的 `重启生效` 说「还没生效」
-export function SectionSwitch({ tool, state, busy, phase, onToggle }: SectionSwitchProps) {
-  // 开着时永远能关：停用不依赖密钥和模型还在不在
-  const blocked = state.enabled ? null : enableDisabledReason(state, totalSelected(state));
-  const switching = phase.kind === "switching" ? phase.next : null;
-  /// 乐观翻转：写的时候滑块已经在拨过去的那一侧
-  const on = switching ?? state.enabled;
-  const label = `${tool.name} 的第三方模型`;
-  return (
-    <span className="models-switch">
-      {blocked !== null && switching === null ? (
-        // 禁用的开关自带原因提示框：悬停出、按下当即出
-        <Switch
-          checked={false}
-          onChange={() => undefined}
-          label={label}
-          disabledReason={blocked}
-          tipPlacement="bottom"
-        />
-      ) : (
-        <BusySlot
-          busy={switching !== null}
-          label={gatewaySwitchText(switching ?? true, tool).busy}
-          className="models-switch__busy"
-        >
-          <Tooltip
-            content={
-              // 结果在前；改的是哪个文件写在后面（新手提示只说结果，路径挪到这里）
-              on
-                ? `关掉后，${tool.name} 只保留官方模型；从 ${tool.configPath} 里删掉那两行`
-                : `打开后，选好的模型会出现在 ${tool.name} 的模型列表里；会在 ${tool.configPath} 里加两行`
-            }
-            placement="bottom"
-          >
-            <Switch
-              checked={on}
-              onChange={onToggle}
-              label={label}
-              disabledReason={busy && switching === null ? "正在处理上一步" : undefined}
-            />
-          </Tooltip>
-        </BusySlot>
-      )}
-    </span>
-  );
-}
-
 // ===== 在用 =====
 
-/// `在用` 一行（DESIGN「在用」，节头下 12）：标签（开关关着时写 `已选`）+ 8 + 模型片（友好名，完整 id 进提示框；
-/// 两家网关撞名时片名后加 ` · 网关短名`；片间 6、折行不藏）。一个都没选时这一行不出。
-/// 只管「看」和「去掉」，挑选只在网关行里；网关抽屉里的 `已选` 是同一种片、这一家的范围（ModelChipRow）
+/// `在用` 一行（DESIGN「在用」，节头下 12）：胶囊行——标签（开关关着时写 `已选`）+ 8 + 模型片（友好名，完整 id
+/// 进提示框；两家网关撞名时片名后加 ` · 网关短名`；片间 6、折行不藏）。一个都没选时这一行不出。
+/// 只管「看」和「去掉」，挑选只在网关行里；片上 × 与网关行里的勾选是同一件事、实时联动
 export function InUseRow({
   state,
   onRemove,
@@ -250,8 +77,23 @@ export function InUseRow({
   state: GatewayState;
   onRemove: (provider: GatewayProvider, model: GatewayProviderModel) => void;
 }) {
+  const rows = effectiveModels(state);
+  if (rows.length === 0) return null;
+  const label = inUseLabel(state);
   return (
-    <ModelChipRow label={inUseLabel(state)} rows={effectiveModels(state)} onRemove={onRemove} />
+    <div className="models-inuse">
+      <ChipRow label={label} listLabel={`${label}的模型`}>
+        {rows.map(({ provider, model, name, suffix }) => (
+          <ModelChip
+            key={`${provider.id}|${model.id}`}
+            name={name}
+            suffix={suffix}
+            id={model.slug || model.id}
+            onRemove={() => onRemove(provider, model)}
+          />
+        ))}
+      </ChipRow>
+    </div>
   );
 }
 
@@ -287,7 +129,6 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   const mounted = useRef(true);
   const reportState = useRef(onGatewayState);
   reportState.current = onGatewayState;
-  const keyEl = useRef<HTMLSpanElement | null>(null);
   /// 最近一次勾选是在哪一家网关的列表里点的（null＝点的是在用片上的 ×）：写失败的灰面板出在那里
   const toggledIn = useRef<string | null>(null);
   /// 此刻画在页面上的状态（含还没写完的勾选）：连点时下一下在上一下的基础上算
@@ -663,61 +504,45 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
     onResolve: (kind) => void resolveTodo(kind),
   });
 
-  // 拨开关写配置期间滑块已在新的一侧：只属于「关着」的这颗键先不出。
-  // 按钮即状态：关着而服务还装着才出现，卸下即消失；卸下中原位刻度 + 一句
-  const uninstallKey =
-    serviceLeftover(state) && phase.kind !== "switching" ? (
-      <BusySlot busy={uninstalling} label="正在卸下后台服务" className="models-restart">
-        <Tooltip content={UNINSTALL_TIP} placement="bottom" align="start" nowrap>
-          {busy && !uninstalling ? (
-            <Button size="compact" disabled disabledReason="正在处理上一步">
-              卸下后台服务
-            </Button>
-          ) : (
-            <Button size="compact" onClick={uninstalling ? undefined : () => void uninstall()}>
-              卸下后台服务
-            </Button>
-          )}
-        </Tooltip>
-      </BusySlot>
-    ) : null;
-
   return (
     <>
       {hint}
       <Section
         title="第三方模型"
         control={
-          // 右端：开关（一列控件的最右）
-          <SectionSwitch
+          // 紧跟节名：开关（拨了就写，乐观翻转；见 codexControls）
+          <CodexSwitch
             tool={tool}
             state={state}
+            switching={phase.kind === "switching" ? phase.next : null}
             busy={busy}
-            phase={phase}
+            label={`${tool.name} 的第三方模型`}
+            // 提示框结果在前，改的是哪个文件写在后面（新手提示只说结果，路径挪到这里）
+            withFile
             onToggle={(next) => void toggleSwitch(next)}
           />
         }
         actions={
-          // 开关左边 12：它引起的下一步（重启生效 / 启动 Codex），手刚拨完开关，下一步就在它旁边（②）；
-          // 同一位的 `卸下后台服务`（只在关着而服务还装着时，与前两颗不会同时出现）
-          <>
-            <RestartSlot
-              tool={tool}
-              state={state}
-              phase={phase}
-              busy={busy}
-              keyRef={keyEl}
-              onRestart={() => setConfirmRestart(true)}
-              onLaunch={() => void launch()}
-              onDoneDismiss={dismissDone}
-            />
-            {uninstallKey}
-          </>
+          // 开关右边 12：它引起的下一步（重启生效 / 启动 Codex），手刚拨完开关，下一步就在它旁边（②）；
+          // 同一位的 `卸下后台服务`（关着而服务还装着时）。三颗不会同时出现，与托盘同一段逻辑
+          <CodexKeySlot
+            tool={tool}
+            state={state}
+            phase={phase}
+            busy={busy}
+            uninstalling={uninstalling}
+            onRestart={() => setConfirmRestart(true)}
+            onLaunch={() => void launch()}
+            onUninstall={() => void uninstall()}
+            onDoneDismiss={dismissDone}
+            place="section"
+          />
         }
       >
         {headNotice ? (
           <div className="models-notice">
             <NoticePanel
+              scope="section"
               message={headNotice.message}
               reason={headNotice.reason}
               action={headNotice.action}
@@ -785,6 +610,7 @@ export function sectionTodos({
     out.push(
       <NoticePanel
         key="router"
+        scope="section"
         message="路由没在跑，第三方模型用不了"
         reason={routerFailure ?? undefined}
         busy={resolving === "router" ? "正在重启路由" : undefined}
@@ -802,6 +628,7 @@ export function sectionTodos({
     out.push(
       <NoticePanel
         key={issue.key}
+        scope="section"
         message={
           kind === "takeover"
             ? `${tool.name} 正由 agents-manager 管理`

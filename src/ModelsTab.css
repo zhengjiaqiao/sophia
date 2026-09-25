@@ -1,7 +1,7 @@
 /* Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，画板 06 / 07 / 08 / 19）。
    节的骨架（节头：左节名、右端控件列＝开关 + 开关左边 12 的键）在 ui/Section.css；页宽 776 与节间距归外壳。
-   这里是这一节自己的东西：开关与它左边的 重启生效 / 启动 Codex / 卸下后台服务、在用行、行内待办条、
-   网关小区块、网关行的抽屉与表单。一条左沿、一列控件：所有控件的右沿在同一条竖线上。
+   这里是这一节自己的东西：在用行与待办条的外距、网关小区块、网关行的副行 / 抽屉内容与表单布局。
+   开关与它旁边的键在 codexControls.css；行、小标、胶囊行、输入框、灰字都是 ui 组件。一条左沿、一列控件：所有控件的右沿在同一条竖线上。
    色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
@@ -14,133 +14,33 @@
   color: var(--ink-mute);
 }
 
-/* 节头右端的开关：开关 / 写配置超过 0.3 秒时原位刻度 +「正在添加」 */
-.models-switch {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--control-h);
-}
-
-.models-switch__busy {
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-}
-
-/* ===== 开关左边 12：重启生效 / 启动 Codex / 卸下后台服务（同一位，都是紧凑 24）：忙碌时原位刻度 + 一句 ===== */
-.models-restart {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  height: var(--control-h);
-  white-space: nowrap;
-}
-
-.models-restart__text {
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-}
-
-/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在节头控件列正下方 4、右沿对齐开关 */
-.models-restart--done {
-  display: inline-block;
-  width: 0;
-  height: var(--control-h);
-}
-
-.models-restart-tip {
-  display: inline-flex;
-}
-
 /* ===== 节里的灰面板：节头下（开关、重启、启动、卸下没成），在用行下（行内待办条）。
-   满宽 776、键在右端控件列（主句占满中间，键被推到右沿），节头下 12 ===== */
+   满宽 776、键在右端控件列（NoticePanel scope="section"），节头下 12、条间 8 ===== */
 .models-notice,
 .models-todos {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   gap: var(--space-xs);
   margin-top: var(--space-sm);
 }
 
-.models-notice .ss-noticepanel,
-.models-todos .ss-noticepanel {
-  display: flex;
-  align-self: stretch;
-}
-
-.models-notice .ss-noticepanel__message,
-.models-todos .ss-noticepanel__message {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: normal;
-}
-
-/* ===== 在用：`在用`（12 / 500 ink-mute）+ 8 + 模型片（白胶囊高 26，片间 6，折行不藏）。节头下 12 ===== */
+/* ===== 在用：胶囊行（ui ChipRow），节头下 12 ===== */
 .models-inuse {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-xs);
   margin-top: var(--space-sm);
 }
 
-/* 标签与第一行片同高居中（片高 26） */
-.models-inuse__label {
-  flex: none;
-  font-size: var(--size-label);
-  font-weight: 500;
-  line-height: 26px;
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-
-.models-inuse__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-}
-
-.models-inuse__chip {
-  display: inline-flex;
-}
-
-/* ===== 网关小区块：上距 30；小标 `网关` + 右端 `+ 网关`，下 7 一条 hairline ===== */
+/* ===== 网关小区块：上距 30；小标 `网关` + 右端 `+ 网关`、下 7 一条 hairline（ui SectionLabel） ===== */
 .gw-block {
   margin-top: 30px;
   padding-bottom: var(--space-huge);
 }
 
-.gw-block__head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-sm);
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.gw-block__label {
-  font-size: var(--size-label);
-  font-weight: 500;
-  line-height: var(--leading-label);
-  color: var(--ink-mute);
-}
-
 .gw-block__empty {
-  margin: var(--space-sm) 0 0;
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
+  margin-top: var(--space-sm);
 }
 
-/* ===== 一家网关一行：行间 1px row-line；两列 内容 ｜ 行尾动作（间距 4）。网关名在页面唯一的左沿上 ===== */
-.gw-row {
-  border-bottom: 1px solid var(--row-line);
-}
-
-/* 刚新增成功：surface 行带亮 → 灭 → 亮 → 灭，各 120ms（不用反色） */
-.gw-row.is-jump {
+/* ===== 一家网关一行（ui ListRow）。刚新增成功：surface 行带亮 → 灭 → 亮 → 灭，各 120ms（不用反色） ===== */
+.gw-row--jump {
   animation: gw-jump calc(var(--motion-fast) * 4) var(--ease-mech);
 }
 
@@ -163,60 +63,11 @@
   }
 }
 
-.gw-row__main {
+/* 第二行（ListRow 的副行里）：地址占满放得下的宽度，放不下才截断；无法连接的原因写全，窄了折行。
+   地址外包一层单列网格：提示框包层随它压窄，地址才截得出省略号 */
+.gw-row__urlbox {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: var(--space-sm);
-  /* 悬停 / 右键菜单开着时的 surface 行带：左右各让 8，文字起点不变 */
-  margin: 0 calc(var(--space-xs) * -1);
-  padding: 10px var(--space-xs);
-  border-radius: var(--radius-control);
-  transition: background-color var(--motion-fast) var(--ease-mech);
-}
-
-.gw-row__main:hover,
-.gw-row.is-menu .gw-row__main {
-  background: var(--surface);
-}
-
-/* 内容格（点整行拉开抽屉）：名字 + 6 + 拉手，第二行灰字 */
-.gw-row__text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-/* 名字被截断时拉手跟在省略号后面 */
-.gw-row__title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.gw-row__label {
-  overflow: hidden;
-  font-size: var(--size-body);
-  line-height: 1.5;
-  color: var(--ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 第二行 12 ink-mute、上距 3：地址占满放得下的宽度，放不下才截断；无法连接的原因写全，窄了折行 */
-.gw-row__sub {
-  display: flex;
-  align-items: flex-start;
-  min-width: 0;
-  margin-top: 3px;
-  font-size: var(--size-label);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-  white-space: nowrap;
-}
-
-.gw-row__sub > .ss-tipwrap {
+  grid-template-columns: minmax(0, 1fr);
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -245,31 +96,6 @@
   white-space: normal;
 }
 
-.gw-row__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xxs);
-}
-
-.gw-row__trash {
-  display: inline-flex;
-}
-
-/* 抽屉（ui/Drawer 的凹槽）：左沿对齐网关名（名字就在左沿上，不另缩进），距第二行 10（4 + 抽屉上 6）。
-   行线归这一行（.gw-row 的下边），抽屉自己不再画一条 */
-.gw-row.is-open .gw-row__main {
-  padding-bottom: var(--space-xxs);
-}
-
-.gw-row__drawer .ss-drawer__room {
-  border-bottom: 0;
-}
-
-/* 拉开着、或表单开着：这一行不出悬停带 */
-.gw-row.is-open .gw-row__main:hover {
-  background: none;
-}
-
 /* 限制说明 12 ink-mute，不截断 */
 .gw-row__note {
   margin: 0;
@@ -290,20 +116,13 @@
 }
 
 .gw-row__none {
-  margin: var(--space-xs) 0 0;
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-}
-
-/* 勾选没写成 / 删 / 重连没成的灰面板 */
-.gw-row__panel {
-  display: flex;
   margin-top: var(--space-xs);
 }
 
-.gw-row__panel--error {
-  padding-bottom: var(--space-sm);
+/* 勾选没写成的灰面板 */
+.gw-row__panel {
+  display: flex;
+  margin-top: var(--space-xs);
 }
 
 /* ===== 编辑 / 新增：表单在行里就地展开。`地址` `密钥`（12 ink-mute 定宽 44）+ 输入框 360 × 28 凹面 ===== */
@@ -323,29 +142,6 @@
 .gw-form__label {
   font-size: var(--size-label);
   color: var(--ink-mute);
-}
-
-.gw-form__input {
-  box-sizing: border-box;
-  width: 100%;
-  height: var(--control-h);
-  padding: 0 10px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-control);
-  background: var(--recess);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  transition: border-color var(--motion-fast) var(--ease-mech);
-}
-
-.gw-form__input::placeholder {
-  color: var(--ink-mute);
-}
-
-.gw-form__input:focus {
-  outline: none;
-  border-color: var(--ink-mute);
 }
 
 .gw-form__actions {
@@ -385,12 +181,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gw-row.is-jump {
+  .gw-row--jump {
     animation: none;
-  }
-
-  .gw-row__main,
-  .gw-form__input {
-    transition: none;
   }
 }

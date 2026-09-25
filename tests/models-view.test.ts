@@ -41,6 +41,7 @@ import {
   gatewaySwitchText,
   switchGateway,
   SWITCH_ROLLBACK_FAILED,
+  codexKeyKind,
 } from "../src/modelsView.ts";
 import type { ModelsTool } from "../src/modelsView.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
@@ -82,7 +83,8 @@ const state = (overrides: Partial<GatewayState> = {}): GatewayState => {
 };
 
 const { ModelList } = await import("../src/ModelList.tsx");
-const { InUseRow, RestartSlot, SectionSwitch, sectionTodos } = await import("../src/ModelsTab.tsx");
+const { InUseRow, sectionTodos } = await import("../src/ModelsTab.tsx");
+const { CodexKeySlot, CodexSwitch } = await import("../src/codexControls.tsx");
 
 const noop = () => {};
 
@@ -492,11 +494,14 @@ const withSelected = (overrides: Partial<GatewayState> = {}) => ({
   ...overrides,
 });
 
+// Codex 页节头的开关与键位（codexControls：与托盘共用同一份）
 const switchProps = (overrides: Partial<GatewayState> = {}) => ({
   tool: MODELS_TOOLS[0],
   state: state(overrides),
+  switching: null as boolean | null,
   busy: false,
-  phase: { kind: "idle" } as const,
+  label: "Codex 的第三方模型",
+  withFile: true,
   onToggle: noop,
 });
 
@@ -504,18 +509,23 @@ const slotProps = (overrides: Partial<GatewayState> = {}) => ({
   tool: MODELS_TOOLS[0],
   state: state(overrides),
   busy: false,
+  uninstalling: false,
   phase: { kind: "idle" } as const,
   onRestart: noop,
+  onLaunch: noop,
+  onUninstall: noop,
+  onDoneDismiss: noop,
+  place: "section" as const,
 });
 
-test("SectionSwitch：标准开关（旁边不点指示点，开着由刻线说）；开关＝配置里开没开；关着时提示框写打开的结果与改的是哪个文件", () => {
-  const on = render(SectionSwitch, switchProps(withSelected({ enabled: true })));
+test("CodexSwitch：标准开关（旁边不点指示点，开着由刻线说）；开关＝配置里开没开；关着时提示框写打开的结果与改的是哪个文件", () => {
+  const on = render(CodexSwitch, switchProps(withSelected({ enabled: true })));
   assert.match(
     on,
     /role="switch" aria-checked="true"[^>]*class="ss-switch ss-switch--regular is-on"/,
   );
   assert.doesNotMatch(on, /ss-indicator/);
-  const off = render(SectionSwitch, switchProps(withSelected()));
+  const off = render(CodexSwitch, switchProps(withSelected()));
   assert.match(off, /role="switch" aria-checked="false"/);
   assert.match(
     off,
@@ -523,11 +533,11 @@ test("SectionSwitch：标准开关（旁边不点指示点，开着由刻线说�
   );
 });
 
-test("SectionSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去的那一侧、亮橙；没有待定位置、没有拨开关的确认", () => {
-  const on = render(SectionSwitch, {
+test("CodexSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去的那一侧、亮橙；没有待定位置、没有拨开关的确认", () => {
+  const on = render(CodexSwitch, {
     ...switchProps(withSelected({ enabled: false })),
     busy: true,
-    phase: { kind: "switching", next: true },
+    switching: true,
   });
   assert.match(
     on,
@@ -537,10 +547,10 @@ test("SectionSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去
     on,
     /role="tooltip"[^>]*>关掉后，Codex 只保留官方模型；从 ~\/\.codex\/config\.toml 里删掉那两行</,
   );
-  const off = render(SectionSwitch, {
+  const off = render(CodexSwitch, {
     ...switchProps(withSelected({ enabled: true })),
     busy: true,
-    phase: { kind: "switching", next: false },
+    switching: false,
   });
   assert.match(off, /role="switch" aria-checked="false"/);
   assert.doesNotMatch(on + off, /data-pending|ss-pending-switch/);
@@ -548,56 +558,65 @@ test("SectionSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去
   assert.doesNotMatch(src, /PendingSwitch|pending=\{|confirmSwitch|gatewayConfirmText|重启并/);
 });
 
-test("SectionSwitch 没有网关 / 没选模型：开关禁用，按下即出「先加一家网关、选好模型再打开」", () => {
-  const html = render(SectionSwitch, switchProps({ providers: [] }));
+test("CodexSwitch 没有网关 / 没选模型：开关禁用，按下即出「先加一家网关、选好模型再打开」", () => {
+  const html = render(CodexSwitch, switchProps({ providers: [] }));
   assert.match(
     html,
     /role="switch" aria-checked="false"[^>]*title="先加一家网关、选好模型再打开" disabled=""/,
   );
   assert.match(
-    render(SectionSwitch, switchProps()),
+    render(CodexSwitch, switchProps()),
     /title="先加一家网关、选好模型再打开" disabled=""/,
   );
 });
 
-test("SectionSwitch 拨开关之后：开关原位锁住（过了 0.3 秒门槛换成转圈 +「正在添加」），不画成禁用", () => {
-  const html = render(SectionSwitch, {
+test("CodexSwitch 拨开关之后：开关原位锁住（过了 0.3 秒门槛换成转圈 +「正在添加」），不画成禁用", () => {
+  const html = render(CodexSwitch, {
     ...switchProps(withSelected({ enabled: false })),
     busy: true,
-    phase: { kind: "switching", next: true },
+    switching: true,
   });
   assert.match(
     html,
-    /class="models-switch"><span class="ss-locked" aria-busy="true">[^]*role="switch" aria-checked="true"/,
+    /class="codex-switch"><span class="ss-locked" aria-busy="true">[^]*role="switch" aria-checked="true"/,
   );
   assert.doesNotMatch(html, /title="正在处理上一步"/);
   assert.doesNotMatch(html, /ss-spinner/);
 });
 
-test("RestartSlot（节头里开关右边 12）：待重启出紧凑键「重启生效」（与 卸下后台服务 同位同高），提示框写后果与代价、左对齐键", () => {
+test("CodexKeySlot（节头里开关右边 12）：待重启出紧凑键「重启生效」（与 卸下后台服务 同位同高），提示框写后果与代价、左对齐键", () => {
   const html = render(
-    RestartSlot,
+    CodexKeySlot,
     slotProps(withSelected({ enabled: true, needsCodexRestart: true })),
   );
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>重启生效</);
   assert.match(html, /role="tooltip"[^>]*>重启 Codex 桌面应用让改动生效，进行中的对话会中断</);
-  assert.equal(render(RestartSlot, slotProps(withSelected({ enabled: true }))), "");
-  const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
-  const slot = src.slice(
-    src.indexOf("export function RestartSlot"),
-    src.indexOf("// ===== 节头：开关"),
+  assert.equal(
+    render(
+      CodexKeySlot,
+      slotProps(
+        withSelected({
+          enabled: true,
+          codex: { version: "26.0", running: true, catalogVersion: "1", drift: false },
+        }),
+      ),
+    ),
+    "",
+    "没有要生效的改动、Codex 在跑：这一位空着",
   );
-  assert.doesNotMatch(slot, /align="end"/, "键紧跟开关：提示框、✓ 已生效都左对齐键");
-  assert.match(slot, /<FloatingToast align="start">/);
+  // 键紧跟开关：节头里提示框左对齐键、✓ 已生效浮在键原位下方左对齐（托盘里右沿对齐开关）
+  assert.match(html, /class="ss-tip ss-tip--bottom ss-tip--nowrap"/);
+  const src = readFileSync(new URL("../src/codexControls.tsx", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /<FloatingToast align=\{place === "section" \? "start" : "end"\} anchor=\{doneAnchor\}>/,
+  );
 });
 
 test("第三方模型节头：开关紧跟节名，开关右边 12 是 重启生效 / 启动 Codex / 卸下后台服务（同一位）；重启确认在窗口正中", () => {
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
-  assert.doesNotMatch(src, /PageHeadActions|models-headctl/);
-  assert.match(
-    src,
-    /control=\{[^}]*<SectionSwitch[^]*actions=\{[^]*<RestartSlot[^]*\{uninstallKey\}/,
-  );
+  assert.doesNotMatch(src, /PageHeadActions|models-headctl|uninstallKey/);
+  assert.match(src, /control=\{[^]*<CodexSwitch[^]*actions=\{[^]*<CodexKeySlot[^]*place="section"/);
   assert.match(src, /onRestart=\{\(\) => setConfirmRestart\(true\)\}/);
   // 确认框一律在窗口正中，不再锚在键下
   assert.doesNotMatch(src, /anchor=\{confirmRestart\}/);
@@ -610,61 +629,63 @@ test("第三方模型节头：开关紧跟节名，开关右边 12 是 重启生
   assert.doesNotMatch(css, /margin-left: auto/);
 });
 
-test("RestartSlot 重启中：0.3 秒门槛之前键照旧、点不动；已生效：键的原位下方浮起白窗", () => {
-  const busyHtml = render(RestartSlot, {
+test("CodexKeySlot 重启中：0.3 秒门槛之前键照旧、点不动；已生效：键的原位下方浮起白窗", () => {
+  const busyHtml = render(CodexKeySlot, {
     ...slotProps(withSelected({ enabled: true, needsCodexRestart: true })),
     phase: { kind: "restarting" },
   });
-  assert.match(
-    busyHtml,
-    /class="models-restart-tip ss-locked" aria-busy="true"[^]*重启生效<\/button>/,
-  );
+  assert.match(busyHtml, /^<span class="ss-locked" aria-busy="true">[^]*重启生效<\/button>/);
   assert.doesNotMatch(busyHtml, /ss-spinner/);
-  const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
-  assert.match(src, /const shown = useBusyShown\(waiting\);\s*if \(waiting && shown\)/);
-  const doneHtml = render(RestartSlot, {
+  // 忙碌走组件库唯一的 0.3 秒门槛（BusySlot），不再自拼刻度 + 文字
+  const src = readFileSync(new URL("../src/codexControls.tsx", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /<BusySlot busy label=\{`\$\{restarting \? "正在重启" : "正在启动"\} \$\{tool\.name\}`\}>/,
+  );
+  assert.doesNotMatch(src, /useBusyShown|Spinner/);
+  const doneHtml = render(CodexKeySlot, {
     ...slotProps(withSelected({ enabled: true })),
     phase: { kind: "done" },
   });
   assert.match(
     doneHtml,
-    /class="models-restart models-restart--done"><span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"/,
+    /class="codex-key__spot"><span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"/,
   );
   assert.match(doneHtml, /ss-toast--routine[^]*已生效/);
 });
 
-test("RestartSlot 启动 Codex：开着、Codex 没在跑才出键，提示框写结果；关着不出", () => {
-  const html = render(RestartSlot, {
+test("CodexKeySlot 启动 Codex：开着、Codex 没在跑才出键，提示框写结果；关着不出", () => {
+  const html = render(CodexKeySlot, {
     ...slotProps(withSelected({ enabled: true })),
     onLaunch: noop,
   });
   assert.match(html, />启动 Codex<\/button>/);
   assert.match(html, /role="tooltip"[^>]*>打开 Codex 桌面应用，它会用上现在的模型设置</);
   assert.doesNotMatch(
-    render(RestartSlot, { ...slotProps(withSelected()), onLaunch: noop }),
+    render(CodexKeySlot, { ...slotProps(withSelected()), onLaunch: noop }),
     /启动 Codex/,
   );
-  const launching = render(RestartSlot, {
+  const launching = render(CodexKeySlot, {
     ...slotProps(withSelected({ enabled: true })),
     onLaunch: noop,
     phase: { kind: "launching" },
   });
   assert.match(launching, /ss-locked" aria-busy="true"[^]*启动 Codex<\/button>/);
-  const launched = render(RestartSlot, {
+  const launched = render(CodexKeySlot, {
     ...slotProps(withSelected({ enabled: true })),
     onLaunch: noop,
     phase: { kind: "launched" },
   });
-  assert.match(launched, /models-restart--done[^]*ss-toast--routine[^]*已启动/);
+  assert.match(launched, /codex-key__spot[^]*ss-toast--routine[^]*已启动/);
 });
 
 test("InUseRow：开着写「在用」、关着写「已选」；片可 ×；一个都没选时整行不出", () => {
   const sel = withSelected();
   const on = render(InUseRow, { state: state({ ...sel, enabled: true }), onRemove: noop });
-  assert.match(on, /models-inuse__label">在用</);
+  assert.match(on, /ss-chiprow__label">在用</);
   assert.match(on, /class="ss-modelchip" title="gpt-x"[^]*ss-modelchip__remove/);
   const off = render(InUseRow, { state: state(sel), onRemove: noop });
-  assert.match(off, /models-inuse__label">已选</);
+  assert.match(off, /ss-chiprow__label">已选</);
   assert.equal(render(InUseRow, { state: state(), onRemove: noop }), "");
   // 没有汇总下拉（原框尾 103 ▾）：这一行只管看和去掉
   assert.doesNotMatch(on, /models-box|aria-haspopup/);
@@ -831,15 +852,19 @@ test("ModelList：超过 8 行出筛选框；新拉到的模型整批出现不�
     model: model({ id: "deepseek/deepseek-chat", slug: "g-ds", displayName: "DeepSeek V3.2" }),
   });
   const html = render(ModelList, { entries, onToggle: noop });
-  assert.match(html, /model-list__search/);
+  assert.match(html, /model-list__search"><label class="ss-textfield ss-textfield--search"/);
   // 批量不闪、不依次点亮（DESIGN 2026-09-24）：行上没有逐个闪的动画
   assert.doesNotMatch(html, /is-flash|animation-delay/);
-  assert.equal((html.match(/models-option__id ss-selectable"/g) ?? []).length, 1);
-  // 模型 id 能选中拷走（D23）
-  assert.match(html, /models-option__id ss-selectable">deepseek-chat</);
-  // 筛选框写出这一家有几个模型；每行 13px 复选框（全应用同一个记号），行尾不写网关短名
+  assert.equal((html.match(/ss-checkrow__trailing"><span class="ss-mono/g) ?? []).length, 1);
+  // 模型 id 能选中拷走（D23）：等宽读数 Mono，放不下截断
+  assert.match(html, /class="ss-mono ss-selectable ss-mono--truncate">deepseek-chat</);
+  // 筛选框写出这一家有几个模型；每行是勾选行（14 方框，全应用同一个记号），行尾不写网关短名
   assert.match(html, /placeholder="筛选 10 个模型"/);
-  assert.match(html, /ss-checkbox models-option__check/);
+  assert.equal((html.match(/class="ss-checkrow ss-checkrow--list"/g) ?? []).length, 10);
+  assert.match(html, /role="checkbox" aria-checked="false" aria-label="DeepSeek V3\.2"/);
+  // 放大镜是组件库那一枚，页面里不再自画
+  const tsx = readFileSync(new URL("../src/ModelList.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(tsx, /<svg|ss-checkbox|CheckboxGlyph/);
   assert.doesNotMatch(html, /models-option__gateway/);
 });
 
@@ -912,7 +937,7 @@ test("ModelList 不再有已选置顶组：已选只由上方模型片表达，�
   const seven = Array.from({ length: 9 }, (_, i) => pe(`azure/m${i}`, i < 7));
   const html = render(ModelList, { entries: seven, onToggle: noop });
   assert.doesNotMatch(html, /model-list__group--pinned|>已选<|model-list__more/);
-  assert.equal((html.match(/role="option"/g) ?? []).length, 9);
+  assert.equal((html.match(/role="checkbox"/g) ?? []).length, 9);
 });
 
 test("ModelList 不整体变暗：不再有 busy 能加上的 ss-busy（DESIGN「忙碌」只锁触发它的那个控件，不把整页/整块变暗）", () => {
@@ -932,7 +957,7 @@ test("网关短名只读 core 给的 shortName（取法与测试表在 core sett
   assert.doesNotMatch(src, /HOST_LIKE|function hostOf/, "界面不再自己从主机名取短名");
 });
 
-test("模型列表：底部不再有「已选 N 个模型」；滚动区的容器是纵向 flex，外层压矮时滚动区跟着变矮", async () => {
+test("模型列表：底部不再有「已选 N 个模型」；滚动区包在组件库的渐隐外层里（纵向 flex，外层压矮时滚动区跟着变矮）", async () => {
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/ModelList.css", import.meta.url), "utf8");
   const rule = (sel: string) =>
@@ -940,10 +965,14 @@ test("模型列表：底部不再有「已选 N 个模型」；滚动区的容�
   const html = render(ModelList, { entries: [pe("azure/a", true)], onToggle: noop });
   assert.doesNotMatch(html, /model-list__foot/);
   assert.doesNotMatch(css, /model-list__foot/);
-  const viewport = rule(".model-list__viewport");
-  assert.match(viewport, /display:\s*flex/);
-  assert.match(viewport, /flex-direction:\s*column/);
-  assert.match(viewport, /min-height:\s*0/);
+  // 渐隐：量用 useEdgeFades、画用 FadeViewport（ss-layer__viewport 是纵向 flex、min-height 0），页面不再自写
+  assert.match(
+    html,
+    /<div class="ss-layer__viewport"><div class="model-list__scroll" role="group"/,
+  );
+  assert.doesNotMatch(css, /::before|::after|linear-gradient/);
+  const tsx = readFileSync(new URL("../src/ModelList.tsx", import.meta.url), "utf8");
+  assert.match(tsx, /const fade = useEdgeFades\(scrollRef\);/);
   assert.match(rule(".model-list__scroll"), /min-height:\s*0/);
   // 行尾网关短名随汇总下拉删掉（每个列表只列一家）；组头计数 tabular、不用等宽（一种数字）
   assert.doesNotMatch(css, /models-option__gateway/);
@@ -1081,4 +1110,51 @@ test("开关拨了就写：第三方模型节拨开关直接走 switchGateway（
   assert.doesNotMatch(src, /const pending =/);
   // D5：不再有网关二级页、配置网关、汇总下拉
   assert.doesNotMatch(src, /GatewayPage|配置网关|ModelPicker|ModelBox/);
+});
+
+test("codexKeyKind：开关旁那一位一次只放一颗——等重启 > Codex 没在跑（开着）> 关着而后台服务还装着；忙的时候不出键", () => {
+  const idle = { kind: "idle" } as const;
+  const router = { installed: true, running: true, port: 1, protocol: "chat", error: "" };
+  const running = { version: "26.0", running: true, catalogVersion: "1", drift: false };
+  assert.equal(codexKeyKind(state({ enabled: true, needsCodexRestart: true }), idle), "restart");
+  assert.equal(codexKeyKind(state({ enabled: true }), idle), "launch");
+  assert.equal(codexKeyKind(state({ enabled: false, router }), idle), "uninstall");
+  // 关着、服务还装着、又等着重启：让位给重启（原来 Codex 页两颗会并排出现）
+  assert.equal(
+    codexKeyKind(state({ enabled: false, router, needsCodexRestart: true }), idle),
+    "restart",
+  );
+  assert.equal(codexKeyKind(state({ enabled: true, codex: running }), idle), null);
+  assert.equal(
+    codexKeyKind(state({ enabled: false, router }), { kind: "switching", next: true }),
+    null,
+    "拨开关写配置期间：写完才知道要不要重启",
+  );
+  assert.equal(
+    codexKeyKind(state({ enabled: true, needsCodexRestart: true }), { kind: "restarting" }),
+    null,
+  );
+});
+
+test("Codex 能力控件只有一份：Codex 页节头与托盘能力行都用 codexControls，不再各写开关三态与键位", () => {
+  const page = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
+  const tray = readFileSync(new URL("../src/TrayModelsRow.tsx", import.meta.url), "utf8");
+  for (const src of [page, tray]) {
+    assert.match(src, /from "\.\/codexControls\.tsx"/);
+    assert.match(src, /<CodexSwitch/);
+    assert.match(src, /<CodexKeySlot/);
+    assert.doesNotMatch(src, /<Switch\b|UNINSTALL_TIP|LAUNCH_TIP|RESTART_TIP|useBusyShown/);
+  }
+  // 页面文件里不再写组件库的内部类
+  for (const file of [
+    "ModelsTab.tsx",
+    "ModelsTab.css",
+    "ModelsGateways.tsx",
+    "ModelList.tsx",
+    "ModelList.css",
+  ]) {
+    const src = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /\bss-[a-z]/, file);
+    assert.doesNotMatch(src, /<svg/, file);
+  }
 });

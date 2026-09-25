@@ -1,0 +1,16 @@
+/* Codex 能力控件（codexControls.tsx）：Codex 页节头与托盘能力行共用的开关与开关旁那一位。
+   色值一律 var(--…)，唯一来源是 tokens.css。 */
+@import "./tokens.css";
+
+/* 开关那一格：开关 / 写配置超过 0.3 秒时原位刻度 +「正在添加」 */
+.codex-switch {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 节头里键消失后留在原位的锚：不占宽、与键同高；`✓ 已生效` 浮在它正下方 4、左沿对齐原来的键 */
+.codex-key__spot {
+  display: inline-block;
+  width: 0;
+  height: var(--control-h);
+}

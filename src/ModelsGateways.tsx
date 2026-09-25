@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MouseEvent } from "react";
 import { contextMenuHandler } from "./contextMenu.ts";
 import { useLeaveGuard } from "./shell/leaveGuard.ts";
 import type { ContextMenuItem } from "./contextMenu.ts";
@@ -13,20 +12,21 @@ import {
   switchNeedsConfirm,
   unsavedText,
 } from "./modelsView.ts";
-import type { EffectiveModel, GatewayChoice, ModelsTool } from "./modelsView.ts";
-import type { GatewayProvider, GatewayProviderModel, GatewayState } from "./types.ts";
+import type { GatewayChoice, ModelsTool } from "./modelsView.ts";
+import type { GatewayProvider, GatewayState } from "./types.ts";
 import {
   AddButton,
   BusySlot,
   Button,
   Confirm,
-  Drawer,
-  DrawerHandle,
   IconButton,
   IconEdit,
   IconTrash,
-  ModelChip,
+  ListRow,
+  Note,
   NoticePanel,
+  SectionLabel,
+  TextField,
   Tooltip,
   TruncTip,
 } from "./ui/index.ts";
@@ -34,56 +34,21 @@ import { ModelList } from "./ModelList.tsx";
 
 /// Codex 页「第三方模型」一节里的网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进来）。
 ///
-/// 区块小标 `网关` + 右端 `+ 网关`，下面一条 hairline；**一家网关一行**，行间 `row-line`：
-/// - 两列 内容 ｜ 行尾动作。第一行网关短名 + 6 + 抽屉拉手（悬停这一行才出，拉开常显朝上），第二行
-///   `地址 · 已连接 · 已选 2 / 103`（地址放不下才截断、截断才提示）；无法连接：`地址 · 无法连接 · 原因`
-///   （原因写全），行尾出 `再试一次`
+/// 区块小标 `网关`（`SectionLabel`，下 7 一条 hairline）+ 右端 `+ 网关`；**一家网关一行**（列表行 `ListRow`，
+/// 与添加来源的候选行同一骨架），行间 `row-line`：
+/// - 拉手（前面没有勾选格，常显）｜ 网关短名，第二行 `地址 · 已连接 · 已选 2 / 103`（地址放不下才截断、
+///   截断才提示）；无法连接：`地址 · 无法连接 · 原因`（原因写全），行尾出 `再试一次`
 /// - 行尾动作列（间距 4）：铅笔（图标键，`编辑`）+ 垃圾桶（图标键，`删掉`；锚在垃圾桶下的确认，
 ///   地址与钥匙串里的密钥一起删）——右沿与节头开关、`+ 网关` 在同一条竖线上
-/// - **点整行拉开抽屉＝从这家挑模型**（ui/Drawer）：限制说明 → 这一家的 `已选` 模型片（没选不出）→
-///   440 宽勾选列表；几行可以同时拉开，各自独立；进这一页时每行都收着，只有刚新增成功的那一行自动拉开；Esc 收起
+/// - **点整行拉开抽屉＝从这家挑模型**：限制说明 → 440 宽勾选列表；几行可以同时拉开，各自独立；进这一页时每行都收着，只有刚新增成功的那一行自动拉开；Esc 收起
 /// - `编辑` / `+ 网关`：表单在这一行的抽屉里就地展开（新网关插在最上面，名字位写 `新网关`）；保存成功、
 ///   拉到模型后新网关变成普通行并自动拉开，模型整批出现不逐个闪，这一行 surface 行带闪两下
 /// - 右键网关行：`编辑` · `删掉…`（D18，与行尾两个入口同一条命令）
 /// - 离开这一页（侧栏、⌘, ⌘1…、应用菜单、托盘跳转、⌘[，都经外壳的 `useLeaveGuard`）时表单有没保存的改动：
 ///   拦下，在那一行里就地问「保存 / 丢弃」，问完再走
 ///
-/// 勾选与模型片读的是 ModelsTab 持有的同一个 GatewayState：勾选 / 取消 / 点在用片或抽屉 `已选` 片的 ×
+/// 勾选与模型片读的是 ModelsTab 持有的同一个 GatewayState：勾选 / 取消 / 点节头 `在用` 片的 ×
 /// 都是同一件事、实时联动
-
-/// 一行模型片（DESIGN「在用」「网关抽屉的已选」）：标签（`label` 12 / 500 `ink-mute`）+ 8 + 模型片（白胶囊带 ×，
-/// 友好名，完整 id 进提示框；片间 6、折行不藏）。节头下的 `在用` 与抽屉里这一家的 `已选` 是同一种片、两个范围。
-/// 一个都没有时不出
-export function ModelChipRow({
-  label,
-  rows,
-  onRemove,
-  className,
-}: {
-  label: string;
-  rows: EffectiveModel[];
-  onRemove: (provider: GatewayProvider, model: GatewayProviderModel) => void;
-  className?: string;
-}) {
-  if (rows.length === 0) return null;
-  return (
-    <div className={className ? `models-inuse ${className}` : "models-inuse"}>
-      <span className="models-inuse__label">{label}</span>
-      <div className="models-inuse__chips" role="list" aria-label={`${label}的模型`}>
-        {rows.map(({ provider, model, name, suffix }) => (
-          <span key={`${provider.id}|${model.id}`} role="listitem" className="models-inuse__chip">
-            <ModelChip
-              name={name}
-              suffix={suffix}
-              id={model.slug || model.id}
-              onRemove={() => onRemove(provider, model)}
-            />
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 /// 删网关的确认：删的是哪一家（确认框在窗口正中）
 interface ConfirmingRemove {
@@ -308,11 +273,13 @@ export function GatewayBlock({
     const facts = gatewayFacts(p);
     const url = p.baseUrl ? displayUrl(p.baseUrl) : facts.url;
     return (
-      <span className="gw-row__sub">
+      <>
         {/* 地址占满放得下的宽度，放不下才截断；截断了才给完整值 */}
-        <TruncTip content={p.baseUrl || facts.url}>
-          <span className="gw-row__url">{url}</span>
-        </TruncTip>
+        <span className="gw-row__urlbox">
+          <TruncTip content={p.baseUrl || facts.url}>
+            <span className="gw-row__url">{url}</span>
+          </TruncTip>
+        </span>
         <span className="gw-row__fact">
           {" · "}
           {facts.status === "无法连接" ? (
@@ -324,7 +291,7 @@ export function GatewayBlock({
           {facts.reason !== null ? " · " : null}
         </span>
         {facts.reason !== null ? <span className="gw-row__reason">{facts.reason}</span> : null}
-      </span>
+      </>
     );
   };
 
@@ -339,12 +306,12 @@ export function GatewayBlock({
     return items;
   };
 
-  /// 行尾动作列（间距 4）：无法连接时 `再试一次`，然后铅笔 + 垃圾桶（一对同形的图标键）
+  /// 行尾动作列（ListRow 给间距 4）：无法连接时 `再试一次`，然后铅笔 + 垃圾桶（一对同形的图标键）
   const actions = (p: GatewayProvider, isEditing: boolean) => {
     const blocked = removeProviderBlockedReason(state, p, tool);
     const short = gatewayShortName(p);
     return (
-      <div className="gw-row__actions">
+      <>
         {p.unreachable && !isEditing ? (
           <BusySlot busy={retrying === p.id} label="正在重新连接">
             <Button size="compact" onClick={() => retrying !== p.id && retry(p.id)}>
@@ -355,25 +322,23 @@ export function GatewayBlock({
         {isEditing ? null : (
           <IconButton icon={<IconEdit />} title="编辑" onClick={() => choose(p.id)} />
         )}
-        <span className="gw-row__trash">
-          {blocked === null ? (
-            <BusySlot busy={removing === p.id} label="正在删掉">
-              <IconButton
-                icon={<IconTrash />}
-                title={`删掉 ${short}`}
-                onClick={() => removing !== p.id && askRemove(p)}
-              />
-            </BusySlot>
-          ) : (
-            // 最后一家还在供模型：后端会拒，键上就说清下一步（禁用键自带原因提示框，按下即出）
-            <IconButton icon={<IconTrash />} title={`删掉 ${short}`} disabledReason={blocked} />
-          )}
-        </span>
-      </div>
+        {blocked === null ? (
+          <BusySlot busy={removing === p.id} label="正在删掉">
+            <IconButton
+              icon={<IconTrash />}
+              title={`删掉 ${short}`}
+              onClick={() => removing !== p.id && askRemove(p)}
+            />
+          </BusySlot>
+        ) : (
+          // 最后一家还在供模型：后端会拒，键上就说清下一步（禁用键自带原因提示框，按下即出）
+          <IconButton icon={<IconTrash />} title={`删掉 ${short}`} disabledReason={blocked} />
+        )}
+      </>
     );
   };
 
-  /// 抽屉里＝从这家挑模型：限制说明（不截断）→ 勾选列表。抽屉左沿对齐网关名。
+  /// 抽屉里＝从这家挑模型：限制说明（不截断）→ 勾选列表。抽屉左沿对齐网关名（ListRow 给）。
   /// 不再列这一家的 `已选` 片：与节头 `在用` 重复（2026-09-25 产品负责人真机：「确实重复了和上面的」）
   const body = (p: GatewayProvider) => (
     <div className="gw-row__body">
@@ -393,138 +358,89 @@ export function GatewayBlock({
           />
         </div>
       ) : (
-        <p className="gw-row__none">{p.unreachable ? "无法连接，还没拉到模型" : "还没拉到模型"}</p>
+        <div className="gw-row__none">
+          <Note>{p.unreachable ? "无法连接，还没拉到模型" : "还没拉到模型"}</Note>
+        </div>
       )}
     </div>
   );
 
-  /// 点整行拉开 / 收起抽屉；行尾动作列里的点击不算（它们各有各的事）
-  const onRowClick = (p: GatewayProvider) => (e: MouseEvent<HTMLDivElement>) => {
-    if ((e.target as Element).closest(".gw-row__actions")) return;
-    onToggleRow(p.id);
-  };
-
-  /// 拉手 + 6 + 名字：网关行前面没有勾选框，拉手常显（收起 ›、拉开 ˅，与表格同一个形与方向）。
-  /// 表单开着时拉手朝下，推回去＝收起表单（有改动先问）
-  const title = (
-    label: string,
-    form: boolean,
-    open: boolean,
-    onToggle: () => void,
-    drawerId: string,
-  ) => (
-    <span className="gw-row__title">
-      <DrawerHandle
-        always
-        open={open}
-        onToggle={onToggle}
-        label={form ? `${label} 的地址与密钥` : `${label} 的模型`}
-        controls={drawerId}
-      />
-      <span className="gw-row__label">{label}</span>
-    </span>
-  );
-
+  /// 一家一行（列表行 ListRow）：没有勾选格，拉手常显（收起 ›、拉开 ˅，与表格同一个形与方向）；
+  /// 点整行拉开抽屉挑模型。编辑时第二行收起、抽屉里换成表单，拉手（或整行、Esc）推回去＝收起表单（有改动先问）
   const row = (p: GatewayProvider) => {
     const open = expanded.has(p.id);
     const isEditing = editing === p.id;
     const short = gatewayShortName(p);
-    const drawerId = `gw-drawer-${p.id}`;
-    const classes = ["gw-row"];
-    if (open || isEditing) classes.push("is-open");
-    if (isEditing) classes.push("is-editing");
-    if (addedId === p.id) classes.push("is-jump");
-    if (menuRow === p.id) classes.push("is-menu");
     return (
-      <div
+      <ListRow
         key={p.id}
-        className={classes.join(" ")}
-        onAnimationEnd={(e) => {
-          if (e.target === e.currentTarget && addedId === p.id) setAddedId(null);
-        }}
-        onKeyDown={(e) => {
-          // Esc 收起抽屉（表单开着时不管：Esc 不替用户丢改动）
-          if (e.key === "Escape" && open && !isEditing) onToggleRow(p.id);
-        }}
-      >
-        <div
-          className="gw-row__main"
-          data-drawer-row=""
-          ref={(el) => {
-            if (el) rowEls.current.set(p.id, el);
-            else rowEls.current.delete(p.id);
-          }}
-          onClick={isEditing ? undefined : onRowClick(p)}
-          onContextMenu={contextMenuHandler(() => menuItems(p, isEditing), {
-            onOpen: () => setMenuRow(p.id),
-            onClose: () => setMenuRow(null),
-          })}
-        >
-          <span className="gw-row__text">
-            {isEditing
-              ? // 编辑时第二行换成表单（在抽屉里）：拉手推回去＝收起表单
-                title(short, true, true, closeForm, drawerId)
-              : title(short, false, open, () => onToggleRow(p.id), drawerId)}
-            {isEditing ? null : subLine(p)}
-          </span>
-          {actions(p, isEditing)}
-        </div>
-        {rowError?.id === p.id ? (
-          <div className="gw-row__panel gw-row__panel--error">
+        title={short}
+        sub={isEditing ? undefined : subLine(p)}
+        actions={actions(p, isEditing)}
+        drawer={isEditing ? form(p) : body(p)}
+        open={open || isEditing}
+        onToggle={isEditing ? closeForm : () => onToggleRow(p.id)}
+        drawerLabel={isEditing ? `${short} 的地址与密钥` : `${short} 的模型`}
+        drawerId={`gw-drawer-${p.id}`}
+        notice={
+          rowError?.id === p.id ? (
             <NoticePanel message={rowError.message} onClose={() => setRowError(null)} />
-          </div>
-        ) : null}
-        {/* 表单与挑模型各是一格抽屉：收起时各自滑回，内容留到滑完 */}
-        <Drawer open={isEditing} className="gw-row__drawer" id={isEditing ? drawerId : undefined}>
-          {isEditing ? form(p) : null}
-        </Drawer>
-        <Drawer
-          open={open && !isEditing}
-          className="gw-row__drawer"
-          id={isEditing ? undefined : drawerId}
-        >
-          {body(p)}
-        </Drawer>
-      </div>
+          ) : undefined
+        }
+        highlighted={menuRow === p.id}
+        onContextMenu={contextMenuHandler(() => menuItems(p, isEditing), {
+          onOpen: () => setMenuRow(p.id),
+          onClose: () => setMenuRow(null),
+        })}
+        className={addedId === p.id ? "gw-row--jump" : undefined}
+        onAnimationEnd={addedId === p.id ? () => setAddedId(null) : undefined}
+        rowRef={(el) => {
+          if (el) rowEls.current.set(p.id, el);
+          else rowEls.current.delete(p.id);
+        }}
+      />
     );
   };
-
-  /// 新网关：插在列表最上面，名字位写 `新网关`，表单在拉开的抽屉里
-  const draftRow = (
-    <div key="new" className="gw-row is-open is-editing">
-      <div className="gw-row__main" data-drawer-row="">
-        <span className="gw-row__text">
-          {title("新网关", true, true, closeForm, "gw-drawer-new")}
-        </span>
-      </div>
-      <Drawer open className="gw-row__drawer" id="gw-drawer-new">
-        {form(null)}
-      </Drawer>
-    </div>
-  );
 
   const drafting = editing === "new";
 
   return (
     <div className="gw-block">
-      <div className="gw-block__head">
-        <span className="gw-block__label">网关</span>
-        <AddButton
-          noun="网关"
-          onClick={() => choose("new")}
-          disabledReason={drafting ? ADD_GATEWAY_BLOCKED : undefined}
-        />
-      </div>
+      <SectionLabel
+        rule
+        action={
+          <AddButton
+            noun="网关"
+            onClick={() => choose("new")}
+            disabledReason={drafting ? ADD_GATEWAY_BLOCKED : undefined}
+          />
+        }
+      >
+        网关
+      </SectionLabel>
       {providers.length === 0 && !drafting ? (
         // 空态一句；`+ 网关` 就在正上方，空态不重复按钮
-        <p className="gw-block__empty">还没有网关，先加一家</p>
+        <div className="gw-block__empty">
+          <Note>还没有网关，先加一家</Note>
+        </div>
       ) : (
         <div className="gw-list">
-          {drafting ? draftRow : null}
+          {drafting ? (
+            // 新网关：插在列表最上面，名字位写 `新网关`，表单在拉开的抽屉里
+            <ListRow
+              key="new"
+              title="新网关"
+              drawer={form(null)}
+              open
+              onToggle={closeForm}
+              drawerLabel="新网关 的地址与密钥"
+              drawerId="gw-drawer-new"
+            />
+          ) : null}
           {providers.map(row)}
         </div>
       )}
-      {/* 删网关：地址与钥匙串里的密钥一起删、删除后无法恢复——锚定确认（⑬） */}
+      {/* 删网关：地址与钥匙串里的密钥一起删、删除后无法恢复——先确认（⑬） */}
       {confirming !== null ? (
         <Confirm
           title={`删掉 ${gatewayShortName(confirming.provider)}？`}
@@ -627,29 +543,33 @@ export function GatewayForm({
 
   return (
     <div className="gw-form">
-      <label className="gw-form__field">
-        <span className="gw-form__label">地址</span>
-        <input
-          className="gw-form__input"
-          type="text"
+      {/* 标签是看的（12 ink-mute 定宽 44）；读屏名在输入框自己身上 */}
+      <div className="gw-form__field">
+        <span className="gw-form__label" aria-hidden="true">
+          地址
+        </span>
+        <TextField
+          label="地址"
           value={baseUrl}
           autoFocus
           spellCheck={false}
           placeholder="https://example.com/openai/v1"
-          onChange={(e) => setBaseUrl(e.target.value)}
+          onChange={setBaseUrl}
         />
-      </label>
-      <label className="gw-form__field">
-        <span className="gw-form__label">密钥</span>
-        <input
-          className="gw-form__input"
+      </div>
+      <div className="gw-form__field">
+        <span className="gw-form__label" aria-hidden="true">
+          密钥
+        </span>
+        <TextField
+          label="密钥"
           type="password"
           value={apiKey}
           autoComplete="off"
           placeholder={hasKey ? "已保存，留空则不改" : "粘贴密钥，存进钥匙串"}
-          onChange={(e) => setApiKey(e.target.value)}
+          onChange={setApiKey}
         />
-      </label>
+      </div>
       <div className="gw-form__actions">
         {ask !== null ? (
           // 离开 / 换一行编辑时表单有未保存的改动：不走，在这一行里就地问一句（⑬⑭）

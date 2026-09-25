@@ -11,23 +11,11 @@ import {
   switchGateway,
 } from "./modelsView.ts";
 import type { TrayRowProps } from "./shell/agentRegistry.ts";
-import {
-  LAUNCH_TIP,
-  RESTART_CONSEQUENCE,
-  RESTART_TIP,
-  UNINSTALL_TIP,
-  trayRow,
-} from "./trayView.ts";
+import { RESTART_CONSEQUENCE, trayRow } from "./trayView.ts";
 import type { GatewayState } from "./types.ts";
-import {
-  BusySlot,
-  Button,
-  FloatingToast,
-  NoticePanel,
-  Switch,
-  Toast,
-  Tooltip,
-} from "./ui/index.ts";
+import { Confirm, NoticePanel } from "./ui/index.ts";
+import { CodexKeySlot, CodexSwitch } from "./codexControls.tsx";
+import type { CodexPhase } from "./codexControls.tsx";
 
 /// 托盘面板里「第三方模型」一行（DESIGN「托盘面板」）：agent 注册表里这一节的 `trayRow` 画法，
 /// 面板（TrayPanel）按注册表把它排进 Codex 那一块，面板自己不认得这一节。样式在 TrayPanel.css。
@@ -36,7 +24,7 @@ import {
 /// （与 Codex 页节头同一个位置关系），不另起一行。不列在用的模型（2026-09-25：在 Codex 页的模型片上看）。
 /// 重启确认、做不成的灰面板都在这一行下当场展开。
 ///
-/// 与 Codex 页同一段逻辑（modelsView）：
+/// 与 Codex 页同一段逻辑（modelsView 的判断 + codexControls 的开关与键位）：
 /// - 开关＝配置里开没开：拨了就写、不确认，乐观翻转（滑块当即过去，写超过 0.3 秒原位转圈 +「正在添加 / 正在移除」）；
 ///   写成了要重启才生效时键位出 `重启生效`（Codex 没在跑出 `启动 Codex`）；没写成连配置一起撤回、滑块滑回，
 ///   键位原位灰面板 + `再试一次`。打断对话的是重启，确认只在 `重启生效` 上
@@ -48,14 +36,7 @@ import {
 const endOf = (probe: HTMLElement) => probe.closest(".tray__end");
 
 /// 键位那一处在做什么：重启生效的确认 / 重启中 / 已生效；启动中 / 已启动；拨了开关、正在写配置
-type Phase =
-  | { kind: "idle" }
-  | { kind: "confirming" }
-  | { kind: "restarting" }
-  | { kind: "done" }
-  | { kind: "launching" }
-  | { kind: "launched" }
-  | { kind: "switching"; next: boolean };
+type Phase = CodexPhase;
 
 /// 键位原位的灰面板：主句 + 原因 + `再试一次`。`for` 说它跟着哪颗键：那颗键消失（问题解决了）就一起走
 interface TrayNotice {
@@ -225,103 +206,9 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
     setPhase(reason === null ? { kind: "launched" } : { kind: "idle" });
   };
 
-  /// 确认在面板里当场展开（一块凹面）：标题 + 一句后果 + `取消`（默认键）与主动作墨键，都紧凑
-  const confirmPanel = (title: string, body: string, label: string, onConfirm: () => void) => (
-    <div className="tray__confirm" id={confirmId} role="dialog" aria-label={title}>
-      <div className="tray__confirm-title">{title}</div>
-      <div className="tray__confirm-body">{body}</div>
-      <div className="tray__confirm-foot">
-        <Button size="compact" onClick={() => setPhase({ kind: "idle" })}>
-          取消
-        </Button>
-        <Button variant="primary" size="compact" onClick={onConfirm}>
-          {label}
-        </Button>
-      </div>
-    </div>
-  );
-
-  /// 键位：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位；做的时候原位忙碌，成了原位下方浮起一窗
-  const keySlot = (current: GatewayState) => {
-    const row = trayRow(current);
-    // 拨开关写配置期间：写完了才知道要不要重启，键等写完再出来
-    if (phase.kind === "switching") return null;
-    if (phase.kind === "restarting" || phase.kind === "launching") {
-      // 键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
-      const restarting = phase.kind === "restarting";
-      return (
-        <BusySlot busy label={`${restarting ? "正在重启" : "正在启动"} ${CODEX.name}`}>
-          <Button size="compact">{restarting ? "重启生效" : `启动 ${CODEX.name}`}</Button>
-        </BusySlot>
-      );
-    }
-    if (phase.kind === "done" || phase.kind === "launched") {
-      // 键已消失：结果浮在原来那颗键的正下方 4、右沿对齐开关（锚＝行尾那一组：键位 + 开关，高 24）
-      return (
-        <FloatingToast align="end" anchor={endOf}>
-          <Toast
-            kind="success"
-            verb={phase.kind === "done" ? "已生效" : "已启动"}
-            onDismiss={dismissDone}
-          />
-        </FloatingToast>
-      );
-    }
-    const blocked = busy ? "正在处理上一步" : undefined;
-    const key = (label: string, tip: string, onClick: () => void, expanded?: boolean) => (
-      <Tooltip content={tip} placement="bottom">
-        {blocked ? (
-          <Button size="compact" disabled disabledReason={blocked}>
-            {label}
-          </Button>
-        ) : (
-          <Button
-            size="compact"
-            onClick={onClick}
-            ariaExpanded={expanded}
-            ariaControls={expanded ? confirmId : undefined}
-          >
-            {label}
-          </Button>
-        )}
-      </Tooltip>
-    );
-    if (row.showRestart)
-      return key(
-        "重启生效",
-        RESTART_TIP,
-        () => {
-          setNotice(null);
-          setPhase({ kind: "confirming" });
-        },
-        phase.kind === "confirming",
-      );
-    if (row.showLaunch) return key(`启动 ${CODEX.name}`, LAUNCH_TIP, () => void launchCodex());
-    if (row.showUninstall)
-      return (
-        <BusySlot busy={uninstalling} label="正在卸下后台服务">
-          <Tooltip content={UNINSTALL_TIP} placement="bottom">
-            {busy && !uninstalling ? (
-              <Button size="compact" disabled disabledReason="正在处理上一步">
-                卸下后台服务
-              </Button>
-            ) : (
-              <Button size="compact" onClick={uninstalling ? undefined : () => void uninstall()}>
-                卸下后台服务
-              </Button>
-            )}
-          </Tooltip>
-        </BusySlot>
-      );
-    return null;
-  };
-
   /// `第三方模型` 一行：名字 + 右端 [键位 12 开关] → 行下当场展开的确认 / 灰面板
   const draw = (current: GatewayState) => {
     const row = trayRow(current);
-    const switching = phase.kind === "switching" ? phase.next : null;
-    /// 乐观翻转：写的时候滑块已经在拨过去的那一侧
-    const on = switching ?? row.toggle.on;
     // 灰面板跟着它那颗键：键消失（问题解决了）就一起走
     const noticeLive =
       notice !== null &&
@@ -329,61 +216,62 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
       (notice.for === "switch" ||
         (notice.for === "restart" && row.showRestart) ||
         (notice.for === "launch" && row.showLaunch));
-    const slot = noticeLive ? null : keySlot(current);
     return (
       <>
         <div className="tray__cap">
           <span className="tray__cap-title">{title}</span>
           <span className="tray__end">
-            {slot}
+            {/* 键位：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位；失败的灰面板出来时让给它 */}
+            {noticeLive ? null : (
+              <CodexKeySlot
+                tool={CODEX}
+                state={current}
+                phase={phase}
+                busy={busy}
+                uninstalling={uninstalling}
+                onRestart={() => {
+                  setNotice(null);
+                  setPhase({ kind: "confirming" });
+                }}
+                onLaunch={() => void launchCodex()}
+                onUninstall={() => void uninstall()}
+                onDoneDismiss={dismissDone}
+                place="tray"
+                doneAnchor={endOf}
+                confirmId={confirmId}
+              />
+            )}
             {/* 开关＝配置里开没开：拨了就写，滑块当即过去；没写成滑回 */}
-            <span className="tray__switch">
-              {row.toggle.disabledReason !== null && switching === null ? (
-                // 禁用的开关自带原因提示框：悬停出、按下当即出（同 Codex 页）
-                <Switch
-                  checked={false}
-                  onChange={() => undefined}
-                  label={`启用 ${CODEX.name} 的${title}`}
-                  disabledReason={row.toggle.disabledReason}
-                  tipPlacement="bottom"
-                />
-              ) : (
-                <BusySlot
-                  busy={switching !== null}
-                  label={gatewaySwitchText(switching ?? true).busy}
-                >
-                  <Tooltip
-                    content={
-                      on
-                        ? `关掉后，${CODEX.name} 只保留官方模型`
-                        : `打开后，选好的模型会出现在 ${CODEX.name} 的模型列表里`
-                    }
-                    placement="bottom"
-                  >
-                    <Switch
-                      checked={on}
-                      onChange={(next) => void toggle(next)}
-                      label={`启用 ${CODEX.name} 的${title}`}
-                      disabledReason={busy && switching === null ? "正在处理上一步" : undefined}
-                    />
-                  </Tooltip>
-                </BusySlot>
-              )}
-            </span>
+            <CodexSwitch
+              tool={CODEX}
+              state={current}
+              switching={phase.kind === "switching" ? phase.next : null}
+              busy={busy}
+              label={`启用 ${CODEX.name} 的${title}`}
+              onToggle={(next) => void toggle(next)}
+            />
           </span>
         </div>
-        {phase.kind === "confirming"
-          ? confirmPanel(
-              `重启 ${CODEX.name}？`,
-              RESTART_CONSEQUENCE,
-              "重启",
-              () => void restartCodex(),
-            )
-          : null}
+        {phase.kind === "confirming" ? (
+          // 确认在面板里当场展开（窄面板形态）：标题 + 一句后果 + `取消` 与主动作墨键，都紧凑
+          <div className="tray__confirm">
+            <Confirm
+              inline
+              id={confirmId}
+              title={`重启 ${CODEX.name}？`}
+              confirmLabel="重启"
+              onConfirm={() => void restartCodex()}
+              onCancel={() => setPhase({ kind: "idle" })}
+            >
+              {RESTART_CONSEQUENCE}
+            </Confirm>
+          </div>
+        ) : null}
         {noticeLive && notice ? (
           // 带下一步的失败：能力行下灰面板（键位原位让给它），不会自己走（DESIGN「反馈的两种形态」）
           <div className="tray__notice">
             <NoticePanel
+              scope="section"
               message={notice.message}
               reason={notice.reason}
               action={{ label: "再试一次", onClick: notice.retry }}

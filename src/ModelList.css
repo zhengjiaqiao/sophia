@@ -1,6 +1,6 @@
 /* 模型勾选列表（DESIGN「模型列表的写法」）：Codex 页网关行展开区里的那一框，一个列表只列一家网关。
-   色值一律 var(--…)，唯一来源是 tokens.css。框本身（paper 面、hairline 边、12 圆角、宽 440）在 ModelsTab.css，
-   它放在网关行的抽屉（recess 凹槽）里 */
+   色值一律 var(--…)，唯一来源是 tokens.css。框本身（paper 面、hairline 边、12 圆角、宽 440）在 ModelsTab.css；
+   筛选框（TextField 搜索形态）、每一行（CheckRow）、滚动渐隐（FadeViewport）都是 ui 组件，这里只排它们的位置 */
 @import "./tokens.css";
 
 .model-list {
@@ -9,85 +9,13 @@
   min-height: 0;
 }
 
-/* 筛选框（DESIGN「输入框」凹面）：框顶，超过约 8 行才出现；放大镜 16 在框内左侧 */
+/* 筛选框：框顶，超过约 8 行才出现 */
 .model-list__search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
   flex-shrink: 0;
   margin: var(--space-xs) var(--space-xs) var(--space-xxs);
-  height: var(--control-h);
-  box-sizing: border-box;
-  padding: 0 10px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-control);
-  background: var(--recess);
-  color: var(--ink-mute);
-  transition: border-color var(--motion-fast) var(--ease-mech);
 }
 
-.model-list__search:focus-within {
-  border-color: var(--ink-mute);
-}
-
-.model-list__input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-}
-
-.model-list__input::placeholder {
-  color: var(--ink-mute);
-}
-
-.model-list__input:focus,
-.model-list__input:focus-visible {
-  outline: none;
-}
-
-/* 滚动边缘渐隐：上 / 下还有被裁掉的行时，那一边 16px 从框的 paper 白渐隐到透明（功能性渐变）。
-   自己也是纵向 flex：外层压矮它时滚动区跟着变矮，最后一行能完整滚出来 */
-.model-list__viewport {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.model-list__viewport::before,
-.model-list__viewport::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  z-index: 1;
-  height: var(--fade-edge);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-mech);
-}
-
-.model-list__viewport::before {
-  top: 0;
-  background: linear-gradient(to bottom, var(--paper), transparent);
-}
-
-.model-list__viewport::after {
-  bottom: 0;
-  background: linear-gradient(to top, var(--paper), transparent);
-}
-
-.model-list__viewport[data-fade-top]::before,
-.model-list__viewport[data-fade-bottom]::after {
-  opacity: 1;
-}
-
-/* 列表在自身范围内滚动：约 8 行 + 组头 */
+/* 列表在自身范围内滚动：约 8 行 + 组头。外层（FadeViewport）是纵向 flex：外层压矮它时滚动区跟着变矮 */
 .model-list__scroll {
   position: relative;
   min-height: 0;
@@ -96,13 +24,7 @@
 }
 
 .model-list__empty {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  margin: 0;
   padding: var(--space-xs) var(--space-sm);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
 }
 
 /* 服务商小组头 `azure · 12`：12 ink-mute，服务商名 600，计数 tabular（一种数字，不用等宽） */
@@ -129,62 +51,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 一个模型一行：高 34 = 16px 勾选框 + 模型名（body），整行是命中区，悬停 surface（勾选框随行进「手靠近」） */
-.models-option {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: var(--space-sm);
-  box-sizing: border-box;
-  height: var(--row-h);
-  /* 行悬停底 6 圆角（control），左右各让 4；文字起点不变（12 = 4 + 8） */
-  margin: 0 var(--space-xxs);
-  padding: 0 var(--space-xs);
-  border-radius: var(--radius-control);
-  transition: background-color var(--motion-fast) var(--ease-mech);
-}
-
-.models-option:hover {
-  background: var(--surface);
-}
-
-.models-option:focus-visible {
-  outline: 1px solid var(--ink);
-  outline-offset: -2px;
-}
-
-/* 方框只画状态：不接指针（点击落到整行上） */
-.models-option__check {
-  pointer-events: none;
-  flex-shrink: 0;
-}
-
-.models-option__name {
-  font-size: var(--size-body);
-  line-height: var(--leading-caption);
-  white-space: nowrap;
-  color: var(--ink);
-}
-
-/* 行尾 id：只有友好名与 id 明显不同才出现；它是标识，放不下可以截断 */
-.models-option__id {
-  margin-left: auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-  font-size: var(--size-label);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--leading-caption);
-  color: var(--ink-faint);
-  white-space: nowrap;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .model-list__viewport::before,
-  .model-list__viewport::after,
-  .model-list__search,
-  .models-option {
-    transition: none;
-  }
+/* 一个模型一行（CheckRow list 34）：行的悬停底左右各让 4，文字起点与组头同在 12 */
+.model-list__rows {
+  padding: 0 var(--space-xxs);
 }

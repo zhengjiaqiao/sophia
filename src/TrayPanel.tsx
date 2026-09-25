@@ -8,7 +8,7 @@ import { AGENTS } from "./shell/agents.tsx";
 import type { AgentState, TrayHost } from "./shell/agentRegistry.ts";
 import { trayAgentState, trayBlocks, type TrayBlock } from "./trayView.ts";
 import type { GatewayState } from "./types.ts";
-import { AgentIcon } from "./ui/index.ts";
+import { AgentIcon, Menu, MenuItem } from "./ui/index.ts";
 import "./TrayPanel.css";
 
 /// 菜单栏面板（DESIGN「托盘面板」，画板 V4Layouts-tray）。宽 320、`paper` 底、1px `hairline`、12 圆角
@@ -106,22 +106,11 @@ export default function TrayPanel() {
     <div className={`tray${blocks.length === 0 ? " tray--bare" : ""}`} ref={rootRef} tabIndex={-1}>
       <TrayAgents blocks={blocks} state={agentState} host={host} />
       {blocks.length > 0 ? <hr className="tray__rule" /> : null}
-      <ul className="tray__menu">
-        <li>
-          <button
-            type="button"
-            className="tray__item"
-            onClick={() => void api.trayOpenMain(null, null)}
-          >
-            打开 Sophia
-          </button>
-        </li>
-        <li>
-          <button type="button" className="tray__item" onClick={() => void api.trayQuit()}>
-            退出
-          </button>
-        </li>
-      </ul>
+      {/* 菜单两项（Menu 常驻在面板里：项高 30、13 号字、左右外距 6，字与块头同一条左沿 16） */}
+      <Menu context="panel" label="Sophia">
+        <MenuItem onSelect={() => void api.trayOpenMain(null, null)}>打开 Sophia</MenuItem>
+        <MenuItem onSelect={() => void api.trayQuit()}>退出</MenuItem>
+      </Menu>
     </div>
   );
 }

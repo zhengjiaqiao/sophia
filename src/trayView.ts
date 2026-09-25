@@ -6,12 +6,7 @@
 import { visibleAgents } from "./shell/agentRegistry.ts";
 import type { ComponentType } from "react";
 import type { AgentEntry, AgentState, TrayRowProps } from "./shell/agentRegistry.ts";
-import {
-  enableDisabledReason,
-  serviceLeftover,
-  showLaunchKey,
-  totalSelected,
-} from "./modelsView.ts";
+import { codexKeyKind, switchDisabledReason } from "./modelsView.ts";
 import type { GatewayState } from "./types.ts";
 
 export { LAUNCH_TIP, RESTART_CONSEQUENCE, RESTART_TIP, UNINSTALL_TIP } from "./modelsView.ts";
@@ -69,12 +64,12 @@ export interface TrayRow {
 }
 
 export function trayRow(state: GatewayState): TrayRow {
-  // 已启用时永远能关：停用不依赖密钥和模型还在不在
-  const disabledReason = state.enabled ? null : enableDisabledReason(state, totalSelected(state));
+  // 与 Codex 页同一个判断（modelsView）：开着时永远能关；三颗键占同一位
+  const key = codexKeyKind(state, { kind: "idle" });
   return {
-    toggle: { on: state.enabled, disabledReason },
-    showRestart: state.needsCodexRestart,
-    showLaunch: showLaunchKey(state, { kind: "idle" }),
-    showUninstall: serviceLeftover(state) && !state.needsCodexRestart,
+    toggle: { on: state.enabled, disabledReason: switchDisabledReason(state) },
+    showRestart: key === "restart",
+    showLaunch: key === "launch",
+    showUninstall: key === "uninstall",
   };
 }

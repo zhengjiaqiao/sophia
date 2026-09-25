@@ -69,9 +69,9 @@ test("edgeFades：内容比可见区多出 1px 以上才渐隐；滚到顶只下
   assert.deepEqual(edgeFades(0, 300, 600), { start: false, end: true });
   assert.deepEqual(edgeFades(150, 300, 600), { start: true, end: true });
   assert.deepEqual(edgeFades(300, 300, 600), { start: true, end: false });
-  // 页面的旧入口转到这里，判定只有一份
+  // 判定只有一份：页面迁完，modelsView 的旧转出已删（页面一律 useEdgeFades / FadeViewport）
   const modelsView = readFileSync(new URL("../src/modelsView.ts", import.meta.url), "utf8");
-  assert.match(modelsView, /export \{ edgeFades \} from "\.\/ui\/edgeFades\.ts";/);
+  assert.doesNotMatch(modelsView, /edgeFades/);
   assert.doesNotMatch(
     readFileSync(new URL("../src/ui/FloatingLayer.tsx", import.meta.url), "utf8"),
     /modelsView/,
