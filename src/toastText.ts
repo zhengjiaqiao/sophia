@@ -208,7 +208,6 @@ export function keepThisConfirm(input: {
 /// 链接怎么处理、能不能找回。
 /// - 别处没有同名原件：`删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除。原件可以从废纸篓找回，链接不会自动恢复`
 /// - 别处有：`删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它。原件可以从废纸篓找回`
-/// - 原件在 git 仓库里再接一句：`CardBox 是 git 仓库，这次删除会出现在它的未提交改动里`
 /// `ownAgents` 是直接读原件所在目录的 agent（这一行里画 ⦿ 的列）；`linkAgents` 是有链接指向它的 agent。
 /// `paths` 一行：`移到废纸篓` + 完整路径（主目录写 `~`，不截断），与「只留这份」同一种路径行
 export function deleteOriginalConfirm(input: {
@@ -222,8 +221,6 @@ export function deleteOriginalConfirm(input: {
   ownAgents: string[];
   /// 有链接指向它的 agent（去重、保序）
   linkAgents: string[];
-  /// 原件所在 git 仓库的文件夹名
-  repo?: string;
 }): { title: string; body: string; paths: { label: string; path: string }[] } {
   const list = (names: string[]) => names.join("、");
   const lose = (names: string[]) =>
@@ -242,8 +239,6 @@ export function deleteOriginalConfirm(input: {
       input.links > 0 ? "原件可以从废纸篓找回，链接不会自动恢复" : "原件可以从废纸篓找回",
     );
   }
-  if (input.repo !== undefined)
-    sentences.push(`${input.repo} 是 git 仓库，这次删除会出现在它的未提交改动里`);
   return {
     title: `删除 ${input.skill}？`,
     body: sentences.filter((x) => x !== "").join("。"),

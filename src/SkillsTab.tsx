@@ -86,8 +86,6 @@ interface DeletePane {
   planId: string;
   /// 链接是改指到别处的同名原件（否则是一起清掉）
   relink: boolean;
-  /// 确认框写明了原件在 git 仓库里：确认就是也认了这个后果
-  inGit: boolean;
   text: ReturnType<typeof deleteOriginalConfirm>;
 }
 
@@ -869,7 +867,6 @@ export default function SkillsTab({
       anchor,
       planId: planned.planId,
       relink: plan.relinkTo !== null,
-      inGit: plan.inGit !== null,
       text: deleteOriginalConfirm({
         skill: ref.skill,
         path: plan.path,
@@ -878,13 +875,6 @@ export default function SkillsTab({
           plan.relinkTo === null ? undefined : relinkName ? originText(relinkName) : plan.relinkTo,
         ownAgents,
         linkAgents,
-        repo:
-          plan.inGit === null
-            ? undefined
-            : plan.inGit
-                .replace(/[/\\]+$/, "")
-                .split(/[/\\]/)
-                .pop(),
       }),
     });
   };
@@ -909,20 +899,12 @@ export default function SkillsTab({
     try {
       let report: SyncReport | null = null;
       try {
-        // 确认框已写明在不在 git 仓库里：确认了就是也同意删仓库里的
+        // 用户在确认框里确认了删它：原件在不在 git 仓库里都删（DESIGN「删除原件」）
         report = await api.deleteSource(pane.planId, true);
       } catch {
-        // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删。确认时说的是「不在仓库里」、
-        // 重检却在仓库里，就不能替用户认这个后果——照旧不代删
+        // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删
         const again = await api.planDeleteSource(ref.sourceId, ref.skill);
-        if (again.plan.inGit !== null && !pane.inGit)
-          node = cannot(
-            `${again.plan.inGit
-              .replace(/[/\\]+$/, "")
-              .split(/[/\\]/)
-              .pop()} 是 git 仓库，删除会出现在它的未提交改动里——确认时没说到这一点，这次没删，再点一次看清后果`,
-          );
-        else report = await api.deleteSource(again.planId, true);
+        report = await api.deleteSource(again.planId, true);
       }
       if (report !== null) {
         const [first, ...links] = report.entries;

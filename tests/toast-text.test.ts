@@ -193,11 +193,6 @@ test("删除 skill 原件的确认框：标题一问，正文写废纸篓与链�
     deleteOriginalConfirm({ ...base, links: 0, linkAgents: [] }).body,
     "删除后 Codex 不能再用它。原件可以从废纸篓找回",
   );
-  // 在 git 仓库里：说具体后果，不说「它在 git 仓库里」
-  assert.equal(
-    deleteOriginalConfirm({ ...base, links: 0, linkAgents: [], repo: "CardBox" }).body,
-    "删除后 Codex 不能再用它。原件可以从废纸篓找回。CardBox 是 git 仓库，这次删除会出现在它的未提交改动里",
-  );
   setHome(null);
 });
 
