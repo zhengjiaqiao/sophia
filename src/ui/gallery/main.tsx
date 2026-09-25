@@ -3,9 +3,8 @@
 /// 组件只收 props、不调 Tauri 命令：这里不需要任何模拟，直接渲染
 import React from "react";
 import ReactDOM from "react-dom/client";
+// 只引组件库自己（样式随 index 一起来）：样张不带外壳的样式，组件单独用就是这个样子
 import "../index.ts";
-// 推入页的页面头是壳的 PageHead，它的样式在外壳里
-import "../../App.css";
 import { setHome } from "../../pathText.ts";
 import { installForcedStates } from "./forceStates.ts";
 import { ContainersFamily } from "./containers.tsx";

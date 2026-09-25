@@ -249,3 +249,11 @@ body {
   font-size: var(--size-caption);
   color: var(--ink);
 }
+
+/* surface 底（表格的选择行）：放在它上面的样张 */
+.gallery-surface {
+  display: inline-flex;
+  padding: var(--space-xxs);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}

@@ -7,6 +7,7 @@ import {
   NoticePanel,
   Spinner,
   StateDot,
+  StateDotButton,
   Toast,
   ToastCount,
   Tooltip,
@@ -56,9 +57,9 @@ export function FeedbackFamily() {
               open
               ceiling
             >
-              <button type="button" className="ss-dot-btn">
+              <StateDotButton aria-label="brainstorming · Codex：未加上">
                 <StateDot dot="missing" hoverable title="" />
-              </button>
+              </StateDotButton>
             </Tooltip>
           </div>
         </Specimen>
@@ -88,6 +89,14 @@ export function FeedbackFamily() {
         </Specimen>
         <Specimen label="成功 · 没有动作">
           <Toast kind="success" verb="已添加" reading={<ToastCount n={11} unit="个 skill" />} />
+        </Specimen>
+        <Specimen label="成功 · 名字 · 读数（trail）">
+          <Toast
+            kind="success"
+            verb="已添加"
+            names={["WeiboAP"]}
+            trail={["已筛选出它的 7 个 skill"]}
+          />
         </Specimen>
         <Specimen label="做不成（错误）">
           <Toast
@@ -234,17 +243,17 @@ export function FeedbackFamily() {
         </Specimen>
         <Specimen label="dim · 变淡（选择行的一点）">
           <BusySlot busy mode="dim" label="正在加到 Codex">
-            <button type="button" className="ss-dot-btn">
+            <StateDotButton aria-label="选中的都加到 Codex">
               <StateDot dot="linked" title="" />
-            </button>
+            </StateDotButton>
           </BusySlot>
         </Specimen>
         <Specimen label="float · 一句话浮在键下" frame="stage" width={260} height={120}>
           <div className="gallery-tipstage">
             <BusySlot busy mode="float" label="正在拆开">
-              <button type="button" className="ss-dot-btn">
+              <StateDotButton aria-label="ego-browser · Codex：整个文件夹是链接">
                 <StateDot dot="wholeLinked" title="" />
-              </button>
+              </StateDotButton>
             </BusySlot>
           </div>
         </Specimen>

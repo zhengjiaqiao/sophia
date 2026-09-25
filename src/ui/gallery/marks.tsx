@@ -1,4 +1,4 @@
-import { DOT_LABEL, Indicator, StateDot, Tag } from "../index.ts";
+import { DOT_LABEL, Indicator, StateDot, StateDotButton, Tag } from "../index.ts";
 import type { Dot } from "../index.ts";
 import { Block, Family, Specimen } from "./Gallery.tsx";
 
@@ -18,15 +18,22 @@ export function MarksFamily() {
             <StateDot dot={dot} />
           </Specimen>
         ))}
-        <Specimen label="可点 · 悬停出光晕" force="hover">
-          <button type="button" className="ss-dot-btn">
+        <Specimen label="可点（StateDotButton）· 悬停出光晕" force="hover">
+          <StateDotButton aria-label="brainstorming · Codex：未加上">
             <StateDot dot="missing" hoverable title="" />
-          </button>
+          </StateDotButton>
         </Specimen>
         <Specimen label="可点 · 键盘焦点" force="focus">
-          <button type="button" className="ss-dot-btn">
+          <StateDotButton aria-label="brainstorming · Codex：已加上">
             <StateDot dot="linked" hoverable title="" />
-          </button>
+          </StateDotButton>
+        </Specimen>
+        <Specimen label="surface 底上（选择行）· 光晕换 track" force="hover">
+          <span className="gallery-surface">
+            <StateDotButton aria-label="选中的都加到 Codex">
+              <StateDot dot="missing" hoverable onSurface title="" />
+            </StateDotButton>
+          </span>
         </Specimen>
         <Specimen label="禁用（已选的都是原件）">
           <StateDot dot="own" muted />

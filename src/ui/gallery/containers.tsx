@@ -18,11 +18,16 @@ import {
   ListRow,
   ModelChip,
   Note,
+  PageHead,
+  PageHeadActions,
+  PageTitle,
   PushedPage,
   Section,
   SectionLabel,
   Switch,
+  Tabs,
   Tag,
+  TextField,
   useEdgeFades,
   usePushedPage,
 } from "../index.ts";
@@ -44,14 +49,33 @@ const SKILLS = [
   "xlsx",
 ];
 
-/// 容器与层：推入页、能力节、区块小标、胶囊行、列表行、抽屉、滚动渐隐、空态、灰字一句
+/// 容器与层：页面头、推入页、能力节、区块小标、胶囊行、列表行、抽屉、滚动渐隐、空态、灰字一句
 export function ContainersFamily() {
   return (
     <Family
       id="containers"
       title="容器与层"
-      lead="推入页在机面里推一页；节是 agent 页的一种能力；区块小标给一组内容起头；列表行下挂抽屉；空态说现状和下一步，灰字一句只说一句。"
+      lead="页面头是机面顶上的一行；推入页在机面里推一页；节是 agent 页的一种能力；区块小标给一组内容起头；列表行下挂抽屉；空态说现状和下一步，灰字一句只说一句。"
     >
+      <Block
+        name="PageHead"
+        guide="机面顶上一行：左主控件或页面名（20 / 700 原样），右这一页的动作（间 8），全应用只有这一种｜ 一组内容的小标题用 SectionLabel"
+      >
+        <Specimen label="位置页：页签 + 筛选框、管理来源、+ 来源" width={776}>
+          <LocationHeadDemo />
+        </Specimen>
+        <Specimen label="agent 页：24 图标 + 10 + 名字" width={776}>
+          <PageHead
+            lead={
+              <PageTitle icon={<AgentIcon id="codex" name="Codex" size={24} />}>Codex</PageTitle>
+            }
+          />
+        </Specimen>
+        <Specimen label="只有页面名（设置）" width={776}>
+          <PageHead lead={<PageTitle>设置</PageTitle>} />
+        </Specimen>
+      </Block>
+
       <Block
         name="PushedPage"
         guide="有起止的多步任务在机面里推入一页（来源管理、添加来源）｜ 能就地拉开完成的用抽屉"
@@ -389,5 +413,40 @@ function FadeDemo() {
         ))}
       </div>
     </FadeViewport>
+  );
+}
+
+/// 位置页的页面头：右端动作经 PageHeadActions 从页面树里别处放进来（这里就近放）
+function LocationHeadDemo() {
+  const [tab, setTab] = useState<"skills" | "mcp">("skills");
+  const [filter, setFilter] = useState("");
+  return (
+    <PageHead
+      lead={
+        <Tabs
+          label="功能"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { id: "skills", label: "skills" },
+            { id: "mcp", label: "mcp" },
+          ]}
+        />
+      }
+    >
+      <PageHeadActions>
+        <TextField
+          search
+          shortcut="⌘F"
+          width={200}
+          label="筛选"
+          placeholder="筛选"
+          value={filter}
+          onChange={setFilter}
+        />
+        <Button onClick={noop}>管理来源</Button>
+        <AddButton noun="来源" onClick={noop} />
+      </PageHeadActions>
+    </PageHead>
   );
 }
