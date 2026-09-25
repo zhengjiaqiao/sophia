@@ -1,6 +1,4 @@
-import { useEffect, useRef } from "react";
-import type { KeyboardEvent } from "react";
-import { FloatingLayer } from "./ui/FloatingLayer.tsx";
+import { FloatingLayer, Menu, MenuItem } from "./ui/index.ts";
 import { pickDiffText, pickTitle } from "./mcpView";
 import type { McpDiff, McpEntry } from "./types";
 
@@ -14,12 +12,10 @@ export interface McpPick {
   diff?: McpDiff | null;
 }
 
-const ITEM = '[role="menuitem"]';
-
-/// MCP 同名多份时的挑选浮层（DESIGN「MCP 同名多份时就地挑一份写进去」）：锚在被点的格子上，
-/// 与来源行的目标浮层同一写法（`FloatingLayer`）。每项一行＝来源位置名 + 与其他几份差在哪几个字段
-/// （只给字段名，不出现令牌、密钥的值）；点一项就把那一份写进这一格。
-/// 键盘：打开即聚焦第一项，方向键上下移动，回车选中，Esc 关掉并把焦点还给格子
+/// MCP 同名多份时的挑选浮层（DESIGN「MCP 同名多份时就地挑一份写进去」）：锚在被点的格子上的菜单
+/// （`FloatingLayer` + `Menu`，同名挑选最宽 320）。一句问话作标题；每项一行＝来源位置名 + 副行「与其他几份差在
+/// 哪几个字段」（只给字段名，不出现令牌、密钥的值）；点一项就把那一份写进这一格。
+/// 键盘：打开即聚焦第一项，方向键上下移动，回车选中，Esc 关掉并把焦点还给格子（菜单与浮层自带）
 export function McpPickLayer({
   pick,
   labelOf,
@@ -31,65 +27,21 @@ export function McpPickLayer({
   onPick: (sourceId: string) => void;
   onClose: () => void;
 }) {
-  const listRef = useRef<HTMLDivElement>(null);
-
-  // 浮层第一帧是隐藏的（等量好位置），隔一帧再聚焦
-  useEffect(() => {
-    const frame = requestAnimationFrame(() =>
-      listRef.current?.querySelector<HTMLElement>(ITEM)?.focus(),
-    );
-    return () => cancelAnimationFrame(frame);
-  }, [pick.trigger]);
-
-  const move = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const items = [...(listRef.current?.querySelectorAll<HTMLElement>(ITEM) ?? [])];
-    const at = items.indexOf(event.currentTarget);
-    const last = items.length - 1;
-    const next =
-      event.key === "ArrowDown"
-        ? at === last
-          ? 0
-          : at + 1
-        : event.key === "ArrowUp"
-          ? at <= 0
-            ? last
-            : at - 1
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? last
-              : -1;
-    if (next < 0) return;
-    event.preventDefault();
-    items[next]?.focus();
-  };
-
   const title = pickTitle(pick.name, pick.choices.length);
   return (
-    <FloatingLayer
-      trigger={pick.trigger}
-      onClose={onClose}
-      className="ss-menu mcp-pick"
-      label={title}
-    >
-      <div className="ss-menu__head mcp-pick__title">{title}</div>
-      <div ref={listRef} className="mcp-pick__list">
+    <FloatingLayer trigger={pick.trigger} onClose={onClose} label={title}>
+      {/* 换了一格（另一次挑选）就重挂：打开即聚焦第一项 */}
+      <Menu key={`${pick.name}\u0000${pick.targetId}`} autoFocus title={title} maxWidth={320}>
         {pick.choices.map((entry) => (
-          <button
+          <MenuItem
             key={entry.sourceId}
-            type="button"
-            role="menuitem"
-            className="ss-menu__item"
-            onKeyDown={move}
-            onClick={() => onPick(entry.sourceId)}
+            sub={pick.diff === undefined ? "正在比对" : pickDiffText(pick.diff, entry.sourceId)}
+            onSelect={() => onPick(entry.sourceId)}
           >
-            <span className="ss-menu__name">{labelOf(entry.sourceId)}</span>
-            <span className="ss-menu__sub">
-              {pick.diff === undefined ? "正在比对" : pickDiffText(pick.diff, entry.sourceId)}
-            </span>
-          </button>
+            {labelOf(entry.sourceId)}
+          </MenuItem>
         ))}
-      </div>
+      </Menu>
     </FloatingLayer>
   );
 }

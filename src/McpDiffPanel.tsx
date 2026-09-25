@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import type { McpDiff, McpEndpoint, McpFieldValue } from "./types.ts";
-import { Button, Spinner, Tooltip, TruncTip, useBusyShown } from "./ui/index.ts";
+import { Button, Mono, Note, Spinner, Tooltip, TruncTip, useBusyShown } from "./ui/index.ts";
 import "./McpDiffPanel.css";
 
 /// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：该服务行的抽屉里的一段
@@ -52,7 +53,7 @@ function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, numb
           {value.last4 !== null ? (
             <>
               {" · 末 4 位 "}
-              <span className="mcp-diff__mono">…{value.last4}</span>
+              <Mono inherit>{`…${value.last4}`}</Mono>
             </>
           ) : null}
         </span>
@@ -62,11 +63,16 @@ function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, numb
   const [pre, suf] = ends;
   const text = value.text;
   const mid = text.slice(pre, text.length - suf);
+  // 三段各是一段等宽（可选中拷走）：不同的那一段加粗
   return (
-    <span className="mcp-diff__mono ss-selectable">
-      {text.slice(0, pre)}
-      {mid ? <b>{mid}</b> : null}
-      {text.slice(text.length - suf)}
+    <span>
+      {pre > 0 ? <Mono inherit>{text.slice(0, pre)}</Mono> : null}
+      {mid ? (
+        <b>
+          <Mono inherit>{mid}</Mono>
+        </b>
+      ) : null}
+      {suf > 0 ? <Mono inherit>{text.slice(text.length - suf)}</Mono> : null}
     </span>
   );
 }
@@ -83,7 +89,7 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
   if (diff instanceof Error) {
     return (
       <div className="mcp-diff">
-        <div className="mcp-diff__note">无法比对：{diff.message}</div>
+        <DiffNote>无法比对：{diff.message}</DiffNote>
         {revealLink}
       </div>
     );
@@ -118,17 +124,11 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
           })}
         </div>
       ) : diff.dynamicAuth ? null : (
-        <div className="mcp-diff__note">
-          连接字段逐项看都一样，不一样的是只有某个 agent 支持的写法
-        </div>
+        <DiffNote>连接字段逐项看都一样，不一样的是只有某个 agent 支持的写法</DiffNote>
       )}
-      {diff.dynamicAuth ? (
-        <div className="mcp-diff__note">认证头要到运行时才生成，无法逐字比对</div>
-      ) : null}
+      {diff.dynamicAuth ? <DiffNote>认证头要到运行时才生成，无法逐字比对</DiffNote> : null}
       {diff.unreadable.length > 0 ? (
-        <div className="mcp-diff__note">
-          {diff.unreadable.map(labelOf).join("、")} 这次无法读取，没有比对
-        </div>
+        <DiffNote>{diff.unreadable.map(labelOf).join("、")} 这次无法读取，没有比对</DiffNote>
       ) : null}
       {revealLink}
     </div>
@@ -175,20 +175,31 @@ export function McpDiffSection({
   );
 }
 
+/// 差异段里的一句灰字（`Note`）：与上面隔 6
+function DiffNote({ children }: { children: ReactNode }) {
+  return (
+    <div className="mcp-diff__note">
+      <Note>{children}</Note>
+    </div>
+  );
+}
+
 /// 点开之后在取差异：过了 0.3 秒门槛才出忙碌指示 + 一句（更快取回的什么都不闪）；之前留一行空白占位
 function Comparing() {
   const shown = useBusyShown(true);
   return (
     <div className="mcp-diff">
       <div className="mcp-diff__note" role="status">
-        {shown ? (
-          <>
-            <Spinner size={14} label="正在比对" />
-            正在比对
-          </>
-        ) : (
-          "\u00a0"
-        )}
+        <Note>
+          {shown ? (
+            <span className="mcp-diff__busy">
+              <Spinner size={14} label="正在比对" />
+              正在比对
+            </span>
+          ) : (
+            "\u00a0"
+          )}
+        </Note>
       </div>
     </div>
   );
@@ -224,8 +235,8 @@ export function McpEndpointRow({
     <>
       <span className="mx-kv__key">{endpoint.kind === "url" ? "地址" : "命令"}</span>
       <span className="mx-kv__value">
-        <TruncTip content={<span className="mx-mono">{endpoint.text}</span>}>
-          <span className="mx-mono ss-selectable">{endpoint.text}</span>
+        <TruncTip content={<Mono inherit>{endpoint.text}</Mono>}>
+          <Mono>{endpoint.text}</Mono>
         </TruncTip>
       </span>
     </>

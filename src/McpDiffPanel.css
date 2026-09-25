@@ -54,15 +54,6 @@
   color: var(--ink);
 }
 
-.mcp-diff__mono {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.mcp-diff__mono b {
-  font-weight: 600;
-}
-
 /* 令牌与密钥：可悬停不可点 → 纯文字（D21 删点状下划线），提示框「出于安全不显示原值」 */
 .mcp-diff__secret {
   cursor: default;
@@ -72,15 +63,16 @@
   color: var(--ink-mute);
 }
 
+/* 一句灰字（Note）与上面隔 6 */
 .mcp-diff__note {
-  display: flex;
+  margin-top: 6px;
+}
+
+/* 正在比对：14 宽刻度 + 一句，间 8 */
+.mcp-diff__busy {
+  display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-  margin-top: 6px;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
 }
 
 .mcp-diff__foot {

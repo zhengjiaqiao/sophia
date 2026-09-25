@@ -17,21 +17,7 @@
 }
 
 .mcp-confirm-note {
-  margin-top: 8px;
+  margin-top: var(--space-xs);
   font-size: var(--size-caption);
   line-height: var(--leading-caption);
-}
-
-/* 同名多份时点格子出的挑选浮层：外壳与项沿用小浮层的 `.ss-menu` 写法（ui/FloatingLayer.css），
-   这里只把标题提成 13 ink（它是一句问话，不是组头），项的列表保持纵向 */
-.mcp-pick__title {
-  padding: 6px var(--space-md);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink);
-}
-
-.mcp-pick__list {
-  display: flex;
-  flex-direction: column;
 }
