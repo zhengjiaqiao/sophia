@@ -9,7 +9,6 @@ import type {
   GatewaySelectedModel,
   GatewayState,
   HarnessList,
-  OutsideSkills,
   Overview,
   PlannedAction,
   PlannedDeletion,
@@ -39,8 +38,6 @@ export type GatewayRestartReport = { terminated: number; pids: number[] };
 
 export const api = {
   scanAll: () => invoke<Overview>("scan_all"),
-  /// 各 agent 自带的、插件带的 skill 个数（位置页列头的 `+N`）
-  outsideSkills: () => invoke<OutsideSkills[]>("outside_skills"),
   /// 这些格里缺失的 → 建链动作
   proposeLinks: (cells: CellRef[]) => invoke<PlannedAction[]>("propose_links", { cells }),
   /// 这些格里已链接且目标非整目录链接的 → 删链动作

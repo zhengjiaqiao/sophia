@@ -470,17 +470,6 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     Ok(Some(report))
 }
 
-/// 各 agent 自带的、插件带的 skill 个数（只读；位置页列头报「另有 N 个不在列表里」）
-#[tauri::command]
-fn outside_skills(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<symsync_core::outside_skills::OutsideSkills>, String> {
-    let env = runtime_env()?;
-    let (installed, settings) = installed_and_settings(&state, &env)?;
-    let harnesses = discovery::enabled(installed, &settings);
-    Ok(symsync_core::outside_skills::count(&env, &harnesses))
-}
-
 /// 扫描 → 跑一轮自动同步（只做一轮，不循环）→ 建过链就再扫一次 → 按最终目录集合重建监视
 #[tauri::command]
 fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<Overview, String> {
@@ -1142,7 +1131,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             scan_all,
-            outside_skills,
             scan_mcp,
             mcp_field_diff,
             mcp_endpoint,

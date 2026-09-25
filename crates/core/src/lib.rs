@@ -6,7 +6,6 @@ pub mod discovery;
 pub mod fs;
 pub mod mcp;
 pub mod models;
-pub mod outside_skills;
 pub mod skills;
 pub mod store;
 pub mod subscriptions;
