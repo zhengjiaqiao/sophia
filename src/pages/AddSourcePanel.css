@@ -35,20 +35,24 @@
 
 /* ---- 候选列表：独立滚动；与第一步同宽 776（DESIGN：内容铺满 776） ---- */
 .add-src__pick,
-.add-src__fade,
 .add-src__loading,
 .add-src__notice {
   max-width: 776px;
 }
 
+/* 列表行的悬停带左右各外扩 8（ListRow）：滚动区（它裁 overflow）连同渐隐向两侧各让出 8，
+   里面再用内边距把内容收回 776，行带就不被滚动区的边裁掉 */
 .add-src__fade {
   flex: 1 1 auto;
+  max-width: calc(776px + 2 * var(--space-xs));
+  margin: 0 calc(-1 * var(--space-xs));
 }
 
 .add-src__scroll {
   flex: 1 1 auto;
   box-sizing: border-box;
   height: 100%;
+  padding: 0 var(--space-xs);
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
