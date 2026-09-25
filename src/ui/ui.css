@@ -349,7 +349,7 @@ textarea,
    凹槽 + 抬起的滑块（paper + raise，面上无纹）。槽是 recess 凹面（与页签槽、搜索框同一种）。
    刻线印在槽上：开＝滑块在右、左边露出一道 accent 橙线；关＝滑块在左、盖住它，看不见。
    位置 + 刻线两重表达；开关旁不再另点指示点（紧挨开关的灯是同一件事说两遍）。
-   regular 34×20（滑块 16、行程 14、刻线 8×2 left 7 top 9）；compact 28×16（12、12、6×2 left 5 top 7）。
+   regular 34×20（滑块 16、行程 14、刻线 8×2 left 7 top 9）；compact 28×16（12、12、8×2 left 4 top 7）。
    滑块位置用 translate（弹簧停靠），按压用 transform（按下 70ms、松开 180ms 弹簧），两者互不打架。
    槽的尺寸变量叫 groove：track 前缀留给 Cap 的字距 token */
 .ss-switch {
@@ -374,9 +374,10 @@ textarea,
   --groove-w: 28px;
   --groove-h: 16px;
   --knob: 12px;
-  --scribe-w: 6px;
+  /* 刻线与标准开关同为 8×2（2026-09-25 真机：6×2 在一列行里几乎看不见），落在滑块让出的那块槽正中 */
+  --scribe-w: 8px;
   --scribe-h: 2px;
-  --scribe-left: 5px;
+  --scribe-left: 4px;
   --travel: 12px;
 }
 
@@ -392,7 +393,7 @@ textarea,
   touch-action: none;
 }
 
-/* 刻线：一道 8×2（紧凑 6×2）的线，竖直居中（regular top 9、compact top 7）。
+/* 刻线：一道 8×2 的线（两档开关同一道），竖直居中（regular top 9、compact top 7）。
    只在开时露出；切换判定之后 120ms 换过来，拖动中不跟手（状态还没变） */
 .ss-switch__scribe {
   position: absolute;

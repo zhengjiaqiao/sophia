@@ -697,9 +697,9 @@ test("Switch regular 34×20 / compact 28×16：role=switch，读屏名必填；�
   assert.match(small, /--groove-w:\s*28px/);
   assert.match(small, /--groove-h:\s*16px/);
   assert.match(small, /--knob:\s*12px/);
-  assert.match(small, /--scribe-w:\s*6px/);
+  assert.match(small, /--scribe-w:\s*8px/); // 与标准开关同一道刻线（6×2 在行里看不见）
   assert.match(small, /--scribe-h:\s*2px/);
-  assert.match(small, /--scribe-left:\s*5px/);
+  assert.match(small, /--scribe-left:\s*4px/);
   assert.match(small, /--travel:\s*12px/);
   // 槽：recess 凹面（与页签槽、搜索框同一种）、5 圆角、内凹；滑块：paper、4 圆角、raise 抬起（不画描边）
   const track = cssRule(uiCss, ".ss-switch__track");
