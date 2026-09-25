@@ -22,6 +22,19 @@
   outline-offset: 2px;
 }
 
+/* 焦点框只回应键盘：本窗口最近一次操作是指针（或还没按过键）时，程序放的焦点一律不画框。
+   浏览器的 :focus-visible 在窗口刚从托盘 / 原生对话框切回来时会猜错，见 src/inputModality.ts。
+   选择器带 html[data-input] 与 *:focus-visible，特异性压得过各组件自己的 .x:focus-visible */
+html[data-input="pointer"] *:focus-visible {
+  outline: none;
+}
+
+/* 只供程序放焦点的落点（tabindex="-1"：推入页的页面名、托盘面板本身）不是控件，不画焦点框——
+   从托盘打开设置时窗口里还没有过鼠标操作，浏览器会把这次程序焦点当成键盘焦点 */
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 /* 界面文字不可拖选（tokens.css 的 :root），路径、id、命令与输入框除外（裁决 D23） */
 .ss-selectable,
 input,
@@ -1695,11 +1708,6 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
   animation: ss-push-out var(--dur-push) var(--ease-mech) both;
 }
 
-/* 程序放焦点的落点，不画框 */
-.ss-pushed:focus {
-  outline: none;
-}
-
 @keyframes ss-push-in {
   from {
     transform: translateX(100%);
@@ -1718,7 +1726,7 @@ html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
   }
 }
 
-/* 页面头（壳的 PageHead）：不被下面的内容压矮，与内容同宽 776 */
+/* 页面头（PageHead）：不被下面的内容压矮，与内容同宽 776 */
 .ss-pushed > .page-head {
   flex-shrink: 0;
   max-width: 776px;

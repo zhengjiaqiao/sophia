@@ -39,24 +39,16 @@
   text-overflow: ellipsis;
 }
 
-/* 新手提示条的插槽（来源筛选下、表头上；空态上）：上下各 16 由 HintStrip 自带（收起时归 0），插槽不另加 */
+/* 新手提示条的插槽（来源筛选下、表头上；空态上）：外距由 HintStrip 自带（收起时归 0），插槽不另加 */
 .mx-hint {
   width: 776px;
 }
 
-/* 提示条开着（Matrix 的 hintOpen）：来源筛选到提示条 16、提示条到表头 16。来源筛选的下内边距收成 16
-   （吸顶区的高度随它，列头吸在它下面）；提示条自带的上外距 16 由插槽的 -16 抵掉（两者折叠成 0）。
-   三处同一时长、同一缓动，收起后回到表格上距 18 */
-.mx.is-hinting > .mx-bar {
+/* 来源筛选下的那一条不带上外距（HintStrip flush）：开着时（data-hint="open"，与提示条的高度动画同一帧）
+   来源筛选的下内边距收成 16（吸顶区的高度随它，列头吸在它下面），提示条到表头是它自带的下外距 16。
+   同一时长、同一缓动，收起后回到表格上距 18 */
+.mx:has(> .mx-hint > [data-hint="open"]) > .mx-bar {
   padding-bottom: var(--space-md);
-}
-
-.mx > .mx-hint {
-  transition: margin-top var(--dur-drawer) var(--ease-mech);
-}
-
-.mx.is-hinting > .mx-hint {
-  margin-top: calc(-1 * var(--space-md));
 }
 
 /* ===== 面板 ===== */

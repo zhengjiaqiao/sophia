@@ -1909,9 +1909,11 @@ test("PushedPage：只替换机面——壳的页面头（← + 页面名 title 
     actions: createElement("button", { type: "button" }, "+ 来源"),
     children: "内容",
   });
+  // 打开时焦点落在页面名上（读屏先读页面名）：页面名是程序放焦点的落点，region 本身不再可聚焦
+  assert.match(html, /^<div class="ss-pushed" role="region" aria-label="CardBox 的来源">/);
   assert.match(
     html,
-    /^<div class="ss-pushed" role="region" aria-label="CardBox 的来源" tabindex="-1">/,
+    /<h1 class="page-head__title" data-tauri-drag-region="deep" tabindex="-1">CardBox 的来源<\/h1>/,
   );
   assert.match(html, /class="page-head"/);
   assert.match(
@@ -1930,8 +1932,9 @@ test("PushedPage：只替换机面——壳的页面头（← + 页面名 title 
       children: "",
       footer: createElement("button", { type: "button" }, "添加 2 个来源"),
     }),
-    /<div class="ss-pushed__foot"><button type="button">添加 2 个来源<\/button><\/div>/,
+    /^<div class="ss-pushed" role="region" aria-label="添加来源到 CardBox" data-footer="">[^]*<div class="ss-pushed__foot"><button type="button">添加 2 个来源<\/button><\/div>/,
   );
+  assert.doesNotMatch(html, /data-footer/);
   const foot = cssRule(uiCss, ".ss-pushed__foot");
   assert.match(foot, /height:\s*60px/);
   assert.match(foot, /border-top:\s*var\(--border-structure\)/);

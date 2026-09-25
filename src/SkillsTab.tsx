@@ -1384,9 +1384,8 @@ export default function SkillsTab({
         cellToast={cellToast}
         keyBusy={keyBusy}
         cellBusy={splitBusy ?? originBusy}
-        hintOpen={skillsHint.visible}
         hint={
-          <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss}>
+          <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss} flush>
             {HINTS["first-scan-skills"](hintCtx)}
           </HintStrip>
         }

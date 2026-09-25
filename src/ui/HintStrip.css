@@ -21,6 +21,11 @@
   opacity: 1;
 }
 
+/* flush：上方的间距归宿主（宿主据 data-hint="open" 把自己的下内边距让成 16），这里只带下外距 */
+.ss-hint--flush.is-open {
+  margin-block: 0 var(--space-md);
+}
+
 /* 高度动画的裁切层：行轨道从 0fr 到 1fr，里面的条按自身高度（40 或两行）走 */
 .ss-hint__clip {
   min-height: 0;

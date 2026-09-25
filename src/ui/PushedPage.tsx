@@ -15,7 +15,10 @@ import { motionMs } from "./motion.ts";
 /// - 页面头＝`PageHead`：`←`（图标键 28）+ 10 + 页面名（`title` 20 / 700，原样），右端页面动作（`+ 来源`）
 /// - 可选贴底一行（`footer`）：高 60、上 1px `hairline`、`face` 底、横贯机面，主动作右对齐到内容右沿 776；
 ///   内容区在它上面滚动（添加来源页的 `添加 N 个来源`）
-/// - 焦点：打开时落到这一页上（只供程序放焦点的落点，不画框），返回时还给进来之前拿着焦点的那颗键（`管理来源`）
+/// - 焦点：打开时落在**页面名**上（读屏先读页面名；只供程序放焦点的落点，`tabIndex={-1}`、不画框），
+///   返回时还给进来之前拿着焦点的那颗键（`管理来源`）
+/// - 有贴底行时根上带 `data-footer`：壳据它把右下那一叠提示抬到贴底行上面（`:has([data-footer])`），
+///   不认组件的内部类
 /// - 返回：`←`、Esc、菜单「返回」（⌘[）是同一条路。`←` 与 Esc 由这里接（浮层、确认框在捕获阶段先接走自己的 Esc，
 ///   输入框里的 Esc 归输入框；`escape={false}` 时这一页暂不接，比如移除确认开着）；菜单总线归页面：
 ///   页面用 `usePushedPage` 拿到 `leave`，自己接 `usePageCommand("back", leave)`
@@ -113,19 +116,19 @@ export function PushedPage({
   children,
   footer,
 }: PushedPageProps) {
-  const pageRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const [host, setHost] = useState<Element | null>(null);
   // 首帧就地画、挂上之后搬去机面（找不到机面就留在原地）
   const findHostRef = useRef(findHost);
   useLayoutEffect(() => setHost(findHostRef.current?.() ?? null), []);
 
-  // 下面那一页 inert；焦点落到这一页上，返回时还给进来之前拿着焦点的那颗键
+  // 下面那一页 inert；焦点落在页面名上，返回时还给进来之前拿着焦点的那颗键
   const coversRef = useRef(covers);
   useEffect(() => {
     const under = coversRef.current?.();
     const release = under ? holdInert(under) : undefined;
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    pageRef.current?.focus({ preventScroll: true });
+    titleRef.current?.focus({ preventScroll: true });
     return () => {
       release?.();
       if (before && before.isConnected) before.focus({ preventScroll: true });
@@ -148,18 +151,16 @@ export function PushedPage({
 
   const page = (
     <div
-      ref={pageRef}
       className={leaving ? "ss-pushed is-leaving" : "ss-pushed"}
       role="region"
       aria-label={label ?? (typeof title === "string" ? title : undefined)}
-      // 只供程序放焦点的落点（打开时焦点落在这一页上）
-      tabIndex={-1}
+      data-footer={footer ? "" : undefined}
     >
       <PageHead
         lead={
           <span className="ss-pushed__lead">
             <IconButton icon={<IconArrowLeft />} title="返回" onClick={leave} />
-            <PageTitle>{title}</PageTitle>
+            <PageTitle focusRef={titleRef}>{title}</PageTitle>
           </span>
         }
         actions={actions}

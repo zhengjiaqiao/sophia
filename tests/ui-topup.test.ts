@@ -66,3 +66,54 @@ test("页面不再为提示框另包一层、也不再覆盖 .ss-tipwrap", () =>
     assert.doesNotMatch(css, /__urlbox|__fit\b|srcline__fit|mx-origin__slot|add-src__sub/, path);
   }
 });
+
+// ===== 新手提示条：宿主的钩子与不带上外距的形态 =====
+
+const { HintStrip } = await import("../src/ui/HintStrip.tsx");
+
+test("HintStrip：根上 data-hint 说展开没有（宿主据它让间距）；flush 不带上外距、只带下外距 16", () => {
+  const html = render(HintStrip, {
+    open: true,
+    onDismiss: () => {},
+    flush: true,
+    children: "说明",
+  });
+  // 挂上的那一帧是收起态，展开由下一帧加 is-open / data-hint="open"
+  assert.match(html, /^<div class="ss-hint ss-hint--flush" data-hint="closed" role="note"/);
+  assert.match(
+    render(HintStrip, { open: true, onDismiss: () => {}, children: "说明" }),
+    /^<div class="ss-hint" data-hint="closed"/,
+  );
+  const css = read("src/ui/HintStrip.css");
+  assert.match(css, /\.ss-hint--flush\.is-open \{\s*margin-block: 0 var\(--space-md\);/);
+  // 两个宿主认公开钩子，不认 .ss-hint 的内部类
+  assert.match(
+    read("src/App.css"),
+    /\.agent-page__section:has\(> \[data-hint="open"\]\) \{\s*padding-top: var\(--space-md\);/,
+  );
+  assert.doesNotMatch(read("src/App.css"), /ss-hint/);
+  assert.match(
+    read("src/ModelsTab.tsx"),
+    /<HintStrip open=\{codexHint\.visible\} onDismiss=\{codexHint\.dismiss\} flush>/,
+  );
+  assert.doesNotMatch(read("src/Matrix.tsx"), /hintOpen/);
+  assert.doesNotMatch(read("src/DomainView.tsx"), /hintOpen/);
+});
+
+// ===== 推入页：焦点落页面名、贴底行的钩子 =====
+
+test("PushedPage：焦点给页面名（focusRef）；有贴底行时根上 data-footer，壳据它抬高右下那一叠", () => {
+  const src = read("src/ui/PushedPage.tsx");
+  assert.match(src, /titleRef\.current\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(src, /<PageTitle focusRef=\{titleRef\}>/);
+  assert.doesNotMatch(src, /pageRef/);
+  const app = read("src/App.css");
+  assert.match(app, /\.app:has\(\[data-footer\]\) \.app__toast \{/);
+  assert.doesNotMatch(app, /ss-pushed/);
+});
+
+test("指针模式下不画焦点框、程序放焦点的落点不画框：规则在组件库里（样张单独用组件也一样）", () => {
+  assert.match(uiCss, /html\[data-input="pointer"\] \*:focus-visible \{\s*outline: none;/);
+  assert.match(uiCss, /\[tabindex="-1"\]:focus-visible \{\s*outline: none;/);
+  assert.doesNotMatch(read("src/App.css"), /html\[data-input="pointer"\] \*:focus-visible/);
+});

@@ -87,10 +87,8 @@ export interface DomainViewProps {
   onAddSource: () => void;
   /// 页面头的 `管理来源`：进来源管理页；这个位置一个来源都没订阅时不给（键不出）
   onManageSources?: () => void;
-  /// 新手提示条的插槽：来源筛选下、表头上
+  /// 新手提示条的插槽：来源筛选下、表头上（放 `<HintStrip flush>`，见 Matrix）
   hint?: ReactNode;
-  /// 插槽里的提示条此刻开着
-  hintOpen?: boolean;
   /// 新手提示条的插槽：空态上方
   emptyHint?: ReactNode;
 
@@ -519,7 +517,6 @@ export default function DomainView(props: DomainViewProps) {
         items: [...counts.keys(), ...emptySources.map((s) => s.id)].map(chip),
       }}
       hint={props.hint}
-      hintOpen={props.hintOpen}
       emptyHint={props.emptyHint}
       nameLabel="名称"
       nameTip="列出这个位置各个来源里的全部 skill，agent 自带的和插件带的不在这里。已经链接到这里的来源会自动加进来，在「管理来源」里增删"

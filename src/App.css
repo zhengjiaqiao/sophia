@@ -30,18 +30,8 @@ button {
   outline-offset: 2px;
 }
 
-/* 焦点框只回应键盘：本窗口最近一次操作是指针（或还没按过键）时，程序放的焦点一律不画框。
-   浏览器的 :focus-visible 在窗口刚从托盘 / 原生对话框切回来时会猜错，见 src/inputModality.ts。
-   选择器带 html[data-input] 与 *:focus-visible，特异性压得过各组件自己的 .x:focus-visible */
-html[data-input="pointer"] *:focus-visible {
-  outline: none;
-}
-
-/* 只供程序放焦点的落点（tabindex="-1"：二级页标题给读屏器的起点、托盘面板本身）不是控件，
-   不画焦点框——从托盘打开设置时窗口里还没有过鼠标操作，浏览器会把这次程序焦点当成键盘焦点 */
-[tabindex="-1"]:focus-visible {
-  outline: none;
-}
+/* 指针操作时不画焦点框、程序放焦点的落点（tabindex="-1"）不画框：这两条在组件库（ui.css 第 0 节），
+   组件在样张里单独用也一样 */
 
 /* 输入框的焦点：描边从 hairline 升到 ink（DESIGN「可点的面」），
    再叠一圈外框就重了，所以这里把外框收掉 */
@@ -386,13 +376,10 @@ input:focus-visible {
 }
 
 /* 节头上方的新手提示条（`first-codex`，DESIGN「新手提示条」）：页面头到提示 16、提示到节头 16。
-   提示在时节的上内边距收成 16、提示条自己的上外距归 0（下外距 16 照旧）；提示收起后回到 24，节头回原位 */
-.agent-page__section:has(> .ss-hint.is-open) {
+   提示条不带上外距（HintStrip flush），开着时（data-hint="open"）节的上内边距收成 16；
+   收起后回到 24，节头回原位 */
+.agent-page__section:has(> [data-hint="open"]) {
   padding-top: var(--space-md);
-}
-
-.agent-page__section > .ss-hint.is-open {
-  margin-top: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -415,8 +402,8 @@ input:focus-visible {
 }
 
 /* 推入页有贴底一行（PushedPage 的 footer，高 60：添加来源页）时，右下那一叠抬到它上面：
-   提示不盖住这一页的主动作（② 就近不遮挡）。组件库没有给出「这一页有贴底行」的公开钩子，暂认它的类 */
-.app:has(.ss-pushed__foot) .app__toast {
+   提示不盖住这一页的主动作（② 就近不遮挡）。认推入页的公开钩子 data-footer */
+.app:has([data-footer]) .app__toast {
   bottom: calc(10px + 60px + var(--space-md));
 }
 

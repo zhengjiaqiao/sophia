@@ -508,13 +508,19 @@ test("新手提示条的两个插槽：来源筛选下 / 表头上，与空态�
   assert.ok(empty.indexOf("probe-hint") < empty.indexOf("probe-empty"));
   // 没给就不占位
   assert.doesNotMatch(render(Matrix, base), /mx-hint/);
-  // 提示条开着：来源筛选到提示条让成提示条自带的上外距（页面不碰提示条的内部类）
-  assert.match(render(Matrix, { ...base, hint, hintOpen: true }), /class="mx is-hinting"/);
-  assert.match(render(Matrix, { ...base, hint, hintOpen: false }), /^<div class="mx">/);
+  // 提示条开着：来源筛选的下内边距让成 16——认 HintStrip 的公开钩子 data-hint，
+  // 提示条不带上外距（flush），页面不碰提示条的内部类，也不再拿负外距去抵
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  assert.match(css, /\.mx\.is-hinting > \.mx-bar \{\s*padding-bottom: var\(--space-md\);/);
-  assert.match(css, /\.mx\.is-hinting > \.mx-hint \{\s*margin-top: calc\(-1 \* var\(--space-md\)\);/);
-  assert.doesNotMatch(css, /\.ss-hint/);
+  assert.match(
+    css,
+    /\.mx:has\(> \.mx-hint > \[data-hint="open"\]\) > \.mx-bar \{\s*padding-bottom: var\(--space-md\);/,
+  );
+  assert.doesNotMatch(css, /\.ss-hint|is-hinting|margin-top: calc\(-1/);
+  const tabs = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
+  assert.match(
+    tabs,
+    /<HintStrip open=\{skillsHint\.visible\} onDismiss=\{skillsHint\.dismiss\} flush>/,
+  );
 });
 
 test("点了做不了的格子：只当即说明（提示框立即出现、停约 3 秒），不交给调用方改数据", async () => {

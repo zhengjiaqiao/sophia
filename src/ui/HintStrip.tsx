@@ -16,6 +16,11 @@ import "./HintStrip.css";
 ///
 /// 出现 / 收起：淡入淡出 + 高度 0 ↔ 40，`--dur-drawer`（260ms）`--ease-mech`，推动下方内容；减少动效时即时。
 /// 何时出由 `src/hints.ts` 的 `useHint` 决定，这里只管长相与进出。
+///
+/// **上方的间距归宿主时**（`flush`）：上外距一直是 0，只带下外距 16（同样随收起归 0）——提示条紧跟在
+/// 一块自己有下内边距的东西后面（位置页的来源筛选、agent 页的节头上方），由宿主把那段内边距在提示条开着时
+/// 让成 16。宿主据根上的 `data-hint="open"`（展开态，与高度动画同一帧）写
+/// `:has(> [data-hint="open"])`，页面不认 `.ss-hint` 的内部类。
 
 export interface HintStripProps {
   /// 显示与否；变 false 时先收起、动画走完再卸下
@@ -24,9 +29,11 @@ export interface HintStripProps {
   onDismiss: () => void;
   /// 说明句，不超过两行：只说用户此刻不确定的事（刚才做了什么、动没动文件、点下去会怎样）
   children: ReactNode;
+  /// 不带上外距（上方的间距归宿主，见上）
+  flush?: boolean;
 }
 
-export function HintStrip({ open, onDismiss, children }: HintStripProps) {
+export function HintStrip({ open, onDismiss, children, flush = false }: HintStripProps) {
   /// 在不在 DOM 里：收起动画期间仍在
   const [mounted, setMounted] = useState(open);
   /// 展开态：先以收起态挂上，再加上它，过渡才有起点
@@ -61,7 +68,9 @@ export function HintStrip({ open, onDismiss, children }: HintStripProps) {
   return (
     <div
       ref={ref}
-      className={shown ? "ss-hint is-open" : "ss-hint"}
+      className={`ss-hint${flush ? " ss-hint--flush" : ""}${shown ? " is-open" : ""}`}
+      // 宿主的钩子：展开态（与高度动画同一帧）
+      data-hint={shown ? "open" : "closed"}
       role="note"
       aria-label="提示"
       aria-hidden={open ? undefined : true}

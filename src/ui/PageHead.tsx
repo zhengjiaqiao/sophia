@@ -1,5 +1,5 @@
 import { createContext, useContext, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { createPortal } from "react-dom";
 import "./PageHead.css";
 
@@ -50,10 +50,25 @@ export function PageHead({ lead, actions, children, location = false }: PageHead
 }
 
 /// 页面名：`title` Condensed 20 / 700，原样；`icon` 在名字前 10（agent 页的 24px agent 图标）。
-/// 它是文字不是控件——外层的 false 只挡拖窗，页面名本身照样能拖
-export function PageTitle({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
+/// 它是文字不是控件——外层的 false 只挡拖窗，页面名本身照样能拖。
+/// `focusRef`：这一页打开时焦点落在页面名上（推入页），读屏先读页面名；页面名只是程序放焦点的落点
+/// （`tabIndex={-1}`，Tab 走不到它，也不画焦点框）
+export function PageTitle({
+  icon,
+  children,
+  focusRef,
+}: {
+  icon?: ReactNode;
+  children: ReactNode;
+  focusRef?: Ref<HTMLHeadingElement>;
+}) {
   return (
-    <h1 className="page-head__title" data-tauri-drag-region="deep">
+    <h1
+      ref={focusRef}
+      className="page-head__title"
+      data-tauri-drag-region="deep"
+      tabIndex={focusRef ? -1 : undefined}
+    >
       {icon}
       {children}
     </h1>

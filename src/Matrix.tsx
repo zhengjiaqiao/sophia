@@ -183,11 +183,9 @@ export interface MatrixProps {
     onSelect: (next: string[]) => void;
     items: SourceChipItem[];
   };
-  /// 新手提示条的插槽：来源筛选下、表头上（上下各 16，推动表格）。接入归新手提示那一组
+  /// 新手提示条的插槽：来源筛选下、表头上（推动表格）。放 `<HintStrip flush>`：提示条开着时
+  /// 来源筛选的下内边距让成 16（提示条到它 16），提示条自带下外距 16；收起后回到表格上距 18
   hint?: ReactNode;
-  /// 插槽里的提示条此刻开着（`HintStrip` 的 `open`）：来源筛选到提示条让成 16（提示条自带的上外距），
-  /// 收起后回到表格上距 18
-  hintOpen?: boolean;
   /// 新手提示条的插槽：空态上方（一行都没有时才出）
   emptyHint?: ReactNode;
   rows: MatrixRowView[];
@@ -438,7 +436,6 @@ export default function Matrix(props: MatrixProps) {
     originLabel,
     sources,
     hint,
-    hintOpen = false,
     emptyHint,
     rows,
     nameLabel,
@@ -1049,34 +1046,34 @@ export default function Matrix(props: MatrixProps) {
           >
             {/* 来源名这一格可收窄（fit="shrink"）：`打开 ↗` 出来时名字按列宽截断，完整值在提示框里 */}
             <Tooltip
-                fit="shrink"
-                content={
-                  <>
-                    <div>{row.origin.label}</div>
-                    <div>
-                      <Mono path inherit>
-                        {row.origin.path}
-                      </Mono>
-                    </div>
-                  </>
-                }
-                context="table"
+              fit="shrink"
+              content={
+                <>
+                  <div>{row.origin.label}</div>
+                  <div>
+                    <Mono path inherit>
+                      {row.origin.path}
+                    </Mono>
+                  </div>
+                </>
+              }
+              context="table"
+            >
+              <span
+                className={`mx-origin${row.origin.gone ? " is-gone" : ""}${row.origin.split ? " is-split" : ""}`}
+                tabIndex={-1}
               >
-                <span
-                  className={`mx-origin${row.origin.gone ? " is-gone" : ""}${row.origin.split ? " is-split" : ""}`}
-                  tabIndex={-1}
-                >
-                  {row.origin.split ? (
-                    <>
-                      <span className="mx-origin__name">{row.origin.split.name}</span>
-                      {/* 分隔用不换行空格：flex 项之间的普通空白会被吃掉 */}
-                      <span className="mx-origin__seg">{` · ${row.origin.split.seg}`}</span>
-                    </>
-                  ) : (
-                    row.origin.label
-                  )}
-                </span>
-              </Tooltip>
+                {row.origin.split ? (
+                  <>
+                    <span className="mx-origin__name">{row.origin.split.name}</span>
+                    {/* 分隔用不换行空格：flex 项之间的普通空白会被吃掉 */}
+                    <span className="mx-origin__seg">{` · ${row.origin.split.seg}`}</span>
+                  </>
+                ) : (
+                  row.origin.label
+                )}
+              </span>
+            </Tooltip>
             {revealShown ? (
               <RevealLink path={row.origin.path} onReveal={row.origin.onReveal} />
             ) : null}
@@ -1196,7 +1193,7 @@ export default function Matrix(props: MatrixProps) {
   };
 
   return (
-    <div className={hint && hintOpen ? "mx is-hinting" : "mx"} ref={rootRef}>
+    <div className="mx" ref={rootRef}>
       <LocationActions
         filterText={filterText}
         onFilterText={onFilterText}

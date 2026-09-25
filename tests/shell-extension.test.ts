@@ -189,7 +189,10 @@ test("侧栏滚动区往下滚过之后上沿 16 渐隐：滚过去的项目不�
     /\.ss-layer__viewport--shell::before \{\s*background: linear-gradient\(to bottom, var\(--shell\), transparent\);/,
   );
   const side = render(Sidebar, sidebarProps([]));
-  assert.match(side, /<div class="ss-layer__viewport ss-layer__viewport--shell sidebar__scroll"><nav class="sidebar__nav"/);
+  assert.match(
+    side,
+    /<div class="ss-layer__viewport ss-layer__viewport--shell sidebar__scroll"><nav class="sidebar__nav"/,
+  );
 });
 
 test("侧栏区块小标与排序下拉走组件库：SectionLabel（`AGENT` 经 Cap）、排序是 FloatingLayer 里的单选 Menu，不再自写定位", async () => {
@@ -204,7 +207,10 @@ test("侧栏区块小标与排序下拉走组件库：SectionLabel（`AGENT` 经
     /<div class="ss-sectionlabel has-action"><span class="ss-sectionlabel__text">项目<\/span><span class="ss-sectionlabel__action"><button type="button" class="sidebar__sort-button" aria-haspopup="menu" aria-expanded="false">最近活跃/,
   );
   const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
-  assert.match(tsx, /<FloatingLayer\s+trigger=\{button\.current\}\s+onClose=\{close\}\s+label="项目排序"\s+align="end"\s*>/);
+  assert.match(
+    tsx,
+    /<FloatingLayer\s+trigger=\{button\.current\}\s+onClose=\{close\}\s+label="项目排序"\s+align="end"\s*>/,
+  );
   assert.match(tsx, /<MenuItem\s+key=\{s\.id\}\s+kind="radio"/);
   const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /\.sidebar__sort-menu|\.sidebar__sort-item|\.sidebar__label/);
@@ -217,7 +223,11 @@ test("PageHead 在组件库里：旧的 shell 路径只是转出，壳与 agent 
   assert.equal(old.PageHead, ui.PageHead);
   assert.equal(old.PageTitle, ui.PageTitle);
   assert.equal(old.PageHeadActions, ui.PageHeadActions);
-  for (const file of ["../src/App.tsx", "../src/shell/AgentPage.tsx", "../src/pages/SettingsPage.tsx"]) {
+  for (const file of [
+    "../src/App.tsx",
+    "../src/shell/AgentPage.tsx",
+    "../src/pages/SettingsPage.tsx",
+  ]) {
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     assert.doesNotMatch(src, /shell\/PageHead|from "\.\/PageHead/, file);
   }

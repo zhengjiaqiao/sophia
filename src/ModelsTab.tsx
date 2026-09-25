@@ -166,7 +166,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
     blocked: banner || notice !== null || hasTodos || confirmRestart || gatewayPanel,
   });
   const hint = (
-    <HintStrip open={codexHint.visible} onDismiss={codexHint.dismiss}>
+    <HintStrip open={codexHint.visible} onDismiss={codexHint.dismiss} flush>
       {HINTS["first-codex"]({ agents: [], skills: 0 })}
     </HintStrip>
   );
