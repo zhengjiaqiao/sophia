@@ -783,7 +783,7 @@ test("批量撤销按条件给：加上时选中的里这一列原本已有一�
   );
 });
 
-test("原件格与 MCP 的 ⦿ 可点（DESIGN「删除原件」）：提示框是带 … 的动词，点了先确认；MCP 选择行全有时也是确认一次再删", () => {
+test("原件格与 MCP 的 ⦿ 可点（DESIGN「删除原件」）：skill 先确认；MCP 只有删到这个位置里最后一份才确认（提示框才带 …）", () => {
   const dv = readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8");
   const skills = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
   const mcp = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
@@ -793,14 +793,23 @@ test("原件格与 MCP 的 ⦿ 可点（DESIGN「删除原件」）：提示框�
     skills,
     /confirmLabel="删除"\s*onConfirm=\{\(\) => void confirmDeleteOriginal\(deletePane\)\}/,
   );
-  assert.match(mcp, /`从 \$\{names\.get\(target\.id\) \?\? target\.label\} 删除…`/);
+  // MCP：`…` 只在会确认时写；别处还有同名定义就直接删、不给撤销（除非这一行各份不一样）
+  assert.match(
+    mcp,
+    /删除\$\{othersHolding\(page, \[row\.name\], new Set\(\[target\.id\]\)\)\.length > 0 \? "" : "…"\}/,
+  );
+  assert.match(
+    mcp,
+    /if \(others\.length > 0\) void deleteOriginal\(pane\);\s*else setDeletePane\(pane\);/,
+  );
+  assert.match(mcp, /undoable: others\.length === 0 \|\| differs/);
   assert.match(
     mcp,
     /confirmLabel="删除"\s*onConfirm=\{\(\) => void deleteOriginal\(deletePane\)\}/,
   );
   // 单格与批量同一个入口：按位置 + 名字删，不看是不是这一行的来源
   assert.match(mcp, /api\.deleteMcpOriginal\(del\.items\)/);
-  // 选择行全有（⦿）：先出确认框（某一列 / 所有位置），不再直接移除、也不再跳过哪一格
+  // 选择行全有（⦿）：经 askDeleteBatch（有一行会删到最后一份才确认），不再跳过哪一格
   assert.match(mcp, /askDeleteBatch\(page, deletable, target\.id\)/);
   assert.match(mcp, /askDeleteBatch\(page, allRemove, "all"\)/);
   assert.doesNotMatch(mcp, /removeCopies|MCP_OWN_TIP|\.copy\b/);

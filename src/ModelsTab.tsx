@@ -44,7 +44,6 @@ import {
   Tooltip,
   useBusyShown,
 } from "./ui/index.ts";
-import type { ConfirmAnchor } from "./ui/index.ts";
 import { HintStrip } from "./ui/HintStrip.tsx";
 import { HINTS, useHint } from "./hints.ts";
 import { Switch } from "./ui/Switch.tsx";
@@ -74,13 +73,6 @@ const describeError = (error: unknown): string => parseBackendError(String(error
 const selectedPayload = (models: GatewayProviderModel[]) =>
   models.filter((m) => m.selected).map(({ id, displayName }) => ({ id, displayName }));
 
-/// 确认框锚点：元素此刻在视口里的矩形
-const anchorOf = (el: Element | null | undefined): ConfirmAnchor | undefined => {
-  if (!el) return undefined;
-  const r = el.getBoundingClientRect();
-  return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
-};
-
 /// 节头下那块灰面板：做不成的事就地说（开关、重启、启动、卸下、勾选没成）。
 /// `message` 是整句（`没重启 Codex` `没移除 GPT 5`），原因写全、折行不截断
 export interface SectionNoticeState {
@@ -92,9 +84,6 @@ export interface SectionNoticeState {
 }
 
 // ===== 节头里开关右边 12：重启生效 / 启动 Codex =====
-
-/// 重启确认的锚：那颗键（确认框出在键正下方、左沿对齐键——键紧跟在开关后面）
-const restartAnchor = (key: Element | null): ConfirmAnchor | undefined => anchorOf(key);
 
 /// 开关右边 12 那一格（DESIGN「改动待生效：重启生效与启动 Codex」）：键（紧凑 24，与 `卸下后台服务` 同位同高）/
 /// 刻度 + 正在重启 / 键消失、原位下方浮起 `✓ 已生效`（约 4 秒淡出，左沿对齐原来的键）。
@@ -286,7 +275,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   /// 网关行展开着的那几家（进这一页时都收着）
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
-  const [confirmRestart, setConfirmRestart] = useState<ConfirmAnchor | null>(null);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [notice, setNotice] = useState<SectionNoticeState | null>(null);
   /// 行内待办条正在执行的那一条（接管 / 重新写入 / 重启路由）：它的键换成忙碌指示
   const [resolving, setResolving] = useState<"takeover" | "rewrite" | "router" | null>(null);
@@ -333,7 +322,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
       modelIssues(state).some((i) => i.action.kind === "takeover" || i.action.kind === "rewrite"));
   const codexHint = useHint("first-codex", {
     eligible: state !== null && healed,
-    blocked: banner || notice !== null || hasTodos || confirmRestart !== null || gatewayPanel,
+    blocked: banner || notice !== null || hasTodos || confirmRestart || gatewayPanel,
   });
   const hint = (
     <HintStrip open={codexHint.visible} onDismiss={codexHint.dismiss}>
@@ -463,7 +452,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   /// 重启 Codex：确认之后键位原地换成 14 宽刻度 + 「正在重启 Codex」；结束了进程再读，键消失才算生效。
   /// 键还在（Codex 还揣着旧配置）就如实说没成，不假装成功
   const restart = async () => {
-    setConfirmRestart(null);
+    setConfirmRestart(false);
     setNotice(null);
     setPhase({ kind: "restarting" });
     onBusy(true);
@@ -718,7 +707,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
               phase={phase}
               busy={busy}
               keyRef={keyEl}
-              onRestart={() => setConfirmRestart(restartAnchor(keyEl.current) ?? null)}
+              onRestart={() => setConfirmRestart(true)}
               onLaunch={() => void launch()}
               onDoneDismiss={dismissDone}
             />
@@ -756,13 +745,12 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
         />
       </Section>
 
-      {confirmRestart !== null ? (
+      {confirmRestart ? (
         <Confirm
           title={`重启 ${tool.name}？`}
           confirmLabel="重启"
-          anchor={confirmRestart}
           onConfirm={() => void restart()}
-          onCancel={() => setConfirmRestart(null)}
+          onCancel={() => setConfirmRestart(false)}
         >
           {RESTART_CONSEQUENCE}
         </Confirm>

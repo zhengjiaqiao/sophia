@@ -591,18 +591,16 @@ test("RestartSlot（节头里开关右边 12）：待重启出紧凑键「重启
   assert.match(slot, /<FloatingToast align="start">/);
 });
 
-test("第三方模型节头：开关紧跟节名，开关右边 12 是 重启生效 / 启动 Codex / 卸下后台服务（同一位）；重启确认锚在键下、左对齐键", () => {
+test("第三方模型节头：开关紧跟节名，开关右边 12 是 重启生效 / 启动 Codex / 卸下后台服务（同一位）；重启确认在窗口正中", () => {
   const src = readFileSync(new URL("../src/ModelsTab.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /PageHeadActions|models-headctl/);
   assert.match(
     src,
     /control=\{[^}]*<SectionSwitch[^]*actions=\{[^]*<RestartSlot[^]*\{uninstallKey\}/,
   );
-  assert.match(
-    src,
-    /onRestart=\{\(\) => setConfirmRestart\(restartAnchor\(keyEl\.current\) \?\? null\)\}/,
-  );
-  assert.match(src, /anchor=\{confirmRestart\}\s*onConfirm=/);
+  assert.match(src, /onRestart=\{\(\) => setConfirmRestart\(true\)\}/);
+  // 确认框一律在窗口正中，不再锚在键下
+  assert.doesNotMatch(src, /anchor=\{confirmRestart\}/);
   // 节头骨架：节名 + 12 + 开关 + 12 + 键（开关紧跟节名，不推到右端）
   const section = readFileSync(new URL("../src/ui/Section.tsx", import.meta.url), "utf8");
   assert.match(section, /ss-section__title[^]*ss-section__control[^]*ss-section__actions/);

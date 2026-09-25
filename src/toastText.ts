@@ -211,13 +211,12 @@ export function keepThisConfirm(input: {
 
 /// 删除 skill 原件的确认框（DESIGN「删除原件」）：说后果，不说机制——删了之后哪些 agent 用不了它、
 /// 链接怎么处理、能不能找回。
-/// - 别处没有同名原件：`删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除。原件可以从废纸篓找回，链接不会自动恢复`
-/// - 别处有：`删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它。原件可以从废纸篓找回`
+/// - 别处没有同名原件：`删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除。可以撤销`
+/// - 别处有：`删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它。可以撤销`
 /// `ownAgents` 是直接读原件所在目录的 agent（这一行里画 ⦿ 的列）；`linkAgents` 是有链接指向它的 agent。
-/// `paths` 一行：`移到废纸篓` + 完整路径（主目录写 `~`，不截断），与「只留这份」同一种路径行
+/// 不写路径行：删的是哪一份，点的那一行已经说了（产品负责人：「这个不需要提示吧」）
 export function deleteOriginalConfirm(input: {
   skill: string;
-  path: string;
   /// 指向它的链接条数
   links: number;
   /// 别处同名原件的来源名；没有就是链接一并删除
@@ -226,7 +225,7 @@ export function deleteOriginalConfirm(input: {
   ownAgents: string[];
   /// 有链接指向它的 agent（去重、保序）
   linkAgents: string[];
-}): { title: string; body: string; paths: { label: string; path: string }[] } {
+}): { title: string; body: string } {
   const list = (names: string[]) => names.join("、");
   const lose = (names: string[]) =>
     names.length > 1 ? `${list(names)} 都不能再用它` : `${list(names)} 不能再用它`;
@@ -235,19 +234,15 @@ export function deleteOriginalConfirm(input: {
     const moved = `删除后 ${list(input.linkAgents)} 改用 ${input.relinkTo} 里的同名 ${input.skill}（${input.links} 条软链接改指过去）`;
     const own = input.ownAgents.filter((a) => !input.linkAgents.includes(a));
     sentences.push(own.length > 0 ? `${moved}；${lose(own)}` : moved);
-    sentences.push("原件可以从废纸篓找回");
   } else {
     const all = [...new Set([...input.ownAgents, ...input.linkAgents])];
     const head = all.length > 0 ? `删除后 ${lose(all)}` : "";
     sentences.push(input.links > 0 ? `${head}：指向它的 ${input.links} 条软链接一并删除` : head);
-    sentences.push(
-      input.links > 0 ? "原件可以从废纸篓找回，链接不会自动恢复" : "原件可以从废纸篓找回",
-    );
   }
+  sentences.push("可以撤销");
   return {
     title: `删除 ${input.skill}？`,
     body: sentences.filter((x) => x !== "").join("。"),
-    paths: [{ label: "移到废纸篓", path: displayPath(input.path) }],
   };
 }
 
@@ -291,26 +286,16 @@ export function restoredOriginalToast(
   return { tier: "routine", kind: "success", verb: "已恢复", names: [skill], agents: [] };
 }
 
-/// MCP 配置文件在确认框路径行里的写法：主目录写 `~`；Claude Local 后接项目名（`~/.claude.json · CardBox`）
-export interface McpConfigPath {
-  path: string;
-  /// 同一个文件里分项目存放的（Claude Local）：项目名
-  project?: string;
-}
-const configPath = (p: McpConfigPath) => displayPath(p.path) + (p.project ? ` · ${p.project}` : "");
-
 /// 点 ⦿ 的确认框（DESIGN「删除原件」MCP；MCP 格子不分原件副本，点哪一格 ⦿ 都是它）：
 /// 标题 `从 Codex 删除 weibo-search？`；正文说后果 `删除后 Codex 不能再用它`，这个位置别的 agent 里
-/// 还有同名定义时接 `；Claude Code 里的那份不受影响`，没有时接 `；这个位置里就没有它了`，再接 `。可以撤销`；
-/// `paths` 一行：`配置` + 配置文件路径
-export function deleteMcpOriginalConfirm(
-  input: {
-    agent: string;
-    name: string;
-    /// 这个位置里还有同名定义的别的 agent（去重、保序）
-    others: string[];
-  } & McpConfigPath,
-): { title: string; body: string; paths: { label: string; path: string }[] } {
+/// 还有同名定义时接 `；Claude Code 里的那份不受影响`，没有时接 `；这个位置里就没有它了`，再接 `。可以撤销`。
+/// 不写配置文件路径：说后果，不说机制
+export function deleteMcpOriginalConfirm(input: {
+  agent: string;
+  name: string;
+  /// 这个位置里还有同名定义的别的 agent（去重、保序）
+  others: string[];
+}): { title: string; body: string } {
   const after =
     input.others.length > 0
       ? `${input.others.join("、")} 里的那份不受影响`
@@ -318,7 +303,6 @@ export function deleteMcpOriginalConfirm(
   return {
     title: `从 ${input.agent} 删除 ${input.name}？`,
     body: `删除后 ${input.agent} 不能再用它；${after}。可以撤销`,
-    paths: [{ label: "配置", path: configPath(input) }],
   };
 }
 
@@ -336,8 +320,7 @@ export function deleteMcpBatchConfirm(input: {
   names: string[];
   /// 这个位置里还留着其中某个同名定义的别的 agent（去重、保序）
   others: string[];
-  paths: McpConfigPath[];
-}): { title: string; body: string; paths: { label: string; path: string }[] } {
+}): { title: string; body: string } {
   const agents = input.agents.join("、");
   const shown =
     input.names.slice(0, BATCH_NAMES).join("、") +
@@ -349,7 +332,6 @@ export function deleteMcpBatchConfirm(input: {
   return {
     title: `从 ${agents} 删除 ${input.names.length} 个 MCP？`,
     body: `${shown}。删除后 ${agents} 不能再用它们；${after}。可以撤销`,
-    paths: uniq(input.paths.map(configPath)).map((path) => ({ label: "配置", path })),
   };
 }
 

@@ -261,9 +261,7 @@ export function useSources({
         <Confirm
           title={removeConfirmTitle(domain, pending.row.name)}
           confirmLabel="移除"
-          anchor={pending.anchor}
           // × 在来源行的右端：确认框右对齐到行尾、出在它下面，不盖来源行
-          align={pending.align === "end" ? "end" : "start"}
           onConfirm={() => void remove(pending)}
           onCancel={() => setPending(null)}
         >

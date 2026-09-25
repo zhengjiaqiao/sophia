@@ -183,6 +183,9 @@ interface DeletePane {
   agent?: ToastAgentRef;
   anchor?: ConfirmAnchor;
   text: ReturnType<typeof deleteMcpOriginalConfirm>;
+  /// 删完给不给 `撤销`：删到这个位置里的最后一份、或这一行各份不一样（再点 ○ 写回的是别的版本）才给；
+  /// 别处还有一样的，再点 ○ 就是准确反操作，不给（DESIGN「表格」MCP 条）
+  undoable: boolean;
 }
 
 /// 正在撤销的那一次（undoId）：带撤销的那一窗读它，按下的 `撤销` 原位忙碌
@@ -833,32 +836,22 @@ export default function McpTab({
     ];
   };
 
-  /// 确认框路径行：Claude Local 在同一个 ~/.claude.json 里按项目存放，路径后接项目名
-  const configPathOf = (target: McpLocation) => ({
-    path: target.path,
-    project: target.selector
-      ? target.selector
-          .split(/[/\\]+/)
-          .filter(Boolean)
-          .pop()
-      : undefined,
-  });
-
-  /// 点 ⦿：锚在那一格下出确认框
+  /// 点 ⦿：别的 agent 里还有同名定义就直接删（带撤销）；是这个位置里最后一份才锚在那一格下出确认框
+  /// （DESIGN「表格」MCP 条：只有删完这一行就没了的才确认）
   const askDeleteOriginal = (p: McpDomain, row: McpDomainRow, target: McpLocation) => {
     const agent = columnNames(p.targets).get(target.id) ?? target.label;
     const r = cellElement(p, rowKeyOf(row), target.id)?.getBoundingClientRect();
-    setDeletePane({
+    const others = othersHolding(p, [row.name], new Set([target.id]));
+    const differs = differingSourceIds(row, new Set(p.targets.map((t) => t.id))).length > 0;
+    const pane: DeletePane = {
       items: [{ locationId: target.id, name: row.name }],
       agent: { id: target.harnessId, name: target.label },
       anchor: r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined,
-      text: deleteMcpOriginalConfirm({
-        agent,
-        name: row.name,
-        others: othersHolding(p, [row.name], new Set([target.id])),
-        ...configPathOf(target),
-      }),
-    });
+      text: deleteMcpOriginalConfirm({ agent, name: row.name, others }),
+      undoable: others.length === 0 || differs,
+    };
+    if (others.length > 0) void deleteOriginal(pane);
+    else setDeletePane(pane);
   };
 
   /// 选择行全有时按下（某一列或「所有位置」）：确认一次删这一批，锚在按下的那个点下
@@ -867,17 +860,29 @@ export default function McpTab({
     const heads = columnNames(p.targets);
     const targets = p.targets.filter((t) => items.some((item) => item.locationId === t.id));
     const names = [...new Set(items.map((item) => item.name))];
-    setDeletePane({
+    const except = new Set(targets.map((t) => t.id));
+    const pane: DeletePane = {
       items,
       keyId,
       anchor: anchorNow(),
       text: deleteMcpBatchConfirm({
         agents: [...new Set(targets.map((t) => heads.get(t.id) ?? t.label))],
         names,
-        others: othersHolding(p, names, new Set(targets.map((t) => t.id))),
-        paths: targets.map(configPathOf),
+        others: othersHolding(p, names, except),
       }),
+      undoable: false,
+    };
+    // 有一行会删到这个位置里的最后一份才确认（也才给撤销）；每一行别处都还有一样的，直接删、不给撤销
+    const emptiesARow = names.some((name) => othersHolding(p, [name], except).length === 0);
+    const differs = names.some((name) => {
+      const row = p.rows.find((r) => rowKeyOf(r) === name);
+      return (
+        row !== undefined && differingSourceIds(row, new Set(p.targets.map((t) => t.id))).length > 0
+      );
     });
+    pane.undoable = emptiesARow || differs;
+    if (emptiesARow) setDeletePane(pane);
+    else void deleteOriginal(pane);
   };
 
   /// 确认之后删。单格：那一格灰着（仍画 ⦿），删成了在按下那一刻那一格的位置出例行一行 + `撤销`，
@@ -937,7 +942,8 @@ export default function McpTab({
           const text = deletedMcpOriginalToast(one.name, del.agent);
           const undoId = result.undoId;
           const at = { keys, rowKey: one.name, columnId: one.locationId, at: del.anchor };
-          const undo = undoId ? () => void undoWrite(undoId, undefined, text, at) : null;
+          const undo =
+            undoId && del.undoable ? () => void undoWrite(undoId, undefined, text, at) : null;
           setUndo(undo);
           setRowToast({
             rowKey: one.name,
@@ -966,7 +972,9 @@ export default function McpTab({
         });
         const undoId = result.undoId;
         const undo =
-          undoId && removed.length > 0 ? () => void undoWrite(undoId, keyId, text) : null;
+          undoId && del.undoable && removed.length > 0
+            ? () => void undoWrite(undoId, keyId, text)
+            : null;
         setUndo(undo);
         setKeyToast({
           keyId,
@@ -1224,7 +1232,8 @@ export default function McpTab({
           ? `${view.reason ?? ""} · 点一下在访达中显示`
           : view.clickable
             ? view.dot === "own"
-              ? `从 ${names.get(target.id) ?? target.label} 删除…`
+              ? // 省略号只在会确认时写：删的是这个位置里最后一份
+                `从 ${names.get(target.id) ?? target.label} 删除${othersHolding(page, [row.name], new Set([target.id])).length > 0 ? "" : "…"}`
               : choiceCount(row, target.id) > 1
                 ? pickTip(row.name, choiceCount(row, target.id))
                 : "点一下写进"
@@ -1531,7 +1540,6 @@ export default function McpTab({
       {pane !== null && (
         <Confirm
           title={`写进 ${new Set(pane.preview.actions.map((a) => a.targetId)).size} 个位置？`}
-          anchor={pane.anchor}
           safetyNote={
             pane.crossDomain
               ? "有几处要写到另一个位置去：完整定义里可能带着请求头或令牌，会一并复制过去"
@@ -1570,17 +1578,7 @@ export default function McpTab({
           confirmLabel="删除"
           onConfirm={() => void deleteOriginal(deletePane)}
           onCancel={() => setDeletePane(null)}
-          anchor={deletePane.anchor}
         >
-          {/* 标题下的路径行（同「只留这份」）：删的是哪个文件里的这一项 */}
-          <div className="mx-keeppaths">
-            {deletePane.text.paths.map((p) => (
-              <div key={p.path} className="mx-keeppaths__row">
-                <span className="mx-keeppaths__label">{p.label}</span>
-                <span className="mx-keeppaths__path">{p.path}</span>
-              </div>
-            ))}
-          </div>
           <div className="mx-keeppaths__body">{deletePane.text.body}</div>
         </Confirm>
       )}

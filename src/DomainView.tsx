@@ -62,7 +62,7 @@ export interface DomainViewProps {
   onDupHover: (row: DomainRow) => void;
   /// 点「只留这份」（抽屉里的键，或右键菜单）：确认框锚在 `anchor` 下面
   /// `at`：按下那一刻触发控件的位置——结果的提示小窗锚在这里，抽屉收起、行重排之后也还在原处
-  onKeepThis: (row: DomainRow, other: DomainRow, anchor: ConfirmAnchor, at: ConfirmAnchor) => void;
+  onKeepThis: (row: DomainRow, other: DomainRow, at: ConfirmAnchor) => void;
   /// 正在为哪一行体检（点了「只留这份」、确认框还没出来）：那一行的键原位忙碌、不随悬停收起
   keepBusy?: string | null;
   /// 孤链行（原件已不在的失效链接，见 orphanRows.ts）。本页全部，筛选在这里做
@@ -321,7 +321,7 @@ export default function DomainView(props: DomainViewProps) {
             keep={
               other === undefined ? undefined : (
                 <KeepKey
-                  onKeep={(anchor, at) => props.onKeepThis(row, other, anchor, at)}
+                  onKeep={(at) => props.onKeepThis(row, other, at)}
                   label={`只留 ${originOf(row.sourceId)} 的 ${row.skill}`}
                   busy={props.keepBusy === key}
                 />
@@ -342,12 +342,12 @@ export default function DomainView(props: DomainViewProps) {
                   run: () => {
                     const r = el.getBoundingClientRect();
                     const n = el.querySelector(".mx-row__name")?.getBoundingClientRect() ?? r;
-                    props.onKeepThis(
-                      row,
-                      other,
-                      { top: r.top, left: r.left, right: r.right, bottom: r.bottom },
-                      { top: r.top, left: n.left, right: n.right, bottom: r.bottom },
-                    );
+                    props.onKeepThis(row, other, {
+                      top: r.top,
+                      left: n.left,
+                      right: n.right,
+                      bottom: r.bottom,
+                    });
                   },
                 },
               ]
@@ -594,7 +594,7 @@ function KeepKey({
   label,
   busy,
 }: {
-  onKeep: (anchor: ConfirmAnchor, at: ConfirmAnchor) => void;
+  onKeep: (at: ConfirmAnchor) => void;
   label: string;
   /// 点过、正在体检：键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
   busy: boolean;
@@ -608,12 +608,9 @@ function KeepKey({
             size="compact"
             onClick={() => {
               if (busy) return;
-              // 确认框与结果的提示小窗都锚在被按下的这颗键上：出在它正下方（DESIGN「锚在被按下的那个控件」）
+              // 结果的提示小窗锚在被按下的这颗键上（确认框在窗口正中）
               const k = ref.current?.getBoundingClientRect();
-              if (k) {
-                const at = { top: k.top, left: k.left, right: k.right, bottom: k.bottom };
-                onKeep(at, at);
-              }
+              if (k) onKeep({ top: k.top, left: k.left, right: k.right, bottom: k.bottom });
             }}
             ariaLabel={label}
           >

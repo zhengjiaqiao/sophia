@@ -30,7 +30,6 @@ import {
   Tooltip,
   TruncTip,
 } from "./ui/index.ts";
-import type { ConfirmAnchor } from "./ui/index.ts";
 import { ModelList } from "./ModelList.tsx";
 
 /// Codex 页「第三方模型」一节里的网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进来）。
@@ -86,10 +85,9 @@ export function ModelChipRow({
   );
 }
 
-/// 删网关的确认：删的是哪一家、锚在哪（垃圾桶所在的那一行）
+/// 删网关的确认：删的是哪一家（确认框在窗口正中）
 interface ConfirmingRemove {
   provider: GatewayProvider;
-  anchor: ConfirmAnchor;
 }
 
 /// 勾选没写成的灰面板：出在那一家展开着的行里
@@ -232,22 +230,8 @@ export function GatewayBlock({
     setEditing(null);
   };
 
-  /// 删网关先问一句：确认框锚在这一行下方、右沿对齐垃圾桶
-  const askRemove = (provider: GatewayProvider) => {
-    const row = rowEls.current.get(provider.id);
-    if (!row) return;
-    const r = row.getBoundingClientRect();
-    const t = row.querySelector(".gw-row__trash")?.getBoundingClientRect();
-    setConfirming({
-      provider,
-      anchor: {
-        top: r.top,
-        bottom: r.bottom,
-        left: r.left,
-        right: t ? Math.max(r.right, t.right) : r.right,
-      },
-    });
-  };
+  /// 删网关先问一句（确认框在窗口正中）
+  const askRemove = (provider: GatewayProvider) => setConfirming({ provider });
 
   /// 确认之后直接删；这一行从列表里消失
   const remove = (provider: GatewayProvider) =>
@@ -545,8 +529,6 @@ export function GatewayBlock({
         <Confirm
           title={`删掉 ${gatewayShortName(confirming.provider)}？`}
           confirmLabel="删掉"
-          anchor={confirming.anchor}
-          align="end"
           onConfirm={() => remove(confirming.provider)}
           onCancel={() => setConfirming(null)}
         >

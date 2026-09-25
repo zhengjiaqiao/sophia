@@ -1672,20 +1672,26 @@ test("Confirm：纸浮层 384（paper + hairline 边 + float 12 + 浮层投影�
   assert.match(veil, /opacity:\s*var\(--veil-opacity\)/);
 });
 
-test("Confirm 锚在触发行下方 6px，遮罩整面压暗、不挖触发行", () => {
+// 2026-09-25 产品负责人：锚在靠下的格子时确认框出窗、键被截掉——确认框一律在窗口正中
+test("Confirm 一律在窗口正中，遮罩整面压暗；不再有锚点", () => {
   const html = render(Confirm, {
     title: "把 notion 写进 Codex · User？",
     confirmLabel: "写进去",
     safetyNote: "会把请求头和令牌一并复制过去",
     onCancel: noop,
-    anchor: { top: 200, left: 40, right: 640, bottom: 234 },
   });
-  assert.match(html, /class="ss-confirm-layer is-anchored"/);
-  // 一整块遮罩，不挖触发行
+  assert.match(html, /class="ss-confirm-layer"/);
+  assert.doesNotMatch(html, /is-anchored|position:absolute/);
   assert.equal(html.match(/class="ss-confirm-veil ss-confirm-veil--full"/g)?.length, 1);
-  assert.doesNotMatch(html, /ss-confirm-hole/);
-  assert.match(html, /style="position:absolute;top:240px;/);
   assert.match(html, /class="ss-confirm__safety">会把请求头和令牌一并复制过去</);
+  const layer = cssRule(uiCss, ".ss-confirm-layer");
+  assert.match(layer, /align-items:\s*center/);
+  assert.match(layer, /justify-content:\s*center/);
+  assert.doesNotMatch(uiCss, /is-anchored/);
+  assert.doesNotMatch(
+    readFileSync(new URL("../src/ui/Confirm.tsx", import.meta.url), "utf8"),
+    /anchor\?:|align\?:/,
+  );
 });
 
 test("Confirm 路径：等宽 ink 字、不垫色块、路径可拖选；主动作禁用时带原因", () => {
@@ -2132,27 +2138,6 @@ test("返回时找回触发它的那颗键：主视图重挂过也按读屏名�
   assert.equal(pickTrigger(fresh, key), 1);
   assert.equal(pickTrigger(fresh, triggerKey(btn(null, " + skill "))), 2);
   assert.equal(pickTrigger(fresh, triggerKey(btn(null, "配置网关"))), -1);
-});
-
-test("Confirm align=end：触发控件在行尾时对话框右沿对齐触发行（删网关的垃圾桶），默认仍左沿对齐", async () => {
-  const { Confirm } = await import("../src/ui/Confirm.tsx");
-  const anchor = { top: 100, bottom: 130, left: 32, right: 776 };
-  const end = render(Confirm, {
-    title: "删掉 x？",
-    confirmLabel: "删掉",
-    onCancel: noop,
-    anchor,
-    align: "end",
-  });
-  // 宽 384：776 − 384 = 392；窗口不够宽时贴右留 16（384 + 16 = 400）
-  assert.match(end, /left:max\(16px, min\(392px, calc\(100vw - 400px\)\)\)/);
-  const start = render(Confirm, {
-    title: "删掉 x？",
-    confirmLabel: "删掉",
-    onCancel: noop,
-    anchor,
-  });
-  assert.match(start, /left:min\(32px, calc\(100vw - 400px\)\)/);
 });
 
 test("提示框：墨窗 face 字、control 7 圆角 + 浮层投影；平铺在页面流里的灰面板不浮起、无阴影", () => {

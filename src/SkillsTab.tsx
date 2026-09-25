@@ -66,7 +66,6 @@ const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
 interface KeepPane {
   kept: DomainRow;
   other: DomainRow;
-  anchor: ConfirmAnchor;
   /// 按下那一刻「只留这份」的位置：结果锚在这里
   at: ConfirmAnchor;
   planId: string;
@@ -91,16 +90,19 @@ interface DeletePane {
 }
 
 /// 确认框里标题下的路径行（`留下` / `移到废纸篓` + 完整路径，不截断、太长就折行）与一句后果
-const confirmPaths = (text: { body: string; paths: { label: string; path: string }[] }) => (
+/// 不给 `paths` 的（删原件）只有那一句后果
+const confirmPaths = (text: { body: string; paths?: { label: string; path: string }[] }) => (
   <>
-    <div className="mx-keeppaths">
-      {text.paths.map((p) => (
-        <div key={p.label} className="mx-keeppaths__row">
-          <span className="mx-keeppaths__label">{p.label}</span>
-          <span className="mx-keeppaths__path">{p.path}</span>
-        </div>
-      ))}
-    </div>
+    {text.paths ? (
+      <div className="mx-keeppaths">
+        {text.paths.map((p) => (
+          <div key={p.label} className="mx-keeppaths__row">
+            <span className="mx-keeppaths__label">{p.label}</span>
+            <span className="mx-keeppaths__path">{p.path}</span>
+          </div>
+        ))}
+      </div>
+    ) : null}
     <div className="mx-keeppaths__body">{text.body}</div>
   </>
 );
@@ -253,7 +255,6 @@ export default function SkillsTab({
   const [splitPane, setSplitPane] = useState<{
     ref: CellRef;
     agent: string;
-    anchor?: ConfirmAnchor;
   } | null>(null);
 
   const pages = overview === null ? [] : overview.domains.filter((d) => d.key === selectedKey);
@@ -632,7 +633,6 @@ export default function SkillsTab({
     setSplitPane({
       ref,
       agent: targetOf(ref.targetId)?.label ?? "",
-      anchor: cellAnchorOf(ref),
     });
   };
 
@@ -870,7 +870,6 @@ export default function SkillsTab({
       relink: plan.relinkTo !== null,
       text: deleteOriginalConfirm({
         skill: ref.skill,
-        path: plan.path,
         links: plan.affected.length,
         relinkTo:
           plan.relinkTo === null ? undefined : relinkName ? originText(relinkName) : plan.relinkTo,
@@ -992,12 +991,7 @@ export default function SkillsTab({
   // DESIGN「页面还是弹层」：删用户的原件先确认（锚在按钮上），确认后直接删、不挂起；
   // 结果是例行一行 + `撤销`（2026-09-25 起：另一份放回原处、改指过的链接指回去）
 
-  const keepThis = async (
-    kept: DomainRow,
-    other: DomainRow,
-    anchor: ConfirmAnchor,
-    at: ConfirmAnchor,
-  ) => {
+  const keepThis = async (kept: DomainRow, other: DomainRow, at: ConfirmAnchor) => {
     const sources = overview?.sources ?? [];
     // 与原件位置列同一套：按本域出现的来源算，同名来源才分得开
     const names = originNames(
@@ -1043,7 +1037,6 @@ export default function SkillsTab({
     setKeepPane({
       kept,
       other,
-      anchor,
       at,
       planId: planned.planId,
       keptName: nameOf(kept.sourceId),
@@ -1356,7 +1349,7 @@ export default function SkillsTab({
         hiddenRows={hiddenRows}
         dupReadout={dupReadout}
         onDupHover={dupHover}
-        onKeepThis={(kept, other, anchor, at) => void keepThis(kept, other, anchor, at)}
+        onKeepThis={(kept, other, at) => void keepThis(kept, other, at)}
         keepBusy={keepBusy}
         orphans={orphans}
         onClearOrphan={clearOrphan}
@@ -1426,7 +1419,6 @@ export default function SkillsTab({
           confirmLabel="只留这份"
           onConfirm={() => void confirmKeep(keepPane)}
           onCancel={() => setKeepPane(null)}
-          anchor={keepPane.anchor}
         >
           {/* 标题下两行路径：决定删哪份的依据，不截断、太长就折行 */}
           {confirmPaths(keepConfirm)}
@@ -1439,7 +1431,6 @@ export default function SkillsTab({
           confirmLabel="删除"
           onConfirm={() => void confirmDeleteOriginal(deletePane)}
           onCancel={() => setDeletePane(null)}
-          anchor={deletePane.anchor}
         >
           {confirmPaths(deletePane.text)}
         </Confirm>
@@ -1451,7 +1442,6 @@ export default function SkillsTab({
           confirmLabel="拆开"
           onConfirm={() => void confirmSplit(splitPane.ref)}
           onCancel={() => setSplitPane(null)}
-          anchor={splitPane.anchor}
         >
           {splitConfirm(splitPane.agent).body}
         </Confirm>

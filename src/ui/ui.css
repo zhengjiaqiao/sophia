@@ -1214,11 +1214,6 @@ textarea,
   padding: 24px;
 }
 
-.ss-confirm-layer.is-anchored {
-  display: block;
-  padding: 0;
-}
-
 .ss-confirm-veil {
   position: absolute;
   background: var(--ink);
