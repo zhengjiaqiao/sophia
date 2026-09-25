@@ -976,7 +976,7 @@ test("Tabs 滑块：paper + raise 抬起、7 圆角；位移与变宽 260ms 弹�
 
 // 2026-09-25 来源筛选＝一排浅胶囊，选中的是墨色：recess 底、无边、高 26、不带计数与图标。
 // 原用例钉的透明底 + ctl-border、28 高、计数是被取代的规范
-test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边无投影；悬停 surface + ink；选中墨色（字重不跳），再悬停内沿 1px ink-mute；可带计数（12 tabular，选中 ctl-border），不带图标", () => {
+test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边无投影；悬停 surface + ink；选中墨色（字重不跳），选中的悬停不变；可带计数（12 tabular，选中 ctl-border），不带图标", () => {
   const html = render(Chip, { children: "WeiboAP", onClick: noop });
   assert.match(html, /class="ss-chip"/);
   assert.match(html, /aria-pressed="false"/);
@@ -1021,10 +1021,11 @@ test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边�
   assert.match(selected, /background:\s*var\(--ink\)/);
   assert.match(selected, /color:\s*var\(--face\)/);
   assert.doesNotMatch(selected, /font-weight/);
+  // 单选里再点选中的那颗不会变：悬停不回应（不加内沿、不换底）
   const selectedHover = cssRule(uiCss, ".ss-chip.is-selected:hover:not(:disabled)");
-  assert.match(selectedHover, /outline:\s*1px solid var\(--ink-mute\)/);
-  assert.match(selectedHover, /outline-offset:\s*-2px/);
   assert.match(selectedHover, /background:\s*var\(--ink\)/);
+  assert.match(selectedHover, /color:\s*var\(--face\)/);
+  assert.doesNotMatch(selectedHover, /outline/);
   assert.doesNotMatch(uiCss, /ss-chip__icon/);
 });
 
