@@ -291,6 +291,11 @@
   color: var(--ink-faint);
 }
 
+/* 列表外的 skill（自带、插件）：跟在计数后，同字同色，间距 4（DESIGN「列头的悬停」） */
+.mx-colbtn__more {
+  margin-left: 4px;
+}
+
 /* 这一列的目录还不存在：图标外一圈虚线（虚线＝目标不在，加上第一个时会自动创建）、名字 ink-faint、计数空 */
 .mx-colbtn.is-missing .mx-colbtn__icon {
   border: 1px dashed var(--ctl-edge);
