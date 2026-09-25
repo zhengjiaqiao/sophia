@@ -746,3 +746,24 @@ test("右键「拷贝路径」走原生剪贴板插件：菜单项在原生菜�
     /"clipboard-manager:allow-write-text"/,
   );
 });
+
+test("批量撤销按条件给：加上时选中的里这一列原本已有一部分（再按会连原有的一起移除）才带 `撤销`；其余批量不给", () => {
+  const dv = readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8");
+  assert.match(
+    dv,
+    /\{ keyId: target\.id, op: "unlink", cells: linked, reversible: true \}\s*: \{ keyId: target\.id, op: "link", cells: missing, reversible: linked\.length === 0 \}/,
+  );
+  assert.match(
+    dv,
+    /\{ keyId: "all", op: "unlink", cells: allRemove, reversible: true \}\s*: \{ keyId: "all", op: "link", cells: allAdd, reversible: allRemove\.length === 0 \}/,
+  );
+  const tab = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
+  assert.match(
+    tab,
+    /action=\{undo && !reversible \? \{ label: "撤销", onClick: undo \} : undefined\}/,
+  );
+  const mcp = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
+  assert.match(mcp, /write\(cells, target\.id, copies\.length === 0\)/);
+  assert.match(mcp, /write\(allAdd, "all", allRemove\.length === 0\)/);
+  assert.match(mcp, /mcpUndoShown\("write", result\.entries, reversible\)/);
+});

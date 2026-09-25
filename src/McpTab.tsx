@@ -78,7 +78,8 @@ import "./McpTab.css";
 ///    选择条上的键同 skill：未全有＝写进缺的，全有（打勾）＝全部移除
 /// 2. **实心不是一条链接，是一份独立副本**——写进、移除都经 core 留快照：没人改过就能撤销，
 ///    改过了撤销禁用，改给「在访达中显示备份 ↗」作手动兜底。撤销按钮只在再点一次不能准确撤回时给
-///    （`mcpUndoShown`）：移除了一份与原版不一样的副本；批量一律不给；`⌘Z` 始终可用
+///    （`mcpUndoShown`）：移除了一份与原版不一样的副本、批量写进时选中的里这一列原本已有一部分；
+///    `⌘Z` 始终可用
 /// 3. **差异是行级、不是格级**——`2 份不一样` 是服务名后的纯文字记号（不是键，提示框给差异字段名）；
 ///    点它（或名字、拉手）拉开这一行的抽屉，不同的字段是抽屉里的一段。传输方式是服务的属性，也在抽屉里（D7）
 /// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格写入、移除都不确认
@@ -161,6 +162,8 @@ interface Pane {
   crossDomain: boolean;
   anchor?: ConfirmAnchor;
   keyId?: string;
+  /// 写完再按一次同一个点恰好撤回（见 `mcpUndoShown`）
+  reversible: boolean;
 }
 
 /// 正在撤销的那一次（undoId）：带撤销的那一窗读它，按下的 `撤销` 原位忙碌
@@ -532,8 +535,13 @@ export default function McpTab({
   /// 写一批（已经确认过或不需要确认）。keyId 给了就把结果浮在那颗键下。
   /// 单格：写的时候那一格灰着，写成闪一下。批量（按键）：格子同时变成新状态、不闪；
   /// 只锁按下的那一项，过了 0.3 秒门槛旁边出忙碌指示 + 一句（DESIGN 冲突表「格子变化要不要闪」）。
-  /// 写入排在前面的写入之后
-  const apply = (preview: McpPreview, allowCrossDomain: boolean, keyId?: string) => {
+  /// 写入排在前面的写入之后。`reversible`：写完再按一次同一个点恰好撤回（单格一律是）
+  const apply = (
+    preview: McpPreview,
+    allowCrossDomain: boolean,
+    keyId?: string,
+    reversible = true,
+  ) => {
     const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
     const single = keyId === undefined;
     setPane(null);
@@ -542,7 +550,7 @@ export default function McpTab({
     setOptimisticFor(keys, "linked");
     if (single) setPendingCells((prev) => new Set([...prev, ...keys]));
     if (keyId) setKeyBusy({ keyId, label: batchBusyText("write", keyAgent(keyId)) });
-    return enqueue(() => applyWrite(preview, allowCrossDomain, keys, keyId));
+    return enqueue(() => applyWrite(preview, allowCrossDomain, keys, keyId, reversible));
   };
 
   const applyWrite = async (
@@ -550,6 +558,7 @@ export default function McpTab({
     allowCrossDomain: boolean,
     keys: string[],
     keyId: string | undefined,
+    reversible: boolean,
   ) => {
     const single = keyId === undefined;
     onBusy(true);
@@ -598,9 +607,9 @@ export default function McpTab({
               // 写数量（`✓ 写进 ⎔ 2 个`），名字在点的提示框里
               names={text.kind === "success" ? undefined : text.names}
               reading={text.kind === "success" ? <ToastCount n={created.length} /> : undefined}
-              // 批量写进一律不给 `撤销`：再按一次同一个点就是移除（⌘Z 照旧可用）
+              // 再按一次同一个点就恰好撤回时不给 `撤销`（⌘Z 照旧可用）；选中的里这一列原本已有一部分时给
               action={
-                undo && mcpUndoShown("write", result.entries)
+                undo && mcpUndoShown("write", result.entries, reversible)
                   ? { label: "撤销", onClick: undo }
                   : undefined
               }
@@ -684,7 +693,7 @@ export default function McpTab({
       setUndo(undo);
       // 只有移除了一份与原版不一样的副本才给 `撤销`：再点只能写回原版（⌘Z 照旧可用）
       const action =
-        undo && mcpUndoShown("remove", result.entries)
+        undo && mcpUndoShown("remove", result.entries, true)
           ? { label: "撤销", onClick: undo }
           : undefined;
       if (keyId !== undefined) {
@@ -800,8 +809,9 @@ export default function McpTab({
     });
   };
 
-  /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）
-  const write = async (selections: McpSelection[], keyId?: string) => {
+  /// 写入这些格。批量或跨域的先确认（锚在触发它的键 / 格下面）。
+  /// `reversible`：写完再按一次同一个点恰好撤回（见 `mcpUndoShown`）
+  const write = async (selections: McpSelection[], keyId?: string, reversible = true) => {
     if (selections.length === 0) return;
     const anchor = anchorNow();
     // 按键的：确认框出来之前要先算影响——只锁按下的那一项，过了 0.3 秒门槛旁边出忙碌指示 + 一句
@@ -841,7 +851,7 @@ export default function McpTab({
     }
     const crossDomain = preview.actions.some((action) => action.crossDomain);
     if (keyId !== undefined || crossDomain) {
-      setPane({ preview, crossDomain, anchor, keyId });
+      setPane({ preview, crossDomain, anchor, keyId, reversible });
       return;
     }
     // 同域单格：乐观点亮 + 闪一下，不确认；写成出例行一行（被点的那一行里，紧跟名字）
@@ -1255,7 +1265,11 @@ export default function McpTab({
             notes,
           ),
       disabledReason,
-      onToggle: () => void (checked ? removeCopies(copies, target.id) : write(cells, target.id)),
+      onToggle: () =>
+        void (checked
+          ? removeCopies(copies, target.id)
+          : // 选中的里这一列原本就有副本时，再按会连原有的一起移除：只有撤销是准确的退路
+            write(cells, target.id, copies.length === 0)),
     };
   }
   // 「所有位置」：每个能改的位置都全有才打勾；点空框全部写进，点打勾全部移除
@@ -1270,7 +1284,10 @@ export default function McpTab({
       ? affectedTip("从所有位置移除", uniqNames(allRemove), [], allRemove.length)
       : affectedTip("写进所有还缺它的位置", uniqNames(allAdd), [], allAdd.length),
     disabledReason: enabledPresses.length === 0 ? "没有能写进或移除的" : undefined,
-    onToggle: () => void (allChecked ? removeCopies(allRemove, "all") : write(allAdd, "all")),
+    onToggle: () =>
+      void (allChecked
+        ? removeCopies(allRemove, "all")
+        : write(allAdd, "all", allRemove.length === 0)),
   };
 
   // 空态（DESIGN「位置页 › 空态」）：`+ 来源` 已在页面头，空态里不重复，只说现状
@@ -1404,7 +1421,7 @@ export default function McpTab({
               : "已经存在的同名配置不会被覆盖；写进已有文件前会先备份"
           }
           confirmLabel="写进去"
-          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId)}
+          onConfirm={() => void apply(pane.preview, pane.crossDomain, pane.keyId, pane.reversible)}
           onCancel={() => setPane(null)}
         >
           <ul className="mcp-confirm-list">

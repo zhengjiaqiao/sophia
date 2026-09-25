@@ -701,7 +701,7 @@ export default function SkillsTab({
     return enqueue(() => batchWrite(press, undoing));
   };
 
-  const batchWrite = async ({ keyId, op, cells }: BatchPress, undoing: boolean) => {
+  const batchWrite = async ({ keyId, op, cells, reversible }: BatchPress, undoing: boolean) => {
     onBusy(true);
     let result: Awaited<ReturnType<typeof run>> | null = null;
     try {
@@ -727,12 +727,15 @@ export default function SkillsTab({
           reason: f.reason,
         })),
       });
-      // 批量一律不给 `撤销` 键（再按一次同一个点就是反操作）；`⌘Z` 照旧撤这一次
+      // `⌘Z` 始终撤这一次；提示条上的 `撤销` 只在再按一次同一个点撤不回原样时给（BatchPress.reversible）
       const undo =
         done.length > 0 && !undoing
           ? () => {
               setUndo(null);
-              void batch({ keyId, op: op === "link" ? "unlink" : "link", cells: done }, true);
+              void batch(
+                { keyId, op: op === "link" ? "unlink" : "link", cells: done, reversible: true },
+                true,
+              );
             }
           : null;
       setUndo(undo);
@@ -745,6 +748,7 @@ export default function SkillsTab({
           // 写数量，不逐个写名字（`✓ 加到 ✳ 1 个`）；名字在点的提示框里
           names={text.kind === "success" ? undefined : text.names}
           reading={text.kind === "success" ? <ToastCount n={done.length} /> : undefined}
+          action={undo && !reversible ? { label: "撤销", onClick: undo } : undefined}
           onDismiss={dismiss}
           onClose={text.tier === "notice" ? dismiss : undefined}
         />
@@ -939,7 +943,10 @@ export default function SkillsTab({
           ? () => {
               setUndo(null);
               setGlobalToast(null);
-              void batchRef.current({ keyId: "", op: "unlink", cells: refs }, true);
+              void batchRef.current(
+                { keyId: "", op: "unlink", cells: refs, reversible: true },
+                true,
+              );
             }
           : null;
       setUndo(undo);

@@ -36,12 +36,16 @@ export const skillRowKey = (row: { sourceId: string; skill: string }) =>
 /// 一格的键（乐观更新、闪烁、就地提示都按它认格）
 export const skillCellKey = (ref: CellRef) => cellKey(skillRowKey(ref), ref.targetId);
 
-/// 批量操作：已选的 × 一个 agent（或全部）。批量一律不给 `撤销` 键（DESIGN「提示条的位置」：
-/// 加上、移除都可逆，再按一次同一个点就是反操作）；`⌘Z` 照旧可用
+/// 批量操作：已选的 × 一个 agent（或全部）。`撤销` 键按条件给（DESIGN「提示条的位置」，2026-09-25
+/// 评审第二轮）：再按一次同一个点就恰好撤回时不给；`⌘Z` 始终可用
 export interface BatchPress {
   keyId: string;
   op: "link" | "unlink";
   cells: CellRef[];
+  /// 做完之后再按一次同一个点，恰好把这一次撤回：移除（打勾＝选中的全有，全移除再按就全加回）、
+  /// 或加上时选中的原本一个都没有。这时提示条不给 `撤销`（同单格：再点一下就恢复了）；
+  /// 选中的里原本就有一部分时，再按会连原有的一起移除、回不到原来有有无无的样子，只有 `撤销` 是准确的退路
+  reversible: boolean;
 }
 
 export interface DomainViewProps {
@@ -432,8 +436,8 @@ export default function DomainView(props: DomainViewProps) {
       onToggle: () =>
         props.onBatch(
           checked
-            ? { keyId: target.id, op: "unlink", cells: linked }
-            : { keyId: target.id, op: "link", cells: missing },
+            ? { keyId: target.id, op: "unlink", cells: linked, reversible: true }
+            : { keyId: target.id, op: "link", cells: missing, reversible: linked.length === 0 },
         ),
     };
   }
@@ -452,8 +456,8 @@ export default function DomainView(props: DomainViewProps) {
     onToggle: () =>
       props.onBatch(
         allChecked
-          ? { keyId: "all", op: "unlink", cells: allRemove }
-          : { keyId: "all", op: "link", cells: allAdd },
+          ? { keyId: "all", op: "unlink", cells: allRemove, reversible: true }
+          : { keyId: "all", op: "link", cells: allAdd, reversible: allRemove.length === 0 },
       ),
   };
 
