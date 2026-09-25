@@ -419,16 +419,14 @@ test("行详情是抽屉：名称格只放「› 名字 ×2」——拉手在名
   assert.doesNotMatch(css, /\.mx-row:hover \.ss-checkbox/);
 });
 
-test("添加来源候选行：勾选框 ｜ 拉手列 18 + 6 ｜ 名字，不能勾的行拉手格留空；抽屉左沿对齐名字", () => {
+test("添加来源候选行＝组件库列表行 ListRow（勾选格 24 ｜ 拉手 18 + 6 ｜ 名字）：不能勾的行没有抽屉；抽屉左沿归组件", () => {
   const tsx = readFileSync(new URL("../src/pages/AddSourcePanel.tsx", import.meta.url), "utf8");
-  assert.match(
-    tsx,
-    /add-src__checkcell[^]*add-src__handlecell[^]*<DrawerHandle[^]*add-src__content[^]*add-src__name/,
-  );
-  assert.doesNotMatch(tsx, /add-src__name">\{entry\.name\}<\/span>\s*\{[^}]*<DrawerHandle/);
+  assert.match(tsx, /<ListRow[^]*check=\{[^]*<Checkbox[^]*drawer=\{\s*blocked \? undefined/);
+  assert.doesNotMatch(tsx, /<DrawerHandle|<Drawer\b/);
   const css = readFileSync(new URL("../src/pages/AddSourcePanel.css", import.meta.url), "utf8");
-  assert.match(css, /grid-template-columns: 24px 8px 18px 6px minmax\(0, 1fr\);/);
-  assert.match(css, /\.add-src__drawer \.ss-drawer__well \{\s*margin-left: 56px;/);
+  // 列宽、悬停带、抽屉缩进都在组件里；页面不再自排一套列、不覆盖抽屉的内部类
+  assert.doesNotMatch(css, /grid-template-columns: 24px/);
+  assert.doesNotMatch(css, /\.ss-[a-z]/);
 });
 
 test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号（不是键），差异是这一行抽屉里的一段；skill 的 `只留这份` 在抽屉里", async () => {
