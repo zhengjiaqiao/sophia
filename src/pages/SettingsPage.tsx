@@ -273,7 +273,7 @@ export function SettingsPage({ onError, initialUpdate, aboutRequest }: SettingsP
             <Toast
               kind="success"
               verb="不在列表里显示了"
-              reason="已建好的链接原样留着"
+              trail={["已建好的链接原样留着"]}
               onDismiss={dismissUnchecked}
             />
           </FloatingToast>

@@ -224,3 +224,88 @@ test("Mono 收节点：一段读数里加粗其中几个字仍是一块等宽；
   );
   assert.doesNotMatch(read("src/McpDiffPanel.tsx"), /<b>\s*<Mono/);
 });
+
+// ===== 输入框关联可见标签、面板里的菜单、成功提示条的读数槽、时长 token =====
+
+const { TextField } = await import("../src/ui/TextField.tsx");
+const { Menu, MenuItem } = await import("../src/ui/Menu.tsx");
+const { Toast } = await import("../src/ui/Toast.tsx");
+
+test("TextField id / labelledBy：有可见标签时读屏名就是它（aria-labelledby），点标签聚焦（htmlFor → id）", () => {
+  const html = render(TextField, {
+    id: "gw-url",
+    labelledBy: "gw-url-label",
+    value: "",
+    onChange: () => {},
+  });
+  assert.match(
+    html,
+    /<input id="gw-url" class="ss-textfield__input" type="text" aria-labelledby="gw-url-label"/,
+  );
+  assert.doesNotMatch(html, /aria-label=/);
+  // 没有可见标签：照旧 aria-label
+  assert.match(
+    render(TextField, { label: "筛选", value: "", onChange: () => {} }),
+    /aria-label="筛选"/,
+  );
+});
+
+test("Menu context=panel：占满面板宽，不套浮层的 320 上限；浮层里照旧 320", () => {
+  const panel = render(Menu, {
+    context: "panel",
+    label: "Sophia",
+    children: createElement(MenuItem, { children: "退出" }),
+  });
+  assert.match(
+    panel,
+    /^<div class="ss-menulist ss-menulist--panel" role="menu" aria-label="Sophia">/,
+  );
+  assert.doesNotMatch(panel, /max-width/);
+  const layer = render(Menu, {
+    label: "项目排序",
+    children: createElement(MenuItem, { children: "名称" }),
+  });
+  assert.match(layer, /style="max-width:320px"/);
+  assert.match(
+    render(Menu, {
+      context: "panel",
+      maxWidth: 280,
+      children: createElement(MenuItem, { children: "x" }),
+    }),
+    /style="max-width:280px"/,
+  );
+});
+
+test("Toast trail：成功档「名字 · 读数」有正式槽位，不借 reason；档位只由 kind 定（没有 tier）", () => {
+  const html = render(Toast, {
+    kind: "success",
+    verb: "已添加",
+    names: ["WeiboAP"],
+    trail: ["已筛选出它的 39 个 skill"],
+  });
+  assert.match(
+    html,
+    /class="ss-toast__names">WeiboAP<\/span><span class="ss-toast__trail"><span class="ss-toast__sep">·<\/span><span>已筛选出它的 39 个 skill<\/span><\/span>/,
+  );
+  assert.doesNotMatch(html, /ss-toast__reason/);
+  assert.match(cssRule(uiCss, ".ss-toast__trail"), /gap:\s*var\(--space-xs\)/);
+  const src = read("src/ui/Toast.tsx");
+  assert.doesNotMatch(src, /tier/);
+  for (const page of ["src/pages/AddSourcePage.tsx", "src/pages/SettingsPage.tsx"]) {
+    assert.doesNotMatch(read(page), /tier=|reason="已建好|reason=\{rest/, page);
+  }
+});
+
+test("时长 token：行收起 --dur-collapse 200、刚加入闪 --dur-flash 900；CSS 与 JS 都从 token 取", () => {
+  const tokens = read("src/tokens.css");
+  assert.match(tokens, /--dur-collapse: 200ms;/);
+  assert.match(tokens, /--dur-flash: 900ms;/);
+  assert.match(tokens, /--dur-collapse: 0ms;/);
+  const css = read("src/SourceRow.css");
+  assert.match(css, /animation: srcline-leave var\(--dur-collapse\)/);
+  assert.match(css, /animation: srcline-flash var\(--dur-flash\)/);
+  assert.doesNotMatch(css, /\b(200|900)ms\b/);
+  const page = read("src/pages/SourcesPage.tsx");
+  assert.match(page, /motionMs\("--dur-collapse"\)/);
+  assert.doesNotMatch(page, /LEAVE_MS/);
+});

@@ -1,7 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api.ts";
-import { AddButton, Empty, PushedPage, useBusyShown, usePushedPage } from "../ui/index.ts";
+import {
+  AddButton,
+  Empty,
+  PushedPage,
+  motionMs,
+  useBusyShown,
+  usePushedPage,
+} from "../ui/index.ts";
 import { useMenuFlag, usePageCommand } from "../shell/menuBus.ts";
 import { SourceLine, ruleText, type SourcesState } from "../SourceRow.tsx";
 import {
@@ -35,9 +42,6 @@ import "./SourcesPage.css";
 ///   移除后这一行收起（200ms），其余的跟着平移，不跳位
 /// - 一个来源都没有：空态「CardBox 还没有来源」+ 猫（`+ 来源` 已在页面头，空态不重复）
 /// - 读屏：`role=region`、名同标题；返回键 `aria-label=返回`。Esc：浮层（捕获阶段）与移除确认先接，其次返回
-
-/// 刚移除的那一行收起的时长，与 SourceRow.css `srcline-leave` 同值
-const LEAVE_MS = 200;
 
 export interface SourcesPageProps {
   /// 位置页的 `useSources`：数据、规则、移除都在它那里
@@ -94,7 +98,11 @@ export function SourcesPage({
     if (gone.length === 0 || reducedMotion()) return;
     setGhosts((prev) => [...prev, ...gone]);
     ghostTimers.current.push(
-      setTimeout(() => setGhosts((prev) => prev.filter((g) => !gone.includes(g))), LEAVE_MS),
+      // 收起播完再撤：时长与 SourceRow.css `srcline-leave` 同取 `--dur-collapse`
+      setTimeout(
+        () => setGhosts((prev) => prev.filter((g) => !gone.includes(g))),
+        motionMs("--dur-collapse"),
+      ),
     );
   }, [sources.data]);
   useEffect(() => () => ghostTimers.current.forEach(clearTimeout), []);

@@ -26,9 +26,10 @@ export interface MenuProps {
   label?: string;
   /// 打开即把焦点放到第一项（键盘打开的浮层）
   autoFocus?: boolean;
-  /// layer（默认）：在浮层里，项左右内缩 4；panel：常驻在面板里（托盘），内缩 6、项占满面板宽
+  /// layer（默认）：在浮层里，项左右内缩 4；panel：常驻在面板里（托盘），内缩 6、占满面板宽
   context?: "layer" | "panel";
-  /// 菜单最宽多少（默认 320，副行在里面折行）：菜单类浮层随内容、不设定宽
+  /// 菜单最宽多少，副行在里面折行。浮层里默认 320（菜单类浮层随内容、不设定宽）；
+  /// 面板里默认不设上限（占满面板宽）
   maxWidth?: number;
   /// 可选的一句标题（`notion 有 3 份，写进哪一份？`）：13 `ink`，不是可点的项
   title?: ReactNode;
@@ -39,7 +40,7 @@ export function Menu({
   label,
   autoFocus = false,
   context = "layer",
-  maxWidth = 320,
+  maxWidth = context === "layer" ? 320 : undefined,
   title,
   children,
 }: MenuProps) {
@@ -89,7 +90,7 @@ export function Menu({
         role={role}
         aria-label={role ? label : undefined}
         aria-labelledby={role && !label && title ? titleId : undefined}
-        style={{ maxWidth }}
+        style={maxWidth === undefined ? undefined : { maxWidth }}
       >
         {title ? (
           <div className="ss-menulist__title" id={titleId}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { contextMenuHandler } from "./contextMenu.ts";
 import { useLeaveGuard } from "./shell/leaveGuard.ts";
 import type { ContextMenuItem } from "./contextMenu.ts";
@@ -493,6 +493,8 @@ export function GatewayForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasKey = provider?.hasKey ?? false;
+  // 看得见的标签与输入框关联：读屏读的就是这个字，点标签聚焦输入框
+  const fieldId = useId();
   const dirty = baseUrl.trim() !== (provider?.baseUrl ?? "") || apiKey !== "";
 
   useEffect(() => {
@@ -541,13 +543,14 @@ export function GatewayForm({
 
   return (
     <div className="gw-form">
-      {/* 标签是看的（12 ink-mute 定宽 44）；读屏名在输入框自己身上 */}
+      {/* 标签 12 ink-mute 定宽 44，与输入框关联（读屏名就是它，点它聚焦输入框） */}
       <div className="gw-form__field">
-        <span className="gw-form__label" aria-hidden="true">
+        <label className="gw-form__label" id={`${fieldId}-url-label`} htmlFor={`${fieldId}-url`}>
           地址
-        </span>
+        </label>
         <TextField
-          label="地址"
+          id={`${fieldId}-url`}
+          labelledBy={`${fieldId}-url-label`}
           value={baseUrl}
           autoFocus
           spellCheck={false}
@@ -556,11 +559,12 @@ export function GatewayForm({
         />
       </div>
       <div className="gw-form__field">
-        <span className="gw-form__label" aria-hidden="true">
+        <label className="gw-form__label" id={`${fieldId}-key-label`} htmlFor={`${fieldId}-key`}>
           密钥
-        </span>
+        </label>
         <TextField
-          label="密钥"
+          id={`${fieldId}-key`}
+          labelledBy={`${fieldId}-key-label`}
           type="password"
           value={apiKey}
           autoComplete="off"

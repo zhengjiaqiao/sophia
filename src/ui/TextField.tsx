@@ -8,12 +8,16 @@ import { IconClose, IconSearch } from "./icons.tsx";
 /// **搜索形态**（`search`）：放大镜 16 在框内左侧（词表里的 `IconSearch`，全应用只有这一枚），
 /// 框内右端空着时写熟练路径的快捷键提示（`⌘F`，12 tabular `ink-faint`，⑩ 看得见）、有字时换成 ✕ 清除
 /// （12 的 `IconClose`，命中 24）；框里按 Esc 先清空文字（清空了才让给页面的 Esc）。
-/// 快捷键本身（菜单「筛选」聚焦它）由页面接：组件只在 `inputRef` 上给出这个输入框
-export interface TextFieldProps {
+/// 快捷键本身（菜单「筛选」聚焦它）由页面接：组件只在 `inputRef` 上给出这个输入框。
+///
+/// **读屏名二选一**：框旁没有可见标签时给 `label`（`筛选`）；有可见标签时（网关表单的 `地址` `密钥`）
+/// 页面写 `<label id=… htmlFor=…>`，这里给同一个 `id` 与 `labelledBy`——读屏读的就是看得见的那个字，
+/// 点标签聚焦输入框
+interface TextFieldBase {
   value: string;
   onChange: (text: string) => void;
-  /// 读屏名，**必填**：框旁通常没有可见标签（`筛选` `地址`）
-  label: string;
+  /// 输入框的 id：页面的 `<label htmlFor>` 指向它（点标签聚焦）
+  id?: string;
   placeholder?: string;
   /// 搜索形态：放大镜、快捷键提示、清除
   search?: boolean;
@@ -31,10 +35,17 @@ export interface TextFieldProps {
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
 }
 
+/// 读屏名：没有可见标签给 `label`；有可见标签给它的 id（`labelledBy`）
+type TextFieldName = { label: string; labelledBy?: never } | { labelledBy: string; label?: never };
+
+export type TextFieldProps = TextFieldBase & TextFieldName;
+
 export function TextField({
   value,
   onChange,
+  id,
   label,
+  labelledBy,
   placeholder,
   search = false,
   shortcut,
@@ -57,11 +68,13 @@ export function TextField({
       {/* 不用 type="search"：WebKit 的搜索框会自己吃掉 Esc */}
       <input
         ref={ref}
+        id={id}
         className="ss-textfield__input"
         type={type}
         value={value}
         placeholder={placeholder}
-        aria-label={label}
+        aria-label={labelledBy ? undefined : label}
+        aria-labelledby={labelledBy}
         autoFocus={autoFocus}
         spellCheck={spellCheck}
         autoComplete={autoComplete}

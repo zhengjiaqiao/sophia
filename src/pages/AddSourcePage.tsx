@@ -66,11 +66,10 @@ export function AddedToast({ parts, onDismiss }: { parts: string[]; onDismiss: (
   const [what, ...rest] = parts;
   return (
     <Toast
-      tier="routine"
       kind="success"
       verb="已添加"
       names={what ? [what] : undefined}
-      reason={rest.length > 0 ? rest.join(" · ") : undefined}
+      trail={rest.length > 0 ? rest : undefined}
       onDismiss={onDismiss}
     />
   );

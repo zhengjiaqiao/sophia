@@ -165,7 +165,7 @@
 /* 刚移除的那一行：收起（高 40 → 0、淡出），下面的行跟着平移上来，不跳位 */
 .srcline.is-leaving {
   overflow: hidden;
-  animation: srcline-leave 200ms var(--ease-mech) forwards;
+  animation: srcline-leave var(--dur-collapse) var(--ease-mech) forwards;
 }
 
 @keyframes srcline-leave {
@@ -182,7 +182,7 @@
 
 /* 刚加进来的那一行：surface 行带闪一下 */
 .srcline.is-flash {
-  animation: srcline-flash 900ms var(--ease-mech);
+  animation: srcline-flash var(--dur-flash) var(--ease-mech);
 }
 
 @keyframes srcline-flash {

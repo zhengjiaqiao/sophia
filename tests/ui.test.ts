@@ -1400,10 +1400,10 @@ test("TruncTip：内容只是触发文字的完整值，文字真被截断才出
 // ===== 提示条 =====
 
 test("Toast notice：纸窗（paper + hairline 边），40px 记号栏 + 动词 + 图标 + 名字 + 默认键紧凑 + ×；不用墨", () => {
-  // 2026-09-25：提示条一律是纸，失败与成功靠句首记号与否定动词分（DESIGN「失败提示」）
+  // 2026-09-25：提示条一律是纸，失败与成功靠句首记号与否定动词分（DESIGN「失败提示」）。
+  // 哪一档只由 kind 定（成功单行、其余带记号栏），没有 tier 这第二个开关
   const html = render(Toast, {
-    tier: "notice",
-    kind: "success",
+    kind: "partial",
     verb: "写进",
     agents: [{ id: "claude-code", name: "Claude Code" }],
     names: ["excalidraw", "notion"],
@@ -1413,7 +1413,7 @@ test("Toast notice：纸窗（paper + hairline 边），40px 记号栏 + 动词 
   assert.match(html, /class="ss-toast ss-toast--notice"/);
   assert.match(
     html,
-    /class="ss-toast__indicator" title="成功" role="img" aria-label="成功"><svg class="ss-tick"/,
+    /class="ss-toast__indicator" title="部分失败" role="img" aria-label="部分失败"><svg/,
   );
   assert.match(html, /class="ss-toast__verb">写进</);
   assert.match(html, /role="img" aria-label="Claude Code"/);
@@ -1479,10 +1479,9 @@ test("Toast 部分失败：! + 2 ✓ · 1 ⊘ 读数 + 查看，停 8 秒", () =
   assert.equal(TOAST_DWELL_MS.partial, 8000);
 });
 
-test("Toast 展开态：删原件的后果与路径放在副行之下", () => {
+test("Toast 展开态：后果与路径放在副行之下（只给带记号栏的那一档）", () => {
   const html = render(Toast, {
-    tier: "notice",
-    kind: "success",
+    kind: "partial",
     verb: "删到废纸篓",
     names: ["docx"],
     detail: "示意图",

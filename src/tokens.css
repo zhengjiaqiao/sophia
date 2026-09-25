@@ -135,6 +135,8 @@
   --dur-slide-knob: 200ms; /* 开关滑块位移：点击与拖动松手后的停靠 */
   --dur-drawer: 260ms; /* 抽屉：高度 0 ↔ auto（--ease-mech）；拉手箭头翻转（--spring-slide） */
   --dur-push: 200ms; /* 机面里推入一页、返回滑回（PushedPage，--ease-mech） */
+  --dur-collapse: 200ms; /* 刚移除的一行收起（高 → 0、淡出），下面的行跟着平移（--ease-mech） */
+  --dur-flash: 900ms; /* 刚加进来的一行 surface 行带闪一下（--ease-mech） */
   /* 阻尼比 0.8、响应 0.25s 的弹簧阶跃响应，0.32s 窗口取 24 点：过冲 1.5%、末端残差 < 0.2%（停稳不弹）。
      同一条曲线按不同时长播放：越重越慢 */
   /* prettier-ignore */
@@ -190,6 +192,8 @@
     --dur-slide-knob: 0ms;
     --dur-drawer: 0ms;
     --dur-push: 0ms;
+    --dur-collapse: 0ms;
+    --dur-flash: 0ms;
     --press-transform: none;
   }
 }

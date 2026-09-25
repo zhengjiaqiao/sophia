@@ -13,11 +13,13 @@ import { motionMs } from "./motion.ts";
 ///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是默认键紧凑 24；句首 ✓ 是勾选框里同一枚对勾 `IconTick`）
 /// - `notice` 做不成 / 部分失败：同一种纸窗，左侧 40px 记号栏放 ✓ / ⊘ / !；动作是默认键紧凑。
 ///   墨色浮窗只给提示框（2026-09-25 起）：失败与成功靠句首记号与否定动词分，不靠颜色。
-///   不给 `tier` 时按 `kind` 取（成功单行纸窗、其余带记号栏）
+///   哪一档由 `kind` 定（成功单行纸窗、其余带记号栏），没有第二个开关
 ///
 /// 文字一律 13（`caption`）：动词 600、名字 400、数字 12 tabular——比表格正文 15 低一档，
 /// 反馈永远不比它说的内容更重（②）。主行 = **动词 + agent 图标 + 名字**；动词与触发它的动作一致，
 /// 失败态动词带否定（`没开启`）。单格失败原因本身是一整句时给 `message`，不拆动词。
+/// 名字后要接几段读数（`已添加 WeiboAP · 39 个 skill`、`不在列表里显示了 · 已建好的链接原样留着`）给 `trail`，
+/// 各段前一个 ` · `；`reason` 只给做不成 / 部分失败的原因，成功档不借它
 ///
 /// **停留**（⑨）：成功无动作约 4 秒，带 `撤销` 约 6 秒，做不成 / 部分失败 8 秒；
 /// 悬停与键盘焦点在里面时停表，移开后重新计满；到点末尾 120ms 同一个淡出。
@@ -59,9 +61,7 @@ export interface ToastAction {
 }
 
 export interface ToastProps {
-  /// 不给按 kind 取：成功 routine（单行纸窗），其余 notice（带记号栏的纸窗）
-  tier?: "notice" | "routine";
-  /// routine 只有 success
+  /// 成功是单行纸窗；做不成、部分失败带左侧记号栏
   kind: ToastKind;
   /// `写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`。
   /// 只有给了整句 `message` 时才可以不给
@@ -80,6 +80,9 @@ export interface ToastProps {
   reading?: ReactNode;
   /// 部分失败的读数：成功几个、没成几个
   tally?: { done: number; failed: number };
+  /// 名字之后 ` · ` 隔开的几段读数（`39 个 skill`）或补一句（`已建好的链接原样留着`）：成功档用，
+  /// 各段前一个 ` · `（ink-faint）
+  trail?: string[];
   /// 做不成 / 部分失败的一句能行动的原因，接在主行 ` · ` 后
   reason?: string;
   /// 副行：等宽 12 读数（路径、条数，`ink-faint`），可拖选
@@ -98,8 +101,8 @@ export interface ToastProps {
   onClose?: () => void;
 }
 
-const INDICATOR: Record<ToastKind, { title: string; glyph: ReactNode }> = {
-  success: { title: "成功", glyph: <IconTick /> },
+/// 记号栏：只有做不成与部分失败有（成功是单行纸窗，句首 ✓）
+const INDICATOR: Record<Exclude<ToastKind, "success">, { title: string; glyph: ReactNode }> = {
   cannot: { title: "做不成", glyph: <IconCannot /> },
   partial: { title: "部分失败", glyph: <IconAttention /> },
 };
@@ -180,7 +183,6 @@ function ActionKeys({ action, secondary }: Pick<ToastProps, "action" | "secondar
 function ResultToast(props: ToastProps) {
   const {
     kind,
-    tier = kind === "success" ? "routine" : "notice",
     verb,
     message,
     verbTail,
@@ -189,6 +191,7 @@ function ResultToast(props: ToastProps) {
     names,
     reading,
     tally,
+    trail,
     reason,
     stats,
     detail,
@@ -249,6 +252,12 @@ function ResultToast(props: ToastProps) {
       {names && names.length ? <Names names={names} /> : null}
       {reading ? <span className="ss-toast__reading">{reading}</span> : null}
       {tally ? <Tally {...tally} /> : null}
+      {trail?.map((part, i) => (
+        <span key={i} className="ss-toast__trail">
+          <span className="ss-toast__sep">·</span>
+          <span>{part}</span>
+        </span>
+      ))}
       {reason ? (
         <>
           <span className="ss-toast__sep">·</span>
@@ -258,7 +267,7 @@ function ResultToast(props: ToastProps) {
     </>
   );
 
-  if (tier === "routine") {
+  if (kind === "success") {
     return (
       <div
         className={`ss-toast ss-toast--routine${leavingClass}`}
@@ -277,11 +286,12 @@ function ResultToast(props: ToastProps) {
   }
 
   const indicator = INDICATOR[kind];
+  // 走到这里的都是做不成 / 部分失败
   return (
     <div
       className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}${leavingClass}`}
       data-kind={kind}
-      role={kind === "success" ? "status" : "alert"}
+      role="alert"
       {...holdHandlers}
     >
       <div

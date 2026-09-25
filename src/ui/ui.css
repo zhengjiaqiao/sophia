@@ -1083,6 +1083,14 @@ textarea,
   gap: var(--space-xs);
 }
 
+/* 名字之后的几段（Toast trail）：每段前一个 ` · `，点与段同主行的 8 间距，一段不折开 */
+.ss-toast__trail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  white-space: nowrap;
+}
+
 /* 数字：12 tabular（Barlow 的等宽数字，不换等宽字族） */
 .ss-toast__more,
 .ss-toast__num {
@@ -1198,7 +1206,7 @@ textarea,
   margin-left: var(--space-xs);
 }
 
-/* 节：满这一节的宽，主句占满中间、放不下折行，键被推到右端控件列 */
+/* 节：占满所在容器的宽（块级 flex；放在纵向 flex 里也拉满），主句占满中间、放不下折行，键被推到右端控件列 */
 .ss-noticepanel--section {
   display: flex;
   align-self: stretch;

@@ -216,15 +216,21 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默
     onDirtyChange: noop,
     ask: null,
   });
-  // 输入框是组件库的 TextField（凹面、聚焦只转边色）；可见标签 12 ink-mute 定宽 44，读屏名在输入框上
-  assert.match(
-    html,
-    /gw-form__label" aria-hidden="true">地址<[^]*class="ss-textfield"[^]*placeholder="https:\/\/example.com\/openai\/v1" aria-label="地址"/,
+  // 输入框是组件库的 TextField（凹面、聚焦只转边色）；可见标签 12 ink-mute 定宽 44，与输入框关联：
+  // 读屏名就是看得见的那个字（aria-labelledby），点标签聚焦输入框（htmlFor → id）
+  const url = html.match(
+    /<label class="gw-form__label" id="([^"]+)" for="([^"]+)">地址<\/label>[^]*?<input id="([^"]+)" class="ss-textfield__input" type="text" placeholder="https:\/\/example.com\/openai\/v1" aria-labelledby="([^"]+)"/,
   );
-  assert.match(
-    html,
-    /gw-form__label" aria-hidden="true">密钥<[^]*type="password"[^]*placeholder="粘贴密钥，存进钥匙串" aria-label="密钥"/,
+  assert.ok(url, "地址标签与输入框没有关联上");
+  assert.equal(url[2], url[3]);
+  assert.equal(url[1], url[4]);
+  const key = html.match(
+    /<label class="gw-form__label" id="([^"]+)" for="([^"]+)">密钥<\/label>[^]*?<input id="([^"]+)" class="ss-textfield__input" type="password" placeholder="粘贴密钥，存进钥匙串" aria-labelledby="([^"]+)"/,
   );
+  assert.ok(key, "密钥标签与输入框没有关联上");
+  assert.equal(key[2], key[3]);
+  assert.equal(key[1], key[4]);
+  assert.doesNotMatch(html, /aria-label="地址"|aria-label="密钥"/);
   assert.match(html, /title="先填地址" disabled=""/);
   assert.match(html, /class="ss-btn ss-btn--primary ss-btn--compact"[^>]*>保存</);
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>取消</);

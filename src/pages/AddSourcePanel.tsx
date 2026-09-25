@@ -427,7 +427,6 @@ export function AddSourcePanel({ model, domain, onChanged, onDone, frame }: AddS
             {pickNotice ? (
               <FloatingToast key={pickNotice.key} align="start">
                 <Toast
-                  tier="notice"
                   kind="cannot"
                   verb="没加进来"
                   names={[pickNotice.name]}
@@ -451,12 +450,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone, frame }: AddS
       {failure ? (
         // 没加上：浮在触发它的主动作那一行（右对齐、放不下就翻到上方），8 秒，悬停停表
         <FloatingToast key={failure.key} align="end">
-          <Toast
-            tier="notice"
-            {...failure.toast}
-            onDismiss={dismissFailure}
-            onClose={dismissFailure}
-          />
+          <Toast {...failure.toast} onDismiss={dismissFailure} onClose={dismissFailure} />
         </FloatingToast>
       ) : null}
       {adding ? (

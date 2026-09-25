@@ -3,6 +3,7 @@
 import { api } from "../api";
 import type { AutoRun, McpLocation, McpReport, McpService, SyncReport, Target } from "../types";
 import type { ToastProps } from "../ui";
+import type { ToastTier } from "../toastText";
 import {
   NO_SKILL_CANDIDATES,
   addSourceTitle,
@@ -30,8 +31,10 @@ import {
   type DomainRef,
 } from "./sourcesView.ts";
 
-/// 提示条的内容；到点消失与关闭由页面补上
-export type ToastText = Pick<ToastProps, "tier" | "kind" | "verb" | "names" | "reason" | "tally">;
+/// 提示条的内容；到点消失与关闭由页面补上。`tier` 是页面自己的（notice 档才给 ×），Toast 只看 kind
+export type ToastText = Pick<ToastProps, "kind" | "verb" | "names" | "reason" | "tally"> & {
+  tier: ToastTier;
+};
 
 /// 列表里的一行
 /// MCP 的 `同名`：同名的服务在主视图合成一行（不像 skill 各成一行），两份不一样时行上标 `2 份不一样`
