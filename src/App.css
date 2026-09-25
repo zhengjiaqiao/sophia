@@ -132,13 +132,14 @@ input:focus-visible {
   pointer-events: none;
 }
 
-/* agent 段、项目段：可滚动的中段；设置贴底 */
+/* agent 段、项目段：可滚动的中段；设置贴底。
+   不留下内边距：sticky 的 bottom: 0 量到内边距里面，`+ 项目` 吸底时下面那一条会露出滚过去的项目。
+   列表与 `设置` 之间的 8 挪到 .sidebar__foot 的上内边距 */
 .sidebar__nav {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-bottom: var(--space-xs);
 }
 
 /* 区块小标：label Condensed 12 / 600 ink-mute；拉丁结构词经 Cap 大写 + 0.96px（`AGENT`），
@@ -390,7 +391,7 @@ input:focus-visible {
 /* 设置：贴侧栏底，底距 10 */
 .sidebar__foot {
   flex-shrink: 0;
-  padding: var(--space-xs) 0 10px;
+  padding: var(--space-md) 0 10px;
 }
 
 /* ---- 机面 ---- */
