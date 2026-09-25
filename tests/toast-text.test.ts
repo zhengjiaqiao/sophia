@@ -165,7 +165,7 @@ test("拆开成功：例行一行 `拆开 [Codex] 的 skills 文件夹`，走 ro
 
 // ---- 删除原件（DESIGN「删除原件」，2026-09-25） ----
 
-test("删除 skill 原件的确认框：标题一问，正文只说后果（谁不能再用、链接怎么办、可以撤销），不写路径", async () => {
+test("删除 skill 原件的确认框：标题一问，正文只说后果（谁不能再用、链接怎么办），不写路径、不写可以撤销", async () => {
   const { deleteOriginalConfirm } = await import("../src/toastText.ts");
   const { setHome } = await import("../src/pathText.ts");
   setHome("/Users/jia");
@@ -173,21 +173,18 @@ test("删除 skill 原件的确认框：标题一问，正文只说后果（谁�
   // 别处没有同名原件：谁不能再用它、链接一并删除、能找回什么
   const gone = deleteOriginalConfirm({ ...base, links: 2, linkAgents: ["Claude Code"] });
   assert.equal(gone.title, "删除 graduate？");
-  assert.equal(
-    gone.body,
-    "删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除。可以撤销",
-  );
+  assert.equal(gone.body, "删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除");
   assert.equal("paths" in gone, false);
   // 别处有同名原件：有链接的 agent 改用那一份，直接读原件目录的 agent 不能再用
   assert.equal(
     deleteOriginalConfirm({ ...base, links: 2, linkAgents: ["Claude Code"], relinkTo: "通用仓库" })
       .body,
-    "删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它。可以撤销",
+    "删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它",
   );
   // 没有链接：只说谁不能再用
   assert.equal(
     deleteOriginalConfirm({ ...base, links: 0, linkAgents: [] }).body,
-    "删除后 Codex 不能再用它。可以撤销",
+    "删除后 Codex 不能再用它",
   );
   setHome(null);
 });
@@ -223,8 +220,8 @@ test("撤销删原件：全回来 ✓ 已恢复；链接没回来是部分失败
   assert.equal(no.reason, "原处已经有同名的东西，没有放回");
 });
 
-/// DESIGN「删除原件」MCP：点任何一格 ⦿ 都先确认，正文说后果（不能再用 + 别处怎样 + 可以撤销）
-test("点 ⦿ 的确认框：说后果——别的 agent 里有同名的不受影响、没有就说这个位置里就没有它了；不写配置路径", async () => {
+/// DESIGN「删除原件」MCP：点任何一格 ⦿ 都先确认，正文说后果（不能再用 + 别处怎样 / 会从列表里移除）
+test("点 ⦿ 的确认框：说后果——别的 agent 里有同名的不受影响、没有就说会从列表里移除；不写配置路径、不写可以撤销", async () => {
   const { deleteMcpOriginalConfirm, deletedMcpOriginalToast } = await import("../src/toastText.ts");
   const { setHome } = await import("../src/pathText.ts");
   setHome("/Users/jia");
@@ -234,7 +231,7 @@ test("点 ⦿ 的确认框：说后果——别的 agent 里有同名的不受�
     others: ["Claude Code"],
   });
   assert.equal(codexDel.title, "从 Codex 删除 weibo-search？");
-  assert.equal(codexDel.body, "删除后 Codex 不能再用它；Claude Code 里的那份不受影响。可以撤销");
+  assert.equal(codexDel.body, "删除后 Codex 不能再用它；Claude Code 里的那份不受影响");
   assert.equal("paths" in codexDel, false);
   const local = deleteMcpOriginalConfirm({
     agent: "Claude Code local",
@@ -242,7 +239,7 @@ test("点 ⦿ 的确认框：说后果——别的 agent 里有同名的不受�
     others: [],
   });
   assert.equal(local.title, "从 Claude Code local 删除 weibo-search？");
-  assert.equal(local.body, "删除后 Claude Code local 不能再用它；这个位置里就没有它了。可以撤销");
+  assert.equal(local.body, "删除后 Claude Code local 不能再用它，这个 MCP 也会从列表里移除");
   setHome(null);
   // 删完：`✓ 已从 [Codex] 删除 weibo-search`（撤销由调用方给，一律给）
   const t = deletedMcpOriginalToast("weibo-search", codex);
@@ -263,11 +260,12 @@ test("选择行批量删除的确认框：标题 `从 Codex 删除 3 个 MCP？`
     agents: ["Codex"],
     names: ["weibo-search", "notion", "fmt"],
     others: ["Claude Code"],
+    leaving: 1,
   });
   assert.equal(some.title, "从 Codex 删除 3 个 MCP？");
   assert.equal(
     some.body,
-    "weibo-search、notion、fmt。删除后 Codex 不能再用它们；Claude Code 里的同名定义不受影响。可以撤销",
+    "weibo-search、notion、fmt。删除后 Codex 不能再用它们；其中 1 个会从列表里移除；Claude Code 里的同名定义不受影响",
   );
   assert.equal("paths" in some, false);
   // 「所有位置」：几个 agent 一起写；别处都没有了
@@ -275,11 +273,12 @@ test("选择行批量删除的确认框：标题 `从 Codex 删除 3 个 MCP？`
     agents: ["Codex", "Claude Code local"],
     names: ["notion", "fmt"],
     others: [],
+    leaving: 2,
   });
   assert.equal(all.title, "从 Codex、Claude Code local 删除 2 个 MCP？");
   assert.equal(
     all.body,
-    "notion、fmt。删除后 Codex、Claude Code local 不能再用它们；这个位置里就没有它们了。可以撤销",
+    "notion、fmt。删除后 Codex、Claude Code local 不能再用它们，这些 MCP 也会从列表里移除",
   );
   setHome(null);
   // 名字太多：列前 12 个，其余写 `等 N 个`（标题已有总数）

@@ -869,6 +869,7 @@ export default function McpTab({
         agents: [...new Set(targets.map((t) => heads.get(t.id) ?? t.label))],
         names,
         others: othersHolding(p, names, except),
+        leaving: names.filter((name) => othersHolding(p, [name], except).length === 0).length,
       }),
       undoable: false,
     };

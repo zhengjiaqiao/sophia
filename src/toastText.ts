@@ -211,8 +211,9 @@ export function keepThisConfirm(input: {
 
 /// 删除 skill 原件的确认框（DESIGN「删除原件」）：说后果，不说机制——删了之后哪些 agent 用不了它、
 /// 链接怎么处理、能不能找回。
-/// - 别处没有同名原件：`删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除。可以撤销`
-/// - 别处有：`删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它。可以撤销`
+/// - 别处没有同名原件：`删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除`
+/// - 别处有：`删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它`
+/// 不写「可以撤销」（产品负责人：「可以撤销可以去掉」——删完的提示条上有 `撤销`，这里不预告）
 /// `ownAgents` 是直接读原件所在目录的 agent（这一行里画 ⦿ 的列）；`linkAgents` 是有链接指向它的 agent。
 /// 不写路径行：删的是哪一份，点的那一行已经说了（产品负责人：「这个不需要提示吧」）
 export function deleteOriginalConfirm(input: {
@@ -239,7 +240,6 @@ export function deleteOriginalConfirm(input: {
     const head = all.length > 0 ? `删除后 ${lose(all)}` : "";
     sentences.push(input.links > 0 ? `${head}：指向它的 ${input.links} 条软链接一并删除` : head);
   }
-  sentences.push("可以撤销");
   return {
     title: `删除 ${input.skill}？`,
     body: sentences.filter((x) => x !== "").join("。"),
@@ -288,8 +288,8 @@ export function restoredOriginalToast(
 
 /// 点 ⦿ 的确认框（DESIGN「删除原件」MCP；MCP 格子不分原件副本，点哪一格 ⦿ 都是它）：
 /// 标题 `从 Codex 删除 weibo-search？`；正文说后果 `删除后 Codex 不能再用它`，这个位置别的 agent 里
-/// 还有同名定义时接 `；Claude Code 里的那份不受影响`，没有时接 `；这个位置里就没有它了`，再接 `。可以撤销`。
-/// 不写配置文件路径：说后果，不说机制
+/// 还有同名定义时接 `；Claude Code 里的那份不受影响`，没有时接 `，这个 MCP 也会从列表里移除`
+/// （产品负责人：「这个位置里就没有它了，应该是这个 mcp 会从列表里移除」）。不写路径、不写「可以撤销」
 export function deleteMcpOriginalConfirm(input: {
   agent: string;
   name: string;
@@ -298,11 +298,11 @@ export function deleteMcpOriginalConfirm(input: {
 }): { title: string; body: string } {
   const after =
     input.others.length > 0
-      ? `${input.others.join("、")} 里的那份不受影响`
-      : "这个位置里就没有它了";
+      ? `；${input.others.join("、")} 里的那份不受影响`
+      : "，这个 MCP 也会从列表里移除";
   return {
     title: `从 ${input.agent} 删除 ${input.name}？`,
-    body: `删除后 ${input.agent} 不能再用它；${after}。可以撤销`,
+    body: `删除后 ${input.agent} 不能再用它${after}`,
   };
 }
 
@@ -311,8 +311,8 @@ const BATCH_NAMES = 12;
 
 /// 选择行全有（⦿）时按下的确认框（DESIGN「表格」MCP 条「选择行」）：确认一次删一批。
 /// 标题 `从 Codex 删除 3 个 MCP？`；正文先列名字，再说后果（同单格：`删除后 Codex 不能再用它们`，
-/// 这个位置别的 agent 里还有其中哪个的同名定义时接 `；Claude Code 里的同名定义不受影响`，
-/// 都没有时接 `；这个位置里就没有它们了`，再接 `。可以撤销`）；路径行每个配置文件一行
+/// 这个位置别的 agent 里还有其中哪个的同名定义时接 `；Claude Code 里的同名定义不受影响`；
+/// 会删到最后一份的：全部是 `，这些 MCP 也会从列表里移除`，一部分是 `；其中 2 个会从列表里移除`）
 export function deleteMcpBatchConfirm(input: {
   /// 要从哪几个 agent 删（去重、保序；按「所有位置」时不止一个）
   agents: string[];
@@ -320,18 +320,23 @@ export function deleteMcpBatchConfirm(input: {
   names: string[];
   /// 这个位置里还留着其中某个同名定义的别的 agent（去重、保序）
   others: string[];
+  /// 其中删完就会从列表里移除（这个位置里没有别的同名定义）的个数
+  leaving: number;
 }): { title: string; body: string } {
   const agents = input.agents.join("、");
   const shown =
     input.names.slice(0, BATCH_NAMES).join("、") +
     (input.names.length > BATCH_NAMES ? ` 等 ${input.names.length} 个` : "");
-  const after =
-    input.others.length > 0
-      ? `${input.others.join("、")} 里的同名定义不受影响`
-      : "这个位置里就没有它们了";
+  const kept = input.others.length > 0 ? `；${input.others.join("、")} 里的同名定义不受影响` : "";
+  const leaving =
+    input.leaving === 0
+      ? ""
+      : input.leaving >= input.names.length
+        ? "，这些 MCP 也会从列表里移除"
+        : `；其中 ${input.leaving} 个会从列表里移除`;
   return {
     title: `从 ${agents} 删除 ${input.names.length} 个 MCP？`,
-    body: `${shown}。删除后 ${agents} 不能再用它们；${after}。可以撤销`,
+    body: `${shown}。删除后 ${agents} 不能再用它们${leaving}${kept}`,
   };
 }
 
