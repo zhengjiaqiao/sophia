@@ -508,7 +508,7 @@ const slotProps = (overrides: Partial<GatewayState> = {}) => ({
   onRestart: noop,
 });
 
-test("SectionSwitch：标准开关（旁边不点指示点，开着由刻线说）；开关＝配置里开没开；关着时提示框写打开的结果", () => {
+test("SectionSwitch：标准开关（旁边不点指示点，开着由刻线说）；开关＝配置里开没开；关着时提示框写打开的结果与改的是哪个文件", () => {
   const on = render(SectionSwitch, switchProps(withSelected({ enabled: true })));
   assert.match(
     on,
@@ -517,7 +517,10 @@ test("SectionSwitch：标准开关（旁边不点指示点，开着由刻线说�
   assert.doesNotMatch(on, /ss-indicator/);
   const off = render(SectionSwitch, switchProps(withSelected()));
   assert.match(off, /role="switch" aria-checked="false"/);
-  assert.match(off, /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里</);
+  assert.match(
+    off,
+    /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里；会在 ~\/\.codex\/config\.toml 里加两行</,
+  );
 });
 
 test("SectionSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去的那一侧、亮橙；没有待定位置、没有拨开关的确认", () => {
@@ -530,7 +533,10 @@ test("SectionSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去
     on,
     /role="switch" aria-checked="true"[^>]*class="ss-switch ss-switch--regular is-on"/,
   );
-  assert.match(on, /role="tooltip"[^>]*>关掉后，Codex 只保留官方模型</);
+  assert.match(
+    on,
+    /role="tooltip"[^>]*>关掉后，Codex 只保留官方模型；从 ~\/\.codex\/config\.toml 里删掉那两行</,
+  );
   const off = render(SectionSwitch, {
     ...switchProps(withSelected({ enabled: true })),
     busy: true,

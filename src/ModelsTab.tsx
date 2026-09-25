@@ -229,9 +229,10 @@ export function SectionSwitch({ tool, state, busy, phase, onToggle }: SectionSwi
         >
           <Tooltip
             content={
+              // 结果在前；改的是哪个文件写在后面（新手提示只说结果，路径挪到这里）
               on
-                ? `关掉后，${tool.name} 只保留官方模型`
-                : `打开后，选好的模型会出现在 ${tool.name} 的模型列表里`
+                ? `关掉后，${tool.name} 只保留官方模型；从 ${tool.configPath} 里删掉那两行`
+                : `打开后，选好的模型会出现在 ${tool.name} 的模型列表里；会在 ${tool.configPath} 里加两行`
             }
             placement="bottom"
           >

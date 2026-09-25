@@ -15,11 +15,15 @@ export interface ModelsTool {
   /// 用这个工具的第三方模型要知道的事（全文，不截断）。只在挑模型时有用：网关行展开区的第一行
   /// （DESIGN「agent 页 › 点整行展开＝从这家挑模型」）
   limitations: string;
+  /// 开关改的那个配置文件（短路径 `~/…`）：开关的提示框里说（新手提示只说结果，机制留给悬停，
+  /// DESIGN 2026-09-25 评审第二轮）
+  configPath: string;
 }
 
 export const CODEX: ModelsTool = {
   id: "codex",
   name: "Codex",
+  configPath: "~/.codex/config.toml",
   limitations:
     "只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了",
 };

@@ -72,19 +72,23 @@ test("登记表三条，句子（用 DESIGN 表头的例子数据）与 DESIGN �
   }
 });
 
-test("句子只说不确定的事：扫描说读了哪些目录、找到几个、没有改动文件；不复述界面、不写小标", () => {
+test("句子一行、只说结果：扫描说读了哪些目录、找到几个、没有改动文件；不复述界面、不讲机制、不写小标", () => {
   const scan = HINTS["first-scan-skills"](EXAMPLE);
-  assert.match(
+  assert.equal(
     scan,
-    /^读了 Claude Code、Codex、OpenCode 的 skill 目录，找到 31 个 skill，没有改动任何文件。/,
+    "读了 Claude Code、Codex、OpenCode 的 skill 目录，找到 31 个 skill，没有改动任何文件。",
   );
-  assert.match(scan, /链接[^]*原件不动/);
-  assert.doesNotMatch(scan, /一行一个|一列一个|第一次用/);
+  assert.doesNotMatch(scan, /一行一个|一列一个|第一次用|链接|原件/);
   assert.equal(
     HINTS["first-scan-empty"]({ agents: [], skills: 0 }),
     "读了本机的 skill 目录，没有找到 skill，没有改动任何文件。",
   );
-  assert.match(HINTS["first-codex"](EXAMPLE), /config\.toml[^]*关掉就原样删掉[^]*重启 Codex/);
+  // Codex：只说结果；配置文件路径挪到开关的提示框（models-view 测试）
+  assert.equal(
+    HINTS["first-codex"](EXAMPLE),
+    "打开后会在 Codex 的配置里加两行，关掉就原样删掉；改了要重启 Codex 才生效。",
+  );
+  assert.doesNotMatch(HINTS["first-codex"](EXAMPLE), /config\.toml|Sophia/);
 });
 
 test("登记表顺序：首次扫描两条在前，Codex 页在后", () => {

@@ -35,14 +35,14 @@ const readWhat = (agents: readonly string[]) =>
 
 /// 今天的三条（DESIGN「今天有三条」）。句子只说用户此刻不确定的事——刚才做了什么、动没动我的文件、
 /// 点下去会发生什么——不复述界面上看得见的东西（⑧ 文字提供确定性；2026-09-25 产品负责人真机：
-/// 「不应该写显而易见的事情，应该提示的是让用户感到不确定的东西」）。以后加新的，同一个组件、同一套规则，
+/// 「不应该写显而易见的事情，应该提示的是让用户感到不确定的东西」）。**一行、只说结果**（2026-09-25 评审
+/// 第二轮）：机制（配置文件路径）留给需要据此判断的人去悬停看。以后加新的，同一个组件、同一套规则，
 /// 并在 DESIGN 的表里登记
 export const HINTS: Record<HintId, (ctx: HintContext) => string> = {
   "first-scan-skills": ({ agents, skills }) =>
-    `读了${readWhat(agents)}，找到 ${skills} 个 skill，没有改动任何文件。点格子加上的是指向原件的链接，再点一下就拿掉，原件不动。`,
+    `读了${readWhat(agents)}，找到 ${skills} 个 skill，没有改动任何文件。`,
   "first-scan-empty": ({ agents }) => `读了${readWhat(agents)}，没有找到 skill，没有改动任何文件。`,
-  "first-codex": () =>
-    "打开后，Sophia 在 ~/.codex/config.toml 里加两行设置，请求经本机转给你在网关里选的模型；关掉就原样删掉。改了之后要重启 Codex 才生效。",
+  "first-codex": () => "打开后会在 Codex 的配置里加两行，关掉就原样删掉；改了要重启 Codex 才生效。",
 };
 
 /// 首次扫描那两条互斥：关掉其中一条，两条都记看过
