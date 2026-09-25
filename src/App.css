@@ -67,7 +67,8 @@ input:focus-visible {
   left: 0;
   right: 0;
   height: 10px;
-  z-index: 1;
+  /* 只需压在同层的侧栏之上 */
+  z-index: var(--z-fade);
 }
 
 /* ---- 侧栏 ---- */
@@ -142,42 +143,29 @@ input:focus-visible {
   overflow-x: hidden;
 }
 
-/* 区块小标：label Condensed 12 / 600 ink-mute；拉丁结构词经 Cap 大写 + 0.96px（`AGENT`），
-   汉字（`项目`）字距 0、不变换；行高 26、左右 20、上距 14 */
+/* 区块小标（ui 的 SectionLabel，字与 Condensed 12 / 600 ink-mute 同源）在侧栏里的摆法：
+   行高 26、左右 20、上距 14，字与右端的排序下拉在这一行里上下居中 */
 .sidebar__head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-xs);
+  flex-direction: column;
+  justify-content: center;
   height: 26px;
   margin-top: 14px;
   padding: 0 20px;
 }
 
-.sidebar__label {
-  font-family: var(--font-cond);
-  font-size: var(--size-label);
-  font-weight: 600;
-  line-height: var(--leading-label);
-  color: var(--ink-mute);
-}
-
-/* 排序下拉：12 ink-mute 纯文字，悬停转 ink；浮层锚在它右下 */
-.sidebar__sort {
-  position: relative;
-  display: inline-flex;
-}
-
+/* 排序下拉的触发：12 ink-mute 纯文字，悬停转 ink；菜单是 ui 的 Menu（放在 FloatingLayer 里） */
 .sidebar__sort-button {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xxs);
   padding: 0;
   border: 0;
   background: none;
   color: var(--ink-mute);
   font-family: var(--font-ui);
   font-size: var(--size-label);
+  font-weight: 400;
   line-height: var(--leading-label);
   white-space: nowrap;
 }
@@ -194,52 +182,6 @@ input:focus-visible {
 
 .sidebar__sort-button[aria-expanded="true"] .sidebar__sort-chevron {
   transform: rotate(180deg);
-}
-
-/* 两项的小浮层：纸浮层（paper + hairline 边 + float 12 + 浮层投影）。宽随内容、不设最小宽——
-   四个字的项配 120 最小宽，右边空出一大块（2026-09-25 真机走查）；对勾在左（macOS 菜单惯例） */
-.sidebar__sort-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  padding: var(--space-xxs);
-  border-radius: var(--radius-float);
-  border: var(--border-float);
-  background: var(--paper);
-  box-shadow: var(--elev-float);
-}
-
-.sidebar__sort-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xxs);
-  height: 28px;
-  /* 左右留白对称：左边 8 + 对勾格里 3 的空 ≈ 右边 12，字两侧看起来一样宽 */
-  padding: 0 12px 0 var(--space-xs);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-label);
-  text-align: left;
-  white-space: nowrap;
-}
-
-.sidebar__sort-item:hover {
-  background: var(--surface);
-}
-
-/* ✓ 占固定一格：没打勾的那项文字照样对齐 */
-.sidebar__sort-check {
-  display: inline-flex;
-  justify-content: center;
-  width: 16px;
-  flex-shrink: 0;
 }
 
 /* 项：高 34，左右外距 10、内距 10（文字左沿 20，与区块小标对齐），图标与字间距 8；15 ink-mute。
@@ -344,7 +286,7 @@ input:focus-visible {
 .sidebar__add {
   position: sticky;
   bottom: 0;
-  z-index: 1;
+  z-index: var(--z-fade);
   background: var(--shell);
 }
 
@@ -376,12 +318,12 @@ input:focus-visible {
 }
 
 /* 滚动区上沿：往下滚过之后画 16 渐隐（shell → 透明），滚过去的项目不在字标带下面硬切。
-   吸在滚动区顶上、不占位（负外距抵掉自身高度） */
+   量归 ui 的 useEdgeFades，画归壳（侧栏底色是 shell）。吸在滚动区顶上、不占位（负外距抵掉自身高度） */
 .sidebar__nav[data-fade-top]::before {
   content: "";
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-fade);
   display: block;
   height: var(--fade-edge);
   margin-bottom: calc(-1 * var(--fade-edge));
@@ -426,16 +368,7 @@ input:focus-visible {
   padding-top: 15px;
 }
 
-/* 页面头：高 34，上距 16（含机面 1px 边）；左主控件或页面名，右这一页的动作。空白处可拖窗 */
-.page-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  box-sizing: border-box;
-  height: 34px;
-  margin-top: 15px;
-}
-
+/* 页面头（ui 的 PageHead，上距 15＝机面顶上 16 含 1px 边）在应用级故障下面时上距 16 */
 .face__banner + .page-head {
   margin-top: var(--space-md);
 }
@@ -446,29 +379,13 @@ input:focus-visible {
 .page-head--location {
   position: sticky;
   top: 0;
-  z-index: 7;
+  /* 低过机面里推入的一页（token 梯子：吸顶页面头 7 < 推入页 8） */
+  z-index: calc(var(--z-pushed) - 1);
   max-width: 776px;
   height: 49px;
   margin-top: 0;
   padding-top: 15px;
   background: var(--face);
-}
-
-.page-head__lead {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.page-head__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  margin-left: auto;
-}
-
-.page-head__actions:empty {
-  display: none;
 }
 
 /* agent 页（shell/AgentPage.tsx）：页面头连同各节整页限宽 776，左沿＝机面内左沿——与位置页的表同宽、
@@ -482,7 +399,7 @@ input:focus-visible {
 .agent-page__section {
   padding-top: var(--space-xl);
   /* 与新手提示条同步：提示出现 / 收起时上内边距 24 ↔ 16 */
-  transition: padding-top 260ms var(--ease-mech);
+  transition: padding-top var(--dur-drawer) var(--ease-mech);
 }
 
 .agent-page__section + .agent-page__section {
@@ -505,34 +422,22 @@ input:focus-visible {
   }
 }
 
-/* 页面名一律 title Condensed 20 / 700，原样、字距 0 */
-.page-head__title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  font-family: var(--font-cond);
-  font-size: var(--size-title);
-  font-weight: 700;
-  line-height: var(--leading-title);
-}
-
 /* 右下提示（后台自动规则、后台 MCP）：右沿对齐机面右沿向内 16、底 16。
-   两个同时在时竖着排，右沿对齐 */
+   两个同时在时竖着排，右沿对齐；层同其他浮起小窗（token 梯子 --z-toast） */
 .app__toast {
   position: fixed;
   right: calc(10px + var(--space-md));
   bottom: calc(10px + var(--space-md));
-  z-index: 10;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: var(--space-xs);
 }
 
-/* 页面贴底有一行动作（添加来源页的 60 高贴底行）时，右下那一叠抬到它上面：
-   提示不盖住这一页的主动作（② 就近不遮挡） */
-.app:has(.add-src__foot) .app__toast {
+/* 推入页有贴底一行（PushedPage 的 footer，高 60：添加来源页）时，右下那一叠抬到它上面：
+   提示不盖住这一页的主动作（② 就近不遮挡）。组件库没有给出「这一页有贴底行」的公开钩子，暂认它的类 */
+.app:has(.ss-pushed__foot) .app__toast {
   bottom: calc(10px + 60px + var(--space-md));
 }
 
@@ -553,8 +458,8 @@ input:focus-visible {
   position: absolute;
   top: 0;
   bottom: 0;
-  /* 高过 Matrix 的吸顶工具行与列头（最高 8），低过浮层 */
-  z-index: 9;
+  /* 高过 Matrix 的吸顶工具行与列头、推入页（token 梯子：机面边缘渐隐 9 > 推入页 8），低过浮层 */
+  z-index: calc(var(--z-pushed) + 1);
   width: var(--fade-edge);
   pointer-events: none;
   opacity: 0;

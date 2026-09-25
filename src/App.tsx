@@ -25,15 +25,21 @@ import {
   type ProjectSort,
   type SidebarProject,
 } from "./sidebarProjects";
-import { edgeFades } from "./modelsView";
-import { ErrorBanner, Tabs, Toast, ToastCount, ToastStack } from "./ui";
+import {
+  NoticePanel,
+  PageHead,
+  Tabs,
+  Toast,
+  ToastCount,
+  ToastStack,
+  useEdgeFades,
+} from "./ui";
 import type { AnchorRect } from "./layerPlace";
 import { Sidebar, type RemovedProject } from "./shell/Sidebar";
 import { AGENTS } from "./shell/agents";
 import { AgentPage } from "./shell/AgentPage";
 import { sidebarAgentsOf, visibleAgents, type AgentState } from "./shell/agentRegistry";
 import { LOCATION_DOMAINS } from "./shell/domains";
-import { PageHead } from "./shell/PageHead";
 import {
   GLOBAL_KEY,
   goAgent,
@@ -102,27 +108,10 @@ export default function App() {
   /// MCP 扫描结果（侧栏项目列表要它）与模型状态（侧栏 agent 指示点要它）
   const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
   const [gatewayState, setGatewayState] = useState<GatewayState | null>(null);
-  /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐
+  /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐（量归 ui 的 useEdgeFades，画归壳 App.css）。
+  /// 窗口变窄、表格长宽（换页签、扫描回来）都会改变能不能横向滚动：它在滚动、改尺寸、每次重绘后都重量
   const contentRef = useRef<HTMLElement>(null);
-  const [contentFade, setContentFade] = useState({ start: false, end: false });
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const update = () => {
-      const next = edgeFades(el.scrollLeft, el.clientWidth, el.scrollWidth);
-      setContentFade((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
-    };
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    // 窗口变窄、表格长宽（换页签、扫描回来）都会改变能不能横向滚动
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-    observer?.observe(el);
-    for (const child of Array.from(el.children)) observer?.observe(child);
-    return () => {
-      el.removeEventListener("scroll", update);
-      observer?.disconnect();
-    };
-  });
+  const contentFade = useEdgeFades(contentRef, "x");
   /// 提示条的到点消失按回调身份计时：必须稳定，否则每次重渲染都重新计时
   const closeMcpToast = useCallback(() => setBackgroundMcpReport(null), []);
   // 监听器只注册一次，用 ref 读当前状态，避免闭包读到旧值
@@ -553,7 +542,7 @@ export default function App() {
           {/* 应用级故障：机面顶上、页面头之上，满内容宽 */}
           {error && (
             <div className="face__banner">
-              <ErrorBanner message={error} onClose={() => setError(null)} />
+              <NoticePanel scope="app" message={error} onClose={() => setError(null)} />
             </div>
           )}
           {place.view === "settings" ? (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ProjectTimes } from "../types.ts";
 import { displayPath } from "../pathText.ts";
 import { relativeTime } from "../dateText.ts";
@@ -9,17 +9,21 @@ import {
   AgentIcon,
   BusySlot,
   Cap,
+  FloatingLayer,
   FloatingToast,
   IconButton,
   IconClose,
   IconPlus,
   IconSettings,
   IconChevronDown,
-  IconTick,
   Indicator,
+  Menu,
+  MenuItem,
   ReasonTip,
+  SectionLabel,
   Toast,
   Tooltip,
+  useEdgeFades,
 } from "../ui/index.ts";
 import { AnimatedWordmark } from "../brand/AnimatedWordmark.tsx";
 import { GLOBAL_KEY, type SidebarSelection } from "./place.ts";
@@ -78,16 +82,9 @@ export function Sidebar(props: SidebarProps) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
   const navRef = useRef<HTMLElement>(null);
-  /// 往下滚过了（上面有项目被字标带挡住）：滚动区上沿画 16 渐隐，不让半截项目名硬切在字标下面
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const nav = navRef.current;
-    if (!nav) return;
-    const update = () => setScrolled(nav.scrollTop > 0);
-    update();
-    nav.addEventListener("scroll", update, { passive: true });
-    return () => nav.removeEventListener("scroll", update);
-  }, []);
+  /// 往下滚过了（上面有项目被字标带挡住）：滚动区上沿画 16 渐隐，不让半截项目名硬切在字标下面。
+  /// 只用上沿：下沿有吸底的 `+ 项目` 与它的线（不用渐隐）
+  const scrolled = useEdgeFades(navRef).start;
 
   /// `+ 项目` 吸在滚动区底边时（下面还有没滚到的项目）上沿才出 1px row-line；项目少、它紧跟最后一项时不画。
   /// 判断靠哨兵：它排在 `+ 项目` 的原位末端（不随 sticky 移动），原位露在可见区里＝没吸住，
@@ -137,9 +134,9 @@ export function Sidebar(props: SidebarProps) {
         {props.agents.length > 0 && (
           <>
             <div className="sidebar__head">
-              <span className="sidebar__label">
+              <SectionLabel>
                 <Cap>agent</Cap>
-              </span>
+              </SectionLabel>
             </div>
             {props.agents.map((a) => {
               const on = selection.kind === "agent" && selection.id === a.id;
@@ -169,8 +166,9 @@ export function Sidebar(props: SidebarProps) {
 
         {/* 小标题 `项目` + 右端排序下拉；`全局` 固定第一，不参与排序 */}
         <div className="sidebar__head">
-          <span className="sidebar__label">项目</span>
-          <SortMenu value={props.sort} onChange={props.onSort} />
+          <SectionLabel action={<SortMenu value={props.sort} onChange={props.onSort} />}>
+            项目
+          </SectionLabel>
         </div>
         <div className={`side-item${isLocation(GLOBAL_KEY) ? " is-on" : ""}`}>
           <button
@@ -297,34 +295,16 @@ export function Sidebar(props: SidebarProps) {
 const rowOf = (key: string): Element | null =>
   document.querySelector(`.side-item[data-project="${CSS.escape(key)}"]`);
 
-/// 小标题行右端的排序下拉：`最近活跃 ˅`（记号是统一的线形箭头 `IconChevronDown`），点开两项的小浮层，当前项前打对勾（`IconTick`，与勾选框同一枚）。
-/// 点外面、按 Esc 关闭，不铺透明罩。选择记在本机，下次打开照旧
+/// 小标题行右端的排序下拉：`最近活跃 ˅`（记号是统一的线形箭头 `IconChevronDown`），点开两项的单选菜单
+/// （ui 的 `Menu` + `MenuItem kind="radio"`，当前项前打 ✓），放在锚着这颗键的 `FloatingLayer` 里——
+/// 定位、放不下上翻、点外面 / Esc 关都归浮层。选择记在本机，下次打开照旧
 function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: ProjectSort) => void }) {
   const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setOpen(false);
-      button.current?.focus();
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && wrap.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown, true);
-      document.removeEventListener("pointerdown", onPointerDown, true);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
   const current = PROJECT_SORTS.find((s) => s.id === value) ?? PROJECT_SORTS[0];
   return (
-    <span ref={wrap} className="sidebar__sort">
+    <>
       <button
         ref={button}
         type="button"
@@ -336,26 +316,25 @@ function SortMenu({ value, onChange }: { value: ProjectSort; onChange: (s: Proje
         {current.label}
         <IconChevronDown className="sidebar__sort-chevron" />
       </button>
-      {open && (
-        <div className="sidebar__sort-menu" role="menu" aria-label="项目排序">
-          {PROJECT_SORTS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={s.id === value}
-              className="sidebar__sort-item"
-              onClick={() => {
-                onChange(s.id);
-                setOpen(false);
-              }}
-            >
-              <span className="sidebar__sort-check">{s.id === value && <IconTick />}</span>
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
+      {open && button.current ? (
+        <FloatingLayer trigger={button.current} onClose={close} label="项目排序">
+          <Menu autoFocus>
+            {PROJECT_SORTS.map((s) => (
+              <MenuItem
+                key={s.id}
+                kind="radio"
+                checked={s.id === value}
+                onSelect={() => {
+                  onChange(s.id);
+                  setOpen(false);
+                }}
+              >
+                {s.label}
+              </MenuItem>
+            ))}
+          </Menu>
+        </FloatingLayer>
+      ) : null}
+    </>
   );
 }

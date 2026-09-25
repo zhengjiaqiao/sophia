@@ -179,7 +179,43 @@ test("侧栏滚动区往下滚过之后上沿 16 渐隐：滚过去的项目不�
     css,
     /\.sidebar__nav\[data-fade-top\]::before \{[^}]*position: sticky;[^}]*top: 0;[^}]*height: var\(--fade-edge\);[^}]*linear-gradient\(to bottom, var\(--shell\), transparent\)/,
   );
+  // 量归 ui 的 useEdgeFades（全应用只有这一份监听），侧栏只取上沿
   const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
-  assert.match(tsx, /setScrolled\(nav\.scrollTop > 0\)/);
+  assert.match(tsx, /const scrolled = useEdgeFades\(navRef\)\.start;/);
+  assert.doesNotMatch(tsx, /addEventListener\("scroll"/);
   assert.match(tsx, /data-fade-top=\{scrolled \? "" : undefined\}/);
+});
+
+test("侧栏区块小标与排序下拉走组件库：SectionLabel（`AGENT` 经 Cap）、排序是 FloatingLayer 里的单选 Menu，不再自写定位", async () => {
+  const { readFileSync } = await import("node:fs");
+  const side = render(Sidebar, sidebarProps(sidebarAgentsOf([fake], macState)));
+  assert.match(
+    side,
+    /<div class="sidebar__head"><div class="ss-sectionlabel"><span class="ss-sectionlabel__text"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">agent</,
+  );
+  assert.match(
+    side,
+    /<div class="ss-sectionlabel has-action"><span class="ss-sectionlabel__text">项目<\/span><span class="ss-sectionlabel__action"><button type="button" class="sidebar__sort-button" aria-haspopup="menu" aria-expanded="false">最近活跃/,
+  );
+  const tsx = readFileSync(new URL("../src/shell/Sidebar.tsx", import.meta.url), "utf8");
+  assert.match(tsx, /<FloatingLayer trigger=\{button\.current\} onClose=\{close\} label="项目排序">/);
+  assert.match(tsx, /<MenuItem\s+key=\{s\.id\}\s+kind="radio"/);
+  const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /\.sidebar__sort-menu|\.sidebar__sort-item|\.sidebar__label/);
+});
+
+test("PageHead 在组件库里：旧的 shell 路径只是转出，壳与 agent 页从 ui 取", async () => {
+  const { readFileSync } = await import("node:fs");
+  const ui = await import("../src/ui/index.ts");
+  const old = await import("../src/shell/PageHead.tsx");
+  assert.equal(old.PageHead, ui.PageHead);
+  assert.equal(old.PageTitle, ui.PageTitle);
+  assert.equal(old.PageHeadActions, ui.PageHeadActions);
+  for (const file of ["../src/App.tsx", "../src/shell/AgentPage.tsx", "../src/pages/SettingsPage.tsx"]) {
+    const src = readFileSync(new URL(file, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /shell\/PageHead|from "\.\/PageHead/, file);
+  }
+  // 页面头的长相归组件库；壳只留它在机面里的摆法（故障下、位置页吸顶）
+  const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css, /^\.page-head \{|^\.page-head__title \{/m);
 });
