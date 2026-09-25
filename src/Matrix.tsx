@@ -88,8 +88,6 @@ export interface MatrixColumn {
   count: number;
   /// 列头提示框：`Claude Code · 41 个已加上`
   tip: string;
-  /// 列表外的 skill（自带、插件）个数：计数后跟 `+N`；不给就不出
-  more?: number;
   /// 提示框在 `tip` 之后多出的几行（列表外的 skill 分类报数）
   tipLines?: string[];
   /// 这一列的目录还不存在：图标外一圈虚线、名字退到 `ink-faint`、计数空（加上第一个时会自动创建）
@@ -895,10 +893,7 @@ export default function Matrix(props: MatrixProps) {
                   <Cap>{col.scope}</Cap>
                 </span>
               ) : null}
-              <span className="mx-colbtn__count">
-                {col.missing ? "" : col.count}
-                {col.more ? <span className="mx-colbtn__more">+{col.more}</span> : null}
-              </span>
+              <span className="mx-colbtn__count">{col.missing ? "" : col.count}</span>
               <SortArrow active={sort.key === col.id} desc={sort.dir === "desc"} />
             </button>
           </Tooltip>

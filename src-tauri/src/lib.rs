@@ -470,7 +470,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     Ok(Some(report))
 }
 
-/// 各 agent 自带的、插件带的 skill 个数（只读；位置页列头报「另有 N 个不在列表里」）
+/// 各 agent 自带的、插件带的 skill 个数（只读；位置页列头提示框报「另有 N 个不在列表里」）
 #[tauri::command]
 fn outside_skills(
     state: tauri::State<'_, AppState>,

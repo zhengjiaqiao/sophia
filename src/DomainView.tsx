@@ -51,7 +51,7 @@ export interface BatchPress {
 
 export interface DomainViewProps {
   overview: Overview;
-  /// 各 agent 自带的、插件带的 skill 个数：全局位置、来源筛选为全部时列头报 `+N`
+  /// 各 agent 自带的、插件带的 skill 个数：全局位置、来源筛选为全部时列头提示框报数
   outsideSkills: OutsideSkills[];
   page: DomainPage;
   /// 经过筛选、要显示的行
@@ -200,20 +200,19 @@ export default function DomainView(props: DomainViewProps) {
       const s = stateAt(row, target.id);
       return s === "linked" || s === "own";
     }).length;
-    // 自带、插件的 skill 属于整个 agent、不随来源筛选变：只在全局位置的「全部」下报
+    // 自带、插件的 skill 属于整个 agent、不随来源筛选变：只在全局位置的「全部」下报（只进提示框）
     const outsideCount =
       page.key === "global" && props.originFilter.length === 0
         ? props.outsideSkills.find((o) => o.harnessId === target.scope.harnessId)
         : undefined;
-    const outside = outsideCount ? outsideTip(outsideCount, target.label) : null;
+    const tipLines = outsideCount ? (outsideTip(outsideCount, target.label) ?? undefined) : undefined;
     return {
       id: target.id,
       agentId: target.scope.harnessId,
       name: target.label,
       count: n,
       tip: `${target.label} · ${n} 个已加上`,
-      more: outside?.more,
-      tipLines: outside?.lines,
+      tipLines,
       missing: !target.exists,
     };
   });

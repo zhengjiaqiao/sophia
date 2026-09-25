@@ -79,7 +79,7 @@ interface KeepPane {
 
 export interface SkillsTabProps {
   overview: Overview | null;
-  /// 各 agent 自带的、插件带的 skill 个数：全局位置的列头报 `+N`
+  /// 各 agent 自带的、插件带的 skill 个数：全局位置的列头提示框报数
   outsideSkills: OutsideSkills[];
   /// 自动同步规则；关链前写排除、开链前恢复都靠它（规则本身在来源管理页上管理）
   autoLinks: AutoLink[];

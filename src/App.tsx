@@ -99,7 +99,7 @@ export default function App() {
   const [projectTimes, setProjectTimes] = useState<ReadonlyMap<string, ProjectTimes>>(new Map());
   // 自动同步规则；扫描时顺带取回，域页与添加页都用它
   const [autoLinks, setAutoLinks] = useState<AutoLink[]>([]);
-  /// 各 agent 自带的、插件带的 skill 个数（位置页列头的 `+N`）；扫描时顺带取回，读不到就当没有
+  /// 各 agent 自带的、插件带的 skill 个数（位置页列头的提示框）；扫描时顺带取回，读不到就当没有
   const [outsideSkills, setOutsideSkills] = useState<OutsideSkills[]>([]);
   const [backgroundMcpReport, setBackgroundMcpReport] = useState<McpReport | null>(null);
   /// MCP 扫描结果（侧栏项目列表要它）与模型状态（侧栏 agent 指示点要它）
