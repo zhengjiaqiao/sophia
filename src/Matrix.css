@@ -91,6 +91,8 @@
   width: 776px;
   padding: 10px 0 18px;
   background: var(--face);
+  /* 与新手提示条同步：提示出现 / 收起时下内边距 18 ↔ 16 */
+  transition: padding-bottom 260ms var(--ease-mech);
 }
 
 /* 行首 `来源` 标签（label 12 / 500 ink-mute）+ 8 + 胶囊；折行时胶囊对齐胶囊，不钻到标签下面 */
@@ -135,15 +137,19 @@
   white-space: nowrap;
 }
 
-/* 新手提示条的插槽（来源筛选下、表头上；空态上）：上下各 16，推动表格。来源筛选的下内边距已有 18，
-   这里上边不再加 */
+/* 新手提示条的插槽（来源筛选下、表头上；空态上）：上下各 16 由 HintStrip 自带（收起时归 0），插槽不另加 */
 .mx-hint {
   width: 776px;
-  margin-bottom: 16px;
 }
 
-.mx-empty > .mx-hint {
-  margin-top: 16px;
+/* 表头上那一格：来源筛选的下内边距（表格上距 18）就是提示条的上距——提示在时它收成 16、提示条自己的上外距归 0，
+   筛选到提示 16、提示到表头 16；提示收起后回到 18，表头回原位 */
+.mx:has(> .mx-hint .ss-hint.is-open) > .mx-bar {
+  padding-bottom: 16px;
+}
+
+.mx > .mx-hint .ss-hint.is-open {
+  margin-top: 0;
 }
 
 /* 来源项提示框里的短路径：mono 没有断点，放不下时照样折行，不溢出提示框 */
@@ -465,14 +471,6 @@
   display: inline-flex;
 }
 
-/* 旧的 ▸ / ▾ 展开记号（Disclosure）：位置页已换成抽屉拉手，别的页迁走之前留着 */
-.mx-disclosure {
-  display: block;
-  flex-shrink: 0;
-  color: var(--ink-mute);
-  transition: transform var(--motion-fast) var(--ease-mech);
-}
-
 /* 名字 ×2 ˅ [键]：名字 + 6 + 拉手（DrawerHandle 悬停这一行才出、拉开的常显），行内键在拉手之后 */
 .mx-row__name {
   display: flex;
@@ -675,7 +673,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .mx-filter,
-  .mx-disclosure {
+  .mx-bar {
     transition: none;
   }
 }

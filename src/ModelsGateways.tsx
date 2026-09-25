@@ -122,6 +122,8 @@ export interface GatewayBlockProps {
   onCloseNotice?: () => void;
   /// 表单开着且有没保存的改动（ModelsTab 据此拦下离开）
   onDirtyChange?: (dirty: boolean) => void;
+  /// 这一块里开着删网关的确认框、或行里的灰面板（删 / 重连没成）：节头上方的新手提示据此让位
+  onPanelChange?: (open: boolean) => void;
 }
 
 /// 地址去掉协议头显示（`https://openrouter.ai/api/v1` → `openrouter.ai/api/v1`）；完整值截断时进提示框
@@ -144,6 +146,7 @@ export function GatewayBlock({
   notice,
   onCloseNotice,
   onDirtyChange,
+  onPanelChange,
 }: GatewayBlockProps) {
   const providers = state.providers;
   /// 表单开在哪一行（一次只开一份）；"new" 是最上面那一行新网关
@@ -166,6 +169,11 @@ export function GatewayBlock({
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowEls = useRef(new Map<string, HTMLDivElement>());
   const formEl = useRef<HTMLDivElement | null>(null);
+
+  const panelOpen = confirming !== null || rowError !== null;
+  useEffect(() => {
+    onPanelChange?.(panelOpen);
+  }, [panelOpen, onPanelChange]);
 
   const trackDirty = useCallback(
     (dirty: boolean) => {

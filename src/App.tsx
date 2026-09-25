@@ -507,6 +507,7 @@ export default function App() {
         selectedKey={selectedKey}
         onRefresh={refresh}
         onError={setError}
+        banner={error !== null}
       />
     ),
     mcp: () => (
@@ -564,7 +565,12 @@ export default function App() {
               aboutRequest={aboutRequest ?? undefined}
             />
           ) : agentEntry ? (
-            <AgentPage entry={agentEntry} onError={setError} onGatewayState={setGatewayState} />
+            <AgentPage
+              entry={agentEntry}
+              onError={setError}
+              onGatewayState={setGatewayState}
+              banner={error !== null}
+            />
           ) : (
             // 位置页：页面头左端 `skills ｜ mcp` 滑槽，右端留给页面自己的动作（PageHeadActions）
             <PageHead

@@ -45,6 +45,8 @@ import {
   useBusyShown,
 } from "./ui/index.ts";
 import type { ConfirmAnchor } from "./ui/index.ts";
+import { HintStrip } from "./ui/HintStrip.tsx";
+import { HINTS, useHint } from "./hints.ts";
 import { Switch } from "./ui/Switch.tsx";
 import { Section } from "./ui/Section.tsx";
 import { GatewayBlock, ModelChipRow } from "./ModelsGateways.tsx";
@@ -55,7 +57,7 @@ import "./ModelsTab.css";
 /// Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，D5：原模型页与网关二级页合并成这一节）。
 ///
 /// agent 页的外框（页面头的图标 + `Codex`、节与节之间的距离、整页限宽 776）由外壳按 agent 注册表画；这一节画：
-/// - **新手提示条的槽**（`hint`）：页面头下、节头上方（接入由调用方做，这里只留位置）
+/// - **新手提示条** `first-codex`：页面头下、节头上方；拨过开关或加过一家网关就算学会
 /// - **节头**：左 `第三方模型`；右端开关（＝配置里开没开：拨了就写、不确认，乐观翻转，没写成滑回），
 ///   开关左边 12 条件出现 `重启生效` / `启动 Codex` / `卸下后台服务`（同一位，不会同时出现）——
 ///   一条左沿、一列控件：开关、待办条的键、`+ 网关`、网关行尾动作的右沿在同一条竖线上。
@@ -277,11 +279,11 @@ export interface ModelsTabProps {
   onError: (message: string) => void;
   /// 每次拿到新状态都报给壳：侧栏 Codex 后的指示点要它
   onGatewayState?: (state: GatewayState) => void;
-  /// 新手提示条（`first-codex`）的槽：页面头下、「第三方模型」节头上方。上下 16 由提示条自带
-  hint?: ReactNode;
+  /// 壳的错误横幅开着（机面顶上的灰面板）：新手提示让位
+  banner?: boolean;
 }
 
-export default function ModelsTab({ onError, onGatewayState, hint }: ModelsTabProps) {
+export default function ModelsTab({ onError, onGatewayState, banner = false }: ModelsTabProps) {
   const tool = MODELS_TOOLS[0];
   const [state, setState] = useState<GatewayState | null>(null);
   /// 这一节正在做一件写 Codex 设置的事（重启、接管、重启路由、存网关……）：对同一对象的下一次操作
@@ -298,6 +300,8 @@ export default function ModelsTab({ onError, onGatewayState, hint }: ModelsTabPr
   /// 启动时的自愈试过了没有：试过仍没起来才出「路由没在跑」
   const [healed, setHealed] = useState(false);
   const [routerFailure, setRouterFailure] = useState<string | null>(null);
+  /// 网关块里开着删网关的确认框或行里的灰面板（新手提示让位）
+  const [gatewayPanel, setGatewayPanel] = useState(false);
   const mounted = useRef(true);
   const reportState = useRef(onGatewayState);
   reportState.current = onGatewayState;
@@ -327,6 +331,22 @@ export default function ModelsTab({ onError, onGatewayState, hint }: ModelsTabPr
     }),
   );
   const applyState = writer.accept;
+
+  // 新手提示 `first-codex`（DESIGN「新手提示条」）：第一次打开这一页、状态读回来（连同启动时的自愈）之后出。
+  // 让位：壳的错误横幅、节里的灰面板与行内待办条、重启确认、网关块里的确认框与灰面板
+  const hasTodos =
+    state !== null &&
+    (showRouterTodo(state, healed) ||
+      modelIssues(state).some((i) => i.action.kind === "takeover" || i.action.kind === "rewrite"));
+  const codexHint = useHint("first-codex", {
+    eligible: state !== null && healed,
+    blocked: banner || notice !== null || hasTodos || confirmRestart !== null || gatewayPanel,
+  });
+  const hint = (
+    <HintStrip open={codexHint.visible} onDismiss={codexHint.dismiss}>
+      {HINTS["first-codex"].sentence}
+    </HintStrip>
+  );
 
   /// 轻查：后台例行读取，不显示忙碌、不锁页面（焦点重读、键显示时的轮询）
   const quietRefresh = useCallback(async () => {
@@ -439,6 +459,8 @@ export default function ModelsTab({ onError, onGatewayState, hint }: ModelsTabPr
       await writer.idle();
       const saved = await api.gatewayUpsertProvider(input);
       if (mounted.current) applyState(saved.state);
+      // 加了一家新网关：`first-codex` 教的另一件事（改已有的那家不算）
+      if (input.id === undefined) codexHint.learned();
       return saved.providerId;
     } finally {
       onBusy(false);
@@ -534,7 +556,11 @@ export default function ModelsTab({ onError, onGatewayState, hint }: ModelsTabPr
     }
     if (failure === undefined || !mounted.current) return;
     setPhase({ kind: "idle" });
-    if (failure === null) return;
+    if (failure === null) {
+      // 拨过开关、写成了：`first-codex` 教的就是这件事
+      codexHint.learned();
+      return;
+    }
     setNotice({
       message: gatewaySwitchText(next, tool).failed,
       reason: failure,
@@ -733,6 +759,7 @@ export default function ModelsTab({ onError, onGatewayState, hint }: ModelsTabPr
           onToggleModel={toggleModel}
           notice={rowNotice}
           onCloseNotice={() => setNotice(null)}
+          onPanelChange={setGatewayPanel}
         />
       </Section>
 

@@ -16,7 +16,8 @@ import { useSources } from "./SourceRow";
 import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { shortDate } from "./dateText";
-import { Confirm, CornerToast, Empty, Toast, ToastCount } from "./ui";
+import { Confirm, CornerToast, Empty, HintStrip, Toast, ToastCount } from "./ui";
+import { HINTS, useHint } from "./hints";
 import type { ConfirmAnchor } from "./ui";
 import {
   batchBusyText,
@@ -79,6 +80,8 @@ export interface SkillsTabProps {
   selectedKey: string;
   onRefresh: () => Promise<void>;
   onError: (message: string) => void;
+  /// 壳的错误横幅开着（机面顶上的灰面板）：新手提示让位
+  banner?: boolean;
 }
 
 /// 位置页的 skills 页签：页面头右端筛选框 + `管理来源` + `+ 来源`，来源筛选、表格（DomainView → Matrix）。
@@ -100,6 +103,7 @@ export default function SkillsTab({
   selectedKey,
   onRefresh,
   onError,
+  banner = false,
 }: SkillsTabProps) {
   // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
@@ -233,6 +237,26 @@ export default function SkillsTab({
     onRemoved: (id) => setOriginFilter((prev) => dropOrigin(prev, id)),
     keys: !addOpen && !manageOpen,
   });
+
+  // ---- 新手提示（DESIGN「新手提示条」）：首次扫描两条按结果二选一 ----
+  // 扫描完成＝壳拿到了 overview（它只在一轮扫描真正结束时才给，扫描中是 null，没有半截的中间态）。
+  // 盖着添加来源页 / 来源管理页时位置页不在眼前，不算到达；回来再出
+  const onPage = !addOpen && !manageOpen;
+  const hasSkills = page !== null && page.rows.length > 0;
+  const noSkills =
+    overview !== null &&
+    (page === null || (page.rows.length === 0 && orphanRows(page).length === 0));
+  // 让位：壳的错误横幅、确认框（只留这份、拆开、移除来源）开着
+  const hintBlocked = banner || keepPane !== null || splitPane !== null || sources.confirming;
+  const skillsHint = useHint("first-scan-skills", {
+    eligible: onPage && hasSkills,
+    blocked: hintBlocked,
+  });
+  const emptyHint = useHint("first-scan-empty", {
+    eligible: onPage && noSkills,
+    blocked: hintBlocked,
+  });
+  const learnedCell = skillsHint.learned;
 
   const targetOf = (targetId: string): Target | null =>
     pages.flatMap((p) => p.targets).find((t) => t.id === targetId) ?? null;
@@ -468,6 +492,7 @@ export default function SkillsTab({
           } else {
             // 重新链接没有可撤销的反面：出一行交代，不带撤销
             setUndo(null);
+            learnedCell();
             showCellToast(++cellToastSeq.current, "link", ref);
           }
           await onRefresh();
@@ -492,6 +517,8 @@ export default function SkillsTab({
           setOptimisticFor([ref], null);
           failCell(rowKey, ref.targetId, result.failed[0].reason);
         } else if (!undoing) {
+          // 点过一格、写成了：`first-scan-skills` 教的就是这件事
+          learnedCell();
           const back = op === "link" ? "linked" : "missing";
           const id = ++cellToastSeq.current;
           // ⌘Z 撤最新这一次；撤了那一窗直接消失，不另出「已撤销」
@@ -605,6 +632,7 @@ export default function SkillsTab({
           failCell(orphan.key, targetId, `没清除：${bad.outcome.reason}`);
         } else {
           setUndo(null);
+          learnedCell();
           setOrphanGhost({ ...orphan, links: orphan.links.filter((l) => l.targetId !== targetId) });
           const text = toastFor("clear", {
             done: [{ name: orphan.skill, agent: agentRef(targetOf(targetId)) }],
@@ -920,7 +948,11 @@ export default function SkillsTab({
       model={model}
       domain={domainRef}
       onClose={closeAdd}
-      onAdded={onRefresh}
+      onAdded={async () => {
+        // 加上了至少一个来源：`first-scan-empty` 教的就是这件事
+        emptyHint.learned();
+        await onRefresh();
+      }}
       onAllAdded={setJustAdded}
     />
   ) : null;
@@ -970,6 +1002,11 @@ export default function SkillsTab({
           actions={sourceKeys}
           enabled={!addOpen && !manageOpen}
         />
+        <div className="mx-hint">
+          <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
+            {HINTS["first-scan-empty"].sentence}
+          </HintStrip>
+        </div>
         <Empty
           kind="noAgentDirs"
           description={`${domainRef.label} 下还没有 agent 的 skill 目录`}
@@ -1081,6 +1118,16 @@ export default function SkillsTab({
         cellToast={cellToast}
         keyBusy={keyBusy}
         cellBusy={splitBusy}
+        hint={
+          <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss}>
+            {HINTS["first-scan-skills"].sentence}
+          </HintStrip>
+        }
+        emptyHint={
+          <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
+            {HINTS["first-scan-empty"].sentence}
+          </HintStrip>
+        }
         barToast={
           addedToast
             ? {

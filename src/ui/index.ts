@@ -71,7 +71,6 @@ export {
   IconArrowLeft,
   IconAttention,
   IconCannot,
-  IconCheck,
   IconChevronRight,
   IconClose,
   IconEdit,
@@ -90,3 +89,6 @@ export { FloatingLayer, FadeViewport } from "./FloatingLayer.tsx";
 
 export { Empty } from "./Empty.tsx";
 export type { EmptyAction, EmptyArt, EmptyKind, EmptyProps } from "./Empty.tsx";
+
+export { HintStrip } from "./HintStrip.tsx";
+export type { HintStripProps } from "./HintStrip.tsx";

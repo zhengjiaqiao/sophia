@@ -467,10 +467,28 @@ input:focus-visible {
    间距归壳，节组件（ui/Section）自己不带外距 */
 .agent-page__section {
   padding-top: var(--space-xl);
+  /* 与新手提示条同步：提示出现 / 收起时上内边距 24 ↔ 16 */
+  transition: padding-top 260ms var(--ease-mech);
 }
 
 .agent-page__section + .agent-page__section {
   padding-top: var(--space-huge);
+}
+
+/* 节头上方的新手提示条（`first-codex`，DESIGN「新手提示条」）：页面头到提示 16、提示到节头 16。
+   提示在时节的上内边距收成 16、提示条自己的上外距归 0（下外距 16 照旧）；提示收起后回到 24，节头回原位 */
+.agent-page__section:has(> .ss-hint.is-open) {
+  padding-top: var(--space-md);
+}
+
+.agent-page__section > .ss-hint.is-open {
+  margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-page__section {
+    transition: none;
+  }
 }
 
 /* 页面名一律 title Condensed 20 / 700，原样、字距 0 */

@@ -25,6 +25,8 @@ export interface AgentSectionProps {
   onError: (message: string) => void;
   /// 节改了模型状态：侧栏指示点跟着更新
   onGatewayState: (state: GatewayState) => void;
+  /// 壳的错误横幅开着（机面顶上的灰面板）：节里的新手提示让位
+  banner?: boolean;
 }
 
 /// 托盘面板给每一行的面板级共用（TrayPanel 持有）
