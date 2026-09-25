@@ -63,17 +63,13 @@ function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, numb
   const [pre, suf] = ends;
   const text = value.text;
   const mid = text.slice(pre, text.length - suf);
-  // 三段各是一段等宽（可选中拷走）：不同的那一段加粗
+  // 整段一块等宽（可选中拷走）：不同的那一段加粗
   return (
-    <span>
-      {pre > 0 ? <Mono inherit>{text.slice(0, pre)}</Mono> : null}
-      {mid ? (
-        <b>
-          <Mono inherit>{mid}</Mono>
-        </b>
-      ) : null}
-      {suf > 0 ? <Mono inherit>{text.slice(text.length - suf)}</Mono> : null}
-    </span>
+    <Mono inherit>
+      {pre > 0 ? text.slice(0, pre) : null}
+      {mid ? <b>{mid}</b> : null}
+      {suf > 0 ? text.slice(text.length - suf) : null}
+    </Mono>
   );
 }
 

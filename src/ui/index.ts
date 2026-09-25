@@ -91,6 +91,8 @@ export type { NoteProps } from "./Note.tsx";
 // ---- 状态记号 ----
 export { StateDot, DupMark, DOT_LABEL } from "./StateDot.tsx";
 export type { Dot, StateDotProps, DupMarkProps } from "./StateDot.tsx";
+export { StateDotButton } from "./StateDotButton.tsx";
+export type { StateDotButtonProps } from "./StateDotButton.tsx";
 export { Tag } from "./Tag.tsx";
 export type { TagProps } from "./Tag.tsx";
 

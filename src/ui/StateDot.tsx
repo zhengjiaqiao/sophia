@@ -11,7 +11,8 @@ import { Tooltip } from "./Tooltip.tsx";
 /// （无法写入与同名占位同一个记号，裁决 D22：该行已有 `×2`，原因由提示框说）、
 /// 整个文件夹是链接＝环内向右箭头（箭头不穿出环，否则读成 ♂）。
 ///
-/// 只有 10px 一档（16px 版、反色、自带按钮这三个分支没人用，2026-09-25 删了；刚点亮的反色闪走 `.ss-flash`）。
+/// 只有 10px 一档（16px 版、反色、自带按钮这三个分支没人用，2026-09-25 删了；刚点亮的反色闪由格子上的
+/// `data-flash` 带出，闪的那一帧不出悬停光晕）。
 ///
 /// 悬停光晕（DESIGN「格子悬停光晕」）：可点的点悬停 / 键盘聚焦时，**点本身一点不变**，
 /// 只在点的下层出一圈直径 22 的圆形 hairline 光晕，说「能点」，不预告结果（结果由提示框的动词说）。
@@ -40,9 +41,11 @@ export interface StateDotProps {
   title?: string;
   /// 读屏名；不给就用 title，再不给用 DOT_LABEL
   label?: string;
-  /// 这颗点可点：外层按钮（`.ss-dot-btn`，整格命中与键盘焦点）**由调用方渲染**，组件只画记号；
+  /// 这颗点可点：外层按钮（`StateDotButton`，整格命中与键盘焦点）由调用方放，这里只画记号；
   /// 给 true 时悬停 / 键盘聚焦外层按钮出光晕（只有开 / 关两种与原件出）
   hoverable?: boolean;
+  /// 点放在 `surface` 底上（表格的选择行）：光晕换深一档的 `track`——`hairline` 在 surface 上看不见
+  onSurface?: boolean;
 }
 
 /// 这两种点下去是开关，原件点下去是删原件（DESIGN「删除原件」）：出悬停光晕
@@ -103,10 +106,18 @@ function Glyph10({ dot }: { dot: Dot }) {
   }
 }
 
-export function StateDot({ dot, muted, title, label, hoverable: canHover }: StateDotProps) {
+export function StateDot({
+  dot,
+  muted,
+  title,
+  label,
+  hoverable: canHover,
+  onSurface = false,
+}: StateDotProps) {
   const text = label ?? title ?? DOT_LABEL[dot];
   const classes = ["ss-dot", `ss-dot--${dot}`];
   if (muted) classes.push("is-muted");
+  if (onSurface) classes.push("is-on-surface");
   const hoverable = Boolean(canHover) && TOGGLES.has(dot);
 
   return (

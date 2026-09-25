@@ -440,7 +440,7 @@ test("StateDot 10px：环 1.3 ink-mute、外径 10；实心 / 芯 / 斜线 ink�
   // 反色闪、禁用：环跟着记号一起转色
   assert.match(
     uiCss,
-    /\.ss-dot\.is-muted \.ss-dot__ring,\s*\.ss-flash \.ss-dot__ring \{\s*stroke: currentColor;/,
+    /\.ss-dot\.is-muted \.ss-dot__ring,\s*\[data-flash\] \.ss-dot__ring \{\s*stroke: currentColor;/,
   );
 });
 
@@ -488,16 +488,21 @@ test("StateDot 悬停：点本身不变，只在下层出 hairline 光晕（surf
   }
   assert.match(uiCss, /\.ss-dot__halo \{\s*fill: var\(--hairline\);\s*opacity: 0;/);
   assert.doesNotMatch(uiCss, /\.ss-dot__fill[^{]*\{\s*opacity:\s*0;/);
-  // 闪烁帧（黑底）上不出光晕
+  // 闪烁帧（黑底）上不出光晕：由组件库自己做（格子上的 data-flash），页面不再覆盖光晕
   const matrixCss = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
-  assert.doesNotMatch(matrixCss, /ss-dot__preview|data-preview/);
+  assert.doesNotMatch(matrixCss, /ss-dot__preview|data-preview|ss-dot__halo|ss-flash/);
   assert.match(
-    matrixCss,
-    /\.mx-cell\.ss-flash \.ss-dot-btn \.ss-dot\[data-hoverable\] \.ss-dot__halo \{\s*opacity:\s*0;/,
+    uiCss,
+    /\[data-flash\] \.ss-dot-btn \.ss-dot\[data-hoverable\] \.ss-dot__halo \{\s*opacity:\s*0;\s*transition:\s*none;/,
+  );
+  // 与悬停规则同一特异性、写在它后面才压得住
+  assert.ok(
+    uiCss.indexOf("[data-flash] .ss-dot-btn .ss-dot[data-hoverable] .ss-dot__halo") >
+      uiCss.indexOf(".ss-dot-btn:hover .ss-dot[data-hoverable] .ss-dot__halo"),
   );
 });
 
-test("StateDot 禁用：muted 退到 ink-faint（刚点亮的反色闪走 .ss-flash）", () => {
+test("StateDot 禁用：muted 退到 ink-faint（刚点亮的反色闪走格子上的 data-flash）", () => {
   assert.match(
     render(StateDot, { dot: "own", muted: true }),
     /class="ss-dot ss-dot--own is-muted"/,
@@ -1031,7 +1036,8 @@ test("Chip 来源胶囊：recess 底、13 ink-mute、高 26 左右 10、无边�
   // 不给计数就只写名字（`全部`）；没有图标
   assert.equal(
     html,
-    '<button type="button" class="ss-chip" aria-pressed="false"><span class="ss-chip__label">WeiboAP</span></button>',
+    // 不可选的原因经 ReasonTip：能选时包层不占盒（与键同一棵树，禁用 / 解禁不重挂）
+    '<span class="ss-tipwrap is-idle"><button type="button" class="ss-chip" aria-pressed="false"><span class="ss-chip__label">WeiboAP</span></button></span>',
   );
   // 计数跟在名字后：12 tabular，没选 ink-faint、选中 ctl-border；名字与数间距 6
   assert.match(
@@ -2248,7 +2254,7 @@ test("Drawer inset / rule / flush：左沿（和右沿）让位写在 well 上�
 
 test("刚变化的格子闪一下：120ms 反色再回落，减少动效时退化为无", () => {
   assert.match(
-    cssRule(uiCss, ".ss-flash"),
+    cssRule(uiCss, "[data-flash]"),
     /animation:\s*ss-flash var\(--motion-fast\) var\(--ease-mech\)/,
   );
 });

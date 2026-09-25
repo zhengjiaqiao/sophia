@@ -257,25 +257,25 @@ test("Matrix：来源筛选——行首 `来源` 标签 + 第一颗 `全部`（�
   // 第一颗 `全部`：什么都不筛时它亮着（任何时候都有一颗说出当前状态），不带数
   assert.match(
     idle,
-    /aria-label="按来源筛选"><span class="ss-chiprow__chip" role="listitem"><span class="mx-sourcechip"><button type="button" class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">全部<\/span><\/button><\/span>/,
+    /aria-label="按来源筛选"><span class="ss-chiprow__chip" role="listitem"><span class="mx-sourcechip"><span class="ss-tipwrap is-idle"><button type="button" class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">全部<\/span><\/button><\/span><\/span>/,
   );
   // 每个来源：名字 + 计数（0 也写），没有橙点
   assert.doesNotMatch(idle, /ss-indicator|has-rule/);
   assert.match(idle, /class="mx-sourcechip" data-origin="u"/);
   assert.match(
     idle,
-    /aria-pressed="false"><span class="ss-chip__label"><span class="mx-chiplabel">通用仓库<\/span><\/span><span class="ss-chip__count">26<\/span><\/button>/,
+    /aria-pressed="false"><span class="ss-chip__label">通用仓库<\/span><span class="ss-chip__count">26<\/span><\/button>/,
   );
   assert.match(
     idle,
-    /aria-pressed="false"><span class="ss-chip__label"><span class="mx-chiplabel">WeiboAP<\/span><\/span><span class="ss-chip__count">0<\/span><\/button>/,
+    /aria-pressed="false"><span class="ss-chip__label">WeiboAP<\/span><span class="ss-chip__count">0<\/span><\/button>/,
   );
   // 选了一个来源：它亮，`全部` 灭；点一颗只看它、点 `全部` 回到全部（单选，originFilter.pickOrigin）
   const one = render(Matrix, { ...base, sources: { ...sources, selected: ["w"] } });
   assert.match(one, /class="ss-chip" aria-pressed="false"><span class="ss-chip__label">全部</);
   assert.match(
     one,
-    /class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label"><span class="mx-chiplabel">WeiboAP</,
+    /class="ss-chip is-selected" aria-pressed="true"><span class="ss-chip__label">WeiboAP</,
   );
   const src0 = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
   assert.match(src0, /onClick=\{\(\) => onSelect\(pickOrigin\(null\)\)\}/);
@@ -322,7 +322,7 @@ test("来源项悬停出提示框：完整名 + 短路径 + 自动添加与移�
   // 来源项包在 ui 的 Tooltip 里（ss-tipwrap）
   assert.match(
     html,
-    /class="mx-sourcechip" data-origin="u"><span class="ss-tipwrap[^"]*"[^>]*><button/,
+    /class="mx-sourcechip" data-origin="u"><span class="ss-tipwrap[^"]*"[^>]*>(?:<span class="ss-tipwrap is-idle">)?<button/,
   );
 });
 
@@ -345,7 +345,7 @@ test("Matrix：选中的来源是墨色、其余不亮；片上不带「新」�
     },
   });
   const label = (name: string) =>
-    `<span class="ss-chip__label"><span class="mx-chiplabel">${name}</span></span>`;
+    `<span class="ss-chip__label">${name}</span>`;
   assert.ok(html.includes(`aria-pressed="false">${label("通用仓库")}`));
   assert.ok(html.includes(`aria-pressed="true">${label("WeiboAP")}</button>`));
   assert.ok(html.includes(`aria-pressed="false">${label("别处")}</button>`));

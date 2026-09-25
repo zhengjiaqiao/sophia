@@ -536,6 +536,8 @@ textarea,
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   height: var(--control-h-chip);
   padding: 0 10px;
   border: 0;
@@ -551,6 +553,14 @@ textarea,
   transition:
     background-color var(--motion-fast) var(--ease-mech),
     color var(--motion-fast) var(--ease-mech);
+}
+
+/* 名字最宽 220，放不下截断（计数完整保留）；整颗在胶囊行里也能被压窄（.ss-chip 的 min-width / max-width） */
+.ss-chip__label {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ss-chip:hover:not(:disabled) {
@@ -673,9 +683,9 @@ textarea,
   stroke: var(--ink-mute);
 }
 
-/* 反色闪（墨底上，.ss-flash）、禁用：环跟着记号一起转色，不再单独退一层 */
+/* 反色闪（墨底上，[data-flash]）、禁用：环跟着记号一起转色，不再单独退一层 */
 .ss-dot.is-muted .ss-dot__ring,
-.ss-flash .ss-dot__ring {
+[data-flash] .ss-dot__ring {
   stroke: currentColor;
 }
 
@@ -698,6 +708,11 @@ textarea,
 .ss-dot-btn:hover .ss-dot[data-hoverable] .ss-dot__halo,
 .ss-dot-btn:focus-visible .ss-dot[data-hoverable] .ss-dot__halo {
   opacity: 1;
+}
+
+/* 放在 surface 底上（表格的选择行，StateDot onSurface）：光晕换 track——hairline 在 surface 上看不见 */
+.ss-dot.is-on-surface .ss-dot__halo {
+  fill: var(--track);
 }
 
 .ss-dot-wrap {
@@ -1454,18 +1469,17 @@ textarea,
 }
 
 /* 图的上沿离机面上沿的距离（DESIGN「位置页 › 空态」表）：扫描中 190、没有 agent 目录 230、
-   来源里还没有 skill 270。这里按空态紧跟在页面头（占 50）下面算；落在表头下的（.mx-empty）
-   由 Matrix.css 再减去表头与来源筛选 */
+   来源里还没有 skill 270。减去上面已被占掉的高度（Empty above → --empty-above，默认 50＝紧跟页面头） */
 .ss-empty.has-art:has(> .ss-empty__art--scanning) {
-  padding-top: calc(190px - 50px);
+  padding-top: calc(190px - var(--empty-above, 50px));
 }
 
 .ss-empty.has-art:has(> .ss-empty__art--noDirs) {
-  padding-top: calc(230px - 50px);
+  padding-top: calc(230px - var(--empty-above, 50px));
 }
 
 .ss-empty.has-art:has(> .ss-empty__art--emptyFolder) {
-  padding-top: calc(270px - 50px);
+  padding-top: calc(270px - var(--empty-above, 50px));
 }
 
 .ss-empty.has-art .ss-empty__hint {
@@ -1505,6 +1519,12 @@ textarea,
   display: inline-flex;
 }
 
+/* 浮起的「在忙」一窗不接指针：它在 React 树里是触发键（格子）的子孙，接了指针，悬停、右键就会经 portal
+   冒回那一格——指针落在它上面时，事件落到下面真正的那一格 */
+.ss-floattoast:has(> .ss-toast--busy) {
+  pointer-events: none;
+}
+
 /* 过渡期：Matrix 的批量键还自己组合这个类（busyLockClass），页面迁到 BusySlot mode="dim" 后删 */
 .ss-busy {
   opacity: var(--busy-dim);
@@ -1524,9 +1544,9 @@ textarea,
 }
 
 /* ===== 13.1 刚变化的格子闪一下：120ms 反色再回落（ink 底、点转 face）=====
-   格子（或任何刚变化的块）加上 .ss-flash 即播一次；里面的 StateDot 跟着 currentColor 转 face。
-   调用方在 animationend 时拿掉这个类，下次变化再加 */
-.ss-flash {
+   格子（或任何刚变化的块）加上 data-flash 属性即播一次；里面的 StateDot 跟着 currentColor 转 face。
+   调用方在 animationend 时拿掉它，下次变化再加（公开钩子，同 data-checkrow） */
+[data-flash] {
   animation: ss-flash var(--motion-fast) var(--ease-mech);
 }
 
@@ -1541,8 +1561,15 @@ textarea,
   }
 }
 
-.ss-flash .ss-dot {
+[data-flash] .ss-dot {
   animation: ss-flash-dot var(--motion-fast) var(--ease-mech);
+}
+
+/* 闪的那一帧是墨底：不出悬停光晕——指针还停在格上时，墨底上会冒出一圈浅灰。
+   与悬停规则同一特异性、写在它后面 */
+[data-flash] .ss-dot-btn .ss-dot[data-hoverable] .ss-dot__halo {
+  opacity: 0;
+  transition: none;
 }
 
 @keyframes ss-flash-dot {
@@ -2287,8 +2314,8 @@ html:not([data-input="pointer"]) .ss-menuitem:focus-visible {
   }
 
   /* 反色闪退化为无：变化本身（点亮 / 熄灭）已即时可见 */
-  .ss-flash,
-  .ss-flash .ss-dot {
+  [data-flash],
+  [data-flash] .ss-dot {
     animation: none;
   }
 }

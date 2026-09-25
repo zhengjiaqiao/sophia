@@ -24,19 +24,11 @@
   transition: padding-bottom var(--dur-drawer) var(--ease-mech);
 }
 
-/* 来源胶囊（ChipRow 里的每一颗）：带右键菜单与锚点（data-origin） */
+/* 来源胶囊（ChipRow 里的每一颗）：带右键菜单与锚点（data-origin）。名字太长由 Chip 自己截断 */
 .mx-sourcechip {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
-}
-
-/* 名字太长（同名来源的区分片段也放不下）时截断，完整值在提示框里 */
-.mx-chiplabel {
-  display: block;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 新手提示条的插槽（来源筛选下、表头上；空态上）：外距由 HintStrip 自带（收起时归 0），插槽不另加 */
@@ -276,24 +268,9 @@
   height: var(--control-h);
 }
 
-/* 选择行的底已是 surface：光晕换 track（hairline 在 surface 上看不见） */
-.mx-selrow .ss-dot__halo {
-  fill: var(--track);
-}
-
 /* ===== 表身 ===== */
 .mx-body {
   position: relative;
-}
-
-/* 表头下的空态：图上沿离机面上沿仍按 DESIGN 空态表（230 / 270）。Empty 按紧跟页面头（占 50）算，
-   这里上面已占的是页面头 + 表头 145，有来源筛选时再加一行到 171：多占的让回去（DomainView 的 TableEmpty 按图给类） */
-.mx-emptyart--noDirs {
-  margin-top: calc(50px - 145px);
-}
-
-.mx-emptyart--emptyFolder {
-  margin-top: calc(50px - 171px);
 }
 
 /* 筛选无结果：表头下一句灰字（Note），左沿对齐名字 */
@@ -495,8 +472,9 @@
   cursor: default;
 }
 
-/* 键盘焦点：1px ink 环画在格里的点外 2（不用整格外框——那会压到邻格与行线） */
-.mx-cellbtn.ss-dot-btn:focus-visible {
+/* 键盘焦点：1px ink 环画在格里的点外 2（不用整格外框——那会压到邻格与行线）。
+   收掉 StateDotButton 默认的整颗外框：特异性要高过它的 :focus-visible */
+.mx-cell .mx-cellbtn:focus-visible {
   outline: 0;
 }
 
@@ -511,13 +489,6 @@
   margin: -8px 0 0 -8px;
   border: 1px solid var(--ink);
   pointer-events: none;
-}
-
-/* 刚变化的格子闪的是实心墨底上的目标状态：闪烁那 120ms 里不出悬停光晕——鼠标还停在格上时，
-   墨底上会冒出一圈浅灰 */
-.mx-cell.ss-flash .ss-dot-btn .ss-dot[data-hoverable] .ss-dot__halo {
-  opacity: 0;
-  transition: none;
 }
 
 /* 「只留这份」确认框标题下的两行：留下 / 移到废纸篓 + 那份的完整路径。

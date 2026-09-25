@@ -117,3 +117,110 @@ test("指针模式下不画焦点框、程序放焦点的落点不画框：规�
   assert.match(uiCss, /\[tabindex="-1"\]:focus-visible \{\s*outline: none;/);
   assert.doesNotMatch(read("src/App.css"), /html\[data-input="pointer"\] \*:focus-visible/);
 });
+
+// ===== 状态点：外层按钮、surface 底上的光晕、刚点亮的反色闪 =====
+
+const { StateDot } = await import("../src/ui/StateDot.tsx");
+const { StateDotButton } = await import("../src/ui/StateDotButton.tsx");
+
+test("StateDotButton：状态点的外层按钮是公开组件（命中至少 24、没有键面），属性原样落到 button 上", () => {
+  const html = render(StateDotButton, {
+    className: "mx-cellbtn",
+    "aria-label": "docx · Codex：未加上",
+    children: createElement(StateDot, { dot: "missing", hoverable: true }),
+  });
+  assert.match(
+    html,
+    /^<button type="button" class="ss-dot-btn mx-cellbtn" aria-label="docx · Codex：未加上"><span class="ss-dot-wrap"/,
+  );
+  assert.match(
+    render(StateDotButton, { children: "x" }),
+    /^<button type="button" class="ss-dot-btn">/,
+  );
+  // 页面不再手写这个类
+  assert.doesNotMatch(read("src/Matrix.tsx"), /ss-dot-btn/);
+});
+
+test("StateDot onSurface：surface 底上光晕换 track；页面不再覆盖 .ss-dot__halo", () => {
+  assert.match(
+    render(StateDot, { dot: "missing", hoverable: true, onSurface: true }),
+    /class="ss-dot ss-dot--missing is-on-surface"/,
+  );
+  assert.match(cssRule(uiCss, ".ss-dot.is-on-surface .ss-dot__halo"), /fill:\s*var\(--track\)/);
+  assert.doesNotMatch(read("src/Matrix.css"), /ss-dot__halo|\.ss-/);
+});
+
+test("刚点亮的反色闪：格子上的 data-flash 是公开钩子；闪的那一帧不出光晕由组件库自己做", () => {
+  const matrix = read("src/Matrix.tsx");
+  assert.match(matrix, /data-flash=\{flashing\.has\(key\) \? "" : undefined\}/);
+  assert.doesNotMatch(matrix, /ss-flash/);
+  assert.doesNotMatch(uiCss, /\.ss-flash\b/);
+  assert.match(cssRule(uiCss, "[data-flash] .ss-dot"), /animation:\s*ss-flash-dot/);
+});
+
+test("格子下方浮起的忙碌一句不接指针：Matrix 不再为它拦 portal 冒上来的悬停 / 右键", () => {
+  assert.match(uiCss, /\.ss-floattoast:has\(> \.ss-toast--busy\) \{\s*pointer-events: none;/);
+  assert.doesNotMatch(read("src/Matrix.tsx"), /\binside\(/);
+});
+
+// ===== 来源胶囊：长名截断、不可选的原因 =====
+
+const { Chip } = await import("../src/ui/Chip.tsx");
+
+test("Chip：名字最宽 220、放不下截断（计数完整）；不可选的原因经 ReasonTip", () => {
+  const label = cssRule(uiCss, ".ss-chip__label");
+  assert.match(label, /max-width:\s*220px/);
+  assert.match(label, /overflow:\s*hidden/);
+  assert.match(label, /text-overflow:\s*ellipsis/);
+  assert.match(cssRule(uiCss, ".ss-chip"), /min-width:\s*0;\s*max-width:\s*100%/);
+  const off = render(Chip, {
+    children: "WeiboAP",
+    disabled: true,
+    disabledReason: "这个来源里还没有 skill",
+  });
+  assert.match(
+    off,
+    /^<span class="ss-tipwrap is-explain"[^>]*><button type="button" class="ss-chip"/,
+  );
+  assert.match(off, /role="tooltip"[^>]*>这个来源里还没有 skill</);
+  // 页面不再包一层去截断
+  assert.doesNotMatch(read("src/Matrix.tsx") + read("src/Matrix.css"), /mx-chiplabel/);
+});
+
+// ===== 空态：上面已被占掉的高度 =====
+
+const { Empty } = await import("../src/ui/Empty.tsx");
+
+test("Empty above：有图时图的上沿按机面上沿量，调用方给上面已占的高度；表头下的空态不再用负外距去抵", () => {
+  const html = render(Empty, { description: "还没有 skill", art: "emptyFolder", above: 171 });
+  assert.match(html, /<div class="ss-empty has-art" style="--empty-above:171px">/);
+  // 不给就是紧跟页面头（50）；没有图时不写
+  assert.match(
+    render(Empty, { description: "x", art: "noDirs" }),
+    /<div class="ss-empty has-art">/,
+  );
+  assert.match(render(Empty, { description: "x", above: 90 }), /^<div class="ss-empty">/);
+  assert.match(
+    cssRule(uiCss, ".ss-empty.has-art:has(> .ss-empty__art--noDirs)"),
+    /padding-top:\s*calc\(230px - var\(--empty-above, 50px\)\)/,
+  );
+  const domain = read("src/DomainView.tsx");
+  assert.match(domain, /above=\{art === "noDirs" \? ABOVE_TABLE : ABOVE_TABLE_WITH_SOURCES\}/);
+  assert.doesNotMatch(read("src/Matrix.css"), /mx-emptyart/);
+  assert.doesNotMatch(domain, /多选纳入式/);
+});
+
+// ===== 等宽读数收节点 =====
+
+const { Mono } = await import("../src/ui/Mono.tsx");
+
+test("Mono 收节点：一段读数里加粗其中几个字仍是一块等宽；path 只对纯文本起作用", () => {
+  assert.equal(
+    render(Mono, {
+      inherit: true,
+      children: ["npx -y ", createElement("b", { key: "b" }, "@notionhq"), "/mcp"],
+    }),
+    '<span class="ss-mono ss-selectable ss-mono--inherit">npx -y <b>@notionhq</b>/mcp</span>',
+  );
+  assert.doesNotMatch(read("src/McpDiffPanel.tsx"), /<b>\s*<Mono/);
+});

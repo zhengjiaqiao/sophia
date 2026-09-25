@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Button } from "./Button.tsx";
 import { Spinner } from "./Spinner.tsx";
 import scanning from "../assets/empty-scanning.png";
@@ -65,6 +65,10 @@ export interface EmptyProps {
   secondary?: EmptyAction;
   /// 图在上（装饰）；不给就不放图
   art?: EmptyArt;
+  /// 有图时：图的上沿按机面上沿量（DESIGN「位置页 › 空态」表：扫描中 190、没有 agent 目录 230、
+  /// 来源里还没有 skill 270），这里给上面已被占掉的高度（px）。默认 50＝紧跟在页面头下；
+  /// 落在表头下的给页面头 + 表头（+ 来源筛选）的高度，不再拿负外距去抵
+  above?: number;
 }
 
 export function Empty({
@@ -75,6 +79,7 @@ export function Empty({
   primary,
   secondary,
   art,
+  above,
 }: EmptyProps) {
   const fallback = kind ? KIND_DEFAULTS[kind] : undefined;
   const description = given ?? fallback?.description;
@@ -85,8 +90,10 @@ export function Empty({
   const classes = ["ss-empty"];
   if (busy) classes.push("is-busy");
   if (art) classes.push("has-art");
+  const style =
+    art && above !== undefined ? ({ "--empty-above": `${above}px` } as CSSProperties) : undefined;
   return (
-    <div className={classes.join(" ")}>
+    <div className={classes.join(" ")} style={style}>
       {art ? (
         <img
           className={`ss-empty__art ss-empty__art--${art}`}

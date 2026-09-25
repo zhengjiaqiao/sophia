@@ -18,7 +18,6 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent as ReactMouseEvent,
   ReactNode,
   RefObject,
 } from "react";
@@ -44,6 +43,7 @@ import {
   PINNED_TIP_MS,
   Spinner,
   StateDot,
+  StateDotButton,
   TextField,
   TIP_DELAY_MS,
   Toast,
@@ -387,9 +387,8 @@ function SelDot({
 }) {
   const disabled = check.disabledReason !== undefined;
   const button = (
-    <button
-      type="button"
-      className={`ss-dot-btn mx-seldot${disabled ? " is-disabled" : ""}`}
+    <StateDotButton
+      className={`mx-seldot${disabled ? " is-disabled" : ""}`}
       aria-label={disabled ? `${check.label}：${check.disabledReason}` : check.label}
       aria-disabled={disabled || undefined}
       onClick={disabled || locked ? undefined : () => check.onToggle()}
@@ -397,15 +396,17 @@ function SelDot({
       {busy ? (
         <Spinner size={14} label={check.label} />
       ) : (
+        // 选择行的底已是 surface：光晕换 track（onSurface）
         <StateDot
           dot={check.checked ? on : "missing"}
           hoverable={!disabled}
           muted={disabled}
+          onSurface
           title=""
           label={check.checked ? "已加上" : "未加上"}
         />
       )}
-    </button>
+    </StateDotButton>
   );
   return (
     // 没有可改的格子：按下当即说明原因（同禁用的键），不是按下即收起
@@ -943,9 +944,7 @@ export default function Matrix(props: MatrixProps) {
           data-drawer-row=""
           className={classes.join(" ")}
           style={gridStyle}
-          onMouseEnter={(e) => {
-            if (inside(e)) setHover({ row: row.key, col: null });
-          }}
+          onMouseEnter={() => setHover({ row: row.key, col: null })}
           onMouseLeave={() => setHover(null)}
           // `⌘` 点行＝加选 / 去掉这一行（DESIGN「勾选框」）：点在格子、名字上也是，不再执行格子自己的动作；
           // 不带 ⌘ 时点行的其余地方不勾选（表格里勾选只经由行首那颗框）
@@ -958,7 +957,6 @@ export default function Matrix(props: MatrixProps) {
             toggleRow(row);
           }}
           onContextMenu={(e) => {
-            if (!inside(e)) return;
             const el = e.currentTarget;
             contextMenuHandler(() => menuItems(el), {
               onOpen: () => setMenuRow(row.key),
@@ -1081,12 +1079,9 @@ export default function Matrix(props: MatrixProps) {
           {columns.map((col, c) => {
             const view = row.cells[col.id] ?? null;
             const key = cellKey(row.key, col.id);
-            const cellClasses = ["mx-cell"];
-            if (flashing.has(key)) cellClasses.push("ss-flash");
             const focused = focus.r === r && focus.c === c;
-            const enter = (e: ReactMouseEvent<HTMLElement>) => {
-              // 格子下方浮起的忙碌一句挂在 body 上，但在 React 树里是这一格的子孙：指针进它不算进这一格
-              if (!inside(e)) return;
+            // 格子下方浮起的忙碌一句（BusySlot float）在 React 树里是这一格的子孙，但它不接指针，进不了这一格
+            const enter = () => {
               setHover({ row: row.key, col: col.id });
               armTip(key);
             };
@@ -1096,7 +1091,9 @@ export default function Matrix(props: MatrixProps) {
                 key={col.id}
                 data-col={col.id}
                 data-cellkey={key}
-                className={cellClasses.join(" ")}
+                className="mx-cell"
+                // 刚变化的格：反色闪一次（ui 的公开钩子），animationend 时摘掉
+                data-flash={flashing.has(key) ? "" : undefined}
                 onMouseEnter={enter}
                 onMouseLeave={() => {
                   setHover({ row: row.key, col: null });
@@ -1139,9 +1136,8 @@ export default function Matrix(props: MatrixProps) {
                       placement={r === 0 ? "bottom" : "top"}
                       shortcut={view.clickable ? "空格" : undefined}
                     >
-                      <button
-                        type="button"
-                        className={`ss-dot-btn mx-cellbtn${view.clickable ? "" : " is-inert"}`}
+                      <StateDotButton
+                        className={`mx-cellbtn${view.clickable ? "" : " is-inert"}`}
                         data-cell={`${r}:${c}`}
                         tabIndex={focused ? 0 : -1}
                         aria-label={`${row.name} · ${col.name}：${dotText[view.dot]}。${view.tip}`}
@@ -1166,7 +1162,7 @@ export default function Matrix(props: MatrixProps) {
                           title=""
                           label={dotText[view.dot]}
                         />
-                      </button>
+                      </StateDotButton>
                     </Tooltip>
                   </BusySlot>
                 )}
@@ -1299,10 +1295,6 @@ function useIdentityKey(value: unknown): number {
   return ref.current.n;
 }
 
-/// 事件真发生在这个元素的 DOM 里（不是经 portal 挂在 body 上、只在 React 树里算它子孙的浮窗）
-const inside = (e: { currentTarget: Element; target: EventTarget }) =>
-  e.target instanceof Node && e.currentTarget.contains(e.target);
-
 const rootOf = (probe: HTMLElement) => probe.closest(".mx");
 const rowEl = (probe: HTMLElement, rowKey: string) =>
   rootOf(probe)?.querySelector(`.mx-row[data-row="${CSS.escape(rowKey)}"]`);
@@ -1381,13 +1373,13 @@ function SourceChips({ selected, onSelect, items }: NonNullable<MatrixProps["sou
           }}
         >
           <Tooltip content={<SourceChipTip item={item} />}>
+            {/* 名字太长（同名来源的区分片段也放不下）时 Chip 自己截断，完整值在提示框里 */}
             <Chip
               selected={selected.includes(item.id)}
               count={item.count}
               onClick={() => onSelect(pickOrigin(item.id))}
             >
-              {/* 名字太长（同名来源的区分片段也放不下）时截断，完整值在提示框里 */}
-              <span className="mx-chiplabel">{item.label}</span>
+              {item.label}
             </Chip>
           </Tooltip>
         </span>

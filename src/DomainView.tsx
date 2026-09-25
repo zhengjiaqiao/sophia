@@ -72,7 +72,8 @@ export interface DomainViewProps {
   filterText: string;
   onFilterText: (text: string) => void;
   onClearFilter: () => void;
-  /// 来源筛选中的来源；空＝全部。多选纳入式，加完来源时一次选中新加的几个
+  /// 来源筛选中的来源；空＝全部。单选 + `全部`（originFilter.ts）：数组里至多一个；
+  /// 加完来源时只加了一个就选中它，加了几个停在 `全部`
   originFilter: readonly string[];
   onOriginFilter: (next: string[]) => void;
   /// 这个位置已订阅、但表格里一行都没有的来源（id、名字、路径）：照样在来源筛选里有一项
@@ -558,8 +559,13 @@ export default function DomainView(props: DomainViewProps) {
 /// 表格里的空态（表头照常在上面）：
 /// - 筛选无结果不放图：表头下一句灰字（`Note`），句后 `清除筛选`（默认键紧凑，次要入口——筛选框内的 ✕ 是主入口）
 /// - 其余是图 + 一句现状（`Empty`）；来源里还没有 skill 时 `在访达中显示 ↗`（浅键，`leave`）。
-///   图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；图的上沿按空态表落在表头下（Matrix.css）
+///   图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；图的上沿按空态表落在表头下——
+///   上面已占页面头 + 表头 145，有来源筛选（emptyFolder 时一定有）再加一行到 171（`Empty above`）
 /// `+ 来源` 在页面头，不在这里重复
+/// 表头下的空态上面已被占掉的高度：页面头 + 表头 145；有来源筛选时再加一行到 171
+const ABOVE_TABLE = 145;
+const ABOVE_TABLE_WITH_SOURCES = 171;
+
 export function TableEmpty({
   text,
   hint,
@@ -579,9 +585,13 @@ export function TableEmpty({
     );
   }
   return (
-    <div className={`mx-emptyart--${art}`}>
-      <Empty description={text} hint={hint} secondary={action} art={art} />
-    </div>
+    <Empty
+      description={text}
+      hint={hint}
+      secondary={action}
+      art={art}
+      above={art === "noDirs" ? ABOVE_TABLE : ABOVE_TABLE_WITH_SOURCES}
+    />
   );
 }
 
