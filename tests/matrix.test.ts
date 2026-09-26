@@ -742,22 +742,37 @@ test("原件格与 MCP 的 ⦿ 可点（DESIGN「删除原件」）：skill 先�
   assert.match(mcp, /view\.dot !== "own" && source !== null/);
 });
 
-test("AC13 多位置：给了 placeLabel，名称后多一列「位置」（72），来源让到 80，面板宽仍 776；每行写自己的位置", () => {
+test("AC13 多位置：给了 placeLabel，名称后多一列「位置」，面板宽仍 776；每行写自己的位置", () => {
   const rows = [
     { ...base.rows[0], key: "global|u|docx", place: "用户级" },
     { ...base.rows[0], key: "project:/p/CardBox|u|docx", place: "CardBox" },
   ];
   const html = render(Matrix, { ...base, rows, placeLabel: "位置" });
-  assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 72px 80px 88px 88px/);
   assert.match(
     html,
     /class="mx-head__name">[^]*class="mx-head__place"><button type="button" class="mx-headbtn">位置[^]*class="mx-head__origin"/,
   );
   const places = [...html.matchAll(/class="mx-place"[^>]*>([^<]*)</g)].map((m) => m[1]);
   assert.deepEqual(places, ["CardBox", "用户级"]);
-  // 4 个 agent 时名称列 238；MCP 5 列时仍有 150
-  assert.equal(34 + 72 + 80 + 4 * 88 + 238, PANEL_W);
-  assert.equal(34 + 72 + 80 + 5 * 88 + 150, PANEL_W);
+});
+
+test("多位置的列宽：地方够时位置 88、来源 144 照常宽，名称列拿余下的；agent 多了才先收来源、再收位置，名称列先保住 246", () => {
+  const cols = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ ...base.columns[0], id: `c${i}` }));
+  const template = (n: number) =>
+    render(Matrix, { ...base, columns: cols(n), placeLabel: "位置" }).match(
+      /grid-template-columns:([^;"]*)/,
+    )?.[1];
+  // 2 个 agent（产品负责人实机：中间空一大块、位置与来源却截断）：两列照常宽
+  assert.equal(template(2), "34px minmax(0, 1fr) 88px 144px 88px 88px");
+  // 3 个：名称列恰好 246，两列仍照常宽
+  assert.equal(template(3), "34px minmax(0, 1fr) 88px 144px 88px 88px 88px");
+  assert.equal(776 - 34 - 88 - 144 - 3 * 88, 246);
+  // 4 个：来源先收到 80、位置再收到 72，名称列 238
+  assert.equal(template(4), "34px minmax(0, 1fr) 72px 80px 88px 88px 88px 88px");
+  // 5 个（MCP 项目带 Local）：两列都到下限，名称列 150
+  assert.equal(template(5), "34px minmax(0, 1fr) 72px 80px 88px 88px 88px 88px 88px");
+  assert.equal(776 - 34 - 72 - 80 - 5 * 88, 150);
 });
 
 test("AC17 单一位置（没给 placeLabel）：没有位置列，列宽与改版前相同", () => {

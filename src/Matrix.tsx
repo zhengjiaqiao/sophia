@@ -57,10 +57,12 @@ import "./Matrix.css";
 const CHECK_W = 34;
 const NAME_W = 246;
 const ORIGIN_W = 144;
-/// 多位置时名称后的「位置」列 72，来源列让到 80（spec 2026-09-26-object-first-navigation R6）：
-/// MCP 项目带 Local 时有 5 个 agent 列，名称列仍留 150，放得下「名字 + 2 处不支持」；截掉的位置名、来源名在提示框里
-const PLACE_W = 72;
-const ORIGIN_W_WITH_PLACE = 80;
+/// 多位置时名称后的「位置」列（spec 2026-09-26-object-first-navigation R6）：地方够时位置 88、来源照常 144；
+/// agent 列多了放不下时，先把来源收到 80、再把位置收到 72，先保住名称列 246——MCP 项目带 Local 时 5 个 agent 列，
+/// 两列都到下限，名称列仍留 150，放得下「名字 + 2 处不支持」。截掉的位置名、来源名在提示框里
+const PLACE_W = 88;
+const PLACE_W_MIN = 72;
+const ORIGIN_W_MIN = 80;
 const COL_W = 88;
 /// 名字前的拉手列：拉手 18 + 6（Matrix.css 的 `--mx-handle-col` 同值）
 const HANDLE_W = 24;
@@ -73,6 +75,19 @@ const MAX_AGENTS = 4;
 /// Skills 与 MCP 同一个固定面板宽度（DESIGN「位置页 › 面板宽度」）：页面头右端的筛选框与 `+ 来源`、
 /// bar 插槽、表格右沿同一条线，切页签不跳。Matrix.css 里页面头的 `max-width` 与它同值
 export const PANEL_W = CHECK_W + NAME_W + ORIGIN_W + MAX_AGENTS * COL_W;
+
+/// 多位置时位置列与来源列的宽：先给名称列留足 246，不够时依次收来源、收位置，都到下限就不再收
+export function placeWidths(agentColumns: number): { place: number; origin: number } {
+  const free = PANEL_W - CHECK_W - agentColumns * COL_W;
+  let place = PLACE_W;
+  let origin = ORIGIN_W;
+  let short = NAME_W - (free - place - origin);
+  const o = Math.max(0, Math.min(short, origin - ORIGIN_W_MIN));
+  origin -= o;
+  short -= o;
+  place -= Math.max(0, Math.min(short, place - PLACE_W_MIN));
+  return { place, origin };
+}
 
 /// 点了做不了的格子后，说明停留的时长：与禁用控件按下钉出的提示框同一个（ui/Tooltip）
 export { PINNED_TIP_MS };
@@ -511,7 +526,7 @@ export default function Matrix(props: MatrixProps) {
     // 名称列吸收面板里余下的宽度：4 列时 246、少于 4 列更宽、5 列时 158
     "minmax(0, 1fr)",
     ...(placeLabel !== undefined
-      ? [`${PLACE_W}px`, `${ORIGIN_W_WITH_PLACE}px`]
+      ? [`${placeWidths(columns.length).place}px`, `${placeWidths(columns.length).origin}px`]
       : [`${ORIGIN_W}px`]),
     ...columns.map(() => `${COL_W}px`),
   ].join(" ");
