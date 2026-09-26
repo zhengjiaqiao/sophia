@@ -57,9 +57,10 @@ import "./Matrix.css";
 const CHECK_W = 34;
 const NAME_W = 246;
 const ORIGIN_W = 144;
-/// 多位置时名称后的「位置」列（与 agent 列同宽），来源列让到 112（spec 2026-09-26-object-first-navigation R6）
-const PLACE_W = 88;
-const ORIGIN_W_WITH_PLACE = 112;
+/// 多位置时名称后的「位置」列 72，来源列让到 80（spec 2026-09-26-object-first-navigation R6）：
+/// MCP 项目带 Local 时有 5 个 agent 列，名称列仍留 150，放得下「名字 + 2 处不支持」；截掉的位置名、来源名在提示框里
+const PLACE_W = 72;
+const ORIGIN_W_WITH_PLACE = 80;
 const COL_W = 88;
 /// 名字前的拉手列：拉手 18 + 6（Matrix.css 的 `--mx-handle-col` 同值）
 const HANDLE_W = 24;

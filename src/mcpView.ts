@@ -1,4 +1,5 @@
 import { presentView, viewOf, type McpCellView, type McpDotState } from "./mcpCellState.ts";
+import { shortPath } from "./pathText.ts";
 import type { McpDiff, McpEntry, McpFieldValue, McpLocation, McpOverview } from "./types.ts";
 
 export interface McpDomainRow {
@@ -263,3 +264,110 @@ export function differingFields(row: McpDomainRow, targetIds: Set<string>): stri
 
 /// 行的来源位置（「来源」列写它）：第一份定义所在的位置（扫描按位置顺序产出条目，第一份就是「原件」那一格）
 export const mcpGroupOf = (row: McpDomainRow): string => row.entries[0]?.sourceId ?? "";
+
+// ===== 多位置（spec 2026-09-26-object-first-navigation R6 R7）=====
+// 范围里可能不止一个位置（`全部` = 用户级 + 选中的项目）。每个位置一页（`McpDomain`），这里把几页并成一张表：
+// 行带上自己的位置（同一个服务在两处就是两行），列按「agent + 是不是 Local」归并。
+// 位置 id 与 core 同一写法：用户级 `<harness>`，项目 `project:<路径>::<harness>`（Claude Code 的 Local 是
+// `::claude-code:local`），所以 id 的末段就是列：用户级的 User 与项目的 Project 同一列，Local 只有项目才有
+
+/// 位置 id → 它归到哪一列
+export function mcpColumnOf(locationId: string): string {
+  const at = locationId.lastIndexOf("::");
+  return at < 0 ? locationId : locationId.slice(at + 2);
+}
+
+/// 行键：位置 + 服务名（同名服务在一个位置里合成一行）
+export const mcpRowKey = (domainKey: string, name: string) => `${domainKey}|${name}`;
+
+export interface McpPlacedRow extends McpDomainRow {
+  domainKey: string;
+}
+
+export interface McpColumn {
+  /// 列 id：位置 id 的末段（`claude-code` / `claude-code:local` / `codex`）
+  id: string;
+  harnessId: string;
+  /// 列头：位置名里 agent 那一段
+  name: string;
+  /// 列头第二行：同一个 agent 有两列（Local / Project）时才有，经 `Cap` 显示为 `LOCAL` / `PROJECT`；
+  /// 一列里混着用户级的 User 与项目的 Project 时不写
+  scope?: string;
+  /// 列在句子里的名字（提示框、提示条、读屏）：`Claude Code local` / `Codex`
+  sentence: string;
+  /// 列头提示框与选择行用的名字：只有一个位置时是那个位置名（`Claude Code · Local MCPs`），否则同 `sentence`
+  label: string;
+  /// 位置 key → 这一列在那个位置的配置位置
+  targets: Map<string, McpLocation>;
+}
+
+export interface McpTable {
+  /// 并进来的各页（按范围的次序）
+  pages: McpDomain[];
+  /// 位置 key → 位置列里写的名字；只有一个位置时是空的（不出位置列）
+  places: Map<string, string>;
+  columns: McpColumn[];
+  rows: McpPlacedRow[];
+}
+
+/// 位置名：用户级 / 项目文件夹名（`添加 MCP 来源到 CardBox`）；WeiboAP agent 沿用侧栏的名字
+export const mcpPlaceName = (page: McpDomain): string =>
+  page.key === "global"
+    ? "用户级"
+    : page.targets.some((t) => t.harnessId === "weiboap")
+      ? page.label
+      : (page.key
+          .replace(/^project:/, "")
+          .split(/[/\\]+/)
+          .filter(Boolean)
+          .pop() ?? page.label);
+
+const headOf = (l: McpLocation) => l.label.split(" · ")[0];
+const scopeOf = (l: McpLocation) =>
+  l.label
+    .split(" · ")[1]
+    ?.replace(/ MCPs$/, "")
+    .toLowerCase();
+
+export function mergeMcpDomains(pages: ReadonlyArray<McpDomain>): McpTable {
+  const byId = new Map<string, Omit<McpColumn, "scope" | "sentence" | "label">>();
+  for (const page of pages) {
+    for (const target of page.targets) {
+      const id = mcpColumnOf(target.id);
+      const col = byId.get(id) ?? {
+        id,
+        harnessId: target.harnessId,
+        name: headOf(target),
+        targets: new Map<string, McpLocation>(),
+      };
+      col.targets.set(page.key, target);
+      byId.set(id, col);
+    }
+  }
+  const raw = [...byId.values()];
+  const columns = raw.map((col): McpColumn => {
+    const clash = raw.filter((other) => other.name === col.name).length > 1;
+    const scopes = new Set([...col.targets.values()].map(scopeOf));
+    const scope = clash && scopes.size === 1 ? [...scopes][0] : undefined;
+    const sentence = scope ? `${col.name} ${scope}` : col.name;
+    const only = col.targets.size === 1 ? [...col.targets.values()][0] : undefined;
+    return { ...col, scope, sentence, label: only?.label ?? sentence };
+  });
+  const places = new Map<string, string>();
+  if (pages.length > 1) {
+    const names = pages.map(mcpPlaceName);
+    pages.forEach((page, i) => {
+      const dup = names.filter((n) => n === names[i]).length > 1 && page.key !== "global";
+      places.set(
+        page.key,
+        dup ? `${names[i]} · ${shortPath(page.key.replace(/^project:/, ""))}` : names[i],
+      );
+    });
+  }
+  return {
+    pages: [...pages],
+    places,
+    columns,
+    rows: pages.flatMap((page) => page.rows.map((row) => ({ ...row, domainKey: page.key }))),
+  };
+}

@@ -389,3 +389,102 @@ test("差异摘要：取不到、读不出来或比不了时说清楚", () => {
     "认证头要到运行时才生成，无法逐字比对",
   );
 });
+
+// ===== 多位置（spec 2026-09-26-object-first-navigation R6 AC16）：位置 id 与 core 同一写法 =====
+
+const { mergeMcpDomains, mcpColumnOf, mcpRowKey } = await import("../src/mcpView.ts");
+
+const CB = "project:/w/CardBox";
+const real = (id: string, label: string, harnessId: string, domain: string): McpLocation => ({
+  id,
+  label,
+  harnessId,
+  domain,
+  path: `/${id}`,
+});
+const userCC = real("claude-code", "Claude Code · User MCPs", "claude-code", "global");
+const userCX = real("codex", "Codex", "codex", "global");
+const cbLocal = real(`${CB}::claude-code:local`, "Claude Code · Local MCPs", "claude-code", CB);
+const cbProject = real(`${CB}::claude-code`, "Claude Code · Project MCPs", "claude-code", CB);
+const cbCX = real(`${CB}::codex`, "Codex", "codex", CB);
+const both = mcpDomains(
+  overview(
+    [userCC, userCX, cbLocal, cbProject, cbCX],
+    [
+      entry("claude-code", "notion", {
+        "claude-code": "own",
+        codex: "missing",
+        [cbLocal.id]: "missing",
+        [cbProject.id]: "missing",
+        [cbCX.id]: "missing",
+      }),
+      entry(cbProject.id, "notion", {
+        "claude-code": "equal",
+        codex: "missing",
+        [cbLocal.id]: "missing",
+        [cbProject.id]: "own",
+        [cbCX.id]: "missing",
+      }),
+    ],
+  ),
+);
+
+test("位置 id 的末段就是列：Local 与 Project 分开，用户级的 Claude Code 与项目的 Project 同一列", () => {
+  assert.equal(mcpColumnOf("claude-code"), "claude-code");
+  assert.equal(mcpColumnOf(cbProject.id), "claude-code");
+  assert.equal(mcpColumnOf(cbLocal.id), "claude-code:local");
+  assert.equal(mcpColumnOf(cbCX.id), "codex");
+});
+
+test("AC16 全部：Claude Code 主列（用户级行是 User、项目行是 Project）+ 只有项目才有的 LOCAL 列", () => {
+  const table = mergeMcpDomains(both);
+  assert.deepEqual(
+    table.columns.map((c) => [c.id, c.name, c.scope ?? null, [...c.targets.keys()]]),
+    [
+      ["claude-code", "Claude Code", null, ["global", CB]],
+      ["codex", "Codex", null, ["global", CB]],
+      ["claude-code:local", "Claude Code", "local", [CB]],
+    ],
+  );
+  const local = table.columns.find((c) => c.id === "claude-code:local")!;
+  const userRow = table.rows.find((r) => r.domainKey === "global")!;
+  const cbRow = table.rows.find((r) => r.domainKey === CB)!;
+  assert.equal(
+    local.targets.get(userRow.domainKey),
+    undefined,
+    "用户级行在 LOCAL 列上没有位置：留空",
+  );
+  assert.equal(local.targets.get(cbRow.domainKey)?.id, cbLocal.id);
+});
+
+test("AC13 同一个服务在用户级与 CardBox：两行，行键带位置、不重复；位置名写在每行上", () => {
+  const table = mergeMcpDomains(both);
+  const keys = table.rows.map((r) => mcpRowKey(r.domainKey, r.name));
+  assert.deepEqual(keys, ["global|notion", `${CB}|notion`]);
+  assert.deepEqual(
+    table.rows.map((r) => table.places.get(r.domainKey)),
+    ["用户级", "CardBox"],
+  );
+});
+
+test("AC17 只有一个项目：列与改版前相同（Local / Project 两列带第二行），没有位置名", () => {
+  const table = mergeMcpDomains(both.filter((d) => d.key === CB));
+  assert.equal(table.places.size, 0);
+  assert.deepEqual(
+    table.columns.map((c) => [c.name, c.scope ?? null, c.label]),
+    [
+      ["Claude Code", "local", "Claude Code · Local MCPs"],
+      ["Claude Code", "project", "Claude Code · Project MCPs"],
+      ["Codex", null, "Codex"],
+    ],
+  );
+  // 只有用户级：一行一列，没有第二行
+  const user = mergeMcpDomains(both.filter((d) => d.key === "global"));
+  assert.deepEqual(
+    user.columns.map((c) => [c.name, c.scope ?? null]),
+    [
+      ["Claude Code", null],
+      ["Codex", null],
+    ],
+  );
+});

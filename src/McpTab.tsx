@@ -30,18 +30,26 @@ import { matchesFilter } from "./rowFilter";
 import { mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { LocationFrame } from "./LocationFrame";
+import { PlacePicker } from "./ScopeBar";
 import {
   cellViewOf,
   differingFields,
   differingSourceIds,
+  mcpColumnOf,
   mcpDomains,
   mcpGroupOf,
+  mcpPlaceName,
+  mcpRowKey,
+  mergeMcpDomains,
   pickChoices,
   pickTip,
   sourceForMissing,
   sourceForMissingTarget,
+  type McpColumn,
   type McpDomain,
   type McpDomainRow,
+  type McpPlacedRow,
+  type McpTable,
 } from "./mcpView";
 import { Confirm, CornerToast, Mono, Tag, Toast, ToastCount } from "./ui";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
@@ -83,9 +91,12 @@ import "./McpTab.css";
 /// 3. **差异是行级、不是格级**——`2 份不一样` 是服务名后的纯文字记号（不是键，提示框给差异字段名）；
 ///    点它（或名字、拉手）拉开这一行的抽屉，不同的字段是抽屉里的一段。传输方式是服务的属性，也在抽屉里（D7）
 /// 4. **批量或跨域写入要确认一道**（跨域会把请求头和令牌一并复制过去）；同域单格写入不确认，删除都确认
+/// 5. **范围里可以不止一个位置**（`全部`，spec 2026-09-26-object-first-navigation R6）：几页并成一张表
+///    （`mergeMcpDomains`），行带位置、列按 agent + 是不是 Local 归并；每一格的判断照旧在这一行自己那一页里做
 
 export interface McpTabProps {
-  selectedKey: string;
+  /// 范围里的位置（域 key，见 shell/nav `locationsOf`）：一个时与改版前的单一位置页相同
+  locations: ReadonlyArray<string>;
   onError: (error: string) => void;
   /// 扫描、写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
@@ -96,8 +107,8 @@ export interface McpTabProps {
   scopeBar?: ReactNode;
 }
 
-/// 行键：同名服务在一个域里合成一行
-const rowKeyOf = (row: McpDomainRow) => row.name;
+/// 行键：同名服务在一个位置里合成一行；不同位置是不同的行
+const rowKeyOf = (row: McpPlacedRow) => mcpRowKey(row.domainKey, row.name);
 
 /// 传输方式：只写真实的传输方式（DESIGN「主视图」）
 const transportText = (entry: McpEntry): string | null =>
@@ -130,17 +141,7 @@ const columnNames = (targets: McpLocation[]): Map<string, string> =>
 const groupLabel = (l: McpLocation | undefined, id: string): string =>
   l ? mcpLocationName(l) : id;
 
-/// 位置名：用户级 / 项目文件夹名（`添加 MCP 来源到 CardBox`）；WeiboAP agent 沿用侧栏的名字
-const placeName = (page: McpDomain): string =>
-  page.key === "global"
-    ? "用户级"
-    : page.targets.some((t) => t.harnessId === "weiboap")
-      ? page.label
-      : (page.key
-          .replace(/^project:/, "")
-          .split(/[/\\]+/)
-          .filter(Boolean)
-          .pop() ?? page.label);
+const placeName = mcpPlaceName;
 
 /// 还没有页的位置的名字：用户级 / 项目文件夹名
 const keyName = (key: string): string =>
@@ -206,7 +207,7 @@ const anchorNow = (): AnchorRect | undefined => {
 };
 
 export default function McpTab({
-  selectedKey,
+  locations,
   onError,
   onBusy,
   refreshKey,
@@ -224,10 +225,26 @@ export default function McpTab({
   // 来源管理页（页面头的 `管理来源`、来源项右键「管理来源」）开着没有；回到它时新来源那几行闪一下
   const [manageOpen, setManageOpen] = useState(false);
   const [manageFlash, setManageFlash] = useState<string[]>([]);
-  const openAdd = useCallback(() => {
+  // 来源管理页、添加来源页作用于哪个位置（R8）：只有一个位置时就是它；不止一个时先在选位置浮层里选
+  const multi = locations.length > 1;
+  const scopeKey = locations.join("\n");
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
+  const sourceKey = !multi ? (locations[0] ?? "global") : (pickedKey ?? locations[0]);
+  const [placePick, setPlacePick] = useState<{
+    anchor: HTMLElement;
+    then: "add" | "manage";
+  } | null>(null);
+  const openAddAt = useCallback((key: string) => {
+    setPickedKey(key);
     addFromManage.current = false;
     setAddOpen(true);
   }, []);
+  /// `+ 来源` / 菜单「添加来源…」：多个位置时先选位置
+  const openAdd = (at?: HTMLElement | null) => {
+    if (!multi) return openAddAt(sourceKey);
+    const anchor = at ?? document.querySelector<HTMLElement>('[data-source-key="add"] button');
+    if (anchor) setPlacePick({ anchor, then: "add" });
+  };
   const closeAdd = useCallback(() => {
     setAddOpen(false);
     if (addFromManage.current) {
@@ -241,7 +258,7 @@ export default function McpTab({
     addFromManage.current = true;
     setAddOpen(true);
   }, []);
-  usePageCommand("add-source", openAdd);
+  usePageCommand("add-source", () => openAdd());
   const [pane, setPane] = useState<Pane | null>(null);
   // 删除的确认框（点了 ⦿，或选择行全有时按下）
   const [deletePane, setDeletePane] = useState<DeletePane | null>(null);
@@ -386,9 +403,11 @@ export default function McpTab({
   const domains = useMemo(() => (overview ? mcpDomains(overview) : []), [overview]);
   domainsRef.current = domains;
 
-  // 提示与弹层只属于当次选择；换一个位置时勾选清空、收起来源管理页
+  // 提示与弹层只属于当次选择；范围里的位置变了时勾选清空、收起来源管理页
   useEffect(() => {
     setManageOpen(false);
+    setPlacePick(null);
+    setPickedKey(null);
     setPane(null);
     setDeletePane(null);
     setPick(null);
@@ -400,14 +419,24 @@ export default function McpTab({
     // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
     setSelected(new Set());
     setUndo(null);
-  }, [selectedKey]);
+  }, [scopeKey]);
 
-  const page: McpDomain | null = domains.find((d) => d.key === selectedKey) ?? null;
+  // 范围里各位置的页（用户级在前）；这个位置一个 MCP 配置位置都没有时不在里面
+  const pages = locations.flatMap((key) => domains.find((d) => d.key === key) ?? []);
+  const table = useMemo(
+    () => mergeMcpDomains(pages),
+    // 页随每一轮扫描换新；范围不变时只跟着扫描结果走
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [domains, scopeKey],
+  );
+  /// 这一行自己那一页（格的判断、同名定义、差异都在一页里做）
+  const pageOf = (row: McpPlacedRow): McpDomain => pages.find((d) => d.key === row.domainKey)!;
+  const sourcePage: McpDomain | null = pages.find((d) => d.key === sourceKey) ?? null;
 
-  // ---- 这个位置订阅的 MCP 来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
-  const domainRef: DomainRef = page
-    ? { key: page.key, label: placeName(page) }
-    : { key: selectedKey, label: keyName(selectedKey) };
+  // ---- 来源管理页、添加来源页那个位置订阅的 MCP 来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
+  const domainRef: DomainRef = sourcePage
+    ? { key: sourcePage.key, label: placeName(sourcePage) }
+    : { key: sourceKey, label: keyName(sourceKey) };
   const domainLocations = useMemo(
     () => (overview?.locations ?? []).filter((l) => l.domain === domainRef.key),
     [overview, domainRef.key],
@@ -439,6 +468,8 @@ export default function McpTab({
       setManageFlash(justAdded.map((e) => e.id));
       return;
     }
+    // 加在哪个位置，就闪那个位置的新行
+    const page = sourcePage;
     if (!page) return;
     const ids = addedOrigins(
       justAdded.map((e) => e.id),
@@ -462,7 +493,9 @@ export default function McpTab({
       setFilterText("");
       // 新行混在全部里，格闪一下交代「就是这些」
       setFlash({
-        keys: added.flatMap((r) => page.targets.map((t) => cellKey(rowKeyOf(r), t.id))),
+        keys: added.flatMap((r) =>
+          page.targets.map((t) => cellKey(mcpRowKey(page.key, r.name), mcpColumnOf(t.id))),
+        ),
         nonce: Date.now(),
       });
     } else {
@@ -507,6 +540,11 @@ export default function McpTab({
   const locationOf = (id: string): McpLocation | undefined =>
     overview?.locations.find((location) => location.id === id);
   const labelOf = (id: string) => locationOf(id)?.label ?? id;
+  /// 一个位置里的一个服务在表里是哪一行、哪一列（写入、删除的结果按位置 id 回来）
+  const rowKeyAt = (name: string, locationId: string) =>
+    mcpRowKey(locationOf(locationId)?.domain ?? "global", name);
+  const cellKeyAt = (name: string, locationId: string) =>
+    cellKey(rowKeyAt(name, locationId), mcpColumnOf(locationId));
 
   const reveal = async (path: string) => {
     try {
@@ -552,7 +590,7 @@ export default function McpTab({
   const keyAgent = (keyId: string) =>
     keyId === "all"
       ? "所有 agent"
-      : ((page ? columnNames(page.targets).get(keyId) : undefined) ?? labelOf(keyId));
+      : (table.columns.find((c) => c.id === keyId)?.sentence ?? labelOf(keyId));
 
   /// 写一批（已经确认过或不需要确认）。keyId 给了就把结果浮在那颗键下。
   /// 单格：写的时候那一格灰着，写成闪一下。批量（按键）：格子同时变成新状态、不闪；
@@ -564,7 +602,7 @@ export default function McpTab({
     keyId?: string,
     reversible = true,
   ) => {
-    const keys = preview.actions.map((a) => cellKey(a.name, a.targetId));
+    const keys = preview.actions.map((a) => cellKeyAt(a.name, a.targetId));
     const single = keyId === undefined;
     setPane(null);
     // 批量开始时收起单格那一窗：一次只一条，撤销入口不混
@@ -602,7 +640,7 @@ export default function McpTab({
       const created = result.entries.filter((e) => e.outcome === "created");
       const failed = result.entries.filter((e) => e.outcome === "failed");
       if (single)
-        setFlash({ keys: created.map((e) => cellKey(e.name, e.targetId)), nonce: Date.now() });
+        setFlash({ keys: created.map((e) => cellKeyAt(e.name, e.targetId)), nonce: Date.now() });
       const text = toastFor("write", {
         done: itemsOf(created),
         failed: itemsOf(failed).map((item, i) => ({
@@ -614,7 +652,14 @@ export default function McpTab({
       // 单格：那一格的键、行键与列（撤销后闪那一格；撤不了时说明出在那一格下）。一份都没写成时
       // 仍锚在被点的那一格上（撤销的结果不落右下）
       const at = created[0] ?? preview.actions[0];
-      const one = single && at ? { keys, rowKey: at.name, columnId: at.targetId } : undefined;
+      const one =
+        single && at
+          ? {
+              keys,
+              rowKey: rowKeyAt(at.name, at.targetId),
+              columnId: mcpColumnOf(at.targetId),
+            }
+          : undefined;
       // 单格所在的行已说明对象：只写 `✓ 写进 [Codex] · 撤销`（撤不了时的说明同样不重复服务名）
       const rowText = one ? toastFor("write", { done: itemsOf(created), omitNames: true }) : text;
       const undo = undoId ? () => void undoWrite(undoId, keyId, rowText, one) : null;
@@ -639,14 +684,14 @@ export default function McpTab({
       } else if (failed.length > 0) {
         // 单格失败：不出成功那一窗，同一个位置（格子正下方）黑窗说原因
         const f = failed[0];
-        failCell(f.name, f.targetId, f.message);
+        failCell(rowKeyAt(f.name, f.targetId), mcpColumnOf(f.targetId), f.message);
       } else if (created.length > 0) {
         // 单格写成：被点那一格正下方浮起 `✓ 写进 [Codex]`（不重复服务名），替换上一条。
         // 不带撤销：再点那一格就是删掉刚写的那一份（⌘Z 照旧可用）
         setCellToast({
           id: ++cellToastSeq.current,
-          rowKey: created[0].name,
-          columnId: created[0].targetId,
+          rowKey: rowKeyAt(created[0].name, created[0].targetId),
+          columnId: mcpColumnOf(created[0].targetId),
           node: <Toast {...rowText} onDismiss={dismissCell} />,
         });
       }
@@ -774,7 +819,7 @@ export default function McpTab({
       if (keyId === undefined) {
         // 点格（含挑选浮层里挑了一份）：同一个位置（被点那一格正下方）说原因
         const s = selections[0];
-        failCell(s.name, s.targetId, reason);
+        failCell(rowKeyAt(s.name, s.targetId), mcpColumnOf(s.targetId), reason);
       } else {
         // 按选择行里的点：浮在那个点下
         setKeyToast({
@@ -805,7 +850,7 @@ export default function McpTab({
 
   /// 这一列的配置里有没有这一行（⦿）
   const holds = (p: McpDomain, name: string, targetId: string) => {
-    const row = p.rows.find((r) => rowKeyOf(r) === name);
+    const row = p.rows.find((r) => r.name === name);
     return row !== undefined && cellViewOf(row, targetId, labelOf)?.dot === "own";
   };
 
@@ -825,7 +870,10 @@ export default function McpTab({
   /// （DESIGN「表格」MCP 条：只有删完这一行就没了的才确认）
   const askDeleteOriginal = (p: McpDomain, row: McpDomainRow, target: McpLocation) => {
     const agent = columnNames(p.targets).get(target.id) ?? target.label;
-    const r = cellElement(p, rowKeyOf(row), target.id)?.getBoundingClientRect();
+    const r = cellElement(
+      mcpRowKey(p.key, row.name),
+      mcpColumnOf(target.id),
+    )?.getBoundingClientRect();
     const others = othersHolding(p, [row.name], new Set([target.id]));
     const differs = differingSourceIds(row, new Set(p.targets.map((t) => t.id))).length > 0;
     const pane: DeletePane = {
@@ -839,33 +887,42 @@ export default function McpTab({
     else setDeletePane(pane);
   };
 
-  /// 选择行全有时按下（某一列或「所有位置」）：确认一次删这一批，锚在按下的那个点下
-  const askDeleteBatch = (p: McpDomain, items: McpRemoveItem[], keyId: string) => {
+  /// 选择行全有时按下（某一列或「所有位置」）：确认一次删这一批，锚在按下的那个点下。
+  /// `全部` 下这一批可以分属几个位置：「别处还有没有」按每一项自己的位置算
+  const askDeleteBatch = (table: McpTable, items: McpRemoveItem[], keyId: string) => {
     if (items.length === 0) return;
-    const heads = columnNames(p.targets);
-    const targets = p.targets.filter((t) => items.some((item) => item.locationId === t.id));
     const names = [...new Set(items.map((item) => item.name))];
-    const except = new Set(targets.map((t) => t.id));
+    const agents = new Set<string>();
+    const others = new Set<string>();
+    let leaving = 0;
+    let differs = false;
+    for (const p of table.pages) {
+      const mine = items.filter((item) => p.targets.some((t) => t.id === item.locationId));
+      if (mine.length === 0) continue;
+      const heads = columnNames(p.targets);
+      const targets = p.targets.filter((t) => mine.some((item) => item.locationId === t.id));
+      for (const t of targets) agents.add(heads.get(t.id) ?? t.label);
+      const except = new Set(targets.map((t) => t.id));
+      const here = [...new Set(mine.map((item) => item.name))];
+      for (const agent of othersHolding(p, here, except)) others.add(agent);
+      leaving += here.filter((name) => othersHolding(p, [name], except).length === 0).length;
+      differs ||= here.some((name) => {
+        const row = p.rows.find((r) => r.name === name);
+        return (
+          row !== undefined &&
+          differingSourceIds(row, new Set(p.targets.map((t) => t.id))).length > 0
+        );
+      });
+    }
     const pane: DeletePane = {
       items,
       keyId,
       anchor: anchorNow(),
-      text: deleteMcpBatchConfirm({
-        agents: [...new Set(targets.map((t) => heads.get(t.id) ?? t.label))],
-        names,
-        others: othersHolding(p, names, except),
-        leaving: names.filter((name) => othersHolding(p, [name], except).length === 0).length,
-      }),
+      text: deleteMcpBatchConfirm({ agents: [...agents], names, others: [...others], leaving }),
       undoable: false,
     };
     // 有一行会删到这个位置里的最后一份才确认（也才给撤销）；每一行别处都还有一样的，直接删、不给撤销
-    const emptiesARow = names.some((name) => othersHolding(p, [name], except).length === 0);
-    const differs = names.some((name) => {
-      const row = p.rows.find((r) => rowKeyOf(r) === name);
-      return (
-        row !== undefined && differingSourceIds(row, new Set(p.targets.map((t) => t.id))).length > 0
-      );
-    });
+    const emptiesARow = leaving > 0;
     pane.undoable = emptiesARow || differs;
     if (emptiesARow) setDeletePane(pane);
     else void deleteOriginal(pane);
@@ -879,7 +936,7 @@ export default function McpTab({
     setCellNotice(null);
     setCellToast(null);
     const keyId = del.keyId;
-    const keys = del.items.map((item) => cellKey(item.name, item.locationId));
+    const keys = del.items.map((item) => cellKeyAt(item.name, item.locationId));
     if (keyId === undefined) {
       setOptimisticFor(keys, "own");
       setPendingCells((prev) => new Set([...prev, ...keys]));
@@ -890,7 +947,7 @@ export default function McpTab({
     const one = del.items[0];
     const cannot = (reason: string) =>
       setRowToast({
-        rowKey: one.name,
+        rowKey: rowKeyAt(one.name, one.locationId),
         at: del.anchor,
         node: (
           <Toast
@@ -927,12 +984,17 @@ export default function McpTab({
         } else {
           const text = deletedMcpOriginalToast(one.name, del.agent);
           const undoId = result.undoId;
-          const at = { keys, rowKey: one.name, columnId: one.locationId, at: del.anchor };
+          const at = {
+            keys,
+            rowKey: rowKeyAt(one.name, one.locationId),
+            columnId: mcpColumnOf(one.locationId),
+            at: del.anchor,
+          };
           const undo =
             undoId && del.undoable ? () => void undoWrite(undoId, undefined, text, at) : null;
           setUndo(undo);
           setRowToast({
-            rowKey: one.name,
+            rowKey: rowKeyAt(one.name, one.locationId),
             at: del.anchor,
             node: (
               <UndoToast
@@ -949,7 +1011,7 @@ export default function McpTab({
         // 拿不掉的写法、已经不在的等以 skipped + 原因回来：和失败一样弹回、说原因
         const failed = result.entries.filter((e) => e.outcome !== "removed");
         setOptimisticFor(
-          failed.map((e) => cellKey(e.name, e.targetId)),
+          failed.map((e) => cellKeyAt(e.name, e.targetId)),
           null,
         );
         const text = toastFor("delete", {
@@ -984,10 +1046,15 @@ export default function McpTab({
   };
 
   /// 点一格：○＝写进（同域单格直接写），⦿＝确认后从这个 agent 的配置里删掉
-  const onCell = (p: McpDomain, rowKey: string, targetId: string) => {
-    const row = p.rows.find((r) => rowKeyOf(r) === rowKey);
-    const target = p.targets.find((t) => t.id === targetId);
-    if (!row || !target) return;
+  /// 列是 agent；落到这一行自己位置里这一列的配置位置上，判断在这一行自己那一页里做
+  const onCell = (rowKey: string, columnId: string) => {
+    const placed = table.rows.find((r) => rowKeyOf(r) === rowKey);
+    const target = placed
+      ? table.columns.find((c) => c.id === columnId)?.targets.get(placed.domainKey)
+      : undefined;
+    if (!placed || !target) return;
+    const p = pageOf(placed);
+    const row: McpDomainRow = placed;
     const view = cellViewOf(row, target.id, labelOf);
     if (view === null) return;
     // 位置无效（整份配置读不出来）：点格＝在访达中显示那个配置文件，交给用户自己去看
@@ -1005,10 +1072,10 @@ export default function McpTab({
     const source = sourceForMissingTarget(row, target.id);
     if (source === null) {
       const choices = pickChoices(row, target.id);
-      const trigger = cellElement(p, rowKey, target.id);
+      const trigger = cellElement(rowKey, columnId);
       if (choices.length < 2 || trigger === null) {
         // 走不到挑选（按理不会）：不替用户挑，格下说清为什么没写
-        failCell(row.name, target.id, ambiguousText(row.name));
+        failCell(rowKey, columnId, ambiguousText(row.name));
         return;
       }
       // 有好几份不一样的同名定义：不替用户挑，也不另开页——锚在格子上出小浮层挑一份（再点一下收起）
@@ -1023,8 +1090,8 @@ export default function McpTab({
   };
 
   /// 格子本身（挑选浮层的锚）：那一行里第几列的那颗格
-  const cellElement = (p: McpDomain, rowKey: string, targetId: string): HTMLElement | null => {
-    const column = p.targets.findIndex((t) => t.id === targetId);
+  const cellElement = (rowKey: string, columnId: string): HTMLElement | null => {
+    const column = table.columns.findIndex((c) => c.id === columnId);
     const rowEl = document.querySelector(`[data-row="${CSS.escape(rowKey)}"]`);
     return rowEl?.querySelector<HTMLElement>(`[data-cell$=":${column}"]`) ?? null;
   };
@@ -1052,13 +1119,39 @@ export default function McpTab({
   // ===== 渲染 =====
 
   /// 这个位置订阅了来源才有 `管理来源`（一个都没订阅时不出：空态已有 `+ 来源`）
+  /// 不止一个位置时总是给：先选位置，那个位置没订阅来源时来源管理页自己出空态
   const subscribed = (sources.data?.rows.length ?? 0) > 0;
-  const openManage = subscribed
-    ? () => {
-        setManageFlash([]);
-        setManageOpen(true);
-      }
-    : undefined;
+  const openManageAt = (key: string) => {
+    setPickedKey(key);
+    setManageFlash([]);
+    setManageOpen(true);
+  };
+  const openManage =
+    multi || subscribed
+      ? (at: HTMLElement | null) =>
+          multi && at ? setPlacePick({ anchor: at, then: "manage" }) : openManageAt(sourceKey)
+      : undefined;
+  /// 选位置浮层（R8）：列出范围里的位置，选好进原来的流程
+  const placePicker = placePick ? (
+    <PlacePicker
+      anchor={placePick.anchor}
+      places={locations.map((key) => {
+        const page = pages.find((d) => d.key === key);
+        return {
+          key,
+          label: table.places.get(key) ?? (page ? placeName(page) : keyName(key)),
+        };
+      })}
+      title={placePick.then === "add" ? "把来源加到哪个位置？" : "管理哪个位置的来源？"}
+      onPick={(key) => {
+        const then = placePick.then;
+        setPlacePick(null);
+        if (then === "add") openAddAt(key);
+        else openManageAt(key);
+      }}
+      onClose={() => setPlacePick(null)}
+    />
+  ) : null;
   const sourceKeys = <SourceKeys onManage={openManage} onAdd={openAdd} />;
   /// 表格还没有时的外框：页面头右端照常放筛选框 + `管理来源` + `+ 来源`（切页签、扫描完时页面头不跳）+ 一块空态
   const frame = {
@@ -1112,13 +1205,14 @@ export default function McpTab({
   }
 
   // 侧栏是 Skills 与 MCP 的并集：选中的项目在 MCP 这边可能一个配置位置都没有（没开能写 MCP 的 agent）
-  if (page === null) {
+  if (pages.length === 0) {
     return (
       <LocationFrame
         {...frame}
         empty={{
-          description:
-            selectedKey === "global"
+          description: multi
+            ? "这几个位置下还没有可用的 MCP 配置位置"
+            : sourceKey === "global"
               ? "这个位置下还没有可用的 MCP 配置位置"
               : "这个项目里还没有 MCP",
           hint: "装了并显示 Claude Code、Codex 或 Cursor，这里才有能写 MCP 的位置",
@@ -1126,30 +1220,32 @@ export default function McpTab({
         }}
       >
         {sources.host}
+        {placePicker}
         {managePage}
         {addPage}
       </LocationFrame>
     );
   }
 
-  const targetIds = new Set(page.targets.map((t) => t.id));
-  const names = columnNames(page.targets);
-  const heads = columnHeads(page.targets);
+  /// 这一行那一页里的列（差异只在一页里比）
+  const targetIdsOf = (row: McpPlacedRow) => new Set(pageOf(row).targets.map((t) => t.id));
+  /// 这一行在这一列的配置位置；这一行的位置里没有这一列（用户级行在 LOCAL 列上）就没有格
+  const targetAt = (row: McpPlacedRow, column: McpColumn) => column.targets.get(row.domainKey);
   // 筛选框（⌘F）同时匹配名字与来源名（R9）：来源名要跟「来源」列显示的一致
   const rowOriginLabel = (row: McpDomainRow) => {
     const originId = mcpGroupOf(row);
     return groupLabel(locationOf(originId), originId);
   };
-  const visible = page.rows.filter((row) =>
+  const visible = table.rows.filter((row) =>
     matchesFilter(filterText, row.name, rowOriginLabel(row)),
   );
 
   /// 格此刻画成什么：乐观更新的画成点下去之后的样子（写进 ⦿、删除空心），落定前不再可点。
   /// WeiboAP 里的定义不在格子上删
-  const viewAt = (row: McpDomainRow, targetId: string) => {
+  const viewAt = (row: McpPlacedRow, targetId: string) => {
     const view = cellViewOf(row, targetId, labelOf);
     if (view === null) return null;
-    const dot = optimistic.get(cellKey(rowKeyOf(row), targetId));
+    const dot = optimistic.get(cellKey(rowKeyOf(row), mcpColumnOf(targetId)));
     if (dot !== undefined) return { ...view, dot, clickable: false, reason: undefined };
     if (view.dot === "own" && locationOf(targetId)?.harnessId === "weiboap")
       return { ...view, clickable: false, reason: WEIBO_REMOVE };
@@ -1158,21 +1254,23 @@ export default function McpTab({
 
   // ---- 列：第三层是这个位置下能用的条数 ----
   // 第三层与 `名称 N` 同一范围：随当前筛选（DESIGN「计数口径」）
-  const columns = page.targets.map((target) => {
-    const n = visible.filter((row) => viewAt(row, target.id)?.dot === "own").length;
-    const head = heads.get(target.id) ?? { name: target.label };
+  const columns = table.columns.map((column) => {
+    const n = visible.filter((row) => {
+      const target = targetAt(row, column);
+      return target !== undefined && viewAt(row, target.id)?.dot === "own";
+    }).length;
     return {
-      id: target.id,
-      agentId: target.harnessId,
-      name: head.name,
-      scope: head.scope,
+      id: column.id,
+      agentId: column.harnessId,
+      name: column.name,
+      scope: column.scope,
       count: n,
-      tip: `${target.label} · ${n} 个已加上`,
+      tip: `${column.label} · ${n} 个已加上`,
     };
   });
 
   /// 这一空格上有几份不一样的同名定义可挑（能直接定下来源的记 1）
-  const choiceCount = (row: McpDomainRow, targetId: string) =>
+  const choiceCount = (row: McpPlacedRow, targetId: string) =>
     sourceForMissingTarget(row, targetId) === null ? pickChoices(row, targetId).length : 1;
 
   // ---- 行 ----
@@ -1181,19 +1279,21 @@ export default function McpTab({
     const cells: Record<string, MatrixCellView | null> = {};
     const unsupportedAt: string[] = [];
     const unsupportedWhy = new Set<string>();
-    for (const target of page.targets) {
-      const view = viewAt(row, target.id);
-      if (view === null) {
-        cells[target.id] = null;
+    const page = pageOf(row);
+    for (const column of table.columns) {
+      const target = targetAt(row, column);
+      const view = target ? viewAt(row, target.id) : null;
+      if (!target || view === null) {
+        cells[column.id] = null;
         continue;
       }
       if (view.dot === "blocked") {
-        unsupportedAt.push(names.get(target.id) ?? target.label);
+        unsupportedAt.push(column.sentence);
         if (view.reason) unsupportedWhy.add(view.reason);
       }
       // 位置无效：原因 + 点一下在访达中显示那个配置文件
       const invalid = view.issue === "invalidLocation";
-      cells[target.id] = {
+      cells[column.id] = {
         dot: view.dot,
         clickable: view.clickable || invalid,
         tip: invalid
@@ -1201,16 +1301,16 @@ export default function McpTab({
           : view.clickable
             ? view.dot === "own"
               ? // 省略号只在会确认时写：删的是这个位置里最后一份
-                `从 ${names.get(target.id) ?? target.label} 删除${othersHolding(page, [row.name], new Set([target.id])).length > 0 ? "" : "…"}`
+                `从 ${column.sentence} 删除${othersHolding(page, [row.name], new Set([target.id])).length > 0 ? "" : "…"}`
               : choiceCount(row, target.id) > 1
                 ? pickTip(row.name, choiceCount(row, target.id))
                 : "点一下写进"
             : (view.reason ?? ""),
-        pending: pendingCells.has(cellKey(key, target.id)),
+        pending: pendingCells.has(cellKey(key, column.id)),
       };
     }
-    const differing = differingSourceIds(row, targetIds);
-    const fields = differingFields(row, targetIds);
+    const differing = differingSourceIds(row, targetIdsOf(row));
+    const fields = differingFields(row, targetIdsOf(row));
     const transports = [
       ...new Set(row.entries.map(transportText).filter((t): t is string => t !== null)),
     ];
@@ -1219,6 +1319,7 @@ export default function McpTab({
     return {
       key,
       name: row.name,
+      place: table.places.get(row.domainKey),
       // 来源：定义住在哪个配置文件；悬停出完整路径与打开 ↗
       origin: {
         id: originId,
@@ -1289,14 +1390,17 @@ export default function McpTab({
         { label: "在访达中显示原件", run: () => void reveal(originPath) },
         { label: "拷贝路径", run: () => copyPath(originPath) },
       ],
-      selectDisabledReason: blockedOf(page, row),
+      selectDisabledReason: blockedOf(pageOf(row), row),
     };
   });
 
   // ---- 选择态 ----
   const chosen = visible.filter((row) => selected.has(rowKeyOf(row)));
-  const missingAt = (targetId: string): McpSelection[] =>
+  // 各行按自己位置里这一列的配置位置算（`全部` 下选中的行可以分属几个位置）
+  const missingAt = (column: McpColumn): McpSelection[] =>
     chosen.flatMap((row) => {
+      const targetId = targetAt(row, column)?.id;
+      if (targetId === undefined) return [];
       const view = viewAt(row, targetId);
       const source = sourceForMissingTarget(row, targetId);
       // ⦿ 可点是删除，不是写进：不算缺的
@@ -1305,27 +1409,37 @@ export default function McpTab({
         : [];
     });
   /// 选中的行里这一列上能删的定义（WeiboAP 里的、正在落定的都不算）
-  const deletableAt = (targetId: string): McpRemoveItem[] =>
-    chosen.flatMap((row) =>
-      viewAt(row, targetId)?.dot === "own" && viewAt(row, targetId)?.clickable === true
+  const deletableAt = (column: McpColumn): McpRemoveItem[] =>
+    chosen.flatMap((row) => {
+      const targetId = targetAt(row, column)?.id;
+      return targetId !== undefined &&
+        viewAt(row, targetId)?.dot === "own" &&
+        viewAt(row, targetId)?.clickable === true
         ? [{ locationId: targetId, name: row.name }]
-        : [],
-    );
+        : [];
+    });
+  /// 选中的行在这一列上的格（没有格的行不算）
+  const viewIn = (row: McpPlacedRow, column: McpColumn) => {
+    const target = targetAt(row, column);
+    return target ? viewAt(row, target.id) : null;
+  };
   // 选择态：工具行里每个位置一项「⦿ / ○ 名字」（DESIGN「MCP 格子只有两种」选择行）：
   // 点 ○ 写进缺的，点 ⦿（选中的都有了）确认一次、从那个 agent 删掉。写不过去、删不了的格不计入
   const columnChecks: Record<string, ColumnCheck> = {};
   const enabledPresses: { add: McpSelection[]; remove: McpRemoveItem[]; checked: boolean }[] = [];
-  for (const target of page.targets) {
-    const cells = missingAt(target.id);
-    const deletable = deletableAt(target.id);
-    const present = chosen
-      .filter((row) => viewAt(row, target.id)?.dot === "own")
-      .map((r) => r.name);
+  for (const target of table.columns) {
+    const cells = missingAt(target);
+    const deletable = deletableAt(target);
+    const present = chosen.filter((row) => viewIn(row, target)?.dot === "own").map((r) => r.name);
     // 还没有、又写不过去的；已经有了、却删不了的（WeiboAP 里的）
     const cant = chosen
       .filter((row) => {
-        const v = viewAt(row, target.id);
-        return v !== null && v.dot !== "own" && !cells.some((c) => c.name === row.name);
+        const v = viewIn(row, target);
+        return (
+          v !== null &&
+          v.dot !== "own" &&
+          !cells.some((c) => c.name === row.name && targetAt(row, target)?.id === c.targetId)
+        );
       })
       .map((r) => r.name);
     const stuck = present.filter((name) => !deletable.some((d) => d.name === name));
@@ -1360,7 +1474,7 @@ export default function McpTab({
       disabledReason,
       onToggle: () =>
         void (checked
-          ? askDeleteBatch(page, deletable, target.id)
+          ? askDeleteBatch(table, deletable, target.id)
           : // 选中的里这一列原本就有能删的时，再按会连原有的一起删掉：只有撤销是准确的退路
             write(cells, target.id, deletable.length === 0)),
     };
@@ -1379,7 +1493,7 @@ export default function McpTab({
     disabledReason: enabledPresses.length === 0 ? "没有能写进或删除的" : undefined,
     onToggle: () =>
       void (allChecked
-        ? askDeleteBatch(page, allRemove, "all")
+        ? askDeleteBatch(table, allRemove, "all")
         : write(allAdd, "all", allRemove.length === 0)),
   };
 
@@ -1391,12 +1505,16 @@ export default function McpTab({
         text={`没有名字或来源里带「${query}」的服务`}
         action={{ label: "清除筛选", onClick: () => setFilterText("") }}
       />
-    ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
+    ) : pages.every((page) => page.targets.some((target) => target.harnessId === "weiboap")) ? (
       <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="emptyFolder" />
     ) : (
       <TableEmpty
         text={
-          page.key === "global" ? `${page.label} 还没有自己的 MCP 配置` : "这个项目里还没有 MCP"
+          multi
+            ? "这几个位置里还没有 MCP"
+            : pages[0].key === "global"
+              ? `${pages[0].label} 还没有自己的 MCP 配置`
+              : "这个项目里还没有 MCP"
         }
         art="emptyFolder"
       />
@@ -1413,6 +1531,7 @@ export default function McpTab({
       <Matrix
         columns={columns}
         originLabel="来源"
+        placeLabel={multi ? "位置" : undefined}
         bar={scopeBar}
         rows={rows}
         nameLabel="名称"
@@ -1431,7 +1550,7 @@ export default function McpTab({
         columnChecks={columnChecks}
         onUndo={() => undoRef.current?.()}
         canUndo={canUndo}
-        onCell={(rowKey, columnId) => onCell(page, rowKey, columnId)}
+        onCell={onCell}
         shortcuts={!addOpen && !manageOpen && pane === null && deletePane === null && pick === null}
         empty={empty}
         flash={flash}
@@ -1516,6 +1635,7 @@ export default function McpTab({
       )}
 
       {sources.host}
+      {placePicker}
       {managePage}
       {addPage}
     </section>

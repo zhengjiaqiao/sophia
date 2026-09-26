@@ -31,7 +31,6 @@ import { ModelsPage } from "./shell/ModelsPage";
 import { visibleAgents, type AgentState } from "./shell/agentRegistry";
 import { DESTINATIONS, isScoped } from "./shell/destinations";
 import {
-  GLOBAL_KEY,
   goDestination,
   goLevel,
   goProject,
@@ -347,12 +346,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav, projectKeyList?.join("\n"), modelsAvailable]);
 
-  /// 这一屏涉及的位置（R4）。SKILLS 已按位置集合出表；MCP 的多位置表格接通之前，先取其中一个显示（中间态，不发布）
+  /// 这一屏涉及的位置（R4 R6）：SKILLS 与 MCP 都按这个位置集合出表
   const locations = locationsOf(
     nav.scope,
     projects.map((p) => p.key),
   );
-  const selectedKey = locations.length === 1 ? locations[0] : GLOBAL_KEY;
 
   /// 换目的地之后的例行重读：回到 SKILLS 重扫一次（MCP 页由自身 refreshKey 驱动）；
   /// 离开设置时重扫一次，因为设置改了 agent 的启用
@@ -455,7 +453,7 @@ export default function App() {
     ),
     mcp: () => (
       <McpTab
-        selectedKey={selectedKey}
+        locations={locations}
         onError={setError}
         onBusy={setBusyState}
         refreshKey={refreshKey}
