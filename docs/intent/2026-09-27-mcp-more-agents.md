@@ -57,8 +57,8 @@ Sophia 的 skill 认得 40 家 agent，MCP 只认 3 家：Claude Code、Codex、
 
 - 第一批：Gemini CLI、GitHub Copilot CLI、Claude Desktop（产品负责人，2026-09-27）。
 - Claude Desktop 进 MCP 页、不进 SKILLS 页，两页的列可以不一致（同上）。
+- 两页的列分开选（产品负责人，2026-09-27）：上限沿用 4 个（面板宽度决定）；设置里 `列表里的 agent · 最多 4 个` 分成两组，`SKILLS 的列 · 最多 4 个` 与 `MCP 的列 · 最多 4 个`，MCP 那组只列支持 MCP 的 agent（含 Claude Desktop）。MCP 那组的默认值 = SKILLS 那组里支持 MCP 的，不满 4 个再按已安装补齐，老用户升级后 MCP 页的列不变。
 
 ## 待决问题
 
 - **Q3 JSONC 与 YAML**：要不要为 OpenCode、Goose 写「保留注释」的改写？还是先只读，显示有哪些服务器，但不往里写？
-- **Q4 两页的列怎么选**：上限沿用 4 个（面板宽度决定）。设置里的 `列表里的 agent · 最多 4 个` 现在是两页共用一份；加了第一批以后两页的候选不一样了——Claude Desktop 只在 MCP 页，SKILLS 页选的 agent 也不一定都支持 MCP。**推荐**：设置里分成两组，`SKILLS 的列 · 最多 4 个` 与 `MCP 的列 · 最多 4 个`，MCP 那组只列支持 MCP 的 agent（含 Claude Desktop）；MCP 那组的默认值 = SKILLS 那组里支持 MCP 的，不满 4 个再按已安装补齐，这样老用户升级后 MCP 页的列不变。待产品负责人确认。
