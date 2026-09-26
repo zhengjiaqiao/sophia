@@ -222,7 +222,7 @@ export default function McpTab({
   // 从来源管理页进去的，返回时回到来源管理页（同 Skills）
   const [addOpen, setAddOpen] = useState(false);
   const addFromManage = useRef(false);
-  // 来源管理页（页面头的 `管理来源`、来源项右键「管理来源」）开着没有；回到它时新来源那几行闪一下
+  // 来源管理页（页面头的 `管理来源`）开着没有；回到它时新来源那几行闪一下
   const [manageOpen, setManageOpen] = useState(false);
   const [manageFlash, setManageFlash] = useState<string[]>([]);
   // 来源管理页、添加来源页作用于哪个位置（R8）：只有一个位置时就是它；不止一个时先在选位置浮层里选
@@ -433,7 +433,7 @@ export default function McpTab({
   const pageOf = (row: McpPlacedRow): McpDomain => pages.find((d) => d.key === row.domainKey)!;
   const sourcePage: McpDomain | null = pages.find((d) => d.key === sourceKey) ?? null;
 
-  // ---- 来源管理页、添加来源页那个位置订阅的 MCP 来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
+  // ---- 来源管理页、添加来源页那个位置订阅的 MCP 来源：来源管理页（规则 + 移除）、添加来源页的候选 ----
   const domainRef: DomainRef = sourcePage
     ? { key: sourcePage.key, label: placeName(sourcePage) }
     : { key: sourceKey, label: keyName(sourceKey) };

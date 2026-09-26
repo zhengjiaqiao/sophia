@@ -151,7 +151,7 @@ export default function SkillsTab({
   // 从来源管理页进去的，返回时回到来源管理页
   const [addOpen, setAddOpen] = useState(false);
   const addFromManage = useRef(false);
-  // 来源管理页（页面头的 `管理来源`、来源项右键「管理来源」）开着没有
+  // 来源管理页（页面头的 `管理来源`）开着没有
   const [manageOpen, setManageOpen] = useState(false);
   // 从来源管理页进去加完、回到来源管理页时，新来源那几行闪一下
   const [manageFlash, setManageFlash] = useState<string[]>([]);
@@ -286,7 +286,7 @@ export default function SkillsTab({
   );
   const sourcePage: DomainPage | null = pages.find((p) => p.key === sourceKey) ?? null;
 
-  // ---- 来源管理页、添加来源页那个位置订阅的来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
+  // ---- 来源管理页、添加来源页那个位置订阅的来源：来源管理页（规则 + 移除）、添加来源页的候选 ----
   // 还没扫描出页的位置：名字取项目文件夹名，没有列可当目标
   const domainRef: DomainRef = sourcePage
     ? { key: sourcePage.key, label: sourcePage.label }
