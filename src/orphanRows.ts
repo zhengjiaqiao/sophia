@@ -17,9 +17,6 @@ export const ORPHAN_ORIGIN = "不在了";
 /// 孤链格的提示框：不确认——链接本来就指向空处
 export const ORPHAN_TIP = "原件不在了，点一下清除这条链接";
 
-/// 勾选框为什么勾不动：这一行没有原件，没有可加上或移除的
-export const ORPHAN_SELECT_REASON = "原件不在了，没有可加上或移除的";
-
 /// 一条孤链：在哪一列、清它要执行的动作（原样交给 `api.applyAll([clear], true)`）
 export interface OrphanLink {
   targetId: string;

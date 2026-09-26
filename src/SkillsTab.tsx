@@ -13,6 +13,7 @@ import {
   refAt,
   refRowKey,
   skillRowKey,
+  type OrphanClear,
   type PlacedOrphan,
   type SkillRow,
 } from "./skillsView";
@@ -771,25 +772,50 @@ export default function SkillsTab({
   /// 按下一个键：格子同时变成新状态（不闪、不依次点亮），写入排在前面的写入之后（连按几个键
   /// 一个一个来，不和彼此抢）。只锁按下的那一项；过了 0.3 秒门槛它旁边出忙碌指示 + 一句
   /// （DESIGN「选择操作条」「反馈的两种形态 › 忙碌」）
-  const batch = (press: BatchPress, undoing = false) => {
+  /// `clears`：勾上的孤链行在这一点上的失效链接，随这一按一起清掉（先画成没有；清掉的不能撤销，同点格清除）
+  const batch = (press: BatchPress, undoing = false, clears: OrphanClear[] = []) => {
     const { keyId, op, cells } = press;
-    if (cells.length === 0) return Promise.resolve();
+    if (cells.length === 0 && clears.length === 0) return Promise.resolve();
     setKeyToast(null);
     setCellToast(null);
     setCellNotice(null);
     setOptimisticFor(cells, op === "link" ? "linked" : "missing");
+    setOrphanGone((prev) => {
+      const next = new Set(prev);
+      for (const c of clears) next.add(cellKey(c.orphanKey, columnOfTarget(c.targetId)));
+      return next;
+    });
     // 选择行的键是 agent 列 id
     const agent =
       keyId === "all" ? "所有 agent" : (view.columns.find((c) => c.id === keyId)?.label ?? "");
     if (keyId) setKeyBusy({ keyId, label: batchBusyText(op, agent) });
-    return enqueue(() => batchWrite(press, undoing));
+    return enqueue(() => batchWrite(press, undoing, clears));
   };
 
-  const batchWrite = async ({ keyId, op, cells, reversible }: BatchPress, undoing: boolean) => {
+  const batchWrite = async (
+    { keyId, op, cells, reversible }: BatchPress,
+    undoing: boolean,
+    clears: OrphanClear[],
+  ) => {
     onBusy(true);
     let result: Awaited<ReturnType<typeof run>> | null = null;
+    // 孤链：清掉的、没清掉的（原因）
+    const cleared: OrphanClear[] = [];
+    const notCleared: { clear: OrphanClear; reason: string }[] = [];
     try {
-      result = await run(op, cells);
+      result = cells.length > 0 ? await run(op, cells) : { done: [], failed: [] };
+      if (clears.length > 0) {
+        const report = await api.applyAll(
+          clears.map((c) => c.clear),
+          true,
+        );
+        for (const c of clears) {
+          const entry = report.entries.find((e) => e.action.targetPath === c.clear.targetPath);
+          if (entry?.outcome.status === "failed")
+            notCleared.push({ clear: c, reason: `没清除：${entry.outcome.reason}` });
+          else cleared.push(c);
+        }
+      }
     } catch (e) {
       onError(String(e));
     } finally {
@@ -804,12 +830,20 @@ export default function SkillsTab({
         null,
       );
       const done = result.done;
-      const text = toastFor(op, {
-        done: toastItems(done),
-        failed: result.failed.map<FailedItem>((f) => ({
-          ...toastItems([f.ref])[0],
-          reason: f.reason,
-        })),
+      const clearItem = (c: OrphanClear): ToastItem => ({
+        name: c.skill,
+        agent: agentRef(targetOf(c.targetId)),
+      });
+      // 只清孤链的一按说「清除」；和正常行一起移除的，说「移除」
+      const text = toastFor(cells.length === 0 ? "clear" : op, {
+        done: [...toastItems(done), ...cleared.map(clearItem)],
+        failed: [
+          ...result.failed.map<FailedItem>((f) => ({
+            ...toastItems([f.ref])[0],
+            reason: f.reason,
+          })),
+          ...notCleared.map<FailedItem>((n) => ({ ...clearItem(n.clear), reason: n.reason })),
+        ],
       });
       // `⌘Z` 始终撤这一次；提示条上的 `撤销` 只在再按一次同一个点撤不回原样时给（BatchPress.reversible）
       const undo =
@@ -831,7 +865,9 @@ export default function SkillsTab({
           {...text}
           // 写数量，不逐个写名字（`✓ 加到 ✳ 1 个`）；名字在点的提示框里
           names={text.kind === "success" ? undefined : text.names}
-          reading={text.kind === "success" ? <ToastCount n={done.length} /> : undefined}
+          reading={
+            text.kind === "success" ? <ToastCount n={done.length + cleared.length} /> : undefined
+          }
           action={undo && !reversible ? { label: "撤销", onClick: undo } : undefined}
           onDismiss={dismiss}
           onClose={text.tier === "notice" ? dismiss : undefined}
@@ -842,6 +878,12 @@ export default function SkillsTab({
     }
     await onRefresh();
     setOptimisticFor(cells, null);
+    // 重扫后清掉的孤链已不在数据里；没清掉的弹回
+    setOrphanGone((prev) => {
+      const next = new Set(prev);
+      for (const c of clears) next.delete(cellKey(c.orphanKey, columnOfTarget(c.targetId)));
+      return next;
+    });
   };
 
   // ===== 原件格：删原件（DESIGN「删除原件」） =====
@@ -1408,7 +1450,7 @@ export default function SkillsTab({
           if (next.size === 0) setKeyToast(null);
         }}
         onCell={onCell}
-        onBatch={(press) => void batch(press)}
+        onBatch={(press, clears) => void batch(press, false, clears)}
         onUndo={() => undoRef.current?.()}
         canUndo={canUndo}
         shortcuts={!addOpen && !manageOpen}
