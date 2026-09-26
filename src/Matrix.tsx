@@ -124,6 +124,9 @@ export interface MatrixCellView {
   tip: string;
   /// 单格写入进行中：画成灰色的将来状态（批量不用它，格子同时变）
   pending?: boolean;
+  /// 多位置的表里「这一行的位置没有这一列」（spec 2026-09-26-object-first-navigation AC16）：空着、不画记号，
+  /// 悬停 / 键盘焦点照样出提示框说原因，点一下只说明
+  blank?: boolean;
 }
 
 export interface MatrixRowView {
@@ -1187,7 +1190,11 @@ export default function Matrix(props: MatrixProps) {
                         className={`mx-cellbtn${view.clickable ? "" : " is-inert"}`}
                         data-cell={`${r}:${c}`}
                         tabIndex={focused ? 0 : -1}
-                        aria-label={`${row.name} · ${col.name}：${dotText[view.dot]}。${view.tip}`}
+                        aria-label={
+                          view.blank
+                            ? `${row.name} · ${col.name}：${view.tip}`
+                            : `${row.name} · ${col.name}：${dotText[view.dot]}。${view.tip}`
+                        }
                         onFocus={() => {
                           setFocus({ r, c });
                           armTip(key);
@@ -1202,13 +1209,15 @@ export default function Matrix(props: MatrixProps) {
                           onCell(row.key, col.id);
                         }}
                       >
-                        <StateDot
-                          dot={view.dot}
-                          hoverable={view.clickable && !view.pending}
-                          muted={view.pending}
-                          title=""
-                          label={dotText[view.dot]}
-                        />
+                        {view.blank ? null : (
+                          <StateDot
+                            dot={view.dot}
+                            hoverable={view.clickable && !view.pending}
+                            muted={view.pending}
+                            title=""
+                            label={dotText[view.dot]}
+                          />
+                        )}
                       </StateDotButton>
                     </Tooltip>
                   </BusySlot>

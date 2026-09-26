@@ -780,3 +780,23 @@ test("AC17 单一位置（没给 placeLabel）：没有位置列，列宽与改�
   assert.doesNotMatch(html, /mx-head__place|mx-place/);
   assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 144px 88px 88px/);
 });
+
+test("多位置里「这一行的位置没有这一列」：空着不画短横，悬停 / 读屏给原因", () => {
+  const rows = [
+    {
+      ...base.rows[0],
+      cells: {
+        cc: {
+          dot: "none" as const,
+          clickable: false,
+          blank: true,
+          tip: "CardBox 里没有 Claude Code 的 skill 目录",
+        },
+        cx: base.rows[0].cells.cx,
+      },
+    },
+  ];
+  const html = render(Matrix, { ...base, rows });
+  assert.doesNotMatch(html, /ss-dot--none/, "不画「无格」短横");
+  assert.match(html, /aria-label="docx · Claude Code：CardBox 里没有 Claude Code 的 skill 目录"/);
+});

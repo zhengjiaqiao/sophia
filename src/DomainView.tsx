@@ -232,6 +232,21 @@ export default function DomainView(props: DomainViewProps) {
     return holder ? originOf(holder.sourceId) : undefined;
   };
 
+  /// 多位置时这一行的位置里没有这一列的 agent：空着、悬停说原因（不画「无格」短横）；
+  /// 位置里有这个 agent、只是这一行没有格的，照旧短横
+  const placeGap = (
+    domainKey: string,
+    column: SkillsView["columns"][number],
+  ): MatrixCellView | null =>
+    multi && !column.targets.has(domainKey)
+      ? {
+          dot: "none",
+          clickable: false,
+          blank: true,
+          tip: `${view.places.get(domainKey) ?? ""} 里没有 ${column.label} 的 skill 目录`,
+        }
+      : null;
+
   // ---- 行 ----
   const matrixRows: MatrixRowView[] = visible
     .filter((row) => !props.hiddenRows.has(skillRowKey(row)))
@@ -241,7 +256,7 @@ export default function DomainView(props: DomainViewProps) {
       for (const column of view.columns) {
         const ref = refAt(row, column);
         if (ref === null) {
-          cells[column.id] = null;
+          cells[column.id] = placeGap(row.domainKey, column);
           continue;
         }
         const target = column.targets.get(row.domainKey)!;
@@ -363,7 +378,9 @@ export default function DomainView(props: DomainViewProps) {
     const cells: Record<string, MatrixCellView | null> = {};
     for (const column of view.columns) {
       const link = orphan.links.find((l) => columnOfTarget(l.targetId) === column.id);
-      cells[column.id] = link ? { dot: "broken", clickable: true, tip: ORPHAN_TIP } : null;
+      cells[column.id] = link
+        ? { dot: "broken", clickable: true, tip: ORPHAN_TIP }
+        : placeGap(orphan.domainKey, column);
     }
     matrixRows.push({
       key: orphan.key,

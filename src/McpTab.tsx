@@ -1274,6 +1274,16 @@ export default function McpTab({
     for (const column of table.columns) {
       const target = targetAt(row, column);
       const view = target ? viewAt(row, target.id) : null;
+      if (!target && table.places.size > 0) {
+        // 多位置时这一行的位置没有这一列（用户级行在 LOCAL 列、项目行在只属于用户级的列）：空着、悬停说原因
+        cells[column.id] = {
+          dot: "none",
+          clickable: false,
+          blank: true,
+          tip: `${table.places.get(row.domainKey) ?? ""} 没有 ${column.sentence} 的配置位置`,
+        };
+        continue;
+      }
       if (!target || view === null) {
         cells[column.id] = null;
         continue;
