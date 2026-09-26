@@ -45,16 +45,20 @@ Sophia 的 skill 认得 40 家 agent，MCP 只认 3 家：Claude Code、Codex、
 - **写配置只走 `atomicfile`**，保留原文件的注释、顺序、BOM、换行；JSONC 与 YAML 在做到「逐字节只动那一项」之前，只读不写。
 - **每家先以官方文档核实**配置位置（用户级、项目级）、字段、传输、环境变量写法，写进 MCP 兼容性调研；没核实的项不写。
 - **格子状态与交互沿用现有 MCP 页**：⦿ 有、○ 没有、⊘ 写不过去；删最后一份才确认。
-- **Claude Desktop 这类「应用」**（不是 coding agent）进不进列、怎么叫，要和 skill 页的 agent 表对齐着定。
+- **Claude Desktop 只进 MCP 页，不进 SKILLS 页**（2026-09-27 产品负责人定）。它是桌面聊天应用的聊天部分，MCP 配在 `claude_desktop_config.json`，与 Claude Code 的 `~/.claude.json` / `.mcp.json` 是两套、互不同步（Claude Code 只提供一次性导入 `claude mcp add-from-claude-desktop`，见 [Connect to MCP servers](https://code.claude.com/docs/en/mcp-quickstart)）；两列要分开，不能合并。
+- **列宽上限不变**：面板固定 776，agent 列最多 4 列（MCP 另有 `CLAUDE CODE · LOCAL`，最多 5 列），沿用现有规则。
 
 ## 范围外
 
 - 管理各家 MCP 的开关、工具过滤、超时、OAuth 等客户端专属设置。
 - 不在 skill 的 agent 表里、也不在上表里的 agent。
 
+## 已定
+
+- 第一批：Gemini CLI、GitHub Copilot CLI、Claude Desktop（产品负责人，2026-09-27）。
+- Claude Desktop 进 MCP 页、不进 SKILLS 页，两页的列可以不一致（同上）。
+
 ## 待决问题
 
-- **Q1 第一批放哪几家**：Gemini CLI、Copilot CLI、Claude Desktop，还是换成 OpenCode（用户多，但有 JSONC）？
-- **Q2 Claude Desktop 算不算一列**：它不是 coding agent，但 MCP 用户很多；进 MCP 页、不进 SKILLS 页，两页的列会不一致。
 - **Q3 JSONC 与 YAML**：要不要为 OpenCode、Goose 写「保留注释」的改写？还是先只读，显示有哪些服务器，但不往里写？
-- **Q4 列太多怎么办**：MCP 页的 agent 列会变多，沿用设置里的「列表里的 agent · 最多 N 个」吗？
+- **Q4 两页的列怎么选**：上限沿用 4 个（面板宽度决定）。设置里的 `列表里的 agent · 最多 4 个` 现在是两页共用一份；加了第一批以后两页的候选不一样了——Claude Desktop 只在 MCP 页，SKILLS 页选的 agent 也不一定都支持 MCP。**推荐**：设置里分成两组，`SKILLS 的列 · 最多 4 个` 与 `MCP 的列 · 最多 4 个`，MCP 那组只列支持 MCP 的 agent（含 Claude Desktop）；MCP 那组的默认值 = SKILLS 那组里支持 MCP 的，不满 4 个再按已安装补齐，这样老用户升级后 MCP 页的列不变。待产品负责人确认。
