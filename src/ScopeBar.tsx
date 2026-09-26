@@ -92,7 +92,7 @@ export function ProjectChips({
 }: ProjectChipsProps) {
   const { chips, more } = chipProjects(recent, selected);
   const [open, setOpen] = useState(false);
-  /// 浮层锚在 `更多` 上；没有 `更多`（项目不超过 6 个）时锚在行首标签上（⌘P 打开时）
+  /// 浮层锚在 `更多` 上；没有 `更多`（项目不超过 6 个）时锚在选中的那一片上（⌘P 打开时）
   const moreRef = useRef<HTMLSpanElement>(null);
   const rowRef = useRef<HTMLSpanElement>(null);
   const lastRequest = useRef(openRequest);
@@ -101,7 +101,11 @@ export function ProjectChips({
     lastRequest.current = openRequest;
     setOpen(true);
   }, [openRequest]);
-  const anchor = moreRef.current ?? rowRef.current;
+  // 锚在键本身上：收起时焦点还给它（外面包的 span 拿不到焦点）
+  const anchor =
+    moreRef.current?.querySelector<HTMLElement>("button") ??
+    rowRef.current?.querySelector<HTMLElement>('button[aria-pressed="true"]') ??
+    rowRef.current;
   if (recent.length === 0) return null;
   return (
     <span className="scope-chips" ref={rowRef}>
@@ -135,6 +139,7 @@ export function ProjectChips({
       {open && anchor ? (
         <ProjectList
           anchor={anchor}
+          focusRequest={openRequest}
           projects={sorted}
           selected={selected}
           sort={sort}
@@ -154,6 +159,7 @@ export function ProjectChips({
 /// 焦点落在搜索框；↓ 进入列表、回车选中第一条；列表里方向键移动（Menu 自带）；Esc 与点外面收起（FloatingLayer）
 function ProjectList({
   anchor,
+  focusRequest,
   projects,
   selected,
   sort,
@@ -162,6 +168,8 @@ function ProjectList({
   onClose,
 }: {
   anchor: HTMLElement;
+  /// ⌘P 在列表已经开着时再按：焦点回到搜索框
+  focusRequest: number;
   projects: ReadonlyArray<ScopeProject>;
   selected: string | null;
   sort: ProjectSort;
@@ -171,6 +179,12 @@ function ProjectList({
 }) {
   const [query, setQuery] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // 浮层第一帧是隐藏的（等量好位置），`autoFocus` 落不到隐藏的输入框上：隔一帧再聚焦（同 Menu）
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [focusRequest]);
   const shown = projects.filter((p) => matchProject(p, query));
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
@@ -190,7 +204,7 @@ function ProjectList({
           onChange={setQuery}
           label="搜索项目"
           placeholder={`搜索 ${projects.length} 个项目`}
-          autoFocus
+          inputRef={searchRef}
           onKeyDown={onKeyDown}
         />
       </div>
