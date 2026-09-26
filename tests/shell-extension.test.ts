@@ -114,3 +114,14 @@ test("PageHead 在组件库里：旧的 shell 转出已删，壳与模型页从 
   const css = readFileSync(new URL("../src/App.css", import.meta.url), "utf8");
   assert.doesNotMatch(css, /^\.page-head \{|^\.page-head__title \{/m);
 });
+
+test("模型页还不知道支不支持时：出「正在读」的忙碌空态，不是只有标题的空页", () => {
+  const page = render(ModelsPage, {
+    entries: [],
+    loading: true,
+    onError: () => undefined,
+    onGatewayState: () => undefined,
+  });
+  assert.match(page, /page-head__title[^>]*>模型</);
+  assert.match(page, /正在读模型设置/);
+});

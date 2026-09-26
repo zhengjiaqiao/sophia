@@ -36,6 +36,7 @@ import {
   goProject,
   loadNav,
   locationsOf,
+  scopeKeyOf,
   resolveNav,
   saveNav,
   type Destination,
@@ -326,8 +327,10 @@ export default function App() {
   const agentState: AgentState = { gateway: gatewayState, modelsSupported };
   const visible = visibleAgents(AGENTS, agentState);
   const modelsAvailable = visible.known ? visible.agents.length > 0 : null;
+  /// 上次停在模型页、还没问出支不支持时：侧栏照样列「模型」并选中它，页里出忙碌空态（问出不支持再退回 SKILLS）
+  const modelsLoading = !visible.known && nav.destination === "models";
   const sidebarItems: SidebarItem[] = DESTINATIONS.filter(
-    (d) => d.id !== "models" || visible.agents.length > 0,
+    (d) => d.id !== "models" || visible.agents.length > 0 || modelsLoading,
   ).map((d) => ({
     id: d.id as SidebarItem["id"],
     label: d.label,
@@ -347,6 +350,7 @@ export default function App() {
   }, [nav, projectKeyList?.join("\n"), modelsAvailable]);
 
   /// 这一屏涉及的位置（R4 R6）：SKILLS 与 MCP 都按这个位置集合出表
+  const scopeKey = scopeKeyOf(nav.scope);
   const locations = locationsOf(
     nav.scope,
     projects.map((p) => p.key),
@@ -396,12 +400,23 @@ export default function App() {
     };
   }, [navigate]);
 
-  /// 应用菜单「切换项目…」（⌘P，R5）：打开「更多」项目列表。在用户级时先换到全部（用户级没有项目筛选片）
-  const [projectListRequest, setProjectListRequest] = useState(0);
+  /// 「更多」项目列表开没开、⌘P 第几次（已开着时再按，焦点回到搜索框）：状态归壳——⌘P 在用户级时先换到全部，
+  /// 筛选片是那一刻才出现的，列表要跟着它一起打开，不能交给筛选片自己记
+  const [projectList, setProjectList] = useState({ open: false, focus: 0 });
+  const openProjectList = () => setProjectList((s) => ({ open: true, focus: s.focus + 1 }));
+  /// 应用菜单「切换项目…」（⌘P，R5）：打开「更多」项目列表。在用户级时先换到全部（用户级没有项目筛选片）；
+  /// 换过去被离开确认拦下、没换成，就不打开
   usePageCommand("switch-project", () => {
-    if (navRef.current.scope.level === "user") navigate((n) => goLevel(n, "all"));
-    setProjectListRequest((n) => n + 1);
+    if (navRef.current.scope.level === "user") navigate((n) => goLevel(n, "all"), openProjectList);
+    else openProjectList();
   });
+  // 离开 SKILLS / MCP、换到用户级（没有筛选片）时收起，回来时不自己弹出
+  useEffect(() => {
+    setProjectList((s) => (s.open ? { ...s, open: false } : s));
+  }, [nav.destination]);
+  useEffect(() => {
+    if (nav.scope.level === "user") setProjectList((s) => (s.open ? { ...s, open: false } : s));
+  }, [nav.scope.level]);
 
   // 菜单里跟着界面灰 / 亮的几项：撤销（当前页有可撤销的操作，或正在输入）、筛选与切换项目（在 SKILLS / MCP）、
   // 返回（在添加来源页）。只在状态真的变了时报给后端
@@ -433,7 +448,9 @@ export default function App() {
       onSelect={(project) => navigate((n) => goProject(n, project))}
       sort={projectSort}
       onSort={chooseSort}
-      openRequest={projectListRequest}
+      listOpen={projectList.open}
+      listFocus={projectList.focus}
+      onListOpen={(open) => setProjectList((s) => ({ ...s, open }))}
     />
   ) : null;
 
@@ -445,6 +462,7 @@ export default function App() {
         autoLinks={autoLinks}
         onBusy={setBusyState}
         locations={locations}
+        scopeKey={scopeKey}
         onRefresh={refresh}
         onError={setError}
         banner={error !== null}
@@ -454,6 +472,7 @@ export default function App() {
     mcp: () => (
       <McpTab
         locations={locations}
+        scopeKey={scopeKey}
         onError={setError}
         onBusy={setBusyState}
         refreshKey={refreshKey}
@@ -495,6 +514,7 @@ export default function App() {
           ) : nav.destination === "models" ? (
             <ModelsPage
               entries={visible.agents}
+              loading={modelsLoading}
               onError={setError}
               onGatewayState={setGatewayState}
               banner={error !== null}

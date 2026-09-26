@@ -227,8 +227,8 @@ export interface MatrixProps {
   keyToast?: { keyId: string; node: ReactNode } | null;
   /// 单格加上 / 移除成功：浮在被点那一格正下方 4。一次只一条：`id` 变了就重挂，计时从头来
   cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
-  /// 加完来源滑回：浮在新来源那几项的正下方 4；`id` 变了就是新的一条
-  barToast?: { id: number; node: ReactNode; origins: string[] } | null;
+  /// 加完来源滑回：浮在页面头 `+ 来源` 的正下方 4、右对齐它；`id` 变了就是新的一条
+  barToast?: { id: number; node: ReactNode } | null;
 }
 
 /// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着）；受阻统称「受阻」（D22）、
@@ -1308,11 +1308,7 @@ export default function Matrix(props: MatrixProps) {
         </FloatingToast>
       ) : null}
       {barToast ? (
-        <FloatingToast
-          key={`bar:${barToast.id}`}
-          align="start"
-          anchor={chipsAnchor(barToast.origins)}
-        >
+        <FloatingToast key={`bar:${barToast.id}`} align="end" anchor={addKeyAnchor}>
           {barToast.node}
         </FloatingToast>
       ) : null}
@@ -1360,23 +1356,8 @@ const rowAnchor = (rowKey: string) => (probe: HTMLElement) => {
   return { top: r.top, bottom: r.bottom, left: n.left, right: r.right };
 };
 
-/// 加完来源的那一窗浮在新来源那几项的正下方：取这几项合起来的矩形；一项都没有时锚在整排上
-const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
-  const group = rootOf(probe)?.querySelector(".mx-bar");
-  const chips = origins
-    .map((id) => group?.querySelector(`[data-origin="${CSS.escape(id)}"]`))
-    .filter((el): el is Element => el != null)
-    .map((el) => el.getBoundingClientRect());
-  if (chips.length === 0) {
-    const first = group?.querySelector(".mx-sourcechip")?.getBoundingClientRect();
-    return first
-      ? { top: first.top, bottom: first.bottom, left: first.left, right: first.right }
-      : group;
-  }
-  return {
-    top: Math.min(...chips.map((c) => c.top)),
-    bottom: Math.max(...chips.map((c) => c.bottom)),
-    left: Math.min(...chips.map((c) => c.left)),
-    right: Math.max(...chips.map((c) => c.right)),
-  };
-};
+/// 加完来源的那一窗浮在页面头的 `+ 来源` 正下方、右对齐它：加来源从这颗键起，新来源的行在表里闪一下
+/// （R9 之后表格上方不再有来源片可锚）；键不在时落在 bar 插槽上
+const addKeyAnchor = (probe: HTMLElement) =>
+  probe.ownerDocument.querySelector('[data-source-key="add"] button') ??
+  rootOf(probe)?.querySelector(".mx-bar");

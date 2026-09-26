@@ -1099,7 +1099,6 @@ fn set_harness_enabled(
     state.store.save_settings(&settings).map_err(err)
 }
 
-/// 仅手动添加的项目；自动发现的项目不在其中
 /// 此刻的毫秒时间戳；时钟早于 1970 时记 0
 fn now_ms() -> u64 {
     std::time::SystemTime::now()

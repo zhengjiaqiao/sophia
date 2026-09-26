@@ -101,3 +101,15 @@ test("R4 范围算出这一屏涉及的位置", () => {
   assert.deepEqual(locationsOf(s("project", A), projects), [A]);
   assert.deepEqual(locationsOf(s("project"), []), [], "没有项目时项目级是空的");
 });
+
+test("范围的键：档或选中的项目变了才变（两页据此清空勾选、收起来源页）", async () => {
+  const { scopeKeyOf } = await import("../src/shell/nav.ts");
+  const a = scopeKeyOf({ level: "all", project: null });
+  assert.equal(a, scopeKeyOf({ level: "all", project: null }));
+  assert.notEqual(a, scopeKeyOf({ level: "user", project: null }));
+  assert.notEqual(a, scopeKeyOf({ level: "all", project: "project:/p/CardBox" }));
+  assert.notEqual(
+    scopeKeyOf({ level: "all", project: "project:/p/CardBox" }),
+    scopeKeyOf({ level: "project", project: "project:/p/CardBox" }),
+  );
+});

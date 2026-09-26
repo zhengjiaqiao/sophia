@@ -30,7 +30,7 @@ import { matchesFilter } from "./rowFilter";
 import { mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { LocationFrame } from "./LocationFrame";
-import { PlacePicker } from "./ScopeBar";
+import { NO_PROJECTS, NO_PROJECTS_HINT, usePlacePick } from "./ScopeBar";
 import {
   cellViewOf,
   differingFields,
@@ -97,6 +97,8 @@ import "./McpTab.css";
 export interface McpTabProps {
   /// 范围里的位置（域 key，见 shell/nav `locationsOf`）：一个时与改版前的单一位置页相同
   locations: ReadonlyArray<string>;
+  /// 范围本身（档 + 选中的项目）：它变了才清空勾选、收起来源页（见 shell/nav `scopeKeyOf`）
+  scopeKey: string;
   onError: (error: string) => void;
   /// 扫描、写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
@@ -208,6 +210,7 @@ const anchorNow = (): AnchorRect | undefined => {
 
 export default function McpTab({
   locations,
+  scopeKey,
   onError,
   onBusy,
   refreshKey,
@@ -225,26 +228,7 @@ export default function McpTab({
   // 来源管理页（页面头的 `管理来源`）开着没有；回到它时新来源那几行闪一下
   const [manageOpen, setManageOpen] = useState(false);
   const [manageFlash, setManageFlash] = useState<string[]>([]);
-  // 来源管理页、添加来源页作用于哪个位置（R8）：只有一个位置时就是它；不止一个时先在选位置浮层里选
-  const multi = locations.length > 1;
-  const scopeKey = locations.join("\n");
-  const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const sourceKey = !multi ? (locations[0] ?? "global") : (pickedKey ?? locations[0]);
-  const [placePick, setPlacePick] = useState<{
-    anchor: HTMLElement;
-    then: "add" | "manage";
-  } | null>(null);
-  const openAddAt = useCallback((key: string) => {
-    setPickedKey(key);
-    addFromManage.current = false;
-    setAddOpen(true);
-  }, []);
-  /// `+ 来源` / 菜单「添加来源…」：多个位置时先选位置
-  const openAdd = (at?: HTMLElement | null) => {
-    if (!multi) return openAddAt(sourceKey);
-    const anchor = at ?? document.querySelector<HTMLElement>('[data-source-key="add"] button');
-    if (anchor) setPlacePick({ anchor, then: "add" });
-  };
+  const locationSetKey = locations.join("\n");
   const closeAdd = useCallback(() => {
     setAddOpen(false);
     if (addFromManage.current) {
@@ -258,7 +242,6 @@ export default function McpTab({
     addFromManage.current = true;
     setAddOpen(true);
   }, []);
-  usePageCommand("add-source", () => openAdd());
   const [pane, setPane] = useState<Pane | null>(null);
   // 删除的确认框（点了 ⦿，或选择行全有时按下）
   const [deletePane, setDeletePane] = useState<DeletePane | null>(null);
@@ -298,7 +281,6 @@ export default function McpTab({
   const [addedToast, setAddedToast] = useState<{
     key: number;
     parts: string[];
-    origins: string[];
   } | null>(null);
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
@@ -403,11 +385,12 @@ export default function McpTab({
   const domains = useMemo(() => (overview ? mcpDomains(overview) : []), [overview]);
   domainsRef.current = domains;
 
-  // 提示与弹层只属于当次选择；范围里的位置变了时勾选清空、收起来源管理页
+  // 提示与弹层只属于当次选择；换了范围（切档、切项目）时勾选清空、收起来源页。
+  // 按范围本身认，不按位置集合：「项目级 · 全部」下后台重扫多出一个项目，不该清掉手上正做的事
   useEffect(() => {
     setManageOpen(false);
-    setPlacePick(null);
-    setPickedKey(null);
+    setAddOpen(false);
+    addFromManage.current = false;
     setPane(null);
     setDeletePane(null);
     setPick(null);
@@ -427,16 +410,41 @@ export default function McpTab({
     () => mergeMcpDomains(pages),
     // 页随每一轮扫描换新；范围不变时只跟着扫描结果走
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [domains, scopeKey],
+    [domains, locationSetKey],
   );
   /// 这一行自己那一页（格的判断、同名定义、差异都在一页里做）
   const pageOf = (row: McpPlacedRow): McpDomain => pages.find((d) => d.key === row.domainKey)!;
+  // 来源管理页、添加来源页作用于哪个位置（R8）：`管理来源`、`+ 来源`、菜单「添加来源…」在不止一个位置时先选位置
+  const place = usePlacePick({
+    locations,
+    scopeKey,
+    nameOf: (key) => {
+      const page = pages.find((d) => d.key === key);
+      return table.places.get(key) ?? (page ? placeName(page) : keyName(key));
+    },
+    onAdd: () => {
+      addFromManage.current = false;
+      setAddOpen(true);
+    },
+    onManage: () => {
+      setManageFlash([]);
+      setManageOpen(true);
+    },
+  });
+  const { multi, sourceKey } = place;
+  usePageCommand("add-source", () => place.openAdd());
+  // 选过的位置不在范围里了（后台重扫后项目没了）：收起开着的来源页，不让它悄悄作用到别处
+  useEffect(() => {
+    if (sourceKey !== null) return;
+    setAddOpen(false);
+    setManageOpen(false);
+  }, [sourceKey]);
   const sourcePage: McpDomain | null = pages.find((d) => d.key === sourceKey) ?? null;
 
   // ---- 来源管理页、添加来源页那个位置订阅的 MCP 来源：来源管理页（规则 + 移除）、添加来源页的候选 ----
   const domainRef: DomainRef = sourcePage
     ? { key: sourcePage.key, label: placeName(sourcePage) }
-    : { key: sourceKey, label: keyName(sourceKey) };
+    : { key: sourceKey ?? "global", label: keyName(sourceKey ?? "global") };
   const domainLocations = useMemo(
     () => (overview?.locations ?? []).filter((l) => l.domain === domainRef.key),
     [overview, domainRef.key],
@@ -507,7 +515,7 @@ export default function McpTab({
         false,
       );
     }
-    setAddedToast({ key: Date.now(), parts, origins: ids });
+    setAddedToast({ key: Date.now(), parts });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justAdded, overview]);
 
@@ -1121,38 +1129,11 @@ export default function McpTab({
   /// 这个位置订阅了来源才有 `管理来源`（一个都没订阅时不出：空态已有 `+ 来源`）
   /// 不止一个位置时总是给：先选位置，那个位置没订阅来源时来源管理页自己出空态
   const subscribed = (sources.data?.rows.length ?? 0) > 0;
-  const openManageAt = (key: string) => {
-    setPickedKey(key);
-    setManageFlash([]);
-    setManageOpen(true);
-  };
-  const openManage =
-    multi || subscribed
-      ? (at: HTMLElement | null) =>
-          multi && at ? setPlacePick({ anchor: at, then: "manage" }) : openManageAt(sourceKey)
-      : undefined;
-  /// 选位置浮层（R8）：列出范围里的位置，选好进原来的流程
-  const placePicker = placePick ? (
-    <PlacePicker
-      anchor={placePick.anchor}
-      places={locations.map((key) => {
-        const page = pages.find((d) => d.key === key);
-        return {
-          key,
-          label: table.places.get(key) ?? (page ? placeName(page) : keyName(key)),
-        };
-      })}
-      title={placePick.then === "add" ? "把来源加到哪个位置？" : "管理哪个位置的来源？"}
-      onPick={(key) => {
-        const then = placePick.then;
-        setPlacePick(null);
-        if (then === "add") openAddAt(key);
-        else openManageAt(key);
-      }}
-      onClose={() => setPlacePick(null)}
-    />
-  ) : null;
-  const sourceKeys = <SourceKeys onManage={openManage} onAdd={openAdd} />;
+  const openManage = multi || subscribed ? place.openManage : undefined;
+  const placePicker = place.picker;
+  /// 范围里一个位置都没有（项目级下没有检测到项目）时不给管来源的键：没有地方可加
+  const sourceKeys =
+    locations.length > 0 ? <SourceKeys onManage={openManage} onAdd={place.openAdd} /> : null;
   /// 表格还没有时的外框：页面头右端照常放筛选框 + `管理来源` + `+ 来源`（切页签、扫描完时页面头不跳）+ 一块空态
   const frame = {
     filterText,
@@ -1204,7 +1185,17 @@ export default function McpTab({
     );
   }
 
-  // 侧栏是 Skills 与 MCP 的并集：选中的项目在 MCP 这边可能一个配置位置都没有（没开能写 MCP 的 agent）
+  if (locations.length === 0) {
+    // 项目级下一个项目都没有：没有位置，也就没有来源可管
+    return (
+      <LocationFrame
+        {...frame}
+        empty={{ description: NO_PROJECTS, hint: NO_PROJECTS_HINT, art: "noDirs" }}
+      />
+    );
+  }
+
+  // 项目列表是 Skills 与 MCP 的并集：选中的项目在 MCP 这边可能一个配置位置都没有（没开能写 MCP 的 agent）
   if (pages.length === 0) {
     return (
       <LocationFrame
@@ -1531,7 +1522,7 @@ export default function McpTab({
       <Matrix
         columns={columns}
         originLabel="来源"
-        placeLabel={multi ? "位置" : undefined}
+        placeLabel={table.places.size > 0 ? "位置" : undefined}
         bar={scopeBar}
         rows={rows}
         nameLabel="名称"
@@ -1571,7 +1562,6 @@ export default function McpTab({
                     onDismiss={dismissAdded}
                   />
                 ),
-                origins: addedToast.origins,
               }
             : null
         }

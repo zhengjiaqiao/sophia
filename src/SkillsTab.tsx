@@ -5,7 +5,7 @@ import { api } from "./api";
 import DomainView, { skillCellKey, type BatchPress } from "./DomainView";
 import { cellKey, SourceKeys } from "./Matrix";
 import { LocationFrame } from "./LocationFrame";
-import { PlacePicker } from "./ScopeBar";
+import { NO_PROJECTS, NO_PROJECTS_HINT, usePlacePick } from "./ScopeBar";
 import {
   columnOfTarget,
   folderLabel,
@@ -112,6 +112,8 @@ export interface SkillsTabProps {
   /// 范围里的位置（DomainPage.key，见 shell/nav `locationsOf`）：一个时与改版前的单一位置页相同；
   /// 不止一个时并成一张表、名称后多一列 `位置`（spec 2026-09-26-object-first-navigation R6 R7）
   locations: ReadonlyArray<string>;
+  /// 范围本身（档 + 选中的项目）：它变了才清空勾选、收起来源页（见 shell/nav `scopeKeyOf`）
+  scopeKey: string;
   onRefresh: () => Promise<void>;
   onError: (message: string) => void;
   /// 壳的错误横幅开着（机面顶上的灰面板）：新手提示让位
@@ -138,6 +140,7 @@ export default function SkillsTab({
   autoLinks,
   onBusy,
   locations,
+  scopeKey,
   onRefresh,
   onError,
   banner = false,
@@ -155,20 +158,7 @@ export default function SkillsTab({
   const [manageOpen, setManageOpen] = useState(false);
   // 从来源管理页进去加完、回到来源管理页时，新来源那几行闪一下
   const [manageFlash, setManageFlash] = useState<string[]>([]);
-  // 来源管理页、添加来源页作用于哪个位置（R8）：只有一个位置时就是它；不止一个时先在选位置浮层里选
-  const multi = locations.length > 1;
   const locationsKey = locations.join("\n");
-  const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const sourceKey = !multi ? (locations[0] ?? "global") : (pickedKey ?? locations[0]);
-  // 选位置浮层：锚在被按的那颗键上（菜单「添加来源…」没有按键，锚在页面头的 `+ 来源` 上）
-  const [picker, setPicker] = useState<{ anchor: HTMLElement; then: "add" | "manage" } | null>(
-    null,
-  );
-  const openAddAt = useCallback((key: string) => {
-    setPickedKey(key);
-    addFromManage.current = false;
-    setAddOpen(true);
-  }, []);
   const closeAdd = useCallback(() => {
     setAddOpen(false);
     if (addFromManage.current) {
@@ -183,13 +173,6 @@ export default function SkillsTab({
     addFromManage.current = true;
     setAddOpen(true);
   }, []);
-  /// `+ 来源` / 菜单「添加来源…」：多个位置时先选位置
-  const openAdd = (at?: HTMLElement | null) => {
-    if (!multi) return openAddAt(sourceKey);
-    const anchor = at ?? document.querySelector<HTMLElement>('[data-source-key="add"] button');
-    if (anchor) setPicker({ anchor, then: "add" });
-  };
-  usePageCommand("add-source", () => openAdd());
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录无法写入）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
@@ -239,7 +222,6 @@ export default function SkillsTab({
   const [addedToast, setAddedToast] = useState<{
     key: number;
     parts: string[];
-    origins: string[];
   } | null>(null);
   // 孤链格：点下去就先画成没有这一格（清除的目标状态），做成重扫后数据自己对上，没成弹回
   const [orphanGone, setOrphanGone] = useState<Set<string>>(new Set());
@@ -284,13 +266,36 @@ export default function SkillsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [overview, locationsKey],
   );
+  // 来源管理页、添加来源页作用于哪个位置（R8）：`管理来源`、`+ 来源`、菜单「添加来源…」在不止一个位置时先选位置
+  const place = usePlacePick({
+    locations,
+    scopeKey,
+    nameOf: (key) =>
+      view.places.get(key) ?? pages.find((p) => p.key === key)?.label ?? folderLabel(key),
+    onAdd: () => {
+      addFromManage.current = false;
+      setAddOpen(true);
+    },
+    onManage: () => {
+      setManageFlash([]);
+      setManageOpen(true);
+    },
+  });
+  const { multi, sourceKey } = place;
+  usePageCommand("add-source", () => place.openAdd());
+  // 选过的位置不在范围里了（后台重扫后项目没了）：收起开着的来源页，不让它悄悄作用到别处
+  useEffect(() => {
+    if (sourceKey !== null) return;
+    setAddOpen(false);
+    setManageOpen(false);
+  }, [sourceKey]);
   const sourcePage: DomainPage | null = pages.find((p) => p.key === sourceKey) ?? null;
 
   // ---- 来源管理页、添加来源页那个位置订阅的来源：来源管理页（规则 + 移除）、添加来源页的候选 ----
   // 还没扫描出页的位置：名字取项目文件夹名，没有列可当目标
   const domainRef: DomainRef = sourcePage
     ? { key: sourcePage.key, label: sourcePage.label }
-    : { key: sourceKey, label: folderLabel(sourceKey) };
+    : { key: sourceKey ?? "global", label: folderLabel(sourceKey ?? "global") };
   const targets = sourcePage?.targets ?? NO_TARGETS;
   const targetsKey = targets.map((t) => `${t.id}:${t.linkedWholeTo ?? ""}`).join("|");
   const model = useMemo(
@@ -367,11 +372,12 @@ export default function SkillsTab({
     setCellNotice({ rowKey, columnId, text });
   };
 
-  // 提示与弹层只属于当次选择；范围里的位置变了时勾选清空、收起来源管理页
+  // 提示与弹层只属于当次选择；换了范围（切档、切项目）时勾选清空、收起来源页。
+  // 按范围本身认，不按位置集合：「项目级 · 全部」下后台重扫多出一个项目，不该清掉手上正做的事
   useEffect(() => {
     setManageOpen(false);
-    setPicker(null);
-    setPickedKey(null);
+    setAddOpen(false);
+    addFromManage.current = false;
     setKeepPane(null);
     setDeletePane(null);
     setSplitPane(null);
@@ -382,7 +388,7 @@ export default function SkillsTab({
     setAddedToast(null);
     setSelected(new Set());
     setUndo(null);
-  }, [locationsKey]);
+  }, [scopeKey]);
 
   // 加完来源滑回位置页（DESIGN「添加来源」）：重扫已完，R9 去掉了按来源筛选——不再筛，只把新行的格
   // 闪一下交代「就是这些」，浮起 `✓ 已添加 … · N 个 skill`。从来源管理页进去加的回到来源管理页，
@@ -432,7 +438,7 @@ export default function SkillsTab({
         false,
       );
     }
-    setAddedToast({ key: Date.now(), parts, origins: ids });
+    setAddedToast({ key: Date.now(), parts });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justAdded, overview]);
 
@@ -1259,34 +1265,8 @@ export default function SkillsTab({
   /// 这个位置订阅了来源才有 `管理来源`（一个都没订阅时不出：空态已有 `+ 来源`）
   /// 不止一个位置时总是给：先选位置，那个位置没订阅来源时来源管理页自己出空态
   const subscribed = (sources.data?.rows.length ?? 0) > 0;
-  const openManageAt = (key: string) => {
-    setPickedKey(key);
-    setManageFlash([]);
-    setManageOpen(true);
-  };
-  const openManage =
-    multi || subscribed
-      ? (at: HTMLElement | null) =>
-          multi && at ? setPicker({ anchor: at, then: "manage" }) : openManageAt(sourceKey)
-      : undefined;
-  /// 选位置浮层（R8）：列出范围里的位置，选好进原来的流程
-  const placePicker = picker ? (
-    <PlacePicker
-      anchor={picker.anchor}
-      places={locations.map((key) => ({
-        key,
-        label: view.places.get(key) ?? pages.find((p) => p.key === key)?.label ?? folderLabel(key),
-      }))}
-      title={picker.then === "add" ? "把来源加到哪个位置？" : "管理哪个位置的来源？"}
-      onPick={(key) => {
-        const then = picker.then;
-        setPicker(null);
-        if (then === "add") openAddAt(key);
-        else openManageAt(key);
-      }}
-      onClose={() => setPicker(null)}
-    />
-  ) : null;
+  const openManage = multi || subscribed ? place.openManage : undefined;
+  const placePicker = place.picker;
   /// 来源管理页（二级页，同添加来源页的骨架）：来源的路径、规则、移除都在这里。
   /// 开着时最后一个来源被移除，它自己出空态，不跟着收起
   const managePage = manageOpen ? (
@@ -1299,8 +1279,10 @@ export default function SkillsTab({
       flashIds={manageFlash}
     />
   ) : null;
-  /// 页面头右端：筛选框 + `管理来源` + `+ 来源`（表格还没有时也照常放，页面头不跳）
-  const sourceKeys = <SourceKeys onManage={openManage} onAdd={openAdd} />;
+  /// 页面头右端：筛选框 + `管理来源` + `+ 来源`（表格还没有时也照常放，页面头不跳）。
+  /// 范围里一个位置都没有（项目级下没有检测到项目）时不给：没有地方可加
+  const sourceKeys =
+    locations.length > 0 ? <SourceKeys onManage={openManage} onAdd={place.openAdd} /> : null;
 
   if (!overview) {
     return (
@@ -1316,6 +1298,19 @@ export default function SkillsTab({
   }
   /// 空态里说的地方：一个位置写它的名字，几个位置合起来说
   const placeLabel = multi ? "这几个位置" : domainRef.label;
+  if (locations.length === 0) {
+    // 项目级下一个项目都没有：没有位置，也就没有来源可管
+    return (
+      <LocationFrame
+        filterText={filterText}
+        onFilterText={setFilterText}
+        actions={null}
+        enabled={!addOpen && !manageOpen}
+        bar={scopeBar}
+        empty={{ description: NO_PROJECTS, hint: NO_PROJECTS_HINT, art: "noDirs" }}
+      />
+    );
+  }
   if (pages.length === 0) {
     // 范围里没有一个位置扫描出页（没有 agent 目录）：`+ 来源` 已在页面头，空态不重复
     return (
@@ -1405,7 +1400,7 @@ export default function SkillsTab({
         bar={scopeBar}
         onReveal={reveal}
         onCopyPath={(path) => void api.copyText(path).catch((e) => onError(String(e)))}
-        onAddSource={openAdd}
+        onAddSource={place.openAdd}
         onManageSources={openManage}
         selected={selected}
         onSelectionChange={(next) => {
@@ -1446,7 +1441,6 @@ export default function SkillsTab({
                     onDismiss={dismissAdded}
                   />
                 ),
-                origins: addedToast.origins,
               }
             : null
         }

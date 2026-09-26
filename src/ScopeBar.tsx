@@ -1,7 +1,7 @@
 /// 范围（spec 2026-09-26-object-first-navigation R3 R4 R5）：SKILLS / MCP 页面头左端的滑槽 `全部 ｜ 用户级 ｜ 项目级`，
 /// 与表格上方那一行 `项目` 筛选片（前 6 个 + `更多 ▾`）。两页共用同一个范围，状态归壳（shell/nav.ts）。
 /// 带业务状态（项目列表、排序记忆），所以是页面层组件，不进 `src/ui`（DESIGN「不进组件库、在页面层合并的」）。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import {
   Chip,
@@ -17,7 +17,7 @@ import {
   Tooltip,
 } from "./ui";
 import type { ScopeLevel } from "./shell/nav";
-import { chipProjects, matchProject, type ScopeProject } from "./scopeView";
+import { chipProjects, matchProject, sourceLocation, type ScopeProject } from "./scopeView";
 import { PROJECT_SORTS, type ProjectSort } from "./sidebarProjects";
 import { shortPath } from "./pathText";
 import "./ScopeBar.css";
@@ -56,6 +56,72 @@ export function PlacePicker({
   );
 }
 
+/// 项目级下一个项目都没有时两页的空态（项目只来自自动检测，R10）
+export const NO_PROJECTS = "还没有检测到项目";
+export const NO_PROJECTS_HINT = "用 Claude Code 打开过的项目会出现在这里";
+
+/// 两页（SKILLS / MCP）管来源作用于哪个位置（R8）：只有一个位置时就是它；不止一个时 `管理来源`、`+ 来源`、
+/// 菜单「添加来源…」先弹选位置浮层，选好再进原来的流程。`sourceKey` 为 null：范围里一个位置都没有，
+/// 或选过的位置已经不在范围里（调用方收起开着的来源页、不给管来源的键）。范围本身变了（`scopeKey`）时忘掉选过的
+export function usePlacePick({
+  locations,
+  scopeKey,
+  nameOf,
+  onAdd,
+  onManage,
+}: {
+  locations: ReadonlyArray<string>;
+  scopeKey: string;
+  /// 浮层里每个位置的名字
+  nameOf: (key: string) => string;
+  /// 位置定了（`sourceKey` 已换成它）：进添加来源页 / 来源管理页
+  onAdd: () => void;
+  onManage: () => void;
+}) {
+  const [picked, setPicked] = useState<string | null>(null);
+  const [picker, setPicker] = useState<{ anchor: HTMLElement; then: "add" | "manage" } | null>(
+    null,
+  );
+  useEffect(() => {
+    setPicked(null);
+    setPicker(null);
+  }, [scopeKey]);
+  const multi = locations.length > 1;
+  const sourceKey = sourceLocation(locations, picked);
+  const go = (then: "add" | "manage", key: string | null) => {
+    if (key === null) return;
+    setPicked(key);
+    if (then === "add") onAdd();
+    else onManage();
+  };
+  /// `at`：被按的键；菜单「添加来源…」没有按键，锚到页面头的 `+ 来源`
+  const open = (then: "add" | "manage", at?: HTMLElement | null) => {
+    if (locations.length === 0) return;
+    if (!multi) return go(then, locations[0]);
+    const anchor = at ?? document.querySelector<HTMLElement>('[data-source-key="add"] button');
+    if (anchor) setPicker({ anchor, then });
+  };
+  const pickerNode = picker ? (
+    <PlacePicker
+      anchor={picker.anchor}
+      places={locations.map((key) => ({ key, label: nameOf(key) }))}
+      title={picker.then === "add" ? "把来源加到哪个位置？" : "管理哪个位置的来源？"}
+      onPick={(key) => {
+        setPicker(null);
+        go(picker.then, key);
+      }}
+      onClose={() => setPicker(null)}
+    />
+  ) : null;
+  return {
+    multi,
+    sourceKey,
+    openAdd: (at?: HTMLElement | null) => open("add", at),
+    openManage: (at?: HTMLElement | null) => open("manage", at),
+    picker: pickerNode,
+  };
+}
+
 /// 页面头左端的滑槽：换的是范围，不是页（SKILLS / MCP 在侧栏）
 export function ScopeTabs({
   value,
@@ -76,8 +142,11 @@ export interface ProjectChipsProps {
   onSelect: (project: string | null) => void;
   sort: ProjectSort;
   onSort: (sort: ProjectSort) => void;
-  /// 每次变化＝打开「更多」列表（应用菜单「切换项目…」⌘P）
-  openRequest: number;
+  /// 「更多」列表开没开（状态归壳：应用菜单「切换项目…」⌘P 也开它）
+  listOpen: boolean;
+  /// ⌘P 第几次：列表已开着时再按，焦点回到搜索框
+  listFocus: number;
+  onListOpen: (open: boolean) => void;
 }
 
 /// 表格上方那一行：`项目` + `全部` + 前 6 个项目 + `更多 ▾`。单选，任何时候都有一颗亮着
@@ -88,24 +157,25 @@ export function ProjectChips({
   onSelect,
   sort,
   onSort,
-  openRequest,
+  listOpen: open,
+  listFocus,
+  onListOpen: setOpen,
 }: ProjectChipsProps) {
   const { chips, more } = chipProjects(recent, selected);
-  const [open, setOpen] = useState(false);
   /// 浮层锚在 `更多` 上；没有 `更多`（项目不超过 6 个）时锚在选中的那一片上（⌘P 打开时）
   const moreRef = useRef<HTMLSpanElement>(null);
   const rowRef = useRef<HTMLSpanElement>(null);
-  const lastRequest = useRef(openRequest);
-  useEffect(() => {
-    if (openRequest === lastRequest.current) return;
-    lastRequest.current = openRequest;
-    setOpen(true);
-  }, [openRequest]);
-  // 锚在键本身上：收起时焦点还给它（外面包的 span 拿不到焦点）
-  const anchor =
-    moreRef.current?.querySelector<HTMLElement>("button") ??
-    rowRef.current?.querySelector<HTMLElement>('button[aria-pressed="true"]') ??
-    rowRef.current;
+  // 锚在键本身上：收起时焦点还给它（外面包的 span 拿不到焦点）。挂载后才量得到：⌘P 从用户级过来时
+  // 筛选片与列表同一帧出现，第一次渲染时键还不在
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    setAnchor(
+      moreRef.current?.querySelector<HTMLElement>("button") ??
+        rowRef.current?.querySelector<HTMLElement>('button[aria-pressed="true"]') ??
+        rowRef.current,
+    );
+  }, [open, more.length, selected]);
   if (recent.length === 0) return null;
   return (
     <span className="scope-chips" ref={rowRef}>
@@ -129,7 +199,7 @@ export function ProjectChips({
         ))}
         {more.length > 0 ? (
           <span ref={moreRef} className="scope-chips__more">
-            <Chip selected={false} onClick={() => setOpen((v) => !v)}>
+            <Chip selected={false} onClick={() => setOpen(!open)}>
               更多
               <IconChevronDown className="scope-chips__chevron" />
             </Chip>
@@ -139,7 +209,7 @@ export function ProjectChips({
       {open && anchor ? (
         <ProjectList
           anchor={anchor}
-          focusRequest={openRequest}
+          focusRequest={listFocus}
           projects={sorted}
           selected={selected}
           sort={sort}

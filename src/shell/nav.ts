@@ -104,6 +104,9 @@ export function resolveNav(
   return next;
 }
 
+/// 范围本身的键（档 + 选中的项目）：位置集合会随后台重扫变（「项目级 · 全部」多出一个项目），范围不会
+export const scopeKeyOf = (scope: Scope): string => `${scope.level}|${scope.project ?? ""}`;
+
 /// 这一屏涉及哪些位置（域 key，用户级在前）：
 /// 全部＝用户级 + 全部项目（点了某个项目＝用户级 + 它）；用户级＝只有它；项目级＝全部项目（点了＝只有它）
 export function locationsOf(scope: Scope, projects: ReadonlyArray<string>): string[] {

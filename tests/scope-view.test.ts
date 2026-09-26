@@ -72,3 +72,13 @@ test("AC11 「更多」里的搜索：名字或路径里有就算，不分大小
   assert.equal(matchProject(w, "cardbox"), false);
   assert.equal(matchProject(w, "  "), true, "空查询全留");
 });
+
+test("R8 来源管理作用于哪个位置：选过的还在就用它；选过的不在了就没有（不悄悄换到别处）；没选过用第一个；一个位置都没有就没有", async () => {
+  const { sourceLocation } = await import("../src/scopeView.ts");
+  const G = "global";
+  const CB = "project:/p/CardBox";
+  assert.equal(sourceLocation([G, CB], null), G);
+  assert.equal(sourceLocation([G, CB], CB), CB);
+  assert.equal(sourceLocation([G], CB), null, "选过的项目不在范围里了：不换成用户级");
+  assert.equal(sourceLocation([], null), null, "项目级下一个项目都没有：不落到用户级");
+});

@@ -35,3 +35,14 @@ export function matchProject(p: ScopeProject, query: string): boolean {
   if (q === "") return true;
   return p.label.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
 }
+
+/// 来源管理页、添加来源页作用于哪个位置（R8）：在选位置浮层里选过的，还在范围里就用它；选过的已经不在了
+/// （后台重扫后项目没了）就没有——不悄悄换成别的位置，调用方收起开着的来源页。没选过用范围里的第一个
+/// （只有一个位置时就是它）。范围里一个位置都没有（项目级下没有检测到项目）也没有：不落到用户级
+export function sourceLocation(
+  locations: ReadonlyArray<string>,
+  picked: string | null,
+): string | null {
+  if (picked !== null) return locations.includes(picked) ? picked : null;
+  return locations[0] ?? null;
+}
