@@ -28,6 +28,34 @@ const LEVELS: ReadonlyArray<{ id: ScopeLevel; label: string }> = [
   { id: "project", label: "项目级" },
 ];
 
+/// 选位置（R8）：范围里不止一个位置时，`管理来源`、`+ 来源`、菜单「添加来源…」先弹它，
+/// 选好再进原来的流程（来源管理页、添加来源页仍只作用于一个位置）。锚在被按的键上，打开即聚焦第一项
+export function PlacePicker({
+  anchor,
+  places,
+  title,
+  onPick,
+  onClose,
+}: {
+  anchor: HTMLElement;
+  places: ReadonlyArray<{ key: string; label: string }>;
+  title: string;
+  onPick: (key: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <FloatingLayer trigger={anchor} onClose={onClose} label="选位置" align="end">
+      <Menu autoFocus title={title}>
+        {places.map((p) => (
+          <MenuItem key={p.key} onSelect={() => onPick(p.key)}>
+            {p.label}
+          </MenuItem>
+        ))}
+      </Menu>
+    </FloatingLayer>
+  );
+}
+
 /// 页面头左端的滑槽：换的是范围，不是页（SKILLS / MCP 在侧栏）
 export function ScopeTabs({
   value,

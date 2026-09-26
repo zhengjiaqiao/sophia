@@ -741,3 +741,25 @@ test("原件格与 MCP 的 ⦿ 可点（DESIGN「删除原件」）：skill 先�
   // 能写进的不含 ⦿（点 ⦿ 是删）
   assert.match(mcp, /view\.dot !== "own" && source !== null/);
 });
+
+test("AC13 多位置：给了 placeLabel，名称后多一列「位置」（88），来源让到 112，面板宽仍 776；每行写自己的位置", () => {
+  const rows = [
+    { ...base.rows[0], key: "global|u|docx", place: "用户级" },
+    { ...base.rows[0], key: "project:/p/CardBox|u|docx", place: "CardBox" },
+  ];
+  const html = render(Matrix, { ...base, rows, placeLabel: "位置" });
+  assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 88px 112px 88px 88px/);
+  assert.match(
+    html,
+    /class="mx-head__name">[^]*class="mx-head__place"><button type="button" class="mx-headbtn">位置[^]*class="mx-head__origin"/,
+  );
+  const places = [...html.matchAll(/class="mx-place"[^>]*>([^<]*)</g)].map((m) => m[1]);
+  assert.deepEqual(places, ["CardBox", "用户级"]);
+  assert.equal(34 + 88 + 112 + 4 * 88 + 190, PANEL_W);
+});
+
+test("AC17 单一位置（没给 placeLabel）：没有位置列，列宽与改版前相同", () => {
+  const html = render(Matrix, base);
+  assert.doesNotMatch(html, /mx-head__place|mx-place/);
+  assert.match(html, /grid-template-columns:34px minmax\(0, 1fr\) 144px 88px 88px/);
+});

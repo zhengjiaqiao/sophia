@@ -2,10 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
-import DomainView, { skillCellKey, skillRowKey, type BatchPress } from "./DomainView";
+import DomainView, { skillCellKey, type BatchPress } from "./DomainView";
 import { cellKey, SourceKeys } from "./Matrix";
 import { LocationFrame } from "./LocationFrame";
-import { orphanRows, type OrphanRow } from "./orphanRows";
+import { PlacePicker } from "./ScopeBar";
+import {
+  columnOfTarget,
+  folderLabel,
+  mergeSkillPages,
+  refAt,
+  refRowKey,
+  skillRowKey,
+  type PlacedOrphan,
+  type SkillRow,
+} from "./skillsView";
 import { originNames, originText, type OriginName } from "./originName";
 import { addedOrigins } from "./originFilter";
 import { matchesFilter } from "./rowFilter";
@@ -36,21 +46,10 @@ import type {
   CellRef,
   CellState,
   DomainPage,
-  DomainRow,
   Overview,
   SyncReport,
   Target,
 } from "./types";
-
-/// 还没扫描出页的位置的显示名：项目取文件夹名（`project:/…/CardBox` → `CardBox`）
-const folderLabel = (key: string): string =>
-  key === "global"
-    ? "用户级"
-    : (key
-        .replace(/^project:/, "")
-        .split(/[/\\]+/)
-        .filter(Boolean)
-        .pop() ?? key);
 
 const NO_TARGETS: Target[] = [];
 
@@ -59,8 +58,8 @@ const NO_WRITE = /permission denied|os error 13|read-?only|只读|权限/i;
 
 /// 「只留这份」确认框要的全部：体检结果先拿到，确认框才写得出几条链接改指
 interface KeepPane {
-  kept: DomainRow;
-  other: DomainRow;
+  kept: SkillRow;
+  other: SkillRow;
   /// 按下那一刻「只留这份」的位置：结果锚在这里
   at: AnchorRect;
   planId: string;
@@ -110,8 +109,9 @@ export interface SkillsTabProps {
   autoLinks: AutoLink[];
   /// 写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
-  /// 侧栏选中的 DomainPage.key
-  selectedKey: string;
+  /// 范围里的位置（DomainPage.key，见 shell/nav `locationsOf`）：一个时与改版前的单一位置页相同；
+  /// 不止一个时并成一张表、名称后多一列 `位置`（spec 2026-09-26-object-first-navigation R6 R7）
+  locations: ReadonlyArray<string>;
   onRefresh: () => Promise<void>;
   onError: (message: string) => void;
   /// 壳的错误横幅开着（机面顶上的灰面板）：新手提示让位
@@ -137,7 +137,7 @@ export default function SkillsTab({
   overview,
   autoLinks,
   onBusy,
-  selectedKey,
+  locations,
   onRefresh,
   onError,
   banner = false,
@@ -155,7 +155,17 @@ export default function SkillsTab({
   const [manageOpen, setManageOpen] = useState(false);
   // 从来源管理页进去加完、回到来源管理页时，新来源那几行闪一下
   const [manageFlash, setManageFlash] = useState<string[]>([]);
-  const openAdd = useCallback(() => {
+  // 来源管理页、添加来源页作用于哪个位置（R8）：只有一个位置时就是它；不止一个时先在选位置浮层里选
+  const multi = locations.length > 1;
+  const locationsKey = locations.join("\n");
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
+  const sourceKey = !multi ? (locations[0] ?? "global") : (pickedKey ?? locations[0]);
+  // 选位置浮层：锚在被按的那颗键上（菜单「添加来源…」没有按键，锚在页面头的 `+ 来源` 上）
+  const [picker, setPicker] = useState<{ anchor: HTMLElement; then: "add" | "manage" } | null>(
+    null,
+  );
+  const openAddAt = useCallback((key: string) => {
+    setPickedKey(key);
     addFromManage.current = false;
     setAddOpen(true);
   }, []);
@@ -173,7 +183,13 @@ export default function SkillsTab({
     addFromManage.current = true;
     setAddOpen(true);
   }, []);
-  usePageCommand("add-source", openAdd);
+  /// `+ 来源` / 菜单「添加来源…」：多个位置时先选位置
+  const openAdd = (at?: HTMLElement | null) => {
+    if (!multi) return openAddAt(sourceKey);
+    const anchor = at ?? document.querySelector<HTMLElement>('[data-source-key="add"] button');
+    if (anchor) setPicker({ anchor, then: "add" });
+  };
+  usePageCommand("add-source", () => openAdd());
   // 乐观更新：格键 → 点下去之后该画成的状态；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, CellState>>(new Map());
   // 写失败（目录无法写入）的格：扫描不产出 readOnly，只有真的写失败之后由这里构造
@@ -192,6 +208,8 @@ export default function SkillsTab({
   const [splitBusy, setSplitBusy] = useState<{
     rowKey: string;
     columnId: string;
+    /// 正在拆的那个文件夹（`全部` 下同一列可以是几个位置的几个文件夹）
+    targetId: string;
     label: string;
   } | null>(null);
   const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
@@ -226,7 +244,7 @@ export default function SkillsTab({
   // 孤链格：点下去就先画成没有这一格（清除的目标状态），做成重扫后数据自己对上，没成弹回
   const [orphanGone, setOrphanGone] = useState<Set<string>>(new Set());
   // 刚清完的孤链行：数据里已经没有它了，那一窗还锚在它那一格上待满 4 秒，这期间照原样留着
-  const [orphanGhost, setOrphanGhost] = useState<OrphanRow | null>(null);
+  const [orphanGhost, setOrphanGhost] = useState<PlacedOrphan | null>(null);
   // 「只留这份」挂起未提交时藏起来的另一份（行键）
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [dupReadout, setDupReadout] = useState<Map<string, string>>(new Map());
@@ -255,15 +273,25 @@ export default function SkillsTab({
     agent: string;
   } | null>(null);
 
-  const pages = overview === null ? [] : overview.domains.filter((d) => d.key === selectedKey);
-  const page: DomainPage | null = pages[0] ?? null;
+  // 范围里各位置的页（按范围的次序：用户级在前）；还没扫描出页的位置不在里面
+  const pages =
+    overview === null
+      ? []
+      : locations.flatMap((key) => overview.domains.find((d) => d.key === key) ?? []);
+  const view = useMemo(
+    () => mergeSkillPages(pages),
+    // 页随每一轮扫描换新；范围不变时只跟着扫描结果走
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overview, locationsKey],
+  );
+  const sourcePage: DomainPage | null = pages.find((p) => p.key === sourceKey) ?? null;
 
-  // ---- 这个位置订阅的来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
+  // ---- 来源管理页、添加来源页那个位置订阅的来源：来源管理页（规则 + 移除）、来源项的右键菜单、添加来源页的候选 ----
   // 还没扫描出页的位置：名字取项目文件夹名，没有列可当目标
-  const domainRef: DomainRef = page
-    ? { key: page.key, label: page.label }
-    : { key: selectedKey, label: folderLabel(selectedKey) };
-  const targets = page?.targets ?? NO_TARGETS;
+  const domainRef: DomainRef = sourcePage
+    ? { key: sourcePage.key, label: sourcePage.label }
+    : { key: sourceKey, label: folderLabel(sourceKey) };
+  const targets = sourcePage?.targets ?? NO_TARGETS;
   const targetsKey = targets.map((t) => `${t.id}:${t.linkedWholeTo ?? ""}`).join("|");
   const model = useMemo(
     () => skillSourcesModel(domainRef, targets),
@@ -285,10 +313,8 @@ export default function SkillsTab({
   // 扫描完成＝壳拿到了 overview（它只在一轮扫描真正结束时才给，扫描中是 null，没有半截的中间态）。
   // 盖着添加来源页 / 来源管理页时位置页不在眼前，不算到达；回来再出
   const onPage = !addOpen && !manageOpen;
-  const hasSkills = page !== null && page.rows.length > 0;
-  const noSkills =
-    overview !== null &&
-    (page === null || (page.rows.length === 0 && orphanRows(page).length === 0));
+  const hasSkills = view.rows.length > 0;
+  const noSkills = overview !== null && view.rows.length === 0 && view.orphans.length === 0;
   // 让位：壳的错误横幅、确认框（只留这份、拆开、移除来源）开着
   const hintBlocked =
     banner || keepPane !== null || deletePane !== null || splitPane !== null || sources.confirming;
@@ -303,8 +329,10 @@ export default function SkillsTab({
   const learnedCell = skillsHint.learned;
   // 提示句用的现场数据：这一轮读了哪些 agent 的目录（有目录的列）、表里几个 skill（＝列头 `名称 N`）
   const hintCtx = {
-    agents: targets.filter((t) => t.exists).map((t) => t.label),
-    skills: page?.rows.length ?? 0,
+    agents: view.columns
+      .filter((c) => [...c.targets.values()].some((t) => t.exists))
+      .map((c) => c.label),
+    skills: view.rows.length,
   };
 
   const targetOf = (targetId: string): Target | null =>
@@ -339,9 +367,11 @@ export default function SkillsTab({
     setCellNotice({ rowKey, columnId, text });
   };
 
-  // 提示与弹层只属于当次选择；换一个位置时勾选清空、收起来源管理页
+  // 提示与弹层只属于当次选择；范围里的位置变了时勾选清空、收起来源管理页
   useEffect(() => {
     setManageOpen(false);
+    setPicker(null);
+    setPickedKey(null);
     setKeepPane(null);
     setDeletePane(null);
     setSplitPane(null);
@@ -352,7 +382,7 @@ export default function SkillsTab({
     setAddedToast(null);
     setSelected(new Set());
     setUndo(null);
-  }, [selectedKey]);
+  }, [locationsKey]);
 
   // 加完来源滑回位置页（DESIGN「添加来源」）：重扫已完，R9 去掉了按来源筛选——不再筛，只把新行的格
   // 闪一下交代「就是这些」，浮起 `✓ 已添加 … · N 个 skill`。从来源管理页进去加的回到来源管理页，
@@ -364,8 +394,10 @@ export default function SkillsTab({
       setManageFlash(justAdded.map((e) => e.id));
       return;
     }
-    if (!page) return;
-    const order = page.rows.map((r) => r.sourceId);
+    // 加在哪个位置，就闪那个位置的新行
+    if (sourcePage === null) return;
+    const placed = view.rows.filter((r) => r.domainKey === sourceKey);
+    const order = placed.map((r) => r.sourceId);
     const ids = addedOrigins(
       justAdded.map((e) => e.id),
       order,
@@ -374,7 +406,7 @@ export default function SkillsTab({
     if (ids.length > 0) {
       // 名字与来源列同一个起名函数、同一组来源（DomainView）；数量＝新来源的行数
       const names = originNames(order, overview.sources);
-      const added = page.rows.filter((r) => ids.includes(r.sourceId));
+      const added = placed.filter((r) => ids.includes(r.sourceId));
       parts = addedParts(
         ids.map((id) => originText(names.get(id)!)),
         added.length,
@@ -384,9 +416,10 @@ export default function SkillsTab({
       setFilterText("");
       setFlash({
         keys: added.flatMap((r) =>
-          page.targets.map((t) =>
-            skillCellKey({ sourceId: r.sourceId, skill: r.skill, targetId: t.id }),
-          ),
+          view.columns.flatMap((c) => {
+            const ref = refAt(r, c);
+            return ref ? [skillCellKey(ref)] : [];
+          }),
         ),
         nonce: Date.now(),
       });
@@ -522,8 +555,8 @@ export default function SkillsTab({
     const text = toastFor(op, { done: toastItems([ref]), omitNames: true });
     setCellToast({
       id,
-      rowKey: skillRowKey(ref),
-      columnId: ref.targetId,
+      rowKey: refRowKey(ref),
+      columnId: columnOfTarget(ref.targetId),
       node: <Toast {...text} onDismiss={dismissCell} />,
     });
   };
@@ -531,13 +564,14 @@ export default function SkillsTab({
   /// `undoing`：这是撤销本身——做成了不再出例行一行，也不再留可撤销的操作
   const toggleCell = (ref: CellRef, from: CellState, undoing = false) => {
     const key = skillCellKey(ref);
-    const rowKey = skillRowKey(ref);
+    const rowKey = refRowKey(ref);
+    const columnId = columnOfTarget(ref.targetId);
     setCellNotice(null);
 
     // 失效的链接：点一下就是重新链接——先清掉指不到东西的那条，再建一条指向这一行的原件
     if (from === "broken") {
       const cell = findCell(ref);
-      const stale = page?.broken.find((a) => a.targetPath === cell?.path);
+      const stale = view.broken.find((a) => a.targetPath === cell?.path);
       setOptimisticFor([ref], "linked");
       setFlash({ keys: [key], nonce: Date.now() });
       void enqueue(async () => {
@@ -545,7 +579,7 @@ export default function SkillsTab({
           if (stale) await api.applyAll([stale], true);
           const result = await run("link", [ref]);
           if (result.failed.length > 0) {
-            failCell(rowKey, ref.targetId, result.failed[0].reason);
+            failCell(rowKey, columnId, result.failed[0].reason);
           } else {
             // 重新链接没有可撤销的反面：出一行交代，不带撤销
             setUndo(null);
@@ -554,7 +588,7 @@ export default function SkillsTab({
           }
           await onRefresh();
         } catch (e) {
-          failCell(rowKey, ref.targetId, String(e));
+          failCell(rowKey, columnId, String(e));
         } finally {
           setOptimisticFor([ref], null);
         }
@@ -572,7 +606,7 @@ export default function SkillsTab({
         if (result.failed.length > 0) {
           // 弹回 + 同一个位置（格子正下方）的黑窗说原因
           setOptimisticFor([ref], null);
-          failCell(rowKey, ref.targetId, result.failed[0].reason);
+          failCell(rowKey, columnId, result.failed[0].reason);
         } else if (!undoing) {
           // 点过一格、写成了：`first-scan-skills` 教的就是这件事
           learnedCell();
@@ -589,7 +623,7 @@ export default function SkillsTab({
         }
         await onRefresh();
       } catch (e) {
-        failCell(rowKey, ref.targetId, String(e));
+        failCell(rowKey, columnId, String(e));
       } finally {
         setOptimisticFor([ref], null);
       }
@@ -611,8 +645,8 @@ export default function SkillsTab({
 
   /// 那一格此刻在视口里的矩形（确认框、结果的锚）
   const cellAnchorOf = (ref: CellRef): AnchorRect | undefined => {
-    const index = page?.targets.findIndex((t) => t.id === ref.targetId) ?? -1;
-    const row = document.querySelector(`[data-row="${CSS.escape(skillRowKey(ref))}"]`);
+    const index = view.columns.findIndex((c) => c.id === columnOfTarget(ref.targetId));
+    const row = document.querySelector(`[data-row="${CSS.escape(refRowKey(ref))}"]`);
     const r = row?.querySelectorAll(".mx-cell")[index]?.getBoundingClientRect();
     return r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined;
   };
@@ -620,8 +654,8 @@ export default function SkillsTab({
   // ===== 整个文件夹是链接：点该列任一格 → 锚定确认 → 拆开 =====
 
   const askSplit = (ref: CellRef) => {
-    // 这一列正在拆：同一个文件夹的下一次点击不再弹确认
-    if (splitBusy?.columnId === ref.targetId) return;
+    // 这个文件夹正在拆：它的下一次点击不再弹确认（`全部` 下同一列里别的位置是别的文件夹）
+    if (splitBusy?.targetId === ref.targetId) return;
     setCellNotice(null);
     setSplitPane({
       ref,
@@ -638,8 +672,9 @@ export default function SkillsTab({
     setCellNotice(null);
     setCellToast(null);
     setSplitBusy({
-      rowKey: skillRowKey(ref),
-      columnId: ref.targetId,
+      rowKey: refRowKey(ref),
+      columnId: columnOfTarget(ref.targetId),
+      targetId: ref.targetId,
       label: `正在拆开 ${agent} 的 skills 文件夹`,
     });
     onBusy(true);
@@ -650,8 +685,8 @@ export default function SkillsTab({
       if (first && first.status === "failed") {
         const created = report.entries.filter((e) => e.outcome.status === "created").length;
         failCell(
-          skillRowKey(ref),
-          ref.targetId,
+          refRowKey(ref),
+          columnOfTarget(ref.targetId),
           created === 0
             ? `没拆开：${first.reason}`
             : `拆开了，但有 ${failed.length} 个没复制过来：${first.reason}`,
@@ -664,8 +699,8 @@ export default function SkillsTab({
         });
         setCellToast({
           id: ++cellToastSeq.current,
-          rowKey: skillRowKey(ref),
-          columnId: ref.targetId,
+          rowKey: refRowKey(ref),
+          columnId: columnOfTarget(ref.targetId),
           node: <Toast {...text} onDismiss={dismissCell} />,
         });
       }
@@ -680,10 +715,11 @@ export default function SkillsTab({
 
   // ===== 孤链：点格清除，不确认（链接本来就指向空处）；没有撤销——重建一条指向空处的链接没有意义 =====
 
-  const clearOrphan = (orphan: OrphanRow, targetId: string) => {
+  const clearOrphan = (orphan: PlacedOrphan, targetId: string) => {
     const link = orphan.links.find((l) => l.targetId === targetId);
     if (!link) return;
-    const key = cellKey(orphan.key, targetId);
+    const columnId = columnOfTarget(targetId);
+    const key = cellKey(orphan.key, columnId);
     setCellNotice(null);
     setOrphanGone((prev) => new Set(prev).add(key));
     setFlash({ keys: [key], nonce: Date.now() });
@@ -692,7 +728,7 @@ export default function SkillsTab({
         const report = await api.applyAll([link.clear], true);
         const bad = report.entries.find((e) => e.outcome.status === "failed");
         if (bad && bad.outcome.status === "failed") {
-          failCell(orphan.key, targetId, `没清除：${bad.outcome.reason}`);
+          failCell(orphan.key, columnId, `没清除：${bad.outcome.reason}`);
         } else {
           setUndo(null);
           learnedCell();
@@ -704,13 +740,13 @@ export default function SkillsTab({
           setCellToast({
             id: ++cellToastSeq.current,
             rowKey: orphan.key,
-            columnId: targetId,
+            columnId,
             node: <Toast {...text} onDismiss={dismissCell} />,
           });
         }
         await onRefresh();
       } catch (e) {
-        failCell(orphan.key, targetId, String(e));
+        failCell(orphan.key, columnId, String(e));
       } finally {
         setOrphanGone((prev) => {
           const next = new Set(prev);
@@ -736,7 +772,9 @@ export default function SkillsTab({
     setCellToast(null);
     setCellNotice(null);
     setOptimisticFor(cells, op === "link" ? "linked" : "missing");
-    const agent = keyId === "all" ? "所有 agent" : (targetOf(keyId)?.label ?? "");
+    // 选择行的键是 agent 列 id
+    const agent =
+      keyId === "all" ? "所有 agent" : (view.columns.find((c) => c.id === keyId)?.label ?? "");
     if (keyId) setKeyBusy({ keyId, label: batchBusyText(op, agent) });
     return enqueue(() => batchWrite(press, undoing));
   };
@@ -806,13 +844,14 @@ export default function SkillsTab({
 
   /// 点原件格：先体检（这一格过了 0.3 秒门槛才出忙碌），再弹确认框说清后果（DESIGN「删除原件」）
   const askDeleteOriginal = async (ref: CellRef) => {
-    const rowKey = skillRowKey(ref);
+    const rowKey = refRowKey(ref);
+    const columnId = columnOfTarget(ref.targetId);
     // 这一格正在体检：这一下不重复发
-    if (originBusy?.rowKey === rowKey && originBusy.columnId === ref.targetId) return;
+    if (originBusy?.rowKey === rowKey && originBusy.columnId === columnId) return;
     setCellNotice(null);
     setCellToast(null);
     const anchor = cellAnchorOf(ref);
-    setOriginBusy({ rowKey, columnId: ref.targetId, label: "正在查看影响" });
+    setOriginBusy({ rowKey, columnId, label: "正在查看影响" });
     let planned;
     try {
       planned = await api.planDeleteSource(ref.sourceId, ref.skill);
@@ -821,7 +860,7 @@ export default function SkillsTab({
       return;
     } finally {
       setOriginBusy((prev) =>
-        prev?.rowKey === rowKey && prev.columnId === ref.targetId ? null : prev,
+        prev?.rowKey === rowKey && prev.columnId === columnId ? null : prev,
       );
     }
     const { plan } = planned;
@@ -834,9 +873,7 @@ export default function SkillsTab({
     const relinkName =
       relinkId === undefined
         ? undefined
-        : originNames([...(page?.rows ?? []).map((r) => r.sourceId), relinkId], sources).get(
-            relinkId,
-          );
+        : originNames([...view.rows.map((r) => r.sourceId), relinkId], sources).get(relinkId);
     const allTargets = overview?.domains.flatMap((d) => d.targets) ?? [];
     const linkAgents = [
       ...new Set(
@@ -848,12 +885,12 @@ export default function SkillsTab({
       ),
     ];
     // 直接读原件所在目录的 agent：这一行里画 ⦿ 的列
-    const row = page?.rows.find((r) => r.sourceId === ref.sourceId && r.skill === ref.skill);
+    const row = view.rows.find((r) => skillRowKey(r) === rowKey);
     const ownAgents = [
       ...new Set(
         (row?.cells ?? [])
           .filter((c) => c.state === "own")
-          .flatMap((c) => page?.targets.find((t) => t.id === c.targetId)?.label ?? []),
+          .flatMap((c) => targetOf(c.targetId)?.label ?? []),
       ),
     ];
     setDeletePane({
@@ -876,7 +913,7 @@ export default function SkillsTab({
   const confirmDeleteOriginal = async (pane: DeletePane) => {
     setDeletePane(null);
     const { ref } = pane;
-    const rowKey = skillRowKey(ref);
+    const rowKey = refRowKey(ref);
     setHidden((prev) => new Set(prev).add(rowKey));
     const cannot = (reason: string) => (
       <Toast
@@ -984,11 +1021,11 @@ export default function SkillsTab({
   // DESIGN「页面还是弹层」：删用户的原件先确认（锚在按钮上），确认后直接删、不挂起；
   // 结果是例行一行 + `撤销`（2026-09-25 起：另一份放回原处、改指过的链接指回去）
 
-  const keepThis = async (kept: DomainRow, other: DomainRow, at: AnchorRect) => {
+  const keepThis = async (kept: SkillRow, other: SkillRow, at: AnchorRect) => {
     const sources = overview?.sources ?? [];
-    // 与原件位置列同一套：按本域出现的来源算，同名来源才分得开
+    // 与原件位置列同一套：按表里出现的来源算，同名来源才分得开
     const names = originNames(
-      (page?.rows ?? [kept, other]).map((r) => r.sourceId),
+      view.rows.map((r) => r.sourceId),
       sources,
     );
     const nameOf = (id: string): OriginName => names.get(id) ?? { name: id, seg: "" };
@@ -1114,10 +1151,13 @@ export default function SkillsTab({
   };
 
   /// 同名两份的读数：×2 的提示框要同时列两份，所以一次把同名的几份都取了（取过的不再取）
-  const dupHover = (row: DomainRow) => {
-    for (const copy of page?.rows.filter((r) => r.skill === row.skill) ?? [row]) readoutOf(copy);
+  const dupHover = (row: SkillRow) => {
+    for (const copy of view.rows.filter(
+      (r) => r.domainKey === row.domainKey && r.skill === row.skill,
+    ))
+      readoutOf(copy);
   };
-  const readoutOf = (row: DomainRow) => {
+  const readoutOf = (row: SkillRow) => {
     const key = skillRowKey(row);
     if (dupReadout.has(key)) return;
     // 先占位，悬停来回扫时不重复体检
@@ -1217,13 +1257,36 @@ export default function SkillsTab({
     />
   ) : null;
   /// 这个位置订阅了来源才有 `管理来源`（一个都没订阅时不出：空态已有 `+ 来源`）
+  /// 不止一个位置时总是给：先选位置，那个位置没订阅来源时来源管理页自己出空态
   const subscribed = (sources.data?.rows.length ?? 0) > 0;
-  const openManage = subscribed
-    ? () => {
-        setManageFlash([]);
-        setManageOpen(true);
-      }
-    : undefined;
+  const openManageAt = (key: string) => {
+    setPickedKey(key);
+    setManageFlash([]);
+    setManageOpen(true);
+  };
+  const openManage =
+    multi || subscribed
+      ? (at: HTMLElement | null) =>
+          multi && at ? setPicker({ anchor: at, then: "manage" }) : openManageAt(sourceKey)
+      : undefined;
+  /// 选位置浮层（R8）：列出范围里的位置，选好进原来的流程
+  const placePicker = picker ? (
+    <PlacePicker
+      anchor={picker.anchor}
+      places={locations.map((key) => ({
+        key,
+        label: view.places.get(key) ?? pages.find((p) => p.key === key)?.label ?? folderLabel(key),
+      }))}
+      title={picker.then === "add" ? "把来源加到哪个位置？" : "管理哪个位置的来源？"}
+      onPick={(key) => {
+        const then = picker.then;
+        setPicker(null);
+        if (then === "add") openAddAt(key);
+        else openManageAt(key);
+      }}
+      onClose={() => setPicker(null)}
+    />
+  ) : null;
   /// 来源管理页（二级页，同添加来源页的骨架）：来源的路径、规则、移除都在这里。
   /// 开着时最后一个来源被移除，它自己出空态，不跟着收起
   const managePage = manageOpen ? (
@@ -1251,8 +1314,10 @@ export default function SkillsTab({
       />
     );
   }
-  if (page === null) {
-    // 这个位置还没有扫描出来的页（没有 agent 目录）：`+ 来源` 已在页面头，空态不重复
+  /// 空态里说的地方：一个位置写它的名字，几个位置合起来说
+  const placeLabel = multi ? "这几个位置" : domainRef.label;
+  if (pages.length === 0) {
+    // 范围里没有一个位置扫描出页（没有 agent 目录）：`+ 来源` 已在页面头，空态不重复
     return (
       <LocationFrame
         filterText={filterText}
@@ -1261,7 +1326,7 @@ export default function SkillsTab({
         enabled={!addOpen && !manageOpen}
         bar={scopeBar}
         empty={{
-          description: `${domainRef.label} 下还没有 agent 的 skill 目录`,
+          description: `${placeLabel} 下还没有 agent 的 skill 目录`,
           hint: "加上第一个 skill 时会自动创建",
           art: "noDirs",
         }}
@@ -1272,6 +1337,7 @@ export default function SkillsTab({
         }
       >
         {sources.host}
+        {placePicker}
         {managePage}
         {addPage}
       </LocationFrame>
@@ -1291,7 +1357,7 @@ export default function SkillsTab({
   // 筛选框（⌘F）同时匹配名字与来源名（R9）：来源名要跟「来源」列显示的一致（同名来源带区分片段），
   // 与 DomainView 同一个起名函数、同一组来源
   const originNamesMap = originNames(
-    [...new Set(page.rows.map((row) => row.sourceId))],
+    [...new Set(view.rows.map((row) => row.sourceId))],
     overview.sources,
   );
   const originLabelOf = (id: string) =>
@@ -1301,14 +1367,14 @@ export default function SkillsTab({
         seg: "",
       },
     );
-  const visible = page.rows.filter((row) =>
+  const visible = view.rows.filter((row) =>
     matchesFilter(filterText, row.skill, originLabelOf(row.sourceId)),
   );
   const hiddenRows = hidden;
   // 孤链行：点过的格先去掉；刚清完、数据里已没有的那一行，例行一行还在时照留
-  const liveOrphans = orphanRows(page).map((o) => ({
+  const liveOrphans = view.orphans.map((o) => ({
     ...o,
-    links: o.links.filter((l) => !orphanGone.has(cellKey(o.key, l.targetId))),
+    links: o.links.filter((l) => !orphanGone.has(cellKey(o.key, columnOfTarget(l.targetId)))),
   }));
   const ghost =
     orphanGhost !== null &&
@@ -1322,7 +1388,8 @@ export default function SkillsTab({
     <section className="mx-page">
       <DomainView
         overview={overview}
-        page={page}
+        view={view}
+        placeLabel={placeLabel}
         rows={visible}
         stateOf={stateOf}
         hiddenRows={hiddenRows}
@@ -1421,6 +1488,7 @@ export default function SkillsTab({
       ) : null}
 
       {sources.host}
+      {placePicker}
       {managePage}
       {addPage}
     </section>

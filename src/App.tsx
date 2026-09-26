@@ -347,7 +347,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav, projectKeyList?.join("\n"), modelsAvailable]);
 
-  /// 这一屏涉及的位置（R4）。多位置的表格在阶段 B 接通之前，先取其中一个显示（中间态，不发布）
+  /// 这一屏涉及的位置（R4）。SKILLS 已按位置集合出表；MCP 的多位置表格接通之前，先取其中一个显示（中间态，不发布）
   const locations = locationsOf(
     nav.scope,
     projects.map((p) => p.key),
@@ -446,7 +446,7 @@ export default function App() {
         overview={overview}
         autoLinks={autoLinks}
         onBusy={setBusyState}
-        selectedKey={selectedKey}
+        locations={locations}
         onRefresh={refresh}
         onError={setError}
         banner={error !== null}

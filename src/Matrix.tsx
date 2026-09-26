@@ -57,6 +57,9 @@ import "./Matrix.css";
 const CHECK_W = 34;
 const NAME_W = 246;
 const ORIGIN_W = 144;
+/// 多位置时名称后的「位置」列（与 agent 列同宽），来源列让到 112（spec 2026-09-26-object-first-navigation R6）
+const PLACE_W = 88;
+const ORIGIN_W_WITH_PLACE = 112;
 const COL_W = 88;
 /// 名字前的拉手列：拉手 18 + 6（Matrix.css 的 `--mx-handle-col` 同值）
 const HANDLE_W = 24;
@@ -110,6 +113,8 @@ export interface MatrixCellView {
 export interface MatrixRowView {
   key: string;
   name: string;
+  /// 「位置」格：这一行所在的位置（`用户级` 或项目名）；表格给了 `placeLabel` 时才画
+  place?: string;
   /// 「来源」格：来源名（同名来源用区分片段）+ 完整路径；悬停出路径提示框与 `打开 ↗`。
   /// `gone`：原件已经不在了（孤链行），名字用 `ink-faint`，不出 `打开 ↗`。
   /// `split`：同名来源时把 `label` 拆成来源名 + 区分片段两段画，放不下只截来源名（`ego… · 0.5.0.32`）
@@ -159,6 +164,8 @@ export interface MatrixProps {
   columns: MatrixColumn[];
   /// 「来源」列的列头文字
   originLabel: string;
+  /// 「位置」列的列头文字：范围里不止一个位置时给，名称后多一列、来源列让窄；不给就没有这一列
+  placeLabel?: string;
   /// 页面头下方的插槽（吸顶）：以前固定放按来源筛选的胶囊行；R9 去掉了它，现在是个空槽——
   /// 调用方放什么就是什么（例如 R4 的项目筛选片），Matrix 不认来源、不认项目。没给就只留上下距
   bar?: ReactNode;
@@ -314,12 +321,29 @@ export function FilterBox({
 
 /// 页面头右端管来源的两颗键（DESIGN「位置页 › 页面头」）：`管理来源`（默认键 28）+ 8 + `+ 来源`（最右端）——
 /// 两件管来源的事并排（① 就近）。这个位置一个来源都没订阅时不给 `onManage`，`管理来源` 不出（空态已有 `+ 来源`）。
-/// skills 与 mcp 同一处，切页签不跳
-export function SourceKeys({ onManage, onAdd }: { onManage?: () => void; onAdd: () => void }) {
+/// skills 与 mcp 同一处，切页签不跳。回调拿到被按的那颗键：范围里不止一个位置时，选位置的浮层锚在它上面（R8）；
+/// `+ 来源` 带 `data-source-key="add"`，菜单「添加来源…」没有按键时浮层锚到它
+export function SourceKeys({
+  onManage,
+  onAdd,
+}: {
+  onManage?: (at: HTMLElement | null) => void;
+  onAdd: (at: HTMLElement | null) => void;
+}) {
+  const manageRef = useRef<HTMLSpanElement>(null);
+  const addRef = useRef<HTMLSpanElement>(null);
+  const keyIn = (ref: RefObject<HTMLSpanElement | null>) =>
+    ref.current?.querySelector("button") ?? null;
   return (
     <>
-      {onManage ? <Button onClick={onManage}>管理来源</Button> : null}
-      <AddButton noun="来源" onClick={onAdd} />
+      {onManage ? (
+        <span ref={manageRef} className="mx-sourcekey">
+          <Button onClick={() => onManage(keyIn(manageRef))}>管理来源</Button>
+        </span>
+      ) : null}
+      <span ref={addRef} className="mx-sourcekey" data-source-key="add">
+        <AddButton noun="来源" onClick={() => onAdd(keyIn(addRef))} />
+      </span>
     </>
   );
 }
@@ -414,6 +438,7 @@ export default function Matrix(props: MatrixProps) {
   const {
     columns,
     originLabel,
+    placeLabel,
     bar,
     hint,
     emptyHint,
@@ -484,7 +509,9 @@ export default function Matrix(props: MatrixProps) {
     `${CHECK_W}px`,
     // 名称列吸收面板里余下的宽度：4 列时 246、少于 4 列更宽、5 列时 158
     "minmax(0, 1fr)",
-    `${ORIGIN_W}px`,
+    ...(placeLabel !== undefined
+      ? [`${PLACE_W}px`, `${ORIGIN_W_WITH_PLACE}px`]
+      : [`${ORIGIN_W}px`]),
     ...columns.map(() => `${COL_W}px`),
   ].join(" ");
   const width = PANEL_W;
@@ -493,14 +520,19 @@ export default function Matrix(props: MatrixProps) {
   // ---- 排序：名称 / 来源 / 某一列的格；同值再按名称、来源，同名两份相邻 ----
   const byName = compareBy((r: MatrixRowView) => r.name, "asc");
   const byOrigin = compareBy((r: MatrixRowView) => r.origin.label, "asc");
+  const byPlace = compareBy((r: MatrixRowView) => r.place ?? "", "asc");
   const primary =
     sort.key === "name"
       ? compareBy((r: MatrixRowView) => r.name, sort.dir)
       : sort.key === "origin"
         ? compareBy((r: MatrixRowView) => r.origin.label, sort.dir)
-        : compareBy((r: MatrixRowView) => DOT_RANK[r.cells[sort.key]?.dot ?? "none"], sort.dir);
-  // 键盘在格间移动按这个顺序
-  const flat = [...rows].sort((a, b) => primary(a, b) || byName(a, b) || byOrigin(a, b));
+        : sort.key === "place"
+          ? compareBy((r: MatrixRowView) => r.place ?? "", sort.dir)
+          : compareBy((r: MatrixRowView) => DOT_RANK[r.cells[sort.key]?.dot ?? "none"], sort.dir);
+  // 键盘在格间移动按这个顺序；同名的两个位置相邻（位置先于来源）
+  const flat = [...rows].sort(
+    (a, b) => primary(a, b) || byName(a, b) || byPlace(a, b) || byOrigin(a, b),
+  );
   const rowIndex = new Map(flat.map((row, i) => [row.key, i]));
   // 筛选让行变少、列数变了之后，焦点格可能落在表外——那样整张表没有一个 tabIndex=0 的格，
   // Tab 键会直接跳过整张表。所以每次渲染都夹回最近的有效格；表为空时没有格可夹
@@ -790,6 +822,15 @@ export default function Matrix(props: MatrixProps) {
           nameHead
         )}
       </div>
+      {/* 位置：只在多位置时有；点文字按位置排序（同位置聚拢） */}
+      {placeLabel !== undefined ? (
+        <div className="mx-head__place">
+          <button type="button" className="mx-headbtn" onClick={() => sortBy("place")}>
+            {placeLabel}
+            <SortArrow active={sort.key === "place"} desc={sort.dir === "desc"} />
+          </button>
+        </div>
+      ) : null}
       {/* 来源：点文字按来源排序（同来源聚拢） */}
       <div className="mx-head__origin">
         <button type="button" className="mx-headbtn" onClick={() => sortBy("origin")}>
@@ -845,6 +886,7 @@ export default function Matrix(props: MatrixProps) {
           </span>
         ) : null}
       </div>
+      {placeLabel !== undefined ? <div /> : null}
       <div className="mx-selrow__all">
         {allAgents ? (
           <>
@@ -1015,6 +1057,16 @@ export default function Matrix(props: MatrixProps) {
               </span>
             ) : null}
           </div>
+          {placeLabel !== undefined ? (
+            // 位置名放不下时截断，完整值在提示框里
+            <div className="mx-row__place">
+              <Tooltip fit="shrink" content={row.place ?? ""} context="table">
+                <span className="mx-place" tabIndex={-1}>
+                  {row.place ?? ""}
+                </span>
+              </Tooltip>
+            </div>
+          ) : null}
           {/* 来源：写来源名；悬停出完整路径提示框与 `打开 ↗`（这一行已展开时只出提示框） */}
           <div
             className="mx-row__origin"

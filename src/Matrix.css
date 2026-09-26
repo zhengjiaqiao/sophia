@@ -1,5 +1,5 @@
 /* 位置页的表格（Matrix.tsx，DESIGN「位置页：skills ｜ mcp」「表格（组件）」「选择行」）。
-   面板 776 = 复选 34 + 名称 246 + 来源 144 + 4 × 88（原来的尾列 24 给了拉手在行尾时，2026-09-25 拉手挪到名字后，尾列并进来源列）；行高 34；表头底 1px hairline、
+   面板 776 = 复选 34 + 名称 246 + 来源 144 + 4 × 88；多位置时名称后插位置 88、来源让到 112（原来的尾列 24 给了拉手在行尾时，2026-09-25 拉手挪到名字后，尾列并进来源列）；行高 34；表头底 1px hairline、
    行与行 1px row-line（V4 没有墨色结构线）。色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
@@ -114,6 +114,7 @@
   color: var(--ink-faint);
 }
 
+.mx-head__place,
 .mx-head__origin {
   display: flex;
   align-items: center;
@@ -301,6 +302,28 @@
 .mx-row.is-hot,
 .mx-row.is-selected {
   background: var(--surface);
+}
+
+/* 页面头管来源的两颗键外的包装：只为拿到被按的键当选位置浮层的锚，不参与排布 */
+.mx-sourcekey {
+  display: contents;
+}
+
+/* 位置格（多位置时才有）：位置名 ink-mute，同来源格一个字号 */
+.mx-row__place {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-right: var(--space-xs);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.mx-place {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 来源格：来源名 ink-mute；悬停出 `打开 ↗` */

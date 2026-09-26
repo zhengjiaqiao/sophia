@@ -1,6 +1,8 @@
-/// Skills 的一个位置（全局或某项目）→ 共享表格 `Matrix` 的视图（DESIGN「位置页：skills ｜ mcp」）。
+/// Skills 的位置集合（用户级、某项目，或 `全部` 下的几个位置）→ 共享表格 `Matrix` 的视图
+/// （DESIGN「位置页：skills ｜ mcp」；spec 2026-09-26-object-first-navigation R6 R7）。
 ///
-/// 只做折算：把 DomainPage 的行 × 目标折成「行 + 来源 + 格 + 选择行的点」，点了什么
+/// 只做折算：把合并后的行 × agent 列（`skillsView.mergeSkillPages`）折成「行 + 来源 + 格 + 选择行的点」，
+/// 每一格落在这一行自己位置的目标上。不止一个位置时名称后多一列 `位置`。点了什么
 /// 原样交回 SkillsTab（写操作、乐观更新、提示条都在那里）。格的语义取自 `cellState.viewOf`，
 /// 不在这里另写一份。
 ///
@@ -22,17 +24,23 @@ import { originNames, originText } from "./originName";
 import { matchesFilter } from "./rowFilter";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
-import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
+import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP } from "./orphanRows";
+import {
+  columnOfTarget,
+  columnPress,
+  refAt,
+  refRowKey,
+  skillRowKey,
+  type PlacedOrphan,
+  type SkillRow,
+  type SkillsView,
+} from "./skillsView";
 import { BusySlot, Button, Empty, Mono, Note, Tag, Tooltip, type EmptyArt } from "./ui";
 import type { AnchorRect } from "./layerPlace.ts";
-import type { CellRef, CellState, DomainPage, DomainRow, Overview } from "./types";
+import type { CellRef, CellState, Overview } from "./types";
 
-/// 行键：本体位置 + skill（一页只显示一个域）
-export const skillRowKey = (row: { sourceId: string; skill: string }) =>
-  `${row.sourceId}|${row.skill}`;
-
-/// 一格的键（乐观更新、闪烁、就地提示都按它认格）
-export const skillCellKey = (ref: CellRef) => cellKey(skillRowKey(ref), ref.targetId);
+/// 一格的键（乐观更新、闪烁、就地提示都按它认格）：这一行（带位置）+ agent 列
+export const skillCellKey = (ref: CellRef) => cellKey(refRowKey(ref), columnOfTarget(ref.targetId));
 
 /// 批量操作：已选的 × 一个 agent（或全部）。`撤销` 键按条件给（DESIGN「提示条的位置」，2026-09-25
 /// 评审第二轮）：再按一次同一个点就恰好撤回时不给；`⌘Z` 始终可用
@@ -48,25 +56,28 @@ export interface BatchPress {
 
 export interface DomainViewProps {
   overview: Overview;
-  page: DomainPage;
+  /// 范围里各位置并成的一张表（列、全部行、位置名）
+  view: SkillsView;
   /// 经过筛选、要显示的行
-  rows: DomainRow[];
+  rows: SkillRow[];
+  /// 一个位置都还没有 agent 目录时空态里说的地方：`用户级` / 项目名 / `这几个位置`
+  placeLabel: string;
   /// 格此刻该画成什么（乐观更新之后的状态）
   stateOf: (ref: CellRef, actual: CellState) => CellState;
   /// 只留这份确认之后、删除完成之前先藏起来的那一份
   hiddenRows: Set<string>;
   /// 同名行悬停读数（`3 个文件`）；没取到时为 undefined
   dupReadout: Map<string, string>;
-  onDupHover: (row: DomainRow) => void;
+  onDupHover: (row: SkillRow) => void;
   /// 点「只留这份」（抽屉里的键，或右键菜单）：确认框锚在 `anchor` 下面
   /// `at`：按下那一刻触发控件的位置——结果的提示小窗锚在这里，抽屉收起、行重排之后也还在原处
-  onKeepThis: (row: DomainRow, other: DomainRow, at: AnchorRect) => void;
+  onKeepThis: (row: SkillRow, other: SkillRow, at: AnchorRect) => void;
   /// 正在为哪一行体检（点了「只留这份」、确认框还没出来）：那一行的键原位忙碌、不随悬停收起
   keepBusy?: string | null;
   /// 孤链行（原件已不在的失效链接，见 orphanRows.ts）。本页全部，筛选在这里做
-  orphans: OrphanRow[];
+  orphans: PlacedOrphan[];
   /// 点孤链格：清除这条链接
-  onClearOrphan: (orphan: OrphanRow, targetId: string) => void;
+  onClearOrphan: (orphan: PlacedOrphan, targetId: string) => void;
 
   filterText: string;
   onFilterText: (text: string) => void;
@@ -75,10 +86,10 @@ export interface DomainViewProps {
   onReveal: (path: string) => void;
   /// 右键「拷贝路径」
   onCopyPath: (path: string) => void;
-  /// 页面头的 `+ 来源`：进添加来源页
-  onAddSource: () => void;
+  /// 页面头的 `+ 来源`：进添加来源页（多个位置时先选位置，`at` 是被按的键）
+  onAddSource: (at: HTMLElement | null) => void;
   /// 页面头的 `管理来源`：进来源管理页；这个位置一个来源都没订阅时不给（键不出）
-  onManageSources?: () => void;
+  onManageSources?: (at: HTMLElement | null) => void;
   /// bar 插槽（R4 的项目筛选片，见 Matrix）：原样传给 Matrix 的 `bar`
   bar?: ReactNode;
   /// 新手提示条的插槽：bar 插槽下、表头上（放 `<HintStrip flush>`，见 Matrix）
@@ -152,12 +163,13 @@ export function affectedTip(
 }
 
 export default function DomainView(props: DomainViewProps) {
-  const { overview, page, rows: visible, stateOf } = props;
+  const { overview, view, rows: visible, stateOf } = props;
+  const multi = view.places.size > 0;
 
   const sourceOf = (id: string) => overview.sources.find((s) => s.id === id);
   const labelOf = (id: string) => sourceOf(id)?.label ?? id;
   /// 原件完整路径：skill 自带；查不到时回退到「来源目录 + 名字」
-  const pathOf = (row: DomainRow) => {
+  const pathOf = (row: SkillRow) => {
     const source = sourceOf(row.sourceId);
     return (
       source?.skills.find((k) => k.name === row.skill)?.path ??
@@ -165,51 +177,55 @@ export default function DomainView(props: DomainViewProps) {
     );
   };
 
-  // 同名：本域里同一个 skill 名出现在不止一个来源下＝有几份原件
-  const copies = new Map<string, DomainRow[]>();
-  for (const row of page.rows) {
+  // 同名：同一个位置里同一个 skill 名出现在不止一个来源下＝有几份原件（两个位置各装一份不算同名）
+  const dupKey = (row: SkillRow) => `${row.domainKey}|${row.skill}`;
+  const copies = new Map<string, SkillRow[]>();
+  for (const row of view.rows) {
     if (props.hiddenRows.has(skillRowKey(row))) continue;
-    const list = copies.get(row.skill);
+    const list = copies.get(dupKey(row));
     if (list) list.push(row);
-    else copies.set(row.skill, [row]);
+    else copies.set(dupKey(row), [row]);
   }
 
-  const stateAt = (row: DomainRow, targetId: string): CellState | null => {
-    const cell = row.cells.find((c) => c.targetId === targetId);
-    if (!cell) return null;
-    return stateOf({ sourceId: row.sourceId, skill: row.skill, targetId }, cell.state);
+  /// 这一行在这一列的格此刻的状态；这一行的位置里没有这个 agent、或没有这一格时为 null
+  const stateAt = (row: SkillRow, column: SkillsView["columns"][number]): CellState | null => {
+    const ref = refAt(row, column);
+    if (ref === null) return null;
+    const cell = row.cells.find((c) => c.targetId === ref.targetId)!;
+    return stateOf(ref, cell.state);
   };
 
   // ---- 列：通道条表头，第三层是这个 agent 下已加上的格数（● 与 ⦿ 都算），与 `名称 N` 同一范围
   // （随当前筛选，DESIGN「计数口径」） ----
-  const columns = page.targets.map((target) => {
+  // 目录还不存在（虚线图标）：这一列在范围里的每个位置都还没有目录
+  const columns = view.columns.map((target) => {
     const n = visible.filter((row) => {
       if (props.hiddenRows.has(skillRowKey(row))) return false;
-      const s = stateAt(row, target.id);
+      const s = stateAt(row, target);
       return s === "linked" || s === "own";
     }).length;
     return {
       id: target.id,
-      agentId: target.scope.harnessId,
+      agentId: target.agentId,
       name: target.label,
       count: n,
       tip: `${target.label} · ${n} 个已加上`,
-      missing: !target.exists,
+      missing: [...target.targets.values()].every((t) => !t.exists),
     };
   });
 
   // ---- 来源名：同名来源用路径里能区分它们的那一级（与确认框同一个起名函数） ----
-  const namedIds = [...new Set(page.rows.map((row) => row.sourceId))];
+  const namedIds = [...new Set(view.rows.map((row) => row.sourceId))];
   const names = originNames(namedIds, overview.sources);
   const nameOf = (id: string) => names.get(id) ?? { name: labelOf(id), seg: "" };
   const originOf = (id: string) => originText(nameOf(id));
 
   /// 同名占位（⊘）的那一格被表格里哪一行的来源占着：同名的另一份在这一列是加上的那一份
-  const occupantAt = (row: DomainRow, targetId: string): string | undefined => {
-    const holder = (copies.get(row.skill) ?? []).find(
+  const occupantAt = (row: SkillRow, column: SkillsView["columns"][number]): string | undefined => {
+    const holder = (copies.get(dupKey(row)) ?? []).find(
       (r) =>
         r.sourceId !== row.sourceId &&
-        (stateAt(r, targetId) === "linked" || stateAt(r, targetId) === "own"),
+        (stateAt(r, column) === "linked" || stateAt(r, column) === "own"),
     );
     return holder ? originOf(holder.sourceId) : undefined;
   };
@@ -220,18 +236,19 @@ export default function DomainView(props: DomainViewProps) {
     .map((row) => {
       const key = skillRowKey(row);
       const cells: Record<string, MatrixCellView | null> = {};
-      for (const target of page.targets) {
-        const cell = row.cells.find((c) => c.targetId === target.id);
-        if (!cell) {
-          cells[target.id] = null;
+      for (const column of view.columns) {
+        const ref = refAt(row, column);
+        if (ref === null) {
+          cells[column.id] = null;
           continue;
         }
-        const ref = { sourceId: row.sourceId, skill: row.skill, targetId: target.id };
+        const target = column.targets.get(row.domainKey)!;
+        const cell = row.cells.find((c) => c.targetId === ref.targetId)!;
         const state = stateOf(ref, cell.state);
-        const view = viewOf({ ...cell, state }, target, target.label, row.skill);
+        const shown = viewOf({ ...cell, state }, target, target.label, row.skill);
         const verb = verbOf(state, target.label);
-        cells[target.id] = {
-          dot: view.dot,
+        cells[column.id] = {
+          dot: shown.dot,
           clickable: verb !== undefined,
           tip:
             verb ??
@@ -239,12 +256,12 @@ export default function DomainView(props: DomainViewProps) {
               state,
               target.label,
               row.skill,
-              view.reason ?? "",
-              occupantAt(row, target.id),
+              shown.reason ?? "",
+              occupantAt(row, column),
             ),
         };
       }
-      const dup = copies.get(row.skill) ?? [];
+      const dup = copies.get(dupKey(row)) ?? [];
       const other = dup.length === 2 ? dup.find((r) => r.sourceId !== row.sourceId) : undefined;
       const readout = props.dupReadout.get(key) || undefined;
       const otherReadout = other
@@ -257,6 +274,7 @@ export default function DomainView(props: DomainViewProps) {
       return {
         key,
         name: row.skill,
+        place: view.places.get(row.domainKey),
         origin: {
           id: row.sourceId,
           label: originOf(row.sourceId),
@@ -288,7 +306,7 @@ export default function DomainView(props: DomainViewProps) {
               </Tag>
             </span>
           ) : undefined,
-        dupGroup: dup.length > 1 ? row.skill : undefined,
+        dupGroup: dup.length > 1 ? dupKey(row) : undefined,
         // 点名字 / ×2 / 拉手拉开抽屉：描述、路径 + 打开 ↗、改于 … · N 个文件（读不到描述不写那一行）；
         // 同名行末尾一颗 `只留这份`（名称格里不放键，名字不被挤成省略号）
         detail: (
@@ -341,13 +359,14 @@ export default function DomainView(props: DomainViewProps) {
   const orphans = props.orphans.filter((o) => matchesFilter(props.filterText, o.skill, null));
   for (const orphan of orphans) {
     const cells: Record<string, MatrixCellView | null> = {};
-    for (const target of page.targets) {
-      const link = orphan.links.find((l) => l.targetId === target.id);
-      cells[target.id] = link ? { dot: "broken", clickable: true, tip: ORPHAN_TIP } : null;
+    for (const column of view.columns) {
+      const link = orphan.links.find((l) => columnOfTarget(l.targetId) === column.id);
+      cells[column.id] = link ? { dot: "broken", clickable: true, tip: ORPHAN_TIP } : null;
     }
     matrixRows.push({
       key: orphan.key,
       name: orphan.skill,
+      place: view.places.get(orphan.domainKey),
       origin: {
         id: orphan.key,
         label: ORPHAN_ORIGIN,
@@ -368,26 +387,16 @@ export default function DomainView(props: DomainViewProps) {
   // 点 ○ 补齐缺的，点 ● 全部移除。原件、受阻（无法写入、同名占位）的格不计入（DESIGN「选择行」）
   const columnChecks: Record<string, ColumnCheck> = {};
   const enabledPresses: { add: CellRef[]; remove: CellRef[]; checked: boolean }[] = [];
-  for (const target of page.targets) {
-    const linked: CellRef[] = [];
-    const missing: CellRef[] = [];
-    const own: string[] = [];
-    const blocked: string[] = [];
-    for (const row of chosen) {
-      const s = stateAt(row, target.id);
-      const ref = { sourceId: row.sourceId, skill: row.skill, targetId: target.id };
-      if (s === "linked") linked.push(ref);
-      else if (s === "missing") missing.push(ref);
-      else if (s === "own") own.push(row.skill);
-      else if (s !== null) blocked.push(row.skill);
-    }
+  for (const target of view.columns) {
+    // 各行按自己位置的格算（`全部` 下选中的行可以分属几个位置）
+    const { linked, missing, own, blocked, targets } = columnPress(chosen, target, stateOf);
     const checked = missing.length === 0 && linked.length > 0;
     const notes = [
       { names: own, why: `原件就在 ${target.label} 里` },
       { names: blocked, why: `无法加到 ${target.label}` },
     ];
     const disabledReason =
-      target.linkedWholeTo !== null
+      targets.length > 0 && targets.every((t) => t.linkedWholeTo !== null)
         ? `${target.label} 的 skills 整个文件夹是链接`
         : linked.length + missing.length > 0
           ? undefined
@@ -440,7 +449,9 @@ export default function DomainView(props: DomainViewProps) {
   };
 
   // ---- 空态（DESIGN「位置页 › 空态」）：动作已在页面头的（`+ 来源`）不重复，只说现状 ----
-  const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
+  const noAgentDirs =
+    view.columns.length === 0 ||
+    view.columns.every((c) => [...c.targets.values()].every((t) => !t.exists));
   const query = props.filterText.trim();
   const empty =
     query !== "" ? (
@@ -450,7 +461,7 @@ export default function DomainView(props: DomainViewProps) {
       />
     ) : noAgentDirs ? (
       <TableEmpty
-        text={`${page.label} 下还没有 agent 的 skill 目录`}
+        text={`${props.placeLabel} 下还没有 agent 的 skill 目录`}
         hint="加上第一个 skill 时会自动创建"
         art="noDirs"
       />
@@ -463,11 +474,16 @@ export default function DomainView(props: DomainViewProps) {
       columns={columns}
       rows={matrixRows}
       originLabel="来源"
+      placeLabel={multi ? "位置" : undefined}
       bar={props.bar}
       hint={props.hint}
       emptyHint={props.emptyHint}
       nameLabel="名称"
-      nameTip="列出这个位置各个来源里的全部 skill，agent 自带的和插件带的不在这里。已经链接到这里的来源会自动加进来，在「管理来源」里增删"
+      nameTip={
+        multi
+          ? "列出这几个位置各个来源里的全部 skill，同一个 skill 装在两个位置就是两行。agent 自带的和插件带的不在这里，在「管理来源」里增删"
+          : "列出这个位置各个来源里的全部 skill，agent 自带的和插件带的不在这里。已经链接到这里的来源会自动加进来，在「管理来源」里增删"
+      }
       nameCount={matrixRows.length}
       dotWords="skill"
       filterText={props.filterText}
@@ -478,13 +494,17 @@ export default function DomainView(props: DomainViewProps) {
       allAgents={allAgents}
       columnChecks={columnChecks}
       onCell={(rowKey, columnId) => {
-        const row = page.rows.find((r) => skillRowKey(r) === rowKey);
-        if (row) {
-          props.onCell({ sourceId: row.sourceId, skill: row.skill, targetId: columnId });
+        // 列 id 是 agent；落到这一行自己位置里那个 agent 的目标上
+        const row = view.rows.find((r) => skillRowKey(r) === rowKey);
+        const column = view.columns.find((c) => c.id === columnId);
+        if (row && column) {
+          const ref = refAt(row, column);
+          if (ref) props.onCell(ref);
           return;
         }
         const orphan = props.orphans.find((o) => o.key === rowKey);
-        if (orphan) props.onClearOrphan(orphan, columnId);
+        const link = orphan?.links.find((l) => columnOfTarget(l.targetId) === columnId);
+        if (orphan && link) props.onClearOrphan(orphan, link.targetId);
       }}
       onUndo={props.onUndo}
       canUndo={props.canUndo}
