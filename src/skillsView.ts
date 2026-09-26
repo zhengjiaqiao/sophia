@@ -126,29 +126,12 @@ export function refAt(row: SkillRow, column: SkillColumn): CellRef | null {
   return { sourceId: row.sourceId, skill: row.skill, targetId: target.id };
 }
 
-/// 一条要清掉的孤链：哪一行、哪一列的目标、清它的动作（原样交给 `api.applyAll([clear], true)`）
-export interface OrphanClear {
-  orphanKey: string;
-  skill: string;
-  targetId: string;
-  clear: PlannedAction;
-}
-
-/// 选中的行 × 一列（选择行里那一点）：按各行自己位置的格分成能加的、能移除的、原件、受阻；
-/// 选中的孤链行在这一列上的失效链接另列（`clears`）——它们只能清除，算在「能移除的」一边
+/// 选中的行 × 一列（选择行里那一点）：按各行自己位置的格分成能加的、能移除的、原件、受阻
 export function columnPress(
   rows: ReadonlyArray<SkillRow>,
   column: SkillColumn,
   stateOf: (ref: CellRef, actual: CellState) => CellState,
-  orphans: ReadonlyArray<PlacedOrphan> = [],
-): {
-  linked: CellRef[];
-  missing: CellRef[];
-  own: string[];
-  blocked: string[];
-  targets: Target[];
-  clears: OrphanClear[];
-} {
+): { linked: CellRef[]; missing: CellRef[]; own: string[]; blocked: string[]; targets: Target[] } {
   const linked: CellRef[] = [];
   const missing: CellRef[] = [];
   const own: string[] = [];
@@ -165,10 +148,5 @@ export function columnPress(
     else if (s === "own") own.push(row.skill);
     else blocked.push(row.skill);
   }
-  const clears = orphans.flatMap((o) =>
-    o.links
-      .filter((l) => columnOfTarget(l.targetId) === column.id)
-      .map((l) => ({ orphanKey: o.key, skill: o.skill, targetId: l.targetId, clear: l.clear })),
-  );
-  return { linked, missing, own, blocked, targets: [...targets], clears };
+  return { linked, missing, own, blocked, targets: [...targets] };
 }

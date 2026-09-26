@@ -190,25 +190,3 @@ test("孤链行按位置分开：行键带位置前缀，格落在自己位置�
     ],
   );
 });
-
-test("孤链批量清除：选中的孤链行在这一列上的失效链接都算「能移除的」，只取这一列的", () => {
-  const brokenAt = (t: Target, name: string) => ({
-    kind: "brokenLink" as const,
-    itemName: name,
-    sourcePath: `/gone/${name}`,
-    targetPath: `${t.path}/${name}`,
-    target: t.path,
-  });
-  const view = mergeSkillPages([
-    { ...user, broken: [brokenAt(gCX, "old"), brokenAt(gCC, "old"), brokenAt(gCX, "gone2")] },
-  ]);
-  const codex = view.columns.find((c) => c.id === "codex")!;
-  const picked = view.orphans.filter((o) => o.skill === "old");
-  const press = columnPress([], codex, (_r, a) => a, picked);
-  assert.deepEqual(
-    press.clears.map((c) => [c.skill, c.targetId]),
-    [["old", "codex"]],
-    "只清 Codex 这一列、只清选中的那一行",
-  );
-  assert.equal(press.clears[0].clear.targetPath, `${gCX.path}/old`);
-});

@@ -8,8 +8,8 @@
 ///
 /// 位置页上没有来源行，来源的路径、规则、移除都在来源管理页（页面头 `管理来源`，SkillsTab 挂）。
 /// R9 去掉了按来源筛选：筛选框（⌘F）同时匹配名字与来源名，见 `rowFilter.matchesFilter`。
-/// 说明横幅、「清除失效的」总按钮不回来（失效画在那一格上，点那一格就是重新链接；
-/// 原件已不在的孤链照样成一行，点那一格就是清除）。
+/// 失效画在那一格上，点那一格就是重新链接；原件已不在的孤链照样成一行，点那一格就是清除。
+/// 孤链的批量入口是表格上方那一句（`OrphanNotice`，SkillsTab 放进 `hint` 插槽），不在这张表里。
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import Matrix, {
@@ -24,14 +24,13 @@ import { originNames, originText } from "./originName.ts";
 import { matchesFilter } from "./rowFilter.ts";
 import { viewOf } from "./cellState.ts";
 import { blockedTipOf } from "./cellTip.ts";
-import { ORPHAN_ORIGIN, ORPHAN_TIP } from "./orphanRows.ts";
+import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP } from "./orphanRows.ts";
 import {
   columnOfTarget,
   columnPress,
   refAt,
   refRowKey,
   skillRowKey,
-  type OrphanClear,
   type PlacedOrphan,
   type SkillRow,
   type SkillsView,
@@ -101,8 +100,7 @@ export interface DomainViewProps {
   selected: Set<string>;
   onSelectionChange: (next: Set<string>) => void;
   onCell: (ref: CellRef) => void;
-  /// `clears`：选中的孤链行在这一点上要清掉的失效链接（只在移除的那一按里有；清掉的不能撤销）
-  onBatch: (press: BatchPress, clears: OrphanClear[]) => void;
+  onBatch: (press: BatchPress) => void;
   onUndo: () => void;
   /// 此刻有没有可撤销的操作（菜单「撤销」亮不亮）
   canUndo: boolean;
@@ -371,7 +369,7 @@ export default function DomainView(props: DomainViewProps) {
       };
     });
 
-  // ---- 孤链行：名字 + 原件位置「不在了」，有孤链的格虚线环、点一下清除；能勾，勾上后选择行里按 ● 一起清掉 ----
+  // ---- 孤链行：名字 + 原件位置「不在了」，有孤链的格虚线环、点一下清除；勾不动 ----
   // 没有真实来源可比对（伪来源 ORPHAN_ORIGIN 不是搜得到的来源名），筛选只按名字命中
   const orphans = props.orphans.filter((o) => matchesFilter(props.filterText, o.skill, null));
   for (const orphan of orphans) {
@@ -394,6 +392,7 @@ export default function DomainView(props: DomainViewProps) {
         gone: true,
       },
       cells,
+      selectDisabledReason: ORPHAN_SELECT_REASON,
     });
   }
 
@@ -401,51 +400,35 @@ export default function DomainView(props: DomainViewProps) {
   const chosen = visible.filter(
     (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
-  // 勾上的孤链行（原件已不在）：它们的失效链接只能清除，算在「能移除的」一边
-  const chosenOrphans = props.orphans.filter((o) => props.selected.has(o.key));
   // 每个 agent 列正下方一点：● ＝选中的在这里（按能改的格算）全都有，否则 ○；
-  // 点 ○ 补齐缺的，点 ● 全部移除（孤链一并清除）。原件、受阻（无法写入、同名占位）的格不计入（DESIGN「选择行」）
+  // 点 ○ 补齐缺的，点 ● 全部移除。原件、受阻（无法写入、同名占位）的格不计入（DESIGN「选择行」）
   const columnChecks: Record<string, ColumnCheck> = {};
-  const enabledPresses: {
-    add: CellRef[];
-    remove: CellRef[];
-    clears: OrphanClear[];
-    checked: boolean;
-  }[] = [];
+  const enabledPresses: { add: CellRef[]; remove: CellRef[]; checked: boolean }[] = [];
   for (const target of view.columns) {
     // 各行按自己位置的格算（`全部` 下选中的行可以分属几个位置）
-    const { linked, missing, own, blocked, targets, clears } = columnPress(
-      chosen,
-      target,
-      stateOf,
-      chosenOrphans,
-    );
-    const checked = missing.length === 0 && linked.length + clears.length > 0;
+    const { linked, missing, own, blocked, targets } = columnPress(chosen, target, stateOf);
+    const checked = missing.length === 0 && linked.length > 0;
     const notes = [
       { names: own, why: `原件就在 ${target.label} 里` },
       { names: blocked, why: `无法加到 ${target.label}` },
-      // 补齐时孤链不动：原件不在了，只能清除（等全都有了再按一次，连它们一起清掉）
-      ...(checked ? [] : [{ names: clears.map((c) => c.skill), why: "原件不在了，只能清除" }]),
     ];
     const disabledReason =
       targets.length > 0 && targets.every((t) => t.linkedWholeTo !== null)
         ? `${target.label} 的 skills 整个文件夹是链接`
-        : linked.length + missing.length + clears.length > 0
+        : linked.length + missing.length > 0
           ? undefined
-          : chosen.length === 0
-            ? `这几个在 ${target.label} 里没有失效链接`
-            : own.length > 0 && blocked.length === 0
-              ? "这几个都是原件，不能在这里加上或移除"
-              : `这几个都无法加到 ${target.label}`;
+          : own.length > 0 && blocked.length === 0
+            ? "这几个都是原件，不能在这里加上或移除"
+            : `这几个都无法加到 ${target.label}`;
     if (disabledReason === undefined)
-      enabledPresses.push({ add: missing, remove: linked, clears, checked });
+      enabledPresses.push({ add: missing, remove: linked, checked });
     columnChecks[target.id] = {
       checked,
       label: checked ? `选中的都从 ${target.label} 移除` : `选中的都加到 ${target.label}`,
       tip: checked
         ? affectedTip(
             `从 ${target.label} 移除`,
-            [...linked.map((c) => c.skill), ...clears.map((c) => c.skill)],
+            linked.map((c) => c.skill),
             notes,
           )
         : affectedTip(
@@ -459,7 +442,6 @@ export default function DomainView(props: DomainViewProps) {
           checked
             ? { keyId: target.id, op: "unlink", cells: linked, reversible: true }
             : { keyId: target.id, op: "link", cells: missing, reversible: linked.length === 0 },
-          checked ? clears : [],
         ),
     };
   }
@@ -467,18 +449,12 @@ export default function DomainView(props: DomainViewProps) {
   const allChecked = enabledPresses.length > 0 && enabledPresses.every((p) => p.checked);
   const allAdd = enabledPresses.flatMap((p) => p.add);
   const allRemove = enabledPresses.flatMap((p) => p.remove);
-  const allClears = enabledPresses.flatMap((p) => p.clears);
-  const uniqNames = (cells: { skill: string }[]) => [...new Set(cells.map((c) => c.skill))];
+  const uniqNames = (cells: CellRef[]) => [...new Set(cells.map((c) => c.skill))];
   const allAgents: ColumnCheck = {
     checked: allChecked,
     label: allChecked ? "选中的都从所有 agent 移除" : "选中的都加到所有 agent",
     tip: allChecked
-      ? affectedTip(
-          "从所有 agent 移除",
-          uniqNames([...allRemove, ...allClears]),
-          [],
-          allRemove.length + allClears.length,
-        )
+      ? affectedTip("从所有 agent 移除", uniqNames(allRemove), [], allRemove.length)
       : affectedTip("加到所有 agent", uniqNames(allAdd), [], allAdd.length),
     disabledReason: enabledPresses.length === 0 ? "没有能加上或移除的" : undefined,
     onToggle: () =>
@@ -486,7 +462,6 @@ export default function DomainView(props: DomainViewProps) {
         allChecked
           ? { keyId: "all", op: "unlink", cells: allRemove, reversible: true }
           : { keyId: "all", op: "link", cells: allAdd, reversible: allRemove.length === 0 },
-        allChecked ? allClears : [],
       ),
   };
 

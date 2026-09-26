@@ -6,6 +6,8 @@ import DomainView, { skillCellKey, type BatchPress } from "./DomainView";
 import { cellKey, SourceKeys } from "./Matrix";
 import { LocationFrame } from "./LocationFrame";
 import { NO_PROJECTS, NO_PROJECTS_HINT, usePlacePick } from "./ScopeBar";
+import { OrphanNotice } from "./OrphanNotice";
+import { orphanTotals } from "./orphanRows";
 import {
   columnOfTarget,
   folderLabel,
@@ -13,7 +15,6 @@ import {
   refAt,
   refRowKey,
   skillRowKey,
-  type OrphanClear,
   type PlacedOrphan,
   type SkillRow,
 } from "./skillsView";
@@ -226,6 +227,8 @@ export default function SkillsTab({
   } | null>(null);
   // 孤链格：点下去就先画成没有这一格（清除的目标状态），做成重扫后数据自己对上，没成弹回
   const [orphanGone, setOrphanGone] = useState<Set<string>>(new Set());
+  // 表格上方那一句的 `只看这些`：表格只列孤链行（再按一次、清完或换了范围就回到全部）
+  const [orphansOnly, setOrphansOnly] = useState(false);
   // 刚清完的孤链行：数据里已经没有它了，那一窗还锚在它那一格上待满 4 秒，这期间照原样留着
   const [orphanGhost, setOrphanGhost] = useState<PlacedOrphan | null>(null);
   // 「只留这份」挂起未提交时藏起来的另一份（行键）
@@ -387,6 +390,7 @@ export default function SkillsTab({
     setRowToast(null);
     setCellNotice(null);
     setAddedToast(null);
+    setOrphansOnly(false);
     setSelected(new Set());
     setUndo(null);
   }, [scopeKey]);
@@ -772,50 +776,25 @@ export default function SkillsTab({
   /// 按下一个键：格子同时变成新状态（不闪、不依次点亮），写入排在前面的写入之后（连按几个键
   /// 一个一个来，不和彼此抢）。只锁按下的那一项；过了 0.3 秒门槛它旁边出忙碌指示 + 一句
   /// （DESIGN「选择操作条」「反馈的两种形态 › 忙碌」）
-  /// `clears`：勾上的孤链行在这一点上的失效链接，随这一按一起清掉（先画成没有；清掉的不能撤销，同点格清除）
-  const batch = (press: BatchPress, undoing = false, clears: OrphanClear[] = []) => {
+  const batch = (press: BatchPress, undoing = false) => {
     const { keyId, op, cells } = press;
-    if (cells.length === 0 && clears.length === 0) return Promise.resolve();
+    if (cells.length === 0) return Promise.resolve();
     setKeyToast(null);
     setCellToast(null);
     setCellNotice(null);
     setOptimisticFor(cells, op === "link" ? "linked" : "missing");
-    setOrphanGone((prev) => {
-      const next = new Set(prev);
-      for (const c of clears) next.add(cellKey(c.orphanKey, columnOfTarget(c.targetId)));
-      return next;
-    });
     // 选择行的键是 agent 列 id
     const agent =
       keyId === "all" ? "所有 agent" : (view.columns.find((c) => c.id === keyId)?.label ?? "");
     if (keyId) setKeyBusy({ keyId, label: batchBusyText(op, agent) });
-    return enqueue(() => batchWrite(press, undoing, clears));
+    return enqueue(() => batchWrite(press, undoing));
   };
 
-  const batchWrite = async (
-    { keyId, op, cells, reversible }: BatchPress,
-    undoing: boolean,
-    clears: OrphanClear[],
-  ) => {
+  const batchWrite = async ({ keyId, op, cells, reversible }: BatchPress, undoing: boolean) => {
     onBusy(true);
     let result: Awaited<ReturnType<typeof run>> | null = null;
-    // 孤链：清掉的、没清掉的（原因）
-    const cleared: OrphanClear[] = [];
-    const notCleared: { clear: OrphanClear; reason: string }[] = [];
     try {
-      result = cells.length > 0 ? await run(op, cells) : { done: [], failed: [] };
-      if (clears.length > 0) {
-        const report = await api.applyAll(
-          clears.map((c) => c.clear),
-          true,
-        );
-        for (const c of clears) {
-          const entry = report.entries.find((e) => e.action.targetPath === c.clear.targetPath);
-          if (entry?.outcome.status === "failed")
-            notCleared.push({ clear: c, reason: `没清除：${entry.outcome.reason}` });
-          else cleared.push(c);
-        }
-      }
+      result = await run(op, cells);
     } catch (e) {
       onError(String(e));
     } finally {
@@ -830,20 +809,12 @@ export default function SkillsTab({
         null,
       );
       const done = result.done;
-      const clearItem = (c: OrphanClear): ToastItem => ({
-        name: c.skill,
-        agent: agentRef(targetOf(c.targetId)),
-      });
-      // 只清孤链的一按说「清除」；和正常行一起移除的，说「移除」
-      const text = toastFor(cells.length === 0 ? "clear" : op, {
-        done: [...toastItems(done), ...cleared.map(clearItem)],
-        failed: [
-          ...result.failed.map<FailedItem>((f) => ({
-            ...toastItems([f.ref])[0],
-            reason: f.reason,
-          })),
-          ...notCleared.map<FailedItem>((n) => ({ ...clearItem(n.clear), reason: n.reason })),
-        ],
+      const text = toastFor(op, {
+        done: toastItems(done),
+        failed: result.failed.map<FailedItem>((f) => ({
+          ...toastItems([f.ref])[0],
+          reason: f.reason,
+        })),
       });
       // `⌘Z` 始终撤这一次；提示条上的 `撤销` 只在再按一次同一个点撤不回原样时给（BatchPress.reversible）
       const undo =
@@ -865,9 +836,7 @@ export default function SkillsTab({
           {...text}
           // 写数量，不逐个写名字（`✓ 加到 ✳ 1 个`）；名字在点的提示框里
           names={text.kind === "success" ? undefined : text.names}
-          reading={
-            text.kind === "success" ? <ToastCount n={done.length + cleared.length} /> : undefined
-          }
+          reading={text.kind === "success" ? <ToastCount n={done.length} /> : undefined}
           action={undo && !reversible ? { label: "撤销", onClick: undo } : undefined}
           onDismiss={dismiss}
           onClose={text.tier === "notice" ? dismiss : undefined}
@@ -878,12 +847,6 @@ export default function SkillsTab({
     }
     await onRefresh();
     setOptimisticFor(cells, null);
-    // 重扫后清掉的孤链已不在数据里；没清掉的弹回
-    setOrphanGone((prev) => {
-      const next = new Set(prev);
-      for (const c of clears) next.delete(cellKey(c.orphanKey, columnOfTarget(c.targetId)));
-      return next;
-    });
   };
 
   // ===== 原件格：删原件（DESIGN「删除原件」） =====
@@ -1420,6 +1383,81 @@ export default function SkillsTab({
       ? orphanGhost
       : null;
   const orphans = ghost ? [...liveOrphans, ghost] : liveOrphans;
+  // 失效链接的常驻一句（OrphanNotice）：还剩的孤链（点过、正在清的不算）
+  const pending = orphanTotals(liveOrphans.filter((o) => o.links.length > 0));
+  const onlyOrphans = orphansOnly && pending.links > 0;
+
+  /// `全部清除`：当前范围里的孤链一次清掉。同点格清除：不确认、不撤销（链接本来就指向空处）；
+  /// 格子先画成没有，结果浮在这颗键下面
+  const clearAllOrphans = (at: HTMLElement | null) => {
+    const all = liveOrphans.filter((o) => o.links.length > 0);
+    if (pending.clears.length === 0) return;
+    const r = at?.getBoundingClientRect();
+    const anchor = r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined;
+    const keys = all.flatMap((o) => o.links.map((l) => cellKey(o.key, columnOfTarget(l.targetId))));
+    setCellNotice(null);
+    setCellToast(null);
+    setOrphanGone((prev) => new Set([...prev, ...keys]));
+    void enqueue(async () => {
+      onBusy(true);
+      let node: ReactNode = null;
+      try {
+        const report = await api.applyAll(pending.clears, true);
+        const failedPaths = new Map(
+          report.entries.flatMap((e) =>
+            e.outcome.status === "failed" ? [[e.action.targetPath, e.outcome.reason] as const] : [],
+          ),
+        );
+        const items = all.flatMap((o) => o.links.map((l) => ({ o, l })));
+        const itemOf = ({ o, l }: (typeof items)[number]): ToastItem => ({
+          name: o.skill,
+          agent: agentRef(targetOf(l.targetId)),
+        });
+        const done = items.filter(({ l }) => !failedPaths.has(l.clear.targetPath));
+        const text = toastFor("clear", {
+          done: done.map(itemOf),
+          failed: items
+            .filter(({ l }) => failedPaths.has(l.clear.targetPath))
+            .map<FailedItem>((it) => ({
+              ...itemOf(it),
+              reason: failedPaths.get(it.l.clear.targetPath) ?? "",
+            })),
+        });
+        node = (
+          <Toast
+            {...text}
+            names={text.kind === "success" ? undefined : text.names}
+            reading={text.kind === "success" ? <ToastCount n={done.length} /> : undefined}
+            onDismiss={dismissRow}
+            onClose={text.tier === "notice" ? dismissRow : undefined}
+          />
+        );
+      } catch (e) {
+        onError(String(e));
+      } finally {
+        onBusy(false);
+      }
+      setUndo(null);
+      await onRefresh();
+      setOrphanGone((prev) => {
+        const next = new Set(prev);
+        for (const k of keys) next.delete(k);
+        return next;
+      });
+      setOrphansOnly(false);
+      if (node !== null) setRowToast({ rowKey: "", at: anchor, node });
+    });
+  };
+  const orphanNotice =
+    pending.links > 0 ? (
+      <OrphanNotice
+        skills={pending.skills}
+        links={pending.links}
+        only={onlyOrphans}
+        onToggleOnly={() => setOrphansOnly((v) => !v)}
+        onClearAll={clearAllOrphans}
+      />
+    ) : null;
 
   return (
     <section className="mx-page">
@@ -1427,7 +1465,7 @@ export default function SkillsTab({
         overview={overview}
         view={view}
         placeLabel={placeLabel}
-        rows={visible}
+        rows={onlyOrphans ? [] : visible}
         stateOf={stateOf}
         hiddenRows={hiddenRows}
         dupReadout={dupReadout}
@@ -1450,7 +1488,7 @@ export default function SkillsTab({
           if (next.size === 0) setKeyToast(null);
         }}
         onCell={onCell}
-        onBatch={(press, clears) => void batch(press, false, clears)}
+        onBatch={(press) => void batch(press)}
         onUndo={() => undoRef.current?.()}
         canUndo={canUndo}
         shortcuts={!addOpen && !manageOpen}
@@ -1463,9 +1501,12 @@ export default function SkillsTab({
         keyBusy={keyBusy}
         cellBusy={splitBusy ?? originBusy}
         hint={
-          <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss} flush>
-            {HINTS["first-scan-skills"](hintCtx)}
-          </HintStrip>
+          <>
+            {orphanNotice}
+            <HintStrip open={skillsHint.visible} onDismiss={skillsHint.dismiss} flush>
+              {HINTS["first-scan-skills"](hintCtx)}
+            </HintStrip>
+          </>
         }
         emptyHint={
           <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
