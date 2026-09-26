@@ -1,112 +1,83 @@
-/* 菜单栏面板（docs/specs/2026-09-21-tray.md）。
-   零圆角、1px ink 描边、无阴影（DESIGN「Elevation」）；层级只靠描边与反色。 */
+/* 菜单栏面板（DESIGN「托盘面板」，画板 V4Layouts-tray）：宽 320，paper 底、1px hairline、float 12 圆角、
+   不画投影（它是系统窗口；原生窗口按同一圆角裁切，见 tray.rs 的 style_panel）；内边距上 12、下 6。
+   与主窗口共用 tokens.css 与组件库——开关、键、提示框、转盘、提示条都是同一份。 */
 @import "./tokens.css";
+
 .tray {
   box-sizing: border-box;
+  outline: none; /* 面板本身接焦点只为不让第一个控件抢到，不画焦点框 */
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--ink);
-  background: var(--canvas);
+  padding: var(--space-sm) 0 6px;
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: var(--size-body);
-  line-height: var(--leading-body);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
   user-select: none;
   cursor: default;
 }
 
-.tray__agent {
-  padding: 16px 16px 12px;
-  border-bottom: 1px solid var(--hairline);
+/* 一块都没有（这台机器不支持、状态没读回来）：只剩菜单，上下都是 6 */
+.tray--bare {
+  padding-top: 6px;
 }
 
-.tray__identity {
+/* 一条左沿 16（2026-09-25）：块头图标、能力行的名字、菜单项的字（外距 6 + 内距 10）都从面板内 16 起 */
+
+/* 块头：高 30、左右 16；16px 图标 + 8 + 名字（body 15 / 600，原样），不放控件 */
+.tray__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 var(--space-md);
 }
 
-/* agent 名是被谈论的对象，不大写（DESIGN「大写是结构的语言」） */
 .tray__name {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
+  font-size: var(--size-body);
+  font-weight: 600;
+  line-height: var(--leading-body);
 }
 
-.tray__status {
-  margin: 8px 0 0;
-  font-size: var(--size-caption);
-  line-height: 1.5;
-  color: var(--ink-mute);
-}
-
-/* 版本与端口是计数类事实，走等宽 */
-.tray__facts {
-  margin: 4px 0 0;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  line-height: 1.6;
-  color: var(--ink-faint);
-}
-
-.tray__agent .ss-btn--link {
-  margin-top: 8px;
-}
-
-.tray__menu {
-  margin: 0;
-  padding: 4px 0;
-  list-style: none;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.tray__menu--last {
-  border-bottom: 0;
-}
-
-/* 列表行：无描边，hover 底色转 surface（DESIGN「可点的面」） */
-.tray__item {
+/* 能力行：高 32、左右 16（名字与块头图标同一条左沿），13 ink；右端 [键位 12 开关] */
+.tray__cap {
   display: flex;
   align-items: center;
-  width: 100%;
-  min-height: 36px;
+  gap: var(--space-sm);
   box-sizing: border-box;
-  padding: 6px 16px;
+  height: 32px;
+  padding: 0 var(--space-md);
+}
+
+.tray__cap-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 行尾一组：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位，在开关左边 12（与 Codex 页节头同一关系）。
+   高 24（紧凑键的高）：键消失后 ✓ 已生效 仍浮在键原来的下沿之下 4 */
+.tray__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 24px;
+  white-space: nowrap;
+}
+
+/* 确认（ui Confirm 的窄面板形态）与失败的灰面板（NoticePanel scope="section"）在能力行下当场展开：
+   左右外距 10、上 8 下 2（面板内的凹面与灰面板，外距归这一行） */
+.tray__confirm,
+.tray__notice {
+  margin: var(--space-xs) 10px 2px;
+}
+
+/* 分隔：1px row-line，上 10 下 6 */
+.tray__rule {
+  margin: 10px 0 6px;
   border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: default;
-}
-
-.tray__item:hover:not(:disabled),
-.tray__item:focus-visible {
-  background: var(--surface);
-  outline: none;
-}
-
-.tray__item:disabled {
-  opacity: 0.45;
-}
-
-.tray__confirm {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 36px;
-  box-sizing: border-box;
-  padding: 6px 16px;
-  font-size: var(--size-caption);
-}
-
-.tray__confirm-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
+  border-top: var(--border-row);
 }

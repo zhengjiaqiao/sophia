@@ -26,6 +26,7 @@
 - `fs.rs`：`entry_kind`（lstat）、`real_path`、`normalize`、`create_link`
 - `sync.rs`：`execute` 执行动作
 - `skills.rs`：矩阵 `scan`（只读事实）/ `propose_links` / `propose_unlinks`（按选中格生成动作），本体判定
+- `subscriptions.rs`：来源订阅（每个位置订阅了哪些来源，存 `settings.json`）、老数据认领、来源管理页的列表 / 候选 / 移除；`scan` 按它成行
 - `discovery.rs` + `data/harnesses.json`：harness 表、已安装判定、项目候选
 - `store.rs`：`projects.json` / `settings.json`
 - `crates/core/src/atomicfile.rs`：写用户配置文件的唯一通道（快照、备份、原子替换、写前写后指纹校验、拒绝软链父目录）。MCP 同步和模型网关共用，不要另写一份
@@ -51,3 +52,5 @@
 - 测试里的临时目录先 `canonicalize`：macOS 上 `/var` 是软链，`atomicfile::safe_parent` 会拒绝父路径里的软链
 - 并行任务只碰自己 Files 列表里的文件；`lib.rs`、`Cargo.toml`、`App.tsx` 由前置任务预留
 - 给自己写了 `display` 的元素上，HTML 的 `hidden` 属性是个装饰：它靠 UA 样式表的 `display: none` 起作用，作者样式的 `display: flex` 压得过它。要藏就条件不渲染，或者 CSS 里显式 `[hidden] { display: none !important }`
+- 程序放的焦点（`el.focus()`：二级页标题、返回时还给入口键、面板弹出、选完文件夹）会被 WebKit 的 `:focus-visible` 猜成键盘焦点——画框、唤起提示框。不要逐处打补丁：焦点框与焦点提示只看 `src/inputModality.ts`（本窗口最近一次是按键还是指针），CSS 走 `html[data-input="pointer"]`；只供程序放焦点的落点用 `tabIndex={-1}`
+- `display: inline-flex` 的按钮里插一个 `<span>` 包专名（`重启 <Plain>Codex</Plain>`），文字会被拆成三个匿名 flex item，**item 之间的空白被吃掉**——渲染成 `删WeiboAP的`。空格要写成 `&nbsp;`，或者别让按钮当 flex 容器

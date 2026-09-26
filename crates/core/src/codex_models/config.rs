@@ -358,8 +358,8 @@ fn statement_line(lines: &[String], key: &str, value: Option<&str>) -> Option<us
     })
 }
 
-/// TOML 基本字符串
-fn toml_string(value: &str) -> String {
+/// TOML 基本字符串（单行，控制字符一律转义）。MCP 往 TOML 追加服务也用它
+pub(crate) fn toml_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');
     for c in value.chars() {

@@ -1,14 +1,15 @@
 //! 按域（全局 / 每个项目）组织的扫描：行的两类来源、格状态、按选中格生成建链 / 删链动作、整目录链接拆分
 use crate::fs::{create_link, entry_kind, normalize, real_path, remove_link, same_real, EntryKind};
 use crate::models::*;
+use crate::subscriptions::{subscribed, Subscriptions};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// 拆分报告里代表那条目录级软链的条目名
-const WHOLE_LINK_ITEM: &str = "<整目录链接>";
+pub(crate) const WHOLE_LINK_ITEM: &str = "<整目录链接>";
 
 /// 全局域的 key
-const GLOBAL_KEY: &str = "global";
+pub(crate) const GLOBAL_KEY: &str = "global";
 
 /// 外部位置不属于任何域，用一个不会与域 key 相等的值占位
 const EXTERNAL_KEY: &str = "external";
@@ -21,10 +22,10 @@ pub fn domain_key(scope: &TargetScope) -> String {
     }
 }
 
-/// 域名：全局固定，项目优先用 `project_label`（harness 的 agent 目录带这个），否则路径末段
+/// 域名：用户级固定（界面上不再叫「全局」，spec 2026-09-26-object-first-navigation R3），项目优先用 `project_label`（harness 的 agent 目录带这个），否则路径末段
 pub fn domain_label(scope: &TargetScope) -> String {
     match scope {
-        TargetScope::Global { .. } => "全局".to_string(),
+        TargetScope::Global { .. } => "用户级".to_string(),
         TargetScope::Project {
             project,
             project_label,
@@ -37,7 +38,7 @@ pub(crate) fn project_key(project: &Path) -> String {
     format!("project:{}", normalize(project).display())
 }
 
-fn dir_name(path: &Path) -> String {
+pub(crate) fn dir_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())
@@ -54,7 +55,7 @@ fn source_domain(kind: &SourceKind) -> String {
 }
 
 /// 按域分组目标：全局在前，项目按 `targets` 里的首现顺序
-fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
+pub(crate) fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
     let mut out: Vec<(String, String, Vec<Target>)> = Vec::new();
     for t in targets {
         let key = domain_key(&t.scope);
@@ -69,26 +70,26 @@ fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Target>)> {
 }
 
 /// `t/name` 是解析到该 skill 本体路径的软链
-fn links_to(target: &Target, skill: &Skill) -> bool {
+pub(crate) fn links_to(target: &Target, skill: &Skill) -> bool {
     let path = target.path.join(&skill.name);
     matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &skill.path)
 }
 
-/// 只读扫描，按域组织。只产出事实，不作任何选择
-pub fn scan(sources: &[Source], targets: &[Target]) -> Overview {
+/// 只读扫描，按域组织。只产出事实，不作任何选择。
+/// 行 = 这个域已订阅的来源（见 `subscriptions::subscribed`）的**全部** skill，没链的格是 Missing
+pub fn scan(sources: &[Source], targets: &[Target], subs: &Subscriptions) -> Overview {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut domains = Vec::new();
     // 目录尚不存在的目标照常成列：格状态自然全是 Missing，补齐时由 `sync::execute` 建目录
     for (key, label, d_targets) in group_domains(targets) {
-        // 行 = 自有全部 ∪ 已链接的那些；(skill, 本体位置 label, 本体位置 id) 排序去重
+        // 行 = 已订阅来源的全部 skill；(skill, 本体位置 label, 本体位置 id) 排序去重
         let mut keys: BTreeSet<(String, String, String)> = BTreeSet::new();
         for s in sources {
-            let own = source_domain(&s.kind) == key;
+            if !subscribed(s, &key, &d_targets, subs) {
+                continue;
+            }
             for skill in &s.skills {
-                let linked = || d_targets.iter().any(|t| links_to(t, skill));
-                if own || linked() {
-                    keys.insert((skill.name.clone(), s.label.clone(), s.id.clone()));
-                }
+                keys.insert((skill.name.clone(), s.label.clone(), s.id.clone()));
             }
         }
 
@@ -214,11 +215,16 @@ fn propose_by(
     out
 }
 
-/// 自动同步规则展开成格：本体位置找不到 / 目标找不到 → 跳过；skill 在排除名单里 → 跳过。
+/// 自动同步规则展开成格：本体位置找不到 / 目标找不到 → 跳过；skill 在这个目标的排除名单或
+/// 这个目标的 baseline（目标加进规则时已有的）里 → 跳过；还没有 baseline 的旧规则整条跳过。
 /// 随后交给 `propose_links`，只对 Missing 建链
 pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink]) -> Vec<CellRef> {
     let mut out = Vec::new();
     for rule in rules {
+        // 规则只管以后新出现的：没有 baseline 就分不清哪些是新的，宁可不建
+        let Some(baseline) = &rule.baseline else {
+            continue;
+        };
         let Some(source) = find_source(sources, &rule.source) else {
             continue;
         };
@@ -230,8 +236,9 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
             if !targets.iter().any(|t| &t.id == target_id) {
                 continue;
             }
+            let baseline = rule.target_baselines.get(target_id).unwrap_or(baseline);
             for skill in &source.skills {
-                if rule.excluded.contains(&skill.name) {
+                if rule.is_excluded(target_id, &skill.name) || baseline.contains(&skill.name) {
                     continue;
                 }
                 out.push(CellRef {
@@ -245,23 +252,92 @@ pub fn auto_link_cells(sources: &[Source], targets: &[Target], rules: &[AutoLink
     out
 }
 
-/// 新建或合并一条规则：同一本体位置已有规则则并入目标（排除名单不动，解除排除走 `include`）
-pub fn upsert_auto_link(rules: &mut Vec<AutoLink>, source: &Path, targets: &[String]) {
+/// 自动同步执行完，把真正建上的链（`Created`）按规则、按位置记成最近一次执行（`AutoLink.last_auto`）。
+/// 建链动作的 `source_path` 是本体位置里的 skill 路径、`target` 是目标目录，都取自同一次扫描的
+/// `sources` / `targets`：前者认出来源（即规则），后者认出位置。一格没建上的位置不动，
+/// 上一次的记录留着。返回是否改动过
+pub fn record_auto_runs(
+    rules: &mut [AutoLink],
+    sources: &[Source],
+    targets: &[Target],
+    report: &SyncReport,
+    at_ms: u64,
+) -> bool {
+    let mut added: BTreeMap<(PathBuf, String), usize> = BTreeMap::new();
+    for entry in &report.entries {
+        if entry.action.kind != ActionKind::Create || entry.outcome != Outcome::Created {
+            continue;
+        }
+        let Some(source) = sources
+            .iter()
+            .find(|s| s.skills.iter().any(|k| k.path == entry.action.source_path))
+        else {
+            continue;
+        };
+        let Some(target) = targets.iter().find(|t| t.path == entry.action.target) else {
+            continue;
+        };
+        *added
+            .entry((normalize(&source.path), domain_key(&target.scope)))
+            .or_default() += 1;
+    }
+    let mut changed = false;
+    for ((source, key), n) in added {
+        if let Some(rule) = rules.iter_mut().find(|r| r.source == source) {
+            rule.last_auto.insert(
+                key,
+                AutoRun {
+                    at: at_ms,
+                    added: n,
+                },
+            );
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// 新建或合并一条规则：同一本体位置已有规则则并入目标（排除名单不动，解除排除走 `include`）。
+/// 规则从无到有（新建，或原先只剩排除名单、没有目标）时拍 baseline：`sources` 里该位置
+/// 当前的全部 skill 名；位置不在 `sources` 里即一个都没有。已生效的规则并入新目标时，
+/// 整条的 baseline 不动，只给新目标单独拍一份（`target_baselines`）：新目标同样只管以后新出现的，
+/// 不把建规则之后出现过的补建过去——来源管理页在另一个位置打开开关就是这种情况
+pub fn upsert_auto_link(
+    rules: &mut Vec<AutoLink>,
+    sources: &[Source],
+    source: &Path,
+    targets: &[String],
+) {
     let source = normalize(source);
+    let snapshot = || source_names(sources, &source).unwrap_or_default();
     let rule = match rules.iter().position(|r| r.source == source) {
         Some(i) => &mut rules[i],
         None => {
             rules.push(AutoLink {
-                source,
+                source: source.clone(),
                 targets: Vec::new(),
-                excluded: BTreeSet::new(),
+                target_excluded: BTreeMap::new(),
+                baseline: None,
+                target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
             });
             rules.last_mut().expect("刚 push 过")
         }
     };
+    if rule.targets.is_empty() {
+        rule.baseline = Some(snapshot());
+        rule.target_baselines.clear();
+        for t in targets {
+            if !rule.targets.contains(t) {
+                rule.targets.push(t.clone());
+            }
+        }
+        return;
+    }
     for t in targets {
         if !rule.targets.contains(t) {
             rule.targets.push(t.clone());
+            rule.target_baselines.insert(t.clone(), snapshot());
         }
     }
 }
@@ -271,48 +347,94 @@ pub fn remove_auto_link(rules: &mut Vec<AutoLink>, source: &Path) {
     rules.retain(|r| r.source != source);
 }
 
-/// 从该本体位置的规则里去掉这些目标（域页的 × 只撤本域的部分）；
-/// 目标与排除名单都空了才整条删除——只剩排除名单的规则仍要保住排除效果
+/// 从该本体位置的规则里去掉这些目标（域页的 × 只撤本域的部分）；这些目标的排除名单留着，
+/// 目标再加回来仍然有效。目标与排除名单都空了才整条删除——只剩排除名单的规则仍要保住排除效果
 pub fn remove_auto_link_targets(rules: &mut Vec<AutoLink>, source: &Path, targets: &[String]) {
     let source = normalize(source);
     let Some(i) = rules.iter().position(|r| r.source == source) else {
         return;
     };
     rules[i].targets.retain(|t| !targets.contains(t));
-    if rules[i].targets.is_empty() && rules[i].excluded.is_empty() {
+    rules[i]
+        .target_baselines
+        .retain(|t, _| !targets.contains(t));
+    if rules[i].targets.is_empty() && rules[i].target_excluded.is_empty() {
         rules.remove(i);
     }
 }
 
-/// 该 skill 不再自动链接（手动清除软链时调用）。
+/// 该 skill 不再自动链接到这个目标（手动清除这一格的软链时调用）。只记进这个目标的
+/// 排除名单：别的位置、同位置别的 agent 照常自动补。
 /// 该本体位置还没有规则时新建一条只有排除名单的规则：排除要能独立于规则存在，
 /// 否则手动清除过的软链会被之后新建的规则补回来
-pub fn exclude(rules: &mut Vec<AutoLink>, source: &Path, skill: &str) {
+pub fn exclude(rules: &mut Vec<AutoLink>, source: &Path, target: &str, skill: &str) {
     let source = normalize(source);
-    match rules.iter().position(|r| r.source == source) {
-        Some(i) => {
-            rules[i].excluded.insert(skill.to_string());
+    let i = match rules.iter().position(|r| r.source == source) {
+        Some(i) => i,
+        None => {
+            // 没有目标的规则不建任何链；baseline 等 `upsert_auto_link` 加目标时再拍
+            rules.push(AutoLink {
+                source,
+                targets: Vec::new(),
+                target_excluded: BTreeMap::new(),
+                baseline: Some(BTreeSet::new()),
+                target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
+            });
+            rules.len() - 1
         }
-        None => rules.push(AutoLink {
-            source,
-            targets: Vec::new(),
-            excluded: BTreeSet::from([skill.to_string()]),
-        }),
+    };
+    rules[i]
+        .target_excluded
+        .entry(target.to_string())
+        .or_default()
+        .insert(skill.to_string());
+}
+
+/// 升级迁移：给没有 baseline 的旧规则补上本体位置当前的全部 skill 名，
+/// 于是旧规则从这一刻起也只管以后新出现的。本体位置这次没扫到的先不补（可能只是暂时
+/// 不在，补成空集会在它回来时把现有的全部补建），规则继续整条跳过。返回是否改动过
+pub fn migrate_baselines(rules: &mut [AutoLink], sources: &[Source]) -> bool {
+    let mut changed = false;
+    for rule in rules.iter_mut().filter(|r| r.baseline.is_none()) {
+        if let Some(names) = source_names(sources, &rule.source) {
+            rule.baseline = Some(names);
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// 该本体位置当前的全部 skill 名；位置不在 `sources` 里 → None
+fn source_names(sources: &[Source], source: &Path) -> Option<BTreeSet<String>> {
+    find_source(sources, source).map(|s| s.skills.iter().map(|k| k.name.clone()).collect())
+}
+
+/// 解除这个目标上的排除，该 skill 重新纳入到这个目标的自动链接
+pub fn include(rules: &mut [AutoLink], source: &Path, target: &str, skill: &str) {
+    let Some(rule) = find_rule_mut(rules, source) else {
+        return;
+    };
+    if let Some(names) = rule.target_excluded.get_mut(target) {
+        names.remove(skill);
+        if names.is_empty() {
+            rule.target_excluded.remove(target);
+        }
     }
 }
 
-/// 解除排除，该 skill 重新纳入自动链接
-pub fn include(rules: &mut [AutoLink], source: &Path, skill: &str) {
-    if let Some(rule) = find_rule_mut(rules, source) {
-        rule.excluded.remove(skill);
-    }
-}
-
-/// 该 (本体位置, skill) 是否在某条规则的范围内（被排除的不算）
-pub fn covering<'a>(rules: &'a [AutoLink], source_id: &str, skill: &str) -> Option<&'a AutoLink> {
-    rules
-        .iter()
-        .find(|r| r.source.to_string_lossy() == source_id && !r.excluded.contains(skill))
+/// 该 (本体位置, skill, 目标) 是否在某条规则的范围内（规则有这个目标，且没在这个目标上排除）
+pub fn covering<'a>(
+    rules: &'a [AutoLink],
+    source_id: &str,
+    target_id: &str,
+    skill: &str,
+) -> Option<&'a AutoLink> {
+    rules.iter().find(|r| {
+        r.source.to_string_lossy() == source_id
+            && r.targets.iter().any(|t| t == target_id)
+            && !r.is_excluded(target_id, skill)
+    })
 }
 
 /// 规则里的 source 与 `Source.path` 都是 normalize 过的绝对路径
@@ -503,7 +625,7 @@ pub fn plan_delete_source(
     targets: &[Target],
 ) -> DeleteSourcePlan {
     let path = normalize(&skill.path);
-    let (entries, bytes) = dir_size(&path);
+    let (entries, bytes, modified) = dir_size(&path);
     let relink_to = same_name_elsewhere(&skill.name, sources, &path);
     // 比较"是否同一处"两侧都要走 real_path：macOS 上 /var 会变成 /private/var
     let real = real_path(&path);
@@ -518,35 +640,132 @@ pub fn plan_delete_source(
         },
         in_git: git_root(&path),
         relink_to,
+        modified,
         path,
     }
 }
 
-/// 递归统计条目数（不含自身）与普通文件字节数。软链只当作一个条目，不跟随、不计字节
-fn dir_size(path: &Path) -> (usize, u64) {
+/// 读原件目录下 `SKILL.md` 的 YAML frontmatter 里的 `description`，只读。
+///
+/// 不引 yaml 依赖，逐行解析够用：frontmatter 是开头 `---` 与下一个 `---` 之间；
+/// 顶格的 `description:` 一行，值支持单行（可带引号）、`|` 字面块（保留换行）、
+/// `>` 折叠块（换行折成空格，空行成段）以及缩进续行的朴素多行。
+/// 没有文件、没有 frontmatter、没有这个键或值为空时返回 None
+pub fn read_description(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("SKILL.md")).ok()?;
+    parse_description(&text)
+}
+
+fn parse_description(text: &str) -> Option<String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut lines = text.lines();
+    if lines.next()?.trim_end() != "---" {
+        return None;
+    }
+    let front: Vec<&str> = lines.take_while(|l| l.trim_end() != "---").collect();
+    let at = front.iter().position(|l| l.starts_with("description:"))?;
+    let head = front[at]["description:".len()..].trim();
+    // 这个键之后、下一个顶格键之前的缩进行（空行也算进块里）
+    let body: Vec<&str> = front[at + 1..]
+        .iter()
+        .take_while(|l| l.trim().is_empty() || l.starts_with([' ', '\t']))
+        .copied()
+        .collect();
+    let indent = body
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    let body: Vec<&str> = body
+        .iter()
+        .map(|l| {
+            if l.trim().is_empty() {
+                ""
+            } else {
+                &l[indent..]
+            }
+        })
+        .collect();
+    let value = if head.starts_with('|') {
+        body.join("\n")
+    } else if head.starts_with('>') || head.is_empty() {
+        fold(&body)
+    } else {
+        let first = unquote(head);
+        let rest = fold(&body);
+        if rest.is_empty() {
+            first.to_string()
+        } else {
+            format!("{first} {rest}")
+        }
+    };
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+/// 折叠：相邻非空行用空格接，空行成段
+fn fold(lines: &[&str]) -> String {
+    let mut out = String::new();
+    let mut blank = false;
+    for line in lines {
+        if line.trim().is_empty() {
+            blank = true;
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(if blank { "\n" } else { " " });
+        }
+        out.push_str(line.trim());
+        blank = false;
+    }
+    out
+}
+
+fn unquote(s: &str) -> &str {
+    for q in ['"', '\''] {
+        if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s
+}
+
+/// 递归统计条目数（不含自身）、普通文件字节数，以及普通文件最新的修改时间（Unix 毫秒）。
+/// 软链只当作一个条目，不跟随、不计字节、不计时间；目录自身的 mtime 不算（增删条目就会变，
+/// 说的不是「内容改于何时」）。一个文件都没有、或时间读不出来时为 None
+fn dir_size(path: &Path) -> (usize, u64, Option<u64>) {
     let Ok(rd) = std::fs::read_dir(path) else {
-        return (0, 0);
+        return (0, 0, None);
     };
     let mut entries = 0usize;
     let mut bytes = 0u64;
+    let mut modified: Option<u64> = None;
     for e in rd.flatten() {
         entries += 1;
         let child = e.path();
         match entry_kind(&child) {
             EntryKind::Dir => {
-                let (n, b) = dir_size(&child);
+                let (n, b, m) = dir_size(&child);
                 entries += n;
                 bytes += b;
+                modified = modified.max(m);
             }
             EntryKind::File => {
-                bytes += std::fs::symlink_metadata(&child)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                if let Ok(meta) = std::fs::symlink_metadata(&child) {
+                    bytes += meta.len();
+                    let ms = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as u64);
+                    modified = modified.max(ms);
+                }
             }
             _ => {}
         }
     }
-    (entries, bytes)
+    (entries, bytes, modified)
 }
 
 /// 各目标目录里解析后落在 `real`（本体的真实路径）之内、含它自身的软链。
@@ -598,6 +817,11 @@ mod tests {
     use super::*;
     use crate::test_support::TempTree;
 
+    /// 还没有订阅记录时的扫描：自己的来源与此刻有链的来源成行
+    fn scan(sources: &[Source], targets: &[Target]) -> Overview {
+        super::scan(sources, targets, &Subscriptions::new())
+    }
+
     fn make_source(path: &Path, label: &str, kind: SourceKind, skills: &[&str]) -> Source {
         let path = normalize(path);
         Source {
@@ -609,6 +833,7 @@ mod tests {
                 .map(|s| Skill {
                     name: s.to_string(),
                     path: path.join(s),
+                    description: None,
                 })
                 .collect(),
             path,
@@ -690,8 +915,9 @@ mod tests {
         }
     }
 
+    /// 来源是订阅单位：有一条链就算订阅，它的全部 skill 成行，没链的是 Missing
     #[test]
-    fn rows_are_own_skills_plus_linked_ones_only() {
+    fn rows_are_own_skills_plus_every_skill_of_linked_sources() {
         let tree = TempTree::new();
         let universal = tree.dir("universal"); // 全局自有：a, b
         let proj_root = tree.dir("proj");
@@ -724,16 +950,18 @@ mod tests {
             ]
         );
         let proj = &ov.domains[1];
-        // 项目域：自有 c、d 全部成行；universal 只有被链的 a，不带入 b（本体位置不属于本域）
+        // 项目域：自有 c、d 全部成行；universal 链了 a 就算订阅，没链的 b 也成行
         assert_eq!(
             rows(proj),
             vec![
                 (sources[0].id.clone(), "a".into(), false),
+                (sources[0].id.clone(), "b".into(), false),
                 (sources[1].id.clone(), "c".into(), true),
                 (sources[1].id.clone(), "d".into(), true),
             ]
         );
         assert_eq!(proj.rows[0].cells[0].state, CellState::Linked);
+        assert_eq!(proj.rows[1].cells[0].state, CellState::Missing);
     }
 
     #[test]
@@ -992,6 +1220,87 @@ mod tests {
         assert_eq!(acts[0].source_path, universal.join("a"));
     }
 
+    /// 自动执行真正建上的链按位置记成最近一次；没建上的（原地已有、失败、别的来源）不算，
+    /// 一格没建上的执行不覆盖上一次
+    #[test]
+    fn record_auto_runs_counts_created_links_per_domain_and_keeps_last_when_idle() {
+        let tree = TempTree::new();
+        let universal = tree.dir("universal");
+        let other = tree.dir("other");
+        for s in ["a", "b"] {
+            tree.dir(&format!("universal/{s}"));
+        }
+        tree.dir("other/z");
+        let proj = tree.dir("work/app");
+        let claude = tree.dir("home/.claude/skills");
+        let codex = tree.dir("work/app/.codex/skills");
+        // claude 里原地已有一份 b：这一格不是 Missing，不建
+        tree.dir("home/.claude/skills/b");
+        let targets = vec![
+            global("claude-code", &claude),
+            project(&proj, "codex", &codex),
+        ];
+        let mut sources = vec![source(&universal, &["a", "b"]), source(&other, &["z"])];
+        let target_ids = [targets[0].id.clone(), targets[1].id.clone()];
+        let mut rules = Vec::new();
+        upsert_auto_link(&mut rules, &[], &universal, &target_ids);
+
+        let run = |sources: &[Source], rules: &[AutoLink]| {
+            let cells = auto_link_cells(sources, &targets, rules);
+            let actions = propose_links(sources, &targets, &cells);
+            crate::sync::execute(&actions, false, LinkStyle::Absolute)
+        };
+        let mut report = run(&sources, &rules);
+        assert_eq!(report.entries.len(), 3);
+        // 别的来源（没有规则）建上的、失败的都不算到这条规则上
+        report.entries.push(ReportEntry {
+            action: PlannedAction {
+                kind: ActionKind::Create,
+                item_name: "z".into(),
+                source_path: normalize(&other).join("z"),
+                target_path: claude.join("z"),
+                target: normalize(&claude),
+            },
+            outcome: Outcome::Created,
+        });
+        report.entries.push(ReportEntry {
+            action: report.entries[0].action.clone(),
+            outcome: Outcome::Failed("不能写".into()),
+        });
+        assert!(record_auto_runs(
+            &mut rules, &sources, &targets, &report, 100
+        ));
+        assert_eq!(
+            rules[0].last_auto,
+            BTreeMap::from([
+                ("global".to_string(), AutoRun { at: 100, added: 1 }),
+                (project_key(&proj), AutoRun { at: 100, added: 2 }),
+            ])
+        );
+        assert_eq!(rules.len(), 1);
+
+        // 再跑一轮什么都没缺：不改，上一次的记录留着
+        let idle = run(&sources, &rules);
+        assert!(idle.entries.is_empty());
+        assert!(!record_auto_runs(
+            &mut rules, &sources, &targets, &idle, 200
+        ));
+        assert_eq!(rules[0].last_auto[&project_key(&proj)].at, 100);
+
+        // 来源里新出现一个：两处各加上一个，时间换成这一次
+        tree.dir("universal/c");
+        sources[0] = source(&universal, &["a", "b", "c"]);
+        let next = run(&sources, &rules);
+        assert!(record_auto_runs(&mut rules, &sources, &targets, &next, 300));
+        assert_eq!(
+            rules[0].last_auto,
+            BTreeMap::from([
+                ("global".to_string(), AutoRun { at: 300, added: 1 }),
+                (project_key(&proj), AutoRun { at: 300, added: 1 }),
+            ])
+        );
+    }
+
     #[test]
     fn auto_link_cells_expands_rules_and_skips_excluded_missing_source_or_target() {
         let tree = TempTree::new();
@@ -1008,13 +1317,22 @@ mod tests {
                 source: normalize(&universal),
                 // "nope" 目标不存在：跳过
                 targets: vec!["claude-code".into(), "nope".into()],
-                excluded: ["b".to_string()].into_iter().collect(),
+                target_excluded: BTreeMap::from([(
+                    "claude-code".to_string(),
+                    BTreeSet::from(["b".to_string()]),
+                )]),
+                baseline: Some(BTreeSet::new()),
+                target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
             },
             // 本体位置不存在：整条跳过
             AutoLink {
                 source: tree.root().join("gone"),
                 targets: vec!["codex".into()],
-                excluded: BTreeSet::new(),
+                target_excluded: BTreeMap::new(),
+                baseline: Some(BTreeSet::new()),
+                target_baselines: BTreeMap::new(),
+                last_auto: BTreeMap::new(),
             },
         ];
         let cells = auto_link_cells(&sources, &targets, &rules);
@@ -1037,33 +1355,46 @@ mod tests {
         let mut rules: Vec<AutoLink> = Vec::new();
         let source = PathBuf::from("/a/skills");
         let dotted = PathBuf::from("/a/./skills/"); // 同一处的非归一化写法
-        upsert_auto_link(&mut rules, &source, &["claude-code".into()]);
+        upsert_auto_link(&mut rules, &[], &source, &["claude-code".into()]);
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].source, source);
         // 同 source 合并目标，不重复
-        upsert_auto_link(&mut rules, &dotted, &["claude-code".into(), "codex".into()]);
+        upsert_auto_link(
+            &mut rules,
+            &[],
+            &dotted,
+            &["claude-code".into(), "codex".into()],
+        );
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].targets, vec!["claude-code", "codex"]);
 
-        exclude(&mut rules, &dotted, "x");
-        assert!(rules[0].excluded.contains("x"));
+        exclude(&mut rules, &dotted, "codex", "x");
+        assert!(rules[0].is_excluded("codex", "x"));
+        // 只记在这个目标上
+        assert!(!rules[0].is_excluded("claude-code", "x"));
         // upsert 不动排除名单
-        upsert_auto_link(&mut rules, &source, &["cursor".into()]);
-        assert!(rules[0].excluded.contains("x"));
-        assert!(covering(&rules, "/a/skills", "x").is_none());
-        assert!(covering(&rules, "/a/skills", "y").is_some());
-        assert!(covering(&rules, "/other", "y").is_none());
+        upsert_auto_link(&mut rules, &[], &source, &["cursor".into()]);
+        assert!(rules[0].is_excluded("codex", "x"));
+        assert!(covering(&rules, "/a/skills", "codex", "x").is_none());
+        assert!(covering(&rules, "/a/skills", "claude-code", "x").is_some());
+        assert!(covering(&rules, "/a/skills", "codex", "y").is_some());
+        assert!(covering(&rules, "/a/skills", "nope", "y").is_none());
+        assert!(covering(&rules, "/other", "codex", "y").is_none());
 
-        include(&mut rules, &dotted, "x");
-        assert!(rules[0].excluded.is_empty());
-        assert!(covering(&rules, "/a/skills", "x").is_some());
+        // 在别的目标上 include 不解除这个目标的排除
+        include(&mut rules, &dotted, "claude-code", "x");
+        assert!(rules[0].is_excluded("codex", "x"));
+        include(&mut rules, &dotted, "codex", "x");
+        // 空了不留键
+        assert!(rules[0].target_excluded.is_empty());
+        assert!(covering(&rules, "/a/skills", "codex", "x").is_some());
 
         // 别的 source 不受影响；它没有规则，exclude 会新建一条只有排除名单的
-        exclude(&mut rules, Path::new("/other"), "x");
-        assert!(rules[0].excluded.is_empty());
+        exclude(&mut rules, Path::new("/other"), "codex", "x");
+        assert!(rules[0].target_excluded.is_empty());
         assert_eq!(rules.len(), 2);
         assert!(rules[1].targets.is_empty());
-        assert!(rules[1].excluded.contains("x"));
+        assert!(rules[1].is_excluded("codex", "x"));
         remove_auto_link(&mut rules, Path::new("/other"));
         assert_eq!(rules.len(), 1);
         remove_auto_link(&mut rules, &dotted);
@@ -1077,6 +1408,7 @@ mod tests {
         let dotted = PathBuf::from("/a/./skills/"); // 同一处的非归一化写法
         upsert_auto_link(
             &mut rules,
+            &[],
             &source,
             &["claude-code".into(), "codex".into(), "cursor".into()],
         );
@@ -1104,18 +1436,289 @@ mod tests {
     fn remove_auto_link_targets_keeps_a_rule_that_still_excludes_something() {
         let mut rules: Vec<AutoLink> = Vec::new();
         let source = PathBuf::from("/a/skills");
-        upsert_auto_link(&mut rules, &source, &["codex".into()]);
-        exclude(&mut rules, &source, "x");
+        upsert_auto_link(&mut rules, &[], &source, &["codex".into()]);
+        exclude(&mut rules, &source, "codex", "x");
 
         remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
         assert_eq!(rules.len(), 1);
         assert!(rules[0].targets.is_empty());
-        assert!(rules[0].excluded.contains("x"));
+        assert!(rules[0].is_excluded("codex", "x"));
 
         // 排除名单也清空后才真正删除
-        include(&mut rules, &source, "x");
+        include(&mut rules, &source, "codex", "x");
         remove_auto_link_targets(&mut rules, &source, &["codex".into()]);
         assert!(rules.is_empty());
+    }
+
+    /// 真实目录里读本体位置（手动添加的位置），与界面上扫描走同一条 `discovery::sources`
+    fn scan_sources(tree: &TempTree, dir: &Path) -> Vec<Source> {
+        let env = crate::discovery::Env {
+            home: tree.dir("home"),
+            vars: Default::default(),
+        };
+        crate::discovery::sources(&env, &[], &[], &[dir.to_path_buf()])
+    }
+
+    /// 本轮会真的建的链：规则展开 → 只对 Missing 建链
+    fn auto_actions(tree: &TempTree, dir: &Path, t: &Target, rules: &[AutoLink]) -> Vec<String> {
+        let sources = scan_sources(tree, dir);
+        let targets = vec![t.clone()];
+        let cells = auto_link_cells(&sources, &targets, rules);
+        propose_links(&sources, &targets, &cells)
+            .into_iter()
+            .map(|a| a.item_name)
+            .collect()
+    }
+
+    /// 规则只管以后新出现的：建规则时已有的不补建；新增的建；排除照旧；删了重建会重拍 baseline
+    #[test]
+    fn auto_link_rule_only_covers_skills_that_appear_after_it() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.skill("store/a");
+        tree.skill("store/b");
+        let claude = tree.dir("home/.claude/skills");
+        let t = global("claude-code", &claude);
+        let mut rules: Vec<AutoLink> = Vec::new();
+
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&t.id),
+        );
+        assert_eq!(
+            rules[0].baseline,
+            Some(BTreeSet::from(["a".to_string(), "b".to_string()]))
+        );
+        // 已有的 a、b 不建链
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+
+        // 新出现的 c 建，且只建它
+        tree.skill("store/c");
+        let acts = auto_actions(&tree, &store, &t, &rules);
+        assert_eq!(acts, vec!["c"]);
+        tree.link(&claude.join("c"), &store.join("c"));
+
+        // 并入目标不重拍 baseline
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            &["codex".into()],
+        );
+        assert!(!rules[0].baseline.as_ref().unwrap().contains("c"));
+
+        // 排除名单照旧生效
+        tree.skill("store/d");
+        exclude(&mut rules, &store, &t.id, "d");
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+
+        // 删掉规则再建：baseline 重拍成此刻的全部
+        remove_auto_link(&mut rules, &store);
+        tree.skill("store/e");
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&t.id),
+        );
+        assert_eq!(
+            rules[0].baseline,
+            Some(["a", "b", "c", "d", "e"].map(String::from).into())
+        );
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+        tree.skill("store/f");
+        assert_eq!(auto_actions(&tree, &store, &t, &rules), vec!["f"]);
+    }
+
+    /// 只剩排除名单的规则（exclude 先于规则建出来的）加上目标时才算建规则，这时拍 baseline
+    #[test]
+    fn exclude_only_rule_snapshots_baseline_when_it_gains_targets() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.skill("store/a");
+        let claude = tree.dir("home/.claude/skills");
+        let t = global("claude-code", &claude);
+        let mut rules: Vec<AutoLink> = Vec::new();
+        exclude(&mut rules, &store, &t.id, "x");
+        tree.skill("store/b");
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&t.id),
+        );
+        assert_eq!(
+            rules[0].baseline,
+            Some(BTreeSet::from(["a".to_string(), "b".to_string()]))
+        );
+        assert!(rules[0].is_excluded(&t.id, "x"));
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+    }
+
+    /// 规则已生效后再加的目标（另一个位置打开开关、或多勾一个 agent）也只管从那一刻起新出现的：
+    /// 建规则之后出现、已经补到老目标上的 skill 不补到新目标
+    #[test]
+    fn target_added_to_a_live_rule_only_covers_skills_after_it_joined() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.skill("store/a");
+        let claude = tree.dir("home/.claude/skills");
+        let proj = tree.dir("proj");
+        let proj_claude = tree.dir("proj/.claude/skills");
+        let g = global("claude-code", &claude);
+        let p = project(&proj, "claude-code", &proj_claude);
+        let both = vec![g.clone(), p.clone()];
+        let run = |rules: &[AutoLink]| {
+            let sources = scan_sources(&tree, &store);
+            let cells = auto_link_cells(&sources, &both, rules);
+            let mut out: Vec<(String, PathBuf)> = propose_links(&sources, &both, &cells)
+                .into_iter()
+                .map(|a| (a.item_name, a.target))
+                .collect();
+            out.sort();
+            out
+        };
+        let mut rules: Vec<AutoLink> = Vec::new();
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&g.id),
+        );
+        // 建规则之后出现的 b：补到全局
+        tree.skill("store/b");
+        assert_eq!(run(&rules), vec![("b".to_string(), claude.clone())]);
+        tree.link(&claude.join("b"), &store.join("b"));
+
+        // 项目里打开开关：b 不补过去，整条的 baseline 不动
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&p.id),
+        );
+        assert_eq!(rules[0].baseline, Some(BTreeSet::from(["a".to_string()])));
+        assert!(run(&rules).is_empty());
+
+        // 之后新出现的 c：两处都加
+        tree.skill("store/c");
+        assert_eq!(
+            run(&rules),
+            vec![
+                ("c".to_string(), claude.clone()),
+                ("c".to_string(), proj_claude.clone())
+            ]
+        );
+
+        // 撤掉项目的目标，它那份 baseline 一并丢掉；再打开时重拍
+        remove_auto_link_targets(&mut rules, &store, std::slice::from_ref(&p.id));
+        assert!(rules[0].target_baselines.is_empty());
+        tree.link(&claude.join("c"), &store.join("c"));
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            std::slice::from_ref(&p.id),
+        );
+        assert!(run(&rules).is_empty());
+    }
+
+    /// 在 A 位置手动撤掉的 skill 只在 A 不再自动添加：B 位置照常补，恢复 A 也只动 A
+    #[test]
+    fn excluding_at_one_location_keeps_auto_linking_elsewhere() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.skill("store/a");
+        let pa = tree.dir("pa");
+        let pa_claude = tree.dir("pa/.claude/skills");
+        let pb = tree.dir("pb");
+        let pb_claude = tree.dir("pb/.claude/skills");
+        let a = project(&pa, "claude-code", &pa_claude);
+        let b = project(&pb, "claude-code", &pb_claude);
+        let both = vec![a.clone(), b.clone()];
+        let run = |rules: &[AutoLink]| {
+            let sources = scan_sources(&tree, &store);
+            let cells = auto_link_cells(&sources, &both, rules);
+            let mut out: Vec<(String, PathBuf)> = propose_links(&sources, &both, &cells)
+                .into_iter()
+                .map(|a| (a.item_name, a.target))
+                .collect();
+            out.sort();
+            out
+        };
+        let mut rules: Vec<AutoLink> = Vec::new();
+        upsert_auto_link(
+            &mut rules,
+            &scan_sources(&tree, &store),
+            &store,
+            &[a.id.clone(), b.id.clone()],
+        );
+        // 新出现的 n 自动补到两处；用户在 A 手动撤掉它
+        tree.skill("store/n");
+        assert_eq!(
+            run(&rules),
+            vec![
+                ("n".to_string(), pa_claude.clone()),
+                ("n".to_string(), pb_claude.clone())
+            ]
+        );
+        exclude(&mut rules, &store, &a.id, "n");
+        assert!(!rules[0].is_excluded(&b.id, "n"));
+        // A 不再补，B 照常补
+        assert_eq!(run(&rules), vec![("n".to_string(), pb_claude.clone())]);
+        // B 上的链之后被别的途径删掉，仍会补回来——排除只记在 A
+        tree.link(&pb_claude.join("n"), &store.join("n"));
+        assert!(run(&rules).is_empty());
+        std::fs::remove_file(pb_claude.join("n")).unwrap();
+        assert_eq!(run(&rules), vec![("n".to_string(), pb_claude.clone())]);
+
+        // 在 B 上 include 不解除 A 的排除；在 A 上 include 才恢复
+        include(&mut rules, &store, &b.id, "n");
+        assert!(rules[0].is_excluded(&a.id, "n"));
+        include(&mut rules, &store, &a.id, "n");
+        assert_eq!(
+            run(&rules),
+            vec![
+                ("n".to_string(), pa_claude.clone()),
+                ("n".to_string(), pb_claude.clone())
+            ]
+        );
+    }
+
+    /// 升级前持久化的规则没有 baseline：迁移前整条不建，迁移取当前全部名字，此后只建新的
+    #[test]
+    fn legacy_rule_without_baseline_migrates_to_current_skills() {
+        let tree = TempTree::new();
+        let store = tree.dir("store");
+        tree.skill("store/a");
+        tree.skill("store/b");
+        let claude = tree.dir("home/.claude/skills");
+        let t = global("claude-code", &claude);
+        let json = format!(
+            r#"[{{"source":{:?},"targets":["claude-code"],"excluded":[]}}]"#,
+            normalize(&store).to_string_lossy()
+        );
+        let mut rules: Vec<AutoLink> = serde_json::from_str(&json).unwrap();
+        assert_eq!(rules[0].baseline, None);
+        // 迁移前：旧规则不再补建
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+
+        // 本体位置这次没扫到：不迁移
+        assert!(!migrate_baselines(&mut rules, &[]));
+        assert_eq!(rules[0].baseline, None);
+
+        assert!(migrate_baselines(&mut rules, &scan_sources(&tree, &store)));
+        assert_eq!(
+            rules[0].baseline,
+            Some(BTreeSet::from(["a".to_string(), "b".to_string()]))
+        );
+        // 迁移只做一次
+        assert!(!migrate_baselines(&mut rules, &scan_sources(&tree, &store)));
+        assert!(auto_actions(&tree, &store, &t, &rules).is_empty());
+        tree.skill("store/c");
+        assert_eq!(auto_actions(&tree, &store, &t, &rules), vec!["c"]);
     }
 
     #[test]
@@ -1148,14 +1751,17 @@ mod tests {
         let targets = vec![tg.clone()];
 
         let ov = scan(&sources, &targets);
-        // 外部位置不属于任何域：只有被链接的那行成行，own 恒为 false
+        // 外部位置不属于任何域（own 恒为 false）；有一条链就算订阅，它的 skill 全部成行
         assert_eq!(
             rows(&ov.domains[0]),
-            vec![(s.id.clone(), "ego-browser".into(), false)]
+            vec![
+                (s.id.clone(), "ego-browser".into(), false),
+                (s.id.clone(), "ego-writer".into(), false)
+            ]
         );
         assert_eq!(ov.domains[0].rows[0].cells[0].state, CellState::Linked);
 
-        // 未成行的 ego-writer 也能建链，链接指向真实路径而非 位置/名字 的拼接
+        // 没链的 ego-writer 能建链，链接指向真实路径而非 位置/名字 的拼接
         let acts = propose_links(&sources, &targets, &[cell(&s, "ego-writer", &tg)]);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].source_path, writer);
@@ -1165,7 +1771,10 @@ mod tests {
         let rules = vec![AutoLink {
             source: normalize(&ego),
             targets: vec![tg.id.clone()],
-            excluded: BTreeSet::new(),
+            target_excluded: BTreeMap::new(),
+            baseline: Some(BTreeSet::new()),
+            target_baselines: BTreeMap::new(),
+            last_auto: BTreeMap::new(),
         }];
         assert!(auto_link_cells(&sources, &targets, &rules).is_empty());
     }
@@ -1284,6 +1893,104 @@ mod tests {
         );
         assert_eq!(plan.in_git, None);
         assert_eq!(plan.relink_to, Some(other_body));
+    }
+
+    #[test]
+    fn read_description_takes_the_frontmatter_field_in_single_and_block_forms() {
+        let t = TempTree::new();
+        let write = |name: &str, body: &str| {
+            let dir = t.dir(name);
+            std::fs::write(dir.join("SKILL.md"), body).unwrap();
+            dir
+        };
+        let single = write(
+            "single",
+            "---\nname: a\ndescription: Turns a codebase into an HTML course.\n---\n# body\n",
+        );
+        assert_eq!(
+            read_description(&single).as_deref(),
+            Some("Turns a codebase into an HTML course.")
+        );
+        let quoted = write("quoted", "---\ndescription: \"Say: hi\"\n---\n");
+        assert_eq!(read_description(&quoted).as_deref(), Some("Say: hi"));
+        let folded = write(
+            "folded",
+            "---\nname: b\ndescription: >\n  first line\n  second line\n\n  new para\nlicense: MIT\n---\n",
+        );
+        assert_eq!(
+            read_description(&folded).as_deref(),
+            Some("first line second line\nnew para")
+        );
+        let literal = write(
+            "literal",
+            "---\ndescription: |\n  line one\n  line two\n---\n",
+        );
+        assert_eq!(
+            read_description(&literal).as_deref(),
+            Some("line one\nline two")
+        );
+        let continued = write(
+            "continued",
+            "---\ndescription: starts here\n  and goes on\n---\n",
+        );
+        assert_eq!(
+            read_description(&continued).as_deref(),
+            Some("starts here and goes on")
+        );
+    }
+
+    #[test]
+    fn read_description_is_none_without_file_frontmatter_or_field() {
+        let t = TempTree::new();
+        assert_eq!(read_description(&t.dir("missing")), None);
+        let no_front = t.dir("nofront");
+        std::fs::write(
+            no_front.join("SKILL.md"),
+            "description: not in frontmatter\n",
+        )
+        .unwrap();
+        assert_eq!(read_description(&no_front), None);
+        let no_field = t.dir("nofield");
+        std::fs::write(
+            no_field.join("SKILL.md"),
+            "---\nname: x\n---\ndescription: body\n",
+        )
+        .unwrap();
+        assert_eq!(read_description(&no_field), None);
+        let empty = t.dir("empty");
+        std::fs::write(empty.join("SKILL.md"), "---\ndescription:\n---\n").unwrap();
+        assert_eq!(read_description(&empty), None);
+    }
+
+    #[test]
+    fn plan_delete_source_reports_the_newest_file_mtime_inside_the_body() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let t = TempTree::new();
+        let store = t.dir("store");
+        let body = t.dir("store/a");
+        t.file(&body, "SKILL.md");
+        let sub = t.dir("store/a/refs");
+        t.file(&sub, "note.md");
+        let set = |p: &Path, ms: u64| {
+            std::fs::File::options()
+                .write(true)
+                .open(p)
+                .unwrap()
+                .set_modified(UNIX_EPOCH + Duration::from_millis(ms))
+                .unwrap();
+        };
+        set(&body.join("SKILL.md"), 1_700_000_000_000);
+        // 子目录里的文件更新：取它
+        set(&sub.join("note.md"), 1_758_326_400_000);
+        let empty = t.dir("store/b");
+
+        let sources = vec![source(&store, &["a", "b"])];
+        let plan = plan_delete_source(&sources[0].skills[0], &sources, &[]);
+        assert_eq!(plan.modified, Some(1_758_326_400_000));
+        // 目录自身的时间不算：一个文件都没有就是 None
+        assert_eq!(empty, sources[0].skills[1].path);
+        let plan = plan_delete_source(&sources[0].skills[1], &sources, &[]);
+        assert_eq!(plan.modified, None);
     }
 
     /// 只有一处本体时没有可改指的目标，如实为 None

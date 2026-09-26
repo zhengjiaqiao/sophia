@@ -1,34 +1,59 @@
 import type { ReactNode } from "react";
+import { IconLeave, IconPlus } from "./icons.tsx";
+import { ReasonTip } from "./Tooltip.tsx";
 
-/// 按钮（组件规范 §3）：只有一种形——ghost pill。没有填充按钮。
-/// 破坏性操作不用红：分量由弹窗里的信息和按钮文案承担（§1.1）。
+/// 按键（DESIGN「按钮」「控件有重量」，视觉 V4）。
+///
+/// 控件矩形（`control` 7），Barlow / 苹方 13 / 600，**原样大小写、字距 0**。键分三档，每档一个意思：
+/// - `primary` 墨键＝这一面的主动作：`ink` 底、`face` 字、抬起 `raise-ink`。一个面里至多一个
+///   （`添加 N 个来源` `保存` 确认框主动作）
+/// - `default` 默认键＝在 Sophia 里做一件事：`paper` 面、抬起 `raise`（边由投影的 1px 环给，不画描边）。
+///   其余一切能点的字都是它，**含 `取消` `稍后` `撤销` `只留这份` `清除筛选` `恢复`**
+/// - `quiet` 浅键＝离开 Sophia（2026-09-25）：静止是平贴的一小块 `surface` 键面、无边无投影、13 `ink-mute`、
+///   高 24、左右 8；手靠近 `paper` + `raise`、字转 `ink`；按下 `raise-pressed` + 按压变形。
+///   **末尾一律 10px `↗`，组件自动画**，调用方只写动词（`打开` `在访达中显示` `去发布页`）。
+///   只给会跳到 Sophia 外面的动作；`size` 对它不起作用（固定 24）。在灰面板、抽屉里键面自动换 `paper`
+///
+/// 三个尺寸按所在那一行选，不按重要性选：`regular` 28（工具行）、`compact` 24（表格行、
+/// 提示条、灰面板、纸窗、抽屉）、`row` 32（确认框与页面级提交）。
+///
+/// 重量：静止抬起一点；悬停手靠近，影子略重、不位移（墨键在内沿加 1px `ink-mute`）；按下 70ms 贴近机面
+/// （影子收紧、下沉 0.5px 并微缩，默认键键面转 `surface`）；松开 180ms 弹簧回位；focus 外 2px 处 1px 环。
+/// 全部在 ui.css。
+///
+/// 破坏性不涂红：分量由信息和按钮文案承担（`删到废纸篓`，不写「确定」）。
+///
+/// 禁用（给了 `disabledReason`）：平贴、实线 `hairline`、`ink-faint` 字，无投影、按下不动（D20）；
+/// 自带原因提示框，悬停出、**按下（点击、空格、回车）当即出**，页面不必再包一层。
+/// 外面再包的提示框（「重启生效」的说明）在禁用期间让给原因，同时只出一个。
 
-/// inverse：反色，表示「现在开着」的开关态（DESIGN components.button-inverse）
-export type ButtonVariant = "default" | "destructive" | "link" | "inverse";
-/// 两种尺寸按所在容器的高度选，不按重要性选
-export type ButtonSize = "regular" | "compact";
+export type ButtonVariant = "primary" | "default" | "quiet";
+export type ButtonSize = "regular" | "compact" | "row";
 
 interface ButtonBase {
   onClick?: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
   title?: string;
-  /// 16px 图标在文字左边，间距 8px（与选择片同一套）。用 src/ui/icons.tsx 里的那几个
+  /// 图标在文字左边（`AddButton` 的 `+` 就是这么来的）
   icon?: ReactNode;
-  /// 反色底上的文字链（错误横幅里的「关闭」）
-  inverse?: boolean;
+  /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
+  "aria-describedby"?: string;
+  /// 开关式的键（`管理来源` / `收起`）：展开着没有、展开的是哪一块
+  ariaExpanded?: boolean;
+  ariaControls?: string;
 }
 
-/// 禁用必须同时给出原因（§3）：不可只置灰，类型上就不给这个选项。
+/// 禁用必须同时给出原因（DESIGN：禁用必须同时给 title 说明原因，类型上强制）
 type DisabledProps =
   { disabled: true; disabledReason: string } | { disabled?: false; disabledReason?: never };
 
-/// 纯图标按钮不给盲点：没有 children 时，`ariaLabel` 与 `title` 都是必填——
-/// 前者给读屏，后者给「这个图标是什么意思」。和上面的 disabledReason 同一个手法，
-/// 靠类型强制，而不是靠 review 时想起来。
-type LabelProps =
-  | { children: ReactNode; ariaLabel?: string }
-  | { children?: never; icon: ReactNode; ariaLabel: string; title: string };
+/// 键一定有字；纯图标的工具走 `IconButton`（旧的无字写法已删，2026-09-25）。
+/// `ariaLabel` 给读屏补全字面没说全的对象（`打开` → `在访达中显示 ~/code/CardBox`）
+interface LabelProps {
+  children: ReactNode;
+  ariaLabel?: string;
+}
 
 export type ButtonProps = ButtonBase & DisabledProps & LabelProps;
 
@@ -41,31 +66,117 @@ export function Button(props: ButtonProps) {
     title,
     icon,
     ariaLabel,
-    inverse,
     disabled,
     disabledReason,
+    "aria-describedby": describedBy,
+    ariaExpanded,
+    ariaControls,
   } = props;
 
   const classes = ["ss-btn"];
-  if (size === "compact") classes.push("ss-btn--compact");
-  if (variant === "destructive") classes.push("ss-btn--destructive");
-  if (variant === "link") classes.push("ss-btn--link");
-  if (variant === "inverse") classes.push("ss-btn--inverse");
-  if (inverse) classes.push("is-inverse");
-  if (icon && children === undefined) classes.push("ss-btn--icon");
+  if (variant === "primary") classes.push("ss-btn--primary");
+  // 浅键（离开 Sophia）固定 24 高：尺寸不叠加
+  const leave = variant === "quiet";
+  if (leave) classes.push("ss-btn--quiet");
+  if (size === "compact" && !leave) classes.push("ss-btn--compact");
+  if (size === "row" && !leave) classes.push("ss-btn--row");
 
   return (
-    <button
-      type="button"
-      className={classes.join(" ")}
-      // 禁用时把原因挂在 title 上，鼠标停住就知道为什么按不动
-      title={disabled ? disabledReason : title}
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onClick={disabled ? undefined : onClick}
-    >
-      {icon ? <span className="ss-btn__icon">{icon}</span> : null}
-      {children}
-    </button>
+    <ReasonTip reason={disabled ? disabledReason : undefined}>
+      <button
+        type="button"
+        className={classes.join(" ")}
+        // 禁用原因同时挂在 title 上，作 aria 兜底
+        title={disabled ? disabledReason : title}
+        aria-label={ariaLabel}
+        aria-describedby={describedBy}
+        aria-expanded={ariaExpanded}
+        aria-controls={ariaControls}
+        disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+      >
+        {icon ? <span className="ss-btn__icon">{icon}</span> : null}
+        {children}
+        {leave ? <IconLeave className="ss-btn__external" /> : null}
+      </button>
+    </ReasonTip>
+  );
+}
+
+export interface IconButtonProps {
+  /// 16px 图形，用 icons.tsx 词表里的
+  icon: ReactNode;
+  /// **必填**：同时作 `aria-label`。图标不替代文案，文案挪到这里
+  title: string;
+  onClick?: () => void;
+  /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
+  disabledReason?: string;
+  /// 禁用原因提示框的优先方向（默认上方）
+  tipPlacement?: "top" | "bottom";
+  /// 禁用原因按画板单行显示，不受 240 上限折行（来源管理页行尾的 ×）
+  tipNowrap?: boolean;
+  /// 外面包的 Tooltip 经 cloneElement 挂上来的，转给 <button>
+  "aria-describedby"?: string;
+}
+
+/// 图标按钮（DESIGN「图标按钮」）：16px 图形、1.4 描边、28×28 命中区、无描边无底，图形 `ink-mute`；
+/// 悬停 `surface` 底（`control` 7）、图形转 `ink`。它是工具不是键：不抬起、按下不动。
+/// 设置齿轮、提示条与侧栏的 × 都是它
+export function IconButton({
+  icon,
+  title,
+  onClick,
+  disabledReason,
+  tipPlacement,
+  tipNowrap,
+  "aria-describedby": describedBy,
+}: IconButtonProps) {
+  const classes = ["ss-iconbtn"];
+  const disabled = Boolean(disabledReason);
+  return (
+    <ReasonTip reason={disabledReason} placement={tipPlacement} nowrap={tipNowrap}>
+      <button
+        type="button"
+        className={classes.join(" ")}
+        title={disabled ? disabledReason : title}
+        aria-label={title}
+        aria-describedby={describedBy}
+        disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+      >
+        <span className="ss-iconbtn__glyph">{icon}</span>
+      </button>
+    </ReasonTip>
+  );
+}
+
+export interface AddButtonProps {
+  /// 名词：`skill` `MCP` `项目` `来源` `网关`
+  noun: string;
+  onClick?: () => void;
+  /// 默认「添加 <noun>」
+  title?: string;
+  /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
+  disabledReason?: string;
+}
+
+/// 「开始一个添加流程」只有这一种长相（DESIGN「添加只有两种长相」）：
+/// 默认按钮（工具行 28）+ 12px `+`（词表里的 `IconPlus`）+ 名词。不是灰色文字链，也不是光秃秃的图标按钮
+export function AddButton({ noun, onClick, title, disabledReason }: AddButtonProps) {
+  const disabled = Boolean(disabledReason);
+  return (
+    <ReasonTip reason={disabledReason}>
+      <button
+        type="button"
+        className="ss-btn ss-btn--add"
+        title={disabled ? disabledReason : (title ?? `添加 ${noun}`)}
+        aria-label={title ?? `添加 ${noun}`}
+        disabled={disabled}
+        onClick={disabled ? undefined : onClick}
+      >
+        <IconPlus size={12} />
+        {noun}
+      </button>
+    </ReasonTip>
   );
 }

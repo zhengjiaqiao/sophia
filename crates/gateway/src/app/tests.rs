@@ -31,6 +31,10 @@ struct World {
     terminated: Vec<u32>,
     /// 非空时发信号失败，内容就是系统的原话
     terminate_error: Option<String>,
+    /// 打开 Codex 桌面应用被调了几次：测试不真去打开
+    launches: u32,
+    /// 非空时打开失败，内容就是系统的原话
+    launch_error: Option<String>,
     codex_started_at: Option<u64>,
     codex_version: String,
     now: u64,
@@ -239,6 +243,19 @@ fn fixture() -> Fixture {
                 }
             }
         }),
+        launch_codex: Box::new({
+            let w = w.clone();
+            move || {
+                let mut w = w.lock().unwrap();
+                match w.launch_error.clone() {
+                    Some(message) => Err(std::io::Error::other(message)),
+                    None => {
+                        w.launches += 1;
+                        Ok(())
+                    }
+                }
+            }
+        }),
         codex_started_at: Box::new({
             let w = w.clone();
             move || w.lock().unwrap().codex_started_at
@@ -331,6 +348,8 @@ fn enable_starts_router_before_writing_config() {
     let world = f.world.lock().unwrap();
     let spec = world.installed.as_ref().unwrap();
     assert_eq!(spec.label, SERVICE_LABEL);
+    // 后台活动通知与登录项里显示 Sophia，而不是可执行文件名 symsync
+    assert_eq!(spec.associated_bundle.as_deref(), Some(APP_BUNDLE_ID));
     assert_eq!(
         spec.program,
         f.root.join("data/bin/symsync").to_string_lossy()
@@ -786,6 +805,34 @@ fn restart_codex_relays_the_signal_error_verbatim() {
     );
 }
 
+/// `启动 Codex`：只调一次注入的打开动作，不写 Codex 设置、不结束任何进程
+#[test]
+fn launch_codex_opens_the_app_once_and_touches_nothing_else() {
+    let f = fixture();
+    f.world.lock().unwrap().processes = fake_processes();
+    f.app.launch_codex().unwrap();
+    let w = f.world.lock().unwrap();
+    assert_eq!(w.launches, 1);
+    assert!(w.terminated.is_empty(), "启动不结束任何进程");
+    drop(w);
+    assert_eq!(f.read_config(), ORIGINAL, "启动不写 Codex 设置");
+}
+
+/// 打不开时原样转述系统的话，不编
+#[test]
+fn launch_codex_relays_the_open_error_verbatim() {
+    let f = fixture();
+    f.world.lock().unwrap().launch_error =
+        Some("Unable to find application with bundle identifier com.openai.codex.".to_owned());
+    let err = f.app.launch_codex().unwrap_err();
+    assert_eq!(err.code, "internal");
+    assert_eq!(
+        err.message,
+        "Unable to find application with bundle identifier com.openai.codex."
+    );
+    assert_eq!(f.world.lock().unwrap().launches, 0);
+}
+
 fn agents_manager_setup(f: &Fixture) -> String {
     let old_catalog = f.codex().join("agents-manager-models.json");
     std::fs::write(&old_catalog, "{}").unwrap();
@@ -1016,7 +1063,7 @@ fn enabling_then_disabling_without_a_codex_restart_in_between_needs_no_restart()
 }
 
 /// 反过来这种必须提示：Codex 已经在用注入的配置，这时停用，路由随之卸载，
-/// 那个 Codex 连官方模型都连不上，得重启。
+/// 那个 Codex 连官方模型都无法连接，得重启。
 #[test]
 fn disabling_while_codex_runs_with_the_injected_config_needs_a_restart() {
     let f = fixture();
@@ -1222,6 +1269,66 @@ fn two_providers_coexist_with_their_own_ids_keys_and_prefixed_slugs() {
     }
     let saved = serde_json::to_string(&f.world.lock().unwrap().settings).unwrap();
     assert!(!saved.contains("sk-wecode") && !saved.contains("sk-other"));
+}
+
+/// 撞名模型在 Codex 目录里的后缀与状态里的 `short_name` 是同一个名字（界面网关行、模型片后缀都读它）：
+/// 新建时没填名字的那家，显示名是完整主机名，两边都写短名 `other`，不是 `other.example`
+#[test]
+fn the_catalog_suffix_for_clashing_models_is_the_short_name_the_ui_shows() {
+    let f = fixture();
+    f.world.lock().unwrap().key = None;
+    let a = f
+        .app
+        .commit_verified_provider_for(
+            None,
+            Some("WeCode"),
+            "https://wecode.example/openai",
+            "sk-wecode-key-123456",
+            vec!["deepseek/v4".into()],
+            "https://wecode.example/openai/v1",
+        )
+        .unwrap();
+    let b = f
+        .app
+        .commit_verified_provider_for(
+            None,
+            None,
+            "https://api.other.example/v1",
+            "sk-other-key-1234567",
+            vec!["deepseek/v4".into()],
+            "",
+        )
+        .unwrap();
+    f.app.set_models_for(&a, vec![pick("deepseek/v4")]).unwrap();
+    f.app.set_models_for(&b, vec![pick("deepseek/v4")]).unwrap();
+    f.app.enable().unwrap();
+
+    let state = f.app.state();
+    assert_eq!(state.providers[1].name, "api.other.example", "显示名原样");
+    let short: Vec<&str> = state
+        .providers
+        .iter()
+        .map(|p| p.short_name.as_str())
+        .collect();
+    assert_eq!(short, ["WeCode", "other"]);
+
+    let doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(f.codex().join("symsync-models.json")).unwrap())
+            .unwrap();
+    let names: Vec<&str> = doc["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(1) // 官方模型
+        .map(|m| m["display_name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            format!("deepseek/v4 · {}", short[0]),
+            format!("deepseek/v4 · {}", short[1])
+        ]
+    );
 }
 
 #[test]
@@ -1623,4 +1730,103 @@ fn enable_brings_the_router_up_before_writing_the_routing_catalog() {
     assert_eq!(code(f.app.enable()), "router_down");
     assert!(!f.codex().join("symsync-routing.json").exists());
     assert_eq!(f.read_config(), ORIGINAL);
+}
+
+/// 拉取失败：原因记在那一家上并落盘，模型和勾选不动；再拉成功就清掉
+#[test]
+fn a_failed_fetch_marks_the_provider_unreachable_until_the_next_success() {
+    let f = fixture();
+    let (a, _) = two_providers(&f);
+    f.app.record_unreachable_for(&a, "地址无法访问").unwrap();
+
+    // 落盘：设置里有，重新读出的状态里也有
+    {
+        let world = f.world.lock().unwrap();
+        let saved = world.settings.provider(&a).unwrap();
+        assert_eq!(saved.unreachable.as_deref(), Some("地址无法访问"));
+        let json = serde_json::to_value(&world.settings).unwrap();
+        assert_eq!(json["providers"][0]["unreachable"], "地址无法访问");
+    }
+    let view = &f.app.state().providers[0];
+    assert_eq!(view.unreachable.as_deref(), Some("地址无法访问"));
+    assert_eq!(view.models.len(), 2, "失败不丢模型列表");
+    assert!(view.models.iter().any(|m| m.selected), "失败不丢勾选");
+    let json = serde_json::to_value(view).unwrap();
+    assert_eq!(
+        json["unreachable"], "地址无法访问",
+        "界面字段名是 unreachable"
+    );
+
+    // 再试一次，这回拉到了：清空
+    f.app
+        .merge_fetched_models_for(&a, vec!["deepseek/v4".into()], "")
+        .unwrap();
+    assert_eq!(f.app.state().providers[0].unreachable, None);
+    let world = f.world.lock().unwrap();
+    assert_eq!(world.settings.provider(&a).unwrap().unreachable, None);
+    let json = serde_json::to_value(&world.settings).unwrap();
+    assert!(
+        json["providers"][0].get("unreachable").is_none(),
+        "清空后不写这个键"
+    );
+}
+
+/// 按 id 再试一次只改那一家；不带 id 的旧命令作用在第一家
+#[test]
+fn retrying_one_provider_leaves_the_others_alone() {
+    let f = fixture();
+    let (a, b) = two_providers(&f);
+    f.app.record_unreachable_for(&a, "地址无法访问").unwrap();
+    f.app
+        .record_unreachable_for(&b, "密钥无效，请换一个密钥")
+        .unwrap();
+
+    f.app
+        .merge_fetched_models_for(&b, vec!["deepseek/v4".into()], "")
+        .unwrap();
+    let state = f.app.state();
+    assert_eq!(
+        state.providers[0].unreachable.as_deref(),
+        Some("地址无法访问")
+    );
+    assert_eq!(state.providers[1].unreachable, None);
+
+    f.app
+        .record_unreachable_for(&b, "密钥无效，请换一个密钥")
+        .unwrap();
+    f.app
+        .merge_fetched_models(vec!["glm-5".into()], "")
+        .unwrap();
+    let state = f.app.state();
+    assert_eq!(state.providers[0].unreachable, None, "旧命令作用在第一家");
+    assert_eq!(
+        state.providers[1].unreachable.as_deref(),
+        Some("密钥无效，请换一个密钥")
+    );
+
+    f.app.record_unreachable("地址无法访问").unwrap();
+    assert_eq!(
+        f.app.state().providers[0].unreachable.as_deref(),
+        Some("地址无法访问")
+    );
+    assert_eq!(code(f.app.record_unreachable_for("nope", "x")), "invalid");
+}
+
+/// 换了地址，「无法连接」是对旧地址的结论，一并清掉；只改名不清
+#[test]
+fn changing_the_address_forgets_the_old_unreachable_verdict() {
+    let f = fixture();
+    let (a, _) = two_providers(&f);
+    f.app.record_unreachable_for(&a, "地址无法访问").unwrap();
+    f.app
+        .upsert_provider(Some(&a), Some("WeCode 2"), "https://wecode.example/openai")
+        .unwrap();
+    assert_eq!(
+        f.app.state().providers[0].unreachable.as_deref(),
+        Some("地址无法访问")
+    );
+    f.app
+        .upsert_provider(Some(&a), None, "https://wecode2.example/openai")
+        .unwrap();
+    assert_eq!(f.app.state().providers[0].unreachable, None);
 }

@@ -486,13 +486,17 @@ fn canonical(key: &str, value: &Value) -> Canonical {
         client_fields: BTreeMap::new(),
         reason: bad.then(|| "WeiboAP MCP 字段、类型或变量引用不受支持".into()),
         unsupported: bad,
-        helper_only: false,
+        headers_helper: None,
     }
 }
 
 fn definition(name: &str, value: &Canonical) -> Result<Value, String> {
     if value.unsupported {
         return Err("来源条目无法无损转换".into());
+    }
+    // 计划阶段已拒绝（`Canonical::refusal_for`）；这里再挡一次，绝不丢掉生成请求头的命令写
+    if value.headers_helper.is_some() {
+        return Err("WeiboAP 不支持用命令生成请求头".into());
     }
     let mut object = serde_json::Map::new();
     object.insert("name".into(), Value::String(name.into()));
@@ -656,7 +660,7 @@ fn unsupported() -> Canonical {
         client_fields: BTreeMap::new(),
         reason: Some("WeiboAP MCP 定义不是对象".into()),
         unsupported: true,
-        helper_only: false,
+        headers_helper: None,
     }
 }
 

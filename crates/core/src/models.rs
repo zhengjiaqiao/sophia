@@ -1,6 +1,6 @@
 //! 共享类型。serde 统一 camelCase，前端 `src/types.ts` 与之对应。
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +123,10 @@ pub struct Skill {
     pub name: String,
     /// 本体真实路径；常规位置就是 `本体位置/name`
     pub path: PathBuf,
+    /// `SKILL.md` frontmatter 里的 `description`，只读；读不到为 None（序列化时省略，
+    /// 前端按缺省处理），行内展开详情用
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// 一处本体位置：真实存放 skill 目录的地方
@@ -196,9 +200,9 @@ pub enum CellState {
     Foreign,
     /// 目标处已有真实文件或目录
     Duplicate,
-    /// 目标整个目录链接到别的本体位置，逐项写不进去
+    /// 目标整个目录链接到别的本体位置，逐项都无法写入
     WholeLinked,
-    /// 目标目录存在但写不进去。**扫描不产出这个状态**：判定它要实际试写一次，
+    /// 目标目录存在但无法写入。**扫描不产出这个状态**：判定它要实际试写一次，
     /// 每轮扫描都试写代价太大。只在上层真的写失败之后由上层构造
     ReadOnly,
 }
@@ -251,17 +255,101 @@ pub struct DomainPage {
     pub broken: Vec<PlannedAction>,
 }
 
-/// 一条自动同步规则：本体位置下的全部 skill（排除名单除外）持续补齐到这些目标
+/// 一条自动同步规则：本体位置下的全部 skill（各目标的排除名单除外）持续补齐到这些目标。
+/// 读入经 `AutoLinkFile` 迁移旧的整条 `excluded`；写出只有新结构
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", from = "AutoLinkFile")]
 pub struct AutoLink {
     /// `normalize` 后的本体位置路径
     pub source: PathBuf,
     /// 目标 id（同一域内）
     pub targets: Vec<String>,
-    /// 手动清除过、不再自动链接的 skill
+    /// 按目标 id 记的排除名单：在这个目标上手动清除过、不再自动链接的 skill。
+    /// 按目标而不是按位置记：手动清除是对一格（本体位置, skill, 目标）做的，规则的 `targets`、
+    /// `target_baselines` 也都按目标 id 记，目标 id 本身带位置（`project:<path>::<harness>`），
+    /// 同一键不必再从 id 里拆位置；于是在一个位置清除只影响那一格的自动链接，其他位置、
+    /// 同位置的其他 agent 照常补。键可以不在 `targets` 里：规则还没有这个目标时先记下的排除，
+    /// 等目标加进来仍然有效。空集合不留键
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub target_excluded: BTreeMap<String, BTreeSet<String>>,
+    /// 建规则那一刻本体位置里已有的 skill：规则只管之后新出现的，这些不补建。
+    /// `None` 只出现在升级前持久化的旧规则上——展开时整条跳过，
+    /// 首次扫描由 `skills::migrate_baselines` 取当时的全部名字补上
     #[serde(default)]
-    pub excluded: BTreeSet<String>,
+    pub baseline: Option<BTreeSet<String>>,
+    /// 规则已生效之后才加进来的目标：各自在加进来那一刻拍的 baseline，优先于 `baseline`。
+    /// 同一来源的规则跨位置共用一条（目标 id 本身带位置），在第二个位置打开开关、或给已开着的
+    /// 规则加一个 agent，都只管从这一刻起新出现的；若沿用整条规则的 `baseline`，建规则之后
+    /// 出现过的 skill 会被当成「新的」补建到新目标上。旧文件没有这个字段，读成空
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub target_baselines: BTreeMap<String, BTreeSet<String>>,
+    /// 最近一次真正建上了链的自动执行，按位置（域 key，`global` / `project:<路径>`）记：
+    /// 规则跨位置共用一条，来源管理页按位置看——在某个项目里加上的不该算到全局那一行上。
+    /// 一格没建上的执行不记、不覆盖上一次（见 `skills::record_auto_runs`）。旧文件没有这个字段，读成空
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub last_auto: BTreeMap<String, AutoRun>,
+}
+
+/// 一次自动执行的结果：什么时候（毫秒时间戳）、加上了几格
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRun {
+    pub at: u64,
+    pub added: usize,
+}
+
+impl AutoLink {
+    /// 这个 skill 在这个目标上是否被手动排除
+    pub fn is_excluded(&self, target_id: &str, skill: &str) -> bool {
+        self.target_excluded
+            .get(target_id)
+            .is_some_and(|s| s.contains(skill))
+    }
+}
+
+/// `AutoLink` 在 settings.json 里的样子，只用于读：多认一个旧字段 `excluded`
+/// （升级前整个来源共用一份排除名单）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AutoLinkFile {
+    source: PathBuf,
+    targets: Vec<String>,
+    #[serde(default)]
+    excluded: BTreeSet<String>,
+    #[serde(default)]
+    target_excluded: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    baseline: Option<BTreeSet<String>>,
+    #[serde(default)]
+    target_baselines: BTreeMap<String, BTreeSet<String>>,
+    #[serde(default)]
+    last_auto: BTreeMap<String, AutoRun>,
+}
+
+/// 旧的整条 `excluded` 按「对当时的所有目标都生效」拆进各目标的名单，老规则的行为不变。
+/// 当时没有目标的规则（只剩排除名单）没有可落的目标，这部分丢掉：之后加目标时
+/// `upsert_auto_link` 会拍 baseline，来源里还在的 skill 照样不补
+impl From<AutoLinkFile> for AutoLink {
+    fn from(f: AutoLinkFile) -> Self {
+        let mut target_excluded = f.target_excluded;
+        if !f.excluded.is_empty() {
+            for t in &f.targets {
+                target_excluded
+                    .entry(t.clone())
+                    .or_default()
+                    .extend(f.excluded.iter().cloned());
+            }
+        }
+        target_excluded.retain(|_, s| !s.is_empty());
+        AutoLink {
+            source: f.source,
+            targets: f.targets,
+            target_excluded,
+            baseline: f.baseline,
+            target_baselines: f.target_baselines,
+            last_auto: f.last_auto,
+        }
+    }
 }
 
 /// 一条指向某本体的链接，以及改指时该怎么写。
@@ -292,6 +380,10 @@ pub struct DeleteSourcePlan {
     pub in_git: Option<PathBuf>,
     /// 别处同名的另一个本体；删完把 `affected` 改指到它。None 表示没有别处可指
     pub relink_to: Option<PathBuf>,
+    /// 目录里普通文件最新的修改时间（Unix 毫秒）。只读事实，给「改于 9月20日」用；
+    /// 没有文件或读不到时为 None。旧数据里没有这个字段，反序列化按 None
+    #[serde(default)]
+    pub modified: Option<u64>,
 }
 
 /// 一次扫描的完整结果
@@ -411,6 +503,7 @@ mod tests {
             ],
             in_git: None,
             relink_to: Some(PathBuf::from("/b/skills/x")),
+            modified: Some(1_758_326_400_000),
         };
         assert_eq!(
             serde_json::to_value(&plan).unwrap(),
@@ -423,7 +516,8 @@ mod tests {
                     {"path": "/p/.claude/skills/x", "style": "relative"}
                 ],
                 "inGit": null,
-                "relinkTo": "/b/skills/x"
+                "relinkTo": "/b/skills/x",
+                "modified": 1_758_326_400_000u64
             })
         );
     }
@@ -462,6 +556,7 @@ mod tests {
         let skill = Skill {
             name: "ego-browser".into(),
             path: PathBuf::from("/opt/ego-skills/ego-browser"),
+            description: None,
         };
         assert_eq!(
             serde_json::to_value(&skill).unwrap(),
@@ -490,14 +585,85 @@ mod tests {
         let rule = AutoLink {
             source: PathBuf::from("/a/skills"),
             targets: vec!["claude-code".into()],
-            excluded: BTreeSet::from(["x".to_string()]),
+            target_excluded: BTreeMap::from([(
+                "claude-code".to_string(),
+                BTreeSet::from(["x".to_string()]),
+            )]),
+            baseline: Some(BTreeSet::from(["y".to_string()])),
+            target_baselines: BTreeMap::new(),
+            last_auto: BTreeMap::new(),
         };
+        let value = serde_json::to_value(&rule).unwrap();
         assert_eq!(
-            serde_json::to_value(&rule).unwrap(),
-            json!({"source": "/a/skills", "targets": ["claude-code"], "excluded": ["x"]})
+            value,
+            json!({"source": "/a/skills", "targets": ["claude-code"],
+                   "targetExcluded": {"claude-code": ["x"]}, "baseline": ["y"]})
         );
+        assert_eq!(serde_json::from_value::<AutoLink>(value).unwrap(), rule);
         let old: AutoLink =
             serde_json::from_value(json!({"source": "/a/skills", "targets": []})).unwrap();
-        assert!(old.excluded.is_empty());
+        assert!(old.target_excluded.is_empty());
+        // 升级前的规则没有 baseline：读成 None，等首次扫描迁移
+        assert_eq!(old.baseline, None);
+        assert!(old.target_baselines.is_empty());
+        // 旧文件没有最近一次执行：读成空，写出也不出这个键
+        assert!(old.last_auto.is_empty());
+        assert!(serde_json::to_value(&old)
+            .unwrap()
+            .get("lastAuto")
+            .is_none());
+
+        // 有记录时按位置写成 camelCase，读回相同
+        let mut ran = old.clone();
+        ran.last_auto.insert(
+            "global".into(),
+            AutoRun {
+                at: 1_700_000_000_000,
+                added: 3,
+            },
+        );
+        let value = serde_json::to_value(&ran).unwrap();
+        assert_eq!(
+            value["lastAuto"],
+            json!({"global": {"at": 1_700_000_000_000u64, "added": 3}})
+        );
+        assert_eq!(serde_json::from_value::<AutoLink>(value).unwrap(), ran);
+    }
+
+    #[test]
+    fn legacy_rule_wide_excluded_applies_to_every_target_it_had() {
+        let old: AutoLink = serde_json::from_value(json!({
+            "source": "/a/skills",
+            "targets": ["claude-code", "project:/p::codex"],
+            "excluded": ["x", "y"],
+            "baseline": []
+        }))
+        .unwrap();
+        let both = BTreeSet::from(["x".to_string(), "y".to_string()]);
+        assert_eq!(
+            old.target_excluded,
+            BTreeMap::from([
+                ("claude-code".to_string(), both.clone()),
+                ("project:/p::codex".to_string(), both),
+            ])
+        );
+        assert!(old.is_excluded("project:/p::codex", "x"));
+        assert!(!old.is_excluded("cursor", "x"));
+        // 写回只有新结构，旧字段不再出现
+        let value = serde_json::to_value(&old).unwrap();
+        assert!(value.get("excluded").is_none());
+        assert_eq!(serde_json::from_value::<AutoLink>(value).unwrap(), old);
+
+        // 空的旧名单、没有目标的旧规则：不留空键
+        let empty: AutoLink = serde_json::from_value(
+            json!({"source": "/a/skills", "targets": ["claude-code"], "excluded": []}),
+        )
+        .unwrap();
+        assert!(empty.target_excluded.is_empty());
+        let targetless: AutoLink = serde_json::from_value(
+            json!({"source": "/a/skills", "targets": [], "excluded": ["x"]}),
+        )
+        .unwrap();
+        assert!(targetless.target_excluded.is_empty());
     }
 }

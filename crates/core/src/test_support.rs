@@ -26,6 +26,15 @@ impl TempTree {
         p
     }
 
+    /// 相对 root 建一个 skill 目录：目录里放最小的 `SKILL.md`（只有 name，没有 description）。
+    /// 位置里只有带 `SKILL.md` 的目录才算 skill
+    pub fn skill(&self, rel: &str) -> PathBuf {
+        let p = self.dir(rel);
+        let name = p.file_name().expect("skill 目录名").to_string_lossy();
+        std::fs::write(p.join("SKILL.md"), format!("---\nname: {name}\n---\n")).expect("write");
+        p
+    }
+
     /// 在目录下创建小文件
     pub fn file(&self, dir: &Path, name: &str) -> PathBuf {
         let p = dir.join(name);

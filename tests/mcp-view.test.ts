@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canSupplement,
-  importedInDomain,
   mcpDomains,
+  pickChoices,
+  pickDiffText,
+  pickTip,
+  pickTitle,
   sourceForMissing,
   sourceForMissingTarget,
   supplementSourcesForTarget,
 } from "../src/mcpView.ts";
-import type { McpCellState, McpEntry, McpLocation, McpOverview } from "../src/types.ts";
+import type { McpCellState, McpDiff, McpEntry, McpLocation, McpOverview } from "../src/types.ts";
 
 const location = (id: string, domain = "global"): McpLocation => ({
   id,
@@ -64,7 +67,7 @@ test("域保留空项目、全局在前，并且项目绝不显示外域来源",
     result.map((page) => page.key),
     ["global", "project:/work/a", "project:/work/b"],
   );
-  assert.equal(result[0].label, "全局");
+  assert.equal(result[0].label, "用户级");
   assert.equal(result[1].label, "项目 · a");
   assert.deepEqual(
     result[0].rows.map((row) => row.name),
@@ -209,28 +212,8 @@ test("同一端点请求头待核对属于已定义，但绝不当作 equal 自�
     ),
   );
 
-  assert.equal(importedInDomain(page.rows[0].entries[0], page), true);
   assert.equal(sourceForMissingTarget(page.rows[0], "c"), null);
   assert.equal(canSupplement(page.rows[0].entries[0], new Set(["b"])), false);
-});
-
-test("导入状态由本域 own/equal 判定：部分引入已出现、冲突不算引入", () => {
-  const [global, project] = mcpDomains(
-    overview(
-      [location("global-a"), location("project-a", "project:/work/a")],
-      [entry("project-a", "arrived", { "global-a": "missing", "project-a": "own" })],
-    ),
-  );
-  const external = entry("outside", "new-service", {
-    "global-a": "equal",
-    "project-a": "conflict",
-  });
-  const absent = entry("outside", "absent", { "global-a": "missing", "project-a": "missing" });
-
-  assert.equal(importedInDomain(project.rows[0].entries[0], project), true);
-  assert.equal(importedInDomain(external, global), true);
-  assert.equal(importedInDomain(external, project), false);
-  assert.equal(importedInDomain(absent, global), false);
 });
 
 test("部分已引入的来源仍可向选中的缺失目标补齐", () => {
@@ -248,12 +231,11 @@ test("部分已引入的来源仍可向选中的缺失目标补齐", () => {
   );
   const source = result[0].rows[0].entries[0];
 
-  assert.equal(importedInDomain(source, result[0]), true);
   assert.equal(canSupplement(source, new Set(["cursor"])), true);
   assert.equal(canSupplement(source, new Set(["claude", "codex"])), false);
 });
 
-test("共享 agents.db 的 WeiboAP agent 仍是独立域，导入按目标 id 判定", () => {
+test("共享 agents.db 的 WeiboAP agent 仍是独立域", () => {
   const agentsDb = "/Users/me/Library/Application Support/WeiboAP/Data/agents.db";
   const agentOne = {
     id: "project:/Users/me/Library/Application Support/WeiboAP/Data/agents/agent-1::weiboap",
@@ -278,10 +260,6 @@ test("共享 agents.db 的 WeiboAP agent 仍是独立域，导入按目标 id �
       ],
     ),
   );
-  const onlyFirst = entry("outside", "same-service", {
-    [agentOne.id]: "equal",
-    [agentTwo.id]: "missing",
-  });
 
   assert.equal(agentOne.path, agentTwo.path);
   assert.deepEqual([first.key, second.key], [agentOne.domain, agentTwo.domain]);
@@ -290,6 +268,223 @@ test("共享 agents.db 的 WeiboAP agent 仍是独立域，导入按目标 id �
     [first.rows[0].entries[0].sourceId, second.rows[0].entries[0].sourceId],
     [agentOne.id, agentTwo.id],
   );
-  assert.equal(importedInDomain(onlyFirst, first), true);
-  assert.equal(importedInDomain(onlyFirst, second), false);
+});
+
+test("订阅着的别处来源：它的全部服务进本域列表，没写进的是 missing；同名时自己的那份在前", () => {
+  const [global, project, other] = mcpDomains({
+    ...overview(
+      [location("user"), location("proj", "project:/work/a"), location("far", "project:/work/b")],
+      [
+        entry("user", "docs", { user: "own", proj: "equal", far: "missing" }),
+        entry("user", "search", { user: "own", proj: "missing", far: "missing" }),
+        entry("proj", "docs", { user: "equal", proj: "own", far: "missing" }),
+        entry("far", "x", { user: "missing", proj: "missing", far: "own" }),
+      ],
+    ),
+    subscribed: { "project:/work/a": ["user"] },
+  });
+
+  assert.deepEqual(
+    project.rows.map((row) => [row.name, row.entries.map((e) => e.sourceId)]),
+    [
+      ["docs", ["proj", "user"]],
+      ["search", ["user"]],
+    ],
+  );
+  // 格只留本域的列
+  assert.deepEqual(project.rows[1].entries[0].cells, [
+    { targetId: "proj", state: "missing", reason: null },
+  ]);
+  // 没订阅的位置照旧只列自己的
+  assert.deepEqual(
+    global.rows.map((row) => row.name),
+    ["docs", "search"],
+  );
+  assert.deepEqual(
+    other.rows.map((row) => row.name),
+    ["x"],
+  );
+});
+
+test("同名多份：只列互不等价的几份，等价的并成一份", () => {
+  const [page] = mcpDomains(
+    overview(
+      [location("a"), location("b"), location("c"), location("d")],
+      [
+        entry("a", "notion", { a: "own", b: "equal", c: "conflict", d: "missing" }),
+        entry("b", "notion", { a: "equal", b: "own", c: "conflict", d: "missing" }),
+        entry("c", "notion", { a: "conflict", b: "conflict", c: "own", d: "missing" }),
+      ],
+    ),
+  );
+  const row = page.rows[0];
+  assert.equal(sourceForMissingTarget(row, "d"), null);
+  assert.deepEqual(
+    pickChoices(row, "d").map((e) => e.sourceId),
+    ["a", "c"],
+  );
+  // 只有一份可写（或都等价）时不用挑
+  const [single] = mcpDomains(
+    overview([location("a"), location("b")], [entry("a", "x", { a: "own", b: "missing" })]),
+  );
+  assert.equal(pickChoices(single.rows[0], "b").length, 1);
+});
+
+test("挑选浮层的标题与格子提示框", () => {
+  assert.equal(pickTitle("notion", 2), "notion 有 2 份不一样的，写进哪一份？");
+  assert.equal(pickTip("notion", 3), "有 3 份不一样的同名 notion · 点一下挑一份");
+});
+
+const diff = (
+  locationIds: string[],
+  fields: McpDiff["fields"],
+  extra: Partial<McpDiff> = {},
+): McpDiff => ({
+  name: "notion",
+  locationIds,
+  fields,
+  dynamicAuth: false,
+  unreadable: [],
+  ...extra,
+});
+const plain = (text: string) => ({ kind: "plain" as const, text });
+
+test("差异摘要：两份时列出全部不同的字段，凭据只给字段名", () => {
+  const d = diff(
+    ["a", "b"],
+    [
+      { field: "url", values: [plain("https://a"), plain("https://b")] },
+      {
+        field: "headers.Authorization",
+        values: [
+          { kind: "secret", last4: "abcd" },
+          { kind: "secret", last4: "wxyz" },
+        ],
+      },
+    ],
+  );
+  assert.equal(pickDiffText(d, "a"), "url、headers.Authorization 不同");
+  assert.equal(pickDiffText(d, "b"), "url、headers.Authorization 不同");
+  assert.ok(!pickDiffText(d, "a").includes("abcd"));
+});
+
+test("差异摘要：三份时只列这一份独有的，没有独有的退回全部", () => {
+  const d = diff(
+    ["a", "b", "c"],
+    [
+      { field: "url", values: [plain("x"), plain("x"), plain("y")] },
+      { field: "command", values: [plain("1"), plain("2"), plain("1")] },
+    ],
+  );
+  assert.equal(pickDiffText(d, "c"), "url 不同");
+  assert.equal(pickDiffText(d, "b"), "command 不同");
+  assert.equal(pickDiffText(d, "a"), "url、command 不同");
+});
+
+test("差异摘要：取不到、读不出来或比不了时说清楚", () => {
+  assert.equal(pickDiffText(null, "a"), "配置不一样");
+  assert.equal(pickDiffText(diff(["a", "b"], [], { unreadable: ["a"] }), "a"), "配置不一样");
+  assert.equal(
+    pickDiffText(diff(["a", "b"], [], { dynamicAuth: true }), "a"),
+    "认证头要到运行时才生成，无法逐字比对",
+  );
+});
+
+// ===== 多位置（spec 2026-09-26-object-first-navigation R6 AC16）：位置 id 与 core 同一写法 =====
+
+const { mergeMcpDomains, mcpColumnOf, mcpRowKey } = await import("../src/mcpView.ts");
+
+const CB = "project:/w/CardBox";
+const real = (id: string, label: string, harnessId: string, domain: string): McpLocation => ({
+  id,
+  label,
+  harnessId,
+  domain,
+  path: `/${id}`,
+});
+const userCC = real("claude-code", "Claude Code · User MCPs", "claude-code", "global");
+const userCX = real("codex", "Codex", "codex", "global");
+const cbLocal = real(`${CB}::claude-code:local`, "Claude Code · Local MCPs", "claude-code", CB);
+const cbProject = real(`${CB}::claude-code`, "Claude Code · Project MCPs", "claude-code", CB);
+const cbCX = real(`${CB}::codex`, "Codex", "codex", CB);
+const both = mcpDomains(
+  overview(
+    [userCC, userCX, cbLocal, cbProject, cbCX],
+    [
+      entry("claude-code", "notion", {
+        "claude-code": "own",
+        codex: "missing",
+        [cbLocal.id]: "missing",
+        [cbProject.id]: "missing",
+        [cbCX.id]: "missing",
+      }),
+      entry(cbProject.id, "notion", {
+        "claude-code": "equal",
+        codex: "missing",
+        [cbLocal.id]: "missing",
+        [cbProject.id]: "own",
+        [cbCX.id]: "missing",
+      }),
+    ],
+  ),
+);
+
+test("位置 id 的末段就是列：Local 与 Project 分开，用户级的 Claude Code 与项目的 Project 同一列", () => {
+  assert.equal(mcpColumnOf("claude-code"), "claude-code");
+  assert.equal(mcpColumnOf(cbProject.id), "claude-code");
+  assert.equal(mcpColumnOf(cbLocal.id), "claude-code:local");
+  assert.equal(mcpColumnOf(cbCX.id), "codex");
+});
+
+test("AC16 全部：Claude Code 主列（用户级行是 User、项目行是 Project）+ 只有项目才有的 LOCAL 列", () => {
+  const table = mergeMcpDomains(both);
+  assert.deepEqual(
+    table.columns.map((c) => [c.id, c.name, c.scope ?? null, [...c.targets.keys()]]),
+    [
+      ["claude-code", "Claude Code", null, ["global", CB]],
+      ["codex", "Codex", null, ["global", CB]],
+      ["claude-code:local", "Claude Code", "local", [CB]],
+    ],
+  );
+  const local = table.columns.find((c) => c.id === "claude-code:local")!;
+  const userRow = table.rows.find((r) => r.domainKey === "global")!;
+  const cbRow = table.rows.find((r) => r.domainKey === CB)!;
+  assert.equal(
+    local.targets.get(userRow.domainKey),
+    undefined,
+    "用户级行在 LOCAL 列上没有位置：留空",
+  );
+  assert.equal(local.targets.get(cbRow.domainKey)?.id, cbLocal.id);
+});
+
+test("AC13 同一个服务在用户级与 CardBox：两行，行键带位置、不重复；位置名写在每行上", () => {
+  const table = mergeMcpDomains(both);
+  const keys = table.rows.map((r) => mcpRowKey(r.domainKey, r.name));
+  assert.deepEqual(keys, ["global|notion", `${CB}|notion`]);
+  assert.deepEqual(
+    table.rows.map((r) => table.places.get(r.domainKey)),
+    ["用户级", "CardBox"],
+  );
+});
+
+test("AC17 只有一个项目：列与改版前相同（Local / Project 两列带第二行），没有位置名", () => {
+  const table = mergeMcpDomains(both.filter((d) => d.key === CB));
+  assert.equal(table.places.size, 0);
+  assert.deepEqual(
+    table.columns.map((c) => [c.name, c.scope ?? null, c.label]),
+    [
+      ["Claude Code", "local", "Claude Code · Local MCPs"],
+      ["Claude Code", "project", "Claude Code · Project MCPs"],
+      ["Codex", null, "Codex"],
+    ],
+  );
+  // 只有用户级：一行一列，没有第二行
+  const user = mergeMcpDomains(both.filter((d) => d.key === "global"));
+  assert.deepEqual(
+    user.columns.map((c) => [c.name, c.scope ?? null]),
+    [
+      ["Claude Code", null],
+      ["Codex", null],
+    ],
+  );
 });

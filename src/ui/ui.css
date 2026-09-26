@@ -1,102 +1,734 @@
-/* 展示组件的样式。色值一律 var(--…)，唯一来源是 tokens.css（§1.1）。
-   零色彩、零阴影、零渐变；圆角只有输入框 4px、pill 32px、圆点 50%（§1.3）。 */
+/* 展示组件的样式（docs/DESIGN.md「材料与工艺」、组件规格 docs/DESIGN-components.md，视觉 V4 · 拉姆斯 / Braun）。
+   色值一律 var(--…)，唯一来源是 tokens.css。投影只说离机面多高：凹（槽与输入框）、平（1px 边）、
+   抬起（键、页签滑块、开关滑块）、浮（浮层）。橙只在开关刻条与指示点上。
+   光标：全应用一律箭头，没有手形；也没有下划线（裁决 D23，2026-09-25 外链并入浅键）。
+   动效：会移动的实物用弹簧（--spring-slide），按下 70ms、松开 180ms 弹簧回位；颜色、底色、影子 120ms
+   机械缓动（--ease-mech）。末尾统一处理 prefers-reduced-motion。 */
 @import "../tokens.css";
 
-/* ===== 0. 键盘焦点 =====
-   系统默认的聚焦环是强调色（macOS 上是蓝的），零色彩界面里它是唯一闯进来的彩色。
-   换成一圈 ink 描边，偏移 2px 让它和 pill 自己的描边分得开。
-   只认 :focus-visible——鼠标点一下不该留下框。 */
+/* ===== 0. 键盘焦点与可选文字 =====
+   只认 :focus-visible：1px ink 外框、偏移 2px；墨面上转 face。不用橙、不要系统蓝环。 */
 .ss-btn:focus-visible,
+.ss-iconbtn:focus-visible,
 .ss-chip:focus-visible,
 .ss-dot-btn:focus-visible,
-.ss-subpage__back:focus-visible {
+.ss-switch:focus-visible,
+.ss-checkbox:focus-visible,
+.ss-tabs__tab:focus-visible,
+.ss-modelchip__remove:focus-visible,
+.ss-drawerhandle:focus-visible,
+.ss-tipwrap[tabindex]:focus-visible {
   outline: 1px solid var(--ink);
   outline-offset: 2px;
 }
 
-/* 反色面（错误横幅、选中行）上的焦点环要反过来，否则黑框压在黑底上看不见 */
-.ss-banner .ss-btn:focus-visible,
-.ss-btn--inverse:focus-visible,
-.is-inverse:focus-visible {
-  outline-color: var(--canvas);
+/* 焦点框只回应键盘：本窗口最近一次操作是指针（或还没按过键）时，程序放的焦点一律不画框。
+   浏览器的 :focus-visible 在窗口刚从托盘 / 原生对话框切回来时会猜错，见 src/inputModality.ts。
+   选择器带 html[data-input] 与 *:focus-visible，特异性压得过各组件自己的 .x:focus-visible */
+html[data-input="pointer"] *:focus-visible {
+  outline: none;
 }
 
-/* 系统偏好里关掉了动效就别做过渡；状态变化本身不依赖动画 */
-@media (prefers-reduced-motion: reduce) {
-  .ss-btn,
-  .ss-chip {
-    transition: none;
-  }
+/* 只供程序放焦点的落点（tabindex="-1"：推入页的页面名、托盘面板本身）不是控件，不画焦点框——
+   从托盘打开设置时窗口里还没有过鼠标操作，浏览器会把这次程序焦点当成键盘焦点 */
+[tabindex="-1"]:focus-visible {
+  outline: none;
 }
 
-/* ===== 2. 状态点 StateDot =====
-   填充＝这个 agent 能不能用它，外环＝它在这儿是本体还是一条软链。 */
-.ss-dot {
-  display: inline-block;
-  box-sizing: border-box;
-  border-radius: 50%;
+/* 界面文字不可拖选（tokens.css 的 :root），路径、id、命令与输入框除外（裁决 D23） */
+.ss-selectable,
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
-.ss-dot--linked {
-  width: 9px;
-  height: 9px;
-  background: var(--ink);
-}
-
-.ss-dot--missing {
-  width: 9px;
-  height: 9px;
-  border: 1px solid var(--ink-faint);
-}
-
-.ss-dot--own {
+/* ===== 1. 按键 Button（DESIGN「按钮」「控件有重量」）=====
+   阶梯：墨键（主动作）→ 默认键（纸面）→ 浅键（只给离开 Sophia 的动作，末尾一律 ↗）。
+   能按的键抬起一点（--raise / --raise-ink，边由投影的 1px 环给，不画描边）：悬停影子略重、不位移；
+   按下 70ms 贴近机面（影子收紧、--press-transform）；松开 180ms 弹簧回位。颜色与影子的变化 120ms 机械缓动。
+   高度定死、内边距只管左右，一律偶数高 */
+.ss-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
-  border: 1px solid var(--ink);
+  gap: 6px;
+  box-sizing: border-box;
+  height: var(--control-h);
+  padding: 0 var(--space-sm);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  box-shadow: var(--raise);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  /* 按钮里嵌专名时文字会被拆成几个匿名 flex item，item 间的空白会被 flex 吃掉
+     （「删 WeiboAP 的」渲染成「删WeiboAP的」）。pre 让那个空格留下，按钮本来就不换行 */
+  white-space: pre;
+  cursor: default;
+  transition:
+    background-color var(--motion-fast) var(--ease-mech),
+    box-shadow var(--motion-fast) var(--ease-mech),
+    color var(--motion-fast) var(--ease-mech),
+    transform var(--dur-release) var(--spring-slide);
 }
 
-.ss-dot--own::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.ss-btn--compact {
+  height: var(--control-h-compact);
+  padding: 0 10px;
+}
+
+/* 确认框与页面级提交：高 32、左右 16 */
+.ss-btn--row {
+  height: var(--control-h-row);
+  padding: 0 var(--space-md);
+}
+
+/* 默认键悬停：手靠近，影子略重、键不动，底色不变 */
+.ss-btn:hover:not(:disabled) {
+  box-shadow: var(--raise-hover);
+}
+
+/* 按下：贴近机面——键面转 surface、影子收紧、下沉 0.5px 并微缩（70ms）；松开由基础规则 180ms 弹簧回位 */
+.ss-btn:active:not(:disabled) {
+  background: var(--surface);
+  box-shadow: var(--raise-pressed);
+  transform: var(--press-transform);
+  transition:
+    background-color var(--dur-press) var(--ease-mech),
+    box-shadow var(--dur-press) var(--ease-mech),
+    color var(--dur-press) var(--ease-mech),
+    transform var(--dur-press) var(--ease-mech);
+}
+
+/* 不可用（裁决 D20）：平贴——实线 hairline、ink-faint 字、透明底、无投影、按下不动。
+   线画在 outline 上、贴着键的外沿：与抬起键的投影环同位，启用 ↔ 禁用时键不变宽、不跳。
+   必须同时给原因（disabledReason，类型上强制），按下即出原因 */
+.ss-btn:disabled {
+  outline: var(--border-disabled);
+  outline-offset: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-faint);
+}
+
+/* 主动作（墨键）：一个面里至多一个。抬起用墨键自己的影子（raise-ink，墨面上不需要环） */
+.ss-btn--primary {
   background: var(--ink);
+  box-shadow: var(--raise-ink);
+  color: var(--face);
 }
 
-/* 无格态：8px 短横，不可点（§8） */
-.ss-dot--none {
-  width: 8px;
-  height: 1px;
-  border-radius: 0;
+/* 墨面已经到顶，不能再深：悬停在键面内缩 1px 处加一圈 ink-mute（键帽边缘反光），影子不变 */
+.ss-btn--primary:hover:not(:disabled) {
+  box-shadow: var(--raise-ink);
+  outline: 1px solid var(--ink-mute);
+  outline-offset: -2px;
+}
+
+/* 墨键按下：底色不变，影子收紧 + 按压变形 */
+.ss-btn--primary:active:not(:disabled) {
+  background: var(--ink);
+  box-shadow: var(--raise-ink-pressed);
+  outline: none;
+}
+
+/* 浅键 button-quiet（2026-09-25）：只给离开 Sophia 的动作，末尾一律 10px ↗（1.4 描边、左间距 3）。
+   静止是平贴在机面上的一小块键面：surface 底、无边无投影、13 ink-mute、高 24、左右 8、control 7；
+   手靠近才抬起（paper + raise、字转 ink）；按下 raise-pressed + 按压变形。没有下划线、没有手形。
+   高度固定 24，不叠加 compact / row（Button 不给它挂尺寸类） */
+.ss-btn--quiet {
+  gap: 3px;
+  height: var(--control-h-compact);
+  padding: 0 var(--space-xs);
+  background: var(--surface);
+  box-shadow: none;
+  color: var(--ink-mute);
+  font-weight: 400;
+}
+
+.ss-btn--quiet:hover:not(:disabled) {
+  background: var(--paper);
+  box-shadow: var(--raise);
+  color: var(--ink);
+}
+
+.ss-btn--quiet:active:not(:disabled) {
+  background: var(--paper);
+  box-shadow: var(--raise-pressed);
+}
+
+/* 放在 surface 底上（灰面板）：键面改 paper、仍平贴——同色的浅面看不出是一颗键 */
+.ss-noticepanel .ss-btn--quiet:not(:disabled) {
+  background: var(--paper);
+}
+
+.ss-btn__external {
+  flex-shrink: 0;
+}
+
+/* 开始一个添加流程：+ 与名词间距 6，左右内边距 12 */
+.ss-btn--add {
+  padding: 0 var(--space-sm);
+}
+
+.ss-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ===== 1.1 图标按钮 IconButton（DESIGN「图标按钮」）=====
+   工具，不是键：28×28、无边无底、图形 ink-mute；悬停 surface 底（control 7）、图形转 ink；不抬起、按下不动 */
+.ss-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xxs);
+  box-sizing: border-box;
+  min-width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: default;
+  transition:
+    background-color var(--motion-fast) var(--ease-mech),
+    color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-iconbtn:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ss-iconbtn:disabled {
+  color: var(--ctl-edge);
+}
+
+.ss-iconbtn__glyph {
+  display: inline-flex;
+}
+
+/* ===== 2. 页签滑槽 Tabs（DESIGN「页签」「控件有重量」，物性之二）=====
+   槽：surface 底、recess-tabs 内凹、10 圆角、内边距 3。页签高 28、左右 16、nav Condensed 15/700 ink-mute，
+   标签经 Cap（nav 档）大写 + 1.17px；选中的是槽里一枚抬起的纸面滑块（paper + raise，边由投影的环给），
+   字转 ink、字重不变（选中同重：切换前后字宽不跳）。
+   按下即切：滑块由阻尼弹簧带到按下的页签（位移与变宽 260ms --spring-slide）；按住期间贴近槽底
+   （raise-pressed + 按压变形 70ms），松开 180ms 弹簧回位；指针在滑块上时影子略重。
+   位置用 translate、按压用 transform，互不打架。量到位置之前（首帧、静态渲染）由选中的页签自己画滑块 */
+.ss-tabs {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 3px;
+  border-radius: var(--radius-tab-track);
+  background: var(--surface);
+  box-shadow: var(--recess-tabs);
+}
+
+.ss-tabs__thumb {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  box-sizing: border-box;
+  width: var(--thumb-w, 0);
+  height: var(--control-h);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  box-shadow: var(--raise);
+  translate: var(--thumb-x, 0);
+  transition:
+    translate var(--dur-slide-tab) var(--spring-slide),
+    width var(--dur-slide-tab) var(--spring-slide),
+    transform var(--dur-release) var(--spring-slide),
+    box-shadow var(--motion-fast) var(--ease-mech);
+}
+
+/* 还没量到：不画滑块，选中的页签自己带面 */
+.ss-tabs:not(.has-thumb) .ss-tabs__thumb {
+  display: none;
+}
+
+.ss-tabs__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--control-h);
+  padding: 0 var(--space-md);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-mute);
+  font-family: var(--font-cond);
+  font-size: var(--size-body);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+  transition: color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-tabs__tab:hover:not(.is-on) {
+  color: var(--ink);
+}
+
+.ss-tabs__tab.is-on {
+  color: var(--ink);
+}
+
+/* 指针在滑块上：手靠近，影子略重 */
+.ss-tabs:has(.ss-tabs__tab.is-on:hover) .ss-tabs__thumb {
+  box-shadow: var(--raise-hover);
+}
+
+/* 按住任一页签（按下即切，滑块已经滑向它）：滑块贴近槽底 */
+.ss-tabs:has(.ss-tabs__tab:active) .ss-tabs__thumb {
+  box-shadow: var(--raise-pressed);
+  transform: var(--press-transform);
+  transition:
+    translate var(--dur-slide-tab) var(--spring-slide),
+    width var(--dur-slide-tab) var(--spring-slide),
+    transform var(--dur-press) var(--ease-mech),
+    box-shadow var(--dur-press) var(--ease-mech);
+}
+
+.ss-tabs:not(.has-thumb) .ss-tabs__tab.is-on {
+  background: var(--paper);
+  box-shadow: var(--raise);
+}
+
+.ss-tabs:not(.has-thumb) .ss-tabs__tab.is-on:active {
+  box-shadow: var(--raise-pressed);
+  transform: var(--press-transform);
+}
+
+/* ===== 3. 开关 Switch（DESIGN「开关」「控件有重量」，物性之三）=====
+   凹槽 + 抬起的滑块（paper + raise，面上无纹）。槽是 recess 凹面（与页签槽、搜索框同一种）。
+   刻线印在槽上：开＝滑块在右、左边露出一道 accent 橙线；关＝滑块在左、盖住它，看不见。
+   位置 + 刻线两重表达；开关旁不再另点指示点（紧挨开关的灯是同一件事说两遍）。
+   regular 34×20（滑块 16、行程 14、刻线 8×2 left 7 top 9）；compact 28×16（12、12、8×2 left 4 top 7）。
+   滑块位置用 translate（弹簧停靠），按压用 transform（按下 70ms、松开 180ms 弹簧），两者互不打架。
+   槽的尺寸变量叫 groove：track 前缀留给 Cap 的字距 token */
+.ss-switch {
+  --groove-w: 34px;
+  --groove-h: 20px;
+  --knob: 16px;
+  --scribe-w: 8px;
+  --scribe-h: 2px;
+  --scribe-left: 7px;
+  --travel: 14px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.ss-switch--compact {
+  --groove-w: 28px;
+  --groove-h: 16px;
+  --knob: 12px;
+  /* 刻线与标准开关同为 8×2（2026-09-25 真机：6×2 在一列行里几乎看不见），落在滑块让出的那块槽正中 */
+  --scribe-w: 8px;
+  --scribe-h: 2px;
+  --scribe-left: 4px;
+  --travel: 12px;
+}
+
+/* 槽：按住横移可拖，触控上别让浏览器拿去滚动 */
+.ss-switch__track {
+  position: relative;
+  display: block;
+  width: var(--groove-w);
+  height: var(--groove-h);
+  border-radius: var(--radius-track);
+  background: var(--recess);
+  box-shadow: var(--recess-track);
+  touch-action: none;
+}
+
+/* 刻线：一道 8×2 的线（两档开关同一道），竖直居中（regular top 9、compact top 7）。
+   只在开时露出；切换判定之后 120ms 换过来，拖动中不跟手（状态还没变） */
+.ss-switch__scribe {
+  position: absolute;
+  top: calc((var(--groove-h) - var(--scribe-h)) / 2);
+  left: var(--scribe-left);
+  width: var(--scribe-w);
+  height: var(--scribe-h);
+  border-radius: var(--radius-scribe);
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.ss-switch.is-on .ss-switch__scribe {
+  opacity: 1;
+}
+
+/* 滑块：paper + raise（边由投影的环给）。位移 200ms 弹簧停靠；影子 120ms；松开的按压变形 180ms 弹簧 */
+.ss-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  display: block;
+  box-sizing: border-box;
+  width: var(--knob);
+  height: var(--knob);
+  border-radius: var(--radius-knob);
+  background: var(--paper);
+  box-shadow: var(--raise);
+  translate: 0;
+  transition:
+    translate var(--dur-slide-knob) var(--spring-slide),
+    transform var(--dur-release) var(--spring-slide),
+    box-shadow var(--motion-fast) var(--ease-mech);
+}
+
+.ss-switch.is-on .ss-switch__knob {
+  translate: var(--travel);
+}
+
+/* 悬停：手靠近，滑块影子略重、不位移 */
+.ss-switch:hover:not(:disabled) .ss-switch__knob {
+  box-shadow: var(--raise-hover);
+}
+
+/* 按住（含拖动中）：贴近槽底——影子收紧、下沉 0.5px 并微缩，70ms */
+.ss-switch:active:not(:disabled) .ss-switch__knob,
+.ss-switch.is-dragging .ss-switch__knob {
+  box-shadow: var(--raise-pressed);
+  transform: var(--press-transform);
+  transition:
+    translate var(--dur-slide-knob) var(--spring-slide),
+    transform var(--dur-press) var(--ease-mech),
+    box-shadow var(--dur-press) var(--ease-mech);
+}
+
+/* 拖动中滑块 1:1 跟手（位移写在内联 translate 上），不走弹簧 */
+.ss-switch.is-dragging .ss-switch__knob {
+  transition:
+    transform var(--dur-press) var(--ease-mech),
+    box-shadow var(--dur-press) var(--ease-mech);
+}
+
+/* 不可用：平贴——槽透明 + 1px hairline 环；滑块 recess 面 + hairline 环、无投影；
+   刻线 hairline；不响应悬停、按住与拖 */
+.ss-switch:disabled .ss-switch__track {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px solid var(--hairline);
+  outline-offset: -1px;
+}
+
+.ss-switch:disabled .ss-switch__knob {
+  border: var(--border-disabled);
+  background: var(--recess);
+  box-shadow: none;
+}
+
+.ss-switch:disabled .ss-switch__scribe {
   background: var(--hairline);
 }
 
-/* 选中行反色：实心与外环转白，空心描边转反色底上的弱色（§2） */
-.ss-dot.is-inverse.ss-dot--linked {
-  background: var(--canvas);
+/* ===== 3.1 指示点 Indicator：6px accent 圆点 + 外一圈 2px 同色 14% 的灯罩环 =====
+   橙的唯一含义「开着 / 在生效」的第二种形态，只出现在看不到开关的地方（侧栏 agent 名后）。
+   灯罩环是平的色环（--accent-halo），不模糊、不发光；lint 只在这里放行这一种投影写法 */
+.ss-indicator {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-dot);
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-halo);
 }
 
-.ss-dot.is-inverse.ss-dot--missing {
-  border-color: var(--ink-faint-inverse);
+/* ===== 3.2 勾选框 Checkbox（DESIGN「勾选框」）=====
+   14 方、mark 4 圆角（2026-09-25 真机：16 在 15 号字旁偏大，改 14，同 macOS 勾选框）。未勾：平贴的 paper 白面 + 1px ink-faint 内环（2026-09-25 真机：灰底 + 深环在字旁像一块灰砖，
+   和文字不协调——白面细环是 macOS 勾选框的样子，只剩一道线）；手靠近：raise-hover 抬起；
+   勾上：墨底白勾（ink 底、无内环、平贴，中心 10px face 对勾 1.8）；半选：同墨底 + 8×2 face 短横。
+   视觉 14、命中区用伪元素撑到 24，不动 border；全应用只有这一个尺寸。
+   行悬停钩子：行元素加 data-checkrow，悬停这一行时它里面的勾选框进「手靠近」态 */
+.ss-checkbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--ink-faint);
+  border-radius: var(--radius-mark);
+  background: var(--paper);
+  color: var(--face);
+  cursor: default;
+  transition:
+    border-color var(--motion-fast) var(--ease-mech),
+    background-color var(--motion-fast) var(--ease-mech),
+    box-shadow var(--motion-fast) var(--ease-mech),
+    transform var(--dur-release) var(--spring-slide);
 }
 
-.ss-dot.is-inverse.ss-dot--own {
-  border-color: var(--canvas);
+.ss-checkbox::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
 }
 
-.ss-dot.is-inverse.ss-dot--own::after {
-  background: var(--canvas);
+/* 手靠近（悬停它自己，或悬停它所在的行）：抬起迎手 */
+.ss-checkbox:hover:not(:disabled):not(.is-on):not(.is-mixed),
+[data-checkrow]:hover .ss-checkbox:not(:disabled):not(.is-on):not(.is-mixed) {
+  background: var(--paper);
+  box-shadow: var(--raise-hover);
 }
 
-.ss-dot.is-inverse.ss-dot--none {
-  background: var(--ink-faint-inverse);
+.ss-checkbox:active:not(:disabled) {
+  transform: var(--press-transform);
+  transition:
+    border-color var(--dur-press) var(--ease-mech),
+    background-color var(--dur-press) var(--ease-mech),
+    box-shadow var(--dur-press) var(--ease-mech),
+    transform var(--dur-press) var(--ease-mech);
 }
 
-/* 点是 9/13px，命中区不跟着缩（§3「命中区与视觉尺寸是两回事」）：
-   透明内边距把目标撑到 24×24。格宽 62、行高 40，撑开不挤到别的格 */
+.ss-checkbox.is-on,
+.ss-checkbox.is-mixed {
+  border-color: transparent;
+  background: var(--ink);
+  box-shadow: none;
+}
+
+.ss-checkbox:disabled {
+  border-color: var(--hairline);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ss-checkbox.is-on:disabled,
+.ss-checkbox.is-mixed:disabled {
+  border-color: transparent;
+  background: var(--ctl-border);
+}
+
+/* ===== 4. 来源筛选胶囊 Chip（DESIGN「选择片」）=====
+   一排浅胶囊：recess 底、13 ink-mute、高 26、左右 10、pill，无边无投影、平贴——不是键。
+   悬停 surface 底 + ink 字；选中＝墨色胶囊（ink 底 face 字，字重不跳），选中的悬停不变——单选里再点它
+   什么都不发生，悬停回应就是在许诺一个不存在的动作（点完手还停在上面，会先看到一圈灰再消失）。名字后可带计数（12 tabular，间距 6；没选 ink-faint、选中 ctl-border）；不带图标
+   （片上不点灯）；不可选实线 hairline、ink-faint 字 */
+.ss-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--control-h-chip);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--recess);
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  font-weight: 400;
+  line-height: 1;
+  white-space: pre;
+  cursor: default;
+  transition:
+    background-color var(--motion-fast) var(--ease-mech),
+    color var(--motion-fast) var(--ease-mech);
+}
+
+/* 名字最宽 220，放不下截断（计数完整保留）；整颗在胶囊行里也能被压窄（.ss-chip 的 min-width / max-width） */
+.ss-chip__label {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-chip:hover:not(:disabled) {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.ss-chip.is-selected {
+  background: var(--ink);
+  color: var(--face);
+}
+
+/* 选中的那颗点了不会变：悬停保持原样，不回应 */
+.ss-chip.is-selected:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--face);
+}
+
+.ss-chip__count {
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+.ss-chip.is-selected .ss-chip__count {
+  color: var(--ctl-border);
+}
+
+.ss-chip:disabled {
+  outline: var(--border-disabled);
+  outline-offset: -1px;
+  background: transparent;
+  color: var(--ink-faint);
+}
+
+/* ===== 4.1 模型片 ModelChip：白胶囊 26（--control-h-chip），paper 面 + 1px hairline 环，末尾 9px ×（IconClose，1.4 描边）=====
+   与来源胶囊（灰胶囊、选中墨色）是两种东西、两种样子；不用墨，机面和凹面上同一个样子 */
+.ss-modelchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: var(--control-h-chip);
+  padding: 0 var(--space-xs) 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ss-modelchip__remove {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-mute);
+  cursor: default;
+}
+
+/* 视觉 9，命中区 25 */
+.ss-modelchip__remove::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+
+.ss-modelchip__remove:hover {
+  color: var(--ink);
+}
+
+/* 网关后缀（DESIGN「在用」：同名才加 ` · 网关短名`，短名 ink-mute） */
+.ss-modelchip__suffix {
+  color: var(--ink-mute);
+}
+
+/* ===== 4.2 标签 Tag：无框的 12px 文字（有框的都能点） ===== */
+.ss-tag {
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  white-space: nowrap;
+}
+
+.ss-tag--strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ss-tag--weak {
+  font-weight: 400;
+  color: var(--ink-mute);
+}
+
+/* 计数记号（同名 ×2）：12 tabular ink-faint，不换等宽字族 */
+.ss-tag--count {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+/* 可悬停读更多、但不可点：不加装饰线（裁决 D21：点状下划线是网页 abbr 惯例，macOS 上没人认得），
+   提示框照出。`2 份不一样` 也是这种纯文字记号（点它拉开这一行的抽屉，动作在抽屉里） */
+.ss-tag.has-tip {
+  cursor: default;
+}
+
+/* ===== 5. 状态点 StateDot（DESIGN「状态点」）=====
+   10px 家族同一个环骨架：外径 10，环 1.3 描边 ink-mute（一整表的 ○ 比实心 ● 退后一层）；
+   实心、原件的芯、受阻的斜线是 ink（currentColor）。不凹、不上色 */
+.ss-dot {
+  display: block;
+  flex-shrink: 0;
+  color: var(--ink);
+  overflow: visible;
+}
+
+.ss-dot__ring {
+  stroke: var(--ink-mute);
+}
+
+/* 反色闪（墨底上，[data-flash]）、禁用：环跟着记号一起转色，不再单独退一层 */
+.ss-dot.is-muted .ss-dot__ring,
+[data-flash] .ss-dot__ring {
+  stroke: currentColor;
+}
+
+.ss-dot--none {
+  color: var(--ink-faint);
+}
+
+.ss-dot.is-muted {
+  color: var(--ink-faint);
+}
+
+/* 悬停光晕：点本身一点不变，只在点的下层出一圈直径 22 的 hairline 圆形实底，说「能点」，
+   不预告结果。用 hairline 不用 surface：悬停格正落在 surface 的行带上，surface 光晕看不出来 */
+.ss-dot__halo {
+  fill: var(--hairline);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.ss-dot-btn:hover .ss-dot[data-hoverable] .ss-dot__halo,
+.ss-dot-btn:focus-visible .ss-dot[data-hoverable] .ss-dot__halo {
+  opacity: 1;
+}
+
+/* 放在 surface 底上（表格的选择行，StateDot onSurface）：光晕换 track——hairline 在 surface 上看不见 */
+.ss-dot.is-on-surface .ss-dot__halo {
+  fill: var(--track);
+}
+
+.ss-dot-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 点只有 10px，命中区不跟着缩：至少 24×24，整格由调用方撑满 */
 .ss-dot-btn {
   display: inline-flex;
   align-items: center;
@@ -107,470 +739,664 @@
   border: 0;
   border-radius: 0;
   background: none;
-  cursor: pointer;
-}
-
-.ss-dot-btn:disabled {
   cursor: default;
 }
 
-/* ===== 3. 按钮 Button：只有一种，ghost pill =====
-   高度定死、内边距只管左右：原先 9px 上下凑出 33px 的奇数高，
-   在 1x 屏上整枚按钮在定高容器里偏心一个设备像素，端帽也只有 75% 覆盖（见 tokens.css 的注释）。 */
-.ss-btn {
+/* ===== 6. 提示框 Tooltip（DESIGN「浮层」）：墨底 face 字 12（全应用唯一的墨色浮窗），内边距 6 8，control 7，浮层投影，最大宽 240 ===== */
+.ss-tipwrap {
+  position: relative;
   display: inline-flex;
+}
+
+/* 在 flex 行里占位（Tooltip fit）：包层成单列网格（minmax(0, 1fr)），里面的触发控件随它收窄，
+   文字才截得断——页面不必为此另包一层。shrink 按内容定宽、放不下时收窄；grow 撑满这一行余下的宽、
+   与行同高，触发控件在里面上下居中 */
+.ss-tipwrap--shrink,
+.ss-tipwrap--grow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  box-sizing: border-box;
-  height: var(--control-h);
-  padding: 0 24px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius-pill);
-  background: none;
-  color: var(--ink);
-  font-family: var(--font-cond);
-  font-size: var(--size-caption);
-  font-weight: 700;
-  letter-spacing: var(--track-button);
-  line-height: 1;
-  text-transform: uppercase;
-  white-space: nowrap;
-  cursor: pointer;
-  /* 按钮上的文字是标签不是内容，拖选它没有意义，选中反白还会晃一下 */
-  user-select: none;
-  -webkit-user-select: none;
-  transition:
-    border-color var(--motion-fast) linear,
-    background-color var(--motion-fast) linear,
-    color var(--motion-fast) linear;
+  min-width: 0;
 }
 
-/* 紧凑档只换高度与左右内边距：字号同属 button-cap（§3） */
-.ss-btn--compact {
-  height: var(--control-h-compact);
-  padding: 0 16px;
+.ss-tipwrap--shrink {
+  flex: 0 1 auto;
 }
 
-/* 悬停：ghost pill 的描边本来就是 ink，没有可升的档，改用次级面做底
-   （DESIGN「可点的面」对列表行的那一档）。按下再深一格。 */
-.ss-btn:hover:not(:disabled) {
-  background: var(--surface);
+.ss-tipwrap--grow {
+  flex: 1 1 auto;
+  align-self: stretch;
 }
 
-.ss-btn:active:not(:disabled) {
-  background: var(--hairline);
+/* 此刻没有提示框（禁用原因撤了）：包层不占盒，控件原地不动。important：页面里
+   `.x > .ss-tipwrap { display: … }` 之类的规则不能把它撑回来 */
+.ss-tipwrap.is-idle {
+  display: contents !important;
 }
 
-.ss-btn:disabled {
-  border-color: var(--disabled);
-  color: var(--ink-faint);
+/* 点了做不了的控件（DESIGN「所有点了做不了的控件，按下当即说明原因」）：原生禁用的控件
+   接不到指针，让它不吃指针，悬停和按下都落在包层上 */
+.ss-tipwrap.is-explain {
   cursor: default;
 }
 
-/* 破坏性：边框同默认，分量由弹窗信息与按钮文案承担，不用红（§1.1） */
-.ss-btn--destructive {
-  border-color: var(--ink);
-  color: var(--ink);
+.ss-tipwrap.is-explain > :disabled {
+  pointer-events: none;
 }
 
-/* 反色：「现在开着」的开关态。零色彩系统里强调阶梯的最高档，
-   模型页的「已启用」、托盘面板的开关都用它，不要各自再写一份 */
-.ss-btn--inverse {
-  border-color: var(--ink);
+/* 勾选框视觉 14、命中区 24：禁用时由包层撑命中区 */
+.ss-tipwrap.is-explain:has(> .ss-checkbox)::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+}
+
+.ss-tip {
+  position: absolute;
+  z-index: var(--z-tip);
+  display: none;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 240px;
+  padding: 6px var(--space-xs);
+  border-radius: var(--radius-control);
   background: var(--ink);
-  color: var(--canvas);
-}
-
-/* 反色档已经在阶梯顶端，悬停只能往回退一格，不能再往上 */
-.ss-btn--inverse:hover:not(:disabled),
-.ss-btn--inverse:active:not(:disabled) {
-  border-color: var(--ink-mute);
-  background: var(--ink-mute);
-}
-
-/* 文字链：取消、关闭、稍后这类次级动作 */
-.ss-btn--link,
-.ss-btn--link.ss-btn--compact {
-  height: auto;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  color: var(--ink-mute);
+  color: var(--face);
+  box-shadow: var(--elev-float);
   font-family: var(--font-ui);
-  font-size: var(--size-caption);
+  font-size: var(--size-label);
   font-weight: 400;
-  letter-spacing: normal;
   line-height: var(--leading-caption);
-  text-transform: none;
-  text-decoration: underline;
+  text-align: left;
+  white-space: normal;
+  pointer-events: none;
 }
 
-/* 文字链没有描边可换，悬停就把字色推到主文字色 */
-.ss-btn--link:hover:not(:disabled),
-.ss-btn--link:active:not(:disabled) {
-  background: none;
-  color: var(--ink);
+.ss-tip.is-open {
+  display: block;
 }
 
-.ss-btn--link:disabled {
-  color: var(--ink-faint);
-}
-
-.ss-btn--link.is-inverse {
-  color: var(--canvas);
-}
-
-.ss-btn--link.is-inverse:hover:not(:disabled) {
-  color: var(--canvas);
-}
-
-/* 纯图标按钮：正方形，命中区不小于 24（§3）。
-   文案不是省掉，是挪到了 aria-label 与 title 上——Button 的类型强制给。 */
-.ss-btn--icon {
-  width: var(--control-h);
-  padding: 0;
-}
-
-.ss-btn--icon.ss-btn--compact {
-  width: var(--control-h-compact);
-}
-
-.ss-btn--link.ss-btn--icon {
-  width: var(--hit-min);
-  height: var(--hit-min);
-  text-decoration: none;
-}
-
-.ss-btn__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-/* ===== 3.0 选择片 Chip：pill，因为它可点（§3.1） ===== */
-.ss-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  height: var(--control-h);
-  padding: 0 16px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-pill);
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-  line-height: 1.2;
-  white-space: nowrap;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  transition:
-    border-color var(--motion-fast) linear,
-    background-color var(--motion-fast) linear,
-    color var(--motion-fast) linear;
-}
-
-/* 描边的块：悬停把 hairline 推到 ink，底色不动（DESIGN「可点的面」） */
-.ss-chip:hover:not(:disabled) {
-  border-color: var(--ink);
-}
-
-/* 选中用反色，不用填充色——界面零色彩，反色是强调阶梯最高档（§3.0） */
-.ss-chip.is-selected {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--canvas);
-}
-
-.ss-chip.is-selected:hover:not(:disabled) {
-  border-color: var(--ink-mute);
-  background: var(--ink-mute);
-}
-
-.ss-chip:disabled {
-  border-color: var(--hairline);
-  background: var(--canvas);
-  color: var(--ink-faint);
-  cursor: default;
-}
-
-.ss-chip__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-/* ===== 4.1 提示条 Toast ===== */
-.ss-toast {
+/* 打开的气泡（Tooltip 组件）挂在 body 上、fixed，位置由 placeTip 写进 top / left：
+   不被滚动容器裁掉、不被侧栏与吸顶区盖住；--z-tip 在推入页、小浮层、浮起小窗、确认弹窗之上，
+   弹窗里的提示框照样看得见（层级梯子见 tokens.css）。
+   最大宽再让窗口一步：窗口四边各留 16（TIP_MARGIN），菜单栏面板这种窄窗口也不出窗 */
+.ss-tip.is-floating {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  inset: auto;
+  transform: none;
+  max-width: min(240px, calc(100vw - 32px));
+}
+
+/* 按画板单行显示的那几句（`nowrap`）：不受 240 上限，窗口放不下才折行 */
+.ss-tip.ss-tip--nowrap.is-floating {
+  max-width: calc(100vw - 32px);
+}
+
+.ss-tip b,
+.ss-tip strong {
+  font-weight: 600;
+}
+
+.ss-tip--top {
+  bottom: calc(100% + 6px);
+}
+
+.ss-tip--bottom {
+  top: calc(100% + 6px);
+}
+
+/* 快捷键只给键盘（DESIGN「提示框」）：鼠标悬停唤起时不写 ` · 空格`，键盘焦点唤起时才写。
+   气泡不在包层里，由 Tooltip 在打开那一刻看包层（或里面的控件）是不是 `:focus-visible`，
+   是就挂 `is-keyed`——`:focus-visible` 只在键盘（方向键、Tab）带来的焦点上成立，鼠标点过的按钮不算 */
+.ss-tip__keyhint {
+  display: none;
+}
+
+.ss-tip.is-keyed .ss-tip__keyhint {
+  display: inline;
+}
+
+/* 墨面上的次字：ctl-border */
+.ss-tip__key {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ctl-border);
+}
+
+/* ===== 7. 忙碌指示的关键帧 =====
+   刻度扫过：亮的那根（和它身后一格的余晖）按格阶跃从左走到右，到头从左重来。
+   位移量＝根数 × 格距（--sweep，按档位写在 .ss-spinner--14 / --24 上），steps(根数) 让它一格一格跳 */
+@keyframes ss-sweep {
+  to {
+    transform: translateX(var(--sweep));
+  }
+}
+
+/* 减少动效时文字后的三点：按三等分裁掉右侧，露 1 → 2 → 3 → 2 点 */
+@keyframes ss-dots {
+  0% {
+    clip-path: inset(0 66.67% 0 0);
+  }
+  25% {
+    clip-path: inset(0 33.33% 0 0);
+  }
+  50% {
+    clip-path: inset(0 0 0 0);
+  }
+  75% {
+    clip-path: inset(0 33.33% 0 0);
+  }
+}
+
+/* ===== 7.1 忙碌指示：刻度扫过（Spinner.tsx）；只在用户等的地方、带文字 =====
+   一排竖刻线（ctl-border、圆头），亮的那根 ink、前一格留 ink-mute 余晖，一趟 0.8s 按格阶跃。
+   14 宽 5 根（1.5 × 7、间距 1.6）/ 24 宽 7 根（2 × 10、间距 1.7）。不用橙：忙碌不是「在生效」 */
+.ss-spinner {
+  display: block;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.ss-spinner__tick {
+  fill: var(--ctl-border);
+}
+
+.ss-spinner__lit {
+  fill: var(--ink);
+}
+
+.ss-spinner__glow {
+  fill: var(--ink-mute);
+}
+
+/* 格距 3.1（1.5 + 1.6）× 5 根；3.7（2 + 1.7）× 7 根 */
+.ss-spinner--14 {
+  --sweep: 15.5px;
+}
+
+.ss-spinner--24 {
+  --sweep: 25.9px;
+}
+
+.ss-spinner--14 .ss-spinner__lit,
+.ss-spinner--14 .ss-spinner__glow {
+  animation: ss-sweep var(--motion-spinner) steps(5) infinite;
+}
+
+.ss-spinner--24 .ss-spinner__lit,
+.ss-spinner--24 .ss-spinner__glow {
+  animation: ss-sweep var(--motion-spinner) steps(7) infinite;
+}
+
+/* 余晖晚一格：同一条动画往回拨一格（一趟里的 N-1 / N），亮的那根回到最左时它落在最右那根 */
+.ss-spinner--14 .ss-spinner__glow {
+  animation-delay: calc(var(--motion-spinner) * -4 / 5);
+}
+
+.ss-spinner--24 .ss-spinner__glow {
+  animation-delay: calc(var(--motion-spinner) * -6 / 7);
+}
+
+/* ===== 8. 提示小窗 Toast（DESIGN「反馈的两种形态」）：浮起的一层只表示「会自己消失」 =====
+   提示条一律是纸（2026-09-25 起，墨色浮窗只给提示框）：失败与成功靠句首记号与否定动词分。文字一律 13（caption）：动词 600、名字 400、数字 12 tabular */
+.ss-toast {
   box-sizing: border-box;
-  max-width: 480px;
-  padding: 16px 20px;
-  border: 1px solid var(--ink);
-  background: var(--canvas);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+}
+
+/* 成功：纸窗（paper + 1px hairline 边 + float 12 圆角 + 浮层投影），单行高 32 */
+.ss-toast--routine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: var(--control-h-row);
+  padding: 0 var(--space-sm);
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.ss-toast__mark {
+  display: inline-flex;
+}
+
+/* 到点末尾 120ms 淡出（两档同一个）；机械缓动，不是 300ms 渐隐 */
+.ss-toast.is-leaving {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+/* 浮起小窗的外壳（FloatingToast）：fixed，位置由 placeToast 给；--z-toast：比吸顶层、推入页与
+   小浮层高，比确认弹窗低 */
+.ss-floattoast {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--z-toast);
+  display: flex;
+  width: max-content;
+}
+
+/* 右下那一叠里各页挂进来的（CornerToast）：不另占一层，随那一叠排 */
+.ss-toaststack__slot {
+  display: contents;
+}
+
+/* 需要注意（做不成、部分失败）：同成功的纸窗（paper + 1px hairline 边 + float 12 圆角 + 浮层投影），
+   宽 ≤ 400；左侧 40 全高记号栏放 ⊘ / !（ink 线稿），与正文隔一道 hairline */
+.ss-toast--notice {
+  display: flex;
+  width: max-content;
+  max-width: 400px;
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
   color: var(--ink);
 }
 
+.ss-toast__indicator {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  border-right: 1px solid var(--hairline);
+}
+
+/* 有展开内容时记号钉在主行那一格，不随整块居中 */
+.ss-toast--notice.has-detail .ss-toast__indicator {
+  align-items: flex-start;
+  padding-top: var(--space-md);
+  box-sizing: border-box;
+}
+
+.ss-toast__body {
+  flex-grow: 1;
+  min-width: 0;
+  padding: 10px 6px 10px var(--space-sm);
+}
+
+/* 没有键和 × 的（单格失败的一句原因）：右边同左边留 12，字不贴边 */
+.ss-toast__body:not(:has(.ss-toast__actions)) {
+  padding-right: var(--space-sm);
+}
+
+.ss-toast__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: var(--control-h);
+}
+
+.ss-toast__verb {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ss-toast__agents {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+}
+
+.ss-toast__names,
+.ss-toast__reading,
+.ss-toast__reason,
+.ss-toast__count {
+  white-space: nowrap;
+}
+
+/* 整句（单格失败原因）：放不下就折行，不截断 */
 .ss-toast__message {
+  white-space: normal;
+}
+
+/* 读数可以是 ` · ` 隔开的几段（`WeiboAP · 39 个 skill`）：段与段、点与段同主行的 8 间距 */
+.ss-toast__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* 名字之后的几段（Toast trail）：每段前一个 ` · `，点与段同主行的 8 间距，一段不折开 */
+.ss-toast__trail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  white-space: nowrap;
+}
+
+/* 数字：12 tabular（Barlow 的等宽数字，不换等宽字族） */
+.ss-toast__more,
+.ss-toast__num {
   font-family: var(--font-ui);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.ss-toast__tally {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+}
+
+.ss-toast__sep {
+  color: var(--ink-faint);
+}
+
+.ss-toast__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-left: auto;
+  padding-left: var(--space-sm);
+}
+
+/* 副行：路径与条数，等宽 12 ink-faint */
+.ss-toast__stats {
+  margin-top: -2px;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.ss-toast__detail {
+  margin-top: var(--space-sm);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--hairline);
+}
+
+/* 忙碌形态（BusyToast / Toast busy=）：同成功的单行纸窗，句首 14 宽刻度 + 一句 13 ink-mute，刻度与字间距 6 */
+.ss-toast--busy {
+  gap: 6px;
+  color: var(--ink-mute);
+}
+
+/* ===== 9. 灰面板 NoticePanel（DESIGN「灰面板」；错误横幅 ErrorBanner 已并进来，scope="app"）=====
+   内嵌、不会自己走：surface 实底、face 12 圆角、无边无投影；左侧 !，一句 ink（原因 ink-mute 同一行），
+   动作是默认键（紧凑 24，纸面在灰上读得出是一颗键）。与悬停行同色但形状不同（圆角、内缩、有内边距）。
+   三种范围只差放在哪：row 随内容宽、13 号字（默认）；section 满这一节的宽，键推到右端；
+   app 满内容宽、主句 15 + 第二行 13、内边距 12 16 */
+.ss-noticepanel {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-face);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+}
+
+.ss-noticepanel__mark {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.ss-noticepanel__message {
+  white-space: nowrap;
+}
+
+.ss-noticepanel__message b {
+  font-weight: 600;
+}
+
+/* 原因跟在主句后，灰字同一行：决定下一步的信息不藏进悬停；写全，放不下就折行（不截断） */
+.ss-noticepanel__reason {
+  color: var(--ink-mute);
+  white-space: normal;
+}
+
+/* 第二行（app）：13 ink-mute，另起一行 */
+.ss-noticepanel__detail {
+  display: block;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.ss-noticepanel__close {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-right: -6px;
+}
+
+.ss-noticepanel__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: var(--space-xs);
+}
+
+/* 在等、过了 0.3 秒门槛：键原位换成刻度 + 一句（BusySlot），与键同一个位置、同样的间距 */
+.ss-noticepanel .ss-busyslot {
+  gap: var(--space-xs);
+  margin-left: var(--space-xs);
+}
+
+/* 节：占满所在容器的宽（块级 flex；放在纵向 flex 里也拉满），主句占满中间、放不下折行，键被推到右端控件列 */
+.ss-noticepanel--section {
+  display: flex;
+  align-self: stretch;
+}
+
+.ss-noticepanel--section .ss-noticepanel__message,
+.ss-noticepanel--app .ss-noticepanel__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+}
+
+/* 应用级：机面顶上、页面头之上，满内容宽；主句 15，键与 × 同在右端（间距 12） */
+.ss-noticepanel--app {
+  display: flex;
+  align-self: auto;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
   font-size: var(--size-body);
   line-height: var(--leading-body);
 }
 
-.ss-toast__foot {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-top: var(--space-xs);
+.ss-noticepanel--app .ss-noticepanel__actions,
+.ss-noticepanel--app .ss-busyslot {
+  margin-left: 0;
 }
 
-/* 关闭的 × 靠右，和「撤销 · 统计」那组分开——它不是这行里的一个动作 */
-.ss-toast__foot .ss-btn--icon {
-  margin-left: auto;
+/* 灰面板上的图标按钮：悬停带 surface 在灰上看不见，退一档到 hairline */
+.ss-noticepanel .ss-iconbtn:hover:not(:disabled) {
+  background: var(--hairline);
 }
 
-.ss-toast__stats {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-}
-
-/* ===== 4.2 错误横幅 ErrorBanner：反色通栏，不自动消失 ===== */
-.ss-banner {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-sizing: border-box;
-  width: 100%;
-  padding: 12px 16px;
-  background: var(--ink);
-  color: var(--canvas);
-}
-
-.ss-banner__message {
-  flex-grow: 1;
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-/* ===== 4.4 行内待办条 RowNotice ===== */
-.ss-rownotice {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  box-sizing: border-box;
-  padding: 8px 12px;
-  border: 1px solid var(--hairline);
-}
-
-.ss-rownotice__message {
-  flex-grow: 1;
-  min-width: 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-.ss-rownotice__actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-/* ===== 5. 确认弹窗 Confirm ===== */
+/* ===== 10. 确认框 Confirm（DESIGN「浮层」「材料与工艺 › 对话框」）=====
+   纸浮层（paper + 1px hairline 边）、float 12 圆角、浮层投影，宽 384、内边距 20 20 16；
+   遮罩 ink 16% 整面压暗。标题 head 16/600，正文 body 15 ink-mute；键高 32、左右 16、间距 8、上距 18，
+   `取消` 是默认键（D14，macOS 惯例），主动作墨键在右 */
 .ss-confirm-layer {
   position: fixed;
   inset: 0;
+  z-index: var(--z-confirm);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--space-xl);
 }
 
-/* 罩子是白的：界面零色彩，没有半透明黑可用 */
 .ss-confirm-veil {
   position: absolute;
+  background: var(--ink);
+  opacity: var(--veil-opacity);
+}
+
+.ss-confirm-veil--full {
   inset: 0;
-  background: var(--canvas);
-  opacity: 0.72;
 }
 
 .ss-confirm {
   position: relative;
   box-sizing: border-box;
-  width: 460px;
-  max-width: 100%;
-  padding: 24px 28px;
-  border: 1px solid var(--ink);
-  background: var(--canvas);
+  width: 384px;
+  max-width: calc(100vw - 32px);
+  padding: 20px 20px var(--space-md);
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+  color: var(--ink);
 }
 
-/* 弹窗标题：Condensed 走正文档——14 那一档已经砍掉（DESIGN「Typography → 层级」） */
+/* 标题 head：Condensed 16/600，原样、字距 0（确认框标题是汉字与专名，不经 Cap） */
 .ss-confirm__title {
   font-family: var(--font-cond);
-  font-size: var(--size-body);
-  font-weight: 700;
-  letter-spacing: var(--track-head);
+  font-size: var(--size-head);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: var(--leading-head);
 }
 
 .ss-confirm__body {
-  margin-top: var(--space-sm);
+  margin-top: var(--space-xs);
   font-family: var(--font-ui);
   font-size: var(--size-body);
   line-height: var(--leading-body);
+  color: var(--ink-mute);
 }
 
-/* 条件性警告段：有才出现 */
-.ss-confirm__warning {
+/* 路径：等宽 12 ink 字，不垫底色块——等宽字已经把它和正文分开（2026-09-25 真机走查，色块审视）。
+   V4 不再用墨底铭牌——墨面只有两义 */
+.ss-confirm__nameplate {
   margin-top: var(--space-sm);
-  padding: var(--space-sm);
-  border: 1px solid var(--hairline);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-label);
+}
+
+.ss-confirm__path {
+  overflow-wrap: anywhere;
+}
+
+.ss-confirm__meta {
+  font-family: var(--font-ui);
+  color: var(--ink-faint);
+}
+
+.ss-confirm__safety {
+  margin-top: var(--space-sm);
   font-family: var(--font-ui);
   font-size: var(--size-caption);
   line-height: var(--leading-caption);
+  color: var(--ink-mute);
 }
 
 .ss-confirm__foot {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--space-md);
-  margin-top: var(--space-xl);
+  gap: var(--space-xs);
+  padding-top: var(--space-lg);
 }
 
-/* ===== 4.6 二级页面 SubPage：占满整窗，不保留侧栏 ===== */
-.ss-subpage {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--canvas);
-}
-
-.ss-subpage__bar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  box-sizing: border-box;
-  height: 56px;
-  padding: 0 var(--space-xxl);
-  border-bottom: 1px solid var(--hairline);
-  flex-shrink: 0;
-}
-
-/* 返回箭头：图标仍是 24px，命中区撑到 32×32。
-   左右各 -4px 的负边距把撑出来的部分吃回去——箭头的位置与页面名的位置都不动 */
-.ss-subpage__back {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  margin: 0 -4px;
-  padding: 0;
+/* 窄面板形态（Confirm inline，托盘）：触发它的那一行下面当场展开的一块凹面——recess、face 12 圆角、
+   内边距 10 12，无边无投影、无遮罩；标题 13 / 600 ink，后果 12 ink-mute（均衡折行，不让末行只剩一个字），
+   右对齐 取消（默认键紧凑）与主动作墨键（紧凑），键间 12、上距 8。外距归那一行 */
+.ss-confirm--inline {
+  width: auto;
+  max-width: none;
+  padding: 10px var(--space-sm);
   border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--ink);
-  cursor: pointer;
-}
-
-/* 二级页面名走 display 28：display 到 body 是三倍以上的跳跃（DESIGN「Layout」） */
-.ss-subpage__title {
-  font-family: var(--font-cond);
-  font-size: var(--size-display);
-  font-weight: 700;
-  letter-spacing: var(--track-display);
-  line-height: var(--leading-display);
-  text-transform: uppercase;
-}
-
-.ss-subpage__aside {
-  margin-left: auto;
+  border-radius: var(--radius-face);
+  background: var(--recess);
+  box-shadow: none;
   font-family: var(--font-ui);
-  font-size: var(--size-caption);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
   color: var(--ink-mute);
 }
 
-.ss-subpage__body {
-  flex-grow: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-.ss-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.ss-confirm--inline .ss-confirm__title {
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
   color: var(--ink);
 }
 
-.ss-mark--stacked {
-  flex-direction: column;
-  gap: 7px;
+.ss-confirm--inline .ss-confirm__body {
+  margin-top: 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  text-wrap: balance;
 }
 
-.ss-mark.is-dim {
-  color: var(--ink-faint);
+.ss-confirm--inline .ss-confirm__foot {
+  gap: var(--space-sm);
+  padding-top: var(--space-xs);
 }
 
-.ss-mark__icon {
-  position: relative;
+/* ===== 12. agent 图标 AgentIcon（DESIGN「agent 图标」）=====
+   单色图标格（size 方、居中）；取不到图标时降级成首字母方块 */
+.ss-mark__glyph {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
   flex-shrink: 0;
 }
 
-/* 首字母方块：图标缺席时的占位，永远和名字一起出现（§9.1） */
+/* 首字母方块：图标缺席时的占位，永远和名字一起出现。14 方、4 圆角、1px ctl-border 边、
+   Condensed 11/600（六档之外的唯一例外：14 方里放不下 12），字母经 Cap（mark 档）大写 */
 .ss-mark__box {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   box-sizing: border-box;
   width: 14px;
   height: 14px;
-  border: 1px solid var(--hairline);
-  border-radius: 0;
+  border: 1px solid var(--ctl-border);
+  border-radius: var(--radius-mark);
   font-family: var(--font-cond);
-  font-size: var(--size-micro);
+  font-size: 11px;
   font-weight: 600;
-  /* 方块是 14px 定高、居中排的，这里的行高不撑高度，保持 1 */
   line-height: 1;
 }
 
-/* 名字不大写——大写是结构的语言（§1.2）…… */
-.ss-mark__name {
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-/* ……唯一的例外是矩阵列头：那里 agent 名承担列标签的职能。
-   micro-cap＝12 / 600 / 0.96px / 行高 2.0——呼吸感靠行高，不靠字号 */
-.ss-mark--stacked .ss-mark__name {
+/* ===== 12.1 Cap：只给拉丁 run 套 Condensed + 大写 + 字距（DESIGN「字距：汉字永远 0」）=====
+   全应用的 text-transform: uppercase 与正字距只许出现在这几条规则里（lint-ui 的 cap-only）。
+   字号字重由所在位置给；汉字 run 不进 .ss-cap，字距 0、不变换 */
+.ss-cap {
   font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-align: center;
   text-transform: uppercase;
+  letter-spacing: var(--track-label);
 }
 
-/* ===== 6. 空态与忙碌态 ===== */
+.ss-cap-wrap--nav .ss-cap {
+  letter-spacing: var(--track-nav);
+}
+
+.ss-cap-wrap--head .ss-cap {
+  letter-spacing: var(--track-head);
+}
+
+/* 首字母方块里单个字母：只大写，字距 0（加字距会把字母挤出方块中线） */
+.ss-cap-wrap--mark .ss-cap {
+  letter-spacing: 0;
+}
+
+/* ===== 13. 空态与忙碌态 ===== */
 .ss-empty {
   display: flex;
   flex-direction: column;
@@ -588,7 +1414,8 @@
   line-height: var(--leading-body);
 }
 
-.ss-empty--scanning .ss-empty__description {
+/* 首次扫描（busy）：那一句退一档，13 ink-mute */
+.ss-empty.is-busy .ss-empty__description {
   color: var(--ink-mute);
   font-size: var(--size-caption);
 }
@@ -607,8 +1434,871 @@
   gap: var(--space-md);
 }
 
-/* 操作进行中：受影响控件置灰（§6） */
-.ss-busy {
-  opacity: var(--busy-dim);
+/* 空态图像（DESIGN「图像」）：图在上、不带边框、底透明，直接落在机面上；图 16 → 一句 8 → 次要说明 16 → 动作 */
+.ss-empty.has-art {
+  gap: 0;
+}
+
+.ss-empty__art {
+  display: block;
+  max-width: 100%;
+  margin-bottom: var(--space-md);
+}
+
+/* 三张都是 2x 资源，按显示尺寸原样画出、不裁切：扫描中 472×150，另两张 250×110 */
+.ss-empty__art--scanning {
+  width: 472px;
+  height: 150px;
+}
+
+.ss-empty__art--noDirs,
+.ss-empty__art--emptyFolder {
+  width: 250px;
+  height: 110px;
+}
+
+/* 图的上沿离机面上沿的距离（DESIGN「位置页 › 空态」表）：扫描中 190、没有 agent 目录 230、
+   来源里还没有 skill 270。减去上面已被占掉的高度（Empty above → --empty-above，默认 50＝紧跟页面头） */
+.ss-empty.has-art:has(> .ss-empty__art--scanning) {
+  padding-top: calc(190px - var(--empty-above, 50px));
+}
+
+.ss-empty.has-art:has(> .ss-empty__art--noDirs) {
+  padding-top: calc(230px - var(--empty-above, 50px));
+}
+
+.ss-empty.has-art:has(> .ss-empty__art--emptyFolder) {
+  padding-top: calc(270px - var(--empty-above, 50px));
+}
+
+.ss-empty.has-art .ss-empty__hint {
+  margin-top: var(--space-xs);
+}
+
+.ss-empty.has-art .ss-empty__actions {
+  margin-top: var(--space-md);
+}
+
+/* 有图时首次扫描：忙碌指示跟在那句话前面 */
+.ss-empty__busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* ===== 13.0 忙碌门槛 BusySlot（全应用一个 0.3 秒门槛，三种形态）===== */
+/* 触发键在等、还没过门槛（replace 形态）：只锁这一颗，外观不变；不另占一层 */
+.ss-locked {
+  display: contents;
   pointer-events: none;
+}
+
+/* dim 形态：包层一直在，忙了就锁，过了门槛变淡（键留在原位，不换字） */
+.ss-busyslot-dim.is-locked,
+.ss-busyslot-float.is-locked {
+  pointer-events: none;
+}
+
+.ss-busyslot-dim.is-dim {
+  opacity: var(--busy-dim);
+}
+
+/* float 形态：包层是浮窗的锚（要有盒子才量得到位置），不改键的排版 */
+.ss-busyslot-float {
+  display: inline-flex;
+}
+
+/* 浮起的「在忙」一窗不接指针：它在 React 树里是触发键（格子）的子孙，接了指针，悬停、右键就会经 portal
+   冒回那一格——指针落在它上面时，事件落到下面真正的那一格 */
+.ss-floattoast:has(> .ss-toast--busy) {
+  pointer-events: none;
+}
+
+/* replace 形态过了门槛：触发键原位换成 14 宽刻度 + 一句（13 ink-mute） */
+.ss-busyslot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* ===== 13.1 刚变化的格子闪一下：120ms 反色再回落（ink 底、点转 face）=====
+   格子（或任何刚变化的块）加上 data-flash 属性即播一次；里面的 StateDot 跟着 currentColor 转 face。
+   调用方在 animationend 时拿掉它，下次变化再加（公开钩子，同 data-checkrow） */
+[data-flash] {
+  animation: ss-flash var(--motion-fast) var(--ease-mech);
+}
+
+@keyframes ss-flash {
+  0%,
+  60% {
+    background-color: var(--ink);
+    color: var(--face);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+[data-flash] .ss-dot {
+  animation: ss-flash-dot var(--motion-fast) var(--ease-mech);
+}
+
+/* 闪的那一帧是墨底：不出悬停光晕——指针还停在格上时，墨底上会冒出一圈浅灰。
+   与悬停规则同一特异性、写在它后面 */
+[data-flash] .ss-dot-btn .ss-dot[data-hoverable] .ss-dot__halo {
+  opacity: 0;
+  transition: none;
+}
+
+@keyframes ss-flash-dot {
+  0%,
+  60% {
+    color: var(--face);
+  }
+}
+
+/* ===== 13.2 抽屉（DESIGN「抽屉（展开与收起）」）=====
+   拉手 DrawerHandle：名字前自成一列的一枚 10px 线形箭头（1.4 描边、ink-mute），没有键面、不抬起；
+   命中区 18 方（看不见）。收起朝右 ›，拉开时 260ms 弹簧转 90° 朝下 ˅（全应用一个方向）。
+   有勾选框的行平时不画，悬停这一行（data-drawer-row）、键盘焦点在这一行上、已拉开时才出；
+   没有勾选框的行（网关行，is-always）常显 */
+.ss-drawerhandle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-mute);
+  cursor: default;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+[data-drawer-row]:hover .ss-drawerhandle,
+html:not([data-input="pointer"]) [data-drawer-row]:focus-visible .ss-drawerhandle,
+html:not([data-input="pointer"]) [data-drawer-row]:has(:focus-visible) .ss-drawerhandle,
+html:not([data-input="pointer"]) .ss-drawerhandle:focus-visible,
+.ss-drawerhandle.is-open,
+.ss-drawerhandle.is-always {
+  opacity: 1;
+}
+
+/* 图形本是 ˅：收起转成 ›，拉开回到 ˅ */
+.ss-drawerhandle__glyph {
+  display: block;
+  transform: rotate(-90deg);
+  transition: transform var(--dur-drawer) var(--spring-slide);
+}
+
+.ss-drawerhandle.is-open .ss-drawerhandle__glyph {
+  transform: none;
+}
+
+/* 抽屉 Drawer：这一行下面拉出来的详情。外层管高度（0 ↔ 内容高，260ms 机械缓动；grid 行 0fr ↔ 1fr
+   让「auto 高」也能过渡），里层是详情本身：**不画底色块**——详情缩进到名字的左沿、夹在这一行和下一条
+   行线之间，归属已经清楚，灰块只是装饰（2026-09-25 真机走查：色块只给能操作的东西与要从正文里拎出来的话）。
+   上 6 下 12，抽屉下 1px row-line。左沿对齐这一行的名字：Drawer 的 inset（行首让出多少，写在 well 的外边距上） */
+.ss-drawer {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-drawer) var(--ease-mech);
+}
+
+.ss-drawer.is-open {
+  grid-template-rows: 1fr;
+}
+
+.ss-drawer__clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ss-drawer__room {
+  padding: 6px 0 var(--space-sm);
+  border-bottom: var(--border-row);
+}
+
+.ss-drawer__well {
+  min-width: 0;
+}
+
+/* 行线由「行 + 抽屉」这一组自己画（列表行）：抽屉不再画一条 */
+.ss-drawer.is-bare .ss-drawer__room {
+  border-bottom: 0;
+}
+
+/* 紧贴行：行自己已经留了下内边距 */
+.ss-drawer.is-flush .ss-drawer__room {
+  padding-top: 0;
+}
+
+/* ===== 13.3 滚动边缘渐隐 FadeViewport（EdgeFade.tsx；DESIGN「渐变只用于功能」）=====
+   上 / 下还有被裁掉的内容时，那一边 16px 从底色渐隐到透明（功能性渐变）；浮层里从 paper，机面上从 face，
+   侧栏里从 shell */
+.ss-layer__viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ss-layer__viewport::before,
+.ss-layer__viewport::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: var(--z-fade);
+  height: var(--fade-edge);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.ss-layer__viewport::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--paper), transparent);
+}
+
+.ss-layer__viewport::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--paper), transparent);
+}
+
+/* 机面上的滚动区（添加来源页的候选列表）：从 face 渐隐 */
+.ss-layer__viewport--face::before {
+  background: linear-gradient(to bottom, var(--face), transparent);
+}
+
+.ss-layer__viewport--face::after {
+  background: linear-gradient(to top, var(--face), transparent);
+}
+
+/* 侧栏（机壳）上的滚动区：从 shell 渐隐 */
+.ss-layer__viewport--shell::before {
+  background: linear-gradient(to bottom, var(--shell), transparent);
+}
+
+.ss-layer__viewport--shell::after {
+  background: linear-gradient(to top, var(--shell), transparent);
+}
+
+.ss-layer__viewport[data-fade-top]::before,
+.ss-layer__viewport[data-fade-bottom]::after {
+  opacity: 1;
+}
+
+/* ===== 15. 推入页 PushedPage（DESIGN「页面还是弹层」）=====
+   只替换机面：盖在机面上（--z-pushed），侧栏不动；内边距同机面（左右 24，含机面 1px 边）；页面头同位置页
+   （上 15、高 34，限宽 776）；在机面里从右推入、返回滑回，--dur-push 机械缓动（减少动效时直接切换） */
+.ss-pushed {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-pushed);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 0 calc(var(--space-xl) - 1px);
+  background: var(--face);
+  animation: ss-push-in var(--dur-push) var(--ease-mech) both;
+}
+
+.ss-pushed.is-leaving {
+  animation: ss-push-out var(--dur-push) var(--ease-mech) both;
+}
+
+@keyframes ss-push-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes ss-push-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 页面头（PageHead）：不被下面的内容压矮，与内容同宽 776 */
+.ss-pushed > .page-head {
+  flex-shrink: 0;
+  max-width: 776px;
+}
+
+/* `←` 图标键 28 + 10 + 页面名 */
+.ss-pushed__lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 页面头下的内容：铺满余下的高度，哪一块滚动由内容自己定 */
+.ss-pushed__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 贴底一行：高 60、上 1px hairline（横贯机面：抵掉机面左右内边距 23）、face 底；
+   主动作右对齐到内容右沿 776（百分比内边距按推入页内容宽算） */
+.ss-pushed__foot {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: 60px;
+  margin: 0 calc(1px - var(--space-xl));
+  padding: 0 calc(100% - 776px + var(--space-xl) - 1px) 0 calc(var(--space-xl) - 1px);
+  border-top: var(--border-structure);
+  background: var(--face);
+}
+
+/* ===== 16. 输入框 TextField（DESIGN「输入框」）=====
+   凹面：recess 底、1px hairline 边、control 7、高 28、左右 10、13 号字、占位 ink-mute；聚焦边转 ink-mute。
+   搜索形态：放大镜 16 在框内左侧（间距 8），右端空着写快捷键提示（12 tabular ink-faint）、有字换成 ✕ 清除（命中 24） */
+.ss-textfield {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--recess);
+  color: var(--ink-mute);
+  cursor: text;
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-textfield:focus-within {
+  border-color: var(--ink-mute);
+}
+
+/* 右端的清除键自带 24 命中区、快捷键提示自带右内边距 6：框的右内边距收到 4 */
+.ss-textfield--search {
+  padding-right: var(--space-xxs);
+}
+
+.ss-textfield__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+}
+
+.ss-textfield__input::placeholder {
+  color: var(--ink-mute);
+}
+
+/* 聚焦由框的边说，不再叠外框 */
+.ss-textfield__input:focus-visible {
+  outline: none;
+}
+
+.ss-textfield__key {
+  flex-shrink: 0;
+  padding-right: 6px;
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+.ss-textfield__clear {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--hit-min);
+  height: var(--hit-min);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-mute);
+  cursor: default;
+}
+
+.ss-textfield__clear:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* ===== 17. 菜单 Menu / MenuItem（DESIGN「浮层：下拉」；裁决：项高 30、13 号字）=====
+   一项一行：悬停与键盘高亮 surface、control 7、左右内缩 4（面板里 6，文字左沿对齐面板的 16）；左右内距 10。
+   单选：当前项前 ✓（占 16 一格，没打勾的文字照样对齐）；多选：勾选框 14，没勾的名字 ink-mute。
+   副行 12 ink-mute、可折行（原因写全）。菜单宽随内容、不设定宽（最宽由 maxWidth 给） */
+.ss-menulist {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: max-content;
+  padding: var(--space-xxs) 0;
+}
+
+.ss-menulist--panel {
+  width: auto;
+  padding: 0;
+}
+
+/* 一句问话（`notion 有 3 份，写进哪一份？`）：13 ink，左沿对齐项的文字，不是可点的项 */
+.ss-menulist__title {
+  padding: 6px 14px;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+}
+
+.ss-menuitem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  min-height: 30px;
+  margin: 0 var(--space-xxs);
+  padding: var(--space-xxs) 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-menulist--panel .ss-menuitem {
+  margin: 0 6px;
+}
+
+.ss-menuitem:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+/* 键盘移到的那一项同悬停；指针操作时程序放的焦点不画（src/inputModality.ts） */
+.ss-menuitem:focus-visible {
+  outline: none;
+}
+
+html:not([data-input="pointer"]) .ss-menuitem:focus-visible {
+  background: var(--surface);
+}
+
+/* 单选：✓ 一格 16 + 4 */
+.ss-menuitem--radio {
+  gap: var(--space-xxs);
+}
+
+.ss-menuitem__tick {
+  display: inline-flex;
+  flex-shrink: 0;
+  justify-content: center;
+  width: 16px;
+}
+
+.ss-menuitem__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.ss-menuitem__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ss-menuitem__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-menuitem--check:not(.is-on) .ss-menuitem__name {
+  color: var(--ink-mute);
+}
+
+.ss-menuitem:disabled .ss-menuitem__name {
+  color: var(--ink-faint);
+}
+
+.ss-menuitem__sub {
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: normal;
+}
+
+/* ===== 18. 勾选行 CheckRow 与画出来的方框 CheckMark（DESIGN「勾选框」）=====
+   方框是 span、吃不到 :disabled：行（按钮）禁用时同 Checkbox 的禁用——平贴 hairline、透明底、无投影；
+   勾上的退到 ctl-border 底 */
+:disabled > .ss-checkmark {
+  border-color: var(--hairline);
+  background: transparent;
+  box-shadow: none;
+}
+
+:disabled > .ss-checkmark.is-on,
+:disabled > .ss-checkmark.is-mixed {
+  border-color: transparent;
+  background: var(--ctl-border);
+}
+
+/* 整行是命中区：list 一行 34（模型列表）、grid 一格 36（设置的三列）；框 → 图标 → 名字各 10。
+   悬停 surface 底（control 7，左右内距 8——行的底比文字左沿外扩 8，放它的容器负责让出）；方框随行「手靠近」 */
+.ss-checkrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--row-h);
+  padding: 0 var(--space-xs);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-checkrow--grid {
+  height: 36px;
+}
+
+.ss-checkrow:hover:not(:disabled),
+.ss-checkrow.is-noted {
+  background: var(--surface);
+}
+
+/* 不可选：图标（currentColor）和名字一起退到 ink-faint，不回应悬停 */
+.ss-checkrow:disabled {
+  color: var(--ink-faint);
+}
+
+.ss-checkrow:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+/* 禁用时原因提示框的包层占满行宽：整行都能悬停出说明 */
+.ss-tipwrap:has(> .ss-checkrow) {
+  display: flex;
+  width: 100%;
+}
+
+.ss-checkrow__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.ss-checkrow__name {
+  overflow: hidden;
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-checkrow__trailing {
+  display: flex;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+}
+
+/* ===== 19. 列表行 ListRow（DESIGN「网关」「添加来源」同一骨架）=====
+   [勾选 24] [拉手 18 · 6] 名字 15 / 第二行 12 ink-mute（上距 3）[行尾动作列，键间 4、左距 12]；
+   上下 10。整行可点（有抽屉时）：悬停 surface 行带，左右各外扩 8、文字起点不变、control 7；拉开着不出悬停带。
+   行与行之间 1px row-line，画在「行 + 抽屉」这一组的底下（最后一行不画） */
+.ss-listrow {
+  border-bottom: var(--border-row);
+}
+
+.ss-listrow:last-child {
+  border-bottom: 0;
+}
+
+.ss-listrow__main {
+  display: flex;
+  align-items: center;
+  margin: 0 calc(var(--space-xs) * -1);
+  padding: 10px var(--space-xs);
+  border-radius: var(--radius-control);
+  cursor: default;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-listrow__main[data-drawer-row]:hover,
+.ss-listrow.is-highlighted .ss-listrow__main {
+  background: var(--surface);
+}
+
+.ss-listrow.is-open .ss-listrow__main[data-drawer-row]:hover {
+  background: none;
+}
+
+/* 勾选格与拉手格：与第一行名字同高、居中 */
+.ss-listrow__check,
+.ss-listrow__handle {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  align-self: flex-start;
+  height: calc(var(--size-body) * var(--leading-caption));
+}
+
+.ss-listrow__check {
+  justify-content: center;
+  width: 24px;
+}
+
+.ss-listrow__handle {
+  width: 18px;
+  margin-right: 6px;
+}
+
+.ss-listrow__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ss-listrow__title {
+  overflow: hidden;
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-listrow__sub {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  margin-top: 3px;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.ss-listrow__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-xxs);
+  margin-left: var(--space-sm);
+}
+
+/* 这一行没写成的灰面板：行下 8，与抽屉之间 12 */
+.ss-listrow__notice {
+  display: flex;
+  margin-top: var(--space-xs);
+  padding-bottom: var(--space-sm);
+}
+
+/* ===== 20. 区块小标 SectionLabel（裁决：Condensed 12 / 600 ink-mute，可选下 7 一条 hairline）===== */
+.ss-sectionlabel {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  font-family: var(--font-cond);
+  font-size: var(--size-label);
+  font-weight: 600;
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}
+
+.ss-sectionlabel.has-rule {
+  padding-bottom: 7px;
+  border-bottom: var(--border-structure);
+}
+
+.ss-sectionlabel__text {
+  min-width: 0;
+}
+
+.ss-sectionlabel__action {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* ===== 21. 胶囊行 ChipRow：行首标签（12 / 500 ink-mute，与第一行胶囊同高居中）+ 8 + 胶囊（间 6、行间 8）===== */
+.ss-chiprow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
+.ss-chiprow__label {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  font-weight: 500;
+  line-height: var(--control-h-chip);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.ss-chiprow__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) 6px;
+  min-width: 0;
+}
+
+/* 名字太长的胶囊由它自己截断（完整值在提示框里）：包层不许把它撑出这一行 */
+.ss-chiprow__chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ===== 22. 灰字一句 Note：13 ink-mute，可带一颗紧凑键（间 8）===== */
+.ss-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* ===== 23. 等宽读数 Mono：id、路径、版本号——Plex Mono 12 ink-faint、数字等宽、可拖选，放不下任意处折行 ===== */
+.ss-mono {
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.ss-mono b {
+  font-weight: 600;
+}
+
+.ss-mono--inherit {
+  font-size: inherit;
+  color: inherit;
+}
+
+.ss-mono--truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* ===== 14. 减少动效：状态变化即时发生，信息不减 =====
+   忙碌刻度不走（全部 ink-mute 静止），改由文字后的 `…` 每 500ms 增减一点表示还在忙 */
+@media (prefers-reduced-motion: reduce) {
+  /* 按下、松开、滑块位移的时长与按压变形在 tokens.css 的同一个媒体查询里置 0 / none；
+     这里再把各控件的颜色与影子过渡关掉：状态照常变，只是即时 */
+  .ss-btn,
+  .ss-iconbtn,
+  .ss-chip,
+  .ss-switch__knob,
+  .ss-switch__scribe,
+  .ss-checkbox,
+  .ss-tabs__thumb,
+  .ss-tabs__tab,
+  .ss-dot__halo,
+  .ss-drawerhandle,
+  .ss-drawerhandle__glyph,
+  .ss-drawer,
+  .ss-layer__viewport::before,
+  .ss-layer__viewport::after,
+  .ss-textfield,
+  .ss-menuitem,
+  .ss-checkrow,
+  .ss-listrow__main {
+    transition: none;
+  }
+
+  /* 推入页直接切换 */
+  .ss-pushed,
+  .ss-pushed.is-leaving {
+    animation: none;
+  }
+
+  .ss-spinner__lit,
+  .ss-spinner__glow {
+    display: none;
+    animation: none;
+  }
+
+  .ss-spinner__tick {
+    fill: var(--ink-mute);
+  }
+
+  /* 例行一行到点直接消失，不淡 */
+  .ss-toast.is-leaving {
+    transition: none;
+  }
+
+  /* 文字后跟三点，一次只露 1 / 2 / 3 / 2 点（每 500ms 一步）。框宽固定，文字不跟着抖。
+     调用方的文字有两种写法：紧跟的元素（<span>正在重启 Codex</span>）挂在那个元素后面；
+     裸文本（<Spinner/>正在比对）时 Spinner 是父元素里最后一个元素，挂在父元素末尾 */
+  .ss-spinner + *::after,
+  :has(> .ss-spinner:last-child)::after {
+    content: "...";
+    display: inline-block;
+    animation: ss-dots calc(var(--motion-dots) * 4) step-end infinite;
+  }
+
+  /* 裸文本那种父元素多是 flex + gap：三点成了单独一项，会和文字隔开一个 gap。
+     去掉父元素的 gap，间距改由 Spinner 自己的右外边距给 */
+  :has(> .ss-spinner:last-child) {
+    gap: 0;
+  }
+
+  :has(> .ss-spinner:last-child) > .ss-spinner {
+    margin-inline-end: var(--space-xs);
+  }
+
+  /* 反色闪退化为无：变化本身（点亮 / 熄灭）已即时可见 */
+  [data-flash],
+  [data-flash] .ss-dot {
+    animation: none;
+  }
 }

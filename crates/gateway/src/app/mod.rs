@@ -15,6 +15,8 @@ use symsync_core::codex_models::config::{self, ConfigError, Managed};
 use symsync_core::codex_models::settings::{self, GatewaySettings, ProviderSettings, SavedModel};
 
 pub const SERVICE_LABEL: &str = "com.zhengjiaqiao.symsync.gateway";
+/// Sophia 的 bundle identifier（tauri.conf.json 的 `identifier`）：路由后台服务挂在它名下
+pub const APP_BUNDLE_ID: &str = "com.zhengjiaqiao.symsync";
 /// 本功能放在 Codex 目录下的文件统一用这个前缀，恢复时据此精确清理
 pub const OWN_FILE_PREFIX: &str = "symsync-";
 const CATALOG_FILE: &str = "symsync-models.json";
@@ -87,7 +89,9 @@ pub struct Deps {
     pub list_processes: Get<io::Result<Vec<process::ProcessInfo>>>,
     /// 向进程发 SIGTERM
     pub terminate: Op<u32, io::Result<()>>,
-    /// Codex 桌面应用主进程的启动时间（unix 秒）；没在运行为 None
+    /// 打开 Codex 桌面应用（按应用标识，不写死路径）；打不开时带回系统的原话
+    pub launch_codex: Get<io::Result<()>>,
+    /// Codex 后台进程（app-server，配置是它读的）最早的启动时间（unix 秒）；没在运行为 None
     pub codex_started_at: Get<Option<u64>>,
     pub codex_version: Get<String>,
     pub now: Get<u64>,
@@ -117,11 +121,16 @@ pub struct ProviderView {
     /// 创建后不变；新命令用它指明操作哪一家
     pub id: String,
     pub name: String,
+    /// 网关短名（`ProviderSettings::short_name`）：网关行的名字，也是撞名模型在 Codex 目录里的后缀。
+    /// 界面只读它，不自己再算一份，Sophia 与 Codex 里看到的是同一个名字
+    pub short_name: String,
     pub base_url: String,
     /// "chat" 或 "responses"
     pub protocol: String,
     pub has_key: bool,
     pub models: Vec<ModelView>,
+    /// 上次拉取模型失败的原因（「地址无法访问」「密钥无效，请换一个密钥」…）；None 表示上次成功或还没拉过
+    pub unreachable: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -358,6 +367,7 @@ impl App {
                 provider.base_url = cleaned;
                 if changed {
                     provider.api_base = None; // 旧地址探明的接口基址作废
+                    provider.unreachable = None; // 无法连接是对旧地址的结论
                 }
                 if let Some(name) = name {
                     provider.name = name.to_owned();
@@ -495,11 +505,35 @@ impl App {
         self.merge_locked(id, ids, api_base)
     }
 
+    /// 某一家拉取模型失败：把原因记在这一家上并保存，模型列表和勾选原样保留
+    pub fn record_unreachable(&self, reason: &str) -> Result<(), AppError> {
+        let _guard = self.guard();
+        let id = self
+            .first_provider_id()?
+            .ok_or_else(|| AppError::new("invalid", "还没有填写网关地址"))?;
+        self.unreachable_locked(&id, reason)
+    }
+
+    pub fn record_unreachable_for(&self, id: &str, reason: &str) -> Result<(), AppError> {
+        let _guard = self.guard();
+        self.unreachable_locked(id, reason)
+    }
+
+    fn unreachable_locked(&self, id: &str, reason: &str) -> Result<(), AppError> {
+        let mut settings = self.load()?;
+        let provider = settings
+            .provider_mut(id)
+            .ok_or_else(|| unknown_provider(id))?;
+        provider.unreachable = Some(reason.to_owned());
+        self.save(&settings)
+    }
+
     fn merge_locked(&self, id: &str, ids: Vec<String>, api_base: &str) -> Result<(), AppError> {
         let mut settings = self.load()?;
         let provider = settings
             .provider_mut(id)
             .ok_or_else(|| unknown_provider(id))?;
+        provider.unreachable = None; // 拉到了就是连得上
         let api_base = api_base.trim().trim_end_matches('/');
         let api_base_changed =
             !api_base.is_empty() && provider.api_base.as_deref() != Some(api_base);
@@ -605,6 +639,10 @@ impl App {
     /// 钥匙串条目删了就回不来，界面负责在调用前向用户确认。
     pub fn remove_provider(&self, id: &str) -> Result<(), AppError> {
         let _guard = self.guard();
+        self.remove_locked(id)
+    }
+
+    fn remove_locked(&self, id: &str) -> Result<(), AppError> {
         let mut settings = self.load()?;
         if settings.provider(id).is_none() {
             return Err(unknown_provider(id));
@@ -770,6 +808,7 @@ impl App {
             .collect(),
             log_path: Some(log_dir.join("service.log").to_string_lossy().into_owned()),
             env: Default::default(),
+            associated_bundle: Some(APP_BUNDLE_ID.to_owned()),
         };
         let was_loaded = (self.deps.service_status)(SERVICE_LABEL)
             .map(|s| s.loaded)
@@ -920,6 +959,13 @@ impl App {
         Ok(report)
     }
 
+    /// 打开 Codex 桌面应用。只发出打开请求、不等它起来——界面自己轮询 `codex.running`，
+    /// 刚起来的 Codex 读的就是现在的设置。不读写 `~/.codex/config.toml`，所以不取 `self.lock`。
+    /// 失败时原样转述系统的话，不编
+    pub fn launch_codex(&self) -> Result<(), AppError> {
+        (self.deps.launch_codex)().map_err(|e| AppError::new("internal", e.to_string()))
+    }
+
     /// 接管 agents-manager 的现有配置：地址、模型、显示名、密钥、启用前默认模型原样带过来
     pub fn takeover(&self) -> Result<(), AppError> {
         let _guard = self.guard();
@@ -963,6 +1009,7 @@ impl App {
                     selected: m.selected,
                 })
                 .collect(),
+            unreachable: None,
         };
         match settings.provider_mut(&target) {
             Some(existing) => *existing = provider,
@@ -1109,9 +1156,11 @@ impl App {
             .map(|provider| ProviderView {
                 id: provider.id.clone(),
                 name: provider.name.clone(),
+                short_name: provider.short_name(),
                 base_url: provider.base_url.clone(),
                 protocol: provider.protocol().to_owned(),
                 has_key: (self.deps.get_key)(&provider.id).is_ok_and(|k| !k.trim().is_empty()),
+                unreachable: provider.unreachable.clone(),
                 models: provider
                     .models
                     .iter()

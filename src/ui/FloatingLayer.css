@@ -1,0 +1,28 @@
+/* 小浮层（FloatingLayer.tsx）：paper + 1px hairline 边、float 12 圆角 + float 投影，--z-layer。
+   外框只管位置、圆角与阴影；最大高度由定位规则给（placeLayer），超出的在里面的滚动区滚、边缘渐隐（ui.css 13.3）。
+   色值一律 var(--…)，唯一来源是 tokens.css */
+@import "../tokens.css";
+
+.ss-layer {
+  position: fixed;
+  z-index: var(--z-layer);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: var(--radius-float);
+  border: var(--border-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+}
+
+.ss-layer__scroll {
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 滚动区被压矮时，里面的项不跟着压扁（1px 的组间 hairline 会被压成 0） */
+.ss-layer__scroll > * {
+  flex-shrink: 0;
+}

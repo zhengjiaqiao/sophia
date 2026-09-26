@@ -1,6 +1,7 @@
 //! 内置 harness 表、已安装判定、项目候选、本体位置与目标发现
 use crate::fs::{entry_kind, normalize, real_path, EntryKind};
 use crate::models::{AgentLabels, Harness, Skill, Source, SourceKind, Target, TargetScope};
+use crate::skills::read_description;
 use crate::store::Settings;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -188,7 +189,9 @@ fn dir_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// 位置里的 skill：直接子项中非隐藏的真实目录，按名排序。
+/// 位置里的 skill：直接子项中非隐藏、**带 `SKILL.md`** 的真实目录，按名排序。
+/// 不带 `SKILL.md` 的目录不是 skill（agent 不会加载它）——同步工具、备份留下的文件夹（如
+/// `~/.claude/skills/synced`）不该出现在表里；与订阅来源「只认带 `SKILL.md` 的子目录」同一条规则。
 /// 软链一律不算——它是指向别处本体的链接，不是这个位置自己的 skill
 fn skills_in(dir: &Path) -> Vec<Skill> {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -197,13 +200,18 @@ fn skills_in(dir: &Path) -> Vec<Skill> {
     let mut names = BTreeSet::new();
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if !name.starts_with('.') && entry_kind(&e.path()) == EntryKind::Dir {
+        let path = e.path();
+        if !name.starts_with('.')
+            && entry_kind(&path) == EntryKind::Dir
+            && path.join("SKILL.md").is_file()
+        {
             names.insert(name);
         }
     }
     names
         .into_iter()
         .map(|name| Skill {
+            description: read_description(&dir.join(&name)),
             path: dir.join(&name),
             name,
         })
@@ -407,8 +415,9 @@ pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec
             if !matches!(entry_kind(&path), EntryKind::Symlink(_)) {
                 continue;
             }
-            // 坏链解析不出真实路径，指向文件的也不是 skill
-            let Some(real) = real_path(&path).filter(|r| r.is_dir()) else {
+            // 坏链解析不出真实路径；指向文件的、指向不带 `SKILL.md` 的目录的都不是 skill
+            // （与 `skills_in` 同一条规则：位置里的 skill 只认带 `SKILL.md` 的目录）
+            let Some(real) = real_path(&path).filter(|r| r.join("SKILL.md").is_file()) else {
                 continue;
             };
             if inside.iter().any(|k| real.starts_with(k)) {
@@ -432,11 +441,57 @@ pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec
             kind: SourceKind::External,
             skills: skills
                 .into_iter()
-                .map(|(name, path)| Skill { name, path })
+                .map(|(name, path)| Skill {
+                    description: read_description(&path),
+                    name,
+                    path,
+                })
                 .collect(),
             path,
         })
         .collect()
+}
+
+/// 订阅记录里、常规发现没找到的文件夹（用户在来源管理页选的，或外部位置的软链都撤了之后
+/// 记录里还留着的）：按手动位置读进来，名字与外部位置同一套取法（`folder_label`）。
+/// 这些文件夹是任意位置，里面未必都是 skill（外部位置的父目录可能就是 `~/Project`），
+/// 所以只认带 `SKILL.md` 的子目录。不在了、一个 skill 都没有、或与已知位置同一处（按
+/// `real_path`）的不产出。要在 `targets` 之前调用，整目录链接与外部位置才认得出它们
+pub fn subscribed_sources<'a>(
+    dirs: impl IntoIterator<Item = &'a PathBuf>,
+    known: &[Source],
+) -> Vec<Source> {
+    let mut keys: Vec<PathBuf> = known
+        .iter()
+        .map(|s| real_path(&s.path).unwrap_or_else(|| normalize(&s.path)))
+        .collect();
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Some(key) = real_path(dir) else {
+            continue;
+        };
+        if keys.contains(&key) || known.iter().any(|s| normalize(&s.path) == normalize(dir)) {
+            continue;
+        }
+        let skills: Vec<Skill> = skills_in(dir);
+        if skills.is_empty() {
+            continue;
+        }
+        keys.push(key);
+        out.push(Source {
+            id: normalize(dir).to_string_lossy().into_owned(),
+            path: normalize(dir),
+            kind: SourceKind::Manual,
+            label: folder_label(dir),
+            skills,
+        });
+    }
+    out
+}
+
+/// 任意文件夹的来源名：与外部位置同一套（应用名、跳过 `skills` 这类泛称）
+pub(crate) fn folder_label(path: &Path) -> String {
+    external_label(path)
 }
 
 /// 外部本体位置的标签是**用户认得的名字**，不是路径（DESIGN.md「来源的名字」）：
@@ -444,17 +499,42 @@ pub fn external_sources(_env: &Env, targets: &[Target], known: &[Source]) -> Vec
 /// 逐路径分量判断：字符串 `contains(".app")` 会被 `my.application` 骗到。
 /// 路径本身留在 `id` 和 `path` 字段里，界面放 `title`
 fn external_label(path: &Path) -> String {
-    for component in path.components() {
-        let Component::Normal(name) = component else {
-            continue;
-        };
-        let name = name.to_string_lossy();
-        // 嵌套应用包取最外层那个：它才是用户装的那个应用
-        if let Some(app) = name.strip_suffix(".app").filter(|a| !a.is_empty()) {
-            return app.to_owned();
+    let names: Vec<String> = path
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(n) => Some(n.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    // 应用包：取最外层那个 .app（嵌套时它才是用户装的那个应用）
+    if let Some(app) = names
+        .iter()
+        .find_map(|n| n.strip_suffix(".app").filter(|a| !a.is_empty()))
+    {
+        return app.to_owned();
+    }
+    // macOS 应用数据目录：`~/Library/Application Support/<应用>/…` 里的东西归那个应用
+    if let Some(i) = names.iter().position(|n| n == "Application Support") {
+        if let Some(app) = names.get(i + 1) {
+            return app.clone();
         }
     }
-    dir_name(path)
+    // 其余：从末尾往上找第一个不是「skills」这类泛称的分量。`~/.local/share/ego/skills`
+    // 该叫 ego 不该叫 skills——末尾一级几乎总是泛称，光取它三个来源会撞成一个名字
+    names
+        .iter()
+        .rev()
+        .find(|n| !is_generic_dir_name(n))
+        .cloned()
+        .unwrap_or_else(|| dir_name(path))
+}
+
+/// 目录名里没有信息量的那几个：标签跳过它们往上取
+fn is_generic_dir_name(name: &str) -> bool {
+    matches!(
+        name.trim_start_matches('.').to_ascii_lowercase().as_str(),
+        "skills" | "skill" | "plugins" | "internal-plugins" | "resources" | "share" | "data"
+    )
 }
 
 /// 所有可写目标：每个启用 harness 各自一列——全局目录、per-agent 目录、每个项目的项目目录。
@@ -570,6 +650,95 @@ pub fn enabled(installed: Vec<Harness>, settings: &Settings) -> Vec<Harness> {
         .collect()
 }
 
+/// 列表里最多显示几个 agent（DESIGN「设置页 › 最多 4 个」）：矩阵、工具行、添加页底部都按
+/// 4 个排版，再多就挤出窗口。唯一定义处，前端经 `list_harnesses` 拿到，不另写一个 4
+pub const MAX_SHOWN: usize = 4;
+
+/// 显示中的 agent 数：已安装且不在不显示名单里
+fn shown_count(installed: &[String], settings: &Settings) -> usize {
+    installed
+        .iter()
+        .filter(|id| !settings.disabled_harnesses.contains(id))
+        .count()
+}
+
+/// 按上限整理显示名单，返回是否改动。`installed` 按 agent 表的先后。
+/// - 新装的（不在 `known_installed` 里、也不在不显示名单里）：显示不满 `MAX_SHOWN` 个时照常出现，
+///   已满就记进不显示名单——不挤掉用户已经在看的
+/// - 新用户与升级上来的老数据 `known_installed` 为空，已安装的全算新装，于是按表先后留前 4 个
+/// - 兜底：仍超出（比如文件被手改过）就按表先后留前 4 个
+///
+/// 最后把 `known_installed` 换成这次的已安装集合：卸载了的从中移除，重装时再按新装算
+pub fn reconcile_shown(installed: &[String], settings: &mut Settings) -> bool {
+    let before = (
+        settings.disabled_harnesses.clone(),
+        settings.known_installed.clone(),
+    );
+    let mut shown = installed
+        .iter()
+        .filter(|id| {
+            settings.known_installed.contains(id) && !settings.disabled_harnesses.contains(id)
+        })
+        .count();
+    for id in installed {
+        if settings.known_installed.contains(id) || settings.disabled_harnesses.contains(id) {
+            continue;
+        }
+        if shown < MAX_SHOWN {
+            shown += 1;
+        } else {
+            settings.disabled_harnesses.push(id.clone());
+        }
+    }
+    let mut kept = 0;
+    for id in installed {
+        if settings.disabled_harnesses.contains(id) {
+            continue;
+        }
+        kept += 1;
+        if kept > MAX_SHOWN {
+            settings.disabled_harnesses.push(id.clone());
+        }
+    }
+    settings.known_installed = installed.to_vec();
+    before.0 != settings.disabled_harnesses || before.1 != settings.known_installed
+}
+
+/// 已显示满 `MAX_SHOWN` 个时再勾一个已安装的
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShownLimitReached;
+
+impl std::fmt::Display for ShownLimitReached {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "最多显示 {MAX_SHOWN} 个，先取消一个")
+    }
+}
+
+impl std::error::Error for ShownLimitReached {}
+
+/// 设置页勾选 / 取消勾选一个 agent。勾上已安装的而显示已满时拒绝，名单不动。
+/// 未安装的「恢复」（从不显示名单移除）不占名额：装上时再按新装的规则判
+pub fn set_shown(
+    installed: &[String],
+    settings: &mut Settings,
+    id: &str,
+    shown: bool,
+) -> Result<(), ShownLimitReached> {
+    let hidden = settings.disabled_harnesses.iter().any(|x| x == id);
+    if shown
+        && hidden
+        && installed.iter().any(|x| x == id)
+        && shown_count(installed, settings) >= MAX_SHOWN
+    {
+        return Err(ShownLimitReached);
+    }
+    settings.disabled_harnesses.retain(|x| x != id);
+    if !shown {
+        settings.disabled_harnesses.push(id.to_string());
+    }
+    Ok(())
+}
+
 /// 探测目录里至少要有一个条目不在通往 `global_dir` 的路径上。
 /// `npx skills add --agent '*'` 会给未安装的工具也建出 `~/.xxx/skills`，
 /// 这类只含 skills 路径的目录不算已安装。没有 global_dir 时存在即可
@@ -596,16 +765,17 @@ pub fn has_project_skill_dir(project: &Path, harnesses: &[Harness]) -> bool {
             .any(|d| project.join(d).is_dir())
 }
 
-/// Claude Code 记录的项目 ∪ 手动添加；只保留仍存在的，排除主目录与根目录。
-/// 记录的项目还要求含 skill 目录（去噪）；手动添加是用户明示，即便还没建目录也保留
-pub fn project_candidates(env: &Env, manual: &[PathBuf], harnesses: &[Harness]) -> Vec<PathBuf> {
-    let manual: BTreeSet<PathBuf> = manual.iter().cloned().collect();
-    let mut set = manual.clone();
-    set.extend(claude_recorded_projects(&env.home));
-    set.into_iter()
+/// 项目只来自自动检测（spec 2026-09-26-object-first-navigation R10）：Claude Code 记录的项目里，
+/// 仍存在、不是主目录 / 根目录 / 主目录下的隐藏目录、且含 skill 目录（去噪）的那些，去重排序。
+/// 旧版手动添加的项目（`projects.json`）不再并入；那个文件不改不删
+pub fn project_candidates(env: &Env, harnesses: &[Harness]) -> Vec<PathBuf> {
+    claude_recorded_projects(&env.home)
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .filter(|p| p != &env.home && p.parent().is_some() && p.is_dir())
-        .filter(|p| manual.contains(p) || !is_hidden_home_dir(&env.home, p))
-        .filter(|p| manual.contains(p) || has_project_skill_dir(p, harnesses))
+        .filter(|p| !is_hidden_home_dir(&env.home, p))
+        .filter(|p| has_project_skill_dir(p, harnesses))
         .collect()
 }
 
@@ -724,6 +894,166 @@ mod tests {
         assert_eq!(h.project_dir, None);
     }
 
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn shown(installed: &[String], settings: &Settings) -> Vec<String> {
+        installed
+            .iter()
+            .filter(|id| !settings.disabled_harnesses.contains(id))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn new_user_shows_first_four_installed_in_table_order() {
+        let installed = ids(&[
+            "claude-code",
+            "codex",
+            "cursor",
+            "cline",
+            "gemini-cli",
+            "amp",
+        ]);
+        let mut settings = Settings::default();
+        assert!(reconcile_shown(&installed, &mut settings));
+        assert_eq!(
+            shown(&installed, &settings),
+            ids(&["claude-code", "codex", "cursor", "cline"])
+        );
+        assert_eq!(settings.disabled_harnesses, ids(&["gemini-cli", "amp"]));
+        assert_eq!(settings.known_installed, installed);
+        // 再整理一次不动
+        assert!(!reconcile_shown(&installed, &mut settings));
+    }
+
+    #[test]
+    fn old_data_over_four_keeps_first_four_and_hides_the_rest() {
+        // 升级上来：没有 known_installed，已显示 6 个，其中 codex 早被用户关掉
+        let installed = ids(&[
+            "claude-code",
+            "codex",
+            "cursor",
+            "cline",
+            "gemini-cli",
+            "github-copilot",
+            "amp",
+        ]);
+        let mut settings = Settings {
+            disabled_harnesses: ids(&["codex"]),
+            ..Default::default()
+        };
+        assert!(reconcile_shown(&installed, &mut settings));
+        assert_eq!(
+            shown(&installed, &settings),
+            ids(&["claude-code", "cursor", "cline", "gemini-cli"])
+        );
+        assert_eq!(
+            settings.disabled_harnesses,
+            ids(&["codex", "github-copilot", "amp"])
+        );
+    }
+
+    #[test]
+    fn old_data_within_four_is_left_alone() {
+        let installed = ids(&["claude-code", "codex", "cursor"]);
+        let mut settings = Settings {
+            disabled_harnesses: ids(&["kiro-cli"]),
+            ..Default::default()
+        };
+        reconcile_shown(&installed, &mut settings);
+        assert_eq!(shown(&installed, &settings), installed);
+        assert_eq!(settings.disabled_harnesses, ids(&["kiro-cli"]));
+    }
+
+    #[test]
+    fn newly_installed_appears_only_while_under_four() {
+        let mut settings = Settings::default();
+        let three = ids(&["claude-code", "codex", "cline"]);
+        reconcile_shown(&three, &mut settings);
+        // 不满 4 个：新装的 cursor 自动出现
+        let four = ids(&["claude-code", "codex", "cursor", "cline"]);
+        assert!(reconcile_shown(&four, &mut settings));
+        assert_eq!(shown(&four, &settings), four);
+        // 已满：新装的 amp 排在表的前面也不挤掉已显示的，记进不显示名单
+        let five = ids(&["claude-code", "codex", "cursor", "amp", "cline"]);
+        assert!(reconcile_shown(&five, &mut settings));
+        assert_eq!(shown(&five, &settings), four);
+        assert_eq!(settings.disabled_harnesses, ids(&["amp"]));
+    }
+
+    #[test]
+    fn uninstalled_then_reinstalled_counts_as_new() {
+        let mut settings = Settings::default();
+        let four = ids(&["claude-code", "codex", "cursor", "cline"]);
+        reconcile_shown(&four, &mut settings);
+        // 卸掉 cursor：不再算已知
+        let three = ids(&["claude-code", "codex", "cline"]);
+        reconcile_shown(&three, &mut settings);
+        assert_eq!(settings.known_installed, three);
+        // 这期间用户勾上了 gemini-cli，满 4 个
+        let with_gemini = ids(&["claude-code", "codex", "cline", "gemini-cli"]);
+        reconcile_shown(&with_gemini, &mut settings);
+        // cursor 重装：已满，不自动出现
+        let all = ids(&["claude-code", "codex", "cursor", "cline", "gemini-cli"]);
+        reconcile_shown(&all, &mut settings);
+        assert_eq!(shown(&all, &settings), with_gemini);
+    }
+
+    #[test]
+    fn hand_edited_known_list_over_four_is_trimmed_in_table_order() {
+        let installed = ids(&["claude-code", "codex", "cursor", "cline", "amp"]);
+        let mut settings = Settings {
+            known_installed: installed.clone(),
+            ..Default::default()
+        };
+        assert!(reconcile_shown(&installed, &mut settings));
+        assert_eq!(shown(&installed, &settings).len(), MAX_SHOWN);
+        assert_eq!(settings.disabled_harnesses, ids(&["amp"]));
+    }
+
+    #[test]
+    fn set_shown_refuses_a_fifth_and_allows_after_unchecking_one() {
+        let installed = ids(&["claude-code", "codex", "cursor", "cline", "amp"]);
+        let mut settings = Settings::default();
+        reconcile_shown(&installed, &mut settings);
+        let before = settings.clone();
+        let refused = set_shown(&installed, &mut settings, "amp", true);
+        assert_eq!(refused, Err(ShownLimitReached));
+        assert_eq!(
+            refused.unwrap_err().to_string(),
+            "最多显示 4 个，先取消一个"
+        );
+        assert_eq!(settings, before);
+        // 勾一个已显示的：不算加一个
+        set_shown(&installed, &mut settings, "codex", true).unwrap();
+        assert_eq!(settings, before);
+        // 取消一个再勾
+        set_shown(&installed, &mut settings, "codex", false).unwrap();
+        set_shown(&installed, &mut settings, "amp", true).unwrap();
+        assert_eq!(
+            shown(&installed, &settings),
+            ids(&["claude-code", "cursor", "cline", "amp"])
+        );
+    }
+
+    #[test]
+    fn restoring_an_uninstalled_agent_does_not_take_a_slot() {
+        let installed = ids(&["claude-code", "codex", "cursor", "cline"]);
+        let mut settings = Settings {
+            disabled_harnesses: ids(&["kiro-cli"]),
+            ..Default::default()
+        };
+        reconcile_shown(&installed, &mut settings);
+        set_shown(&installed, &mut settings, "kiro-cli", true).unwrap();
+        assert!(settings.disabled_harnesses.is_empty());
+        // 装上时已满：照新装的规则，不自动出现
+        let five = ids(&["claude-code", "codex", "cursor", "cline", "kiro-cli"]);
+        reconcile_shown(&five, &mut settings);
+        assert_eq!(shown(&five, &settings), installed);
+    }
+
     #[test]
     fn enabled_filters_disabled_ids_keeping_order() {
         let e = env(Path::new("/home/u"), &[]);
@@ -777,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn project_candidates_merge_claude_json_and_manual_then_filter() {
+    fn project_candidates_come_only_from_claude_json_then_filter() {
         let t = TempTree::new();
         let home = t.root();
         let good = t.dir("Project/good");
@@ -799,8 +1129,10 @@ mod tests {
         std::fs::write(home.join(".claude.json"), json).unwrap();
         let e = env(&home, &[]);
         let harnesses = all_harnesses(&e);
-        let got = project_candidates(&e, std::slice::from_ref(&manual), &harnesses);
-        let mut want = vec![good, uni, manual];
+        let got = project_candidates(&e, &harnesses);
+        // 手动加过的目录（旧版 projects.json 里的）不再算项目，即便它有 skill 目录（spec R10）
+        assert!(!got.contains(&manual));
+        let mut want = vec![good, uni];
         want.sort();
         assert_eq!(got, want);
     }
@@ -822,7 +1154,7 @@ mod tests {
         );
         std::fs::write(home.join(".claude.json"), json).unwrap();
         let e = env(&home, &[]);
-        assert_eq!(project_candidates(&e, &[], &all_harnesses(&e)), vec![real]);
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![real]);
     }
 
     #[test]
@@ -884,7 +1216,7 @@ mod tests {
         let all = all_harnesses(&e);
         let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
         let hs = vec![pick("claude-code"), pick("weiboap")];
-        assert!(project_candidates(&e, &[], &hs).is_empty());
+        assert!(project_candidates(&e, &hs).is_empty());
 
         let got: Vec<(String, String, PathBuf, TargetScope)> = existing(targets(&e, &hs, &[], &[]))
             .into_iter()
@@ -925,7 +1257,7 @@ mod tests {
         // weiboap 的托管目录：有真实 skill
         let custom =
             t.dir("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom");
-        t.dir("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom/official-a");
+        t.skill("Library/Application Support/WeiboAP/claude-code-plugins-custom/skills/custom/official-a");
         let e = env(&home, &[]);
         let hs = vec![all_harnesses(&e)
             .into_iter()
@@ -953,7 +1285,7 @@ mod tests {
         let dir = t.dir(
             "Library/Application Support/WeiboAP/Data/agents/agent_1776/.internal-plugins/skills",
         );
-        t.dir(
+        t.skill(
             "Library/Application Support/WeiboAP/Data/agents/agent_1776/.internal-plugins/skills/x",
         );
         // 另一个助手不在库里 → 降级为目录名
@@ -999,7 +1331,9 @@ mod tests {
         let home = t.root();
         let wap = t.dir("Library/Application Support/WeiboAP");
         t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills");
-        t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/x");
+        t.skill(
+            "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/x",
+        );
         let e = env(&home, &[]);
         let hs = vec![all_harnesses(&e)
             .into_iter()
@@ -1041,19 +1375,19 @@ mod tests {
     fn sources_cover_every_kind_and_skip_empty_locations() {
         let t = TempTree::new();
         let home = t.root();
-        t.dir(".agents/skills/uni-skill");
-        t.dir(".claude/skills/claude-skill");
+        t.skill(".agents/skills/uni-skill");
+        t.skill(".claude/skills/claude-skill");
         t.dir(".codex/skills"); // 没有 skill → 不产出
         let agent_root = t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1");
         let agent_dir = t.dir(
             "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
         );
-        t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
+        t.skill("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
         let project = t.dir("Project/app");
-        t.dir("Project/app/.agents/skills/proj-skill");
+        t.skill("Project/app/.agents/skills/proj-skill");
         let manual = t.dir("Manual/box");
-        t.dir("Manual/box/manual-skill");
-        t.dir("Manual/box/.hidden"); // 隐藏目录不是 skill
+        t.skill("Manual/box/manual-skill");
+        t.skill("Manual/box/.hidden"); // 隐藏目录不是 skill
         t.file(&manual, "README.md"); // 文件不是 skill
 
         let e = env(&home, &[]);
@@ -1140,9 +1474,9 @@ mod tests {
     fn sources_count_only_real_directories_as_skills() {
         let t = TempTree::new();
         let home = t.root();
-        let outside = t.dir("Applications/ego-skills/ego-browser");
+        let outside = t.skill("Applications/ego-skills/ego-browser");
         let store = t.dir(".agents/skills");
-        t.dir(".agents/skills/real-skill");
+        t.skill(".agents/skills/real-skill");
         t.link(&store.join("ego-browser"), &outside); // 软链不是自己的 skill
         t.link(&store.join("rotten"), &home.join("gone"));
         // harness 全局目录满是软链（消费目录），一个真实目录都没有 → 不是本体位置
@@ -1159,6 +1493,7 @@ mod tests {
             vec![Skill {
                 name: "real-skill".into(),
                 path: store.join("real-skill"),
+                description: None,
             }]
         );
     }
@@ -1172,11 +1507,11 @@ mod tests {
         let agent_dir = t.dir(
             "Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
         );
-        let agent_skill = t.dir("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
-        let outside = t.dir("Applications/ego-skills/ego-browser");
+        let agent_skill = t.skill("Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills/agent-skill");
+        let outside = t.skill("Applications/ego-skills/ego-browser");
         let project = t.dir("Project/app");
         let store = t.dir("Project/app/.agents/skills");
-        t.dir("Project/app/.agents/skills/own");
+        t.skill("Project/app/.agents/skills/own");
         t.link(&store.join("from-agent"), &agent_skill); // 指向别的本体位置
         t.link(&store.join("external"), &outside); // 指向外部目录
 
@@ -1209,12 +1544,44 @@ mod tests {
             ),
             ("/Applications/Foo.app/Contents/Resources/skills", "Foo"),
             ("/Users/me/.local/share/ego/ego-skills", "ego-skills"),
-            // `.application` 不是应用包，不能被字符串匹配骗到
-            ("/x/my.application/skills", "skills"),
+            // 末尾是「skills」这类泛称时往上取：三个外部目录都叫 skills 就分不清了
+            ("/Users/me/.local/share/ego/skills", "ego"),
+            (
+                "/Users/me/Library/Application Support/WeiboAP/Data/agents/agent_1/.internal-plugins/skills",
+                "WeiboAP",
+            ),
+            // `.application` 不是应用包，不能被字符串匹配骗到；末尾泛称往上取到 my.application
+            ("/x/my.application/skills", "my.application"),
         ];
         for (path, want) in cases {
             assert_eq!(external_label(Path::new(path)), want, "{path}");
         }
+    }
+
+    #[test]
+    fn location_counts_only_directories_with_skill_md_as_skills() {
+        let t = TempTree::new();
+        let home = t.root();
+        let claude = t.dir(".claude/skills");
+        let mine = t.skill(".claude/skills/mine");
+        // 同步工具留下的文件夹：有内容，但没有 SKILL.md → 不是 skill
+        let synced = t.dir(".claude/skills/synced");
+        t.file(&synced, "state.json");
+        t.skill(".claude/skills/synced/nested");
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let hs = vec![all.iter().find(|h| h.id == "claude-code").unwrap().clone()];
+        let got = sources(&e, &hs, &[], &[]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].path, claude);
+        assert_eq!(
+            got[0].skills,
+            vec![Skill {
+                name: "mine".into(),
+                path: mine,
+                description: None,
+            }]
+        );
     }
 
     #[test]
@@ -1223,13 +1590,13 @@ mod tests {
         let home = t.dir("h");
         // 不在应用包里 → label 用最后一级目录名；两条链接同父目录 → 合并成一处
         let ego = t.dir("opt/ego-skills");
-        let browser = t.dir("opt/ego-skills/ego-browser");
-        let writer = t.dir("opt/ego-skills/ego-writer");
+        let browser = t.skill("opt/ego-skills/ego-browser");
+        let writer = t.skill("opt/ego-skills/ego-writer");
         // home 下也一样取目录名，不用 ~ 缩写
         let pack = t.dir("h/Applications/pack");
-        let far = t.dir("h/Applications/pack/far-skill");
+        let far = t.skill("h/Applications/pack/far-skill");
         let store = t.dir("h/.agents/skills");
-        let own = t.dir("h/.agents/skills/own");
+        let own = t.skill("h/.agents/skills/own");
 
         let claude = t.dir("h/.claude/skills");
         t.link(&claude.join("ego-browser"), &browser);
@@ -1238,6 +1605,9 @@ mod tests {
         t.link(&claude.join("own"), &own); // 指向已知本体位置 → 不合成
         t.link(&claude.join("rotten"), &home.join("gone")); // 坏链 → 不合成
         t.file(&claude, "notes.md"); // 真实文件 → 不合成
+                                     // 指向不带 SKILL.md 的目录（同步工具的文件夹之类）→ 不是 skill，不合成
+        let not_skill = t.dir("opt/sync-bucket");
+        t.link(&claude.join("synced"), &not_skill);
 
         let e = env(&home, &[]);
         let all = all_harnesses(&e);
@@ -1259,6 +1629,7 @@ mod tests {
                     skills: vec![Skill {
                         name: "far-skill".into(),
                         path: far,
+                        description: None,
                     }],
                 },
                 Source {
@@ -1270,10 +1641,12 @@ mod tests {
                         Skill {
                             name: "ego-browser".into(),
                             path: browser,
+                            description: None,
                         },
                         Skill {
                             name: "ego-writer".into(),
                             path: writer,
+                            description: None,
                         },
                     ],
                 },
@@ -1286,8 +1659,8 @@ mod tests {
         let t = TempTree::new();
         let home = t.dir("h");
         let ego = t.dir("opt/ego-skills");
-        t.dir("opt/ego-skills/ego-browser");
-        let outside = t.dir("opt/other/far-skill");
+        t.skill("opt/ego-skills/ego-browser");
+        let outside = t.skill("opt/other/far-skill");
         t.link(&ego.join("far-skill"), &outside); // ego 里还链着更外面的目录
                                                   // 项目的 .claude/skills 整个是指向 ego 的软链：读进去就是本体位置
         let proj = t.dir("h/proj");
@@ -1315,7 +1688,7 @@ mod tests {
     fn sources_dedupe_by_real_path_keeping_the_first() {
         let t = TempTree::new();
         let home = t.root();
-        t.dir(".agents/skills/uni-skill");
+        t.skill(".agents/skills/uni-skill");
         let alias = t.root().join("alias");
         t.link(&alias, &home.join(".agents/skills"));
         let e = env(&home, &[]);
@@ -1454,7 +1827,7 @@ mod tests {
         let t = TempTree::new();
         let home = t.root();
         let store = t.dir("Store/skills");
-        t.dir("Store/skills/a-skill");
+        t.skill("Store/skills/a-skill");
         let project = t.dir("Project/app");
         t.dir("Project/app/.claude"); // .claude/skills 整个是软链
         t.link(&project.join(".claude/skills"), &store);
@@ -1482,7 +1855,7 @@ mod tests {
         let t = TempTree::new();
         let home = t.root();
         let store = t.dir("Store/skills");
-        t.dir("Store/skills/a-skill");
+        t.skill("Store/skills/a-skill");
         // 项目的 .agents/skills 整个是指向 store 的软链，codex 与 cursor 共用它
         let project = t.dir("Project/app");
         t.dir("Project/app/.agents");
@@ -1521,7 +1894,7 @@ mod tests {
         let agent_dir = t.dir(&format!(
             "{weiboap}/Data/agents/agent_1/.internal-plugins/skills"
         ));
-        t.dir(&format!(
+        t.skill(&format!(
             "{weiboap}/Data/agents/agent_1/.internal-plugins/skills/a-skill"
         ));
         // 项目的 .claude/skills 整个是指向那个 agent 目录的软链
@@ -1614,16 +1987,12 @@ mod tests {
     }
 
     #[test]
-    fn broken_claude_json_only_drops_recorded_projects() {
+    fn broken_claude_json_gives_no_projects() {
         let t = TempTree::new();
         let home = t.root();
         std::fs::write(home.join(".claude.json"), "{not json").unwrap();
-        let manual = t.dir("m");
         t.dir("m/.claude/skills");
         let e = env(&home, &[]);
-        assert_eq!(
-            project_candidates(&e, std::slice::from_ref(&manual), &all_harnesses(&e)),
-            vec![manual]
-        );
+        assert!(project_candidates(&e, &all_harnesses(&e)).is_empty());
     }
 }

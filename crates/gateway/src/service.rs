@@ -26,6 +26,10 @@ pub struct Spec {
     pub log_path: Option<String>,
     /// 启动后进程的环境变量；按 key 排序写入。
     pub env: BTreeMap<String, String>,
+    /// 这项后台服务属于哪个应用（应用的 bundle identifier）。写成 `AssociatedBundleIdentifiers`
+    /// （`man launchd.plist`）：系统的「后台活动」通知与「登录项与扩展」据此显示应用名和图标，
+    /// 不写就只能显示可执行文件名（产品负责人：通知里写的是 symsync）
+    pub associated_bundle: Option<String>,
 }
 
 /// `plist` 校验失败的原因。
@@ -69,6 +73,9 @@ pub fn plist(spec: &Spec) -> Result<String, PlistError> {
     out.push_str("<plist version=\"1.0\">\n<dict>\n");
 
     write_key_string(&mut out, 1, "Label", &spec.label);
+    if let Some(bundle) = spec.associated_bundle.as_deref().filter(|b| !b.is_empty()) {
+        write_key_string(&mut out, 1, "AssociatedBundleIdentifiers", bundle);
+    }
 
     out.push_str("\t<key>ProgramArguments</key>\n\t<array>\n");
     write_element(&mut out, 2, "string", &spec.program);
@@ -382,6 +389,7 @@ mod tests {
             args: vec!["--config".into(), "/etc/agents-manager/config.json".into()],
             log_path: Some("/var/log/agents-manager/router.log".into()),
             env,
+            associated_bundle: Some("com.jiaqiao.agents-manager".into()),
         };
 
         let got = plist(&spec).unwrap();
@@ -392,6 +400,8 @@ mod tests {
 <dict>\n\
 \t<key>Label</key>\n\
 \t<string>com.jiaqiao.agents-manager.router</string>\n\
+\t<key>AssociatedBundleIdentifiers</key>\n\
+\t<string>com.jiaqiao.agents-manager</string>\n\
 \t<key>ProgramArguments</key>\n\
 \t<array>\n\
 \t\t<string>/usr/local/bin/agents-manager-router</string>\n\
@@ -569,6 +579,7 @@ mod tests {
             args: vec!["--flag".into()],
             log_path: Some("/tmp/foo.log".into()),
             env: BTreeMap::new(),
+            associated_bundle: None,
         }
     }
 

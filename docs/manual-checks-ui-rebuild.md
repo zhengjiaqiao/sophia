@@ -45,8 +45,8 @@ make dev
 
 **这条最容易被漏掉，因为界面上看不出来。**
 
-- [ ] **AC13** 给某来源建一条自动同步规则 → 在矩阵里点圆点**关闭**其中一个 skill → 检查 `~/Library/Application Support/.../settings.json`，该 skill 出现在 `excluded` 里
-- [ ] 再点开同一个格 → **`excluded` 里那一条消失了**
+- [ ] **AC13** 给某来源建一条自动同步规则 → 在矩阵里点圆点**关闭**其中一个 skill → 检查 `~/Library/Application Support/.../settings.json`，该 skill 出现在 `targetExcluded` 里这一格的目标 id 下（只记这个目标，别的位置、别的 agent 下没有）
+- [ ] 再点开同一个格 → **`targetExcluded` 里那一条消失了**
 - [ ] 触发一次自动同步（切窗口焦点或改动源目录）→ 链接仍在，没有被规则当成"已排除"而不再维护
 
 ## 六、删本体（AC14–AC16）—— 不可逆，逐条核对

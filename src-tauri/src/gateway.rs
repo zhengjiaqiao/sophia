@@ -172,19 +172,31 @@ pub async fn gateway_fetch_models(
         None => worker.provider_for_fetch(),
     })
     .await?;
-    let (ids, api_base) = runtime::fetch_models(&base_url, &key)
-        .await
-        .map_err(|e| e.to_string())?;
+    let fetched = runtime::fetch_models_detailed(&base_url, &key).await;
     // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
-    {
-        let _guard = state.config_lock.lock().await;
-        let worker = app.clone();
-        blocking(move || match provider_id {
-            Some(id) => worker.merge_fetched_models_for(&id, ids, &api_base),
-            None => worker.merge_fetched_models(ids, &api_base),
-        })
-        .await?;
+    let guard = state.config_lock.lock().await;
+    let worker = app.clone();
+    match fetched {
+        Ok((ids, api_base)) => {
+            blocking(move || match provider_id {
+                Some(id) => worker.merge_fetched_models_for(&id, ids, &api_base),
+                None => worker.merge_fetched_models(ids, &api_base),
+            })
+            .await?;
+        }
+        Err(failure) => {
+            // 无法连接是那一家的状态：先把原因记下来（界面重读 state 就能在那一行显示），再照旧报错
+            if let Some(reason) = failure.unreachable {
+                blocking(move || match provider_id {
+                    Some(id) => worker.record_unreachable_for(&id, reason),
+                    None => worker.record_unreachable(reason),
+                })
+                .await?;
+            }
+            return Err(failure.error.to_string());
+        }
     }
+    drop(guard);
     current_state(app).await
 }
 
@@ -269,6 +281,14 @@ pub async fn gateway_restart_codex(
 ) -> Result<RestartReport, String> {
     let app = app(&state)?;
     blocking(move || app.restart_codex()).await
+}
+
+/// 打开 Codex 桌面应用（按应用标识）。只发出打开请求，界面自己轮询 `codex.running` 等它起来。
+/// 它不写 `~/.codex/config.toml`，所以不取 `config_lock`
+#[tauri::command]
+pub async fn gateway_launch_codex(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let app = app(&state)?;
+    blocking(move || app.launch_codex()).await
 }
 
 #[tauri::command]

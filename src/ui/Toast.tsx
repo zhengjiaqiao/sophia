@@ -1,75 +1,320 @@
-import { useEffect } from "react";
-import type { ReactNode } from "react";
-import { Button } from "./Button.tsx";
-import { IconClose } from "./icons.tsx";
+import { useEffect, useState } from "react";
+import type { FocusEvent, ReactNode } from "react";
+import { AgentIcon } from "./AgentIcon.tsx";
+import { Button, IconButton } from "./Button.tsx";
+import { BusySlot, BusyToast } from "./BusySlot.tsx";
+import { IconAttention, IconCannot, IconClose, IconTick } from "./icons.tsx";
+import { motionMs } from "./motion.ts";
 
-/// 提示条（组件规范 §4.1）：右下角浮层，说「刚做完了什么」。
-/// 不排队——一次操作只汇总成一句，新的替换旧的，由上层保证。
+/// 提示小窗（DESIGN「反馈的两种形态」「提示条分两档」，画板 Feedback「提示条」）。
+///
+/// **浮起的小窗只表示一件事：会自己消失。** 两档，严重程度决定打断程度（①）：
+/// - `routine` 成功：纸窗（`paper` + 1px `hairline` 边 + `float` 12 圆角 + 浮层投影），单行高 32：
+///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是默认键紧凑 24；句首 ✓ 是勾选框里同一枚对勾 `IconTick`）
+/// - `notice` 做不成 / 部分失败：同一种纸窗，左侧 40px 记号栏放 ✓ / ⊘ / !；动作是默认键紧凑。
+///   墨色浮窗只给提示框（2026-09-25 起）：失败与成功靠句首记号与否定动词分，不靠颜色。
+///   哪一档由 `kind` 定（成功单行纸窗、其余带记号栏），没有第二个开关
+///
+/// 文字一律 13（`caption`）：动词 600、名字 400、数字 12 tabular——比表格正文 15 低一档，
+/// 反馈永远不比它说的内容更重（②）。主行 = **动词 + agent 图标 + 名字**；动词与触发它的动作一致，
+/// 失败态动词带否定（`没开启`）。单格失败原因本身是一整句时给 `message`，不拆动词。
+/// 名字后要接几段读数（`已添加 WeiboAP · 39 个 skill`、`不在列表里显示了 · 已建好的链接原样留着`）给 `trail`，
+/// 各段前一个 ` · `；`reason` 只给做不成 / 部分失败的原因，成功档不借它
+///
+/// **停留**（⑨）：成功无动作约 4 秒，带 `撤销` 约 6 秒，做不成 / 部分失败 8 秒；
+/// 悬停与键盘焦点在里面时停表，移开后重新计满；到点末尾 120ms 同一个淡出。
+/// 不给 `onDismiss` 的不自动消失。
+///
+/// **忙碌形态**（`<Toast busy="正在拆开" />`）：结果出来之前，同一个位置先说在忙什么——同成功的单行纸窗，
+/// 句首 14 宽刻度（`BusyToast`）；不计时、不自己走，忙完由调用方换成结果那一窗。门槛（0.3 秒）归调用方或 `BusySlot`。
+///
+/// **位置不归组件管**：浮起的一律经 `FloatingToast`（锚在触发处，`placeToast`）或
+/// `CornerToast`（右下，全应用一套）。带下一步的失败不用它，用内嵌灰面板 `NoticePanel`。
 
-/// 三类语气，四种形态：成功（带副行统计）、成功·多项（不带）、做不成、部分失败。
 export type ToastKind = "success" | "cannot" | "partial";
 
-/// 停留时长：成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿
+/// 停留时长：带动作（撤销）的成功 6 秒，做不成与部分失败 8 秒——后两种要多读一会儿；
+/// 没有动作的成功约 4 秒（`CELL_TOAST_DWELL_MS`）。悬停 / 焦点在里面时不计时
 export const TOAST_DWELL_MS: Record<ToastKind, number> = {
   success: 6000,
   cannot: 8000,
   partial: 8000,
 };
 
+/// 没有动作的成功（单格、`✓ 已生效`、`✓ 已是最新版本`……）的停留：约 4 秒，比带撤销的 6 秒短——
+/// 只是交代一声，结果本身已经画出来了
+export const CELL_TOAST_DWELL_MS = 4000;
+
+export interface ToastAgent {
+  id: string;
+  name: string;
+}
+
 export interface ToastAction {
   label: string;
   onClick: () => void;
-  /// 可选的 16px 图标（`撤销` 配 `IconUndo`）。**文字不省**：
-  /// 「撤销」「查看」是两件完全不同的事，只留图标认不出来
-  icon?: ReactNode;
+  /// 给了就禁用，原因进提示框（MCP 撤销：写入之后文件又被改过）
+  disabledReason?: string;
+  /// 点下去之后在等（MCP 撤销要等 core 从快照还原）：只锁这一颗，过了 0.3 秒门槛原位换成
+  /// 忙碌刻度 + 这一句（`正在撤销`，见 `BusySlot`）
+  busy?: string;
 }
 
 export interface ToastProps {
+  /// 成功是单行纸窗；做不成、部分失败带左侧记号栏
   kind: ToastKind;
-  /// 一句话总结。做不成时说原因，不说失败（§4.5）
-  message: ReactNode;
-  /// 副行等宽统计，如「新建了 1 个目录 · 1 条链接」
+  /// `写进` `开启` `清除` `删到废纸篓`；失败态用否定动词 `没开启`。
+  /// 只有给了整句 `message` 时才可以不给
+  verb?: string;
+  /// 整句（单格失败的原因本身就是一句话：`无法写入 Codex 的 skills 目录`），写在动词的位置
+  message?: ReactNode;
+  /// 动词后半截，写在 agent 图标之后（带方向的「从 [图标] 移除 名字」）；只有一截动词时不给
+  verbTail?: string;
+  /// agent 图标组（`ink`）。图标自带读屏名
+  agents?: ToastAgent[];
+  /// 动词与名字之间的其他记号（删原件那个白色小方块）
+  icons?: ReactNode;
+  /// 名字：至多两个逐个写（顿号分隔），超过两个写 `+N`
+  names?: string[];
+  /// 名字之外的读数：`3 个`、部分失败的 `2 ✓ · 1 ⊘`（用 `tally`）
+  reading?: ReactNode;
+  /// 部分失败的读数：成功几个、没成几个
+  tally?: { done: number; failed: number };
+  /// 名字之后 ` · ` 隔开的几段读数（`39 个 skill`）或补一句（`已建好的链接原样留着`）：成功档用，
+  /// 各段前一个 ` · `（ink-faint）
+  trail?: string[];
+  /// 做不成 / 部分失败的一句能行动的原因，接在主行 ` · ` 后
+  reason?: string;
+  /// 副行：等宽 12 读数（路径、条数，`ink-faint`），可拖选
   stats?: string;
-  /// 「撤销」只在该操作可逆时给；部分失败给「查看」跳待处理栏
+  /// 副行之下的展开内容（删原件的后果示意图与铭牌）；只给 notice
+  detail?: ReactNode;
+  /// 默认键紧凑 24。`撤销`
   action?: ToastAction;
-  /// 给了就到点自动消失
+  /// 次要的离开 Sophia 的动作：浅键，末尾自动带 ↗（`在访达中显示备份`）
+  secondary?: ToastAction;
+  /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉
   onDismiss?: () => void;
-  /// 手动关闭。busy 期间它照常可用（§6）
+  /// 停留时长（毫秒）；不给按 kind 与有没有动作取（见 `TOAST_DWELL_MS`）
+  dwellMs?: number;
+  /// notice 右端的 ×。busy 期间照常可用
   onClose?: () => void;
 }
 
-export function Toast({ kind, message, stats, action, onDismiss, onClose }: ToastProps) {
-  useEffect(() => {
-    if (!onDismiss) return;
-    const timer = setTimeout(onDismiss, TOAST_DWELL_MS[kind]);
-    return () => clearTimeout(timer);
-  }, [kind, onDismiss]);
+/// 记号栏：只有做不成与部分失败有（成功是单行纸窗，句首 ✓）
+const INDICATOR: Record<Exclude<ToastKind, "success">, { title: string; glyph: ReactNode }> = {
+  cannot: { title: "做不成", glyph: <IconCannot /> },
+  partial: { title: "部分失败", glyph: <IconAttention /> },
+};
 
-  const hasFoot = Boolean(action || stats || onClose);
-
+function Names({ names }: { names: string[] }) {
+  if (names.length <= 2) return <span className="ss-toast__names">{names.join("、")}</span>;
   return (
-    <div className="ss-toast" data-kind={kind} role="status">
-      <div className="ss-toast__message">{message}</div>
-      {hasFoot ? (
-        <div className="ss-toast__foot">
-          {action ? (
-            <Button variant="link" icon={action.icon} onClick={action.onClick}>
+    <span className="ss-toast__more" title={names.join("、")} aria-label={names.join("、")}>
+      +{names.length}
+    </span>
+  );
+}
+
+function Tally({ done, failed }: { done: number; failed: number }) {
+  return (
+    <span className="ss-toast__tally" aria-label={`${done} 个成功，${failed} 个没成`}>
+      <span className="ss-toast__num">{done}</span>
+      <IconTick />
+      <span className="ss-toast__sep">·</span>
+      <span className="ss-toast__num">{failed}</span>
+      <IconCannot size={12} />
+    </span>
+  );
+}
+
+/// 读数里的数量：数字等宽 12，量词随正文（`3 个`）。整段是一个元素，flex 的 gap 拆不开它
+export function ToastCount({ n, unit = "个" }: { n: number; unit?: string }) {
+  return (
+    <span className="ss-toast__count">
+      <span className="ss-toast__num">{n}</span>
+      {`\u00a0${unit}`}
+    </span>
+  );
+}
+
+/// 忙碌形态：只有一句「在忙什么」
+export interface ToastBusyProps {
+  busy: string;
+}
+
+export function Toast(props: ToastProps | ToastBusyProps) {
+  if ("busy" in props) return <BusyToast label={props.busy} />;
+  return <ResultToast {...props} />;
+}
+
+/// 键区：动作（默认键紧凑 24；禁用带原因；在等时原位忙碌）+ 次要的离开 Sophia 的浅键。两档共用
+function ActionKeys({ action, secondary }: Pick<ToastProps, "action" | "secondary">) {
+  return (
+    <>
+      {action ? (
+        action.disabledReason ? (
+          <Button size="compact" disabled disabledReason={action.disabledReason}>
+            {action.label}
+          </Button>
+        ) : (
+          <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
+            <Button size="compact" onClick={action.onClick}>
               {action.label}
             </Button>
-          ) : null}
-          {stats ? <span className="ss-toast__stats">{stats}</span> : null}
-          {onClose ? (
-            // 同错误横幅：关掉这条浮层不是一个动作，用 ×，文案挪到 aria-label 与 title
-            <Button
-              variant="link"
-              icon={<IconClose />}
-              ariaLabel="关闭"
-              title="关闭"
-              onClick={onClose}
-            />
+          </BusySlot>
+        )
+      ) : null}
+      {secondary ? (
+        secondary.disabledReason ? (
+          <Button variant="quiet" disabled disabledReason={secondary.disabledReason}>
+            {secondary.label}
+          </Button>
+        ) : (
+          <Button variant="quiet" onClick={secondary.onClick}>
+            {secondary.label}
+          </Button>
+        )
+      ) : null}
+    </>
+  );
+}
+
+function ResultToast(props: ToastProps) {
+  const {
+    kind,
+    verb,
+    message,
+    verbTail,
+    agents,
+    icons,
+    names,
+    reading,
+    tally,
+    trail,
+    reason,
+    stats,
+    detail,
+    action,
+    secondary,
+    onDismiss,
+    onClose,
+    dwellMs,
+  } = props;
+  // 没有动作（撤销）的成功只是一句告知，约 4 秒就走（同单格例行一行）；6 秒是留给点撤销的
+  const dwell =
+    dwellMs ?? (kind === "success" && !action ? CELL_TOAST_DWELL_MS : TOAST_DWELL_MS[kind]);
+  // 悬停 / 焦点在里面：停表；到点前最后 120ms：淡出中
+  const [held, setHeld] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    if (!onDismiss || held) return;
+    const timer = setTimeout(onDismiss, dwell);
+    // 末尾这一段淡出，时长取 `--motion-fast`（tokens.css 一处）
+    const fade = setTimeout(() => setLeaving(true), dwell - motionMs("--motion-fast"));
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(fade);
+    };
+  }, [dwell, onDismiss, held]);
+
+  // 悬停与键盘焦点在里面时停表（两档同一套），移开后重新计满
+  const hold = (on: boolean) => {
+    setHeld(on);
+    if (on) setLeaving(false);
+  };
+  const holdHandlers = onDismiss
+    ? {
+        onMouseEnter: () => hold(true),
+        onMouseLeave: () => hold(false),
+        onFocus: () => hold(true),
+        onBlur: (e: FocusEvent<HTMLDivElement>) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hold(false);
+        },
+      }
+    : {};
+  const leavingClass = leaving ? " is-leaving" : "";
+
+  const main = (
+    <>
+      {message !== undefined ? <span className="ss-toast__message">{message}</span> : null}
+      {verb ? <span className="ss-toast__verb">{verb}</span> : null}
+      {agents && agents.length ? (
+        <span className="ss-toast__agents">
+          {agents.map((a) => (
+            <AgentIcon key={a.id} id={a.id} name={a.name} labelled />
+          ))}
+        </span>
+      ) : null}
+      {icons}
+      {verbTail ? <span className="ss-toast__verb">{verbTail}</span> : null}
+      {names && names.length ? <Names names={names} /> : null}
+      {reading ? <span className="ss-toast__reading">{reading}</span> : null}
+      {tally ? <Tally {...tally} /> : null}
+      {trail?.map((part, i) => (
+        <span key={i} className="ss-toast__trail">
+          <span className="ss-toast__sep">·</span>
+          <span>{part}</span>
+        </span>
+      ))}
+      {reason ? (
+        <>
+          <span className="ss-toast__sep">·</span>
+          <span className="ss-toast__reason">{reason}</span>
+        </>
+      ) : null}
+    </>
+  );
+
+  if (kind === "success") {
+    return (
+      <div
+        className={`ss-toast ss-toast--routine${leavingClass}`}
+        data-kind={kind}
+        role="status"
+        {...holdHandlers}
+      >
+        <span className="ss-toast__mark" title="成功" aria-hidden="true">
+          <IconTick />
+        </span>
+        {main}
+        {action ? <span className="ss-toast__sep">·</span> : null}
+        <ActionKeys action={action} secondary={secondary} />
+      </div>
+    );
+  }
+
+  const indicator = INDICATOR[kind];
+  // 走到这里的都是做不成 / 部分失败
+  return (
+    <div
+      className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}${leavingClass}`}
+      data-kind={kind}
+      role="alert"
+      {...holdHandlers}
+    >
+      <div
+        className="ss-toast__indicator"
+        title={indicator.title}
+        role="img"
+        aria-label={indicator.title}
+      >
+        {indicator.glyph}
+      </div>
+      <div className="ss-toast__body">
+        <div className="ss-toast__main">
+          {main}
+          {action || secondary || onClose ? (
+            <span className="ss-toast__actions">
+              <ActionKeys action={action} secondary={secondary} />
+              {onClose ? <IconButton icon={<IconClose />} title="关闭" onClick={onClose} /> : null}
+            </span>
           ) : null}
         </div>
-      ) : null}
+        {stats ? <div className="ss-toast__stats ss-selectable">{stats}</div> : null}
+        {detail ? <div className="ss-toast__detail">{detail}</div> : null}
+      </div>
     </div>
   );
 }

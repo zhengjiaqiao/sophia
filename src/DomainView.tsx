@@ -1,457 +1,650 @@
-import { useEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
-import { MICRO_CAP, MONO, TAG_SQUARE } from "./ui/text";
-import { api } from "./api";
-import { viewOf } from "./cellState";
-import { compareBy, STATE_RANK, toggleSort, type SortState } from "./sort";
+/// Skills 的位置集合（用户级、某项目，或 `全部` 下的几个位置）→ 共享表格 `Matrix` 的视图
+/// （DESIGN「位置页：skills ｜ mcp」；spec 2026-09-26-object-first-navigation R6 R7）。
+///
+/// 只做折算：把合并后的行 × agent 列（`skillsView.mergeSkillPages`）折成「行 + 来源 + 格 + 选择行的点」，
+/// 每一格落在这一行自己位置的目标上。不止一个位置时名称后多一列 `位置`。点了什么
+/// 原样交回 SkillsTab（写操作、乐观更新、提示条都在那里）。格的语义取自 `cellState.viewOf`，
+/// 不在这里另写一份。
+///
+/// 位置页上没有来源行，来源的路径、规则、移除都在来源管理页（页面头 `管理来源`，SkillsTab 挂）。
+/// R9 去掉了按来源筛选：筛选框（⌘F）同时匹配名字与来源名，见 `rowFilter.matchesFilter`。
+/// 失效画在那一格上，点那一格就是重新链接；原件已不在的孤链照样成一行，点那一格就是清除。
+/// 孤链的批量入口是表格上方那一句（`OrphanNotice`，SkillsTab 放进 `hint` 插槽），不在这张表里。
+import { useEffect, useRef } from "react";
+import type { ReactNode } from "react";
+import Matrix, {
+  cellKey,
+  RevealLink,
+  SourceKeys,
+  type MatrixCellView,
+  type MatrixRowView,
+  type ColumnCheck,
+} from "./Matrix.tsx";
+import { originNames, originText } from "./originName.ts";
+import { matchesFilter } from "./rowFilter.ts";
+import { viewOf } from "./cellState.ts";
+import { blockedTipOf } from "./cellTip.ts";
+import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP } from "./orphanRows.ts";
 import {
-  AgentMark,
-  Button,
-  Chip,
-  Empty,
-  StateDot,
-  type ButtonSize,
-  type ButtonVariant,
-} from "./ui";
-import type { AutoLink, CellRef, DomainPage, DomainRow, Overview } from "./types";
+  columnOfTarget,
+  columnPress,
+  refAt,
+  refRowKey,
+  skillRowKey,
+  type PlacedOrphan,
+  type SkillRow,
+  type SkillsView,
+} from "./skillsView.ts";
+import { BusySlot, Button, Empty, Mono, Note, Tag, Tooltip, type EmptyArt } from "./ui/index.ts";
+import type { AnchorRect } from "./layerPlace.ts";
+import type { CellRef, CellState, Overview } from "./types.ts";
 
-/// 交给容器去清除的一批链接：行（用于结果说明）+ 要清的格，省略 cells = 整行
-export interface UnlinkTarget {
-  page: DomainPage;
-  row: DomainRow;
-  cells?: CellRef[];
+/// 一格的键（乐观更新、闪烁、就地提示都按它认格）：这一行（带位置）+ agent 列
+export const skillCellKey = (ref: CellRef) => cellKey(refRowKey(ref), columnOfTarget(ref.targetId));
+
+/// 批量操作：已选的 × 一个 agent（或全部）。`撤销` 键按条件给（DESIGN「提示条的位置」，2026-09-25
+/// 评审第二轮）：再按一次同一个点就恰好撤回时不给；`⌘Z` 始终可用
+export interface BatchPress {
+  keyId: string;
+  op: "link" | "unlink";
+  cells: CellRef[];
+  /// 做完之后再按一次同一个点，恰好把这一次撤回：移除（打勾＝选中的全有，全移除再按就全加回）、
+  /// 或加上时选中的原本一个都没有。这时提示条不给 `撤销`（同单格：再点一下就恢复了）；
+  /// 选中的里原本就有一部分时，再按会连原有的一起移除、回不到原来有有无无的样子，只有 `撤销` 是准确的退路
+  reversible: boolean;
 }
 
 export interface DomainViewProps {
   overview: Overview;
-  page: DomainPage;
-  /// 全部自动同步规则；本组件只列目标落在本域的那些
-  autoLinks: AutoLink[];
-  /// 经过筛选、要显示的行；排序在本组件里做
-  rows: DomainRow[];
-  busy: boolean;
-  /// 高亮的本体位置筛选片（空 = 不筛）
-  activeSources: Set<string>;
-  onToggleSource: (sourceId: string) => void;
-  /// 「全部」片：清掉本域的本体位置筛选
-  onClearSources: () => void;
-  /// 当前是否有筛选条件（文字或本体位置）——决定空表格该说哪一句
-  filtered: boolean;
-  /// 空态里的「清除筛选」：文字与本体位置一起清掉
+  /// 范围里各位置并成的一张表（列、全部行、位置名）
+  view: SkillsView;
+  /// 经过筛选、要显示的行
+  rows: SkillRow[];
+  /// 一个位置都还没有 agent 目录时空态里说的地方：`用户级` / 项目名 / `这几个位置`
+  placeLabel: string;
+  /// 格此刻该画成什么（乐观更新之后的状态）
+  stateOf: (ref: CellRef, actual: CellState) => CellState;
+  /// 只留这份确认之后、删除完成之前先藏起来的那一份
+  hiddenRows: Set<string>;
+  /// 同名行悬停读数（`3 个文件`）；没取到时为 undefined
+  dupReadout: Map<string, string>;
+  onDupHover: (row: SkillRow) => void;
+  /// 点「只留这份」（抽屉里的键，或右键菜单）：确认框锚在 `anchor` 下面
+  /// `at`：按下那一刻触发控件的位置——结果的提示小窗锚在这里，抽屉收起、行重排之后也还在原处
+  onKeepThis: (row: SkillRow, other: SkillRow, at: AnchorRect) => void;
+  /// 正在为哪一行体检（点了「只留这份」、确认框还没出来）：那一行的键原位忙碌、不随悬停收起
+  keepBusy?: string | null;
+  /// 孤链行（原件已不在的失效链接，见 orphanRows.ts）。本页全部，筛选在这里做
+  orphans: PlacedOrphan[];
+  /// 点孤链格：清除这条链接
+  onClearOrphan: (orphan: PlacedOrphan, targetId: string) => void;
+
+  filterText: string;
+  onFilterText: (text: string) => void;
   onClearFilter: () => void;
-  /// 空态里的「导入 skill」
-  onImport: () => void;
-  isSelected: (row: DomainRow) => boolean;
-  /// 行首复选框：交回当前显示顺序的行，供 Shift 区间选择算区间
-  onToggle: (row: DomainRow, shiftKey: boolean, ordered: DomainRow[]) => void;
-  onSelectAll: (selected: boolean) => void;
-  onChange: () => Promise<void>;
-  onError: (message: string) => void;
-  /// 把格交给容器：开启、关闭、只说明原因
-  onLink: (cells: CellRef[]) => Promise<void>;
-  onUnlink: (targets: UnlinkTarget[]) => Promise<void>;
-  onNotice: (text: string) => void;
+  /// 行悬停「打开 ↗」、空态 `在访达中显示 ↗`：在访达中显示
+  onReveal: (path: string) => void;
+  /// 右键「拷贝路径」
+  onCopyPath: (path: string) => void;
+  /// 页面头的 `+ 来源`：进添加来源页（多个位置时先选位置，`at` 是被按的键）
+  onAddSource: (at: HTMLElement | null) => void;
+  /// 页面头的 `管理来源`：进来源管理页；这个位置一个来源都没订阅时不给（键不出）
+  onManageSources?: (at: HTMLElement | null) => void;
+  /// bar 插槽（R4 的项目筛选片，见 Matrix）：原样传给 Matrix 的 `bar`
+  bar?: ReactNode;
+  /// 新手提示条的插槽：bar 插槽下、表头上（放 `<HintStrip flush>`，见 Matrix）
+  hint?: ReactNode;
+  /// 新手提示条的插槽：空态上方
+  emptyHint?: ReactNode;
+
+  selected: Set<string>;
+  onSelectionChange: (next: Set<string>) => void;
+  onCell: (ref: CellRef) => void;
+  onBatch: (press: BatchPress) => void;
+  onUndo: () => void;
+  /// 此刻有没有可撤销的操作（菜单「撤销」亮不亮）
+  canUndo: boolean;
+  shortcuts: boolean;
+
+  flash?: { keys: string[]; nonce: number };
+  /// 批量写入进行中：按下的那一项（过了 0.3 秒门槛旁边出忙碌指示 + 一句）
+  keyBusy?: { keyId: string; label: string } | null;
+  /// 点格之后真要等的（拆开）：过了 0.3 秒门槛被点那一格下方出忙碌指示 + 一句
+  cellBusy?: { rowKey: string; columnId: string; label: string } | null;
+  cellNotice?: { rowKey: string; columnId: string; text: string } | null;
+  onDismissCellNotice?: () => void;
+  rowToast?: { rowKey: string; at?: AnchorRect; node: ReactNode } | null;
+  keyToast?: { keyId: string; node: ReactNode } | null;
+  /// 单格成功：浮在被点那一格正下方
+  cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
+  /// 加完来源：浮在新来源那几片正下方
+  barToast?: { id: number; node: ReactNode } | null;
 }
 
-/// 没有格子的行排在所有状态之后
-const ABSENT_RANK = STATE_RANK.readOnly + 1;
+/// 提示框里的动词：格子只写「动词 · 快捷键」，动词带方向（`加到 Claude Code` / `从 Claude Code 移除`）——
+/// 「开启 Claude Code」会读成操作应用本身（DESIGN 冲突表）。原件格 `删除原件…`：`…` 表示还要确认一步
+const verbOf = (state: CellState, agent: string): string | undefined =>
+  state === "own"
+    ? "删除原件…"
+    : state === "linked"
+      ? `从 ${agent} 移除`
+      : state === "missing"
+        ? `加到 ${agent}`
+        : state === "broken"
+          ? "链接失效，原件还在 · 点一下重新链接"
+          : state === "readOnly"
+            ? `无法写入 ${agent} 的 skills 目录 · 点一下再试一次`
+            : state === "wholeLinked"
+              ? `${agent} 的 skills 文件夹整个是链接 · 点一下拆开`
+              : undefined;
 
-/// 拼路径：Windows 路径用反斜杠，其余用斜杠
-export const join = (dir: string, name: string) =>
-  `${dir}${dir.includes("\\") ? "\\" : "/"}${name}`;
-
-/// 区域标签与列头（组件规范 §1.2 的「区域标签」档）
-/// 等宽只给**路径与计数**（§1.2）。skill 名是当词读的，用正文档；
-/// 「本体位置」显示的是位置名时同样用正文档，显示的是路径时才随路径走等宽
-
-/// 这个位置名看着是不是一条路径
-const looksLikePath = (label: string) => /[\\/]/.test(label);
-/// 不可点的方标签：零圆角，因为圆角只给可点的东西（§3.1）
-
-/// busy 期间受影响控件的样子（§6）：置灰且点不动。
-/// **豁免的五处不要套它**：设置、筛选输入框、取消选择、提示条关闭、表头排序
-export const dim = (busy: boolean): CSSProperties | undefined =>
-  busy ? { opacity: "var(--busy-dim)", pointerEvents: "none" } : undefined;
-
-/// `Button` / `Chip` 的「禁用必须同时给出原因」在类型上是个联合，条件禁用得分两支写。
-/// 这一层只做那件事，省得每个调用点都展开成三元
-export function ActionButton({
-  disabled,
-  disabledReason,
-  ...rest
-}: {
-  children: ReactNode;
-  onClick?: () => void;
-  title?: string;
-  size?: ButtonSize;
-  variant?: ButtonVariant;
-  disabled?: boolean;
-  disabledReason?: string;
-}) {
-  return disabled ? (
-    <Button {...rest} disabled disabledReason={disabledReason ?? "正在执行上一步操作"} />
-  ) : (
-    <Button {...rest} />
+/// 按 agent 那一项的提示框：动词 + 数量 + 受影响的名字（前 5 个 +「等 N 个」）；原件、无法写入的注明不受影响
+export function affectedTip(
+  head: string,
+  names: string[],
+  notes: { names: string[]; why: string }[] = [],
+  /// 「所有 agent」那一项：同一个名字可能改好几处，写总处数
+  places?: number,
+): ReactNode {
+  // 名字列出前 5 个；只有被截掉时才补数量（数量与名字并排是重复）
+  const list = (xs: string[]) =>
+    `${xs.slice(0, 5).join("、")}${xs.length > 5 ? ` 等 ${xs.length} 个` : ""}`;
+  return (
+    <>
+      <div>{`${head}：${list(names)}${places !== undefined ? `（共 ${places} 处）` : ""}`}</div>
+      {/* 不会被改的：一类一行，写清楚为什么跳过（原因说清是哪个 agent） */}
+      {notes
+        .filter((n) => n.names.length > 0)
+        .map((n) => (
+          <div key={n.why}>{`跳过 ${list(n.names)}：${n.why}`}</div>
+        ))}
+    </>
   );
 }
 
-/// 一个域的整页：筛选片、自动同步行、行×目标的矩阵
-export default function DomainView({
-  overview,
-  page,
-  autoLinks,
-  rows: visible,
-  busy,
-  activeSources,
-  onToggleSource,
-  onClearSources,
-  filtered,
-  onClearFilter,
-  onImport,
-  isSelected,
-  onToggle,
-  onSelectAll,
-  onChange,
-  onError,
-  onLink,
-  onUnlink,
-  onNotice,
-}: DomainViewProps) {
-  // 表头排序；null = 后端原序（skill 名再本体位置）
-  const [sort, setSort] = useState<SortState | null>(null);
-  // 表头是「看起来是读的」：默认无箭头，鼠标停在哪一列才浮出淡箭头（§7）
-  const [hovered, setHovered] = useState<string | null>(null);
+export default function DomainView(props: DomainViewProps) {
+  const { overview, view, rows: visible, stateOf } = props;
+  const multi = view.places.size > 0;
 
-  const labelOf = (sourceId: string) =>
-    overview.sources.find((s) => s.id === sourceId)?.label ?? sourceId;
-
-  // skill 自带本体真实路径；查不到时回退到「本体位置目录 + 名字」
-  const skillPathOf = (sourceId: string, skill: string) => {
-    const source = overview.sources.find((s) => s.id === sourceId);
+  const sourceOf = (id: string) => overview.sources.find((s) => s.id === id);
+  const labelOf = (id: string) => sourceOf(id)?.label ?? id;
+  /// 原件完整路径：skill 自带；查不到时回退到「来源目录 + 名字」
+  const pathOf = (row: SkillRow) => {
+    const source = sourceOf(row.sourceId);
     return (
-      source?.skills.find((sk) => sk.name === skill)?.path ?? join(source?.path ?? sourceId, skill)
+      source?.skills.find((k) => k.name === row.skill)?.path ??
+      `${source?.path ?? row.sourceId}/${row.skill}`
     );
   };
 
-  const isExternal = (sourceId: string) =>
-    overview.sources.find((s) => s.id === sourceId)?.kind.type === "external";
+  // 同名：同一个位置里同一个 skill 名出现在不止一个来源下＝有几份原件（两个位置各装一份不算同名）
+  const dupKey = (row: SkillRow) => `${row.domainKey}|${row.skill}`;
+  const copies = new Map<string, SkillRow[]>();
+  for (const row of view.rows) {
+    if (props.hiddenRows.has(skillRowKey(row))) continue;
+    const list = copies.get(dupKey(row));
+    if (list) list.push(row);
+    else copies.set(dupKey(row), [row]);
+  }
 
-  const targetLabelOf = (targetId: string) =>
-    page.targets.find((t) => t.id === targetId)?.label ?? targetId;
-
-  /// 这条规则下一轮会**新建**的链接条数，不含已存在的（§11 的口径）
-  const pendingOf = (rule: AutoLink, local: string[]) =>
-    page.rows
-      .filter((row) => row.sourceId === rule.source && !rule.excluded.includes(row.skill))
-      .reduce(
-        (n, row) =>
-          n + row.cells.filter((c) => local.includes(c.targetId) && c.state === "missing").length,
-        0,
-      );
-
-  // 只列目标落在本域的规则，且每条只保留本域的那部分目标
-  const rules = autoLinks
-    .map((rule) => ({
-      rule,
-      local: rule.targets.filter((id) => page.targets.some((t) => t.id === id)),
-    }))
-    .filter((r) => r.local.length > 0);
-
-  /// 在系统文件管理器里定位并选中该 skill 的本体目录
-  const reveal = async (path: string) => {
-    try {
-      await api.revealInDir(path);
-    } catch (e) {
-      onError(String(e));
-    }
+  /// 这一行在这一列的格此刻的状态；这一行的位置里没有这个 agent、或没有这一格时为 null
+  const stateAt = (row: SkillRow, column: SkillsView["columns"][number]): CellState | null => {
+    const ref = refAt(row, column);
+    if (ref === null) return null;
+    const cell = row.cells.find((c) => c.targetId === ref.targetId)!;
+    return stateOf(ref, cell.state);
   };
 
-  // 写操作后统一重扫；失败只报错，不改本地状态
-  const run = async (act: () => Promise<unknown>) => {
-    try {
-      await act();
-      await onChange();
-    } catch (e) {
-      onError(String(e));
-    }
-  };
+  // ---- 列：通道条表头，第三层是这个 agent 下已加上的格数（● 与 ⦿ 都算），与 `名称 N` 同一范围
+  // （随当前筛选，DESIGN「计数口径」） ----
+  // 目录还不存在（虚线图标）：这一列在范围里的每个位置都还没有目录
+  const columns = view.columns.map((target) => {
+    const n = visible.filter((row) => {
+      if (props.hiddenRows.has(skillRowKey(row))) return false;
+      const s = stateAt(row, target);
+      return s === "linked" || s === "own";
+    }).length;
+    return {
+      id: target.id,
+      agentId: target.agentId,
+      name: target.label,
+      count: n,
+      tip: `${target.label} · ${n} 个已加上`,
+      missing: [...target.targets.values()].every((t) => !t.exists),
+    };
+  });
 
-  const cellOf = (row: DomainRow, targetId: string) =>
-    row.cells.find((c) => c.targetId === targetId) ?? null;
+  // ---- 来源名：同名来源用路径里能区分它们的那一级（与确认框同一个起名函数） ----
+  const namedIds = [...new Set(view.rows.map((row) => row.sourceId))];
+  const names = originNames(namedIds, overview.sources);
+  const nameOf = (id: string) => names.get(id) ?? { name: labelOf(id), seg: "" };
+  const originOf = (id: string) => originText(nameOf(id));
 
-  // 筛选片按本域全部行统计本体位置，筛选不改变片上的计数（§11）
-  const counts = new Map<string, number>();
-  for (const row of page.rows) counts.set(row.sourceId, (counts.get(row.sourceId) ?? 0) + 1);
-
-  // 表头全选框只看可见行：全选则勾，部分选中则半选
-  const allSelected = visible.length > 0 && visible.every((r) => isSelected(r));
-  const someSelected = !allSelected && visible.some((r) => isSelected(r));
-  const allRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (allRef.current) allRef.current.indeterminate = someSelected;
-  }, [someSelected]);
-
-  const rows = sort
-    ? [...visible].sort(
-        compareBy((row: DomainRow) => {
-          if (sort.key === "skill") return row.skill;
-          if (sort.key === "source") return labelOf(row.sourceId);
-          const cell = cellOf(row, sort.key);
-          return cell ? STATE_RANK[cell.state] : ABSENT_RANK;
-        }, sort.dir),
-      )
-    : visible;
-
-  /// 排序箭头：默认不占眼、hover 才淡淡浮出、激活转黑（§7）。
-  /// 位置留着不抽走，否则 hover 时整行会跳一下
-  const arrow = (column: string) => {
-    const active = sort?.key === column;
-    const down = active && sort?.dir === "desc";
-    return (
-      <svg
-        width="8"
-        height="8"
-        viewBox="0 0 8 8"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        aria-hidden="true"
-        style={{
-          flexShrink: 0,
-          visibility: active || hovered === column ? "visible" : "hidden",
-          color: active ? "var(--ink)" : "var(--ink-faint)",
-        }}
-      >
-        <path d={down ? "M1.4 2.8L4 5.4l2.6-2.6" : "M1.4 5.2L4 2.6l2.6 2.6"} />
-      </svg>
+  /// 同名占位（⊘）的那一格被表格里哪一行的来源占着：同名的另一份在这一列是加上的那一份
+  const occupantAt = (row: SkillRow, column: SkillsView["columns"][number]): string | undefined => {
+    const holder = (copies.get(dupKey(row)) ?? []).find(
+      (r) =>
+        r.sourceId !== row.sourceId &&
+        (stateAt(r, column) === "linked" || stateAt(r, column) === "own"),
     );
+    return holder ? originOf(holder.sourceId) : undefined;
   };
 
-  /// 表头一列。**busy 期间照常可点**——排序不写磁盘（§6 第三条细节）
-  const sortHeader = (column: string, content: ReactNode, stacked = false) => (
-    <button
-      type="button"
-      className="sort"
-      style={{
-        display: "inline-flex",
-        alignItems: stacked ? "flex-start" : "center",
-        gap: 5,
-        opacity: 1,
-      }}
-      onMouseEnter={() => setHovered(column)}
-      onMouseLeave={() => setHovered((prev) => (prev === column ? null : prev))}
-      onClick={() => setSort((prev) => toggleSort(prev, column))}
-    >
-      {content}
-      {arrow(column)}
-    </button>
-  );
+  /// 多位置时这一行的位置里没有这一列的 agent：空着、悬停说原因（不画「无格」短横）；
+  /// 位置里有这个 agent、只是这一行没有格的，照旧短横
+  const placeGap = (
+    domainKey: string,
+    column: SkillsView["columns"][number],
+  ): MatrixCellView | null =>
+    multi && !column.targets.has(domainKey)
+      ? {
+          dot: "none",
+          clickable: false,
+          blank: true,
+          tip: `${view.places.get(domainKey) ?? ""} 里没有 ${column.label} 的 skill 目录`,
+        }
+      : null;
 
-  /// 一个 agent 目录都还不存在：列照常在（§6 / AC17），用户才有入口把目录建出来
-  const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
-
-  const tableBody = (
-    <table className="matrix">
-      <thead>
-        <tr>
-          <th style={{ borderBottom: "1px solid var(--ink)" }}>
-            {/* 表头整行不置灰，只灰这个全选框（§6 第二条细节） */}
-            <input
-              ref={allRef}
-              type="checkbox"
-              checked={allSelected}
-              style={dim(busy)}
-              disabled={busy || visible.length === 0}
-              onChange={() => onSelectAll(!allSelected)}
-            />
-            {sortHeader("skill", <span style={MICRO_CAP}>skill</span>)}
-          </th>
-          <th style={{ borderBottom: "1px solid var(--ink)" }}>
-            {sortHeader("source", <span style={MICRO_CAP}>本体位置</span>)}
-          </th>
-          {page.targets.map((target) => (
-            <th
-              key={target.id}
-              style={{ borderBottom: "1px solid var(--ink)", textAlign: "center" }}
-            >
-              {sortHeader(
-                target.id,
-                // 列头＝图标 + 名字，**没有灯**（DESIGN「矩阵列头」）：目录不存在这件事
-                // 由点格那一刻的提示条说，写不进去的进待处理栏，列头不再说第二遍
-                <AgentMark
-                  id={target.scope.harnessId}
-                  name={target.label}
-                  title={target.path}
-                  layout="stacked"
-                />,
-                true,
-              )}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody style={dim(busy)}>
-        {rows.map((row) => {
-          const selected = isSelected(row);
-          return (
-            <tr
-              key={`${row.sourceId}|${row.skill}`}
-              style={selected ? { background: "var(--surface)" } : undefined}
-            >
-              <td>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  {/* 用 onClick 是为了拿到 shiftKey；选中态仍由上层状态决定 */}
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    disabled={busy}
-                    readOnly
-                    onClick={(e) => onToggle(row, e.shiftKey, rows)}
-                  />
-                  <span style={{ fontSize: "var(--size-body)" }}>{row.skill}</span>
-                </label>
-              </td>
-              <td className="path">
-                {isExternal(row.sourceId) && <span style={TAG_SQUARE}>外部</span>}
-                <Button
-                  variant="link"
-                  title={skillPathOf(row.sourceId, row.skill)}
-                  onClick={() => void reveal(skillPathOf(row.sourceId, row.skill))}
-                >
-                  <span style={looksLikePath(labelOf(row.sourceId)) ? MONO : undefined}>
-                    {labelOf(row.sourceId)}
-                  </span>
-                </Button>
-              </td>
-              {page.targets.map((target) => {
-                const cell = cellOf(row, target.id);
-                // 无格态：该 target 在这一行没有格，例如本体属于另一个域（§8）
-                if (!cell) {
-                  return (
-                    <td className="cell" key={target.id}>
-                      <StateDot dot="none" title="这个 agent 不在当前域" />
-                    </td>
-                  );
+  // ---- 行 ----
+  const matrixRows: MatrixRowView[] = visible
+    .filter((row) => !props.hiddenRows.has(skillRowKey(row)))
+    .map((row) => {
+      const key = skillRowKey(row);
+      const cells: Record<string, MatrixCellView | null> = {};
+      for (const column of view.columns) {
+        const ref = refAt(row, column);
+        if (ref === null) {
+          cells[column.id] = placeGap(row.domainKey, column);
+          continue;
+        }
+        const target = column.targets.get(row.domainKey)!;
+        const cell = row.cells.find((c) => c.targetId === ref.targetId)!;
+        const state = stateOf(ref, cell.state);
+        const shown = viewOf({ ...cell, state }, target, target.label, row.skill);
+        const verb = verbOf(state, target.label);
+        cells[column.id] = {
+          dot: shown.dot,
+          clickable: verb !== undefined,
+          tip:
+            verb ??
+            blockedTipOf(
+              state,
+              target.label,
+              row.skill,
+              shown.reason ?? "",
+              occupantAt(row, column),
+            ),
+        };
+      }
+      const dup = copies.get(dupKey(row)) ?? [];
+      const other = dup.length === 2 ? dup.find((r) => r.sourceId !== row.sourceId) : undefined;
+      const readout = props.dupReadout.get(key) || undefined;
+      const otherReadout = other
+        ? props.dupReadout.get(skillRowKey(other)) || undefined
+        : undefined;
+      const path = pathOf(row);
+      const description = sourceOf(row.sourceId)?.skills.find(
+        (k) => k.name === row.skill,
+      )?.description;
+      return {
+        key,
+        name: row.skill,
+        place: view.places.get(row.domainKey),
+        origin: {
+          id: row.sourceId,
+          label: originOf(row.sourceId),
+          split: nameOf(row.sourceId).seg ? nameOf(row.sourceId) : undefined,
+          path,
+          onReveal: () => props.onReveal(path),
+        },
+        cells,
+        // 判断用的读数不越过面板右沿：进 ×2 的提示框，两份同时列出（DESIGN「表格 = 面板」）。
+        // ×2 是名字后的纯文字记号，排在拉手之前；点它拉开抽屉，`只留这份` 在抽屉里
+        mark:
+          dup.length > 1 ? (
+            <span onMouseEnter={() => props.onDupHover(row)} onFocus={() => props.onDupHover(row)}>
+              <Tag
+                tone="count"
+                label={`同名：有 ${dup.length} 份`}
+                tip={
+                  other === undefined ? undefined : (
+                    <>
+                      <div>这份 {readout ?? "…"}</div>
+                      <div>
+                        {originOf(other.sourceId)} 那份 {otherReadout ?? "…"}
+                      </div>
+                    </>
+                  )
                 }
-                const view = viewOf(cell, target, target.label, row.skill);
-                const ref: CellRef = {
-                  sourceId: row.sourceId,
-                  skill: row.skill,
-                  targetId: target.id,
-                };
-                // 先判状态再决定做什么：不能点的四种画得和「未开启」一样，
-                // 凭动作数组为空统一说一句话对它们全是错的（§8）
-                const click = () => {
-                  if (!view.clickable) {
-                    if (view.reason) onNotice(view.reason);
-                    return;
-                  }
-                  if (view.dot === "linked") void onUnlink([{ page, row, cells: [ref] }]);
-                  else void onLink([ref]);
-                };
-                const title = view.clickable
-                  ? view.dot === "linked"
-                    ? `关掉 ${row.skill} 在 ${target.label} 下的链接`
-                    : `在 ${target.label} 下开启 ${row.skill}`
-                  : view.reason;
-                return (
-                  <td className="cell" key={target.id}>
-                    <StateDot
-                      dot={view.dot}
-                      title={title}
-                      onClick={busy ? undefined : click}
-                      label={`${row.skill} · ${target.label}`}
-                    />
-                  </td>
-                );
-              })}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+              >
+                ×{dup.length}
+              </Tag>
+            </span>
+          ) : undefined,
+        dupGroup: dup.length > 1 ? dupKey(row) : undefined,
+        // 点名字 / ×2 / 拉手拉开抽屉：描述、路径 + 打开 ↗、改于 … · N 个文件（读不到描述不写那一行）；
+        // 同名行末尾一颗 `只留这份`（名称格里不放键，名字不被挤成省略号）
+        detail: (
+          <SkillDetail
+            description={description}
+            path={path}
+            readout={readout}
+            onShow={() => props.onDupHover(row)}
+            onReveal={() => props.onReveal(path)}
+            keep={
+              other === undefined ? undefined : (
+                <KeepKey
+                  onKeep={(at) => props.onKeepThis(row, other, at)}
+                  label={`只留 ${originOf(row.sourceId)} 的 ${row.skill}`}
+                  busy={props.keepBusy === key}
+                />
+              )
+            }
+          />
+        ),
+        // 右键菜单：在访达中显示原件（＝`打开 ↗`）、拷贝路径（＝展开区里可选中的路径）、
+        // 只留这份…（只在同名行，走同一个锚定确认）
+        menu: (el) => [
+          { label: "在访达中显示原件", run: () => props.onReveal(path) },
+          { label: "拷贝路径", run: () => props.onCopyPath(path) },
+          "separator",
+          ...(other !== undefined && props.keepBusy !== key
+            ? [
+                {
+                  label: "只留这份…",
+                  run: () => {
+                    const r = el.getBoundingClientRect();
+                    const n = el.querySelector(".mx-row__name")?.getBoundingClientRect() ?? r;
+                    props.onKeepThis(row, other, {
+                      top: r.top,
+                      left: n.left,
+                      right: n.right,
+                      bottom: r.bottom,
+                    });
+                  },
+                },
+              ]
+            : []),
+        ],
+      };
+    });
+
+  // ---- 孤链行：名字 + 原件位置「不在了」，有孤链的格虚线环、点一下清除；勾不动 ----
+  // 没有真实来源可比对（伪来源 ORPHAN_ORIGIN 不是搜得到的来源名），筛选只按名字命中
+  const orphans = props.orphans.filter((o) => matchesFilter(props.filterText, o.skill, null));
+  for (const orphan of orphans) {
+    const cells: Record<string, MatrixCellView | null> = {};
+    for (const column of view.columns) {
+      const link = orphan.links.find((l) => columnOfTarget(l.targetId) === column.id);
+      cells[column.id] = link
+        ? { dot: "broken", clickable: true, tip: ORPHAN_TIP }
+        : placeGap(orphan.domainKey, column);
+    }
+    matrixRows.push({
+      key: orphan.key,
+      name: orphan.skill,
+      place: view.places.get(orphan.domainKey),
+      origin: {
+        id: orphan.key,
+        label: ORPHAN_ORIGIN,
+        path: orphan.pointedTo,
+        onReveal: () => undefined,
+        gone: true,
+      },
+      cells,
+      selectDisabledReason: ORPHAN_SELECT_REASON,
+    });
+  }
+
+  // ---- 选择行（D4）：已选的 × 每个 agent 一点 ----
+  const chosen = visible.filter(
+    (row) => props.selected.has(skillRowKey(row)) && !props.hiddenRows.has(skillRowKey(row)),
   );
+  // 每个 agent 列正下方一点：● ＝选中的在这里（按能改的格算）全都有，否则 ○；
+  // 点 ○ 补齐缺的，点 ● 全部移除。原件、受阻（无法写入、同名占位）的格不计入（DESIGN「选择行」）
+  const columnChecks: Record<string, ColumnCheck> = {};
+  const enabledPresses: { add: CellRef[]; remove: CellRef[]; checked: boolean }[] = [];
+  for (const target of view.columns) {
+    // 各行按自己位置的格算（`全部` 下选中的行可以分属几个位置）
+    const { linked, missing, own, blocked, targets } = columnPress(chosen, target, stateOf);
+    const checked = missing.length === 0 && linked.length > 0;
+    const notes = [
+      { names: own, why: `原件就在 ${target.label} 里` },
+      { names: blocked, why: `无法加到 ${target.label}` },
+    ];
+    const disabledReason =
+      targets.length > 0 && targets.every((t) => t.linkedWholeTo !== null)
+        ? `${target.label} 的 skills 整个文件夹是链接`
+        : linked.length + missing.length > 0
+          ? undefined
+          : own.length > 0 && blocked.length === 0
+            ? "这几个都是原件，不能在这里加上或移除"
+            : `这几个都无法加到 ${target.label}`;
+    if (disabledReason === undefined)
+      enabledPresses.push({ add: missing, remove: linked, checked });
+    columnChecks[target.id] = {
+      checked,
+      label: checked ? `选中的都从 ${target.label} 移除` : `选中的都加到 ${target.label}`,
+      tip: checked
+        ? affectedTip(
+            `从 ${target.label} 移除`,
+            linked.map((c) => c.skill),
+            notes,
+          )
+        : affectedTip(
+            `加到 ${target.label}`,
+            missing.map((c) => c.skill),
+            notes,
+          ),
+      disabledReason,
+      onToggle: () =>
+        props.onBatch(
+          checked
+            ? { keyId: target.id, op: "unlink", cells: linked, reversible: true }
+            : { keyId: target.id, op: "link", cells: missing, reversible: linked.length === 0 },
+        ),
+    };
+  }
+  // 「所有 agent」：每个能改的 agent 都全有才打勾；点空框全部加上，点打勾全部移除
+  const allChecked = enabledPresses.length > 0 && enabledPresses.every((p) => p.checked);
+  const allAdd = enabledPresses.flatMap((p) => p.add);
+  const allRemove = enabledPresses.flatMap((p) => p.remove);
+  const uniqNames = (cells: CellRef[]) => [...new Set(cells.map((c) => c.skill))];
+  const allAgents: ColumnCheck = {
+    checked: allChecked,
+    label: allChecked ? "选中的都从所有 agent 移除" : "选中的都加到所有 agent",
+    tip: allChecked
+      ? affectedTip("从所有 agent 移除", uniqNames(allRemove), [], allRemove.length)
+      : affectedTip("加到所有 agent", uniqNames(allAdd), [], allAdd.length),
+    disabledReason: enabledPresses.length === 0 ? "没有能加上或移除的" : undefined,
+    onToggle: () =>
+      props.onBatch(
+        allChecked
+          ? { keyId: "all", op: "unlink", cells: allRemove, reversible: true }
+          : { keyId: "all", op: "link", cells: allAdd, reversible: allRemove.length === 0 },
+      ),
+  };
+
+  // ---- 空态（DESIGN「位置页 › 空态」）：动作已在页面头的（`+ 来源`）不重复，只说现状 ----
+  const noAgentDirs =
+    view.columns.length === 0 ||
+    view.columns.every((c) => [...c.targets.values()].every((t) => !t.exists));
+  const query = props.filterText.trim();
+  const empty =
+    query !== "" ? (
+      <TableEmpty
+        text={`没有名字或来源里带「${query}」的 skill`}
+        action={{ label: "清除筛选", onClick: props.onClearFilter }}
+      />
+    ) : noAgentDirs ? (
+      <TableEmpty
+        text={`${props.placeLabel} 下还没有 agent 的 skill 目录`}
+        hint="加上第一个 skill 时会自动创建"
+        art="noDirs"
+      />
+    ) : (
+      <TableEmpty text="还没有 skill" art="emptyFolder" />
+    );
 
   return (
-    <div className="domain-group">
-      <h2>{page.label}</h2>
+    <Matrix
+      columns={columns}
+      rows={matrixRows}
+      originLabel="来源"
+      placeLabel={multi ? "位置" : undefined}
+      bar={props.bar}
+      hint={props.hint}
+      emptyHint={props.emptyHint}
+      nameLabel="名称"
+      nameTip={
+        multi
+          ? "列出这几个位置各个来源里的全部 skill，同一个 skill 装在两个位置就是两行。agent 自带的和插件带的不在这里，在「管理来源」里增删"
+          : "列出这个位置各个来源里的全部 skill，agent 自带的和插件带的不在这里。已经链接到这里的来源会自动加进来，在「管理来源」里增删"
+      }
+      nameCount={matrixRows.length}
+      dotWords="skill"
+      filterText={props.filterText}
+      onFilterText={props.onFilterText}
+      headActions={<SourceKeys onManage={props.onManageSources} onAdd={props.onAddSource} />}
+      selected={props.selected}
+      onSelectionChange={props.onSelectionChange}
+      allAgents={allAgents}
+      columnChecks={columnChecks}
+      onCell={(rowKey, columnId) => {
+        // 列 id 是 agent；落到这一行自己位置里那个 agent 的目标上
+        const row = view.rows.find((r) => skillRowKey(r) === rowKey);
+        const column = view.columns.find((c) => c.id === columnId);
+        if (row && column) {
+          const ref = refAt(row, column);
+          if (ref) props.onCell(ref);
+          return;
+        }
+        const orphan = props.orphans.find((o) => o.key === rowKey);
+        const link = orphan?.links.find((l) => columnOfTarget(l.targetId) === columnId);
+        if (orphan && link) props.onClearOrphan(orphan, link.targetId);
+      }}
+      onUndo={props.onUndo}
+      canUndo={props.canUndo}
+      shortcuts={props.shortcuts}
+      empty={empty}
+      flash={props.flash}
+      cellNotice={props.cellNotice}
+      onDismissCellNotice={props.onDismissCellNotice}
+      rowToast={props.rowToast}
+      keyToast={props.keyToast}
+      cellToast={props.cellToast}
+      keyBusy={props.keyBusy}
+      cellBusy={props.cellBusy}
+      barToast={props.barToast}
+    />
+  );
+}
 
-      {counts.size > 0 && (
-        <div className="tags" style={dim(busy)}>
-          {/* 「全部 N」与侧栏、与各片同源：本域的 skill 行数（§11） */}
-          <Chip selected={activeSources.size === 0} onClick={onClearSources}>
-            全部 <span style={MONO}>{page.rows.length}</span>
-          </Chip>
-          {[...counts].map(([sourceId, n]) => (
-            <Chip
-              key={sourceId}
-              selected={activeSources.has(sourceId)}
-              title={sourceId}
-              onClick={() => onToggleSource(sourceId)}
-            >
-              <span style={looksLikePath(labelOf(sourceId)) ? MONO : undefined}>
-                {labelOf(sourceId)}
-              </span>{" "}
-              <span style={MONO}>{n}</span>
-            </Chip>
-          ))}
-        </div>
-      )}
+/// 表格里的空态（表头照常在上面）：
+/// - 筛选无结果不放图：表头下一句灰字（`Note`），句后 `清除筛选`（默认键紧凑，次要入口——筛选框内的 ✕ 是主入口）
+/// - 其余是图 + 一句现状（`Empty`）；来源里还没有 skill 时 `在访达中显示 ↗`（浅键，`leave`）。
+///   图按 DESIGN「图像」：没有 agent 目录 noDirs、一个都没有 emptyFolder；图的上沿按空态表落在表头下——
+///   上面已占页面头 + 表头 145，有来源筛选（emptyFolder 时一定有）再加一行到 171（`Empty above`）
+/// `+ 来源` 在页面头，不在这里重复
+/// 表头下的空态上面已被占掉的高度：页面头 + 表头 145；有来源筛选时再加一行到 171
+const ABOVE_TABLE = 145;
+const ABOVE_TABLE_WITH_SOURCES = 171;
 
-      {/* 自动同步行：只读一行，顶多关掉。不展开、没有展开箭头（§12） */}
-      {rules.map(({ rule, local }) => (
-        <div
-          key={rule.source}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 9,
-            border: "1px solid var(--hairline)",
-            padding: "7px 12px",
-            marginBottom: 10,
-          }}
-        >
-          <span style={MICRO_CAP}>自动同步</span>
-          <span style={{ fontSize: "var(--size-body)" }}>
-            {labelOf(rule.source)} <span style={{ color: "var(--ink-faint)" }}>→</span>{" "}
-            {local.map((id) => targetLabelOf(id)).join(" · ")}
-          </span>
-          {/* 计数带单位：裸的「+2」紧跟在 agent 列表后面会被读成「还有 2 个 agent」（§11） */}
-          <span style={{ ...MONO, color: "var(--ink-mute)" }}>
-            {pendingOf(rule, local)} 条待建
-            {rule.excluded.length > 0 && `（排除 ${rule.excluded.length}）`}
-          </span>
-          <span style={{ marginLeft: "auto", ...dim(busy) }}>
-            <Button
-              size="compact"
-              title="不再自动同步到本域的这些 agent"
-              onClick={() => void run(() => api.removeAutoLinkTargets(rule.source, local))}
-            >
-              关掉
-            </Button>
-          </span>
-        </div>
-      ))}
+export function TableEmpty({
+  text,
+  hint,
+  action,
+  art,
+}: {
+  text: string;
+  hint?: string;
+  action?: { label: string; onClick: () => void; leave?: boolean };
+  art?: EmptyArt;
+}) {
+  if (!art) {
+    return (
+      <div className="mx-note">
+        <Note action={action}>{text}</Note>
+      </div>
+    );
+  }
+  return (
+    <Empty
+      description={text}
+      hint={hint}
+      secondary={action}
+      art={art}
+      above={art === "noDirs" ? ABOVE_TABLE : ABOVE_TABLE_WITH_SOURCES}
+    />
+  );
+}
 
-      {/* 表头照常渲染，即使一行都没有——agent 列在，用户才有入口把目录建出来（§8） */}
-      {page.targets.length > 0 && tableBody}
-      {rows.length === 0 &&
-        (filtered ? (
-          <Empty kind="noMatch" secondary={{ label: "清除筛选", onClick: onClearFilter }} />
-        ) : noAgentDirs ? (
-          <Empty
-            kind="noAgentDirs"
-            description="这个位置下还没有任何 agent 的 skill 目录。开启任一 skill 时会顺手建出来。"
-            primary={{ label: "导入 skill", onClick: onImport }}
-          />
-        ) : (
-          <Empty
-            kind="noSkills"
-            description={`${page.label} 里还没有 skill。`}
-            hint="导入之后它会出现在这张表里，再逐个 agent 开启。"
-            primary={{ label: "导入 skill", onClick: onImport }}
-          />
-        ))}
-    </div>
+/// 同名行抽屉里的「只留这份」（两份的读数由抽屉拉开时去取，见 SkillDetail）
+function KeepKey({
+  onKeep,
+  label,
+  busy,
+}: {
+  onKeep: (at: AnchorRect) => void;
+  label: string;
+  /// 点过、正在体检：键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 一句
+  busy: boolean;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  return (
+    <Tooltip content="另一份移到废纸篓，先确认">
+      <span ref={ref}>
+        <BusySlot busy={busy} label="正在核对两份">
+          <Button
+            size="compact"
+            onClick={() => {
+              if (busy) return;
+              // 结果的提示小窗锚在被按下的这颗键上（确认框在窗口正中）
+              const k = ref.current?.getBoundingClientRect();
+              if (k) onKeep({ top: k.top, left: k.left, right: k.right, bottom: k.bottom });
+            }}
+            ariaLabel={label}
+          >
+            只留这份
+          </Button>
+        </BusySlot>
+      </span>
+    </Tooltip>
+  );
+}
+
+/// 抽屉里的行详情：描述（ink-mute 13，不截断；读不到不写）、路径（等宽 ink-faint）+ 打开 ↗、
+/// 改于 … · N 个文件；同名行末尾 `只留这份`。拉开那一刻去取读数（同名时两份一起取，给 ×2 的提示框用）
+function SkillDetail({
+  description,
+  path,
+  readout,
+  onShow,
+  onReveal,
+  keep,
+}: {
+  description?: string;
+  path: string;
+  readout?: string;
+  onShow: () => void;
+  onReveal: () => void;
+  /// 同名行的 `只留这份`
+  keep?: ReactNode;
+}) {
+  useEffect(() => {
+    onShow();
+    // 只在展开时取一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <>
+      {description ? <div className="mx-detail__desc">{description}</div> : null}
+      <div className="mx-detail__path">
+        <Mono path>{path}</Mono>
+        <RevealLink path={path} onReveal={onReveal} />
+      </div>
+      {readout ? <div>{readout}</div> : null}
+      {keep ? <div className="mx-detail__keep">{keep}</div> : null}
+    </>
   );
 }

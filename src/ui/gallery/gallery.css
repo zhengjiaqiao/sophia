@@ -1,0 +1,259 @@
+/* 组件样张的版式（只在开发时用）：一块机面上按家族排，每块组件一行说明 + 一格一格的样张。
+   只排样张本身，不改任何组件的样子。色值一律 var(--…) */
+@import "../../tokens.css";
+
+body {
+  margin: 0;
+}
+
+.gallery {
+  min-height: 100vh;
+  background: var(--shell);
+}
+
+.gallery__head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-fade);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xl);
+  padding: var(--space-sm) var(--space-xl);
+  background: var(--shell);
+  border-bottom: var(--border-structure);
+}
+
+.gallery__title {
+  font-family: var(--font-cond);
+  font-size: var(--size-title);
+  font-weight: 700;
+}
+
+.gallery__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  font-size: var(--size-caption);
+}
+
+.gallery__nav a {
+  color: var(--ink-mute);
+  text-decoration: none;
+}
+
+.gallery__nav a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.gallery__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  padding: var(--space-xl);
+}
+
+.gallery-family {
+  padding: var(--space-xl);
+  border: var(--border-face);
+  border-radius: var(--radius-face);
+  background: var(--face);
+}
+
+.gallery-family__title {
+  margin: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-title);
+  font-weight: 700;
+  line-height: var(--leading-title);
+}
+
+.gallery-family__lead {
+  margin: var(--space-xxs) 0 0;
+  max-width: 776px;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.gallery-block {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-md);
+  border-top: var(--border-row);
+}
+
+.gallery-block__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.gallery-block__name {
+  font-family: var(--font-mono);
+  font-size: var(--size-caption);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.gallery-block__guide {
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.gallery-block__grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-md) var(--space-xl);
+  margin-top: var(--space-sm);
+}
+
+.gallery-specimen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+}
+
+/* 纵向排：放进去的组件像在页面的一列里——给了宽的样张框里，块级的东西（区块小标、列表行、灰面板的 section 范围）
+   撑满这一格；没给宽的框随内容缩 */
+.gallery-specimen__frame {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  min-height: var(--control-h-row);
+  box-sizing: border-box;
+}
+
+/* 定高的一块机面：确认框、推入页这类 fixed / absolute 的东西只在这块里铺开（transform 让 fixed 以它为准） */
+.gallery-specimen__frame--stage {
+  position: relative;
+  width: 360px;
+  height: 240px;
+  overflow: hidden;
+  border: var(--border-face);
+  border-radius: var(--radius-face);
+  background: var(--face);
+  transform: translateZ(0);
+}
+
+.gallery-specimen__label {
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+/* 样张里的零件 */
+.gallery-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.gallery-note {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.gallery-strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* 提示框、浮起小窗的锚放在样张框里偏上，下方留出它弹出来的地方 */
+.gallery-tipstage {
+  align-self: flex-start;
+  padding: var(--space-xs) var(--space-md);
+}
+
+/* 菜单样张：纸浮层的外观（真的浮层要锚在触发键上，见最后一格） */
+.gallery-layer {
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+}
+
+.gallery-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+}
+
+.gallery-list {
+  width: 100%;
+}
+
+.gallery-items {
+  display: grid;
+  grid-template-columns: repeat(3, 160px);
+  column-gap: var(--space-sm);
+}
+
+.gallery-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h-compact);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.gallery-drawerrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--row-h);
+}
+
+.gallery-fade {
+  width: 100%;
+}
+
+.gallery-fade__scroll {
+  height: 132px;
+  overflow-y: auto;
+}
+
+.gallery-fade__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 28px;
+  font-size: var(--size-caption);
+}
+
+.gallery-nav {
+  font-family: var(--font-cond);
+  font-size: var(--size-body);
+  font-weight: 700;
+}
+
+.gallery-label {
+  font-family: var(--font-cond);
+  font-size: var(--size-label);
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.gallery-sentence {
+  font-size: var(--size-caption);
+  color: var(--ink);
+}
+
+/* surface 底（表格的选择行）：放在它上面的样张 */
+.gallery-surface {
+  display: inline-flex;
+  padding: var(--space-xxs);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}

@@ -1,0 +1,57 @@
+/* 模型勾选列表（DESIGN「模型列表的写法」）：Codex 页网关行展开区里的那一框，一个列表只列一家网关。
+   色值一律 var(--…)，唯一来源是 tokens.css。框本身（paper 面、hairline 边、12 圆角、宽 440）在 ModelsTab.css；
+   筛选框（TextField 搜索形态）、每一行（CheckRow）、滚动渐隐（FadeViewport）都是 ui 组件，这里只排它们的位置 */
+@import "./tokens.css";
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 筛选框：框顶，超过约 8 行才出现 */
+.model-list__search {
+  flex-shrink: 0;
+  margin: var(--space-xs) var(--space-xs) var(--space-xxs);
+}
+
+/* 列表在自身范围内滚动：约 8 行 + 组头。外层（FadeViewport）是纵向 flex：外层压矮它时滚动区跟着变矮 */
+.model-list__scroll {
+  position: relative;
+  min-height: 0;
+  max-height: calc(var(--row-h) * 8 + 56px);
+  overflow: auto;
+}
+
+.model-list__empty {
+  padding: var(--space-xs) var(--space-sm);
+}
+
+/* 服务商小组头 `azure · 12`：12 ink-mute，服务商名 600，计数 tabular（一种数字，不用等宽） */
+.model-list__group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: var(--space-xs) var(--space-sm) 2px;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+}
+
+.model-list__vendor {
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.model-list__dot {
+  color: var(--ink-mute);
+}
+
+.model-list__count {
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 一个模型一行（CheckRow list 34）：行的悬停底左右各让 4，文字起点与组头同在 12 */
+.model-list__rows {
+  padding: 0 var(--space-xxs);
+}

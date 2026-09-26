@@ -1,50 +1,75 @@
-/// 菜单栏面板里 Codex 那一行要显示什么（docs/specs/2026-09-21-tray.md）。
-/// 纯函数：面板与「模型」页说同一句话，所以文案一律取自 modelsView。
-import { enableDisabledReason, routerUnavailable, statusSentence } from "./modelsView.ts";
+/// 菜单栏面板要显示什么（DESIGN「托盘面板」，画板 V4Layouts-tray）。纯函数，tests/tray-view.test.ts 直接测。
+///
+/// 面板**一个 agent 一块、一种能力一行**：块与行从外壳的 agent 注册表生成（`src/shell/agents.tsx`），
+/// 与侧栏 `agent` 段、agent 页的节同一份名单与顺序；托盘不自己写一份 Codex 名单。
+/// 能力行的文案与判断一律取自 modelsView，面板与 Codex 页说同一句话。
+import { visibleAgents } from "./shell/agentRegistry.ts";
+import type { ComponentType } from "react";
+import type { AgentEntry, AgentState, TrayRowProps } from "./shell/agentRegistry.ts";
+import { codexKeyKind, switchDisabledReason } from "./modelsView.ts";
 import type { GatewayState } from "./types.ts";
 
+export { LAUNCH_TIP, RESTART_CONSEQUENCE, RESTART_TIP, UNINSTALL_TIP } from "./modelsView.ts";
+
+// ===== 块与行：从 agent 注册表生成 =====
+
+/// 面板里的一块：块头（图标 + 名字，不放控件）+ 这个 agent 在面板里画得出的能力行
+export interface TrayBlock {
+  id: string;
+  name: string;
+  /// 能力行：注册表里这个 agent 的节，按节序；只留带 `trayRow` 画法的
+  rows: { id: string; title: string; Row: ComponentType<TrayRowProps> }[];
+}
+
+/// 注册表 → 面板的块。行的画法就在注册表的节上（`trayRow`，今天只有 `third-party-models`；
+/// 以后的 `usage` 给那一节配一个即可，面板不改）。可用且有节的 agent 才成块（同侧栏的入选条件），
+/// 一行都画不出的 agent 不成块（空块头是噪音）
+export function trayBlocks(registry: ReadonlyArray<AgentEntry>, s: AgentState): TrayBlock[] {
+  return visibleAgents(registry, s)
+    .agents.map((agent) => ({
+      id: agent.id,
+      name: agent.name,
+      rows: agent.sections.flatMap((section) =>
+        section.trayRow ? [{ id: section.id, title: section.title, Row: section.trayRow }] : [],
+      ),
+    }))
+    .filter((block) => block.rows.length > 0);
+}
+
+/// 面板手里只有模型状态：据此给注册表的只读状态（支不支持第三方模型＝后端说的 `supported`）
+export const trayAgentState = (state: GatewayState | null): AgentState => ({
+  gateway: state,
+  modelsSupported: state ? state.supported : null,
+});
+
+// ===== `第三方模型` 一行 =====
+
 export interface TrayToggle {
-  /// 反色＝已启用（DESIGN：用反色表示"现在开着"）
+  /// 开关现在开着没有
   on: boolean;
-  label: "已启用" | "启用";
-  /// 按不动的原因；能按则为 null。禁用必须同时说原因（DESIGN §按钮）
+  /// 按不动的原因；能按则为 null。禁用必须同时说原因（进开关的提示框）
   disabledReason: string | null;
 }
 
 export interface TrayRow {
-  /// 这台机器不支持模型注入时整行不出现
-  visible: boolean;
-  status: string;
   toggle: TrayToggle;
-  /// 开关按不动、得先去「模型」页把事情办完：面板给一条过去的路
-  needsSetup: boolean;
-  /// 「重启 Codex」只在有改动等着生效时出现：平时摆着是噪音，还多一个误触的机会。
-  /// 启用和停用都算——停用之后 Codex 的列表同样要重启才会变回去
+  /// 「重启生效」键：按钮即状态，只在改动等着生效时出现。启用和停用都算——
+  /// 停用之后 Codex 的列表同样要重启才会变回去
   showRestart: boolean;
+  /// 「启动 Codex」：开着、Codex 桌面应用没在跑（与 Codex 页同一规则，`showLaunchKey`）
+  showLaunch: boolean;
+  /// 「卸下后台服务」：停用后服务仍在才出现（与 Codex 页同一规则）。三颗键占同一位，
+  /// 和「重启生效」同时该出现时让位给重启
+  showUninstall: boolean;
 }
 
-/// 「重启 Codex」确认那一行的话：说会发生什么，让用户读完就知道后果（DESIGN：破坏性靠信息承担分量）
-export const RESTART_CONSEQUENCE = "会中断 Codex 里进行中的对话";
-
 export function trayRow(state: GatewayState): TrayRow {
-  const selectedCount = state.provider.models.filter((m) => m.selected).length;
-  // 已启用时永远能关：停用不依赖密钥和模型还在不在
-  const disabledReason = state.enabled ? null : enableDisabledReason(state, selectedCount);
-  const status = routerUnavailable(state)
-    ? "已经启用，但本机路由没在跑，这会儿连官方模型也用不了"
-    : !state.enabled && state.needsCodexRestart
-      ? // 模型页的那句在这里只会说「还没启用」，像是什么都没发生
-        "已经停用，要重启 Codex，它的模型列表才会变回只有官方模型"
-      : statusSentence(state, selectedCount);
+  // 与 Codex 页同一个判断（modelsView）：开着时永远能关；三颗键占同一位
+  const key = codexKeyKind(state, { kind: "idle" });
   return {
-    visible: state.supported,
-    status,
-    toggle: {
-      on: state.enabled,
-      label: state.enabled ? "已启用" : "启用",
-      disabledReason,
-    },
-    needsSetup: disabledReason !== null,
-    showRestart: state.needsCodexRestart,
+    toggle: { on: state.enabled, disabledReason: switchDisabledReason(state) },
+    showRestart: key === "restart",
+    showLaunch: key === "launch",
+    showUninstall: key === "uninstall",
   };
 }

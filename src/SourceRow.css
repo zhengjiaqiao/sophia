@@ -1,0 +1,207 @@
+/* 来源行（SourceRow.tsx，DESIGN「位置页 › 来源行（只在来源管理页）」）：高 40、13 号字、底 1px row-line，
+   纯文字行无底色。来源管理页的一行是 `.srcline`（各格对齐页面列头，见文末）；`.srcrow__*`
+   是一行里的规则控件（目标框）与 × 键。选目标浮层是组件库的 `Menu`（多选项）。
+   色值一律 var(--…)，唯一来源是 tokens.css */
+@import "./tokens.css";
+
+/* 目标框：高 24、paper 面、1px ctl-border、control 7；里面目标 agent 的 13px 图标 + ▾，看得出能点开改。
+   有边的块：悬停描边升一档（ctl-edge），底色不变 */
+.srcrow__targets {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  box-sizing: border-box;
+  height: var(--control-h-compact);
+  padding: 0 6px 0 var(--space-xs);
+  border: var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  cursor: default;
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.srcrow__targets:hover,
+.srcrow__targets.is-open {
+  border-color: var(--ctl-edge);
+}
+
+.srcrow__shown {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  min-width: 0;
+}
+
+/* 规则关着时框里写 `选目标 ▾`（ink-faint） */
+.srcrow__pick {
+  color: var(--ink-faint);
+}
+
+/* 规则关着：目标框禁用（选目标不会顺带打开规则，按下说「先打开规则」）——平贴、1px hairline、
+   透明底、字与记号 ink-faint（D20 禁用样子）；原生禁用不吃指针，悬停与按下落在提示框的包层上 */
+.srcrow__targets:disabled {
+  border: var(--border-disabled);
+  background: transparent;
+  color: var(--ink-faint);
+}
+
+.srcrow__targets:disabled .srcrow__chevron {
+  color: var(--ink-faint);
+}
+
+.srcrow__chevron {
+  flex-shrink: 0;
+  color: var(--ink-mute);
+}
+
+.srcrow__remove {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: calc(6px - var(--space-xs));
+}
+
+/* ===== 来源管理页的一行（SourceLine）=====
+   行元素是页面表格（pages/SourcesPage.css `.srcpage__table`）的一行，用 subgrid 让各格对齐列头：
+   来源名 + 8 + 数 ｜ 短路径 ｜ 打开 ↗ ｜（撑开）｜ 目标框 ｜ 8 + 紧凑开关 ｜ 6 + ×。
+   行高 40、行间 1px row-line，纯文字行无底色 */
+.srcline {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  box-sizing: border-box;
+  height: 40px;
+  border-bottom: var(--border-row);
+  font-size: var(--size-caption);
+}
+
+/* 名字列：按最长的名字定宽，字至多 160，右留 16；数 12 tabular ink-faint，离名字 8 */
+.srcline__name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  min-width: 0;
+  padding-right: var(--space-md);
+}
+
+/* 名字与路径：按内容定宽、有上限（名字 160、路径 240）、放得下时不占多余；放不下时截断
+   （提示框 fit="shrink" 随它收窄） */
+.srcline__label {
+  display: block;
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.srcline__count {
+  flex-shrink: 0;
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+/* 位置列：按最长的路径定宽，至多 240，放不下中段省略（末两级完整）；右留 16，`打开 ↗` 在各行成一列 */
+.srcline__where {
+  display: flex;
+  min-width: 0;
+  padding-right: var(--space-md);
+}
+
+/* 短路径（等宽 Mono，12 ink-faint），一行；前段放不下以 … 截断（Mono truncate），末两级（tail）完整保留 */
+.srcrow__path {
+  display: flex;
+  min-width: 0;
+  max-width: 240px;
+  white-space: nowrap;
+}
+
+.srcrow__tail {
+  display: flex;
+  flex-shrink: 0;
+}
+
+/* `打开 ↗` 悬停这一行（或键盘焦点在这一行）才出（SourceLine 给 is-shown）：键一直占着这一列，
+   各行对齐；其余时候整格看不见（opacity，不用 visibility——Tab 还要走得到它）。即时出没，同表格来源格 */
+.srcline__open {
+  display: flex;
+  opacity: 0;
+}
+
+.srcline__open.is-shown {
+  opacity: 1;
+}
+
+/* 目标框：这一页里定宽（整列一样宽，按最宽的那一个，至少放得下「选目标 ▾」）。
+   框外的提示框包层（fit="grow"）撑满这一格，框再占满包层 */
+.srcline__targets {
+  display: flex;
+  min-width: 0;
+}
+
+.srcline__targets .srcrow__targets {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.srcline__switch {
+  display: flex;
+  padding-right: var(--space-xs);
+}
+
+.srcline__remove {
+  display: flex;
+}
+
+.srcline .srcrow__remove {
+  margin-left: 6px;
+}
+
+/* 刚移除的那一行：收起（高 40 → 0、淡出），下面的行跟着平移上来，不跳位 */
+.srcline.is-leaving {
+  overflow: hidden;
+  animation: srcline-leave var(--dur-collapse) var(--ease-mech) forwards;
+}
+
+@keyframes srcline-leave {
+  from {
+    height: 40px;
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+    border-bottom-width: 0;
+  }
+}
+
+/* 刚加进来的那一行：surface 行带闪一下 */
+.srcline.is-flash {
+  animation: srcline-flash var(--dur-flash) var(--ease-mech);
+}
+
+@keyframes srcline-flash {
+  0%,
+  60% {
+    background: var(--surface);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .srcrow__targets {
+    transition: none;
+  }
+
+  .srcline.is-leaving,
+  .srcline.is-flash {
+    animation: none;
+  }
+}

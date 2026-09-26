@@ -1,393 +1,277 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api.ts";
 import {
+  LAUNCH_POLL_MS,
+  LAUNCH_TIMEOUT,
+  LAUNCH_TIMEOUT_MS,
   MODELS_TOOLS,
+  RESTART_CONSEQUENCE,
+  RESTART_POLL_MS,
   effectiveModels,
-  emptyEffectiveText,
-  enableDisabledReason,
-  factsLine,
-  gatewaySummary,
+  gatewaySwitchText,
+  inUseLabel,
+  modelIssues,
   modelLabel,
   parseBackendError,
-  providerCatalogHint,
-  providerLabel,
-  removeProviderBlockedReason,
   routerUnavailable,
-  selectedModels,
-  sortAndFilterModels,
-  statusSentence,
-  takeoverOfferText,
-  totalSelected,
+  selectModel,
+  settleAfterRestart,
+  shouldPollRestart,
+  showRouterTodo,
+  switchGateway,
 } from "./modelsView.ts";
-import type { ModelsTool } from "./modelsView.ts";
-import type {
-  GatewayProvider,
-  GatewayProviderModel,
-  GatewaySelectedModel,
-  GatewayState,
-} from "./types.ts";
+import type { ModelsTool, RestartPhase } from "./modelsView.ts";
+import type { GatewayProvider, GatewayProviderModel, GatewayState } from "./types.ts";
 import {
-  AgentIcon,
-  Busy,
-  Button,
+  ChipRow,
   Confirm,
-  Empty,
-  ErrorBanner,
-  RowNotice,
-  Toast,
+  HintStrip,
+  ModelChip,
+  NoticePanel,
+  Section,
+  Spinner,
 } from "./ui/index.ts";
-import type { ToastKind } from "./ui/index.ts";
-import { GatewayPage } from "./pages/GatewayPage.tsx";
+import { HINTS, useHint } from "./hints.ts";
+import { CodexKeySlot, CodexSwitch } from "./codexControls.tsx";
+import { GatewayBlock } from "./ModelsGateways.tsx";
+import type { RowNotice } from "./ModelsGateways.tsx";
+import { createSelectionWriter } from "./selectionWrites.ts";
 import "./ModelsTab.css";
 
-/// 模型页（spec `docs/specs/2026-09-21-ui-rebuild-models.md`）。
+/// Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，D5：原模型页与网关二级页合并成这一节）。
 ///
-/// 它是应用的**启动页**，版面按 DESIGN.md「Layout」的大留白排，不是一张密排的表。
+/// agent 页的外框（页面头的图标 + `Codex`、节与节之间的距离、整页限宽 776）由外壳按 agent 注册表画；这一节画：
+/// - **新手提示条** `first-codex`：页面头下、节头上方；拨过开关或加过一家网关就算学会
+/// - **节头**：`第三方模型` + 紧跟节名的开关（＝配置里开没开：拨了就写、不确认，乐观翻转，没写成滑回），
+///   开关右边 12 那一位只出一颗键：`重启生效` / `启动 Codex` / `卸下后台服务`（重启优先于启动、启动优先于卸下，
+///   codexKeyKind）——
+///   一条左沿、一列控件：开关、待办条的键、`+ 网关`、网关行尾动作的右沿在同一条竖线上。
+///   键即状态——`needsCodexRestart` 比的是 Codex 启动时加载的配置与现在，用户用任何方式重启 Codex 键都会自己消失；
+///   所以窗口获得焦点时重读，键显示着时每 5 秒轻查一次，键消失即停。**从不自动重启**；重启要确认（打断对话）
+/// - **在用**：模型片（关着时标签写 `已选`），片上 × 与网关行里的勾选实时联动
+/// - **行内待办条**：路由没在跑 / 正由 agents-manager 管理 / 设置被改掉了，挂在这一节里，问题解决自动收起
+/// - **网关**：一家一行、点整行展开挑模型，编辑与新增就地展开（ModelsGateways.tsx）
 ///
-/// **按工具分块**（第二轮反馈）：一个工具一块，块里从上到下是
-/// 「它是谁 → 它现在怎么样 → 它生效的模型 → 用它要知道的限制」，
-/// 动作也归块——`重启 <工具>` 是那个工具的动作，不是页面的动作。
-/// 今天 `MODELS_TOOLS` 里只有 Codex，但**版面、文案、空态都不写死一个工具**：
-/// 名字一律从 `tool.name` 取。后端那侧现在确实只支持 Codex，这一轮只为多工具留位置。
-///
-/// **网关整个搬去配置页**（第三轮反馈）：一家一块的卡片、地址、有没有密钥、
-/// 添加、删除、改名，全在 `pages/GatewayPage.tsx`。主页面只剩一句极简的网关事实
-/// （`gatewaySummary`）当进配置页的由头。
-///
-/// 一屏要回答三件事：**这是什么工具**（图标 + 名字，display 28）、
-/// **它现在生效的是哪几个模型**（紧凑片，就地可改）、
-/// **哪里出了问题**（横幅 / 行内待办条 / 那句人话）。
-///
-/// 页面没有域的概念，所以壳在这一页不要渲染侧栏，见 `MODELS_TAB_FULL_BLEED`。
-///
-/// 六条形上的定死选择，改之前先回去看 spec：
-/// - **图标永远和名字一起出现**（DESIGN §9.1）。第一轮只画了图标、把 `Codex`
-///   这个名字吃掉了，是错的——图标是补充，不是替代
-/// - **生效的模型在主页面直接可见，改选也在当前页完成**。这是我们和 cc-switch
-///   那类工具的差异点：它必须进二级页才能挑模型，我们不进。二级页只管网关本身。
-///   选择器横跨这个工具的全部网关，归属靠分组抬头 + 每条那行 `网关id-模型名` 的标识
-/// - 开关是 ghost pill 两态（`启用` / 反色 `已启用`），不是滑动开关也不是复选框（R4）
-/// - 模型列表的「已选」用 12px 方形复选框：**圆＝状态（只读事实），方＝选择（我选的）**（R3）
-/// - 三组状态词合成一句人话 + 一行等宽事实，不并排三个徽标（R2）
-/// - 按钮叫 `重启 <工具>`：实测 Codex 以 `codex app-server` 常驻进程跑着，启动时读一次
-///   config.toml 之后不重读，所以改完配置确实要结束它。会中断进行中的对话，确认一道（R6 修订 v2）
-///
-/// 四条提示各有各的位置（R7）：`drift` 与 `takeover` 是挂在那个工具上的常驻待办，
-/// 走行内待办条；`needsCodexRestart` 并进那句人话；`routerUnavailable` 是应用级故障，
-/// 走顶栏之下的反色横幅；某次操作的结果走右下角提示条。
-///
-/// 数据一律读 `GatewayState.providers`（全部网关），**不读兼容字段 `provider`**
-/// （docs/gateway-commands.md：「只给还没迁到 providers 的界面用」）。写也一样：
-/// 勾选走 `gatewaySelectModelsOf`、存网关走 `gatewayUpsertProvider`、删走 `gatewayRemoveProvider`。
-
-/// 模型页不分项目、不分域，左边那条侧栏对它没有意义：壳在这一页把整幅宽度交给它，
-/// 页边 32px 由本页自己给（`.models-page` 的内边距）。App.tsx 用这个常量做条件。
-export const MODELS_TAB_FULL_BLEED = true;
+/// 页面上没有解释段落，没有版本、路由状态、网关几家这些内部事实
 
 const describeError = (error: unknown): string => parseBackendError(String(error)).message;
 
-const selectedPayload = (models: GatewayProviderModel[]): GatewaySelectedModel[] =>
+const selectedPayload = (models: GatewayProviderModel[]) =>
   models.filter((m) => m.selected).map(({ id, displayName }) => ({ id, displayName }));
 
-// ===== 一个工具的抬头：它是谁，它现在怎么样 =====
-
-export interface ToolIntroProps {
-  tool: ModelsTool;
-  state: GatewayState;
-  selectedCount: number;
-  busy: boolean;
-  onEnable: () => void;
-  onDisable: () => void;
-  onRestart: () => void;
-  /// 进网关配置页。网关的增删改都在那儿，主页面上不摊开（第三轮反馈）
-  onConfigure: () => void;
+/// 节头下那块灰面板：做不成的事就地说（开关、重启、启动、卸下、勾选没成）。
+/// `message` 是整句（`没重启 Codex` `没移除 GPT 5`），原因写全、折行不截断
+export interface SectionNoticeState {
+  message: string;
+  reason: string;
+  action?: { label: string; onClick: () => void };
+  /// 勾选列表里点的：那一家网关行展开着时，灰面板出在那一行里（就近）
+  providerId?: string;
 }
 
-/**
- * 工具身份先出场，再谈状态。
- *
- * **图标永远和名字一起出现**（DESIGN §9.1，`tests/ui.test.ts` 也钉着这条）：
- * 图标 24px 在左，名字走 display 档在右。名字**不做大写转换**——display token 自带
- * `uppercase`，但「被谈论的对象一律不大写」（§1.2），`Codex` 不能变成 `CODEX`，
- * 所以这一处显式关掉它。这是这一页唯一一处偏离 token 默认值的地方。
- *
- * 「开着没有」由反色 pill 回答（DESIGN「用反色表示现在开着」）＋ 那句人话，
- * 不再另起一行 28px 的状态词——那会和开关说同一件事。
- *
- * 层级：28px 名字 → 15px 一句人话 → 12px 等宽事实，靠字号和行高拉开，不靠分隔线。
- */
-export function ToolIntro({
-  tool,
+// ===== 在用 =====
+
+/// `在用` 一行（DESIGN「在用」，节头下 12）：胶囊行——标签（开关关着时写 `已选`）+ 8 + 模型片（友好名，完整 id
+/// 进提示框；两家网关撞名时片名后加 ` · 网关短名`；片间 6、折行不藏）。一个都没选时这一行不出。
+/// 只管「看」和「去掉」，挑选只在网关行里；片上 × 与网关行里的勾选是同一件事、实时联动
+export function InUseRow({
   state,
-  selectedCount,
-  busy,
-  onEnable,
-  onDisable,
-  onRestart,
-  onConfigure,
-}: ToolIntroProps) {
-  const disabledReason = enableDisabledReason(state, selectedCount);
-
-  return (
-    <header className="models-tool__intro">
-      <div className="models-tool__head">
-        <span className="models-tool__mark">
-          <AgentIcon id={tool.id} name={tool.name} size={24} />
-        </span>
-        <h2 className="models-tool__name">{tool.name}</h2>
-
-        <Busy busy={busy} className="models-tool__actions">
-          {state.enabled ? (
-            // 已启用＝反色 pill，点一下停用（DESIGN components.button-inverse）
-            <Button
-              variant="inverse"
-              title={`点一下停用：${tool.name} 的模型列表只保留官方模型`}
-              onClick={onDisable}
-            >
-              已启用
-            </Button>
-          ) : disabledReason !== null ? (
-            <Button disabled disabledReason={disabledReason}>
-              启用
-            </Button>
-          ) : (
-            <Button onClick={onEnable}>启用</Button>
-          )}
-
-          {/* 那句人话里「改动要重启 <工具> 才生效」的动作就是它。它是**这个工具**
-              的动作，所以归在这一块里，不放在页面级的位置上（R7、第二轮反馈） */}
-          <Button title={`结束 ${tool.name} 的后台进程，下次启动就带着新配置`} onClick={onRestart}>
-            {/* button-cap 自带 uppercase，会把 Codex 变成 CODEX。「重启」是我们写的
-                结构词该大写，工具名是被谈论的对象不该大写（§1.2），所以名字单独
-                裹一层把大写关掉 */}
-            重启 <span className="models-plain">{tool.name}</span>
-          </Button>
-
-          {/* 网关的地址、密钥、增删改全在配置页；主页面只展示生效的模型（第三轮反馈） */}
-          <Button title="添加、修改、删除网关" onClick={onConfigure}>
-            配置网关
-          </Button>
-        </Busy>
-      </div>
-
-      <p className="models-tool__sentence">{statusSentence(state, selectedCount, tool)}</p>
-      {/* 版本号与端口是计数类事实，走等宽（§1.2） */}
-      <p className="models-tool__facts">{factsLine(state, tool)}</p>
-    </header>
-  );
-}
-
-// ===== 生效的模型 =====
-
-export interface EffectiveModelsProps {
-  tool: ModelsTool;
+  onRemove,
+}: {
   state: GatewayState;
-  busy: boolean;
-  /// 点这块区域：打开选择器（**留在当前页**，不进二级页）
-  onOpenPicker: () => void;
-  onRemoveModel: (provider: GatewayProvider, model: GatewayProviderModel) => void;
-  /// 一家网关都没有时，把人送去配置页
-  onConfigure: () => void;
-  /// 选择器浮层。挂在外层，浮层里的点击不会冒泡回去再把它打开
-  children?: ReactNode;
-}
-
-/**
- * 主页面上唯一和模型有关的东西：**这个工具现在真正在用的那几个**。
- *
- * 网关本身（一家一块、地址、密钥、增删）第三轮搬去配置页了，主页面只剩
- * 身份 / 生效的模型 / 动作三样。但**改选仍然在这一页完成**——整块可点，
- * 点哪儿都开选择器。这是和 cc-switch 那类工具的差异点，不许退化成「进二级页选」。
- *
- * 片上的名字用 `effectiveModels` 算出来的 `label`：两家网关撞名时后端会加
- * 「 · 网关名」，这一块叫「生效的模型」，写的就得和工具里看到的一致。
- */
-export function EffectiveModels({
-  tool,
-  state,
-  busy,
-  onOpenPicker,
-  onRemoveModel,
-  onConfigure,
-  children,
-}: EffectiveModelsProps) {
-  // 一家网关都没有：这块区域点开也是空的，不如直接把人送去配置页
-  if (state.providers.length === 0) {
-    return (
-      <div className="models-effective__empty">
-        <Empty
-          kind="noSkills"
-          description={`还没有网关。到「配置网关」里加一家，它的模型才能进 ${tool.name} 的模型列表。`}
-          primary={{ label: "配置网关", onClick: onConfigure }}
-        />
-      </div>
-    );
-  }
-
+  onRemove: (provider: GatewayProvider, model: GatewayProviderModel) => void;
+}) {
   const rows = effectiveModels(state);
-
+  if (rows.length === 0) return null;
+  const label = inUseLabel(state);
   return (
-    <div className="models-effective">
-      <div
-        className="models-effective__box"
-        role="button"
-        tabIndex={0}
-        title="点一下改选模型"
-        onClick={onOpenPicker}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onOpenPicker();
-          }
-        }}
-      >
-        {rows.length === 0 ? (
-          // 空着的几种原因是几件不同的事，各说各的下一步
-          <span className="models-effective__hint">{emptyEffectiveText(state)}</span>
-        ) : (
-          rows.map(({ provider, model, label }) => (
-            <span key={`${provider.id}|${model.id}`} className="ss-model-chip">
-              <span className="ss-model-chip__label" title={`来自网关 ${providerLabel(provider)}`}>
-                {label}
-              </span>
-              <button
-                type="button"
-                className="ss-model-chip__remove"
-                title={`把 ${label} 从 ${tool.name} 的模型列表里去掉`}
-                disabled={busy}
-                onClick={(e) => {
-                  // 去掉这一个就是去掉这一个，别顺带把选择器也打开了
-                  e.stopPropagation();
-                  onRemoveModel(provider, model);
-                }}
-              >
-                <svg
-                  width="9"
-                  height="9"
-                  viewBox="0 0 12 12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  aria-hidden="true"
-                >
-                  <path d="M3 3l6 6M9 3l-6 6" />
-                </svg>
-              </button>
-            </span>
-          ))
-        )}
-      </div>
-      {children}
+    <div className="models-inuse">
+      <ChipRow label={label} listLabel={`${label}的模型`}>
+        {rows.map(({ provider, model, name, suffix }) => (
+          <ModelChip
+            key={`${provider.id}|${model.id}`}
+            name={name}
+            suffix={suffix}
+            id={model.slug || model.id}
+            onRemove={() => onRemove(provider, model)}
+          />
+        ))}
+      </ChipRow>
     </div>
   );
 }
 
-// ===== 页面 =====
+// ===== 这一节 =====
 
 export interface ModelsTabProps {
   onError: (message: string) => void;
-  busy: boolean;
-  onBusy: (busy: boolean) => void;
+  /// 每次拿到新状态都报给壳：侧栏 Codex 后的指示点要它
+  onGatewayState?: (state: GatewayState) => void;
+  /// 壳的错误横幅开着（机面顶上的灰面板）：新手提示让位
+  banner?: boolean;
 }
 
-export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
+export default function ModelsTab({ onError, onGatewayState, banner = false }: ModelsTabProps) {
+  const tool = MODELS_TOOLS[0];
   const [state, setState] = useState<GatewayState | null>(null);
-  /// 选择器开着的那个工具；null＝没开。一个工具一份，横跨它的全部网关
-  const [pickerTool, setPickerTool] = useState<ModelsTool | null>(null);
-  const [query, setQuery] = useState("");
-  /// 改名在输入框里过渡，Enter / 失焦时提交；勾选当场写盘，所以只有改名需要本地镜像
-  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
-  /// 网关配置页（二级页面，§4.6）：网关的增删改都在那儿，主页面不摊开
-  const [gatewayOpen, setGatewayOpen] = useState(false);
-  /// 结束工具的后台进程会中断进行中的对话，确认一道（R6、§5）。存的是要重启哪个工具
-  const [confirmRestart, setConfirmRestart] = useState<ModelsTool | null>(null);
-  /// 删网关会连钥匙串里的密钥一起删，回不来，确认一道。带上是哪个工具的，文案要点名
-  const [confirmRemove, setConfirmRemove] = useState<{
-    tool: ModelsTool;
-    provider: GatewayProvider;
-  } | null>(null);
-  const [toast, setToast] = useState<{ kind: ToastKind; message: string } | null>(null);
-  /// 行内待办条按「稍后」只在这一程里收起来，下次打开还会再提一次
-  const [later, setLater] = useState<{ drift: boolean; takeover: boolean }>({
-    drift: false,
-    takeover: false,
-  });
-  /// 错误横幅不自动消失，只有用户自己关掉；路由恢复了就重新亮起来
-  const [bannerClosed, setBannerClosed] = useState(false);
+  /// 这一节正在做一件写 Codex 设置的事（重启、接管、重启路由、存网关……）：对同一对象的下一次操作
+  /// 先不接（键禁用并说「正在处理上一步」）；不锁页面、不锁别的页，勾选排队不受它影响
+  const [busy, onBusy] = useState(false);
+  const [uninstalling, setUninstalling] = useState(false);
+  /// 网关行展开着的那几家（进这一页时都收着）
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [notice, setNotice] = useState<SectionNoticeState | null>(null);
+  /// 行内待办条正在执行的那一条（接管 / 重新写入 / 重启路由）：它的键换成忙碌指示
+  const [resolving, setResolving] = useState<"takeover" | "rewrite" | "router" | null>(null);
+  /// 启动时的自愈试过了没有：试过仍没起来才出「路由没在跑」
+  const [healed, setHealed] = useState(false);
+  const [routerFailure, setRouterFailure] = useState<string | null>(null);
+  /// 网关块里开着删网关的确认框或行里的灰面板（新手提示让位）
+  const [gatewayPanel, setGatewayPanel] = useState(false);
   const mounted = useRef(true);
+  const reportState = useRef(onGatewayState);
+  reportState.current = onGatewayState;
+  /// 最近一次勾选是在哪一家网关的列表里点的（null＝点的是在用片上的 ×）：写失败的灰面板出在那里
+  const toggledIn = useRef<string | null>(null);
+  /// 此刻画在页面上的状态（含还没写完的勾选）：连点时下一下在上一下的基础上算
+  const shown = useRef<GatewayState | null>(null);
+  /// 勾选的写盘队列（DESIGN「勾选不闪」）：先画、后台排队写、失败才回滚并说话。
+  /// 后端给的状态一律经它（applyState）：还有没写完的勾选时只记下、不画，片不会跳回去再跳回来
+  const [writer] = useState(() =>
+    createSelectionWriter<GatewayState>({
+      paint: (next) => {
+        shown.current = next;
+        setState(next);
+      },
+      report: (next) => reportState.current?.(next),
+      reread: () => api.gatewayState(),
+      onDone: () => setNotice(null),
+      onFail: (message, error) =>
+        setNotice({
+          message,
+          reason: describeError(error),
+          providerId: toggledIn.current ?? undefined,
+        }),
+      alive: () => mounted.current,
+    }),
+  );
+  const applyState = writer.accept;
 
-  // 页面只认 providers；密钥从不回显，网关地址由配置页自己持有。
-  const applyState = (next: GatewayState) => {
-    setState(next);
-    if (!routerUnavailable(next)) setBannerClosed(false);
-  };
+  // 新手提示 `first-codex`（DESIGN「新手提示条」）：第一次打开这一页、状态读回来（连同启动时的自愈）之后出。
+  // 让位：壳的错误横幅、节里的灰面板与行内待办条、重启确认、网关块里的确认框与灰面板
+  const hasTodos =
+    state !== null &&
+    (showRouterTodo(state, healed) ||
+      modelIssues(state).some((i) => i.action.kind === "takeover" || i.action.kind === "rewrite"));
+  const codexHint = useHint("first-codex", {
+    eligible: state !== null && healed,
+    blocked: banner || notice !== null || hasTodos || confirmRestart || gatewayPanel,
+  });
+  const hint = (
+    <HintStrip open={codexHint.visible} onDismiss={codexHint.dismiss} flush>
+      {HINTS["first-codex"]({ agents: [], skills: 0 })}
+    </HintStrip>
+  );
 
-  const refresh = async () => {
-    onBusy(true);
+  /// 轻查：后台例行读取，不显示忙碌、不锁页面（焦点重读、键显示时的轮询）
+  const quietRefresh = useCallback(async () => {
     try {
       const next = await api.gatewayState();
       if (mounted.current) applyState(next);
-    } catch (error) {
-      onError(describeError(error));
-    } finally {
-      onBusy(false);
+    } catch {
+      // 轻查失败不打扰：下一次焦点或操作还会再读
     }
-  };
+  }, [applyState]);
 
+  // 挂载：读一次；路由没在跑就先自愈一次（重启路由），还不行才让待办条出来。
+  // 这是后台读取，不置 busy（读回来之前这一节只有一行「正在读模型设置」）
   useEffect(() => {
     mounted.current = true;
-    void refresh();
+    void (async () => {
+      try {
+        let next = await api.gatewayState();
+        if (routerUnavailable(next)) {
+          try {
+            next = await api.gatewayRestart();
+          } catch (error) {
+            if (mounted.current) setRouterFailure(describeError(error));
+          }
+        }
+        if (mounted.current) {
+          applyState(next);
+          setHealed(true);
+        }
+      } catch (error) {
+        onError(describeError(error));
+      }
+    })();
     return () => {
       mounted.current = false;
     };
-    // 只在挂载时加载一次；后续操作各自刷新状态。
+    // 只在挂载时跑一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 菜单栏面板也能开关注入、重启 Codex：它改完会广播一声，这一页跟着重读
+  // 菜单栏面板也能开关、重启：它改完广播一声，这一节跟着重读；
+  // 窗口获得焦点时也重读——外部重启了 Codex，「重启生效」键要自己消失
   useEffect(() => {
-    const pending = listen("gateway-changed", () => void refresh());
+    let disposed = false;
+    const unlistens: Array<() => void> = [];
+    const collect = (pending: Promise<() => void>) => {
+      void pending.then((un) => (disposed ? un() : unlistens.push(un)));
+    };
+    collect(listen("gateway-changed", () => void quietRefresh()));
+    collect(
+      getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        if (focused) void quietRefresh();
+      }),
+    );
     return () => {
-      void pending.then((un) => un());
+      disposed = true;
+      unlistens.forEach((un) => un());
     };
-    // refresh 只依赖稳定的回调与 ref
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [quietRefresh]);
 
-  // 浮层按 Esc 关掉，和二级页面一个手势
+  // 键显示着时每 5 秒轻查一次，键消失即停；不做常驻进程监控
+  const polling = shouldPollRestart(state, phase);
   useEffect(() => {
-    if (pickerTool === null) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closePicker();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-    // closePicker 只写本地状态，不依赖别的东西
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickerTool]);
+    if (!polling) return;
+    const timer = setInterval(() => void quietRefresh(), RESTART_POLL_MS);
+    return () => clearInterval(timer);
+  }, [polling, quietRefresh]);
 
-  /// 大多数操作都是「调命令 → 用返回的最新状态刷新页面」。
-  /// 成功汇总成一句话，做不成就把后端的原话摆出来——那是用户要拿去查的信息（§4.1）。
-  const runAction = async (action: () => Promise<GatewayState>, success: string) => {
+  // ✓ 已生效 / 已启动那一窗到点（停留、悬停停表、淡出都在 Toast 里）
+  const dismissDone = useCallback(() => setPhase({ kind: "idle" }), []);
+
+  /// 调命令 → 用返回的最新状态刷新；做不成就在节头下灰面板就地说。
+  /// 开关、接管这类用户在等的操作才走这里；勾选不走这里，见 writer
+  const run = async (message: string, action: () => Promise<GatewayState>) => {
     onBusy(true);
     try {
+      // 排在还没写完的勾选后面：两边都写 Codex 设置，谁先谁后要和点的顺序一致
+      await writer.idle();
       const next = await action();
-      if (!mounted.current) return;
-      applyState(next);
-      setToast({ kind: "success", message: success });
+      if (mounted.current) {
+        applyState(next);
+        setNotice(null);
+      }
     } catch (error) {
-      if (mounted.current) setToast({ kind: "cannot", message: describeError(error) });
+      if (mounted.current) setNotice({ message, reason: describeError(error) });
     } finally {
       onBusy(false);
     }
   };
 
-  /// 配置页要自己就地说明失败，所以这一支把错误原样抛回去
+  /// 网关行要自己就地说明失败，所以这一支把错误原样抛回去
   const runOrThrow = async (action: () => Promise<GatewayState>) => {
     onBusy(true);
     try {
+      await writer.idle();
       const next = await action();
       if (mounted.current) applyState(next);
     } finally {
@@ -395,7 +279,6 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
     }
   };
 
-  /// 新建或改一家网关，返回这一家的 id（新建时由后端生成，配置页接着用它拉模型）
   const saveProvider = async (input: {
     id?: string;
     baseUrl: string;
@@ -403,491 +286,369 @@ export default function ModelsTab({ onError, busy, onBusy }: ModelsTabProps) {
   }): Promise<string> => {
     onBusy(true);
     try {
+      await writer.idle();
       const saved = await api.gatewayUpsertProvider(input);
       if (mounted.current) applyState(saved.state);
+      // 加了一家新网关：`first-codex` 教的另一件事（改已有的那家不算）
+      if (input.id === undefined) codexHint.learned();
       return saved.providerId;
     } finally {
       onBusy(false);
     }
   };
 
-  /// 结束这个工具的后台进程。一个都没找到**不是失败**——下次启动照样带着新配置起来，
-  /// 所以那一支也走 success 形态（R6、AC7′）。
-  const restartTool = async (tool: ModelsTool) => {
-    setConfirmRestart(null);
+  /// 重启 Codex：确认之后键位原地换成 14 宽刻度 + 「正在重启 Codex」；结束了进程再读，键消失才算生效。
+  /// 键还在（Codex 还揣着旧配置）就如实说没成，不假装成功
+  const restart = async () => {
+    setConfirmRestart(false);
+    setNotice(null);
+    setPhase({ kind: "restarting" });
     onBusy(true);
-    let done = false;
+    let failure: string | null = null;
     try {
-      const result = await api.gatewayRestartCodex();
-      if (!mounted.current) return;
-      done = true;
-      setToast({
-        kind: "success",
-        message:
-          result.terminated > 0
-            ? `结束了 ${result.terminated} 个 ${tool.name} 进程，下次启动就是新配置`
-            : `${tool.name} 现在没在跑，下次启动就是新配置`,
+      await api.gatewayRestartCodex();
+      // 结束信号是异步的：等到旧进程退了（不再用旧配置）才算成，上限 15 秒
+      const settled = await settleAfterRestart(api.gatewayState, applyState, () => mounted.current);
+      if (settled === undefined) return;
+      failure = settled;
+    } catch (error) {
+      failure = describeError(error);
+    } finally {
+      onBusy(false);
+    }
+    if (!mounted.current) return;
+    if (failure !== null) {
+      setNotice({
+        message: `没重启 ${tool.name}`,
+        reason: failure,
+        action: { label: "再试一次", onClick: () => void restart() },
       });
+    }
+    setPhase(failure === null ? { kind: "done" } : { kind: "idle" });
+  };
+
+  /// 启动 Codex：不打断任何东西，不确认。键位原地换成忙碌指示 +「正在启动 Codex」，
+  /// 轮询到它在跑（上限 15 秒）才算成；超时或打不开，节头下灰面板说原因 + `再试一次`
+  const launch = async () => {
+    setNotice(null);
+    setPhase({ kind: "launching" });
+    let failure: string | null = null;
+    try {
+      await api.gatewayLaunchCodex();
+      const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
+      for (;;) {
+        const fresh = await api.gatewayState();
+        if (!mounted.current) return;
+        applyState(fresh);
+        if (fresh.codex.running) break;
+        if (Date.now() >= deadline) {
+          failure = LAUNCH_TIMEOUT;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, LAUNCH_POLL_MS));
+        if (!mounted.current) return;
+      }
     } catch (error) {
-      if (mounted.current) setToast({ kind: "cannot", message: describeError(error) });
+      failure = describeError(error);
+    }
+    if (!mounted.current) return;
+    if (failure !== null) {
+      setNotice({
+        message: `没启动 ${tool.name}`,
+        reason: failure,
+        action: { label: "再试一次", onClick: () => void launch() },
+      });
+    }
+    setPhase(failure === null ? { kind: "launched" } : { kind: "idle" });
+  };
+
+  /// 拨开关（DESIGN「第三方模型（一节）」）：不确认，直接写配置——打断对话的是重启，不是拨开关。
+  /// 滑块当即过去（phase switching，乐观翻转；写超过 0.3 秒原位刻度）；写成了用返回的状态刷新，
+  /// 要重启才生效时旁边出 `重启生效`，Codex 没在跑出 `启动 Codex`。没写成：switchGateway 撤回刚写的、
+  /// 滑块滑回，节头下灰面板 + `再试一次`
+  const toggleSwitch = async (next: boolean) => {
+    setNotice(null);
+    setPhase({ kind: "switching", next });
+    onBusy(true);
+    let failure: string | null | undefined;
+    try {
+      // 排在还没写完的勾选后面：两边都写 Codex 设置，谁先谁后要和点的顺序一致
+      await writer.idle();
+      failure = await switchGateway(next, {
+        write: (on) => (on ? api.gatewayEnable() : api.gatewayRestore()),
+        read: api.gatewayState,
+        onState: applyState,
+        alive: () => mounted.current,
+        describe: describeError,
+      });
     } finally {
       onBusy(false);
     }
-    // 进程没了之后 codex.running 与 needsCodexRestart 都会变，重读一次让那句人话跟上
-    if (done && mounted.current) await refresh();
+    if (failure === undefined || !mounted.current) return;
+    setPhase({ kind: "idle" });
+    if (failure === null) {
+      // 拨过开关、写成了：`first-codex` 教的就是这件事
+      codexHint.learned();
+      return;
+    }
+    setNotice({
+      message: gatewaySwitchText(next, tool).failed,
+      reason: failure,
+      action: { label: "再试一次", onClick: () => void toggleSwitch(next) },
+    });
   };
 
-  /// 写盘但不出成功提示条：浮层里每点一下就是一次操作，逐次弹提示条是噪音，
-  /// 片的增减本身就是反馈；只有失败才说话
-  const commitModels = async (provider: GatewayProvider, models: GatewayProviderModel[]) => {
+  /// 勾上 / 取消一个模型。开着时去掉的是最后一个在用模型 → 等同关掉开关（同拨开关，不确认）：
+  /// 直接写——先恢复（`gateway_restore` 不动勾选），再把这一家的勾选清空，两步都完成才是
+  /// 「开关关、没有片」；Codex 在跑时写完出 `重启生效`
+  const setModel = (providerId: string, modelId: string, selected: boolean) => {
+    const base = shown.current;
+    const model = base?.providers
+      .find((p) => p.id === providerId)
+      ?.models.find((m) => m.id === modelId);
+    if (!base || !model || model.selected === selected) return;
+    const { next, turnsOff } = selectModel(base, providerId, modelId, selected);
+    const models = next.providers.find((p) => p.id === providerId)?.models ?? [];
+    const payload = selectedPayload(models);
+    writer.write(
+      `${selected ? "没加上" : "没移除"} ${modelLabel(model)}`,
+      next,
+      turnsOff
+        ? async () => {
+            await api.gatewayRestore();
+            return api.gatewaySelectModelsOf(providerId, payload);
+          }
+        : () => api.gatewaySelectModelsOf(providerId, payload),
+    );
+  };
+
+  /// 网关行里的勾选列表：以画面上的状态为准翻转（连点时 provider 对象可能还是上一帧的）
+  const toggleModel = (provider: GatewayProvider, id: string) => {
+    const model = shown.current?.providers
+      .find((p) => p.id === provider.id)
+      ?.models.find((m) => m.id === id);
+    if (!model) return;
+    toggledIn.current = provider.id;
+    setModel(provider.id, id, !model.selected);
+  };
+
+  /// 在用片上的 ×
+  const removeModel = (provider: GatewayProvider, model: GatewayProviderModel) => {
+    toggledIn.current = null;
+    setModel(provider.id, model.id, false);
+  };
+
+  const toggleRow = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const expand = (id: string) => setExpanded((prev) => new Set(prev).add(id));
+
+  /// 行内待办条的动作：接管 / 重新写入。做成了用返回的状态刷新，条随问题一起消失；
+  /// 做不成走同一个节头下灰面板说原因
+  const resolveTodo = async (kind: "takeover" | "rewrite") => {
+    setResolving(kind);
+    await run(kind === "takeover" ? "没接管 Codex 的配置" : "没重新写入 Codex 的设置", () =>
+      kind === "takeover" ? api.gatewayTakeover() : api.gatewayEnable(),
+    );
+    if (mounted.current) setResolving(null);
+  };
+
+  const restartRouter = async () => {
+    setResolving("router");
     onBusy(true);
     try {
-      const fresh = await api.gatewaySelectModelsOf(provider.id, selectedPayload(models));
-      if (mounted.current) applyState(fresh);
+      const next = await api.gatewayRestart();
+      if (mounted.current) {
+        applyState(next);
+        setRouterFailure(null);
+      }
     } catch (error) {
-      // 写盘失败什么都不改：页面读的就是已落盘的那份，界面和文件不会对不上
-      if (mounted.current) setToast({ kind: "cannot", message: describeError(error) });
+      if (mounted.current) setRouterFailure(describeError(error));
     } finally {
       onBusy(false);
+      if (mounted.current) setResolving(null);
     }
   };
 
-  /// 勾选当场生效
-  const toggleModel = (provider: GatewayProvider, id: string) => {
-    void commitModels(
-      provider,
-      provider.models.map((m) => (m.id === id ? { ...m, selected: !m.selected } : m)),
-    );
+  const uninstall = async () => {
+    setUninstalling(true);
+    await run("没卸下后台服务", () => api.gatewayRestore());
+    if (mounted.current) setUninstalling(false);
   };
 
-  const commitRename = (provider: GatewayProvider) => {
-    const pending = renaming;
-    setRenaming(null);
-    if (pending === null) return;
-    const before = provider.models.find((m) => m.id === pending.id);
-    if (!before || before.displayName === pending.value) return;
-    void commitModels(
-      provider,
-      provider.models.map((m) => (m.id === pending.id ? { ...m, displayName: pending.value } : m)),
-    );
-  };
-
-  /// 关就是关，没有「未保存」这个状态——每一下都已经落盘了
-  const closePicker = () => {
-    setRenaming(null);
-    setQuery("");
-    setPickerTool(null);
-  };
-
-  /// 片上的 × ：当场移除，这一次有成功提示条（它是块上的一次明确操作）
-  const removeModel = (
-    tool: ModelsTool,
-    provider: GatewayProvider,
-    model: GatewayProviderModel,
-  ) => {
-    void runAction(
-      () =>
-        api.gatewaySelectModelsOf(
-          provider.id,
-          selectedPayload(
-            provider.models.map((m) => (m.id === model.id ? { ...m, selected: false } : m)),
-          ),
-        ),
-      `${tool.name} 的模型列表里去掉了 ${modelLabel(model)}`,
-    );
-  };
-
-  const removeProvider = (provider: GatewayProvider) => {
-    setConfirmRemove(null);
-    setPickerTool(null);
-    void runAction(
-      () => api.gatewayRemoveProvider(provider.id),
-      `${providerLabel(provider)} 删掉了，它的模型和密钥一起清掉了`,
-    );
-  };
-
-  // 网关配置页：一整页管全部网关（列表 + 添加 + 每家可改可删）。
-  // 删网关的确认弹窗留在这一层渲染——它是页面级的浮层，和配置页并排出现
-  /// 删网关的确认弹窗。主视图和配置页都要能弹它（删的入口在配置页的列表上），
-  /// 所以抽出来，两处各渲染一次。连钥匙串里的密钥一起删、回不来，
-  /// 分量由信息承担，不涂红（§1.1）
-  const removeConfirm = (current: GatewayState) => {
-    if (confirmRemove === null) return null;
-    const { tool, provider } = confirmRemove;
-    const blocked = removeProviderBlockedReason(current, provider, tool);
-    return (
-      <Confirm
-        title={`删掉 ${providerLabel(provider)}`}
-        body="这家网关的地址、拉到的模型列表，以及钥匙串里的密钥会一起删掉。密钥删了取不回来，要用得重新填一次。"
-        warning={
-          <>
-            <span className="models-page__mono">{provider.baseUrl}</span>
-            <br />
-            已选的 {selectedModels(provider).length} 个模型会从 {tool.name} 的模型列表里去掉
-            {current.enabled ? `，${tool.name} 重启后生效` : ""}。
-            {/* 后端会拒的那一种：把原因和下一步摆在眼前，不让用户按完才撞上 */}
-            {blocked !== null ? (
-              <>
-                <br />
-                {blocked}。
-              </>
-            ) : null}
-          </>
-        }
-        confirmLabel="连密钥一起删掉"
-        destructive
-        confirmDisabledReason={blocked ?? undefined}
-        onConfirm={() => removeProvider(provider)}
-        onCancel={() => setConfirmRemove(null)}
-      />
-    );
-  };
-
-  if (gatewayOpen && state !== null) {
+  if (!state) {
     return (
       <>
-        <GatewayPage
-          state={state}
-          tool={MODELS_TOOLS[0]}
-          busy={busy}
-          onBack={() => setGatewayOpen(false)}
-          onSave={saveProvider}
-          onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
-          onRemove={(provider) => setConfirmRemove({ tool: MODELS_TOOLS[0], provider })}
-          onRestore={() => runOrThrow(() => api.gatewayRestore())}
-        />
-        {removeConfirm(state)}
-        {toast ? (
-          <Toast
-            kind={toast.kind}
-            message={toast.message}
-            onDismiss={() => setToast(null)}
-            onClose={() => setToast(null)}
-          />
-        ) : null}
+        {hint}
+        <Section title={`${tool.name} · 第三方模型`}>
+          <div className="models-loading" aria-busy="true">
+            <Spinner size={14} label="正在读模型设置" />
+            <span>正在读模型设置</span>
+          </div>
+        </Section>
       </>
     );
   }
 
-  if (!state) return <Empty kind="scanning" description="读取中…" />;
+  /// 这一节的灰面板：勾选在展开着的那一家列表里没写成的，出在那一行里；其余出在节头下
+  const rowNotice: RowNotice | null =
+    notice?.providerId !== undefined && expanded.has(notice.providerId)
+      ? { providerId: notice.providerId, message: notice.message, reason: notice.reason }
+      : null;
+  const headNotice = notice !== null && rowNotice === null ? notice : null;
 
-  const selectedCount = totalSelected(state);
-  const showBanner = routerUnavailable(state) && !bannerClosed;
-
-  /**
-   * 选择器浮层：**一个工具一份，横跨它的全部网关**。
-   *
-   * 网关卡片搬去配置页之后，原来「从某一家的模型区点开」这个入口没了，
-   * 所以这里要能同时看到几家的模型，并且分得清归属（第三轮反馈）。归属靠两样：
-   * 多于一家时每家一个分组抬头；每条模型下面那行等宽的标识本来就是
-   * `网关id-模型名`（后端的 slug 规则），两家同名模型也不会看混。
-   */
-  const picker = (tool: ModelsTool) => {
-    const groups = state.providers
-      .map((provider) => ({ provider, models: sortAndFilterModels(provider.models, query) }))
-      .filter((group) => group.models.length > 0);
-    const anyModel = state.providers.some((provider) => provider.models.length > 0);
-    // 只有一家时不画分组抬头——那行字在只有一家的时候纯属噪音
-    const grouped = state.providers.length > 1;
-
-    return (
-      <>
-        {/* 点浮层外面等于关闭；罩子透明，不遮挡下面那一块 */}
-        <button
-          type="button"
-          className="models-picker__veil"
-          aria-label="关闭模型选择"
-          onClick={closePicker}
-        />
-        <div className="models-picker" role="dialog" aria-label="选模型">
-          {/* 筛选输入框不受 busy 约束（§6） */}
-          <div className="models-picker__search">
-            <input
-              type="search"
-              className="models-picker__input"
-              placeholder="筛选模型（可能有 100+ 个）"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </div>
-
-          <Busy busy={busy} className="models-picker__list">
-            {!anyModel ? (
-              <Empty
-                kind="noSkills"
-                description="还没有可以选的模型——先到「配置网关」里存好地址和密钥，模型列表会跟着拉回来。"
-                primary={{
-                  label: "配置网关",
-                  onClick: () => {
-                    closePicker();
-                    setGatewayOpen(true);
-                  },
-                }}
-              />
-            ) : groups.length === 0 ? (
-              <Empty
-                kind="noMatch"
-                description="没有匹配的模型。"
-                secondary={{ label: "清除筛选", onClick: () => setQuery("") }}
-              />
-            ) : (
-              <ul className="models-list">
-                {groups.map(({ provider, models }) => (
-                  <li key={provider.id}>
-                    {grouped ? (
-                      <div className="models-group">
-                        {/* 网关名是被谈论的对象，不大写（§1.2） */}
-                        <span className="models-group__name">{providerLabel(provider)}</span>
-                        <span className="models-group__count">{providerCatalogHint(provider)}</span>
-                      </div>
-                    ) : null}
-                    <ul className="models-list">
-                      {models.map((m) => (
-                        <li
-                          key={m.id}
-                          className={
-                            renaming?.id === m.id ? "models-item is-renaming" : "models-item"
-                          }
-                          // 整行可点：12px 的记号只告诉你点了会发生什么，命中区是整行（DESIGN「命中区」）
-                          onClick={() => renaming?.id !== m.id && toggleModel(provider, m.id)}
-                        >
-                          {/* 12px 方形复选框：方＝选择，与状态点的圆分得开（R3） */}
-                          <button
-                            type="button"
-                            role="checkbox"
-                            aria-checked={m.selected}
-                            className="models-item__check"
-                            title={
-                              m.selected
-                                ? `点一下，不再把 ${modelLabel(m)} 放进 ${tool.name} 的列表`
-                                : `点一下，把 ${modelLabel(m)} 放进 ${tool.name} 的列表`
-                            }
-                          >
-                            {m.selected ? (
-                              <svg
-                                width="8"
-                                height="8"
-                                viewBox="0 0 10 10"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.6"
-                                aria-hidden="true"
-                              >
-                                <path d="M2 5.2l2 2 4-4.4" />
-                              </svg>
-                            ) : null}
-                          </button>
-
-                          <div className="models-item__text">
-                            {renaming?.id === m.id ? (
-                              <input
-                                type="text"
-                                className="models-item__rename"
-                                value={renaming.value}
-                                autoFocus
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => setRenaming({ id: m.id, value: e.target.value })}
-                                onBlur={() => commitRename(provider)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.stopPropagation();
-                                    commitRename(provider);
-                                  } else if (e.key === "Escape") {
-                                    // Esc 先被输入框吃掉，不要顺带把浮层也关了；改名作废
-                                    e.stopPropagation();
-                                    setRenaming(null);
-                                  }
-                                }}
-                              />
-                            ) : (
-                              <div className="models-item__name">{modelLabel(m)}</div>
-                            )}
-                            {/* 标识是 `网关id-模型名`，既是标识符也是归属，走等宽（§1.2） */}
-                            <div className="models-item__id">{m.slug || m.id}</div>
-                          </div>
-
-                          {m.selected ? (
-                            renaming?.id === m.id ? (
-                              <span className="models-item__hint">
-                                {tool.name} 列表里显示这个名字
-                              </span>
-                            ) : (
-                              // Button 的 onClick 不带事件；用外层挡住冒泡，别让「改名」顺带切换勾选
-                              <span onClick={(e) => e.stopPropagation()}>
-                                <Button
-                                  variant="link"
-                                  onClick={() => setRenaming({ id: m.id, value: modelLabel(m) })}
-                                >
-                                  改名
-                                </Button>
-                              </span>
-                            )
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Busy>
-
-          <div className="models-picker__foot">
-            <span className="models-picker__count">已选 {selectedCount} 个模型</span>
-          </div>
-        </div>
-      </>
-    );
-  };
+  const todos = sectionTodos({
+    tool,
+    state,
+    healed,
+    routerFailure,
+    resolving,
+    busy,
+    onRestartRouter: () => void restartRouter(),
+    onResolve: (kind) => void resolveTodo(kind),
+  });
 
   return (
-    <section className="models-page">
-      {/* 应用级故障：已启用但路由没在跑，官方模型也会受影响（R7、§4.2） */}
-      {showBanner ? (
-        <ErrorBanner
-          message={state.router.error || "本机路由没在跑，这会儿连官方模型也用不了。"}
-          onClose={() => setBannerClosed(true)}
+    <>
+      {hint}
+      <Section
+        title={`${tool.name} · 第三方模型`}
+        control={
+          // 紧跟节名：开关（拨了就写，乐观翻转；见 codexControls）
+          <CodexSwitch
+            tool={tool}
+            state={state}
+            switching={phase.kind === "switching" ? phase.next : null}
+            busy={busy}
+            label={`${tool.name} 的第三方模型`}
+            // 提示框结果在前，改的是哪个文件写在后面（新手提示只说结果，路径挪到这里）
+            withFile
+            onToggle={(next) => void toggleSwitch(next)}
+          />
+        }
+        actions={
+          // 开关右边 12：它引起的下一步（重启生效 / 启动 Codex），手刚拨完开关，下一步就在它旁边（②）；
+          // 同一位的 `卸下后台服务`（关着而服务还装着时）。三颗不会同时出现，与托盘同一段逻辑
+          <CodexKeySlot
+            tool={tool}
+            state={state}
+            phase={phase}
+            busy={busy}
+            uninstalling={uninstalling}
+            onRestart={() => setConfirmRestart(true)}
+            onLaunch={() => void launch()}
+            onUninstall={() => void uninstall()}
+            onDoneDismiss={dismissDone}
+            place="section"
+          />
+        }
+      >
+        {headNotice ? (
+          <div className="models-notice">
+            <NoticePanel
+              scope="section"
+              message={headNotice.message}
+              reason={headNotice.reason}
+              action={headNotice.action}
+              onClose={() => setNotice(null)}
+            />
+          </div>
+        ) : null}
+        <InUseRow state={state} onRemove={removeModel} />
+        {todos.length > 0 ? <div className="models-todos">{todos}</div> : null}
+        <GatewayBlock
+          tool={tool}
+          state={state}
+          busy={busy}
+          expanded={expanded}
+          onToggleRow={toggleRow}
+          onExpand={expand}
+          onSave={saveProvider}
+          onFetchModels={(id) => runOrThrow(() => api.gatewayFetchModelsOf(id))}
+          onRetry={(id) => runOrThrow(() => api.gatewayRetryProvider(id))}
+          onRemove={(p) => runOrThrow(() => api.gatewayRemoveProvider(p.id))}
+          onToggleModel={toggleModel}
+          notice={rowNotice}
+          onCloseNotice={() => setNotice(null)}
+          onPanelChange={setGatewayPanel}
         />
-      ) : null}
+      </Section>
 
-      <div className="models-page__body">
-        <div className="models-page__head">
-          <span className="models-page__label">第三方模型</span>
-          <p className="models-page__intro">
-            接上自建或第三方网关，把它们的模型放进下面这些工具自己的模型列表。
-          </p>
-        </div>
-
-        {/* 一个工具一块。今天 MODELS_TOOLS 里只有一个，但版面不假设只有一个：
-            后端那侧现在也只支持 Codex，所以每一块共用同一份 state；等后端按工具
-            分开，改的是这里传什么 state，块里的东西一个都不用动 */}
-        <ul className="models-tools">
-          {MODELS_TOOLS.map((tool) => (
-            <li key={tool.id} className="models-tool">
-              <ToolIntro
-                tool={tool}
-                state={state}
-                selectedCount={selectedCount}
-                busy={busy}
-                onEnable={() =>
-                  void runAction(
-                    () => api.gatewayEnable(),
-                    `${selectedCount} 个模型进了 ${tool.name} 的模型列表，要重启 ${tool.name} 才看得到`,
-                  )
-                }
-                onDisable={() =>
-                  void runAction(
-                    () => api.gatewayRestore(),
-                    `已经停用，${tool.name} 的模型列表只剩官方模型；要重启 ${tool.name} 才看得到`,
-                  )
-                }
-                onRestart={() => setConfirmRestart(tool)}
-                onConfigure={() => setGatewayOpen(true)}
-              />
-
-              {/* 常驻待办挂在这个工具上，动作就在右边（R7、§4.4） */}
-              {state.codex.drift && !later.drift ? (
-                <div className="models-tool__notice">
-                  <RowNotice
-                    message={
-                      <>
-                        {tool.name} 升到{" "}
-                        <span className="models-page__mono">{state.codex.version}</span>{" "}
-                        之后，模型列表要重新生成一次才对得上。
-                      </>
-                    }
-                    actions={[
-                      {
-                        label: "重新生成",
-                        onClick: () =>
-                          void runAction(
-                            () => api.gatewayEnable(),
-                            `模型列表重新生成好了，要重启 ${tool.name} 才看得到`,
-                          ),
-                      },
-                    ]}
-                    onLater={() => setLater((c) => ({ ...c, drift: true }))}
-                  />
-                </div>
-              ) : null}
-
-              {state.takeover !== null && !later.takeover ? (
-                <div className="models-tool__notice">
-                  <RowNotice
-                    message={`${takeoverOfferText(state.takeover)}。接过来会把网关地址、已选模型和密钥原样带过来，并撤下 agents-manager 的后台服务与文件。`}
-                    actions={[
-                      {
-                        label: "接管",
-                        onClick: () =>
-                          void runAction(
-                            () => api.gatewayTakeover(),
-                            `接过来了，网关地址、已选模型和密钥都在；要重启 ${tool.name} 才看得到`,
-                          ),
-                      },
-                    ]}
-                    onLater={() => setLater((c) => ({ ...c, takeover: true }))}
-                  />
-                </div>
-              ) : null}
-
-              {/* 主页面上只剩「生效的模型」这一块：网关的增删改搬去配置页了（第三轮反馈）。
-                  改选仍然在这一页完成，整块可点——不许退化成「进二级页选」 */}
-              <section className="models-section">
-                <div className="models-section__head">
-                  <span className="models-page__label">生效的模型</span>
-                  {/* 极简一句网关事实，当进配置页的由头；网关内容本身不摊在这儿 */}
-                  <span className="models-section__summary">{gatewaySummary(state)}</span>
-                </div>
-
-                <EffectiveModels
-                  tool={tool}
-                  state={state}
-                  busy={busy}
-                  onOpenPicker={() => {
-                    setQuery("");
-                    setRenaming(null);
-                    setPickerTool(tool);
-                  }}
-                  onRemoveModel={(provider, model) => removeModel(tool, provider, model)}
-                  onConfigure={() => setGatewayOpen(true)}
-                >
-                  {pickerTool?.id === tool.id ? picker(tool) : null}
-                </EffectiveModels>
-              </section>
-
-              {/* 限制说明是**这个工具**的事实，不是某次操作的结果，常驻（R8） */}
-              <div className="models-tool__limits">
-                {/* 标签里不嵌工具名：micro-cap 是大写档，`Codex` 会变成 `CODEX`（§1.2）。
-                    这一块本来就在这个工具底下，不点名也不会误会 */}
-                <span className="models-page__label">用第三方模型要知道的</span>
-                <p className="models-tool__limits-text">{tool.limitations}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      {/* 会中断进行中的对话，所以确认一道（R6、§5 四处确认之一） */}
-      {confirmRestart !== null ? (
+      {confirmRestart ? (
         <Confirm
-          title={`重启 ${confirmRestart.name}`}
-          body={`会结束正在运行的 ${confirmRestart.name} 后台进程，进行中的对话会中断。下次用 ${confirmRestart.name} 时会带着新配置起来。`}
+          title={`重启 ${tool.name}？`}
           confirmLabel="重启"
-          onConfirm={() => void restartTool(confirmRestart)}
-          onCancel={() => setConfirmRestart(null)}
-        />
+          onConfirm={() => void restart()}
+          onCancel={() => setConfirmRestart(false)}
+        >
+          {RESTART_CONSEQUENCE}
+        </Confirm>
       ) : null}
-
-      {removeConfirm(state)}
-
-      {toast ? (
-        <Toast
-          kind={toast.kind}
-          message={toast.message}
-          onDismiss={() => setToast(null)}
-          onClose={() => setToast(null)}
-        />
-      ) : null}
-    </section>
+    </>
   );
+}
+
+/// 行内待办条（DESIGN「行内待办条」）：路由没在跑（排在最前，原因跟在主句后同一行）、正由
+/// agents-manager 管理、Sophia 写进去的设置被改掉了。都不给「稍后」，问题解决自动收起；执行时键换成忙碌指示
+export function sectionTodos({
+  tool,
+  state,
+  healed,
+  routerFailure,
+  resolving,
+  busy,
+  onRestartRouter,
+  onResolve,
+}: {
+  tool: ModelsTool;
+  state: GatewayState;
+  healed: boolean;
+  routerFailure: string | null;
+  resolving: "takeover" | "rewrite" | "router" | null;
+  busy: boolean;
+  onRestartRouter: () => void;
+  onResolve: (kind: "takeover" | "rewrite") => void;
+}): ReactNode[] {
+  const out: ReactNode[] = [];
+  if (showRouterTodo(state, healed)) {
+    out.push(
+      <NoticePanel
+        key="router"
+        scope="section"
+        message="路由没在跑，第三方模型用不了"
+        reason={routerFailure ?? undefined}
+        busy={resolving === "router" ? "正在重启路由" : undefined}
+        action={{
+          label: "重启路由",
+          onClick: onRestartRouter,
+          disabledReason: busy ? "正在处理上一步" : undefined,
+        }}
+      />,
+    );
+  }
+  for (const issue of modelIssues(state)) {
+    const kind = issue.action.kind;
+    if (kind !== "takeover" && kind !== "rewrite") continue;
+    out.push(
+      <NoticePanel
+        key={issue.key}
+        scope="section"
+        message={
+          kind === "takeover"
+            ? `${tool.name} 正由 agents-manager 管理`
+            : "Sophia 写进去的设置被改掉了"
+        }
+        busy={resolving === kind ? (kind === "takeover" ? "正在接管" : "正在重新写入") : undefined}
+        action={{
+          label: kind === "takeover" ? "接管" : "重新写入",
+          onClick: () => onResolve(kind),
+          disabledReason: busy ? "正在处理上一步" : undefined,
+        }}
+      />,
+    );
+  }
+  return out;
 }

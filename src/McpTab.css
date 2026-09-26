@@ -1,35 +1,23 @@
-/* MCP 矩阵的版式。表格本体（.matrix / .cell / .path）与 skill 页共用 App.css 那一份——
-   两页是同一个界面（spec 核心判断），这里只补 MCP 多出来的那两列与列宽。
-   色值一律 var(--…)，唯一来源是 tokens.css（§1.1）。 */
+/* MCP 页。表格本体与 Skills 共用 Matrix.css——两页是同一张表，这里只补 MCP 独有的：
+   批量 / 跨域写入确认框里的清单。色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
-/* 一个域里可能有好几个位置（同一个 agent 也可能有两个），列多了整块横向滚动，
-   不去挤压圆点列——挤到看不清是哪一列，格就白画了 */
-.mcp-domain-group {
-  max-width: 100%;
-  overflow-x: auto;
+.mcp-confirm-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
 }
 
-table.mcp-matrix {
-  width: 100%;
-  min-width: 620px;
-}
-
-/* 服务名那一列要放得下行级方标签「N 份不一样」 */
-table.mcp-matrix th:nth-child(1),
-table.mcp-matrix td:nth-child(1) {
-  width: 240px;
-}
-
-/* 传输：标准输入输出 / HTTP / 不支持。次要文字，不抢服务名 */
-table.mcp-matrix td.mcp-transport {
-  width: 104px;
-  font-size: var(--size-caption);
+.mcp-confirm-more,
+.mcp-confirm-note {
   color: var(--ink-mute);
 }
 
-/* 来源位置：一行里可能有好几个位置名，放不下就截断 */
-table.mcp-matrix td.path {
-  width: 170px;
-  max-width: 170px;
+.mcp-confirm-note {
+  margin-top: var(--space-xs);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
 }

@@ -1,0 +1,159 @@
+/* 添加来源的内容（DESIGN「来源：订阅、来源行、添加来源 › 添加来源」，画板 V4Layouts add-source）：
+   单栏，自上而下——页面头下 18 是 `选择文件夹…`（默认键 32）+ 12 + 灰字；下面一列候选来源
+   （可滚、边缘从 face 渐隐）；贴底一行（`添加 N 个来源`）是推入页 `PushedPage` 的贴底行。
+   只管内容；页面头、转场、页边、贴底行在容器（组件库的推入页）。候选行是组件库的列表行 `ListRow`。
+   色值一律 var(--…)。 */
+@import "../tokens.css";
+
+.add-src {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---- 第一步：`选择文件夹…`（高 32）+ 12 + 灰字（12 ink-mute） ---- */
+/* 键与它的做不成浮窗的锚点（选的文件夹加不进来时，提示条出在键下方、左对齐键） */
+.add-src__pickbtn {
+  display: inline-flex;
+}
+
+.add-src__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  padding-top: var(--space-lg);
+}
+
+.add-src__hint {
+  min-width: 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* ---- 候选列表：独立滚动；与第一步同宽 776（DESIGN：内容铺满 776） ---- */
+.add-src__pick,
+.add-src__loading,
+.add-src__notice {
+  max-width: 776px;
+}
+
+/* 列表行的悬停带左右各外扩 8（ListRow）：滚动区（它裁 overflow）连同渐隐向两侧各让出 8，
+   里面再用内边距把内容收回 776，行带就不被滚动区的边裁掉 */
+.add-src__fade {
+  flex: 1 1 auto;
+  max-width: calc(776px + 2 * var(--space-xs));
+  margin: 0 calc(-1 * var(--space-xs));
+}
+
+.add-src__scroll {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 var(--space-xs);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* 区域小标 `建议的来源`（区块小标 SectionLabel）：上距 22 */
+.add-src__label {
+  padding: 22px 0 0;
+}
+
+/* 组小标题：`你选的文件夹` `其他项目在用的` `检测到的`：13 / 600 ink，贴下面 1px hairline 上方 6；组间 22 */
+.add-src__group {
+  margin-top: 22px;
+  padding-bottom: 6px;
+  border-bottom: var(--border-structure);
+  font-size: var(--size-caption);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.add-src__label + .add-src__group {
+  margin-top: 10px;
+}
+
+/* 没有建议的来源：灰字一句（Note），小标下 8 */
+.add-src__none {
+  padding-top: var(--space-xs);
+}
+
+/* ---- 候选行＝列表行 ListRow：勾选框 24 ｜ 拉手 18 + 6 ｜ 名字 / 第二行；行、悬停带、抽屉、行线都归组件 ---- */
+
+/* 第二行：12 ink-mute（组件给），一行放不下以 … 截断（提示框 fit="grow" 撑满这一行、随它收窄） */
+.add-src__meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 抽屉里：全部名字，只读，四列各 160，13 ink-mute */
+.add-src__items {
+  display: grid;
+  grid-template-columns: repeat(4, 160px);
+  column-gap: var(--space-sm);
+}
+
+.add-src__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: var(--control-h-compact);
+}
+
+.add-src__itemname {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 这里放不过去的服务（不支持）：名字再淡一级 */
+.add-src__itemname.is-dim {
+  color: var(--ink-faint);
+}
+
+/* `同名` / `不支持`：不跟名字一起被挤窄 */
+.add-src__tag {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.add-src__loading {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.add-src__notice {
+  flex: 1 1 auto;
+  padding-top: var(--space-lg);
+}
+
+/* 选了文件夹、正在读（过了 0.3 秒门槛才出现）：第二行原位忙碌指示 + 一句，字随第二行 12 */
+.add-src__reading {
+  font-size: inherit;
+}
+
+.add-src__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: var(--control-h-row);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}

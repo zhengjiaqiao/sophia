@@ -1,80 +1,106 @@
-/* 设置页的排版（组件规范 §4.6 二级页面、§13.1 agent 选择）。
-   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影、零圆角。 */
+/* 设置页（DESIGN「产品裁决 › 设置」，画板 V4Layouts-settings）：侧栏目的地，只替换机面。
+   左右内边距由机面给（.face__scroll），这里只排内容；色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "../tokens.css";
 
 .settings-page {
-  box-sizing: border-box;
-  max-width: 760px;
-  padding: var(--space-xl) var(--space-xxl) var(--space-xxl);
+  width: 776px;
+  max-width: 100%;
+  padding-bottom: var(--space-huge);
 }
 
-/* 区域标签是我们自己写的结构词，大写；后面那句是说明，不大写（§1.2） */
-.settings-page__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
+/* 区块小标（ui 的 SectionLabel rule）的位置：页面头下 24 */
+.settings-page__section {
+  margin-top: var(--space-xl);
 }
 
-.settings-page__label {
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-transform: uppercase;
-  color: var(--ink-mute);
-}
-
-.settings-page__note {
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-}
-
-/* 版本号是标识符不是句子，走等宽（§排版：mono 只给路径与计数） */
-.settings-page__version {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-mute);
-}
-
-/* 「版本」和「Agent」是两个区，按区距分开（§留白）。
-   中间那个 __update 盒子没有提示条时高度为零，这条外距照样把两区拉开 */
-.settings-page__head--later {
+/* 关于：上距 48 */
+.settings-page__section--later {
   margin-top: var(--space-huge);
 }
 
-/* 一行放得下 4–5 片，已安装的 9 个两行完事（§13.1） */
+/* 三列等分、按行读；勾选行（CheckRow grid）的悬停带左右各外扩 8，复选框仍与区块小标左沿对齐 */
 .settings-page__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 6px calc(-1 * var(--space-xs)) 0;
+}
+
+.settings-page__cell {
+  position: relative;
+  min-width: 0;
+}
+
+/* 未安装那一节的名字：放不下截断 */
+.settings-page__name {
+  overflow: hidden;
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* `› 未安装的 32 个`：一行展开（拉手常显在前 + 6 + 13 ink-mute 字），上 10；点字也拉开 */
+.settings-page__more {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
 }
 
-/* 选中片是反色，首字母方块的描边跟着转白，否则黑底上一圈浅灰很脏 */
-.settings-page .ss-chip.is-selected .ss-mark__box {
-  border-color: var(--canvas);
+.settings-page__more-label {
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
 }
 
-/* 没装的那些：形状不变、字色更轻。它们仍然可以预先开启，所以不是禁用态 */
-.settings-page__grid--absent {
+.settings-page__more-label:hover {
+  color: var(--ink);
+}
+
+/* 未安装那一节：信息不是设置——没有复选框，名字 ink-mute，悬停没有反馈 */
+.settings-page__absent {
   margin-top: var(--space-sm);
 }
 
-.settings-page__grid--absent .ss-chip:not(.is-selected) {
-  color: var(--ink-faint);
+.settings-page__info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 var(--space-xs);
+  color: var(--ink-mute);
+  white-space: nowrap;
 }
 
-.settings-page__more {
-  margin-top: var(--space-md);
-}
-
-.settings-page__foot {
-  max-width: 560px;
-  margin-top: var(--space-huge);
-  font-family: var(--font-ui);
+/* 在不显示名单里又卸载了的：名字后「装上后也不显示 · 恢复」 */
+.settings-page__hidden-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
   font-size: var(--size-caption);
   color: var(--ink-mute);
-  line-height: var(--leading-caption);
+}
+
+/* 关于：版本 + 0.1.0（ui 的 Mono：等宽 ink-faint、可选中）+ 14 + 检查更新（默认键紧凑） */
+.settings-page__about {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.settings-page__label {
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+}
+
+/* 键与它下方浮起的 `✓ 已是最新版本` 的锚 */
+.settings-page__check {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 更新待办条（灰面板 section）/ 检查失败的一句（Note）：关于下，上距 14 */
+.settings-page__update {
+  margin-top: 14px;
 }

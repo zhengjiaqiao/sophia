@@ -174,22 +174,47 @@ pub fn parse_etime(text: &str) -> Option<u64> {
     Some(days * 86400 + seconds)
 }
 
-/// Codex 桌面应用主进程的启动时间；没在运行为 None
+/// Codex 桌面应用的应用标识。本机实测应用包是 `ChatGPT.app`，按标识打开就不必写死路径
+const CODEX_BUNDLE_ID: &str = "com.openai.codex";
+
+/// `open -b com.openai.codex`：让系统按应用标识打开 Codex 桌面应用（已开着就只是带到前面）。
+/// 打不开时把 `open` 的原话带回去
+fn launch_codex() -> io::Result<()> {
+    let output = Command::new("/usr/bin/open")
+        .args(["-b", CODEX_BUNDLE_ID])
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let said = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    Err(io::Error::other(if said.is_empty() {
+        format!("open 没能打开 {CODEX_BUNDLE_ID}（{}）", output.status)
+    } else {
+        said
+    }))
+}
+
+/// Codex 加载配置的那批进程里最早的启动时间；一个都没在跑为 None。
+///
+/// 认的是 `restart_codex` 会结束的同一批后台进程（`process::is_codex_background`：
+/// 桌面应用与编辑器插件拉起的 `codex app-server`），**不是桌面应用主进程**：
+/// 配置是 app-server 启动时读的，重启生效结束的也是它——主进程一直开着，
+/// 按它的启动时间比，点完「重启生效」键永远不会消失。
+/// 终端里交互式的 `codex` 不认（重启也不碰它），界面上写明「Codex 桌面应用」。
 fn codex_started_at() -> Option<u64> {
     let output = Command::new("/bin/ps")
-        .args(["-axo", "etime=,comm="])
+        .args(["-axo", "etime=,command="])
         .output()
         .ok()?;
-    let now = unix_now();
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
+    earliest_codex_start(&String::from_utf8_lossy(&output.stdout), unix_now())
+}
+
+/// `ps -axo etime=,command=` 的输出里，Codex 后台进程最早的启动时刻
+fn earliest_codex_start(ps: &str, now: u64) -> Option<u64> {
+    ps.lines()
         .filter_map(|line| {
-            let line = line.trim();
-            let (etime, command) = line.split_once(char::is_whitespace)?;
-            let command = command.trim();
-            let is_codex = command.ends_with("/ChatGPT.app/Contents/MacOS/ChatGPT")
-                || command.ends_with("/Codex.app/Contents/MacOS/Codex");
-            if !is_codex {
+            let (etime, command) = line.trim().split_once(char::is_whitespace)?;
+            if !process::is_codex_background(command.trim()) {
                 return None;
             }
             Some(now.saturating_sub(parse_etime(etime)?))
@@ -357,6 +382,7 @@ pub fn build_app(store_dir: PathBuf) -> App {
         }),
         list_processes: Box::new(process::list_processes),
         terminate: Box::new(process::terminate),
+        launch_codex: Box::new(launch_codex),
         codex_started_at: Box::new(codex_started_at),
         codex_version: Box::new(codex_version_cached()),
         now: Box::new(unix_now),
@@ -381,13 +407,33 @@ pub fn prewarm(app: &App) {
 }
 
 pub async fn fetch_models(base_url: &str, key: &str) -> Result<(Vec<String>, String), AppError> {
+    fetch_models_detailed(base_url, key)
+        .await
+        .map_err(|failure| failure.error)
+}
+
+/// 一次拉取失败：给用户看的错误，以及要记在那一家网关上的短原因（没联网就失败时为 None）
+#[derive(Debug)]
+pub struct FetchFailure {
+    pub error: AppError,
+    pub unreachable: Option<&'static str>,
+}
+
+/// 同 [`fetch_models`]，失败时多带一个按错误种类归纳的短原因，供调用方记到那一家网关上
+pub async fn fetch_models_detailed(
+    base_url: &str,
+    key: &str,
+) -> Result<(Vec<String>, String), FetchFailure> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let resolve = system_proxy();
     let client = provider::client_builder_defaults()
         .no_proxy()
         .proxy(reqwest::Proxy::custom(move |url| resolve(url)))
         .build()
-        .map_err(|e| AppError::new("internal", e.to_string()))?;
+        .map_err(|e| FetchFailure {
+            error: AppError::new("internal", e.to_string()),
+            unreachable: None,
+        })?;
     match provider::fetch_models(&client, base_url, key, Duration::from_secs(10)).await {
         Ok(result) => Ok((result.ids, result.api_base)),
         Err(e) => {
@@ -396,7 +442,10 @@ pub async fn fetch_models(base_url: &str, key: &str) -> Result<(Vec<String>, Str
             } else {
                 "network"
             };
-            Err(AppError::new(code, e.message))
+            Err(FetchFailure {
+                error: AppError::new(code, e.message),
+                unreachable: Some(e.kind.unreachable_reason()),
+            })
         }
     }
 }
@@ -584,6 +633,19 @@ mod tests {
         assert_eq!(parse_etime("01:02:03"), Some(3723));
         assert_eq!(parse_etime("2-01:02:03"), Some(2 * 86400 + 3723));
         assert_eq!(parse_etime("garbage"), None);
+    }
+
+    /// 比的是揣着配置的 app-server，不是桌面应用主进程；终端里的交互式 codex 不算
+    #[test]
+    fn codex_start_follows_background_processes() {
+        let ps = "01-16:41:15 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT\n\
+                  00:10 /Applications/ChatGPT.app/Contents/Resources/codex -c a=b app-server --x\n\
+                  05:00 /opt/homebrew/bin/codex\n";
+        assert_eq!(earliest_codex_start(ps, 1000), Some(990));
+        assert_eq!(
+            earliest_codex_start("05:00 /opt/homebrew/bin/codex\n", 1000),
+            None
+        );
     }
 
     /// AC28 的判据：内容没变不复制；内容变了才复制并报告已更新；只是修改时间变了不算更新

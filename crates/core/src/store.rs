@@ -1,122 +1,42 @@
 //! JSON 持久化：projects.json、settings.json，整文件原子写（先写 .tmp 再 rename）
-use crate::{codex_models::settings::GatewaySettings, mcp::McpAutoImportRule, models::AutoLink};
+use crate::{
+    codex_models::settings::GatewaySettings,
+    mcp::{sources::McpSubscriptions, McpAutoImportRule, McpOverview},
+    models::{AutoLink, Source, Target},
+    subscriptions::Subscriptions,
+};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 应用设置：被用户关掉的 harness id、手动添加的本体位置、自动同步规则
 /// 容器级 `default` 让旧格式（缺字段）照样能读
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// 不显示名单：不在列表里显示的 agent id（见 `discovery::reconcile_shown`）
     pub disabled_harnesses: Vec<String>,
+    /// 上次整理显示名单时已安装的 agent id。不在其中的已安装 agent 算新装的——
+    /// 只有它们受「显示不满 4 个才自动出现」管。旧文件没有这个字段，读成空：
+    /// 已安装的全算新装，正好按 agent 表先后留前 4 个
+    pub known_installed: Vec<String>,
     pub manual_sources: Vec<PathBuf>,
     pub auto_links: Vec<AutoLink>,
     pub mcp_auto_imports: Vec<McpAutoImportRule>,
     pub codex_gateway: GatewaySettings,
-    /// 被用户忽略的待处理问题；旧文件没有这个字段
-    #[serde(default)]
-    pub ignored: Vec<IgnoredIssue>,
-}
-
-/// 待处理栏里四类需要用户拿主意的问题；待处理页按它分动作，一类一种动作
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum IssueKind {
-    /// 同名本体出现在多处，目标指向了另一处
-    DuplicateSource,
-    /// 链接指向不存在的位置
-    BrokenLink,
-    /// 目标位置写不进去 → 再试一次
-    ReadOnlyTarget,
-    /// 目标整个目录链到了别的本体 → 拆开
-    WholeLinkedTarget,
-    /// MCP：几个位置各有一份同名配置、连的地址不一样 → 看两边差在哪
-    DifferentCopies,
-    /// MCP：某个位置的配置文件这次读不出来 → 去看看
-    InvalidLocation,
-}
-
-impl IssueKind {
-    /// key 里的稳定标签，与 serde 的 camelCase 一致
-    pub fn as_str(self) -> &'static str {
-        match self {
-            IssueKind::DuplicateSource => "duplicateSource",
-            IssueKind::BrokenLink => "brokenLink",
-            IssueKind::ReadOnlyTarget => "readOnlyTarget",
-            IssueKind::WholeLinkedTarget => "wholeLinkedTarget",
-            IssueKind::DifferentCopies => "differentCopies",
-            IssueKind::InvalidLocation => "invalidLocation",
-        }
-    }
-}
-
-/// 忽略的是"这一条具体状况"而不是某个 skill：涉及的位置一变，key 就变，界面自然重新提示
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IgnoredIssue {
-    pub kind: IssueKind,
-    pub key: String,
-    /// 忽略时间，RFC 3339 的 UTC 写法，可直接按字典序排
-    pub at: String,
-}
-
-/// key 内部的分隔符：Unit Separator，路径里不会出现
-const KEY_SEP: char = '\u{1f}';
-
-impl IgnoredIssue {
-    /// 现在忽略这一条
-    pub fn new(kind: IssueKind, paths: &[PathBuf]) -> Self {
-        Self {
-            kind,
-            key: Self::key_for(kind, paths),
-            at: now_rfc3339(),
-        }
-    }
-
-    /// 类别 + 全部路径（规范化后排序）拼成的 key。
-    /// 排序是为了让路径的先后顺序不影响结果；不取摘要，直接留可读的路径串，
-    /// 这样 settings.json 里的记录能看懂，也不依赖任何跨版本不保证稳定的 hash。
-    pub fn key_for(kind: IssueKind, paths: &[PathBuf]) -> String {
-        let mut parts: Vec<String> = paths
-            .iter()
-            .map(|p| crate::fs::normalize(p).to_string_lossy().into_owned())
-            .collect();
-        parts.sort();
-        let mut key = String::from(kind.as_str());
-        for p in parts {
-            key.push(KEY_SEP);
-            key.push_str(&p);
-        }
-        key
-    }
-}
-
-fn now_rfc3339() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    rfc3339_utc(secs)
-}
-
-/// Unix 秒 → `YYYY-MM-DDTHH:MM:SSZ`。天数转公历用 Howard Hinnant 的 civil_from_days
-fn rfc3339_utc(secs: i64) -> String {
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
-    // 把纪元移到 0000-03-01，让闰日落在 400 年周期末尾
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}Z")
+    /// 手动项目加入 Sophia 的时间：规范化路径 → 毫秒时间戳。侧栏「最近创建」在取不到文件夹
+    /// 创建时间时用它；旧文件没有这个字段，旧项目也就没有记录（回退到文件夹修改时间）
+    pub project_added_at: BTreeMap<String, u64>,
+    /// 每个位置订阅了哪些来源：域 key（`global` / `project:<路径>`）→ 来源路径（normalize 后）。
+    /// 旧文件没有这个字段，读成空；第一次扫描由 `subscriptions::adopt` 按老数据补上
+    pub subscriptions: Subscriptions,
+    /// 每个位置订阅了哪些 MCP 来源：域 key → 来源位置 id（`McpLocation.id`）。
+    /// 旧文件没有这个字段，读成空；扫描时由 `mcp::sources::adopt` 按老数据补上
+    pub mcp_subscriptions: McpSubscriptions,
+    /// 看过的新手提示 id（关掉或学会的那几条，前端 `src/hints.ts` 登记）。
+    /// 旧文件没有这个字段，读成空：每条提示都还没看过
+    pub seen_hints: Vec<String>,
 }
 
 pub struct Store {
@@ -145,6 +65,7 @@ impl Store {
         save_json(&self.dir.join("projects.json"), &projects)
     }
 
+    /// 读设置；旧文件里已删功能留下的字段（`seenIssues`、`ignored`）读时忽略
     pub fn load_settings(&self) -> io::Result<Settings> {
         load_json(&self.dir.join("settings.json"))
     }
@@ -153,30 +74,151 @@ impl Store {
         save_json(&self.dir.join("settings.json"), settings)
     }
 
-    /// 记下一条忽略；同一个 key 已经在里面就保持原样（不刷新 at）
-    pub fn ignore(&self, issue: IgnoredIssue) -> io::Result<()> {
+    /// 读设置，顺手做 skill 自动同步规则的升级迁移：没有 baseline 的旧规则补上本体位置
+    /// 当前的全部 skill 名（见 `skills::migrate_baselines`），改过才写回。
+    /// 要扫描结果才能迁移，所以只在扫描之后展开规则的地方用它，其余照旧 `load_settings`
+    pub fn load_settings_migrating_auto_links(&self, sources: &[Source]) -> io::Result<Settings> {
         let mut settings = self.load_settings()?;
-        if settings.ignored.iter().any(|i| i.key == issue.key) {
+        if crate::skills::migrate_baselines(&mut settings.auto_links, sources) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
+    /// 自动同步执行完，记下各规则在各位置最近一次真正建上的链（见 `skills::record_auto_runs`）；
+    /// 一格没建上就不写盘。`sources` / `targets` 要是产出这批动作的那次扫描
+    pub fn record_auto_link_runs(
+        &self,
+        sources: &[Source],
+        targets: &[Target],
+        report: &crate::models::SyncReport,
+        at_ms: u64,
+    ) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if crate::skills::record_auto_runs(
+            &mut settings.auto_links,
+            sources,
+            targets,
+            report,
+            at_ms,
+        ) {
+            self.save_settings(&settings)?;
+        }
+        Ok(())
+    }
+
+    /// 读设置，顺手把此刻有软链的来源写进各位置的订阅记录（见 `subscriptions::adopt`；
+    /// 第一次扫描时认领老数据），改过才写回。要发现结果才能认领，所以只在发现之后用
+    pub fn load_settings_adopting_subscriptions(
+        &self,
+        sources: &[Source],
+        targets: &[Target],
+    ) -> io::Result<Settings> {
+        let mut settings = self.load_settings()?;
+        let legacy = settings.manual_sources.clone();
+        if crate::subscriptions::adopt(&mut settings.subscriptions, sources, targets, &legacy) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
+    /// 同上，MCP 自动添加规则：取来源位置当前的全部 MCP 名（见 `mcp::migrate_baselines`）
+    pub fn load_settings_migrating_mcp_auto_imports(
+        &self,
+        overview: &McpOverview,
+    ) -> io::Result<Settings> {
+        let mut settings = self.load_settings()?;
+        if crate::mcp::migrate_baselines(&mut settings.mcp_auto_imports, overview) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
+    /// MCP 自动写入执行完，记下各规则最近一次真正写进去的（见 `mcp::record_auto_runs`）；
+    /// 一项没写进去就不写盘。`actions` 是产出这批写入的计划动作
+    pub fn record_mcp_auto_import_runs(
+        &self,
+        actions: &[crate::mcp::McpAction],
+        report: &crate::mcp::McpReport,
+        at_ms: u64,
+    ) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if crate::mcp::record_auto_runs(&mut settings.mcp_auto_imports, actions, report, at_ms) {
+            self.save_settings(&settings)?;
+        }
+        Ok(())
+    }
+
+    /// 读设置，顺手把老数据里已经写进各位置的 MCP 来源记进订阅（见 `mcp::sources::adopt`），
+    /// 改过才写回。要扫描结果才能认领，所以只在 MCP 扫描之后用；规则先迁移再认领
+    pub fn load_settings_adopting_mcp_subscriptions(
+        &self,
+        overview: &McpOverview,
+    ) -> io::Result<Settings> {
+        let mut settings = self.load_settings_migrating_mcp_auto_imports(overview)?;
+        if crate::mcp::sources::adopt(
+            &mut settings.mcp_subscriptions,
+            overview,
+            &settings.mcp_auto_imports,
+        ) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
+    /// 读设置，顺手按上限整理显示名单（见 `discovery::reconcile_shown`），改过才写回。
+    /// `installed` 是已安装的 agent id，按 agent 表的先后
+    pub fn load_settings_reconciling_shown(&self, installed: &[String]) -> io::Result<Settings> {
+        let mut settings = self.load_settings()?;
+        if crate::discovery::reconcile_shown(installed, &mut settings) {
+            self.save_settings(&settings)?;
+        }
+        Ok(settings)
+    }
+
+    /// 记下手动项目加入的时间（毫秒）；已有记录不覆盖——移除前再加一次不算新加入
+    pub fn mark_project_added(&self, path: &Path, at_ms: u64) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        let key = project_key(path);
+        if settings.project_added_at.contains_key(&key) {
             return Ok(());
         }
-        settings.ignored.push(issue);
+        settings.project_added_at.insert(key, at_ms);
         self.save_settings(&settings)
     }
 
-    /// 恢复提示；key 不在里面就什么都不做
-    pub fn unignore(&self, key: &str) -> io::Result<()> {
+    /// 移除手动项目时一并忘掉它的加入时间；本来就没有记录时不写盘
+    pub fn forget_project_added(&self, path: &Path) -> io::Result<()> {
         let mut settings = self.load_settings()?;
-        let before = settings.ignored.len();
-        settings.ignored.retain(|i| i.key != key);
-        if settings.ignored.len() == before {
+        if settings
+            .project_added_at
+            .remove(&project_key(path))
+            .is_none()
+        {
             return Ok(());
         }
         self.save_settings(&settings)
     }
 
-    pub fn is_ignored(&self, key: &str) -> io::Result<bool> {
-        Ok(self.load_settings()?.ignored.iter().any(|i| i.key == key))
+    /// 看过的新手提示 id，按记下的先后
+    pub fn seen_hints(&self) -> io::Result<Vec<String>> {
+        Ok(self.load_settings()?.seen_hints)
     }
+
+    /// 记下一条看过的新手提示；已记过或空串不写盘
+    pub fn mark_hint_seen(&self, id: &str) -> io::Result<()> {
+        let mut settings = self.load_settings()?;
+        if id.is_empty() || settings.seen_hints.iter().any(|x| x == id) {
+            return Ok(());
+        }
+        settings.seen_hints.push(id.to_string());
+        self.save_settings(&settings)
+    }
+}
+
+/// `project_added_at` 的 key：规范化后的路径文本
+fn project_key(path: &Path) -> String {
+    crate::fs::normalize(path).to_string_lossy().into_owned()
 }
 
 /// 文件不存在 → 默认值；存在但损坏 → 报错，不静默清空
@@ -233,11 +275,30 @@ mod tests {
         assert_eq!(s.load_settings().unwrap(), Settings::default());
         let settings = Settings {
             disabled_harnesses: vec!["a".into(), "b".into()],
+            known_installed: vec!["a".into(), "c".into()],
             manual_sources: vec![PathBuf::from("/a/skills")],
             auto_links: vec![AutoLink {
                 source: PathBuf::from("/a/skills"),
                 targets: vec!["claude-code".into()],
-                excluded: ["x".to_string()].into_iter().collect(),
+                target_excluded: [(
+                    "claude-code".to_string(),
+                    ["x".to_string()].into_iter().collect(),
+                )]
+                .into_iter()
+                .collect(),
+                baseline: Some(["y".to_string()].into_iter().collect()),
+                target_baselines: [("codex".to_string(), ["z".to_string()].into_iter().collect())]
+                    .into_iter()
+                    .collect(),
+                last_auto: [(
+                    "global".to_string(),
+                    crate::models::AutoRun {
+                        at: 1_700_000_000_000,
+                        added: 2,
+                    },
+                )]
+                .into_iter()
+                .collect(),
             }],
             mcp_auto_imports: vec![McpAutoImportRule {
                 source: crate::mcp::McpLocationRef {
@@ -255,18 +316,64 @@ mod tests {
                     path: PathBuf::from("/a/.codex/config.toml"),
                     selector: None,
                 }],
-                excluded: ["private".to_string()].into_iter().collect(),
+                target_excluded: [(
+                    "target".to_string(),
+                    ["private".to_string()].into_iter().collect(),
+                )]
+                .into_iter()
+                .collect(),
                 allow_cross_domain: true,
+                baseline: Some(["docs".to_string()].into_iter().collect()),
+                target_baselines: [(
+                    "target".to_string(),
+                    ["web".to_string()].into_iter().collect(),
+                )]
+                .into_iter()
+                .collect(),
+                last_auto: Some(crate::models::AutoRun {
+                    at: 1_700_000_000_000,
+                    added: 1,
+                }),
             }],
             codex_gateway: GatewaySettings::default(),
-            ignored: vec![IgnoredIssue::new(
-                IssueKind::BrokenLink,
-                &[PathBuf::from("/a/skills/x")],
-            )],
+            project_added_at: [("/a".to_string(), 1_700_000_000_000)]
+                .into_iter()
+                .collect(),
+            subscriptions: [(
+                "project:/p".to_string(),
+                [PathBuf::from("/a/skills")].into_iter().collect(),
+            )]
+            .into_iter()
+            .collect(),
+            mcp_subscriptions: [(
+                "project:/p".to_string(),
+                ["claude-code".to_string()].into_iter().collect(),
+            )]
+            .into_iter()
+            .collect(),
+            seen_hints: vec!["first-scan-skills".into()],
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
         assert!(!dir.join("settings.json.tmp").exists());
+    }
+
+    #[test]
+    fn project_added_at_is_kept_once_and_forgotten_on_remove() {
+        let t = TempTree::new();
+        let s = Store::new(t.root().join("data/SymSync"));
+        s.mark_project_added(Path::new("/w/app/"), 10).unwrap();
+        // 再加一次不覆盖最初的时间；路径按规范化后比较
+        s.mark_project_added(Path::new("/w/app"), 20).unwrap();
+        assert_eq!(
+            s.load_settings().unwrap().project_added_at.get("/w/app"),
+            Some(&10)
+        );
+        s.forget_project_added(Path::new("/w/./app")).unwrap();
+        assert!(s.load_settings().unwrap().project_added_at.is_empty());
+        // 旧文件没有这个字段：读成空表
+        std::fs::write(t.root().join("data/SymSync/settings.json"), "{}").unwrap();
+        assert!(s.load_settings().unwrap().project_added_at.is_empty());
     }
 
     #[test]
@@ -278,10 +385,280 @@ mod tests {
         assert_eq!(loaded.manual_sources, Vec::<PathBuf>::new());
         assert_eq!(loaded.auto_links, Vec::<AutoLink>::new());
         assert_eq!(loaded.mcp_auto_imports, Vec::<McpAutoImportRule>::new());
+        // 订阅记录是后加的：旧文件读成空，等第一次扫描认领
+        assert!(loaded.subscriptions.is_empty());
+        assert!(loaded.mcp_subscriptions.is_empty());
+    }
+
+    /// 旧 settings.json 的规则没有 `lastAuto`：照常读；自动执行建上了链才写回记录，
+    /// 一格没建上不写盘、不动上一次
+    #[test]
+    fn auto_link_runs_are_recorded_into_legacy_settings() {
+        use crate::models::{LinkStyle, SyncReport, TargetScope};
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        let store_dir = t.dir("store");
+        let claude = t.dir("home/.claude/skills");
+        let file = dir.join("settings.json");
+        std::fs::write(
+            &file,
+            serde_json::json!({"autoLinks": [
+                {"source": store_dir, "targets": ["claude-code"], "baseline": []}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let s = Store::new(dir);
+        let loaded = s.load_settings().unwrap();
+        assert!(loaded.auto_links[0].last_auto.is_empty());
+
+        // 建规则之后来源里出现了 a：自动执行真的把它链进 claude
+        t.skill("store/a");
+        let env = crate::discovery::Env {
+            home: t.dir("home"),
+            vars: Default::default(),
+        };
+        let sources = crate::discovery::sources(&env, &[], &[], std::slice::from_ref(&store_dir));
+        let targets = vec![Target {
+            id: "claude-code".into(),
+            label: "Claude Code".into(),
+            path: claude.clone(),
+            scope: TargetScope::Global {
+                harness_id: "claude-code".into(),
+            },
+            exists: true,
+            linked_whole_to: None,
+        }];
+        let cells = crate::skills::auto_link_cells(&sources, &targets, &loaded.auto_links);
+        let actions = crate::skills::propose_links(&sources, &targets, &cells);
+        let report = crate::sync::execute(&actions, false, LinkStyle::Absolute);
+        assert!(matches!(
+            crate::fs::entry_kind(&claude.join("a")),
+            crate::fs::EntryKind::Symlink(_)
+        ));
+        s.record_auto_link_runs(&sources, &targets, &report, 42)
+            .unwrap();
+        let ran = crate::models::AutoRun { at: 42, added: 1 };
+        assert_eq!(
+            s.load_settings().unwrap().auto_links[0]
+                .last_auto
+                .get("global"),
+            Some(&ran)
+        );
+        let written = std::fs::read_to_string(&file).unwrap();
+        let raw: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(
+            raw["autoLinks"][0]["lastAuto"],
+            serde_json::json!({"global": {"at": 42, "added": 1}})
+        );
+        // 空的一轮：不写盘，记录不变
+        s.record_auto_link_runs(&sources, &targets, &SyncReport::default(), 99)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), written);
+    }
+
+    /// 升级前写下的 settings.json：两类规则都没有 baseline。
+    /// 首次扫描后读设置即迁移成当前全部名字并写回，旧规则从此不再补建现有的
+    #[test]
+    fn rules_persisted_without_baseline_migrate_on_first_scanned_load() {
+        let t = TempTree::new();
+        let dir = t.root().join("data/SymSync");
+        let store_dir = t.dir("store");
+        t.skill("store/a");
+        t.skill("store/b");
+        let mcp_path = t.root().join("mcp.json");
+        std::fs::write(&mcp_path, r#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = serde_json::json!({
+            "autoLinks": [{"source": store_dir, "targets": ["claude-code"], "excluded": []}],
+            "mcpAutoImports": [{
+                "source": {"id": "src", "harnessId": "claude-code", "domain": "global", "path": mcp_path},
+                "targetDomain": "global",
+                "targets": [],
+                "excluded": []
+            }]
+        });
+        std::fs::write(dir.join("settings.json"), old.to_string()).unwrap();
+        let s = Store::new(dir.clone());
+        let loaded = s.load_settings().unwrap();
+        assert_eq!(loaded.auto_links[0].baseline, None);
+        assert_eq!(loaded.mcp_auto_imports[0].baseline, None);
+
+        let env = crate::discovery::Env {
+            home: t.dir("home"),
+            vars: Default::default(),
+        };
+        let sources = crate::discovery::sources(&env, &[], &[], std::slice::from_ref(&store_dir));
+        let migrated = s.load_settings_migrating_auto_links(&sources).unwrap();
+        let names = |v: &[&str]| Some(v.iter().map(|n| n.to_string()).collect());
+        assert_eq!(migrated.auto_links[0].baseline, names(&["a", "b"]));
+        // 写回了：之后普通读取也带着 baseline，新增的名字不会被并进去
+        t.skill("store/c");
+        assert_eq!(
+            s.load_settings().unwrap().auto_links[0].baseline,
+            names(&["a", "b"])
+        );
+
+        let location = crate::mcp::McpLocation {
+            id: "src".into(),
+            label: "src".into(),
+            harness_id: "claude-code".into(),
+            domain: "global".into(),
+            path: mcp_path,
+            selector: None,
+            matrix_hidden: false,
+        };
+        let overview = crate::mcp::scan(&[location]);
+        let migrated = s
+            .load_settings_migrating_mcp_auto_imports(&overview)
+            .unwrap();
+        assert_eq!(migrated.mcp_auto_imports[0].baseline, names(&["docs"]));
+        let reloaded = s.load_settings().unwrap();
+        assert_eq!(reloaded.mcp_auto_imports[0].baseline, names(&["docs"]));
+        assert_eq!(reloaded.auto_links[0].baseline, names(&["a", "b"]));
+    }
+
+    /// 升级前的整条 `excluded`：读进来按「对当时的所有目标都生效」拆到各目标，展开结果与
+    /// 升级前一样；写回只有新结构，再读回不变
+    #[test]
+    fn legacy_rule_wide_excluded_migrates_per_target_and_round_trips() {
+        use crate::models::TargetScope;
+        let t = TempTree::new();
+        let dir = t.root().join("data/SymSync");
+        let store_dir = t.dir("store");
+        t.skill("store/a");
+        let claude = t.dir("home/.claude/skills");
+        let proj = t.dir("proj");
+        let proj_codex = t.dir("proj/.codex/skills");
+        let global = Target {
+            id: "claude-code".into(),
+            label: "claude-code".into(),
+            path: claude.clone(),
+            scope: TargetScope::Global {
+                harness_id: "claude-code".into(),
+            },
+            exists: true,
+            linked_whole_to: None,
+        };
+        let project = Target {
+            id: format!("project:{}::codex", proj.display()),
+            label: "codex".into(),
+            path: proj_codex.clone(),
+            scope: TargetScope::Project {
+                project: proj.clone(),
+                harness_id: "codex".into(),
+                project_label: None,
+            },
+            exists: true,
+            linked_whole_to: None,
+        };
+        let targets = vec![global.clone(), project.clone()];
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = serde_json::json!({
+            "autoLinks": [{
+                "source": store_dir,
+                "targets": [global.id, project.id],
+                "excluded": ["x"],
+                "baseline": ["a"]
+            }]
+        });
+        std::fs::write(dir.join("settings.json"), old.to_string()).unwrap();
+        // 建规则之后出现的 x（被排除）与 y
+        t.skill("store/x");
+        t.skill("store/y");
+
+        let s = Store::new(dir.clone());
+        let loaded = s.load_settings().unwrap();
+        let rule = &loaded.auto_links[0];
+        assert!(rule.is_excluded(&global.id, "x"));
+        assert!(rule.is_excluded(&project.id, "x"));
+        // 行为不变：x 两处都不补，y 两处都补
+        let env = crate::discovery::Env {
+            home: t.dir("home"),
+            vars: Default::default(),
+        };
+        let sources = crate::discovery::sources(&env, &[], &[], std::slice::from_ref(&store_dir));
+        let cells = crate::skills::auto_link_cells(&sources, &targets, &loaded.auto_links);
+        let mut built: Vec<(String, PathBuf)> =
+            crate::skills::propose_links(&sources, &targets, &cells)
+                .into_iter()
+                .map(|a| (a.item_name, a.target))
+                .collect();
+        built.sort();
+        assert_eq!(
+            built,
+            vec![("y".to_string(), claude), ("y".to_string(), proj_codex)]
+        );
+
+        // 写回用新结构：没有 excluded，只有按目标的 targetExcluded
+        s.save_settings(&loaded).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap())
+                .unwrap();
+        let written = &raw["autoLinks"][0];
+        assert!(written.get("excluded").is_none());
+        assert_eq!(
+            written["targetExcluded"],
+            serde_json::json!({ global.id.clone(): ["x"], project.id.clone(): ["x"] })
+        );
+        assert_eq!(s.load_settings().unwrap(), loaded);
+    }
+
+    /// 旧版写下的 settings.json 还带着已删功能的字段：「看过」表 `seenIssues`（新问题一次性提示，
+    /// 2026-09-25 删）与更早的「忽略」表 `ignored`。照样能读；设置按类型整份写回，下次写盘时它们就不在了
+    #[test]
+    fn settings_with_removed_issue_fields_still_load_and_drop_on_save() {
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{
+                "disabledHarnesses": ["codex"],
+                "manualSources": ["/a/skills"],
+                "seenIssues": [{"key": "brokenLink\u001f/a", "at": "2026-09-03T00:00:00Z"}],
+                "ignored": [{"kind": "brokenLink", "key": "brokenLink\u001f/b", "at": "2026-09-01T00:00:00Z"}]
+            }"#,
+        )
+        .unwrap();
+        let s = Store::new(dir.clone());
+        let loaded = s.load_settings().unwrap();
+        assert_eq!(loaded.disabled_harnesses, vec!["codex".to_string()]);
+        assert_eq!(loaded.manual_sources, vec![PathBuf::from("/a/skills")]);
+
+        s.save_settings(&loaded).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap();
+        assert!(raw.get("seenIssues").is_none(), "{raw}");
+        assert!(raw.get("ignored").is_none(), "{raw}");
+        assert_eq!(raw["disabledHarnesses"], serde_json::json!(["codex"]));
+        assert_eq!(s.load_settings().unwrap(), loaded);
     }
 
     #[test]
-    fn settings_without_ignored_still_loads() {
+    fn old_settings_over_four_shown_are_trimmed_and_written_back() {
+        // 升级前的文件：没有 knownInstalled，5 个已安装全在显示
+        let t = TempTree::new();
+        let dir = t.dir("data/SymSync");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"disabledHarnesses":[],"manualSources":[],"autoLinks":[]}"#,
+        )
+        .unwrap();
+        let s = Store::new(dir);
+        let installed: Vec<String> = ["claude-code", "codex", "cursor", "cline", "gemini-cli"]
+            .iter()
+            .map(|x| x.to_string())
+            .collect();
+        let loaded = s.load_settings_reconciling_shown(&installed).unwrap();
+        assert_eq!(loaded.disabled_harnesses, vec!["gemini-cli".to_string()]);
+        let reread = s.load_settings().unwrap();
+        assert_eq!(reread, loaded);
+        assert_eq!(reread.known_installed, installed);
+    }
+
+    /// 新手提示看过表：旧文件没有字段读成空；记一个去重、空串忽略；存盘字段名 `seenHints`；清空后为空
+    #[test]
+    fn seen_hints_mark_dedupe() {
         let t = TempTree::new();
         let dir = t.dir("data/SymSync");
         std::fs::write(
@@ -289,121 +666,37 @@ mod tests {
             r#"{"disabledHarnesses":["codex"],"manualSources":["/a/skills"]}"#,
         )
         .unwrap();
-        let loaded = Store::new(dir).load_settings().unwrap();
-        assert_eq!(loaded.disabled_harnesses, vec!["codex".to_string()]);
-        assert_eq!(loaded.ignored, Vec::<IgnoredIssue>::new());
-    }
+        let s = Store::new(dir.clone());
+        assert!(s.seen_hints().unwrap().is_empty());
 
-    #[test]
-    fn key_ignores_path_order() {
-        let a = PathBuf::from("/a/skills/x");
-        let b = PathBuf::from("/b/skills/x");
+        s.mark_hint_seen("first-scan-skills").unwrap();
+        s.mark_hint_seen("first-codex").unwrap();
+        s.mark_hint_seen("first-scan-skills").unwrap();
+        s.mark_hint_seen("").unwrap();
         assert_eq!(
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &[a.clone(), b.clone()]),
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &[b, a])
+            s.seen_hints().unwrap(),
+            vec!["first-scan-skills".to_string(), "first-codex".to_string()]
         );
-    }
-
-    #[test]
-    fn key_changes_when_any_path_changes() {
-        let base = [PathBuf::from("/a/skills/x"), PathBuf::from("/b/skills/x")];
-        let moved = [PathBuf::from("/a/skills/x"), PathBuf::from("/c/skills/x")];
-        assert_ne!(
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &base),
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &moved)
-        );
-        // 多一个位置也算变化
-        let more = [
-            PathBuf::from("/a/skills/x"),
-            PathBuf::from("/b/skills/x"),
-            PathBuf::from("/c/skills/x"),
-        ];
-        assert_ne!(
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &base),
-            IgnoredIssue::key_for(IssueKind::DuplicateSource, &more)
-        );
-    }
-
-    #[test]
-    fn key_separates_kinds_and_normalizes_paths() {
-        let paths = [PathBuf::from("/a/skills/x")];
-        // 路径完全相同时，每个 kind 都必须给出互不相同的 key
-        let kinds = [
-            IssueKind::DuplicateSource,
-            IssueKind::BrokenLink,
-            IssueKind::ReadOnlyTarget,
-            IssueKind::WholeLinkedTarget,
-            IssueKind::DifferentCopies,
-            IssueKind::InvalidLocation,
-        ];
-        let keys: std::collections::BTreeSet<String> = kinds
-            .iter()
-            .map(|k| IgnoredIssue::key_for(*k, &paths))
-            .collect();
-        assert_eq!(keys.len(), kinds.len(), "{keys:?}");
-        // ./ 与 .. 只是写法差异，不该算成另一条状况
+        // 真实文件里是 camelCase 的 seenHints；别的字段原样留着
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap();
         assert_eq!(
-            IgnoredIssue::key_for(IssueKind::BrokenLink, &paths),
-            IgnoredIssue::key_for(
-                IssueKind::BrokenLink,
-                &[PathBuf::from("/a/./b/../skills/x")]
-            )
+            raw["seenHints"],
+            serde_json::json!(["first-scan-skills", "first-codex"])
         );
+        assert_eq!(raw["disabledHarnesses"], serde_json::json!(["codex"]));
+        assert_eq!(raw["manualSources"], serde_json::json!(["/a/skills"]));
     }
 
+    /// 没有 settings.json 时：读成空，空串不建文件
     #[test]
-    fn ignore_unignore_round_trip() {
+    fn seen_hints_without_settings_file() {
         let t = TempTree::new();
         let dir = t.root().join("data/SymSync");
-        let s = Store::new(dir);
-        let issue = IgnoredIssue::new(IssueKind::BrokenLink, &[PathBuf::from("/a/skills/x")]);
-        let key = issue.key.clone();
-
-        assert!(!s.is_ignored(&key).unwrap());
-        s.ignore(issue.clone()).unwrap();
-        assert!(s.is_ignored(&key).unwrap());
-        // 重复忽略不会写进第二条
-        s.ignore(issue.clone()).unwrap();
-        assert_eq!(s.load_settings().unwrap().ignored, vec![issue]);
-
-        s.unignore(&key).unwrap();
-        assert!(!s.is_ignored(&key).unwrap());
-        // 不存在的 key 也不报错
-        s.unignore(&key).unwrap();
-    }
-
-    #[test]
-    fn ignored_survives_a_save_load_round_trip() {
-        let t = TempTree::new();
-        let dir = t.root().join("data/SymSync");
-        let s = Store::new(dir);
-        let issue = IgnoredIssue::new(
-            IssueKind::DuplicateSource,
-            &[PathBuf::from("/b/skills/x"), PathBuf::from("/a/skills/x")],
-        );
-        s.ignore(issue.clone()).unwrap();
-        let loaded = s.load_settings().unwrap();
-        assert_eq!(loaded.ignored, vec![issue]);
-        assert_eq!(
-            loaded.ignored[0].key,
-            IgnoredIssue::key_for(
-                IssueKind::DuplicateSource,
-                &[PathBuf::from("/a/skills/x"), PathBuf::from("/b/skills/x")]
-            )
-        );
-    }
-
-    #[test]
-    fn at_is_sortable_utc_text() {
-        assert_eq!(rfc3339_utc(0), "1970-01-01T00:00:00Z");
-        assert_eq!(rfc3339_utc(1_700_000_000), "2023-11-14T22:13:20Z");
-        // 闰日
-        assert_eq!(rfc3339_utc(951_782_400), "2000-02-29T00:00:00Z");
-        assert_eq!(rfc3339_utc(1_767_225_599), "2025-12-31T23:59:59Z");
-        // 字典序就是时间序
-        assert!(rfc3339_utc(0) < rfc3339_utc(1_700_000_000));
-        let at = IgnoredIssue::new(IssueKind::BrokenLink, &[]).at;
-        assert!(at.len() == 20 && at.ends_with('Z'), "at = {at}");
+        let s = Store::new(dir.clone());
+        assert!(s.seen_hints().unwrap().is_empty());
+        s.mark_hint_seen("").unwrap();
+        assert!(!dir.join("settings.json").exists());
     }
 
     #[test]
@@ -412,23 +705,5 @@ mod tests {
         let dir = t.dir("data/SymSync");
         std::fs::write(dir.join("projects.json"), "{oops").unwrap();
         assert!(Store::new(dir).load_projects().is_err());
-    }
-
-    /// 跨语言契约：前端 `src/pages/pendingIssues.ts` 的 `issueKey` 必须算出同一个串。
-    /// 两边各钉一条同输入同期望的测试——任一边改了格式，另一边立刻红。
-    /// 改这条时必须同步改 `tests/issue-key-contract.test.ts` 里的同名期望值。
-    #[test]
-    fn key_format_is_pinned_for_the_frontend() {
-        let key = IgnoredIssue::key_for(
-            IssueKind::DuplicateSource,
-            &[
-                PathBuf::from("/b/skills/defuddle"),
-                PathBuf::from("/a/skills/defuddle"),
-            ],
-        );
-        assert_eq!(
-            key, "duplicateSource\u{1f}/a/skills/defuddle\u{1f}/b/skills/defuddle",
-            "key 格式变了就要同步改前端的 issueKey 和它那条契约测试"
-        );
     }
 }

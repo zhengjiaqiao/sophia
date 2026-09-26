@@ -1,448 +1,180 @@
-/* 模型页的排版（spec docs/specs/2026-09-21-ui-rebuild-models.md）。
-   色值一律 var(--…)，唯一来源是 tokens.css；零色彩、零阴影，
-   圆角只有输入框 4px 与 pill 32px（§1.3）。
-
-   这一页是启动页，所以留白按 DESIGN「Layout → 留白：往大了给」的上限给：
-   页边 32、区块之间 48。宽度收在 880px——大窗口上不把 15px 的正文拉成一条长带子。 */
+/* Codex 页「第三方模型」一节（DESIGN「agent 页：Codex」，画板 06 / 07 / 08 / 19）。
+   节的骨架（节头：左节名、右端控件列＝开关 + 开关左边 12 的键）在 ui/Section.css；页宽 776 与节间距归外壳。
+   这里是这一节自己的东西：在用行与待办条的外距、网关小区块、网关行的副行 / 抽屉内容与表单布局。
+   开关与它旁边的键在 codexControls.css；行、小标、胶囊行、输入框、灰字都是 ui 组件。一条左沿、一列控件：所有控件的右沿在同一条竖线上。
+   色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
-.models-page {
+.models-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+/* ===== 节里的灰面板：节头下（开关、重启、启动、卸下没成），在用行下（行内待办条）。
+   满宽 776、键在右端控件列（NoticePanel scope="section"），节头下 12、条间 8 ===== */
+.models-notice,
+.models-todos {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  gap: var(--space-xs);
+  margin-top: var(--space-sm);
 }
 
-.models-page__body {
-  box-sizing: border-box;
-  max-width: 880px;
-  padding: var(--space-huge) var(--space-xxl);
+/* ===== 在用：胶囊行（ui ChipRow），节头下 12 ===== */
+.models-inuse {
+  margin-top: var(--space-sm);
 }
 
-/* micro-cap：12 / 600 / 0.96px / 行高 2.0。区域标签是我们自己写的结构词，大写（§1.2） */
-.models-page__label {
-  display: block;
-  font-family: var(--font-cond);
-  font-size: var(--size-micro);
-  font-weight: 600;
-  letter-spacing: var(--track-label);
-  line-height: var(--leading-micro);
-  text-transform: uppercase;
-  color: var(--ink-mute);
+/* ===== 网关小区块：上距 30；小标 `网关` + 右端 `+ 网关`、下 7 一条 hairline（ui SectionLabel） ===== */
+.gw-block {
+  margin-top: 30px;
+  padding-bottom: var(--space-huge);
 }
 
-.models-page__note {
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-faint);
+.gw-block__empty {
+  margin-top: var(--space-sm);
 }
 
-.models-page__mono {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
+/* ===== 一家网关一行（ui ListRow）。刚新增成功：surface 行带亮 → 灭 → 亮 → 灭，各 120ms（不用反色） ===== */
+.gw-row--jump {
+  animation: gw-jump calc(var(--motion-fast) * 4) var(--ease-mech);
 }
 
-.models-page__intro {
-  margin: 0;
-  max-width: 560px;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
-}
-
-/* ===== 一个工具一块 =====
-   块与块之间隔 48 并压一条 ink：这是页面里的大区块（DESIGN「Layout」）。
-   今天只有一块，看不见这条线，但版面不假设只有一块。 */
-.models-tools {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.models-tool {
-  margin-top: var(--space-huge);
-}
-
-.models-tool + .models-tool {
-  padding-top: var(--space-huge);
-  border-top: 1px solid var(--ink);
-}
-
-.models-tool__head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.models-tool__mark {
-  display: inline-flex;
-  color: var(--ink);
-}
-
-/* 工具名走 display 档：28 / 1.1 / 1.4px，与下面 15px 的那句人话差近一倍（§1.2）。
-   **唯独关掉 uppercase**——display token 自带大写，但工具名是被谈论的对象，
-   `Codex` 不能变成 `CODEX`（§1.2「大写是结构的语言」）。这是本页唯一一处偏离
-   token 默认值的地方，图标在它左边，两者永远一起出现（§9.1）。 */
-.models-tool__name {
-  margin: 0;
-  font-family: var(--font-cond);
-  font-size: var(--size-display);
-  font-weight: 700;
-  line-height: var(--leading-display);
-  letter-spacing: var(--track-display);
-  text-transform: none;
-  color: var(--ink);
-}
-
-/* 大写档（按钮、区域标签）里嵌进来的专名：原样，不做大小写转换（§1.2）。
-   `defuddle` 被转成 `DEFUDDLE` 后跟表格里的名字就对不上了，工具名同理 */
-.models-plain {
-  text-transform: none;
-}
-
-.models-tool__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-left: auto;
-}
-
-/* 三组状态词合成的那一句人话（R2）。它是主文字，不退到次要色——要读的就是它 */
-.models-tool__sentence {
-  margin: var(--space-sm) 0 0;
-  max-width: 560px;
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-  line-height: var(--leading-body);
-  color: var(--ink);
-}
-
-/* 版本号与端口是计数类事实，走等宽（§1.2） */
-.models-tool__facts {
-  margin: var(--space-xxs) 0 0;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-}
-
-.models-tool__notice {
-  margin-top: var(--space-md);
-}
-
-/* ===== 网关区 =====
-   区块之间 48（DESIGN「Layout」）。分区靠分隔线，不靠再套一层框。 */
-.models-section {
-  margin-top: var(--space-huge);
-}
-
-.models-section__head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-xs);
-}
-
-.models-section__action {
-  margin-left: auto;
-}
-
-/* 那句极简的网关事实，靠右、等宽（§1.2）。它是进配置页的由头，本身不可点——
-   动作是抬头那颗「配置网关」按钮，一件事不给两个入口 */
-.models-section__summary {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-}
-
-/* ===== 生效的模型 =====
-   主页面上唯一和模型有关的一块。网关搬去配置页了，这里不再有嵌套的卡片，
-   所以它自己就是那个 hairline 描边的块（DESIGN「可点的面」第一类）。 */
-.models-effective {
-  position: relative;
-}
-
-.models-effective__empty {
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--ink);
-}
-
-/* 整块可点，点哪儿都开选择器。hairline 描边的块 hover 转 ink 描边、**底色不变**
-   ——换底色会把里面 canvas 底的片糊掉（DESIGN「可点的面」）。
-   焦点用 :focus-visible 的 1px ink 外框，不吃掉它（DESIGN「状态与动效」）。 */
-.models-effective__box {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-xxs) 6px;
-  box-sizing: border-box;
-  min-height: 40px;
-  padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--hairline);
-  cursor: pointer;
-  transition: border-color var(--motion-fast) linear;
-}
-
-.models-effective__box:hover {
-  border-color: var(--ink);
-}
-
-.models-effective__box:focus-visible {
-  border-color: var(--ink);
-  outline: 1px solid var(--ink);
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .models-effective__box {
-    transition: none;
+@keyframes gw-jump {
+  0%,
+  25% {
+    background-color: var(--surface);
+  }
+  26%,
+  50% {
+    background-color: transparent;
+  }
+  51%,
+  75% {
+    background-color: var(--surface);
+  }
+  76%,
+  100% {
+    background-color: transparent;
   }
 }
 
-.models-effective__hint {
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-faint);
-}
-
-/* ===== 选择器里的网关分组 =====
-   浮层横跨全部网关，所以要分得清哪几个模型是哪一家的。
-   **只有多于一家时才画这个抬头**——一家时它纯属噪音。 */
-.models-group {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-sm) var(--space-xxs);
-  border-bottom: 1px solid var(--hairline);
-}
-
-/* 网关名是被谈论的对象，不大写（§1.2） */
-.models-group__name {
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  font-weight: 600;
-}
-
-.models-group__count {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-}
-
-/* ===== 已选模型片：chip-compact + ×（DESIGN.md components.chip-compact） =====
-   hairline 描边、caption 字号、padding 2px 10px，**不反色**——它们是事实，
-   不是正在选的东西。组件库里还没有这个尺寸的 Chip，先在这儿按 token 写一份。 */
-.ss-model-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  box-sizing: border-box;
-  padding: 2px 6px 2px 10px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-pill);
-  background: var(--canvas);
-  color: var(--ink);
-}
-
-.ss-model-chip__label {
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-}
-
-.ss-model-chip__remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  /* 图标 9px，命中区撑到 24px；负外边距抵消，片的视觉尺寸不变 */
-  padding: 7px;
-  margin: -7px -7px -7px -2px;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--ink-mute);
-  cursor: pointer;
-}
-
-.ss-model-chip__remove:hover {
-  color: var(--ink);
-}
-
-.ss-model-chip__remove:disabled {
-  color: var(--ink-faint);
-  cursor: default;
-}
-
-/* ===== 模型选择浮层 ===== */
-.models-picker__veil {
-  position: fixed;
-  inset: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-  cursor: default;
-}
-
-.models-picker {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  max-height: 420px;
-  border: 1px solid var(--ink);
-  background: var(--canvas);
-}
-
-.models-picker__search {
-  padding: 8px 12px 7px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.models-picker__input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-input);
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-.models-picker__input:focus {
-  border-color: var(--ink);
-  outline: none;
-}
-
-.models-picker__list {
-  flex-grow: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 2px 12px 0;
-}
-
-.models-picker__foot {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
-  border-top: 1px solid var(--hairline);
-}
-
-/* 计数走等宽（§1.2、§11） */
-.models-picker__count {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-}
-
-/* ===== 模型列表 ===== */
-.models-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.models-item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
-  border-bottom: 1px solid var(--surface);
-  /* 整行是点击目标（DESIGN「命中区与视觉尺寸是两回事」）；列表行 hover 转底色 */
-  cursor: pointer;
-}
-.models-item:hover {
-  background: var(--surface);
-}
-
-.models-item.is-renaming {
-  background: var(--surface);
-}
-
-/* 12px 方形复选框：方＝选择（我选的），圆＝状态（只读事实）（R3） */
-.models-item__check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: content-box;
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  /* 视觉 12px，命中区用透明内边距撑到 24px；背景只画在 content-box 上 */
-  padding: 6px;
-  background-clip: content-box;
-  border: 1px solid var(--ink-faint);
-  border-radius: 0;
-  background: var(--canvas);
-  color: var(--canvas);
-  cursor: pointer;
-}
-
-.models-item__check[aria-checked="true"] {
-  border-color: var(--ink);
-  background: var(--ink);
-}
-
-.models-item__text {
-  flex-grow: 1;
-  min-width: 0;
-}
-
-.models-item__name {
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-/* 模型标识是标识符，走等宽（§1.2） */
-.models-item__id {
-  font-family: var(--font-mono);
-  font-size: var(--size-micro);
-  color: var(--ink-faint);
-}
-
-.models-item__rename {
-  box-sizing: border-box;
-  width: 168px;
-  padding: 3px 8px;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius-input);
-  background: var(--canvas);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: var(--size-body);
-}
-
-.models-item__rename:focus {
-  outline: none;
-}
-
-.models-item__hint {
-  flex-shrink: 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
+/* 第二行（ListRow 的副行里）：地址占满放得下的宽度，放不下才截断（提示框 fit="shrink" 随它收窄）；
+   无法连接的原因写全，窄了折行 */
+.gw-row__url {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ===== 限制说明：这个工具的事实，常驻、不随操作消失（R8） ===== */
-/* 与网关区之间 48：块里的大段落之间（DESIGN「Layout」） */
-.models-tool__limits {
-  max-width: 560px;
-  margin-top: var(--space-huge);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--hairline);
+.gw-row__fact {
+  flex-shrink: 0;
+  white-space: pre;
 }
 
-.models-tool__limits-text {
-  margin: var(--space-xs) 0 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-caption);
+/* `无法连接`：墨色 600 */
+.gw-row__down {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.gw-row__reason {
+  flex: 1 1 0;
+  min-width: 40%;
+  white-space: normal;
+}
+
+/* 限制说明 12 ink-mute，不截断 */
+.gw-row__note {
+  margin: 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
   color: var(--ink-mute);
+}
+
+/* 勾选列表框：宽 440、paper 面 + 1px hairline 边、12 圆角；行内平铺，没有投影 */
+.gw-row__list {
+  box-sizing: border-box;
+  width: min(440px, 100%);
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+}
+
+.gw-row__none {
+  margin-top: var(--space-xs);
+}
+
+/* 勾选没写成的灰面板 */
+.gw-row__panel {
+  display: flex;
+  margin-top: var(--space-xs);
+}
+
+/* ===== 编辑 / 新增：表单在行里就地展开。`地址` `密钥`（12 ink-mute 定宽 44）+ 输入框 360 × 28 凹面 ===== */
+.gw-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.gw-form__field {
+  display: grid;
+  grid-template-columns: 44px min(360px, 100%);
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.gw-form__label {
+  font-size: var(--size-label);
+  color: var(--ink-mute);
+}
+
+.gw-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: var(--control-h);
+  padding-left: calc(44px + var(--space-sm));
+}
+
+.gw-form__ask {
+  font-size: var(--size-caption);
   line-height: var(--leading-caption);
+  color: var(--ink);
+}
+
+.gw-form__error {
+  display: flex;
+  padding-left: calc(44px + var(--space-sm));
+}
+
+/* 只读事实一行：`本机端口 47328` `协议 拉取模型时识别`（12 ink-mute，值 ink） */
+.gw-form__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-xl);
+  margin: var(--space-xxs) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}
+
+.gw-form__value {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gw-row--jump {
+    animation: none;
+  }
 }
