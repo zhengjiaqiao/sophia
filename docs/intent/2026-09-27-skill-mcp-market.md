@@ -54,7 +54,8 @@ Sophia 现在只管「本机已经有的」skill 和 MCP：把它们链到或写
 
 ## 范围外
 
-- 共享指令（一份指令同步进各 agent 的 `CLAUDE.md` / `AGENTS.md`）、MCP 支持更多 agent、分配方案快照、备份与多机同步——调研里记下了，另行立项。
+- MCP 支持更多 agent——已另立需求：`docs/intent/2026-09-27-mcp-more-agents.md`。本需求里装 MCP 时，可选的 agent 就是当时 MCP 页支持的那些。
+- 共享指令（一份指令同步进各 agent 的 `CLAUDE.md` / `AGENTS.md`）、分配方案快照、备份与多机同步——调研里记下了，另行立项。
 - 私有 GitHub 仓库、需要登录的下载源。
 - MCP 从目录更新版本（MCP 大多是远程地址或 `npx` 启动，版本由它自己管）。
 - 在 Sophia 里发布、上传、评分、评论 skill。
