@@ -123,66 +123,16 @@ input:focus-visible {
   pointer-events: none;
 }
 
-/* agent 段、项目段：可滚动的中段；设置贴底。
-   不留下内边距：sticky 的 bottom: 0 量到内边距里面，`+ 项目` 吸底时下面那一条会露出滚过去的项目。
-   列表与 `设置` 之间的 8 挪到 .sidebar__foot 的上内边距 */
-/* 滚动区上沿：往下滚过之后画 16 渐隐（shell → 透明），滚过去的项目不在字标带下面硬切。
-   量与画都归 ui（useEdgeFades + FadeViewport tone="shell"），只要上沿；这一层只占满余下的高度 */
-.sidebar__scroll {
-  flex: 1;
-}
-
+/* 平铺的目的地（spec 2026-09-26-object-first-navigation R1）：占满字标带与 `设置` 之间，不分组、不列项目；
+   项目少了之后侧栏不再需要滚动。与字标带之间留 12 */
 .sidebar__nav {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  padding-top: var(--space-sm);
 }
 
-/* 区块小标（ui 的 SectionLabel，字与 Condensed 12 / 600 ink-mute 同源）在侧栏里的摆法：
-   行高 26、左右 20、上距 14，字与右端的排序下拉在这一行里上下居中 */
-.sidebar__head {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  height: 26px;
-  margin-top: 14px;
-  padding: 0 20px;
-}
-
-/* 排序下拉的触发：12 ink-mute 纯文字，悬停转 ink；菜单是 ui 的 Menu（放在 FloatingLayer 里） */
-.sidebar__sort-button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xxs);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink-mute);
-  font-family: var(--font-ui);
-  font-size: var(--size-label);
-  font-weight: 400;
-  line-height: var(--leading-label);
-  white-space: nowrap;
-}
-
-.sidebar__sort-button:hover,
-.sidebar__sort-button[aria-expanded="true"] {
-  color: var(--ink);
-}
-
-/* 下拉记号：统一的 10px 线形箭头（IconChevronDown）；打开时翻转朝上，与抽屉拉手同一个动作 */
-.sidebar__sort-chevron {
-  transition: transform var(--dur-drawer) var(--ease-mech);
-}
-
-.sidebar__sort-button[aria-expanded="true"] .sidebar__sort-chevron {
-  transform: rotate(180deg);
-}
-
-/* 项：高 34，左右外距 10、内距 10（文字左沿 20，与区块小标对齐），图标与字间距 8；15 ink-mute。
-   选中：ink 600、一小块机面（face 底 + 1px hairline 环、control 7）；悬停 surface。
-   三段同一种项、同一个选中 */
+/* 项：高 34，左右外距 10、内距 10（文字左沿 20），图标与字间距 8；15 ink-mute。
+   选中：ink 600、一小块机面（face 底 + 1px hairline 环、control 7）；悬停 surface。全栏同一种项、同一个选中 */
 .side-item {
   position: relative;
   display: flex;
@@ -196,8 +146,7 @@ input:focus-visible {
   transition: background-color var(--motion-fast) var(--ease-mech);
 }
 
-.side-item:hover,
-.side-item.is-menu {
+.side-item:hover {
   background: var(--surface);
 }
 
@@ -247,57 +196,12 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-/* agent 名后的 6px 指示点：右端，与移除键同一条右沿 */
+/* 名字后的 6px 指示点（模型：第三方模型开着）：右端 */
 .side-item__dot {
   display: inline-flex;
   flex-shrink: 0;
   margin-left: auto;
   padding-right: var(--space-xxs);
-}
-
-/* 手动项目的移除键：只在悬停 / 键盘聚焦时出现（① 回应只由用户唤起）；行尾右内距 3 */
-.side-item__remove {
-  display: inline-flex;
-  flex-shrink: 0;
-  margin-right: 2px;
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-mech);
-}
-
-.side-item:hover .side-item__remove,
-.side-item__remove:focus-within {
-  opacity: 1;
-}
-
-/* `+ 项目`：项目列表的最后一项，长相是侧栏的一行（`.side-item--add`，不是键）。
-   列表长了它不跟着滚走：吸在滚动区底边（`设置` 上方），底色 shell 盖住滚过去的项目；
-   吸住时（下面还有项目，data-stuck）上沿出 1px row-line，左右与侧栏项同宽（外距 10）——
-   只在吸住时出现，项目少、它紧跟最后一项时和列表之间没有分隔。不用渐隐 */
-.sidebar__add {
-  position: sticky;
-  bottom: 0;
-  z-index: var(--z-fade);
-  background: var(--shell);
-}
-
-.sidebar__add[data-stuck]::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 10px;
-  left: 10px;
-  border-top: var(--border-row);
-  pointer-events: none;
-}
-
-/* 忙着（正在添加 / 正在移除）：行不回应悬停，字退到 ink-faint（同禁用的键）；
-   正在添加时原位的「转圈 + 一句」自带 ink-mute */
-.side-item--add:has(.side-item__main:disabled) {
-  background: none;
-}
-
-.side-item--add:has(.side-item__main:disabled) .side-item__main {
-  color: var(--ink-faint);
 }
 
 /* 设置：贴侧栏底，底距 10 */
@@ -357,13 +261,13 @@ input:focus-visible {
   background: var(--face);
 }
 
-/* agent 页（shell/AgentPage.tsx）：页面头连同各节整页限宽 776，左沿＝机面内左沿——与位置页的表同宽、
+/* 模型页（shell/ModelsPage.tsx）：页面头连同各节整页限宽 776，左沿＝机面内左沿——与 SKILLS / MCP 的表同宽、
    同一条左右沿（DESIGN「agent 页 › 第三方模型」：一条左沿、一列控件）。页内怎么排归各节 */
 .agent-page {
   max-width: 776px;
 }
 
-/* agent 页的节（shell/AgentPage.tsx 把每一节包一层）：页面头下 24，节与节之间 48（DESIGN「agent 页」）。
+/* 模型页的节（shell/ModelsPage.tsx 把每一节包一层）：页面头下 24，节与节之间 48（DESIGN「模型页」）。
    间距归壳，节组件（ui/Section）自己不带外距 */
 .agent-page__section {
   padding-top: var(--space-xl);
@@ -410,8 +314,7 @@ input:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .face::before,
   .face::after,
-  .side-item,
-  .side-item__remove {
+  .side-item {
     transition: none;
   }
 }

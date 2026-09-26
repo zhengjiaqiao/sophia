@@ -26,7 +26,7 @@ import {
 } from "../src/pages/addSourceView.ts";
 
 const cardbox = { key: "project:/Users/me/CardBox", label: "CardBox" };
-const global = { key: "global", label: "全局" };
+const global = { key: "global", label: "用户级" };
 
 const entry = (ref: string, count = 1): CandidateEntry => ({
   ref,
@@ -36,9 +36,9 @@ const entry = (ref: string, count = 1): CandidateEntry => ({
   items: Array.from({ length: count }, (_, i) => ({ name: `s${i}` })),
 });
 
-test("页名与固定文案：skill 与 MCP 两种，全局写「全局」", () => {
+test("页名与固定文案：skill 与 MCP 两种，用户级写「用户级」", () => {
   assert.equal(addSourceTitle(cardbox, "skill"), "添加来源到 CardBox");
-  assert.equal(addSourceTitle(global, "skill"), "添加来源到全局");
+  assert.equal(addSourceTitle(global, "skill"), "添加来源到用户级");
   assert.equal(addSourceTitle(cardbox, "mcp"), "添加 MCP 来源到 CardBox");
   assert.equal(alreadySubscribedText(cardbox), "它已经在 CardBox 的来源里");
   assert.equal(PICK_HINT, "选 skill 所在的文件夹，只认带 SKILL.md 的子目录");

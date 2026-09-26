@@ -483,7 +483,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
     return (
       <>
         {hint}
-        <Section title="第三方模型">
+        <Section title={`${tool.name} · 第三方模型`}>
           <div className="models-loading" aria-busy="true">
             <Spinner size={14} label="正在读模型设置" />
             <span>正在读模型设置</span>
@@ -515,7 +515,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
     <>
       {hint}
       <Section
-        title="第三方模型"
+        title={`${tool.name} · 第三方模型`}
         control={
           // 紧跟节名：开关（拨了就写，乐观翻转；见 codexControls）
           <CodexSwitch

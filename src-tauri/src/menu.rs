@@ -4,11 +4,12 @@
 //! 项的 id 原样作为 `menu-command` 事件发给主窗口，前端按 id 路由（`src/shell/menuCommands.ts`）；
 //! 剪切 / 拷贝 / 粘贴与隐藏、退出、窗口这些系统标准项用预置项，由系统直接处理。
 //!
-//! 「显示」里的页签项由位置页的 domain 表生成（`src/shell/locationDomains.json`，与前端同一个文件）：
-//! 第 N 项 `CmdOrCtrl+N`，命令名 `tab-<id>`。加一个 domain 不用改这里。
+//! 「显示」里的目的地项由目的地表生成（`src/shell/destinations.json`，与前端同一个文件，
+//! spec 2026-09-26-object-first-navigation R2）：命令名 `dest-<id>`，快捷键写在表里、不按先后推算。
+//! 加一个目的地不用改这里。
 //!
-//! 做不了的项灰着、不隐藏：`撤销`（没有可撤销的操作）、`筛选`（不在位置页）、`返回`（不在添加来源页）
-//! 由前端按界面状态调 `set_menu_state` 开关。
+//! 做不了的项灰着、不隐藏：`撤销`（没有可撤销的操作）、`筛选` 与 `切换项目…`（不在 SKILLS / MCP）、
+//! `返回`（不在添加来源页）由前端按界面状态调 `set_menu_state` 开关。
 //!
 //! 只在 macOS 上装：别的系统上菜单栏会画进窗口里，那不是这个设计。
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -40,8 +41,8 @@ const fn item(id: &'static str, text: &'static str, accelerator: Option<&'static
 pub const ABOUT: Item = item("about", "关于 Sophia", None);
 pub const CHECK_UPDATE: Item = item("check-update", "检查更新…", None);
 pub const SETTINGS: Item = item("settings", "设置…", Some("CmdOrCtrl+,"));
-pub const ADD_PROJECT: Item = item("add-project", "添加项目…", None);
 pub const ADD_SOURCE: Item = item("add-source", "添加来源…", None);
+pub const SWITCH_PROJECT: Item = item("switch-project", "切换项目…", Some("CmdOrCtrl+P"));
 pub const UNDO: Item = item("undo", "撤销", Some("CmdOrCtrl+Z"));
 pub const SELECT_ALL: Item = item("select-all", "全选", Some("CmdOrCtrl+A"));
 pub const FILTER: Item = item("filter", "筛选", Some("CmdOrCtrl+F"));
@@ -52,35 +53,42 @@ pub const ITEMS: [&Item; 9] = [
     &ABOUT,
     &CHECK_UPDATE,
     &SETTINGS,
-    &ADD_PROJECT,
     &ADD_SOURCE,
+    &SWITCH_PROJECT,
     &UNDO,
     &SELECT_ALL,
     &FILTER,
     &BACK,
 ];
 
-/// 位置页的一个 domain（页签）：与前端 `src/shell/domains.ts` 读同一个 JSON
+/// 侧栏的一个目的地：与前端 `src/shell/destinations.ts` 读同一个 JSON
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct Domain {
+pub struct Destination {
     pub id: String,
-    /// 页签上的字，原样小写写（`skills` `mcp`）；页签经 `Cap` 显示为大写，菜单项在 `tab_item` 里转大写
+    /// 侧栏上的字，拉丁结构词原样小写写（`skills` `mcp`），中文原样（`模型`）；菜单项在 `dest_item` 里转大写
     pub label: String,
+    /// 快捷键（`CmdOrCtrl+N`），按 id 写死，不随先后变
+    pub shortcut: String,
+    /// 页面头有没有范围滑槽（前端用；菜单不用）
+    pub scoped: bool,
 }
 
-const DOMAINS_JSON: &str = include_str!("../../src/shell/locationDomains.json");
+const DESTINATIONS_JSON: &str = include_str!("../../src/shell/destinations.json");
 
-/// domain 表；文件是随代码一起提交的常量，读不出来就是构建错误，测试里钉住
-pub fn domains() -> Vec<Domain> {
-    serde_json::from_str(DOMAINS_JSON).expect("src/shell/locationDomains.json 格式不对")
+/// 目的地表；文件是随代码一起提交的常量，读不出来就是构建错误，测试里钉住
+pub fn destinations() -> Vec<Destination> {
+    serde_json::from_str(DESTINATIONS_JSON).expect("src/shell/destinations.json 格式不对")
 }
 
-/// 第 i 个 domain 的菜单项：命令 `tab-<id>`，名字＝页签上显示的字（大写，`SKILLS` `MCP`），
-/// 快捷键 ⌘(i+1)（第 10 项起不给）。原生菜单用系统字体、没有 `Cap`，所以在这里直接转大写——
-/// 与前端 `domainMenuItems` 同一条规则（DESIGN「应用菜单」：名字与界面上同一个命令同名）
-pub fn tab_item(i: usize, d: &Domain) -> (String, String, Option<String>) {
-    let accelerator = (i < 9).then(|| format!("CmdOrCtrl+{}", i + 1));
-    (format!("tab-{}", d.id), d.label.to_uppercase(), accelerator)
+/// 一个目的地的菜单项：命令 `dest-<id>`，名字＝侧栏上显示的字（拉丁词大写，`SKILLS` `MCP` `模型`），
+/// 快捷键取表里的。原生菜单用系统字体、没有 `Cap`，所以在这里直接转大写——
+/// 与前端 `destinationMenuItems` 同一条规则（DESIGN「应用菜单」：名字与界面上同一个命令同名）
+pub fn dest_item(d: &Destination) -> (String, String, String) {
+    (
+        format!("dest-{}", d.id),
+        d.label.to_uppercase(),
+        d.shortcut.clone(),
+    )
 }
 
 /// 菜单事件的 id 是不是应用菜单的自定义项；是就返回要发给前端的命令名
@@ -88,30 +96,34 @@ pub fn command_for(id: &str) -> Option<String> {
     if let Some(i) = ITEMS.iter().find(|i| i.id == id) {
         return Some(i.id.to_string());
     }
-    let domain = id.strip_prefix("tab-")?;
-    domains()
+    let dest = id.strip_prefix("dest-")?;
+    destinations()
         .iter()
-        .any(|d| d.id == domain)
+        .any(|d| d.id == dest)
         .then(|| id.to_string())
 }
 
-/// 前端报上来的界面状态：这三项灰不灰
+/// 前端报上来的界面状态：这几项灰不灰
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MenuState {
     /// 有可撤销的操作（或输入框聚焦、可以撤销文字）
     pub undo: bool,
-    /// 在位置页
+    /// 在 SKILLS / MCP
     pub filter: bool,
     /// 在添加来源页
     pub back: bool,
+    /// 在 SKILLS / MCP（有项目筛选片的页）
+    #[serde(default)]
+    pub switch_project: bool,
 }
 
-/// 启用状态跟着界面走的三项，建菜单时留下句柄
+/// 启用状态跟着界面走的几项，建菜单时留下句柄
 pub struct MenuHandles<R: Runtime> {
     undo: MenuItem<R>,
     filter: MenuItem<R>,
     back: MenuItem<R>,
+    switch_project: MenuItem<R>,
     window: Submenu<R>,
 }
 
@@ -123,13 +135,14 @@ fn custom<R: Runtime>(app: &AppHandle<R>, i: &Item) -> tauri::Result<MenuItem<R>
     b.build(app)
 }
 
-/// 建整套菜单，并把要跟着界面开关的项交给 app 管理。三项起始都是灰的：
+/// 建整套菜单，并把要跟着界面开关的项交给 app 管理。这几项起始都是灰的：
 /// 前端第一次报状态之前，哪一项都还做不了
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let undo = custom(app, &UNDO)?;
     let filter = custom(app, &FILTER)?;
     let back = custom(app, &BACK)?;
-    for it in [&undo, &filter, &back] {
+    let switch_project = custom(app, &SWITCH_PROJECT)?;
+    for it in [&undo, &filter, &back, &switch_project] {
         it.set_enabled(false)?;
     }
 
@@ -146,7 +159,6 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&PredefinedMenuItem::quit(app, Some("退出 Sophia"))?)
         .build()?;
     let file = SubmenuBuilder::new(app, "文件")
-        .item(&custom(app, &ADD_PROJECT)?)
         .item(&custom(app, &ADD_SOURCE)?)
         .separator()
         .item(&PredefinedMenuItem::close_window(app, Some("关闭窗口"))?)
@@ -162,15 +174,15 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&filter)
         .build()?;
     let mut view = SubmenuBuilder::new(app, "显示");
-    for (i, d) in domains().iter().enumerate() {
-        let (id, text, accelerator) = tab_item(i, d);
-        let mut b = MenuItemBuilder::with_id(id, text);
-        if let Some(acc) = accelerator {
-            b = b.accelerator(acc);
-        }
-        view = view.item(&b.build(app)?);
+    for d in destinations() {
+        let (id, text, accelerator) = dest_item(&d);
+        view = view.item(
+            &MenuItemBuilder::with_id(id, text)
+                .accelerator(accelerator)
+                .build(app)?,
+        );
     }
-    let view = view.separator().item(&back).build()?;
+    let view = view.separator().item(&switch_project).item(&back).build()?;
     let window = SubmenuBuilder::new(app, "窗口")
         .item(&PredefinedMenuItem::minimize(app, Some("最小化"))?)
         .item(&PredefinedMenuItem::maximize(app, Some("缩放"))?)
@@ -186,6 +198,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         undo,
         filter,
         back,
+        switch_project,
         window,
     });
     Ok(menu)
@@ -211,13 +224,14 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
     let _ = app.emit_to("main", EVENT, command);
 }
 
-/// 前端报界面状态：三项跟着开关。没装菜单（非 macOS）时什么都不做
+/// 前端报界面状态：这几项跟着开关。没装菜单（非 macOS）时什么都不做
 #[tauri::command]
 pub fn set_menu_state(app: AppHandle, state: MenuState) {
     if let Some(h) = app.try_state::<MenuHandles<tauri::Wry>>() {
         let _ = h.undo.set_enabled(state.undo);
         let _ = h.filter.set_enabled(state.filter);
         let _ = h.back.set_enabled(state.back);
+        let _ = h.switch_project.set_enabled(state.switch_project);
     }
 }
 
@@ -234,9 +248,12 @@ mod tests {
         for i in ITEMS {
             assert_eq!(command_for(i.id).as_deref(), Some(i.id));
         }
-        assert_eq!(command_for("tab-skills").as_deref(), Some("tab-skills"));
-        assert_eq!(command_for("tab-mcp").as_deref(), Some("tab-mcp"));
-        assert_eq!(command_for("tab-nope"), None);
+        assert_eq!(command_for("dest-skills").as_deref(), Some("dest-skills"));
+        assert_eq!(command_for("dest-mcp").as_deref(), Some("dest-mcp"));
+        assert_eq!(command_for("dest-models").as_deref(), Some("dest-models"));
+        assert_eq!(command_for("dest-usage"), None);
+        assert_eq!(command_for("tab-skills"), None);
+        assert_eq!(command_for("add-project"), None);
         assert_eq!(command_for("quit"), None);
         assert_eq!(command_for(""), None);
     }
@@ -249,55 +266,47 @@ mod tests {
         assert_eq!(acc(&UNDO), Some("CmdOrCtrl+Z"));
         assert_eq!(acc(&SELECT_ALL), Some("CmdOrCtrl+A"));
         assert_eq!(acc(&BACK), Some("CmdOrCtrl+["));
+        assert_eq!(acc(&SWITCH_PROJECT), Some("CmdOrCtrl+P"));
         // 要再操作一步的项带省略号
-        for i in [&SETTINGS, &CHECK_UPDATE, &ADD_PROJECT, &ADD_SOURCE] {
+        for i in [&SETTINGS, &CHECK_UPDATE, &ADD_SOURCE, &SWITCH_PROJECT] {
             assert!(i.text.ends_with('…'), "{} 应带 …", i.text);
         }
     }
 
     #[test]
-    fn 显示菜单的页签项由_domain_表生成_第_n_项是_cmd_n() {
-        let ds = domains();
-        assert_eq!(ds[0].id, "skills");
-        assert_eq!(ds[1].id, "mcp");
-        let items: Vec<_> = ds.iter().enumerate().map(|(i, d)| tab_item(i, d)).collect();
+    fn 显示菜单的目的地项由目的地表生成_快捷键按表() {
+        let items: Vec<_> = destinations().iter().map(dest_item).collect();
         assert_eq!(
-            items[0],
-            (
-                "tab-skills".into(),
-                "SKILLS".into(),
-                Some("CmdOrCtrl+1".into())
-            )
+            items,
+            vec![
+                ("dest-skills".into(), "SKILLS".into(), "CmdOrCtrl+1".into()),
+                ("dest-mcp".into(), "MCP".into(), "CmdOrCtrl+2".into()),
+                ("dest-models".into(), "模型".into(), "CmdOrCtrl+3".into()),
+            ]
         );
-        // 菜单项与页签显示的字同写大写
-        assert_eq!(items[1].1, "MCP");
-        assert_eq!(items[1].2.as_deref(), Some("CmdOrCtrl+2"));
-        // 表里加第三项（以后的 sessions）：自动得到 ⌘3
-        let third = Domain {
+        // 以后插一项（会话 ⌘5）：用它自己写的键，不按先后推算
+        let sessions = Destination {
             id: "sessions".into(),
             label: "sessions".into(),
+            shortcut: "CmdOrCtrl+5".into(),
+            scoped: true,
         };
-        assert_eq!(
-            tab_item(2, &third),
-            (
-                "tab-sessions".into(),
-                "SESSIONS".into(),
-                Some("CmdOrCtrl+3".into())
-            )
-        );
-        assert_eq!(tab_item(9, &third).2, None);
+        assert_eq!(dest_item(&sessions).2, "CmdOrCtrl+5");
     }
 
     #[test]
     fn 界面状态按驼峰读() {
-        let s: MenuState =
-            serde_json::from_str(r#"{"undo":true,"filter":false,"back":true}"#).unwrap();
+        let s: MenuState = serde_json::from_str(
+            r#"{"undo":true,"filter":false,"back":true,"switchProject":true}"#,
+        )
+        .unwrap();
         assert_eq!(
             s,
             MenuState {
                 undo: true,
                 filter: false,
-                back: true
+                back: true,
+                switch_project: true
             }
         );
     }

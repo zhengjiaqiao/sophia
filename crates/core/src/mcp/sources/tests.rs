@@ -239,7 +239,7 @@ fn unwritten_services_of_a_subscribed_source_are_rows_with_missing_cells() {
             ("Claude Code · User", false, vec!["docs", "search"]),
         ]
     );
-    assert_eq!(page.subscribed[1].source.place, "全局");
+    assert_eq!(page.subscribed[1].source.place, "用户级");
     assert_eq!(page.subscribed[0].source.place, "proj");
 }
 
@@ -601,7 +601,7 @@ fn source_list_serializes_flat_and_camel_case() {
             label: "Codex · User".into(),
             harness_id: "codex".into(),
             domain: "global".into(),
-            place: "全局".into(),
+            place: "用户级".into(),
             path: PathBuf::from("/h/.codex/config.toml"),
             unreadable: false,
             services: vec![McpService {
@@ -618,7 +618,7 @@ fn source_list_serializes_flat_and_camel_case() {
         serde_json::to_value(&entry).unwrap(),
         json!({
             "id": "codex", "label": "Codex · User", "harnessId": "codex", "domain": "global",
-            "place": "全局", "path": "/h/.codex/config.toml", "unreadable": false,
+            "place": "用户级", "path": "/h/.codex/config.toml", "unreadable": false,
             "services": [{"name": "lint", "portable": false}], "own": false, "autoTargets": [],
             "lastAuto": null
         })

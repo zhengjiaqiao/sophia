@@ -261,7 +261,7 @@ fn domain_label(key: &str, names: &BTreeMap<String, String>) -> String {
     }
     match key.strip_prefix("project:") {
         Some(path) => dir_name(Path::new(path)),
-        None => "全局".to_string(),
+        None => "用户级".to_string(),
     }
 }
 
@@ -1050,7 +1050,7 @@ mod tests {
             vec![
                 DomainName {
                     key: "global".into(),
-                    label: "全局".into()
+                    label: "用户级".into()
                 },
                 DomainName {
                     key: pkey(&other),

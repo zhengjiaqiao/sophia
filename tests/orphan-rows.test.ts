@@ -23,7 +23,7 @@ const broken = (targetId: string, name: string, pointedTo: string): PlannedActio
 
 const page = (actions: PlannedAction[]): DomainPage => ({
   key: "global",
-  label: "全局",
+  label: "用户级",
   targets: [target("codex", "Codex"), target("cursor", "Cursor")],
   rows: [
     {

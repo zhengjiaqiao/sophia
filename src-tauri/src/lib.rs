@@ -129,8 +129,7 @@ fn discover_mcp(state: &AppState) -> Result<symsync_core::mcp::McpDiscovery, Str
         }
     }
     let harnesses = discovery::enabled(candidates, &settings);
-    let manual_projects = state.store.load_projects().map_err(err)?;
-    let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
+    let projects = discovery::project_candidates(&env, &harnesses);
     Ok(symsync_core::mcp::discover_locations(
         &env, &harnesses, &projects,
     ))
@@ -152,8 +151,7 @@ fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = runtime_env()?;
     let (installed, settings) = installed_and_settings(state, &env)?;
     let harnesses = discovery::enabled(installed, &settings);
-    let manual_projects = state.store.load_projects().map_err(err)?;
-    let projects = discovery::project_candidates(&env, &manual_projects, &harnesses);
+    let projects = discovery::project_candidates(&env, &harnesses);
     let mut sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
     let subscribed = discovery::subscribed_sources(
         &subscriptions::recorded_dirs(&settings.subscriptions),
@@ -1102,45 +1100,12 @@ fn set_harness_enabled(
 }
 
 /// 仅手动添加的项目；自动发现的项目不在其中
-#[tauri::command]
-fn list_manual_projects(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
-    // 历史文件里可能有未归一化的路径，返回前统一，前端才能和域 key 对上
-    Ok(state
-        .store
-        .load_projects()
-        .map_err(err)?
-        .iter()
-        .map(|p| normalize(p))
-        .collect())
-}
-
-#[tauri::command]
-fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let path = normalize(&path);
-    let mut list = state.store.load_projects().map_err(err)?;
-    if !list.iter().any(|p| normalize(p) == path) {
-        list.push(path.clone());
-    }
-    state.store.save_projects(&list).map_err(err)?;
-    // 侧栏「最近创建」在取不到文件夹创建时间时用加入时间
-    state.store.mark_project_added(&path, now_ms()).map_err(err)
-}
-
 /// 此刻的毫秒时间戳；时钟早于 1970 时记 0
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
-}
-
-#[tauri::command]
-fn remove_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let path = normalize(&path);
-    let mut list = state.store.load_projects().map_err(err)?;
-    list.retain(|p| normalize(p) != path);
-    state.store.save_projects(&list).map_err(err)?;
-    state.store.forget_project_added(&path).map_err(err)
 }
 
 /// 看过的新手提示 id（前端 `src/hints.ts` 登记）
@@ -1241,9 +1206,6 @@ pub fn run() {
             list_manual_sources,
             add_manual_source,
             remove_manual_source,
-            list_manual_projects,
-            add_project,
-            remove_project,
             project_times,
             list_auto_links,
             set_auto_link,

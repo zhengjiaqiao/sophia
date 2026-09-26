@@ -1,0 +1,36 @@
+/* 范围（spec 2026-09-26-object-first-navigation R4 R5）：项目筛选片那一行与「更多」浮层。
+   片本身是 ui 的 Chip / ChipRow，这里只管外壳层的排布。 */
+
+.scope-chips {
+  display: block;
+}
+
+.scope-chips__more {
+  display: inline-flex;
+}
+
+.scope-chips__chevron {
+  margin-left: var(--space-xxs);
+}
+
+/* 「更多」浮层：搜索框在上，排序与列表在下；宽随内容但不窄于搜索框 */
+.scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
+  min-width: 280px;
+}
+
+.scope-list__search {
+  padding: 0 var(--space-xs);
+}
+
+.scope-list__head {
+  padding: 0 var(--space-sm);
+}
+
+.scope-list__sort {
+  display: inline-flex;
+  gap: var(--space-xxs);
+}

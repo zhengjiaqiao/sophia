@@ -17,24 +17,17 @@ import Matrix, {
   type MatrixCellView,
   type MatrixRowView,
   type ColumnCheck,
-  type SourceChipItem,
 } from "./Matrix";
 import { affectedTip, TableEmpty } from "./DomainView";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { SourcesPage } from "./pages/SourcesPage";
 import { useSources } from "./SourceRow";
-import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { mcpSourcesModel } from "./pages/sourcesModel";
-import {
-  addedOrigins,
-  dropOrigin,
-  filterAfterAdd,
-  liveOrigins,
-  originMatches,
-} from "./originFilter";
-import { MANAGE_SOURCES, mcpLocationName, type DomainRef } from "./pages/sourcesView";
+import { addedOrigins } from "./originFilter";
+import { matchesFilter } from "./rowFilter";
+import { mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { LocationFrame } from "./LocationFrame";
 import {
@@ -99,6 +92,8 @@ export interface McpTabProps {
   refreshKey: number;
   /// 每次扫描完回传一次（壳拿它算侧栏的项目并集，不用再自己扫一遍）
   onOverview?: (overview: McpOverview) => void;
+  /// bar 插槽（R4 的项目筛选片）：壳传进来，原样交给 Matrix / LocationFrame
+  scopeBar?: ReactNode;
 }
 
 /// 行键：同名服务在一个域里合成一行
@@ -130,15 +125,15 @@ const columnNames = (targets: McpLocation[]): Map<string, string> =>
     [...columnHeads(targets)].map(([id, h]) => [id, h.scope ? `${h.name} ${h.scope}` : h.name]),
   );
 
-/// 组名（「来源」列与筛选片）：定义所在的位置名，与 MCP 来源页同一个写法（`mcpLocationName`：
+/// 组名（「来源」列，筛选框搜来源名也用它）：定义所在的位置名，与 MCP 来源页同一个写法（`mcpLocationName`：
 /// `Claude Code · User`、`Codex · Project`）
 const groupLabel = (l: McpLocation | undefined, id: string): string =>
   l ? mcpLocationName(l) : id;
 
-/// 位置名：全局 / 项目文件夹名（`添加 MCP 来源到 CardBox`）；WeiboAP agent 沿用侧栏的名字
+/// 位置名：用户级 / 项目文件夹名（`添加 MCP 来源到 CardBox`）；WeiboAP agent 沿用侧栏的名字
 const placeName = (page: McpDomain): string =>
   page.key === "global"
-    ? "全局"
+    ? "用户级"
     : page.targets.some((t) => t.harnessId === "weiboap")
       ? page.label
       : (page.key
@@ -147,10 +142,10 @@ const placeName = (page: McpDomain): string =>
           .filter(Boolean)
           .pop() ?? page.label);
 
-/// 还没有页的位置的名字：全局 / 项目文件夹名
+/// 还没有页的位置的名字：用户级 / 项目文件夹名
 const keyName = (key: string): string =>
   key === "global"
-    ? "全局"
+    ? "用户级"
     : (key
         .replace(/^project:/, "")
         .split(/[/\\]+/)
@@ -216,13 +211,12 @@ export default function McpTab({
   onBusy,
   refreshKey,
   onOverview,
+  scopeBar,
 }: McpTabProps) {
   const [overview, setOverview] = useState<McpOverview | null>(null);
   // 选中的行：域 key → 行键集合
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  // 来源筛选；空＝全部。多选纳入式，加完来源时一次选中新加的几个
-  const [originFilter, setOriginFilter] = useState<string[]>([]);
   // 添加来源页（页面头的 `+ 来源`、菜单「添加来源…」、来源管理页的 `+ 来源`）开着没有；
   // 从来源管理页进去的，返回时回到来源管理页（同 Skills）
   const [addOpen, setAddOpen] = useState(false);
@@ -392,7 +386,7 @@ export default function McpTab({
   const domains = useMemo(() => (overview ? mcpDomains(overview) : []), [overview]);
   domainsRef.current = domains;
 
-  // 提示与弹层只属于当次选择；换一个位置时勾选与来源筛选清空、收起来源管理页
+  // 提示与弹层只属于当次选择；换一个位置时勾选清空、收起来源管理页
   useEffect(() => {
     setManageOpen(false);
     setPane(null);
@@ -405,7 +399,6 @@ export default function McpTab({
     setAddedToast(null);
     // 默认一行不选；换一个位置时清空，不把别处的勾选带过来
     setSelected(new Set());
-    setOriginFilter([]);
     setUndo(null);
   }, [selectedKey]);
 
@@ -431,13 +424,13 @@ export default function McpTab({
     domain: domainRef,
     version: overview,
     onChange: refresh,
-    // 移除之后：正勾着它就从筛选里去掉，其余勾着的照旧
-    onRemoved: (id) => setOriginFilter((prev) => dropOrigin(prev, id)),
+    // R9 去掉了按来源筛选：移除来源之后不用再更新筛选状态
+    onRemoved: () => undefined,
     keys: !addOpen && !manageOpen && pane === null && deletePane === null && pick === null,
   });
 
-  // 加完来源滑回位置页（同 Skills）：重扫已完。只加了一个就选中它（列表筛到它），它正下方浮起
-  // `✓ 已添加 … · 已筛选出它的 N 个 MCP`；加了几个就停在 `全部`，新行的格闪一下。
+  // 加完来源滑回位置页（同 Skills）：重扫已完，R9 去掉了按来源筛选——不再筛，只把新行的格闪一下
+  // 交代「就是这些」，浮起 `✓ 已添加 … · N 个 MCP`。
   // 从来源管理页进去加的回到来源管理页，新来源那几行闪一下，位置页的筛选不动
   useEffect(() => {
     if (justAdded === null || !overview) return;
@@ -453,14 +446,8 @@ export default function McpTab({
     );
     let parts: string[];
     if (ids.length > 0) {
-      // 名字与来源筛选同一个写法（groupLabel）；数量＝新来源的行数
-      const added = page.rows.filter((r) =>
-        originMatches(
-          ids,
-          r.entries.map((e) => e.sourceId),
-        ),
-      );
-      const pick = filterAfterAdd(ids);
+      // 名字与来源列同一个写法（groupLabel）；数量＝新来源的行数
+      const added = page.rows.filter((r) => r.entries.some((e) => ids.includes(e.sourceId)));
       parts = addedParts(
         ids.map((id) =>
           groupLabel(
@@ -470,18 +457,16 @@ export default function McpTab({
         ),
         added.length,
         "MCP",
-        pick.length > 0,
+        false,
       );
       setFilterText("");
-      setOriginFilter(pick);
-      // 停在 `全部`：新行混在全部里，格闪一下交代「就是这些」
-      if (pick.length === 0)
-        setFlash({
-          keys: added.flatMap((r) => page.targets.map((t) => cellKey(rowKeyOf(r), t.id))),
-          nonce: Date.now(),
-        });
+      // 新行混在全部里，格闪一下交代「就是这些」
+      setFlash({
+        keys: added.flatMap((r) => page.targets.map((t) => cellKey(rowKeyOf(r), t.id))),
+        nonce: Date.now(),
+      });
     } else {
-      // 新来源在这个位置下一行都没有：来源筛选里没有它可选，只交代加上了
+      // 新来源在这个位置下一行都没有：只交代加上了
       parts = addedParts(
         justAdded.map((e) => e.name),
         justAdded.reduce((n, e) => n + e.count, 0),
@@ -1081,6 +1066,7 @@ export default function McpTab({
     onFilterText: setFilterText,
     actions: sourceKeys,
     enabled: !addOpen && !manageOpen,
+    bar: scopeBar,
   };
   /// 来源管理页（二级页，同添加来源页的骨架）：来源的路径、规则、移除都在这里
   const managePage = manageOpen ? (
@@ -1149,29 +1135,14 @@ export default function McpTab({
   const targetIds = new Set(page.targets.map((t) => t.id));
   const names = columnNames(page.targets);
   const heads = columnHeads(page.targets);
-  const query = filterText.trim().toLowerCase();
-  // 来源筛选＝有行的来源 + 已订阅但一个服务都没有的来源（选中它，空态里有 `在访达中显示 ↗`）
-  const rowOrigins = page.rows.flatMap((row) => row.entries.map((e) => e.sourceId));
-  const subscribedEmpty = (sources.data?.rows ?? []).filter((r) => !rowOrigins.includes(r.id));
-  const activeOrigins = liveOrigins(originFilter, [
-    ...rowOrigins,
-    ...subscribedEmpty.map((r) => r.id),
-  ]);
-  const visible = page.rows.filter(
-    (row) =>
-      (query === "" || row.name.toLowerCase().includes(query)) &&
-      originMatches(
-        activeOrigins,
-        row.entries.map((e) => e.sourceId),
-      ),
+  // 筛选框（⌘F）同时匹配名字与来源名（R9）：来源名要跟「来源」列显示的一致
+  const rowOriginLabel = (row: McpDomainRow) => {
+    const originId = mcpGroupOf(row);
+    return groupLabel(locationOf(originId), originId);
+  };
+  const visible = page.rows.filter((row) =>
+    matchesFilter(filterText, row.name, rowOriginLabel(row)),
   );
-  // 每个来源在这里有几行（一行几份定义各算一次）：来源筛选的顺序、空态判断用
-  const sourceCounts = new Map<string, number>();
-  for (const row of page.rows) {
-    for (const id of new Set(row.entries.map((e) => e.sourceId))) {
-      sourceCounts.set(id, (sourceCounts.get(id) ?? 0) + 1);
-    }
-  }
 
   /// 格此刻画成什么：乐观更新的画成点下去之后的样子（写进 ⦿、删除空心），落定前不再可点。
   /// WeiboAP 里的定义不在格子上删
@@ -1413,30 +1384,12 @@ export default function McpTab({
   };
 
   // 空态（DESIGN「位置页 › 空态」）：`+ 来源` 已在页面头，空态里不重复，只说现状
-  const onlySource = activeOrigins.length === 1 ? activeOrigins[0] : null;
+  const query = filterText.trim();
   const empty =
     query !== "" ? (
       <TableEmpty
-        text={`没有名字里带「${filterText.trim()}」的服务`}
-        action={{
-          label: "清除筛选",
-          onClick: () => {
-            setFilterText("");
-            setOriginFilter([]);
-          },
-        }}
-      />
-    ) : onlySource !== null && !sourceCounts.has(onlySource) ? (
-      // 只选了这一个来源、它里面一个服务都没有：往这份配置里放的入口就在这里（`在访达中显示 ↗`，浅键）
-      <TableEmpty
-        text={`${groupLabel(locationOf(onlySource), onlySource)} 里还没有 MCP`}
-        art="emptyFolder"
-        action={(() => {
-          const path = locationOf(onlySource)?.path ?? sources.rowOf(onlySource)?.path;
-          return path
-            ? { label: "在访达中显示", leave: true, onClick: () => void reveal(path) }
-            : undefined;
-        })()}
+        text={`没有名字或来源里带「${query}」的服务`}
+        action={{ label: "清除筛选", onClick: () => setFilterText("") }}
       />
     ) : page.targets.some((target) => target.harnessId === "weiboap") ? (
       <TableEmpty text="这里没有能复制的完整定义，从别处添加一份过来" art="emptyFolder" />
@@ -1449,28 +1402,6 @@ export default function McpTab({
       />
     );
 
-  /// 来源项的右键菜单（D18）：管理来源（＝页面头的 `管理来源`）· 在访达中显示（＝来源管理页那一行的
-  /// `打开 ↗`）· 移除来源…（＝那一行的 `×`，来源自己那一处没有这一项）
-  const chipMenu = (id: string, chip: HTMLElement): ContextMenuItem[] => {
-    const row = sources.rowOf(id);
-    const path = row?.path ?? locationOf(id)?.path;
-    return [
-      ...(openManage ? [{ label: MANAGE_SOURCES, run: openManage }] : []),
-      ...(path ? [{ label: "在访达中显示", run: () => void reveal(path) }] : []),
-      "separator",
-      ...(row && !row.own
-        ? [{ label: "移除来源…", run: () => void sources.askRemove(row, chip, chip, "start") }]
-        : []),
-    ];
-  };
-  const chip = (id: string): SourceChipItem => ({
-    id,
-    label: groupLabel(locationOf(id), id),
-    count: sourceCounts.get(id) ?? 0,
-    path: locationOf(id)?.path ?? sources.rowOf(id)?.path,
-    menu: (el) => chipMenu(id, el),
-  });
-
   // 写进 WeiboAP 的那几处要额外说一句：它只收下定义，启用是它自己的事
   const paneHasWeibo =
     pane !== null &&
@@ -1482,11 +1413,7 @@ export default function McpTab({
       <Matrix
         columns={columns}
         originLabel="来源"
-        sources={{
-          selected: activeOrigins,
-          onSelect: setOriginFilter,
-          items: [...sourceCounts.keys(), ...subscribedEmpty.map((r) => r.id)].map(chip),
-        }}
+        bar={scopeBar}
         rows={rows}
         nameLabel="名称"
         nameTip="⦿ 是这个 agent 的配置里有这一项，点它删掉（先确认、可撤销）。agent 自带的和插件带的 MCP 不在这里"

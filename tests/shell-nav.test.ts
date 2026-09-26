@@ -91,7 +91,11 @@ test("R4 范围算出这一屏涉及的位置", () => {
     project,
   });
   assert.deepEqual(locationsOf(s("all"), projects), [GLOBAL_KEY, A, B]);
-  assert.deepEqual(locationsOf(s("all", B), projects), [GLOBAL_KEY, B], "全部下点项目＝用户级 + 它");
+  assert.deepEqual(
+    locationsOf(s("all", B), projects),
+    [GLOBAL_KEY, B],
+    "全部下点项目＝用户级 + 它",
+  );
   assert.deepEqual(locationsOf(s("user"), projects), [GLOBAL_KEY]);
   assert.deepEqual(locationsOf(s("project"), projects), [A, B]);
   assert.deepEqual(locationsOf(s("project", A), projects), [A]);

@@ -32,7 +32,7 @@ import type {
 } from "../src/types.ts";
 
 const cardbox = { key: "project:/Users/me/CardBox", label: "CardBox" };
-const global = { key: "global", label: "全局" };
+const global = { key: "global", label: "用户级" };
 
 const sub = (over: Partial<SubscribedSource>): SubscribedSource => ({
   id: "/s",
@@ -61,9 +61,9 @@ const cand = (over: Partial<CandidateSource>): CandidateSource => ({
 
 test("页名：专名与汉字之间一个空格，汉字之间不加", () => {
   assert.equal(sourcesTitle(cardbox), "CardBox 的来源");
-  assert.equal(sourcesTitle(global), "全局的来源");
+  assert.equal(sourcesTitle(global), "用户级的来源");
   assert.equal(noSourcesText(cardbox), "CardBox 还没有来源");
-  assert.equal(noSourcesText(global), "全局还没有来源");
+  assert.equal(noSourcesText(global), "用户级还没有来源");
 });
 
 const WA = "/Users/me/Library/Application Support/WeiboAP";
@@ -124,7 +124,7 @@ test("名字列表：至多 5 个，多了写「等 N 个」", () => {
 
 test("移除的提示框、禁用原因与确认标题", () => {
   assert.equal(removeTitle(cardbox, "WeiboAP"), "从 CardBox 移除 WeiboAP（不动原件）");
-  assert.equal(removeTitle(global, "通用仓库"), "从全局移除通用仓库（不动原件）");
+  assert.equal(removeTitle(global, "通用仓库"), "从用户级移除通用仓库（不动原件）");
   assert.equal(ownRemoveReason(cardbox), "它的原件就在 CardBox 里，删掉原件才会消失");
   assert.equal(removeConfirmTitle(cardbox, "WeiboAP"), "从 CardBox 移除 WeiboAP？");
 });
@@ -221,7 +221,7 @@ const mcpSub = (over: Partial<McpSubscribedSource>): McpSubscribedSource => ({
   label: "Claude Code · User",
   harnessId: "claude-code",
   domain: "global",
-  place: "全局",
+  place: "用户级",
   path: "/h/.claude.json",
   unreadable: false,
   services: [],
@@ -238,7 +238,7 @@ const mcpCand = (over: Partial<McpCandidateSource>): McpCandidateSource => ({
 
 test("MCP 页名与空态", () => {
   assert.equal(mcpSourcesTitle(cardbox), "CardBox 的 MCP 来源");
-  assert.equal(mcpSourcesTitle(global), "全局的 MCP 来源");
+  assert.equal(mcpSourcesTitle(global), "用户级的 MCP 来源");
   assert.equal(noMcpSourcesText(cardbox), "CardBox 还没有 MCP 来源");
 });
 
@@ -265,9 +265,9 @@ test("MCP 行上两行字：这个项目自己的写「项目里」，其余写�
   });
   assert.deepEqual(mcpSourceLines(own, cardbox), { name: "Claude Code · Local", sub: "项目里" });
   assert.deepEqual(mcpSourceSubtitle(own, cardbox), { where: "项目里", count: "2 个 MCP" });
-  assert.deepEqual(mcpSourceSubtitle(mcpSub({}), cardbox), { where: "全局", count: "0 个 MCP" });
-  // 全局里自己的写「全局」
-  assert.equal(mcpSourceLines(mcpSub({ own: true }), global).sub, "全局");
+  assert.deepEqual(mcpSourceSubtitle(mcpSub({}), cardbox), { where: "用户级", count: "0 个 MCP" });
+  // 用户级里自己的写「用户级」
+  assert.equal(mcpSourceLines(mcpSub({ own: true }), global).sub, "用户级");
 });
 
 test("MCP 移除：禁用原因、确认正文（服务与位置各自去重；没有时照实说）、搬不过去的提示", () => {

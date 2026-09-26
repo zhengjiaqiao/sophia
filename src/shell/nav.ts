@@ -54,7 +54,8 @@ export function parseNav(raw: string | null): Nav {
   const destination = DESTINATIONS.includes(o.destination as Destination)
     ? (o.destination as Destination)
     : DEFAULT_NAV.destination;
-  const s = typeof o.scope === "object" && o.scope !== null ? (o.scope as Record<string, unknown>) : {};
+  const s =
+    typeof o.scope === "object" && o.scope !== null ? (o.scope as Record<string, unknown>) : {};
   const level = LEVELS.includes(s.level as ScopeLevel) ? (s.level as ScopeLevel) : "all";
   const project = isProjectKey(s.project) ? s.project : null;
   return { destination, scope: scopeOf(level, project) };

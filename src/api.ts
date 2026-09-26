@@ -75,9 +75,6 @@ export const api = {
   listManualSources: () => invoke<string[]>("list_manual_sources"),
   addManualSource: (path: string) => invoke<void>("add_manual_source", { path }),
   removeManualSource: (path: string) => invoke<void>("remove_manual_source", { path }),
-  listManualProjects: () => invoke<string[]>("list_manual_projects"),
-  addProject: (path: string) => invoke<void>("add_project", { path }),
-  removeProject: (path: string) => invoke<void>("remove_project", { path }),
   /// 侧栏排序用的项目时间，按传入顺序返回；只读
   projectTimes: (paths: string[]) => invoke<ProjectTimes[]>("project_times", { paths }),
   listAutoLinks: () => invoke<AutoLink[]>("list_auto_links"),

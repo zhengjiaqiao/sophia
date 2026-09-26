@@ -89,9 +89,9 @@ export function differingSourceIds(row: McpDomainRow, targetIds: Set<string>): s
   return ids;
 }
 
-/// 域名：全局 / 项目 · <目录名>。侧栏、导入页、跨域说明共用这一份
+/// 域名：用户级 / 项目 · <目录名>。侧栏、导入页、跨域说明共用这一份
 export const mcpDomainLabel = (key: string): string => {
-  if (key === "global") return "全局";
+  if (key === "global") return "用户级";
   const path = key.startsWith("project:") ? key.slice("project:".length) : key;
   return `项目 · ${path.split(/[\\/]/).filter(Boolean).pop() ?? path}`;
 };

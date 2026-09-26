@@ -765,16 +765,17 @@ pub fn has_project_skill_dir(project: &Path, harnesses: &[Harness]) -> bool {
             .any(|d| project.join(d).is_dir())
 }
 
-/// Claude Code 记录的项目 ∪ 手动添加；只保留仍存在的，排除主目录与根目录。
-/// 记录的项目还要求含 skill 目录（去噪）；手动添加是用户明示，即便还没建目录也保留
-pub fn project_candidates(env: &Env, manual: &[PathBuf], harnesses: &[Harness]) -> Vec<PathBuf> {
-    let manual: BTreeSet<PathBuf> = manual.iter().cloned().collect();
-    let mut set = manual.clone();
-    set.extend(claude_recorded_projects(&env.home));
-    set.into_iter()
+/// 项目只来自自动检测（spec 2026-09-26-object-first-navigation R10）：Claude Code 记录的项目里，
+/// 仍存在、不是主目录 / 根目录 / 主目录下的隐藏目录、且含 skill 目录（去噪）的那些，去重排序。
+/// 旧版手动添加的项目（`projects.json`）不再并入；那个文件不改不删
+pub fn project_candidates(env: &Env, harnesses: &[Harness]) -> Vec<PathBuf> {
+    claude_recorded_projects(&env.home)
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .filter(|p| p != &env.home && p.parent().is_some() && p.is_dir())
-        .filter(|p| manual.contains(p) || !is_hidden_home_dir(&env.home, p))
-        .filter(|p| manual.contains(p) || has_project_skill_dir(p, harnesses))
+        .filter(|p| !is_hidden_home_dir(&env.home, p))
+        .filter(|p| has_project_skill_dir(p, harnesses))
         .collect()
 }
 
@@ -1106,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn project_candidates_merge_claude_json_and_manual_then_filter() {
+    fn project_candidates_come_only_from_claude_json_then_filter() {
         let t = TempTree::new();
         let home = t.root();
         let good = t.dir("Project/good");
@@ -1128,8 +1129,10 @@ mod tests {
         std::fs::write(home.join(".claude.json"), json).unwrap();
         let e = env(&home, &[]);
         let harnesses = all_harnesses(&e);
-        let got = project_candidates(&e, std::slice::from_ref(&manual), &harnesses);
-        let mut want = vec![good, uni, manual];
+        let got = project_candidates(&e, &harnesses);
+        // 手动加过的目录（旧版 projects.json 里的）不再算项目，即便它有 skill 目录（spec R10）
+        assert!(!got.contains(&manual));
+        let mut want = vec![good, uni];
         want.sort();
         assert_eq!(got, want);
     }
@@ -1151,7 +1154,7 @@ mod tests {
         );
         std::fs::write(home.join(".claude.json"), json).unwrap();
         let e = env(&home, &[]);
-        assert_eq!(project_candidates(&e, &[], &all_harnesses(&e)), vec![real]);
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![real]);
     }
 
     #[test]
@@ -1213,7 +1216,7 @@ mod tests {
         let all = all_harnesses(&e);
         let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
         let hs = vec![pick("claude-code"), pick("weiboap")];
-        assert!(project_candidates(&e, &[], &hs).is_empty());
+        assert!(project_candidates(&e, &hs).is_empty());
 
         let got: Vec<(String, String, PathBuf, TargetScope)> = existing(targets(&e, &hs, &[], &[]))
             .into_iter()
@@ -1984,16 +1987,12 @@ mod tests {
     }
 
     #[test]
-    fn broken_claude_json_only_drops_recorded_projects() {
+    fn broken_claude_json_gives_no_projects() {
         let t = TempTree::new();
         let home = t.root();
         std::fs::write(home.join(".claude.json"), "{not json").unwrap();
-        let manual = t.dir("m");
         t.dir("m/.claude/skills");
         let e = env(&home, &[]);
-        assert_eq!(
-            project_candidates(&e, std::slice::from_ref(&manual), &all_harnesses(&e)),
-            vec![manual]
-        );
+        assert!(project_candidates(&e, &all_harnesses(&e)).is_empty());
     }
 }

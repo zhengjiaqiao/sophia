@@ -4,8 +4,8 @@
 /// 原样交回 SkillsTab（写操作、乐观更新、提示条都在那里）。格的语义取自 `cellState.viewOf`，
 /// 不在这里另写一份。
 ///
-/// 来源筛选里的项是这个位置的来源（表格里有行的 + 已订阅但一个 skill 都没有的）；位置页上没有来源行，
-/// 来源的路径、规则、移除都在来源管理页（页面头 `管理来源`，SkillsTab 挂）。
+/// 位置页上没有来源行，来源的路径、规则、移除都在来源管理页（页面头 `管理来源`，SkillsTab 挂）。
+/// R9 去掉了按来源筛选：筛选框（⌘F）同时匹配名字与来源名，见 `rowFilter.matchesFilter`。
 /// 说明横幅、「清除失效的」总按钮不回来（失效画在那一格上，点那一格就是重新链接；
 /// 原件已不在的孤链照样成一行，点那一格就是清除）。
 import { useEffect, useRef } from "react";
@@ -17,10 +17,9 @@ import Matrix, {
   type MatrixCellView,
   type MatrixRowView,
   type ColumnCheck,
-  type SourceChipItem,
 } from "./Matrix";
-import type { ContextMenuItem } from "./contextMenu";
-import { originFullNames, originNames, originText } from "./originName";
+import { originNames, originText } from "./originName";
+import { matchesFilter } from "./rowFilter";
 import { viewOf } from "./cellState";
 import { blockedTipOf } from "./cellTip";
 import { ORPHAN_ORIGIN, ORPHAN_SELECT_REASON, ORPHAN_TIP, type OrphanRow } from "./orphanRows";
@@ -72,14 +71,6 @@ export interface DomainViewProps {
   filterText: string;
   onFilterText: (text: string) => void;
   onClearFilter: () => void;
-  /// 来源筛选中的来源；空＝全部。单选 + `全部`（originFilter.ts）：数组里至多一个；
-  /// 加完来源时只加了一个就选中它，加了几个停在 `全部`
-  originFilter: readonly string[];
-  onOriginFilter: (next: string[]) => void;
-  /// 这个位置已订阅、但表格里一行都没有的来源（id、名字、路径）：照样在来源筛选里有一项
-  emptySources: { id: string; name: string; path?: string }[];
-  /// 来源项的右键菜单（管理来源 · 在访达中显示 · 移除来源…）
-  chipMenu: (id: string, chip: HTMLElement) => ContextMenuItem[];
   /// 行悬停「打开 ↗」、空态 `在访达中显示 ↗`：在访达中显示
   onReveal: (path: string) => void;
   /// 右键「拷贝路径」
@@ -88,7 +79,9 @@ export interface DomainViewProps {
   onAddSource: () => void;
   /// 页面头的 `管理来源`：进来源管理页；这个位置一个来源都没订阅时不给（键不出）
   onManageSources?: () => void;
-  /// 新手提示条的插槽：来源筛选下、表头上（放 `<HintStrip flush>`，见 Matrix）
+  /// bar 插槽（R4 的项目筛选片，见 Matrix）：原样传给 Matrix 的 `bar`
+  bar?: ReactNode;
+  /// 新手提示条的插槽：bar 插槽下、表头上（放 `<HintStrip flush>`，见 Matrix）
   hint?: ReactNode;
   /// 新手提示条的插槽：空态上方
   emptyHint?: ReactNode;
@@ -172,10 +165,6 @@ export default function DomainView(props: DomainViewProps) {
     );
   };
 
-  // 来源顺序 = 行里第一次出现的先后；来源筛选与来源列共用。计数只用来判断「这个来源里有没有行」
-  const counts = new Map<string, number>();
-  for (const row of page.rows) counts.set(row.sourceId, (counts.get(row.sourceId) ?? 0) + 1);
-
   // 同名：本域里同一个 skill 名出现在不止一个来源下＝有几份原件
   const copies = new Map<string, DomainRow[]>();
   for (const row of page.rows) {
@@ -209,22 +198,10 @@ export default function DomainView(props: DomainViewProps) {
     };
   });
 
-  // 已订阅、但一行都没有的来源：照样在来源筛选里有一项，排在后面
-  const emptySources = props.emptySources.filter((s) => !counts.has(s.id));
-
-  // ---- 来源名：同名来源用路径里能区分它们的那一级（与片、确认框同一个起名函数） ----
-  const namedIds = [
-    ...counts.keys(),
-    ...emptySources.map((s) => s.id).filter((id) => sourceOf(id)),
-  ];
+  // ---- 来源名：同名来源用路径里能区分它们的那一级（与确认框同一个起名函数） ----
+  const namedIds = [...new Set(page.rows.map((row) => row.sourceId))];
   const names = originNames(namedIds, overview.sources);
-  /// 片的提示框第一行：不截短的完整名
-  const fullNames = originFullNames(namedIds, overview.sources);
-  const nameOf = (id: string) =>
-    names.get(id) ?? {
-      name: props.emptySources.find((s) => s.id === id)?.name ?? labelOf(id),
-      seg: "",
-    };
+  const nameOf = (id: string) => names.get(id) ?? { name: labelOf(id), seg: "" };
   const originOf = (id: string) => originText(nameOf(id));
 
   /// 同名占位（⊘）的那一格被表格里哪一行的来源占着：同名的另一份在这一列是加上的那一份
@@ -360,12 +337,8 @@ export default function DomainView(props: DomainViewProps) {
     });
 
   // ---- 孤链行：名字 + 原件位置「不在了」，有孤链的格虚线环、点一下清除；勾不动 ----
-  const orphanQuery = props.filterText.trim().toLowerCase();
-  const orphans = props.orphans.filter(
-    (o) =>
-      props.originFilter.length === 0 &&
-      (orphanQuery === "" || o.skill.toLowerCase().includes(orphanQuery)),
-  );
+  // 没有真实来源可比对（伪来源 ORPHAN_ORIGIN 不是搜得到的来源名），筛选只按名字命中
+  const orphans = props.orphans.filter((o) => matchesFilter(props.filterText, o.skill, null));
   for (const orphan of orphans) {
     const cells: Record<string, MatrixCellView | null> = {};
     for (const target of page.targets) {
@@ -469,27 +442,11 @@ export default function DomainView(props: DomainViewProps) {
   // ---- 空态（DESIGN「位置页 › 空态」）：动作已在页面头的（`+ 来源`）不重复，只说现状 ----
   const noAgentDirs = page.targets.length === 0 || page.targets.every((t) => !t.exists);
   const query = props.filterText.trim();
-  const pathOfSource = (id: string) =>
-    sourceOf(id)?.path ?? props.emptySources.find((s) => s.id === id)?.path;
-  const onlySource = props.originFilter.length === 1 ? props.originFilter[0] : null;
-  const onlyPath = onlySource !== null ? pathOfSource(onlySource) : undefined;
   const empty =
     query !== "" ? (
       <TableEmpty
-        text={`没有名字里带「${query}」的 skill`}
+        text={`没有名字或来源里带「${query}」的 skill`}
         action={{ label: "清除筛选", onClick: props.onClearFilter }}
-      />
-    ) : onlySource !== null && !counts.has(onlySource) ? (
-      // 只选了这一个来源、它里面一个 skill 都没有：位置页上没有来源行，往这个文件夹放 skill 的入口
-      // 就在这里（`在访达中显示 ↗`，浅键）
-      <TableEmpty
-        text={`${originOf(onlySource)} 里还没有 skill`}
-        art="emptyFolder"
-        action={
-          onlyPath
-            ? { label: "在访达中显示", leave: true, onClick: () => props.onReveal(onlyPath) }
-            : undefined
-        }
       />
     ) : noAgentDirs ? (
       <TableEmpty
@@ -501,25 +458,12 @@ export default function DomainView(props: DomainViewProps) {
       <TableEmpty text="还没有 skill" art="emptyFolder" />
     );
 
-  const chip = (id: string): SourceChipItem => ({
-    id,
-    label: originOf(id),
-    count: counts.get(id) ?? 0,
-    full: fullNames.get(id) ?? originOf(id),
-    path: pathOfSource(id),
-    menu: (el) => props.chipMenu(id, el),
-  });
-
   return (
     <Matrix
       columns={columns}
       rows={matrixRows}
       originLabel="来源"
-      sources={{
-        selected: props.originFilter,
-        onSelect: props.onOriginFilter,
-        items: [...counts.keys(), ...emptySources.map((s) => s.id)].map(chip),
-      }}
+      bar={props.bar}
       hint={props.hint}
       emptyHint={props.emptyHint}
       nameLabel="名称"

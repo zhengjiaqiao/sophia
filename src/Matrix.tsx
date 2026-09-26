@@ -3,9 +3,10 @@
 ///
 /// Skills 与 MCP **共用这一张表**：两边只是内容不同——行是 skill 或 MCP 服务，列是 agent，
 /// 格是同一套状态点（以后 `sessions` 页签也沿用它，所以这里不认任何 skill / MCP 专有字段）。
-/// 本组件只管形制与交互：页面头右端的筛选框与管来源的两颗键、来源筛选、通道条表头、来源列、
+/// 本组件只管形制与交互：页面头右端的筛选框与管来源的两颗键、bar 插槽（调用方放什么就是什么，
+/// 例如项目筛选片，见 R4）、通道条表头、来源列、
 /// 行带、提示框、行详情抽屉、键盘与菜单命令、右键菜单、表格里的选择行、浮起提示小窗的锚点、
-/// 新手提示条的两个插槽（来源筛选下、空态上）。位置页上没有来源行：管来源进二级页「来源管理页」。
+/// 新手提示条的两个插槽（bar 插槽下、空态上）。位置页上没有来源行：管来源进二级页「来源管理页」。
 /// 不碰 api、不认后端状态：调用方把一切折算成「记号 + 能不能点 + 一句话」交进来，点了什么再原样交回去。
 ///
 /// 版式（Matrix.css）：
@@ -23,7 +24,6 @@ import type {
 } from "react";
 import type { Dot } from "./cellState";
 import { compareBy, DOT_RANK, toggleSort, type SortState } from "./sort.ts";
-import { pickOrigin } from "./originFilter.ts";
 import {
   AddButton,
   AgentIcon,
@@ -31,8 +31,6 @@ import {
   Button,
   Cap,
   Checkbox,
-  Chip,
-  ChipRow,
   DOT_LABEL,
   Drawer,
   DrawerHandle,
@@ -52,7 +50,7 @@ import {
 } from "./ui/index.ts";
 import { useMenuFlag, usePageCommand } from "./shell/menuBus.ts";
 import { canPopup, contextMenuHandler, type ContextMenuItem } from "./contextMenu.ts";
-import { displayPath, shortPath } from "./pathText.ts";
+import { displayPath } from "./pathText.ts";
 import "./Matrix.css";
 
 /// 版式常量，与 Matrix.css 同值
@@ -69,7 +67,7 @@ const ORIGIN_COL = "\u0000origin";
 /// 列表里最多显示几个 agent（core 的 `MAX_SHOWN`，DESIGN「设置页 · 最多 4 个」）
 const MAX_AGENTS = 4;
 /// Skills 与 MCP 同一个固定面板宽度（DESIGN「位置页 › 面板宽度」）：页面头右端的筛选框与 `+ 来源`、
-/// 来源筛选、表格右沿同一条线，切页签不跳。Matrix.css 里页面头的 `max-width` 与它同值
+/// bar 插槽、表格右沿同一条线，切页签不跳。Matrix.css 里页面头的 `max-width` 与它同值
 export const PANEL_W = CHECK_W + NAME_W + ORIGIN_W + MAX_AGENTS * COL_W;
 
 /// 点了做不了的格子后，说明停留的时长：与禁用控件按下钉出的提示框同一个（ui/Tooltip）
@@ -157,34 +155,15 @@ export interface ColumnCheck {
   onToggle: () => void;
 }
 
-/// 来源筛选里的一项（一颗胶囊）：名字 + 这个来源在这个位置的行数，不点灯（DESIGN「来源筛选」）
-export interface SourceChipItem {
-  id: string;
-  label: string;
-  /// 胶囊里的计数（12 tabular）：这个来源在这个位置下有几行（不随筛选变）
-  count?: number;
-  /// 提示框第一行的完整名（项上是最短区分片段、放不下还会截断）；不给就用 label
-  full?: string;
-  /// 提示框第二行的路径（原值；显示时写成短路径 `~/…`，mono）
-  path?: string;
-  /// 右键菜单（管理来源 · 在访达中显示 · 移除来源…）；右键那一刻才取。`chip` 是这一项此刻的元素
-  menu?: (chip: HTMLElement) => ContextMenuItem[];
-}
-
 export interface MatrixProps {
   columns: MatrixColumn[];
   /// 「来源」列的列头文字
   originLabel: string;
-  /// 来源筛选：行首 `来源` 标签 + 第一颗 `全部`（不带数）+ 每个来源一颗胶囊（名字 + 计数），选中的是墨色；
-  /// 放不下折行（不超出面板宽）；名字放不下截断，完整值在提示框里。一项都没有时整行不出。
-  /// selected 空＝全部；单选（originFilter.ts `pickOrigin`）：点一颗只看它，点 `全部` 回到全部
-  sources?: {
-    selected: readonly string[];
-    onSelect: (next: string[]) => void;
-    items: SourceChipItem[];
-  };
-  /// 新手提示条的插槽：来源筛选下、表头上（推动表格）。放 `<HintStrip flush>`：提示条开着时
-  /// 来源筛选的下内边距让成 16（提示条到它 16），提示条自带下外距 16；收起后回到表格上距 18
+  /// 页面头下方的插槽（吸顶）：以前固定放按来源筛选的胶囊行；R9 去掉了它，现在是个空槽——
+  /// 调用方放什么就是什么（例如 R4 的项目筛选片），Matrix 不认来源、不认项目。没给就只留上下距
+  bar?: ReactNode;
+  /// 新手提示条的插槽：bar 插槽下、表头上（推动表格）。放 `<HintStrip flush>`：提示条开着时
+  /// bar 插槽的下内边距让成 16（提示条到它 16），提示条自带下外距 16；收起后回到表格上距 18
   hint?: ReactNode;
   /// 新手提示条的插槽：空态上方（一行都没有时才出）
   emptyHint?: ReactNode;
@@ -435,7 +414,7 @@ export default function Matrix(props: MatrixProps) {
   const {
     columns,
     originLabel,
-    sources,
+    bar,
     hint,
     emptyHint,
     rows,
@@ -492,7 +471,7 @@ export default function Matrix(props: MatrixProps) {
   // Shift 区间选择的锚点
   const anchor = useRef<string | null>(null);
   const shift = useRef(false);
-  // 吸顶：来源筛选在页面头下，列头（+ 选择行）紧贴它下面
+  // 吸顶：bar 插槽在页面头下，列头（+ 选择行）紧贴它下面
   const barRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(0);
@@ -616,8 +595,8 @@ export default function Matrix(props: MatrixProps) {
   }, [barH, width, columns.length]);
 
   // ---- 吸顶区的高度 ----
-  // 来源筛选折行、出现 / 消失都会改高度：只在 resize 时量，列头就停在旧高度上，
-  // 行从来源筛选和列头之间的缝里漏出来（产品负责人真机）
+  // bar 插槽折行、出现 / 消失都会改高度：只在 resize 时量，列头就停在旧高度上，
+  // 行从 bar 插槽和列头之间的缝里漏出来（产品负责人真机）
   useLayoutEffect(() => {
     const bar = barRef.current;
     if (!bar) return;
@@ -1197,14 +1176,14 @@ export default function Matrix(props: MatrixProps) {
         inputRef={filterRef}
         enabled={shortcuts}
       />
-      {/* 来源筛选吸在页面头下；表格上距在这一块的下内边距里。没有来源时整行不出，只留上下距 */}
+      {/* bar 插槽吸在页面头下；表格上距在这一块的下内边距里。没有内容时整行不出，只留上下距 */}
       <div className="mx-bar" ref={barRef}>
-        {sources ? <SourceChips {...sources} /> : null}
+        {bar}
       </div>
-      {/* 新手提示条的插槽：来源筛选下、表头上，随页面滚走（不吸顶） */}
+      {/* 新手提示条的插槽：bar 插槽下、表头上，随页面滚走（不吸顶） */}
       {hint ? <div className="mx-hint">{hint}</div> : null}
       <div className="mx-panel" ref={panelRef} style={{ width }}>
-        {/* 列头连同结构线与选择行吸顶，紧贴来源筛选下面 */}
+        {/* 列头连同结构线与选择行吸顶，紧贴 bar 插槽下面 */}
         <div
           className="mx-headwrap"
           ref={headRef}
@@ -1348,62 +1327,3 @@ const chipsAnchor = (origins: string[]) => (probe: HTMLElement) => {
     right: Math.max(...chips.map((c) => c.right)),
   };
 };
-
-/// 来源筛选（DESIGN「位置页 › 来源筛选」「选择片 Chip」）：胶囊行 `ChipRow`（行首 `来源`）+
-/// 第一颗 `全部`（默认选中、不带数）+ 每个来源一颗浅胶囊（名字 + 计数）；选中的是墨色。**单选**：点一颗＝
-/// 只看这个来源，点 `全部` 回到全部——任何时候都有一颗亮着说出当前状态。项上不点灯。一项都没有（这个位置
-/// 还没有来源）时整行不出
-function SourceChips({ selected, onSelect, items }: NonNullable<MatrixProps["sources"]>) {
-  if (items.length === 0) return null;
-  return (
-    <ChipRow label="来源" listLabel="按来源筛选">
-      <span className="mx-sourcechip">
-        <Chip selected={selected.length === 0} onClick={() => onSelect(pickOrigin(null))}>
-          全部
-        </Chip>
-      </span>
-      {items.map((item) => (
-        <span
-          key={item.id}
-          className="mx-sourcechip"
-          data-origin={item.id}
-          onContextMenu={(e) => {
-            const el = e.currentTarget;
-            if (item.menu) contextMenuHandler(() => item.menu?.(el) ?? [])(e);
-          }}
-        >
-          <Tooltip content={<SourceChipTip item={item} />}>
-            {/* 名字太长（同名来源的区分片段也放不下）时 Chip 自己截断，完整值在提示框里 */}
-            <Chip
-              selected={selected.includes(item.id)}
-              count={item.count}
-              onClick={() => onSelect(pickOrigin(item.id))}
-            >
-              {item.label}
-            </Chip>
-          </Tooltip>
-        </span>
-      ))}
-    </ChipRow>
-  );
-}
-
-/// 来源项悬停的提示框（DESIGN「来源筛选」）：完整名 + 短路径 + 自动添加与移除去哪里设。
-/// 路径与这句都是项上没有的信息，不算重复（⑧）
-export const SOURCE_CHIP_HINT = "在管理来源里设置自动添加或移除";
-
-export function SourceChipTip({ item }: { item: Pick<SourceChipItem, "label" | "full" | "path"> }) {
-  return (
-    <>
-      {item.full ?? item.label}
-      {item.path ? (
-        <>
-          <br />
-          <Mono inherit>{shortPath(item.path)}</Mono>
-        </>
-      ) : null}
-      <br />
-      {SOURCE_CHIP_HINT}
-    </>
-  );
-}

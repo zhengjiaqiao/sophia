@@ -1,0 +1,5 @@
+[
+  { "id": "skills", "label": "skills", "shortcut": "CmdOrCtrl+1", "scoped": true },
+  { "id": "mcp", "label": "mcp", "shortcut": "CmdOrCtrl+2", "scoped": true },
+  { "id": "models", "label": "模型", "shortcut": "CmdOrCtrl+3", "scoped": false }
+]

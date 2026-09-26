@@ -7,20 +7,14 @@ import { cellKey, SourceKeys } from "./Matrix";
 import { LocationFrame } from "./LocationFrame";
 import { orphanRows, type OrphanRow } from "./orphanRows";
 import { originNames, originText, type OriginName } from "./originName";
-import {
-  addedOrigins,
-  dropOrigin,
-  filterAfterAdd,
-  liveOrigins,
-  originMatches,
-} from "./originFilter";
+import { addedOrigins } from "./originFilter";
+import { matchesFilter } from "./rowFilter";
 import { AddedToast, AddSourcePage } from "./pages/AddSourcePage";
 import { SourcesPage } from "./pages/SourcesPage";
 import { addedParts, type CandidateEntry } from "./pages/addSourceView";
 import { skillSourcesModel } from "./pages/sourcesModel";
-import { MANAGE_SOURCES, type DomainRef } from "./pages/sourcesView";
+import type { DomainRef } from "./pages/sourcesView";
 import { useSources } from "./SourceRow";
-import type { ContextMenuItem } from "./contextMenu";
 import { usePageCommand } from "./shell/menuBus";
 import { shortDate } from "./dateText";
 import { Confirm, CornerToast, HintStrip, Mono, Toast, ToastCount } from "./ui";
@@ -51,7 +45,7 @@ import type {
 /// 还没扫描出页的位置的显示名：项目取文件夹名（`project:/…/CardBox` → `CardBox`）
 const folderLabel = (key: string): string =>
   key === "global"
-    ? "全局"
+    ? "用户级"
     : (key
         .replace(/^project:/, "")
         .split(/[/\\]+/)
@@ -122,9 +116,11 @@ export interface SkillsTabProps {
   onError: (message: string) => void;
   /// 壳的错误横幅开着（机面顶上的灰面板）：新手提示让位
   banner?: boolean;
+  /// bar 插槽（R4 的项目筛选片）：壳传进来，原样交给 DomainView / LocationFrame
+  scopeBar?: ReactNode;
 }
 
-/// 位置页的 skills 页签：页面头右端筛选框 + `管理来源` + `+ 来源`，来源筛选、表格（DomainView → Matrix）。
+/// 位置页的 skills 页签：页面头右端筛选框 + `管理来源` + `+ 来源`，表格（DomainView → Matrix）。
 /// 添加来源页与来源管理页都在机面里推入一页（侧栏留着），位置页在下面不卸载——回来时筛选、滚动、
 /// 拉开的抽屉照旧。
 ///
@@ -145,13 +141,12 @@ export default function SkillsTab({
   onRefresh,
   onError,
   banner = false,
+  scopeBar,
 }: SkillsTabProps) {
   // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterText, setFilterText] = useState("");
-  // 来源筛选；空＝全部。多选纳入式，加完来源时一次选中新加的几个
-  const [originFilter, setOriginFilter] = useState<string[]>([]);
   // 添加来源页（页面头的 `+ 来源`、菜单「添加来源…」、来源管理页的 `+ 来源`）开着没有；
   // 从来源管理页进去的，返回时回到来源管理页
   const [addOpen, setAddOpen] = useState(false);
@@ -281,8 +276,8 @@ export default function SkillsTab({
     domain: domainRef,
     version: overview,
     onChange: onRefresh,
-    // 移除之后：正勾着它就从筛选里去掉，其余勾着的照旧
-    onRemoved: (id) => setOriginFilter((prev) => dropOrigin(prev, id)),
+    // R9 去掉了按来源筛选：移除来源之后不用再更新筛选状态
+    onRemoved: () => undefined,
     keys: !addOpen && !manageOpen,
   });
 
@@ -344,7 +339,7 @@ export default function SkillsTab({
     setCellNotice({ rowKey, columnId, text });
   };
 
-  // 提示与弹层只属于当次选择；换一个位置时勾选与来源筛选清空、收起来源管理页
+  // 提示与弹层只属于当次选择；换一个位置时勾选清空、收起来源管理页
   useEffect(() => {
     setManageOpen(false);
     setKeepPane(null);
@@ -356,13 +351,12 @@ export default function SkillsTab({
     setCellNotice(null);
     setAddedToast(null);
     setSelected(new Set());
-    setOriginFilter([]);
     setUndo(null);
   }, [selectedKey]);
 
-  // 加完来源滑回位置页（DESIGN「添加来源」）：重扫已完。只加了一个就选中它（列表筛到它），它正下方浮起
-  // `✓ 已添加 … · 已筛选出它的 N 个 skill`（说清楚列表为什么变少了）；加了几个就停在 `全部`，新行的格闪一下，
-  // 浮起 `✓ 已添加 N 个来源 · M 个 skill`。从来源管理页进去加的回到来源管理页，位置页的筛选不动
+  // 加完来源滑回位置页（DESIGN「添加来源」）：重扫已完，R9 去掉了按来源筛选——不再筛，只把新行的格
+  // 闪一下交代「就是这些」，浮起 `✓ 已添加 … · N 个 skill`。从来源管理页进去加的回到来源管理页，
+  // 位置页的筛选不动
   useEffect(() => {
     if (justAdded === null || !overview) return;
     setJustAdded(null);
@@ -378,30 +372,26 @@ export default function SkillsTab({
     );
     let parts: string[];
     if (ids.length > 0) {
-      // 名字与来源筛选同一个起名函数、同一组来源（DomainView）；数量＝新来源的行数
+      // 名字与来源列同一个起名函数、同一组来源（DomainView）；数量＝新来源的行数
       const names = originNames(order, overview.sources);
-      const added = page.rows.filter((r) => originMatches(ids, [r.sourceId]));
-      const pick = filterAfterAdd(ids);
+      const added = page.rows.filter((r) => ids.includes(r.sourceId));
       parts = addedParts(
         ids.map((id) => originText(names.get(id)!)),
         added.length,
         "skill",
-        pick.length > 0,
+        false,
       );
       setFilterText("");
-      setOriginFilter(pick);
-      // 停在 `全部`：新行混在全部里，格闪一下交代「就是这些」
-      if (pick.length === 0)
-        setFlash({
-          keys: added.flatMap((r) =>
-            page.targets.map((t) =>
-              skillCellKey({ sourceId: r.sourceId, skill: r.skill, targetId: t.id }),
-            ),
+      setFlash({
+        keys: added.flatMap((r) =>
+          page.targets.map((t) =>
+            skillCellKey({ sourceId: r.sourceId, skill: r.skill, targetId: t.id }),
           ),
-          nonce: Date.now(),
-        });
+        ),
+        nonce: Date.now(),
+      });
     } else {
-      // 新来源在这个位置下一行都没有：来源筛选里没有它可选，只交代加上了
+      // 新来源在这个位置下一行都没有：只交代加上了
       parts = addedParts(
         justAdded.map((e) => e.name),
         justAdded.reduce((n, e) => n + e.count, 0),
@@ -1256,6 +1246,7 @@ export default function SkillsTab({
         onFilterText={setFilterText}
         actions={sourceKeys}
         enabled={!addOpen && !manageOpen}
+        bar={scopeBar}
         empty={{ description: "正在读 skill 目录", busy: true, art: "scanning" }}
       />
     );
@@ -1268,6 +1259,7 @@ export default function SkillsTab({
         onFilterText={setFilterText}
         actions={sourceKeys}
         enabled={!addOpen && !manageOpen}
+        bar={scopeBar}
         empty={{
           description: `${domainRef.label} 下还没有 agent 的 skill 目录`,
           hint: "加上第一个 skill 时会自动创建",
@@ -1286,7 +1278,6 @@ export default function SkillsTab({
     );
   }
 
-  const query = filterText.trim().toLowerCase();
   const keepConfirm = keepPane
     ? keepThisConfirm({
         kept: { ...keepPane.keptName, path: keepPane.keptPath },
@@ -1296,33 +1287,22 @@ export default function SkillsTab({
       })
     : null;
 
-  // 来源筛选＝表格里有行的来源 + 已订阅但一行都没有的来源（选中它，空态里有 `在访达中显示 ↗`）
-  const subscribedEmpty = (sources.data?.rows ?? [])
-    .filter((r) => !page.rows.some((row) => row.sourceId === r.id))
-    .map((r) => ({ id: r.id, name: r.name, path: r.path }));
-  const activeOrigins = liveOrigins(originFilter, [
-    ...page.rows.map((row) => row.sourceId),
-    ...subscribedEmpty.map((r) => r.id),
-  ]);
   const reveal = (path: string) => void api.revealInDir(path).catch((e) => onError(String(e)));
-  /// 来源项的右键菜单（D18）：管理来源（＝页面头的 `管理来源`）· 在访达中显示（＝来源管理页那一行的
-  /// `打开 ↗`）· 移除来源…（＝那一行的 `×`，原件在这个位置里的来源没有这一项）；确认锚在被右键的那一项上
-  const chipMenu = (id: string, chip: HTMLElement): ContextMenuItem[] => {
-    const row = sources.rowOf(id);
-    const path = row?.path ?? overview.sources.find((x) => x.id === id)?.path;
-    return [
-      ...(openManage ? [{ label: MANAGE_SOURCES, run: openManage }] : []),
-      ...(path ? [{ label: "在访达中显示", run: () => reveal(path) }] : []),
-      "separator",
-      ...(row && !row.own
-        ? [{ label: "移除来源…", run: () => void sources.askRemove(row, chip, chip, "start") }]
-        : []),
-    ];
-  };
-  const visible = page.rows.filter(
-    (row) =>
-      (query === "" || row.skill.toLowerCase().includes(query)) &&
-      originMatches(activeOrigins, [row.sourceId]),
+  // 筛选框（⌘F）同时匹配名字与来源名（R9）：来源名要跟「来源」列显示的一致（同名来源带区分片段），
+  // 与 DomainView 同一个起名函数、同一组来源
+  const originNamesMap = originNames(
+    [...new Set(page.rows.map((row) => row.sourceId))],
+    overview.sources,
+  );
+  const originLabelOf = (id: string) =>
+    originText(
+      originNamesMap.get(id) ?? {
+        name: overview.sources.find((s) => s.id === id)?.label ?? id,
+        seg: "",
+      },
+    );
+  const visible = page.rows.filter((row) =>
+    matchesFilter(filterText, row.skill, originLabelOf(row.sourceId)),
   );
   const hiddenRows = hidden;
   // 孤链行：点过的格先去掉；刚清完、数据里已没有的那一行，例行一行还在时照留
@@ -1354,14 +1334,8 @@ export default function SkillsTab({
         onClearOrphan={clearOrphan}
         filterText={filterText}
         onFilterText={setFilterText}
-        onClearFilter={() => {
-          setFilterText("");
-          setOriginFilter([]);
-        }}
-        originFilter={activeOrigins}
-        onOriginFilter={setOriginFilter}
-        emptySources={subscribedEmpty}
-        chipMenu={chipMenu}
+        onClearFilter={() => setFilterText("")}
+        bar={scopeBar}
         onReveal={reveal}
         onCopyPath={(path) => void api.copyText(path).catch((e) => onError(String(e)))}
         onAddSource={openAdd}

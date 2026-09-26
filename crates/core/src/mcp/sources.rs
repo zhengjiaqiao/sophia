@@ -263,7 +263,7 @@ pub fn domain_label(key: &str) -> String {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string()),
-        None => "全局".into(),
+        None => "用户级".into(),
     }
 }
 

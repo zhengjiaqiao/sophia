@@ -1,13 +1,12 @@
-/// agent 注册表的类型与取用（DESIGN「侧栏 › agent 段」「agent 页」「扩展预留：用量与会话」）。
+/// agent 能力注册表的类型与取用（DESIGN「模型页」「扩展预留：用量与会话」；spec 2026-09-26-object-first-navigation R11）。
 ///
-/// **两个扩展点之一**（另一个是 domains.ts 的位置页 domain 表）：一张表生成侧栏的 `agent` 段、
-/// agent 页的节、托盘面板的块与行（节带 `trayRow` 画法，面板按表画，不认得具体哪一节）。每一项：
-/// id、名字（原样大小写）、图标（`AgentIcon` 按 id 取）、指示点条件、能力节列表。
-/// **只列有能力节的 agent**（可配的如第三方模型，可看的如以后的用量）：节列表为空、或此刻不可用的，
-/// 侧栏不列、也不灰着列。
+/// **两个扩展点之一**（另一个是 destinations.ts 的目的地表，它决定侧栏）：这张表生成模型页里的节、
+/// 托盘面板的块与行（节带 `trayRow` 画法，面板按表画，不认得具体哪一节），并决定侧栏「模型」一项在不在、
+/// 名字后亮不亮橙点。每一项：id、名字（原样大小写）、图标（`AgentIcon` 按 id 取）、指示点条件、能力节列表。
+/// **只列有能力节的 agent**：节列表为空、或此刻不可用的，不列、也不灰着列；一个都没有时侧栏不列「模型」。
 ///
 /// 加一个 agent / 一种能力＝往 `agents.tsx` 的表里加一项 / 一节，写一个节组件；外壳、路由都不改。
-/// 这里只放类型与纯函数（不产 JSX），tests/shell-agents.test.ts 直接测。
+/// 这里只放类型与纯函数（不产 JSX），tests/shell-extension.test.ts 直接测。
 
 import type { ComponentType } from "react";
 import type { GatewayState } from "../types.ts";
@@ -76,15 +75,8 @@ export interface AgentEntry {
   sections: ReadonlyArray<AgentSection>;
 }
 
-/// 侧栏 agent 段的一项
-export interface SidebarAgent {
-  id: string;
-  name: string;
-  on: boolean;
-}
-
 /// 此刻列出的 agent：可用且有节的，按表的先后。`known` 为假时（有一项还不知道）
-/// 落点不据此退回——免得状态没读回来就把记着的 Codex 页当成不在了
+/// 落点不据此退回——免得状态没读回来就把记着的模型页当成不在了
 export function visibleAgents(
   registry: ReadonlyArray<AgentEntry>,
   s: AgentState,
@@ -98,6 +90,3 @@ export function visibleAgents(
   }
   return { agents, known };
 }
-
-export const sidebarAgentsOf = (agents: ReadonlyArray<AgentEntry>, s: AgentState): SidebarAgent[] =>
-  agents.map((a) => ({ id: a.id, name: a.name, on: a.indicator(s) }));

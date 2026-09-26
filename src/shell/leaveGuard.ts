@@ -8,7 +8,8 @@
 /// 纯逻辑与 React 钩子分开：`createLeaveGuards` 不碰 React，tests/shell-leave.test.ts 直接测。
 
 import { useEffect, useRef } from "react";
-import type { Place } from "./place.ts";
+import type { Nav } from "./nav.ts";
+import { isScoped } from "./destinations.ts";
 
 /// 页面怎么问：拿到「问完之后继续走」的那一下，自己决定什么时候调（保存成了、丢弃了）；不调就是不走
 export type LeaveAsk = (proceed: () => void) => void;
@@ -54,11 +55,10 @@ export function useLeaveGuard(dirty: boolean, ask: LeaveAsk) {
   }, [dirty]);
 }
 
-/// 从 `from` 换到 `to` 会不会换掉机面里的这一页：目的地不同、或同是 agent 页但换了 agent、
-/// 同是位置页但换了位置或页签。只改了「记着的」字段（停在 Codex 页时记着的页签）不算离开
-export function changesPage(from: Place, to: Place): boolean {
-  if (from.view !== to.view) return true;
-  if (from.view === "agent") return from.agentId !== to.agentId;
-  if (from.view === "location") return from.locationKey !== to.locationKey || from.tab !== to.tab;
-  return false;
+/// 从 `from` 换到 `to` 会不会换掉机面里的这一页：目的地不同、或同在 SKILLS / MCP 但换了范围（档或项目）。
+/// 只改了「记着的」范围（停在模型页、设置时）不算离开
+export function changesPage(from: Nav, to: Nav): boolean {
+  if (from.destination !== to.destination) return true;
+  if (!isScoped(from.destination)) return false;
+  return from.scope.level !== to.scope.level || from.scope.project !== to.scope.project;
 }

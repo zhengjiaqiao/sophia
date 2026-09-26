@@ -16,6 +16,8 @@ export interface LocationFrameProps {
   actions: ReactNode;
   /// 菜单「筛选」（⌘F）交不交给这一页（推入页盖在上面时不交）
   enabled: boolean;
+  /// bar 插槽（与 Matrix 同一个位置、同一条 `mx-bar`）：R4 的项目筛选片放这里；没给就只留上下距
+  bar?: ReactNode;
   /// 机面里的空态：一句现状（扫描中时就是「忙什么」）、可选第二行、图
   empty: { description: string; hint?: string; busy?: boolean; art: EmptyArt };
   /// 空态上方的新手提示条（`HintStrip`）
@@ -29,6 +31,7 @@ export function LocationFrame({
   onFilterText,
   actions,
   enabled,
+  bar,
   empty,
   hint,
   children,
@@ -41,6 +44,7 @@ export function LocationFrame({
         actions={actions}
         enabled={enabled}
       />
+      {bar ? <div className="mx-bar">{bar}</div> : null}
       {hint ? <div className="mx-hint">{hint}</div> : null}
       <Empty description={empty.description} hint={empty.hint} busy={empty.busy} art={empty.art} />
       {children}

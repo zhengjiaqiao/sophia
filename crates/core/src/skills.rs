@@ -22,10 +22,10 @@ pub fn domain_key(scope: &TargetScope) -> String {
     }
 }
 
-/// 域名：全局固定，项目优先用 `project_label`（harness 的 agent 目录带这个），否则路径末段
+/// 域名：用户级固定（界面上不再叫「全局」，spec 2026-09-26-object-first-navigation R3），项目优先用 `project_label`（harness 的 agent 目录带这个），否则路径末段
 pub fn domain_label(scope: &TargetScope) -> String {
     match scope {
-        TargetScope::Global { .. } => "全局".to_string(),
+        TargetScope::Global { .. } => "用户级".to_string(),
         TargetScope::Project {
             project,
             project_label,

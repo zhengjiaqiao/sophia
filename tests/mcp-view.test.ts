@@ -67,7 +67,7 @@ test("域保留空项目、全局在前，并且项目绝不显示外域来源",
     result.map((page) => page.key),
     ["global", "project:/work/a", "project:/work/b"],
   );
-  assert.equal(result[0].label, "全局");
+  assert.equal(result[0].label, "用户级");
   assert.equal(result[1].label, "项目 · a");
   assert.deepEqual(
     result[0].rows.map((row) => row.name),
