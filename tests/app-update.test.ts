@@ -6,7 +6,7 @@ import { render } from "./ui-render.ts";
 import type { AppUpdateBackend, AppUpdateHandle } from "../src/appUpdate.ts";
 
 const { createAppUpdateStore, RECHECK_MS } = await import("../src/appUpdate.ts");
-const { UpdateKey } = await import("../src/ui/UpdateKey.tsx");
+const { UpdateKey, litTicks } = await import("../src/ui/UpdateKey.tsx");
 
 function fakeBackend() {
   let clock = 1_000;
@@ -148,49 +148,40 @@ test("同一时刻只查一次：后台那次还没回来，手动按下就等�
   assert.equal(manual, true);
 });
 
-test("侧栏更新键：可下载是纸面键 + 下载；下载中是忙碌、不能点；装好是墨键 + 重启", () => {
+test("侧栏更新键：只有图标、不展开，字在提示框里；纸面键 = 下载，平贴 + 进度刻度 = 正在下载，墨键 = 重启", () => {
   const noop = () => undefined;
-  const available = render(UpdateKey, {
-    phase: { kind: "available", version: "0.2.0" },
-    onDownload: noop,
-    onRestart: noop,
-  });
+  const key = (phase: Parameters<typeof UpdateKey>[0]["phase"]) =>
+    render(UpdateKey, { phase, onDownload: noop, onRestart: noop });
+
+  const available = key({ kind: "available", version: "0.2.0" });
   assert.match(available, /ss-updatekey--paper/);
   assert.match(available, /aria-label="下载 0.2.0"/);
-  assert.match(available, />下载 0.2.0</);
+  assert.match(available, /role="tooltip"[^>]*>下载 0.2.0</, "字在提示框里");
+  assert.doesNotMatch(available, /ss-updatekey__label/, "键上不再有展开的字");
 
-  const failed = render(UpdateKey, {
-    phase: { kind: "failed", version: "0.2.0", reason: "x" },
-    onDownload: noop,
-    onRestart: noop,
-  });
-  assert.match(failed, /ss-updatekey--paper/, "失败回到纸面键，再点就是重试");
+  assert.match(
+    key({ kind: "failed", version: "0.2.0", reason: "x" }),
+    /ss-updatekey--paper/,
+    "失败回到纸面键，再点就是重试",
+  );
 
-  const downloading = render(UpdateKey, {
-    phase: { kind: "downloading", version: "0.2.0", percent: 43 },
-    onDownload: noop,
-    onRestart: noop,
-  });
+  const downloading = key({ kind: "downloading", version: "0.2.0", percent: 43 });
   assert.match(downloading, /ss-updatekey--busy/);
   assert.match(downloading, /aria-disabled="true"/);
-  assert.match(downloading, /正在下载 43%/);
-  assert.match(downloading, /ss-spinner/);
+  assert.match(downloading, /role="tooltip"[^>]*>正在下载 43%</);
+  assert.equal((downloading.match(/class="is-lit"/g) ?? []).length, 3, "43% 点亮三根");
 
-  const unknown = render(UpdateKey, {
-    phase: { kind: "downloading", version: "0.2.0", percent: null },
-    onDownload: noop,
-    onRestart: noop,
-  });
-  assert.match(unknown, />正在下载</, "拿不到总大小时不写百分比");
+  const unknown = key({ kind: "downloading", version: "0.2.0", percent: null });
+  assert.match(unknown, /ss-spinner/, "拿不到总大小：扫过的忙碌刻度");
+  assert.match(unknown, /role="tooltip"[^>]*>正在下载</);
 
-  const installed = render(UpdateKey, {
-    phase: { kind: "installed", version: "0.2.0" },
-    onDownload: noop,
-    onRestart: noop,
-  });
+  const installed = key({ kind: "installed", version: "0.2.0" });
   assert.match(installed, /ss-updatekey--ink/);
-  assert.match(installed, /aria-label="重启以更新到 0.2.0"/);
+  assert.match(installed, /role="tooltip"[^>]*>重启以更新到 0.2.0</);
 
-  const none = render(UpdateKey, { phase: { kind: "none" }, onDownload: noop, onRestart: noop });
-  assert.equal(none, "");
+  assert.equal(key({ kind: "none" }), "");
+});
+
+test("进度刻度：0–19% 一根，每 20% 多一根，80% 起五根", () => {
+  assert.deepEqual([0, 19, 20, 43, 79, 80, 100].map(litTicks), [1, 1, 2, 3, 4, 5, 5]);
 });

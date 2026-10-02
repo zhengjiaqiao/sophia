@@ -39,9 +39,9 @@ fi
 
 # ── 1. 数据目录 ──
 if [ ! -d "$OLD_DIR" ]; then
-  echo "· 没有旧数据目录（$OLD_DIR），跳过"
+  echo "· 没有旧数据目录（${OLD_DIR}），跳过"
 elif [ -e "$NEW_DIR" ] && [ -n "$(ls -A "$NEW_DIR" 2>/dev/null)" ]; then
-  fail "新数据目录已经有东西了（$NEW_DIR）：不覆盖。确认里面的东西不要了就先删掉它再跑"
+  fail "新数据目录已经有东西了（${NEW_DIR}）：不覆盖。确认里面的东西不要了就先删掉它再跑"
 else
   mkdir -p "$NEW_DIR"
   # 旧的后台程序副本不搬：新版打开第三方模型时会按新名字重新放一份

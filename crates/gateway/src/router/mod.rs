@@ -92,6 +92,8 @@ impl Agent {
 pub type KeySource = Arc<dyn Fn(Agent, &str) -> Result<String, String> + Send + Sync>;
 /// 给定目标地址，返回要用的代理；`None` 表示直连
 pub type ProxyFn = Arc<dyn Fn(&url::Url) -> Option<url::Url> + Send + Sync>;
+/// 此刻的界面语言；`None` 表示这回取不到，沿用上一次的
+pub type LocaleSource = Arc<dyn Fn() -> Option<sophia_core::i18n::Lang> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
@@ -121,6 +123,8 @@ pub struct Config {
     pub router_token: TokenSource,
     /// Claude 流式响应的保活间隔；零表示默认 15 秒（R24）
     pub keepalive: Duration,
+    /// 每个请求进来先按它换当前语言，路由说的话（错误句）跟界面语言走。None：不动当前语言
+    pub locale: Option<LocaleSource>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -155,6 +159,7 @@ pub struct Router {
     claude_routing_path: Option<PathBuf>,
     token: claude::TokenCache,
     keepalive: Duration,
+    locale: Option<LocaleSource>,
     // 两个上游各用各的客户端，一路不通不拖累另一路
     native: reqwest::Client,
     third_party: reqwest::Client,
@@ -280,6 +285,7 @@ impl Router {
             } else {
                 config.keepalive
             },
+            locale: config.locale,
             native: build_client(&config.proxy, None)?,
             // 内网网关不可达时尽快失败；流式响应不设总超时
             third_party: build_client(&config.proxy, Some(Duration::from_secs(5)))?,
@@ -1017,6 +1023,10 @@ impl Router {
                     hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| {
                         let router = router.clone();
                         async move {
+                            // 先换语言再做来源校验：散请求的 404 也是一句要给人看的话
+                            if let Some(lang) = router.locale.as_ref().and_then(|source| source()) {
+                                sophia_core::i18n::set_locale(lang);
+                            }
                             let (parts, body) = req.into_parts();
                             // 来源校验先于读请求体：不给跨站请求让路由白白缓冲几十兆的机会；
                             // 没带前缀的 Anthropic 请求也在这里就拒绝，请求体一个字节都不读

@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// `Sophia gateway …`：launchd 拉起的就是这个可执行文件的副本，参数为 `gateway run …`
 pub fn cli(args: Vec<String>) -> i32 {
     match crate::runtime_store_dir() {
-        Ok(dir) => runtime::cli(args, dir),
+        Ok(dir) => runtime::cli(args, dir, crate::language::system_tags),
         Err(e) => {
             eprintln!("{e}");
             1

@@ -164,6 +164,7 @@ impl Harness {
             claude_routing_path: None,
             router_token: Arc::new(|| Err("not set".to_owned())),
             keepalive: Duration::ZERO,
+            locale: None,
         })
         .unwrap();
         Self {
@@ -843,6 +844,7 @@ async fn native_streaming_response_is_forwarded_incrementally() {
         claude_routing_path: None,
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
+        locale: None,
     })
     .unwrap();
     let request = hyper::Request::builder()
@@ -880,6 +882,7 @@ impl Harness {
             claude_routing_path: None,
             router_token: Arc::new(|| Err("not set".to_owned())),
             keepalive: Duration::ZERO,
+            locale: None,
         })
         .unwrap();
         h
@@ -1180,6 +1183,7 @@ async fn connect_failure_is_retried_once() {
         claude_routing_path: None,
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
+        locale: None,
     })
     .unwrap();
     let request = hyper::Request::builder()

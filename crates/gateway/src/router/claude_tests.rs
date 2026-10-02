@@ -100,6 +100,7 @@ impl ClaudeHarness {
             claude_routing_path: claude.then(|| h.dir.path().join("claude-routing.json")),
             router_token: tokens.source(),
             keepalive,
+            locale: None,
         })
         .unwrap();
         Self { h, tokens }
@@ -650,6 +651,7 @@ async fn ac15_missing_or_broken_catalog_and_missing_keys_fail_closed() {
         claude_routing_path: Some(c.h.dir.path().join("claude-routing.json")),
         router_token: tokens.source(),
         keepalive: Duration::ZERO,
+        locale: None,
     })
     .unwrap();
     let res = c.send(messages_req(MESSAGES)).await;

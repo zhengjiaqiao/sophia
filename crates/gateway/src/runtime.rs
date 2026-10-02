@@ -1,16 +1,17 @@
 //! 把编排层接到真实世界：钥匙串、launchd、系统代理、Codex 可执行文件、后台程序副本。
 //! 以及无界面入口 `Sophia gateway run|status|doctor|restore|enable|provider-add|select|probe|restart|launch|…`。
 use crate::app::{App, AppError, Deps, ProviderView};
-use crate::router::{Agent, Config, Protocol, ProxyFn, Router, HEALTH_SERVICE_NAME};
+use crate::router::{Agent, Config, LocaleSource, Protocol, ProxyFn, Router, HEALTH_SERVICE_NAME};
 use crate::{claude_desktop, codex_desktop, keychain, process, provider, service, sysproxy};
 use sha2::{Digest, Sha256};
 use sophia_core::claude_models::desktop::DesktopDirs;
 use sophia_core::codex_models::catalog::Model;
+use sophia_core::i18n;
 use sophia_core::store::Store;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// 钥匙串条目：服务名与账户名
@@ -813,8 +814,9 @@ fn select(app: &App, agent: Agent, args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `Sophia gateway …`；返回进程退出码
-pub fn cli(args: Vec<String>, store_dir: PathBuf) -> i32 {
+/// `Sophia gateway …`；返回进程退出码。`system_tags` 是系统首选语言列表（壳里读 `NSLocale`），
+/// 界面语言设成「跟随系统」时路由用它解析
+pub fn cli(args: Vec<String>, store_dir: PathBuf, system_tags: fn() -> Vec<String>) -> i32 {
     let agent = match args.first().map(String::as_str) {
         Some("run") => Ok(None),
         _ => agent_flag(&args),
@@ -827,7 +829,7 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf) -> i32 {
         }
     };
     let outcome = match (args.first().map(String::as_str), agent) {
-        (Some("run"), _) => run_router(&args[1..]),
+        (Some("run"), _) => run_router(&args[1..], saved_locale(store_dir, system_tags)),
         (Some("status"), None) => serde_json::to_string_pretty(&build_app(store_dir).state())
             .map(|json| println!("{json}"))
             .map_err(|e| e.to_string()),
@@ -926,7 +928,25 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf) -> i32 {
     }
 }
 
-fn run_router(args: &[String]) -> Result<(), String> {
+/// 路由的当前语言：每次调用重读 `settings.json` 里的界面语言。
+///
+/// 为什么每个请求重读，而不是只在启动时读一次：换语言只写这份文件（`Store::set_language`），
+/// 路由是 launchd 拉起的另一个进程，收不到界面的通知；为换语言重启后台服务会掐断进行中的请求。
+/// 这份文件几 KB、写入是原子替换，读一次比一次上游往返小几个数量级，也不必另起监视文件的线程。
+/// 读不到（文件坏了）返回 None，路由沿用上一次的语言。
+/// 「跟随系统」的系统语言只在第一次用到时读一次：界面自己也只在启动时读
+pub fn saved_locale(store_dir: PathBuf, system_tags: fn() -> Vec<String>) -> LocaleSource {
+    let store = Store::new(store_dir);
+    let system = OnceLock::new();
+    Arc::new(move || {
+        let setting = store.load_settings().ok()?.language;
+        Some(i18n::resolve(setting, || {
+            system.get_or_init(system_tags).clone()
+        }))
+    })
+}
+
+fn run_router(args: &[String], locale: LocaleSource) -> Result<(), String> {
     let port: u16 = flag(args, "--port")
         .unwrap_or("47328")
         .parse()
@@ -987,6 +1007,7 @@ fn run_router(args: &[String]) -> Result<(), String> {
             .map_err(key_error)
         }),
         keepalive: Duration::ZERO,
+        locale: Some(locale),
     })?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

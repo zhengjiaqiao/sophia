@@ -497,9 +497,8 @@ textarea,
 }
 
 /* ===== 3.1.1 侧栏更新键 UpdateKey（DESIGN「壳：侧栏 › 更新键」）=====
-   20 × 20 的小方键（圆角同别的键 control 7：圆只给只读的状态点），平时只露 12px 图标（右沿对齐，向左展开）；手放上去 / 键盘聚焦时展开出字（12 / 600）。
-   展开靠字的 max-width 0 ↔ 上限过渡（同抽屉的时长与缓动）：grid 的 0fr 在自适应宽的键里收不回去。
-   三种样子：纸面键（有新版、还没下）、平贴的忙碌（下载中，同禁用键的写法：透明底 + 1px hairline，常展开）、
+   20 × 20 的小方键（圆角同别的键 control 7：圆只给只读的状态点），只有图标、不展开；字在提示框里（2026-10-02）。
+   三种样子：纸面键（有新版、还没下）、平贴的忙碌（下载中，同禁用键的写法：透明底 + 1px hairline，键上画进度刻度）、
    墨键（下好了）。出现时从 60% 弹到原大小，只一次（backwards：播完回到自身样式，不压住按下变形）。
    命中区用伪元素撑到 24 */
 .ss-updatekey {
@@ -508,22 +507,16 @@ textarea,
   flex-shrink: 0;
   align-self: center;
   align-items: center;
+  justify-content: center;
   box-sizing: border-box;
+  width: 20px;
   height: 20px;
-  min-width: 20px;
-  padding: 0 var(--space-xxs);
+  padding: 0;
   border: 0;
   border-radius: var(--radius-control);
-  font-family: var(--font-ui);
-  font-size: var(--size-label);
-  font-weight: 600;
-  line-height: 1;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
   transform-origin: right center;
   animation: ss-updatekey-in var(--dur-slide-knob) var(--spring-slide) backwards;
   transition:
-    padding var(--dur-drawer) var(--ease-mech),
     background-color var(--motion-fast) var(--ease-mech),
     box-shadow var(--motion-fast) var(--ease-mech),
     color var(--motion-fast) var(--ease-mech),
@@ -541,36 +534,14 @@ textarea,
   flex-shrink: 0;
 }
 
-/* 字：收起时宽 0；展开到上限（最长的 `重启以更新到 0.10.0` 也放得下），左边留 5 与图标隔开 */
-.ss-updatekey__label {
-  display: block;
-  max-width: 0;
-  margin-left: 0;
-  overflow: hidden;
-  transition:
-    max-width var(--dur-drawer) var(--ease-mech),
-    margin-left var(--dur-drawer) var(--ease-mech);
+/* 进度刻度：静止刻线同忙碌刻度（ctl-border），已到的那几根 ink */
+.ss-updatekey__ticks rect {
+  fill: var(--ctl-border);
+  transition: fill var(--motion-fast) var(--ease-mech);
 }
 
-/* 展开：悬停、下载中；键盘聚焦另写一条（带 data-input 的规则样张不钉，分开写悬停才钉得住） */
-.ss-updatekey:hover,
-.ss-updatekey--busy {
-  padding: 0 var(--space-xs) 0 var(--space-xxs);
-}
-
-.ss-updatekey:hover .ss-updatekey__label,
-.ss-updatekey--busy .ss-updatekey__label {
-  max-width: 160px;
-  margin-left: 5px;
-}
-
-html:not([data-input="pointer"]) .ss-updatekey:focus-visible {
-  padding: 0 var(--space-xs) 0 var(--space-xxs);
-}
-
-html:not([data-input="pointer"]) .ss-updatekey:focus-visible .ss-updatekey__label {
-  max-width: 160px;
-  margin-left: 5px;
+.ss-updatekey__ticks rect.is-lit {
+  fill: var(--ink);
 }
 
 .ss-updatekey:focus-visible {
@@ -606,7 +577,7 @@ html:not([data-input="pointer"]) .ss-updatekey:focus-visible .ss-updatekey__labe
   transition-duration: var(--dur-press);
 }
 
-/* 下载中：不能点，平贴（同禁用键：透明底、贴着外沿一道 hairline）；字 ink-mute */
+/* 下载中：不能点，平贴（同禁用键：透明底、贴着外沿一道 hairline） */
 .ss-updatekey--busy {
   outline: var(--border-disabled);
   outline-offset: 0;
@@ -2611,7 +2582,7 @@ html[data-input="keyboard"] .ss-menuitem:focus {
 
   /* 更新键：直接出现、直接展开 / 收回与换色 */
   .ss-updatekey,
-  .ss-updatekey__label {
+  .ss-updatekey__ticks rect {
     animation: none;
     transition: none;
   }

@@ -8,7 +8,8 @@
 //! 网关命令行的终端输出不进目录，照旧写中文（`tests/i18n_literals.rs` 把关，放过的类别写在那里）。
 //!
 //! 当前语言是进程级的一份（`set_locale` / `locale`），壳在启动时按设置写入、改设置时换掉；
-//! 按当前语言查，这种语言里没有的键退回简体
+//! 后台路由（`Sophia gateway run`）是另一个进程，每个请求按 settings.json 重设一次
+//! （`sophia_gateway::runtime::saved_locale`）。按当前语言查，这种语言里没有的键退回简体
 use crate::store::Language;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

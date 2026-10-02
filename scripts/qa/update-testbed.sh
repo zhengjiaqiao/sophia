@@ -84,7 +84,7 @@ write_manifest() { # write_manifest <模式>
     };
     fs.writeFileSync(out, JSON.stringify(manifest, null, 2));
   ' "$version" "$url" "$ROOT/serve/Sophia.app.tar.gz.sig" "$PLATFORM" "$ROOT/serve/latest.json"
-  echo "更新服务器：模式 $1（latest.json 版本 $version）"
+  echo "更新服务器：模式 $1（latest.json 版本 ${version}）"
 }
 
 stop_pid() { # stop_pid <pid 文件>
@@ -131,7 +131,7 @@ case "$cmd" in
     SOPHIA_TEST_HOME="$QA_HOME" nohup "$ROOT/app/Sophia.app/Contents/MacOS/Sophia" \
       >"$ROOT/app.log" 2>&1 &
     echo $! >"$ROOT/app.pid"
-    echo "已启动旧版 $OLD_VERSION（$ROOT/app/Sophia.app，日志 $ROOT/app.log）"
+    echo "已启动旧版 ${OLD_VERSION}（$ROOT/app/Sophia.app，日志 $ROOT/app.log）"
     ;;
   stop)
     stop_pid "$ROOT/app.pid"
