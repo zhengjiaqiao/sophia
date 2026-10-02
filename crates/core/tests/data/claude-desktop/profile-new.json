@@ -1,0 +1,8 @@
+{
+  "inferenceProvider": "gateway",
+  "inferenceGatewayBaseUrl": "http://127.0.0.1:47328/claude",
+  "inferenceGatewayApiKey": "sophia-test-token-0123456789abcdefghijklmnopqrstu",
+  "inferenceGatewayAuthScheme": "bearer",
+  "inferenceModels": [{"name": "claude-sonnet-5", "labelOverride": "Kimi K3"}, {"name": "claude-haiku-4-5", "labelOverride": "glm-5 · AP"}],
+  "chatTabEnabled": true
+}

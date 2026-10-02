@@ -1,0 +1,59 @@
+{
+  "_说明": "write-profile.sh 与 capture_server.py 共用的实验数据。profile 里的显示名带【配置X】，网关 /v1/models 的 display_name 带【网关】，看选择器里显示哪种就知道名字从哪来。",
+  "labToken": "sophia-lab-fake-token-not-a-secret",
+  "profileId": "00000000-0000-4000-8000-736f70686961",
+  "profileName": "Sophia 实验",
+  "shapes": {
+    "A": {
+      "_说明": "官方形状：非 Claude 名字 + labelOverride + anthropicFamilyTier（Sophia 想用的形状）",
+      "inferenceModels": [
+        {"name": "sophia-kimi-k2-5", "labelOverride": "Kimi K2.5【配置A】", "anthropicFamilyTier": "sonnet"},
+        {"name": "sophia-glm-5", "labelOverride": "GLM-5【配置A】", "anthropicFamilyTier": "opus"},
+        {"name": "sophia-deepseek-v3-2", "labelOverride": "DeepSeek V3.2【配置A】", "anthropicFamilyTier": "haiku"}
+      ]
+    },
+    "M": {
+      "_说明": "诊断用混合形状（A 被拒时用）：中性非 Claude 名、带别家名字的非 Claude 名、合法 claude-* 名各一个，看是整组拒收还是逐项过滤、按什么过滤",
+      "inferenceModels": [
+        {"name": "sophia-lab-alpha", "labelOverride": "中性名 Alpha【配置M】", "anthropicFamilyTier": "sonnet"},
+        {"name": "sophia-kimi-k2-5", "labelOverride": "Kimi K2.5【配置M】", "anthropicFamilyTier": "opus"},
+        {"name": "claude-haiku-4-5", "labelOverride": "Haiku 路由【配置M】", "anthropicFamilyTier": "haiku"}
+      ]
+    },
+    "B": {
+      "_说明": "配置切换工具形状：name 用 claude-* 角色 id，真名只进 labelOverride",
+      "inferenceModels": [
+        {"name": "claude-sonnet-5", "labelOverride": "Kimi K2.5【配置B】"},
+        {"name": "claude-opus-5", "labelOverride": "GLM-5【配置B】"},
+        {"name": "claude-haiku-4-5", "labelOverride": "DeepSeek V3.2【配置B】"}
+      ]
+    }
+  },
+  "foreign": {
+    "_说明": "模拟别家（配置切换工具模型映射模式）写的 profile：固定 id、自己的令牌、带 /ccs-sim 前缀的回环地址、B 形状的模型名。抓包里路径带 /ccs-sim、鉴权是「模拟别家令牌」、选择器里是【别家】，就说明生效的是它。故意不写 disableDeploymentModeChooser（写了应用里就切不回去）。",
+    "profileId": "00000000-0000-4000-8000-00000000cc55",
+    "profileName": "别家（模拟）",
+    "token": "ccs-lab-simulated-token-not-a-secret",
+    "prefix": "/ccs-sim",
+    "inferenceModels": [
+      {"name": "claude-sonnet-5", "labelOverride": "Kimi K2.5【别家】"},
+      {"name": "claude-opus-5", "labelOverride": "GLM-5【别家】"},
+      {"name": "claude-haiku-4-5", "labelOverride": "DeepSeek V3.2【别家】"}
+    ]
+  },
+  "upstream": {
+    "_说明": "capture_server.py 兼任「假的 OpenAI 兼容上游」时用：路径首段形如 /openai、/openai-a 的请求按 Chat Completions 处理（Sophia 路由转换后发来的请求就打到这里）。密钥不是秘密，在 Sophia 的「+ 网关」里地址填 http://127.0.0.1:<端口>/openai（或 /openai-a、/openai-b，都认），密钥填这个 key。",
+    "key": "sk-lab-fake-upstream-key-not-a-secret",
+    "models": ["fake/kimi-k2.5", "fake/glm-5", "fake/deepseek-v3.2", "fake/qwen3-coder"]
+  },
+  "missingProfileId": "00000000-0000-4000-8000-00000000dead",
+  "gatewayModels": [
+    {"id": "sophia-kimi-k2-5", "display_name": "Kimi K2.5【网关】", "anthropic_family_tier": "sonnet", "is_family_default": true, "max_input_tokens": 256000, "description": "实验网关返回的说明文字"},
+    {"id": "sophia-glm-5", "display_name": "GLM-5【网关】", "anthropic_family_tier": "opus", "is_family_default": true, "max_input_tokens": 200000, "description": "实验网关返回的说明文字"},
+    {"id": "sophia-deepseek-v3-2", "display_name": "DeepSeek V3.2【网关】", "anthropic_family_tier": "haiku", "is_family_default": true, "max_input_tokens": 128000, "description": "实验网关返回的说明文字"},
+    {"id": "sophia-lab-alpha", "display_name": "中性名 Alpha【网关】", "anthropic_family_tier": "sonnet", "max_input_tokens": 200000},
+    {"id": "claude-sonnet-5", "display_name": "Sonnet 路由【网关】", "anthropic_family_tier": "sonnet", "max_input_tokens": 200000},
+    {"id": "claude-opus-5", "display_name": "Opus 路由【网关】", "anthropic_family_tier": "opus", "max_input_tokens": 200000},
+    {"id": "claude-haiku-4-5", "display_name": "Haiku 路由【网关】", "anthropic_family_tier": "haiku", "max_input_tokens": 200000}
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "status": 400,
+  "reason": "Bad Request",
+  "headers": [
+    [
+      "Date",
+      "Tue, 29 Sep 2026 03:56:34 GMT"
+    ],
+    [
+      "Content-Type",
+      "application/json"
+    ],
+    [
+      "Transfer-Encoding",
+      "chunked"
+    ],
+    [
+      "Connection",
+      "keep-alive"
+    ],
+    [
+      "Access-Control-Allow-Origin",
+      "*"
+    ],
+    [
+      "Access-Control-Expose-Headers",
+      "X-Generation-Id,X-Provider-Name,request-id,cf-ray"
+    ],
+    [
+      "X-Generation-Id",
+      "gen-1790654194-PinPrTDnhm6tcIDXdN7H"
+    ],
+    [
+      "set-cookie",
+      "<redacted>"
+    ],
+    [
+      "Permissions-Policy",
+      "payment=(self \"https://checkout.stripe.com\" \"https://connect-js.stripe.com\" \"https://js.stripe.com\" \"https://*.js.stripe.com\" \"https://hooks.stripe.com\")"
+    ],
+    [
+      "Referrer-Policy",
+      "no-referrer, strict-origin-when-cross-origin"
+    ],
+    [
+      "X-Content-Type-Options",
+      "nosniff"
+    ],
+    [
+      "Server",
+      "cloudflare"
+    ],
+    [
+      "CF-RAY",
+      "a4280f05991a1289-LAX"
+    ]
+  ],
+  "request_bytes": 600193,
+  "timing_s": {
+    "headers": 2.056,
+    "first_body_byte": 2.056,
+    "total": 2.056
+  },
+  "request": {
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "messages": [
+      {
+        "role": "user",
+        "content": "<'hello ' × 100000>\\n一句话回答：你好吗？"
+      }
+    ],
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "max_tokens": 16
+  }
+}

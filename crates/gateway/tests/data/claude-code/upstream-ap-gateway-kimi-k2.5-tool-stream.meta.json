@@ -1,0 +1,76 @@
+{
+  "status": 200,
+  "reason": "OK",
+  "headers": [
+    [
+      "Content-Type",
+      "text/event-stream; charset=utf-8"
+    ],
+    [
+      "Transfer-Encoding",
+      "chunked"
+    ],
+    [
+      "Connection",
+      "keep-alive"
+    ],
+    [
+      "date",
+      "Tue, 29 Sep 2026 03:57:20 GMT"
+    ],
+    [
+      "alb-x-request-id",
+      "a99c99ee-df10-41ba-911c-18566bf022e3"
+    ],
+    [
+      "Server",
+      "APISIX/3.14.1"
+    ]
+  ],
+  "request_bytes": 573,
+  "timing_s": {
+    "headers": 1.605,
+    "first_body_byte": 1.605,
+    "total": 1.605
+  },
+  "request": {
+    "model": "weibo/kimi-k2.5",
+    "messages": [
+      {
+        "role": "system",
+        "content": "你是助手。需要天气信息时必须调用 get_weather 工具，不要猜。"
+      },
+      {
+        "role": "user",
+        "content": "北京现在天气怎么样？"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "查询某个城市当前的天气",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "城市名"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "tool_choice": "auto",
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "max_tokens": 300
+  }
+}

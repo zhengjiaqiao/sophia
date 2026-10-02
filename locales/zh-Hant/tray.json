@@ -1,0 +1,7 @@
+{
+  "tray.menu.open": "開啟 Sophia",
+  "tray.menu.quit": "結束",
+  "tray.closeHint.title": "Sophia 還在選單列裡",
+  "tray.closeHint.message": "要結束，請點選選單列圖示裡的「結束」。模型注入由系統背景服務維持，結束應用程式也不受影響。",
+  "tray.closeHint.ok": "好"
+}

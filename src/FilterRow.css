@@ -1,0 +1,105 @@
+/* 筛选行（spec 2026-09-27-skill-mcp-market R2；DESIGN「位置页 › 筛选行」）：左 `位置` 胶囊，右端 `来源` 下拉，
+   一行、不折行；与「更多」浮层。胶囊本身是 ui 的 Chip / ChipRow，这里只管外壳层的排布。 */
+
+.filter-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.filter-row__chips {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filter-row__source {
+  flex-shrink: 0;
+  margin-left: auto;
+  /* 几何补偿：悬停带向右外扩 8，字与记号的右沿仍落在表格右沿上 */
+  margin-right: calc(-1 * var(--space-xs));
+}
+
+.filter-row__more {
+  display: inline-flex;
+}
+
+.filter-row__chevron {
+  margin-left: var(--space-xxs);
+}
+
+/* 量尺：同样的胶囊排成一行量宽；不占位、看不见、点不到 */
+.filter-row__ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* `来源：全部 ˅`：平贴在机面上，没有键面；手靠近出 surface 底（DESIGN「可点的面：hover 怎么表示」）。
+   高 26 与胶囊同高；`来源：` ink-mute，当前值 ink 紧跟全角冒号（冒号自带留白），˅ 前 4 */
+.filter-source {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--control-h-chip);
+  padding: 0 var(--space-xs);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.filter-source:hover,
+.filter-source.is-open {
+  background: var(--surface);
+}
+
+.filter-source:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.filter-source__value {
+  max-width: 200px;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+}
+
+.filter-source__chevron {
+  flex-shrink: 0;
+  margin-left: var(--space-xxs);
+  color: var(--ink-mute);
+}
+
+/* 「更多」浮层：搜索框在上，排序与列表在下；宽随内容但不窄于搜索框 */
+.scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
+  min-width: 280px;
+}
+
+.scope-list__search {
+  padding: 0 var(--space-xs);
+}
+
+.scope-list__head {
+  padding: 0 var(--space-sm);
+}
+
+.scope-list__sort {
+  display: inline-flex;
+  gap: var(--space-xxs);
+}

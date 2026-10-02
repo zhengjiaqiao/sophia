@@ -1,0 +1,1007 @@
+{
+  "note": "热门快照（spec R5）：scripts/market-snapshot.mjs 生成，勿手改。发布前重跑。",
+  "source": "skills.sh /api/search（与 npx skills find 同一接口）。没有匿名可用的排行榜接口，用一批常见词与前列仓库名逐个搜，按 owner/repo/skill 去重，按装过人数取前 200。近似值：名字不含任何搜索词、仓库又不在前列的 skill 可能漏掉。",
+  "generatedAt": "2026-09-26T19:34:33.322Z",
+  "skills": [
+    {
+      "name": "find-skills",
+      "repo": "vercel-labs/skills",
+      "installs": 3577826
+    },
+    {
+      "name": "grill-me",
+      "repo": "mattpocock/skills",
+      "installs": 1228840
+    },
+    {
+      "name": "grill-with-docs",
+      "repo": "mattpocock/skills",
+      "installs": 1050042
+    },
+    {
+      "name": "improve-codebase-architecture",
+      "repo": "mattpocock/skills",
+      "installs": 997456
+    },
+    {
+      "name": "tdd",
+      "repo": "mattpocock/skills",
+      "installs": 968596
+    },
+    {
+      "name": "frontend-design",
+      "repo": "anthropics/skills",
+      "installs": 925511
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "repo": "mattpocock/skills",
+      "installs": 894883
+    },
+    {
+      "name": "agent-browser",
+      "repo": "vercel-labs/agent-browser",
+      "installs": 873196
+    },
+    {
+      "name": "handoff",
+      "repo": "mattpocock/skills",
+      "installs": 872520
+    },
+    {
+      "name": "triage",
+      "repo": "mattpocock/skills",
+      "installs": 843951
+    },
+    {
+      "name": "prototype",
+      "repo": "mattpocock/skills",
+      "installs": 842680
+    },
+    {
+      "name": "grilling",
+      "repo": "mattpocock/skills",
+      "installs": 780291
+    },
+    {
+      "name": "vercel-react-best-practices",
+      "repo": "vercel-labs/agent-skills",
+      "installs": 745081
+    },
+    {
+      "name": "teach",
+      "repo": "mattpocock/skills",
+      "installs": 714192
+    },
+    {
+      "name": "domain-modeling",
+      "repo": "mattpocock/skills",
+      "installs": 701740
+    },
+    {
+      "name": "hyperframes-cli",
+      "repo": "heygen-com/hyperframes",
+      "installs": 686148
+    },
+    {
+      "name": "codebase-design",
+      "repo": "mattpocock/skills",
+      "installs": 679724
+    },
+    {
+      "name": "image-to-video",
+      "repo": "genmedia-labs/skills",
+      "installs": 679407
+    },
+    {
+      "name": "video-edit",
+      "repo": "genmedia-labs/skills",
+      "installs": 676702
+    },
+    {
+      "name": "ai-music",
+      "repo": "genmedia-labs/skills",
+      "installs": 675624
+    },
+    {
+      "name": "ai-video-generation",
+      "repo": "genmedia-labs/skills",
+      "installs": 675352
+    },
+    {
+      "name": "ai-image-generation",
+      "repo": "genmedia-labs/skills",
+      "installs": 674376
+    },
+    {
+      "name": "web-design-guidelines",
+      "repo": "vercel-labs/agent-skills",
+      "installs": 668542
+    },
+    {
+      "name": "diagnosing-bugs",
+      "repo": "mattpocock/skills",
+      "installs": 665992
+    },
+    {
+      "name": "hyperframes",
+      "repo": "heygen-com/hyperframes",
+      "installs": 654037
+    },
+    {
+      "name": "reddit-automation",
+      "repo": "flowkit-labs/skills",
+      "installs": 645602
+    },
+    {
+      "name": "code-review",
+      "repo": "mattpocock/skills",
+      "installs": 618900
+    },
+    {
+      "name": "ask-matt",
+      "repo": "mattpocock/skills",
+      "installs": 615910
+    },
+    {
+      "name": "microsoft-foundry",
+      "repo": "microsoft/azure-skills",
+      "installs": 614075
+    },
+    {
+      "name": "azure-diagnostics",
+      "repo": "microsoft/azure-skills",
+      "installs": 604223
+    },
+    {
+      "name": "azure-prepare",
+      "repo": "microsoft/azure-skills",
+      "installs": 603807
+    },
+    {
+      "name": "azure-ai",
+      "repo": "microsoft/azure-skills",
+      "installs": 603564
+    },
+    {
+      "name": "azure-deploy",
+      "repo": "microsoft/azure-skills",
+      "installs": 603465
+    },
+    {
+      "name": "azure-validate",
+      "repo": "microsoft/azure-skills",
+      "installs": 602905
+    },
+    {
+      "name": "entra-app-registration",
+      "repo": "microsoft/azure-skills",
+      "installs": 602482
+    },
+    {
+      "name": "azure-storage",
+      "repo": "microsoft/azure-skills",
+      "installs": 602364
+    },
+    {
+      "name": "azure-compliance",
+      "repo": "microsoft/azure-skills",
+      "installs": 601931
+    },
+    {
+      "name": "appinsights-instrumentation",
+      "repo": "microsoft/azure-skills",
+      "installs": 601844
+    },
+    {
+      "name": "azure-resource-lookup",
+      "repo": "microsoft/azure-skills",
+      "installs": 601779
+    },
+    {
+      "name": "azure-resource-visualizer",
+      "repo": "microsoft/azure-skills",
+      "installs": 601765
+    },
+    {
+      "name": "azure-aigateway",
+      "repo": "microsoft/azure-skills",
+      "installs": 601512
+    },
+    {
+      "name": "azure-kusto",
+      "repo": "microsoft/azure-skills",
+      "installs": 601465
+    },
+    {
+      "name": "hyperframes-registry",
+      "repo": "heygen-com/hyperframes",
+      "installs": 594189
+    },
+    {
+      "name": "azure-messaging",
+      "repo": "microsoft/azure-skills",
+      "installs": 591172
+    },
+    {
+      "name": "wayfinder",
+      "repo": "mattpocock/skills",
+      "installs": 569441
+    },
+    {
+      "name": "to-spec",
+      "repo": "mattpocock/skills",
+      "installs": 566119
+    },
+    {
+      "name": "research",
+      "repo": "mattpocock/skills",
+      "installs": 565391
+    },
+    {
+      "name": "to-tickets",
+      "repo": "mattpocock/skills",
+      "installs": 555880
+    },
+    {
+      "name": "media-use",
+      "repo": "heygen-com/hyperframes",
+      "installs": 555823
+    },
+    {
+      "name": "hyperframes-core",
+      "repo": "heygen-com/hyperframes",
+      "installs": 553032
+    },
+    {
+      "name": "azure-compute",
+      "repo": "microsoft/azure-skills",
+      "installs": 545091
+    },
+    {
+      "name": "remotion-best-practices",
+      "repo": "remotion-dev/skills",
+      "installs": 544591
+    },
+    {
+      "name": "hyperframes-animation",
+      "repo": "heygen-com/hyperframes",
+      "installs": 543271
+    },
+    {
+      "name": "resolving-merge-conflicts",
+      "repo": "mattpocock/skills",
+      "installs": 542947
+    },
+    {
+      "name": "caveman",
+      "repo": "juliusbrussee/caveman",
+      "installs": 539805
+    },
+    {
+      "name": "azure-cloud-migrate",
+      "repo": "microsoft/azure-skills",
+      "installs": 535109
+    },
+    {
+      "name": "design-taste-frontend",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 521559
+    },
+    {
+      "name": "hyperframes-creative",
+      "repo": "heygen-com/hyperframes",
+      "installs": 514309
+    },
+    {
+      "name": "azure-rbac",
+      "repo": "microsoft/azure-skills",
+      "installs": 492397
+    },
+    {
+      "name": "ai-video-generation",
+      "repo": "101-skills/superpowers",
+      "installs": 490376
+    },
+    {
+      "name": "twitter-automation",
+      "repo": "101-skills/superpowers",
+      "installs": 490041
+    },
+    {
+      "name": "ai-image-generation",
+      "repo": "101-skills/superpowers",
+      "installs": 490005
+    },
+    {
+      "name": "ai-avatar-video",
+      "repo": "101-skills/superpowers",
+      "installs": 489742
+    },
+    {
+      "name": "azure-quotas",
+      "repo": "microsoft/azure-skills",
+      "installs": 471179
+    },
+    {
+      "name": "azure-upgrade",
+      "repo": "microsoft/azure-skills",
+      "installs": 463287
+    },
+    {
+      "name": "lark-doc",
+      "repo": "larksuite/cli",
+      "installs": 459806
+    },
+    {
+      "name": "lark-base",
+      "repo": "larksuite/cli",
+      "installs": 457657
+    },
+    {
+      "name": "lark-shared",
+      "repo": "larksuite/cli",
+      "installs": 456482
+    },
+    {
+      "name": "lark-im",
+      "repo": "larksuite/cli",
+      "installs": 454893
+    },
+    {
+      "name": "lark-drive",
+      "repo": "larksuite/cli",
+      "installs": 454752
+    },
+    {
+      "name": "lark-sheets",
+      "repo": "larksuite/cli",
+      "installs": 454024
+    },
+    {
+      "name": "lark-wiki",
+      "repo": "larksuite/cli",
+      "installs": 453641
+    },
+    {
+      "name": "lark-whiteboard",
+      "repo": "larksuite/cli",
+      "installs": 452299
+    },
+    {
+      "name": "lark-task",
+      "repo": "larksuite/cli",
+      "installs": 452022
+    },
+    {
+      "name": "lark-calendar",
+      "repo": "larksuite/cli",
+      "installs": 451175
+    },
+    {
+      "name": "paper-context-resolver",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 450960
+    },
+    {
+      "name": "repo-intake-and-plan",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 450172
+    },
+    {
+      "name": "minimal-run-and-audit",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 450084
+    },
+    {
+      "name": "env-and-assets-bootstrap",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 450042
+    },
+    {
+      "name": "lark-mail",
+      "repo": "larksuite/cli",
+      "installs": 449729
+    },
+    {
+      "name": "lark-minutes",
+      "repo": "larksuite/cli",
+      "installs": 449390
+    },
+    {
+      "name": "lark-vc",
+      "repo": "larksuite/cli",
+      "installs": 449226
+    },
+    {
+      "name": "lark-event",
+      "repo": "larksuite/cli",
+      "installs": 449084
+    },
+    {
+      "name": "lark-contact",
+      "repo": "larksuite/cli",
+      "installs": 448771
+    },
+    {
+      "name": "lark-workflow-meeting-summary",
+      "repo": "larksuite/cli",
+      "installs": 448231
+    },
+    {
+      "name": "lark-workflow-standup-report",
+      "repo": "larksuite/cli",
+      "installs": 447461
+    },
+    {
+      "name": "lark-openapi-explorer",
+      "repo": "larksuite/cli",
+      "installs": 447221
+    },
+    {
+      "name": "lark-skill-maker",
+      "repo": "larksuite/cli",
+      "installs": 446946
+    },
+    {
+      "name": "azure-hosted-copilot-sdk",
+      "repo": "microsoft/azure-skills",
+      "installs": 443154
+    },
+    {
+      "name": "design-mobile-apps",
+      "repo": "designed-by-ai/skills",
+      "installs": 442822
+    },
+    {
+      "name": "azure-enterprise-infra-planner",
+      "repo": "microsoft/azure-skills",
+      "installs": 437826
+    },
+    {
+      "name": "azure-kubernetes",
+      "repo": "microsoft/azure-skills",
+      "installs": 430712
+    },
+    {
+      "name": "video-edit",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 425052
+    },
+    {
+      "name": "image-to-video",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 423512
+    },
+    {
+      "name": "nano-banana-2",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 423171
+    },
+    {
+      "name": "image-edit",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 422823
+    },
+    {
+      "name": "nano-banana-edit",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 422686
+    },
+    {
+      "name": "flux-kontext",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 422529
+    },
+    {
+      "name": "lark-approval",
+      "repo": "larksuite/cli",
+      "installs": 422440
+    },
+    {
+      "name": "wan-2-7",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 421844
+    },
+    {
+      "name": "gpt-image-edit",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 421799
+    },
+    {
+      "name": "happyhorse-1-0",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 421748
+    },
+    {
+      "name": "seedance-v2",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 421710
+    },
+    {
+      "name": "flux-2-klein",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 421574
+    },
+    {
+      "name": "supabase-postgres-best-practices",
+      "repo": "supabase/agent-skills",
+      "installs": 417973
+    },
+    {
+      "name": "wizard",
+      "repo": "mattpocock/skills",
+      "installs": 415021
+    },
+    {
+      "name": "hyperframes-keyframes",
+      "repo": "heygen-com/hyperframes",
+      "installs": 412699
+    },
+    {
+      "name": "azure-cost",
+      "repo": "microsoft/azure-skills",
+      "installs": 404021
+    },
+    {
+      "name": "lark-slides",
+      "repo": "larksuite/cli",
+      "installs": 402890
+    },
+    {
+      "name": "git-guardrails-claude-code",
+      "repo": "mattpocock/skills",
+      "installs": 401204
+    },
+    {
+      "name": "lark-attendance",
+      "repo": "larksuite/cli",
+      "installs": 400082
+    },
+    {
+      "name": "google-agents-cli-adk-code",
+      "repo": "google/agents-cli",
+      "installs": 399031
+    },
+    {
+      "name": "kling-3-0",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 398760
+    },
+    {
+      "name": "google-agents-cli-workflow",
+      "repo": "google/agents-cli",
+      "installs": 398608
+    },
+    {
+      "name": "google-agents-cli-eval",
+      "repo": "google/agents-cli",
+      "installs": 398575
+    },
+    {
+      "name": "google-agents-cli-deploy",
+      "repo": "google/agents-cli",
+      "installs": 398514
+    },
+    {
+      "name": "google-agents-cli-scaffold",
+      "repo": "google/agents-cli",
+      "installs": 398507
+    },
+    {
+      "name": "google-agents-cli-observability",
+      "repo": "google/agents-cli",
+      "installs": 398479
+    },
+    {
+      "name": "google-agents-cli-publish",
+      "repo": "google/agents-cli",
+      "installs": 398338
+    },
+    {
+      "name": "setup-pre-commit",
+      "repo": "mattpocock/skills",
+      "installs": 392263
+    },
+    {
+      "name": "skill-creator",
+      "repo": "anthropics/skills",
+      "installs": 391405
+    },
+    {
+      "name": "codex-pet",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 386993
+    },
+    {
+      "name": "lark-okr",
+      "repo": "larksuite/cli",
+      "installs": 386166
+    },
+    {
+      "name": "writing-beats",
+      "repo": "mattpocock/skills",
+      "installs": 385599
+    },
+    {
+      "name": "scaffold-exercises",
+      "repo": "mattpocock/skills",
+      "installs": 385398
+    },
+    {
+      "name": "writing-shape",
+      "repo": "mattpocock/skills",
+      "installs": 385120
+    },
+    {
+      "name": "writing-fragments",
+      "repo": "mattpocock/skills",
+      "installs": 384910
+    },
+    {
+      "name": "high-end-visual-design",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 383094
+    },
+    {
+      "name": "migrate-to-shoehorn",
+      "repo": "mattpocock/skills",
+      "installs": 381925
+    },
+    {
+      "name": "redesign-existing-projects",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 379299
+    },
+    {
+      "name": "caveman-commit",
+      "repo": "juliusbrussee/caveman",
+      "installs": 379162
+    },
+    {
+      "name": "brainstorming",
+      "repo": "obra/superpowers",
+      "installs": 376727
+    },
+    {
+      "name": "caveman-review",
+      "repo": "juliusbrussee/caveman",
+      "installs": 375293
+    },
+    {
+      "name": "caveman-compress",
+      "repo": "juliusbrussee/caveman",
+      "installs": 373982
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "installs": 371526
+    },
+    {
+      "name": "ai-video-generation",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 368376
+    },
+    {
+      "name": "to-prd",
+      "repo": "mattpocock/skills",
+      "installs": 368299
+    },
+    {
+      "name": "ai-image-generation",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 368274
+    },
+    {
+      "name": "lark-markdown",
+      "repo": "larksuite/cli",
+      "installs": 367186
+    },
+    {
+      "name": "caveman-help",
+      "repo": "juliusbrussee/caveman",
+      "installs": 365865
+    },
+    {
+      "name": "runcomfy-cli",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 365617
+    },
+    {
+      "name": "face-swap",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 365380
+    },
+    {
+      "name": "ai-avatar-video",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 365362
+    },
+    {
+      "name": "to-questionnaire",
+      "repo": "mattpocock/skills",
+      "installs": 364702
+    },
+    {
+      "name": "video-inpainting",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 363617
+    },
+    {
+      "name": "image-inpainting",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 363257
+    },
+    {
+      "name": "lipsync",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 362951
+    },
+    {
+      "name": "controlnet-pose",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 362856
+    },
+    {
+      "name": "video-extend",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 362459
+    },
+    {
+      "name": "elevenlabs-music-generation",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 362455
+    },
+    {
+      "name": "image-outpainting",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 362313
+    },
+    {
+      "name": "relight",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 362133
+    },
+    {
+      "name": "video-outpainting",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 362000
+    },
+    {
+      "name": "vercel-composition-patterns",
+      "repo": "vercel-labs/agent-skills",
+      "installs": 357120
+    },
+    {
+      "name": "to-issues",
+      "repo": "mattpocock/skills",
+      "installs": 355224
+    },
+    {
+      "name": "general-video",
+      "repo": "heygen-com/hyperframes",
+      "installs": 355131
+    },
+    {
+      "name": "ai-music",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 354411
+    },
+    {
+      "name": "ace-step",
+      "repo": "prime-skills/runcomfy-agent-skills",
+      "installs": 353887
+    },
+    {
+      "name": "minimalist-ui",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 352650
+    },
+    {
+      "name": "airunway-aks-setup",
+      "repo": "microsoft/azure-skills",
+      "installs": 349805
+    },
+    {
+      "name": "shadcn",
+      "repo": "shadcn-ui/ui",
+      "installs": 347506
+    },
+    {
+      "name": "seedance-2-5-image-to-video",
+      "repo": "genmedia-labs/skills",
+      "installs": 343564
+    },
+    {
+      "name": "seedance-2-5-reference-to-video",
+      "repo": "genmedia-labs/skills",
+      "installs": 343212
+    },
+    {
+      "name": "wan-3-0-prime-reference-to-video",
+      "repo": "genmedia-labs/skills",
+      "installs": 342351
+    },
+    {
+      "name": "loop-me",
+      "repo": "mattpocock/skills",
+      "installs": 340997
+    },
+    {
+      "name": "lark-vc-agent",
+      "repo": "larksuite/cli",
+      "installs": 337056
+    },
+    {
+      "name": "remotion-to-hyperframes",
+      "repo": "heygen-com/hyperframes",
+      "installs": 336879
+    },
+    {
+      "name": "full-output-enforcement",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 336698
+    },
+    {
+      "name": "gpt-taste",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 330220
+    },
+    {
+      "name": "industrial-brutalist-ui",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 330040
+    },
+    {
+      "name": "stitch-design-taste",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 327830
+    },
+    {
+      "name": "writing-great-skills",
+      "repo": "mattpocock/skills",
+      "installs": 324283
+    },
+    {
+      "name": "cavecrew",
+      "repo": "juliusbrussee/caveman",
+      "installs": 322572
+    },
+    {
+      "name": "caveman-stats",
+      "repo": "juliusbrussee/caveman",
+      "installs": 322041
+    },
+    {
+      "name": "writing-for-agents",
+      "repo": "mattpocock/skills",
+      "installs": 319624
+    },
+    {
+      "name": "brandkit",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 319051
+    },
+    {
+      "name": "claude-handoff",
+      "repo": "mattpocock/skills",
+      "installs": 316741
+    },
+    {
+      "name": "image-to-code",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 315585
+    },
+    {
+      "name": "prisma-database-setup",
+      "repo": "prisma/skills",
+      "installs": 315367
+    },
+    {
+      "name": "prisma-client-api",
+      "repo": "prisma/skills",
+      "installs": 315015
+    },
+    {
+      "name": "imagegen-frontend-web",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 312741
+    },
+    {
+      "name": "prisma-cli",
+      "repo": "prisma/skills",
+      "installs": 312594
+    },
+    {
+      "name": "ai-research-explore",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 311319
+    },
+    {
+      "name": "analyze-project",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 311086
+    },
+    {
+      "name": "ai-research-reproduction",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 310994
+    },
+    {
+      "name": "explore-code",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 310690
+    },
+    {
+      "name": "safe-debug",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 310680
+    },
+    {
+      "name": "product-launch-video",
+      "repo": "heygen-com/hyperframes",
+      "installs": 310558
+    },
+    {
+      "name": "run-train",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 310515
+    },
+    {
+      "name": "explore-run",
+      "repo": "lllllllama/rigorpilot-skills",
+      "installs": 310499
+    },
+    {
+      "name": "prisma-postgres",
+      "repo": "prisma/skills",
+      "installs": 308072
+    },
+    {
+      "name": "imagegen-frontend-mobile",
+      "repo": "leonxlnx/taste-skill",
+      "installs": 307017
+    },
+    {
+      "name": "faceless-explainer",
+      "repo": "heygen-com/hyperframes",
+      "installs": 305974
+    },
+    {
+      "name": "wait-what",
+      "repo": "mattpocock/skills",
+      "installs": 305865
+    },
+    {
+      "name": "prisma-driver-adapter-implementation",
+      "repo": "prisma/skills",
+      "installs": 303106
+    },
+    {
+      "name": "prisma-upgrade-v7",
+      "repo": "prisma/skills",
+      "installs": 302840
+    },
+    {
+      "name": "motion-graphics",
+      "repo": "heygen-com/hyperframes",
+      "installs": 302713
+    },
+    {
+      "name": "prisma-postgres-setup",
+      "repo": "prisma/skills",
+      "installs": 302386
+    },
+    {
+      "name": "emil-design-eng",
+      "repo": "emilkowalski/skills",
+      "installs": 300003
+    },
+    {
+      "name": "prisma-compute",
+      "repo": "prisma/skills",
+      "installs": 298109
+    }
+  ]
+}

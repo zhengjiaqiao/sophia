@@ -1,0 +1,372 @@
+/* 安装类推入页（DESIGN「发现与安装 › 安装页」「从链接安装 · 从 JSON 添加」，画板 06 07 09 10）：
+   页面头下 10 是来历一行、一句说明；其下一节一节（区块小标 + hairline + 内容），节间 24；贴底一行在推入页的贴底行里。
+   内容宽 776，左沿与页面头一条线。色值、间距、字号一律 var(--…)。 */
+
+/* ---- 滚动区：贴底行上面那一块自己滚，上下被裁掉时从 face 渐隐。
+   勾选行的悬停带贴着内容沿，滚动区向两侧各让出 8，免得焦点环与悬停底被裁掉 ---- */
+.install-scroll-fade {
+  flex: 1 1 auto;
+  max-width: calc(var(--panel-w) + 2 * var(--space-xs));
+  margin: 0 calc(-1 * var(--space-xs));
+}
+
+.install-scroll {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  padding: 0 var(--space-xs);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.install-scroll__inner {
+  display: flex;
+  flex-direction: column;
+  max-width: var(--panel-w);
+  padding-bottom: var(--space-xl);
+}
+
+/* ---- 来历一行（页面头下 10）：仓库（等宽 ink）· 路径（等宽 ink-mute）+ 离开键 ---- */
+.install-origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 10px 0 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.install-origin__part {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.install-origin__dot {
+  color: var(--ink-faint);
+}
+
+.install-origin__mono {
+  font-size: var(--size-label);
+  color: var(--ink-mute);
+}
+
+.install-origin__mono.is-strong {
+  color: var(--ink);
+}
+
+/* 一句说明 / 连接方式：13 ink-mute，来历下 6 */
+.install-lede {
+  margin: 6px 0 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.install-lede__mono {
+  font-size: var(--size-label);
+  color: var(--ink);
+}
+
+/* ---- 一节：区块小标 + hairline，节间 24，内容在线下 12 ---- */
+.install-block {
+  margin-top: var(--space-xl);
+}
+
+.install-block__body {
+  padding-top: var(--space-sm);
+}
+
+/* 位置胶囊下一行：落点（12 ink-faint，路径等宽） */
+.install-landing {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+/* 落点已有同名：一句（13 ink）+ 在访达中显示 ↗ */
+.install-blocked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: var(--space-xs) 0 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+}
+
+/* 计划读不到（这个位置认不出之类）：一句 13 ink-mute，照样能按安装，由后端再判 */
+.install-error {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* ---- 勾选行网格：两列（行高 36），从 JSON 添加是一列（放得下原因句） ---- */
+.install-agents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--space-xl);
+}
+
+.install-agents--one {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ---- 给谁用（skill）：直接读取的一组只告诉、不勾——一句 + 一排图标与名字；其余 agent 在小标 `另外链接给` 下勾 ---- */
+.install-direct {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+
+.install-direct__say,
+.install-direct__more {
+  margin: 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.install-direct__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.install-direct__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--size-body);
+  color: var(--ink);
+}
+
+/* ---- 要填的：两列表单——左键名（等宽 ink）+ 下一行 `必填 · 密钥`；右输入框 ---- */
+.install-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.install-field {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  align-items: start;
+}
+
+.install-field__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-right: var(--space-md);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.install-fields__note {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+/* ---- 勾选列表：自己滚，露 4 行半（被切掉的半行就是「下面还有」，不加渐隐） ---- */
+.install-picklist {
+  max-height: calc(4.5 * (var(--row-h) + 1px));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* 一行：勾选框 ｜ 名字（定宽 200）｜ 一句（等宽 12 ink-faint）｜ 行尾动作；行间 row-line。
+   整行可点：悬停出 surface 带（同勾选行）；不能勾的行不回应悬停、名字退到 ink-faint */
+.install-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: var(--row-h);
+  padding: 0 var(--space-xs);
+  border-bottom: var(--border-row);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.install-pick:last-child {
+  border-bottom: 0;
+}
+
+.install-pick:hover:not(.is-blocked) {
+  background: var(--surface);
+}
+
+.install-pick.is-blocked {
+  color: var(--ink-faint);
+}
+
+.install-pick__box {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.install-pick__name {
+  flex: 0 0 200px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.install-pick__detail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 不能勾的原因要读全：折行，不截断 */
+.install-pick.is-blocked .install-pick__detail {
+  color: var(--ink-mute);
+  white-space: normal;
+}
+
+.install-pick__action {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* ---- 从链接安装：满宽等宽输入框（页面头下 10），下一行一句状态 ---- */
+.install-link {
+  margin-top: 10px;
+}
+
+.install-status {
+  min-height: 18px;
+  margin: 6px 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.install-status.is-reading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.install-status.is-error {
+  color: var(--ink);
+}
+
+.install-status__repo {
+  color: var(--ink);
+}
+
+/* ---- 从 JSON 添加：等宽框，recess 底、限高、框内滚 ---- */
+.install-json {
+  box-sizing: border-box;
+  width: 100%;
+  height: 168px;
+  margin-top: 10px;
+  padding: 10px var(--space-sm);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--recess);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  resize: none;
+  overflow: auto;
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.install-json::placeholder {
+  color: var(--ink-mute);
+}
+
+.install-json:focus {
+  border-color: var(--ink-mute);
+  outline: none;
+}
+
+/* ---- 贴底一行：左一句去向（等宽 12 ink-faint），右 `取消` + 8 + 墨键 ---- */
+.install-foot {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+/* 一句去向：12 ink-faint，一行放不下截断；其中的地址、分支、大小走等宽（footRuns），汉字不走——
+   等宽字族的半角空格夹在汉字中间会读成两个空格 */
+.install-foot__line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--size-label);
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.install-foot__keys {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* 主动作与它的做不成浮窗的锚点 */
+.install-foot__primary {
+  display: inline-flex;
+}
+
+.install-foot__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: var(--control-h-row);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* 项目位置里 Claude Code 写到哪一格（spec 2026-09-30-mcp-claude-self-team R8）：勾选行按内容宽，
+   两颗单选片紧跟名字（勾选行是一颗键，片不能放进它里面，所以并排放在同一格） */
+.install-scope {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  align-items: center;
+  column-gap: var(--space-xs);
+  min-width: 0;
+}
+
+.install-scope__hint {
+  margin: var(--space-xxs) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}

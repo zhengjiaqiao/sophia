@@ -1,0 +1,190 @@
+/* 用量页（spec 2026-09-26-menubar-usage R11，线框 5A）：整页限宽 776、左沿＝机面内左沿（同模型页、设置页）。
+   靠标题与留白分组、不用卡片：页面头下 24；组间 48；组内行距 12，行与行之间不画线；行首标签列统一 92 对齐 */
+.usage-page {
+  max-width: var(--panel-w);
+  padding-bottom: var(--space-huge);
+}
+
+/* 当前用量：页面头下 24；每个 agent 一栏（与下面的配置栏同一种左右并排） */
+.usage-page__now {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-xl);
+}
+
+.usage-page__now-col {
+  min-width: 0;
+}
+
+/* 栏头：16 的标志 + 名字（body 15 / 600，同托盘块头）；右边「N 分钟前更新」12 ink-mute */
+.usage-page__now-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  height: 30px;
+}
+
+.usage-page__agent-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--size-body);
+  font-weight: 600;
+  line-height: var(--leading-body);
+}
+
+.usage-page__updated {
+  margin-left: auto;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}
+
+/* 「菜单栏显示用量」一节：组间 48（节头＝节名 + 开关，ui 的 Section；间距归页，节自己不带外距） */
+.usage-page__head {
+  padding-top: var(--space-huge);
+}
+
+/* 开关关着：节头下一句原因（13 ink-mute），下面整块调淡、点不了 */
+.usage-page__off {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* 节里的预览、数字、刷新：节头下 16；关着时调淡 */
+.usage-page__menubar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+}
+
+.usage-page__menubar.is-off {
+  opacity: 0.45;
+}
+
+/* 一组：组间 48 */
+.usage-page__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-huge);
+}
+
+/* 各 agent 左右并排两栏（776 里各 376，栏间 24）；小标的下线各自对齐到栏宽 */
+.usage-page__cols,
+.usage-page__agents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-huge) var(--space-xl);
+}
+
+/* 配置栏是单独一组：组间 48（当前用量的两栏紧跟小标，不另加） */
+.usage-page__agents {
+  margin-top: var(--space-huge);
+}
+
+.usage-page__agent-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+/* 一行：92 的标签 + 控件（控件下可带一行说明） */
+.usage-page__row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: start;
+}
+
+.usage-page__label {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-h);
+  font-size: var(--size-body);
+  line-height: var(--leading-body);
+  color: var(--ink);
+}
+
+.usage-page__control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: var(--control-h);
+  gap: var(--space-xxs);
+}
+
+.usage-page__hint {
+  margin: 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-faint);
+}
+
+/* 每个 agent 一组的小标：14 的标志 + 名字 */
+.usage-page__agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 预览：菜单栏的一小截（recess 底、5 圆角、高 24），后面一句说明 */
+.usage-page__preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.usage-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 var(--space-xs);
+  border-radius: 5px;
+  background: var(--recess);
+  color: var(--ink);
+  font-size: var(--size-caption);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.usage-preview__icon {
+  width: 16px;
+  height: 16px;
+}
+
+.usage-preview__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 读数过期：整段变淡（同菜单栏） */
+.usage-preview__seg.is-stale {
+  opacity: 0.45;
+}
+
+.usage-preview__nums {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+/* 两行叠放：小 9 / 中 10 / 大 11（同菜单栏的三档字号） */
+.usage-preview__nums.is-stacked.is-small {
+  font-size: 9px;
+}
+
+.usage-preview__nums.is-stacked.is-medium {
+  font-size: 10px;
+}
+
+.usage-preview__nums.is-stacked.is-large {
+  font-size: 11px;
+}

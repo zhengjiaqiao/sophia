@@ -1,0 +1,6 @@
+/* `发现` 一面（DESIGN「发现与安装 › `发现` 的页面头与列表」）：页面头下没有筛选行，列表（或占位的一句）
+   离页面头 18，与 `我的` 里表格到筛选行的距离相同；宽同位置页的面板 776 */
+.discover-frame {
+  max-width: var(--panel-w);
+  padding-top: var(--space-lg);
+}

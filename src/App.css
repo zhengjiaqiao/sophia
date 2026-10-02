@@ -1,0 +1,365 @@
+/* 外壳（侧栏 · 机面）的版式。组件在 src/ui/，表格在 Matrix.css，这里只管整窗怎么摆。
+
+   色值一律 var(--…)，唯一来源是 tokens.css；圆角、层次只用 token 表里的值。
+   scripts/lint-ui.mjs 逐条拦。 */
+@import "./tokens.css";
+
+/* ===== 基础 ===== */
+body {
+  margin: 0;
+}
+
+/* 勾选框是系统控件，没法零色彩：把强调色拉回主文字色，别让系统蓝闯进来 */
+input[type="checkbox"] {
+  accent-color: var(--ink);
+}
+
+/* 裸 <button>（表格列头、添加页的行、格子）的字承接所在的那一行，不落到系统按钮字体；
+   外形一律由各自的类给，这里不画描边与圆角 */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* 键盘焦点：系统默认的聚焦环是强调色（macOS 上是蓝的），
+   那是零色彩界面里唯一闯进来的彩色。统一换成一圈 ink，偏移 2px 和控件自己的描边分开。
+   只认 :focus-visible——鼠标点一下不该留下框 */
+:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 指针操作时不画焦点框、程序放焦点的落点（tabindex="-1"）不画框：这两条在组件库（ui.css 第 0 节），
+   组件在样张里单独用也一样 */
+
+/* 输入框的焦点：描边从 hairline 升到 ink（DESIGN「可点的面」），
+   再叠一圈外框就重了，所以这里把外框收掉 */
+input:focus-visible {
+  outline: none;
+  border-color: var(--ink);
+}
+
+/* ===== 外壳（DESIGN「壳：侧栏 + 一块机面」，裁决 D1 D17） =====
+   没有顶栏：一条全高侧栏（208，落在机壳上、不画线）做全部导航，右边一块机面放当前这一页。
+   系统标题栏隐藏了（titleBarStyle: Overlay），红绿灯内缩到侧栏顶那 28 里（trafficLightPosition）。 */
+.app {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  height: 100vh;
+}
+
+/* 机面上方那条 10 高的机壳：整窗宽的拖窗区（D17）。盖在侧栏之上也无妨——侧栏那一段本来就能拖 */
+.app__drag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  /* 只需压在同层的侧栏之上 */
+  z-index: var(--z-fade);
+}
+
+/* ---- 侧栏 ---- */
+.sidebar {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 208px;
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+/* 红绿灯行：高 28，留空、可拖窗 */
+.sidebar__lights {
+  height: 28px;
+  flex-shrink: 0;
+}
+
+/* 字标带：高 44；字标（标志资产原样，高 26）上下各留 9（窗口 y 37–63）。
+   对齐取主体不取重影：主体 S 左沿落在 20（与红绿灯、侧栏文字同一条左沿），左下重影挂在它左边、
+   左沿 15。画布只盖这一块（data-brand-band），碎片落在它的下沿 */
+.sidebar__brand {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  flex-shrink: 0;
+  padding-left: 15px;
+}
+
+.sidebar__mark {
+  display: flex;
+  margin: 0;
+}
+
+/* 高 26、宽随 3304:916（93.8）。框内主体 S 左沿在 6.9、重影左沿在 1.8：图往左让 2，
+   主体落在 20；让出去的那 2 不在命中区里（指针穿过图、落在外层的盒上） */
+.sidebar__mark .wordmark {
+  display: block;
+  height: 26px;
+  width: auto;
+  margin-left: -2px;
+  pointer-events: none;
+}
+
+/* 字标框＝命中区：窗口 x 15–109（重影左沿到 A 右沿 105.4 + 4）、y 37–63。这一块不当拖窗区。
+   画布由 GlassMark 按字标带定位与定尺寸，不接指针事件 */
+.brandmark {
+  position: relative;
+  display: block;
+  padding-right: 3px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.brandmark__canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* 平铺的目的地（spec 2026-09-26-object-first-navigation R1）：占满字标带与 `设置` 之间，不分组、不列项目；
+   项目少了之后侧栏不再需要滚动。与字标带之间留 12 */
+.sidebar__nav {
+  flex: 1;
+  min-height: 0;
+  padding-top: var(--space-sm);
+}
+
+/* 项：高 34，左右外距 10、内距 10（文字左沿 20），图标与字间距 8；15 ink-mute。
+   选中：ink 600、一小块机面（face 底 + 1px hairline 环、control 7）；悬停 surface。全栏同一种项、同一个选中 */
+.side-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 34px;
+  margin: 0 10px;
+  /* 环常备、平时透明：选中时只换色，文字不挪（文字左沿 = 外距 10 + 边 1 + 内距 9 = 20） */
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.side-item:hover {
+  background: var(--surface);
+}
+
+.side-item.is-on {
+  border-color: var(--hairline);
+  background: var(--face);
+}
+
+.side-item__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  text-align: left;
+}
+
+.side-item:hover .side-item__main,
+.side-item.is-on .side-item__main {
+  color: var(--ink);
+}
+
+.side-item.is-on .side-item__main {
+  font-weight: 600;
+}
+
+.side-item__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.side-item__name {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 名字后的 6px 指示点（模型：第三方模型开着）：右端 */
+.side-item__dot {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-right: var(--space-xxs);
+}
+
+/* `设置` 行右端的更新键（DESIGN「壳：侧栏 › 更新键」）：贴右内沿、垂直居中，向左展开时盖在 `设置` 右侧
+   （键面不透明；最长的「重启以更新到 0.2.0」悬停时会盖住末字一点），不挤压 `设置` 的字；右距同指示点 */
+.side-item__trail {
+  position: absolute;
+  top: 50%;
+  right: var(--space-xxs);
+  display: inline-flex;
+  transform: translateY(-50%);
+}
+
+/* 设置：贴侧栏底，底距 10 */
+.sidebar__foot {
+  flex-shrink: 0;
+  padding: var(--space-md) 0 10px;
+}
+
+/* ---- 机面 ---- */
+/* 一块机面：face 底、1px hairline 边、12 圆角、无投影；上右下离窗沿 10，左沿紧贴侧栏。
+   1100 宽时机面宽 882。滚动边缘的渐隐也用 face */
+.face {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  margin: 10px 10px 10px 0;
+  border: var(--border-face);
+  border-radius: var(--radius-face);
+  background: var(--face);
+  overflow: hidden;
+}
+
+/* 机面内边距 16 24 0（量到机面外沿，含 1px 边）。**滚动容器上下内边距为 0**：sticky 的落点按
+   滚动容器的内容盒算，上内边距会让吸顶行离顶留一道缝、滚过去的内容从缝里漏出来——上面的 16 由页面头
+   （或错误横幅）自己的上外距给 */
+.face__scroll {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0 calc(var(--space-xl) - 1px) 0;
+  overflow: auto;
+}
+
+/* 应用级故障：机面顶上、页面头之上的灰面板，满内容宽 */
+.face__banner {
+  padding-top: 15px;
+}
+
+/* 页面头（ui 的 PageHead，上距 15＝机面顶上 16 含 1px 边）在应用级故障下面时上距 16 */
+.face__banner + .page-head {
+  margin-top: var(--space-md);
+}
+
+/* 位置页的页面头连同来源片、来源行、列头一起吸顶（DESIGN「位置页 › 表格 › 吸顶」）；
+   宽度与表格同一条右沿（776，= Matrix.tsx 的 PANEL_W），切页签时右端的筛选框与 `+ 来源` 不跳。
+   上距换成同高的内边距（15 + 34 = 49，= Matrix.css 的 --mx-top），吸顶后上面不留缝 */
+.page-head--location {
+  position: sticky;
+  top: 0;
+  /* 低过机面里推入的一页（token 梯子：吸顶页面头 7 < 推入页 8） */
+  z-index: calc(var(--z-pushed) - 1);
+  /* 底色向左右各多铺 8（负外距 + 同宽内边距，内容仍是 776、左右沿不动）：列表行里贴右沿的键（发现的 `安装`）
+     投影比键面宽几像素，滚到页面头底下时超出 776 的那一截会从右边漏出来（2026-09-27 产品负责人实机）。
+     只往两侧铺、不往下，不压下面的内容 */
+  box-sizing: border-box;
+  max-width: calc(var(--panel-w) + 2 * var(--space-xs));
+  height: 49px;
+  margin: 0 calc(-1 * var(--space-xs));
+  padding: 15px var(--space-xs) 0;
+  background: var(--face);
+}
+
+/* 模型页（shell/ModelsPage.tsx）：页面头连同各节整页限宽 776，左沿＝机面内左沿——与 SKILLS / MCP 的表同宽、
+   同一条左右沿（DESIGN「agent 页 › 第三方模型」：一条左沿、一列控件）。页内怎么排归各节 */
+.agent-page {
+  max-width: var(--panel-w);
+}
+
+/* 模型页的节（shell/ModelsPage.tsx 把每一节包一层）：页面头下 24，节与节之间 48（DESIGN「模型页」）。
+   间距归壳，节组件（ui/Section）自己不带外距 */
+.agent-page__section {
+  padding-top: var(--space-xl);
+  /* 与新手提示条同步：提示出现 / 收起时上内边距 24 ↔ 16 */
+  transition: padding-top var(--dur-drawer) var(--ease-mech);
+}
+
+.agent-page__section + .agent-page__section {
+  padding-top: var(--space-huge);
+}
+
+/* 节头上方的新手提示条（`first-codex`，DESIGN「新手提示条」）：页面头到提示 16、提示到节头 16。
+   提示条不带上外距（HintStrip flush），开着时（data-hint="open"）节的上内边距收成 16；
+   收起后回到 24，节头回原位 */
+.agent-page__section:has(> [data-hint="open"]) {
+  padding-top: var(--space-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-page__section {
+    transition: none;
+  }
+}
+
+/* 右下提示（后台自动规则、后台 MCP）：右沿对齐机面右沿向内 16、底 16。
+   两个同时在时竖着排，右沿对齐；层同其他浮起小窗（token 梯子 --z-toast） */
+.app__toast {
+  position: fixed;
+  right: calc(10px + var(--space-md));
+  bottom: calc(10px + var(--space-md));
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-xs);
+}
+
+/* 推入页有贴底一行（PushedPage 的 footer，高 60：添加来源页）时，右下那一叠抬到它上面：
+   提示不盖住这一页的主动作（② 就近不遮挡）。认推入页的公开钩子 data-footer */
+.app:has([data-footer]) .app__toast {
+  bottom: calc(10px + 60px + var(--space-md));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .face::before,
+  .face::after,
+  .side-item {
+    transition: none;
+  }
+}
+
+/* 横向放不下时被裁掉的左 / 右边缘 16px 从 face 渐隐到透明（功能性渐变）。
+   渐隐盖在滚动容器外面，不随内容滚走 */
+.face::before,
+.face::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* 高过 Matrix 的吸顶工具行与列头、推入页（token 梯子：机面边缘渐隐 9 > 推入页 8），低过浮层 */
+  z-index: calc(var(--z-pushed) + 1);
+  width: var(--fade-edge);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.face::before {
+  left: 0;
+  background: linear-gradient(to right, var(--face), transparent);
+}
+
+.face::after {
+  right: 0;
+  background: linear-gradient(to left, var(--face), transparent);
+}
+
+.face[data-fade-left]::before,
+.face[data-fade-right]::after {
+  opacity: 1;
+}

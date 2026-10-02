@@ -1,0 +1,129 @@
+{
+  "toast.keepThis.nameOf": "{skill} from {label}",
+  "toast.split.folder": "skills folder",
+  "toast.line.success.link": "Added {names} to {agents}",
+  "toast.line.success.linkBare": "Added to {agents}",
+  "toast.line.success.unlink": "Removed {names} from {agents}",
+  "toast.line.success.unlinkBare": "Removed from {agents}",
+  "toast.line.success.write": "Wrote {names} to {agents}",
+  "toast.line.success.writeBare": "Wrote to {agents}",
+  "toast.line.success.delete": "Deleted {names} from {agents}",
+  "toast.line.success.clear": "Cleared {names} from {agents}",
+  "toast.line.success.clearBare": "Cleared from {agents}",
+  "toast.line.success.split": "Split {agents} {names}",
+  "toast.line.success.keepThis": "Kept only {names}",
+  "toast.line.success.autoLink": "Auto-added {names} to {agents}",
+  "toast.line.success.autoWrite": "Auto-wrote {names} to {agents}",
+  "toast.line.cannot.link": "Couldn't add {names} to {agents}",
+  "toast.line.cannot.unlink": "Couldn't remove {names} from {agents}",
+  "toast.line.cannot.write": "Couldn't write {names} to {agents}",
+  "toast.line.cannot.delete": "Couldn't delete {names} from {agents}",
+  "toast.line.cannot.clear": "Couldn't clear {names} from {agents}",
+  "toast.line.cannot.split": "Couldn't split {agents} {names}",
+  "toast.line.cannot.keepThis": "Couldn't delete the other copy of {names}",
+  "toast.line.cannot.autoLink": "Couldn't auto-add {names} to {agents}",
+  "toast.line.cannot.autoWrite": "Couldn't auto-write {names} to {agents}",
+  "toast.line.partial.link": "Added {names} to {agents}",
+  "toast.line.partial.unlink": "Removed {names} from {agents}",
+  "toast.line.partial.write": "Wrote {names} to {agents}",
+  "toast.line.partial.delete": "Deleted {names} from {agents}",
+  "toast.line.partial.clear": "Cleared {names} from {agents}",
+  "toast.line.partial.split": "Split {agents} {names}",
+  "toast.line.partial.keepThis": "Kept only {names}",
+  "toast.line.partial.autoLink": "Auto-added {names} to {agents}",
+  "toast.line.partial.autoWrite": "Auto-wrote {names} to {agents}",
+  "toast.line.deleteOriginal.success": "Deleted {names}",
+  "toast.line.deleteOriginal.cannot": "Couldn't delete {names}",
+  "toast.line.deleteOriginal.partial": "Deleted {names}",
+  "toast.line.restore.success": "Restored {names}",
+  "toast.line.restore.cannot": "Couldn't restore {names}",
+  "toast.line.restore.partial": "Restored {names}",
+  "toast.trail.restartClaudeDesktop": "Restart Claude Desktop to apply",
+  "toast.trail.newSession": "Applies in a new session",
+  "toast.trail.trustCopilotFolder": "Applies once you trust this folder in Copilot",
+  "toast.keepThisConfirm.title": "Keep only {skill} from {origin}?",
+  "toast.keepThisConfirm.trash": "The copy in {origin} goes to the Trash",
+  "toast.keepThisConfirm.trashRelinked": {
+    "one": "The copy in {origin} goes to the Trash, and {count} link is repointed to this one",
+    "other": "The copy in {origin} goes to the Trash, and {count} links are repointed to this one"
+  },
+  "toast.keepThisConfirm.keptLabel": "Keep",
+  "toast.keepThisConfirm.trashLabel": "Move to Trash",
+  "toast.deleteOriginal.title": "Delete {skill}?",
+  "toast.deleteOriginal.relinked": {
+    "one": "After deletion, {agents} will use the same-name {skill} in {source} ({count} symlink repointed)",
+    "other": "After deletion, {agents} will use the same-name {skill} in {source} ({count} symlinks repointed)"
+  },
+  "toast.deleteOriginal.relinkedLostOne": {
+    "one": "After deletion, {agents} will use the same-name {skill} in {source} ({count} symlink repointed); {names} can no longer use it",
+    "other": "After deletion, {agents} will use the same-name {skill} in {source} ({count} symlinks repointed); {names} can no longer use it"
+  },
+  "toast.deleteOriginal.relinkedLostMany": {
+    "one": "After deletion, {agents} will use the same-name {skill} in {source} ({count} symlink repointed); {names} can no longer use it",
+    "other": "After deletion, {agents} will use the same-name {skill} in {source} ({count} symlinks repointed); {names} can no longer use it"
+  },
+  "toast.deleteOriginal.lostOne": "After deletion, {names} can no longer use it",
+  "toast.deleteOriginal.lostMany": "After deletion, {names} can no longer use it",
+  "toast.deleteOriginal.lostLinksOne": {
+    "one": "After deletion, {names} can no longer use it; the {count} symlink pointing to it will be deleted too",
+    "other": "After deletion, {names} can no longer use it; the {count} symlinks pointing to it will be deleted too"
+  },
+  "toast.deleteOriginal.lostLinksMany": {
+    "one": "After deletion, {names} can no longer use it; the {count} symlink pointing to it will be deleted too",
+    "other": "After deletion, {names} can no longer use it; the {count} symlinks pointing to it will be deleted too"
+  },
+  "toast.deleteOriginal.linksOnly": {
+    "one": "The {count} symlink pointing to it will be deleted too",
+    "other": "The {count} symlinks pointing to it will be deleted too"
+  },
+  "toast.deleted.inTrash": "In the Trash",
+  "toast.restored.linksFailed": {
+    "one": "{count} link wasn't restored: {reason}",
+    "other": "{count} links weren't restored: {reason}"
+  },
+  "toast.deleteMcp.title": "Delete {name} from {agent}?",
+  "toast.deleteMcp.bodyOthers": "After deletion, {agent} can no longer use it; the copy in {others} isn't affected",
+  "toast.deleteMcp.bodyLast": "After deletion, {agent} can no longer use it, and this MCP server will be removed from the list",
+  "toast.deleteMcpBatch.title": {
+    "one": "Delete {count} MCP server from {agents}?",
+    "other": "Delete {count} MCP servers from {agents}?"
+  },
+  "toast.deleteMcpBatch.namesMore": {
+    "one": "{names} ({count} total)",
+    "other": "{names} ({count} total)"
+  },
+  "toast.deleteMcpBatch.bodyPlain": "{names}. After deletion, {agents} can no longer use them",
+  "toast.deleteMcpBatch.bodyPlainKept": "{names}. After deletion, {agents} can no longer use them; same-name definitions in {others} aren't affected",
+  "toast.deleteMcpBatch.bodyAll": "{names}. After deletion, {agents} can no longer use them, and these MCP servers will be removed from the list",
+  "toast.deleteMcpBatch.bodyAllKept": "{names}. After deletion, {agents} can no longer use them, and these MCP servers will be removed from the list; same-name definitions in {others} aren't affected",
+  "toast.deleteMcpBatch.bodySome": {
+    "one": "{names}. After deletion, {agents} can no longer use them; {count} of them will be removed from the list",
+    "other": "{names}. After deletion, {agents} can no longer use them; {count} of them will be removed from the list"
+  },
+  "toast.deleteMcpBatch.bodySomeKept": {
+    "one": "{names}. After deletion, {agents} can no longer use them; {count} of them will be removed from the list; same-name definitions in {others} aren't affected",
+    "other": "{names}. After deletion, {agents} can no longer use them; {count} of them will be removed from the list; same-name definitions in {others} aren't affected"
+  },
+  "toast.split.title": "Split the skills folder in {agent}?",
+  "toast.split.body": "The link is replaced with a real folder, and its contents are copied over as they are",
+  "toast.busy.link": "Adding to {agent}",
+  "toast.busy.unlink": "Removing from {agent}",
+  "toast.busy.write": "Writing to {agent}",
+  "toast.busy.delete": "Deleting from {agent}",
+  "toast.updateCheck.noInfo": "No update information available right now",
+  "toast.updateCheck.offline": "Can't reach the update server; check your network",
+  "toast.updateCheck.failedWith": "Update check failed: {text}",
+  "toast.updateCheck.failed": "Update check failed",
+  "toast.indicator.cannot": "Failed",
+  "toast.indicator.partial": "Partly failed",
+  "toast.tally.label": "{done} succeeded, {failed} failed",
+  "toast.count.skills": {
+    "one": "{count} skill",
+    "other": "{count} skills"
+  },
+  "toast.count.mcp": {
+    "one": "{count} MCP server",
+    "other": "{count} MCP servers"
+  },
+  "toast.success.mark": "Success"
+}

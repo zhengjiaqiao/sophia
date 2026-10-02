@@ -1,0 +1,58 @@
+/* 有更新（DESIGN「发现与安装 › 有更新」）：行上的灰字、抽屉末行、确认框里改过的文件。
+   色值、字号、间距一律 var(--…)，唯一来源是 tokens.css；组件内部类 ss-* 不在这里写。 */
+
+/* 行上名字后的灰字 `有更新`：12 ink-mute，不是键（没有键面、不换光标） */
+.update-mark {
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* 抽屉末行：`来自 anthropics/skills · 有新版本` + 8 + `更新`（默认键紧凑）+ 8 + `看改动 ↗`（浅键）。
+   字随抽屉（13 ink-mute）；与上面几行隔开一点，自成一行 */
+.update-line {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  margin-top: 2px;
+}
+
+/* `更新` 键的包层：更新不成的那一句锚在它下面，不改排版 */
+.update-line__key {
+  display: inline-flex;
+}
+
+.update-line__text {
+  min-width: 0;
+}
+
+.update-line__sep {
+  margin: 0 var(--space-xs);
+  color: var(--ink-faint);
+}
+
+/* 确认框正文里的一句后果：随确认框正文（15 ink-mute），与下面的文件清单隔 12 */
+.update-confirm__body {
+  margin: 0;
+}
+
+/* 改过的文件：recess 底、mono 12 ink、控件圆角；多了框内滚（限高约 6 行），路径不截断、太长折行 */
+.update-confirm__files {
+  max-height: 120px;
+  margin: var(--space-sm) 0 0;
+  padding: var(--space-xs) var(--space-sm);
+  overflow-y: auto;
+  list-style: none;
+  border-radius: var(--radius-control);
+  background: var(--recess);
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}

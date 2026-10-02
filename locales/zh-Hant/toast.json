@@ -1,0 +1,111 @@
+{
+  "toast.keepThis.nameOf": "{label} 的 {skill}",
+  "toast.split.folder": "的 skills 資料夾",
+  "toast.line.success.link": "加到 {agents} {names}",
+  "toast.line.success.linkBare": "加到 {agents}",
+  "toast.line.success.unlink": "從 {agents} 移除 {names}",
+  "toast.line.success.unlinkBare": "從 {agents} 移除",
+  "toast.line.success.write": "寫入 {agents} {names}",
+  "toast.line.success.writeBare": "寫入 {agents}",
+  "toast.line.success.delete": "已從 {agents} 刪除 {names}",
+  "toast.line.success.clear": "清除 {agents} {names}",
+  "toast.line.success.clearBare": "清除 {agents}",
+  "toast.line.success.split": "拆開 {agents} {names}",
+  "toast.line.success.keepThis": "只留 {names}",
+  "toast.line.success.autoLink": "自動加到 {agents} {names}",
+  "toast.line.success.autoWrite": "自動寫入 {agents} {names}",
+  "toast.line.cannot.link": "{names} 加到 {agents} 失敗",
+  "toast.line.cannot.unlink": "{names} 從 {agents} 移除失敗",
+  "toast.line.cannot.write": "{names} 寫入 {agents} 失敗",
+  "toast.line.cannot.delete": "{names} 從 {agents} 刪除失敗",
+  "toast.line.cannot.clear": "{names} 清除 {agents} 失敗",
+  "toast.line.cannot.split": "{names} 拆開 {agents} 失敗",
+  "toast.line.cannot.keepThis": "{names} 刪掉另一份失敗",
+  "toast.line.cannot.autoLink": "{names} 自動加到 {agents} 失敗",
+  "toast.line.cannot.autoWrite": "{names} 自動寫入 {agents} 失敗",
+  "toast.line.partial.link": "加上 {agents} {names}",
+  "toast.line.partial.unlink": "移除 {agents} {names}",
+  "toast.line.partial.write": "寫入 {agents} {names}",
+  "toast.line.partial.delete": "刪除 {agents} {names}",
+  "toast.line.partial.clear": "清除 {agents} {names}",
+  "toast.line.partial.split": "拆開 {agents} {names}",
+  "toast.line.partial.keepThis": "只留 {names}",
+  "toast.line.partial.autoLink": "自動加上 {agents} {names}",
+  "toast.line.partial.autoWrite": "自動寫入 {agents} {names}",
+  "toast.line.deleteOriginal.success": "已刪除 {names}",
+  "toast.line.deleteOriginal.cannot": "{names} 刪除失敗",
+  "toast.line.deleteOriginal.partial": "已刪除 {names}",
+  "toast.line.restore.success": "已還原 {names}",
+  "toast.line.restore.cannot": "{names} 還原失敗",
+  "toast.line.restore.partial": "已還原 {names}",
+  "toast.trail.restartClaudeDesktop": "重啟 Claude Desktop 後生效",
+  "toast.trail.newSession": "新開工作階段後生效",
+  "toast.trail.trustCopilotFolder": "在 Copilot 裡信任這個資料夾後生效",
+  "toast.keepThisConfirm.title": "只留 {origin} 的 {skill}？",
+  "toast.keepThisConfirm.trash": "{origin} 那份移到垃圾桶",
+  "toast.keepThisConfirm.trashRelinked": {
+    "other": "{origin} 那份移到垃圾桶，{count} 條連結改指到這一份"
+  },
+  "toast.keepThisConfirm.keptLabel": "留下",
+  "toast.keepThisConfirm.trashLabel": "移到垃圾桶",
+  "toast.deleteOriginal.title": "刪除 {skill}？",
+  "toast.deleteOriginal.relinked": {
+    "other": "刪除後 {agents} 改用 {source} 裡的同名 {skill}（{count} 條軟連結改指過去）"
+  },
+  "toast.deleteOriginal.relinkedLostOne": {
+    "other": "刪除後 {agents} 改用 {source} 裡的同名 {skill}（{count} 條軟連結改指過去）；{names} 不能再用它"
+  },
+  "toast.deleteOriginal.relinkedLostMany": {
+    "other": "刪除後 {agents} 改用 {source} 裡的同名 {skill}（{count} 條軟連結改指過去）；{names} 都不能再用它"
+  },
+  "toast.deleteOriginal.lostOne": "刪除後 {names} 不能再用它",
+  "toast.deleteOriginal.lostMany": "刪除後 {names} 都不能再用它",
+  "toast.deleteOriginal.lostLinksOne": {
+    "other": "刪除後 {names} 不能再用它：指向它的 {count} 條軟連結一併刪除"
+  },
+  "toast.deleteOriginal.lostLinksMany": {
+    "other": "刪除後 {names} 都不能再用它：指向它的 {count} 條軟連結一併刪除"
+  },
+  "toast.deleteOriginal.linksOnly": {
+    "other": "指向它的 {count} 條軟連結一併刪除"
+  },
+  "toast.deleted.inTrash": "在垃圾桶裡",
+  "toast.restored.linksFailed": {
+    "other": "{count} 條連結沒還原：{reason}"
+  },
+  "toast.deleteMcp.title": "從 {agent} 刪除 {name}？",
+  "toast.deleteMcp.bodyOthers": "刪除後 {agent} 不能再用它；{others} 裡的那份不受影響",
+  "toast.deleteMcp.bodyLast": "刪除後 {agent} 不能再用它，這個 MCP 也會從清單裡移除",
+  "toast.deleteMcpBatch.title": {
+    "other": "從 {agents} 刪除 {count} 個 MCP？"
+  },
+  "toast.deleteMcpBatch.namesMore": {
+    "other": "{names} 等 {count} 個"
+  },
+  "toast.deleteMcpBatch.bodyPlain": "{names}。刪除後 {agents} 不能再用它們",
+  "toast.deleteMcpBatch.bodyPlainKept": "{names}。刪除後 {agents} 不能再用它們；{others} 裡的同名定義不受影響",
+  "toast.deleteMcpBatch.bodyAll": "{names}。刪除後 {agents} 不能再用它們，這些 MCP 也會從清單裡移除",
+  "toast.deleteMcpBatch.bodyAllKept": "{names}。刪除後 {agents} 不能再用它們，這些 MCP 也會從清單裡移除；{others} 裡的同名定義不受影響",
+  "toast.deleteMcpBatch.bodySome": {
+    "other": "{names}。刪除後 {agents} 不能再用它們；其中 {count} 個會從清單裡移除"
+  },
+  "toast.deleteMcpBatch.bodySomeKept": {
+    "other": "{names}。刪除後 {agents} 不能再用它們；其中 {count} 個會從清單裡移除；{others} 裡的同名定義不受影響"
+  },
+  "toast.split.title": "拆開 {agent} 的 skills 資料夾？",
+  "toast.split.body": "把連結換成真資料夾，裡面的內容原樣複製過來",
+  "toast.busy.link": "正在加到 {agent}",
+  "toast.busy.unlink": "正在從 {agent} 移除",
+  "toast.busy.write": "正在寫入 {agent}",
+  "toast.busy.delete": "正在從 {agent} 刪除",
+  "toast.updateCheck.noInfo": "暫時沒有可用的更新資訊",
+  "toast.updateCheck.offline": "無法連線更新伺服器，請檢查網路",
+  "toast.updateCheck.failedWith": "檢查更新失敗：{text}",
+  "toast.updateCheck.failed": "檢查更新失敗",
+  "toast.indicator.cannot": "做不成",
+  "toast.indicator.partial": "部分失敗",
+  "toast.tally.label": "{done} 個成功，{failed} 個沒成",
+  "toast.count.skills": "{count} 個",
+  "toast.count.mcp": "{count} 個",
+  "toast.success.mark": "成功"
+}

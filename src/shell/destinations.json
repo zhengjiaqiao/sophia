@@ -1,0 +1,6 @@
+[
+  { "id": "skills", "labelKey": "shell.dest.skills", "shortcut": "CmdOrCtrl+1", "scoped": true },
+  { "id": "mcp", "labelKey": "shell.dest.mcp", "shortcut": "CmdOrCtrl+2", "scoped": true },
+  { "id": "models", "labelKey": "shell.dest.models", "shortcut": "CmdOrCtrl+3", "scoped": false },
+  { "id": "usage", "labelKey": "shell.dest.usage", "shortcut": "CmdOrCtrl+4", "scoped": false }
+]

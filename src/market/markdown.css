@@ -1,0 +1,144 @@
+/* 介绍页正文（DESIGN「发现与安装 › 介绍页」）：渲染后的 SKILL.md / README，读宽由外层定（640）。
+   正文 15 / 1.65 ink（设计稿写 14；字号只有六档、14 已砍，取 15），小标题 15 / 600，代码块 recess 底 mono 12。
+   原文什么语言就显示什么语言。色值一律 var(--…) */
+@import "../tokens.css";
+
+.md {
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  line-height: 1.65;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md blockquote,
+.md-pre,
+.md-tablewrap {
+  margin: 0 0 var(--space-sm);
+}
+
+.md-heading {
+  margin: var(--space-xl) 0 var(--space-xs);
+  font-size: var(--size-body);
+  font-weight: 600;
+  line-height: var(--leading-body);
+  color: var(--ink);
+}
+
+.md ul,
+.md ol {
+  padding-left: var(--space-xl);
+}
+
+.md li + li {
+  margin-top: var(--space-xxs);
+}
+
+.md li > p {
+  margin: 0;
+}
+
+.md blockquote {
+  padding-left: var(--space-sm);
+  border-left: 2px solid var(--hairline);
+  color: var(--ink-mute);
+}
+
+.md strong {
+  font-weight: 600;
+}
+
+/* 行内代码：等宽 12，不垫底（等宽字族本身就是记号） */
+.md-code {
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+}
+
+/* 代码块：recess 底、control 圆角，自己横向滚，不折行 */
+.md-pre {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-control);
+  background: var(--recess);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.md-pre .md-code {
+  font-size: inherit;
+}
+
+/* 图片不加载：只留替代文字，ink-mute，与正文同一行 */
+.md-alt {
+  color: var(--ink-mute);
+}
+
+/* 链接：原样的字 + 10px ↗（离开 Sophia 只由 ↗ 说；没有下划线、没有手形） */
+.md-link {
+  display: inline;
+  color: var(--ink);
+  font-weight: 600;
+  border-radius: var(--radius-mark);
+}
+
+.md-link:hover {
+  color: var(--ink-mute);
+}
+
+.md-link__leave {
+  display: inline-block;
+  margin-left: 2px;
+  vertical-align: 0.1em;
+}
+
+.md-rule {
+  height: 0;
+  margin: var(--space-xl) 0;
+  border: 0;
+  border-top: var(--border-structure);
+}
+
+.md-tablewrap {
+  overflow-x: auto;
+}
+
+.md-table {
+  border-collapse: collapse;
+  font-size: var(--size-caption);
+}
+
+.md-table th,
+.md-table td {
+  padding: var(--space-xxs) var(--space-sm) var(--space-xxs) 0;
+  border-bottom: var(--border-row);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  font-weight: 600;
+  border-bottom: var(--border-structure);
+}
+
+/* 渲染失败时的纯文字 */
+.md-plain {
+  margin: 0;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}

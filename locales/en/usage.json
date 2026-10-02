@@ -1,0 +1,105 @@
+{
+  "usage.agents.maxShown": {
+    "one": "Up to {count} agent, turn one off first",
+    "other": "Up to {count} agents, turn one off first"
+  },
+  "usage.window.auto": "Auto",
+  "usage.window.none": "None",
+  "usage.page.title": "Usage",
+  "usage.now.title": "Current usage",
+  "usage.now.colLabel": "{name} usage",
+  "usage.signedIn.none": "No signed-in Claude Code or Codex detected yet",
+  "usage.menubar.title": "Show usage in menu bar",
+  "usage.menubar.off": "Usage isn't shown in the menu bar",
+  "usage.menubar.previewNote": "This is how it will look in the menu bar",
+  "usage.number.label": "Number",
+  "usage.number.hint": "When used up, the menu bar shows a countdown instead",
+  "usage.mode.remaining": "Remaining",
+  "usage.mode.used": "Used",
+  "usage.refresh.label": "Refresh",
+  "usage.refresh.hint": "Auto: refreshes often right after you look at the menu, slows down when idle (2–30 min), slowest on low battery, and refreshes once more near reset time. Fixed options go as fast as once a minute. Off only updates when you open the menu",
+  "usage.refresh.auto": "Auto",
+  "usage.refresh.off": "Off",
+  "usage.refresh.minutes": {
+    "one": "{count} min",
+    "other": "{count} min"
+  },
+  "usage.size.small": "Small",
+  "usage.size.medium": "Medium",
+  "usage.size.large": "Large",
+  "usage.agents.title": "Agents to show",
+  "usage.agents.max": {
+    "one": "Up to {count}",
+    "other": "Up to {count}"
+  },
+  "usage.display.primary": "Primary window",
+  "usage.display.primaryLabel": "{name} primary window",
+  "usage.display.secondary": "Secondary window",
+  "usage.display.secondaryLabel": "{name} secondary window",
+  "usage.display.stacked": "Two lines",
+  "usage.display.stackedHint": "Two windows on two lines, half the width",
+  "usage.display.stackedLabel": "{name} two lines",
+  "usage.display.size": "Text size",
+  "usage.display.sizeLabel": "{name} stacked text size",
+  "usage.tray.updatedMinutesAgo": {
+    "one": "Updated {count} min ago",
+    "other": "Updated {count} min ago"
+  },
+  "usage.tray.updatedHoursAgo": {
+    "one": "Updated {count} hr ago",
+    "other": "Updated {count} hr ago"
+  },
+  "usage.tray.resetInMinutes": {
+    "one": "Resets in {count} min",
+    "other": "Resets in {count} min"
+  },
+  "usage.tray.resetInHours": {
+    "one": "Resets in {count} hr",
+    "other": "Resets in {count} hr"
+  },
+  "usage.tray.resetInHoursMinutes": {
+    "one": "Resets in {count} hr {m} min",
+    "other": "Resets in {count} hr {m} min"
+  },
+  "usage.tray.resetInDays": {
+    "one": "Resets in {count} day",
+    "other": "Resets in {count} days"
+  },
+  "usage.tray.resetDone": "Reset",
+  "usage.tray.remaining": "{percent} left",
+  "usage.tray.used": "{percent} used",
+  "usage.tray.rateLimitedFor": {
+    "one": "Rate limited, retry in ~{count} min",
+    "other": "Rate limited, retry in ~{count} min"
+  },
+  "usage.tray.rateLimitedLater": "Rate limited, retry later",
+  "usage.tray.noReading": "No reading yet",
+  "usage.window.session": "5h",
+  "usage.window.weekly": "Week",
+  "usage.window.days": {
+    "one": "{count}d",
+    "other": "{count}d"
+  },
+  "usage.window.hours": {
+    "one": "{count}h",
+    "other": "{count}h"
+  },
+  "usage.window.weeklyModel": "Week · {name}",
+  "usage.window.durationModel": "{duration} · {name}",
+  "usage.reason.notInstalled": "{agent} not found",
+  "usage.reason.notSignedIn": "{agent} isn't signed in",
+  "usage.reason.timeout": "{agent} didn't respond",
+  "usage.reason.spawnFailed": "Couldn't start {agent}",
+  "usage.reason.noPlanLimits": "This account has no subscription limits",
+  "usage.reason.authRequired": "Sign in to {agent} again",
+  "usage.reason.rateLimited": "{agent} is rate limited",
+  "usage.reason.malformed": "Couldn't read the data {agent} returned",
+  "usage.probe.dirNotEmpty": "The probe folder isn't empty, refusing to start a process in it: {dir}",
+  "usage.probe.spawnFailed": "Couldn't start the process: {error}",
+  "usage.probe.ioFailed": "Couldn't read or write the child process pipe: {error}",
+  "usage.probe.timeout": "No reply within {seconds} seconds, process ended",
+  "usage.agents.maxMenuBar": {
+    "one": "The menu bar shows up to {count} agent",
+    "other": "The menu bar shows up to {count} agents"
+  }
+}

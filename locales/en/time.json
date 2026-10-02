@@ -1,0 +1,24 @@
+{
+  "time.relative.justNow": "Just now",
+  "time.relative.justNowInline": "just now",
+  "time.relative.minutes": {
+    "one": "1 min ago",
+    "other": "{count} min ago"
+  },
+  "time.relative.hours": {
+    "one": "1 hr ago",
+    "other": "{count} hr ago"
+  },
+  "time.relative.days": {
+    "one": "1 day ago",
+    "other": "{count} days ago"
+  },
+  "time.lastAutoSkill": {
+    "one": "{when} · Added {count}",
+    "other": "{when} · Added {count}"
+  },
+  "time.lastAutoMcp": {
+    "one": "{when} · Wrote {count}",
+    "other": "{when} · Wrote {count}"
+  }
+}

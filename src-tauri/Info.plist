@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 打包时 tauri 自动并进应用包的 Info.plist（spec 2026-09-30-language-and-theme R13）。
+     声明应用有这三种本地化，系统控件（选文件夹对话框的按钮、窗口菜单里的系统项）才按系统语言显示；
+     开发区域写 en：系统语言是日语等时，系统控件回落英文，与界面回落 English 一致 -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>zh-Hans</string>
+		<string>zh-Hant</string>
+		<string>en</string>
+	</array>
+</dict>
+</plist>

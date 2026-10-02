@@ -1,0 +1,7 @@
+{
+  "tray.menu.open": "打开 Sophia",
+  "tray.menu.quit": "退出",
+  "tray.closeHint.title": "Sophia 还在菜单栏里",
+  "tray.closeHint.message": "要退出，点菜单栏图标里的「退出」。模型注入由系统后台服务维持，退出应用也不受影响。",
+  "tray.closeHint.ok": "好"
+}

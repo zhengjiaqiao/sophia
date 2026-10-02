@@ -1,0 +1,97 @@
+{
+  "_note": "claude 2.1.283，交互式（cli），设置形状同 spec R29（MODEL=OPUS=SONNET=FABLE=默认用，HAIKU=后台任务用）：/context 触发的 15 个并发 count_tokens 之一（系统提示分段，无 system 字段）",
+  "method": "POST",
+  "path": "/v1/messages/count_tokens?beta=true",
+  "headers": [
+    [
+      "Accept",
+      "application/json"
+    ],
+    [
+      "Authorization",
+      "Bearer p0-fake-auth-token-JJJJ"
+    ],
+    [
+      "Content-Type",
+      "application/json"
+    ],
+    [
+      "User-Agent",
+      "claude-cli/2.1.283 (external, cli)"
+    ],
+    [
+      "X-Claude-Code-Session-Id",
+      "ad03a3f2-d3e4-4b23-9b89-0a21908ab03f"
+    ],
+    [
+      "X-Stainless-Arch",
+      "arm64"
+    ],
+    [
+      "X-Stainless-Lang",
+      "js"
+    ],
+    [
+      "X-Stainless-OS",
+      "MacOS"
+    ],
+    [
+      "X-Stainless-Package-Version",
+      "0.112.1"
+    ],
+    [
+      "X-Stainless-Retry-Count",
+      "0"
+    ],
+    [
+      "X-Stainless-Runtime",
+      "node"
+    ],
+    [
+      "X-Stainless-Runtime-Version",
+      "v26.3.0"
+    ],
+    [
+      "anthropic-beta",
+      "claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,token-counting-2024-11-01"
+    ],
+    [
+      "anthropic-dangerous-direct-browser-access",
+      "true"
+    ],
+    [
+      "anthropic-version",
+      "2023-06-01"
+    ],
+    [
+      "x-app",
+      "cli"
+    ],
+    [
+      "Connection",
+      "keep-alive"
+    ],
+    [
+      "Host",
+      "127.0.0.1:47811"
+    ],
+    [
+      "Accept-Encoding",
+      "gzip, deflate, br, zstd"
+    ],
+    [
+      "Content-Length",
+      "1312"
+    ]
+  ],
+  "body": {
+    "model": "default-weibo-kimi-k2.5",
+    "messages": [
+      {
+        "role": "user",
+        "content": "\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, ex…<截断，原长 1210 字符>"
+      }
+    ],
+    "tools": []
+  }
+}

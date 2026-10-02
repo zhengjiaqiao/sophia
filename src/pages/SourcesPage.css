@@ -1,0 +1,69 @@
+/* 来源管理页（SourcesPage.tsx，DESIGN「位置页 › 来源管理页」；2026-09-30 起位置在页里选）。容器（盖在机面上、
+   推入滑回、页面头）是组件库的推入页 `PushedPage`。这里只排页面头下的位置胶囊与列表：
+   内容定宽 776；胶囊一行（表格页的 FilterRow）；列头一行 `位置 ｜ 来源 ｜ skill 数 ｜ 以后新出现的自动加到`
+   （label 12 ink-mute）+ 1px hairline；每个来源一行（SourceRow.css `.srcline`，行高 40、行间 row-line）。
+   色值一律 var(--…)。 */
+@import "../tokens.css";
+
+.srcpage__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: var(--panel-w);
+  overflow-y: auto;
+}
+
+/* 位置胶囊：页面头下 10，同表格页的筛选行 */
+.srcpage__places {
+  max-width: var(--panel-w);
+  margin-top: 10px;
+}
+
+/* 列：位置（按最长定宽）｜ 来源（按最长定宽）｜ 数 ｜ 撑开 ｜ 开关 ｜ 目标框 ｜ ×。
+   各行是 subgrid，格子对齐列头；定宽上限在格子里（位置 120、来源 220） */
+.srcpage__table {
+  display: grid;
+  grid-template-columns:
+    max-content max-content max-content minmax(0, 1fr)
+    max-content max-content max-content;
+  margin-top: var(--space-xs);
+}
+
+/* 一行都没有时整张表（连列头）藏起来、换成空态；自己写了 display，hidden 属性压不过，要显式写 */
+.srcpage__table[hidden] {
+  display: none;
+}
+
+.srcpage__head {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  box-sizing: border-box;
+  height: 32px;
+  border-bottom: var(--border-structure);
+}
+
+.srcpage__col {
+  font-size: var(--size-label);
+  font-weight: 600;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.srcpage__col--place {
+  grid-column: 1;
+}
+
+.srcpage__col--name {
+  grid-column: 2;
+}
+
+/* 数右对齐，与各行的数对齐 */
+.srcpage__col--count {
+  grid-column: 3;
+  text-align: right;
+}
+
+.srcpage__col--rule {
+  grid-column: 5 / -1;
+}

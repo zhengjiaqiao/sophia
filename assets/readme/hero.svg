@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Sophia</title>
+  <desc id="desc">Sophia: one place for the skills, MCP servers and models your AI coding agents share. A table shows skills as rows and agents (Claude Code, Codex, Cursor) as columns; filled dots are linked, hollow dots are one click away, ringed dots mark where the original lives.</desc>
+  <rect width="1200" height="420" rx="24" fill="#f4f4f2"/>
+
+  <g id="identity">
+    <text x="64" y="92" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="600" letter-spacing="2.4" fill="#6f6f6a">SKILLS · MCP · MODELS</text>
+    <svg x="58" y="112" width="404" height="112.0" viewBox="0 0 3304 916"><path d="M30 175V204Q30 209 33.5 212.5Q37 216 42 216H157Q162 216 165.5 212.5Q169 209 169 204V182Q169 151 185.0 132.0Q201 113 225 113Q249 113 265.0 131.0Q281 149 281 178Q281 208 261.0 229.5Q241 251 183 293Q133 329 102.0 357.0Q71 385 49.0 426.0Q27 467 27 521Q27 606 80.0 657.0Q133 708 220 708Q308 708 361.5 655.0Q415 602 415 516V492Q415 487 411.5 483.5Q408 480 403 480H288Q283 480 279.5 483.5Q276 487 276 492V519Q276 550 260.5 568.5Q245 587 220 587Q196 587 181.0 569.5Q166 552 166 521Q166 491 185.0 468.0Q204 445 260 404Q322 358 353.5 329.5Q385 301 402.5 266.5Q420 232 420 184Q420 96 366.0 44.0Q312 -8 224 -8Q166 -8 122.0 15.0Q78 38 54.0 79.5Q30 121 30 175Z" transform="translate(36.0 874.8266666666667) scale(1 -1)" fill="#c8c8d0"/><path d="M30 175V204Q30 209 33.5 212.5Q37 216 42 216H157Q162 216 165.5 212.5Q169 209 169 204V182Q169 151 185.0 132.0Q201 113 225 113Q249 113 265.0 131.0Q281 149 281 178Q281 208 261.0 229.5Q241 251 183 293Q133 329 102.0 357.0Q71 385 49.0 426.0Q27 467 27 521Q27 606 80.0 657.0Q133 708 220 708Q308 708 361.5 655.0Q415 602 415 516V492Q415 487 411.5 483.5Q408 480 403 480H288Q283 480 279.5 483.5Q276 487 276 492V519Q276 550 260.5 568.5Q245 587 220 587Q196 587 181.0 569.5Q166 552 166 521Q166 491 185.0 468.0Q204 445 260 404Q322 358 353.5 329.5Q385 301 402.5 266.5Q420 232 420 184Q420 96 366.0 44.0Q312 -8 224 -8Q166 -8 122.0 15.0Q78 38 54.0 79.5Q30 121 30 175Z" transform="translate(215 808) scale(1 -1)" fill="#000000"/><path d="M34 190V510Q34 600 89.0 654.0Q144 708 236 708Q328 708 383.5 654.0Q439 600 439 510V190Q439 100 383.5 46.0Q328 -8 236 -8Q144 -8 89.0 46.0Q34 100 34 190ZM298 184V516Q298 548 281.0 567.5Q264 587 236 587Q208 587 191.5 567.5Q175 548 175 516V184Q175 152 191.5 132.5Q208 113 236 113Q264 113 281.0 132.5Q298 152 298 184Z" transform="translate(754 808) scale(1 -1)" fill="#000000"/><path d="M445 488Q445 395 395.0 339.0Q345 283 264 283H189Q184 283 184 278V12Q184 7 180.5 3.5Q177 0 172 0H55Q50 0 46.5 3.5Q43 7 43 12V689Q43 694 46.5 697.5Q50 701 55 701H257Q312 701 355.0 674.0Q398 647 421.5 598.5Q445 550 445 488ZM304 485Q304 529 284.5 554.0Q265 579 233 579H189Q184 579 184 574V398Q184 393 189 393H233Q265 393 284.5 417.5Q304 442 304 485Z" transform="translate(1322 808) scale(1 -1)" fill="#000000"/><path d="M307 700H424Q429 700 432.5 696.5Q436 693 436 688V12Q436 7 432.5 3.5Q429 0 424 0H307Q302 0 298.5 3.5Q295 7 295 12V285Q295 290 290 290H190Q185 290 185 285V12Q185 7 181.5 3.5Q178 0 173 0H56Q51 0 47.5 3.5Q44 7 44 12V688Q44 693 47.5 696.5Q51 700 56 700H173Q178 700 181.5 696.5Q185 693 185 688V416Q185 411 190 411H290Q295 411 295 416V688Q295 693 298.5 696.5Q302 700 307 700Z" transform="translate(1882 808) scale(1 -1)" fill="#000000"/><path d="M44 12V688Q44 693 47.5 696.5Q51 700 56 700H173Q178 700 181.5 696.5Q185 693 185 688V12Q185 7 181.5 3.5Q178 0 173 0H56Q51 0 47.5 3.5Q44 7 44 12Z" transform="translate(2457 808) scale(1 -1)" fill="#000000"/><path d="M325 11 309 107Q309 112 303 112H176Q170 112 170 107L154 11Q153 0 141 0H24Q11 0 14 13L161 689Q163 700 174 700H309Q320 700 322 689L468 13L469 9Q469 0 458 0H338Q326 0 325 11ZM194 221H284Q289 221 288 226L241 499Q240 502 238.0 502.0Q236 502 235 499L190 226Q190 221 194 221Z" transform="translate(2782 808) scale(1 -1)" fill="#000000"/><defs><clipPath id="wo1"><path d="M30 175V204Q30 209 33.5 212.5Q37 216 42 216H157Q162 216 165.5 212.5Q169 209 169 204V182Q169 151 185.0 132.0Q201 113 225 113Q249 113 265.0 131.0Q281 149 281 178Q281 208 261.0 229.5Q241 251 183 293Q133 329 102.0 357.0Q71 385 49.0 426.0Q27 467 27 521Q27 606 80.0 657.0Q133 708 220 708Q308 708 361.5 655.0Q415 602 415 516V492Q415 487 411.5 483.5Q408 480 403 480H288Q283 480 279.5 483.5Q276 487 276 492V519Q276 550 260.5 568.5Q245 587 220 587Q196 587 181.0 569.5Q166 552 166 521Q166 491 185.0 468.0Q204 445 260 404Q322 358 353.5 329.5Q385 301 402.5 266.5Q420 232 420 184Q420 96 366.0 44.0Q312 -8 224 -8Q166 -8 122.0 15.0Q78 38 54.0 79.5Q30 121 30 175Z" transform="translate(215 808) scale(1 -1)" /></clipPath></defs><g clip-path="url(#wo1)"><path d="M30 175V204Q30 209 33.5 212.5Q37 216 42 216H157Q162 216 165.5 212.5Q169 209 169 204V182Q169 151 185.0 132.0Q201 113 225 113Q249 113 265.0 131.0Q281 149 281 178Q281 208 261.0 229.5Q241 251 183 293Q133 329 102.0 357.0Q71 385 49.0 426.0Q27 467 27 521Q27 606 80.0 657.0Q133 708 220 708Q308 708 361.5 655.0Q415 602 415 516V492Q415 487 411.5 483.5Q408 480 403 480H288Q283 480 279.5 483.5Q276 487 276 492V519Q276 550 260.5 568.5Q245 587 220 587Q196 587 181.0 569.5Q166 552 166 521Q166 491 185.0 468.0Q204 445 260 404Q322 358 353.5 329.5Q385 301 402.5 266.5Q420 232 420 184Q420 96 366.0 44.0Q312 -8 224 -8Q166 -8 122.0 15.0Q78 38 54.0 79.5Q30 121 30 175Z" transform="translate(36.0 874.8266666666667) scale(1 -1)" fill="#9a9aa2"/></g></svg>
+    <text font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="29" font-weight="500" fill="#1c1c1a">
+      <tspan x="64" y="268">One place for the skills, MCP servers</tspan>
+      <tspan x="64" y="306">and models your AI coding agents share.</tspan>
+    </text>
+    <text x="64" y="356" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#6f6f6a">Claude Code · Codex · Cursor · 37 more</text>
+  </g>
+  <g id="dot-table">
+    <rect x="628" y="44" width="520" height="336" rx="14" fill="#fcfcfb" stroke="#e3e3df"/>
+    <text x="658" y="98" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="18" font-weight="600" fill="#4e4e4a">Skill</text>
+    <text x="890" y="98" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="0.9" fill="#1c1c1a">CLAUDE CODE</text>
+    <text x="1010" y="98" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="0.9" fill="#1c1c1a">CODEX</text>
+    <text x="1098" y="98" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="0.9" fill="#1c1c1a">CURSOR</text>
+    <line x1="648" y1="120" x2="1128" y2="120" stroke="#e3e3df" stroke-width="1.5"/>
+    <text x="658" y="155" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" fill="#1c1c1a">brainstorming</text>
+    <circle cx="890" cy="148" r="7" fill="#1c1c1a"/>
+    <circle cx="1010" cy="148" r="7" fill="#1c1c1a"/>
+    <circle cx="1098" cy="148" r="7.2" fill="none" stroke="#4e4e4a" stroke-width="1.6"/><circle cx="1098" cy="148" r="3.2" fill="#1c1c1a"/>
+    <line x1="648" y1="167.0" x2="1128" y2="167.0" stroke="#e3e3df"/>
+    <text x="658" y="193" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" fill="#1c1c1a">code-review</text>
+    <circle cx="890" cy="186" r="7" fill="#1c1c1a"/>
+    <circle cx="1010" cy="186" r="7" fill="#1c1c1a"/>
+    <circle cx="1098" cy="186" r="6.4" fill="none" stroke="#4e4e4a" stroke-width="1.6"/>
+    <line x1="648" y1="205.0" x2="1128" y2="205.0" stroke="#e3e3df"/>
+    <text x="658" y="231" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" fill="#1c1c1a">frontend-design</text>
+    <circle cx="890" cy="224" r="7.2" fill="none" stroke="#4e4e4a" stroke-width="1.6"/><circle cx="890" cy="224" r="3.2" fill="#1c1c1a"/>
+    <circle cx="1010" cy="224" r="7" fill="#1c1c1a"/>
+    <circle cx="1098" cy="224" r="7" fill="#1c1c1a"/>
+    <line x1="648" y1="243.0" x2="1128" y2="243.0" stroke="#e3e3df"/>
+    <text x="658" y="269" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" fill="#1c1c1a">pdf</text>
+    <circle cx="890" cy="262" r="7" fill="#1c1c1a"/>
+    <circle cx="1010" cy="262" r="6.4" fill="none" stroke="#4e4e4a" stroke-width="1.6"/>
+    <circle cx="1098" cy="262" r="6.4" fill="none" stroke="#4e4e4a" stroke-width="1.6"/>
+    <line x1="648" y1="281.0" x2="1128" y2="281.0" stroke="#e3e3df"/>
+    <text x="658" y="307" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="19" fill="#1c1c1a">webapp-testing</text>
+    <circle cx="890" cy="300" r="7" fill="#1c1c1a"/>
+    <circle cx="1010" cy="300" r="7" fill="#1c1c1a"/>
+    <circle cx="1098" cy="300" r="7" fill="#1c1c1a"/>
+  </g>
+
+  <g id="legend" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" fill="#4e4e4a">
+    <circle cx="664" cy="351" r="7" fill="#1c1c1a"/><text x="678" y="356">linked</text>
+    <circle cx="758" cy="351" r="6.4" fill="none" stroke="#4e4e4a" stroke-width="1.6"/><text x="772" y="356">click to link</text>
+    <circle cx="898" cy="351" r="7.2" fill="none" stroke="#4e4e4a" stroke-width="1.6"/><circle cx="898" cy="351" r="3.2" fill="#1c1c1a"/><text x="913" y="356">original lives here</text>
+  </g>
+</svg>

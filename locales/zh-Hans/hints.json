@@ -1,0 +1,13 @@
+{
+  "hints.firstScan.skillsWithAgents": {
+    "other": "读了 {agents} 的 skill 目录，找到 {count} 个 skill，没有改动任何文件。"
+  },
+  "hints.firstScan.skillsLocal": {
+    "other": "读了本机的 skill 目录，找到 {count} 个 skill，没有改动任何文件。"
+  },
+  "hints.firstScan.emptyWithAgents": "读了 {agents} 的 skill 目录，没有找到 skill，没有改动任何文件。",
+  "hints.firstScan.emptyLocal": "读了本机的 skill 目录，没有找到 skill，没有改动任何文件。",
+  "hints.firstCodex": "打开后会改一处 Codex 的设置，让它能用第三方模型；关掉就恢复原样。改完要重启 Codex 才生效。",
+  "hints.log.markFailed": "记录新手提示看过失败",
+  "hints.log.loadFailed": "读取新手提示看过表失败"
+}

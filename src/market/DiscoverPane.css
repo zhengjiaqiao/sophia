@@ -1,0 +1,192 @@
+/* `发现` 的列表（DESIGN「发现与安装 › `发现` 的页面头与列表」）：宽同位置页的面板 776（外框 `.discover-frame` 给）。
+   行高 40、行间 row-line，表头与名字同一条左沿（没有勾选框、没有拉手列）；悬停 / 键盘焦点的行带同表格（surface），
+   左右各外扩 8，字不贴带边。色值一律 var(--…) */
+@import "../tokens.css";
+
+.dsc {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 热门列表上方一行：`热门排行 · 多久前更新` + 刷新（图标键 28、图形 12，与 13 的字同高；
+   2026-09-30 真机：16 的图形挨着 13 的字太大）。键与字不另留间距，键里图形两侧的 8 就是间距；按下超过 0.3 秒原位换成一个转动的圆
+   （全应用唯一的转圈，2026-09-30 产品负责人破例；别处仍是刻度）。后台定时刷新不显示任何忙碌 */
+.dsc-popular {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-md);
+}
+
+.dsc-popular__status {
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+/* 光学下移 1px：回转箭头的箭头在右上角，重心偏高，和 13 的字居中对齐时看着比字高（2026-09-30 真机）。
+   刷新中的转圈（RefreshSpin）整块同样下移，换上换下不跳 */
+.dsc-popular__glyph {
+  transform: translateY(1px);
+}
+
+/* 灰面板：列表上方，下 16；铺满列表宽（section 档随容器宽） */
+.dsc-notice {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--space-md);
+}
+
+/* 官方目录一节：与上一节隔一组 */
+.dsc-section {
+  margin-top: var(--space-xl);
+}
+
+/* ---- 列：skill 名字 ｜ 仓库 ｜ 装过的人 ｜ 键；MCP 名字 + 发布方 ｜ 说明 ｜ 要填什么 ｜ 键 ---- */
+.dsc-table--skills .dsc-head,
+.dsc-table--skills .dsc-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 240px) 88px 88px;
+}
+
+.dsc-table--mcp .dsc-head,
+.dsc-table--mcp .dsc-row {
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr) 96px 88px;
+}
+
+/* ---- 表头：12 / 600 ink-mute，计数 400 tabular ink-faint；下 6 一条结构线 ---- */
+.dsc-head {
+  display: grid;
+  column-gap: var(--space-sm);
+  align-items: end;
+  padding-bottom: 6px;
+  border-bottom: var(--border-structure);
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  font-weight: 600;
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.dsc-head__count {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+.dsc-head__num {
+  text-align: right;
+}
+
+.dsc-empty {
+  padding-top: var(--space-sm);
+}
+
+/* ---- 行 ---- */
+.dsc-row {
+  position: relative;
+  display: grid;
+  column-gap: var(--space-sm);
+  align-items: center;
+  height: 40px;
+  box-sizing: border-box;
+  border-bottom: var(--border-row);
+  outline: none;
+  cursor: default;
+}
+
+[role="list"] > .dsc-row:last-child {
+  border-bottom: 0;
+}
+
+/* 行带：画在行后面、左右各外扩 8；格子各自 position: relative，按文档顺序画在行带之上 */
+.dsc-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 calc(-1 * var(--space-xs));
+  background: var(--surface);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.dsc-row > * {
+  position: relative;
+  min-width: 0;
+}
+
+.dsc-row:hover::before,
+html:not([data-input="pointer"]) .dsc-row:focus-visible::before,
+html[data-input="keyboard"] .dsc-row:focus::before {
+  opacity: 1;
+}
+
+.dsc-row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--size-body);
+  color: var(--ink);
+}
+
+.dsc-row__repo {
+  display: flex;
+  font-size: var(--size-label);
+  color: var(--ink-mute);
+}
+
+.dsc-row__num {
+  text-align: right;
+  font-size: var(--size-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* MCP：名字 + 8 + 发布方（12 ink-faint），放不下先截发布方 */
+.dsc-row__who {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+}
+
+.dsc-row__who .dsc-row__name {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.dsc-row__publisher {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--size-label);
+  color: var(--ink-faint);
+}
+
+.dsc-row__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.dsc-row__needs {
+  white-space: nowrap;
+}
+
+/* 行尾：`安装` 键或 `✓ 已安装`，右沿对齐 */
+.dsc-row__action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 状态 `✓ 已安装`：对勾 + 13 ink-mute，平贴、没有键面；高同紧凑键 24 */
+.dsc-installed {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xxs);
+  height: var(--control-h-compact);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+  cursor: default;
+}

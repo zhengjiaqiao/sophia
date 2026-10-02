@@ -1,0 +1,13 @@
+{
+    "mcpServers": {
+        "fs": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/notes"]
+        }
+    },
+    "preferences": {
+        "sidebarMode": "chat",
+        "quickEntryShortcut": "off"
+    },
+    "deploymentMode": "1p"
+}

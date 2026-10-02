@@ -1,0 +1,137 @@
+/* 第三方模型页（shell/ModelsPage.tsx，DESIGN「### 模型 › 列表页」「每家的页（推入页，共同骨架）」，画板 ClaudeCodeModels 01 / 03）。
+   整页限宽 776 归壳（App.css `.agent-page`）。色值一律 var(--…)，唯一来源是 tokens.css。 */
+@import "../tokens.css";
+
+/* ===== 列表页 ===== */
+
+/* 路由没在跑：页面头下 12、列表之上，满宽 776、键在右端控件列 */
+.models-list__todo {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-sm);
+}
+
+/* 表头位置一条 hairline（页面头下 24），一家一行、行间 row-line（同列表行 ListRow 的量） */
+.models-list {
+  margin-top: var(--space-xl);
+  border-top: var(--border-structure);
+}
+
+.models-row {
+  border-bottom: var(--border-row);
+}
+
+.models-row:last-child {
+  border-bottom: 0;
+}
+
+/* 整行可点（推入这一家的页）：悬停出 surface 带（control 7，左右各外扩 8，文字起点不变）；没有拉手、行尾不加 › */
+.models-row__main {
+  display: flex;
+  align-items: center;
+  margin: 0 calc(var(--space-xs) * -1);
+  padding: 10px var(--space-xs);
+  border-radius: var(--radius-control);
+  cursor: default;
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+.models-row__main:hover {
+  background: var(--surface);
+}
+
+/* 16 图标 + 8 + 名字；图标与第一行名字同高、居中 */
+.models-row__icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  align-self: flex-start;
+  height: calc(var(--size-body) * var(--leading-caption));
+  margin-right: var(--space-xs);
+  color: var(--ink);
+}
+
+.models-row__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/* 名字（body 15 ink）是一颗没有键面的键：键盘能推入，返回时焦点还给它 */
+.models-row__open {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--size-body);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.models-row__open:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 第二行一句现状：12 ink-mute，上距 3，左沿对齐名字 */
+.models-row__sub {
+  max-width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右端控件列：条件键 + 12 + 开关（与网关行的铅笔 / 垃圾桶同一列） */
+.models-row__end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-left: var(--space-sm);
+}
+
+/* 控件没写成：这一行下的行内灰面板（行下 8，与下一条行线之间 12） */
+.models-row__notice {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-xs);
+  padding-bottom: var(--space-sm);
+}
+
+/* ===== 各家的页（推入页） ===== */
+
+/* 页面头只写是哪一家（不放控件）；页面头下 12 一行能力行：能力名 head 16 / 600 + 12 + 开关 + 12 + 条件键
+   （ui Section 的节头，开关紧跟能力名）。`已选` 在它下 12（ModelsTab.css `.models-inuse`） */
+.models-agent__cap {
+  margin-top: var(--space-sm);
+}
+
+/* 页面头下的内容：自己滚动、限宽 776。列表行的悬停带左右各外扩 8，滚动区向两侧各让出 8 免得被裁 */
+.models-agent {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  min-height: 0;
+  max-width: calc(776px + var(--space-xs) * 2);
+  margin-inline: calc(var(--space-xs) * -1);
+  padding-inline: var(--space-xs);
+  overflow-y: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .models-row__main {
+    transition: none;
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "_note": "claude 2.1.283，claude -p（sdk-cli）：启动时的探测，不带任何凭证头",
+  "method": "HEAD",
+  "path": "/api/hello",
+  "headers": [
+    [
+      "Connection",
+      "keep-alive"
+    ],
+    [
+      "User-Agent",
+      "Bun/1.4.3"
+    ],
+    [
+      "Accept",
+      "*/*"
+    ],
+    [
+      "Host",
+      "127.0.0.1:47801"
+    ],
+    [
+      "Accept-Encoding",
+      "gzip, deflate, br, zstd"
+    ]
+  ]
+}

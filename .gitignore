@@ -1,0 +1,33 @@
+# Xcode
+build/
+# macOS
+.DS_Store
+# Claude Code local
+.claude/settings.local.json
+# Superpowers scratch
+.superpowers/
+.claude/FIXING
+# 并行 agent 的 git worktree 落在这儿，是独立仓库，绝不能提交
+.claude/worktrees/
+
+# Rust / Tauri / Node
+target/
+# 不带斜杠：它也可能是一条指向别处的软链（在临时工作树里跑 npm 时会这么接），
+# `node_modules/` 只挡目录，挡不住软链，`git add -A` 就会把那条链提交进来
+node_modules
+dist/
+.worktrees/
+
+# /design-sync：暂存的转换脚本、生成的产物与机器状态（.design-sync/ 其余文件要提交）
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+
+# 调研报告与笔记：只留在本机，不入库
+reports/
+research_notes/
+# 点了竞品名的调研（代码与文档里不写竞品名）
+docs/research/2026-10-01-competitive-landscape.html
+docs/research/2026-09-30-diagnostics-feedback.md

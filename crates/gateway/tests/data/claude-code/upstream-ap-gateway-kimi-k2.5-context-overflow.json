@@ -1,0 +1,1 @@
+{"code": 400, "error": " {\"error\": {\"object\": \"error\", \"message\": \"The input (300020 tokens) is longer than the model's context length (163840 tokens).\", \"type\": \"BadRequestError\", \"param\": null, \"code\": 400}}", "user_tip": "您的输入或输出内容超出了模型的处理上限，请尝试以下方式：\n1.缩短输入内容或减少上传文件的大小\n2.开启新会话"}

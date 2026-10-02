@@ -1,0 +1,35 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 固定版本：@stable 会随上游前进，新版 clippy 新增的 lint 会让本来绿的 CI 突然变红；
+      # 开发机上的 clippy 往往更旧，本地零警告不代表 CI 通过。升级时一起改两处并本地复跑。
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          components: clippy
+      - run: cargo test -p sophia-core
+      - run: cargo test -p sophia-gateway
+      - run: cargo clippy -p sophia-core -p sophia-gateway --all-targets -- -D warnings
+  # macOS 机器在私有仓库按分钟计费（约为 Linux 的 10 倍），只在公开仓库跑；
+  # 开发仓库（sophia-dev，私有）里提交前靠本机 `make test` 兜住这一段
+  app:
+    if: github.repository == 'zhengjiaqiao/sophia'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      # 版本号三处一致。发布那天才发现对不上，就已经是打了 tag 之后的事了
+      - run: node packaging/check-version.mjs
+      - run: npm run build
+      - run: cargo check --workspace
+      - run: cargo test -p sophia --lib

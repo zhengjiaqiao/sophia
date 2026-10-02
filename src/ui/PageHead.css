@@ -1,0 +1,39 @@
+/* 页面头 PageHead（DESIGN「壳 › 页面头」）：高 34，左主控件或页面名，右这一页的动作（间 8）。
+   上外距默认 15（机面顶上 16，含机面 1px 边）；应用级故障下、位置页吸顶这些摆法归壳（App.css） */
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: 34px;
+  margin-top: 15px;
+}
+
+.page-head__lead {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.page-head__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+}
+
+.page-head__actions:empty {
+  display: none;
+}
+
+/* 页面名一律 title Condensed 20 / 700，原样、字距 0；前置图标后 10 */
+.page-head__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-family: var(--font-cond);
+  font-size: var(--size-title);
+  font-weight: 700;
+  line-height: var(--leading-title);
+}

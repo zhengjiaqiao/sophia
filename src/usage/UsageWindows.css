@@ -1,0 +1,132 @@
+/* 一个 agent 的各窗口（spec 2026-09-26-menubar-usage R10）：托盘面板与用量页「当前用量」共用同一种画法。
+   一个窗口一行、三列一张格子：窗口名 12 ink-mute ｜ 条（track 槽、ink 填充，撑满中间）｜
+   「剩 72%」12 ink 等宽 +「 · 5 天后重置」ink-mute。行高 28；同一块里的条左右沿对齐 */
+@import "../tokens.css";
+
+.usage-wins {
+  display: grid;
+  /* 窗口名那一列能收窄（放不下截断），条至少 48，读数不收窄 */
+  grid-template-columns: minmax(0, max-content) minmax(48px, 1fr) max-content;
+  column-gap: var(--space-sm);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+}
+
+/* 一个窗口一行：三格直接落进上面的格子 */
+.usage-win {
+  display: contents;
+}
+
+.usage-win > * {
+  display: flex;
+  align-items: center;
+  height: 28px;
+}
+
+/* 窗口名放不下截断（提示框出全名，TruncTip）；读数不收窄 */
+.usage-win__label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-mute);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.usage-win__bar {
+  position: relative;
+}
+
+.usage-win__bar::before,
+.usage-win__bar > i {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 999px;
+}
+
+.usage-win__bar::before {
+  right: 0;
+  background: var(--track);
+}
+
+.usage-win__bar > i {
+  background: var(--gauge-fill, var(--ink));
+}
+
+.usage-win__text {
+  flex-shrink: 0;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.usage-win__pct {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-win__sep,
+.usage-win__reset {
+  color: var(--ink-mute);
+  white-space: pre;
+}
+
+/* 紧张（服务端判为 warning 及以上）：窗口名与百分比加粗，不用红、不用橙（R10） */
+.usage-win.is-tight .usage-win__label,
+.usage-win.is-tight .usage-win__pct {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* 取不到新数、被限流、没有订阅额度、还没有读数：一行灰字说原因（R7） */
+.usage-note {
+  margin: var(--space-xxs) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}
+
+/* 两行版式（托盘，系统菜单风格）：每个窗口上一行「窗口名 ……… 读数」（名 13、读数 12），下一行满宽进度条（高 5）。
+   一个窗口一块，块间 3 */
+.usage-wins--stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage-wins--stacked .usage-win {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 0 5px;
+}
+
+.usage-wins--stacked .usage-win > * {
+  height: auto;
+}
+
+.usage-win__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.usage-wins--stacked .usage-win__label {
+  color: var(--ink);
+  font-size: var(--size-caption);
+}
+
+.usage-wins--stacked .usage-win__bar {
+  height: 5px;
+  margin-top: 5px;
+}
+
+.usage-wins--stacked .usage-win__bar::before,
+.usage-wins--stacked .usage-win__bar > i {
+  top: 0;
+  height: 5px;
+  margin-top: 0;
+}

@@ -1,0 +1,449 @@
+{
+  "attribution": "起点取自一份 MIT 许可的精选 MCP 清单，出处与许可见仓库根 NOTICE。本文件逐条对照各家官方 README / 文档核实后改写。",
+  "note": "MCP 精选（spec R7）。definition 值里的 ${KEY} 是要填的项，与 fields 的 key 一一对应。signIn 为 true 的是远程服务器，首次使用时由 agent 在浏览器里登录（OAuth），不用填值。",
+  "verifiedAt": "2026-09-27",
+  "servers": [
+    {
+      "name": "context7",
+      "publisher": "Upstash",
+      "description": "把任意库的最新文档与示例代码取进上下文",
+      "definition": {
+        "name": "context7",
+        "transport": "http",
+        "url": "https://mcp.context7.com/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/upstash/context7",
+      "source": "curated"
+    },
+    {
+      "name": "playwright",
+      "publisher": "Microsoft",
+      "description": "驱动真实浏览器：打开网页、点击、输入，按无障碍树读页面",
+      "definition": {
+        "name": "playwright",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@playwright/mcp@latest"
+        ]
+      },
+      "fields": [],
+      "homepage": "https://github.com/microsoft/playwright-mcp",
+      "source": "curated"
+    },
+    {
+      "name": "chrome-devtools",
+      "publisher": "Google",
+      "description": "操控并检查正在运行的 Chrome：控制台、网络、性能追踪与截图",
+      "definition": {
+        "name": "chrome-devtools",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "chrome-devtools-mcp@latest"
+        ]
+      },
+      "fields": [],
+      "homepage": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "source": "curated"
+    },
+    {
+      "name": "github",
+      "publisher": "GitHub",
+      "description": "GitHub 上的仓库、议题、拉取请求、Actions 与代码搜索",
+      "definition": {
+        "name": "github",
+        "transport": "http",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "headers": {
+          "Authorization": "Bearer ${GITHUB_TOKEN}"
+        }
+      },
+      "fields": [
+        {
+          "key": "GITHUB_TOKEN",
+          "kind": "header",
+          "required": true,
+          "secret": true,
+          "description": "GitHub 个人访问令牌，在 github.com/settings/personal-access-tokens 生成"
+        }
+      ],
+      "homepage": "https://github.com/github/github-mcp-server",
+      "source": "curated"
+    },
+    {
+      "name": "deepwiki",
+      "publisher": "Cognition",
+      "description": "就任意公开 GitHub 仓库提问，读它自动生成的 wiki",
+      "definition": {
+        "name": "deepwiki",
+        "transport": "http",
+        "url": "https://mcp.deepwiki.com/mcp"
+      },
+      "fields": [],
+      "homepage": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+      "source": "curated"
+    },
+    {
+      "name": "exa",
+      "publisher": "Exa",
+      "description": "为 agent 做的网页搜索与代码搜索，返回干净的正文",
+      "definition": {
+        "name": "exa",
+        "transport": "http",
+        "url": "https://mcp.exa.ai/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/exa-labs/exa-mcp-server",
+      "source": "curated"
+    },
+    {
+      "name": "filesystem",
+      "publisher": "Model Context Protocol",
+      "description": "读写、搜索本机文件，只限你允许的文件夹",
+      "definition": {
+        "name": "filesystem",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "${ALLOWED_DIR}"
+        ]
+      },
+      "fields": [
+        {
+          "key": "ALLOWED_DIR",
+          "kind": "arg",
+          "required": true,
+          "secret": false,
+          "description": "允许它读写的文件夹，写绝对路径"
+        }
+      ],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "source": "curated"
+    },
+    {
+      "name": "fetch",
+      "publisher": "Model Context Protocol",
+      "description": "抓取网页并转成 Markdown（需要本机装有 uv）",
+      "definition": {
+        "name": "fetch",
+        "transport": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-fetch"
+        ]
+      },
+      "fields": [],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+      "source": "curated"
+    },
+    {
+      "name": "memory",
+      "publisher": "Model Context Protocol",
+      "description": "一张跨对话保留的知识图谱，让 agent 记住事情",
+      "definition": {
+        "name": "memory",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ]
+      },
+      "fields": [],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "source": "curated"
+    },
+    {
+      "name": "sequential-thinking",
+      "publisher": "Model Context Protocol",
+      "description": "一步步想清楚问题，可以回头修正、分岔",
+      "definition": {
+        "name": "sequential-thinking",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-sequential-thinking"
+        ]
+      },
+      "fields": [],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "source": "curated"
+    },
+    {
+      "name": "git",
+      "publisher": "Model Context Protocol",
+      "description": "读取、搜索与修改本地 Git 仓库",
+      "definition": {
+        "name": "git",
+        "transport": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-git"
+        ]
+      },
+      "fields": [],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+      "source": "curated"
+    },
+    {
+      "name": "time",
+      "publisher": "Model Context Protocol",
+      "description": "查询各时区的当前时间，在时区之间转换时间",
+      "definition": {
+        "name": "time",
+        "transport": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-time"
+        ]
+      },
+      "fields": [],
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/time",
+      "source": "curated"
+    },
+    {
+      "name": "sentry",
+      "publisher": "Sentry",
+      "description": "Sentry 里的问题、错误与追踪，以及 Seer 的分析",
+      "definition": {
+        "name": "sentry",
+        "transport": "http",
+        "url": "https://mcp.sentry.dev/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/getsentry/sentry-mcp",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "linear",
+      "publisher": "Linear",
+      "description": "查找、创建、更新 Linear 的议题、项目与评论",
+      "definition": {
+        "name": "linear",
+        "transport": "http",
+        "url": "https://mcp.linear.app/mcp"
+      },
+      "fields": [],
+      "homepage": "https://linear.app/docs/mcp",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "notion",
+      "publisher": "Notion",
+      "description": "搜索、读写 Notion 工作区里的页面与数据库",
+      "definition": {
+        "name": "notion",
+        "transport": "http",
+        "url": "https://mcp.notion.com/mcp"
+      },
+      "fields": [],
+      "homepage": "https://developers.notion.com/docs/mcp",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "atlassian",
+      "publisher": "Atlassian",
+      "description": "Atlassian Cloud 上的 Jira 议题与 Confluence 页面",
+      "definition": {
+        "name": "atlassian",
+        "transport": "http",
+        "url": "https://mcp.atlassian.com/v2/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/atlassian/atlassian-mcp-server",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "supabase",
+      "publisher": "Supabase",
+      "description": "管理 Supabase 项目：表、SQL、迁移、日志与边缘函数",
+      "definition": {
+        "name": "supabase",
+        "transport": "http",
+        "url": "https://mcp.supabase.com/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/supabase-community/supabase-mcp",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "stripe",
+      "publisher": "Stripe",
+      "description": "Stripe 的客户、付款、订阅，以及 Stripe 文档",
+      "definition": {
+        "name": "stripe",
+        "transport": "http",
+        "url": "https://mcp.stripe.com"
+      },
+      "fields": [],
+      "homepage": "https://docs.stripe.com/mcp",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "vercel",
+      "publisher": "Vercel",
+      "description": "Vercel 上的项目、部署与日志，以及 Vercel 文档",
+      "definition": {
+        "name": "vercel",
+        "transport": "http",
+        "url": "https://mcp.vercel.com"
+      },
+      "fields": [],
+      "homepage": "https://vercel.com/docs/mcp/vercel-mcp",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "neon",
+      "publisher": "Neon",
+      "description": "Neon 无服务器 Postgres：项目、分支与 SQL",
+      "definition": {
+        "name": "neon",
+        "transport": "http",
+        "url": "https://mcp.neon.tech/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/neondatabase/mcp-server-neon",
+      "source": "curated",
+      "signIn": true
+    },
+    {
+      "name": "cloudflare-docs",
+      "publisher": "Cloudflare",
+      "description": "搜索 Cloudflare 官方文档",
+      "definition": {
+        "name": "cloudflare-docs",
+        "transport": "http",
+        "url": "https://docs.mcp.cloudflare.com/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/cloudflare/mcp-server-cloudflare",
+      "source": "curated"
+    },
+    {
+      "name": "microsoft-learn",
+      "publisher": "Microsoft",
+      "description": "微软与 Azure 的官方文档和示例代码",
+      "definition": {
+        "name": "microsoft-learn",
+        "transport": "http",
+        "url": "https://learn.microsoft.com/api/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/MicrosoftDocs/mcp",
+      "source": "curated"
+    },
+    {
+      "name": "huggingface",
+      "publisher": "Hugging Face",
+      "description": "搜索 Hugging Face 上的模型、数据集、Spaces 与论文",
+      "definition": {
+        "name": "huggingface",
+        "transport": "http",
+        "url": "https://huggingface.co/mcp"
+      },
+      "fields": [],
+      "homepage": "https://github.com/huggingface/hf-mcp-server",
+      "source": "curated"
+    },
+    {
+      "name": "brave-search",
+      "publisher": "Brave",
+      "description": "用 Brave 自己的索引搜网页、新闻、图片与本地信息",
+      "definition": {
+        "name": "brave-search",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@brave/brave-search-mcp-server",
+          "--transport",
+          "stdio"
+        ],
+        "env": {
+          "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+        }
+      },
+      "fields": [
+        {
+          "key": "BRAVE_API_KEY",
+          "kind": "env",
+          "required": true,
+          "secret": true,
+          "description": "Brave Search API key，在 brave.com/search/api 申请"
+        }
+      ],
+      "homepage": "https://github.com/brave/brave-search-mcp-server",
+      "source": "curated"
+    },
+    {
+      "name": "firecrawl",
+      "publisher": "Firecrawl",
+      "description": "抓取、爬取与搜索网页，转成干净的 Markdown",
+      "definition": {
+        "name": "firecrawl",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "firecrawl-mcp"
+        ],
+        "env": {
+          "FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"
+        }
+      },
+      "fields": [
+        {
+          "key": "FIRECRAWL_API_KEY",
+          "kind": "env",
+          "required": true,
+          "secret": true,
+          "description": "Firecrawl API key，在 firecrawl.dev/app/api-keys 取"
+        }
+      ],
+      "homepage": "https://github.com/firecrawl/firecrawl-mcp-server",
+      "source": "curated"
+    },
+    {
+      "name": "tavily",
+      "publisher": "Tavily",
+      "description": "用 Tavily 搜索网页并提取正文",
+      "definition": {
+        "name": "tavily",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "tavily-mcp@latest"
+        ],
+        "env": {
+          "TAVILY_API_KEY": "${TAVILY_API_KEY}"
+        }
+      },
+      "fields": [
+        {
+          "key": "TAVILY_API_KEY",
+          "kind": "env",
+          "required": true,
+          "secret": true,
+          "description": "Tavily API key，在 app.tavily.com 取"
+        }
+      ],
+      "homepage": "https://github.com/tavily-ai/tavily-mcp",
+      "source": "curated"
+    }
+  ]
+}

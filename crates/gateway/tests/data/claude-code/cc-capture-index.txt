@@ -1,0 +1,88 @@
+== run A
+001 2026-09-29T11:47:24 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:47:24 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Glob
+003 2026-09-29T11:47:24 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run B
+001 2026-09-29T11:48:00 HEAD /claude-code/api/hello model=None -> 200 hello
+002 2026-09-29T11:48:03 POST /claude-code/v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Glob
+003 2026-09-29T11:48:03 POST /claude-code/v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run C
+001 2026-09-29T11:48:03 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:48:06 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Glob
+003 2026-09-29T11:48:06 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run D
+001 2026-09-29T11:48:07 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:48:10 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Glob
+003 2026-09-29T11:48:10 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run D2
+001 2026-09-29T11:48:28 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:48:28 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Glob
+003 2026-09-29T11:48:28 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run D3
+001 2026-09-29T11:48:28 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:48:28 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Glob
+003 2026-09-29T11:48:28 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run E
+001 2026-09-29T11:48:10 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:48:13 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Glob
+003 2026-09-29T11:48:13 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run F
+001 2026-09-29T11:48:47 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:48:50 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use WebFetch
+003 2026-09-29T11:48:51 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use Agent
+004 2026-09-29T11:48:51 POST /v1/messages?beta=true model=glm-5-opus -> stream tool_use WebFetch
+005 2026-09-29T11:48:51 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+006 2026-09-29T11:48:51 POST /v1/messages?beta=true model=glm-5-opus -> stream text
+007 2026-09-29T11:48:51 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run G
+001 2026-09-29T11:49:09 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:49:12 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream tool_use WebFetch
+003 2026-09-29T11:49:13 POST /v1/messages?beta=true model=kimi-k2.5-haiku -> stream text
+004 2026-09-29T11:49:13 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run I
+001 2026-09-29T11:49:51 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:50:03 POST /v1/messages?beta=true model=kimi-k2.5-haiku -> stream text
+003 2026-09-29T11:50:03 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run J
+001 2026-09-29T11:52:04 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:52:18 POST /v1/messages?beta=true model=default-weibo-glm-5 -> stream text
+003 2026-09-29T11:52:18 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream tool_use Read
+004 2026-09-29T11:52:18 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream tool_use Bash
+005 2026-09-29T11:52:18 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream text
+006 2026-09-29T11:53:07 HEAD /api/hello model=None -> 200 hello
+007 2026-09-29T11:53:20 POST /v1/messages?beta=true model=default-weibo-glm-5 -> stream text
+008 2026-09-29T11:53:20 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream tool_use Read
+009 2026-09-29T11:53:20 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream tool_use Bash
+010 2026-09-29T11:53:20 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream text
+013 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+011 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+012 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+015 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+014 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+016 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+017 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+019 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+018 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+020 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+021 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+022 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+023 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+025 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+024 2026-09-29T11:53:38 POST /v1/messages/count_tokens?beta=true model=default-weibo-kimi-k2.5 -> 200 count_tokens
+026 2026-09-29T11:53:48 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream text
+027 2026-09-29T11:54:05 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream tool_use Read
+028 2026-09-29T11:54:06 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream tool_use Bash
+029 2026-09-29T11:54:06 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream text
+== run K1
+001 2026-09-29T11:54:42 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:54:46 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run K2
+001 2026-09-29T11:54:46 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:54:49 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run K3
+001 2026-09-29T11:54:49 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T11:54:52 POST /v1/messages?beta=true model=kimi-k2.5-main -> stream text
+== run L
+001 2026-09-29T11:59:50 HEAD /api/hello model=None -> 200 hello
+002 2026-09-29T12:00:02 POST /v1/messages?beta=true model=default-weibo-glm-5 -> stream text json-title
+003 2026-09-29T12:00:02 POST /v1/messages?beta=true model=default-weibo-kimi-k2.5 -> stream text

@@ -1,0 +1,41 @@
+{
+  "upstream_model": "weibo/kimi-k2.5",
+  "estimate": 180,
+  "chat": {
+    "model": "weibo/kimi-k2.5",
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are Claude Code, Anthropic's official CLI for Claude.\n\nYou are naming a coding session so the user can pick it out of a long list of sessions. The title is a name for what the session is about, not a sentence describing the task: a short noun phrase of two to five words, in sentence case (capitalize only the first word, plus proper nouns, acronyms, and …<截断，原长 3059 字符>\n\nRespond with only a JSON object that matches the following JSON Schema. Do not wrap it in Markdown code fences and do not add any other text.\n\nJSON Schema:\n{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"}},\"required\":[\"title\"],\"additionalProperties\":false}"
+      },
+      {
+        "role": "user",
+        "content": "<session>\n读一下 hello.txt，然后 echo 一下\n</session>\n\nWrite the title in the predominant language of the session — a stray word or code token in another language doesn't change it, and neither does the English of these instructions."
+      }
+    ],
+    "max_tokens": 32000,
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "output",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        "strict": true
+      }
+    }
+  }
+}

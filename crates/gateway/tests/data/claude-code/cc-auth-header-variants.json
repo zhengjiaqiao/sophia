@@ -1,0 +1,87 @@
+{
+  "_note": "claude 2.1.283，claude -p（sdk-cli）：各种凭证组合下 /v1/messages 实际带的鉴权头（值均为编造的假值）",
+  "runs": [
+    {
+      "run": "A",
+      "config": "shell: AUTH_TOKEN",
+      "auth_headers": [
+        [
+          "Authorization",
+          "Bearer p0-fake-auth-token-AAAA"
+        ]
+      ],
+      "host": "127.0.0.1:47801"
+    },
+    {
+      "run": "C",
+      "config": "shell: AUTH_TOKEN + ANTHROPIC_API_KEY",
+      "auth_headers": [
+        [
+          "Authorization",
+          "Bearer p0-fake-auth-token-CCCC"
+        ],
+        [
+          "x-api-key",
+          "p0-fake-api-key-CCCC"
+        ]
+      ],
+      "host": "127.0.0.1:47803"
+    },
+    {
+      "run": "D",
+      "config": "shell: AUTH_TOKEN；settings: apiKeyHelper",
+      "auth_headers": [
+        [
+          "Authorization",
+          "Bearer p0-fake-auth-token-DDDD"
+        ]
+      ],
+      "host": "127.0.0.1:47804"
+    },
+    {
+      "run": "D2",
+      "config": "settings: apiKeyHelper（无 AUTH_TOKEN）",
+      "auth_headers": [
+        [
+          "Authorization",
+          "Bearer p0-fake-helper-key-DDDD"
+        ],
+        [
+          "x-api-key",
+          "p0-fake-helper-key-DDDD"
+        ]
+      ],
+      "host": "127.0.0.1:47806"
+    },
+    {
+      "run": "D3",
+      "config": "shell: ANTHROPIC_API_KEY；settings: apiKeyHelper",
+      "auth_headers": [
+        [
+          "Authorization",
+          "Bearer p0-fake-helper-key-DDDD"
+        ],
+        [
+          "x-api-key",
+          "p0-fake-api-key-D3D3"
+        ]
+      ],
+      "host": "127.0.0.1:47807"
+    },
+    {
+      "run": "E",
+      "config": "settings.env: BASE_URL + AUTH_TOKEN；shell: 另一个 BASE_URL、另一个 AUTH_TOKEN、ANTHROPIC_API_KEY",
+      "auth_headers": [
+        [
+          "Authorization",
+          "Bearer p0-fake-auth-token-EEEE"
+        ],
+        [
+          "x-api-key",
+          "p0-fake-api-key-EEEE"
+        ]
+      ],
+      "host": "127.0.0.1:47805"
+    }
+  ]
+}

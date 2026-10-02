@@ -1,0 +1,50 @@
+{
+  "status": 400,
+  "reason": "Bad Request",
+  "headers": [
+    [
+      "Content-Type",
+      "application/json"
+    ],
+    [
+      "Content-Length",
+      "400"
+    ],
+    [
+      "Connection",
+      "keep-alive"
+    ],
+    [
+      "date",
+      "Tue, 29 Sep 2026 03:57:22 GMT"
+    ],
+    [
+      "alb-x-request-id",
+      "a9346f83-4fa7-467f-ab82-d100d729bf35"
+    ],
+    [
+      "Server",
+      "APISIX/3.14.1"
+    ]
+  ],
+  "request_bytes": 1800184,
+  "timing_s": {
+    "headers": 5.055,
+    "first_body_byte": 5.055,
+    "total": 5.055
+  },
+  "request": {
+    "model": "weibo/kimi-k2.5",
+    "messages": [
+      {
+        "role": "user",
+        "content": "<'hello ' × 300000>\\n一句话回答：你好吗？"
+      }
+    ],
+    "stream": true,
+    "stream_options": {
+      "include_usage": true
+    },
+    "max_tokens": 16
+  }
+}

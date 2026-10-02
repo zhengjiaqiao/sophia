@@ -1,0 +1,23 @@
+/* Claude 的页（ClaudeModelsPage.tsx；DESIGN「Claude 的页：桌面应用」，画板 ClaudeCodeModels-04 / 05）。
+   已选行、灰面板、网关区块的外距与 Codex 的页同一套（ModelsTab.css）；这里只是 Claude 自己的：
+   开关那一格、键消失后的锚、已选下的代价句。
+   色值一律 var(--…)，唯一来源是 tokens.css。 */
+@import "./tokens.css";
+
+/* 开关那一格：开关 / 写配置超过 0.3 秒时原位刻度 +「正在切换」 */
+.claude-switch {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 键消失后留在原位的锚：不占宽、与键同高；`✓ 已重启 / 已打开` 浮在它正下方 4、左沿对齐原来的键 */
+.claude-key__spot {
+  display: inline-block;
+  width: 0;
+  height: var(--control-h);
+}
+
+/* 代价句（Note 13 ink-mute）：已选下 10，开着才出 */
+.claude-cost {
+  margin-top: 10px;
+}

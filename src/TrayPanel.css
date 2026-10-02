@@ -1,0 +1,161 @@
+/* 菜单栏面板（DESIGN「托盘面板」）：2026-09-30 起是 **macOS 菜单风格**（spec 2026-09-30-language-and-theme R14，
+   设计稿 7ZoeBtNk7RbTLKoWnPEDY8 第 6 组）——它挂在系统菜单栏下，和系统菜单是同一类东西，全应用只有它不用拉姆斯配色。
+   - 底：原生窗口里网页底下垫着系统菜单材质（tray.rs 的 style_panel），网页不画底，磨砂随系统
+   - 字：系统字体 13；字色、次要字、分隔线、强调色取系统色（tokens.css 的 --sys-*），随外观与系统强调色自动变
+   - 组件照旧是那一份（开关、键、提示条、确认），外观只经 token 与组件暴露的变量钩子换，这里不碰组件内部类 */
+@import "./tokens.css";
+
+/* 托盘窗口的根（main.tsx 打的标记）：挂在 body 上的浮层也在它下面，一并换 */
+html[data-window="tray"] {
+  background: transparent;
+  --font-ui: var(--font-system);
+  --ink: var(--sys-label);
+  --ink-mute: var(--sys-secondary);
+  --ink-faint: var(--sys-secondary);
+  --hairline: var(--sys-separator);
+  --row-line: var(--sys-separator);
+  --track: var(--sys-fill);
+  --recess: var(--sys-fill);
+  --surface: var(--sys-fill);
+  /* 用量条：系统强调色 */
+  --gauge-fill: var(--sys-accent);
+  /* 开关：系统样式——开着槽填强调色、圆滑块、没有刻线 */
+  --switch-on-track: var(--sys-accent);
+  --switch-scribe: transparent;
+  --switch-knob: var(--sys-knob);
+  --switch-knob-radius: 50%;
+  --switch-track-radius: 999px;
+  /* 菜单项：行高 22、圆角 4，悬停整行强调色、字转白 */
+  --menu-item-h: 22px;
+  /* 上下内边距归零：否则 4 + 19.5 + 4 把 22 撑到 27.5 */
+  --menu-item-pad: 0;
+  --menu-item-radius: 4px;
+  --menu-hover-bg: var(--sys-accent);
+  --menu-hover-ink: var(--sys-knob);
+  /* 键（`重启生效` 等）：macOS 小按键——半透明底、0.5px 细边、圆角 5（设计稿第 9 组 C）；字 13 / 500
+     （真机「按钮文案太不明显」：12 号常规在磨砂底上太轻） */
+  --key-bg: var(--sys-key-bg);
+  --key-bg-pressed: var(--sys-fill);
+  --key-shadow: var(--sys-key-shadow);
+  --key-shadow-hover: var(--sys-key-shadow);
+  --key-shadow-pressed: var(--sys-key-shadow);
+  --key-radius: 5px;
+  --key-size: var(--size-caption);
+  --key-weight: 500;
+}
+
+html[data-window="tray"] body {
+  background: transparent;
+}
+
+.tray {
+  box-sizing: border-box;
+  outline: none; /* 面板本身接焦点只为不让第一个控件抢到，不画焦点框 */
+  display: flex;
+  flex-direction: column;
+  padding: 5px 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  user-select: none;
+  cursor: default;
+}
+
+/* 一块都没有（这台机器不支持、状态没读回来）：只剩菜单，上下都是 6 */
+.tray--bare {
+  padding-top: 5px;
+}
+
+/* 一条左沿 16（2026-09-25）：块头图标、能力行的名字、菜单项的字（外距 6 + 内距 10）都从面板内 16 起 */
+
+/* 块头：高 26、左右 16；16px 图标 + 8 + 名字（13 / 600，同系统菜单的小标题），不放控件 */
+.tray__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  height: 26px;
+  padding: 0 var(--space-md);
+}
+
+/* 块头名字：系统菜单的小标题，13 / 600 */
+.tray__name {
+  font-size: var(--size-caption);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+}
+
+/* 块头名字后的弱字（用量：「3 分钟前更新」）：12 ink-mute，贴右沿；不是控件 */
+.tray__head-note {
+  margin-left: auto;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* 用量那一行的外框：左右 16 与块头同一条左沿；窗口的格子与状态句在 usage/UsageWindows.css（与用量页共用） */
+.tray__usage {
+  box-sizing: border-box;
+  padding: 0 var(--space-md) var(--space-xxs);
+}
+
+/* 能力行：高 26（系统菜单的行高）、左右 16（名字与块头图标同一条左沿），13；右端 [键位 12 开关] */
+.tray__cap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: 26px;
+  padding: 0 var(--space-md);
+}
+
+/* 名字一行放不下省略（English 的节名 + 键 + 开关，第三批画板 4A）；包层 TruncTip fit="grow" 撑满键位左边的宽、
+   截断时悬停出全名。简体放得下，照旧整名 */
+.tray__cap-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 行尾一组：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位，在开关左边 12（与 Codex 页节头同一关系）。
+   高 24（紧凑键的高）：键消失后 ✓ 已生效 仍浮在键原来的下沿之下 4 */
+.tray__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  height: 24px;
+  white-space: nowrap;
+}
+
+/* 确认（ui Confirm 的窄面板形态）与失败的灰面板（NoticePanel scope="section"）在能力行下当场展开：
+   左右外距 10、上 8 下 2（面板内的凹面与灰面板，外距归这一行） */
+.tray__confirm,
+.tray__notice {
+  margin: var(--space-xs) 10px 2px;
+}
+
+/* 块与块之间留 8：有了用量行之后，下一块的块头不再贴着上一块的最后一行 */
+.tray__agent + .tray__agent {
+  margin-top: var(--space-xs);
+}
+
+/* 分隔：1px 系统分隔色，上下 5、左右与内容同一条沿（系统菜单的分隔线不顶到边） */
+.tray__rule {
+  margin: 5px var(--space-md);
+  border: 0;
+  border-top: var(--border-row);
+}
+
+/* Claude 开着时能力行下一行的代价（DESIGN「托盘面板」：`账号里的对话暂时看不到`）：12 ink-mute，
+   左沿 16 与能力行的名字同一条，紧贴能力行 */
+.tray__cost {
+  margin: 0;
+  padding: 0 var(--space-md) var(--space-xxs);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}

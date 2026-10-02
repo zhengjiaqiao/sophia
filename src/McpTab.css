@@ -1,0 +1,73 @@
+/* MCP 页。表格本体与 Skills 共用 Matrix.css——两页是同一张表，这里只补 MCP 独有的：
+   批量 / 跨域写入确认框里的清单。色值一律 var(--…)，唯一来源是 tokens.css。 */
+@import "./tokens.css";
+
+.mcp-confirm-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+}
+
+.mcp-confirm-more,
+.mcp-confirm-note {
+  color: var(--ink-mute);
+}
+
+.mcp-confirm-note {
+  margin-top: var(--space-xs);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+}
+
+/* 修改生效范围的确认框（McpScopeDialog）：几块之间 16（确认框比安装页紧），后果灰字一句一行 */
+.mcp-scope .install-block {
+  margin-top: var(--space-md);
+}
+
+/* 第一块紧跟标题（标题与正文的间距由确认框给） */
+.mcp-scope > .install-block:first-child {
+  margin-top: 0;
+}
+
+/* 写进哪些 agent：行首一句 + 目标框（同自动同步页），框里是会写过去的 agent 的图标 */
+.mcp-scope__agents {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-md);
+  font-size: var(--size-caption);
+  color: var(--ink-mute);
+}
+
+.mcp-scope__cons {
+  margin-top: var(--space-md);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.mcp-scope__cons p {
+  margin: 0;
+}
+
+/* 只在这些项目：项目勾选行两列，缩进到单选行的名字下（单选圈 14 + 10）；选「所有项目」时变淡、不可勾 */
+.mcp-scope__projects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: var(--space-sm);
+  margin-left: var(--space-xl);
+}
+
+.mcp-scope__projects.is-off {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.mcp-scope__more {
+  display: flex;
+  align-items: center;
+  padding-left: var(--space-xs);
+}

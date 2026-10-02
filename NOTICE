@@ -1,0 +1,32 @@
+Sophia 包含以下 MIT 许可证项目的派生内容：
+
+- vercel-labs/skills (https://github.com/vercel-labs/skills), Copyright (c) Vercel, Inc.
+  crates/core/data/harnesses.json 的 harness 目录表整理自其 src/agents.ts；
+  crates/core/src/fs.rs 的链接策略（Unix 相对软链、Windows junction）参考其 src/installer.ts。
+- yetone/magpie (https://github.com/yetone/magpie), Copyright (c) 2026 yetone
+  crates/core/data/market/mcp-curated.json 的精选 MCP 清单以其 internal/library/market.go（commit b3f613a）为起点，
+  逐条对照各家官方 README / 文档核实后改写。
+- ollama/ollama (https://github.com/ollama/ollama), Copyright (c) Ollama
+  crates/core/src/codex_models/catalog.rs 的第三方模型条目字段取自其 cmd/launch/codex_app.go 的 codexAppCatalogEntry（commit 6383a0f）；
+  crates/gateway/src/router 的结构参照其 internal/proxy/codex_desktop.go；
+  crates/gateway/src/translate 的转换规则与发给 Codex 的事件序列参照其 openai/responses.go（commit 6383a0f）。
+
+以上各项目的许可证（MIT）：
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

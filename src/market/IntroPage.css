@@ -1,0 +1,147 @@
+/* 介绍页的内容（DESIGN「发现与安装 › 介绍页（推入页）」，画板 04B / 08B）：页面头、转场、页边归推入页 `PushedPage`。
+   来历一行在页面头下 10；MCP 另有两行事实；其下 16 一条 hairline（读宽 640），再 16 起正文，正文区自己滚、
+   上下边缘从 face 渐隐。色值一律 var(--…) */
+@import "../tokens.css";
+
+.intro {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: var(--panel-w);
+}
+
+/* ---- 来历一行：13 ink-mute；仓库 mono ink、路径 mono ink-mute，间隔 · ink-faint；末尾浅键 ---- */
+.intro__origin {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+  min-width: 0;
+  padding-top: 10px;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.intro__facts-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.intro__repo {
+  font-size: var(--size-label);
+  color: var(--ink);
+}
+
+.intro__path {
+  font-size: var(--size-label);
+  color: var(--ink-mute);
+}
+
+.intro__dot {
+  padding: 0 6px;
+  color: var(--ink-faint);
+}
+
+/* 装过的：来历行下一句 13 ink-mute */
+.intro__placed {
+  flex-shrink: 0;
+  margin: var(--space-xxs) 0 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* ---- MCP 的两行事实：键 12 ink-faint 至少 72，值 13 ink ----
+   两行一张格子，键列 minmax(72px, max-content)：简体仍是 72，English 按最长的键撑开、两行的值对齐（第三批画板 7A） */
+.intro__facts {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-sm);
+  flex-shrink: 0;
+  margin: var(--space-md) 0 0;
+}
+
+/* 一行事实：dt、dd 直接落进上面的格子 */
+.intro__fact {
+  display: contents;
+}
+
+.intro__fact dt {
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
+}
+
+.intro__fact dd {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.intro__fact dd .intro__dot + * {
+  font-size: var(--size-label);
+}
+
+/* 要填的几项：一项一段，项间 16，放不下折行 */
+.intro__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-md);
+}
+
+/* 一项要填的：键名（mono）+ 8 + `必填 · 密钥` */
+.intro__field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-xs);
+  font-size: var(--size-label);
+}
+
+/* ---- 其下 16 一条 hairline，读宽 640 ---- */
+.intro__rule {
+  flex-shrink: 0;
+  max-width: 640px;
+  margin-top: var(--space-md);
+  border-top: var(--border-structure);
+}
+
+/* ---- 正文区：铺满余下的高度，自己滚 ---- */
+.intro__fade {
+  flex: 1 1 auto;
+  max-width: 640px;
+}
+
+.intro__scroll {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.intro__read {
+  padding: var(--space-md) 0 var(--space-xl);
+}
+
+/* frontmatter 的 description：首段 15 ink */
+.intro__lede {
+  margin: 0 0 var(--space-md);
+  font-size: var(--size-body);
+  line-height: 1.65;
+  color: var(--ink);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 取的时候 / 取不到时的一句 */
+.intro__status {
+  display: flex;
+}

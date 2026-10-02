@@ -1,0 +1,58 @@
+[package]
+name = "sophia"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "sophia_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# 微博内部版。默认关闭：公开版就是不加任何 feature 的默认构建，
+# 内部版用 `--features weiboap`（见 Makefile 与 docs/specs 的双版本方案）。
+weiboap = ["sophia-core/weiboap"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sophia-core = { path = "../crates/core" }
+sophia-gateway = { path = "../crates/gateway" }
+tokio = { version = "1", features = ["sync", "time"] }
+notify = "6"
+notify-debouncer-mini = "0.4"
+# 应用内更新：updater 查清单、下载、装；process 负责装完重启自己。
+# 两个都只有桌面端有实现——这个应用本来就只有桌面端（托盘、launchd、软链）。
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-clipboard-manager = "2"
+# 发现与安装的网络层（market.rs）：skills.sh 搜索、MCP Registry、codeload 下载、GitHub 接口。
+# 与 sophia-gateway 同版本同写法；rustls-no-provider 要先装加密提供方，所以 rustls 也直接依赖
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "http2"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+
+# 托盘面板的原生窗口细节（去掉弹出时从中心放大的动画、圆角）：tauri 自己就依赖这两个，版本随它
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSResponder", "NSColor", "NSGraphics", "NSEvent", "NSScreen", "NSImage", "NSFont", "NSFontDescriptor", "NSAttributedString", "NSStringDrawing", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImageRep", "NSVisualEffectView"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSGeometry", "NSAttributedString", "NSDictionary", "NSString", "NSData", "NSProcessInfo", "NSLocale"] }
+# 菜单栏用量：屏幕是否睡着（调度暂停）
+objc2-core-graphics = { version = "0.3", features = ["CGDirectDisplay", "CGDisplayConfiguration"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
+# 托盘面板换成不激活应用的 NSPanel：点图标、点面板里的控件都不把应用（和它的主窗口）提到前台
+tauri-nspanel = "2.1"
+
+[dev-dependencies]
+tempfile = "3"

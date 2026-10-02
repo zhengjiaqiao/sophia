@@ -1,0 +1,19 @@
+{
+  "time.relative.justNow": "剛剛",
+  "time.relative.justNowInline": "剛剛",
+  "time.relative.minutes": {
+    "other": "{count} 分鐘前"
+  },
+  "time.relative.hours": {
+    "other": "{count} 小時前"
+  },
+  "time.relative.days": {
+    "other": "{count} 天前"
+  },
+  "time.lastAutoSkill": {
+    "other": "{when} · 加到 {count} 個"
+  },
+  "time.lastAutoMcp": {
+    "other": "{when} · 寫入 {count} 個"
+  }
+}

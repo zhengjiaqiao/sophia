@@ -1,0 +1,229 @@
+/// `发现` 列表与介绍页的纯逻辑（spec 2026-09-27-skill-mcp-market R5 R5B R7 R16；DESIGN「发现与安装」）：
+/// 表头、排序、`✓ 已安装` 的判断、灰面板那一句、来历行的读数、MCP 的连接方式与要填的。
+/// 不碰 api、不碰 DOM，node:test 直接测（tests/market-discover.test.ts）
+import { relativeTime } from "../dateText.ts";
+import { listText, locale, t, tn } from "../i18n.ts";
+import type {
+  LocationKey,
+  MarketFallback,
+  McpDefinitionInput,
+  McpFieldSpec,
+  McpRow,
+  SkillRow,
+  SkillList,
+} from "../types.ts";
+
+/// GitHub 限流时在触发处说的那一句（R16）
+export const rateLimited = () => t("market.rateLimited");
+
+/// 装过的人：中文一万以下写整数，一万起写 `12.4 万`（去掉末尾的 .0）；其他语言按 `Intl` 的紧凑写法（`12K`）
+export function formatInstalls(n: number, lang: string = locale()): string {
+  const { text, wan } = installsParts(n, lang);
+  return wan ? t("market.installs.wan", { value: text }) : text;
+}
+
+/// 数字部分与是否按「万」写（中文一万起）：`12.4` + 万 / `812`。非中文语言没有「万」，数字交给 `Intl`
+function installsParts(n: number, lang: string): { text: string; wan: boolean } {
+  if (!Number.isFinite(n) || n < 0) return { text: "0", wan: false };
+  if (!lang.startsWith("zh")) {
+    return {
+      text: new Intl.NumberFormat(lang, { notation: "compact" }).format(Math.round(n)),
+      wan: false,
+    };
+  }
+  if (n < 10_000) return { text: String(Math.round(n)), wan: false };
+  const value = Math.round(n / 1_000) / 10;
+  const text = value >= 1_000 ? String(Math.round(value)) : value.toFixed(1).replace(/\.0$/, "");
+  return { text, wan: true };
+}
+
+/// 来历行的「装过的人」：`6.2 万人装过` / `812 人装过`。数字文本是格式化后的，`count` 传原数以选单复数
+export function installsText(n: number, lang: string = locale()): string {
+  const { text, wan } = installsParts(n, lang);
+  const count = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  return tn(wan ? "market.installs.peopleWan" : "market.installs.people", count, { value: text });
+}
+
+/// 装过了没有：`installedIn` 非空＝装过（`安装` 换成状态 `✓ 已安装`，R5）
+export function isInstalled(row: { installedIn: ReadonlyArray<LocationKey> }): boolean {
+  return row.installedIn.length > 0;
+}
+
+/// skill 列表按装过的人从多到少排；一样多时保持原来的先后（稳定）。不改入参
+export function sortSkills<T extends { installs: number }>(items: ReadonlyArray<T>): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => b.item.installs - a.item.installs || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+/// skills.sh 不到 2 个字直接报错：这时列热门
+export const MIN_SKILL_QUERY = 2;
+
+/// 实际拿去搜 skill 的词：去掉首尾空白；不到 2 个字当没输入（列热门）
+export function skillQuery(query: string): string {
+  const q = query.trim();
+  return [...q].length < MIN_SKILL_QUERY ? "" : q;
+}
+
+/// skill 列表的表头：没输入（或不到 2 个字）时 `热门 N`，输入后 `搜索结果 N`（R5）
+export function skillHeader(query: string, count: number): { label: string; count: number } {
+  return {
+    label: t(skillQuery(query) === "" ? "market.header.popular" : "market.header.results"),
+    count,
+  };
+}
+
+/// 热门列表上方那一句：取自哪、多久前（旧缓存不冒充刚更新的榜单）。
+/// `热门排行 · 3 分钟前更新`（2026-09-30 产品负责人真机：不写「来自 skills.sh」）；还没取到过在线榜单时 `随包附带的列表`
+export function popularText(popular: SkillList["popular"], now: Date = new Date()): string {
+  if (popular?.source !== "online") return t("market.popular.bundled");
+  if (popular.updatedAt == null) return t("market.popular.online");
+  return t("market.popular.updatedAt", { time: relativeTime(popular.updatedAt * 1000, now, true) });
+}
+
+/// 一行的身份：列表刷新后介绍页据它找回同一条（装完 `installedIn` 会变）
+export function skillKey(row: Pick<SkillRow, "repo" | "name" | "path">): string {
+  return `${row.repo}\u0000${row.path ?? ""}\u0000${row.name}`;
+}
+export function mcpKey(row: Pick<McpRow, "id">): string {
+  return row.id;
+}
+
+/// 位置的名字：`global` → `用户级`；`project:<路径>` → 项目文件夹名
+export function placeName(key: LocationKey): string {
+  if (key === "global") return t("market.place.user");
+  const path = key.startsWith("project:") ? key.slice("project:".length) : key;
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : path;
+}
+
+/// 介绍页来历行下的那一句：`装在 用户级、CardBox`；没装过为 null。用户级排最前，其余按原先后
+export function installedLine(keys: ReadonlyArray<LocationKey>): string | null {
+  if (keys.length === 0) return null;
+  const ordered = [...keys.filter((k) => k === "global"), ...keys.filter((k) => k !== "global")];
+  const names: string[] = [];
+  for (const key of ordered) {
+    const name = placeName(key);
+    if (!names.includes(name)) names.push(name);
+  }
+  return t("market.installed.at", { places: listText(names, "enum") });
+}
+
+/// 列表上方灰面板的那一句（R16）：
+/// - 限流：按实际服务显示 `skills.sh 暂时限流，稍后再试` 等
+/// - 有上次的缓存：`现在无法连接 skills.sh，显示的是上次的结果 · 6 小时前`
+/// - 没有缓存（随包数据）：`现在无法连接 skills.sh，显示的是随包附带的列表`
+/// 画板写的是「连不上」；文案语域（D24）的旧词表里「连不上」换成「无法连接」
+export function fallbackText(fallback: MarketFallback, now: Date = new Date()): string {
+  const { service } = fallback;
+  if (fallback.rateLimited) return t("market.fallback.limited", { service });
+  if (fallback.cachedAt === null) return t("market.fallback.bundled", { service });
+  return t("market.fallback.cached", {
+    service,
+    time: relativeTime(fallback.cachedAt * 1000, now, true),
+  });
+}
+
+/// Tauri 通道与 JS 运行时自己抛的原始错误的样子：`TypeError: fetch failed`、`Command x not found`、
+/// `invalid args …`。命令层返回的 Err 一律是整句话（系统错误是包在句子里的），不会以这几种开头
+const RAW_ERROR =
+  /^\s*(?:\w*Error\b|Command\b|invalid args\b|missing required\b|unknown command\b)/i;
+
+/// 命令本身抛出来的错：后端约定是一句给用户看的话，不看它用哪种文字写；
+/// 是空的或原始错误的样子时换成 `fallback`
+export function errorText(error: unknown, fallback: string): string {
+  const text = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  return text.trim() === "" || RAW_ERROR.test(text) ? fallback : text;
+}
+
+// ── MCP ──
+
+/// MCP 一行后面的弱标识（R7）：要在浏览器里登录的远程服务器（`signIn`）`需要登录`；
+/// 否则有密钥要填 `需要 API key`；都不是为 null
+export function mcpNeeds(entry: Pick<McpRow, "fields" | "signIn">): string | null {
+  if (entry.signIn) return t("market.mcp.needsSignIn");
+  if (entry.fields.some((f) => f.secret)) return t("market.mcp.needsKey");
+  return null;
+}
+
+/// 远程还是本机命令
+export function isRemote(def: Pick<McpDefinitionInput, "transport">): boolean {
+  return def.transport !== "stdio";
+}
+
+/// 命令行：`npx -y @playwright/mcp@latest`
+export function commandLine(def: Pick<McpDefinitionInput, "command" | "args">): string {
+  return [def.command ?? "", ...(def.args ?? [])].filter((part) => part !== "").join(" ");
+}
+
+/// 介绍页事实行 `连接方式`：`本机命令 · npx -y …` / `远程 · https://…`
+export function mcpConnection(def: McpDefinitionInput): { kind: string; text: string } {
+  if (isRemote(def)) return { kind: t("market.mcp.connRemote"), text: def.url ?? "" };
+  return { kind: t("market.mcp.connLocal"), text: commandLine(def) };
+}
+
+/// 来历行里的包名或地址：远程写地址；`npx` / `uvx` / `bunx` / `pnpm dlx` 写包名；`docker run` 写镜像；
+/// 认不出就写整条命令
+export function mcpPackage(def: McpDefinitionInput): string {
+  if (isRemote(def)) return def.url ?? "";
+  const args = def.args ?? [];
+  const cmd = (def.command ?? "").split(/[\\/]/).pop() ?? "";
+  const firstPlain = (list: ReadonlyArray<string>) => list.find((a) => !a.startsWith("-")) ?? null;
+  if (cmd === "npx" || cmd === "uvx" || cmd === "bunx") return firstPlain(args) ?? commandLine(def);
+  if ((cmd === "pnpm" || cmd === "npm") && (args[0] === "dlx" || args[0] === "exec"))
+    return firstPlain(args.slice(1)) ?? commandLine(def);
+  if (cmd === "docker" && args[0] === "run") {
+    const plain = args.slice(1).filter((a) => !a.startsWith("-"));
+    // `-e KEY` 这类带值的旗标：值也不以 - 开头，取最后一个不像 KEY=… 的
+    const image = [...plain]
+      .reverse()
+      .find((a) => !a.includes("=") && !/^[A-Z_][A-Z0-9_]*$/.test(a));
+    return image ?? commandLine(def);
+  }
+  return commandLine(def);
+}
+
+/// 介绍页事实行 `要填的`：每项键名 + `必填 · 密钥`；没有要填的时说 `不用填`（要登录时补一句）
+export function mcpFieldFacts(
+  entry: Pick<McpRow, "fields" | "signIn">,
+): { key: string; note: string }[] | string {
+  if (entry.fields.length === 0)
+    return entry.signIn ? t("market.mcp.noFieldsSignIn") : t("market.mcp.noFields");
+  return entry.fields.map((f: McpFieldSpec) => ({
+    key: f.key,
+    note: [
+      f.required ? t("market.field.required") : t("market.field.optional"),
+      f.secret ? t("market.field.secret") : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  }));
+}
+
+/// 来历行末尾那个标记：精选 / 官方目录
+export function mcpSourceLabel(source: string): string {
+  return source === "registry" ? t("market.mcp.sourceRegistry") : t("market.mcp.sourceCurated");
+}
+
+// ── 离开键 ──
+
+/// 仓库在 GitHub 上的页：有路径时指到那个文件夹（分支不知道时用 HEAD）
+export function githubUrl(repo: string, path: string | null, branch?: string | null): string {
+  const base = `https://github.com/${repo}`;
+  if (!path) return base;
+  return `${base}/tree/${branch ?? "HEAD"}/${path.replace(/^\/+/, "")}`;
+}
+
+/// 离开键的动词：npm 上的包 `npm 上的说明`，GitHub `在 GitHub 打开`，其余 `打开说明页`
+export function leaveLabel(url: string): string {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return t("market.leave.readme");
+  }
+  if (host === "www.npmjs.com" || host === "npmjs.com") return t("market.leave.npm");
+  if (host === "github.com") return t("market.leave.github");
+  return t("market.leave.readme");
+}

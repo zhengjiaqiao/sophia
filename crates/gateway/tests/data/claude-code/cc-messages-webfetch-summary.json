@@ -1,0 +1,124 @@
+{
+  "_note": "claude 2.1.283，claude -p（sdk-cli）：WebFetch 取回网页后的摘要请求，走 HAIKU 档，无工具、无 thinking",
+  "method": "POST",
+  "path": "/v1/messages?beta=true",
+  "headers": [
+    [
+      "Accept",
+      "application/json"
+    ],
+    [
+      "Authorization",
+      "Bearer p0-fake-auth-token-GGGG"
+    ],
+    [
+      "Content-Type",
+      "application/json"
+    ],
+    [
+      "User-Agent",
+      "claude-cli/2.1.283 (external, sdk-cli)"
+    ],
+    [
+      "X-Claude-Code-Session-Id",
+      "7eed008f-8796-40ca-8916-2b3091f8a665"
+    ],
+    [
+      "X-Stainless-Arch",
+      "arm64"
+    ],
+    [
+      "X-Stainless-Lang",
+      "js"
+    ],
+    [
+      "X-Stainless-OS",
+      "MacOS"
+    ],
+    [
+      "X-Stainless-Package-Version",
+      "0.112.1"
+    ],
+    [
+      "X-Stainless-Retry-Count",
+      "0"
+    ],
+    [
+      "X-Stainless-Runtime",
+      "node"
+    ],
+    [
+      "X-Stainless-Runtime-Version",
+      "v26.3.0"
+    ],
+    [
+      "X-Stainless-Timeout",
+      "600"
+    ],
+    [
+      "anthropic-beta",
+      "interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24"
+    ],
+    [
+      "anthropic-dangerous-direct-browser-access",
+      "true"
+    ],
+    [
+      "anthropic-version",
+      "2023-06-01"
+    ],
+    [
+      "x-app",
+      "cli"
+    ],
+    [
+      "Connection",
+      "keep-alive"
+    ],
+    [
+      "Host",
+      "127.0.0.1:47809"
+    ],
+    [
+      "Accept-Encoding",
+      "gzip, deflate, br, zstd"
+    ],
+    [
+      "Content-Length",
+      "1351"
+    ]
+  ],
+  "body": {
+    "model": "kimi-k2.5-haiku",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "\nWeb page content:\n---\nExample Domain\n\nThis domain is for use in documentation examples without needing permission. This is not a service, avoid relying on it for testing and monitoring purposes.\n\n[Learn more](https://iana.org/help/example-domains)\n---\n\nWhat is the page title?\n\nProvide a concise response based only on the content above. In your response:\n - Enforce a strict 125-character maximum f…<截断，原长 775 字符>"
+          }
+        ]
+      }
+    ],
+    "system": [
+      {
+        "type": "text",
+        "text": "x-anthropic-billing-header: cc_version=2.1.283.a80; cc_entrypoint=sdk-cli;"
+      },
+      {
+        "type": "text",
+        "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+      }
+    ],
+    "tools": [],
+    "metadata": {
+      "user_id": "{\"device_id\":\"<device-id>\",\"account_uuid\":\"\",\"session_id\":\"7eed008f-8796-40ca-8916-2b3091f8a665\"}"
+    },
+    "max_tokens": 32000,
+    "output_config": {
+      "effort": "high"
+    },
+    "stream": true
+  }
+}

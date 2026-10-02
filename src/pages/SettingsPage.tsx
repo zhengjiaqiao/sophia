@@ -1,0 +1,480 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { api } from "../api";
+import { t, tn } from "../i18n.ts";
+import type { Appearance, HarnessList, HarnessStatus, LanguageSetting } from "../types";
+import {
+  AgentIcon,
+  BusySlot,
+  Button,
+  CheckRow,
+  DrawerHandle,
+  FloatingToast,
+  Mono,
+  Note,
+  NoticePanel,
+  PageHead,
+  PageTitle,
+  SectionLabel,
+  Switch,
+  Toast,
+} from "../ui";
+import { AbsentAgents } from "./AbsentAgents.tsx";
+import { AppearanceRow } from "./AppearanceRow.tsx";
+import { LanguageRow } from "./LanguageRow.tsx";
+import { updateCheckFailure } from "../updateText.ts";
+import { appUpdates, useAppUpdate } from "../useAppUpdate.ts";
+import { lastCheckText } from "../market/updateView.ts";
+import { useSkillUpdates } from "../market/useSkillUpdates.ts";
+import "./SettingsPage.css";
+
+/// 设置页（DESIGN「产品裁决 › 设置」，画板 V4Layouts-settings）：侧栏底的 `设置`（或 `⌘,`）落到这里，
+/// **只替换机面，侧栏不消失**（D6）。页面头 `设置`，右端没有动作。
+/// 它只回答一个问题——**这个 agent 出不出现在列表里**。名单只有一份，SKILLS、MCP 两页共用
+/// （2026-09-27 产品负责人：「这里感觉不用分开」）：MCP 页只显示其中支持 MCP 的，名单下一行灰字说这件事。
+/// Claude Desktop 不进名单、不占名额（它跟着 Claude Code 出现在 MCP 页，core 的 `mcp_columns`）。
+///
+/// `列表里的 agent · 最多 4 个`：勾选框列表，三列等分、按行读，一行＝勾选行 `CheckRow`（14px 勾选框 + 10 + 16px 图标 + 10 + 名字），
+/// 行高 36；默认只列已安装的，其余收在一行展开「› 未安装的 N 个」里。**最多显示 4 个**（上限来自 core，
+/// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
+/// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
+/// 再往下 48：`skill 更新`——`自动检查 skill 更新` + 灰字何时查，右端 `立即检查`（默认键紧凑）+ 开关（默认开）；
+/// 下一行 `上次检查 今天 14:32 · 2 个有更新`。查的结果与 SKILLS 页同一份（`useSkillUpdates`）。
+/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24，应用内查，不跳 GitHub）。
+/// 应用菜单「关于 Sophia」「检查更新…」停在这一节（`aboutRequest`）。
+///
+/// 改一个生效一个，**没有「保存」按钮**。
+///
+/// 故意不做的事：
+/// - **不展示路径**。用户要做的判断只有一个，路径是我们的实现细节。
+/// - 不提「目录不存在，开启任一 skill 时会建出来」——那是开启 skill 那一刻的事。
+/// - 不给「链接方式（相对 / 绝对）」开关：它按「本体是否在目标项目内」自动判，是正确性判断不是口味问题。
+/// - **没有后台服务那一行**（D10）：它只转述 Codex 开关的状态、自己不能操作；
+///   后台服务残留时的 `卸下后台服务` 在 Codex 页「第三方模型」节头与托盘。
+
+/// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
+/// 其余收在「› 未安装的 N 个」展开里。
+type AgentOption = HarnessStatus;
+
+/// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的浅键）
+const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
+
+export interface SettingsPageProps {
+  onError: (message: string) => void;
+  /// 壳接线（应用菜单「关于 Sophia」「检查更新…」，D15）：停在「关于」；`check` 时同时开始检查
+  aboutRequest?: { at: number; check: boolean };
+  /// `skill 更新` 一节的 `去看看`：到 SKILLS · 我的 · 全部，打开 `只看这些`
+  onShowUpdates?: () => void;
+}
+
+export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsPageProps) {
+  /// null＝还没读回来，与「一个 agent 都没有」是两回事
+  const [list, setList] = useState<HarnessList | null>(null);
+  const agents: AgentOption[] | null = list?.harnesses ?? null;
+  const [showAbsent, setShowAbsent] = useState(false);
+
+  const reload = async () => {
+    try {
+      setList(await api.listHarnesses());
+    } catch (e) {
+      onError(String(e));
+    }
+  };
+  useEffect(() => {
+    void reload();
+    // 首次进入加载一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /// 当前版本：从应用自己读，不从任何配置文件读——用户看的是正在跑的这一份
+  const [current, setCurrent] = useState<string | null>(null);
+  /// 新版本的处境与侧栏的更新键是同一份（壳在启动时和之后每 6 小时静默查，见 App.tsx）：
+  /// 在侧栏点了下载，这里看到的是同一条进度；离开设置页下载照样继续。进设置不另查
+  const { phase: update } = useAppUpdate();
+  /// 「稍后」只在这一程有效，下次进来再问（与模型页的 later 同一套语义，§4.4）；只收起这里的待办条，
+  /// 侧栏的更新键照旧在
+  const [later, setLater] = useState(false);
+
+  useEffect(() => {
+    void getVersion().then(setCurrent, () => setCurrent(null));
+  }, []);
+
+  /// 要用户处理的三种处境各自一条行内待办条；下载中是同一条待办条，键位原地换成忙碌 + `正在下载 0.2.0 · 43%`
+  const updateNotice = () => {
+    if (later) return null;
+    switch (update.kind) {
+      case "none":
+        // 检查失败：灰字一句书面说明 + 浅键 `去发布页 ↗`（离开 Sophia，唯一还会去 GitHub 的地方）
+        if (checkFailed !== null)
+          return (
+            <Note
+              action={{
+                label: t("settings.update.releasesPage"),
+                leave: true,
+                onClick: () => void openUrl(RELEASES_URL),
+              }}
+            >
+              {checkFailed}
+            </Note>
+          );
+        return null;
+      case "available":
+      case "downloading": {
+        const version = update.version;
+        const busy =
+          update.kind === "downloading"
+            ? t("settings.update.downloading", { version }) +
+              (update.percent === null ? "" : " · " + update.percent + "%")
+            : undefined;
+        return (
+          <NoticePanel
+            scope="section"
+            message={t("settings.update.available", { version })}
+            busy={busy}
+            action={{
+              label: t("settings.update.install"),
+              onClick: () => void appUpdates.install(),
+            }}
+            secondary={{ label: t("settings.update.later"), onClick: () => setLater(true) }}
+          />
+        );
+      }
+      case "installed":
+        return (
+          <NoticePanel
+            scope="section"
+            message={t("settings.update.installed", { version: update.version })}
+            action={{
+              label: t("settings.update.restart"),
+              onClick: () => void appUpdates.relaunch(),
+            }}
+            secondary={{ label: t("settings.update.later"), onClick: () => setLater(true) }}
+          />
+        );
+      case "failed":
+        return (
+          <NoticePanel
+            scope="section"
+            message={t("settings.update.failed", {
+              version: update.version,
+              reason: update.reason,
+            })}
+            action={{ label: t("settings.update.retry"), onClick: () => void appUpdates.install() }}
+            secondary={{ label: t("settings.update.later"), onClick: () => setLater(true) }}
+          />
+        );
+    }
+  };
+
+  /// 点「检查更新」之后：正在检查（键原位忙碌）/ 已是最新（键下方浮起，约 4 秒淡出）/
+  /// 检查失败（一行书面说明 + 去发布页的退路）
+  const [latest, setLatest] = useState(0);
+  const [checking, setChecking] = useState(false);
+  const [checkFailed, setCheckFailed] = useState<string | null>(null);
+  const dismissLatest = useCallback(() => setLatest(0), []);
+
+  /// 刚取消勾选的那一项：它正下方浮起一句说明，约 4 秒淡出（`at` 让连着取消两次时计时从头来）
+  const [unchecked, setUnchecked] = useState<{ id: string; at: number } | null>(null);
+  const dismissUnchecked = useCallback(() => setUnchecked(null), []);
+
+  /// 点一下切换，当场生效。写盘成功后重读一次，界面始终以落盘结果为准
+  /// 勾选先画出来再写（同模型页「勾选不闪」）：写失败读回实际状态并说原因
+  const toggle = async (id: string, enabled: boolean) => {
+    setList((l) =>
+      l ? { ...l, harnesses: l.harnesses.map((h) => (h.id === id ? { ...h, enabled } : h)) } : l,
+    );
+    try {
+      await api.setHarnessEnabled(id, enabled);
+      setUnchecked(enabled ? null : { id, at: Date.now() });
+      await reload();
+    } catch (e) {
+      onError(String(e));
+      await reload();
+    }
+  };
+
+  /// `检查更新`：在应用里查（产品负责人：跳到 GitHub 让用户手动下载太难用）。有新版出待办条
+  /// （下载并安装 → 重启），没有就说「已是最新版本」，查不成才给「去发布页 ↗」的退路
+  const checkUpdate = async () => {
+    setLater(false);
+    setLatest(0);
+    setCheckFailed(null);
+    setChecking(true);
+    try {
+      if (!(await appUpdates.checkNow())) setLatest(Date.now());
+    } catch (e) {
+      setCheckFailed(updateCheckFailure(e instanceof Error ? e.message : String(e)));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  // 应用菜单「关于 Sophia」「检查更新…」：停在「关于」一节，检查更新时同时开始检查（同点 `检查更新`）
+  const aboutRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!aboutRequest) return;
+    aboutRef.current?.scrollIntoView({ block: "start" });
+    if (aboutRequest.check && !checking) void checkUpdate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aboutRequest?.at]);
+
+  // ── 界面 · 界面语言（spec 2026-09-30-language-and-theme R1 R2，第三批画板 1A）──
+  /// 同外观：读自 core（设置里存的那一项，「跟随系统」就是 system）；选了先画出来再写，core 写完当场换语言
+  /// （后端发 locale-changed，整棵界面树按新语言重画）。写不成说原因、重读 core 的真值
+  const [language, setLanguageState] = useState<LanguageSetting>("system");
+  useEffect(() => {
+    void api.uiLanguage().then(
+      (v) => setLanguageState(v.setting),
+      (e) => onError(String(e)),
+    );
+    // 首次进入读一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const changeLanguage = async (next: LanguageSetting) => {
+    setLanguageState(next);
+    try {
+      await api.setUiLanguage(next);
+    } catch (e) {
+      onError(String(e));
+      void api.uiLanguage().then(
+        (v) => setLanguageState(v.setting),
+        () => undefined,
+      );
+    }
+  };
+
+  // ── 界面 · 外观（spec 2026-09-30-language-and-theme R2）──
+  /// 读自 core；选了先画出来再写，core 写完当场把外观设到所有窗口。写不成说原因、重读 core 的真值
+  /// （不回到旧值：快速连点两项时，前一次失败不该盖掉后一次的选择）
+  const [appearance, setAppearanceState] = useState<Appearance>("system");
+  useEffect(() => {
+    void api.appearance().then(setAppearanceState, (e) => onError(String(e)));
+    // 首次进入读一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const changeAppearance = async (next: Appearance) => {
+    setAppearanceState(next);
+    try {
+      await api.setAppearance(next);
+    } catch (e) {
+      onError(String(e));
+      void api.appearance().then(setAppearanceState, () => undefined);
+    }
+  };
+
+  // ── skill 更新（R14）──
+  /// 开关与上次检查的时刻读自 core；「几个有更新」只在这一程拿到过查更新的结果时写（结果与 SKILLS 页同一份）。
+  /// 进设置不查：什么时候查只有两处——打开 SKILLS 页（6 小时、开关归 core）与这里的 `立即检查`
+  const skillUpdates = useSkillUpdates();
+  const [autoCheck, setAutoCheck] = useState<boolean | null>(null);
+  const [lastCheck, setLastCheck] = useState<number | null>(null);
+  useEffect(() => {
+    void api.skillUpdateSettings().then(
+      (s) => {
+        setAutoCheck(s.autoCheck);
+        setLastCheck(s.lastCheck);
+      },
+      (e) => onError(String(e)),
+    );
+    // 首次进入读一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  /// 当场生效：先画出来再写，写不成读回原样并说原因
+  const toggleAutoCheck = async (next: boolean) => {
+    setAutoCheck(next);
+    try {
+      await api.setAutoCheckSkillUpdates(next);
+    } catch (e) {
+      setAutoCheck(!next);
+      onError(String(e));
+    }
+  };
+  const checkingSkills = skillUpdates.checking === "settings";
+  const skillNotice = skillUpdates.noticeFor("settings");
+  const lastCheckLine = lastCheckText(
+    skillUpdates.checkedAt ?? lastCheck,
+    skillUpdates.loaded ? skillUpdates.updates.length : null,
+  );
+
+  /// 一格一个勾选行（`CheckRow size="grid"`，行高 36）：整行是命中区，方框只是记号。勾满上限时没勾的行禁用，
+  /// 原因提示框悬停出、按下当即出（组件自己包 `ReasonTip`）
+  const row = (agent: AgentOption) => {
+    const blocked = full && !agent.enabled;
+    return (
+      <div key={agent.id} className="settings-page__cell">
+        <CheckRow
+          size="grid"
+          checked={agent.enabled}
+          onChange={(next) => void toggle(agent.id, next)}
+          icon={<AgentIcon id={agent.id} name={agent.displayName} />}
+          disabledReason={blocked ? fullReason : undefined}
+          highlighted={unchecked?.id === agent.id}
+        >
+          {agent.displayName}
+        </CheckRow>
+        {unchecked?.id === agent.id ? (
+          <FloatingToast key={unchecked.at} align="start">
+            <Toast
+              kind="success"
+              sentence="settings.agents.unchecked"
+              trail={[t("settings.agents.uncheckedTrail")]}
+              onDismiss={dismissUnchecked}
+            />
+          </FloatingToast>
+        ) : null}
+      </div>
+    );
+  };
+
+  /// 三列等分、按行读（与 agent 表的先后一致：默认显示的前 4 个就是第一行起的前 4 个）
+  const grid = (items: AgentOption[]) => (
+    <div className="settings-page__grid">{items.map(row)}</div>
+  );
+
+  const present = (agents ?? []).filter((a) => a.installed);
+  const absent = (agents ?? []).filter((a) => !a.installed);
+  const maxShown = list?.maxShown ?? 0;
+  /// 已显示满上限：其余已安装项不能再勾
+  const full = list !== null && present.filter((a) => a.enabled).length >= maxShown;
+  const fullReason = t("settings.agents.fullReason", { max: maxShown });
+
+  const notice = updateNotice();
+  return (
+    <PageHead lead={<PageTitle>{t("settings.title")}</PageTitle>}>
+      <div className="settings-page">
+        {/* 界面（页面头下 24，第一节）：两行，界面语言在上、外观在下（第三批画板 1A） */}
+        <div className="settings-page__section">
+          <SectionLabel rule>{t("settings.appearance.section")}</SectionLabel>
+        </div>
+        <LanguageRow value={language} onChange={(next) => void changeLanguage(next)} />
+        <AppearanceRow value={appearance} onChange={(next) => void changeAppearance(next)} />
+
+        {/* 区块小标（上距 48）：下 7 一条 hairline；句子里的 agent 是词不是结构词，不经 Cap */}
+        <div className="settings-page__section settings-page__section--later">
+          <SectionLabel rule>
+            {t("settings.agents.heading")}
+            {list ? ` · ${t("settings.agents.maxShown", { max: maxShown })}` : ""}
+          </SectionLabel>
+        </div>
+
+        {/* 读回来之前什么都不画：本机读取很快，闪一下忙碌只是噪音（后台例行读取不显示忙碌） */}
+        {agents === null ? null : agents.length === 0 ? (
+          <Note>{t("settings.agents.none")}</Note>
+        ) : (
+          <>
+            {grid(present)}
+            {/* 没装的收在一行展开里：它不做事，只是在原地把列表拉开，所以是展开的样子（拉手在前、
+                收起 › 拉开 ˅，与网关行同一种），不是一颗键（2026-09-25 产品负责人真机：「感觉是个展开？」）。
+                列出来只是噪音，但要留入口——用户可能想预先恢复，装上之后就直接在列表里了 */}
+            {absent.length > 0 ? (
+              <>
+                <div className="settings-page__more">
+                  <DrawerHandle
+                    always
+                    open={showAbsent}
+                    onToggle={() => setShowAbsent(!showAbsent)}
+                    label={tn("settings.agents.absentCount", absent.length)}
+                    controls="settings-absent"
+                  />
+                  <span
+                    className="settings-page__more-label"
+                    onClick={() => setShowAbsent(!showAbsent)}
+                  >
+                    {tn("settings.agents.absentCount", absent.length)}
+                  </span>
+                </div>
+                {showAbsent ? (
+                  <div id="settings-absent">
+                    <AbsentAgents agents={absent} onRestore={(id) => void toggle(id, true)} />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {/* 名单两页共用：MCP 页只显示其中支持 MCP 的（12 ink-faint，只是说明，不是设置） */}
+            <p className="settings-page__mcp-note">{t("settings.agents.mcpNote")}</p>
+          </>
+        )}
+
+        {/* skill 更新（上距 48）：一行 `自动检查 skill 更新` + 12 + 灰字何时查；右端 `立即检查` + 12 + 开关。
+            下一行上次检查的时刻与结果（12 ink-faint）。页面头不放检查键——结果在 `我的` 的提示条上说 */}
+        <div className="settings-page__section settings-page__section--later">
+          <SectionLabel rule>{t("settings.skillUpdates.section")}</SectionLabel>
+        </div>
+        <div className="settings-page__auto">
+          <span className="settings-page__label">{t("settings.skillUpdates.auto")}</span>
+          <span className="settings-page__auto-note">{t("settings.skillUpdates.autoNote")}</span>
+          <span className="settings-page__auto-keys">
+            <span className="settings-page__check">
+              {/* 查的时候键锁住，过了 0.3 秒门槛原位换成刻度 + 正在检查 */}
+              <BusySlot busy={checkingSkills} label={t("settings.checking")}>
+                <Button size="compact" onClick={() => !checkingSkills && skillUpdates.refresh()}>
+                  {t("settings.skillUpdates.checkNow")}
+                </Button>
+              </BusySlot>
+              {/* 限流、查不成：在按下的这颗键下浮起一句，不弹窗、不自动重试 */}
+              {skillNotice !== null ? (
+                <FloatingToast key={skillUpdates.notice?.at} align="end">
+                  <Toast kind="cannot" message={skillNotice} onDismiss={skillUpdates.clearNotice} />
+                </FloatingToast>
+              ) : null}
+            </span>
+            {autoCheck === null ? null : (
+              <Switch
+                checked={autoCheck}
+                onChange={(next) => void toggleAutoCheck(next)}
+                label={t("settings.skillUpdates.auto")}
+              />
+            )}
+          </span>
+        </div>
+        <p className="settings-page__last">
+          <span>{lastCheckLine}</span>
+          {/* 查到了就给一条直达路：设置里看不到是哪几个（2026-09-27 产品负责人） */}
+          {skillUpdates.loaded && skillUpdates.updates.length > 0 && onShowUpdates ? (
+            <Button
+              size="compact"
+              onClick={() => {
+                skillUpdates.showInList();
+                onShowUpdates();
+              }}
+            >
+              {t("settings.skillUpdates.showUpdates")}
+            </Button>
+          ) : null}
+        </p>
+
+        <div ref={aboutRef} className="settings-page__section settings-page__section--later">
+          <SectionLabel rule>{t("settings.about.section")}</SectionLabel>
+        </div>
+        <div className="settings-page__about">
+          <span className="settings-page__label">{t("settings.about.version")}</span>
+          <Mono>{current ?? "…"}</Mono>
+          <span className="settings-page__check">
+            {update.kind === "downloading" ? (
+              <Button size="compact" disabled disabledReason={t("settings.about.downloading")}>
+                {t("settings.about.checkUpdate")}
+              </Button>
+            ) : (
+              // 查的时候键锁住，过了 0.3 秒门槛原位换成忙碌指示 + 正在检查
+              <BusySlot busy={checking} label={t("settings.checking")}>
+                <Button size="compact" onClick={() => !checking && void checkUpdate()}>
+                  {t("settings.about.checkUpdate")}
+                </Button>
+              </BusySlot>
+            )}
+            {latest ? (
+              <FloatingToast key={latest} align="start">
+                <Toast kind="success" sentence="settings.about.latest" onDismiss={dismissLatest} />
+              </FloatingToast>
+            ) : null}
+          </span>
+        </div>
+        {/* 检查更新的结果（待办条 / 查不成的一句）紧跟在 `检查更新` 那一行下（② 就近） */}
+        {notice === null ? null : <div className="settings-page__update">{notice}</div>}
+      </div>
+    </PageHead>
+  );
+}
+
+export default SettingsPage;

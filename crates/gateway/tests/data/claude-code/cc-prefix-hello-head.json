@@ -1,0 +1,27 @@
+{
+  "_note": "claude 2.1.283，claude -p（sdk-cli）：ANTHROPIC_BASE_URL 带 /claude-code 前缀时的探测",
+  "method": "HEAD",
+  "path": "/claude-code/api/hello",
+  "headers": [
+    [
+      "Connection",
+      "keep-alive"
+    ],
+    [
+      "User-Agent",
+      "Bun/1.4.3"
+    ],
+    [
+      "Accept",
+      "*/*"
+    ],
+    [
+      "Host",
+      "127.0.0.1:47802"
+    ],
+    [
+      "Accept-Encoding",
+      "gzip, deflate, br, zstd"
+    ]
+  ]
+}
