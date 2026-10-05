@@ -439,6 +439,23 @@ export function foundLine(resolved: ResolvedLink): string {
 }
 
 /// 列表表头：`装哪几个 · 17 个里选了 3`
+/// 从链接安装的列表顺序：能装的排前面、装过的沉底，各自保持仓库里的先后（2026-10-05 产品负责人）
+export function pickOrder<T extends { path: string }>(
+  skills: ReadonlyArray<T>,
+  blockedOf: (path: string) => string | null,
+): T[] {
+  return [
+    ...skills.filter((s) => blockedOf(s.path) === null),
+    ...skills.filter((s) => blockedOf(s.path) !== null),
+  ];
+}
+
+/// 全选那一行的三态：只看能装的——一个没选＝空框，选了一部分＝半选，能装的全选上＝勾
+export function pickAllState(picked: number, installable: number): boolean | "mixed" {
+  if (picked === 0) return false;
+  return picked >= installable ? true : "mixed";
+}
+
 export const pickHeader = (n: number, m: number) => tn("market.link.pickHeader", n, { picked: m });
 
 /// 贴底主动作：一个时 `安装`，几个时 `安装 3 个`

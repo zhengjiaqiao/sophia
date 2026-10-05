@@ -37,7 +37,9 @@ import {
   packageOf,
   parseErrorLine,
   parseGithubLink,
+  pickAllState,
   pickHeader,
+  pickOrder,
   placeholderFields,
   sameNote,
   skillInstallBlock,
@@ -657,4 +659,32 @@ test("写 MCP 之后：✓ 已写进 [图标…] brave-search，Desktop 接生�
     none.agents.map((a) => a.id),
     ["codex"],
   );
+});
+
+test("从链接安装的列表：能装的排前面、装过的沉底，各自保持先后；全选只看能装的（空框 / 半选 / 勾）", () => {
+  const skills = ["a", "b", "c", "d", "e"].map((name) => ({ path: `skills/${name}`, name }));
+  const done = new Set(["skills/a", "skills/c"]);
+  const blockedOf = (path: string) => (done.has(path) ? "已经有了" : null);
+  assert.deepEqual(
+    pickOrder(skills, blockedOf).map((s) => s.name),
+    ["b", "d", "e", "a", "c"],
+  );
+  assert.equal(pickAllState(0, 3), false);
+  assert.equal(pickAllState(2, 3), "mixed");
+  assert.equal(pickAllState(3, 3), true);
+  // 一个能装的都没有：空框（那一行灰着说原因）
+  assert.equal(pickAllState(0, 0), false);
+});
+
+test("全选那一行：三态框、钉在顶上、个数；都装过了时灰着说原因", async () => {
+  const { render } = await import("./ui-render.ts");
+  const { PickRow } = await import("../src/market/InstallParts.tsx");
+  const base = { label: "全部可装的", name: "全部可装的", onChange: () => undefined, pinned: true };
+  const mixed = render(PickRow, { ...base, checked: "mixed" as const, detail: "12 个" });
+  assert.match(mixed, /class="install-pick is-pinned"/);
+  assert.match(mixed, /aria-checked="mixed"/);
+  assert.match(mixed, /12 个/);
+  const none = render(PickRow, { ...base, checked: false, blocked: "都已经装过了" });
+  assert.match(none, /class="install-pick is-blocked is-pinned"/);
+  assert.match(none, /都已经装过了/);
 });

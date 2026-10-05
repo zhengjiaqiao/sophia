@@ -5,9 +5,10 @@
 /// [https://github.com/anthropics/skills                                    ]
 /// anthropics/skills · main · 找到 17 个 skill
 /// 装哪几个 · 17 个里选了 3 ─────────────────────────
+/// ☐ 全部可装的  16 个                      （钉在顶上；三态，同表头全选框）
 /// ☑ docx     skills/docx
+/// …（能装的在前，装过的沉底；自己滚，露 6 行半）
 /// ☐ pdf      用户级的通用仓库里已经有 pdf  在访达中显示 ↗
-/// …（自己滚，露 4 行半）
 /// 位置 ─── [用户级] [CardBox] [更多 ˅]
 /// 装到 ~/.agents/skills/<名字> · 这里是用户级的通用仓库
 /// 给谁用 ─ ☑ Claude Code  ☑ Codex …
@@ -42,10 +43,13 @@ import {
   linkState,
   looksLikeGithub,
   parseGithubLink,
+  pickAllState,
   pickHeader,
+  pickOrder,
   skillInstallBlock,
 } from "./installView.ts";
 import { errorText, marketService } from "./service.ts";
+import { usePageCommand } from "../shell/menuBus.ts";
 import { useClipboardPrefill, useDebounced, useSkillInstall } from "./useInstall.ts";
 
 export interface LinkPageProps extends InstallPageBase {
@@ -114,6 +118,15 @@ export function LinkPage(props: LinkPageProps) {
   useEffect(() => setSelected([]), [foundKey]);
   const blockedOf = (path: string) => state.itemFor(path)?.blocked ?? null;
   const picked = single ? [single.path] : selected.filter((p) => blockedOf(p) === null);
+  // 能装的排前面、装过的沉底（能装的被挤到下面要往下翻）；全选只管能装的
+  const ordered = pickOrder(skills, blockedOf);
+  const installable = ordered.filter((s) => blockedOf(s.path) === null).map((s) => s.path);
+  const allState = pickAllState(picked.length, installable.length);
+  const setAll = (on: boolean) => setSelected(on ? installable : []);
+  // ⌘A（应用菜单「全选」）：勾上能装的全部；输入框聚焦时壳把它交给文字，不会到这里
+  usePageCommand("select-all", () => {
+    if (!single && skills.length > 1 && installable.length > 0) setAll(true);
+  });
   const pickedItems = picked
     .map((p) => state.itemFor(p))
     .filter((i): i is NonNullable<typeof i> => i !== undefined);
@@ -215,7 +228,16 @@ export function LinkPage(props: LinkPageProps) {
               <>
                 <InstallBlock label={pickHeader(skills.length, picked.length)}>
                   <PickList label={t("market.link.pickLabel")}>
-                    {skills.map((s) => {
+                    <PickRow
+                      pinned
+                      label={t("market.link.pickAll")}
+                      name={t("market.link.pickAll")}
+                      checked={allState}
+                      onChange={setAll}
+                      detail={tn("market.link.pickAllCount", installable.length)}
+                      blocked={installable.length === 0 ? t("market.link.pickAllNone") : null}
+                    />
+                    {ordered.map((s) => {
                       const item = state.itemFor(s.path);
                       const blocked = item?.blocked ?? null;
                       return (

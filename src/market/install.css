@@ -185,9 +185,10 @@
   color: var(--ink-faint);
 }
 
-/* ---- 勾选列表：自己滚，露 4 行半（被切掉的半行就是「下面还有」，不加渐隐） ---- */
+/* ---- 勾选列表：自己滚，露 6 行半（被切掉的半行就是「下面还有」，不加渐隐；2026-10-05 产品负责人：
+   「skill 选择的窗口可以稍微加高一些」，原 4 行半） ---- */
 .install-picklist {
-  max-height: calc(4.5 * (var(--row-h) + 1px));
+  max-height: calc(6.5 * (var(--row-h) + 1px));
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -217,6 +218,14 @@
 
 .install-pick.is-blocked {
   color: var(--ink-faint);
+}
+
+/* 全选那一行钉在列表顶上：机面底挡住滚上来的行；悬停照常出 surface 带（上面那条规则更具体） */
+.install-pick.is-pinned {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-fade); /* 压在同一滚动区里滚上来的行上 */
+  background: var(--face);
 }
 
 .install-pick__box {

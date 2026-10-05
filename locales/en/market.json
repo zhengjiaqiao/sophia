@@ -203,6 +203,12 @@
   "market.link.inputPlaceholder": "https://github.com/owner/repo or owner/repo",
   "market.link.title": "Install from link",
   "market.link.pickLabel": "Choose which to install",
+  "market.link.pickAll": "All installable",
+  "market.link.pickAllCount": {
+    "one": "{count} skill",
+    "other": "{count} skills"
+  },
+  "market.link.pickAllNone": "All already installed",
   "market.mcp.signInNote": "Sign in through your browser on first use",
   "market.update.hasNew": "Update available",
   "market.update.ariaUpdate": "Update {name}",

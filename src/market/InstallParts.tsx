@@ -316,8 +316,10 @@ export function PickRow({
   detail,
   blocked,
   action,
+  pinned = false,
 }: {
-  checked: boolean;
+  /// `"mixed"`＝半选（只有全选那一行用：选了一部分）
+  checked: boolean | "mixed";
   onChange: (next: boolean) => void;
   /// 名字；要现起名字时是一个输入框
   name: ReactNode;
@@ -329,20 +331,22 @@ export function PickRow({
   blocked?: string | null;
   /// 行尾动作（`在访达中显示 ↗`）
   action?: ReactNode;
+  /// 钉在列表顶上、不随列表滚走（全选那一行）
+  pinned?: boolean;
 }) {
   const disabled = Boolean(blocked);
   const onRow = (e: MouseEvent<HTMLDivElement>) => {
     if (disabled) return;
     const target = e.target as Element;
     if (target.closest("button, input, textarea, a, label")) return;
-    onChange(!checked);
+    // 半选时点行同点框：全选
+    onChange(checked !== true);
   };
+  const classes = ["install-pick"];
+  if (disabled) classes.push("is-blocked");
+  if (pinned) classes.push("is-pinned");
   return (
-    <div
-      className={disabled ? "install-pick is-blocked" : "install-pick"}
-      data-checkrow={disabled ? undefined : ""}
-      onClick={onRow}
-    >
+    <div className={classes.join(" ")} data-checkrow={disabled ? undefined : ""} onClick={onRow}>
       <span className="install-pick__box">
         <Checkbox
           checked={!disabled && checked}
@@ -358,7 +362,7 @@ export function PickRow({
   );
 }
 
-/// 自己滚的勾选列表：露 4 行半，被切掉的半行就是「下面还有」——**不加渐隐**（渐隐会把最后一行画成禁用的样子）
+/// 自己滚的勾选列表：露 6 行半，被切掉的半行就是「下面还有」——**不加渐隐**（渐隐会把最后一行画成禁用的样子）
 export function PickList({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="install-picklist" role="group" aria-label={label}>

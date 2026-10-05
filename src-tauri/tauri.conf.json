@@ -34,7 +34,7 @@
       "endpoints": [
         "https://github.com/zhengjiaqiao/sophia/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzMUY2RDM2RUJDMURDQTkKUldTcDNNSHJObTBmZ3lxTlhGVlpNeGgrWEFjQkZPdmlpcUpKVUJxaVU4czd6a2Z4cVI3ekZaRHoK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZCQ0YzN0VBRkNFREFBRUYKUldUdnF1Mzg2amZQKy9VRjl0eEROaG1JL2l0ODg5OGYzY252UEJBb0xhaHdjc2M2NHlhbm9ZdEoK"
     }
   },
   "bundle": {
