@@ -39,6 +39,7 @@ import { IntroPage } from "./IntroPage";
 import { createMcpLoader, type McpLoadState } from "./mcpRefresh";
 import { createSkillLoader, POPULAR_CHECK_MS, type SkillLoadState } from "./popularRefresh";
 import "./DiscoverPane.css";
+import { copyDetails } from "../diagnostics.ts";
 
 /// 输入停多久才查（R5）
 export const SEARCH_DELAY_MS = 300;
@@ -188,28 +189,34 @@ function ListHead({
   );
 }
 
-/// 列表上方：灰面板（连不上 / 限流）或整个取不到时的一句
+/// 列表上方：灰面板（连不上 / 读不懂 / 限流……）或整个取不到时的一句。有技术原文时主键之前一颗 `详情`
+/// （点开是浮层，spec 2026-10-04-local-diagnostics R13）
 function ListNotice({
   fallback,
+  detail,
   error,
   retry,
 }: {
   fallback: string | null;
+  /// 降级的技术原文（后端已去隐私）
+  detail?: string | null;
   error: string | null;
   /// 热门榜单没取到时灰面板上的 `再试一次`（默认键紧凑 24），按下原位 `正在刷新`
   retry?: { onClick: () => void; busy: boolean };
 }) {
-  const action = (message: string) => (
+  const action = (message: string, technical?: string | null) => (
     <NoticePanel
       scope="section"
       message={message}
+      technical={technical ?? undefined}
+      onCopy={(text) => copyDetails(text)}
       action={retry ? { label: t("market.action.retry"), onClick: retry.onClick } : undefined}
       busy={retry?.busy ? t("market.busy.refreshing") : undefined}
     />
   );
   return (
     <>
-      {fallback ? <div className="dsc-notice">{action(fallback)}</div> : null}
+      {fallback ? <div className="dsc-notice">{action(fallback, detail)}</div> : null}
       {error ? <div className="dsc-notice">{action(error)}</div> : null}
     </>
   );
@@ -272,6 +279,7 @@ function SkillDiscover({
       ) : null}
       <ListNotice
         fallback={fallback}
+        detail={list.data?.fallback?.detail}
         error={list.error}
         retry={popular ? { onClick: list.refresh, busy: list.refreshing } : undefined}
       />
@@ -416,7 +424,7 @@ function McpDiscover({
     registry.length === 0;
   return (
     <div className="dsc">
-      <ListNotice fallback={fallback} error={list.error} />
+      <ListNotice fallback={fallback} detail={list.data?.fallback?.detail} error={list.error} />
       {list.curatedLoading && curated.length === 0 ? (
         <BusySlot busy label={t("market.busy.readingCurated")}>
           <span />

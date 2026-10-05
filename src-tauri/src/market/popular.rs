@@ -9,7 +9,7 @@ const CAP: u64 = 8 * 1024 * 1024;
 pub(super) struct Attempt {
     generation: u64,
     at: Option<u64>,
-    error: Option<NetError>,
+    failure: Option<NetFailure>,
 }
 
 // 只解析 script 内容中的 JSON 字符串，不执行 JavaScript。
@@ -122,11 +122,10 @@ impl Refresh {
                 updated_at: at,
                 refresh_needed: should_refresh(at, attempt.at, t, false),
             },
-            attempt.error.as_ref().map(|error| Fallback {
-                service: "skills.sh".into(),
-                cached_at: at,
-                rate_limited: matches!(error, NetError::RateLimited { .. }),
-            }),
+            attempt
+                .failure
+                .as_ref()
+                .map(|failure| Fallback::from_failure("skills.sh", at, failure)),
         )
     }
 
@@ -138,7 +137,7 @@ impl Refresh {
         save: impl FnOnce(Cached<Vec<SkillHit>>),
         fetch: impl FnOnce() -> Fut,
     ) where
-        Fut: std::future::Future<Output = Result<Vec<SkillHit>, NetError>>,
+        Fut: std::future::Future<Output = Result<Vec<SkillHit>, NetFailure>>,
     {
         let generation = guard(&self.attempt).generation;
         let _serial = self.serial.lock().await;
@@ -151,7 +150,7 @@ impl Refresh {
         }
         let result = fetch().await;
         let completed_at = clock();
-        let error = match result {
+        let failure = match result {
             Ok(items) if !items.is_empty() => {
                 save(Cached {
                     at: completed_at,
@@ -159,13 +158,16 @@ impl Refresh {
                 });
                 None
             }
-            Ok(_) => Some(NetError::Network),
+            Ok(_) => Some(NetFailure {
+                error: NetError::Unreadable,
+                detail: "the popular list came back empty".into(),
+            }),
             Err(error) => Some(error),
         };
         let mut attempt = guard(&self.attempt);
         attempt.generation += 1;
         attempt.at = Some(completed_at);
-        attempt.error = error;
+        attempt.failure = failure;
     }
 }
 
@@ -183,22 +185,15 @@ pub(super) fn cached_result(
     (hits, fallback, meta)
 }
 
-async fn fetch(market: &MarketState, url: &str) -> Result<Vec<SkillHit>, NetError> {
+async fn fetch(market: &MarketState, url: &str) -> Result<Vec<SkillHit>, NetFailure> {
     // 用客户端自带的 `Sophia/版本` 如实标明身份（2026-09-29 实测首页对它照常返回 200 与 initialSkills）
-    let response = market
-        .client()?
-        .get(url)
-        .send()
-        .await
-        .map_err(|_| NetError::Network)?;
-    classify(
-        response.status().as_u16(),
-        header(&response, "x-ratelimit-remaining"),
-        response.headers().contains_key("retry-after"),
-        None,
-    )?;
+    let response =
+        market.client()?.get(url).send().await.map_err(|e| {
+            NetFailure::new(kind_of(&e, NetError::Network), url, &error_chain_text(&e))
+        })?;
+    let response = check_status(response).await?;
     let body = MarketState::read_capped(response, CAP).await?;
-    parse(&body).ok_or(NetError::Network)
+    parse(&body).ok_or_else(|| NetFailure::unreadable(url, "page has no usable skills list", &body))
 }
 
 pub(super) async fn refresh(market: &MarketState, force: bool, url: &str) {
@@ -347,7 +342,18 @@ mod tests {
             assert_eq!(actual, hits);
             assert_eq!(meta.updated_at, Some(100));
             assert!(!meta.refresh_needed);
-            assert_eq!(fallback.unwrap().rate_limited, limited);
+            let fallback = fallback.unwrap();
+            assert_eq!(fallback.rate_limited, limited);
+            // 读不懂的页面不再说成连不上（R10）
+            if status == 200 {
+                assert_eq!(
+                    fallback.reason.as_deref(),
+                    Some("skills.sh 返回的内容读不懂")
+                );
+            }
+            assert!(fallback
+                .detail
+                .is_some_and(|d| d.starts_with("GET http://127.0.0.1:")));
             state.with_cache(|cache| cache.popular = None);
             let (actual, fallback, meta) = cached_result(&state, now());
             assert!(!actual.is_empty());
@@ -385,7 +391,7 @@ mod tests {
                     |_| panic!("失败不得写缓存"),
                     || async {
                         clock.store(2030, Ordering::SeqCst);
-                        Err(NetError::Network)
+                        Err(NetFailure::new(NetError::Network, "http://x/", "refused"))
                     },
                 )
                 .await;

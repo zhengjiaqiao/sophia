@@ -50,7 +50,7 @@ pub fn apply_saved<R: Runtime>(app: &AppHandle<R>) {
         .map(|s| s.appearance)
         .unwrap_or_default();
     if let Err(e) = apply(app, value) {
-        eprintln!("{e}");
+        log::warn!("设外观失败：{e}");
     }
 }
 

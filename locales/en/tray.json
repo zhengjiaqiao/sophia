@@ -2,6 +2,6 @@
   "tray.menu.open": "Open Sophia",
   "tray.menu.quit": "Quit",
   "tray.closeHint.title": "Sophia is still in the menu bar",
-  "tray.closeHint.message": "To quit, click Quit in the menu bar icon's menu. Model injection is kept running by the system's background service, so quitting the app doesn't affect it.",
+  "tray.closeHint.message": "To quit, click Quit in the menu bar icon's menu. Third-party models stop working after you quit.",
   "tray.closeHint.ok": "OK"
 }

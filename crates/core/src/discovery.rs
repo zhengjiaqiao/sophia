@@ -271,7 +271,7 @@ fn agent_label_map(spec: &AgentLabels, env: &Env) -> HashMap<String, String> {
     ) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("打不开 {}：{e}", path.display());
+            log::warn!("打不开 {}：{e}", path.display());
             return HashMap::new();
         }
     };
@@ -285,7 +285,7 @@ fn agent_label_map(spec: &AgentLabels, env: &Env) -> HashMap<String, String> {
         Ok(rows.flatten().collect::<Vec<_>>())
     }) {
         Ok(pairs) => out.extend(pairs),
-        Err(e) => eprintln!("读 {} 失败：{e}", spec.table),
+        Err(e) => log::warn!("读 {} 失败：{e}", spec.table),
     }
     out
 }

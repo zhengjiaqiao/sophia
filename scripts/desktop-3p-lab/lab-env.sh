@@ -1,16 +1,21 @@
 # shellcheck shell=bash
 # 真机用例（docs/testing/2026-09-29-claude-desktop-3p-test-cases.md）的短名与小工具。bash、zsh 都能 source：
-#   source /Users/jiaqiao/Project/sophia/.worktrees/claude-code-models/scripts/desktop-3p-lab/lab-env.sh
+#   source /Users/jiaqiao/Project/sophia/.claude/worktrees/local-diagnostics/scripts/desktop-3p-lab/lab-env.sh
+#   （仓库换了位置就设 SOPHIA_LAB_REPO 指过去，脚本都从 $SOPHIA_LAB_REPO/scripts/desktop-3p-lab 取）
 # 每开一个新 shell（执行者每条命令若是新进程，就每条）都要先 source。只定义变量和函数，source 本身不改任何文件。
 #
 # 路径同 lib.sh，可用 CLAUDE_LAB_BASE / CLAUDE_LAB_STATE_DIR 指到演练目录。
 #
 # 2026-09-30 起另有 Sophia 验收用的短名（docs/testing/2026-09-30-claude-third-party-acceptance.md）：
-#   SOPHIA_APP（被测包）、SBK（Sophia 这一侧的备份）、RPORT（路由端口）、TEE_PORT（录制代理端口）、RLOG（路由日志）；
-#   ss（sophia-state.sh）、sophia（起停被测的 Sophia）、cli（被测包的 symsync gateway 命令行）、rmark / rlog（路由日志）、
+#   SOPHIA_APP（被测包）、SOPHIA_BUNDLE_ID（被测包的包 id）、SDATA（Sophia 数据目录）、SBK（Sophia 这一侧的备份）、
+#   RPORT（路由端口）、TEE_PORT（录制代理端口）、RLOG（路由日志）；
+#   ss（sophia-state.sh）、sophia（起停被测的 Sophia）、cli（被测包的 Sophia gateway 命令行）、rmark / rlog / rcheck（路由日志）、
 #   tee_start / tee_stop / tphase / treqs（录制代理）、upeek（假上游收到的请求要点）。
+# 被测包与包 id 可换（见下方 SOPHIA_LAB_APP / SOPHIA_LAB_BUNDLE_ID）；本轮用自定包 id 构建，免得和安装版、开发版抢单实例：
+#   npm run tauri build -- --debug --config '{"identifier":"com.zhengjiaqiao.sophia.diagtest"}'
+#   → $R/target/debug/bundle/macos/Sophia.app，包 id com.zhengjiaqiao.sophia.diagtest（数据目录不随包 id，仍是 …/Sophia）
 
-export R=/Users/jiaqiao/Project/sophia/.worktrees/claude-code-models
+export R="${SOPHIA_LAB_REPO:-/Users/jiaqiao/Project/sophia/.claude/worktrees/local-diagnostics}"
 export L="$R/scripts/desktop-3p-lab"
 export LAB="${CLAUDE_LAB_STATE_DIR:-$HOME/claude-desktop-lab}"
 export E="$LAB/evidence"
@@ -140,18 +145,23 @@ for fn in fns:
 PY
 }
 # ───── Sophia 验收（docs/testing/2026-09-30-claude-third-party-acceptance.md）用的短名 ─────
-# 被测包、Sophia 这一侧的备份、路由端口（settings.json 的 codexGateway.port，读不到按 47328）、录制代理端口
+# 被测包（SOPHIA_LAB_APP，默认本仓库的 debug 包）、它的包 id（SOPHIA_LAB_BUNDLE_ID，默认读包里的 Info.plist；
+# 本轮是 com.zhengjiaqiao.sophia.diagtest）、Sophia 数据目录（SOPHIA_LAB_DATA_DIR，默认 ~/Library/Application Support/Sophia）、
+# Sophia 这一侧的备份、路由端口（settings.json 的 codexGateway.port，读不到按 47328）、录制代理端口
 export SOPHIA_APP="${SOPHIA_LAB_APP:-$R/target/debug/bundle/macos/Sophia.app}"
+export SOPHIA_BUNDLE_ID="${SOPHIA_LAB_BUNDLE_ID:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SOPHIA_APP/Contents/Info.plist" 2>/dev/null || echo com.zhengjiaqiao.sophia)}"
+export SDATA="${SOPHIA_LAB_DATA_DIR:-$HOME/Library/Application Support/Sophia}"
 if [ -s "$LAB/SOPHIA_BASELINE" ]; then export SBK="$(cat "$LAB/SOPHIA_BASELINE")"; fi
 export RPORT="$(python3 -c 'import json,os,sys
 try: print(json.load(open(sys.argv[1])).get("codexGateway",{}).get("port") or 47328)
-except Exception: print(47328)' "${SOPHIA_LAB_DATA_DIR:-$HOME/Library/Application Support/SymSync}/settings.json")"
+except Exception: print(47328)' "$SDATA/settings.json")"
 export TEE_PORT="${LAB_TEE_PORT:-18767}"
-export RLOG="${SOPHIA_LAB_DATA_DIR:-$HOME/Library/Application Support/SymSync}/gateway-logs/router.log"
+export RLOG="$SDATA/gateway-logs/router.log"
 ss()     { bash "$L/sophia-state.sh" "$@"; }
 sophia() { bash "$L/sophia-state.sh" app "$@"; }
-# 被测包的命令行（只读的 status / doctor 随便用；enable / restore 会写，用例写了才用）
-cli()    { "$SOPHIA_APP/Contents/MacOS/symsync" gateway "$@"; }
+# 被测包的命令行 `Sophia gateway <命令> [--agent codex|claude]`（只读的 status / doctor 随便用；
+# enable / restore / restart / launch / provider-add / select 会写，用例写了才用）
+cli()    { "$SOPHIA_APP/Contents/MacOS/Sophia" gateway "$@"; }
 # 路由日志：rmark 记下现在的行数；rlog <名字> [grep 式子] 把之后新增的行存到 $E/<名字>-router.txt 并打印
 rmark()  { mkdir -p "$LAB"; wc -l < "$RLOG" 2>/dev/null | tr -d ' ' > "$LAB/rlog.mark" || echo 0 > "$LAB/rlog.mark"; echo "路由日志记号：第 $(cat "$LAB/rlog.mark") 行之后"; }
 rlog()   {
@@ -172,6 +182,19 @@ tee_stop() {
   for p in $(lsof -t -nP -iTCP:"$TEE_PORT" -sTCP:LISTEN 2>/dev/null); do
     ps -o command= -p "$p" | grep -q 'capture_server.py' && kill "$p" && echo "录制代理已停（pid ${p}）"
   done
+}
+# rcheck <名字>：读 rlog 存下的 $E/<名字>-router.txt，按 agent=claude 的状态码计数，列出非 2xx 与走了 openai / chatgpt 的行。
+# 末行「全是 2xx」才算过
+rcheck() {
+  local f="$E/$1-router.txt"
+  [ -f "$f" ] || { echo "没有 ${f}（先跑 rlog $1）"; return 1; }
+  echo "agent=claude 的行：$(grep -c 'agent=claude' "$f" | tr -d ' ') 条；状态码计数："
+  grep 'agent=claude' "$f" | grep -oE 'status=[0-9]+' | sort | uniq -c | sed 's/^/    /'
+  local bad
+  bad="$(grep 'agent=claude' "$f" | grep -vE 'status=2[0-9][0-9]( |$)'; grep 'agent=claude' "$f" | grep -E 'route=(openai|chatgpt)( |$)')"
+  if [ -n "$bad" ]; then printf '非 2xx 或走了官方的行：\n%s\n' "$bad" | cut -c1-300; echo "==> 有非 2xx / 走官方的请求"; return 1; fi
+  [ "$(grep -c 'agent=claude' "$f" | tr -d ' ')" -gt 0 ] || { echo "==> 一条 agent=claude 的请求都没有"; return 1; }
+  echo "==> agent=claude 的请求全是 2xx，没有走官方"
 }
 tphase() { python3 "$L/capture_server.py" phase "$1" --port "$TEE_PORT"; }
 treqs()  { python3 "$L/capture_server.py" timeline "$LAB/tee" --phase "$1"; }

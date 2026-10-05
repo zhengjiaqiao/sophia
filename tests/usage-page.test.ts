@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   MAX_MENU_BAR_AGENTS,
   agentChoices,
+  usageNoteAction,
   menuBarAgents,
   primaryOptions,
   secondaryOptions,
@@ -10,7 +11,7 @@ import {
   setAgentDisplay,
   toggleMenuBarAgent,
 } from "../src/usage/usageView.ts";
-import type { UsageView, UsageWindow } from "../src/types.ts";
+import type { TrayUsage, UsageView, UsageWindow } from "../src/types.ts";
 
 /// 用量页（spec 2026-09-26-menubar-usage R11 R12）的纯逻辑
 
@@ -200,9 +201,11 @@ test("5A 菜单栏一节：预览 +「这就是菜单栏上会显示的样子」
   assert.match(html, /用尽时菜单栏自动改显示倒计时/);
   assert.match(
     html,
-    /usage-page__label">刷新<[^]*?ss-tabs ss-tabs--compact[^]*>自动<[^]*>关<[^]*>1 分钟<[^]*>15 分钟</,
+    /usage-page__label">刷新<[^]*?ss-tabs ss-tabs--compact[^]*>自动<[^]*>关<[^]*>5 分钟<[^]*>15 分钟</,
   );
-  assert.match(html, /手动档最快一分钟一次/);
+  // 「1 分钟」档已去掉（M17）
+  assert.doesNotMatch(html, />1 分钟</);
+  assert.match(html, /手动档最快五分钟一次/);
 });
 
 test("5A 显示哪些 agent：区块小标下一排选择片（agent 标志 + 名字），下一行「最多 3 个」", () => {
@@ -294,12 +297,14 @@ test("页面最上方「当前用量」：每个已登录的 agent 一栏（标�
           },
         ],
         note: null,
+        retry: false,
       },
       {
         agent: "codex",
         updatedText: null,
         windows: [],
         note: "还没有读数",
+        retry: false,
       },
     ],
   });
@@ -371,7 +376,6 @@ test("第三批 3A：数字、刷新、字号这几组设置分段是内容、�
     "已用",
     "自动",
     "关",
-    "1 分钟",
     "5 分钟",
     "10 分钟",
     "15 分钟",
@@ -394,6 +398,93 @@ test("第三批 3A：数字、刷新、字号这几组设置分段是内容、�
     assert.match(enTabs[0], />Remaining<\/button>/);
     assert.ok(enTabs.some((nav) => />Small<\/button>[^]*>Medium<\/button>/.test(nav)));
     for (const nav of enTabs) assert.doesNotMatch(nav, /ss-cap/);
+  } finally {
+    setLocale("zh-Hans");
+  }
+});
+
+// ===== 「再试一次」（2026-10-03 产品负责人；原因行右端） =====
+
+const failing = (overrides: Partial<TrayUsage> = {}): TrayUsage => ({
+  agent: "claude-code",
+  updatedText: "2 小时前更新",
+  windows: [
+    {
+      label: "5 小时",
+      percentText: "剩 93%",
+      gaugePercent: 93,
+      emphasize: false,
+      resetText: "2:58 后重置",
+    },
+  ],
+  note: "Claude Code 没有回应",
+  retry: true,
+  ...overrides,
+});
+
+test("原因行右端：后端说能再试才给「再试一次」；正在读取时换成「正在读取」；没有原因行就什么都不给", () => {
+  assert.equal(usageNoteAction(failing(), false), "retry");
+  assert.equal(usageNoteAction(failing(), true), "retrying");
+  // 被限流、没有订阅额度、要登录、还没有读数：后端给 retry=false
+  assert.equal(
+    usageNoteAction(failing({ note: "被限流，约 5 分钟后再试", retry: false }), false),
+    null,
+  );
+  assert.equal(usageNoteAction(failing({ note: "还没有读数", retry: false }), false), null);
+  // 取到了（原因行没了）：正常画，不留「正在读取」
+  assert.equal(usageNoteAction(failing({ note: null, retry: false }), true), null);
+  assert.equal(usageNoteAction(failing({ note: null, retry: false }), false), null);
+});
+
+test("当前用量：能再试的原因行右端一颗紧凑默认键「再试一次」（上一次的读数照画）；不能再试的不给", () => {
+  const html = render(UsageBody, {
+    view: view({
+      tray: [failing(), failing({ agent: "codex", note: "被限流，约 5 分钟后再试", retry: false })],
+    }),
+    onChange: () => undefined,
+    onRetry: () => undefined,
+    retrying: () => false,
+  });
+  const now = html.slice(html.indexOf("当前用量"), html.indexOf("菜单栏显示用量"));
+  const claude = now.slice(
+    now.indexOf('aria-label="Claude 的用量"'),
+    now.indexOf('aria-label="Codex 的用量"'),
+  );
+  assert.match(claude, />剩 93%</, "上一次的读数照画");
+  assert.match(
+    claude,
+    /<p class="usage-note usage-note--retry"><span class="usage-note__text">Claude Code 没有回应<\/span><span class="ss-tipwrap is-idle"><button type="button" class="ss-btn ss-btn--compact">再试一次<\/button><\/span><\/p>/,
+  );
+  const codex = now.slice(now.indexOf('aria-label="Codex 的用量"'));
+  assert.match(codex, /<p class="usage-note">被限流，约 5 分钟后再试<\/p>/);
+  assert.doesNotMatch(codex, /再试一次/);
+});
+
+test("当前用量：正在读取时键锁住（再按不起作用，过了忙碌门槛换成刻度 +「正在读取」）", () => {
+  const html = render(UsageBody, {
+    view: view({ tray: [failing()] }),
+    onChange: () => undefined,
+    onRetry: () => undefined,
+    retrying: (agent: string) => agent === "claude-code",
+  });
+  assert.match(
+    html,
+    /usage-note__text">Claude Code 没有回应<\/span><span class="ss-locked" aria-busy="true"><span class="ss-tipwrap is-idle"><button[^>]*>再试一次<\/button><\/span><\/span><\/p>/,
+  );
+});
+
+test("「再试一次」三种语言", async () => {
+  const { setLocale, t } = await import("../src/i18n.ts");
+  try {
+    for (const [lang, retry, retrying] of [
+      ["zh-Hans", "再试一次", "正在读取"],
+      ["zh-Hant", "再試一次", "正在讀取"],
+      ["en", "Try again", "Reading"],
+    ] as const) {
+      setLocale(lang);
+      assert.equal(t("usage.retry"), retry, lang);
+      assert.equal(t("usage.retrying"), retrying, lang);
+    }
   } finally {
     setLocale("zh-Hans");
   }

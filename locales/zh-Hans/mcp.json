@@ -148,7 +148,7 @@
   "mcp.report.atomicWriteFailed": "原子写入失败",
   "mcp.report.created": "已创建 MCP 定义",
   "mcp.report.createdEnableIn": "已创建 MCP 定义（请在 {agent} 中启用）",
-  "mcp.read.symlink": "配置文件是软链接，已拒绝读取",
+  "mcp.read.symlink": "配置文件是软链接，没能解析它指向的文件",
   "mcp.read.notRegular": "配置路径不是普通文件",
   "mcp.read.unreadable": "配置不可读",
   "mcp.read.jsonInvalid": "JSON 无法解析或含重复对象键（JSONC 不支持）",

@@ -8,6 +8,17 @@ import "./FloatingLayer.css";
 /// 浮层已经是 `role="menu"` 并带着读屏名：里面的 `Menu` 据此不再自己叠一层 menu
 export const InLayerContext = createContext(false);
 
+/// `dialog` 浮层里能聚焦的（反馈小窗的 Tab 焦点圈同用）
+export const FOCUSABLE =
+  'button:not(:disabled), [tabindex]:not([tabindex="-1"]), a[href], input, textarea';
+
+/// Tab 在 `count` 项里转圈：`index` 是现在的焦点（-1＝不在浮层里），`back` 是 Shift+Tab；没有可聚焦的为 -1
+export function cycleFocus(count: number, index: number, back: boolean): number {
+  if (count === 0) return -1;
+  if (index < 0) return back ? count - 1 : 0;
+  return (index + (back ? count - 1 : 1)) % count;
+}
+
 /// 小浮层（DESIGN「浮层：下拉、提示框、提示条、确认框」的下拉 / 选择器一行）：`paper` + 1px `hairline` 边、
 /// `float` 12 圆角 + `float` 投影。来源行的目标浮层、MCP 同名挑选浮层共用（原在来源管理页里，
 /// 那一页随 D3 删除，搬到这里）。
@@ -23,6 +34,7 @@ export function FloatingLayer({
   className,
   label,
   align = "start",
+  role = "menu",
   children,
 }: {
   trigger: HTMLElement;
@@ -33,6 +45,8 @@ export function FloatingLayer({
   /// 挂在滚动区上：宽度、内边距、纵向排列由它定（里面是 `Menu` 时不用给，Menu 自己定）
   className?: string;
   label: string;
+  /// 里面是一组选项（默认 `menu`）；是一段可读、可复制的内容（`详情` 的原文）给 `dialog`
+  role?: "menu" | "dialog";
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -72,6 +86,18 @@ export function FloatingLayer({
     const inside = (target: EventTarget | null) =>
       target instanceof Node && (ref.current?.contains(target) || trigger.contains(target));
     const onKeyDown = (event: KeyboardEvent) => {
+      // `dialog`（详情的原文）：焦点留在浮层里转圈，Tab 不会走到后面的列表、也不会因滚动把浮层关掉（Codex 复审 7/7）
+      if (event.key === "Tab" && role === "dialog" && ref.current) {
+        const items = Array.from(ref.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+        const at = items.indexOf(document.activeElement as HTMLElement);
+        const next = cycleFocus(items.length, at, event.shiftKey);
+        if (next >= 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          items[next].focus({ preventScroll: true });
+        }
+        return;
+      }
       if (event.key !== "Escape") return;
       // 捕获阶段接走：不让页面把 Esc 当成返回 / 取消选择
       event.stopPropagation();
@@ -95,14 +121,23 @@ export function FloatingLayer({
       document.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onClose);
     };
-  }, [trigger, onClose]);
+  }, [trigger, onClose, role]);
+
+  // `dialog` 一摆好位置（之前是 visibility: hidden，聚焦不了）就把焦点放进去：第一个能聚焦的（详情的原文）。
+  // 程序放的焦点不滚动页面，焦点框按输入方式画（inputModality）
+  const focused = useRef(false);
+  useEffect(() => {
+    if (role !== "dialog" || pos === null || focused.current) return;
+    focused.current = true;
+    ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus({ preventScroll: true });
+  }, [role, pos]);
 
   const layer = (
     <div
       ref={ref}
       // 从确认框里打开的（确认框里的「更多」项目列表）：浮在确认框上面，不被它盖住
       className={trigger.closest(".ss-confirm") ? "ss-layer ss-layer--over-confirm" : "ss-layer"}
-      role="menu"
+      role={role}
       aria-label={label}
       style={
         pos ? { top: pos.top, left: pos.left, maxHeight: pos.maxHeight } : { visibility: "hidden" }
@@ -113,7 +148,7 @@ export function FloatingLayer({
           ref={scrollRef}
           className={className ? `ss-layer__scroll ${className}` : "ss-layer__scroll"}
         >
-          <InLayerContext.Provider value={true}>{children}</InLayerContext.Provider>
+          <InLayerContext.Provider value={role === "menu"}>{children}</InLayerContext.Provider>
         </div>
       </FadeViewport>
     </div>

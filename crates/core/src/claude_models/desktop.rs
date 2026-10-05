@@ -33,7 +33,7 @@ pub const FIRST_ROLE: &str = "claude-sonnet-5";
 pub const HAIKU_ROLE: &str = "claude-haiku-4-5";
 /// 记录里代替令牌的占位
 pub const TOKEN_PLACEHOLDER: &str = "<token>";
-/// 改写前备份的后缀：`<名>.sophia-models[.N].bak`
+/// 改写前备份的后缀：Sophia 备份目录里的 `<序号>-sophia-models.bak`（见 `atomicfile::backup`）
 pub const BACKUP_SUFFIX: &str = "sophia-models";
 
 const MODE_KEY: &str = "deploymentMode";
@@ -185,7 +185,7 @@ pub struct RoleModel {
 pub struct Desired {
     /// `http://127.0.0.1:<port>/claude`（`base_url`）
     pub base_url: String,
-    /// 令牌（钥匙串里的），只写进 profile
+    /// 令牌（密钥文件里的），只写进 profile
     pub token: String,
     /// 已选的全部模型，按选择顺序（不设上限；Sophia 不设默认，第一个只是 Claude 第一次切过去时的初始默认）
     pub models: Vec<RoleModel>,
@@ -224,6 +224,13 @@ pub fn role_ids(count: usize) -> Vec<String> {
 /// 写进 profile 的网关地址（R11：带 `/claude` 前缀）
 pub fn base_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/claude")
+}
+
+/// 是不是 Sophia 在路由端口范围内任一端口写下的网关地址：换过端口后，设置丢了时也认得旧端口写的文件
+fn is_router_base_url(value: &str) -> bool {
+    crate::codex_models::settings::PORT_RANGE
+        .into_iter()
+        .any(|port| value == base_url(port))
 }
 
 /// `inferenceModels` 的值（R29）：已选按选择顺序逐项 `{name: <角色 id>, labelOverride: <模型片上的名字>}`
@@ -597,7 +604,7 @@ pub fn inspect(files: &DesktopFiles, ours: &Ours) -> Result<Inspection, DesktopE
             profile
                 .get("inferenceGatewayBaseUrl")
                 .and_then(Value::as_str)
-                == Some(ours.base_url)
+                .is_some_and(|url| url == ours.base_url || is_router_base_url(url))
                 && profile.get(API_KEY).and_then(Value::as_str) == Some(ours.token)
         });
     Ok(Inspection {
@@ -1095,19 +1102,22 @@ pub fn execute(
     dirs: &DesktopDirs,
     snapshot: &DesktopSnapshot,
     plan: &Plan,
+    backups: &Path,
 ) -> Result<(), DesktopError> {
     for step in &plan.steps {
-        apply_step(dirs, snapshot, step)?;
+        apply_step(dirs, snapshot, step, backups)?;
     }
     Ok(())
 }
 
 /// 执行一步。文件已是目标内容 → 什么都不做；与快照不同 → `Changed`，不覆盖。
 /// 改写前备份原文（Sophia 自己的 profile 除外：内含令牌，令牌不该出现在别处）；删文件前重校验
+/// 备份放进 `backups`（Sophia 的备份目录，见 `atomicfile::backup`）
 pub fn apply_step(
     dirs: &DesktopDirs,
     snapshot: &DesktopSnapshot,
     step: &Step,
+    backups: &Path,
 ) -> Result<(), DesktopError> {
     let file = step.file;
     let path = dirs.path(file);
@@ -1139,13 +1149,19 @@ pub fn apply_step(
         return Err(DesktopError::Changed { file });
     }
     if let (FileState::Present(snap), true) = (expected, file != DesktopFile::Profile) {
-        atomicfile::backup(&path, snap, BACKUP_SUFFIX).map_err(|e| DesktopError::io(file, e))?;
+        atomicfile::backup(&path, snap, BACKUP_SUFFIX, backups).map_err(|e| {
+            DesktopError::io(
+                file,
+                atomicfile::backup_failure_text(&path, &e).unwrap_or_else(|| e.to_string()),
+            )
+        })?;
     }
     let changed = |error: io::Error| {
         if error.to_string() == "changed" {
             DesktopError::Changed { file }
         } else {
-            DesktopError::io(file, error)
+            // 磁盘满、没权限、只读说人话，原文进日志（spec 2026-10-04-local-diagnostics R12）
+            DesktopError::io(file, atomicfile::write_error_text(&path, &error))
         }
     };
     match &step.after {

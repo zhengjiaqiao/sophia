@@ -3,10 +3,9 @@
 //!
 //! 写什么由 core 的 `claude_models::desktop` 算（纯函数：`plan_apply` / `plan_restore` / `inspect`）；
 //! 这里决定什么时候写（桌面应用不在运行，每次写之前在同一动作里重查）、先记后写（`applied.phase`）、
-//! 失败时撤回或留给「重新写入 / 再试一次」前滚，以及路由服务与 Claude 清单。
-use super::{internal, Agent, App, AppError, Untouched, SERVICE_LABEL};
+//! 失败时撤回或留给「重新写入 / 再试一次」前滚，以及路由与 Claude 清单。
+use super::{internal, Agent, App, AppError, Untouched};
 use crate::claude_desktop;
-use crate::router::FEATURE_CLAUDE;
 use sophia_core::claude_models::desktop::{
     self, Desired, DesktopError, DesktopSnapshot, Foreign, Plan, RoleModel, TOKEN_PLACEHOLDER,
 };
@@ -100,6 +99,11 @@ fn desktop_error(error: DesktopError) -> AppError {
     AppError::new(error.code(), error.to_string())
 }
 
+/// Claude 的路由清单在数据目录下的位置；路由每个请求重读
+pub fn claude_routing_file(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join(ROUTING_DIR).join(ROUTING_FILE)
+}
+
 /// `1.12603.1` 这样的版本号逐段按数字比；读不懂的不算太旧
 pub fn version_too_old(version: &str) -> bool {
     let parse = |text: &str| -> Option<Vec<u64>> {
@@ -166,19 +170,19 @@ impl App {
     }
 
     pub(super) fn claude_routing_path(&self) -> PathBuf {
-        self.deps.data_dir.join(ROUTING_DIR).join(ROUTING_FILE)
+        claude_routing_file(&self.deps.data_dir)
     }
 
-    /// 路由服务的引用计数里 Claude 算不算开着：桌面应用配置里写着 Sophia 的（与开关位置无关，R8），
+    /// 路由的引用计数里 Claude 算不算开着：桌面应用配置里写着 Sophia 的（与开关位置无关，R8），
     /// 或开关开着、等重启生效（在运行时拨开就装了路由，`applied` 还空着；此时卸路由，重启后 Claude 连不上）
     pub(super) fn claude_on(&self) -> bool {
         self.load_claude()
             .is_ok_and(|s| s.applied.is_some() || s.enabled)
     }
 
-    /// 路由服务的引用计数里 Codex 算不算开着：设置文件指向路由（含只剩一半指向的——那时卸掉路由，
+    /// 路由的引用计数里 Codex 算不算开着：设置文件指向路由（含只剩一半指向的——那时停掉路由，
     /// Codex 连官方模型也用不了，同 `restore` 里「仍指向就保留路由」的保护）
-    fn codex_on(&self) -> bool {
+    pub(super) fn codex_on(&self) -> bool {
         let Ok(settings) = self.load() else {
             return false;
         };
@@ -195,7 +199,7 @@ impl App {
         Ok(self.load()?.port)
     }
 
-    fn running(&self) -> Result<bool, AppError> {
+    pub(super) fn running(&self) -> Result<bool, AppError> {
         (self.deps.desktop_running)().map_err(|e| {
             AppError::new(
                 "internal",
@@ -219,7 +223,8 @@ impl App {
         None
     }
 
-    /// 钥匙串里的令牌；`create` 为真时没有就生成一个存进去（R5：第一次打开或接管时，之后一直复用）
+    /// 密钥文件里的令牌；`create` 为真时没有就生成一个存进去（R5：第一次打开或接管时，之后一直复用）。
+    /// 读不出（文件权限、还在钥匙串里没迁完）时报错，不另生成：生成了就把桌面应用里的旧令牌作废了
     fn token(&self, create: bool) -> Result<Option<String>, AppError> {
         match (self.deps.get_router_token)() {
             Ok(Some(token)) if !token.trim().is_empty() => Ok(Some(token.trim().to_owned())),
@@ -357,40 +362,14 @@ impl App {
         Ok(())
     }
 
-    /// R9：路由就绪，且 `/_health` 的 `features` 含 `claude`。不含（旧版路由在跑）→ 重启服务再查一次，
-    /// 还不含 → `router_down`，不写桌面应用的任何文件：旧版路由会把 Anthropic 请求转发到官方
-    fn ensure_router_for_claude(&self, port: u16) -> Result<(), AppError> {
-        self.install_router_on(port, Untouched::Claude)?;
-        let knows_claude = || {
-            (self.deps.router_features)(port)
-                .is_ok_and(|features| features.iter().any(|f| f == FEATURE_CLAUDE))
-        };
-        if knows_claude() {
-            return Ok(());
-        }
-        (self.deps.service_restart)(SERVICE_LABEL).map_err(|e| {
-            AppError::new(
-                "router_down",
-                sophia_core::t!("models.app.restartServiceFailed", error = e),
-            )
-        })?;
-        (self.deps.router_healthy)(port).map_err(|e| {
-            AppError::new(
-                "router_down",
-                sophia_core::t!("models.claude.routerNotReady", port = port, error = e),
-            )
-        })?;
-        if knows_claude() {
-            Ok(())
-        } else {
-            Err(AppError::new(
-                "router_down",
-                sophia_core::t!("models.claude.routerTooOld"),
-            ))
-        }
+    /// 写桌面应用配置之前起好路由（同进程，不会是旧版）。端口被别的程序占着时换了端口：返回现在的端口
+    fn ensure_router_for_claude(&self) -> Result<u16, AppError> {
+        let mut settings = self.load()?;
+        self.ensure_router(&mut settings, Untouched::Claude)?;
+        Ok(settings.port)
     }
 
-    /// 删 Claude 清单；Codex 也关着就卸服务并删 Codex 目录下本功能的文件（R8）。返回提示
+    /// 删 Claude 清单；Codex 也关着就停路由并删 Codex 目录下本功能的文件（R8）。返回提示
     fn release_router_for_claude(&self) -> Vec<String> {
         let mut warnings = Vec::new();
         match std::fs::remove_file(self.claude_routing_path()) {
@@ -402,12 +381,8 @@ impl App {
             )),
         }
         if !self.codex_on() {
-            if let Err(e) = (self.deps.service_uninstall)(SERVICE_LABEL) {
-                warnings.push(sophia_core::t!(
-                    "models.app.uninstallServiceFailed",
-                    error = e
-                ));
-            }
+            (self.deps.router_stop)();
+            self.set_notice(None);
             warnings.extend(self.remove_codex_files(&[]));
         }
         warnings
@@ -424,7 +399,8 @@ impl App {
             {
                 hook(step.file).map_err(|e| AppError::new("internal", e))?;
             }
-            desktop::apply_step(&self.deps.desktop_dirs, snapshot, step).map_err(desktop_error)?;
+            desktop::apply_step(&self.deps.desktop_dirs, snapshot, step, &self.backups_dir())
+                .map_err(desktop_error)?;
         }
         Ok(())
     }
@@ -470,10 +446,10 @@ impl App {
         let token = self
             .token(true)?
             .ok_or_else(|| internal(sophia_core::t!("models.claude.tokenMissing")))?;
-        let desired = self.desired(settings, port, &token)?;
+        let mut desired = self.desired(settings, port, &token)?;
         let routing = self.claude_routing(settings, &desired)?;
 
-        // 先在内存里试一次：文件不合法、别家配置在生效等，在碰路由服务之前就退出
+        // 先在内存里试一次：文件不合法、别家配置在生效等，在碰路由之前就退出
         let snapshot = desktop::read(dirs, settings.applied.as_ref()).map_err(desktop_error)?;
         let trial = desktop::plan_apply(snapshot.files(), &desired, settings.applied.as_ref())
             .map_err(desktop_error)?;
@@ -488,7 +464,11 @@ impl App {
             return Ok(());
         }
 
-        self.ensure_router_for_claude(port)?;
+        let now_port = self.ensure_router_for_claude()?;
+        if now_port != port {
+            // 端口被别的程序占着、路由换了端口：按新端口写
+            desired = self.desired(settings, now_port, &token)?;
+        }
         let snapshot = desktop::read(dirs, settings.applied.as_ref()).map_err(desktop_error)?;
         let plan = desktop::plan_apply(snapshot.files(), &desired, settings.applied.as_ref())
             .map_err(desktop_error)?;
@@ -638,7 +618,7 @@ impl App {
         self.open_claude_locked(true)
     }
 
-    fn open_claude_locked(&self, takeover: bool) -> Result<Vec<String>, AppError> {
+    pub(super) fn open_claude_locked(&self, takeover: bool) -> Result<Vec<String>, AppError> {
         let mut settings = self.load_claude()?;
         if let Some(error) = self.desktop_unavailable() {
             return Err(error);
@@ -657,14 +637,7 @@ impl App {
             if provider.selected().is_empty() {
                 continue;
             }
-            if (self.deps.get_key)(Agent::Claude, &provider.id)
-                .map_or(true, |k| k.trim().is_empty())
-            {
-                return Err(AppError::new(
-                    "invalid",
-                    sophia_core::t!("models.app.providerNoKey", name = provider.name),
-                ));
-            }
+            self.require_key(Agent::Claude, provider, false)?;
         }
         if !takeover && !settings.takeover {
             // 别家的配置在生效而没允许接管：拒绝，什么都不改（R35）
@@ -690,9 +663,9 @@ impl App {
         }
         let running = self.running()?;
         if running {
-            // 在运行：桌面应用的文件等重启生效再写，但路由现在就装好——开关开着、路由却不在，
-            // 页面会报「路由没在跑」，和旁边的 `重启生效` 叠在一起（2026-10-01 真机）。装不上就不开
-            self.ensure_router_for_claude(self.port()?)?;
+            // 在运行：桌面应用的文件等重启生效再写，但路由现在就起好——开关开着、路由却不在，
+            // 页面会报「路由没在跑」，和旁边的 `重启生效` 叠在一起（2026-10-01 真机）。起不来就不开
+            self.ensure_router_for_claude()?;
         }
         settings.enabled = true;
         self.save_claude(&settings)?;
@@ -712,11 +685,11 @@ impl App {
         let mut settings = self.load_claude()?;
         settings.enabled = false;
         settings.takeover = false;
-        // 认领没记下的那份读不成（钥匙串、文件不合法、是软链……）就当没有可认领的：
+        // 认领没记下的那份读不成（令牌读不出、文件不合法、是软链……）就当没有可认领的：
         // 切回不能因此卡住，开关开着时永远能关
         if settings.applied.is_none() && !self.adopt_unrecorded(&mut settings).unwrap_or(false) {
             self.save_claude(&settings)?;
-            // 桌面应用里什么都没写过，但拨开时可能已经把路由装上了（在运行时拨开）：Codex 也关着就卸掉
+            // 桌面应用里什么都没写过，但拨开时可能已经把路由起好了（在运行时拨开）：Codex 也关着就停掉
             return Ok(self.release_router_for_claude());
         }
         self.save_claude(&settings)?;
@@ -806,6 +779,70 @@ impl App {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    /// 退出 Sophia 前把桌面应用切回官方（spec 2026-10-03-gateway-in-app R7）：「开着」不变，下次打开 Sophia 时接上。
+    /// 没写着 Sophia 的 → 什么都不做。在运行 → 让它退出（最多 15 秒，不强杀；退不掉 `desktop_busy`）→ 写 → 重新打开；
+    /// 没在运行 → 直接写，不替用户打开。`acquire` 同 `restart_claude`：只在写文件那一段持有
+    pub(super) fn switch_back_for_quit<G>(
+        &self,
+        acquire: impl FnOnce() -> G,
+    ) -> Result<(), AppError> {
+        if self.load_claude()?.applied.is_none() {
+            return Ok(());
+        }
+        let was_running = self.running()?;
+        if was_running {
+            (self.deps.desktop_quit)().map_err(|e| {
+                if e.kind() == io::ErrorKind::TimedOut {
+                    AppError::new("desktop_busy", claude_desktop::busy_message())
+                } else {
+                    AppError::new(
+                        "internal",
+                        sophia_core::t!("models.desktop.quitFailed", app = "Claude", error = e),
+                    )
+                }
+            })?;
+        }
+        let written = {
+            let _outer = acquire();
+            let _guard = self.guard();
+            self.restore_files_keeping_choice()
+        };
+        if !was_running {
+            return written;
+        }
+        match (written, (self.deps.desktop_open)()) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Ok(()), Err(e)) => Err(AppError::new(
+                "internal",
+                sophia_core::t!("models.claude.reopenFailed", error = e),
+            )),
+            (Err(error), Ok(())) => Err(AppError::new(
+                error.code,
+                sophia_core::t!("models.claude.notWrittenReopened", reason = error.message),
+            )),
+            (Err(error), Err(e)) => Err(AppError::new(
+                error.code,
+                sophia_core::t!(
+                    "models.claude.notWrittenNotReopened",
+                    error = e,
+                    reason = error.message
+                ),
+            )),
+        }
+    }
+
+    /// 同一动作里重查确认不在运行，按记录切回；`enabled` 不动
+    fn restore_files_keeping_choice(&self) -> Result<(), AppError> {
+        if self.running()? {
+            return Err(AppError::new(
+                "desktop_busy",
+                claude_desktop::busy_message(),
+            ));
+        }
+        let mut settings = self.load_claude()?;
+        self.claude_restore_files(&mut settings).map(|_| ())
     }
 
     // ----- 状态 -----

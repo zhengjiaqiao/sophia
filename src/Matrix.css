@@ -33,27 +33,17 @@
   max-width: 100%;
 }
 
-/* 新手提示条的插槽（来源筛选下、表头上；空态上）：外距由 HintStrip 自带（收起时归 0），插槽不另加 */
+/* 新手提示条的插槽（来源筛选下、表头上；空态上）：外距由灰面板（NoticePanel 的进出用法）自带（收起时归 0），插槽不另加 */
 .mx-hint {
   width: var(--mx-w, 776px);
 }
 
-/* 失效链接的常驻一句（OrphanNotice）：灰字 13 + 两颗紧凑键，不画框、不能关；到新手提示条或表头 12 */
-.mx-orphans {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
+/* 失效链接的常驻提示（OrphanNotice）：灰面板一节（满宽，样子归组件），不能关；到新手提示条或表头 12 */
+.mx-orphan-notice {
   margin: 0 0 var(--space-sm);
-  font-size: var(--size-caption);
-  line-height: var(--leading-caption);
-  color: var(--ink-mute);
 }
 
-.mx-orphans__key {
-  display: contents;
-}
-
-/* 来源筛选下的那一条不带上外距（HintStrip flush）：开着时（data-hint="open"，与提示条的高度动画同一帧）
+/* 来源筛选下的那一条不带上外距（NoticePanel flush）：开着时（data-hint="open"，与提示条的高度动画同一帧）
    来源筛选的下内边距收成 16（吸顶区的高度随它，列头吸在它下面），提示条到表头是它自带的下外距 16。
    同一时长、同一缓动，收起后回到表格上距 18 */
 .mx:has(> .mx-hint > [data-hint="open"]) > .mx-bar {

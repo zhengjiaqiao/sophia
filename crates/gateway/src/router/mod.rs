@@ -90,6 +90,19 @@ impl Agent {
 
 /// 每次第三方请求时按（家, 网关 id）取密钥；密钥不落入配置和日志
 pub type KeySource = Arc<dyn Fn(Agent, &str) -> Result<String, String> + Send + Sync>;
+
+/// 取密钥（缓存没命中时要读密钥文件）放到阻塞线程池里做，不占异步运行时的工作线程
+pub(crate) async fn key_off_thread(
+    source: &KeySource,
+    agent: Agent,
+    provider: &str,
+) -> Result<String, String> {
+    let (source, provider) = (Arc::clone(source), provider.to_owned());
+    tokio::task::spawn_blocking(move || source(agent, &provider))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()))
+}
+
 /// 给定目标地址，返回要用的代理；`None` 表示直连
 pub type ProxyFn = Arc<dyn Fn(&url::Url) -> Option<url::Url> + Send + Sync>;
 /// 此刻的界面语言；`None` 表示这回取不到，沿用上一次的
@@ -119,7 +132,7 @@ pub struct Config {
     pub proxy: Option<ProxyFn>,
     /// 家 `claude` 的路由清单（`--claude-routing`）。None：旧 plist 拉起的新程序，Claude 请求一律 404（R10）
     pub claude_routing_path: Option<PathBuf>,
-    /// 读家 `claude` 的网关令牌（钥匙串）；路由自己缓存（R12）
+    /// 读家 `claude` 的网关令牌（密钥文件）；路由自己缓存（R12）
     pub router_token: TokenSource,
     /// Claude 流式响应的保活间隔；零表示默认 15 秒（R24）
     pub keepalive: Duration,
@@ -175,6 +188,14 @@ struct Counters {
     upstream_errors: AtomicU64,
     claude: AtomicU64,
     last: Mutex<(String, String, u16)>,
+}
+
+impl Counters {
+    /// 上游出错（连不上、5xx、流断了）：路由自己的计数加一，另记一次异常（自动上报，spec 2026-10-04-reporting-feedback R7）
+    fn upstream_error(&self) {
+        self.upstream_errors.fetch_add(1, Ordering::Relaxed);
+        sophia_core::report::count(sophia_core::report::Kind::Upstream);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -291,7 +312,7 @@ impl Router {
             third_party: build_client(&config.proxy, Some(Duration::from_secs(5)))?,
             log: Arc::new(ActivityLog {
                 path: config.activity_log_path,
-                lock: Mutex::new(()),
+                lock: Arc::new(Mutex::new(())),
             }),
             counters: Arc::default(),
             sessions: Mutex::default(),
@@ -460,7 +481,12 @@ impl Router {
         let mut target: Option<RoutingModel> = None;
         let mut upstream: Option<Result<Upstream, String>> = None;
         if let Some(model) = &model {
-            let catalog = match load_routing_catalog(&self.routing_catalog_path) {
+            // 读清单文件放到阻塞线程池里做：路由与界面在同一进程，不占异步运行时的工作线程
+            let path = self.routing_catalog_path.clone();
+            let loaded = tokio::task::spawn_blocking(move || load_routing_catalog(&path))
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()));
+            let catalog = match loaded {
                 Ok(catalog) => catalog,
                 // 读不到清单就拒绝，而不是回落官方
                 Err(e) => {
@@ -508,30 +534,42 @@ impl Router {
             .unwrap_or_default();
         let outcome = match target {
             Some(target) => {
-                // 第三方模型的上游必须明确可用：归属不明、地址不安全都拒绝，绝不回落到官方或别家
+                // 第三方模型的上游必须明确可用：归属不明、地址不安全都拒绝，绝不回落到官方或别家。
+                // 回 403 而不是 502：清单不改，重试也没用，Codex 却会把 5xx 重试好几次
                 let upstream = match upstream {
                     Some(Ok(upstream)) => upstream,
                     Some(Err(why)) => {
                         return reject(
                             &model_name,
                             Route::ThirdParty,
-                            StatusCode::BAD_GATEWAY,
+                            StatusCode::FORBIDDEN,
                             "provider_error",
-                            &format!("third-party gateway for this model is not usable: {why}"),
+                            &why,
                         )
                     }
                     None => unreachable!("upstream is resolved whenever a target is found"),
                 };
+                // 取不到密钥回 403 而不是 5xx：Codex 会把 5xx 重试好几次，重试也取不到；
+                // 也不回 401，免得 Codex 当成自己的 ChatGPT 登录失效。
+                // 取不到的原因（没存、密钥文件读不出）跟在后面，与模型页上那一家网关的说法一致
                 let key =
-                    match (self.third_party_key)(Agent::Codex, &upstream.provider) {
+                    match key_off_thread(&self.third_party_key, Agent::Codex, &upstream.provider)
+                        .await
+                    {
                         Ok(key) if !key.trim().is_empty() => key,
-                        _ => return reject(
-                            &model_name,
-                            Route::ThirdParty,
-                            StatusCode::BAD_GATEWAY,
-                            "key_error",
-                            "third-party API key is not available; set it in Sophia（密钥未保存）", // i18n-exempt: 发给 Codex 的协议层错误文字（HTTP 响应体），显示在 Codex 界面，不随 Sophia 的语言
-                        ),
+                        failed => {
+                            return reject(
+                                &model_name,
+                                Route::ThirdParty,
+                                StatusCode::FORBIDDEN,
+                                "key_error",
+                                &format!(
+                                    "Sophia could not get the API key for third-party gateway {:?} ({}); check this gateway's key on the Models page in Sophia",
+                                    log_safe(&upstream.provider),
+                                    failed.err().unwrap_or_default()
+                                ),
+                            )
+                        }
                     };
                 self.forward_third_party(
                     &parts,
@@ -553,9 +591,7 @@ impl Router {
         let (route, result) = match outcome {
             Ok(pair) => pair,
             Err((route, status, message)) => {
-                self.counters
-                    .upstream_errors
-                    .fetch_add(1, Ordering::Relaxed);
+                self.counters.upstream_error();
                 *self.counters.last.lock().unwrap() =
                     (model_name.clone(), route.name().to_owned(), status.as_u16());
                 return reject(&model_name, route, status, "upstream_error", &message);
@@ -565,9 +601,7 @@ impl Router {
         *self.counters.last.lock().unwrap() =
             (model_name.clone(), route.name().to_owned(), status.as_u16());
         if status.is_server_error() {
-            self.counters
-                .upstream_errors
-                .fetch_add(1, Ordering::Relaxed);
+            self.counters.upstream_error();
         }
         if model.is_some() && status.is_success() {
             let counter = if route == Route::ThirdParty {
@@ -679,6 +713,7 @@ impl Router {
     }
 
     /// 一条路由该发往哪家上游。带归属的从清单里取；不带归属的是旧格式清单，走启动参数给的那个上游。
+    /// Err 是直接给 Codex 看的文字：点名网关与原因（不在清单里 / 地址不可用），并说明请求没有发出
     fn upstream_for(
         &self,
         target: &RoutingModel,
@@ -689,7 +724,9 @@ impl Router {
             let (url, protocol) = self
                 .legacy_upstream
                 .clone()
-                .ok_or("the routing catalog does not say which gateway serves it")?;
+                .ok_or(
+                    "Sophia's routing list does not say which third-party gateway serves this model; the request was not sent",
+                )?;
             return Ok(Upstream {
                 provider: sophia_core::codex_models::settings::LEGACY_PROVIDER_ID.to_owned(),
                 url,
@@ -698,13 +735,19 @@ impl Router {
         }
         let entry = catalog.providers.get(provider).ok_or_else(|| {
             format!(
-                "gateway {:?} is not in the routing catalog",
+                "third-party gateway {:?} is not in Sophia's routing list (it may have been deleted); the request was not sent",
+                log_safe(provider)
+            )
+        })?;
+        let url = parse_provider_base(&entry.base_url).map_err(|why| {
+            format!(
+                "the address saved for third-party gateway {:?} is not usable ({why}); the request was not sent",
                 log_safe(provider)
             )
         })?;
         Ok(Upstream {
             provider: provider.to_owned(),
-            url: parse_provider_base(&entry.base_url)?,
+            url,
             protocol: if entry.protocol == "responses" {
                 Protocol::Responses
             } else {
@@ -742,7 +785,7 @@ impl Router {
                     decoded,
                     model,
                     upstream_model,
-                    &upstream.url,
+                    upstream,
                     legacy_compact,
                     key,
                 )
@@ -792,6 +835,9 @@ impl Router {
         if !status.is_success() {
             // 网关常在错误信息里把收到的 Authorization 原样吐回来，不能转给本机客户端
             let body = read_limited(response, 1 << 20).await;
+            if is_key_rejection(status) {
+                return Ok((route, key_rejected(&upstream.provider, status, &body, key)));
+            }
             let scrubbed = String::from_utf8_lossy(&body).replace(key, "***");
             return Ok((
                 route,
@@ -809,11 +855,12 @@ impl Router {
         decoded: &Bytes,
         model: &str,
         upstream_model: &str,
-        base: &url::Url,
+        upstream: &Upstream,
         legacy_compact: bool,
         key: &str,
     ) -> Result<(Route, Response<UpstreamBody>), (Route, StatusCode, String)> {
         let route = Route::ThirdParty;
+        let base = &upstream.url;
         let bad_request = |e: String| {
             (
                 route,
@@ -837,7 +884,8 @@ impl Router {
             doc.insert("input".to_owned(), serde_json::Value::Array(input));
             source = serde_json::to_vec(&doc).map_err(|e| bad_request(e.to_string()))?;
         }
-        // 发了 `reasoning_effort` 而上游因它 400 时，去掉它重发一次（至多一次）
+        // 发了 `reasoning_effort` / 带回了 `reasoning_content` 而上游因它 400 时，去掉它重发；
+        // 两种各至多一次（spec R18a、reasoning-passback R4），最多发三次
         let mut options = crate::translate::ChatOptions::default();
         let (response, translated) = loop {
             let mut translated = crate::translate::to_chat_with(&source, upstream_model, options)
@@ -880,12 +928,25 @@ impl Router {
                 break (response, translated);
             }
             let body = read_limited(response, 1 << 20).await;
-            if translated.reasoning_effort_sent
-                && !options.omit_reasoning_effort
-                && crate::translate::rejects_reasoning_effort(status.as_u16(), &body)
-            {
-                options.omit_reasoning_effort = true;
-                continue;
+            // 去掉后重新转换出的请求体里不再有该字段（`*_sent` 为假），所以每种自然至多一次
+            match crate::translate::reasoning_retry(
+                status.as_u16(),
+                &body,
+                translated.reasoning_effort_sent,
+                translated.reasoning_content_sent,
+            ) {
+                Some(crate::translate::ReasoningRetry::DropEffort) => {
+                    options.omit_reasoning_effort = true;
+                    continue;
+                }
+                Some(crate::translate::ReasoningRetry::DropContent) => {
+                    options.omit_reasoning_content = true;
+                    continue;
+                }
+                None => {}
+            }
+            if is_key_rejection(status) {
+                return Ok((route, key_rejected(&upstream.provider, status, &body, key)));
             }
             // 网关的错误体各有各的格式；统一成 Codex 能读出文字的样子，状态码保留
             let payload = serde_json::json!({"error": {
@@ -912,7 +973,8 @@ impl Router {
                     crate::translate::StreamConverter::new(&model, translated.tools);
                 let mut events = converter.start();
                 events.extend(converter.feed_bytes(&body));
-                events.extend(converter.finish());
+                // 收齐时也可能是截断的（中途出错、超出上限）：没有结束标记就以 failed 结束
+                events.extend(converter.end_of_stream());
                 events
             };
             let response = if client_streams {
@@ -962,10 +1024,11 @@ impl Router {
                 } else {
                     match state.upstream.next().await {
                         Some(Ok(chunk)) => state.converter.feed_bytes(&chunk),
-                        // 上游断流或结束：把已收到的内容正常收尾，让 Codex 拿到完整的事件序列
+                        // 上游断流或结束：见过 `[DONE]` / finish_reason 才按完成收尾，
+                        // 否则以 response.failed 结束，不把截断的回答伪装成完整回答
                         Some(Err(_)) | None => {
                             state.done = true;
-                            state.converter.finish()
+                            state.converter.end_of_stream()
                         }
                     }
                 };
@@ -1015,8 +1078,29 @@ impl Router {
 
     /// 只监听回环地址并一直服务
     pub async fn serve(self: Arc<Self>, listener: tokio::net::TcpListener) -> std::io::Result<()> {
+        self.serve_until(listener, std::future::pending()).await
+    }
+
+    /// 同 [`serve`](Self::serve)，`shutdown` 完成时停止接新连接并放掉端口；已接下的连接各自做完
+    pub async fn serve_until(
+        self: Arc<Self>,
+        listener: tokio::net::TcpListener,
+        shutdown: impl std::future::Future<Output = ()>,
+    ) -> std::io::Result<()> {
+        tokio::pin!(shutdown);
         loop {
-            let (stream, remote) = listener.accept().await?;
+            let accepted = tokio::select! {
+                accepted = listener.accept() => accepted,
+                () = &mut shutdown => return Ok(()),
+            };
+            // 接连接出错（文件描述符一时用完等）不让路由整个停掉：路由在 Sophia 进程里，没有 launchd 替它重起
+            let (stream, remote) = match accepted {
+                Ok(accepted) => accepted,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+            };
             let router = self.clone();
             tokio::spawn(async move {
                 let service =
@@ -1064,6 +1148,38 @@ impl Router {
 }
 
 type UpstreamBody = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>;
+
+/// 第三方网关拒绝了密钥（401 / 403）
+fn is_key_rejection(status: StatusCode) -> bool {
+    matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+}
+
+/// 第三方网关拒绝了密钥：一律回 403，说明是哪家网关拒绝了 Sophia 保存的密钥，附上原文（密钥打码）。
+/// 不回 401：Codex 收到 401 会当成自己的 ChatGPT 登录失效（与 Claude 那边 R27 同理）
+fn key_rejected(
+    provider: &str,
+    status: StatusCode,
+    body: &[u8],
+    key: &str,
+) -> Response<UpstreamBody> {
+    // 先打码再截取可读文字：截断不能把密钥切成替换不掉的半截
+    let scrubbed = String::from_utf8_lossy(body).replace(key, "***");
+    let payload = serde_json::json!({"error": {
+        "message": format!(
+            "third-party gateway {:?} rejected the API key saved in Sophia (HTTP {}): {}",
+            log_safe(provider),
+            status.as_u16(),
+            crate::translate::error_message(scrubbed.as_bytes()),
+        ),
+        "type": "upstream_error",
+        "code": StatusCode::FORBIDDEN.as_u16(),
+    }});
+    fixed_response(
+        StatusCode::FORBIDDEN,
+        "application/json",
+        payload.to_string().into_bytes(),
+    )
+}
 
 fn fixed_response(status: StatusCode, content_type: &str, body: Vec<u8>) -> Response<UpstreamBody> {
     let stream: UpstreamBody = Box::pin(futures_util::stream::once(async move {
@@ -1288,11 +1404,11 @@ fn json_error(status: StatusCode, message: &str) -> Response<Body> {
 
 struct ActivityLog {
     path: Option<PathBuf>,
-    lock: Mutex<()>,
+    lock: Arc<Mutex<()>>,
 }
 
 impl ActivityLog {
-    /// 只记时间、家、模型、去向、状态、耗时、字节数；不记请求内容和凭据。
+    /// 只记时间、家、模型、去向、状态、耗时、字节数；不记请求内容和凭据，来自请求的字段先去隐私。
     /// `extra` 是行末的附加字段（以空格开头，如 Claude 关键词回落的 ` fallback=<角色>`）
     #[allow(clippy::too_many_arguments)]
     fn write(
@@ -1308,19 +1424,7 @@ impl ActivityLog {
         extra: &str,
         transfer: Option<(Option<Duration>, u64)>,
     ) {
-        let Some(log_path) = &self.path else { return };
-        let _guard = self.lock.lock().unwrap();
-        if let Some(parent) = log_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let mut options = std::fs::OpenOptions::new();
-        options.append(true).create(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let Ok(mut file) = options.open(log_path) else {
+        let Some(log_path) = self.path.clone() else {
             return;
         };
         let now = SystemTime::now()
@@ -1335,8 +1439,83 @@ impl ActivityLog {
                 )
             })
             .unwrap_or_default();
-        let _ = writeln!(file, "{now} agent={agent} route={} model={} method={method} path={} status={status} duration={}ms result={result}{extra}{transfer}",
-            route.name(), log_safe(model), log_safe(path), started.elapsed().as_millis());
+        // 模型名、路径来自请求，经 `log_field` 去隐私再落盘；`extra` 由调用方逐个字段用 `log_field` 拼好，
+        // 整段再过一次去隐私兜底
+        let line = format!("{now} agent={agent} route={} model={} method={method} path={} status={status} duration={}ms result={result}{}{transfer}\n",
+            route.name(), log_field(model), log_field(path), started.elapsed().as_millis(), sophia_core::redact::redact(extra));
+        let lock = self.lock.clone();
+        let append = move || {
+            let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+            append_activity_line(&log_path, &line, ACTIVITY_LOG_MAX_BYTES);
+        };
+        // 路由与界面在同一进程（多线程运行时）：写文件放到阻塞线程池里，不占异步运行时的工作线程。
+        // 单线程运行时（命令行、测试）照旧当场写，日志行的先后与请求一致
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                handle.spawn_blocking(append);
+            }
+            _ => append(),
+        }
+    }
+}
+
+/// 活动日志里一个来自请求或上游的字段：先对原文去隐私（spec 2026-10-04-local-diagnostics R3），
+/// 再换掉空白与控制字符。顺序不能反：换过空白之后 `Bearer x`、制表符分隔的 JSON 就认不出了
+fn log_field(value: &str) -> String {
+    log_safe(&sophia_core::redact::redact(value))
+}
+
+/// 上游错误原文里账号与密钥标识的前缀（Kimi 限流原话形如 `Your account org-…<ak-…> request reached …`）
+const ACCOUNT_ID_PREFIXES: &[&str] = &["org-", "ak-", "sk-"];
+
+/// 把上游原文里形如 `org-…`、`ak-…`、`sk-…` 的标识整段换成 `…`，其余原文照留（reasoning-passback R5）。
+/// 标识是一串字母数字与 `-_.`，前缀要在串的开头（`task-ak-1` 不算）、前缀后至少还有一个字符。
+/// 不论长短都抹：`redact` 只认 20 字符以上的 `sk-` 密钥，短的账号标识照样能认出人
+fn mask_account_ids(text: &str) -> String {
+    let token_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(token_char) {
+        out.push_str(&rest[..start]);
+        let token_len = rest[start..]
+            .find(|c: char| !token_char(c))
+            .unwrap_or(rest.len() - start);
+        let token = &rest[start..start + token_len];
+        let masked = ACCOUNT_ID_PREFIXES
+            .iter()
+            .any(|prefix| token.len() > prefix.len() && token.starts_with(prefix));
+        out.push_str(if masked { "…" } else { token });
+        rest = &rest[start + token_len..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `router.log` 的上限：超过就改名 `router.log.1`，只留一份旧的（spec 2026-10-04-local-diagnostics R2）
+const ACTIVITY_LOG_MAX_BYTES: u64 = 5_000_000;
+
+/// 追加一行活动日志；文件已到 `max_bytes`、或这一行写进去会越过它，先轮转。写不进去只记一条日志，不影响请求
+fn append_activity_line(log_path: &std::path::Path, line: &str, max_bytes: u64) {
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) =
+        sophia_core::diagnostics::rotate_before_append(log_path, line.len() as u64, max_bytes, 1)
+    {
+        log::warn!("轮转 {} 失败：{e}", log_path.display());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.append(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Err(e) = options
+        .open(log_path)
+        .and_then(|mut file| file.write_all(line.as_bytes()))
+    {
+        log::warn!("写 {} 失败：{e}", log_path.display());
     }
 }
 
@@ -1376,10 +1555,7 @@ impl LoggedStream {
     fn finish(&mut self, result: &str) {
         if let Some(entry) = self.entry.take() {
             if result == "stream_error" {
-                entry
-                    .counters
-                    .upstream_errors
-                    .fetch_add(1, Ordering::Relaxed);
+                entry.counters.upstream_error();
             }
             let result = if entry.status >= 500 && result == "ok" {
                 "upstream_error"

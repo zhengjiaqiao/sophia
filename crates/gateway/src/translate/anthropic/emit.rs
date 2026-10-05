@@ -1,4 +1,4 @@
-//! 回程第二层：中性事件 → Anthropic 流事件（R21–R24），整条 Message 的聚合（R25），
+//! 回程第二层：中性事件 → Anthropic 流事件（R21–R24；思考块见 reasoning-passback R2），整条 Message 的聚合（R25），
 //! 以及保活 `ping` 的判定（R23）。
 
 use std::time::{Duration, Instant};
@@ -11,6 +11,9 @@ use super::count::TokenTally;
 use super::errors::AnthropicError;
 use super::events::{FinishReason, UpstreamEvent, Usage};
 use super::names::{random_alnum, sanitize_tool_id, ToolNameMap};
+
+/// 思考块签名的固定前缀，后接随机串。客户端原样送回，本工具不校验（reasoning-passback R2）。
+pub const THINKING_SIGNATURE_PREFIX: &str = "sophia-thinking-v1:";
 
 /// R23 的默认保活间隔（路由配置项，测试里调小）。
 pub const DEFAULT_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
@@ -77,6 +80,7 @@ struct ToolSlot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Open {
     None,
+    Thinking(u64),
     Text(u64),
     Tool(u64),
 }
@@ -89,6 +93,10 @@ enum Open {
 ///
 /// 块的顺序（R21）：文本来一段转一段；第一个工具块打开后实时转发它的参数，其余并行的工具
 /// 参数与之后到的文本先缓冲，收尾时依次开块发出。同一时刻只开一个块，`index` 连续递增。
+///
+/// 思考（reasoning-passback R2）：在任何文本 / 工具块之前到的推理文字开一个 `thinking` 块、来一段转一段，
+/// 别的块要开时先补一个 `signature_delta` 再关它。正文或工具块已经开过之后才到的推理文字丢弃、不产出字节
+/// （不能回头插到前面，也不再开第二个思考块；与 Codex 路径 `StreamConverter` 一致）。
 pub struct AnthropicEmitter {
     model: String,
     message_id: String,
@@ -162,8 +170,7 @@ impl AnthropicEmitter {
         let mut out = self.start();
         match upstream {
             UpstreamEvent::Text(text) => self.text(&text, &mut out),
-            // R22：推理内容不回；也不写任何字节，所以路由的保活计时照走
-            UpstreamEvent::Reasoning => {}
+            UpstreamEvent::Reasoning(text) => self.reasoning(&text, &mut out),
             UpstreamEvent::ToolStart { index, id, name } => {
                 self.tool_start(index, &id, &name, &mut out)
             }
@@ -228,11 +235,47 @@ impl AnthropicEmitter {
     fn close_open(&mut self, out: &mut Vec<SseEvent>) {
         match self.open {
             Open::None => {}
+            Open::Thinking(index) => {
+                // 签名只是本工具的标记：客户端下一轮原样送回，本工具不校验（R3 带回时不看签名）
+                let signature = format!("{THINKING_SIGNATURE_PREFIX}{}", random_alnum(32));
+                out.push(event(
+                    "content_block_delta",
+                    json!({ "index": index, "delta": { "type": "signature_delta", "signature": signature } }),
+                ));
+                out.push(event("content_block_stop", json!({ "index": index })));
+            }
             Open::Text(index) | Open::Tool(index) => {
                 out.push(event("content_block_stop", json!({ "index": index })));
             }
         }
         self.open = Open::None;
+    }
+
+    fn reasoning(&mut self, text: &str, out: &mut Vec<SseEvent>) {
+        if text.is_empty() {
+            return;
+        }
+        let index = match self.open {
+            Open::Thinking(index) => index,
+            // 还没开过任何块（工具参数可能已在缓冲里等名字，不算开过）
+            Open::None if self.next_index == 0 => {
+                let index = self.next();
+                // 开块带空的 signature：官方流式示例与 SDK 的 ThinkingBlock 都要求这个字段，值在收尾的 signature_delta 里给
+                out.push(event(
+                    "content_block_start",
+                    json!({ "index": index, "content_block": { "type": "thinking", "thinking": "", "signature": "" } }),
+                ));
+                self.open = Open::Thinking(index);
+                index
+            }
+            // 正文或工具块已经开过：不回头插入，丢弃
+            _ => return,
+        };
+        self.output.add_text(text);
+        out.push(event(
+            "content_block_delta",
+            json!({ "index": index, "delta": { "type": "thinking_delta", "thinking": text } }),
+        ));
     }
 
     fn text(&mut self, text: &str, out: &mut Vec<SseEvent>) {
@@ -422,6 +465,10 @@ fn args_delta(index: u64, partial: &str) -> SseEvent {
 
 #[derive(Debug)]
 enum Block {
+    Thinking {
+        thinking: String,
+        signature: String,
+    },
     Text(String),
     Tool {
         id: String,
@@ -461,18 +508,28 @@ impl MessageAggregator {
                 self.model = text("/message/model").to_string();
             }
             "content_block_start" => {
-                let block = if text("/content_block/type") == "tool_use" {
-                    Block::Tool {
+                let block = match text("/content_block/type") {
+                    "tool_use" => Block::Tool {
                         id: text("/content_block/id").to_string(),
                         name: text("/content_block/name").to_string(),
                         json: String::new(),
-                    }
-                } else {
-                    Block::Text(String::new())
+                    },
+                    "thinking" => Block::Thinking {
+                        thinking: String::new(),
+                        signature: String::new(),
+                    },
+                    _ => Block::Text(String::new()),
                 };
                 self.blocks.push(block);
             }
             "content_block_delta" => match self.blocks.last_mut() {
+                Some(Block::Thinking {
+                    thinking,
+                    signature,
+                }) => {
+                    thinking.push_str(text("/delta/thinking"));
+                    signature.push_str(text("/delta/signature"));
+                }
                 Some(Block::Text(buffer)) => buffer.push_str(text("/delta/text")),
                 Some(Block::Tool { json, .. }) => json.push_str(text("/delta/partial_json")),
                 None => {}
@@ -517,6 +574,10 @@ impl MessageAggregator {
             .blocks
             .into_iter()
             .map(|block| match block {
+                Block::Thinking {
+                    thinking,
+                    signature,
+                } => json!({ "type": "thinking", "thinking": thinking, "signature": signature }),
                 Block::Text(text) => json!({ "type": "text", "text": text }),
                 Block::Tool { id, name, json } => {
                     // 参数被截断（如 max_tokens）而不是合法 JSON 时退回空对象，不让整条失败

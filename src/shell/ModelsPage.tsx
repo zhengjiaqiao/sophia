@@ -2,8 +2,9 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
-import { parseBackendError, routerUnavailable, showRouterTodo } from "../modelsView.ts";
-import type { GatewayAgent } from "../types.ts";
+import { parseBackendError, routerTodo, routerUnavailable } from "../modelsView.ts";
+import type { GatewayAgent, GatewayState, GatewayUnreadable } from "../types.ts";
+import { copyDetails } from "../diagnostics.ts";
 import {
   AgentIcon,
   Empty,
@@ -150,6 +151,65 @@ function PushedAgent({
 
 const describeError = (error: unknown): string => parseBackendError(String(error)).message;
 
+/// 读不到第三方模型的状态（spec 2026-10-04-local-diagnostics R11，画板 AuPbAQHePv3L1U3g1PAtH8）：页面头下一块灰面板
+/// `读不到第三方模型的状态 · <文件> <原因>`，键按种类给往前走的路，都带 `详情`（原文在浮层里）——
+/// 没权限 `修复权限`（系统密码框，做成后自动重读）；格式有误 `打开文件 ↗` + `再试一次`；别的 `再试一次`。
+/// 入口不因此消失（原来读不到就把侧栏「模型」藏掉）
+function UnreadableNotice({
+  issue,
+  onGatewayState,
+  onError,
+}: {
+  issue: GatewayUnreadable;
+  onGatewayState: (state: GatewayState) => void;
+  onError: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const run = async (label: string, job: () => Promise<GatewayState>) => {
+    setBusy(label);
+    try {
+      onGatewayState(await job());
+    } catch (error) {
+      const parsed = parseBackendError(String(error));
+      // 在系统密码框里点了取消：不是错，什么都不说
+      if (parsed.code !== "cancelled") onError(parsed.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const retry = {
+    label: t("models.gateway.retry"),
+    onClick: () => void run(t("common.empty.busy"), api.gatewayState),
+  };
+  const action =
+    issue.kind === "permission"
+      ? {
+          label: t("models.unreadable.fixOwner"),
+          onClick: () =>
+            void run(t("models.unreadable.fixing"), () => api.gatewayFixFileOwner(issue.path)),
+        }
+      : issue.kind === "format"
+        ? {
+            label: t("models.unreadable.openFile"),
+            leave: true,
+            onClick: () =>
+              void api.gatewayOpenFile(issue.path).catch((e) => onError(describeError(e))),
+          }
+        : retry;
+  return (
+    <NoticePanel
+      scope="section"
+      message={t("models.unreadable.title")}
+      reason={issue.reason || undefined}
+      technical={issue.detail || undefined}
+      onCopy={(text) => copyDetails(text)}
+      action={action}
+      secondary={issue.kind === "format" ? retry : undefined}
+      busy={busy ?? undefined}
+    />
+  );
+}
+
 export function ModelsPage({
   entries,
   state,
@@ -233,22 +293,32 @@ export function ModelsPage({
     setPushed(id);
   };
 
-  const router = state.gateway !== null && showRouterTodo(state.gateway, healed);
+  const router = state.gateway === null ? null : routerTodo(state.gateway, healed, routerFailure);
+  const unreadable = state.gateway?.unreadable ?? state.gatewayError ?? null;
 
   return (
     <div className="agent-page">
       <PageHead lead={<PageTitle>{t("models.page.title")}</PageTitle>}>
         {loading ? <Empty description={t("models.page.loading")} busy art="scanning" /> : null}
+        {unreadable ? (
+          <div className="models-list__todo">
+            <UnreadableNotice
+              issue={unreadable}
+              onGatewayState={onGatewayState}
+              onError={props.onError}
+            />
+          </div>
+        ) : null}
         {router ? (
-          // 路由没在跑：影响每一家，挂在页面头下、列表之上；原因跟在主句后同一行
+          // 路由没在跑或没接上：影响每一家，挂在页面头下、列表之上；原因跟在主句后同一行
           <div className="models-list__todo">
             <NoticePanel
               scope="section"
-              message={t("models.todo.routerDown")}
-              reason={routerFailure ?? undefined}
-              busy={restartingRouter ? t("models.todo.routerRestarting") : undefined}
+              message={router.message}
+              reason={router.reason ?? undefined}
+              busy={restartingRouter ? router.busy : undefined}
               action={{
-                label: t("models.todo.routerRestart"),
+                label: router.label,
                 onClick: () => void restartRouter(),
                 disabledReason: restartingRouter ? t("models.control.busyPrev") : undefined,
               }}

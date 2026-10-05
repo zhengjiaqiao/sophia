@@ -18,6 +18,7 @@ import Matrix, {
   SourceKeys,
   type MatrixCellView,
   type MatrixRowView,
+  type CellNotice,
   type ColumnCheck,
 } from "./Matrix";
 import { affectedTip, TableEmpty } from "./DomainView";
@@ -287,11 +288,7 @@ export default function McpTab({
   // 忙碌那一句存成取文案的函数，画的时候才取：换了界面语言跟着换
   const [keyBusy, setKeyBusy] = useState<{ keyId: string; label: () => string } | null>(null);
   const [flash, setFlash] = useState<{ keys: string[]; nonce: number }>();
-  const [cellNotice, setCellNotice] = useState<{
-    rowKey: string;
-    columnId: string;
-    text: string;
-  } | null>(null);
+  const [cellNotice, setCellNotice] = useState<CellNotice | null>(null);
   const [keyToast, setKeyToast] = useState<{ keyId: string; node: ReactNode } | null>(null);
   // 单格写成（浮在被点那一格下）：一个槽位，新的替换旧的
   const [cellToast, setCellToast] = useState<{
@@ -327,9 +324,14 @@ export default function McpTab({
   const dismissRow = useCallback(() => setRowToast(null), []);
   const dismissNotice = useCallback(() => setCellNotice(null), []);
   /// 单格失败：同一个位置（那一格正下方）说原因，替掉那一格的成功窗（一次只一条）
-  const failCell = (rowKey: string, columnId: string, text: string) => {
+  const failCell = (
+    rowKey: string,
+    columnId: string,
+    text: string,
+    failure?: CellNotice["failure"],
+  ) => {
     setCellToast(null);
-    setCellNotice({ rowKey, columnId, text });
+    setCellNotice({ rowKey, columnId, text, failure });
   };
   // 写入排队：连按几个键、连点几格时一个一个写，不和彼此抢同一份配置文件
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -701,9 +703,21 @@ export default function McpTab({
           ),
         });
       } else if (failed.length > 0) {
-        // 单格失败：不出成功那一窗，同一个位置（格子正下方）黑窗说原因
+        // 单格失败：不出成功那一窗，同一个位置（格子正下方）说 `context7 写进 [Codex] 失败 · 原因`，
+        // 第二行是写的那个文件（spec 2026-10-04-local-diagnostics R12）；提示条里不放详情
         const f = failed[0];
-        failCell(rowKeyAt(f.name, f.targetId), mcpColumnOf(f.targetId), f.message);
+        const line = toastFor("write", {
+          done: [],
+          failed: itemsOf([f]).map((item) => ({ ...item, reason: f.message })),
+        });
+        const path = locationOf(f.targetId)?.path;
+        failCell(rowKeyAt(f.name, f.targetId), mcpColumnOf(f.targetId), f.message, {
+          sentence: line.sentence,
+          names: line.names,
+          agents: line.agents,
+          reason: line.reason,
+          stats: path ? displayPath(path) : undefined,
+        });
       } else if (created.length > 0 && moves.length > 0) {
         const c = created[0];
         const toTeam = mcpColumnOf(c.targetId) === CLAUDE_TEAM;

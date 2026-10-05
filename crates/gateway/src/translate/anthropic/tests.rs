@@ -38,7 +38,7 @@ fn chat_with(request: Value, options: &UpstreamOptions) -> Value {
     serde_json::from_slice(&converted.body).unwrap()
 }
 
-/// 事件转成 `{"event","data"}`，并把随机的消息 id 换成占位，便于与黄金序列逐条比较。
+/// 事件转成 `{"event","data"}`，并把随机的消息 id 与思考块签名换成占位，便于与黄金序列逐条比较。
 fn normalize(events: &[SseEvent]) -> Vec<Value> {
     events
         .iter()
@@ -47,6 +47,17 @@ fn normalize(events: &[SseEvent]) -> Vec<Value> {
             if let Some(id) = data.pointer_mut("/message/id") {
                 assert!(id.as_str().unwrap().starts_with("msg_"), "消息 id：{id}");
                 *id = json!("<msg-id>");
+            }
+            if let Some(signature) = data.pointer_mut("/delta/signature") {
+                let text = signature.as_str().unwrap();
+                let random = text
+                    .strip_prefix(THINKING_SIGNATURE_PREFIX)
+                    .unwrap_or_else(|| panic!("签名要带本工具的前缀：{text}"));
+                assert!(
+                    random.len() >= 16 && random.chars().all(|c| c.is_ascii_alphanumeric()),
+                    "签名的随机部分：{text}"
+                );
+                *signature = json!("<signature>");
             }
             json!({ "event": event.name, "data": data })
         })
@@ -395,7 +406,9 @@ fn ac18_synthetic_request_strips_everything_listed() {
             "messages": [
                 { "role": "system", "content": "Be brief." },
                 { "role": "user", "content": "hi" },
-                { "role": "assistant", "content": "found", "tool_calls": [
+                // 2026-10-05 起（reasoning-passback R3）：thinking 块的文字带回成 reasoning_content，
+                // redacted_thinking 仍丢弃
+                { "role": "assistant", "content": "found", "reasoning_content": "hmm", "tool_calls": [
                     { "id": "toolu_1", "type": "function", "function": { "name": "Read", "arguments": "{\"file_path\":\"a\"}" } }
                 ] },
                 { "role": "tool", "tool_call_id": "toolu_1", "content": "file body" }
@@ -408,6 +421,98 @@ fn ac18_synthetic_request_strips_everything_listed() {
             "reasoning_effort": "high"
         })
     );
+}
+
+// ---------- 思考内容带回（reasoning-passback R3） ----------
+
+/// AC3：历史 assistant 的 thinking 块（不论签名是谁的）按顺序拼成 reasoning_content；
+/// redacted_thinking 不进；没有 thinking 的 assistant 不加这个字段；只有 thinking 的 assistant 照旧丢弃。
+#[test]
+fn ac3_history_thinking_is_passed_back_as_reasoning_content() {
+    let request = json!({
+        "model": "m", "max_tokens": 100,
+        "tools": [{ "name": "Read", "input_schema": { "type": "object" } }],
+        "messages": [
+            { "role": "user", "content": "看看 a" },
+            { "role": "assistant", "content": [
+                { "type": "thinking", "thinking": "先读 a", "signature": "sophia-thinking-v1:abc" },
+                { "type": "redacted_thinking", "data": "secret-blob" },
+                { "type": "tool_use", "id": "toolu_1", "name": "Read", "input": { "file_path": "a" } }
+            ] },
+            { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "toolu_1", "content": "内容" }] },
+            { "role": "assistant", "content": [
+                { "type": "thinking", "thinking": "甲", "signature": "official-sig" },
+                { "type": "text", "text": "读完了" },
+                { "type": "thinking", "thinking": "乙", "signature": "x" }
+            ] },
+            { "role": "user", "content": "再说一遍" },
+            { "role": "assistant", "content": [{ "type": "thinking", "thinking": "只有思考", "signature": "s" }] },
+            { "role": "assistant", "content": "好" },
+            { "role": "user", "content": "谢谢" }
+        ]
+    });
+    let body = serde_json::to_vec(&request).unwrap();
+    let converted = to_chat(&body, "up", &UpstreamOptions::default()).unwrap();
+    assert!(converted.reasoning_content_sent);
+    let chat: Value = serde_json::from_slice(&converted.body).unwrap();
+    let messages = chat["messages"].as_array().unwrap();
+    assert_eq!(
+        messages[1]["reasoning_content"],
+        json!("先读 a"),
+        "{}",
+        messages[1]
+    );
+    assert!(messages[1]["tool_calls"].is_array());
+    assert_eq!(
+        messages[3]["reasoning_content"],
+        json!("甲\n\n乙"),
+        "{}",
+        messages[3]
+    );
+    assert_eq!(messages[5], json!({ "role": "assistant", "content": "好" }));
+    assert_eq!(
+        messages.len(),
+        7,
+        "只有思考的 assistant 不凭空造消息：{messages:?}"
+    );
+    let text = String::from_utf8_lossy(&converted.body);
+    assert!(
+        !text.contains("secret-blob") && !text.contains("只有思考"),
+        "{text}"
+    );
+
+    // 重试用的开关：去掉全部 reasoning_content，与历史里没有 thinking 块时逐字节相同
+    let omit = UpstreamOptions {
+        omit_reasoning_content: true,
+        ..Default::default()
+    };
+    let omitted = to_chat(&body, "up", &omit).unwrap();
+    assert!(!omitted.reasoning_content_sent);
+    let mut plain = request.clone();
+    for message in plain["messages"].as_array_mut().unwrap() {
+        if let Some(blocks) = message["content"].as_array_mut() {
+            blocks.retain(|b| b["type"] != "thinking");
+        }
+    }
+    let plain = to_chat(
+        &serde_json::to_vec(&plain).unwrap(),
+        "up",
+        &UpstreamOptions::default(),
+    )
+    .unwrap();
+    assert!(!plain.reasoning_content_sent);
+    assert_eq!(omitted.body, plain.body);
+
+    // 输入估算按实际发出的请求算：带回了思考才计入，去掉后、Responses 出口都不计
+    assert_eq!(converted.input_estimate, estimate_tokens(&request));
+    assert!(converted.input_estimate > plain.input_estimate);
+    assert_eq!(omitted.input_estimate, plain.input_estimate);
+
+    // Responses 出口（R20）照旧不带
+    let responses = to_responses(&body, "up", &UpstreamOptions::default()).unwrap();
+    assert!(!responses.reasoning_content_sent);
+    assert_eq!(responses.input_estimate, plain.input_estimate);
+    assert!(!String::from_utf8_lossy(&responses.body).contains("先读 a"));
 }
 
 // ---------- 请求方向：映射细节（R16） ----------
@@ -904,19 +1009,46 @@ fn ac15_fixed_request_estimate() {
                 { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "AAAA" } }
             ] },
             { "role": "assistant", "content": [
-                { "type": "thinking", "thinking": "不计入" },
+                { "type": "thinking", "thinking": "要计入" },
                 { "type": "tool_use", "id": "t1", "name": "Read", "input": { "path": "a.txt" } }
             ] },
             { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": "ok" }] }
         ]
     });
-    // ASCII：16 + 6 + 16 + 2 + 4 + 17 = 61 → 16；非 ASCII：2 + 3 = 5；图片 1600
-    assert_eq!(estimate_tokens(&request), 1621);
+    // ASCII：16 + 6 + 16 + 2 + 4 + 17 = 61 → 16；非 ASCII：2 + 3 + 3（思考，2026-10-05 起带回上游）= 8；图片 1600
+    assert_eq!(estimate_tokens(&request), 1624);
     let response: Value = serde_json::from_slice(
         &count_tokens_response(&serde_json::to_vec(&request).unwrap()).unwrap(),
     )
     .unwrap();
-    assert_eq!(response, json!({ "input_tokens": 1621 }));
+    assert_eq!(response, json!({ "input_tokens": 1624 }));
+}
+
+/// 估算跟发送规则走（reasoning-passback R3）：assistant 里带文字或工具调用的那条，thinking 文字计入；
+/// redacted_thinking、只有思考的 assistant、user 侧的 thinking 块都不发，不计。
+#[test]
+fn thinking_is_counted_only_where_it_is_sent() {
+    let estimate =
+        |messages: Value| estimate_tokens(&json!({ "model": "m", "messages": messages }));
+    let user = json!({ "role": "user", "content": "q" });
+    let base = estimate(
+        json!([user, { "role": "assistant", "content": [{ "type": "text", "text": "答" }] }]),
+    );
+    let with_thinking = estimate(json!([user, { "role": "assistant", "content": [
+        { "type": "thinking", "thinking": "思考十个字思考十个字", "signature": "s" },
+        { "type": "redacted_thinking", "data": "很长很长很长很长很长很长很长" },
+        { "type": "text", "text": "答" }
+    ] }]));
+    assert_eq!(with_thinking, base + 10);
+    let thinking_only = estimate(json!([user, { "role": "assistant", "content": [
+        { "type": "thinking", "thinking": "思考十个字思考十个字" }
+    ] }]));
+    assert_eq!(thinking_only, estimate(json!([user])));
+    let user_side = estimate(json!([{ "role": "user", "content": [
+        { "type": "text", "text": "q" },
+        { "type": "thinking", "thinking": "思考十个字思考十个字" }
+    ] }]));
+    assert_eq!(user_side, estimate(json!([user])));
 }
 
 #[test]
@@ -966,7 +1098,7 @@ fn golden_ap_gateway_stream() {
 
 #[test]
 fn golden_openrouter_stream() {
-    // openrouter：reasoning / reasoning_details 丢弃；finish_reason 出现两次只算一次；usage 在最后
+    // openrouter：reasoning / reasoning_details 只取一份转成 thinking 块；finish_reason 出现两次只算一次；usage 在最后
     let upstream = read("upstream-openrouter-deepseek-flash-tool-stream.sse");
     let expected =
         golden_events("golden/upstream-openrouter-deepseek-flash-tool-stream.anthropic.jsonl");
@@ -1056,28 +1188,100 @@ fn tool_name_arriving_after_id_is_kept() {
     assert_eq!(data[3]["delta"]["partial_json"], json!(":1}"));
 }
 
+/// AC2（reasoning-passback R2）：上游先吐 30 段 reasoning_content 再吐文本与工具调用 →
+/// 一个 thinking 块（逐段 thinking_delta、收尾一个 signature_delta）、文本块、tool_use 块，index 连续。
 #[test]
-fn ac23_reasoning_is_dropped() {
+fn ac2_reasoning_becomes_a_thinking_block_first() {
     let mut chunks: Vec<Value> = (0..30)
         .map(|i| delta(json!({ "content": "", "reasoning_content": format!("想{i}") })))
         .collect();
-    chunks.push(delta(json!({ "reasoning": "r", "reasoning_details": [{ "type": "reasoning.text", "text": "r" }] })));
     chunks.push(delta(json!({ "content": "答案" })));
-    chunks.push(finish("stop"));
+    chunks.push(delta(
+        json!({ "tool_calls": [{ "index": 0, "id": "call_1", "type": "function", "function": { "name": "Read", "arguments": "{}" } }] }),
+    ));
+    chunks.push(finish("tool_calls"));
     let events = run_chat(&sse_done(&chunks), 13, "m", 1, ToolNameMap::new());
     assert_well_formed(&events);
-    let text = serde_json::to_string(&normalize(&events)).unwrap();
-    assert!(!text.contains("thinking") && !text.contains("signature") && !text.contains("想"));
+    let got = normalize(&events);
     assert_eq!(
-        names(&events),
+        got[1]["data"],
+        json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "thinking", "thinking": "", "signature": "" } })
+    );
+    for i in 0..30 {
+        assert_eq!(
+            got[2 + i]["data"],
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "thinking_delta", "thinking": format!("想{i}") } }),
+            "第 {i} 段思考"
+        );
+    }
+    assert_eq!(
+        got[32]["data"],
+        json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "signature_delta", "signature": "<signature>" } })
+    );
+    assert_eq!(
+        got[33]["data"],
+        json!({ "type": "content_block_stop", "index": 0 })
+    );
+    assert_eq!(got[34]["data"]["content_block"]["type"], json!("text"));
+    assert_eq!(got[34]["data"]["index"], json!(1));
+    assert_eq!(got[37]["data"]["content_block"]["type"], json!("tool_use"));
+    assert_eq!(got[37]["data"]["index"], json!(2));
+    assert_eq!(
+        names(&events)[34..],
         [
-            "message_start",
+            "content_block_start",
+            "content_block_delta",
+            "content_block_stop",
             "content_block_start",
             "content_block_delta",
             "content_block_stop",
             "message_delta",
             "message_stop"
         ]
+    );
+}
+
+/// openrouter 同一块里的 reasoning 与 reasoning_details 内容相同，只取一份；只有加密内容的 details、
+/// 正文开始之后才到的思考都不产出字节（不回头插入，同 Codex 路径）；没有思考内容时不发 thinking 块。
+#[test]
+fn reasoning_sources_and_late_reasoning() {
+    let upstream = sse_done(&[
+        delta(
+            json!({ "reasoning": "r1", "reasoning_details": [{ "type": "reasoning.text", "text": "r1" }] }),
+        ),
+        delta(json!({ "reasoning_details": [{ "type": "reasoning.summary", "summary": "s2" }] })),
+        delta(
+            json!({ "reasoning_details": [{ "type": "reasoning.encrypted", "data": "opaque" }] }),
+        ),
+        delta(json!({ "content": "答" })),
+        delta(json!({ "reasoning_content": "晚到的思考" })),
+        finish("stop"),
+    ]);
+    let events = run_chat(&upstream, 7, "m", 1, ToolNameMap::new());
+    assert_well_formed(&events);
+    let thinking: String = events
+        .iter()
+        .filter_map(|e| e.data.pointer("/delta/thinking").and_then(Value::as_str))
+        .collect();
+    assert_eq!(thinking, "r1s2");
+    let text = serde_json::to_string(&normalize(&events)).unwrap();
+    assert!(
+        !text.contains("晚到的思考") && !text.contains("opaque"),
+        "{text}"
+    );
+    assert_eq!(text.matches("signature_delta").count(), 1);
+
+    let plain = run_chat(
+        &sse_done(&[delta(json!({ "content": "hi" })), finish("stop")]),
+        64,
+        "m",
+        1,
+        ToolNameMap::new(),
+    );
+    let text = serde_json::to_string(&normalize(&plain)).unwrap();
+    assert!(
+        !text.contains("thinking") && !text.contains("signature"),
+        "{text}"
     );
 }
 
@@ -1267,11 +1471,20 @@ fn keepalive_pings_only_after_silence() {
     assert_eq!(DEFAULT_KEEPALIVE_INTERVAL, Duration::from_secs(15));
     assert_eq!(ping_event(), ping);
 
-    // 推理内容不产出任何字节：发射器对它什么都不写，所以路由会照样 ping
+    // 没有文字的推理信号（Responses 上游、只有加密内容）不产出任何字节，所以路由会照样 ping；
+    // 正文开始之后才到的思考也一样
     let mut emitter = AnthropicEmitter::new("m", 1, ToolNameMap::new());
     emitter.start();
-    assert!(emitter.on_event(UpstreamEvent::Reasoning).is_empty());
+    assert!(emitter
+        .on_event(UpstreamEvent::Reasoning(String::new()))
+        .is_empty());
     assert!(emitter.is_streaming());
+    assert!(!emitter
+        .on_event(UpstreamEvent::Text("答".to_string()))
+        .is_empty());
+    assert!(emitter
+        .on_event(UpstreamEvent::Reasoning("晚了".to_string()))
+        .is_empty());
 }
 
 // ---------- 非流式（R25） ----------
@@ -1293,11 +1506,31 @@ fn r26_aggregated_message_matches_stream() {
     let message = aggregator.finish().unwrap();
     let id = message["id"].as_str().unwrap().to_string();
     assert!(id.starts_with("msg_"));
+    // R2：非流式同样带 thinking 块，排在最前；文字与流式时拼起来的相同
+    let streamed: String = events
+        .iter()
+        .filter_map(|e| e.data.pointer("/delta/thinking").and_then(Value::as_str))
+        .collect();
+    let thinking = message["content"][0]["thinking"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    assert!(thinking.starts_with("用户想知道北京的"), "{thinking}");
+    assert_eq!(thinking, streamed);
+    let signature = message["content"][0]["signature"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    assert!(
+        signature.starts_with(THINKING_SIGNATURE_PREFIX),
+        "{signature}"
+    );
     assert_eq!(
         message,
         json!({
             "id": id, "type": "message", "role": "assistant", "model": "default-weibo-kimi-k2.5",
             "content": [
+                { "type": "thinking", "thinking": thinking, "signature": signature },
                 { "type": "text", "text": "我来为您查询一下北京当前的天气情况。" },
                 { "type": "tool_use", "id": "functions_get_weather_0", "name": "get_weather", "input": { "city": "北京" } }
             ],
@@ -1640,6 +1873,22 @@ fn ac27_retry_after() {
     );
     assert_eq!(retry_after_seconds(Some("soon"), None, at(0)), None);
     assert_eq!(retry_after_seconds(None, None, at(0)), None);
+    // 畸形日期：越界的年月日时分秒一律读不出，不 panic、不回绕（Codex 复审 4/7）
+    for bad in [
+        "Thu, 01 Jan -9223372036854775808 00:00:00 GMT",
+        "Thu, 01 Jan 9223372036854775807 00:00:00 GMT",
+        "Thu, 99 Jan 2026 00:00:00 GMT",
+        "Thu, 01 Jan 2026 25:00:00 GMT",
+        "Thu, 01 Jan 2026 00:61:00 GMT",
+        "Thu, 01 Jan 2026 00:00:99 GMT",
+        "Thu, 00 Jan 2026 00:00:00 GMT",
+        "Thu, 01 Jan 1969 00:00:00 GMT",
+    ] {
+        assert_eq!(retry_after_seconds(Some(bad), None, at(0)), None, "{bad}");
+    }
+    // 秒数太大或是负数：取不到（不回绕成小数）
+    assert_eq!(retry_after_seconds(Some("-5"), None, at(0)), None);
+    assert_eq!(retry_after_seconds(Some("1e400"), None, at(0)), None);
 
     let limited = UpstreamFailure {
         status: 429,

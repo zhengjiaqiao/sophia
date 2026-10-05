@@ -12,13 +12,7 @@ import { codexKeyKind, switchDisabledReason } from "./modelsView.ts";
 import { codexGateway } from "./types.ts";
 import type { ClaudeGatewayView, GatewayState, UsageView } from "./types.ts";
 
-export {
-  launchTimeout,
-  launchTip,
-  restartConsequence,
-  restartTip,
-  uninstallTip,
-} from "./modelsView.ts";
+export { launchTimeout, launchTip, restartConsequence, restartTip } from "./modelsView.ts";
 
 // ===== 块与行：从 agent 注册表生成 =====
 
@@ -76,19 +70,15 @@ export interface TrayRow {
   showRestart: boolean;
   /// 「启动 Codex」：开着、Codex 桌面应用没在跑（与 Codex 页同一规则，`showLaunchKey`）
   showLaunch: boolean;
-  /// 「卸下后台服务」：停用后服务仍在才出现（与 Codex 页同一规则）。三颗键占同一位，
-  /// 和「重启生效」同时该出现时让位给重启
-  showUninstall: boolean;
 }
 
 export function trayRow(state: GatewayState): TrayRow {
-  // 与 Codex 页同一个判断（modelsView）：开着时永远能关；三颗键占同一位
+  // 与 Codex 页同一个判断（modelsView）：开着时永远能关；两颗键占同一位
   const key = codexKeyKind(state, { kind: "idle" });
   return {
     toggle: { on: codexGateway(state).enabled, disabledReason: switchDisabledReason(state) },
     showRestart: key === "restart",
     showLaunch: key === "launch",
-    showUninstall: key === "uninstall",
   };
 }
 

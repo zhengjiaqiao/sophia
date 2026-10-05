@@ -6,7 +6,8 @@ import type { ReactNode } from "react";
 /// 不是节标题（那是 `Section` 的 `head` 16）、不是表格列头（列头由表格定）。上下外距归所在的页
 export interface SectionLabelProps {
   children: ReactNode;
-  /// 下 7 一条 1px `hairline`：下面紧跟一列行（设置、网关）时给；侧栏、候选列表的组前不给
+  /// 下 7 一条 1px `hairline`：下面是一张表或一列列表行、要一条结构线托住时给（网关、位置）；
+  /// 设置页（设置行自带行线）、侧栏、候选列表的组前不给
   rule?: boolean;
   /// 右端一颗键（`AddButton`、排序下拉）；与小标底对齐
   action?: ReactNode;

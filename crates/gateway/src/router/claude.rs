@@ -6,16 +6,16 @@
 //!
 //! 形状转换全在 `translate::anthropic`（纯同步）；这里只管鉴权、查清单、收发字节、保活计时与日志。
 use super::{
-    decode_zstd, describe, header_str, log_safe, parse_provider_base, path_is_safe, read_limited,
-    resolve_target, send_with_connect_retry, Agent, Body, BoxError, LoggedEntry, Protocol, Route,
-    Router, UpstreamBody,
+    decode_zstd, describe, header_str, log_field, mask_account_ids, parse_provider_base,
+    path_is_safe, read_limited, resolve_target, send_with_connect_retry, Agent, Body, BoxError,
+    LoggedEntry, Protocol, Route, Router, UpstreamBody,
 };
 use crate::translate::anthropic::{
     self as anthropic, AnthropicEmitter, AnthropicError, ChatEvents, Keepalive, MessageAggregator,
     ResponsesEvents, StructuredOutput, ThinkingOff, UpstreamEvent, UpstreamFailure,
     UpstreamOptions, UpstreamRequest,
 };
-use crate::translate::{rejects_reasoning_effort, SseEvent};
+use crate::translate::{reasoning_retry, ReasoningRetry, SseEvent};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use http_body_util::{BodyExt, Full};
@@ -121,12 +121,12 @@ fn not_found(message: &str) -> AnthropicError {
 
 // ───────────────────────── 令牌 ─────────────────────────
 
-/// 读令牌（钥匙串 `claude-router-token`）。没有令牌返回 Err
+/// 读令牌（密钥文件的 `claudeRouterToken`）。没有令牌返回 Err
 pub type TokenSource = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
 
 /// 令牌缓存（R12）：30 秒；比对不上时绕过缓存重读一次（每秒至多一次），让刚生成的令牌立即可用，
-/// 又不让一串错令牌请求把钥匙串读取放大。读取时持锁：并发的十几个请求只读一次。
-/// 会阻塞（锁 + 子进程），调用方在阻塞线程池里调 [`accepts`](Self::accepts)
+/// 又不让一串错令牌请求把读取放大。读取时持锁：并发的十几个请求只读一次。
+/// 会阻塞（锁 + 读文件），调用方在阻塞线程池里调 [`accepts`](Self::accepts)
 pub(super) struct TokenCache {
     fetch: TokenSource,
     state: Mutex<TokenState>,
@@ -134,7 +134,7 @@ pub(super) struct TokenCache {
 
 #[derive(Default)]
 struct TokenState {
-    /// 上次读到的令牌与读取时刻；钥匙串里没有令牌（`None`）同样缓存，免得只用 Codex 时每个请求都起子进程
+    /// 上次读到的令牌与读取时刻；还没有令牌（`None`）同样缓存，免得只用 Codex 时每个请求都去读文件
     value: Option<(Option<String>, Instant)>,
     forced_at: Option<Instant>,
 }
@@ -355,7 +355,12 @@ impl Ctx {
         if result == "upstream_error" {
             // 上游的原话（已抹掉密钥）记进日志：桌面应用只报「模型不可用」，不看这一句查不出是哪个参数被拒
             //（2026-09-30 真机：openrouter 回 400，桌面应用的 Details 里没有原因）
-            let extra = format!("{} reason={}", self.extra, log_safe(&error.message));
+            // 上游原话里的账号与密钥标识（Kimi 限流时回显 `org-…<ak-…>`）先抹掉（reasoning-passback R5）
+            let extra = format!(
+                "{} reason={}",
+                self.extra,
+                log_field(&mask_account_ids(&error.message))
+            );
             self.router.log.write(
                 self.started,
                 Agent::Claude.as_str(),
@@ -372,10 +377,7 @@ impl Ctx {
             self.log(error.status, result);
         }
         if error.status >= 500 {
-            self.router
-                .counters
-                .upstream_errors
-                .fetch_add(1, Ordering::Relaxed);
+            self.router.counters.upstream_error();
         }
         error_response(&error, self.cors)
     }
@@ -436,7 +438,7 @@ pub(super) async fn handle(
         };
         return ctx.respond(StatusCode::OK, Some("application/json"), body);
     }
-    // 比对令牌可能要读钥匙串（起 `security` 子进程，且持锁让并发请求只读一次）：放到阻塞线程池里做，
+    // 比对令牌可能要读密钥文件（且持锁让并发请求只读一次）：放到阻塞线程池里做，
     // 不让一串并发请求把运行时的工作线程全卡在锁上，连带 Codex 的请求一起停
     let accepted = {
         let router = Arc::clone(&router);
@@ -450,8 +452,10 @@ pub(super) async fn handle(
     }
     match (method, sub.as_str()) {
         (Method::POST, "/v1/messages") => messages(&mut ctx, &parts, &raw_body).await,
-        (Method::POST, "/v1/messages/count_tokens") => count_tokens(&mut ctx, &parts, &raw_body),
-        (Method::GET, "/v1/models") => models(&ctx),
+        (Method::POST, "/v1/messages/count_tokens") => {
+            count_tokens(&mut ctx, &parts, &raw_body).await
+        }
+        (Method::GET, "/v1/models") => models(&ctx).await,
         _ => ctx.fail(
             not_found(&sophia_core::t!("models.router.noEndpoint")),
             "not_found",
@@ -512,9 +516,17 @@ fn decode_body(
     }
 }
 
+/// 读清单文件放到阻塞线程池里做：路由与界面在同一进程，不占异步运行时的工作线程
+async fn load_catalog(ctx: &Ctx) -> Result<Option<ClaudeCatalog>, String> {
+    let path = ctx.router.claude_routing_path.clone();
+    tokio::task::spawn_blocking(move || ClaudeCatalog::load(path.as_deref()))
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()))
+}
+
 /// 读清单：不存在 → 404；读不懂 → 500（第二项是日志里的结果）
-fn catalog(ctx: &Ctx, model: &str) -> Result<ClaudeCatalog, (AnthropicError, &'static str)> {
-    match ClaudeCatalog::load(ctx.router.claude_routing_path.as_deref()) {
+async fn catalog(ctx: &Ctx, model: &str) -> Result<ClaudeCatalog, (AnthropicError, &'static str)> {
+    match load_catalog(ctx).await {
         Ok(Some(catalog)) => Ok(catalog),
         Ok(None) => Err((AnthropicError::model_not_selected(model), "no_catalog")),
         Err(e) => Err((
@@ -528,7 +540,11 @@ fn catalog(ctx: &Ctx, model: &str) -> Result<ClaudeCatalog, (AnthropicError, &'s
 }
 
 /// R15：本地估算，不联网；模型未命中同样 404
-fn count_tokens(ctx: &mut Ctx, parts: &hyper::http::request::Parts, raw: &Bytes) -> Response<Body> {
+async fn count_tokens(
+    ctx: &mut Ctx,
+    parts: &hyper::http::request::Parts,
+    raw: &Bytes,
+) -> Response<Body> {
     let body = match decode_body(parts, raw, ctx.router.max_body_bytes) {
         Ok(body) => body,
         Err(error) => return ctx.fail(error, "request_error"),
@@ -543,7 +559,7 @@ fn count_tokens(ctx: &mut Ctx, parts: &hyper::http::request::Parts, raw: &Bytes)
         }
     };
     ctx.model = model.clone();
-    let catalog = match catalog(ctx, &model) {
+    let catalog = match catalog(ctx, &model).await {
         Ok(catalog) => catalog,
         Err((error, result)) => return ctx.fail(error, result),
     };
@@ -560,8 +576,8 @@ fn count_tokens(ctx: &mut Ctx, parts: &hyper::http::request::Parts, raw: &Bytes)
 }
 
 /// R16：按 `inferenceModels` 的顺序逐项列出
-fn models(ctx: &Ctx) -> Response<Body> {
-    let catalog = match ClaudeCatalog::load(ctx.router.claude_routing_path.as_deref()) {
+async fn models(ctx: &Ctx) -> Response<Body> {
+    let catalog = match load_catalog(ctx).await {
         Ok(Some(catalog)) => catalog,
         // Claude 没打开，或旧 plist 没给清单路径（R10：Claude 命名空间一律 404）
         Ok(None) => {
@@ -624,7 +640,7 @@ async fn messages(
         }
     };
     ctx.model = model.clone();
-    let catalog = match catalog(ctx, &model) {
+    let catalog = match catalog(ctx, &model).await {
         Ok(catalog) => catalog,
         Err((error, result)) => return ctx.fail(error, result),
     };
@@ -633,7 +649,7 @@ async fn messages(
     };
     if fallback {
         // 桌面应用的子任务会点名带日期的官方名：记下它落到了哪个角色（原名在 model 一栏）
-        ctx.extra = format!(" fallback={}", log_safe(&entry.slug));
+        ctx.extra = format!(" fallback={}", log_field(&entry.slug));
     }
     let unavailable = |ctx: &Ctx| ctx.fail(AnthropicError::gateway_unavailable(), "provider_error");
     let Some(provider) = catalog.providers.get(entry.provider.trim()) else {
@@ -642,7 +658,13 @@ async fn messages(
     let Ok(base) = parse_provider_base(&provider.base_url) else {
         return unavailable(ctx);
     };
-    let key = match (router.third_party_key)(Agent::Claude, entry.provider.trim()) {
+    let key = match super::key_off_thread(
+        &router.third_party_key,
+        Agent::Claude,
+        entry.provider.trim(),
+    )
+    .await
+    {
         Ok(key) if !key.trim().is_empty() => key.trim().to_owned(),
         _ => return unavailable(ctx),
     };
@@ -665,6 +687,7 @@ async fn messages(
         structured_output: StructuredOutput::ResponseFormat,
         thinking_off: ThinkingOff::detect(&provider.base_url),
         omit_reasoning_effort: false,
+        omit_reasoning_content: false,
     };
     let wants_format = serde_json::from_slice::<Value>(&body)
         .ok()
@@ -673,9 +696,13 @@ async fn messages(
     // 上游 400 后各有一次改形重发的机会，互不占用：
     // 0. 这次发了「关推理」的字段且上游说推理不能关 → 不再关，重发；
     // 1. 这次发了 `reasoning_effort` 且错误点名了它 → 去掉它（保留 response_format）重发；
-    // 2. 带 `output_config.format` 且不是上下文超长 → 改「只写说明」重发。
-    // 0 与 1 互斥（关推理只在明说不要思考时发，推理强度只在要了思考时发），所以最多发三次。
+    // 2. 这次带回了 `reasoning_content`（历史 thinking 块）且错误点名了它 → 去掉全部重发
+    //    （reasoning-passback R4；1 与 2 谁先见 `reasoning_retry`）；
+    // 3. 带 `output_config.format` 且不是上下文超长 → 改「只写说明」重发。错误点名了 `response_format`
+    //    时它排在 1、2 之前（「response_format is not supported for reasoning models」会被 1 的宽判认成推理强度）。
+    // 0 与 1 互斥（关推理只在明说不要思考时发，推理强度只在要了思考时发），所以最多发四次。
     let mut effort_retried = false;
+    let mut content_retried = false;
     let mut thinking_off_retried = false;
     let mut format_retried = false;
     let (response, translated) = loop {
@@ -738,20 +765,41 @@ async fn messages(
             options.thinking_off = ThinkingOff::Omit;
             continue;
         }
-        if translated.reasoning_effort_sent
-            && !effort_retried
-            && rejects_reasoning_effort(status.as_u16(), &failure_body)
-        {
-            // 上游不认 reasoning_effort：去掉它重发一次
-            effort_retried = true;
-            options.omit_reasoning_effort = true;
-            continue;
-        }
-        if status == StatusCode::BAD_REQUEST
+        let format_retry = status == StatusCode::BAD_REQUEST
             && wants_format
             && !format_retried
-            && !anthropic::is_context_overflow(&String::from_utf8_lossy(&failure_body))
+            && !anthropic::is_context_overflow(&String::from_utf8_lossy(&failure_body));
+        if format_retry
+            && String::from_utf8_lossy(&failure_body)
+                .to_lowercase()
+                .contains("response_format")
         {
+            // 错误点名了 response_format：先降级格式，推理字段留着
+            format_retried = true;
+            options.structured_output = StructuredOutput::PromptOnly;
+            continue;
+        }
+        match reasoning_retry(
+            status.as_u16(),
+            &failure_body,
+            translated.reasoning_effort_sent && !effort_retried,
+            translated.reasoning_content_sent && !content_retried,
+        ) {
+            // 上游不认 reasoning_effort：去掉它重发一次
+            Some(ReasoningRetry::DropEffort) => {
+                effort_retried = true;
+                options.omit_reasoning_effort = true;
+                continue;
+            }
+            // 上游不认带回的思考内容：去掉全部 reasoning_content 重发一次
+            Some(ReasoningRetry::DropContent) => {
+                content_retried = true;
+                options.omit_reasoning_content = true;
+                continue;
+            }
+            None => {}
+        }
+        if format_retry {
             // 上游不认 response_format：改用「只写说明」重发一次，再失败的结果原样按 R27 回
             format_retried = true;
             options.structured_output = StructuredOutput::PromptOnly;

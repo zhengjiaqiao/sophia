@@ -14,7 +14,10 @@ mod effort;
 mod request;
 mod stream;
 
-pub use effort::{rejects_reasoning_effort, Effort, REASONING_EFFORT_FIELD};
+pub use effort::{
+    reasoning_retry, rejects_reasoning_content, rejects_reasoning_effort, Effort, ReasoningRetry,
+    REASONING_CONTENT_FIELD, REASONING_EFFORT_FIELD,
+};
 pub use request::{
     compaction_item, normalize_for_native, to_chat, to_chat_with, ChatOptions, ChatRequest,
     ToolNames, TranslateError, REASONING_ID_PREFIX,

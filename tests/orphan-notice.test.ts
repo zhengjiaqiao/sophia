@@ -59,3 +59,16 @@ test("两颗都是默认紧凑键：浅键（末尾 ↗）只给离开 Sophia �
   const html = render(OrphanNotice, props(false));
   assert.doesNotMatch(html, /ss-btn--quiet/);
 });
+
+test("和模型页同一种不能关的提示（画板 HqfEseaJe9ti6mhk4wjLv4）：灰面板（NoticePanel 一节，满宽）、左侧 !、键在右端；不再是落在机面上的一行灰字", () => {
+  const html = render(OrphanNotice, props(false));
+  assert.match(html, /class="ss-noticepanel ss-noticepanel--section"/);
+  assert.match(html, /class="ss-noticepanel__mark"/);
+  assert.match(html, /只看这些<\/button>[^]*全部清除<\/button>/);
+  assert.doesNotMatch(html, /mx-orphans/);
+});
+
+test("「!」记号与 ⊘ 同一族：圆圈里一笔加一点（灰面板与部分失败的提示条共用 IconAttention）", async () => {
+  const { IconAttention } = await import("../src/ui/icons.tsx");
+  assert.match(render(IconAttention, {}), /<circle cx="8" cy="8" r="6.3"/);
+});

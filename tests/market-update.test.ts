@@ -1,6 +1,6 @@
 /// 有更新（spec 2026-09-27-skill-mcp-market R14 R15 R16，AC14 AC15；DESIGN「发现与安装 › 有更新」「设置 › skill 更新」）：
 /// src/market/updateView.ts 的纯逻辑、useSkillUpdates.ts 的 store（换假的 core）、提示条 / 行记号 / 抽屉末行 /
-/// 确认框 / 纸窗的静态渲染，以及 HintStrip 的 `actions`
+/// 确认框 / 纸窗的静态渲染，以及灰面板（一次性说明用法）的两颗键
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -11,7 +11,7 @@ import type { InstallOutcome, UpdateCheck, UpdateInfo, UpdateTarget } from "../s
 
 const view = await import("../src/market/updateView.ts");
 const { createUpdateStore, rowTrigger } = await import("../src/market/useSkillUpdates.ts");
-const { HintStrip } = await import("../src/ui/HintStrip.tsx");
+const { NoticePanel } = await import("../src/ui/NoticePanel.tsx");
 const { UpdateStrip } = await import("../src/market/UpdateStrip.tsx");
 const { UpdateMark, UpdateDrawerLine, updateMark } = await import("../src/market/UpdateRow.tsx");
 const { UpdateConfirm, UpdateResultToast } = await import("../src/market/UpdateFlow.tsx");
@@ -51,6 +51,7 @@ function outcome(
     installed,
     failed,
     links: { entries: [] } as unknown as InstallOutcome["links"],
+    unlinked: [],
     records: [],
     undoId,
   };
@@ -223,23 +224,20 @@ test("按下之后查的结果是降级来的：限流说固定句，连接不�
   );
 });
 
-test("设置第二行：`上次检查 今天 14:32 · 2 个有更新`；昨天、跨日、跨年；没拿到结果只写时刻；从没查过", () => {
+test("设置行 `上次检查` 的灰字：`今天 14:32 · 2 个有更新`；昨天、跨日、跨年；没拿到结果只写时刻；从没查过", () => {
   const now = new Date(2026, 8, 27, 18, 0);
   const at = (d: Date) => Math.floor(d.getTime() / 1000);
   assert.equal(
-    view.lastCheckText(at(new Date(2026, 8, 27, 14, 32)), 2, now),
-    "上次检查 今天 14:32 · 2 个有更新",
+    view.lastCheckDetail(at(new Date(2026, 8, 27, 14, 32)), 2, now),
+    "今天 14:32 · 2 个有更新",
   );
   assert.equal(
-    view.lastCheckText(at(new Date(2026, 8, 26, 9, 5)), 0, now),
-    "上次检查 昨天 09:05 · 没有更新",
+    view.lastCheckDetail(at(new Date(2026, 8, 26, 9, 5)), 0, now),
+    "昨天 09:05 · 没有更新",
   );
-  assert.equal(
-    view.lastCheckText(at(new Date(2026, 8, 20, 8, 0)), null, now),
-    "上次检查 9月20日 08:00",
-  );
+  assert.equal(view.lastCheckDetail(at(new Date(2026, 8, 20, 8, 0)), null, now), "9月20日 08:00");
   assert.equal(view.clockText(at(new Date(2025, 11, 31, 23, 59)), now), "2025年12月31日 23:59");
-  assert.equal(view.lastCheckText(null, null, now), "还没有检查过");
+  assert.equal(view.lastCheckDetail(null, null, now), "还没有检查过");
 });
 
 // ---- store：换假的 core ----
@@ -428,27 +426,32 @@ test("store：撤销没成出一窗 `撤销失败`；页面卸下收起确认框
 
 // ---- 渲染 ----
 
-test("HintStrip actions：句子与 × 之间至多两颗紧凑默认键；在等的那颗原位换成一句", () => {
-  const html = render(HintStrip, {
+test("灰面板的一次性说明用法：句子与 × 之间两颗紧凑默认键；在等的那颗只锁它自己；键带公开钩子 data-hint-action", () => {
+  const html = render(NoticePanel, {
+    scope: "section",
+    mark: false,
     open: true,
-    onDismiss: () => {},
-    children: "2 个 skill 有新版本",
-    actions: [
-      { label: "只看这些", onClick: () => {} },
-      { label: "全部更新", onClick: () => {} },
-      { label: "第三颗", onClick: () => {} },
-    ],
+    onClose: () => {},
+    message: "2 个 skill 有新版本",
+    action: { label: "只看这些", onClick: () => {} },
+    secondary: { label: "全部更新", onClick: () => {}, busy: "正在更新" },
   });
-  assert.match(html, /ss-hint__text">2 个 skill 有新版本<\/span><span class="ss-hint__actions">/);
+  assert.match(
+    html,
+    /ss-noticepanel__message">2 个 skill 有新版本<\/span><span class="ss-noticepanel__actions"><span class="ss-noticepanel__key" data-hint-action="只看这些">/,
+  );
   assert.match(html, /ss-btn ss-btn--compact"[^>]*>只看这些<\/button>/);
-  assert.match(html, /ss-btn ss-btn--compact"[^>]*>全部更新<\/button>/);
-  assert.doesNotMatch(html, /第三颗/);
+  // 在等的那颗：门槛前锁住、外观不变（另一颗照常）
+  assert.match(
+    html,
+    /data-hint-action="全部更新"><span class="ss-locked" aria-busy="true">(<span[^>]*>)?<button[^>]*>全部更新<\/button>/,
+  );
+  assert.doesNotMatch(html, /data-hint-action="只看这些"><span class="ss-locked"/);
   assert.doesNotMatch(html, /ss-btn--primary/, "不是墨键");
-  // 默认 × 仍是新手提示的「知道了，不再提示」
+  // 没有 ! 的 × 默认是新手提示的「知道了，不再提示」
   assert.match(html, /title="知道了，不再提示"/);
-  const css = readFileSync(new URL("../src/ui/HintStrip.css", import.meta.url), "utf8");
-  assert.match(css, /\.ss-hint__actions \{[^}]*gap: var\(--space-xs\)/);
-  assert.match(css, /\.ss-hint__actions \{[^}]*margin-block: -2px/);
+  const css = readFileSync(new URL("../src/ui/ui.css", import.meta.url), "utf8");
+  assert.match(css, /\.ss-noticepanel__actions \{[^}]*gap: var\(--space-xs\)/);
 });
 
 test("提示条：`2 个 skill 有新版本` · `只看这些` · `全部更新` · ×（这一批不再提示）；只看这些后换 `显示全部`", () => {
@@ -530,16 +533,22 @@ test("纸窗：`✓ 已更新 2 个 skill` + 撤销", () => {
   assert.match(html, />撤销<\/button>/);
 });
 
-test("设置 `skill 更新` 一节：开关 + 灰字何时查 + `立即检查` + 上次检查一行（不进设置就查）", () => {
+test("设置 `skill 更新` 一节：两行设置行——自动检查｜开关；上次检查｜`去看看` + `立即检查`（不进设置就查）", () => {
   const src = withCopy(
     readFileSync(new URL("../src/pages/SettingsPage.tsx", import.meta.url), "utf8"),
   );
-  assert.match(src, /<SectionLabel rule>skill 更新<\/SectionLabel>/);
-  assert.match(src, /自动检查 skill 更新<\/span>/);
-  assert.match(src, /打开 Skills 页、距上次超过 6 小时时查一次/);
-  assert.match(src, /<BusySlot busy=\{checkingSkills\} label="正在检查">/);
-  assert.match(src, /立即检查/);
-  assert.match(src, /<Switch[\s\S]*?label="自动检查 skill 更新"/);
+  assert.match(src, /<SectionLabel>skill 更新<\/SectionLabel>/);
+  // 第一行：名字与灰字在左，开关在右（2026-10-04 画板 B）
+  assert.match(
+    src,
+    /<SettingRow\s+label="自动检查 skill 更新"\s+note="打开 Skills 页、距上次超过 6 小时时查一次"\s*>\s*\{autoCheck === null \? null : \(\s*<Switch[\s\S]*?label="自动检查 skill 更新"[\s\S]*?<\/SettingRow>/,
+  );
+  // 第二行：`上次检查` + 时刻与结果，右端 `去看看`（查到了才出）在 `立即检查` 前
+  const second = src.slice(src.indexOf('<SettingRow label="上次检查"'));
+  assert.match(second, /^<SettingRow label="上次检查" note=\{lastCheckLine\}>/);
+  assert.ok(second.indexOf("去看看") < second.indexOf("立即检查"));
+  assert.match(second, /<BusySlot busy=\{checkingSkills\} label="正在检查">/);
+  assert.match(src, /lastCheckDetail\(/);
   assert.match(src, /useSkillUpdates\(\)/, "设置页不给 active：进设置不查");
   // 一节在 `关于` 之前
   assert.ok(src.indexOf("skill 更新</SectionLabel>") < src.indexOf("关于</SectionLabel>"));

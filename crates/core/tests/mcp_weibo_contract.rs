@@ -8,6 +8,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::{tempdir, TempDir};
 
+/// 备份根目录（`atomicfile::backup` 的 root）：整个测试进程共用一份临时目录，不碰真实数据目录
+fn backups() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 struct Fixture {
     _temp: TempDir,
     user_data: PathBuf,
@@ -123,7 +129,7 @@ fn shared_database_agents_stay_isolated_with_opaque_location_ids() {
     );
     assert!(plan.issues.is_empty());
     assert_eq!(plan.actions.len(), 2);
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert!(report
         .entries
         .iter()
@@ -165,6 +171,7 @@ fn one_weibo_batch_uses_one_readable_backup_of_the_original_row() {
             ],
         ),
         true,
+        backups(),
     );
     assert!(report
         .entries
@@ -215,6 +222,7 @@ fn weibo_source_exports_stdio_and_http_public_fields_to_json() {
             ],
         ),
         true,
+        backups(),
     );
     assert!(report
         .entries
@@ -264,7 +272,7 @@ fn cloud_mode_and_changed_preview_are_rejected_without_overwrite() {
             ["{\"external\":{}}"],
         )
         .unwrap();
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert_eq!(report.entries[0].outcome, "failed");
     assert_eq!(agent_columns(&local.database, "a").1, "{\"external\":{}}");
 }

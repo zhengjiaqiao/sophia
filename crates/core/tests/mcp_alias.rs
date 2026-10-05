@@ -4,6 +4,12 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
+/// 备份根目录（`atomicfile::backup` 的 root）：整个测试进程共用一份临时目录，不碰真实数据目录
+fn backups() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn location(id: &str, path: &Path, domain: &str) -> McpLocation {
     McpLocation {
         id: id.into(),
@@ -54,7 +60,7 @@ fn aliases_of_one_json_target_write_one_server_once() {
     );
     assert!(plan.issues.is_empty());
     assert_eq!(plan.actions.len(), 1);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries.len(), 1);
     assert_eq!(report.entries[0].outcome, "created");
     let written = fs::read_to_string(target).unwrap();
@@ -90,7 +96,7 @@ fn aliases_with_conflicting_sources_leave_target_unchanged() {
     );
     assert!(plan.actions.is_empty());
     assert_eq!(plan.issues.len(), 1);
-    assert!(execute(plan, false).entries.is_empty());
+    assert!(execute(plan, false, backups()).entries.is_empty());
     assert_eq!(fs::read(target).unwrap(), original);
 }
 
@@ -120,7 +126,7 @@ fn aliases_still_verify_the_selected_source_snapshot() {
         &source,
         json!({"mcpServers":{"docs":{"command":"changed"}}}),
     );
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "failed");
     assert_eq!(report.entries[0].message, "配置在预览后发生变化");
     assert_eq!(fs::read(target).unwrap(), original);
@@ -154,7 +160,7 @@ fn aliased_cross_domain_target_requires_confirmation() {
     );
     assert_eq!(plan.actions.len(), 1);
     assert!(plan.actions[0].cross_domain);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "failed");
     assert_eq!(report.entries[0].message, "没有允许写到其他位置");
     assert_eq!(fs::read(target).unwrap(), original);
@@ -185,7 +191,7 @@ fn different_servers_for_one_aliased_target_merge_together() {
         ],
     );
     assert_eq!(plan.actions.len(), 2);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert!(report
         .entries
         .iter()

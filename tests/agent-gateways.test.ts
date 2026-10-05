@@ -31,7 +31,7 @@ const provider = (overrides: Partial<GatewayProvider> = {}): GatewayProvider => 
   name: "wecode",
   baseUrl: "https://example.com/openai",
   protocol: "chat",
-  hasKey: true,
+  key: "set",
   models: [],
   ...overrides,
 });
@@ -43,7 +43,7 @@ const state = (overrides: Partial<CodexFixture> = {}): GatewayState =>
     providers: [provider()],
     enabled: false,
     needsCodexRestart: false,
-    router: { installed: false, running: false, port: 47328, error: "" },
+    router: { running: false, port: 47328, error: "" },
     codex: { version: "26.0", running: false, catalogVersion: "1", drift: false },
     conflict: "",
     takeover: null,
@@ -196,6 +196,57 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
   });
 });
 
+// spec 2026-10-04-local-diagnostics R13（画板 AuPbAQHePv3L1U3g1PAtH8）：行尾 `详情` · `再试一次` · 编辑 · 删除；
+// `详情` 是一颗键、点开是浮层，原文不进行里
+test("无法连接且有技术原文：行尾先 `详情`（弹出浮层）再 `再试一次`；原文不在行里；没有原文不出 `详情`", () => {
+  const reason = "服务商限流了，约 30 秒后再试";
+  const detail = "GET https://openrouter.ai/api/v1/models → 429 Too Many Requests · Retry-After: 30";
+  const html = block({ providers: [ap(), { ...or(reason), unreachableDetail: detail }] });
+  const [, down] = rows(html);
+  assert.match(
+    down,
+    /ss-listrow__actions"><span class="ss-details">[^]*aria-haspopup="dialog"[^]*>详情<\/button>[^]*>再试一次<[^]*title="编辑"/,
+  );
+  assert.doesNotMatch(down, /Retry-After/);
+  const [, plain] = rows(block({ providers: [ap(), or(reason)] }));
+  assert.doesNotMatch(plain, />详情</);
+});
+
+test("密钥读不出（R4 / AC2）：`地址 · 密钥不可用 · 原因`（红字，原因写全），不说「还没有密钥」；表单不说「已保存」", () => {
+  const reason = "读不出密钥文件：没有读取权限";
+  const locked = provider({
+    id: "wecode",
+    name: "wecode",
+    key: "unreadable",
+    keyProblem: reason,
+    models: [model({ selected: true })],
+  });
+  const [row] = rows(block({ providers: [locked] }));
+  assert.match(row, /gw-row__down">密钥不可用</);
+  assert.match(row, new RegExp(`gw-row__reason">${reason}<`));
+  assert.doesNotMatch(row, /还没有密钥|已连接/);
+  assert.deepEqual(gatewayFacts(locked), {
+    url: "https://example.com/openai",
+    statusKind: "keyUnreadable",
+    status: "密钥不可用",
+    reason,
+    picked: "已选 1 / 1",
+  });
+  const form = render(GatewayForm, {
+    state: state({ providers: [locked] }),
+    provider: locked,
+    busy: false,
+    onSave: async () => "x",
+    onFetchModels: async () => {},
+    onSaved: noop,
+    onCancel: noop,
+    onDirtyChange: noop,
+    ask: null,
+  });
+  assert.match(form, /placeholder="粘贴密钥"/);
+  assert.doesNotMatch(form, /已保存，留空则不改/);
+});
+
 test("没有网关：小标下一句「还没有网关，先加一家」，不重复按钮；`+ 网关` 可按", () => {
   const html = block({ providers: [] });
   assert.match(
@@ -229,7 +280,7 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默
   assert.equal(url[2], url[3]);
   assert.equal(url[1], url[4]);
   const key = html.match(
-    /<label class="gw-form__label" id="([^"]+)" for="([^"]+)">密钥<\/label>[^]*?<input id="([^"]+)" class="ss-textfield__input" type="password" placeholder="粘贴密钥，存进钥匙串" aria-labelledby="([^"]+)"/,
+    /<label class="gw-form__label" id="([^"]+)" for="([^"]+)">密钥<\/label>[^]*?<input id="([^"]+)" class="ss-textfield__input" type="password" placeholder="粘贴密钥" aria-labelledby="([^"]+)"/,
   );
   assert.ok(key, "密钥标签与输入框没有关联上");
   assert.equal(key[2], key[3]);
@@ -390,6 +441,60 @@ test("删网关的确认：另一家有同一地址时正文下一行 `同时删
     other: { name: "Claude", providers: [] },
     alsoOther: false,
   });
-  assert.match(plain, /地址和钥匙串里的密钥一起删掉，删除后无法恢复/);
+  assert.match(plain, /地址和密钥一起删掉，删除后无法恢复/);
   assert.doesNotMatch(plain, /role="checkbox"|同时删掉/);
+});
+
+test("还没有密钥（画板 1PxHo6ZoEe8pFCYbU1pAud）：第二行 `还没有密钥` 加粗；行尾不出 ↻ 也不另加键，只留编辑与删掉；没勾的模型勾选框不可用、按下说原因；编辑时光标落在密钥框", () => {
+  const bare = (key: "missing" | "unreadable") =>
+    provider({
+      id: "or",
+      name: "",
+      shortName: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      key,
+      models: [
+        model({ id: "a/one", displayName: "a/one", selected: true }),
+        model({ id: "b/two", displayName: "b/two" }),
+      ],
+    });
+  for (const key of ["missing", "unreadable"] as const) {
+    const [row] = rows(block({ providers: [bare(key)] }, { expanded: new Set(["or"]) }));
+    assert.match(
+      row,
+      key === "missing" ? /gw-row__down">还没有密钥</ : /gw-row__down">密钥不可用</,
+    );
+    // 拉不了模型列表：↻ 不出，也没有「填写密钥」——填密钥就是编辑
+    assert.doesNotMatch(row, /刷新模型列表|>填写密钥<|再试一次/, key);
+    assert.match(row, /title="编辑"/);
+    // 已勾的那一个照常（取消勾选不用密钥）；没勾的不可用，原因写清下一步
+    assert.equal((row.match(/data-checkrow=""/g) ?? []).length, 1, key);
+    assert.match(row, /先点右边的铅笔填写密钥，才能勾选这一家的模型/);
+  }
+  // 有密钥照旧：↻ 在，勾选框都可用
+  const [ok] = rows(
+    block({ providers: [{ ...bare("missing"), key: "set" }] }, { expanded: new Set(["or"]) }),
+  );
+  assert.match(ok, /刷新模型列表/);
+  assert.equal((ok.match(/data-checkrow=""/g) ?? []).length, 2);
+  // 编辑一家还没有密钥的：光标在密钥框（地址已经有了）；新建与有密钥时仍在地址框
+  const form = (p: GatewayProvider | null) =>
+    render(GatewayForm, {
+      state: state({ providers: p ? [p] : [] }),
+      provider: p,
+      busy: false,
+      onSave: async () => "x",
+      onFetchModels: async () => {},
+      onSaved: noop,
+      onCancel: noop,
+      onDirtyChange: noop,
+      ask: null,
+    });
+  const focused = (html: string) => html.match(/<input[^>]*autofocus[^>]*>/gi) ?? [];
+  assert.match(focused(form(bare("missing"))).join(""), /type="password"/);
+  assert.doesNotMatch(
+    focused(form({ ...bare("missing"), key: "set" })).join(""),
+    /type="password"/,
+  );
+  assert.doesNotMatch(focused(form(null)).join(""), /type="password"/);
 });

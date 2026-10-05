@@ -5,6 +5,7 @@ import { contextMenuHandler } from "./contextMenu.ts";
 import { t, tRich } from "./i18n.ts";
 import type { MessageKey } from "./i18n.ts";
 import { useLeaveGuard } from "./shell/leaveGuard.ts";
+import { copyDetails } from "./diagnostics.ts";
 import type { ContextMenuItem } from "./contextMenu.ts";
 import {
   addGatewayBlocked,
@@ -32,6 +33,7 @@ import {
   Button,
   CheckRow,
   Confirm,
+  Details,
   FloatingToast,
   IconButton,
   IconEdit,
@@ -57,7 +59,7 @@ import { ModelList } from "./ModelList.tsx";
 /// - 拉手（前面没有勾选格，常显）｜ 网关短名，第二行 `地址 · 已连接 · 已选 2 / 103`（地址放不下才截断、
 ///   截断才提示）；无法连接：`地址 · 无法连接 · 原因`（原因写全），行尾出 `再试一次`
 /// - 行尾动作列（间距 4）：铅笔（图标键，`编辑`）+ 垃圾桶（图标键，`删掉`；锚在垃圾桶下的确认，
-///   地址与钥匙串里的密钥一起删）——右沿与节头开关、`+ 网关` 在同一条竖线上
+///   地址与密钥一起删）——右沿与节头开关、`+ 网关` 在同一条竖线上
 /// - **点整行拉开抽屉＝从这家挑模型**：限制说明 → 440 宽勾选列表；几行可以同时拉开，各自独立；进这一页时每行都收着，只有刚新增成功的那一行自动拉开；Esc 收起
 /// - `编辑` / `+ 网关`：表单在这一行的抽屉里就地展开（新网关插在最上面，名字位写 `新网关`）；保存成功、
 ///   拉到模型后新网关变成普通行并自动拉开，模型整批出现不逐个闪，这一行 surface 行带闪两下
@@ -112,7 +114,7 @@ export interface GatewayBlockProps {
   onFetchModels: (providerId: string) => Promise<void>;
   /// 「再试一次」：按 id 重拉（拉取失败不抛错，原因记在 unreachable 上）
   onRetry: (providerId: string) => Promise<void>;
-  /// 删掉这一家（地址与钥匙串里的密钥一起删，删除后无法恢复）：确认之后才调。失败时抛出原话。
+  /// 删掉这一家（地址与密钥一起删，删除后无法恢复）：确认之后才调。失败时抛出原话。
   /// `alsoOther`：确认框里勾了「同时删掉 <另一家> 里的 X」
   onRemove: (provider: GatewayProvider, alsoOther: boolean) => Promise<void>;
   /// `带过来`：把另一家的网关原样复制到这一家（不确认）。失败时抛出原话。不给就不出这颗键
@@ -398,7 +400,7 @@ export function GatewayBlock({
         </TruncTip>
         <span className="gw-row__fact">
           {" · "}
-          {facts.statusKind === "unreachable" ? (
+          {facts.statusKind !== "connected" ? (
             <span className="gw-row__down">{facts.status}</span>
           ) : (
             facts.status
@@ -425,20 +427,27 @@ export function GatewayBlock({
     return items;
   };
 
-  /// 行尾动作列（ListRow 给间距 4）：无法连接时 `再试一次`，然后铅笔 + 垃圾桶（一对同形的图标键）
+  /// 行尾动作列（ListRow 给间距 4）：无法连接时 `详情`（有技术原文时，点开是锚在键上的浮层）+ `再试一次`，
+  /// 然后铅笔 + 垃圾桶（一对同形的图标键；spec 2026-10-04-local-diagnostics R13，画板 AuPbAQHePv3L1U3g1PAtH8）
   const actions = (p: GatewayProvider, isEditing: boolean) => {
     const blocked = removeProviderBlockedReason(state, p, tool, agent);
     const short = gatewayShortName(p);
+    /// 没有读得出的密钥：拉不了模型列表，↻ / `再试一次` 都不出，也不另加「填写密钥」——填密钥就是铅笔「编辑」
+    /// （画板 1PxHo6ZoEe8pFCYbU1pAud，2026-10-03 产品负责人：「这样和编辑按钮重复」）
+    const canFetch = p.key === "set";
     return (
       <>
-        {p.unreachable && !isEditing ? (
+        {p.unreachable && p.unreachableDetail && !isEditing ? (
+          <Details text={p.unreachableDetail} onCopy={(text) => copyDetails(text)} />
+        ) : null}
+        {p.unreachable && canFetch && !isEditing ? (
           <BusySlot busy={retrying === p.id} label={t("models.gateway.reconnecting")}>
             <Button size="compact" onClick={() => retrying !== p.id && retry(p.id)}>
               {t("models.gateway.retry")}
             </Button>
           </BusySlot>
         ) : null}
-        {isEditing || p.unreachable ? null : (
+        {isEditing || p.unreachable || !canFetch ? null : (
           // 手动重新拉取（2026-09-30：不自动拉）：连不上时这一位让给 `再试一次`（同一个动作）
           <span className="gw-row__refetch">
             <RefetchKey refetching={refetching === p.id} onRefetch={() => refetch(p)} />
@@ -499,6 +508,7 @@ export function GatewayBlock({
             entries={p.models.map((model) => ({ provider: p, model }))}
             onToggle={onToggleModel}
             probe={onProbeModel}
+            pickBlockedReason={p.key === "set" ? undefined : t("models.gateway.needKeyToPick")}
           />
         </div>
       ) : (
@@ -615,7 +625,7 @@ export function GatewayBlock({
           {providers.map(row)}
         </div>
       )}
-      {/* 删网关：地址与钥匙串里的密钥一起删、删除后无法恢复——先确认（⑬） */}
+      {/* 删网关：地址与密钥一起删、删除后无法恢复——先确认（⑬） */}
       {confirming !== null
         ? bodyLayer(
             <RemoveGatewayConfirm
@@ -741,11 +751,15 @@ export function GatewayForm({
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /// 没存成 / 存了没拉到：一句 + 原因 + 技术原文（灰面板的 `详情`）
+  const [error, setError] = useState<{ message: string; reason?: string; detail?: string } | null>(
+    null,
+  );
   /// 同步那一行勾没勾（默认勾上：多数人两家用同一批网关）
   const [syncOn, setSyncOn] = useState(true);
   const syncLabel = syncCheckLabel(provider, baseUrl, other);
-  const hasKey = provider?.hasKey ?? false;
+  // 读不出的不算「已保存」：占位写「粘贴密钥」，提示重新填写（R5、R6）
+  const hasKey = provider?.key === "set";
   // 看得见的标签与输入框关联：读屏读的就是这个字，点标签聚焦输入框
   const fieldId = useId();
   const dirty = baseUrl.trim() !== (provider?.baseUrl ?? "") || apiKey !== "";
@@ -773,7 +787,8 @@ export function GatewayForm({
       });
     } catch (e) {
       setSaving(false);
-      setError(parseBackendError(String(e)).message);
+      const parsed = parseBackendError(String(e));
+      setError({ message: parsed.message, detail: parsed.detail });
       return false;
     }
     if (key === "" && hasKey) {
@@ -781,7 +796,12 @@ export function GatewayForm({
         await onFetchModels(id);
       } catch (e) {
         setSaving(false);
-        setError(t("models.form.fetchFailed", { reason: parseBackendError(String(e)).message }));
+        const parsed = parseBackendError(String(e));
+        setError({
+          message: t("models.form.fetchFailed"),
+          reason: parsed.message,
+          detail: parsed.detail,
+        });
         return false;
       }
     }
@@ -794,6 +814,8 @@ export function GatewayForm({
   };
 
   const blank = baseUrl.trim() === "";
+  /// 编辑一家地址已经有了、密钥还没有（或读不出）的：要填的只剩密钥，光标直接落在密钥框
+  const focusKey = provider !== null && provider.key !== "set";
   const taken = blank ? null : addressTakenBy(siblings, baseUrl, provider?.id);
   const takenText = taken === null ? null : addressTakenText(taken);
 
@@ -808,7 +830,7 @@ export function GatewayForm({
           id={`${fieldId}-url`}
           labelledBy={`${fieldId}-url-label`}
           value={baseUrl}
-          autoFocus
+          autoFocus={!focusKey}
           spellCheck={false}
           placeholder="https://example.com/openai/v1"
           onChange={setBaseUrl}
@@ -829,6 +851,7 @@ export function GatewayForm({
           labelledBy={`${fieldId}-key-label`}
           type="password"
           value={apiKey}
+          autoFocus={focusKey}
           autoComplete="off"
           placeholder={hasKey ? t("models.form.keySaved") : t("models.form.keyNew")}
           onChange={setApiKey}
@@ -907,7 +930,13 @@ export function GatewayForm({
       </div>
       {error !== null ? (
         <div className="gw-form__error">
-          <NoticePanel message={error} onClose={() => setError(null)} />
+          <NoticePanel
+            message={error.message}
+            reason={error.reason}
+            technical={error.detail}
+            onCopy={(text) => copyDetails(text)}
+            onClose={() => setError(null)}
+          />
         </div>
       ) : null}
       {/* 只读事实：端口与协议不做成可改 */}

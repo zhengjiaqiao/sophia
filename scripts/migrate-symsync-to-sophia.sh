@@ -4,9 +4,9 @@
 #
 # 做的事：
 #   1. 数据目录 ~/Library/Application Support/SymSync 复制成 …/Sophia（不含旧的后台程序副本 bin/）
-#   2. 钥匙串里服务名 symsync 的条目（网关密钥）逐条复制到服务名 Sophia 下，值原样搬（经标准输入，不进命令行参数）
 # 不做的事：
-#   - 不删旧数据、不删旧钥匙串条目：确认新版一切正常后，按末尾打印的命令自己删
+#   - 不迁网关密钥：新版的密钥存在数据目录的 secrets.json，不再读钥匙串，迁完在模型页重新填写
+#   - 不删旧数据、不删旧钥匙串条目：确认新版一切正常后自己删
 #   - 不碰 ~/.codex、~/.claude 与后台服务：它们要先在旧版里关掉（见下面的前提检查），迁完在新版里重新打开
 #   - 界面自己记的东西（上次停在哪一页、看过哪些提示）不迁：新版按首次打开处理
 #
@@ -18,7 +18,6 @@ SUPPORT="$HOME/Library/Application Support"
 OLD_DIR="$SUPPORT/SymSync"
 NEW_DIR="$SUPPORT/Sophia"
 OLD_SERVICE=symsync
-NEW_SERVICE=Sophia
 OLD_AGENT="$HOME/Library/LaunchAgents/com.zhengjiaqiao.symsync.gateway.plist"
 
 fail() { echo "✗ $1" >&2; exit 1; }
@@ -49,40 +48,10 @@ else
   echo "✓ 数据目录已复制：$OLD_DIR → $NEW_DIR"
 fi
 
-# ── 2. 钥匙串 ──
-# 只列元数据，不读值，不会弹授权
-accounts=$(security dump-keychain 2>/dev/null | awk -v svc="\"svce\"<blob>=\"$OLD_SERVICE\"" '
-  /^keychain: / { if (hit && acct != "") print acct; acct = ""; hit = 0; next }
-  index($0, "\"acct\"<blob>=\"") { a = $0; sub(/.*"acct"<blob>="/, "", a); sub(/"[[:space:]]*$/, "", a); acct = a }
-  index($0, svc) { hit = 1 }
-  END { if (hit && acct != "") print acct }
-' | sort -u)
-
-if [ -z "$accounts" ]; then
-  echo "· 钥匙串里没有服务名 $OLD_SERVICE 的条目，跳过"
-else
-  echo "· 钥匙串里要复制的条目：$(echo "$accounts" | tr '\n' ' ')（读值时系统会问一次是否允许，选「允许」）"
-  while IFS= read -r acct; do
-    [ -n "$acct" ] || continue
-    value=$(security find-generic-password -s "$OLD_SERVICE" -a "$acct" -w) || fail "读不出 $acct"
-    # 应用存的是编码后的值（字母数字与少数符号），原样搬；含引号等意外字符就停下，不冒险拼命令
-    case "$value" in
-      *[!A-Za-z0-9+/=:._-]*) fail "$acct 的值里有意外字符，没复制；请在新版里重新填这个密钥" ;;
-    esac
-    printf "add-generic-password -U -s '%s' -a '%s' -w '%s'\n" "$NEW_SERVICE" "$acct" "$value" | security -i \
-      || fail "写不进 $NEW_SERVICE / $acct"
-    echo "✓ 钥匙串：$OLD_SERVICE / $acct → $NEW_SERVICE / $acct"
-  done <<< "$accounts"
-fi
-
 cat <<EOF
 
-迁移完成。打开新版 Sophia 确认设置、订阅、网关都在，第三方模型需要的话在新版里重新打开。
-都正常之后，再删掉旧的：
+迁移完成。打开新版 Sophia 确认设置、订阅、网关都在；网关密钥在模型页逐家重新填写，
+第三方模型需要的话在新版里重新打开。都正常之后，再删掉旧的：
   rm -rf "$OLD_DIR"
+  钥匙串里服务名 $OLD_SERVICE 的条目（「钥匙串访问」里搜 $OLD_SERVICE 删掉）
 EOF
-if [ -n "$accounts" ]; then
-  while IFS= read -r acct; do
-    [ -n "$acct" ] && echo "  security delete-generic-password -s $OLD_SERVICE -a '$acct'"
-  done <<< "$accounts"
-fi

@@ -28,14 +28,14 @@ pub fn resync(slot: &mut Option<Watcher>, app: &AppHandle, paths: BTreeSet<PathB
     }) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("创建文件系统监视失败：{e}");
+            log::warn!("创建文件系统监视失败：{e}");
             return;
         }
     };
     for path in &paths {
         // skill 是这些目录的直接子项，非递归即可覆盖建链、删链、删本体目录
         if let Err(e) = debouncer.watcher().watch(path, RecursiveMode::NonRecursive) {
-            eprintln!("监视 {} 失败：{e}", path.display());
+            log::warn!("监视 {} 失败：{e}", path.display());
         }
     }
     *slot = Some(Watcher {

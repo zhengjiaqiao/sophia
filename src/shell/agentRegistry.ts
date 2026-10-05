@@ -12,7 +12,7 @@
 /// 右端控件列由第三方模型那一节的 `listRow` 给，点整行推入它的 `Component`（这一家的页）。
 
 import type { ComponentType, ReactNode } from "react";
-import type { GatewayAgent, GatewayState, UsageView } from "../types.ts";
+import type { GatewayAgent, GatewayState, GatewayUnreadable, UsageView } from "../types.ts";
 
 /// 判断「在不在、开没开」用的只读状态（壳持有，逐项往里加）
 export interface AgentState {
@@ -23,6 +23,8 @@ export interface AgentState {
   modelsSupported: boolean | null;
   /// 用量（托盘的用量行、块头后的重置时间）；还没读回来、或这台机器没有用量是 null
   usage: UsageView | null;
+  /// 模型状态整个读不回来（命令本身失败，spec 2026-10-04-local-diagnostics R11）：入口照常在，模型页顶上说；没有为缺省 / null
+  gatewayError?: GatewayUnreadable | null;
 }
 
 /// 节组件拿到的：壳的回调（节自己的数据自己读）
@@ -50,7 +52,7 @@ export interface AgentListRow {
   /// 第二行那一句现状：已选的模型名 `glm-5、kimi-k2.5`（超过 3 个 `glm-5、kimi-k2.5 等 5 个`）、`还没选模型`、`正由 agents-manager 管理`；
   /// Claude 同样只写模型名，另有 `正在用别的第三方配置`、`没有找到 Claude 桌面应用`…
   status: (s: AgentState) => string;
-  /// 右端控件列：条件出现的键（`重启生效` / `启动 Codex` / `打开 Claude` / `卸下后台服务`）+ 12 + 开关。
+  /// 右端控件列：条件出现的键（`重启生效` / `启动 Codex` / `打开 Claude`）+ 12 + 开关。
   /// 开关按下即写、不确认；禁用时按下即说原因
   Controls: ComponentType<AgentListRowProps>;
 }
@@ -67,6 +69,8 @@ export interface TrayHost {
   openedAt: number;
   /// 做不成、面板放不下一段解释：主窗口到前面、切过去、把原话带过去
   failOver: (error: unknown) => void;
+  /// 重读用量视图（只读不取）：「再试一次」跑完后先把新数画上，再收回「正在读取」
+  rereadUsage: () => Promise<void>;
 }
 
 /// 托盘面板里一节的那一行拿到的

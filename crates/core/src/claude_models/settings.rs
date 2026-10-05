@@ -72,7 +72,7 @@ pub struct Written {
     pub models: Vec<WrittenModel>,
     /// `chatTabEnabled` 是 Sophia 补上的（profile 里原本没有这个键）
     pub chat_tab_written: bool,
-    /// 写入后整份 profile；其中 `inferenceGatewayApiKey` 存成占位 `"<token>"`，比较时换成钥匙串里的令牌
+    /// 写入后整份 profile；其中 `inferenceGatewayApiKey` 存成占位 `"<token>"`，比较时换成密钥文件里的令牌
     pub profile: Value,
 }
 

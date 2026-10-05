@@ -9,7 +9,7 @@
 #   确实要放进 iCloud 同步目录，加 --allow-icloud。
 #
 # 做法：同一块 APFS 盘上用 cp -c（clonefile）克隆，几秒完成、几乎不占额外空间；克隆失败退回普通复制。
-# 复制完逐个比对文件数、总字节数、软链数，对不上就报错。只读源目录，不改它。
+# 复制完逐个文件比内容（SHA-256）、软链比指向、比权限（treecmp.py），对不上就报错、不写 LATEST。只读源目录，不改它。
 # 可重复运行：每次都新建一个带时间戳的目录，不覆盖旧备份。
 set -euo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
@@ -76,39 +76,9 @@ else
   : > "$DEST/NO-Claude-3p"
 fi
 
-step "核对：文件数、总字节数、软链数逐项比对"
-python3 - "$LAB_DIR_1P" "$DEST/Claude" "$LAB_DIR_3P" "$DEST/Claude-3p" <<'PY'
-import os, sys
-
-def tally(root):
-    files = links = dirs = size = 0
-    for dp, dns, fns in os.walk(root, followlinks=False):
-        dirs += len(dns)
-        for n in dns:
-            if os.path.islink(os.path.join(dp, n)):
-                links += 1
-        for n in fns:
-            p = os.path.join(dp, n)
-            st = os.lstat(p)
-            if os.path.islink(p):
-                links += 1
-            else:
-                files += 1
-                size += st.st_size
-    return files, links, dirs, size
-
-args = sys.argv[1:]
-bad = False
-for src, dst in zip(args[0::2], args[1::2]):
-    if not os.path.isdir(src):
-        continue
-    a, b = tally(src), tally(dst)
-    ok = a == b
-    bad |= not ok
-    print(f"    {os.path.basename(src)}：源 文件 {a[0]} / 软链 {a[1]} / 目录 {a[2]} / {a[3]} 字节；"
-          f"备份 文件 {b[0]} / 软链 {b[1]} / 目录 {b[2]} / {b[3]} 字节 → {'一致' if ok else '不一致！'}")
-sys.exit(1 if bad else 0)
-PY
+step "核对：备份与源目录逐个文件比内容（SHA-256）、软链比指向、比权限"
+python3 "$LAB_SCRIPT_DIR/treecmp.py" "$LAB_DIR_1P" "$DEST/Claude" "$LAB_DIR_3P" "$DEST/Claude-3p" \
+  || die "备份与源目录不一致（见上）：这份备份不能用，没有写 LATEST。"
 
 step "写备份说明 $DEST/manifest.txt"
 {

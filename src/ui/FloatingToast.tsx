@@ -25,6 +25,17 @@ import { placeToast, type AnchorRect, type ToastAlign } from "../layerPlace.ts";
 ///   右下，壳上一处 `ToastStack`，主视图不再另有一套
 ///
 /// 各页不再自写 absolute / fixed 偏移。换一条内容就是新出现一次：调用方换 `key`。
+///
+/// **长相跟着位置走**（2026-10-04，DESIGN-components「提示条 Toast」）：两套外壳各自经
+/// `ToastPlacementContext` 告诉里面的 `Toast` 出在哪——锚点（`FloatingToast`）一律是轻量一行，
+/// 右下（`CornerToast` / `ToastStack`）一律带 40 记号栏。调用方不传。
+
+/// 提示小窗出在哪：`anchored` 锚在触发处 / `corner` 右下那一叠
+export type ToastPlacement = "anchored" | "corner";
+
+/// 由外壳给出位置，`Toast` 据它选长相。不在任何外壳里（测试、画廊里就地画的）按锚点档；
+/// 画廊要看右下档的样张就包一层 `CornerToast`（没有壳时它就地画、照样给出「右下」）
+export const ToastPlacementContext = createContext<ToastPlacement>("anchored");
 
 export interface FloatingToastProps {
   children: ReactNode;
@@ -122,7 +133,9 @@ export function FloatingToast({ children, align = "center", anchor, bounds }: Fl
           : { visibility: "hidden" }
       }
     >
-      <ToastRelayoutContext.Provider value={relayout}>{children}</ToastRelayoutContext.Provider>
+      <ToastPlacementContext.Provider value="anchored">
+        <ToastRelayoutContext.Provider value={relayout}>{children}</ToastRelayoutContext.Provider>
+      </ToastPlacementContext.Provider>
     </div>
   );
   return (
@@ -154,7 +167,7 @@ export function ToastStack({ className, children }: { className: string; childre
   const setEl = useContext(HostContext)?.setEl;
   return (
     <div className={className}>
-      {children}
+      <ToastPlacementContext.Provider value="corner">{children}</ToastPlacementContext.Provider>
       <div className="ss-toaststack__slot" ref={setEl} />
     </div>
   );
@@ -163,6 +176,9 @@ export function ToastStack({ className, children }: { className: string; childre
 /// 不属于任何一处的提示小窗：挂到壳右下那一叠里（没有壳时就地画，测试与菜单栏面板）
 export function CornerToast({ children }: { children: ReactNode }) {
   const host = useContext(HostContext);
-  if (host?.el) return createPortal(children, host.el);
-  return host ? null : <>{children}</>;
+  const corner = (
+    <ToastPlacementContext.Provider value="corner">{children}</ToastPlacementContext.Provider>
+  );
+  if (host?.el) return createPortal(corner, host.el);
+  return host ? null : corner;
 }

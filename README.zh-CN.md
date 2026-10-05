@@ -40,7 +40,7 @@ Sophia 把这些放进一张表：**每个 agent 现在能用哪些 skill、哪�
 
 ### 给 Codex 和 Claude 用第三方模型（macOS）
 
-在 Codex 应用和 Claude 桌面应用里，把其他服务商的模型和官方模型放在一起用。Sophia 在 `launchd` 下跑一个本机小网关负责转换接口，关掉 Sophia 也照常工作。可以加多家服务商、为每个 agent 选要显示的模型，在应用或菜单栏里一键开关。API 密钥存进 macOS 钥匙串，不写进任何文件。
+在 Codex 应用和 Claude 桌面应用里，把其他服务商的模型和官方模型放在一起用。Sophia 在应用里跑一个本机小网关负责转换接口，Sophia 开着时第三方模型就能用（在设置里打开「开机启动」就随时能用）。退出 Sophia 前会先确认，再把 Codex 应用和 Claude 桌面应用改回官方模型。可以加多家服务商、为每个 agent 选要显示的模型，在应用或菜单栏里一键开关。API 密钥存在 Sophia 数据目录里一个只有你本人能读的文件中（会随 Time Machine 备份）。
 
 <p align="center">
   <img src="./assets/readme/zh-CN/screen-models.png" width="100%" alt="Codex 的模型页：两家网关、从每家选好的模型，以及第三方模型的总开关。">
@@ -73,6 +73,8 @@ make build        # 调试版应用在 target/debug/bundle/
 
 ### 平台支持
 
+macOS 14（Sonoma）或更新。
+
 | | macOS | Windows | Linux |
 |---|:-:|:-:|:-:|
 | skill、MCP、发现 | ✓ | 未验证 | 未验证 |
@@ -85,7 +87,7 @@ make build        # 调试版应用在 target/debug/bundle/
 | 路径 | 内容 |
 |---|---|
 | `crates/core` | 全部业务逻辑：发现、扫描、生成操作计划、安全写文件。不含异步、网络和 Tauri。 |
-| `crates/gateway` | 模型网关和用量探测：本机路由、协议转换、`launchd`、系统代理、钥匙串。唯一含异步和网络代码的 crate。 |
+| `crates/gateway` | 模型网关和用量探测：本机路由（在应用进程里运行）、协议转换、系统代理、密钥文件。唯一含异步和网络代码的 crate。 |
 | `src-tauri` | Tauri 命令（每个只是薄薄一层，调用 `core`），以及「发现」的网络部分。 |
 | `src` | React + TypeScript 界面。 |
 | `locales` | 所有界面文案，三种语言。 |

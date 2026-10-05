@@ -1,0 +1,5 @@
+node_modules
+# wrangler dev 的本地 D1、限流等状态
+.wrangler/
+# 本地开发用的管理口令；样例见 .dev.vars.example
+.dev.vars

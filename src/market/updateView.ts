@@ -214,9 +214,9 @@ export function restoreUpdates(
 /// 用户按下 `立即检查`（或更新）时，查的结果是降级来的：在触发处说哪一句。自动检查不说
 export function fallbackNotice(fallback: MarketFallback | null): string | null {
   if (fallback === null) return null;
-  return fallback.rateLimited
-    ? rateLimited()
-    : t("market.fallback.offline", { service: fallback.service });
+  if (fallback.rateLimited) return rateLimited();
+  // 不是连不上（读不懂、断了、超时……）：按后端给的原因说（spec 2026-10-04-local-diagnostics R10）
+  return fallback.reason || t("market.fallback.offline", { service: fallback.service });
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -233,16 +233,16 @@ export function clockText(at: number, now: Date = new Date()): string {
   return t("market.clock.date", { date: shortDate(d.getTime(), now), time });
 }
 
-/// 设置 `skill 更新` 一节的第二行：`上次检查 今天 14:32 · 2 个有更新`。
+/// 设置 `skill 更新` 一节第二行（设置行 `上次检查`）的灰字：`今天 14:32 · 2 个有更新`。
 /// `count` 为 null＝这一程还没拿到结果（只写时刻）；从没查过写 `还没有检查过`
-export function lastCheckText(
+export function lastCheckDetail(
   checkedAt: number | null,
   count: number | null,
   now: Date = new Date(),
 ): string {
   if (checkedAt === null) return t("market.update.neverChecked");
-  const head = t("market.update.lastCheck", { time: clockText(checkedAt, now) });
-  if (count === null) return head;
+  const time = clockText(checkedAt, now);
+  if (count === null) return time;
   const tail = count > 0 ? tn("market.update.hasCount", count) : t("market.update.none");
-  return `${head} · ${tail}`;
+  return `${time} · ${tail}`;
 }

@@ -8,6 +8,8 @@
 //!   的取法链新鲜度（下面单独说）。选了固定档时，起进程的取法的最短间隔就是这个档位（AC13，
 //!   选 1 分钟就每分钟一次）；「自动」「关」时 `get_usage` 后台按
 //!   15 分钟、有人看着按 5 分钟挡住多出来的 Tick（AC13b）。见 `spacing_seconds`。
+//! - **「再试一次」（`Trigger::Retry`）是唯一不等最短间隔的入口**：用户看着原因点了它，在等这一下，
+//!   起进程的取法当场跑；限流退避照守（R7）。打开托盘、手动刷新、改设置仍按上面的间隔。
 //! - **`visible=false` 时什么都不跑、也不再醒。** spec 原话是「后台不跑」，这里做成更强的
 //!   「这一轮谁都不跑」：显式触发（打开托盘、手动刷新、设置改动）在真实场景里必然伴随
 //!   `visible=true`（打开托盘这个动作本身就让 `visible` 变 true），所以两种读法在实际输入下
@@ -44,6 +46,9 @@ pub enum Trigger {
     Opened,
     /// 用户手动点了刷新
     Manual,
+    /// 用户在取不到新数的原因旁点了「再试一次」（2026-10-03）：起进程的取法不等最短间隔，
+    /// 限流退避照守。只给这一个入口，打开托盘、手动刷新、改设置的间隔不放宽
+    Retry,
     /// 屏幕唤醒后的补刷
     Woke,
     /// 用量设置刚被改动
@@ -128,7 +133,6 @@ const CONSTRAINED_INTERVAL_MINUTES: i64 = 30;
 /// 用户选的固定档（分钟）；「自动」「关」是 None
 fn fixed_minutes(refresh: Refresh) -> Option<i64> {
     match refresh {
-        Refresh::Every1 => Some(1),
         Refresh::Every5 => Some(5),
         Refresh::Every10 => Some(10),
         Refresh::Every15 => Some(15),
@@ -139,7 +143,7 @@ fn fixed_minutes(refresh: Refresh) -> Option<i64> {
 /// 一条取法的最短间隔。`attended`：有人看着（打开托盘或用量页、手动刷新、改设置），
 /// 或者这个 agent 有窗口过了重置时刻还没取到新数（过了重置就不按后台节流）。
 ///
-/// 起进程的取法：选了固定档就严格按它（最短 1 分钟），有人看着时
+/// 起进程的取法：选了固定档就严格按它（最短 5 分钟），有人看着时
 /// 取 5 分钟与档位中较短的那个；「自动」「关」时 `get_usage` 后台 15 分钟、有人看着 5 分钟，
 /// `app-server` 一律 5 分钟
 fn spacing_seconds(source: Source, attended: bool, refresh: Refresh) -> i64 {
@@ -204,8 +208,9 @@ pub fn decide(input: &ScheduleInput) -> SchedulePlan {
     let floor = background_floor_seconds(input);
     let explicit = matches!(
         input.trigger,
-        Trigger::Opened | Trigger::Manual | Trigger::SettingsChanged
+        Trigger::Opened | Trigger::Manual | Trigger::Retry | Trigger::SettingsChanged
     );
+    let retry = matches!(input.trigger, Trigger::Retry);
 
     for agent in &input.agents {
         if !agent.available {
@@ -223,7 +228,7 @@ pub fn decide(input: &ScheduleInput) -> SchedulePlan {
         let attended = explicit || (reset_passed && !covers_reset);
 
         let (runnable, earliest_future) =
-            decide_agent_source(agent, input.now, attended, input.refresh, floor);
+            decide_agent_source(agent, input.now, attended, retry, input.refresh, floor);
 
         if let Some(source) = runnable {
             run.push((agent.agent, source));
@@ -235,7 +240,7 @@ pub fn decide(input: &ScheduleInput) -> SchedulePlan {
                 let earliest_at_reset = if attended {
                     earliest_future
                 } else {
-                    decide_agent_source(agent, input.now, true, input.refresh, floor).1
+                    decide_agent_source(agent, input.now, true, retry, input.refresh, floor).1
                 };
                 let candidate = match earliest_at_reset {
                     Some(earliest) => earliest.max(reset),
@@ -269,11 +274,13 @@ pub fn decide(input: &ScheduleInput) -> SchedulePlan {
 
 /// 给一个 agent 的取法链做决策：`(Some(source), _)` 表示这条取法此刻就能跑；
 /// `(None, Some(t))` 表示都不能跑，最早要等到 `t`；`(None, None)` 表示这个 agent 没有
-/// 任何取法（空链），永远不会自己触发
+/// 任何取法（空链），永远不会自己触发。`retry`：点了「再试一次」，起进程的取法不等最短间隔
+/// （限流退避照守；链上的新鲜度仍按平常的间隔判断，本机会话记录的 30 秒也照旧）
 fn decide_agent_source(
     agent: &AgentSchedule,
     now: i64,
     attended: bool,
+    retry: bool,
     refresh: Refresh,
     background_floor: i64,
 ) -> (Option<Source>, Option<i64>) {
@@ -301,6 +308,9 @@ fn decide_agent_source(
         let mut spacing = spacing_seconds(candidate.source, attended, refresh);
         if !attended && candidate.source.spawns_process() {
             spacing = spacing.max(background_floor);
+        }
+        if retry && candidate.source.spawns_process() {
+            spacing = 0;
         }
         let next_ok = candidate
             .last_attempt
@@ -343,7 +353,6 @@ fn base_interval_minutes(input: &ScheduleInput) -> Option<i64> {
 
     let base_minutes = match input.refresh {
         Refresh::Auto => auto_interval_minutes(input.now, input.last_opened),
-        Refresh::Every1 => 1,
         Refresh::Every5 => 5,
         Refresh::Every10 => 10,
         Refresh::Every15 => 15,
@@ -475,9 +484,9 @@ mod tests {
     }
 
     #[test]
-    fn ac12_constrained_forces_30_min_even_on_fixed_1_min_setting() {
+    fn ac12_constrained_forces_30_min_even_on_fixed_5_min_setting() {
         let mut input = base_input(vec![]);
-        input.refresh = Refresh::Every1;
+        input.refresh = Refresh::Every5;
         input.on_battery = true; // constrained 优先级更高，电池翻倍不再叠加
         input.constrained = true;
         let plan = decide(&input);
@@ -593,7 +602,7 @@ mod tests {
     /// AC13：选了固定档，起进程的取法严格按这个频率
     #[test]
     fn ac13_fixed_setting_is_honored_for_get_usage() {
-        for (refresh, minutes) in [(Refresh::Every1, 1), (Refresh::Every10, 10)] {
+        for (refresh, minutes) in [(Refresh::Every5, 5), (Refresh::Every10, 10)] {
             let mut input = claude_attempted(minutes * 60);
             input.refresh = refresh;
             input.trigger = Trigger::Tick;
@@ -612,7 +621,7 @@ mod tests {
     /// AC13：固定档下有人看着时，最短间隔取 5 分钟与档位中较短的那个
     #[test]
     fn ac13_fixed_setting_attended_spacing_is_min_of_5_and_setting() {
-        for (refresh, minutes) in [(Refresh::Every1, 1), (Refresh::Every15, 5)] {
+        for (refresh, minutes) in [(Refresh::Every5, 5), (Refresh::Every15, 5)] {
             let mut input = claude_attempted(minutes * 60);
             input.refresh = refresh;
             input.trigger = Trigger::Manual;
@@ -632,10 +641,10 @@ mod tests {
     fn ac13_fixed_setting_is_honored_for_app_server() {
         let mut input = base_input(vec![codex_agent(vec![SourceSchedule {
             source: Source::AppServer,
-            last_attempt: Some(NOW - 60),
+            last_attempt: Some(NOW - 5 * 60),
             rate_limited_until: None,
         }])]);
-        input.refresh = Refresh::Every1;
+        input.refresh = Refresh::Every5;
         input.trigger = Trigger::Tick;
         assert_eq!(
             decide(&input).run,
@@ -643,18 +652,18 @@ mod tests {
         );
     }
 
-    /// SCH-11（2026-09-29 真机）：下次醒来的时刻是开低电量之前按 1 分钟算的，到点那一轮不能照旧起进程——
+    /// SCH-11（2026-09-29 真机）：下次醒来的时刻是开低电量之前按固定档算的，到点那一轮不能照旧起进程——
     /// 后台触发时，起进程的取法的最短间隔不低于此刻状态下的刷新间隔（低电量 / 发热一律 30 分钟）
     #[test]
     fn constrained_background_tick_does_not_spawn_before_30_min() {
         for trigger in [Trigger::Tick, Trigger::Woke] {
-            let mut input = claude_attempted(60);
-            input.refresh = Refresh::Every1;
+            let mut input = claude_attempted(5 * 60);
+            input.refresh = Refresh::Every5;
             input.constrained = true;
             input.trigger = trigger;
-            assert_eq!(decide(&input).run, vec![], "{trigger:?} 1 分钟前跑过");
+            assert_eq!(decide(&input).run, vec![], "{trigger:?} 5 分钟前跑过");
             let mut input = claude_attempted(30 * 60);
-            input.refresh = Refresh::Every1;
+            input.refresh = Refresh::Every5;
             input.constrained = true;
             input.trigger = trigger;
             assert_eq!(
@@ -673,13 +682,13 @@ mod tests {
     /// 同一类问题：固定档切到用电池后，到点那一轮也按翻倍的间隔算
     #[test]
     fn battery_background_tick_doubles_fixed_spacing() {
-        let mut input = claude_attempted(60);
-        input.refresh = Refresh::Every1;
+        let mut input = claude_attempted(10 * 60 - 1);
+        input.refresh = Refresh::Every5;
         input.on_battery = true;
         input.trigger = Trigger::Tick;
         assert_eq!(decide(&input).run, vec![]);
-        let mut input = claude_attempted(120);
-        input.refresh = Refresh::Every1;
+        let mut input = claude_attempted(10 * 60);
+        input.refresh = Refresh::Every5;
         input.on_battery = true;
         input.trigger = Trigger::Tick;
         assert_eq!(
@@ -691,8 +700,8 @@ mod tests {
     /// 有人看着（打开托盘、手动刷新）不受低电量影响：仍按有人看着的间隔
     #[test]
     fn constrained_does_not_block_attended_refresh() {
-        let mut input = claude_attempted(60);
-        input.refresh = Refresh::Every1;
+        let mut input = claude_attempted(5 * 60);
+        input.refresh = Refresh::Every5;
         input.constrained = true;
         input.trigger = Trigger::Manual;
         assert_eq!(
@@ -709,7 +718,7 @@ mod tests {
             last_attempt: Some(NOW - 60),
             rate_limited_until: None,
         }])]);
-        input.refresh = Refresh::Every1;
+        input.refresh = Refresh::Every5;
         input.constrained = true;
         input.trigger = Trigger::Tick;
         assert_eq!(decide(&input).run, vec![(AgentId::Codex, Source::Rollout)]);
@@ -723,7 +732,7 @@ mod tests {
             last_attempt: Some(NOW - 60),
             rate_limited_until: Some(NOW + 60),
         }])]);
-        input.refresh = Refresh::Every1;
+        input.refresh = Refresh::Every5;
         input.trigger = Trigger::Manual;
         assert_eq!(decide(&input).run, vec![]);
     }
@@ -816,7 +825,7 @@ mod tests {
             },
             never_run(Source::AppServer),
         ])]);
-        input.refresh = Refresh::Every1;
+        input.refresh = Refresh::Every5;
         input.trigger = Trigger::Tick;
         let plan = decide(&input);
         assert_eq!(plan.run, vec![(AgentId::Codex, Source::Rollout)]);
@@ -1058,5 +1067,77 @@ mod tests {
         let plan = decide(&input);
         assert_eq!(plan.run, vec![]);
         assert_eq!(plan.wake_at, Some(NOW + 30 * 60));
+    }
+
+    // ---------------- 「再试一次」（2026-10-03）：不等最短间隔，限流退避照守 ----------------
+
+    /// 1 分钟前刚起过 claude：点「再试一次」当场再起；打开托盘、手动刷新、改设置照旧挡住
+    #[test]
+    fn retry_within_spacing_runs_immediately_but_attended_still_waits() {
+        let mut input = claude_attempted(60);
+        input.trigger = Trigger::Retry;
+        assert_eq!(
+            decide(&input).run,
+            vec![(AgentId::ClaudeCode, Source::GetUsage)]
+        );
+        for trigger in [Trigger::Opened, Trigger::Manual, Trigger::SettingsChanged] {
+            let mut input = claude_attempted(60);
+            input.trigger = trigger;
+            assert_eq!(decide(&input).run, vec![], "{trigger:?} 仍按 5 分钟");
+        }
+        // 固定档、低电量也不挡「再试一次」（有人在等这一下）
+        let mut input = claude_attempted(1);
+        input.trigger = Trigger::Retry;
+        input.refresh = Refresh::Every15;
+        input.constrained = true;
+        assert_eq!(
+            decide(&input).run,
+            vec![(AgentId::ClaudeCode, Source::GetUsage)]
+        );
+    }
+
+    /// 限流退避期间「再试一次」也不起进程
+    #[test]
+    fn retry_during_rate_limit_backoff_does_not_run() {
+        let mut input = base_input(vec![claude_agent(vec![SourceSchedule {
+            source: Source::GetUsage,
+            last_attempt: Some(NOW - 60),
+            rate_limited_until: Some(NOW + 4 * 60),
+        }])]);
+        input.trigger = Trigger::Retry;
+        let plan = decide(&input);
+        assert_eq!(plan.run, vec![]);
+    }
+
+    /// Codex：会话记录 10 秒前刚读过（30 秒没到）、手上的数不够新、app-server 1 分钟前刚失败：
+    /// 「再试一次」直接再起 app-server；会话记录的 30 秒照旧（本机文件，链上的新鲜度靠它）
+    #[test]
+    fn retry_codex_reruns_app_server_within_spacing() {
+        let mut agent = codex_agent(vec![
+            SourceSchedule {
+                source: Source::Rollout,
+                last_attempt: Some(NOW - 10),
+                rate_limited_until: None,
+            },
+            SourceSchedule {
+                source: Source::AppServer,
+                last_attempt: Some(NOW - 60),
+                rate_limited_until: None,
+            },
+        ]);
+        agent.last_success_observed_at = Some(NOW - 3600);
+        let mut input = base_input(vec![agent.clone()]);
+        input.trigger = Trigger::Retry;
+        assert_eq!(
+            decide(&input).run,
+            vec![(AgentId::Codex, Source::AppServer)]
+        );
+        input.trigger = Trigger::Manual;
+        assert_eq!(decide(&input).run, vec![], "手动刷新仍按 5 分钟");
+        // 会话记录读到了够新的数：不必再起 app-server
+        agent.last_success_observed_at = Some(NOW - 5);
+        let mut input = base_input(vec![agent]);
+        input.trigger = Trigger::Retry;
+        assert_eq!(decide(&input).run, vec![]);
     }
 }

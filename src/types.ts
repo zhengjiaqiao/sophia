@@ -370,7 +370,7 @@ export interface McpReport {
 /** 撤销单个文件的结果 */
 export interface McpUndoFileResult {
   targetPath: string;
-  /** 写入时留下的 `.mcp.bak`；新建文件的写入没有备份 */
+  /** 写入前留下的备份（在 Sophia 数据目录的 backups/ 下）；新建文件的写入没有备份 */
   backupPath: string | null;
   outcome: "restored" | "removed" | "changed" | "unchanged" | "failed" | "skipped";
   message: string;
@@ -484,6 +484,8 @@ export interface GatewayProviderModel {
   /// 网关在模型列表里给的上下文长度（token）；没给为 null / 缺省
   contextWindow?: number | null;
 }
+/// 一家网关的密钥状态（后端 `KeyStatus`）：读不出不等于没有
+export type GatewayKeyStatus = "set" | "missing" | "unreadable";
 export interface GatewayProvider {
   /** 创建后不变，只在这一家（agent）里唯一；带 providerId 的命令用它指明操作哪一个网关 */
   id: string;
@@ -495,21 +497,33 @@ export interface GatewayProvider {
   baseUrl: string;
   /** 这家网关的协议："chat" 或 "responses" */
   protocol: string;
-  hasKey: boolean;
+  /** 密钥：有 / 没有 / 读不出（密钥文件没有读取权限、损坏，或还在钥匙串里没迁完） */
+  key: GatewayKeyStatus;
+  /** 读不出时的原因（当前语言的一句话，写全）；其余为 null */
+  keyProblem?: string | null;
   models: GatewayProviderModel[];
   /** 上次拉取模型失败的原因（「地址无法访问」「密钥无效，请换一个密钥」…）；null / 缺省表示上次成功或还没拉过 */
   unreachable?: string | null;
+  /** 那次失败的技术原文（请求、状态码、返回的错误；已去隐私），网关行 `详情` 里给；没有为 null / 缺省 */
+  unreachableDetail?: string | null;
 }
 /// 网关的家（spec 2026-09-29「家」）：模型页里的一个 agent，也是网关数据的归属单位。
 /// 与注册表 id 不同：注册表里 Claude 那一项的 id 是 `claude-code`，它用 `AgentEntry.gateway` 指到这里的 `claude`
 export type GatewayAgent = "codex" | "claude";
-/// 本机路由：两家共用一个
+/// 本机路由：两家共用一个，在 Sophia 进程里跑（spec 2026-10-03-gateway-in-app）
 export interface GatewayRouter {
-  installed: boolean;
+  /// 本进程里的路由在 `port` 上跑着
   running: boolean;
   port: number;
   error: string;
 }
+/// 路由端口的说明（打开 Sophia 时接上的结果，spec 2026-10-03-gateway-in-app R4、R13）：
+/// 另一个 Sophia 占着端口（没换，Codex 设置改回了原样）/ 端口被别的程序占着、换到了 `to`（正在运行的要重启生效）/
+/// 端口范围里全被别的程序占着（Codex 设置改回了原样）
+export type GatewayPortNotice =
+  | { code: "another_sophia"; port: number }
+  | { code: "port_moved"; from: number; to: number }
+  | { code: "ports_busy" };
 export interface GatewayCodex {
   version: string;
   running: boolean;
@@ -523,12 +537,23 @@ export interface GatewayTakeover {
   baseUrl: string;
   selectedCount: number;
 }
+/// Codex 接第三方模型的接法：借用内置的 openai 服务商（要 OpenAI 登录），或独立服务商（不用登录）
+export type GatewayHookupMode = "builtin" | "provider";
+/// 选这种接法的原因（spec 2026-10-03-codex-hookup-auto R2）
+export type GatewayModeReason = "signedIn" | "apiKey" | "unknown" | "signedOut";
 /// Codex 那一家特有的
 export interface GatewayCodexView {
+  /// 用户开着 Codex 的第三方模型（模型页开关的选择）；`enabled` 是 Codex 设置此刻指着路由。
+  /// 两者不同只在打开 Sophia 时没接上（见 `GatewayState.portNotice`）
+  wanted: boolean;
   /// 按钮即状态：Codex 启动时加载的配置与现在不同
   needsRestart: boolean;
   app: GatewayCodex;
   takeover: GatewayTakeover | null;
+  /// 接法：Codex 设置指着路由时是写着的那一种，否则是上次写的
+  mode: GatewayHookupMode;
+  /// 选这种接法的原因；还没判断过为 null
+  modeReason: GatewayModeReason | null;
 }
 /// 别家写进 Claude 桌面应用、正在生效的第三方配置（别的配置工具或用户自己配的）。界面不写来源，后端也不给名字
 export interface GatewayClaudeForeign {
@@ -588,8 +613,47 @@ export type ClaudeGatewayView = AgentGatewayView & { agent: "claude"; claude: Ga
 export interface GatewayState {
   supported: boolean;
   router: GatewayRouter;
+  /// 路由端口的说明；没有为 null
+  portNotice: GatewayPortNotice | null;
   /// 顺序 codex、claude；`supported: false` 时为空
   agents: AgentGatewayView[];
+  /// 读不到第三方模型的状态（spec 2026-10-04-local-diagnostics R11）：哪个文件、哪一种；其余字段照能读到的给。没有为缺省
+  unreadable?: GatewayUnreadable;
+}
+
+/// 读不了的那一份文件：`permission` 没权限（给 `修复权限`）、`format` 格式有误（给 `打开文件 ↗`）、`other`
+export interface GatewayUnreadable {
+  kind: "permission" | "format" | "other";
+  /// 完整路径（修复、打开按它做）；状态整个读不回来时为空串
+  path: string;
+  /// 格式有误的那一行（从 1 数）
+  line: number | null;
+  /// 当前语言的一句：`~/.codex/config.toml 不归你的账户所有，读不了（多半是用 sudo 运行过 Codex）`；没有为空串
+  reason: string;
+  /// 技术原文（已去隐私），`详情` 里给
+  detail: string;
+}
+
+/// 退出前要不要确认、确认框里说什么（`quit_preview`，spec 2026-10-03-gateway-in-app R5、R6）
+export interface QuitPreview {
+  /// Codex 设置正指着路由：退出会改回并重启 Codex
+  codex: boolean;
+  /// Codex 桌面应用在运行
+  codexAppRunning: boolean;
+  /// 终端里有交互式 `codex` 在运行：它不会被重启，要用户自己重启
+  codexTerminal: boolean;
+  /// Claude 桌面应用处在 Sophia 写入的第三方模式：退出会切回官方
+  claude: boolean;
+  /// Claude 桌面应用在运行
+  claudeRunning: boolean;
+}
+/// 退出收尾进行到哪一步（`quit-progress` 事件的 `step`）
+export type QuitStep = "restartingCodex" | "restartingClaude";
+/// 退出收尾里没做成的一家（`app_quit` 返回）：`code` 如 `desktop_busy`，`message` 是后端按当前语言写好的原因
+export interface QuitFailure {
+  agent: GatewayAgent;
+  code: string;
+  message: string;
 }
 
 /// 某一家的状态；不支持（非 macOS）或还没有时为 null
@@ -604,9 +668,12 @@ const EMPTY_CODEX: CodexGatewayView = {
   enabled: false,
   conflict: "",
   codex: {
+    wanted: false,
     needsRestart: false,
     app: { version: "", running: false, catalogVersion: "", drift: false, appName: "" },
     takeover: null,
+    mode: "builtin",
+    modeReason: null,
   },
 };
 
@@ -697,8 +764,12 @@ export interface MarketFallback {
   service: string;
   /// 显示的是哪一刻的缓存；null＝随包数据
   cachedAt: number | null;
-  /// GitHub 限流：说 `GitHub 暂时限流，稍后再试`，不自动重试
+  /// 被限流（GitHub、skills.sh、MCP 目录都可能）：说限流，不自动重试
   rateLimited: boolean;
+  /// 为什么（spec 2026-10-04-local-diagnostics R10）：`skills.sh 返回的内容读不懂` 等一句；只是连不上为 null / 缺省
+  reason?: string | null;
+  /// 技术原文（请求、状态码、返回体开头；已去隐私），灰面板 `详情` 里给
+  detail?: string | null;
 }
 /// 发现 · skill 的一行：`installedIn` 非空时 `安装` 换成 `✓ 已安装`。
 /// `skillId` 是 skills.sh 的 id（在线榜单、搜索结果会有，与显示名不一定相同，如 `react:components` / `reactcomponents`）：
@@ -821,6 +892,24 @@ export interface InstallPlan {
   /// 直接读 `.agents/skills` 的 agent：勾选行后写 `直接读取，不用链接`
   directReaders: string[];
   links: PlannedAction[];
+  /// 其余要靠链接的 agent（勾没勾都列）：目录与里面已有同名东西的 skill 名（M14：那一行不能勾）
+  agentDirs: AgentDir[];
+}
+/// 一个要靠链接才读得到的 agent 在这个位置的 skill 目录（core `AgentDir`）
+export interface AgentDir {
+  harnessId: string;
+  dir: string;
+  /// 这次勾了它
+  chosen: boolean;
+  /// 这个目录已经有同名东西的 skill 名：不覆盖、不建链接
+  taken: string[];
+}
+/// 装上了、但没给某个勾了的 agent 链上（core `Unlinked`）
+export interface Unlinked {
+  harnessId: string;
+  name: string;
+  /// `那里已有同名的`，或建链接失败的那一句
+  reason: string;
 }
 /// 安装页（R9）：计划 + 贴底的下载地址与大小
 export interface SkillInstallPreview {
@@ -847,6 +936,8 @@ export interface InstallOutcome {
   /// skill 名 → 原因
   failed: Record<string, string>;
   links: SyncReport;
+  /// 装上了但没链上的 agent（勾了、那里已有同名的或建链接失败）
+  unlinked: Unlinked[];
   records: InstallRecord[];
   undoId: string | null;
 }
@@ -928,6 +1019,22 @@ export interface SkillUpdateSettings {
   lastCheck: number | null;
 }
 
+/// 设置「关于」里 `使用统计和错误报告` 那一行（src-tauri/src/report.rs `ReportSettings`）
+export interface ReportSettings {
+  autoReport: boolean;
+  /// 这份构建、这次运行能不能上报（有接收服务地址、没设 DO_NOT_TRACK）；不能时不画开关
+  available: boolean;
+  /// 有没有接收服务能收反馈（有地址就有；DO_NOT_TRACK 不管它）
+  feedback: boolean;
+}
+
+/// 上传截图、发送反馈没成的原因（core `report::feedback::Failure`）
+export type FeedbackFailure =
+  "network" | "rateLimited" | "server" | "tooLarge" | "shotExpired" | "other";
+
+/// 网页侧报给自动上报的两种异常（core `report::Kind::from_frontend`）
+export type ReportCountKind = "pageFault" | "uncaught";
+
 // ===== 菜单栏用量（spec 2026-09-26-menubar-usage 第 6 节；与 crates/core/src/usage 一一对应） =====
 
 /// 有用量的 agent，与 agent 注册表、`AgentIcon` 的 id 一致
@@ -971,7 +1078,7 @@ export interface UsageState {
 }
 export type UsageDisplayMode = "remaining" | "used";
 export type StackedSize = "small" | "medium" | "large";
-export type UsageRefresh = "auto" | "off" | "1" | "5" | "10" | "15";
+export type UsageRefresh = "auto" | "off" | "5" | "10" | "15";
 /// 每个 agent 在菜单栏上怎么显示（叠放与字号也跟着 agent 走）
 export interface AgentDisplay {
   /// 主窗口的 key；null＝自动
@@ -1007,6 +1114,8 @@ export interface TrayUsage {
   updatedText: string | null;
   windows: TrayWindowRow[];
   note: string | null;
+  /// 原因行右端给不给「再试一次」：后端按原因算好（版本可能太旧、没有回应、没能启动、认不出、没找到才给）
+  retry: boolean;
 }
 export interface MenuBarSegment {
   agent: UsageAgentId;

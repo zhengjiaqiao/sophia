@@ -157,7 +157,7 @@ mod imp {
         let ns_panel = panel.to_panel::<class::SophiaTrayPanel>()?;
         // 只加 NonactivatingPanel 一位，保留 tauri 建窗时的其余样式
         if let Err(e) = ns_panel.add_style_mask(StyleMask::empty().nonactivating_panel().into()) {
-            eprintln!("托盘面板设不成非激活：{e}");
+            log::warn!("托盘面板设不成非激活：{e}");
         }
         // 菜单栏下拉的层级：与状态栏同层，压在普通窗口和浮动窗口之上
         ns_panel.set_level(PanelLevel::Status.value());
@@ -388,7 +388,7 @@ mod imp {
 #[cfg(target_os = "macos")]
 pub use imp::*;
 
-// ----- 面板调用的命令：窗口的显示、隐藏、退出走这里，不给面板窗口开放通用的窗口权限 -----
+// ----- 面板调用的命令：窗口的显示、隐藏走这里，不给面板窗口开放通用的窗口权限（退出走 quit.rs）-----
 
 #[tauri::command]
 pub fn tray_open_main(app: tauri::AppHandle, page: Option<String>, error: Option<String>) {
@@ -412,11 +412,6 @@ pub fn tray_hide(app: tauri::AppHandle) {
     hide_panel(&app);
     #[cfg(not(target_os = "macos"))]
     let _ = app;
-}
-
-#[tauri::command]
-pub fn tray_quit(app: tauri::AppHandle) {
-    app.exit(0);
 }
 
 #[cfg(test)]

@@ -5,12 +5,14 @@ import { api } from "./api";
 import type {
   AutoLink,
   GatewayState,
+  GatewayUnreadable,
   HarnessList,
   McpOverview,
   McpReport,
   Overview,
   ProjectTimes,
 } from "./types";
+import { parseBackendError } from "./modelsView";
 import SkillsTab from "./SkillsTab";
 import McpTab from "./McpTab";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -54,13 +56,17 @@ import {
   type Destination,
   type Nav,
 } from "./shell/nav";
-import { isMenuCommand, menuState, routeMenuCommand } from "./shell/menuCommands";
+import { isMenuCommand, menuState, routeMenuCommand, routeUnderModal } from "./shell/menuCommands";
 import { dispatchPageCommand, useMenuFlags, usePageCommand } from "./shell/menuBus";
 import { FaceTabs, FilterRow } from "./FilterRow";
 import type { InstallContext } from "./market";
 import { changesPage, requestLeave } from "./shell/leaveGuard";
 import { canPopup } from "./contextMenu";
 import { useLocale, useOnLocaleChange } from "./i18n";
+import { useQuitFlow } from "./QuitFlow";
+import { FaultBomb, PageGuard, useFaultPage } from "./PageGuard";
+import { CrashNotice, FeedbackHost, closeFeedback, feedbackOpen } from "./feedback";
+import { quitRequested } from "./feedbackView";
 import "./App.css";
 
 /// 文件系统事件与窗口获得焦点后的重扫去抖
@@ -76,6 +82,8 @@ const isEditable = (el: Element | null): el is HTMLElement =>
   (el instanceof HTMLElement && el.isContentEditable);
 
 export default function App() {
+  /// 开发版故意让某一页渲染出错（`debug_fault`），验证页面兜底；正式版恒为 null
+  const faultPage = useFaultPage();
   const [overview, setOverview] = useState<Overview | null>(null);
   /// 用户发起的写入正在进行：后台重扫排到它结束之后。**不锁位置切换**——
   /// 忙碌只锁触发它的那个控件（DESIGN「反馈的两种形态 › 忙碌」），由各页自己管
@@ -109,7 +117,14 @@ export default function App() {
   const [backgroundMcpReport, setBackgroundMcpReport] = useState<McpReport | null>(null);
   /// MCP 扫描结果（项目列表要它）与模型状态（侧栏「模型」后的指示点要它）
   const [mcpOverview, setMcpOverview] = useState<McpOverview | null>(null);
-  const [gatewayState, setGatewayState] = useState<GatewayState | null>(null);
+  const [gatewayState, setGatewayStateRaw] = useState<GatewayState | null>(null);
+  /// 模型状态整个读不回来（命令本身失败）：入口照常列，模型页顶上说（spec 2026-10-04-local-diagnostics R11）
+  const [gatewayError, setGatewayError] = useState<GatewayUnreadable | null>(null);
+  /// 读回了一份状态：读不回来的那句随之撤掉
+  const setGatewayState = useCallback((state: GatewayState) => {
+    setGatewayStateRaw(state);
+    setGatewayError(null);
+  }, []);
   /// 内容区横向滚动的边缘渐隐：左 / 右还有被裁掉的内容时那一边出渐隐（量归 ui 的 useEdgeFades，画归壳 App.css）。
   /// 窗口变窄、表格长宽（换页签、扫描回来）都会改变能不能横向滚动：它在滚动、改尺寸、每次重绘后都重量
   const contentRef = useRef<HTMLElement>(null);
@@ -204,7 +219,7 @@ export default function App() {
       (state) => setGatewayState(state),
       () => undefined,
     );
-  }, []);
+  }, [setGatewayState]);
 
   // 文件系统变化与窗口获得焦点都走这里：用户的操作进行中则排到它结束之后，否则去抖后重扫
   const requestRefresh = useCallback(() => {
@@ -297,9 +312,19 @@ export default function App() {
         setGatewayState(state);
         applyModelsSupported(state.supported);
       })
-      .catch(() => {
-        // 读不到就当作不支持，侧栏不列「模型」
-        if (!cancelled) applyModelsSupported(false);
+      .catch((error) => {
+        // 读不到不再当作不支持（原来侧栏「模型」会消失）：入口照常列，模型页顶上说原因、给 `再试一次`。
+        // 不支持的系统上命令不会失败（返回 supported: false），所以失败只会出在支持的系统上
+        if (cancelled) return;
+        const parsed = parseBackendError(String(error));
+        setGatewayError({
+          kind: "other",
+          path: "",
+          line: null,
+          reason: "",
+          detail: parsed.detail ?? String(error),
+        });
+        applyModelsSupported(true);
       });
     // 路径显示把主目录写成 ~：主目录启动时读一次，之后 displayPath 同步可用
     void loadHome();
@@ -402,7 +427,12 @@ export default function App() {
 
   /// 模型页的节由注册表生成（shell/agents.tsx）：Codex 与 Claude（桌面应用）的第三方模型，只在 macOS 上有。
   /// 侧栏「模型」后的橙点＝任一家开着，与模型页开关、托盘开关读同一份状态，同一帧亮灭
-  const agentState: AgentState = { gateway: gatewayState, modelsSupported, usage: null };
+  const agentState: AgentState = {
+    gateway: gatewayState,
+    modelsSupported,
+    usage: null,
+    gatewayError,
+  };
   const visible = visibleAgents(AGENTS, agentState);
   const modelsAvailable = visible.known ? visible.agents.length > 0 : null;
   /// 上次停在模型页、还没问出支不支持时：侧栏照样列「模型」并选中它，页里出忙碌空态（问出不支持再退回 SKILLS）
@@ -454,6 +484,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nav]);
 
+  // ===== 退出 Sophia（菜单「退出 Sophia」⌘Q，spec 2026-10-03-gateway-in-app R5–R9）：确认框在窗口正中 =====
+  const quit = useQuitFlow();
+  const startQuit = quit.start;
+  useEffect(() => {
+    // 退出必须总能生效：反馈小窗开着（发送中也一样）先收起它、摘掉壳的 inert，再照常走退出（确认框在壳里）
+    const pending = listen("quit-requested", () =>
+      quitRequested(feedbackOpen(), closeFeedback, startQuit),
+    );
+    return () => void pending.then((un) => un());
+  }, [startQuit]);
+
   // ===== 应用菜单（D15）：菜单栏按下一项 → 换目的地 / 交给设置页 / 作用于输入框 / 交给当前页 =====
   useEffect(() => {
     let disposed = false;
@@ -462,7 +503,9 @@ export default function App() {
       if (!isMenuCommand(payload)) return;
       const active = document.activeElement;
       const editing = isEditable(active);
-      const route = routeMenuCommand(payload, navRef.current, editing);
+      const routed = routeMenuCommand(payload, navRef.current, editing);
+      // 反馈小窗开着（模态，遮罩盖着整窗）：不换页、不交给页面，只留作用于小窗里输入框的撤销 / 全选
+      const route = feedbackOpen() ? routeUnderModal(routed, navRef.current) : routed;
       if (route.text === "undo") document.execCommand("undo");
       if (route.text === "select-all") {
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
@@ -598,35 +641,43 @@ export default function App() {
               <NoticePanel scope="app" message={error} onClose={() => setError(null)} />
             </div>
           )}
-          {nav.destination === "settings" ? (
-            <SettingsPage
-              onError={setError}
-              aboutRequest={aboutRequest ?? undefined}
-              onShowUpdates={() =>
-                navigate((n) => goLocation(goFace(goDestination(n, "skills"), "mine"), "all"))
-              }
-            />
-          ) : nav.destination === "usage" ? (
-            <UsagePage onError={setError} />
-          ) : nav.destination === "models" ? (
-            <ModelsPage
-              key={modelsVisit}
-              entries={visible.agents}
-              state={agentState}
-              loading={modelsLoading}
-              onError={setError}
-              onGatewayState={setGatewayState}
-              banner={error !== null}
-            />
-          ) : (
-            // SKILLS / MCP：页面头左端是 `我的 ｜ 发现` 滑槽，右端留给页面自己的动作（PageHeadActions）
-            <PageHead
-              location
-              lead={<FaceTabs value={face} onChange={(face) => navigate((n) => goFace(n, face))} />}
-            >
-              {scopedPages[nav.destination]?.() ?? null}
-            </PageHead>
-          )}
+          {/* 上次意外退出、上报关着时提示一次（把问题报告给我们） */}
+          <CrashNotice />
+          {/* 页面兜底：只包页面这一块，侧栏在外；换页（key）就重置 */}
+          <PageGuard key={nav.destination}>
+            {faultPage === nav.destination && <FaultBomb page={faultPage} />}
+            {nav.destination === "settings" ? (
+              <SettingsPage
+                onError={setError}
+                aboutRequest={aboutRequest ?? undefined}
+                onShowUpdates={() =>
+                  navigate((n) => goLocation(goFace(goDestination(n, "skills"), "mine"), "all"))
+                }
+              />
+            ) : nav.destination === "usage" ? (
+              <UsagePage onError={setError} />
+            ) : nav.destination === "models" ? (
+              <ModelsPage
+                key={modelsVisit}
+                entries={visible.agents}
+                state={agentState}
+                loading={modelsLoading}
+                onError={setError}
+                onGatewayState={setGatewayState}
+                banner={error !== null}
+              />
+            ) : (
+              // SKILLS / MCP：页面头左端是 `我的 ｜ 发现` 滑槽，右端留给页面自己的动作（PageHeadActions）
+              <PageHead
+                location
+                lead={
+                  <FaceTabs value={face} onChange={(face) => navigate((n) => goFace(n, face))} />
+                }
+              >
+                {scopedPages[nav.destination]?.() ?? null}
+              </PageHead>
+            )}
+          </PageGuard>
         </main>
       </div>
       {/* 右下那一叠（DESIGN「浮起小窗的位置」）：不属于任何一处的提示小窗，全应用只有这一套——
@@ -636,6 +687,9 @@ export default function App() {
           <BackgroundMcpToast report={backgroundMcpReport} onClose={closeMcpToast} />
         )}
       </ToastStack>
+      {quit.dialog}
+      {/* 反馈小窗挂在壳上（不随页面卸载：发送中切页也不丢草稿与请求）；入口键不在了时成功提示出在右下 */}
+      <FeedbackHost />
     </div>
   );
 }

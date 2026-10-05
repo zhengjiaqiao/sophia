@@ -126,6 +126,49 @@ test("灰面板：连不上时说上次的结果与多久前；没有缓存说�
   );
 });
 
+// spec 2026-10-04-local-diagnostics R10 / AC9：读不懂、读到一半断了、限流各说各的，不再一律「无法连接」
+test("灰面板：后端给了原因就按原因说（读不懂 / 断了 / 超时接上缓存或随包；限流带等待时间）", () => {
+  const now = new Date(2026, 8, 27, 18);
+  const sixHoursAgo = now.getTime() / 1000 - 6 * 3600;
+  assert.equal(
+    fallbackText(
+      {
+        service: "skills.sh",
+        cachedAt: sixHoursAgo,
+        rateLimited: false,
+        reason: "skills.sh 返回的内容读不懂",
+        detail: "GET https://skills.sh/api/search?… → 200 OK",
+      },
+      now,
+    ),
+    "skills.sh 返回的内容读不懂，显示的是上次的结果 · 6 小时前",
+  );
+  assert.equal(
+    fallbackText(
+      { service: "skills.sh", cachedAt: null, rateLimited: false, reason: "从 skills.sh 读到一半断了" },
+      now,
+    ),
+    "从 skills.sh 读到一半断了，显示的是随包附带的列表",
+  );
+  assert.equal(
+    fallbackText(
+      {
+        service: "skills.sh",
+        cachedAt: sixHoursAgo,
+        rateLimited: true,
+        reason: "skills.sh 限流了，约 1 分钟后再试",
+      },
+      now,
+    ),
+    "skills.sh 限流了，约 1 分钟后再试",
+  );
+  // 只是连不上：照旧
+  assert.equal(
+    fallbackText({ service: "skills.sh", cachedAt: null, rateLimited: false, reason: null }, now),
+    "现在无法连接 skills.sh，显示的是随包附带的列表",
+  );
+});
+
 test("命令的错：中文句原样，其余换成兜底句", () => {
   assert.equal(errorText("GitHub 暂时限流，稍后再试", "x"), rateLimited());
   assert.equal(errorText(new Error("网络不通"), "x"), "网络不通");

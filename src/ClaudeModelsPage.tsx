@@ -28,6 +28,7 @@ import {
   RESTART_POLL_MS,
   modelLabel,
   parseBackendError,
+  portMovedNote,
   routerUnavailable,
 } from "./modelsView.ts";
 import type { RestartPhase } from "./modelsView.ts";
@@ -291,7 +292,10 @@ export function ClaudeTodos({
           key={todo.kind}
           scope="section"
           message={todo.message}
-          reason={(todo.kind === "router" ? routerFailure : todo.reason) ?? undefined}
+          // 路由那一条：没接上时原因是那一种（端口），路由没在跑时是自愈失败的原话
+          reason={
+            (todo.kind === "router" ? (todo.reason ?? routerFailure) : todo.reason) ?? undefined
+          }
           busy={resolving === todo.kind ? todo.busy : undefined}
           action={{
             label: todo.label,
@@ -648,6 +652,7 @@ export default function ClaudeModelsPage({ onError, onGatewayState }: AgentSecti
         : null;
   const switching = phase.kind === "switching" ? phase.next : null;
   const on = switching ?? view.enabled;
+  const portNote = portMovedNote(state, "claude");
 
   return (
     <AgentPage
@@ -687,6 +692,8 @@ export default function ClaudeModelsPage({ onError, onGatewayState }: AgentSecti
           />
         </div>
       ) : null}
+      {/* 换了端口、Claude 等着重启：一行灰字说为什么（跟着 `重启生效` 走） */}
+      {portNote !== null ? <p className="models-port-note">{portNote}</p> : null}
       <ClaudePicked view={view} onRemove={removeModel} />
       <ClaudeCostNote on={on} />
       <ClaudeTodos

@@ -89,6 +89,23 @@
   color: var(--ink-mute);
 }
 
+/* 能再试的原因：右端一颗紧凑键「再试一次」（跑着时原位换成刻度 +「正在读取」）。原因放不下就折行，键不收窄 */
+.usage-note--retry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.usage-note__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.usage-note--retry > :not(.usage-note__text) {
+  flex: none;
+  white-space: nowrap;
+}
+
 /* 两行版式（托盘，系统菜单风格）：每个窗口上一行「窗口名 ……… 读数」（名 13、读数 12），下一行满宽进度条（高 5）。
    一个窗口一块，块间 3 */
 .usage-wins--stacked {

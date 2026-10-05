@@ -147,10 +147,20 @@ impl App {
         family: &mut Family,
         republish: bool,
     ) -> Result<Vec<String>, AppError> {
+        self.commit_family_as(family, republish, false)
+    }
+
+    /// 同 `commit_family`；`selection` 为真＝这次是改选模型，Codex 那一家要重新判断接法（R4）
+    pub(super) fn commit_family_as(
+        &self,
+        family: &mut Family,
+        republish: bool,
+        selection: bool,
+    ) -> Result<Vec<String>, AppError> {
         match family {
             Family::Codex(s) => {
                 if republish && self.enabled(s) {
-                    self.republish(s)?;
+                    self.republish(s, selection)?;
                 }
                 self.save(s)?;
                 Ok(Vec::new())
@@ -232,11 +242,8 @@ impl App {
                 sophia_core::t!("models.app.noBaseUrl"),
             ));
         }
-        let key = (self.deps.get_key)(agent, id)
-            .ok()
-            .filter(|k| !k.trim().is_empty());
-        let key =
-            key.ok_or_else(|| AppError::new("invalid", sophia_core::t!("models.app.noKey")))?;
+        // 没有、读不出（文件权限、还在钥匙串里）各说各的原因
+        let key = self.require_key(agent, provider, true)?;
         Ok((provider.base_url.clone(), key))
     }
 
@@ -282,14 +289,16 @@ impl App {
         self.merge_locked(agent, id, models, api_base).map(|_| ())
     }
 
+    /// 记下这一家拉不到模型的原因与技术原文（`detail`，已去隐私；没有为 None）
     pub fn record_unreachable_in(
         &self,
         agent: Agent,
         id: &str,
         reason: UnreachableReason,
+        detail: Option<String>,
     ) -> Result<(), AppError> {
         let _guard = self.guard();
-        self.unreachable_locked(agent, id, reason)
+        self.unreachable_locked(agent, id, reason, detail)
     }
 
     /// 保存这一家网关的完整勾选；已生效时让配置跟上（见 `commit_family`）
@@ -365,11 +374,8 @@ impl App {
         self.save_family(&family)?;
         for (from_id, id) in copied {
             // 另一家那一份没有密钥就不带：这一家的网关照样在，界面显示「没有密钥」
-            if let Ok(key) = (self.deps.get_key)(from, &from_id) {
-                if !key.trim().is_empty() {
-                    (self.deps.set_key)(agent, &id, key.trim())
-                        .map_err(|e| AppError::new("invalid", e))?;
-                }
+            if let Ok(Some(key)) = self.key_of(from, &from_id) {
+                (self.deps.set_key)(agent, &id, &key).map_err(|e| AppError::new("invalid", e))?;
             }
         }
         Ok(())
@@ -433,7 +439,7 @@ impl App {
         // 地址与拉到的模型在内存里一起改，最后只存一次（已生效时只重写一遍配置）
         let (id, url_changed) = apply_upsert(&mut family, id, name, cleaned)?;
         if is_new {
-            // 新建的网关要先有 id 才有钥匙串账户；密钥没存成就什么都不存
+            // 新建的网关要先有 id 才能存密钥；密钥没存成就什么都不存
             (self.deps.set_key)(agent, &id, key).map_err(|e| AppError::new("invalid", e))?;
         }
         let base_changed = apply_merge(&mut family, &id, models, api_base)?;
@@ -447,12 +453,14 @@ impl App {
         agent: Agent,
         id: &str,
         reason: UnreachableReason,
+        detail: Option<String>,
     ) -> Result<(), AppError> {
         let mut family = self.load_family(agent)?;
         let provider = family
             .provider_mut(id)
             .ok_or_else(|| unknown_provider(id))?;
         provider.unreachable = Some(reason);
+        provider.unreachable_detail = detail;
         self.save_family(&family)
     }
 
@@ -512,7 +520,7 @@ impl App {
             }
         }
         provider.models = next;
-        self.commit_family(&mut family, true)
+        self.commit_family_as(&mut family, true, true)
     }
 
     fn remove_locked(&self, agent: Agent, id: &str) -> Result<Vec<String>, AppError> {
@@ -574,7 +582,7 @@ impl App {
                 }
                 let key = match key {
                     Some(key) => Some(key.trim().to_owned()),
-                    None => (self.deps.get_key)(agent, this_id).ok(),
+                    None => self.key_of(agent, this_id).ok().flatten(),
                 };
                 let mut family = family;
                 let taken: Vec<&str> = family.providers().iter().map(|p| p.id.as_str()).collect();
@@ -659,6 +667,7 @@ fn apply_upsert(
             if changed {
                 provider.api_base = None; // 旧地址探明的接口基址作废
                 provider.unreachable = None; // 无法连接是对旧地址的结论
+                provider.unreachable_detail = None;
             }
             if let Some(name) = name {
                 provider.name = name.to_owned();
@@ -691,6 +700,7 @@ fn apply_merge(
         .provider_mut(id)
         .ok_or_else(|| unknown_provider(id))?;
     provider.unreachable = None; // 拉到了就是连得上
+    provider.unreachable_detail = None;
     let api_base = api_base.trim().trim_end_matches('/');
     let api_base_changed = !api_base.is_empty() && provider.api_base.as_deref() != Some(api_base);
     if api_base_changed {
@@ -749,6 +759,7 @@ fn unselected_copy(provider: &ProviderSettings, id: &str) -> ProviderSettings {
             })
             .collect(),
         unreachable: None,
+        unreachable_detail: None,
     }
 }
 

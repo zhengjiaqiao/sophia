@@ -114,12 +114,16 @@ impl sophia_gateway::usage::scheduler::Host for TauriHost {
 
     fn save_readings(&self, readings: &[sophia_core::usage::Reading]) {
         // 存不下只影响重启后的首屏（R13），不打断调度
-        let _ = self.store.save_usage_readings(readings);
+        if let Err(e) = self.store.save_usage_readings(readings) {
+            log::warn!("存用量读数失败：{e}");
+        }
     }
 
     fn save_memo(&self, memo: &sophia_core::usage::ScheduleMemo) {
         // 存不下只是重启后少了上次尝试与限流的记忆，不打断调度
-        let _ = self.store.save_usage_memo(memo);
+        if let Err(e) = self.store.save_usage_memo(memo) {
+            log::warn!("存用量调度记录失败：{e}");
+        }
     }
 }
 
@@ -204,6 +208,7 @@ pub fn usage_set_settings(
             MAX_MENU_BAR_AGENTS
         ));
     }
+    let _settings_guard = state.store.lock_settings();
     let mut all = state.store.load_settings().map_err(err)?;
     all.usage = settings.clone();
     state.store.save_settings(&all).map_err(err)?;
@@ -213,8 +218,20 @@ pub fn usage_set_settings(
     Ok(())
 }
 
-/// 手动刷新（`agent` 为空刷全部），仍受各取法的最短间隔与限流约束（R6、R7）
+/// 手动刷新。给了 `agent` 是原因行旁的「再试一次」（2026-10-03）：只取这一个，起进程的取法不等最短间隔、
+/// 限流退避照守，这一轮跑完才返回（界面据此收回「正在读取…」，新数照常经 `usage-changed` 到）。
+/// `agent` 为空刷全部，仍受各取法的最短间隔与限流约束，发出即返回（R6、R7）
 #[tauri::command]
-pub fn usage_refresh(shared: tauri::State<'_, UsageShared>, agent: Option<AgentId>) {
-    shared.handle.send(Command::Refresh(agent));
+pub async fn usage_refresh(
+    shared: tauri::State<'_, UsageShared>,
+    agent: Option<AgentId>,
+) -> Result<(), String> {
+    match agent {
+        // 调度循环没在跑（非 macOS）时回话端随命令丢了，立即返回
+        Some(agent) => {
+            let _ = shared.handle.retry(agent).await;
+        }
+        None => shared.handle.send(Command::Refresh(None)),
+    }
+    Ok(())
 }

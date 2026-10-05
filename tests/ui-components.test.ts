@@ -49,10 +49,10 @@ test("parseDuration：CSS 时长写法 → 毫秒；写错、空、负数一律 
 test("JS 里不再镜像 CSS 的时长：抽屉、新手提示条、提示条淡出、推入页都读 token", () => {
   const read = (f: string) => readFileSync(new URL(`../src/ui/${f}`, import.meta.url), "utf8");
   assert.match(read("Drawer.tsx"), /motionMs\("--dur-drawer"\)/);
-  assert.match(read("HintStrip.tsx"), /motionMs\("--dur-drawer"\)/);
+  assert.match(read("NoticePanel.tsx"), /motionMs\("--dur-drawer"\)/);
   assert.match(read("Toast.tsx"), /motionMs\("--motion-fast"\)/);
   assert.match(read("PushedPage.tsx"), /motionMs\("--dur-push"\)/);
-  for (const f of ["Drawer.tsx", "HintStrip.tsx", "Toast.tsx", "PushedPage.tsx"]) {
+  for (const f of ["Drawer.tsx", "NoticePanel.tsx", "Toast.tsx", "PushedPage.tsx"]) {
     assert.doesNotMatch(read(f), /(_MS|Ms)\s*=\s*(120|200|260)\b/, f);
   }
   // 被读的 token 都在，且减少动效时位移类置 0（JS 读到的也是 0，不必再各判一次）

@@ -13,8 +13,8 @@
 //! 本来就不出；删它反而要判断「是不是别的工具在这期间也往里放过东西」。
 use super::archive::{self, Pick};
 use super::{
-    installs, treehash, InstallItem, InstallOutcome, InstallPlan, InstallRecord, MarketResult,
-    SkillInstallRequest, UpdateInfo,
+    installs, treehash, AgentDir, InstallItem, InstallOutcome, InstallPlan, InstallRecord,
+    MarketResult, SkillInstallRequest, Unlinked, UpdateInfo,
 };
 use crate::discovery::{self, Env};
 use crate::fs::{entry_kind, normalize, same_real, EntryKind};
@@ -169,6 +169,8 @@ fn usable_name(name: &str) -> bool {
 /// - `direct_readers` 列出 `harnesses` 里所有在这个位置直接读通用仓库的（安装页给每个勾选行写
 ///   `直接读取，不用链接`，勾没勾都算），外加勾选的 agent 里目录整个链到通用仓库的；
 /// - `links` 只给勾选的、其余的 agent 建；那一格已经有东西（别的链接、同名文件夹）的不出动作；
+/// - `agent_dirs` 列出 `harnesses` 里其余（要靠链接的）agent 的目录与里面已被占的名字，勾没勾都列
+///   （安装页据此把那一行画成不能勾，执行时据此把勾了却没链上的写进 `unlinked`）；
 /// - 被拒的 skill 不出链接。
 pub fn plan(
     env: &Env,
@@ -245,17 +247,14 @@ pub fn plan(
         .collect();
     let source = loc.store_source(&store, ready);
 
-    let chosen: Vec<Harness> = harnesses
-        .iter()
-        .filter(|h| request.harness_ids.contains(&h.id))
-        .cloned()
-        .collect();
+    let chosen = |id: &str| request.harness_ids.iter().any(|h| h == id);
     let projects: Vec<PathBuf> = match &loc {
         Location::Global => Vec::new(),
         Location::Project(p) => vec![p.clone()],
     };
+    // 全部 agent 的目标都看（安装页要知道没勾的那几行那里有没有同名的），链接只给勾选的建
     let targets: Vec<Target> =
-        discovery::targets(env, &chosen, &projects, std::slice::from_ref(&source))
+        discovery::targets(env, harnesses, &projects, std::slice::from_ref(&source))
             .into_iter()
             .filter(|t| skills::domain_key(&t.scope) == location)
             .collect();
@@ -265,16 +264,34 @@ pub fn plan(
         .filter(|h| reads_store_directly(h, &loc, &store))
         .map(|h| h.id.clone())
         .collect();
-    // 勾选的 agent 的目录整个就是通用仓库（写法相同、解析后相同、或整目录链过去）：也是直接读
+    // 目录整个就是通用仓库（写法相同、解析后相同、或整目录链过去）：也是直接读——勾选的才算进 `direct_readers`
     let mut link_targets = Vec::new();
+    let mut agent_dirs = Vec::new();
     for t in targets {
         let id = harness_of(&t).to_string();
-        if direct.contains(&id)
-            || same_place(&t.path, &store)
-            || t.linked_whole_to.as_deref() == Some(source.id.as_str())
-        {
-            direct.insert(id);
-        } else {
+        if direct.contains(&id) {
+            continue;
+        }
+        if same_place(&t.path, &store) || t.linked_whole_to.as_deref() == Some(source.id.as_str()) {
+            if chosen(&id) {
+                direct.insert(id);
+            }
+            continue;
+        }
+        // 已有同名东西（文件夹、别的链接、断链）的：不覆盖，安装页那一行不能勾
+        let taken: Vec<String> = source
+            .skills
+            .iter()
+            .filter(|s| entry_kind(&t.path.join(&s.name)) != EntryKind::Missing)
+            .map(|s| s.name.clone())
+            .collect();
+        agent_dirs.push(AgentDir {
+            harness_id: id.clone(),
+            dir: t.path.clone(),
+            chosen: chosen(&id),
+            taken,
+        });
+        if chosen(&id) {
             link_targets.push(t);
         }
     }
@@ -303,7 +320,40 @@ pub fn plan(
         items,
         direct_readers,
         links,
+        agent_dirs,
     })
+}
+
+/// 放到位了、但没给勾了的 agent 链上的：计划时那里已有同名的（不出动作），和建链接失败的（M14）
+fn unlinked(plan: &InstallPlan, placed: &[&InstallItem], links: &SyncReport) -> Vec<Unlinked> {
+    let mut out = Vec::new();
+    for d in plan.agent_dirs.iter().filter(|d| d.chosen) {
+        for item in placed.iter().filter(|i| d.taken.contains(&i.name)) {
+            out.push(Unlinked {
+                harness_id: d.harness_id.clone(),
+                name: item.name.clone(),
+                reason: crate::t!("market.install.linkTaken"),
+            });
+        }
+    }
+    for e in &links.entries {
+        let Outcome::Failed(reason) = &e.outcome else {
+            continue;
+        };
+        // 几家共用一个目录（Amp、Kimi、Replit）时链接按路径去重只有一条：算到每一个勾了的头上
+        for d in plan
+            .agent_dirs
+            .iter()
+            .filter(|d| d.chosen && d.dir == e.action.target)
+        {
+            out.push(Unlinked {
+                harness_id: d.harness_id.clone(),
+                name: e.action.item_name.clone(),
+                reason: reason.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// `archive::extract` 的形状
@@ -457,6 +507,7 @@ pub(crate) fn execute_with(
         .filter(|e| e.outcome == Outcome::Created)
         .map(|e| (e.action.target_path.clone(), e.action.source_path.clone()))
         .collect();
+    out.unlinked = unlinked(plan, &placed, &out.links);
 
     for item in placed {
         out.installed.push(item.name.clone());
@@ -1169,6 +1220,139 @@ mod tests {
         assert_eq!(after.remove(".agents/skills").as_deref(), Some("dir"));
         assert_eq!(after.remove(".agents").as_deref(), Some("dir"));
         assert_eq!(after, before);
+    }
+
+    /// M14：安装页要知道哪个 agent 那里已有同名的（勾没勾都算）：给每个要建链接的 agent 列出它的目录、
+    /// 里面已被占的名字；直接读取的不列
+    #[test]
+    fn plan_lists_taken_names_per_agent() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        tree.skill("home/.claude/skills/pdf");
+        tree.dir("home/.codex/skills");
+        let env = env_at(&home);
+        let hs = harnesses(&env, &["claude-code", "codex", "cline"]);
+        let plan = plan(&env, &hs, &request("global", &["skills/pdf"], &[])).unwrap();
+        let dirs: Vec<(&str, &Path, bool, Vec<&str>)> = plan
+            .agent_dirs
+            .iter()
+            .map(|d| {
+                (
+                    d.harness_id.as_str(),
+                    d.dir.as_path(),
+                    d.chosen,
+                    d.taken.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            dirs,
+            vec![
+                (
+                    "claude-code",
+                    home.join(".claude/skills").as_path(),
+                    false,
+                    vec!["pdf"]
+                ),
+                ("codex", home.join(".codex/skills").as_path(), false, vec![]),
+            ]
+        );
+        assert!(plan.links.is_empty());
+    }
+
+    /// M14：勾了的 agent 那里已有同名的：不覆盖、不建链接，结果里如实写进 `unlinked`
+    #[test]
+    fn execute_reports_taken_agents_as_unlinked() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        let theirs = tree.skill("home/.claude/skills/pdf");
+        tree.dir("home/.codex/skills");
+        let env = env_at(&home);
+        let hs = harnesses(&env, &["claude-code", "codex"]);
+        let plan = plan(
+            &env,
+            &hs,
+            &request("global", &["skills/pdf"], &["claude-code", "codex"]),
+        )
+        .unwrap();
+        let mut subs = Subscriptions::new();
+        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        assert_eq!(out.installed, vec!["pdf".to_string()]);
+        assert_eq!(
+            out.unlinked,
+            vec![Unlinked {
+                harness_id: "claude-code".into(),
+                name: "pdf".into(),
+                reason: "那里已有同名的".into(),
+            }]
+        );
+        assert_eq!(entry_kind(&theirs), EntryKind::Dir, "原有的那份不动");
+        assert!(matches!(
+            entry_kind(&home.join(".codex/skills/pdf")),
+            EntryKind::Symlink(_)
+        ));
+    }
+
+    /// M14：出计划之后、执行之前 agent 那里冒出了同名的：建链接失败，同样进 `unlinked`，原因用失败那一句
+    #[test]
+    fn execute_reports_failed_links_as_unlinked() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        tree.dir("home/.codex/skills");
+        let env = env_at(&home);
+        let hs = harnesses(&env, &["codex"]);
+        let plan = plan(&env, &hs, &request("global", &["skills/pdf"], &["codex"])).unwrap();
+        assert_eq!(plan.links.len(), 1);
+        tree.skill("home/.codex/skills/pdf");
+        let mut subs = Subscriptions::new();
+        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        assert_eq!(out.installed, vec!["pdf".to_string()]);
+        assert_eq!(out.unlinked.len(), 1, "{:?}", out.unlinked);
+        assert_eq!(out.unlinked[0].harness_id, "codex");
+        assert_eq!(out.unlinked[0].name, "pdf");
+        assert!(!out.unlinked[0].reason.is_empty());
+    }
+
+    /// 几家共用一个 skill 目录（Amp、Kimi、Replit 都是 `~/.config/agents/skills`）：建链接失败要算到
+    /// 每一个勾了的头上，没勾的不算（链接按路径去重，只有一条动作）
+    #[test]
+    fn failed_link_in_shared_dir_counts_every_chosen_agent() {
+        for (chosen, expected) in [
+            (vec!["kimi-cli"], vec!["kimi-cli"]),
+            (vec!["amp", "kimi-cli"], vec!["amp", "kimi-cli"]),
+        ] {
+            let tree = TempTree::new();
+            let home = tree.dir("home");
+            tree.dir("home/.config/agents/skills");
+            let env = env_at(&home);
+            let hs = harnesses(&env, &["amp", "kimi-cli", "replit"]);
+            let plan = plan(&env, &hs, &request("global", &["skills/pdf"], &chosen)).unwrap();
+            assert_eq!(plan.links.len(), 1, "{:?}", plan.links);
+            tree.skill("home/.config/agents/skills/pdf");
+            let mut subs = Subscriptions::new();
+            let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+            let ids: Vec<&str> = out.unlinked.iter().map(|u| u.harness_id.as_str()).collect();
+            assert_eq!(ids, expected, "勾了 {chosen:?}");
+        }
+    }
+
+    /// 全都链上了：`unlinked` 为空
+    #[test]
+    fn execute_all_linked_has_no_unlinked() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        tree.dir("home/.claude/skills");
+        let env = env_at(&home);
+        let hs = harnesses(&env, &["claude-code"]);
+        let plan = plan(
+            &env,
+            &hs,
+            &request("global", &["skills/pdf"], &["claude-code"]),
+        )
+        .unwrap();
+        let mut subs = Subscriptions::new();
+        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        assert!(out.unlinked.is_empty());
     }
 
     /// 撤销前链接被换成了别处：不删它、如实上报；文件夹照样进暂存

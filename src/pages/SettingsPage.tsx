@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { t, tn } from "../i18n.ts";
@@ -23,9 +25,17 @@ import {
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { AppearanceRow } from "./AppearanceRow.tsx";
 import { LanguageRow } from "./LanguageRow.tsx";
+import { ISSUES_URL, PRIVACY_URL, ReportRow } from "./ReportRow.tsx";
+import {
+  FeedbackSentNote,
+  openFeedback,
+  setReportSettings,
+  useReportSettings,
+} from "../feedback.tsx";
+import { SettingRow } from "./SettingRow.tsx";
 import { updateCheckFailure } from "../updateText.ts";
 import { appUpdates, useAppUpdate } from "../useAppUpdate.ts";
-import { lastCheckText } from "../market/updateView.ts";
+import { lastCheckDetail } from "../market/updateView.ts";
 import { useSkillUpdates } from "../market/useSkillUpdates.ts";
 import "./SettingsPage.css";
 
@@ -39,10 +49,12 @@ import "./SettingsPage.css";
 /// 行高 36；默认只列已安装的，其余收在一行展开「› 未安装的 N 个」里。**最多显示 4 个**（上限来自 core，
 /// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
 /// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
-/// 再往下 48：`skill 更新`——`自动检查 skill 更新` + 灰字何时查，右端 `立即检查`（默认键紧凑）+ 开关（默认开）；
-/// 下一行 `上次检查 今天 14:32 · 2 个有更新`。查的结果与 SKILLS 页同一份（`useSkillUpdates`）。
-/// 再往下 48：`关于`——版本（等宽 `ink-faint`）+ `检查更新`（默认键紧凑 24，应用内查，不跳 GitHub）。
-/// 应用菜单「关于 Sophia」「检查更新…」停在这一节（`aboutRequest`）。
+/// 节序：`通用`（界面语言、外观、开机启动）→ `列表里的 agent` → `skill 更新`（自动检查｜开关；上次检查｜`立即检查`）
+/// → `关于`（版本｜`检查更新`，应用内查，不跳 GitHub；`使用统计和错误报告`｜开关，这份构建能上报才有）。查 skill 更新的结果与 SKILLS 页同一份（`useSkillUpdates`）。
+/// 除 agent 名单外，每一行都是设置行（`SettingRow`，2026-10-04 画板 B，照 Claude 的设置页）：名字与一句灰字在左，
+/// 控件在右端一列，行与行之间一条行线；节小标下不画线，节间 32；宽度同各页，随窗口变宽。
+/// 应用菜单「关于 Sophia」「检查更新…」停在 `关于`（`aboutRequest`）。`开机启动`（spec 2026-10-03-gateway-in-app R15、R16）
+/// 开没开以系统登录项为准、不另存。
 ///
 /// 改一个生效一个，**没有「保存」按钮**。
 ///
@@ -50,8 +62,7 @@ import "./SettingsPage.css";
 /// - **不展示路径**。用户要做的判断只有一个，路径是我们的实现细节。
 /// - 不提「目录不存在，开启任一 skill 时会建出来」——那是开启 skill 那一刻的事。
 /// - 不给「链接方式（相对 / 绝对）」开关：它按「本体是否在目标项目内」自动判，是正确性判断不是口味问题。
-/// - **没有后台服务那一行**（D10）：它只转述 Codex 开关的状态、自己不能操作；
-///   后台服务残留时的 `卸下后台服务` 在 Codex 页「第三方模型」节头与托盘。
+/// - **没有路由状态那一行**（D10）：它只转述 Codex 开关的状态、自己不能操作。
 
 /// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
 /// 其余收在「› 未安装的 N 个」展开里。
@@ -290,9 +301,75 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
       onError(String(e));
     }
   };
+  // ── 使用统计和错误报告（spec 2026-10-04-reporting-feedback R6）──
+  /// 读不回来（内部版没有这个命令）就当不能上报，整行不画、不报错。与出错页、意外退出提示共用一份
+  /// （`useReportSettings`）：这里拨了开关，那两处给不给 `报告这个问题` 跟着变
+  const report = useReportSettings();
+  /// 当场生效：先画出来再写，写不成读回原样并说原因
+  const toggleReport = async (next: boolean) => {
+    setReportSettings((r) => (r ? { ...r, autoReport: next } : r));
+    try {
+      await api.setAutoReport(next);
+    } catch (e) {
+      setReportSettings((r) => (r ? { ...r, autoReport: !next } : r));
+      onError(String(e));
+    }
+  };
+  // ── 启动（spec 2026-10-03-gateway-in-app R15、R16）──
+  /// 开机启动：以系统的登录项为准、不另存（用户在系统设置里关掉，这里跟着显示关）。读回来之前不画开关；
+  /// 先画出来再写，写不成读回原样并说原因
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  /// 这个平台没有开机启动（非 macOS）：整节不画
+  const [autostartSupported, setAutostartSupported] = useState(true);
+  /// 正在改：系统要一两秒才回话，这期间再拨不发第二次（否则刚打开又被关掉）
+  const autostartPending = useRef(false);
+  useEffect(() => {
+    const read = () => {
+      if (autostartPending.current) return;
+      void api.autostartGet().then(
+        (on) => {
+          if (on === null) setAutostartSupported(false);
+          else if (!autostartPending.current) setAutostart(on);
+        },
+        (e) => onError(String(e)),
+      );
+    };
+    // 进来读一次；窗口回到前台再读（用户可能刚在系统设置里改过，R16）；
+    // 第一次打开时后台默认注册完成也再读（spec 2026-10-05-keep-running R1）
+    read();
+    let disposed = false;
+    const unlisteners: (() => void)[] = [];
+    const keep = (p: Promise<() => void>) =>
+      void p.then((un) => (disposed ? un() : unlisteners.push(un)));
+    keep(
+      getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        if (focused) read();
+      }),
+    );
+    keep(listen("autostart-changed", () => read()));
+    return () => {
+      disposed = true;
+      unlisteners.forEach((un) => un());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const toggleAutostart = async (next: boolean) => {
+    if (autostartPending.current) return;
+    autostartPending.current = true;
+    setAutostart(next);
+    try {
+      setAutostart(await api.autostartSet(next));
+    } catch (e) {
+      setAutostart(!next);
+      onError(String(e));
+    } finally {
+      autostartPending.current = false;
+    }
+  };
+
   const checkingSkills = skillUpdates.checking === "settings";
   const skillNotice = skillUpdates.noticeFor("settings");
-  const lastCheckLine = lastCheckText(
+  const lastCheckLine = lastCheckDetail(
     skillUpdates.checkedAt ?? lastCheck,
     skillUpdates.loaded ? skillUpdates.updates.length : null,
   );
@@ -343,16 +420,32 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
   return (
     <PageHead lead={<PageTitle>{t("settings.title")}</PageTitle>}>
       <div className="settings-page">
-        {/* 界面（页面头下 24，第一节）：两行，界面语言在上、外观在下（第三批画板 1A） */}
+        {/* 通用（页面头下 24，第一节）：界面语言、外观、开机启动三行（2026-10-04 画板 B 把原「界面」「启动」两节并成一节）。
+            每一行是设置行：名字与灰字在左、控件在右端一列，行与行之间一条行线 */}
         <div className="settings-page__section">
-          <SectionLabel rule>{t("settings.appearance.section")}</SectionLabel>
+          <SectionLabel>{t("settings.general.section")}</SectionLabel>
         </div>
         <LanguageRow value={language} onChange={(next) => void changeLanguage(next)} />
         <AppearanceRow value={appearance} onChange={(next) => void changeAppearance(next)} />
+        {/* 开机启动（spec 2026-10-03-gateway-in-app R15、R16）：这个平台没有就不画这一行 */}
+        {autostartSupported ? (
+          <SettingRow
+            label={t("settings.startup.autostart")}
+            note={t("settings.startup.autostartNote")}
+          >
+            {autostart === null ? null : (
+              <Switch
+                checked={autostart}
+                onChange={(next) => void toggleAutostart(next)}
+                label={t("settings.startup.autostart")}
+              />
+            )}
+          </SettingRow>
+        ) : null}
 
-        {/* 区块小标（上距 48）：下 7 一条 hairline；句子里的 agent 是词不是结构词，不经 Cap */}
+        {/* 区块小标（节间 32）；句子里的 agent 是词不是结构词，不经 Cap */}
         <div className="settings-page__section settings-page__section--later">
-          <SectionLabel rule>
+          <SectionLabel>
             {t("settings.agents.heading")}
             {list ? ` · ${t("settings.agents.maxShown", { max: maxShown })}` : ""}
           </SectionLabel>
@@ -396,40 +489,24 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
           </>
         )}
 
-        {/* skill 更新（上距 48）：一行 `自动检查 skill 更新` + 12 + 灰字何时查；右端 `立即检查` + 12 + 开关。
-            下一行上次检查的时刻与结果（12 ink-faint）。页面头不放检查键——结果在 `我的` 的提示条上说 */}
+        {/* skill 更新（节间 32）：两行设置行——`自动检查 skill 更新` + 灰字何时查｜开关；
+            `上次检查` + 时刻与结果｜查到了的 `去看看` + `立即检查`。页面头不放检查键——结果在 `我的` 的提示条上说 */}
         <div className="settings-page__section settings-page__section--later">
-          <SectionLabel rule>{t("settings.skillUpdates.section")}</SectionLabel>
+          <SectionLabel>{t("settings.skillUpdates.section")}</SectionLabel>
         </div>
-        <div className="settings-page__auto">
-          <span className="settings-page__label">{t("settings.skillUpdates.auto")}</span>
-          <span className="settings-page__auto-note">{t("settings.skillUpdates.autoNote")}</span>
-          <span className="settings-page__auto-keys">
-            <span className="settings-page__check">
-              {/* 查的时候键锁住，过了 0.3 秒门槛原位换成刻度 + 正在检查 */}
-              <BusySlot busy={checkingSkills} label={t("settings.checking")}>
-                <Button size="compact" onClick={() => !checkingSkills && skillUpdates.refresh()}>
-                  {t("settings.skillUpdates.checkNow")}
-                </Button>
-              </BusySlot>
-              {/* 限流、查不成：在按下的这颗键下浮起一句，不弹窗、不自动重试 */}
-              {skillNotice !== null ? (
-                <FloatingToast key={skillUpdates.notice?.at} align="end">
-                  <Toast kind="cannot" message={skillNotice} onDismiss={skillUpdates.clearNotice} />
-                </FloatingToast>
-              ) : null}
-            </span>
-            {autoCheck === null ? null : (
-              <Switch
-                checked={autoCheck}
-                onChange={(next) => void toggleAutoCheck(next)}
-                label={t("settings.skillUpdates.auto")}
-              />
-            )}
-          </span>
-        </div>
-        <p className="settings-page__last">
-          <span>{lastCheckLine}</span>
+        <SettingRow
+          label={t("settings.skillUpdates.auto")}
+          note={t("settings.skillUpdates.autoNote")}
+        >
+          {autoCheck === null ? null : (
+            <Switch
+              checked={autoCheck}
+              onChange={(next) => void toggleAutoCheck(next)}
+              label={t("settings.skillUpdates.auto")}
+            />
+          )}
+        </SettingRow>
+        <SettingRow label={t("settings.skillUpdates.lastCheck")} note={lastCheckLine}>
           {/* 查到了就给一条直达路：设置里看不到是哪几个（2026-09-27 产品负责人） */}
           {skillUpdates.loaded && skillUpdates.updates.length > 0 && onShowUpdates ? (
             <Button
@@ -442,14 +519,26 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
               {t("settings.skillUpdates.showUpdates")}
             </Button>
           ) : null}
-        </p>
+          <span className="settings-page__check">
+            {/* 查的时候键锁住，过了 0.3 秒门槛原位换成刻度 + 正在检查 */}
+            <BusySlot busy={checkingSkills} label={t("settings.checking")}>
+              <Button size="compact" onClick={() => !checkingSkills && skillUpdates.refresh()}>
+                {t("settings.skillUpdates.checkNow")}
+              </Button>
+            </BusySlot>
+            {/* 限流、查不成：在按下的这颗键下浮起一句，不弹窗、不自动重试 */}
+            {skillNotice !== null ? (
+              <FloatingToast key={skillUpdates.notice?.at} align="end">
+                <Toast kind="cannot" message={skillNotice} onDismiss={skillUpdates.clearNotice} />
+              </FloatingToast>
+            ) : null}
+          </span>
+        </SettingRow>
 
         <div ref={aboutRef} className="settings-page__section settings-page__section--later">
-          <SectionLabel rule>{t("settings.about.section")}</SectionLabel>
+          <SectionLabel>{t("settings.about.section")}</SectionLabel>
         </div>
-        <div className="settings-page__about">
-          <span className="settings-page__label">{t("settings.about.version")}</span>
-          <Mono>{current ?? "…"}</Mono>
+        <SettingRow label={t("settings.about.version")} note={<Mono>{current ?? "…"}</Mono>}>
           <span className="settings-page__check">
             {update.kind === "downloading" ? (
               <Button size="compact" disabled disabledReason={t("settings.about.downloading")}>
@@ -463,15 +552,26 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
                 </Button>
               </BusySlot>
             )}
+            {/* 键在右端：浮起的一句右对齐键，不越出内容右沿 */}
             {latest ? (
-              <FloatingToast key={latest} align="start">
+              <FloatingToast key={latest} align="end">
                 <Toast kind="success" sentence="settings.about.latest" onDismiss={dismissLatest} />
               </FloatingToast>
             ) : null}
           </span>
-        </div>
+        </SettingRow>
         {/* 检查更新的结果（待办条 / 查不成的一句）紧跟在 `检查更新` 那一行下（② 就近） */}
         {notice === null ? null : <div className="settings-page__update">{notice}</div>}
+        <ReportRow
+          settings={report}
+          onChange={(next) => void toggleReport(next)}
+          // 打不开浏览器就走页面的错误横幅（Codex 复审：兜底入口失败不能没声）
+          onPrivacy={() => void openUrl(PRIVACY_URL).catch((e) => onError(String(e)))}
+          onGithub={() => void openUrl(ISSUES_URL).catch((e) => onError(String(e)))}
+          // 反馈问题（R12、R13）：小窗是应用级的一份；发出去时键还在就把提示条锚在键下（右对齐键，不越出内容右沿）
+          onFeedback={() => openFeedback("settings")}
+          feedbackNote={<FeedbackSentNote source="settings" align="end" />}
+        />
       </div>
     </PageHead>
   );

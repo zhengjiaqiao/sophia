@@ -3,7 +3,9 @@ import {
   BusySlot,
   Button,
   Confirm,
-  HintStrip,
+  CornerToast,
+  Details,
+  FaultView,
   NoticePanel,
   Spinner,
   StateDot,
@@ -24,7 +26,7 @@ export function FeedbackFamily() {
     <Family
       id="feedback"
       title="提示与反馈"
-      lead="提示框补一句屏幕上没写的；提示条说刚做完了什么、会自己走；灰面板要你处理、不会自己走；新手提示条只在第一次来时说；确认框只问不可逆的决定。"
+      lead="提示框补一句屏幕上没写的；提示条说刚做完了什么、会自己走（锚点轻量一行，右下带记号栏）；灰面板嵌在页面里、不会自己走（左 ! 要你处理，没有 ! 是一次性说明）；确认框只问不可逆的决定。"
     >
       <Block
         name="Tooltip"
@@ -76,9 +78,9 @@ export function FeedbackFamily() {
 
       <Block
         name="Toast"
-        guide="刚做完的结果，会自己走（成功 4 / 6 秒、做不成 8 秒）｜ 要用户处理的事用灰面板"
+        guide="刚做完的结果，会自己走（成功 3 / 6 秒、做不成 8 秒）；长相由出在哪定：锚在触发处一律轻量一行，右下一律带记号栏｜ 要用户处理的事用灰面板"
       >
-        <Specimen label="成功 · 带撤销">
+        <Specimen label="锚点 · 成功 · 带撤销">
           <Toast
             kind="success"
             sentence="toast.line.success.write"
@@ -87,14 +89,7 @@ export function FeedbackFamily() {
             action={{ label: "撤销", onClick: noop }}
           />
         </Specimen>
-        <Specimen label="成功 · 没有动作">
-          <Toast
-            kind="success"
-            sentence="sources.added.done"
-            reading={<ToastCount n={11} line="market.update.count" />}
-          />
-        </Specimen>
-        <Specimen label="成功 · 名字 · 读数（trail）">
+        <Specimen label="锚点 · 成功 · 名字 · 读数（trail）">
           <Toast
             kind="success"
             sentence="sources.added.done"
@@ -102,7 +97,17 @@ export function FeedbackFamily() {
             trail={["已筛选出它的 7 个 skill"]}
           />
         </Specimen>
-        <Specimen label="做不成（错误）">
+        <Specimen label="锚点 · 做不成 · 原因 + ×">
+          <Toast
+            kind="cannot"
+            sentence="toast.line.cannot.write"
+            agents={codex}
+            names={["defuddle"]}
+            reason="已有同名"
+            onClose={noop}
+          />
+        </Specimen>
+        <Specimen label="锚点 · 做不成 · 第二行路径（与字对齐）">
           <Toast
             kind="cannot"
             sentence="toast.line.cannot.write"
@@ -113,7 +118,20 @@ export function FeedbackFamily() {
             onClose={noop}
           />
         </Specimen>
-        <Specimen label="部分失败 · 撤销不可用 + 离开的浅键">
+        <Specimen label="锚点 · 部分失败 · 原因放不下（折两行，与字对齐）">
+          <Toast
+            kind="partial"
+            sentence="toast.line.partial.write"
+            tally={{ done: 2, failed: 1 }}
+            reason="Cline 的 skills 目录是一个指向外置磁盘的链接，磁盘此刻没有接上"
+            action={{ label: "撤销", onClick: noop }}
+            onClose={noop}
+          />
+        </Specimen>
+        <Specimen label="锚点 · 单格失败（整句）">
+          <Toast kind="cannot" message="无法写入 Codex 的 skills 目录" />
+        </Specimen>
+        <Specimen label="锚点 · 部分失败 · 撤销不可用 + 离开的浅键">
           <Toast
             kind="partial"
             sentence="toast.line.partial.write"
@@ -127,7 +145,7 @@ export function FeedbackFamily() {
             onClose={noop}
           />
         </Specimen>
-        <Specimen label="撤销在等（忙碌）">
+        <Specimen label="锚点 · 撤销在等（忙碌）">
           <Toast
             kind="success"
             sentence="toast.line.success.write"
@@ -135,16 +153,72 @@ export function FeedbackFamily() {
             action={{ label: "撤销", onClick: noop, busy: "正在撤销" }}
           />
         </Specimen>
-        <Specimen label="忙碌形态（结果出来前同一位置）">
+        <Specimen label="锚点 · 忙碌形态（结果出来前同一位置）">
           <Toast busy="正在拆开 CardBox 的链接" />
+        </Specimen>
+        <Specimen label="右下 · 成功（后台自动添加）">
+          <CornerToast>
+            <Toast
+              kind="success"
+              sentence="shell.mcpToast.autoAdd"
+              names={["brave-search"]}
+              onClose={noop}
+            />
+          </CornerToast>
+        </Specimen>
+        <Specimen label="右下 · 成功 · 没有名字（读数）">
+          <CornerToast>
+            <Toast
+              kind="success"
+              sentence="sources.added.done"
+              reading={<ToastCount n={11} line="market.update.count" />}
+            />
+          </CornerToast>
+        </Specimen>
+        <Specimen label="右下 · 成功 · 读数很长（在框里折行）">
+          <CornerToast>
+            <Toast
+              kind="success"
+              sentence="sources.added.done"
+              names={["brave-search"]}
+              trail={["只在 weibo-ai-platform-recommendation-service-monorepo 里能用了"]}
+            />
+          </CornerToast>
+        </Specimen>
+        <Specimen label="锚点 · 成功 · 读数很长（折两行）">
+          <Toast
+            kind="success"
+            sentence="sources.added.done"
+            names={["brave-search"]}
+            trail={["只在 weibo-ai-platform-recommendation-service-monorepo 里能用了"]}
+            action={{ label: "撤销", onClick: noop }}
+          />
+        </Specimen>
+        <Specimen label="右下 · 部分失败">
+          <CornerToast>
+            <Toast
+              kind="partial"
+              sentence="shell.mcpToast.autoAdd"
+              names={["brave-search"]}
+              tally={{ done: 1, failed: 1 }}
+              reason="Cline 的配置文件不是合法的 JSON"
+              onClose={noop}
+            />
+          </CornerToast>
         </Specimen>
       </Block>
 
       <Block
         name="NoticePanel"
-        guide="不会自己走、要你处理的事｜ scope：row 挂在一行下 / section 满这一节 / app 应用级（原 ErrorBanner）｜ 一次性结果用提示条"
+        guide="嵌在页面里、不会自己走的一句｜ 左 ! ＝有问题要你处理，没有 ! ＝一次性说明；右 × ＝能关｜ scope：row 挂在一行下 / section 满这一节 / app 应用级｜ 一次性结果用提示条"
       >
-        <Specimen label="row · 原因写全 · 可关">
+        <Specimen label="! · 不可关 · 一颗键（待办）">
+          <NoticePanel
+            message="Sophia 写进去的设置被改掉了"
+            action={{ label: "重新写入", onClick: noop }}
+          />
+        </Specimen>
+        <Specimen label="! · 原因写全 · 可关">
           <NoticePanel
             message="没重启 Codex"
             reason="端口 47328 被别的程序占着"
@@ -152,21 +226,21 @@ export function FeedbackFamily() {
             onClose={noop}
           />
         </Specimen>
-        <Specimen label="row · 两颗键">
+        <Specimen label="! · 两颗键">
           <NoticePanel
             message="有新版本 0.2.0"
             action={{ label: "安装并重启", onClick: noop }}
             secondary={{ label: "稍后", onClick: noop }}
           />
         </Specimen>
-        <Specimen label="row · 忙碌（过门槛）">
+        <Specimen label="! · 忙碌（过门槛）">
           <NoticePanel
             message="Codex 正由 agents-manager 管着"
             busy="正在接管"
             action={{ label: "接管", onClick: noop }}
           />
         </Specimen>
-        <Specimen label="row · 键禁用" force="hover">
+        <Specimen label="! · 键禁用" force="hover">
           <NoticePanel
             message="Sophia 写进去的设置被改掉了"
             action={{ label: "重新写入", onClick: noop, disabledReason: "正在处理上一步" }}
@@ -180,6 +254,62 @@ export function FeedbackFamily() {
             action={{ label: "重启路由", onClick: noop }}
           />
         </Specimen>
+        <Specimen label="没有 ! · × · 一次性说明（进出）" width={640}>
+          <NoticePanel
+            scope="section"
+            mark={false}
+            open={hint}
+            onClose={() => setHint(false)}
+            message="点格子把 skill 加到那个 agent；● 是已加上，○ 是还没加。不会移动或改动你的文件"
+          />
+          {hint ? null : (
+            <Button size="compact" onClick={() => setHint(true)}>
+              再出一次
+            </Button>
+          )}
+        </Specimen>
+        <Specimen label="没有 ! · 两颗键 + ×（有新版本）" width={640}>
+          <NoticePanel
+            scope="section"
+            mark={false}
+            message="2 个 skill 有新版本"
+            action={{ label: "只看这些", onClick: noop }}
+            secondary={{ label: "全部更新", onClick: noop }}
+            onClose={noop}
+            dismissTitle="这一批不再提示"
+          />
+        </Specimen>
+        <Specimen label="没有 ! · 叠放（下面还压着一张）" width={640}>
+          <NoticePanel
+            scope="section"
+            mark={false}
+            open
+            stacked={1}
+            message="读了 Claude Code、Codex 的 skill 目录，找到 31 个 skill，没有改动任何文件。"
+            onClose={noop}
+          />
+        </Specimen>
+        <Specimen label="! · 出错带详情：详情 + 往前走的路（键在主键之前）" width={640}>
+          <NoticePanel
+            scope="section"
+            message="读不到第三方模型的状态"
+            reason="~/.codex/config.toml 不归你的账户所有，读不了（多半是用 sudo 运行过 Codex）"
+            technical={"open ~/.codex/config.toml\nPermission denied (os error 13)"}
+            onCopy={noop}
+            action={{ label: "修复权限", onClick: noop }}
+          />
+        </Specimen>
+        <Specimen label="! · 详情 + 离开 Sophia 的浅键 + 再试一次" width={640}>
+          <NoticePanel
+            scope="section"
+            message="读不到第三方模型的状态"
+            reason="~/.codex/config.toml 第 3 行格式有误"
+            technical={"/Users/…/.codex/config.toml\nTOML parse error at line 3, column 8"}
+            onCopy={noop}
+            action={{ label: "打开文件", leave: true, onClick: noop }}
+            secondary={{ label: "再试一次", onClick: noop }}
+          />
+        </Specimen>
         <Specimen label="app · 应用级故障（错误）" width={640}>
           <NoticePanel
             scope="app"
@@ -191,16 +321,41 @@ export function FeedbackFamily() {
         </Specimen>
       </Block>
 
-      <Block name="HintStrip" guide="第一次来时说明这里怎么用，只有 ×｜ 报状态、催做事不用它">
-        <Specimen label="打开" width={640}>
-          <HintStrip open={hint} onDismiss={() => setHint(false)}>
-            点格子把 skill 加到那个 agent；● 是已加上，○ 是还没加。不会移动或改动你的文件
-          </HintStrip>
-          {hint ? null : (
-            <Button size="compact" onClick={() => setHint(true)}>
-              再出一次
-            </Button>
-          )}
+      <Block
+        name="Details"
+        guide="出错提示上的技术原文（请求、状态码、返回的错误、调用栈）｜ 一颗默认键 `详情`，点开是锚在键上的浮层：原文 + `复制详情`，点外面 / Esc 关｜ 长条提示里不展开；提示条里不放"
+      >
+        <Specimen label="收起：一颗紧凑默认键">
+          <Details text="GET https://openrouter.ai/api/v1/models → 429" onCopy={noop} />
+        </Specimen>
+        <Specimen
+          label="点开：锚在键上的浮层（点外面、Esc 关）"
+          frame="stage"
+          width={520}
+          height={220}
+        >
+          <Details
+            defaultOpen
+            align="start"
+            onCopy={noop}
+            text={
+              'GET https://openrouter.ai/api/v1/models → 429 Too Many Requests · Retry-After: 30\n{"error":{"message":"Rate limit exceeded: free-models-per-min"}}'
+            }
+          />
+        </Specimen>
+        <Specimen
+          label="出错页（PageFault）：重新加载 + 详情同一行"
+          frame="stage"
+          width={520}
+          height={240}
+        >
+          <FaultView
+            details={
+              "TypeError: x is not a function\n    at ModelsPage (ModelsPage.tsx:12:3)\n\nversion: 0.2.0"
+            }
+            onReload={noop}
+            onCopy={noop}
+          />
         </Specimen>
       </Block>
 
@@ -210,7 +365,7 @@ export function FeedbackFamily() {
       >
         <Specimen label="居中弹窗 · 遮罩" frame="stage" width={520} height={260}>
           <Confirm title="删掉 openrouter？" confirmLabel="删掉" onConfirm={noop} onCancel={noop}>
-            地址和钥匙串里的密钥一起删掉，删除后无法恢复
+            地址和密钥一起删掉，删除后无法恢复
           </Confirm>
         </Specimen>
         <Specimen label="路径铭牌 · 主动作禁用" frame="stage" width={520} height={300}>

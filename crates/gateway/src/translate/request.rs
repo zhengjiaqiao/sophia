@@ -18,6 +18,8 @@ use super::effort::{Effort, REASONING_EFFORT_FIELD};
 pub const REASONING_ID_PREFIX: &str = "rs_sg_";
 /// agents-manager（Go 版）用的前缀；在它下面开始的会话要能接着用。
 const LEGACY_REASONING_ID_PREFIX: &str = "rs_am_";
+/// 多段思考内容拼成一条 `reasoning_content` 时的分隔。
+const REASONING_SEPARATOR: &str = "\n\n";
 
 const COMPACTION_PAYLOAD_TYPE: &str = "symsync_compaction";
 const LEGACY_COMPACTION_PAYLOAD_TYPE: &str = "agents_manager_compaction";
@@ -74,6 +76,9 @@ pub struct ChatRequest {
     pub compaction: bool,
     /// 这次请求体里带没带 `reasoning_effort`：路由据此决定上游拒收时要不要去掉它重发。
     pub reasoning_effort_sent: bool,
+    /// 这次请求体里有没有 assistant 消息带 `reasoning_content`（思考内容带回）：
+    /// 路由据此决定上游拒收时要不要去掉它重发。
+    pub reasoning_content_sent: bool,
 }
 
 /// 转换的开关（路由重试时用）。
@@ -81,6 +86,8 @@ pub struct ChatRequest {
 pub struct ChatOptions {
     /// 不发 `reasoning_effort`，即使请求里带了推理强度（上游因它 400 后重发时用）。
     pub omit_reasoning_effort: bool,
+    /// 不给 assistant 消息带 `reasoning_content`（上游不认这个字段、因它 400 后重发时用）。
+    pub omit_reasoning_content: bool,
 }
 
 /// 请求无法转换的原因。文字会回给 Codex 显示，与 agents-manager 保持一致用英文。
@@ -159,6 +166,10 @@ struct ChatMessage {
     tool_calls: Vec<ChatToolCall>,
     #[serde(skip_serializing_if = "String::is_empty")]
     tool_call_id: String,
+    /// 上一步的思考内容带回给上游（DeepSeek、Kimi 等思考模型在工具循环里要求带回）。放在最后，
+    /// 没有时不出现，出站体与以前逐字节相同。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    reasoning_content: String,
 }
 
 impl ChatMessage {
@@ -168,6 +179,7 @@ impl ChatMessage {
             content: Value::String(content.into()),
             tool_calls: Vec::new(),
             tool_call_id: String::new(),
+            reasoning_content: String::new(),
         }
     }
 
@@ -220,17 +232,28 @@ pub fn to_chat_with(
     if !request.instructions.trim().is_empty() {
         messages.push(ChatMessage::text("system", request.instructions.as_str()));
     }
+    // 本工具 reasoning 条目的文字，等紧随其后的 assistant 消息（R1）；先等到别的消息就丢弃。
+    let mut reasoning: Vec<String> = Vec::new();
     for item in input_items(request.input)? {
         let Ok(head) = ItemHead::deserialize(&item) else {
             continue;
         };
         match head.kind.as_str() {
-            "message" => messages.extend(convert_message(&item)),
-            "" if !head.role.is_empty() => messages.extend(convert_message(&item)),
-            "function_call" => append_tool_call(&mut messages, &item, false),
-            "custom_tool_call" => append_tool_call(&mut messages, &item, true),
+            "message" => push_message(&mut messages, convert_message(&item), &mut reasoning),
+            "" if !head.role.is_empty() => {
+                push_message(&mut messages, convert_message(&item), &mut reasoning)
+            }
+            "function_call" | "custom_tool_call" => {
+                if append_tool_call(&mut messages, &item, head.kind == "custom_tool_call") {
+                    attach_reasoning(&mut messages, &mut reasoning);
+                }
+            }
             "function_call_output" | "custom_tool_call_output" => {
-                messages.push(convert_tool_output(&item));
+                push_message(
+                    &mut messages,
+                    Some(convert_tool_output(&item)),
+                    &mut reasoning,
+                );
             }
             "compaction" => {
                 // 只有本工具（和 agents-manager）自己的压缩条目能展开；官方的是加密的，解不开就丢弃。
@@ -239,18 +262,27 @@ pub fn to_chat_with(
                     .and_then(Value::as_str)
                     .and_then(compaction_summary);
                 if let Some(summary) = summary {
-                    messages.push(ChatMessage::text(
-                        "user",
-                        format!("{COMPACTION_PREAMBLE}{summary}"),
-                    ));
+                    let message =
+                        ChatMessage::text("user", format!("{COMPACTION_PREAMBLE}{summary}"));
+                    push_message(&mut messages, Some(message), &mut reasoning);
                 }
             }
             "compaction_trigger" => compaction = true,
-            // reasoning、web_search_call 等：网关不认识，丢弃。
+            // 本工具发出的推理条目：文字带回给上游（R1）；官方的（加密、无前缀）丢弃。
+            "reasoning" => reasoning.extend(our_reasoning_text(&item)),
+            // web_search_call 等：网关不认识，丢弃。
             _ => {}
         }
     }
     let mut messages = repair_tool_history(messages);
+    if options.omit_reasoning_content {
+        for message in &mut messages {
+            message.reasoning_content.clear();
+        }
+    }
+    let reasoning_content_sent = messages
+        .iter()
+        .any(|message| !message.reasoning_content.is_empty());
 
     let mut chat = Map::new();
     chat.insert("model".into(), json!(upstream_model));
@@ -304,7 +336,59 @@ pub fn to_chat_with(
         tools: tool_names,
         compaction,
         reasoning_effort_sent: effort.is_some(),
+        reasoning_content_sent,
     })
+}
+
+/// 本工具（或 agents-manager）发出的 reasoning 条目里的摘要文字；不是我们的、或没有文字，返回 `None`。
+fn our_reasoning_text(item: &Value) -> Option<String> {
+    let id = item.get("id").and_then(Value::as_str).unwrap_or("");
+    if !id.starts_with(REASONING_ID_PREFIX) && !id.starts_with(LEGACY_REASONING_ID_PREFIX) {
+        return None;
+    }
+    let texts: Vec<&str> = item
+        .get("summary")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .filter(|text| !text.is_empty())
+        .collect();
+    (!texts.is_empty()).then(|| texts.join(REASONING_SEPARATOR))
+}
+
+/// 放进一条转换出的消息：是 assistant 就挂上等着的思考内容，否则等着的思考内容作废。
+fn push_message(
+    messages: &mut Vec<ChatMessage>,
+    message: Option<ChatMessage>,
+    reasoning: &mut Vec<String>,
+) {
+    let Some(message) = message else {
+        return;
+    };
+    let assistant = message.role == "assistant";
+    messages.push(message);
+    if assistant {
+        attach_reasoning(messages, reasoning);
+    } else {
+        reasoning.clear();
+    }
+}
+
+/// 等着的思考内容按顺序拼到最后一条（assistant）消息的 `reasoning_content` 上。
+fn attach_reasoning(messages: &mut [ChatMessage], reasoning: &mut Vec<String>) {
+    if reasoning.is_empty() {
+        return;
+    }
+    let Some(last) = messages.last_mut().filter(|m| m.role == "assistant") else {
+        return;
+    };
+    for text in reasoning.drain(..) {
+        if !last.reasoning_content.is_empty() {
+            last.reasoning_content.push_str(REASONING_SEPARATOR);
+        }
+        last.reasoning_content.push_str(&text);
+    }
 }
 
 fn input_items(input: Option<Value>) -> Result<Vec<Value>, TranslateError> {
@@ -415,12 +499,13 @@ struct ToolCallItem {
     input: String,
 }
 
-fn append_tool_call(messages: &mut Vec<ChatMessage>, item: &Value, custom: bool) {
+/// 返回是否真的加了一个调用（读不懂、没有名字的丢弃）。
+fn append_tool_call(messages: &mut Vec<ChatMessage>, item: &Value, custom: bool) -> bool {
     let Ok(item) = ToolCallItem::deserialize(item) else {
-        return;
+        return false;
     };
     if item.name.is_empty() {
-        return;
+        return false;
     }
     let call_id = if item.call_id.is_empty() {
         item.id
@@ -451,6 +536,7 @@ fn append_tool_call(messages: &mut Vec<ChatMessage>, item: &Value, custom: bool)
             ..ChatMessage::text("assistant", "")
         }),
     }
+    true
 }
 
 fn convert_tool_output(item: &Value) -> ChatMessage {
@@ -1168,6 +1254,7 @@ mod tests {
     fn omit_option_drops_reasoning_effort() {
         let omit = ChatOptions {
             omit_reasoning_effort: true,
+            ..ChatOptions::default()
         };
         let (req, chat) = chat_with_effort(r#"{"effort":"high"}"#, omit);
         assert!(chat.get("reasoning_effort").is_none(), "{chat}");
@@ -1225,6 +1312,84 @@ mod tests {
                 serde_json::to_string(COMPACTION_INSTRUCTION).unwrap()
             )
         );
+    }
+
+    /// AC1（spec 2026-10-05-reasoning-passback R1）：本工具发出的 reasoning 条目的摘要文字挂到
+    /// 紧随其后那条 assistant 消息的 `reasoning_content`；官方 reasoning 条目（无前缀）不进 Chat 请求。
+    #[test]
+    fn ac1_our_reasoning_rides_on_the_following_assistant_message() {
+        let body = format!(
+            r#"{{"model":"m","tools":[{{"type":"function","name":"exec_command","parameters":{{}}}}],"input":[
+          {{"type":"message","role":"user","content":[{{"type":"input_text","text":"看看 a"}}]}},
+          {{"type":"reasoning","id":"{REASONING_ID_PREFIX}1","summary":[{{"type":"summary_text","text":"先读 a"}}]}},
+          {{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{{\"cmd\":\"cat a\"}}"}},
+          {{"type":"function_call_output","call_id":"call_1","output":"内容"}},
+          {{"type":"reasoning","id":"rs_official","summary":[{{"type":"summary_text","text":"官方的"}}],"encrypted_content":"opaque"}},
+          {{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"读完了"}}]}}
+        ]}}"#
+        );
+        let (req, chat) = convert(&body);
+        let got = messages(&chat);
+        assert_eq!(got.len(), 4, "messages = {got:?}");
+        assert_eq!(got[1]["role"], "assistant");
+        assert_eq!(got[1]["tool_calls"][0]["id"], "call_1", "{}", got[1]);
+        assert_eq!(got[1]["reasoning_content"], "先读 a", "{}", got[1]);
+        assert_eq!(got[3]["content"], "读完了");
+        assert!(
+            got[3].get("reasoning_content").is_none(),
+            "没有本工具 reasoning 条目的 assistant 消息不加这个字段：{}",
+            got[3]
+        );
+        assert!(req.reasoning_content_sent);
+        let text = String::from_utf8(req.chat_body.clone()).unwrap();
+        assert!(
+            !text.contains("官方的") && !text.contains("opaque"),
+            "{text}"
+        );
+    }
+
+    /// 同一条 assistant 前有多个本工具 reasoning 条目（含旧前缀）时按顺序拼接；后面紧跟的不是 assistant 就丢弃。
+    #[test]
+    fn several_reasoning_items_are_joined_and_orphans_dropped() {
+        let body = format!(
+            r#"{{"model":"m","input":[
+          {{"type":"message","role":"user","content":"q1"}},
+          {{"type":"reasoning","id":"rs_am_1","summary":[{{"type":"summary_text","text":"甲"}}]}},
+          {{"type":"reasoning","id":"{REASONING_ID_PREFIX}2","summary":[{{"type":"summary_text","text":"乙"}},{{"type":"summary_text","text":"丙"}}]}},
+          {{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"答一"}}]}},
+          {{"type":"reasoning","id":"{REASONING_ID_PREFIX}3","summary":[{{"type":"summary_text","text":"孤儿"}}]}},
+          {{"type":"message","role":"user","content":"q2"}},
+          {{"type":"reasoning","id":"{REASONING_ID_PREFIX}4","summary":[]}},
+          {{"type":"message","role":"assistant","content":"答二"}}
+        ]}}"#
+        );
+        let (req, chat) = convert(&body);
+        let got = messages(&chat);
+        assert_eq!(got.len(), 4, "messages = {got:?}");
+        assert_eq!(got[1]["reasoning_content"], "甲\n\n乙\n\n丙", "{}", got[1]);
+        assert!(got[3].get("reasoning_content").is_none(), "{}", got[3]);
+        assert!(!String::from_utf8_lossy(&req.chat_body).contains("孤儿"));
+    }
+
+    /// 重试用的选项：去掉全部 `reasoning_content` 后，与历史里没有 reasoning 条目时逐字节相同。
+    #[test]
+    fn omit_option_drops_reasoning_content() {
+        let with_reasoning = format!(
+            r#"{{"model":"m","input":[{{"type":"message","role":"user","content":"q"}},
+          {{"type":"reasoning","id":"{REASONING_ID_PREFIX}1","summary":[{{"type":"summary_text","text":"想"}}]}},
+          {{"type":"message","role":"assistant","content":"答"}}]}}"#
+        );
+        let plain = r#"{"model":"m","input":[{"type":"message","role":"user","content":"q"},
+          {"type":"message","role":"assistant","content":"答"}]}"#;
+        let omit = ChatOptions {
+            omit_reasoning_content: true,
+            ..ChatOptions::default()
+        };
+        let omitted = to_chat_with(with_reasoning.as_bytes(), "m", omit).unwrap();
+        assert!(!omitted.reasoning_content_sent);
+        let plain = to_chat(plain.as_bytes(), "m").unwrap();
+        assert!(!plain.reasoning_content_sent);
+        assert_eq!(omitted.chat_body, plain.chat_body);
     }
 
     /// 在 agents-manager（Go 版）下开始的会话要能接着用：它的压缩条目和推理条目前缀同样认。

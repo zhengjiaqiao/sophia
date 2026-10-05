@@ -774,8 +774,12 @@ fn backup(database: &Path, metadata: &fs::Metadata) -> Result<PathBuf, String> {
     let parent = database
         .parent()
         .ok_or_else(|| crate::t!("weiboap.database.pathInvalid"))?;
-    for index in 0..1000 {
-        let path = parent.join(format!("agents.db.sophia-mcp-{index}.bak"));
+    // 编号接着已有的最大值往上走，不回填删掉的空位：「按 N 先后」才等于新旧
+    let first = backup_indices(parent)
+        .last()
+        .map_or(0, |(index, _)| index.saturating_add(1));
+    for index in first..first.saturating_add(1000) {
+        let path = parent.join(format!("{BACKUP_PREFIX}{index}{BACKUP_SUFFIX}"));
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -824,10 +828,52 @@ fn backup(database: &Path, metadata: &fs::Metadata) -> Result<PathBuf, String> {
             Ok(path.clone())
         })();
         if result.is_ok() {
+            prune_backups(parent, &path);
             return result;
         }
         let _ = fs::remove_file(&path);
         return result;
     }
     Err(crate::t!("weiboap.backup.pathUnavailable"))
+}
+
+/// 数据库备份的命名：`agents.db.sophia-mcp-<N>.bak`，放在 WeiboAP 自己的数据目录里（外部应用的库，不搬走）
+const BACKUP_PREFIX: &str = "agents.db.sophia-mcp-";
+const BACKUP_SUFFIX: &str = ".bak";
+/// 数据库备份最多留几份，与 `atomicfile::BACKUP_KEEP` 一致
+const BACKUP_KEEP: usize = crate::atomicfile::BACKUP_KEEP;
+
+/// 目录里按 N 从小到大排好的数据库备份（只认上面这个命名的普通文件）；列不出目录当作没有
+fn backup_indices(dir: &Path) -> Vec<(u64, PathBuf)> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(u64, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| {
+            let index = entry
+                .file_name()
+                .to_str()?
+                .strip_prefix(BACKUP_PREFIX)?
+                .strip_suffix(BACKUP_SUFFIX)?
+                .parse::<u64>()
+                .ok()?;
+            Some((index, entry.path()))
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// 新备份写成后只留最近 `BACKUP_KEEP` 份（按 N 先后），刚写的那份无论如何不删。
+/// 尽力而为：删不掉不影响这次写入
+fn prune_backups(dir: &Path, keep: &Path) {
+    let found = backup_indices(dir);
+    let excess = found.len().saturating_sub(BACKUP_KEEP);
+    for (_, old) in found.into_iter().take(excess) {
+        if old != keep {
+            let _ = fs::remove_file(old);
+        }
+    }
 }

@@ -139,7 +139,7 @@ test("用量两行版式（stacked）：上一行窗口名 + 读数，下一行�
     /class="usage-wins usage-wins--stacked"[^]*?class="usage-win__line">[^]*?<span class="usage-win__label">5 小时<\/span>[^]*?<span class="usage-win__text">[^]*?剩 87%[^]*?<\/span><\/span><span class="usage-win__bar"/,
   );
   assert.doesNotMatch(render(UsageWindows, { usage }), /usage-wins--stacked|usage-win__line/);
-  assert.match(read("../src/usage/UsageTrayRow.tsx"), /<UsageWindows usage=\{[^}]*\} stacked \/>/);
+  assert.match(read("../src/usage/UsageTrayRow.tsx"), /<UsageWindows\s+usage=\{[^}]*\}\s+stacked\b/);
 });
 
 test("原生层：托盘面板底下垫系统菜单材质，网页不画底；圆角 10、带系统窗口投影", () => {

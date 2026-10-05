@@ -169,7 +169,7 @@
   "mcp.report.atomicWriteFailed": "Atomic write failed",
   "mcp.report.created": "MCP definition created",
   "mcp.report.createdEnableIn": "MCP definition created (enable it in {agent})",
-  "mcp.read.symlink": "The config file is a symlink; read refused",
+  "mcp.read.symlink": "The config file is a symlink whose target could not be resolved",
   "mcp.read.notRegular": "The config path isn't a regular file",
   "mcp.read.unreadable": "Config is unreadable",
   "mcp.read.jsonInvalid": "JSON can't be parsed or has duplicate object keys (JSONC isn't supported)",

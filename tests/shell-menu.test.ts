@@ -7,6 +7,7 @@ import {
   MENU_COMMANDS,
   menuState,
   routeMenuCommand,
+  routeUnderModal,
 } from "../src/shell/menuCommands.ts";
 import {
   DEFAULT_NAV,
@@ -23,7 +24,13 @@ import { tidyItems } from "../src/contextMenu.ts";
 test("AC4 前端的命令表与 src-tauri/src/menu.rs 一一对应；目的地项两边读同一个目的地表", () => {
   const rs = readFileSync(new URL("../src-tauri/src/menu.rs", import.meta.url), "utf8");
   const ids = [...rs.matchAll(/= item\(\s*"([a-z-]+)"/g)].map((m) => m[1]).sort();
-  assert.deepEqual(ids, [...FIXED_COMMANDS].sort());
+  // 「退出 Sophia」（⌘Q）也是自定义项，但不发 menu-command：它走退出流程（quit-requested，QuitFlow.tsx）
+  assert.deepEqual(
+    ids.filter((id) => id !== "quit"),
+    [...FIXED_COMMANDS].sort(),
+  );
+  assert.ok(ids.includes("quit"), "退出 Sophia 是自定义项（预置的退出项拦不住、来不及确认）");
+  assert.match(rs, /"CmdOrCtrl\+Q"/);
   assert.match(rs, /include_str!\("\.\.\/\.\.\/src\/shell\/destinations\.json"\)/);
   for (const c of ["dest-skills", "dest-mcp", "dest-models", "dest-usage", "switch-project"]) {
     assert.ok(isMenuCommand(c), c);
@@ -130,4 +137,20 @@ test("右键菜单：条件项拿掉之后不留空段", () => {
     "separator",
     b,
   ]);
+});
+
+// 复审（反馈小窗第二轮 2）：模态小窗开着时，菜单与快捷键不能换页、不能把焦点带到遮罩后面去；
+// 作用于输入框的撤销 / 全选照常（小窗里的输入框要用）
+test("routeUnderModal：只留作用于输入框的那一项，换目的地、交给页面、停在关于的都拿掉", () => {
+  const nav = DEFAULT_NAV;
+  for (const command of MENU_COMMANDS) {
+    for (const editing of [false, true]) {
+      const route = routeUnderModal(routeMenuCommand(command, nav, editing), nav);
+      assert.equal(route.nav, nav, command);
+      assert.equal(route.page, undefined, command);
+      assert.equal(route.settings, undefined, command);
+    }
+  }
+  assert.equal(routeUnderModal(routeMenuCommand("undo", nav, true), nav).text, "undo");
+  assert.equal(routeUnderModal(routeMenuCommand("select-all", nav, true), nav).text, "select-all");
 });

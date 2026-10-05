@@ -4,10 +4,15 @@
 //! 第三方网关可以有多家（`providers`）。Codex 自己同一时间只认一个 provider，
 //! 本功能绕开了这个概念：所有模型在同一份目录里，路由按模型标识决定发给哪一家。
 use super::catalog::{slug_for, Model, Published, RoutingProvider};
+use super::login::ModeReason;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// 本机路由监听端口的默认值
 pub const DEFAULT_PORT: u16 = 47328;
+
+/// 路由可用的端口：默认端口被别的程序占着时，自动换到这里面第一个空闲的并记住（spec 2026-10-03 R4）。
+/// Codex、Claude 的设置里认得这个范围内任一端口写下的路由地址：崩溃后留下的可能是换端口之前的那个
+pub const PORT_RANGE: std::ops::RangeInclusive<u16> = DEFAULT_PORT..=47339;
 
 /// 旧的单网关设置读入时迁移成的那一家的 id；它的密钥仍在旧的钥匙串账户里
 pub const LEGACY_PROVIDER_ID: &str = "default";
@@ -31,7 +36,7 @@ pub struct SavedModel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ProviderSettings {
-    /// 创建时由名称生成，之后不变：它是模型标识的前缀，也是钥匙串账户名的一部分，
+    /// 创建时由名称生成，之后不变：它是模型标识的前缀，也是密钥文件里这一家密钥的键，
     /// 改了会让 Codex 里已选的模型全部失效
     pub id: String,
     /// 显示名，可以随时改
@@ -48,23 +53,42 @@ pub struct ProviderSettings {
     /// 拉取成功或换地址后清空
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unreachable: Option<UnreachableReason>,
+    /// 上次拉取失败的技术原文（请求、状态码、返回的错误；已去掉密钥与隐私），界面 `详情` 里给；
+    /// 与 `unreachable` 同生同灭（spec 2026-10-04-local-diagnostics R13）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unreachable_detail: Option<String>,
 }
 
-/// 拉取模型失败的原因种类。落盘写种类代码字符串（`"auth"` / `"network"` / `"unexpected"`），
+/// 拉取模型失败的原因种类。落盘写种类代码字符串（`"auth"` / `"network"` / `"unexpected"` / `"dns"` /
+/// `"refused"` / `"timeout"` / `"tls"` / `"proxy"` / `"rateLimited"`、`"rateLimited:30"` / `"server:503"`），
 /// 不存写好的句子，换语言后照当前语言显示。落成字符串是为了旧版 App 也读得了：它把这个字段当
 /// 一句话，最多显示成英文代码，不会读失败。
 ///
-/// 读取：先认这三个代码；再认旧版存的句子（现在与更早的说法）→ 对应种类；都不是读成
+/// 读取：先认这些代码；再认旧版存的句子（现在与更早的说法）→ 对应种类；都不是读成
 /// [`UnreachableReason::Legacy`]，显示时原样给出、写回也是原串；下一次拉取模型会把它覆盖成种类。
 /// 开发期间写过的对象形 `{"kind":"auth"}` 也能读
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnreachableReason {
     /// 密钥被拒绝
     Auth,
-    /// 地址连不上、超时
+    /// 地址连不上（分不出更细的原因时；旧文件里的「连不上、超时」也是它）
     Network,
     /// 回来的不是模型列表
     Unexpected,
+    /// 域名解析不了（spec 2026-10-04-local-diagnostics R9）
+    Dns,
+    /// 连接被拒：那个端口上没有服务
+    Refused,
+    /// 连接或等回应超时
+    Timeout,
+    /// 证书 / TLS 握手出错
+    Tls,
+    /// 走系统代理时连不上代理
+    Proxy,
+    /// 429：限流；带上游说的多少秒后再试（`Retry-After`）
+    RateLimited(Option<u64>),
+    /// 5xx：服务端出错（状态码）
+    Server(u16),
     /// 旧文件里认不出的一句话，原样显示，原样写回
     Legacy(String),
 }
@@ -76,8 +100,60 @@ impl UnreachableReason {
             UnreachableReason::Auth => crate::t!("models.fetch.reasonAuth"),
             UnreachableReason::Network => crate::t!("models.fetch.reasonNetwork"),
             UnreachableReason::Unexpected => crate::t!("models.fetch.reasonUnexpected"),
+            UnreachableReason::Dns => crate::t!("models.fetch.reasonDns"),
+            UnreachableReason::Refused => crate::t!("models.fetch.reasonRefused"),
+            UnreachableReason::Timeout => crate::t!("models.fetch.reasonTimeout"),
+            UnreachableReason::Tls => crate::t!("models.fetch.reasonTls"),
+            UnreachableReason::Proxy => crate::t!("models.fetch.reasonProxy"),
+            UnreachableReason::RateLimited(Some(seconds)) => {
+                crate::t!("models.fetch.reasonRateLimitedIn", seconds = seconds)
+            }
+            UnreachableReason::RateLimited(None) => crate::t!("models.fetch.reasonRateLimited"),
+            UnreachableReason::Server(code) => {
+                crate::t!("models.fetch.reasonServer", code = code)
+            }
             UnreachableReason::Legacy(text) => text.clone(),
         }
+    }
+
+    /// 落盘的代码；`Legacy` 没有代码（原样写回原句）
+    fn code(&self) -> Option<String> {
+        Some(match self {
+            UnreachableReason::Auth => "auth".into(),
+            UnreachableReason::Network => "network".into(),
+            UnreachableReason::Unexpected => "unexpected".into(),
+            UnreachableReason::Dns => "dns".into(),
+            UnreachableReason::Refused => "refused".into(),
+            UnreachableReason::Timeout => "timeout".into(),
+            UnreachableReason::Tls => "tls".into(),
+            UnreachableReason::Proxy => "proxy".into(),
+            UnreachableReason::RateLimited(None) => "rateLimited".into(),
+            UnreachableReason::RateLimited(Some(seconds)) => format!("rateLimited:{seconds}"),
+            UnreachableReason::Server(code) => format!("server:{code}"),
+            UnreachableReason::Legacy(_) => return None,
+        })
+    }
+
+    /// 认代码；认不出为 None
+    fn from_code(code: &str) -> Option<Self> {
+        Some(match code {
+            "auth" => UnreachableReason::Auth,
+            "network" => UnreachableReason::Network,
+            "unexpected" => UnreachableReason::Unexpected,
+            "dns" => UnreachableReason::Dns,
+            "refused" => UnreachableReason::Refused,
+            "timeout" => UnreachableReason::Timeout,
+            "tls" => UnreachableReason::Tls,
+            "proxy" => UnreachableReason::Proxy,
+            "rateLimited" => UnreachableReason::RateLimited(None),
+            _ => {
+                if let Some(seconds) = code.strip_prefix("rateLimited:") {
+                    UnreachableReason::RateLimited(Some(seconds.parse().ok()?))
+                } else {
+                    UnreachableReason::Server(code.strip_prefix("server:")?.parse().ok()?)
+                }
+            }
+        })
     }
 
     /// 旧文件里的句子：现在的说法与 2026-09-24 文案语域 D24 之前的说法，都认成对应种类
@@ -106,12 +182,10 @@ impl UnreachableReason {
 
 impl Serialize for UnreachableReason {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(match self {
-            UnreachableReason::Auth => "auth",
-            UnreachableReason::Network => "network",
-            UnreachableReason::Unexpected => "unexpected",
-            UnreachableReason::Legacy(text) => text,
-        })
+        match (self, self.code()) {
+            (UnreachableReason::Legacy(text), _) => serializer.serialize_str(text),
+            (_, code) => serializer.serialize_str(&code.unwrap_or_default()),
+        }
     }
 }
 
@@ -124,11 +198,9 @@ impl<'de> Deserialize<'de> for UnreachableReason {
             Kind { kind: String },
         }
         Ok(match Wire::deserialize(de)? {
-            Wire::Text(text) => match text.as_str() {
-                "auth" => UnreachableReason::Auth,
-                "network" => UnreachableReason::Network,
-                "unexpected" => UnreachableReason::Unexpected,
-                _ => UnreachableReason::from_legacy_text(text),
+            Wire::Text(text) => match UnreachableReason::from_code(&text) {
+                Some(reason) => reason,
+                None => UnreachableReason::from_legacy_text(text),
             },
             // 开发期间写过的对象形；认不得的种类当成「回来的不是模型列表」，总比读不出整份设置好
             Wire::Kind { kind } => match kind.as_str() {
@@ -150,6 +222,7 @@ impl Default for ProviderSettings {
             protocol: PROTOCOL_CHAT.into(),
             models: Vec::new(),
             unreachable: None,
+            unreachable_detail: None,
         }
     }
 }
@@ -304,10 +377,32 @@ pub fn new_provider_id(name: &str, taken: &[&str]) -> String {
         .expect("an unbounded counter always finds a free id")
 }
 
+/// Codex 接第三方模型的两种接法（spec 2026-10-03-codex-hookup-auto）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HookupMode {
+    /// 借用 Codex 内置的 `openai` 服务商：只写 `openai_base_url` 与 `model_catalog_json`，要求 OpenAI 登录
+    #[default]
+    Builtin,
+    /// 独立服务商：再写 `model_provider = "sophia"` 与 `[model_providers.sophia]`，不需要登录
+    Provider,
+}
+
+impl HookupMode {
+    pub fn is_builtin(&self) -> bool {
+        *self == HookupMode::Builtin
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewaySettings {
     pub providers: Vec<ProviderSettings>,
+    /// 用户是否开着 Codex 的第三方模型（只由模型页开关改变；退出、关机把 Codex 设置改回，这里不变，
+    /// 下次打开 Sophia 时据此自动接上）。None：旧版本留下的设置，第一次加载时由编排层按
+    /// 「Codex 设置现在指着路由」补上
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// 0 视为未设置，读入时换成 `DEFAULT_PORT`
     pub port: u16,
     /// 原文件末行没有换行、插入时补了一个；恢复时据此还原
@@ -330,6 +425,12 @@ pub struct GatewaySettings {
     /// Codex 能看到的状态的变更记录，由旧到新。用来回答「Codex 启动那一刻加载到的是什么」
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<Change>,
+    /// 当前（最近一次）写进 Codex 设置的接法；老文件没有这个字段，读成借用内置
+    #[serde(skip_serializing_if = "HookupMode::is_builtin")]
+    pub mode: HookupMode,
+    /// 选这种接法的原因（模型页那一行说明用）；还没判断过为 None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode_reason: Option<ModeReason>,
 }
 
 /// 一次会被 Codex 看到的变更：从 `at` 起，注入是否开着、目录内容是什么
@@ -342,6 +443,16 @@ pub struct Change {
     /// 目录内容的指纹；没开着时无意义，留空
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub catalog: String,
+    /// Codex 设置里写的路由端口；没开着、或旧版本的记录为 0（不知道，当作没变）
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub port: u16,
+    /// 写着的接法；没开着、或旧版本的记录为借用内置
+    #[serde(default, skip_serializing_if = "HookupMode::is_builtin")]
+    pub mode: HookupMode,
+}
+
+fn is_zero(port: &u16) -> bool {
+    *port == 0
 }
 
 impl Change {
@@ -349,7 +460,11 @@ impl Change {
     fn same_for_codex(&self, other: &Change) -> bool {
         match (self.enabled, other.enabled) {
             (false, false) => true,
-            (true, true) => self.catalog == other.catalog,
+            (true, true) => {
+                self.catalog == other.catalog
+                    && self.mode == other.mode
+                    && (self.port == 0 || other.port == 0 || self.port == other.port)
+            }
             _ => false,
         }
     }
@@ -362,6 +477,7 @@ impl Default for GatewaySettings {
     fn default() -> Self {
         Self {
             providers: Vec::new(),
+            enabled: None,
             port: DEFAULT_PORT,
             added_newline: false,
             catalog_client_version: String::new(),
@@ -371,6 +487,8 @@ impl Default for GatewaySettings {
             changed_at: None,
             catalog_fingerprint: String::new(),
             history: Vec::new(),
+            mode: HookupMode::Builtin,
+            mode_reason: None,
         }
     }
 }
@@ -385,6 +503,12 @@ impl GatewaySettings {
                 self.catalog_fingerprint.clone()
             } else {
                 String::new()
+            },
+            port: if enabled { self.port } else { 0 },
+            mode: if enabled {
+                self.mode
+            } else {
+                HookupMode::Builtin
             },
         };
         if self
@@ -424,6 +548,7 @@ impl<'de> Deserialize<'de> for GatewaySettings {
         #[serde(rename_all = "camelCase", default)]
         struct Raw {
             providers: Vec<ProviderSettings>,
+            enabled: Option<bool>,
             base_url: String,
             api_base: Option<String>,
             protocol: String,
@@ -437,6 +562,8 @@ impl<'de> Deserialize<'de> for GatewaySettings {
             changed_at: Option<u64>,
             catalog_fingerprint: String,
             history: Vec<Change>,
+            mode: HookupMode,
+            mode_reason: Option<ModeReason>,
         }
         let raw = Raw::deserialize(deserializer)?;
         let mut providers = raw.providers;
@@ -454,10 +581,12 @@ impl<'de> Deserialize<'de> for GatewaySettings {
                 },
                 models: raw.models,
                 unreachable: None,
+                unreachable_detail: None,
             });
         }
         Ok(Self {
             providers,
+            enabled: raw.enabled,
             port: if raw.port == 0 {
                 DEFAULT_PORT
             } else {
@@ -471,6 +600,8 @@ impl<'de> Deserialize<'de> for GatewaySettings {
             changed_at: raw.changed_at,
             catalog_fingerprint: raw.catalog_fingerprint,
             history: raw.history,
+            mode: raw.mode,
+            mode_reason: raw.mode_reason,
         })
     }
 }
@@ -611,7 +742,7 @@ mod tests {
         let expected: Vec<Option<&str>> = vec![
             Some("地址无法访问"),
             Some("密钥无效，请换一个密钥"),
-            Some("地址有误，无法获取模型列表"),
+            Some("地址有误，返回的不是模型列表"),
             Some("超时"),
             None,
         ];
@@ -639,6 +770,14 @@ mod tests {
             (UnreachableReason::Auth, "auth"),
             (UnreachableReason::Network, "network"),
             (UnreachableReason::Unexpected, "unexpected"),
+            (UnreachableReason::Dns, "dns"),
+            (UnreachableReason::Refused, "refused"),
+            (UnreachableReason::Timeout, "timeout"),
+            (UnreachableReason::Tls, "tls"),
+            (UnreachableReason::Proxy, "proxy"),
+            (UnreachableReason::RateLimited(Some(30)), "rateLimited:30"),
+            (UnreachableReason::RateLimited(None), "rateLimited"),
+            (UnreachableReason::Server(503), "server:503"),
         ] {
             let mut p = provider("a", vec![]);
             p.unreachable = Some(reason.clone());
@@ -687,6 +826,70 @@ mod tests {
         )
         .unwrap();
         assert_eq!(future.unreachable, Some(UnreachableReason::Unexpected));
+    }
+
+    /// spec 2026-10-04-local-diagnostics R9 / AC8：每种连不上的原因各说各的
+    #[test]
+    fn each_unreachable_reason_has_its_own_sentence() {
+        let cases = [
+            (UnreachableReason::Dns, "找不到这个地址（检查地址或内网）"),
+            (UnreachableReason::Refused, "无法连接，对方没在这个端口上"),
+            (UnreachableReason::Timeout, "连接超时（检查网络或内网）"),
+            (UnreachableReason::Tls, "证书有问题，不能安全连接"),
+            (UnreachableReason::Proxy, "无法连接代理（检查系统代理）"),
+            (
+                UnreachableReason::RateLimited(Some(30)),
+                "服务商限流了，约 30 秒后再试",
+            ),
+            (
+                UnreachableReason::RateLimited(None),
+                "服务商限流了，稍后再试",
+            ),
+            (
+                UnreachableReason::Server(503),
+                "服务商出了问题（HTTP 503），稍后再试",
+            ),
+            (UnreachableReason::Auth, "密钥无效，请换一个密钥"),
+            (
+                UnreachableReason::Unexpected,
+                "地址有误，返回的不是模型列表",
+            ),
+        ];
+        for (reason, text) in cases {
+            assert_eq!(reason.text(), text);
+        }
+        // 写坏了的新代码（数字读不出）：不让整份设置读不出来，原样当旧句显示
+        let odd: ProviderSettings = serde_json::from_value(
+            json!({"id": "a", "name": "a", "baseUrl": "https://a.test", "unreachable": "server:abc"}),
+        )
+        .unwrap();
+        assert_eq!(
+            odd.unreachable,
+            Some(UnreachableReason::Legacy("server:abc".into()))
+        );
+    }
+
+    /// 技术原文与原因一起存（`unreachableDetail`），没有就不写这个键；旧文件没有它照样读
+    #[test]
+    fn unreachable_detail_persists_next_to_the_reason() {
+        let mut p = provider("a", vec![]);
+        p.unreachable = Some(UnreachableReason::RateLimited(Some(30)));
+        p.unreachable_detail = Some("GET https://a.test/models → 429".into());
+        let value = serde_json::to_value(&p).unwrap();
+        assert_eq!(
+            value["unreachableDetail"],
+            json!("GET https://a.test/models → 429")
+        );
+        let back: ProviderSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(back, p);
+
+        let plain = serde_json::to_value(provider("b", vec![])).unwrap();
+        assert!(plain.get("unreachableDetail").is_none());
+        let old: ProviderSettings = serde_json::from_value(
+            json!({"id": "a", "name": "a", "baseUrl": "https://a.test", "unreachable": "network"}),
+        )
+        .unwrap();
+        assert_eq!(old.unreachable_detail, None);
     }
 
     #[test]
@@ -1112,7 +1315,9 @@ mod tests {
                     selected: true,
                 }],
                 unreachable: None,
+                unreachable_detail: None,
             }],
+            enabled: None,
             port: 5000,
             added_newline: true,
             catalog_client_version: "0.154.0".into(),
@@ -1125,7 +1330,11 @@ mod tests {
                 at: 1_790_000_000,
                 enabled: true,
                 catalog: "abc".into(),
+                port: 0,
+                mode: HookupMode::Builtin,
             }],
+            mode: HookupMode::Builtin,
+            mode_reason: None,
         };
         let value = serde_json::to_value(&settings).expect("json");
         assert_eq!(
@@ -1190,6 +1399,83 @@ mod tests {
         let changed = with_history(&[(100, true, "a"), (300, true, "b")]);
         assert_eq!(changed.needs_codex_restart(150), Some(true));
         assert_eq!(changed.needs_codex_restart(350), Some(false));
+    }
+
+    /// 换了端口：正在运行的 Codex 还指着旧端口，要重启；没记端口的旧记录当作同一个端口
+    #[test]
+    fn a_port_move_needs_a_restart() {
+        let mut settings = with_history(&[(100, true, "a")]);
+        settings.port = 47329;
+        settings.record_change(200, true);
+        assert_eq!(settings.needs_codex_restart(150), Some(true));
+        assert_eq!(settings.needs_codex_restart(250), Some(false));
+
+        let legacy: GatewaySettings = serde_json::from_value(json!({
+            "port": 47328,
+            "catalogFingerprint": "a",
+            "history": [{"at": 100, "enabled": true, "catalog": "a"}]
+        }))
+        .expect("json");
+        let mut legacy = legacy;
+        legacy.record_change(200, true);
+        assert_eq!(legacy.history.len(), 1, "旧记录没有端口：不算变了");
+        assert_eq!(legacy.needs_codex_restart(150), Some(false));
+    }
+
+    /// 换接法（借用内置 ↔ 独立服务商）是 Codex 看得到的变化：要重启（R9）
+    #[test]
+    fn a_mode_switch_needs_a_restart() {
+        let mut settings = with_history(&[(100, true, "a")]);
+        settings.mode = HookupMode::Provider;
+        settings.record_change(200, true);
+        assert_eq!(settings.history.len(), 2);
+        assert_eq!(settings.needs_codex_restart(150), Some(true));
+        assert_eq!(settings.needs_codex_restart(250), Some(false));
+    }
+
+    /// 接法与原因随设置读写；老文件没有 mode，读成借用内置，写回也不多出字段
+    #[test]
+    fn mode_round_trips_and_defaults_to_builtin() {
+        let legacy: GatewaySettings = serde_json::from_value(json!({"port": 47328})).expect("json");
+        assert_eq!(legacy.mode, HookupMode::Builtin);
+        assert_eq!(legacy.mode_reason, None);
+        let value = serde_json::to_value(&legacy).unwrap();
+        assert!(value.get("mode").is_none() && value.get("modeReason").is_none());
+        let provider = GatewaySettings {
+            mode: HookupMode::Provider,
+            mode_reason: Some(ModeReason::SignedOut),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&provider).unwrap();
+        assert_eq!(value["mode"], json!("provider"));
+        assert_eq!(value["modeReason"], json!("signedOut"));
+        let back: GatewaySettings = serde_json::from_value(value).unwrap();
+        assert_eq!(back, provider);
+    }
+
+    /// 「开着」是用户的选择，单独存；老数据没有这个字段，读成 None 由编排层补
+    #[test]
+    fn enabled_choice_is_optional_and_round_trips() {
+        let legacy: GatewaySettings = serde_json::from_value(json!({"port": 47328})).expect("json");
+        assert_eq!(legacy.enabled, None);
+        assert!(serde_json::to_value(&legacy)
+            .unwrap()
+            .get("enabled")
+            .is_none());
+        let on = GatewaySettings {
+            enabled: Some(true),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&on).unwrap();
+        assert_eq!(value["enabled"], json!(true));
+        let back: GatewaySettings = serde_json::from_value(value).unwrap();
+        assert_eq!(back.enabled, Some(true));
+    }
+
+    #[test]
+    fn port_range_starts_at_the_default_port() {
+        assert_eq!(*PORT_RANGE.start(), DEFAULT_PORT);
+        assert_eq!(*PORT_RANGE.end(), 47339);
     }
 
     #[test]

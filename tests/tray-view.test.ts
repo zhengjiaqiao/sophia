@@ -47,7 +47,7 @@ const state = ({ provider: one, ...overrides }: Fixture = {}): GatewayState => {
   // 只给面板判断用得到的几项（与原夹具一样）；名字取不到时 providerLabel 退回主机名
   const provider = {
     baseUrl: "https://example.com/openai",
-    hasKey: true,
+    key: "set",
     models: [],
     ...one,
   } as GatewayProvider;
@@ -56,7 +56,7 @@ const state = ({ provider: one, ...overrides }: Fixture = {}): GatewayState => {
     providers: [provider],
     enabled: false,
     needsCodexRestart: false,
-    router: { installed: false, running: false, port: 47328, error: "" },
+    router: { running: false, port: 47328, error: "" },
     codex: { version: "26.0", running: false, catalogVersion: "1", drift: false },
     conflict: "",
     takeover: null,
@@ -69,7 +69,7 @@ const withModels = (n: number, overrides: Fixture = {}) =>
     ...overrides,
     provider: {
       baseUrl: "https://example.com/openai",
-      hasKey: true,
+      key: "set",
       models: [...Array(n)].map((_, i) => model(`m${i}`, true)).concat(model("off", false)),
       ...(overrides.provider ?? {}),
     },
@@ -81,7 +81,7 @@ test("AC1 已启用：开关开着、可点", () => {
   const row = trayRow(
     withModels(3, {
       enabled: true,
-      router: { installed: true, running: true, port: 47328, error: "" },
+      router: { running: true, port: 47328, error: "" },
     }),
   );
   assert.equal(row.toggle.on, true);
@@ -97,7 +97,7 @@ test("可以启用：开关关着、可点", () => {
 
 // 原因的文案归 modelsView（与 Codex 页同一句），这里只钉「禁用、且说的是同一句」
 test("AC2 没保存密钥：开关禁用并说原因（与 Codex 页同一句）", () => {
-  const s = state({ provider: { baseUrl: "", hasKey: false, models: [] } });
+  const s = state({ provider: { baseUrl: "", key: "missing", models: [] } });
   const row = trayRow(s);
   assert.equal(row.toggle.on, false);
   assert.notEqual(row.toggle.disabledReason, null);
@@ -118,7 +118,7 @@ test("AC3 由 agents-manager 启用：开关禁用，原因是先接管", () => 
 
 test("已启用时永远能关：哪怕密钥没了、模型清空了", () => {
   const row = trayRow(
-    state({ enabled: true, provider: { baseUrl: "", hasKey: false, models: [] } }),
+    state({ enabled: true, provider: { baseUrl: "", key: "missing", models: [] } }),
   );
   assert.equal(row.toggle.on, true);
   assert.equal(row.toggle.disabledReason, null);
@@ -159,6 +159,7 @@ const usageView = (overrides: Partial<UsageView> = {}): UsageView => ({
         },
       ],
       note: null,
+      retry: false,
     },
     {
       agent: "codex",
@@ -173,6 +174,7 @@ const usageView = (overrides: Partial<UsageView> = {}): UsageView => ({
         },
       ],
       note: null,
+      retry: false,
     },
   ],
   menuBar: { segments: [] },
@@ -246,7 +248,52 @@ const trayHost = {
   alive: () => true,
   openedAt: 0,
   failOver: () => undefined,
+  rereadUsage: async () => undefined,
 };
+
+test("用量行：能再试的原因行右端一颗托盘小按键「再试一次」（同 `重启生效` 那种键），上一次的读数照画；被限流的不给", async () => {
+  const { TrayAgents } = await import("../src/TrayPanel.tsx");
+  const [claude, codex] = usageView().tray;
+  const view = usageView({
+    tray: [
+      { ...claude, note: "Claude Code 版本可能太旧，更新后再试", retry: true },
+      { ...codex, windows: [], note: "被限流，约 5 分钟后再试", retry: false },
+    ],
+  });
+  const agentState = trayAgentState(state(), view);
+  const html = render(TrayAgents, {
+    blocks: trayBlocks(AGENTS, agentState),
+    state: agentState,
+    host: trayHost,
+  });
+  const claudeHtml = html.slice(html.indexOf('aria-label="Claude"'));
+  assert.match(claudeHtml, /usage-wins--stacked[^]*>剩 93%</, "上一次的读数照画");
+  assert.match(
+    claudeHtml,
+    /<p class="usage-note usage-note--retry"><span class="usage-note__text">Claude Code 版本可能太旧，更新后再试<\/span><span class="ss-tipwrap is-idle"><button type="button" class="ss-btn ss-btn--compact">再试一次<\/button><\/span><\/p>/,
+  );
+  const codexHtml = html.slice(0, html.indexOf('aria-label="Claude"'));
+  assert.match(codexHtml, /<p class="usage-note">被限流，约 5 分钟后再试<\/p>/);
+  assert.doesNotMatch(codexHtml, /再试一次/);
+});
+
+test("用量行（两行版式）正在读取：键锁住、aria-busy，过了忙碌门槛换成刻度 +「正在读取」", async () => {
+  const { UsageWindows } = await import("../src/usage/UsageWindows.tsx");
+  const [claude] = usageView().tray;
+  const usage = { ...claude, note: "Claude Code 没有回应", retry: true };
+  const html = render(UsageWindows, {
+    usage,
+    stacked: true,
+    retrying: true,
+    onRetry: () => undefined,
+  });
+  assert.match(
+    html,
+    /<span class="ss-locked" aria-busy="true"><span class="ss-tipwrap is-idle"><button[^>]*>再试一次<\/button><\/span><\/span><\/p>/,
+  );
+  // 没给 onRetry（不在托盘或用量页里）：只有原因，不出键
+  assert.doesNotMatch(render(UsageWindows, { usage, stacked: true }), /再试一次/);
+});
 
 test("R10 用量：托盘里一个窗口两行（2026-09-30 系统菜单风格：上一行名字 ……「剩 93% · 2:58 后重置」，下一行满宽的条），紧张的那个加粗；条与文字同一刻度", async () => {
   const { TrayAgents } = await import("../src/TrayPanel.tsx");
@@ -353,7 +400,7 @@ test("R4 刚启用、Codex 还开着旧配置：出现「重启生效」", () =>
     withModels(2, {
       enabled: true,
       needsCodexRestart: true,
-      router: { installed: true, running: true, port: 47328, error: "" },
+      router: { running: true, port: 47328, error: "" },
     }),
   );
   assert.equal(row.showRestart, true);
@@ -389,14 +436,12 @@ test("托盘拨开关：拨了就写（switchGateway，不确认、不重启）�
   assert.doesNotMatch(src, /confirmPanel|tray__confirm-/);
 });
 
-test("托盘「卸下后台服务」：停用后服务仍在才出现；和「重启生效」同时该出现时让位给重启（一行放不下两颗键）", () => {
-  const router = { installed: true, running: true, port: 47328, error: "" };
-  assert.equal(trayRow(withModels(2, { enabled: false, router })).showUninstall, true);
-  assert.equal(trayRow(withModels(2, { enabled: true, router })).showUninstall, false);
-  assert.equal(
-    trayRow(withModels(2, { enabled: false, router, needsCodexRestart: true })).showUninstall,
-    false,
-  );
+test("托盘没有「卸下后台服务」（路由在 Sophia 进程里，没有要卸的后台服务）：关着时键位空着", () => {
+  const router = { running: false, port: 47328, error: "" };
+  const row = trayRow(withModels(2, { enabled: false, router }));
+  assert.equal(row.showRestart, false);
+  assert.equal(row.showLaunch, false);
+  assert.ok(!("showUninstall" in row));
 });
 
 test("「启动 Codex」：开着、Codex 没在跑、不等重启时出现；关着不出现（与 Codex 页同一规则）", () => {
@@ -510,7 +555,7 @@ const claudeView = (
   providers: [
     {
       baseUrl: "https://example.com/openai",
-      hasKey: true,
+      key: "set",
       models: [model("kimi", true), model("glm", false)],
     } as GatewayProvider,
   ],
@@ -562,7 +607,7 @@ test("R41 R44 Claude 开关按不动时说「怎么办」（与列表行同一�
     reason(
       claudeView({
         providers: [
-          { baseUrl: "https://a.example.com", hasKey: true, models: [model("x", false)] },
+          { baseUrl: "https://a.example.com", key: "set", models: [model("x", false)] },
         ] as GatewayProvider[],
       }),
     ),
@@ -574,11 +619,11 @@ test("R41 R44 Claude 开关按不动时说「怎么办」（与列表行同一�
 test("R44 Claude 行的几句话：开关提示框两段、重启确认正文按方向、`打开 Claude` 的提示框（DESIGN 原话）", () => {
   assert.equal(
     claudeSwitchTip(false),
-    "打开后，Claude 桌面应用改用这里选的模型，不再登录 Claude 账号；账号里的对话暂时看不到，切回即恢复。要重开 Claude 才生效",
+    "打开后，Claude 桌面应用改用这里选的模型，不再登录 Claude 账号；账号里的对话暂时看不到，切回即恢复。要重开 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上",
   );
   assert.equal(
     claudeSwitchTip(true),
-    "关掉后，Claude 桌面应用回到 Claude 账号；要重开 Claude 才生效",
+    "关掉后，Claude 桌面应用回到 Claude 账号；要重开 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上",
   );
   assert.equal(
     claudeRestartConsequence(true),
@@ -643,7 +688,7 @@ test("AC45 托盘：Claude 块在用量之后是 `第三方模型` + [重启生�
   );
   assert.match(
     html,
-    /tray__usage[^]*剩 10%[^]*<div class="tray__cap"><span class="tray__cap-title">第三方模型<\/span><span class="tray__end">[^]*重启生效[^]*role="switch"[^]*<\/div><p class="tray__cost">账号里的对话暂时看不到<\/p>/,
+    /tray__usage[^]*剩 10%[^]*<div class="tray__cap">[^]*?<span class="tray__cap-title">第三方模型<\/span>[^]*?<span class="tray__end">[^]*重启生效[^]*role="switch"[^]*<\/div><p class="tray__cost">账号里的对话暂时看不到<\/p>/,
   );
   assert.match(html, /aria-label="启用 Claude 的第三方模型"/);
   assert.doesNotMatch(html, />kimi</, "模型名不进托盘");
@@ -703,4 +748,15 @@ test("R44 托盘的 Claude 行：拨了就写（gatewayEnable / gatewayRestore �
   assert.equal(AGENTS[1].sections[1].trayRow?.name, "TrayClaudeModels");
   assert.doesNotMatch(src, /\bss-[a-z]/);
   assert.doesNotMatch(src, /<svg/);
+});
+
+test("托盘两家的能力行同一骨架：名字撑满键位左边（TruncTip grow），开关贴右沿", () => {
+  for (const file of ["TrayModelsRow.tsx", "TrayClaudeRow.tsx"]) {
+    const src = readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8");
+    assert.match(
+      src,
+      /<TruncTip content=\{title\} fit="grow">\s*<span className="tray__cap-title">\{title\}<\/span>/,
+      file,
+    );
+  }
 });

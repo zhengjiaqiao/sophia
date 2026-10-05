@@ -41,11 +41,15 @@ import {
   placeholderFields,
   sameNote,
   skillInstallBlock,
+  skillPlanPending,
   skillInstalledToast,
   skillNameOf,
+  skillRowView,
+  takenAgents,
   writableCount,
 } from "../src/market/installView.ts";
 import type {
+  AgentDir,
   InstallOutcome,
   McpDefinitionInput,
   McpReport,
@@ -214,6 +218,7 @@ test("贴底（skill）：从 codeload.github.com 下载 · 分支 · 大小；�
       items: [],
       directReaders: [],
       links: [],
+      agentDirs: [],
     },
     branch: "main",
     downloadUrl: "https://codeload.github.com/anthropics/skills/tar.gz/refs/heads/main",
@@ -469,10 +474,15 @@ test("安装 MCP 的来历：发布方 · 包名 + npm / PyPI 上的说明；远
 
 // ───────── 装完那一窗 ─────────
 
-const outcome = (installed: string[], failed: Record<string, string> = {}): InstallOutcome => ({
+const outcome = (
+  installed: string[],
+  failed: Record<string, string> = {},
+  unlinked: InstallOutcome["unlinked"] = [],
+): InstallOutcome => ({
   installed,
   failed,
   links: { entries: [] },
+  unlinked,
   records: [],
   undoId: installed.length > 0 ? "u1" : null,
 });
@@ -493,6 +503,90 @@ test("装 skill 之后：✓ 已安装 pdf（例行）；部分没装上是部�
   assert.equal(none.kind, "cannot");
   assert.equal(say(none.sentence, { names: "pdf" }), "pdf 安装失败");
   assert.equal(none.reason, "下载失败");
+});
+
+test("M14 装完：勾了的 agent 那里已有同名的没链上，是部分失败一窗：已安装 pdf · Claude Code 没链上：那里已有同名的", () => {
+  const taken = "那里已有同名的";
+  const one = skillInstalledToast(
+    outcome(["pdf"], {}, [{ harnessId: "claude-code", name: "pdf", reason: taken }]),
+    INSTALLED,
+  );
+  assert.equal(one.kind, "partial");
+  assert.equal(one.tier, "notice");
+  assert.equal(say(one.sentence, { names: "pdf" }), "已安装 pdf");
+  assert.deepEqual(one.names, ["pdf"]);
+  assert.equal(one.tally, undefined, "没有没装上的，不写 1 ✓ · 0 ⊘");
+  assert.equal(one.reason, "Claude Code 没链上：那里已有同名的");
+
+  const two = skillInstalledToast(
+    outcome(["pdf"], {}, [
+      { harnessId: "claude-code", name: "pdf", reason: taken },
+      { harnessId: "cursor", name: "pdf", reason: taken },
+    ]),
+    INSTALLED,
+  );
+  assert.equal(two.kind, "partial");
+  assert.equal(two.reason, "Claude Code、Cursor 没链上：那里已有同名的");
+
+  // 别的原因照抄后端那一句，按原因分开说
+  const mixed = skillInstalledToast(
+    outcome(["pdf"], {}, [
+      { harnessId: "claude-code", name: "pdf", reason: taken },
+      { harnessId: "codex", name: "pdf", reason: "无法写入 Codex 的 skills 目录" },
+    ]),
+    INSTALLED,
+  );
+  assert.equal(
+    mixed.reason,
+    "Claude Code 没链上：那里已有同名的；Codex 没链上：无法写入 Codex 的 skills 目录",
+  );
+});
+
+test("M14 复审：计划还没回来（不知道哪个 agent 那里已有同名的）时 安装 不能按，说正在检查", () => {
+  assert.equal(skillPlanPending(null, null), true);
+  assert.equal(skillPlanPending(null, "读不到仓库"), false, "出错了不算在检查，照旧交给后端再判");
+  // 换了位置、旧计划还没清掉的那一下：手里的计划（或出错）是上一个位置的，不作数
+  assert.equal(skillPlanPending({}, null, true), true);
+  assert.equal(skillPlanPending(null, "读不到仓库", true), true);
+  assert.equal(skillPlanPending({}, null, false), false);
+  assert.equal(
+    skillInstallBlock({ items: [], selected: 1, agents: 2, checking: true }),
+    "正在检查各 agent",
+  );
+  // 还没选要装的：先说没选
+  assert.equal(skillInstallBlock({ items: [], selected: 0, agents: 2, checking: true }), noSkill());
+  assert.equal(
+    skillInstallBlock({ items: [{ blocked: null }], selected: 1, agents: 2, checking: false }),
+    null,
+  );
+});
+
+test("M14 装完：全都链上了照旧是 ✓ 已安装 pdf", () => {
+  const ok = skillInstalledToast(outcome(["pdf"]), INSTALLED);
+  assert.equal(ok.kind, "success");
+  assert.equal(ok.tier, "routine");
+  assert.equal(ok.reason, undefined);
+  assert.equal(say(ok.sentence, { names: "pdf" }), "已安装 pdf");
+});
+
+test("M14 装之前：那里已有同名 skill 的 agent 不能勾，名字后就地说原因", () => {
+  const dirs: AgentDir[] = [
+    { harnessId: "claude-code", dir: "/Users/you/.claude/skills", chosen: false, taken: ["pdf"] },
+    { harnessId: "codex", dir: "/Users/you/.codex/skills", chosen: false, taken: [] },
+  ];
+  const cc = skillRowView(dirs, "claude-code", ["pdf"]);
+  assert.equal(cc.disabledReason, "那里已经有一个同名的 pdf，不会覆盖");
+  assert.equal(cc.note, "那里已经有一个同名的 pdf，不会覆盖");
+  assert.deepEqual(skillRowView(dirs, "codex", ["pdf"]), {});
+  // 不在表里的（直接读取的、计划还没回来）照常能勾
+  assert.deepEqual(skillRowView(dirs, "cline", ["pdf"]), {});
+  assert.deepEqual(skillRowView(undefined, "claude-code", ["pdf"]), {});
+  // 什么都还没选：不禁用
+  assert.deepEqual(skillRowView(dirs, "claude-code", []), {});
+  // 装好几个、只有一部分被占：照样能勾（装完的那一窗说哪一个没链上）
+  assert.deepEqual(skillRowView(dirs, "claude-code", ["pdf", "docx"]), {});
+  assert.deepEqual(takenAgents(dirs, ["pdf"]), ["claude-code"]);
+  assert.deepEqual(takenAgents(dirs, ["pdf", "docx"]), []);
 });
 
 const entry = (

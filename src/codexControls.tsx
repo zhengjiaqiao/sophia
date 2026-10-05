@@ -22,7 +22,6 @@ import {
   shouldPollRestart,
   switchDisabledReason,
   switchGateway,
-  uninstallTip,
 } from "./modelsView.ts";
 import { t } from "./i18n.ts";
 import { codexGateway } from "./types.ts";
@@ -40,7 +39,7 @@ import {
 import "./codexControls.css";
 
 /// Codex 能力控件（DESIGN「组件使用指南 › 不进组件库、在页面层合并的」）：「第三方模型」的开关三态、
-/// 开关旁那一位的 `重启生效` / `启动 Codex` / `卸下后台服务`。Codex 页节头（ModelsTab）与托盘能力行
+/// 开关旁那一位的 `重启生效` / `启动 Codex`。Codex 页节头（ModelsTab）与托盘能力行
 /// （TrayModelsRow）用的是这同一份——DESIGN「改动待生效」：Codex 页与托盘同一段逻辑。
 /// 它带业务判断（哪颗键此刻该出、开关为什么按不动），所以不进 `src/ui`；写配置、重启、等结果由调用方做，
 /// 这里只按调用方给的阶段画。两处只差放在哪（`place`）：节头里提示框与 `✓ 已生效` 左对齐键；
@@ -116,12 +115,9 @@ export interface CodexKeySlotProps {
   phase: CodexPhase;
   /// 别的写 Codex 设置的事在做：键禁用并说「正在处理上一步」
   busy: boolean;
-  /// 正在卸下后台服务：那颗键原位忙碌
-  uninstalling: boolean;
   /// 点 `重启生效`：调用方先确认（节头：窗口正中的确认框；托盘：面板里的窄面板）
   onRestart: () => void;
   onLaunch: () => void;
-  onUninstall: () => void;
   /// `✓ 已生效 / 已启动` 那一窗到点
   onDoneDismiss: () => void;
   /// section：Codex 页节头（提示框、✓ 左对齐键）；tray：托盘能力行（提示框居中、✓ 右沿对齐 `doneAnchor`）
@@ -132,18 +128,16 @@ export interface CodexKeySlotProps {
   confirmId?: string;
 }
 
-/// 开关旁那一位（DESIGN「改动待生效：重启生效与启动 Codex」）：`重启生效` / `启动 Codex` / `卸下后台服务`
+/// 开关旁那一位（DESIGN「改动待生效：重启生效与启动 Codex」）：`重启生效` / `启动 Codex`
 /// 同一位、不会同时出现（modelsView.codexKeyKind）；都是默认键紧凑 24。
-/// 重启、启动、卸下期间原位忙碌（`BusySlot`：过了 0.3 秒门槛才换成刻度 + 一句，之前键照旧、点不动）；
+/// 重启、启动期间原位忙碌（`BusySlot`：过了 0.3 秒门槛才换成刻度 + 一句，之前键照旧、点不动）；
 /// 重启、启动成了键消失，原位下方浮起 `✓ 已生效 / 已启动`（约 4 秒淡出）。做不成的灰面板不在这里——由调用方挂
 export function CodexKeySlot({
   state,
   phase,
   busy,
-  uninstalling,
   onRestart,
   onLaunch,
-  onUninstall,
   onDoneDismiss,
   place,
   doneAnchor,
@@ -191,24 +185,6 @@ export function CodexKeySlot({
 
   const kind = codexKeyKind(state, settled(phase));
   if (kind === null) return null;
-  if (kind === "uninstall") {
-    return (
-      <BusySlot busy={uninstalling} label={t("models.control.uninstalling")}>
-        {tipped(
-          uninstallTip(),
-          busy && !uninstalling ? (
-            <Button size="compact" disabled disabledReason={t("models.control.busyPrev")}>
-              {t("models.control.uninstallKey")}
-            </Button>
-          ) : (
-            <Button size="compact" onClick={uninstalling ? undefined : onUninstall}>
-              {t("models.control.uninstallKey")}
-            </Button>
-          ),
-        )}
-      </BusySlot>
-    );
-  }
   const restart = kind === "restart";
   const label = restart ? t("models.control.restartKey") : t("models.control.launchKey", { app });
   const expanded = restart && confirmId !== undefined ? phase.kind === "confirming" : undefined;
@@ -231,8 +207,8 @@ export function CodexKeySlot({
   );
 }
 
-/// 模型列表页里 Codex 那一行的右端控件列（注册表 `listRow.Controls`；DESIGN「列表页」）：条件键（`重启生效` / `启动 Codex` /
-/// `卸下后台服务`，同 Codex 的页那一位）+ 12 + 开关。规则同 Codex 的页：拨了就写、不确认、乐观翻转；`重启生效` 先确认
+/// 模型列表页里 Codex 那一行的右端控件列（注册表 `listRow.Controls`；DESIGN「列表页」）：条件键（`重启生效` / `启动 Codex`，
+/// 同 Codex 的页那一位）+ 12 + 开关。规则同 Codex 的页：拨了就写、不确认、乐观翻转；`重启生效` 先确认
 /// （窗口正中）；禁用时按下即说原因——行上说「是什么」、提示框说「怎么办」（`codexListSwitchReason`）。
 /// 没写成：滑块滑回，这一行下出行内灰面板 + `再试一次`（经 `onNotice` 交给列表页挂）；新状态经 `onGatewayState` 报给壳，
 /// 列表页、侧栏橙点、Codex 的页下次推入都读同一份。键显示着时每 5 秒轻查一次（外部重启了 Codex，键要自己消失）
@@ -240,7 +216,6 @@ export function CodexListControls({ state, onNotice, onGatewayState }: AgentList
   const gateway = state.gateway;
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
-  const [uninstalling, setUninstalling] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -363,34 +338,14 @@ export function CodexListControls({ state, onNotice, onGatewayState }: AgentList
     setPhase(reason === null ? { kind: "launched" } : { kind: "idle" });
   };
 
-  const uninstall = async () => {
-    onNotice(null);
-    setUninstalling(true);
-    setBusy(true);
-    try {
-      const next = await api.gatewayRestore("codex");
-      if (alive()) onGatewayState(next);
-    } catch (error) {
-      if (alive())
-        fail(t("models.notice.uninstallFailed"), describe(error), () => void uninstall());
-    } finally {
-      if (alive()) {
-        setBusy(false);
-        setUninstalling(false);
-      }
-    }
-  };
-
   return (
     <>
       <CodexKeySlot
         state={gateway}
         phase={phase}
         busy={busy}
-        uninstalling={uninstalling}
         onRestart={() => setConfirmRestart(true)}
         onLaunch={() => void launch()}
-        onUninstall={() => void uninstall()}
         onDoneDismiss={dismissDone}
         place="section"
       />

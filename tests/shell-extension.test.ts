@@ -75,7 +75,7 @@ const gw = (id: string, models: ReturnType<typeof pick>[]) => ({
   shortName: id,
   baseUrl: `https://${id}.example`,
   protocol: "chat",
-  hasKey: true,
+  key: "set",
   models,
   unreachable: null,
 });
@@ -98,7 +98,7 @@ const gatewayState = (
   const { desktop: extra, ...claudeView } = claude;
   return {
     supported: true,
-    router: { installed: false, running: false, port: 47328, error: "" },
+    router: { running: false, port: 47328, error: "" },
     agents: [
       {
         agent: "codex",

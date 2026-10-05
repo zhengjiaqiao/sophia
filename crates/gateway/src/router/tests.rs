@@ -544,8 +544,13 @@ async fn routing_catalog_is_reloaded_per_request() {
 async fn third_party_key_unavailable_does_not_forward() {
     let h = Harness::with_key(None, Arc::new(|_, _| Err("not set".to_owned()))).await;
     let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
-    assert_eq!(res.status, 502);
-    assert!(res.text().contains("key") || res.text().contains("密钥"));
+    // 不回 502：Codex 会把 5xx 重试好几次，而密钥取不到重试也没用
+    assert_eq!(res.status, 403, "{}", res.text());
+    let message = json(&res.body)["error"]["message"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned();
+    assert!(message.contains("could not get the API key"), "{message}");
     assert_eq!(h.third_party.all().len(), 0);
 }
 
@@ -563,15 +568,55 @@ async fn third_party_down_does_not_affect_native() {
 async fn third_party_error_is_passed_through() {
     let h = Harness::new(Some(Arc::new(|_| {
         (
-            401,
+            429,
             vec![("content-type".into(), "application/json".into())],
-            br#"{"type":"error","error":"Unauthorized"}"#.to_vec(),
+            br#"{"type":"error","error":"Too Many Requests"}"#.to_vec(),
         )
     })))
     .await;
     let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
-    assert_eq!(res.status, 401);
-    assert!(res.text().contains("Unauthorized"));
+    assert_eq!(res.status, 429);
+    assert!(res.text().contains("Too Many Requests"));
+}
+
+/// 上游 401 / 403（两种协议）：一律回 403 并说明是第三方网关拒绝了密钥。
+/// 不回 401：Codex 会把 401 当成自己的 ChatGPT 登录失效
+#[tokio::test]
+async fn third_party_key_rejection_becomes_403() {
+    for status in [401u16, 403] {
+        for chat in [false, true] {
+            let respond: Responder = Arc::new(move |_| {
+                (
+                    status,
+                    vec![("content-type".into(), "application/json".into())],
+                    br#"{"type":"error","error":"Unauthorized"}"#.to_vec(),
+                )
+            });
+            let (h, body) = if chat {
+                (Harness::chat(Some(respond)).await, RESPONSES_BODY)
+            } else {
+                (
+                    Harness::new(Some(respond)).await,
+                    r#"{"model":"weibo-glm-5"}"#,
+                )
+            };
+            let res = h.send(post(body)).await;
+            assert_eq!(
+                res.status,
+                403,
+                "upstream {status}, chat {chat}: {}",
+                res.text()
+            );
+            let message = json(&res.body)["error"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .to_owned();
+            assert!(
+                message.contains("rejected the API key") && message.contains("Unauthorized"),
+                "upstream {status}, chat {chat}: {message}"
+            );
+        }
+    }
 }
 
 /// 日志只记时间、模型、去向、状态码，不含凭据和请求内容
@@ -807,6 +852,20 @@ fn log_safe_truncates_on_char_boundary() {
     assert_eq!(log_safe(""), "-");
 }
 
+/// reasoning-passback R5：账号与密钥标识整段换成 `…`，只认串开头的前缀，其余原文照留
+#[test]
+fn account_ids_are_masked() {
+    assert_eq!(
+        mask_account_ids("Your account org-abc123<ak-xyz.9> hit max RPM; sk-1 used"),
+        "Your account …<…> hit max RPM; … used"
+    );
+    assert_eq!(
+        mask_account_ids("task-ak-1 org- disk-sk-2 组织org-1中"),
+        "task-ak-1 org- disk-sk-2 组织…中"
+    );
+    assert_eq!(mask_account_ids(""), "");
+}
+
 /// 流式响应逐块转发：上游还没结束，第一块就已经到达客户端
 #[tokio::test]
 async fn native_streaming_response_is_forwarded_incrementally() {
@@ -969,6 +1028,64 @@ async fn ac6_chat_protocol_tool_call() {
     );
 }
 
+/// 客户端流里最后一个事件的名字
+fn last_event(sse: &str) -> &str {
+    sse.lines()
+        .filter_map(|line| line.strip_prefix("event: "))
+        .next_back()
+        .unwrap_or("")
+}
+
+/// 第三方网关中途断流（没有 `[DONE]` 也没有 finish_reason）：最后一个事件是 response.failed，
+/// 不能把半截回答标成完成；不要流式的客户端同样拿到 failed
+#[tokio::test]
+async fn chat_stream_cut_before_terminator_ends_with_failed() {
+    let h = Harness::chat(Some(Arc::new(|_| {
+        (
+            200,
+            vec![("content-type".into(), "text/event-stream".into())],
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"半截\"}}]}\n\n"
+                .as_bytes()
+                .to_vec(),
+        )
+    })))
+    .await;
+    let out = h.send(post(RESPONSES_BODY)).await.text();
+    assert_eq!(last_event(&out), "response.failed", "{out}");
+    assert!(!out.contains("event: response.completed"), "{out}");
+    assert!(out.contains("disconnected"), "{out}");
+
+    let res = h
+        .send(post(
+            r#"{"model":"weibo-glm-5","stream":false,"input":"hi"}"#,
+        ))
+        .await;
+    assert_eq!(json(&res.body)["status"], "failed", "{}", res.text());
+}
+
+/// 正常收尾（`[DONE]`，或只给 finish_reason）：最后一个事件是 response.completed
+#[tokio::test]
+async fn chat_stream_with_terminator_ends_with_completed() {
+    let finish_only: Responder = Arc::new(|_| {
+        (
+            200,
+            vec![("content-type".into(), "text/event-stream".into())],
+            br#"data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+
+"#
+            .to_vec(),
+        )
+    });
+    for respond in [
+        chat_sse(&[r#"{"choices":[{"index":0,"delta":{"content":"ok"}}]}"#]),
+        finish_only,
+    ] {
+        let h = Harness::chat(Some(respond)).await;
+        let out = h.send(post(RESPONSES_BODY)).await.text();
+        assert_eq!(last_event(&out), "response.completed", "{out}");
+    }
+}
+
 /// 网关报错时 Codex 要拿到状态码和能读的错误文字（wecode 的错误体不是 OpenAI 的格式）
 #[tokio::test]
 async fn chat_protocol_upstream_error_is_readable() {
@@ -1127,6 +1244,111 @@ async fn chat_protocol_compaction_retries_without_reasoning_effort() {
     assert_eq!(json(&all[0].body)["reasoning_effort"], "low");
     assert_eq!(json(&all[1].body)["stream"], false);
     assert!(json(&all[1].body).get("reasoning_effort").is_none());
+}
+
+/// 历史里有本工具的推理条目（摘要「先读 a」）与一轮工具调用：转成 Chat 时 assistant 带 reasoning_content
+fn passback_body(effort: bool) -> String {
+    let reasoning = if effort {
+        r#""reasoning":{"effort":"high"},"#
+    } else {
+        ""
+    };
+    format!(
+        r#"{{"model":"weibo-glm-5","stream":true,{reasoning}"input":[
+      {{"type":"message","role":"user","content":"看看 a"}},
+      {{"type":"reasoning","id":"{}1","summary":[{{"type":"summary_text","text":"先读 a"}}]}},
+      {{"type":"function_call","call_id":"call_1","name":"exec_command","arguments":"{{}}"}},
+      {{"type":"function_call_output","call_id":"call_1","output":"内容"}}]}}"#,
+        crate::translate::REASONING_ID_PREFIX
+    )
+}
+
+const CONTENT_REJECTED: &[u8] =
+    br#"{"error":{"message":"unknown field reasoning_content","type":"invalid_request_error"}}"#;
+
+fn has_reasoning_content(body: &[u8]) -> bool {
+    String::from_utf8_lossy(body).contains("reasoning_content")
+}
+
+/// AC4（Codex）：上游因 reasoning_content 回 400 → 去掉全部后重发一次并成功；仍 400 则原样回、不再重发
+#[tokio::test]
+async fn chat_protocol_drops_reasoning_content_once_when_rejected() {
+    let ok =
+        chat_sse(&[r#"{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}"#]);
+    let h = Harness::chat(Some(Arc::new(move |req: &Captured| {
+        if has_reasoning_content(&req.body) {
+            (400, vec![], CONTENT_REJECTED.to_vec())
+        } else {
+            ok(req)
+        }
+    })))
+    .await;
+    let res = h.send(post(&passback_body(false))).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = h.third_party.all();
+    assert_eq!(all.len(), 2, "恰好重发一次");
+    assert_eq!(
+        json(&all[0].body)["messages"][1]["reasoning_content"],
+        "先读 a"
+    );
+    assert!(!has_reasoning_content(&all[1].body));
+    let mut first = json(&all[0].body);
+    first["messages"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("reasoning_content");
+    assert_eq!(first, json(&all[1].body));
+
+    let h = Harness::chat(Some(Arc::new(|_: &Captured| {
+        (400, vec![], CONTENT_REJECTED.to_vec())
+    })))
+    .await;
+    let res = h.send(post(&passback_body(false))).await;
+    assert_eq!(res.status, 400);
+    assert!(res.text().contains("reasoning_content"), "{}", res.text());
+    assert_eq!(h.third_party.all().len(), 2, "至多一次");
+}
+
+/// 推理强度与思考内容各被点名拒收一次：各去掉一次，共发三次；都一直 400 时也只发三次
+#[tokio::test]
+async fn chat_protocol_effort_and_reasoning_content_retries_are_independent() {
+    let ok =
+        chat_sse(&[r#"{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}"#]);
+    let h = Harness::chat(Some(Arc::new(move |req: &Captured| {
+        if has_reasoning_content(&req.body) {
+            (400, vec![], CONTENT_REJECTED.to_vec())
+        } else if json(&req.body).get("reasoning_effort").is_some() {
+            (400, vec![], EFFORT_REJECTED.to_vec())
+        } else {
+            ok(req)
+        }
+    })))
+    .await;
+    let res = h.send(post(&passback_body(true))).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all: Vec<serde_json::Value> = h.third_party.all().iter().map(|r| json(&r.body)).collect();
+    assert_eq!(all.len(), 3);
+    assert!(
+        all[1].get("reasoning_effort").is_some(),
+        "点名的是 reasoning_content，先去它"
+    );
+    assert!(!all[1].to_string().contains("reasoning_content"));
+    assert!(all[2].get("reasoning_effort").is_none());
+
+    let h = Harness::chat(Some(Arc::new(|_: &Captured| {
+        (
+            400,
+            vec![],
+            br#"{"error":{"message":"reasoning is not supported"}}"#.to_vec(),
+        )
+    })))
+    .await;
+    assert_eq!(h.send(post(&passback_body(true))).await.status, 400);
+    assert_eq!(
+        h.third_party.all().len(),
+        2,
+        "说不清的拒收只去推理强度，不动思考内容"
+    );
 }
 
 /// AC7：从第三方模型切回官方模型时，历史里本功能产生的推理条目要剔除，否则官方上游会拒绝整个请求
@@ -1322,7 +1544,7 @@ async fn chat_error_body_does_not_relay_the_third_party_key() {
     })))
     .await;
     let res = h.send(post(RESPONSES_BODY)).await;
-    assert_eq!(res.status, 401);
+    assert_eq!(res.status, 403);
     assert!(!res.text().contains(THIRD_PARTY_KEY), "{}", res.text());
 }
 
@@ -1383,7 +1605,7 @@ async fn responses_error_body_does_not_relay_the_third_party_key() {
     })))
     .await;
     let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
-    assert_eq!(res.status, 401);
+    assert_eq!(res.status, 403);
     assert!(!res.text().contains(THIRD_PARTY_KEY), "{}", res.text());
 }
 
@@ -1516,28 +1738,32 @@ async fn one_providers_missing_key_does_not_affect_the_other() {
     ));
     assert_eq!(h.send(post(r#"{"model":"a-m"}"#)).await.status, 200);
     let res = h.send(post(r#"{"model":"b-m"}"#)).await;
-    assert_eq!(res.status, 502, "{}", res.text());
+    assert_eq!(res.status, 403, "{}", res.text());
     assert!(b.all().is_empty(), "没有密钥就不该发出请求");
 }
 
-/// 归属不明、上游缺失或上游地址不安全：一律拒绝，绝不回落到官方或别家
+/// 归属不明、上游缺失或上游地址不安全：一律拒绝，绝不回落到官方或别家。
+/// 回 403 而不是 502：Codex 会把 5xx 重试好几次，清单不改重试也没用；文字点名网关和原因
 #[tokio::test]
 async fn a_route_without_a_usable_provider_fails_closed() {
     let h = Harness::new(None).await;
     let elsewhere = FakeUpstream::start(None).await;
-    for (why, catalog) in [
+    for (why, want, catalog) in [
         (
             "归属指向不存在的上游",
+            r#"third-party gateway "ghost" is not in Sophia's routing list"#,
             r#"{"providers":[],"models":[{"slug":"x-m","provider":"ghost"}]}"#.to_owned(),
         ),
         (
             "明文 http 且不是本机：密钥会走明文",
+            r#"the address saved for third-party gateway "x" is not usable"#,
             r#"{"providers":[{"id":"x","base_url":"http://gateway.example/v1","protocol":"chat"}],
                 "models":[{"slug":"x-m","provider":"x"}]}"#
                 .to_owned(),
         ),
         (
             "地址里带用户名密码",
+            r#"the address saved for third-party gateway "x" is not usable"#,
             format!(
                 r#"{{"providers":[{{"id":"x","base_url":"http://u:p@{}/v1","protocol":"chat"}}],
                     "models":[{{"slug":"x-m","provider":"x"}}]}}"#,
@@ -1546,6 +1772,7 @@ async fn a_route_without_a_usable_provider_fails_closed() {
         ),
         (
             "不是 http(s)",
+            r#"the address saved for third-party gateway "x" is not usable"#,
             r#"{"providers":[{"id":"x","base_url":"file:///etc/passwd","protocol":"chat"}],
                 "models":[{"slug":"x-m","provider":"x"}]}"#
                 .to_owned(),
@@ -1553,7 +1780,12 @@ async fn a_route_without_a_usable_provider_fails_closed() {
     ] {
         h.catalog(&catalog);
         let res = h.send(post(r#"{"model":"x-m","input":"secret"}"#)).await;
-        assert_eq!(res.status, 502, "{why}: {}", res.text());
+        assert_eq!(res.status, 403, "{why}: {}", res.text());
+        let message = json(&res.body)["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        assert!(message.contains(want), "{why}: {message}");
         assert!(elsewhere.all().is_empty(), "{why}");
         assert!(
             h.third_party.all().is_empty(),
@@ -1579,7 +1811,39 @@ async fn a_broken_provider_entry_does_not_take_down_the_others() {
     ));
     assert_eq!(h.send(post(r#"{"model":"good-m"}"#)).await.status, 200);
     assert_eq!(good.all().len(), 1);
-    assert_eq!(h.send(post(r#"{"model":"bad-m"}"#)).await.status, 502);
+    assert_eq!(h.send(post(r#"{"model":"bad-m"}"#)).await.status, 403);
+}
+
+/// 路由不带归属、启动参数里也没有旧的单上游：不知道发给谁，回 403，任何上游都收不到
+#[tokio::test]
+async fn a_route_without_an_owner_fails_closed() {
+    let mut h = Harness::new(None).await;
+    h.router = Router::new(Config {
+        third_party_url: String::new(),
+        third_party_protocol: Protocol::Responses,
+        chatgpt_url: format!("{}/backend-api/codex", h.chatgpt.url),
+        openai_url: format!("{}/v1", h.openai.url),
+        routing_catalog_path: h.dir.path().join("routing.json"),
+        activity_log_path: None,
+        third_party_key: Arc::new(|_, _| Ok(THIRD_PARTY_KEY.to_owned())),
+        max_body_bytes: 0,
+        proxy: None,
+        claude_routing_path: None,
+        router_token: Arc::new(|| Err("not set".to_owned())),
+        keepalive: Duration::ZERO,
+        locale: None,
+    })
+    .unwrap();
+    let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
+    assert_eq!(res.status, 403, "{}", res.text());
+    assert!(
+        res.text()
+            .contains("does not say which third-party gateway"),
+        "{}",
+        res.text()
+    );
+    assert!(h.third_party.all().is_empty());
+    assert_eq!(h.official_reached(), 0, "不能回落到官方");
 }
 
 /// 旧格式的清单（路由不带归属）仍走启动参数给的那个上游，密钥按迁移来的那一家取
@@ -1603,3 +1867,110 @@ async fn routes_without_a_provider_use_the_startup_upstream_and_the_legacy_key()
 // 家 claude 的路由测试，复用上面的假上游与 Harness
 #[path = "claude_tests.rs"]
 mod claude_tests;
+
+/// `router.log` 有上限（spec 2026-10-04-local-diagnostics R2）：已到上限、或这一行写进去会越过上限，
+/// 先改名 `router.log.1`，只留一份旧的
+#[test]
+fn activity_log_rotates_past_the_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path().canonicalize().unwrap();
+    let log = dir.join("gateway-logs").join("router.log");
+    let old = dir.join("gateway-logs/router.log.1");
+    let read = |p: &std::path::Path| std::fs::read_to_string(p).unwrap();
+    append_activity_line(&log, "first line\n", 16);
+    // 11 + 7 > 16：先换
+    append_activity_line(&log, "second\n", 16);
+    assert_eq!(read(&old), "first line\n");
+    assert_eq!(read(&log), "second\n");
+    // 7 + 6 ≤ 16：接着写
+    append_activity_line(&log, "third\n", 16);
+    assert_eq!(read(&log), "second\nthird\n");
+    // 比上限还长的一行：换出旧的，自己写进新文件
+    append_activity_line(&log, "0123456789abcdefghij\n", 16);
+    assert_eq!(read(&old), "second\nthird\n");
+    assert_eq!(read(&log), "0123456789abcdefghij\n");
+    // 已经越过上限：再写一行先换，旧的只留一份
+    append_activity_line(&log, "fifth\n", 16);
+    assert_eq!(read(&old), "0123456789abcdefghij\n");
+    assert_eq!(read(&log), "fifth\n");
+}
+
+/// `router.log` 同样经统一的去隐私（Codex 复审 3）：模型名像密钥、路径带用户名都不原样落盘
+#[test]
+fn activity_log_lines_are_redacted() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path().canonicalize().unwrap();
+    let path = dir.join("router.log");
+    let log = ActivityLog {
+        path: Some(path.clone()),
+        lock: Arc::new(Mutex::new(())),
+    };
+    log.write(
+        Instant::now(),
+        "codex",
+        "POST",
+        "/Users/alice/a?api_key=opaque123",
+        "sk-ant-api03-abcdefghijklmnopqrstuv",
+        Route::ThirdParty,
+        400,
+        "rejected",
+        " fallback=/Users/bob/x",
+        None,
+    );
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("sk-ant-api03"), "{text}");
+    assert!(!text.contains("alice"), "{text}");
+    assert!(!text.contains("bob"), "{text}");
+    assert!(!text.contains("opaque123"), "{text}");
+    assert!(text.contains("path=~/a"), "{text}");
+    assert!(
+        text.contains("route=third_party status=") || text.contains("route=third_party model="),
+        "{text}"
+    );
+}
+
+/// Codex 复审第二轮：先去隐私、再换空白，`Bearer x` 与制表符分隔的 JSON 照样认得出
+#[test]
+fn activity_log_redacts_before_flattening_whitespace() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path().canonicalize().unwrap();
+    let path = dir.join("router.log");
+    let log = ActivityLog {
+        path: Some(path.clone()),
+        lock: Arc::new(Mutex::new(())),
+    };
+    for model in [
+        "Bearer opaqueCredential987654321",
+        "{\"api_key\":\t\"opaqueCredential987654321\"}",
+    ] {
+        log.write(
+            Instant::now(),
+            "codex",
+            "POST",
+            "/v1/responses",
+            model,
+            Route::ThirdParty,
+            400,
+            "rejected",
+            "",
+            None,
+        );
+    }
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("opaqueCredential"), "{text}");
+    assert_eq!(text.lines().count(), 2, "{text}");
+}
+
+/// Codex 复审第三轮：Claude 上游原话等附加字段同样先去隐私、再换空白（`log_field` 是所有活动日志字段的共用入口）
+#[test]
+fn log_field_redacts_before_flattening() {
+    for raw in [
+        "Bearer opaqueCredential987654321",
+        "{\"api_key\":\t\"opaqueCredential987654321\"}",
+    ] {
+        let field = log_field(raw);
+        assert!(!field.contains("opaqueCredential"), "{field}");
+        assert!(!field.contains(char::is_whitespace), "{field}");
+    }
+    assert_eq!(log_field(""), "-");
+}

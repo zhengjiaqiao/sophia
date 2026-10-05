@@ -2,19 +2,21 @@
    左右内边距由机面给（.face__scroll），这里只排内容；色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "../tokens.css";
 
+/* 宽度同各页：随窗口变宽到 --panel-w（2026-10-04 产品负责人：限 776 右边会空一大片；
+   设置行靠行线与右端一列对上，不靠收窄） */
 .settings-page {
   max-width: var(--panel-w);
   padding-bottom: var(--space-huge);
 }
 
-/* 区块小标（ui 的 SectionLabel rule）的位置：页面头下 24 */
+/* 区块小标（ui 的 SectionLabel，不画下线）的位置：页面头下 24 */
 .settings-page__section {
   margin-top: var(--space-xl);
 }
 
-/* 关于：上距 48 */
+/* 第二节起：节间 32（节小标下不画线，靠留白分节；2026-10-04 画板 B，原 48 + hairline） */
 .settings-page__section--later {
-  margin-top: var(--space-huge);
+  margin-top: 32px;
 }
 
 /* 三列等分、按行读；勾选行（CheckRow grid）的悬停带左右各外扩 8，复选框仍与区块小标左沿对齐 */
@@ -89,77 +91,42 @@
   color: var(--ink-mute);
 }
 
-/* skill 更新：`自动检查 skill 更新`（body）+ 12 + 灰字何时查（12 ink-mute）；右端 `立即检查` + 12 + 开关。上 14 */
-.settings-page__auto {
+/* 设置行（SettingRow，2026-10-04 画板 B，照 Claude 的设置页）：左栏名字（body）在上、一句灰字（13 ink-mute）在下，
+   右端一列放控件（间 12）；上下各 12，同一节里行与行之间一条行线。左栏最宽 520，长了在左栏里折行，控件不跟着挪 */
+.settings-page__row {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
-  margin-top: 14px;
+  justify-content: space-between;
+  gap: 32px;
+  padding: var(--space-sm) 0;
 }
 
-.settings-page__auto-note {
-  flex: 1 1 auto;
+.settings-page__row + .settings-page__row {
+  border-top: var(--border-row);
+}
+
+.settings-page__text {
   min-width: 0;
-  font-size: var(--size-label);
-  line-height: var(--leading-label);
-  color: var(--ink-mute);
-}
-
-.settings-page__auto-keys {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-/* 下一行：上次检查 今天 14:32 · 2 个有更新（12 ink-faint），上 4；查到了后面跟一颗 `去看看`（间 12） */
-.settings-page__last {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin: var(--space-xxs) 0 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-label);
-  line-height: var(--leading-label);
-  color: var(--ink-faint);
-}
-
-/* 关于：版本 + 0.1.0（ui 的 Mono：等宽 ink-faint、可选中）+ 14 + 检查更新（默认键紧凑） */
-.settings-page__about {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 14px;
-}
-
-/* 界面一节的一行（AppearanceRow）：92 标签列 + 控件；控件下一句灰字（12 ink-mute，上 4）。
-   与用量页的设置行同一种排法 */
-.settings-page__line {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  align-items: start;
-  gap: var(--space-sm);
-  margin-top: 14px;
-}
-
-.settings-page__line > .settings-page__label {
-  line-height: var(--control-h-compact);
-}
-
-.settings-page__control {
-  min-width: 0;
-}
-
-.settings-page__hint {
-  margin: var(--space-xxs) 0 0;
-  font-size: var(--size-label);
-  line-height: var(--leading-label);
-  color: var(--ink-mute);
+  max-width: 520px;
 }
 
 .settings-page__label {
   font-size: var(--size-body);
   line-height: var(--leading-body);
+}
+
+.settings-page__note {
+  margin-top: 2px;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.settings-page__controls {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 /* 键与它下方浮起的 `✓ 已是最新版本` 的锚 */
@@ -168,7 +135,7 @@
   display: inline-flex;
 }
 
-/* 更新待办条（灰面板 section）/ 检查失败的一句（Note）：关于下，上距 14 */
+/* 更新待办条（灰面板 section）/ 检查失败的一句（Note）：`版本` 那一行下 4（行自带下 12） */
 .settings-page__update {
-  margin-top: 14px;
+  margin-top: var(--space-xxs);
 }

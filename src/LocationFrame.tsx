@@ -23,7 +23,7 @@ export interface LocationFrameProps {
   bar?: ReactNode;
   /// 机面里的空态：一句现状（扫描中时就是「忙什么」）、可选第二行、图
   empty: { description: string; hint?: string; busy?: boolean; art: EmptyArt };
-  /// 空态上方的新手提示条（`HintStrip`）
+  /// 空态上方的新手提示条（`NoticePanel` 的一次性说明用法：没有 `!`、能关、能进出）
   hint?: ReactNode;
   /// 叠在上面的层：来源移除的确认、来源管理页、添加来源页
   children?: ReactNode;

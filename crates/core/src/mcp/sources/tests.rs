@@ -1,7 +1,7 @@
 use super::*;
 use crate::mcp::{auto_selections, location_ref, scan, upsert_auto_import, McpCellState};
 use crate::store::Store;
-use crate::test_support::TempTree;
+use crate::test_support::{backups, TempTree};
 use serde_json::json;
 use std::fs;
 
@@ -402,6 +402,7 @@ fn remove_takes_out_only_copies_still_equal_to_the_source() {
         &locations,
         &mut subs,
         &mut rules,
+        backups(),
     )
     .unwrap();
     let outcomes: Vec<(&str, &str, &str)> = report
@@ -468,7 +469,8 @@ fn own_locations_cannot_be_removed() {
         &[item],
         &locations,
         &mut subs,
-        &mut rules
+        &mut rules,
+        backups()
     )
     .is_err());
     assert!(plan_remove("global", "codex", &locations).is_err());
@@ -639,4 +641,96 @@ fn source_list_serializes_flat_and_camel_case() {
     let item: McpRemovalItem =
         serde_json::from_value(json!({"name": "a", "targetId": "codex"})).unwrap();
     assert_eq!(item.location, "");
+}
+
+/// spec 2026-10-04-local-diagnostics R12：项目文件夹不让写时说「没有写入权限」，不再说「可能刚被别的程序改过」
+/// （以 root 运行时权限不拦，跳过）
+#[cfg(unix)]
+#[test]
+fn removing_from_a_read_only_folder_says_no_permission() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    write_json(
+        &f.claude_json,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    let mcp_json = f.proj.join(".mcp.json");
+    let before = "{\"mcpServers\": {\"docs\": {\"command\": \"docs\"}}}\n";
+    fs::write(&mcp_json, before).unwrap();
+    let locations = f.locations();
+    let mut subs = McpSubscriptions::new();
+    subs.entry(f.pkey())
+        .or_default()
+        .insert("claude-code".to_string());
+    let mut rules = Vec::new();
+    let plan = plan_remove(&f.pkey(), "claude-code", &locations).unwrap();
+    assert_eq!(plan.items.len(), 1, "{:?}", plan.items);
+
+    fs::set_permissions(&f.proj, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(f.proj.join("probe"), b"x").is_ok() {
+        fs::set_permissions(&f.proj, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let report = remove(
+        &f.pkey(),
+        "claude-code",
+        &plan.items,
+        &locations,
+        &mut subs,
+        &mut rules,
+        backups(),
+    );
+    fs::set_permissions(&f.proj, fs::Permissions::from_mode(0o755)).unwrap();
+    let report = report.unwrap();
+    let entry = &report.entries[0];
+    assert_eq!(entry.outcome, "failed", "{entry:?}");
+    assert_eq!(entry.message, "没有写入权限，没动");
+    assert_eq!(fs::read_to_string(&mcp_json).unwrap(), before);
+}
+
+/// 备份目录不让写：说「备份时没有写入权限」（Codex 复审 6/7）
+/// （以 root 运行时权限不拦，跳过）
+#[cfg(unix)]
+#[test]
+fn removing_with_read_only_backups_says_why() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    write_json(
+        &f.claude_json,
+        json!({"mcpServers": {"docs": {"command": "docs"}}}),
+    );
+    let mcp_json = f.proj.join(".mcp.json");
+    let before = "{\"mcpServers\": {\"docs\": {\"command\": \"docs\"}}}\n";
+    fs::write(&mcp_json, before).unwrap();
+    let locations = f.locations();
+    let mut subs = McpSubscriptions::new();
+    subs.entry(f.pkey())
+        .or_default()
+        .insert("claude-code".to_string());
+    let mut rules = Vec::new();
+    let plan = plan_remove(&f.pkey(), "claude-code", &locations).unwrap();
+    assert_eq!(plan.items.len(), 1, "{:?}", plan.items);
+
+    let locked = f.tree.dir("locked");
+    let ro = locked.join("backups");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(locked.join("probe"), b"x").is_ok() {
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let report = remove(
+        &f.pkey(),
+        "claude-code",
+        &plan.items,
+        &locations,
+        &mut subs,
+        &mut rules,
+        &ro,
+    );
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    let report = report.unwrap();
+    let entry = &report.entries[0];
+    assert_eq!(entry.outcome, "failed", "{entry:?}");
+    assert_eq!(entry.message, "备份时没有写入权限，没动");
+    assert_eq!(fs::read_to_string(&mcp_json).unwrap(), before);
 }

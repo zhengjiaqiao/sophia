@@ -21,7 +21,7 @@ const provider = (overrides: Partial<GatewayProvider> = {}): GatewayProvider => 
   name: "ap-gateway",
   baseUrl: "https://ap.example.com/v1",
   protocol: "chat",
-  hasKey: true,
+  key: "set",
   models: [],
   ...overrides,
 });
@@ -32,7 +32,7 @@ const gateway = (overrides: Partial<CodexFixture> = {}): GatewayState =>
     providers: [provider()],
     enabled: false,
     needsCodexRestart: false,
-    router: { installed: false, running: false, port: 47328, error: "" },
+    router: { running: false, port: 47328, error: "" },
     codex: { version: "26.0", running: true, catalogVersion: "1", drift: false },
     conflict: "",
     takeover: null,
@@ -231,7 +231,7 @@ test("列表页里 Claude 开着时的 R46：Codex 关着、Claude 开着，Code
     agent: "codex",
     state: stateOf(
       gateway({
-        router: { installed: true, running: true, port: 1, error: "" },
+        router: { running: true, port: 1, error: "" },
         claude: { ...CLAUDE_OFF, installed: true, enabled: true },
       }),
     ),
@@ -240,4 +240,65 @@ test("列表页里 Claude 开着时的 R46：Codex 关着、Claude 开着，Code
     onGatewayState: noop,
   });
   assert.doesNotMatch(html, /卸下后台服务/);
+});
+
+// ===== 读不到第三方模型的状态（spec 2026-10-04-local-diagnostics R11 / AC10，画板 AuPbAQHePv3L1U3g1PAtH8）=====
+// 入口不消失；页面顶上一块灰面板说是哪个文件、为什么，按种类给往前走的路，都带 `详情`
+
+const unreadable = (
+  kind: "permission" | "format" | "other",
+  reason: string,
+): GatewayState => ({
+  ...gateway(),
+  unreadable: {
+    kind,
+    path: "/Users/me/.codex/config.toml",
+    line: kind === "format" ? 3 : null,
+    reason,
+    detail: "open ~/.codex/config.toml\nPermission denied (os error 13)",
+  },
+});
+
+test("读不到状态 · 没权限：灰面板「读不到第三方模型的状态 · <文件> 不归你的账户所有…」+ `详情` + `修复权限`；列表照常", () => {
+  const reason = "~/.codex/config.toml 不归你的账户所有，读不了（多半是用 sudo 运行过 Codex）";
+  const html = page([entry("codex", "Codex", "glm-5")], unreadable("permission", reason));
+  assert.match(
+    html,
+    new RegExp(
+      `ss-noticepanel--section[^]*读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ${reason.replace(/[()]/g, "\\$&")}</span>`,
+    ),
+  );
+  assert.match(html, /ss-noticepanel__actions"><span class="ss-details">[^]*>详情<[^]*>修复权限</);
+  assert.doesNotMatch(html, /Permission denied/, "原文只在详情浮层里");
+  assert.doesNotMatch(html, />再试一次</);
+  assert.equal(rows(html).length, 1);
+});
+
+test("读不到状态 · 格式有误：`详情` + `打开文件 ↗`（浅键，离开 Sophia）+ `再试一次`", () => {
+  const html = page(
+    [entry("codex", "Codex", "")],
+    unreadable("format", "~/.codex/config.toml 第 3 行格式有误"),
+  );
+  assert.match(html, /第 3 行格式有误/);
+  assert.match(
+    html,
+    /ss-noticepanel__actions"><span class="ss-details">[^]*>详情<[^]*class="ss-btn ss-btn--quiet"[^>]*>打开文件<[^]*>再试一次</,
+  );
+});
+
+test("读不到状态 · 别的：`详情` + `再试一次`；状态整个读不回来（IPC 失败）也照样出这块，入口不消失", () => {
+  const html = page([entry("codex", "Codex", "")], unreadable("other", "~/.codex/config.toml 读不了"));
+  assert.match(html, />详情<[^]*>再试一次</);
+  assert.doesNotMatch(html, /修复权限|打开文件/);
+  const lost = render(ModelsPage, {
+    entries: [entry("codex", "Codex", "")],
+    state: {
+      ...stateOf(null),
+      gatewayError: { kind: "other", path: "", line: null, reason: "", detail: "[internal] boom" },
+    },
+    onError: noop,
+    onGatewayState: noop,
+  });
+  assert.match(lost, /读不到第三方模型的状态/);
+  assert.match(lost, />详情<[^]*>再试一次</);
 });

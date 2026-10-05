@@ -9,4 +9,8 @@ codegen-units = 1
 lto = true
 opt-level = 3
 panic = "abort"
-strip = true
+# 崩溃记录要看得懂（spec 2026-10-04-local-diagnostics R6）：只去掉调试信息、保留符号表，进程内调用栈带函数名；
+# 行号表另存成 dSYM（packed：cargo 在二进制旁边生成 sophia.dSYM，不随包发），发版时留存，需要时 atos 离线对行号
+strip = "debuginfo"
+debug = "line-tables-only"
+split-debuginfo = "packed"

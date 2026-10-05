@@ -154,7 +154,7 @@ fn resets_at_rfc3339(v: &Value, key: &str) -> Option<i64> {
 /// 解析 Claude Code 程序化模式 `get_usage` 控制请求的整行回复（`msg` = 整个
 /// `{"type":"control_response","response":{...}}` 对象）。
 ///
-/// - `response.subtype == "error"` → [`ParseFailure::Malformed`]。
+/// - `response.subtype == "error"` → 按 `error` 的文字分类，见 [`classify_get_usage_error`]。
 /// - `rate_limits_available == false` → [`ParseFailure::NoPlanLimits`]（R5）。
 /// - `rate_limits_available == true` 但 `rate_limits` 缺失/为 `null` → [`ParseFailure::RateLimited`]
 ///   （不带截止时刻）：实测是用量接口被限流时的样子。
@@ -166,9 +166,7 @@ pub fn parse_get_usage(msg: &Value, fetched_at: i64) -> Result<Reading, ParseFai
         .ok_or_else(|| ParseFailure::Malformed("get_usage 回复缺少 response".to_string()))?; // i18n-exempt: 诊断信息，界面只显示 reason()
 
     if str_field(response, "subtype") == Some("error") {
-        return Err(ParseFailure::Malformed(
-            "get_usage 控制请求回复了 error".to_string(), // i18n-exempt: 诊断信息，界面只显示 reason()
-        ));
+        return Err(classify_get_usage_error(response));
     }
 
     let inner = response.get("response").ok_or_else(|| {
@@ -243,6 +241,44 @@ pub fn parse_get_usage(msg: &Value, fetched_at: i64) -> Result<Reading, ParseFai
         windows,
         plan,
     })
+}
+
+/// `get_usage` 回了 `subtype: "error"`：按 `response.error`（字符串，SDK 的 `ControlErrorResponse`）分类。
+/// 没有公开的错误码，只能按文字认，认不出的一律 [`ParseFailure::Malformed`]：
+/// - 程序不认这个请求 → [`ParseFailure::Unsupported`]。没有 `get_usage` 的旧版 Claude Code 对认不得的
+///   控制请求回 `Unsupported control request subtype: get_usage`（取自程序化模式的源码，未在真机上复现）；
+/// - 要重新登录（凭据过期、未授权、让人跑 `/login`）→ [`ParseFailure::AuthRequired`]。这几种说法是推测，
+///   没有真实样本；宁可窄一点，认不出就按「认不出来」报
+fn classify_get_usage_error(response: &Value) -> ParseFailure {
+    let error = str_field(response, "error").unwrap_or("");
+    let lower = error.to_lowercase();
+    // 「unknown」单独出现太宽（「Unknown error」），要么连着「request subtype」，要么点名 get_usage
+    let unsupported = lower.contains("request subtype")
+        || (["unsupported", "not supported"]
+            .iter()
+            .any(|kw| lower.contains(kw))
+            && lower.contains("get_usage"));
+    if unsupported {
+        return ParseFailure::Unsupported;
+    }
+    let auth = [
+        "/login",
+        "not logged in",
+        "log in",
+        "login",
+        "unauthorized",
+        "401",
+        "authentication",
+        "oauth token",
+        "token has expired",
+        "token expired",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
+    if auth {
+        return ParseFailure::AuthRequired;
+    }
+    ParseFailure::Malformed(format!("get_usage 控制请求回复了 error：{error}")) // i18n-exempt: 诊断信息，界面只显示 reason()
 }
 
 /// `rate_limits.limits[]` 里的一项：`kind`、`percent`、`resets_at`、`severity`、`is_active`、
@@ -712,22 +748,79 @@ mod tests {
 
     // ---------------- get_usage：失败路径 ----------------
 
-    #[test]
-    fn subtype_error_is_malformed() {
-        let msg = serde_json::json!({
+    fn get_usage_error(error: Value) -> Value {
+        serde_json::json!({
             "type": "control_response",
             "response": {
                 "subtype": "error",
                 "request_id": "usage-1",
-                "error": "boom"
+                "error": error
             }
-        });
+        })
+    }
+
+    /// 认不出的 error 照旧算「认不出来」，诊断里带上原话
+    #[test]
+    fn subtype_error_is_malformed() {
         assert_eq!(
-            parse_get_usage(&msg, 0),
+            parse_get_usage(&get_usage_error("boom".into()), 0),
             Err(ParseFailure::Malformed(
-                "get_usage 控制请求回复了 error".to_string()
+                "get_usage 控制请求回复了 error：boom".to_string()
             ))
         );
+        // 没有 error 字段、不是字符串
+        let msg = serde_json::json!({
+            "type": "control_response",
+            "response": {"subtype": "error", "request_id": "usage-1"}
+        });
+        assert!(matches!(
+            parse_get_usage(&msg, 0),
+            Err(ParseFailure::Malformed(_))
+        ));
+        assert!(matches!(
+            parse_get_usage(&get_usage_error(serde_json::json!({"x": 1})), 0),
+            Err(ParseFailure::Malformed(_))
+        ));
+        // 只说 unknown、没点名请求的，不当成旧版
+        assert!(matches!(
+            parse_get_usage(&get_usage_error("Unknown error".into()), 0),
+            Err(ParseFailure::Malformed(_))
+        ));
+    }
+
+    /// 没有 `get_usage` 的旧版 Claude Code：程序化模式对认不得的控制请求回
+    /// `Unsupported control request subtype: <subtype>`（M17）
+    #[test]
+    fn subtype_error_unsupported_request_is_unsupported() {
+        for error in [
+            "Unsupported control request subtype: get_usage",
+            "Unknown control request subtype: get_usage",
+            "unsupported request: get_usage",
+        ] {
+            assert_eq!(
+                parse_get_usage(&get_usage_error(error.into()), 0),
+                Err(ParseFailure::Unsupported),
+                "{error}"
+            );
+        }
+    }
+
+    /// 要重新登录的说法：凭据过期、未授权、让人跑 `/login`（M17）
+    #[test]
+    fn subtype_error_auth_is_auth_required() {
+        for error in [
+            "OAuth token has expired. Please obtain a new token or refresh your existing token.",
+            "Invalid API key · Please run /login",
+            "Not logged in",
+            "401 Unauthorized",
+            "authentication_error",
+        ] {
+            assert_eq!(
+                parse_get_usage(&get_usage_error(error.into()), 0),
+                Err(ParseFailure::AuthRequired),
+                "{error}"
+            );
+        }
     }
 
     #[test]

@@ -1,9 +1,9 @@
 import { t } from "../i18n.ts";
-import { FloatingToast, HintStrip, Toast } from "../ui/index.ts";
+import { FloatingToast, NoticePanel, Toast } from "../ui/index.ts";
 import { onlyTheseLabel, stripSentence } from "./updateView.ts";
 
-/// 有更新的一次性提示条（DESIGN「发现与安装 › 有更新」，画板 01 / 11）：筛选行下，长相同新手提示条
-/// （`HintStrip`，上下各 16、宽 776），多两颗紧凑默认键：`2 个 skill 有新版本` · `只看这些` · `全部更新` · ×。
+/// 有更新的一次性提示条（DESIGN「发现与安装 › 有更新」，画板 01 / 11）：筛选行下，灰面板的一次性说明用法
+/// （`NoticePanel` 没有 `!`、能关、能进出，上下各 16、宽 776），两颗紧凑默认键：`2 个 skill 有新版本` · `只看这些` · `全部更新` · ×。
 ///
 /// - `只看这些` 让表格只列这些行，键换成 `显示全部`（过滤由页面做，这里只报按下）
 /// - × ＝这一批不再提（`useSkillUpdates().dismiss`：记下此刻各个新版本的 tree SHA）；之后出了不同的版本才再出
@@ -46,7 +46,7 @@ export interface UpdateStripProps {
   onNoticeDone?: () => void;
   /// 上方的间距归宿主（紧跟位置页的筛选行时）
   flush?: boolean;
-  /// 下面还压着几张提示条（叠放，见 HintStrip `useHintStack`）
+  /// 下面还压着几张提示条（叠放，见 NoticePanel `useHintStack`）
   stacked?: number;
 }
 
@@ -64,28 +64,27 @@ export function UpdateStrip({
   flush = false,
   stacked = 0,
 }: UpdateStripProps) {
-  // 不另包一层：宿主据提示条根上的 `data-hint="open"` 写 `:has(> …)` 让间距（`flush`），多包一层就认不到了。
-  // 更新不成的那一句锚在被按的 `全部更新` 这颗键下（提示条的公开钩子 data-hint-action；2026-09-30：原来锚在整条、
+  // 不另包一层：宿主据灰面板根上的 `data-hint="open"` 写 `:has(> …)` 让间距（`flush`），多包一层就认不到了。
+  // 更新不成的那一句锚在被按的 `全部更新` 这颗键下（灰面板键的公开钩子 data-hint-action；2026-09-30：原来锚在整条、
   // 右对齐到 ×）；键不在了（提示条收起）就落在提示条上
   return (
     <>
-      <HintStrip
+      <NoticePanel
+        scope="section"
+        mark={false}
         open={open}
-        onDismiss={onDismiss}
+        onClose={onDismiss}
         flush={flush}
         stacked={stacked}
         dismissTitle={t("market.update.dismiss")}
-        actions={[
-          { label: onlyTheseLabel(onlyThese), onClick: onToggleOnly },
-          {
-            label: t("market.update.updateAll"),
-            onClick: onUpdateAll,
-            busy: busy ? t("market.busy.updating") : undefined,
-          },
-        ]}
-      >
-        {stripSentence(count)}
-      </HintStrip>
+        action={{ label: onlyTheseLabel(onlyThese), onClick: onToggleOnly }}
+        secondary={{
+          label: t("market.update.updateAll"),
+          onClick: onUpdateAll,
+          busy: busy ? t("market.busy.updating") : undefined,
+        }}
+        message={stripSentence(count)}
+      />
       {notice !== null && open ? (
         <FloatingToast
           key={noticeAt}

@@ -1,4 +1,4 @@
-/// 新手提示（DESIGN「组件 › 新手提示条 HintStrip」）。
+/// 新手提示（DESIGN-components「灰面板 NoticePanel › 一次性说明的用法」）。
 ///
 /// 第一次走到某处时在内容上方铺一条说明；关掉（×）或做了它教的事就不再出。
 /// 看过的 id 存 core（`settings.json` 的 `seenHints`），这里是全应用共用的一个模块级小 store：
@@ -213,7 +213,7 @@ export function wantsHint(s: {
 }
 
 export interface UseHint {
-  /// 此刻显示（交给 `<HintStrip open={visible}>`，收起动画由组件管）
+  /// 此刻显示（交给 `<NoticePanel mark={false} open={visible}>`，收起动画由组件管）
   visible: boolean;
   /// 点 × 关掉
   dismiss(): void;

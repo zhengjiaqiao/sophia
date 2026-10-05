@@ -4,7 +4,7 @@
 
 use serde_json::{Map, Value};
 
-use super::count::estimate_tokens;
+use super::count::estimate_split;
 use super::names::ToolNameMap;
 use super::request::{RequestError, ATTACHMENT_PLACEHOLDER, BILLING_BLOCK_PREFIX};
 use crate::translate::Effort;
@@ -39,8 +39,17 @@ pub(super) struct Call {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Item {
     User(Vec<Part>),
-    Assistant { text: String, calls: Vec<Call> },
-    ToolResult { call_id: String, output: String },
+    /// `reasoning`：这条消息里 `thinking` 块的文字（按顺序以空行相连），Chat 出口带回成
+    /// `reasoning_content`（reasoning-passback R3）；没有时为空。
+    Assistant {
+        text: String,
+        calls: Vec<Call>,
+        reasoning: String,
+    },
+    ToolResult {
+        call_id: String,
+        output: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,7 +88,10 @@ pub(super) struct Parsed {
     pub top_p: Option<Value>,
     pub stop: Vec<String>,
     pub names: ToolNameMap,
+    /// R14 估算，带回思考内容时（默认）。
     pub estimate: u64,
+    /// R14 估算，不带思考内容时（R4 降级后、Responses 出口）。
+    pub estimate_without_thinking: u64,
 }
 
 pub(super) fn parse_root(body: &[u8]) -> Result<Map<String, Value>, RequestError> {
@@ -217,6 +229,7 @@ pub(super) fn parse(body: &[u8]) -> Result<Parsed, RequestError> {
         None
     };
 
+    let (estimate, estimate_without_thinking) = estimate_split(&root);
     Ok(Parsed {
         stream: root.get("stream").and_then(Value::as_bool).unwrap_or(false),
         system: system_parts.join(BLOCK_SEPARATOR),
@@ -245,7 +258,8 @@ pub(super) fn parse(body: &[u8]) -> Result<Parsed, RequestError> {
             })
             .unwrap_or_default(),
         names,
-        estimate: estimate_tokens(&root),
+        estimate,
+        estimate_without_thinking,
     })
 }
 
@@ -310,6 +324,7 @@ fn block_type(block: &Value) -> &str {
 }
 
 /// 丢弃而不占位的块：思考、服务端工具的调用与结果、工具搜索的引用（R17）。
+/// assistant 侧的 `thinking` 例外：文字由 [`convert_assistant`] 收进 `reasoning` 带回（reasoning-passback R3）。
 fn is_dropped_block(kind: &str) -> bool {
     matches!(
         kind,
@@ -410,6 +425,7 @@ fn convert_user(items: &mut Vec<Item>, content: &Value, prefix: Vec<Part>) {
 fn convert_assistant(content: &Value, names: &mut ToolNameMap) -> Option<Item> {
     let mut texts = Vec::new();
     let mut calls = Vec::new();
+    let mut thoughts = Vec::new();
     match content {
         Value::String(text) if !text.is_empty() => texts.push(text.clone()),
         Value::Array(blocks) => {
@@ -422,6 +438,16 @@ fn convert_assistant(content: &Value, names: &mut ToolNameMap) -> Option<Item> {
                             .filter(|t| !t.is_empty())
                         {
                             texts.push(text.to_string());
+                        }
+                    }
+                    // 思考块的文字带回给上游（不论签名是谁的：签名是给官方校验用的，第三方不看）
+                    "thinking" => {
+                        if let Some(thinking) = block
+                            .get("thinking")
+                            .and_then(Value::as_str)
+                            .filter(|t| !t.is_empty())
+                        {
+                            thoughts.push(thinking.to_string());
                         }
                     }
                     "tool_use" => {
@@ -441,19 +467,21 @@ fn convert_assistant(content: &Value, names: &mut ToolNameMap) -> Option<Item> {
                             arguments,
                         });
                     }
-                    // 思考、服务端工具等：丢弃（assistant 侧没有需要占位的附件）
+                    // redacted_thinking、服务端工具等：丢弃（assistant 侧没有需要占位的附件）
                     _ => {}
                 }
             }
         }
         _ => {}
     }
+    // 只有思考、没有文字与工具调用的不凭空造消息（R3）
     if texts.is_empty() && calls.is_empty() {
         return None;
     }
     Some(Item::Assistant {
         text: texts.join(BLOCK_SEPARATOR),
         calls,
+        reasoning: thoughts.join(BLOCK_SEPARATOR),
     })
 }
 

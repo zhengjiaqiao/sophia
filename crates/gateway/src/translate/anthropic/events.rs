@@ -46,8 +46,10 @@ pub struct Usage {
 pub enum UpstreamEvent {
     /// 一段回答文字（非空）。
     Text(String),
-    /// 上游在吐推理内容。内容一律丢弃（R22），只表示「上游还活着」。
-    Reasoning,
+    /// 上游在吐推理内容：Chat 上游的文字（`reasoning_content` / `reasoning` / `reasoning_details`），
+    /// 发射器转成 `thinking` 块（reasoning-passback R2）。为空表示只知道「上游还活着」
+    /// （Responses 上游的 reasoning 条目、只有加密内容的 `reasoning_details`），不产出字节。
+    Reasoning(String),
     /// 一个工具调用开始。`index` 是上游的序号，用来对上后续参数片段。
     ToolStart {
         index: i64,
@@ -122,6 +124,30 @@ fn error_text(error: &Value) -> String {
             .map(str::to_string)
             .unwrap_or_else(|| other.to_string()),
     }
+}
+
+/// Chat 增量里的推理文字。三个字段按 `reasoning_content` → `reasoning` → `reasoning_details` 只取第一个有的：
+/// openrouter 在同一块里同时给 `reasoning` 与内容相同的 `reasoning_details`，拼起来会重复（P0 样本）。
+/// `reasoning_details` 取各项的 `text`（`reasoning.text`）或 `summary`（`reasoning.summary`）；只有加密内容时
+/// 返回空串（上游还活着，但没有可显示的文字）。都没有返回 `None`。
+fn reasoning_text(delta: &Value) -> Option<String> {
+    if let Some(text) = non_empty_str(delta.get("reasoning_content"))
+        .or_else(|| non_empty_str(delta.get("reasoning")))
+    {
+        return Some(text.to_string());
+    }
+    let details = delta
+        .get("reasoning_details")
+        .and_then(Value::as_array)
+        .filter(|details| !details.is_empty())?;
+    Some(
+        details
+            .iter()
+            .filter_map(|detail| {
+                non_empty_str(detail.get("text")).or_else(|| non_empty_str(detail.get("summary")))
+            })
+            .collect(),
+    )
 }
 
 const LINE_TOO_LONG: &str = "the third-party stream sent a line that is too long";
@@ -204,14 +230,8 @@ impl ChatEvents {
             });
         if let Some(choice) = choice {
             let delta = choice.get("delta").unwrap_or(&Value::Null);
-            let reasoning = non_empty_str(delta.get("reasoning_content")).is_some()
-                || non_empty_str(delta.get("reasoning")).is_some()
-                || delta
-                    .get("reasoning_details")
-                    .and_then(Value::as_array)
-                    .is_some_and(|details| !details.is_empty());
-            if reasoning {
-                events.push(UpstreamEvent::Reasoning);
+            if let Some(reasoning) = reasoning_text(delta) {
+                events.push(UpstreamEvent::Reasoning(reasoning));
             }
             if let Some(text) = non_empty_str(delta.get("content")) {
                 events.push(UpstreamEvent::Text(text.to_string()));
@@ -342,7 +362,10 @@ impl ResponsesEvents {
                     events.push(UpstreamEvent::Text(text.to_string()));
                 }
             }
-            kind if kind.starts_with("response.reasoning") => events.push(UpstreamEvent::Reasoning),
+            // Responses 上游的推理条目仍丢弃（R23），只表示上游还活着
+            kind if kind.starts_with("response.reasoning") => {
+                events.push(UpstreamEvent::Reasoning(String::new()))
+            }
             "response.output_item.added" if item_is_call => {
                 self.start_tool(index, item, events);
                 if let Some(arguments) = non_empty_str(item.get("arguments")) {

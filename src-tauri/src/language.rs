@@ -58,7 +58,7 @@ pub fn apply(app: &AppHandle, lang: Lang) {
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
             if let Err(e) = crate::menu::rebuild(&handle) {
-                eprintln!("重建应用菜单失败：{e}");
+                log::warn!("重建应用菜单失败：{e}");
             }
         });
     }

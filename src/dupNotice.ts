@@ -42,9 +42,7 @@ export function dupStripWanted(
 /// 提示条的一句：`2 个 skill 在同一个生效范围里有两份同名的，只能用上一份`（有一组超过两份时说「几份」）
 export function dupStripSentence(groups: ReadonlyMap<string, number>): string {
   const many = [...groups.values()].some((n) => n > 2);
-  return many
-    ? tn("skills.dupStrip.many", groups.size)
-    : tn("skills.dupStrip.two", groups.size);
+  return many ? tn("skills.dupStrip.many", groups.size) : tn("skills.dupStrip.two", groups.size);
 }
 
 /// `只看这些` 开着、同名的都只留了一份之后提示条那一句（列表照旧是按下那一刻那几行，`显示全部` 回到全部）

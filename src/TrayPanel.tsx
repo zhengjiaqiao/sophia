@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api.ts";
 import { t, useOnLocaleChange } from "./i18n.ts";
 import { parseBackendError } from "./modelsView.ts";
+import { useQuitFlow } from "./QuitFlow.tsx";
 import { createSelectionWriter } from "./selectionWrites.ts";
 import { AGENTS } from "./shell/agents.tsx";
 import type { AgentState, TrayHost } from "./shell/agentRegistry.ts";
@@ -22,7 +23,8 @@ import "./TrayPanel.css";
 /// 在注册表里给那一节配一个 `trayRow`，面板就出这一行，这个文件不用改。
 ///
 /// 面板只管面板级的事：读回状态（每次弹出都重读）、把后端给的新状态画上去并广播给主窗口、焦点落在面板本身、
-/// Esc 收起、高度跟着内容走。分隔 1px `row-line` 之下是菜单两项 `打开 Sophia` `退出`。没有 `设置`
+/// Esc 收起、高度跟着内容走。分隔 1px `row-line` 之下是菜单两项 `打开 Sophia` `退出`（退出的确认在菜单下当场展开，
+/// 同主窗口的退出流程，QuitFlow.tsx）。没有 `设置`
 /// （D9，经 `打开 Sophia` 一步可达）；`退出` 后不写 `⌘Q`（面板不激活 Sophia，⌘Q 退出的是前台那个应用）。
 
 /// 面板里的动作做不成：主窗口到前面、切到 Codex 页、把原话带过去（面板放不下一段解释）
@@ -136,9 +138,23 @@ export default function TrayPanel() {
     return () => observer.disconnect();
   }, []);
 
+  /// `退出`：同主窗口的退出流程，确认在面板里当场展开（窄面板形态）
+  const quit = useQuitFlow(true);
+  // 面板重新打开：上次没回答的退出确认不留着（同重启确认）
+  const dismissQuit = quit.dismiss;
+  useEffect(() => dismissQuit(), [openedAt, dismissQuit]);
+
   const agentState = trayAgentState(state, usage);
   const blocks = trayBlocks(AGENTS, agentState);
-  const host: TrayHost = { applyGateway: applyState, idle, alive, openedAt, failOver };
+  const rereadUsage = useCallback(() => readUsage(false), [readUsage]);
+  const host: TrayHost = {
+    applyGateway: applyState,
+    idle,
+    alive,
+    openedAt,
+    failOver,
+    rereadUsage,
+  };
 
   return (
     <div className={`tray${blocks.length === 0 ? " tray--bare" : ""}`} ref={rootRef} tabIndex={-1}>
@@ -149,8 +165,9 @@ export default function TrayPanel() {
         <MenuItem onSelect={() => void api.trayOpenMain(null, null)}>
           {t("tray.menu.open")}
         </MenuItem>
-        <MenuItem onSelect={() => void api.trayQuit()}>{t("tray.menu.quit")}</MenuItem>
+        <MenuItem onSelect={quit.start}>{t("tray.menu.quit")}</MenuItem>
       </Menu>
+      {quit.dialog ? <div className="tray__confirm">{quit.dialog}</div> : null}
     </div>
   );
 }

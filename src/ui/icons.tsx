@@ -290,12 +290,24 @@ export function IconUpgrade(props: IconProps) {
   );
 }
 
-/// 部分失败 / 要你注意：!
+/// 部分失败 / 要你注意：圆圈里一个 !，与「做不成」⊘ 同一族（同一个圆，2026-10-03 产品负责人：灰面板的记号与画板统一）
 export function IconAttention(props: IconProps) {
   return (
     <Glyph {...props}>
-      <path d="M8 2.6v7.2" />
-      <path d="M8 12.9v0.3" />
+      <circle cx="8" cy="8" r="6.3" />
+      <path d="M8 4.8v3.6" />
+      <path d="M8 11v0.2" />
+    </Glyph>
+  );
+}
+
+/// 图片：反馈小窗框下那一行「可以粘贴或拖入截图」句首（配文字，不单独当键用；画板 Feedback）
+export function IconImage(props: IconProps) {
+  return (
+    <Glyph {...props}>
+      <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" />
+      <circle cx="6" cy="7" r="1.2" />
+      <path d="M13.5 11l-3.5-3.5-5 5" />
     </Glyph>
   );
 }

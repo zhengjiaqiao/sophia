@@ -225,11 +225,14 @@ export function SkillAgents({
   direct,
   checked,
   onToggle,
+  viewOf = () => ({}),
 }: {
   rows: ReadonlyArray<AgentRef>;
   direct: ReadonlyArray<string>;
   checked: ReadonlyArray<string>;
   onToggle: (id: string, on: boolean) => void;
+  /// 那里已有同名的那一行不能勾、名字后说原因（M14）
+  viewOf?: (id: string) => AgentRowView;
 }) {
   const readers = rows.filter((a) => direct.includes(a.id));
   const others = rows.filter((a) => !direct.includes(a.id));
@@ -253,7 +256,7 @@ export function SkillAgents({
           {readers.length > 0 ? (
             <p className="install-direct__more">{t("market.install.alsoLink")}</p>
           ) : null}
-          <AgentChecks rows={others} checked={checked} onToggle={onToggle} viewOf={() => ({})} />
+          <AgentChecks rows={others} checked={checked} onToggle={onToggle} viewOf={viewOf} />
         </>
       ) : null}
     </>

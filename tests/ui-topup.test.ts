@@ -67,25 +67,30 @@ test("页面不再为提示框另包一层、也不再覆盖 .ss-tipwrap", () =>
   }
 });
 
-// ===== 新手提示条：宿主的钩子与不带上外距的形态 =====
+// ===== 灰面板的进出用法（原新手提示条）：宿主的钩子与不带上外距的形态 =====
 
-const { HintStrip } = await import("../src/ui/HintStrip.tsx");
+const { NoticePanel } = await import("../src/ui/NoticePanel.tsx");
 
-test("HintStrip：根上 data-hint 说展开没有（宿主据它让间距）；flush 不带上外距、只带下外距 16", () => {
-  const html = render(HintStrip, {
-    open: true,
-    onDismiss: () => {},
-    flush: true,
-    children: "说明",
-  });
+test("NoticePanel 进出：根上 data-hint 说展开没有（宿主据它让间距）；flush 不带上外距、只带下外距 16", () => {
+  const props = { mark: false, open: true, onClose: () => {}, message: "说明" };
+  const html = render(NoticePanel, { ...props, flush: true });
   // 挂上的那一帧是收起态，展开由下一帧加 is-open / data-hint="open"
-  assert.match(html, /^<div class="ss-hint ss-hint--flush" data-hint="closed" role="note"/);
   assert.match(
-    render(HintStrip, { open: true, onDismiss: () => {}, children: "说明" }),
-    /^<div class="ss-hint" data-hint="closed"/,
+    html,
+    /^<div class="ss-noticepanel-slide ss-noticepanel-slide--flush" data-hint="closed"><div class="ss-noticepanel-slide__clip"><div class="ss-noticepanel ss-noticepanel--row" role="note"/,
   );
-  const css = read("src/ui/HintStrip.css");
-  assert.match(css, /\.ss-hint--flush\.is-open \{\s*margin-block: 0 var\(--space-md\);/);
+  assert.match(render(NoticePanel, props), /^<div class="ss-noticepanel-slide" data-hint="closed"/);
+  // 不给 open 的不进出：没有外层、没有钩子
+  assert.match(
+    render(NoticePanel, { message: "x" }),
+    /^<div class="ss-noticepanel ss-noticepanel--row"/,
+  );
+  assert.doesNotMatch(render(NoticePanel, { message: "x" }), /data-hint/);
+  const css = read("src/ui/ui.css");
+  assert.match(
+    css,
+    /\.ss-noticepanel-slide--flush\.is-open \{\s*margin-block: 0 var\(--space-md\);/,
+  );
   // 两个宿主认公开钩子，不认 .ss-hint 的内部类
   assert.match(
     read("src/App.css"),
@@ -94,7 +99,7 @@ test("HintStrip：根上 data-hint 说展开没有（宿主据它让间距）；
   assert.doesNotMatch(read("src/App.css"), /ss-hint/);
   assert.match(
     read("src/ModelsTab.tsx"),
-    /<HintStrip open=\{codexHint\.visible\} onDismiss=\{codexHint\.dismiss\} flush>/,
+    /<NoticePanel\s+scope="section"\s+mark=\{false\}\s+open=\{codexHint\.visible\}\s+onClose=\{codexHint\.dismiss\}\s+flush/,
   );
   assert.doesNotMatch(read("src/Matrix.tsx"), /hintOpen/);
   assert.doesNotMatch(read("src/DomainView.tsx"), /hintOpen/);

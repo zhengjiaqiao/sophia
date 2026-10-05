@@ -17,7 +17,7 @@
   "usage.mode.remaining": "Remaining",
   "usage.mode.used": "Used",
   "usage.refresh.label": "Refresh",
-  "usage.refresh.hint": "Auto: refreshes often right after you look at the menu, slows down when idle (2–30 min), slowest on low battery, and refreshes once more near reset time. Fixed options go as fast as once a minute. Off only updates when you open the menu",
+  "usage.refresh.hint": "Auto: refreshes often right after you look at the menu, slows down when idle (2–30 min), slowest on low battery, and refreshes once more near reset time. Fixed options go as fast as every 5 minutes. Off only updates when you open the menu",
   "usage.refresh.auto": "Auto",
   "usage.refresh.off": "Off",
   "usage.refresh.minutes": {
@@ -74,6 +74,8 @@
   },
   "usage.tray.rateLimitedLater": "Rate limited, retry later",
   "usage.tray.noReading": "No reading yet",
+  "usage.retry": "Try again",
+  "usage.retrying": "Reading",
   "usage.window.session": "5h",
   "usage.window.weekly": "Week",
   "usage.window.days": {
@@ -93,6 +95,7 @@
   "usage.reason.noPlanLimits": "This account has no subscription limits",
   "usage.reason.authRequired": "Sign in to {agent} again",
   "usage.reason.rateLimited": "{agent} is rate limited",
+  "usage.reason.unsupported": "{agent} may be out of date. Update it and try again",
   "usage.reason.malformed": "Couldn't read the data {agent} returned",
   "usage.probe.dirNotEmpty": "The probe folder isn't empty, refusing to start a process in it: {dir}",
   "usage.probe.spawnFailed": "Couldn't start the process: {error}",

@@ -2,7 +2,7 @@
 //! 两家之间照常互搬、写入换成目标的字段名、其余字节不动；写到别的 agent 按目标拒绝；
 //! 命令字符串相同即相同，差异照常逐项列
 use super::*;
-use crate::test_support::TempTree;
+use crate::test_support::{backups, TempTree};
 use serde_json::json;
 
 fn location(id: &str, label: &str, harness_id: &str, path: PathBuf) -> McpLocation {
@@ -41,7 +41,7 @@ fn write_one(locations: &[McpLocation], selection: McpSelection) {
     let plan = prepare(locations, &[selection]);
     assert!(plan.issues.is_empty(), "{:?}", plan.issues);
     assert_eq!(plan.actions.len(), 1);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "created", "{:?}", report.entries);
 }
 
@@ -288,7 +288,7 @@ fn agents_without_helpers_refuse_that_pair_only() {
     assert_eq!(plan.issues.len(), 1);
     assert_eq!(plan.issues[0].location_id, "cursor");
     assert_eq!(plan.issues[0].message, "Cursor 不支持用命令生成请求头");
-    execute(plan, false);
+    execute(plan, false, backups());
     assert!(
         fs::symlink_metadata(&cursor).is_err(),
         "Cursor 一个字节都没写"

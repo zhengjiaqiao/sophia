@@ -28,9 +28,10 @@ cask "sophia" do
   # 没有写 auto_updates：应用自己也会查更新，但只有 brew upgrade 这条路
   # 能把 cask 记录的版本号一起带上去。两条路都留着，谁先跑到算谁的。
   #
-  # depends_on :macos 不带版本：Sophia 只有 macOS 版，而最低系统版本由 .app 里的
-  # LSMinimumSystemVersion 说了算，在这儿再写一个数字只会有两个来源。
-  depends_on :macos
+  # 最低系统版本和 src-tauri/tauri.conf.json 的 bundle.macOS.minimumSystemVersion 写同一个值
+  # （spec 2026-10-05-min-macos）：brew 在下载前就拦住老系统，.app 里的 LSMinimumSystemVersion
+  # 是最后一道。两处改要一起改。
+  depends_on macos: :sonoma
 
   app "Sophia.app"
 
@@ -48,13 +49,6 @@ cask "sophia" do
   ]
 
   caveats <<~EOS
-    Sophia 还没有 Apple 开发者签名，macOS 第一次打开会拦一次。
-    跑一次这条命令就好，只需要做一次：
-
-      xattr -dr com.apple.quarantine #{appdir}/Sophia.app
-
-    或者双击打开、被拦住之后去「系统设置 → 隐私与安全性」点「仍要打开」。
-
     Sophia 如果启用过模型网关，卸载前先在应用里「停用」一次：
     它往 ~/.codex/config.toml 写过东西，那部分只有应用自己能干净地撤回。
   EOS

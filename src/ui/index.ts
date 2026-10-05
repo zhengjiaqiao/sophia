@@ -30,16 +30,20 @@ export type { TipEvent, TipFit, TipState, TooltipProps } from "./Tooltip.tsx";
 export { Toast, ToastCount, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS } from "./Toast.tsx";
 export type { ToastAction, ToastAgent, ToastBusyProps, ToastKind, ToastProps } from "./Toast.tsx";
 export { CornerToast, FloatingToast, ToastHost, ToastStack } from "./FloatingToast.tsx";
-export type { FloatingToastProps } from "./FloatingToast.tsx";
+export type { FloatingToastProps, ToastPlacement } from "./FloatingToast.tsx";
 
-export { NoticePanel } from "./NoticePanel.tsx";
+export { NoticePanel, hintStackOf, useHintStack } from "./NoticePanel.tsx";
 export type { NoticePanelAction, NoticePanelProps, NoticeScope } from "./NoticePanel.tsx";
 
-export { HintStrip, hintStackOf, useHintStack } from "./HintStrip.tsx";
-export type { HintStripProps } from "./HintStrip.tsx";
+export { Details } from "./Details.tsx";
+export type { DetailsProps } from "./Details.tsx";
+export { PageFault, FaultView, faultDetails } from "./PageFault.tsx";
+export type { FaultViewProps, PageFaultProps } from "./PageFault.tsx";
 
 export { Confirm } from "./Confirm.tsx";
 export type { ConfirmProps } from "./Confirm.tsx";
+export { FeedbackDialog } from "./FeedbackDialog.tsx";
+export type { FeedbackDialogProps } from "./FeedbackDialog.tsx";
 
 export { BUSY_DELAY_MS, Spinner, SWEEP, useBusyShown } from "./Spinner.tsx";
 export type { SpinnerProps } from "./Spinner.tsx";
@@ -112,6 +116,7 @@ export {
   IconDownload,
   IconEdit,
   IconEye,
+  IconImage,
   IconLeave,
   IconPlus,
   IconSearch,

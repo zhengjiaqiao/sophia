@@ -18,6 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # 微博内部版。默认关闭：公开版就是不加任何 feature 的默认构建，
 # 内部版用 `--features weiboap`（见 Makefile 与 docs/specs 的双版本方案）。
 weiboap = ["sophia-core/weiboap"]
+# 故意出错的入口（spec 2026-10-04-local-diagnostics 风险 2）：调试版总是带着；正式版只有验证崩溃记录时
+# 用 `--features diag-faults` 打一个包，发布的包不开。release 构建开它要显式 SOPHIA_ALLOW_DIAG_FAULTS=1（build.rs 把关）
+diag-faults = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -30,7 +33,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sophia-core = { path = "../crates/core" }
 sophia-gateway = { path = "../crates/gateway" }
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["sync", "time", "macros"] }
 notify = "6"
 notify-debouncer-mini = "0.4"
 # 应用内更新：updater 查清单、下载、装；process 负责装完重启自己。
@@ -38,21 +41,32 @@ notify-debouncer-mini = "0.4"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-clipboard-manager = "2"
+# 同一时间只运行一个 Sophia（spec 2026-10-03-gateway-in-app R3）：路由在进程里，两个进程会抢端口、抢着改 Codex 设置。
+# 钉在 2.4.5：2.5 起要求 tauri ^2.12
+tauri-plugin-single-instance = "=2.4.5"
+# 本机日志（spec 2026-10-04-local-diagnostics R1–R3）：写 ~/Library/Logs/<应用标识>/sophia.log，按大小轮转，
+# 网页侧经 plugin:log 写同一个文件。钉在 2.9.2：2.10 起要求 tauri ^2.12
+tauri-plugin-log = "=2.9.2"
+log = "0.4"
 # 发现与安装的网络层（market.rs）：skills.sh 搜索、MCP Registry、codeload 下载、GitHub 接口。
 # 与 sophia-gateway 同版本同写法；rustls-no-provider 要先装加密提供方，所以 rustls 也直接依赖
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "http2"] }
+# 反馈截图按 base64 文本上传（接收服务按文本存，省得在 Worker 里转码）；与 sophia-gateway 同版本
+base64 = "0.23.1"
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "logging", "tls12"] }
 
 # 托盘面板的原生窗口细节（去掉弹出时从中心放大的动画、圆角）：tauri 自己就依赖这两个，版本随它
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSResponder", "NSColor", "NSGraphics", "NSEvent", "NSScreen", "NSImage", "NSFont", "NSFontDescriptor", "NSAttributedString", "NSStringDrawing", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImageRep", "NSVisualEffectView"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSGeometry", "NSAttributedString", "NSDictionary", "NSString", "NSData", "NSProcessInfo", "NSLocale"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSGeometry", "NSAttributedString", "NSDictionary", "NSString", "NSData", "NSProcessInfo", "NSLocale", "NSError", "NSTimeZone", "NSAppleEventManager", "NSAppleEventDescriptor"] }
 # 菜单栏用量：屏幕是否睡着（调度暂停）
 objc2-core-graphics = { version = "0.3", features = ["CGDirectDisplay", "CGDisplayConfiguration"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 # 托盘面板换成不激活应用的 NSPanel：点图标、点面板里的控件都不把应用（和它的主窗口）提到前台
 tauri-nspanel = "2.1"
+# 开机启动（R15、R16）：SMAppService.mainAppService 的 register / unregister / status，状态就是系统登录项的真实状态
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 [dev-dependencies]
 tempfile = "3"

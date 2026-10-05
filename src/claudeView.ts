@@ -4,7 +4,7 @@
 /// 三处（Claude 的页、列表行、托盘那一行）说同一句话：文案与判断只在这里写一份——取 Claude 那一份、不能切的情况、
 /// 开关的禁用原因（按所在处说下一步）、开关提示框两段、重启确认正文按方向、键的提示框、列表行的现状句、
 /// 开关旁那一位出哪颗键；页里的能力名、已选、代价句、行内待办条。
-import { listText, t } from "./i18n.ts";
+import { t } from "./i18n.ts";
 import type { MessageKey } from "./i18n.ts";
 import type { AgentState } from "./shell/agentRegistry.ts";
 import {
@@ -13,9 +13,10 @@ import {
   chipLabel,
   gatewayShortName,
   listModelNames,
-  providerLabel,
+  noUsableKeyReason,
+  selectedKeyReason,
   selectedModels,
-  showRouterTodo,
+  routerTodo,
   splitModelId,
 } from "./modelsView.ts";
 import type { EffectiveModel, ModelsTool } from "./modelsView.ts";
@@ -110,19 +111,15 @@ export function claudeSwitchReason(
   if (view.conflict) return view.conflict;
   const needsModels = place === "list" ? listNeedsModels() : enableNeedsModels();
   if (view.providers.length === 0) return needsModels;
-  if (!view.providers.some((provider) => provider.hasKey)) return t("models.enable.needsKey");
+  const none = noUsableKeyReason(view.providers);
+  if (none) return none;
   if (claudeSelectedCount(view) === 0) return needsModels;
-  const noKey = view.providers.filter(
-    (provider) => selectedModels(provider).length > 0 && !provider.hasKey,
-  );
-  if (noKey.length > 0)
-    return t("models.enable.missingKey", { names: listText(noKey.map(providerLabel), "enum") });
-  return null;
+  return selectedKeyReason(view.providers);
 }
 
 /// 开关的提示框：先说结果，再说要重开 Claude（DESIGN 两段原话；页、列表行、托盘同一段）
 export const claudeSwitchTip = (on: boolean): string =>
-  on ? t("models.claudePage.switchOnTip") : t("models.claudePage.switchOffTip");
+  `${on ? t("models.claudePage.switchOnTip") : t("models.claudePage.switchOffTip")}${t("models.switch.keepRunning")}`;
 
 /// `重启 Claude？` 的正文，按方向（开着＝切过去、关着＝切回）
 export const claudeRestartConsequence = (enabled: boolean): string =>
@@ -232,15 +229,10 @@ export interface ClaudeTodo {
 export function claudeTodos(state: GatewayState, healed: boolean): ClaudeTodo[] {
   const view = claudeGateway(state);
   const out: ClaudeTodo[] = [];
-  if (showRouterTodo(state, healed)) {
-    out.push({
-      kind: "router",
-      message: t("models.todo.routerDown"),
-      reason: null,
-      label: t("models.todo.routerRestart"),
-      busy: t("models.todo.routerRestarting"),
-    });
-  }
+  // 路由那一条：没在跑，或打开 Sophia 时没接上（另一个 Sophia 在运行、端口都被占）——与 Codex 的页同一条（routerTodo）。
+  // 原因：没接上时是那一种；路由没在跑时自愈失败的原话由页面接上（`routerFailure`）
+  const router = routerTodo(state, healed, null);
+  if (router !== null) out.push({ kind: "router", ...router });
   if (view === null) return out;
   const { foreign, drift } = view.claude.desktop;
   if (foreign !== null) {

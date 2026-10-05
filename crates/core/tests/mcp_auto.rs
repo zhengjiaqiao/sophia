@@ -11,6 +11,12 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
+/// 备份根目录（`atomicfile::backup` 的 root）：整个测试进程共用一份临时目录，不碰真实数据目录
+fn backups() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn json_location(id: &str, path: &Path, domain: &str) -> McpLocation {
     McpLocation {
         id: id.into(),
@@ -147,10 +153,27 @@ fn auto_imports_execute_once_then_pick_up_later_source_additions() {
     let first_plan = prepare(&locations, &first);
     assert!(first_plan.issues.is_empty(), "{:#?}", first_plan.issues);
     let first_actions = first_plan.actions.clone();
-    let first_report = execute(first_plan, false);
+    let first_report = execute(first_plan, false, backups());
     assert_eq!(first_report.entries.len(), 1);
     assert_eq!(first_report.entries[0].outcome, "created");
-    assert!(target_path.with_extension("mcp.bak").is_file());
+    // 写之前备份了一份，放在备份目录里
+    let baks = || {
+        fs::read_dir(sophia_core::atomicfile::backup_dir(backups(), &target_path)).map_or(
+            0,
+            |entries| {
+                entries
+                    .filter(|e| {
+                        e.as_ref()
+                            .unwrap()
+                            .path()
+                            .extension()
+                            .is_some_and(|x| x == "bak")
+                    })
+                    .count()
+            },
+        )
+    };
+    assert_eq!(baks(), 1);
     // 真写进去了：记成这条规则最近一次执行
     let mut rules = vec![import.clone(), elsewhere];
     assert!(record_auto_runs(
@@ -165,9 +188,9 @@ fn auto_imports_execute_once_then_pick_up_later_source_additions() {
 
     let repeated = auto_selections(&scan(&locations), std::slice::from_ref(&import));
     assert!(repeated.is_empty());
-    assert!(!target_path.with_extension("mcp.1.bak").exists());
+    assert_eq!(baks(), 1);
     // 什么都没写的一轮：不改，上一次留着
-    let idle = execute(prepare(&locations, &repeated), false);
+    let idle = execute(prepare(&locations, &repeated), false, backups());
     assert!(!record_auto_runs(&mut rules, &[], &idle, 20));
     assert_eq!(rules[0].last_auto, Some(AutoRun { at: 10, added: 1 }));
 
@@ -182,10 +205,10 @@ fn auto_imports_execute_once_then_pick_up_later_source_additions() {
     assert_eq!(later, vec![selection("source", "search", "target")]);
     let later_plan = prepare(&locations, &later);
     let later_actions = later_plan.actions.clone();
-    let later_report = execute(later_plan, false);
+    let later_report = execute(later_plan, false, backups());
     assert_eq!(later_report.entries.len(), 1);
     assert_eq!(later_report.entries[0].outcome, "created");
-    assert!(target_path.with_extension("mcp.1.bak").is_file());
+    assert_eq!(baks(), 2);
     assert!(record_auto_runs(
         &mut rules,
         &later_actions,

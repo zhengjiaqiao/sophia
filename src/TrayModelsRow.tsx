@@ -30,8 +30,7 @@ import type { CodexPhase } from "./codexControls.tsx";
 /// - 开关＝配置里开没开：拨了就写、不确认，乐观翻转（滑块当即过去，写超过 0.3 秒原位转圈 +「正在添加 / 正在移除」）；
 ///   写成了要重启才生效时键位出 `重启生效`（Codex 没在跑出 `启动 Codex`）；没写成连配置一起撤回、滑块滑回，
 ///   键位原位灰面板 + `再试一次`。打断对话的是重启，确认只在 `重启生效` 上
-/// - 键位 `重启生效` / `启动 Codex` / `卸下后台服务` 占同一位（默认键紧凑），规则同 Codex 页
-/// - 卸下后台服务做不成：把主窗口带到 Codex 页，由那里说原因——面板放不下一段解释
+/// - 键位 `重启生效` / `启动 Codex` 占同一位（默认键紧凑），规则同 Codex 页
 /// - Esc：重启确认开着先收回那一问（在捕获阶段接住，面板自己的 Esc 收起就不再收到）；面板每次弹出，上次没答的确认作废
 
 /// `✓ 已生效 / 已启动` 的锚：能力行右端那一组（键位 + 开关）
@@ -51,7 +50,6 @@ interface TrayNotice {
 export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
   const gateway = state.gateway;
   const [busy, setBusy] = useState(false);
-  const [uninstalling, setUninstalling] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   /// 重启 / 启动 / 拨开关没成（键位原位灰面板）：带下一步的失败不会自己走——关掉、再试一次、
   /// 或问题解决了（那颗键消失）才走，面板收起再弹出也还在
@@ -114,25 +112,6 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
       retry: () => void toggle(next),
       for: "switch",
     });
-  };
-
-  /// 停用后服务仍在：卸下它。做不成就把主窗口带到 Codex 页说原因（面板放不下一段解释）
-  const uninstall = async () => {
-    setUninstalling(true);
-    setBusy(true);
-    try {
-      // 排在还没写完的开关后面：都写 Codex 设置，先后要和点的顺序一致
-      await tray.idle();
-      const fresh = await api.gatewayRestore("codex");
-      if (tray.alive()) tray.applyGateway(fresh);
-    } catch (error) {
-      tray.failOver(error);
-    } finally {
-      if (tray.alive()) {
-        setBusy(false);
-        setUninstalling(false);
-      }
-    }
   };
 
   const restartCodex = async () => {
@@ -226,19 +205,17 @@ export function TrayThirdPartyModels({ title, state, tray }: TrayRowProps) {
             <span className="tray__cap-title">{title}</span>
           </TruncTip>
           <span className="tray__end">
-            {/* 键位：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位；失败的灰面板出来时让给它 */}
+            {/* 键位：`重启生效` / `启动 Codex` 占同一位；失败的灰面板出来时让给它 */}
             {noticeLive ? null : (
               <CodexKeySlot
                 state={current}
                 phase={phase}
                 busy={busy}
-                uninstalling={uninstalling}
                 onRestart={() => {
                   setNotice(null);
                   setPhase({ kind: "confirming" });
                 }}
                 onLaunch={() => void launchCodex()}
-                onUninstall={() => void uninstall()}
                 onDoneDismiss={dismissDone}
                 place="tray"
                 doneAnchor={endOf}

@@ -4,7 +4,7 @@
 //! - 拿远端各文件夹的 tree SHA 与记下的比，出 `UpdateInfo`（顺带算本地改没改）；
 //! - 「已关掉的一批」：提示条按 × 记下此刻各个新版本的 tree SHA，之后有不同的新版本才再出；
 //! - 发现列表的 `✓ 已安装` 与介绍页的 `装在 用户级、CardBox`。
-use super::lock::LockEntry;
+use super::lock::{LockEntry, UpdateRef};
 use super::treehash::{self, FileHashes};
 use super::{install, InstallRecord, UpdateInfo, UpdateOrigin};
 use crate::fs::{entry_kind, EntryKind};
@@ -22,7 +22,7 @@ pub struct UpdateCandidate {
     pub dir: PathBuf,
     /// `owner/repo`
     pub repo: String,
-    /// lock 不记分支：None，网络层取默认分支
+    /// 对着哪个分支（或 tag）比；lock 里没写 `ref` 的为 None，网络层取默认分支
     pub branch: Option<String>,
     pub path: String,
     pub recorded_tree_sha: String,
@@ -43,7 +43,8 @@ pub type RemoteTrees = BTreeMap<(String, Option<String>), RemoteTree>;
 
 /// 合成可查更新的 skill：先 Sophia 的记录（按记录先后），再 lock 里的（按 lock 先后）。
 /// 同一个文件夹两边都有时以 Sophia 的记录为准——从 lock 认出来的更新过一次之后，Sophia 记下的才是
-/// 那个文件夹此刻的版本，lock 里的已经过时。认不出位置的记录跳过
+/// 那个文件夹此刻的版本，lock 里的已经过时。认不出位置的记录跳过；
+/// lock 里的按 `ref` 定对着哪一处比，钉死的（`UpdateRef::Pinned`，如钉在 commit 上）不查
 pub fn candidates(
     records: &[InstallRecord],
     lock: &[LockEntry],
@@ -71,12 +72,17 @@ pub fn candidates(
         if out.iter().any(|c| c.dir == dir) {
             continue;
         }
+        let branch = match entry.update_ref() {
+            UpdateRef::DefaultBranch => None,
+            UpdateRef::Ref(r) => Some(r),
+            UpdateRef::Pinned => continue,
+        };
         out.push(UpdateCandidate {
             name: entry.name.clone(),
             location: GLOBAL_KEY.to_string(),
             dir,
             repo: entry.repo.clone(),
-            branch: None,
+            branch,
             path: entry.path.clone(),
             recorded_tree_sha: entry.folder_hash.clone(),
             origin: UpdateOrigin::SkillLock,
@@ -253,6 +259,7 @@ mod tests {
             repo: repo.into(),
             path: path.into(),
             folder_hash: sha.into(),
+            git_ref: None,
         }
     }
 
@@ -390,6 +397,88 @@ mod tests {
         assert_eq!(lockd.branch, "trunk");
         assert_eq!(lockd.origin, UpdateOrigin::SkillLock);
         assert_eq!(lockd.location, "global");
+    }
+
+    /// lock 的 `ref`（M15）：钉在 tag 上的对着 tag 自己的 tree 比，默认分支往前走了也不算有更新；
+    /// 跟着分支 `dev` 的对着 dev 比；钉在 commit 上的根本不查；没写 `ref` 的照旧对着默认分支
+    #[test]
+    fn lock_ref_is_compared_against_its_own_ref() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        for name in ["tagged", "dev", "commit", "plain"] {
+            tree.skill(&format!("home/.agents/skills/{name}"));
+        }
+        let with_ref = |name: &str, r: Option<&str>| LockEntry {
+            git_ref: r.map(Into::into),
+            ..lock_entry(
+                name,
+                "o/r",
+                &format!("skills/{name}"),
+                &format!("old-{name}"),
+            )
+        };
+        let lock = vec![
+            with_ref("tagged", Some("v1.0")),
+            with_ref("dev", Some("dev")),
+            with_ref("commit", Some("5539516444cff4eed7865daf61a707590acda485")),
+            with_ref("plain", None),
+        ];
+        let c = candidates(&[], &lock, &home);
+        let names: Vec<&str> = c.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["tagged", "dev", "plain"],
+            "钉在 commit 上的不查"
+        );
+        assert_eq!(
+            repos_to_query(&c),
+            vec![
+                ("o/r".to_string(), Some("v1.0".to_string())),
+                ("o/r".to_string(), Some("dev".to_string())),
+                ("o/r".to_string(), None),
+            ]
+        );
+
+        // 默认分支上每个文件夹都变了；tag 那一份没变；dev 上 dev 文件夹变了
+        let everything_new = |branch: &str| RemoteTree {
+            branch: branch.into(),
+            folders: ["tagged", "dev", "commit", "plain"]
+                .iter()
+                .map(|n| (format!("skills/{n}"), format!("new-{n}")))
+                .collect(),
+        };
+        let remote: RemoteTrees = BTreeMap::from([
+            (("o/r".to_string(), None), everything_new("main")),
+            (
+                ("o/r".to_string(), Some("dev".to_string())),
+                everything_new("dev"),
+            ),
+            (
+                ("o/r".to_string(), Some("v1.0".to_string())),
+                RemoteTree {
+                    branch: "v1.0".into(),
+                    folders: BTreeMap::from([(
+                        "skills/tagged".to_string(),
+                        "old-tagged".to_string(),
+                    )]),
+                },
+            ),
+        ]);
+        let updates = compare_with(&c, &remote, &fake_tree_sha);
+        let found: Vec<(&str, &str, &str)> = updates
+            .iter()
+            .map(|u| {
+                (
+                    u.name.as_str(),
+                    u.branch.as_str(),
+                    u.remote_tree_sha.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            vec![("dev", "dev", "new-dev"), ("plain", "main", "new-plain")]
+        );
     }
 
     /// AC14：按 × 记下这一批 → 提示条不出；有一个出了不同的新版本 → 再出

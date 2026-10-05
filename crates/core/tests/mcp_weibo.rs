@@ -14,6 +14,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
+/// 备份根目录（`atomicfile::backup` 的 root）：整个测试进程共用一份临时目录，不碰真实数据目录
+fn backups() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 struct Fixture {
     _temp: tempfile::TempDir,
     root: PathBuf,
@@ -189,7 +195,7 @@ fn writes_two_agents_once_without_changing_enabled_or_unknown_values() {
     );
     assert!(plan.issues.is_empty());
     assert_eq!(plan.actions.len(), 2);
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert!(report
         .entries
         .iter()
@@ -258,7 +264,7 @@ fn weibo_source_round_trips_to_json_and_stale_or_pg_mode_are_rejected() {
         &[selection(&source.id, "old", &target_location.id)],
     );
     assert!(plan.issues.is_empty());
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert_eq!(report.entries[0].outcome, "created");
     let value: Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
     assert_eq!(value["mcpServers"]["old"]["command"], "old");
@@ -276,7 +282,7 @@ fn weibo_source_round_trips_to_json_and_stale_or_pg_mode_are_rejected() {
             [],
         )
         .unwrap();
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert_eq!(report.entries[0].outcome, "failed");
 
     fs::write(fixture.root.join("config.json"), r#"{"pgEnabled":true}"#).unwrap();
@@ -304,4 +310,79 @@ fn symlinked_agent_root_is_invalid() {
     let overview = scan(&[location]);
     assert_eq!(overview.entries.len(), 0);
     assert_eq!(overview.issues.len(), 1);
+}
+
+/// WeiboAP 目录里的 `agents.db.sophia-mcp-<N>.bak` 的全部 N，从小到大
+fn weibo_backup_indices(root: &Path) -> Vec<u64> {
+    let mut indices: Vec<u64> = fs::read_dir(root)
+        .unwrap()
+        .filter_map(|entry| {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            name.strip_prefix("agents.db.sophia-mcp-")?
+                .strip_suffix(".bak")?
+                .parse()
+                .ok()
+        })
+        .collect();
+    indices.sort();
+    indices
+}
+
+/// 数据库备份留在 WeiboAP 自己的目录里，但只留最近 10 份（按 N 先后）：新备份写成后删更早的，
+/// 刚写的那份永远在；编号接着最大的往上走，不回填删掉的空位；不是这个命名的文件一概不动
+#[test]
+fn weibo_database_backups_keep_only_the_latest_ten() {
+    let fixture = Fixture::new();
+    // 上一版留下的一份旧备份（编号 3）和一个无关文件
+    fs::copy(&fixture.db, fixture.root.join("agents.db.sophia-mcp-3.bak")).unwrap();
+    fs::write(fixture.root.join("agents.db.bak"), b"not ours").unwrap();
+    let source = fixture.root.join("source.json");
+    let servers: serde_json::Map<String, Value> = (0..12)
+        .map(|n| (format!("s{n}"), json!({"command": format!("c{n}")})))
+        .collect();
+    fs::write(
+        &source,
+        serde_json::to_vec(&json!({ "mcpServers": servers })).unwrap(),
+    )
+    .unwrap();
+    let locations = vec![
+        json_location("source", &source),
+        fixture.weibo(&fixture.alpha),
+    ];
+    let alpha = locations[1].id.clone();
+
+    let mut newest = None;
+    for n in 0..12 {
+        let before = fixture.config("agent_alpha");
+        let plan = prepare(&locations, &[selection("source", &format!("s{n}"), &alpha)]);
+        assert!(plan.issues.is_empty(), "{:?}", plan.issues);
+        let report = execute(plan, true, backups());
+        assert_eq!(report.entries[0].outcome, "created", "{:?}", report.entries);
+        let backup = report.entries[0].backup_path.clone().unwrap();
+        assert!(backup.starts_with(&fixture.root), "备份仍在 WeiboAP 目录里");
+        assert!(backup.is_file(), "刚写的那份不删");
+        newest = Some((backup, before));
+    }
+
+    // 旧的 3 + 新的 4..=15 共 13 份，只留最新的 6..=15
+    assert_eq!(
+        weibo_backup_indices(&fixture.root),
+        (6..=15).collect::<Vec<_>>()
+    );
+    let (backup, before) = newest.unwrap();
+    assert_eq!(backup, fixture.root.join("agents.db.sophia-mcp-15.bak"));
+    let backed_up: String = Connection::open(&backup)
+        .unwrap()
+        .query_row(
+            "SELECT mcp_config FROM agents WHERE id = 'agent_alpha'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(backed_up, before);
+    assert_eq!(
+        fs::read(fixture.root.join("agents.db.bak")).unwrap(),
+        b"not ours"
+    );
+    assert!(fixture.db.is_file());
 }

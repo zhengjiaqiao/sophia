@@ -2,7 +2,9 @@
 //!
 //! 每一项都是界面上已有入口的另一条路，不新增能力。菜单只管「按了哪一项」：自定义项一律把
 //! 项的 id 原样作为 `menu-command` 事件发给主窗口，前端按 id 路由（`src/shell/menuCommands.ts`）；
-//! 剪切 / 拷贝 / 粘贴与隐藏、退出、窗口这些系统标准项用预置项，由系统直接处理。
+//! 剪切 / 拷贝 / 粘贴与隐藏、窗口这些系统标准项用预置项，由系统直接处理。
+//! 「退出 Sophia」（⌘Q）例外：预置的退出项走 AppKit `terminate:`，拦不住、来不及确认，所以是自定义项，
+//! 按下后让主窗口走退出流程（`quit-requested`，spec 2026-10-03-gateway-in-app 设计 §2）。它不发 `menu-command`
 //!
 //! 「显示」里的目的地项由目的地表生成（`src/shell/destinations.json`，与前端同一个文件，
 //! spec 2026-09-26-object-first-navigation R2）：命令名 `dest-<id>`，快捷键写在表里、不按先后推算。
@@ -80,6 +82,13 @@ pub const BACK: Item = item(
     "back",
     || sophia_core::t!("shell.menu.back"),
     Some("CmdOrCtrl+["),
+);
+
+/// 「退出 Sophia」：不在 `ITEMS` 里（不发 `menu-command`），`on_event` 单独接住
+pub const QUIT: Item = item(
+    "quit",
+    || sophia_core::t!("shell.menu.quit"),
+    Some("CmdOrCtrl+Q"),
 );
 
 /// 全部自定义项：收到菜单事件时只认这张表里的 id（右键菜单等别处的项不转发）
@@ -224,10 +233,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             Some(&sophia_core::t!("shell.menu.showAll")),
         )?)
         .separator()
-        .item(&PredefinedMenuItem::quit(
-            app,
-            Some(&sophia_core::t!("shell.menu.quit")),
-        )?)
+        .item(&custom(app, &QUIT)?)
         .build()?;
     let file = SubmenuBuilder::new(app, sophia_core::t!("shell.menu.file"))
         .item(&custom(app, &ADD_SOURCE)?)
@@ -327,17 +333,24 @@ fn apply_state<R: Runtime>(slot: &MenuSlot<R>, state: MenuState) {
     }
 }
 
-/// 自定义项被按下：把主窗口带到前面（窗口可能藏在菜单栏里），再把命令发给它
+/// 自定义项被按下：把主窗口带到前面（窗口可能藏在菜单栏里），再把命令发给它。
+/// 「退出 Sophia」发 `quit-requested`：确认框出在主窗口正中
 pub fn on_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
-    let Some(command) = command_for(event.id().as_ref()) else {
-        return;
+    let id = event.id().as_ref();
+    let (name, payload) = if id == QUIT.id {
+        (crate::quit::QUIT_REQUESTED, String::new())
+    } else {
+        match command_for(id) {
+            Some(command) => (EVENT, command),
+            None => return,
+        }
     };
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
-    let _ = app.emit_to("main", EVENT, command);
+    let _ = app.emit_to("main", name, payload);
 }
 
 /// 前端报界面状态：这几项跟着开关。没装菜单（非 macOS）时什么都不做
@@ -382,6 +395,7 @@ mod tests {
         assert_eq!(acc(&SELECT_ALL), Some("CmdOrCtrl+A"));
         assert_eq!(acc(&BACK), Some("CmdOrCtrl+["));
         assert_eq!(acc(&SWITCH_PROJECT), Some("CmdOrCtrl+P"));
+        assert_eq!(acc(&QUIT), Some("CmdOrCtrl+Q"));
         // 要再操作一步的项带省略号
         for i in [&SETTINGS, &CHECK_UPDATE, &ADD_SOURCE, &SWITCH_PROJECT] {
             assert!((i.text)().ends_with('…'), "{} 应带 …", (i.text)());

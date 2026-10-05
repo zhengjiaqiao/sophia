@@ -48,6 +48,6 @@
 | 文件 | 内容 |
 |---|---|
 | `messages-{sdk-tool-result,interactive-tool-loop,interactive-first-turn,title,tool-search}.chat.json` | 对应 `cc-*.json` 的 `body` 经 `to_chat(…, "weibo/kimi-k2.5", 默认选项)` 应得的 Chat Completions 请求体（`chat`）与 R14 估算值（`estimate`）。由一份独立于 Rust 实现、按 spec R16–R20 写的 Python 参照实现生成后人工核对，不是拿 Rust 的输出回填的 |
-| `upstream-*-tool-stream.anthropic.jsonl` | 对应 `upstream-*.sse` 喂给 `ChatEvents` + `AnthropicEmitter`（模型名见测试、估算 100）应得的 Anthropic 事件序列，每行 `{"event","data"}`；`message.id` 写作 `<msg-id>`。手写 |
+| `upstream-*-tool-stream.anthropic.jsonl` | 对应 `upstream-*.sse` 喂给 `ChatEvents` + `AnthropicEmitter`（模型名见测试、估算 100）应得的 Anthropic 事件序列，每行 `{"event","data"}`；`message.id` 写作 `<msg-id>`，思考块的随机签名写作 `<signature>`。手写；2026-10-05 起正文之前的推理内容回成 `thinking` 块（`docs/specs/2026-10-05-reasoning-passback.md` R2），开头的思考块由一段 Python 直接从 `.sse` 推出后插入、其后各块 `index` 加一，不是拿 Rust 的输出回填 |
 
 改转换规则时同步改这里的黄金文件，并在提交说明里写清是规则变了而不是为了让测试通过。

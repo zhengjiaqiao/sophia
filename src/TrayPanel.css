@@ -42,6 +42,20 @@ html[data-window="tray"] {
   --key-radius: 5px;
   --key-size: var(--size-caption);
   --key-weight: 500;
+  /* 确认（重启 Codex、退出 Sophia，Confirm 窄面板形态）照系统菜单的样子（2026-10-03 产品负责人：「托盘是系统风格」，
+     画板「托盘退出 · A」）：不垫底块，顶上一条系统分隔线、左右与菜单文字同一条沿 16，两颗小按键间 8；
+     主动作是系统默认键（强调色实底、白字、在尾侧），照 HIG 的提示框 */
+  --confirm-inline-bg: transparent;
+  --confirm-inline-radius: 0;
+  --confirm-inline-pad: 0 var(--space-md) var(--space-xs);
+  --confirm-inline-gap: var(--space-xs);
+  --confirm-inline-rule: block;
+  /* 后果照常从左往右排满（系统菜单不做均衡折行），只避免末行剩一个字 */
+  --confirm-inline-wrap: pretty;
+  --key-primary-bg: var(--sys-accent);
+  --key-primary-ink: var(--sys-knob);
+  --key-primary-shadow: none;
+  --key-primary-hover-outline: none;
 }
 
 html[data-window="tray"] body {
@@ -121,7 +135,7 @@ html[data-window="tray"] body {
   text-overflow: ellipsis;
 }
 
-/* 行尾一组：`重启生效` / `启动 Codex` / `卸下后台服务` 占同一位，在开关左边 12（与 Codex 页节头同一关系）。
+/* 行尾一组：`重启生效` / `启动 Codex` 占同一位，在开关左边 12（与 Codex 页节头同一关系）。
    高 24（紧凑键的高）：键消失后 ✓ 已生效 仍浮在键原来的下沿之下 4 */
 .tray__end {
   display: flex;
@@ -131,11 +145,15 @@ html[data-window="tray"] body {
   white-space: nowrap;
 }
 
-/* 确认（ui Confirm 的窄面板形态）与失败的灰面板（NoticePanel scope="section"）在能力行下当场展开：
-   左右外距 10、上 8 下 2（面板内的凹面与灰面板，外距归这一行） */
-.tray__confirm,
+/* 失败的灰面板（NoticePanel scope="section"）在能力行下当场展开：左右外距 10、上 8 下 2（外距归这一行）。
+   确认（ui Confirm 的窄面板形态）的样子见下面「托盘里的确认」 */
 .tray__notice {
   margin: var(--space-xs) 10px 2px;
+}
+
+/* 托盘里的确认（Confirm 窄面板形态）贴着上一行展开，外距归零；它的系统样式走根上的 --confirm-inline-* 钩子 */
+.tray__confirm {
+  margin: 0;
 }
 
 /* 块与块之间留 8：有了用量行之后，下一块的块头不再贴着上一块的最后一行 */

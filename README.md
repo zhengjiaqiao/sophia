@@ -40,7 +40,7 @@ Switch the Skills or MCP page from **Yours** to **Discover** to search popular s
 
 ### Third-party models for Codex and Claude (macOS)
 
-Use models from other providers in the Codex app and in Claude Desktop, next to the official ones. Sophia runs a small local gateway under `launchd` that translates between the APIs, so it keeps working when Sophia is closed. Add several providers, choose the models each agent should see, and switch it on or off from the app or the menu bar. API keys go into the macOS Keychain, not into a file.
+Use models from other providers in the Codex app and in Claude Desktop, next to the official ones. Sophia runs a small local gateway inside the app that translates between the APIs, so third-party models work while Sophia is open (turn on **Open at login** in Settings to keep them always available). Quitting Sophia asks first, then switches the Codex app and Claude Desktop back to the official models. Add several providers, choose the models each agent should see, and switch it on or off from the app or the menu bar. API keys are kept in a file in the Sophia data folder that only you can read (it is included in Time Machine backups).
 
 <p align="center">
   <img src="./assets/readme/en/screen-models.png" width="100%" alt="The Codex models page: two gateway providers, the models chosen from each, and the switch for third-party models.">
@@ -73,6 +73,8 @@ Use `make dev` for a development window with hot reload.
 
 ### Platform support
 
+macOS 14 (Sonoma) or later.
+
 | | macOS | Windows | Linux |
 |---|:-:|:-:|:-:|
 | Skills, MCP servers, Discover | ✓ | untested | untested |
@@ -85,7 +87,7 @@ The interface is available in English, Simplified Chinese and Traditional Chines
 | Path | What lives there |
 |---|---|
 | `crates/core` | All of the logic: discovery, scanning, planning actions, writing files safely. No async, no network, no Tauri. |
-| `crates/gateway` | The model gateway and usage probes: local router, protocol translation, `launchd`, system proxy, Keychain. The only crate with async and network code. |
+| `crates/gateway` | The model gateway and usage probes: local router (runs inside the app process), protocol translation, system proxy, the API key file. The only crate with async and network code. |
 | `src-tauri` | Tauri commands — each one is a thin call into `core` — plus the Discover network layer. |
 | `src` | The React + TypeScript interface. |
 | `locales` | Every interface string, in all three languages. |

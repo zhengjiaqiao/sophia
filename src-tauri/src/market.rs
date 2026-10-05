@@ -23,6 +23,8 @@
 //! - 写 `~/.codex/config.toml` 的（装 MCP 勾了 Codex）先拿 `AppState.config_lock`。
 
 use crate::AppState;
+#[cfg(test)]
+mod net_tests;
 mod popular;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -41,7 +43,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 // ── 常量 ──
 
@@ -164,8 +166,26 @@ pub struct Fallback {
     pub service: String,
     /// 显示的是哪一刻的缓存（unix 秒）；None＝没有缓存，显示的是随包数据
     pub cached_at: Option<u64>,
-    /// GitHub 限流：界面说 `GitHub 暂时限流，稍后再试`，不自动重试
+    /// 被限流（GitHub、skills.sh、MCP 目录都算）：不自动重试
     pub rate_limited: bool,
+    /// 失败的真实原因一句话（`skills.sh 返回的内容读不懂`）。None＝单纯连不上，界面沿用
+    /// `现在无法连接 {service}，显示的是…` 的说法
+    pub reason: Option<String>,
+    /// 给 `详情` 展开的技术原文（请求、状态码、返回体开头），已去隐私。没有为 None
+    pub detail: Option<String>,
+}
+
+impl Fallback {
+    /// 一次联网失败 → 降级说明。`reason` 与 `detail` 都从失败里来
+    fn from_failure(service: &str, cached_at: Option<u64>, failure: &NetFailure) -> Self {
+        Fallback {
+            service: service.to_string(),
+            cached_at,
+            rate_limited: matches!(failure.error, NetError::RateLimited { .. }),
+            reason: (failure.error != NetError::Network).then(|| failure.error.message(service)),
+            detail: Some(failure.detail.clone()).filter(|d| !d.is_empty()),
+        }
+    }
 }
 
 /// 发现 · skill 的一行：列表条目 + 装在了哪些位置（空＝没装；非空时 `安装` 换成 `✓ 已安装`）
@@ -304,14 +324,150 @@ pub struct SkillUpdateSettings {
 enum NetError {
     /// 404 / 410；GitHub 的 git 地址对不存在或私有仓库回 401，也算这个
     NotFound,
-    /// 被限流；`reset` 是限流头里写的恢复时刻（unix 秒）
-    RateLimited { reset: Option<u64> },
+    /// 被限流；`reset` 是限流头里写的恢复时刻（unix 秒），`wait_secs` 是还要等多少秒（知道的话）
+    RateLimited {
+        reset: Option<u64>,
+        wait_secs: Option<u64>,
+    },
     /// 超过上限（仓库压缩包 200MB，其余接口各自的上限）
     TooLarge,
     /// 其他 HTTP 状态
     Status(u16),
-    /// 连不上、超时、读到一半断了、返回的东西读不懂
+    /// 连不上、发不出请求（不含超时）
     Network,
+    /// 超时：连接、等响应或读响应体
+    Timeout,
+    /// 响应体读到一半断了（不含超时）
+    Interrupted,
+    /// 响应收到了，内容读不懂（不是预期的格式）
+    Unreadable,
+    /// 联网组件（client）建不起来，或地址拼不出来
+    Client,
+}
+
+impl NetError {
+    /// 自动上报里算哪一类：连不上、超时、读断了是网络；对方回错、限流、太大、读不懂是上游；
+    /// 联网组件建不起来是内部错误。404（不存在、私有）是正常的回答，不计
+    fn report_kind(&self) -> Option<sophia_core::report::Kind> {
+        use sophia_core::report::Kind;
+        match self {
+            NetError::NotFound => None,
+            NetError::Network | NetError::Timeout | NetError::Interrupted => Some(Kind::Network),
+            NetError::RateLimited { .. }
+            | NetError::TooLarge
+            | NetError::Status(_)
+            | NetError::Unreadable => Some(Kind::Upstream),
+            NetError::Client => Some(Kind::Internal),
+        }
+    }
+}
+
+/// 失败 + 给 `详情` 的技术原文。`error` 是小的种类枚举，`detail` 已去隐私
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NetFailure {
+    error: NetError,
+    detail: String,
+}
+
+impl NetFailure {
+    /// 原文是 `GET <地址> → <说明>`，整条去隐私并限长。每一次真发出去的请求失败都在这里记一次异常（自动上报）；
+    /// 内部错误（联网组件建不起来、地址拼不出来）再上传一条事件（R8），外部原因只计数
+    fn new(error: NetError, url: &str, what: &str) -> Self {
+        let kind = error.report_kind();
+        let failure = Self::uncounted(error, url, what);
+        match kind {
+            Some(sophia_core::report::Kind::Internal) => {
+                sophia_core::report::capture_internal(&failure.detail)
+            }
+            Some(kind) => sophia_core::report::count(kind),
+            None => {}
+        }
+        failure
+    }
+
+    /// 同 [`NetFailure::new`]，不记异常（这次根本没发请求）
+    fn uncounted(error: NetError, url: &str, what: &str) -> Self {
+        NetFailure {
+            error,
+            detail: sophia_core::redact::redact(&format!("GET {url} → {what}")),
+        }
+    }
+
+    /// 响应收到了但读不懂：`GET <地址> → 200 OK`，换行接说明和返回体开头
+    fn unreadable(url: &str, why: &str, body: &[u8]) -> Self {
+        NetFailure::new(
+            NetError::Unreadable,
+            url,
+            &format!("200 OK\n{why}{}", body_head(body)),
+        )
+    }
+}
+
+/// 详情里的失败类型可以直接当 `NetError` 用（`.message()`、传给 `github_message`）
+impl std::ops::Deref for NetFailure {
+    type Target = NetError;
+    fn deref(&self) -> &NetError {
+        &self.error
+    }
+}
+
+/// 详情里带返回体开头这么多字符
+const DETAIL_BODY_CHARS: usize = 300;
+
+/// `\n` + 返回体开头；体是空的为空串
+fn body_head(body: &[u8]) -> String {
+    let text = String::from_utf8_lossy(body);
+    let head: String = text.trim().chars().take(DETAIL_BODY_CHARS).collect();
+    if head.is_empty() {
+        String::new()
+    } else {
+        format!("\n{head}")
+    }
+}
+
+/// 沿源错误链走：`io::Error::source()` 会跳过它包着的那个错误，要另看 `get_ref()`
+fn for_each_cause(
+    error: &(dyn std::error::Error + 'static),
+    visit: &mut impl FnMut(&(dyn std::error::Error + 'static)),
+) {
+    visit(error);
+    match error
+        .downcast_ref::<std::io::Error>()
+        .and_then(|io| io.get_ref())
+    {
+        Some(inner) => for_each_cause(inner, visit),
+        None => {
+            if let Some(next) = error.source() {
+                for_each_cause(next, visit);
+            }
+        }
+    }
+}
+
+/// reqwest 错误的原文：整条源错误链用 `: ` 接起来（reqwest 自己的那一环只说「发请求出错」，带着地址，跳过）
+fn error_chain_text(error: &reqwest::Error) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for_each_cause(error, &mut |cause| {
+        let text = cause.to_string();
+        if !parts.iter().any(|p| p == &text) {
+            parts.push(text);
+        }
+    });
+    if parts.len() > 1 {
+        parts.remove(0);
+    }
+    parts.join(": ")
+}
+
+/// 发不出去 / 读不下去时的种类：超时单列，`broken` 是别的情况下该归的类
+fn kind_of(error: &reqwest::Error, broken: NetError) -> NetError {
+    if error.is_timeout() {
+        NetError::Timeout
+    } else if error.is_builder() {
+        NetError::Client
+    } else {
+        broken
+    }
 }
 
 impl NetError {
@@ -320,6 +476,14 @@ impl NetError {
         match self {
             NetError::NotFound => sophia_core::t!("market.net.notFound", service = service),
             NetError::RateLimited { .. } if service == "GitHub" => rate_limited_text(),
+            NetError::RateLimited {
+                wait_secs: Some(secs),
+                ..
+            } => sophia_core::t!(
+                "market.net.limitedWait",
+                service = service,
+                minutes = secs.div_ceil(60).max(1)
+            ),
             NetError::RateLimited { .. } => {
                 sophia_core::t!("market.fallback.limited", service = service)
             }
@@ -328,6 +492,10 @@ impl NetError {
                 sophia_core::t!("market.net.status", service = service, code = code)
             }
             NetError::Network => sophia_core::t!("market.net.unreachable", service = service),
+            NetError::Timeout => sophia_core::t!("market.net.timeout", service = service),
+            NetError::Interrupted => sophia_core::t!("market.net.interrupted", service = service),
+            NetError::Unreadable => sophia_core::t!("market.net.unreadable", service = service),
+            NetError::Client => sophia_core::t!("market.net.client"),
         }
     }
 }
@@ -335,23 +503,100 @@ impl NetError {
 /// 按状态码与限流头判断一次响应。纯函数，单测覆盖：
 /// - 2xx 成功；
 /// - 429 一律算限流；403 只有 `x-ratelimit-remaining: 0` 或带 `retry-after`（GitHub 的次级限流）才算，
-///   单纯 403 是没权限，不能当限流；
+///   单纯 403 是没权限，不能当限流；限流要等多久先看 `retry-after-ms` / `retry-after`，
+///   没有再用 `x-ratelimit-reset` 减 `now`（unix 秒）；
 /// - 404 / 410 / 401 算没找到（GitHub 对不存在或私有仓库的 git 地址回 401）
 fn classify(
     status: u16,
     remaining: Option<&str>,
-    retry_after: bool,
+    retry_after: Option<&str>,
+    retry_after_ms: Option<&str>,
     reset: Option<u64>,
+    now: u64,
 ) -> Result<(), NetError> {
+    let limited = || {
+        let wait_secs = sophia_gateway::translate::anthropic::retry_after_seconds(
+            retry_after,
+            retry_after_ms,
+            UNIX_EPOCH + Duration::from_secs(now),
+        )
+        .or_else(|| reset.map(|at| at.saturating_sub(now)));
+        NetError::RateLimited { reset, wait_secs }
+    };
     match status {
         200..=299 => Ok(()),
-        429 => Err(NetError::RateLimited { reset }),
-        403 if remaining.map(str::trim) == Some("0") || retry_after => {
-            Err(NetError::RateLimited { reset })
-        }
+        429 => Err(limited()),
+        403 if remaining.map(str::trim) == Some("0") || retry_after.is_some() => Err(limited()),
         401 | 404 | 410 => Err(NetError::NotFound),
         other => Err(NetError::Status(other)),
     }
+}
+
+/// 之前被 GitHub 限流、还没到恢复时刻，这次没发请求
+fn blocked_failure(url: &str) -> NetFailure {
+    NetFailure::uncounted(
+        NetError::RateLimited {
+            reset: None,
+            wait_secs: None,
+        },
+        url,
+        "not sent: GitHub rate limit from an earlier request is still in effect",
+    )
+}
+
+/// 读响应体读断了：超时单列，其余是读到一半断了
+fn body_failure(url: &str, status: reqwest::StatusCode, error: &reqwest::Error) -> NetFailure {
+    NetFailure::new(
+        kind_of(error, NetError::Interrupted),
+        url,
+        &format!(
+            "{status}\nreading the response failed: {}",
+            error_chain_text(error)
+        ),
+    )
+}
+
+/// 按状态码与限流头判断一次响应（`classify`）；失败时顺手读一小段返回体，连同状态行写进详情
+async fn check_status(resp: reqwest::Response) -> Result<reqwest::Response, NetFailure> {
+    let reset = header(&resp, "x-ratelimit-reset").and_then(|v| v.trim().parse().ok());
+    let status = resp.status();
+    let retry_after = header(&resp, "retry-after").map(str::to_string);
+    let Err(error) = classify(
+        status.as_u16(),
+        header(&resp, "x-ratelimit-remaining"),
+        retry_after.as_deref(),
+        header(&resp, "retry-after-ms"),
+        reset,
+        now(),
+    ) else {
+        return Ok(resp);
+    };
+    let url = resp.url().to_string();
+    let mut line = status.to_string();
+    if let Some(value) = &retry_after {
+        line.push_str(&format!(" · Retry-After: {value}"));
+    }
+    // 返回体只是给详情的参考：最多等 3 秒，读不到就不带
+    let body = tokio::time::timeout(Duration::from_secs(3), head_of(resp))
+        .await
+        .unwrap_or_default();
+    Err(NetFailure::new(
+        error,
+        &url,
+        &format!("{line}{}", body_head(&body)),
+    ))
+}
+
+/// 读响应体的开头几 KB，出错就停
+async fn head_of(mut resp: reqwest::Response) -> Vec<u8> {
+    let mut body = Vec::new();
+    while body.len() < 4096 {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+            _ => break,
+        }
+    }
+    body
 }
 
 fn header<'a>(resp: &'a reqwest::Response, name: &str) -> Option<&'a str> {
@@ -376,7 +621,7 @@ fn query_key(query: &str) -> String {
 }
 
 impl MarketState {
-    fn client(&self) -> Result<reqwest::Client, NetError> {
+    fn client(&self) -> Result<reqwest::Client, NetFailure> {
         self.client
             .get_or_init(|| {
                 // reqwest 用 rustls-no-provider：不装加密提供方，建 client 会 panic（同 sophia-gateway）
@@ -386,10 +631,15 @@ impl MarketState {
                     .timeout(REQUEST_TIMEOUT)
                     .user_agent(concat!("Sophia/", env!("CARGO_PKG_VERSION")))
                     .build()
-                    .map_err(|e| e.to_string())
+                    .map_err(|e| error_chain_text(&e))
             })
             .clone()
-            .map_err(|_| NetError::Network)
+            .map_err(|text| NetFailure {
+                error: NetError::Client,
+                detail: sophia_core::redact::redact(&format!(
+                    "building the HTTP client failed: {text}"
+                )),
+            })
     }
 
     /// 发一个 GET，按 `classify` 判断状态。`timeout` 为 None 时用 client 的 30 秒
@@ -398,7 +648,7 @@ impl MarketState {
         url: &str,
         timeout: Option<Duration>,
         github_api: bool,
-    ) -> Result<reqwest::Response, NetError> {
+    ) -> Result<reqwest::Response, NetFailure> {
         let mut request = self.client()?.get(url);
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
@@ -408,69 +658,96 @@ impl MarketState {
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28");
         }
-        let resp = request.send().await.map_err(|_| NetError::Network)?;
-        let reset = header(&resp, "x-ratelimit-reset").and_then(|v| v.trim().parse().ok());
-        classify(
-            resp.status().as_u16(),
-            header(&resp, "x-ratelimit-remaining"),
-            resp.headers().contains_key("retry-after"),
-            reset,
-        )?;
-        Ok(resp)
+        let resp = request.send().await.map_err(|e| {
+            NetFailure::new(kind_of(&e, NetError::Network), url, &error_chain_text(&e))
+        })?;
+        check_status(resp).await
     }
 
     /// 读完响应体，超过 `cap` 即停
-    async fn read_capped(mut resp: reqwest::Response, cap: u64) -> Result<Vec<u8>, NetError> {
+    async fn read_capped(mut resp: reqwest::Response, cap: u64) -> Result<Vec<u8>, NetFailure> {
+        let url = resp.url().to_string();
         if resp.content_length().is_some_and(|n| n > cap) {
-            return Err(NetError::TooLarge);
+            return Err(NetFailure::new(
+                NetError::TooLarge,
+                &url,
+                &format!("{} larger than {cap} bytes", resp.status()),
+            ));
         }
         let mut body = Vec::new();
-        while let Some(chunk) = resp.chunk().await.map_err(|_| NetError::Network)? {
-            if (body.len() + chunk.len()) as u64 > cap {
-                return Err(NetError::TooLarge);
+        loop {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    if (body.len() + chunk.len()) as u64 > cap {
+                        return Err(NetFailure::new(
+                            NetError::TooLarge,
+                            &url,
+                            &format!("{} larger than {cap} bytes", resp.status()),
+                        ));
+                    }
+                    body.extend_from_slice(&chunk);
+                }
+                Ok(None) => return Ok(body),
+                Err(e) => return Err(body_failure(&url, resp.status(), &e)),
             }
-            body.extend_from_slice(&chunk);
         }
-        Ok(body)
     }
 
-    async fn get_bytes(&self, url: &str, github_api: bool) -> Result<Vec<u8>, NetError> {
+    async fn get_bytes(&self, url: &str, github_api: bool) -> Result<Vec<u8>, NetFailure> {
         let resp = self.get(url, None, github_api).await?;
         Self::read_capped(resp, JSON_CAP).await
     }
 
     // ── skills.sh ──
 
-    async fn fetch_skills(&self, query: &str) -> Result<Vec<SkillHit>, NetError> {
+    async fn fetch_skills(&self, query: &str) -> Result<Vec<SkillHit>, NetFailure> {
+        self.fetch_skills_at(SKILLS_SEARCH_URL, query).await
+    }
+
+    /// 地址由参数给（单测指到本机假服务）
+    async fn fetch_skills_at(&self, base: &str, query: &str) -> Result<Vec<SkillHit>, NetFailure> {
         let url = reqwest::Url::parse_with_params(
-            SKILLS_SEARCH_URL,
+            base,
             &[("q", query), ("limit", &SKILLS_LIMIT.to_string())],
         )
-        .map_err(|_| NetError::Network)?;
+        .map_err(|e| NetFailure::new(NetError::Client, base, &e.to_string()))?;
         let body = self.get_bytes(url.as_str(), false).await?;
-        parse_skill_search(&body).ok_or(NetError::Network)
+        parse_skill_search(&body).ok_or_else(|| {
+            NetFailure::unreadable(url.as_str(), "response is not the expected JSON", &body)
+        })
     }
 
     // ── MCP Registry ──
 
-    async fn fetch_registry(&self, query: &str) -> Result<Vec<RegistryHit>, NetError> {
+    async fn fetch_registry(&self, query: &str) -> Result<Vec<RegistryHit>, NetFailure> {
+        self.fetch_registry_at(REGISTRY_URL, query).await
+    }
+
+    /// 地址由参数给（单测指到本机假服务）
+    async fn fetch_registry_at(
+        &self,
+        base: &str,
+        query: &str,
+    ) -> Result<Vec<RegistryHit>, NetFailure> {
         let url = reqwest::Url::parse_with_params(
-            REGISTRY_URL,
+            base,
             &[
                 ("search", query),
                 ("limit", &REGISTRY_LIMIT.to_string()),
                 ("version", "latest"),
             ],
         )
-        .map_err(|_| NetError::Network)?;
+        .map_err(|e| NetFailure::new(NetError::Client, base, &e.to_string()))?;
         let body = self.get_bytes(url.as_str(), false).await?;
-        parse_registry(&body).ok_or(NetError::Network)
+        parse_registry(&body).ok_or_else(|| {
+            NetFailure::unreadable(url.as_str(), "response is not the expected JSON", &body)
+        })
     }
 
     // ── GitHub：默认分支、下载、raw、trees ──
 
     /// 仓库的默认分支：读 git 智能 HTTP 首行的 `symref=HEAD:refs/heads/<分支>`，不占接口次数。缓存 6 小时
-    async fn default_branch(&self, repo: &str) -> Result<String, NetError> {
+    async fn default_branch(&self, repo: &str) -> Result<String, NetFailure> {
         let key = repo.to_lowercase();
         let t = now();
         if let Some((at, branch)) = guard(&self.branches).get(&key) {
@@ -480,19 +757,27 @@ impl MarketState {
         }
         let url = format!("https://github.com/{repo}.git/info/refs?service=git-upload-pack");
         let mut resp = self.get(&url, None, false).await?;
+        let unreadable = |head: &[u8]| {
+            NetFailure::unreadable(
+                &url,
+                "no default branch (symref=HEAD) in the response",
+                head,
+            )
+        };
         let mut head = Vec::new();
         let branch = loop {
-            match resp.chunk().await.map_err(|_| NetError::Network)? {
-                Some(chunk) => {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
                     head.extend_from_slice(&chunk);
                     if let Some(branch) = parse_symref(&head) {
                         break branch;
                     }
                     if head.len() > REFS_CAP {
-                        return Err(NetError::Network);
+                        return Err(unreadable(&head));
                     }
                 }
-                None => return parse_symref(&head).ok_or(NetError::Network),
+                Ok(None) => return parse_symref(&head).ok_or_else(|| unreadable(&head)),
+                Err(e) => return Err(body_failure(&url, resp.status(), &e)),
             }
         };
         // 读到就停：大仓库的 refs 列表（含所有 PR 的 refs）可以有几 MB
@@ -506,7 +791,7 @@ impl MarketState {
         &self,
         repo: &str,
         branch: Option<&str>,
-    ) -> Result<String, NetError> {
+    ) -> Result<String, NetFailure> {
         match branch
             .map(str::trim)
             .filter(|b| !b.is_empty() && *b != "HEAD")
@@ -517,7 +802,7 @@ impl MarketState {
     }
 
     /// codeload 整包；同一个仓库分支在 15 分钟里只下一次
-    async fn download(&self, repo: &str, branch: &str) -> Result<Arc<Vec<u8>>, NetError> {
+    async fn download(&self, repo: &str, branch: &str) -> Result<Arc<Vec<u8>>, NetFailure> {
         let key = repo.to_lowercase();
         let t = now();
         {
@@ -545,11 +830,11 @@ impl MarketState {
     }
 
     /// raw 取一个文本文件；404 为 Ok(None)
-    async fn raw_text(&self, url: &str) -> Result<Option<String>, NetError> {
+    async fn raw_text(&self, url: &str) -> Result<Option<String>, NetFailure> {
         match self.get_bytes(url, false).await {
             Ok(body) => Ok(Some(String::from_utf8_lossy(&body).into_owned())),
-            Err(NetError::NotFound) => Ok(None),
-            Err(e) => Err(e),
+            Err(f) if f.error == NetError::NotFound => Ok(None),
+            Err(f) => Err(f),
         }
     }
 
@@ -559,24 +844,26 @@ impl MarketState {
     }
 
     fn note_rate_limit(&self, error: &NetError) {
-        if let NetError::RateLimited { reset } = error {
+        if let NetError::RateLimited { reset, .. } = error {
             let until = reset.unwrap_or_else(|| now() + RATE_LIMIT_FALLBACK_SECS);
             *guard(&self.github_blocked_until) = Some(until);
         }
     }
 
     /// `GET /repos/{repo}/git/trees/{reference}?recursive=1`：reference 是分支或 tree SHA
-    async fn fetch_tree(&self, repo: &str, reference: &str) -> Result<ParsedTree, NetError> {
-        if self.github_blocked(now()) {
-            return Err(NetError::RateLimited { reset: None });
-        }
+    async fn fetch_tree(&self, repo: &str, reference: &str) -> Result<ParsedTree, NetFailure> {
         let url = format!("https://api.github.com/repos/{repo}/git/trees/{reference}?recursive=1");
+        if self.github_blocked(now()) {
+            return Err(blocked_failure(&url));
+        }
         let result = match self.get_bytes(&url, true).await {
-            Ok(body) => parse_tree(&body).ok_or(NetError::Network),
+            Ok(body) => parse_tree(&body).ok_or_else(|| {
+                NetFailure::unreadable(&url, "response is not the expected JSON", &body)
+            }),
             Err(e) => Err(e),
         };
         if let Err(e) = &result {
-            self.note_rate_limit(e);
+            self.note_rate_limit(&e.error);
         }
         result
     }
@@ -601,7 +888,9 @@ impl MarketState {
             serde_json::to_vec(cache).ok()
         });
         if let (Some(bytes), Some(path)) = (snapshot, cache_path()) {
-            let _ = write_atomic(&path, &bytes);
+            if let Err(e) = write_atomic(&path, &bytes) {
+                log::warn!("写发现页缓存 {} 失败：{e}", path.display());
+            }
         }
     }
 
@@ -1565,17 +1854,13 @@ pub async fn market_search_skills(
                 market.update_cache(|c| remember(&mut c.skills, key, t, items));
                 (hits, None)
             }
-            Err(_) => {
+            Err(failure) => {
                 let cached_at = cached.as_ref().map(|c| c.at);
                 let hits = match cached {
                     Some(c) => c.items,
                     None => snapshot_matching(sophia_core::market::popular_snapshot(), &query),
                 };
-                let fallback = Fallback {
-                    service: "skills.sh".into(),
-                    cached_at,
-                    rate_limited: false,
-                };
+                let fallback = Fallback::from_failure("skills.sh", cached_at, &failure);
                 (hits, Some(fallback))
             }
         },
@@ -1642,12 +1927,12 @@ pub async fn market_search_mcp(
                     market.update_cache(|c| remember(&mut c.mcp, key, t, items));
                     (hits, None)
                 }
-                Err(_) => {
-                    let fallback = Fallback {
-                        service: sophia_core::t!("market.service.mcpDirectory"),
-                        cached_at: cached.as_ref().map(|c| c.at),
-                        rate_limited: false,
-                    };
+                Err(failure) => {
+                    let fallback = Fallback::from_failure(
+                        &sophia_core::t!("market.service.mcpDirectory"),
+                        cached.as_ref().map(|c| c.at),
+                        &failure,
+                    );
                     (cached.map(|c| c.items).unwrap_or_default(), Some(fallback))
                 }
             },
@@ -1832,9 +2117,9 @@ pub async fn market_resolve_link(
                         hit = Some((branch, path, bytes));
                         break;
                     }
-                    Err(NetError::NotFound) => continue,
-                    Err(e) => {
-                        last = e;
+                    Err(f) if f.error == NetError::NotFound => continue,
+                    Err(f) => {
+                        last = f.error;
                         break;
                     }
                 }
@@ -1925,7 +2210,8 @@ pub async fn market_install_skill(
     let harnesses = discovery::installed(&env);
     let plan = install::plan(&env, &harnesses, &request)?;
     let commit = archive::commit_sha(&bytes).unwrap_or_default();
-    // 通用仓库成为这个位置的来源：先过认领订阅那一步，改了才写回
+    // 通用仓库成为这个位置的来源：先过认领订阅那一步，改了才写回（读到写回拿着设置锁；之后不再 .await）
+    let _settings_guard = state.store.lock_settings();
     let (sources, targets) = crate::discover(&state)?;
     let mut settings = crate::subscribed_settings(&state, &sources, &targets)?;
     let before = settings.subscriptions.clone();
@@ -1984,7 +2270,8 @@ pub async fn market_install_mcp(
     let env = crate::runtime_env()?;
     let harnesses = mcp_harnesses(&state, &env)?;
     let _config_guard = state.config_lock.lock().await;
-    let mut report = sophia_core::mcp::write_definitions(&env, &harnesses, &request);
+    let mut report =
+        sophia_core::mcp::write_definitions(&env, &harnesses, &request, &state.store.backups_dir());
     crate::register_mcp_undo(&state, &mut report)?;
     Ok(report)
 }
@@ -2052,23 +2339,18 @@ pub async fn market_check_updates(
     let dismissed = settings.dismissed_update_shas.clone();
     let last = settings.last_skill_update_check;
     let t = now();
-    let failed = |e: &NetError| -> Result<UpdateCheck, String> {
-        let rate_limited = matches!(e, NetError::RateLimited { .. });
-        if rate_limited && force {
+    let failed = |e: &NetFailure| -> Result<UpdateCheck, String> {
+        if matches!(e.error, NetError::RateLimited { .. }) && force {
             return Err(rate_limited_text());
         }
-        let fallback = Fallback {
-            service: "GitHub".into(),
-            cached_at: last,
-            rate_limited,
-        };
+        let fallback = Fallback::from_failure("GitHub", last, e);
         Ok(previous_check(&market, &dismissed, last, Some(fallback)))
     };
     if !due(force, settings.auto_check_skill_updates, last, t) {
         return Ok(previous_check(&market, &dismissed, last, None));
     }
     if market.github_blocked(t) {
-        return failed(&NetError::RateLimited { reset: None });
+        return failed(&blocked_failure("https://api.github.com/"));
     }
 
     let env = crate::runtime_env()?;
@@ -2080,7 +2362,7 @@ pub async fn market_check_updates(
         let actual = match market.branch_or_default(&repo, branch.as_deref()).await {
             Ok(b) => b,
             // 仓库没了、改成私有了：这一个不算有更新，别的照查
-            Err(NetError::NotFound) => continue,
+            Err(f) if f.error == NetError::NotFound => continue,
             Err(e) => return failed(&e),
         };
         match market.fetch_tree(&repo, &actual).await {
@@ -2093,7 +2375,7 @@ pub async fn market_check_updates(
                     },
                 );
             }
-            Err(NetError::NotFound) => continue,
+            Err(f) if f.error == NetError::NotFound => continue,
             Err(e) => return failed(&e),
         }
     }
@@ -2316,37 +2598,58 @@ mod tests {
 
     #[test]
     fn rate_limit_needs_the_header_on_403() {
-        assert_eq!(classify(200, None, false, None), Ok(()));
-        assert_eq!(classify(204, Some("0"), false, None), Ok(()));
+        let limited = |reset, wait_secs| Err(NetError::RateLimited { reset, wait_secs });
+        assert_eq!(classify(200, None, None, None, None, 0), Ok(()));
+        assert_eq!(classify(204, Some("0"), None, None, None, 0), Ok(()));
         assert_eq!(
-            classify(403, Some("0"), false, Some(1_800_000_000)),
-            Err(NetError::RateLimited {
-                reset: Some(1_800_000_000)
-            })
+            classify(
+                403,
+                Some("0"),
+                None,
+                None,
+                Some(1_800_000_000),
+                1_799_999_000
+            ),
+            limited(Some(1_800_000_000), Some(1000))
         );
         // 次级限流：403 + retry-after
         assert_eq!(
-            classify(403, Some("12"), true, None),
-            Err(NetError::RateLimited { reset: None })
+            classify(403, Some("12"), Some("30"), None, None, 0),
+            limited(None, Some(30))
         );
         assert_eq!(
-            classify(429, None, false, None),
-            Err(NetError::RateLimited { reset: None })
+            classify(429, None, None, None, None, 0),
+            limited(None, None)
         );
         // 单纯 403 是没权限，不能当限流
-        assert_eq!(classify(403, None, false, None), Err(NetError::Status(403)));
         assert_eq!(
-            classify(403, Some("59"), false, None),
+            classify(403, None, None, None, None, 0),
             Err(NetError::Status(403))
         );
-        assert_eq!(classify(404, None, false, None), Err(NetError::NotFound));
-        assert_eq!(classify(401, None, false, None), Err(NetError::NotFound));
-        assert_eq!(classify(500, None, false, None), Err(NetError::Status(500)));
+        assert_eq!(
+            classify(403, Some("59"), None, None, None, 0),
+            Err(NetError::Status(403))
+        );
+        assert_eq!(
+            classify(404, None, None, None, None, 0),
+            Err(NetError::NotFound)
+        );
+        assert_eq!(
+            classify(401, None, None, None, None, 0),
+            Err(NetError::NotFound)
+        );
+        assert_eq!(
+            classify(500, None, None, None, None, 0),
+            Err(NetError::Status(500))
+        );
     }
 
     #[test]
     fn rate_limit_message_is_exact() {
-        let e = NetError::RateLimited { reset: None };
+        let e = NetError::RateLimited {
+            reset: None,
+            wait_secs: None,
+        };
         assert_eq!(e.message("GitHub"), "GitHub 暂时限流，稍后再试");
         assert_eq!(
             github_message(&NetError::TooLarge),
@@ -2508,6 +2811,7 @@ mod tests {
             repo: "google-labs-code/stitch-skills".into(),
             path: "skills/react-components".into(),
             folder_hash: "f".into(),
+            git_ref: None,
         };
         let installed = Installed {
             records: vec![record],
@@ -3090,7 +3394,8 @@ mod tests {
                 market
                     .download("anthropics/skills", "no-such-branch-x")
                     .await
-                    .err(),
+                    .err()
+                    .map(|f| f.error),
                 Some(NetError::NotFound)
             );
         });

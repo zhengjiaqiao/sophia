@@ -24,6 +24,9 @@ import {
   mcpInstalledToast,
   mcpRowView,
   skillInstalledToast,
+  skillPlanPending,
+  skillRowView,
+  takenAgents,
   writableCount,
   type AgentRef,
   type InstallKind,
@@ -128,10 +131,14 @@ export function useSkillInstall(opts: SkillInstallOptions) {
   const pathsKey = JSON.stringify(opts.planPaths);
   const seq = useRef(0);
   const rowIds = rows.map((a) => a.id).join("\n");
+  /// 计划（或出错）是按哪一组条件出的：换了位置到旧的清掉之前隔着一次渲染，那一下旧计划不作数（M14 复审）
+  const planKey = JSON.stringify([repo, branch, pathsKey, location, rowIds]);
+  const [planFor, setPlanFor] = useState<string | null>(null);
   useEffect(() => {
     const n = ++seq.current;
     setPreview(null);
     setPlanError(null);
+    setPlanFor(planKey);
     const paths = JSON.parse(pathsKey) as string[];
     if (repo === "" || paths.length === 0) return;
     service
@@ -149,7 +156,7 @@ export function useSkillInstall(opts: SkillInstallOptions) {
       .catch((error: unknown) => {
         if (n === seq.current) setPlanError(errorText(error));
       });
-  }, [service, repo, branch, pathsKey, location, rowIds]);
+  }, [service, repo, branch, pathsKey, location, rowIds, planKey]);
 
   /// 计划里对应的那一项。只要了一项、又是按名字要的（搜索结果不知道路径）时，回来的路径是后端补上的，就取那一项
   const itemFor = (path: string) => {
@@ -164,12 +171,29 @@ export function useSkillInstall(opts: SkillInstallOptions) {
   const requested = [
     ...new Set([...checked.filter((id) => !directReaders.includes(id)), ...directReaders]),
   ];
+  const agentDirs = preview?.plan.agentDirs;
+  const checking = skillPlanPending(preview, planError, planFor !== planKey);
+  /// 这几条路径在计划里的 skill 名（被拒的不算：它们不装，也就不链）
+  const namesOf = (paths: ReadonlyArray<string>) =>
+    paths
+      .map((p) => itemFor(p))
+      .filter((i): i is NonNullable<typeof i> => i !== undefined && i.blocked === null)
+      .map((i) => i.name);
+  /// 这次要装的 `names` 那里全都已有同名的 agent 不能勾（M14）：勾选行画成没勾，也不交给后端
+  const requestedFor = (names: ReadonlyArray<string>) => {
+    const taken = takenAgents(agentDirs, names);
+    return requested.filter((id) => !taken.includes(id));
+  };
+  const viewFor = (names: ReadonlyArray<string>) => (id: string) =>
+    skillRowView(agentDirs, id, names);
 
   /// 装。成了（至少装上一个）返回结果与那一窗的文案，并记下这次勾的 agent；做不成在主动作上方说原因、留在这一页
   const install = async (
     paths: ReadonlyArray<string>,
     names: ReadonlyArray<string>,
   ): Promise<{ outcome: InstallOutcome; toast: ToastText } | null> => {
+    // 计划还没回来：不知道哪个 agent 那里已有同名的，先不交（`安装` 此时也是禁用的）
+    if (checking) return null;
     setBusy(true);
     setFailure(null);
     try {
@@ -178,9 +202,9 @@ export function useSkillInstall(opts: SkillInstallOptions) {
         branch: branch ?? "",
         paths: [...paths],
         location,
-        harnessIds: requested,
+        harnessIds: requestedFor(namesOf(paths)),
       });
-      const toast = skillInstalledToast(outcome);
+      const toast = skillInstalledToast(outcome, opts.agents);
       if (outcome.installed.length === 0) {
         setFailure({
           key: Date.now(),
@@ -213,7 +237,10 @@ export function useSkillInstall(opts: SkillInstallOptions) {
     planError,
     itemFor,
     directReaders,
-    requested,
+    checking,
+    namesOf,
+    requestedFor,
+    viewFor,
     busy,
     failure,
     dismissFailure: () => setFailure(null),

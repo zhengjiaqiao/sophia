@@ -148,7 +148,7 @@
   "mcp.report.atomicWriteFailed": "原子寫入失敗",
   "mcp.report.created": "已建立 MCP 定義",
   "mcp.report.createdEnableIn": "已建立 MCP 定義（請在 {agent} 中啟用）",
-  "mcp.read.symlink": "設定檔是符號連結，已拒絕讀取",
+  "mcp.read.symlink": "設定檔是符號連結，沒能解析它指向的檔案",
   "mcp.read.notRegular": "設定路徑不是一般檔案",
   "mcp.read.unreadable": "設定不可讀",
   "mcp.read.jsonInvalid": "JSON 無法解析或含重複物件鍵（JSONC 不支援）",

@@ -11,8 +11,8 @@
 //! `mcp_servers = { … }`、跨行的内联定义）如实拒绝，不猜。
 use super::sources::{remove_json_server, remove_toml_server};
 use super::{
-    backup, parse, record_undo, same_location, toml, McpIssue, McpLocation, McpReport,
-    McpReportEntry, Parsed, State,
+    backup, backup_failed_message, parse, record_undo, same_location, toml, write_failed_message,
+    McpIssue, McpLocation, McpReport, McpReportEntry, Parsed, State,
 };
 use crate::atomicfile::{self, unsafe_parent, FileState};
 use crate::fs::normalize;
@@ -151,8 +151,8 @@ pub fn prepare_original_removal(
 }
 
 /// 执行删除。计划里拒绝的项以 `skipped` + 原因进报告（逐项），执行时出错的以 `failed` + 原因。
-/// 删掉的条目 `outcome` 为 `removed`，带备份路径；撤销记录同写入（`take_undo`）
-pub fn execute_removal(plan: McpRemovalPlan) -> McpReport {
+/// 删掉的条目 `outcome` 为 `removed`，带备份路径（在 `backups` 下，见 `atomicfile::backup`）；撤销记录同写入（`take_undo`）
+pub fn execute_removal(plan: McpRemovalPlan, backups: &Path) -> McpReport {
     let mut report = McpReport::default();
     for issue in plan.issues {
         report.entries.push(McpReportEntry {
@@ -172,7 +172,7 @@ pub fn execute_removal(plan: McpRemovalPlan) -> McpReport {
             .push(pending);
     }
     for group in groups.into_values() {
-        execute_group(&group, &mut report);
+        execute_group(&group, backups, &mut report);
     }
     report
 }
@@ -192,7 +192,7 @@ fn entry(
     }
 }
 
-fn execute_group(group: &[PendingRemoval], report: &mut McpReport) {
+fn execute_group(group: &[PendingRemoval], backups: &Path, report: &mut McpReport) {
     let fail = |report: &mut McpReport,
                 items: &[&PendingRemoval],
                 message: &str,
@@ -245,25 +245,21 @@ fn execute_group(group: &[PendingRemoval], report: &mut McpReport) {
     if removed.is_empty() {
         return;
     }
-    let backup_path = match backup(path, snap) {
+    let backup_path = match backup(path, snap, backups) {
         Ok(backup_path) => backup_path,
-        Err(_) => {
-            fail(
-                report,
-                &removed,
-                &crate::t!("mcp.report.backupFailedUntouched"),
-                None,
-            );
+        Err(error) => {
+            let message = backup_failed_message(path, &error, || {
+                crate::t!("mcp.report.backupFailedUntouched")
+            });
+            fail(report, &removed, &message, None);
             return;
         }
     };
-    if atomicfile::atomic_write(path, &bytes, &FileState::Present(snap.clone())).is_err() {
-        fail(
-            report,
-            &removed,
-            &crate::t!("mcp.report.writeBackFailedUntouched"),
-            Some(backup_path),
-        );
+    if let Err(error) = atomicfile::atomic_write(path, &bytes, &FileState::Present(snap.clone())) {
+        let message = write_failed_message(path, &error, || {
+            crate::t!("mcp.report.writeBackFailedUntouched")
+        });
+        fail(report, &removed, &message, Some(backup_path));
         return;
     }
     record_undo(

@@ -2,75 +2,101 @@
 # Sophia 这一侧（模型网关）真机验收用的小工具：看状态、起停被测的 Sophia、备份 / 比对 / 恢复网关相关的文件，
 # 以及几种只在 Claude 桌面应用退出时才做的「造现场」改动。给 docs/testing/2026-09-30-claude-third-party-acceptance.md 用。
 #
+# 2026-10-03 起路由在 Sophia 进程里跑（spec 2026-10-03-gateway-in-app）：Sophia 开着、且 Codex 或 Claude 有一家开着才有路由，
+# 端口读 settings.json 的 codexGateway.port（被占时会自动换到 47329–47339），没有 launchd 服务、没有 bin/ 程序副本。
+# 下面只把旧版留下的 launchd 服务（标签 com.zhengjiaqiao.sophia.gateway）当残留看一眼（新版打开时会卸掉它、删掉 plist 与 bin/，R14）。
+# 服务商密钥与 Claude 网关令牌都在 <数据目录>/secrets.json（0600），不在钥匙串。
+#
 # 用法：scripts/desktop-3p-lab/sophia-state.sh <子命令> [参数]
-#   app status              只读：列出正在跑的 Sophia 界面进程（同包 id 可能有别的 worktree 的实例）与可执行文件路径
-#   app quit [--wait 秒]    让所有 Sophia 界面进程正常退出（Apple 事件 quit，等于 ⌘Q；不 kill），默认每个等 15 秒
-#   app open [--wait 秒]    没有任何 Sophia 在跑时，打开被测包（SOPHIA_LAB_APP），并核对跑起来的就是它
-#   status [--log-lines N]  只读：路由服务、~/.codex、Sophia 设置里两家的网关摘要、钥匙串 symsync 条目名、
-#                           Claude 的四个文件、Claude 路由清单、路由日志末尾。不显示任何密钥与令牌
+#   app status              只读：列出正在跑的 Sophia 界面进程（安装版、开发版、别的 worktree 的都算）、包 id 与可执行文件路径
+#   app quit [--wait 秒]    让所有 Sophia 界面进程正常退出（按各自的包 id 发 Apple 事件 quit，同从 Dock 退出；不 kill），
+#                           默认每轮等 15 秒。注意：这条路不弹确认框，Sophia 会把 Codex 设置改回原样（不重启 Codex）、
+#                           不动 Claude（spec R10）——Claude 若正处在 Sophia 写的第三方模式，路由一停它就连不上
+#   app open [--wait 秒]    没有任何 Sophia 在跑时，打开被测包（SOPHIA_LAB_APP），并核对跑起来的就是它、包 id 对
+#   status [--log-lines N]  只读：路由、~/.codex、Sophia 设置里两家的网关摘要、密钥文件 secrets.json 的权限与项目名、
+#                           Claude 的四个文件、Sophia 改写前备份（<数据目录>/backups/）、Claude 路由清单、路由日志末尾。
+#                           不显示任何密钥与令牌
 #   claude4 <名字>          只读：把 Claude 的四个文件拍一份快照到 $LAB/evidence/claude4-<名字>/
 #                           （两份 claude_desktop_config.json 与 _meta.json 原样复制；Sophia 的 profile 只存令牌打码后的 JSON、
 #                            sha256 与权限）
 #   claude4-diff <甲> <乙>  只读：比两份快照，逐文件说「字节相同 / 不同」，不同的列出差异（profile 只比打码后的内容与指纹）
-#   backup                  备份 Sophia 这一侧：~/.codex 的 config.toml、config.models*.bak、symsync-*；Sophia 的 settings.json、
-#                           bin/、gateway/；路由服务的 plist（有才备份）；Claude 的四个文件；钥匙串 symsync 条目名（只记名字）。
-#                           放在 $LAB/sophia-backups/sophia-backup-<时间>/，并把路径写进 $LAB/SOPHIA_BASELINE。Sophia 要先退出
-#   compare [备份目录]       只读：现在与备份逐项比对（缺省用 $LAB/SOPHIA_BASELINE）
-#   restore [备份目录]       把 ~/.codex 那几份、settings.json、bin/、gateway/ 放回备份的样子（现在的挪到 $LAB/aside/restore-<时间>/，
-#                           不删）；备份时没有、现在多出来的 symsync-* 同样挪开。不碰 plist、钥匙串、Claude 的文件；
-#                           路由服务此刻装着而备份时没有 → 拒绝（先在 Sophia 里把两家都关掉）。要输入 yes
+#   backup                  备份 Sophia 这一侧：~/.codex 的 config.toml、sophia-*；Sophia 的 settings.json、secrets.json（含密钥，
+#                           权限保持 0600）、gateway/；Claude 的三个文件与 configLibrary 清单；<数据目录>/backups/ 的文件清单。
+#                           放在 $LAB/sophia-backups/sophia-backup-<时间>/（0700）。每一项「在 / 不在」明确记进 presence.txt；
+#                           任何一步失败（读不了、复制后核对不上）都中止、非零退出，不写 COMPLETE、不动 $LAB/SOPHIA_BASELINE；
+#                           全部成功才写 COMPLETE 并把路径写进 $LAB/SOPHIA_BASELINE。Sophia 要先退出
+#   compare [备份目录]       只读：现在与备份逐项比对（缺省用 $LAB/SOPHIA_BASELINE）；secrets.json 只比字节与项目名，不显示值；
+#                           configLibrary 清单变了也计入。有不一致时非零退出
+#   restore [备份目录]       把 ~/.codex 那几份、settings.json、secrets.json、gateway/ 放回备份的样子（现在的挪到
+#                           $LAB/aside/restore-<时间>/，不删）。只认 presence.txt：记 present 的放回，记 absent 的现在若有就挪开，
+#                           没记的不动并中止；不完整的备份（没有 COMPLETE）拒绝。先查备份里该在的都在、读得了才开始动；
+#                           先把要换掉、要挪开的全部挪到 aside，再逐项放回并核对；任何一项失败，或中途收到 Ctrl+C / SIGTERM /
+#                           SIGHUP，都整体撤回（删掉已放回的、原件全部挪回）并非零退出。成功后 aside 留着交给人，不自动删。
+#                           secrets.json 不管内容是否相同都校正到 0600。不碰 Claude 的文件、<数据目录>/backups/。要输入 yes
+#   bak-of <文件>            只读：打印 Sophia 给这个文件做的最新一份改写前备份（<数据目录>/backups/<名>-<哈希>/<序号>-*.bak，
+#                           按目录里的 source 认原文件）；没有就以 1 退出
 #   claude-reset [备份目录]  Claude 退出时，把 Claude 的四个文件回到备份时的「模式与生效指向」：_meta.json 放回原样；
 #                           configLibrary 里备份时没有的 profile（Sophia 的、模拟别家的）挪到 $LAB/aside/<时间>/；
 #                           两份 claude_desktop_config.json 只把 deploymentMode 的值改回原值（其余字节不动）。要输入 yes
 #   dm-only <甲文件> <乙文件>  只读：乙是否只在 deploymentMode 的值上与甲不同（其余字节逐字节相同）；
-#                           用来核对 Sophia 改 claude_desktop_config.json 时只动了这一个成员（甲用 <名>.sophia-models.bak）
+#                           用来核对 Sophia 改 claude_desktop_config.json 时只动了这一个成员（甲用 bak-of 找到的改写前备份）
 #   profile-set base-port <端口>   Claude 退出时，把 Sophia profile 里网关地址的端口换成 <端口>（其余字节不动）
 #   profile-set token-wrong        Claude 退出时，把 Sophia profile 里的令牌换成一个错的（不打印新旧值）
-#   token-check [目录…]           只读：拿 Sophia profile 里的令牌去搜 settings.json、路由日志、Claude 路由清单、$LAB 下的抓包与
-#                                  代理记录（及另给的目录），只报每处「搜到 / 没搜到」，不打印令牌
+#   token-check [目录…]           只读：先核对 secrets.json 的 claudeRouterToken 与 profile 里的令牌相同（只比不打印；
+#                                  缺失、读不了、不一致都算失败），
+#                                  再拿令牌去搜 settings.json、路由日志、Claude 路由清单、$LAB 下的抓包与代理记录（及另给的目录），
+#                                  只报每处「搜到 / 没搜到」，不打印令牌；<数据目录>/backups/ 单列（改写前备份，交给人判断）
 #   sim-phase restoring            Sophia 退出时，把 settings.json 里 Claude 的记录改成「切回没做完」（enabled=false、
 #                                  applied.phase=restoring），模拟切回写到一半 Sophia 没了；改前整份另存一份
 #
 # 路径都能换，自测时指向临时目录：
-#   SOPHIA_LAB_DATA_DIR    Sophia 数据目录，默认 ~/Library/Application Support/SymSync
+#   SOPHIA_LAB_DATA_DIR    Sophia 数据目录，默认 ~/Library/Application Support/Sophia（不随包 id 变）
 #   SOPHIA_LAB_CODEX_HOME  默认 ${CODEX_HOME}，没有则 ~/.codex
-#   SOPHIA_LAB_AGENTS_DIR  默认 ~/Library/LaunchAgents
+#   SOPHIA_LAB_AGENTS_DIR  默认 ~/Library/LaunchAgents（只用来看旧版 launchd 服务的残留）
 #   SOPHIA_LAB_APP         被测包，默认本仓库 target/debug/bundle/macos/Sophia.app
-#   SOPHIA_LAB_KEYCHAIN=0  不查钥匙串（自测用）
+#   SOPHIA_LAB_BUNDLE_ID   被测包的包 id，默认读被测包的 Info.plist（读不到按 com.zhengjiaqiao.sophia）。
+#                          本轮用 --config '{"identifier":"com.zhengjiaqiao.sophia.diagtest"}' 构建，就是 com.zhengjiaqiao.sophia.diagtest；
+#                          安装版 com.zhengjiaqiao.sophia，make dev / make build 是 com.zhengjiaqiao.sophia.dev
 #   CLAUDE_LAB_BASE / CLAUDE_LAB_STATE_DIR 同 lib.sh
 # Sophia「没在跑」的检查只在上面几个目录都是真目录时才生效；自测时（指向临时目录）跳过。
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-SOPHIA_BUNDLE_ID=com.zhengjiaqiao.symsync
-SERVICE_LABEL=com.zhengjiaqiao.symsync.gateway
+# 旧版 launchd 路由服务的标签（crates/gateway/src/app/mod.rs SERVICE_LABEL）：新版只卸它，不再装
+LEGACY_SERVICE_LABEL=com.zhengjiaqiao.sophia.gateway
 SOPHIA_ID=00000000-0000-4000-8000-736f70686961
-REAL_DATA_DIR="$HOME/Library/Application Support/SymSync"
+REAL_DATA_DIR="$HOME/Library/Application Support/Sophia"
 DATA_DIR="${SOPHIA_LAB_DATA_DIR:-$REAL_DATA_DIR}"
 CODEX_DIR="${SOPHIA_LAB_CODEX_HOME:-${CODEX_HOME:-$HOME/.codex}}"
 AGENTS_DIR="${SOPHIA_LAB_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 SOPHIA_APP="${SOPHIA_LAB_APP:-$(cd "$LAB_SCRIPT_DIR/../.." && pwd)/target/debug/bundle/macos/Sophia.app}"
-PLIST="$AGENTS_DIR/$SERVICE_LABEL.plist"
+SOPHIA_EXE=Sophia   # mainBinaryName（src-tauri/tauri.conf.json）
+bundle_id_of() { /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$1/Contents/Info.plist" 2>/dev/null; }
+SOPHIA_BUNDLE_ID="${SOPHIA_LAB_BUNDLE_ID:-$(bundle_id_of "$SOPHIA_APP" || true)}"
+SOPHIA_BUNDLE_ID="${SOPHIA_BUNDLE_ID:-com.zhengjiaqiao.sophia}"
+LEGACY_PLIST="$AGENTS_DIR/$LEGACY_SERVICE_LABEL.plist"
 EVIDENCE="$LAB_STATE_DIR/evidence"
-KEYCHAIN="${SOPHIA_LAB_KEYCHAIN:-1}"
 
 sophia_is_real() {
   [ -z "${SOPHIA_LAB_DATA_DIR:-}" ] || same_path "$DATA_DIR" "$REAL_DATA_DIR"
 }
 
-# Sophia 界面进程：可执行文件以 /Contents/MacOS/symsync 结尾、第一个参数不是 gateway（那是命令行或路由）。
-# 每行「pid<TAB>可执行文件路径」。只读
+# Sophia 界面进程：可执行文件以 /Contents/MacOS/Sophia 结尾、第一个参数不是 gateway（那是命令行）。
+# 路由在界面进程里，没有单独的进程。每行「pid<TAB>可执行文件路径」。只读
 sophia_gui_procs() {
   ps -axo pid=,comm= 2>/dev/null | while read -r pid comm; do
     case "$comm" in
-      */Contents/MacOS/symsync)
+      */Contents/MacOS/"$SOPHIA_EXE")
         case "$(ps -o args= -p "$pid" 2>/dev/null)" in
-          *"/Contents/MacOS/symsync gateway"*) ;;
+          *"/Contents/MacOS/$SOPHIA_EXE gateway"*) ;;
           *) printf '%s\t%s\n' "$pid" "$comm" ;;
         esac ;;
     esac
   done
 }
+
+# 可执行文件路径 → 它所在 .app 的包 id（读不到为空）
+exe_bundle_id() { bundle_id_of "${1%/Contents/MacOS/*}"; }
 
 require_sophia_quit() {
   if ! sophia_is_real; then
@@ -95,23 +121,24 @@ except Exception:
 PY
 }
 
-keychain_names() {
-  [ "$KEYCHAIN" = 1 ] || { echo "（没查：SOPHIA_LAB_KEYCHAIN=0）"; return 0; }
-  # dump-keychain 不带 -d 只列属性，不读密钥值；这里只挑出 service 为 symsync 的条目的账户名
-  security dump-keychain 2>/dev/null | python3 -c '
-import re, sys
-names, block = set(), []
-def flush(b):
-    t = "\n".join(b)
-    if re.search(r"\"svce\"<blob>=\"symsync\"", t):
-        m = re.search(r"\"acct\"<blob>=\"([^\"]*)\"", t)
-        names.add(m.group(1) if m else "（无账户名）")
-for line in sys.stdin:
-    if line.startswith("keychain:"):
-        flush(block); block = []
-    block.append(line.rstrip("\n"))
-flush(block)
-print("\n".join(sorted(names)) if names else "（没有 symsync 条目）")'
+secrets_summary() {
+  local f="$DATA_DIR/secrets.json"
+  [ -e "$f" ] || { echo "不存在"; return 0; }
+  local mode
+  mode="$(stat -f '%Sp' "$f")"
+  if [ "$mode" = "-rw-------" ]; then echo "权限 $mode"; else echo "权限 $mode ！应为 -rw-------（0600）"; fi
+  python3 - "$f" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"读不了：{e}")
+    sys.exit(0)
+print(f"version {d.get('version')}")
+for agent, keys in sorted((d.get("providers") or {}).items()):
+    print(f"{agent}：{', '.join(sorted(keys)) or '（没有）'}")
+print("Claude 网关令牌：" + ("有" if d.get("claudeRouterToken") else "没有"))
+PY
 }
 
 cmd_app() {
@@ -124,7 +151,7 @@ cmd_app() {
     esac
   done
   local tested
-  tested="$(cd "$SOPHIA_APP/Contents/MacOS" 2>/dev/null && pwd -P)/symsync"
+  tested="$(cd "$SOPHIA_APP/Contents/MacOS" 2>/dev/null && pwd -P)/$SOPHIA_EXE"
   case "$sub" in
     status)
       step "Sophia 界面进程"
@@ -134,34 +161,45 @@ cmd_app() {
       printf '%s\n' "$p" | while IFS="$(printf '\t')" read -r pid exe; do
         [ -n "$pid" ] || continue
         local real tag
-        real="$(cd "$(dirname "$exe")" 2>/dev/null && pwd -P)/symsync"
+        real="$(cd "$(dirname "$exe")" 2>/dev/null && pwd -P)/$SOPHIA_EXE"
         if [ "$real" = "$tested" ]; then tag="被测包"; else tag="别的包！"; fi
-        info "pid $pid  $exe  （${tag}）"
+        info "pid $pid  $exe  包 id $(exe_bundle_id "$exe")  （${tag}）"
       done
-      info "被测包：$SOPHIA_APP"
+      info "被测包：${SOPHIA_APP}（包 id ${SOPHIA_BUNDLE_ID}）"
       ;;
     quit)
-      step "让所有 Sophia 界面进程退出（Apple 事件 quit，等于 ⌘Q；不 kill）"
-      local round=0 n
+      step "让所有 Sophia 界面进程退出（按各自的包 id 发 Apple 事件 quit，同从 Dock 退出；不 kill）"
+      info "这条路不弹确认框：Codex 设置会被改回原样（不重启 Codex），Claude 不动（spec 2026-10-03-gateway-in-app R10）"
+      local round=0 n ids id
       while [ -n "$(sophia_gui_procs)" ] && [ "$round" -lt 6 ]; do
         round=$((round + 1))
-        osascript -e "tell application id \"$SOPHIA_BUNDLE_ID\" to quit" >/dev/null 2>&1 \
-          || warn "osascript 发退出请求失败（没给「控制 Sophia」的授权？）"
+        # 安装版、开发版、本轮的 diagtest 包 id 各不相同：逐个按在跑的那几个包 id 发
+        ids="$(sophia_gui_procs | while IFS="$(printf '\t')" read -r _ exe; do exe_bundle_id "$exe"; echo; done | sed '/^$/d' | sort -u)"
+        # 读不到包 id 时不按缺省包 id 发：给没在跑的包 id 发 quit 会先把它拉起来
+        [ -n "$ids" ] || { warn "读不到在跑的 Sophia 的包 id，没发退出请求"; break; }
+        for id in $ids; do
+          info "退出 $id"
+          osascript -e "tell application id \"$id\" to quit" >/dev/null 2>&1 \
+            || warn "osascript 给 $id 发退出请求失败（没给「控制 Sophia」的授权？）"
+        done
         n=0
         while [ -n "$(sophia_gui_procs)" ] && [ "$n" -lt "$wait" ]; do sleep 1; n=$((n + 1)); done
       done
       if [ -n "$(sophia_gui_procs)" ]; then
         sophia_gui_procs | sed 's/^/    /'
-        die "还有 Sophia 没退出。请人点它托盘面板里的「退出」（或切到它按 ⌘Q），不要 kill。"
+        die "还有 Sophia 没退出。请人在 Dock 上右键它选「退出」（同样不弹框）；托盘「退出」与 ⌘Q 会弹确认框，确认后还会重启 Codex 与 Claude，由人决定。不要 kill。"
       fi
       info "Sophia 都已退出。"
       ;;
     open)
       step "打开被测的 Sophia：$SOPHIA_APP"
-      [ -x "$SOPHIA_APP/Contents/MacOS/symsync" ] || die "找不到被测包的可执行文件：$SOPHIA_APP/Contents/MacOS/symsync"
+      [ -x "$SOPHIA_APP/Contents/MacOS/$SOPHIA_EXE" ] || die "找不到被测包的可执行文件：$SOPHIA_APP/Contents/MacOS/$SOPHIA_EXE"
+      local got_id
+      got_id="$(bundle_id_of "$SOPHIA_APP")"
+      [ "$got_id" = "$SOPHIA_BUNDLE_ID" ] || die "被测包的包 id 是 ${got_id:-（读不到）}，不是 SOPHIA_LAB_BUNDLE_ID 说的 ${SOPHIA_BUNDLE_ID}。"
       if [ -n "$(sophia_gui_procs)" ]; then
         sophia_gui_procs | sed 's/^/    /'
-        die "已有 Sophia 在跑。同一个包 id 下 open 可能只是把它调到前台，先 app quit。"
+        die "已有 Sophia 在跑（单实例：同包 id 时 open 只会把它调到前台；别的包 id 会和它抢路由端口与同一个数据目录），先 app quit。"
       fi
       open "$SOPHIA_APP" || die "open 失败。"
       local n=0
@@ -173,11 +211,11 @@ cmd_app() {
       count="$(printf '%s\n' "$p" | wc -l | tr -d ' ')"
       printf '%s\n' "$p" | while IFS="$(printf '\t')" read -r pid exe; do info "pid $pid  $exe"; done
       while IFS="$(printf '\t')" read -r _ exe; do
-        real="$(cd "$(dirname "$exe")" 2>/dev/null && pwd -P)/symsync"
+        real="$(cd "$(dirname "$exe")" 2>/dev/null && pwd -P)/$SOPHIA_EXE"
         [ "$real" = "$tested" ] || bad=1
       done <<< "$p"
       [ "$count" = 1 ] && [ "$bad" = 0 ] || die "跑起来的不是（只有）被测包。先 app quit，交给人看。"
-      info "在跑的就是被测包（约 $n 秒）。"
+      info "在跑的就是被测包（包 id ${SOPHIA_BUNDLE_ID}，约 $n 秒）。"
       ;;
     *) die "app 只认 status / quit / open" ;;
   esac
@@ -194,17 +232,17 @@ cmd_status() {
   cmd_app status
   local port
   port="$(router_port)"
-  step "路由服务（端口 ${port}）"
-  if [ -e "$PLIST" ]; then info "plist 在：$PLIST"; else info "plist 不在：$PLIST"; fi
-  local lc
-  lc="$(launchctl print "gui/$(id -u)/$SERVICE_LABEL" 2>&1)"
-  if printf '%s' "$lc" | grep -q 'state = '; then
-    info "launchd：已加载；$(printf '%s\n' "$lc" | grep -E '^\s*(state|pid) = ' | tr -s ' \t' ' ' | tr '\n' ';')"
-    info "程序：$(printf '%s\n' "$lc" | grep -E '^\s*program = ' | sed 's/^[[:space:]]*//')"
-  else
-    info "launchd：没加载（${SERVICE_LABEL}）"
-  fi
+  step "路由（端口 ${port}；在 Sophia 界面进程里，Sophia 开着且有一家开着才有）"
   info "/_health：$(curl -sS -m 3 "http://127.0.0.1:$port/_health" 2>&1 | head -c 200)"
+  info "端口上在听的进程：$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 { print $1 "(pid " $2 ")" }' | sort -u | tr '\n' ' ')"
+  # 旧版留下的 launchd 服务（迁移后应当都不在；在就说明这台机器上旧版的服务还没被新版卸掉）
+  if [ -e "$LEGACY_PLIST" ]; then info "！旧版 plist 还在：$LEGACY_PLIST"; else info "旧版 plist 不在（正常）"; fi
+  if launchctl print "gui/$(id -u)/$LEGACY_SERVICE_LABEL" >/dev/null 2>&1; then
+    info "！旧版 launchd 服务 $LEGACY_SERVICE_LABEL 还加载着"
+  else
+    info "旧版 launchd 服务没加载（正常）"
+  fi
+  [ -e "$DATA_DIR/bin" ] && info "！旧版程序副本 $DATA_DIR/bin 还在"
   python3 - "$DATA_DIR" "$CODEX_DIR" "$LAB_BASE" "$SOPHIA_ID" <<'PY'
 import hashlib, json, os, stat, sys
 data, codex, base, sid = sys.argv[1:]
@@ -219,12 +257,16 @@ cfg = os.path.join(codex, "config.toml")
 p(f"config.toml sha256:{sha(cfg)}")
 try:
     lines = open(cfg, encoding="utf-8", errors="replace").read().splitlines()
-    hits = [l.strip() for l in lines if "symsync" in l and not any(k in l.lower() for k in ("key", "token", "secret"))]
-    p("含 symsync 的行：" + ("；".join(hits[:6]) if hits else "没有（Codex 没指向路由）"))
+    # Sophia 写的：根键 model_catalog_json、openai_base_url；独立服务商接法再加 model_provider = "sophia" 与 [model_providers.sophia]
+    ours = ("model_catalog_json", "openai_base_url", "model_provider", "[model_providers.sophia]")
+    hits = [l.strip() for l in lines
+            if (l.strip().startswith(ours) or ("127.0.0.1" in l and "base_url" in l))
+            and not any(k in l.lower() for k in ("key", "token", "secret"))]
+    p("Sophia 写的那几行：" + ("；".join(hits[:8]) if hits else "没有（Codex 没指向路由）"))
 except FileNotFoundError:
     pass
-extra = sorted(f for f in os.listdir(codex) if f.startswith("symsync-") or f.startswith("config.models")) if os.path.isdir(codex) else []
-p("symsync-* / config.models*：" + ("、".join(f"{f}({sha(os.path.join(codex, f))})" for f in extra) if extra else "没有"))
+extra = sorted(f for f in os.listdir(codex) if f.startswith("sophia-")) if os.path.isdir(codex) else []
+p("sophia-*：" + ("、".join(f"{f}({sha(os.path.join(codex, f))})" for f in extra) if extra else "没有"))
 
 print("\n\033[1m==> Sophia 设置里的两家网关（不含密钥）\033[0m")
 try:
@@ -238,10 +280,11 @@ for fam in ("codexGateway", "claudeGateway"):
         p(f"{fam}：没有"); continue
     canon = hashlib.sha256(json.dumps(g, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
     extra = ""
+    if fam == "codexGateway":
+        extra = f"；enabled={g.get('enabled')} port={g.get('port')} mode={g.get('mode', 'builtin')}"
     if fam == "claudeGateway":
         a = g.get("applied")
-        extra = (f"；enabled={g.get('enabled')} takeover={g.get('takeover')} defaultModel={g.get('defaultModel')} "
-                 f"backgroundModel={g.get('backgroundModel')} applied="
+        extra = (f"；enabled={g.get('enabled')} takeover={g.get('takeover')} applied="
                  + ("无" if not a else f"phase={a.get('phase')} originals={json.dumps(a.get('originals'), ensure_ascii=False)}"))
     p(f"{fam}：整段指纹 {canon}{extra}")
     for pr in g.get("providers") or []:
@@ -275,11 +318,28 @@ for label, path in files:
 if os.path.isdir(lib):
     others = sorted(f for f in os.listdir(lib) if f not in ("_meta.json", sid + ".json"))
     p("configLibrary 里其余文件：" + ("、".join(others) if others else "没有"))
-baks = []
+
+print("\n\033[1m==> Sophia 改写前备份（<数据目录>/backups/<名>-<哈希>/<序号>-<后缀>.bak；Claude 的是 -sophia-models，Codex 的是 -models）\033[0m")
+broot = os.path.join(data, "backups")
+rows = []
+if os.path.isdir(broot):
+    for d in sorted(os.listdir(broot)):
+        dp = os.path.join(broot, d)
+        try:
+            src = open(os.path.join(dp, "source"), encoding="utf-8").read().strip()
+        except Exception:
+            continue
+        if not (src.startswith(os.path.realpath(base)) or src.startswith(os.path.realpath(codex))):
+            continue
+        baks = sorted(f for f in os.listdir(dp) if f.endswith(".bak"))
+        rows.append(f"{src} ← {len(baks)} 份，最新 {baks[-1] if baks else '（无）'}")
+p("；\n    ".join(rows) if rows else "没有 Claude / Codex 文件的备份")
+# 更早的版本把备份写在原文件旁边（<名>.sophia-models[.N].bak），现在不再写；有就是旧残留
+old = []
 for d in (os.path.join(base, "Claude"), os.path.join(base, "Claude-3p"), lib):
     if os.path.isdir(d):
-        baks += [os.path.join(os.path.basename(d), f) for f in os.listdir(d) if ".sophia-models" in f]
-p("Sophia 留下的 .sophia-models*.bak：" + ("、".join(sorted(baks)) if baks else "没有"))
+        old += [os.path.join(os.path.basename(d), f) for f in os.listdir(d) if ".sophia-models" in f]
+p("旧版写在原文件旁边的 .sophia-models*.bak（残留）：" + ("、".join(sorted(old)) if old else "没有"))
 
 print("\n\033[1m==> Claude 路由清单（Sophia 写的；不含密钥）\033[0m")
 cr = os.path.join(data, "gateway", "claude-routing.json")
@@ -294,8 +354,8 @@ except FileNotFoundError:
 except Exception as e:
     p(f"读不了：{e}")
 PY
-  step "钥匙串里 service=symsync 的条目（只列账户名）"
-  keychain_names | sed 's/^/    /'
+  step "密钥文件 $DATA_DIR/secrets.json（只列权限与有哪几项，不显示密钥与令牌）"
+  secrets_summary | sed 's/^/    /'
   if [ "$lines" != 0 ]; then
     step "路由日志最后 $lines 行（$DATA_DIR/gateway-logs/router.log；只有时间、家、模型、路径、状态）"
     tail -n "$lines" "$DATA_DIR/gateway-logs/router.log" 2>/dev/null | sed 's/^/    /' || info "没有路由日志"
@@ -376,6 +436,43 @@ print(f"    configLibrary：{a.get('configLibrary')} → {b.get('configLibrary')
 PY
 }
 
+# 基线里每一项「备份时在不在」都明确记在 presence.txt（<键><TAB>present|absent）；恢复只认这份记录：
+# 记 present → 放回；记 absent → 现在多出来的挪开；没记 → 不动并中止（不把「备份里没有」当成「原来没有」）
+presence_of() {
+  awk -F '\t' -v k="$2" '$1 == k { print $2; found = 1 } END { if (!found) print "unknown" }' "$1/presence.txt" 2>/dev/null || echo unknown
+}
+
+# backup 用：记一条在不在
+record() { printf '%s\t%s\n' "$1" "$2" >> "$BK_DEST/presence.txt" || die "写不了 $BK_DEST/presence.txt，备份不完整，没有写基线。"; }
+
+# backup 用：有就复制并逐字节核对、记 present；没有就记 absent；存在却不是普通文件、读不了、复制失败 → 中止，不写基线
+backup_file() {
+  local src="$1" dst="$2" key="$3"
+  if [ -f "$src" ]; then
+    cp -p "$src" "$dst" || die "复制 $src 失败：备份不完整，没有写基线（$BK_DEST 留着，交给人看）。"
+    cmp -s "$src" "$dst" || die "$dst 与原文件不一致：备份不完整，没有写基线。"
+    record "$key" present
+  elif [ -e "$src" ] || [ -L "$src" ]; then
+    die "$src 存在但不是普通文件（或是坏软链）：不知道怎么备份，没有写基线。"
+  else
+    record "$key" absent
+  fi
+}
+
+# backup 用：目录版
+backup_dir() {
+  local src="$1" dst="$2" key="$3"
+  if [ -d "$src" ] && [ ! -L "$src" ]; then
+    cp -Rp "$src" "$dst" || die "复制 $src 失败：备份不完整，没有写基线（$BK_DEST 留着，交给人看）。"
+    diff -r "$src" "$dst" >/dev/null 2>&1 || die "$dst 与原目录不一致：备份不完整，没有写基线。"
+    record "$key" present
+  elif [ -e "$src" ] || [ -L "$src" ]; then
+    die "$src 存在但不是普通目录：不知道怎么备份，没有写基线。"
+  else
+    record "$key" absent
+  fi
+}
+
 cmd_backup() {
   require_sophia_quit
   local stamp dest
@@ -384,29 +481,58 @@ cmd_backup() {
   if lab_in_icloud "$LAB_STATE_DIR"; then die "$LAB_STATE_DIR 在 iCloud 同步目录里，不要把备份放这里。"; fi
   [ -e "$dest" ] && die "$dest 已存在，过一秒再试。"
   mkdir -p "$LAB_STATE_DIR/sophia-backups" && mkdir -m 700 "$dest" || die "建不了 $dest"
+  BK_DEST="$dest"
   step "备份 Sophia 这一侧 → $dest"
-  mkdir -p "$dest/codex" "$dest/symsync" "$dest/launchagents" "$dest/claude4"
-  local f
-  for f in "$CODEX_DIR"/config.toml "$CODEX_DIR"/config.models*.bak "$CODEX_DIR"/symsync-*; do
-    [ -f "$f" ] && cp -p "$f" "$dest/codex/" && info "~/.codex/$(basename "$f")"
+  mkdir -p "$dest/codex" "$dest/sophia" "$dest/claude4" || die "建不了 $dest 下的子目录"
+  : > "$dest/presence.txt" || die "写不了 $dest/presence.txt"
+  local f name
+  backup_file "$CODEX_DIR/config.toml" "$dest/codex/config.toml" codex/config.toml && info "~/.codex/config.toml：$(presence_of "$dest" codex/config.toml)"
+  for f in "$CODEX_DIR"/sophia-*; do
+    { [ -e "$f" ] || [ -L "$f" ]; } || continue
+    name="$(basename "$f")"
+    backup_file "$f" "$dest/codex/$name" "codex/$name" && info "~/.codex/$name"
   done
-  [ -f "$DATA_DIR/settings.json" ] && cp -p "$DATA_DIR/settings.json" "$dest/symsync/" && info "settings.json"
-  [ -d "$DATA_DIR/bin" ] && cp -Rp "$DATA_DIR/bin" "$dest/symsync/bin" && info "bin/"
-  [ -d "$DATA_DIR/gateway" ] && cp -Rp "$DATA_DIR/gateway" "$dest/symsync/gateway" && info "gateway/"
-  [ -f "$PLIST" ] && cp -p "$PLIST" "$dest/launchagents/" && info "$(basename "$PLIST")"
-  [ -f "$PLIST" ] || info "路由服务的 plist 不存在（备份时没装路由）"
+  # sophia-* 的清单是完整的：恢复时不在清单里的 sophia-* 才敢挪开
+  record "codex/sophia-*" listed
+  backup_file "$DATA_DIR/settings.json" "$dest/sophia/settings.json" sophia/settings.json
+  info "settings.json：$(presence_of "$dest" sophia/settings.json)"
+  # 含服务商密钥与 Claude 网关令牌：cp -p 保留 0600，备份目录本身 0700；不存在也明确记下
+  backup_file "$DATA_DIR/secrets.json" "$dest/sophia/secrets.json" sophia/secrets.json
+  if [ "$(presence_of "$dest" sophia/secrets.json)" = present ]; then
+    chmod 600 "$dest/sophia/secrets.json" || die "收紧不了 $dest/sophia/secrets.json 的权限"
+    info "secrets.json：present（$(stat -f '%Sp' "$DATA_DIR/secrets.json")，含密钥，不要外发）"
+  else
+    info "secrets.json：absent（备份时没有任何密钥与令牌）"
+  fi
+  backup_dir "$DATA_DIR/gateway" "$dest/sophia/gateway" sophia/gateway
+  info "gateway/：$(presence_of "$dest" sophia/gateway)"
+  # 改写前备份只记清单（不放回、不比字节）：Sophia 每次改写 Claude / Codex 文件都会往里加
+  if [ -d "$DATA_DIR/backups" ]; then
+    (cd "$DATA_DIR/backups" && find . -type f | sort) > "$dest/sophia/backups-list.txt" || die "列不出 $DATA_DIR/backups"
+    info "backups/ 文件清单（$(wc -l < "$dest/sophia/backups-list.txt" | tr -d ' ') 个）"
+  else
+    : > "$dest/sophia/backups-list.txt" || die "写不了 backups-list.txt"
+  fi
+  [ -e "$LEGACY_PLIST" ] && warn "旧版 launchd 服务的 plist 还在（${LEGACY_PLIST}）：新版打开时会卸掉它，恢复时放不回来。先交给人。"
+  [ -e "$DATA_DIR/bin" ] && warn "旧版程序副本 $DATA_DIR/bin 还在：新版打开时会删掉它，恢复时放不回来。先交给人。"
   local lib="$LAB_BASE/Claude-3p/configLibrary"
-  [ -f "$LAB_BASE/Claude/claude_desktop_config.json" ] && cp -p "$LAB_BASE/Claude/claude_desktop_config.json" "$dest/claude4/config-1p.json"
-  [ -f "$LAB_BASE/Claude-3p/claude_desktop_config.json" ] && cp -p "$LAB_BASE/Claude-3p/claude_desktop_config.json" "$dest/claude4/config-3p.json"
-  [ -f "$lib/_meta.json" ] && cp -p "$lib/_meta.json" "$dest/claude4/meta.json"
-  [ -d "$lib" ] && ls -1 "$lib" > "$dest/claude4/configLibrary.txt"
+  backup_file "$LAB_BASE/Claude/claude_desktop_config.json" "$dest/claude4/config-1p.json" claude4/config-1p.json
+  backup_file "$LAB_BASE/Claude-3p/claude_desktop_config.json" "$dest/claude4/config-3p.json" claude4/config-3p.json
+  backup_file "$lib/_meta.json" "$dest/claude4/meta.json" claude4/meta.json
+  if [ -d "$lib" ]; then
+    ls -1 "$lib" > "$dest/claude4/configLibrary.txt" || die "列不出 $lib"
+    record claude4/configLibrary present
+  else
+    : > "$dest/claude4/configLibrary.txt" || die "写不了 configLibrary.txt"
+    record claude4/configLibrary absent
+  fi
   [ -f "$lib/$SOPHIA_ID.json" ] && warn "备份时 configLibrary 里已经有 Sophia 的 profile（不是干净的基线？）"
   info "Claude 的三个文件与 configLibrary 清单"
-  launchctl print "gui/$(id -u)/$SERVICE_LABEL" >/dev/null 2>&1 && echo loaded > "$dest/router-loaded" || echo not-loaded > "$dest/router-loaded"
-  keychain_names > "$dest/keychain-accounts.txt"
-  info "钥匙串 symsync 条目名：$(tr '\n' ' ' < "$dest/keychain-accounts.txt")"
-  (cd "$dest" && find . -type f ! -name manifest.txt -exec shasum -a 256 {} + | sort -k2) > "$dest/manifest.txt"
-  echo "$dest" > "$LAB_STATE_DIR/SOPHIA_BASELINE"
+  (cd "$dest" && find . -type f ! -name manifest.txt -exec shasum -a 256 {} + | sort -k2) > "$dest/manifest.txt" \
+    || die "写不了 $dest/manifest.txt，没有写基线。"
+  # 最后才标完整、写基线：前面任何一步中止，SOPHIA_BASELINE 都还指着上一份（或没有）
+  date '+%Y-%m-%d %H:%M:%S' > "$dest/COMPLETE" || die "写不了 $dest/COMPLETE，没有写基线。"
+  echo "$dest" > "$LAB_STATE_DIR/SOPHIA_BASELINE" || die "写不了 $LAB_STATE_DIR/SOPHIA_BASELINE"
   step "完成：${dest}（路径已写进 $LAB_STATE_DIR/SOPHIA_BASELINE）"
 }
 
@@ -414,6 +540,7 @@ baseline_dir() {
   local d="${1:-}"
   [ -n "$d" ] || d="$(cat "$LAB_STATE_DIR/SOPHIA_BASELINE" 2>/dev/null || true)"
   [ -n "$d" ] && [ -d "$d" ] || die "找不到 Sophia 这一侧的备份（$LAB_STATE_DIR/SOPHIA_BASELINE）。"
+  [ -f "$d/COMPLETE" ] && [ -f "$d/presence.txt" ] || die "$d 不是完整的备份（没有 COMPLETE / presence.txt：备份中途失败，或是旧格式）。不要拿它恢复，交给人。"
   printf '%s' "$d"
 }
 
@@ -421,9 +548,9 @@ cmd_compare() {
   local bk
   bk="$(baseline_dir "${1:-}")" || exit 1
   step "现在 vs 备份 $bk"
-  python3 - "$bk" "$CODEX_DIR" "$DATA_DIR" "$PLIST" "$LAB_BASE" "$SOPHIA_ID" <<'PY'
+  python3 - "$bk" "$CODEX_DIR" "$DATA_DIR" "$LAB_BASE" "$SOPHIA_ID" <<'PY'
 import filecmp, glob, json, os, sys
-bk, codex, data, plist, base, sid = sys.argv[1:]
+bk, codex, data, base, sid = sys.argv[1:]
 bad = 0
 def p(s): print("    " + s)
 def same(a, b):
@@ -431,14 +558,14 @@ def same(a, b):
     if not ea and not eb: return "两边都没有"
     if ea != eb: return "备份有、现在没有" if ea else "备份没有、现在有"
     return "字节相同" if filecmp.cmp(a, b, shallow=False) else "不同"
-now_codex = {os.path.basename(f) for f in glob.glob(os.path.join(codex, "config.toml")) + glob.glob(os.path.join(codex, "config.models*.bak")) + glob.glob(os.path.join(codex, "symsync-*"))}
+now_codex = {os.path.basename(f) for f in glob.glob(os.path.join(codex, "config.toml")) + glob.glob(os.path.join(codex, "sophia-*"))}
 bak_codex = set(os.listdir(os.path.join(bk, "codex")))
 for name in sorted(now_codex | bak_codex):
     r = same(os.path.join(bk, "codex", name), os.path.join(codex, name))
     bad += r != "字节相同"
     p(f"~/.codex/{name}：{r}")
 try:
-    a = json.load(open(os.path.join(bk, "symsync", "settings.json")))
+    a = json.load(open(os.path.join(bk, "sophia", "settings.json")))
     b = json.load(open(os.path.join(data, "settings.json")))
     for fam in ("codexGateway", "claudeGateway"):
         ga, gb = a.get(fam), b.get(fam)
@@ -453,18 +580,52 @@ try:
 except Exception as e:
     bad += 1
     p(f"settings.json 比不了：{e}")
-for sub in ("bin", "gateway"):
-    names = set()
-    for root in (os.path.join(bk, "symsync", sub), os.path.join(data, sub)):
-        if os.path.isdir(root):
-            names |= {os.path.relpath(os.path.join(dp, f), root) for dp, _, fs in os.walk(root) for f in fs}
-    for n in sorted(names):
-        r = same(os.path.join(bk, "symsync", sub, n), os.path.join(data, sub, n))
-        bad += r not in ("字节相同",)
-        p(f"SymSync/{sub}/{n}：{r}")
-r = same(os.path.join(bk, "launchagents", os.path.basename(plist)), plist)
+# secrets.json：比字节；不同时只说哪几项变了（不显示值）
+sa, sb = os.path.join(bk, "sophia", "secrets.json"), os.path.join(data, "secrets.json")
+r = same(sa, sb)
 bad += r not in ("字节相同", "两边都没有")
-p(f"路由服务 plist：{r}")
+note = ""
+def items(path):
+    try:
+        d = json.load(open(path))
+    except Exception:
+        return None
+    out = {f"{agent}/{k}": v for agent, keys in (d.get("providers") or {}).items() for k, v in (keys or {}).items()}
+    if d.get("claudeRouterToken"):
+        out["claudeRouterToken"] = d["claudeRouterToken"]
+    return out
+if r == "不同":
+    ia, ib = items(sa), items(sb)
+    if ia is None or ib is None:
+        note = "（有一边读不了）"
+    else:
+        added = sorted(set(ib) - set(ia)); gone = sorted(set(ia) - set(ib))
+        changed = sorted(k for k in set(ia) & set(ib) if ia[k] != ib[k])
+        note = f"（多了 {added or '无'}；少了 {gone or '无'}；值变了 {changed or '无'}）"
+if os.path.exists(sb):
+    mode = oct(os.stat(sb).st_mode & 0o777)
+    if mode != "0o600":
+        bad += 1
+        note += f"（！现在权限 {mode}，应为 0o600）"
+p(f"Sophia/secrets.json：{r}{note}")
+names = set()
+for root in (os.path.join(bk, "sophia", "gateway"), os.path.join(data, "gateway")):
+    if os.path.isdir(root):
+        names |= {os.path.relpath(os.path.join(dp, f), root) for dp, _, fs in os.walk(root) for f in fs}
+for n in sorted(names):
+    r = same(os.path.join(bk, "sophia", "gateway", n), os.path.join(data, "gateway", n))
+    bad += r != "字节相同"
+    p(f"Sophia/gateway/{n}：{r}")
+try:
+    before = set(open(os.path.join(bk, "sophia", "backups-list.txt")).read().split())
+except FileNotFoundError:
+    before = set()
+broot = os.path.join(data, "backups")
+now = set()
+if os.path.isdir(broot):
+    now = {"./" + os.path.relpath(os.path.join(dp, f), broot) for dp, _, fs in os.walk(broot) for f in fs}
+new = sorted(now - before)
+p(f"Sophia/backups/ 新增（Sophia 改写前备份，只列出不计入，不会被 restore 动）：{len(new)} 个" + ("：" + "、".join(new[:8]) if new else ""))
 lib = os.path.join(base, "Claude-3p", "configLibrary")
 for name, path in (("config-1p.json", os.path.join(base, "Claude", "claude_desktop_config.json")),
                    ("config-3p.json", os.path.join(base, "Claude-3p", "claude_desktop_config.json")),
@@ -483,31 +644,79 @@ for name, path in (("config-1p.json", os.path.join(base, "Claude", "claude_deskt
     bad += r not in ("字节相同", "两边都没有") and not (note.startswith("（deploymentMode 相同"))
     p(f"Claude {name}：{r}{note}")
 try:
-    before = open(os.path.join(bk, "claude4", "configLibrary.txt")).read().split()
+    before = sorted(open(os.path.join(bk, "claude4", "configLibrary.txt")).read().split())
 except FileNotFoundError:
-    before = []
+    before = None
 now = sorted(os.listdir(lib)) if os.path.isdir(lib) else []
-p(f"configLibrary：备份 {before} → 现在 {now}")
+if before is None:
+    bad += 1
+    p(f"configLibrary：备份里没有清单（不完整的备份），现在 {now}")
+elif before != now:
+    bad += 1
+    p(f"configLibrary：不同（多了 {sorted(set(now) - set(before)) or '无'}；少了 {sorted(set(before) - set(now)) or '无'}）")
+else:
+    p(f"configLibrary：相同 {now}")
 print(f"\n==> {'关键项都与备份一致' if bad == 0 else f'有 {bad} 处与备份不一致（见上）'}")
+sys.exit(1 if bad else 0)
 PY
-  local now
-  now="$(keychain_names)"
-  if [ "$now" = "$(cat "$bk/keychain-accounts.txt")" ]; then
-    info "钥匙串 symsync 条目名：与备份相同"
+  local rc=$?
+  if [ -e "$LEGACY_PLIST" ] || launchctl print "gui/$(id -u)/$LEGACY_SERVICE_LABEL" >/dev/null 2>&1; then
+    info "！旧版 launchd 路由服务（${LEGACY_SERVICE_LABEL}）现在还在"
   else
-    info "钥匙串 symsync 条目名：备份 [$(tr '\n' ' ' < "$bk/keychain-accounts.txt")] → 现在 [$(printf '%s' "$now" | tr '\n' ' ')]"
+    info "旧版 launchd 路由服务：不在（正常）"
   fi
-  if launchctl print "gui/$(id -u)/$SERVICE_LABEL" >/dev/null 2>&1; then info "路由服务：现在已加载（备份时 $(cat "$bk/router-loaded")）"; else info "路由服务：现在没加载（备份时 $(cat "$bk/router-loaded")）"; fi
+  return "$rc"
 }
 
-# 把现在的 <路径> 挪到 $LAB/aside/restore-<时间>/<分组>/<名字>（不删；不留在原目录里，免得又被 symsync-* 之类的名字匹配到）
+# 把现在的 <路径> 挪到 $LAB/aside/restore-<时间>/<分组>/<名字>（不删；不留在原目录里，免得又被 sophia-* 之类的名字匹配到）。
+# 先在恢复日志里登记「打算把 X 挪到 Y」，再挪（见 lib.sh 的 journal_*）；挪去的路径放在 LAST_ASIDE
 move_aside() {
   local cur="$1" group="$2" dir="$LAB_STATE_DIR/aside/restore-$STAMP/$2"
   local aside
-  mkdir -p "$dir" || die "建不了 $dir"
+  mkdir -p "$dir" && chmod 700 "$dir" || die "建不了 $dir"
   aside="$dir/$(basename "$cur")"
-  [ -e "$aside" ] && die "$aside 已存在，没挪。"
-  mv -n "$cur" "$aside" && info "挪开：$cur → $aside"
+  { [ -e "$aside" ] || [ -L "$aside" ]; } && die "$aside 已存在，没挪。"
+  journal_add move "$cur" "$aside"
+  mv -n "$cur" "$aside" || die "没能把 $cur 挪到 ${aside}。"
+  { [ -e "$cur" ] || [ -L "$cur" ]; } && die "$cur 还在原处，没挪开。"
+  LAST_ASIDE="$aside"
+  info "挪开：$cur → $aside"
+}
+
+R_DONE=0
+R_ROLLED=0
+
+restore_rollback() {
+  trap '' INT TERM HUP   # 撤回本身不能再被打断
+  R_ROLLED=1
+  [ "$(journal_count)" -gt 0 ] || return 0
+  step "撤回：按恢复日志倒序，这次恢复登记过的 $(journal_count) 步全部回到恢复前"
+  journal_rollback
+}
+
+# restore 进行中的退出（die、意外错误、信号）都走这里：没完成就整体撤回
+restore_on_exit() {
+  local rc=$?
+  trap - EXIT
+  if [ "$R_DONE" != 1 ] && [ "$R_ROLLED" != 1 ]; then
+    if restore_rollback; then
+      [ "$(journal_count)" -gt 0 ] && warn "恢复没做完，已全部撤回：Sophia 这一侧保持恢复前的样子。"
+    else
+      warn "恢复没做完，撤回也没做完（见上）：挪开的原件在 $LAB_STATE_DIR/aside/restore-$STAMP/，恢复日志 ${JOURNAL}，交给人。"
+    fi
+    [ "$rc" = 0 ] && rc=1
+  fi
+  exit "$rc"
+}
+
+# 计划里的一项要不要放回：备份记 present 且现在的与备份不同（类型不对也算不同）
+differs() {
+  local saved="$1" cur="$2" kind="$3"
+  if [ "$kind" = dir ]; then
+    ! { [ -d "$cur" ] && [ ! -L "$cur" ] && diff -r "$saved" "$cur" >/dev/null 2>&1; }
+  else
+    ! { [ -f "$cur" ] && [ ! -L "$cur" ] && cmp -s "$saved" "$cur"; }
+  fi
 }
 
 cmd_restore() {
@@ -516,43 +725,121 @@ cmd_restore() {
   STAMP="$(date +%Y%m%d-%H%M%S)"
   step "把 Sophia 这一侧放回备份的样子：$bk"
   require_sophia_quit
-  if [ "$(cat "$bk/router-loaded")" = not-loaded ] && launchctl print "gui/$(id -u)/$SERVICE_LABEL" >/dev/null 2>&1; then
-    die "路由服务现在还装着，备份时没有。先在 Sophia 里把 Codex、Claude 都关掉（两家都关才卸），确认卸了再来；不要直接换 bin/。"
-  fi
-  if sophia_is_real; then confirm_real "将按备份放回 ~/.codex 的几份文件、SymSync 的 settings.json、bin/、gateway/（现在的挪到一旁，不删）。"; fi
-  local f name
-  for f in "$CODEX_DIR"/config.toml "$CODEX_DIR"/config.models*.bak "$CODEX_DIR"/symsync-*; do
-    [ -f "$f" ] || continue
+  # 先查一遍：基线记 present 的每一项在备份里都在、读得了；没记的项一律不碰。都过了才开始动
+  local key state
+  for key in codex/config.toml "codex/sophia-*" sophia/settings.json sophia/secrets.json sophia/gateway; do
+    state="$(presence_of "$bk" "$key")"
+    case "$state" in present|absent|listed) ;; *) die "基线没有记 $key 在不在：旧格式或不完整的备份，什么也没动。" ;; esac
+  done
+  while IFS="$(printf '\t')" read -r key state; do
+    case "$key" in claude4/*) continue ;; esac
+    [ "$state" = present ] || continue
+    # 目录要逐层列得出、逐个文件读得了（列不出的目录也算不行）：cp -Rp 中途才失败会留下半成品
+    python3 -c 'import os, sys
+p = sys.argv[1]
+errs = []
+ok = os.access(p, os.R_OK)
+if ok and os.path.isdir(p):
+    for dp, ds, fs in os.walk(p, onerror=errs.append):
+        ok = ok and all(os.access(os.path.join(dp, d), os.R_OK | os.X_OK) for d in ds) \
+                and all(os.access(os.path.join(dp, f), os.R_OK) for f in fs)
+sys.exit(0 if ok and not errs else 1)' "$bk/$key" \
+      || die "基线记着 $key 在，备份里的 $bk/$key 却不在或（其中有文件、目录）读不了：什么也没动，交给人。"
+  done < "$bk/presence.txt"
+  if sophia_is_real; then confirm_real "将按备份放回 ~/.codex 的几份文件、Sophia 的 settings.json、secrets.json、gateway/（现在的挪到一旁，不删）。"; fi
+
+  # 定计划：要放回的（键、备份里的、原处、类型）与只要挪开的（备份时没有、现在有）
+  local f name i
+  local P_KEY=() P_SAVED=() P_CUR=() P_KIND=() P_ASIDE=() A_CUR=() A_GROUP=()
+  plan_item() {   # <键> <备份里的> <原处> [dir]
+    case "$(presence_of "$bk" "$1")" in
+      present)
+        if differs "$2" "$3" "${4:-file}"; then P_KEY+=("$1"); P_SAVED+=("$2"); P_CUR+=("$3"); P_KIND+=("${4:-file}"); fi ;;
+      absent)
+        if [ -e "$3" ] || [ -L "$3" ]; then A_CUR+=("$3"); A_GROUP+=("$(dirname "$1")"); fi ;;
+      *) die "基线没有记 $1 在不在：什么也没动，交给人。" ;;
+    esac
+  }
+  plan_item codex/config.toml "$bk/codex/config.toml" "$CODEX_DIR/config.toml"
+  for f in "$CODEX_DIR"/sophia-*; do
+    { [ -e "$f" ] || [ -L "$f" ]; } || continue
     name="$(basename "$f")"
-    if [ -f "$bk/codex/$name" ]; then
-      cmp -s "$f" "$bk/codex/$name" || { move_aside "$f" codex; cp -p "$bk/codex/$name" "$f"; info "放回 ~/.codex/$name"; }
+    # 清单是完整的（listed）：备份时没有的 sophia-* 挪开
+    if [ "$(presence_of "$bk" "codex/$name")" = present ]; then plan_item "codex/$name" "$bk/codex/$name" "$f"
+    else A_CUR+=("$f"); A_GROUP+=(codex); fi
+  done
+  while IFS="$(printf '\t')" read -r key state; do
+    case "$key" in codex/sophia-\*|codex/config.toml) continue ;; codex/sophia-*) ;; *) continue ;; esac
+    [ "$state" = present ] || continue
+    name="${key#codex/}"
+    { [ -e "$CODEX_DIR/$name" ] || [ -L "$CODEX_DIR/$name" ]; } || plan_item "$key" "$bk/codex/$name" "$CODEX_DIR/$name"
+  done < "$bk/presence.txt"
+  plan_item sophia/settings.json "$bk/sophia/settings.json" "$DATA_DIR/settings.json"
+  plan_item sophia/secrets.json "$bk/sophia/secrets.json" "$DATA_DIR/secrets.json"
+  plan_item sophia/gateway "$bk/sophia/gateway" "$DATA_DIR/gateway" dir
+
+  # 从这里起改动现场：每一步先登记进恢复日志再动手；任何退出（失败、Ctrl+C、SIGTERM、挂断）都按日志整体撤回
+  journal_open "$LAB_STATE_DIR/aside/restore-$STAMP/journal.tsv"
+  trap restore_on_exit EXIT
+  trap 'warn "收到 SIGINT，中断"; exit 130' INT
+  trap 'warn "收到 SIGTERM，中断"; exit 143' TERM
+  trap 'warn "收到 SIGHUP，中断"; exit 129' HUP
+  # 1. 先把要换掉的与要挪开的全部挪到 aside
+  for ((i = 0; i < ${#P_CUR[@]}; i++)); do
+    P_ASIDE[$i]=""
+    if [ -e "${P_CUR[$i]}" ] || [ -L "${P_CUR[$i]}" ]; then move_aside "${P_CUR[$i]}" "$(dirname "${P_KEY[$i]}")"; P_ASIDE[$i]="$LAST_ASIDE"; fi
+  done
+  for ((i = 0; i < ${#A_CUR[@]}; i++)); do move_aside "${A_CUR[$i]}" "${A_GROUP[$i]}"; done
+  # 2. 再逐项放回并核对；任何一项失败 → 退出时整体撤回
+  for ((i = 0; i < ${#P_CUR[@]}; i++)); do
+    journal_add copy "${P_CUR[$i]}" "${P_ASIDE[$i]}"
+    if [ "${P_KIND[$i]}" = dir ]; then
+      cp -Rp "${P_SAVED[$i]}" "${P_CUR[$i]}" || die "放回 ${P_CUR[$i]} 失败"
+      diff -r "${P_SAVED[$i]}" "${P_CUR[$i]}" >/dev/null 2>&1 || die "放回后 ${P_CUR[$i]} 与备份不同"
     else
-      move_aside "$f" codex
+      cp -p "${P_SAVED[$i]}" "${P_CUR[$i]}" || die "放回 ${P_CUR[$i]} 失败"
+      cmp -s "${P_SAVED[$i]}" "${P_CUR[$i]}" || die "放回后 ${P_CUR[$i]} 与备份不同"
     fi
+    info "放回 ${P_CUR[$i]}"
   done
-  for f in "$bk"/codex/*; do
-    [ -f "$f" ] || continue
-    name="$(basename "$f")"
-    [ -e "$CODEX_DIR/$name" ] || { cp -p "$f" "$CODEX_DIR/$name"; info "放回 ~/.codex/${name}（现在没有）"; }
-  done
-  if [ -f "$bk/symsync/settings.json" ]; then
-    if ! cmp -s "$DATA_DIR/settings.json" "$bk/symsync/settings.json"; then
-      [ -e "$DATA_DIR/settings.json" ] && move_aside "$DATA_DIR/settings.json" SymSync
-      cp -p "$bk/symsync/settings.json" "$DATA_DIR/settings.json" && info "放回 settings.json"
-    fi
+  # 3. 不管内容是否相同，都把权限校正到 0600（含密钥）
+  if [ "$(presence_of "$bk" sophia/secrets.json)" = present ]; then
+    chmod 600 "$DATA_DIR/secrets.json" || die "改不了 $DATA_DIR/secrets.json 的权限"
+    [ "$(stat -f '%Lp' "$DATA_DIR/secrets.json")" = 600 ] || die "$DATA_DIR/secrets.json 的权限不是 0600"
+    info "secrets.json 权限 0600"
   fi
-  local sub
-  for sub in bin gateway; do
-    if [ -d "$bk/symsync/$sub" ]; then
-      if ! diff -rq "$bk/symsync/$sub" "$DATA_DIR/$sub" >/dev/null 2>&1; then
-        [ -e "$DATA_DIR/$sub" ] && move_aside "$DATA_DIR/$sub" SymSync
-        cp -Rp "$bk/symsync/$sub" "$DATA_DIR/$sub" && info "放回 SymSync/$sub/"
-      fi
-    elif [ -e "$DATA_DIR/$sub" ]; then
-      move_aside "$DATA_DIR/$sub" SymSync
-    fi
-  done
-  step "完成。plist、钥匙串、Claude 的文件没有动；用 compare 再核对一遍。挪开的东西在 $LAB_STATE_DIR/aside/restore-$STAMP/，交给人决定删不删。"
+  R_DONE=1
+  trap - INT TERM HUP EXIT
+  step "完成（放回 ${#P_CUR[@]} 项）。Claude 的文件、Sophia/backups/ 没有动；用 compare 再核对一遍。挪开的东西在 $LAB_STATE_DIR/aside/restore-$STAMP/（secrets.json 含密钥），交给人决定删不删。"
+}
+
+# 这个文件最新的一份改写前备份：<数据目录>/backups/ 下 source 指向它的目录里序号最大的 *.bak
+cmd_bak_of() {
+  [ $# -eq 1 ] || die "bak-of 要一个文件"
+  python3 - "$DATA_DIR/backups" "$1" <<'PY'
+import os, sys
+root, target = sys.argv[1:]
+want = os.path.join(os.path.realpath(os.path.dirname(os.path.abspath(target))), os.path.basename(target))
+best = None
+if os.path.isdir(root):
+    for d in os.listdir(root):
+        dp = os.path.join(root, d)
+        try:
+            src = open(os.path.join(dp, "source"), encoding="utf-8").read().strip()
+        except Exception:
+            continue
+        if src != want:
+            continue
+        for f in os.listdir(dp):
+            stem = f[:-4] if f.endswith(".bak") else None
+            if stem and "-" in stem and stem.split("-", 1)[0].isdigit():
+                seq = int(stem.split("-", 1)[0])
+                if best is None or seq > best[0]:
+                    best = (seq, os.path.join(dp, f))
+if best is None:
+    sys.exit(f"[中止] {root} 里没有 {want} 的备份")
+print(best[1])
+PY
 }
 
 cmd_claude_reset() {
@@ -572,7 +859,10 @@ def atomic_write(path, data):
         f.write(data); f.flush(); os.fsync(f.fileno())
     os.chmod(tmp, mode); os.replace(tmp, path)
 # 1. 备份时没有的 profile 挪开（不删）
-before = open(os.path.join(bk, "configLibrary.txt")).read().split() if os.path.exists(os.path.join(bk, "configLibrary.txt")) else []
+# 没有清单不能当成「备份时是空的」，否则会把现在 configLibrary 里的全部 profile 挪走
+if not os.path.exists(os.path.join(bk, "configLibrary.txt")):
+    sys.exit("[中止] 备份里没有 configLibrary 清单（不完整的备份），什么也没动")
+before = open(os.path.join(bk, "configLibrary.txt")).read().split()
 if os.path.isdir(lib):
     for f in sorted(os.listdir(lib)):
         if f.endswith(".json") and f != "_meta.json" and f not in before:
@@ -680,7 +970,7 @@ PY
 
 cmd_token_check() {
   local prof="$LAB_BASE/Claude-3p/configLibrary/$SOPHIA_ID.json"
-  [ -f "$prof" ] || die "Sophia 的 profile 不存在：$prof（Claude 没打开时查不了）"
+  [ -f "$prof" ] || die "Sophia 的 profile 不存在：${prof}（Claude 没打开时查不了）"
   python3 - "$prof" "$DATA_DIR" "$LAB_STATE_DIR" "$@" <<'PY'
 import json, os, sys
 prof, data, lab, *extra = sys.argv[1:]
@@ -688,6 +978,18 @@ tok = json.load(open(prof, encoding="utf-8-sig")).get("inferenceGatewayApiKey")
 if not isinstance(tok, str) or len(tok) < 20:
     sys.exit("[中止] profile 里没有像样的令牌")
 needle = tok.encode()
+# 令牌该在的地方：Sophia 的 profile 与 <数据目录>/secrets.json 的 claudeRouterToken（crates/core/src/keystore.rs；spec R5 原写钥匙串，现已改存密钥文件）
+problems = 0
+try:
+    stored = json.load(open(os.path.join(data, "secrets.json"))).get("claudeRouterToken")
+    print("    secrets.json 的 claudeRouterToken：" + ("与 profile 里的相同" if stored == tok else "没有！" if not stored else "与 profile 里的不同！"))
+    problems += stored != tok
+except FileNotFoundError:
+    problems += 1
+    print("    secrets.json：不存在！（令牌应当存在这里）")
+except Exception as e:
+    problems += 1
+    print(f"    secrets.json 读不了！（{type(e).__name__}）")
 targets = [os.path.join(data, "settings.json"), os.path.join(data, "gateway-logs"), os.path.join(data, "gateway"),
            os.path.join(lab, "capture"), os.path.join(lab, "tee"), os.path.join(lab, "evidence")] + list(extra)
 def files(t):
@@ -704,8 +1006,16 @@ for t in targets:
     found = [f for f in files(t) if needle in open(f, "rb").read()]
     hit += len(found)
     print(f"    {t}：{'搜到！' + '、'.join(found[:5]) if found else '没搜到'}")
-print(f"\n==> {'令牌只在该在的地方（profile、钥匙串）' if hit == 0 else f'有 {hit} 个文件里出现了令牌（见上），按中止处理'}")
-sys.exit(1 if hit else 0)
+# Sophia 改写前备份：profile 被改写 / 删掉前的原文会进这里，里面带令牌不算泄露到日志，但单列出来交给人判断
+broot = os.path.join(data, "backups")
+bk_hits = [f for f in files(broot) if needle in open(f, "rb").read()] if os.path.isdir(broot) else []
+print(f"    {broot}（改写前备份，单列不计入）：{'搜到 ' + str(len(bk_hits)) + ' 个：' + '、'.join(bk_hits[:3]) if bk_hits else '没搜到'}")
+if hit == 0 and problems == 0:
+    print("\n==> 令牌只在该在的地方（profile、secrets.json）")
+else:
+    why = ([f"有 {hit} 个文件里出现了令牌"] if hit else []) + (["secrets.json 里的令牌缺失、读不了或与 profile 不一致"] if problems else [])
+    print(f"\n==> {'；'.join(why)}（见上），按中止处理")
+sys.exit(1 if hit or problems else 0)
 PY
 }
 
@@ -744,6 +1054,7 @@ case "$CMD" in
   backup) cmd_backup ;;
   compare) cmd_compare "$@" ;;
   restore) cmd_restore "$@" ;;
+  bak-of) cmd_bak_of "$@" ;;
   claude-reset) cmd_claude_reset "$@" ;;
   dm-only) cmd_dm_only "$@" ;;
   profile-set) cmd_profile_set "$@" ;;

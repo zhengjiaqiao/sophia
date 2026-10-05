@@ -1,44 +1,56 @@
 //! 把各模块串成“保存网关 / 选模型 / 启用 / 恢复 / 接管 / 查看状态”这几个动作，界面和命令行共用。
 //! 行为移植自 agents-manager 的 `internal/app`（Go，已在真实环境验证）。
 //!
-//! 两家（`Agent::Codex`、`Agent::Claude`）共用一个 `App`、一把锁、一个路由服务：路由服务的引用计数
-//! （任一家开着就保留，都关了才卸，spec R8）与两家之间的同步需要同时看到两家的状态。
+//! 两家（`Agent::Codex`、`Agent::Claude`）共用一个 `App`、一把锁、一个路由：路由的引用计数
+//! （任一家开着就留着，都关了才停，spec R8）与两家之间的同步需要同时看到两家的状态。
+//! 路由在 Sophia 进程里运行（spec 2026-10-03-gateway-in-app）：打开时接上、退出时收尾、关机时同步改回，在 `lifecycle.rs`。
 //! 本文件是公共部分与 Codex；按家的网关增删改在 `providers.rs`，Claude 桌面应用在 `claude.rs`。
 mod claude;
 #[cfg(test)]
 mod claude_tests;
+#[cfg(test)]
+mod hookup_tests;
+mod lifecycle;
+#[cfg(test)]
+mod lifecycle_tests;
 mod providers;
 #[cfg(test)]
 mod tests;
 
 pub use crate::claude_desktop::DesktopInfo;
 pub use crate::router::Agent;
-pub use claude::{ClaudeAgentView, DesktopView, ProfileModel, MIN_DESKTOP_VERSION};
+pub use crate::router_host::{Occupant, StartError};
+pub use claude::{
+    claude_routing_file, ClaudeAgentView, DesktopView, ProfileModel, MIN_DESKTOP_VERSION,
+};
+pub use lifecycle::{AttachReport, FamilyError, PortNotice, QuitPreview, QuitStep};
 pub use providers::{same_address, ProbeTarget, ProviderSaved};
 
 use crate::process::{self, RestartReport};
-use crate::{codex_desktop, service, takeover};
-use sophia_core::atomicfile::{self, FileState};
+use crate::{codex_desktop, takeover};
+use sophia_core::atomicfile::{self, FileState, ReadError};
 use sophia_core::claude_models::desktop::DesktopDirs;
 use sophia_core::claude_models::settings::ClaudeGatewaySettings;
 use sophia_core::codex_models::catalog::{self, Model};
 use sophia_core::codex_models::config::{self, ConfigError, Managed};
+use sophia_core::codex_models::login::{self, ModeReason};
 use sophia_core::codex_models::settings::{
-    self, GatewaySettings, ProviderSettings, SavedModel, UnreachableReason,
+    self, GatewaySettings, HookupMode, ProviderSettings, SavedModel, UnreachableReason,
 };
+use sophia_core::file_issue::FileIssue;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+/// 旧版本装的 launchd 路由服务的标签：只用来在升级后卸掉它（R14）
 pub const SERVICE_LABEL: &str = "com.zhengjiaqiao.sophia.gateway";
-/// Sophia 的 bundle identifier（tauri.conf.json 的 `identifier`）：路由后台服务挂在它名下
-pub const APP_BUNDLE_ID: &str = "com.zhengjiaqiao.sophia";
 /// 本功能放在 Codex 目录下的文件统一用这个前缀，恢复时据此精确清理
 pub const OWN_FILE_PREFIX: &str = "sophia-";
 const CATALOG_FILE: &str = "sophia-models.json";
-const ROUTING_FILE: &str = "sophia-routing.json";
-/// 备份后缀：`config.models.bak`，与 MCP 的 `config.mcp.bak` 不撞名
+/// Codex 的路由清单（在 Codex 目录下）；路由每个请求重读
+pub const ROUTING_FILE: &str = "sophia-routing.json";
+/// 备份后缀：备份目录里的 `<序号>-models.bak`，与 MCP 的 `<序号>-mcp.bak` 分得清是谁写的
 const BACKUP_SUFFIX: &str = "models";
 /// 接管 agents-manager 时生成的那一家网关的首选 id 与名字（对方只接了 wecode 这一家）；
 /// 实际 id 见 `takeover_provider_id`
@@ -49,6 +61,8 @@ pub const TAKEOVER_PROVIDER_ID: &str = "wecode";
 pub struct AppError {
     pub code: &'static str,
     pub message: String,
+    /// 技术原文（请求、状态码、返回的错误；已去隐私），界面 `详情` 里给（spec 2026-10-04-local-diagnostics R13）
+    pub detail: Option<String>,
 }
 
 impl AppError {
@@ -56,13 +70,29 @@ impl AppError {
         Self {
             code,
             message: message.into(),
+            detail: None,
         }
+    }
+
+    /// 带上技术原文；空的不带
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        self.detail = (!detail.trim().is_empty()).then_some(detail);
+        self
     }
 }
 
+/// 命令错误串里技术原文的分隔（docs/gateway-commands.md「错误」）：`[code] 一句话` 之后另起一行
+/// `[detail] 原文`。界面 `parseBackendError` 按它拆开，一句话照旧给人看，原文进 `详情`
+pub const DETAIL_MARK: &str = "\n[detail] ";
+
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {}", self.code, self.message)
+        write!(f, "[{}] {}", self.code, self.message)?;
+        if let Some(detail) = &self.detail {
+            write!(f, "{DETAIL_MARK}{detail}")?;
+        }
+        Ok(())
     }
 }
 
@@ -73,7 +103,6 @@ type Get<R> = Box<dyn Fn() -> R + Send + Sync>;
 /// 参数按引用传入的操作
 type RefOp<A, R> = Box<dyn for<'a> Fn(&'a A) -> R + Send + Sync>;
 type StrOp<R> = Box<dyn Fn(&str) -> R + Send + Sync>;
-type PathOp<R> = Box<dyn Fn(&Path) -> R + Send + Sync>;
 /// 按（家, 网关 id）读 / 删服务商密钥
 type KeyOp<R> = Box<dyn Fn(Agent, &str) -> R + Send + Sync>;
 /// 按（家, 网关 id）写服务商密钥：`(家, id, key)`
@@ -82,29 +111,32 @@ type KeyWrite = Box<dyn Fn(Agent, &str, &str) -> Result<(), String> + Send + Syn
 /// 对外部世界的全部依赖，测试里全部替换成假的
 pub struct Deps {
     pub codex_home: PathBuf,
-    /// Sophia 的数据目录；后台程序副本放在它的 `bin/` 下。同目录还有 settings.json 等，清理时不能碰
+    /// Sophia 的数据目录。旧版本在它的 `bin/` 下放过后台程序副本（R14 删掉）；同目录还有 settings.json 等，清理时不能碰
     pub data_dir: PathBuf,
     /// agents-manager 的数据目录（`~/.agents-manager`），只读
     pub agents_manager_dir: PathBuf,
     pub load_settings: Get<io::Result<GatewaySettings>>,
     pub save_settings: RefOp<GatewaySettings, io::Result<()>>,
-    pub service_install: RefOp<service::Spec, io::Result<()>>,
+    /// launchd 的 LaunchAgents 目录：看旧版本的路由服务还在不在（R14）
+    pub launch_agents_dir: PathBuf,
+    /// 卸掉一个 launchd 服务并删它的 plist（按标签）：旧版本的路由服务（R14）、接管时 agents-manager 的
     pub service_uninstall: StrOp<io::Result<()>>,
-    pub service_status: StrOp<io::Result<service::Status>>,
-    pub service_restart: StrOp<io::Result<()>>,
-    /// 在端口上确认本功能的路由已就绪（内部自带等待）
-    pub router_healthy: Op<u16, Result<(), String>>,
+    /// 在本进程里起路由（同步：bind 成功即可服务）；已在这个端口上跑着不算错
+    pub router_start: Op<u16, Result<(), StartError>>,
+    /// 停下路由、放掉端口
+    pub router_stop: Get<()>,
+    /// 路由正在哪个端口上跑；没在跑为 None
+    pub router_running: Get<Option<u16>>,
     /// 运行 `codex debug models --bundled`
     pub bundled: Get<io::Result<Vec<u8>>>,
-    /// 按（家, 网关 id）读密钥：Codex 账户 `codex-gateway.<id>`，Claude 账户 `claude-gateway.<id>`（R4）
-    pub get_key: KeyOp<Result<String, String>>,
+    /// 按（家, 网关 id）读密钥（密钥文件 `secrets.json` 里两家各一份）：没有为 `Ok(None)`；
+    /// 读不出（文件权限、格式损坏、还在钥匙串里没迁完）为 `Err(原因)`，原因是当前语言的一句话
+    pub get_key: KeyOp<Result<Option<String>, String>>,
     /// 按（家, 网关 id）写密钥
     pub set_key: KeyWrite,
     /// 按（家, 网关 id）删密钥；本来就没有不算错
     pub delete_key: KeyOp<Result<(), String>>,
     pub get_agents_manager_key: Get<Result<String, String>>,
-    /// 把当前可执行文件复制到稳定路径；返回副本是否被更新
-    pub install_binary: PathOp<io::Result<bool>>,
     /// 当前进程表（pid + 完整命令行）
     pub list_processes: Get<io::Result<Vec<process::ProcessInfo>>>,
     /// 向进程发 SIGTERM
@@ -127,9 +159,7 @@ pub struct Deps {
     // ----- 家 claude -----
     pub load_claude: Get<io::Result<ClaudeGatewaySettings>>,
     pub save_claude: RefOp<ClaudeGatewaySettings, io::Result<()>>,
-    /// `/_health` 的 `features`（R9：写桌面应用配置前确认路由认得家 claude）
-    pub router_features: Op<u16, Result<Vec<String>, String>>,
-    /// 钥匙串里的令牌（`claude-router-token`）；没有为 `Ok(None)`
+    /// 密钥文件里的 Claude 网关令牌；没有为 `Ok(None)`
     pub get_router_token: Get<Result<Option<String>, String>>,
     pub set_router_token: StrOp<Result<(), String>>,
     /// 生成一个新令牌（256 位系统随机数，R5）
@@ -153,6 +183,8 @@ pub struct App {
     /// 同一进程里的动作串行执行。某个动作 panic 之后锁会被标记为中毒，
     /// 但它保护的是磁盘上的文件、不是内存里的不变量，所以继续用，不让整个功能瘫掉。
     lock: Mutex<()>,
+    /// 路由端口的说明（另一个 Sophia 占着、换了端口、端口都被占），模型页显示；只在内存里
+    notice: Mutex<Option<PortNotice>>,
     /// 测试用：在写桌面应用的每一个文件之前调用，返回 Err 即模拟这一步写失败
     #[cfg(test)]
     step_hook: claude::StepHook,
@@ -184,17 +216,32 @@ pub struct ProviderView {
     pub base_url: String,
     /// "chat" 或 "responses"
     pub protocol: String,
-    pub has_key: bool,
+    /// 密钥：有 / 没有 / 读不出（spec 2026-10-03-keys-in-file R4）
+    pub key: KeyStatus,
+    /// 读不出时的原因（当前语言的一句话：「读不出密钥文件：没有读取权限」「密钥还在钥匙串里…」）；其余为 None
+    pub key_problem: Option<String>,
     pub models: Vec<ModelView>,
     /// 上次拉取模型失败的原因（当前语言的短句：「地址无法访问」「密钥无效，请换一个密钥」…，返回界面时才取句）；
     /// None 表示上次成功或还没拉过
     pub unreachable: Option<String>,
+    /// 那次失败的技术原文（已去隐私），网关行 `详情` 里给；没有为 None
+    pub unreachable_detail: Option<String>,
+}
+
+/// 一家网关的密钥状态。不再把「读不出」当成「没有」（R4）
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyStatus {
+    Set,
+    #[default]
+    Missing,
+    Unreadable,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouterView {
-    pub installed: bool,
+    /// 本进程里的路由在 `port` 上跑着
     pub running: bool,
     pub port: u16,
     pub error: String,
@@ -222,9 +269,16 @@ pub struct TakeoverOffer {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexAgentView {
+    /// 用户开着 Codex 的第三方模型（模型页开关的选择）。`AgentGatewayView.enabled` 是 Codex 设置现在
+    /// 指着路由；两者不同只在打开 Sophia 时没接上（见 `GatewayState.port_notice`）
+    pub wanted: bool,
     pub needs_restart: bool,
     pub app: CodexView,
     pub takeover: Option<TakeoverOffer>,
+    /// 接法：Codex 设置指着路由时是写着的那一种，否则是上次写的（spec 2026-10-03-codex-hookup-auto）
+    pub mode: HookupMode,
+    /// 选这种接法的原因；还没判断过为 None
+    pub mode_reason: Option<ModeReason>,
 }
 
 /// 一家的状态（契约 §6 `AgentGatewayView`）
@@ -249,7 +303,13 @@ pub struct AgentGatewayView {
 #[serde(rename_all = "camelCase")]
 pub struct GatewayState {
     pub supported: bool,
+    /// 读不到第三方模型的状态（spec 2026-10-04-local-diagnostics R11）：哪个文件、哪一种（没权限 / 格式有误 / 别的）。
+    /// 其余字段照能读到的给，模型页顶上据它出灰面板与往前走的键；没有为 None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unreadable: Option<FileIssue>,
     pub router: RouterView,
+    /// 路由端口的说明：另一个 Sophia 占着、换了端口、端口都被占；没有为 None
+    pub port_notice: Option<PortNotice>,
     /// 按家拆开的状态
     pub agents: Vec<AgentGatewayView>,
 }
@@ -277,7 +337,7 @@ fn internal(e: impl fmt::Display) -> AppError {
 
 /// 路由没就绪时，告诉用户哪一家的配置没动
 #[derive(Debug, Clone, Copy)]
-enum Untouched {
+pub(super) enum Untouched {
     Codex,
     Claude,
 }
@@ -331,6 +391,7 @@ impl App {
         Self {
             deps,
             lock: Mutex::new(()),
+            notice: Mutex::new(None),
             #[cfg(test)]
             step_hook: Default::default(),
         }
@@ -339,23 +400,42 @@ impl App {
     fn config_path(&self) -> PathBuf {
         self.deps.codex_home.join("config.toml")
     }
+
+    /// Codex 的设置文件（`~/.codex/config.toml`）
+    pub fn codex_config_path(&self) -> PathBuf {
+        self.config_path()
+    }
+
+    /// Sophia 自己的设置（`settings.json`，网关设置存在里面）
+    fn settings_path(&self) -> PathBuf {
+        self.deps.data_dir.join("settings.json")
+    }
+
+    /// `修复权限`、`打开文件` 只认这些（spec 2026-10-04-local-diagnostics R11）：Codex 的设置文件，
+    /// 与 Sophia 数据目录里直接放着的 JSON（`settings.json`、`secrets.json`……），逐字比对、不解析；
+    /// 路径上任何一级是软链、带 `..`、不在白名单里都为 None（`file_issue::managed_path`）
+    pub fn managed_file(&self, path: &Path) -> Option<PathBuf> {
+        sophia_core::file_issue::managed_path(
+            path,
+            &[self.config_path().as_path()],
+            &self.deps.data_dir,
+        )
+    }
+    /// 改写用户配置前的备份放这里：Sophia 数据目录下的 `backups/`（见 `atomicfile::backup`）
+    fn backups_dir(&self) -> PathBuf {
+        self.deps.data_dir.join(atomicfile::BACKUPS_DIR)
+    }
     fn catalog_path(&self) -> PathBuf {
         self.deps.codex_home.join(CATALOG_FILE)
     }
     fn routing_path(&self) -> PathBuf {
         self.deps.codex_home.join(ROUTING_FILE)
     }
-    fn binary_path(&self) -> PathBuf {
-        self.deps.data_dir.join("bin").join("Sophia")
-    }
-    fn log_dir(&self) -> PathBuf {
-        self.deps.data_dir.join("gateway-logs")
-    }
-
     fn managed(&self, settings: &GatewaySettings) -> Managed {
         Managed {
             catalog_path: self.catalog_path().to_string_lossy().into_owned(),
-            base_url: format!("http://127.0.0.1:{}/v1", settings.port),
+            base_url: config::router_base_url(settings.port),
+            mode: settings.mode,
         }
     }
 
@@ -389,13 +469,24 @@ impl App {
         }
         let path = self.config_path();
         if let FileState::Present(existing) = &snapshot.state {
-            atomicfile::backup(&path, existing, BACKUP_SUFFIX).map_err(internal)?;
+            atomicfile::backup(&path, existing, BACKUP_SUFFIX, &self.backups_dir()).map_err(
+                |e| {
+                    internal(sophia_core::t!(
+                        "models.app.configWriteFailed",
+                        error = atomicfile::backup_failure_text(&path, &e)
+                            .unwrap_or_else(|| e.to_string())
+                    ))
+                },
+            )?;
         }
         atomicfile::atomic_write(&path, text.as_bytes(), &snapshot.state).map_err(|e| {
             if e.to_string() == "changed" {
                 AppError::new("changed", sophia_core::t!("models.app.configChanged"))
             } else {
-                internal(sophia_core::t!("models.app.configWriteFailed", error = e))
+                internal(sophia_core::t!(
+                    "models.app.configWriteFailed",
+                    error = atomicfile::write_error_text(&path, &e)
+                ))
             }
         })
     }
@@ -405,6 +496,47 @@ impl App {
             .ok()
             .and_then(|snapshot| config::inspect(&snapshot.text, &self.managed(settings)).ok())
             .is_some_and(|inspection| inspection.enabled)
+    }
+
+    /// 按 Codex 的登录状态选接法（spec 2026-10-03-codex-hookup-auto R1、R2）。`auth.json` 的字节只交给
+    /// `login_state` 看字段有没有值，不进日志、不进错误、不出这个函数
+    fn decide_mode(&self, config_text: &str) -> (HookupMode, ModeReason) {
+        let login = match std::fs::read(self.deps.codex_home.join("auth.json")) {
+            Ok(bytes) => {
+                let store = config::root_string(config_text, "cli_auth_credentials_store");
+                login::login_state(Some(&bytes), store.as_deref())
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let store = config::root_string(config_text, "cli_auth_credentials_store");
+                login::login_state(None, store.as_deref())
+            }
+            // 在却读不了：说不准
+            Err(_) => login::LoginState::Unknown,
+        };
+        // 没登录又显式写着 `model_provider = "openai"`：照样选独立服务商，写入时按冲突拒绝并说清下一步
+        // （不改别人写的这一行，也不悄悄借用内置——那样 Codex 会停在登录页）
+        login::choose_mode(login)
+    }
+
+    /// Codex 设置正指着路由、写着的接法与 `settings.mode` 不同：先把本功能写的删干净（两种形态都删），
+    /// 返回删后的内容，调用方再按新接法写。不用换为 None
+    fn strip_other_form(
+        &self,
+        text: &str,
+        settings: &GatewaySettings,
+    ) -> Result<Option<String>, AppError> {
+        let managed = self.managed(settings);
+        let Ok(inspection) = config::inspect(text, &managed) else {
+            return Ok(None);
+        };
+        match inspection.mode {
+            Some(written) if inspection.points_at_router && written != settings.mode => {
+                let removed =
+                    config::remove(text, &managed, settings.added_newline).map_err(config_error)?;
+                Ok(Some(removed.text))
+            }
+            _ => Ok(None),
+        }
     }
 
     fn detect_agents_manager(&self, config_text: &str) -> Option<takeover::Detected> {
@@ -421,28 +553,62 @@ impl App {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// 已启用时，勾选或上游变了：让 Codex 目录下的两份清单跟上。
-    /// 先确保后台的路由程序是当前版本，再写清单——旧版路由不认清单里的归属，
-    /// 会把所有第三方模型都发给启动参数里的那一家，第二家的请求内容就发错了地方。
-    fn republish(&self, settings: &mut GatewaySettings) -> Result<(), AppError> {
+    /// 已启用时，勾选或上游变了：让 Codex 目录下的两份清单跟上。先确保路由在跑，再写清单。
+    /// `redecide`：这次是改选模型（spec 2026-10-03-codex-hookup-auto R4 的时刻之一）——重新判断接法，变了就换形态、
+    /// 提示重启；只改网关地址等别的变化不重新判断
+    fn republish(&self, settings: &mut GatewaySettings, redecide: bool) -> Result<(), AppError> {
         if settings.published().is_empty() {
             return Err(AppError::new(
                 "invalid",
                 sophia_core::t!("models.app.needOneModel"),
             ));
         }
-        self.install_router(settings)?;
+        let before = self.read_config()?;
+        let written = settings.mode;
+        let (mode, reason) = if redecide {
+            self.decide_mode(&before.text)
+        } else {
+            (
+                written,
+                settings.mode_reason.unwrap_or(ModeReason::SignedIn),
+            )
+        };
+        settings.mode = mode;
+        // 先在内存里试一次：换不过去（冲突、设置不合法）就留在现在写着的形态，不因此挡住改选模型
+        if let Some(stripped) = self.strip_other_form(&before.text, settings)? {
+            if config::apply(&stripped, &self.managed(settings)).is_err() {
+                settings.mode = written;
+            }
+        }
+        if settings.mode == mode {
+            settings.mode_reason = Some(reason);
+        }
+        self.ensure_router(settings, Untouched::Codex)?;
         self.write_catalogs(settings)?;
         // 被取消的模型若正是 Codex 当前的默认模型，改回启用前的值
         let retired = retired_slugs(settings);
         let snapshot = self.read_config()?;
-        let updated = reset_default_model(&snapshot.text, settings, &retired);
+        let mut text = snapshot.text.clone();
+        if let Some(stripped) = self.strip_other_form(&text, settings)? {
+            let applied =
+                config::apply(&stripped, &self.managed(settings)).map_err(config_error)?;
+            settings.added_newline = applied.added_newline;
+            text = applied.text;
+            let now = (self.deps.now)();
+            settings.changed_at = Some(now);
+            settings.record_change(now, true);
+        }
+        let updated = reset_default_model(&text, settings, &retired);
         self.write_config(&snapshot, &updated)
     }
 
-    /// 先让路由常驻并确认健康，再写 Codex 设置
+    /// 先起好路由，再写 Codex 设置；记下用户「开着」
     pub fn enable(&self) -> Result<(), AppError> {
         let _guard = self.guard();
+        self.enable_locked()
+    }
+
+    pub(super) fn enable_locked(&self) -> Result<(), AppError> {
         let mut settings = self.load()?;
         if settings.providers.iter().all(|p| p.base_url.is_empty()) {
             return Err(AppError::new(
@@ -467,17 +633,7 @@ impl App {
                     sophia_core::t!("models.app.providerNoUrl", name = provider.name),
                 ));
             }
-            if (self.deps.get_key)(Agent::Codex, &provider.id).map_or(true, |k| k.trim().is_empty())
-            {
-                return Err(AppError::new(
-                    "invalid",
-                    if settings.providers.len() == 1 {
-                        sophia_core::t!("models.app.noKey")
-                    } else {
-                        sophia_core::t!("models.app.providerNoKey", name = provider.name)
-                    },
-                ));
-            }
+            self.require_key(Agent::Codex, provider, settings.providers.len() == 1)?;
         }
         let first = self.read_config()?;
         if self.detect_agents_manager(&first.text).is_some() {
@@ -486,10 +642,18 @@ impl App {
                 sophia_core::t!("models.app.takeoverFirst"),
             ));
         }
+        // 打开开关、打开 Sophia 接上都走这里：按此刻的登录状态选接法（spec 2026-10-03-codex-hookup-auto R4）
+        let (mode, reason) = self.decide_mode(&first.text);
+        settings.mode = mode;
+        settings.mode_reason = Some(reason);
         let managed = self.managed(&settings);
-        // 先在内存里试一次：有冲突或设置不合法，就在产生任何副作用之前退出
-        let trial = config::apply(&first.text, &managed).map_err(config_error)?;
-        if trial.changed {
+        // 先在内存里试一次：有冲突或设置不合法，就在产生任何副作用之前退出。
+        // 写着另一种形态（换了接法、或崩溃留下的）就先删掉再按这次的写
+        let base = self
+            .strip_other_form(&first.text, &settings)?
+            .unwrap_or_else(|| first.text.clone());
+        let trial = config::apply(&base, &managed).map_err(config_error)?;
+        if trial.inserted {
             // 记住启用前的默认模型：Codex 会把用户选中的模型写回设置，恢复时要能改回来
             let current = config::root_string(&first.text, "model");
             let ours = current.as_ref().is_some_and(|m| {
@@ -503,126 +667,31 @@ impl App {
                 settings.prev_model = current;
             }
         }
-        // 先确保后台路由是当前版本，再写清单，理由同 `republish`：升级后第一次点启用时旧版路由还在跑
-        self.install_router(&settings)?;
+        // 先起好路由再写清单；端口被别的程序占着时路由换了端口，按新端口写
+        self.ensure_router(&mut settings, Untouched::Codex)?;
+        let managed = self.managed(&settings);
         self.write_catalogs(&mut settings)?;
-        // 装服务、等路由就绪要花几秒，这期间别人可能改过设置：基于最新内容重新生成，绝不拿旧内容覆盖
+        // 起路由、写清单的这段时间里别人可能改过设置：基于最新内容重新生成，绝不拿旧内容覆盖
         let latest = self.read_config()?;
-        let applied = config::apply(&latest.text, &managed).map_err(config_error)?;
+        let stripped = self.strip_other_form(&latest.text, &settings)?;
+        let switched = stripped.is_some();
+        let applied = config::apply(stripped.as_deref().unwrap_or(&latest.text), &managed)
+            .map_err(config_error)?;
         // 已启用时再点启用也会走到这里：默认模型若指向一个已经不在目录里的标识
         // （比如旧的单网关格式迁移后标识带上了前缀），一并改回启用前的值
         let text = reset_default_model(&applied.text, &settings, &retired_slugs(&settings));
         if text != latest.text {
             self.write_config(&latest, &text)?;
         }
-        if applied.changed {
+        if applied.inserted {
             settings.added_newline = applied.added_newline;
+        }
+        if applied.changed || switched {
             settings.changed_at = Some((self.deps.now)());
         }
+        settings.enabled = Some(true);
         settings.record_change((self.deps.now)(), true);
         self.save(&settings)
-    }
-
-    /// 预热：把程序副本更新到位；后台服务正开着且程序变了，就让它换上新版本。返回副本是否被更新过。
-    ///
-    /// 这一步原本只在启用时做。但新程序文件第一次运行要过系统校验，实测会让启用卡上好几秒，
-    /// 甚至撞上就绪等待的上限而失败。所以应用启动时在后台先做掉；启用时只剩「装服务、等就绪」。
-    /// 不碰 Codex 的设置，也不安装后台服务。
-    pub fn prewarm(&self) -> Result<bool, AppError> {
-        let _guard = self
-            .lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let changed = (self.deps.install_binary)(&self.binary_path())
-            .map_err(|e| internal(sophia_core::t!("models.app.installBinaryFailed", error = e)))?;
-        let loaded = (self.deps.service_status)(SERVICE_LABEL)
-            .map(|s| s.loaded)
-            .unwrap_or(false);
-        // 已知的、可接受的窗口：此刻正好在走路由的那一个请求会断（重启是几百毫秒的事，
-        // 只在应用更新后的第一次启动出现一次）。不为此加活跃连接计数，见 docs/specs/2026-09-21-tray.md「修订」
-        if changed && loaded {
-            (self.deps.service_restart)(SERVICE_LABEL).map_err(|e| {
-                AppError::new(
-                    "router_down",
-                    sophia_core::t!("models.app.restartServiceFailed", error = e),
-                )
-            })?;
-        }
-        Ok(changed)
-    }
-
-    /// 程序副本的路径；预热之后调用方拿它空跑一次，让系统把首次校验做掉
-    pub fn router_binary(&self) -> PathBuf {
-        self.binary_path()
-    }
-
-    fn install_router(&self, settings: &GatewaySettings) -> Result<(), AppError> {
-        self.install_router_on(settings.port, Untouched::Codex)
-    }
-
-    /// 装好并确认路由健康。启动参数在两家开关的任何组合下都相同（R7）：只在升级后第一次安装时改一次 plist，
-    /// 之后开关某一家不会重载服务。`untouched` 定失败时告诉用户「哪份配置没动」的那一句
-    fn install_router_on(&self, port: u16, untouched: Untouched) -> Result<(), AppError> {
-        let binary = self.binary_path();
-        let binary_changed = (self.deps.install_binary)(&binary)
-            .map_err(|e| internal(sophia_core::t!("models.app.installBinaryFailed", error = e)))?;
-        let log_dir = self.log_dir();
-        std::fs::create_dir_all(&log_dir).map_err(internal)?;
-        let spec = service::Spec {
-            label: SERVICE_LABEL.to_owned(),
-            program: binary.to_string_lossy().into_owned(),
-            args: [
-                "gateway",
-                "run",
-                "--port",
-                &port.to_string(),
-                // 上游地址和协议不在启动参数里：它们写在路由清单里，路由每个请求重读，
-                // 增删网关、改地址都不用重装后台服务
-                "--routing-catalog",
-                &self.routing_path().to_string_lossy(),
-                "--claude-routing",
-                &self.claude_routing_path().to_string_lossy(),
-                "--log",
-                &log_dir.join("router.log").to_string_lossy(),
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-            log_path: Some(log_dir.join("service.log").to_string_lossy().into_owned()),
-            env: Default::default(),
-            associated_bundle: Some(APP_BUNDLE_ID.to_owned()),
-        };
-        let was_loaded = (self.deps.service_status)(SERVICE_LABEL)
-            .map(|s| s.loaded)
-            .unwrap_or(false);
-        (self.deps.service_install)(&spec).map_err(|e| {
-            AppError::new(
-                "router_down",
-                sophia_core::t!("models.app.installServiceFailed", error = e),
-            )
-        })?;
-        if binary_changed && was_loaded {
-            // 程序文件换了，让已在运行的后台服务重启以用上新版本
-            (self.deps.service_restart)(SERVICE_LABEL).map_err(|e| {
-                AppError::new(
-                    "router_down",
-                    sophia_core::t!("models.app.restartServiceFailed", error = e),
-                )
-            })?;
-        }
-        (self.deps.router_healthy)(port).map_err(|e| {
-            AppError::new(
-                "router_down",
-                match untouched {
-                    Untouched::Codex => {
-                        sophia_core::t!("models.app.routerNotReady", port = port, error = e)
-                    }
-                    Untouched::Claude => {
-                        sophia_core::t!("models.claude.routerNotReadyBusy", port = port, error = e)
-                    }
-                },
-            )
-        })
     }
 
     fn write_catalogs(&self, settings: &mut GatewaySettings) -> Result<(), AppError> {
@@ -635,7 +704,7 @@ impl App {
                 settings.published_slugs.push(published.slug.clone());
             }
         }
-        let combined = catalog::build_combined(&native.models, &models)
+        let combined = catalog::build_combined(&native.models, &models, settings.mode.is_builtin())
             .map_err(|e| AppError::new("invalid", e))?;
         let routing = catalog::build_routing(
             &models,
@@ -678,19 +747,25 @@ impl App {
             internal(sophia_core::t!(
                 "models.app.fileWriteFailed",
                 path = path.display(),
-                error = e
+                error = atomicfile::write_error_text(path, &e)
             ))
         })
     }
 
-    /// 从 Codex 设置里移除本功能的两项，清理本功能文件并卸载后台服务。路由不通时也可用。
-    /// Claude 还开着时路由服务保留，Codex 的路由清单改成「无生效模型」（R8）
+    /// 关掉 Codex 的第三方模型（用户的选择）：从 Codex 设置里移除本功能写的内容（两种接法都删），
+    /// 清理本功能文件，两家都关了就停路由。Claude 还开着时路由留着，Codex 的路由清单改成「无生效模型」（R8）
     pub fn restore(&self) -> Result<Vec<String>, AppError> {
         let _guard = self.guard();
         self.restore_locked()
     }
 
-    fn restore_locked(&self) -> Result<Vec<String>, AppError> {
+    pub(super) fn restore_locked(&self) -> Result<Vec<String>, AppError> {
+        self.unwrite_codex_locked(true)
+    }
+
+    /// 把 Codex 设置改回开启前（逐字节）。`user_off`：用户关掉（记下「没开着」、忘掉启用前的默认模型）；
+    /// 否则是退出或接不上时的改回，「开着」与启用前默认模型的记录不变，下次打开 Sophia 时接上
+    pub(super) fn unwrite_codex_locked(&self, user_off: bool) -> Result<Vec<String>, AppError> {
         let mut settings = self.load()?;
         let managed = self.managed(&settings);
         let snapshot = self.read_config()?;
@@ -723,33 +798,24 @@ impl App {
             self.write_own_file(&self.routing_path(), &routing)?;
             warnings.extend(self.remove_codex_files(&[ROUTING_FILE]));
         } else {
-            if let Err(e) = (self.deps.service_uninstall)(SERVICE_LABEL) {
-                warnings.push(sophia_core::t!(
-                    "models.app.uninstallServiceFailed",
-                    error = e
-                ));
+            (self.deps.router_stop)();
+            if user_off {
+                self.set_notice(None);
             }
             warnings.extend(self.remove_codex_files(&[]));
         }
         settings.added_newline = false;
         settings.catalog_client_version.clear();
         // published_slugs 不清：没重启过的 Codex 选择器里旧模型还在，下次启用时它们仍要进停用名单
-        settings.prev_model = None;
-        settings.had_prev_model = false;
+        if user_off {
+            settings.prev_model = None;
+            settings.had_prev_model = false;
+            settings.enabled = Some(false);
+        }
         settings.changed_at = Some((self.deps.now)());
         settings.record_change((self.deps.now)(), false);
         self.save(&settings)?;
         Ok(warnings)
-    }
-
-    /// 重启我们自己装的 launchd 路由服务（`launchctl kickstart -k`）。
-    ///
-    /// **只重启路由，不碰 Codex**：Codex 是用户的编辑器 / CLI，我们无权重启它。
-    /// 不读写 `~/.codex/config.toml`，也不改 settings.json，所以不取 `self.lock`。
-    /// 失败时把 `launchctl` 的原话原样带出去——那是运维信息，用户要拿它去查。
-    pub fn restart_router(&self) -> Result<(), AppError> {
-        (self.deps.service_restart)(SERVICE_LABEL)
-            .map_err(|e| AppError::new("router_down", e.to_string()))
     }
 
     /// 重启生效：让 Codex 读到新配置。
@@ -911,6 +977,7 @@ impl App {
                 })
                 .collect(),
             unreachable: None,
+            unreachable_detail: None,
         };
         match settings.provider_mut(&target) {
             Some(existing) => *existing = provider,
@@ -933,22 +1000,22 @@ impl App {
                 sophia_core::t!("models.app.noAmModels"),
             ));
         }
-        // 先把本功能的目录和路由准备好并确认健康；这一步失败时对方仍然完好
+        // 先把本功能的目录和路由准备好；这一步失败时对方仍然完好
         if let Err(error) = self
             .write_catalogs(&mut settings)
-            .and_then(|()| self.install_router(&settings))
+            .and_then(|()| self.ensure_router(&mut settings, Untouched::Codex))
         {
-            // 没成：对方仍然完好，本功能不留下后台服务和文件
+            // 没成：对方仍然完好，本功能不留下路由和文件
             self.remove_own_traces();
             return Err(error);
         }
-        // 路由确认健康之后才动密钥：失败的接管不能覆盖本功能原有的密钥
+        // 路由起好之后才动密钥：失败的接管不能覆盖本功能原有的密钥
         if let Err(error) = (self.deps.set_key)(Agent::Codex, &target, key.trim()) {
             self.remove_own_traces();
             return Err(AppError::new("invalid", error));
         }
 
-        // 从这里往后，密钥已经被覆盖、服务在跑、目录文件已落盘：任何失败都要把这些撤掉，
+        // 从这里往后，密钥已经被覆盖、路由在跑、目录文件已落盘：任何失败都要把这些撤掉，
         // 否则会留下“两边都半开着”的状态。
         match self.finish_takeover(&mut settings, &detected, old.added_newline) {
             Ok(()) => {}
@@ -1011,6 +1078,7 @@ impl App {
         let old_managed = Managed {
             catalog_path: old_catalog,
             base_url: takeover::ROUTER_BASE_URL.to_owned(),
+            mode: HookupMode::Builtin,
         };
         let removed = config::remove(&latest.text, &old_managed, false).map_err(config_error)?;
         if !removed.warnings.is_empty() {
@@ -1032,16 +1100,17 @@ impl App {
         self.write_config(&latest, &text)?;
         // 对方当初给末行补过的换行还在文件里，恢复时同样要还原
         settings.added_newline = applied.added_newline || old_added_newline;
+        settings.enabled = Some(true);
         settings.changed_at = Some((self.deps.now)());
         settings.record_change((self.deps.now)(), true);
         self.save(settings)
     }
 
-    /// 卸载本功能的后台服务并删掉 Codex 目录下本功能前缀的文件（只删普通文件）。
-    /// Claude 开着时服务留着（R8），只删 Codex 目录下的文件
+    /// 停下路由并删掉 Codex 目录下本功能前缀的文件（只删普通文件）。
+    /// Claude 开着时路由留着（R8），只删 Codex 目录下的文件
     fn remove_own_traces(&self) {
         if !self.claude_on() {
-            let _ = (self.deps.service_uninstall)(SERVICE_LABEL);
+            (self.deps.router_stop)();
         }
         let _ = self.remove_codex_files(&[]);
     }
@@ -1068,19 +1137,62 @@ impl App {
         warnings
     }
 
+    /// 这一家这个网关的密钥：有就给出来（去掉首尾空白）；没有为 `Ok(None)`；读不出为 `Err(原因)`
+    fn key_of(&self, agent: Agent, id: &str) -> Result<Option<String>, String> {
+        (self.deps.get_key)(agent, id)
+            .map(|key| key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty()))
+    }
+
+    /// 有模型要发布的网关必须有读得出的密钥；没有、读不出各说各的（`only` 为真时只有这一家，不点名）
+    fn require_key(
+        &self,
+        agent: Agent,
+        provider: &ProviderSettings,
+        only: bool,
+    ) -> Result<String, AppError> {
+        match self.key_of(agent, &provider.id) {
+            Ok(Some(key)) => Ok(key),
+            Ok(None) => Err(AppError::new(
+                "invalid",
+                if only {
+                    sophia_core::t!("models.app.noKey")
+                } else {
+                    sophia_core::t!("models.app.providerNoKey", name = provider.name)
+                },
+            )),
+            Err(reason) => Err(AppError::new(
+                "invalid",
+                sophia_core::t!(
+                    "models.app.keyUnreadable",
+                    name = provider.name,
+                    reason = reason
+                ),
+            )),
+        }
+    }
+
     /// 一家的网关列表视图
     fn provider_views(&self, agent: Agent, providers: &[ProviderSettings]) -> Vec<ProviderView> {
         providers
             .iter()
-            .map(|provider| ProviderView {
+            .map(|provider| (provider, self.key_of(agent, &provider.id)))
+            .map(|(provider, read)| ProviderView {
                 id: provider.id.clone(),
                 name: provider.name.clone(),
                 short_name: provider.short_name(),
                 base_url: provider.base_url.clone(),
                 protocol: provider.protocol().to_owned(),
-                has_key: (self.deps.get_key)(agent, &provider.id)
-                    .is_ok_and(|k| !k.trim().is_empty()),
+                key: match &read {
+                    Ok(Some(_)) => KeyStatus::Set,
+                    Ok(None) => KeyStatus::Missing,
+                    Err(_) => KeyStatus::Unreadable,
+                },
+                key_problem: read.err(),
                 unreachable: provider.unreachable.as_ref().map(UnreachableReason::text),
+                unreachable_detail: provider
+                    .unreachable
+                    .as_ref()
+                    .and(provider.unreachable_detail.clone()),
                 models: provider
                     .models
                     .iter()
@@ -1103,8 +1215,21 @@ impl App {
 
     pub fn state(&self) -> GatewayState {
         let _guard = self.guard();
-        let settings = self.load().unwrap_or_default();
-        let claude_settings = self.load_claude().unwrap_or_default();
+        // 读不出 Sophia 自己的设置：照旧当空的往下画，但说出来是哪个文件、为什么（R11），不再悄悄当没有网关
+        let my_uid = sophia_core::file_issue::current_uid();
+        let mut unreadable: Option<FileIssue> = None;
+        let settings = (self.deps.load_settings)().unwrap_or_else(|e| {
+            unreadable.get_or_insert_with(|| {
+                FileIssue::from_io(&self.settings_path(), &e, my_uid, false)
+            });
+            GatewaySettings::default()
+        });
+        let claude_settings = (self.deps.load_claude)().unwrap_or_else(|e| {
+            unreadable.get_or_insert_with(|| {
+                FileIssue::from_io(&self.settings_path(), &e, my_uid, false)
+            });
+            ClaudeGatewaySettings::default()
+        });
         let mut view = GatewayState {
             supported: true,
             ..Default::default()
@@ -1118,7 +1243,12 @@ impl App {
             codex: None,
             claude: None,
         };
-        let mut extra = CodexAgentView::default();
+        let mut extra = CodexAgentView {
+            mode: settings.mode,
+            mode_reason: settings.mode_reason,
+            ..Default::default()
+        };
+        let mut codex_points = false;
 
         match self.read_config() {
             Ok(snapshot) => {
@@ -1134,39 +1264,62 @@ impl App {
                     match config::inspect(&snapshot.text, &self.managed(&settings)) {
                         Ok(inspection) => {
                             codex.enabled = inspection.enabled;
+                            codex_points = inspection.points_at_router;
+                            if let Some(written) = inspection.mode {
+                                extra.mode = written;
+                            }
                             codex.conflict = inspection.conflict.unwrap_or_default();
                         }
-                        Err(e) => codex.conflict = e.to_string(),
+                        Err(e) => {
+                            if let ConfigError::Invalid(detail) = &e {
+                                unreadable.get_or_insert_with(|| {
+                                    FileIssue::format(
+                                        &self.config_path(),
+                                        config::invalid_line(&snapshot.text),
+                                        detail,
+                                    )
+                                });
+                            }
+                            codex.conflict = e.to_string();
+                        }
                     }
                 }
             }
-            Err(e) => codex.conflict = e.message,
+            Err(e) => {
+                // 读本身失败（没权限、IO）：说是哪个文件、哪一种；软链、不是普通文件只当冲突说
+                if let Err(ReadError::Io(io)) = atomicfile::read_state(&self.config_path()) {
+                    unreadable.get_or_insert_with(|| {
+                        FileIssue::from_io(&self.config_path(), &io, my_uid, true)
+                    });
+                }
+                codex.conflict = e.message;
+            }
         }
 
+        view.unreadable = unreadable;
+        // 路由在本进程里：直接看宿主，不再探 HTTP（也就不在锁里等）
         view.router.port = settings.port;
-        view.router.installed =
-            (self.deps.service_status)(SERVICE_LABEL).is_ok_and(|s| s.installed);
+        view.router.running = (self.deps.router_running)() == Some(settings.port);
+        view.port_notice = self.notice();
         let claude_applied = claude_settings.applied.is_some();
-        // 健康检查每次只做一次，两家共用
-        if codex.enabled || view.router.installed || claude_applied {
-            match (self.deps.router_healthy)(settings.port) {
-                Ok(()) => view.router.running = true,
-                Err(e) if codex.enabled => {
-                    view.router.error = sophia_core::t!(
-                        "models.app.routerNoResponse",
-                        port = settings.port,
-                        error = e
-                    )
-                }
-                Err(e) if claude_applied => {
-                    view.router.error = sophia_core::t!(
-                        "models.claude.routerNoResponse",
-                        port = settings.port,
-                        error = e
-                    )
-                }
-                Err(_) => {}
-            }
+        if !view.router.running && (codex_points || claude_applied) {
+            let reason = view.port_notice.as_ref().map_or_else(
+                || sophia_core::t!("models.app.routerStopped"),
+                PortNotice::text,
+            );
+            view.router.error = if codex_points {
+                sophia_core::t!(
+                    "models.app.routerNoResponse",
+                    port = settings.port,
+                    error = reason
+                )
+            } else {
+                sophia_core::t!(
+                    "models.claude.routerNoResponse",
+                    port = settings.port,
+                    error = reason
+                )
+            };
         }
 
         extra.app.version = (self.deps.codex_version)();
@@ -1188,6 +1341,7 @@ impl App {
                         .is_some_and(|changed_at| started_at < changed_at)
             });
         }
+        extra.wanted = settings.enabled.unwrap_or(codex_points);
         codex.installed = !extra.app.version.is_empty();
         codex.codex = Some(extra);
         view.agents = vec![codex, self.claude_view(&claude_settings, settings.port)];

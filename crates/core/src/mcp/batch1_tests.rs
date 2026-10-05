@@ -1,7 +1,7 @@
 //! MCP 第一批（spec 2026-09-27-mcp-batch1）：Gemini CLI、GitHub Copilot CLI、Claude Desktop 的位置、
 //! 读写映射、无损拒绝、撤销。全部在临时目录里搭真实文件，不碰本机配置
 use super::*;
-use crate::test_support::TempTree;
+use crate::test_support::{backups, TempTree};
 use serde_json::json;
 
 fn harness(id: &str, name: &str) -> Harness {
@@ -75,7 +75,7 @@ fn write_one(locations: &[McpLocation], selection: McpSelection) -> McpReport {
     let plan = prepare(locations, &[selection]);
     assert!(plan.issues.is_empty(), "{:?}", plan.issues);
     assert_eq!(plan.actions.len(), 1);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "created", "{:?}", report.entries);
     report
 }
@@ -92,7 +92,7 @@ fn refused_with(locations: &[McpLocation], selection: McpSelection, reason: &str
     let plan = prepare(locations, &[selection]);
     assert!(plan.actions.is_empty());
     assert_eq!(plan.issues[0].message, reason);
-    assert_eq!(execute(plan, false).entries, Vec::new());
+    assert_eq!(execute(plan, false, backups()).entries, Vec::new());
     assert_eq!(fs::read(&target).ok(), before, "目标不变");
 }
 
@@ -714,7 +714,7 @@ fn gemini_only_settings_block_other_agents_but_copy_within_gemini() {
     );
     let plan = prepare(&locations, &[sel("gemini", "many", "gemini-project")]);
     assert!(plan.issues.is_empty());
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert_eq!(report.entries[0].outcome, "created");
     let written: Value = serde_json::from_slice(&fs::read(&gemini_project).unwrap()).unwrap();
     assert_eq!(
@@ -903,7 +903,7 @@ fn variable_references_copy_within_the_same_agent() {
     }
     let plan = prepare(&locations, &[sel("user", "gh", "project")]);
     assert!(plan.issues.is_empty(), "{:?}", plan.issues);
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert_eq!(report.entries[0].outcome, "created", "{:?}", report.entries);
     let written: Value = serde_json::from_slice(&fs::read(&project).unwrap()).unwrap();
     assert_eq!(
@@ -960,7 +960,7 @@ fn removal_cuts_only_the_member_and_undo_restores_bytes_in_each_new_format() {
             }],
         );
         assert!(plan.issues.is_empty(), "{id} {:?}", plan.issues);
-        let mut report = execute_removal(plan);
+        let mut report = execute_removal(plan, backups());
         assert_eq!(report.entries[0].outcome, "removed", "{id}");
         let after = fs::read(&path).unwrap();
         // 删掉的只是这一段：放回去就是原文

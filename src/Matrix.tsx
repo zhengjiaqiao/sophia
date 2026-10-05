@@ -151,6 +151,22 @@ export const cellPress = (view: Pick<MatrixCellView, "clickable">): "act" | "exp
 const CELL_SEP = String.fromCharCode(31);
 export const cellKey = (rowKey: string, columnId: string) => rowKey + CELL_SEP + columnId;
 
+/// 单格失败的提示条。`failure` 给了就画整句（`context7 写进 [Codex] 失败 · 没有写入权限，没动`，副行文件路径；
+/// spec 2026-10-04-local-diagnostics R12，画板 AuPbAQHePv3L1U3g1PAtH8），不给就把 `text` 当整句。提示条里不放详情
+export interface CellNotice {
+  rowKey: string;
+  columnId: string;
+  text: string;
+  failure?: {
+    sentence: MessageKey;
+    names: string[];
+    agents: { id: string; name: string }[];
+    reason?: string;
+    /// 副行：等宽读数（写的是哪个文件，主目录写 `~`）
+    stats?: string;
+  };
+}
+
 export interface MatrixColumn {
   id: string;
   /// harness id，决定图标
@@ -282,7 +298,7 @@ export interface MatrixProps {
   /// 页面头下方的插槽（吸顶）：以前固定放按来源筛选的胶囊行；R9 去掉了它，现在是个空槽——
   /// 调用方放什么就是什么（例如 R4 的项目筛选片），Matrix 不认来源、不认项目。没给就只留上下距
   bar?: ReactNode;
-  /// 新手提示条的插槽：bar 插槽下、表头上（推动表格）。放 `<HintStrip flush>`：提示条开着时
+  /// 新手提示条的插槽：bar 插槽下、表头上（推动表格）。放 `<NoticePanel mark={false} open flush>`：提示条开着时
   /// bar 插槽的下内边距让成 16（提示条到它 16），提示条自带下外距 16；收起后回到表格上距 18
   hint?: ReactNode;
   /// 新手提示条的插槽：空态上方（一行都没有时才出）
@@ -326,8 +342,8 @@ export interface MatrixProps {
   keyBusy?: { keyId: string; label: string } | null;
   /// 点格之后真要等的（拆开整个文件夹链接）：过了 0.3 秒门槛，被点那一格正下方浮起刻度 + 一句
   cellBusy?: { rowKey: string; columnId: string; label: string } | null;
-  /// 单格失败：被点那一格正下方的提示条（纸窗 + 记号栏）说原因（与成功同一个位置），8 秒，悬停停表
-  cellNotice?: { rowKey: string; columnId: string; text: string } | null;
+  /// 单格失败：被点那一格正下方的提示条说原因（与成功同一个位置），8 秒，悬停停表
+  cellNotice?: CellNotice | null;
   onDismissCellNotice?: () => void;
   /// 一行的结果（只留这份）：锚在被按下的那个控件上（`at`：按下那一刻它的位置）
   rowToast?: {
@@ -1635,7 +1651,11 @@ export default function Matrix(props: MatrixProps) {
           anchor={cellAnchor(cellNotice.rowKey, cellNotice.columnId)}
           bounds={panelBounds}
         >
-          <Toast kind="cannot" message={cellNotice.text} onDismiss={onDismissCellNotice} />
+          {cellNotice.failure ? (
+            <Toast kind="cannot" {...cellNotice.failure} onDismiss={onDismissCellNotice} />
+          ) : (
+            <Toast kind="cannot" message={cellNotice.text} onDismiss={onDismissCellNotice} />
+          )}
         </FloatingToast>
       ) : cellToast ? (
         <FloatingToast

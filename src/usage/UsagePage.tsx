@@ -7,6 +7,7 @@ import type {
   MenuBarView,
   StackedSize,
   UsageDisplayMode,
+  UsageAgentId,
   UsageRefresh,
   UsageSettings,
   UsageView,
@@ -35,7 +36,7 @@ import {
   usageAgentName,
   windowCount,
 } from "./usageView.ts";
-import { UsageWindows } from "./UsageWindows.tsx";
+import { UsageWindows, useUsageRetry } from "./UsageWindows.tsx";
 import "./UsagePage.css";
 
 /// 用量页（侧栏「用量」⌘4；spec 2026-09-26-menubar-usage R11，线框 5A）：最上面是「当前用量」（与托盘同一种画法），
@@ -56,7 +57,6 @@ const modeItems = (): ReadonlyArray<{ id: UsageDisplayMode; label: string }> => 
 const refreshItems = (): ReadonlyArray<{ id: UsageRefresh; label: string }> => [
   { id: "auto", label: t("usage.refresh.auto") },
   { id: "off", label: t("usage.refresh.off") },
-  { id: "1", label: tn("usage.refresh.minutes", 1) },
   { id: "5", label: tn("usage.refresh.minutes", 5) },
   { id: "10", label: tn("usage.refresh.minutes", 10) },
   { id: "15", label: tn("usage.refresh.minutes", 15) },
@@ -93,6 +93,10 @@ export function UsagePage({ onError }: { onError: (message: string) => void }) {
   // 换了界面语言：视图里的文字是后端按语言算好的，重读（不补取）
   useOnLocaleChange(() => void read(false));
 
+  // 「当前用量」原因行的「再试一次」：跑完先重读（不补取）把新数画上，再收回「正在读取」
+  const reread = useCallback(() => read(false), [read]);
+  const { retry, retrying } = useUsageRetry(reread);
+
   useEffect(() => {
     alive.current = true;
     // 打开这一页：顺带补取一次（R6），新数经 usage-changed 到
@@ -120,7 +124,14 @@ export function UsagePage({ onError }: { onError: (message: string) => void }) {
   return (
     <div className="usage-page">
       <PageHead lead={<PageTitle>{t("usage.page.title")}</PageTitle>}>
-        {view ? <UsageBody view={view} onChange={(next) => void save(next)} /> : null}
+        {view ? (
+          <UsageBody
+            view={view}
+            onChange={(next) => void save(next)}
+            onRetry={(agent) => void retry(agent)}
+            retrying={retrying}
+          />
+        ) : null}
       </PageHead>
     </div>
   );
@@ -144,9 +155,15 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
 export function UsageBody({
   view,
   onChange,
+  onRetry,
+  retrying = () => false,
 }: {
   view: UsageView;
   onChange: (next: UsageSettings) => void;
+  /// 「当前用量」原因行右端的「再试一次」；不给就只写原因
+  onRetry?: (agent: UsageAgentId) => void;
+  /// 这个 agent 的「再试一次」正在跑
+  retrying?: (agent: UsageAgentId) => boolean;
 }) {
   const s = view.settings;
   const off = !s.menuBarEnabled;
@@ -178,7 +195,11 @@ export function UsageBody({
                       <span className="usage-page__updated">{tray.updatedText}</span>
                     ) : null}
                   </div>
-                  <UsageWindows usage={tray} />
+                  <UsageWindows
+                    usage={tray}
+                    retrying={retrying(tray.agent)}
+                    onRetry={onRetry ? () => onRetry(tray.agent) : undefined}
+                  />
                 </div>
               );
             })}

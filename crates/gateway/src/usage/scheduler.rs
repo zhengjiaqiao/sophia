@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 /// 后台轮询的最长睡眠：到点、屏幕醒来、整机睡醒最迟这么久能发现
 pub const CHECK_EVERY: Duration = Duration::from_secs(60);
@@ -91,6 +91,9 @@ struct AgentTrack {
     rate_limit_streak: u32,
     /// 回过「没有订阅额度」：不再重试，直到重启或登录状态变化（R5、AC11）
     no_plan_limits: bool,
+    /// 回过「程序不认这个请求」（旧版 Claude Code 没有 `get_usage`）：后台不再起进程，状态一直写原因；
+    /// 重启、登录 / 安装状态变化、手动刷新后重新尝试。不存盘
+    unsupported: bool,
 }
 
 /// 调度的内存状态。只在调度循环里改，交出去的是 [`Tracker::state`] 的快照
@@ -133,6 +136,7 @@ impl Tracker {
                         .collect(),
                     rate_limit_streak: memo.rate_limit_streaks.get(&agent).copied().unwrap_or(0),
                     no_plan_limits: false,
+                    unsupported: false,
                 },
             );
         }
@@ -169,12 +173,23 @@ impl Tracker {
             .expect("AgentId::ALL 里的每个 agent 都建过")
     }
 
-    /// 记下这一轮的可用性。登录状态一变，「没有订阅额度」的判断作废（R5）
+    /// 记下这一轮的可用性。登录 / 安装状态一变，「没有订阅额度」「版本可能太旧」的判断作废（R5）
     pub fn set_availability(&mut self, agent: AgentId, availability: Availability) {
         let t = self.track(agent);
         if t.availability != availability {
             t.availability = availability;
             t.no_plan_limits = false;
+            t.unsupported = false;
+        }
+    }
+
+    /// 手动刷新：「版本可能太旧」的判断作废，再试一次（用户多半刚更新了 Claude Code）。
+    /// `only` 为 None 时是全部 agent
+    pub fn retry_unsupported(&mut self, only: Option<AgentId>) {
+        for (&agent, t) in self.agents.iter_mut() {
+            if only.is_none_or(|a| a == agent) {
+                t.unsupported = false;
+            }
         }
     }
 
@@ -184,7 +199,9 @@ impl Tracker {
             .iter()
             .map(|(&agent, t)| AgentSchedule {
                 agent,
-                available: t.availability == Availability::Ready && !t.no_plan_limits,
+                available: t.availability == Availability::Ready
+                    && !t.no_plan_limits
+                    && !t.unsupported,
                 sources: t
                     .sources
                     .iter()
@@ -273,6 +290,7 @@ impl Tracker {
                 false
             }
             Err(e) => {
+                t.unsupported = matches!(e, FetchError::Failed(ParseFailure::Unsupported));
                 t.status = UsageStatus::Failing {
                     reason: e.fail_reason(),
                 };
@@ -342,12 +360,15 @@ pub trait Host: Send + Sync {
 }
 
 /// 发给调度循环的命令
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Command {
     /// 刚打开托盘或用量页
     Opened,
     /// 手动刷新；`Some` 只刷这一个 agent
     Refresh(Option<AgentId>),
+    /// 原因行旁点了「再试一次」：只取这一个 agent，起进程的取法不等最短间隔（限流退避照守）。
+    /// 这一轮跑完（或没得跑）就经第二项回话，界面据此收回「正在读取…」
+    Retry(AgentId, oneshot::Sender<()>),
     /// 用量设置改了
     Settings(UsageSettings),
     Shutdown,
@@ -369,12 +390,19 @@ impl Handle {
     pub fn send(&self, command: Command) {
         let _ = self.tx.send(command);
     }
+
+    /// 「再试一次」：返回的接收端在这一轮跑完时收到回话；循环已经退出时立即报错（发送端随命令丢了）
+    pub fn retry(&self, agent: AgentId) -> oneshot::Receiver<()> {
+        let (done, rx) = oneshot::channel();
+        self.send(Command::Retry(agent, done));
+        rx
+    }
 }
 
 fn is_explicit(trigger: Trigger) -> bool {
     matches!(
         trigger,
-        Trigger::Opened | Trigger::Manual | Trigger::SettingsChanged
+        Trigger::Opened | Trigger::Manual | Trigger::Retry | Trigger::SettingsChanged
     )
 }
 
@@ -401,7 +429,8 @@ impl Loop<'_> {
         }
     }
 
-    /// 一轮：刷新可用性 → 决策 → 跑 → 记结果，链上还有要跑的就再决策一次。返回下次该醒的时刻
+    /// 一轮：刷新可用性 → 决策 → 跑 → 记结果，链上还有要跑的就再决策一次。返回下次该醒的时刻。
+    /// 一轮里每条取法最多跑一次：「再试一次」不等最短间隔，不挡就会在同一轮里连着再起
     async fn step(&mut self, trigger: Trigger, only: Option<AgentId>) -> Option<i64> {
         for agent in AgentId::ALL {
             let availability = self.fetcher.availability(agent);
@@ -410,6 +439,7 @@ impl Loop<'_> {
         self.publish();
         let system = self.host.system();
         let mut wake_at = None;
+        let mut ran: Vec<(AgentId, Source)> = Vec::new();
         for _ in 0..MAX_PASSES {
             let now = self.host.now();
             let plan = decide(&ScheduleInput {
@@ -427,11 +457,13 @@ impl Loop<'_> {
                 .run
                 .into_iter()
                 .filter(|(agent, _)| only.is_none_or(|a| a == *agent))
+                .filter(|pair| !ran.contains(pair))
                 .collect();
             if run.is_empty() {
                 break;
             }
             for (agent, source) in run {
+                ran.push((agent, source));
                 let outcome = self.fetcher.fetch(agent, source, now).await;
                 let at = self.host.now();
                 if self.tracker.record(agent, source, at, outcome) {
@@ -470,6 +502,8 @@ pub async fn run(
     lp.publish();
 
     let mut pending: Option<(Trigger, Option<AgentId>)> = Some((Trigger::Tick, None));
+    // 「再试一次」等着的回话：这一轮跑完就回
+    let mut reply: Option<oneshot::Sender<()>> = None;
     let mut wake_at: Option<i64> = None;
     let mut display_was_asleep = false;
 
@@ -482,6 +516,10 @@ pub async fn run(
                 display_was_asleep = false;
                 wake_at = lp.step(trigger, only).await;
             }
+        }
+        if let Some(done) = reply.take() {
+            // 界面已经不等了（面板关了）也无妨
+            let _ = done.send(());
         }
 
         let background = runs_in_background(&lp.settings);
@@ -504,7 +542,15 @@ pub async fn run(
                 lp.publish();
                 pending = Some((Trigger::Opened, None));
             }
-            Some(Some(Command::Refresh(agent))) => pending = Some((Trigger::Manual, agent)),
+            Some(Some(Command::Refresh(agent))) => {
+                lp.tracker.retry_unsupported(agent);
+                pending = Some((Trigger::Manual, agent));
+            }
+            Some(Some(Command::Retry(agent, done))) => {
+                lp.tracker.retry_unsupported(Some(agent));
+                pending = Some((Trigger::Retry, Some(agent)));
+                reply = Some(done);
+            }
             Some(Some(Command::Settings(settings))) => {
                 lp.settings = settings;
                 pending = Some((Trigger::SettingsChanged, None));
@@ -746,6 +792,76 @@ mod tests {
         assert!(claude(&t).available, "退出再登录后重新尝试");
     }
 
+    /// 旧版 Claude Code 不认 get_usage：不再调度，状态一直写「版本可能太旧」，上次读数照留；
+    /// 手动刷新（这个 agent 或全部）、登录状态变化、重启后重新尝试
+    #[test]
+    fn unsupported_is_sticky_until_manual_refresh() {
+        let claude = |t: &Tracker| {
+            t.schedule_agents()
+                .into_iter()
+                .find(|a| a.agent == AgentId::ClaudeCode)
+                .unwrap()
+        };
+        let unsupported = || Err(FetchError::Failed(ParseFailure::Unsupported));
+        let mut t = Tracker::new(vec![], ScheduleMemo::default());
+        let r = reading(AgentId::ClaudeCode, Source::GetUsage, T0, 13.0);
+        t.record(
+            AgentId::ClaudeCode,
+            Source::GetUsage,
+            T0,
+            Ok(Some(r.clone())),
+        );
+        t.record(
+            AgentId::ClaudeCode,
+            Source::GetUsage,
+            T0 + 900,
+            unsupported(),
+        );
+        assert!(!claude(&t).available);
+        let a = agent_state(&t, AgentId::ClaudeCode);
+        assert_eq!(
+            a.status,
+            UsageStatus::Failing {
+                reason: FailReason::Unsupported
+            }
+        );
+        assert_eq!(a.reading, Some(r));
+        t.set_availability(AgentId::ClaudeCode, Availability::Ready);
+        assert!(!claude(&t).available, "可用性没变，判断照旧");
+        t.retry_unsupported(Some(AgentId::Codex));
+        assert!(!claude(&t).available, "只刷 Codex 不碰 Claude");
+        t.retry_unsupported(Some(AgentId::ClaudeCode));
+        assert!(claude(&t).available, "手动刷新 Claude 后重新尝试");
+
+        t.record(
+            AgentId::ClaudeCode,
+            Source::GetUsage,
+            T0 + 1800,
+            unsupported(),
+        );
+        t.retry_unsupported(None);
+        assert!(claude(&t).available, "手动刷新全部也算");
+
+        t.record(
+            AgentId::ClaudeCode,
+            Source::GetUsage,
+            T0 + 2700,
+            unsupported(),
+        );
+        t.set_availability(AgentId::ClaudeCode, Availability::NotInstalled);
+        t.set_availability(AgentId::ClaudeCode, Availability::Ready);
+        assert!(claude(&t).available, "重装后重新尝试");
+
+        t.record(
+            AgentId::ClaudeCode,
+            Source::GetUsage,
+            T0 + 3600,
+            unsupported(),
+        );
+        let restarted = Tracker::new(vec![], t.memo());
+        assert!(claude(&restarted).available, "不存盘：重启后重新尝试");
+    }
+
     /// 会话记录读到比手上更旧的数：不替换，也不把状态改成正常
     #[test]
     fn older_rollout_reading_does_not_replace_newer() {
@@ -964,6 +1080,7 @@ mod tests {
         calls: Mutex<Vec<(AgentId, Source, i64)>>,
         rollout_age: Mutex<Option<i64>>,
         claude_rate_limited: Mutex<bool>,
+        claude_unsupported: Mutex<bool>,
         claude_signed_out: Mutex<bool>,
     }
 
@@ -974,6 +1091,7 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
                 rollout_age: Mutex::new(Some(5)),
                 claude_rate_limited: Mutex::new(false),
+                claude_unsupported: Mutex::new(false),
                 claude_signed_out: Mutex::new(false),
             })
         }
@@ -1003,6 +1121,9 @@ mod tests {
                     .unwrap()
                     .map(|age| reading(agent, source, now - age, 30.0))),
                 Source::GetUsage if *self.claude_rate_limited.lock().unwrap() => rate_limited(),
+                Source::GetUsage if *self.claude_unsupported.lock().unwrap() => {
+                    Err(FetchError::Failed(ParseFailure::Unsupported))
+                }
                 _ => Ok(Some(reading(agent, source, now, 20.0))),
             };
             Box::pin(async move { outcome })
@@ -1156,11 +1277,11 @@ mod tests {
             .collect()
     }
 
-    /// AC13：选了固定 1 分钟档，get_usage 严格每分钟一次
+    /// AC13：选了固定 5 分钟档，get_usage 严格每 5 分钟一次
     #[tokio::test(start_paused = true)]
-    async fn fixed_1_min_setting_runs_get_usage_every_minute() {
+    async fn fixed_5_min_setting_runs_get_usage_every_5_minutes() {
         let settings = UsageSettings {
-            refresh: Refresh::Every1,
+            refresh: Refresh::Every5,
             ..menu_bar_on()
         };
         let r = start(settings, |_, _| {});
@@ -1168,7 +1289,7 @@ mod tests {
         let (_, fetcher) = r.stop().await;
         assert_eq!(
             claude_times(&fetcher),
-            (0..60).map(|i| i * 60).collect::<Vec<_>>()
+            (0..12).map(|i| i * 300).collect::<Vec<_>>()
         );
     }
 
@@ -1235,6 +1356,95 @@ mod tests {
             .find(|a| a.agent == AgentId::ClaudeCode)
             .unwrap();
         assert!(matches!(claude.status, UsageStatus::RateLimited { .. }));
+    }
+
+    /// 旧版 Claude Code（get_usage 回 Unsupported）：之后两小时后台不再起 claude，打开托盘也不起；
+    /// 托盘一直写「版本可能太旧」；手动刷新起一次
+    #[tokio::test(start_paused = true)]
+    async fn unsupported_stops_background_probes_until_manual_refresh() {
+        let settings = UsageSettings {
+            refresh: Refresh::Every5,
+            ..menu_bar_on()
+        };
+        let r = start(settings, |f, _| {
+            *f.claude_unsupported.lock().unwrap() = true
+        });
+        advance(2 * 3600).await;
+        r.handle.send(Command::Opened);
+        r.handle.send(Command::Refresh(Some(AgentId::Codex)));
+        advance(1).await;
+        assert_eq!(claude_times(&r.fetcher), vec![0]);
+        let last = r.host.published.lock().unwrap().last().cloned().unwrap();
+        let claude = last
+            .agents
+            .iter()
+            .find(|a| a.agent == AgentId::ClaudeCode)
+            .unwrap();
+        assert_eq!(
+            claude.status,
+            UsageStatus::Failing {
+                reason: FailReason::Unsupported
+            }
+        );
+
+        r.handle.send(Command::Refresh(Some(AgentId::ClaudeCode)));
+        advance(1).await;
+        assert_eq!(r.fetcher.count(Source::GetUsage), 2, "手动刷新起一次");
+        // 还是旧版：又停下来
+        advance(3600).await;
+        let (_, fetcher) = r.stop().await;
+        assert_eq!(fetcher.count(Source::GetUsage), 2);
+    }
+
+    /// 「再试一次」：1 分钟前刚起过 claude，打开托盘照旧不起（5 分钟），点「再试一次」当场起一次——
+    /// 只起一次（同一轮里不连跑），只碰这一个 agent；跑完才回话
+    #[tokio::test(start_paused = true)]
+    async fn retry_within_spacing_probes_immediately_once() {
+        let r = start(menu_bar_on(), |_, _| {});
+        advance(60).await;
+        r.handle.send(Command::Opened);
+        advance(1).await;
+        assert_eq!(r.fetcher.count(Source::GetUsage), 1, "打开托盘仍按 5 分钟");
+        let before = r.fetcher.calls().len();
+        r.handle.retry(AgentId::ClaudeCode).await.unwrap();
+        assert_eq!(r.fetcher.count(Source::GetUsage), 2, "回话时已经取过");
+        let after = r.fetcher.calls()[before..].to_vec();
+        assert_eq!(after.len(), 1, "{after:?}");
+        advance(1).await;
+        let (_, fetcher) = r.stop().await;
+        assert_eq!(fetcher.count(Source::GetUsage), 2);
+    }
+
+    /// 「再试一次」在限流退避期间也不起 claude；没得跑也照样回话（界面上的「正在读取…」要收回）
+    #[tokio::test(start_paused = true)]
+    async fn retry_during_rate_limit_backoff_does_not_probe() {
+        let r = start(menu_bar_on(), |f, _| {
+            *f.claude_rate_limited.lock().unwrap() = true
+        });
+        advance(60).await;
+        r.handle.retry(AgentId::ClaudeCode).await.unwrap();
+        let (_, fetcher) = r.stop().await;
+        assert_eq!(fetcher.count(Source::GetUsage), 1);
+    }
+
+    /// 旧版 Claude Code 停下后台之后，「再试一次」不等间隔、当场再试（用户多半刚更新完）
+    #[tokio::test(start_paused = true)]
+    async fn retry_clears_unsupported_and_probes_within_spacing() {
+        let r = start(menu_bar_on(), |f, _| {
+            *f.claude_unsupported.lock().unwrap() = true
+        });
+        advance(60).await;
+        *r.fetcher.claude_unsupported.lock().unwrap() = false;
+        r.handle.retry(AgentId::ClaudeCode).await.unwrap();
+        let (host, fetcher) = r.stop().await;
+        assert_eq!(fetcher.count(Source::GetUsage), 2);
+        let last = host.published.lock().unwrap().last().cloned().unwrap();
+        let claude = last
+            .agents
+            .iter()
+            .find(|a| a.agent == AgentId::ClaudeCode)
+            .unwrap();
+        assert_eq!(claude.status, UsageStatus::Ok);
     }
 
     /// 只刷一个 agent 时不碰另一个

@@ -38,7 +38,7 @@ use crate::models::Harness;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ===== 解析粘贴的配置（R8）=====
 
@@ -1522,10 +1522,12 @@ fn report_entry(name: &str, target_id: &str, outcome: &str, message: &str) -> Mc
 /// 报告里 `created`；已有一样的、写不过去的是 `skipped` + 原因；写的时候出错是 `failed`。
 /// 撤销记录在报告里（`take_undo`），与 MCP 页的写入同一种，交给 `mcp_undo_write`。
 /// 会写 `~/.codex/config.toml`：调用方先拿 `config_lock`
+/// 改已有文件前的备份放进 `backups`（Sophia 的备份目录，见 `atomicfile::backup`）
 pub fn write_definitions(
     env: &Env,
     harnesses: &[Harness],
     request: &McpInstallRequest,
+    backups: &Path,
 ) -> McpReport {
     let built = build_all(request, Mode::Write, harnesses);
     let mut private = Vec::new();
@@ -1572,7 +1574,7 @@ pub fn write_definitions(
         issues: Vec::new(),
         private,
     };
-    let mut report = execute(plan, false);
+    let mut report = execute(plan, false, backups);
     report.entries.extend(skipped);
     report
 }
@@ -1581,7 +1583,7 @@ pub fn write_definitions(
 mod tests {
     use super::*;
     use crate::mcp::undo_write;
-    use crate::test_support::TempTree;
+    use crate::test_support::{backups, TempTree};
     use std::fs;
     use std::path::Path;
 
@@ -2045,6 +2047,7 @@ API_KEY = "${DOCS_KEY}"
                 &["claude-desktop"],
                 &[("GITHUB_TOKEN", SECRET)],
             ),
+            backups(),
         );
         let outcomes: Vec<_> = report
             .entries
@@ -2114,6 +2117,7 @@ API_KEY = "${DOCS_KEY}"
                 &["claude-code"],
                 &[("GITHUB_TOKEN", "tok-1")],
             ),
+            backups(),
         );
         assert_eq!(report.entries.len(), 1);
         assert_eq!(report.entries[0].outcome, "skipped");
@@ -2183,7 +2187,7 @@ API_KEY = "${DOCS_KEY}"
             check(&checks, "github-copilot").note.as_deref(),
             Some("新开会话后生效 · 在 Copilot 里信任这个文件夹后生效")
         );
-        let report = write_definitions(&env, &six(), &request);
+        let report = write_definitions(&env, &six(), &request, backups());
         assert!(report.entries.iter().all(|e| e.outcome == "created"));
         let mcp: Value =
             serde_json::from_slice(&fs::read(project.join(".mcp.json")).unwrap()).unwrap();
@@ -2221,7 +2225,7 @@ API_KEY = "${DOCS_KEY}"
             assert_eq!(code.location_id, Some(local_id(&project)));
         }
         let request = request(vec![filesystem()], &key, &["claude-code"], &[]);
-        let report = write_definitions(&env, &six(), &request);
+        let report = write_definitions(&env, &six(), &request, backups());
         assert!(
             report.entries.iter().all(|e| e.outcome == "created"),
             "{:?}",
@@ -2254,7 +2258,7 @@ API_KEY = "${DOCS_KEY}"
             check(&checks, "claude-code").location_id,
             Some(format!("project:{}::claude-code", project.display()))
         );
-        let report = write_definitions(&env, &six(), &request);
+        let report = write_definitions(&env, &six(), &request, backups());
         assert!(report.entries.iter().all(|e| e.outcome == "created"));
         let mcp: Value =
             serde_json::from_slice(&fs::read(project.join(".mcp.json")).unwrap()).unwrap();
@@ -2278,7 +2282,7 @@ API_KEY = "${DOCS_KEY}"
         write(&claude, &before);
         let key = format!("project:{}", project.display());
         let request = request(vec![filesystem()], &key, &["claude-code"], &[]);
-        let report = write_definitions(&env, &six(), &request);
+        let report = write_definitions(&env, &six(), &request, backups());
         assert!(
             report.entries.iter().all(|e| e.outcome == "created"),
             "{:?}",
@@ -2313,7 +2317,7 @@ API_KEY = "${DOCS_KEY}"
         }
         let mut request = request(vec![filesystem()], "global", &["claude-code"], &[]);
         request.claude_code_scope = Some("team".into());
-        let report = write_definitions(&env, &six(), &request);
+        let report = write_definitions(&env, &six(), &request, backups());
         assert!(report.entries.iter().all(|e| e.outcome == "created"));
         let claude: Value =
             serde_json::from_slice(&fs::read(home.join(".claude.json")).unwrap()).unwrap();
@@ -2329,7 +2333,7 @@ API_KEY = "${DOCS_KEY}"
         let key = format!("project:{}", project.display());
         // 本地配置里已有一样的 filesystem
         let request_self = request(vec![filesystem()], &key, &["claude-code"], &[]);
-        let report = write_definitions(&env1, &six(), &request_self);
+        let report = write_definitions(&env1, &six(), &request_self, backups());
         assert!(report.entries.iter().all(|e| e.outcome == "created"));
 
         let checks = check_targets(&env1, &six(), &request_self);
@@ -2351,7 +2355,7 @@ API_KEY = "${DOCS_KEY}"
         let key = format!("project:{}", project.display());
         let mut request_team = request(vec![filesystem()], &key, &["claude-code"], &[]);
         request_team.claude_code_scope = Some("team".into());
-        write_definitions(&env, &six(), &request_team);
+        write_definitions(&env, &six(), &request_team, backups());
         let checks = check_targets(&env, &six(), &request_team);
         assert_eq!(check(&checks, "claude-code").status, McpTargetStatus::Same);
         let mut request_self = request_team.clone();
@@ -2384,7 +2388,7 @@ API_KEY = "${DOCS_KEY}"
             &[("GITHUB_TOKEN", SECRET)],
         );
         let checks = check_targets(&env, &six(), &request);
-        let mut report = write_definitions(&env, &six(), &request);
+        let mut report = write_definitions(&env, &six(), &request, backups());
         assert_eq!(report.entries.len(), 6, "{:?}", report.entries);
         assert!(
             report.entries.iter().all(|e| e.outcome == "created"),
@@ -2454,6 +2458,7 @@ API_KEY = "${DOCS_KEY}"
             &env,
             &six(),
             &request(vec![github()], "global", &["claude-code"], &[]),
+            backups(),
         );
         assert_eq!(report.entries[0].outcome, "skipped");
         assert_eq!(report.entries[0].message, "github 还有没填的 GITHUB_TOKEN");
@@ -2470,6 +2475,7 @@ API_KEY = "${DOCS_KEY}"
                 &["claude-code"],
                 &[("GITHUB_TOKEN", "${HOME}")],
             ),
+            backups(),
         );
         assert!(report.entries[0].message.contains("GITHUB_TOKEN 的值里有"));
         assert!(!home.join(".claude.json").exists());
@@ -2558,7 +2564,7 @@ API_KEY = "${DOCS_KEY}"
         );
 
         // 写：Gemini 里原样带上 trust 与 timeout；别家一个文件都不建
-        let mut report = write_definitions(&env, &six(), &only_g);
+        let mut report = write_definitions(&env, &six(), &only_g, backups());
         let outcomes: Vec<_> = report
             .entries
             .iter()
@@ -2625,7 +2631,7 @@ API_KEY = "${DOCS_KEY}"
                 Some("Codex 客户端设置 startup_timeout_sec 无法跨工具无损迁移")
             );
         }
-        let report = write_definitions(&env, &six(), &req);
+        let report = write_definitions(&env, &six(), &req, backups());
         let created: Vec<_> = report
             .entries
             .iter()
@@ -2666,7 +2672,12 @@ API_KEY = "${DOCS_KEY}"
                 Some("带有认不得的字段（disabled），照写会丢掉它")
             );
         }
-        let report = write_definitions(&env, &six(), &request(unknown, "global", &all, &[]));
+        let report = write_definitions(
+            &env,
+            &six(),
+            &request(unknown, "global", &all, &[]),
+            backups(),
+        );
         assert!(report.entries.iter().all(|e| e.outcome == "skipped"));
         // Codex 自己也写不了的 Codex 字段：连 Codex 也不写
         let codex = servers("[mcp_servers.x]\ncommand = \"x\"\nenabled_tools = [\"a\"]\n");
@@ -2689,6 +2700,7 @@ API_KEY = "${DOCS_KEY}"
                 &["claude-code"],
                 &[],
             ),
+            backups(),
         );
         assert!(report.take_undo().is_none());
         let mut leftovers = Vec::new();
@@ -2713,7 +2725,7 @@ API_KEY = "${DOCS_KEY}"
             check(&checks, "cursor").reason.as_deref(),
             Some("Cursor 不支持用命令生成请求头")
         );
-        let report = write_definitions(&env, &six(), &req);
+        let report = write_definitions(&env, &six(), &req, backups());
         assert_eq!(
             report
                 .entries

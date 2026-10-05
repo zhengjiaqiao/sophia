@@ -5,7 +5,6 @@ import { copy, withCopy } from "./copy.ts";
 import { render } from "./ui-render.ts";
 import {
   MODELS_TOOLS,
-  canRestore,
   effectiveModels,
   enableDisabledReason,
   modelLabel,
@@ -33,8 +32,6 @@ import {
   snapshotOrder,
   gatewayShortName,
   frozenGroups,
-  serviceLeftover,
-  uninstallTip,
   restartTip,
   predictEnabled,
   settleAfterRestart,
@@ -77,7 +74,7 @@ const provider = (overrides: Partial<GatewayProvider> = {}): GatewayProvider => 
   name: "wecode",
   baseUrl: "https://example.com/openai",
   protocol: "chat",
-  hasKey: true,
+  key: "set",
   models: [],
   ...overrides,
 });
@@ -89,7 +86,7 @@ const state = (overrides: Partial<CodexFixture> = {}): GatewayState =>
     providers: [provider()],
     enabled: false,
     needsCodexRestart: false,
-    router: { installed: false, running: false, port: 47328, error: "" },
+    router: { running: false, port: 47328, error: "" },
     codex: { version: "26.0", running: false, catalogVersion: "1", drift: false },
     conflict: "",
     takeover: null,
@@ -114,12 +111,27 @@ test("parseBackendError 剥离 [code] 前缀，读不出前缀时整段当作 in
   });
 });
 
+// spec 2026-10-04-local-diagnostics R13：技术原文跟在一句话之后另起一行 `[detail] `，拆进 detail，只把一句话给人看
+test("parseBackendError：`\\n[detail] ` 之后是技术原文，拆进 detail（可以多行）；没有就不带 detail", () => {
+  assert.deepEqual(
+    parseBackendError(
+      "[network] 服务商限流了，约 30 秒后再试\n[detail] GET https://x/models → 429 Too Many Requests\n{\"error\":1}",
+    ),
+    {
+      code: "network",
+      message: "服务商限流了，约 30 秒后再试",
+      detail: "GET https://x/models → 429 Too Many Requests\n{\"error\":1}",
+    },
+  );
+  assert.equal("detail" in parseBackendError("[auth] 鉴权失败"), false);
+});
+
 test("routerUnavailable 只在已启用且路由没跑时为真", () => {
   assert.equal(
     routerUnavailable(
       state({
         enabled: false,
-        router: { installed: true, running: false, port: 1, error: "" },
+        router: { running: false, port: 1, error: "" },
       }),
     ),
     false,
@@ -128,7 +140,7 @@ test("routerUnavailable 只在已启用且路由没跑时为真", () => {
     routerUnavailable(
       state({
         enabled: true,
-        router: { installed: true, running: true, port: 1, error: "" },
+        router: { running: true, port: 1, error: "" },
       }),
     ),
     false,
@@ -137,7 +149,7 @@ test("routerUnavailable 只在已启用且路由没跑时为真", () => {
     routerUnavailable(
       state({
         enabled: true,
-        router: { installed: true, running: false, port: 1, protocol: "chat", error: "占用" },
+        router: { running: false, port: 1, protocol: "chat", error: "占用" },
       }),
     ),
     true,
@@ -168,7 +180,7 @@ test("enableDisabledReason 按优先级返回原因：待接管 > 冲突 > 没�
           provider({
             id: "b",
             name: "缺钥匙的",
-            hasKey: false,
+            key: "missing",
             models: [model({ id: "m2", selected: true })],
           }),
         ],
@@ -183,7 +195,7 @@ test("enableDisabledReason 按优先级返回原因：待接管 > 冲突 > 没�
       state({
         providers: [
           provider({ id: "a", models: [model({ id: "m1", selected: true })] }),
-          provider({ id: "b", name: "闲着的", hasKey: false, models: [model({ id: "m2" })] }),
+          provider({ id: "b", name: "闲着的", key: "missing", models: [model({ id: "m2" })] }),
         ],
       }),
       1,
@@ -193,20 +205,47 @@ test("enableDisabledReason 按优先级返回原因：待接管 > 冲突 > 没�
   assert.equal(enableDisabledReason(state(), 1), null);
 });
 
-test("canRestore：已启用，或后台服务还装着", () => {
+test("开关禁用原因（R4）：密钥读不出不说「还没有密钥」，点名「X 的密钥不可用」", () => {
+  const selected = [model({ id: "m1", selected: true })];
+  // 一个能用的都没有、其中有读不出的：先说那几家不可用
   assert.equal(
-    canRestore(
+    enableDisabledReason(
       state({
-        enabled: false,
-        router: { installed: false, running: false, port: 1, error: "" },
+        providers: [
+          provider({ id: "a", name: "锁着的", key: "unreadable", models: selected }),
+          provider({ id: "b", name: "空的", key: "missing" }),
+        ],
       }),
+      1,
     ),
-    false,
+    "锁着的 的密钥不可用",
   );
-  assert.equal(canRestore(state({ enabled: true })), true);
+  // 选了模型的那几家里有读不出的：先说读不出的，不说「还没有密钥」
   assert.equal(
-    canRestore(state({ router: { installed: true, running: false, port: 1, error: "" } })),
-    true,
+    enableDisabledReason(
+      state({
+        providers: [
+          provider({ id: "a", name: "好的", models: selected }),
+          provider({ id: "b", name: "锁着的", key: "unreadable", models: selected }),
+          provider({ id: "c", name: "空的", key: "missing", models: selected }),
+        ],
+      }),
+      3,
+    ),
+    "锁着的 的密钥不可用",
+  );
+  // 读不出的那家没选模型：不挡路
+  assert.equal(
+    enableDisabledReason(
+      state({
+        providers: [
+          provider({ id: "a", models: selected }),
+          provider({ id: "b", name: "锁着的", key: "unreadable" }),
+        ],
+      }),
+      1,
+    ),
+    null,
   );
 });
 
@@ -450,8 +489,9 @@ test("selectModel：只翻这一家这一个模型；网关开着时去掉最后
   assert.equal(last.turnsOff, true);
   assert.equal(codexGateway(last.next).enabled, false);
   assert.equal(totalSelected(last.next), 0);
-  // 关掉的预测连路由一起：否则等结果那一下 `卸下后台服务` 会闪出来
-  assert.equal(serviceLeftover(last.next), false);
+  // 关掉的预测连路由一起：另一家没开着，路由跟着停
+  assert.equal(last.next.router.running, false);
+  assert.equal(codexGateway(last.next).codex.wanted, false);
 
   // 网关本来就关着：去掉最后一个只是去掉
   const closed = withAgentGateway(partial.next, { ...codexGateway(partial.next), enabled: false });
@@ -462,7 +502,7 @@ test("selectModel：只翻这一家这一个模型；网关开着时去掉最后
 test("路由没在跑：先自愈，自愈过仍没起来才出横幅", () => {
   const down = state({
     enabled: true,
-    router: { installed: true, running: false, port: 1, protocol: "chat", error: "x" },
+    router: { running: false, port: 1, protocol: "chat", error: "x" },
   });
   assert.equal(showRouterTodo(down, false), false);
   assert.equal(showRouterTodo(down, true), true);
@@ -478,7 +518,7 @@ test("modelIssues：接管 / 配置被外部改过 / 网关无法连接三类，
       state({
         enabled: true,
         needsCodexRestart: true,
-        router: { installed: true, running: false, port: 1, protocol: "chat", error: "x" },
+        router: { running: false, port: 1, protocol: "chat", error: "x" },
       }),
     ),
     [],
@@ -540,11 +580,9 @@ const slotProps = (overrides: Partial<CodexFixture> = {}) => ({
   tool: MODELS_TOOLS[0],
   state: state(overrides),
   busy: false,
-  uninstalling: false,
   phase: { kind: "idle" } as const,
   onRestart: noop,
   onLaunch: noop,
-  onUninstall: noop,
   onDoneDismiss: noop,
   place: "section" as const,
 });
@@ -560,7 +598,7 @@ test("CodexSwitch：标准开关（旁边不点指示点，开着由刻线说）
   assert.match(off, /role="switch" aria-checked="false"/);
   assert.match(
     off,
-    /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里；会改 ~\/\.codex\/config\.toml 里的一处设置</,
+    /role="tooltip"[^>]*>打开后，选好的模型会出现在 Codex 的模型列表里；会改 ~\/\.codex\/config\.toml 里的一处设置；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上</,
   );
 });
 
@@ -576,7 +614,7 @@ test("CodexSwitch 乐观翻转：拨下去写配置期间滑块已在拨过去�
   );
   assert.match(
     on,
-    /role="tooltip"[^>]*>关掉后，Codex 只保留官方模型；~\/\.codex\/config\.toml 会恢复原样</,
+    /role="tooltip"[^>]*>关掉后，Codex 只保留官方模型；~\/\.codex\/config\.toml 会恢复原样；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上</,
   );
   const off = render(CodexSwitch, {
     ...switchProps(withSelected({ enabled: true })),
@@ -915,19 +953,6 @@ test("ModelList：网关给了上下文长度就在行尾写读数（`1M`），�
   assert.equal((html.match(/model-list__context/g) ?? []).length, 1);
 });
 
-test("serviceLeftover：只有停用了、后台服务却还装着才算残留（关开关本身会卸下）", () => {
-  const router = (installed: boolean) => ({
-    installed,
-    running: installed,
-    port: 1,
-    protocol: "chat",
-    error: "",
-  });
-  assert.equal(serviceLeftover(state({ enabled: false, router: router(true) })), true);
-  assert.equal(serviceLeftover(state({ enabled: true, router: router(true) })), false);
-  assert.equal(serviceLeftover(state({ enabled: false, router: router(false) })), false);
-});
-
 // ===== 勾选不挪位置 =====
 
 const pinProvider = provider({ id: "g", name: "网关" });
@@ -1027,20 +1052,15 @@ test("模型列表：底部不再有「已选 N 个模型」；滚动区包在�
   assert.doesNotMatch(rule(".model-list__count"), /font-mono/);
 });
 
-test("predictEnabled：先画做成之后的样子（Codex 没在跑时删掉最后一个模型那一支）——开时路由在跑、关时服务已卸，提示不闪", () => {
+test("predictEnabled：先画做成之后的样子（Codex 没在跑时删掉最后一个模型那一支）——开时路由在跑、关时路由停了，提示不闪", () => {
   const router = state().router;
-  const on = predictEnabled(
-    state({ enabled: false, router: { ...router, installed: false, running: false } }),
-    true,
-  );
+  const on = predictEnabled(state({ enabled: false, router: { ...router, running: false } }), true);
   assert.equal(codexGateway(on).enabled, true);
+  assert.equal(codexGateway(on).codex.wanted, true);
   assert.equal(routerUnavailable(on), false);
-  const off = predictEnabled(
-    state({ enabled: true, router: { ...router, installed: true, running: true } }),
-    false,
-  );
+  const off = predictEnabled(state({ enabled: true, router: { ...router, running: true } }), false);
   assert.equal(codexGateway(off).enabled, false);
-  assert.equal(serviceLeftover(off), false);
+  assert.equal(off.router.running, false);
 });
 
 test("settleAfterRestart：发完结束信号等旧进程退——先读到旧配置不算失败，等到换上才算成；等满才说没换上", async () => {
@@ -1163,14 +1183,14 @@ test("开关拨了就写：第三方模型节拨开关直接走 switchGateway（
   assert.doesNotMatch(src, /GatewayPage|配置网关|ModelPicker|ModelBox/);
 });
 
-test("codexKeyKind：开关旁那一位一次只放一颗——等重启 > Codex 没在跑（开着）> 关着而后台服务还装着；忙的时候不出键", () => {
+test("codexKeyKind：开关旁那一位一次只放一颗——等重启 > Codex 没在跑（开着）；关着不出键（没有后台服务可卸）；忙的时候不出键", () => {
   const idle = { kind: "idle" } as const;
-  const router = { installed: true, running: true, port: 1, error: "" };
+  const router = { running: true, port: 1, error: "" };
   const running = { version: "26.0", running: true, catalogVersion: "1", drift: false };
   assert.equal(codexKeyKind(state({ enabled: true, needsCodexRestart: true }), idle), "restart");
   assert.equal(codexKeyKind(state({ enabled: true }), idle), "launch");
-  assert.equal(codexKeyKind(state({ enabled: false, router }), idle), "uninstall");
-  // 关着、服务还装着、又等着重启：让位给重启（原来 Codex 页两颗会并排出现）
+  assert.equal(codexKeyKind(state({ enabled: false, router }), idle), null);
+  // 关着、等着重启：出重启
   assert.equal(
     codexKeyKind(state({ enabled: false, router, needsCodexRestart: true }), idle),
     "restart",
@@ -1194,7 +1214,7 @@ test("Codex 能力控件只有一份：Codex 页节头与托盘能力行都用 c
     assert.match(src, /from "\.\/codexControls\.tsx"/);
     assert.match(src, /<CodexSwitch/);
     assert.match(src, /<CodexKeySlot/);
-    assert.doesNotMatch(src, /<Switch\b|uninstallTip|launchTip|restartTip|useBusyShown/);
+    assert.doesNotMatch(src, /<Switch\b|uninstall|launchTip|restartTip|useBusyShown/);
   }
   // 页面文件里不再写组件库的内部类
   for (const file of [
@@ -1220,27 +1240,23 @@ const claude = (enabled: boolean, providers: GatewayProvider[] = []) => ({
   providers,
 });
 
-test("R46 路由两家共用：只有 Claude 开着时路由没在跑也要说；关掉 Codex 而 Claude 开着时不把路由画成已卸、不出 `卸下后台服务`", () => {
-  const down = { installed: true, running: false, port: 1, error: "" };
-  const up = { installed: true, running: true, port: 1, error: "" };
+test("R46 路由两家共用：只有 Claude 开着时路由没在跑也要说；关掉 Codex 而 Claude 开着时不把路由画成停了", () => {
+  const down = { running: false, port: 1, error: "" };
+  const up = { running: true, port: 1, error: "" };
   const claudeOn = state({ enabled: false, router: down, claude: claude(true) });
   assert.equal(anyGatewayOn(claudeOn), true);
   assert.equal(routerUnavailable(claudeOn), true);
   assert.equal(showRouterTodo(claudeOn, true), true);
   assert.equal(anyGatewayOn(state({ enabled: false })), false);
-  // 关掉 Codex、Claude 还开着：路由服务留着（R8），预测不把它画成已卸
+  // 关掉 Codex、Claude 还开着：路由留着（R8），预测不把它画成停了
   const off = predictEnabled(state({ enabled: true, router: up, claude: claude(true) }), false);
   assert.equal(codexGateway(off).enabled, false);
-  assert.equal(off.router.installed, true);
   assert.equal(off.router.running, true);
-  // 两家都关才是残留、才出 `卸下后台服务`
-  assert.equal(serviceLeftover(state({ enabled: false, router: up, claude: claude(true) })), false);
   assert.equal(
     codexKeyKind(state({ enabled: false, router: up, claude: claude(true) }), { kind: "idle" }),
     null,
   );
-  assert.equal(serviceLeftover(state({ enabled: false, router: up, claude: claude(false) })), true);
-  // Claude 拨关了、等重启生效（桌面应用里还写着 Sophia）：仍在用路由，不出 `卸下后台服务`、路由停了照样提醒
+  // Claude 拨关了、等重启生效（桌面应用里还写着 Sophia）：仍在用路由，路由停了照样提醒
   const pendingOff = {
     ...claude(false),
     claude: {
@@ -1248,8 +1264,10 @@ test("R46 路由两家共用：只有 Claude 开着时路由没在跑也要说�
       desktop: { ...CLAUDE_OFF.claude!.desktop, applied: true, pending: true, needsRestart: true },
     },
   };
-  assert.equal(serviceLeftover(state({ enabled: false, router: up, claude: pendingOff })), false);
-  assert.equal(routerUnavailable(state({ enabled: false, router: down, claude: pendingOff })), true);
+  assert.equal(
+    routerUnavailable(state({ enabled: false, router: down, claude: pendingOff })),
+    true,
+  );
   // 打开 Codex 的预测不动 Claude 那一份
   const on = predictEnabled(state({ enabled: false, claude: claude(true) }), true);
   assert.equal(on.agents.find((a) => a.agent === "claude")?.enabled, true);
@@ -1268,7 +1286,7 @@ test("列表行上 Codex 开关按不动的原因：说「怎么办」——没�
   // 别的原因（冲突、缺密钥）照原话
   assert.equal(
     codexListSwitchReason(
-      state({ providers: [provider({ hasKey: false, models: [model({ selected: true })] })] }),
+      state({ providers: [provider({ key: "missing", models: [model({ selected: true })] })] }),
     ),
     "请先保存网关密钥",
   );
@@ -1326,7 +1344,7 @@ test("删网关确认的正文随勾选变（R43）：不勾说另一家不受�
     removeConfirmText(mine, { name: "Claude", providers: [apC] }, true).body,
     "两家的地址和密钥都删掉，删除后无法恢复",
   );
-  const plain = { body: "地址和钥匙串里的密钥一起删掉，删除后无法恢复", also: null };
+  const plain = { body: "地址和密钥一起删掉，删除后无法恢复", also: null };
   assert.deepEqual(removeConfirmText(mine, { name: "Claude", providers: [] }, false), plain);
   assert.deepEqual(removeConfirmText(mine, null, true), plain);
 });

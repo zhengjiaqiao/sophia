@@ -4,6 +4,7 @@ use crate::discovery::Env;
 use crate::fs::normalize;
 use crate::jsonedit::{self, Layout, NoDuplicates};
 use crate::models::{AutoRun, Harness};
+use crate::redact::{secretish, url_without_secrets};
 use agents::Dialect;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -571,7 +572,7 @@ pub struct McpUndoReport {
 #[serde(rename_all = "camelCase")]
 pub struct McpUndoFileResult {
     pub target_path: PathBuf,
-    /// 写入时留下的 `.mcp.bak`；新建文件的写入没有备份。撤不了时前端据此「在访达中显示备份」
+    /// 写入前留下的备份（在 Sophia 的备份目录里，见 `atomicfile::backup`）；新建文件的写入没有备份。撤不了时前端据此「在访达中显示备份」
     pub backup_path: Option<PathBuf>,
     /// `restored` / `removed` / `changed`（写后被改过）/ `unchanged`（没被改过，但因别的文件被改过而未动）
     /// / `failed` / `skipped`（前面的文件失败后未尝试）
@@ -641,9 +642,12 @@ pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
                 failed = true;
                 files.push(result(file, "changed", undo_changed_message()));
             }
-            Err(_) => {
+            Err(error) => {
                 failed = true;
-                files.push(result(file, "failed", crate::t!("mcp.undo.fileFailed")));
+                // 磁盘满、没权限、只读说人话，别的照旧（原文进日志，spec 2026-10-04-local-diagnostics R12）
+                let message =
+                    write_failed_message(&file.target, &error, || crate::t!("mcp.undo.fileFailed"));
+                files.push(result(file, "failed", message));
             }
         }
     }
@@ -883,6 +887,11 @@ pub fn discover_locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]
             }
         }
     }
+    // 软链接的设置文件改它指向的真实文件（spec 2026-10-05-mcp-symlink-config R1）：之后扫描、写入、备份都按真实路径。
+    // 只对上面这些普通位置做：WeiboAP 的数据库位置有自己的目录规则（模式检查、备份都按原目录），不解析
+    for location in &mut out {
+        location.path = resolve_symlinks(&location.path);
+    }
     #[cfg(feature = "weiboap")]
     let issues = {
         let (weibo_locations, issues) = weiboap::discover(env, harnesses);
@@ -895,6 +904,51 @@ pub fn discover_locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]
         locations: out,
         issues,
     }
+}
+
+/// 路径里有软链接（文件本身或某一级父目录）就换成解析后的真实路径；文件还不存在时解析它的父目录（父目录是软链接、
+/// 第一次写入也要落到真实目录）；解析不出（坏链）或没有软链接就原样。
+/// 两种不换：macOS 的 `/var`、`/tmp`、`/etc` 本身是指向 `/private/…` 的软链接（项目可能放在 /tmp 下），不算用户的
+/// 软链接，换了之后路径和用户看到的、项目记录里的对不上；文件名的扩展名变了（`config.toml → codex-config`）也不换，
+/// 读写按扩展名分 JSON / TOML，换了会认错格式。只在 Unix 上做：Windows 的 canonicalize 会带 `\\?\` 前缀，
+/// 比不出有没有软链接，而且 Windows 还没验证过
+fn resolve_symlinks(path: &Path) -> PathBuf {
+    if !cfg!(unix) {
+        return path.to_path_buf();
+    }
+    let normalized = normalize(path);
+    // 文件或它的某几级父目录还不存在：解析最近的那一级存在的祖先，再把缺的几段拼回去
+    // （项目本身是软链接、里面还没有 .cursor 时，第一次写入也要落到真实项目里）
+    let real = crate::fs::real_path(path).or_else(|| {
+        let mut missing = Vec::new();
+        let mut ancestor = path.parent()?;
+        missing.push(path.file_name()?);
+        loop {
+            if let Some(real) = crate::fs::real_path(ancestor) {
+                return Some(missing.iter().rev().fold(real, |acc, part| acc.join(part)));
+            }
+            missing.push(ancestor.file_name()?);
+            ancestor = ancestor.parent()?;
+        }
+    });
+    match real {
+        Some(real)
+            if real != normalized
+                && !only_private_prefix(&real, &normalized)
+                && real.extension() == path.extension() =>
+        {
+            real
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
+/// `real` 只比 `normalized` 多了 macOS 的 `/private` 前缀
+fn only_private_prefix(real: &Path, normalized: &Path) -> bool {
+    cfg!(target_os = "macos")
+        && normalized
+            .strip_prefix("/")
+            .is_ok_and(|rest| real == Path::new("/private").join(rest))
 }
 
 /// 同一个 agent、同一种写法（原样搬的前提，见 `RawServer`）
@@ -1143,61 +1197,6 @@ fn secret_value(value: &str) -> McpFieldValue {
     // 短于 12 个字符时末 4 位占去三分之一以上，宁可不给
     let last4 = (chars.len() >= 12).then(|| chars[chars.len() - 4..].iter().collect());
     McpFieldValue::Secret { last4 }
-}
-
-/// URL 里的凭据：查询串与 `#` 片段里的值换成 `…`、键留着（`?api_key=…`、`#access_token=…`）；
-/// 地址里的账号密码（`https://user:pass@host`）整段换成 `…:…@`，账号本身也可能是令牌，一并不给
-fn url_without_secrets(url: &str) -> String {
-    let (url, fragment) = match url.split_once('#') {
-        Some((url, fragment)) => (url, Some(fragment)),
-        None => (url, None),
-    };
-    let (base, query) = match url.split_once('?') {
-        Some((base, query)) => (base, Some(query)),
-        None => (url, None),
-    };
-    let mut out = match base.split_once("://") {
-        Some((scheme, rest)) => {
-            let end = rest.find('/').unwrap_or(rest.len());
-            match rest[..end].rsplit_once('@') {
-                Some((userinfo, host)) => {
-                    let masked = if userinfo.contains(':') {
-                        "…:…"
-                    } else {
-                        "…"
-                    };
-                    format!("{scheme}://{masked}@{host}{}", &rest[end..])
-                }
-                None => base.to_owned(),
-            }
-        }
-        None => base.to_owned(),
-    };
-    let mask_pairs = |part: &str| {
-        part.split('&')
-            .map(|pair| match pair.split_once('=') {
-                Some((key, _)) => format!("{key}=…"),
-                None => pair.to_owned(),
-            })
-            .collect::<Vec<_>>()
-            .join("&")
-    };
-    if let Some(query) = query {
-        out = format!("{out}?{}", mask_pairs(query));
-    }
-    if let Some(fragment) = fragment {
-        out = format!("{out}#{}", mask_pairs(fragment));
-    }
-    out
-}
-
-fn secretish(word: &str) -> bool {
-    let lower = word.to_ascii_lowercase();
-    [
-        "key", "token", "secret", "password", "auth", "bearer", "cookie",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
 }
 
 /// 参数串是纯文本，凭据按 `secret_value` 的规则嵌进去：`…` 加末 4 位，太短只给 `…`
@@ -1638,18 +1637,24 @@ pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> Prepar
     }
 }
 
-pub fn execute(plan: PreparedPlan, allow_cross_domain: bool) -> McpReport {
+/// `backups` 是 Sophia 的备份目录（`<数据目录>/backups`，见 `atomicfile::backup`）；改已有文件前先备份到那里
+pub fn execute(plan: PreparedPlan, allow_cross_domain: bool, backups: &Path) -> McpReport {
     let mut report = McpReport::default();
     let mut groups: BTreeMap<String, Vec<Pending>> = BTreeMap::new();
     for pending in plan.private {
         groups.entry(group_key(&pending)).or_default().push(pending);
     }
     for group in groups.into_values() {
-        execute_group(group, allow_cross_domain, &mut report);
+        execute_group(group, allow_cross_domain, backups, &mut report);
     }
     report
 }
-fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut McpReport) {
+fn execute_group(
+    group: Vec<Pending>,
+    allow_cross_domain: bool,
+    backups: &Path,
+    report: &mut McpReport,
+) {
     let fail = |report: &mut McpReport, message: &str| {
         for pending in &group {
             report
@@ -1702,10 +1707,13 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
         }
     };
     let backup = match &group[0].target {
-        State::Present(snap) => match backup(path, snap) {
+        State::Present(snap) => match backup(path, snap, backups) {
             Ok(path) => Some(path),
-            Err(_) => {
-                fail(report, &crate::t!("mcp.report.backupFailedNotWritten"));
+            Err(error) => {
+                let message = backup_failed_message(path, &error, || {
+                    crate::t!("mcp.report.backupFailedNotWritten")
+                });
+                fail(report, &message);
                 return;
             }
         },
@@ -1714,12 +1722,14 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
         #[cfg(feature = "weiboap")]
         State::Weibo(_) => unreachable!("WeiboAP groups are handled above"),
     };
-    if atomic_write(path, &bytes, &group[0].target).is_err() {
+    if let Err(error) = atomic_write(path, &bytes, &group[0].target) {
+        let message =
+            write_failed_message(path, &error, || crate::t!("mcp.report.atomicWriteFailed"));
         for (index, pending) in group.iter().enumerate() {
             report.entries.push(entry(
                 &pending.action,
                 "failed",
-                &crate::t!("mcp.report.atomicWriteFailed"),
+                &message,
                 (index == 0).then(|| backup.clone()).flatten(),
             ));
         }
@@ -1734,6 +1744,29 @@ fn execute_group(group: Vec<Pending>, allow_cross_domain: bool, report: &mut Mcp
             (index == 0).then(|| backup.clone()).flatten(),
         ));
     }
+}
+
+/// 写配置没写成时给用户的一句（spec 2026-10-04-local-diagnostics R12）：磁盘满、没权限、只读、被改过各说各的，
+/// 别的原因用调用处自己的那一句（`other`）；原文进日志
+pub(super) fn write_failed_message(
+    path: &Path,
+    error: &io::Error,
+    other: impl FnOnce() -> String,
+) -> String {
+    log::warn!("写 MCP 配置 {} 失败：{error}", path.display());
+    crate::report::count_write_failure(error);
+    atomicfile::write_failure(error)
+        .untouched()
+        .unwrap_or_else(other)
+}
+
+/// 备份没做成时给用户的一句：磁盘满、没权限、只读说「备份时…，没动」，别的（含「已存在」）用调用处那一句；原文进日志
+pub(super) fn backup_failed_message(
+    path: &Path,
+    error: &io::Error,
+    other: impl FnOnce() -> String,
+) -> String {
+    atomicfile::backup_failure_text(path, error).unwrap_or_else(other)
 }
 
 /// 写成功后立刻读回，记下写后指纹。读回的内容不是我们刚写的（写后瞬间又被别人改了），
@@ -2901,9 +2934,9 @@ fn toml(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str()) == Some("toml")
 }
 
-/// MCP 的备份固定用 `mcp` 后缀：`config.mcp.bak`、`config.mcp.1.bak`……
-fn backup(path: &Path, snap: &Snapshot) -> io::Result<PathBuf> {
-    atomicfile::backup(path, snap, "mcp")
+/// MCP 的备份固定用 `mcp` 后缀，放进 Sophia 的备份目录 `backups`：`<原文件名>-<哈希>/000001-mcp.bak`……
+fn backup(path: &Path, snap: &Snapshot, backups: &Path) -> io::Result<PathBuf> {
+    atomicfile::backup(path, snap, "mcp", backups)
 }
 /// 只有 Missing / Present 可写；Bad 与 Weibo 在这里拒绝，不进入共享的原子写。
 fn atomic_write(path: &Path, bytes: &[u8], expected: &State) -> io::Result<()> {
@@ -3185,6 +3218,83 @@ mod tests {
         }
     }
 
+    /// AC1–AC3：设置文件或父目录是软链接 → 位置用真实路径；坏链原样保留，读出来是拒绝
+    #[test]
+    #[cfg(unix)]
+    fn symlinked_config_paths_resolve_to_the_real_file() {
+        use crate::test_support::TempTree;
+        let t = TempTree::new();
+        let home = t.dir("home");
+        let real_claude = t.dir("dotfiles").join("claude.json");
+        std::fs::write(&real_claude, b"{}").unwrap();
+        t.link(&home.join(".claude.json"), &real_claude);
+        // 父目录是软链接、文件还不存在：解析父目录，第一次写入落到真实目录
+        let real_cursor = t.dir("dotfiles/cursor");
+        t.link(&home.join(".cursor"), &real_cursor);
+        // 扩展名变了：不解析（读写按扩展名分格式）
+        let odd = t.dir("dotfiles").join("gemini-settings");
+        std::fs::write(&odd, b"{}").unwrap();
+        t.dir("home/.gemini");
+        t.link(&home.join(".gemini/settings.json"), &odd);
+        t.dir("home/.codex");
+        t.link(&home.join(".codex/config.toml"), &t.root().join("gone"));
+        let harness = |id: &str| Harness {
+            id: id.into(),
+            display_name: id.into(),
+            project_dir: None,
+            global_dir: None,
+            universal: false,
+            agent_dirs: Vec::new(),
+            managed_global_dir: false,
+            agent_labels: None,
+        };
+        let env = Env {
+            home: home.clone(),
+            vars: Default::default(),
+        };
+        let found = locations(
+            &env,
+            &[
+                harness("claude-code"),
+                harness("cursor"),
+                harness("codex"),
+                harness("gemini-cli"),
+            ],
+            &[],
+        );
+        let path_of = |id: &str| found.iter().find(|l| l.id == id).unwrap().path.clone();
+        assert_eq!(path_of("claude-code"), real_claude);
+        assert_eq!(path_of("cursor"), real_cursor.join("mcp.json"));
+        assert_eq!(path_of("gemini-cli"), home.join(".gemini/settings.json"));
+        assert!(matches!(read(&path_of("gemini-cli")), State::Bad(_)));
+        // 坏链：原样保留，读出来是拒绝
+        assert_eq!(path_of("codex"), home.join(".codex/config.toml"));
+        assert!(matches!(read(&path_of("codex")), State::Bad(_)));
+        // 项目本身是软链接、里面还没有 .cursor：解析到真实项目再拼回去
+        let real_project = t.dir("dotfiles/proj");
+        t.link(&home.join("proj"), &real_project);
+        let linked = locations(
+            &env,
+            &[harness("cursor")],
+            std::slice::from_ref(&home.join("proj")),
+        );
+        let linked_loc = linked
+            .iter()
+            .find(|l| l.domain.starts_with("project:"))
+            .unwrap();
+        assert_eq!(linked_loc.path, real_project.join(".cursor/mcp.json"));
+        // macOS 的 /var → /private/var 不算用户的软链接：没 canonicalize 过的项目路径原样保留
+        let project = std::env::temp_dir().join("sophia-symlink-test-project");
+        std::fs::create_dir_all(&project).unwrap();
+        let in_project = locations(&env, &[harness("cursor")], std::slice::from_ref(&project));
+        let project_loc = in_project
+            .iter()
+            .find(|l| l.domain.starts_with("project:"))
+            .unwrap();
+        assert_eq!(project_loc.path, project.join(".cursor/mcp.json"));
+        let _ = std::fs::remove_dir(&project);
+    }
+
     #[test]
     fn blank_codex_home_falls_back_to_home_directory() {
         let harness = Harness {
@@ -3288,7 +3398,7 @@ mod endpoint_tests {
 #[cfg(test)]
 mod undo_tests {
     use super::*;
-    use crate::test_support::TempTree;
+    use crate::test_support::{backups, TempTree};
 
     fn loc(id: &str, path: &Path) -> McpLocation {
         McpLocation {
@@ -3321,7 +3431,7 @@ mod undo_tests {
             locations.push(loc(&id, target));
             selections.push(sel(&id));
         }
-        let mut report = execute(prepare(&locations, &selections), false);
+        let mut report = execute(prepare(&locations, &selections), false, backups());
         assert!(report
             .entries
             .iter()
@@ -3499,7 +3609,7 @@ mod undo_tests {
             name: "docs".into(),
             target_id: "target".into(),
         };
-        let report = execute(prepare(&locations, &[selection]), false);
+        let report = execute(prepare(&locations, &[selection]), false, backups());
         assert_eq!(report.entries[0].outcome, "created");
         let written = parse_toml(&fs::read(&target).unwrap(), State::Missing);
         assert_eq!(
@@ -3519,8 +3629,81 @@ mod undo_tests {
         let locations = vec![loc("source", &source), loc("t0", &target)];
         let plan = prepare(&locations, &[sel("t0")]);
         fs::write(&target, b"{\"mcpServers\":{}}").unwrap();
-        let mut report = execute(plan, false);
+        let mut report = execute(plan, false, backups());
         assert_eq!(report.entries[0].outcome, "failed");
         assert!(report.take_undo().is_none());
+    }
+
+    /// spec 2026-10-04-local-diagnostics R12 / AC11：目标所在的文件夹不让写时说「没有写入权限」，
+    /// 不再一律说写入失败；文件一个字节没动（以 root 运行时权限不拦，跳过）
+    #[cfg(unix)]
+    #[test]
+    fn write_into_a_read_only_folder_says_no_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let tree = TempTree::new();
+        let source = tree.root().join("source.json");
+        let dir = tree.dir("ro");
+        let target = dir.join("target.json");
+        fs::write(&source, br#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        fs::write(&target, ORIGINAL).unwrap();
+        let locations = vec![loc("source", &source), loc("t0", &target)];
+        let plan = prepare(&locations, &[sel("t0")]);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+        if fs::write(dir.join("probe"), b"x").is_ok() {
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let report = execute(plan, false, backups());
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(report.entries[0].outcome, "failed");
+        assert_eq!(report.entries[0].message, "没有写入权限，没动");
+        assert_eq!(fs::read(&target).unwrap(), ORIGINAL);
+    }
+
+    /// 备份目录不让写：说「备份时没有写入权限」，不再只说备份失败（Codex 复审 6/7）
+    #[cfg(unix)]
+    #[test]
+    fn backup_into_a_read_only_folder_says_why() {
+        use std::os::unix::fs::PermissionsExt;
+        let tree = TempTree::new();
+        let source = tree.root().join("source.json");
+        let target = tree.root().join("target.json");
+        let locked = tree.dir("locked");
+        let ro = locked.join("backups");
+        fs::write(&source, br#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        fs::write(&target, ORIGINAL).unwrap();
+        let plan = prepare(&[loc("source", &source), loc("t0", &target)], &[sel("t0")]);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+        if fs::write(locked.join("probe"), b"x").is_ok() {
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let report = execute(plan, false, &ro);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(report.entries[0].outcome, "failed");
+        assert_eq!(report.entries[0].message, "备份时没有写入权限，没动");
+        assert_eq!(fs::read(&target).unwrap(), ORIGINAL);
+    }
+
+    /// 撤销写回时文件夹不让写：那一份说「没有写入权限」，不再只说撤销失败
+    #[cfg(unix)]
+    #[test]
+    fn undo_into_a_read_only_folder_says_why() {
+        use std::os::unix::fs::PermissionsExt;
+        let tree = TempTree::new();
+        let dir = tree.dir("ro");
+        let target = dir.join("target.json");
+        fs::write(&target, ORIGINAL).unwrap();
+        let (_, undo) = write(&tree, &[&target]);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+        if fs::write(dir.join("probe"), b"x").is_ok() {
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let result = undo_write(&undo);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(result.outcome, "failed");
+        assert_eq!(result.files[0].outcome, "failed");
+        assert_eq!(result.files[0].message, "没有写入权限，没动");
     }
 }

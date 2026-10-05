@@ -13,6 +13,14 @@ export const trayUsageOf = (s: AgentState, agent: string): TrayUsage | null =>
 export const usageHeadNote = (s: AgentState, agent: string): string | null =>
   trayUsageOf(s, agent)?.updatedText ?? null;
 
+/// 原因行右端那一处（2026-10-03 产品负责人）：`retry`＝「再试一次」，`retrying`＝刻度 +「正在读取」，
+/// null＝什么都不给。能不能再试由后端按原因算好（`usage.retry`）；取到了（原因行没了）就正常画，不留「正在读取」
+export function usageNoteAction(usage: TrayUsage, retrying: boolean): "retry" | "retrying" | null {
+  if (usage.note === null) return null;
+  if (retrying) return "retrying";
+  return usage.retry ? "retry" : null;
+}
+
 /// 这个 agent 登录了没有（R5：Claude 块只在 Claude Code 已登录时出现）；用量还没读回来是 null（先不列）
 export const usageSignedIn = (s: AgentState, agent: UsageAgentId): boolean | null =>
   s.usage === null ? null : s.usage.signedIn.includes(agent);

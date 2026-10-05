@@ -50,3 +50,10 @@ impl TempTree {
         junction::create(to, at).expect("junction");
     }
 }
+
+/// 测试用的备份目录（`atomicfile::backup` 的 root）：整个测试进程共用一份临时目录，不碰真实数据目录。
+/// 备份按原文件分目录，各测试的原文件路径不同，互不干扰
+pub fn backups() -> &'static Path {
+    static TREE: std::sync::OnceLock<TempTree> = std::sync::OnceLock::new();
+    TREE.get_or_init(TempTree::new).root.as_path()
+}

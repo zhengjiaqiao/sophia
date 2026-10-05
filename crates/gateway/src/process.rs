@@ -73,6 +73,46 @@ pub fn is_codex_background(command: &str) -> bool {
     }
 }
 
+/// 不是交互式会话的子命令（`codex exec` 跑完就退、`codex mcp-server` 是别人拉起的服务…）。
+/// 不在这里的都算交互式：没有子命令、`resume`、或者直接带提示词（`codex "修个 bug"`，提示词会占到子命令位）
+const NON_INTERACTIVE: [&str; 18] = [
+    "app-server",
+    "exec",
+    "e",
+    "mcp-server",
+    "mcp",
+    "login",
+    "logout",
+    "apply",
+    "a",
+    "completion",
+    "debug",
+    "sandbox",
+    "proto",
+    "cloud",
+    "features",
+    "help",
+    "responses-api-proxy",
+    "stdio-to-uds",
+];
+
+/// 是不是用户在终端里跑的交互式 `codex`（与 [`is_codex_background`] 相反的那一类）：退出 Sophia 时重启 Codex
+/// 不碰它，确认框要提醒用户自己重启（spec 2026-10-03-gateway-in-app R6）。
+/// 可执行名是 `codex`、不在应用包里（桌面应用自带的那份只会是后台形态）、子命令不是一次性或服务类的
+pub fn is_codex_interactive(command: &str) -> bool {
+    let mut tokens = command.split_whitespace();
+    let Some(first) = tokens.next() else {
+        return false;
+    };
+    if first.contains(".app/Contents/") {
+        return false;
+    }
+    if Path::new(first).file_name().is_none_or(|n| n != "codex") {
+        return false;
+    }
+    !subcommand(tokens).is_some_and(|sub| NON_INTERACTIVE.contains(&sub))
+}
+
 /// 选项之后的第一个非选项 token；全是选项就没有子命令
 fn subcommand<'a>(tokens: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     let mut tokens = tokens;
@@ -133,6 +173,33 @@ pub fn terminate(pid: u32) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 终端里的交互式会话：没有子命令、带选项、resume、直接带提示词；一次性、服务类与桌面应用自带的不算
+    #[test]
+    fn interactive_sessions_are_told_from_the_rest() {
+        for yes in [
+            "codex",
+            "/opt/homebrew/bin/codex",
+            "/opt/homebrew/bin/codex --model gpt-5.6-sol",
+            "/Users/me/.local/bin/codex -c a=b resume",
+            "codex fix the flaky test",
+        ] {
+            assert!(is_codex_interactive(yes), "{yes}");
+        }
+        for no in [
+            "codex app-server",
+            "/opt/homebrew/bin/codex exec fix it",
+            "codex mcp-server",
+            "codex login",
+            "/Applications/ChatGPT.app/Contents/Resources/codex -c features.code_mode_host=true app-server",
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/usr/local/bin/codex-code-mode-host",
+            "node /x/codex-app-server-broker.mjs",
+            "",
+        ] {
+            assert!(!is_codex_interactive(no), "{no}");
+        }
+    }
 
     /// 只认两种后台形态；交互式会话和 node 壳进程都不碰
     #[test]

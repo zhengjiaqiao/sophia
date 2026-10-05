@@ -119,7 +119,8 @@ export function InstallPage(props: InstallPageProps) {
   const block = skillInstallBlock({
     items: item ? [item] : [],
     selected: 1,
-    agents: state.requested.length,
+    agents: state.requestedFor(state.namesOf([planPathOf(skill)])).length,
+    checking: state.checking,
   });
   const submit = async () => {
     const done = await state.install([planPathOf(skill)], [skill.name]);
@@ -216,6 +217,7 @@ export function SkillInstallBody({
           direct={state.directReaders}
           checked={state.checked}
           onToggle={state.toggle}
+          viewOf={state.viewFor(state.namesOf([planPathOf(skill)]))}
         />
       </InstallBlock>
     </>

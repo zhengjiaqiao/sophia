@@ -256,9 +256,11 @@ pub enum ParseFailure {
     NoPlanLimits,
     /// 服务端说被限流；`until` 是它给的截止时刻，没给就是 None（调用方按 5 分钟退避）
     RateLimited { until: Option<i64> },
-    /// 鉴权失败（Codex 需要重新登录）
+    /// 鉴权失败（需要重新登录）
     AuthRequired,
-    /// 格式对不上：字段缺失、类型不对、控制请求回了 error。带一句给人看的原因（不含账号信息）
+    /// 程序不认这个请求：没有 `get_usage` 的旧版 Claude Code
+    Unsupported,
+    /// 格式对不上：字段缺失、类型不对、控制请求回了认不出的 error。带一句给人看的原因（不含账号信息）
     Malformed(String),
 }
 
@@ -274,6 +276,7 @@ pub enum FailReason {
     NoPlanLimits,
     AuthRequired,
     RateLimited,
+    Unsupported,
     Malformed,
 }
 
@@ -288,6 +291,7 @@ impl FailReason {
             FailReason::NoPlanLimits => crate::t!("usage.reason.noPlanLimits"),
             FailReason::AuthRequired => crate::t!("usage.reason.authRequired", agent = agent),
             FailReason::RateLimited => crate::t!("usage.reason.rateLimited", agent = agent),
+            FailReason::Unsupported => crate::t!("usage.reason.unsupported", agent = agent),
             FailReason::Malformed => crate::t!("usage.reason.malformed", agent = agent),
         }
     }
@@ -377,7 +381,8 @@ pub enum StackedSize {
     Large,
 }
 
-/// 刷新节奏（R6）：自动、关、固定分钟
+/// 刷新节奏（R6）：自动、关、固定分钟。
+/// 曾有过「1 分钟」档（`"1"`），已去掉：存着它的老设置读成 5 分钟
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Refresh {
     #[default]
@@ -385,9 +390,7 @@ pub enum Refresh {
     Auto,
     #[serde(rename = "off")]
     Off,
-    #[serde(rename = "1")]
-    Every1,
-    #[serde(rename = "5")]
+    #[serde(rename = "5", alias = "1")]
     Every5,
     #[serde(rename = "10")]
     Every10,
@@ -433,6 +436,15 @@ mod tests {
             r#"{{"key":{key:?},"label":{label:?},"usedPercent":10.0,"resetsAt":null,"windowMinutes":null,"severity":"normal","active":true}}"#
         );
         serde_json::from_str::<WindowWire>(&json).unwrap().into()
+    }
+
+    /// 旧版 Claude Code 没有 `get_usage`：给一句能照着做的话（M17）
+    #[test]
+    fn unsupported_reason_says_update() {
+        assert_eq!(
+            FailReason::Unsupported.text("Claude Code"),
+            "Claude Code 版本可能太旧，更新后再试"
+        );
     }
 
     #[test]

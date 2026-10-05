@@ -6,7 +6,7 @@ use serde_json::{json, Map, Value};
 
 use super::ir::{self, Item, Part, ToolChoice, BLOCK_SEPARATOR};
 use super::names::ToolNameMap;
-use crate::translate::REASONING_EFFORT_FIELD;
+use crate::translate::{REASONING_CONTENT_FIELD, REASONING_EFFORT_FIELD};
 
 /// R20：第三方表达不了的块换成的占位文字。
 pub const ATTACHMENT_PLACEHOLDER: &str = "[Sophia：这个第三方模型读不了这类附件，已省略]"; // i18n-exempt: 换进对话内容发给模型的占位文字（协议内容），不是界面文案
@@ -108,6 +108,8 @@ pub struct UpstreamOptions {
     pub thinking_off: ThinkingOff,
     /// 不发 `reasoning_effort`，即使请求要了推理强度。默认发；上游因它 400 后路由置真重发一次。
     pub omit_reasoning_effort: bool,
+    /// 不给 assistant 消息带 `reasoning_content`（历史 `thinking` 块的文字）。默认带；上游因它 400 后路由置真重发一次。
+    pub omit_reasoning_content: bool,
 }
 
 /// 转换后要发给上游的请求。
@@ -127,6 +129,9 @@ pub struct UpstreamRequest {
     /// 这次请求体里带没带「关推理」的字段（[`ThinkingOff`] 不是 `Omit` 且请求明说不要思考）：
     /// 路由据此决定上游说推理不能关时要不要去掉它重发。Responses 出口不发，总是假。
     pub thinking_off_sent: bool,
+    /// 这次请求体里有没有 assistant 消息带 `reasoning_content`：路由据此决定上游拒收时要不要去掉它重发。
+    /// Responses 出口不发，总是假。
+    pub reasoning_content_sent: bool,
 }
 
 /// 请求读不懂。路由回 400 `invalid_request_error`。
@@ -215,16 +220,26 @@ pub fn to_chat(
     }
 
     let mut messages = Vec::new();
+    let mut reasoning_content_sent = false;
     if !parsed.system.is_empty() {
         messages.push(json!({ "role": "system", "content": parsed.system }));
     }
     for item in &parsed.items {
         messages.push(match item {
             Item::User(parts) => json!({ "role": "user", "content": user_content(parts) }),
-            Item::Assistant { text, calls } => {
+            Item::Assistant {
+                text,
+                calls,
+                reasoning,
+            } => {
                 let mut message = Map::new();
                 message.insert("role".into(), json!("assistant"));
                 message.insert("content".into(), json!(text));
+                // 历史 thinking 块的文字带回（reasoning-passback R3）；上游因它 400 后路由去掉重发
+                if !reasoning.is_empty() && !options.omit_reasoning_content {
+                    message.insert(REASONING_CONTENT_FIELD.into(), json!(reasoning));
+                    reasoning_content_sent = true;
+                }
                 if !calls.is_empty() {
                     let calls: Vec<Value> = calls
                         .iter()
@@ -291,9 +306,15 @@ pub fn to_chat(
         body: serde_json::to_vec(&chat).map_err(RequestError::Encode)?,
         stream: parsed.stream,
         tools: parsed.names,
-        input_estimate: parsed.estimate,
+        // 按实际发出的请求估算：带回了思考才计入（R4 降级去掉后不计）
+        input_estimate: if reasoning_content_sent {
+            parsed.estimate
+        } else {
+            parsed.estimate_without_thinking
+        },
         reasoning_effort_sent,
         thinking_off_sent,
+        reasoning_content_sent,
     })
 }
 

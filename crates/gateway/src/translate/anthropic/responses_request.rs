@@ -69,7 +69,7 @@ pub fn to_responses(
                     .collect();
                 input.push(json!({ "type": "message", "role": "user", "content": content }));
             }
-            Item::Assistant { text, calls } => {
+            Item::Assistant { text, calls, .. } => {
                 if !text.is_empty() {
                     input.push(json!({
                         "type": "message",
@@ -126,9 +126,12 @@ pub fn to_responses(
         body: serde_json::to_vec(&out).map_err(RequestError::Encode)?,
         stream: parsed.stream,
         tools: parsed.names,
-        input_estimate: parsed.estimate,
+        // Responses 出口不带回思考内容，估算也不计
+        input_estimate: parsed.estimate_without_thinking,
         // 本次只给 Chat 出口转推理强度
         reasoning_effort_sent: false,
         thinking_off_sent: false,
+        // Responses 出口不带回思考内容（R20 不发 reasoning）
+        reasoning_content_sent: false,
     })
 }

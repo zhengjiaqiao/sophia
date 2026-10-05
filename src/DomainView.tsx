@@ -18,6 +18,7 @@ import Matrix, {
   SourceKeys,
   type MatrixCellView,
   type MatrixRowView,
+  type CellNotice,
   type ColumnCheck,
 } from "./Matrix.tsx";
 import { originNames, originText } from "./originName.ts";
@@ -96,7 +97,7 @@ export interface DomainViewProps {
   onManageSources: (at: HTMLElement | null) => void;
   /// bar 插槽（R4 的项目筛选片，见 Matrix）：原样传给 Matrix 的 `bar`
   bar?: ReactNode;
-  /// 新手提示条的插槽：bar 插槽下、表头上（放 `<HintStrip flush>`，见 Matrix）
+  /// 新手提示条的插槽：bar 插槽下、表头上（放 `<NoticePanel mark={false} open flush>`，见 Matrix）
   hint?: ReactNode;
   /// 新手提示条的插槽：空态上方
   emptyHint?: ReactNode;
@@ -115,7 +116,7 @@ export interface DomainViewProps {
   keyBusy?: { keyId: string; label: string } | null;
   /// 点格之后真要等的（拆开）：过了 0.3 秒门槛被点那一格下方出忙碌指示 + 一句
   cellBusy?: { rowKey: string; columnId: string; label: string } | null;
-  cellNotice?: { rowKey: string; columnId: string; text: string } | null;
+  cellNotice?: CellNotice | null;
   onDismissCellNotice?: () => void;
   rowToast?: { rowKey: string; at?: AnchorRect; node: ReactNode } | null;
   keyToast?: { keyId: string; node: ReactNode } | null;

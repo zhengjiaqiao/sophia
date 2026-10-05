@@ -64,6 +64,10 @@ struct ChatChunk {
 struct ChunkChoice {
     #[serde(default, deserialize_with = "nullable")]
     delta: ChunkDelta,
+    /// 非空即上游说这一轮生成完了；ap-gateway 每块都带空串，不算。
+    /// 按任意 JSON 收：类型不合预期时不能连同这一块的正文一起丢掉
+    #[serde(default)]
+    finish_reason: Value,
 }
 
 #[derive(Deserialize, Default)]
@@ -106,7 +110,7 @@ struct PendingCall {
 /// 增量状态机：调用方从异步字节流里读到什么就喂什么，拿到的事件立刻写给 Codex。
 ///
 /// 用法：[`start`](Self::start) → 反复 [`feed_bytes`](Self::feed_bytes)（或按行
-/// [`feed_line`](Self::feed_line)）→ 上游结束（含中途断流）时 [`finish`](Self::finish)。
+/// [`feed_line`](Self::feed_line)）→ 上游字节流结束（含中途断流）时 [`end_of_stream`](Self::end_of_stream)。
 /// 收到 `data: [DONE]` 或上游报错后状态机即告结束，之后的输入被忽略，`finish` 不再产出事件。
 /// 单行 SSE 的上限；正常的数据块远小于它
 const MAX_LINE_BYTES: usize = 8 << 20;
@@ -132,7 +136,13 @@ pub struct StreamConverter {
 
     calls: BTreeMap<i64, PendingCall>,
     usage: Option<ChatUsage>,
+    /// 见过非空的 finish_reason：之后即使没有 `[DONE]` 就断了，内容也是完整的
+    terminated: bool,
 }
+
+/// 上游没给出结束标记就断了时，`response.failed` 里给 Codex 看的文字
+const DISCONNECTED: &str =
+    "the third-party gateway disconnected before the response finished; the answer is incomplete";
 
 impl StreamConverter {
     pub fn new(model: &str, tools: ToolNames) -> Self {
@@ -153,6 +163,7 @@ impl StreamConverter {
             text: String::new(),
             calls: BTreeMap::new(),
             usage: None,
+            terminated: false,
         }
     }
 
@@ -218,6 +229,29 @@ impl StreamConverter {
         }
         if !data.is_empty() {
             self.chunk(&mut events, data.as_bytes());
+        }
+        events
+    }
+
+    /// 上游字节流结束（正常关闭或中途出错）。收到过 `[DONE]` 或 finish_reason 才按完成收尾；
+    /// 否则回答是截断的，以 `response.failed` 结束，不能把半截内容标成完成。可重复调用。
+    pub fn end_of_stream(&mut self) -> Vec<SseEvent> {
+        let mut events = Vec::new();
+        if self.finished {
+            return events;
+        }
+        // 末行可能没有换行符（例如不带换行的 `[DONE]`），先把它处理掉再判断
+        if !self.line_buffer.is_empty() {
+            let line = std::mem::take(&mut self.line_buffer);
+            events.extend(self.feed_line(&String::from_utf8_lossy(&line)));
+            if self.finished {
+                return events;
+            }
+        }
+        if self.terminated {
+            events.extend(self.finish());
+        } else {
+            self.fail(&mut events, DISCONNECTED);
         }
         events
     }
@@ -411,6 +445,11 @@ impl StreamConverter {
             self.usage = chunk.usage;
         }
         for choice in chunk.choices {
+            self.terminated |= match &choice.finish_reason {
+                Value::Null => false,
+                Value::String(reason) => !reason.is_empty(),
+                _ => true,
+            };
             let delta = choice.delta;
             let thinking = delta.reasoning_content + &delta.reasoning;
             if !thinking.is_empty() {
@@ -532,7 +571,7 @@ pub fn convert_stream(upstream_text: &str, model: &str, tools: ToolNames) -> Str
     let mut converter = StreamConverter::new(model, tools);
     let mut events = converter.start();
     events.extend(converter.feed_bytes(upstream_text.as_bytes()));
-    events.extend(converter.finish());
+    events.extend(converter.end_of_stream());
     events.iter().map(SseEvent::to_sse_string).collect()
 }
 
@@ -860,16 +899,59 @@ mod tests {
         );
     }
 
-    /// 上游中途断流或根本没给出结束标记：已经收到的内容要正常收尾，让 Codex 拿到完整的事件序列。
+    /// 上游中途断流（没有 `[DONE]`，也没有 finish_reason）：不能把截断的回答标成完成，以 response.failed 结束。
     #[test]
-    fn stream_without_done_still_completes() {
+    fn stream_cut_before_any_terminator_fails() {
         let upstream =
             "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n";
         let out = convert_stream(upstream, "m", ToolNames::new());
-        let got = names(&parse_events(&out));
+        let events = parse_events(&out);
+        let last = events.last().expect("events");
+        assert_eq!(last.name, "response.failed", "events = {}", names(&events));
+        assert_eq!(last.data["response"]["status"], "failed");
         assert!(
-            got.ends_with("response.output_item.done response.completed"),
-            "events = {got}"
+            last.data["response"]["error"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("disconnected"),
+            "last event = {}",
+            last.data
+        );
+        assert!(
+            !events.iter().any(|e| e.name == "response.completed"),
+            "events = {}",
+            names(&events)
+        );
+    }
+
+    /// 只给 finish_reason 不发 `[DONE]` 的网关、末行 `[DONE]` 没有换行：内容是完整的，照常 completed。
+    #[test]
+    fn finish_reason_or_unterminated_done_still_completes() {
+        for upstream in [
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n\
+             data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]",
+        ] {
+            let events = parse_events(&convert_stream(upstream, "m", ToolNames::new()));
+            assert_eq!(
+                events.last().expect("events").name,
+                "response.completed",
+                "upstream = {upstream:?}, events = {}",
+                names(&events)
+            );
+        }
+    }
+
+    /// ap-gateway 每块都带 `"finish_reason":""`：空串不算结束标记，之后断流仍是 failed。
+    #[test]
+    fn empty_finish_reason_is_not_a_terminator() {
+        let upstream = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"\"}]}\n\n";
+        let events = parse_events(&convert_stream(upstream, "m", ToolNames::new()));
+        assert_eq!(
+            events.last().expect("events").name,
+            "response.failed",
+            "events = {}",
+            names(&events)
         );
     }
 

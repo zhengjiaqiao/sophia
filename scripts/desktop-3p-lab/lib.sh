@@ -132,3 +132,49 @@ lab_print_paths() {
   info "Claude-3p 目录： $LAB_DIR_3P"
   if lab_is_real_base; then info "（真目录）"; else info "（演练目录，不是真目录）"; fi
 }
+
+# ───── 恢复日志（restore.sh 与 sophia-state.sh restore 共用）：先登记、后动手 ─────
+# 每一步动手之前，先把「打算做什么」写成日志里完整的一行（<动作>\t<原处 X>\t<aside Y>，一次写入），再执行：
+#   move  X Y   打算把 X 挪到 Y
+#   copy  X Y   打算在 X 放一份备份的副本；Y 是 X 原件挪去的 aside（原来没有原件为空）
+# 撤回时按日志倒序，逐条看实际状态再做，所以没开始、做了一半、做完了的步骤都能正确处理：
+#   copy：X 在，且（Y 为空，或 Y 在＝原件确实已挪开）→ 删 X 上的副本；否则不动（X 上还是原件）
+#   move：Y 在且 X 不在 → 把 Y 挪回 X；X 还在 → 没挪动，跳过；X、Y 都不在 → 报告
+JOURNAL=""
+journal_open() {
+  JOURNAL="$1"
+  mkdir -p "$(dirname "$JOURNAL")" && chmod 700 "$(dirname "$JOURNAL")" || die "建不了恢复日志的目录 $(dirname "$JOURNAL")"
+  ( umask 077; : > "$JOURNAL" ) || die "建不了恢复日志 $JOURNAL"
+}
+journal_add() {
+  [ -n "$JOURNAL" ] || die "恢复日志没打开"
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$JOURNAL" || die "写不了恢复日志 ${JOURNAL}：这一步没有做。"
+}
+journal_count() { [ -n "$JOURNAL" ] && [ -s "$JOURNAL" ] && wc -l < "$JOURNAL" | tr -d ' ' || echo 0; }
+lexists() { [ -e "$1" ] || [ -L "$1" ]; }
+# 按日志倒序撤回；全部撤回成功返回 0。撤回过程中忽略中断信号
+journal_rollback() {
+  trap '' INT TERM HUP
+  [ "$(journal_count)" -gt 0 ] || return 0
+  local lines=() line op x y i ok=0
+  while IFS= read -r line; do lines+=("$line"); done < "$JOURNAL"
+  for ((i = ${#lines[@]} - 1; i >= 0; i--)); do
+    IFS="$(printf '\t')" read -r op x y <<< "${lines[$i]}"
+    case "$op" in
+      copy)
+        if lexists "$x" && { [ -z "$y" ] || lexists "$y"; }; then
+          rm -rf "${x:?}" && info "撤回放回的副本：$x" || { warn "删不掉放回的副本 $x"; ok=1; }
+        fi ;;
+      move)
+        if lexists "$x"; then
+          :   # 没挪动（或已挪回），跳过
+        elif lexists "$y"; then
+          mv -n "$y" "$x" && ! lexists "$y" && info "挪回：$y → $x" || { warn "没能把 $y 挪回 $x"; ok=1; }
+        else
+          warn "$x 与 $y 都不在：这一项找不回，交给人"; ok=1
+        fi ;;
+      *) warn "恢复日志里有看不懂的一行：${lines[$i]}"; ok=1 ;;
+    esac
+  done
+  return "$ok"
+}

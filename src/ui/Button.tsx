@@ -42,6 +42,8 @@ interface ButtonBase {
   /// 开关式的键（`管理来源` / `收起`）：展开着没有、展开的是哪一块
   ariaExpanded?: boolean;
   ariaControls?: string;
+  /// 按下弹出一个浮层（`详情` 弹出原文浮层：`dialog`）
+  ariaHasPopup?: "dialog" | "menu";
 }
 
 /// 禁用必须同时给出原因（DESIGN：禁用必须同时给 title 说明原因，类型上强制）
@@ -71,6 +73,7 @@ export function Button(props: ButtonProps) {
     "aria-describedby": describedBy,
     ariaExpanded,
     ariaControls,
+    ariaHasPopup,
   } = props;
 
   const classes = ["ss-btn"];
@@ -90,6 +93,7 @@ export function Button(props: ButtonProps) {
         title={disabled ? disabledReason : title}
         aria-label={ariaLabel}
         aria-describedby={describedBy}
+        aria-haspopup={ariaHasPopup}
         aria-expanded={ariaExpanded}
         aria-controls={ariaControls}
         disabled={disabled}

@@ -24,6 +24,14 @@
   margin-top: var(--space-sm);
 }
 
+/* ===== 换了端口、等重启生效：节头下 12，一行 12 号灰字（Codex 的页与 Claude 的页同一行） ===== */
+.models-port-note {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}
+
 /* ===== 在用：胶囊行（ui ChipRow），节头下 12 ===== */
 .models-inuse {
   margin-top: var(--space-sm);

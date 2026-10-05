@@ -17,6 +17,9 @@ const LEGACY_OWN_DESCRIPTION: &str = "agents-manager third-party model";
 
 const FALLBACK_BASE_INSTRUCTIONS: &str = "You are Codex, a coding agent. You and the user share one workspace, and your job is to collaborate with them until their goal is genuinely handled.";
 const DEFAULT_CONTEXT_WINDOW: u32 = 128_000;
+/// 告诉 Codex 的窗口上限（spec 2026-10-05-codex-context-cap R1）：窗口再大也只报这个数，让 Codex 早点压缩对话，
+/// 不然 100 万窗口的模型做长任务会越用越慢。272K 是 OpenAI 自己的模型报给 Codex 的数，magpie 也取它
+pub const WORKING_WINDOW: u32 = 272_000;
 
 /// 一个要加入 Codex 的第三方模型
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -183,7 +186,13 @@ enum CombinedEntry<'a> {
 }
 
 /// 生成合并目录：官方条目原样在前，第三方条目按选择顺序排在其后。
-pub fn build_combined(native: &[Box<RawValue>], models: &[Published]) -> Result<Vec<u8>, String> {
+/// `include_native` 为假（独立服务商接法，spec 2026-10-03-codex-hookup-auto R6）：官方条目只提供
+/// `base_instructions` 与排序基数，不写进目录——没登录时官方模型发不出去
+pub fn build_combined(
+    native: &[Box<RawValue>],
+    models: &[Published],
+    include_native: bool,
+) -> Result<Vec<u8>, String> {
     #[derive(Deserialize)]
     struct Head {
         #[serde(default)]
@@ -203,7 +212,10 @@ pub fn build_combined(native: &[Box<RawValue>], models: &[Published]) -> Result<
     for raw in native {
         let head: Head = serde_json::from_str(raw.get())
             .map_err(|error| format!("parse native entry: {error}"))?;
-        seen.insert(head.slug.unwrap_or_default().trim().to_lowercase());
+        // 官方条目不进目录时，它的标识也挡不着第三方
+        if include_native {
+            seen.insert(head.slug.unwrap_or_default().trim().to_lowercase());
+        }
         max_priority = max_priority.max(head.priority.unwrap_or(0.0));
         if base_instructions.is_none() {
             base_instructions = head
@@ -214,10 +226,14 @@ pub fn build_combined(native: &[Box<RawValue>], models: &[Published]) -> Result<
     let base_instructions =
         base_instructions.unwrap_or_else(|| FALLBACK_BASE_INSTRUCTIONS.to_string());
 
-    let mut entries: Vec<CombinedEntry> = native
-        .iter()
-        .map(|raw| CombinedEntry::Native(raw))
-        .collect();
+    let mut entries: Vec<CombinedEntry> = if include_native {
+        native
+            .iter()
+            .map(|raw| CombinedEntry::Native(raw))
+            .collect()
+    } else {
+        Vec::new()
+    };
     for (index, published) in models.iter().enumerate() {
         let slug = published.slug.trim().to_lowercase();
         if slug.is_empty() {
@@ -315,10 +331,13 @@ fn entry(model: &Model, slug: String, priority: i64, base_instructions: &str) ->
         Some(name) if !name.is_empty() => name,
         _ => model.id.trim(),
     };
-    let context_window = match model.context_window {
+    // `context_window` 封顶（Codex 据它决定何时压缩）；`max_context_window` 报真实窗口：
+    // 用户在 config.toml 里自己写了更大的 `model_context_window` 时，Codex 以它为上限截断，封了就改不回去（Codex 复审）
+    let real_window = match model.context_window {
         Some(window) if window > 0 => window,
         _ => DEFAULT_CONTEXT_WINDOW,
     };
+    let context_window = real_window.min(WORKING_WINDOW);
     let modalities: &[&str] = if model.vision {
         &["text", "image"]
     } else {
@@ -359,7 +378,7 @@ fn entry(model: &Model, slug: String, priority: i64, base_instructions: &str) ->
         "supports_parallel_tool_calls": true,
         "supports_image_detail_original": false,
         "context_window": context_window,
-        "max_context_window": context_window,
+        "max_context_window": real_window,
         "auto_compact_token_limit": null,
         "effective_context_window_percent": 95,
         "experimental_supported_tools": [],
@@ -442,6 +461,7 @@ mod tests {
                 }),
                 model("kimi-k3"),
             ],
+            true,
         )
         .expect("build_combined");
         let models = decode(&data);
@@ -488,6 +508,7 @@ mod tests {
                 m.context_window = Some(200_000);
                 m.vision = true;
             })],
+            true,
         )
         .expect("build_combined");
         let models = decode(&data);
@@ -539,11 +560,47 @@ mod tests {
         assert_eq!(models[0].as_object().expect("object").len(), 36);
     }
 
+    /// AC1：报 100 万的模型，目录里只写 272K；报得更小的照报
+    #[test]
+    fn own_entry_caps_the_context_window_at_the_working_window() {
+        let data = build_combined(
+            &[],
+            &[
+                with(model("deepseek-v4-pro"), |m| {
+                    m.context_window = Some(1_000_000)
+                }),
+                with(model("kimi-k3"), |m| m.context_window = Some(200_000)),
+            ],
+            true,
+        )
+        .expect("build_combined");
+        let entries = decode(&data);
+        assert_eq!(entries[0]["context_window"], 272_000);
+        assert_eq!(entries[0]["max_context_window"], 1_000_000);
+        assert_eq!(entries[1]["context_window"], 200_000);
+        assert_eq!(entries[1]["max_context_window"], 200_000);
+        // 临界：恰好 272K 不动，多 1 就封
+        let edge = build_combined(
+            &[],
+            &[
+                with(model("a"), |m| m.context_window = Some(272_000)),
+                with(model("b"), |m| m.context_window = Some(272_001)),
+            ],
+            true,
+        )
+        .expect("build_combined");
+        let edge = decode(&edge);
+        assert_eq!(edge[0]["context_window"], 272_000);
+        assert_eq!(edge[1]["context_window"], 272_000);
+        assert_eq!(edge[1]["max_context_window"], 272_001);
+    }
+
     #[test]
     fn own_entry_defaults_context_window_and_text_only() {
         let data = build_combined(
             &[],
             &[with(model("kimi-k3"), |m| m.context_window = Some(0))],
+            true,
         )
         .expect("build_combined");
         let entry = &decode(&data)[0];
@@ -552,28 +609,43 @@ mod tests {
         assert_eq!(entry["input_modalities"], json!(["text"]));
     }
 
+    /// R6、AC9：独立服务商接法的目录只有第三方模型；官方条目仍提供说明文字与排序基数，
+    /// 官方的标识也不再挡第三方（目录里根本没有官方条目）
+    #[test]
+    fn provider_form_catalog_lists_only_third_party_models() {
+        let (native, _) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
+        let data = build_combined(&native, &[model("weibo/glm-5"), model("kimi-k3")], false)
+            .expect("build_combined");
+        let models = decode(&data);
+        let slugs: Vec<&str> = models.iter().map(|m| m["slug"].as_str().unwrap()).collect();
+        assert_eq!(slugs, ["weibo-glm-5", "kimi-k3"]);
+        assert_eq!(models[0]["base_instructions"], "You are Codex.");
+        assert_eq!(models[0]["priority"], 8);
+        assert!(build_combined(&native, &[model("gpt-6-astra")], false).is_ok());
+    }
+
     /// 第三方与官方重名时，官方条目保留，第三方那条被拒绝，避免官方模型被内网路由劫持。
     #[test]
     fn third_party_slug_colliding_with_native_is_rejected() {
         let (native, _) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
-        let error = build_combined(&native, &[model("gpt-6-astra")]).expect_err("collision");
+        let error = build_combined(&native, &[model("gpt-6-astra")], true).expect_err("collision");
         assert!(error.contains("gpt-6-astra"), "{error}");
         // 官方 slug 大小写、首尾空白不同也算重名
         let native = parse_native(br#"{"models":[{"slug":" GPT-6-Astra "}]}"#)
             .expect("parse_native")
             .0;
-        assert!(build_combined(&native, &[model("gpt-6-astra")]).is_err());
+        assert!(build_combined(&native, &[model("gpt-6-astra")], true).is_err());
     }
 
     #[test]
     fn duplicate_third_party_slug_is_rejected() {
         let (native, _) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
-        assert!(build_combined(&native, &[model("a/b"), model("a-b")]).is_err());
+        assert!(build_combined(&native, &[model("a/b"), model("a-b")], true).is_err());
     }
 
     #[test]
     fn model_without_usable_slug_is_rejected() {
-        assert!(build_combined(&[], &[model("///")]).is_err());
+        assert!(build_combined(&[], &[model("///")], true).is_err());
         assert!(build_routing(&[model("///")], &[upstream("p")], &[]).is_err());
     }
 
@@ -649,7 +721,8 @@ mod tests {
     fn combined_catalog_accepts_the_same_model_under_two_prefixes() {
         let mut second = model("deepseek/v4");
         second.slug = "other-deepseek-v4".into();
-        let data = build_combined(&[], &[model("deepseek/v4"), second]).expect("build_combined");
+        let data =
+            build_combined(&[], &[model("deepseek/v4"), second], true).expect("build_combined");
         let slugs: Vec<String> = decode(&data)
             .iter()
             .map(|entry| entry["slug"].as_str().unwrap_or_default().to_owned())

@@ -47,28 +47,46 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -R zhengjiaqiao/sophia   # 按�
 
 名字必须逐字一致——这两个名字是 Tauri 认的环境变量名，不能改。
 
-### 3. 决定要不要买 Apple 开发者账号
+另有一个**仓库变量**（不是 Secret，同一页的 Variables 标签）：`SOPHIA_REPORT_URL`，接收服务的地址（如
+`https://sophia-ingest.<账号子域>.workers.dev`，部署见 `server/README.md`）。发版时编进公开版，用于自动上报
+（spec 2026-10-04-reporting-feedback）；内部版不编。没设或为空，打出来的包就不上报、设置里也没有那一行：
 
-分三档，差别比「签不签名」这个二选一要大：
+```sh
+gh variable set SOPHIA_REPORT_URL -R zhengjiaqiao/sophia --body 'https://…workers.dev'
+```
 
-| | 代价 | 用户体验 |
-|---|---|---|
-| ⓪ 什么都不配，完全不签 | 零成本 | **不可接受**。新版 macOS 直接判「已损坏」，连「仍要打开」都没得点，只剩死胡同 |
-| ① 临时（ad-hoc）签名，`codesign -s -` | 零成本 | 被拦一次，用户跑一行 `xattr`，或去「系统设置 → 隐私与安全性」点「仍要打开」 |
-| ② 买开发者账号（99 美元/年），签名 + 公证 | 每年 99 美元；首次公证可能等几小时 | 双击就开，和任何正规 App 一样；cask 也干净 |
+### 3. Apple 签名与公证
 
-**现在默认走 ①**：workflow 里 `APPLE_SIGNING_IDENTITY` 没有 secret 时退到 `-`，
-产物带临时签名。Release 说明和 cask 的 caveats 都写了怎么放行。
+发出去的包带 Developer ID 签名并经过 Apple 公证，用户双击就能打开（spec 2026-10-05-signing-notarization）。
+`release.yml` 的 guard 要求下面七个 secret **都在**（同样配在公开仓库），缺一个就在编译前失败、逐项说缺什么；
+不再退回临时签名。
 
-⓪ 和 ① 的区别不是程度问题：完全不签的包只带链接器给的那点 ad-hoc 痕迹、没有封好的
-资源签名，Gatekeeper 把它当损坏文件；显式签一遍才保住「仍要打开」那条路。所以
-**不要把 `APPLE_SIGNING_IDENTITY` 的那个 `|| '-'` 兜底删掉**。
+**证书**（账号持有人才能建，5 年到期，到期前按同样步骤重建、重设前三个 secret）：
 
-②的接线已经留好（同样配在公开仓库）：`.github/workflows/release.yml` 里 tauri-action 那一步的 `env:` 已经把七个变量挂到同名 secret 上，**买了账号只需要把 secret 填上，workflow 一个字都不用改**（`APPLE_SIGNING_IDENTITY` 一旦有值就自动顶掉 `-`）：
+1. Xcode → Settings → Accounts，登录开发者账号 → Manage Certificates → 左下角「+」→ **Developer ID Application**。
+2. 「钥匙串访问」→ 登录 → 我的证书，找到 `Developer ID Application: …`，右键「导出」成 `.p12`，设一个密码。
+3. `security find-identity -v -p codesigning` 里那一整串名字就是 `APPLE_SIGNING_IDENTITY`。
 
-`APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`KEYCHAIN_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`
+**公证**用 Apple ID 加 App 专用密码（account.apple.com →「登录与安全」→「App 专用密码」）。
 
-填上之后记得把 Release 说明和 cask caveats 里那段 `xattr` 删掉。
+**设 secret**：值只在自己的终端里输入或从文件读，不进仓库、不进聊天记录。
+
+```sh
+R=zhengjiaqiao/sophia
+base64 -i ~/Desktop/sophia-developer-id.p12 | gh secret set APPLE_CERTIFICATE -R $R
+gh secret set APPLE_CERTIFICATE_PASSWORD -R $R     # 按提示粘贴导出 .p12 时设的密码
+gh secret set APPLE_SIGNING_IDENTITY -R $R --body "$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)"
+openssl rand -base64 24 | gh secret set KEYCHAIN_PASSWORD -R $R   # CI 临时钥匙串的密码，随机即可
+gh secret set APPLE_ID -R $R --body '开发者账号的 Apple ID 邮箱'
+gh secret set APPLE_PASSWORD -R $R                 # 按提示粘贴 App 专用密码
+gh secret set APPLE_TEAM_ID -R $R --body '10 位 Team ID（developer.apple.com/account 的 Membership details）'
+```
+
+设完 `.p12` 文件就可以删掉（证书本身还在钥匙串里）。
+
+每个架构构建完，`packaging/verify-signature.sh` 核对三件事：签名完整、Gatekeeper 认它是
+`Notarized Developer ID`、票据已钉上。CI 上的文件没有 quarantine 属性，绿了不等于用户打得开；
+第一次发版前，用浏览器下一份排练产物（带 quarantine）在真机上双击验一次。
 
 ### 4. 建 tap 仓库
 
@@ -121,6 +139,53 @@ tag 推到公开仓库之后，那边的 `.github/workflows/release.yml` 会：�
 ```sh
 gh workflow run release.yml -R zhengjiaqiao/sophia
 gh run list -R zhengjiaqiao/sophia --workflow release.yml --limit 1
+```
+
+### 留存符号文件（dSYM）
+
+发布档是 `strip = "debuginfo"` + `split-debuginfo = "packed"`（根 `Cargo.toml`）：包里的程序只留函数名，
+行号表另存在构建机的 `target/<架构>/release/sophia.dSYM`，**不随包发**。用户发来崩溃记录时要靠它对行号，
+所以每次发版把两个架构的 dSYM 留下来，按版本号与架构存好（丢了就再也对不上这一版）：
+
+```sh
+# 每个架构一份；名字带版本与架构。target/…/sophia.dSYM 是指向 deps/sophia-<哈希>.dSYM 的软链，
+# 用 cp -RL 取出实体并改成固定的名字（直接 ditto 软链会带着哈希名打包）
+cp -RL target/aarch64-apple-darwin/release/sophia.dSYM sophia-0.2.0-aarch64.dSYM
+cp -RL target/x86_64-apple-darwin/release/sophia.dSYM  sophia-0.2.0-x86_64.dSYM
+ditto -c -k --keepParent sophia-0.2.0-aarch64.dSYM sophia-0.2.0-aarch64.dSYM.zip
+ditto -c -k --keepParent sophia-0.2.0-x86_64.dSYM  sophia-0.2.0-x86_64.dSYM.zip
+# 核对与包里的程序是同一次构建：两边的 UUID 要一致
+dwarfdump --uuid sophia-0.2.0-aarch64.dSYM
+dwarfdump --uuid Sophia.app/Contents/MacOS/Sophia   # 打包时程序改名成 Sophia，内容同一个
+```
+
+CI 发版时 Release 工作流已经按上面的办法取出 dSYM，每个架构存成一个 artifact
+`sophia-dsym-<变体>-<架构>`（里面是 `sophia-<版本>-<架构>-<变体>.dSYM`）。artifact 只保留 90 天（公开仓库的上限），
+**发版后一周内下回来另存**：
+
+```sh
+gh run list -R zhengjiaqiao/sophia --workflow release.yml --limit 1      # 找到这次发版的 run id
+gh run download <run id> -R zhengjiaqiao/sophia --pattern 'sophia-dsym-*' -D dsym-0.2.0
+```
+
+对行号：`crash.log`（`~/Library/Logs/com.zhengjiaqiao.sophia/`）里有 panic 的文件:行与带函数名的调用栈，
+其余各帧的行号用系统自己的崩溃报告（`~/Library/Logs/DiagnosticReports/Sophia-*.ips`，带每帧地址与镜像加载地址）
+配合 dSYM 离线查：
+
+```sh
+atos -arch arm64 -o sophia-0.2.0-aarch64.dSYM -l <镜像加载地址> <帧地址…>
+```
+
+### 验证崩溃记录（故意出错的入口）
+
+`src-tauri` 的 cargo feature `diag-faults` 带着开发者的故意出错入口（`SOPHIA_FAULT=panic` / `gateway-state` / `page:<页>`）。
+调试版总是带着；**正式包不能带**：release 构建开了它，`src-tauri/build.rs` 会让构建直接失败。
+只有本机验证崩溃记录（spec 2026-10-04-local-diagnostics AC4）时显式放行，打出来的包用完就删，不要发出去：
+
+```sh
+SOPHIA_ALLOW_DIAG_FAULTS=1 npm run tauri build -- --features diag-faults
+# 直接跑包里的程序（open 不把环境变量带给应用）；约 2 秒后崩溃，看 ~/Library/Logs/com.zhengjiaqiao.sophia/crash.log
+SOPHIA_FAULT=panic target/release/bundle/macos/Sophia.app/Contents/MacOS/Sophia
 ```
 
 发布完更新 cask：

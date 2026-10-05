@@ -27,6 +27,7 @@ mod tests;
 pub use count::{count_tokens_response, estimate_tokens, TokenTally};
 pub use emit::{
     ping_event, AnthropicEmitter, Keepalive, MessageAggregator, DEFAULT_KEEPALIVE_INTERVAL,
+    THINKING_SIGNATURE_PREFIX,
 };
 pub use errors::{
     is_context_overflow, map_upstream_error, readable_upstream_message, retry_after_seconds,

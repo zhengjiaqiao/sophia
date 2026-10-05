@@ -4,8 +4,8 @@
 //! （`src-tauri/src/tray.rs`）只管把这里给的字符串画出来，不重新判断任何业务规则。
 
 use super::model::{
-    AgentDisplay, AgentId, AgentUsage, DisplayMode, PowerState, Reading, Refresh, Severity, Source,
-    StackedSize, UsageSettings, UsageState, UsageStatus, Window,
+    AgentDisplay, AgentId, AgentUsage, DisplayMode, FailReason, PowerState, Reading, Refresh,
+    Severity, Source, StackedSize, UsageSettings, UsageState, UsageStatus, Window,
 };
 use super::MAX_MENU_BAR_AGENTS;
 use serde::Serialize;
@@ -206,7 +206,6 @@ pub fn is_stale(observed_at: i64, now: i64, refresh_interval_secs: i64) -> bool 
 pub fn stale_interval_secs(refresh: Refresh, power: PowerState) -> i64 {
     // 与调度实际的间隔一致：低电量 / 发热不短于 30 分钟，固定档用电池翻倍（「自动」「关」本来就按 30 分钟）
     let minutes = match refresh {
-        Refresh::Every1 => 1,
         Refresh::Every5 => 5,
         Refresh::Every10 => 10,
         Refresh::Every15 => 15,
@@ -400,6 +399,8 @@ pub struct TrayUsage {
     pub windows: Vec<TrayWindowRow>,
     /// 取不到新数的原因、被限流还要等多久、没有订阅额度、还没有读数；正常时 None
     pub note: Option<String>,
+    /// 原因行右端给不给「再试一次」：只在再试可能有用的原因后面给（见 [`can_retry`]）
+    pub retry: bool,
 }
 
 /// 给前端的窗口：同 [`Window`]，但名字是按当前语言算好的一句（内存与落盘里只存种类）
@@ -539,6 +540,27 @@ fn tray_note(usage: &AgentUsage, now: i64) -> Option<String> {
     }
 }
 
+/// 原因行后给不给「再试一次」（2026-10-03 产品负责人）：版本可能太旧（多半刚更新完）、没有回应、没能启动、
+/// 认不出、没找到——这些再试可能就好了。被限流（要等退避，点了也不会取）、没有订阅额度、要登录（点了也没用）、
+/// 还没有读数（没失败过，取数本来就在路上）不给
+pub fn can_retry(status: &UsageStatus) -> bool {
+    match status {
+        UsageStatus::NotInstalled => true,
+        UsageStatus::Failing { reason } => matches!(
+            reason,
+            FailReason::Unsupported
+                | FailReason::Timeout
+                | FailReason::SpawnFailed
+                | FailReason::Malformed
+                | FailReason::NotInstalled
+        ),
+        UsageStatus::Ok
+        | UsageStatus::NotSignedIn
+        | UsageStatus::NoPlanLimits
+        | UsageStatus::RateLimited { .. } => false,
+    }
+}
+
 /// 由状态与设置算出整份视图
 pub fn usage_view(
     state: &UsageState,
@@ -570,6 +592,7 @@ pub fn usage_view(
                 })
                 .unwrap_or_default(),
             note: tray_note(usage, now),
+            retry: can_retry(&usage.status),
         });
     }
     UsageView {
@@ -598,7 +621,7 @@ mod tests {
     #[test]
     fn stale_interval_by_refresh() {
         let ac = PowerState::default();
-        assert_eq!(stale_interval_secs(Refresh::Every1, ac), 60);
+        assert_eq!(stale_interval_secs(Refresh::Every5, ac), 300);
         assert_eq!(stale_interval_secs(Refresh::Every10, ac), 600);
         assert_eq!(stale_interval_secs(Refresh::Auto, ac), 1800);
         assert_eq!(stale_interval_secs(Refresh::Off, ac), 1800);
@@ -611,13 +634,13 @@ mod tests {
             on_battery: false,
             constrained: true,
         };
-        assert_eq!(stale_interval_secs(Refresh::Every1, battery), 120);
-        assert_eq!(stale_interval_secs(Refresh::Every1, low), 1800);
+        assert_eq!(stale_interval_secs(Refresh::Every5, battery), 600);
+        assert_eq!(stale_interval_secs(Refresh::Every5, low), 1800);
         assert_eq!(stale_interval_secs(Refresh::Auto, battery), 1800);
     }
 
     use super::*;
-    use crate::usage::model::{FailReason, Source, StackedSize, WindowKind};
+    use crate::usage::model::{Source, StackedSize, WindowKind};
 
     fn window(key: &str, label: &str, used_percent: f64, resets_at: Option<i64>) -> Window {
         Window {
@@ -790,6 +813,60 @@ mod tests {
             .collect();
         assert_eq!(labels, ["5 小时", "5 小时 · Spark", "旧句"]);
         assert!(agent["reading"]["windows"][0].get("kind").is_none());
+    }
+
+    /// 「再试一次」只跟在再试可能有用的原因后面（2026-10-03 产品负责人）：版本可能太旧、没有回应、
+    /// 没能启动、认不出、没找到；被限流（等退避）、没有订阅额度、要登录、还没有读数（没失败过）不给
+    #[test]
+    fn view_tray_retry_by_status() {
+        let now = 100_000;
+        let retry = |status: UsageStatus| signed_in_view(status, None, now).tray[0].retry;
+        let failing = |reason: FailReason| retry(UsageStatus::Failing { reason });
+        for (reason, want) in [
+            (FailReason::Unsupported, true),
+            (FailReason::Timeout, true),
+            (FailReason::SpawnFailed, true),
+            (FailReason::Malformed, true),
+            (FailReason::NotInstalled, true),
+            (FailReason::RateLimited, false),
+            (FailReason::NoPlanLimits, false),
+            (FailReason::NotSignedIn, false),
+            (FailReason::AuthRequired, false),
+        ] {
+            assert_eq!(failing(reason), want, "{reason:?}");
+        }
+        assert!(retry(UsageStatus::NotInstalled), "没找到（可用性判出来的）");
+        assert!(!retry(UsageStatus::RateLimited { until: now + 60 }));
+        assert!(!retry(UsageStatus::RateLimited { until: now - 1 }));
+        assert!(!retry(UsageStatus::NoPlanLimits));
+        assert!(!retry(UsageStatus::Ok), "还没有读数、也没失败过");
+        let ok = signed_in_view(
+            UsageStatus::Ok,
+            Some(at(
+                AgentId::ClaudeCode,
+                now,
+                vec![window("session", "5 小时", 7.0, None)],
+            )),
+            now,
+        );
+        assert!(!ok.tray[0].retry);
+        // 失败时照常画上一次的读数，原因行后照样给
+        let stale = signed_in_view(
+            UsageStatus::Failing {
+                reason: FailReason::Timeout,
+            },
+            Some(at(
+                AgentId::ClaudeCode,
+                now - 3600,
+                vec![window("session", "5 小时", 7.0, None)],
+            )),
+            now,
+        );
+        assert!(stale.tray[0].retry);
+        assert_eq!(
+            serde_json::to_value(&stale.tray[0]).unwrap()["retry"],
+            serde_json::json!(true)
+        );
     }
 
     /// R5：登录了但找不到程序时照样列出这个 agent，写「没找到 Claude Code」；没登录才不列

@@ -39,6 +39,7 @@ const { BusySlot, BusyToast } = await import("../src/ui/BusySlot.tsx");
 const { Toast, ToastCount, TOAST_DWELL_MS, CELL_TOAST_DWELL_MS, TOAST_LEAVE_MS } =
   await import("../src/ui/Toast.tsx");
 const { NoticePanel } = await import("../src/ui/NoticePanel.tsx");
+const { CornerToast, FloatingToast, ToastStack } = await import("../src/ui/FloatingToast.tsx");
 const { Confirm } = await import("../src/ui/Confirm.tsx");
 const { PushedPage, holdInert } = await import("../src/ui/PushedPage.tsx");
 const { AgentIcon, agentInitial, hasAgentIcon } = await import("../src/ui/AgentIcon.tsx");
@@ -62,6 +63,8 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "Spinner",
     "Toast",
     "NoticePanel",
+    "useHintStack",
+    "hintStackOf",
     "Confirm",
     "PushedPage",
     "Tabs",
@@ -87,6 +90,8 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
     "Drawer",
     "DrawerHandle",
     "IconTick",
+    "Details",
+    "PageFault",
   ];
   for (const name of exported) {
     assert.equal(typeof (ui as Record<string, unknown>)[name], "function", name);
@@ -99,8 +104,10 @@ test("index 把组件和样式一起交出去，用的人不必自己 import css
   // Cap 已恢复（2026-09-24 字体回到原设计）；它的出口 Plain 不恢复（大写只经 Cap 这一条路）
   assert.equal((ui as Record<string, unknown>).Plain, undefined);
   // 2026-09-25 设计系统梳理删掉的死件：整窗二级页、没人用的 agent 标记、第二枚 ›、JS 里镜像 CSS 的时长；
-  // 四路迁完之后删掉的转接：错误横幅（并进 NoticePanel scope="app"）、勾选框记号（CheckRow 内部用）
+  // 四路迁完之后删掉的转接：错误横幅（并进 NoticePanel scope="app"）、勾选框记号（CheckRow 内部用）；
+  // 2026-10-04：新手提示条并进灰面板（NoticePanel 没有 ! 的用法）
   for (const gone of [
+    "HintStrip",
     "SubPage",
     "AgentMark",
     "IconChevronRight",
@@ -603,17 +610,18 @@ test("Button 三个尺寸：regular 28 / compact 24 / row 32", () => {
 test("Button 墨键：ink 底 face 字 + raise-ink 抬起；hover 内沿 1px ink-mute、影子不变；按下影子收紧、底色不变", () => {
   const html = render(Button, { children: "保存", variant: "primary", onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--primary"/);
+  // 默认值就是墨键；托盘经 --key-primary-* 钩子换成系统默认键
   const rule = cssRule(uiCss, ".ss-btn--primary");
-  assert.match(rule, /background:\s*var\(--ink\)/);
-  assert.match(rule, /color:\s*var\(--face\)/);
-  assert.match(rule, /box-shadow:\s*var\(--raise-ink\)/);
+  assert.match(rule, /background:\s*var\(--key-primary-bg, var\(--ink\)\)/);
+  assert.match(rule, /color:\s*var\(--key-primary-ink, var\(--face\)\)/);
+  assert.match(rule, /box-shadow:\s*var\(--key-primary-shadow, var\(--raise-ink\)\)/);
   const hover = cssRule(uiCss, ".ss-btn--primary:hover:not(:disabled)");
-  assert.match(hover, /box-shadow:\s*var\(--raise-ink\)/);
-  assert.match(hover, /outline:\s*1px solid var\(--ink-mute\)/);
+  assert.match(hover, /box-shadow:\s*var\(--key-primary-shadow, var\(--raise-ink\)\)/);
+  assert.match(hover, /outline:\s*var\(--key-primary-hover-outline, 1px solid var\(--ink-mute\)\)/);
   assert.match(hover, /outline-offset:\s*-2px/);
   const pressed = cssRule(uiCss, ".ss-btn--primary:active:not(:disabled)");
-  assert.match(pressed, /box-shadow:\s*var\(--raise-ink-pressed\)/);
-  assert.match(pressed, /background:\s*var\(--ink\)/);
+  assert.match(pressed, /box-shadow:\s*var\(--key-primary-shadow, var\(--raise-ink-pressed\)\)/);
+  assert.match(pressed, /background:\s*var\(--key-primary-bg, var\(--ink\)\)/);
 });
 
 test("Button 禁用：必须同时给原因，挂在 title 上；平贴、实线 hairline、ink-faint 字、无投影（D20）", () => {
@@ -1460,10 +1468,16 @@ test("TruncTip：内容只是触发文字的完整值，文字真被截断才出
 
 // ===== 提示条 =====
 
-test("Toast notice：纸窗（paper + hairline 边），40px 记号栏 + 动词 + 图标 + 名字 + 默认键紧凑 + ×；不用墨", () => {
+/// 右下那一叠里的（CornerToast 给出「右下」）；不在任何外壳里的按锚点档画
+const corner = (props: Record<string, unknown>) =>
+  render(CornerToast, { children: createElement(Toast, props as never) });
+const anchored = (props: Record<string, unknown>) =>
+  render(FloatingToast, { children: createElement(Toast, props as never) });
+
+test("Toast 右下（notice 档）：纸窗（paper + hairline 边），40px 记号栏 + 动词 + 图标 + 名字 + 默认键紧凑 + ×；不用墨", () => {
   // 2026-09-25：提示条一律是纸，失败与成功靠句首记号与否定动词分（DESIGN-decisions「黑条提示全部改纸窗」）。
-  // 哪一档只由 kind 定（成功单行、其余带记号栏），没有 tier 这第二个开关
-  const html = render(Toast, {
+  // 2026-10-04：哪一种长相由出在哪定（锚点轻量一行、右下带记号栏），不由 kind 定；调用方不传
+  const html = corner({
     kind: "partial",
     sentence: "toast.line.partial.write",
     agents: [{ id: "claude-code", name: "Claude Code" }],
@@ -1546,15 +1560,126 @@ test("Toast 部分失败：! + 2 ✓ · 1 ⊘ 读数 + 查看，停 8 秒", () =
   assert.equal(TOAST_DWELL_MS.partial, 8000);
 });
 
-test("Toast 展开态：后果与路径放在副行之下（只给带记号栏的那一档）", () => {
-  const html = render(Toast, {
-    kind: "partial",
-    sentence: "toast.line.partial.delete",
-    names: ["docx"],
-    detail: "示意图",
+// 2026-10-04 产品负责人：提示条里不放可展开的内容——要展开看的东西不该放在会自己走的一窗里
+test("Toast 没有展开内容：detail 一档已删（组件、样式都不留）", () => {
+  const src = readFileSync(new URL("../src/ui/Toast.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /\bdetail\b/);
+  assert.doesNotMatch(uiCss, /ss-toast__detail|has-detail/);
+});
+
+test("Toast 锚点档（FloatingToast 里）：三种 kind 都是轻量一行纸窗，记号在句首（✓ / ⊘ / !），没有记号栏", () => {
+  const ok = anchored({ kind: "success", sentence: "toast.line.success.link", names: ["pdf"] });
+  assert.match(ok, /class="ss-toast ss-toast--routine" data-kind="success" role="status"/);
+  assert.match(ok, /class="ss-toast__mark" title="成功" aria-hidden="true"><svg class="ss-tick"/);
+  const cannot = anchored({
+    kind: "cannot",
+    sentence: "toast.line.cannot.link",
+    agents: [{ id: "codex", name: "Codex" }],
+    names: ["defuddle"],
+    reason: "已有同名",
+    onClose: noop,
   });
-  assert.match(html, /class="ss-toast ss-toast--notice has-detail"/);
-  assert.match(html, /class="ss-toast__detail">示意图</);
+  assert.match(
+    cannot,
+    /^<span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"[^>]*><div class="ss-toast ss-toast--routine" data-kind="cannot" role="alert"><span class="ss-toast__mark" title="做不成" role="img" aria-label="做不成"><svg/,
+  );
+  assert.doesNotMatch(cannot, /ss-toast__indicator|ss-toast--notice/);
+  // 原因照旧接在 ` · ` 后；× 在最后
+  assert.match(
+    cannot,
+    /<span class="ss-toast__sep">·<\/span><span class="ss-toast__reason">已有同名<\/span>/,
+  );
+  assert.match(
+    cannot,
+    /class="ss-toast__close"><span class="ss-tipwrap is-idle"><button[^>]*aria-label="关闭"/,
+  );
+  const partial = anchored({
+    kind: "partial",
+    sentence: "toast.line.partial.write",
+    tally: { done: 2, failed: 1 },
+    action: { label: "撤销", onClick: noop },
+    onClose: noop,
+  });
+  assert.match(partial, /class="ss-toast__mark" title="部分失败" role="img" aria-label="部分失败"/);
+  // 键行内：` · 撤销`，× 在键后
+  assert.match(
+    partial,
+    /<span class="ss-toast__sep">·<\/span><span class="ss-tipwrap is-idle"><button[^>]*>撤销<\/button><\/span><span class="ss-toast__close">/,
+  );
+  // 不在任何外壳里（测试、画廊就地画的）按锚点档
+  assert.match(
+    render(Toast, { kind: "cannot", sentence: "toast.line.cannot.link" }),
+    /ss-toast--routine/,
+  );
+});
+
+test("Toast 锚点档的失败第二行（路径）：12 等宽 ink-mute，缩进到句首记号之后，与整句的字对齐", () => {
+  const html = anchored({
+    kind: "cannot",
+    sentence: "toast.line.cannot.link",
+    names: ["defuddle"],
+    reason: "已有同名",
+    stats: "~/.codex/skills/defuddle",
+    onClose: noop,
+  });
+  // 有副行就是两行排法：记号自成一格，整句一行、副行在它下面（同一列），键与 × 在右侧
+  assert.match(
+    html,
+    /class="ss-toast ss-toast--routine is-wrapped" data-kind="cannot" role="alert"><span class="ss-toast__mark"[^]*?<\/span><span class="ss-toast__line">[^]*?<\/span><div class="ss-toast__stats ss-selectable">~\/\.codex\/skills\/defuddle<\/div><span class="ss-toast__keys"><span class="ss-toast__close">/,
+  );
+  const box = cssRule(uiCss, ".ss-toast--routine.is-wrapped");
+  assert.match(box, /grid-template-columns: auto minmax\(0, 1fr\) auto;/);
+  const mark = cssRule(uiCss, ".ss-toast--routine.is-wrapped > .ss-toast__mark");
+  assert.match(mark, /grid-column: 1;/);
+  assert.match(mark, /align-self: start;/);
+  assert.match(cssRule(uiCss, ".ss-toast--routine .ss-toast__stats"), /grid-column: 2;/);
+  const stats = cssRule(uiCss, ".ss-toast__stats");
+  assert.match(stats, /font-family: var\(--font-mono\)/);
+  assert.match(stats, /font-size: var\(--size-label\)/);
+  assert.match(stats, /color: var\(--ink-mute\)/);
+  // 一行时原因不在框里自己折（折了量不出放不下），放不下由组件改两行
+  assert.match(
+    uiCss,
+    /\.ss-toast--routine:not\(\.is-wrapped\) \.ss-toast__reason,\s*\.ss-toast--routine:not\(\.is-wrapped\) \.ss-toast__message \{\s*white-space: nowrap;/,
+  );
+  // 量放不下：三种 kind 都量（不只成功）
+  const src = readFileSync(new URL("../src/ui/Toast.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /kind === "success" && wrappedFor/);
+});
+
+// Codex 复审（2026-10-04）：右下成功直接排主行，读数一整段 nowrap，长项目名（`只在……里能用了`）撑出 ≤400 的纸窗
+test("Toast 读数可折：右下档的 trail / reading 在正文里折行，不撑出纸窗；锚点两行时读数同样能折", () => {
+  for (const sel of [
+    ".ss-toast--notice .ss-toast__trail",
+    ".ss-toast--notice .ss-toast__reading",
+    ".ss-toast--routine.is-wrapped .ss-toast__reading",
+  ]) {
+    const rule = cssRule(uiCss, sel);
+    assert.match(rule, /min-width: 0;/, sel);
+    assert.match(rule, /white-space: normal;/, sel);
+  }
+  // 锚点两行的第二行（trailline）随两行排法的 white-space: normal 折，不再自己 nowrap
+  assert.doesNotMatch(cssRule(uiCss, ".ss-toast__trailline"), /nowrap/);
+  assert.match(cssRule(uiCss, ".ss-toast--routine.is-wrapped"), /white-space: normal;/);
+});
+
+test("Toast 右下档（CornerToast / ToastStack 里）：三种 kind 都带 40 记号栏，成功的记号栏里是 ✓", () => {
+  const ok = corner({ kind: "success", sentence: "toast.line.success.link", names: ["pdf"] });
+  assert.match(ok, /^<div class="ss-toast ss-toast--notice" data-kind="success" role="status">/);
+  assert.match(
+    ok,
+    /class="ss-toast__indicator" title="成功" role="img" aria-label="成功"><svg class="ss-tick"/,
+  );
+  assert.doesNotMatch(ok, /ss-toast__mark/);
+  const stacked = render(ToastStack, {
+    className: "app__toast",
+    children: createElement(Toast, { kind: "cannot", sentence: "toast.line.cannot.link" }),
+  });
+  assert.match(stacked, /class="ss-toast ss-toast--notice" data-kind="cannot" role="alert"/);
+  // 位置由外壳给，调用方不传：Toast 没有 placement 这个参数
+  const src = readFileSync(new URL("../src/ui/Toast.tsx", import.meta.url), "utf8");
+  assert.match(src, /useContext\(ToastPlacementContext\)/);
+  assert.doesNotMatch(src, /placement\?:/);
 });
 
 // 2026-09-25：应用内能点的一律默认键——`撤销` 从安静键改为默认键紧凑 24；句首 ✓ 用统一对勾；
@@ -1590,10 +1715,11 @@ test("Toast 成功：不给档位也是纸窗（paper + hairline 边 + float 12 
   assert.match(rule, /border-radius:\s*var\(--radius-float\)/);
   assert.match(rule, /box-shadow:\s*var\(--elev-float\)/);
   assert.match(rule, /height:\s*var\(--control-h-row\)/);
-  // 做不成 / 部分失败不给档位时是带记号栏的纸窗（notice 档）
+  // 做不成 / 部分失败在右下时才带记号栏（notice 档）；锚在触发处的同成功一样是轻量一行
+  assert.match(corner({ kind: "cannot", sentence: "toast.line.cannot.link" }), /ss-toast--notice/);
   assert.match(
-    render(Toast, { kind: "cannot", sentence: "toast.line.cannot.link" }),
-    /ss-toast--notice/,
+    anchored({ kind: "cannot", sentence: "toast.line.cannot.link" }),
+    /ss-toast--routine/,
   );
 });
 
@@ -1636,7 +1762,7 @@ test("第三批 8A 例行提示条放不下 420：整句一行，读数（trail�
   );
   const box = cssRule(uiCss, ".ss-toast--routine.is-wrapped");
   assert.match(box, /display: inline-grid;/);
-  assert.match(box, /grid-template-columns: minmax\(0, 1fr\) auto;/);
+  assert.match(box, /grid-template-columns: auto minmax\(0, 1fr\) auto;/);
   assert.match(box, /height: auto;/);
   assert.match(box, /white-space: normal;/);
   const trail = uiCss.match(/\n\n\.ss-toast__trailline \{([^}]*)\}/)?.[1] ?? "";
@@ -1752,7 +1878,7 @@ test("BusySlot 浮起（float）：键照旧锁着，过了门槛一句话浮在
 
 // 2026-09-25 设计系统梳理：notice 档原来丢掉次要键（在访达中显示备份）和撤销的禁用原因
 test("Toast notice 与 routine 同样画次要的浅键，撤销不可用时带原因", () => {
-  const html = render(Toast, {
+  const html = corner({
     kind: "partial",
     sentence: "toast.line.partial.write",
     tally: { done: 2, failed: 1 },
@@ -1882,6 +2008,47 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认键紧凑（纸面）
   assert.match(after, /margin-left:\s*var\(--space-xs\)/);
 });
 
+// 2026-10-04 产品负责人：「NoticePanel 和 HintStrip 是不是可以合并？」——一个灰面板，意思只靠两端分
+test("NoticePanel 两端：左 ! 默认有（要你处理），mark={false} 没有（一次性说明，读屏念「提示」）；× 的提示框随之默认", () => {
+  const problem = render(NoticePanel, { message: "没重启 Codex", onClose: noop });
+  assert.match(problem, /class="ss-noticepanel__mark" title="要你动手" role="img"/);
+  assert.match(problem, /title="关闭" aria-label="关闭"/);
+  const hint = render(NoticePanel, {
+    scope: "section",
+    mark: false,
+    message: "读了本机的 skill 目录",
+    onClose: noop,
+  });
+  assert.doesNotMatch(hint, /ss-noticepanel__mark/);
+  assert.match(
+    hint,
+    /^<div class="ss-noticepanel ss-noticepanel--section" role="note" aria-label="提示">/,
+  );
+  assert.match(hint, /title="知道了，不再提示" aria-label="知道了，不再提示"/);
+  // 调用方给了就用给的（有更新：这一批不再提示）
+  assert.match(
+    render(NoticePanel, {
+      mark: false,
+      message: "x",
+      onClose: noop,
+      dismissTitle: "这一批不再提示",
+    }),
+    /title="这一批不再提示"/,
+  );
+  // 没有 ×、没有键：只是一句
+  assert.doesNotMatch(render(NoticePanel, { mark: false, message: "x" }), /ss-iconbtn|ss-btn/);
+});
+
+test("NoticePanel 量：section / row 13 号字、内边距 8 12、最矮 40；× 28 上下各让 2，面板仍是 40", () => {
+  const rule = cssRule(uiCss, ".ss-noticepanel");
+  assert.match(rule, /min-height:\s*40px/);
+  assert.match(rule, /padding:\s*var\(--space-xs\) var\(--space-sm\)/);
+  assert.match(rule, /font-size:\s*var\(--size-caption\)/);
+  assert.match(cssRule(uiCss, ".ss-noticepanel__close"), /margin:\s*-2px -6px -2px 0/);
+  // 句中的 ● ○（一次性说明里）与字同行
+  assert.match(cssRule(uiCss, ".ss-noticepanel__message .ss-dot-wrap"), /display:\s*inline-block/);
+});
+
 test("NoticePanel 行下失败：原因写全、可折行，给了 onClose 才有右端 ×", () => {
   const reason = "已启用时至少要保留一个模型；如需全部移除请先恢复";
   const html = render(NoticePanel, {
@@ -1901,6 +2068,28 @@ test("NoticePanel 行下失败：原因写全、可折行，给了 onClose 才�
   assert.doesNotMatch(reasonRule, /ellipsis|overflow:\s*hidden/);
   // 待办条（不可关）没有 ×
   assert.doesNotMatch(render(NoticePanel, { message: "x" }), /关闭/);
+});
+
+// spec 2026-10-04-local-diagnostics R13；2026-10-04 产品负责人：长条提示里不放展开按钮，`详情` 是一颗键、点开是浮层
+test("NoticePanel technical：键区在主键之前多一颗紧凑默认键 `详情`（弹出浮层，不在面板里展开原文）；没给 onCopy 不出", () => {
+  const html = render(NoticePanel, {
+    scope: "section",
+    message: "读不到第三方模型的状态",
+    reason: "~/.codex/config.toml 不归你的账户所有",
+    technical: "open ~/.codex/config.toml\nPermission denied (os error 13)",
+    onCopy: noop,
+    action: { label: "修复权限", onClick: noop },
+  });
+  assert.match(
+    html,
+    /<span class="ss-noticepanel__actions"><span class="ss-details">[^]*aria-haspopup="dialog"[^]*>详情<\/button>[^]*>修复权限</,
+  );
+  assert.doesNotMatch(html, /Permission denied/, "原文只在浮层里");
+  // 只有详情、没有别的键也出键区
+  const only = render(NoticePanel, { message: "x", technical: "raw", onCopy: noop });
+  assert.match(only, /<span class="ss-noticepanel__actions"><span class="ss-details">/);
+  // 没给复制回调：不出（复制要先去隐私，调用方负责）
+  assert.doesNotMatch(render(NoticePanel, { message: "x", technical: "raw" }), /详情/);
 });
 
 // ===== 确认弹窗 =====
@@ -2019,16 +2208,27 @@ test("Confirm 窄面板：行下当场展开的一块凹面（recess、face 12�
     /class="ss-btn ss-btn--compact">取消<\/button>.*class="ss-btn ss-btn--primary ss-btn--compact">重启</,
   );
   const panel = cssRule(uiCss, ".ss-confirm--inline");
-  assert.match(panel, /background:\s*var\(--recess\)/);
-  assert.match(panel, /border-radius:\s*var\(--radius-face\)/);
-  assert.match(panel, /padding:\s*10px var\(--space-sm\)/);
+  // 默认值是凹面；托盘经 --confirm-inline-* 钩子换成系统菜单的样子
+  assert.match(panel, /background:\s*var\(--confirm-inline-bg, var\(--recess\)\)/);
+  assert.match(panel, /border-radius:\s*var\(--confirm-inline-radius, var\(--radius-face\)\)/);
+  assert.match(panel, /padding:\s*var\(--confirm-inline-pad, 10px var\(--space-sm\)\)/);
+  assert.match(
+    cssRule(uiCss, ".ss-confirm--inline::before"),
+    /display:\s*var\(--confirm-inline-rule, none\)/,
+  );
   assert.match(panel, /box-shadow:\s*none/);
   assert.match(
     cssRule(uiCss, ".ss-confirm--inline .ss-confirm__title"),
     /font-size:\s*var\(--size-caption\)/,
   );
-  assert.match(cssRule(uiCss, ".ss-confirm--inline .ss-confirm__body"), /text-wrap:\s*balance/);
-  assert.match(cssRule(uiCss, ".ss-confirm--inline .ss-confirm__foot"), /gap:\s*var\(--space-sm\)/);
+  assert.match(
+    cssRule(uiCss, ".ss-confirm--inline .ss-confirm__body"),
+    /text-wrap:\s*var\(--confirm-inline-wrap, balance\)/,
+  );
+  assert.match(
+    cssRule(uiCss, ".ss-confirm--inline .ss-confirm__foot"),
+    /gap:\s*var\(--confirm-inline-gap, var\(--space-sm\)\)/,
+  );
 });
 
 // ===== 推入页（2026-09-25 取代整窗二级页 SubPage）=====

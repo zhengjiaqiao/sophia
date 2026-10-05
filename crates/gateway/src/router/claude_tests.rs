@@ -847,6 +847,332 @@ async fn effort_retry_comes_first_then_structured_output_retry() {
     assert_eq!(c.h.third_party.all().len(), 3);
 }
 
+// ---------- 思考内容带回（reasoning-passback R4） ----------
+
+const CONTENT_REJECTED: &[u8] =
+    br#"{"error":{"message":"unknown field reasoning_content","type":"invalid_request_error"}}"#;
+
+fn has_reasoning_content(body: &[u8]) -> bool {
+    String::from_utf8_lossy(body).contains("reasoning_content")
+}
+
+/// 历史 assistant 带 thinking（「先读 a」）+ tool_use；`thinking` 给了就是要了思考（会发 reasoning_effort）
+fn passback_messages(thinking: bool) -> String {
+    let mut body = serde_json::json!({
+        "model": "claude-sonnet-5", "max_tokens": 100, "stream": true,
+        "tools": [{"name": "Read", "input_schema": {"type": "object"}}],
+        "messages": [
+            {"role": "user", "content": "看看 a"},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "先读 a", "signature": "sophia-thinking-v1:x"},
+                {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {}}
+            ]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "内容"}]}
+        ]
+    });
+    if thinking {
+        body["thinking"] = serde_json::json!({"type": "enabled", "budget_tokens": 2000});
+    }
+    body.to_string()
+}
+
+/// AC4（Claude）：上游因 reasoning_content 回 400 → 去掉后重发一次并成功；第二次仍 400 则按 R27 回、不再重发
+#[tokio::test]
+async fn reasoning_content_is_dropped_once_when_rejected() {
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        if has_reasoning_content(&req.body) {
+            (400, vec![], CONTENT_REJECTED.to_vec())
+        } else {
+            let respond = text_stream();
+            respond(req)
+        }
+    })))
+    .await;
+    let res = c.send(messages_req(&passback_messages(false))).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = c.h.third_party.all();
+    assert_eq!(all.len(), 2, "恰好重发一次");
+    assert_eq!(
+        json(&all[0].body)["messages"][1]["reasoning_content"],
+        "先读 a"
+    );
+    assert!(!has_reasoning_content(&all[1].body));
+    let mut first = json(&all[0].body);
+    first["messages"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("reasoning_content");
+    assert_eq!(first, json(&all[1].body));
+
+    let c = ClaudeHarness::new(Some(upstream_error(400, vec![], CONTENT_REJECTED.to_vec()))).await;
+    let res = c.send(messages_req(&passback_messages(false))).await;
+    assert_eq!(res.status, 400);
+    assert_eq!(anthropic_error(&res).0, "invalid_request_error");
+    assert_eq!(c.h.third_party.all().len(), 2, "至多一次");
+}
+
+/// Codex 复审第二轮：pydantic 式 extra_forbidden 回显的 input 里有 required，仍要认作拒收、去掉重发一次
+#[tokio::test]
+async fn extra_forbidden_with_echoed_input_drops_reasoning_content() {
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        if has_reasoning_content(&req.body) {
+            (
+                400,
+                vec![],
+                br#"{"detail":[{"type":"extra_forbidden","loc":["body","messages",1,"reasoning_content"],"msg":"Extra inputs are not permitted","input":"Read the required settings first"}]}"#.to_vec(),
+            )
+        } else {
+            let respond = text_stream();
+            respond(req)
+        }
+    })))
+    .await;
+    let res = c.send(messages_req(&passback_messages(false))).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert_eq!(c.h.third_party.all().len(), 2);
+
+    // 上一轮的：上游说缺思考内容 → 不去掉、不重发
+    let c = ClaudeHarness::new(Some(upstream_error(
+        400,
+        vec![],
+        br#"{"error":{"message":"Missing reasoning_content","type":"invalid_request_error"}}"#
+            .to_vec(),
+    )))
+    .await;
+    assert_eq!(
+        c.send(messages_req(&passback_messages(false))).await.status,
+        400
+    );
+    assert_eq!(c.h.third_party.all().len(), 1);
+}
+
+/// Codex 复审第三轮的复现：同一条错误里「JSON schema output is unsupported」与「reasoning_content is required」
+/// 并存。只看点名它的那一句（说的是必需）→ 不删思考，走格式降级，第二次就成功
+#[tokio::test]
+async fn unsupported_elsewhere_does_not_drop_required_reasoning_content() {
+    const MIXED: &[u8] = br#"{"error":{"message":"Invalid request: JSON schema output is unsupported; reasoning_content is required for assistant tool calls","type":"invalid_request_error"}}"#;
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        let body = json(&req.body);
+        if body.get("response_format").is_some() || !has_reasoning_content(&req.body) {
+            (400, vec![], MIXED.to_vec())
+        } else {
+            let respond = text_stream();
+            respond(req)
+        }
+    })))
+    .await;
+    let mut body: serde_json::Value = serde_json::from_str(&passback_messages(false)).unwrap();
+    body["output_config"] =
+        serde_json::json!({"format": {"type": "json_schema", "schema": {"type": "object"}}});
+    let res = c.send(messages_req(&body.to_string())).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = c.h.third_party.all();
+    assert_eq!(all.len(), 2, "格式降级一次就成功");
+    assert!(json(&all[1].body).get("response_format").is_none());
+    assert!(has_reasoning_content(&all[1].body), "思考历史保留");
+}
+
+/// Codex 复审第四轮的复现：Pydantic 文字报错，路径行与原因行相邻 → 认作拒收，去掉后重发一次成功
+#[tokio::test]
+async fn pydantic_text_error_drops_reasoning_content_once() {
+    const PYDANTIC: &[u8] = br#"{"error":{"message":"1 validation error for Request\nmessages.0.reasoning_content\n  Extra inputs are not permitted [type=extra_forbidden, input_value='thought', input_type=str]","type":"invalid_request_error"}}"#;
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        if has_reasoning_content(&req.body) {
+            (400, vec![], PYDANTIC.to_vec())
+        } else {
+            let respond = text_stream();
+            respond(req)
+        }
+    })))
+    .await;
+    let res = c.send(messages_req(&passback_messages(false))).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = c.h.third_party.all();
+    assert_eq!(all.len(), 2);
+    assert!(!has_reasoning_content(&all[1].body));
+}
+
+/// 降级去掉思考内容后上游没给用量：兜底的输入用量是不含思考的估算（按实际发出的请求算）
+#[tokio::test]
+async fn input_estimate_follows_the_request_actually_sent() {
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        if has_reasoning_content(&req.body) {
+            (400, vec![], CONTENT_REJECTED.to_vec())
+        } else {
+            let respond = chat_sse(&[
+                r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":"好"},"finish_reason":"stop"}]}"#,
+            ]);
+            respond(req)
+        }
+    })))
+    .await;
+    let mut body: serde_json::Value = serde_json::from_str(&passback_messages(false)).unwrap();
+    body["messages"][1]["content"][0]["thinking"] = serde_json::json!("思".repeat(500));
+    let with_thinking = crate::translate::anthropic::estimate_tokens(&body);
+    let mut stripped = body.clone();
+    stripped["messages"][1]["content"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|b| b["type"] != "thinking");
+    let without = crate::translate::anthropic::estimate_tokens(&stripped);
+    assert_eq!(with_thinking, without + 500);
+
+    let res = c.send(messages_req(&body.to_string())).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert_eq!(c.h.third_party.all().len(), 2);
+    let events = sse_events(&res.text());
+    let start = &events.iter().find(|(n, _)| n == "message_start").unwrap().1;
+    assert_eq!(start["message"]["usage"]["input_tokens"], without);
+    let delta = &events.iter().find(|(n, _)| n == "message_delta").unwrap().1;
+    assert_eq!(delta["usage"]["input_tokens"], without);
+}
+
+/// 推理强度、思考内容各被点名拒收一次：各去一次（点名谁去谁），共三次；一直说不清地拒收也只发三次
+#[tokio::test]
+async fn effort_and_reasoning_content_retries_are_independent() {
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        if has_reasoning_content(&req.body) {
+            (400, vec![], CONTENT_REJECTED.to_vec())
+        } else if json(&req.body).get("reasoning_effort").is_some() {
+            (400, vec![], EFFORT_REJECTED.to_vec())
+        } else {
+            let respond = text_stream();
+            respond(req)
+        }
+    })))
+    .await;
+    let res = c.send(messages_req(&passback_messages(true))).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all: Vec<serde_json::Value> =
+        c.h.third_party
+            .all()
+            .iter()
+            .map(|r| json(&r.body))
+            .collect();
+    assert_eq!(all.len(), 3);
+    assert_eq!(all[0]["reasoning_effort"], "low");
+    assert!(
+        all[1].get("reasoning_effort").is_some(),
+        "点名的是 reasoning_content，先去它"
+    );
+    assert!(!all[1].to_string().contains("reasoning_content"));
+    assert!(all[2].get("reasoning_effort").is_none());
+
+    let c = ClaudeHarness::new(Some(upstream_error(
+        400,
+        vec![],
+        br#"{"error":{"message":"reasoning is not supported"}}"#.to_vec(),
+    )))
+    .await;
+    assert_eq!(
+        c.send(messages_req(&passback_messages(true))).await.status,
+        400
+    );
+    assert_eq!(
+        c.h.third_party.all().len(),
+        2,
+        "说不清的拒收只去推理强度，不动思考内容"
+    );
+}
+
+/// Codex 复审 P2 的复现：上游对带 response_format 的请求回「response_format is not supported for reasoning
+/// models」（含 reasoning + 不支持），不带思考内容又回「Missing reasoning_content」。应先降级格式、保留思考历史，
+/// 第二次就成功；不能因宽判先删思考内容（那样第三次也失败）
+#[tokio::test]
+async fn format_rejection_mentioning_reasoning_keeps_reasoning_content() {
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        let body = json(&req.body);
+        if body.get("response_format").is_some() {
+            (
+                400,
+                vec![],
+                br#"{"error":{"message":"response_format is not supported for reasoning models"}}"#
+                    .to_vec(),
+            )
+        } else if !has_reasoning_content(&req.body) {
+            (
+                400,
+                vec![],
+                br#"{"error":{"message":"Missing reasoning_content"}}"#.to_vec(),
+            )
+        } else {
+            let respond = text_stream();
+            respond(req)
+        }
+    })))
+    .await;
+    let mut body: serde_json::Value = serde_json::from_str(&passback_messages(false)).unwrap();
+    body["output_config"] =
+        serde_json::json!({"format": {"type": "json_schema", "schema": {"type": "object"}}});
+    let res = c.send(messages_req(&body.to_string())).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all: Vec<serde_json::Value> =
+        c.h.third_party
+            .all()
+            .iter()
+            .map(|r| json(&r.body))
+            .collect();
+    assert_eq!(all.len(), 2, "只降级格式一次");
+    assert!(all[0].get("response_format").is_some());
+    assert!(all[1].get("response_format").is_none());
+    let assistant = all[1]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["role"] == "assistant")
+        .unwrap();
+    assert_eq!(assistant["reasoning_content"], "先读 a", "思考历史保留");
+
+    // 要了思考（发了 reasoning_effort）时同样先降级格式：这句错误也会被推理强度的宽判认中，但点名的是 response_format
+    let c = ClaudeHarness::new(Some(Arc::new(|req: &Captured| {
+        if json(&req.body).get("response_format").is_some() {
+            (
+                400,
+                vec![],
+                br#"{"error":{"message":"response_format is not supported for reasoning models"}}"#
+                    .to_vec(),
+            )
+        } else {
+            let respond = text_stream();
+            respond(req)
+        }
+    })))
+    .await;
+    let mut body: serde_json::Value = serde_json::from_str(&passback_messages(true)).unwrap();
+    body["output_config"] =
+        serde_json::json!({"format": {"type": "json_schema", "schema": {"type": "object"}}});
+    let res = c.send(messages_req(&body.to_string())).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = c.h.third_party.all();
+    assert_eq!(all.len(), 2);
+    assert_eq!(
+        json(&all[1].body)["reasoning_effort"],
+        "low",
+        "推理强度留着"
+    );
+    assert!(json(&all[1].body).get("response_format").is_none());
+}
+
+/// AC5：上游错误原文里的账号与密钥标识（org-…、ak-…、sk-…）不进路由日志，其余原文照留
+#[tokio::test]
+async fn upstream_reason_in_log_has_no_account_ids() {
+    let c = ClaudeHarness::new(Some(upstream_error(
+        429,
+        vec![],
+        br#"{"error":{"message":"Your account org-abc123def456<ak-xyz789uvw> request reached organization max RPM: 3, key sk-short1"}}"#.to_vec(),
+    )))
+    .await;
+    let res = c.send(messages_req(MESSAGES)).await;
+    assert_eq!(res.status, 429);
+    let log = std::fs::read_to_string(c.h.dir.path().join("router.log")).unwrap();
+    let line = log.lines().last().unwrap();
+    assert!(line.contains("result=upstream_error reason="), "{line}");
+    for id in ["org-abc", "ak-xyz", "sk-short"] {
+        assert!(!line.contains(id), "日志里不能有 {id}: {line}");
+    }
+    assert!(line.contains("max_RPM"), "其余原文照留: {line}");
+}
+
 /// AC16（路由部分）：count_tokens 本地估算，上游 0 次；模型未命中 404
 #[tokio::test]
 async fn count_tokens_is_local_and_needs_a_known_model() {
@@ -1098,7 +1424,8 @@ async fn ac23_text_is_forwarded_as_it_arrives() {
     }
 }
 
-/// AC25：上游 200 后静默 3 个保活间隔 → 客户端收到 ≥ 2 个 ping，之后正常收尾；只吐推理内容时同样有 ping
+/// AC25：上游 200 后静默 3 个保活间隔 → 客户端收到 ≥ 2 个 ping，之后正常收尾；只吐被丢弃的推理内容时同样有 ping
+///（2026-10-05 起正文之前的推理内容转成 thinking 块写出，reasoning-passback R2；被丢弃的只剩正文开始之后才到的）
 #[tokio::test]
 async fn ac25_ping_is_sent_while_the_upstream_is_silent() {
     let (c, _) = paced_harness(vec![
@@ -1130,14 +1457,17 @@ async fn ac25_ping_is_sent_while_the_upstream_is_silent() {
         .unwrap();
     assert_eq!(ping.1, serde_json::json!({"type": "ping"}));
 
-    let mut reasoning = vec![(Duration::ZERO, chunk(r#"{"role":"assistant"}"#, None))];
+    let mut reasoning = vec![(
+        Duration::ZERO,
+        chunk(r#"{"role":"assistant","content":"答"}"#, None),
+    )];
     for _ in 0..8 {
         reasoning.push((
             Duration::from_millis(50),
             chunk(r#"{"reasoning_content":"想"}"#, None),
         ));
     }
-    reasoning.push((Duration::ZERO, chunk(r#"{"content":"答"}"#, Some("stop"))));
+    reasoning.push((Duration::ZERO, chunk(r#"{"content":"完"}"#, Some("stop"))));
     reasoning.push((Duration::ZERO, "data: [DONE]\n\n".to_owned()));
     let (c, _) = paced_harness(reasoning).await;
     let text: String = frames(raw_send(&c, messages_req(MESSAGES)).await)
@@ -1150,7 +1480,7 @@ async fn ac25_ping_is_sent_while_the_upstream_is_silent() {
         names.iter().filter(|n| *n == "ping").count() >= 2,
         "{names:?}"
     );
-    assert!(!text.contains("thinking"), "推理内容不回");
+    assert!(!text.contains("thinking"), "正文之后的推理内容不回");
     assert!(!text.contains("想"));
 }
 
@@ -1195,7 +1525,17 @@ async fn ac22_real_upstream_sample_replays_to_the_golden_sequence() {
     let got: Vec<serde_json::Value> = sse_events(&res.text())
         .into_iter()
         .filter(|(n, _)| n != "ping")
-        .map(|(n, d)| serde_json::json!({"event": n, "data": d}))
+        .map(|(n, mut d)| {
+            // 思考块的签名是随机的（reasoning-passback R2），黄金序列里写作 <signature>
+            if let Some(signature) = d.pointer_mut("/delta/signature") {
+                assert!(signature
+                    .as_str()
+                    .unwrap()
+                    .starts_with(crate::translate::anthropic::THINKING_SIGNATURE_PREFIX));
+                *signature = serde_json::json!("<signature>");
+            }
+            serde_json::json!({"event": n, "data": d})
+        })
         .collect();
     let golden: Vec<serde_json::Value> = String::from_utf8(data(
         "golden/upstream-ap-gateway-kimi-k2.5-tool-stream.anthropic.jsonl",

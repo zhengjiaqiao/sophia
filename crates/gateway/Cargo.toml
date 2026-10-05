@@ -2,7 +2,7 @@
 name = "sophia-gateway"
 version = "0.1.0"
 edition = "2021"
-description = "Codex 模型网关：本机路由、协议转换、launchd 常驻。不依赖 tauri。"
+description = "模型网关：本机路由（在 Sophia 进程里运行）、协议转换。不依赖 tauri。"
 
 [dependencies]
 sophia-core = { path = "../core" }
@@ -20,6 +20,8 @@ ruzstd = "0.9.0"
 sha2 = "0.11.0"
 base64 = "0.23.1"
 url = "2.5.8"
+# 日志门面：写到哪由宿主决定（应用里是 tauri-plugin-log）
+log = "0.4"
 
 [dev-dependencies]
 tempfile = "3.27.0"

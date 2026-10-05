@@ -25,6 +25,7 @@ import {
   Switch,
   Toast,
   Tooltip,
+  TruncTip,
 } from "./ui/index.ts";
 
 /// 托盘面板里 Claude 那一块的「第三方模型」一行（注册表 Claude 那一项的 `trayRow`，经 TrayModelsRow 导出；
@@ -246,7 +247,10 @@ export function TrayClaudeModels({ title, state, tray }: TrayRowProps) {
   return (
     <>
       <div className="tray__cap">
-        <span className="tray__cap-title">{title}</span>
+        {/* 名字撑满键位左边的宽（同 Codex 那一行）：不撑开的话开关贴着名字，不在右端 */}
+        <TruncTip content={title} fit="grow">
+          <span className="tray__cap-title">{title}</span>
+        </TruncTip>
         <span className="tray__end">
           {/* 键位：失败的灰面板出来时让给它 */}
           {noticeLive ? null : keySlot()}

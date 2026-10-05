@@ -1,6 +1,6 @@
 use super::*;
 use crate::mcp::{undo_changed_message, undo_write};
-use crate::test_support::TempTree;
+use crate::test_support::{backups, TempTree};
 use std::fs;
 
 fn loc(id: &str, harness: &str, path: &Path, selector: Option<&str>) -> McpLocation {
@@ -24,7 +24,7 @@ fn item(location: &str, name: &str) -> McpRemoveItem {
 
 /// 单格与批量同一个入口（DESIGN「删除原件」MCP：删哪一处都走 `prepare_original_removal`）
 fn remove(locations: &[McpLocation], items: &[McpRemoveItem]) -> McpReport {
-    execute_removal(prepare_original_removal(locations, items))
+    execute_removal(prepare_original_removal(locations, items), backups())
 }
 
 fn outcome<'a>(report: &'a McpReport, target: &str, name: &str) -> &'a McpReportEntry {
@@ -218,7 +218,7 @@ fn batch_removes_what_it_can_and_says_why_for_the_rest() {
     assert_eq!(plan.actions.len(), 4);
     // 预览之后被别的程序改过：执行时整组拒绝，别的文件照常
     fs::write(&stale, br#"{"mcpServers":{"fmt":{"command":"fmt"}},"x":1}"#).unwrap();
-    let mut report = execute_removal(plan);
+    let mut report = execute_removal(plan, backups());
 
     let docs = outcome(&report, "cursor", "docs");
     let fmt = outcome(&report, "cursor", "fmt");
@@ -283,7 +283,7 @@ fn the_original_is_cut_out_of_its_own_location_and_can_be_undone() {
     let plan = prepare_original_removal(&locations, &[item("source", "docs")]);
     assert_eq!(plan.actions.len(), 1);
     assert_eq!(plan.actions[0].target_id, "source");
-    let mut report = execute_removal(plan);
+    let mut report = execute_removal(plan, backups());
     let entry = outcome(&report, "source", "docs");
     assert_eq!(entry.outcome, "removed", "{}", entry.message);
     let backup = entry.backup_path.clone().expect("删前先备份");
@@ -363,7 +363,7 @@ fn deleting_an_original_refuses_honestly_and_touches_nothing() {
     ] {
         let plan = prepare_original_removal(&locations, &[item(location, name)]);
         assert!(plan.actions.is_empty());
-        let mut report = execute_removal(plan);
+        let mut report = execute_removal(plan, backups());
         let entry = outcome(&report, location, name);
         assert_eq!(entry.outcome, "skipped");
         assert_eq!(entry.message, message);
@@ -385,10 +385,63 @@ fn deleting_an_original_refuses_when_the_file_changed_after_the_check() {
     let plan = prepare_original_removal(&locations, &[item("source", "docs")]);
     let edited = br#"{"mcpServers":{"docs":{"command":"docs"},"fmt":{"command":"fmt"}},"x":1}"#;
     fs::write(&source, edited).unwrap();
-    let mut report = execute_removal(plan);
+    let mut report = execute_removal(plan, backups());
     let entry = outcome(&report, "source", "docs");
     assert_eq!(entry.outcome, "failed");
     assert_eq!(entry.message, "配置在预览后发生变化");
     assert!(report.take_undo().is_none());
     assert_eq!(fs::read(&source).unwrap(), edited);
+}
+
+/// spec 2026-10-04-local-diagnostics R12：所在文件夹不让写时说「没有写入权限」，不再说「可能刚被别的程序改过」
+/// （以 root 运行时权限不拦，跳过）
+#[cfg(unix)]
+#[test]
+fn deleting_an_original_in_a_read_only_folder_says_no_permission() {
+    use std::os::unix::fs::PermissionsExt;
+    let tree = TempTree::new();
+    let dir = tree.dir("ro");
+    let source = tree.root().join("source.json");
+    let target = dir.join("mcp.json");
+    fs::write(&source, SOURCE_JSON).unwrap();
+    fs::write(&target, SOURCE_JSON).unwrap();
+    let locations = vec![
+        loc("source", "claude-code", &source, None),
+        loc("target", "cursor", &target, None),
+    ];
+    let plan = prepare_original_removal(&locations, &[item("target", "docs")]);
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(dir.join("probe"), b"x").is_ok() {
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let report = execute_removal(plan, backups());
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    let entry = outcome(&report, "target", "docs");
+    assert_eq!(entry.outcome, "failed");
+    assert_eq!(entry.message, "没有写入权限，没动");
+    assert_eq!(fs::read(&target).unwrap(), SOURCE_JSON);
+}
+
+/// 备份目录不让写：说「备份时没有写入权限」（Codex 复审 6/7）
+#[cfg(unix)]
+#[test]
+fn deleting_an_original_when_backups_are_read_only_says_why() {
+    use std::os::unix::fs::PermissionsExt;
+    let tree = TempTree::new();
+    let (locations, target) = json_tree(&tree, SOURCE_JSON);
+    let locked = tree.dir("locked");
+    let ro = locked.join("backups");
+    let plan = prepare_original_removal(&locations, &[item("target", "docs")]);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(locked.join("probe"), b"x").is_ok() {
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let report = execute_removal(plan, &ro);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    let entry = outcome(&report, "target", "docs");
+    assert_eq!(entry.outcome, "failed");
+    assert_eq!(entry.message, "备份时没有写入权限，没动");
+    assert_eq!(fs::read(&target).unwrap(), SOURCE_JSON);
 }

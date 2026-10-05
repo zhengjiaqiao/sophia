@@ -29,6 +29,9 @@ struct Lab {
     _tmp: tempfile::TempDir,
     root: PathBuf,
     dirs: DesktopDirs,
+    /// Sophia 的备份目录替身：另一个临时目录，不混进 `root` 的文件树
+    _backups_tmp: tempfile::TempDir,
+    backups: PathBuf,
 }
 
 impl Lab {
@@ -36,15 +39,35 @@ impl Lab {
         let tmp = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(tmp.path()).unwrap();
         let dirs = DesktopDirs::new(&root);
+        let backups_tmp = tempfile::tempdir().unwrap();
+        let backups = fs::canonicalize(backups_tmp.path())
+            .unwrap()
+            .join("backups");
         Self {
             _tmp: tmp,
             root,
             dirs,
+            _backups_tmp: backups_tmp,
+            backups,
         }
     }
 
     fn path(&self, file: DesktopFile) -> PathBuf {
         self.dirs.path(file)
+    }
+
+    /// 这个文件在备份目录里的全部备份（按序号先后）；没有备份过为空
+    fn backups_of(&self, path: &Path) -> Vec<PathBuf> {
+        let Ok(entries) = fs::read_dir(sophia_core::atomicfile::backup_dir(&self.backups, path))
+        else {
+            return Vec::new();
+        };
+        let mut baks: Vec<PathBuf> = entries
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "bak"))
+            .collect();
+        baks.sort();
+        baks
     }
 
     fn put(&self, file: DesktopFile, bytes: &[u8]) {
@@ -119,7 +142,7 @@ impl Lab {
     fn open(&self, desired: &Desired, previous: Option<&Applied>) -> Applied {
         let snapshot = desktop::read(&self.dirs, previous).unwrap();
         let plan = desktop::plan_apply(snapshot.files(), desired, previous).unwrap();
-        desktop::execute(&self.dirs, &snapshot, &plan).unwrap();
+        desktop::execute(&self.dirs, &snapshot, &plan, &self.backups).unwrap();
         Applied {
             phase: Phase::Done,
             ..plan.record
@@ -130,7 +153,7 @@ impl Lab {
     fn close(&self, record: &Applied) -> Plan {
         let snapshot = desktop::read(&self.dirs, Some(record)).unwrap();
         let plan = desktop::plan_restore(snapshot.files(), record, TOKEN).unwrap();
-        desktop::execute(&self.dirs, &snapshot, &plan).unwrap();
+        desktop::execute(&self.dirs, &snapshot, &plan, &self.backups).unwrap();
         plan
     }
 
@@ -270,8 +293,9 @@ fn opening_on_a_bare_machine_creates_all_four_files() {
     // 令牌不进记录：profile 里存占位
     assert_eq!(record.written.profile["inferenceGatewayApiKey"], "<token>");
     assert!(!serde_json::to_string(&record).unwrap().contains(TOKEN));
-    // 新建的文件没有可备份的原文
+    // 新建的文件没有可备份的原文；原文件旁边也不留备份
     assert!(!lab.tree().iter().any(|(name, _)| name.ends_with(".bak")));
+    assert!(!lab.backups.exists());
 }
 
 /// AC30：profile 已存在且被用户在配置窗口里加了键、关了 Chat：改已选后重写只动 inferenceModels
@@ -324,10 +348,8 @@ fn rewriting_an_existing_profile_touches_only_sophias_keys() {
     // 原值沿用第一次记下的
     assert_eq!(record.originals.applied_id, Original::FileAbsent);
     // 改 Sophia 自己的 profile 不留备份（内含令牌）
-    assert!(!lab
-        .tree()
-        .iter()
-        .any(|(name, _)| name.contains("configLibrary/") && name.ends_with(".bak")));
+    assert!(lab.backups_of(&lab.path(DesktopFile::Profile)).is_empty());
+    assert!(!lab.tree().iter().any(|(name, _)| name.ends_with(".bak")));
 }
 
 /// profile 已存在（例如上次留下的）且缺几个键：补在末尾，缩进跟随原文；已有 chatTabEnabled 不动
@@ -413,14 +435,15 @@ fn deployment_mode_is_written_in_both_places_following_each_files_layout() {
         lab.text(DesktopFile::Claude3pConfig),
         "{\"deploymentMode\":\"3p\"}"
     );
+    // 备份在 Sophia 的备份目录里，原文件旁边没有
+    let baks = lab.backups_of(&lab.path(DesktopFile::ClaudeConfig));
+    assert_eq!(baks.len(), 1, "{baks:?}");
+    assert!(baks[0].to_string_lossy().ends_with("-sophia-models.bak"));
     assert_eq!(
-        fs::read(
-            lab.root
-                .join("Claude/claude_desktop_config.sophia-models.bak")
-        )
-        .unwrap(),
+        fs::read(&baks[0]).unwrap(),
         golden("claude-config-crlf.json")
     );
+    assert!(!lab.tree().iter().any(|(name, _)| name.ends_with(".bak")));
 }
 
 /// 文件开头的 BOM 原样保留
@@ -649,7 +672,7 @@ fn a_failed_open_is_undone_in_the_same_action() {
         let snapshot = desktop::read(&lab.dirs, None).unwrap();
         let plan = desktop::plan_apply(snapshot.files(), &desired(), None).unwrap();
         for step in &plan.steps[..written] {
-            desktop::apply_step(&lab.dirs, &snapshot, step).unwrap();
+            desktop::apply_step(&lab.dirs, &snapshot, step, &lab.backups).unwrap();
         }
         // 第 written+1 步失败：Sophia 还活着，用记下的原值撤回
         lab.close(&plan.record);
@@ -666,7 +689,7 @@ fn a_crash_midway_is_rolled_forward_to_the_same_result() {
     let snapshot = desktop::read(&lab.dirs, None).unwrap();
     let plan = desktop::plan_apply(snapshot.files(), &desired(), None).unwrap();
     for step in &plan.steps[..2] {
-        desktop::apply_step(&lab.dirs, &snapshot, step).unwrap();
+        desktop::apply_step(&lab.dirs, &snapshot, step, &lab.backups).unwrap();
     }
     let crashed = plan.record;
     assert_eq!(crashed.phase, Phase::Writing);
@@ -699,7 +722,7 @@ fn rolling_forward_refuses_to_overwrite_a_file_changed_by_someone_else() {
     let snapshot = desktop::read(&lab.dirs, None).unwrap();
     let plan = desktop::plan_apply(snapshot.files(), &desired(), None).unwrap();
     for step in &plan.steps[..2] {
-        desktop::apply_step(&lab.dirs, &snapshot, step).unwrap();
+        desktop::apply_step(&lab.dirs, &snapshot, step, &lab.backups).unwrap();
     }
     lab.put_profile(CC_ID, CC_PROFILE);
     let meta = format!(
@@ -731,7 +754,7 @@ fn a_file_changed_after_the_snapshot_is_not_overwritten() {
     let snapshot = desktop::read(&lab.dirs, None).unwrap();
     let plan = desktop::plan_apply(snapshot.files(), &desired(), None).unwrap();
     lab.put(DesktopFile::Meta, b"{\"entries\": [], \"other\": 1}");
-    let error = desktop::execute(&lab.dirs, &snapshot, &plan).unwrap_err();
+    let error = desktop::execute(&lab.dirs, &snapshot, &plan, &lab.backups).unwrap_err();
     assert!(
         matches!(
             error,
@@ -757,7 +780,7 @@ fn an_interrupted_switch_back_is_finished_by_running_it_again() {
     let record = lab.open(&desired(), None);
     let snapshot = desktop::read(&lab.dirs, Some(&record)).unwrap();
     let plan = desktop::plan_restore(snapshot.files(), &record, TOKEN).unwrap();
-    desktop::apply_step(&lab.dirs, &snapshot, &plan.steps[0]).unwrap();
+    desktop::apply_step(&lab.dirs, &snapshot, &plan.steps[0], &lab.backups).unwrap();
     assert_eq!(mode(&lab, DesktopFile::ClaudeConfig), "1p");
     assert_eq!(mode(&lab, DesktopFile::Claude3pConfig), "3p");
 
@@ -982,6 +1005,23 @@ fn inspection_reports_what_is_ours_and_what_drifted() {
         .replace("\"chatTabEnabled\": true", "\"chatTabEnabled\": false");
     lab.put(DesktopFile::Profile, off.as_bytes());
     assert!(lab.inspect(Some(&record)).drift.is_empty());
+}
+
+/// 换过端口：设置丢了时，Sophia 在 47328–47339 任一端口写下的文件都认得；范围外的不认
+#[test]
+fn files_written_for_another_port_in_the_range_are_still_ours() {
+    for (port, ours) in [(47331, true), (47340, false)] {
+        let lab = Lab::new();
+        account_mode(&lab);
+        lab.open(
+            &Desired {
+                base_url: desktop::base_url(port),
+                ..desired()
+            },
+            None,
+        );
+        assert_eq!(lab.inspect(None).unrecorded_ours, ours, "port {port}");
+    }
 }
 
 /// Sophia 设置丢了、但文件还是我们写的：认得出，切回按「原来没有」处理（写 "1p"、删 appliedId）

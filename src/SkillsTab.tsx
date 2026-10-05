@@ -52,7 +52,7 @@ import type { DomainRef } from "./pages/sourcesView";
 import { useSources } from "./SourceRow";
 import { usePageCommand } from "./shell/menuBus";
 import { GLOBAL_KEY, type Face, type Location } from "./shell/nav";
-import { Confirm, CornerToast, HintStrip, Mono, Toast, ToastCount, useHintStack } from "./ui";
+import { Confirm, CornerToast, Mono, NoticePanel, Toast, ToastCount, useHintStack } from "./ui";
 import { HINTS, useHint } from "./hints";
 import type { AnchorRect } from "./layerPlace.ts";
 import {
@@ -1536,9 +1536,13 @@ export default function SkillsTab({
           art: "noDirs",
         }}
         hint={
-          <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
-            {HINTS["first-scan-empty"](hintCtx)}
-          </HintStrip>
+          <NoticePanel
+            scope="section"
+            mark={false}
+            open={emptyHint.visible}
+            onClose={emptyHint.dismiss}
+            message={HINTS["first-scan-empty"](hintCtx)}
+          />
         }
       >
         {sources.host}
@@ -1754,52 +1758,56 @@ export default function SkillsTab({
               flush
             />
             {/* 同名原件（2026-09-30）：能关，关掉＝这一批不再提示；没有「全部处理」，每一个都要人决定留哪份 */}
-            <HintStrip
+            <NoticePanel
+              scope="section"
+              mark={false}
               open={hintStack.top === "dup"}
               stacked={hintStack.top === "dup" ? hintStack.below : 0}
-              onDismiss={() => {
+              onClose={() => {
                 const next = new Set([...dupDismissed, ...dupGroups.keys()]);
                 setDupDismissed(next);
                 saveDupDismissed(next);
                 setDupRows(null);
               }}
               dismissTitle={t("skills.dupStrip.dismiss")}
-              actions={[
-                {
-                  label: onlyTheseLabel(onlyDups),
-                  onClick: () => {
-                    setOrphansOnly(false);
-                    updates.setOnlyThese(false);
-                    setDupRows((prev) =>
-                      prev !== null
-                        ? null
-                        : new Set(
-                            view.rows
-                              .filter((row) => dupGroups.has(dupGroupKey(row)))
-                              .map((row) => skillRowKey(row)),
-                          ),
-                    );
-                  },
+              action={{
+                label: onlyTheseLabel(onlyDups),
+                onClick: () => {
+                  setOrphansOnly(false);
+                  updates.setOnlyThese(false);
+                  setDupRows((prev) =>
+                    prev !== null
+                      ? null
+                      : new Set(
+                          view.rows
+                            .filter((row) => dupGroups.has(dupGroupKey(row)))
+                            .map((row) => skillRowKey(row)),
+                        ),
+                  );
                 },
-              ]}
+              }}
               flush
-            >
-              {dupGroups.size > 0 ? dupStripSentence(dupGroups) : dupsDone()}
-            </HintStrip>
-            <HintStrip
+              message={dupGroups.size > 0 ? dupStripSentence(dupGroups) : dupsDone()}
+            />
+            <NoticePanel
+              scope="section"
+              mark={false}
               open={hintStack.top === "first-scan"}
               stacked={hintStack.top === "first-scan" ? hintStack.below : 0}
-              onDismiss={skillsHint.dismiss}
+              onClose={skillsHint.dismiss}
               flush
-            >
-              {HINTS["first-scan-skills"](hintCtx)}
-            </HintStrip>
+              message={HINTS["first-scan-skills"](hintCtx)}
+            />
           </>
         }
         emptyHint={
-          <HintStrip open={emptyHint.visible} onDismiss={emptyHint.dismiss}>
-            {HINTS["first-scan-empty"](hintCtx)}
-          </HintStrip>
+          <NoticePanel
+            scope="section"
+            mark={false}
+            open={emptyHint.visible}
+            onClose={emptyHint.dismiss}
+            message={HINTS["first-scan-empty"](hintCtx)}
+          />
         }
       />
       {globalToast ? <CornerToast>{globalToast}</CornerToast> : null}

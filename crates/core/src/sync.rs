@@ -134,6 +134,15 @@ pub fn delete_source_holding(
     plan: &DeleteSourcePlan,
     hold_root: Option<&Path>,
 ) -> (SyncReport, Option<DeleteUndo>) {
+    delete_source_holding_with(plan, hold_root, &trash)
+}
+
+/// 同 `delete_source_holding`，移进废纸篓这一步可替换（测试不碰系统废纸篓）
+pub(crate) fn delete_source_holding_with(
+    plan: &DeleteSourcePlan,
+    hold_root: Option<&Path>,
+    trash: &dyn Fn(&Path) -> io::Result<()>,
+) -> (SyncReport, Option<DeleteUndo>) {
     let delete = PlannedAction {
         kind: ActionKind::DeleteSource,
         item_name: file_name(&plan.path),
@@ -240,6 +249,10 @@ pub fn app_bundle(path: &Path) -> Option<PathBuf> {
 /// 普通文件，与暂存的原件（真实目录）分得开；以点开头
 const HOLD_ORIGIN: &str = ".sophia-origin";
 
+/// 访达往目录里写的显示设置文件。从暂存格把原件移进废纸篓时，访达偶尔在暂存格里留下一个
+/// （2026-10-05 实测：6 路并行 18 次里 2 次），它不是暂存的原件
+const FINDER_METADATA: &str = ".DS_Store";
+
 /// 把原件挪进 `root/<时间戳>/<名字>`，同一格里记下原处（`HOLD_ORIGIN`）。
 /// 先重校验仍是真实目录（软链不能顺着挪到本体里）。
 /// 装 skill 的撤销与更新（`market::install`）也用它，`release_held` 一并收尾
@@ -268,14 +281,17 @@ pub(crate) fn hold(body: &Path, root: &Path) -> io::Result<PathBuf> {
     Ok(held)
 }
 
-/// 暂存格里只剩原处记录（或已空）时删掉这一格；还有东西（没收成的原件）就留着，原处记录也留着
+/// 暂存格里只剩杂物（原处记录、访达留下的 `.DS_Store`）或已空时删掉这一格；
+/// 还有东西（没收成的原件）就留着，杂物也留着
 pub(crate) fn drop_slot(slot: &Path) {
     let Ok(entries) = std::fs::read_dir(slot) else {
         return;
     };
-    let others = entries.flatten().any(|e| !is_origin_record(&e.path()));
-    if !others {
-        let _ = std::fs::remove_file(slot.join(HOLD_ORIGIN));
+    let entries: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    if entries.iter().all(|p| is_slot_litter(p)) {
+        for litter in &entries {
+            let _ = std::fs::remove_file(litter);
+        }
         let _ = std::fs::remove_dir(slot);
     }
 }
@@ -376,7 +392,7 @@ pub(crate) fn release_held_with(
             .map(PathBuf::from);
         if let Ok(items) = std::fs::read_dir(&slot) {
             for item in items.flatten().map(|e| e.path()) {
-                if is_origin_record(&item) {
+                if is_slot_litter(&item) {
                     continue;
                 }
                 // 原处记录只认同名的那一件（旧版本留下的暂存格没有记录）
@@ -393,8 +409,11 @@ pub(crate) fn release_held_with(
     failed
 }
 
-fn is_origin_record(path: &Path) -> bool {
-    path.file_name().is_some_and(|n| n == HOLD_ORIGIN) && entry_kind(path) == EntryKind::File
+/// 暂存格里的杂物：原处记录、访达留下的 `.DS_Store`。只认普通文件，暂存的原件是真实目录
+fn is_slot_litter(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|n| n == HOLD_ORIGIN || n == FINDER_METADATA)
+        && entry_kind(path) == EntryKind::File
 }
 
 /// 暂存的一件移进废纸篓。访达的「放回原处」记的是移进废纸篓那一刻的位置，所以先放回原处再移
@@ -858,11 +877,9 @@ mod tests {
     }
 
     /// AC16：删完之后，原本指向被删本体的链接全部改指到留下的那个，且都不是断链。
-    /// 这条测试会真的往系统废纸篓里放一个目录
+    /// 删原件的这几条走替身废纸篓（`FakeBin`）：真的系统废纸篓经访达移，整套并行跑时偶发失败，
+    /// 也不该往用户废纸篓里塞东西；真进废纸篓（AC14）靠真机核对
     #[test]
-    // 这几条测试会真的往系统废纸篓放目录（AC14 的语义就是这个）。
-    // 名字必须各不相同：整套并行跑时两条同时往废纸篓扔同名目录，废纸篓要改名去重，
-    // 曾在 make test 里偶发挂掉一条，单独跑或串行跑都过
     fn delete_source_trashes_the_body_and_repoints_links_to_the_remaining_one() {
         let t = TempTree::new();
         let store = t.dir("store");
@@ -895,7 +912,9 @@ mod tests {
             ]
         );
 
-        let r = delete_source(&plan);
+        let bin = FakeBin::new(&t);
+        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(r.entries[0].action.kind, ActionKind::DeleteSource);
         assert_eq!(r.entries[0].outcome, Outcome::Removed);
         assert_eq!(entry_kind(&body), EntryKind::Missing);
@@ -915,7 +934,6 @@ mod tests {
     /// 改指不许把相对链接写成绝对：项目内的链接是随 git 走到别的机器上的，写法必须保住。
     /// 判相对/绝对读 `read_link` 的原始值——`real_path` 会把两种写法解析成同一个绝对路径，
     /// 拿它断言的话这条性质坏掉了测试也不会红。
-    /// 这条测试会真的往系统废纸篓里放一个目录
     #[cfg(unix)]
     #[test]
     fn relinking_keeps_the_project_local_link_relative_and_the_global_one_absolute() {
@@ -956,7 +974,9 @@ mod tests {
         assert_eq!(style_of(&in_proj), LinkStyle::Relative);
         assert_eq!(style_of(&global_link), LinkStyle::Absolute);
 
-        let r = delete_source(&plan);
+        let bin = FakeBin::new(&t);
+        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(
             outcomes(&r),
             vec![Outcome::Removed, Outcome::Created, Outcome::Created]
@@ -971,7 +991,6 @@ mod tests {
     }
 
     /// 没有别处的同名本体时，指向它的链接一起清掉，不留断链（DESIGN「删除原件」），逐条上报。
-    /// 这条测试会真的往系统废纸篓里放一个目录
     #[test]
     fn delete_source_clears_links_when_no_other_body_remains() {
         let t = TempTree::new();
@@ -996,7 +1015,9 @@ mod tests {
         assert_eq!(plan.relink_to, None);
         assert_eq!(plan.affected, vec![absolute(&link), absolute(&inner)]);
 
-        let r = delete_source(&plan);
+        let bin = FakeBin::new(&t);
+        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(
             outcomes(&r),
             vec![Outcome::Removed, Outcome::Removed, Outcome::Removed]
@@ -1129,25 +1150,43 @@ mod tests {
         );
     }
 
-    /// 撤销机会过去：暂存的原件移进废纸篓，暂存格删掉。这条测试会真的往系统废纸篓里放一个目录
+    /// 撤销机会过去：暂存的原件移进废纸篓，暂存格删掉。走替身废纸篓：真的系统废纸篓经访达移，
+    /// 并行跑整套测试时暂存格偶尔删不掉（2026-10-05 `make test` 六次挂三次），也不该往用户废纸篓里塞东西
     #[test]
     fn release_held_moves_held_bodies_to_the_trash() {
         let t = TempTree::new();
         let hold_root = t.dir("app/held");
-        // 名字带进程号与时刻：几个工作区同时跑测试时，同名目录一起进废纸篓会互相撞（偶发失败的来源）
-        let unique = format!(
-            "app/held/123/sophia-test-release-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let item = t.dir(&unique);
+        let item = t.dir("app/held/123/pdf");
         t.file(&item, "SKILL.md");
-        assert!(release_held(&hold_root).is_empty());
+        let bin = FakeBin::new(&t);
+        assert!(release_held_with(&hold_root, &|p| bin.trash(p)).is_empty());
+        assert_eq!(bin.from(), vec![item]);
+        assert!(bin.bin.join("1/SKILL.md").is_file(), "内容整份进了废纸篓");
         assert_eq!(std::fs::read_dir(&hold_root).unwrap().count(), 0);
+        // 暂存目录不存在：什么都不做（读不到目录就返回，碰不到废纸篓）
         assert!(release_held(&t.root().join("nope")).is_empty());
+    }
+
+    /// 访达从暂存格移走原件时偶尔在格里留下 `.DS_Store`：它不是原件，不交给废纸篓、不算失败，
+    /// 暂存格照样删掉；以前积下的、只剩原处记录和 `.DS_Store` 的格子，下次收尾一并删掉
+    #[test]
+    fn release_held_drops_slots_finder_left_a_ds_store_in() {
+        let t = TempTree::new();
+        let hold_root = t.dir("app/held");
+        // 旧版本留下的暂存格没有原处记录：从暂存格直接移，访达就在这一格里留下 .DS_Store
+        let item = t.dir("app/held/2/pdf");
+        t.file(&item, "SKILL.md");
+        let leftover = t.dir("app/held/1");
+        t.file(&leftover, ".sophia-origin");
+        t.file(&leftover, ".DS_Store");
+        let bin = FakeBin::new(&t);
+        let finder = |p: &Path| {
+            bin.trash(p)?;
+            std::fs::write(p.parent().unwrap().join(".DS_Store"), "")
+        };
+        assert!(release_held_with(&hold_root, &finder).is_empty());
+        assert_eq!(bin.from(), vec![item], ".DS_Store 不交给废纸篓");
+        assert_eq!(std::fs::read_dir(&hold_root).unwrap().count(), 0);
     }
 
     /// 替身废纸篓：记下每次从哪里移、把东西挪进 `bin/<序号>`，不碰系统废纸篓。
@@ -1294,7 +1333,6 @@ mod tests {
     }
 
     /// 体检之后链接被换掉（改指到别处、换成真实目录）：删前重校验不过，跳过并如实上报，不误删。
-    /// 这条测试会真的往系统废纸篓里放一个目录
     #[test]
     fn delete_source_skips_links_that_changed_since_the_plan() {
         let t = TempTree::new();
@@ -1321,7 +1359,9 @@ mod tests {
         std::fs::remove_file(&replaced).unwrap();
         std::fs::create_dir(&replaced).unwrap();
 
-        let r = delete_source(&plan);
+        let bin = FakeBin::new(&t);
+        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(r.entries[0].outcome, Outcome::Removed);
         for entry in &r.entries[1..] {
             assert_eq!(

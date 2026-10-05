@@ -20,7 +20,9 @@
         "minHeight": 560,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 20, "y": 17 }
+        "trafficLightPosition": { "x": 20, "y": 17 },
+        "dragDropEnabled": false,
+        "visible": false
       }
     ],
     "security": {
@@ -38,6 +40,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "macOS": {
+      "minimumSystemVersion": "14.0"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

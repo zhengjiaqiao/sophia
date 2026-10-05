@@ -1,10 +1,17 @@
 //! 模型网关与 MCP 同步写的是同一份 `~/.codex/config.toml`：先后操作互不破坏（spec 的 AC15、AC16）。
 use sophia_core::atomicfile::{self, FileState};
 use sophia_core::codex_models::config::{self, Managed};
+use sophia_core::codex_models::settings::HookupMode;
 use sophia_core::mcp::{execute, prepare, McpLocation, McpSelection};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
+
+/// 备份根目录（`atomicfile::backup` 的 root）：整个测试进程共用一份临时目录，不碰真实数据目录
+fn backups() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
 
 fn managed(dir: &Path) -> Managed {
     Managed {
@@ -13,6 +20,7 @@ fn managed(dir: &Path) -> Managed {
             .to_string_lossy()
             .into_owned(),
         base_url: "http://127.0.0.1:47328/v1".into(),
+        mode: HookupMode::Builtin,
     }
 }
 
@@ -44,7 +52,7 @@ fn gateway_write(path: &Path, edit: impl Fn(&str) -> String) {
         FileState::Present(snapshot) => String::from_utf8(snapshot.bytes.clone()).unwrap(),
     };
     if let FileState::Present(snapshot) = &state {
-        atomicfile::backup(path, snapshot, "models").unwrap();
+        atomicfile::backup(path, snapshot, "models", backups()).unwrap();
     }
     atomicfile::atomic_write(path, edit(&text).as_bytes(), &state).unwrap();
 }
@@ -85,7 +93,7 @@ fn ac15_mcp_sync_after_gateway_enable_keeps_both() {
     });
 
     let locations = vec![location("source", &t.source), location("target", &t.target)];
-    let report = execute(prepare(&locations, &selection()), false);
+    let report = execute(prepare(&locations, &selection()), false, backups());
     assert_eq!(report.entries[0].outcome, "created");
 
     let text = fs::read_to_string(&t.target).unwrap();
@@ -98,8 +106,24 @@ fn ac15_mcp_sync_after_gateway_enable_keeps_both() {
     let text = fs::read_to_string(&t.target).unwrap();
     assert!(!text.contains("openai_base_url") && !text.contains("model_catalog_json"));
     assert!(text.contains("[mcp_servers.docs]") && text.contains("[mcp_servers.existing]"));
-    // 两种备份各用各的名字，互不覆盖
-    assert!(t.root.join("config.mcp.bak").exists() && t.root.join("config.models.bak").exists());
+    // 两种备份各用各的名字，互不覆盖；都在备份目录里，原文件旁边没有
+    let names: Vec<String> = fs::read_dir(atomicfile::backup_dir(backups(), &t.target))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().any(|name| name.ends_with("-mcp.bak")),
+        "{names:?}"
+    );
+    assert!(
+        names.iter().any(|name| name.ends_with("-models.bak")),
+        "{names:?}"
+    );
+    assert!(!fs::read_dir(&t.root).unwrap().any(|entry| entry
+        .unwrap()
+        .path()
+        .extension()
+        .is_some_and(|ext| ext == "bak")));
 }
 
 /// AC15 反向：先 MCP 同步，再启用模型页
@@ -108,7 +132,7 @@ fn ac15_gateway_enable_after_mcp_sync_keeps_both() {
     let t = tree();
     let locations = vec![location("source", &t.source), location("target", &t.target)];
     assert_eq!(
-        execute(prepare(&locations, &selection()), false).entries[0].outcome,
+        execute(prepare(&locations, &selection()), false, backups()).entries[0].outcome,
         "created"
     );
     let managed = managed(&t.root);
@@ -133,7 +157,7 @@ fn ac16_stale_mcp_preview_fails_without_overwriting_gateway_keys() {
     });
     let after_gateway = fs::read_to_string(&t.target).unwrap();
 
-    let report = execute(stale, false);
+    let report = execute(stale, false, backups());
     assert_eq!(report.entries[0].outcome, "failed");
     assert_eq!(
         fs::read_to_string(&t.target).unwrap(),
@@ -141,7 +165,7 @@ fn ac16_stale_mcp_preview_fails_without_overwriting_gateway_keys() {
         "过期的预览不能覆盖模型页写入的内容"
     );
 
-    let report = execute(prepare(&locations, &selection()), false);
+    let report = execute(prepare(&locations, &selection()), false, backups());
     assert_eq!(report.entries[0].outcome, "created");
     let text = fs::read_to_string(&t.target).unwrap();
     assert!(
@@ -156,7 +180,7 @@ fn ac16_stale_gateway_snapshot_is_refused() {
     let stale = atomicfile::read_state(&t.target).unwrap();
     let locations = vec![location("source", &t.source), location("target", &t.target)];
     assert_eq!(
-        execute(prepare(&locations, &selection()), false).entries[0].outcome,
+        execute(prepare(&locations, &selection()), false, backups()).entries[0].outcome,
         "created"
     );
     let after_mcp = fs::read_to_string(&t.target).unwrap();

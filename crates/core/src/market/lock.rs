@@ -1,6 +1,7 @@
 //! 只读 `~/.agents/.skill-lock.json`（R13，T2 负责）：`npx skills` 装的 skill 也能查更新。
 //! 只认版本 3、`sourceType` 为 `github` 的条目；读不懂（版本不对、字段不对、文件坏了）就当没有，不报错。
 //! Sophia 从不写这个文件。
+//! 条目的 `ref`（装时指定的分支或 tag，`npx skills` 按它做「认 ref 的更新」）决定查更新对着哪一处比，见 `UpdateRef`。
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,43 @@ pub struct LockEntry {
     pub path: String,
     /// `skillFolderHash`：git tree SHA
     pub folder_hash: String,
+    /// `ref`：装时指定的分支、tag 或 commit（去掉首尾空白；没写或空串为 None）
+    pub git_ref: Option<String>,
+}
+
+/// 一条 lock 查更新时对着哪一处比
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateRef {
+    /// 没写 `ref`（或写的是 `HEAD`）：仓库的默认分支
+    DefaultBranch,
+    /// 分支或 tag：对着这个 ref 自己的 tree 比（GitHub trees 接口两样都认）。
+    /// 本地不联网分不清分支和 tag，也不必分：tag 的 tree 不动，自然算不出更新；
+    /// 分支往前走了才算。与 `npx skills update` 按 `ref` 取 tree 的做法一致
+    Ref(String),
+    /// 不查更新：40 位十六进制（commit SHA，`npx skills` 也按这个形状认），
+    /// 或带了拼进网址会出岔子的字符——宁可不查，也不拿默认分支去比
+    Pinned,
+}
+
+impl LockEntry {
+    pub fn update_ref(&self) -> UpdateRef {
+        match self.git_ref.as_deref() {
+            None | Some("HEAD") => UpdateRef::DefaultBranch,
+            Some(r) if r.len() == 40 && r.bytes().all(|b| b.is_ascii_hexdigit()) => {
+                UpdateRef::Pinned
+            }
+            Some(r) if is_plain_ref(r) => UpdateRef::Ref(r.to_string()),
+            Some(_) => UpdateRef::Pinned,
+        }
+    }
+}
+
+/// 能原样拼进 GitHub 网址的 ref：只含字母数字与 `._-/`，各段非空、不是 `.` / `..`
+fn is_plain_ref(r: &str) -> bool {
+    r.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/'))
+        && r.split('/')
+            .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
 /// lock 文件的位置，同 `npx skills` 的 `getSkillLockPath`：设了 `$XDG_STATE_HOME`（非空）时是
@@ -73,6 +111,10 @@ fn parse_entry(name: &str, entry: &Value) -> Option<LockEntry> {
         repo: repo.to_string(),
         path: folder_of(field("skillPath")?)?,
         folder_hash: folder_hash.to_ascii_lowercase(),
+        git_ref: field("ref")
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .map(str::to_string),
     })
 }
 
@@ -133,6 +175,21 @@ mod tests {
       "skillFolderHash": "76a98a285cb0434f3d39e1a873823556330e398b",
       "installedAt": "2026-04-14T16:17:28.497Z",
       "updatedAt": "2026-07-17T08:37:18.162Z"
+    },
+    "pinned-tag": {
+      "source": "someone/pinned",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/someone/pinned.git",
+      "ref": " v1.0 ",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "5539516444cff4eed7865daf61a707590acda485"
+    },
+    "empty-ref": {
+      "source": "someone/empty-ref",
+      "sourceType": "github",
+      "ref": "",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "5539516444cff4eed7865daf61a707590acda485"
     },
     "bun": {
       "source": "mintlify/bun.com",
@@ -196,6 +253,11 @@ mod tests {
             repo: repo.into(),
             path: path.into(),
             folder_hash: hash.into(),
+            git_ref: None,
+        };
+        let with_ref = |e: LockEntry, r: &str| LockEntry {
+            git_ref: Some(r.into()),
+            ..e
         };
         assert_eq!(
             entries,
@@ -207,10 +269,28 @@ mod tests {
                     "5539516444cff4eed7865daf61a707590acda485"
                 ),
                 entry(
-                    "find-skills",
-                    "vercel-labs/skills",
-                    "skills/find-skills",
-                    "76a98a285cb0434f3d39e1a873823556330e398b"
+                    "empty-ref",
+                    "someone/empty-ref",
+                    "",
+                    "5539516444cff4eed7865daf61a707590acda485"
+                ),
+                with_ref(
+                    entry(
+                        "find-skills",
+                        "vercel-labs/skills",
+                        "skills/find-skills",
+                        "76a98a285cb0434f3d39e1a873823556330e398b"
+                    ),
+                    "main"
+                ),
+                with_ref(
+                    entry(
+                        "pinned-tag",
+                        "someone/pinned",
+                        "",
+                        "5539516444cff4eed7865daf61a707590acda485"
+                    ),
+                    "v1.0"
                 ),
                 entry(
                     "xlsx",
@@ -220,6 +300,47 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// `ref` 怎么用于查更新：没写、空、`HEAD` 跟默认分支；40 位十六进制是 commit，钉死；
+    /// 其余（分支或 tag）对着那个 ref 自己的 tree 比；带 URL 里有特殊含义的字符、`..` 的不认，当钉死
+    #[test]
+    fn update_ref_follows_lock_ref() {
+        let with = |r: Option<&str>| LockEntry {
+            name: "x".into(),
+            repo: "o/r".into(),
+            path: String::new(),
+            folder_hash: "5539516444cff4eed7865daf61a707590acda485".into(),
+            git_ref: r.map(Into::into),
+        };
+        assert_eq!(with(None).update_ref(), UpdateRef::DefaultBranch);
+        assert_eq!(with(Some("HEAD")).update_ref(), UpdateRef::DefaultBranch);
+        assert_eq!(with(Some("dev")).update_ref(), UpdateRef::Ref("dev".into()));
+        assert_eq!(
+            with(Some("v1.0")).update_ref(),
+            UpdateRef::Ref("v1.0".into())
+        );
+        assert_eq!(
+            with(Some("release/2.x")).update_ref(),
+            UpdateRef::Ref("release/2.x".into())
+        );
+        for pinned in [
+            "5539516444cff4eed7865daf61a707590acda485",
+            "5539516444CFF4EED7865DAF61A707590ACDA485",
+            "../main",
+            "a b",
+            "main?x=1",
+            "main#frag",
+            "/main",
+            "main/",
+            "a//b",
+        ] {
+            assert_eq!(
+                with(Some(pinned)).update_ref(),
+                UpdateRef::Pinned,
+                "{pinned}"
+            );
+        }
     }
 
     #[test]

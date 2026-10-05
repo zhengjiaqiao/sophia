@@ -16,6 +16,8 @@ serde_json = { version = "1", features = ["raw_value"] }
 tempfile = "3"
 toml_edit = "0.25"
 dirs = "7"
+# 日志门面：core 只发日志，写到哪由宿主（src-tauri 装的 tauri-plugin-log）决定
+log = "0.4"
 pathdiff = "0.2"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 trash = { version = "5", default-features = false }
@@ -23,6 +25,8 @@ trash = { version = "5", default-features = false }
 flate2 = "1.1.10"
 tar = { version = "0.4.46", default-features = false }
 sha1 = { version = "0.11.0", default-features = false }
+# 自动上报的安装 ID（随机 UUID v4）；与 tauri 等用的是同一份 uuid，不新增依赖
+uuid = { version = "1.26", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 junction = "2"

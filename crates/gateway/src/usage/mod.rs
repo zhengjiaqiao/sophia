@@ -45,6 +45,7 @@ impl FetchError {
             FetchError::Failed(ParseFailure::NoPlanLimits) => FailReason::NoPlanLimits,
             FetchError::Failed(ParseFailure::AuthRequired) => FailReason::AuthRequired,
             FetchError::Failed(ParseFailure::RateLimited { .. }) => FailReason::RateLimited,
+            FetchError::Failed(ParseFailure::Unsupported) => FailReason::Unsupported,
             FetchError::Failed(ParseFailure::Malformed(_)) => FailReason::Malformed,
         }
     }
@@ -471,6 +472,10 @@ mod tests {
             (
                 FetchError::Failed(ParseFailure::Malformed("y".into())),
                 FailReason::Malformed,
+            ),
+            (
+                FetchError::Failed(ParseFailure::Unsupported),
+                FailReason::Unsupported,
             ),
         ];
         for (err, kind) in cases {

@@ -1,21 +1,55 @@
 {"event": "message_start", "data": {"type": "message_start", "message": {"id": "<msg-id>", "type": "message", "role": "assistant", "model": "default-weibo-kimi-k2.5", "content": [], "stop_reason": null, "stop_sequence": null, "usage": {"input_tokens": 100, "output_tokens": 0}}}}
-{"event": "content_block_start", "data": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "我来"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "为您"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "查询"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "一下"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "北京"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "当前的"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "天气"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "情况"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "。"}}}
+{"event": "content_block_start", "data": {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "用户"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "想知道"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "北京的"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "当前"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "天气"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "情况"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "。"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "根据"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "指示"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "，"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "我需要"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "调用"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": " get"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "_we"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "ather"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": " "}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "工具"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "来获取"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "北京的"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "天气"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "信息"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "，"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "而不要"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "瞎"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "猜"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "。"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "我选择"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "使用"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "工具"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "查询"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "。"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "<signature>"}}}
 {"event": "content_block_stop", "data": {"type": "content_block_stop", "index": 0}}
-{"event": "content_block_start", "data": {"type": "content_block_start", "index": 1, "content_block": {"type": "tool_use", "id": "functions_get_weather_0", "name": "get_weather", "input": {}}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "{\"city"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "\":"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": " \""}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "北京"}}}
-{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "input_json_delta", "partial_json": "\"}"}}}
+{"event": "content_block_start", "data": {"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "我来"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "为您"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "查询"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "一下"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "北京"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "当前的"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "天气"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "情况"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "。"}}}
 {"event": "content_block_stop", "data": {"type": "content_block_stop", "index": 1}}
+{"event": "content_block_start", "data": {"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "functions_get_weather_0", "name": "get_weather", "input": {}}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"city"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "\":"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": " \""}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "北京"}}}
+{"event": "content_block_delta", "data": {"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "\"}"}}}
+{"event": "content_block_stop", "data": {"type": "content_block_stop", "index": 2}}
 {"event": "message_delta", "data": {"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": null}, "usage": {"input_tokens": 81, "output_tokens": 59, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}}
 {"event": "message_stop", "data": {"type": "message_stop"}}

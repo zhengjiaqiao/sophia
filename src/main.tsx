@@ -5,8 +5,21 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import TrayPanel from "./TrayPanel";
 import { api } from "./api";
+import { installGlobalErrorLogging } from "./diagnostics";
+import { FaultBomb, PageGuard, useFaultPage } from "./PageGuard";
 import { isLang, locale, setLocale, subscribeLocale, useLocale } from "./i18n";
 import { ToastHost } from "./ui";
+
+// 未捕获的错误与未处理的拒绝写进日志（两个窗口各装各的）；越早装越好，只记、不改界面
+installGlobalErrorLogging();
+
+// 主窗口关了系统的文件拖放（tauri.conf.json `dragDropEnabled: false`），反馈小窗才收得到拖进来的截图（HTML5 拖放）。
+// 代价是拖到别处的文件会被网页当成要打开的东西、把整个窗口换成那个文件：在根上拦下，只有反馈小窗自己接
+const blockFileDrop = (event: DragEvent) => {
+  if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+};
+window.addEventListener("dragover", blockFileDrop);
+window.addEventListener("drop", blockFileDrop);
 
 // 同一份前端产物服务两个窗口：主窗口，和菜单栏弹出的小面板（窗口标签 tray）
 const isTray = getCurrentWindow().label === "tray";
@@ -22,13 +35,25 @@ listen<string>("locale-changed", ({ payload }) => {
   if (isLang(payload)) setLocale(payload);
 }).catch(() => undefined);
 
+/// 托盘面板的兜底：出错只换掉面板里的内容（窄形态），菜单栏图标和窗口不受影响。
+/// 开发版 `debug_fault` 返回 `page:tray` 时故意出错
+function GuardedTray() {
+  const fault = useFaultPage();
+  return (
+    <PageGuard narrow>
+      {fault === "tray" && <FaultBomb page="tray" />}
+      <TrayPanel />
+    </PageGuard>
+  );
+}
+
 /// 根部订阅当前语言：换了语言整棵树重渲染（组件状态保留），每一处 `t()` 都按新语言取
 function Root() {
   useLocale();
   return (
     <React.StrictMode>
       {/* 右下那一叠提示小窗挂在哪（壳上的 ToastStack），各页经 CornerToast 挂进去 */}
-      <ToastHost>{isTray ? <TrayPanel /> : <App />}</ToastHost>
+      <ToastHost>{isTray ? <GuardedTray /> : <App />}</ToastHost>
     </React.StrictMode>
   );
 }

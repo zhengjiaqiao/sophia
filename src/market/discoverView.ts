@@ -111,18 +111,25 @@ export function installedLine(keys: ReadonlyArray<LocationKey>): string | null {
 }
 
 /// 列表上方灰面板的那一句（R16）：
-/// - 限流：按实际服务显示 `skills.sh 暂时限流，稍后再试` 等
+/// - 限流：后端给的原因（`skills.sh 限流了，约 1 分钟后再试`），没有时 `skills.sh 暂时限流，稍后再试` 等
 /// - 有上次的缓存：`现在无法连接 skills.sh，显示的是上次的结果 · 6 小时前`
 /// - 没有缓存（随包数据）：`现在无法连接 skills.sh，显示的是随包附带的列表`
+/// - 不是连不上（spec 2026-10-04-local-diagnostics R10）：原因换掉「现在无法连接 …」——
+///   `skills.sh 返回的内容读不懂，显示的是上次的结果 · 10:42`
 /// 画板写的是「连不上」；文案语域（D24）的旧词表里「连不上」换成「无法连接」
 export function fallbackText(fallback: MarketFallback, now: Date = new Date()): string {
   const { service } = fallback;
-  if (fallback.rateLimited) return t("market.fallback.limited", { service });
-  if (fallback.cachedAt === null) return t("market.fallback.bundled", { service });
-  return t("market.fallback.cached", {
-    service,
-    time: relativeTime(fallback.cachedAt * 1000, now, true),
-  });
+  const reason = fallback.reason || null;
+  if (fallback.rateLimited) return reason ?? t("market.fallback.limited", { service });
+  if (fallback.cachedAt === null) {
+    return reason === null
+      ? t("market.fallback.bundled", { service })
+      : t("market.fallback.bundledBecause", { reason });
+  }
+  const time = relativeTime(fallback.cachedAt * 1000, now, true);
+  return reason === null
+    ? t("market.fallback.cached", { service, time })
+    : t("market.fallback.cachedBecause", { reason, time });
 }
 
 /// Tauri 通道与 JS 运行时自己抛的原始错误的样子：`TypeError: fetch failed`、`Command x not found`、

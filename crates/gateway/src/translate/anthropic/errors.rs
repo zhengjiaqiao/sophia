@@ -257,8 +257,11 @@ pub fn retry_after_seconds(
     retry_after_ms: Option<&str>,
     now: SystemTime,
 ) -> Option<u64> {
-    let ceil_seconds =
-        |value: f64| (value.is_finite() && value >= 0.0).then(|| value.ceil() as u64);
+    // 负数、无穷、超出 u64 的都算读不出（`as u64` 会把它们饱和成 0 或最大值）
+    let ceil_seconds = |value: f64| {
+        (value.is_finite() && value >= 0.0 && value.ceil() < u64::MAX as f64)
+            .then(|| value.ceil() as u64)
+    };
     if let Some(ms) = retry_after_ms.and_then(|ms| ms.trim().parse::<f64>().ok()) {
         if let Some(seconds) = ceil_seconds(ms / 1000.0) {
             return Some(seconds);
@@ -292,6 +295,15 @@ fn parse_http_date(text: &str) -> Option<u64> {
     let [hour, minute, second] = clock.as_slice() else {
         return None;
     };
+    // 越界的一律读不出：下面的算术只对合理的日期成立（不 panic、不回绕；Codex 复审 4/7）
+    if !(1970..=9999).contains(&year)
+        || !(1..=31).contains(&day)
+        || !(0..24).contains(hour)
+        || !(0..60).contains(minute)
+        || !(0..=60).contains(second)
+    {
+        return None;
+    }
     // Howard Hinnant 的 days_from_civil
     let y = if month <= 2 { year - 1 } else { year };
     let era = y.div_euclid(400);

@@ -7,6 +7,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
+/// 备份根目录（`atomicfile::backup` 的 root）：整个测试进程共用一份临时目录，不碰真实数据目录
+fn backups() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| tempfile::tempdir().unwrap()).path()
+}
+
 fn loc(id: &str, path: &Path, domain: &str) -> McpLocation {
     let path = canonical_path(path);
     let harness_id = if path.extension().and_then(|e| e.to_str()) == Some("toml") {
@@ -119,6 +125,7 @@ fn http_definition_is_parsed_and_migrated_with_http_type() {
     let report = execute(
         prepare(&locations, &[sel("source", "docs", "target")]),
         false,
+        backups(),
     );
     assert_eq!(report.entries[0].outcome, "created");
     let written: serde_json::Value =
@@ -149,7 +156,7 @@ fn two_servers_share_one_backup_and_both_succeed() {
         ],
     );
     assert_eq!(plan.actions.len(), 2);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert!(report.entries.iter().all(|e| e.outcome == "created"));
     let backups: Vec<_> = report
         .entries
@@ -186,6 +193,7 @@ fn json_unknown_fields_numbers_and_whitespace_survive_merge() {
     let report = execute(
         prepare(&locations, &[sel("source", "new", "target")]),
         false,
+        backups(),
     );
     assert_eq!(report.entries[0].outcome, "created");
     let written = String::from_utf8(fs::read(target_path).unwrap()).unwrap();
@@ -207,6 +215,7 @@ fn codex_inline_env_is_migrated_without_losing_values() {
     let report = execute(
         prepare(&locations, &[sel("source", "docs", "target")]),
         false,
+        backups(),
     );
     assert_eq!(report.entries[0].outcome, "created");
     assert!(String::from_utf8(fs::read(target_path).unwrap())
@@ -266,6 +275,7 @@ fn codex_same_harness_new_target_preserves_confirmed_client_settings() {
     let report = execute(
         prepare(&locations, &[sel("source", "docs", "target")]),
         true,
+        backups(),
     );
     assert_eq!(report.entries[0].outcome, "created");
     let output = fs::read_to_string(target).unwrap();
@@ -547,7 +557,7 @@ fn references_are_copied_within_the_same_agent() {
         );
         let plan = prepare(&locations, &[sel("source", "ref", "target")]);
         assert!(plan.issues.is_empty(), "{server}");
-        let report = execute(plan, true);
+        let report = execute(plan, true, backups());
         assert_eq!(report.entries[0].outcome, "created", "{server}");
         let mut written: serde_json::Value =
             serde_json::from_slice(&fs::read(&target_path).unwrap()).unwrap();
@@ -600,7 +610,7 @@ fn changing_source_or_target_after_preview_blocks_execution() {
         } else {
             fs::write(&target, br#"{"other":true}"#).unwrap();
         }
-        let report = execute(plan, false);
+        let report = execute(plan, false, backups());
         assert_eq!(report.entries[0].outcome, "failed");
         if !change_source {
             assert_eq!(fs::read(target).unwrap(), br#"{"other":true}"#);
@@ -629,6 +639,7 @@ fn repeated_rounds_succeed_with_unique_backups_and_mode() {
     let first = execute(
         prepare(&locations, &[sel("source", "one", "target")]),
         false,
+        backups(),
     );
     assert_eq!(first.entries[0].outcome, "created");
     let first_backup = first.entries[0].backup_path.clone().unwrap();
@@ -637,6 +648,7 @@ fn repeated_rounds_succeed_with_unique_backups_and_mode() {
     let second = execute(
         prepare(&locations, &[sel("source", "two", "target")]),
         false,
+        backups(),
     );
     assert_eq!(second.entries[0].outcome, "created");
     let second_backup = second.entries[0].backup_path.clone().unwrap();
@@ -849,7 +861,7 @@ fn claude_local_is_discovered_as_its_own_scope_without_a_missing_project_column(
     let plan = prepare(&locations, &[sel(&local.id, "dingtalk-doc", &project.id)]);
     assert!(plan.issues.is_empty());
     assert_eq!(plan.actions.len(), 1);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "created");
     let written: serde_json::Value =
         serde_json::from_slice(&fs::read(cardbox.join(".mcp.json")).unwrap()).unwrap();
@@ -897,7 +909,7 @@ fn empty_claude_local_is_listed_and_remains_an_import_target() {
     let plan = prepare(&locations, &[sel(&shared.id, "weibo-search", &local.id)]);
     assert!(plan.issues.is_empty());
     assert_eq!(plan.actions.len(), 1);
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "created");
     let written: serde_json::Value =
         serde_json::from_slice(&fs::read(home.join(".claude.json")).unwrap()).unwrap();
@@ -970,7 +982,7 @@ fn claude_local_is_listed_when_project_is_not_in_claude_json() {
         let before = fs::read(&claude_json).ok();
         let plan = prepare(&locations, &[sel(&shared.id, "weibo-search", &local.id)]);
         assert!(plan.issues.is_empty(), "{:?}", plan.issues);
-        let report = execute(plan, false);
+        let report = execute(plan, false, backups());
         assert_eq!(report.entries[0].outcome, "created");
         let after = fs::read(&claude_json).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&after).unwrap();
@@ -1101,7 +1113,7 @@ fn claude_local_write_preserves_other_scopes_and_rechecks_the_full_file() {
     ];
     let plan = prepare(&locations, &[sel("source", "dingtalk-doc", "local")]);
     assert!(plan.issues.is_empty());
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "created");
     let backup = report.entries[0].backup_path.as_ref().unwrap();
     assert_eq!(fs::read_to_string(backup).unwrap(), original);
@@ -1167,6 +1179,7 @@ fn one_claude_file_batch_merges_user_and_two_local_scopes_once() {
             ],
         ),
         true,
+        backups(),
     );
     assert!(report
         .entries
@@ -1238,7 +1251,7 @@ fn changed_claude_local_target_after_preview_is_never_written() {
         format!(r#"{{"projects":{{"{project_key}":{{"mcpServers":{{"external":{{"command":"keep"}}}}}}}}}}"#),
     )
     .unwrap();
-    let report = execute(plan, false);
+    let report = execute(plan, false, backups());
     assert_eq!(report.entries[0].outcome, "failed");
     let parsed: serde_json::Value = serde_json::from_slice(&fs::read(&claude).unwrap()).unwrap();
     assert!(parsed["projects"][&project_key]["mcpServers"]
@@ -1294,7 +1307,7 @@ fn unknown_fields_are_copied_verbatim_within_the_same_codex() {
 
     let plan = prepare(&locations, &[sel("user", "computer-use", "project")]);
     assert!(plan.issues.is_empty(), "{:?}", plan.issues);
-    let report = execute(plan, true);
+    let report = execute(plan, true, backups());
     assert_eq!(report.entries[0].outcome, "created", "{:?}", report.entries);
     let output = fs::read_to_string(&project).unwrap();
     assert!(output.starts_with(before), "原有内容逐字节不动：{output}");
@@ -1365,7 +1378,11 @@ fn unknown_fields_are_copied_verbatim_within_the_same_claude_code() {
     };
     assert_eq!(state("fs"), McpCellState::Missing);
     assert_eq!(state("bad"), McpCellState::Unsupported);
-    let report = execute(prepare(&locations, &[sel("user", "fs", "project")]), true);
+    let report = execute(
+        prepare(&locations, &[sel("user", "fs", "project")]),
+        true,
+        backups(),
+    );
     assert_eq!(report.entries[0].outcome, "created", "{:?}", report.entries);
     let written: serde_json::Value = serde_json::from_slice(&fs::read(&project).unwrap()).unwrap();
     assert_eq!(written["mcpServers"]["fs"], server);
@@ -1373,4 +1390,165 @@ fn unknown_fields_are_copied_verbatim_within_the_same_claude_code() {
     let text = String::from_utf8(fs::read(&project).unwrap()).unwrap();
     assert!(text.contains("1.50"), "{text}");
     assert!(before.len() < text.len());
+}
+
+/// 某个原文件在备份目录 `root` 里的全部备份（按序号先后）
+fn baks_of(root: &Path, original: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(sophia_core::atomicfile::backup_dir(root, original)) else {
+        return Vec::new();
+    };
+    let mut baks: Vec<PathBuf> = entries
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "bak"))
+        .collect();
+    baks.sort();
+    baks
+}
+
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// 项目里的 `.mcp.json` 常在用户的仓库里：写它之前的备份（含明文密钥）不能落在项目目录里，
+/// 而是进 Sophia 的备份目录（0700 / 0600）；撤销照样还原，「显示备份」指向的文件就是写前原文
+#[test]
+fn project_mcp_json_backup_goes_to_the_backup_dir_and_undo_still_restores() {
+    let t = tempdir().unwrap();
+    let root = fs::canonicalize(t.path()).unwrap();
+    let project = root.join("project");
+    fs::create_dir(&project).unwrap();
+    let backups = root.join("Sophia").join("backups");
+    let source = root.join("source.json");
+    let target = project.join(".mcp.json");
+    json_file(&source, json!({"mcpServers":{"docs":{"command":"docs"}}}));
+    let original = br#"{"mcpServers":{"gh":{"env":{"GITHUB_TOKEN":"ghp_secret"}}}}"#;
+    fs::write(&target, original).unwrap();
+    let locations = vec![
+        loc("source", &source, "global"),
+        loc("target", &target, "project:p"),
+    ];
+
+    let mut report = execute(
+        prepare(&locations, &[sel("source", "docs", "target")]),
+        true,
+        &backups,
+    );
+
+    assert_eq!(report.entries[0].outcome, "created", "{:?}", report.entries);
+    assert_eq!(
+        names_in(&project),
+        vec![".mcp.json"],
+        "项目目录里不多出任何文件"
+    );
+    let backup = report.entries[0].backup_path.clone().unwrap();
+    assert!(backup.starts_with(&backups), "{}", backup.display());
+    assert_eq!(baks_of(&backups, &target), vec![backup.clone()]);
+    assert_eq!(fs::read(&backup).unwrap(), original);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&backup), 0o600);
+        assert_eq!(mode(&backups), 0o700);
+        assert_eq!(mode(backup.parent().unwrap()), 0o700);
+    }
+
+    let undo = report.take_undo().expect("可撤销");
+    let result = sophia_core::mcp::undo_write(&undo);
+    assert_eq!(result.outcome, "undone", "{}", result.message);
+    assert_eq!(fs::read(&target).unwrap(), original);
+    assert_eq!(result.files[0].backup_path.as_ref(), Some(&backup));
+    assert!(backup.is_file(), "撤销后「显示备份」仍能找到文件");
+    assert_eq!(names_in(&project), vec![".mcp.json"]);
+}
+
+/// 同一个文件连写 12 次：只留最近 10 份备份，最新那份就是最后一次写前的原文
+#[test]
+fn twelve_writes_keep_the_latest_ten_backups() {
+    let t = tempdir().unwrap();
+    let root = fs::canonicalize(t.path()).unwrap();
+    let backups = root.join("backups");
+    let source = root.join("source.json");
+    fs::create_dir(root.join("project")).unwrap();
+    let target = root.join("project").join(".mcp.json");
+    let servers: serde_json::Map<String, serde_json::Value> = (0..12)
+        .map(|n| (format!("s{n}"), json!({"command": format!("c{n}")})))
+        .collect();
+    json_file(&source, json!({ "mcpServers": servers }));
+    fs::write(&target, br#"{"mcpServers":{}}"#).unwrap();
+    let locations = vec![
+        loc("source", &source, "global"),
+        loc("target", &target, "global"),
+    ];
+
+    let mut last = None;
+    for n in 0..12 {
+        let before = fs::read(&target).unwrap();
+        let report = execute(
+            prepare(&locations, &[sel("source", &format!("s{n}"), "target")]),
+            false,
+            &backups,
+        );
+        assert_eq!(report.entries[0].outcome, "created", "{n}");
+        last = Some((report.entries[0].backup_path.clone().unwrap(), before));
+    }
+
+    let baks = baks_of(&backups, &target);
+    assert_eq!(baks.len(), 10, "{baks:?}");
+    let (newest, before) = last.unwrap();
+    assert_eq!(baks.last(), Some(&newest));
+    assert_eq!(fs::read(&newest).unwrap(), before);
+    assert_eq!(names_in(&root.join("project")), vec![".mcp.json"]);
+}
+
+/// 两个项目各有一个 `.mcp.json`：备份各进各的目录，不互相顶掉
+#[test]
+fn same_named_project_files_keep_separate_backups() {
+    let t = tempdir().unwrap();
+    let root = fs::canonicalize(t.path()).unwrap();
+    let backups = root.join("backups");
+    let source = root.join("source.json");
+    json_file(&source, json!({"mcpServers":{"docs":{"command":"docs"}}}));
+    let mut written = Vec::new();
+    for name in ["a", "b"] {
+        fs::create_dir(root.join(name)).unwrap();
+        let target = root.join(name).join(".mcp.json");
+        json_file(&target, json!({"mcpServers": {name: {"command": "x"}}}));
+        let original = fs::read(&target).unwrap();
+        written.push((target, original));
+    }
+    let locations = vec![
+        loc("source", &source, "global"),
+        loc("a", &written[0].0, "global"),
+        loc("b", &written[1].0, "global"),
+    ];
+
+    let report = execute(
+        prepare(
+            &locations,
+            &[sel("source", "docs", "a"), sel("source", "docs", "b")],
+        ),
+        false,
+        &backups,
+    );
+
+    assert!(
+        report.entries.iter().all(|e| e.outcome == "created"),
+        "{:?}",
+        report.entries
+    );
+    assert_ne!(
+        sophia_core::atomicfile::backup_dir(&backups, &written[0].0),
+        sophia_core::atomicfile::backup_dir(&backups, &written[1].0)
+    );
+    for (target, original) in &written {
+        let baks = baks_of(&backups, target);
+        assert_eq!(baks.len(), 1);
+        assert_eq!(&fs::read(&baks[0]).unwrap(), original);
+    }
 }

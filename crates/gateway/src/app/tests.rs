@@ -4,30 +4,38 @@ use sophia_core::claude_models::settings::ClaudeGatewaySettings;
 use sophia_core::codex_models::catalog::Model;
 use std::sync::{Arc, Mutex};
 
-const ORIGINAL: &str = "model = \"gpt-5.6-sol\"\nmodel_reasoning_effort = \"high\"\n\n[mcp_servers]\n\n[mcp_servers.node_repl]\ncommand = \"/x/node_repl\"\n";
+pub(super) const ORIGINAL: &str = "model = \"gpt-5.6-sol\"\nmodel_reasoning_effort = \"high\"\n\n[mcp_servers]\n\n[mcp_servers.node_repl]\ncommand = \"/x/node_repl\"\n";
+/// 测试夹具里的 Codex 登录凭据：ChatGPT 登录
+pub(super) const AUTH_JSON: &str =
+    r#"{"auth_mode":"chatgpt","tokens":{"access_token":"official-secret"}}"#;
 const NATIVE_CACHE: &str = r#"{"client_version":"0.154.0","models":[{"slug":"gpt-5.6-sol","display_name":"GPT-5.6 Sol","priority":2,"visibility":"list","base_instructions":"You are Codex."}]}"#;
 
 #[derive(Default)]
 pub(super) struct World {
     pub(super) settings: GatewaySettings,
+    /// 卸 launchd 服务的调用（`uninstall <label>`）：旧版 Sophia 的路由服务（R14）与 agents-manager 的
     pub(super) service_calls: Vec<String>,
-    /// 每次 restart 传进来的 label，用来确认我们只重启自己那个服务
-    restart_labels: Vec<String>,
-    /// 非空时 restart 失败，内容就是 launchctl 的原话
-    restart_error: Option<String>,
-    pub(super) installed: Option<service::Spec>,
     old_service_installed: bool,
+    /// 本进程里的路由在哪个端口上跑着；None＝没在跑
+    pub(super) router: Option<u16>,
+    /// 起 / 停路由的记录：`start <端口>` / `stop`
+    pub(super) router_events: Vec<String>,
+    /// 被别人占着的端口：另一个 Sophia，或别的程序
+    pub(super) occupied: std::collections::HashMap<u16, Occupant>,
+    /// false：起路由失败（不是端口被占，比如没有权限）
     pub(super) healthy: bool,
     /// 任何一家都能读到的密钥：原有的单网关用例靠它；也记着最近一次写入的值
     key: Option<String>,
     /// 按网关 id 分开存的密钥，优先于 `key`
     pub(super) keys: std::collections::HashMap<String, String>,
     /// 写密钥失败的网关 id
-    key_write_fails_for: Option<String>,
+    pub(super) key_write_fails_for: Option<String>,
+    /// 密钥读不出的网关（位置同 `keys`）→ 原因：模拟密钥文件没有读取权限、还在钥匙串里没迁完
+    pub(super) key_errors: std::collections::HashMap<String, String>,
     pub(super) deleted_keys: Vec<String>,
     old_key: Option<String>,
     /// 假进程表：结束进程的测试不真杀进程
-    processes: Vec<process::ProcessInfo>,
+    pub(super) processes: Vec<process::ProcessInfo>,
     /// 实际被发过 SIGTERM 的 pid
     terminated: Vec<u32>,
     /// 非空时发信号失败，内容就是系统的原话
@@ -39,27 +47,24 @@ pub(super) struct World {
     // ----- Codex 桌面应用（重启生效用；测试不真去退出或打开） -----
     /// 装着的显示名；空串＝没装
     codex_app_name: String,
-    codex_app_running: bool,
+    pub(super) codex_app_running: bool,
     /// 查不了在不在运行（`lsappinfo` 不可用）
     codex_app_running_fails: bool,
     /// 退出请求发出后它一直不退（在等人确认）
-    codex_app_stuck: bool,
+    pub(super) codex_app_stuck: bool,
     /// 非空时重新打开失败：`(错误种类, 原话)`
     codex_app_open_error: Option<(std::io::ErrorKind, String)>,
     /// 这些 pid 在收到 SIGTERM 之前已经自己退了：kill 报「No such process」，进程表里也没了
     vanished: Vec<u32>,
     /// Codex 桌面应用与结束进程的调用顺序：quit / term <pid> / open
-    codex_events: Vec<String>,
-    codex_started_at: Option<u64>,
+    pub(super) codex_events: Vec<String>,
+    pub(super) codex_started_at: Option<u64>,
     codex_version: String,
-    now: u64,
-    on_health: Option<Box<dyn Fn() + Send>>,
-    binary_changed: bool,
+    pub(super) now: u64,
+    /// 起路由时先调它（在端口上 bind 之前）
+    on_start: Option<Box<dyn Fn() + Send>>,
     // ----- 家 claude（claude_tests.rs 用） -----
     pub(super) claude: ClaudeGatewaySettings,
-    /// `/_health` 的 features；重启服务后换成 `features_after_restart`（给了的话）
-    pub(super) features: Vec<String>,
-    pub(super) features_after_restart: Option<Vec<String>>,
     /// 钥匙串里的令牌
     pub(super) token: Option<String>,
     /// 下一次生成的令牌
@@ -192,14 +197,18 @@ impl Fixture {
         serde_json::from_slice(&std::fs::read(self.codex().join("sophia-routing.json")).unwrap())
             .unwrap()
     }
-    pub(super) fn args(&self) -> String {
-        self.world
-            .lock()
-            .unwrap()
-            .installed
-            .as_ref()
-            .map(|s| s.args.join(" "))
-            .unwrap_or_default()
+    /// 路由正在哪个端口上跑
+    pub(super) fn router(&self) -> Option<u16> {
+        self.world.lock().unwrap().router
+    }
+    pub(super) fn router_events(&self) -> Vec<String> {
+        self.world.lock().unwrap().router_events.clone()
+    }
+    /// 旧版 Sophia 装的 launchd 服务的 plist
+    pub(super) fn legacy_plist(&self) -> PathBuf {
+        self.root
+            .join("LaunchAgents")
+            .join(format!("{SERVICE_LABEL}.plist"))
     }
 }
 
@@ -209,14 +218,14 @@ pub(super) fn fixture() -> Fixture {
     let codex = root.join("codex");
     std::fs::create_dir_all(&codex).unwrap();
     std::fs::write(codex.join("config.toml"), ORIGINAL).unwrap();
-    std::fs::write(codex.join("auth.json"), r#"{"tokens":"official-secret"}"#).unwrap();
+    // ChatGPT 登录的形状（只看字段有没有值）：现有用例都按借用内置服务商写（spec 2026-10-03-codex-hookup-auto R2）
+    std::fs::write(codex.join("auth.json"), AUTH_JSON).unwrap();
     std::fs::write(codex.join("models_cache.json"), NATIVE_CACHE).unwrap();
     let world = Arc::new(Mutex::new(World {
         healthy: true,
         key: Some("sk-test-key-123456".into()),
         codex_version: "0.154.0".into(),
         now: 2_000_000_000,
-        features: vec!["claude".into()],
         next_token: format!("sophia-{}", "A".repeat(43)),
         desktop_installed: true,
         desktop_version: Some("2.9939.4".into()),
@@ -238,66 +247,56 @@ pub(super) fn fixture() -> Fixture {
                 Ok(())
             }
         }),
-        service_install: Box::new({
-            let w = w.clone();
-            move |spec| {
-                let mut w = w.lock().unwrap();
-                w.service_calls.push("install".into());
-                w.installed = Some(spec.clone());
-                Ok(())
-            }
-        }),
+        launch_agents_dir: root.join("LaunchAgents"),
         service_uninstall: Box::new({
             let w = w.clone();
+            let plist_dir = root.join("LaunchAgents");
             move |label| {
                 let mut w = w.lock().unwrap();
                 w.service_calls.push(format!("uninstall {label}"));
-                if label == SERVICE_LABEL {
-                    w.installed = None
-                } else {
+                if label != SERVICE_LABEL {
                     w.old_service_installed = false
                 }
+                let _ = std::fs::remove_file(plist_dir.join(format!("{label}.plist")));
                 Ok(())
             }
         }),
-        service_status: Box::new({
+        router_start: Box::new({
             let w = w.clone();
-            move |_| {
-                let installed = w.lock().unwrap().installed.is_some();
-                Ok(service::Status {
-                    installed,
-                    loaded: installed,
-                    ..Default::default()
-                })
-            }
-        }),
-        service_restart: Box::new({
-            let w = w.clone();
-            move |label| {
-                let mut w = w.lock().unwrap();
-                w.service_calls.push("restart".into());
-                w.restart_labels.push(label.to_owned());
-                if let Some(features) = w.features_after_restart.clone() {
-                    w.features = features;
-                }
-                match w.restart_error.clone() {
-                    Some(message) => Err(std::io::Error::other(message)),
-                    None => Ok(()),
-                }
-            }
-        }),
-        router_healthy: Box::new({
-            let w = w.clone();
-            move |_| {
-                if let Some(hook) = &w.lock().unwrap().on_health {
+            move |port| {
+                if let Some(hook) = &w.lock().unwrap().on_start {
                     hook();
                 }
-                if w.lock().unwrap().healthy {
-                    Ok(())
-                } else {
-                    Err("connection refused".into())
+                let mut w = w.lock().unwrap();
+                if w.router == Some(port) {
+                    return Ok(());
+                }
+                if let Some(occupant) = w.occupied.get(&port) {
+                    return Err(StartError::Busy(*occupant));
+                }
+                if !w.healthy {
+                    return Err(StartError::Failed("Permission denied (os error 13)".into()));
+                }
+                if w.router.take().is_some() {
+                    w.router_events.push("stop".into());
+                }
+                w.router = Some(port);
+                w.router_events.push(format!("start {port}"));
+                Ok(())
+            }
+        }),
+        router_stop: Box::new({
+            let w = w.clone();
+            move || {
+                let mut w = w.lock().unwrap();
+                if w.router.take().is_some() {
+                    w.router_events.push("stop".into());
                 }
             }
+        }),
+        router_running: Box::new({
+            let w = w.clone();
+            move || w.lock().unwrap().router
         }),
         bundled: Box::new(|| Err(std::io::Error::other("not needed"))),
         // Codex 的账户按 id 存（原有用例的断言不变），Claude 的按 `claude:<id>` 存
@@ -305,11 +304,13 @@ pub(super) fn fixture() -> Fixture {
             let w = w.clone();
             move |agent, id| {
                 let w = w.lock().unwrap();
-                w.keys
+                if let Some(reason) = w.key_errors.get(&key_slot(agent, id)) {
+                    return Err(reason.clone());
+                }
+                Ok(w.keys
                     .get(&key_slot(agent, id))
                     .cloned()
-                    .or_else(|| w.key.clone())
-                    .ok_or_else(|| "not set".to_owned())
+                    .or_else(|| w.key.clone()))
             }
         }),
         set_key: Box::new({
@@ -344,10 +345,6 @@ pub(super) fn fixture() -> Fixture {
                     .clone()
                     .ok_or_else(|| "not set".to_owned())
             }
-        }),
-        install_binary: Box::new({
-            let w = w.clone();
-            move |_| Ok(w.lock().unwrap().binary_changed)
         }),
         list_processes: Box::new({
             let w = w.clone();
@@ -460,10 +457,6 @@ pub(super) fn fixture() -> Fixture {
                 Ok(())
             }
         }),
-        router_features: Box::new({
-            let w = w.clone();
-            move |_| Ok(w.lock().unwrap().features.clone())
-        }),
         get_router_token: Box::new({
             let w = w.clone();
             move || Ok(w.lock().unwrap().token.clone())
@@ -549,16 +542,26 @@ pub(super) fn code(result: Result<impl Sized, AppError>) -> String {
     result.err().map(|e| e.code.to_owned()).unwrap_or_default()
 }
 
-fn our_lines(f: &Fixture) -> String {
+/// 借用内置服务商接法写进 Codex 设置的三行：注释加两个根键（spec 2026-10-05-exit-fallback R2）
+pub(super) fn our_lines(f: &Fixture) -> String {
+    format!(
+        "{}\n{}",
+        sophia_core::codex_models::config::COMMENT_BUILTIN,
+        our_keys(f)
+    )
+}
+
+/// 两个根键本身
+pub(super) fn our_keys(f: &Fixture) -> String {
     format!(
         "model_catalog_json = \"{}\"\nopenai_base_url = \"http://127.0.0.1:47328/v1\"\n",
         f.codex().join("sophia-models.json").display()
     )
 }
 
-/// AC18：启用只给 Codex 设置多写两行，登录凭据文件不被触碰，并留下备份
+/// AC18（2026-10-05 起三行：注释加两个根键）：启用只给 Codex 设置多写这几行，登录凭据文件不被触碰，并留下备份
 #[test]
-fn ac18_enable_writes_two_lines_and_never_touches_auth() {
+fn ac18_enable_writes_three_lines_and_never_touches_auth() {
     let f = fixture();
     f.configure();
     let auth = f.codex().join("auth.json");
@@ -569,15 +572,21 @@ fn ac18_enable_writes_two_lines_and_never_touches_auth() {
         std::fs::metadata(&auth).unwrap().modified().unwrap(),
         before
     );
-    assert_eq!(
-        std::fs::read_to_string(&auth).unwrap(),
-        r#"{"tokens":"official-secret"}"#
-    );
-    assert_eq!(
-        std::fs::read_to_string(f.codex().join("config.models.bak")).unwrap(),
-        ORIGINAL,
-        "备份与 MCP 的 config.mcp.bak 不撞名"
-    );
+    assert_eq!(std::fs::read_to_string(&auth).unwrap(), AUTH_JSON);
+    // 备份进 Sophia 数据目录下的 backups/，后缀 models 与 MCP 的 mcp 分得清；codex 目录里不留备份
+    let backups = atomicfile::backup_dir(&f.root.join("data/backups"), &f.config());
+    let baks: Vec<_> = std::fs::read_dir(&backups)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.to_string_lossy().ends_with("-models.bak"))
+        .collect();
+    assert_eq!(baks.len(), 1, "{baks:?}");
+    assert_eq!(std::fs::read_to_string(&baks[0]).unwrap(), ORIGINAL);
+    assert!(!std::fs::read_dir(f.codex()).unwrap().any(|entry| entry
+        .unwrap()
+        .path()
+        .extension()
+        .is_some_and(|ext| ext == "bak")));
     let combined: serde_json::Value =
         serde_json::from_slice(&std::fs::read(f.codex().join("sophia-models.json")).unwrap())
             .unwrap();
@@ -597,14 +606,14 @@ fn ac18_enable_writes_two_lines_and_never_touches_auth() {
     assert!(f.codex_state().enabled);
 }
 
-/// R6：先确认路由健康，再写 Codex 设置；服务参数指向稳定路径和正确的上游
+/// R6：先在本进程里起好路由，再写 Codex 设置；不装 launchd 服务、不复制程序（AC1）
 #[test]
 fn enable_starts_router_before_writing_config() {
     let f = fixture();
     f.configure();
     let seen = Arc::new(Mutex::new(String::new()));
     let (seen2, config) = (seen.clone(), f.config());
-    f.world.lock().unwrap().on_health = Some(Box::new(move || {
+    f.world.lock().unwrap().on_start = Some(Box::new(move || {
         *seen2.lock().unwrap() = std::fs::read_to_string(&config).unwrap()
     }));
     f.app.enable().unwrap();
@@ -613,23 +622,10 @@ fn enable_starts_router_before_writing_config() {
         ORIGINAL,
         "路由确认健康之前就写了设置"
     );
-    let world = f.world.lock().unwrap();
-    let spec = world.installed.as_ref().unwrap();
-    assert_eq!(spec.label, SERVICE_LABEL);
-    // 后台活动通知与登录项里显示应用名 Sophia，而不是后台程序副本的文件名
-    assert_eq!(spec.associated_bundle.as_deref(), Some(APP_BUNDLE_ID));
-    assert_eq!(
-        spec.program,
-        f.root.join("data/bin/Sophia").to_string_lossy()
-    );
-    let args = spec.args.join(" ");
-    for want in ["gateway run", "--port 47328"] {
-        assert!(args.contains(want), "{args} 缺少 {want}");
-    }
-    // 上游地址和协议不在启动参数里，而在路由清单里：增删网关、改地址都不用重装后台服务
-    for gone in ["--third-party-url", "--protocol"] {
-        assert!(!args.contains(gone), "{args} 不该再带 {gone}");
-    }
+    assert_eq!(f.router(), Some(47328));
+    assert_eq!(f.router_events(), ["start 47328"]);
+    assert!(f.world.lock().unwrap().service_calls.is_empty());
+    assert!(!f.root.join("data/bin").exists(), "不再复制程序副本");
     assert_eq!(
         f.routing()["providers"],
         serde_json::json!([{
@@ -638,10 +634,6 @@ fn enable_starts_router_before_writing_config() {
             "protocol": "chat"
         }])
     );
-    assert!(args.contains(&format!(
-        "--routing-catalog {}",
-        f.codex().join("sophia-routing.json").display()
-    )));
 }
 
 /// AC26 前半：路由起不来时不写 Codex 设置
@@ -666,7 +658,7 @@ fn ac19_conflict_refused_without_side_effects() {
     assert_eq!(err.code, "conflict");
     assert!(err.message.contains("openai_base_url"));
     assert_eq!(f.read_config(), foreign);
-    assert!(f.world.lock().unwrap().service_calls.is_empty());
+    assert!(f.router_events().is_empty());
     assert!(!f.codex().join("sophia-models.json").exists());
     assert!(f.codex_state().conflict.contains("openai_base_url"));
 }
@@ -749,22 +741,21 @@ fn fetched_api_base_is_used_and_selection_survives() {
         f.routing()["providers"][0]["base_url"],
         "https://gw.example/openai/v1"
     );
-    // 换地址：旧基址作废，清单立刻跟上；启动参数里没有地址，后台服务的参数不变
+    // 换地址：旧基址作废，清单立刻跟上；路由每个请求重读清单，不用重起
     f.save_provider("https://other.example/api").unwrap();
     assert_eq!(
         f.routing()["providers"][0]["base_url"],
         "https://other.example/api"
     );
-    assert!(!f.args().contains("other.example"), "{}", f.args());
+    assert_eq!(f.router_events(), ["start 47328"]);
 }
 
-/// AC20：恢复后逐字节相同，本功能文件与服务清除；路由不通时照样可用
+/// AC20：恢复后逐字节相同，本功能文件清除、路由停下
 #[test]
 fn ac20_restore_returns_original_bytes_and_cleans_up() {
     let f = fixture();
     f.configure();
     f.app.enable().unwrap();
-    f.world.lock().unwrap().healthy = false;
     let warnings = f.app.restore().unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(f.read_config(), ORIGINAL);
@@ -775,7 +766,7 @@ fn ac20_restore_returns_original_bytes_and_cleans_up() {
         .filter(|n| n.starts_with("sophia-"))
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
-    assert!(f.world.lock().unwrap().installed.is_none());
+    assert_eq!(f.router(), None, "两家都关了：路由停下");
     let state = f.codex_state();
     assert!(
         !state.enabled
@@ -878,10 +869,12 @@ fn state_reports_router_down_and_drift_without_false_positive() {
     f.world.lock().unwrap().codex_version = "0.155.0-alpha.9.2".into(); // 缓存里记的是 0.154.0
     f.app.enable().unwrap();
     assert!(!f.codex_state().codex.drift, "刚启用就误报版本漂移");
-    f.world.lock().unwrap().healthy = false;
+    assert!(f.codex_state().router.running);
+    // 路由不在了（比如打开时没接上）：状态直接看本进程的路由，不再探 HTTP
+    f.world.lock().unwrap().router = None;
     let state = f.codex_state();
     assert!(!state.router.running && !state.router.error.is_empty());
-    f.world.lock().unwrap().healthy = true;
+    f.world.lock().unwrap().router = Some(47328);
     f.world.lock().unwrap().codex_version = "0.156.0".into();
     assert!(f.codex_state().codex.drift);
 }
@@ -897,7 +890,7 @@ fn enable_does_not_overwrite_concurrent_edits() {
         1,
     );
     let (config, text) = (f.config(), edited.clone());
-    f.world.lock().unwrap().on_health =
+    f.world.lock().unwrap().on_start =
         Some(Box::new(move || std::fs::write(&config, &text).unwrap()));
     f.app.enable().unwrap();
     let got = f.read_config();
@@ -919,7 +912,7 @@ fn ac21_restore_keeps_router_when_config_still_points_at_it() {
         1,
     ));
     assert!(f.app.restore().is_err());
-    assert!(f.world.lock().unwrap().installed.is_some());
+    assert_eq!(f.router(), Some(47328));
     assert!(f.codex().join("sophia-routing.json").exists());
 }
 
@@ -960,44 +953,6 @@ fn default_model_is_reset_only_when_it_is_ours() {
     );
     f.app.restore().unwrap();
     assert!(f.read_config().contains("model = \"gpt-5.5\""));
-}
-
-/// AC28：后台程序副本更新后要重启后台服务
-#[test]
-fn ac28_changed_binary_restarts_the_service() {
-    let f = fixture();
-    f.configure();
-    f.app.enable().unwrap();
-    assert!(!f
-        .world
-        .lock()
-        .unwrap()
-        .service_calls
-        .contains(&"restart".to_owned()));
-    f.world.lock().unwrap().binary_changed = true;
-    f.app.enable().unwrap();
-    assert!(f
-        .world
-        .lock()
-        .unwrap()
-        .service_calls
-        .contains(&"restart".to_owned()));
-}
-
-/// R6：`重启路由` 只 kickstart 我们自己装的那个 launchd 服务，不碰 Codex 设置；
-/// 失败时把 launchctl 的原话原样带出去（代码 router_down），不改写成「操作没成功」这类空话
-#[test]
-fn restart_router_kickstarts_our_service_and_relays_launchctl_errors() {
-    let f = fixture();
-    f.app.restart_router().unwrap();
-    assert_eq!(f.world.lock().unwrap().restart_labels, [SERVICE_LABEL]);
-    assert_eq!(f.read_config(), ORIGINAL, "重启不写 Codex 设置");
-
-    let raw = "launchctl kickstart -k gui/501/com.zhengjiaqiao.sophia.gateway failed with exit code 3: Could not find service";
-    f.world.lock().unwrap().restart_error = Some(raw.to_owned());
-    let err = f.app.restart_router().unwrap_err();
-    assert_eq!(err.code, "router_down");
-    assert_eq!(err.message, raw);
 }
 
 fn fake_processes() -> Vec<process::ProcessInfo> {
@@ -1395,7 +1350,7 @@ fn failed_takeover_leaves_no_residue_of_ours() {
         Some("sk-existing-sophia-key"),
         "路由没确认健康之前不该动密钥"
     );
-    assert!(world.installed.is_none(), "失败后不该留下本功能的后台服务");
+    assert_eq!(world.router, None, "失败后不该留下本功能的路由");
     drop(world);
     let ours: Vec<_> = std::fs::read_dir(f.codex())
         .unwrap()
@@ -1434,12 +1389,12 @@ fn takeover_failing_after_the_key_was_written_still_cleans_up() {
     f.world.lock().unwrap().key = Some("sk-existing-sophia-key".into());
     // 路由确认健康之后、写设置之前，别人把设置换掉
     let config = f.config();
-    f.world.lock().unwrap().on_health = Some(Box::new(move || {
+    f.world.lock().unwrap().on_start = Some(Box::new(move || {
         std::fs::write(&config, "model = \"gpt-5.6-sol\"\n").unwrap();
     }));
     assert!(f.app.takeover().is_err());
     let world = f.world.lock().unwrap();
-    assert!(world.installed.is_none(), "失败后不该留下本功能的后台服务");
+    assert_eq!(world.router, None, "失败后不该留下本功能的路由");
     drop(world);
     let ours: Vec<_> = std::fs::read_dir(f.codex())
         .unwrap()
@@ -1537,52 +1492,6 @@ fn settings_without_history_only_ask_for_a_restart_while_enabled() {
     f.app.restore().unwrap();
     f.world.lock().unwrap().settings.history.clear();
     assert!(!f.codex_state().needs_codex_restart, "没开着就不提示");
-}
-
-// ----- 预热：把「复制程序、让后台服务用上新版本」从启用路径上挪走 -----
-// 真机实测：新程序文件第一次运行要过系统校验，放在启用里会让它卡上好几秒，甚至撞上就绪等待的上限而失败。
-
-/// 应用更新后启动：程序文件变了、后台服务正开着 → 预热时就让它换上新版本
-#[test]
-fn prewarm_restarts_a_running_service_when_the_binary_changed() {
-    let f = fixture();
-    f.configure();
-    f.app.enable().unwrap();
-    {
-        let mut world = f.world.lock().unwrap();
-        world.binary_changed = true;
-        world.restart_labels.clear();
-    }
-    assert!(f.app.prewarm().unwrap(), "报告程序文件被更新过");
-    assert_eq!(f.world.lock().unwrap().restart_labels, [SERVICE_LABEL]);
-}
-
-/// 后台服务没开着：只复制，不去启动什么
-#[test]
-fn prewarm_only_copies_when_the_service_is_not_loaded() {
-    let f = fixture();
-    f.world.lock().unwrap().binary_changed = true;
-    assert!(f.app.prewarm().unwrap());
-    let world = f.world.lock().unwrap();
-    assert!(world.restart_labels.is_empty());
-    assert!(world.installed.is_none(), "预热不安装后台服务");
-}
-
-/// 程序文件没变：什么都不做，也不动 Codex 的设置
-#[test]
-fn prewarm_is_a_no_op_when_nothing_changed() {
-    let f = fixture();
-    f.configure();
-    f.app.enable().unwrap();
-    let before = f.read_config();
-    {
-        let mut world = f.world.lock().unwrap();
-        world.binary_changed = false;
-        world.restart_labels.clear();
-    }
-    assert!(!f.app.prewarm().unwrap());
-    assert!(f.world.lock().unwrap().restart_labels.is_empty());
-    assert_eq!(f.read_config(), before);
 }
 
 // ---------------------------------------------------------------------------
@@ -1776,9 +1685,14 @@ fn state_lists_every_provider() {
     assert_eq!(state.providers.len(), 2);
     assert_eq!(state.providers[0].id, a);
     assert_eq!(state.providers[0].name, "WeCode");
-    assert!(state.providers[0].has_key);
+    assert_eq!(state.providers[0].key, KeyStatus::Set);
     assert_eq!(state.providers[1].name, "Other Gateway");
-    assert!(!state.providers[1].has_key, "每家的密钥状态各自独立");
+    assert_eq!(
+        state.providers[1].key,
+        KeyStatus::Missing,
+        "每家的密钥状态各自独立"
+    );
+    assert_eq!(state.providers[1].key_problem, None);
     let model = &state.providers[1].models[0];
     assert_eq!(
         (model.slug.as_str(), model.selected),
@@ -1810,6 +1724,50 @@ fn enable_checks_the_key_of_every_publishing_provider() {
     assert_eq!(catalog_slugs(&f), ["gpt-5.6-sol", "wecode-deepseek-v4"]);
     // 没有模型在用的那一家，地址不写进 Codex 目录
     assert_eq!(f.routing()["providers"].as_array().unwrap().len(), 1);
+}
+
+/// R4 / AC2：读不出密钥不当成「没有」——状态带原因，启用、拉模型、试调都说「不可用：原因」而不是「还没有密钥」
+#[test]
+fn an_unreadable_key_is_not_reported_as_missing() {
+    let f = fixture();
+    let (a, b) = two_providers(&f);
+    let reason = sophia_core::t!(
+        "models.secrets.unreadable",
+        reason = sophia_core::t!("models.secrets.noPermission")
+    );
+    f.world
+        .lock()
+        .unwrap()
+        .key_errors
+        .insert(b.clone(), reason.clone());
+
+    let state = f.codex_state();
+    assert_eq!(state.providers[0].key, KeyStatus::Set);
+    assert_eq!(state.providers[1].key, KeyStatus::Unreadable);
+    assert_eq!(
+        state.providers[1].key_problem.as_deref(),
+        Some(reason.as_str())
+    );
+    let json = serde_json::to_value(&state.providers[1]).unwrap();
+    assert_eq!(json["key"], "unreadable");
+    assert_eq!(json["keyProblem"], reason.as_str());
+    assert!(json.get("hasKey").is_none());
+
+    let missing = sophia_core::t!("models.app.providerNoKey", name = "Other Gateway");
+    let error = f.app.enable().unwrap_err();
+    assert_eq!(error.code, "invalid");
+    assert!(error.message.contains(&reason), "{}", error.message);
+    assert_ne!(error.message, missing);
+    let error = f.app.provider_for_fetch_in(Agent::Codex, &b).unwrap_err();
+    assert!(error.message.contains(&reason), "{}", error.message);
+    assert_ne!(error.message, sophia_core::t!("models.app.noKey"));
+    let error = f
+        .app
+        .provider_for_probe_in(Agent::Codex, &b, "deepseek/v4")
+        .unwrap_err();
+    assert!(error.message.contains(&reason), "{}", error.message);
+    assert!(f.app.provider_for_fetch_in(Agent::Codex, &a).is_ok());
+    assert_eq!(f.read_config(), ORIGINAL);
 }
 
 /// 改名只改显示名：id、标识、钥匙串账户都不变，Codex 里已选的模型不受影响
@@ -2066,8 +2024,7 @@ fn a_new_provider_is_not_left_behind_when_its_key_cannot_be_stored() {
     assert!(f.codex_state().providers.is_empty());
 }
 
-/// 已启用时改动发布内容，要先确保后台路由是当前版本再写清单：
-/// 旧版路由不认清单里的归属，会把第二家的请求发给第一家。路由起不来就什么都不写。
+/// 已启用时改动发布内容，要先确保路由在跑再写清单。路由起不来就什么都不写。
 #[test]
 fn republishing_refuses_to_write_catalogs_when_the_router_cannot_be_brought_up() {
     let f = fixture();
@@ -2075,7 +2032,12 @@ fn republishing_refuses_to_write_catalogs_when_the_router_cannot_be_brought_up()
     f.app.set_models_in(Agent::Codex, &b, vec![]).unwrap();
     f.app.enable().unwrap();
     let routing_before = f.routing();
-    f.world.lock().unwrap().healthy = false;
+    // 打开 Sophia 时没接上（路由不在），这次也起不来
+    {
+        let mut w = f.world.lock().unwrap();
+        w.router = None;
+        w.healthy = false;
+    }
     assert_eq!(
         code(
             f.app
@@ -2274,8 +2236,7 @@ fn taking_over_the_same_gateway_twice_reuses_the_provider() {
     assert_eq!(ids, ["wecode"]);
 }
 
-/// 评审发现：启用时也必须先确保后台路由是当前版本、再写清单。
-/// 升级后第一次点启用时旧版路由还在跑，它不认清单里的归属，会把第二家的请求发给第一家。
+/// 启用时也必须先起好路由、再写清单。
 #[test]
 fn enable_brings_the_router_up_before_writing_the_routing_catalog() {
     let f = fixture();
@@ -2284,7 +2245,7 @@ fn enable_brings_the_router_up_before_writing_the_routing_catalog() {
     let seen = Arc::new(Mutex::new(None::<bool>));
     let record = seen.clone();
     let path = routing.clone();
-    f.world.lock().unwrap().on_health = Some(Box::new(move || {
+    f.world.lock().unwrap().on_start = Some(Box::new(move || {
         // 路由确认健康的那一刻，清单应当还没写
         record.lock().unwrap().get_or_insert(path.exists());
     }));
@@ -2307,7 +2268,7 @@ fn a_failed_fetch_marks_the_provider_unreachable_until_the_next_success() {
     let f = fixture();
     let (a, _) = two_providers(&f);
     f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network)
+        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
         .unwrap();
 
     // 落盘：设置里有，重新读出的状态里也有
@@ -2352,10 +2313,10 @@ fn retrying_one_provider_leaves_the_others_alone() {
     let f = fixture();
     let (a, b) = two_providers(&f);
     f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network)
+        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
         .unwrap();
     f.app
-        .record_unreachable_in(Agent::Codex, &b, UnreachableReason::Auth)
+        .record_unreachable_in(Agent::Codex, &b, UnreachableReason::Auth, None)
         .unwrap();
 
     f.app
@@ -2369,10 +2330,12 @@ fn retrying_one_provider_leaves_the_others_alone() {
     assert_eq!(state.providers[1].unreachable, None);
 
     assert_eq!(
-        code(
-            f.app
-                .record_unreachable_in(Agent::Codex, "nope", UnreachableReason::Unexpected)
-        ),
+        code(f.app.record_unreachable_in(
+            Agent::Codex,
+            "nope",
+            UnreachableReason::Unexpected,
+            None
+        )),
         "invalid"
     );
 }
@@ -2383,7 +2346,7 @@ fn the_view_shows_the_current_sentence_for_each_reason_kind() {
     let f = fixture();
     let (a, b) = two_providers(&f);
     f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Auth)
+        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Auth, None)
         .unwrap();
     f.world
         .lock()
@@ -2406,7 +2369,7 @@ fn changing_the_address_forgets_the_old_unreachable_verdict() {
     let f = fixture();
     let (a, _) = two_providers(&f);
     f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network)
+        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
         .unwrap();
     f.app
         .upsert_provider_in(
@@ -2589,4 +2552,72 @@ fn probe_target_needs_a_key_a_known_provider_and_a_model() {
         .provider_for_probe_in(Agent::Codex, &id, "weibo/glm-5")
         .unwrap_err();
     assert_eq!(err.to_string(), "[invalid] 还没有保存密钥");
+}
+
+/// spec 2026-10-04-local-diagnostics R11：读不到状态时说是哪个文件、哪一种（没权限 / 格式有误），
+/// 页面据此给修复权限、打开文件；其余照常读（入口不消失）
+#[test]
+fn unreadable_config_is_reported_by_kind() {
+    use sophia_core::file_issue::FileIssueKind;
+    let f = fixture();
+    assert_eq!(f.app.state().unreadable, None);
+
+    std::fs::write(f.config(), "model = \"gpt\"\n[broken\n").unwrap();
+    let state = f.app.state();
+    let issue = state.unreadable.clone().expect("格式有误");
+    assert_eq!(issue.kind, FileIssueKind::Format);
+    assert_eq!(issue.line, Some(2));
+    assert_eq!(issue.path, f.config());
+    assert!(
+        issue.reason.ends_with("第 2 行格式有误"),
+        "{}",
+        issue.reason
+    );
+    assert!(state.supported);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(f.config(), std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(f.config()).is_err() {
+            let issue = f.app.state().unreadable.expect("没权限");
+            assert_eq!(issue.kind, FileIssueKind::Permission);
+            assert!(issue.reason.contains("读不了"), "{}", issue.reason);
+        }
+        std::fs::set_permissions(f.config(), std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+}
+
+/// 修复权限、打开文件只认 Sophia 管的文件：Codex 的设置文件与 Sophia 数据目录里的 JSON；
+/// 逐字比对白名单，软链（文件或父目录）、`..` 一律不认（管理员授权的 chown 会跟随软链）
+#[test]
+fn only_managed_files_can_be_fixed_or_opened() {
+    let f = fixture();
+    let data = f.root.join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(data.join("settings.json"), "{}").unwrap();
+    assert_eq!(f.app.managed_file(&f.config()), Some(f.config()));
+    assert_eq!(
+        f.app.managed_file(&data.join("settings.json")),
+        Some(data.join("settings.json"))
+    );
+    assert_eq!(f.app.managed_file(&data.join("..").join("x.json")), None);
+    assert_eq!(f.app.managed_file(&f.codex().join("auth.json")), None);
+    assert_eq!(
+        f.app.managed_file(std::path::Path::new("/etc/sudoers")),
+        None
+    );
+    #[cfg(unix)]
+    {
+        let outside = f.root.join("outside.json");
+        std::fs::write(&outside, "{}").unwrap();
+        std::os::unix::fs::symlink(&outside, data.join("x.json")).unwrap();
+        assert_eq!(f.app.managed_file(&data.join("x.json")), None);
+        std::os::unix::fs::symlink(&data, f.root.join("alias")).unwrap();
+        assert_eq!(
+            f.app
+                .managed_file(&f.root.join("alias").join("settings.json")),
+            None
+        );
+    }
 }

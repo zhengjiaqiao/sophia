@@ -387,9 +387,7 @@ pub fn managed(paths: &[PathBuf]) -> bool {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
+    crate::runtime::home()
 }
 
 fn real() -> &'static Desktop<RealSystem> {

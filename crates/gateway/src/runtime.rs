@@ -1,36 +1,35 @@
-//! 把编排层接到真实世界：钥匙串、launchd、系统代理、Codex 可执行文件、后台程序副本。
+//! 把编排层接到真实世界：密钥文件、本进程里的路由、系统代理、Codex 可执行文件，以及升级时卸旧版 launchd 服务。
 //! 以及无界面入口 `Sophia gateway run|status|doctor|restore|enable|provider-add|select|probe|restart|launch|…`。
-use crate::app::{App, AppError, Deps, ProviderView};
-use crate::router::{Agent, Config, LocaleSource, Protocol, ProxyFn, Router, HEALTH_SERVICE_NAME};
+use crate::app::{App, AppError, Deps, KeyStatus, ProviderView, StartError};
+use crate::router::{
+    Agent, Config, KeySource, LocaleSource, Protocol, ProxyFn, Router, TokenSource,
+};
+use crate::router_host::{self, RouterHost};
 use crate::{claude_desktop, codex_desktop, keychain, process, provider, service, sysproxy};
-use sha2::{Digest, Sha256};
 use sophia_core::claude_models::desktop::DesktopDirs;
 use sophia_core::codex_models::catalog::Model;
 use sophia_core::i18n;
+use sophia_core::keystore::{KeyStore, KeyStoreError};
 use sophia_core::store::Store;
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// 钥匙串条目：服务名与账户名
-pub const KEYCHAIN_SERVICE: &str = "Sophia";
-/// Codex 各家网关的服务商密钥账户基名：`codex-gateway.<id>`（不变）
-pub const KEYCHAIN_ACCOUNT: &str = "codex-gateway";
-/// Claude 各家网关的服务商密钥账户基名：`claude-gateway.<id>`（R4）
-pub const CLAUDE_KEYCHAIN_ACCOUNT: &str = "claude-gateway";
-
-/// 这一家的服务商密钥账户基名
-pub fn key_account(agent: Agent) -> &'static str {
-    match agent {
-        Agent::Codex => KEYCHAIN_ACCOUNT,
-        Agent::Claude => CLAUDE_KEYCHAIN_ACCOUNT,
-    }
-}
-
-/// crate 内公开：`usage` 模块（T5）也要用同一份 HOME/CODEX_HOME 判定，不另写一份
+/// crate 内公开：`usage` 模块（T5）也要用同一份 HOME/CODEX_HOME 判定，不另写一份。
+///
+/// debug 版设了 `SOPHIA_TEST_HOME`（与界面进程 `runtime_env` 同一个测试主目录）时就用它，不改 HOME 也能把
+/// `~/.codex`、Claude 的数据目录换成测试目录。不要靠改 HOME 来隔离：Sophia 重启 Codex、Claude 时用 `open -b`
+/// 拉起它们，子进程会继承 HOME，真实的桌面应用就跑在空的测试目录里，看着像登录掉了、会话没了（2026-10-03 真机）
 pub(crate) fn home() -> PathBuf {
+    #[cfg(debug_assertions)]
+    if let Some(root) = std::env::var_os("SOPHIA_TEST_HOME").map(PathBuf::from) {
+        if root.is_absolute() {
+            return root;
+        }
+    }
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
@@ -74,78 +73,6 @@ fn service_manager() -> service::Manager {
             text.push_str(&String::from_utf8_lossy(&output.stderr));
             Ok((text, output.status.code().unwrap_or(-1)))
         }),
-    }
-}
-
-/// `/_health` 响应里的 `features`（R9）。旧版路由没有这个字段，返回空列表
-pub fn router_features(port: u16) -> Result<Vec<String>, String> {
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = std::net::TcpStream::connect_timeout(&address, Duration::from_millis(500))
-        .map_err(|e| e.to_string())?;
-    stream.set_read_timeout(Some(Duration::from_secs(1))).ok();
-    write!(
-        stream,
-        "GET /_health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n"
-    )
-    .map_err(|e| e.to_string())?;
-    let mut response = String::new();
-    let _ = stream.take(16384).read_to_string(&mut response);
-    health_features(&response)
-}
-
-/// 从 `/_health` 的原始 HTTP 响应里取 `features`；不是本功能的路由 → Err
-fn health_features(response: &str) -> Result<Vec<String>, String> {
-    let body = response.split_once("\r\n\r\n").map_or("", |(_, body)| body);
-    let doc: serde_json::Value = serde_json::from_str(body.trim())
-        .map_err(|_| sophia_core::t!("models.runtime.notOurRouter"))?;
-    if doc.get("service").and_then(|v| v.as_str()) != Some(HEALTH_SERVICE_NAME) {
-        return Err(sophia_core::t!("models.runtime.notOurRouter"));
-    }
-    Ok(doc
-        .get("features")
-        .and_then(|v| v.as_array())
-        .map(|list| {
-            list.iter()
-                .filter_map(|f| f.as_str().map(str::to_owned))
-                .collect()
-        })
-        .unwrap_or_default())
-}
-
-/// 在端口上确认响应的是本功能的路由；最多等 5 秒
-pub fn router_healthy(port: u16) -> Result<(), String> {
-    // 上限 10 秒：系统对新程序文件的首次校验实测就可能占去好几秒，5 秒会把「只是慢」误判成「没起来」
-    router_healthy_within(port, Duration::from_secs(10))
-}
-
-fn router_healthy_within(port: u16, patience: Duration) -> Result<(), String> {
-    let deadline = Instant::now() + patience;
-    loop {
-        let attempt = (|| -> Result<(), String> {
-            let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-            let mut stream =
-                std::net::TcpStream::connect_timeout(&address, Duration::from_millis(500))
-                    .map_err(|e| e.to_string())?;
-            stream.set_read_timeout(Some(Duration::from_secs(1))).ok();
-            write!(
-                stream,
-                "GET /_health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n"
-            )
-            .map_err(|e| e.to_string())?;
-            let mut response = String::new();
-            let _ = stream.take(4096).read_to_string(&mut response);
-            if response.contains(HEALTH_SERVICE_NAME) {
-                Ok(())
-            } else {
-                Err(sophia_core::t!("models.runtime.notOurRouter"))
-            }
-        })();
-        match attempt {
-            Ok(()) => return Ok(()),
-            Err(e) if Instant::now() >= deadline => return Err(e),
-            // 路由通常在一两百毫秒内就绪，轮询密一点，启用就少等一截
-            Err(_) => std::thread::sleep(Duration::from_millis(50)),
-        }
     }
 }
 
@@ -262,144 +189,197 @@ fn earliest_codex_start(ps: &str, now: u64) -> Option<u64> {
         .min()
 }
 
-fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; 1 << 20];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect())
+/// 编排层眼里的密钥文件（`<数据目录>/secrets.json`）。读一次是几百字节的本地文件，不再缓存。
+///
+/// 「没有」之外还有说不出密钥的情况（R4）：文件读不出（权限、格式）。
+/// 界面进程（`ui`）在写之前把损坏的文件另存（R5），另存过之后「没有」的那几家说明原因
+struct KeyFile {
+    keys: KeyStore,
+    ui: bool,
+    repaired: AtomicBool,
 }
 
-/// 把 `source` 复制到 `dest`（后台服务用的稳定路径）。返回副本是否被更新。
-/// 判据：先比源文件的长度和修改时间（记在旁边的 `.meta` 里），不一致再比 SHA-256，不每次读全文件。
-pub fn install_binary_from(source: &Path, dest: &Path) -> io::Result<bool> {
-    let metadata = std::fs::metadata(source)?;
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_nanos());
-    let stamp = format!("{}:{}", metadata.len(), modified);
-    let meta_path = dest.with_extension("meta");
-    let recorded = std::fs::read_to_string(&meta_path).unwrap_or_default();
-    let (recorded_stamp, recorded_hash) = recorded.trim().split_once(' ').unwrap_or(("", ""));
-    // 副本必须是普通文件且长度与源一致，记录才可信；副本被截断或被换成别的东西时要重新复制
-    let dest_intact = std::fs::symlink_metadata(dest)
-        .is_ok_and(|m| m.file_type().is_file() && m.len() == metadata.len());
-    if dest_intact && recorded_stamp == stamp {
-        return Ok(false);
-    }
-    let hash = sha256_file(source)?;
-    if dest_intact && recorded_hash == hash && sha256_file(dest)? == hash {
-        std::fs::write(&meta_path, format!("{stamp} {hash}\n"))?;
-        return Ok(false);
-    }
-    let parent = dest
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "dest has no parent"))?;
-    std::fs::create_dir_all(parent)?;
-    // 临时文件名不固定，且用 create_new：不会顺着别人预先放好的软链写出去，界面和命令行同时运行也不会互相踩
-    let temp = parent.join(format!(
-        ".sophia-{}-{:x}.tmp",
-        std::process::id(),
-        unix_now_nanos()
-    ));
-    let result = (|| -> io::Result<()> {
-        let mut input = std::fs::File::open(source)?;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o755);
-        }
-        let mut output = options.open(&temp)?;
-        io::copy(&mut input, &mut output)?;
-        output.sync_all()?;
-        // 原子替换：正在运行的旧路由继续用旧文件，直到被重启。rename 会替换掉目标位置上的软链本身
-        std::fs::rename(&temp, dest)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result?;
-    std::fs::write(&meta_path, format!("{stamp} {hash}\n"))?;
-    Ok(true)
-}
-
-fn unix_now_nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
-}
-
-fn key_error(e: keychain::KeyError) -> String {
-    e.to_string()
-}
-
-/// 界面进程里的钥匙串读取缓存（spec 非功能需求「状态查询开销」）：同一账户的结果（含「没有」）缓存 30 秒，
-/// 本进程写 / 删这个账户时立即失效。`state()` 每次都要问每家网关有没有密钥，每问一次就是一个 `security` 子进程
-struct KeyCache {
-    ttl: Duration,
-    entries: Mutex<std::collections::HashMap<String, (Option<String>, Instant)>>,
-}
-
-impl KeyCache {
-    fn new() -> Self {
+impl KeyFile {
+    fn new(store_dir: &Path, ui: bool) -> Self {
         Self {
-            ttl: Duration::from_secs(30),
-            entries: Mutex::default(),
+            keys: KeyStore::new(store_dir),
+            ui,
+            repaired: AtomicBool::new(false),
         }
     }
 
-    /// `fetch` 的结果按 `account` 缓存：有值与「没有这个条目」（`None`）都缓存，其他错误不缓存
-    fn get(
+    /// 只在界面进程里：损坏的文件另存为 `secrets.json.broken-<时间>`，当作空文件继续
+    fn repair(&self) {
+        if self.ui && matches!(self.keys.repair_if_corrupt(unix_now()), Ok(Some(_))) {
+            self.repaired.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// 文件里没有这一项时，说不出密钥的原因；真的就是没有为 None
+    fn missing_reason(&self) -> Option<String> {
+        self.repaired
+            .load(Ordering::Relaxed)
+            .then(|| sophia_core::t!("models.secrets.repaired"))
+    }
+
+    fn present(
         &self,
-        account: &str,
-        fetch: impl FnOnce() -> Result<String, keychain::KeyError>,
+        read: Result<Option<String>, KeyStoreError>,
     ) -> Result<Option<String>, String> {
-        let now = Instant::now();
-        if let Some((value, at)) = self.entries.lock().unwrap().get(account) {
-            if now.saturating_duration_since(*at) < self.ttl {
-                return Ok(value.clone());
-            }
+        match read {
+            Ok(Some(value)) => Ok(Some(value)),
+            Ok(None) => self.missing_reason().map_or(Ok(None), Err),
+            Err(e) => Err(e.to_string()),
         }
-        let value = match fetch() {
-            Ok(value) => Some(value),
-            Err(keychain::KeyError::NotSet) => None,
-            Err(e) => return Err(key_error(e)),
-        };
-        self.entries
-            .lock()
-            .unwrap()
-            .insert(account.to_owned(), (value.clone(), now));
-        Ok(value)
     }
 
-    fn forget(&self, account: &str) {
-        self.entries.lock().unwrap().remove(account);
+    fn get(&self, agent: Agent, id: &str) -> Result<Option<String>, String> {
+        self.present(self.keys.get(agent.as_str(), id))
+    }
+
+    fn set(&self, agent: Agent, id: &str, key: &str) -> Result<(), String> {
+        self.repair();
+        self.keys
+            .set(agent.as_str(), id, key)
+            .map_err(|e| e.to_string())
+    }
+
+    fn delete(&self, agent: Agent, id: &str) -> Result<(), String> {
+        self.repair();
+        self.keys
+            .delete(agent.as_str(), id)
+            .map_err(|e| e.to_string())
+    }
+
+    fn token(&self) -> Result<Option<String>, String> {
+        self.present(self.keys.router_token())
+    }
+
+    fn set_token(&self, token: &str) -> Result<(), String> {
+        self.repair();
+        self.keys.set_router_token(token).map_err(|e| e.to_string())
     }
 }
 
-fn provider_cache_key(agent: Agent, provider: &str) -> String {
-    format!("{}.{provider}", key_account(agent))
+/// 路由的文件位置：Codex 的路由清单、Claude 的路由清单、活动日志。编排层写清单，路由每个请求重读
+fn router_paths(store_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    (
+        codex_home().join(crate::app::ROUTING_FILE),
+        crate::app::claude_routing_file(store_dir),
+        store_dir.join("gateway-logs").join("router.log"),
+    )
 }
 
-/// 用真实依赖装配编排层。`store_dir` 是 Sophia 的数据目录
+/// 路由取密钥与 Claude 网关令牌：按请求从密钥文件取并短时缓存，改密钥不用重起路由；两家各一份缓存（R4）。
+/// 路由只读：文件损坏时报错、不另存（那是编排层的事，R5）
+fn router_secrets(store_dir: &Path) -> (KeySource, TokenSource) {
+    let keys = KeyStore::new(store_dir);
+    let cached_for = |agent: Agent| {
+        let keys = keys.clone();
+        CachedKeys::new(
+            move |provider: &str| keys.get(agent.as_str(), provider),
+            Duration::from_secs(30),
+            Instant::now,
+        )
+    };
+    let (codex_keys, claude_keys) = (cached_for(Agent::Codex), cached_for(Agent::Claude));
+    (
+        Arc::new(move |agent, provider| match agent {
+            Agent::Codex => codex_keys.get(provider),
+            Agent::Claude => claude_keys.get(provider),
+        }),
+        // 令牌的缓存与「比对不上时重读」由路由自己做
+        Arc::new(move || {
+            keys.router_token()
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| sophia_core::t!("models.claude.tokenMissing"))
+        }),
+    )
+}
+
+/// 界面进程里的路由：路由与界面同一进程，说话的语言就是界面当前的语言（`locale: None`，不按请求改语言）
+fn ui_router(store_dir: &Path) -> Result<Arc<Router>, String> {
+    let (routing_catalog_path, claude_routing_path, log) = router_paths(store_dir);
+    let (third_party_key, router_token) = router_secrets(store_dir);
+    Router::new(Config {
+        third_party_url: String::new(),
+        third_party_protocol: Protocol::Chat,
+        chatgpt_url: String::new(),
+        openai_url: String::new(),
+        routing_catalog_path,
+        activity_log_path: Some(log),
+        third_party_key,
+        max_body_bytes: 0,
+        proxy: Some(system_proxy()),
+        claude_routing_path: Some(claude_routing_path),
+        router_token,
+        keepalive: Duration::ZERO,
+        locale: None,
+    })
+}
+
+/// 界面进程用的编排层：先把损坏的密钥文件另存（R5），再交给界面。路由在本进程里、跑在 `handle` 所属的
+/// tokio 运行时上（界面是 Tauri 的运行时）
+pub fn build_ui_app(store_dir: PathBuf, handle: tokio::runtime::Handle) -> App {
+    let keys = Arc::new(KeyFile::new(&store_dir, true));
+    keys.repair();
+    let router_dir = store_dir.clone();
+    let host = Arc::new(RouterHost::new(
+        handle,
+        Box::new(move || ui_router(&router_dir)),
+    ));
+    let (h1, h2, h3) = (host.clone(), host.clone(), host);
+    build_app_with(
+        store_dir,
+        keys,
+        RouterDeps {
+            start: Box::new(move |port| h1.start(port)),
+            stop: Box::new(move || h2.stop()),
+            running: Box::new(move || h3.running()),
+        },
+    )
+}
+
+/// 命令行进程看到的路由：路由在界面进程（Sophia）里，命令行起不了也停不了它，只能探一下它在不在
+fn cli_router(store_dir: &Path) -> RouterDeps {
+    let patience = Duration::from_millis(800);
+    let store = Store::new(store_dir.to_path_buf());
+    RouterDeps {
+        start: Box::new(move |port| {
+            if router_host::sophia_answers(port, patience) {
+                Ok(())
+            } else {
+                Err(StartError::Failed(sophia_core::t!(
+                    "models.app.sophiaNotRunning"
+                )))
+            }
+        }),
+        stop: Box::new(|| {}),
+        running: Box::new(move || {
+            let port = store.load_settings().ok()?.codex_gateway.port;
+            router_host::sophia_answers(port, patience).then_some(port)
+        }),
+    }
+}
+
+/// 用真实依赖装配编排层（命令行用；界面用 [`build_ui_app`]）。`store_dir` 是 Sophia 的数据目录
 pub fn build_app(store_dir: PathBuf) -> App {
-    let manager = Arc::new(service_manager());
-    let keys = Arc::new(KeyCache::new());
+    let keys = Arc::new(KeyFile::new(&store_dir, false));
+    let router = cli_router(&store_dir);
+    build_app_with(store_dir, keys, router)
+}
+
+type RouterStart = Box<dyn Fn(u16) -> Result<(), StartError> + Send + Sync>;
+
+/// 编排层起、停、查路由的三个依赖
+struct RouterDeps {
+    start: RouterStart,
+    stop: Box<dyn Fn() + Send + Sync>,
+    running: Box<dyn Fn() -> Option<u16> + Send + Sync>,
+}
+
+fn build_app_with(store_dir: PathBuf, keys: Arc<KeyFile>, router: RouterDeps) -> App {
+    let manager = service_manager();
     let (k1, k2, k3, k4, k5) = (
         keys.clone(),
         keys.clone(),
@@ -411,12 +391,6 @@ pub fn build_app(store_dir: PathBuf) -> App {
     let store_dir_for_save = store_dir.clone();
     let store_dir_for_claude_load = store_dir.clone();
     let store_dir_for_claude_save = store_dir.clone();
-    let (m1, m2, m3, m4) = (
-        manager.clone(),
-        manager.clone(),
-        manager.clone(),
-        manager.clone(),
-    );
     App::new(Deps {
         codex_home: codex_home(),
         data_dir: store_dir,
@@ -428,59 +402,28 @@ pub fn build_app(store_dir: PathBuf) -> App {
         }),
         save_settings: Box::new(move |gateway| {
             let store = Store::new(store_dir_for_save.clone());
+            let _guard = store.lock_settings();
             let mut settings = store.load_settings()?;
             settings.codex_gateway = gateway.clone();
             store.save_settings(&settings)
         }),
-        service_install: Box::new(move |spec| m1.install(spec)),
-        service_uninstall: Box::new(move |label| m2.uninstall(label)),
-        service_status: Box::new(move |label| m3.status(label)),
-        service_restart: Box::new(move |label| m4.restart(label)),
-        router_healthy: Box::new(router_healthy),
+        launch_agents_dir: manager.launch_agents_dir.clone(),
+        service_uninstall: Box::new(move |label| manager.uninstall(label)),
+        router_start: router.start,
+        router_stop: router.stop,
+        router_running: router.running,
         bundled: Box::new(|| run_codex(&["debug", "models", "--bundled"])),
-        get_key: Box::new(move |agent, provider| {
-            k1.get(&provider_cache_key(agent, provider), || {
-                keychain::get_provider_key(
-                    &keychain::security_runner(),
-                    KEYCHAIN_SERVICE,
-                    key_account(agent),
-                    provider,
-                )
-            })?
-            .ok_or_else(|| keychain::KeyError::NotSet.to_string())
-        }),
-        set_key: Box::new(move |agent, provider, key| {
-            k2.forget(&provider_cache_key(agent, provider));
-            keychain::set_provider_key(
-                &keychain::security_runner(),
-                KEYCHAIN_SERVICE,
-                key_account(agent),
-                provider,
-                key,
-            )
-            .map_err(key_error)
-        }),
-        delete_key: Box::new(move |agent, provider| {
-            k3.forget(&provider_cache_key(agent, provider));
-            keychain::delete_provider_key(
-                &keychain::security_runner(),
-                KEYCHAIN_SERVICE,
-                key_account(agent),
-                provider,
-            )
-            .map_err(key_error)
-        }),
+        get_key: Box::new(move |agent, provider| k1.get(agent, provider)),
+        set_key: Box::new(move |agent, provider, key| k2.set(agent, provider, key)),
+        delete_key: Box::new(move |agent, provider| k3.delete(agent, provider)),
+        // 接管 agents-manager 时仍从它的钥匙串条目读一次（R8），之后写进密钥文件
         get_agents_manager_key: Box::new(|| {
             keychain::get_key(
                 &keychain::security_runner(),
                 crate::takeover::KEYCHAIN_SERVICE,
                 crate::takeover::KEYCHAIN_ACCOUNT,
             )
-            .map_err(key_error)
-        }),
-        install_binary: Box::new(|dest| {
-            let source = std::env::current_exe().and_then(|p| p.canonicalize())?;
-            install_binary_from(&source, dest)
+            .map_err(|e| e.to_string())
         }),
         list_processes: Box::new(process::list_processes),
         terminate: Box::new(process::terminate),
@@ -499,30 +442,13 @@ pub fn build_app(store_dir: PathBuf) -> App {
         }),
         save_claude: Box::new(move |gateway| {
             let store = Store::new(store_dir_for_claude_save.clone());
+            let _guard = store.lock_settings();
             let mut settings = store.load_settings()?;
             settings.claude_gateway = gateway.clone();
             store.save_settings(&settings)
         }),
-        router_features: Box::new(router_features),
-        get_router_token: Box::new(move || {
-            k4.get(keychain::ROUTER_TOKEN_ACCOUNT, || {
-                keychain::get_key(
-                    &keychain::security_runner(),
-                    KEYCHAIN_SERVICE,
-                    keychain::ROUTER_TOKEN_ACCOUNT,
-                )
-            })
-        }),
-        set_router_token: Box::new(move |token| {
-            k5.forget(keychain::ROUTER_TOKEN_ACCOUNT);
-            keychain::set_key(
-                &keychain::security_runner(),
-                KEYCHAIN_SERVICE,
-                keychain::ROUTER_TOKEN_ACCOUNT,
-                token,
-            )
-            .map_err(key_error)
-        }),
+        get_router_token: Box::new(move || k4.token()),
+        set_router_token: Box::new(move |token| k5.set_token(token)),
         new_router_token: Box::new(keychain::new_router_token),
         desktop_dirs: DesktopDirs::new(&home().join("Library").join("Application Support")),
         managed_prefs: claude_desktop::managed_pref_paths(),
@@ -533,21 +459,9 @@ pub fn build_app(store_dir: PathBuf) -> App {
     })
 }
 
-/// 向网关拉取模型列表，并把网关客户端的错误翻译成带错误码的错误
-/// 应用启动后在后台线程里调用：更新程序副本，并空跑它一次，让系统把首次校验提前做掉。
-/// 失败不影响应用——启用时还会照常再做一遍。
-pub fn prewarm(app: &App) {
-    match app.prewarm() {
-        Ok(_) => {
-            let _ = std::process::Command::new(app.router_binary())
-                .args(["gateway", "warm"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-        }
-        Err(error) => eprintln!("预热后台程序失败：{error}"),
-    }
+/// 这个地址按系统设置走不走代理（连不上时据此说是代理的事，见 `provider::classify_send_error`）
+fn proxied(resolve: &ProxyFn, address: &str) -> bool {
+    url::Url::parse(address.trim()).is_ok_and(|url| resolve(&url).is_some())
 }
 
 /// 拉取模型列表：返回网关的模型（`id` 与网关给了的上下文长度）和探明的接口基址
@@ -558,14 +472,17 @@ pub async fn fetch_models(base_url: &str, key: &str) -> Result<(Vec<Model>, Stri
 }
 
 /// 向第三方网关发请求用的客户端：不跟随重定向（带着密钥），代理按 macOS 系统设置
-fn gateway_client() -> Result<reqwest::Client, AppError> {
+/// 同时交回解析代理用的那一份（判断某个地址走不走代理）
+fn gateway_client() -> Result<(reqwest::Client, ProxyFn), AppError> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let resolve = system_proxy();
-    provider::client_builder_defaults()
+    let for_client = resolve.clone();
+    let client = provider::client_builder_defaults()
         .no_proxy()
-        .proxy(reqwest::Proxy::custom(move |url| resolve(url)))
+        .proxy(reqwest::Proxy::custom(move |url| for_client(url)))
         .build()
-        .map_err(|e| AppError::new("internal", e.to_string()))
+        .map_err(|e| AppError::new("internal", e.to_string()))?;
+    Ok((client, resolve))
 }
 
 /// 勾选前试调一个模型（[`provider::probe_model`]，等 [`provider::PROBE_TIMEOUT`]）。`target` 由
@@ -574,7 +491,7 @@ fn gateway_client() -> Result<reqwest::Client, AppError> {
 /// 「`provider_for_probe_in` → 这里」。错误代码：`invalid`、`auth`（401/403）、`network`（连不上、超时）、
 /// `upstream`（别的非 2xx）
 pub async fn probe_target(target: &crate::app::ProbeTarget) -> Result<(), AppError> {
-    let client = gateway_client()?;
+    let (client, resolve) = gateway_client()?;
     provider::probe_model(
         &client,
         &target.api_base,
@@ -582,6 +499,7 @@ pub async fn probe_target(target: &crate::app::ProbeTarget) -> Result<(), AppErr
         &target.model,
         &target.key,
         provider::PROBE_TIMEOUT,
+        proxied(&resolve, &target.api_base),
     )
     .await
     .map_err(|e| {
@@ -591,7 +509,7 @@ pub async fn probe_target(target: &crate::app::ProbeTarget) -> Result<(), AppErr
             provider::ProbeErrorKind::Network => "network",
             provider::ProbeErrorKind::Upstream => "upstream",
         };
-        AppError::new(code, e.message)
+        AppError::new(code, e.message).with_detail(e.detail)
     })
 }
 
@@ -607,20 +525,23 @@ pub async fn fetch_models_detailed(
     base_url: &str,
     key: &str,
 ) -> Result<(Vec<Model>, String), FetchFailure> {
-    let client = gateway_client().map_err(|error| FetchFailure {
+    let (client, resolve) = gateway_client().map_err(|error| FetchFailure {
         error,
         unreachable: None,
     })?;
-    match provider::fetch_models(&client, base_url, key, Duration::from_secs(10)).await {
+    let proxied = proxied(&resolve, base_url);
+    match provider::fetch_models(&client, base_url, key, Duration::from_secs(10), proxied).await {
         Ok(result) => Ok((result.models, result.api_base)),
         Err(e) => {
+            // 代码约定不变（docs/gateway-commands.md）：鉴权失败是 auth，其余都是 network；原因的细分在句子与
+            // 记在那一行上的种类里，技术原文跟在 `[detail]` 后面
             let code = if matches!(e.kind, provider::FetchErrorKind::Auth) {
                 "auth"
             } else {
                 "network"
             };
             Err(FetchFailure {
-                error: AppError::new(code, e.message),
+                error: AppError::new(code, e.message).with_detail(e.detail),
                 unreachable: Some(e.kind.unreachable()),
             })
         }
@@ -636,7 +557,7 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
-const USAGE: &str = "用法: Sophia gateway <命令> [--agent codex|claude]\n  run           运行本机路由（由登录后台服务调用）\n  status        当前状态（JSON；带 --agent 时只打印那一家；Claude 那一份带 profile 里写着的模型 profileModels）\n  doctor        诊断：设置、后台服务、端口、版本、最近日志\n  restore       移除本功能写入这一家的一切（界面不可用时应急）；两家都关了才卸载路由\n  enable        按已保存的网关和模型启用（界面不可用时应急）\n  provider-add  --url <地址> --key-env <环境变量名> [--sync]：新建一个网关，密钥从环境变量读，校验并拉取模型\n  select        --provider <网关 id> --models <m1,m2,…>：设这个网关的已选（覆盖）\n  probe         --provider <网关 id> --model <模型 id>：同界面勾选前的试调，通了打印 ok，不通打印原因并以 1 退出\n  restart       --agent claude：同界面的「重启生效」（在跑则退出→写→打开）\n  launch        --agent claude：同界面的「打开 Claude」（有待生效先写再打开）\n  adopt-key     把 agents-manager 钥匙串里的密钥复制到本功能的条目（密钥不显示）\n  --agent       作用于哪一家：codex（缺省）或 claude（Claude 桌面应用）"; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+const USAGE: &str = "用法: Sophia gateway <命令> [--agent codex|claude]\n  run           在前台运行本机路由（调试用；平时路由在 Sophia 进程里）\n  status        当前状态（JSON；带 --agent 时只打印那一家；Claude 那一份带 profile 里写着的模型 profileModels）\n  doctor        诊断：设置、路由、端口、版本、最近日志\n  restore       移除本功能写入这一家的一切（界面不可用时应急）\n  enable        按已保存的网关和模型启用（界面不可用时应急）\n  provider-add  --url <地址> --key-env <环境变量名> [--sync]：新建一个网关，密钥从环境变量读，校验并拉取模型\n  select        --provider <网关 id> --models <m1,m2,…>：设这个网关的已选（覆盖）\n  probe         --provider <网关 id> --model <模型 id>：同界面勾选前的试调，通了打印 ok，不通打印原因并以 1 退出\n  restart       --agent claude：同界面的「重启生效」（在跑则退出→写→打开）\n  launch        --agent claude：同界面的「打开 Claude」（有待生效先写再打开）\n  adopt-key     把 agents-manager 钥匙串里的密钥复制进 Sophia 的密钥文件（密钥不显示）\n  --agent       作用于哪一家：codex（缺省）或 claude（Claude 桌面应用）"; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
 
 /// `--agent codex|claude`，缺省 codex（保持文档里已写的含义）
 fn agent_flag(args: &[String]) -> Result<Option<Agent>, String> {
@@ -829,7 +750,11 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf, system_tags: fn() -> Vec<Strin
         }
     };
     let outcome = match (args.first().map(String::as_str), agent) {
-        (Some("run"), _) => run_router(&args[1..], saved_locale(store_dir, system_tags)),
+        (Some("run"), _) => run_router(
+            &args[1..],
+            &store_dir,
+            saved_locale(store_dir.clone(), system_tags),
+        ),
         (Some("status"), None) => serde_json::to_string_pretty(&build_app(store_dir).state())
             .map(|json| println!("{json}"))
             .map_err(|e| e.to_string()),
@@ -887,8 +812,6 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf, system_tags: fn() -> Vec<Strin
                     "已启用。重启 Codex 后，模型选择器里会同时出现官方模型和所选的第三方模型。"
                 );
             }),
-        // 预热用：什么都不做就退出，只为让系统对这份程序文件做完首次校验
-        (Some("warm"), _) => Ok(()),
         (Some("provider-add"), agent) => {
             provider_add(&build_app(store_dir), agent.unwrap_or(Agent::Codex), &args)
         }
@@ -916,7 +839,7 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf, system_tags: fn() -> Vec<Strin
         (Some("adopt-key"), _) => build_app(store_dir)
             .adopt_agents_manager_key()
             .map_err(|e| e.to_string())
-            .map(|id| eprintln!("已把 agents-manager 的密钥复制到网关 {id} 的钥匙串条目。")),
+            .map(|id| eprintln!("已把 agents-manager 的密钥复制到网关 {id}（存进 Sophia 的密钥文件）。")),
         _ => Err(USAGE.to_owned()),
     };
     match outcome {
@@ -946,66 +869,92 @@ pub fn saved_locale(store_dir: PathBuf, system_tags: fn() -> Vec<String>) -> Loc
     })
 }
 
-fn run_router(args: &[String], locale: LocaleSource) -> Result<(), String> {
+type FetchKey = Box<dyn Fn(&str) -> Result<Option<String>, KeyStoreError> + Send + Sync>;
+
+/// 路由按家缓存的服务商密钥（spec 非功能需求）：每家网关各自缓存 `ttl`。
+/// 文件里确认没有（`Ok(None)`）才清掉缓存；读不出、格式损坏时照用已缓存的值（过期了也用），
+/// 免得文件一时读不出就让正在用的模型全部失败（AC7）
+struct CachedKeys {
+    fetch: FetchKey,
+    ttl: Duration,
+    now: Box<dyn Fn() -> Instant + Send + Sync>,
+    state: Mutex<std::collections::HashMap<String, (String, Instant)>>,
+}
+
+impl CachedKeys {
+    fn new(
+        fetch: impl Fn(&str) -> Result<Option<String>, KeyStoreError> + Send + Sync + 'static,
+        ttl: Duration,
+        now: impl Fn() -> Instant + Send + Sync + 'static,
+    ) -> Self {
+        CachedKeys {
+            fetch: Box::new(fetch),
+            ttl,
+            now: Box::new(now),
+            state: Mutex::new(Default::default()),
+        }
+    }
+
+    fn get(&self, provider_id: &str) -> Result<String, String> {
+        let now = (self.now)();
+        if let Some((value, expires_at)) = self.state.lock().unwrap().get(provider_id) {
+            if now < *expires_at {
+                return Ok(value.clone());
+            }
+        }
+        // 读文件时不占着锁：一家慢不拖住别家
+        let fetched = (self.fetch)(provider_id);
+        let mut state = self.state.lock().unwrap();
+        match fetched {
+            Ok(Some(value)) => {
+                state.insert(provider_id.to_owned(), (value.clone(), now + self.ttl));
+                Ok(value)
+            }
+            Ok(None) => {
+                state.remove(provider_id);
+                Err(sophia_core::t!("models.app.noKey"))
+            }
+            Err(error) => match state.get(provider_id) {
+                Some((value, _)) => Ok(value.clone()),
+                None => Err(error.to_string()),
+            },
+        }
+    }
+}
+
+/// `gateway run`：在前台运行路由（调试用；平时路由在 Sophia 进程里）。清单、日志的位置缺省同界面进程，
+/// 参数里给了就用参数的（旧版本 launchd 服务的启动参数仍能跑）
+fn run_router(args: &[String], store_dir: &Path, locale: LocaleSource) -> Result<(), String> {
     let port: u16 = flag(args, "--port")
-        .unwrap_or("47328")
-        .parse()
+        .map_or(
+            Ok(sophia_core::codex_models::settings::DEFAULT_PORT),
+            str::parse,
+        )
         .map_err(|_| "端口不合法".to_owned())?; // i18n-exempt: 网关命令行的参数错误，只在终端出现，不进界面
-                                                // 旧版本装的后台服务启动参数里带着唯一的上游；新清单里上游写在清单里，这两个参数可以没有
-    let third_party_url = flag(args, "--third-party-url")
-        .unwrap_or_default()
-        .to_owned();
-    let routing_catalog_path =
-        PathBuf::from(flag(args, "--routing-catalog").ok_or("需要 --routing-catalog")?); // i18n-exempt: 网关命令行的参数错误，只在终端出现，不进界面
+    let (routing, claude_routing, log) = router_paths(store_dir);
     let protocol = if flag(args, "--protocol") == Some("responses") {
         Protocol::Responses
     } else {
         Protocol::Chat
     };
-    // 密钥按请求取并短时缓存：改密钥不用重启路由，错误不缓存。两家各一份缓存、各用各的账户（R4）
-    let cached_for = |agent: Agent| {
-        keychain::CachedKeys::new(
-            move |provider: &str| {
-                keychain::get_provider_key(
-                    &keychain::security_runner(),
-                    KEYCHAIN_SERVICE,
-                    key_account(agent),
-                    provider,
-                )
-            },
-            Duration::from_secs(30),
-            Instant::now,
-        )
-    };
-    let (codex_keys, claude_keys) = (cached_for(Agent::Codex), cached_for(Agent::Claude));
-    // 旧版本装的后台服务没有这个参数：Claude 命名空间的请求一律 404（R10）
-    let claude_routing_path = flag(args, "--claude-routing").map(PathBuf::from);
+    let (third_party_key, router_token) = router_secrets(store_dir);
     let router = Router::new(Config {
-        third_party_url,
+        // 旧版本装的后台服务启动参数里带着唯一的上游；新清单里上游写在清单里，这个参数可以没有
+        third_party_url: flag(args, "--third-party-url")
+            .unwrap_or_default()
+            .to_owned(),
         third_party_protocol: protocol,
         chatgpt_url: String::new(),
         openai_url: String::new(),
-        routing_catalog_path,
-        activity_log_path: flag(args, "--log").map(PathBuf::from),
-        third_party_key: Arc::new(move |agent, provider| {
-            match agent {
-                Agent::Codex => codex_keys.get(provider),
-                Agent::Claude => claude_keys.get(provider),
-            }
-            .map_err(key_error)
-        }),
+        routing_catalog_path: flag(args, "--routing-catalog").map_or(routing, PathBuf::from),
+        activity_log_path: Some(flag(args, "--log").map_or(log, PathBuf::from)),
+        third_party_key,
         max_body_bytes: 0,
         proxy: Some(system_proxy()),
-        claude_routing_path,
-        // 令牌的缓存与「比对不上时重读」由路由自己做
-        router_token: Arc::new(|| {
-            keychain::get_key(
-                &keychain::security_runner(),
-                KEYCHAIN_SERVICE,
-                keychain::ROUTER_TOKEN_ACCOUNT,
-            )
-            .map_err(key_error)
-        }),
+        claude_routing_path: Some(
+            flag(args, "--claude-routing").map_or(claude_routing, PathBuf::from),
+        ),
+        router_token,
         keepalive: Duration::ZERO,
         locale: Some(locale),
     })?;
@@ -1017,7 +966,7 @@ fn run_router(args: &[String], locale: LocaleSource) -> Result<(), String> {
         // 只监听回环地址；路由内部还会再按来源地址和 Host 拒绝一次
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
             .await
-            .map_err(|e| format!("监听 127.0.0.1:{port} 失败: {e}"))?; // i18n-exempt: 网关命令行（launchd 拉起）的启动错误，输出进日志，不进界面
+            .map_err(|e| format!("监听 127.0.0.1:{port} 失败: {e}"))?; // i18n-exempt: 网关命令行的启动错误，只在终端出现，不进界面
         eprintln!("路由已启动: http://127.0.0.1:{port}/v1");
         router.serve(listener).await.map_err(|e| e.to_string())
     })
@@ -1070,8 +1019,7 @@ fn doctor_claude(app: &App, store_dir: &Path) {
         println!("问题: {}", view.conflict);
     }
     println!(
-        "路由后台服务已安装: {}；端口 {} 上运行中: {}",
-        yes_no(state.router.installed),
+        "路由（在 Sophia 进程里）端口 {} 上运行中: {}",
         state.router.port,
         yes_no(state.router.running)
     );
@@ -1091,11 +1039,23 @@ fn doctor_claude(app: &App, store_dir: &Path) {
             provider.id,
             provider.base_url,
             provider.protocol,
-            yes_no(provider.has_key),
+            key_text(provider),
             selected.join(", ")
         );
     }
     print_router_log(store_dir);
+}
+
+/// doctor 里「密钥已保存」一栏：是 / 否 / 读不出时带原因（R4）
+fn key_text(provider: &ProviderView) -> String {
+    match provider.key {
+        KeyStatus::Set => "是".to_owned(), // i18n-exempt: doctor 是网关命令行的诊断输出，只在终端出现，不进界面
+        KeyStatus::Missing => "否".to_owned(), // i18n-exempt: 同上
+        KeyStatus::Unreadable => format!(
+            "读不出（{}）", // i18n-exempt: 同上
+            provider.key_problem.as_deref().unwrap_or_default()
+        ),
+    }
 }
 
 fn print_router_log(store_dir: &Path) {
@@ -1127,8 +1087,7 @@ fn doctor(app: &App, store_dir: &Path) {
         );
     }
     println!(
-        "路由后台服务已安装: {}；端口 {} 上运行中: {}",
-        yes_no(state.router.installed),
+        "路由（在 Sophia 进程里）端口 {} 上运行中: {}",
         state.router.port,
         yes_no(state.router.running)
     );
@@ -1162,7 +1121,7 @@ fn doctor(app: &App, store_dir: &Path) {
             provider.id,
             provider.base_url,
             provider.protocol,
-            yes_no(provider.has_key),
+            key_text(provider),
             selected.join(", ")
         );
     }
@@ -1192,83 +1151,6 @@ mod tests {
             earliest_codex_start("05:00 /opt/homebrew/bin/codex\n", 1000),
             None
         );
-    }
-
-    /// AC28 的判据：内容没变不复制；内容变了才复制并报告已更新；只是修改时间变了不算更新
-    #[test]
-    fn install_binary_copies_only_when_content_changes() {
-        let dir = tempfile::tempdir().unwrap();
-        let (source, dest) = (
-            dir.path().join("source"),
-            dir.path().join("bin").join("Sophia"),
-        );
-        std::fs::write(&source, b"v1").unwrap();
-        assert!(install_binary_from(&source, &dest).unwrap());
-        assert_eq!(std::fs::read(&dest).unwrap(), b"v1");
-        assert!(!install_binary_from(&source, &dest).unwrap());
-        // 重写同样的内容（修改时间变了，内容没变）
-        std::thread::sleep(Duration::from_millis(20));
-        std::fs::write(&source, b"v1").unwrap();
-        assert!(!install_binary_from(&source, &dest).unwrap());
-        std::fs::write(&source, b"v2!").unwrap();
-        assert!(install_binary_from(&source, &dest).unwrap());
-        assert_eq!(std::fs::read(&dest).unwrap(), b"v2!");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
-                0o755
-            );
-        }
-    }
-
-    /// 独立验证发现：记录的指纹对得上时完全信任副本，副本被截断也不会修；固定的临时文件名还可能被人预先放一个软链
-    #[test]
-    fn install_binary_repairs_a_damaged_copy_and_ignores_planted_temp_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let (source, dest) = (
-            dir.path().join("source"),
-            dir.path().join("bin").join("Sophia"),
-        );
-        std::fs::write(&source, b"version-1").unwrap();
-        assert!(install_binary_from(&source, &dest).unwrap());
-        std::fs::write(&dest, b"").unwrap(); // 副本被截断
-        assert!(
-            install_binary_from(&source, &dest).unwrap(),
-            "损坏的副本应当被修复"
-        );
-        assert_eq!(std::fs::read(&dest).unwrap(), b"version-1");
-
-        #[cfg(unix)]
-        {
-            let victim = dir.path().join("victim");
-            std::fs::write(&victim, b"do not touch").unwrap();
-            std::os::unix::fs::symlink(&victim, dest.with_extension("tmp")).unwrap();
-            std::fs::write(&source, b"version-2").unwrap();
-            assert!(install_binary_from(&source, &dest).unwrap());
-            assert_eq!(
-                std::fs::read(&victim).unwrap(),
-                b"do not touch",
-                "不能顺着别人放的软链写出去"
-            );
-            assert!(!std::fs::symlink_metadata(&dest)
-                .unwrap()
-                .file_type()
-                .is_symlink());
-            assert_eq!(std::fs::read(&dest).unwrap(), b"version-2");
-        }
-    }
-
-    /// R9：从 `/_health` 读出 features；旧版路由没有这个字段 → 空；不是本功能的路由 → Err
-    #[test]
-    fn health_features_are_read_from_the_body() {
-        let new = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n{\"ok\":true,\"service\":\"sophia-gateway\",\"features\":[\"claude\"]}";
-        assert_eq!(health_features(new).unwrap(), ["claude"]);
-        let old = "HTTP/1.1 200 OK\r\n\r\n{\"ok\":true,\"service\":\"sophia-gateway\"}";
-        assert!(health_features(old).unwrap().is_empty());
-        assert!(health_features("HTTP/1.0 200 OK\r\n\r\n{\"ok\":true}").is_err());
-        assert!(health_features("garbage").is_err());
     }
 
     /// `--agent` 缺省 codex；写错的报出来
@@ -1453,61 +1335,96 @@ mod tests {
         assert!(err.contains("gpt-9") && err.contains("ap"), "{err}");
     }
 
-    /// 界面进程的钥匙串缓存：有值与「没有」都缓存 30 秒，写 / 删时失效；其他错误不缓存
+    /// 路由的密钥缓存：每家各自缓存 30 秒；文件里确认没有才清，读不出 / 损坏时照用缓存（AC7）
     #[test]
-    fn key_cache_remembers_presence_and_forgets_on_write() {
-        let cache = KeyCache::new();
-        let calls = std::cell::Cell::new(0);
-        let fetch = |value: Result<&str, keychain::KeyError>| {
-            calls.set(calls.get() + 1);
-            value.map(str::to_owned)
-        };
-        assert_eq!(
-            cache.get("a", || fetch(Ok("k"))).unwrap().as_deref(),
-            Some("k")
+    fn cached_keys_survive_an_unreadable_file_but_not_a_removed_key() {
+        type Answer = Result<Option<String>, KeyStoreError>;
+        let answer: Arc<Mutex<Answer>> = Arc::new(Mutex::new(Ok(Some("sk-a-1234567".into()))));
+        let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+        let now = Arc::new(Mutex::new(Instant::now()));
+        let cache = CachedKeys::new(
+            {
+                let (answer, calls) = (answer.clone(), calls.clone());
+                move |id: &str| {
+                    calls.lock().unwrap().push(id.to_owned());
+                    answer.lock().unwrap().clone()
+                }
+            },
+            Duration::from_secs(30),
+            {
+                let now = now.clone();
+                move || *now.lock().unwrap()
+            },
         );
+        assert_eq!(cache.get("a").unwrap(), "sk-a-1234567");
+        assert_eq!(cache.get("a").unwrap(), "sk-a-1234567");
+        assert_eq!(*calls.lock().unwrap(), ["a"], "30 秒内只读一次");
+
+        // 文件读不出、格式损坏：缓存过期了也照用
+        *now.lock().unwrap() += Duration::from_secs(31);
+        *answer.lock().unwrap() = Err(KeyStoreError::Unreadable("Permission denied".into()));
+        assert_eq!(cache.get("a").unwrap(), "sk-a-1234567");
+        *answer.lock().unwrap() = Err(KeyStoreError::Corrupt);
+        assert_eq!(cache.get("a").unwrap(), "sk-a-1234567");
+        // 从没读到过的那一家：报读不出的原因
         assert_eq!(
-            cache.get("a", || fetch(Ok("other"))).unwrap().as_deref(),
-            Some("k")
+            cache.get("b").unwrap_err(),
+            KeyStoreError::Corrupt.to_string()
         );
-        assert_eq!(
-            cache
-                .get("b", || fetch(Err(keychain::KeyError::NotSet)))
-                .unwrap(),
-            None
-        );
-        assert_eq!(cache.get("b", || fetch(Ok("late"))).unwrap(), None);
-        assert_eq!(calls.get(), 2);
-        cache.forget("b");
-        assert_eq!(
-            cache.get("b", || fetch(Ok("late"))).unwrap().as_deref(),
-            Some("late")
-        );
-        assert!(cache
-            .get("c", || fetch(Err(keychain::KeyError::Command(
-                "locked".into()
-            ))))
-            .is_err());
-        assert_eq!(
-            cache.get("c", || fetch(Ok("now"))).unwrap().as_deref(),
-            Some("now")
-        );
-        assert_eq!(calls.get(), 5);
+
+        // 确认没有了（用户删了密钥）：清掉缓存，之后不再用旧值
+        *answer.lock().unwrap() = Ok(None);
+        assert!(cache.get("a").is_err());
+        *answer.lock().unwrap() = Err(KeyStoreError::Corrupt);
+        assert!(cache.get("a").is_err());
     }
 
-    /// 健康检查必须认身份：端口上是别的程序时不算健康
+    /// 编排层眼里的两种说不出密钥：没有（Ok(None)）、文件读不出
     #[test]
-    fn router_health_requires_our_service_name() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten().take(40) {
-                let mut stream = stream;
-                let mut buf = [0u8; 512];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(b"HTTP/1.0 200 OK\r\n\r\n{\"ok\":true}");
-            }
-        });
-        assert!(router_healthy_within(port, Duration::from_millis(600)).is_err());
+    fn key_file_explains_why_a_key_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let file = KeyFile::new(&root, false);
+        assert_eq!(file.get(Agent::Codex, "a").unwrap(), None);
+        assert_eq!(file.token().unwrap(), None);
+        file.set(Agent::Codex, "a", "sk-again-1234567").unwrap();
+        assert_eq!(
+            file.get(Agent::Codex, "a").unwrap().as_deref(),
+            Some("sk-again-1234567")
+        );
+
+        std::fs::write(file.keys.path(), b"{\"version\":1,").unwrap();
+        assert_eq!(
+            file.get(Agent::Codex, "a").unwrap_err(),
+            KeyStoreError::Corrupt.to_string()
+        );
+        // 命令行进程不另存损坏的文件，写也写不进去
+        assert!(file.set(Agent::Codex, "b", "sk-new-12345678").is_err());
+        assert!(file.keys.path().exists());
+    }
+
+    /// R5 / AC3：界面进程把损坏的文件另存，之后「没有」的几家说明原因；填了的那家就是有
+    #[test]
+    fn the_ui_sets_a_corrupt_file_aside_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::write(root.join("secrets.json"), b"{\"version\":1,\"provi").unwrap();
+        let file = KeyFile::new(&root, true);
+        file.repair();
+        let broken: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with("secrets.json.broken-"))
+            .collect();
+        assert_eq!(broken.len(), 1);
+        assert_eq!(
+            std::fs::read(root.join(&broken[0])).unwrap(),
+            b"{\"version\":1,\"provi"
+        );
+        let repaired = sophia_core::t!("models.secrets.repaired");
+        assert_eq!(file.get(Agent::Codex, "a").unwrap_err(), repaired);
+        file.set(Agent::Codex, "a", "sk-again-1234567").unwrap();
+        assert!(file.get(Agent::Codex, "a").unwrap().is_some());
+        assert_eq!(file.get(Agent::Claude, "b").unwrap_err(), repaired);
     }
 }

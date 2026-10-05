@@ -40,16 +40,19 @@ test("1A 语言名写成各自的自称，换了界面语言也不变；只有�
   }
 });
 
-test("1A 界面语言一行：标签 + 紧凑页签（原样显示，不转大写）+ 说明句；选中的那项亮着；读屏名写明", () => {
+test("1A 界面语言一行：设置行，标签与说明句在左、紧凑页签在右（原样显示，不转大写）；选中的那项亮着；读屏名写明", () => {
   const html = render(LanguageRow, { value: "zh-Hant", onChange: () => undefined });
   assert.match(html, /settings-page__label">界面语言</);
+  // 名字与说明句在左栏，页签在右端一列（2026-10-04 画板 B）
+  assert.ok(html.indexOf("settings-page__text") < html.indexOf("settings-page__controls"));
+  assert.ok(html.indexOf("settings-page__controls") < html.indexOf("ss-tabs--compact"));
   assert.match(html, /aria-label="界面语言"/);
   assert.match(html, /ss-tabs--compact/);
   assert.doesNotMatch(html, /ss-cap/);
   assert.match(html, /aria-current="page"[^>]*>繁體中文</);
   assert.match(
     html,
-    /settings-page__hint">部分系统控件（如选文件夹对话框的按钮）跟随 macOS 的语言</,
+    /settings-page__note">部分系统控件（如选文件夹对话框的按钮）跟随 macOS 的语言</,
   );
   setLocale("en");
   try {
@@ -86,19 +89,18 @@ test("外观一行：标签「外观」+ 紧凑页签（原样显示，不转大
   assert.doesNotMatch(html, /<svg/);
 });
 
-test("设置页：「界面」是第一节（在「列表里的 agent」之前），两行：语言在上、外观在下；外观读自 core、改了当场写，写不成读回原样", () => {
+test("设置页：「通用」是第一节（在「列表里的 agent」之前），语言在上、外观在下；外观读自 core、改了当场写，写不成读回原样", () => {
   const src = withCopy(
     readFileSync(new URL("../src/pages/SettingsPage.tsx", import.meta.url), "utf8"),
   );
-  assert.match(src, /<SectionLabel rule>界面<\/SectionLabel>/);
-  assert.ok(
-    src.indexOf("界面</SectionLabel>") < src.search(/<SectionLabel rule>\s*列表里的 agent/),
-  );
-  // 节序（画板 1A）：界面 → 界面语言 → 外观 → 列表里的 agent
+  // 节小标下不画线（2026-10-04 画板 B）
+  assert.match(src, /<SectionLabel>通用<\/SectionLabel>/);
+  assert.doesNotMatch(src, /<SectionLabel rule/);
+  // 节序（画板 1A、B）：通用 → 界面语言 → 外观 → 列表里的 agent
   const at = (re: RegExp) => src.search(re);
-  assert.ok(at(/界面<\/SectionLabel>/) < at(/<LanguageRow /));
+  assert.ok(at(/通用<\/SectionLabel>/) < at(/<LanguageRow /));
   assert.ok(at(/<LanguageRow /) < at(/<AppearanceRow /));
-  assert.ok(at(/<AppearanceRow /) < at(/<SectionLabel rule>\s*列表里的 agent/));
+  assert.ok(at(/<AppearanceRow /) < at(/<SectionLabel>\s*列表里的 agent/));
   assert.match(src, /<AppearanceRow value=\{appearance\} onChange=\{/);
   assert.match(src, /api\.appearance\(\)/);
   assert.match(src, /api\.setAppearance\(next\)/);

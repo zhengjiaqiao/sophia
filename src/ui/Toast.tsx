@@ -4,19 +4,24 @@ import { formatRich, listText, locale, t, tn, tRich, type MessageKey } from "../
 import { AgentIcon } from "./AgentIcon.tsx";
 import { Button, IconButton } from "./Button.tsx";
 import { BusySlot, BusyToast } from "./BusySlot.tsx";
-import { ToastRelayoutContext } from "./FloatingToast.tsx";
+import { ToastPlacementContext, ToastRelayoutContext } from "./FloatingToast.tsx";
 import { IconAttention, IconCannot, IconClose, IconTick } from "./icons.tsx";
 import { motionMs } from "./motion.ts";
 import { sentencePieces } from "./sentence.tsx";
 
-/// 提示小窗（DESIGN「反馈的两种形态」「提示条分两档」，画板 Feedback「提示条」）。
+/// 提示小窗（DESIGN「反馈的两种形态」，DESIGN-components「提示条 Toast」，画板 Feedback「提示条」）。
 ///
-/// **浮起的小窗只表示一件事：会自己消失。** 两档，严重程度决定打断程度（①）：
-/// - `routine` 成功：纸窗（`paper` + 1px `hairline` 边 + `float` 12 圆角 + 浮层投影），单行高 32：
-///   `✓ 写进 [图标] 名字 · 撤销`（`撤销` 是默认键紧凑 24；句首 ✓ 是勾选框里同一枚对勾 `IconTick`）
-/// - `notice` 做不成 / 部分失败：同一种纸窗，左侧 40px 记号栏放 ✓ / ⊘ / !；动作是默认键紧凑。
-///   墨色浮窗只给提示框（2026-09-25 起）：失败与成功靠句首记号与否定动词分，不靠颜色。
-///   哪一档由 `kind` 定（成功单行纸窗、其余带记号栏），没有第二个开关
+/// **浮起的小窗只表示一件事：会自己消失。** 两种长相，**由出在哪定，不由 kind 定**（2026-10-04 产品负责人：
+/// 「toast 拆分两种，一种是在锚点位置出的，用轻量级的，一种是全局页面的，在页面右下角出，用带记号栏的」）：
+/// - 锚点（`FloatingToast` 里，routine 档）：成功、做不成、部分失败都是轻量一行纸窗（`paper` + 1px `hairline` 边 +
+///   `float` 12 圆角 + 浮层投影），单行高 32、最宽 420；状态记号在句首：✓（勾选框里同一枚 `IconTick`）/ ⊘ / !。
+///   键行内（` · 撤销`），失败的 × 在最后。放不下、或有副行（路径）时折成两行：记号自成一格，
+///   第二行（读数 / 路径）缩进到记号之后，与整句的字对齐
+/// - 右下（`CornerToast` / `ToastStack` 里，notice 档）：都带左侧 40px 记号栏（✓ / ⊘ / !），宽 ≤ 400
+///
+/// 位置由外壳经 `ToastPlacementContext` 给，调用方不传；不在任何外壳里（测试、画廊）按锚点档。
+/// 墨色浮窗只给提示框（2026-09-25 起）：失败与成功靠句首记号与否定动词分，不靠颜色。
+/// 提示条里不放可展开的内容（2026-10-04 产品负责人）。
 ///
 /// 文字一律 13（`caption`）：动词 600、名字 400、数字 12 tabular——比表格正文 15 低一档，
 /// 反馈永远不比它说的内容更重（②）。主行 = **动词 + agent 图标 + 名字**；动词与触发它的动作一致。
@@ -76,7 +81,7 @@ export interface ToastAction {
 }
 
 export interface ToastProps {
-  /// 成功是单行纸窗；做不成、部分失败带左侧记号栏
+  /// 成功、做不成、部分失败：定句首（或记号栏里）的记号、停留时长与读屏的紧急程度；长相由位置定
   kind: ToastKind;
   /// 主行整句（目录键）：值里 `{agents}` 是 agent 图标组、`{names}` 是名字（没有名字时是 `reading`）。
   /// 做不成 / 部分失败各有各的句子（`名字 加到 [图标] 失败`）。只给 `message` 时可以不给
@@ -100,10 +105,8 @@ export interface ToastProps {
   trail?: string[];
   /// 做不成 / 部分失败的一句能行动的原因，接在主行 ` · ` 后
   reason?: string;
-  /// 副行：等宽 12 读数（路径、条数，`ink-faint`），可拖选
+  /// 副行：等宽 12 读数（路径、条数，`ink-mute`），可拖选
   stats?: string;
-  /// 副行之下的展开内容（删原件的后果示意图与铭牌）；只给 notice
-  detail?: ReactNode;
   /// 默认键紧凑 24。`撤销`
   action?: ToastAction;
   /// 次要的离开 Sophia 的动作：浅键，末尾自动带 ↗（`在访达中显示备份`）
@@ -112,15 +115,13 @@ export interface ToastProps {
   onDismiss?: () => void;
   /// 停留时长（毫秒）；不给按 kind 与有没有动作取（见 `TOAST_DWELL_MS`）
   dwellMs?: number;
-  /// notice 右端的 ×。busy 期间照常可用
+  /// 右端的 ×（锚点档在键之后，右下档在键区末尾）。busy 期间照常可用
   onClose?: () => void;
 }
 
-/// 记号栏：只有做不成与部分失败有（成功是单行纸窗，句首 ✓）
-const INDICATOR: Record<
-  Exclude<ToastKind, "success">,
-  { titleKey: MessageKey; glyph: ReactNode }
-> = {
+/// 状态记号：锚点档放在句首，右下档放在记号栏里——同一枚，只差放在哪
+const MARK: Record<ToastKind, { titleKey: MessageKey; glyph: ReactNode }> = {
+  success: { titleKey: "toast.success.mark", glyph: <IconTick /> },
   cannot: { titleKey: "toast.indicator.cannot", glyph: <IconCannot /> },
   partial: { titleKey: "toast.indicator.partial", glyph: <IconAttention /> },
 };
@@ -254,36 +255,55 @@ function ActionKeys({ action, secondary }: Pick<ToastProps, "action" | "secondar
   );
 }
 
-/// 例行一条（成功）的内容，两种排法（第三批画板 8A）：
-/// - 一行（`wrapped` 为 false，放得下最宽 420 时；简体的短句都是这种）：`flat`——✓、整句、` · 读数`——之后接
-///   ` · ` 与键，都是纸窗根下的兄弟，与改版前逐字相同
-/// - 两行（放不下时）：整句一行（`line`）；读数（`trail`）换到第二行，12 `ink-mute`，段间 ` · `、不带句首的点；
-///   键在右侧、跨两行上下居中
+/// 右端的 ×（提示框「关闭」）
+function CloseKey({ onClose }: { onClose: () => void }) {
+  return <IconButton icon={<IconClose />} title={t("common.close")} onClick={onClose} />;
+}
+
+/// 锚点档（轻量一行）的内容，两种排法（第三批画板 8A；2026-10-04 起三种 kind 共用）：
+/// - 一行（`wrapped` 为 false，放得下最宽 420 时；简体的短句都是这种）：记号、`flat`——整句、` · 读数` / ` · 原因`——之后接
+///   ` · ` 与键、×，都是纸窗根下的兄弟（成功的与改版前逐字相同）
+/// - 两行（放不下、或有副行时）：记号自成一格；整句一行（`line`）；读数（`trail`）或路径（`stats`）换到第二行，
+///   12 `ink-mute`，与整句的字对齐（缩在记号之后）；键与 × 在右侧、跨两行上下居中
 export function RoutineLines({
   wrapped,
+  mark,
   flat,
   line,
   trail,
+  stats,
   action,
   secondary,
+  onClose,
 }: {
   wrapped: boolean;
+  mark?: ReactNode;
   flat: ReactNode;
   line: ReactNode;
   trail?: string[];
+  stats?: string;
   action?: ToastAction;
   secondary?: ToastAction;
+  onClose?: () => void;
 }) {
+  const close = onClose ? (
+    <span className="ss-toast__close">
+      <CloseKey onClose={onClose} />
+    </span>
+  ) : null;
   if (!wrapped)
     return (
       <>
+        {mark}
         {flat}
         {action ? <span className="ss-toast__sep">·</span> : null}
         <ActionKeys action={action} secondary={secondary} />
+        {close}
       </>
     );
   return (
     <>
+      {mark}
       <span className="ss-toast__line">{line}</span>
       {trail?.length ? (
         <span className="ss-toast__trailline">
@@ -295,9 +315,11 @@ export function RoutineLines({
           ))}
         </span>
       ) : null}
-      {action || secondary ? (
+      {stats ? <div className="ss-toast__stats ss-selectable">{stats}</div> : null}
+      {action || secondary || close ? (
         <span className="ss-toast__keys">
           <ActionKeys action={action} secondary={secondary} />
+          {close}
         </span>
       ) : null}
     </>
@@ -318,7 +340,6 @@ function ResultToast(props: ToastProps) {
     trail,
     reason,
     stats,
-    detail,
     action,
     secondary,
     onDismiss,
@@ -365,8 +386,13 @@ function ResultToast(props: ToastProps) {
     : {};
   const leavingClass = leaving ? " is-leaving" : "";
 
-  // 例行一条放不下最宽 420 时折成两行（画板 8A）：先按一行画，挂上之后量一次，横向溢出才折。记下是为哪一份内容
-  // 折的——内容（或界面语言）换了就回到一行重量。折了之后请浮起外壳按新尺寸再定一次位（它在同一刻按一行量过）
+  // 出在哪定长相：锚点轻量一行，右下带记号栏（外壳给，调用方不传）
+  const placement = useContext(ToastPlacementContext);
+  const anchored = placement === "anchored";
+
+  // 锚点档放不下最宽 420 时折成两行（画板 8A）：先按一行画，挂上之后量一次，横向溢出才折。记下是为哪一份内容
+  // 折的——内容（或界面语言）换了就回到一行重量。折了之后请浮起外壳按新尺寸再定一次位（它在同一刻按一行量过）。
+  // 有副行（路径）的一开始就是两行
   const boxRef = useRef<HTMLDivElement>(null);
   const relayout = useContext(ToastRelayoutContext);
   const fit = [
@@ -381,10 +407,10 @@ function ResultToast(props: ToastProps) {
     secondary?.label,
   ].join("\u0000");
   const [wrappedFor, setWrappedFor] = useState<string | null>(null);
-  const wrapped = kind === "success" && wrappedFor === fit;
+  const wrapped = anchored && (Boolean(stats) || wrappedFor === fit);
   useLayoutEffect(() => {
     const el = boxRef.current;
-    if (kind !== "success" || wrapped || !el) return;
+    if (!anchored || wrapped || !el) return;
     if (el.scrollWidth > el.clientWidth) {
       setWrappedFor(fit);
       relayout?.();
@@ -424,32 +450,36 @@ function ResultToast(props: ToastProps) {
     </>
   );
 
-  if (kind === "success") {
-    const mark = (
-      <span className="ss-toast__mark" title={t("toast.success.mark")} aria-hidden="true">
-        <IconTick />
-      </span>
-    );
+  const { titleKey, glyph } = MARK[kind];
+  const role = kind === "success" ? "status" : "alert";
+
+  if (anchored) {
+    // 句首记号：成功的 ✓ 只是装饰（整句已说成了）；失败的 ⊘ / ! 给读屏一个名字
+    const mark =
+      kind === "success" ? (
+        <span className="ss-toast__mark" title={t(titleKey)} aria-hidden="true">
+          {glyph}
+        </span>
+      ) : (
+        <span className="ss-toast__mark" title={t(titleKey)} role="img" aria-label={t(titleKey)}>
+          {glyph}
+        </span>
+      );
     return (
       <div
         ref={boxRef}
         className={`ss-toast ss-toast--routine${wrapped ? " is-wrapped" : ""}${leavingClass}`}
         data-kind={kind}
-        role="status"
+        role={role}
         {...holdHandlers}
       >
         <RoutineLines
           wrapped={wrapped}
-          flat={
-            <>
-              {mark}
-              {main}
-            </>
-          }
+          mark={mark}
+          flat={main}
           line={
             wrapped ? (
               <>
-                {mark}
                 {message !== undefined ? (
                   <span className="ss-toast__message">{message}</span>
                 ) : null}
@@ -460,29 +490,25 @@ function ResultToast(props: ToastProps) {
             ) : null
           }
           trail={trail}
+          stats={stats}
           action={action}
           secondary={secondary}
+          onClose={onClose}
         />
       </div>
     );
   }
 
-  const indicator = INDICATOR[kind];
-  // 走到这里的都是做不成 / 部分失败
+  // 右下：左侧 40 记号栏（✓ / ⊘ / !）
   return (
     <div
-      className={`ss-toast ss-toast--notice${detail ? " has-detail" : ""}${leavingClass}`}
+      className={`ss-toast ss-toast--notice${leavingClass}`}
       data-kind={kind}
-      role="alert"
+      role={role}
       {...holdHandlers}
     >
-      <div
-        className="ss-toast__indicator"
-        title={t(indicator.titleKey)}
-        role="img"
-        aria-label={t(indicator.titleKey)}
-      >
-        {indicator.glyph}
+      <div className="ss-toast__indicator" title={t(titleKey)} role="img" aria-label={t(titleKey)}>
+        {glyph}
       </div>
       <div className="ss-toast__body">
         <div className="ss-toast__main">
@@ -490,14 +516,11 @@ function ResultToast(props: ToastProps) {
           {action || secondary || onClose ? (
             <span className="ss-toast__actions">
               <ActionKeys action={action} secondary={secondary} />
-              {onClose ? (
-                <IconButton icon={<IconClose />} title={t("common.close")} onClick={onClose} />
-              ) : null}
+              {onClose ? <CloseKey onClose={onClose} /> : null}
             </span>
           ) : null}
         </div>
         {stats ? <div className="ss-toast__stats ss-selectable">{stats}</div> : null}
-        {detail ? <div className="ss-toast__detail">{detail}</div> : null}
       </div>
     </div>
   );

@@ -16,9 +16,9 @@
 //! 文件是文本级手术：JSON 只切掉那一个成员，TOML 只删属于它的那几行，写前按语义核对
 //! 「除了拿掉的那一项，其余一模一样」，对不上整个文件不写。
 use super::{
-    agents::dialect_of, backup, is_supported_transport, location_unreadable, parse_json,
-    parse_toml, read, toml, Canonical, McpAutoImportRule, McpLocation, McpOverview, McpReport,
-    McpReportEntry, Parsed, State,
+    agents::dialect_of, backup, backup_failed_message, is_supported_transport, location_unreadable,
+    parse_json, parse_toml, read, toml, write_failed_message, Canonical, McpAutoImportRule,
+    McpLocation, McpOverview, McpReport, McpReportEntry, Parsed, State,
 };
 use crate::atomicfile::{self, FileState};
 use crate::fs::normalize;
@@ -481,6 +481,7 @@ pub fn plan_remove(
 /// 才拿掉，改过的、来源里已经没有的跳过并如实报告；同一个文件的几项一次备份、一次原子写。
 /// 然后从订阅记录里删掉它，撤掉它往本位置写的自动添加规则。来源本身一概不动。
 /// 有没拿掉的也照样删记录：下次扫描若还有一致的副本，它会被重新认领——如实反映
+/// 改写前的备份放进 `backups`（Sophia 的备份目录，见 `atomicfile::backup`）
 pub fn remove(
     key: &str,
     source_id: &str,
@@ -488,6 +489,7 @@ pub fn remove(
     locations: &[McpLocation],
     subs: &mut McpSubscriptions,
     rules: &mut Vec<McpAutoImportRule>,
+    backups: &Path,
 ) -> Result<McpReport, String> {
     let (source, here) = removable(key, source_id, locations)?;
     let mut report = McpReport::default();
@@ -522,7 +524,7 @@ pub fn remove(
             );
             continue;
         };
-        remove_group(&path, source, from, &group, &mut report);
+        remove_group(&path, source, from, &group, backups, &mut report);
     }
 
     if let Some(set) = subs.get_mut(key) {
@@ -553,6 +555,7 @@ fn remove_group(
     source: &McpLocation,
     from: &Parsed,
     group: &[(&McpRemovalItem, &McpLocation)],
+    backups: &Path,
     report: &mut McpReport,
 ) {
     let fail = |report: &mut McpReport, message: &str| {
@@ -624,28 +627,26 @@ fn remove_group(
     if removed.is_empty() {
         return;
     }
-    let backup_path = match backup(path, snap) {
+    let backup_path = match backup(path, snap, backups) {
         Ok(p) => p,
-        Err(_) => {
+        Err(error) => {
+            let message = backup_failed_message(path, &error, || {
+                crate::t!("mcp.report.backupFailedUntouched")
+            });
             for item in removed {
-                report.entries.push(entry(
-                    item,
-                    "failed",
-                    &crate::t!("mcp.report.backupFailedUntouched"),
-                    None,
-                ));
+                report.entries.push(entry(item, "failed", &message, None));
             }
             return;
         }
     };
-    if atomicfile::atomic_write(path, &bytes, &FileState::Present(snap.clone())).is_err() {
+    if let Err(error) = atomicfile::atomic_write(path, &bytes, &FileState::Present(snap.clone())) {
+        let message = write_failed_message(path, &error, || {
+            crate::t!("mcp.report.writeBackFailedUntouched")
+        });
         for item in removed {
-            report.entries.push(entry(
-                item,
-                "failed",
-                &crate::t!("mcp.report.writeBackFailedUntouched"),
-                Some(backup_path.clone()),
-            ));
+            report
+                .entries
+                .push(entry(item, "failed", &message, Some(backup_path.clone())));
         }
         return;
     }

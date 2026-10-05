@@ -1,7 +1,8 @@
-/// 新手提示的规则与提示条（DESIGN「组件 › 新手提示条 HintStrip」；src/hints.ts、src/ui/HintStrip.tsx）
+/// 新手提示的规则与提示条（DESIGN-components「灰面板 NoticePanel › 一次性说明的用法」；src/hints.ts、src/ui/NoticePanel.tsx）
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
+import * as React from "react";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { render } from "./ui-render.ts";
@@ -16,7 +17,7 @@ const {
   shouldYield,
   wantsHint,
 } = await import("../src/hints.ts");
-const { HintStrip } = await import("../src/ui/HintStrip.tsx");
+const { NoticePanel, hintStackOf, useHintStack } = await import("../src/ui/NoticePanel.tsx");
 
 /// 假的 core：记下每次调用；list / mark 的结果可控
 function fakePersist(initial: string[] = []) {
@@ -306,26 +307,35 @@ test("订阅者在出现 / 收起时收到通知", async () => {
 
 // ---- 提示条 ----
 
+// 2026-10-04：新手提示条并进灰面板——没有 `!`、能关、能进出的那种用法（`mark={false}` + `onClose` + `open`）
 const strip = (open: boolean, over: Record<string, unknown> = {}) =>
-  render(HintStrip, {
+  render(NoticePanel, {
+    scope: "section",
+    mark: false,
     open,
-    onDismiss: () => {},
-    children: HINTS["first-scan-skills"](EXAMPLE),
+    onClose: () => {},
+    message: HINTS["first-scan-skills"](EXAMPLE),
     ...over,
   });
 
-test("提示条：只有说明句 + × 图标键（知道了，不再提示），没有小标", () => {
+test("提示条：只有说明句 + × 图标键（知道了，不再提示），没有小标、没有 !", () => {
   const html = strip(true);
-  assert.match(html, /class="ss-hint"/);
-  assert.match(html, /role="note"/);
-  assert.doesNotMatch(html, /ss-hint__label|第一次用/);
-  assert.match(html, /class="ss-hint__text">读了 Claude Code、Codex、OpenCode 的 skill 目录/);
+  assert.match(html, /class="ss-noticepanel-slide"/);
+  assert.match(
+    html,
+    /class="ss-noticepanel ss-noticepanel--section" role="note" aria-label="提示"/,
+  );
+  assert.doesNotMatch(html, /第一次用/);
+  assert.match(
+    html,
+    /class="ss-noticepanel__message">读了 Claude Code、Codex、OpenCode 的 skill 目录/,
+  );
   assert.match(
     html,
     /class="ss-iconbtn"[^>]*title="知道了，不再提示"[^>]*aria-label="知道了，不再提示"/,
   );
-  // 只有 ×，没有动作键、没有 ! 记号（与灰面板分开）
-  assert.doesNotMatch(html, /ss-btn\b|ss-noticepanel/);
+  // 只有 ×，没有动作键、没有 ! 记号（意思靠两端分：没有 ! ＝一次性说明）
+  assert.doesNotMatch(html, /ss-btn\b|ss-noticepanel__mark/);
 });
 
 test("提示条：挂上时是收起态，展开由下一帧加 is-open（过渡才有起点）", () => {
@@ -336,33 +346,38 @@ test("提示条：open=false 挂上时什么都不画", () => {
   assert.equal(strip(false), "");
 });
 
-test("提示条样式：shell 底、face 12 圆角、无边无投影、高 40 内边距 10 14、上下 16、260ms ease-mech、减少动效即时", () => {
-  const css = readFileSync(new URL("../src/ui/HintStrip.css", import.meta.url), "utf8");
-  const block = (sel: string) => {
-    const m = css.match(new RegExp(`\\n${sel.replace(/\./g, "\\.")} \\{([^}]*)\\}`));
-    assert.ok(m, `缺 ${sel}`);
-    return m[1];
-  };
-  const bar = block(".ss-hint__bar");
-  assert.match(bar, /background: var\(--shell\)/);
-  assert.match(bar, /border-radius: var\(--radius-face\)/);
-  assert.match(bar, /min-height: 40px/);
-  assert.match(bar, /padding: 10px 14px/);
-  assert.doesNotMatch(css, /box-shadow|border:/);
-  assert.match(block(".ss-hint.is-open"), /margin-block: var\(--space-md\)/);
+const uiCss = readFileSync(new URL("../src/ui/ui.css", import.meta.url), "utf8");
+const block = (sel: string) => {
+  const m = uiCss.match(new RegExp(`\\n${sel.replace(/\./g, "\\.")} \\{([^}]*)\\}`));
+  assert.ok(m, `缺 ${sel}`);
+  return m[1];
+};
+
+test("提示条样式：就是灰面板——surface 底、face 12 圆角、无边无投影、最矮 40 内边距 8 12、13 号 ink；上下 16、260ms ease-mech、减少动效即时", () => {
+  const panel = block(".ss-noticepanel");
+  assert.match(panel, /background: var\(--surface\)/);
+  assert.match(panel, /border-radius: var\(--radius-face\)/);
+  assert.match(panel, /min-height: 40px/);
+  assert.match(panel, /padding: var\(--space-xs\) var\(--space-sm\)/);
+  assert.match(panel, /font-size: var\(--size-caption\)/);
+  assert.match(panel, /color: var\(--ink\);/);
+  assert.doesNotMatch(panel, /box-shadow|border:/);
+  assert.match(block(".ss-noticepanel-slide.is-open"), /margin-block: var\(--space-md\)/);
   // 260ms 只在 tokens.css 写一次（--dur-drawer），组件的 CSS 与 JS 都从那里取
-  assert.match(block(".ss-hint"), /grid-template-rows var\(--dur-drawer\) var\(--ease-mech\)/);
-  assert.match(block(".ss-hint"), /opacity var\(--dur-drawer\) var\(--ease-mech\)/);
-  assert.doesNotMatch(css, /\b260ms\b/);
-  assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*\.ss-hint \{\s*transition: none;/);
-  assert.match(block(".ss-hint__text"), /font-size: var\(--size-caption\)/);
-  assert.match(block(".ss-hint__text"), /color: var\(--ink\);/);
+  const slide = block(".ss-noticepanel-slide");
+  assert.match(slide, /grid-template-rows var\(--dur-drawer\) var\(--ease-mech\)/);
+  assert.match(slide, /opacity var\(--dur-drawer\) var\(--ease-mech\)/);
+  assert.doesNotMatch(slide, /\b260ms\b/);
+  const reduced = uiCss.slice(uiCss.indexOf("@media (prefers-reduced-motion: reduce)"));
+  assert.match(reduced, /\.ss-noticepanel-slide \{\s*transition: none;/);
+  // 新手提示条的另一套样式已删
+  assert.equal(existsSync(new URL("../src/ui/HintStrip.css", import.meta.url)), false);
+  assert.equal(existsSync(new URL("../src/ui/HintStrip.tsx", import.meta.url)), false);
+  assert.doesNotMatch(uiCss, /\.ss-hint\b/);
 });
 
 // ---- 几张提示条叠放（2026-09-30 产品负责人：「如果有多个的时候，我希望叠放在上面，用户处理完一个再处理下一个，
 // 注意不要把底下的漏出来」）----
-
-const { hintStackOf } = await import("../src/ui/HintStrip.tsx");
 
 test("叠放：几张同时想出时只展开登记顺序里的第一张，其余算压在下面的张数", () => {
   assert.deepEqual(
@@ -385,10 +400,127 @@ test("叠放：几张同时想出时只展开登记顺序里的第一张，其�
 
 test("叠放：压着别的提示条时，条下露出一两道没有内容的薄边（不露底下那张的字）；没压着时没有", () => {
   const one = strip(true, { stacked: 1 });
-  assert.equal(one.match(/class="ss-hint__peek"/g)?.length, 1);
+  assert.equal(one.match(/class="ss-noticepanel-slide__peek"/g)?.length, 1);
   const many = strip(true, { stacked: 3 });
-  assert.equal(many.match(/class="ss-hint__peek"/g)?.length, 2, "至多画两道");
-  assert.doesNotMatch(strip(true), /ss-hint__peek/);
-  const css = readFileSync(new URL("../src/ui/HintStrip.css", import.meta.url), "utf8");
-  assert.match(css, /\.ss-hint__peek \{[^}]*height: 4px;/);
+  assert.equal(many.match(/class="ss-noticepanel-slide__peek"/g)?.length, 2, "至多画两道");
+  assert.doesNotMatch(strip(true), /ss-noticepanel-slide__peek/);
+  assert.match(block(".ss-noticepanel-slide__peek"), /height: 4px;/);
+});
+
+// ---- 叠放换张的时序：在内存里驱动 effect（不起浏览器）----
+
+type Hook<P, R> = (props: P) => R;
+
+/// 最小的 hooks 运行器：只实现 useState / useEffect，换掉 React 的当前 dispatcher 调一次 hook，
+/// 渲染完按依赖跑 effect；effect 或定时器里 setState 之后由 `flush` 重渲染，直到稳定
+function driveHook<P, R>(hook: Hook<P, R>, initial: P) {
+  const internals = (React as unknown as Record<string, { H: unknown }>)
+    .__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  const states: unknown[] = [];
+  const effects: { deps?: unknown[]; cleanup?: () => void }[] = [];
+  let props = initial;
+  let result!: R;
+  let dirty = false;
+  const renderOnce = () => {
+    let si = 0;
+    let ei = 0;
+    const pending: (() => void)[] = [];
+    const dispatcher = {
+      useState(init: unknown) {
+        const i = si++;
+        if (!(i in states))
+          states[i] = typeof init === "function" ? (init as () => unknown)() : init;
+        const set = (v: unknown) => {
+          const nv = typeof v === "function" ? (v as (p: unknown) => unknown)(states[i]) : v;
+          if (!Object.is(nv, states[i])) {
+            states[i] = nv;
+            dirty = true;
+          }
+        };
+        return [states[i], set];
+      },
+      useEffect(fn: () => void | (() => void), deps?: unknown[]) {
+        const i = ei++;
+        const prev = effects[i];
+        const changed = !prev || !deps || deps.some((d, k) => !Object.is(d, prev.deps?.[k]));
+        if (!changed) return;
+        pending.push(() => {
+          prev?.cleanup?.();
+          const cleanup = fn();
+          effects[i] = { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined };
+        });
+      },
+    };
+    const saved = internals.H;
+    internals.H = dispatcher;
+    try {
+      result = hook(props);
+    } finally {
+      internals.H = saved;
+    }
+    for (const run of pending) run();
+  };
+  const flush = () => {
+    for (let n = 0; n < 50; n++) {
+      dirty = false;
+      renderOnce();
+      if (!dirty) return result;
+    }
+    throw new Error("没有稳定下来");
+  };
+  flush();
+  return {
+    get: () => result,
+    rerender(next: P) {
+      props = next;
+      return flush();
+    },
+    flush,
+  };
+}
+
+/// 文档里的 `--dur-drawer`：减少动效时 tokens.css 把它置 0
+function withDrawer<T>(ms: number, run: () => T): T {
+  const g = globalThis as Record<string, unknown>;
+  const saved = { window: g.window, document: g.document, getComputedStyle: g.getComputedStyle };
+  g.window = globalThis;
+  g.document = { documentElement: {} };
+  g.getComputedStyle = () => ({ getPropertyValue: () => `${ms}ms` });
+  try {
+    return run();
+  } finally {
+    Object.assign(g, saved);
+  }
+}
+
+const want = (update: boolean, scan: boolean) => [
+  { key: "update", want: update },
+  { key: "first-scan", want: scan },
+];
+
+test("叠放换张：上面那张关掉后先收起（260ms），收完才展开下一张；两张不同时半开", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  withDrawer(260, () => {
+    const h = driveHook(useHintStack, want(true, true));
+    assert.deepEqual(h.get(), { top: "update", below: 1 });
+    // 关掉「有新版本」：这一刻谁都不展开（上一张在收）
+    assert.deepEqual(h.rerender(want(false, true)), { top: null, below: 0 });
+    t.mock.timers.tick(259);
+    assert.deepEqual(h.flush(), { top: null, below: 0 }, "没收完不展开下一张");
+    t.mock.timers.tick(1);
+    assert.deepEqual(h.flush(), { top: "first-scan", below: 0 });
+  });
+});
+
+test("叠放换张：本来什么都没开时，想出的那张当即展开；减少动效时收起是即时的，下一张也当即展开", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  withDrawer(260, () => {
+    const h = driveHook(useHintStack, want(false, false));
+    assert.deepEqual(h.get(), { top: null, below: 0 });
+    assert.deepEqual(h.rerender(want(false, true)), { top: "first-scan", below: 0 });
+  });
+  withDrawer(0, () => {
+    const h = driveHook(useHintStack, want(true, true));
+    assert.deepEqual(h.rerender(want(false, true)), { top: "first-scan", below: 0 });
+  });
 });

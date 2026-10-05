@@ -71,6 +71,38 @@ jobs:
             exit 1
           fi
 
+      # Apple 签名与公证（spec 2026-10-05-signing-notarization R2）：七个 secret 缺一个就停，逐项说缺什么。
+      # 不再退回临时签名：空字符串交给打包工具会被当成「有证书」，连临时签名都可能出不来；
+      # 而且排练本来就是为了验签名和公证，缺了它们排练也没有意义
+      - name: Apple 签名与公证的 secret 都已配好
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          check() {
+            if [ -z "$(printenv "$1")" ]; then
+              echo "::error::缺少 secret $1：$2"
+              missing=1
+            fi
+          }
+          check APPLE_CERTIFICATE "Developer ID Application 证书导出的 .p12，base64 之后的整段文字"
+          check APPLE_CERTIFICATE_PASSWORD "导出 .p12 时设的密码"
+          check APPLE_SIGNING_IDENTITY "security find-identity -v -p codesigning 里的名字，形如 Developer ID Application: 名字 (TEAMID)"
+          check KEYCHAIN_PASSWORD "CI 临时钥匙串的密码，任意随机值"
+          check APPLE_ID "开发者账号的 Apple ID 邮箱"
+          check APPLE_PASSWORD "account.apple.com 生成的 App 专用密码"
+          check APPLE_TEAM_ID "developer.apple.com/account 的 Membership details 里的 Team ID"
+          if [ "$missing" = 1 ]; then
+            echo "::error::怎么建证书、怎么设这几个 secret，见 packaging/README.md「3. Apple 签名与公证」。"
+            exit 1
+          fi
+
   # 先建一个草稿 Release 拿到 id，两个架构的构建往同一个 id 上挂产物，
   # tauri-action 会把各自的 latest.json 合并进同一份清单。
   # 排练（workflow_dispatch）不建 Release，这一步整个跳过，输出为空。
@@ -100,6 +132,8 @@ jobs:
   build:
     needs: draft
     runs-on: macos-latest
+    # 公证通常几分钟，首次可能排队更久；超时就失败，草稿 Release 不公开，重跑即可（R5）
+    timeout-minutes: 60
     strategy:
       # 两个架构串行跑。并行时两边都要改同一份 latest.json，后写的会盖掉先写的，
       # 于是清单里只剩一个架构——发布一次才看得出来的那种错，不值得为省十分钟冒。
@@ -137,21 +171,19 @@ jobs:
           # 更新包的签名。没有它 tauri build 会直接失败——这正是我们要的。
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # 下面七个是 Apple 签名 + 公证的接线位。买了开发者账号（99 美元/年）之后
-          # 把它们配成 secret，这里不用改一个字，产物就从「临时签名」变成「签名并公证」，
-          # 用户不再需要动 Gatekeeper。
+          # Apple 签名 + 公证（spec 2026-10-05-signing-notarization）：有证书就导入临时钥匙串签名，
+          # 有 Apple ID 三件套就提交公证并钉票据。七个都由 guard 保证非空
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # 没有证书时退到 "-"：codesign 的临时（ad-hoc）签名。
-          # 这一步不能省——完全不签的包在新版 macOS 上会被直接判成「已损坏」，
-          # 用户连「仍要打开」都没得点，只剩死胡同。临时签名保住了那条路。
-          # 用环境变量给默认值、而不是把 "-" 写进 tauri.conf.json：
-          # 写进配置的话，以后真买了证书，配置和 secret 谁压谁说不准，容易悄悄退回临时签名。
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # 自动上报的接收服务地址（spec 2026-10-04-reporting-feedback R9），编译期注入（src-tauri/src/report.rs 的
+          # option_env!）。只给公开版：内部版本来就不编上报模块，这里也不给地址。仓库变量（Settings → Variables）
+          # 没设或为空＝这个包不上报
+          SOPHIA_REPORT_URL: ${{ matrix.variant.name == 'public' && vars.SOPHIA_REPORT_URL || '' }}
         with:
           # 空字符串＝不往 Release 上挂，只构建（排练，以及内部版）
           releaseId: ${{ (matrix.variant.publish && needs.draft.outputs.releaseId) || '' }}
@@ -166,6 +198,32 @@ jobs:
             --target ${{ matrix.target }}
             --config ${{ github.workspace }}/packaging/updater.conf.json
             ${{ matrix.variant.features && format('--features {0}', matrix.variant.features) || '' }}
+
+      # 核对产物（spec 2026-10-05-signing-notarization R3）：签名完整、已公证、票据已钉上，缺一样
+      # 这个架构就算失败。CI 上的文件没有 quarantine 属性，绿了也不等于用户双击打得开
+      - name: 核对签名与公证
+        run: |
+          bundle="target/${{ matrix.target }}/release/bundle"
+          packaging/verify-signature.sh "$bundle/macos/Sophia.app" "$bundle"/dmg/*.dmg
+
+      # 留存符号文件（spec 2026-10-04-local-diagnostics R6）：发布档把行号表另存成 dSYM、不随包发，
+      # runner 用完即丢，所以在这里取出来存成 artifact。用户发来崩溃记录时，按版本与架构下回来对行号。
+      # target/<架构>/release/sophia.dSYM 是指向 deps/sophia-<哈希>.dSYM 的软链：cp -RL 取实体、改固定名
+      - name: 取出 dSYM
+        run: |
+          version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+          target='${{ matrix.target }}'
+          name="sophia-${version}-${target%%-*}-${{ matrix.variant.name }}.dSYM"
+          mkdir -p dsym
+          cp -RL "target/${target}/release/sophia.dSYM" "dsym/${name}"
+          dwarfdump --uuid "dsym/${name}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sophia-dsym-${{ matrix.variant.name }}-${{ matrix.target }}
+          path: dsym/
+          if-no-files-found: error
+          # 公开仓库的上限就是 90 天；要更久，发版后按 packaging/README.md 下回来另存
+          retention-days: 90
 
   # 两个架构都挂上去了，latest.json 也合并完了，才把草稿转正。
   # 中途失败就把草稿留在那儿：它不可见，改完重打同一个 tag 之前先手工删掉。

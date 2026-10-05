@@ -191,7 +191,10 @@ fn parse(lang: Lang, files: &[&str]) -> Catalog {
     let mut all = HashMap::new();
     for text in files {
         let part: Catalog = serde_json::from_str(text).unwrap_or_else(|e| {
-            panic!("locales/{} 下的目录文件不是键到文案的 JSON 对象：{e}", lang.tag())
+            panic!(
+                "locales/{} 下的目录文件不是键到文案的 JSON 对象：{e}",
+                lang.tag()
+            )
         });
         all.extend(part);
     }
@@ -457,8 +460,14 @@ mod tests {
         assert_eq!(one("ja-JP"), Lang::En);
         assert_eq!(resolve_system::<String>(&[]), Lang::En);
         // 认不出的跳过，取第一个认得出的
-        assert_eq!(resolve_system(&tags(&["ja-JP", "zh-Hant-TW"])), Lang::ZhHant);
-        assert_eq!(resolve_system(&tags(&["fr-FR", "en-US", "zh-Hans-CN"])), Lang::En);
+        assert_eq!(
+            resolve_system(&tags(&["ja-JP", "zh-Hant-TW"])),
+            Lang::ZhHant
+        );
+        assert_eq!(
+            resolve_system(&tags(&["fr-FR", "en-US", "zh-Hans-CN"])),
+            Lang::En
+        );
         assert_eq!(resolve_system(&tags(&["ja-JP", "ko-KR"])), Lang::En);
         // 大小写、下划线写法也认
         assert_eq!(one("zh_TW"), Lang::ZhHant);
@@ -501,13 +510,11 @@ mod tests {
     fn sample_catalogs() -> [HashMap<String, Message>; 3] {
         let parse = |s: &str| serde_json::from_str::<HashMap<String, Message>>(s).unwrap();
         let mut cats = [HashMap::new(), HashMap::new(), HashMap::new()];
-        cats[Lang::ZhHans.index()] = parse(
-            r#"{"x.hi":"你好 {name}","x.only":"只有简体","x.n":"{count} 个 skill"}"#,
-        );
+        cats[Lang::ZhHans.index()] =
+            parse(r#"{"x.hi":"你好 {name}","x.only":"只有简体","x.n":"{count} 个 skill"}"#);
         cats[Lang::ZhHant.index()] = parse(r#"{"x.hi":"妳好 {name}","x.n":"{count} 個 skill"}"#);
-        cats[Lang::En.index()] = parse(
-            r#"{"x.hi":"Hi {name}","x.n":{"one":"{count} skill","other":"{count} skills"}}"#,
-        );
+        cats[Lang::En.index()] =
+            parse(r#"{"x.hi":"Hi {name}","x.n":{"one":"{count} skill","other":"{count} skills"}}"#);
         cats
     }
 

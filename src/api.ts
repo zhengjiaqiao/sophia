@@ -10,6 +10,8 @@ import type {
   GatewayProviderSaved,
   GatewaySelectedModel,
   GatewayState,
+  QuitFailure,
+  QuitPreview,
   HarnessList,
   LanguageSetting,
   Overview,
@@ -38,6 +40,8 @@ import type {
   McpList,
   McpParseResult,
   McpTargetCheck,
+  ReportCountKind,
+  ReportSettings,
   ResolvedLink,
   SkillInstallPreview,
   SkillInstallRequest,
@@ -133,6 +137,28 @@ export const api = {
   /// 文字进系统剪贴板（右键「拷贝路径」）。不用 navigator.clipboard：原生右键菜单的项在菜单关掉之后才执行，
   /// 已不在网页的用户手势里，WKWebView 会拒绝写入；原生剪贴板插件没有这个限制
   copyText: (text: string) => writeText(text),
+  /// 技术原文去隐私（家目录、密钥、网址里的查询参数等），复制详情前先过它；规则只在 core 的 `redact` 一份
+  redactText: (text: string) => invoke<string>("redact_text", { text }),
+  /// 开发版的故意出错入口：`page:<页>` 等；正式版恒为 null
+  debugFault: () => invoke<string | null>("debug_fault"),
+  /// 自动上报（spec 2026-10-04-reporting-feedback R6、R7、R8）：设置「关于」里那一行与开关；
+  /// 网页侧的异常记一次次数，带了原文再收一条错误事件（后端去隐私）。内部版没有这三个命令
+  /// （`available` 读不到就当不能上报）
+  reportSettings: () => invoke<ReportSettings>("report_settings"),
+  setAutoReport: (enabled: boolean) => invoke<void>("set_auto_report", { enabled }),
+  reportCountFrontend: (kind: ReportCountKind, text?: string) =>
+    invoke<void>("report_count_frontend", { kind, text }),
+  /// 上次是不是意外退出的（崩溃、被强制结束、断电；一次启动一次）
+  lastExitUnexpected: () => invoke<boolean>("last_exit_unexpected"),
+  /// 应用内反馈（spec 2026-10-04-reporting-feedback R12）：传一张已压好的 JPEG，回截图 id。
+  /// 字节走原始请求体（不转 JSON 数组，后端转 base64 再发）。界面的进度只按时间模拟（交给 socket 的字节一开始
+  /// 就接近 100%，真机 2026-10-05），后端不报进度。
+  /// 失败时拒绝的值是原因名（`FeedbackFailure`）。内部版没有这两个命令
+  feedbackUploadShot: (bytes: Uint8Array) => invoke<string>("feedback_upload_shot", bytes),
+  /// 发反馈：草稿 id（32 位小写 hex，重试复用，接收服务据它去重）、写的话、已传上去的截图 id、
+  /// 出错页带来的已去隐私的错误详情（后端再过一遍、附上诊断内容）
+  feedbackSend: (id: string, text: string, shots: string[], attached?: string) =>
+    invoke<void>("feedback_send", { id, text, shots, attached: attached ?? null }),
   scanMcp: () => invoke<McpOverview>("scan_mcp"),
   /// 同名服务在这几个位置上哪些字段不一样（只读；凭据已在 core 脱敏）
   mcpFieldDiff: (name: string, locationIds: string[]) =>
@@ -177,6 +203,10 @@ export const api = {
   removeMcpSource: (domain: string, sourceId: string, items: McpRemovalItem[]) =>
     invoke<McpReport>("remove_mcp_source", { domain, sourceId, items }),
   gatewayState: () => invoke<GatewayState>("gateway_state"),
+  /** `修复权限`：经系统密码框把 Sophia 管的这份文件改回当前账户所有，返回重读的状态；用户取消抛 `[cancelled] ` */
+  gatewayFixFileOwner: (path: string) => invoke<GatewayState>("gateway_fix_file_owner", { path }),
+  /** `打开文件 ↗`：用默认应用打开 Sophia 管的这份文件 */
+  gatewayOpenFile: (path: string) => invoke<void>("gateway_open_file", { path }),
   // ----- 网关按家各管（spec 2026-09-29 R39、R40）：带 agent 的命令只动这一家；`sync` / `alsoOther` 决定另一家跟不跟 -----
   /** id 省略是新建；key 省略表示不动已存的密钥，带了就先向网关校验。
    *  `sync`：另一家同一地址的网关一起加 / 一起改（新建时另一家已有同一地址的就不加第二份） */
@@ -188,7 +218,7 @@ export const api = {
     key?: string;
     sync: boolean;
   }) => invoke<GatewayProviderSaved>("gateway_upsert_provider", input),
-  /** 连同钥匙串里的密钥一起删，删了回不来：调用前先向用户确认。
+  /** 连同密钥文件里的密钥一起删，删了回不来：调用前先向用户确认。
    *  `alsoOther`：另一家同一地址的网关连同密钥一起删（另一家因此已选为空且开着则随之关掉） */
   gatewayRemoveProvider: (agent: GatewayAgent, id: string, alsoOther: boolean) =>
     invoke<GatewayState>("gateway_remove_provider", { agent, id, alsoOther }),
@@ -227,7 +257,8 @@ export const api = {
   /** 重启 Claude 桌面应用让改动生效：退出（最多 15 秒，没退出是 desktop_busy、什么都不写）→ 写 → 重新打开。
    *  会打断正在用的桌面应用，调用前先向用户确认 */
   gatewayRestartClaude: () => invoke<GatewayState>("gateway_restart_claude"),
-  /// 重启我们自己装的 launchd 路由服务；不重启 Codex。界面上不给按钮，命令留着
+  /// 重新接上（路由没在跑、没接上时的 `重启路由` / `再试一次`）：起路由，端口被别的程序占着就换一个，按「开着」写设置；
+  /// 不重启 Codex、Claude
   gatewayRestart: () => invoke<GatewayState>("gateway_restart"),
   /// 结束 Codex 的后台进程，下次启动才读到新配置；terminated 为 0 表示 Codex 当时没在跑
   gatewayRestartCodex: () => invoke<GatewayRestartReport>("gateway_restart_codex"),
@@ -242,7 +273,17 @@ export const api = {
   /// 面板高度由内容决定：量好了报给后端去调窗口
   traySetHeight: (height: number) => invoke<void>("tray_set_height", { height }),
   trayHide: () => invoke<void>("tray_hide"),
-  trayQuit: () => invoke<void>("tray_quit"),
+  /// 退出前问一次：要不要确认、确认框里说什么（都没开着就不确认，直接 `appQuit`）
+  quitPreview: () => invoke<QuitPreview>("quit_preview"),
+  /// 退出：Codex 改回并重启、Claude 切回官方、停路由，都做成了就退出（这次调用不会返回）。
+  /// 有没做成的就不退出、返回那几家（说明后果后用户点 `退出` 走 `appExitNow`）。进度经 `quit-progress` 事件
+  appQuit: () => invoke<QuitFailure[]>("app_quit"),
+  /// 直接退出（收尾已经做过）
+  appExitNow: () => invoke<void>("app_exit_now"),
+  /// 开机启动（系统登录项）开着没有：以系统为准
+  autostartGet: () => invoke<boolean | null>("autostart_get"),
+  /// 打开 / 关掉开机启动；返回改完之后系统里的真实状态
+  autostartSet: (on: boolean) => invoke<boolean>("autostart_set", { on }),
   /// 应用菜单里跟着界面灰 / 亮的三项（`撤销` `筛选` `返回`，DESIGN「应用菜单」）
   setMenuState: (state: { undo: boolean; filter: boolean; back: boolean }) =>
     invoke<void>("set_menu_state", { state }),
@@ -316,6 +357,7 @@ export const api = {
   usageView: (opened: boolean) => invoke<UsageView | null>("usage_view", { opened }),
   /// 存用量设置，调度与菜单栏立即生效；菜单栏最多 3 个 agent，超了报错
   usageSetSettings: (settings: UsageSettings) => invoke<void>("usage_set_settings", { settings }),
-  /// 手动刷新（agent 为空刷全部），仍受最短间隔与限流约束
+  /// 手动刷新。给了 agent 是原因行旁的「再试一次」：只取它，不等最短间隔（限流退避照守），
+  /// 这一轮跑完才返回（新数照常经 `usage-changed` 到）；agent 为空刷全部，仍受最短间隔约束、发出即返回
   usageRefresh: (agent: UsageAgentId | null) => invoke<void>("usage_refresh", { agent }),
 };

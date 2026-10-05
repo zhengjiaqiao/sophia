@@ -87,6 +87,12 @@ export function routeMenuCommand(command: MenuCommand, nav: Nav, editing: boolea
   return destination === null ? { nav } : { nav: goDestination(nav, destination) };
 }
 
+/// 模态小窗（反馈小窗）开着时：只留作用于输入框的撤销 / 全选（小窗里的输入框要用），换目的地、交给页面、
+/// 停在「关于」的都拿掉——不换页、不把焦点放到遮罩后面去
+export function routeUnderModal(route: MenuRoute, nav: Nav): MenuRoute {
+  return route.text ? { nav, text: route.text } : { nav };
+}
+
 /// 菜单里跟着界面灰 / 亮的几项（`set_menu_state`）
 export interface MenuState {
   undo: boolean;

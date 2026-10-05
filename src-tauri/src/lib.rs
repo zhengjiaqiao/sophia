@@ -1,13 +1,24 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
 mod appearance;
+mod autostart;
+mod diagnostics;
+mod fileowner;
 mod gateway;
 mod language;
 mod market;
 mod menu;
+mod quit;
+// 自动上报（spec 2026-10-04-reporting-feedback）：内部版不编进去，没有上报代码也没有地址
+#[cfg(not(feature = "weiboap"))]
+mod report;
+// 应用内反馈（同一份 spec R12–R14）：与自动上报同一个接收服务，内部版同样不编进去
+#[cfg(not(feature = "weiboap"))]
+mod feedback;
 mod tray;
 mod usage;
 mod watch;
 
+pub use diagnostics::install_panic_hook;
 pub use gateway::cli as gateway_cli;
 
 use serde::Serialize;
@@ -49,6 +60,8 @@ struct AppState {
     config_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     /// 模型网关；仅 macOS 上有
     gateway: Option<std::sync::Arc<sophia_gateway::app::App>>,
+    /// 上次是不是意外退出的（spec 2026-10-04-local-diagnostics R8），setup 时判定
+    last_exit_unexpected: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -216,7 +229,7 @@ fn auto_import_mcp(
     // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
     let actions = plan.actions.clone();
-    let mut report = sophia_core::mcp::execute(plan, true);
+    let mut report = sophia_core::mcp::execute(plan, true, &state.store.backups_dir());
     register_mcp_undo(state, &mut report)?;
     // 来源管理页目标框的提示框写「最近一次自动操作」：真写进去了才记
     state
@@ -406,7 +419,8 @@ fn apply_mcp(
     // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
     // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
-    let mut report = sophia_core::mcp::execute(plan, allow_cross_domain);
+    let mut report =
+        sophia_core::mcp::execute(plan, allow_cross_domain, &state.store.backups_dir());
     register_mcp_undo(&state, &mut report)?;
     // 手动写进来的：之前手动移除时记下的排除撤掉，自动规则照常接管
     update_mcp_rules(&state, |rules| {
@@ -420,6 +434,7 @@ fn update_mcp_rules(
     state: &AppState,
     edit: impl FnOnce(&mut Vec<sophia_core::mcp::McpAutoImportRule>) -> bool,
 ) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let mut settings = state.store.load_settings().map_err(err)?;
     if edit(&mut settings.mcp_auto_imports) {
         state.store.save_settings(&settings).map_err(err)?;
@@ -439,7 +454,7 @@ fn delete_mcp_original(
     // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 apply_mcp）
     let _config_guard = state.config_lock.blocking_lock();
     let plan = sophia_core::mcp::prepare_original_removal(&discovery.locations, &items);
-    let mut report = sophia_core::mcp::execute_removal(plan);
+    let mut report = sophia_core::mcp::execute_removal(plan, &state.store.backups_dir());
     register_mcp_undo(&state, &mut report)?;
     // 手动拿掉的：自动规则不再往这个位置写回它（不记的话下一轮扫描就写回去了）
     update_mcp_rules(&state, |rules| {
@@ -779,6 +794,7 @@ fn subscribe_source(
     path: PathBuf,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let (sources, targets) = discover(&state)?;
     let mut settings = subscribed_settings(&state, &sources, &targets)?;
     subscriptions::subscribe(
@@ -822,6 +838,7 @@ fn remove_source(
     source_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncReport, String> {
+    let _settings_guard = state.store.lock_settings();
     let (sources, targets) = discover(&state)?;
     let mut settings = subscribed_settings(&state, &sources, &targets)?;
     let report = subscriptions::remove(
@@ -879,6 +896,7 @@ fn subscribe_mcp_source(
     source_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let (_, overview, mut settings) = mcp_scanned(&state)?;
     mcp_sources::subscribe(
         &mut settings.mcp_subscriptions,
@@ -910,10 +928,12 @@ fn remove_mcp_source(
     items: Vec<mcp_sources::McpRemovalItem>,
     state: tauri::State<'_, AppState>,
 ) -> Result<sophia_core::mcp::McpReport, String> {
+    // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 auto_import_mcp）。
+    // 也改设置：配置写锁在前、设置锁在后，读设置到写回全程拿着
+    let _config_guard = state.config_lock.blocking_lock();
+    let _settings_guard = state.store.lock_settings();
     let (discovery, _, mut settings) = mcp_scanned(&state)?;
     let report = {
-        // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 auto_import_mcp）
-        let _config_guard = state.config_lock.blocking_lock();
         mcp_sources::remove(
             &domain,
             &source_id,
@@ -921,6 +941,7 @@ fn remove_mcp_source(
             &discovery.locations,
             &mut settings.mcp_subscriptions,
             &mut settings.mcp_auto_imports,
+            &state.store.backups_dir(),
         )?
     };
     state.store.save_settings(&settings).map_err(err)?;
@@ -934,6 +955,7 @@ fn list_manual_sources(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>
 
 #[tauri::command]
 fn add_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let path = normalize(&path);
     let mut settings = state.store.load_settings().map_err(err)?;
     if !settings.manual_sources.contains(&path) {
@@ -944,6 +966,7 @@ fn add_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result
 
 #[tauri::command]
 fn remove_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let path = normalize(&path);
     let mut settings = state.store.load_settings().map_err(err)?;
     settings.manual_sources.retain(|p| normalize(p) != path);
@@ -995,6 +1018,7 @@ fn set_mcp_auto_import(
     if source.domain != target_domain && !allow_cross_domain {
         return Err(sophia_core::t!("shell.error.crossDomainNeedsAllow"));
     }
+    let _settings_guard = state.store.lock_settings();
     let mut settings = state.store.load_settings().map_err(err)?;
     // 同一来源+目标域重新设置：目标集合整体替换；已生效的规则保留 baseline 与排除名单，
     // 不重拍。新建（或关掉后再开）才在 core 里按此刻来源的全部名字拍 baseline
@@ -1016,6 +1040,7 @@ fn remove_mcp_auto_import(
     target_domain: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let mut settings = state.store.load_settings().map_err(err)?;
     settings
         .mcp_auto_imports
@@ -1083,6 +1108,7 @@ fn update_auto_links(
     state: &AppState,
     edit: impl FnOnce(&mut Vec<AutoLink>),
 ) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let mut settings = state.store.load_settings().map_err(err)?;
     edit(&mut settings.auto_links);
     state.store.save_settings(&settings).map_err(err)
@@ -1118,6 +1144,7 @@ fn set_harness_enabled(
     enabled: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
     let env = runtime_env()?;
     let (installed, mut settings) = installed_and_settings(&state, &env)?;
     let ids: Vec<String> = installed.into_iter().map(|h| h.id).collect();
@@ -1143,6 +1170,13 @@ fn list_seen_hints(state: tauri::State<'_, AppState>) -> Result<Vec<String>, Str
 #[tauri::command]
 fn mark_hint_seen(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.store.mark_hint_seen(&id).map_err(err)
+}
+
+/// 上次是不是意外退出的（崩溃、被强制结束、断电；spec 2026-10-04-local-diagnostics R8）。
+/// 怎么提示由上报反馈那份 spec 决定，本身不带界面
+#[tauri::command]
+fn last_exit_unexpected(state: tauri::State<'_, AppState>) -> bool {
+    state.last_exit_unexpected.load(Ordering::SeqCst)
 }
 
 /// 侧栏排序用的项目时间（最近活跃 / 最近创建），按传入顺序返回。只读元数据，不写盘
@@ -1173,11 +1207,28 @@ fn project_times(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 应用标识（开发版带 `.dev`）最先定：日志目录、运行标记都按它分，日志插件注册时就要用
+    let context = tauri::generate_context!();
+    diagnostics::set_identity(&context.config().identifier);
     // 界面语言最先定：下面 `menu::build` 建应用菜单时就要按它取名字（spec 2026-09-30-language-and-theme R13）
     language::init(&Store::new(
         runtime_store_dir().unwrap_or_else(|e| panic!("{e}")),
     ));
-    let builder = tauri::Builder::default();
+    // 同一时间只运行一个 Sophia（spec 2026-10-03-gateway-in-app R3）：必须第一个注册，第二个进程在它的 setup 里就退出。
+    // 再次打开时把已有的主窗口带到前面（窗口藏在菜单栏里时插件不管）
+    let builder =
+        tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            #[cfg(target_os = "macos")]
+            tray::show_main(app);
+            #[cfg(not(target_os = "macos"))]
+            if let Some(window) = tauri::Manager::get_webview_window(app, tray::MAIN) {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    // 本机日志（spec 2026-10-04-local-diagnostics R1–R3）：紧跟单实例之后注册，第二个进程不必开日志文件
+    let builder = builder.plugin(diagnostics::log_plugin());
     // 托盘面板要做成不激活应用的 NSPanel（tray.rs），面板登记表由这个插件管
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_nspanel::init());
@@ -1196,7 +1247,15 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState {
             config_lock: Default::default(),
-            gateway: gateway::build(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
+            gateway: {
+                let gateway = gateway::build(runtime_store_dir().unwrap_or_else(|e| panic!("{e}")));
+                // 崩溃时先把 Codex 设置改回原样再退出（spec 2026-10-05-exit-fallback R1）：
+                // 和关机走同一条 exit_sync，只改 Codex、有时限、不起子进程
+                if let Some(app) = gateway.clone() {
+                    diagnostics::on_panic_exit(move || app.exit_sync());
+                }
+                gateway
+            },
             store: Store::new(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
             watcher: Mutex::new(None),
             mcp_plan: Mutex::new(None),
@@ -1206,6 +1265,7 @@ pub fn run() {
             delete_plan: Mutex::new(None),
             next_delete_plan: AtomicU64::new(1),
             delete_undo: Mutex::new(None),
+            last_exit_unexpected: Default::default(),
         })
         // 发现与安装的运行时状态（缓存、撤销记录），字段由 market.rs 自己管
         .manage(market::MarketState::default())
@@ -1252,6 +1312,8 @@ pub fn run() {
             list_seen_hints,
             mark_hint_seen,
             gateway::gateway_state,
+            gateway::gateway_fix_file_owner,
+            gateway::gateway_open_file,
             gateway::gateway_upsert_provider,
             gateway::gateway_remove_provider,
             gateway::gateway_copy_providers,
@@ -1269,7 +1331,11 @@ pub fn run() {
             tray::tray_open_main,
             tray::tray_set_height,
             tray::tray_hide,
-            tray::tray_quit,
+            quit::quit_preview,
+            quit::app_quit,
+            quit::app_exit_now,
+            autostart::autostart_get,
+            autostart::autostart_set,
             menu::set_menu_state,
             // ── 发现与安装（spec 2026-09-27-skill-mcp-market）：T0 预留，实现在 market.rs ──
             market::market_popular,
@@ -1298,12 +1364,39 @@ pub fn run() {
             appearance::set_appearance,
             language::ui_language,
             language::set_ui_language,
-            usage::usage_refresh
+            usage::usage_refresh,
+            last_exit_unexpected,
+            diagnostics::redact_text,
+            diagnostics::debug_fault,
+            #[cfg(not(feature = "weiboap"))]
+            report::report_settings,
+            #[cfg(not(feature = "weiboap"))]
+            report::set_auto_report,
+            #[cfg(not(feature = "weiboap"))]
+            report::report_count_frontend,
+            #[cfg(not(feature = "weiboap"))]
+            feedback::feedback_upload_shot,
+            #[cfg(not(feature = "weiboap"))]
+            feedback::feedback_send
         ])
         .setup(|_app| {
+            // 本机诊断最先接上：日志目录、启动日志、上次是否意外退出（运行标记在数据目录下）
+            {
+                use tauri::Manager;
+                let data_dir = runtime_store_dir().ok();
+                let unexpected = diagnostics::on_setup(_app, data_dir.as_deref());
+                _app.state::<AppState>()
+                    .last_exit_unexpected
+                    .store(unexpected, Ordering::SeqCst);
+            }
             // 上次运行里删掉、还暂存着的原件：撤销机会已随上次运行过去，移进废纸篓
-            if let Ok(dir) = held_dir() {
-                sync::release_held(&dir);
+            match held_dir() {
+                Ok(dir) => {
+                    for (path, error) in sync::release_held(&dir) {
+                        log::warn!("暂存的原件 {} 没能移进废纸篓：{error}", path.display());
+                    }
+                }
+                Err(e) => log::warn!("找不到暂存原件的目录：{e}"),
             }
             // 外观：按存下的设到窗口上（各平台都有；托盘面板在下面建好之后再设一次）
             appearance::apply_saved(_app.handle());
@@ -1313,14 +1406,40 @@ pub fn run() {
                 tray::setup(_app)?;
                 menu::after_setup(_app.handle());
                 appearance::apply_saved(_app.handle());
-                // 后台线程里预热：复制程序、让系统做完首次校验，启用时就不用等这几秒
-                use tauri::Manager;
-                if let Some(gateway) = _app.state::<AppState>().gateway.clone() {
-                    std::thread::spawn(move || sophia_gateway::runtime::prewarm(&gateway));
-                }
             }
             // 用量调度：托盘建好之后再起，第一次交出状态时菜单栏按钮已经在了
             usage::setup(_app)?;
+            // 开机启动默认开（spec 2026-10-05-keep-running R1）：第一次打开注册一次，之后以系统为准
+            if let Ok(dir) = runtime_store_dir() {
+                autostart::default_on_first_launch(_app.handle().clone(), dir);
+            }
+            // 自动上报：没有接收服务地址（开发版、自己编译的版本）或设了 DO_NOT_TRACK 时什么都不做；
+            // 有就 30 秒后起后台循环
+            #[cfg(not(feature = "weiboap"))]
+            report::setup(_app);
+            // 模型网关接上（spec 2026-10-03-gateway-in-app R12–R14）：先卸掉旧版留下的 launchd 服务（它占着端口），
+            // 再按「开着」起路由、写设置。会写 Codex 设置，取配置写锁；普通线程上可以 blocking_lock。
+            // 做完通知界面重读状态（端口说明、开关）
+            {
+                use tauri::Manager;
+                let state = _app.state::<AppState>();
+                if let Some(gateway) = state.gateway.clone() {
+                    let lock = state.config_lock.clone();
+                    let handle = _app.handle().clone();
+                    std::thread::spawn(move || {
+                        {
+                            let _guard = lock.blocking_lock();
+                            if let Err(e) = gateway.migrate_legacy_service() {
+                                log::warn!("卸旧版路由服务失败：{e}");
+                            }
+                            for error in gateway.attach().errors {
+                                log::warn!("接上模型网关失败：{}", error.message);
+                            }
+                        }
+                        let _ = handle.emit("gateway-changed", ());
+                    });
+                }
+            }
             Ok(())
         })
         .on_window_event(|_window, _event| {
@@ -1330,13 +1449,20 @@ pub fn run() {
                 tray::intercept_close(_window, _event, &dir);
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|_app, _event| {
+            // 主窗口创建时不可见（tauri.conf.json）：登录项拉起就只留菜单栏，否则这时开窗口
+            // （spec 2026-10-05-keep-running R2）
+            if let tauri::RunEvent::Ready = _event {
+                autostart::show_main_unless_login_item(_app);
+            }
             // 窗口藏起来之后点 Dock 图标：把它带回来
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 tray::show_main(_app);
             }
+            // 升级重启不改回；关机、注销、Dock 退出同步改回 Codex 设置
+            quit::on_run_event(_app, &_event);
         });
 }

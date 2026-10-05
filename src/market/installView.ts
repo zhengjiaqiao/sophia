@@ -3,7 +3,7 @@
 /// 贴底的去向、主动作的禁用原因、链接的就地识别、JSON 的占位与连接方式、装完那一窗的文案。
 /// 不碰 api、不产 JSX，tests/market-install-view.test.ts 直接测。
 
-import { t, tn } from "../i18n.ts";
+import { listText, t, tn } from "../i18n.ts";
 import type { Location } from "../shell/nav.ts";
 import { displayPath } from "../pathText.ts";
 import {
@@ -13,6 +13,7 @@ import {
   type ToastText,
 } from "../toastText.ts";
 import type {
+  AgentDir,
   InstallItem,
   InstallOutcome,
   LocationKey,
@@ -156,6 +157,27 @@ export function defaultChecked(
 /// 这个位置本来就直接读通用仓库的 agent，名字后写这一句
 export const directReaderNote = () => t("market.install.directReader");
 
+/// 要装的 skill 那里全都已有同名的 agent（M14）：链不上，勾选行不能勾。还没选要装的（`names` 为空）时一个都不算
+export function takenAgents(
+  dirs: ReadonlyArray<AgentDir> | undefined,
+  names: ReadonlyArray<string>,
+): string[] {
+  if (!dirs || names.length === 0) return [];
+  return dirs.filter((d) => names.every((n) => d.taken.includes(n))).map((d) => d.harnessId);
+}
+
+/// 勾选行（skill）的样子（M14，同 MCP「一个都写不过去的不能勾」）：那里已有同名的不能勾、名字后就地说原因
+/// `那里已经有一个同名的 pdf，不会覆盖`；只有一部分被占的照样能勾，装完那一窗说哪个没链上
+export function skillRowView(
+  dirs: ReadonlyArray<AgentDir> | undefined,
+  id: string,
+  names: ReadonlyArray<string>,
+): { disabledReason?: string; note?: string } {
+  if (!takenAgents(dirs, names).includes(id)) return {};
+  const reason = t("market.install.takenNote", { name: listText(names) });
+  return { disabledReason: reason, note: reason };
+}
+
 /// 勾选行（MCP）的样子：一个都写不过去的不能勾、就地说原因；部分写不过去的能勾、说清只写哪几个；
 /// 已有一样的照样能勾、说会跳过；勾上的再说生效时机（`重启 Claude Desktop 后生效`）
 export interface McpRowView {
@@ -263,16 +285,26 @@ export function downloadLine(source: DownloadSource | null, branch: string | nul
 export const noAgent = () => t("market.install.noAgent");
 export const noSkill = () => t("market.install.noSkill");
 export const noServer = () => t("market.install.noServer");
+export const checkingAgents = () => t("market.install.checking");
 
-/// skill 的 `安装` 能不能按：要装的都被拒 → 第一条原因（`用户级的通用仓库里已经有 pdf`）；一个没选；一个 agent 没勾
+/// 计划还在路上（M14 复审）：不知道哪个 agent 那里已有同名的，`安装` 先不能按、也不交给后端。
+/// 出计划出错的不算——计划永远不会来，照旧能按，由后端装的时候再判一次。
+/// `stale`：手里的计划（或出错）是换位置之前的，还没清掉，不作数
+export const skillPlanPending = (preview: unknown, planError: string | null, stale = false) =>
+  stale || (preview === null && planError === null);
+
+/// skill 的 `安装` 能不能按：计划还没回来 → `正在检查各 agent`；要装的都被拒 → 第一条原因（`用户级的通用仓库里已经有 pdf`）；一个没选；一个 agent 没勾
 export function skillInstallBlock(input: {
   /// 这次要装的（计划里对应的项；计划还没回来时为空）
   items: ReadonlyArray<Pick<InstallItem, "blocked">>;
   /// 选了几个（安装页恒为 1）
   selected: number;
   agents: number;
+  /// 计划还没回来（`skillPlanPending`）
+  checking?: boolean;
 }): string | null {
   if (input.selected === 0) return noSkill();
+  if (input.checking) return checkingAgents();
   const open = input.items.filter((i) => i.blocked === null);
   if (input.items.length > 0 && open.length === 0) return input.items[0].blocked;
   if (input.agents === 0) return noAgent();
@@ -550,9 +582,34 @@ export function mcpOrigin(entry: Pick<McpCatalogEntry, "publisher" | "definition
 
 // ───────────────────────── 装完那一窗 ─────────────────────────
 
+/// 装上了但没链上的那几句（M14）：按原因分开、同一原因的 agent 连起来——
+/// `Claude Code 和 Cursor 没链上：那里已有同名的`；几种原因之间用分号
+export function notLinkedReason(
+  unlinked: InstallOutcome["unlinked"],
+  agents: ReadonlyArray<AgentRef>,
+): string | undefined {
+  const byReason = new Map<string, string[]>();
+  for (const u of unlinked) {
+    const name = agents.find((a) => a.id === u.harnessId)?.name ?? u.harnessId;
+    const names = byReason.get(u.reason) ?? [];
+    if (!names.includes(name)) names.push(name);
+    byReason.set(u.reason, names);
+  }
+  if (byReason.size === 0) return undefined;
+  const parts = [...byReason].map(([reason, names]) =>
+    t("market.toast.notLinked", { agents: listText(names), reason }),
+  );
+  return listText(parts, "semicolon");
+}
+
 /// 装 skill 之后右下那一窗（R9）：`✓ 已安装 pdf` + `撤销`（撤销由调用方接 `undoId`）；
-/// 有没装上的是部分失败（`! 已安装 2 ✓ · 1 ⊘ · pdf：原因`），一个都没装上是 `⊘ pdf 安装失败 · 原因`
-export function skillInstalledToast(outcome: InstallOutcome): ToastText {
+/// 有没装上的是部分失败（`! 已安装 2 ✓ · 1 ⊘ · pdf：原因`），一个都没装上是 `⊘ pdf 安装失败 · 原因`；
+/// 都装上了、但有勾了的 agent 没链上（那里已有同名的、建链接失败），也是部分失败那一窗、不带计数：
+/// `! 已安装 pdf · Claude Code 没链上：那里已有同名的`（M14）。`agents` 用来把 harness id 对回显示名
+export function skillInstalledToast(
+  outcome: InstallOutcome,
+  agents: ReadonlyArray<AgentRef> = [],
+): ToastText {
   const failed = Object.entries(outcome.failed);
   const firstReason =
     failed.length > 0
@@ -568,6 +625,7 @@ export function skillInstalledToast(outcome: InstallOutcome): ToastText {
       reason: failed.length === 1 ? failed[0][1] : firstReason,
     };
   }
+  const notLinked = notLinkedReason(outcome.unlinked ?? [], agents);
   if (failed.length > 0) {
     return {
       tier: "notice",
@@ -575,8 +633,18 @@ export function skillInstalledToast(outcome: InstallOutcome): ToastText {
       sentence: "market.toast.installPartial",
       names: outcome.installed,
       agents: [],
-      reason: firstReason,
+      reason: [firstReason, notLinked].filter(Boolean).join(" · "),
       tally: { done: outcome.installed.length, failed: failed.length },
+    };
+  }
+  if (notLinked) {
+    return {
+      tier: "notice",
+      kind: "partial",
+      sentence: "market.toast.installPartial",
+      names: outcome.installed,
+      agents: [],
+      reason: notLinked,
     };
   }
   return {

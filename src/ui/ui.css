@@ -120,22 +120,22 @@ textarea,
 
 /* 主动作（墨键）：一个面里至多一个。抬起用墨键自己的影子（raise-ink，墨面上不需要环） */
 .ss-btn--primary {
-  background: var(--ink);
-  box-shadow: var(--raise-ink);
-  color: var(--face);
+  background: var(--key-primary-bg, var(--ink));
+  box-shadow: var(--key-primary-shadow, var(--raise-ink));
+  color: var(--key-primary-ink, var(--face));
 }
 
 /* 墨面已经到顶，不能再深：悬停在键面内缩 1px 处加一圈 ink-mute（键帽边缘反光），影子不变 */
 .ss-btn--primary:hover:not(:disabled) {
-  box-shadow: var(--raise-ink);
-  outline: 1px solid var(--ink-mute);
+  box-shadow: var(--key-primary-shadow, var(--raise-ink));
+  outline: var(--key-primary-hover-outline, 1px solid var(--ink-mute));
   outline-offset: -2px;
 }
 
 /* 墨键按下：底色不变，影子收紧 + 按压变形 */
 .ss-btn--primary:active:not(:disabled) {
-  background: var(--ink);
-  box-shadow: var(--raise-ink-pressed);
+  background: var(--key-primary-bg, var(--ink));
+  box-shadow: var(--key-primary-shadow, var(--raise-ink-pressed));
   outline: none;
 }
 
@@ -1084,7 +1084,8 @@ textarea,
 }
 
 /* ===== 8. 提示小窗 Toast（DESIGN「反馈的两种形态」）：浮起的一层只表示「会自己消失」 =====
-   提示条一律是纸（2026-09-25 起，墨色浮窗只给提示框）：失败与成功靠句首记号与否定动词分。文字一律 13（caption）：动词 600、名字 400、数字 12 tabular */
+   提示条一律是纸（2026-09-25 起，墨色浮窗只给提示框）：失败与成功靠句首记号与否定动词分。文字一律 13（caption）：动词 600、名字 400、数字 12 tabular。
+   两种长相由出在哪定（2026-10-04）：锚点轻量一行（routine），右下带记号栏（notice） */
 .ss-toast {
   box-sizing: border-box;
   font-family: var(--font-ui);
@@ -1092,7 +1093,8 @@ textarea,
   line-height: var(--leading-caption);
 }
 
-/* 成功：纸窗（paper + 1px hairline 边 + float 12 圆角 + 浮层投影），单行高 32，最宽 420（第三批画板 8A） */
+/* 锚点（FloatingToast 里，成功 / 做不成 / 部分失败都是）：纸窗（paper + 1px hairline 边 + float 12 圆角 + 浮层投影），
+   单行高 32，最宽 420（第三批画板 8A）；记号在句首 */
 .ss-toast--routine {
   display: inline-flex;
   align-items: center;
@@ -1108,13 +1110,14 @@ textarea,
   white-space: nowrap;
 }
 
-/* 一行放不下 420（Toast 量过才加 is-wrapped；简体短句不会走到这里）：整句一行，读数换到第二行 12 ink-mute，
-   键在右侧、跨两行上下居中；整句自己也放不下时在片段之间折行 */
+/* 一行放不下 420、或有副行（路径）时（Toast 加 is-wrapped；简体短句不会走到这里）：记号自成一格，整句一行，
+   读数 / 路径换到第二行 12 ink-mute、与整句的字对齐（缩在记号之后）；键与 × 在右侧、跨两行上下居中；
+   整句自己也放不下时在片段之间折行，折下来的也缩在记号之后 */
 .ss-toast--routine.is-wrapped {
   display: inline-grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 2px var(--space-sm);
+  gap: 2px var(--space-xs);
   height: auto;
   min-height: var(--control-h-row);
   padding: var(--space-xs) var(--space-sm);
@@ -1125,7 +1128,7 @@ textarea,
 .ss-toast__trailline {
   display: flex;
   flex-wrap: wrap;
-  grid-column: 1;
+  grid-column: 2;
   align-items: center;
   gap: 0 var(--space-xs);
   min-width: 0;
@@ -1137,20 +1140,52 @@ textarea,
   color: var(--ink-mute);
 }
 
+/* 键与 × 离字 12（列间 8 + 4） */
 .ss-toast__keys {
   display: inline-flex;
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   align-items: center;
   gap: var(--space-xs);
+  margin-left: var(--space-xxs);
 }
 
-.ss-toast__trailline ~ .ss-toast__keys {
+.ss-toast__trailline ~ .ss-toast__keys,
+.ss-toast__stats ~ .ss-toast__keys {
   grid-row: 1 / span 2;
 }
 
 .ss-toast__mark {
   display: inline-flex;
+}
+
+/* 两行时记号钉在第一行（高同一行字），不随整块居中 */
+.ss-toast--routine.is-wrapped > .ss-toast__mark {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  align-items: center;
+  height: calc(var(--size-caption) * var(--leading-caption));
+}
+
+/* 失败的第二行（路径）：与整句的字对齐；长路径折行，不撑出 420 */
+.ss-toast--routine .ss-toast__stats {
+  grid-column: 2;
+  margin-top: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 一行时原因、整句不在框里自己折（折了量不出放不下）：放不下由 Toast 改成两行 */
+.ss-toast--routine:not(.is-wrapped) .ss-toast__reason,
+.ss-toast--routine:not(.is-wrapped) .ss-toast__message {
+  white-space: nowrap;
+}
+
+/* 失败的 ×：图标键 28，右沿让 6，图形与内边距对齐 */
+.ss-toast__close {
+  display: inline-flex;
+  margin-right: -6px;
 }
 
 /* 到点末尾 120ms 淡出（两档同一个）；机械缓动，不是 300ms 渐隐 */
@@ -1175,8 +1210,8 @@ textarea,
   display: contents;
 }
 
-/* 需要注意（做不成、部分失败）：同成功的纸窗（paper + 1px hairline 边 + float 12 圆角 + 浮层投影），
-   宽 ≤ 400；左侧 40 全高记号栏放 ⊘ / !（ink 线稿），与正文隔一道 hairline */
+/* 右下（CornerToast / ToastStack 里，成功 / 做不成 / 部分失败都是）：同一种纸窗（paper + 1px hairline 边 + float 12 圆角 +
+   浮层投影），宽 ≤ 400；左侧 40 全高记号栏放 ✓ / ⊘ / !（ink 线稿），与正文隔一道 hairline */
 .ss-toast--notice {
   display: flex;
   width: max-content;
@@ -1195,13 +1230,6 @@ textarea,
   justify-content: center;
   width: 40px;
   border-right: 1px solid var(--hairline);
-}
-
-/* 有展开内容时记号钉在主行那一格，不随整块居中 */
-.ss-toast--notice.has-detail .ss-toast__indicator {
-  align-items: flex-start;
-  padding-top: var(--space-md);
-  box-sizing: border-box;
 }
 
 .ss-toast__body {
@@ -1240,8 +1268,8 @@ textarea,
   white-space: nowrap;
 }
 
-/* 原因可长（`Codex 不支持迁移字段 cwd`）：做不成 / 部分失败的纸窗宽 ≤ 400，主行放不下就折到下一行、句子自己也能折，
-   不撑出框（2026-09-30 产品负责人真机：「文案都超出框了」） */
+/* 原因可长（`Codex 不支持迁移字段 cwd`）：主行放不下就折到下一行、句子自己也能折，不撑出框
+   （2026-09-30 产品负责人真机：「文案都超出框了」）；锚点档一行时先不折、量出放不下再改两行（见上） */
 .ss-toast__reason {
   min-width: 0;
   white-space: normal;
@@ -1265,6 +1293,15 @@ textarea,
   align-items: center;
   gap: var(--space-xs);
   white-space: nowrap;
+}
+
+/* 读数在放得下的地方折行（Codex 复审 2026-10-04：长项目名的 `只在……里能用了` 撑出纸窗）：右下档的主行、
+   锚点两行时的整句一行都有宽度上限，读数一段放不下就在段里折，不撑出框；数量 `3 个` 仍是一整段 */
+.ss-toast--notice .ss-toast__trail,
+.ss-toast--notice .ss-toast__reading,
+.ss-toast--routine.is-wrapped .ss-toast__reading {
+  min-width: 0;
+  white-space: normal;
 }
 
 /* 数字：12 tabular（Barlow 的等宽数字，不换等宽字族） */
@@ -1294,20 +1331,14 @@ textarea,
   padding-left: var(--space-sm);
 }
 
-/* 副行：路径与条数，等宽 12 ink-faint */
+/* 副行：路径与条数，等宽 12 ink-mute（同读数那一行的灰） */
 .ss-toast__stats {
   margin-top: -2px;
   font-family: var(--font-mono);
   font-size: var(--size-label);
   font-variant-numeric: tabular-nums;
-  color: var(--ink-faint);
+  color: var(--ink-mute);
   white-space: nowrap;
-}
-
-.ss-toast__detail {
-  margin-top: var(--space-sm);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--hairline);
 }
 
 /* 忙碌形态（BusyToast / Toast busy=）：同成功的单行纸窗，句首 14 宽刻度 + 一句 13 ink-mute，刻度与字间距 6 */
@@ -1316,10 +1347,11 @@ textarea,
   color: var(--ink-mute);
 }
 
-/* ===== 9. 灰面板 NoticePanel（DESIGN「灰面板」；错误横幅 ErrorBanner 已并进来，scope="app"）=====
-   内嵌、不会自己走：surface 实底、face 12 圆角、无边无投影；左侧 !，一句 ink（原因 ink-mute 同一行），
+/* ===== 9. 灰面板 NoticePanel（DESIGN-components「灰面板」；错误横幅 ErrorBanner、新手提示条 HintStrip 都已并进来）=====
+   内嵌、不会自己走：surface 实底、face 12 圆角、无边无投影；一句 ink（原因 ink-mute 同一行），
    动作是默认键（紧凑 24，纸面在灰上读得出是一颗键）。与悬停行同色但形状不同（圆角、内缩、有内边距）。
-   三种范围只差放在哪：row 随内容宽、13 号字（默认）；section 满这一节的宽，键推到右端；
+   意思靠两端分：左端 ! ＝要你处理，没有 ! ＝一次性说明；右端 × ＝能关。
+   三种范围只差放在哪：row 随内容宽、13 号字（默认）；section 满这一节的宽，键推到右端；两者内边距 8 12、最矮 40；
    app 满内容宽、主句 15 + 第二行 13、内边距 12 16 */
 .ss-noticepanel {
   display: inline-flex;
@@ -1327,6 +1359,7 @@ textarea,
   align-items: center;
   gap: var(--space-xs);
   box-sizing: border-box;
+  min-height: 40px;
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-face);
   background: var(--surface);
@@ -1355,6 +1388,17 @@ textarea,
   white-space: normal;
 }
 
+/* 句中的真记号（一次性说明里的 ● ○）：与字同行，略微下沉对齐字心，左右各让 1 */
+.ss-noticepanel__message .ss-dot-wrap {
+  display: inline-block;
+  margin: 0 1px;
+  vertical-align: -0.5px;
+}
+
+.ss-noticepanel__message .ss-dot-wrap > svg {
+  display: block;
+}
+
 /* 第二行（app）：13 ink-mute，另起一行 */
 .ss-noticepanel__detail {
   display: block;
@@ -1363,17 +1407,25 @@ textarea,
   color: var(--ink-mute);
 }
 
+/* × 图标键 28 高：上下各让 2，面板仍是 40；右沿让 6，图形与内边距对齐 */
 .ss-noticepanel__close {
   display: inline-flex;
   flex-shrink: 0;
-  margin-right: -6px;
+  margin: -2px -6px -2px 0;
 }
 
+/* 键组不收窄，句子吸收余下的宽（放不下时句子折行） */
 .ss-noticepanel__actions {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: var(--space-xs);
   margin-left: var(--space-xs);
+}
+
+/* 一颗键的包层（带 data-hint-action，调用方据它锚结果）：不改排版 */
+.ss-noticepanel__key {
+  display: inline-flex;
 }
 
 /* 在等、过了 0.3 秒门槛：键原位换成刻度 + 一句（BusySlot），与键同一个位置、同样的间距 */
@@ -1414,6 +1466,52 @@ textarea,
 /* 灰面板上的图标按钮：悬停带 surface 在灰上看不见，退一档到 hairline */
 .ss-noticepanel .ss-iconbtn:hover:not(:disabled) {
   background: var(--hairline);
+}
+
+/* 进出（给了 open，一次性说明的用法）：淡入淡出 + 高度 0 ↔ 自身高度 + 外距 0 ↔ 16，--dur-drawer --ease-mech，
+   推动下方内容；上下外距 16 由组件自带，收起时一起滑回 0 */
+.ss-noticepanel-slide {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 100%;
+  margin-block: 0;
+  opacity: 0;
+  /* 时长 --dur-drawer：NoticePanel.tsx 读同一个 token，到时卸下 */
+  transition:
+    grid-template-rows var(--dur-drawer) var(--ease-mech),
+    margin-block var(--dur-drawer) var(--ease-mech),
+    opacity var(--dur-drawer) var(--ease-mech);
+}
+
+.ss-noticepanel-slide.is-open {
+  grid-template-rows: 1fr;
+  margin-block: var(--space-md);
+  opacity: 1;
+}
+
+/* flush：上方的间距归宿主（宿主据 data-hint="open" 把自己的下内边距让成 16），这里只带下外距 */
+.ss-noticepanel-slide--flush.is-open {
+  margin-block: 0 var(--space-md);
+}
+
+/* 高度动画的裁切层：行轨道从 0fr 到 1fr，里面的面板按自身高度（40 或两行）走 */
+.ss-noticepanel-slide__clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 叠放（2026-09-30）：下面还压着别的一张时，面板下露一两道 4 高的薄边——每道左右各收 10、只圆下角、
+   比面板深一档（hairline，第二道 row-line），读作「后面还有一张」；不露字。薄边在裁切层里，随面板一起展开收起 */
+.ss-noticepanel-slide__peek {
+  height: 4px;
+  margin-inline: 10px;
+  border-radius: 0 0 7px 7px;
+  background: var(--hairline);
+}
+
+.ss-noticepanel-slide__peek + .ss-noticepanel-slide__peek {
+  margin-inline: 20px;
+  background: var(--row-line);
 }
 
 /* ===== 10. 确认框 Confirm（DESIGN「浮层」「材料与工艺 › 对话框」）=====
@@ -1506,16 +1604,27 @@ textarea,
   padding-top: var(--space-lg);
 }
 
+/* 忙碌（Confirm busy）：键区原位换成刻度 + 一句，高度同键，框不跳 */
+.ss-confirm__foot .ss-busyslot {
+  min-height: var(--control-h-row);
+}
+
+.ss-confirm--inline .ss-confirm__foot .ss-busyslot {
+  min-height: var(--control-h-compact);
+}
+
 /* 窄面板形态（Confirm inline，托盘）：触发它的那一行下面当场展开的一块凹面——recess、face 12 圆角、
    内边距 10 12，无边无投影、无遮罩；标题 13 / 600 ink，后果 12 ink-mute（均衡折行，不让末行只剩一个字），
-   右对齐 取消（默认键紧凑）与主动作墨键（紧凑），键间 12、上距 8。外距归那一行 */
+   右对齐 取消（默认键紧凑）与主动作墨键（紧凑），键间 12、上距 8。外距归那一行。
+   变量钩子（托盘的系统样式用，默认值就是上面这一套）：--confirm-inline-bg / -radius / -pad / -gap，
+   --confirm-inline-rule（block 时顶上画一条行线，同托盘的分隔线） */
 .ss-confirm--inline {
   width: auto;
   max-width: none;
-  padding: 10px var(--space-sm);
+  padding: var(--confirm-inline-pad, 10px var(--space-sm));
   border: 0;
-  border-radius: var(--radius-face);
-  background: var(--recess);
+  border-radius: var(--confirm-inline-radius, var(--radius-face));
+  background: var(--confirm-inline-bg, var(--recess));
   box-shadow: none;
   font-family: var(--font-ui);
   font-size: var(--size-label);
@@ -1534,12 +1643,218 @@ textarea,
   margin-top: 0;
   font-size: var(--size-label);
   line-height: var(--leading-caption);
-  text-wrap: balance;
+  text-wrap: var(--confirm-inline-wrap, balance);
+}
+
+.ss-confirm--inline::before {
+  content: "";
+  display: var(--confirm-inline-rule, none);
+  margin: 5px 0 9px;
+  border-top: var(--border-row);
 }
 
 .ss-confirm--inline .ss-confirm__foot {
-  gap: var(--space-sm);
+  gap: var(--confirm-inline-gap, var(--space-sm));
   padding-top: var(--space-xs);
+}
+
+/* ===== 11.1 反馈小窗 FeedbackDialog（DESIGN-components「反馈小窗」，画板 Feedback）=====
+   确认框的宽档 480；标题下 12 一个凹面输入框（recess 底、1px hairline、control 7、最小高 140、内边距 8 10，
+   获焦与拖着图片经过时边转 ink-mute）。截图 56 方缩略图在文字上方（间 12、上 4 下 12）：上传中一道 1.5 ink 细线
+   沿缩略图外 3px 顺时针画到百分比，右上角百分比（12 tabular ink-mute，纸面抬起的小签）；到 100 百分比淡出、
+   去掉键（20 方纸键）同处淡入。框下 8 一行 12 ink-faint 提示；按钮行失败时左边一句 13 ink-mute */
+.ss-confirm--wide {
+  width: 480px;
+}
+
+.ss-confirm--wide .ss-confirm__title {
+  margin-bottom: var(--space-sm);
+}
+
+.ss-feedback__box {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 140px;
+  padding: var(--space-xs) 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--recess);
+  cursor: text;
+  transition: border-color var(--motion-fast) var(--ease-mech);
+}
+
+.ss-feedback__box:focus-within,
+.ss-feedback__box[data-drop="over"] {
+  border-color: var(--ink-mute);
+}
+
+.ss-feedback__shots {
+  display: flex;
+  gap: var(--space-sm);
+  margin: var(--space-xxs) 0 var(--space-sm);
+}
+
+.ss-feedback__shot {
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  cursor: default;
+}
+
+.ss-feedback__thumb {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-control);
+}
+
+.ss-feedback__thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 细线：缩略图外 3px 的一圈（60 方、圆角 9），pathLength 100，stroke-dasharray 画到百分比 */
+.ss-feedback__ring {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ss-feedback__ring rect {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--motion-fast) var(--ease-mech);
+}
+
+.ss-feedback__percent {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  box-shadow: var(--raise);
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  transition: opacity var(--motion-fast) var(--ease-mech);
+}
+
+.ss-feedback__shot[data-phase="done"] .ss-feedback__percent,
+.ss-feedback__shot[data-phase="failed"] .ss-feedback__percent {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ss-feedback__remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  box-shadow: var(--raise);
+  color: var(--ink-mute);
+  cursor: default;
+  animation: ss-feedback-in var(--motion-fast) var(--ease-mech);
+}
+
+.ss-feedback__remove:hover:not(:disabled) {
+  box-shadow: var(--raise-hover);
+  color: var(--ink);
+}
+
+.ss-feedback__remove:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@keyframes ss-feedback-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.ss-feedback__text {
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 4.8em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-body);
+  resize: none;
+}
+
+.ss-feedback__text::placeholder {
+  color: var(--ink-mute);
+}
+
+/* 聚焦由框的边说，不再叠外框 */
+.ss-feedback__text:focus-visible {
+  outline: none;
+}
+
+.ss-feedback__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-xs);
+  color: var(--ink-faint);
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+}
+
+.ss-feedback__failure {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-mute);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+}
+
+/* 减少动效：细线、百分比、去掉键都即时 */
+@media (prefers-reduced-motion: reduce) {
+  .ss-feedback__box,
+  .ss-feedback__ring rect,
+  .ss-feedback__percent {
+    transition: none;
+  }
+
+  .ss-feedback__remove {
+    animation: none;
+  }
 }
 
 /* ===== 12. agent 图标 AgentIcon（DESIGN「agent 图标」）=====
@@ -1589,6 +1904,121 @@ textarea,
 /* 首字母方块里单个字母：只大写，字距 0（加字距会把字母挤出方块中线） */
 .ss-cap-wrap--mark .ss-cap {
   letter-spacing: 0;
+}
+
+/* ===== 详情 Details 与页面兜底 PageFault（spec 2026-10-04-local-diagnostics R7 / R13）=====
+   详情：一颗默认键（紧凑 24；出错页 regular 28），点开是锚在键上的小浮层（FloatingLayer：paper + hairline +
+   float 12 圆角 + 浮层投影），不在行里展开（2026-10-04 产品负责人）。浮层宽 440、内边距 12：等宽 12 ink 原文，
+   放不下折行、太长在原文里滚；右下一颗紧凑 `复制详情`，上距 8。
+   出错页：在机面里居中，标题 head / 一句 ink-mute / 一行键（墨键 `重新加载` + 默认键 `详情`），间距照空态（12 / 16 / 16） */
+.ss-details {
+  display: inline-flex;
+  flex: none;
+}
+
+/* 浮层开着时键保持按下（同锁键「按下锁住」：surface 面 + raise-pressed），说明浮层是从它弹出的 */
+.ss-details .ss-btn[aria-expanded="true"] {
+  background: var(--key-bg-pressed, var(--surface));
+  box-shadow: var(--key-shadow-pressed, var(--raise-pressed));
+}
+
+/* 浮层的滚动区（FloatingLayer 的 className）：宽 440，窄窗口（托盘）里收到窗口左右边距之内 */
+.ss-details__layer {
+  box-sizing: border-box;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  padding: var(--space-sm);
+}
+
+.ss-details__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.ss-details__text {
+  box-sizing: border-box;
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ss-details__text:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.ss-details__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ss-pagefault {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: var(--space-xl);
+}
+
+/* 块内文字靠左、限宽：标题 15/600 → 一句 13 ink-mute → 墨键 → 详情 */
+.ss-pagefault__block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-md);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 460px;
+  text-align: left;
+}
+
+.ss-pagefault__title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-body);
+  font-weight: 600;
+  line-height: var(--leading-body);
+  color: var(--ink);
+}
+
+.ss-pagefault__sentence {
+  margin: calc(var(--space-xs) * -1) 0 0;
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* 一行键：墨键 `重新加载` +（上报关着时）默认键 `报告这个问题` + 默认键 `详情`（同高 28），间 8 */
+.ss-pagefault__keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* `报告这个问题` 那一格：发出去之后的提示条锚在它下面 */
+.ss-pagefault__report {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 托盘面板（宽 280）：块占满窄面板，间距收紧 */
+.ss-pagefault--narrow {
+  padding: var(--space-md);
+}
+
+.ss-pagefault--narrow .ss-pagefault__block {
+  gap: var(--space-sm);
 }
 
 /* ===== 13. 空态与忙碌态 ===== */
@@ -2605,6 +3035,11 @@ html[data-input="keyboard"] .ss-menuitem:focus {
 
   /* 例行一行到点直接消失，不淡 */
   .ss-toast.is-leaving {
+    transition: none;
+  }
+
+  /* 灰面板进出即时 */
+  .ss-noticepanel-slide {
     transition: none;
   }
 

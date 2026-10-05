@@ -58,7 +58,7 @@ const provider = (overrides: Partial<GatewayProvider> = {}): GatewayProvider => 
   shortName: "ap-gateway",
   baseUrl: "https://ap.example.com/v1",
   protocol: "chat",
-  hasKey: true,
+  key: "set",
   models: [model("kimi-k2.5", true), model("glm-5", false)],
   ...overrides,
 });
@@ -80,7 +80,7 @@ const claude = (
 
 const stateWith = (
   view: AgentGatewayView,
-  router = { installed: true, running: true, port: 47328, error: "" },
+  router = { running: true, port: 47328, error: "" },
 ): GatewayState =>
   gatewayFixture({
     supported: true,
@@ -126,7 +126,12 @@ test("R41 R42 开关按不动：没装 / 受管 / 太旧说「怎么办」；别
     reason(claude({ providers: [provider({ models: [model("x", false)] })] }), "list"),
     listNeedsModels(),
   );
-  assert.equal(reason(claude({ providers: [provider({ hasKey: false })] })), "请先保存网关密钥");
+  assert.equal(reason(claude({ providers: [provider({ key: "missing" })] })), "请先保存网关密钥");
+  // 读不出（还在钥匙串里、文件没有读取权限）不说「请先保存」：点名不可用（R4）
+  assert.equal(
+    reason(claude({ providers: [provider({ name: "ap", key: "unreadable" })] })),
+    "ap 的密钥不可用",
+  );
   // 能按；开着时永远能关
   assert.equal(reason(claude()), null);
   assert.equal(reason(claude({ enabled: true, installed: false, providers: [] })), null);
@@ -137,11 +142,11 @@ test("R41 R42 开关按不动：没装 / 受管 / 太旧说「怎么办」；别
 test("R42 R44 文案只有一份：开关提示框两段、重启确认正文按方向、键的提示框、拨开关的忙碌与没成，都在 claudeView；trayView 不再自己写", () => {
   assert.equal(
     claudeSwitchTip(false),
-    "打开后，Claude 桌面应用改用这里选的模型，不再登录 Claude 账号；账号里的对话暂时看不到，切回即恢复。要重开 Claude 才生效",
+    "打开后，Claude 桌面应用改用这里选的模型，不再登录 Claude 账号；账号里的对话暂时看不到，切回即恢复。要重开 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上",
   );
   assert.equal(
     claudeSwitchTip(true),
-    "关掉后，Claude 桌面应用回到 Claude 账号；要重开 Claude 才生效",
+    "关掉后，Claude 桌面应用回到 Claude 账号；要重开 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上",
   );
   assert.match(
     claudeRestartConsequence(true),
@@ -239,9 +244,12 @@ test("R42 勾选先画：只改这一家这一个模型；开着时去掉最后�
 
 test("R42 AC43 行内待办条：路由没在跑（自愈过一次仍没起来）/ 别家配置在生效 + `接管`（只说主句，不写是谁的配置：DESIGN ① 同一屏不重复）/ 被改掉了 + `重新写入`；没有登录页那一条", () => {
   const kinds = (view: AgentGatewayView, healed = true, running = true) =>
-    claudeTodos(stateWith(view, { installed: true, running, port: 1, error: "" }), healed).map(
-      (t) => [t.kind, t.message, t.reason, t.label],
-    );
+    claudeTodos(stateWith(view, { running, port: 1, error: "" }), healed).map((t) => [
+      t.kind,
+      t.message,
+      t.reason,
+      t.label,
+    ]);
   assert.deepEqual(kinds(claude()), []);
   assert.deepEqual(kinds(claude({ enabled: true }), true, false), [
     ["router", "路由没在跑，第三方模型用不了", null, "重启路由"],

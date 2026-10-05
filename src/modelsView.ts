@@ -43,19 +43,31 @@ export const MODELS_TOOLS: ModelsTool[] = [CODEX];
 export interface ParsedBackendError {
   code: string;
   message: string;
+  /// 技术原文（请求、状态码、返回的错误；后端已去隐私），给 `详情`；没有就不带这个字段
+  detail?: string;
 }
 
 const ERROR_PREFIX = /^\[([a-z_]+)]\s*/;
+/// 技术原文的分隔（后端 `app::DETAIL_MARK`，docs/gateway-commands.md「错误」）
+const DETAIL_MARK = "\n[detail] ";
 
 /**
- * 后端错误形如 `[code] message`；剥离前缀，只展示后半段。
+ * 后端错误形如 `[code] message`，带技术原文时再另起一行 `[detail] 原文`（spec 2026-10-04-local-diagnostics R13）；
+ * 剥离前缀，一句话给人看，原文拆进 `detail`。
  * `[changed]` 的正文本身已经在说明“配置已变化，请重试”，同样剥离前缀原样展示即可。
  * 读不出前缀（例如非字符串异常）时把整段原文当作 internal 展示。
  */
 export function parseBackendError(text: string): ParsedBackendError {
   const match = ERROR_PREFIX.exec(text);
   if (!match) return { code: "internal", message: text };
-  return { code: match[1], message: text.slice(match[0].length) };
+  const rest = text.slice(match[0].length);
+  const at = rest.indexOf(DETAIL_MARK);
+  if (at < 0) return { code: match[1], message: rest };
+  return {
+    code: match[1],
+    message: rest.slice(0, at),
+    detail: rest.slice(at + DETAIL_MARK.length),
+  };
 }
 
 /// 任一家在用路由（路由两家共用：任一家在用它就得在跑，两家都不用了才卸，spec 2026-09-29 R8 R46）。
@@ -423,36 +435,43 @@ export function enableDisabledReason(state: GatewayState, selectedCount: number)
     return t("models.enable.takeover", { manager: "agents-manager" });
   if (codex.conflict) return codex.conflict;
   if (codex.providers.length === 0) return enableNeedsModels();
-  if (!codex.providers.some((provider) => provider.hasKey)) return t("models.enable.needsKey");
+  const none = noUsableKeyReason(codex.providers);
+  if (none) return none;
   if (selectedCount === 0) return enableNeedsModels();
-  const noKey = codex.providers.filter(
-    (provider) => selectedModels(provider).length > 0 && !provider.hasKey,
-  );
-  if (noKey.length > 0)
-    return t("models.enable.missingKey", {
-      names: listText(noKey.map(providerLabel), "enum"),
-    });
-  return null;
+  return selectedKeyReason(codex.providers);
 }
 
-/// 「恢复」按钮可用：已启用，或后台服务还装着（哪怕当前未启用）
-export function canRestore(state: GatewayState): boolean {
-  return codexGateway(state).enabled || state.router.installed;
+/// `X、Y 的密钥不可用`：读不出密钥的那几家（原因在各自网关行上写全）
+function keyUnreadableReason(providers: GatewayProvider[]): string {
+  return t("models.enable.keyUnreadable", {
+    names: listText(providers.map(providerLabel), "enum"),
+  });
 }
 
 /**
- * 后台服务残留：已经停用、服务却还装着（自动卸下失败，或旧版本遗留）。
- * 关开关时的 gatewayRestore 本身就会卸下服务，所以手动入口只在这种状态下出现——
- * Codex 页「第三方模型」节头右端（与托盘那一块）按状态出现紧凑键 `卸下后台服务`
- * （DESIGN「停用即卸下后台服务」）。
+ * 一个能用的密钥都没有时的原因；有就返回 null。全是没存的说「请先保存网关密钥」；
+ * 有读不出的先说那几家「密钥不可用」——那时重填未必是对的下一步（文件权限、钥匙串锁着）。
+ * Codex 与 Claude 两页共用
  */
-export function serviceLeftover(state: GatewayState): boolean {
-  // 路由两家共用：两家都关了才算残留（spec 2026-09-29 R46）
-  return !anyGatewayOn(state) && state.router.installed;
+export function noUsableKeyReason(providers: GatewayProvider[]): string | null {
+  if (providers.some((provider) => provider.key === "set")) return null;
+  const unreadable = providers.filter((provider) => provider.key === "unreadable");
+  return unreadable.length > 0 ? keyUnreadableReason(unreadable) : t("models.enable.needsKey");
 }
 
-/// 「卸下后台服务」键的提示框：只写点下去的结果
-export const uninstallTip = () => t("models.tip.uninstall");
+/// 选了模型的那几家里说不出密钥的：读不出的先说，其次没存的；都有返回 null。两页共用
+export function selectedKeyReason(providers: GatewayProvider[]): string | null {
+  const blocked = providers.filter(
+    (provider) => selectedModels(provider).length > 0 && provider.key !== "set",
+  );
+  const unreadable = blocked.filter((provider) => provider.key === "unreadable");
+  if (unreadable.length > 0) return keyUnreadableReason(unreadable);
+  if (blocked.length > 0)
+    return t("models.enable.missingKey", {
+      names: listText(blocked.map(providerLabel), "enum"),
+    });
+  return null;
+}
 
 // ===== 网关行里的表单（DESIGN「agent 页 › 编辑 / 新增：表单在行里就地展开」） =====
 
@@ -475,10 +494,10 @@ export function switchNeedsConfirm(
 export interface GatewayFacts {
   /// 地址；还没填时一句话
   url: string;
-  /// 状态码：组件按它判断（无法连接时那一段画成红字），不比对显示文字
-  statusKind: "unreachable" | "connected" | "noKey";
+  /// 状态码：组件按它判断（无法连接、密钥不可用时那一段画成红字），不比对显示文字
+  statusKind: "unreachable" | "connected" | "noKey" | "keyUnreadable";
   status: string;
-  /// 无法连接的原因（写全，不藏进悬停）
+  /// 无法连接、密钥不可用的原因（写全，不藏进悬停）
   reason: string | null;
   /// `已选 2 / 103`；还没拉到模型、或无法连接时为 null
   picked: string | null;
@@ -495,17 +514,28 @@ export function gatewayFacts(provider: GatewayProvider): GatewayFacts {
       picked: null,
     };
   }
+  const picked =
+    provider.models.length > 0
+      ? tn("models.gateway.picked", provider.models.length, {
+          selected: selectedModels(provider).length,
+        })
+      : null;
+  if (provider.key === "unreadable") {
+    // 读不出不是「还没有密钥」：`地址 · 密钥不可用 · 已选 2 / 103 · 读不出密钥文件：没有读取权限`
+    return {
+      url,
+      statusKind: "keyUnreadable",
+      status: t("models.gateway.keyUnreadable"),
+      reason: provider.keyProblem || null,
+      picked,
+    };
+  }
   return {
     url,
-    statusKind: provider.hasKey ? "connected" : "noKey",
-    status: provider.hasKey ? t("models.gateway.connected") : t("models.gateway.noKey"),
+    statusKind: provider.key === "set" ? "connected" : "noKey",
+    status: provider.key === "set" ? t("models.gateway.connected") : t("models.gateway.noKey"),
     reason: null,
-    picked:
-      provider.models.length > 0
-        ? tn("models.gateway.picked", provider.models.length, {
-            selected: selectedModels(provider).length,
-          })
-        : null,
+    picked,
   };
 }
 
@@ -658,14 +688,15 @@ export function gatewaySwitchText(
 /// 开关的提示框：先说拨下去的结果；`withFile` 时再说改的是哪个文件（Codex 页；托盘面板窄，只说结果）。
 /// 新手提示只说结果，机制留给悬停（DESIGN 2026-09-25 评审第二轮）
 export function gatewaySwitchTip(on: boolean, tool: ModelsTool = CODEX, withFile = true): string {
-  if (on) {
-    return withFile
+  const result = on
+    ? withFile
       ? t("models.switch.onTipFile", { tool: tool.name, path: tool.configPath })
-      : t("models.switch.onTip", { tool: tool.name });
-  }
-  return withFile
-    ? t("models.switch.offTipFile", { tool: tool.name, path: tool.configPath })
-    : t("models.switch.offTip", { tool: tool.name });
+      : t("models.switch.onTip", { tool: tool.name })
+    : withFile
+      ? t("models.switch.offTipFile", { tool: tool.name, path: tool.configPath })
+      : t("models.switch.offTip", { tool: tool.name });
+  // 末尾再说一句「要开着」（spec 2026-10-05-keep-running R3）：网关跟着 Sophia，Sophia 退出就没了
+  return `${result}${t("models.switch.keepRunning")}`;
 }
 
 export interface GatewaySwitchIo {
@@ -760,15 +791,14 @@ export function showLaunchKey(state: GatewayState, phase: RestartPhase): boolean
   );
 }
 
-/// 开关旁那一位此刻放哪颗键（DESIGN「第三方模型（一节）」「托盘面板」：`重启生效` / `启动 Codex` /
-/// `卸下后台服务` 同一位，不会同时出现）。Codex 页节头与托盘能力行同一个判断：
-/// 等重启 > Codex 没在跑（开着）> 关着而后台服务还装着；拨开关写配置、重启、启动期间都不出键
-export type CodexKeyKind = "restart" | "launch" | "uninstall";
+/// 开关旁那一位此刻放哪颗键（DESIGN「第三方模型（一节）」「托盘面板」：`重启生效` / `启动 Codex`
+/// 同一位，不会同时出现）。Codex 页节头与托盘能力行同一个判断：
+/// 等重启 > Codex 没在跑（开着）；拨开关写配置、重启、启动期间都不出键
+export type CodexKeyKind = "restart" | "launch";
 
 export function codexKeyKind(state: GatewayState, phase: RestartPhase): CodexKeyKind | null {
   if (showRestartKey(state, phase)) return "restart";
   if (showLaunchKey(state, phase)) return "launch";
-  if (phase.kind === "idle" && serviceLeftover(state)) return "uninstall";
   return null;
 }
 
@@ -799,16 +829,20 @@ export function shouldPollRestart(state: GatewayState | null, phase: RestartPhas
 // ===== 在用的模型与勾选 =====
 
 /// 关掉之后先画的「做成之后」的样子（删掉最后一个生效模型那一支用它，见 selectModel）：只翻 enabled 会让依赖它的提示在等结果的那一下闪出来——开时「路由没在跑」
-/// 待办条（启用成功时后端已等到路由就绪），关时 `卸下后台服务` 键（恢复会一并卸掉路由服务）。
-/// 做不成时整份回滚到后端给的状态，所以这里只预测成功
+/// 待办条（启用成功时后端已起好路由）。做不成时整份回滚到后端给的状态，所以这里只预测成功
 export function predictEnabled(state: GatewayState, enabled: boolean): GatewayState {
-  const next = withAgentGateway(state, { ...codexGateway(state), enabled });
-  // 关掉时：另一家还开着，路由服务留着（spec 2026-09-29 R8 R46：两家都关才卸）
+  const codex = codexGateway(state);
+  const next = withAgentGateway(state, {
+    ...codex,
+    enabled,
+    codex: { ...codex.codex, wanted: enabled },
+  });
+  // 关掉时：另一家还开着，路由留着（spec 2026-09-29 R8 R46：两家都关才停）
   const router = enabled
-    ? { ...state.router, installed: true, running: true }
+    ? { ...state.router, running: true }
     : anyGatewayOn(next)
       ? state.router
-      : { ...state.router, installed: false, running: false };
+      : { ...state.router, running: false };
   return { ...next, router };
 }
 
@@ -878,9 +912,78 @@ export function codexListSwitchReason(state: GatewayState): string | null {
   return reason === enableNeedsModels() ? listNeedsModels() : reason;
 }
 
-/// 路由没在跑、且启动时自愈过一次仍没起来，才在「第三方模型」节里出待办条（DESIGN「路由没在跑」）
+/// 路由没在跑、且启动时自愈过一次仍没起来，才在「第三方模型」节里出待办条（DESIGN「路由没在跑」）；
+/// 打开 Sophia 时没接上（另一个 Sophia 占着端口、端口都被占）也出，原因换成那一种（`routerTodo`）
 export function showRouterTodo(state: GatewayState, healAttempted: boolean): boolean {
-  return healAttempted && routerUnavailable(state);
+  return routerTodo(state, healAttempted, null) !== null;
+}
+
+/// 路由自动换端口的范围（core `PORT_RANGE`，spec 2026-10-03-gateway-in-app R4）：只用来写进那一句原因
+export const PORT_FIRST = 47328;
+export const PORT_LAST = 47339;
+
+/// 路由那一条待办的文案（列表页头下、各家页里同一条）：主句、原因（跟在主句后同一行）、键与它的忙碌句
+export interface RouterTodo {
+  message: string;
+  reason: string | null;
+  label: string;
+  busy: string;
+}
+
+/// 路由那一条待办（DESIGN「路由没在跑」）：打开 Sophia 时没接上（`portNotice`）先说那一种——另一个 Sophia 在运行、
+/// 端口都被别的程序占了（这时 Codex 设置已改回原样，开关显示关，所以不看「有没有一家开着」）；
+/// 否则有一家开着而路由没在跑、自愈过一次仍没起来，说「路由没在跑」+ 自愈失败的原因。键都是重新接上（`gatewayRestart`）
+export function routerTodo(
+  state: GatewayState,
+  healAttempted: boolean,
+  failure: string | null,
+): RouterTodo | null {
+  const busy = t("models.todo.routerRestarting");
+  switch (state.portNotice?.code) {
+    case "another_sophia":
+      return {
+        message: t("models.todo.anotherSophia"),
+        reason: t("models.todo.anotherSophiaReason"),
+        label: t("models.todo.retry"),
+        busy,
+      };
+    case "ports_busy":
+      return {
+        message: t("models.todo.portsBusy"),
+        reason: t("models.todo.portsBusyReason", { from: PORT_FIRST, to: PORT_LAST }),
+        label: t("models.todo.retry"),
+        busy,
+      };
+  }
+  if (!healAttempted || !routerUnavailable(state)) return null;
+  return {
+    message: t("models.todo.routerDown"),
+    reason: failure,
+    label: t("models.todo.routerRestart"),
+    busy,
+  };
+}
+
+/// 换了端口（原来的被别的程序占了）、这一家正等着重启生效：节里一行灰字说为什么要重启。
+/// 跟着 `重启生效` 走——重启过了就不再说
+export function portMovedNote(state: GatewayState, agent: "codex" | "claude"): string | null {
+  if (state.portNotice?.code !== "port_moved") return null;
+  if (agent === "codex") {
+    return codexGateway(state).codex.needsRestart
+      ? t("models.note.portMoved", { app: codexAppName(state) })
+      : null;
+  }
+  const claude = agentGateway(state, "claude")?.claude;
+  return claude?.desktop.needsRestart ? t("models.note.portMovedClaude") : null;
+}
+
+/// 改用独立服务商（没登录 OpenAI）时：节里一行灰字说接法与后果（spec 2026-10-03-codex-hookup-auto R10）。
+/// 借用内置、开关关着时不说
+export function modeNote(state: GatewayState): string | null {
+  if (!state.supported) return null;
+  const view = codexGateway(state);
+  if (!view.enabled || view.codex.mode !== "provider") return null;
+  return t("models.note.modeSignedOut");
 }
 
 // ===== 模型的问题（就地在 Codex 页「第三方模型」节里显示） =====

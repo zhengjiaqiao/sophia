@@ -107,6 +107,15 @@ pub struct Settings {
     pub appearance: Appearance,
     /// 界面语言：跟随系统 / 简体 / 繁體 / English。旧文件没有这个字段，读成跟随系统
     pub language: Language,
+    // ── 自动上报（spec 2026-10-04-reporting-feedback R5、R6）──
+    /// 设置「关于」里的 `使用统计和错误报告`：默认开。旧文件没有这个字段，读成开
+    pub auto_report: bool,
+    /// 安装 ID（随机 UUID v4）：开着时第一次上报前生成；关掉时删掉（写盘时连键都不留），再打开换新的
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_id: Option<String>,
+    // ── 开机启动（spec 2026-10-05-keep-running R1）──
+    /// 第一次打开时已经默认注册过登录项：只做一次，之后以系统为准。旧文件没有这个字段，读成没做过
+    pub autostart_defaulted: bool,
 }
 
 /// 手写而不派生：`auto_check_skill_updates` 默认是开。新加字段照原样往下补一行默认值
@@ -130,7 +139,64 @@ impl Default for Settings {
             usage: UsageSettings::default(),
             appearance: Appearance::System,
             language: Language::System,
+            auto_report: true,
+            install_id: None,
+            autostart_defaulted: false,
         }
+    }
+}
+
+/// settings.json 读改写的锁（Codex 复审 1）：进程内只有一把，各处的 `Store` 共用；可重入——同一线程里
+/// 套着拿（命令拿着它，再调本身也拿它的方法）不自锁。读 → 改 → 写全程拿着它；只读不用拿（写盘是先写临时文件再改名）。
+/// 与配置写锁（`AppState.config_lock`）同时要时，先拿配置写锁再拿它
+struct ReentrantLock {
+    state: std::sync::Mutex<(Option<std::thread::ThreadId>, usize)>,
+    released: std::sync::Condvar,
+}
+
+impl ReentrantLock {
+    fn acquire(&self) {
+        let me = std::thread::current().id();
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        loop {
+            match state.0 {
+                None => {
+                    *state = (Some(me), 1);
+                    return;
+                }
+                Some(owner) if owner == me => {
+                    state.1 += 1;
+                    return;
+                }
+                Some(_) => {
+                    state = self.released.wait(state).unwrap_or_else(|p| p.into_inner());
+                }
+            }
+        }
+    }
+
+    fn release(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.1 = state.1.saturating_sub(1);
+        if state.1 == 0 {
+            state.0 = None;
+            self.released.notify_all();
+        }
+    }
+}
+
+static SETTINGS_LOCK: ReentrantLock = ReentrantLock {
+    state: std::sync::Mutex::new((None, 0)),
+    released: std::sync::Condvar::new(),
+};
+
+/// 拿着 settings.json 读改写锁的凭据，离开作用域放手。只属于拿它的线程（不能跨 `.await` 持有）
+#[must_use]
+pub struct SettingsGuard(std::marker::PhantomData<*const ()>);
+
+impl Drop for SettingsGuard {
+    fn drop(&mut self) {
+        SETTINGS_LOCK.release();
     }
 }
 
@@ -143,11 +209,21 @@ impl Store {
         Self { dir }
     }
 
-    /// 系统应用数据目录下的 `Sophia`：projects.json / settings.json 和后台程序副本都在里面
+    /// 系统应用数据目录下的 `Sophia`：projects.json / settings.json、后台程序副本和改写配置前的备份（`backups/`）都在里面
     pub fn default_dir() -> PathBuf {
         dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("Sophia")
+    }
+
+    /// 数据目录本身
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// 改写用户配置文件前的备份放这里：数据目录下的 `backups/`（布局见 `atomicfile::backup`）
+    pub fn backups_dir(&self) -> PathBuf {
+        self.dir.join(crate::atomicfile::BACKUPS_DIR)
     }
 
     pub fn load_projects(&self) -> io::Result<Vec<PathBuf>> {
@@ -163,7 +239,14 @@ impl Store {
         load_json(&self.dir.join("settings.json"))
     }
 
+    /// 拿 settings.json 读改写锁（见 [`SettingsGuard`]）。改设置的命令：先拿它，再读、改、写
+    pub fn lock_settings(&self) -> SettingsGuard {
+        SETTINGS_LOCK.acquire();
+        SettingsGuard(std::marker::PhantomData)
+    }
+
     pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
+        let _guard = self.lock_settings();
         save_json(&self.dir.join("settings.json"), settings)
     }
 
@@ -189,6 +272,7 @@ impl Store {
     /// 当前的全部 skill 名（见 `skills::migrate_baselines`），改过才写回。
     /// 要扫描结果才能迁移，所以只在扫描之后展开规则的地方用它，其余照旧 `load_settings`
     pub fn load_settings_migrating_auto_links(&self, sources: &[Source]) -> io::Result<Settings> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if crate::skills::migrate_baselines(&mut settings.auto_links, sources) {
             self.save_settings(&settings)?;
@@ -205,6 +289,7 @@ impl Store {
         report: &crate::models::SyncReport,
         at_ms: u64,
     ) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if crate::skills::record_auto_runs(
             &mut settings.auto_links,
@@ -225,6 +310,7 @@ impl Store {
         sources: &[Source],
         targets: &[Target],
     ) -> io::Result<Settings> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         let legacy = settings.manual_sources.clone();
         if crate::subscriptions::adopt(&mut settings.subscriptions, sources, targets, &legacy) {
@@ -238,6 +324,7 @@ impl Store {
         &self,
         overview: &McpOverview,
     ) -> io::Result<Settings> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if crate::mcp::migrate_baselines(&mut settings.mcp_auto_imports, overview) {
             self.save_settings(&settings)?;
@@ -253,6 +340,7 @@ impl Store {
         report: &crate::mcp::McpReport,
         at_ms: u64,
     ) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if crate::mcp::record_auto_runs(&mut settings.mcp_auto_imports, actions, report, at_ms) {
             self.save_settings(&settings)?;
@@ -266,6 +354,7 @@ impl Store {
         &self,
         overview: &McpOverview,
     ) -> io::Result<Settings> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings_migrating_mcp_auto_imports(overview)?;
         if crate::mcp::sources::adopt(
             &mut settings.mcp_subscriptions,
@@ -280,6 +369,7 @@ impl Store {
     /// 读设置，顺手按上限整理显示名单（见 `discovery::reconcile_shown`），改过才写回。
     /// `installed` 是已安装的 agent id，按 agent 表的先后
     pub fn load_settings_reconciling_shown(&self, installed: &[String]) -> io::Result<Settings> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if crate::discovery::reconcile_shown(installed, &mut settings) {
             self.save_settings(&settings)?;
@@ -289,6 +379,7 @@ impl Store {
 
     /// 记下手动项目加入的时间（毫秒）；已有记录不覆盖——移除前再加一次不算新加入
     pub fn mark_project_added(&self, path: &Path, at_ms: u64) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         let key = project_key(path);
         if settings.project_added_at.contains_key(&key) {
@@ -300,6 +391,7 @@ impl Store {
 
     /// 移除手动项目时一并忘掉它的加入时间；本来就没有记录时不写盘
     pub fn forget_project_added(&self, path: &Path) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if settings
             .project_added_at
@@ -318,6 +410,7 @@ impl Store {
 
     /// 记下一条看过的新手提示；已记过或空串不写盘
     pub fn mark_hint_seen(&self, id: &str) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if id.is_empty() || settings.seen_hints.iter().any(|x| x == id) {
             return Ok(());
@@ -341,6 +434,7 @@ impl Store {
 
     /// 设置外观；没变不写盘
     pub fn set_appearance(&self, value: Appearance) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if settings.appearance == value {
             return Ok(());
@@ -351,6 +445,7 @@ impl Store {
 
     /// 设置界面语言；没变不写盘
     pub fn set_language(&self, value: Language) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if settings.language == value {
             return Ok(());
@@ -361,6 +456,7 @@ impl Store {
 
     /// 设置 `自动检查 skill 更新`（R14）
     pub fn set_auto_check_skill_updates(&self, enabled: bool) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if settings.auto_check_skill_updates == enabled {
             return Ok(());
@@ -369,8 +465,20 @@ impl Store {
         self.save_settings(&settings)
     }
 
+    /// 记下「默认注册登录项」已经做过（spec 2026-10-05-keep-running R1）：不论注册成败都记，只做一次
+    pub fn mark_autostart_defaulted(&self) -> io::Result<()> {
+        let _guard = self.lock_settings();
+        let mut settings = self.load_settings()?;
+        if settings.autostart_defaulted {
+            return Ok(());
+        }
+        settings.autostart_defaulted = true;
+        self.save_settings(&settings)
+    }
+
     /// 记下这一次查更新的时刻（unix 秒）
     pub fn record_skill_update_check(&self, at: u64) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         settings.last_skill_update_check = Some(at);
         self.save_settings(&settings)
@@ -378,12 +486,91 @@ impl Store {
 
     /// 提示条按 ×：整批替换记下的 tree SHA（R15）
     pub fn set_dismissed_update_shas(&self, shas: Vec<String>) -> io::Result<()> {
+        let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         if settings.dismissed_update_shas == shas {
             return Ok(());
         }
         settings.dismissed_update_shas = shas;
         self.save_settings(&settings)
+    }
+}
+
+// ── 自动上报（spec 2026-10-04-reporting-feedback R5–R7）────────────────────────────
+impl Store {
+    /// 按天的异常次数与上报记录（`report-counts.json`），不存在时为空
+    pub fn load_report_counts(&self) -> io::Result<crate::report::CountsFile> {
+        load_json(&self.dir.join(crate::report::COUNTS_FILE))
+    }
+
+    pub fn save_report_counts(&self, counts: &crate::report::CountsFile) -> io::Result<()> {
+        save_json(&self.dir.join(crate::report::COUNTS_FILE), counts)
+    }
+
+    /// 没发出去的事件与当天已收过的签名（`report-events.json`），不存在时为空
+    pub fn load_report_events(&self) -> io::Result<crate::report::EventsFile> {
+        load_json(&self.dir.join(crate::report::EVENTS_FILE))
+    }
+
+    pub fn save_report_events(&self, events: &crate::report::EventsFile) -> io::Result<()> {
+        save_json(&self.dir.join(crate::report::EVENTS_FILE), events)
+    }
+
+    /// 上报用的安装 ID：关着为 None；开着还没有就生成一个存下
+    pub fn report_install_id(&self) -> io::Result<Option<String>> {
+        let _guard = self.lock_settings();
+        let mut settings = self.load_settings()?;
+        if !settings.auto_report {
+            return Ok(None);
+        }
+        if let Some(id) = &settings.install_id {
+            return Ok(Some(id.clone()));
+        }
+        let id = crate::report::new_install_id();
+        settings.install_id = Some(id.clone());
+        self.save_settings(&settings)?;
+        Ok(Some(id))
+    }
+
+    /// `使用统计和错误报告` 开关（R6）：关掉删安装 ID；再打开生成新的。开关一变就清掉按天的计数、没发出去的
+    /// 事件与崩溃旁文件，新的安装 ID 不带上旧 ID 那段时间的东西。没变（开着且已有 ID、关着且没有 ID）什么都不做。
+    ///
+    /// 关掉：先存设置（关掉优先），再删文件，删不掉只记一条日志、不报错（已经关了、ID 已删，界面不回滚成「开」）。
+    /// 打开：先删文件，删不掉就不打开、报错——旧 ID 那段时间留下的东西无论如何不会带着新 ID 发出去（复审 P1）
+    pub fn set_auto_report(&self, enabled: bool) -> io::Result<()> {
+        let _guard = self.lock_settings();
+        let mut settings = self.load_settings()?;
+        if settings.auto_report == enabled && settings.install_id.is_some() == enabled {
+            return Ok(());
+        }
+        if enabled {
+            self.remove_report_files()?;
+        }
+        settings.auto_report = enabled;
+        settings.install_id = enabled.then(crate::report::new_install_id);
+        self.save_settings(&settings)?;
+        if !enabled {
+            if let Err(e) = self.remove_report_files() {
+                log::warn!("关掉自动上报时删不掉本机的上报记录（下次打开前会再删）：{e}");
+            }
+        }
+        Ok(())
+    }
+
+    /// 删掉按天的计数、没发出去的事件与崩溃旁文件：每份都试，报第一个错。本来就没有不算错
+    fn remove_report_files(&self) -> io::Result<()> {
+        let mut result = Ok(());
+        for name in [
+            crate::report::COUNTS_FILE,
+            crate::report::EVENTS_FILE,
+            crate::report::CRASH_FILE,
+        ] {
+            match std::fs::remove_file(self.dir.join(name)) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => result = result.and(Err(e)),
+                _ => {}
+            }
+        }
+        result
     }
 }
 
@@ -674,10 +861,32 @@ mod tests {
             },
             appearance: Appearance::Dark,
             language: Language::ZhHant,
+            auto_report: false,
+            install_id: Some("3f0c0f9e-0000-4000-8000-000000000000".into()),
+            autostart_defaulted: false,
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
         assert!(!dir.join("settings.json.tmp").exists());
+    }
+
+    /// 「1 分钟」档已去掉（M17）：存着它的老设置读成 5 分钟，再存就写成 `"5"`
+    #[test]
+    fn removed_one_minute_refresh_loads_as_five() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"usage":{"menuBarEnabled":true,"refresh":"1"}}"#,
+        )
+        .unwrap();
+        let s = Store::new(dir.clone());
+        let loaded = s.load_settings().unwrap();
+        assert_eq!(loaded.usage.refresh, Refresh::Every5);
+        assert!(loaded.usage.menu_bar_enabled);
+        s.save_settings(&loaded).unwrap();
+        let text = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(text.contains(r#""refresh": "5""#), "{text}");
     }
 
     /// 叠放跟着每个 agent 走；2026-09-29 短暂存在过的顶层 `stacked / stackedSize` 读时忽略
@@ -723,12 +932,12 @@ mod tests {
         // 改一项用量设置后重启（重新用 Store 读取）：保持，其余字段不受影响
         let mut changed = loaded.clone();
         changed.usage.menu_bar_enabled = true;
-        changed.usage.refresh = Refresh::Every1;
+        changed.usage.refresh = Refresh::Every10;
         s.save_settings(&changed).unwrap();
         let reloaded = Store::new(dir).load_settings().unwrap();
         assert_eq!(reloaded, changed);
         assert!(reloaded.usage.menu_bar_enabled);
-        assert_eq!(reloaded.usage.refresh, Refresh::Every1);
+        assert_eq!(reloaded.usage.refresh, Refresh::Every10);
         assert_eq!(reloaded.disabled_harnesses, vec!["codex".to_string()]);
         assert_eq!(reloaded.manual_sources, vec![PathBuf::from("/a/skills")]);
     }
@@ -1101,6 +1310,24 @@ mod tests {
         assert!(!dir.join("settings.json").exists());
     }
 
+    /// 开机启动默认开只做一次（spec 2026-10-05-keep-running AC1）：旧文件没有字段读成「没做过」；
+    /// 记过之后再读是 true，别的字段不动
+    #[test]
+    fn autostart_defaulted_is_false_for_old_files_and_sticks_once_marked() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        let s = Store::new(dir.clone());
+        assert!(!s.load_settings().unwrap().autostart_defaulted);
+        std::fs::write(dir.join("settings.json"), r#"{"seenHints":["x"]}"#).unwrap();
+        assert!(!s.load_settings().unwrap().autostart_defaulted);
+        s.mark_autostart_defaulted().unwrap();
+        let after = s.load_settings().unwrap();
+        assert!(after.autostart_defaulted);
+        assert_eq!(after.seen_hints, ["x"]);
+        s.mark_autostart_defaulted().unwrap();
+        assert!(s.load_settings().unwrap().autostart_defaulted);
+    }
+
     /// 发现与安装加的设置字段：旧文件没有，读成默认（自动检查开、没查过、没关过提示条）；
     /// 没有 settings.json 时同样默认开；三个 setter 写盘后读回一致、别的字段不动
     #[test]
@@ -1136,6 +1363,109 @@ mod tests {
         let reread = s.load_settings().unwrap();
         assert!(!reread.auto_check_skill_updates);
         assert_eq!(reread.seen_hints, vec!["x".to_string()]);
+    }
+
+    /// settings.json 读改写的锁：同一线程里套着拿不自锁；别的线程拿着时要等它放手（Codex 复审 1）
+    #[test]
+    fn settings_lock_is_reentrant_and_exclusive() {
+        let t = TempTree::new();
+        let s = Store::new(t.dir("data/Sophia"));
+        {
+            let _outer = s.lock_settings();
+            let _inner = s.lock_settings();
+            s.mark_hint_seen("nested").unwrap();
+        }
+        let started = std::time::Instant::now();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let other = Store::new(s.dir.clone());
+        let holder = std::thread::spawn(move || {
+            let _guard = other.lock_settings();
+            tx.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        });
+        rx.recv().unwrap();
+        s.mark_hint_seen("after").unwrap();
+        assert!(started.elapsed() >= std::time::Duration::from_millis(150));
+        holder.join().unwrap();
+        assert_eq!(s.seen_hints().unwrap(), ["nested", "after"]);
+    }
+
+    /// 后台要安装 ID 与开关互斥（Codex 复审 1）：开关先关上，后台再要 ID 时读到的是关着，
+    /// 不生成 ID、不把旧的「开着」写回去
+    #[test]
+    fn install_id_request_waits_for_the_switch_and_never_turns_it_back_on() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        let s = Store::new(dir.clone());
+        let guard = s.lock_settings();
+        let background = {
+            let s = Store::new(dir.clone());
+            std::thread::spawn(move || s.report_install_id().unwrap())
+        };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        s.set_auto_report(false).unwrap();
+        drop(guard);
+        assert_eq!(background.join().unwrap(), None);
+        let settings = s.load_settings().unwrap();
+        assert!(!settings.auto_report);
+        assert_eq!(settings.install_id, None);
+    }
+
+    /// 自动上报（spec 2026-10-04-reporting-feedback R5、R6）：旧文件与没有 settings.json 都读成开着、还没有安装 ID；
+    /// 开着时第一次要安装 ID 才生成并存下，之后不变；关掉删安装 ID（文件里连键都没有）、清掉按天的计数；
+    /// 再打开换一个新的安装 ID。别的字段不动
+    #[test]
+    fn auto_report_defaults_on_and_install_id_follows_the_switch() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        let s = Store::new(dir.clone());
+        let fresh = s.load_settings().unwrap();
+        assert!(fresh.auto_report);
+        assert_eq!(fresh.install_id, None);
+
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"disabledHarnesses":["codex"],"autoCheckSkillUpdates":false}"#,
+        )
+        .unwrap();
+        let old = s.load_settings().unwrap();
+        assert!(old.auto_report);
+        assert_eq!(old.install_id, None);
+
+        let first = s.report_install_id().unwrap().unwrap();
+        assert_eq!(
+            s.report_install_id().unwrap().as_deref(),
+            Some(first.as_str())
+        );
+        let raw = || -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap()
+        };
+        assert_eq!(raw()["installId"], serde_json::json!(first));
+        assert_eq!(raw()["disabledHarnesses"], serde_json::json!(["codex"]));
+        assert_eq!(raw()["autoCheckSkillUpdates"], serde_json::json!(false));
+
+        let mut counts = crate::report::CountsFile::default();
+        counts.absorb("2026-10-04", &Default::default());
+        s.save_report_counts(&counts).unwrap();
+        assert_eq!(s.load_report_counts().unwrap(), counts);
+
+        s.set_auto_report(false).unwrap();
+        assert_eq!(raw()["autoReport"], serde_json::json!(false));
+        assert!(raw().get("installId").is_none(), "{}", raw());
+        assert_eq!(s.report_install_id().unwrap(), None);
+        assert!(!dir.join(crate::report::COUNTS_FILE).exists());
+        assert_eq!(s.load_report_counts().unwrap(), Default::default());
+        // 关着再关：不报错
+        s.set_auto_report(false).unwrap();
+
+        s.set_auto_report(true).unwrap();
+        let second = s.report_install_id().unwrap().unwrap();
+        assert_ne!(second, first);
+        assert_eq!(raw()["installId"], serde_json::json!(second));
+        // 开着再开：安装 ID 不换
+        s.set_auto_report(true).unwrap();
+        assert_eq!(s.report_install_id().unwrap(), Some(second));
+        assert_eq!(raw()["disabledHarnesses"], serde_json::json!(["codex"]));
     }
 
     /// 外观（spec 2026-09-30-language-and-theme R2）：旧文件没有这个字段、没有 settings.json、

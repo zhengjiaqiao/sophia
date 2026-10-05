@@ -78,6 +78,7 @@
   "market.toast.updatePartial": "Updated",
   "market.toast.undoCannot": "Couldn't undo",
   "market.toast.failedReason": "{name}: {reason}",
+  "market.toast.notLinked": "Not linked to {agents}: {reason}",
   "market.update.mark": "Update",
   "market.update.strip": {
     "one": "{count} skill has an update",
@@ -103,7 +104,6 @@
   "market.update.confirmOne": "Update",
   "market.update.confirmAll": "Update all",
   "market.update.neverChecked": "Never checked",
-  "market.update.lastCheck": "Last checked {time}",
   "market.update.hasCount": {
     "one": "{count} with an update",
     "other": "{count} with updates"
@@ -116,6 +116,8 @@
   "market.fallback.limited": "{service} is rate limiting requests, try again later",
   "market.fallback.bundled": "Can't reach {service} right now, showing the list bundled with the app",
   "market.fallback.cached": "Can't reach {service} right now, showing the last results · {time}",
+  "market.fallback.bundledBecause": "{reason}, showing the list bundled with the app",
+  "market.fallback.cachedBecause": "{reason}, showing the last results · {time}",
   "market.installs.wan": "{value}",
   "market.installs.people": {
     "one": "{value} install",
@@ -216,6 +218,9 @@
   "market.install.storeTaken": "{store}: the location is taken by a file",
   "market.install.dupInBatch": "There's already a {name} in this batch",
   "market.install.alreadyThere": "{store} already contains {name}",
+  "market.install.linkTaken": "something with the same name is already there",
+  "market.install.takenNote": "There's already a {name} there; it won't be overwritten",
+  "market.install.checking": "Checking agents",
   "market.install.mkStoreFailed": "Couldn't create the .agents folder: {error}",
   "market.install.notDirAfterExtract": "The unpacked result isn't a folder",
   "market.install.noExtractResult": "Unpacking returned no result",
@@ -257,6 +262,11 @@
   "market.net.tooLarge": "{service} returned too much data",
   "market.net.status": "{service} returned an error ({code})",
   "market.net.unreachable": "Can't reach {service}",
+  "market.net.unreadable": "{service} returned something Sophia can't read",
+  "market.net.interrupted": "The connection to {service} dropped while reading",
+  "market.net.timeout": "Timed out connecting to {service}",
+  "market.net.limitedWait": "{service} is rate limiting requests, try again in about {minutes} min",
+  "market.net.client": "Couldn't send the request: the networking component failed to start",
   "market.service.mcpDirectory": "MCP registry",
   "market.github.notFound": "Couldn't find this repo or branch on GitHub (or it isn't public)",
   "market.github.tooLarge": "The repository is over {mb} MB and can't be downloaded"

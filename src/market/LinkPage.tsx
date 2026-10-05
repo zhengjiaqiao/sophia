@@ -122,7 +122,8 @@ export function LinkPage(props: LinkPageProps) {
     : skillInstallBlock({
         items: pickedItems,
         selected: picked.length,
-        agents: state.requested.length,
+        agents: state.requestedFor(state.namesOf(picked)).length,
+        checking: state.checking,
       });
 
   const submit = async () => {
@@ -255,6 +256,7 @@ export function LinkPage(props: LinkPageProps) {
                     direct={state.directReaders}
                     checked={state.checked}
                     onToggle={state.toggle}
+                    viewOf={state.viewFor(state.namesOf(picked))}
                   />
                 </InstallBlock>
               </>

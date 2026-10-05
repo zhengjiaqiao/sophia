@@ -127,10 +127,14 @@ fn tree(f: &Fixture) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
-fn without_backups(tree: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
-    tree.into_iter()
-        .filter(|(name, _)| !name.contains(".sophia-models"))
-        .collect()
+/// 备份进 Sophia 的数据目录，不落在桌面应用的目录里：这里断言文件树里没有备份，原样返回
+fn no_backups_beside(tree: BTreeMap<String, Vec<u8>>) -> BTreeMap<String, Vec<u8>> {
+    assert!(
+        !tree.keys().any(|name| name.ends_with(".bak")),
+        "备份不该出现在原文件旁边：{:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    tree
 }
 
 fn claude_state(f: &Fixture) -> AgentGatewayView {
@@ -180,12 +184,9 @@ fn clear_hook(f: &Fixture) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
-fn our_service_uninstalled(f: &Fixture) -> bool {
-    f.world
-        .lock()
-        .unwrap()
-        .service_calls
-        .contains(&format!("uninstall {SERVICE_LABEL}"))
+/// 本进程里的路由停下了（两家都关了，R8）
+fn router_stopped(f: &Fixture) -> bool {
+    f.router().is_none()
 }
 
 // ---------- 打开与令牌（R5、R29） ----------
@@ -272,10 +273,6 @@ fn opening_writes_profile_meta_modes_and_the_claude_routing() {
     let s = settings_of(&f);
     assert!(s.enabled);
     assert_eq!(s.applied.as_ref().unwrap().phase, Phase::Done);
-    assert!(f.args().contains(&format!(
-        "--claude-routing {}",
-        f.root.join("data/gateway/claude-routing.json").display()
-    )));
     let desktop = desktop_state(&f);
     assert!(desktop.applied && !desktop.pending && !desktop.drift && !desktop.needs_restart);
 }
@@ -286,29 +283,28 @@ fn ac34_open_then_restore_returns_every_byte() {
     let f = claude_fixture();
     let before = tree(&f);
     f.app.enable_claude().unwrap();
-    assert_ne!(without_backups(tree(&f)), before);
+    assert_ne!(no_backups_beside(tree(&f)), before);
     let warnings = f.app.restore_claude().unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
-    assert_eq!(without_backups(tree(&f)), before);
+    assert_eq!(no_backups_beside(tree(&f)), before);
     assert!(settings_of(&f).applied.is_none());
     assert!(!settings_of(&f).enabled);
     assert!(claude_routing(&f).is_none());
-    assert!(our_service_uninstalled(&f), "Codex 也关着：卸服务");
+    assert!(router_stopped(&f), "Codex 也关着：停路由");
 }
 
 // ---------- 路由服务（R7–R9） ----------
 
-/// AC6：Codex 开着时 Claude 打开 / 切回，plist 参数不变、服务不被卸
+/// AC6：Codex 开着时 Claude 打开 / 切回，路由不重起、不停
 #[test]
 fn ac6_claude_toggles_leave_the_service_alone_while_codex_is_on() {
     let f = claude_fixture();
     f.configure();
     f.app.enable().unwrap();
-    let args = f.args();
     f.app.enable_claude().unwrap();
     f.app.restore_claude().unwrap();
-    assert_eq!(f.args(), args, "plist 参数不随开关变");
-    assert!(!our_service_uninstalled(&f));
+    assert_eq!(f.router_events(), ["start 47328"], "路由不随开关重起");
+    assert!(!router_stopped(&f));
     assert!(f.codex_state().enabled);
 }
 
@@ -320,7 +316,7 @@ fn ac7_service_is_kept_while_either_family_is_on() {
     f.app.enable().unwrap();
     f.app.enable_claude().unwrap();
     f.app.restore().unwrap();
-    assert!(!our_service_uninstalled(&f), "Claude 还开着");
+    assert!(!router_stopped(&f), "Claude 还开着");
     let routing = f.routing();
     assert_eq!(routing["models"], serde_json::json!([]));
     assert_eq!(
@@ -331,7 +327,7 @@ fn ac7_service_is_kept_while_either_family_is_on() {
     assert!(claude_routing(&f).is_some(), "Claude 请求照常");
 
     f.app.restore_claude().unwrap();
-    assert!(our_service_uninstalled(&f));
+    assert!(router_stopped(&f));
     assert!(claude_routing(&f).is_none());
     let leftovers: Vec<_> = std::fs::read_dir(f.codex())
         .unwrap()
@@ -351,10 +347,7 @@ fn closing_codex_keeps_the_service_for_a_pending_claude() {
     f.app.enable_claude().unwrap();
     assert!(!desktop_state(&f).applied, "还没写进桌面应用");
     f.app.restore().unwrap();
-    assert!(
-        !our_service_uninstalled(&f),
-        "Claude 等重启生效，路由要留着"
-    );
+    assert!(!router_stopped(&f), "Claude 等重启生效，路由要留着");
 }
 
 /// 开着、等重启生效时桌面应用的配置文件坏了：切回照样关得掉（认领读不成就当没有可认领的）
@@ -374,40 +367,11 @@ fn ac8_codex_takeover_rollback_keeps_the_service_for_claude() {
     let f = claude_fixture();
     f.app.enable_claude().unwrap();
     agents_manager_setup(&f);
-    f.world.lock().unwrap().healthy = false;
-    assert_eq!(code(f.app.takeover()), "router_down");
-    assert!(!our_service_uninstalled(&f));
+    // 路由已经因为 Claude 在跑；接管在写密钥时失败，要撤回本功能的痕迹
+    f.world.lock().unwrap().key_write_fails_for = Some("wecode".into());
+    assert_eq!(code(f.app.takeover()), "invalid");
+    assert!(!router_stopped(&f));
     assert!(claude_routing(&f).is_some());
-}
-
-/// AC9：旧版路由在跑、重启后仍不认家 claude → router_down，四个文件逐字节未变、没有 Claude 清单
-#[test]
-fn ac9_old_router_blocks_writing_the_desktop_config() {
-    let f = claude_fixture();
-    let before = tree(&f);
-    {
-        let mut w = f.world.lock().unwrap();
-        w.features = vec![];
-        w.features_after_restart = Some(vec![]);
-    }
-    let error = f.app.enable_claude().unwrap_err();
-    assert_eq!(error.code, "router_down");
-    assert!(error.message.contains("路由版本过旧"), "{}", error.message);
-    assert_eq!(tree(&f), before);
-    assert!(claude_routing(&f).is_none());
-    assert!(!settings_of(&f).enabled, "开关滑回");
-    assert!(settings_of(&f).applied.is_none());
-    assert!(f
-        .world
-        .lock()
-        .unwrap()
-        .service_calls
-        .contains(&"restart".to_owned()));
-
-    // 重启后换上了新版本：照常写
-    f.world.lock().unwrap().features_after_restart = Some(vec!["claude".into()]);
-    f.app.enable_claude().unwrap();
-    assert!(settings_of(&f).applied.is_some());
 }
 
 // ---------- 什么时候写（R28、R49） ----------
@@ -424,16 +388,10 @@ fn ac29_running_app_or_invalid_files_are_not_written() {
     let desktop = desktop_state(&f);
     assert!(desktop.pending && desktop.needs_restart && !desktop.applied);
     // 路由现在就装好（2026-10-01：开着却没路由，页面会报「路由没在跑」叠在 `重启生效` 旁）
-    assert!(
-        f.world.lock().unwrap().installed.is_some(),
-        "拨开时就装路由"
-    );
+    assert_eq!(f.router(), Some(47328), "拨开时就起路由");
     // 重启生效之前又拨关：桌面应用里什么都没写过，路由随之卸掉（Codex 也关着）
     f.app.restore_claude().unwrap();
-    assert!(
-        f.world.lock().unwrap().installed.is_none(),
-        "拨关时卸掉刚装的路由"
-    );
+    assert!(router_stopped(&f), "拨关时停掉刚起的路由");
     assert_eq!(tree(&f), before);
 
     let f = claude_fixture();
@@ -505,11 +463,11 @@ fn ac33_failed_open_is_undone_in_the_same_action() {
         fail_at(&f, target);
         let error = f.app.enable_claude().unwrap_err();
         assert!(error.message.contains("模拟"), "{}", error.message);
-        assert_eq!(without_backups(tree(&f)), before, "{target:?}");
+        assert_eq!(no_backups_beside(tree(&f)), before, "{target:?}");
         let s = settings_of(&f);
         assert!(s.applied.is_none() && !s.enabled, "{target:?}");
         assert!(claude_routing(&f).is_none());
-        assert!(our_service_uninstalled(&f));
+        assert!(router_stopped(&f));
     }
 }
 
@@ -518,7 +476,7 @@ fn ac33_failed_open_is_undone_in_the_same_action() {
 fn ac33_crash_after_meta_is_rolled_forward_by_rewrite() {
     let reference = claude_fixture();
     reference.app.enable_claude().unwrap();
-    let expected = without_backups(tree(&reference));
+    let expected = no_backups_beside(tree(&reference));
 
     let f = claude_fixture();
     set_hook(&f, |file| {
@@ -545,7 +503,7 @@ fn ac33_crash_after_meta_is_rolled_forward_by_rewrite() {
     assert!(desktop_state(&f).drift);
 
     f.app.enable_claude().unwrap();
-    assert_eq!(without_backups(tree(&f)), expected);
+    assert_eq!(no_backups_beside(tree(&f)), expected);
     let s = settings_of(&f);
     assert_eq!(s.applied.as_ref().unwrap().phase, Phase::Done);
     assert_eq!(s.applied.as_ref().unwrap().originals, originals_before);
@@ -601,11 +559,11 @@ fn ac33_failed_restore_is_finished_by_trying_again() {
         assert!(!s.enabled);
         assert_eq!(s.applied.as_ref().unwrap().phase, Phase::Restoring);
         assert!(desktop_state(&f).restore_unfinished);
-        assert!(!our_service_uninstalled(&f), "没做完之前路由留着");
+        assert!(!router_stopped(&f), "没做完之前路由留着");
 
         clear_hook(&f);
         f.app.restore_claude().unwrap();
-        assert_eq!(without_backups(tree(&f)), before, "{target:?}");
+        assert_eq!(no_backups_beside(tree(&f)), before, "{target:?}");
         assert!(settings_of(&f).applied.is_none());
         assert!(!desktop_state(&f).restore_unfinished);
     }
@@ -755,7 +713,7 @@ fn ac36_takeover_and_give_back_a_foreign_config() {
         json_of(&f, DesktopFile::Claude3pConfig)["deploymentMode"],
         "3p"
     );
-    assert_eq!(without_backups(tree(&f)), before);
+    assert_eq!(no_backups_beside(tree(&f)), before);
     assert!(!settings_of(&f).takeover);
 
     // 接管之后别家那份被删了（工具卸载）：换不回去，两处 deploymentMode 回到 1p，回到 Claude 账号
@@ -1119,7 +1077,7 @@ fn ac51_restart_quits_writes_then_opens() {
         error.message
     );
     assert!(f.world.lock().unwrap().running, "仍然打开了");
-    assert_eq!(without_backups(tree(&f)), before, "新打开没写成：撤回");
+    assert_eq!(no_backups_beside(tree(&f)), before, "新打开没写成：撤回");
 
     // 不在运行 → 等同打开 Claude
     let f = claude_fixture();
@@ -1334,7 +1292,7 @@ fn ac41_copy_providers_from_the_other_family() {
     let view = claude_state(&f);
     assert_eq!(view.providers.len(), 2);
     for provider in &view.providers {
-        assert!(provider.has_key, "{}", provider.name);
+        assert_eq!(provider.key, KeyStatus::Set, "{}", provider.name);
         assert!(provider.models.iter().all(|m| !m.selected));
         assert_eq!(provider.models.len(), 2);
     }
@@ -1357,7 +1315,7 @@ fn state_has_both_families_in_order() {
     assert!(codex.codex.is_some() && codex.claude.is_none());
     let claude = &state.agents[1];
     assert_eq!(claude.providers[0].id, "ap");
-    assert!(claude.providers[0].has_key);
+    assert_eq!(claude.providers[0].key, KeyStatus::Set);
     let view = claude.claude.as_ref().unwrap();
     assert!(view.profile_models.is_empty(), "还没打开，profile 不存在");
     let json = serde_json::to_value(&state).unwrap();
@@ -1373,7 +1331,7 @@ fn state_has_both_families_in_order() {
     assert_eq!(json["agents"][1]["agent"], "claude");
     assert!(json["agents"][1]["claude"]["desktop"]["needsRestart"].is_boolean());
     assert!(json["agents"][0].get("claude").is_none());
-    // R39：顶层只剩 supported、router、agents，不留 Codex 的旧字段
+    // R39：顶层只剩 supported、router、portNotice（2026-10-03 网关并入进程）、agents，不留 Codex 的旧字段
     let mut keys: Vec<&str> = json
         .as_object()
         .unwrap()
@@ -1381,7 +1339,7 @@ fn state_has_both_families_in_order() {
         .map(String::as_str)
         .collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["agents", "router", "supported"]);
+    assert_eq!(keys, ["agents", "portNotice", "router", "supported"]);
     assert!(json["router"].get("protocol").is_none());
 }
 
@@ -1401,6 +1359,184 @@ fn restoring_claude_keeps_the_service_while_codex_still_points_at_it() {
     f.app.enable_claude().unwrap();
     f.write_config("openai_base_url = \"http://127.0.0.1:47328/v1\"\n");
     f.app.restore_claude().unwrap();
-    assert!(!our_service_uninstalled(&f));
+    assert!(!router_stopped(&f));
     assert!(claude_routing(&f).is_none());
+}
+
+/// R4：Claude 这家的密钥读不出（密钥文件损坏）时，打开报「不可用：原因」，不说「还没有密钥」，什么都不写
+#[test]
+fn enabling_claude_with_an_unreadable_key_names_the_reason() {
+    let f = claude_fixture();
+    let reason = sophia_core::t!("models.secrets.corrupt");
+    f.world
+        .lock()
+        .unwrap()
+        .key_errors
+        .insert(key_slot(Agent::Claude, "ap"), reason.clone());
+    let view = claude_state(&f);
+    assert_eq!(view.providers[0].key, KeyStatus::Unreadable);
+    assert_eq!(
+        view.providers[0].key_problem.as_deref(),
+        Some(reason.as_str())
+    );
+    let error = f.app.enable_claude().unwrap_err();
+    assert_eq!(error.code, "invalid");
+    assert!(error.message.contains(&reason), "{}", error.message);
+    assert!(f.world.lock().unwrap().claude.applied.is_none());
+}
+
+// ---------- 网关并入 Sophia 进程（spec 2026-10-03-gateway-in-app） ----------
+
+/// 模拟 Sophia 退出后再打开：路由不在了，记录清空
+fn relaunch(f: &Fixture) {
+    let mut w = f.world.lock().unwrap();
+    w.router = None;
+    w.router_events.clear();
+    w.events.clear();
+}
+
+/// AC9：Claude 在第三方模式且在运行，确认退出：退出 → 切回官方 → 重新打开；「开着」不变，路由停下
+#[test]
+fn ac9_detach_switches_a_running_claude_back_and_keeps_the_choice() {
+    let f = claude_fixture();
+    let before = tree(&f);
+    f.app.enable_claude().unwrap();
+    f.world.lock().unwrap().running = true;
+    f.world.lock().unwrap().events.clear();
+    assert!(f.app.quit_preview().claude);
+    let steps = Mutex::new(Vec::new());
+    let failures = f
+        .app
+        .detach_for_quit(|| (), |step| steps.lock().unwrap().push(step));
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(steps.into_inner().unwrap(), [QuitStep::RestartingClaude]);
+    assert_eq!(no_backups_beside(tree(&f)), before);
+    let events = f.world.lock().unwrap().events.clone();
+    assert_eq!(events.first().map(String::as_str), Some("quit"));
+    assert_eq!(events.last().map(String::as_str), Some("open"));
+    let s = settings_of(&f);
+    assert!(s.enabled, "开着是用户的选择，退出不改");
+    assert!(s.applied.is_none());
+    assert!(router_stopped(&f));
+}
+
+/// Claude 没在运行：直接切回，不替用户打开它
+#[test]
+fn detach_writes_a_closed_claude_without_opening_it() {
+    let f = claude_fixture();
+    let before = tree(&f);
+    f.app.enable_claude().unwrap();
+    f.world.lock().unwrap().events.clear();
+    assert!(f.app.detach_for_quit(|| (), |_| {}).is_empty());
+    assert_eq!(no_backups_beside(tree(&f)), before);
+    assert!(!f.world.lock().unwrap().events.contains(&"open".to_owned()));
+    assert!(settings_of(&f).enabled);
+}
+
+/// AC10：Claude 15 秒内没退出：报 desktop_busy、Claude 留在第三方模式；Codex 照样改回并重启
+#[test]
+fn ac10_claude_that_will_not_quit_is_reported_and_codex_still_detaches() {
+    let f = claude_fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.app.enable_claude().unwrap();
+    {
+        let mut w = f.world.lock().unwrap();
+        w.running = true;
+        w.quit_error = Some(std::io::ErrorKind::TimedOut);
+        w.codex_app_running = true;
+    }
+    let failures = f.app.detach_for_quit(|| (), |_| {});
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].agent, Agent::Claude);
+    assert_eq!(failures[0].code, "desktop_busy");
+    assert_eq!(f.read_config(), super::tests::ORIGINAL);
+    assert_eq!(f.world.lock().unwrap().codex_events, ["quit", "open"]);
+    assert!(settings_of(&f).applied.is_some(), "Claude 还在第三方模式");
+    assert!(router_stopped(&f));
+}
+
+/// AC11（Claude）：退出时切回了；再打开 Sophia、Claude 没在运行：当场写回第三方模式
+#[test]
+fn attach_rewrites_claude_after_quitting() {
+    let f = claude_fixture();
+    f.app.enable_claude().unwrap();
+    let profile = json_of(&f, DesktopFile::Profile);
+    f.app.detach_for_quit(|| (), |_| {});
+    relaunch(&f);
+    let report = f.app.attach();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert_eq!(f.router(), Some(47328));
+    assert_eq!(json_of(&f, DesktopFile::Profile), profile);
+    assert_eq!(settings_of(&f).applied.unwrap().phase, Phase::Done);
+
+    // Claude 在运行：写不了，记为待生效（重启生效）
+    let f = claude_fixture();
+    f.app.enable_claude().unwrap();
+    f.app.detach_for_quit(|| (), |_| {});
+    relaunch(&f);
+    f.world.lock().unwrap().running = true;
+    f.app.attach();
+    assert_eq!(f.router(), Some(47328), "路由先起来");
+    let desktop = desktop_state(&f);
+    assert!(desktop.pending && desktop.needs_restart && !desktop.applied);
+}
+
+/// AC15（Claude）：被强制结束时 Claude 在第三方模式：再打开只起路由，桌面应用的文件不动
+#[test]
+fn attach_after_a_crash_leaves_claude_files_alone() {
+    let f = claude_fixture();
+    f.app.enable_claude().unwrap();
+    let files = tree(&f);
+    relaunch(&f);
+    f.app.attach();
+    assert_eq!(f.router(), Some(47328));
+    assert_eq!(tree(&f), files);
+}
+
+/// R13：换了端口：Claude 没在运行就按新端口重写；在运行就待生效
+#[test]
+fn a_port_move_rewrites_claude_for_the_new_port() {
+    let f = claude_fixture();
+    f.app.enable_claude().unwrap();
+    relaunch(&f);
+    f.world
+        .lock()
+        .unwrap()
+        .occupied
+        .insert(47328, Occupant::Other);
+    f.app.attach();
+    assert_eq!(f.router(), Some(47329));
+    assert_eq!(
+        json_of(&f, DesktopFile::Profile)["inferenceGatewayBaseUrl"],
+        "http://127.0.0.1:47329/claude"
+    );
+
+    let f = claude_fixture();
+    f.app.enable_claude().unwrap();
+    relaunch(&f);
+    {
+        let mut w = f.world.lock().unwrap();
+        w.occupied.insert(47328, Occupant::Other);
+        w.running = true;
+    }
+    f.app.attach();
+    assert_eq!(
+        json_of(&f, DesktopFile::Profile)["inferenceGatewayBaseUrl"],
+        "http://127.0.0.1:47328/claude",
+        "在运行时不写"
+    );
+    let desktop = desktop_state(&f);
+    assert!(desktop.pending && desktop.needs_restart);
+}
+
+/// R10：关机时不动 Claude
+#[test]
+fn exit_sync_leaves_claude_alone() {
+    let f = claude_fixture();
+    f.app.enable_claude().unwrap();
+    let files = tree(&f);
+    f.app.exit_sync();
+    assert_eq!(tree(&f), files);
+    assert!(settings_of(&f).applied.is_some());
 }

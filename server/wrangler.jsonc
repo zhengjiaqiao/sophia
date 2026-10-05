@@ -1,0 +1,32 @@
+// Sophia 接收服务：每日上报、自身错误事件、用户反馈，外加维护者统计页 /admin。
+// 部署步骤见 README.md。管理口令 ADMIN_TOKEN 是 secret，不写在这里。
+{
+  // Worker 名就是对外地址的第一段：api.<账号子域>.workers.dev（中性，以后加接口不用改名）
+  "name": "api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sophia-telemetry",
+      "database_id": "179de9d3-0a65-4259-9710-b631c887ac7b",
+      "migrations_dir": "migrations"
+    },
+    // 用户反馈与截图单独一个库（截图写满它也不影响上报）
+    {
+      "binding": "FB",
+      "database_name": "sophia-feedback",
+      "database_id": "de9625f5-3e79-4503-a65b-e412fc2e01ff",
+      "migrations_dir": "migrations-feedback"
+    }
+  ],
+  // 按 IP 限流（键是 CF-Connecting-IP，只在内存里用，不写库）。period 只能是 10 或 60。
+  // 按机房宽松计数；免费档实测（2026-10-04）部署接受但不生效，配置留着无害，防刷靠库里的日上限与字节预算。
+  "ratelimits": [
+    { "name": "RL", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } }
+  ],
+  // 每天 UTC 03:17 按保留期清理与汇总
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": { "enabled": false }
+}

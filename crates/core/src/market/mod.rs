@@ -154,6 +154,32 @@ pub struct InstallPlan {
     pub direct_readers: Vec<String>,
     /// 装完要建的链接（`ActionKind::Create`，指向各 `InstallItem::dest`）
     pub links: Vec<crate::models::PlannedAction>,
+    /// 这个位置上要靠链接才读得到的 agent（`harnesses` 里全部，勾没勾都列；直接读取的不列）：
+    /// 安装页据此把「那里已有同名的」那一行画成不能勾（M14）
+    pub agent_dirs: Vec<AgentDir>,
+}
+
+/// 一个要靠链接才读得到的 agent 在这个位置的 skill 目录
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDir {
+    pub harness_id: String,
+    pub dir: PathBuf,
+    /// 这次勾了它（要给它建链接）
+    pub chosen: bool,
+    /// 要装的 skill 里，这个目录已经有同名东西的（文件夹、别的链接）：不覆盖、不建链接
+    pub taken: Vec<String>,
+}
+
+/// 装上了、但没给某个勾了的 agent 链上（M14）：那里已有同名的，或建链接失败
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unlinked {
+    pub harness_id: String,
+    /// skill 名
+    pub name: String,
+    /// 给人看的原因：`那里已有同名的`，或建链接失败的那一句
+    pub reason: String,
 }
 
 /// 计划里的一个 skill
@@ -179,6 +205,10 @@ pub struct InstallOutcome {
     pub failed: BTreeMap<String, String>,
     /// 建链接的逐条结果
     pub links: crate::models::SyncReport,
+    /// 装上了但没链上的 agent（勾了、那里已有同名的或建链接失败）。提示条据此说「没链上」，不能只看 `links`：
+    /// 已有同名的那一格根本不出动作
+    #[serde(default)]
+    pub unlinked: Vec<Unlinked>,
     /// 这次装下 / 更新后的安装记录；调用方合进 `installs.json`（`installs::upsert`）
     pub records: Vec<InstallRecord>,
     /// 命令层登记撤销记录后填的 id；core 从不填

@@ -19,6 +19,9 @@ import {
   modelIssues,
   modelLabel,
   parseBackendError,
+  modeNote,
+  portMovedNote,
+  routerTodo,
   routerUnavailable,
   selectModel,
   settleAfterRestart,
@@ -29,7 +32,7 @@ import {
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
 import { codexGateway } from "./types.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState } from "./types.ts";
-import { ChipRow, Confirm, HintStrip, ModelChip, NoticePanel, Spinner } from "./ui/index.ts";
+import { ChipRow, Confirm, ModelChip, NoticePanel, Spinner } from "./ui/index.ts";
 import { HINTS, useHint } from "./hints.ts";
 import { CodexKeySlot, CodexSwitch } from "./codexControls.tsx";
 import { GatewayBlock, bodyLayer } from "./ModelsGateways.tsx";
@@ -45,7 +48,7 @@ import "./ModelsTab.css";
 /// - **页面头**：`←` + `Codex`，不放控件
 /// - **新手提示条** `first-codex`：页面头下、能力行上方；拨过开关或加过一家网关就算学会
 /// - **能力行**：`第三方模型` + 紧跟的开关（＝配置里开没开：拨了就写、不确认，乐观翻转，没写成滑回），
-///   开关右边 12 那一位只出一颗键：`重启生效` / `启动 Codex` / `卸下后台服务`（重启优先于启动、启动优先于卸下，
+///   开关右边 12 那一位只出一颗键：`重启生效` / `启动 Codex`（重启优先于启动，
 ///   codexKeyKind）——
 ///   一条左沿、一列控件：开关、待办条的键、`+ 网关`、网关行尾动作的右沿在同一条竖线上。
 ///   键即状态——Codex 的 `needsRestart` 比的是 Codex 启动时加载的配置与现在，用户用任何方式重启 Codex 键都会自己消失；
@@ -120,7 +123,6 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   /// 这一节正在做一件写 Codex 设置的事（重启、接管、重启路由、存网关……）：对同一对象的下一次操作
   /// 先不接（键禁用并说「正在处理上一步」）；不锁页面、不锁别的页，勾选排队不受它影响
   const [busy, onBusy] = useState(false);
-  const [uninstalling, setUninstalling] = useState(false);
   /// 网关行展开着的那几家（进这一页时都收着）
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
@@ -177,9 +179,14 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
     blocked: banner || notice !== null || hasTodos || confirmRestart || gatewayPanel,
   });
   const hint = (
-    <HintStrip open={codexHint.visible} onDismiss={codexHint.dismiss} flush>
-      {HINTS["first-codex"]({ agents: [], skills: 0 })}
-    </HintStrip>
+    <NoticePanel
+      scope="section"
+      mark={false}
+      open={codexHint.visible}
+      onClose={codexHint.dismiss}
+      flush
+      message={HINTS["first-codex"]({ agents: [], skills: 0 })}
+    />
   );
 
   /// 轻查：后台例行读取，不显示忙碌、不锁页面（焦点重读、键显示时的轮询）
@@ -492,12 +499,6 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
     }
   };
 
-  const uninstall = async () => {
-    setUninstalling(true);
-    await run(t("models.notice.uninstallFailed"), () => api.gatewayRestore("codex"));
-    if (mounted.current) setUninstalling(false);
-  };
-
   if (!state) {
     return (
       <AgentPage title={tool.name} lead={hint}>
@@ -516,6 +517,10 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
       : null;
   const headNotice = notice !== null && rowNotice === null ? notice : null;
 
+  /// 换了端口、Codex 等着重启：节头下一行灰字说为什么（跟着 `重启生效` 走）
+  const portNote = portMovedNote(state, "codex");
+  /// 没登录 OpenAI、改用了独立服务商：同一位置、同一种灰字说接法与后果
+  const modeText = modeNote(state);
   const todos = sectionTodos({
     tool,
     state,
@@ -548,16 +553,14 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
         />
       }
       actions={
-        // 开关右边 12：它引起的下一步（重启生效 / 启动 Codex），手刚拨完开关，下一步就在它旁边（②）；
-        // 同一位的 `卸下后台服务`（关着而服务还装着时）。三颗不会同时出现，与托盘同一段逻辑
+        // 开关右边 12：它引起的下一步（重启生效 / 启动 Codex），手刚拨完开关，下一步就在它旁边（②）。
+        // 两颗不会同时出现，与托盘同一段逻辑
         <CodexKeySlot
           state={state}
           phase={phase}
           busy={busy}
-          uninstalling={uninstalling}
           onRestart={() => setConfirmRestart(true)}
           onLaunch={() => void launch()}
-          onUninstall={() => void uninstall()}
           onDoneDismiss={dismissDone}
           place="section"
         />
@@ -574,6 +577,8 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
           />
         </div>
       ) : null}
+      {portNote !== null ? <p className="models-port-note">{portNote}</p> : null}
+      {modeText !== null ? <p className="models-port-note">{modeText}</p> : null}
       <InUseRow state={state} onRemove={removeModel} />
       {todos.length > 0 ? <div className="models-todos">{todos}</div> : null}
       <GatewayBlock
@@ -617,7 +622,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   );
 }
 
-/// 行内待办条（DESIGN「行内待办条」）：路由没在跑（排在最前，原因跟在主句后同一行）、正由
+/// 行内待办条（DESIGN「行内待办条」）：路由没在跑或没接上（排在最前，原因跟在主句后同一行）、正由
 /// agents-manager 管理、Sophia 写进去的设置被改掉了。都不给「稍后」，问题解决自动收起；执行时键换成忙碌指示
 export function sectionTodos({
   tool,
@@ -639,16 +644,18 @@ export function sectionTodos({
   onResolve: (kind: "takeover" | "rewrite") => void;
 }): ReactNode[] {
   const out: ReactNode[] = [];
-  if (showRouterTodo(state, healed)) {
+  // 路由没在跑，或打开 Sophia 时没接上（另一个 Sophia 在运行、端口都被占）：原因是那一种，或自愈失败的原话
+  const router = routerTodo(state, healed, routerFailure);
+  if (router !== null) {
     out.push(
       <NoticePanel
         key="router"
         scope="section"
-        message={t("models.todo.routerDown")}
-        reason={routerFailure ?? undefined}
-        busy={resolving === "router" ? t("models.todo.routerRestarting") : undefined}
+        message={router.message}
+        reason={router.reason ?? undefined}
+        busy={resolving === "router" ? router.busy : undefined}
         action={{
-          label: t("models.todo.routerRestart"),
+          label: router.label,
           onClick: onRestartRouter,
           disabledReason: busy ? t("models.control.busyPrev") : undefined,
         }}

@@ -64,7 +64,7 @@ test("English 的列表与计数：A, B, and C；1 个与多个写法不同", ()
   });
 });
 
-test("定宽处 English 用短写（第三批画板 2A 4A 6A）：窗口 5h / Week / 12h / 2d，键 Restart / Remove service，要填的 API key / Sign-in；全句留在提示框", () => {
+test("定宽处 English 用短写（第三批画板 2A 4A 6A）：窗口 5h / Week / 12h / 2d，键 Restart，要填的 API key / Sign-in；全句留在提示框", () => {
   inLang("en", () => {
     assert.equal(t("usage.window.session"), "5h");
     assert.equal(t("usage.window.weekly"), "Week");
@@ -74,13 +74,11 @@ test("定宽处 English 用短写（第三批画板 2A 4A 6A）：窗口 5h / We
     assert.equal(tn("usage.window.days", 1), "1d");
     assert.equal(tn("usage.window.days", 2), "2d");
     assert.equal(t("models.control.restartKey"), "Restart");
-    assert.equal(t("models.control.uninstallKey"), "Remove service");
     // 键面短写，提示框（另一个键）仍是全句
     assert.match(
       t("models.tip.restart", { app: "Codex" }),
       /^Restart the Codex desktop app to apply the change/,
     );
-    assert.match(t("models.tip.uninstall"), /background service/);
     assert.equal(t("market.mcp.needsKey"), "API key");
     assert.equal(t("market.mcp.needsSignIn"), "Sign-in");
   });
@@ -89,7 +87,6 @@ test("定宽处 English 用短写（第三批画板 2A 4A 6A）：窗口 5h / We
   assert.equal(t("usage.window.weeklyModel", { name: "Fable" }), "本周 · Fable");
   assert.equal(tn("usage.window.hours", 12), "12 小时");
   assert.equal(t("models.control.restartKey"), "重启生效");
-  assert.equal(t("models.control.uninstallKey"), "卸下后台服务");
   assert.equal(t("market.mcp.needsKey"), "需要 API key");
   inLang("zh-Hant", () => {
     assert.equal(t("usage.window.weekly"), "本週");

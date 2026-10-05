@@ -29,6 +29,8 @@ export interface ModelListProps {
   probe?: (provider: GatewayProvider, modelId: string) => Promise<unknown>;
   /// 列表为空时的一句
   empty?: ReactNode;
+  /// 给了就不能勾新的（还没有密钥，试调不了）：没勾的行不可用、按下说这一句；已勾的照常能取消
+  pickBlockedReason?: string;
 }
 
 export const entryKey = modelEntryKey;
@@ -40,7 +42,7 @@ export const entryKey = modelEntryKey;
  * 打开（挂载）时排一次序（组内已选在前），之后勾选 / 取消不挪位置，下次打开再重排。
  * 勾选当场写盘；超过约 8 行时框顶出筛选框（`筛选 40 个模型`），列表在框内滚动、底边渐隐。
  */
-export function ModelList({ entries, onToggle, probe, empty }: ModelListProps) {
+export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }: ModelListProps) {
   const [query, setQuery] = useState("");
   /// 正在试调用的行：再点不接（一次只试一回）
   const [probing, setProbing] = useState<ReadonlySet<string>>(() => new Set());
@@ -119,6 +121,7 @@ export function ModelList({ entries, onToggle, probe, empty }: ModelListProps) {
         label={name}
         checked={model.selected || probing.has(key)}
         onChange={() => void toggle(entry)}
+        disabledReason={model.selected ? undefined : pickBlockedReason}
         note={note}
         trailing={
           context === null ? (

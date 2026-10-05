@@ -25,6 +25,7 @@
     "process:allow-restart",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "log:default"
   ]
 }

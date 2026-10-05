@@ -7,7 +7,7 @@ use sophia_gateway::process::RestartReport;
 use sophia_gateway::runtime;
 use std::sync::Arc;
 
-/// `Sophia gateway …`：launchd 拉起的就是这个可执行文件的副本，参数为 `gateway run …`
+/// `Sophia gateway …`：命令行入口（界面不可用时应急、调试）
 pub fn cli(args: Vec<String>) -> i32 {
     match crate::runtime_store_dir() {
         Ok(dir) => runtime::cli(args, dir, crate::language::system_tags),
@@ -18,9 +18,13 @@ pub fn cli(args: Vec<String>) -> i32 {
     }
 }
 
-/// 仅 macOS 提供这项功能；其他系统上界面据 `supported: false` 隐藏标签页
+/// 仅 macOS 提供这项功能；其他系统上界面据 `supported: false` 隐藏标签页。
+/// 返回之前先把损坏的密钥文件另存（spec 2026-10-03-keys-in-file R5）。路由在本进程里，跑在 Tauri 的异步运行时上
 pub fn build(store_dir: std::path::PathBuf) -> Option<Arc<App>> {
-    cfg!(target_os = "macos").then(|| Arc::new(runtime::build_app(store_dir)))
+    cfg!(target_os = "macos").then(|| {
+        let handle = tauri::async_runtime::handle().inner().clone();
+        Arc::new(runtime::build_ui_app(store_dir, handle))
+    })
 }
 
 fn app(state: &AppState) -> Result<Arc<App>, String> {
@@ -34,10 +38,21 @@ fn app(state: &AppState) -> Result<Arc<App>, String> {
 async fn blocking<T: Send + 'static>(
     task: impl FnOnce() -> Result<T, AppError> + Send + 'static,
 ) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(task)
-        .await
-        .map_err(|e| format!("[internal] {e}"))?
-        .map_err(|e| e.to_string())
+    // 下层已经记过的失败（例如写配置没写成，被包成 internal）不再按错误代码记一次
+    let (result, inner_counted) =
+        tauri::async_runtime::spawn_blocking(move || sophia_core::report::scoped(task))
+            .await
+            .map_err(|e| format!("[internal] {e}"))?;
+    result.map_err(|e| {
+        let text = e.to_string();
+        // 内部错误（下层没记过的）计数并上传一条事件（R8）；别的代码只计数
+        if e.code == "internal" && !inner_counted {
+            sophia_core::report::capture_internal(&text);
+        } else {
+            sophia_core::report::count_command_error(e.code, inner_counted);
+        }
+        text
+    })
 }
 
 async fn current_state(app: Arc<App>) -> Result<GatewayState, String> {
@@ -47,9 +62,106 @@ async fn current_state(app: Arc<App>) -> Result<GatewayState, String> {
 #[tauri::command]
 pub async fn gateway_state(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
     match state.gateway.clone() {
-        Some(app) => current_state(app).await,
+        Some(app) => {
+            let mut view = current_state(app.clone()).await?;
+            // 开发者入口：报「读不到状态 · Codex 设置不归你的账户所有」，直到修复权限做成一次，
+            // 验证模型页那块灰面板与修复的路（正式版恒为 false）
+            if crate::diagnostics::gateway_state_fault() {
+                view.unreadable = Some(sophia_core::file_issue::FileIssue::from_io(
+                    &app.codex_config_path(),
+                    &std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+                    Some(u32::MAX),
+                    true,
+                ));
+            }
+            Ok(view)
+        }
         None => Ok(GatewayState::default()),
     }
+}
+
+/// 只认 Sophia 管的文件（逐字等于 Codex 的设置文件，或 Sophia 数据目录里的 JSON；从根到文件不能有软链），
+/// 交回这个字面路径；别的一律拒绝，不碰。调用处核对完紧接着动手
+fn managed_file(app: &App, path: &str) -> Result<std::path::PathBuf, String> {
+    let asked = std::path::PathBuf::from(path);
+    app.managed_file(&asked).ok_or_else(|| {
+        format!(
+            "[invalid] {}",
+            sophia_core::t!(
+                "models.unreadable.notManaged",
+                file = sophia_core::redact::redact(&asked.display().to_string())
+            )
+        )
+    })
+}
+
+/// `修复权限`（spec 2026-10-04-local-diagnostics R11）：经系统密码框把这份文件改回当前账户所有、本人可读写，
+/// 做成后返回重读的状态。用户在密码框里取消：`[cancelled]`（界面什么都不说）
+#[tauri::command]
+pub async fn gateway_fix_file_owner(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<GatewayState, String> {
+    let app = app(&state)?;
+    let path = managed_file(&app, &path)?;
+    let uid = sophia_core::file_issue::current_uid().ok_or_else(|| {
+        let text = format!(
+            "[internal] {}",
+            sophia_core::t!("models.unreadable.fixFailed", reason = "uid")
+        );
+        sophia_core::report::capture_internal(&text);
+        text
+    })?;
+    let script = crate::fileowner::admin_script(&path, uid, true).ok_or_else(|| {
+        format!(
+            "[invalid] {}",
+            sophia_core::t!("models.unreadable.notManaged", file = path.display())
+        )
+    })?;
+    let ran = tauri::async_runtime::spawn_blocking(move || crate::fileowner::run(&script))
+        .await
+        .map_err(|e| format!("[internal] {e}"))?;
+    match ran {
+        Ok(()) => {
+            crate::diagnostics::clear_gateway_state_fault();
+            gateway_state(state).await
+        }
+        Err(crate::fileowner::FixError::Cancelled) => Err("[cancelled] ".to_owned()),
+        Err(crate::fileowner::FixError::Failed(message)) => {
+            log::warn!("修复 {} 的权限失败：{message}", path.display());
+            // 系统命令（chown / chmod）没做成多半是外部原因：只计数、不上传原文（复审 P2）
+            sophia_core::report::count(sophia_core::report::Kind::Internal);
+            Err(AppError::new(
+                "internal",
+                sophia_core::t!(
+                    "models.unreadable.fixFailed",
+                    reason = message.lines().last().unwrap_or_default()
+                ),
+            )
+            .with_detail(sophia_core::redact::redact(&message))
+            .to_string())
+        }
+    }
+}
+
+/// `打开文件 ↗`：用默认应用打开 Sophia 管的那份文件（格式有误时自己改）
+#[tauri::command]
+pub fn gateway_open_file(
+    path: String,
+    handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let app = app(&state)?;
+    let path = managed_file(&app, &path)?;
+    handle
+        .opener()
+        .open_path(path.display().to_string(), None::<&str>)
+        .map_err(|e| {
+            let text = format!("[internal] {e}");
+            sophia_core::report::capture_internal(&text);
+            text
+        })
 }
 
 /// 新建或修改一家网关之后返回：这一家的 id、同步到另一家的那一家的 id（没同步为 null）与最新状态
@@ -77,18 +189,19 @@ pub async fn gateway_upsert_provider(
     let app = app(&state)?;
     let key = key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty());
     // 联网校验放在拿锁之前：锁只保护写文件的那一小段，否则 MCP 的同步命令会被一次网络请求卡住十秒。
-    // 先用新密钥向网关校验；失败就什么都不保存，错误的密钥不会覆盖钥匙串里原本好用的那个。
+    // 先用新密钥向网关校验；失败就什么都不保存，错误的密钥不会覆盖密钥文件里原本好用的那个。
     // 同步到另一家时也只联网这一次（R40）
     let verified = match &key {
         None => None,
         Some(key) => {
             let cleaned =
                 sophia_gateway::app::clean_base_url(&base_url).map_err(|e| e.to_string())?;
-            Some(
-                runtime::fetch_models(&cleaned, key)
-                    .await
-                    .map_err(|e| e.to_string())?,
-            )
+            Some(runtime::fetch_models(&cleaned, key).await.map_err(|e| {
+                // 日志按 spec 2026-10-04-local-diagnostics AC1 记一条；格式化时统一去隐私
+                log::warn!("校验网关 {cleaned} 的密钥时拉模型失败：{e}");
+                sophia_core::report::count_error_code(e.code);
+                e.to_string()
+            })?)
         }
     };
     // 这把锁会跨 .await 持有，必须是 tokio::sync::Mutex（std 的 guard 不是 Send，还会阻塞运行时线程）。
@@ -117,7 +230,7 @@ pub async fn gateway_upsert_provider(
     })
 }
 
-/// 删掉 `agent` 这一家的一个网关，连同它在钥匙串里的密钥（删了回不来，确认由界面负责）。
+/// 删掉 `agent` 这一家的一个网关，连同它在密钥文件里的密钥（删了回不来，确认由界面负责）。
 /// `also_other`：另一家同一地址的网关连同密钥一起删（R40）
 #[tauri::command]
 pub async fn gateway_remove_provider(
@@ -171,9 +284,16 @@ pub async fn gateway_fetch_models(
                 .await?;
         }
         Err(failure) => {
+            log::warn!(
+                "拉网关 {provider_id}（{base_url}）的模型失败：{}",
+                failure.error
+            );
+            sophia_core::report::count_error_code(failure.error.code);
             // 无法连接是那一家的状态：先把原因记下来（界面重读 state 就能在那一行显示），再照旧报错
             if let Some(reason) = failure.unreachable {
-                blocking(move || worker.record_unreachable_in(agent, &provider_id, reason)).await?;
+                let detail = failure.error.detail.clone();
+                blocking(move || worker.record_unreachable_in(agent, &provider_id, reason, detail))
+                    .await?;
             }
             return Err(failure.error.to_string());
         }
@@ -194,9 +314,15 @@ pub async fn gateway_probe_model(
     let app = app(&state)?;
     let target =
         blocking(move || app.provider_for_probe_in(agent, &provider_id, &model_id)).await?;
-    runtime::probe_target(&target)
-        .await
-        .map_err(|e| e.to_string())
+    runtime::probe_target(&target).await.map_err(|e| {
+        log::warn!(
+            "试调网关 {} 的模型 {} 失败：{e}",
+            target.api_base,
+            target.model
+        );
+        sophia_core::report::count_error_code(e.code);
+        e.to_string()
+    })
 }
 
 #[derive(serde::Deserialize)]
@@ -302,11 +428,15 @@ pub async fn gateway_restart_claude(
     current_state(app).await
 }
 
+/// 「再试一次」：重新接上（起路由，必要时换端口、写设置）。会写 Codex 设置，所以取 `config_lock`
 #[tauri::command]
 pub async fn gateway_restart(state: tauri::State<'_, AppState>) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    let worker = app.clone();
-    blocking(move || worker.restart_router()).await?;
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        blocking(move || Ok(worker.attach())).await?;
+    }
     current_state(app).await
 }
 

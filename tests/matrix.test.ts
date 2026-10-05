@@ -468,19 +468,19 @@ test("新手提示条的两个插槽：来源筛选下 / 表头上，与空态�
   assert.ok(empty.indexOf("probe-hint") < empty.indexOf("probe-empty"));
   // 没给就不占位
   assert.doesNotMatch(render(Matrix, base), /mx-hint/);
-  // 提示条开着：来源筛选的下内边距让成 16——认 HintStrip 的公开钩子 data-hint，
+  // 提示条开着：来源筛选的下内边距让成 16——认灰面板（进出用法）的公开钩子 data-hint，
   // 提示条不带上外距（flush），页面不碰提示条的内部类，也不再拿负外距去抵
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
   assert.match(
     css,
     /\.mx:has\(> \.mx-hint > \[data-hint="open"\]\) > \.mx-bar \{\s*padding-bottom: var\(--space-md\);/,
   );
-  assert.doesNotMatch(css, /\.ss-hint|is-hinting|margin-top: calc\(-1/);
+  assert.doesNotMatch(css, /\.ss-hint|\.ss-noticepanel|is-hinting|margin-top: calc\(-1/);
   const tabs = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
   assert.match(
     tabs,
     // 首次扫描那条与「有新版本」叠放（2026-09-30）：展开哪一张归 useHintStack
-    /<HintStrip\s+open=\{hintStack\.top === "first-scan"\}[\s\S]*?onDismiss=\{skillsHint\.dismiss\}\s+flush\s*>/,
+    /<NoticePanel\s+scope="section"\s+mark=\{false\}\s+open=\{hintStack\.top === "first-scan"\}[\s\S]*?onClose=\{skillsHint\.dismiss\}\s+flush\s/,
   );
 });
 
@@ -583,15 +583,36 @@ test("单格的结果：浮在被点那一格正下方（成功与失败同一�
   assert.match(line, /ss-toast--routine[\s\S]*?加到/);
   assert.doesNotMatch(line, /撤销/);
   assert.doesNotMatch(line, /docx/);
-  // 同一格失败时只出黑窗（一次只一条，失败优先），原因是整句
+  // 同一格失败时只出失败那一窗（一次只一条，失败优先），原因是整句；锚在格下，同成功是轻量一行（2026-10-04）
   const failed = render(Matrix, {
     ...base,
     cellToast: { id: 1, rowKey: "u|docx", columnId: "cx", node },
     cellNotice: { rowKey: "u|docx", columnId: "cx", text: "无法写入 Codex 的 skills 目录" },
   });
   assert.equal((failed.match(/class="ss-floattoast"/g) ?? []).length, 1);
-  assert.match(failed, /ss-toast--notice" data-kind="cannot" role="alert"/);
+  assert.match(failed, /ss-toast--routine" data-kind="cannot" role="alert"/);
   assert.match(failed, /class="ss-toast__message">无法写入 Codex 的 skills 目录</);
+  // 写 MCP 没写成（spec 2026-10-04-local-diagnostics R12）：整句 `context7 写进 [Codex] 失败 · 原因`，
+  // 第二行是写的那个文件；提示条里不放详情
+  const mcp = render(Matrix, {
+    ...base,
+    cellNotice: {
+      rowKey: "u|docx",
+      columnId: "cx",
+      text: "没有写入权限，没动",
+      failure: {
+        sentence: "toast.line.cannot.write",
+        names: ["context7"],
+        agents: [{ id: "codex", name: "Codex" }],
+        reason: "没有写入权限，没动",
+        stats: "~/.codex/config.toml",
+      },
+    },
+  });
+  assert.match(mcp, /data-kind="cannot"/);
+  assert.match(mcp, /context7[^]*写进[^]*失败[^]*没有写入权限，没动/);
+  assert.match(mcp, />~\/\.codex\/config\.toml</);
+  assert.doesNotMatch(mcp, />详情</);
   // 旧的行内一行与格下小黑窗的样式已撤
   const css = readFileSync(new URL("../src/Matrix.css", import.meta.url), "utf8");
   assert.doesNotMatch(

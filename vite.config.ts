@@ -8,6 +8,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react()],
 
+  // 打包后保留函数名与类名（组件名也是函数名）：出错页的详情和日志里的调用栈才读得出是哪个组件，
+  // 否则全是压缩后的 `$E`、`go`（spec 2026-10-04-local-diagnostics R7）
+  build: {
+    rolldownOptions: { output: { keepNames: true } },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
