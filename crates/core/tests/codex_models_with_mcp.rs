@@ -33,6 +33,7 @@ fn location(id: &str, path: &Path) -> McpLocation {
         path: path.to_path_buf(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

@@ -46,14 +46,22 @@ pub struct ReportEntry {
     /// 失败的机器可读类别，前端按它分支，不去认原因句的文字。只有建链 / 删链的失败会填
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fail_kind: Option<FailKind>,
+    /// 失败的技术原文（系统的错误原句，已去隐私；spec S18）：原因句给人看，原文进详情与日志
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
-/// 失败是哪一类（给前端判断用；原因句照旧是给人看的）
+/// 失败是哪一类（给前端判断用；原因句照旧是给人看的）。按 io 错误分：这三类是外部原因，只计数；
+/// 分不进去的算 Sophia 自身没料到的（spec S18）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FailKind {
     /// 目标目录无法写入：权限不够或只读文件系统
     NoWrite,
+    /// 磁盘满了
+    DiskFull,
+    /// 要动的东西已经不在了（目标目录、要删的链）
+    Missing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

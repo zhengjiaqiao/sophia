@@ -63,11 +63,16 @@ impl<'de> Deserialize<'de> for Language {
     }
 }
 
+/// 本程序写的 settings.json 格式版本；读到更高的版本时只读不写（spec S7）。旧文件没有这个字段，按 1 读
+pub const SETTINGS_VERSION: u64 = 1;
+
 /// 应用设置：被用户关掉的 harness id、手动添加的本体位置、自动同步规则
 /// 容器级 `default` 让旧格式（缺字段）照样能读
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
+    /// 格式版本（见 [`SETTINGS_VERSION`]）。更新版本的 Sophia 写的文件：读得出、拒绝写回
+    pub version: u64,
     /// 不显示名单：不在列表里显示的 agent id（见 `discovery::reconcile_shown`）
     pub disabled_harnesses: Vec<String>,
     /// 上次整理显示名单时已安装的 agent id。不在其中的已安装 agent 算新装的——
@@ -122,6 +127,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            version: SETTINGS_VERSION,
             disabled_harnesses: Vec::new(),
             known_installed: Vec::new(),
             manual_sources: Vec::new(),
@@ -246,8 +252,29 @@ impl Store {
     }
 
     pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
+        if settings.version > SETTINGS_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                crate::t!("common.settings.tooNew"),
+            ));
+        }
         let _guard = self.lock_settings();
         save_json(&self.dir.join("settings.json"), settings)
+    }
+
+    /// 启动时修坏文件（spec S7）：settings.json、projects.json 在但读不出（截断、半截、手改坏）时，
+    /// 改名另存为 `<文件名>.broken-<now>`（重名加 `-1`、`-2`…），之后按默认值继续。返回另存后的路径；
+    /// 文件不存在、读得出都不动。只在界面进程启动时调一次；命令行形态不调（只读、不修）
+    pub fn repair_if_corrupt(&self, now: u64) -> io::Result<Vec<PathBuf>> {
+        let _guard = self.lock_settings();
+        let mut moved = Vec::new();
+        if let Some(path) = repair_json::<Settings>(&self.dir.join("settings.json"), now)? {
+            moved.push(path);
+        }
+        if let Some(path) = repair_json::<Vec<PathBuf>>(&self.dir.join("projects.json"), now)? {
+            moved.push(path);
+        }
+        Ok(moved)
     }
 
     /// 上一次成功的用量读数（R13）：重启后托盘先显示它，再去取新数。只存读数本身，没有账号标识
@@ -589,15 +616,55 @@ fn load_json<T: DeserializeOwned + Default>(path: &Path) -> io::Result<T> {
     }
 }
 
-fn save_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+/// 文件在但读不出 → 改名另存并返回新路径；不存在或读得出 → None。读文件本身出错（没权限）照样报错
+fn repair_json<T: DeserializeOwned>(path: &Path, now: u64) -> io::Result<Option<PathBuf>> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if serde_json::from_slice::<T>(&bytes).is_ok() {
+        return Ok(None);
     }
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let base = format!("{name}.broken-{now}");
+    let mut target = parent.join(&base);
+    let mut n = 1;
+    while std::fs::symlink_metadata(&target).is_ok() {
+        target = parent.join(format!("{base}-{n}"));
+        n += 1;
+    }
+    std::fs::rename(path, &target)?;
+    Ok(Some(target))
+}
+
+/// 先写临时文件并落盘（fsync），再改名替换，再把目录落盘：断电时要么是旧文件、要么是完整的新文件，
+/// 不留半截（spec S7）
+fn save_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "parent"))?;
+    std::fs::create_dir_all(parent)?;
     let tmp = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec_pretty(value)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+    // 目录项的改名也要落盘；macOS/Linux 上对目录打开后 fsync 即可。目录 fsync 不被支持时不算错
+    #[cfg(unix)]
+    if let Ok(dir) = std::fs::File::open(parent) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -760,6 +827,7 @@ mod tests {
         let s = Store::new(dir.clone());
         assert_eq!(s.load_settings().unwrap(), Settings::default());
         let settings = Settings {
+            version: SETTINGS_VERSION,
             disabled_harnesses: vec!["a".into(), "b".into()],
             known_installed: vec!["a".into(), "c".into()],
             manual_sources: vec![PathBuf::from("/a/skills")],
@@ -1091,6 +1159,7 @@ mod tests {
             path: mcp_path,
             selector: None,
             matrix_hidden: false,
+            mirrors: Vec::new(),
         };
         let overview = crate::mcp::scan(&[location]);
         let migrated = s
@@ -1565,11 +1634,98 @@ mod tests {
         assert!(!dir.join("installs.json.tmp").exists());
     }
 
+    /// 读坏的文件照旧是错误、不静默清空；修复是另一步（`repair_if_corrupt`），只有界面进程启动时调
     #[test]
-    fn corrupt_file_is_an_error_not_silent_reset() {
+    fn corrupt_file_is_an_error_until_repaired() {
         let t = TempTree::new();
         let dir = t.dir("data/Sophia");
         std::fs::write(dir.join("projects.json"), "{oops").unwrap();
         assert!(Store::new(dir).load_projects().is_err());
+    }
+
+    /// spec S7：空文件、截断的文件各一个——另存为 `.broken-<时间>`、之后读出默认值；返回两个另存路径
+    #[test]
+    fn repair_moves_corrupt_files_aside_and_loads_defaults() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(dir.join("settings.json"), "").unwrap();
+        std::fs::write(dir.join("projects.json"), "[\"/a/b\", \"/c").unwrap();
+        let store = Store::new(dir.clone());
+        assert!(store.load_settings().is_err());
+
+        let moved = store.repair_if_corrupt(1_790_000_000).unwrap();
+        assert_eq!(
+            moved,
+            vec![
+                dir.join("settings.json.broken-1790000000"),
+                dir.join("projects.json.broken-1790000000"),
+            ]
+        );
+        assert!(!dir.join("settings.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(&moved[1]).unwrap(),
+            "[\"/a/b\", \"/c",
+            "坏文件原样另存"
+        );
+        assert_eq!(store.load_settings().unwrap(), Settings::default());
+        assert_eq!(store.load_projects().unwrap(), Vec::<PathBuf>::new());
+    }
+
+    /// 同一秒修两次（或上次另存的还在）：第二份带 `-1`，不覆盖
+    #[test]
+    fn repair_does_not_overwrite_an_earlier_broken_copy() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(dir.join("settings.json.broken-7"), "old").unwrap();
+        std::fs::write(dir.join("settings.json"), "{").unwrap();
+        let moved = Store::new(dir.clone()).repair_if_corrupt(7).unwrap();
+        assert_eq!(moved, vec![dir.join("settings.json.broken-7-1")]);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("settings.json.broken-7")).unwrap(),
+            "old"
+        );
+    }
+
+    /// 读得出的文件和不存在的文件都不动
+    #[test]
+    fn repair_leaves_healthy_and_missing_files_alone() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        let store = Store::new(dir.clone());
+        let mut settings = Settings::default();
+        settings.seen_hints.push("x".into());
+        store.save_settings(&settings).unwrap();
+        assert_eq!(store.repair_if_corrupt(1).unwrap(), Vec::<PathBuf>::new());
+        assert_eq!(store.load_settings().unwrap(), settings);
+        assert!(!dir.join("projects.json").exists());
+    }
+
+    /// 旧文件没有 `version` 按 1 读；更新版本写的文件读得出、写回被拒（不拿新版的内容盖掉）
+    #[test]
+    fn newer_settings_version_is_read_but_never_written_back() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        let store = Store::new(dir.clone());
+        std::fs::write(dir.join("settings.json"), "{\"seenHints\":[\"a\"]}").unwrap();
+        let old = store.load_settings().unwrap();
+        assert_eq!(old.version, SETTINGS_VERSION);
+        assert_eq!(old.seen_hints, vec!["a".to_string()]);
+
+        std::fs::write(
+            dir.join("settings.json"),
+            format!(
+                "{{\"version\":{},\"seenHints\":[\"b\"]}}",
+                SETTINGS_VERSION + 1
+            ),
+        )
+        .unwrap();
+        let newer = store.load_settings().unwrap();
+        assert_eq!(newer.seen_hints, vec!["b".to_string()]);
+        let err = store.save_settings(&newer).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Unsupported);
+        assert!(store.repair_if_corrupt(1).unwrap().is_empty(), "太新不算坏");
+        assert!(std::fs::read_to_string(dir.join("settings.json"))
+            .unwrap()
+            .contains("\"b\""));
     }
 }

@@ -132,6 +132,22 @@ test("faultHeadline：只取错误名与那一句（不带调用栈、路径行�
 
 // 应用内反馈（spec 2026-10-04-reporting-feedback R11、AC10）：上报关着（或 DO_NOT_TRACK）且有接收服务时，
 // 出错页换一句说法、`重新加载` 之后多一颗 `报告这个问题`；上报开着时照旧（上面那条）
+test("FaultView 外壳形态（spec S18）：标题换成「Sophia 出了问题」，只有 `重新加载`，没有 `详情`、没有 `报告这个问题`", () => {
+  const html = render(FaultView, {
+    details: "boom",
+    onReload: noop,
+    onCopy: noop,
+    shell: true,
+    onReport: noop,
+  });
+  assert.match(html, /Sophia 出了问题/);
+  assert.match(html, /重新加载后一般就好了/);
+  assert.match(html, /<button[^>]*class="ss-btn ss-btn--primary"[^>]*>重新加载<\/button>/);
+  assert.doesNotMatch(html, />详情</);
+  assert.doesNotMatch(html, /报告这个问题/);
+  assert.doesNotMatch(html, /boom/);
+});
+
 test("FaultView 给了 onReport：说法换成「反复出现的话，把问题报告给我们」，键行是 重新加载 · 报告这个问题 · 详情", () => {
   const html = render(FaultView, {
     details: "boom",

@@ -28,6 +28,9 @@ export interface PageFaultProps {
   onCopy: (text: string) => void | Promise<void>;
   /// 托盘面板的窄形态
   narrow?: boolean;
+  /// 主窗口外壳（侧栏、横幅、反馈小窗、退出确认）的兜底（spec S18）：整窗换成出错页，只有 `重新加载`
+  /// （重载整个窗口），没有 `详情` 与 `报告这个问题`——壳都没了，别的一概不画
+  shell?: boolean;
   /// 应用版本，写进详情；读不到传 null
   version?: string | null;
   /// 去隐私（后端 `redact_text`）：屏幕上的详情与复制出去的一样去过隐私（Codex 复审 7/7）。
@@ -82,13 +85,16 @@ export class PageFault extends Component<PageFaultProps, PageFaultState> {
   render(): ReactNode {
     const { failed, error, redacted } = this.state;
     if (!failed) return this.props.children;
-    const { narrow, onCopy, onReport, reportNote } = this.props;
+    const { narrow, shell, onCopy, onReport, reportNote } = this.props;
     return (
       <FaultView
         narrow={narrow}
+        shell={shell}
         details={redacted ?? faultHeadline(error)}
         onReload={() =>
-          this.setState({ failed: false, error: null, componentStack: "", redacted: null })
+          shell
+            ? window.location.reload()
+            : this.setState({ failed: false, error: null, componentStack: "", redacted: null })
         }
         onCopy={onCopy}
         // 只交出去过隐私的详情：还没做好（或没做成）时不带，绝不带 `faultHeadline` 的原文
@@ -105,6 +111,8 @@ export interface FaultViewProps {
   onReload: () => void;
   onCopy: (text: string) => void | Promise<void>;
   narrow?: boolean;
+  /// 外壳形态：只有 `重新加载`（见 `PageFaultProps.shell`）
+  shell?: boolean;
   /// 给了就有 `报告这个问题`（上报关着时），说明换成带「报告给我们」的那一句
   onReport?: () => void;
   /// 发出去之后的提示条，挂在 `报告这个问题` 那一格里
@@ -117,27 +125,34 @@ export function FaultView({
   onReload,
   onCopy,
   narrow = false,
+  shell = false,
   onReport,
   reportNote,
 }: FaultViewProps) {
   return (
     <div className={narrow ? "ss-pagefault ss-pagefault--narrow" : "ss-pagefault"} role="alert">
       <div className="ss-pagefault__block">
-        <h2 className="ss-pagefault__title">{t("common.pageFault.title")}</h2>
+        <h2 className="ss-pagefault__title">
+          {shell ? t("common.pageFault.shellTitle") : t("common.pageFault.title")}
+        </h2>
         <p className="ss-pagefault__sentence">
-          {onReport ? t("common.pageFault.sentenceReport") : t("common.pageFault.sentence")}
+          {shell
+            ? t("common.pageFault.shellSentence")
+            : onReport
+              ? t("common.pageFault.sentenceReport")
+              : t("common.pageFault.sentence")}
         </p>
         <div className="ss-pagefault__keys">
           <Button variant="primary" onClick={onReload}>
             {t("common.pageFault.reload")}
           </Button>
-          {onReport ? (
+          {!shell && onReport ? (
             <span className="ss-pagefault__report">
               <Button onClick={onReport}>{t("common.feedback.report")}</Button>
               {reportNote}
             </span>
           ) : null}
-          <Details text={details} onCopy={onCopy} size="regular" align="start" />
+          {shell ? null : <Details text={details} onCopy={onCopy} size="regular" align="start" />}
         </div>
       </div>
     </div>

@@ -150,6 +150,8 @@ export const api = {
     invoke<void>("report_count_frontend", { kind, text }),
   /// 上次是不是意外退出的（崩溃、被强制结束、断电；一次启动一次）
   lastExitUnexpected: () => invoke<boolean>("last_exit_unexpected"),
+  /// 这次启动时设置文件坏了、已另存并重置（spec S7；一次启动一次）
+  settingsRepaired: () => invoke<boolean>("settings_repaired"),
   /// 应用内反馈（spec 2026-10-04-reporting-feedback R12）：传一张已压好的 JPEG，回截图 id。
   /// 字节走原始请求体（不转 JSON 数组，后端转 base64 再发）。界面的进度只按时间模拟（交给 socket 的字节一开始
   /// 就接近 100%，真机 2026-10-05），后端不报进度。

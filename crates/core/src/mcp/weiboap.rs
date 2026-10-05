@@ -109,6 +109,7 @@ pub(super) fn discover(env: &Env, harnesses: &[Harness]) -> (Vec<McpLocation>, V
                     path: root.join("agents.db"),
                     selector: None,
                     matrix_hidden: false,
+                    mirrors: Vec::new(),
                 }
             })
             .collect(),

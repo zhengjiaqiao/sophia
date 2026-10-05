@@ -19,6 +19,7 @@ fn location(id: &str, path: &Path, domain: &str) -> McpLocation {
         path: path.into(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

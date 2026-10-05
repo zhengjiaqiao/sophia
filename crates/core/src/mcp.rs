@@ -19,6 +19,8 @@ mod batch1_tests;
 mod define;
 #[cfg(test)]
 mod helper_tests;
+#[cfg(test)]
+mod mirror_tests;
 mod removal;
 pub mod sources;
 #[cfg(feature = "weiboap")]
@@ -52,6 +54,10 @@ pub struct McpLocation {
     /// Claude Project 文件误报成同 harness 的缺失配置。
     #[serde(default, skip_serializing_if = "is_false")]
     pub matrix_hidden: bool,
+    /// 写这个位置时要跟着写的附属文件（spec 2026-10-05-mcp-claude-3p）：Claude 桌面应用切进第三方模式后
+    /// 读的是 `Claude-3p/` 下的另一份，添加、移除两份都写；矩阵状态仍只按 `path` 判断，这里的文件不扫描
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<PathBuf>,
 }
 
 /// 可持久化的 MCP 位置身份。规则只记录位置与选择条件，不保存 MCP 定义或凭据。
@@ -678,6 +684,10 @@ pub struct McpReportEntry {
     pub outcome: String,
     pub message: String,
     pub backup_path: Option<PathBuf>,
+    /// 这一条写成了，但它的镜像文件（Claude Desktop 第三方模式那一份，`McpLocation::mirrors`）没写成：
+    /// 整句原因（`mcp.report.mirrorFailed`）。前端在成功条目下用失败原因的样式显示它；没有镜像或镜像也成了为 None
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror_failed: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -808,12 +818,16 @@ pub(super) struct Pending {
     pub(super) target: State,
     pub(super) target_location: McpLocation,
     pub(super) definition: Canonical,
+    /// 这条是某个目标的镜像写入（`McpLocation::mirrors`，见 `with_mirrors`）：不进 `actions`，报告并进主条目
+    pub(super) mirror: bool,
 }
 #[derive(Debug)]
 pub struct PreparedPlan {
     pub actions: Vec<McpAction>,
     pub issues: Vec<McpIssue>,
     private: Vec<Pending>,
+    /// 计划时就知道写不成的镜像写入（镜像里已有同名但不同的定义），执行时与别的镜像失败一样并进主条目
+    mirror_failures: Vec<McpReportEntry>,
 }
 
 pub fn locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]) -> Vec<McpLocation> {
@@ -841,6 +855,7 @@ pub fn discover_locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]
                 path,
                 selector: None,
                 matrix_hidden: false,
+                mirrors: agent.user_mirrors(env),
             });
         }
         let Some(relative) = agent.project else {
@@ -864,6 +879,7 @@ pub fn discover_locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]
                     path: claude,
                     selector: Some(project_key),
                     matrix_hidden: false,
+                    mirrors: Vec::new(),
                 });
                 out.push(McpLocation {
                     id: format!("project:{domain}::{}", h.id),
@@ -873,6 +889,7 @@ pub fn discover_locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]
                     path,
                     selector: None,
                     matrix_hidden: false,
+                    mirrors: Vec::new(),
                 });
             } else {
                 out.push(McpLocation {
@@ -883,6 +900,7 @@ pub fn discover_locations(env: &Env, harnesses: &[Harness], projects: &[PathBuf]
                     path,
                     selector: None,
                     matrix_hidden: false,
+                    mirrors: Vec::new(),
                 });
             }
         }
@@ -1604,6 +1622,7 @@ pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> Prepar
                 target: target.state.clone(),
                 target_location: (*target_location).clone(),
                 definition,
+                mirror: false,
             });
     }
     let mut private = Vec::new();
@@ -1627,26 +1646,159 @@ pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> Prepar
             private.push(pending);
         }
     }
+    let (private, mirror_failures) = with_mirrors(private);
     PreparedPlan {
-        actions: private
-            .iter()
-            .map(|pending| pending.action.clone())
-            .collect(),
+        actions: plan_actions(&private),
         issues,
         private,
+        mirror_failures,
     }
+}
+
+/// 给前端看的动作：镜像写入不另列（预览里仍只有一条「Claude Desktop」）
+pub(super) fn plan_actions(private: &[Pending]) -> Vec<McpAction> {
+    private
+        .iter()
+        .filter(|pending| !pending.mirror)
+        .map(|pending| pending.action.clone())
+        .collect()
+}
+
+/// 目标位置带 `mirrors` 的每条写入再生成一条镜像写入（spec 2026-10-05-mcp-claude-3p 设计）：目标文件、目标状态、
+/// 位置的 `path` 都换成镜像文件，其余不变；它按文件（`group_key`）自成一组，备份、合并、写入、撤销记录都是现成的。
+/// 镜像里已有一样的定义就不用写；读不出（坏 JSON、软链接）、已有同名但不同的（或比不了的）此刻就记成失败，
+/// 执行时并进主条目（R3），与主文件在 `prepare` 里的判法一致。镜像与主文件是同一个文件时（主配置是指向
+/// `Claude-3p/` 那份的软链接，`resolve_symlinks` 已把主路径换成真实路径）不生成：一个文件只写一次
+pub(super) fn with_mirrors(private: Vec<Pending>) -> (Vec<Pending>, Vec<McpReportEntry>) {
+    let mut out = Vec::with_capacity(private.len());
+    let mut failures = Vec::new();
+    for pending in private {
+        for mirror_path in &pending.target_location.mirrors {
+            if same_file(&pending.target_location.path, mirror_path) {
+                continue;
+            }
+            let mut location = pending.target_location.clone();
+            location.path = mirror_path.clone();
+            location.mirrors = Vec::new();
+            let parsed = parse(&location);
+            if parsed.issue.is_some() {
+                let reason = crate::t!("mcp.reason.targetUnreadable");
+                failures.push(entry(&pending.action, "failed", &reason, None));
+                continue;
+            }
+            if let Some(old) = parsed.values.get(&pending.action.name) {
+                if !old.unsupported && old.connection_eq(&pending.definition) {
+                    continue;
+                }
+                let reason = if old.unsupported {
+                    old.reason
+                        .clone()
+                        .unwrap_or_else(|| crate::t!("mcp.issue.targetCannotCompare"))
+                } else {
+                    crate::t!("mcp.issue.targetConflict")
+                };
+                failures.push(entry(&pending.action, "failed", &reason, None));
+                continue;
+            }
+            let mut mirror = pending.clone();
+            mirror.action.target_path = mirror_path.clone();
+            mirror.target = parsed.state;
+            mirror.target_location = location;
+            mirror.mirror = true;
+            // 来源一栏填的是目标自己的（导入对话框的 `write_definitions`：核对的是目标从检查到写之间没被改过）：
+            // 镜像也核对镜像自己——主文件先写，写完它就变了，不能再拿它当镜像的来源
+            if same_file(&pending.action.source_path, &pending.target_location.path) {
+                mirror.action.source_path = mirror_path.clone();
+                mirror.source = mirror.target.clone();
+            }
+            out.push(mirror);
+        }
+        out.push(pending);
+    }
+    (out, failures)
+}
+
+/// 两个路径是不是同一个文件：规范化后相同，或都存在且真实路径（跟随软链接）相同
+pub(super) fn same_file(a: &Path, b: &Path) -> bool {
+    normalize(a) == normalize(b)
+        || matches!(
+            (crate::fs::real_path(a), crate::fs::real_path(b)),
+            (Some(x), Some(y)) if x == y
+        )
+}
+
+/// 主文件那一条成了没有（`created` / `removed`）：镜像只在主文件写成之后才动（spec 2026-10-05-mcp-claude-3p；
+/// Codex 复审：主失败、镜像成了会让镜像已改却只报失败、撤销记录也丢）
+pub(super) fn main_succeeded(report: &McpReport, target_id: &str, name: &str) -> bool {
+    report.entries.iter().any(|entry| {
+        entry.target_id == target_id
+            && entry.name == name
+            && matches!(entry.outcome.as_str(), "created" | "removed")
+    })
+}
+
+/// 镜像写入的结果并进主条目（spec 2026-10-05-mcp-claude-3p 设计「报告」）：镜像成功的不另出现；失败的整句原因
+/// 放进同一目标、同一名字的主条目的 `mirror_failed`，主条目的状态与 `message` 不变（前端只在失败条目上显示
+/// `message`，成功条目下另显示这一句）；撤销记录两边合在一起，哪一边撤不了整次就撤不了。
+/// 主条目没成的（镜像那一组本就不执行）与找不到主条目的（不该发生）不出条目：报告里不出现第二个「Claude Desktop」
+pub(super) fn fold_mirrors(report: &mut McpReport, mirrors: McpReport) {
+    for entry in mirrors.entries {
+        if entry.outcome != "failed" {
+            continue;
+        }
+        let main = report.entries.iter_mut().find(|main| {
+            main.target_id == entry.target_id
+                && main.name == entry.name
+                && matches!(main.outcome.as_str(), "created" | "removed")
+        });
+        if let Some(main) = main {
+            main.mirror_failed = Some(crate::t!("mcp.report.mirrorFailed", reason = entry.message));
+        }
+    }
+    report.undo.files.extend(mirrors.undo.files);
+    report.undo.blocked |= mirrors.undo.blocked;
 }
 
 /// `backups` 是 Sophia 的备份目录（`<数据目录>/backups`，见 `atomicfile::backup`）；改已有文件前先备份到那里
 pub fn execute(plan: PreparedPlan, allow_cross_domain: bool, backups: &Path) -> McpReport {
     let mut report = McpReport::default();
     let mut groups: BTreeMap<String, Vec<Pending>> = BTreeMap::new();
+    let mut mirror_groups = Vec::new();
     for pending in plan.private {
         groups.entry(group_key(&pending)).or_default().push(pending);
     }
+    // 主文件的组先执行；镜像的组只留主文件写成了的那几条，之后执行、结果单独收，最后并进主条目。
+    // 一组里镜像与别的位置的写入混在一起（别的 agent 的配置是指向 Claude-3p 那份的软链接，错配）：
+    // 镜像那几条不写、记成镜像失败，不为它做同一个文件的两阶段写
+    let mut mirrors = McpReport::default();
     for group in groups.into_values() {
-        execute_group(group, allow_cross_domain, backups, &mut report);
+        let (mirror, main): (Vec<Pending>, Vec<Pending>) =
+            group.into_iter().partition(|pending| pending.mirror);
+        if main.is_empty() {
+            mirror_groups.push(mirror);
+            continue;
+        }
+        for pending in &mirror {
+            mirrors.entries.push(entry(
+                &pending.action,
+                "failed",
+                &crate::t!("mcp.reason.mirrorSharedFile"),
+                None,
+            ));
+        }
+        execute_group(main, allow_cross_domain, backups, &mut report);
     }
+    for group in mirror_groups {
+        let group: Vec<Pending> = group
+            .into_iter()
+            .filter(|p| main_succeeded(&report, &p.action.target_id, &p.action.name))
+            .collect();
+        if !group.is_empty() {
+            execute_group(group, allow_cross_domain, backups, &mut mirrors);
+        }
+    }
+    mirrors.entries.extend(plan.mirror_failures);
+    fold_mirrors(&mut report, mirrors);
     report
 }
 fn execute_group(
@@ -1854,6 +2006,7 @@ fn entry(
         outcome: outcome.into(),
         message: message.into(),
         backup_path,
+        mirror_failed: None,
     }
 }
 
@@ -2999,6 +3152,7 @@ mod exclusion_tests {
                     outcome: (*outcome).into(),
                     message: String::new(),
                     backup_path: None,
+                    mirror_failed: None,
                 })
                 .collect(),
             ..McpReport::default()
@@ -3332,6 +3486,7 @@ mod endpoint_tests {
             path,
             selector: None,
             matrix_hidden: false,
+            mirrors: Vec::new(),
         }
     }
 
@@ -3409,6 +3564,7 @@ mod undo_tests {
             path: path.to_path_buf(),
             selector: None,
             matrix_hidden: false,
+            mirrors: Vec::new(),
         }
     }
 

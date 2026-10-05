@@ -6,6 +6,7 @@
 import { listText, t, tn } from "../i18n.ts";
 import type { Location } from "../shell/nav.ts";
 import { displayPath } from "../pathText.ts";
+import { mirrorFailedNote } from "../mcpView.ts";
 import {
   mcpEffectTrail,
   type ToastAgentRef,
@@ -720,6 +721,8 @@ export function mcpInstalledToast(
     };
   }
   const trail = mcpEffectTrail(done);
+  // Claude Desktop 第三方模式那一份没写成：成功句后接那一句（借 `reason` 的位置，同 MCP 页的提示条）
+  const note = mirrorFailedNote(report.entries);
   return {
     tier: "routine",
     kind: "success",
@@ -727,5 +730,6 @@ export function mcpInstalledToast(
     names: uniq(done.map((d) => d.name)),
     agents: agentsOf(done),
     ...(trail.length > 0 ? { trail } : {}),
+    ...(note ? { reason: note } : {}),
   };
 }

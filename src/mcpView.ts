@@ -523,6 +523,14 @@ export function claudeMoveTip(
 }
 
 /// 挪完、删掉团队共享那份之后纸窗接的一句（R4 R7）：改的是本机的 `.mcp.json`，提交之后队友那边才变
+/// 成了的几条里第一条「第三方模式那一份没写成」的整句（`McpReportEntry.mirrorFailed`，spec 2026-10-05-mcp-claude-3p）：
+/// 成功的提示条借 `reason` 的位置接它。没有就是 undefined
+export const mirrorFailedNote = (
+  entries: ReadonlyArray<{ outcome: string; mirrorFailed?: string }>,
+): string | undefined =>
+  entries.find((e) => (e.outcome === "created" || e.outcome === "removed") && e.mirrorFailed)
+    ?.mirrorFailed;
+
 export const teamGained = () => t("mcp.claude.teamGained");
 export const teamLost = () => t("mcp.claude.teamLost");
 

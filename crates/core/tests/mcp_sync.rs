@@ -28,6 +28,7 @@ fn loc(id: &str, path: &Path, domain: &str) -> McpLocation {
         path,
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 fn loc_h(id: &str, path: &Path, domain: &str, harness_id: &str) -> McpLocation {
@@ -103,6 +104,7 @@ fn claude_local(id: &str, path: &Path, domain: &str, project_key: &str) -> McpLo
         path: canonical_path(path),
         selector: Some(project_key.into()),
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

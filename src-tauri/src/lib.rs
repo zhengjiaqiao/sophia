@@ -62,6 +62,8 @@ struct AppState {
     gateway: Option<std::sync::Arc<sophia_gateway::app::App>>,
     /// 上次是不是意外退出的（spec 2026-10-04-local-diagnostics R8），setup 时判定
     last_exit_unexpected: std::sync::atomic::AtomicBool,
+    /// 这次启动时设置文件坏了、已另存并重置（spec S7）：界面提示一次
+    settings_repaired: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Serialize)]
@@ -83,8 +85,19 @@ struct HarnessList {
     harnesses: Vec<HarnessStatus>,
 }
 
+/// 命令的错误转成给前端的一句，同时记一条去隐私的日志（spec S18：核心功能出问题维护者看得见）。
+/// 调用处的 `文件:行` 一起记，36 处 `.map_err(err)` 不逐个改
+#[track_caller]
 fn err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+    let text = e.to_string();
+    let at = std::panic::Location::caller();
+    log::warn!(
+        "命令失败（{}:{}）：{}",
+        at.file(),
+        at.line(),
+        sophia_core::redact::redact(&text)
+    );
+    text
 }
 
 /// 仅供 Debug 原生 MCP UI 验收使用的临时根目录；生产环境始终使用系统环境。
@@ -1179,6 +1192,35 @@ fn last_exit_unexpected(state: tauri::State<'_, AppState>) -> bool {
     state.last_exit_unexpected.load(Ordering::SeqCst)
 }
 
+/// 这次启动时设置文件（settings.json / projects.json）坏了、已另存并按默认值重置（spec S7）。
+/// 界面据此提示一次：第三方模型随设置一起关了，Codex 已在启动时改回官方
+#[tauri::command]
+fn settings_repaired(state: tauri::State<'_, AppState>) -> bool {
+    state.settings_repaired.load(Ordering::SeqCst)
+}
+
+/// 启动最早期修坏文件（spec S7）：读不出的 settings.json / projects.json 另存为 `.broken-<时间>`，
+/// 之后一切按默认值走。只有界面进程做；返回有没有修过
+fn repair_store_files(store: &Store) -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match store.repair_if_corrupt(now) {
+        Ok(moved) if moved.is_empty() => false,
+        Ok(moved) => {
+            for path in &moved {
+                log::warn!("设置文件损坏，已另存为 {} 并重置", path.display());
+            }
+            true
+        }
+        Err(e) => {
+            log::warn!("检查设置文件是否损坏时出错：{e}");
+            false
+        }
+    }
+}
+
 /// 侧栏排序用的项目时间（最近活跃 / 最近创建），按传入顺序返回。只读元数据，不写盘
 #[tauri::command]
 fn project_times(
@@ -1210,10 +1252,11 @@ pub fn run() {
     // 应用标识（开发版带 `.dev`）最先定：日志目录、运行标记都按它分，日志插件注册时就要用
     let context = tauri::generate_context!();
     diagnostics::set_identity(&context.config().identifier);
+    // 设置文件坏了先修（spec S7）：在任何人读设置之前；之后读到的都是默认值
+    let store = Store::new(runtime_store_dir().unwrap_or_else(|e| panic!("{e}")));
+    let repaired = repair_store_files(&store);
     // 界面语言最先定：下面 `menu::build` 建应用菜单时就要按它取名字（spec 2026-09-30-language-and-theme R13）
-    language::init(&Store::new(
-        runtime_store_dir().unwrap_or_else(|e| panic!("{e}")),
-    ));
+    language::init(&store);
     // 同一时间只运行一个 Sophia（spec 2026-10-03-gateway-in-app R3）：必须第一个注册，第二个进程在它的 setup 里就退出。
     // 再次打开时把已有的主窗口带到前面（窗口藏在菜单栏里时插件不管）
     let builder =
@@ -1254,9 +1297,16 @@ pub fn run() {
                 if let Some(app) = gateway.clone() {
                     diagnostics::on_panic_exit(move || app.exit_sync());
                 }
+                // 设置刚被重置（spec S7）：第三方模型的「开着」随之丢了，Codex 设置却还指着本机网关——
+                // 立刻按值改回，不等退出。和关机走同一条 exit_sync
+                if repaired {
+                    if let Some(app) = gateway.as_ref() {
+                        app.exit_sync();
+                    }
+                }
                 gateway
             },
-            store: Store::new(runtime_store_dir().unwrap_or_else(|e| panic!("{e}"))),
+            store,
             watcher: Mutex::new(None),
             mcp_plan: Mutex::new(None),
             next_mcp_plan: AtomicU64::new(1),
@@ -1266,6 +1316,7 @@ pub fn run() {
             next_delete_plan: AtomicU64::new(1),
             delete_undo: Mutex::new(None),
             last_exit_unexpected: Default::default(),
+            settings_repaired: std::sync::atomic::AtomicBool::new(repaired),
         })
         // 发现与安装的运行时状态（缓存、撤销记录），字段由 market.rs 自己管
         .manage(market::MarketState::default())
@@ -1366,6 +1417,7 @@ pub fn run() {
             language::set_ui_language,
             usage::usage_refresh,
             last_exit_unexpected,
+            settings_repaired,
             diagnostics::redact_text,
             diagnostics::debug_fault,
             #[cfg(not(feature = "weiboap"))]

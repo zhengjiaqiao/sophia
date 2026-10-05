@@ -18,7 +18,7 @@ import McpTab from "./McpTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { appUpdates, useAppUpdate } from "./useAppUpdate";
 import { RECHECK_TICK_MS } from "./appUpdate";
-import { mcpDomains } from "./mcpView";
+import { mcpDomains, mirrorFailedNote } from "./mcpView";
 import { loadHome } from "./pathText";
 import {
   loadProjectSort,
@@ -65,7 +65,9 @@ import { canPopup } from "./contextMenu";
 import { useLocale, useOnLocaleChange } from "./i18n";
 import { useQuitFlow } from "./QuitFlow";
 import { FaultBomb, PageGuard, useFaultPage } from "./PageGuard";
+import { copyDetails } from "./diagnostics";
 import { CrashNotice, FeedbackHost, closeFeedback, feedbackOpen } from "./feedback";
+import { SettingsRepairedNotice } from "./settingsRepaired";
 import { quitRequested } from "./feedbackView";
 import "./App.css";
 
@@ -638,11 +640,21 @@ export default function App() {
           {/* 应用级故障：机面顶上、页面头之上，满内容宽 */}
           {error && (
             <div className="face__banner">
-              <NoticePanel scope="app" message={error} onClose={() => setError(null)} />
+              {/* 后端错误形如 `[code] 一句\n[detail] 原文`（spec 2026-10-04-local-diagnostics R13）：一句给人看，
+                  原文进 `详情`、`复制详情`（spec S18）；普通字符串原样 */}
+              <NoticePanel
+                scope="app"
+                message={parseBackendError(error).message}
+                technical={parseBackendError(error).detail}
+                onCopy={(text) => copyDetails(text)}
+                onClose={() => setError(null)}
+              />
             </div>
           )}
           {/* 上次意外退出、上报关着时提示一次（把问题报告给我们） */}
           <CrashNotice />
+          {/* 设置文件坏了、已另存并重置（spec S7）：提示一次 */}
+          <SettingsRepairedNotice />
           {/* 页面兜底：只包页面这一块，侧栏在外；换页（key）就重置 */}
           <PageGuard key={nav.destination}>
             {faultPage === nav.destination && <FaultBomb page={faultPage} />}
@@ -721,6 +733,8 @@ function BackgroundMcpToast({ report, onClose }: { report: McpReport; onClose: (
       reading={
         names.length === 0 ? <ToastCount n={created.length} line="toast.count.mcp" /> : undefined
       }
+      // 第三方模式那一份没写成：成功句后接那一句（`McpReportEntry.mirrorFailed`）
+      reason={mirrorFailedNote(report.entries)}
       onDismiss={onClose}
     />
   );

@@ -13,11 +13,13 @@ pub fn execute(actions: &[PlannedAction], clean_broken: bool, style: LinkStyle) 
             .iter()
             .map(|a| {
                 let mut fail_kind = None;
-                let outcome = outcome_for(a, clean_broken, style, &mut fail_kind);
+                let mut detail = None;
+                let outcome = outcome_for(a, clean_broken, style, &mut fail_kind, &mut detail);
                 ReportEntry {
                     action: a.clone(),
                     outcome,
                     fail_kind,
+                    detail,
                 }
             })
             .collect(),
@@ -25,19 +27,64 @@ pub fn execute(actions: &[PlannedAction], clean_broken: bool, style: LinkStyle) 
 }
 
 /// io 错误属于哪一类失败：权限不够（EACCES、Windows 的拒绝访问）与只读文件系统都算「无法写入」，
-/// 前端据此说人话，不去认操作系统的英文错误串
+/// 磁盘满、要动的东西不在了各一类；前端据此说人话，不去认操作系统的英文错误串。
+/// 分不进去的（spec S18）为 None：算 Sophia 自身没料到的情况
 pub(crate) fn fail_kind_of(e: &io::Error) -> Option<FailKind> {
-    matches!(
-        e.kind(),
-        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
-    )
-    .then_some(FailKind::NoWrite)
+    use crate::atomicfile::{write_failure, WriteFailure};
+    match write_failure(e) {
+        WriteFailure::NoPermission | WriteFailure::ReadOnly => return Some(FailKind::NoWrite),
+        WriteFailure::DiskFull => return Some(FailKind::DiskFull),
+        WriteFailure::Changed | WriteFailure::Other => {}
+    }
+    (e.kind() == io::ErrorKind::NotFound).then_some(FailKind::Missing)
 }
 
-/// io 错误变失败结果，同时记下失败类别
-pub(crate) fn io_failed(e: &io::Error, fail_kind: &mut Option<FailKind>) -> Outcome {
-    *fail_kind = fail_kind_of(e);
-    Outcome::Failed(e.to_string())
+/// 一次 io 失败：类别、给人看的原因句、已去隐私的原文（spec S18）。
+/// 同时写一条日志；外部原因（三类）只计数，分不进去的按 Sophia 自身的错误记一条
+pub(crate) struct IoFail {
+    pub kind: Option<FailKind>,
+    pub reason: String,
+    pub detail: String,
+}
+
+/// `what` 是动作的英文标签（只进日志与错误记录，不是界面文案）
+pub(crate) fn io_fail(what: &str, path: &Path, e: &io::Error) -> IoFail {
+    let kind = fail_kind_of(e);
+    let detail = crate::redact::redact(&e.to_string());
+    log::warn!(
+        "{what} {} 失败：{detail}",
+        crate::redact::redact(&path.display().to_string())
+    );
+    let reason = match kind {
+        Some(FailKind::NoWrite) => crate::t!("common.write.noPermission"),
+        Some(FailKind::DiskFull) => crate::t!("common.write.diskFull"),
+        Some(FailKind::Missing) => crate::t!("skills.sync.gone"),
+        None => e.to_string(),
+    };
+    if kind.is_some() {
+        crate::report::count_write_failure(e);
+    } else {
+        crate::report::capture_internal(&format!("{what}: {detail}"));
+    }
+    IoFail {
+        kind,
+        reason,
+        detail,
+    }
+}
+
+/// io 错误变失败结果，同时记下失败类别与原文
+pub(crate) fn io_failed(
+    what: &str,
+    path: &Path,
+    e: &io::Error,
+    fail_kind: &mut Option<FailKind>,
+    detail: &mut Option<String>,
+) -> Outcome {
+    let fail = io_fail(what, path, e);
+    *fail_kind = fail.kind;
+    *detail = Some(fail.detail);
+    Outcome::Failed(fail.reason)
 }
 
 fn outcome_for(
@@ -45,6 +92,7 @@ fn outcome_for(
     clean_broken: bool,
     style: LinkStyle,
     fail_kind: &mut Option<FailKind>,
+    detail: &mut Option<String>,
 ) -> Outcome {
     match action.kind {
         ActionKind::Create => {
@@ -52,13 +100,18 @@ fn outcome_for(
             // 是否存在要跟随软链判断（is_dir），整目录软链也算已存在
             if !action.target.is_dir() {
                 if let Err(e) = std::fs::create_dir_all(&action.target) {
-                    *fail_kind = fail_kind_of(&e);
-                    return Outcome::Failed(crate::t!("skills.sync.mkTargetFailed", error = e));
+                    let fail = io_fail("mkdir-target", &action.target, &e);
+                    *fail_kind = fail.kind;
+                    *detail = Some(fail.detail);
+                    return Outcome::Failed(crate::t!(
+                        "skills.sync.mkTargetFailed",
+                        error = fail.reason
+                    ));
                 }
             }
             match create_link(&action.source_path, &action.target_path, style) {
                 Ok(()) => Outcome::Created,
-                Err(e) => io_failed(&e, fail_kind),
+                Err(e) => io_failed("create-link", &action.target_path, &e, fail_kind, detail),
             }
         }
         ActionKind::Unlink => {
@@ -70,7 +123,7 @@ fn outcome_for(
             }
             match remove_link(&action.target_path) {
                 Ok(()) => Outcome::Removed,
-                Err(e) => io_failed(&e, fail_kind),
+                Err(e) => io_failed("remove-link", &action.target_path, &e, fail_kind, detail),
             }
         }
         ActionKind::BrokenLink if clean_broken => {
@@ -80,7 +133,13 @@ fn outcome_for(
             }
             match remove_link(&action.target_path) {
                 Ok(()) => Outcome::Removed,
-                Err(e) => io_failed(&e, fail_kind),
+                Err(e) => io_failed(
+                    "remove-broken-link",
+                    &action.target_path,
+                    &e,
+                    fail_kind,
+                    detail,
+                ),
             }
         }
         ActionKind::BrokenLink => Outcome::Skipped,
@@ -156,6 +215,7 @@ pub(crate) fn delete_source_holding_with(
                 action: delete.clone(),
                 outcome,
                 fail_kind: None,
+                detail: None,
             }],
         };
         (report, None)
@@ -200,7 +260,7 @@ pub(crate) fn delete_source_holding_with(
         // 挪不进暂存处（跨磁盘等）或没给暂存处：直接进废纸篓，不给撤销
         _ => {
             if let Err(e) = trash(&plan.path) {
-                return one(Outcome::Failed(e.to_string()));
+                return one(Outcome::Failed(io_fail("trash", &plan.path, &e).reason));
             }
             None
         }
@@ -209,6 +269,7 @@ pub(crate) fn delete_source_holding_with(
         action: delete,
         outcome: Outcome::Removed,
         fail_kind: None,
+        detail: None,
     }];
     let mut links = Vec::new();
     for (i, link) in plan.affected.iter().enumerate() {
@@ -313,7 +374,7 @@ pub fn undo_delete(undo: &DeleteUndo) -> SyncReport {
     } else {
         match std::fs::rename(&undo.held, &undo.body) {
             Ok(()) => Outcome::Created,
-            Err(e) => Outcome::Failed(e.to_string()),
+            Err(e) => Outcome::Failed(io_fail("put-back", &undo.body, &e).reason),
         }
     };
     let back = matches!(body, Outcome::Created);
@@ -326,6 +387,7 @@ pub fn undo_delete(undo: &DeleteUndo) -> SyncReport {
         action: restore,
         outcome: body,
         fail_kind: None,
+        detail: None,
     }];
     entries.extend(undo.links.iter().map(|link| {
         let action = PlannedAction {
@@ -344,6 +406,7 @@ pub fn undo_delete(undo: &DeleteUndo) -> SyncReport {
             action,
             outcome,
             fail_kind: None,
+            detail: None,
         }
     }));
     SyncReport { entries }
@@ -361,13 +424,13 @@ fn restore_link(link: &LinkUndo) -> Outcome {
                 return Outcome::Failed(crate::t!("skills.sync.linkChanged"));
             }
             if let Err(e) = remove_link(&link.path) {
-                return Outcome::Failed(e.to_string());
+                return Outcome::Failed(io_fail("remove-link", &link.path, &e).reason);
             }
         }
     }
     match create_link(&link.dest, &link.path, link.style) {
         Ok(()) => Outcome::Created,
-        Err(e) => Outcome::Failed(e.to_string()),
+        Err(e) => Outcome::Failed(io_fail("create-link", &link.path, &e).reason),
     }
 }
 
@@ -400,7 +463,8 @@ pub(crate) fn release_held_with(
                     .as_deref()
                     .filter(|o| o.file_name() == item.file_name());
                 if let Err(e) = release_one(&item, orig, trash) {
-                    failed.push((item, e.to_string()));
+                    let reason = io_fail("release-held", &item, &e).reason;
+                    failed.push((item, reason));
                 }
             }
         }
@@ -475,18 +539,21 @@ fn clear(link: &Path, before: Option<PathBuf>) -> ReportEntry {
     let still = matches!(kind, EntryKind::Symlink(_))
         && before.as_ref() == Some(&dest)
         && real_path(link).is_none();
+    let mut fail_kind = None;
+    let mut detail = None;
     let outcome = if !still {
         Outcome::Failed(crate::t!("skills.sync.notOrigLink"))
     } else {
         match remove_link(link) {
             Ok(()) => Outcome::Removed,
-            Err(e) => Outcome::Failed(e.to_string()),
+            Err(e) => io_failed("remove-link", link, &e, &mut fail_kind, &mut detail),
         }
     };
     ReportEntry {
         action,
         outcome,
-        fail_kind: None,
+        fail_kind,
+        detail,
     }
 }
 
@@ -508,19 +575,23 @@ fn relink(affected: &AffectedLink, to: &Path) -> ReportEntry {
             action: create,
             outcome: Outcome::Failed(crate::t!("skills.sync.notLink")),
             fail_kind: None,
+            detail: None,
         };
     }
+    let mut fail_kind = None;
+    let mut detail = None;
     let outcome = match remove_link(link) {
-        Err(e) => Outcome::Failed(e.to_string()),
+        Err(e) => io_failed("remove-link", link, &e, &mut fail_kind, &mut detail),
         Ok(()) => match create_link(to, link, affected.style) {
             Ok(()) => Outcome::Created,
-            Err(e) => Outcome::Failed(e.to_string()),
+            Err(e) => io_failed("create-link", link, &e, &mut fail_kind, &mut detail),
         },
     };
     ReportEntry {
         action: create,
         outcome,
-        fail_kind: None,
+        fail_kind,
+        detail,
     }
 }
 
@@ -618,7 +689,44 @@ mod tests {
         }
         assert_eq!(
             fail_kind_of(&io::Error::from(io::ErrorKind::NotFound)),
+            Some(FailKind::Missing)
+        );
+        assert_eq!(
+            fail_kind_of(&io::Error::from(io::ErrorKind::StorageFull)),
+            Some(FailKind::DiskFull)
+        );
+        assert_eq!(
+            fail_kind_of(&io::Error::from(io::ErrorKind::InvalidInput)),
             None
+        );
+    }
+
+    /// spec S18：原因句给人看（当前语言）、原文进 `detail`；分不进类的原文原样当原因
+    #[test]
+    fn io失败_分得出类的说人话_原文进详情() {
+        let tree = TempTree::new();
+        let gone = tree.root().join("gone/x");
+        let fail = io_fail(
+            "remove-link",
+            &gone,
+            &io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert_eq!(fail.kind, Some(FailKind::Missing));
+        assert_eq!(fail.reason, crate::t!("skills.sync.gone"));
+        assert!(
+            fail.detail.contains("not found") || fail.detail.contains("NotFound"),
+            "{}",
+            fail.detail
+        );
+
+        let other = io::Error::new(io::ErrorKind::InvalidInput, "weird /Users/someone/x");
+        let fail = io_fail("create-link", &gone, &other);
+        assert_eq!(fail.kind, None);
+        assert_eq!(fail.reason, other.to_string(), "分不进类：原句就是原因");
+        assert!(
+            !fail.detail.contains("/Users/someone"),
+            "原文要去隐私：{}",
+            fail.detail
         );
     }
 
@@ -644,8 +752,16 @@ mod tests {
         // root 不受权限位约束：那种环境下这条断言没有意义
         if matches!(report.entries[0].outcome, Outcome::Failed(_)) {
             assert_eq!(report.entries[0].fail_kind, Some(FailKind::NoWrite));
+            assert_eq!(
+                report.entries[0].outcome,
+                Outcome::Failed(crate::t!("common.write.noPermission")),
+                "原因句给人看"
+            );
+            assert!(report.entries[0].detail.is_some(), "原文进详情");
         }
         assert_eq!(report.entries[1].fail_kind, None);
+        assert_eq!(report.entries[1].detail, None);
+        // 要删的链本来就不在：不是软链，走的是「不是本体链」那句，不带类别
         assert!(matches!(report.entries[2].outcome, Outcome::Failed(_)));
         assert_eq!(report.entries[2].fail_kind, None);
     }

@@ -439,6 +439,17 @@ impl App {
         }
     }
 
+    /// 网关设置读不出（settings.json 坏了、还没修）时用来**只删**本功能写进 Codex 设置的内容（spec S7）：
+    /// 目录路径只看 `codex_home`；路由地址用默认端口——`remove` 认端口范围内任一端口写下的值；
+    /// 接法无所谓，`remove` 两种形态都删
+    fn managed_fallback(&self) -> Managed {
+        Managed {
+            catalog_path: self.catalog_path().to_string_lossy().into_owned(),
+            base_url: config::router_base_url(sophia_core::codex_models::settings::DEFAULT_PORT),
+            mode: Default::default(),
+        }
+    }
+
     fn load(&self) -> Result<GatewaySettings, AppError> {
         (self.deps.load_settings)().map_err(internal)
     }
@@ -766,7 +777,12 @@ impl App {
     /// 把 Codex 设置改回开启前（逐字节）。`user_off`：用户关掉（记下「没开着」、忘掉启用前的默认模型）；
     /// 否则是退出或接不上时的改回，「开着」与启用前默认模型的记录不变，下次打开 Sophia 时接上
     pub(super) fn unwrite_codex_locked(&self, user_off: bool) -> Result<Vec<String>, AppError> {
-        let mut settings = self.load()?;
+        let mut settings = match self.load() {
+            Ok(settings) => settings,
+            // 设置读不出（spec S7）：照样把 Codex 改回官方——这是用户（或命令行）明确要的；
+            // 设置本身改不了，告诉调用方
+            Err(error) => return self.unwrite_codex_without_settings(error),
+        };
         let managed = self.managed(&settings);
         let snapshot = self.read_config()?;
         let reset = reset_default_model(&snapshot.text, &settings, &settings.published_slugs);
@@ -815,6 +831,34 @@ impl App {
         settings.changed_at = Some((self.deps.now)());
         settings.record_change((self.deps.now)(), false);
         self.save(&settings)?;
+        Ok(warnings)
+    }
+
+    /// 网关设置读不出时的改回（spec S7）：只删本功能写进 Codex 设置的内容、停路由、清自己的文件；
+    /// 启用前的默认模型记录在设置里，读不出就还原不了（`model` 原样留着，Codex 自己会报模型不存在）。
+    /// 设置文件不写；返回的警告里带上设置读不出这一条
+    fn unwrite_codex_without_settings(&self, error: AppError) -> Result<Vec<String>, AppError> {
+        let managed = self.managed_fallback();
+        let snapshot = self.read_config()?;
+        let removed = config::remove(&snapshot.text, &managed, false).map_err(config_error)?;
+        let mut warnings = removed.warnings.clone();
+        self.write_config(&snapshot, &removed.text)?;
+        if config::inspect(&removed.text, &managed).is_ok_and(|i| i.points_at_router) {
+            return Err(AppError::new(
+                "conflict",
+                sophia_core::t!(
+                    "models.app.stillPointing",
+                    warnings = sophia_core::i18n::list_text(
+                        &warnings,
+                        sophia_core::i18n::ListStyle::Semicolon
+                    )
+                ),
+            ));
+        }
+        (self.deps.router_stop)();
+        warnings.extend(self.remove_codex_files(&[]));
+        warnings.push(error.to_string());
+        log::warn!("改回 Codex 设置时网关设置读不出，设置文件没动：{error}");
         Ok(warnings)
     }
 

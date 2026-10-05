@@ -11,8 +11,9 @@
 //! `mcp_servers = { … }`、跨行的内联定义）如实拒绝，不猜。
 use super::sources::{remove_json_server, remove_toml_server};
 use super::{
-    backup, backup_failed_message, parse, record_undo, same_location, toml, write_failed_message,
-    McpIssue, McpLocation, McpReport, McpReportEntry, Parsed, State,
+    backup, backup_failed_message, fold_mirrors, main_succeeded, parse, record_undo, same_file,
+    same_location, toml, write_failed_message, McpIssue, McpLocation, McpReport, McpReportEntry,
+    Parsed, State,
 };
 use crate::atomicfile::{self, unsafe_parent, FileState};
 use crate::fs::normalize;
@@ -50,6 +51,8 @@ pub struct McpRemovalPlan {
     pub actions: Vec<McpRemoveAction>,
     pub issues: Vec<McpIssue>,
     private: Vec<PendingRemoval>,
+    /// 计划时就知道删不成的镜像文件（读不出、写法拿不掉），执行时与别的镜像失败一样并进主条目
+    mirror_failures: Vec<McpReportEntry>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +61,9 @@ struct PendingRemoval {
     selector: Option<String>,
     /// 体检时那个文件的快照；执行前必须没变
     target: State,
+    /// 从某个位置的镜像文件（`McpLocation::mirrors`，Claude Desktop 第三方模式那一份）里删：
+    /// 不进 `actions`，结果并进主条目（spec 2026-10-05-mcp-claude-3p）
+    mirror: bool,
 }
 
 /// 同一个配置作用域：同一个文件里的同一个 MCP 容器
@@ -106,6 +112,7 @@ pub fn prepare_original_removal(
     let mut issues = Vec::new();
     let mut seen = BTreeSet::new();
     let mut private = Vec::new();
+    let mut mirror_failures = Vec::new();
     for item in items {
         let mut refuse = |message: String| {
             issues.push(McpIssue {
@@ -141,12 +148,46 @@ pub fn prepare_original_removal(
             },
             selector: location.selector.clone(),
             target: here.state,
+            mirror: false,
         });
+        // 镜像文件里的同名项跟着删：与主文件是同一个文件的（主配置是软链接）不另删、本来就没有的没什么可删；
+        // 删不成的记下，执行时并进主条目
+        for mirror_path in &location.mirrors {
+            if same_file(&location.path, mirror_path) {
+                continue;
+            }
+            let mut mirror_location = location.clone();
+            mirror_location.path = mirror_path.clone();
+            mirror_location.mirrors = Vec::new();
+            let there = parse(&mirror_location);
+            if there.issue.is_none() && !there.values.contains_key(&item.name) {
+                continue;
+            }
+            let action = McpRemoveAction {
+                target_id: location.id.clone(),
+                name: item.name.clone(),
+                target_path: mirror_path.clone(),
+            };
+            match cuttable(&mirror_location, &there, &item.name) {
+                Ok(()) => private.push(PendingRemoval {
+                    action,
+                    selector: location.selector.clone(),
+                    target: there.state,
+                    mirror: true,
+                }),
+                Err(message) => mirror_failures.push(entry(&action, "failed", &message, None)),
+            }
+        }
     }
     McpRemovalPlan {
-        actions: private.iter().map(|p| p.action.clone()).collect(),
+        actions: private
+            .iter()
+            .filter(|p| !p.mirror)
+            .map(|p| p.action.clone())
+            .collect(),
         issues,
         private,
+        mirror_failures,
     }
 }
 
@@ -161,6 +202,7 @@ pub fn execute_removal(plan: McpRemovalPlan, backups: &Path) -> McpReport {
             outcome: "skipped".into(),
             message: issue.message,
             backup_path: None,
+            mirror_failed: None,
         });
     }
     // 同一个 .claude.json 里的 User / Local 必须一次备份、一次原子写
@@ -171,9 +213,39 @@ pub fn execute_removal(plan: McpRemovalPlan, backups: &Path) -> McpReport {
             .or_default()
             .push(pending);
     }
+    // 主文件的组先执行；镜像文件（Claude Desktop 第三方模式那一份）的组只留主文件删成了的那几条，
+    // 之后执行、结果单独收，最后并进主条目。一组里镜像与别的位置的删除混在一起（别的 agent 的配置是
+    // 指向 Claude-3p 那份的软链接，错配）：镜像那几条不删、记成镜像失败
+    let mut mirror_groups = Vec::new();
+    let mut mirrors = McpReport::default();
     for group in groups.into_values() {
-        execute_group(&group, backups, &mut report);
+        let (mirror, main): (Vec<PendingRemoval>, Vec<PendingRemoval>) =
+            group.into_iter().partition(|pending| pending.mirror);
+        if main.is_empty() {
+            mirror_groups.push(mirror);
+            continue;
+        }
+        for pending in &mirror {
+            mirrors.entries.push(entry(
+                &pending.action,
+                "failed",
+                &crate::t!("mcp.reason.mirrorSharedFile"),
+                None,
+            ));
+        }
+        execute_group(&main, backups, &mut report);
     }
+    for group in mirror_groups {
+        let group: Vec<PendingRemoval> = group
+            .into_iter()
+            .filter(|p| main_succeeded(&report, &p.action.target_id, &p.action.name))
+            .collect();
+        if !group.is_empty() {
+            execute_group(&group, backups, &mut mirrors);
+        }
+    }
+    mirrors.entries.extend(plan.mirror_failures);
+    fold_mirrors(&mut report, mirrors);
     report
 }
 
@@ -189,6 +261,7 @@ fn entry(
         outcome: outcome.into(),
         message: message.into(),
         backup_path,
+        mirror_failed: None,
     }
 }
 

@@ -3,8 +3,8 @@
 //! 是设计第 2 节「已实测」的那份契约；隔离起进程、超时、清环境变量由 `probe::run_probe` 负责，
 //! 这里只管拼协议、判断可用性、把回复交给 `sophia_core::usage::parse::parse_get_usage`。
 
-use super::FetchError;
 use super::{claude_executables, claude_probe_dir, claude_signed_in, ensure_empty_probe_dir};
+use super::{Account, FetchError};
 use crate::usage::probe::{run_probe, ProbeSpec};
 use serde_json::Value;
 use sophia_core::usage::parse::parse_get_usage;
@@ -25,16 +25,18 @@ const USAGE_REQUEST_ID: &str = "sophia-usage";
 ///
 /// 找不到 `claude` → [`FetchError::NotInstalled`]；没登录 → [`FetchError::NotSignedIn`]，
 /// 且**不会**起任何进程（R5、AC10）。
-pub async fn fetch_get_usage(base_dir: &Path, now: i64) -> Result<Reading, FetchError> {
-    let home = crate::runtime::home();
-    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+pub async fn fetch_get_usage(
+    base_dir: &Path,
+    account: &Account,
+    now: i64,
+) -> Result<Reading, FetchError> {
     fetch_get_usage_with(
         base_dir,
         now,
         &claude_executables(),
-        &home,
-        config_dir.as_deref(),
-        None,
+        &account.home,
+        account.claude_config_dir.as_deref(),
+        account.probe_parent_env(),
         TIMEOUT,
     )
     .await
@@ -309,6 +311,39 @@ mod tests {
         });
     }
 
+    /// 测试主目录：探测子进程的 HOME 换成它，`claude` 读的是测试主目录里的登录，不是真实账号
+    #[test]
+    fn test_home_account_runs_probe_with_that_home() {
+        run(async {
+            let root = tempfile::tempdir().unwrap();
+            let root = root.path().canonicalize().unwrap();
+            let base_dir = root.join("support");
+            let home = signed_in_home(&root);
+            let account = crate::usage::Account::in_home(&home);
+            let body = format!(
+                "printf '%s' \"$HOME\" > home.marker\nn=0\nwhile IFS= read -r line; do\n  n=$((n+1))\n  if [ \"$n\" -eq 2 ]; then\n    printf '%s\\n' {}\n  fi\ndone\n",
+                shell_single_quoted(&success_reply_line())
+            );
+            let program = write_script(&root, "claude-home.sh", &body);
+            fetch_get_usage_with(
+                &base_dir,
+                1_000,
+                &[program],
+                &account.home,
+                account.claude_config_dir.as_deref(),
+                account.probe_parent_env(),
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+            let marker = claude_probe_dir(&base_dir).join("home.marker");
+            assert_eq!(
+                std::fs::read_to_string(marker).unwrap(),
+                home.to_string_lossy()
+            );
+        });
+    }
+
     /// 探测目录里有上一次没清干净的文件：应该被清空重建，取数照常成功
     #[test]
     fn cleans_leftover_probe_dir_before_spawning() {
@@ -535,7 +570,7 @@ mod real_verification {
             let base_dir = std::env::temp_dir()
                 .join(format!("sophia-usage-verify-claude-{}", std::process::id()));
             let start = std::time::Instant::now();
-            let result = fetch_get_usage(&base_dir, 0).await;
+            let result = fetch_get_usage(&base_dir, &crate::usage::Account::real(), 0).await;
             let elapsed = start.elapsed();
             eprintln!("elapsed={elapsed:?}");
             match result {

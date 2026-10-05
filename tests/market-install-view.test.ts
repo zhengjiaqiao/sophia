@@ -629,6 +629,24 @@ test("写 MCP 之后：✓ 已写进 [图标…] brave-search，Desktop 接生�
     ["claude-code", "codex", CLAUDE_DESKTOP],
   );
   assert.deepEqual(t.trail, ["重启 Claude Desktop 后生效"]);
+  assert.equal(t.reason, undefined);
+  // Claude Desktop 第三方模式那一份没写成：仍是成功一行，那一句接在原因的位置（spec 2026-10-05-mcp-claude-3p）
+  const NOTE = "第三方模式的那一份没写成：目标配置无法解析或不安全";
+  const mirrored = mcpInstalledToast(
+    {
+      entries: [
+        entry("brave-search", "global::claude-code", "created"),
+        { ...entry("brave-search", `global::${CLAUDE_DESKTOP}`, "created"), mirrorFailed: NOTE },
+      ],
+      undoId: "w3",
+    },
+    checks,
+    [CC, DESKTOP],
+    "global",
+  );
+  assert.equal(mirrored.kind, "success");
+  assert.equal(mirrored.reason, NOTE);
+  assert.deepEqual(mirrored.trail, ["重启 Claude Desktop 后生效"]);
 
   const partial = mcpInstalledToast(
     {

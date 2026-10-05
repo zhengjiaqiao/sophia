@@ -350,20 +350,34 @@ impl App {
     pub fn exit_sync(&self) {
         let _guard = self.guard_within(EXIT_LOCK_PATIENCE);
         // 每个停下的地方记一条日志（spec 2026-10-04-local-diagnostics R4）：界面上照旧不报错
-        let settings = self.load();
-        let Ok(mut settings) = settings.inspect_err(|e| log::warn!("退出时读网关设置失败：{e}"))
-        else {
-            return;
-        };
         let snapshot = self.read_config();
         let Ok(snapshot) = snapshot.inspect_err(|e| log::warn!("退出时读 Codex 设置失败：{e}"))
         else {
             return;
         };
-        let managed = self.managed(&settings);
+        // 网关设置读不出（settings.json 坏了，spec S7）：Codex 照样要改回，否则它指着一个不在的网关；
+        // 只是启用前的默认模型还原不了、设置文件不写
+        let settings = self.load().inspect_err(|e| {
+            log::warn!("退出时读网关设置失败，只改回 Codex 设置：{e}");
+        });
+        let managed = match &settings {
+            Ok(settings) => self.managed(settings),
+            Err(_) => self.managed_fallback(),
+        };
         if !config::inspect(&snapshot.text, &managed).is_ok_and(|i| i.points_at_router) {
             return;
         }
+        let Ok(mut settings) = settings else {
+            let removed = config::remove(&snapshot.text, &managed, false);
+            let Ok(removed) = removed.inspect_err(|e| log::warn!("退出时改回 Codex 设置失败：{e}"))
+            else {
+                return;
+            };
+            if let Err(e) = self.write_config(&snapshot, &removed.text) {
+                log::warn!("退出时写回 Codex 设置失败：{e}");
+            }
+            return;
+        };
         let reset = reset_default_model(&snapshot.text, &settings, &settings.published_slugs);
         let removed = config::remove(&reset, &managed, settings.added_newline);
         let Ok(removed) = removed.inspect_err(|e| log::warn!("退出时改回 Codex 设置失败：{e}"))

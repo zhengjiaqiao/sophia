@@ -47,13 +47,26 @@ function GuardedTray() {
   );
 }
 
+/// 主窗口外壳的兜底（spec S18）：侧栏、横幅、反馈小窗、退出确认任何一处出错，整窗换成出错页，
+/// 只有 `重新加载`（重载整个窗口）；页面那一块另有各自的边界（App 里的 PageGuard）。
+/// 开发版 `debug_fault` 返回 `page:shell` 时故意出错
+function GuardedApp() {
+  const fault = useFaultPage();
+  return (
+    <PageGuard shell>
+      {fault === "shell" && <FaultBomb page="shell" />}
+      <App />
+    </PageGuard>
+  );
+}
+
 /// 根部订阅当前语言：换了语言整棵树重渲染（组件状态保留），每一处 `t()` 都按新语言取
 function Root() {
   useLocale();
   return (
     <React.StrictMode>
       {/* 右下那一叠提示小窗挂在哪（壳上的 ToastStack），各页经 CornerToast 挂进去 */}
-      <ToastHost>{isTray ? <GuardedTray /> : <App />}</ToastHost>
+      <ToastHost>{isTray ? <GuardedTray /> : <GuardedApp />}</ToastHost>
     </React.StrictMode>
   );
 }

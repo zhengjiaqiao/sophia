@@ -12,6 +12,7 @@ fn loc(id: &str, harness: &str, path: &Path, selector: Option<&str>) -> McpLocat
         path: path.to_path_buf(),
         selector: selector.map(Into::into),
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

@@ -567,25 +567,42 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
             action: remove,
             outcome: Outcome::Failed(crate::t!("skills.sync.notWholeLink")),
             fail_kind: None,
+            detail: None,
         }]);
     }
     if let Err(e) = remove_link(&target.path) {
         let mut fail_kind = None;
-        let outcome = io_failed(&e, &mut fail_kind);
+        let mut detail = None;
+        let outcome = io_failed(
+            "remove-whole-link",
+            &target.path,
+            &e,
+            &mut fail_kind,
+            &mut detail,
+        );
         return report(vec![ReportEntry {
             action: remove,
             outcome,
             fail_kind,
+            detail,
         }]);
     }
     entries.push(ReportEntry {
         action: remove,
         outcome: Outcome::Removed,
         fail_kind: None,
+        detail: None,
     });
     if let Err(e) = std::fs::create_dir(&target.path) {
         let mut fail_kind = None;
-        let outcome = io_failed(&e, &mut fail_kind);
+        let mut detail = None;
+        let outcome = io_failed(
+            "mkdir-target",
+            &target.path,
+            &e,
+            &mut fail_kind,
+            &mut detail,
+        );
         entries.push(ReportEntry {
             action: action(
                 ActionKind::Create,
@@ -595,6 +612,7 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
             ),
             outcome,
             fail_kind,
+            detail,
         });
         return report(entries);
     }
@@ -603,9 +621,10 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
         let target_path = target.path.join(&skill.name);
         let style = link_style(&source_path, target);
         let mut fail_kind = None;
+        let mut detail = None;
         let outcome = match create_link(&source_path, &target_path, style) {
             Ok(()) => Outcome::Created,
-            Err(e) => io_failed(&e, &mut fail_kind),
+            Err(e) => io_failed("create-link", &target_path, &e, &mut fail_kind, &mut detail),
         };
         let failed = matches!(outcome, Outcome::Failed(_));
         entries.push(ReportEntry {
@@ -618,6 +637,7 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
             },
             outcome,
             fail_kind,
+            detail,
         });
         if failed {
             break;
@@ -1317,11 +1337,13 @@ mod tests {
             },
             outcome: Outcome::Created,
             fail_kind: None,
+            detail: None,
         });
         report.entries.push(ReportEntry {
             action: report.entries[0].action.clone(),
             outcome: Outcome::Failed("不能写".into()),
             fail_kind: None,
+            detail: None,
         });
         assert!(record_auto_runs(
             &mut rules, &sources, &targets, &report, 100

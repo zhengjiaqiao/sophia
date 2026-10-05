@@ -155,11 +155,13 @@ export type Outcome =
   | { status: "removed" }
   | { status: "failed"; reason: string };
 /// 失败的机器可读类别（core `FailKind`）：前端按它分支，不认原因句的文字。只有建链 / 删链的失败会填
-export type FailKind = "noWrite";
+export type FailKind = "noWrite" | "diskFull" | "missing";
 export interface ReportEntry {
   action: PlannedAction;
   outcome: Outcome;
   failKind?: FailKind;
+  /// 失败的技术原文（系统的错误原句，后端已去隐私；spec S18）
+  detail?: string;
 }
 export interface SyncReport {
   entries: ReportEntry[];
@@ -278,6 +280,8 @@ export interface McpLocation {
   selector?: string;
   /** 发现了配置位置，但不参与普通矩阵；导入时仍可作为目标。 */
   matrixHidden?: boolean;
+  /** 写这个位置时跟着写的附属文件（Claude Desktop 第三方模式那一份）；矩阵状态只看 path，没有时缺省。 */
+  mirrors?: string[];
 }
 
 export type McpCellState =
@@ -360,6 +364,8 @@ export interface McpReportEntry {
   outcome: "created" | "removed" | "skipped" | "failed";
   message: string;
   backupPath: string | null;
+  /** 这一条成了，但 Claude Desktop 第三方模式那一份（`McpLocation.mirrors`）没写成：整句原因，在成功条目下显示 */
+  mirrorFailed?: string;
 }
 export interface McpReport {
   entries: McpReportEntry[];

@@ -14,6 +14,7 @@ fn loc(id: &str, path: &Path, harness_id: &str) -> McpLocation {
         path: path.to_path_buf(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

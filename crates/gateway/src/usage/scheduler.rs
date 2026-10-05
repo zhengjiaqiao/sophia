@@ -13,7 +13,7 @@
 //! 屏幕睡着时不取数，醒来补一次（R6）。只有菜单栏显示开着、刷新不是「关」时才这样轮询；
 //! 否则循环只等命令，闲着时不醒（R13）。
 
-use super::{claude, codex, FetchError};
+use super::{claude, codex, Account, FetchError};
 use futures_util::future::BoxFuture;
 use sophia_core::usage::schedule::{
     decide, rate_limited_until, AgentSchedule, ScheduleInput, SourceSchedule, Trigger,
@@ -573,21 +573,20 @@ pub async fn run(
 pub struct RealFetcher {
     /// Sophia 应用支持目录，探测目录在它下面
     pub base_dir: PathBuf,
+    /// 看哪个账号：平时 [`Account::real`]，调试版的测试主目录用 [`Account::in_home`]
+    pub account: Account,
 }
 
 impl Fetcher for RealFetcher {
     fn availability(&self, agent: AgentId) -> Availability {
         match agent {
-            AgentId::ClaudeCode => {
-                let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
-                availability_of(
-                    !super::claude_executables().is_empty(),
-                    super::claude_signed_in(&crate::runtime::home(), config_dir.as_deref()),
-                )
-            }
+            AgentId::ClaudeCode => availability_of(
+                !super::claude_executables().is_empty(),
+                self.account.claude_signed_in(),
+            ),
             AgentId::Codex => availability_of(
                 !super::codex_executables().is_empty(),
-                super::codex_signed_in(&crate::runtime::codex_home()),
+                self.account.codex_signed_in(),
             ),
         }
     }
@@ -596,7 +595,7 @@ impl Fetcher for RealFetcher {
         Box::pin(async move {
             match (agent, source) {
                 (AgentId::Codex, Source::Rollout) => {
-                    let codex_home = crate::runtime::codex_home();
+                    let codex_home = self.account.codex_home.clone();
                     tokio::task::spawn_blocking(move || codex::read_rollout(&codex_home))
                         .await
                         .map_err(|e| {
@@ -605,10 +604,12 @@ impl Fetcher for RealFetcher {
                         })
                 }
                 (AgentId::ClaudeCode, Source::GetUsage) => {
-                    claude::fetch_get_usage(&self.base_dir, now).await.map(Some)
+                    claude::fetch_get_usage(&self.base_dir, &self.account, now)
+                        .await
+                        .map(Some)
                 }
                 (AgentId::Codex, Source::AppServer) => {
-                    codex::fetch_app_server(&self.base_dir, &crate::runtime::codex_home(), now)
+                    codex::fetch_app_server(&self.base_dir, &self.account, now)
                         .await
                         .map(Some)
                 }

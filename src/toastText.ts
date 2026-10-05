@@ -74,6 +74,9 @@ export interface ToastItem {
   agent?: ToastAgentRef;
   /// MCP：写进的是项目里的配置（不是用户级）。写进 Copilot 的项目文件要多说一句信任文件夹
   project?: boolean;
+  /// 做成了、但有一句要交代的（MCP：Claude Desktop 第三方模式那一份没写成，`McpReportEntry.mirrorFailed`）：
+  /// 成功句后接这一句，用失败原因的位置与样式（`reason`）
+  note?: string;
 }
 
 export interface FailedItem extends ToastItem {
@@ -220,6 +223,8 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
     };
   }
   const trail = op === "write" || op === "autoWrite" ? mcpEffectTrail(done) : [];
+  // 成了但有一句要交代的（第三方模式那一份没写成）：第一句，接在原因的位置
+  const note = done.find((item) => item.note)?.note;
   return {
     // 成功一律例行一行（DESIGN「提示条分两档」：黑块只给失败）
     tier: "routine",
@@ -228,6 +233,7 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
     names: input.omitNames ? [] : namesOf(done),
     agents: agentsOf(done),
     ...(trail.length ? { trail } : {}),
+    ...(note ? { reason: note } : {}),
   };
 }
 
@@ -451,9 +457,14 @@ export function deleteMcpBatchConfirm(input: {
   };
 }
 
-/// 删完一项 MCP 定义的例行一行：`✓ 已从 [Codex] 删除 weibo-search`（调用方另给 `撤销`，一律给）
-export function deletedMcpOriginalToast(name: string, agent?: ToastAgentRef): ToastText {
-  return toastFor("delete", { done: [{ name, agent }] });
+/// 删完一项 MCP 定义的例行一行：`✓ 已从 [Codex] 删除 weibo-search`（调用方另给 `撤销`，一律给）。
+/// `note`：第三方模式那一份没删成的那一句（`McpReportEntry.mirrorFailed`）
+export function deletedMcpOriginalToast(
+  name: string,
+  agent?: ToastAgentRef,
+  note?: string,
+): ToastText {
+  return toastFor("delete", { done: [{ name, agent, note }] });
 }
 
 /// 「拆开」确认框（DESIGN「没有收件箱、待处理页和「忽略」」表：整个文件夹是链接，点该列任一格）：

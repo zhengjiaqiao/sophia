@@ -14,6 +14,7 @@ fn loc(id: &str, label: &str, harness: &str, domain: &str, path: &Path) -> McpLo
         path: path.to_path_buf(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

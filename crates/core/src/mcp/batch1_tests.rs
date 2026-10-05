@@ -48,6 +48,7 @@ fn location(id: &str, label: &str, harness_id: &str, path: PathBuf) -> McpLocati
         path,
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

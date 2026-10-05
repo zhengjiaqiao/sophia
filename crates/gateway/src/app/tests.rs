@@ -13,6 +13,8 @@ const NATIVE_CACHE: &str = r#"{"client_version":"0.154.0","models":[{"slug":"gpt
 #[derive(Default)]
 pub(super) struct World {
     pub(super) settings: GatewaySettings,
+    /// true：网关设置读不出（settings.json 坏了，spec S7）
+    pub(super) settings_unreadable: bool,
     /// 卸 launchd 服务的调用（`uninstall <label>`）：旧版 Sophia 的路由服务（R14）与 agents-manager 的
     pub(super) service_calls: Vec<String>,
     old_service_installed: bool,
@@ -238,7 +240,16 @@ pub(super) fn fixture() -> Fixture {
         agents_manager_dir: root.join("agents-manager"),
         load_settings: Box::new({
             let w = w.clone();
-            move || Ok(w.lock().unwrap().settings.clone())
+            move || {
+                let w = w.lock().unwrap();
+                if w.settings_unreadable {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "settings.json 坏了",
+                    ));
+                }
+                Ok(w.settings.clone())
+            }
         }),
         save_settings: Box::new({
             let w = w.clone();

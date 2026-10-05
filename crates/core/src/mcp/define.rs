@@ -24,8 +24,9 @@
 //! Zed 的 `source: "custom"`）直接略过。
 use super::agents::{self, desktop_remote};
 use super::{
-    agent_name, discover_locations, execute, has_duplicate_header_names, parse, secretish,
-    Canonical, McpAction, McpLocation, McpReport, McpReportEntry, Parsed, Pending, PreparedPlan,
+    agent_name, discover_locations, execute, has_duplicate_header_names, parse, plan_actions,
+    secretish, with_mirrors, Canonical, McpAction, McpLocation, McpReport, McpReportEntry, Parsed,
+    Pending, PreparedPlan,
 };
 use crate::atomicfile::unsafe_parent;
 use crate::discovery::Env;
@@ -1514,6 +1515,7 @@ fn report_entry(name: &str, target_id: &str, outcome: &str, message: &str) -> Mc
         outcome: outcome.into(),
         message: message.into(),
         backup_path: None,
+        mirror_failed: None,
     }
 }
 
@@ -1555,6 +1557,7 @@ pub fn write_definitions(
                         target: parsed.state.clone(),
                         target_location: location.clone(),
                         definition: def.canon.clone(),
+                        mirror: false,
                     });
                 }
                 Verdict::Same => skipped.push(report_entry(
@@ -1569,10 +1572,13 @@ pub fn write_definitions(
             }
         }
     }
+    // Claude Desktop 第三方模式的那一份跟着写（`McpLocation::mirrors`）
+    let (private, mirror_failures) = with_mirrors(private);
     let plan = PreparedPlan {
-        actions: private.iter().map(|p| p.action.clone()).collect(),
+        actions: plan_actions(&private),
         issues: Vec::new(),
         private,
+        mirror_failures,
     };
     let mut report = execute(plan, false, backups);
     report.entries.extend(skipped);

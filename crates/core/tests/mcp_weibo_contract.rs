@@ -66,6 +66,7 @@ fn weibo_location(fixture: &Fixture, agent: &str, id: &str) -> McpLocation {
         path: fixture.database.clone(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 
@@ -78,6 +79,7 @@ fn json_location(id: &str, path: &Path) -> McpLocation {
         path: path.into(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

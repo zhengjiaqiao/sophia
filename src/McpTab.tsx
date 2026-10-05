@@ -74,6 +74,7 @@ import {
   type McpDomainRow,
   type McpPlacedRow,
   type McpTable,
+  mirrorFailedNote,
 } from "./mcpView";
 import { Button, Confirm, CornerToast, Mono, Tag, Toast, ToastCount } from "./ui";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
@@ -394,6 +395,7 @@ export default function McpTab({
           name: e.name,
           agent: t ? { id: t.harnessId, name: t.label } : undefined,
           project: t ? t.domain !== "global" : undefined,
+          note: e.mirrorFailed,
         };
       });
       const text = toastFor("autoWrite", { done: items });
@@ -566,6 +568,7 @@ export default function McpTab({
         name: e.name,
         agent: l ? { id: l.harnessId, name: l.label } : undefined,
         project: l ? l.domain !== "global" : undefined,
+        note: e.mirrorFailed,
       };
     });
 
@@ -1182,6 +1185,8 @@ export default function McpTab({
           place={toName}
           names={[placed.name]}
           trail={trail}
+          // 第三方模式那一份没写成：成功句后接那一句（`McpReportEntry.mirrorFailed`）
+          reason={mirrorFailedNote(created)}
           onDismiss={dismissGlobal}
         />,
       );
@@ -1346,7 +1351,9 @@ export default function McpTab({
           cannot(result.entries[0]?.message ?? t("mcp.delete.noChange"));
         } else {
           // 删的是团队共享那一格：接一句提交之后队友那边的后果（spec 2026-09-30-mcp-claude-self-team R7）
-          const base = del.resultText ?? deletedMcpOriginalToast(one.name, del.agent);
+          // 第三方模式那一份没删成时，成功句后接那一句
+          const mirrorFailed = result.entries.find((e) => e.outcome === "removed")?.mirrorFailed;
+          const base = del.resultText ?? deletedMcpOriginalToast(one.name, del.agent, mirrorFailed);
           const text =
             mcpColumnOf(one.locationId) === CLAUDE_TEAM
               ? { ...base, trail: [...(base.trail ?? []), teamLost()] }

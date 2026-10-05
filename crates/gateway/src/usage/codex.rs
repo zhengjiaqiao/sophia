@@ -12,8 +12,8 @@
 //! 不需要改它。
 
 use super::probe::{run_probe, ProbeSpec};
-use super::FetchError;
 use super::{codex_executables, codex_probe_dir, codex_signed_in, ensure_empty_probe_dir};
+use super::{Account, FetchError};
 use serde_json::Value;
 use sophia_core::usage::parse::{parse_app_server, parse_rollout_line};
 use sophia_core::usage::rollout::{latest_rollout, read_last_rate_limits_line};
@@ -45,20 +45,19 @@ pub fn read_rollout(codex_home: &Path) -> Option<Reading> {
 /// [`FetchError::NotSignedIn`]，且**不会**起任何进程（R5、AC10）。
 pub async fn fetch_app_server(
     base_dir: &Path,
-    codex_home: &Path,
+    account: &Account,
     now: i64,
 ) -> Result<Reading, FetchError> {
-    // 只在用户环境本来就设过 CODEX_HOME 时才把它带给子进程（设计第 2 节：「启动时去掉
-    // CODEX_HOME 以外会改变身份的环境变量」——反过来说，CODEX_HOME 本身要保留，否则
-    // app-server 会去读默认的 ~/.codex，跟调用方解析出的 `codex_home` 可能不是同一个目录）
-    let codex_home_env = std::env::var_os("CODEX_HOME").map(|v| v.to_string_lossy().into_owned());
+    // 带给子进程的 CODEX_HOME 由账号决定（设计第 2 节：「启动时去掉 CODEX_HOME 以外会改变身份的
+    // 环境变量」——CODEX_HOME 本身要保留，否则 app-server 会去读默认的 ~/.codex，跟这里解析出的
+    // `codex_home` 可能不是同一个目录）；测试主目录时连 HOME 一起换掉
     fetch_app_server_with(
         base_dir,
-        codex_home,
+        &account.codex_home,
         now,
         &codex_executables(),
-        codex_home_env,
-        None,
+        account.codex_home_env.clone(),
+        account.probe_parent_env(),
         TIMEOUT,
     )
     .await
@@ -472,9 +471,8 @@ mod real_verification {
         rt.block_on(async {
             let base_dir = std::env::temp_dir()
                 .join(format!("sophia-usage-verify-codex-{}", std::process::id()));
-            let codex_home = crate::runtime::codex_home();
             let start = std::time::Instant::now();
-            let result = fetch_app_server(&base_dir, &codex_home, 0).await;
+            let result = fetch_app_server(&base_dir, &crate::usage::Account::real(), 0).await;
             let elapsed = start.elapsed();
             eprintln!("elapsed={elapsed:?}");
             match result {

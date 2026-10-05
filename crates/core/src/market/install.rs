@@ -764,13 +764,14 @@ fn move_away(placed: &Path, hold_root: &Path) -> ReportEntry {
             .or_else(|_| sync::trash(placed))
         {
             Ok(()) => Outcome::Removed,
-            Err(e) => Outcome::Failed(e.to_string()),
+            Err(e) => Outcome::Failed(sync::io_fail("move-installed", placed, &e).reason),
         }
     };
     ReportEntry {
         action,
         outcome,
         fail_kind: None,
+        detail: None,
     }
 }
 
@@ -797,13 +798,14 @@ fn put_back(held: &Path, orig: &Path, new_moved: bool) -> ReportEntry {
                 }
                 Outcome::Created
             }
-            Err(e) => Outcome::Failed(e.to_string()),
+            Err(e) => Outcome::Failed(sync::io_fail("put-back-old", orig, &e).reason),
         }
     };
     ReportEntry {
         action,
         outcome,
         fail_kind: None,
+        detail: None,
     }
 }
 

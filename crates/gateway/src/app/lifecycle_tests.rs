@@ -362,6 +362,33 @@ fn exit_sync_restores_codex_only_and_is_idempotent() {
     assert_eq!(f.read_config(), config);
 }
 
+/// spec S7：网关设置读不出（settings.json 坏了）时，关机、崩溃的同步改回照样把 Codex 改回官方——
+/// 按值认出路由地址与目录路径，不靠设置里记的端口；设置文件不写
+#[test]
+fn exit_sync_restores_codex_even_when_settings_are_unreadable() {
+    let f = codex_on();
+    f.world.lock().unwrap().settings_unreadable = true;
+    f.app.exit_sync();
+    assert_eq!(f.read_config(), ORIGINAL);
+    let w = f.world.lock().unwrap();
+    assert_eq!(w.settings.enabled, Some(true), "设置读不出就不写");
+}
+
+/// spec S7：用户关掉（或命令行 `restore`）时设置读不出，照样改回 Codex、停路由；警告里带上设置读不出这一条
+#[test]
+fn restore_works_when_settings_are_unreadable() {
+    let f = codex_on();
+    f.world.lock().unwrap().settings_unreadable = true;
+    let warnings = f.app.restore().unwrap();
+    assert_eq!(f.read_config(), ORIGINAL);
+    assert!(
+        warnings.iter().any(|w| w.contains("settings.json 坏了")),
+        "{warnings:?}"
+    );
+    let w = f.world.lock().unwrap();
+    assert!(w.router.is_none(), "路由停了");
+}
+
 /// 关机前 Codex 在跑：它加载的是第三方配置；关机改回之后再接上，开机后新起的 Codex 读的是官方配置，要提示重启
 #[test]
 fn exit_sync_is_recorded_so_a_codex_started_meanwhile_is_asked_to_restart() {

@@ -60,13 +60,27 @@ pub fn setup(app: &tauri::App) -> Result<(), String> {
             app: app.handle().clone(),
             store,
         });
-        let fetcher = Arc::new(RealFetcher { base_dir: dir });
+        let fetcher = Arc::new(RealFetcher {
+            base_dir: dir,
+            account: usage_account()?,
+        });
         tauri::async_runtime::spawn(run(rx, fetcher, host, settings, restored, memo));
         tauri::async_runtime::spawn(redraw_every_minute(app.handle().clone()));
     }
     #[cfg(not(target_os = "macos"))]
     drop((rx, store, restored, memo));
     Ok(())
+}
+
+/// 用量看哪个账号：调试版指定了测试主目录（`SOPHIA_TEST_HOME`）时看它，否则看真实环境
+#[cfg(target_os = "macos")]
+fn usage_account() -> Result<sophia_gateway::usage::Account, String> {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("SOPHIA_TEST_HOME").is_some() {
+        let home = crate::runtime_env()?.home;
+        return Ok(sophia_gateway::usage::Account::in_home(&home));
+    }
+    Ok(sophia_gateway::usage::Account::real())
 }
 
 /// 倒计时（「2:58」）与过期变淡随时间变化，读数不变也要按分钟重画

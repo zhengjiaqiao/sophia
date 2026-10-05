@@ -546,6 +546,7 @@ fn entry(
         outcome: outcome.into(),
         message: message.into(),
         backup_path,
+        mirror_failed: None,
     }
 }
 

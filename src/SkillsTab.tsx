@@ -670,16 +670,23 @@ export default function SkillsTab({
 
   /// 这条没做成的原因，一句人话：说原因，不说「失败」
   /// 动词带方向：没加到 X / 没从 X 移除（「开启 X」会读成操作应用本身）
-  /// 无法写入（core 按 io 错误类别判的 `failKind`）时说人话，否则原样转述 core 给的那句
+  /// 分得出类的（core 按 io 错误类别判的 `failKind`：无法写入、磁盘满、已不在）说人话，否则原样转述 core 给的那句
   const reasonOf = (entry: ReportEntry, what: "link" | "unlink"): string => {
     const target = entry.action.target;
     const reason = entry.outcome.status === "failed" ? entry.outcome.reason : "";
     const agent = targetByPath(target)?.label ?? target;
-    return entry.failKind === "noWrite"
-      ? t("skills.reason.readOnly", { agent })
-      : what === "link"
-        ? t("skills.reason.linkFailed", { agent, reason })
-        : t("skills.reason.unlinkFailed", { agent, reason });
+    switch (entry.failKind) {
+      case "noWrite":
+        return t("skills.reason.readOnly", { agent });
+      case "diskFull":
+        return t("skills.reason.diskFull", { agent });
+      case "missing":
+        return t("skills.reason.gone", { agent });
+      default:
+        return what === "link"
+          ? t("skills.reason.linkFailed", { agent, reason })
+          : t("skills.reason.unlinkFailed", { agent, reason });
+    }
   };
 
   /// 执行一次开 / 关：返回每一格做成没做成。排除 / 恢复在动作之前写，顺序不能反

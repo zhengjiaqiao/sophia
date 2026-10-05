@@ -23,7 +23,16 @@ function readVersion(): Promise<string | null> {
   return versionRead;
 }
 
-export function PageGuard({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
+export function PageGuard({
+  children,
+  narrow,
+  shell,
+}: {
+  children: ReactNode;
+  narrow?: boolean;
+  /// 主窗口外壳的兜底（spec S18）：整窗换成出错页，只有 `重新加载`
+  shell?: boolean;
+}) {
   const [version, setVersion] = useState<string | null>(null);
   const settings = useReportSettings();
   useEffect(() => {
@@ -36,6 +45,7 @@ export function PageGuard({ children, narrow }: { children: ReactNode; narrow?: 
   return (
     <PageFault
       narrow={narrow}
+      shell={shell}
       version={version}
       onError={(error, componentStack) => {
         // 故意出的错只出一次：边界接住后拆掉，`重新加载` 才能恢复（React 渲染出错会就地重试一次，
@@ -46,7 +56,7 @@ export function PageGuard({ children, narrow }: { children: ReactNode; narrow?: 
       onCopy={(text) => copyDetails(text)}
       redact={api.redactText}
       onReport={
-        !narrow && offerReport(settings)
+        !narrow && !shell && offerReport(settings)
           ? (attached) => openFeedback("pageFault", attached)
           : undefined
       }

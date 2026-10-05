@@ -12,6 +12,7 @@ use super::{
     unsupported_with, Canonical, McpLocation, McpReasonKind,
 };
 use crate::discovery::Env;
+use crate::fs::EntryKind;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::io;
@@ -49,6 +50,15 @@ pub(super) struct Agent {
 impl Agent {
     pub(super) fn user_path(&self, env: &Env) -> Option<PathBuf> {
         (self.user)(env)
+    }
+
+    /// 用户级位置写入时要跟着写的附属文件（`McpLocation::mirrors`）：只有 Claude Desktop 有（第三方模式那一份）
+    pub(super) fn user_mirrors(&self, env: &Env) -> Vec<PathBuf> {
+        if self.id == "claude-desktop" {
+            desktop_mirrors(env)
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -109,6 +119,20 @@ fn desktop_user(env: &Env) -> Option<PathBuf> {
         var(env, "APPDATA").map(|dir| dir.join("Claude").join("claude_desktop_config.json"))
     } else {
         None
+    }
+}
+
+/// 第三方模式下 Claude 桌面应用读的那一份（spec 2026-10-05-mcp-claude-3p R1）：macOS 上
+/// `~/Library/Application Support/Claude-3p/` 本身是目录（`symlink_metadata`，软链接不算）时，
+/// 它下面的 `claude_desktop_config.json`；目录不存在（从没切过第三方模式）就没有。Windows 没有第三方模式
+fn desktop_mirrors(env: &Env) -> Vec<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return Vec::new();
+    }
+    let dir = env.home.join("Library/Application Support/Claude-3p");
+    match crate::fs::entry_kind(&dir) {
+        EntryKind::Dir => vec![dir.join("claude_desktop_config.json")],
+        _ => Vec::new(),
     }
 }
 

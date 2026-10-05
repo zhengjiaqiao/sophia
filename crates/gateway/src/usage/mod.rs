@@ -188,6 +188,71 @@ pub fn codex_signed_in(codex_home: &Path) -> bool {
     codex_home.join("auth.json").is_file()
 }
 
+/// 用量看的是哪个账号：登录判断、会话记录、探测子进程都从这里取路径。
+///
+/// 平时是真实环境（`HOME`、`CLAUDE_CONFIG_DIR`、`CODEX_HOME`）；调试版指定了测试主目录
+/// （`SOPHIA_TEST_HOME`）时一律以它为准，探测子进程的 HOME、CODEX_HOME 也换成它，
+/// 不去问真实账号（否则测试环境里的用量页显示的是开发者本人的额度）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Account {
+    /// Claude 的 `.claude.json` 默认在这里
+    pub home: PathBuf,
+    /// 用户设过 `CLAUDE_CONFIG_DIR` 时以它为准
+    pub claude_config_dir: Option<PathBuf>,
+    /// Codex 的 `auth.json` 与会话记录所在目录
+    pub codex_home: PathBuf,
+    /// 要带给 `codex` 子进程的 `CODEX_HOME`；`None`＝不带（用它自己的默认）
+    pub codex_home_env: Option<String>,
+    /// 探测子进程的 HOME 要换成它；`None`＝沿用本进程的环境
+    child_home: Option<PathBuf>,
+}
+
+impl Account {
+    /// 真实环境
+    pub fn real() -> Self {
+        let codex_home_env = std::env::var_os("CODEX_HOME")
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string_lossy().into_owned());
+        Self {
+            home: crate::runtime::home(),
+            claude_config_dir: std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from),
+            codex_home: crate::runtime::codex_home(),
+            codex_home_env,
+            child_home: None,
+        }
+    }
+
+    /// 以 `home` 为主目录的账号：不看用户环境里的 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`
+    pub fn in_home(home: &Path) -> Self {
+        let codex_home = home.join(".codex");
+        Self {
+            home: home.to_path_buf(),
+            claude_config_dir: None,
+            codex_home_env: Some(codex_home.to_string_lossy().into_owned()),
+            codex_home,
+            child_home: Some(home.to_path_buf()),
+        }
+    }
+
+    pub fn claude_signed_in(&self) -> bool {
+        claude_signed_in(&self.home, self.claude_config_dir.as_deref())
+    }
+
+    pub fn codex_signed_in(&self) -> bool {
+        codex_signed_in(&self.codex_home)
+    }
+
+    /// 探测子进程的父环境：`None`＝用本进程的环境；测试主目录时是本进程环境把 HOME 换掉
+    /// （`probe` 只从中取白名单变量，CLAUDE_CONFIG_DIR、CODEX_HOME 这类本来就不带）
+    pub fn probe_parent_env(&self) -> Option<Vec<(String, String)>> {
+        let home = self.child_home.as_ref()?;
+        let mut env: Vec<(String, String)> =
+            std::env::vars().filter(|(k, _)| k != "HOME").collect();
+        env.push(("HOME".to_owned(), home.to_string_lossy().into_owned()));
+        Some(env)
+    }
+}
+
 /// 探测用的空目录：`<base>/probe/claude`。`base` 是 Sophia 的应用支持目录，由调用方传入；
 /// 这里只算路径，不创建、不校验是否为空——那是 `probe::run_probe` 的事
 pub fn claude_probe_dir(base: &Path) -> PathBuf {
@@ -247,6 +312,57 @@ mod tests {
         let home = root.join("home");
         std::fs::create_dir_all(&home).unwrap();
         assert!(claude_executables_from(None, &home).is_empty());
+    }
+
+    /// 调试版指定了测试主目录（`SOPHIA_TEST_HOME`）：登录判断、会话记录、探测子进程的 HOME 与
+    /// CODEX_HOME 都指向它，不再读真实账号（2026-10-02 截图时发现用量页显示的是真实额度）
+    #[test]
+    fn account_in_home_points_every_lookup_at_that_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap();
+        let account = Account::in_home(&home);
+        assert_eq!(account.home, home);
+        assert_eq!(
+            account.claude_config_dir, None,
+            "测试主目录不跟用户环境里的 CLAUDE_CONFIG_DIR"
+        );
+        assert_eq!(account.codex_home, home.join(".codex"));
+        assert_eq!(
+            account.codex_home_env.as_deref(),
+            Some(home.join(".codex").to_string_lossy().as_ref())
+        );
+        let env = account
+            .probe_parent_env()
+            .expect("测试主目录要换掉探测子进程的 HOME");
+        let child_home = env
+            .iter()
+            .find(|(k, _)| k == "HOME")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(child_home, Some(home.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn account_in_home_reads_login_from_that_home_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap();
+        let account = Account::in_home(&home);
+        assert!(!account.claude_signed_in(), "测试主目录里没登录就是没登录");
+        assert!(!account.codex_signed_in());
+
+        std::fs::write(
+            home.join(".claude.json"),
+            r#"{"oauthAccount":{"accountUuid":"x"}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(home.join(".codex").join("auth.json"), "{}").unwrap();
+        assert!(account.claude_signed_in());
+        assert!(account.codex_signed_in());
+    }
+
+    #[test]
+    fn real_account_keeps_the_process_environment() {
+        assert!(Account::real().probe_parent_env().is_none());
     }
 
     #[test]

@@ -26,6 +26,7 @@ fn json_location(id: &str, path: &Path, domain: &str) -> McpLocation {
         path: path.into(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 
@@ -244,6 +245,7 @@ fn weibo_location(id: &str, database: &Path, agent_root: &Path) -> McpLocation {
         path: database.into(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 

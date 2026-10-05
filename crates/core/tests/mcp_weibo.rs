@@ -70,6 +70,7 @@ impl Fixture {
             path: self.db.clone(),
             selector: None,
             matrix_hidden: false,
+            mirrors: Vec::new(),
         }
     }
 
@@ -92,6 +93,7 @@ fn json_location(id: &str, path: &Path) -> McpLocation {
         path: path.into(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     }
 }
 
@@ -306,6 +308,7 @@ fn symlinked_agent_root_is_invalid() {
         path: fixture.db.clone(),
         selector: None,
         matrix_hidden: false,
+        mirrors: Vec::new(),
     };
     let overview = scan(&[location]);
     assert_eq!(overview.entries.len(), 0);
