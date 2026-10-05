@@ -103,6 +103,18 @@ jobs:
             exit 1
           fi
 
+      # 上报与反馈的接收服务地址（发布前评估 M19）：空着的话，公开版会悄悄变成「没有上报、没有反馈入口」的包，
+      # 而且这里不检查就没人会发现。只在公开仓库发版，所以变量也只配在公开仓库
+      - name: 接收服务地址已配成仓库变量
+        env:
+          SOPHIA_REPORT_URL: ${{ vars.SOPHIA_REPORT_URL }}
+        run: |
+          if [ -z "$SOPHIA_REPORT_URL" ]; then
+            echo "::error::仓库变量 SOPHIA_REPORT_URL 是空的：公开版会没有自动上报和「反馈问题」。"
+            echo "::error::gh variable set SOPHIA_REPORT_URL -R zhengjiaqiao/sophia --body 'https://api.sophiakit.workers.dev'（部署见 server/README.md）。"
+            exit 1
+          fi
+
   # 先建一个草稿 Release 拿到 id，两个架构的构建往同一个 id 上挂产物，
   # tauri-action 会把各自的 latest.json 合并进同一份清单。
   # 排练（workflow_dispatch）不建 Release，这一步整个跳过，输出为空。
@@ -189,7 +201,9 @@ jobs:
           releaseId: ${{ (matrix.variant.publish && needs.draft.outputs.releaseId) || '' }}
           uploadUpdaterJson: ${{ matrix.variant.publish }}
           uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: sophia-${{ matrix.variant.name }}-${{ matrix.target }}
+          # tauri-action 每种安装包（dmg、app）各传一个 artifact，名字必须带 [bundle]，
+          # 否则第二个撞名 409、整个架构判失败（2026-10-05 排练 run 37309681257）
+          workflowArtifactNamePattern: sophia-${{ matrix.variant.name }}-${{ matrix.target }}-[bundle]
           retryAttempts: 2
           # createUpdaterArtifacts 只在发布这条路上打开（packaging/updater.conf.json 合并进配置）：
           # 它会要求签名私钥，而本机 make build 不该为了出一个 debug 包去配密钥。

@@ -20,7 +20,7 @@ Sophia puts it all in one table: **which skill or MCP server each agent can use 
 - **Sophia reads what is already on disk.** Skills stay where they are — a shared folder such as `~/.agents/skills`, an agent's own folder, or a project. Nothing is imported or moved.
 - **User-wide or per project.** Pick a scope and the table shows what is in effect there.
 - **Knows the skill folders of 41 agents** — Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Windsurf and more — and only shows the ones you have installed.
-- **Problems show up on the row they affect**: a broken link, two different skills with the same name, an agent folder that is itself a symlink. Each comes with the fix.
+- **Problems show up on the row they affect**: a broken link, two different skills with the same name, an agent folder that is itself a symlink. Each one points you to the fix.
 
 ### MCP servers, copied between agents
 
@@ -40,7 +40,7 @@ Switch the Skills or MCP page from **Yours** to **Discover** to search popular s
 
 ### Third-party models for Codex and Claude (macOS)
 
-Use models from other providers in the Codex app and in Claude Desktop, next to the official ones. Sophia runs a small local gateway inside the app that translates between the APIs, so third-party models work while Sophia is open (turn on **Open at login** in Settings to keep them always available). Quitting Sophia asks first, then switches the Codex app and Claude Desktop back to the official models. Add several providers, choose the models each agent should see, and switch it on or off from the app or the menu bar. API keys are kept in a file in the Sophia data folder that only you can read (it is included in Time Machine backups).
+Use models from other providers in the Codex app and in Claude Desktop, next to the official ones. Sophia runs a small local gateway inside the app that translates between the APIs, so third-party models work while Sophia is open (turn on **Open at login** in Settings to keep them always available). Quitting Sophia asks first, then switches the Codex app and Claude Desktop back to the official models. Add several providers, choose the models each agent should see, and switch it on or off from the app or the menu bar. API keys are kept in a file in the Sophia data folder, readable only by your user account (so any program you run can read it too; it is included in Time Machine backups).
 
 <p align="center">
   <img src="./assets/readme/en/screen-models.png" width="100%" alt="The Codex models page: two gateway providers, the models chosen from each, and the switch for third-party models.">
@@ -48,12 +48,14 @@ Use models from other providers in the Codex app and in Claude Desktop, next to 
 
 ### Usage in the menu bar (macOS)
 
-See how much of your Claude and Codex plan limits is left, right in the menu bar. Sophia asks Claude Code and Codex themselves; it never reads or refreshes your login tokens.
+See how much of your Claude and Codex plan limits is left, right in the menu bar. Sophia asks Claude Code and Codex themselves. It only checks whether you are signed in; it never stores or uploads your login tokens.
 
 ## Safe by default
 
 - **Links, not copies.** Adding a skill to an agent creates a symlink (a junction on Windows). Linking never rewrites your skill folders.
 - **Nothing is overwritten.** If an agent already has a different skill or MCP server with the same name, Sophia leaves it alone and tells you.
+- **Usage statistics and error reports are on by default**, anonymous, and can be switched off in Settings › About. What is sent is in [PRIVACY.md](./PRIVACY.md). Local logs live in `~/Library/Logs/com.zhengjiaqiao.sophia/`.
+- **Uninstalling**: quit Sophia first (it switches Codex and Claude Desktop back to the official models), then delete the app. If Sophia is not running and Codex cannot connect, remove the lines marked "Written by Sophia" from `~/.codex/config.toml`.
 - **Deleting an original asks first** and says which agents lose it. The folder is set aside so the delete can be undone, and moved to the Trash afterwards.
 - **Config files are edited surgically.** Changes to `~/.claude.json`, `~/.codex/config.toml` and friends take a snapshot and a backup, replace the file atomically and check fingerprints before and after writing. Only the entry in question changes — comments, key order and line endings stay as they were. MCP changes can be undone.
 - **Turning the Codex gateway off restores `config.toml` byte for byte.** It only ever adds or removes two top-level keys.

@@ -547,11 +547,14 @@ export function inUseLabel(state: GatewayState): string {
 /// 勾选列表框顶上的筛选框：`筛选 40 个模型`
 export const modelFilterPlaceholder = (count: number) => tn("models.filter.placeholder", count);
 
-/// 编辑表单里只读的协议：本机路由收 Responses，转给网关时说它的协议；还没拉过模型时写「拉取模型时识别」
-export function protocolText(protocol: string | undefined): string {
-  if (protocol === "chat") return "Responses → Chat Completions";
-  if (protocol === "responses") return "Responses";
-  return t("models.gateway.protocolUnknown");
+/// 编辑表单里只读的协议：本机路由收 Responses，转给网关时说它的协议。新网关默认按 Chat Completions 发
+/// （`codex_models::settings` 的缺省），没有「识别协议」的逻辑，所以还没拉过模型时也照实写默认值
+/// （发布前评估 M16：原来写「拉取模型时识别」，代码里没有这回事）
+export function protocolText(protocol: string | undefined, agent: GatewayAgent = "codex"): string {
+  // 本机路由从 Codex 收 Responses、从 Claude 桌面应用收 Messages；转给网关时按网关的协议发
+  const inbound = agent === "claude" ? "Messages" : "Responses";
+  if (protocol === "responses") return agent === "claude" ? "Messages → Responses" : "Responses";
+  return `${inbound} → Chat Completions`;
 }
 
 /// 草稿存在期间 `+ 网关` 禁用的原因（从源头防止两个草稿）

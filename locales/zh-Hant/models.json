@@ -14,7 +14,6 @@
   "models.gateway.keyUnreadable": "金鑰無法使用",
   "models.gateway.needKeyToPick": "先點右邊的鉛筆填寫金鑰，才能勾選這一家的模型",
   "models.gateway.picked": "已選 {selected} / {count}",
-  "models.gateway.protocolUnknown": "取得模型時辨識",
   "models.gateway.unsavedNew": "新閘道沒儲存",
   "models.gateway.unsavedEdit": "網址改動沒儲存",
   "models.inUse.inUse": "在用",

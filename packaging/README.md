@@ -48,11 +48,11 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -R zhengjiaqiao/sophia   # 按�
 名字必须逐字一致——这两个名字是 Tauri 认的环境变量名，不能改。
 
 另有一个**仓库变量**（不是 Secret，同一页的 Variables 标签）：`SOPHIA_REPORT_URL`，接收服务的地址（如
-`https://sophia-ingest.<账号子域>.workers.dev`，部署见 `server/README.md`）。发版时编进公开版，用于自动上报
+`https://api.sophiakit.workers.dev`，部署见 `server/README.md`；guard 会检查它，空着就在编译前失败）。发版时编进公开版，用于自动上报
 （spec 2026-10-04-reporting-feedback）；内部版不编。没设或为空，打出来的包就不上报、设置里也没有那一行：
 
 ```sh
-gh variable set SOPHIA_REPORT_URL -R zhengjiaqiao/sophia --body 'https://…workers.dev'
+gh variable set SOPHIA_REPORT_URL -R zhengjiaqiao/sophia --body 'https://api.sophiakit.workers.dev'
 ```
 
 ### 3. Apple 签名与公证

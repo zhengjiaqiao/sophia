@@ -35,10 +35,8 @@ cask "sophia" do
 
   app "Sophia.app"
 
-  # 模型网关是个 launchd 常驻服务，指着 .app 里的可执行文件。
-  # 卸载时不把它卸掉，它会一直去拉一个已经不存在的程序。
-  uninstall launchctl: "com.zhengjiaqiao.sophia.gateway",
-            quit:      "com.zhengjiaqiao.sophia"
+  # 退出时 Sophia 自己把 Codex、Claude 桌面应用改回官方模型（网关跑在应用进程里，没有后台服务要卸）
+  uninstall quit: "com.zhengjiaqiao.sophia"
 
   zap trash: [
     "~/Library/Application Support/Sophia",
@@ -46,10 +44,11 @@ cask "sophia" do
     "~/Library/Preferences/com.zhengjiaqiao.sophia.plist",
     "~/Library/Saved Application State/com.zhengjiaqiao.sophia.savedState",
     "~/Library/WebKit/com.zhengjiaqiao.sophia",
+    "~/Library/Logs/com.zhengjiaqiao.sophia",
   ]
 
   caveats <<~EOS
-    Sophia 如果启用过模型网关，卸载前先在应用里「停用」一次：
-    它往 ~/.codex/config.toml 写过东西，那部分只有应用自己能干净地撤回。
+    卸载前先退出 Sophia（它会把 Codex 和 Claude 桌面应用改回官方模型）。
+    brew 升级会先关掉 Sophia，正在运行的 Codex 要重启一次才会重新接上。
   EOS
 end

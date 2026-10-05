@@ -363,6 +363,7 @@ export function GatewayBlock({
       <div className="gw-row__form" ref={formEl}>
         <GatewayForm
           state={state}
+          agent={agent}
           provider={provider}
           siblings={providers}
           other={other}
@@ -714,6 +715,8 @@ interface GatewayFormProps {
   onDirtyChange: (dirty: boolean) => void;
   /// 离开页面或换一行编辑时表单还有改动：就地一句 + 保存 / 丢弃，问完做 `onDone`
   ask: { text: string; onDone: () => void } | null;
+  /// 哪一家的网关：决定「协议」一行怎么写（Codex 收 Responses、Claude 收 Messages）
+  agent?: GatewayAgent;
 }
 
 /// 地址为空时的「保存」：禁用，按下即出「先填地址」
@@ -747,6 +750,7 @@ export function GatewayForm({
   onCancel,
   onDirtyChange,
   ask,
+  agent = "codex",
 }: GatewayFormProps) {
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
   const [apiKey, setApiKey] = useState("");
@@ -948,7 +952,7 @@ export function GatewayForm({
         </span>
         <span>
           {tRich("models.form.protocol", {
-            protocol: <span className="gw-form__value">{protocolText(provider?.protocol)}</span>,
+            protocol: <span className="gw-form__value">{protocolText(provider?.protocol, agent)}</span>,
           })}
         </span>
       </p>

@@ -23,7 +23,6 @@
     "one": "{selected} of 1 selected",
     "other": "{selected} of {count} selected"
   },
-  "models.gateway.protocolUnknown": "Detected when models are fetched",
   "models.gateway.unsavedNew": "New gateway not saved",
   "models.gateway.unsavedEdit": "URL change not saved",
   "models.inUse.inUse": "In use",

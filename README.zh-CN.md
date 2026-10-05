@@ -20,7 +20,7 @@ Sophia 把这些放进一张表：**每个 agent 现在能用哪些 skill、哪�
 - **原件在哪就从哪管。** skill 留在原处：通用仓库 `~/.agents/skills`、某个 agent 自己的文件夹、某个项目，都行。不导入，也不搬动。
 - **用户级或按项目。** 选一个生效范围，表格就显示在那里生效的内容。
 - **认得 41 个 agent 的 skill 目录**：Claude Code、Codex、Cursor、Gemini CLI、GitHub Copilot、Windsurf 等，只显示你装了的。
-- **问题就地显示在出问题的那一行**：失效的链接、同名的两份不同 skill、agent 的文件夹本身是个软链。每一种都给出修复办法。
+- **问题就地显示在出问题的那一行**：失效的链接、同名的两份不同 skill、agent 的文件夹本身是个软链。每一种都指给你修复的位置。
 
 ### MCP 在 agent 之间复制
 
@@ -40,7 +40,7 @@ Sophia 把这些放进一张表：**每个 agent 现在能用哪些 skill、哪�
 
 ### 给 Codex 和 Claude 用第三方模型（macOS）
 
-在 Codex 应用和 Claude 桌面应用里，把其他服务商的模型和官方模型放在一起用。Sophia 在应用里跑一个本机小网关负责转换接口，Sophia 开着时第三方模型就能用（在设置里打开「开机启动」就随时能用）。退出 Sophia 前会先确认，再把 Codex 应用和 Claude 桌面应用改回官方模型。可以加多家服务商、为每个 agent 选要显示的模型，在应用或菜单栏里一键开关。API 密钥存在 Sophia 数据目录里一个只有你本人能读的文件中（会随 Time Machine 备份）。
+在 Codex 应用和 Claude 桌面应用里，把其他服务商的模型和官方模型放在一起用。Sophia 在应用里跑一个本机小网关负责转换接口，Sophia 开着时第三方模型就能用（在设置里打开「开机启动」就随时能用）。退出 Sophia 前会先确认，再把 Codex 应用和 Claude 桌面应用改回官方模型。可以加多家服务商、为每个 agent 选要显示的模型，在应用或菜单栏里一键开关。API 密钥存在 Sophia 数据目录里的一个文件中，只有你的账户能读（以你身份运行的程序也读得到；会随 Time Machine 备份）。
 
 <p align="center">
   <img src="./assets/readme/zh-CN/screen-models.png" width="100%" alt="Codex 的模型页：两家网关、从每家选好的模型，以及第三方模型的总开关。">
@@ -48,12 +48,14 @@ Sophia 把这些放进一张表：**每个 agent 现在能用哪些 skill、哪�
 
 ### 菜单栏看用量（macOS）
 
-在菜单栏直接看 Claude 和 Codex 订阅额度还剩多少。用量由 Claude Code 和 Codex 自己去查，Sophia 从不读取、也不刷新你的登录令牌。
+在菜单栏直接看 Claude 和 Codex 订阅额度还剩多少。用量由 Claude Code 和 Codex 自己去查。Sophia 只看你是否已登录，不保存、不上传你的登录令牌。
 
 ## 默认就安全
 
 - **建链接，不复制。** 给 agent 加 skill 是建一条软链（Windows 上是 junction），不会改写你的 skill 文件夹。
 - **不覆盖。** agent 里已经有同名但不同的 skill 或 MCP 时，Sophia 不动它，只告诉你。
+- **使用统计和错误报告默认开着**，匿名，可以在设置「关于」里关掉。发什么见 [PRIVACY.md](./PRIVACY.md)。本机日志在 `~/Library/Logs/com.zhengjiaqiao.sophia/`。
+- **卸载**：先退出 Sophia（会把 Codex 和 Claude 桌面应用改回官方模型），再删应用。Sophia 没在运行而 Codex 连不上时，把 `~/.codex/config.toml` 里标着「由 Sophia 写入」的那几行删掉即可。
 - **删除原件先确认**，并说明哪些 agent 会失去它。原件先挪到一边、可以撤销，之后再移进废纸篓。
 - **改配置文件只动那一项。** 改 `~/.claude.json`、`~/.codex/config.toml` 等文件之前先留快照和备份，原子替换，写前写后都核对指纹。只改相关的那一项，注释、键的顺序和换行符都原样保留。MCP 的改动可以撤销。
 - **关掉 Codex 网关，`config.toml` 逐字节还原。** 它只增删两个根键。

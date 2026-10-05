@@ -291,7 +291,7 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>取消</);
   assert.doesNotMatch(html, /ss-btn--quiet/);
   assert.match(html, /本机端口 <span class="gw-form__value">47328<\/span>/);
-  assert.match(html, /协议 <span class="gw-form__value">拉取模型时识别<\/span>/);
+  assert.match(html, /协议 <span class="gw-form__value">Responses → Chat Completions<\/span>/);
   assert.equal(protocolText("chat"), "Responses → Chat Completions");
   // 离开 / 换一行时有没保存的改动：就地一句 + 保存 / 丢弃
   const ask = render(GatewayForm, {

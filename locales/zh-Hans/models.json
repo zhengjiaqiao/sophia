@@ -14,7 +14,6 @@
   "models.gateway.keyUnreadable": "密钥不可用",
   "models.gateway.needKeyToPick": "先点右边的铅笔填写密钥，才能勾选这一家的模型",
   "models.gateway.picked": "已选 {selected} / {count}",
-  "models.gateway.protocolUnknown": "拉取模型时识别",
   "models.gateway.unsavedNew": "新网关没保存",
   "models.gateway.unsavedEdit": "地址改动没保存",
   "models.inUse.inUse": "在用",
