@@ -58,5 +58,10 @@
   "settings.update.restart": "重启",
   "settings.update.failed": "{version} 安装失败：{reason}",
   "settings.update.retry": "再试一次",
+  "settings.update.failedReason.permission": "没有权限替换 Sophia",
+  "settings.update.failedReason.verify": "下载的安装包没通过校验",
+  "settings.update.failedReason.network": "无法连接下载服务器，请检查网络",
+  "settings.update.failedReason.disk": "磁盘空间不够",
+  "settings.update.failedReason.unknown": "原因见详情",
   "settings.appearance.applyFailed": "设不上窗口外观：{error}"
 }

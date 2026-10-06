@@ -428,6 +428,16 @@ pub fn clear_gateway_state_fault() {
     faults::clear_gateway_state();
 }
 
+/// `SOPHIA_FAULT=tray-panel`：托盘面板这一步要当成建失败（发行版恒为 false）
+pub fn tray_panel_fault() -> bool {
+    faults::tray_panel_active()
+}
+
+/// `SOPHIA_FAULT=tray-icon`：托盘图标这一步要当成建失败（发行版恒为 false）
+pub fn tray_icon_fault() -> bool {
+    faults::tray_icon_active()
+}
+
 /// 故意出错的入口只在调试版、或显式开了 `diag-faults` 的构建里有（spec 风险 2）
 #[cfg(any(debug_assertions, feature = "diag-faults"))]
 mod faults {
@@ -447,12 +457,18 @@ mod faults {
         GatewayState,
         /// 网页侧某一页渲染出错（由前端经 `debug_fault` 读）
         Page(String),
+        /// 托盘面板这一步建不出来（验证「面板缺席，图标仍在」）
+        TrayPanel,
+        /// 托盘图标这一步建不出来（验证「无图标，Dock 仍在」）
+        TrayIcon,
     }
 
     pub fn parse_fault(value: &str) -> Option<Fault> {
         match value.trim() {
             "panic" => Some(Fault::Panic),
             "gateway-state" => Some(Fault::GatewayState),
+            "tray-panel" => Some(Fault::TrayPanel),
+            "tray-icon" => Some(Fault::TrayIcon),
             other => other
                 .strip_prefix("page:")
                 .filter(|page| !page.is_empty())
@@ -491,6 +507,14 @@ mod faults {
     pub(super) fn clear_gateway_state() {
         GATEWAY_STATE_USED.store(true, Ordering::SeqCst);
     }
+
+    pub(super) fn tray_panel_active() -> bool {
+        raw().is_some_and(|v| parse_fault(&v) == Some(Fault::TrayPanel))
+    }
+
+    pub(super) fn tray_icon_active() -> bool {
+        raw().is_some_and(|v| parse_fault(&v) == Some(Fault::TrayIcon))
+    }
 }
 
 #[cfg(not(any(debug_assertions, feature = "diag-faults")))]
@@ -508,6 +532,14 @@ mod faults {
     }
 
     pub(super) fn clear_gateway_state() {}
+
+    pub(super) fn tray_panel_active() -> bool {
+        false
+    }
+
+    pub(super) fn tray_icon_active() -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -649,6 +681,9 @@ mod tests {
             parse_fault("page:models"),
             Some(Fault::Page("models".into()))
         );
+        assert_eq!(parse_fault("tray-panel"), Some(Fault::TrayPanel));
+        assert_eq!(parse_fault(" tray-icon "), Some(Fault::TrayIcon));
+        assert_eq!(parse_fault("tray"), None);
         assert_eq!(parse_fault("page:"), None);
         assert_eq!(parse_fault(""), None);
         assert_eq!(parse_fault("nonsense"), None);

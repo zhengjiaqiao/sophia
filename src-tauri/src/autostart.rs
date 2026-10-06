@@ -119,12 +119,25 @@ fn should_default(defaulted: bool, test_home: bool) -> bool {
 /// 登录项在后台被改过（默认注册完成）：设置页收到就重读
 pub const AUTOSTART_CHANGED: &str = "autostart-changed";
 
+/// 这次启动要不要开主窗口：登录项拉起且菜单栏图标建成了才只留菜单栏；
+/// 图标没建成就没有别的入口，必须开窗口（spec prelaunch-five R3）
+fn should_show_main(tray_built: bool, login_item: bool) -> bool {
+    !(tray_built && login_item)
+}
+
 /// `Ready` 时调（R2）：登录项拉起就只留菜单栏，否则开主窗口。别的系统上一律开窗口
 pub fn show_main_unless_login_item(app: &tauri::AppHandle) {
     #[cfg(target_os = "macos")]
-    if imp::launched_as_login_item() {
-        log::info!("由登录项拉起：只出现在菜单栏");
-        return;
+    {
+        let login_item = imp::launched_as_login_item();
+        let tray_built = crate::tray::icon_built();
+        if !should_show_main(tray_built, login_item) {
+            log::info!("由登录项拉起：只出现在菜单栏");
+            return;
+        }
+        if login_item {
+            log::warn!("由登录项拉起，但菜单栏图标没建成：照常打开主窗口");
+        }
     }
     #[cfg(target_os = "macos")]
     crate::tray::show_main(app);
@@ -148,6 +161,18 @@ mod tests {
             !super::should_default(false, true),
             "测试主目录里的实例不碰系统登录项"
         );
+    }
+
+    #[test]
+    fn show_main_decision_covers_tray_and_login_item() {
+        // 图标在 × 登录项拉起：只留菜单栏
+        assert!(!should_show_main(true, true));
+        // 图标在 × 自己打开：开窗口
+        assert!(should_show_main(true, false));
+        // 图标不在 × 登录项拉起：没有别的入口，必须开窗口
+        assert!(should_show_main(false, true));
+        // 图标不在 × 自己打开：开窗口
+        assert!(should_show_main(false, false));
     }
 
     #[test]

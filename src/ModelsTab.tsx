@@ -20,6 +20,7 @@ import {
   modelLabel,
   parseBackendError,
   modeNote,
+  quotaNote,
   portMovedNote,
   routerTodo,
   routerUnavailable,
@@ -31,7 +32,7 @@ import {
 } from "./modelsView.ts";
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
 import { codexGateway } from "./types.ts";
-import type { GatewayProvider, GatewayProviderModel, GatewayState } from "./types.ts";
+import type { GatewayProvider, GatewayProviderModel, GatewayState, UsageView } from "./types.ts";
 import { ChipRow, Confirm, ModelChip, NoticePanel, Spinner } from "./ui/index.ts";
 import { HINTS, useHint } from "./hints.ts";
 import { CodexKeySlot, CodexSwitch } from "./codexControls.tsx";
@@ -120,6 +121,8 @@ export interface ModelsTabProps {
 export default function ModelsTab({ onError, onGatewayState, banner = false }: ModelsTabProps) {
   const tool = MODELS_TOOLS[0];
   const [state, setState] = useState<GatewayState | null>(null);
+  /// 菜单栏用量视图（与用量页、托盘同一读法）：读到 ChatGPT 额度用完时节里说一句；读不到就当没有
+  const [usage, setUsage] = useState<UsageView | null>(null);
   /// 这一节正在做一件写 Codex 设置的事（重启、接管、重启路由、存网关……）：对同一对象的下一次操作
   /// 先不接（键禁用并说「正在处理上一步」）；不锁页面、不锁别的页，勾选排队不受它影响
   const [busy, onBusy] = useState(false);
@@ -253,6 +256,25 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
       unlistens.forEach((un) => un());
     };
   }, [quietRefresh]);
+
+  // 用量视图：只读不取（`opened` 为 false），新数经 `usage-changed` 到；读不到（这台机器没有用量、命令失败）就当没有
+  useEffect(() => {
+    let disposed = false;
+    const unlistens: Array<() => void> = [];
+    const read = () =>
+      api
+        .usageView(false)
+        .then((view) => !disposed && setUsage(view))
+        .catch(() => !disposed && setUsage(null));
+    void read();
+    void listen("usage-changed", () => void read()).then((un) =>
+      disposed ? un() : unlistens.push(un),
+    );
+    return () => {
+      disposed = true;
+      unlistens.forEach((un) => un());
+    };
+  }, []);
 
   // 键显示着时每 5 秒轻查一次，键消失即停；不做常驻进程监控
   const polling = shouldPollRestart(state, phase);
@@ -521,6 +543,8 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
   const portNote = portMovedNote(state, "codex");
   /// 没登录 OpenAI、改用了独立服务商：同一位置、同一种灰字说接法与后果
   const modeText = modeNote(state);
+  /// ChatGPT 额度用完：同一位置、同一种灰字说第三方模型也可能用不了与出路
+  const quotaText = quotaNote(state, usage);
   const todos = sectionTodos({
     tool,
     state,
@@ -579,6 +603,7 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
       ) : null}
       {portNote !== null ? <p className="models-port-note">{portNote}</p> : null}
       {modeText !== null ? <p className="models-port-note">{modeText}</p> : null}
+      {quotaText !== null ? <p className="models-port-note">{quotaText}</p> : null}
       <InUseRow state={state} onRemove={removeModel} />
       {todos.length > 0 ? <div className="models-todos">{todos}</div> : null}
       <GatewayBlock

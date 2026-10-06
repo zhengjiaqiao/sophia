@@ -70,11 +70,11 @@ While **Usage statistics and error reports** in Settings › About is on (it is 
 - **Sophia version**.
 - **macOS major version**, e.g. `macOS 15`.
 - **CPU architecture**: Apple silicon (`aarch64`) or Intel (`x86_64`).
-- **How many errors of each kind happened that day**: Sophia's own (crashes, page errors, uncaught errors, internal errors) and external ones (network failures, third-party service errors, config files that couldn't be written, rejected API keys). **Counts only** — no error text.
+- **How many errors of each kind happened that day**: Sophia's own (crashes, page errors, uncaught errors, internal errors) and external ones (network failures, third-party service errors, config files, skills or MCP that couldn't be written or synced — no permission, disk full, read-only, the target already gone — and rejected API keys). **Counts only** — no error text.
 
 Within a day, Sophia overwrites that day's record with the running totals at most once every 6 hours; the service keeps one row per computer per day. If a report can't be sent, Sophia stays quiet and tries again later, for up to 30 days back.
 
-**When Sophia itself goes wrong**, it also sends an error record so the maintainer can find where the problem is. This covers only Sophia's own faults: crashes, page errors, uncaught errors and internal errors. External causes — network failures, third-party service errors, config files that couldn't be written, rejected API keys — are still counts only. An error record contains:
+**When Sophia itself goes wrong**, it also sends an error record so the maintainer can find where the problem is. This covers only Sophia's own faults: crashes, page errors, uncaught errors and internal errors. External causes — network failures, third-party service errors, config files or skills/MCP that couldn't be written or synced (no permission, disk full, read-only, the target already gone), rejected API keys — are still counts only, with no paths and no error text. An error record contains:
 
 - the install ID, the Sophia version and the macOS major version;
 - the error text and stack trace (where in the code it happened); a crash also includes the thread name and time;

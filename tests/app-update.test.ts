@@ -127,7 +127,8 @@ test("下载失败：记下原因；后台再查不冲掉原因，重试先重�
   assert.deepEqual(store.get().phase, {
     kind: "failed",
     version: "0.2.0",
-    reason: "Error: disk full",
+    detail: "Error: disk full",
+    reason: "原因见详情",
   });
   await store.checkQuietly();
   assert.equal(store.get().phase.kind, "failed");
@@ -160,7 +161,7 @@ test("侧栏更新键：只有图标、不展开，字在提示框里；纸面�
   assert.doesNotMatch(available, /ss-updatekey__label/, "键上不再有展开的字");
 
   assert.match(
-    key({ kind: "failed", version: "0.2.0", reason: "x" }),
+    key({ kind: "failed", version: "0.2.0", detail: "x", reason: "原因见详情" }),
     /ss-updatekey--paper/,
     "失败回到纸面键，再点就是重试",
   );

@@ -11,9 +11,9 @@ cask "sophia" do
   arch arm: "aarch64", intel: "x64"
 
   # 下面三行每次发版由 render-cask.mjs 重写；现在填的是占位值，装不上任何东西
-  version "0.0.0"
-  sha256 arm:   "000000000000000000000000000000000000000000000000000000000000000a",
-         intel: "000000000000000000000000000000000000000000000000000000000000000b"
+  version "0.1.1"
+  sha256 arm:   "46b584a0bf709906cc8dcdb1c1b36f38df6b8fc37d4842c607539ade7dc83eaa",
+         intel: "c971914881b5f113ff299cdb11b9f59e95ff5eb73678c7ccc494062ca6efaf32"
 
   url "https://github.com/zhengjiaqiao/sophia/releases/download/v#{version}/Sophia_#{version}_#{arch}.dmg"
   name "Sophia"
@@ -41,10 +41,10 @@ cask "sophia" do
   zap trash: [
     "~/Library/Application Support/Sophia",
     "~/Library/Caches/com.zhengjiaqiao.sophia",
+    "~/Library/Logs/com.zhengjiaqiao.sophia",
     "~/Library/Preferences/com.zhengjiaqiao.sophia.plist",
     "~/Library/Saved Application State/com.zhengjiaqiao.sophia.savedState",
     "~/Library/WebKit/com.zhengjiaqiao.sophia",
-    "~/Library/Logs/com.zhengjiaqiao.sophia",
   ]
 
   caveats <<~EOS

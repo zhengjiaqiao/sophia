@@ -40,6 +40,7 @@ import {
   useReportSettings,
 } from "../feedback.tsx";
 import { SettingRow } from "./SettingRow.tsx";
+import { copyDetails } from "../diagnostics.ts";
 import { updateCheckFailure } from "../updateText.ts";
 import { appUpdates, useAppUpdate } from "../useAppUpdate.ts";
 import { autoCheckNote } from "../market/updateView.ts";
@@ -186,15 +187,24 @@ export function SettingsPage({
           />
         );
       case "failed":
+        // 原因说中文、英文原文进 `详情`；`去发布页 ↗` 跟在句后（离开 Sophia 的退路），键区只放留在 Sophia 里的动作；
+        // × 与「稍后」同义：只收起这一程的待办条，侧栏更新键照旧在
         return (
           <NoticePanel
             scope="section"
-            message={t("settings.update.failed", {
-              version: update.version,
-              reason: update.reason,
-            })}
+            message={
+              <>
+                {t("settings.update.failed", { version: update.version, reason: update.reason })}
+                {" ·\u00a0"}
+                <Button variant="quiet" inline onClick={() => void openUrl(RELEASES_URL)}>
+                  {t("settings.update.releasesPage")}
+                </Button>
+              </>
+            }
+            technical={update.detail}
+            onCopy={(text) => copyDetails(text)}
             action={{ label: t("settings.update.retry"), onClick: () => void appUpdates.install() }}
-            secondary={{ label: t("settings.update.later"), onClick: () => setLater(true) }}
+            onClose={() => setLater(true)}
           />
         );
     }

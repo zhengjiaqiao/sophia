@@ -1,0 +1,183 @@
+name: Homebrew cask
+
+# 把某个已发布 Release 的 cask 推到 tap 仓库 zhengjiaqiao/homebrew-tap（spec #193）。两个入口：
+#   - release.yml 在草稿转正之后调用（workflow_call），只有真发版（tag push）才走到；排练不建 Release，也不调用它。
+#   - 手动运行（workflow_dispatch），填一个已发布的 tag：发版那次失败了（令牌过期、brew 检查没过）修好后补推，
+#     或者换了令牌后先验一遍。tap 里已经是这个版本就不提交，跑一遍等于只做检查。
+# 推送前在 macOS runner 上 brew style、brew audit，再真装一次、带 zap 卸一次，全过才推。
+# 失败不影响 Release：它在转正之后才跑，Release 已经公开了。
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      # 不设 required：缺了要走到下面的检查，由它说清缺什么、怎么补，而不是在调用处报一句含糊的错
+      HOMEBREW_TAP_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已发布的 tag，如 v0.2.0
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  cask:
+    # 与 release.yml 一样只在公开仓库跑：令牌只配在那里，开发仓库里手动运行也直接跳过
+    if: github.repository == 'zhengjiaqiao/sophia'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    # 同一时间只有一次往 tap 推，两次发版挨得近也不会互相顶掉
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag }}
+      TAP: zhengjiaqiao/tap
+      TAP_REPO: zhengjiaqiao/homebrew-tap
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_ENV_HINTS: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      # 先把不用花 macOS 分钟就能问清的事问清：tag 写对了没有、令牌在不在、还能不能往 tap 推。
+      # 照 release.yml 的 guard：每条失败都说缺什么、去哪儿补
+      - name: tag 写法正确，推 tap 的令牌已配好且能用
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          bad_tag=0
+          bad_token=0
+          bad_net=0
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag 要写成 v<版本>，如 v0.2.0；收到的是「${TAG}」"
+            bad_tag=1
+          fi
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::error::缺少 secret HOMEBREW_TAP_TOKEN：只授权 ${TAP_REPO}、Contents 读写的 fine-grained PAT"
+            bad_token=1
+          else
+            # 和 git push 开头那一下是同一个请求：200 能推；401 令牌认不出（过期、被撤销、粘错）；
+            # 403/404 令牌有效但没授权 tap 仓库，或者权限不是 Contents 读写
+            code=$(printf 'user = "x-access-token:%s"\n' "$HOMEBREW_TAP_TOKEN" |
+              curl -sS -o /dev/null -w '%{http_code}' -K - \
+                "https://github.com/${TAP_REPO}.git/info/refs?service=git-receive-pack" || true)
+            case "$code" in
+              200) ;;
+              000)
+                echo "::error::连不上 github.com，没法核对 secret HOMEBREW_TAP_TOKEN；稍后重跑"
+                bad_net=1 ;;
+              401)
+                echo "::error::secret HOMEBREW_TAP_TOKEN 认不出（HTTP 401）：多半是过期了或被撤销了，需要换一个新令牌"
+                bad_token=1 ;;
+              *)
+                echo "::error::secret HOMEBREW_TAP_TOKEN 推不了 ${TAP_REPO}（HTTP ${code}）：建令牌时要选这个仓库，权限 Contents 选 Read and write"
+                bad_token=1 ;;
+            esac
+          fi
+          if [ "$bad_token" = 1 ]; then
+            echo "::error::在本机跑 packaging/setup-tap-token.sh，按提示建令牌并写进 zhengjiaqiao/sophia 的 secret；"
+            echo "::error::配好后在 Actions 里手动运行「Homebrew cask」，tag 填 ${TAG}（见 packaging/README.md「4. Homebrew tap 与推 tap 的令牌」）。"
+            echo "::error::Release 本身不受影响，已经发出去了。"
+          fi
+          [ "$bad_tag$bad_token$bad_net" = 000 ]
+
+      # 用这次运行所在提交的模板：发版时就是 tag 那次同步提交；手动运行是 main 上最新的模板
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # 现下两个 dmg 算 sha256、核对产物名与 url 模板，写回 packaging/Casks/sophia.rb（对不上就停）
+      - name: 按 Release 产物渲染 cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node packaging/render-cask.mjs "$TAG"
+
+      # tap 用 brew 自己 clone 的那份：检查、安装读的都是它，提交和推送也在它上面做
+      - name: 放进本地 tap
+        run: |
+          brew tap "$TAP"
+          # 新版 brew 要求第三方 tap 的 cask 先信任才肯加载；没有 trust 命令的旧版本来就不要求
+          if brew trust --help >/dev/null 2>&1; then
+            brew trust --cask "$TAP/sophia"
+          fi
+          tap_dir=$(brew --repository "$TAP")
+          cp packaging/Casks/sophia.rb "$tap_dir/Casks/sophia.rb"
+          echo "TAP_DIR=$tap_dir" >> "$GITHUB_ENV"
+          git -C "$tap_dir" --no-pager diff --stat
+
+      # --online 会把两个架构的 dmg 都下回来核对；--strict 多跑一批更严的检查
+      - name: brew style 与 brew audit
+        env:
+          # audit --online 会查 GitHub API，runner 共用出口 IP，不带令牌容易撞匿名限流
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
+        run: |
+          brew style --cask "$TAP/sophia"
+          brew audit --cask --strict --online --arch=all "$TAP/sophia"
+
+      # runner 上没有在跑的 Sophia：正好验装、验卸、验 zap。不启动应用（会往接收服务上报）
+      - name: 真装一次，带 zap 卸一次
+        run: |
+          app=/Applications/Sophia.app
+          brew install --cask "$TAP/sophia"
+          got=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          if [ "$got" != "${TAG#v}" ]; then
+            echo "::error::装上的是 ${got}，应为 ${TAG#v}"
+            exit 1
+          fi
+
+          # 按 cask 自己列的 zap 路径先造出来，卸完逐个确认已经清掉
+          zap=()
+          while IFS= read -r p; do zap+=("${p/#\~/$HOME}"); done < <(
+            brew info --cask --json=v2 "$TAP/sophia" |
+              jq -r '.casks[0].artifacts[] | select(.zap) | .zap[] | .trash // empty | if type == "array" then .[] else . end'
+          )
+          if [ "${#zap[@]}" = 0 ]; then
+            echo "::error::cask 里读不到 zap trash 路径"
+            exit 1
+          fi
+          for p in "${zap[@]}"; do
+            case "$p" in
+              *.plist) mkdir -p "$(dirname "$p")" && touch "$p" ;;
+              *) mkdir -p "$p" && touch "$p/ci-marker" ;;
+            esac
+          done
+
+          brew uninstall --zap --cask "$TAP/sophia"
+          left=0
+          for p in "$app" "${zap[@]}"; do
+            if [ -e "$p" ]; then
+              echo "::error::卸载后还在：$p"
+              left=1
+            fi
+          done
+          [ "$left" = 0 ]
+
+      - name: 提交到 tap 仓库并推送
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          version="${TAG#v}"
+          cd "$TAP_DIR"
+          git add Casks/sophia.rb
+          if git diff --cached --quiet; then
+            echo "::notice::tap 里的 cask 已经是 ${version}，内容没变，不提交"
+            exit 0
+          fi
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "sophia ${version}"
+          git --no-pager show --stat HEAD
+          if ! git push "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git" HEAD:main; then
+            echo "::error::推送 ${TAP_REPO} 失败。tap 的 main 刚被别处改过就手动运行「Homebrew cask」对 ${TAG} 重跑；"
+            echo "::error::令牌问题见 packaging/README.md「4. Homebrew tap 与推 tap 的令牌」。"
+            exit 1
+          fi

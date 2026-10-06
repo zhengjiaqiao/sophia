@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { setLocale } from "../src/i18n.ts";
-import { modeNote } from "../src/modelsView.ts";
+import { modeNote, quotaNote } from "../src/modelsView.ts";
 import { gatewayFixture } from "./gateway-fixture.ts";
 import type { CodexFixture } from "./gateway-fixture.ts";
-import type { GatewayState } from "../src/types.ts";
+import type { GatewayState, UsageStatus, UsageView, UsageWindow } from "../src/types.ts";
 
 const src = (path: string) => readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
 const catalog = (locale: string) =>
@@ -61,4 +61,82 @@ test("说明与端口说明同一位置、同一种灰字", () => {
   const page = src("ModelsTab.tsx");
   assert.match(page, /modeNote\(state\)/);
   assert.match(page, /<p className="models-port-note">\{modeText\}<\/p>/);
+});
+
+// ===== ChatGPT 额度用完的说明（spec 2026-10-06-prelaunch-five R13） =====
+
+const window_ = (over: Partial<UsageWindow> = {}): UsageWindow => ({
+  key: "weekly",
+  label: "本周",
+  usedPercent: 100,
+  resetsAt: null,
+  windowMinutes: null,
+  severity: "critical",
+  active: true,
+  ...over,
+});
+
+const usage = (
+  windows: UsageWindow[] | null,
+  over: { status?: UsageStatus; menuBarEnabled?: boolean } = {},
+): UsageView =>
+  ({
+    state: {
+      agents: [
+        {
+          agent: "codex",
+          status: over.status ?? { kind: "ok" },
+          reading:
+            windows === null
+              ? null
+              : { agent: "codex", source: "appServer", observedAt: 0, windows, plan: null },
+          attemptedAt: null,
+        },
+      ],
+    },
+    settings: { menuBarEnabled: over.menuBarEnabled ?? true },
+    signedIn: ["codex"],
+    tray: [],
+    menuBar: {},
+  }) as unknown as UsageView;
+
+test("额度用到 100 且借用内置：出说明", () => {
+  setLocale("zh-Hans");
+  const text =
+    "ChatGPT 额度已用完，Codex 可能连第三方模型也用不了。要接着用：在 Codex 里退出登录，再关开一次上面的开关";
+  assert.equal(quotaNote(state(), usage([window_()])), text);
+  assert.equal(quotaNote(state(), usage([window_({ usedPercent: 120 })])), text);
+});
+
+test("不到 100、没有在用的窗口、没有读数、读取失败、没开菜单栏用量：不出", () => {
+  assert.equal(quotaNote(state(), usage([window_({ usedPercent: 99 })])), null);
+  assert.equal(quotaNote(state(), usage([window_({ active: false })])), null);
+  assert.equal(quotaNote(state(), usage([])), null);
+  assert.equal(quotaNote(state(), usage(null)), null);
+  assert.equal(quotaNote(state(), null), null);
+  assert.equal(quotaNote(state(), usage(null, { status: { kind: "failing", reason: "x" } })), null);
+  assert.equal(quotaNote(state(), usage([window_()], { menuBarEnabled: false })), null);
+});
+
+test("读数里的窗口已过了重置时刻（读数是旧的）：不出；还没到重置时刻：出", () => {
+  setLocale("zh-Hans");
+  const now = 1_800_000_000;
+  assert.equal(quotaNote(state(), usage([window_({ resetsAt: now - 1 })]), now), null);
+  assert.equal(quotaNote(state(), usage([window_({ resetsAt: now })]), now), null);
+  assert.notEqual(quotaNote(state(), usage([window_({ resetsAt: now + 60 })]), now), null);
+});
+
+test("免登录接法、开关关着、不支持：不出", () => {
+  const full = usage([window_()]);
+  assert.equal(quotaNote(state({ mode: "provider", modeReason: "signedOut" }), full), null);
+  assert.equal(quotaNote(state({ enabled: false }), full), null);
+  assert.equal(quotaNote(state({ supported: false }), full), null);
+});
+
+test("额度说明三种语言都有，位置同其他灰字", () => {
+  for (const locale of ["zh-Hans", "zh-Hant", "en"]) {
+    assert.ok(Object.keys(catalog(locale)).includes("models.note.quotaUsedUp"), locale);
+  }
+  const page = src("ModelsTab.tsx");
+  assert.match(page, /<p className="models-port-note">\{quotaText\}<\/p>/);
 });

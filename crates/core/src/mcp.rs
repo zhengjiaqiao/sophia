@@ -1999,7 +1999,11 @@ fn execute_group(
     let bytes = match merge_group(old, &group) {
         Ok(bytes) => bytes,
         Err(error) => {
-            // 文本级追加核对不过时带上原因
+            // 写回前核对没通过是 Sophia 自己的改写出了问题：计一次内部错误，只计次数不收原文
+            // （spec 2026-10-06-prelaunch-five R15）；用户文件本身的状态不计。拒绝写时带上原因
+            if merge_unverified(&error) {
+                crate::report::count(crate::report::Kind::Internal);
+            }
             match error.get_ref().and_then(|e| e.downcast_ref::<Refused>()) {
                 Some(reason) => fail(
                     report,
@@ -2995,7 +2999,7 @@ fn verify_json_merge(
     additions: &[(&str, &Canonical)],
     dialect: Dialect,
 ) -> io::Result<()> {
-    let bad = || refused(crate::t!("mcp.write.afterMismatch"));
+    let bad = || unverified(crate::t!("mcp.write.afterMismatch"));
     let old: Value = serde_json::from_slice(before).map_err(|_| bad())?;
     serde_json::from_slice::<NoDuplicates>(after).map_err(|_| bad())?;
     let mut new: Value = serde_json::from_slice(after).map_err(|_| bad())?;
@@ -3115,16 +3119,45 @@ fn json_server(def: &Canonical, helper_key: Option<&str>) -> io::Result<Vec<u8>>
     serde_json::to_vec(&Value::Object(object)).map_err(io::Error::other)
 }
 /// 合并被拒绝的原因（给用户看的一句中文），随 `io::Error` 带到 `execute_group` 显示
+/// 不写的原因。`unverified`：改写已经做出来、写回前按语义核对没通过——是 Sophia 自己的改写出了问题，
+/// 计入每日上报的内部错误（spec 2026-10-06-prelaunch-five R15）；其余（文件不是合法 TOML、形状不对、
+/// 名字已在等）是用户那边的状态，不计
 #[derive(Debug)]
-struct Refused(String);
+struct Refused {
+    reason: String,
+    unverified: bool,
+}
 impl std::fmt::Display for Refused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.reason)
     }
 }
 impl std::error::Error for Refused {}
 fn refused(reason: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, Refused(reason.into()))
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        Refused {
+            reason: reason.into(),
+            unverified: false,
+        },
+    )
+}
+/// 写回前核对没通过（见 [`Refused`]）
+fn unverified(reason: impl Into<String>) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        Refused {
+            reason: reason.into(),
+            unverified: true,
+        },
+    )
+}
+/// 合并没做成是不是 Sophia 自己的改写出了问题（只有写回前核对没通过才算）
+fn merge_unverified(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .and_then(|e| e.downcast_ref::<Refused>())
+        .is_some_and(|r| r.unverified)
 }
 
 /// 往 TOML 配置（Codex 的 `config.toml`）里追加 MCP 服务。**不重新序列化整份文件**：
@@ -3293,14 +3326,14 @@ fn verify_toml_merge(
         .map_err(|_| refused(crate::t!("mcp.write.notToml")))?;
     let new = after
         .parse::<toml_edit::DocumentMut>()
-        .map_err(|_| refused(crate::t!("mcp.write.afterUnparsable")))?;
+        .map_err(|_| unverified(crate::t!("mcp.write.afterUnparsable")))?;
     let mut actual = sources::plain_table(new.as_table());
     let Some(Value::Object(servers)) = actual.get_mut("mcp_servers") else {
-        return Err(refused(crate::t!("mcp.write.afterNoServers")));
+        return Err(unverified(crate::t!("mcp.write.afterNoServers")));
     };
     for (name, def) in additions {
         if servers.remove(*name).is_none() {
-            return Err(refused(crate::t!(
+            return Err(unverified(crate::t!(
                 "mcp.write.afterNameMissing",
                 name = name
             )));
@@ -3310,7 +3343,7 @@ fn verify_toml_merge(
             let expected = raw_inline(text)
                 .map(|table| sources::plain_item(&toml_edit::Item::Value(table.into())));
             if expected != Some(sources::plain_item(&new["mcp_servers"][*name])) {
-                return Err(refused(crate::t!(
+                return Err(unverified(crate::t!(
                     "mcp.write.afterNameDiffers",
                     name = name
                 )));
@@ -3327,7 +3360,7 @@ fn verify_toml_merge(
                     .is_some_and(|got| render(got).is_some() && render(got) == render(raw))
             });
         if !written.connection_eq(def) || !same_clients {
-            return Err(refused(crate::t!(
+            return Err(unverified(crate::t!(
                 "mcp.write.afterNameDiffers",
                 name = name
             )));
@@ -3338,7 +3371,7 @@ fn verify_toml_merge(
         actual.remove("mcp_servers");
     }
     if actual != expected {
-        return Err(refused(crate::t!("mcp.write.alteredExisting")));
+        return Err(unverified(crate::t!("mcp.write.alteredExisting")));
     }
     Ok(())
 }
@@ -3641,7 +3674,10 @@ mod tests {
         for bad in ["mcp_servers = 1\n", "[[mcp_servers]]\nx = 1\n"] {
             let error = merge_toml(Some(bad.as_bytes()), &[("new", &def)]).unwrap_err();
             let reason = error.get_ref().and_then(|e| e.downcast_ref::<Refused>());
-            assert!(reason.is_some_and(|r| r.0.contains("mcp_servers")), "{bad}");
+            assert!(
+                reason.is_some_and(|r| r.reason.contains("mcp_servers")),
+                "{bad}"
+            );
         }
     }
 
@@ -4134,5 +4170,83 @@ mod undo_tests {
         assert_eq!(result.outcome, "failed");
         assert_eq!(result.files[0].outcome, "failed");
         assert_eq!(result.files[0].message, "没有写入权限，没动");
+    }
+}
+
+#[cfg(test)]
+mod count_tests {
+    use super::*;
+    use crate::report::{Kind, PENDING};
+    use crate::test_support::{backups, TempTree};
+    use std::sync::Mutex;
+
+    /// 全局计数器是进程共用的：开关与取数都在锁里，以后加的计数测试同样串行
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    fn loc(id: &str, path: &Path) -> McpLocation {
+        McpLocation {
+            id: id.into(),
+            label: id.into(),
+            harness_id: "claude-code".into(),
+            domain: "global".into(),
+            path: path.to_path_buf(),
+            selector: None,
+            matrix_hidden: false,
+            mirrors: Vec::new(),
+        }
+    }
+
+    /// 先按「目标还不存在」生成计划，再用 `setup` 把目标弄成要测的样子，并把计划里的目标状态更新成磁盘上的现状
+    /// （预览时看到的就是这份内容）。
+    /// 返回这次执行记下的 (writeFailure, internal) 次数；同时断言没收事件原文
+    fn run(toml_target: bool, reporting: bool, setup: impl FnOnce(&Path)) -> (u32, u32) {
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let tree = TempTree::new();
+        let source = tree.root().join("source.json");
+        fs::write(&source, br#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        let target = tree
+            .root()
+            .join(if toml_target { "config.toml" } else { "t.json" });
+        let mut target_location = loc("t0", &target);
+        if toml_target {
+            target_location.harness_id = "codex".into();
+        }
+        let locations = vec![loc("source", &source), target_location];
+        let selections = vec![McpSelection {
+            source_id: "source".into(),
+            name: "docs".into(),
+            target_id: "t0".into(),
+        }];
+        let mut plan = prepare(&locations, &selections);
+        assert_eq!(plan.private.len(), 1);
+        setup(&target);
+        plan.private[0].target = read(&target);
+        PENDING.set_enabled(reporting);
+        PENDING.clear();
+        let report = execute(plan, false, backups());
+        let taken = PENDING.take();
+        let events = PENDING.take_events();
+        PENDING.set_enabled(false);
+        assert!(events.is_empty(), "只计次数，不收事件原文");
+        assert!(report.entries.iter().all(|e| e.outcome == "failed"));
+        assert_eq!(report.entries.len(), 1);
+        let sum = |kind| taken.values().map(|c| c.get(kind)).sum::<u32>();
+        (sum(Kind::WriteFailure), sum(Kind::Internal))
+    }
+
+    #[test]
+    fn user_file_shape_refusal_is_not_counted() {
+        // `mcp_servers` 不是表：用户文件本身的状态，不是 Sophia 的改写出错
+        let bad = |p: &Path| fs::write(p, b"mcp_servers = 1\n").unwrap();
+        assert_eq!(run(true, true, bad), (0, 0));
+    }
+
+    #[test]
+    fn only_failed_write_back_verification_counts_as_internal() {
+        assert!(merge_unverified(&unverified("核对没通过")));
+        assert!(!merge_unverified(&refused("不是合法 TOML")));
+        assert!(!merge_unverified(&io::Error::from(
+            io::ErrorKind::AlreadyExists
+        )));
     }
 }

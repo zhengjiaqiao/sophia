@@ -58,5 +58,10 @@
   "settings.update.restart": "重啟",
   "settings.update.failed": "{version} 安裝失敗：{reason}",
   "settings.update.retry": "再試一次",
+  "settings.update.failedReason.permission": "沒有權限取代 Sophia",
+  "settings.update.failedReason.verify": "下載的安裝包沒通過校驗",
+  "settings.update.failedReason.network": "無法連線下載伺服器，請檢查網路",
+  "settings.update.failedReason.disk": "磁碟空間不夠",
+  "settings.update.failedReason.unknown": "原因見詳情",
   "settings.appearance.applyFailed": "設不上視窗外觀：{error}"
 }

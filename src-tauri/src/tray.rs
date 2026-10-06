@@ -74,6 +74,7 @@ pub fn take_close_hint(store_dir: &Path) -> bool {
 #[cfg(target_os = "macos")]
 mod imp {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -269,10 +270,37 @@ mod imp {
         window.setFrameTopLeftPoint(NSPoint::new(x, top));
     }
 
-    pub fn setup(app: &tauri::App) -> tauri::Result<()> {
-        app.manage(PanelState::default());
+    /// 图标建成了没有：登录项拉起时靠它决定要不要开主窗口（图标不在就没有别的入口，必须开）
+    static ICON_BUILT: AtomicBool = AtomicBool::new(false);
 
-        // 面板窗口：启动时就建好、藏着，弹出时不用等前端加载
+    pub fn icon_built() -> bool {
+        ICON_BUILT.load(Ordering::SeqCst)
+    }
+
+    /// 两步各自兜底：面板或图标任一步失败只记 WARN，应用照常起（spec prelaunch-five R1–R4）。
+    /// 面板缺席：图标仍建，点击直接打开主窗口；图标缺席：没有菜单栏入口，Dock 与主窗口照旧
+    pub fn setup(app: &tauri::App) {
+        app.manage(PanelState::default());
+        let panel_ok = match build_panel(app) {
+            Ok(()) => true,
+            Err(e) => {
+                log::warn!("托盘面板没建成，菜单栏图标改为直接打开主窗口：{e}");
+                false
+            }
+        };
+        match build_icon(app, panel_ok) {
+            Ok(()) => ICON_BUILT.store(true, Ordering::SeqCst),
+            Err(e) => log::warn!("菜单栏图标没建成，这次没有菜单栏入口：{e}"),
+        }
+    }
+
+    /// 面板窗口：启动时就建好、藏着，弹出时不用等前端加载
+    fn build_panel(app: &tauri::App) -> tauri::Result<()> {
+        if crate::diagnostics::tray_panel_fault() {
+            return Err(tauri::Error::AssetNotFound(
+                "SOPHIA_FAULT=tray-panel: injected failure".into(),
+            ));
+        }
         let panel = WebviewWindowBuilder::new(app, PANEL, WebviewUrl::App("index.html".into()))
             .title("Sophia")
             .inner_size(PANEL_WIDTH, 260.0)
@@ -286,7 +314,11 @@ mod imp {
             .build()?;
         // 先换成 NSPanel、改完样式掩码，再做动画与圆角：改样式掩码可能重建窗口边框视图，
         // 放在后面保证圆角、透明底落在最终的那一层上
-        make_nonactivating(&panel)?;
+        if let Err(e) = make_nonactivating(&panel) {
+            // 半成品窗口留着没用：关掉，免得后面点图标弹出一个普通窗口
+            let _ = panel.destroy();
+            return Err(e);
+        }
         style_panel(&panel);
         let handle = app.handle().clone();
         panel.on_window_event(move |event| {
@@ -299,24 +331,36 @@ mod imp {
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
             }
         });
+        Ok(())
+    }
 
-        // 左键、右键（双指）都弹同一个面板（DESIGN「托盘面板」）：图标只做一件事，
-        // 不再挂一份只有「打开 / 退出」的原生菜单——面板里就有这两项；面板万一出不来，
-        // Dock 图标与 ⌘Q 仍能打开和退出
+    /// 左键、右键（双指）都弹同一个面板（DESIGN「托盘面板」）：图标只做一件事，
+    /// 不再挂一份只有「打开 / 退出」的原生菜单——面板里就有这两项。
+    /// 面板没建成时点击改为打开主窗口
+    fn build_icon(app: &tauri::App, panel_ok: bool) -> tauri::Result<()> {
+        if crate::diagnostics::tray_icon_fault() {
+            return Err(tauri::Error::AssetNotFound(
+                "SOPHIA_FAULT=tray-icon: injected failure".into(),
+            ));
+        }
         TrayIconBuilder::with_id("main")
             .icon(tauri::image::Image::from_bytes(include_bytes!(
                 "../icons/tray.png"
             ))?)
             .icon_as_template(true) // 单色模板图，系统按深浅色着色：零色彩
             .tooltip("Sophia")
-            .on_tray_icon_event(|tray, event| {
+            .on_tray_icon_event(move |tray, event| {
                 if let TrayIconEvent::Click {
                     button: MouseButton::Left | MouseButton::Right,
                     button_state: MouseButtonState::Up,
                     ..
                 } = event
                 {
-                    toggle_panel(tray.app_handle());
+                    if panel_ok {
+                        toggle_panel(tray.app_handle());
+                    } else {
+                        show_main(tray.app_handle());
+                    }
                 }
             })
             .build(app)?;

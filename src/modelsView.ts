@@ -2,7 +2,13 @@ import { listText, t, tn } from "./i18n.ts";
 import type { MessageKey } from "./i18n.ts";
 import { agentGateway, codexGateway, withAgentGateway } from "./types.ts";
 import type { AgentState } from "./shell/agentRegistry.ts";
-import type { GatewayAgent, GatewayProvider, GatewayProviderModel, GatewayState } from "./types.ts";
+import type {
+  GatewayAgent,
+  GatewayProvider,
+  GatewayProviderModel,
+  GatewayState,
+  UsageView,
+} from "./types.ts";
 
 /**
  * 页面上的一个**工具**（Codex、以后可能还有别的）。
@@ -1036,6 +1042,26 @@ export function modeNote(state: GatewayState): string | null {
   const view = codexGateway(state);
   if (!view.enabled || view.codex.mode !== "provider") return null;
   return t("models.note.modeSignedOut");
+}
+
+/// ChatGPT 额度用完时：节里一行灰字说「第三方模型也可能用不了」和出路（spec 2026-10-06-prelaunch-five R13）。
+/// 只在第三方模型开着、借用内置接法、菜单栏用量读到 Codex 有一个在用（`active`）的窗口已用满时说；
+/// 读不到用量、没开菜单栏用量、读取失败、免登录接法时都不说；窗口已过了重置时刻（读数是旧的）也不算用满。
+/// `now` 是 Unix 秒，同 `resetsAt`
+export function quotaNote(
+  state: GatewayState,
+  usage: UsageView | null,
+  now: number = Date.now() / 1000,
+): string | null {
+  if (!state.supported || usage === null || !usage.settings.menuBarEnabled) return null;
+  const view = codexGateway(state);
+  if (!view.enabled || view.codex.mode === "provider") return null;
+  const codex = usage.state.agents.find((a) => a.agent === "codex");
+  if (!codex || codex.status.kind !== "ok" || codex.reading === null) return null;
+  const spent = codex.reading.windows.some(
+    (w) => w.active && w.usedPercent >= 100 && (w.resetsAt === null || w.resetsAt > now),
+  );
+  return spent ? t("models.note.quotaUsedUp") : null;
 }
 
 // ===== 模型的问题（就地在 Codex 页「第三方模型」节里显示） =====

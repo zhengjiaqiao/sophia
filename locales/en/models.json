@@ -93,6 +93,7 @@
   "models.note.portMoved": "The original port was in use by another program, so another one was picked automatically. Restart {app} to apply",
   "models.note.portMovedClaude": "The original port was in use by another program, so another one was picked automatically. Restart Claude to apply",
   "models.note.modeSignedOut": "Codex isn't signed in to OpenAI, so it now connects without sign-in: official models are unavailable for now, and sessions from this period are kept separate from your signed-in sessions — neither can see the other",
+  "models.note.quotaUsedUp": "Your ChatGPT quota is used up, and Codex may stop working with third-party models too. To keep going: sign out in Codex, then turn the switch above off and on again",
   "models.todo.takeover": "{tool} is managed by agents-manager",
   "models.todo.drift": "Settings Sophia wrote were changed",
   "models.todo.takingOver": "Taking over",

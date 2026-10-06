@@ -8,7 +8,8 @@
 //   node packaging/render-cask.mjs v0.2.0
 //   node packaging/render-cask.mjs            # 用 tauri.conf.json 里的版本
 //
-// 需要 gh 已登录。跑完把 packaging/Casks/sophia.rb 复制到 tap 仓库的 Casks/ 再 push。
+// 需要 gh 已登录（CI 里给 GH_TOKEN）。发版后由 .github/workflows/homebrew-cask.yml 调用它，检查通过后推到 tap 仓库；
+// 手工跑只用来本机看渲染结果，补推用那个工作流的手动入口。
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdtempSync, readFileSync as read } from "node:fs";
@@ -77,16 +78,20 @@ const armSha = digest(arm[0]);
 const intelSha = digest(intel[0]);
 
 const before = readFileSync(CASK, "utf8");
-let after = before
-  .replace(/^(\s*version\s+")[^"]*(")/m, `$1${version}$2`)
-  .replace(/^(\s*sha256 arm:\s+")[0-9a-f]{64}(")/m, `$1${armSha}$2`)
-  .replace(/^(\s*)(intel:\s+")[0-9a-f]{64}(")/m, `$1$2${intelSha}$3`);
-
-if (after === before) die("没有替换到任何一行——packaging/Casks/sophia.rb 的格式变了，改这个脚本的正则。");
+const rules = [
+  [/^(\s*version\s+")[^"]*(")/m, `$1${version}$2`],
+  [/^(\s*sha256 arm:\s+")[0-9a-f]{64}(")/m, `$1${armSha}$2`],
+  [/^(\s*)(intel:\s+")[0-9a-f]{64}(")/m, `$1$2${intelSha}$3`],
+];
+// 三行都要找得到；找到了而值没变（模板已经是这一版，比如补推同一个 tag）不算错
+if (!rules.every(([re]) => re.test(before))) {
+  die("version 与两个 sha256 有一行没找到——packaging/Casks/sophia.rb 的格式变了，改这个脚本的正则。");
+}
+const after = rules.reduce((text, [re, to]) => text.replace(re, to), before);
 writeFileSync(CASK, after);
 
 console.log(`✓ ${CASK}`);
 console.log(`    version ${version}`);
 console.log(`    arm     ${armSha}`);
 console.log(`    intel   ${intelSha}`);
-console.log(`  下一步：brew style --cask <tap>/sophia 过一遍，然后复制到 tap 仓库的 Casks/ 并 push。`);
+console.log(`  推到 tap 仓库由 homebrew-cask 工作流做（发版后自动；补推用它的手动入口）。`);

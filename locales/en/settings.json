@@ -67,5 +67,10 @@
   "settings.update.restart": "Restart",
   "settings.update.failed": "Couldn't install {version}: {reason}",
   "settings.update.retry": "Try again",
+  "settings.update.failedReason.permission": "No permission to replace Sophia",
+  "settings.update.failedReason.verify": "The downloaded package failed verification",
+  "settings.update.failedReason.network": "Can't reach the download server; check your network",
+  "settings.update.failedReason.disk": "Not enough disk space",
+  "settings.update.failedReason.unknown": "See details for the cause",
   "settings.appearance.applyFailed": "Couldn't set the window appearance: {error}"
 }

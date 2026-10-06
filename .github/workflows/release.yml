@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag 就发布：v0.2.0 → 构建两个架构的 macOS 包、生成更新清单、挂上 GitHub Release。
+# 打 tag 就发布：v0.2.0 → 构建两个架构的 macOS 包、生成更新清单、挂上 GitHub Release，再更新 Homebrew tap。
 # workflow_dispatch 是排练：一样地构建、一样地签名，但不建 Release，产物落在 workflow artifacts 里。
 # 排练能验掉除了「Release 资产名和 latest.json 内容」之外的全部环节。
 on:
@@ -252,3 +252,15 @@ jobs:
           gh api --method PATCH \
             "repos/${GITHUB_REPOSITORY}/releases/${{ needs.draft.outputs.releaseId }}" \
             -F draft=false
+
+  # 转正之后把 cask 推到 Homebrew tap（spec #193），步骤在 homebrew-cask.yml，那边也有手动入口。
+  # 排练不建 Release，publish 跳过，这一步跟着跳过、不推 tap。
+  # 它红了不回滚 Release（已经公开了）：按报错补好令牌之类，再用手动入口对同一个 tag 重跑
+  homebrew:
+    needs: publish
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/homebrew-cask.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

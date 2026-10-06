@@ -81,6 +81,7 @@
   "models.note.portMoved": "原來的連接埠被別的程式佔用了，已自動換一個，重啟 {app} 後套用",
   "models.note.portMovedClaude": "原來的連接埠被別的程式佔用了，已自動換一個，重啟 Claude 後套用",
   "models.note.modeSignedOut": "Codex 沒有登入 OpenAI，已改用免登入的方式連接：官方模型暫時無法使用；這段期間的工作階段和登入後的工作階段分開儲存，互相看不到",
+  "models.note.quotaUsedUp": "ChatGPT 額度已用完，Codex 可能連第三方模型也無法使用。要繼續使用：在 Codex 裡登出，再關開一次上面的開關",
   "models.todo.takeover": "{tool} 正由 agents-manager 管理",
   "models.todo.drift": "Sophia 寫入的設定被改掉了",
   "models.todo.takingOver": "正在接管",

@@ -1,3 +1,5 @@
+import { updateInstallFailure } from "./updateText.ts";
+
 /// Sophia 自己的新版本（DESIGN「设置 › 检查更新」「壳：侧栏 › 更新键」）。
 ///
 /// - **何时查**：启动时一次；应用开着时，距上次查超过 6 小时再查一次。这两种都静默：查不成一句不说。
@@ -31,7 +33,7 @@ export type AppUpdatePhase =
   | { kind: "available"; version: string }
   | { kind: "downloading"; version: string; percent: number | null }
   | { kind: "installed"; version: string }
-  | { kind: "failed"; version: string; reason: string };
+  | { kind: "failed"; version: string; reason: string; detail: string };
 
 export interface AppUpdateSnapshot {
   phase: AppUpdatePhase;
@@ -144,7 +146,15 @@ export function createAppUpdateStore(backend: AppUpdateBackend): AppUpdateStore 
         );
         set({ phase: { kind: "installed", version } });
       } catch (e) {
-        set({ phase: { kind: "failed", version: phase.version, reason: String(e) } });
+        const detail = String(e);
+        set({
+          phase: {
+            kind: "failed",
+            version: phase.version,
+            reason: updateInstallFailure(detail),
+            detail,
+          },
+        });
       }
     },
     async relaunch() {

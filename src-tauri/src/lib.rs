@@ -1718,12 +1718,15 @@ pub fn run() {
             // 菜单栏入口只在 macOS 上有：模型注入本身只支持 macOS
             #[cfg(target_os = "macos")]
             {
-                tray::setup(_app)?;
+                // 面板、图标建不成只记日志，不拦启动（spec prelaunch-five R1–R4）
+                tray::setup(_app);
                 menu::after_setup(_app.handle());
                 appearance::apply_saved(_app.handle());
             }
             // 用量调度：托盘建好之后再起，第一次交出状态时菜单栏按钮已经在了
-            usage::setup(_app)?;
+            if let Err(e) = usage::setup(_app) {
+                log::warn!("用量调度没起来，菜单栏不显示用量：{e}");
+            }
             // 开机启动默认开（spec 2026-10-05-keep-running R1）：第一次打开注册一次，之后以系统为准
             if let Ok(dir) = runtime_store_dir() {
                 autostart::default_on_first_launch(_app.handle().clone(), dir);

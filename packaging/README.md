@@ -88,29 +88,31 @@ gh secret set APPLE_TEAM_ID -R $R --body '10 位 Team ID（developer.apple.com/a
 `Notarized Developer ID`、票据已钉上。CI 上的文件没有 quarantine 属性，绿了不等于用户打得开；
 第一次发版前，用浏览器下一份排练产物（带 quarantine）在真机上双击验一次。
 
-### 4. 建 tap 仓库（待建：发布后视需要再建）
-
-> 现状：`zhengjiaqiao/homebrew-tap` 还没建，用户现在只能从 GitHub Releases 下载 dmg，`brew install --cask sophia` 还不能用。下面的步骤保留，什么时候要上 brew 再照做；没建之前，「每次发版」末尾的更新 cask 一步也先不用做。
+### 4. Homebrew tap 与推 tap 的令牌
 
 官方 homebrew-cask 有知名度门槛（新仓库基本会被拒），而且从 2026-09 起它对未签名、未公证的 cask 已经开始下架。**现实路径是自建 tap。**
+tap 仓库是公开的 `zhengjiaqiao/homebrew-tap`（仓库名必须叫 homebrew-tap，brew 才认 `zhengjiaqiao/tap` 这种短写法），
+里面只有 `Casks/sophia.rb`。用户那边：
 
 ```sh
-# 本机生成一个 tap 骨架
-brew tap-new zhengjiaqiao/tap
-
-# 推到 GitHub（仓库名必须叫 homebrew-tap，brew 才认 zhengjiaqiao/tap 这种短写法）
-gh repo create zhengjiaqiao/homebrew-tap --public --push \
-  --source "$(brew --repository zhengjiaqiao/tap)"
-```
-
-用户那边：
-
-```sh
-brew tap zhengjiaqiao/tap
-brew install --cask sophia
+brew install --cask zhengjiaqiao/tap/sophia
 # 以后
 brew upgrade --cask sophia
 ```
+
+每次发版由工作流把新的 cask 推进 tap（见下面「每次发版」），推送用公开仓库的 secret `HOMEBREW_TAP_TOKEN`：
+一个 **fine-grained PAT，只授权 `zhengjiaqiao/homebrew-tap`，权限只有 Contents: Read and write**，泄露了也动不了别的仓库。
+建令牌、写 secret 跑向导，它会打开预填好的创建页、试推一下确认权限对、再 `gh secret set`，令牌不落盘、不打印：
+
+```sh
+packaging/setup-tap-token.sh
+```
+
+**有效期**：向导预填 366 天；也可以选不过期，但那样只能靠自己记得撤销。到期前 GitHub 会发邮件。
+
+**过期之后**：发版照常——Release 转正、应用内更新都不受影响，但工作流里的「homebrew / cask」那一步会红在第一步，
+报 `secret HOMEBREW_TAP_TOKEN 认不出（HTTP 401）`，brew 用户就停在旧版。补救：重跑 `packaging/setup-tap-token.sh`
+换一个新令牌，再按下面「Homebrew cask」的手动入口对这次的 tag 补推。令牌被撤销、建的时候没勾 tap 仓库（报 HTTP 403/404）同样处理。
 
 ## 每次发版
 
@@ -133,10 +135,10 @@ git tag v0.2.0 && git push origin v0.2.0
 
 tag 推到公开仓库之后，那边的 `.github/workflows/release.yml` 会：建草稿 Release → 依次构建
 `aarch64-apple-darwin` 和 `x86_64-apple-darwin` → 挂上 dmg、`.app.tar.gz` 和签名 →
-合并出 `latest.json` → 把草稿转正。
+合并出 `latest.json` → 把草稿转正 → 把 cask 推进 Homebrew tap（见下面「Homebrew cask」）。
 
 想先排练一遍而不真发布：先 `scripts/publish-public.sh --push` 把代码同步过去（不打 tag），
-再在公开仓库跑一次 Release 工作流。一样地构建和签名，不建 Release，产物落在 workflow artifacts 里：
+再在公开仓库跑一次 Release 工作流。一样地构建和签名，不建 Release、不推 tap，产物落在 workflow artifacts 里：
 
 ```sh
 gh workflow run release.yml -R zhengjiaqiao/sophia
@@ -190,15 +192,25 @@ SOPHIA_ALLOW_DIAG_FAULTS=1 npm run tauri build -- --features diag-faults
 SOPHIA_FAULT=panic target/release/bundle/macos/Sophia.app/Contents/MacOS/Sophia
 ```
 
-发布完更新 cask（tap 建好之后才做；没建之前跳过）：
+### Homebrew cask（自动）
+
+Release 转正之后，`release.yml` 调 `.github/workflows/homebrew-cask.yml`，在 macOS runner 上：
+核对 `HOMEBREW_TAP_TOKEN` 能推 tap → `node packaging/render-cask.mjs <tag>`（下回两个 dmg 现算 sha256，产物名对不上就停）→
+放进 brew 自己 clone 的 tap → `brew style`、`brew audit --cask --strict --online --arch=all` →
+`brew install --cask` 真装一次、核对装上的版本 → `brew uninstall --zap --cask` 卸一次、核对应用和 zap 路径都清掉 →
+全过才在 tap 里提交「sophia <版本>」并推送。tap 里已经是这一版就不提交，日志里一句 notice。
+
+这一步红了**不影响 Release**（它已经公开了），只是 brew 用户暂时还是旧版。看 job 日志的 `::error::` 那几行：
+令牌的问题按上面「4. Homebrew tap 与推 tap 的令牌」换令牌；cask 检查没过就在开发仓库改模板或脚本、合并、
+`scripts/publish-public.sh --push` 同步过去（不用重打 tag）。然后用手动入口补推：
 
 ```sh
-node packaging/render-cask.mjs v0.2.0    # 下回产物算 sha256，写回 Casks/sophia.rb
-brew style --cask zhengjiaqiao/tap/sophia
-
-cp packaging/Casks/sophia.rb "$(brew --repository zhengjiaqiao/tap)/Casks/sophia.rb"
-cd "$(brew --repository zhengjiaqiao/tap)" && git commit -am "sophia 0.2.0" && git push
+gh workflow run homebrew-cask.yml -R zhengjiaqiao/sophia -f tag=v0.2.0
+gh run list -R zhengjiaqiao/sophia --workflow homebrew-cask.yml --limit 1
 ```
+
+手动入口用的是公开仓库 main 上最新的 cask 模板，version 与 sha256 取自填的那个 tag 的 Release；
+对已经推过的 tag 再跑一次，等于只做一遍检查。
 
 ## 中途失败了怎么办
 
