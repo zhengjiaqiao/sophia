@@ -122,7 +122,8 @@ mod tests {
         assert!(find("deepseek").is_some_and(|p| p.supported()));
     }
 
-    /// 来源里的推广链接不带进来（`/i/<码>`、`/invite/`、`ccswitch` 活动页、短链）
+    /// 来源里的推广链接不带进来（`/i/<码>`、`/invite/`、`/register/<码>`、`/agent/register/<码>`、
+    /// `?aff=` 一类查询参数、`ccswitch` 活动页、短链）。不带码的 `/register` 是普通注册页，放行
     #[test]
     fn 预设里没有推广链接() {
         for p in all() {
@@ -131,8 +132,30 @@ mod tests {
                 .flatten()
             {
                 let lower = url.to_ascii_lowercase();
+                // `/register/` 后面还跟一截路径就是推广码；查询里带 aff / ref 等参数同理
+                let register_code = lower
+                    .split_once("/register/")
+                    .is_some_and(|(_, rest)| !rest.is_empty());
+                let promo_query = lower.split_once('?').is_some_and(|(_, query)| {
+                    query.split('&').any(|kv| {
+                        let key = kv.split('=').next().unwrap_or("");
+                        matches!(
+                            key,
+                            "aff"
+                                | "aff_code"
+                                | "ref"
+                                | "referral"
+                                | "invite"
+                                | "invite_code"
+                                | "inviter"
+                                | "promo"
+                        )
+                    })
+                });
                 assert!(
-                    !lower.contains("/i/")
+                    !register_code
+                        && !promo_query
+                        && !lower.contains("/i/")
                         && !lower.contains("/invite/")
                         && !lower.contains("ccswitch")
                         && !lower.contains("cc-switch")

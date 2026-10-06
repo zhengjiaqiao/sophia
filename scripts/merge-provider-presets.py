@@ -557,10 +557,13 @@ def main():
     providers = providers_cn + mo_cn + providers_gl + mo_gl
 
     # 校验
-    # 推广链接不带进来：来源里的邀请码、活动页、短链（`/i/<码>`、`/invite/`、`/r/`、`activity/ccswitch`、
-    # 根路径下一截 6 位随机码、`s.qiniu.com` 短链）一律退回官网首页；来源的推广码不是 Sophia 的
+    # 推广链接不带进来：来源里的邀请码、活动页、短链（`/i/<码>`、`/invite/`、`/r/`、`/register/<码>`、
+    # `/agent/register/<码>`、`?aff=` / `?ref=` 一类查询参数、`activity/ccswitch`、根路径下一截 6 位随机码、
+    # `s.qiniu.com` 短链）一律退回官网首页；来源的推广码不是 Sophia 的。
+    # 不带码的 `/register` 是普通注册页，留着
     affiliate = re.compile(
-        r"/i/[A-Za-z0-9]+$|/invite/|/r/[A-Za-z0-9]+$|activity/ccswitch|ccswitch|cc-switch|^https?://[^/]+/[A-Za-z0-9]{6}$",
+        r"/i/[A-Za-z0-9]+$|/invite/|/r/[A-Za-z0-9]+$|/register/[^/?#]+|activity/ccswitch|ccswitch|cc-switch"
+        r"|^https?://[^/]+/[A-Za-z0-9]{6}$|[?&](aff|aff_code|ref|referral|invite|invite_code|inviter|promo)=",
         re.I,
     )
     for r in providers:

@@ -15,7 +15,6 @@ interface ChipBase {
   count?: number;
   selected?: boolean;
   onClick?: () => void;
-  title?: string;
 }
 
 /// 不可选必须同时给出原因
@@ -25,7 +24,7 @@ type ChipDisabled =
 export type ChipProps = ChipBase & ChipDisabled;
 
 export function Chip(props: ChipProps) {
-  const { children, count, selected, onClick, title, disabled, disabledReason } = props;
+  const { children, count, selected, onClick, disabled, disabledReason } = props;
   const classes = ["ss-chip"];
   if (selected) classes.push("is-selected");
 
@@ -34,7 +33,6 @@ export function Chip(props: ChipProps) {
       <button
         type="button"
         className={classes.join(" ")}
-        title={disabled ? disabledReason : title}
         disabled={disabled}
         aria-pressed={selected ? true : false}
         onClick={disabled ? undefined : onClick}

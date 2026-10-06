@@ -518,7 +518,7 @@ export function withEnableNote(
   return detail === null ? note : `${detail} · ${note}`;
 }
 
-/// 设置里 `列表里的 agent` 勾了 OpenCode：MCP 页还写不了它（core `mcp::supports`），没有它的列，筛选行下说一声（#115）
+/// 设置里 `显示的 agent` 勾了 OpenCode：MCP 页还写不了它（core `mcp::supports`），没有它的列，筛选行下说一声（#115）
 export const openCodeNoticeWanted = (shown: readonly string[]): boolean =>
   shown.includes("opencode");
 

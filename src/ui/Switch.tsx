@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { ReasonTip } from "./Tooltip.tsx";
+import { ReasonTip, Tooltip } from "./Tooltip.tsx";
 import { IconDash, IconTick } from "./icons.tsx";
 import { dragEnd, dragMove, dragStart, type SwitchDrag } from "./switchDrag.ts";
 
@@ -30,7 +30,7 @@ export interface SwitchProps {
   size?: SwitchSize;
   /// 读屏名，**必填**：开关旁边通常没有字（规则行是图式），得告诉读屏它管什么
   label: string;
-  /// 悬停说明（「只管以后新出现的，现有的不变」）
+  /// 悬停说明（「只管以后新出现的，现有的不变」），经提示框出；禁用期间让给原因
   title?: string;
   /// 给了就禁用。原因提示框悬停出、**按下当即出**（DESIGN「所有点了做不了的控件，按下当即说明原因」：
   /// 它是开关，用户一定会去点）；外面再包的提示框（「打开：…」）禁用期间让给它
@@ -104,7 +104,7 @@ export function Switch({
     : undefined;
 
   return (
-    <ReasonTip reason={disabledReason} placement={tipPlacement}>
+    <ReasonTip reason={disabledReason} tip={title} placement={tipPlacement}>
       <button
         type="button"
         role="switch"
@@ -112,7 +112,6 @@ export function Switch({
         aria-label={label}
         aria-describedby={describedBy}
         className={classes.join(" ")}
-        title={disabled ? disabledReason : title}
         disabled={disabled}
         onClick={
           disabled
@@ -154,7 +153,9 @@ export interface IndicatorProps {
 export function Indicator({ label }: IndicatorProps) {
   // `is-on` 留在类名上：只剩这一态，样式不靠它；页面与测试据它认「开着的灯」
   return label ? (
-    <span className="ss-indicator is-on" role="img" aria-label={label} title={label} />
+    <Tooltip content={label}>
+      <span className="ss-indicator is-on" role="img" aria-label={label} />
+    </Tooltip>
   ) : (
     <span className="ss-indicator is-on" aria-hidden="true" />
   );
@@ -190,7 +191,6 @@ export function Checkbox({ checked, onChange, label, disabledReason }: CheckboxP
         aria-checked={checked === "mixed" ? "mixed" : checked}
         aria-label={label}
         className={classes.join(" ")}
-        title={disabledReason}
         disabled={disabled}
         onClick={disabled ? undefined : () => onChange?.(checked !== true)}
       >

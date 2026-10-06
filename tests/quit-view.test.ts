@@ -248,11 +248,11 @@ test("AC4 换了端口：等重启的那一家节里一行灰字，重启过了�
 
 // ===== 设置页：启动 · 开机启动（R15、R16） =====
 
-test("AC17 开机启动是「通用」一节的第三行（外观之后、agent 名单之前）：读系统的、读回来之前不画开关、写不成读回原样", () => {
+test("AC17 开机启动是「通用」一节的第三行（外观之后、`Skills 和 MCP` 一节之前）：读系统的、读回来之前不画开关、写不成读回原样", () => {
   const page = src("pages/SettingsPage.tsx");
   const row = page.indexOf('label={t("settings.startup.autostart")}');
   assert.ok(row > page.indexOf("<AppearanceRow "));
-  assert.ok(row < page.indexOf('t("settings.agents.heading")'));
+  assert.ok(row < page.indexOf('t("settings.skillsMcp.section")'));
   assert.ok(page.indexOf('t("settings.general.section")') < page.indexOf("<LanguageRow "));
   assert.doesNotMatch(page, /settings\.startup\.section/);
   assert.match(page, /api\.autostartGet\(\)/);

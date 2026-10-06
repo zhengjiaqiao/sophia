@@ -13,6 +13,10 @@ import { ReasonTip } from "./Tooltip.tsx";
 ///   高 24、左右 8；手靠近 `paper` + `raise`、字转 `ink`；按下 `raise-pressed` + 按压变形。
 ///   **末尾一律 10px `↗`，组件自动画**，调用方只写动词（`打开` `在访达中显示` `去发布页`）。
 ///   只给会跳到 Sophia 外面的动作；`size` 对它不起作用（固定 24）。在灰面板、抽屉里键面自动换 `paper`
+///   - `inline`：**跟在一句话后面的**浅键（2026-10-06，`隐私说明 ↗`、发送失败后的 `在 GitHub 提 ↗`）静止不垫底、
+///     不带左右留白，看上去就是字 + ↗；手靠近照旧浮起 `paper` + `raise`、字转 `ink`，按下照旧。命中区靠负外距
+///     保持 24 高、左右各多 4，不撑高所在那一行。与句子、彼此之间的「 · 」由调用方写（流式文字里写 ` · `，
+///     flex 排的行里放一个分隔记号）。单独放的浅键（灰面板、抽屉、空态）不给
 ///
 /// 三个尺寸按所在那一行选，不按重要性选：`regular` 28（工具行）、`compact` 24（表格行、
 /// 提示条、灰面板、纸窗、抽屉）、`row` 32（确认框与页面级提交）。
@@ -26,6 +30,8 @@ import { ReasonTip } from "./Tooltip.tsx";
 /// 禁用（给了 `disabledReason`）：平贴、实线 `hairline`、`ink-faint` 字，无投影、按下不动（D20）；
 /// 自带原因提示框，悬停出、**按下（点击、空格、回车）当即出**，页面不必再包一层。
 /// 外面再包的提示框（「重启生效」的说明）在禁用期间让给原因，同时只出一个。
+///
+/// 不写原生 `title`（悬停弹系统灰框，2026-10-06）：`title` 参数与图标键的名字都经 `Tooltip` 出。
 
 export type ButtonVariant = "primary" | "default" | "quiet";
 export type ButtonSize = "regular" | "compact" | "row";
@@ -34,6 +40,7 @@ interface ButtonBase {
   onClick?: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /// 悬停说明（键上没写全的：`看改动 ↗` 去的地址），经提示框出；禁用期间让给原因
   title?: string;
   /// 图标在文字左边（`AddButton` 的 `+` 就是这么来的）
   icon?: ReactNode;
@@ -44,9 +51,11 @@ interface ButtonBase {
   ariaControls?: string;
   /// 按下弹出一个浮层（`详情` 弹出原文浮层：`dialog`）
   ariaHasPopup?: "dialog" | "menu";
+  /// 只对浅键：跟在一句话后面，静止不垫底、不带左右留白（见上）
+  inline?: boolean;
 }
 
-/// 禁用必须同时给出原因（DESIGN：禁用必须同时给 title 说明原因，类型上强制）
+/// 禁用必须同时给出原因（DESIGN：禁用必须同时说明原因，类型上强制）
 type DisabledProps =
   { disabled: true; disabledReason: string } | { disabled?: false; disabledReason?: never };
 
@@ -74,6 +83,7 @@ export function Button(props: ButtonProps) {
     ariaExpanded,
     ariaControls,
     ariaHasPopup,
+    inline = false,
   } = props;
 
   const classes = ["ss-btn"];
@@ -81,16 +91,15 @@ export function Button(props: ButtonProps) {
   // 浅键（离开 Sophia）固定 24 高：尺寸不叠加
   const leave = variant === "quiet";
   if (leave) classes.push("ss-btn--quiet");
+  if (leave && inline) classes.push("ss-btn--inline");
   if (size === "compact" && !leave) classes.push("ss-btn--compact");
   if (size === "row" && !leave) classes.push("ss-btn--row");
 
   return (
-    <ReasonTip reason={disabled ? disabledReason : undefined}>
+    <ReasonTip reason={disabled ? disabledReason : undefined} tip={title}>
       <button
         type="button"
         className={classes.join(" ")}
-        // 禁用原因同时挂在 title 上，作 aria 兜底
-        title={disabled ? disabledReason : title}
         aria-label={ariaLabel}
         aria-describedby={describedBy}
         aria-haspopup={ariaHasPopup}
@@ -110,7 +119,7 @@ export function Button(props: ButtonProps) {
 export interface IconButtonProps {
   /// 16px 图形，用 icons.tsx 词表里的
   icon: ReactNode;
-  /// **必填**：同时作 `aria-label`。图标不替代文案，文案挪到这里
+  /// **必填**：提示框的字，同时作 `aria-label`。图标不替代文案，文案挪到这里
   title: string;
   onClick?: () => void;
   /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
@@ -138,11 +147,10 @@ export function IconButton({
   const classes = ["ss-iconbtn"];
   const disabled = Boolean(disabledReason);
   return (
-    <ReasonTip reason={disabledReason} placement={tipPlacement} nowrap={tipNowrap}>
+    <ReasonTip reason={disabledReason} tip={title} placement={tipPlacement} nowrap={tipNowrap}>
       <button
         type="button"
         className={classes.join(" ")}
-        title={disabled ? disabledReason : title}
         aria-label={title}
         aria-describedby={describedBy}
         disabled={disabled}
@@ -158,7 +166,7 @@ export interface AddButtonProps {
   /// 键上的字（名词）：`原件位置` `配置文件` `网关`
   noun: string;
   onClick?: () => void;
-  /// 读屏名与提示框的整句（`添加 原件位置`）：由调用方按名词取整句键，这里不拼
+  /// 读屏名的整句（`添加 原件位置`）：由调用方按名词取整句键，这里不拼。键上 `+ 名词` 已说全，不另出提示框
   label: string;
   /// 给了就禁用，原因提示框悬停出、按下当即出（禁用必带原因）
   disabledReason?: string;
@@ -173,7 +181,6 @@ export function AddButton({ noun, onClick, label, disabledReason }: AddButtonPro
       <button
         type="button"
         className="ss-btn ss-btn--add"
-        title={disabled ? disabledReason : label}
         aria-label={label}
         disabled={disabled}
         onClick={disabled ? undefined : onClick}

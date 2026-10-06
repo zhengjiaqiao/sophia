@@ -42,23 +42,28 @@ import {
 import { SettingRow } from "./SettingRow.tsx";
 import { updateCheckFailure } from "../updateText.ts";
 import { appUpdates, useAppUpdate } from "../useAppUpdate.ts";
-import { lastCheckDetail } from "../market/updateView.ts";
+import { autoCheckNote } from "../market/updateView.ts";
 import { useSkillUpdates } from "../market/useSkillUpdates.ts";
 import "./SettingsPage.css";
 
 /// 设置页（DESIGN「产品裁决 › 设置」，画板 V4Layouts-settings）：侧栏底的 `设置`（或 `⌘,`）落到这里，
 /// **只替换机面，侧栏不消失**（D6）。页面头 `设置`，右端没有动作。
 /// 它只回答一个问题——**这个 agent 出不出现在列表里**。名单只有一份，SKILLS、MCP 两页共用
-/// （2026-09-27 产品负责人：「这里感觉不用分开」）：MCP 页只显示其中支持 MCP 的，名单下一行灰字说这件事。
+/// （2026-09-27 产品负责人：「这里感觉不用分开」）：MCP 页只显示其中支持 MCP 的，`显示的 agent` 的灰字说这件事。
 /// Claude Desktop 不进名单、不占名额（它跟着 Claude Code 出现在 MCP 页，core 的 `mcp_columns`）。
 ///
-/// `列表里的 agent · 最多 4 个`：勾选框列表，三列等分、按行读，一行＝勾选行 `CheckRow`（14px 勾选框 + 10 + 16px 图标 + 10 + 名字），
-/// 行高 36；默认只列已安装的，其余收在一行展开「› 未安装的 N 个」里。**最多显示 4 个**（上限来自 core，
-/// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
-/// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
-/// 节序：`通用`（界面语言、外观、开机启动）→ `列表里的 agent` → `生效范围`（项目勾不勾，`ScopeSection`）→ `skill 更新`（自动检查｜开关；上次检查｜`立即检查`）
-/// → `关于`（版本｜`检查更新`，应用内查，不跳 GitHub；`使用统计和错误报告`｜开关，这份构建能上报才有）。查 skill 更新的结果与 SKILLS 页同一份（`useSkillUpdates`）。
-/// 除 agent 名单外，每一行都是设置行（`SettingRow`，2026-10-04 画板 B，照 Claude 的设置页）：名字与一句灰字在左，
+/// 三节（2026-10-06 并节）：`通用`（界面语言、外观、开机启动）→ `Skills 和 MCP` → `关于`（版本｜`检查更新`，
+/// 应用内查，不跳 GitHub；`使用统计和错误报告`｜开关，这份构建能上报才有）。
+/// `Skills 和 MCP` 一节三块，每块是一条设置行，名单紧跟在行下，设置行连同名单是一块，块间一道行线：
+/// - `显示的 agent` + 灰字「最多显示 4 个 · MCP 页只显示其中支持 MCP 的」：勾选框列表，三列等分、按行读，一行＝勾选行
+///   `CheckRow`（14px 勾选框 + 10 + 16px 图标 + 10 + 名字），行高 36；默认只列已安装的，其余收在一行展开
+///   「未安装的 N 个 ›」里（字在前、拉手在后）。**最多显示 4 个**（上限来自 core，`list_harnesses` 带回）：勾满时其余已安装项禁用，
+///   按下即出「最多显示 4 个，先取消一个」。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
+///   **取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
+/// - `生效范围`（项目勾不勾，`ScopeSection`），右端 `+ 项目`。
+/// - `自动检查 skill 更新` + 灰字何时查与上次的时刻｜查到了的 `看 N 个更新`、`立即检查`、开关。
+///   查 skill 更新的结果与 SKILLS 页同一份（`useSkillUpdates`）。
+/// 每一行都是设置行（`SettingRow`，2026-10-04 画板 B，照 Claude 的设置页）：名字与一句灰字在左，
 /// 控件在右端一列，行与行之间一条行线；节小标下不画线，节间 32；宽度同各页，随窗口变宽。
 /// 应用菜单「关于 Sophia」「检查更新…」停在 `关于`（`aboutRequest`）。`开机启动`（spec 2026-10-03-gateway-in-app R15、R16）
 /// 开没开以系统登录项为准、不另存。
@@ -72,7 +77,7 @@ import "./SettingsPage.css";
 /// - **没有路由状态那一行**（D10）：它只转述 Codex 开关的状态、自己不能操作。
 
 /// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
-/// 其余收在「› 未安装的 N 个」展开里。
+/// 其余收在「未安装的 N 个 ›」展开里。
 type AgentOption = HarnessStatus;
 
 /// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的浅键）
@@ -82,9 +87,9 @@ export interface SettingsPageProps {
   onError: (message: string) => void;
   /// 壳接线（应用菜单「关于 Sophia」「检查更新…」，D15）：停在「关于」；`check` 时同时开始检查
   aboutRequest?: { at: number; check: boolean };
-  /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`（issue #109）：停在「列表里的 agent」一节
+  /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`（issue #109）：停在 `Skills 和 MCP` 一节（第一块就是 `显示的 agent`）
   agentsRequest?: { at: number };
-  /// `skill 更新` 一节的 `去看看`：到 SKILLS · 我的 · 全部，打开 `只看这些`
+  /// `自动检查 skill 更新` 那一行的 `看 N 个更新`：到 SKILLS · 我的 · 全部，打开 `只看这些`
   onShowUpdates?: () => void;
   /// 壳每扫完一轮加一：应用菜单「添加项目…」加了项目、文件夹没了，`生效范围` 跟着重读
   refreshKey?: number;
@@ -302,7 +307,7 @@ export function SettingsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aboutRequest?.at]);
 
-  // SKILLS 页的 `去设置`：停在「列表里的 agent」一节（排在「关于」之后，两个都在时以它为准）
+  // SKILLS 页的 `去设置`：停在 `Skills 和 MCP` 一节，第一块就是 `显示的 agent`（排在「关于」之后，两个都在时以它为准）
   const agentsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!agentsRequest) return;
@@ -354,8 +359,8 @@ export function SettingsPage({
     }
   };
 
-  // ── skill 更新（R14）──
-  /// 开关与上次检查的时刻读自 core；「几个有更新」只在这一程拿到过查更新的结果时写（结果与 SKILLS 页同一份）。
+  // ── 自动检查 skill 更新（R14）──
+  /// 开关与上次检查的时刻读自 core；「几个有更新」只在这一程拿到过查更新的结果时有（结果与 SKILLS 页同一份）。
   /// 进设置不查：什么时候查只有两处——打开 SKILLS 页（6 小时、开关归 core）与这里的 `立即检查`
   const skillUpdates = useSkillUpdates();
   const [autoCheck, setAutoCheck] = useState<boolean | null>(null);
@@ -449,10 +454,9 @@ export function SettingsPage({
 
   const checkingSkills = skillUpdates.checking === "settings";
   const skillNotice = skillUpdates.noticeFor("settings");
-  const lastCheckLine = lastCheckDetail(
-    skillUpdates.checkedAt ?? lastCheck,
-    skillUpdates.loaded ? skillUpdates.updates.length : null,
-  );
+  /// 这一程拿到过的结果里有几个新版本；null＝还没拿到
+  const updateCount = skillUpdates.loaded ? skillUpdates.updates.length : null;
+  const autoCheckLine = autoCheckNote(skillUpdates.checkedAt ?? lastCheck, updateCount);
 
   /// 一格一个勾选行（`CheckRow size="grid"`，行高 36）：整行是命中区，方框只是记号。勾满上限时没勾的行禁用，
   /// 原因提示框悬停出、按下当即出（组件自己包 `ReasonTip`）
@@ -523,53 +527,57 @@ export function SettingsPage({
           </SettingRow>
         ) : null}
 
-        {/* 区块小标（节间 32）；句子里的 agent 是词不是结构词，不经 Cap */}
+        {/* Skills 和 MCP（节间 32，2026-10-06 由原来 agent 名单、生效范围、skill 更新三节并成）：三块，
+            每块一条设置行、名单紧跟在行下，设置行连同名单是一块，块间一道行线 */}
         <div ref={agentsRef} className="settings-page__section settings-page__section--later">
-          <SectionLabel>
-            {t("settings.agents.heading")}
-            {list ? ` · ${t("settings.agents.maxShown", { max: maxShown })}` : ""}
-          </SectionLabel>
+          <SectionLabel>{t("settings.skillsMcp.section")}</SectionLabel>
         </div>
 
-        {/* 读回来之前什么都不画：本机读取很快，闪一下忙碌只是噪音（后台例行读取不显示忙碌） */}
-        {agents === null ? null : agents.length === 0 ? (
-          <Note>{t("settings.agents.none")}</Note>
-        ) : (
-          <>
-            {grid(present)}
-            {/* 没装的收在一行展开里：它不做事，只是在原地把列表拉开，所以是展开的样子（拉手在前、
-                收起 › 拉开 ˅，与网关行同一种），不是一颗键（2026-09-25 产品负责人真机：「感觉是个展开？」）。
-                列出来只是噪音，但要留入口——用户可能想预先恢复，装上之后就直接在列表里了 */}
-            {absent.length > 0 ? (
-              <>
-                <div className="settings-page__more">
-                  <DrawerHandle
-                    always
-                    open={showAbsent}
-                    onToggle={() => setShowAbsent(!showAbsent)}
-                    label={tn("settings.agents.absentCount", absent.length)}
-                    controls="settings-absent"
-                  />
-                  <span
-                    className="settings-page__more-label"
-                    onClick={() => setShowAbsent(!showAbsent)}
-                  >
-                    {tn("settings.agents.absentCount", absent.length)}
-                  </span>
-                </div>
-                {showAbsent ? (
-                  <div id="settings-absent">
-                    <AbsentAgents agents={absent} onRestore={(id) => void toggle(id, true)} />
+        {/* 显示的 agent：灰字说上限与 MCP 页只显示其中支持 MCP 的（上限读回来之前不写灰字）；右端没有控件 */}
+        <div className="settings-page__block">
+          <SettingRow
+            label={t("settings.agents.label")}
+            note={list ? t("settings.agents.note", { max: maxShown }) : undefined}
+          />
+          {/* 读回来之前什么都不画：本机读取很快，闪一下忙碌只是噪音（后台例行读取不显示忙碌） */}
+          {agents === null ? null : agents.length === 0 ? (
+            <Note>{t("settings.agents.none")}</Note>
+          ) : (
+            <>
+              {grid(present)}
+              {/* 没装的收在一行展开里：它不做事，只是在原地把列表拉开，所以是展开的样子（收起 › 拉开 ˅），
+                  不是一颗键（2026-09-25 产品负责人真机：「感觉是个展开？」）。这是句末补充式的「还有 N 个」，
+                  字在前、拉手在后（2026-10-06）：先读到是什么，再看到能展开；整句可点。
+                  列出来只是噪音，但要留入口——用户可能想预先恢复，装上之后就直接在列表里了 */}
+              {absent.length > 0 ? (
+                <>
+                  <div className="settings-page__more">
+                    <span
+                      className="settings-page__more-label"
+                      onClick={() => setShowAbsent(!showAbsent)}
+                    >
+                      {tn("settings.agents.absentCount", absent.length)}
+                    </span>
+                    <DrawerHandle
+                      always
+                      open={showAbsent}
+                      onToggle={() => setShowAbsent(!showAbsent)}
+                      label={tn("settings.agents.absentCount", absent.length)}
+                      controls="settings-absent"
+                    />
                   </div>
-                ) : null}
-              </>
-            ) : null}
-            {/* 名单两页共用：MCP 页只显示其中支持 MCP 的（12 ink-faint，只是说明，不是设置） */}
-            <p className="settings-page__mcp-note">{t("settings.agents.mcpNote")}</p>
-          </>
-        )}
+                  {showAbsent ? (
+                    <div id="settings-absent">
+                      <AbsentAgents agents={absent} onRestore={(id) => void toggle(id, true)} />
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </>
+          )}
+        </div>
 
-        {/* 生效范围（节间 32）：用户级 + 各个项目，勾上的才出现在 SKILLS、MCP 页的筛选行里；节头 `+ 项目` */}
+        {/* 生效范围：用户级 + 各个项目，勾上的才出现在 SKILLS、MCP 页的筛选行里；行右端 `+ 项目` */}
         <ScopeSection
           projects={projects}
           kept={keptProjects}
@@ -583,26 +591,12 @@ export function SettingsPage({
           onDismissAddNotice={dismissAddNotice}
         />
 
-        {/* skill 更新（节间 32）：两行设置行——`自动检查 skill 更新` + 灰字何时查｜开关；
-            `上次检查` + 时刻与结果｜查到了的 `去看看` + `立即检查`。页面头不放检查键——结果在 `我的` 的提示条上说 */}
-        <div className="settings-page__section settings-page__section--later">
-          <SectionLabel>{t("settings.skillUpdates.section")}</SectionLabel>
-        </div>
-        <SettingRow
-          label={t("settings.skillUpdates.auto")}
-          note={t("settings.skillUpdates.autoNote")}
-        >
-          {autoCheck === null ? null : (
-            <Switch
-              checked={autoCheck}
-              onChange={(next) => void toggleAutoCheck(next)}
-              label={t("settings.skillUpdates.auto")}
-            />
-          )}
-        </SettingRow>
-        <SettingRow label={t("settings.skillUpdates.lastCheck")} note={lastCheckLine}>
-          {/* 查到了就给一条直达路：设置里看不到是哪几个（2026-09-27 产品负责人） */}
-          {skillUpdates.loaded && skillUpdates.updates.length > 0 && onShowUpdates ? (
+        {/* 自动检查 skill 更新（2026-10-06 由「自动检查」「上次检查」两行并成一行）：灰字何时查 · 上次的时刻
+            （这一程查过且没有更新时接「，没有更新」）；右端一列依次是查到了才有的 `看 N 个更新`、`立即检查`、开关。
+            页面头不放检查键——结果在 `我的` 的提示条上说 */}
+        <SettingRow label={t("settings.skillUpdates.auto")} note={autoCheckLine}>
+          {/* 查到了就给一条直达路：设置里看不到是哪几个（2026-09-27 产品负责人）；数量写在键上，灰字不写 */}
+          {updateCount !== null && updateCount > 0 && onShowUpdates ? (
             <Button
               size="compact"
               onClick={() => {
@@ -610,7 +604,7 @@ export function SettingsPage({
                 onShowUpdates();
               }}
             >
-              {t("settings.skillUpdates.showUpdates")}
+              {tn("settings.skillUpdates.showUpdates", updateCount)}
             </Button>
           ) : null}
           <span className="settings-page__check">
@@ -627,6 +621,13 @@ export function SettingsPage({
               </FloatingToast>
             ) : null}
           </span>
+          {autoCheck === null ? null : (
+            <Switch
+              checked={autoCheck}
+              onChange={(next) => void toggleAutoCheck(next)}
+              label={t("settings.skillUpdates.auto")}
+            />
+          )}
         </SettingRow>
 
         <div ref={aboutRef} className="settings-page__section settings-page__section--later">

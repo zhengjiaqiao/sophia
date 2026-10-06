@@ -786,9 +786,10 @@ pub fn set_shown(
     Ok(())
 }
 
-/// 探测目录里至少要有一个条目不在通往 `global_dir` 的路径上。
-/// `npx skills add --agent '*'` 会给未安装的工具也建出 `~/.xxx/skills`，
-/// 这类只含 skills 路径的目录不算已安装。没有 global_dir 时存在即可
+/// 探测目录里至少要有一个条目不在通往 `global_dir` 的路径上、也不是别的工具代写的扩展点。
+/// `npx skills add --agent '*'` 会给未安装的工具也建出 `~/.xxx/skills`；Orca 这类状态栏工具会给
+/// 一长串 agent 都写上 hooks / plugins（连同 `.bak` 备份）——这些都不说明 agent 本身装过。
+/// 没有 global_dir 时存在即可
 fn looks_installed(probe: &Path, global_dir: Option<&Path>) -> bool {
     let Some(global) = global_dir else {
         return probe.exists();
@@ -796,9 +797,43 @@ fn looks_installed(probe: &Path, global_dir: Option<&Path>) -> bool {
     let Ok(entries) = std::fs::read_dir(probe) else {
         return false;
     };
-    entries
+    entries.flatten().any(|e| {
+        let path = e.path();
+        !global.starts_with(path.as_path()) && !written_by_others(&path, 0)
+    })
+}
+
+/// 别的工具往 agent 目录里代写的东西：hooks、plugins、备份，只含 hooks / plugin 键的 JSON 配置，
+/// 以及只装着这些的子目录（Gemini 的 `config/hooks.json`）
+fn written_by_others(path: &Path, depth: usize) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if matches!(name, "hooks" | "hooks.json" | "plugins") || name.ends_with(".bak") {
+        return true;
+    }
+    match entry_kind(path) {
+        EntryKind::Dir if depth < 2 => std::fs::read_dir(path).is_ok_and(|entries| {
+            let mut entries = entries.flatten().peekable();
+            entries.peek().is_some() && entries.all(|e| written_by_others(&e.path(), depth + 1))
+        }),
+        EntryKind::File if name.ends_with(".json") => hooks_only_json(path),
+        _ => false,
+    }
+}
+
+/// 顶层只有 hooks / plugin 一类的键（`{}` 不算：空配置可能是 agent 自己建的）
+fn hooks_only_json(path: &Path) -> bool {
+    const KEYS: [&str; 4] = ["hooks", "plugin", "plugins", "$schema"];
+    let small = std::fs::metadata(path).is_ok_and(|m| m.len() <= 256 * 1024);
+    let Some(serde_json::Value::Object(map)) = small
+        .then(|| std::fs::read(path).ok())
         .flatten()
-        .any(|e| !global.starts_with(e.path().as_path()))
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+    else {
+        return false;
+    };
+    !map.is_empty() && map.keys().all(|k| KEYS.contains(&k.as_str()))
 }
 
 /// 项目目录里是否有任一 harness 的项目级 skill 目录。
@@ -1321,7 +1356,7 @@ mod tests {
         t.dir(".kiro/skills"); // 只有 skills，npx 留下的空壳 → 未安装
         t.dir(".pi/agent/skills"); // 只有通往 skills 的路径 → 未安装
         t.dir(".cursor/skills");
-        t.file(&home.join(".cursor"), "hooks.json"); // 有真实配置 → 已安装
+        t.file(&home.join(".cursor"), "argv.json"); // agent 自己的文件 → 已安装
         t.dir(".codex/skills");
         t.file(&home.join(".codex"), "config.toml");
         t.dir(".claude"); // 空目录（用户刚装、还没 skills）→ 未安装
@@ -1332,6 +1367,39 @@ mod tests {
         assert!(!ids.contains(&"kiro-cli".to_string()));
         assert!(!ids.contains(&"pi".to_string()));
         assert!(!ids.contains(&"claude-code".to_string()));
+    }
+
+    /// Orca 一类工具给没装的 agent 也写 hooks / plugins（2026-10-06 真机：9 个里 7 个是这样来的）
+    #[test]
+    fn installed_ignores_hooks_and_plugins_written_by_other_tools() {
+        let t = TempTree::new();
+        let home = t.root();
+        let write = |rel: &str, text: &str| {
+            let p = home.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        let hooks = r#"{"hooks":{"stop":[]}}"#;
+        write(".cursor/hooks.json", hooks);
+        write(".cursor/hooks.json.bak", hooks);
+        t.dir(".cursor/skills");
+        write(".factory/settings.json", hooks);
+        write(".factory/settings.json.bak", hooks);
+        write(".gemini/config/hooks.json", hooks);
+        write(".gemini/settings.json", hooks);
+        write(".copilot/hooks/orca.json", hooks);
+        write(".config/amp/plugins/status.ts", "x");
+        write(".config/opencode/plugins/status.js", "x");
+        write(
+            ".config/opencode/tui.json",
+            r#"{"plugin":["file:///x/tui.js"]}"#,
+        );
+        // 真装过的：agent 自己的配置里除了 hooks 还有别的、或有自己的文件
+        write(".commandcode/settings.json", r#"{"hooks":{},"model":"m"}"#);
+        write(".kiro/settings/cli.json", "{}");
+        let e = env(&home, &[]);
+        let ids: Vec<String> = installed(&e).into_iter().map(|h| h.id).collect();
+        assert_eq!(ids, s(&["command-code", "kiro-cli"]));
     }
 
     #[test]

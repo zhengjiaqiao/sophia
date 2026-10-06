@@ -1099,7 +1099,7 @@ export interface UpdateCheck {
   stripVisible: boolean;
   fallback: MarketFallback | null;
 }
-/// 设置 `skill 更新` 一节
+/// 设置 `自动检查 skill 更新` 那一行
 /// 外观：跟随系统 / 浅色 / 深色（core `store::Appearance`）
 export type Appearance = "system" | "light" | "dark";
 

@@ -10,7 +10,12 @@ import {
   switchNeedsConfirm,
   unsavedText,
 } from "../src/modelsView.ts";
-import type { GatewayProvider, GatewayProviderModel, GatewayState, ProviderPreset } from "../src/types.ts";
+import type {
+  GatewayProvider,
+  GatewayProviderModel,
+  GatewayState,
+  ProviderPreset,
+} from "../src/types.ts";
 import { CLAUDE_OFF, gatewayFixture, type CodexFixture } from "./gateway-fixture.ts";
 
 // 网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进 Codex 页「第三方模型」一节）：
@@ -83,7 +88,11 @@ const or = (unreachable?: string) =>
 
 /// 每一行的 HTML 片段，按出现顺序
 /// 页面上的网关行按添加先后倒着显示（新的在上，2026-10-06）；用例按添加先后列网关，这里倒回来对上
-const rows = (html: string) => html.split(/(?=<div class="ss-listrow[" ])/).slice(1).reverse();
+const rows = (html: string) =>
+  html
+    .split(/(?=<div class="ss-listrow[" ])/)
+    .slice(1)
+    .reverse();
 
 test("骨架：小标 `网关` + 右端 `+ 网关`（默认键），一家一行；没有二级页的 ← 与页头", () => {
   const html = block({ providers: [ap(), or()] });
@@ -122,11 +131,16 @@ test("行：拉手（常显，在名字前）+ 短名；第二行 `地址 · 已
   assert.doesNotMatch(html, /gw-row__body|is-open|gw-row__caret|gw-row__name/);
   assert.match(first, /gw-row__url">ap-gateway\.example\.com\/v1</);
   assert.match(first, /gw-row__fact"> · 已连接 · 已选 1 \/ 2</);
-  assert.doesNotMatch(first, /gw-row__url[^]*aria-describedby/);
+  assert.doesNotMatch(
+    first,
+    /aria-describedby[^>]*><span class="gw-row__url"|class="gw-row__url"[^>]*aria-describedby/,
+  );
+  // 图标键的名字经提示框出，不写原生 title
   assert.match(
     first,
-    /ss-listrow__actions"><span class="gw-row__refetch">(<span[^>]*>)?<button type="button" class="ss-iconbtn" title="刷新模型列表" aria-label="刷新模型列表">[^]*title="编辑" aria-label="编辑">[^]*aria-label="删掉 ap-gateway"/,
+    /ss-listrow__actions"><span class="gw-row__refetch">(<span[^>]*>)?<button type="button" class="ss-iconbtn" aria-label="刷新模型列表"[^]*role="tooltip"[^>]*>刷新模型列表<[^]*aria-label="编辑"[^]*role="tooltip"[^>]*>编辑<[^]*aria-label="删掉 ap-gateway"/,
   );
+  assert.doesNotMatch(first, / title=/);
   assert.doesNotMatch(html, /ss-btn--quiet/);
   // 没拉到模型时不写「已选」
   assert.match(second, /ss-listrow__title">deepseek</);
@@ -163,10 +177,7 @@ test("抽屉＝从这家挑模型：限制说明（全文）→ 勾选列表（�
   const notice = first.indexOf("o3 添加失败");
   const list = first.indexOf("gw-row__list");
   assert.ok(note > 0 && note < notice && notice < list);
-  assert.match(
-    first,
-    /gw-row__note">网页搜索用不了 · 图片要看模型</,
-  );
+  assert.match(first, /gw-row__note">网页搜索用不了 · 图片要看模型</);
   // 抽屉里没有 `已选` 片（节头的 `在用` 已经列了）
   assert.doesNotMatch(first, /gw-row__chosen|ss-modelchip/);
   assert.equal((first.match(/role="checkbox"/g) ?? []).length, 3);
@@ -191,7 +202,7 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
   assert.doesNotMatch(down, /刷新模型列表/);
   assert.match(
     down,
-    /ss-listrow__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*class="ss-iconbtn" title="编辑"/,
+    /ss-listrow__actions">(<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--compact"[^>]*>再试一次<[^]*class="ss-iconbtn" aria-label="编辑"/,
   );
   assert.match(
     down,
@@ -210,12 +221,13 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
 // `详情` 是一颗键、点开是浮层，原文不进行里
 test("无法连接且有技术原文：行尾先 `详情`（弹出浮层）再 `再试一次`；原文不在行里；没有原文不出 `详情`", () => {
   const reason = "服务商限流了，约 30 秒后再试";
-  const detail = "GET https://openrouter.ai/api/v1/models → 429 Too Many Requests · Retry-After: 30";
+  const detail =
+    "GET https://openrouter.ai/api/v1/models → 429 Too Many Requests · Retry-After: 30";
   const html = block({ providers: [ap(), { ...or(reason), unreachableDetail: detail }] });
   const [, down] = rows(html);
   assert.match(
     down,
-    /ss-listrow__actions"><span class="ss-details">[^]*aria-haspopup="dialog"[^]*>详情<\/button>[^]*>再试一次<[^]*title="编辑"/,
+    /ss-listrow__actions"><span class="ss-details">[^]*aria-haspopup="dialog"[^]*>详情<\/button>[^]*>再试一次<[^]*aria-label="编辑"/,
   );
   assert.doesNotMatch(down, /Retry-After/);
   const [, plain] = rows(block({ providers: [ap(), or(reason)] }));
@@ -301,7 +313,7 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默
   assert.equal(key[2], key[3]);
   assert.equal(key[1], key[4]);
   assert.doesNotMatch(html, /aria-label="地址"|aria-label="密钥"/);
-  assert.match(html, /title="先填地址" disabled=""/);
+  assert.match(html, /disabled=""[^>]*>保存<\/button><span[^>]*role="tooltip"[^>]*>先填地址</);
   assert.match(html, /class="ss-btn ss-btn--primary ss-btn--compact"[^>]*>保存</);
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>取消</);
   assert.doesNotMatch(html, /ss-btn--quiet/);
@@ -412,7 +424,10 @@ test("新网关第一步：`服务商` 搜索框 + 名单（暂不支持的灰�
   const custom = html.indexOf("自定义地址…");
   assert.ok(ds > 0 && ds < mimo && mimo < or && or < custom, "顺序不对");
   assert.doesNotMatch(html, />国内<|>海外</);
-  assert.match(html, /gw-preset__scroll"[^>]*>[^]*OpenRouter[^]*<\/div><div class="gw-preset__foot">[^]*自定义地址…/);
+  assert.match(
+    html,
+    /gw-preset__scroll"[^>]*>[^]*OpenRouter[^]*<\/div><div class="gw-preset__foot">[^]*自定义地址…/,
+  );
   assert.match(html, /gw-preset__item gw-preset__item--off"[^>]*>[^]*?Xiaomi MiMo[^]*?暂不支持/);
   assert.match(html, /api\.deepseek\.com/);
   assert.match(html, /这家只给 Anthropic 协议的地址，Sophia 暂时接不上/);
@@ -560,7 +575,7 @@ test("还没有密钥（画板 1PxHo6ZoEe8pFCYbU1pAud）：第二行 `还没有�
     );
     // 拉不了模型列表：↻ 不出，也没有「填写密钥」——填密钥就是编辑
     assert.doesNotMatch(row, /刷新模型列表|>填写密钥<|再试一次/, key);
-    assert.match(row, /title="编辑"/);
+    assert.match(row, /aria-label="编辑"/);
     // 已勾的那一个照常（取消勾选不用密钥）；没勾的不可用，原因写清下一步
     assert.equal((row.match(/data-checkrow=""/g) ?? []).length, 1, key);
     assert.match(row, /先点右边的铅笔填写密钥，才能勾选这一家的模型/);
@@ -617,14 +632,19 @@ test("真实调用被拒了密钥：`地址 · 密钥无效…`（红字，不�
   assert.doesNotMatch(row, /无法连接/);
   assert.doesNotMatch(row, /gw-row__reason/);
   assert.doesNotMatch(row, /已连接/);
-  assert.match(row, />详情<\/button>[^]*title="编辑"/);
+  assert.match(row, />详情<\/button>[^]*aria-label="编辑"/);
   assert.doesNotMatch(row, />再试一次</);
   assert.doesNotMatch(row, /刷新模型列表/);
   // 拉列表记下的「密钥无效」照旧给 `再试一次`，同样不写「无法连接」；没拉到模型时空态也不说「无法连接」
   const fetchedRejected: GatewayProvider = { ...or(reason), keyInvalid: true };
-  const [, fetched] = rows(block({ providers: [ap(), fetchedRejected] }, { expanded: new Set(["or"]) }));
+  const [, fetched] = rows(
+    block({ providers: [ap(), fetchedRejected] }, { expanded: new Set(["or"]) }),
+  );
   assert.match(fetched, />再试一次</);
   assert.match(fetched, new RegExp(`gw-row__down">${reason}<`));
   assert.doesNotMatch(fetched, /无法连接/);
-  assert.match(fetched, /gw-row__none"><p class="ss-note"><span class="ss-note__text">还没拉到模型</);
+  assert.match(
+    fetched,
+    /gw-row__none"><p class="ss-note"><span class="ss-note__text">还没拉到模型</,
+  );
 });

@@ -88,7 +88,9 @@ gh secret set APPLE_TEAM_ID -R $R --body '10 位 Team ID（developer.apple.com/a
 `Notarized Developer ID`、票据已钉上。CI 上的文件没有 quarantine 属性，绿了不等于用户打得开；
 第一次发版前，用浏览器下一份排练产物（带 quarantine）在真机上双击验一次。
 
-### 4. 建 tap 仓库
+### 4. 建 tap 仓库（待建：发布后视需要再建）
+
+> 现状：`zhengjiaqiao/homebrew-tap` 还没建，用户现在只能从 GitHub Releases 下载 dmg，`brew install --cask sophia` 还不能用。下面的步骤保留，什么时候要上 brew 再照做；没建之前，「每次发版」末尾的更新 cask 一步也先不用做。
 
 官方 homebrew-cask 有知名度门槛（新仓库基本会被拒），而且从 2026-09 起它对未签名、未公证的 cask 已经开始下架。**现实路径是自建 tap。**
 
@@ -188,7 +190,7 @@ SOPHIA_ALLOW_DIAG_FAULTS=1 npm run tauri build -- --features diag-faults
 SOPHIA_FAULT=panic target/release/bundle/macos/Sophia.app/Contents/MacOS/Sophia
 ```
 
-发布完更新 cask：
+发布完更新 cask（tap 建好之后才做；没建之前跳过）：
 
 ```sh
 node packaging/render-cask.mjs v0.2.0    # 下回产物算 sha256，写回 Casks/sophia.rb

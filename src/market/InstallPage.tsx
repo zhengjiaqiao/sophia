@@ -51,7 +51,7 @@ export interface InstallPageBase {
   places: InstallPlaces;
   /// 已安装的 agent（agent 表的先后）：勾选行从这里取
   agents: ReadonlyArray<AgentRef>;
-  /// 设置里 `列表里的 agent`（harness id）：默认勾它们
+  /// 设置里 `显示的 agent`（harness id）：默认勾它们
   shown: ReadonlyArray<string>;
   /// 滑回播完：调用方卸掉这一页
   onClose: () => void;

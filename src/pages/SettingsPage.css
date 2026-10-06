@@ -40,7 +40,8 @@
   text-overflow: ellipsis;
 }
 
-/* `› 未安装的 32 个`：一行展开（拉手常显在前 + 6 + 13 ink-mute 字），上 10；点字也拉开 */
+/* `未安装的 32 个 ›` `不显示的 2 个 ›`：句末补充式的一行展开（13 ink-mute 字 + 6 + 拉手常显在后，2026-10-06），
+   上 10；点字也拉开。字的左沿与上面勾选框的左沿对齐 */
 .settings-page__more {
   display: flex;
   align-items: center;
@@ -56,15 +57,6 @@
 
 .settings-page__more-label:hover {
   color: var(--ink);
-}
-
-/* 名单下一行灰字：MCP 页只显示其中支持 MCP 的 agent（12 ink-faint），上 8 */
-.settings-page__mcp-note {
-  margin: var(--space-xs) 0 0;
-  font-family: var(--font-ui);
-  font-size: var(--size-label);
-  line-height: var(--leading-label);
-  color: var(--ink-faint);
 }
 
 /* 未安装那一节：信息不是设置——没有复选框，名字 ink-mute，悬停没有反馈 */
@@ -92,7 +84,8 @@
 }
 
 /* 设置行（SettingRow，2026-10-04 画板 B，照 Claude 的设置页）：左栏名字（body）在上、一句灰字（13 ink-mute）在下，
-   右端一列放控件（间 12）；上下各 12，同一节里行与行之间一条行线。左栏最宽 520，长了在左栏里折行，控件不跟着挪 */
+   右端一列放控件（间 12）；上下各 12，同一节里行与行之间一条行线。左栏不限宽（2026-10-06），铺到右端控件前
+   （间 32），长了在左栏里折行，控件不跟着挪 */
 .settings-page__row {
   display: flex;
   align-items: center;
@@ -107,7 +100,18 @@
 
 .settings-page__text {
   min-width: 0;
-  max-width: 520px;
+}
+
+/* 一块＝一条设置行连同紧跟在它下面的名单（Skills 和 MCP 一节，2026-10-06）：块内不再画行线，
+   块与块、块与前后的设置行之间一道行线（同设置行之间）；名单下留 8 再到行线 */
+.settings-page__block {
+  padding-bottom: var(--space-xs);
+}
+
+.settings-page__block + .settings-page__block,
+.settings-page__block + .settings-page__row,
+.settings-page__row + .settings-page__block {
+  border-top: var(--border-row);
 }
 
 .settings-page__label {

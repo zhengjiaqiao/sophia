@@ -14,8 +14,9 @@ import { keyboardModality } from "../inputModality.ts";
 import { placeTip, type ToastAlign } from "../layerPlace.ts";
 import type { ReactElement, ReactNode } from "react";
 
-/// 提示框（DESIGN「提示框」，画板 States「提示框」）：文字确定性由它承载，
-/// **原生 title 不作唯一说明**（系统灰底小框、约 1 秒延迟、位置不受控），只作 aria 兜底。
+/// 提示框（DESIGN「提示框」，画板 States「提示框」）：文字确定性由它承载。
+/// **界面里不写原生 title**（系统灰底小框、约 1 秒延迟、位置不受控，在就会弹；2026-10-06 产品负责人真机
+/// 看到模型片弹灰框）：悬停要读到的一律经它，读屏走 `aria-label` / 它自带的 `aria-describedby`。
 ///
 /// - 材质：墨窗（全应用唯一的墨色浮窗）白字 12/400，重点词 600（调用方用 <b> 包）；`control` 7 圆角、
 ///   浮层投影、无箭头；内边距 6 8；最大宽 240，超出换行
@@ -121,13 +122,14 @@ export interface TooltipProps {
   /// - 不给：随触发控件的大小（行内）
   /// - `shrink`：按内容定宽、放不下时跟着收窄（第二行里的地址、来源格里的来源名）
   /// - `grow`：撑满这一行余下的宽（侧栏项目名、整格宽的目标框）
-  /// 两种都让里面的触发控件随包层收窄（`min-width: 0`），它自己写好截断（overflow + ellipsis）就截得断
+  /// 这两种都让里面的触发控件随包层收窄（`min-width: 0`），它自己写好截断（overflow + ellipsis）就截得断
+  /// - `inline`：包层是行内的，触发文字随段落折行（正文里的链接，悬停给地址）
   fit?: TipFit;
   children: ReactElement;
 }
 
 /// 提示框包层在 flex 行里的占位方式，见 `TooltipProps.fit`
-export type TipFit = "shrink" | "grow";
+export type TipFit = "shrink" | "grow" | "inline";
 
 /// 包层里有没有哪一段文字此刻被截断（横向溢出）；行内元素量不出宽度，不算
 export function isClipped(root: Element | null): boolean {
@@ -392,16 +394,21 @@ export function Tooltip({
 
 /// 禁用控件的原因（DESIGN「所有点了做不了的控件，按下当即说明原因」）：`Button` / `IconButton` /
 /// `AddButton` / `Switch` / `Checkbox` 自己套这一层，页面不再各包一层。
-/// 有原因：包层接住悬停、按下和键盘焦点（空格 / 回车），按下当即弹出；没原因：包层不占盒。
-/// 两种情况是同一棵树，控件禁用 / 解禁时不重挂（焦点、开关的过冲动画都不断）
+/// 有原因：包层接住悬停、按下和键盘焦点（空格 / 回车），按下当即弹出；没原因：能用时的说明 `tip`
+/// 照普通提示框出（图标键的名字、开关的「只管以后新出现的」），连它也没有时包层不占盒。
+/// 几种情况是同一棵树，控件禁用 / 解禁时不重挂（焦点、开关的过冲动画都不断）；
+/// 禁用的控件仍是包层的直接子元素（`.ss-tipwrap.is-explain > :disabled` 不吃指针）
 export function ReasonTip({
   reason,
+  tip,
   placement,
   nowrap,
   fit,
   children,
 }: {
   reason: string | undefined;
+  /// 能用时的提示框（禁用期间让给原因）
+  tip?: ReactNode;
   placement?: "top" | "bottom";
   nowrap?: boolean;
   /// 同 `Tooltip fit`：禁用的控件占着一行余下的宽时（侧栏 `+ 项目`、整格宽的目标框）给 `grow`
@@ -409,7 +416,14 @@ export function ReasonTip({
   children: ReactElement;
 }) {
   return (
-    <Tooltip content={reason} placement={placement} nowrap={nowrap} fit={fit} focusable explain>
+    <Tooltip
+      content={reason ?? tip}
+      placement={placement}
+      nowrap={nowrap}
+      fit={fit}
+      focusable={reason !== undefined}
+      explain={reason !== undefined}
+    >
       {children}
     </Tooltip>
   );

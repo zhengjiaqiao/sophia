@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Cap } from "./Cap.tsx";
+import { Tooltip } from "./Tooltip.tsx";
 
 /// agent 图标（DESIGN「agent 图标」，画板 Marks「agent 图标」）。旁边的名字由调用方写（原来的 `AgentMark`
 /// 图标 + 名字组合没人用，2026-09-25 删了；矩阵列头由表格自己排）。
@@ -70,12 +71,18 @@ export interface AgentIconProps {
   name: string;
   /// 格子尺寸（默认 16；图标键 14、模型页 24）。Claude 星形在格子里小 1px 居中
   size?: number;
-  /// 旁边**没有**名字时给 true：图标自己带 `title` 与 `aria-label`（提示条里的图标组）
+  /// 旁边**没有**名字时给 true：图标自己带 `aria-label`，悬停出名字的提示框（提示条里的图标组）。
+  /// 不写原生 title、也不在 svg 里放 `<title>`：两者悬停都弹系统灰框（2026-10-06）
   labelled?: boolean;
 }
 
 /// 只有图标本身。旁边有名字时读屏跳过它（名字已说）；没有名字时给 `labelled`
-export function AgentIcon({ id, name, size = 16, labelled }: AgentIconProps) {
+export function AgentIcon(props: AgentIconProps) {
+  const icon = <AgentGlyph {...props} />;
+  return props.labelled ? <Tooltip content={props.name}>{icon}</Tooltip> : icon;
+}
+
+function AgentGlyph({ id, name, size = 16, labelled }: AgentIconProps) {
   const a11y = labelled
     ? { role: "img" as const, "aria-label": name }
     : { "aria-hidden": true as const };
@@ -84,7 +91,7 @@ export function AgentIcon({ id, name, size = 16, labelled }: AgentIconProps) {
   if (!drawn) {
     // 降级：14px 首字母方块（专名首字母取大写，经 Cap 的 mark 档套 Condensed）
     return (
-      <span className="ss-mark__box" title={labelled ? name : undefined} {...a11y}>
+      <span className="ss-mark__box" {...a11y}>
         <Cap tone="mark">{agentInitial(name)}</Cap>
       </span>
     );
@@ -105,7 +112,6 @@ export function AgentIcon({ id, name, size = 16, labelled }: AgentIconProps) {
       focusable="false"
       {...(labelled ? {} : { "aria-hidden": true as const })}
     >
-      {labelled ? <title>{name}</title> : null}
       {drawn.body}
     </svg>
   );

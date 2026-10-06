@@ -21,6 +21,7 @@ import {
   TextField,
   Toast,
   Tooltip,
+  TruncTip,
   useEdgeFades,
 } from "../ui/index.ts";
 import { FilterRow } from "../FilterRow.tsx";
@@ -106,10 +107,14 @@ export function PlaceBlock({
       ) : null}
       {blocked ? (
         <p className="install-blocked">
-          <span>{blocked.reason}</span>
-          <Button variant="quiet" onClick={() => onReveal?.(blocked.path)}>
-            {t("market.install.reveal")}
-          </Button>
+          {/* 句后浅键：不垫底，与句子之间一个「 · 」（2026-10-06）；`·` 跟着键走、不留在行尾 */}
+          <span>
+            {blocked.reason}
+            {" ·\u00a0"}
+            <Button variant="quiet" inline onClick={() => onReveal?.(blocked.path)}>
+              {t("market.install.reveal")}
+            </Button>
+          </span>
         </p>
       ) : null}
     </InstallBlock>
@@ -460,17 +465,20 @@ export function InstallFooter({
 }) {
   return (
     <div className="install-foot">
-      <span className="install-foot__line" title={line}>
-        {footRuns(line).map((run, i) =>
-          run.mono ? (
-            <Mono key={i} inherit>
-              {run.text}
-            </Mono>
-          ) : (
-            <span key={i}>{run.text}</span>
-          ),
-        )}
-      </span>
+      {/* 一行放不下截断时悬停出全句（不写原生 title：悬停弹系统灰框） */}
+      <TruncTip content={line} fit="grow">
+        <span className="install-foot__line">
+          {footRuns(line).map((run, i) =>
+            run.mono ? (
+              <Mono key={i} inherit>
+                {run.text}
+              </Mono>
+            ) : (
+              <span key={i}>{run.text}</span>
+            ),
+          )}
+        </span>
+      </TruncTip>
       <span className="install-foot__keys">
         <Button size="row" onClick={onCancel}>
           {t("market.action.cancel")}
@@ -502,7 +510,7 @@ export function InstallFooter({
   );
 }
 
-/// 来历一行：等宽的仓库 / 包名 · 仓库内路径 + 离开键（`在 GitHub 打开 ↗`）
+/// 来历一行：等宽的仓库 / 包名 · 仓库内路径 · 句后浅键（`在 GitHub 打开 ↗`，不垫底）
 export function OriginLine({
   parts,
   leave,
@@ -525,10 +533,14 @@ export function OriginLine({
           )}
         </span>
       ))}
+      {/* 末尾的外链是这一行的最后一项：句后浅键，不垫底，同样一个 · 隔开（2026-10-06） */}
       {leave ? (
-        <Button variant="quiet" onClick={leave.onClick}>
-          {leave.label}
-        </Button>
+        <span className="install-origin__part">
+          <span className="install-origin__dot">·</span>
+          <Button variant="quiet" inline onClick={leave.onClick}>
+            {leave.label}
+          </Button>
+        </span>
       ) : null}
     </p>
   );

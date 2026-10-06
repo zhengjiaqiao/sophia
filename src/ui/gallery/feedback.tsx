@@ -60,7 +60,7 @@ export function FeedbackFamily() {
               ceiling
             >
               <StateDotButton aria-label="brainstorming · Codex：未加上">
-                <StateDot dot="missing" hoverable title="" />
+                <StateDot dot="missing" hoverable />
               </StateDotButton>
             </Tooltip>
           </div>
@@ -416,7 +416,7 @@ export function FeedbackFamily() {
         <Specimen label="dim · 变淡（选择行的一点）">
           <BusySlot busy mode="dim" label="正在加到 Codex">
             <StateDotButton aria-label="选中的都加到 Codex">
-              <StateDot dot="linked" title="" />
+              <StateDot dot="linked" />
             </StateDotButton>
           </BusySlot>
         </Specimen>
@@ -424,7 +424,7 @@ export function FeedbackFamily() {
           <div className="gallery-tipstage">
             <BusySlot busy mode="float" label="正在拆开">
               <StateDotButton aria-label="ego-browser · Codex：整个文件夹是链接">
-                <StateDot dot="wholeLinked" title="" />
+                <StateDot dot="wholeLinked" />
               </StateDotButton>
             </BusySlot>
           </div>

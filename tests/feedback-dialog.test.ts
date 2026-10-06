@@ -43,7 +43,7 @@ test("小窗：确认框的层与遮罩、宽档 480；标题「反馈问题」�
   // 按钮行：取消（默认键）、发送（墨键，没写字时禁用，理由「先写几句」）
   assert.match(
     html,
-    /<button[^>]*class="ss-btn ss-btn--row"[^>]*>取消<\/button>.*<button[^>]*class="ss-btn ss-btn--primary ss-btn--row"[^>]*title="先写几句"[^>]*disabled=""[^>]*>发送<\/button>/,
+    /<button[^>]*class="ss-btn ss-btn--row"[^>]*>取消<\/button>.*<button[^>]*class="ss-btn ss-btn--primary ss-btn--row"[^>]*disabled=""[^>]*>发送<\/button><span[^>]*role="tooltip"[^>]*>先写几句</,
   );
 });
 
@@ -116,11 +116,11 @@ test("FeedbackFoot 发送中：取消与发送都禁用，理由「正在发送�
   });
   assert.match(
     html,
-    /<button[^>]*class="ss-btn ss-btn--row"[^>]*title="正在发送"[^>]*disabled=""[^>]*>取消<\/button>/,
+    /<button[^>]*class="ss-btn ss-btn--row"[^>]*disabled=""[^>]*>取消<\/button><span[^>]*role="tooltip"[^>]*>正在发送</,
   );
   assert.match(
     html,
-    /<button[^>]*class="ss-btn ss-btn--primary ss-btn--row"[^>]*title="正在发送"[^>]*disabled=""[^>]*>发送<\/button>/,
+    /<button[^>]*class="ss-btn ss-btn--primary ss-btn--row"[^>]*disabled=""[^>]*>发送<\/button><span[^>]*role="tooltip"[^>]*>正在发送</,
   );
   // 没失败：按钮行里没有 `在 GitHub 提` 那颗浅键
   assert.doesNotMatch(html, /ss-btn--quiet/);
@@ -135,10 +135,11 @@ test("FeedbackFoot 失败：左边一句「发送失败 · 网络不通」，主
     onSend: noop,
     onGithub: noop,
   });
-  // 原因后隔两个不断行空格一颗浅键 `在 GitHub 提 ↗`（2026-10-05 产品负责人：常驻一个 GitHub 入口），只在失败时出现
+  // 原因后「 · 」接一颗句后浅键 `在 GitHub 提 ↗`（2026-10-05 产品负责人：常驻一个 GitHub 入口；2026-10-06 不垫底），
+  // 只在失败时出现
   assert.match(
     html,
-    /class="ss-feedback__failure"[^>]*>发送失败 · 网络不通\u00a0\u00a0(?:<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--quiet"[^>]*>在 GitHub 提</,
+    /class="ss-feedback__failure"[^>]*>发送失败 · 网络不通 ·\u00a0(?:<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--quiet ss-btn--inline"[^>]*>在 GitHub 提</,
   );
   assert.match(
     html,

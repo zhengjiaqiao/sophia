@@ -26,6 +26,7 @@ import { Button } from "./Button.tsx";
 import { FOCUSABLE, cycleFocus } from "./FloatingLayer.tsx";
 import { IconClose, IconImage } from "./icons.tsx";
 import { holdInert, type InertTarget } from "./PushedPage.tsx";
+import { Tooltip } from "./Tooltip.tsx";
 
 /// 反馈小窗（spec 2026-10-04-reporting-feedback R12、R14；DESIGN-components「反馈小窗」，画板 FeedbackEmpty /
 /// Feedback / FeedbackFailed）。DESIGN「弹层只用于确认」的唯一例外：像聊天输入框，写几句、贴截图就发。
@@ -399,13 +400,7 @@ export function ShotTile({
           ? t("common.feedback.shotFailed", { n })
           : t("common.feedback.shot", { n });
   return (
-    <div
-      className="ss-feedback__shot"
-      data-phase={phase}
-      role="img"
-      aria-label={label}
-      title={phase === "uploading" ? t("common.feedback.uploading", { percent }) : undefined}
-    >
+    <div className="ss-feedback__shot" data-phase={phase} role="img" aria-label={label}>
       <div className="ss-feedback__thumb">
         {url ? <img src={url} alt="" draggable={false} /> : null}
       </div>
@@ -432,16 +427,17 @@ export function ShotTile({
         {percent}%
       </span>
       {busy ? null : (
-        <button
-          type="button"
-          className="ss-feedback__remove"
-          aria-label={t("common.feedback.removeShot", { n })}
-          title={t("common.feedback.removeShot", { n })}
-          disabled={!onRemove}
-          onClick={onRemove}
-        >
-          <IconClose size={10} />
-        </button>
+        <Tooltip content={onRemove ? t("common.feedback.removeShot", { n }) : undefined}>
+          <button
+            type="button"
+            className="ss-feedback__remove"
+            aria-label={t("common.feedback.removeShot", { n })}
+            disabled={!onRemove}
+            onClick={onRemove}
+          >
+            <IconClose size={10} />
+          </button>
+        </Tooltip>
       )}
     </div>
   );
@@ -472,8 +468,9 @@ export function FeedbackFoot({
       {failed ? (
         <span className="ss-feedback__failure" role="status">
           {t("common.feedback.failed", { reason: t(FAILURE_KEY[failed]) })}
-          &nbsp;&nbsp;
-          <Button variant="quiet" onClick={onGithub}>
+          {/* 句后的浅键：不垫底，与句子之间一个「 · 」（2026-10-06）；`·` 跟着键走、不留在行尾 */}
+          {" ·\u00a0"}
+          <Button variant="quiet" inline onClick={onGithub}>
             {t("common.feedback.github")}
           </Button>
         </span>

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { KeyboardEvent, RefObject } from "react";
 import { t } from "../i18n.ts";
 import { IconClose, IconEye, IconSearch } from "./icons.tsx";
+import { Tooltip } from "./Tooltip.tsx";
 
 /// 输入框（DESIGN「输入框」）：凹面——`recess` 底、1px `hairline` 边、`control` 7、高 28、左右 10、13 号字、
 /// 占位 `ink-mute`；聚焦时边转 `ink-mute`（不再叠焦点外框）。不含标签与表单布局、不做校验。
@@ -102,29 +103,31 @@ export function TextField({
         }}
       />
       {search && value !== "" ? (
-        <button
-          type="button"
-          className="ss-textfield__clear"
-          title={t("common.textField.clear")}
-          aria-label={t("common.textField.clear")}
-          onClick={() => {
-            onChange("");
-            ref.current?.focus();
-          }}
-        >
-          <IconClose size={12} />
-        </button>
+        <Tooltip content={t("common.textField.clear")}>
+          <button
+            type="button"
+            className="ss-textfield__clear"
+            aria-label={t("common.textField.clear")}
+            onClick={() => {
+              onChange("");
+              ref.current?.focus();
+            }}
+          >
+            <IconClose size={12} />
+          </button>
+        </Tooltip>
       ) : eye ? (
-        <button
-          type="button"
-          className="ss-textfield__clear"
-          title={shown ? t("common.textField.hide") : t("common.textField.show")}
-          aria-label={shown ? t("common.textField.hide") : t("common.textField.show")}
-          aria-pressed={shown}
-          onClick={() => setShown(!shown)}
-        >
-          <IconEye size={14} shut={shown} />
-        </button>
+        <Tooltip content={shown ? t("common.textField.hide") : t("common.textField.show")}>
+          <button
+            type="button"
+            className="ss-textfield__clear"
+            aria-label={shown ? t("common.textField.hide") : t("common.textField.show")}
+            aria-pressed={shown}
+            onClick={() => setShown(!shown)}
+          >
+            <IconEye size={14} shut={shown} />
+          </button>
+        </Tooltip>
       ) : search && shortcut ? (
         <span className="ss-textfield__key" aria-hidden="true">
           {shortcut}

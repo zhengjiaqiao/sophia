@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 /// 区块小标（DESIGN「刻字」，裁决：全应用一种——**Condensed 12 / 600 `ink-mute`，可选下 7 一条 hairline**）：
 /// 一组内容上面的一句小标题，右端可带一颗键（`网关` + `+ 网关`、侧栏 `AGENT` `项目` + 排序下拉）。
-/// 字原样：汉字字距 0；独立成词的拉丁结构词（`AGENT`）由调用方包 `Cap`，句子里的词（`列表里的 agent`）不包。
+/// 字原样：汉字字距 0；独立成词的拉丁结构词（`AGENT`）由调用方包 `Cap`，句子里的词（`Skills 和 MCP`）不包。
 /// 不是节标题（那是 `Section` 的 `head` 16）、不是表格列头（列头由表格定）。上下外距归所在的页
 export interface SectionLabelProps {
   children: ReactNode;

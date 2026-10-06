@@ -74,8 +74,6 @@
   "market.update.confirmOne": "更新",
   "market.update.confirmAll": "全部更新",
   "market.update.neverChecked": "還沒有檢查過",
-  "market.update.hasCount": "{count} 個有更新",
-  "market.update.none": "沒有更新",
   "market.clock.today": "今天 {time}",
   "market.clock.yesterday": "昨天 {time}",
   "market.clock.date": "{date} {time}",

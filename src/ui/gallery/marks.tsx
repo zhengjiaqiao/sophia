@@ -20,18 +20,18 @@ export function MarksFamily() {
         ))}
         <Specimen label="可点（StateDotButton）· 悬停出光晕" force="hover">
           <StateDotButton aria-label="brainstorming · Codex：未加上">
-            <StateDot dot="missing" hoverable title="" />
+            <StateDot dot="missing" hoverable />
           </StateDotButton>
         </Specimen>
         <Specimen label="可点 · 键盘焦点" force="focus">
           <StateDotButton aria-label="brainstorming · Codex：已加上">
-            <StateDot dot="linked" hoverable title="" />
+            <StateDot dot="linked" hoverable />
           </StateDotButton>
         </Specimen>
         <Specimen label="surface 底上（选择行）· 光晕换 track" force="hover">
           <span className="gallery-surface">
             <StateDotButton aria-label="选中的都加到 Codex">
-              <StateDot dot="missing" hoverable onSurface title="" />
+              <StateDot dot="missing" hoverable onSurface />
             </StateDotButton>
           </span>
         </Specimen>

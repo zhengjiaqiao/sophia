@@ -729,7 +729,6 @@
       "id": "code0",
       "name": "Code0",
       "website": "https://code0.ai",
-      "keysUrl": "https://code0.ai/agent/register/B2XHxGjGmRvqgznY",
       "region": "global",
       "openai": {
         "apiBase": "https://code0.ai/v1",
@@ -1351,7 +1350,6 @@
       "id": "claudeapi",
       "name": "ClaudeAPI",
       "website": "https://www.apito.ai",
-      "keysUrl": "https://console.apito.ai/agent/register/pQBql2buaqiX3dDS",
       "region": "global",
       "openai": null,
       "anthropic": {

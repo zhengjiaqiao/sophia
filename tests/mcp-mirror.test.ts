@@ -53,7 +53,7 @@ test("渲染：成功条目下那一句用失败原因同一个元素（ss-toast
   });
   const html = render(Toast, { ...text, onDismiss: () => {} });
   assert.match(html, /role="status"/);
-  assert.match(html, /title="成功"/);
+  assert.match(html, /class="ss-toast__mark" aria-hidden="true"/);
   assert.match(
     html,
     new RegExp(`<span class="ss-toast__sep">·</span><span class="ss-toast__reason">${NOTE}</span>`),

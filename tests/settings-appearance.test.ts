@@ -89,18 +89,18 @@ test("外观一行：标签「外观」+ 紧凑页签（原样显示，不转大
   assert.doesNotMatch(html, /<svg/);
 });
 
-test("设置页：「通用」是第一节（在「列表里的 agent」之前），语言在上、外观在下；外观读自 core、改了当场写，写不成读回原样", () => {
+test("设置页：「通用」是第一节（在「Skills 和 MCP」之前），语言在上、外观在下；外观读自 core、改了当场写，写不成读回原样", () => {
   const src = withCopy(
     readFileSync(new URL("../src/pages/SettingsPage.tsx", import.meta.url), "utf8"),
   );
   // 节小标下不画线（2026-10-04 画板 B）
   assert.match(src, /<SectionLabel>通用<\/SectionLabel>/);
   assert.doesNotMatch(src, /<SectionLabel rule/);
-  // 节序（画板 1A、B）：通用 → 界面语言 → 外观 → 列表里的 agent
+  // 节序（画板 1A、B；2026-10-06 并节）：通用 → 界面语言 → 外观 → Skills 和 MCP
   const at = (re: RegExp) => src.search(re);
   assert.ok(at(/通用<\/SectionLabel>/) < at(/<LanguageRow /));
   assert.ok(at(/<LanguageRow /) < at(/<AppearanceRow /));
-  assert.ok(at(/<AppearanceRow /) < at(/<SectionLabel>\s*列表里的 agent/));
+  assert.ok(at(/<AppearanceRow /) < at(/<SectionLabel>Skills 和 MCP<\/SectionLabel>/));
   assert.match(src, /<AppearanceRow value=\{appearance\} onChange=\{/);
   assert.match(src, /api\.appearance\(\)/);
   assert.match(src, /api\.setAppearance\(next\)/);

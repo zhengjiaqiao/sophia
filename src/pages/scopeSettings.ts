@@ -11,7 +11,7 @@ export interface ScopeGroups {
 }
 
 /// 按 core 给的先后分两组。`kept`：这一程在上面取消勾的项目路径——格子留在原处、勾掉的样子，
-/// 下次进设置才折进去（同「列表里的 agent」取消勾后行还在原处）
+/// 下次进设置才折进去（同 `显示的 agent` 取消勾后行还在原处）
 export function scopeGroups(
   projects: ReadonlyArray<ProjectScope>,
   kept: ReadonlySet<string>,

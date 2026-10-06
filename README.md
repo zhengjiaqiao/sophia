@@ -40,7 +40,7 @@ Switch the Skills or MCP page from **Yours** to **Discover** to search popular s
 
 ### Third-party models for Codex and Claude (macOS)
 
-Use models from other providers in the Codex app and in Claude Desktop, next to the official ones. Sophia runs a small local gateway inside the app that translates between the APIs, so third-party models work while Sophia is open (turn on **Open at login** in Settings to keep them always available). Quitting Sophia asks first, then switches the Codex app and Claude Desktop back to the official models. Add several providers, choose the models each agent should see, and switch it on or off from the app or the menu bar. API keys are kept in a file in the Sophia data folder, readable only by your user account (so any program you run can read it too; it is included in Time Machine backups).
+Use models from other providers in the Codex app and in Claude Desktop, next to the official ones. Sophia runs a small local gateway inside the app that translates between the APIs, so third-party models work while Sophia is open (Sophia turns on **Open at login** the first time you open it, so they stay available after a restart; you can turn it off in Settings). Quitting Sophia asks first, then switches the Codex app and Claude Desktop back to the official models. Add several providers, choose the models each agent should see, and switch it on or off from the app or the menu bar. API keys are kept in a file in the Sophia data folder, readable only by your user account (so any program you run can read it too; it is included in Time Machine backups).
 
 <p align="center">
   <img src="./assets/readme/en/screen-models.png" width="100%" alt="The Codex models page: two gateway providers, the models chosen from each, and the switch for third-party models.">
@@ -62,7 +62,9 @@ See how much of your Claude and Codex plan limits is left, right in the menu bar
 
 ## Getting started
 
-There is no prebuilt release yet, so build it from source. You need [Rust](https://rustup.rs) 1.98 or newer, Node.js 22, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS.
+Download the latest release from [GitHub Releases](https://github.com/zhengjiaqiao/sophia/releases/latest). On an Apple silicon Mac pick the `.dmg` with `aarch64` in its name; on an Intel Mac pick the one with `x64`. It is signed and notarized by Apple: open the dmg and drag Sophia into Applications. Requires macOS 14 (Sonoma) or later.
+
+Or build it from source. You need [Rust](https://rustup.rs) 1.98 or newer, Node.js 22, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS.
 
 ```bash
 git clone https://github.com/zhengjiaqiao/sophia.git

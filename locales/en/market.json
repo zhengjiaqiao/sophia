@@ -104,11 +104,6 @@
   "market.update.confirmOne": "Update",
   "market.update.confirmAll": "Update all",
   "market.update.neverChecked": "Never checked",
-  "market.update.hasCount": {
-    "one": "{count} with an update",
-    "other": "{count} with updates"
-  },
-  "market.update.none": "No updates",
   "market.clock.today": "Today {time}",
   "market.clock.yesterday": "Yesterday {time}",
   "market.clock.date": "{date} {time}",

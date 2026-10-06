@@ -21,7 +21,7 @@ import { t } from "../i18n.ts";
 export type Dot =
   "own" | "linked" | "missing" | "none" | "broken" | "readOnly" | "blocked" | "wholeLinked";
 
-/// 读屏与 title 的默认说法：新图形都要有文字，调用方不给就用这一份
+/// 读屏的默认说法：新图形都要有文字，调用方不给就用这一份
 /// 各取值是 getter：文案用到时才取，不在模块加载时定死（展开 `...DOT_LABEL` 的调用方是展开那一刻取）
 export const DOT_LABEL: Record<Dot, string> = {
   get own() {
@@ -54,9 +54,8 @@ export interface StateDotProps {
   dot: Dot;
   /// 禁用：选择条里「已选的都是原件」那颗禁用键上的原件环，退到 `ink-faint`
   muted?: boolean;
-  /// 鼠标悬停的系统兜底说明。**不作唯一说明**——格子的文字确定性由 Tooltip 承载
-  title?: string;
-  /// 读屏名；不给就用 title，再不给用 DOT_LABEL
+  /// 读屏名；不给用 DOT_LABEL。悬停说明不在这里：格子的文字由 Tooltip 承载，
+  /// 点上不写原生 title（悬停弹系统灰框，2026-10-06）
   label?: string;
   /// 这颗点可点：外层按钮（`StateDotButton`，整格命中与键盘焦点）由调用方放，这里只画记号；
   /// 给 true 时悬停 / 键盘聚焦外层按钮出光晕（只有开 / 关两种与原件出）
@@ -126,19 +125,18 @@ function Glyph10({ dot }: { dot: Dot }) {
 export function StateDot({
   dot,
   muted,
-  title,
   label,
   hoverable: canHover,
   onSurface = false,
 }: StateDotProps) {
-  const text = label ?? title ?? DOT_LABEL[dot];
+  const text = label ?? DOT_LABEL[dot];
   const classes = ["ss-dot", `ss-dot--${dot}`];
   if (muted) classes.push("is-muted");
   if (onSurface) classes.push("is-on-surface");
   const hoverable = Boolean(canHover) && TOGGLES.has(dot);
 
   return (
-    <span className="ss-dot-wrap" title={title ?? text} role="img" aria-label={text}>
+    <span className="ss-dot-wrap" role="img" aria-label={text}>
       <svg
         className={classes.join(" ")}
         data-dot={dot}

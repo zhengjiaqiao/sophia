@@ -111,6 +111,28 @@ export function KeysFamily() {
       </Block>
 
       <Block
+        name="Button · quiet · inline"
+        guide="跟在一句话后面的外链：不垫底、不带左右留白，「 · 」隔开；手靠近照旧浮起 ｜ 单独放的（灰面板、抽屉、空态）不是它"
+      >
+        <Specimen label="静止">
+          <span className="gallery-sentence">
+            匿名发送使用数据 ·&nbsp;
+            <Button variant="quiet" inline onClick={noop}>
+              隐私说明
+            </Button>
+          </span>
+        </Specimen>
+        <Specimen label="悬停" force="hover">
+          <span className="gallery-sentence">
+            匿名发送使用数据 ·&nbsp;
+            <Button variant="quiet" inline onClick={noop}>
+              隐私说明
+            </Button>
+          </span>
+        </Specimen>
+      </Block>
+
+      <Block
         name="AddButton"
         guide="开始一个添加流程，写「+ 名词」（+ 来源、+ 网关）｜ 侧栏的 + 项目 是侧栏行，不是它"
       >

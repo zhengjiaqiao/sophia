@@ -40,7 +40,7 @@ Sophia 把这些放进一张表：**每个 agent 现在能用哪些 skill、哪�
 
 ### 给 Codex 和 Claude 用第三方模型（macOS）
 
-在 Codex 应用和 Claude 桌面应用里，把其他服务商的模型和官方模型放在一起用。Sophia 在应用里跑一个本机小网关负责转换接口，Sophia 开着时第三方模型就能用（在设置里打开「开机启动」就随时能用）。退出 Sophia 前会先确认，再把 Codex 应用和 Claude 桌面应用改回官方模型。可以加多家服务商、为每个 agent 选要显示的模型，在应用或菜单栏里一键开关。API 密钥存在 Sophia 数据目录里的一个文件中，只有你的账户能读（以你身份运行的程序也读得到；会随 Time Machine 备份）。
+在 Codex 应用和 Claude 桌面应用里，把其他服务商的模型和官方模型放在一起用。Sophia 在应用里跑一个本机小网关负责转换接口，Sophia 开着时第三方模型就能用（第一次打开时 Sophia 会默认开启「开机启动」，重启电脑后也随时能用，可以在设置里关）。退出 Sophia 前会先确认，再把 Codex 应用和 Claude 桌面应用改回官方模型。可以加多家服务商、为每个 agent 选要显示的模型，在应用或菜单栏里一键开关。API 密钥存在 Sophia 数据目录里的一个文件中，只有你的账户能读（以你身份运行的程序也读得到；会随 Time Machine 备份）。
 
 <p align="center">
   <img src="./assets/readme/zh-CN/screen-models.png" width="100%" alt="Codex 的模型页：两家网关、从每家选好的模型，以及第三方模型的总开关。">
@@ -62,7 +62,9 @@ Sophia 把这些放进一张表：**每个 agent 现在能用哪些 skill、哪�
 
 ## 开始使用
 
-还没有发布安装包，需要从源码构建。需要 [Rust](https://rustup.rs) 1.98 或更新版本、Node.js 22，以及你所用系统的 [Tauri 依赖](https://tauri.app/start/prerequisites/)。
+从 [GitHub Releases](https://github.com/zhengjiaqiao/sophia/releases/latest) 下载最新版。Apple 芯片的 Mac 选文件名带 `aarch64` 的 dmg，Intel 的选带 `x64` 的。已签名并通过 Apple 公证：打开 dmg，把 Sophia 拖进「应用程序」即可。需要 macOS 14（Sonoma）或更新。
+
+也可以从源码构建。需要 [Rust](https://rustup.rs) 1.98 或更新版本、Node.js 22，以及你所用系统的 [Tauri 依赖](https://tauri.app/start/prerequisites/)。
 
 ```bash
 git clone https://github.com/zhengjiaqiao/sophia.git

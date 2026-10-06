@@ -579,6 +579,18 @@ export const rules = [
     },
   },
   {
+    id: "no-native-title",
+    // 原生 title 只要在 DOM 上，悬停就弹系统灰框（位置不受控、无法排版），和墨色提示框同时出或单独出都不对
+    // （DESIGN-components「提示框 Tooltip」，2026-10-06 产品负责人真机看到模型片弹灰框）。
+    // 提示一律经 Tooltip / TruncTip，读屏走 aria-label / aria-describedby。
+    // 只管小写的 HTML 标签（组件的 title 参数交给内部 Tooltip，不算）；属性跨行写也找得到
+    desc: "界面不写原生 title：小写 HTML 标签上不出现 title=、svg 里不放 <title>（提示用 Tooltip / TruncTip，读屏用 aria-label）",
+    run(src, path) {
+      if (!path.endsWith(".tsx")) return [];
+      return nativeTitleTags(stripComments(src, path));
+    },
+  },
+  {
     id: "spacing-token",
     // 间距档位（tokens.css「间距」）写成字面量就绕过了 token：改档位时漏改的正是它们。
     // 只管外距、内距与间隙；负值（几何补偿：抵掉外扩的悬停带、让图标键对齐内边距）不算，1px 线不在档位里
@@ -766,6 +778,42 @@ export function scanSource(src, path = "x.tsx") {
     i++;
   }
   return { code: out, strings, regexes };
+}
+
+/// 小写 HTML 标签（`<span`、`<div`……）的属性区里直接写了 `title=` 的，返回 `<标签 title=>（第 N 行）`；
+/// svg 里的 `<title>` 元素同样报（悬停也弹系统灰框）。
+/// 从 `<标签名` 往后走到属性区结束的 `>`：花括号里（`{a > b}`、`style={{…}}`）与字符串里的 `>` 不算，
+/// 所以属性分几行写、表达式里带比较号都找得到；只看花括号外的 `title=`，`{...{ title }}` 这种不在此列
+export function nativeTitleTags(code) {
+  const out = [];
+  for (const m of code.matchAll(/<([a-z][\w-]*)(?=[\s/>])/g)) {
+    let depth = 0;
+    let quote = null;
+    let attrs = "";
+    for (let i = m.index + m[0].length; i < code.length; i++) {
+      const c = code[i];
+      if (quote) {
+        if (c === "\\") i++;
+        else if (c === quote) quote = null;
+        if (depth === 0) attrs += " ";
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") {
+        quote = c;
+        if (depth === 0) attrs += " ";
+        continue;
+      }
+      if (c === "{") depth++;
+      else if (c === "}") depth--;
+      else if (c === ">" && depth === 0) break;
+      attrs += depth === 0 && c !== "}" ? c : " ";
+    }
+    const line = code.slice(0, m.index).split("\n").length;
+    if (/(^|\s)title\s*=/.test(attrs)) out.push(`<${m[1]} title=>（第 ${line} 行）`);
+    // svg 里的 <title> 子元素悬停同样弹系统灰框
+    if (m[1] === "title") out.push(`<title>（第 ${line} 行）`);
+  }
+  return out;
 }
 
 /// 去掉注释的源码（字符串原样）：各条规则都在它上面找

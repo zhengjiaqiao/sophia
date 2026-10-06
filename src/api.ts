@@ -392,7 +392,7 @@ export const api = {
   /// 提示条按 ×：传此刻各个 UpdateInfo.remoteTreeSha
   marketDismissUpdates: (treeShas: string[]) =>
     invoke<void>("market_dismiss_updates", { treeShas }),
-  /// 设置 `skill 更新` 一节
+  /// 设置 `自动检查 skill 更新` 那一行
   skillUpdateSettings: () => invoke<SkillUpdateSettings>("skill_update_settings"),
   setAutoCheckSkillUpdates: (enabled: boolean) =>
     invoke<void>("set_auto_check_skill_updates", { enabled }),

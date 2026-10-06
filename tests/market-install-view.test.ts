@@ -77,7 +77,7 @@ const DESKTOP = agent(CLAUDE_DESKTOP, "Claude Desktop");
 const COPILOT = agent("github-copilot", "GitHub Copilot");
 /// 已安装的 agent（agent 表的先后）
 const INSTALLED = [CC, CODEX, CURSOR, GEMINI, OPENCODE, CLINE, DESKTOP, COPILOT];
-/// 设置里 `列表里的 agent`
+/// 设置里 `显示的 agent`
 const SHOWN = ["claude-code", "codex", "cursor", "gemini-cli"];
 const PROJECT = "project:/Users/you/Project/CardBox";
 

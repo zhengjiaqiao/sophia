@@ -122,7 +122,7 @@ export function landingTip(projectPath: string, name: string | null): string {
 
 // ───────────────────────── 给谁用 / 写进哪些 agent ─────────────────────────
 
-/// 勾选行列哪些 agent、按什么先后（画板 06 / 09）：`列表里的 agent` 在前（按名单的先后），
+/// 勾选行列哪些 agent、按什么先后（画板 06 / 09）：设置里 `显示的 agent` 在前（按名单的先后），
 /// 其余已安装的在后（按 agent 表的先后）。MCP 只列能写 MCP 的，Claude Desktop 不进名单、
 /// 跟在名单那一段后面；skill 不列 Claude Desktop（它没有 skill 目录）
 export function agentRows(
@@ -140,7 +140,7 @@ export function agentRows(
   return [...head, ...usable.filter((a) => !head.includes(a))];
 }
 
-/// 默认勾哪些（R9 R10）：设置里 `列表里的 agent`（2026-09-27 产品负责人：「默认应该只勾选用户在设置里勾选的
+/// 默认勾哪些（R9 R10）：设置里 `显示的 agent`（2026-09-27 产品负责人：「默认应该只勾选用户在设置里勾选的
 /// agent」——不再记上次的选择，每次打开都一样），MCP 另外 Claude Desktop 跟着 Claude Code
 export function defaultChecked(
   kind: InstallKind,

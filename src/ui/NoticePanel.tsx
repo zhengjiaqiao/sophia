@@ -220,7 +220,7 @@ export function NoticePanel({
       aria-label={mark ? undefined : t("common.noticePanel.hint")}
     >
       {mark ? (
-        <span className="ss-noticepanel__mark" title={markTitle} role="img" aria-label={markTitle}>
+        <span className="ss-noticepanel__mark" role="img" aria-label={markTitle}>
           <IconAttention />
         </span>
       ) : null}

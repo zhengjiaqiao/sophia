@@ -62,7 +62,7 @@ export interface UpdateSnapshot {
   undoing: boolean;
   /// 最近一次能撤销的更新：纸窗收起之后 ⌘Z 照旧能撤（与位置页其他写入同一个规矩），撤过、撤不成就清掉
   lastUndoId: string | null;
-  /// 设置里按了 `去看看`：SKILLS 页挂上时打开 `只看这些`，接过去就清掉
+  /// 设置里按了 `看 N 个更新`：SKILLS 页挂上时打开 `只看这些`，接过去就清掉
   wantOnlyThese: boolean;
 }
 
@@ -90,7 +90,7 @@ export interface UpdateStore {
   check(force: boolean, trigger: UpdateTrigger): Promise<void>;
   /// 按 ×：这一批不再提
   dismiss(): Promise<void>;
-  /// 设置的 `去看看`：请 SKILLS 页打开 `只看这些`（`take` 接过去）
+  /// 设置的 `看 N 个更新`：请 SKILLS 页打开 `只看这些`（`take` 接过去）
   askOnlyThese(): void;
   takeOnlyThese(): boolean;
   /// 按 `全部更新` / `更新`：有本地改动先确认，否则直接更新
@@ -290,7 +290,7 @@ export interface SkillUpdates extends UpdateSnapshot {
   setOnlyThese: (on: boolean) => void;
   /// 设置的 `立即检查`
   refresh: () => void;
-  /// 设置的 `去看看`：请 SKILLS 页打开 `只看这些`、提示条亮着
+  /// 设置的 `看 N 个更新`：请 SKILLS 页打开 `只看这些`、提示条亮着
   showInList: () => void;
   /// 提示条的 `全部更新`：传当前位置的那几条
   updateAll: (targets: UpdateInfo[]) => void;
@@ -320,7 +320,7 @@ export function useSkillUpdates(
     if (active) void store.check(false, "auto");
   }, [active, store]);
 
-  // 设置里按了 `去看看`：这一页挂上时接过去，打开 `只看这些`
+  // 设置里按了 `看 N 个更新`：这一页挂上时接过去，打开 `只看这些`
   useEffect(() => {
     if (active && snap.wantOnlyThese && store.takeOnlyThese()) setOnlyThese(true);
   }, [active, snap.wantOnlyThese, store]);

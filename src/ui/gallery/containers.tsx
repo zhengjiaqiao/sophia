@@ -121,8 +121,8 @@ export function ContainersFamily() {
         <Specimen label="只有字（设置 · 关于）" width={360}>
           <SectionLabel>关于</SectionLabel>
         </Specimen>
-        <Specimen label="下线（列表里的 agent）" width={360}>
-          <SectionLabel rule>列表里的 agent · 最多 4 个</SectionLabel>
+        <Specimen label="下线（网关）" width={360}>
+          <SectionLabel rule>网关</SectionLabel>
         </Specimen>
         <Specimen label="下线 + 右端键（网关）" width={480}>
           <SectionLabel rule action={<AddButton noun="网关" label="添加 网关" onClick={noop} />}>

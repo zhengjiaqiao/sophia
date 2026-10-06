@@ -227,12 +227,18 @@ export function IntroPage(props: IntroPageProps) {
     >
       <div className="intro">
         <div className="intro__origin">
-          <span className="intro__facts-line">{origin}</span>
-          {leaveUrl ? (
-            <Button variant="quiet" onClick={() => open(leaveUrl)}>
-              {leaveText}
-            </Button>
-          ) : null}
+          <span className="intro__facts-line">
+            {origin}
+            {/* 末尾的外链是这一行事实的最后一项：句后浅键，不垫底，与前面同样一个 · 隔开（2026-10-06） */}
+            {leaveUrl ? (
+              <>
+                <Dot />
+                <Button variant="quiet" inline onClick={() => open(leaveUrl)}>
+                  {leaveText}
+                </Button>
+              </>
+            ) : null}
+          </span>
         </div>
         {placed ? <p className="intro__placed">{placed}</p> : null}
         {props.kind === "mcp" ? <McpFacts item={props.item} /> : null}

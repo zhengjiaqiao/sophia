@@ -408,7 +408,8 @@ test("StateDot 10px 家族：八种各自一个记号，默认带读屏名与 ti
     assert.match(html, new RegExp(`data-dot="${dot}"`), dot);
     assert.match(html, /width="10" height="10" viewBox="0 0 10 10"/, dot);
     assert.match(html, new RegExp(`aria-label="${DOT_LABEL[dot]}"`), dot);
-    assert.match(html, new RegExp(`title="${DOT_LABEL[dot]}"`), dot);
+    // 不写原生 title（悬停弹系统灰框）：格子的说明由表格的提示框承载
+    assert.doesNotMatch(html, / title=/, dot);
     assert.match(html, /role="img"/, dot);
   }
 });
@@ -472,9 +473,9 @@ test("StateDot 只有 10px 一档；可点时外层按钮由调用方给，hover
   const src = readFileSync(new URL("../src/ui/StateDot.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(src, /size\?:|inverse|onClick|Glyph16|ss-dot-btn"/);
   assert.doesNotMatch(uiCss, /is-inverse/);
-  const linked = render(StateDot, { dot: "linked", hoverable: true, title: "点一下关闭" });
+  const linked = render(StateDot, { dot: "linked", hoverable: true, label: "点一下关闭" });
   assert.doesNotMatch(linked, /<button/);
-  assert.match(linked, /^<span class="ss-dot-wrap" title="点一下关闭" role="img"/);
+  assert.match(linked, /^<span class="ss-dot-wrap" role="img" aria-label="点一下关闭"/);
   assert.match(linked, /data-hoverable=""/);
   assert.match(linked, /class="ss-dot__fill"/);
   const missing = render(StateDot, { dot: "missing", hoverable: true });
@@ -536,9 +537,10 @@ test("StateDot 禁用：muted 退到 ink-faint（刚点亮的反色闪走格子�
 // 2026-09-26：同名 ×2 并进 Tag 的 count 一档（原 DupMark）
 test("Tag count：名字后 ×2——12 tabular ink-faint，读屏读「同名：有 2 份」", () => {
   const row = render(Tag, { tone: "count", label: "同名：有 2 份", children: "×2" });
-  assert.equal(
+  // 读屏名同时是悬停的提示框（不写原生 title：悬停弹系统灰框）
+  assert.match(
     row,
-    '<span class="ss-tag ss-tag--count" title="同名：有 2 份" role="img" aria-label="同名：有 2 份">×2</span>',
+    /^<span class="ss-tipwrap" tabindex="0" aria-describedby="[^"]+"><span class="ss-tag ss-tag--count has-tip" role="img" aria-label="同名：有 2 份">×2<\/span><span id="[^"]+" role="tooltip"[^>]*>同名：有 2 份<\/span><\/span>$/,
   );
   // 计数：12 tabular，不换等宽字族
   assert.match(cssRule(uiCss, ".ss-tag"), /font-family:\s*var\(--font-ui\)/);
@@ -632,7 +634,8 @@ test("Button 禁用：必须同时给原因，挂在 title 上；平贴、实线
     disabledReason: "先点亮一个 agent",
   });
   assert.match(html, /disabled=""/);
-  assert.match(html, /title="先点亮一个 agent"/);
+  assert.match(html, /role="tooltip"[^>]*>先点亮一个 agent</);
+  assert.doesNotMatch(html, / title=/);
   const rule = cssRule(uiCss, ".ss-btn:disabled");
   // 线画在键的外沿（与抬起键的投影环同位）：启用 ↔ 禁用时键不变宽
   assert.match(rule, /outline:\s*var\(--border-disabled\)/);
@@ -693,9 +696,39 @@ test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mu
     disabled: true,
     disabledReason: "文件夹已经不在了",
   });
-  assert.match(off, /class="ss-btn ss-btn--quiet" title="文件夹已经不在了"[^>]*disabled=""/);
+  assert.match(off, /class="ss-btn ss-btn--quiet"[^>]*disabled=""/);
+  assert.match(off, /role="tooltip"[^>]*>文件夹已经不在了</);
   assert.match(off, /ss-btn__external/);
   assert.doesNotMatch(uiCss, /ss-btn--link|ss-btn--quiet:disabled|ss-btn--external/);
+});
+
+// 2026-10-06 浅键分场景：跟在一句话后面的（`inline`）不垫底、不带左右留白；手靠近照旧浮起
+test("Button 句后浅键（inline）：静止不垫底、不带左右留白（负外距保命中区）、行高随句子；悬停照旧 paper + raise；只对浅键", () => {
+  const html = render(Button, {
+    children: "隐私说明",
+    variant: "quiet",
+    inline: true,
+    onClick: noop,
+  });
+  assert.match(
+    html,
+    /class="ss-btn ss-btn--quiet ss-btn--inline">隐私说明<svg class="ss-btn__external"/,
+  );
+  // 默认键不吃这个开关
+  assert.match(
+    render(Button, { children: "检查更新", inline: true, onClick: noop }),
+    /class="ss-btn">检查更新</,
+  );
+  const rule = cssRule(uiCss, ".ss-btn--inline");
+  assert.match(rule, /background:\s*transparent/);
+  assert.match(rule, /padding:\s*2px var\(--space-xxs\)/);
+  assert.match(rule, /margin:\s*-2px calc\(-1 \* var\(--space-xxs\)\)/);
+  assert.match(rule, /line-height:\s*var\(--leading-caption\)/);
+  // 写在浅键规则之后（同特异性靠先后压过 surface 底）；悬停的 :hover 特异性更高，照旧浮起
+  assert.ok(uiCss.indexOf("\n.ss-btn--inline {") > uiCss.indexOf("\n.ss-btn--quiet {"));
+  assert.ok(
+    uiCss.indexOf("\n.ss-btn--inline {") > uiCss.indexOf("\n.ss-noticepanel .ss-btn--quiet"),
+  );
 });
 
 // 2026-09-25 提示条一律是纸、墨色浮窗只给提示框：墨面上的浅描边键随墨窗一起删掉
@@ -730,10 +763,11 @@ test("RefreshSpin（全应用唯一的转圈，只给刷新键）：与图标键
   assert.doesNotMatch(uiCss, /is-spinning/);
 });
 
-test("IconButton：28×28，title 必填且同时作 aria-label；不带计数", () => {
+test("IconButton：28×28，title 必填，是提示框的字且同时作 aria-label；不带计数", () => {
   const html = render(IconButton, { icon: IconTick(), title: "设置", onClick: noop });
   assert.match(html, /class="ss-iconbtn"/);
-  assert.match(html, /title="设置"/);
+  assert.match(html, /role="tooltip"[^>]*>设置</);
+  assert.doesNotMatch(html, / title=/);
   assert.match(html, /aria-label="设置"/);
   // 顶栏只剩设置；页签上、图标上都不挂计数（常驻的数字会一直催处理不了的事）
   assert.doesNotMatch(html, /ss-iconbtn__count/);
@@ -752,7 +786,9 @@ test("IconButton：28×28，title 必填且同时作 aria-label；不带计数",
 test("AddButton：开始一个添加流程只有「+ 名词」这一种长相；+ 是词表里的 IconPlus 缩到 12，不另画一枚", () => {
   const html = render(AddButton, { noun: "skill", label: "添加 skill", onClick: noop });
   assert.match(html, /class="ss-btn ss-btn--add"/);
-  assert.match(html, /title="添加 skill"/);
+  // 整句只给读屏：键上「+ 名词」已说全，不出提示框，也不写原生 title
+  assert.match(html, /aria-label="添加 skill"/);
+  assert.doesNotMatch(html, / title=|role="tooltip"/);
   assert.match(
     html,
     /<svg width="12" height="12" viewBox="0 0 16 16"[^>]*><path d="M8 2\.6v10\.8M2\.6 8h10\.8"><\/path><\/svg>skill</,
@@ -918,7 +954,8 @@ test("Switch 禁用：带原因；平贴、无投影、不响应悬停按住与�
     disabledReason: "Codex 还没装",
   });
   assert.match(html, /disabled=""/);
-  assert.match(html, /title="Codex 还没装"/);
+  assert.match(html, /role="tooltip"[^>]*>Codex 还没装</);
+  assert.doesNotMatch(html, / title=/);
   // 不可用：槽透明 + hairline 环；滑块 recess、无底边；刻线 hairline；开关旁没有指示点
   assert.doesNotMatch(html, /ss-indicator/);
   assert.match(
@@ -959,7 +996,8 @@ test("Checkbox 14px：未勾 / 手靠近 / 勾上 / 半选 / 不可选；与 Che
   assert.match(mixed, /stroke-width="2"[^>]*><path d="M1 5h8"><\/path>/);
   const off = render(Checkbox, { checked: false, label: "docx", disabledReason: "已添加" });
   assert.match(off, /disabled=""/);
-  assert.match(off, /title="已添加"/);
+  assert.match(off, /role="tooltip"[^>]*>已添加</);
+  assert.doesNotMatch(off, / title=/);
   const rule = cssRule(uiCss, ".ss-checkbox");
   assert.match(rule, /width:\s*14px/);
   assert.match(rule, /height:\s*14px/);
@@ -1156,7 +1194,8 @@ test("Chip 不可选：实线 hairline、ink-faint 字，并给出原因", () =>
     disabledReason: "这个 agent 还没装",
   });
   assert.match(html, /disabled=""/);
-  assert.match(html, /title="这个 agent 还没装"/);
+  assert.match(html, /role="tooltip"[^>]*>这个 agent 还没装</);
+  assert.doesNotMatch(html, / title=/);
   const rule = cssRule(uiCss, ".ss-chip:disabled");
   assert.match(rule, /outline:\s*var\(--border-disabled\)/);
   assert.match(rule, /background:\s*transparent/);
@@ -1164,13 +1203,20 @@ test("Chip 不可选：实线 hairline、ink-faint 字，并给出原因", () =>
 });
 
 // 2026-09-25 模型片：白胶囊高 26（原 24）、左 10 右 8、× 1.4 描边（原 1.2）
-test("ModelChip：白胶囊高 26、左 10 右 8，paper + 1px hairline 环；× 9px 1.4 描边、左间距 6；友好名 + title 放完整 id", () => {
+test("ModelChip：白胶囊高 26、左 10 右 8，paper + 1px hairline 环；× 9px 1.4 描边、左间距 6；友好名 + 提示框给完整 id", () => {
   const html = render(ModelChip, {
     name: "Opus 4.6",
     id: "anthropic/claude-opus-4-6",
     onRemove: noop,
   });
-  assert.match(html, /class="ss-modelchip" title="anthropic\/claude-opus-4-6"/);
+  // 完整 id 与「移除」都走提示框（等宽 id）；不写原生 title（2026-10-06 真机：悬停弹系统灰框）
+  assert.match(html, /^<span class="ss-tipwrap"><span class="ss-modelchip"/);
+  assert.match(
+    html,
+    /role="tooltip"[^>]*><span class="ss-mono[^"]*">anthropic\/claude-opus-4-6<\/span><\/span><\/span>$/,
+  );
+  assert.match(html, /role="tooltip"[^>]*>移除</);
+  assert.doesNotMatch(html, / title=/);
   assert.match(html, />Opus 4\.6</);
   assert.match(html, /aria-label="移除 Opus 4\.6"/);
   // × 是词表里的 IconClose 缩到 9（线宽按比例反算，画出来仍是 1.4），不另画一枚
@@ -1486,10 +1532,7 @@ test("Toast 右下（notice 档）：纸窗（paper + hairline 边），40px 记
     onClose: noop,
   });
   assert.match(html, /class="ss-toast ss-toast--notice"/);
-  assert.match(
-    html,
-    /class="ss-toast__indicator" title="部分失败" role="img" aria-label="部分失败"><svg/,
-  );
+  assert.match(html, /class="ss-toast__indicator" role="img" aria-label="部分失败"><svg/);
   assert.match(html, /class="ss-toast__verb">写进</);
   assert.match(html, /role="img" aria-label="Claude Code"/);
   assert.match(html, /class="ss-toast__names">excalidraw、notion</);
@@ -1520,7 +1563,10 @@ test("Toast 名字超过两个写 +N，不逐个列", () => {
     names: ["a", "b", "c", "d", "e"],
   });
   assert.match(html, />\+5</);
-  assert.doesNotMatch(html, />a、b/);
+  assert.doesNotMatch(html, /ss-toast__names/);
+  // 藏起来的名字经提示框出（不写原生 title）
+  assert.match(html, /role="tooltip"[^>]*>a、b、c、d、e</);
+  assert.doesNotMatch(html, / title=/);
 });
 
 test("Toast 做不成：⊘ + 否定动词 + 一句原因 + 副行，停 8 秒", () => {
@@ -1533,7 +1579,7 @@ test("Toast 做不成：⊘ + 否定动词 + 一句原因 + 副行，停 8 秒",
     stats: "~/.codex/skills/defuddle",
     onClose: noop,
   });
-  assert.match(html, /title="做不成"/);
+  assert.match(html, /role="img" aria-label="做不成"/);
   assert.match(html, /role="alert"/);
   // 失败是它自己的一句：名字在前，句尾「失败」；动词段各自一个 span
   assert.match(html, /class="ss-toast__verb">加到</);
@@ -1552,7 +1598,7 @@ test("Toast 部分失败：! + 2 ✓ · 1 ⊘ 读数 + 查看，停 8 秒", () =
     reason: "无法写入 Cline",
     action: { label: "查看", onClick: noop },
   });
-  assert.match(html, /title="部分失败"/);
+  assert.match(html, /role="img" aria-label="部分失败"/);
   assert.match(html, /aria-label="2 个成功，1 个没成"/);
   // `2 ✓` 的 ✓ 也是统一对勾
   assert.match(html, /class="ss-toast__num">2<\/span><svg class="ss-tick"/);
@@ -1570,7 +1616,7 @@ test("Toast 没有展开内容：detail 一档已删（组件、样式都不留�
 test("Toast 锚点档（FloatingToast 里）：三种 kind 都是轻量一行纸窗，记号在句首（✓ / ⊘ / !），没有记号栏", () => {
   const ok = anchored({ kind: "success", sentence: "toast.line.success.link", names: ["pdf"] });
   assert.match(ok, /class="ss-toast ss-toast--routine" data-kind="success" role="status"/);
-  assert.match(ok, /class="ss-toast__mark" title="成功" aria-hidden="true"><svg class="ss-tick"/);
+  assert.match(ok, /class="ss-toast__mark" aria-hidden="true"><svg class="ss-tick"/);
   const cannot = anchored({
     kind: "cannot",
     sentence: "toast.line.cannot.link",
@@ -1581,7 +1627,7 @@ test("Toast 锚点档（FloatingToast 里）：三种 kind 都是轻量一行纸
   });
   assert.match(
     cannot,
-    /^<span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"[^>]*><div class="ss-toast ss-toast--routine" data-kind="cannot" role="alert"><span class="ss-toast__mark" title="做不成" role="img" aria-label="做不成"><svg/,
+    /^<span class="ss-floattoast__probe" hidden=""><\/span><div class="ss-floattoast"[^>]*><div class="ss-toast ss-toast--routine" data-kind="cannot" role="alert"><span class="ss-toast__mark" role="img" aria-label="做不成"><svg/,
   );
   assert.doesNotMatch(cannot, /ss-toast__indicator|ss-toast--notice/);
   // 原因照旧接在 ` · ` 后；× 在最后
@@ -1591,7 +1637,7 @@ test("Toast 锚点档（FloatingToast 里）：三种 kind 都是轻量一行纸
   );
   assert.match(
     cannot,
-    /class="ss-toast__close"><span class="ss-tipwrap is-idle"><button[^>]*aria-label="关闭"/,
+    /class="ss-toast__close"><span class="ss-tipwrap"><button[^>]*aria-label="关闭"/,
   );
   const partial = anchored({
     kind: "partial",
@@ -1600,7 +1646,7 @@ test("Toast 锚点档（FloatingToast 里）：三种 kind 都是轻量一行纸
     action: { label: "撤销", onClick: noop },
     onClose: noop,
   });
-  assert.match(partial, /class="ss-toast__mark" title="部分失败" role="img" aria-label="部分失败"/);
+  assert.match(partial, /class="ss-toast__mark" role="img" aria-label="部分失败"/);
   // 键行内：` · 撤销`，× 在键后
   assert.match(
     partial,
@@ -1666,10 +1712,7 @@ test("Toast 读数可折：右下档的 trail / reading 在正文里折行，不
 test("Toast 右下档（CornerToast / ToastStack 里）：三种 kind 都带 40 记号栏，成功的记号栏里是 ✓", () => {
   const ok = corner({ kind: "success", sentence: "toast.line.success.link", names: ["pdf"] });
   assert.match(ok, /^<div class="ss-toast ss-toast--notice" data-kind="success" role="status">/);
-  assert.match(
-    ok,
-    /class="ss-toast__indicator" title="成功" role="img" aria-label="成功"><svg class="ss-tick"/,
-  );
+  assert.match(ok, /class="ss-toast__indicator" role="img" aria-label="成功"><svg class="ss-tick"/);
   assert.doesNotMatch(ok, /ss-toast__mark/);
   const stacked = render(ToastStack, {
     className: "app__toast",
@@ -1697,7 +1740,7 @@ test("Toast 成功：不给档位也是纸窗（paper + hairline 边 + float 12 
   assert.match(html, /class="ss-btn ss-btn--compact">撤销</);
   assert.doesNotMatch(html, /ss-toast__indicator/);
   // 句首 ✓ 是勾选框里同一枚对勾
-  assert.match(html, /class="ss-toast__mark" title="成功" aria-hidden="true"><svg class="ss-tick"/);
+  assert.match(html, /class="ss-toast__mark" aria-hidden="true"><svg class="ss-tick"/);
   // 次要的离开 Sophia 的动作：浅键 + ↗
   const backup = render(Toast, {
     kind: "success",
@@ -1889,7 +1932,7 @@ test("Toast notice 与 routine 同样画次要的浅键，撤销不可用时带�
   assert.match(html, /class="ss-toast ss-toast--notice"/);
   assert.match(
     html,
-    /class="ss-btn ss-btn--compact" title="写入之后文件又被改过，无法安全撤销"[^>]*disabled="">撤销</,
+    /class="ss-btn ss-btn--compact"[^>]*disabled="">撤销<\/button><span[^>]*role="tooltip"[^>]*>写入之后文件又被改过，无法安全撤销</,
   );
   assert.match(html, /class="ss-btn ss-btn--quiet">在访达中显示备份<svg class="ss-btn__external"/);
   // 键在 × 前面
@@ -1929,7 +1972,7 @@ test("NoticePanel 应用级（原 ErrorBanner）：满内容宽、主句 15 + �
   };
   const html = render(NoticePanel, { scope: "app", ...props });
   assert.match(html, /class="ss-noticepanel ss-noticepanel--app" role="alert"/);
-  assert.match(html, /class="ss-noticepanel__mark" title="故障" role="img" aria-label="故障"/);
+  assert.match(html, /class="ss-noticepanel__mark" role="img" aria-label="故障"/);
   assert.match(html, /class="ss-noticepanel__detail">配置文件没有读权限</);
   assert.match(html, /class="ss-btn ss-btn--compact">再试一次</);
   assert.match(html, /aria-label="关闭"/);
@@ -2011,8 +2054,8 @@ test("NoticePanel：surface 灰面板，! + 一句 + 默认键紧凑（纸面）
 // 2026-10-04 产品负责人：「NoticePanel 和 HintStrip 是不是可以合并？」——一个灰面板，意思只靠两端分
 test("NoticePanel 两端：左 ! 默认有（要你处理），mark={false} 没有（一次性说明，读屏念「提示」）；× 的提示框随之默认", () => {
   const problem = render(NoticePanel, { message: "没重启 Codex", onClose: noop });
-  assert.match(problem, /class="ss-noticepanel__mark" title="要你动手" role="img"/);
-  assert.match(problem, /title="关闭" aria-label="关闭"/);
+  assert.match(problem, /class="ss-noticepanel__mark" role="img" aria-label="要你动手"/);
+  assert.match(problem, /aria-label="关闭"[^]*role="tooltip"[^>]*>关闭</);
   const hint = render(NoticePanel, {
     scope: "section",
     mark: false,
@@ -2024,7 +2067,7 @@ test("NoticePanel 两端：左 ! 默认有（要你处理），mark={false} 没�
     hint,
     /^<div class="ss-noticepanel ss-noticepanel--section" role="note" aria-label="提示">/,
   );
-  assert.match(hint, /title="知道了，不再提示" aria-label="知道了，不再提示"/);
+  assert.match(hint, /aria-label="知道了，不再提示"[^]*role="tooltip"[^>]*>知道了，不再提示</);
   // 调用方给了就用给的（有更新：这一批不再提示）
   assert.match(
     render(NoticePanel, {
@@ -2033,7 +2076,7 @@ test("NoticePanel 两端：左 ! 默认有（要你处理），mark={false} 没�
       onClose: noop,
       dismissTitle: "这一批不再提示",
     }),
-    /title="这一批不再提示"/,
+    /role="tooltip"[^>]*>这一批不再提示</,
   );
   // 没有 ×、没有键：只是一句
   assert.doesNotMatch(render(NoticePanel, { mark: false, message: "x" }), /ss-iconbtn|ss-btn/);
@@ -2179,7 +2222,7 @@ test("Confirm 路径：等宽 ink 字、不垫色块、路径可拖选；主动�
   );
   assert.match(html, /class="ss-confirm__meta">3 个文件/);
   assert.match(html, /disabled=""/);
-  assert.match(html, /title="原件在 git 仓库里，请在仓库里删掉并提交"/);
+  assert.match(html, /role="tooltip"[^>]*>原件在 git 仓库里，请在仓库里删掉并提交</);
   const plate = cssRule(uiCss, ".ss-confirm__nameplate");
   // V4 不再用墨底铭牌；也不垫底色块：等宽字已经把路径和正文分开（2026-09-25 色块审视）
   assert.doesNotMatch(plate, /background|box-shadow|border-radius/);
@@ -2250,7 +2293,7 @@ test("PushedPage：只替换机面——壳的页面头（← + 页面名 title 
   assert.match(html, /class="page-head"/);
   assert.match(
     html,
-    /class="ss-pushed__lead"><span[^>]*><button type="button" class="ss-iconbtn" title="返回" aria-label="返回"/,
+    /class="ss-pushed__lead"><span[^>]*><button type="button" class="ss-iconbtn" aria-label="返回"/,
   );
   assert.match(html, /class="page-head__title"[^>]*>CardBox 的来源</);
   assert.match(html, /class="page-head__actions"[^>]*><button type="button">\+ 来源</);
@@ -2372,14 +2415,16 @@ test("AgentIcon：Codex 是 OpenAI 绳结（单色填充，画框四周各留 1.
   assert.match(star, /stroke-width="1\.2"/);
 });
 
-test("AgentIcon labelled：旁边没有名字时自己带 title 与读屏名", () => {
+test("AgentIcon labelled：旁边没有名字时自己带读屏名，悬停出名字的提示框（不写原生 title、svg 里不放 <title>）", () => {
   const html = render(AgentIcon, { id: "codex", name: "Codex", labelled: true });
   assert.match(html, /role="img" aria-label="Codex"/);
-  assert.match(html, /<title>Codex<\/title>/);
-  assert.match(
-    render(AgentIcon, { id: "cline", name: "Cline", labelled: true }),
-    /title="Cline" role="img" aria-label="Cline"/,
-  );
+  assert.match(html, /role="tooltip"[^>]*>Codex</);
+  assert.doesNotMatch(html, /<title>| title=/);
+  const box = render(AgentIcon, { id: "cline", name: "Cline", labelled: true });
+  assert.match(box, /class="ss-mark__box" role="img" aria-label="Cline"/);
+  assert.match(box, /role="tooltip"[^>]*>Cline</);
+  // 旁边有名字时不出提示框
+  assert.doesNotMatch(render(AgentIcon, { id: "codex", name: "Codex" }), /role="tooltip"/);
 });
 
 test("AgentIcon：没图标的降级成首字母方块（14 方、mark 4 圆角、ctl-border 边、Condensed 11/600，字母经 Cap）", () => {

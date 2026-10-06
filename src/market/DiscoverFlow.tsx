@@ -32,7 +32,7 @@ export interface InstallContext {
   places: InstallPlaces;
   /// 已安装的 agent（agent 表的先后；装了 Claude Desktop 时带上它，MCP 用）
   agents: ReadonlyArray<AgentRef>;
-  /// 设置里 `列表里的 agent`
+  /// 设置里 `显示的 agent`
   shown: ReadonlyArray<string>;
 }
 

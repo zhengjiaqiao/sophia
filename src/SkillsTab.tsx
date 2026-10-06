@@ -166,7 +166,7 @@ export interface SkillsTabProps {
   filterBar?: (source: ReactNode) => ReactNode;
   /// `发现` 一面的安装页要的（当前位置、位置胶囊、agent 名单）；不给时发现列表的 `安装` 不接
   install?: InstallContext;
-  /// 装的 agent 多于列表上限（issue #109）：筛选行下一块能关的灰面板，`去设置` 到「列表里的 agent」。
+  /// 装的 agent 多于列表上限（issue #109）：筛选行下一块能关的灰面板，`去设置` 到设置的 `Skills 和 MCP` 一节（第一块是 `显示的 agent`）。
   /// 该不该出、关掉记在哪由壳管（src/agentsOverCap.ts）
   agentsOverCap?: {
     cap: AgentsOverCap | null;
@@ -419,7 +419,7 @@ export default function SkillsTab({
   const sourcePage: DomainPage | null = pages.find((p) => p.key === sourceKey) ?? null;
 
   // ---- 有更新（spec 2026-09-27-skill-mcp-market R14 R15）：`我的` 在眼前时查一次（距上次 6 小时与开关归 core），
-  // 与设置里 `skill 更新` 一节看同一份结果。更新、撤销成了，文件变了：重扫 ----
+  // 与设置里 `自动检查 skill 更新` 那一行看同一份结果。更新、撤销成了，文件变了：重扫 ----
   const updates = useSkillUpdates({
     active: face === "mine",
     onFilesChanged: () => void onRefresh(),

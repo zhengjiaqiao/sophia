@@ -13,6 +13,8 @@ import type { KeyboardEvent, ReactNode } from "react";
 import Markdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { IconLeave } from "../ui/icons.tsx";
+import { Mono } from "../ui/Mono.tsx";
+import { Tooltip } from "../ui/Tooltip.tsx";
 import { remarkPlainHtml, safeHref } from "./markdownText.ts";
 import "./markdown.css";
 
@@ -52,17 +54,13 @@ function components(base: string | null, onOpenLink: (url: string) => void): Com
         }
       };
       return (
-        <span
-          className="md-link"
-          role="link"
-          tabIndex={0}
-          title={url}
-          onClick={open}
-          onKeyDown={onKey}
-        >
-          {children}
-          <IconLeave className="md-link__leave" />
-        </span>
+        // 去哪儿经提示框说（不写原生 title：悬停弹系统灰框）；包层是行内的，链接文字照常折行
+        <Tooltip content={<Mono inherit>{url}</Mono>} fit="inline">
+          <span className="md-link" role="link" tabIndex={0} onClick={open} onKeyDown={onKey}>
+            {children}
+            <IconLeave className="md-link__leave" />
+          </span>
+        </Tooltip>
       );
     },
     pre: ({ children }) => <pre className="md-pre">{children}</pre>,

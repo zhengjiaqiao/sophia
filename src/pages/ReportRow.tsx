@@ -10,7 +10,7 @@ export const PRIVACY_URL = "https://github.com/zhengjiaqiao/sophia/blob/main/PRI
 export const ISSUES_URL = "https://github.com/zhengjiaqiao/sophia/issues/new/choose";
 
 /// 设置「关于」里 `版本` 之后的 `使用统计和错误报告`（spec 2026-10-04-reporting-feedback R5、R6，画板「关于 · 使用统计」B）：
-/// 设置行，左栏名字与一句灰字，灰字后接浅键 `隐私说明 ↗`、`在 GitHub 提 ↗`；右端一列 `反馈问题`（默认键紧凑，R13）+ 开关，
+/// 设置行，左栏名字与一句灰字，灰字后接句后浅键 `隐私说明 ↗`、`在 GitHub 提 ↗`（不垫底，「 · 」隔开）；右端一列 `反馈问题`（默认键紧凑，R13）+ 开关，
 /// 开关默认开、随时可关（关掉删安装 ID）。不弹首次告知、不加说明段落。
 /// 开关只在这份构建、这次运行能上报时画（内部版、没有接收服务地址、DO_NOT_TRACK 都不画）；`反馈问题` 只要有接收服务
 /// 就有（DO_NOT_TRACK 不管它）。两样都没有、或还没读回来时整行不画。
@@ -38,12 +38,14 @@ export function ReportRow({
       label={t("settings.about.report")}
       note={
         <>
-          {t("settings.about.reportNote")}&nbsp;&nbsp;
-          <Button variant="quiet" onClick={onPrivacy}>
+          {t("settings.about.reportNote")}
+          {/* 句后的浅键：不垫底，与句子、彼此之间一个「 · 」（2026-10-06）；`·` 跟着键走、不留在行尾 */}
+          {" ·\u00a0"}
+          <Button variant="quiet" inline onClick={onPrivacy}>
             {t("settings.about.privacy")}
           </Button>
-          &nbsp;&nbsp;
-          <Button variant="quiet" onClick={onGithub}>
+          {" ·\u00a0"}
+          <Button variant="quiet" inline onClick={onGithub}>
             {t("settings.about.github")}
           </Button>
         </>

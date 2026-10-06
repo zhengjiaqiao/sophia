@@ -631,7 +631,6 @@ function SelDot({
           hoverable={!disabled}
           muted={disabled}
           onSurface
-          title=""
           label={check.checked ? t("skills.dot.checked") : t("skills.dot.missing")}
         />
       )}
@@ -900,7 +899,9 @@ export default function Matrix(props: MatrixProps) {
 
   // ---- 吸顶区的高度 ----
   // bar 插槽折行、出现 / 消失都会改高度：只在 resize 时量，列头就停在旧高度上，
-  // 行从 bar 插槽和列头之间的缝里漏出来（产品负责人真机）
+  // 行从 bar 插槽和列头之间的缝里漏出来（产品负责人真机）。
+  // 要量 border-box：灰面板开 / 关时只改 bar 的下内边距（Matrix.css 的 `:has([data-hint="open"])`，18 ↔ 16，
+  // 带过渡），默认的 content-box 不变、回调不来，列头停在旧高度上露出缝（0.1.1 产品负责人真机）
   useLayoutEffect(() => {
     const bar = barRef.current;
     if (!bar) return;
@@ -911,7 +912,7 @@ export default function Matrix(props: MatrixProps) {
       return () => window.removeEventListener("resize", measure);
     }
     const observer = new ResizeObserver(measure);
-    observer.observe(bar);
+    observer.observe(bar, { box: "border-box" });
     return () => observer.disconnect();
   }, [width, columns.length]);
 
@@ -1498,7 +1499,7 @@ export default function Matrix(props: MatrixProps) {
                     }}
                     onBlur={dropTip}
                   >
-                    <StateDot dot="none" title="" label={t("skills.matrix.noSlot")} />
+                    <StateDot dot="none" label={t("skills.matrix.noSlot")} />
                   </span>
                 ) : (
                   // 点格之后真要等的（拆开）：过了门槛，格子下方浮起刻度 + 一句（靠右沿的列右对齐，不越过表格右沿）
@@ -1573,7 +1574,6 @@ export default function Matrix(props: MatrixProps) {
                             dot={view.dot}
                             hoverable={view.clickable && !view.pending}
                             muted={view.pending}
-                            title=""
                             label={dotText[view.dot]}
                           />
                         )}

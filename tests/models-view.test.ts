@@ -117,12 +117,12 @@ test("parseBackendError 剥离 [code] 前缀，读不出前缀时整段当作 in
 test("parseBackendError：`\\n[detail] ` 之后是技术原文，拆进 detail（可以多行）；没有就不带 detail", () => {
   assert.deepEqual(
     parseBackendError(
-      "[network] 服务商限流了，约 30 秒后再试\n[detail] GET https://x/models → 429 Too Many Requests\n{\"error\":1}",
+      '[network] 服务商限流了，约 30 秒后再试\n[detail] GET https://x/models → 429 Too Many Requests\n{"error":1}',
     ),
     {
       code: "network",
       message: "服务商限流了，约 30 秒后再试",
-      detail: "GET https://x/models → 429 Too Many Requests\n{\"error\":1}",
+      detail: 'GET https://x/models → 429 Too Many Requests\n{"error":1}',
     },
   );
   assert.equal("detail" in parseBackendError("[auth] 鉴权失败"), false);
@@ -398,10 +398,7 @@ test("MODELS_TOOLS：版面按工具分块；今天只有 Codex，但名字一�
   assert.equal(codex.id, "codex");
   assert.equal(codex.name, "Codex");
   // 限制说明全文（网关行展开区第一行，不截断）
-  assert.equal(
-    codex.limitations,
-    "网页搜索用不了 · 图片要看模型",
-  );
+  assert.equal(codex.limitations, "网页搜索用不了 · 图片要看模型");
 });
 
 // ===== 重启生效、选择器导航、路由自愈（纯逻辑） =====
@@ -434,7 +431,10 @@ test("重启、启动写桌面应用本身的名字（2026-09-30 起 Codex 桌�
   assert.equal(codexAppName(state()), "Codex");
   assert.equal(codexAppName(null), "Codex");
   assert.equal(restartTip("ChatGPT"), "重启 ChatGPT 桌面应用让改动生效，进行中的对话会中断");
-  assert.equal(restartConsequence("ChatGPT"), "ChatGPT 会退出再打开，它和终端里 Codex 进行中的对话都会中断");
+  assert.equal(
+    restartConsequence("ChatGPT"),
+    "ChatGPT 会退出再打开，它和终端里 Codex 进行中的对话都会中断",
+  );
   assert.equal(restartStillStale("ChatGPT"), "ChatGPT 15 秒内没换上新配置，稍后再试一次");
   assert.equal(launchTip("ChatGPT"), "打开 ChatGPT 桌面应用，它会用上现在的模型设置");
 });
@@ -633,11 +633,11 @@ test("CodexSwitch 没有网关 / 没选模型：开关禁用，按下即出「�
   const html = render(CodexSwitch, switchProps({ providers: [] }));
   assert.match(
     html,
-    /role="switch" aria-checked="false"[^>]*title="先加一家网关、选好模型再打开" disabled=""/,
+    /role="switch" aria-checked="false"[^>]*disabled=""[^]*?role="tooltip"[^>]*>先加一家网关、选好模型再打开</,
   );
   assert.match(
     render(CodexSwitch, switchProps()),
-    /title="先加一家网关、选好模型再打开" disabled=""/,
+    /disabled=""[^]*?role="tooltip"[^>]*>先加一家网关、选好模型再打开</,
   );
 });
 
@@ -754,7 +754,10 @@ test("InUseRow：开着写「在用」、关着写「已选」；片可 ×；一
   const sel = withSelected();
   const on = render(InUseRow, { state: state({ ...sel, enabled: true }), onRemove: noop });
   assert.match(on, /ss-chiprow__label">在用</);
-  assert.match(on, /class="ss-modelchip" title="gpt-x"[^]*ss-modelchip__remove/);
+  assert.match(
+    on,
+    /class="ss-modelchip"[^]*ss-modelchip__remove[^]*role="tooltip"[^>]*><span class="ss-mono[^"]*">gpt-x</,
+  );
   const off = render(InUseRow, { state: state(sel), onRemove: noop });
   assert.match(off, /ss-chiprow__label">已选</);
   assert.equal(render(InUseRow, { state: state(), onRemove: noop }), "");
@@ -953,7 +956,10 @@ test("resolveManual（#117）：手动填的 id 先按完整 id 对、再按去�
   assert.equal(one("glm-5.3"), "weibo/glm-5.3");
   assert.equal(one("WEIBO/GLM-5.3"), "weibo/glm-5.3");
   assert.equal(one("thudm/glm-5"), "thudm/glm-5");
-  assert.deepEqual(resolveManual(entries, "glm-5"), { kind: "many", ids: ["thudm/glm-5", "weibo/glm-5"] });
+  assert.deepEqual(resolveManual(entries, "glm-5"), {
+    kind: "many",
+    ids: ["thudm/glm-5", "weibo/glm-5"],
+  });
   assert.equal(one("glm-9"), "none");
   assert.equal(one("  "), "none");
 });
@@ -964,7 +970,11 @@ test("prefixExample：没带前缀、这家过半带前缀时挑去前缀后最�
   const list = [e("azure/gpt-4.1"), e("weibo/glm-5"), e("thudm/glm-4.7"), e("weibo/kimi-k2.5")];
   assert.equal(prefixExample(list, "glm-5.3"), "weibo/glm-5");
   assert.equal(prefixExample(list, "weibo/glm-5.3"), null, "带了前缀就不是格式问题");
-  assert.equal(prefixExample([e("glm-5"), e("kimi-k2"), e("a/b")], "glm-5.3"), null, "这家多半不带前缀");
+  assert.equal(
+    prefixExample([e("glm-5"), e("kimi-k2"), e("a/b")], "glm-5.3"),
+    null,
+    "这家多半不带前缀",
+  );
   assert.equal(prefixExample([], "glm-5.3"), null);
 });
 
@@ -972,14 +982,23 @@ test("ModelList 手动添加（#117）：给了 onAddManual 框底出一行输�
   const p = provider({ id: "g", name: "g" });
   const html = render(ModelList, {
     entries: [
-      { provider: p, model: model({ id: "a/x", displayName: "a/x", selected: true, manual: true }) },
+      {
+        provider: p,
+        model: model({ id: "a/x", displayName: "a/x", selected: true, manual: true }),
+      },
       { provider: p, model: model({ id: "a/y", displayName: "a/y" }) },
     ],
     onToggle: noop,
     onAddManual: async () => {},
   });
-  assert.match(html, /model-list__manual-row"><label class="ss-textfield[^>]*>[^]*?placeholder="手动添加模型：填模型 id"/);
-  assert.match(html, /title="先填模型 id" disabled=""[^>]*>试一下再加</);
+  assert.match(
+    html,
+    /model-list__manual-row"><label class="ss-textfield[^>]*>[^]*?placeholder="手动添加模型：填模型 id"/,
+  );
+  assert.match(
+    html,
+    /disabled=""[^>]*>试一下再加<\/button><span[^>]*role="tooltip"[^>]*>先填模型 id</,
+  );
   assert.match(html, /model-list__trail"><span class="ss-tag ss-tag--weak">手动<\/span>/);
   assert.equal((html.match(/>手动</g) ?? []).length, 1);
   // 不给 onAddManual 就没有这一行
@@ -989,7 +1008,10 @@ test("ModelList 手动添加（#117）：给了 onAddManual 框底出一行输�
     providers: [
       provider({
         id: "g",
-        models: [model({ id: "a/x", selected: true, manual: true }), model({ id: "a/y", selected: true })],
+        models: [
+          model({ id: "a/x", selected: true, manual: true }),
+          model({ id: "a/y", selected: true }),
+        ],
       }),
     ],
   });

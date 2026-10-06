@@ -61,11 +61,16 @@ test("链接：javascript: 与页内锚点只留文字；http(s) 成链接带 �
   assert.doesNotMatch(out, /javascript:/);
   assert.doesNotMatch(out, /data:text/);
   assert.doesNotMatch(out, /<a\b/);
-  assert.match(out, /role="link"[^>]*title="https:\/\/skills\.sh\/x"/);
+  // 去哪儿经提示框说（行内包层，链接照常折行），不写原生 title
   assert.match(
     out,
-    /title="https:\/\/github\.com\/anthropics\/skills\/blob\/main\/skills\/pdf\/reference\.md"/,
+    /class="ss-tipwrap ss-tipwrap--inline"><span class="md-link" role="link"[^]*?role="tooltip"[^>]*><span class="ss-mono[^"]*">https:\/\/skills\.sh\/x</,
   );
+  assert.match(
+    out,
+    /role="tooltip"[^>]*><span class="ss-mono[^"]*">https:\/\/github\.com\/anthropics\/skills\/blob\/main\/skills\/pdf\/reference\.md</,
+  );
+  assert.doesNotMatch(out, / title=/);
   assert.equal((out.match(/role="link"/g) ?? []).length, 2);
   assert.match(out, /<span>坏<\/span>/);
   assert.match(out, /<span>锚<\/span>/);

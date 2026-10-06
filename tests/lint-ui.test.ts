@@ -97,6 +97,32 @@ test("svg-outside-ui：页面里不画 <svg；组件库与标志资产可以", (
   assert.deepEqual(hits("svg-outside-ui", "// 不再手写 <svg>", "src/Matrix.tsx"), []);
 });
 
+// ===== no-native-title =====
+
+test("no-native-title：小写标签上的 title=（含跨行、表达式里带 >）与 svg 的 <title> 报；组件的 title 参数、注释、别的属性不算", () => {
+  const nt = (src: string) => hits("no-native-title", src, "src/ui/X.tsx");
+  assert.deepEqual(nt('<span className="a" title={id}>x</span>'), ["<span title=>（第 1 行）"]);
+  // 属性跨行写、前面的表达式里有 `>`
+  assert.deepEqual(
+    nt('<button\n  type="button"\n  disabled={a > b}\n  title={t("k")}\n>x</button>'),
+    ["<button title=>（第 1 行）"],
+  );
+  assert.deepEqual(nt("<svg><title>{name}</title></svg>"), ["<title>（第 1 行）"]);
+  // 组件的 title 参数交给内部提示框，不算
+  assert.deepEqual(nt('<IconButton title="编辑" icon={x} />'), []);
+  assert.deepEqual(nt("<row.Row title={row.title} />"), []);
+  // 字符串里、花括号里、别的属性名里的 title 都不算
+  assert.deepEqual(
+    nt('<span aria-label="title=x" data-title="a" style={{ title: 1 }}>x</span>'),
+    [],
+  );
+  assert.deepEqual(nt("// <span title={x}>"), []);
+  // 泛型与比较号不当成标签
+  assert.deepEqual(nt("const s = useState<string>(title);"), []);
+  // 只管 .tsx
+  assert.deepEqual(hits("no-native-title", '<span title="x" />', "src/ui/ui.css"), []);
+});
+
 // ===== spacing-token =====
 
 test("spacing-token：外距 / 内距 / 间隙的档位写成字面量报错；token、负值补偿、非档位值、别的属性不算", () => {

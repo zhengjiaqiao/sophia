@@ -106,7 +106,7 @@ export default function App() {
   /// 应用菜单「关于 Sophia」「检查更新…」：设置页停在「关于」一节，`check` 时同时开始检查。
   /// `at` 让同一个请求再发一次也算新的
   const [aboutRequest, setAboutRequest] = useState<{ at: number; check: boolean } | null>(null);
-  /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`：设置页停在「列表里的 agent」一节。离开设置就清掉，
+  /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`：设置页停在 `Skills 和 MCP` 一节（第一块是 `显示的 agent`）。离开设置就清掉，
   /// 下回从侧栏进设置不再跳
   const [agentsRequest, setAgentsRequest] = useState<{ at: number } | null>(null);
   /// Sophia 自己的新版本：侧栏的更新键与设置「关于」读同一份（src/useAppUpdate.ts）
@@ -403,7 +403,7 @@ export default function App() {
     saveProjectSort(sort);
   };
 
-  /// 安装类推入页的 `给谁用` / `写进哪些 agent`：已安装的 agent 与设置里 `列表里的 agent`。
+  /// 安装类推入页的 `给谁用` / `写进哪些 agent`：已安装的 agent 与设置里 `显示的 agent`。
   /// 每轮扫描后重读（设置里改了名单、新装了 agent）；读不到就当一个都没有，不报错
   const [harnesses, setHarnesses] = useState<HarnessList | null>(null);
   useEffect(() => {

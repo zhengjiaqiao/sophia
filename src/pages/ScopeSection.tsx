@@ -7,11 +7,11 @@ import {
   FloatingToast,
   IconPlus,
   Mono,
-  SectionLabel,
   Toast,
   Tooltip,
 } from "../ui/index.ts";
 import { scopeGroups } from "./scopeSettings.ts";
+import { SettingRow } from "./SettingRow.tsx";
 
 export interface ScopeSectionProps {
   /// 全部项目格（core 给的先后）；null＝还没读回来
@@ -32,11 +32,12 @@ export interface ScopeSectionProps {
   onDismissAddNotice: () => void;
 }
 
-/// 设置「生效范围」（spec 2026-10-05-skill-mcp-batch2「项目来源」，画板第七稿；DESIGN「设置 › 生效范围」）：
+/// 设置 `Skills 和 MCP` 一节的 `生效范围` 一块（spec 2026-10-05-skill-mcp-batch2「项目来源」；DESIGN「设置 › 生效范围」）：
 /// SKILLS、MCP 页筛选行上那一排在这里管，**勾上的才出现在筛选行与「切换项目…」浮层里**。
-/// 画法照「列表里的 agent」（三列 `CheckRow` grid），差三处：第一格用户级勾着且禁用；节头右端紧凑键 `+ 项目`；
+/// 一块＝一条设置行（名字 `生效范围` + 灰字说用户级与项目从哪来，右端 `+ 项目`）连同下面的名单（2026-10-06 并节）。
+/// 名单画法照 `显示的 agent`（三列 `CheckRow` grid），差两处：第一格用户级勾着且禁用；
 /// 项目格没有图标，停上去提示框给路径。只有勾不勾一个动作——没有「移除」、不分手动还是自动；
-/// 没勾的折进下面「不显示的 N 个」（照「未安装的 N 个」），拉开能勾回来
+/// 没勾的折进下面「不显示的 N 个 ›」（照「未安装的 N 个 ›」，拉手在字后），拉开能勾回来
 export function ScopeSection({
   projects,
   kept,
@@ -84,31 +85,25 @@ export function ScopeSection({
   );
   const toggleOpen = () => onOpen(!open);
   return (
-    <>
-      <div className="settings-page__section settings-page__section--later">
-        <SectionLabel
-          action={
-            // 键与它下方浮起的原因（选的文件夹当不了项目）的锚
-            <span className="settings-page__check">
-              <Button
-                size="compact"
-                icon={<IconPlus size={12} />}
-                ariaLabel={t("settings.scope.addLabel")}
-                onClick={onAdd}
-              >
-                {t("settings.scope.addNoun")}
-              </Button>
-              {addNotice ? (
-                <FloatingToast key={addNotice.at} align="end">
-                  <Toast kind="cannot" message={addNotice.message} onDismiss={onDismissAddNotice} />
-                </FloatingToast>
-              ) : null}
-            </span>
-          }
-        >
-          {`${t("settings.scope.heading")} · ${t("settings.scope.headingNote")}`}
-        </SectionLabel>
-      </div>
+    <div className="settings-page__block">
+      <SettingRow label={t("settings.scope.label")} note={t("settings.scope.note")}>
+        {/* 键与它下方浮起的原因（选的文件夹当不了项目）的锚 */}
+        <span className="settings-page__check">
+          <Button
+            size="compact"
+            icon={<IconPlus size={12} />}
+            ariaLabel={t("settings.scope.addLabel")}
+            onClick={onAdd}
+          >
+            {t("settings.scope.addNoun")}
+          </Button>
+          {addNotice ? (
+            <FloatingToast key={addNotice.at} align="end">
+              <Toast kind="cannot" message={addNotice.message} onDismiss={onDismissAddNotice} />
+            </FloatingToast>
+          ) : null}
+        </span>
+      </SettingRow>
       <div className="settings-page__grid">
         {/* 用户级一直在：勾着、禁用，按下即说原因 */}
         <div className="settings-page__cell">
@@ -125,7 +120,11 @@ export function ScopeSection({
       </div>
       {folded.length > 0 ? (
         <>
+          {/* 句末补充式的「还有 N 个」：字在前、拉手在后（2026-10-06），整句可点 */}
           <div className="settings-page__more">
+            <span className="settings-page__more-label" onClick={toggleOpen}>
+              {tn("settings.scope.hiddenCount", folded.length)}
+            </span>
             <DrawerHandle
               always
               open={open}
@@ -133,9 +132,6 @@ export function ScopeSection({
               label={tn("settings.scope.hiddenCount", folded.length)}
               controls="settings-scope-hidden"
             />
-            <span className="settings-page__more-label" onClick={toggleOpen}>
-              {tn("settings.scope.hiddenCount", folded.length)}
-            </span>
           </div>
           {open ? (
             <div id="settings-scope-hidden" className="settings-page__grid">
@@ -144,7 +140,6 @@ export function ScopeSection({
           ) : null}
         </>
       ) : null}
-      <p className="settings-page__mcp-note">{t("settings.scope.note")}</p>
-    </>
+    </div>
   );
 }

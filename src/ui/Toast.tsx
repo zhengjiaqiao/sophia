@@ -8,6 +8,7 @@ import { ToastPlacementContext, ToastRelayoutContext } from "./FloatingToast.tsx
 import { IconAttention, IconCannot, IconClose, IconTick } from "./icons.tsx";
 import { motionMs } from "./motion.ts";
 import { sentencePieces } from "./sentence.tsx";
+import { Tooltip } from "./Tooltip.tsx";
 
 /// 提示小窗（DESIGN「反馈的两种形态」，DESIGN-components「提示条 Toast」，画板 Feedback「提示条」）。
 ///
@@ -135,9 +136,12 @@ function Names({ names }: { names: string[] }) {
   const joined = listText(names);
   if (names.length <= 2) return <span className="ss-toast__names">{joined}</span>;
   return (
-    <span className="ss-toast__more" title={joined} aria-label={joined}>
-      +{names.length}
-    </span>
+    // 藏起来的名字经提示框出（不写原生 title：悬停弹系统灰框）
+    <Tooltip content={joined} focusable>
+      <span className="ss-toast__more" aria-label={joined}>
+        +{names.length}
+      </span>
+    </Tooltip>
   );
 }
 
@@ -552,11 +556,11 @@ function ResultToast(props: ToastProps) {
     // 句首记号：成功的 ✓ 只是装饰（整句已说成了）；失败的 ⊘ / ! 给读屏一个名字
     const mark =
       kind === "success" ? (
-        <span className="ss-toast__mark" title={t(titleKey)} aria-hidden="true">
+        <span className="ss-toast__mark" aria-hidden="true">
           {glyph}
         </span>
       ) : (
-        <span className="ss-toast__mark" title={t(titleKey)} role="img" aria-label={t(titleKey)}>
+        <span className="ss-toast__mark" role="img" aria-label={t(titleKey)}>
           {glyph}
         </span>
       );
@@ -603,7 +607,7 @@ function ResultToast(props: ToastProps) {
       role={role}
       {...holdHandlers}
     >
-      <div className="ss-toast__indicator" title={t(titleKey)} role="img" aria-label={t(titleKey)}>
+      <div className="ss-toast__indicator" role="img" aria-label={t(titleKey)}>
         {glyph}
       </div>
       <NoticeLines

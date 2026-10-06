@@ -1,6 +1,6 @@
-/// 「有更新」（spec 2026-09-27-skill-mcp-market R14 R15；DESIGN「发现与安装 › 有更新」「设置 › skill 更新」）的纯逻辑：
+/// 「有更新」（spec 2026-09-27-skill-mcp-market R14 R15；DESIGN「发现与安装 › 有更新」「设置 › `Skills 和 MCP`」）的纯逻辑：
 /// 提示条那一句、哪些行挂 `有更新`、抽屉末行与 `看改动 ↗` 的地址、更新前要不要确认与确认框写什么、
-/// 更新之后的纸窗、设置里 `上次检查 …` 那一行。不碰 api、不产 JSX，tests/market-update.test.ts 直接测。
+/// 更新之后的纸窗、设置里 `自动检查 skill 更新` 那一行的灰字。不碰 api、不产 JSX，tests/market-update.test.ts 直接测。
 /// 时刻一律是 unix 秒（与 core 一致）。
 
 import { listText, t, tn, tSpaced, type MessageKey } from "../i18n.ts";
@@ -233,16 +233,21 @@ export function clockText(at: number, now: Date = new Date()): string {
   return t("market.clock.date", { date: shortDate(d.getTime(), now), time });
 }
 
-/// 设置 `skill 更新` 一节第二行（设置行 `上次检查`）的灰字：`今天 14:32 · 2 个有更新`。
-/// `count` 为 null＝这一程还没拿到结果（只写时刻）；从没查过写 `还没有检查过`
-export function lastCheckDetail(
+/// 设置 `Skills 和 MCP` 一节 `自动检查 skill 更新` 那一行的灰字（2026-10-06 并成一行）：
+/// `打开 Skills 页时检查，每 6 小时最多一次 · 上次：今天 12:21`。这一程查过且没有更新时接 `，没有更新`；
+/// 有更新不写数量（数量写在右端的 `看 N 个更新` 上）；`count` 为 null＝这一程还没拿到结果（只写时刻）；
+/// 从没查过写 `还没有检查过`
+export function autoCheckNote(
   checkedAt: number | null,
   count: number | null,
   now: Date = new Date(),
 ): string {
-  if (checkedAt === null) return t("market.update.neverChecked");
+  const when = t("settings.skillUpdates.autoNote");
+  if (checkedAt === null) return `${when} · ${t("market.update.neverChecked")}`;
   const time = clockText(checkedAt, now);
-  if (count === null) return time;
-  const tail = count > 0 ? tn("market.update.hasCount", count) : t("market.update.none");
-  return `${time} · ${tail}`;
+  const last =
+    count === 0
+      ? t("settings.skillUpdates.lastNone", { time })
+      : t("settings.skillUpdates.last", { time });
+  return `${when} · ${last}`;
 }

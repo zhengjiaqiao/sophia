@@ -169,6 +169,19 @@ textarea,
   background: var(--paper);
 }
 
+/* 跟在一句话后面的浅键（Button inline，2026-10-06）：静止不垫底、不带左右留白——看上去就是字 + ↗，
+   句子里的灰块会把一句话切碎。手靠近照旧浮起（上面 quiet 的 :hover 特异性更高，底转 paper + raise），按下照旧。
+   命中区：上下 2、左右 4 的内边距配同样大的负外距，悬停时浮起的键面约 24 高、左右各出 4，
+   字的位置与所在那一行的行高不变。行高跟着句子走（13 号 1.5） */
+.ss-btn--inline {
+  height: auto;
+  padding: 2px var(--space-xxs);
+  margin: -2px calc(-1 * var(--space-xxs));
+  background: transparent;
+  line-height: var(--leading-caption);
+  vertical-align: baseline;
+}
+
 .ss-btn__external {
   flex-shrink: 0;
 }
@@ -912,6 +925,11 @@ textarea,
 .ss-tipwrap--grow {
   flex: 1 1 auto;
   align-self: stretch;
+}
+
+/* 正文里的触发文字（说明页的链接）：包层是行内的，链接文字照常随段落折行 */
+.ss-tipwrap--inline {
+  display: inline;
 }
 
 /* 此刻没有提示框（禁用原因撤了）：包层不占盒，控件原地不动。important：页面里

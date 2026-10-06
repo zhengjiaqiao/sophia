@@ -20,6 +20,7 @@ import {
   Note,
   NoticePanel,
   Tag,
+  TruncTip,
   useBusyShown,
 } from "../ui";
 import {
@@ -386,9 +387,10 @@ function McpRows({
               <span className="dsc-row__name">{row.name}</span>
               <span className="dsc-row__publisher">{row.publisher}</span>
             </span>
-            <span className="dsc-row__desc" title={row.description}>
-              {row.description}
-            </span>
+            {/* 放不下截断时悬停出全文（不写原生 title：悬停弹系统灰框） */}
+            <TruncTip content={row.description} fit="grow">
+              <span className="dsc-row__desc">{row.description}</span>
+            </TruncTip>
             <span className="dsc-row__needs">{needs ? <Tag tone="weak">{needs}</Tag> : null}</span>
             <RowAction
               installed={isInstalled(row)}

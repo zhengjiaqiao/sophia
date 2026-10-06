@@ -4,8 +4,8 @@
 # `node packaging/render-cask.mjs v<版本>` 从 GitHub Release 的真实产物算出来后写回。
 # 手改 version 而不改 sha256，`brew install` 会在校验那一步失败。
 #
-# 用户不从这个仓库装，而是从 tap 仓库 zhengjiaqiao/homebrew-tap 装。
-# 每次发版把渲染后的这个文件复制到 tap 仓库的 Casks/sophia.rb 再 push。
+# 注意：tap 仓库 zhengjiaqiao/homebrew-tap 还没建（待建，发布后视需要再建），现在还不能 brew install。
+# 建好之后，用户不从这个仓库装，而是从 tap 仓库装；每次发版把渲染后的这个文件复制到 tap 仓库的 Casks/sophia.rb 再 push。
 # 步骤见 packaging/README.md。
 cask "sophia" do
   arch arm: "aarch64", intel: "x64"

@@ -43,7 +43,6 @@
   "common.feedback.shot": "Screenshot {n}",
   "common.feedback.shotPreparing": "Screenshot {n}, preparing",
   "common.feedback.shotUploading": "Screenshot {n}, uploading {percent}%",
-  "common.feedback.uploading": "Uploading {percent}%",
   "common.feedback.shotFailed": "Screenshot {n} didn't upload, will retry when sending",
   "common.feedback.removeShot": "Remove screenshot {n}",
   "common.details.toggle": "Details",

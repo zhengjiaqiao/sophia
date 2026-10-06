@@ -129,7 +129,7 @@ test("安装 MCP（画板 09）：连接方式、写进哪些 agent（Desktop �
   assert.match(t, /只写进勾选的 agent 的配置文件，Sophia 自己不存/);
   assert.match(t, /写进 \d 个配置文件/);
   // 必填的空着：安装不可点、带原因
-  assert.match(html, /disabled=""[^>]*>安装|title="先填 BRAVE_API_KEY"/);
+  assert.match(html, /disabled=""[^>]*>安装|role="tooltip"[^>]*>先填 BRAVE_API_KEY</);
 });
 
 test("从链接安装（画板 07）：认不出的链接当即说明，不发请求；安装不可点", () => {
@@ -144,7 +144,7 @@ test("从链接安装（画板 07）：认不出的链接当即说明，不发�
   assert.match(t, /从链接安装/);
   assert.match(t, /只认 GitHub 上的仓库或文件夹链接/);
   assert.match(html, /value="https:\/\/example.com"/);
-  assert.match(html, /title="先贴一个 GitHub 上的仓库或文件夹链接"/);
+  assert.match(html, /role="tooltip"[^>]*>先贴一个 GitHub 上的仓库或文件夹链接</);
   assert.equal(asked, 0);
 });
 

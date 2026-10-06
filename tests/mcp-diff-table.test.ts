@@ -124,7 +124,7 @@ test("面板画成行优先的表：列头「原件」在最前，行首位置�
   assert.match(html, /…7f3a/);
   assert.equal(html.match(/>保留这份</g)?.length, 3);
   // 挡住的那一份：键禁用，原因说是哪一处、为什么
-  assert.match(html, /title="sophia · Cursor 改不成这份：Cursor 不支持 SSE 传输"/);
+  assert.match(html, /role="tooltip"[^>]*>sophia · Cursor 改不成这份：Cursor 不支持 SSE 传输</);
   // 列：位置名 + 原件 + 两个字段 + 键（吃掉剩下的宽度，右对齐）
   assert.match(
     html,

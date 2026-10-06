@@ -43,7 +43,6 @@
   "common.feedback.shot": "截圖 {n}",
   "common.feedback.shotPreparing": "截圖 {n}，正在準備",
   "common.feedback.shotUploading": "截圖 {n}，正在上傳 {percent}%",
-  "common.feedback.uploading": "正在上傳 {percent}%",
   "common.feedback.shotFailed": "截圖 {n}，沒有傳上去，傳送時再試",
   "common.feedback.removeShot": "移除截圖 {n}",
   "common.details.toggle": "詳情",

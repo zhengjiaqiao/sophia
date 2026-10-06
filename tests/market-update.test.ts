@@ -224,20 +224,25 @@ test("按下之后查的结果是降级来的：限流说固定句，连接不�
   );
 });
 
-test("设置行 `上次检查` 的灰字：`今天 14:32 · 2 个有更新`；昨天、跨日、跨年；没拿到结果只写时刻；从没查过", () => {
+test("设置行 `自动检查 skill 更新` 的灰字：何时查 · 上次的时刻；没有更新接「，没有更新」，有更新不写数量；没拿到结果只写时刻；从没查过", () => {
   const now = new Date(2026, 8, 27, 18, 0);
   const at = (d: Date) => Math.floor(d.getTime() / 1000);
+  const when = "打开 Skills 页时检查，每 6 小时最多一次";
+  // 有更新：数量写在右端的 `看 2 个更新` 上，灰字不写
   assert.equal(
-    view.lastCheckDetail(at(new Date(2026, 8, 27, 14, 32)), 2, now),
-    "今天 14:32 · 2 个有更新",
+    view.autoCheckNote(at(new Date(2026, 8, 27, 14, 32)), 2, now),
+    `${when} · 上次：今天 14:32`,
   );
   assert.equal(
-    view.lastCheckDetail(at(new Date(2026, 8, 26, 9, 5)), 0, now),
-    "昨天 09:05 · 没有更新",
+    view.autoCheckNote(at(new Date(2026, 8, 26, 9, 5)), 0, now),
+    `${when} · 上次：昨天 09:05，没有更新`,
   );
-  assert.equal(view.lastCheckDetail(at(new Date(2026, 8, 20, 8, 0)), null, now), "9月20日 08:00");
+  assert.equal(
+    view.autoCheckNote(at(new Date(2026, 8, 20, 8, 0)), null, now),
+    `${when} · 上次：9月20日 08:00`,
+  );
   assert.equal(view.clockText(at(new Date(2025, 11, 31, 23, 59)), now), "2025年12月31日 23:59");
-  assert.equal(view.lastCheckDetail(null, null, now), "还没有检查过");
+  assert.equal(view.autoCheckNote(null, null, now), `${when} · 还没有检查过`);
 });
 
 // ---- store：换假的 core ----
@@ -449,7 +454,7 @@ test("灰面板的一次性说明用法：句子与 × 之间两颗紧凑默认�
   assert.doesNotMatch(html, /data-hint-action="只看这些"><span class="ss-locked"/);
   assert.doesNotMatch(html, /ss-btn--primary/, "不是墨键");
   // 没有 ! 的 × 默认是新手提示的「知道了，不再提示」
-  assert.match(html, /title="知道了，不再提示"/);
+  assert.match(html, /role="tooltip"[^>]*>知道了，不再提示</);
   const css = readFileSync(new URL("../src/ui/ui.css", import.meta.url), "utf8");
   assert.match(css, /\.ss-noticepanel__actions \{[^}]*gap: var\(--space-xs\)/);
 });
@@ -467,7 +472,7 @@ test("提示条：`2 个 skill 有新版本` · `只看这些` · `全部更新`
   assert.match(html, /2 个 skill 有新版本/);
   assert.match(html, />只看这些<\/button>/);
   assert.match(html, />全部更新<\/button>/);
-  assert.match(html, /title="这一批不再提示"/);
+  assert.match(html, /role="tooltip"[^>]*>这一批不再提示</);
   assert.doesNotMatch(
     html,
     /<div class="update-strip/,
@@ -497,7 +502,7 @@ test("抽屉末行：来自 + 仓库 · 有新版本 + `更新`（默认键紧�
   );
   assert.match(
     html,
-    /class="ss-btn ss-btn--quiet"[^>]*title="https:\/\/github.com\/anthropics\/skills\/commits\/main\/skills\/pdf"[^>]*>看改动/,
+    /class="ss-btn ss-btn--quiet"[^>]*>看改动[^]*?role="tooltip"[^>]*>https:\/\/github.com\/anthropics\/skills\/commits\/main\/skills\/pdf</,
   );
 });
 
@@ -533,25 +538,32 @@ test("纸窗：`✓ 已更新 2 个 skill` + 撤销", () => {
   assert.match(html, />撤销<\/button>/);
 });
 
-test("设置 `skill 更新` 一节：两行设置行——自动检查｜开关；上次检查｜`去看看` + `立即检查`（不进设置就查）", () => {
+test("设置 `自动检查 skill 更新`：一行设置行（2026-10-06 并成一行）——灰字何时查与上次；右端 `看 N 个更新`（查到了才出）、`立即检查`、开关（不进设置就查）", () => {
   const src = withCopy(
     readFileSync(new URL("../src/pages/SettingsPage.tsx", import.meta.url), "utf8"),
   );
-  assert.match(src, /<SectionLabel>skill 更新<\/SectionLabel>/);
-  // 第一行：名字与灰字在左，开关在右（2026-10-04 画板 B）
-  assert.match(
-    src,
-    /<SettingRow\s+label="自动检查 skill 更新"\s+note="打开 Skills 页、距上次超过 6 小时时查一次"\s*>\s*\{autoCheck === null \? null : \(\s*<Switch[\s\S]*?label="自动检查 skill 更新"[\s\S]*?<\/SettingRow>/,
+  // 并进 `Skills 和 MCP` 一节，不再单成一节；`上次检查` 那一行删掉
+  assert.match(src, /<SectionLabel>Skills 和 MCP<\/SectionLabel>/);
+  assert.doesNotMatch(src, /skill 更新<\/SectionLabel>|label="上次检查"|去看看/);
+  const row = src.slice(
+    src.indexOf('<SettingRow label="自动检查 skill 更新" note={autoCheckLine}>'),
   );
-  // 第二行：`上次检查` + 时刻与结果，右端 `去看看`（查到了才出）在 `立即检查` 前
-  const second = src.slice(src.indexOf('<SettingRow label="上次检查"'));
-  assert.match(second, /^<SettingRow label="上次检查" note=\{lastCheckLine\}>/);
-  assert.ok(second.indexOf("去看看") < second.indexOf("立即检查"));
-  assert.match(second, /<BusySlot busy=\{checkingSkills\} label="正在检查">/);
-  assert.match(src, /lastCheckDetail\(/);
+  assert.match(row, /^<SettingRow label="自动检查 skill 更新" note=\{autoCheckLine\}>/);
+  const end = row.indexOf("</SettingRow>");
+  const show = row.indexOf("看 {count} 个更新");
+  const check = row.indexOf("立即检查");
+  const sw = row.indexOf("<Switch");
+  // 右端一列依次：看 N 个更新（数量写在键上）→ 立即检查 → 开关
+  assert.ok(show > 0 && show < check && check < sw && sw < end);
+  assert.match(row, /tn\("看 \{count\} 个更新", updateCount\)/);
+  assert.match(row, /updateCount !== null && updateCount > 0 && onShowUpdates/);
+  assert.match(row, /<BusySlot busy=\{checkingSkills\} label="正在检查">/);
+  assert.match(row, /autoCheck === null \? null : \(\s*<Switch[\s\S]*?label="自动检查 skill 更新"/);
+  assert.match(src, /autoCheckNote\(/);
   assert.match(src, /useSkillUpdates\(\)/, "设置页不给 active：进设置不查");
-  // 一节在 `关于` 之前
-  assert.ok(src.indexOf("skill 更新</SectionLabel>") < src.indexOf("关于</SectionLabel>"));
+  // 在 `关于` 之前
+  assert.ok(src.indexOf("Skills 和 MCP</SectionLabel>") < src.indexOf("关于</SectionLabel>"));
+  assert.ok(src.indexOf("<ScopeSection") < src.indexOf('label="自动检查 skill 更新"'));
 });
 
 test("store：设置里 `立即检查` 是主动要看——关掉过的这一批重新提示并清掉记录；自动检查照 core 的", async () => {

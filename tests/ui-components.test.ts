@@ -140,7 +140,10 @@ test("TextField 搜索形态：词表里那一枚放大镜在左；空着写快�
     search: true,
     shortcut: "⌘F",
   });
-  assert.match(typed, /class="ss-textfield__clear" title="清除筛选" aria-label="清除筛选"/);
+  assert.match(
+    typed,
+    /class="ss-textfield__clear" aria-label="清除筛选"[^]*role="tooltip"[^>]*>清除筛选</,
+  );
   assert.doesNotMatch(typed, /⌘F/);
   assert.match(cssRule(uiCss, ".ss-textfield__clear"), /width:\s*var\(--hit-min\)/);
   // 不用 type="search"：WebKit 的搜索框会自己吃掉 Esc
@@ -412,7 +415,7 @@ test("ChipRow：行首标签 12 / 500 与胶囊同高（--control-h-chip），+ 
   assert.match(cssRule(uiCss, ".ss-chiprow__chips"), /gap:\s*var\(--space-xs\) 6px/);
 });
 
-test("Note：一句 13 ink-mute，可带一颗紧凑默认键；离开 Sophia 的给 leave 画成浅键", () => {
+test("Note：一句 13 ink-mute，可带一颗紧凑默认键；离开 Sophia 的给 leave 画成句后浅键（不垫底，「 · 」接在句子里）", () => {
   const html = render(Note, {
     action: { label: "清除筛选", onClick: noop },
     children: "没有匹配的模型",
@@ -424,7 +427,7 @@ test("Note：一句 13 ink-mute，可带一颗紧凑默认键；离开 Sophia �
       action: { label: "去发布页", onClick: noop, leave: true },
       children: "下载没成",
     }),
-    /class="ss-btn ss-btn--quiet">去发布页<svg class="ss-btn__external"/,
+    /^<p class="ss-note"><span class="ss-note__text">下载没成 ·\u00a0(?:<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--quiet ss-btn--inline">去发布页<svg class="ss-btn__external"/,
   );
   const note = cssRule(uiCss, ".ss-note");
   assert.match(note, /font-size:\s*var\(--size-caption\)/);

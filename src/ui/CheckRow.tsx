@@ -47,7 +47,7 @@ export interface CheckRowProps {
 
 /// 勾选行（DESIGN「勾选框」「命中区与视觉尺寸是两回事」）：**整行可点**的一项多选——左 14px 勾选框（只画状态）+
 /// 可选图标 + 名字 + 可选行尾。悬停整行 `surface` 底（`control` 7，行的底左右各外扩 8，框仍与上面的文字左沿对齐），
-/// 方框随行「手靠近」。设置页 `列表里的 agent`、网关抽屉里的模型勾选列表用它。
+/// 方框随行「手靠近」。设置页 `显示的 agent`、网关抽屉里的模型勾选列表用它。
 /// 一件事：我选了哪些；当场生效的布尔状态用开关，浮层里的多选用 `MenuItem kind="check"`
 export function CheckRow({
   checked,
@@ -76,7 +76,6 @@ export function CheckRow({
         aria-describedby={describedBy}
         className={classes.join(" ")}
         data-checkrow={disabled ? undefined : ""}
-        title={disabledReason}
         disabled={disabled}
         onClick={disabled ? undefined : () => onChange(!checked)}
       >
@@ -126,7 +125,6 @@ export function RadioRow({
         aria-checked={checked}
         className={`ss-checkrow ss-checkrow--${size} ss-radiorow`}
         data-checkrow={disabled ? undefined : ""}
-        title={disabledReason}
         disabled={disabled}
         onClick={disabled || checked ? undefined : onSelect}
       >

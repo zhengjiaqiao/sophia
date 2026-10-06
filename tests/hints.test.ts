@@ -337,7 +337,7 @@ test("提示条：只有说明句 + × 图标键（知道了，不再提示）�
   );
   assert.match(
     html,
-    /class="ss-iconbtn"[^>]*title="知道了，不再提示"[^>]*aria-label="知道了，不再提示"/,
+    /class="ss-iconbtn"[^>]*aria-label="知道了，不再提示"[^]*role="tooltip"[^>]*>知道了，不再提示</,
   );
   // 只有 ×，没有动作键、没有 ! 记号（意思靠两端分：没有 ! ＝一次性说明）
   assert.doesNotMatch(html, /ss-btn\b|ss-noticepanel__mark/);
