@@ -157,7 +157,21 @@ pub fn trash(path: &Path) -> io::Result<()> {
             crate::t!("skills.sync.trashNotDir", path = path.display()),
         ));
     }
-    ::trash::delete(path).map_err(io::Error::other)
+    trash_context().delete(path).map_err(io::Error::other)
+}
+
+/// macOS 上不让访达代删：`trash` 库默认用 osascript 指挥访达，系统会弹「Sophia 想控制访达」的
+/// 自动化授权框（2026-10-06 产品负责人：代价太大）。改用系统文件接口 `NSFileManager.trashItemAtURL`，
+/// 同样进废纸篓、不要任何额外授权；代价是有的系统版本上废纸篓右键没有「放回原处」，拖出来即可恢复
+fn trash_context() -> ::trash::TrashContext {
+    #[allow(unused_mut)]
+    let mut ctx = ::trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use ::trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx
 }
 
 /// 删本体：目录移进废纸篓，再把指向它的链接逐条改指到 `plan.relink_to`。
@@ -930,6 +944,18 @@ mod tests {
         assert!(matches!(entry_kind(&link), EntryKind::Symlink(_)));
         assert_eq!(entry_kind(&real), EntryKind::Dir);
         assert_eq!(entry_kind(&f), EntryKind::File);
+    }
+
+    /// 真进一次废纸篓，确认走的是系统文件接口、不弹「控制访达」的授权框也删得掉。
+    /// 会在本机废纸篓里留一个空的测试文件夹，所以默认不跑：`cargo test -p sophia-core trash_moves_a_real_directory -- --ignored`
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn trash_moves_a_real_directory_without_finder() {
+        let t = TempTree::new();
+        let dir = t.dir(&format!("sophia-trash-test-{}", std::process::id()));
+        trash(&dir).expect("NSFileManager 移进废纸篓");
+        assert_eq!(entry_kind(&dir), EntryKind::Missing);
     }
 
     /// 原件在应用包（`xxx.app`）里一律不代删：目录原样在，如实上报原因（2026-09-30 真机 ego lite.app）

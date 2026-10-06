@@ -2,7 +2,7 @@
 // 右边是不一样的字段列，行尾「保留这份」自成一列
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { render } from "./ui-render.ts";
 import { withCopy } from "./copy.ts";
 import { mcpCopyName, mcpDiffTable } from "../src/mcpDiffTable.ts";
@@ -160,7 +160,13 @@ test("MCP 抽屉：有差异时「原件」一行不单列（路径进了表）�
   assert.match(lib, /\n\s+keep_mcp_copy,\n/);
 });
 
-test("DESIGN 有差异表的条目", () => {
-  const spec = readFileSync(new URL("../docs/DESIGN-components.md", import.meta.url), "utf8");
-  assert.match(spec, /### 差异表 `DiffTable`/);
-});
+const DESIGN_COMPONENTS = new URL("../docs/DESIGN-components.md", import.meta.url);
+
+test(
+  "DESIGN 有差异表的条目",
+  { skip: !existsSync(DESIGN_COMPONENTS) && "没有 docs/DESIGN-components.md（公开仓库）" },
+  () => {
+    const spec = readFileSync(DESIGN_COMPONENTS, "utf8");
+    assert.match(spec, /### 差异表 `DiffTable`/);
+  },
+);
