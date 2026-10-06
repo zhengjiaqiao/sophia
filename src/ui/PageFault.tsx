@@ -9,8 +9,8 @@ import { Details } from "./Details.tsx";
 /// （换页就重置）。托盘面板同样兜底，`narrow` 是窄面板的形态。
 ///
 /// 出错页（M10 画板）：整块在页面区里上下左右居中，块内文字靠左、宽不过 460：标题 15 / 600、一句 13 `ink-mute`
-/// 说明、一行键：墨键 `重新加载`（把边界清掉、子树重新渲染）+ 默认键 `详情`（点开是锚在键上的浮层：错误原文 + 调用栈、
-/// 版本、本地时间；`复制详情` 经 `onCopy`）。
+/// 说明、一行键：墨键 `重新加载`（把边界清掉、子树重新渲染）。说明那句话上挂悬浮卡（`Details`：错误原文 + 调用栈、
+/// 版本、本地时间；`复制详情` 经 `onCopy`），停上去就出。
 ///
 /// **上报关着时**（spec 2026-10-04-reporting-feedback R11，画板 ErrorOff；自动上报关着或 `DO_NOT_TRACK`、且有接收服务，
 /// 由调用方判断后给 `onReport`）：说明换成「……反复出现的话，把问题报告给我们。」，`重新加载` 之后多一颗默认键
@@ -29,7 +29,7 @@ export interface PageFaultProps {
   /// 托盘面板的窄形态
   narrow?: boolean;
   /// 主窗口外壳（侧栏、横幅、反馈小窗、退出确认）的兜底（spec S18）：整窗换成出错页，只有 `重新加载`
-  /// （重载整个窗口），没有 `详情` 与 `报告这个问题`——壳都没了，别的一概不画
+  /// （重载整个窗口），说明上不挂详情，也没有 `报告这个问题`——壳都没了，别的一概不画
   shell?: boolean;
   /// 应用版本，写进详情；读不到传 null
   version?: string | null;
@@ -136,11 +136,14 @@ export function FaultView({
           {shell ? t("common.pageFault.shellTitle") : t("common.pageFault.title")}
         </h2>
         <p className="ss-pagefault__sentence">
-          {shell
-            ? t("common.pageFault.shellSentence")
-            : onReport
-              ? t("common.pageFault.sentenceReport")
-              : t("common.pageFault.sentence")}
+          {shell ? (
+            t("common.pageFault.shellSentence")
+          ) : (
+            // 错误原文与调用栈挂在这句话上：停上去浮起悬浮卡（2026-10-06 起不再是一颗 `详情` 键）
+            <Details text={details} onCopy={onCopy}>
+              {onReport ? t("common.pageFault.sentenceReport") : t("common.pageFault.sentence")}
+            </Details>
+          )}
         </p>
         <div className="ss-pagefault__keys">
           <Button variant="primary" onClick={onReload}>
@@ -152,7 +155,6 @@ export function FaultView({
               {reportNote}
             </span>
           ) : null}
-          {shell ? null : <Details text={details} onCopy={onCopy} size="regular" align="start" />}
         </div>
       </div>
     </div>

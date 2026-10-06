@@ -22,25 +22,18 @@ const rule = (selector: string) => {
 };
 
 // ===== Details =====
-// 2026-10-04 产品负责人：长条提示里不再有展开按钮——`详情` 是一颗紧凑默认键，点开是锚在键上的浮层
-// （FloatingLayer：paper、hairline、12 圆角、浮层投影，点外面 / Esc 关），里面是去隐私后的原文 + `复制详情`
+// 2026-10-06 产品负责人：不再是一颗 `详情` 键——挂在出错的那句话上，停上去（或点一下）浮起悬浮卡
+// （HoverCard：就是 FloatingLayer，paper、hairline、12 圆角、浮层投影，点外面 / Esc 关），里面是去隐私后的原文 + `复制详情`
 
-test("Details：一颗紧凑默认键 `详情`，说明它弹出浮层（aria-haspopup=dialog、aria-expanded=false）；原文不在行里", () => {
-  const html = render(Details, { text: "boom", onCopy: noop });
+test("Details：挂在那句话上（悬浮卡的触发区，说明会弹出对话框、现在没开）；没有键，原文不在页面里", () => {
+  const html = render(Details, { text: "boom", onCopy: noop, children: "服务商限流了" });
   assert.match(
     html,
-    /<button[^>]*class="ss-btn ss-btn--compact"[^>]*aria-expanded="false"[^>]*>详情<\/button>/,
+    /<span class="ss-hovercard" tabindex="0" role="button" aria-haspopup="dialog" aria-expanded="false">服务商限流了<\/span>/,
   );
-  assert.match(html, /aria-haspopup="dialog"/);
+  assert.doesNotMatch(html, /<button/);
   assert.doesNotMatch(html, /boom/);
   assert.doesNotMatch(html, /复制详情/);
-  // 不再有可展开的那一套（小箭头、行内原文框）
-  assert.doesNotMatch(html, /ss-details__toggle|ss-details__chevron/);
-});
-
-test("Details：size=regular 给出错页（与 `重新加载` 同高的默认键）", () => {
-  const html = render(Details, { text: "boom", onCopy: noop, size: "regular" });
-  assert.match(html, /<button[^>]*class="ss-btn"[^>]*>详情<\/button>/);
 });
 
 test("DetailsBody（浮层里）：原文进等宽块（转义、可选中），下面右对齐一颗 `复制详情`；复制过换成 `已复制`", () => {
@@ -53,7 +46,7 @@ test("DetailsBody（浮层里）：原文进等宽块（转义、可选中），
   assert.match(render(DetailsBody, { text: "x", copied: true, onCopy: noop }), />已复制</);
 });
 
-test("Details 浮层的量：宽 440（窄窗口里收到窗口边距之内）、内边距 12、等宽 12 ink、复制键右对齐上距 8", () => {
+test("Details 悬浮卡的量：宽 440（窄窗口里收到窗口边距之内）、内边距 12、等宽 12 ink、复制键右对齐上距 8", () => {
   const layer = rule(".ss-details__layer");
   assert.match(layer, /width:\s*440px/);
   assert.match(layer, /max-width:\s*calc\(100vw - 32px\)/);
@@ -64,8 +57,13 @@ test("Details 浮层的量：宽 440（窄窗口里收到窗口边距之内）�
   assert.match(text, /color:\s*var\(--ink\)/);
   assert.match(text, /white-space:\s*pre-wrap/);
   assert.match(rule(".ss-details__actions"), /justify-content:\s*flex-end/);
-  // 浮层开着时键保持按下（同锁键：surface 面 + raise-pressed），说明这颗键弹出的就是它
-  assert.match(rule('.ss-details .ss-btn[aria-expanded="true"]'), /var\(--raise-pressed\)/);
+  // 那句话平时不加记号，手放上去、卡开着时转主字色
+  assert.match(
+    rule(
+      ".ss-hovercard:hover,\n.ss-hovercard.is-open,\n.ss-hovercard:hover .ss-noticepanel__reason,\n.ss-hovercard.is-open .ss-noticepanel__reason",
+    ),
+    /color:\s*var\(--ink\)/,
+  );
 });
 
 // Codex 复审 7/7：键盘用户打开浮层后焦点进到浮层里，Tab 在浮层里转圈，到不了后面的列表（也就不会因滚动关掉）
@@ -106,14 +104,18 @@ test("faultDetails：没有 stack 退回 name + message；抛出的不是 Error 
   assert.match(faultDetails({ error: null, version: null, now: new Date() }), /version: -/);
 });
 
-test("FaultView：标题、一句说明、墨键 `重新加载` 与默认键 `详情` 同一行（详情是弹出的浮层）；不给 onReport 时没有上报键", () => {
+test("FaultView：标题、一句说明（原文挂在这句话上，停上去出悬浮卡）、墨键 `重新加载`；没有 `详情` 键；不给 onReport 时没有上报键", () => {
   const html = render(FaultView, { details: "boom", onReload: noop, onCopy: noop });
   assert.match(html, /这一页出了问题/);
-  assert.match(html, /其他页面照常能用。先重新加载这一页。/);
   assert.match(
     html,
-    /<div class="ss-pagefault__keys">(?:<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--primary"[^>]*>重新加载<\/button>(?:<\/span>)?<span class="ss-details">(?:<span[^>]*>)?<button[^>]*class="ss-btn"[^>]*aria-expanded="false"[^>]*>详情<\/button>/,
+    /<p class="ss-pagefault__sentence"><span class="ss-hovercard"[^>]*aria-haspopup="dialog"[^>]*>其他页面照常能用。先重新加载这一页。<\/span><\/p>/,
   );
+  assert.match(
+    html,
+    /<div class="ss-pagefault__keys">(?:<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--primary"[^>]*>重新加载<\/button>(?:<\/span>)?<\/div>/,
+  );
+  assert.doesNotMatch(html, />详情</);
   assert.doesNotMatch(html, /boom/);
   assert.doesNotMatch(html, /报告|反馈|上报/);
   assert.doesNotMatch(html, /ss-pagefault--narrow/);
@@ -132,7 +134,7 @@ test("faultHeadline：只取错误名与那一句（不带调用栈、路径行�
 
 // 应用内反馈（spec 2026-10-04-reporting-feedback R11、AC10）：上报关着（或 DO_NOT_TRACK）且有接收服务时，
 // 出错页换一句说法、`重新加载` 之后多一颗 `报告这个问题`；上报开着时照旧（上面那条）
-test("FaultView 外壳形态（spec S18）：标题换成「Sophia 出了问题」，只有 `重新加载`，没有 `详情`、没有 `报告这个问题`", () => {
+test("FaultView 外壳形态（spec S18）：标题换成「Sophia 出了问题」，只有 `重新加载`，说明上不挂详情、没有 `报告这个问题`", () => {
   const html = render(FaultView, {
     details: "boom",
     onReload: noop,
@@ -143,12 +145,13 @@ test("FaultView 外壳形态（spec S18）：标题换成「Sophia 出了问题�
   assert.match(html, /Sophia 出了问题/);
   assert.match(html, /重新加载后一般就好了/);
   assert.match(html, /<button[^>]*class="ss-btn ss-btn--primary"[^>]*>重新加载<\/button>/);
+  assert.doesNotMatch(html, /ss-hovercard/);
   assert.doesNotMatch(html, />详情</);
   assert.doesNotMatch(html, /报告这个问题/);
   assert.doesNotMatch(html, /boom/);
 });
 
-test("FaultView 给了 onReport：说法换成「反复出现的话，把问题报告给我们」，键行是 重新加载 · 报告这个问题 · 详情", () => {
+test("FaultView 给了 onReport：说法换成「反复出现的话，把问题报告给我们」，键行是 重新加载 · 报告这个问题", () => {
   const html = render(FaultView, {
     details: "boom",
     onReload: noop,
@@ -158,7 +161,7 @@ test("FaultView 给了 onReport：说法换成「反复出现的话，把问题�
   assert.match(html, /其他页面照常能用。先重新加载这一页；反复出现的话，把问题报告给我们。/);
   assert.match(
     html,
-    /<div class="ss-pagefault__keys">(?:<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--primary"[^>]*>重新加载<\/button>(?:<\/span>)?<span class="ss-pagefault__report">(?:<span[^>]*>)?<button[^>]*class="ss-btn"[^>]*>报告这个问题<\/button>(?:<\/span>)?<\/span><span class="ss-details">/,
+    /<div class="ss-pagefault__keys">(?:<span[^>]*>)?<button[^>]*class="ss-btn ss-btn--primary"[^>]*>重新加载<\/button>(?:<\/span>)?<span class="ss-pagefault__report">(?:<span[^>]*>)?<button[^>]*class="ss-btn"[^>]*>报告这个问题<\/button>(?:<\/span>)?<\/span><\/div>/,
   );
 });
 

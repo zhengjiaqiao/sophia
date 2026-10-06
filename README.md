@@ -64,6 +64,8 @@ See how much of your Claude and Codex plan limits is left, right in the menu bar
 
 Download the latest release from [GitHub Releases](https://github.com/zhengjiaqiao/sophia/releases/latest). On an Apple silicon Mac pick the `.dmg` with `aarch64` in its name; on an Intel Mac pick the one with `x64`. It is signed and notarized by Apple: open the dmg and drag Sophia into Applications. Requires macOS 14 (Sonoma) or later.
 
+Or install with [Homebrew](https://brew.sh): `brew install --cask zhengjiaqiao/tap/sophia`. That one command adds the tap for you. Later, `brew upgrade --cask sophia` updates it; in-app updates keep working too.
+
 Or build it from source. You need [Rust](https://rustup.rs) 1.98 or newer, Node.js 22, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS.
 
 ```bash

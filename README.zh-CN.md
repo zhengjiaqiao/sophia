@@ -64,6 +64,8 @@ Sophia 把这些放进一张表：**每个 agent 现在能用哪些 skill、哪�
 
 从 [GitHub Releases](https://github.com/zhengjiaqiao/sophia/releases/latest) 下载最新版。Apple 芯片的 Mac 选文件名带 `aarch64` 的 dmg，Intel 的选带 `x64` 的。已签名并通过 Apple 公证：打开 dmg，把 Sophia 拖进「应用程序」即可。需要 macOS 14（Sonoma）或更新。
 
+也可以用 [Homebrew](https://brew.sh) 安装：`brew install --cask zhengjiaqiao/tap/sophia`，这一条命令会自动添加 tap。以后用 `brew upgrade --cask sophia` 升级；应用内更新也照常可用。
+
 也可以从源码构建。需要 [Rust](https://rustup.rs) 1.98 或更新版本、Node.js 22，以及你所用系统的 [Tauri 依赖](https://tauri.app/start/prerequisites/)。
 
 ```bash

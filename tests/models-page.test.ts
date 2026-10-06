@@ -243,12 +243,9 @@ test("列表页里 Claude 开着时的 R46：Codex 关着、Claude 开着，Code
 });
 
 // ===== 读不到第三方模型的状态（spec 2026-10-04-local-diagnostics R11 / AC10，画板 AuPbAQHePv3L1U3g1PAtH8）=====
-// 入口不消失；页面顶上一块灰面板说是哪个文件、为什么，按种类给往前走的路，都带 `详情`
+// 入口不消失；页面顶上一块灰面板说是哪个文件、为什么，按种类给往前走的路；原文挂在那句话上（停上去出悬浮卡）
 
-const unreadable = (
-  kind: "permission" | "format" | "other",
-  reason: string,
-): GatewayState => ({
+const unreadable = (kind: "permission" | "format" | "other", reason: string): GatewayState => ({
   ...gateway(),
   unreadable: {
     kind,
@@ -259,22 +256,23 @@ const unreadable = (
   },
 });
 
-test("读不到状态 · 没权限：灰面板「读不到第三方模型的状态 · <文件> 不归你的账户所有…」+ `详情` + `修复权限`；列表照常", () => {
+test("读不到状态 · 没权限：灰面板「读不到第三方模型的状态 · <文件> 不归你的账户所有…」（句上挂悬浮卡）+ `修复权限`；列表照常", () => {
   const reason = "~/.codex/config.toml 不归你的账户所有，读不了（多半是用 sudo 运行过 Codex）";
   const html = page([entry("codex", "Codex", "glm-5")], unreadable("permission", reason));
   assert.match(
     html,
     new RegExp(
-      `ss-noticepanel--section[^]*读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ${reason.replace(/[()]/g, "\\$&")}</span>`,
+      `ss-noticepanel--section[^]*<span class="ss-hovercard"[^>]*>读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ${reason.replace(/[()]/g, "\\$&")}</span></span>`,
     ),
   );
-  assert.match(html, /ss-noticepanel__actions"><span class="ss-details">[^]*>详情<[^]*>修复权限</);
-  assert.doesNotMatch(html, /Permission denied/, "原文只在详情浮层里");
+  assert.match(html, /ss-noticepanel__actions">[^]*>修复权限</);
+  assert.doesNotMatch(html, />详情</);
+  assert.doesNotMatch(html, /Permission denied/, "原文只在悬浮卡里");
   assert.doesNotMatch(html, />再试一次</);
   assert.equal(rows(html).length, 1);
 });
 
-test("读不到状态 · 格式有误：`详情` + `打开文件 ↗`（浅键，离开 Sophia）+ `再试一次`", () => {
+test("读不到状态 · 格式有误：`打开文件 ↗`（浅键，离开 Sophia）+ `再试一次`", () => {
   const html = page(
     [entry("codex", "Codex", "")],
     unreadable("format", "~/.codex/config.toml 第 3 行格式有误"),
@@ -282,14 +280,17 @@ test("读不到状态 · 格式有误：`详情` + `打开文件 ↗`（浅键�
   assert.match(html, /第 3 行格式有误/);
   assert.match(
     html,
-    /ss-noticepanel__actions"><span class="ss-details">[^]*>详情<[^]*class="ss-btn ss-btn--quiet"[^>]*>打开文件<[^]*>再试一次</,
+    /ss-noticepanel__actions">[^]*class="ss-btn ss-btn--quiet"[^>]*>打开文件<[^]*>再试一次</,
   );
 });
 
-test("读不到状态 · 别的：`详情` + `再试一次`；状态整个读不回来（IPC 失败）也照样出这块，入口不消失", () => {
-  const html = page([entry("codex", "Codex", "")], unreadable("other", "~/.codex/config.toml 读不了"));
-  assert.match(html, />详情<[^]*>再试一次</);
-  assert.doesNotMatch(html, /修复权限|打开文件/);
+test("读不到状态 · 别的：`再试一次`（原文挂在句上）；状态整个读不回来（IPC 失败）也照样出这块，入口不消失", () => {
+  const html = page(
+    [entry("codex", "Codex", "")],
+    unreadable("other", "~/.codex/config.toml 读不了"),
+  );
+  assert.match(html, /ss-hovercard[^]*>再试一次</);
+  assert.doesNotMatch(html, /修复权限|打开文件|>详情</);
   const lost = render(ModelsPage, {
     entries: [entry("codex", "Codex", "")],
     state: {
@@ -300,5 +301,5 @@ test("读不到状态 · 别的：`详情` + `再试一次`；状态整个读不
     onGatewayState: noop,
   });
   assert.match(lost, /读不到第三方模型的状态/);
-  assert.match(lost, />详情<[^]*>再试一次</);
+  assert.match(lost, /ss-hovercard[^]*>再试一次</);
 });

@@ -164,8 +164,9 @@ textarea,
   box-shadow: var(--raise-pressed);
 }
 
-/* 放在 surface 底上（灰面板）：键面改 paper、仍平贴——同色的浅面看不出是一颗键 */
-.ss-noticepanel .ss-btn--quiet:not(:disabled) {
+/* 放在 surface 底上（灰面板）：键面改 paper、仍平贴——同色的浅面看不出是一颗键。
+   跟在句子后面的（inline）不垫底，灰面板里也一样（DESIGN-components「按钮」例外一段） */
+.ss-noticepanel .ss-btn--quiet:not(:disabled):not(.ss-btn--inline) {
   background: var(--paper);
 }
 
@@ -1987,18 +1988,27 @@ textarea,
    float 12 圆角 + 浮层投影），不在行里展开（2026-10-04 产品负责人）。浮层宽 440、内边距 12：等宽 12 ink 原文，
    放不下折行、太长在原文里滚；右下一颗紧凑 `复制详情`，上距 8。
    出错页：在机面里居中，标题 head / 一句 ink-mute / 一行键（墨键 `重新加载` + 默认键 `详情`），间距照空态（12 / 16 / 16） */
-.ss-details {
-  display: inline-flex;
-  flex: none;
+/* ===== 悬浮卡 HoverCard（DESIGN-components「悬浮卡」，画板 06e734c8）=====
+   触发的那句话平时不加任何记号（D21：可悬停的字不加装饰线）；手放上去、卡开着时字转主字色——说「这里有东西」。
+   卡本身就是浮层（FloatingLayer：paper + hairline、float 12 圆角 + 浮层投影）。键盘焦点框同其他控件 */
+.ss-hovercard {
+  cursor: default;
+  transition: color var(--motion-fast) var(--ease-mech);
 }
 
-/* 浮层开着时键保持按下（同锁键「按下锁住」：surface 面 + raise-pressed），说明浮层是从它弹出的 */
-.ss-details .ss-btn[aria-expanded="true"] {
-  background: var(--key-bg-pressed, var(--surface));
-  box-shadow: var(--key-shadow-pressed, var(--raise-pressed));
+.ss-hovercard:hover,
+.ss-hovercard.is-open,
+.ss-hovercard:hover .ss-noticepanel__reason,
+.ss-hovercard.is-open .ss-noticepanel__reason {
+  color: var(--ink);
 }
 
-/* 浮层的滚动区（FloatingLayer 的 className）：宽 440，窄窗口（托盘）里收到窗口左右边距之内 */
+.ss-hovercard:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 详情的悬浮卡（FloatingLayer 的 className）：宽 440，窄窗口（托盘）里收到窗口左右边距之内 */
 .ss-details__layer {
   box-sizing: border-box;
   width: 440px;

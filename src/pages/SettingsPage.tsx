@@ -17,6 +17,7 @@ import {
   BusySlot,
   Button,
   CheckRow,
+  Details,
   DrawerHandle,
   FloatingToast,
   Mono,
@@ -187,22 +188,22 @@ export function SettingsPage({
           />
         );
       case "failed":
-        // 原因说中文、英文原文进 `详情`；`去发布页 ↗` 跟在句后（离开 Sophia 的退路），键区只放留在 Sophia 里的动作；
-        // × 与「稍后」同义：只收起这一程的待办条，侧栏更新键照旧在
+        // 原因说中文，英文原文挂在这句话上（停上去出悬浮卡）；`去发布页 ↗` 跟在句后（离开 Sophia 的退路），
+        // 不算悬浮卡的触发区；键区只放留在 Sophia 里的动作。× 与「稍后」同义：只收起这一程的待办条，侧栏更新键照旧在
         return (
           <NoticePanel
             scope="section"
             message={
               <>
-                {t("settings.update.failed", { version: update.version, reason: update.reason })}
+                <Details text={update.detail} onCopy={(text) => copyDetails(text)}>
+                  {t("settings.update.failed", { version: update.version, reason: update.reason })}
+                </Details>
                 {" ·\u00a0"}
                 <Button variant="quiet" inline onClick={() => void openUrl(RELEASES_URL)}>
                   {t("settings.update.releasesPage")}
                 </Button>
               </>
             }
-            technical={update.detail}
-            onCopy={(text) => copyDetails(text)}
             action={{ label: t("settings.update.retry"), onClick: () => void appUpdates.install() }}
             onClose={() => setLater(true)}
           />

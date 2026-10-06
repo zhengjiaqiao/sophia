@@ -36,6 +36,8 @@ export { NoticePanel, hintStackOf, useHintStack } from "./NoticePanel.tsx";
 export type { NoticePanelAction, NoticePanelProps, NoticeScope } from "./NoticePanel.tsx";
 
 export { Details } from "./Details.tsx";
+export { HoverCard } from "./HoverCard.tsx";
+export type { HoverCardProps } from "./HoverCard.tsx";
 export type { DetailsProps } from "./Details.tsx";
 export { PageFault, FaultView, faultDetails } from "./PageFault.tsx";
 export type { FaultViewProps, PageFaultProps } from "./PageFault.tsx";

@@ -418,6 +418,17 @@ export function GatewayBlock({
   const subLine = (p: GatewayProvider) => {
     const facts = gatewayFacts(p);
     const url = p.baseUrl ? displayUrl(p.baseUrl) : facts.url;
+    /// 有技术原文时挂在说原因的那段字上（原因段；密钥被拒时原因就是红字状态），停上去浮起悬浮卡
+    /// （原文 + 复制详情），行尾不再有 `详情` 键
+    const detail = p.unreachable ? p.unreachableDetail : null;
+    const cause = (className: string, text: string) =>
+      detail ? (
+        <Details className={className} text={detail} onCopy={(raw) => copyDetails(raw)}>
+          {text}
+        </Details>
+      ) : (
+        <span className={className}>{text}</span>
+      );
     return (
       <>
         {/* 地址占满放得下的宽度，放不下才截断；截断了才给完整值 */}
@@ -426,15 +437,17 @@ export function GatewayBlock({
         </TruncTip>
         <span className="gw-row__fact">
           {" · "}
-          {facts.statusKind !== "connected" ? (
-            <span className="gw-row__down">{facts.status}</span>
-          ) : (
+          {facts.statusKind === "connected" ? (
             facts.status
+          ) : facts.reason === null ? (
+            cause("gw-row__down", facts.status)
+          ) : (
+            <span className="gw-row__down">{facts.status}</span>
           )}
           {facts.picked !== null ? ` · ${facts.picked}` : null}
           {facts.reason !== null ? " · " : null}
         </span>
-        {facts.reason !== null ? <span className="gw-row__reason">{facts.reason}</span> : null}
+        {facts.reason !== null ? cause("gw-row__reason", facts.reason) : null}
       </>
     );
   };
@@ -453,7 +466,7 @@ export function GatewayBlock({
     return items;
   };
 
-  /// 行尾动作列（ListRow 给间距 4）：无法连接时 `详情`（有技术原文时，点开是锚在键上的浮层）+ `再试一次`，
+  /// 行尾动作列（ListRow 给间距 4）：无法连接时 `再试一次`（技术原文挂在第二行的原因上，停上去出悬浮卡），
   /// 然后铅笔 + 垃圾桶（一对同形的图标键；spec 2026-10-04-local-diagnostics R13，画板 AuPbAQHePv3L1U3g1PAtH8）
   const actions = (p: GatewayProvider, isEditing: boolean) => {
     const blocked = removeProviderBlockedReason(state, p, tool, agent);
@@ -464,9 +477,6 @@ export function GatewayBlock({
     const canFetch = p.key === "set";
     return (
       <>
-        {p.unreachable && p.unreachableDetail && !isEditing ? (
-          <Details text={p.unreachableDetail} onCopy={(text) => copyDetails(text)} />
-        ) : null}
         {p.unreachable && canFetch && !p.keyRejectedOnCall && !isEditing ? (
           <BusySlot busy={retrying === p.id} label={t("models.gateway.reconnecting")}>
             <Button size="compact" onClick={() => retrying !== p.id && retry(p.id)}>
@@ -818,7 +828,7 @@ export function GatewayForm({
   const savedPreset =
     provider?.preset != null ? (presets.find((p) => p.id === provider.preset) ?? null) : null;
   const pickedPreset = preset !== null && preset !== "custom" ? preset : savedPreset;
-  /// 没存成 / 存了没拉到：一句 + 原因 + 技术原文（灰面板的 `详情`）
+  /// 没存成 / 存了没拉到：一句 + 原因 + 技术原文（停在那句话上出悬浮卡）
   const [error, setError] = useState<{ message: string; reason?: string; detail?: string } | null>(
     null,
   );

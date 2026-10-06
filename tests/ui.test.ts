@@ -679,10 +679,10 @@ test("Button 浅键（离开 Sophia）：平贴的 surface 小键面、13 ink-mu
     cssRule(uiCss, ".ss-btn--quiet:active:not(:disabled)"),
     /box-shadow:\s*var\(--raise-pressed\)/,
   );
-  // 灰面板、抽屉上键面换 paper、仍平贴
+  // 灰面板、抽屉上键面换 paper、仍平贴；跟在句子后面的（inline）除外，灰面板里也不垫底
   assert.match(
     uiCss,
-    /\n\.ss-noticepanel \.ss-btn--quiet:not\(:disabled\) \{\s*background: var\(--paper\);\s*\}/,
+    /\n\.ss-noticepanel \.ss-btn--quiet:not\(:disabled\):not\(\.ss-btn--inline\) \{\s*background: var\(--paper\);\s*\}/,
   );
   // 固定 24：不叠尺寸类
   assert.match(
@@ -726,9 +726,7 @@ test("Button 句后浅键（inline）：静止不垫底、不带左右留白（�
   assert.match(rule, /line-height:\s*var\(--leading-caption\)/);
   // 写在浅键规则之后（同特异性靠先后压过 surface 底）；悬停的 :hover 特异性更高，照旧浮起
   assert.ok(uiCss.indexOf("\n.ss-btn--inline {") > uiCss.indexOf("\n.ss-btn--quiet {"));
-  assert.ok(
-    uiCss.indexOf("\n.ss-btn--inline {") > uiCss.indexOf("\n.ss-noticepanel .ss-btn--quiet"),
-  );
+  // 灰面板那条特异性更高，先后压不过它：靠它自己排除 inline（上面的断言）
 });
 
 // 2026-09-25 提示条一律是纸、墨色浮窗只给提示框：墨面上的浅描边键随墨窗一起删掉
@@ -2113,8 +2111,9 @@ test("NoticePanel 行下失败：原因写全、可折行，给了 onClose 才�
   assert.doesNotMatch(render(NoticePanel, { message: "x" }), /关闭/);
 });
 
-// spec 2026-10-04-local-diagnostics R13；2026-10-04 产品负责人：长条提示里不放展开按钮，`详情` 是一颗键、点开是浮层
-test("NoticePanel technical：键区在主键之前多一颗紧凑默认键 `详情`（弹出浮层，不在面板里展开原文）；没给 onCopy 不出", () => {
+// spec 2026-10-04-local-diagnostics R13；2026-10-06 产品负责人（画板 06e734c8）：不再是一颗 `详情` 键——
+// 原文挂在那句话（主句 · 原因）上，停上去浮起悬浮卡；键区不多一颗键
+test("NoticePanel technical：整句（主句 · 原因）是悬浮卡的触发区，键区没有 `详情`；没给 onCopy 就是普通的句子", () => {
   const html = render(NoticePanel, {
     scope: "section",
     message: "读不到第三方模型的状态",
@@ -2125,14 +2124,20 @@ test("NoticePanel technical：键区在主键之前多一颗紧凑默认键 `详
   });
   assert.match(
     html,
-    /<span class="ss-noticepanel__actions"><span class="ss-details">[^]*aria-haspopup="dialog"[^]*>详情<\/button>[^]*>修复权限</,
+    /<span class="ss-noticepanel__message"><span class="ss-hovercard"[^>]*aria-haspopup="dialog"[^>]*>读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ~\/\.codex\/config\.toml 不归你的账户所有<\/span><\/span><\/span>/,
   );
-  assert.doesNotMatch(html, /Permission denied/, "原文只在浮层里");
-  // 只有详情、没有别的键也出键区
+  assert.match(
+    html,
+    /<span class="ss-noticepanel__actions">(?:<span[^>]*>)*<button[^>]*>修复权限</,
+  );
+  assert.doesNotMatch(html, />详情</);
+  assert.doesNotMatch(html, /Permission denied/, "原文只在悬浮卡里");
+  // 只有原文、没有别的键：不出键区
   const only = render(NoticePanel, { message: "x", technical: "raw", onCopy: noop });
-  assert.match(only, /<span class="ss-noticepanel__actions"><span class="ss-details">/);
-  // 没给复制回调：不出（复制要先去隐私，调用方负责）
-  assert.doesNotMatch(render(NoticePanel, { message: "x", technical: "raw" }), /详情/);
+  assert.doesNotMatch(only, /ss-noticepanel__actions/);
+  assert.match(only, /ss-hovercard/);
+  // 没给复制回调：不挂（复制要先去隐私，调用方负责）
+  assert.doesNotMatch(render(NoticePanel, { message: "x", technical: "raw" }), /ss-hovercard/);
 });
 
 // ===== 确认弹窗 =====

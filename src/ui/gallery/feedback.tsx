@@ -336,28 +336,31 @@ export function FeedbackFamily() {
 
       <Block
         name="Details"
-        guide="出错提示上的技术原文（请求、状态码、返回的错误、调用栈）｜ 一颗默认键 `详情`，点开是锚在键上的浮层：原文 + `复制详情`，点外面 / Esc 关｜ 长条提示里不展开；提示条里不放"
+        guide="出错提示上的技术原文（请求、状态码、返回的错误、调用栈）｜ 不是一颗键：挂在出错那句话上，停上去（或点一下）浮起悬浮卡——原文 + `复制详情`，点外面 / Esc 关｜ 长条提示里不展开；提示条里不放"
       >
-        <Specimen label="收起：一颗紧凑默认键">
-          <Details text="GET https://openrouter.ai/api/v1/models → 429" onCopy={noop} />
+        <Specimen label="平时：那句话不加记号，手放上去字转深">
+          <Details text="GET https://openrouter.ai/api/v1/models → 429" onCopy={noop}>
+            服务商限流了，约 30 秒后再试
+          </Details>
         </Specimen>
         <Specimen
-          label="点开：锚在键上的浮层（点外面、Esc 关）"
+          label="停上去 / 点一下：字下面浮起悬浮卡（点外面、Esc 关）"
           frame="stage"
           width={520}
           height={220}
         >
           <Details
             defaultOpen
-            align="start"
             onCopy={noop}
             text={
               'GET https://openrouter.ai/api/v1/models → 429 Too Many Requests · Retry-After: 30\n{"error":{"message":"Rate limit exceeded: free-models-per-min"}}'
             }
-          />
+          >
+            服务商限流了，约 30 秒后再试
+          </Details>
         </Specimen>
         <Specimen
-          label="出错页（PageFault）：重新加载 + 详情同一行"
+          label="出错页（PageFault）：说明那句话上挂悬浮卡，键行只有重新加载"
           frame="stage"
           width={520}
           height={240}

@@ -35,6 +35,8 @@ export function FloatingLayer({
   label,
   align = "start",
   role = "menu",
+  autoFocus = true,
+  onHover,
   children,
 }: {
   trigger: HTMLElement;
@@ -47,6 +49,10 @@ export function FloatingLayer({
   label: string;
   /// 里面是一组选项（默认 `menu`）；是一段可读、可复制的内容（`详情` 的原文）给 `dialog`
   role?: "menu" | "dialog";
+  /// `dialog` 摆好位置就把焦点放进去（默认）。悬浮卡在悬停时出现，不抢焦点：给 false
+  autoFocus?: boolean;
+  /// 指针进出浮层（悬浮卡靠它在手挪进卡里时不收）
+  onHover?: (inside: boolean) => void;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -127,10 +133,10 @@ export function FloatingLayer({
   // 程序放的焦点不滚动页面，焦点框按输入方式画（inputModality）
   const focused = useRef(false);
   useEffect(() => {
-    if (role !== "dialog" || pos === null || focused.current) return;
+    if (role !== "dialog" || !autoFocus || pos === null || focused.current) return;
     focused.current = true;
     ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus({ preventScroll: true });
-  }, [role, pos]);
+  }, [role, autoFocus, pos]);
 
   const layer = (
     <div
@@ -139,6 +145,8 @@ export function FloatingLayer({
       className={trigger.closest(".ss-confirm") ? "ss-layer ss-layer--over-confirm" : "ss-layer"}
       role={role}
       aria-label={label}
+      onPointerEnter={onHover ? () => onHover(true) : undefined}
+      onPointerLeave={onHover ? () => onHover(false) : undefined}
       style={
         pos ? { top: pos.top, left: pos.left, maxHeight: pos.maxHeight } : { visibility: "hidden" }
       }
