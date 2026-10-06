@@ -144,7 +144,12 @@ export function LinkPage(props: LinkPageProps) {
     const names = picked.map((p) => skills.find((s) => s.path === p)?.name ?? p);
     const done = await state.install(picked, names);
     if (!done) return;
-    props.onDone(done.outcome, { kind: "skill", toast: done.toast, undoId: done.outcome.undoId });
+    props.onDone(done.outcome, {
+      kind: "skill",
+      toast: done.toast,
+      undoId: done.outcome.undoId,
+      handle: done.handle,
+    });
     page.leave();
   };
 

@@ -5,7 +5,12 @@ Sophia 包含以下 MIT 许可证项目的派生内容：
   crates/core/src/fs.rs 的链接策略（Unix 相对软链、Windows junction）参考其 src/installer.ts。
 - yetone/magpie (https://github.com/yetone/magpie), Copyright (c) 2026 yetone
   crates/core/data/market/mcp-curated.json 的精选 MCP 清单以其 internal/library/market.go（commit b3f613a）为起点，
-  逐条对照各家官方 README / 文档核实后改写。
+  逐条对照各家官方 README / 文档核实后改写；
+  crates/core/data/provider-presets.json 的服务商预设合并自其 internal/provider/presets.go（2026-10-05）。
+- farion1231/cc-switch (https://github.com/farion1231/cc-switch), Copyright (c) farion1231
+  crates/core/data/provider-presets.json 的服务商预设以其 src/config/codexProviderPresets.ts、claudeProviderPresets.ts
+  （2026-10-05）为准合并（scripts/merge-provider-presets.py）；
+  crates/gateway/src/provider.rs 拉模型时去掉的 Anthropic 后缀清单取自其 src-tauri/src/services/model_fetch.rs。
 - ollama/ollama (https://github.com/ollama/ollama), Copyright (c) Ollama
   crates/core/src/codex_models/catalog.rs 的第三方模型条目字段取自其 cmd/launch/codex_app.go 的 codexAppCatalogEntry（commit 6383a0f）；
   crates/gateway/src/router 的结构参照其 internal/proxy/codex_desktop.go；

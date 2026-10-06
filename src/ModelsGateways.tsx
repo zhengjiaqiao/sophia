@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { contextMenuHandler } from "./contextMenu.ts";
-import { t, tRich } from "./i18n.ts";
+import { t } from "./i18n.ts";
 import type { MessageKey } from "./i18n.ts";
 import { useLeaveGuard } from "./shell/leaveGuard.ts";
 import { copyDetails } from "./diagnostics.ts";
@@ -16,7 +16,6 @@ import {
   gatewayShortName,
   otherAgent,
   parseBackendError,
-  protocolText,
   refetchSummary,
   removeConfirmText,
   removeProviderBlockedReason,
@@ -26,7 +25,10 @@ import {
 } from "./modelsView.ts";
 import type { GatewayChoice, ModelsTool, OtherHome } from "./modelsView.ts";
 import { agentGateway } from "./types.ts";
-import type { GatewayAgent, GatewayProvider, GatewayState } from "./types.ts";
+import type { GatewayAgent, GatewayProvider, GatewayState, ProviderPreset } from "./types.ts";
+import { usePresets } from "./presets.ts";
+import { filterPresets, firstPick, keysLink, presetHost, presetSupported } from "./presetView.ts";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AddButton,
   BusySlot,
@@ -44,13 +46,14 @@ import {
   NoticePanel,
   RefreshSpin,
   SectionLabel,
+  Tag,
   TextField,
   Toast,
   Tooltip,
   TruncTip,
   useBusyShown,
 } from "./ui/index.ts";
-import { ModelList } from "./ModelList.tsx";
+import { ManualModelRow, ModelList } from "./ModelList.tsx";
 
 /// Codex 页「第三方模型」一节里的网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进来）。
 ///
@@ -122,6 +125,8 @@ export interface GatewayBlockProps {
   onToggleModel: (provider: GatewayProvider, modelId: string) => void;
   /// 勾上之前先试调用一次（ModelList `probe`）；抛出＝调不通
   onProbeModel?: (provider: GatewayProvider, modelId: string) => Promise<unknown>;
+  /// 手动添加模型（#117）：先试调，通了进列表并勾上；抛出＝试不通
+  onAddManualModel?: (provider: GatewayProvider, modelId: string) => Promise<unknown>;
   notice?: RowNotice | null;
   onCloseNotice?: () => void;
   /// 表单开着且有没保存的改动（ModelsTab 据此拦下离开）
@@ -138,6 +143,8 @@ export interface GatewaySaveInput {
   baseUrl: string;
   key?: string;
   sync: boolean;
+  /// 从哪个服务商预设建的（spec S1）：后端保存后记上来源与协议
+  preset?: string;
 }
 
 /// 地址去掉协议头显示（`https://openrouter.ai/api/v1` → `openrouter.ai/api/v1`）；完整值截断时进提示框
@@ -161,6 +168,7 @@ export function GatewayBlock({
   onCopy,
   onToggleModel,
   onProbeModel,
+  onAddManualModel,
   notice,
   onCloseNotice,
   onDirtyChange,
@@ -203,6 +211,8 @@ export function GatewayBlock({
   /// 右键菜单开着的那一行：surface 行带
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowEls = useRef(new Map<string, HTMLDivElement>());
+  /// 新网关的草稿行（在列表最上面）：开始添加时滚进视野
+  const draftEl = useRef<HTMLDivElement>(null);
   const formEl = useRef<HTMLDivElement | null>(null);
 
   const panelOpen = confirming !== null || rowError !== null || copyError !== null;
@@ -246,8 +256,18 @@ export function GatewayBlock({
   const jumpMounted = jumpTo !== null && providers.some((p) => p.id === jumpTo);
   useEffect(() => {
     if (jumpTo === null || !jumpMounted) return;
-    rowEls.current.get(jumpTo)?.scrollIntoView?.({ block: "nearest" });
+    // 只把名字那一截（行的主行）滚进视野、看得见就不动：整行连展开的模型抽屉一起算会比视野高，
+    // 「最近的边」会把名字留在视野外；对齐行首又会把页头推出去
+    const row = rowEls.current.get(jumpTo);
+    const head = row?.querySelector<HTMLElement>("[data-drawer-row]") ?? row;
+    head?.scrollIntoView?.({ block: "nearest" });
   }, [jumpTo, jumpMounted]);
+
+  // 开始添加：草稿在列表最上面；页面往下滚过时 `+ 网关` 在视野里、草稿未必在，滚过去
+  const drafting = editing === "new";
+  useEffect(() => {
+    if (drafting) draftEl.current?.scrollIntoView?.({ block: "nearest" });
+  }, [drafting]);
 
   /// 真正换过去（已确认没有要丢的改动）
   const startEditing = (next: GatewayChoice) => {
@@ -362,8 +382,6 @@ export function GatewayBlock({
     return (
       <div className="gw-row__form" ref={formEl}>
         <GatewayForm
-          state={state}
-          agent={agent}
           provider={provider}
           siblings={providers}
           other={other}
@@ -381,6 +399,13 @@ export function GatewayBlock({
             trackDirty(false);
             // 取消新网关：那一行拿掉；取消编辑：第二行换回来
             setEditing(null);
+          }}
+          onPickExisting={(id) => {
+            // 选的预设已经加过：收掉草稿，展开那一行并闪两下
+            trackDirty(false);
+            setEditing(null);
+            onExpand(id);
+            setAddedId(id);
           }}
           onDirtyChange={trackDirty}
           ask={asking ? { text: unsavedText(key), onDone: () => afterAsk(key) } : null}
@@ -434,14 +459,15 @@ export function GatewayBlock({
     const blocked = removeProviderBlockedReason(state, p, tool, agent);
     const short = gatewayShortName(p);
     /// 没有读得出的密钥：拉不了模型列表，↻ / `再试一次` 都不出，也不另加「填写密钥」——填密钥就是铅笔「编辑」
-    /// （画板 1PxHo6ZoEe8pFCYbU1pAud，2026-10-03 产品负责人：「这样和编辑按钮重复」）
+    /// （画板 1PxHo6ZoEe8pFCYbU1pAud，2026-10-03 产品负责人：「这样和编辑按钮重复」）。
+    /// 真实调用被拒了密钥（#144）也不出 `再试一次`：重拉列表清不掉它，出路是铅笔换密钥
     const canFetch = p.key === "set";
     return (
       <>
         {p.unreachable && p.unreachableDetail && !isEditing ? (
           <Details text={p.unreachableDetail} onCopy={(text) => copyDetails(text)} />
         ) : null}
-        {p.unreachable && canFetch && !isEditing ? (
+        {p.unreachable && canFetch && !p.keyRejectedOnCall && !isEditing ? (
           <BusySlot busy={retrying === p.id} label={t("models.gateway.reconnecting")}>
             <Button size="compact" onClick={() => retrying !== p.id && retry(p.id)}>
               {t("models.gateway.retry")}
@@ -510,13 +536,26 @@ export function GatewayBlock({
             onToggle={onToggleModel}
             probe={onProbeModel}
             pickBlockedReason={p.key === "set" ? undefined : t("models.gateway.needKeyToPick")}
+            onAddManual={onAddManualModel ? (modelId) => onAddManualModel(p, modelId) : undefined}
           />
         </div>
       ) : (
         <div className="gw-row__none">
           <Note>
-            {p.unreachable ? t("models.gateway.noModelsDown") : t("models.gateway.noModels")}
+            {/* 密钥被拒时网络是通的：不说「无法连接」 */}
+            {p.unreachable && !p.keyInvalid
+              ? t("models.gateway.noModelsDown")
+              : t("models.gateway.noModels")}
           </Note>
+          {onAddManualModel ? (
+            // 拉不到列表也能手动加（#117）：空态下面同一行输入
+            <div className="gw-row__list gw-row__list--manual">
+              <ManualModelRow
+                onAdd={(modelId) => onAddManualModel(p, modelId).then(() => modelId)}
+                blockedReason={p.key === "set" ? undefined : t("models.gateway.needKeyToPick")}
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </div>
@@ -563,7 +602,6 @@ export function GatewayBlock({
     );
   };
 
-  const drafting = editing === "new";
   const copyText = onCopy ? copyEmptyText(other) : null;
 
   return (
@@ -580,6 +618,10 @@ export function GatewayBlock({
         }
       >
         {t("models.gateway.noun")}
+        {/* 本机路由的端口：全局一个（2026-10-06 产品负责人：从每个网关的表单挪到这里，不抢眼） */}
+        <span className="gw-block__port">
+          {t("models.gateway.port", { port: state.router.port })}
+        </span>
       </SectionLabel>
       {providers.length === 0 && !drafting ? (
         // 空态一句；`+ 网关` 就在正上方，空态不重复按钮。另一家已有网关时换成一句 + `带过来`
@@ -612,18 +654,23 @@ export function GatewayBlock({
       ) : (
         <div className="gw-list">
           {drafting ? (
-            // 新网关：插在列表最上面，名字位写 `新网关`，表单在拉开的抽屉里
-            <ListRow
-              key="new"
-              title={t("models.gateway.newName")}
-              drawer={form(null)}
-              open
-              onToggle={closeForm}
-              drawerLabel={t("models.gateway.formDrawer", { name: t("models.gateway.newName") })}
-              drawerId="gw-drawer-new"
-            />
+            // 新网关：画在列表最上面——列表按添加先后倒着排（新的在上），保存后它就落在这里，同一个位置变成
+            // 真正的那一行，不跳（2026-10-06 产品负责人）。名字位写 `新网关`，表单在拉开的抽屉里
+            <div ref={draftEl}>
+              <ListRow
+                key="new"
+                title={t("models.gateway.newName")}
+                drawer={form(null)}
+                open
+                onToggle={closeForm}
+                drawerLabel={t("models.gateway.formDrawer", { name: t("models.gateway.newName") })}
+                drawerId="gw-drawer-new"
+              />
+            </div>
           ) : null}
-          {providers.map(row)}
+          {/* 按添加先后倒着显示：新加的在最上面（存储顺序不动，Codex 里模型的先后也不变）。
+              不按更新时间：改地址、刷新模型时那一行会从手底下跑掉 */}
+          {[...providers].reverse().map(row)}
         </div>
       )}
       {/* 删网关：地址与密钥一起删、删除后无法恢复——先确认（⑬） */}
@@ -700,7 +747,6 @@ export function RemoveGatewayConfirm({
 }
 
 interface GatewayFormProps {
-  state: GatewayState;
   /// 要改的那一家；null＝新加一家
   provider: GatewayProvider | null;
   /// 这一家的全部网关：地址撞上其中别的一个时就地说、保存不可用（同一家同一地址只能有一个）；不给＝不查
@@ -715,8 +761,10 @@ interface GatewayFormProps {
   onDirtyChange: (dirty: boolean) => void;
   /// 离开页面或换一行编辑时表单还有改动：就地一句 + 保存 / 丢弃，问完做 `onDone`
   ask: { text: string; onDone: () => void } | null;
-  /// 哪一家的网关：决定「协议」一行怎么写（Codex 收 Responses、Claude 收 Messages）
-  agent?: GatewayAgent;
+  /// 新网关第一步「服务商」的起点（spec S1）：不给就从选服务商开始；`custom` 直接到地址与密钥
+  initialPreset?: ProviderPreset | "custom";
+  /// 选的预设这一家已经加过（地址撞上 `siblings` 里的一个）：不走表单，交给调用方跳到那一行
+  onPickExisting?: (providerId: string) => void;
 }
 
 /// 地址为空时的「保存」：禁用，按下即出「先填地址」
@@ -739,7 +787,6 @@ function BlockedSave({ reason }: { reason: string }) {
 
 /// 连接表单：地址与密钥。保存才生效、保存即拉取；保存中原位忙碌指示 +「正在拉模型」
 export function GatewayForm({
-  state,
   provider,
   siblings = [],
   other = null,
@@ -750,11 +797,27 @@ export function GatewayForm({
   onCancel,
   onDirtyChange,
   ask,
-  agent = "codex",
+  initialPreset,
+  onPickExisting,
 }: GatewayFormProps) {
-  const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
+  const [baseUrl, setBaseUrl] = useState(
+    provider?.baseUrl ??
+      (initialPreset !== undefined && initialPreset !== "custom"
+        ? (initialPreset.openai?.apiBase ?? "")
+        : ""),
+  );
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
+  /// 新网关的第一步「服务商」（spec S1）：null＝还没选；一家预设；或 `custom` 自己填地址。编辑已有的不走这一步
+  const [preset, setPreset] = useState<ProviderPreset | "custom" | null>(
+    provider === null ? (initialPreset ?? null) : "custom",
+  );
+  const [query, setQuery] = useState("");
+  const presets = usePresets();
+  /// 编辑已有的、从预设建的：取密钥的链接照样给
+  const savedPreset =
+    provider?.preset != null ? (presets.find((p) => p.id === provider.preset) ?? null) : null;
+  const pickedPreset = preset !== null && preset !== "custom" ? preset : savedPreset;
   /// 没存成 / 存了没拉到：一句 + 原因 + 技术原文（灰面板的 `详情`）
   const [error, setError] = useState<{ message: string; reason?: string; detail?: string } | null>(
     null,
@@ -788,6 +851,7 @@ export function GatewayForm({
         baseUrl: baseUrl.trim(),
         key: key === "" ? undefined : key,
         sync: syncLabel !== null && syncOn,
+        preset: preset !== null && preset !== "custom" ? preset.id : undefined,
       });
     } catch (e) {
       setSaving(false);
@@ -818,13 +882,146 @@ export function GatewayForm({
   };
 
   const blank = baseUrl.trim() === "";
-  /// 编辑一家地址已经有了、密钥还没有（或读不出）的：要填的只剩密钥，光标直接落在密钥框
-  const focusKey = provider !== null && provider.key !== "set";
+  /// 编辑一家地址已经有了、密钥还没有（或读不出）的：要填的只剩密钥，光标直接落在密钥框；
+  /// 选了预设的新网关同样：地址已经填好
+  const focusKey =
+    (provider !== null && provider.key !== "set") || (preset !== null && preset !== "custom");
   const taken = blank ? null : addressTakenBy(siblings, baseUrl, provider?.id);
   const takenText = taken === null ? null : addressTakenText(taken);
 
+  /// 选一家预设：地址、协议填好，密钥框等着
+  const pick = (p: ProviderPreset) => {
+    if (!presetSupported(p)) return;
+    // 这一家已经加过：直接去那一行，不让用户再填一遍再被「地址撞上」拦下（2026-10-05 产品负责人）
+    const existing = addressTakenBy(siblings, p.openai?.apiBase ?? "", provider?.id);
+    if (existing !== null && onPickExisting) {
+      onPickExisting(existing.id);
+      return;
+    }
+    setPreset(p);
+    setBaseUrl(p.openai?.apiBase ?? "");
+    setError(null);
+  };
+  const toCustom = () => {
+    setPreset("custom");
+    setBaseUrl("");
+  };
+  const changePreset = () => {
+    setPreset(null);
+    setBaseUrl("");
+    setApiKey("");
+    setQuery("");
+    setError(null);
+  };
+
+  // 第一步：选服务商（画板 https://claude.ai/artifact/SvjEZCgBMgWqe666nJGXR7 第一张；2026-10-05 产品负责人：
+  // 不分国内海外，一列到底；`自定义地址…` 固定在框底不随名单滚动）
+  if (preset === null) {
+    const shown = filterPresets(presets, query);
+    return (
+      <div className="gw-form">
+        <div className="gw-form__field">
+          <label className="gw-form__label gw-form__label--top" id={`${fieldId}-preset-label`}>
+            {t("models.preset.label")}
+          </label>
+          <div className="gw-preset">
+            <TextField
+              id={`${fieldId}-preset`}
+              labelledBy={`${fieldId}-preset-label`}
+              value={query}
+              autoFocus
+              search
+              spellCheck={false}
+              placeholder={t("models.preset.search")}
+              onChange={setQuery}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                const first = firstPick(shown);
+                if (first !== null) pick(first);
+              }}
+            />
+            <div className="gw-preset__box">
+              <div
+                className="gw-preset__scroll"
+                role="listbox"
+                aria-label={t("models.preset.list")}
+              >
+                {shown.length === 0 ? (
+                  <p className="gw-preset__empty">{t("models.preset.empty")}</p>
+                ) : (
+                  shown.map((p) => {
+                    const supported = presetSupported(p);
+                    const item = (
+                      <button
+                        type="button"
+                        key={p.id}
+                        role="option"
+                        aria-selected={false}
+                        aria-disabled={!supported}
+                        className={
+                          supported ? "gw-preset__item" : "gw-preset__item gw-preset__item--off"
+                        }
+                        onClick={() => pick(p)}
+                      >
+                        <span className="gw-preset__name">
+                          {p.name}
+                          <span className="gw-preset__host">
+                            {presetHost(p)}
+                            {p.note ? ` · ${p.note}` : null}
+                          </span>
+                        </span>
+                        {supported ? null : <Tag tone="weak">{t("models.preset.unsupported")}</Tag>}
+                      </button>
+                    );
+                    // 为什么不能选只在悬停时说（原来名单下常驻一句，2026-10-06 删了）；提示框挂在整行上，
+                    // 不在按钮里再嵌一个可聚焦的记号
+                    return supported ? (
+                      item
+                    ) : (
+                      <Tooltip key={p.id} content={t("models.preset.unsupportedTip")}>
+                        {item}
+                      </Tooltip>
+                    );
+                  })
+                )}
+              </div>
+              {/* 固定在框底、不随名单滚动 */}
+              <div className="gw-preset__foot">
+                <button type="button" className="gw-preset__item" onClick={toCustom}>
+                  <span className="gw-preset__name">{t("models.preset.custom")}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* 第一步只有 `取消`：还没选服务商，没有东西可存（2026-10-06 产品负责人：不言自明的提示都不要） */}
+        <div className="gw-form__actions">
+          <Button size="compact" onClick={onCancel}>
+            {t("models.form.cancel")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const keysUrl = pickedPreset === null ? null : keysLink(pickedPreset);
+
   return (
     <div className="gw-form">
+      {provider === null ? (
+        // 新网关：选好的服务商一行（预设名 + `预设` / `自定义地址`）+ `换一家`
+        <div className="gw-form__field">
+          <span className="gw-form__label">{t("models.preset.label")}</span>
+          <div className="gw-preset__picked">
+            <span>{preset === "custom" ? t("models.preset.customName") : preset.name}</span>
+            <span className="gw-preset__change">
+              <Button size="compact" onClick={changePreset}>
+                {t("models.preset.change")}
+              </Button>
+            </span>
+          </div>
+        </div>
+      ) : null}
       {/* 标签 12 ink-mute 定宽 44，与输入框关联（读屏名就是它，点它聚焦输入框） */}
       <div className="gw-form__field">
         <label className="gw-form__label" id={`${fieldId}-url-label`} htmlFor={`${fieldId}-url`}>
@@ -861,10 +1058,25 @@ export function GatewayForm({
           onChange={setApiKey}
         />
       </div>
+      {keysUrl !== null && pickedPreset !== null ? (
+        // 从预设建的：取密钥的页面一键打开（离开 Sophia 的链接带 ↗）
+        <p className="gw-form__hint">
+          <a
+            href={keysUrl}
+            className="gw-preset__keys"
+            onClick={(event) => {
+              event.preventDefault();
+              void openUrl(keysUrl);
+            }}
+          >
+            {t("models.preset.keys", { name: pickedPreset.name })} ↗
+          </a>
+        </p>
+      ) : null}
       {syncLabel !== null ? (
         // 同步由用户选：本来就有的这一步里多一个勾选，不多走一步（⑧）
         <div className="gw-form__sync">
-          <CheckRow checked={syncOn} onChange={setSyncOn}>
+          <CheckRow size="small" checked={syncOn} onChange={setSyncOn}>
             {syncLabel}
           </CheckRow>
         </div>
@@ -920,11 +1132,9 @@ export function GatewayForm({
             {t("models.form.save")}
           </Button>
         ) : (
-          <Tooltip content={t("models.form.saveTip")}>
-            <Button variant="primary" size="compact" onClick={() => void save()}>
-              {t("models.form.save")}
-            </Button>
-          </Tooltip>
+          <Button variant="primary" size="compact" onClick={() => void save()}>
+            {t("models.form.save")}
+          </Button>
         )}
         {ask === null ? (
           <Button size="compact" onClick={onCancel}>
@@ -943,19 +1153,6 @@ export function GatewayForm({
           />
         </div>
       ) : null}
-      {/* 只读事实：端口与协议不做成可改 */}
-      <p className="gw-form__facts">
-        <span>
-          {tRich("models.form.port", {
-            port: <span className="gw-form__value">{state.router.port}</span>,
-          })}
-        </span>
-        <span>
-          {tRich("models.form.protocol", {
-            protocol: <span className="gw-form__value">{protocolText(provider?.protocol, agent)}</span>,
-          })}
-        </span>
-      </p>
     </div>
   );
 }

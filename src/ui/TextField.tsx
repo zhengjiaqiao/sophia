@@ -90,6 +90,8 @@ export function TextField({
         spellCheck={spellCheck}
         autoComplete={autoComplete}
         onChange={(e) => onChange(e.target.value)}
+        // 中文输入法里打英文字母时文字先在组字态里：组字结束再报一次，筛选框不会「打了没反应」
+        onCompositionEnd={(e) => onChange(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (search && e.key === "Escape" && value !== "") {
             // 先清空文字；清空了的 Esc 才让给页面（返回、收起）

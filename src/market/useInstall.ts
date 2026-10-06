@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t, type MessageKey } from "../i18n.ts";
 import type { Location } from "../shell/nav.ts";
+import { projectName } from "../sidebarProjects.ts";
 import type { ToastText } from "../toastText.ts";
 import type {
   InstallOutcome,
@@ -22,14 +23,22 @@ import {
   defaultInstallLocation,
   mcpInstallBlock,
   mcpInstalledToast,
+  keyHintTip,
+  keyTrackedNote,
+  mcpKeyHint,
+  mcpTrackedFiles,
   mcpRowView,
+  projectPathOf,
+  skillHandleTarget,
   skillInstalledToast,
+  withTakenSkipped,
   skillPlanPending,
   skillRowView,
   takenAgents,
   writableCount,
   type AgentRef,
   type InstallKind,
+  type SkillHandle,
 } from "./installView.ts";
 import { errorText, type MarketService } from "./service.ts";
 
@@ -191,19 +200,26 @@ export function useSkillInstall(opts: SkillInstallOptions) {
   const install = async (
     paths: ReadonlyArray<string>,
     names: ReadonlyArray<string>,
-  ): Promise<{ outcome: InstallOutcome; toast: ToastText } | null> => {
+  ): Promise<{ outcome: InstallOutcome; toast: ToastText; handle: SkillHandle | null } | null> => {
     // 计划还没回来：不知道哪个 agent 那里已有同名的，先不交（`安装` 此时也是禁用的）
     if (checking) return null;
     setBusy(true);
     setFailure(null);
     try {
-      const outcome = await service.installSkill({
+      const harnessIds = requestedFor(namesOf(paths));
+      const reply = await service.installSkill({
         repo,
         branch: branch ?? "",
         paths: [...paths],
         location,
-        harnessIds: requestedFor(namesOf(paths)),
+        harnessIds,
       });
+      // 那里已有同名的、没能勾的 agent 也算没链上（issue #111）：装完那一窗说出来、给「去处理」
+      const outcome = withTakenSkipped(
+        reply,
+        agentDirs,
+        requested.filter((id) => !harnessIds.includes(id)),
+      );
       const toast = skillInstalledToast(outcome, opts.agents);
       if (outcome.installed.length === 0) {
         setFailure({
@@ -215,7 +231,8 @@ export function useSkillInstall(opts: SkillInstallOptions) {
         });
         return null;
       }
-      return { outcome, toast };
+      // 有没链上的：装完那一窗的「去处理」去这次装到的位置下的那一行（issue #111）
+      return { outcome, toast, handle: skillHandleTarget(outcome, location) };
     } catch (error) {
       setFailure({
         key: Date.now(),
@@ -270,6 +287,8 @@ export function useMcpInstall(opts: McpInstallOptions) {
   const [failure, setFailure] = useState<InstallFailure | null>(null);
   /// 项目里 Claude Code 写到哪一格：默认仅自己（同 `claude mcp add` 的默认；spec 2026-09-30-mcp-claude-self-team R8）
   const [claudeScope, setClaudeScope] = useState<ClaudeCodeScope>("self");
+  /// 密钥提醒（S19）的「同时加进 .gitignore」：默认不勾
+  const [addToGitignore, setAddToGitignore] = useState(false);
 
   // 每个 agent 写不写得过去：问一次后端（只看定义与位置；不带要填的值，那些不离开这一页）
   const defsKey = JSON.stringify(definitions);
@@ -311,6 +330,14 @@ export function useMcpInstall(opts: McpInstallOptions) {
   const names = definitions.map((d) => d.name);
   const block = mcpInstallBlock({ names, checked: effective, checks, fields, values });
   const files = writableCount(checks, effective);
+  const keyHintFiles = mcpKeyHint(checks, writable);
+  const keyHint =
+    keyHintFiles.length > 0
+      ? keyHintTip(keyHintFiles, projectName(projectPathOf(location) ?? ""))
+      : null;
+  const trackedFiles = mcpTrackedFiles(checks, writable);
+  const keyTracked =
+    trackedFiles.length > 0 ? keyTrackedNote(trackedFiles, keyHint !== null) : null;
 
   const install = async (): Promise<{ report: McpReport; toast: ToastText } | null> => {
     setBusy(true);
@@ -322,6 +349,8 @@ export function useMcpInstall(opts: McpInstallOptions) {
         harnessIds: writable,
         values: Object.fromEntries(fields.map((f) => [f.key, values[f.key] ?? ""])),
         claudeCodeScope: claudeScope,
+        // 照用户勾的交：后端写的时候自己再判一次，只给该提醒的项目文件追加（检查还没回来时也不丢）
+        addToGitignore,
       });
       const toast = mcpInstalledToast(report, checks ?? [], rows, location);
       const created = report.entries.some((e) => e.outcome === "created");
@@ -353,6 +382,12 @@ export function useMcpInstall(opts: McpInstallOptions) {
     setClaudeScope,
     values,
     setValue: (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value })),
+    /// 密钥提醒（S19）：「同时加进 .gitignore」的提示框文字；不出这个勾选时为 null
+    keyHint,
+    /// 目标文件已被跟踪的那一句（在勾选的位置）；没有为 null
+    keyTracked,
+    addToGitignore,
+    setAddToGitignore,
     checks,
     files,
     block,

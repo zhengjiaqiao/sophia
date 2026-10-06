@@ -10,6 +10,7 @@
   "hints.firstScan.emptyWithAgents": "Read the skill folders of {agents} and found no skills. No files were changed.",
   "hints.firstScan.emptyLocal": "Read the skill folders on this Mac and found no skills. No files were changed.",
   "hints.firstCodex": "Turning this on changes one Codex setting so it can use third-party models; turning it off puts it back. Restart Codex for the change to apply.",
+  "hints.mcpOpenCode": "OpenCode isn't supported for MCP yet, so this page has no column for it",
   "hints.log.markFailed": "Couldn't record that the hint was seen",
   "hints.log.loadFailed": "Couldn't read the list of hints already seen"
 }

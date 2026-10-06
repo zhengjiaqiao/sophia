@@ -14,11 +14,19 @@ import type {
 } from "./types";
 import { parseBackendError } from "./modelsView";
 import SkillsTab from "./SkillsTab";
+import {
+  agentsOverCapOf,
+  keepDismissed,
+  loadOverCapDismissed,
+  overCapWanted,
+  saveOverCapDismissed,
+} from "./agentsOverCap";
 import McpTab from "./McpTab";
 import { SettingsPage } from "./pages/SettingsPage";
 import { appUpdates, useAppUpdate } from "./useAppUpdate";
 import { RECHECK_TICK_MS } from "./appUpdate";
 import { mcpDomains, mirrorFailedNote } from "./mcpView";
+import { joinReasons, keyHintNote } from "./mcpKeyHint";
 import { loadHome } from "./pathText";
 import {
   loadProjectSort,
@@ -48,6 +56,7 @@ import {
   goDestination,
   goFace,
   goLocation,
+  goRow,
   locationOf,
   loadNav,
   locationsOf,
@@ -62,7 +71,7 @@ import { FaceTabs, FilterRow } from "./FilterRow";
 import type { InstallContext } from "./market";
 import { changesPage, requestLeave } from "./shell/leaveGuard";
 import { canPopup } from "./contextMenu";
-import { useLocale, useOnLocaleChange } from "./i18n";
+import { t, useLocale, useOnLocaleChange } from "./i18n";
 import { useQuitFlow } from "./QuitFlow";
 import { FaultBomb, PageGuard, useFaultPage } from "./PageGuard";
 import { copyDetails } from "./diagnostics";
@@ -97,6 +106,9 @@ export default function App() {
   /// 应用菜单「关于 Sophia」「检查更新…」：设置页停在「关于」一节，`check` 时同时开始检查。
   /// `at` 让同一个请求再发一次也算新的
   const [aboutRequest, setAboutRequest] = useState<{ at: number; check: boolean } | null>(null);
+  /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`：设置页停在「列表里的 agent」一节。离开设置就清掉，
+  /// 下回从侧栏进设置不再跳
+  const [agentsRequest, setAgentsRequest] = useState<{ at: number } | null>(null);
   /// Sophia 自己的新版本：侧栏的更新键与设置「关于」读同一份（src/useAppUpdate.ts）
   const appUpdate = useAppUpdate();
   /// 此刻显示哪张表（SKILLS / MCP）；在模型页、设置时为 null
@@ -346,7 +358,7 @@ export default function App() {
     refreshGateway();
   });
   // 项目列表（spec 2026-09-26-object-first-navigation R4 R10）：skill 与 MCP 两边自动发现的项目的并集，
-  // 与当前在哪一页无关。例如没有 skill 的 WeiboAP agent 也在里面。不再有手动添加的项目
+  // 与当前在哪一页无关。例如没有 skill 的 WeiboAP agent 也在里面。手动选的项目也在里面，设置「生效范围」里取消勾的不在（core 不扫它们）
   const mcpDomainList = useMemo(
     () =>
       mcpOverview === null
@@ -427,6 +439,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [harnesses, desktopInstalled, nav, recentProjects, sortedProjects, projectSort]);
 
+  /// 装的 agent 多于列表上限时 SKILLS 页筛选行下那块灰面板（issue #109）：关掉的那一批记在本机；
+  /// 装的集合一变（不管停在哪一页）关掉的记录就作废，再超上限时再出
+  const [overCapDismissed, setOverCapDismissed] = useState(loadOverCapDismissed);
+  useEffect(() => {
+    const keep = keepDismissed(harnesses, overCapDismissed);
+    if (keep === overCapDismissed) return;
+    setOverCapDismissed(keep);
+    saveOverCapDismissed(keep);
+  }, [harnesses, overCapDismissed]);
+  const agentsOverCap = agentsOverCapOf(harnesses);
+
   /// 模型页的节由注册表生成（shell/agents.tsx）：Codex 与 Claude（桌面应用）的第三方模型，只在 macOS 上有。
   /// 侧栏「模型」后的橙点＝任一家开着，与模型页开关、托盘开关读同一份状态，同一帧亮灭
   const agentState: AgentState = {
@@ -480,6 +503,7 @@ export default function App() {
     const prev = prevNav.current;
     prevNav.current = nav;
     if (prev.destination === "settings" && nav.destination !== "settings") {
+      setAgentsRequest(null);
       void refresh();
       refreshGateway();
     } else if (nav.destination === "skills" && prev.destination !== "skills") void refresh();
@@ -496,6 +520,20 @@ export default function App() {
     );
     return () => void pending.then((un) => un());
   }, [startQuit]);
+
+  /// 应用菜单「添加项目…」（同设置「生效范围」的 `+ 项目`）：不换页，弹系统文件夹选择器，选了就加、重扫一轮——
+  /// 新项目出现在筛选行里，停在设置时「生效范围」跟着重读。当不了项目的（主目录、不是文件夹）在顶上说原因
+  const addProjectFromMenu = async () => {
+    try {
+      const path = await api.pickDirectory(t("settings.scope.pickDialog"));
+      if (path === null) return;
+      await api.addProject(path);
+    } catch (e) {
+      setError(String(e));
+      return;
+    }
+    void refreshRef.current();
+  };
 
   // ===== 应用菜单（D15）：菜单栏按下一项 → 换目的地 / 交给设置页 / 作用于输入框 / 交给当前页 =====
   useEffect(() => {
@@ -518,6 +556,7 @@ export default function App() {
       const act = () => {
         if (route.settings) setAboutRequest({ at: Date.now(), check: route.settings.check });
         if (route.page) dispatchPageCommand(route.page);
+        if (route.addProject) void addProjectFromMenu();
       };
       // 换目的地的（⌘, ⌘1… 设置 / 关于 / 添加来源）与 ⌘[ 返回都要先经离开前询问
       if (route.nav !== navRef.current) navigate(() => route.nav, act);
@@ -594,6 +633,29 @@ export default function App() {
         face={face}
         filterBar={filterBar}
         install={installContext}
+        onGoToRow={(domainKey) =>
+          navigate((n) =>
+            goRow(
+              n,
+              domainKey,
+              projects.map((p) => p.key),
+            ),
+          )
+        }
+        agentsOverCap={{
+          cap: agentsOverCap,
+          open: overCapWanted(agentsOverCap, overCapDismissed),
+          onDismiss: () => {
+            const key = agentsOverCap?.key ?? null;
+            setOverCapDismissed(key);
+            saveOverCapDismissed(key);
+          },
+          onOpenSettings: () =>
+            navigate(
+              (n) => goDestination(n, "settings"),
+              () => setAgentsRequest({ at: Date.now() }),
+            ),
+        }}
       />
     ),
     mcp: () => (
@@ -601,6 +663,7 @@ export default function App() {
         locations={locations}
         scopeKey={scopeKey}
         onError={setError}
+        banner={error !== null}
         onBusy={setBusyState}
         refreshKey={refreshKey}
         onOverview={setMcpOverview}
@@ -661,7 +724,9 @@ export default function App() {
             {nav.destination === "settings" ? (
               <SettingsPage
                 onError={setError}
+                refreshKey={refreshKey}
                 aboutRequest={aboutRequest ?? undefined}
+                agentsRequest={agentsRequest ?? undefined}
                 onShowUpdates={() =>
                   navigate((n) => goLocation(goFace(goDestination(n, "skills"), "mine"), "all"))
                 }
@@ -707,11 +772,13 @@ export default function App() {
 }
 
 /// 停在别的页上时规则在背后添加了 MCP：右下交代一声（⑨⑬ 自动发生的事要交代）；
-/// 全成是白窗，有没成的是黑窗
+/// 全成是白窗，有没成的是黑窗。密钥提醒（S19）在原因的位置接一句：来源被忽略的「已加进 .gitignore」，
+/// 第一次写进仓库的「密钥会随仓库提交，没加进 .gitignore」（规则上没有勾选，照常写）
 function BackgroundMcpToast({ report, onClose }: { report: McpReport; onClose: () => void }) {
   const created = report.entries.filter((e) => e.outcome === "created");
   const failed = report.entries.filter((e) => e.outcome === "failed");
   const names = [...new Set(created.map((e) => e.name))];
+  const keyNote = keyHintNote(report, true);
   if (failed.length > 0) {
     return (
       <Toast
@@ -719,7 +786,7 @@ function BackgroundMcpToast({ report, onClose }: { report: McpReport; onClose: (
         sentence="shell.mcpToast.autoAdd"
         names={names}
         tally={{ done: created.length, failed: failed.length }}
-        reason={failed[0].message}
+        reason={joinReasons(failed[0].message, keyNote)}
         onDismiss={onClose}
         onClose={onClose}
       />
@@ -734,7 +801,7 @@ function BackgroundMcpToast({ report, onClose }: { report: McpReport; onClose: (
         names.length === 0 ? <ToastCount n={created.length} line="toast.count.mcp" /> : undefined
       }
       // 第三方模式那一份没写成：成功句后接那一句（`McpReportEntry.mirrorFailed`）
-      reason={mirrorFailedNote(report.entries)}
+      reason={joinReasons(mirrorFailedNote(report.entries), keyNote)}
       onDismiss={onClose}
     />
   );

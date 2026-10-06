@@ -52,6 +52,7 @@ async fn router_error_sentences_follow_the_saved_ui_language() {
         keepalive: Duration::ZERO,
         // 「跟随系统」时系统说繁體：这里只用明确的语言，用不到它
         locale: Some(saved_locale(store_dir.clone(), || vec!["zh-TW".into()])),
+        key_verdicts: None,
     })
     .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

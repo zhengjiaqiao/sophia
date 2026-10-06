@@ -58,6 +58,12 @@ pub const ADD_SOURCE: Item = item(
     || sophia_core::t!("shell.menu.addSource"),
     None,
 );
+/// 「添加项目…」：直接弹系统文件夹选择器（同设置「生效范围」的 `+ 项目`），不换页
+pub const ADD_PROJECT: Item = item(
+    "add-project",
+    || sophia_core::t!("shell.menu.addProject"),
+    None,
+);
 pub const SWITCH_PROJECT: Item = item(
     "switch-project",
     || sophia_core::t!("shell.menu.switchProject"),
@@ -92,11 +98,12 @@ pub const QUIT: Item = item(
 );
 
 /// 全部自定义项：收到菜单事件时只认这张表里的 id（右键菜单等别处的项不转发）
-pub const ITEMS: [&Item; 9] = [
+pub const ITEMS: [&Item; 10] = [
     &ABOUT,
     &CHECK_UPDATE,
     &SETTINGS,
     &ADD_SOURCE,
+    &ADD_PROJECT,
     &SWITCH_PROJECT,
     &UNDO,
     &SELECT_ALL,
@@ -237,6 +244,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
     let file = SubmenuBuilder::new(app, sophia_core::t!("shell.menu.file"))
         .item(&custom(app, &ADD_SOURCE)?)
+        .item(&custom(app, &ADD_PROJECT)?)
         .separator()
         .item(&PredefinedMenuItem::close_window(
             app,
@@ -381,7 +389,6 @@ mod tests {
         assert_eq!(command_for("dest-usage").as_deref(), Some("dest-usage"));
         assert_eq!(command_for("dest-sessions"), None);
         assert_eq!(command_for("tab-skills"), None);
-        assert_eq!(command_for("add-project"), None);
         assert_eq!(command_for("quit"), None);
         assert_eq!(command_for(""), None);
     }
@@ -397,7 +404,13 @@ mod tests {
         assert_eq!(acc(&SWITCH_PROJECT), Some("CmdOrCtrl+P"));
         assert_eq!(acc(&QUIT), Some("CmdOrCtrl+Q"));
         // 要再操作一步的项带省略号
-        for i in [&SETTINGS, &CHECK_UPDATE, &ADD_SOURCE, &SWITCH_PROJECT] {
+        for i in [
+            &SETTINGS,
+            &CHECK_UPDATE,
+            &ADD_SOURCE,
+            &ADD_PROJECT,
+            &SWITCH_PROJECT,
+        ] {
             assert!((i.text)().ends_with('…'), "{} 应带 …", (i.text)());
         }
     }

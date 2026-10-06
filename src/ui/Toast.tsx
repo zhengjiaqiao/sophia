@@ -1,5 +1,5 @@
 import { Fragment, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { FocusEvent, ReactNode } from "react";
+import type { FocusEvent, ReactNode, Ref } from "react";
 import { formatRich, listText, locale, t, tn, tRich, type MessageKey } from "../i18n.ts";
 import { AgentIcon } from "./AgentIcon.tsx";
 import { Button, IconButton } from "./Button.tsx";
@@ -17,7 +17,9 @@ import { sentencePieces } from "./sentence.tsx";
 ///   `float` 12 圆角 + 浮层投影），单行高 32、最宽 420；状态记号在句首：✓（勾选框里同一枚 `IconTick`）/ ⊘ / !。
 ///   键行内（` · 撤销`），失败的 × 在最后。放不下、或有副行（路径）时折成两行：记号自成一格，
 ///   第二行（读数 / 路径）缩进到记号之后，与整句的字对齐
-/// - 右下（`CornerToast` / `ToastStack` 里，notice 档）：都带左侧 40px 记号栏（✓ / ⊘ / !），宽 ≤ 400
+/// - 右下（`CornerToast` / `ToastStack` 里，notice 档）：都带左侧 40px 记号栏（✓ / ⊘ / !），宽 ≤ 400。
+///   放得下时一行，键与 × 在主行右端；放不下时折成两行（issue #111，同锚点档「两行」）：字在左——整句一行、
+///   原因换到第二行（12 `ink-mute`），键与 × 在右侧、跨两行上下居中，不掉到字的下面
 ///
 /// 位置由外壳经 `ToastPlacementContext` 给，调用方不传；不在任何外壳里（测试、画廊）按锚点档。
 /// 墨色浮窗只给提示框（2026-09-25 起）：失败与成功靠句首记号与否定动词分，不靠颜色。
@@ -109,6 +111,9 @@ export interface ToastProps {
   stats?: string;
   /// 默认键紧凑 24。`撤销`
   action?: ToastAction;
+  /// 带人去处理的那颗默认键紧凑（装完提示里的 `去处理`，issue #111）：排在 `action` 前——先读到出了什么事，
+  /// 再看到去处理，撤销在它后面
+  go?: ToastAction;
   /// 次要的离开 Sophia 的动作：浅键，末尾自动带 ↗（`在访达中显示备份`）
   secondary?: ToastAction;
   /// 给了就到点自动消失；不给就一直留着，直到调用方撤掉
@@ -223,23 +228,27 @@ export function Toast(props: ToastProps | ToastBusyProps) {
   return <ResultToast {...props} />;
 }
 
-/// 键区：动作（默认键紧凑 24；禁用带原因；在等时原位忙碌）+ 次要的离开 Sophia 的浅键。两档共用
-function ActionKeys({ action, secondary }: Pick<ToastProps, "action" | "secondary">) {
+/// 一颗默认键紧凑 24：禁用带原因；在等时原位忙碌
+function CompactKey({ action }: { action: ToastAction }) {
+  return action.disabledReason ? (
+    <Button size="compact" disabled disabledReason={action.disabledReason}>
+      {action.label}
+    </Button>
+  ) : (
+    <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
+      <Button size="compact" onClick={action.onClick}>
+        {action.label}
+      </Button>
+    </BusySlot>
+  );
+}
+
+/// 键区：去处理、动作（默认键紧凑 24）+ 次要的离开 Sophia 的浅键。两档共用
+function ActionKeys({ go, action, secondary }: Pick<ToastProps, "go" | "action" | "secondary">) {
   return (
     <>
-      {action ? (
-        action.disabledReason ? (
-          <Button size="compact" disabled disabledReason={action.disabledReason}>
-            {action.label}
-          </Button>
-        ) : (
-          <BusySlot busy={action.busy !== undefined} label={action.busy ?? ""}>
-            <Button size="compact" onClick={action.onClick}>
-              {action.label}
-            </Button>
-          </BusySlot>
-        )
-      ) : null}
+      {go ? <CompactKey action={go} /> : null}
+      {action ? <CompactKey action={action} /> : null}
       {secondary ? (
         secondary.disabledReason ? (
           <Button variant="quiet" disabled disabledReason={secondary.disabledReason}>
@@ -272,6 +281,7 @@ export function RoutineLines({
   line,
   trail,
   stats,
+  go,
   action,
   secondary,
   onClose,
@@ -282,6 +292,7 @@ export function RoutineLines({
   line: ReactNode;
   trail?: string[];
   stats?: string;
+  go?: ToastAction;
   action?: ToastAction;
   secondary?: ToastAction;
   onClose?: () => void;
@@ -296,8 +307,8 @@ export function RoutineLines({
       <>
         {mark}
         {flat}
-        {action ? <span className="ss-toast__sep">·</span> : null}
-        <ActionKeys action={action} secondary={secondary} />
+        {action || go ? <span className="ss-toast__sep">·</span> : null}
+        <ActionKeys go={go} action={action} secondary={secondary} />
         {close}
       </>
     );
@@ -316,13 +327,94 @@ export function RoutineLines({
         </span>
       ) : null}
       {stats ? <div className="ss-toast__stats ss-selectable">{stats}</div> : null}
-      {action || secondary || close ? (
+      {go || action || secondary || close ? (
         <span className="ss-toast__keys">
-          <ActionKeys action={action} secondary={secondary} />
+          <ActionKeys go={go} action={action} secondary={secondary} />
           {close}
         </span>
       ) : null}
     </>
+  );
+}
+
+/// 右下档（notice）的正文，两种排法（issue #111，画板 #105 第七稿第 3 节，同锚点档「两行」的规则）：
+/// - 一行（`wrapped` 为 false，放得下宽 ≤ 400 时）：整句、` · 读数`、` · 原因`，键与 × 在主行右端；副行（路径）在主行下
+/// - 两行（放不下时）：字在左一格——整句一行（`main`），读数（`trail`，段间 ` · `）与原因各换到下一行
+///   （`ss-toast__sub`，12 `ink-mute`），副行再下；键与 × 在右侧一格、跨两行上下居中，不掉到字的下面
+export function NoticeLines({
+  wrapped,
+  main,
+  trail,
+  reason,
+  stats,
+  go,
+  action,
+  secondary,
+  onClose,
+  bodyRef,
+}: {
+  wrapped: boolean;
+  /// 整句（含计数）；读数与原因不在里面
+  main: ReactNode;
+  trail?: string[];
+  reason?: string;
+  stats?: string;
+  go?: ToastAction;
+  action?: ToastAction;
+  secondary?: ToastAction;
+  onClose?: () => void;
+  /// 量放不放得下用（一行时横向溢出就折成两行）
+  bodyRef?: Ref<HTMLDivElement>;
+}) {
+  const keys =
+    go || action || secondary || onClose ? (
+      <span className="ss-toast__actions">
+        <ActionKeys go={go} action={action} secondary={secondary} />
+        {onClose ? <CloseKey onClose={onClose} /> : null}
+      </span>
+    ) : null;
+  const statsLine = stats ? <div className="ss-toast__stats ss-selectable">{stats}</div> : null;
+  if (wrapped)
+    return (
+      <div ref={bodyRef} className="ss-toast__body is-two">
+        <div className="ss-toast__text">
+          <div className="ss-toast__main">{main}</div>
+          {trail?.length ? (
+            <div className="ss-toast__sub">
+              {trail.map((part, i) => (
+                <Fragment key={i}>
+                  {i > 0 ? <span className="ss-toast__sep">·</span> : null}
+                  <span>{part}</span>
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+          {reason ? <div className="ss-toast__sub">{reason}</div> : null}
+          {statsLine}
+        </div>
+        {keys}
+      </div>
+    );
+  return (
+    <div ref={bodyRef} className="ss-toast__body">
+      <div className="ss-toast__main">
+        {main}
+        {trail?.map((part, i) => (
+          <span key={i} className="ss-toast__trail">
+            <span className="ss-toast__sep">·</span>
+            <span>{part}</span>
+          </span>
+        ))}
+        {reason ? (
+          <>
+            <span className="ss-toast__sep">·</span>
+            <span className="ss-toast__reason">{reason}</span>
+          </>
+        ) : null}
+        {keys}
+      </div>
+      {statsLine}
+    </div>
   );
 }
 
@@ -340,6 +432,7 @@ function ResultToast(props: ToastProps) {
     trail,
     reason,
     stats,
+    go,
     action,
     secondary,
     onDismiss,
@@ -390,10 +483,11 @@ function ResultToast(props: ToastProps) {
   const placement = useContext(ToastPlacementContext);
   const anchored = placement === "anchored";
 
-  // 锚点档放不下最宽 420 时折成两行（画板 8A）：先按一行画，挂上之后量一次，横向溢出才折。记下是为哪一份内容
-  // 折的——内容（或界面语言）换了就回到一行重量。折了之后请浮起外壳按新尺寸再定一次位（它在同一刻按一行量过）。
-  // 有副行（路径）的一开始就是两行
+  // 放不下时折成两行（锚点档最宽 420，画板 8A；右下档宽 ≤ 400，issue #111）：先按一行画，挂上之后量一次，
+  // 横向溢出才折。记下是为哪一份内容折的——内容（或界面语言）换了就回到一行重量。锚点档折了之后请浮起外壳
+  // 按新尺寸再定一次位（它在同一刻按一行量过）；有副行（路径）的锚点档一开始就是两行
   const boxRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const relayout = useContext(ToastRelayoutContext);
   const fit = [
     locale(),
@@ -403,17 +497,18 @@ function ResultToast(props: ToastProps) {
     trail?.join("\n"),
     typeof message === "string" ? message : "",
     reason,
+    go?.label,
     action?.label,
     secondary?.label,
   ].join("\u0000");
   const [wrappedFor, setWrappedFor] = useState<string | null>(null);
-  const wrapped = anchored && (Boolean(stats) || wrappedFor === fit);
+  const wrapped = (anchored && Boolean(stats)) || wrappedFor === fit;
   useLayoutEffect(() => {
-    const el = boxRef.current;
-    if (!anchored || wrapped || !el) return;
+    const el = anchored ? boxRef.current : bodyRef.current;
+    if (wrapped || !el) return;
     if (el.scrollWidth > el.clientWidth) {
       setWrappedFor(fit);
-      relayout?.();
+      if (anchored) relayout?.();
     }
   });
 
@@ -491,6 +586,7 @@ function ResultToast(props: ToastProps) {
           }
           trail={trail}
           stats={stats}
+          go={go}
           action={action}
           secondary={secondary}
           onClose={onClose}
@@ -499,10 +595,10 @@ function ResultToast(props: ToastProps) {
     );
   }
 
-  // 右下：左侧 40 记号栏（✓ / ⊘ / !）
+  // 右下：左侧 40 记号栏（✓ / ⊘ / !）；放不下一行时字在左两行、键与 × 在右侧跨两行居中
   return (
     <div
-      className={`ss-toast ss-toast--notice${leavingClass}`}
+      className={`ss-toast ss-toast--notice${wrapped ? " is-wrapped" : ""}${leavingClass}`}
       data-kind={kind}
       role={role}
       {...holdHandlers}
@@ -510,18 +606,24 @@ function ResultToast(props: ToastProps) {
       <div className="ss-toast__indicator" title={t(titleKey)} role="img" aria-label={t(titleKey)}>
         {glyph}
       </div>
-      <div className="ss-toast__body">
-        <div className="ss-toast__main">
-          {main}
-          {action || secondary || onClose ? (
-            <span className="ss-toast__actions">
-              <ActionKeys action={action} secondary={secondary} />
-              {onClose ? <CloseKey onClose={onClose} /> : null}
-            </span>
-          ) : null}
-        </div>
-        {stats ? <div className="ss-toast__stats ss-selectable">{stats}</div> : null}
-      </div>
+      <NoticeLines
+        wrapped={wrapped}
+        main={
+          <>
+            {message !== undefined ? <span className="ss-toast__message">{message}</span> : null}
+            {lead}
+            {tallyNode}
+          </>
+        }
+        trail={trail}
+        reason={reason}
+        stats={stats}
+        go={go}
+        action={action}
+        secondary={secondary}
+        onClose={onClose}
+        bodyRef={bodyRef}
+      />
     </div>
   );
 }

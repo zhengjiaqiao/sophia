@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { t } from "./i18n.ts";
+import { listText, t } from "./i18n.ts";
 import {
   MODEL_FILTER_THRESHOLD,
   probingNote,
@@ -11,11 +11,25 @@ import {
   modelRowId,
   modelRowLabel,
   parseBackendError,
+  prefixExample,
+  resolveManual,
   snapshotOrder,
 } from "./modelsView.ts";
 import type { ModelEntry } from "./modelsView.ts";
 import type { GatewayProvider } from "./types.ts";
-import { CheckRow, FadeViewport, Mono, Note, TextField, useEdgeFades } from "./ui/index.ts";
+import {
+  BusySlot,
+  Button,
+  CheckRow,
+  FadeViewport,
+  FloatingToast,
+  Mono,
+  Note,
+  Tag,
+  TextField,
+  Toast,
+  useEdgeFades,
+} from "./ui/index.ts";
 import "./ModelList.css";
 
 /// 模型勾选列表：Codex 页网关行抽屉里的那一框（DESIGN「模型列表的写法」）。每个列表只列一家网关
@@ -31,7 +45,113 @@ export interface ModelListProps {
   empty?: ReactNode;
   /// 给了就不能勾新的（还没有密钥，试调不了）：没勾的行不可用、按下说这一句；已勾的照常能取消
   pickBlockedReason?: string;
+  /// 手动添加模型（sophia-dev#117，画板 SvjEZCgBMgWqe666nJGXR7 第四张）：给了就在框底出一行输入 + `试一下再加`；
+  /// 抛出＝试不通，原话写在输入框下，不加。列表只列一家，所以这一行就是这一家的。
+  /// 填的 id 对上列表里已有的（完整 id，或去掉服务商前缀的那一截）：不另加，走勾选那条路（先试调）
+  onAddManual?: (modelId: string) => Promise<unknown>;
 }
+
+/// 框底那一行（也给没有模型时的空态用）：输入 id → `试一下再加`（按下原位忙碌 `正在试调`）→ 通了清空输入框，
+/// 不通原话写在下面。回车同按键
+export function ManualModelRow({
+  onAdd,
+  blockedReason,
+}: {
+  /// 通了返回勾上的那个 id（可能是列表里已有的、补全了前缀的那一个），写进下面那句反馈
+  onAdd: (modelId: string) => Promise<string | void>;
+  /// 还没有密钥：不可用，按下说原因
+  blockedReason?: string;
+}) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  /// 结果用提示条说（2026-10-06 产品负责人：写在输入框下面好几次都没看见），锚在 `试一下再加` 正下方、
+  /// 轻量一行（DESIGN「Patterns › 反馈」：用户按的键出的结果锚在那颗键上，右下只给后台发生的事）：
+  /// 勾上了（成功，约 3 秒）、试不通 / 几家同名（做不成，8 秒）。`seq` 让同一种结果再出一次时重新计时
+  const [toast, setToast] = useState<{ seq: number; node: ReactNode } | null>(null);
+  const seq = useRef(0);
+  const dismiss = useCallback(() => setToast(null), []);
+  const show = (node: ReactNode) => {
+    seq.current += 1;
+    setToast({ seq: seq.current, node });
+  };
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const id = value.trim();
+  const add = async () => {
+    if (id === "" || busy) return;
+    setBusy(true);
+    setToast(null);
+    try {
+      const added = await onAdd(id);
+      if (mounted.current) {
+        setValue("");
+        const checked = typeof added === "string" ? added : id;
+        show(
+          <Toast
+            kind="success"
+            message={t("models.manual.checked", { model: checked })}
+            onDismiss={dismiss}
+          />,
+        );
+      }
+    } catch (error) {
+      // 几家同名那一句是前端自己抛的（`AmbiguousModel`），不带 `[code]` 前缀，直接用原句；后端的按 `[code] 一句` 拆
+      const message =
+        error instanceof ManualAddError ? error.message : parseBackendError(String(error)).message;
+      if (mounted.current) show(<Toast kind="cannot" message={message} onDismiss={dismiss} />);
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  };
+  return (
+    <div className="model-list__manual">
+      <div className="model-list__manual-row">
+        <TextField
+          mono
+          label={t("models.manual.label")}
+          placeholder={t("models.manual.placeholder")}
+          value={value}
+          spellCheck={false}
+          onChange={setValue}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void add();
+          }}
+        />
+        {/* 键与锚在它下面的提示条（FloatingToast 以这一层为锚） */}
+        <span className="model-list__manual-key">
+          <BusySlot busy={busy} label={t("models.manual.adding")}>
+            {blockedReason !== undefined ? (
+              <Button size="compact" disabled disabledReason={blockedReason}>
+                {t("models.manual.add")}
+              </Button>
+            ) : id === "" ? (
+              <Button size="compact" disabled disabledReason={t("models.manual.needId")}>
+                {t("models.manual.add")}
+              </Button>
+            ) : (
+              <Button size="compact" onClick={() => void add()}>
+                {t("models.manual.add")}
+              </Button>
+            )}
+          </BusySlot>
+          {toast ? (
+            <FloatingToast key={toast.seq} align="end">
+              {toast.node}
+            </FloatingToast>
+          ) : null}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/// 前端自己说的失败原因（几家同名、该带前缀）：句子已经写好，不按后端的 `[code] 一句` 拆
+class ManualAddError extends Error {}
 
 export const entryKey = modelEntryKey;
 
@@ -42,7 +162,14 @@ export const entryKey = modelEntryKey;
  * 打开（挂载）时排一次序（组内已选在前），之后勾选 / 取消不挪位置，下次打开再重排。
  * 勾选当场写盘；超过约 8 行时框顶出筛选框（`筛选 40 个模型`），列表在框内滚动、底边渐隐。
  */
-export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }: ModelListProps) {
+export function ModelList({
+  entries,
+  onToggle,
+  probe,
+  empty,
+  pickBlockedReason,
+  onAddManual,
+}: ModelListProps) {
   const [query, setQuery] = useState("");
   /// 正在试调用的行：再点不接（一次只试一回）
   const [probing, setProbing] = useState<ReadonlySet<string>>(() => new Set());
@@ -60,6 +187,8 @@ export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }
   }, []);
   /// 打开那一刻的排序：之后勾选只改状态、不挪位置
   const [snap] = useState(() => snapshotOrder(entries));
+  /// 刚由手动添加勾上的那一行：亮一会儿，让人找得到（#117）
+  const [flash, setFlash] = useState<string | null>(null);
   /// 滚动边缘渐隐：上面 / 下面还有被裁掉的行时，那一边出 16px 渐隐（DESIGN「渐变只用于功能」）
   const scrollRef = useRef<HTMLDivElement>(null);
   const fade = useEdgeFades(scrollRef);
@@ -108,6 +237,45 @@ export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }
     if (mounted.current) settle(key, null);
   };
 
+  /// 手动添加（#117）：先对一遍列表——对上已有的就按勾选的路走（没勾的先试调再勾，已勾的什么都不做）；
+  /// 几家都有这个名字就说清让人填完整 id；对不上才真的加。完了把那一行亮起来、筛选框换成它，人一眼看到勾在哪
+  const addManual = async (typed: string): Promise<string> => {
+    const match = resolveManual(latest.current, typed);
+    if (match.kind === "many") {
+      throw new ManualAddError(t("models.manual.ambiguous", { ids: listText(match.ids) }));
+    }
+    let id = typed.trim();
+    let key: string | null = null;
+    if (match.kind === "one") {
+      id = match.entry.model.id;
+      key = entryKey(match.entry);
+      if (!match.entry.model.selected) {
+        if (probe) await probe(match.entry.provider, id);
+        onToggle(match.entry.provider, id);
+      }
+    } else if (onAddManual) {
+      try {
+        await onAddManual(id);
+      } catch (error) {
+        // 没带服务商前缀、这家又都是带前缀的写法：多半是格式不对，给一个列表里的例子
+        const example = prefixExample(latest.current, id);
+        if (example === null) throw error;
+        throw new ManualAddError(t("models.manual.needPrefix", { model: id, example }));
+      }
+    }
+    if (mounted.current) {
+      if (withFilter) setQuery(id);
+      if (key !== null) {
+        setFlash(key);
+        window.setTimeout(
+          () => mounted.current && setFlash((f) => (f === key ? null : f)),
+          FLASH_MS,
+        );
+      }
+    }
+    return id;
+  };
+
   const row = (entry: ModelEntry) => {
     const { model } = entry;
     const key = entryKey(entry);
@@ -115,6 +283,21 @@ export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }
     const name = modelRowLabel(model);
     const context = contextLabel(model.contextWindow);
     const note = probing.has(key) ? probingNote() : (failed.get(key) ?? undefined);
+    // 手动填的（#117）：行尾带弱记号 `手动`，在读数与 id 之前
+    const manual = model.manual ? <Tag tone="weak">{t("models.manual.tag")}</Tag> : null;
+    const trailing =
+      manual === null && context === null ? (
+        id !== null ? (
+          <Mono truncate>{id}</Mono>
+        ) : undefined
+      ) : (
+        // 有读数时读数在前、不截，id 跟在后面
+        <span className="model-list__trail">
+          {manual}
+          {context !== null ? <span className="model-list__context">{context}</span> : null}
+          {id !== null ? <Mono truncate>{id}</Mono> : null}
+        </span>
+      );
     return (
       <CheckRow
         key={key}
@@ -122,20 +305,9 @@ export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }
         checked={model.selected || probing.has(key)}
         onChange={() => void toggle(entry)}
         disabledReason={model.selected ? undefined : pickBlockedReason}
+        highlighted={flash === key}
         note={note}
-        trailing={
-          context === null ? (
-            id !== null ? (
-              <Mono truncate>{id}</Mono>
-            ) : undefined
-          ) : (
-            // 有读数时读数在前、不截，id 跟在后面
-            <span className="model-list__trail">
-              <span className="model-list__context">{context}</span>
-              {id !== null ? <Mono truncate>{id}</Mono> : null}
-            </span>
-          )
-        }
+        trailing={trailing}
       >
         {name}
       </CheckRow>
@@ -171,9 +343,8 @@ export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }
           >
             {groups.length === 0 ? (
               <div className="model-list__empty">
-                <Note action={{ label: t("models.list.clearFilter"), onClick: () => setQuery("") }}>
-                  {t("models.list.noMatch")}
-                </Note>
+                {/* 清空就用筛选框自己右端的 ✕，不再多一颗「清除筛选」（2026-10-06 产品负责人：两个重复了） */}
+                <Note>{t("models.list.noMatch")}</Note>
               </div>
             ) : (
               groups.map((group) => (
@@ -190,6 +361,10 @@ export function ModelList({ entries, onToggle, probe, empty, pickBlockedReason }
           </div>
         </FadeViewport>
       )}
+      {onAddManual ? <ManualModelRow onAdd={addManual} blockedReason={pickBlockedReason} /> : null}
     </div>
   );
 }
+
+/// 刚勾上的那一行亮多久
+const FLASH_MS = 2500;

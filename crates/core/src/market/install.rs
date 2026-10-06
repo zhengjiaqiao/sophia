@@ -359,17 +359,18 @@ fn unlinked(plan: &InstallPlan, placed: &[&InstallItem], links: &SyncReport) -> 
 /// `archive::extract` 的形状
 type ExtractFn = dyn Fn(&[u8], &[Pick]) -> Vec<MarketResult<()>>;
 
-/// 解包、算 tree SHA、读提交 SHA：生产用 T1 / T2 的实现，测试换成不依赖它们的替身
+/// 解包、算本地指纹（`git` 记进安装记录，比改没改用 `LocalSha::is`）、读提交 SHA：
+/// 生产用 T1 / T2 的实现，测试换成不依赖它们的替身
 pub(crate) struct Ops<'a> {
     pub(crate) extract: &'a ExtractFn,
-    pub(crate) tree_sha: &'a dyn Fn(&Path) -> io::Result<String>,
+    pub(crate) local_sha: &'a dyn Fn(&Path) -> io::Result<treehash::LocalSha>,
     pub(crate) commit_sha: &'a dyn Fn(&[u8]) -> MarketResult<String>,
 }
 
 fn real_ops() -> Ops<'static> {
     Ops {
         extract: &archive::extract,
-        tree_sha: &treehash::tree_sha,
+        local_sha: &treehash::local_sha,
         commit_sha: &archive::commit_sha,
     }
 }
@@ -511,7 +512,8 @@ pub(crate) fn execute_with(
 
     for item in placed {
         out.installed.push(item.name.clone());
-        if let Ok(tree_sha) = (ops.tree_sha)(&item.dest) {
+        let local = (ops.local_sha)(&item.dest).ok();
+        if let Some((tree_sha, content)) = local.and_then(|l| Some((l.git?, l.content))) {
             out.records.push(InstallRecord {
                 name: item.name.clone(),
                 location: plan.location.clone(),
@@ -519,6 +521,7 @@ pub(crate) fn execute_with(
                 branch: from.branch.to_string(),
                 path: item.path.clone(),
                 tree_sha,
+                content_sha: Some(content),
                 commit_sha: from.commit_sha.to_string(),
                 installed_at: from.now,
             });
@@ -609,8 +612,18 @@ fn update_one(
     if entry_kind(&u.dir) != EntryKind::Dir {
         return Err(crate::t!("market.update.localGone"));
     }
-    let local = (ops.tree_sha)(&u.dir).ok();
-    let modified = local.as_deref() != Some(u.recorded_tree_sha.as_str());
+    let record_before = batch
+        .records
+        .iter()
+        .find(|r| r.location == u.location && r.name == u.name)
+        .cloned();
+    // 记录里排除杂项的指纹只在它说的就是这一版时才用
+    let recorded_content = record_before
+        .as_ref()
+        .filter(|r| r.tree_sha == u.recorded_tree_sha)
+        .and_then(|r| r.content_sha.as_deref());
+    let modified = !(ops.local_sha)(&u.dir)
+        .is_ok_and(|l| l.unchanged_since(&u.recorded_tree_sha, recorded_content));
     if modified && !batch.overwrite_modified {
         return Err(crate::t!("market.update.localModified", name = u.name));
     }
@@ -662,21 +675,20 @@ fn update_one(
     }
     let _ = std::fs::remove_dir(&temp);
 
-    let record_before = batch
-        .records
-        .iter()
-        .find(|r| r.location == u.location && r.name == u.name)
-        .cloned();
-    let record = (ops.tree_sha)(&u.dir).ok().map(|tree_sha| InstallRecord {
-        name: u.name.clone(),
-        location: u.location.clone(),
-        repo: u.repo.clone(),
-        branch: u.branch.clone(),
-        path: u.path.clone(),
-        tree_sha,
-        commit_sha: (ops.commit_sha)(bytes).unwrap_or_default(),
-        installed_at: batch.now,
-    });
+    let record = (ops.local_sha)(&u.dir)
+        .ok()
+        .and_then(|l| Some((l.git?, l.content)))
+        .map(|(tree_sha, content)| InstallRecord {
+            name: u.name.clone(),
+            location: u.location.clone(),
+            repo: u.repo.clone(),
+            branch: u.branch.clone(),
+            path: u.path.clone(),
+            tree_sha,
+            content_sha: Some(content),
+            commit_sha: (ops.commit_sha)(bytes).unwrap_or_default(),
+            installed_at: batch.now,
+        });
     let item = UndoItem {
         location: u.location.clone(),
         name: u.name.clone(),
@@ -836,11 +848,31 @@ pub(crate) mod testkit {
 
     /// 按相对路径排序后把路径与内容一起算 SHA-1：只求「内容一样 ⇔ 指纹一样」，不是 git 的算法
     pub(crate) fn fake_tree_sha(dir: &Path) -> io::Result<String> {
+        fake_sha(dir, |_| false)
+    }
+
+    /// `treehash::local_sha` 的替身：排除杂项的两种同样排除（名单用真的）
+    pub(crate) fn fake_local_sha(dir: &Path) -> io::Result<treehash::LocalSha> {
+        Ok(treehash::LocalSha {
+            git: Some(fake_sha(dir, |_| false)?),
+            content: fake_sha(dir, treehash::is_ignored)?,
+            content_with_gitignore: Some(fake_sha(dir, |part| {
+                treehash::is_ignored(part) && !part.eq_ignore_ascii_case(".gitignore")
+            })?),
+        })
+    }
+
+    fn fake_sha(dir: &Path, skip: impl Fn(&str) -> bool) -> io::Result<String> {
         if entry_kind(dir) != EntryKind::Dir {
             return Err(io::Error::other("不是文件夹"));
         }
         let mut files = Vec::new();
         walk(dir, dir, &mut files)?;
+        files.retain(|(rel, _)| {
+            !Path::new(rel)
+                .iter()
+                .any(|part| skip(&part.to_string_lossy()))
+        });
         files.sort();
         let mut hasher = Sha1::new();
         for (rel, bytes) in files {
@@ -880,7 +912,7 @@ pub(crate) mod testkit {
     pub(crate) fn ops() -> Ops<'static> {
         Ops {
             extract: &fake_extract,
-            tree_sha: &fake_tree_sha,
+            local_sha: &fake_local_sha,
             commit_sha: &fake_commit,
         }
     }
@@ -1172,6 +1204,11 @@ mod tests {
             ("main", "skills/pdf")
         );
         assert_eq!(rec.tree_sha, fake_tree_sha(&dest).unwrap());
+        assert_eq!(
+            rec.content_sha,
+            Some(fake_local_sha(&dest).unwrap().content),
+            "排除杂项的指纹一起记下"
+        );
         assert_eq!(rec.commit_sha, "abc123");
         assert_eq!(rec.installed_at, 1_700_000_000);
 
@@ -1423,6 +1460,7 @@ mod tests {
             branch: "main".into(),
             path: "skills/pdf".into(),
             tree_sha: fake_tree_sha(&dir).unwrap(),
+            content_sha: None,
             commit_sha: "old".into(),
             installed_at: 1,
         };
@@ -1436,7 +1474,7 @@ mod tests {
     }
 
     fn update_info(s: &Installed) -> UpdateInfo {
-        let local = fake_tree_sha(&s.dir).unwrap();
+        let local = fake_local_sha(&s.dir).unwrap();
         UpdateInfo {
             name: "pdf".into(),
             location: "global".into(),
@@ -1445,8 +1483,8 @@ mod tests {
             branch: "main".into(),
             path: "skills/pdf".into(),
             origin: UpdateOrigin::Sophia,
-            locally_modified: local != s.record.tree_sha,
-            local_tree_sha: Some(local),
+            locally_modified: !local.is(&s.record.tree_sha),
+            local_tree_sha: local.git,
             recorded_tree_sha: s.record.tree_sha.clone(),
             remote_tree_sha: "remote-v2".into(),
             changed_files: Vec::new(),
@@ -1591,6 +1629,59 @@ mod tests {
         let mut current = out.records.clone();
         undo(&out.take_undo().unwrap(), &s.hold_root, &mut current);
         assert!(current.is_empty());
+    }
+
+    /// #108：Finder 打开过、跑过里面的脚本（`.DS_Store`、`__pycache__`）不算改过：不带 overwrite 也直接更新
+    #[test]
+    fn update_ignores_junk_files() {
+        let s = installed_v1();
+        std::fs::write(s.dir.join(".DS_Store"), "finder").unwrap();
+        std::fs::create_dir_all(s.dir.join("__pycache__")).unwrap();
+        std::fs::write(s.dir.join("__pycache__/helper.cpython-312.pyc"), "bytecode").unwrap();
+        let info = update_info(&s);
+        assert!(!info.locally_modified);
+        let records = vec![s.record.clone()];
+        let archives = archives_v2();
+        let batch = UpdateBatch {
+            records: &records,
+            archives: &archives,
+            overwrite_modified: false,
+            hold_root: &s.hold_root,
+            now: 99,
+        };
+        let out = execute_update_with(&[info], &batch, &ops());
+        assert_eq!(out.installed, vec!["pdf".to_string()]);
+        assert!(out.failed.is_empty(), "{:?}", out.failed);
+    }
+
+    /// #108：装下的那一版自己带着 `.DS_Store`、`.gitignore`（作者误提交），之后 Finder 改了 `.DS_Store`、
+    /// 用户删了 `.gitignore`：按记下的排除杂项指纹比，不算改过；更新后的记录同样带上这个指纹
+    #[test]
+    fn update_compares_recorded_content_sha() {
+        let mut s = installed_v1();
+        std::fs::write(s.dir.join(".DS_Store"), "v1").unwrap();
+        std::fs::write(s.dir.join(".gitignore"), "*.pyc\n").unwrap();
+        let baseline = fake_local_sha(&s.dir).unwrap();
+        s.record.tree_sha = baseline.git.clone().unwrap();
+        s.record.content_sha = Some(baseline.content);
+        std::fs::write(s.dir.join(".DS_Store"), "finder rewrote").unwrap();
+        std::fs::remove_file(s.dir.join(".gitignore")).unwrap();
+        let records = vec![s.record.clone()];
+        let archives = archives_v2();
+        let batch = UpdateBatch {
+            records: &records,
+            archives: &archives,
+            overwrite_modified: false,
+            hold_root: &s.hold_root,
+            now: 99,
+        };
+        let out = execute_update_with(&[update_info(&s)], &batch, &ops());
+        assert_eq!(out.installed, vec!["pdf".to_string()]);
+        assert!(out.failed.is_empty(), "{:?}", out.failed);
+        assert_eq!(
+            out.records[0].content_sha,
+            Some(fake_local_sha(&s.dir).unwrap().content)
+        );
     }
 
     #[test]

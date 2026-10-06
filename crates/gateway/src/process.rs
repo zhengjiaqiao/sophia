@@ -154,6 +154,30 @@ pub fn list_processes() -> io::Result<Vec<ProcessInfo>> {
     Ok(parse_ps(&String::from_utf8_lossy(&output.stdout)))
 }
 
+/// 让这个 pid 的图形应用正常退出：`NSRunningApplication.terminate`，与 ⌘Q 同一条路
+/// （应用自己走退出流程，Electron 的辅助进程跟着退）。返回请求是否发出去了：
+/// 系统里没有这个 pid 的应用、或系统说没发成 → false，由调用方退回 SIGTERM。
+/// 不等它退出；不用 `osascript`（会弹「Sophia 想控制 …」的自动化授权框）。
+/// 为什么不直接 SIGTERM：Electron 收到 SIGTERM 不带走辅助进程，每次都留下一组孤儿（issue #143）
+#[cfg(target_os = "macos")]
+pub fn quit_app(pid: u32) -> bool {
+    use objc2_app_kit::NSRunningApplication;
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    // 在后台线程上调用：自建自动释放池，免得返回的对象攒在线程的隐式池里
+    objc2::rc::autoreleasepool(|_| {
+        NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+            .is_some_and(|app| app.terminate())
+    })
+}
+
+/// 非 macOS 没有 `NSRunningApplication`：总是 false，调用方照旧发 SIGTERM
+#[cfg(not(target_os = "macos"))]
+pub fn quit_app(_pid: u32) -> bool {
+    false
+}
+
 /// 发 SIGTERM。用 `/bin/kill` 而不是 libc：不为一个信号引一个新依赖。
 /// 失败时把系统的原话带出去，不编
 pub fn terminate(pid: u32) -> io::Result<()> {

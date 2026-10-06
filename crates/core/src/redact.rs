@@ -447,6 +447,11 @@ const KEY_PREFIXES: &[&str] = &[
     "AIza",
 ];
 
+/// 文本里有没有长得像密钥的一串（`sk-…`、`ghp_…`、JWT）：MCP 的「像密钥的值」（密钥提醒 S19）用
+pub(crate) fn has_key_shaped(text: &str) -> bool {
+    key_shaped(text) != text
+}
+
 /// 长得像密钥的一串（服务商常见前缀，或 JWT）
 fn key_like(token: &str) -> bool {
     token.len() >= 20

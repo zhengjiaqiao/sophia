@@ -80,6 +80,11 @@ pub struct InstallRecord {
     pub path: String,
     /// 装下那一版文件夹的 git tree SHA，与 `.skill-lock.json` 的 `skillFolderHash` 同一种
     pub tree_sha: String,
+    /// 装下那一版排除杂项后的指纹（`treehash::content_sha`，#108），比本地改没改时优先用它：
+    /// 那一版自己带着 `.DS_Store`、`.gitignore` 时，它们之后变了也不算改动。
+    /// 这一项加上之前记下的没有，按 `tree_sha` 比
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_sha: Option<String>,
     /// 提交 SHA，从 codeload 包的 `pax_global_header` 读
     pub commit_sha: String,
     /// 装的时刻，unix 秒；更新后改成更新的时刻
@@ -117,7 +122,7 @@ pub struct UpdateInfo {
     pub recorded_tree_sha: String,
     /// GitHub 上此刻的；「关掉这一批」记的就是它
     pub remote_tree_sha: String,
-    /// 本地改过：`local_tree_sha` 与 `recorded_tree_sha` 不同
+    /// 本地改过：本地两种指纹都对不上 `recorded_tree_sha`（`treehash::LocalSha::is`，杂项不算改动）
     pub locally_modified: bool,
     /// 改过的文件，相对 skill 文件夹、按名排序。没改过为空；改过但还没取到记下那一版的
     /// 文件清单时也为空（网络层补上后再算，见 `treehash::changed_files`）
@@ -332,6 +337,10 @@ pub struct McpInstallRequest {
     /// 只对项目位置的 Claude Code 生效，用户级与其它 agent 忽略
     #[serde(default)]
     pub claude_code_scope: Option<String>,
+    /// 安装页勾了「同时加进 .gitignore」（密钥提醒 S19）：写成之后，提醒为 `KeyHint::Remind` 的项目文件
+    /// 追加进项目根的 `.gitignore`
+    #[serde(default)]
+    pub add_to_gitignore: bool,
 }
 
 /// 写进某个 agent 行不行（R10 安装页每个勾选行后面那句）
@@ -363,6 +372,14 @@ pub struct McpTargetCheck {
     pub reason: Option<String>,
     /// 生效时机等附注：`重启 Claude Desktop 后生效`
     pub note: Option<String>,
+    /// 密钥提醒（S19）：往项目里的 git 仓库写像密钥的值时为 `Remind`（安装页出「同时加进 .gitignore」）；
+    /// 目标文件已被跟踪时为 `Tracked`（不出勾选，换成一句说明）
+    #[serde(default)]
+    pub key_hint: crate::keyhint::KeyHint,
+    /// `Remind` / `Tracked` 时这个目标在项目根 `.gitignore` 里会写成的那一行（`.cursor/mcp.json`、`/.mcp.json`）：
+    /// 安装页提示框与说明列「哪几个文件」
+    #[serde(default)]
+    pub gitignore_line: Option<String>,
 }
 
 /// 发现 · MCP 列表里的一条（精选或官方目录）
@@ -463,6 +480,7 @@ mod tests {
             branch: "main".into(),
             path: "skills/pdf".into(),
             tree_sha: "t".into(),
+            content_sha: None,
             commit_sha: "c".into(),
             installed_at: 1,
         };

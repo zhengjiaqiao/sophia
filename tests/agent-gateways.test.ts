@@ -7,11 +7,10 @@ import {
   MODELS_TOOLS,
   addGatewayBlocked,
   gatewayFacts,
-  protocolText,
   switchNeedsConfirm,
   unsavedText,
 } from "../src/modelsView.ts";
-import type { GatewayProvider, GatewayProviderModel, GatewayState } from "../src/types.ts";
+import type { GatewayProvider, GatewayProviderModel, GatewayState, ProviderPreset } from "../src/types.ts";
 import { CLAUDE_OFF, gatewayFixture, type CodexFixture } from "./gateway-fixture.ts";
 
 // 网关小区块（DESIGN「agent 页 › 网关」，D5：网关二级页并进 Codex 页「第三方模型」一节）：
@@ -83,16 +82,27 @@ const or = (unreachable?: string) =>
   });
 
 /// 每一行的 HTML 片段，按出现顺序
-const rows = (html: string) => html.split(/(?=<div class="ss-listrow[" ])/).slice(1);
+/// 页面上的网关行按添加先后倒着显示（新的在上，2026-10-06）；用例按添加先后列网关，这里倒回来对上
+const rows = (html: string) => html.split(/(?=<div class="ss-listrow[" ])/).slice(1).reverse();
 
 test("骨架：小标 `网关` + 右端 `+ 网关`（默认键），一家一行；没有二级页的 ← 与页头", () => {
   const html = block({ providers: [ap(), or()] });
   assert.match(
     html,
-    /class="ss-sectionlabel has-rule has-action"><span class="ss-sectionlabel__text">网关<\/span>[^]*ss-btn--add[^]*网关/,
+    /class="ss-sectionlabel has-rule has-action"><span class="ss-sectionlabel__text">网关<span class="gw-block__port">本机端口 47328<\/span><\/span>[^]*ss-btn--add[^]*网关/,
   );
   assert.equal(rows(html).length, 2);
   assert.doesNotMatch(html, /ss-subpage|Codex 的网关|src-row/);
+});
+
+test("网关列表按添加先后倒着显示：后加的在最上面（2026-10-06 产品负责人：新加的保存后不能跑到末尾不见）", () => {
+  const html = block({
+    providers: [
+      ap(),
+      provider({ id: "ds", name: "", shortName: "deepseek", baseUrl: "https://api.deepseek.com" }),
+    ],
+  });
+  assert.ok(html.indexOf(">deepseek<") < html.indexOf(">ap-gateway<"), "后加的 deepseek 在上");
 });
 
 test("行：拉手（常显，在名字前）+ 短名；第二行 `地址 · 已连接 · 已选 1 / 2`（地址去掉协议头，截断才提示）；行尾 ↻（刷新模型列表，2026-09-30）+ 铅笔 + 垃圾桶", () => {
@@ -155,7 +165,7 @@ test("抽屉＝从这家挑模型：限制说明（全文）→ 勾选列表（�
   assert.ok(note > 0 && note < notice && notice < list);
   assert.match(
     first,
-    /gw-row__note">只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了</,
+    /gw-row__note">网页搜索用不了 · 图片要看模型</,
   );
   // 抽屉里没有 `已选` 片（节头的 `在用` 已经列了）
   assert.doesNotMatch(first, /gw-row__chosen|ss-modelchip/);
@@ -261,7 +271,6 @@ test("没有网关：小标下一句「还没有网关，先加一家」，不�
 
 test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默认键，抽屉里紧凑）；只读 `本机端口 47328` `协议 拉取模型时识别`", () => {
   const html = render(GatewayForm, {
-    state: state(),
     provider: null,
     busy: false,
     onSave: async () => "x",
@@ -270,7 +279,13 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默
     onCancel: noop,
     onDirtyChange: noop,
     ask: null,
+    // 新网关先选服务商（spec S1，下面单测）；这里直接从「自定义地址」看地址与密钥
+    initialPreset: "custom",
   });
+  // 自定义地址：服务商一行写 `自定义地址` + `换一家`，没有 `预设` 记号
+  assert.match(html, /gw-preset__picked"><span>自定义地址<\/span>/);
+  assert.match(html, /gw-preset__change">[^]*?>换一家<\/button>/);
+  assert.doesNotMatch(html, />预设</);
   // 输入框是组件库的 TextField（凹面、聚焦只转边色）；可见标签 12 ink-mute 定宽 44，与输入框关联：
   // 读屏名就是看得见的那个字（aria-labelledby），点标签聚焦输入框（htmlFor → id）
   const url = html.match(
@@ -290,12 +305,10 @@ test("表单：`地址` `密钥` + `保存`（主动作墨键）+ `取消`（默
   assert.match(html, /class="ss-btn ss-btn--primary ss-btn--compact"[^>]*>保存</);
   assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>取消</);
   assert.doesNotMatch(html, /ss-btn--quiet/);
-  assert.match(html, /本机端口 <span class="gw-form__value">47328<\/span>/);
-  assert.match(html, /协议 <span class="gw-form__value">Responses → Chat Completions<\/span>/);
-  assert.equal(protocolText("chat"), "Responses → Chat Completions");
+  // 表单底下不再有端口与协议那一行（2026-10-06）：端口挪到「网关」小标旁
+  assert.doesNotMatch(html, /本机端口|协议 /);
   // 离开 / 换一行时有没保存的改动：就地一句 + 保存 / 丢弃
   const ask = render(GatewayForm, {
-    state: state(),
     provider: ap(),
     busy: false,
     onSave: async () => "x",
@@ -333,7 +346,7 @@ test("网关行右键（D18）与离开拦截：用外壳的 contextMenuHandler 
   assert.doesNotMatch(css, /cubic-bezier|cursor:\s*pointer/);
   // 右键菜单开着时行带亮着：交给 ListRow 的 highlighted，页面不再自写行与悬停带
   assert.match(tsx, /highlighted=\{menuRow === p\.id\}/);
-  assert.doesNotMatch(css, /gw-row__main|:hover/);
+  assert.doesNotMatch(css, /gw-row__main|gw-row[^{]*:hover/);
 });
 
 // ===== 两家各管自己的网关，配置时可以顺手同步（spec 2026-09-29 R43；DESIGN「同步由用户选」） =====
@@ -345,7 +358,6 @@ const claudeWith = (providers: GatewayProvider[]) => ({
 });
 
 const formProps = (extra: Record<string, unknown> = {}) => ({
-  state: state(),
   provider: null,
   busy: false,
   onSave: async () => "x",
@@ -357,8 +369,82 @@ const formProps = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+// ===== 新网关第一步：选服务商（spec S1，sophia-dev#95；画板 SvjEZCgBMgWqe666nJGXR7） =====
+
+const PRESETS: ProviderPreset[] = [
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    website: "https://platform.deepseek.com",
+    keysUrl: "https://platform.deepseek.com/api_keys",
+    region: "cn",
+    openai: { apiBase: "https://api.deepseek.com", protocol: "responses" },
+    anthropic: { apiBase: "https://api.deepseek.com/anthropic" },
+  },
+  {
+    id: "mimo",
+    name: "Xiaomi MiMo",
+    website: "https://mimo.xiaomi.com",
+    region: "cn",
+    openai: null,
+    anthropic: { apiBase: "https://api.xiaomimimo.com/anthropic" },
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    website: "https://openrouter.ai",
+    region: "global",
+    openai: { apiBase: "https://openrouter.ai/api/v1", protocol: "responses" },
+    anthropic: null,
+  },
+];
+
+test("新网关第一步：`服务商` 搜索框 + 名单（暂不支持的灰显带记号、原因在提示框里、最下面自定义地址）；只有 `取消`，没有常驻说明（2026-10-06）", async () => {
+  const presets = await import("../src/presets.ts");
+  presets.seedPresetsForTest(PRESETS);
+  const html = render(GatewayForm, formProps());
+  assert.match(html, /gw-form__label gw-form__label--top"[^>]*>服务商</);
+  assert.match(html, /class="ss-textfield__input"[^>]*placeholder="搜索服务商"/);
+  // 一列到底、不分国内海外（2026-10-05 产品负责人）；`自定义地址…` 在滚动区之外的框底
+  const ds = html.indexOf("DeepSeek");
+  const mimo = html.indexOf("Xiaomi MiMo");
+  const or = html.indexOf("OpenRouter");
+  const custom = html.indexOf("自定义地址…");
+  assert.ok(ds > 0 && ds < mimo && mimo < or && or < custom, "顺序不对");
+  assert.doesNotMatch(html, />国内<|>海外</);
+  assert.match(html, /gw-preset__scroll"[^>]*>[^]*OpenRouter[^]*<\/div><div class="gw-preset__foot">[^]*自定义地址…/);
+  assert.match(html, /gw-preset__item gw-preset__item--off"[^>]*>[^]*?Xiaomi MiMo[^]*?暂不支持/);
+  assert.match(html, /api\.deepseek\.com/);
+  assert.match(html, /这家只给 Anthropic 协议的地址，Sophia 暂时接不上/);
+  // 不言自明的都不写：名单下没有说明句，键行只有 `取消`，自定义地址后没有副句
+  assert.doesNotMatch(html, />保存</);
+  assert.doesNotMatch(html, /gw-form__hint|不在名单里的服务商/);
+  assert.doesNotMatch(html, />地址<\/label>|>密钥<\/label>/);
+  // 选了 DeepSeek：服务商一行 `DeepSeek` + `换一家`（不再带 `预设` 记号），地址已填、密钥框等着、取密钥的链接、协议按预设
+  const picked = render(GatewayForm, formProps({ initialPreset: PRESETS[0] }));
+  assert.match(picked, /gw-preset__picked"><span>DeepSeek<\/span><span class="gw-preset__change">/);
+  assert.doesNotMatch(picked, />预设</);
+  assert.match(picked, /value="https:\/\/api\.deepseek\.com"/);
+  assert.match(picked, /gw-preset__keys"[^>]*>去 DeepSeek 取密钥 ↗<\/a>/);
+  presets.seedPresetsForTest(null);
+});
+
+test("选的预设这一家已经加过（地址撞上现有网关）：不进表单，交给 onPickExisting 跳到那一行", async () => {
+  const presets = await import("../src/presets.ts");
+  presets.seedPresetsForTest(PRESETS);
+  const { addressTakenBy } = await import("../src/modelsView.ts");
+  const mine = provider({ id: "ds", name: "DeepSeek", baseUrl: "https://api.deepseek.com/" });
+  // 纯逻辑：同一地址（末尾斜杠不算差别）认出是哪一行；表单的 pick 按这个结果调 onPickExisting
+  assert.equal(addressTakenBy([mine], PRESETS[0].openai!.apiBase, undefined)?.id, "ds");
+  assert.equal(addressTakenBy([mine], PRESETS[2].openai!.apiBase, undefined), null);
+  presets.seedPresetsForTest(null);
+});
+
 test("新建表单：`地址` `密钥` 下一行勾选 `也加到 Claude`（CheckRow，默认勾上），在 `保存` 之前；不给另一家就不出", () => {
-  const html = render(GatewayForm, formProps({ other: { name: "Claude", providers: [] } }));
+  const html = render(
+    GatewayForm,
+    formProps({ other: { name: "Claude", providers: [] }, initialPreset: "custom" }),
+  );
   const key = html.indexOf(">密钥<");
   const sync = html.indexOf("也加到 Claude");
   const save = html.indexOf(">保存<");
@@ -367,7 +453,15 @@ test("新建表单：`地址` `密钥` 下一行勾选 `也加到 Claude`（Chec
     html,
     /gw-form__sync">(<span[^>]*>)?<button type="button" role="checkbox" aria-checked="true"[^>]*>[^]*也加到 Claude/,
   );
-  assert.doesNotMatch(render(GatewayForm, formProps()), /也加到|role="checkbox"/);
+  // 表单里附加的一个选项：勾选行小档，名字跟着 12 号的标签与说明走（DESIGN-components「勾选行 › 字号随场景」）
+  assert.match(
+    html,
+    /gw-form__sync">(<span[^>]*>)?<button[^>]*class="ss-checkrow ss-checkrow--small"/,
+  );
+  assert.doesNotMatch(
+    render(GatewayForm, formProps({ initialPreset: "custom" })),
+    /也加到|role="checkbox"/,
+  );
 });
 
 test("编辑表单：另一家有同一地址的网关时 `Claude 里的 ap-gateway 一起改`（默认勾上）；没有就不出", () => {
@@ -497,4 +591,40 @@ test("还没有密钥（画板 1PxHo6ZoEe8pFCYbU1pAud）：第二行 `还没有�
     /type="password"/,
   );
   assert.doesNotMatch(focused(form(null)).join(""), /type="password"/);
+});
+// #144：拉列表的接口不一定验密钥（OpenRouter），真发请求被拒了密钥才知道。那一家照「无法连接」画（红字、原因写全），
+// 原因是「密钥无效」；重拉列表清不掉它，所以行尾只有 `详情` 与铅笔，不出 `再试一次`
+test("真实调用被拒了密钥：`地址 · 密钥无效…`（红字，不写「无法连接」）；有 `详情`，不出 `再试一次`", () => {
+  const reason = "密钥无效，请换一个密钥";
+  const detail = "POST https://openrouter.ai/api/v1/chat/completions → 401 Unauthorized";
+  const rejected: GatewayProvider = {
+    ...or(reason),
+    unreachableDetail: detail,
+    keyRejectedOnCall: true,
+    keyInvalid: true,
+    models: [model({ selected: true }), model({ id: "b", slug: "b" })],
+  };
+  // 密钥被拒时网络是通的：红字直接是原因，不写「无法连接」（2026-10-06）
+  assert.deepEqual(gatewayFacts(rejected), {
+    url: "https://openrouter.ai/api/v1",
+    statusKind: "unreachable",
+    status: reason,
+    reason: null,
+    picked: null,
+  });
+  const [, row] = rows(block({ providers: [ap(), rejected] }));
+  assert.match(row, new RegExp(`gw-row__down">${reason}<`));
+  assert.doesNotMatch(row, /无法连接/);
+  assert.doesNotMatch(row, /gw-row__reason/);
+  assert.doesNotMatch(row, /已连接/);
+  assert.match(row, />详情<\/button>[^]*title="编辑"/);
+  assert.doesNotMatch(row, />再试一次</);
+  assert.doesNotMatch(row, /刷新模型列表/);
+  // 拉列表记下的「密钥无效」照旧给 `再试一次`，同样不写「无法连接」；没拉到模型时空态也不说「无法连接」
+  const fetchedRejected: GatewayProvider = { ...or(reason), keyInvalid: true };
+  const [, fetched] = rows(block({ providers: [ap(), fetchedRejected] }, { expanded: new Set(["or"]) }));
+  assert.match(fetched, />再试一次</);
+  assert.match(fetched, new RegExp(`gw-row__down">${reason}<`));
+  assert.doesNotMatch(fetched, /无法连接/);
+  assert.match(fetched, /gw-row__none"><p class="ss-note"><span class="ss-note__text">还没拉到模型</);
 });

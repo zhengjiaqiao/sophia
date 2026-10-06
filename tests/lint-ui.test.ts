@@ -148,6 +148,22 @@ test("z-index-token：只许 var(--z-*) 或基于它的 calc", () => {
     assert.deepEqual(hits("z-index-token", css, "src/x.css"), [], css);
 });
 
+// ===== color =====
+
+test("color：注释里的 issue 号与带前缀的 #数字 不是色值；代码里的字面色照报", () => {
+  for (const [src, path] of [
+    ["/* 框底手动添加一行（#117）：上一条行线 */\n.a { color: var(--ink); }", "src/x.css"],
+    ["  /// 用户手动填的（sophia-dev#117）：刷新列表不冲掉\n  manual?: boolean;", "src/types.ts"],
+    ["// 画板 SvjEZCgBMgWqe666nJGXR7 第四张（#117）\nconst a = 1;", "src/X.tsx"],
+  ] as const)
+    assert.deepEqual(hits("color", src, path), [], src);
+  assert.deepEqual(hits("color", ".a { color: #117; }", "src/x.css"), ["#117 不是 token 色"]);
+  assert.deepEqual(hits("color", '<div style={{ color: "#123456" }} />', "src/X.tsx"), [
+    "#123456 不是 token 色",
+  ]);
+  assert.deepEqual(hits("color", "a.b { color: #117 }", "src/x.css"), ["#117 不是 token 色"]);
+});
+
 // ===== font =====
 
 test("font：tokens.css 里三个字族的回退栈都要带 CJK——直接写苹方，或经 --font-cjk 引用；--font-cjk 只写中文字族", () => {

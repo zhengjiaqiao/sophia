@@ -81,6 +81,8 @@ pub(super) struct World {
     pub(super) open_error: Option<String>,
     /// 调用顺序：quit / open / lock / unlock / save:<phase>
     pub(super) events: Vec<String>,
+    /// Codex 那一家的网关设置被存了几次
+    pub(super) settings_saves: u32,
 }
 
 /// 见 `Fixture::codex_state`
@@ -254,7 +256,9 @@ pub(super) fn fixture() -> Fixture {
         save_settings: Box::new({
             let w = w.clone();
             move |s| {
-                w.lock().unwrap().settings = s.clone();
+                let mut w = w.lock().unwrap();
+                w.settings = s.clone();
+                w.settings_saves += 1;
                 Ok(())
             }
         }),
@@ -2438,6 +2442,51 @@ fn catalog_context_windows(f: &Fixture) -> std::collections::HashMap<String, u64
 /// 拉取时网关给的上下文长度：存下、出现在状态里（`agents[].providers[].models[].contextWindow`）、
 /// 勾选（界面只传 id 与显示名）不抹掉它和看图能力、再拉取时新值覆盖而没给值时沿用旧值、
 /// 已选却没返回的原样保留，最后写进 Codex 目录的 `context_window`
+/// sophia-dev#117：手动填的模型进列表就勾上、带 `manual`；再拉取（网关列表里没有它）照样在；
+/// 取消勾选就从列表移除；同一个 id 已在列表里就只勾上
+#[test]
+fn manual_model_is_added_selected_survives_refetch_and_is_removed_when_unchecked() {
+    let f = fixture();
+    f.configure();
+    f.merge_fetched_models(vec![fetched("weibo/glm-5", None)], "")
+        .unwrap();
+    let id = f.first_provider().unwrap();
+    f.app
+        .add_manual_model_in(Agent::Codex, &id, " my/preview ")
+        .unwrap();
+    let saved = f.app.load().unwrap().providers[0].models.clone();
+    let mine = saved.iter().find(|m| m.model.id == "my/preview").unwrap();
+    assert!(mine.selected && mine.model.manual);
+    let state = serde_json::to_value(f.app.state()).unwrap();
+    let models = &state["agents"][0]["providers"][0]["models"];
+    assert_eq!(models[1]["id"], "my/preview");
+    assert_eq!(models[1]["manual"], true);
+    assert_eq!(models[0]["manual"], false);
+
+    // 已在列表里的 id（网关给的 glm-5 没勾）：不报错，替用户勾上，也不变成手动的
+    f.app
+        .add_manual_model_in(Agent::Codex, &id, "weibo/glm-5")
+        .unwrap();
+    let saved = f.app.load().unwrap().providers[0].models.clone();
+    let glm = saved.iter().find(|m| m.model.id == "weibo/glm-5").unwrap();
+    assert!(glm.selected && !glm.model.manual);
+    assert_eq!(saved.len(), 2, "没有多出一条");
+
+    // 再拉取：网关没列它，手动的照样在
+    f.merge_fetched_models(vec![fetched("weibo/glm-5", None)], "")
+        .unwrap();
+    let saved = f.app.load().unwrap().providers[0].models.clone();
+    assert!(saved
+        .iter()
+        .any(|m| m.model.id == "my/preview" && m.model.manual));
+
+    // 取消勾选（完整勾选里没有它）：移除，不是留着没勾
+    f.set_models(vec![pick("weibo/glm-5")]).unwrap();
+    let saved = f.app.load().unwrap().providers[0].models.clone();
+    assert!(!saved.iter().any(|m| m.model.id == "my/preview"));
+    assert_eq!(saved.len(), 1);
+}
+
 #[test]
 fn fetched_context_window_survives_select_and_refetch_and_reaches_the_catalog() {
     let f = fixture();
@@ -2631,4 +2680,239 @@ fn only_managed_files_can_be_fixed_or_opened() {
             None
         );
     }
+}
+// ---------- 真实调用的密钥结论（#144） ----------
+
+fn rejected(detail: &str) -> crate::router::KeyVerdict {
+    crate::router::KeyVerdict::Rejected {
+        detail: detail.into(),
+    }
+}
+
+/// 路由转发的请求被拒了密钥：那一家记成「密钥无效」（带原文）并落盘；同一结论再报不写文件。
+/// 拉列表成功、拉列表又失败都不顶掉它；之后一次调用成功才清，清过再报「成功」也不写
+#[test]
+fn a_rejected_call_marks_the_provider_until_a_call_succeeds() {
+    let f = fixture();
+    let (a, b) = two_providers(&f);
+    let saves = || f.world.lock().unwrap().settings_saves;
+    let before = saves();
+    let detail = "POST https://wecode.example/openai/v1/chat/completions → 401 Unauthorized";
+    assert!(f
+        .app
+        .record_key_verdict_in(Agent::Codex, &a, rejected(detail))
+        .unwrap());
+    assert_eq!(saves(), before + 1);
+    let state = f.codex_state();
+    let view = &state.providers[0];
+    assert_eq!(view.unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
+    assert_eq!(view.unreachable_detail.as_deref(), Some(detail));
+    assert!(view.key_rejected_on_call);
+    assert_eq!(view.models.len(), 2, "不动模型列表");
+    assert_eq!(state.providers[1].unreachable, None, "别家不动");
+    let json = serde_json::to_value(view).unwrap();
+    assert_eq!(json["keyRejectedOnCall"], serde_json::json!(true));
+
+    // 同一结论：不写文件
+    assert!(!f
+        .app
+        .record_key_verdict_in(Agent::Codex, &a, rejected("另一次的原文"))
+        .unwrap());
+    assert_eq!(saves(), before + 1);
+
+    // 拉列表成功不清（列表接口不一定验密钥）；拉列表失败也不顶掉它
+    f.app
+        .merge_fetched_models_in(Agent::Codex, &a, vec!["deepseek/v4".into()], "")
+        .unwrap();
+    f.app
+        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
+        .unwrap();
+    let view = &f.codex_state().providers[0];
+    assert_eq!(view.unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
+    assert_eq!(view.unreachable_detail.as_deref(), Some(detail));
+
+    // 之后一次调用成功：清掉
+    let before = saves();
+    assert!(f
+        .app
+        .record_key_verdict_in(Agent::Codex, &a, crate::router::KeyVerdict::Accepted)
+        .unwrap());
+    assert_eq!(saves(), before + 1);
+    let view = &f.codex_state().providers[0];
+    assert_eq!(view.unreachable, None);
+    assert_eq!(view.unreachable_detail, None);
+    assert!(!view.key_rejected_on_call);
+    // 已经是好的：成功不写文件；拉列表记下的原因也不归它清
+    f.app
+        .record_unreachable_in(Agent::Codex, &b, UnreachableReason::Auth, None)
+        .unwrap();
+    let before = saves();
+    for id in [&a, &b] {
+        assert!(!f
+            .app
+            .record_key_verdict_in(Agent::Codex, id, crate::router::KeyVerdict::Accepted)
+            .unwrap());
+    }
+    assert_eq!(saves(), before);
+    assert_eq!(
+        f.codex_state().providers[1].unreachable.as_deref(),
+        Some("密钥无效，请换一个密钥")
+    );
+    assert!(!f.codex_state().providers[1].key_rejected_on_call);
+
+    // 已经删掉的网关：不算错，也不写
+    assert!(!f
+        .app
+        .record_key_verdict_in(Agent::Codex, "gone", rejected(detail))
+        .unwrap());
+    assert_eq!(saves(), before);
+}
+
+/// 换了密钥（带密钥保存，同一地址）：调用被拒是对旧密钥的结论，清掉；换地址也清
+#[test]
+fn saving_a_key_or_changing_the_address_clears_a_call_rejection() {
+    let f = fixture();
+    let (a, b) = two_providers(&f);
+    for id in [&a, &b] {
+        f.app
+            .record_key_verdict_in(Agent::Codex, id, rejected("401"))
+            .unwrap();
+    }
+    f.app
+        .commit_verified_provider_in(
+            Agent::Codex,
+            Some(&a),
+            None,
+            "https://wecode.example/openai",
+            "sk-wecode-new-key-123",
+            vec!["deepseek/v4".into()],
+            "https://wecode.example/openai/v1",
+            false,
+        )
+        .unwrap();
+    f.app
+        .upsert_provider_in(
+            Agent::Codex,
+            Some(&b),
+            None,
+            "https://other2.example/api",
+            false,
+        )
+        .unwrap();
+    let state = f.codex_state();
+    for view in &state.providers {
+        assert_eq!(view.unreachable, None, "{}", view.id);
+        assert!(!view.key_rejected_on_call, "{}", view.id);
+    }
+    let world = f.world.lock().unwrap();
+    assert!(world
+        .settings
+        .providers
+        .iter()
+        .all(|p| !p.key_rejected_on_call && p.unreachable.is_none()));
+}
+
+/// 勾选前的试调：401/403（`auth`）记成被拒，通了清掉，别的失败不动（`runtime::probe_verdict` 接到同一个入口）
+#[test]
+fn probe_results_feed_the_same_key_verdict() {
+    let f = fixture();
+    let (a, _) = two_providers(&f);
+    let rejected_probe: Result<(), AppError> = Err(AppError::new("auth", "密钥被拒")
+        .with_detail("POST https://wecode.example/openai/v1/chat/completions → 403 Forbidden"));
+    let verdict = crate::runtime::probe_verdict(&rejected_probe).unwrap();
+    f.app
+        .record_key_verdict_in(Agent::Codex, &a, verdict)
+        .unwrap();
+    let view = &f.codex_state().providers[0];
+    assert_eq!(view.unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
+    assert!(view
+        .unreachable_detail
+        .as_deref()
+        .is_some_and(|d| d.contains("403")));
+
+    for other in ["network", "upstream", "invalid"] {
+        assert_eq!(
+            crate::runtime::probe_verdict(&Err(AppError::new(other, "x"))),
+            None,
+            "{other}"
+        );
+    }
+    let verdict = crate::runtime::probe_verdict(&Ok(())).unwrap();
+    assert_eq!(verdict, crate::router::KeyVerdict::Accepted);
+    f.app
+        .record_key_verdict_in(Agent::Codex, &a, verdict)
+        .unwrap();
+    assert_eq!(f.codex_state().providers[0].unreachable, None);
+}
+/// 家 claude 的网关同样记、同样清，只动那一家（同 id 的 Codex 网关不受影响）
+#[test]
+fn claude_call_rejections_are_kept_per_family() {
+    let f = fixture();
+    let (a, _) = two_providers(&f);
+    let claude = f
+        .app
+        .commit_verified_provider_in(
+            Agent::Claude,
+            None,
+            Some("WeCode"),
+            "https://wecode.example/openai",
+            "sk-claude-wecode-1",
+            vec!["deepseek/v4".into()],
+            "",
+            false,
+        )
+        .unwrap()
+        .provider_id;
+    assert_eq!(claude, a, "两家同一个 id");
+    assert!(f
+        .app
+        .record_key_verdict_in(Agent::Claude, &claude, rejected("401"))
+        .unwrap());
+    {
+        let world = f.world.lock().unwrap();
+        let marked = &world.claude.providers[0];
+        assert_eq!(marked.unreachable, Some(UnreachableReason::Auth));
+        assert!(marked.key_rejected_on_call);
+        assert_eq!(world.settings.provider(&a).unwrap().unreachable, None);
+    }
+    assert!(f
+        .app
+        .record_key_verdict_in(Agent::Claude, &claude, crate::router::KeyVerdict::Accepted)
+        .unwrap());
+    assert_eq!(
+        f.world.lock().unwrap().claude.providers[0].unreachable,
+        None
+    );
+}
+/// 真实装配里路由拿到的那个出口（`runtime::key_verdict_recorder`）：交出去立刻返回，由另一条线程经编排层落盘
+#[test]
+fn the_router_sink_records_verdicts_off_the_request_path() {
+    let f = fixture();
+    let (a, _) = two_providers(&f);
+    let Fixture {
+        app, world, _dir, ..
+    } = f;
+    let app = Arc::new(app);
+    let sink = crate::runtime::key_verdict_recorder(Arc::downgrade(&app));
+    let marked = |want: bool| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            let on_call = world
+                .lock()
+                .unwrap()
+                .settings
+                .provider(&a)
+                .unwrap()
+                .key_rejected_on_call;
+            if on_call == want {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    };
+    sink(Agent::Codex, &a, rejected("401"));
+    assert!(marked(true), "被拒应当落盘");
+    sink(Agent::Codex, &a, crate::router::KeyVerdict::Accepted);
+    assert!(marked(false), "成功应当清掉");
 }

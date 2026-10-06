@@ -717,7 +717,7 @@ mod hardening_tests {
         let result = run_with_timeout("/bin/sh", &["-c", "sleep 60"], Duration::from_millis(300));
         assert!(result.is_err(), "应当超时返回错误");
         assert!(
-            started.elapsed() < Duration::from_secs(5),
+            started.elapsed() < Duration::from_millis(300) + crate::test_timing::KILL_SLACK,
             "超时没有生效，耗时 {:?}",
             started.elapsed()
         );

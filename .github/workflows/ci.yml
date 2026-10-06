@@ -12,10 +12,20 @@ jobs:
       # 开发机上的 clippy 往往更旧，本地零警告不代表 CI 通过。升级时一起改两处并本地复跑。
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
-          components: clippy
+          components: clippy, rustfmt
       - run: cargo test -p sophia-core
       - run: cargo test -p sophia-gateway
       - run: cargo clippy -p sophia-core -p sophia-gateway --all-targets -- -D warnings
+      - run: cargo fmt --all -- --check
+      # 前端这一半不需要 macOS：类型检查、纯逻辑测试（含文案目录、术语表、模块加载的检查）、prettier。
+      # 开发仓库不跑 app 作业，没有这几步就只剩本机 make test 兜着（2026-10-05 retro）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - run: node --test tests/*.test.ts
+      - run: npx prettier --check "src/**/*.{ts,tsx,css}"
   # macOS 机器在私有仓库按分钟计费（约为 Linux 的 10 倍），只在公开仓库跑；
   # 开发仓库（sophia-dev，私有）里提交前靠本机 `make test` 兜住这一段
   app:

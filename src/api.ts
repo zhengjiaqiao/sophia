@@ -6,13 +6,16 @@ import type {
   Appearance,
   AutoLink,
   CellRef,
+  CopyRef,
   GatewayAgent,
   GatewayProviderSaved,
+  ProviderPreset,
   GatewaySelectedModel,
   GatewayState,
   QuitFailure,
   QuitPreview,
   HarnessList,
+  ProjectScope,
   LanguageSetting,
   Overview,
   PlannedAction,
@@ -24,6 +27,7 @@ import type {
   SyncReport,
   McpOverview,
   McpPreview,
+  McpKeyHint,
   McpReport,
   McpUndoReport,
   McpRemoveItem,
@@ -79,6 +83,11 @@ export const api = {
   /// 删本体前的只读体检；计划留在后端，前端拿到的只用来摆给用户确认
   planDeleteSource: (sourceId: string, skill: string) =>
     invoke<PlannedDeletion>("plan_delete_source", { sourceId, skill }),
+  /// 同名两份里有一份在 agent 自己目录里时的「只留这份」体检（issue #153）：挪走 `drop`、留下 `keep`，
+  /// 指向 `drop` 的链接改指到 `keep`。一方是原件位置里的那一份（`sourceId`），或 agent 目录下的那一份（`targetId`）。
+  /// 计划同 `planDeleteSource` 留在后端，确认后照样 `deleteSource`
+  planKeepCopy: (skill: string, keep: CopyRef, drop: CopyRef) =>
+    invoke<PlannedDeletion>("plan_keep_copy", { skill, keep, drop }),
   /// 执行用户已确认的删除计划；planId 用后即弃，不能重放
   /// `inGitConfirmed`：删原件的确认框已写明原件在 git 仓库里、用户仍确认了（只留这份不传，仓库里的不代删）
   /// 结果带撤销 id：原件挪进了暂存处才有（跨磁盘退回直接进废纸篓时为 null）
@@ -121,6 +130,13 @@ export const api = {
   includeAutoLink: (source: string, target: string, skill: string) =>
     invoke<void>("include_auto_link", { source, target, skill }),
   listHarnesses: () => invoke<HarnessList>("list_harnesses"),
+  /// 设置「生效范围」的项目格（自动检测的与手动选的，存在的才列）
+  listProjects: () => invoke<ProjectScope[]>("list_projects"),
+  /// `+ 项目` / 应用菜单「添加项目…」：选的文件夹记下、默认勾上。当不了项目的 reject，错误信息就是给用户看的那句
+  addProject: (path: string) => invoke<void>("add_project", { path }),
+  /// 勾上 / 取消勾一个项目；取消勾只是不显示，链接不动
+  setProjectShown: (path: string, shown: boolean) =>
+    invoke<void>("set_project_shown", { path, shown }),
   setHarnessEnabled: (id: string, enabled: boolean) =>
     invoke<void>("set_harness_enabled", { id, enabled }),
   /// 看过的新手提示 id（存在 settings.json 的 seenHints；旧文件没有＝空）
@@ -171,12 +187,37 @@ export const api = {
     invoke<McpEndpoint | null>("mcp_endpoint", { name, locationId }),
   proposeMcpSync: (selections: McpSelection[]) =>
     invoke<McpPreview>("propose_mcp_sync", { selections }),
-  applyMcp: (planId: string, allowCrossDomain: boolean) =>
-    invoke<McpReport>("apply_mcp", { planId, allowCrossDomain }),
+  /// 写进项目文件的后端一律按密钥提醒处理。`addToGitignore`：只有移动 / 复制的确认框给（勾没勾「同时加进 .gitignore」）；
+  /// 格子里的写入不给，按没勾——报告里的 `ignorable` 交给 `addMcpGitignore`
+  applyMcp: (planId: string, allowCrossDomain: boolean, addToGitignore?: boolean) =>
+    invoke<McpReport>("apply_mcp", {
+      planId,
+      allowCrossDomain,
+      addToGitignore: addToGitignore ?? null,
+    }),
+  /// 密钥提醒（S19）：这几条写进项目文件时各目标的提醒（只读），移动 / 复制的确认框据此出不出勾选
+  checkMcpKeyHints: (selections: McpSelection[]) =>
+    invoke<McpKeyHint[]>("check_mcp_key_hints", { selections }),
+  /// 点格子写入的提示条上的「加进 .gitignore」：那次写入报告里的 `ignorable`。撤销号在 `gitignoreUndoId`
+  addMcpGitignore: (targetIds: string[]) => invoke<McpReport>("add_mcp_gitignore", { targetIds }),
   /// 从 agent 的配置里删掉 MCP 定义（单格或批量）：每项只删那个位置（locationId）里 name 的定义，
   /// 别处的同名定义不动。拿不掉的以 skipped + 原因回来；一批一个撤销（`undoId`），交给 `mcpUndoWrite`
   deleteMcpOriginal: (items: McpRemoveItem[]) =>
     invoke<McpReport>("delete_mcp_original", { items }),
+  /// 「保留这份」：以 keepId 那一处的 name 为准，改写 locationIds 里其余几处（各 agent 专属字段不动）。
+  /// 一处不成整次不动（没成的 failed + 原因，其余 skipped）；写成的一次撤销（`undoId`），交给 `mcpUndoWrite`
+  /// 密钥提醒接到「保留这份」（issue #147）：`addToGitignore` 是确认框里勾没勾「同时加进 .gitignore」，
+  /// 追加的那几行进同一次撤销（`undoId`）
+  keepMcpCopy: (
+    name: string,
+    keepId: string,
+    locationIds: string[],
+    revision: string,
+    addToGitignore: boolean,
+  ) => invoke<McpReport>("keep_mcp_copy", { name, keepId, locationIds, revision, addToGitignore }),
+  /// 密钥提醒（S19，issue #147）：「保留这份」要改写的项目文件各自的提醒（只读），确认框据此出不出勾选
+  checkMcpKeepKeyHints: (name: string, keepId: string, locationIds: string[]) =>
+    invoke<McpKeyHint[]>("check_mcp_keep_key_hints", { name, keepId, locationIds }),
   /// 撤销一次 MCP 写入；id 不存在或已过期时 reject「撤销记录不存在或已过期」
   mcpUndoWrite: (undoId: string) => invoke<McpUndoReport>("mcp_undo_write", { undoId }),
   setMcpAutoImport: (
@@ -219,7 +260,11 @@ export const api = {
     baseUrl: string;
     key?: string;
     sync: boolean;
+    /** 从哪个服务商预设建的（spec S1）：保存后记上来源与协议 */
+    preset?: string;
   }) => invoke<GatewayProviderSaved>("gateway_upsert_provider", input),
+  /** 服务商预设的名单（内置数据，不联网；spec S1） */
+  gatewayPresets: () => invoke<ProviderPreset[]>("gateway_presets"),
   /** 连同密钥文件里的密钥一起删，删了回不来：调用前先向用户确认。
    *  `alsoOther`：另一家同一地址的网关连同密钥一起删（另一家因此已选为空且开着则随之关掉） */
   gatewayRemoveProvider: (agent: GatewayAgent, id: string, alsoOther: boolean) =>
@@ -267,6 +312,9 @@ export const api = {
   /** 勾上一个模型之前试调用一次（发一条极短的请求，不写任何东西）；调不通时抛出原因 */
   gatewayProbeModel: (agent: GatewayAgent, providerId: string, modelId: string) =>
     invoke<void>("gateway_probe_model", { agent, providerId, modelId }),
+  /// 手动添加一个模型（sophia-dev#117）：先试调，通了才进列表并勾上；试不通拒绝的值是 `[代码] 原因` */
+  gatewayAddManualModel: (agent: GatewayAgent, providerId: string, modelId: string) =>
+    invoke<GatewayState>("gateway_add_manual_model", { agent, providerId, modelId }),
   /// 按应用标识打开 Codex 桌面应用；只发出请求，等它起来要自己轮询 `codex.running`
   gatewayLaunchCodex: () => invoke<void>("gateway_launch_codex"),
   /// 菜单栏面板用：把主窗口带到前面；`page` 给了就切过去，`error` 给了就在那一页上说

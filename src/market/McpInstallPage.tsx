@@ -30,6 +30,7 @@ import {
   InstallBlock,
   InstallFooter,
   InstallScroll,
+  KeyHintBlock,
   OriginLine,
   PlaceBlock,
 } from "./InstallParts.tsx";
@@ -64,6 +65,16 @@ export function McpInstallPage(props: McpInstallPageProps) {
     agents: props.agents,
     shown: props.shown,
   });
+  // 「同时加进 .gitignore」：有「要填的」时放在那一块最后，没有时放在「写进哪些 agent」最后
+  const gitignore =
+    state.keyHint !== null || state.keyTracked !== null ? (
+      <KeyHintBlock
+        checked={state.addToGitignore}
+        onChange={state.setAddToGitignore}
+        tip={state.keyHint}
+        tracked={state.keyTracked}
+      />
+    ) : null;
   const origin = mcpOrigin(entry);
   const connection = connectionParts(entry.definition);
   const submit = async () => {
@@ -123,9 +134,15 @@ export function McpInstallPage(props: McpInstallPageProps) {
               state.setClaudeScope,
             )}
           />
+          {entry.fields.length === 0 ? gitignore : null}
         </InstallBlock>
         {entry.fields.length > 0 ? (
-          <FieldsBlock fields={entry.fields} values={state.values} onChange={state.setValue} />
+          <FieldsBlock
+            fields={entry.fields}
+            values={state.values}
+            onChange={state.setValue}
+            footer={gitignore}
+          />
         ) : null}
       </InstallScroll>
     </PushedPage>

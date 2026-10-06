@@ -8,6 +8,7 @@ import {
   Checkbox,
   Chip,
   ChipRow,
+  DiffTable,
   Drawer,
   DrawerHandle,
   Empty,
@@ -17,6 +18,7 @@ import {
   IconTrash,
   ListRow,
   ModelChip,
+  Mono,
   Note,
   PageHead,
   PageHeadActions,
@@ -191,6 +193,60 @@ export function ContainersFamily() {
       >
         <Specimen label="拉手：收起 ›、拉开 ˅、常显" width={360}>
           <DrawerDemo />
+        </Specimen>
+      </Block>
+
+      <Block
+        name="DiffTable"
+        guide="同名几份并排比：一行一份、字段成列（第一列原件），行尾键右对齐 ｜ 一份定义的键值用抽屉里的键值几行"
+      >
+        <Specimen label="MCP：3 份不一样 · 保留这份（第一份留不了）" width={720}>
+          <DiffTable
+            fields={["原件", <Mono inherit>url</Mono>, <Mono inherit>headers.Authorization</Mono>]}
+            rows={[
+              {
+                id: "a",
+                place: "用户级 · Claude Code",
+                values: [
+                  <Mono path>~/.claude.json</Mono>,
+                  <Mono inherit>https://docs.test/mcp</Mono>,
+                  "不同 · 末 4 位 …7f3a",
+                ],
+                actionDisabledReason: "sophia · Cursor 改不成这份：Cursor 不支持 SSE 传输",
+              },
+              {
+                id: "b",
+                place: "用户级 · Codex",
+                values: [
+                  <Mono path>~/.codex/config.toml</Mono>,
+                  <Mono inherit>https://docs.test/v2/mcp</Mono>,
+                  "不同 · 末 4 位 …91c0",
+                ],
+              },
+              {
+                id: "c",
+                place: "sophia · Cursor",
+                values: [
+                  <Mono path>~/Project/sophia/.cursor/mcp.json</Mono>,
+                  <Mono inherit>https://docs.test/mcp</Mono>,
+                  "不同 · 末 4 位 …7f3a",
+                ],
+              },
+            ]}
+            actionLabel="保留这份"
+            onAction={noop}
+          />
+        </Specimen>
+        <Specimen label="skill：只有原件一列 · 只留这份" width={520}>
+          <DiffTable
+            fields={["原件"]}
+            rows={[
+              { id: "a", place: "~/.agents", values: [<Mono path>~/.agents/skills/pdf</Mono>] },
+              { id: "b", place: "Claude Code", values: [<Mono path>~/.claude/skills/pdf</Mono>] },
+            ]}
+            actionLabel="只留这份"
+            onAction={noop}
+          />
         </Specimen>
       </Block>
 

@@ -86,6 +86,8 @@ export type { ChipRowProps } from "./ChipRow.tsx";
 export { ListRow } from "./ListRow.tsx";
 export type { ListRowProps } from "./ListRow.tsx";
 export { Drawer, DrawerHandle } from "./Drawer.tsx";
+export { DiffTable } from "./DiffTable.tsx";
+export type { DiffTableProps, DiffTableRow } from "./DiffTable.tsx";
 export type { DrawerInset, DrawerProps, DrawerHandleProps } from "./Drawer.tsx";
 export { FloatingLayer } from "./FloatingLayer.tsx";
 export { FadeViewport, useEdgeFades, edgeFades } from "./EdgeFade.tsx";

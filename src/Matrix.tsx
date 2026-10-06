@@ -355,6 +355,11 @@ export interface MatrixProps {
   keyToast?: { keyId: string; node: ReactNode } | null;
   /// 单格加上 / 移除成功：浮在被点那一格正下方 4。一次只一条：`id` 变了就重挂，计时从头来
   cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
+  /// 从别处带过来要看的那一行（装完提示的「去处理」，issue #111）：拉开它的抽屉、滚到眼前。
+  /// `nonce` 变了才再做一次；这一行此刻不在表里（筛掉了、还没扫出来）时不做
+  reveal?: { key: string; nonce: number } | null;
+  /// 拉开了：调用方撤掉 `reveal`（表格重挂时不再拉一次）
+  onRevealed?: () => void;
 }
 
 /// 格的读屏名：状态名统一成「已加上 / 未加上」（「已开启」会读成应用开着）；受阻统称「受阻」（D22）、
@@ -690,6 +695,8 @@ export default function Matrix(props: MatrixProps) {
     cellToast,
     keyBusy,
     cellBusy,
+    reveal,
+    onRevealed,
   } = props;
 
   const drawerId = useId();
@@ -725,6 +732,26 @@ export default function Matrix(props: MatrixProps) {
   // 拉开了行详情抽屉的那一行。表格一次只开一格（DESIGN「抽屉」）：拉开另一行，这一行收起
   const [expanded, setExpanded] = useState<string | null>(null);
   const toggleDetail = (key: string) => setExpanded((prev) => (prev === key ? null : key));
+  // 「去处理」带过来的那一行：拉开抽屉（表格一次只开一格，别的收起），挂上之后滚到眼前（居中：吸顶的表头盖不住它，
+  // 下面拉开的抽屉也露得出来）。每个 nonce 只做一次
+  const revealed = useRef<number | null>(null);
+  const revealRow = reveal?.key ?? null;
+  const revealNonce = reveal?.nonce ?? null;
+  const revealHere = revealRow !== null && rows.some((r) => r.key === revealRow);
+  useEffect(() => {
+    if (!revealHere || revealRow === null || revealed.current === revealNonce) return;
+    revealed.current = revealNonce;
+    setExpanded(revealRow);
+    onRevealed?.();
+    // 抽屉挂上之后再滚（不在清理里取消：拉开抽屉的那一次重绘不该把它撤掉）
+    requestAnimationFrame(() => {
+      rootRef.current
+        ?.querySelector(`[data-row="${CSS.escape(revealRow)}"]`)
+        ?.scrollIntoView({ block: "center" });
+    });
+    // onRevealed 每次渲染可能是新的；只在要拉的那一行变了时做
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealHere, revealRow, revealNonce]);
 
   const dotText = dotWords === "mcp" ? mcpDotText() : skillDotText();
   const colW = agentColumnWidth(columns.length);

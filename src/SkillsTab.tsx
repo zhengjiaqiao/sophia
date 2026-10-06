@@ -5,7 +5,7 @@ import { api } from "./api";
 import DomainView, { skillCellKey, type BatchPress } from "./DomainView";
 import { cellKey, SourceKeys } from "./Matrix";
 import { LocationFrame } from "./LocationFrame";
-import { DiscoverFlow, PageUndo, type InstallContext } from "./market";
+import { DiscoverFlow, PageUndo, type InstallContext, type SkillHandle } from "./market";
 import type { InstallPlaces } from "./market/InstallParts";
 import { locationOfNav } from "./market/installView";
 import { UpdateStrip } from "./market/UpdateStrip";
@@ -34,10 +34,13 @@ import { t, tn, useLocale, useOnLocaleChange } from "./i18n";
 import {
   columnOfTarget,
   folderLabel,
+  keepSideKey,
   mergeSkillPages,
   refAt,
   refRowKey,
+  rowForHandle,
   skillRowKey,
+  type KeepSide,
   type PlacedOrphan,
   type SkillRow,
 } from "./skillsView";
@@ -54,6 +57,7 @@ import { usePageCommand } from "./shell/menuBus";
 import { GLOBAL_KEY, type Face, type Location } from "./shell/nav";
 import { Confirm, CornerToast, Mono, NoticePanel, Toast, ToastCount, useHintStack } from "./ui";
 import { HINTS, useHint } from "./hints";
+import { overCapText, type AgentsOverCap } from "./agentsOverCap";
 import type { AnchorRect } from "./layerPlace.ts";
 import {
   batchBusyText,
@@ -70,8 +74,10 @@ import type {
   AutoLink,
   CellRef,
   CellState,
+  CopyRef,
   DomainPage,
   Overview,
+  PlannedDeletion,
   ReportEntry,
   SkillCopyInfo,
   SyncReport,
@@ -88,14 +94,19 @@ const NO_TARGETS: Target[] = [];
 
 /// 「只留这份」确认框要的全部：体检结果先拿到，确认框才写得出几条链接改指
 interface KeepPane {
-  kept: SkillRow;
-  other: SkillRow;
+  skill: string;
+  /// 两方在同名差异表里的行键：留下那份（结果锚它）、挪走那份（删完之前先藏起来）
+  keptKey: string;
+  otherKey: string;
+  /// 再体检一次（计划只存一份，悬停读数时可能被换掉了）
+  replan: () => Promise<PlannedDeletion>;
   /// 按下那一刻「只留这份」的位置：结果锚在这里
   at: AnchorRect;
   planId: string;
   /// 两份的来源名（同名来源带区分片段，与原件位置列同一写法）与完整路径
-  keptName: OriginName;
-  otherName: OriginName;
+  /// `own`：这一方是 agent 自己目录里的那一份，名字是整句说法（issue #153）
+  keptName: OriginName & { own?: boolean };
+  otherName: OriginName & { own?: boolean };
   keptPath: string;
   otherPath: string;
   /// 要改指到留下那份的链接条数
@@ -155,6 +166,17 @@ export interface SkillsTabProps {
   filterBar?: (source: ReactNode) => ReactNode;
   /// `发现` 一面的安装页要的（当前位置、位置胶囊、agent 名单）；不给时发现列表的 `安装` 不接
   install?: InstallContext;
+  /// 装的 agent 多于列表上限（issue #109）：筛选行下一块能关的灰面板，`去设置` 到「列表里的 agent」。
+  /// 该不该出、关掉记在哪由壳管（src/agentsOverCap.ts）
+  agentsOverCap?: {
+    cap: AgentsOverCap | null;
+    open: boolean;
+    onDismiss: () => void;
+    onOpenSettings: () => void;
+  };
+  /// 装完提示的「去处理」（issue #111）：壳切到 SKILLS · 我的、位置换到看得见这一行的（`goRow`）；
+  /// 找到那一行、拉开抽屉归这一页
+  onGoToRow?: (domainKey: string) => void;
 }
 
 /// 位置页的 skills 页签：页面头右端筛选框 + `管理来源` + `+ 来源`，表格（DomainView → Matrix）。
@@ -182,6 +204,8 @@ export default function SkillsTab({
   face = "mine",
   filterBar,
   install,
+  agentsOverCap,
+  onGoToRow,
 }: SkillsTabProps) {
   // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
@@ -287,6 +311,13 @@ export default function SkillsTab({
   /// 同名几份各自的读数（文件数、改于、内容指纹）：推荐保留哪份据它算（src/dupNotice.ts）
   const [dupInfo, setDupInfo] = useState<Map<string, SkillCopyInfo>>(new Map());
 
+  // 装完提示的「去处理」要看的那一行（位置 key + skill 名）：等 `我的` 重扫出这一行再拉开它的抽屉，拉开了就清掉
+  const [handleTarget, setHandleTarget] = useState<(SkillHandle & { nonce: number }) | null>(null);
+  // 交给表格的那一次「拉开这一行、滚到眼前」
+  const [revealRow, setRevealRow] = useState<{ key: string; nonce: number } | null>(null);
+  // 去处理换了位置时带过去的撤销（刚装的那一次）：换范围本来会清掉撤销入口，只是去看一眼冲突不该丢掉它
+  const carryUndo = useRef<(() => void) | null>(null);
+
   // 最近一次可撤销的操作（⌘Z、菜单「撤销」与提示条里的「撤销」走同一个）；
   // 有没有可撤的同时报给菜单（没有时「撤销」灰着）
   const undoRef = useRef<(() => void) | null>(null);
@@ -341,6 +372,36 @@ export default function SkillsTab({
     overview === null ? null : view.rows.map((row) => originLabelOf(row.sourceId)),
   );
   const bar = filterBar?.(sourceFilter.picker);
+
+  // ---- 去处理（issue #111）：点了之后挡住那一行的筛选都放开（筛选框、来源、几条提示的「只看这些」），
+  // 壳切到 `我的`、换位置；这一行扫出来以后（装完正在重扫）交给表格拉开抽屉、滚到眼前 ----
+  const goToRow = (target: SkillHandle) => {
+    setFilterText("");
+    sourceFilter.clear();
+    setDupRows(null);
+    setOrphansOnly(false);
+    updates.setOnlyThese(false);
+    setHandleTarget({ ...target, nonce: Date.now() });
+    // 要换位置（当前范围里没有那一行的位置）时才带：不换范围就没有什么会清掉撤销，带着反而留到下一次换范围
+    carryUndo.current = locations.includes(target.domainKey) ? null : undoRef.current;
+    onGoToRow?.(target.domainKey);
+  };
+  const handleRow =
+    handleTarget !== null && face === "mine" && overview !== null
+      ? rowForHandle(view.rows, handleTarget, hidden)
+      : null;
+  const handleRowKey = handleRow ? skillRowKey(handleRow) : null;
+  useEffect(() => {
+    if (handleTarget === null || handleRowKey === null) return;
+    setRevealRow({ key: handleRowKey, nonce: handleTarget.nonce });
+    setHandleTarget(null);
+  }, [handleTarget, handleRowKey]);
+  // 又回到 `发现`：还没找到、还没拉开的那一行不再等
+  useEffect(() => {
+    if (face !== "discover") return;
+    setHandleTarget(null);
+    setRevealRow(null);
+  }, [face]);
   // 来源管理页、添加来源页：直接进，位置在页里选（R8，2026-09-30：不再先弹「哪个位置？」）
   const multi = locations.length > 1;
   const openAdd = () => {
@@ -495,12 +556,41 @@ export default function SkillsTab({
       for (const row of copies)
         dupAdvice.set(skillRowKey(row), { keep: pick.key, reason: pick.reason });
   }
+  // 一个位置都没扫描出页时只有空态：「有新版本」与同名原件不画，也就不能占着叠放的顶上
+  const hasTable = pages.length > 0;
   const hintStack = useHintStack([
-    { key: "update", want: stripOpen(updates.stripVisible, scopedUpdates) },
+    { key: "update", want: hasTable && stripOpen(updates.stripVisible, scopedUpdates) },
     // `只看这些` 开着时提示条一直在（同名都只留了一份也在）：它是回到全部的那颗键所在的地方
-    { key: "dup", want: onlyDups || dupStripWanted(dupGroups, dupDismissed) },
+    { key: "dup", want: hasTable && (onlyDups || dupStripWanted(dupGroups, dupDismissed)) },
+    { key: "agents", want: agentsOverCap?.open ?? false },
     { key: "first-scan", want: skillsHint.visible },
+    // 空库那条在空态上方，与上面几张同一时刻也只展开一张（一个页面最多展开一条）
+    { key: "first-scan-empty", want: emptyHint.visible },
   ]);
+  // 那块灰面板收起的动画里还要有字：卸了一个 agent、不再超上限时 cap 已是 null，留着上一回的
+  const lastOverCap = useRef<AgentsOverCap | null>(null);
+  if (agentsOverCap?.cap) lastOverCap.current = agentsOverCap.cap;
+  const overCap = lastOverCap.current ? overCapText(lastOverCap.current) : null;
+  /// 装的 agent 多于列表上限（issue #109）：一次性说明，关掉＝这一批不再提示，装的集合变了再出。
+  /// 表格上方与「一个位置都没扫描出页」（比如勾的全取消了）的空态上方都挂它
+  const overCapPanel =
+    agentsOverCap && overCap ? (
+      <NoticePanel
+        scope="section"
+        mark={false}
+        open={hintStack.top === "agents"}
+        stacked={hintStack.top === "agents" ? hintStack.below : 0}
+        onClose={agentsOverCap.onDismiss}
+        dismissTitle={t("skills.agentsOverCap.dismiss")}
+        action={{
+          label: t("skills.agentsOverCap.settings"),
+          onClick: agentsOverCap.onOpenSettings,
+        }}
+        flush
+        message={overCap.message}
+        reason={overCap.reason}
+      />
+    ) : null;
 
   const targetOf = (targetId: string): Target | null =>
     pages.flatMap((p) => p.targets).find((t) => t.id === targetId) ?? null;
@@ -551,7 +641,10 @@ export default function SkillsTab({
     setOrphansOnly(false);
     setDupRows(null);
     setSelected(new Set());
-    setUndo(null);
+    // 去处理带过来的撤销还是最近那一次（这期间没有别的操作顶掉它）就留着
+    const carried = carryUndo.current;
+    carryUndo.current = null;
+    setUndo(carried !== null && carried === undoRef.current ? carried : null);
   }, [scopeKey]);
 
   // 换了界面语言：存着的成句（提示条、格下那一句、同名两份的读数）是旧语言的，收起、清掉，要用时按新语言重取。
@@ -1149,14 +1242,12 @@ export default function SkillsTab({
       const [first, ...links] = report.entries;
       const failed = links.filter((e) => e.outcome.status === "failed");
       const bad = failed[0]?.outcome;
-      // 界面上没有别的退路：能撤销就给 `撤销`（DESIGN「删除原件」）
-      const undo =
-        undoId === null
-          ? undefined
-          : {
-              label: t("skills.undo.label"),
-              onClick: () => void undoDeleteOriginal(undoId, ref.skill, rowKey, pane.anchor),
-            };
+      // 界面上没有别的退路：能撤销就给 `撤销`（DESIGN「删除原件」）；原件动了就是一次写入，⌘Z 跟着换成它
+      const run =
+        first?.outcome.status === "failed"
+          ? null
+          : offerDeleteUndo(undoId, ref.skill, rowKey, pane.anchor);
+      const undo = run === null ? undefined : { label: t("skills.undo.label"), onClick: run };
       if (first?.outcome.status === "failed") node = cannot(first.outcome.reason);
       else if (bad && bad.status === "failed")
         // 原件已删，但有链接没处理好：逐条上报的结果汇成一句，不偷偷跳过
@@ -1199,6 +1290,26 @@ export default function SkillsTab({
     if (node !== null) setRowToast({ rowKey, at: pane.anchor, node });
   };
 
+  /// 删原件 / 只留这份动了原件之后：提示条上的 `撤销` 与 ⌘Z 是同一个，直到下一次写入（issue #153）；
+  /// 没有撤销 id（跨磁盘直接进了废纸篓）时 ⌘Z 也不再指着更早的那一次。返回提示条上那颗键要跑的
+  const offerDeleteUndo = (
+    undoId: string | null,
+    skill: string,
+    rowKey: string,
+    at: AnchorRect | undefined,
+  ): (() => void) | null => {
+    if (undoId === null) {
+      setUndo(null);
+      return null;
+    }
+    const run = () => {
+      if (undoRef.current === run) setUndo(null);
+      void undoDeleteOriginal(undoId, skill, rowKey, at);
+    };
+    setUndo(run);
+    return run;
+  };
+
   /// 撤销删原件（删原件与只留这份共用）：原件放回原处、链接复原，重扫后在原来那一格下说结果
   const undoDeleteOriginal = async (
     undoId: string,
@@ -1238,26 +1349,43 @@ export default function SkillsTab({
   // DESIGN「页面还是弹层」：删用户的原件先确认（锚在按钮上），确认后直接删、不挂起；
   // 结果是例行一行 + `撤销`（2026-09-25 起：另一份放回原处、改指过的链接指回去）
 
-  const keepThis = async (kept: SkillRow, other: SkillRow, at: AnchorRect) => {
+  const keepThis = async (kept: KeepSide, other: KeepSide, at: AnchorRect) => {
     const sources = overview?.sources ?? [];
     // 与原件位置列同一套：按表里出现的来源算，同名来源才分得开
     const names = originNames(
       view.rows.map((r) => r.sourceId),
       sources,
     );
-    const nameOf = (id: string): OriginName => names.get(id) ?? { name: id, seg: "" };
-    const source = sources.find((s) => s.id === kept.sourceId);
-    const keptPath =
-      source?.skills.find((k) => k.name === kept.skill)?.path ??
-      `${source?.path ?? kept.sourceId}/${kept.skill}`;
-    const rowKey = skillRowKey(kept);
+    // agent 自己目录里的那一份（issue #153）没有来源名：整句说成「Claude Code 自己那份」，句子里不再接「的」
+    const nameOf = (side: KeepSide): OriginName & { own?: boolean } =>
+      "row" in side
+        ? (names.get(side.row.sourceId) ?? { name: side.row.sourceId, seg: "" })
+        : { name: t("skills.dup.agentOwnCopy", { agent: side.copy.agent }), seg: "", own: true };
+    const pathOf = (side: KeepSide): string => {
+      if (!("row" in side)) return side.copy.path;
+      const source = sources.find((s) => s.id === side.row.sourceId);
+      return (
+        source?.skills.find((k) => k.name === side.row.skill)?.path ??
+        `${source?.path ?? side.row.sourceId}/${side.row.skill}`
+      );
+    };
+    const refOf = (side: KeepSide): CopyRef =>
+      "row" in side ? { sourceId: side.row.sourceId } : { targetId: side.copy.targetId };
+    const skill = "row" in kept ? kept.row.skill : kept.copy.skill;
+    // 两份都是表格里的行：照旧（另一份的原件位置里找别处同名的改指）；有一方是 agent 自己那一份：
+    // 明确改指到留下的这份（它不在任何原件位置里，按原件位置找不到它）
+    const replan = () =>
+      "row" in kept && "row" in other
+        ? api.planDeleteSource(other.row.sourceId, other.row.skill)
+        : api.planKeepCopy(skill, refOf(kept), refOf(other));
+    const rowKey = keepSideKey(kept);
     // 同一行正在体检：这一下不重复发
     if (keepBusy === rowKey) return;
     // 点下去到确认框出来之间要体检：键原位忙碌（过了 0.3 秒门槛才出刻度），只锁这一颗
     setKeepBusy(rowKey);
     let planned;
     try {
-      planned = await api.planDeleteSource(other.sourceId, other.skill);
+      planned = await replan();
     } catch (e) {
       onError(String(e));
       return;
@@ -1272,7 +1400,7 @@ export default function SkillsTab({
           <Toast
             kind="cannot"
             sentence="toast.line.cannot.keepThis"
-            names={[other.skill]}
+            names={[skill]}
             reason={t("skills.keep.inGit", { path: planned.plan.inGit })}
             onDismiss={dismissRow}
             onClose={dismissRow}
@@ -1282,13 +1410,15 @@ export default function SkillsTab({
       return;
     }
     setKeepPane({
-      kept,
-      other,
+      skill,
+      keptKey: rowKey,
+      otherKey: keepSideKey(other),
+      replan,
       at,
       planId: planned.planId,
-      keptName: nameOf(kept.sourceId),
-      otherName: nameOf(other.sourceId),
-      keptPath,
+      keptName: nameOf(kept),
+      otherName: nameOf(other),
+      keptPath: pathOf(kept),
       otherPath: planned.plan.path,
       relinked: planned.plan.affected.length,
     });
@@ -1297,34 +1427,40 @@ export default function SkillsTab({
   /// 确认之后：立即删掉另一份（先藏起来，删完重扫再放开）
   const confirmKeep = async (pane: KeepPane) => {
     setKeepPane(null);
-    const { kept, other } = pane;
-    const otherKey = skillRowKey(other);
+    const { skill, keptKey, otherKey } = pane;
     setHidden((prev) => new Set(prev).add(otherKey));
     let ok = false;
     let undoId: string | null = null;
+    // 提示条上的 `撤销` 与 ⌘Z 是同一个
+    let run: (() => void) | null = null;
     try {
       let report: SyncReport;
       try {
         ({ report, undoId } = await api.deleteSource(pane.planId));
       } catch {
         // 计划只存一份，悬停读数时可能被换掉了：重新体检一次再删（仓库里的照旧不代删）
-        const again = await api.planDeleteSource(other.sourceId, other.skill);
+        const again = await pane.replan();
         if (again.plan.inGit !== null)
           throw new Error(t("skills.keep.inGitError", { path: again.plan.inGit }));
         ({ report, undoId } = await api.deleteSource(again.planId));
       }
+      // 另一份挪走了就是一次写入：⌘Z 换成这一次的撤销（有链接没改指成也一样，撤销把挪走的那份放回来）；
+      // 挪不走时什么都没动，⌘Z 照旧
+      if (report.entries[0]?.outcome.status !== "failed")
+        run = offerDeleteUndo(undoId, skill, keptKey, pane.at);
       const bad = report.entries.find((e) => e.outcome.status === "failed");
       if (bad && bad.outcome.status === "failed") {
         // 删掉另一份失败：同「只留这份」的结果，浮在留下那一行下方
         setRowToast({
-          rowKey: skillRowKey(kept),
+          rowKey: keptKey,
           at: pane.at,
           node: (
             <Toast
               kind="cannot"
               sentence="toast.line.cannot.keepThis"
-              names={[other.skill]}
+              names={[skill]}
               reason={bad.outcome.reason}
+              action={run === null ? undefined : { label: t("skills.undo.label"), onClick: run }}
               onDismiss={dismissRow}
               onClose={dismissRow}
             />
@@ -1342,25 +1478,17 @@ export default function SkillsTab({
     });
     if (!ok) return;
     const text = toastFor("keepThis", {
-      done: [{ name: kept.skill }],
+      done: [{ name: skill }],
       keepLabel: originText(pane.keptName),
+      keepOwn: pane.keptName.own,
     });
-    const keptKey = skillRowKey(kept);
-    const id = undoId;
     setRowToast({
       rowKey: keptKey,
       at: pane.at,
       node: (
         <Toast
           {...text}
-          action={
-            id === null
-              ? undefined
-              : {
-                  label: t("skills.undo.label"),
-                  onClick: () => void undoDeleteOriginal(id, other.skill, keptKey, pane.at),
-                }
-          }
+          action={run === null ? undefined : { label: t("skills.undo.label"), onClick: run }}
           onDismiss={dismissRow}
         />
       ),
@@ -1463,6 +1591,7 @@ export default function SkillsTab({
             onChanged={onRefresh}
             onUndoable={setUndo}
             onError={onError}
+            onHandle={goToRow}
           />
         ) : null}
         <PageUndo run={() => undoRef.current?.()} can={canUndo} />
@@ -1543,13 +1672,16 @@ export default function SkillsTab({
           art: "noDirs",
         }}
         hint={
-          <NoticePanel
-            scope="section"
-            mark={false}
-            open={emptyHint.visible}
-            onClose={emptyHint.dismiss}
-            message={HINTS["first-scan-empty"](hintCtx)}
-          />
+          <>
+            {overCapPanel}
+            <NoticePanel
+              scope="section"
+              mark={false}
+              open={hintStack.top === "first-scan-empty"}
+              onClose={emptyHint.dismiss}
+              message={HINTS["first-scan-empty"](hintCtx)}
+            />
+          </>
         }
       >
         {sources.host}
@@ -1563,7 +1695,7 @@ export default function SkillsTab({
     ? keepThisConfirm({
         kept: { ...keepPane.keptName, path: keepPane.keptPath },
         other: { ...keepPane.otherName, path: keepPane.otherPath },
-        skill: keepPane.kept.skill,
+        skill: keepPane.skill,
         relinked: keepPane.relinked,
       })
     : null;
@@ -1688,6 +1820,8 @@ export default function SkillsTab({
         hiddenRows={hiddenRows}
         dupReadout={dupReadout}
         dupAdvice={dupAdvice}
+        reveal={revealRow}
+        onRevealed={() => setRevealRow(null)}
         onDupHover={dupHover}
         onKeepThis={(kept, other, at) => void keepThis(kept, other, at)}
         keepBusy={keepBusy}
@@ -1796,6 +1930,7 @@ export default function SkillsTab({
               flush
               message={dupGroups.size > 0 ? dupStripSentence(dupGroups) : dupsDone()}
             />
+            {overCapPanel}
             <NoticePanel
               scope="section"
               mark={false}
@@ -1811,7 +1946,7 @@ export default function SkillsTab({
           <NoticePanel
             scope="section"
             mark={false}
-            open={emptyHint.visible}
+            open={hintStack.top === "first-scan-empty"}
             onClose={emptyHint.dismiss}
             message={HINTS["first-scan-empty"](hintCtx)}
           />

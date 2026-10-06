@@ -53,6 +53,18 @@
   margin: 0;
 }
 
+/* 密钥提醒（S19）：后果那几句（13）下面的附加选项 `同时加进 .gitignore`，勾选行小档、行宽随内容
+   （「保留这份」确认框里紧挨 15 号正文，用默认档）；底比文字左沿外扩 8，往左让出，框与上面的文字同一左沿（同安装页 `.install-keyhint`） */
+.mcp-scope__keyhint {
+  margin-top: var(--space-sm);
+  margin-left: calc(-1 * var(--space-xs));
+}
+
+/* 目标文件已被跟踪：勾选的位置换成一句灰字（Note 13 ink-mute），与上面的后果那几句同一左沿 */
+.mcp-scope__keynote {
+  margin-top: var(--space-sm);
+}
+
 /* 只在这些项目：项目勾选行两列，缩进到单选行的名字下（单选圈 14 + 10）；选「所有项目」时变淡、不可勾 */
 .mcp-scope__projects {
   display: grid;

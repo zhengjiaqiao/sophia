@@ -1,5 +1,6 @@
 {
   "toast.keepThis.nameOf": "{skill} from {label}",
+  "toast.keepThis.nameOfOwn": "{copy} of {skill}",
   "toast.split.folder": "skills folder",
   "toast.line.success.link": "Added {names} to {agents}",
   "toast.line.success.linkBare": "Added to {agents}",
@@ -42,6 +43,12 @@
   "toast.trail.newSession": "Applies in a new session",
   "toast.trail.trustCopilotFolder": "Applies once you trust this folder in Copilot",
   "toast.keepThisConfirm.title": "Keep only {skill} from {origin}?",
+  "toast.keepThisConfirm.titleOwn": "Keep only {copy} of {skill}?",
+  "toast.keepThisConfirm.trashOwn": "{copy} goes to the Trash",
+  "toast.keepThisConfirm.trashRelinkedOwn": {
+    "one": "{copy} goes to the Trash, and {count} link is repointed to this one",
+    "other": "{copy} goes to the Trash, and {count} links are repointed to this one"
+  },
   "toast.keepThisConfirm.trash": "The copy in {origin} goes to the Trash",
   "toast.keepThisConfirm.trashRelinked": {
     "one": "The copy in {origin} goes to the Trash, and {count} link is repointed to this one",

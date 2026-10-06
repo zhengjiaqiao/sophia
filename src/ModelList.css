@@ -70,3 +70,27 @@
   color: var(--ink-mute);
   font-variant-numeric: tabular-nums;
 }
+
+/* 框底手动添加一行（#117）：上一条行线，输入框（等宽）占满、紧凑键在右；试不通的原话 12 ink-mute 写在下面 */
+.model-list__manual {
+  flex-shrink: 0;
+  border-top: 1px solid var(--row-line);
+  padding: var(--space-xs) var(--space-sm) var(--space-xs);
+}
+
+.model-list__manual-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.model-list__manual-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* `试一下再加` 与锚在它下面的提示条：提示条以这一层为锚（同网关行尾 ↻ 的 `gw-row__refetch`） */
+.model-list__manual-key {
+  display: inline-flex;
+  flex-shrink: 0;
+}

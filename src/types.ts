@@ -75,7 +75,22 @@ export interface DomainPage {
   targets: Target[];
   rows: DomainRow[];
   broken: PlannedAction[];
+  /// agent 自己目录里的同名 skill（issue #153），见 `AgentCopy`
+  agentCopies: AgentCopy[];
 }
+
+/// agent 自己目录里的一份同名 skill（core `AgentCopy`，issue #153）：某一格因「那里已有同名的」被挡住，
+/// 占着的是一个真实文件夹、又不是这一位置里任何一行的原件——表格里没有它那一行，同名行抽屉的差异表单列它
+export interface AgentCopy {
+  skill: string;
+  /// 它所在的目标（agent 目录）
+  targetId: string;
+  /// 目标目录下的 `<skill>`
+  path: string;
+}
+
+/// 「只留这份」的一方（core `CopyRef`，issue #153）：某个原件位置里的那一份，或 agent 目录下不在任何原件位置里的那一份
+export type CopyRef = { sourceId: string } | { targetId: string };
 
 export interface Overview {
   domains: DomainPage[];
@@ -271,6 +286,16 @@ export interface HarnessList {
   harnesses: HarnessStatus[];
 }
 
+/// 设置「生效范围」里的一格项目（core `discovery::ProjectScope`）：自动检测的与手动选的长得一样
+export interface ProjectScope {
+  /// 项目文件夹；停上去的提示框给它
+  path: string;
+  /// 格子上的名字：文件夹名
+  name: string;
+  /// 勾着没有：勾着的才出现在筛选行与「切换项目…」浮层里
+  shown: boolean;
+}
+
 export interface McpLocation {
   id: string;
   label: string;
@@ -360,8 +385,9 @@ export interface McpPreview {
 export interface McpReportEntry {
   name: string;
   targetId: string;
-  /// `removed` 只出现在移除 MCP 来源、从 agent 的配置里删定义（`deleteMcpOriginal`）的报告里
-  outcome: "created" | "removed" | "skipped" | "failed";
+  /// `removed` 只出现在移除 MCP 来源、从 agent 的配置里删定义（`deleteMcpOriginal`）的报告里；
+  /// `updated` 只出现在「保留这份」（`keepMcpCopy`）的报告里
+  outcome: "created" | "removed" | "updated" | "skipped" | "failed";
   message: string;
   backupPath: string | null;
   /** 这一条成了，但 Claude Desktop 第三方模式那一份（`McpLocation.mirrors`）没写成：整句原因，在成功条目下显示 */
@@ -372,6 +398,29 @@ export interface McpReport {
   /** 撤销这次写入用的 id（交给 `api.mcpUndoWrite`）；没有可撤销的写入时为 null。
    *  下一次写到同一文件、撤销过一次或应用退出后失效 */
   undoId: string | null;
+  /** 勾了「同时加进 .gitignore」、配置写成了，`.gitignore` 却没写成：整句原因 */
+  gitignoreFailed?: string;
+  /** 密钥提醒（移动 / 复制、自动同步）：来源被忽略，写成之后目标也自动加进了 `.gitignore` */
+  autoIgnored?: boolean;
+  /** 密钥提醒：像密钥的值第一次写进 git 仓库里的项目文件、没加进 `.gitignore`（自动同步规则、格子写入遇到 `remind`） */
+  keyExposed?: boolean;
+  /** `keyExposed` 里还能补加进 `.gitignore` 的位置 id：格子写入的提示条据此给「加进 .gitignore」（`api.addMcpGitignore`） */
+  ignorable?: string[];
+  /** 密钥提醒：像密钥的值写进了已被 git 跟踪的项目文件（`tracked`，加进 `.gitignore` 也挡不住） */
+  keyTracked?: boolean;
+  /** `keyTracked` 是哪几个目标（位置 id）：「保留这份」的提示条按目标比对确认框里出过那一句的 */
+  trackedTargets?: string[];
+  /** 撤销这次追加进 `.gitignore` 的那几行用的 id（与 `undoId` 分开记：移动的撤销不走写入的快照） */
+  gitignoreUndoId?: string;
+}
+/** 移动 / 复制写进项目文件的一个目标这次的密钥提醒（core `McpKeyHint`） */
+export interface McpKeyHint {
+  targetId: string;
+  hint: KeyHint;
+  /** 目标所在项目的根：`.gitignore` 加在这里 */
+  project: string;
+  /** 在项目根 `.gitignore` 里写成的那一行（`.cursor/mcp.json`） */
+  gitignoreLine: string;
 }
 /** 撤销单个文件的结果 */
 export interface McpUndoFileResult {
@@ -489,9 +538,29 @@ export interface GatewayProviderModel {
   selected: boolean;
   /// 网关在模型列表里给的上下文长度（token）；没给为 null / 缺省
   contextWindow?: number | null;
+  /// 用户手动填的（sophia-dev#117）：刷新列表不冲掉；取消勾选就移除
+  manual?: boolean;
 }
 /// 一家网关的密钥状态（后端 `KeyStatus`）：读不出不等于没有
 export type GatewayKeyStatus = "set" | "missing" | "unreadable";
+/// 服务商预设（core `provider_presets`，spec S1）：选一家只填密钥。`openai` 是 Sophia 现在接得上的地址；
+/// 只有 `anthropic` 的那几家界面上标「暂不支持」
+export interface PresetEndpoint {
+  apiBase: string;
+  /** "chat" | "responses"；Anthropic 地址没有 */
+  protocol?: string;
+}
+export interface ProviderPreset {
+  id: string;
+  name: string;
+  website: string;
+  keysUrl?: string;
+  /** "cn" 国内 / "global" 海外 */
+  region: string;
+  openai: PresetEndpoint | null;
+  anthropic: PresetEndpoint | null;
+  note?: string;
+}
 export interface GatewayProvider {
   /** 创建后不变，只在这一家（agent）里唯一；带 providerId 的命令用它指明操作哪一个网关 */
   id: string;
@@ -503,6 +572,8 @@ export interface GatewayProvider {
   baseUrl: string;
   /** 这家网关的协议："chat" 或 "responses" */
   protocol: string;
+  /** 从哪个服务商预设建的（`ProviderPreset.id`，spec S1）；手填的为 null / 缺省 */
+  preset?: string | null;
   /** 密钥：有 / 没有 / 读不出（密钥文件没有读取权限、损坏，或还在钥匙串里没迁完） */
   key: GatewayKeyStatus;
   /** 读不出时的原因（当前语言的一句话，写全）；其余为 null */
@@ -512,6 +583,11 @@ export interface GatewayProvider {
   unreachable?: string | null;
   /** 那次失败的技术原文（请求、状态码、返回的错误；已去隐私），网关行 `详情` 里给；没有为 null / 缺省 */
   unreachableDetail?: string | null;
+  /** `unreachable` 是真实调用（转发的请求、勾选前的试调）被拒了密钥记下的（#144）：重拉模型列表清不掉，
+   *  行尾不出 `再试一次`，换密钥走铅笔 `编辑` */
+  keyRejectedOnCall?: boolean;
+  /** `unreachable` 的原因是密钥被拒（拉列表或真实调用都算）：网络是通的，网关行不写「无法连接」，只写原因 */
+  keyInvalid?: boolean;
 }
 /// 网关的家（spec 2026-09-29「家」）：模型页里的一个 agent，也是网关数据的归属单位。
 /// 与注册表 id 不同：注册表里 Claude 那一项的 id 是 `claude-code`，它用 `AgentEntry.gateway` 指到这里的 `claude`
@@ -739,6 +815,10 @@ export interface McpDiff {
   dynamicAuth: boolean;
   /// 读不出来的位置
   unreadable: string[];
+  /// 与 `locationIds` 一一对应：「保留这份」做不成时挡住它的第一处与原因；做得成为 null（core `prepare_keep` 同一套判断）
+  keepBlocked: (McpIssue | null)[];
+  /// 这几处定义此刻的指纹：「保留这份」确认后原样带回，用户看过之后谁被改了 core 就不动
+  revision: string;
 }
 /// MCP 行详情 `命令` / `地址` 那一行（`mcp_endpoint`）：服务在一处的定义怎么连。凭据已在 core 脱敏
 export interface McpEndpoint {
@@ -933,6 +1013,8 @@ export interface InstallRecord {
   branch: string;
   path: string;
   treeSha: string;
+  /// 装下那一版排除杂项（`.DS_Store`、`__pycache__` 等）后的指纹；这一项加上之前记下的没有
+  contentSha?: string;
   commitSha: string;
   installedAt: number;
 }
@@ -958,8 +1040,14 @@ export interface McpInstallRequest {
   /// 项目位置里 Claude Code 写到哪一格（spec 2026-09-30-mcp-claude-self-team R8）：`self` 本地配置（缺省）、
   /// `team` 项目的 `.mcp.json`；用户级忽略
   claudeCodeScope?: ClaudeCodeScope;
+  /// 勾了「同时加进 .gitignore」（密钥提醒 S19）：写成之后把提醒为 `remind` 的项目文件加进项目根的 `.gitignore`
+  addToGitignore?: boolean;
 }
 export type ClaudeCodeScope = "self" | "team";
+/// 密钥提醒的五种结果（core `KeyHint`；spec 2026-10-05-skill-mcp-batch2「密钥提醒（S19）」）：
+/// 不处理 / 不处理（来源已提交过）/ 目标加进 `.gitignore` 并在提示条里说 / 默认不勾的「同时加进 .gitignore」/
+/// 目标文件已被跟踪（不出勾选、不追加，说一句）
+export type KeyHint = "quiet" | "sourceCommitted" | "autoIgnore" | "remind" | "tracked";
 /// 「写进哪些 agent」一行的检查结果（core `McpTargetCheck`）
 export interface McpTargetCheck {
   harnessId: string;
@@ -970,6 +1058,10 @@ export interface McpTargetCheck {
   reason: string | null;
   /// `重启 Claude Desktop 后生效`
   note: string | null;
+  /// 往 git 仓库里的项目文件写像密钥的值时为 `remind`；那个文件已被跟踪时为 `tracked`
+  keyHint: KeyHint;
+  /// `remind` / `tracked` 时这个文件在项目根 `.gitignore` 里写成的那一行（`.cursor/mcp.json`、`/.mcp.json`），其余为 null
+  gitignoreLine: string | null;
 }
 /// 粘贴 JSON 的解析结果（R8）；解析不了时 `error` 说哪一行
 export interface McpParseResult {

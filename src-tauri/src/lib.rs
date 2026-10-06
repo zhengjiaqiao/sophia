@@ -114,7 +114,31 @@ fn runtime_env() -> Result<Env, String> {
             vars: HashMap::new(),
         });
     }
-    Ok(Env::from_system())
+    // 登录 shell 问到的 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`（spec S16）：本进程没有的才补，有的以本进程为准
+    let mut env = Env::from_system();
+    if let Some(login) = sophia_gateway::login_env::current() {
+        for (key, value) in [
+            ("CLAUDE_CONFIG_DIR", login.claude_config_dir),
+            ("CODEX_HOME", login.codex_home),
+        ] {
+            if let Some(value) = value {
+                env.vars.entry(key.to_owned()).or_insert(value);
+            }
+        }
+    }
+    Ok(env)
+}
+
+/// debug 版设了测试主目录：验证用的实例，不该在这台电脑上留下任何系统级副作用（登录项等）
+pub(crate) fn test_home_active() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var_os("SOPHIA_TEST_HOME").is_some()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
 }
 
 pub(crate) fn runtime_store_dir() -> Result<PathBuf, String> {
@@ -145,6 +169,21 @@ fn installed_and_settings(
     Ok((installed, settings))
 }
 
+/// 扫描用的项目：自动检测的加手动选的（`projects.json`），去掉设置「生效范围」里取消勾的。
+/// SKILLS、MCP 两页与安装页都只看这一份，筛选行、「切换项目…」浮层（⌘P）由扫描结果得出，所以三处一致
+fn shown_projects(
+    state: &AppState,
+    env: &Env,
+    harnesses: &[Harness],
+    settings: &sophia_core::store::Settings,
+) -> Result<Vec<PathBuf>, String> {
+    let manual = state.store.load_projects().map_err(err)?;
+    Ok(discovery::shown_projects(
+        discovery::projects(env, harnesses, &manual),
+        &settings.hidden_projects,
+    ))
+}
+
 fn discover_mcp(state: &AppState) -> Result<sophia_core::mcp::McpDiscovery, String> {
     let env = runtime_env()?;
     #[cfg_attr(not(feature = "weiboap"), allow(unused_mut))]
@@ -159,7 +198,7 @@ fn discover_mcp(state: &AppState) -> Result<sophia_core::mcp::McpDiscovery, Stri
         }
     }
     let shown = discovery::enabled(candidates, &settings);
-    let projects = discovery::project_candidates(&env, &shown);
+    let projects = shown_projects(state, &env, &shown, &settings)?;
     // 两页共用一份名单：MCP 页取其中支持 MCP 的，再加跟着 Claude Code 的 Claude Desktop；
     // WeiboAP 不在 MCP 的 agent 表里，照旧跟着名单
     let mut harnesses = discovery::mcp_columns(&env, &shown);
@@ -185,7 +224,7 @@ fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = runtime_env()?;
     let (installed, settings) = installed_and_settings(state, &env)?;
     let harnesses = discovery::enabled(installed, &settings);
-    let projects = discovery::project_candidates(&env, &harnesses);
+    let projects = shown_projects(state, &env, &harnesses, &settings)?;
     let mut sources = discovery::sources(&env, &harnesses, &projects, &settings.manual_sources);
     let subscribed = discovery::subscribed_sources(
         &subscriptions::recorded_dirs(&settings.subscriptions),
@@ -242,7 +281,9 @@ fn auto_import_mcp(
     // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
     let actions = plan.actions.clone();
-    let mut report = sophia_core::mcp::execute(plan, true, &state.store.backups_dir());
+    // 密钥提醒（S19）：规则上没有「同时加进 .gitignore」的勾选，来源被忽略的照搬，第一次暴露的照常写、提示条里说
+    let mut report =
+        sophia_core::mcp::execute_minding_keys(plan, true, false, &state.store.backups_dir());
     register_mcp_undo(state, &mut report)?;
     // 来源管理页目标框的提示框写「最近一次自动操作」：真写进去了才记
     state
@@ -256,13 +297,21 @@ fn auto_import_mcp(
 const MCP_UNDO_LIMIT: usize = 16;
 
 /// 把这次写入的撤销记录登记进内存，id 写回报告。同一文件的旧记录一并作废。
+/// 追加 `.gitignore` 的那几行（密钥提醒）另记一条，id 写进 `gitignore_undo_id`
 fn register_mcp_undo(
     state: &AppState,
     report: &mut sophia_core::mcp::McpReport,
 ) -> Result<(), String> {
-    let Some(undo) = report.take_undo() else {
-        return Ok(());
-    };
+    if let Some(undo) = report.take_undo() {
+        report.undo_id = Some(register_undo(state, undo)?);
+    }
+    if let Some(undo) = report.take_gitignore_undo() {
+        report.gitignore_undo_id = Some(register_undo(state, undo)?);
+    }
+    Ok(())
+}
+
+fn register_undo(state: &AppState, undo: sophia_core::mcp::McpUndo) -> Result<String, String> {
     let mut records = state
         .mcp_undo
         .lock()
@@ -277,8 +326,7 @@ fn register_mcp_undo(
     }
     let id = mcp_undo_id(state.next_mcp_undo.fetch_add(1, Ordering::Relaxed));
     records.push((id.clone(), undo));
-    report.undo_id = Some(id);
-    Ok(())
+    Ok(id)
 }
 
 /// 进程内随机种子 + 序号，不可预测也不重复；安全性不靠它（记录只能由 core 的写入产生）
@@ -409,10 +457,25 @@ fn propose_mcp_sync(
     Ok(preview)
 }
 
+/// 密钥提醒（S19）的问法：移动 / 复制的确认框按选中的去处问一次，出不出「同时加进 .gitignore」。只读
+#[tauri::command]
+fn check_mcp_key_hints(
+    selections: Vec<sophia_core::mcp::McpSelection>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<sophia_core::mcp::McpKeyHint>, String> {
+    let discovery = discover_mcp(&state)?;
+    let plan = sophia_core::mcp::prepare(&discovery.locations, &selections);
+    Ok(sophia_core::mcp::key_hints(&plan))
+}
+
+/// 写进项目文件的一律按密钥提醒处理（`execute_minding_keys`）。`add_to_gitignore`：只有移动 / 复制的确认框给
+/// （勾没勾「同时加进 .gitignore」）；不给（格子里的写入）按没勾——照常写，报告里给可以补加的目标（`ignorable`），
+/// 提示条上的「加进 .gitignore」交给 `add_mcp_gitignore`
 #[tauri::command]
 fn apply_mcp(
     plan_id: String,
     allow_cross_domain: bool,
+    add_to_gitignore: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<sophia_core::mcp::McpReport, String> {
     let plan = {
@@ -432,13 +495,37 @@ fn apply_mcp(
     // 但会占住那个线程：模型页正在写设置时，这条命令要等它放锁，界面在此期间不响应。
     // 所以模型页那边只把写文件包在锁里，不把联网和状态查询放进临界区。
     let _config_guard = state.config_lock.blocking_lock();
-    let mut report =
-        sophia_core::mcp::execute(plan, allow_cross_domain, &state.store.backups_dir());
+    let backups = state.store.backups_dir();
+    let mut report = sophia_core::mcp::execute_minding_keys(
+        plan,
+        allow_cross_domain,
+        add_to_gitignore.unwrap_or(false),
+        &backups,
+    );
     register_mcp_undo(&state, &mut report)?;
     // 手动写进来的：之前手动移除时记下的排除撤掉，自动规则照常接管
     update_mcp_rules(&state, |rules| {
         sophia_core::mcp::include_written(rules, &report)
     })?;
+    Ok(report)
+}
+
+/// 点格子写入的提示条上的「加进 .gitignore」（密钥提醒，产品负责人 2026-10-06）：把那次写入报告里的 `ignorable`
+/// 加进各自项目根的 `.gitignore`。撤销号进 `gitignore_undo_id`，前端在撤那次写入时接着撤它
+#[tauri::command]
+fn add_mcp_gitignore(
+    target_ids: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<sophia_core::mcp::McpReport, String> {
+    let discovery = discover_mcp(&state)?;
+    // 与写入共用一把锁（同步命令，见 apply_mcp）：撤之前核对的是配置文件此刻的内容
+    let _config_guard = state.config_lock.blocking_lock();
+    let mut report = sophia_core::mcp::ignore_targets(
+        &discovery.locations,
+        &target_ids,
+        &state.store.backups_dir(),
+    );
+    register_mcp_undo(&state, &mut report)?;
     Ok(report)
 }
 
@@ -473,6 +560,51 @@ fn delete_mcp_original(
     update_mcp_rules(&state, |rules| {
         sophia_core::mcp::exclude_removed(rules, &report)
     })?;
+    Ok(report)
+}
+
+/// 密钥提醒（S19，issue #147）的问法：「保留这份」的确认框问一次，要改写的项目文件出不出「同时加进 .gitignore」、
+/// 已被跟踪的那一句。来源是选中那一份所在的文件。只读
+#[tauri::command]
+fn check_mcp_keep_key_hints(
+    name: String,
+    keep_id: String,
+    location_ids: Vec<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<sophia_core::mcp::McpKeyHint>, String> {
+    let discovery = discover_mcp(&state)?;
+    let plan = sophia_core::mcp::prepare_keep(&discovery.locations, &name, &keep_id, &location_ids);
+    Ok(sophia_core::mcp::keep_key_hints(&plan))
+}
+
+/// MCP「保留这份」（spec 2026-10-05-skill-mcp-batch2 S4）：以 `keep_id` 那一处的定义为准，改写 `location_ids`
+/// 里其余几处同名的 `name`，各 agent 专属字段不动；`revision` 是用户看到的差异表的指纹，之后谁被改了就不动。一处不成整次不动；写成的一次撤销，与写入共用 `mcp_undo_write`。
+/// 密钥提醒（issue #147）：`add_to_gitignore` 是确认框里勾没勾「同时加进 .gitignore」；追加的那几行进同一次撤销
+#[tauri::command]
+fn keep_mcp_copy(
+    name: String,
+    keep_id: String,
+    location_ids: Vec<String>,
+    revision: String,
+    add_to_gitignore: Option<bool>,
+    state: tauri::State<'_, AppState>,
+) -> Result<sophia_core::mcp::McpReport, String> {
+    let discovery = discover_mcp(&state)?;
+    // 会写 ~/.codex/config.toml：与模型页、MCP 写入共用一把锁（同步命令，见 apply_mcp）
+    let _config_guard = state.config_lock.blocking_lock();
+    let plan = sophia_core::mcp::prepare_keep_seen(
+        &discovery.locations,
+        &name,
+        &keep_id,
+        &location_ids,
+        &revision,
+    );
+    let mut report = sophia_core::mcp::execute_keep_minding_keys(
+        plan,
+        add_to_gitignore.unwrap_or(false),
+        &state.store.backups_dir(),
+    );
+    register_mcp_undo(&state, &mut report)?;
     Ok(report)
 }
 
@@ -692,6 +824,75 @@ fn plan_delete_source(
         .find(|s| s.name == skill)
         .ok_or_else(|| sophia_core::t!("shell.error.originGone"))?;
     let plan = skills::plan_delete_source(skill, &sources, &targets);
+    let plan_id = state
+        .next_delete_plan
+        .fetch_add(1, Ordering::Relaxed)
+        .to_string();
+    *state
+        .delete_plan
+        .lock()
+        .map_err(|_| sophia_core::t!("shell.error.deletePlanCacheCorrupt"))? =
+        Some((plan_id.clone(), plan.clone()));
+    Ok(PlannedDeletion { plan_id, plan })
+}
+
+/// 「只留这份」的一方（issue #153）：某个原件位置里的那一份（`source_id`），或 agent 自己目录里
+/// 不在任何原件位置里的那一份（`target_id`：那个目标目录下的同名文件夹）
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CopyRef {
+    source_id: Option<String>,
+    target_id: Option<String>,
+}
+
+/// 这一方此刻在哪：原件位置里查不到、agent 目录下那一份不是真实文件夹时报「已不存在」
+fn copy_path(
+    copy: &CopyRef,
+    skill: &str,
+    sources: &[Source],
+    targets: &[Target],
+) -> Result<PathBuf, String> {
+    if let Some(id) = &copy.source_id {
+        return sources
+            .iter()
+            .find(|s| &s.id == id)
+            .ok_or_else(|| sophia_core::t!("shell.error.originLocationGone"))?
+            .skill_path(skill)
+            .map(Path::to_path_buf)
+            .ok_or_else(|| sophia_core::t!("shell.error.originGone"));
+    }
+    let target = targets
+        .iter()
+        .find(|t| Some(&t.id) == copy.target_id.as_ref())
+        .ok_or_else(|| sophia_core::t!("shell.error.targetGone"))?;
+    let path = target.path.join(skill);
+    // 只认带 `SKILL.md` 的真实文件夹：链接要走 `remove_link`，不能当成一份挪走；不带 `SKILL.md` 的不是 skill
+    if sophia_core::fs::entry_kind(&path) != sophia_core::fs::EntryKind::Dir
+        || !path.join("SKILL.md").is_file()
+    {
+        return Err(sophia_core::t!("shell.error.originGone"));
+    }
+    Ok(path)
+}
+
+/// 同名两份里有一份在 agent 自己目录里时的「只留这份」体检（issue #153）：挪走 `drop`、留下 `keep`，
+/// 指向 `drop` 的链接改指到 `keep`。计划同 `plan_delete_source` 留在服务端，确认后凭 `plan_id` 调 `delete_source`
+#[tauri::command]
+fn plan_keep_copy(
+    skill: String,
+    keep: CopyRef,
+    drop: CopyRef,
+    state: tauri::State<'_, AppState>,
+) -> Result<PlannedDeletion, String> {
+    let (sources, targets) = discover(&state)?;
+    let keep = copy_path(&keep, &skill, &sources, &targets)?;
+    let path = copy_path(&drop, &skill, &sources, &targets)?;
+    let drop = Skill {
+        name: skill,
+        path,
+        description: None,
+    };
+    let plan = skills::plan_keep(&drop, &keep, &targets);
     let plan_id = state
         .next_delete_plan
         .fetch_add(1, Ordering::Relaxed)
@@ -1165,6 +1366,52 @@ fn set_harness_enabled(
     state.store.save_settings(&settings).map_err(err)
 }
 
+/// 设置「生效范围」的项目格：自动检测的与手动选的（存在的才列），带勾没勾
+#[tauri::command]
+fn list_projects(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<discovery::ProjectScope>, String> {
+    let env = runtime_env()?;
+    let (installed, settings) = installed_and_settings(&state, &env)?;
+    let harnesses = discovery::enabled(installed, &settings);
+    let manual = state.store.load_projects().map_err(err)?;
+    Ok(discovery::project_scopes(
+        discovery::projects(&env, &harnesses, &manual),
+        &settings.hidden_projects,
+    ))
+}
+
+/// `+ 项目` / 应用菜单「添加项目…」：选的文件夹记进 projects.json、默认勾上；当不了项目的（主目录、
+/// 不是文件夹）拒绝，错误信息就是给用户看的那句
+#[tauri::command]
+fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let env = runtime_env()?;
+    let _settings_guard = state.store.lock_settings();
+    let mut manual = state.store.load_projects().map_err(err)?;
+    let mut settings = state.store.load_settings().map_err(err)?;
+    let path =
+        discovery::add_manual_project(&env, &mut manual, &mut settings, &path).map_err(err)?;
+    state.store.save_projects(&manual).map_err(err)?;
+    state.store.save_settings(&settings).map_err(err)?;
+    // 「更多」浮层按「最近创建」排序时，取不到文件夹创建时间就用加入时间
+    state.store.mark_project_added(&path, now_ms()).map_err(err)
+}
+
+/// 「生效范围」里勾上 / 取消勾一个项目。取消勾只是不显示，已建好的链接原样留着
+#[tauri::command]
+fn set_project_shown(
+    path: PathBuf,
+    shown: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let _settings_guard = state.store.lock_settings();
+    let mut settings = state.store.load_settings().map_err(err)?;
+    if discovery::set_project_shown(&mut settings, &path, shown) {
+        state.store.save_settings(&settings).map_err(err)?;
+    }
+    Ok(())
+}
+
 /// 此刻的毫秒时间戳；时钟早于 1970 时记 0
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -1261,6 +1508,9 @@ pub fn run() {
     // 再次打开时把已有的主窗口带到前面（窗口藏在菜单栏里时插件不管）
     let builder =
         tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 第二个实例被拦下时它自己什么都不说就退了（exit 0）；在活着的这个实例里记一条，
+            // 排查「新开的 Sophia 怎么没出来」时有据可查（2026-10-05 retro）
+            log::info!("又开了一个 Sophia，已被拦下；把现有窗口带到前面");
             #[cfg(target_os = "macos")]
             tray::show_main(app);
             #[cfg(not(target_os = "macos"))]
@@ -1327,13 +1577,18 @@ pub fn run() {
             mcp_endpoint,
             propose_mcp_sync,
             apply_mcp,
+            check_mcp_key_hints,
+            add_mcp_gitignore,
             delete_mcp_original,
+            check_mcp_keep_key_hints,
+            keep_mcp_copy,
             mcp_undo_write,
             propose_links,
             propose_unlinks,
             apply_all,
             split_whole_link,
             plan_delete_source,
+            plan_keep_copy,
             skill_copy_info,
             delete_source,
             undo_delete_source,
@@ -1346,6 +1601,9 @@ pub fn run() {
             subscribe_mcp_source,
             plan_remove_mcp_source,
             remove_mcp_source,
+            list_projects,
+            add_project,
+            set_project_shown,
             list_manual_sources,
             add_manual_source,
             remove_manual_source,
@@ -1369,8 +1627,10 @@ pub fn run() {
             gateway::gateway_remove_provider,
             gateway::gateway_copy_providers,
             gateway::gateway_fetch_models,
+            gateway::gateway_presets,
             gateway::gateway_select_models,
             gateway::gateway_probe_model,
+            gateway::gateway_add_manual_model,
             gateway::gateway_enable,
             gateway::gateway_restore,
             gateway::gateway_takeover,
@@ -1432,6 +1692,9 @@ pub fn run() {
             feedback::feedback_send
         ])
         .setup(|_app| {
+            // 后台问一次登录 shell 要 PATH 与两个目录变量（spec S16）：不等它，问到之前按现状找程序。
+            // 放在 setup 里而不是更早：日志插件此时已装好，问到没问到有一条日志可查
+            sophia_gateway::login_env::start();
             // 本机诊断最先接上：日志目录、启动日志、上次是否意外退出（运行标记在数据目录下）
             {
                 use tauri::Manager;

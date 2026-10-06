@@ -185,6 +185,7 @@ mod tests {
                     router_token: Arc::new(|| Err("none".into())),
                     keepalive: Duration::ZERO,
                     locale: None,
+                    key_verdicts: None,
                 })
             }),
         )

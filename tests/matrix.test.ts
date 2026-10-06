@@ -423,13 +423,14 @@ test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号�
   // 宽抽屉由行视图说（detailWide），右沿只让出尾列：让位走 Drawer 的 inset
   const mx = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
   assert.match(mx, /end: row\.detailWide \? WIDE_DETAIL_END : columns\.length \* colW/);
-  // skill：`只留这份` 是抽屉末尾的一颗键（SkillDetail 的 keep），名称格里没有；确认框锚在这颗键下
+  // skill：`只留这份` 在抽屉末尾「N 份不一样」那张差异表的行尾（issue #111，SkillDetail 的 copies），
+  // 名称格里没有；确认框锚在按下的那颗键下
   const dv = withSkillsCopy(
     readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8"),
   );
   assert.doesNotMatch(dv, /\bextra:|extraPinned|DupExtra/);
-  assert.match(dv, /keep=\{\s*other === undefined \? undefined : \(\s*<>\s*<KeepKey/);
-  assert.match(dv, /\{keep \? <div className="mx-detail__keep">\{keep\}<\/div> : null\}/);
+  assert.match(dv, /copies=\{\s*table === null \? undefined : \(\s*<SkillCopies/);
+  assert.match(dv, /\{copies \?\? null\}/);
   // 右键菜单里的「只留这份…」快捷路保留
   assert.match(dv, /label: t\("只留这份…"\)/);
 });
@@ -751,7 +752,7 @@ test("MCP 行详情第二行 `命令` / `地址`：core 取单份定义（mcp_en
   // 键值三行的顺序：传输 → 命令或地址 → 原件；读的是行的原件那一处
   assert.match(
     tab,
-    /mx-kv__key">传输<[^]*<McpEndpointRow name=\{row\.name\} locationId=\{originId\} load=\{api\.mcpEndpoint\} \/>[^]*mx-kv__key">原件</,
+    /mx-kv__key">传输<[^]*<McpEndpointRow\s+name=\{row\.name\}\s+locationId=\{originId\}\s+load=\{api\.mcpEndpoint\}\s+reloadKey=\{overview\}\s+\/>[^]*mx-kv__key">原件</,
   );
   const panel = withMcpCopy(
     readFileSync(new URL("../src/McpDiffPanel.tsx", import.meta.url), "utf8"),
@@ -804,9 +805,10 @@ test("批量撤销按条件给：加上时选中的里这一列原本已有一�
   const mcp = withMcpCopy(readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8"));
   assert.match(mcp, /write\(cells, target\.id, deletable\.length === 0\)/);
   assert.match(mcp, /write\(allAdd, "all", allRemove\.length === 0\)/);
+  // MCP 批量写进项目文件、密钥第一次暴露时那一条多一颗 `加进 .gitignore`，排在 `撤销` 前（同 `去处理 · 撤销`）
   assert.match(
     mcp,
-    /action=\{\s*undo && !reversible \? \{ label: t\("撤销"\), onClick: undo \} : undefined\s*\}/,
+    /go=\{addKey\}\s*action=\{\s*undo && !reversible \? \{ label: t\("撤销"\), onClick: undo \} : undefined\s*\}/,
   );
 });
 

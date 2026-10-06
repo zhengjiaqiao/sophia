@@ -151,8 +151,8 @@ fn is_usage_response(v: &Value) -> bool {
 mod tests {
     use super::*;
     use crate::usage::probe::ProbeError;
+    use crate::usage::test_support::write_executable;
     use sophia_core::usage::{AgentId, Severity, Source};
-    use std::os::unix::fs::PermissionsExt;
 
     /// 真实（脱敏）样本 `get_usage_max_with_limits.json`，把 `request_id` 换成
     /// 我们自己协议里用的 `sophia-usage`，压成单行——`run_probe` 按行读 stdout，
@@ -223,8 +223,7 @@ mod tests {
         let mut full = String::from("#!/bin/sh\n");
         full.push_str(body);
         let path = dir.join(name);
-        std::fs::write(&path, full).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&path, &full);
         path
     }
 
@@ -261,7 +260,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap();
@@ -299,7 +298,7 @@ mod tests {
                 &empty_home,
                 Some(&config_dir),
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap();
@@ -332,7 +331,7 @@ mod tests {
                 &account.home,
                 account.claude_config_dir.as_deref(),
                 account.probe_parent_env(),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap();
@@ -368,7 +367,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap();
@@ -399,7 +398,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap_err();
@@ -457,7 +456,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap_err();
@@ -489,7 +488,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap_err();
@@ -519,7 +518,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap_err();

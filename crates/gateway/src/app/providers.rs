@@ -3,7 +3,7 @@
 //! 两家的网关列表形状相同（`ProviderSettings`），规则也相同；不同的只是改完之后怎么让已生效的配置跟上：
 //! Codex 已启用时重写目录与路由清单（原有行为，逐字节不变）；Claude 见 `commit_family`。
 use super::{clean_base_url, host_of, unknown_provider, Agent, App, AppError};
-use crate::router::Protocol;
+use crate::router::{KeyVerdict, Protocol};
 use sophia_core::claude_models::settings::ClaudeGatewaySettings;
 use sophia_core::codex_models::catalog::Model;
 use sophia_core::codex_models::settings::{
@@ -228,6 +228,41 @@ impl App {
         })
     }
 
+    /// 按服务商预设（spec S1）给这一家网关记上来源与协议：`preset` 是 `provider_presets` 里的 id。
+    /// 在保存之后调（保存那一步只认地址与密钥）；协议变了且已生效就重写路由清单。`also` 是同步到另一家的那一个
+    pub fn apply_preset_in(
+        &self,
+        agent: Agent,
+        id: &str,
+        preset: &str,
+        also: Option<(Agent, &str)>,
+    ) -> Result<(), AppError> {
+        let _guard = self.guard();
+        let Some(found) = sophia_core::provider_presets::find(preset) else {
+            return Err(AppError::new(
+                "invalid",
+                sophia_core::t!("models.preset.unknown", preset = preset),
+            ));
+        };
+        let protocol = found
+            .openai
+            .as_ref()
+            .and_then(|e| e.protocol.clone())
+            .unwrap_or_else(|| "chat".to_owned());
+        for (agent, id) in std::iter::once((agent, id)).chain(also) {
+            let mut family = self.load_family(agent)?;
+            let provider = family
+                .provider_mut(id)
+                .ok_or_else(|| unknown_provider(id))?;
+            let changed = provider.protocol() != protocol;
+            provider.protocol = protocol.clone();
+            provider.preset = Some(preset.to_owned());
+            let publishes = family.publishes(id);
+            self.commit_family(&mut family, changed && publishes)?;
+        }
+        Ok(())
+    }
+
     /// 拉取模型列表要用的地址和密钥；任一缺失则报错，不联网
     pub fn provider_for_fetch_in(
         &self,
@@ -299,6 +334,65 @@ impl App {
     ) -> Result<(), AppError> {
         let _guard = self.guard();
         self.unreachable_locked(agent, id, reason, detail)
+    }
+
+    /// 真实调用（路由转发的请求、勾选前的试调）对这一家密钥的结论（#144）：被拒记成「密钥无效」并带上原文，
+    /// 成功清掉真实调用记下的那一条（拉列表记下的原因不动）。状态没变不写文件；这家网关已经不在了（删掉了、
+    /// 旧格式清单的那一家）不算错。返回写没写
+    pub fn record_key_verdict_in(
+        &self,
+        agent: Agent,
+        id: &str,
+        verdict: KeyVerdict,
+    ) -> Result<bool, AppError> {
+        let _guard = self.guard();
+        let mut family = self.load_family(agent)?;
+        let Some(provider) = family.provider_mut(id) else {
+            return Ok(false);
+        };
+        let changed = match verdict {
+            KeyVerdict::Rejected { detail } => provider.mark_key_rejected(Some(detail)),
+            KeyVerdict::Accepted => provider.clear_key_rejection(),
+        };
+        if changed {
+            self.save_family(&family)?;
+        }
+        Ok(changed)
+    }
+
+    /// 手动添加一个模型并勾上（sophia-dev#117）：调用方已经试调通了才调这里。`id` 已在列表里就只勾上；
+    /// 已生效时让配置跟上
+    pub fn add_manual_model_in(
+        &self,
+        agent: Agent,
+        id: &str,
+        model_id: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let _guard = self.guard();
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return Err(AppError::new(
+                "invalid",
+                sophia_core::t!("models.probe.noModel"),
+            ));
+        }
+        let mut family = self.load_family(agent)?;
+        let provider = family
+            .provider_mut(id)
+            .ok_or_else(|| unknown_provider(id))?;
+        // 已经在列表里（网关给的或早先手动加的）：直接替用户勾上，不报错（2026-10-05 产品负责人）
+        match provider.models.iter_mut().find(|m| m.model.id == model_id) {
+            Some(existing) => existing.selected = true,
+            None => provider.models.push(SavedModel {
+                model: Model {
+                    id: model_id.to_owned(),
+                    manual: true,
+                    ..Default::default()
+                },
+                selected: true,
+            }),
+        }
+        self.commit_family_as(&mut family, true, true)
     }
 
     /// 保存这一家网关的完整勾选；已生效时让配置跟上（见 `commit_family`）
@@ -443,6 +537,10 @@ impl App {
             (self.deps.set_key)(agent, &id, key).map_err(|e| AppError::new("invalid", e))?;
         }
         let base_changed = apply_merge(&mut family, &id, models, api_base)?;
+        // 存了密钥：真实调用记下的「密钥无效」是对旧密钥的结论（#144）
+        if let Some(provider) = family.provider_mut(&id) {
+            provider.clear_key_rejection();
+        }
         let publishes = family.publishes(&id);
         self.commit_family(&mut family, (url_changed || base_changed) && publishes)?;
         Ok(id)
@@ -459,6 +557,10 @@ impl App {
         let provider = family
             .provider_mut(id)
             .ok_or_else(|| unknown_provider(id))?;
+        if provider.key_rejected_on_call {
+            // 真实调用已经说了密钥被拒：拉列表这次的失败不顶掉它，换密钥或调用成功才清（#144）
+            return Ok(());
+        }
         provider.unreachable = Some(reason);
         provider.unreachable_detail = detail;
         self.save_family(&family)
@@ -505,6 +607,8 @@ impl App {
                     model: picked_over(&existing.model, pick),
                     selected: true,
                 }),
+                // 手动填的（#117）只因用户要它才在列表里：取消勾选就是移除，再要就再加一次
+                None if existing.model.manual => {}
                 None => next.push(SavedModel {
                     selected: false,
                     ..existing.clone()
@@ -623,6 +727,11 @@ impl App {
                     }
                     None => false,
                 };
+                if key.is_some() {
+                    if let Some(provider) = family.provider_mut(&target) {
+                        provider.clear_key_rejection();
+                    }
+                }
                 let publishes = family.publishes(&target);
                 self.commit_family(&mut family, (url_changed || base_changed) && publishes)
                     .map_err(fail)?;
@@ -668,6 +777,7 @@ fn apply_upsert(
                 provider.api_base = None; // 旧地址探明的接口基址作废
                 provider.unreachable = None; // 无法连接是对旧地址的结论
                 provider.unreachable_detail = None;
+                provider.key_rejected_on_call = false;
             }
             if let Some(name) = name {
                 provider.name = name.to_owned();
@@ -699,8 +809,11 @@ fn apply_merge(
     let provider = family
         .provider_mut(id)
         .ok_or_else(|| unknown_provider(id))?;
-    provider.unreachable = None; // 拉到了就是连得上
-    provider.unreachable_detail = None;
+    // 拉到了就是连得上；真实调用记下的「密钥无效」除外：有的服务商拉列表不验密钥（#144）
+    if !provider.key_rejected_on_call {
+        provider.unreachable = None;
+        provider.unreachable_detail = None;
+    }
     let api_base = api_base.trim().trim_end_matches('/');
     let api_base_changed = !api_base.is_empty() && provider.api_base.as_deref() != Some(api_base);
     if api_base_changed {
@@ -732,9 +845,9 @@ fn apply_merge(
             }),
         }
     }
-    // 已勾选但网关这次没返回的模型保留，避免一次网络抖动丢掉选择
+    // 已勾选但网关这次没返回的模型保留，避免一次网络抖动丢掉选择；手动填的（#117）不在网关列表里是常态，一律保留
     for model in &provider.models {
-        if model.selected && !seen.contains(&model.model.id) {
+        if (model.selected || model.model.manual) && !seen.contains(&model.model.id) {
             merged.push(model.clone());
         }
     }
@@ -750,6 +863,7 @@ fn unselected_copy(provider: &ProviderSettings, id: &str) -> ProviderSettings {
         base_url: provider.base_url.clone(),
         api_base: provider.api_base.clone(),
         protocol: provider.protocol.clone(),
+        preset: provider.preset.clone(),
         models: provider
             .models
             .iter()
@@ -760,6 +874,7 @@ fn unselected_copy(provider: &ProviderSettings, id: &str) -> ProviderSettings {
             .collect(),
         unreachable: None,
         unreachable_detail: None,
+        key_rejected_on_call: false,
     }
 }
 

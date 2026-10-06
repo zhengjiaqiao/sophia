@@ -48,6 +48,9 @@ pub struct ProviderSettings {
     pub api_base: Option<String>,
     /// 这家网关支持的协议："chat"（默认）或 "responses"。读取请用 `protocol()`，它会归一化未知值
     pub protocol: String,
+    /// 从哪个服务商预设建的（`provider_presets` 里的 id，spec S1）；手填地址的没有。只用来显示来源与取密钥的链接
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
     pub models: Vec<SavedModel>,
     /// 上次拉取模型失败的原因种类（界面上的短句由 [`UnreachableReason::text`] 按当前语言取）；
     /// 拉取成功或换地址后清空
@@ -57,6 +60,11 @@ pub struct ProviderSettings {
     /// 与 `unreachable` 同生同灭（spec 2026-10-04-local-diagnostics R13）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unreachable_detail: Option<String>,
+    /// `unreachable` 是真实调用（路由转发的请求、勾选前的试调）被拒了密钥时记下的，不是拉模型列表记下的。
+    /// 有的服务商拉列表不验密钥（OpenRouter 的 `GET /models`），所以拉列表成功不清它；换密钥、换地址、
+    /// 之后一次真实调用成功才清（#144）。为假不写这个键；旧版 App 不认它，读时忽略
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub key_rejected_on_call: bool,
 }
 
 /// 拉取模型失败的原因种类。落盘写种类代码字符串（`"auth"` / `"network"` / `"unexpected"` / `"dns"` /
@@ -89,6 +97,8 @@ pub enum UnreachableReason {
     RateLimited(Option<u64>),
     /// 5xx：服务端出错（状态码）
     Server(u16),
+    /// 填的是 Anthropic 协议的地址（`/anthropic` 一类后缀）：去掉后缀也拉不到模型列表（spec S1）
+    AnthropicAddress,
     /// 旧文件里认不出的一句话，原样显示，原样写回
     Legacy(String),
 }
@@ -112,6 +122,7 @@ impl UnreachableReason {
             UnreachableReason::Server(code) => {
                 crate::t!("models.fetch.reasonServer", code = code)
             }
+            UnreachableReason::AnthropicAddress => crate::t!("models.fetch.reasonAnthropic"),
             UnreachableReason::Legacy(text) => text.clone(),
         }
     }
@@ -130,6 +141,7 @@ impl UnreachableReason {
             UnreachableReason::RateLimited(None) => "rateLimited".into(),
             UnreachableReason::RateLimited(Some(seconds)) => format!("rateLimited:{seconds}"),
             UnreachableReason::Server(code) => format!("server:{code}"),
+            UnreachableReason::AnthropicAddress => "anthropicAddress".into(),
             UnreachableReason::Legacy(_) => return None,
         })
     }
@@ -146,6 +158,7 @@ impl UnreachableReason {
             "tls" => UnreachableReason::Tls,
             "proxy" => UnreachableReason::Proxy,
             "rateLimited" => UnreachableReason::RateLimited(None),
+            "anthropicAddress" => UnreachableReason::AnthropicAddress,
             _ => {
                 if let Some(seconds) = code.strip_prefix("rateLimited:") {
                     UnreachableReason::RateLimited(Some(seconds.parse().ok()?))
@@ -220,14 +233,40 @@ impl Default for ProviderSettings {
             base_url: String::new(),
             api_base: None,
             protocol: PROTOCOL_CHAT.into(),
+            preset: None,
             models: Vec::new(),
             unreachable: None,
             unreachable_detail: None,
+            key_rejected_on_call: false,
         }
     }
 }
 
 impl ProviderSettings {
+    /// 真实调用被拒了密钥：记成「密钥无效」并带上那次请求的原文（已去密钥与隐私）。
+    /// 已经这样记着就不动（原文也不换），返回改没改——没改就不必写文件
+    pub fn mark_key_rejected(&mut self, detail: Option<String>) -> bool {
+        if self.key_rejected_on_call && self.unreachable == Some(UnreachableReason::Auth) {
+            return false;
+        }
+        self.unreachable = Some(UnreachableReason::Auth);
+        self.unreachable_detail = detail.filter(|d| !d.trim().is_empty());
+        self.key_rejected_on_call = true;
+        true
+    }
+
+    /// 换了密钥，或之后一次真实调用成功：清掉真实调用记下的「密钥无效」。拉列表记下的原因不归它管。
+    /// 返回改没改
+    pub fn clear_key_rejection(&mut self) -> bool {
+        if !self.key_rejected_on_call {
+            return false;
+        }
+        self.unreachable = None;
+        self.unreachable_detail = None;
+        self.key_rejected_on_call = false;
+        true
+    }
+
     /// 当前勾选的模型，保持列表顺序
     pub fn selected(&self) -> Vec<Model> {
         self.models
@@ -579,9 +618,11 @@ impl<'de> Deserialize<'de> for GatewaySettings {
                 } else {
                     raw.protocol
                 },
+                preset: None,
                 models: raw.models,
                 unreachable: None,
                 unreachable_detail: None,
+                key_rejected_on_call: false,
             });
         }
         Ok(Self {
@@ -890,6 +931,50 @@ mod tests {
         )
         .unwrap();
         assert_eq!(old.unreachable_detail, None);
+    }
+
+    /// 真实调用被拒了密钥（#144）：记成「密钥无效」并标明来源；再记一次不算变化；清只清这一种。
+    /// 落盘只多一个 `keyRejectedOnCall: true`，为假不写；旧版 App 的形状读得了（不认的键忽略）
+    #[test]
+    fn key_rejection_on_call_marks_once_clears_only_itself_and_stays_readable() {
+        let mut p = provider("a", vec![]);
+        assert!(p.mark_key_rejected(Some("POST https://a.test/chat/completions → 401".into())));
+        assert_eq!(p.unreachable, Some(UnreachableReason::Auth));
+        assert!(p.key_rejected_on_call);
+        assert!(
+            !p.mark_key_rejected(Some("另一句原文".into())),
+            "已经记着：不改"
+        );
+        assert_eq!(
+            p.unreachable_detail.as_deref(),
+            Some("POST https://a.test/chat/completions → 401")
+        );
+
+        let value = serde_json::to_value(&p).unwrap();
+        assert_eq!(value["unreachable"], json!("auth"));
+        assert_eq!(value["keyRejectedOnCall"], json!(true));
+        #[derive(Deserialize)]
+        struct OldProvider {
+            unreachable: Option<String>,
+        }
+        let old: OldProvider = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(old.unreachable.as_deref(), Some("auth"), "旧版读得了");
+        let back: ProviderSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(back, p);
+
+        assert!(p.clear_key_rejection());
+        assert_eq!(p.unreachable, None);
+        assert_eq!(p.unreachable_detail, None);
+        assert!(!p.clear_key_rejection(), "清过了：不再算变化");
+        assert!(serde_json::to_value(&p)
+            .unwrap()
+            .get("keyRejectedOnCall")
+            .is_none());
+
+        // 拉列表记下的原因不归它清
+        p.unreachable = Some(UnreachableReason::Auth);
+        assert!(!p.clear_key_rejection());
+        assert_eq!(p.unreachable, Some(UnreachableReason::Auth));
     }
 
     #[test]
@@ -1305,17 +1390,20 @@ mod tests {
                 base_url: "https://gw.example".into(),
                 api_base: Some("https://gw.example/v1".into()),
                 protocol: "responses".into(),
+                preset: None,
                 models: vec![SavedModel {
                     model: Model {
                         id: "weibo/glm-5".into(),
                         display_name: Some("GLM".into()),
                         context_window: Some(200_000),
                         vision: true,
+                        manual: false,
                     },
                     selected: true,
                 }],
                 unreachable: None,
                 unreachable_detail: None,
+                key_rejected_on_call: false,
             }],
             enabled: None,
             port: 5000,

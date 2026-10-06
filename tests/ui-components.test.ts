@@ -272,6 +272,20 @@ test("CheckRow：整行是命中区（role=checkbox），勾选框 + 10 + 图标
   assert.match(cssRule(uiCss, ".ss-checkrow"), /height:\s*var\(--row-h\)/);
   assert.match(cssRule(uiCss, ".ss-checkrow"), /gap:\s*10px/);
   assert.match(cssRule(uiCss, ".ss-checkrow--grid"), /height:\s*36px/);
+  // 小档（字号随场景：表单里附加的一个选项）：名字 13、框与字 8、行高 28、行宽随内容；提示框包层跟着收成这一行宽
+  assert.match(
+    render(CheckRow, { checked: false, onChange: noop, size: "small", children: "x" }),
+    /class="ss-checkrow ss-checkrow--small"/,
+  );
+  const small = cssRule(uiCss, ".ss-checkrow--small");
+  assert.match(small, /height:\s*var\(--control-h\)/);
+  assert.match(small, /gap:\s*var\(--space-xs\)/);
+  assert.match(small, /width:\s*auto/);
+  assert.match(
+    cssRule(uiCss, ".ss-checkrow--small .ss-checkrow__name"),
+    /font-size:\s*var\(--size-caption\)/,
+  );
+  assert.match(cssRule(uiCss, ".ss-tipwrap:has(> .ss-checkrow--small)"), /width:\s*auto/);
   assert.match(
     uiCss,
     /\.ss-checkrow:hover:not\(:disabled\),\s*\.ss-checkrow\.is-noted \{\s*background: var\(--surface\);/,

@@ -206,6 +206,19 @@ export function FeedbackFamily() {
             />
           </CornerToast>
         </Specimen>
+        <Specimen label="右下 · 部分失败 · 放不下折两行（去处理 · 撤销，键跨两行居中）">
+          <CornerToast>
+            <Toast
+              kind="partial"
+              sentence="market.toast.installPartial"
+              names={["pdf"]}
+              reason="Claude Code 没链上：那里已有同名的"
+              go={{ label: "去处理", onClick: noop }}
+              action={{ label: "撤销", onClick: noop }}
+              onClose={noop}
+            />
+          </CornerToast>
+        </Specimen>
       </Block>
 
       <Block

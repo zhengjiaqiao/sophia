@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AgentIcon,
   Button,
@@ -8,7 +8,9 @@ import {
   IconChevronDown,
   Menu,
   MenuItem,
+  Note,
   RadioRow,
+  Tooltip,
 } from "./ui/index.ts";
 import { ProjectList } from "./FilterRow.tsx";
 import { scopeWord } from "./terms.ts";
@@ -21,7 +23,17 @@ import {
   type ScopeAgentOption,
   type ScopeMode,
 } from "./mcpView.ts";
-import type { LocationKey } from "./types.ts";
+import { askedTargets, scopeKeyHintTip, scopeTrackedNote } from "./mcpKeyHint.ts";
+import type { LocationKey, McpKeyHint } from "./types.ts";
+
+/// 确认时确认框里对哪几个目标（位置 id）说过什么：`remind` 出了勾选的，`tracked` 出了已被跟踪那一句的（按目标记：
+/// 说过的提示条不再说，没说过的——检查之后又变了，比如勾选护着的那个文件确认前被 git add 了——照样说）；
+/// `add` 出了勾选并且勾了。修改生效范围与「保留这份」共用
+export interface ScopeGitignore {
+  remind: string[];
+  tracked: string[];
+  add: boolean;
+}
 
 /// 确认框里这一刻的样子：能不能做、后果几句、几个去处在句子里的写法（`CardBox、weibo_assistant` / `3 个项目`）、
 /// 按哪种动作说（移动但一份都不从这边挪＝加一份）
@@ -53,6 +65,8 @@ const DIALOG_PROJECTS = 5;
 ///   agent，然后展示出来，但是用户可以调整」）；点开的多选菜单同自动同步页：去处能写的每个位置一项（Claude Code 仅自己、
 ///   团队共享各一项，两格互斥同表格），勾着的是和现在一致的；去掉的留在原处，多勾的从现有的一份转写过去，
 ///   去不了的灰着说原因（「不能选的应该灰色」）
+/// - 密钥提醒（S19）：选中的去处里有「第一次暴露」的（来源不在仓库里、没被忽略，目标是 git 仓库里的项目文件）时，
+///   正文末尾出默认不勾的 `同时加进 .gitignore`（`ScopeKeyHint`）；来源被忽略的写成后自动加，结果提示条里说
 export function McpScopeDialog({
   name,
   places,
@@ -61,6 +75,7 @@ export function McpScopeDialog({
   agents: agentsFor,
   view,
   targetBlocked,
+  keyHints,
   onConfirm,
   onCancel,
 }: {
@@ -75,7 +90,16 @@ export function McpScopeDialog({
   view: (mode: ScopeMode, targets: LocationKey[], columns: ReadonlySet<string>) => ScopeChoiceView;
   /// 这个项目为什么勾不了（已有同名、一份都放不过去）；能勾时为 null
   targetBlocked: (key: LocationKey) => string | null;
-  onConfirm: (mode: ScopeMode, targets: LocationKey[], columns: ReadonlySet<string>) => void;
+  /// 密钥提醒（S19）：写进这几个去处、这几列时各项目文件的提醒（问后端，只读）
+  keyHints: (targets: LocationKey[], columns: ReadonlySet<string>) => Promise<McpKeyHint[]>;
+  /// `gitignore.remind` / `gitignore.tracked`：确认框里对哪几个目标出了「同时加进 .gitignore」、出了已被跟踪那一句；
+  /// `gitignore.add`：出了勾选并且勾了
+  onConfirm: (
+    mode: ScopeMode,
+    targets: LocationKey[],
+    columns: ReadonlySet<string>,
+    gitignore: ScopeGitignore,
+  ) => void;
   onCancel: () => void;
 }) {
   const [all, setAll] = useState(fromKey === "global");
@@ -107,6 +131,28 @@ export function McpScopeDialog({
     if (on && sibling !== null && isOn(sibling)) setOn(sibling, false);
   };
   const now = "blocked" in intent ? null : view(intent.mode, intent.targets, columns);
+  // 密钥提醒：去处或列变了再问一次；新的回来之前先留着上一次的（不闪），但墨键等这一次回来再亮——
+  // 不然没看到勾选就写进去了。问不出来（不该发生）按没有要提醒的算，写的时候后端照样再判一次
+  const [keyCheck, setKeyCheck] = useState<{ key: string; hints: McpKeyHint[] } | null>(null);
+  const [addGitignore, setAddGitignore] = useState(false);
+  const checkKey = "blocked" in intent ? "" : JSON.stringify([intent.targets, [...columns].sort()]);
+  useEffect(() => {
+    if ("blocked" in intent) return;
+    let live = true;
+    keyHints(intent.targets, columns).then(
+      (hints) => live && setKeyCheck({ key: checkKey, hints }),
+      () => live && setKeyCheck({ key: checkKey, hints: [] }),
+    );
+    return () => {
+      live = false;
+    };
+    // 只随去处与列变：`keyHints` 每次渲染都是新的函数
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkKey]);
+  const keyTip = "blocked" in intent ? null : scopeKeyHintTip(keyCheck?.hints ?? null);
+  // 目标文件已被跟踪的：不出勾选，在同一个位置说一句（产品负责人 2026-10-06）
+  const keyTracked = "blocked" in intent ? null : scopeTrackedNote(keyCheck?.hints ?? null);
+  const checking = !("blocked" in intent) && keyCheck?.key !== checkKey;
   const blocked =
     "blocked" in intent
       ? intent.blocked
@@ -148,9 +194,13 @@ export function McpScopeDialog({
     <Confirm
       title={t("mcp.scope.title", { name })}
       confirmLabel={label}
-      confirmDisabledReason={blocked ?? undefined}
+      confirmDisabledReason={blocked ?? (checking ? t("mcp.write.checking") : undefined)}
       onConfirm={() => {
-        if (!("blocked" in intent)) onConfirm(intent.mode, intent.targets, columns);
+        if (!("blocked" in intent) && !checking)
+          onConfirm(intent.mode, intent.targets, columns, {
+            ...askedTargets(keyCheck?.hints ?? null),
+            add: keyTip !== null && addGitignore,
+          });
       }}
       onCancel={onCancel}
     >
@@ -255,7 +305,56 @@ export function McpScopeDialog({
             <p key={line}>{line}</p>
           ))}
         </div>
+        {keyTip !== null || keyTracked !== null ? (
+          <ScopeKeyHint
+            checked={addGitignore}
+            onChange={setAddGitignore}
+            tip={keyTip}
+            tracked={keyTracked}
+          />
+        ) : null}
       </div>
     </Confirm>
+  );
+}
+
+/// 确认框正文末尾的 `同时加进 .gitignore`（密钥提醒 S19）：DESIGN-components「勾选行」字号随场景，与紧挨着的正文
+/// 同一档——修改生效范围确认框紧挨 13 号的后果那几句（`mcp-scope__cons`），小档；「保留这份」确认框紧挨 15 号的
+/// 确认框正文，默认档（`size="list"`）。默认不勾。
+/// 解释同安装页，进提示框（悬停这一行、键盘焦点到它时出）。目标文件已被跟踪的不出勾选，在同一个位置说一句
+/// （现成的 `Note`，13 `ink-mute`）；两种都有时勾选在上、那一句在下（同安装页 `KeyHintBlock`）
+export function ScopeKeyHint({
+  checked,
+  onChange,
+  tip,
+  tracked,
+  size = "small",
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  /// 勾选的提示框文字（`scopeKeyHintTip`）；没有要提醒的为 null，不出勾选
+  tip: string | null;
+  /// 已被跟踪的那一句（`scopeTrackedNote`）；没有为 null
+  tracked?: string | null;
+  /// 勾选行的档：与紧挨着的正文同一档（13 号旁小档，15 号确认框正文旁默认档）
+  size?: "small" | "list";
+}) {
+  return (
+    <>
+      {tip !== null ? (
+        <div className="mcp-scope__keyhint">
+          <Tooltip content={tip}>
+            <CheckRow size={size} checked={checked} onChange={onChange}>
+              {t("market.install.addGitignore")}
+            </CheckRow>
+          </Tooltip>
+        </div>
+      ) : null}
+      {tracked ? (
+        <div className="mcp-scope__keynote">
+          <Note>{tracked}</Note>
+        </div>
+      ) : null}
+    </>
   );
 }

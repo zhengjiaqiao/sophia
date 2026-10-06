@@ -132,18 +132,55 @@ pub fn scan(sources: &[Source], targets: &[Target], subs: &Subscriptions) -> Ove
             .filter(|t| t.exists && t.linked_whole_to.is_none())
             .flat_map(|t| broken_links(&t.path))
             .collect();
+        let agent_copies = agent_copies(&rows, &by_id);
         domains.push(DomainPage {
             key,
             label,
             targets: d_targets,
             rows,
             broken,
+            agent_copies,
         });
     }
     Overview {
         domains,
         sources: sources.to_vec(),
     }
+}
+
+/// 本域里因「那里已有同名的」被挡住的格上，占着的那一份 agent 自己的文件夹（issue #153）：
+/// 是带 `SKILL.md` 的真实文件夹（文件、链接、残留的空文件夹不算），且不是本域任何一行的原件（那一份在表里有自己的行）。按路径去重
+fn agent_copies(rows: &[DomainRow], by_id: &BTreeMap<&str, &Source>) -> Vec<AgentCopy> {
+    // 比较「是否同一处」两侧都走 real_path：macOS 上 /var 会变成 /private/var
+    let listed: BTreeSet<PathBuf> = rows
+        .iter()
+        .filter_map(|r| by_id.get(r.source_id.as_str())?.skill_path(&r.skill))
+        .filter_map(real_path)
+        .collect();
+    // 按真实路径去重：两个 agent 目录可能是同一处（一个链到另一个），那是同一份
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut out = Vec::new();
+    for cell in rows.iter().flat_map(|r| &r.cells) {
+        // 不带 `SKILL.md` 的文件夹不是 skill（agent 不会加载它，同原件位置的规则），不列
+        if cell.state != CellState::Duplicate
+            || entry_kind(&cell.path) != EntryKind::Dir
+            || !cell.path.join("SKILL.md").is_file()
+        {
+            continue;
+        }
+        let Some(real) = real_path(&cell.path) else {
+            continue;
+        };
+        if listed.contains(&real) || !seen.insert(real) {
+            continue;
+        }
+        out.push(AgentCopy {
+            skill: cell.skill.clone(),
+            target_id: cell.target_id.clone(),
+            path: cell.path.clone(),
+        });
+    }
+    out
 }
 
 /// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重。
@@ -657,9 +694,23 @@ pub fn plan_delete_source(
     sources: &[Source],
     targets: &[Target],
 ) -> DeleteSourcePlan {
+    let relink_to = same_name_elsewhere(&skill.name, sources, &normalize(&skill.path));
+    plan_delete(skill, relink_to, targets)
+}
+
+/// 「只留这份」挪走 `drop`、留下 `keep` 的体检（issue #153）：同 `plan_delete_source`，只是指向被挪走那份的
+/// 链接明确改指到留下的 `keep`——留下的可能是 agent 自己目录里的那一份，不在任何原件位置里，
+/// 按原件位置找别处同名的找不到它。`keep` 已不在时没有可改指的地方
+pub fn plan_keep(drop: &Skill, keep: &Path, targets: &[Target]) -> DeleteSourcePlan {
+    let keep = normalize(keep);
+    let relink_to =
+        (real_path(&keep).is_some() && !same_real(&keep, &normalize(&drop.path))).then_some(keep);
+    plan_delete(drop, relink_to, targets)
+}
+
+fn plan_delete(skill: &Skill, relink_to: Option<PathBuf>, targets: &[Target]) -> DeleteSourcePlan {
     let path = normalize(&skill.path);
     let (entries, bytes, modified) = dir_size(&path);
-    let relink_to = same_name_elsewhere(&skill.name, sources, &path);
     // 比较"是否同一处"两侧都要走 real_path：macOS 上 /var 会变成 /private/var
     let real = real_path(&path);
     DeleteSourcePlan {
@@ -768,7 +819,8 @@ fn unquote(s: &str) -> &str {
 /// 软链只当作一个条目，不跟随、不计字节、不计时间；目录自身的 mtime 不算（增删条目就会变，
 /// 说的不是「内容改于何时」）。一个文件都没有、或时间读不出来时为 None
 /// 同名几份里的一份的读数（DESIGN「同名原件」：`×2` 的提示框、推荐保留哪份）：
-/// 文件数、最近一次修改（毫秒）、内容指纹（按 git 规则算的文件夹 tree SHA，两份一样即内容一模一样）
+/// 文件数、最近一次修改（毫秒）、内容指纹（`treehash::content_sha`：排除 `.DS_Store` 等杂项后按 git 规则算的
+/// 文件夹 tree SHA，两份一样即内容一模一样）
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillCopyInfo {
@@ -785,7 +837,7 @@ pub fn skill_copy_info(path: &Path) -> SkillCopyInfo {
     SkillCopyInfo {
         entries,
         modified,
-        content: crate::market::treehash::tree_sha(&path).ok(),
+        content: crate::market::treehash::content_sha(&path).ok(),
     }
 }
 
@@ -2091,6 +2143,115 @@ mod tests {
         assert_eq!(plan.path, body);
         assert_eq!(plan.relink_to, None);
         assert!(plan.affected.is_empty());
+    }
+
+    /// issue #153：某一格因「那里已有同名的」被挡住，占着的是 agent 自己目录里的真实文件夹、又不是本域任何
+    /// 原件位置里的那一份——表格里没有它那一行，扫描把它单列出来（同名行抽屉的差异表要列它）。
+    /// 同名的是文件、链接，或那一份本来就是某个原件位置的本体（表里有它那一行）时不列
+    #[test]
+    fn scan_lists_same_name_folders_in_agent_dirs_that_are_no_listed_origin() {
+        let t = TempTree::new();
+        let store = t.dir("home/.agents/skills");
+        for n in ["docx", "own", "pdf", "xlsx"] {
+            t.skill(&format!("home/.agents/skills/{n}"));
+        }
+        let claude = t.dir("home/.claude/skills");
+        let codex = t.dir("home/.codex/skills");
+        let cursor = t.dir("home/.cursor/skills");
+        let claude_pdf = t.skill("home/.claude/skills/pdf"); // agent 自己的同名文件夹：列
+        let codex_pdf = t.skill("home/.codex/skills/pdf"); // 另一个 agent 也有一份：各列一份
+        t.file(&claude, "docx"); // 同名的是个文件：不列
+        t.dir("home/.codex/skills/own"); // 不带 SKILL.md 的残留文件夹不是 skill：不列
+        t.link(&claude.join("xlsx"), &store.join("xlsx")); // 链接：不列
+        t.skill("home/.cursor/skills/own"); // cursor 目录也是原件位置，这一份是它的本体：表里有它那一行
+        let gemini = t.root().join("home/.gemini/skills");
+        t.dir("home/.gemini");
+        t.link(&gemini, &codex); // gemini 的目录链到 codex 的：它那里的 pdf 与 codex 那份是同一份，不重复列
+
+        let sources = vec![
+            source(&store, &["docx", "own", "pdf", "xlsx"]),
+            external_source(&cursor, &["own"]),
+        ];
+        let targets = vec![
+            global("claude-code", &claude),
+            global("codex", &codex),
+            global("cursor", &cursor),
+            global("gemini", &gemini),
+        ];
+        let ov = scan(&sources, &targets);
+        let page = &ov.domains[0];
+        // cursor 那一格确实是「那里已有同名的」，只是占着它的那一份在表里
+        let own_row = page
+            .rows
+            .iter()
+            .find(|r| r.skill == "own" && r.source_id == sources[0].id)
+            .expect("通用仓库的 own 那一行");
+        assert_eq!(own_row.cells[2].state, CellState::Duplicate);
+        assert_eq!(
+            page.agent_copies,
+            vec![
+                AgentCopy {
+                    skill: "pdf".into(),
+                    target_id: "claude-code".into(),
+                    path: claude_pdf,
+                },
+                AgentCopy {
+                    skill: "pdf".into(),
+                    target_id: "codex".into(),
+                    path: codex_pdf,
+                },
+            ]
+        );
+    }
+
+    /// 「只留这份」留下的是 agent 自己那一份（不在任何原件位置里）：指向被删那份的链接改指到它，
+    /// 不是别处同名的另一个原件位置（`plan_delete_source` 只会在原件位置里找）
+    #[test]
+    fn plan_keep_relinks_to_the_kept_copy_even_when_it_is_no_origin() {
+        let t = TempTree::new();
+        let store = t.dir("proj/.agents/skills");
+        let body = t.skill("proj/.agents/skills/pdf");
+        let elsewhere = t.dir("home/.agents/skills");
+        t.skill("home/.agents/skills/pdf"); // 别处同名的另一个原件位置
+        let claude = t.dir("proj/.claude/skills");
+        let codex = t.dir("proj/.codex/skills");
+        let own = t.skill("proj/.claude/skills/pdf"); // Claude Code 自己的那一份
+        t.link(&codex.join("pdf"), &body);
+        let sources = [source(&store, &["pdf"]), source(&elsewhere, &["pdf"])];
+        let targets = vec![global("claude-code", &claude), global("codex", &codex)];
+
+        let plan = plan_keep(&sources[0].skills[0], &own, &targets);
+        assert_eq!(plan.path, body);
+        assert_eq!(plan.relink_to.as_deref(), Some(own.as_path()));
+        assert_eq!(
+            plan.affected,
+            vec![AffectedLink {
+                path: codex.join("pdf"),
+                style: LinkStyle::Absolute,
+            }]
+        );
+
+        // 反过来：留通用仓库那份、挪走 Claude Code 自己的那一份——指向它的链接改指到通用仓库那份
+        t.link(&codex.join("pdf-alias"), &own);
+        let drop = Skill {
+            name: "pdf".into(),
+            path: own.clone(),
+            description: None,
+        };
+        let plan = plan_keep(&drop, &body, &targets);
+        assert_eq!(plan.path, own);
+        assert_eq!(plan.relink_to.as_deref(), Some(body.as_path()));
+        assert_eq!(
+            plan.affected,
+            vec![AffectedLink {
+                path: codex.join("pdf-alias"),
+                style: LinkStyle::Absolute,
+            }]
+        );
+
+        // 留下的那份已不在：没有可改指的地方（同 `plan_delete_source` 找不到别处时）
+        let gone = t.root().join("gone/pdf");
+        assert_eq!(plan_keep(&drop, &gone, &targets).relink_to, None);
     }
 
     /// git 仓库内的本体要报出仓库根：`.git` 是目录（常规仓库）或文件（工作树 / 子模块）都算

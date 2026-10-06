@@ -5,7 +5,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { t, tn } from "../i18n.ts";
-import type { Appearance, HarnessList, HarnessStatus, LanguageSetting } from "../types";
+import type {
+  Appearance,
+  HarnessList,
+  HarnessStatus,
+  LanguageSetting,
+  ProjectScope,
+} from "../types";
 import {
   AgentIcon,
   BusySlot,
@@ -25,6 +31,7 @@ import {
 import { AbsentAgents } from "./AbsentAgents.tsx";
 import { AppearanceRow } from "./AppearanceRow.tsx";
 import { LanguageRow } from "./LanguageRow.tsx";
+import { ScopeSection } from "./ScopeSection.tsx";
 import { ISSUES_URL, PRIVACY_URL, ReportRow } from "./ReportRow.tsx";
 import {
   FeedbackSentNote,
@@ -49,7 +56,7 @@ import "./SettingsPage.css";
 /// 行高 36；默认只列已安装的，其余收在一行展开「› 未安装的 N 个」里。**最多显示 4 个**（上限来自 core，
 /// `list_harnesses` 带回）：勾满时其余已安装项禁用，按下即出「最多显示 4 个，先取消一个」。
 /// 「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——**取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
-/// 节序：`通用`（界面语言、外观、开机启动）→ `列表里的 agent` → `skill 更新`（自动检查｜开关；上次检查｜`立即检查`）
+/// 节序：`通用`（界面语言、外观、开机启动）→ `列表里的 agent` → `生效范围`（项目勾不勾，`ScopeSection`）→ `skill 更新`（自动检查｜开关；上次检查｜`立即检查`）
 /// → `关于`（版本｜`检查更新`，应用内查，不跳 GitHub；`使用统计和错误报告`｜开关，这份构建能上报才有）。查 skill 更新的结果与 SKILLS 页同一份（`useSkillUpdates`）。
 /// 除 agent 名单外，每一行都是设置行（`SettingRow`，2026-10-04 画板 B，照 Claude 的设置页）：名字与一句灰字在左，
 /// 控件在右端一列，行与行之间一条行线；节小标下不画线，节间 32；宽度同各页，随窗口变宽。
@@ -75,11 +82,21 @@ export interface SettingsPageProps {
   onError: (message: string) => void;
   /// 壳接线（应用菜单「关于 Sophia」「检查更新…」，D15）：停在「关于」；`check` 时同时开始检查
   aboutRequest?: { at: number; check: boolean };
+  /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`（issue #109）：停在「列表里的 agent」一节
+  agentsRequest?: { at: number };
   /// `skill 更新` 一节的 `去看看`：到 SKILLS · 我的 · 全部，打开 `只看这些`
   onShowUpdates?: () => void;
+  /// 壳每扫完一轮加一：应用菜单「添加项目…」加了项目、文件夹没了，`生效范围` 跟着重读
+  refreshKey?: number;
 }
 
-export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsPageProps) {
+export function SettingsPage({
+  onError,
+  aboutRequest,
+  agentsRequest,
+  onShowUpdates,
+  refreshKey = 0,
+}: SettingsPageProps) {
   /// null＝还没读回来，与「一个 agent 都没有」是两回事
   const [list, setList] = useState<HarnessList | null>(null);
   const agents: AgentOption[] | null = list?.harnesses ?? null;
@@ -205,6 +222,61 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
     }
   };
 
+  // ── 生效范围（spec 2026-10-05-skill-mcp-batch2「项目来源」）──
+  /// null＝还没读回来。勾选先画出来再写，写完重读一次，界面以落盘结果为准（同 agent 名单）
+  const [projects, setProjects] = useState<ProjectScope[] | null>(null);
+  /// 这一程在上面取消勾的：格子留在原处，下次进设置才折进「不显示的 N 个」
+  const [keptProjects, setKeptProjects] = useState<ReadonlySet<string>>(new Set());
+  const [showHiddenProjects, setShowHiddenProjects] = useState(false);
+  const [uncheckedProject, setUncheckedProject] = useState<{ path: string; at: number } | null>(
+    null,
+  );
+  const dismissUncheckedProject = useCallback(() => setUncheckedProject(null), []);
+  const [addNotice, setAddNotice] = useState<{ message: string; at: number } | null>(null);
+  const dismissAddNotice = useCallback(() => setAddNotice(null), []);
+  const reloadProjects = async () => {
+    try {
+      setProjects(await api.listProjects());
+    } catch (e) {
+      onError(String(e));
+    }
+  };
+  useEffect(() => {
+    void reloadProjects();
+    // 进来读一次；壳扫完一轮（菜单加了项目、文件夹没了）再读
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+  const toggleProject = async (path: string, shown: boolean) => {
+    setProjects((list) => list?.map((p) => (p.path === path ? { ...p, shown } : p)) ?? list);
+    // 在上面取消勾的留在原处；从「不显示的」里勾回来的回到上面（勾着本来就在上面）
+    if (!shown) setKeptProjects((kept) => new Set(kept).add(path));
+    try {
+      await api.setProjectShown(path, shown);
+      setUncheckedProject(shown ? null : { path, at: Date.now() });
+    } catch (e) {
+      onError(String(e));
+    }
+    await reloadProjects();
+  };
+  /// `+ 项目`：系统文件夹选择器，选的文件夹就是一格、默认勾上。当不了项目的（主目录、不是文件夹）在键下说原因
+  const addProject = async () => {
+    setAddNotice(null);
+    let path: string | null;
+    try {
+      path = await api.pickDirectory(t("settings.scope.pickDialog"));
+    } catch (e) {
+      onError(String(e));
+      return;
+    }
+    if (path === null) return;
+    try {
+      await api.addProject(path);
+    } catch (e) {
+      setAddNotice({ message: String(e), at: Date.now() });
+    }
+    await reloadProjects();
+  };
+
   /// `检查更新`：在应用里查（产品负责人：跳到 GitHub 让用户手动下载太难用）。有新版出待办条
   /// （下载并安装 → 重启），没有就说「已是最新版本」，查不成才给「去发布页 ↗」的退路
   const checkUpdate = async () => {
@@ -229,6 +301,14 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
     if (aboutRequest.check && !checking) void checkUpdate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aboutRequest?.at]);
+
+  // SKILLS 页的 `去设置`：停在「列表里的 agent」一节（排在「关于」之后，两个都在时以它为准）
+  const agentsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!agentsRequest) return;
+    agentsRef.current?.scrollIntoView({ block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentsRequest?.at]);
 
   // ── 界面 · 界面语言（spec 2026-09-30-language-and-theme R1 R2，第三批画板 1A）──
   /// 同外观：读自 core（设置里存的那一项，「跟随系统」就是 system）；选了先画出来再写，core 写完当场换语言
@@ -444,7 +524,7 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
         ) : null}
 
         {/* 区块小标（节间 32）；句子里的 agent 是词不是结构词，不经 Cap */}
-        <div className="settings-page__section settings-page__section--later">
+        <div ref={agentsRef} className="settings-page__section settings-page__section--later">
           <SectionLabel>
             {t("settings.agents.heading")}
             {list ? ` · ${t("settings.agents.maxShown", { max: maxShown })}` : ""}
@@ -488,6 +568,20 @@ export function SettingsPage({ onError, aboutRequest, onShowUpdates }: SettingsP
             <p className="settings-page__mcp-note">{t("settings.agents.mcpNote")}</p>
           </>
         )}
+
+        {/* 生效范围（节间 32）：用户级 + 各个项目，勾上的才出现在 SKILLS、MCP 页的筛选行里；节头 `+ 项目` */}
+        <ScopeSection
+          projects={projects}
+          kept={keptProjects}
+          open={showHiddenProjects}
+          onOpen={setShowHiddenProjects}
+          onToggle={(path, shown) => void toggleProject(path, shown)}
+          onAdd={() => void addProject()}
+          unchecked={uncheckedProject}
+          onDismissUnchecked={dismissUncheckedProject}
+          addNotice={addNotice}
+          onDismissAddNotice={dismissAddNotice}
+        />
 
         {/* skill 更新（节间 32）：两行设置行——`自动检查 skill 更新` + 灰字何时查｜开关；
             `上次检查` + 时刻与结果｜查到了的 `去看看` + `立即检查`。页面头不放检查键——结果在 `我的` 的提示条上说 */}

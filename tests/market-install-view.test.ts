@@ -28,6 +28,10 @@ import {
   looksLikeGithub,
   mcpInstallBlock,
   mcpInstalledToast,
+  keyHintTip,
+  keyTrackedNote,
+  mcpKeyHint,
+  mcpTrackedFiles,
   mcpOrigin,
   mcpRowView,
   navOfLocation,
@@ -159,6 +163,8 @@ const check = (
   writes: status === "ok" || status === "partial" ? ["brave-search"] : [],
   reason: null,
   note: null,
+  keyHint: "quiet",
+  gitignoreLine: null,
   ...extra,
 });
 
@@ -705,4 +711,194 @@ test("全选那一行：三态框、钉在顶上、个数；都装过了时灰�
   const none = render(PickRow, { ...base, checked: false, blocked: "都已经装过了" });
   assert.match(none, /class="install-pick is-blocked is-pinned"/);
   assert.match(none, /都已经装过了/);
+});
+
+test("密钥提醒（S19）：只有「第一次暴露进仓库」才出「同时加进 .gitignore」；没勾、写不过去的不算", async () => {
+  const remind = (id: string, line: string, extra: Partial<McpTargetCheck> = {}) =>
+    check(id, "ok", { keyHint: "remind", gitignoreLine: line, ...extra });
+  const cases: [McpTargetCheck["keyHint"], boolean][] = [
+    ["quiet", false],
+    ["sourceCommitted", false],
+    ["autoIgnore", false],
+    ["tracked", false],
+    ["remind", true],
+  ];
+  for (const [keyHint, shown] of cases) {
+    const files = mcpKeyHint([remind("cursor", ".cursor/mcp.json", { keyHint })], ["cursor"]);
+    assert.equal(files.length > 0, shown, keyHint);
+  }
+  // 要写进仓库的那个 agent 没勾、或整个写不过去：不出
+  assert.deepEqual(mcpKeyHint([remind("cursor", ".cursor/mcp.json")], []), []);
+  assert.deepEqual(
+    mcpKeyHint([remind("cursor", ".cursor/mcp.json", { status: "blocked" })], ["cursor"]),
+    [],
+  );
+  assert.deepEqual(
+    mcpKeyHint([remind("cursor", ".cursor/mcp.json", { status: "partial" })], ["cursor"]),
+    [".cursor/mcp.json"],
+  );
+  // 检查还没回来：先不出
+  assert.deepEqual(mcpKeyHint(null, ["cursor"]), []);
+  // Claude Code 仅自己（quiet）不算；团队共享与 Cursor 都要提醒时按检查结果的先后列两个文件
+  assert.deepEqual(
+    mcpKeyHint(
+      [check("claude-code", "ok"), remind("cursor", ".cursor/mcp.json")],
+      ["claude-code", "cursor"],
+    ),
+    [".cursor/mcp.json"],
+  );
+  const both = mcpKeyHint(
+    [remind("claude-code", "/.mcp.json"), remind("cursor", ".cursor/mcp.json")],
+    ["claude-code", "cursor"],
+  );
+  assert.deepEqual(both, ["/.mcp.json", ".cursor/mcp.json"]);
+  // 写进 .gitignore 的是锚在项目根的 `/.mcp.json`；提示框里列文件时去掉开头的 `/`，读着像相对路径
+
+  // 提示框：哪几个文件在仓库里、不加会怎样、勾上在哪个项目的 .gitignore 里加几行
+  assert.equal(
+    keyHintTip(both, "sophia"),
+    ".mcp.json、.cursor/mcp.json 在 git 仓库里，不加的话，密钥会随下一次提交进仓库。勾上就在 sophia 的 .gitignore 里加这几行，只留在你这台电脑上",
+  );
+  assert.equal(
+    keyHintTip(["/.mcp.json"], "我的项目"),
+    ".mcp.json 在 git 仓库里，不加的话，密钥会随下一次提交进仓库。勾上就在我的项目的 .gitignore 里加这一行，只留在你这台电脑上",
+  );
+
+  // 没有灰字句；勾选行默认不勾，解释在提示框里
+  const { render } = await import("./ui-render.ts");
+  const { KeyHintBlock } = await import("../src/market/InstallParts.tsx");
+  const tip = keyHintTip(both, "sophia");
+  const html = render(KeyHintBlock, {
+    checked: false,
+    onChange: () => undefined,
+    tip,
+    tracked: null,
+  });
+  assert.doesNotMatch(html, /会随仓库提交/);
+  assert.doesNotMatch(html, /ss-note/);
+  assert.match(html, /role="checkbox" aria-checked="false"/);
+  // 表单里附加的一个选项：勾选行小档（名字 13，跟着「要填的」的小字走）
+  assert.match(html, /class="ss-checkrow ss-checkrow--small"/);
+  assert.match(html, /同时加进 \.gitignore/);
+  assert.match(html, /role="tooltip"/);
+  assert.ok(html.includes("勾上就在 sophia 的 .gitignore 里加这几行"));
+  assert.match(
+    render(KeyHintBlock, { checked: true, onChange: () => undefined, tip, tracked: null }),
+    /aria-checked="true"/,
+  );
+
+  // 有「要填的」时放在那一块最后（说明句下面）；没有时由页面放在「写进哪些 agent」最后
+  const { FieldsBlock } = await import("../src/market/InstallParts.tsx");
+  const fields = render(FieldsBlock, {
+    fields: [{ key: "BRAVE_API_KEY", kind: "env", required: true, secret: true }],
+    values: {},
+    onChange: () => undefined,
+    footer: "＠勾选",
+  });
+  assert.ok(
+    fields.indexOf("只写进勾选的 agent 的配置文件") < fields.indexOf("＠勾选"),
+    "勾选在说明句下面",
+  );
+});
+
+test("勾了「同时加进 .gitignore」却没写成：仍是成功一行，原因接在后面", () => {
+  const FAIL = "没能加进 .gitignore：没有写入权限，没动";
+  const t = mcpInstalledToast(
+    {
+      entries: [entry("brave-search", "project:/p::cursor", "created")],
+      undoId: "w9",
+      gitignoreFailed: FAIL,
+    },
+    [check("cursor", "ok", { locationId: "project:/p::cursor", keyHint: "remind" })],
+    [CURSOR],
+    "project:/p",
+  );
+  assert.equal(t.kind, "success");
+  assert.equal(t.reason, FAIL);
+  // 同时另一处没写成（部分失败）、或第三方模式那一份也没写成：两句都说，不互相遮住
+  const partial = mcpInstalledToast(
+    {
+      entries: [
+        entry("brave-search", "project:/p::cursor", "created"),
+        entry("brave-search", "project:/p::codex", "failed", "无法写入 Codex 的配置文件"),
+      ],
+      undoId: "w10",
+      gitignoreFailed: FAIL,
+    },
+    [check("cursor", "ok"), check("codex", "ok")],
+    [CURSOR, CODEX],
+    "project:/p",
+  );
+  assert.equal(partial.kind, "partial");
+  assert.equal(partial.reason, `无法写入 Codex 的配置文件 · ${FAIL}`);
+  const NOTE = "第三方模式的那一份没写成：目标配置无法解析或不安全";
+  const both = mcpInstalledToast(
+    {
+      entries: [{ ...entry("brave-search", "project:/p::cursor", "created"), mirrorFailed: NOTE }],
+      undoId: "w11",
+      gitignoreFailed: FAIL,
+    },
+    [check("cursor", "ok")],
+    [CURSOR],
+    "project:/p",
+  );
+  assert.equal(both.reason, `${NOTE} · ${FAIL}`);
+});
+
+test("密钥提醒：目标文件已被 git 跟踪（加进 .gitignore 也挡不住）——不出勾选，换成一句说明", async () => {
+  const tracked = (id: string, line: string, extra: Partial<McpTargetCheck> = {}) =>
+    check(id, "ok", { keyHint: "tracked", gitignoreLine: line, ...extra });
+  assert.deepEqual(mcpTrackedFiles([tracked("claude-code", "/.mcp.json")], ["claude-code"]), [
+    "/.mcp.json",
+  ]);
+  // 没勾、写不过去、检查没回来、不是 tracked 的：不算
+  assert.deepEqual(mcpTrackedFiles([tracked("claude-code", "/.mcp.json")], []), []);
+  assert.deepEqual(
+    mcpTrackedFiles([tracked("claude-code", "/.mcp.json", { status: "blocked" })], ["claude-code"]),
+    [],
+  );
+  assert.deepEqual(mcpTrackedFiles(null, ["claude-code"]), []);
+  assert.deepEqual(
+    mcpTrackedFiles(
+      [check("cursor", "ok", { keyHint: "remind", gitignoreLine: ".cursor/mcp.json" })],
+      ["cursor"],
+    ),
+    [],
+  );
+  // 一个文件不点名；多个写出是哪几个（去掉开头的 `/`）
+  assert.equal(keyTrackedNote(["/.mcp.json"]), "这个文件已在仓库里，密钥会随下一次提交上去");
+  assert.equal(
+    keyTrackedNote(["/.mcp.json", ".cursor/mcp.json"]),
+    ".mcp.json、.cursor/mcp.json 已在仓库里，密钥会随下一次提交上去",
+  );
+  // 和勾选同时出现：一个文件也点名（不然「这个文件」读着像在说全部）；句子的单复数跟着文件数
+  assert.equal(
+    keyTrackedNote(["/.mcp.json"], true),
+    ".mcp.json 已在仓库里，密钥会随下一次提交上去",
+  );
+  assert.equal(
+    keyTrackedNote(["/.mcp.json", ".cursor/mcp.json"], true),
+    ".mcp.json、.cursor/mcp.json 已在仓库里，密钥会随下一次提交上去",
+  );
+  // 在原来勾选的位置：现成的灰字一句，没有勾选框
+  const { render } = await import("./ui-render.ts");
+  const { KeyHintBlock } = await import("../src/market/InstallParts.tsx");
+  const note = keyTrackedNote(["/.mcp.json"]);
+  const only = render(KeyHintBlock, {
+    checked: false,
+    onChange: () => undefined,
+    tip: null,
+    tracked: note,
+  });
+  assert.match(only, /class="ss-note"/);
+  assert.ok(only.includes("这个文件已在仓库里，密钥会随下一次提交上去"));
+  assert.doesNotMatch(only, /role="checkbox"/);
+  // 有要提醒的另一个文件时：勾选照出，说明在它下面
+  const both = render(KeyHintBlock, {
+    checked: false,
+    onChange: () => undefined,
+    tip: keyHintTip([".cursor/mcp.json"], "sophia"),
+    tracked: note,
+  });
+  assert.ok(both.indexOf('role="checkbox"') < both.indexOf('class="ss-note"'));
 });

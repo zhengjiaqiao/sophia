@@ -1,0 +1,1559 @@
+{
+  "_notice": "服务商预设合并自 farion1231/cc-switch (MIT) 与 yetone/magpie (MIT)，见仓库 NOTICE。cc-switch 为准，magpie 只补 cc-switch 没有的。合并日期 2026-10-05。",
+  "providers": [
+    {
+      "id": "kimi",
+      "name": "Kimi",
+      "website": "https://platform.kimi.com",
+      "keysUrl": "https://platform.kimi.com/console/api-keys",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.moonshot.cn/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.moonshot.cn/anthropic"
+      },
+      "note": "按量计费 · 国内站"
+    },
+    {
+      "id": "kimi-for-coding",
+      "name": "Kimi For Coding",
+      "website": "https://www.kimi.com/code/",
+      "keysUrl": "https://www.kimi.com/code/",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.kimi.com/coding/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.kimi.com/coding"
+      },
+      "note": "Coding Plan · 国内站"
+    },
+    {
+      "id": "shengsuanyun",
+      "name": "Shengsuanyun",
+      "website": "https://www.shengsuanyun.com/",
+      "keysUrl": "https://www.shengsuanyun.com/",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://router.shengsuanyun.com/api/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://router.shengsuanyun.com/api"
+      }
+    },
+    {
+      "id": "qiniu",
+      "name": "Qiniu",
+      "website": "https://www.qiniu.com",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.qnaigc.com/bypass/openai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.qnaigc.com"
+      }
+    },
+    {
+      "id": "fluxa-token-plan",
+      "name": "FluxA Token Plan",
+      "website": "https://agentmarket.fluxapay.xyz/",
+      "keysUrl": "https://agentmarket.fluxapay.xyz/marketplace/tokenplans",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.baiduqianfan.ai/v2/tokenplan/team",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.baiduqianfan.ai/anthropic/tokenplan/team"
+      }
+    },
+    {
+      "id": "teamorouter",
+      "name": "TeamoRouter",
+      "website": "https://teamorouter.cn",
+      "keysUrl": "https://teamorouter.cn/",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.teamorouter.cn/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.teamorouter.cn"
+      }
+    },
+    {
+      "id": "volcengine-agent-plan",
+      "name": "火山 Agent Plan",
+      "website": "https://www.volcengine.com/activity/agentplan",
+      "keysUrl": "https://www.volcengine.com/activity/agentplan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://ark.cn-beijing.volces.com/api/plan"
+      },
+      "note": "Agent Plan"
+    },
+    {
+      "id": "volcengine-coding-plan",
+      "name": "火山 Coding Plan",
+      "website": "https://www.volcengine.com/activity/codingplan",
+      "keysUrl": "https://www.volcengine.com/activity/codingplan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://ark.cn-beijing.volces.com/api/coding"
+      },
+      "note": "Coding Plan"
+    },
+    {
+      "id": "volcengine-doubao",
+      "name": "Volcengine Doubao",
+      "website": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+      "keysUrl": "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://ark.cn-beijing.volces.com/api/v3",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://ark.cn-beijing.volces.com/api/compatible"
+      },
+      "note": "按量计费"
+    },
+    {
+      "id": "siliconflow",
+      "name": "SiliconFlow",
+      "website": "https://siliconflow.cn",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.siliconflow.cn/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.siliconflow.cn"
+      },
+      "note": "国内站"
+    },
+    {
+      "id": "compshare",
+      "name": "Compshare",
+      "website": "https://www.compshare.cn",
+      "keysUrl": "https://www.compshare.cn/coding-plan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.modelverse.cn/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.modelverse.cn"
+      },
+      "note": "按量计费"
+    },
+    {
+      "id": "compshare-coding-plan",
+      "name": "Compshare Coding Plan",
+      "website": "https://www.compshare.cn",
+      "keysUrl": "https://www.compshare.cn/coding-plan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://cp.compshare.cn/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://cp.compshare.cn"
+      },
+      "note": "Coding Plan"
+    },
+    {
+      "id": "dmxapi",
+      "name": "DMXAPI",
+      "website": "https://www.dmxapi.cn",
+      "keysUrl": "https://www.dmxapi.cn",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://www.dmxapi.cn/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://www.dmxapi.cn"
+      }
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "website": "https://platform.deepseek.com",
+      "keysUrl": "https://platform.deepseek.com/api_keys",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.deepseek.com",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.deepseek.com/anthropic"
+      }
+    },
+    {
+      "id": "zhipu-glm",
+      "name": "Zhipu GLM",
+      "website": "https://open.bigmodel.cn",
+      "keysUrl": "https://www.bigmodel.cn/claude-code",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://open.bigmodel.cn/api/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://open.bigmodel.cn/api/anthropic"
+      },
+      "note": "国内站"
+    },
+    {
+      "id": "baidu-qianfan",
+      "name": "Baidu Qianfan",
+      "website": "https://cloud.baidu.com/product/qianfan_modelbuilder",
+      "keysUrl": "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://qianfan.baidubce.com/v2",
+        "protocol": "responses"
+      },
+      "anthropic": null,
+      "note": "按量计费"
+    },
+    {
+      "id": "baidu-qianfan-coding-plan",
+      "name": "Baidu Qianfan Coding Plan",
+      "website": "https://cloud.baidu.com/product/qianfan_modelbuilder",
+      "keysUrl": "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://qianfan.baidubce.com/v2/coding",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://qianfan.baidubce.com/anthropic/coding"
+      },
+      "note": "Coding Plan"
+    },
+    {
+      "id": "baidu-qianfan-token-plan",
+      "name": "Baidu Qianfan Token Plan",
+      "website": "https://cloud.baidu.com/product/codingplan.html",
+      "keysUrl": "https://console.bce.baidu.com/qianfan/resource/token-plan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://qianfan.baidubce.com/v2/tokenplan/personal",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://qianfan.baidubce.com/anthropic/tokenplan/personal"
+      },
+      "note": "Token Plan"
+    },
+    {
+      "id": "qwen-ai",
+      "name": "千问AI平台",
+      "website": "https://platform.qianwenai.com/",
+      "keysUrl": "https://platform.qianwenai.com/home/api-keys",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://dashscope.aliyuncs.com/apps/anthropic"
+      },
+      "note": "按量计费"
+    },
+    {
+      "id": "qwen-ai-token-plan",
+      "name": "千问AI平台 Token Plan",
+      "website": "https://platform.qianwenai.com/pricing/token-plan",
+      "keysUrl": "https://platform.qianwenai.com/home/api-keys",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+      },
+      "note": "Token Plan"
+    },
+    {
+      "id": "tencent-hunyuan",
+      "name": "Tencent Hunyuan",
+      "website": "https://cloud.tencent.com/product/tokenhub",
+      "keysUrl": "https://console.cloud.tencent.com/tokenhub/apikey",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://tokenhub.tencentmaas.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": null,
+      "note": "按量计费 · 国内站"
+    },
+    {
+      "id": "tencent-token-plan",
+      "name": "Tencent Token Plan",
+      "website": "https://cloud.tencent.com/product/tokenhub",
+      "keysUrl": "https://console.cloud.tencent.com/tokenhub/tokenplan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.lkeap.cloud.tencent.com/plan/v3",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.lkeap.cloud.tencent.com/plan/anthropic"
+      },
+      "note": "Token Plan · 国内站"
+    },
+    {
+      "id": "tencent-token-plan-enterprise-pro",
+      "name": "Tencent Token Plan Enterprise Pro",
+      "website": "https://cloud.tencent.com/product/tokenhub",
+      "keysUrl": "https://console.cloud.tencent.com/tokenhub/tokenplan-e",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://tokenhub.tencentmaas.com/plan/v3",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://tokenhub.tencentmaas.com/plan/anthropic"
+      },
+      "note": "Enterprise Pro · 国内站"
+    },
+    {
+      "id": "tencent-token-plan-enterprise-lite",
+      "name": "Tencent Token Plan Enterprise Lite",
+      "website": "https://cloud.tencent.com/product/tokenhub",
+      "keysUrl": "https://console.cloud.tencent.com/tokenhub/tokenplan-e",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://tokenhub.tencentmaas.com/plan/v3",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://tokenhub.tencentmaas.com/plan/anthropic"
+      },
+      "note": "Enterprise Lite · 国内站"
+    },
+    {
+      "id": "stepfun-api",
+      "name": "StepFun API",
+      "website": "https://platform.stepfun.com",
+      "keysUrl": "https://platform.stepfun.com/interface-key",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.stepfun.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": null,
+      "note": "按量计费 · 国内站"
+    },
+    {
+      "id": "stepfun",
+      "name": "StepFun",
+      "website": "https://platform.stepfun.com/step-plan",
+      "keysUrl": "https://platform.stepfun.com/interface-key",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.stepfun.com/step_plan/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.stepfun.com/step_plan"
+      },
+      "note": "Step Plan · 国内站"
+    },
+    {
+      "id": "modelscope",
+      "name": "ModelScope",
+      "website": "https://modelscope.cn",
+      "keysUrl": "https://modelscope.cn/my/myaccesstoken",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api-inference.modelscope.cn/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api-inference.modelscope.cn"
+      },
+      "note": "魔搭 · API-Inference"
+    },
+    {
+      "id": "longcat",
+      "name": "Longcat",
+      "website": "https://longcat.chat/platform",
+      "keysUrl": "https://longcat.chat/platform/api_keys",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.longcat.chat/openai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.longcat.chat/anthropic"
+      }
+    },
+    {
+      "id": "minimax",
+      "name": "MiniMax",
+      "website": "https://platform.minimax.cn",
+      "keysUrl": "https://platform.minimax.cn/subscribe/token-plan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.minimax.cn/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.minimax.cn/anthropic"
+      },
+      "note": "国内站"
+    },
+    {
+      "id": "astron-coding-plan",
+      "name": "Astron Coding Plan",
+      "website": "https://maas.xfyun.cn/packageSubscription",
+      "keysUrl": "https://maas.xfyun.cn/packageSubscription",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://maas-coding-api.cn-huabei-1.xf-yun.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": null
+    },
+    {
+      "id": "bailing",
+      "name": "BaiLing",
+      "website": "https://developer.ant-ling.com/zh-CN/docs/",
+      "keysUrl": "https://chat.ant-ling.com/open",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.ant-ling.com/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.ant-ling.com/anthropic"
+      }
+    },
+    {
+      "id": "xiaomi-mimo",
+      "name": "Xiaomi MiMo",
+      "website": "https://platform.xiaomimimo.com",
+      "keysUrl": "https://platform.xiaomimimo.com/#/console/api-keys",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.xiaomimimo.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.xiaomimimo.com/anthropic"
+      },
+      "note": "按量计费"
+    },
+    {
+      "id": "xiaomi-mimo-token-plan-china",
+      "name": "Xiaomi MiMo Token Plan (China)",
+      "website": "https://platform.xiaomimimo.com/#/token-plan",
+      "keysUrl": "https://platform.xiaomimimo.com/#/console/plan-manage",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://token-plan-cn.xiaomimimo.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://token-plan-cn.xiaomimimo.com/anthropic"
+      },
+      "note": "Token Plan"
+    },
+    {
+      "id": "qwen-ai-coding-plan",
+      "name": "千问AI平台 Coding Plan",
+      "website": "https://bailian.console.aliyun.com",
+      "region": "cn",
+      "openai": null,
+      "anthropic": {
+        "apiBase": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+      },
+      "note": "Coding Plan"
+    },
+    {
+      "id": "minimax-cn",
+      "name": "MiniMax (China)",
+      "website": "https://platform.minimaxi.com",
+      "keysUrl": "https://platform.minimaxi.com/user-center/basic-information/interface-key",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.minimaxi.com/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.minimaxi.com/anthropic"
+      }
+    },
+    {
+      "id": "yylx",
+      "name": "鱼鱼连线",
+      "website": "https://yylx.io",
+      "keysUrl": "https://app.yylx.io/keys",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://app.yylx.io/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://app.yylx.io"
+      }
+    },
+    {
+      "id": "kimi-global",
+      "name": "Kimi Global",
+      "website": "https://platform.kimi.ai",
+      "keysUrl": "https://platform.kimi.ai/console/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.moonshot.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.moonshot.ai/anthropic"
+      },
+      "note": "按量计费 · 海外站"
+    },
+    {
+      "id": "kimi-for-coding-global",
+      "name": "Kimi For Coding Global",
+      "website": "https://www.kimi.ai/code",
+      "keysUrl": "https://www.kimi.ai/code",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.kimi.ai/coding/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.kimi.ai/coding"
+      },
+      "note": "Coding Plan · 海外站"
+    },
+    {
+      "id": "packycode",
+      "name": "PackyCode",
+      "website": "https://www.packyapi.ai",
+      "keysUrl": "https://www.packyapi.ai/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://www.packyapi.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://www.packyapi.ai"
+      }
+    },
+    {
+      "id": "zetaapi",
+      "name": "ZetaAPI",
+      "website": "https://zetaapi.ai",
+      "keysUrl": "https://zetaapi.ai/go/u117",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.zetaapi.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.zetaapi.ai"
+      }
+    },
+    {
+      "id": "apinebula",
+      "name": "APINebula",
+      "website": "https://apinebula.ai",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://apinebula.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://apinebula.ai"
+      }
+    },
+    {
+      "id": "aicodemirror",
+      "name": "AICodeMirror",
+      "website": "https://www.aicodemirror.ai",
+      "keysUrl": "https://www.aicodemirror.ai/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.aicodemirror.ai/api/codex/backend-api/codex",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.aicodemirror.ai/api/claudecode"
+      }
+    },
+    {
+      "id": "patewayai",
+      "name": "PatewayAI",
+      "website": "https://pateway.ai",
+      "keysUrl": "https://pateway.ai/#/",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.pateway.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.pateway.ai"
+      }
+    },
+    {
+      "id": "fennoai",
+      "name": "FennoAI",
+      "website": "https://api.fenno.ai",
+      "keysUrl": "https://api.fenno.ai/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.fenno.ai",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.fenno.ai"
+      }
+    },
+    {
+      "id": "runapi",
+      "name": "RunAPI",
+      "website": "https://runapi.host",
+      "keysUrl": "https://runapi.host/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://runapi.host/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://runapi.host"
+      }
+    },
+    {
+      "id": "aigocode",
+      "name": "AIGoCode",
+      "website": "https://aigocode.app",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.aigocode.app",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.aigocode.app"
+      }
+    },
+    {
+      "id": "aicoding",
+      "name": "AICoding",
+      "website": "https://aicoding.inc",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.aicoding.inc",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.aicoding.inc"
+      }
+    },
+    {
+      "id": "subrouter",
+      "name": "SubRouter",
+      "website": "https://subrouter.ai",
+      "keysUrl": "https://subrouter.ai/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://subrouter.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://subrouter.ai"
+      }
+    },
+    {
+      "id": "88api",
+      "name": "88API",
+      "website": "https://88api.ai",
+      "keysUrl": "https://88api.ai/sign-up",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.88api.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.88api.ai"
+      }
+    },
+    {
+      "id": "apikey-fun",
+      "name": "APIKEY.FUN",
+      "website": "https://apikey.fan",
+      "keysUrl": "https://apikey.fan/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.apikey.fan/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.apikey.fan"
+      }
+    },
+    {
+      "id": "9527code",
+      "name": "9527CODE",
+      "website": "https://9527.codes",
+      "keysUrl": "https://9527.codes/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://9527.codes/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://9527.codes"
+      }
+    },
+    {
+      "id": "code0",
+      "name": "Code0",
+      "website": "https://code0.ai",
+      "keysUrl": "https://code0.ai/agent/register/B2XHxGjGmRvqgznY",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://code0.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://code0.ai"
+      }
+    },
+    {
+      "id": "ppio",
+      "name": "PPIO",
+      "website": "https://ppio.com",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.ppio.com/openai/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.ppio.com/anthropic"
+      }
+    },
+    {
+      "id": "claudecn",
+      "name": "ClaudeCN",
+      "website": "https://claudecn.top",
+      "keysUrl": "https://claudecn.ai/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://claudecn.top/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://claudecn.top"
+      }
+    },
+    {
+      "id": "byteplus",
+      "name": "BytePlus",
+      "website": "https://www.byteplus.com/en/product/modelark",
+      "keysUrl": "https://www.byteplus.com/en/product/modelark",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://ark.ap-southeast.bytepluses.com/api/coding"
+      }
+    },
+    {
+      "id": "siliconflow-en",
+      "name": "SiliconFlow en",
+      "website": "https://siliconflow.com",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.siliconflow.com/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.siliconflow.com"
+      },
+      "note": "海外站"
+    },
+    {
+      "id": "a6api",
+      "name": "A6API",
+      "website": "https://www.a6api.com",
+      "keysUrl": "https://a6api.com/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.a6api.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.a6api.com"
+      }
+    },
+    {
+      "id": "ccsub",
+      "name": "CCSub",
+      "website": "https://www.ccsub.net",
+      "keysUrl": "https://www.ccsub.net/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://www.ccsub.net/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://www.ccsub.net"
+      }
+    },
+    {
+      "id": "sssaicode",
+      "name": "SSSAiCode",
+      "website": "https://sssaicodeapi.com",
+      "keysUrl": "https://sssaicodeapi.com/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://node-hk.sssaicodeapi.com/api/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://node-hk.sssaicodeapi.com/api"
+      }
+    },
+    {
+      "id": "soleapi",
+      "name": "SoleAPI",
+      "website": "https://soleapi.com",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://soleapi.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://soleapi.com"
+      }
+    },
+    {
+      "id": "micu",
+      "name": "Micu",
+      "website": "https://www.micuapi.ai",
+      "keysUrl": "https://www.micuapi.ai/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://www.micuapi.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://www.micuapi.ai"
+      }
+    },
+    {
+      "id": "rightcode",
+      "name": "RightCode",
+      "website": "https://www.rightapi.ai",
+      "keysUrl": "https://www.rightapi.ai/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://www.rightapi.ai/codex/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://www.rightapi.ai/claude"
+      }
+    },
+    {
+      "id": "cubence",
+      "name": "Cubence",
+      "website": "https://cubence.com",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.cubence.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.cubence.com"
+      }
+    },
+    {
+      "id": "crazyrouter",
+      "name": "CrazyRouter",
+      "website": "https://www.crazyrouter.com",
+      "keysUrl": "https://www.crazyrouter.com/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://cn.crazyrouter.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://cn.crazyrouter.com"
+      }
+    },
+    {
+      "id": "sudocode-chat",
+      "name": "SudoCode.chat",
+      "website": "https://sudocode.chat",
+      "keysUrl": "https://sudocode.chat/sign-up",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.sudocode.chat/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.sudocode.chat"
+      }
+    },
+    {
+      "id": "sudocode-us",
+      "name": "SudoCode.us",
+      "website": "https://sudocode.us",
+      "keysUrl": "https://sudocode.us",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://sudocode.us/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://sudocode.us"
+      }
+    },
+    {
+      "id": "xycai",
+      "name": "XycAi",
+      "website": "https://xycai.us",
+      "keysUrl": "https://xycai.us/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://apicdn.xycai.us/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://apicdn.xycai.us"
+      }
+    },
+    {
+      "id": "tu-zi",
+      "name": "Tu-zi",
+      "website": "https://api.tu-zi.com",
+      "keysUrl": "https://api.tu-zi.com/token",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.tu-zi.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.tu-zi.com"
+      }
+    },
+    {
+      "id": "amux",
+      "name": "Amux",
+      "website": "https://amux.ai",
+      "keysUrl": "https://amux.ai",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.amux.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.amux.ai"
+      }
+    },
+    {
+      "id": "atlascloud",
+      "name": "AtlasCloud",
+      "website": "https://www.atlascloud.ai/console/coding-plan",
+      "keysUrl": "https://www.atlascloud.ai/console/coding-plan",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.atlascloud.ai/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.atlascloud.ai"
+      }
+    },
+    {
+      "id": "soshow",
+      "name": "Soshow",
+      "website": "https://aimarket.so-show.com",
+      "keysUrl": "https://aimarket.so-show.com/workbench/access-key",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://maas.so-show.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://maas.so-show.com"
+      }
+    },
+    {
+      "id": "zhipu-glm-en",
+      "name": "Zhipu GLM en",
+      "website": "https://z.ai",
+      "keysUrl": "https://z.ai/subscribe",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.z.ai/api/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.z.ai/api/anthropic"
+      },
+      "note": "海外站"
+    },
+    {
+      "id": "qwencloud",
+      "name": "QwenCloud",
+      "website": "https://home.qwencloud.com/",
+      "keysUrl": "https://home.qwencloud.com/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://dashscope-intl.aliyuncs.com/apps/anthropic"
+      },
+      "note": "按量计费"
+    },
+    {
+      "id": "qwencloud-for-coding",
+      "name": "QwenCloud For Coding",
+      "website": "https://www.qwencloud.com",
+      "keysUrl": "https://home.qwencloud.com/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://coding-intl.dashscope.aliyuncs.com/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
+      },
+      "note": "Coding Plan"
+    },
+    {
+      "id": "qwencloud-token-plan",
+      "name": "QwenCloud Token Plan",
+      "website": "https://www.qwencloud.com/pricing/token-plan",
+      "keysUrl": "https://home.qwencloud.com/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic"
+      },
+      "note": "Token Plan"
+    },
+    {
+      "id": "tencent-token-plan-intl",
+      "name": "Tencent Token Plan (Intl)",
+      "website": "https://www.tencentcloud.com/products/tokenhub",
+      "keysUrl": "https://console.tencentcloud.com/tokenhub/tokenplan",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/v3",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic"
+      },
+      "note": "Token Plan · 海外站"
+    },
+    {
+      "id": "tencent-token-plan-enterprise-pro-intl",
+      "name": "Tencent Token Plan Enterprise Pro (Intl)",
+      "website": "https://www.tencentcloud.com/products/tokenhub",
+      "keysUrl": "https://console.tencentcloud.com/tokenhub/tokenplan-e",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/v3",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic"
+      },
+      "note": "Enterprise Pro · 海外站"
+    },
+    {
+      "id": "tencent-token-plan-enterprise-lite-intl",
+      "name": "Tencent Token Plan Enterprise Lite (Intl)",
+      "website": "https://www.tencentcloud.com/products/tokenhub",
+      "keysUrl": "https://console.tencentcloud.com/tokenhub/tokenplan-e",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/v3",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic"
+      },
+      "note": "Enterprise Lite · 海外站"
+    },
+    {
+      "id": "stepfun-api-en",
+      "name": "StepFun API en",
+      "website": "https://platform.stepfun.ai",
+      "keysUrl": "https://platform.stepfun.ai/interface-key",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.stepfun.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": null,
+      "note": "按量计费 · 海外站"
+    },
+    {
+      "id": "stepfun-en",
+      "name": "StepFun en",
+      "website": "https://platform.stepfun.ai/step-plan",
+      "keysUrl": "https://platform.stepfun.ai/interface-key",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.stepfun.ai/step_plan/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.stepfun.ai/step_plan"
+      },
+      "note": "Step Plan · 海外站"
+    },
+    {
+      "id": "minimax-en",
+      "name": "MiniMax en",
+      "website": "https://platform.minimax.io",
+      "keysUrl": "https://platform.minimax.io/subscribe/coding-plan",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.minimax.io/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.minimax.io/anthropic"
+      },
+      "note": "海外站"
+    },
+    {
+      "id": "novita-ai",
+      "name": "Novita AI",
+      "website": "https://novita.ai",
+      "keysUrl": "https://novita.ai",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.novita.ai/openai/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.novita.ai/anthropic"
+      }
+    },
+    {
+      "id": "xai-grok",
+      "name": "xAI (Grok)",
+      "website": "https://x.ai/api",
+      "keysUrl": "https://console.x.ai",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.x.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.x.ai"
+      }
+    },
+    {
+      "id": "nvidia",
+      "name": "Nvidia",
+      "website": "https://build.nvidia.com",
+      "keysUrl": "https://build.nvidia.com/settings/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://integrate.api.nvidia.com/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://integrate.api.nvidia.com"
+      }
+    },
+    {
+      "id": "opencode-go",
+      "name": "OpenCode Go",
+      "website": "https://opencode.ai/go",
+      "keysUrl": "https://opencode.ai/go",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://opencode.ai/zen/go/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://opencode.ai/zen/go"
+      },
+      "note": "open coding models, $10/month"
+    },
+    {
+      "id": "aihubmix",
+      "name": "AiHubMix",
+      "website": "https://aihubmix.com",
+      "keysUrl": "https://aihubmix.com",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://aihubmix.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://aihubmix.com"
+      }
+    },
+    {
+      "id": "cherryin",
+      "name": "CherryIN",
+      "website": "https://open.cherryin.ai",
+      "keysUrl": "https://open.cherryin.ai/console/token",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://open.cherryin.net/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://open.cherryin.net"
+      }
+    },
+    {
+      "id": "relaxycode",
+      "name": "RelaxyCode",
+      "website": "https://www.relaxycode.com",
+      "keysUrl": "https://www.relaxycode.com/register",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://www.relaxycode.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://www.relaxycode.com"
+      }
+    },
+    {
+      "id": "e-flowcode",
+      "name": "E-FlowCode",
+      "website": "https://e-flowcode.cc",
+      "keysUrl": "https://e-flowcode.cc",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://e-flowcode.cc/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://e-flowcode.cc"
+      }
+    },
+    {
+      "id": "pipellm",
+      "name": "PIPELLM",
+      "website": "https://code.pipellm.ai",
+      "keysUrl": "https://code.pipellm.ai/login",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://cc-api.pipellm.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://cc-api.pipellm.ai"
+      }
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "website": "https://openrouter.ai",
+      "keysUrl": "https://openrouter.ai/keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://openrouter.ai/api/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://openrouter.ai/api"
+      }
+    },
+    {
+      "id": "therouter",
+      "name": "TheRouter",
+      "website": "https://therouter.ai",
+      "keysUrl": "https://dashboard.therouter.ai",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.therouter.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.therouter.ai"
+      }
+    },
+    {
+      "id": "jiekou-ai",
+      "name": "JieKou AI",
+      "website": "https://jiekou.ai/#model-library",
+      "keysUrl": "https://jiekou.ai/settings/key-management",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.jiekou.ai/openai/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.jiekou.ai/anthropic"
+      }
+    },
+    {
+      "id": "aicodewith",
+      "name": "AICodeWith",
+      "website": "https://aicodewith.ai",
+      "keysUrl": "https://aicodewith.ai/login",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.aicodewith.ai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.aicodewith.ai"
+      }
+    },
+    {
+      "id": "command-code",
+      "name": "Command Code",
+      "website": "https://commandcode.ai",
+      "keysUrl": "https://commandcode.ai/settings/keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.commandcode.ai/provider/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://api.commandcode.ai/provider"
+      }
+    },
+    {
+      "id": "claudeapi",
+      "name": "ClaudeAPI",
+      "website": "https://www.apito.ai",
+      "keysUrl": "https://console.apito.ai/agent/register/pQBql2buaqiX3dDS",
+      "region": "global",
+      "openai": null,
+      "anthropic": {
+        "apiBase": "https://gw.apito.ai"
+      }
+    },
+    {
+      "id": "gemini-native",
+      "name": "Gemini Native",
+      "website": "https://ai.google.dev/gemini-api",
+      "keysUrl": "https://aistudio.google.com/app/apikey",
+      "region": "global",
+      "openai": null,
+      "anthropic": {
+        "apiBase": "https://generativelanguage.googleapis.com"
+      },
+      "note": "Gemini Developer API"
+    },
+    {
+      "id": "302ai",
+      "name": "302.AI",
+      "website": "https://302.ai",
+      "keysUrl": "https://302.ai/api-keys/list",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.302.ai/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.302.ai"
+      }
+    },
+    {
+      "id": "bedrock",
+      "name": "Amazon Bedrock",
+      "website": "https://aws.amazon.com/bedrock/",
+      "keysUrl": "https://console.aws.amazon.com/bedrock/home#/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic"
+      },
+      "note": "Bedrock API key"
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "website": "https://console.anthropic.com",
+      "keysUrl": "https://console.anthropic.com/settings/keys",
+      "region": "global",
+      "openai": null,
+      "anthropic": {
+        "apiBase": "https://api.anthropic.com"
+      }
+    },
+    {
+      "id": "clinepass",
+      "name": "ClinePass",
+      "website": "https://docs.cline.bot/getting-started/clinepass",
+      "keysUrl": "https://app.cline.bot",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.cline.bot/api/v1",
+        "protocol": "chat"
+      },
+      "anthropic": null,
+      "note": "open coding models, $9.99/month"
+    },
+    {
+      "id": "fireworks",
+      "name": "Fireworks",
+      "website": "https://fireworks.ai",
+      "keysUrl": "https://app.fireworks.ai/settings/users/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.fireworks.ai/inference/v1",
+        "protocol": "chat"
+      },
+      "anthropic": null
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "website": "https://console.groq.com",
+      "keysUrl": "https://console.groq.com/keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.groq.com/openai/v1",
+        "protocol": "responses"
+      },
+      "anthropic": null
+    },
+    {
+      "id": "huaweicloud",
+      "name": "Huawei Cloud MaaS",
+      "website": "https://support.huaweicloud.com/Token-plan-maas/tokenplan-maas-0001.html",
+      "keysUrl": "https://console.huaweicloud.com/modelarts/?#/model-studio/authmanage",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.modelarts-maas.com/plan/v2",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.modelarts-maas.com/plan/anthropic"
+      },
+      "note": "Token Plan · 西南-贵阳一"
+    },
+    {
+      "id": "kilo",
+      "name": "Kilo Gateway",
+      "website": "https://kilo.ai/docs/gateway",
+      "keysUrl": "https://app.kilo.ai",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.kilo.ai/api/openrouter",
+        "protocol": "chat"
+      },
+      "anthropic": null,
+      "note": "free models with no key"
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral",
+      "website": "https://console.mistral.ai",
+      "keysUrl": "https://console.mistral.ai/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.mistral.ai/v1",
+        "protocol": "chat"
+      },
+      "anthropic": null
+    },
+    {
+      "id": "ollama-cloud",
+      "name": "Ollama Cloud",
+      "website": "https://docs.ollama.com/cloud",
+      "keysUrl": "https://ollama.com/settings/keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://ollama.com/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://ollama.com"
+      },
+      "note": "cloud models, with an API key"
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "website": "https://platform.openai.com",
+      "keysUrl": "https://platform.openai.com/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.openai.com/v1",
+        "protocol": "responses"
+      },
+      "anthropic": null
+    },
+    {
+      "id": "opencode-zen",
+      "name": "OpenCode Zen",
+      "website": "https://opencode.ai/docs/zen",
+      "keysUrl": "https://opencode.ai/auth",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://opencode.ai/zen/v1",
+        "protocol": "responses"
+      },
+      "anthropic": {
+        "apiBase": "https://opencode.ai/zen"
+      }
+    },
+    {
+      "id": "qwen-token-plan",
+      "name": "Qwen Token Plan",
+      "website": "https://help.aliyun.com/zh/model-studio/token-plan-overview",
+      "keysUrl": "https://bailian.console.aliyun.com/cn-beijing/subscription/token-plan/personal",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
+      },
+      "note": "Bailian · subscription"
+    },
+    {
+      "id": "together",
+      "name": "Together AI",
+      "website": "https://api.together.ai",
+      "keysUrl": "https://api.together.ai/settings/api-keys",
+      "region": "global",
+      "openai": {
+        "apiBase": "https://api.together.xyz/v1",
+        "protocol": "chat"
+      },
+      "anthropic": null
+    }
+  ]
+}

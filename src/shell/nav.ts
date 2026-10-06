@@ -183,6 +183,26 @@ export function goFace(n: Nav, face: Face): Nav {
   return { ...n, face: { ...n.face, [n.destination]: face } };
 }
 
+/// 装完提示里的「去处理」（issue #111）：到 SKILLS 的 `我的`，位置换成看得见那一行的——当前位置已经包含它
+/// （`全部` 里的这个项目、用户级本身）就不动，不然换到那一行自己的位置（用户级 → `用户级`，项目 → 这个项目）。
+/// MCP 页的位置与面不动
+export function goRow(n: Nav, domainKey: string, projects: ReadonlyArray<string>): Nav {
+  const current = n.location.skills;
+  const location: Location = locationsOf(current, projects).includes(domainKey)
+    ? current
+    : domainKey === GLOBAL_KEY
+      ? "user"
+      : isProjectKey(domainKey)
+        ? domainKey
+        : current;
+  return {
+    ...n,
+    destination: "skills",
+    location: { ...n.location, skills: location },
+    face: { ...n.face, skills: "mine" },
+  };
+}
+
 const STORE = "sophia.shell.nav";
 const OLD_STORE = "sophia.shell.place";
 

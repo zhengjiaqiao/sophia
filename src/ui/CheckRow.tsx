@@ -35,10 +35,14 @@ export interface CheckRowProps {
   disabledReason?: string;
   /// 这一行此刻被点名（取消勾选后行下浮起提示的那一会儿）：保持悬停底
   highlighted?: boolean;
-  /// list（默认）：列表里一行 34（`--row-h`，模型列表）；grid：设置页的三列网格一格 36。框 → 图标 → 名字各 10
-  size?: "list" | "grid";
+  /// list（默认）：列表里一行 34（`--row-h`，模型列表）；grid：设置页的三列网格一格 36。框 → 图标 → 名字各 10。
+  /// small：表单里附加的一个选项（跟在 12 / 13 号的标签与说明后面：安装页「同时加进 .gitignore」、网关表单的同步勾选）——
+  /// 名字 13、框与字 8、行高 28、行宽随内容。DESIGN-components「勾选行 › 字号随场景」：名字与旁边的正文同一档
+  size?: "list" | "grid" | "small";
   /// 读屏名；不给就用名字的文字
   label?: string;
+  /// 外面包的 Tooltip 经 cloneElement 挂上来的（设置「生效范围」的项目格停上去给路径），转给行
+  "aria-describedby"?: string;
 }
 
 /// 勾选行（DESIGN「勾选框」「命中区与视觉尺寸是两回事」）：**整行可点**的一项多选——左 14px 勾选框（只画状态）+
@@ -56,6 +60,7 @@ export function CheckRow({
   highlighted = false,
   size = "list",
   label,
+  "aria-describedby": describedBy,
 }: CheckRowProps) {
   const disabled = disabledReason !== undefined;
   const classes = ["ss-checkrow", `ss-checkrow--${size}`];
@@ -68,6 +73,7 @@ export function CheckRow({
         role="checkbox"
         aria-checked={checked}
         aria-label={label}
+        aria-describedby={describedBy}
         className={classes.join(" ")}
         data-checkrow={disabled ? undefined : ""}
         title={disabledReason}

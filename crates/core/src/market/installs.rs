@@ -5,7 +5,7 @@
 //! - 「已关掉的一批」：提示条按 × 记下此刻各个新版本的 tree SHA，之后有不同的新版本才再出；
 //! - 发现列表的 `✓ 已安装` 与介绍页的 `装在 用户级、CardBox`。
 use super::lock::{LockEntry, UpdateRef};
-use super::treehash::{self, FileHashes};
+use super::treehash::{self, FileHashes, LocalSha};
 use super::{install, InstallRecord, UpdateInfo, UpdateOrigin};
 use crate::fs::{entry_kind, EntryKind};
 use crate::skills::GLOBAL_KEY;
@@ -26,6 +26,8 @@ pub struct UpdateCandidate {
     pub branch: Option<String>,
     pub path: String,
     pub recorded_tree_sha: String,
+    /// 记下那一版排除杂项后的指纹；lock 里的、升级前的记录没有
+    pub recorded_content_sha: Option<String>,
     pub origin: UpdateOrigin,
 }
 
@@ -62,6 +64,7 @@ pub fn candidates(
                 branch: Some(r.branch.clone()),
                 path: r.path.clone(),
                 recorded_tree_sha: r.tree_sha.clone(),
+                recorded_content_sha: r.content_sha.clone(),
                 origin: UpdateOrigin::Sophia,
             })
         })
@@ -85,6 +88,7 @@ pub fn candidates(
             branch,
             path: entry.path.clone(),
             recorded_tree_sha: entry.folder_hash.clone(),
+            recorded_content_sha: None,
             origin: UpdateOrigin::SkillLock,
         });
     }
@@ -107,17 +111,18 @@ pub fn repos_to_query(candidates: &[UpdateCandidate]) -> Vec<(String, Option<Str
 /// - 本地文件夹不在了（被删、被换成链接）：那里已经没装着它；
 /// - 本地此刻已经就是远端那一版（别的工具更新过）。
 ///
-/// 本地改没改按 tree SHA 比：算不出（读不了）按改过处理，更新前要确认，宁可多问一句。
+/// 本地改没改按指纹比（`LocalSha::unchanged_since`：Finder、跑脚本留下的杂项不算改动）：算不出（读不了）
+/// 按改过处理，更新前要确认，宁可多问一句。
 /// `changed_files` 在这里总是空的：比较只有 tree SHA，没有记下那一版的逐文件 SHA；
 /// 网络层取到后用 `fill_changed_files` 补上
 pub fn compare(candidates: &[UpdateCandidate], remote: &RemoteTrees) -> Vec<UpdateInfo> {
-    compare_with(candidates, remote, &treehash::tree_sha)
+    compare_with(candidates, remote, &treehash::local_sha)
 }
 
 pub(crate) fn compare_with(
     candidates: &[UpdateCandidate],
     remote: &RemoteTrees,
-    tree_sha: &dyn Fn(&Path) -> io::Result<String>,
+    local_sha: &dyn Fn(&Path) -> io::Result<LocalSha>,
 ) -> Vec<UpdateInfo> {
     let mut out = Vec::new();
     for c in candidates {
@@ -130,8 +135,8 @@ pub(crate) fn compare_with(
         if *remote_sha == c.recorded_tree_sha || entry_kind(&c.dir) != EntryKind::Dir {
             continue;
         }
-        let local = tree_sha(&c.dir).ok();
-        if local.as_deref() == Some(remote_sha.as_str()) {
+        let local = local_sha(&c.dir).ok();
+        if local.as_ref().is_some_and(|l| l.is(remote_sha)) {
             continue;
         }
         out.push(UpdateInfo {
@@ -142,8 +147,10 @@ pub(crate) fn compare_with(
             branch: tree.branch.clone(),
             path: c.path.clone(),
             origin: c.origin,
-            locally_modified: local.as_deref() != Some(c.recorded_tree_sha.as_str()),
-            local_tree_sha: local,
+            locally_modified: !local.as_ref().is_some_and(|l| {
+                l.unchanged_since(&c.recorded_tree_sha, c.recorded_content_sha.as_deref())
+            }),
+            local_tree_sha: local.and_then(|l| l.git),
             recorded_tree_sha: c.recorded_tree_sha.clone(),
             remote_tree_sha: remote_sha.clone(),
             changed_files: Vec::new(),
@@ -236,7 +243,7 @@ pub fn installed_locations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::market::install::testkit::fake_tree_sha;
+    use crate::market::install::testkit::{fake_local_sha, fake_tree_sha};
     use crate::skills::project_key;
     use crate::test_support::TempTree;
 
@@ -248,6 +255,7 @@ mod tests {
             branch: "main".into(),
             path: path.into(),
             tree_sha: sha.into(),
+            content_sha: None,
             commit_sha: "c".into(),
             installed_at: 1,
         }
@@ -375,7 +383,7 @@ mod tests {
                 },
             ),
         ]);
-        let updates = compare_with(&c, &remote, &fake_tree_sha);
+        let updates = compare_with(&c, &remote, &fake_local_sha);
         let names: Vec<&str> = updates.iter().map(|u| u.name.as_str()).collect();
         assert_eq!(names, vec!["pdf", "docx", "lockd"]);
 
@@ -397,6 +405,96 @@ mod tests {
         assert_eq!(lockd.branch, "trunk");
         assert_eq!(lockd.origin, UpdateOrigin::SkillLock);
         assert_eq!(lockd.location, "global");
+    }
+
+    /// #108：Finder、脚本留下的杂项不算本地改动（按真实的 git tree SHA 比）。记下的是装时按 git 原样算的
+    /// （升级前装的也是这一种，不用重算）；那一版自己提交了 `.gitignore`、本地又多了杂项的照样认作没改过；
+    /// 本地加了杂项、其余已是远端那一版的，不算有更新
+    #[test]
+    fn compare_ignores_junk_files() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        let pdf = tree.skill("home/.agents/skills/pdf");
+        let kept = tree.skill("home/.agents/skills/kept");
+        std::fs::write(kept.join(".gitignore"), "node_modules\n").unwrap();
+        let same = tree.skill("home/.agents/skills/same");
+        let pdf_recorded = treehash::tree_sha(&pdf).unwrap();
+        let kept_recorded = treehash::tree_sha(&kept).unwrap();
+        let same_remote = treehash::tree_sha(&same).unwrap();
+        for dir in [&pdf, &kept, &same] {
+            std::fs::write(dir.join(".DS_Store"), "finder").unwrap();
+            std::fs::create_dir_all(dir.join("__pycache__")).unwrap();
+            std::fs::write(dir.join("__pycache__/x.cpython-312.pyc"), "bytecode").unwrap();
+        }
+
+        let records = vec![
+            record("pdf", "global", "o/r", "skills/pdf", &pdf_recorded),
+            record("kept", "global", "o/r", "skills/kept", &kept_recorded),
+            record("same", "global", "o/r", "skills/same", "old-same"),
+        ];
+        let c = candidates(&records, &[], &home);
+        let remote: RemoteTrees = BTreeMap::from([(
+            ("o/r".to_string(), Some("main".to_string())),
+            RemoteTree {
+                branch: "main".into(),
+                folders: BTreeMap::from([
+                    ("skills/pdf".to_string(), "new-pdf".to_string()),
+                    ("skills/kept".to_string(), "new-kept".to_string()),
+                    ("skills/same".to_string(), same_remote),
+                ]),
+            },
+        )]);
+        let updates = compare(&c, &remote);
+        let found: Vec<(&str, bool)> = updates
+            .iter()
+            .map(|u| (u.name.as_str(), u.locally_modified))
+            .collect();
+        assert_eq!(found, vec![("pdf", false), ("kept", false)]);
+    }
+
+    /// #108：记录带着装时排除杂项的指纹（`content_sha`）时按它比：那一版自己提交了 `.DS_Store`、
+    /// `.gitignore`，之后被 Finder 改写、被删掉，都不算改过；改了正文才算
+    #[test]
+    fn compare_uses_recorded_content_sha() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        let mut records = Vec::new();
+        for name in ["junk", "body"] {
+            let dir = tree.skill(&format!("home/.agents/skills/{name}"));
+            std::fs::write(dir.join(".DS_Store"), "v1").unwrap();
+            std::fs::write(dir.join(".gitignore"), "*.pyc\n").unwrap();
+            let mut r = record(
+                name,
+                "global",
+                "o/r",
+                &format!("skills/{name}"),
+                &treehash::tree_sha(&dir).unwrap(),
+            );
+            r.content_sha = Some(treehash::content_sha(&dir).unwrap());
+            records.push(r);
+            std::fs::write(dir.join(".DS_Store"), "finder rewrote").unwrap();
+            std::fs::remove_file(dir.join(".gitignore")).unwrap();
+        }
+        std::fs::write(home.join(".agents/skills/body/SKILL.md"), "我改过").unwrap();
+        let c = candidates(&records, &[], &home);
+        let remote: RemoteTrees = BTreeMap::from([(
+            ("o/r".to_string(), Some("main".to_string())),
+            RemoteTree {
+                branch: "main".into(),
+                folders: BTreeMap::from([
+                    ("skills/junk".to_string(), "new-junk".to_string()),
+                    ("skills/body".to_string(), "new-body".to_string()),
+                ]),
+            },
+        )]);
+        let found: Vec<(String, bool)> = compare(&c, &remote)
+            .into_iter()
+            .map(|u| (u.name, u.locally_modified))
+            .collect();
+        assert_eq!(
+            found,
+            vec![("junk".to_string(), false), ("body".to_string(), true)]
+        );
     }
 
     /// lock 的 `ref`（M15）：钉在 tag 上的对着 tag 自己的 tree 比，默认分支往前走了也不算有更新；
@@ -464,7 +562,7 @@ mod tests {
                 },
             ),
         ]);
-        let updates = compare_with(&c, &remote, &fake_tree_sha);
+        let updates = compare_with(&c, &remote, &fake_local_sha);
         let found: Vec<(&str, &str, &str)> = updates
             .iter()
             .map(|u| {

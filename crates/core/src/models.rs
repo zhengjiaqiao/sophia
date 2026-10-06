@@ -272,6 +272,22 @@ pub struct DomainPage {
     pub targets: Vec<Target>,
     pub rows: Vec<DomainRow>,
     pub broken: Vec<PlannedAction>,
+    /// agent 自己目录里的同名 skill（issue #153），见 `AgentCopy`
+    #[serde(default)]
+    pub agent_copies: Vec<AgentCopy>,
+}
+
+/// agent 自己目录里的一份同名 skill（issue #153）：某一格因「那里已有同名的」被挡住（`Duplicate`），
+/// 占着的是一个真实文件夹，又不是本域任何一行的原件——表格里没有它那一行，同名行抽屉的差异表要单列它。
+/// 只读事实
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCopy {
+    pub skill: String,
+    /// 它所在的目标（agent 目录）
+    pub target_id: String,
+    /// 目标目录下的 `<skill>`
+    pub path: PathBuf,
 }
 
 /// 一条自动同步规则：本体位置下的全部 skill（各目标的排除名单除外）持续补齐到这些目标。

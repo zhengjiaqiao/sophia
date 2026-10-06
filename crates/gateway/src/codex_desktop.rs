@@ -5,11 +5,18 @@
 //! （新开会话也一样）；整个应用退出再打开才会重新读。
 //!
 //! 写法照 `claude_desktop`：系统调用与时钟走 `System`，测试换成假的，不去真的启动或退出用户的应用。
-//! 退出只发 SIGTERM 给 `lsappinfo` 报出的主进程（Electron 当作 ⌘Q 处理），不用 `osascript`、不发 SIGKILL——
+//! 退出先走正常退出：对 `lsappinfo` 报出的主进程调 `NSRunningApplication.terminate`（`process::quit_app`），
+//! 它发的是标准的退出 Apple 事件（与 ⌘Q 同一条路），不是 `osascript` 那种自动化脚本控制。
+//! 不直接发 SIGTERM：Electron 收到 SIGTERM 不带走辅助进程，
+//! 每重启一次就留下一组孤儿（`bare-modifier-monitor`、`browser_crashpad_handler`，issue #143）。
+//! 退回 SIGTERM 有两种情况：找不到它或系统说没发成，立刻发；发出去了但 `QUIT_GRACE` 后还在，补发一次
+//! （hardened runtime 下这个 Apple 事件要不要权限声明还没核实，被拦时靠它兜底，详见 `claude_desktop`）。
+//! 总等待仍是 `QUIT_PATIENCE`。不用 `osascript`（会弹自动化授权框）、不发 SIGKILL——
 //! 退不掉就如实报「可能正在等你确认」，交给人。
 //! 在不在运行只看 `lsappinfo`：它拉起的 `codex app-server` 由 `app` 按 `process::is_codex_background` 另行结束。
 use crate::claude_desktop::{
-    self, parse_lsappinfo_asn, parse_lsappinfo_pid, OPEN_PATIENCE, POLL_INTERVAL, QUIT_PATIENCE,
+    self, parse_lsappinfo_asn, parse_lsappinfo_pid, OPEN_PATIENCE, POLL_INTERVAL, QUIT_GRACE,
+    QUIT_PATIENCE,
 };
 use crate::process;
 use std::collections::HashMap;
@@ -43,6 +50,9 @@ pub trait System: Send + Sync {
     fn lsappinfo_find(&self) -> io::Result<String>;
     /// `lsappinfo info -only pid <ASN>` 的标准输出
     fn lsappinfo_pid(&self, asn: &str) -> io::Result<String>;
+    /// 正常退出（`NSRunningApplication.terminate`，同 ⌘Q）。请求发出去了为 true；
+    /// 没有这个 pid 的应用或系统说没发成为 false
+    fn quit_app(&self, pid: u32) -> bool;
     /// 发 SIGTERM；失败时带回系统的原话
     fn terminate(&self, pid: u32) -> io::Result<()>;
     /// `open -b com.openai.codex`；失败时带回 `open` 的原话
@@ -53,7 +63,7 @@ pub trait System: Send + Sync {
     fn sleep(&self, duration: Duration);
 }
 
-/// 真实的系统调用（macOS 自带的 `lsappinfo`、`kill`、`open`、`plutil`）
+/// 真实的系统调用（macOS 自带的 `lsappinfo`、`kill`、`open`、`plutil`，与 AppKit 的 `NSRunningApplication`）
 pub struct RealSystem;
 
 impl System for RealSystem {
@@ -66,6 +76,10 @@ impl System for RealSystem {
 
     fn lsappinfo_pid(&self, asn: &str) -> io::Result<String> {
         claude_desktop::stdout_of("/usr/bin/lsappinfo", &["info", "-only", "pid", asn])
+    }
+
+    fn quit_app(&self, pid: u32) -> bool {
+        process::quit_app(pid)
     }
 
     fn terminate(&self, pid: u32) -> io::Result<()> {
@@ -113,11 +127,19 @@ impl<S: System> Desktop<S> {
         Ok(!self.system.lsappinfo_find()?.trim().is_empty())
     }
 
-    /// 发退出请求并等到它不在运行（最多 15 秒）。本来就没在运行 → 不发信号，直接返回。
+    /// 发退出请求并等到它不在运行（总共最多 15 秒）。本来就没在运行 → 不发请求，直接返回。
+    /// 正常退出发出去了、`QUIT_GRACE` 后主进程还在 → 补发一次 SIGTERM。
     /// 超时 → `TimedOut` + `busy_message`；从不强杀
     pub fn quit(&self) -> io::Result<()> {
-        self.request_quit()?;
-        if self.wait_until(false, QUIT_PATIENCE)? {
+        let deadline = self.system.now() + QUIT_PATIENCE;
+        if let Some(pid) = self.request_quit()? {
+            let grace = (self.system.now() + QUIT_GRACE).min(deadline);
+            // 宽限期末尾查不成也当它还在：要不要补发由 `signal_if_still` 再按主进程判
+            if !self.wait_until_deadline(false, grace).unwrap_or(false) {
+                self.signal_if_still(pid)?;
+            }
+        }
+        if self.wait_until_deadline(false, deadline)? {
             Ok(())
         } else {
             Err(io::Error::new(
@@ -127,11 +149,29 @@ impl<S: System> Desktop<S> {
         }
     }
 
-    /// 只发退出请求（SIGTERM 给 `lsappinfo` 报出的主进程），不等
-    fn request_quit(&self) -> io::Result<()> {
+    /// 只发退出请求，不等：先对 `lsappinfo` 报出的主进程正常退出（同 ⌘Q），没发成才发 SIGTERM。
+    /// 返回 `Some(pid)` = 正常退出发出去了，还要看它是否真的在退；`None` = 已发 SIGTERM 或本来就没在运行
+    fn request_quit(&self) -> io::Result<Option<u32>> {
         let Some(pid) = self.main_pid()? else {
-            return Ok(());
+            return Ok(None);
         };
+        if self.system.quit_app(pid) {
+            return Ok(Some(pid));
+        }
+        self.signal(pid)?;
+        Ok(None)
+    }
+
+    /// 宽限期过后主进程还是这个 pid → 补发一次 SIGTERM。已经不在、换了 pid、或查不成 → 不补，接着等
+    fn signal_if_still(&self, pid: u32) -> io::Result<()> {
+        match self.main_pid() {
+            Ok(Some(still)) if still == pid => self.signal(pid),
+            _ => Ok(()),
+        }
+    }
+
+    /// 给主进程发 SIGTERM
+    fn signal(&self, pid: u32) -> io::Result<()> {
         self.system.terminate(pid).or_else(|e| {
             // 发信号前它刚好自己退了：不算失败。还在就把系统的原话带出去
             match self.main_pid() {
@@ -178,7 +218,11 @@ impl<S: System> Desktop<S> {
     /// 每 `POLL_INTERVAL` 查一次，直到在不在运行等于 `want`；到点还不是 → `Ok(false)`。
     /// 中途查不成就接着等，到点时最后一次还是查不成才把那次的错误带出去（同 `claude_desktop`）
     fn wait_until(&self, want: bool, patience: Duration) -> io::Result<bool> {
-        let deadline = self.system.now() + patience;
+        self.wait_until_deadline(want, self.system.now() + patience)
+    }
+
+    /// 同 `wait_until`，等到给定的截止时刻（退出时宽限期与总等待共用一个截止时刻）
+    fn wait_until_deadline(&self, want: bool, deadline: Instant) -> io::Result<bool> {
         loop {
             match self.running() {
                 Ok(now) if now == want => return Ok(true),
@@ -293,8 +337,12 @@ mod tests {
     #[derive(Default)]
     struct World {
         app: bool,
-        /// 收到 SIGTERM 后再过几次轮询间隔退出；None = 一直不退（在等人确认）
+        /// 收到退出请求（正常退出或 SIGTERM）后再过几次轮询间隔退出；None = 一直不退（在等人确认）
         exits_after: Option<u32>,
+        /// 正常退出发不出去（没有这个 pid 的 `NSRunningApplication`，或 `terminate` 返回 false）
+        refuses_app_quit: bool,
+        /// 正常退出说发出去了，却没起作用（签名包里 Apple 事件被拦的样子）
+        ignores_app_quit: bool,
         /// `open` 之后再过几次轮询间隔在运行；None = 一直起不来
         starts_after: Option<u32>,
         quitting: Option<u32>,
@@ -361,6 +409,19 @@ mod tests {
             })
         }
 
+        fn quit_app(&self, pid: u32) -> bool {
+            let mut w = self.w();
+            w.calls.push(format!("quit {pid}"));
+            if w.refuses_app_quit {
+                return false;
+            }
+            if w.ignores_app_quit {
+                return true;
+            }
+            w.quitting = Some(w.exits_after.unwrap_or(u32::MAX));
+            true
+        }
+
         fn terminate(&self, pid: u32) -> io::Result<()> {
             let mut w = self.w();
             w.calls.push(format!("term {pid}"));
@@ -419,11 +480,39 @@ mod tests {
     }
 
     #[test]
-    fn quit_sends_one_sigterm_to_the_main_pid_and_waits() {
+    fn quit_asks_the_main_pid_to_quit_normally_and_waits() {
         let (d, fake) = desktop(running_app());
         d.quit().unwrap();
-        assert_eq!(fake.count("term 4242"), 1);
+        assert_eq!(fake.count("quit 4242"), 1, "正常退出，同 ⌘Q");
+        assert_eq!(
+            fake.count("term 4242"),
+            0,
+            "正常退出发出去了就不发 SIGTERM（issue #143）"
+        );
         assert_eq!(fake.count("sleep"), 3, "等到它退出才返回");
+        assert!(!d.running().unwrap());
+    }
+
+    #[test]
+    fn quit_falls_back_to_sigterm_when_the_normal_quit_is_not_sent() {
+        let (d, fake) = desktop(World {
+            refuses_app_quit: true,
+            ..running_app()
+        });
+        d.quit().unwrap();
+        let asks: Vec<String> = fake
+            .w()
+            .calls
+            .iter()
+            .filter(|c| c.starts_with("quit") || c.starts_with("term"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            asks,
+            vec!["quit 4242", "term 4242"],
+            "先正常退出，没发成才 SIGTERM"
+        );
+        assert_eq!(fake.count("sleep"), 3, "等待照旧");
         assert!(!d.running().unwrap());
     }
 
@@ -431,12 +520,44 @@ mod tests {
     fn quit_does_not_signal_when_not_running() {
         let (d, fake) = desktop(World::default());
         d.quit().unwrap();
-        assert!(fake.w().calls.iter().all(|c| !c.starts_with("term")));
+        assert!(fake
+            .w()
+            .calls
+            .iter()
+            .all(|c| !c.starts_with("term") && !c.starts_with("quit")));
         assert_eq!(fake.count("sleep"), 0);
     }
 
     #[test]
-    fn quit_times_out_as_busy_without_escalating() {
+    fn quit_sends_one_sigterm_when_the_normal_quit_had_no_effect_after_the_grace() {
+        let (d, fake) = desktop(World {
+            ignores_app_quit: true,
+            ..running_app()
+        });
+        d.quit().unwrap();
+        let asks: Vec<String> = fake
+            .w()
+            .calls
+            .iter()
+            .filter(|c| c.starts_with("quit") || c.starts_with("term"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            asks,
+            vec!["quit 4242", "term 4242"],
+            "宽限期后补发一次 SIGTERM"
+        );
+        let grace_polls = QUIT_GRACE.as_millis().div_ceil(POLL_INTERVAL.as_millis()) as usize;
+        assert_eq!(
+            fake.count("sleep"),
+            grace_polls + 3,
+            "等满宽限期才补发，之后等到它退出"
+        );
+        assert!(!d.running().unwrap());
+    }
+
+    #[test]
+    fn quit_times_out_as_busy_after_one_quit_and_one_sigterm() {
         let (d, fake) = desktop(World {
             exits_after: None,
             ..running_app()
@@ -444,14 +565,23 @@ mod tests {
         let err = d.quit().unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
         assert_eq!(err.to_string(), "Codex 没有退出，可能正在等你确认");
-        assert_eq!(fake.count("term 4242"), 1, "超时也不再发信号，更不强杀");
+        assert_eq!(fake.count("quit 4242"), 1);
+        assert_eq!(
+            fake.count("term 4242"),
+            1,
+            "宽限期后只补一次 SIGTERM，不强杀"
+        );
         let waited = fake.w().elapsed;
-        assert!(waited >= QUIT_PATIENCE && waited < QUIT_PATIENCE + POLL_INTERVAL);
+        assert!(
+            waited >= QUIT_PATIENCE && waited < QUIT_PATIENCE + POLL_INTERVAL,
+            "总等待不因宽限期变长：{waited:?}"
+        );
     }
 
     #[test]
     fn quit_relays_the_kill_error_when_it_is_still_there() {
         let (d, fake) = desktop(World {
+            refuses_app_quit: true,
             terminate_error: Some("kill: 4242: Operation not permitted".into()),
             ..running_app()
         });

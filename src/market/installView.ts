@@ -3,7 +3,7 @@
 /// 贴底的去向、主动作的禁用原因、链接的就地识别、JSON 的占位与连接方式、装完那一窗的文案。
 /// 不碰 api、不产 JSX，tests/market-install-view.test.ts 直接测。
 
-import { listText, t, tn } from "../i18n.ts";
+import { listText, t, tn, tSpaced } from "../i18n.ts";
 import type { Location } from "../shell/nav.ts";
 import { displayPath } from "../pathText.ts";
 import { mirrorFailedNote } from "../mcpView.ts";
@@ -215,6 +215,65 @@ export function writableCount(
   return checks.filter(
     (c) => checked.includes(c.harnessId) && (c.status === "ok" || c.status === "partial"),
   ).length;
+}
+
+/// 密钥提醒（S19）：勾着、写得过去的 agent 里要把像密钥的值写进 git 仓库里的项目文件（`remind`）的那几个文件
+/// （在项目根 `.gitignore` 里会加的行，按检查结果的先后、去重）。非空就出默认不勾的「同时加进 .gitignore」，
+/// 放在 `要填的` 最后（没有那一块时放在 `写进哪些 agent` 最后）。检查没回来先不出
+export function mcpKeyHint(
+  checks: ReadonlyArray<McpTargetCheck> | null,
+  checked: ReadonlyArray<string>,
+): string[] {
+  const files: string[] = [];
+  for (const c of checks ?? []) {
+    if (!checked.includes(c.harnessId)) continue;
+    if (c.status !== "ok" && c.status !== "partial") continue;
+    if (c.keyHint !== "remind" || !c.gitignoreLine || files.includes(c.gitignoreLine)) continue;
+    files.push(c.gitignoreLine);
+  }
+  return files;
+}
+
+/// 目标文件已被 git 跟踪（`tracked`）的那几个文件：加进 .gitignore 也挡不住，不出勾选，在勾选的位置说一句
+/// （`keyTrackedNote`）。挑法同 `mcpKeyHint`（勾着、写得过去、按检查结果的先后去重）
+export function mcpTrackedFiles(
+  checks: ReadonlyArray<McpTargetCheck> | null,
+  checked: ReadonlyArray<string>,
+): string[] {
+  const files: string[] = [];
+  for (const c of checks ?? []) {
+    if (!checked.includes(c.harnessId)) continue;
+    if (c.status !== "ok" && c.status !== "partial") continue;
+    if (c.keyHint !== "tracked" || !c.gitignoreLine || files.includes(c.gitignoreLine)) continue;
+    files.push(c.gitignoreLine);
+  }
+  return files;
+}
+
+/// 已被跟踪的那一句（产品负责人 2026-10-06）：只有一个文件、又没有同时出现的勾选（`withCheckbox`）时不点名
+/// （「这个文件」）；有勾选同时出现、或文件不止一个时写出是哪几个（去掉开头的 `/`，同 `keyHintTip`），
+/// 不然读着像在说全部。`named` 给「目标不止一个」用（同名文件在几个项目里，文件只有一个）。
+/// 确认框（`scopeTrackedNote`）与安装页共用
+export function keyTrackedNote(files: ReadonlyArray<string>, named: boolean = false): string {
+  if (files.length === 1 && !named) return t("market.install.trackedOne");
+  const params = { files: listText(files.map(unanchored)) };
+  return files.length === 1
+    ? tSpaced("market.install.trackedNamed", params)
+    : tSpaced("market.install.trackedMany", params);
+}
+
+/// 写进 .gitignore 的行去掉锚在项目根的开头 `/`：列给人看时读着像项目里的相对路径
+const unanchored = (line: string) => line.replace(/^\//, "");
+
+/// 「同时加进 .gitignore」的提示框：哪几个文件在 git 仓库里、不加会怎样、勾上在哪个项目的 .gitignore 里加几行。
+/// 中文的「这一行 / 这几行」按个数分两个键（中文没有单复数形，`tn` 分不出一个）。
+/// `files` 是写进 .gitignore 的行，锚在项目根的带开头的 `/`（`/.mcp.json`）；列出来时去掉它，读着像项目里的
+/// 相对路径，不像绝对路径（写进去的仍带）。确认框（`scopeKeyHintTip`）与安装页共用
+export function keyHintTip(files: ReadonlyArray<string>, project: string): string {
+  const params = { files: listText(files.map(unanchored)), project };
+  return files.length === 1
+    ? tSpaced("market.install.gitignoreTipOne", params)
+    : tSpaced("market.install.gitignoreTipMany", params);
 }
 
 export const configFilesLine = (k: number) => tn("market.mcp.configFiles", k);
@@ -674,6 +733,42 @@ export function skillInstalledToast(
   };
 }
 
+/// 那里已有同名的、勾选行不能勾、也就没交给后端的 agent（M14）：装完照样算「没链上：那里已有同名的」
+/// （issue #111：先在 Claude Code 放了 pdf 再装 pdf，装完那一窗要说 Claude Code 没链上、给「去处理」）。
+/// `skipped` 是本来要交（勾着或直接读取）、因为被占而拿掉的 agent；后端已经报过的不重复
+export function withTakenSkipped(
+  outcome: InstallOutcome,
+  dirs: ReadonlyArray<AgentDir> | undefined,
+  skipped: ReadonlyArray<string>,
+): InstallOutcome {
+  const unlinked = [...(outcome.unlinked ?? [])];
+  for (const id of skipped) {
+    const taken = dirs?.find((d) => d.harnessId === id)?.taken ?? [];
+    for (const name of outcome.installed) {
+      if (!taken.includes(name)) continue;
+      if (unlinked.some((u) => u.harnessId === id && u.name === name)) continue;
+      unlinked.push({ harnessId: id, name, reason: t("market.install.linkTaken") });
+    }
+  }
+  return { ...outcome, unlinked };
+}
+
+/// 装完那一窗里「去处理」去哪（issue #111）：SKILLS · 我的 里装到的那个位置下、没链上的那个 skill 那一行
+/// （位置 key + skill 名定位）。没有「没链上」时没有去处理，返回 null；一次装了几个都没链上时去第一个
+export interface SkillHandle {
+  /// 位置 key（`global` / `project:<路径>`），就是这次装到的位置
+  domainKey: LocationKey;
+  skill: string;
+}
+
+export function skillHandleTarget(
+  outcome: InstallOutcome,
+  location: LocationKey,
+): SkillHandle | null {
+  const first = (outcome.unlinked ?? [])[0];
+  return first ? { domainKey: location, skill: first.name } : null;
+}
+
 /// 写 MCP 之后那一窗（R10）：`✓ 已写进 [图标…] brave-search` + `撤销`，第一批三家接生效时机；
 /// 已有一样的跳过、不算失败；有写不进的是部分失败，全没写进是 `⊘ … 写进 [图标…] 失败`。
 /// `checks` 用来把报告里的位置 id 对回 agent（图标）
@@ -709,6 +804,9 @@ export function mcpInstalledToast(
       reason: failed[0].message,
     };
   }
+  // 写成了的那几处里有的没加进 .gitignore（勾了「同时加进 .gitignore」）：接在别的原因后面，不互相遮住
+  const withGitignore = (reason: string | undefined) =>
+    [reason, report.gitignoreFailed].filter((x) => x).join(" · ") || undefined;
   if (failed.length > 0) {
     return {
       tier: "notice",
@@ -716,13 +814,13 @@ export function mcpInstalledToast(
       sentence: "market.toast.writePartial",
       names: uniq(done.map((d) => d.name)),
       agents: agentsOf(done),
-      reason: failed[0].message,
+      reason: withGitignore(failed[0].message),
       tally: { done: done.length, failed: failed.length },
     };
   }
   const trail = mcpEffectTrail(done);
   // Claude Desktop 第三方模式那一份没写成：成功句后接那一句（借 `reason` 的位置，同 MCP 页的提示条）
-  const note = mirrorFailedNote(report.entries);
+  const note = withGitignore(mirrorFailedNote(report.entries));
   return {
     tier: "routine",
     kind: "success",

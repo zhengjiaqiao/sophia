@@ -27,6 +27,8 @@ import {
   shouldPollRestart,
   showLaunchKey,
   selectModel,
+  resolveManual,
+  prefixExample,
   launchTip,
   showRouterTodo,
   snapshotOrder,
@@ -398,7 +400,7 @@ test("MODELS_TOOLS：版面按工具分块；今天只有 Codex，但名字一�
   // 限制说明全文（网关行展开区第一行，不截断）
   assert.equal(
     codex.limitations,
-    "只支持文本与工具调用，不支持图片 · 会话标题仍由官方模型生成，第一条消息会发给官方 · 网页搜索用不了",
+    "网页搜索用不了 · 图片要看模型",
   );
 });
 
@@ -432,7 +434,7 @@ test("重启、启动写桌面应用本身的名字（2026-09-30 起 Codex 桌�
   assert.equal(codexAppName(state()), "Codex");
   assert.equal(codexAppName(null), "Codex");
   assert.equal(restartTip("ChatGPT"), "重启 ChatGPT 桌面应用让改动生效，进行中的对话会中断");
-  assert.equal(restartConsequence("ChatGPT"), "ChatGPT 会退出再打开，进行中的对话会中断");
+  assert.equal(restartConsequence("ChatGPT"), "ChatGPT 会退出再打开，它和终端里 Codex 进行中的对话都会中断");
   assert.equal(restartStillStale("ChatGPT"), "ChatGPT 15 秒内没换上新配置，稍后再试一次");
   assert.equal(launchTip("ChatGPT"), "打开 ChatGPT 桌面应用，它会用上现在的模型设置");
 });
@@ -841,14 +843,14 @@ test("shouldShowModelId：友好名与 id 明显不同才显示；Opus / Kimi / 
   assert.equal(shouldShowModelId("GPT_4.1", "azure/gpt-4.1"), false, "分隔符与大小写不算不同");
 });
 
-test("行名与行尾 id：有友好名写友好名；没有就写去掉服务商前缀的 id；网关把 id 填进显示名不算友好名", () => {
+test("行名与行尾 id：有友好名写友好名；没有就写完整 id（和手动填的一致，2026-10-06）；网关把 id 填进显示名不算友好名", () => {
   const named = model({
     id: "deepseek/deepseek-chat",
     slug: "g-deepseek/deepseek-chat",
     displayName: "DeepSeek V3.2",
   });
   assert.equal(modelRowLabel(named), "DeepSeek V3.2");
-  assert.equal(modelRowId(named), "deepseek-chat");
+  assert.equal(modelRowId(named), "deepseek/deepseek-chat");
   const kimi = model({ id: "moonshotai/kimi-k2-0905", slug: "g-x", displayName: "Kimi K2" });
   assert.equal(modelRowId(kimi), null);
   const bare = model({
@@ -856,7 +858,7 @@ test("行名与行尾 id：有友好名写友好名；没有就写去掉服务�
     slug: "g-default-azure-gpt-4.1",
     displayName: "default-azure-gpt-4.1",
   });
-  assert.equal(modelRowLabel(bare), "gpt-4.1");
+  assert.equal(modelRowLabel(bare), "default-azure-gpt-4.1");
   assert.equal(modelRowId(bare), null);
 });
 
@@ -926,7 +928,7 @@ test("ModelList：超过 8 行出筛选框；新拉到的模型整批出现不�
   assert.doesNotMatch(html, /is-flash|animation-delay/);
   assert.equal((html.match(/ss-checkrow__trailing"><span class="ss-mono/g) ?? []).length, 1);
   // 模型 id 能选中拷走（D23）：等宽读数 Mono，放不下截断
-  assert.match(html, /class="ss-mono ss-selectable ss-mono--truncate">deepseek-chat</);
+  assert.match(html, /class="ss-mono ss-selectable ss-mono--truncate">deepseek\/deepseek-chat</);
   // 筛选框写出这一家有几个模型；每行是勾选行（14 方框，全应用同一个记号），行尾不写网关短名
   assert.match(html, /placeholder="筛选 10 个模型"/);
   assert.equal((html.match(/class="ss-checkrow ss-checkrow--list"/g) ?? []).length, 10);
@@ -935,6 +937,70 @@ test("ModelList：超过 8 行出筛选框；新拉到的模型整批出现不�
   const tsx = withCopy(readFileSync(new URL("../src/ModelList.tsx", import.meta.url), "utf8"));
   assert.doesNotMatch(tsx, /<svg|ss-checkbox|CheckboxGlyph/);
   assert.doesNotMatch(html, /models-option__gateway/);
+});
+
+test("resolveManual（#117）：手动填的 id 先按完整 id 对、再按去掉前缀的那一截对；撞上几家交回完整 id；对不上为 none", () => {
+  const p = provider({ id: "g", name: "g" });
+  const entries = [
+    { provider: p, model: model({ id: "weibo/glm-5.3", displayName: "weibo/glm-5.3" }) },
+    { provider: p, model: model({ id: "thudm/glm-5", displayName: "thudm/glm-5" }) },
+    { provider: p, model: model({ id: "weibo/glm-5", displayName: "weibo/glm-5" }) },
+  ];
+  const one = (typed: string) => {
+    const m = resolveManual(entries, typed);
+    return m.kind === "one" ? m.entry.model.id : m.kind;
+  };
+  assert.equal(one("glm-5.3"), "weibo/glm-5.3");
+  assert.equal(one("WEIBO/GLM-5.3"), "weibo/glm-5.3");
+  assert.equal(one("thudm/glm-5"), "thudm/glm-5");
+  assert.deepEqual(resolveManual(entries, "glm-5"), { kind: "many", ids: ["thudm/glm-5", "weibo/glm-5"] });
+  assert.equal(one("glm-9"), "none");
+  assert.equal(one("  "), "none");
+});
+
+test("prefixExample：没带前缀、这家过半带前缀时挑去前缀后最像的一个当例子；否则为 null", () => {
+  const p = provider({ id: "g", name: "g" });
+  const e = (id: string) => ({ provider: p, model: model({ id, displayName: id }) });
+  const list = [e("azure/gpt-4.1"), e("weibo/glm-5"), e("thudm/glm-4.7"), e("weibo/kimi-k2.5")];
+  assert.equal(prefixExample(list, "glm-5.3"), "weibo/glm-5");
+  assert.equal(prefixExample(list, "weibo/glm-5.3"), null, "带了前缀就不是格式问题");
+  assert.equal(prefixExample([e("glm-5"), e("kimi-k2"), e("a/b")], "glm-5.3"), null, "这家多半不带前缀");
+  assert.equal(prefixExample([], "glm-5.3"), null);
+});
+
+test("ModelList 手动添加（#117）：给了 onAddManual 框底出一行输入 + `试一下再加`（没填 id 时不可用、按下说原因）；手动的行尾带 `手动`；取消勾选手动的就从列表移除", () => {
+  const p = provider({ id: "g", name: "g" });
+  const html = render(ModelList, {
+    entries: [
+      { provider: p, model: model({ id: "a/x", displayName: "a/x", selected: true, manual: true }) },
+      { provider: p, model: model({ id: "a/y", displayName: "a/y" }) },
+    ],
+    onToggle: noop,
+    onAddManual: async () => {},
+  });
+  assert.match(html, /model-list__manual-row"><label class="ss-textfield[^>]*>[^]*?placeholder="手动添加模型：填模型 id"/);
+  assert.match(html, /title="先填模型 id" disabled=""[^>]*>试一下再加</);
+  assert.match(html, /model-list__trail"><span class="ss-tag ss-tag--weak">手动<\/span>/);
+  assert.equal((html.match(/>手动</g) ?? []).length, 1);
+  // 不给 onAddManual 就没有这一行
+  assert.doesNotMatch(render(ModelList, { entries: [], onToggle: noop }), /model-list__manual/);
+
+  const st = state({
+    providers: [
+      provider({
+        id: "g",
+        models: [model({ id: "a/x", selected: true, manual: true }), model({ id: "a/y", selected: true })],
+      }),
+    ],
+  });
+  const { next } = selectModel(st, "g", "a/x", false);
+  assert.deepEqual(
+    codexGateway(next).providers[0].models.map((m) => m.id),
+    ["a/y"],
+    "手动的取消勾选就移除",
+  );
+  const { next: kept } = selectModel(st, "g", "a/y", false);
+  assert.equal(codexGateway(kept).providers[0].models.length, 2, "网关列表里的照旧留着");
 });
 
 test("ModelList：网关给了上下文长度就在行尾写读数（`1M`），在 id 前、不截；没给就不写", () => {

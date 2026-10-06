@@ -178,6 +178,17 @@
   overflow-wrap: anywhere;
 }
 
+/* 密钥提醒（S19）：「同时加进 .gitignore」（勾选行小档）。悬停带比文字左沿外扩 8：往左让出 8，框与上面的文字左沿对齐 */
+.install-keyhint {
+  margin-top: var(--space-sm);
+  margin-left: calc(-1 * var(--space-xs));
+}
+
+/* 目标文件已被跟踪：勾选的位置换成一句灰字（Note 13 ink-mute），与上面的字同一左沿 */
+.install-keyhint-note {
+  margin-top: var(--space-sm);
+}
+
 .install-fields__note {
   margin: var(--space-sm) 0 0;
   font-size: var(--size-label);

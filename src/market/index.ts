@@ -19,6 +19,7 @@ export type { JsonPageProps } from "./JsonPage.tsx";
 export { InstalledToast } from "./InstalledToast.tsx";
 export type { InstalledNotice } from "./InstalledToast.tsx";
 export type { InstallPlaces } from "./InstallParts.tsx";
+export type { SkillHandle } from "./installView.ts";
 export { marketService } from "./service.ts";
 export type { MarketService } from "./service.ts";
 export {

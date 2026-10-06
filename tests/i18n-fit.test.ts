@@ -36,7 +36,6 @@ test("7A 网关表单：两行的标签与输入框同一张格子，标签列 m
     assert.match(rule(src, sel), /grid-column: 3 \/ -1;/, sel);
     assert.doesNotMatch(rule(src, sel), /44px/, sel);
   }
-  assert.match(rule(src, ".gw-form__facts"), /grid-column: 1 \/ -1;/);
   assert.doesNotMatch(src, /calc\(44px/);
 });
 

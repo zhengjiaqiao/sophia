@@ -3,7 +3,7 @@ use crate::fs::{entry_kind, normalize, real_path, EntryKind};
 use crate::models::{AgentLabels, Harness, Skill, Source, SourceKind, Target, TargetScope};
 use crate::skills::read_description;
 use crate::store::Settings;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 
@@ -812,18 +812,163 @@ pub fn has_project_skill_dir(project: &Path, harnesses: &[Harness]) -> bool {
             .any(|d| project.join(d).is_dir())
 }
 
-/// 项目只来自自动检测（spec 2026-09-26-object-first-navigation R10）：Claude Code 记录的项目里，
-/// 仍存在、不是主目录 / 根目录 / 主目录下的隐藏目录、且含 skill 目录（去噪）的那些，去重排序。
-/// 旧版手动添加的项目（`projects.json`）不再并入；那个文件不改不删
+/// 自动检测的项目：Claude Code 与 Codex 记录的项目合并（spec 2026-10-05-skill-mcp-batch2「项目来源」），
+/// 其中是绝对路径、仍存在、不是主目录 / 根目录 / 主目录下的隐藏目录、且含 skill 目录（去噪）的那些，
+/// 按 `real_path` 去重（留先读到的写法，Claude Code 在前）后排序。
+/// 手动选的项目（`projects.json`）不在这里并入，见 `projects`
 pub fn project_candidates(env: &Env, harnesses: &[Harness]) -> Vec<PathBuf> {
-    claude_recorded_projects(&env.home)
+    let home = real_path(&env.home).unwrap_or_else(|| env.home.clone());
+    let mut seen = BTreeSet::new();
+    let mut found: Vec<PathBuf> = claude_recorded_projects(&env.home)
         .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .filter(|p| p != &env.home && p.parent().is_some() && p.is_dir())
+        .chain(codex_recorded_projects(env))
+        // 判断目标目录是否存在，要跟随软链
+        .filter(|p| p.is_absolute() && p.is_dir())
+        // 记录的写法和解析后的真实路径都要过隐藏目录这关：`~/.tool` 可能是指向别处的软链
         .filter(|p| !is_hidden_home_dir(&env.home, p))
+        .filter(|p| {
+            real_path(p).is_some_and(|real| {
+                real != home
+                    && real.parent().is_some()
+                    && !is_hidden_home_dir(&home, &real)
+                    && seen.insert(real)
+            })
+        })
         .filter(|p| has_project_skill_dir(p, harnesses))
+        .collect();
+    found.sort();
+    found
+}
+
+/// 全部项目：自动检测的（`project_candidates`）加手动选的（`projects.json`）。手动选的**不受「含 skill 目录」去噪**
+/// ——空文件夹也是一格，好从零开始装——但仍要是绝对路径、此刻存在、不是主目录或根目录；不存在了就不列。
+/// 按 `real_path` 去重：自动检测到的写法在前，手动的按加入先后；结果按路径排序。
+/// 设置「生效范围」列的就是这一份；扫描与筛选行只用其中勾着的（`shown_projects`）
+pub fn projects(env: &Env, harnesses: &[Harness], manual: &[PathBuf]) -> Vec<PathBuf> {
+    let home = real_path(&env.home).unwrap_or_else(|| env.home.clone());
+    let auto = project_candidates(env, harnesses);
+    let mut seen: BTreeSet<PathBuf> = auto.iter().filter_map(|p| real_path(p)).collect();
+    let mut found = auto;
+    for p in manual {
+        // 判断目标目录是否存在，要跟随软链
+        if !(p.is_absolute() && p.is_dir()) {
+            continue;
+        }
+        let Some(real) = real_path(p) else {
+            continue;
+        };
+        if real == home || real.parent().is_none() || !seen.insert(real) {
+            continue;
+        }
+        found.push(normalize(p));
+    }
+    found.sort();
+    found
+}
+
+/// 去掉设置「生效范围」里取消勾的项目（`Settings.hidden_projects`），按 `real_path` 认同一处；
+/// 记录里的文件夹已经不在的，什么都不去掉。一个都不勾时为空：筛选行只剩用户级
+pub fn shown_projects(projects: Vec<PathBuf>, hidden: &[PathBuf]) -> Vec<PathBuf> {
+    let is_hidden = hidden_test(hidden);
+    projects.into_iter().filter(|p| !is_hidden(p)).collect()
+}
+
+/// 判断一个项目是否取消勾了：记录先解析一次真实路径，之后逐个比
+fn hidden_test(hidden: &[PathBuf]) -> impl Fn(&Path) -> bool {
+    let hidden: Vec<PathBuf> = hidden.iter().filter_map(|h| real_path(h)).collect();
+    move |p| real_path(p).is_some_and(|real| hidden.contains(&real))
+}
+
+/// 设置「生效范围」里的一格项目（用户级那一格不在这里，它一直勾着）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectScope {
+    /// 项目文件夹（与扫描结果里 `project:<路径>` 的路径同一个写法）；停上去的提示框给它
+    pub path: PathBuf,
+    /// 格子上的名字：文件夹名
+    pub name: String,
+    /// 勾着没有：勾着的才出现在筛选行与「切换项目…」浮层里
+    pub shown: bool,
+}
+
+/// 「生效范围」一节的全部项目格，先后同 `projects`
+pub fn project_scopes(projects: Vec<PathBuf>, hidden: &[PathBuf]) -> Vec<ProjectScope> {
+    let is_hidden = hidden_test(hidden);
+    projects
+        .into_iter()
+        .map(|path| ProjectScope {
+            name: dir_name(&path),
+            shown: !is_hidden(&path),
+            path,
+        })
         .collect()
+}
+
+/// 两个写法是否同一处：规范化后相同，或都存在且解析到同一个真实路径
+fn same_place(a: &Path, b: &Path) -> bool {
+    normalize(a) == normalize(b) || crate::fs::same_real(a, b)
+}
+
+/// 设置「生效范围」里勾上 / 取消勾一个项目：取消勾记进 `hidden_projects`，同一处不重复记。记的是**真实路径**
+/// （文件夹此刻不在时退回规范化后的写法）：经软链写法取消勾的，软链以后删了、改了，记录照样认得这个文件夹。
+/// 勾上把指向同一处的记录都清掉。返回是否改动过
+pub fn set_project_shown(settings: &mut Settings, path: &Path, shown: bool) -> bool {
+    let hidden = &mut settings.hidden_projects;
+    if shown {
+        let before = hidden.len();
+        hidden.retain(|h| !same_place(h, path));
+        hidden.len() != before
+    } else if hidden.iter().any(|h| same_place(h, path)) {
+        false
+    } else {
+        hidden.push(real_path(path).unwrap_or_else(|| normalize(path)));
+        true
+    }
+}
+
+/// 手动选的文件夹当不了项目的原因（给用户看的一句）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualProjectError {
+    /// 不是一个此刻存在的文件夹（或不是绝对路径）
+    NotFolder,
+    /// 主目录或根目录：里面是整台电脑的配置，不是一个项目
+    Home,
+}
+
+impl std::fmt::Display for ManualProjectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self {
+            ManualProjectError::NotFolder => crate::t!("settings.scope.notFolder"),
+            ManualProjectError::Home => crate::t!("settings.scope.isHome"),
+        })
+    }
+}
+
+impl std::error::Error for ManualProjectError {}
+
+/// 手动加一个项目（`+ 项目` / 应用菜单「添加项目…」）：选的文件夹就是一格，默认勾上——记进 `manual`
+/// （`projects.json`；同一处已记过就不重复记），并清掉它在「生效范围」里取消勾的记录（自动检测到、
+/// 先前取消勾过的也算重新选上）。返回记下的写法（规范化后）
+pub fn add_manual_project(
+    env: &Env,
+    manual: &mut Vec<PathBuf>,
+    settings: &mut Settings,
+    path: &Path,
+) -> Result<PathBuf, ManualProjectError> {
+    if !(path.is_absolute() && path.is_dir()) {
+        return Err(ManualProjectError::NotFolder);
+    }
+    let real = real_path(path).ok_or(ManualProjectError::NotFolder)?;
+    let home = real_path(&env.home).unwrap_or_else(|| env.home.clone());
+    if real == home || real.parent().is_none() {
+        return Err(ManualProjectError::Home);
+    }
+    let path = normalize(path);
+    if !manual.iter().any(|m| same_place(m, &path)) {
+        manual.push(path.clone());
+    }
+    set_project_shown(settings, &path, true);
+    Ok(path)
 }
 
 /// 主目录下的隐藏目录（如 ~/.claude、~/.agents）是工具配置，不是项目
@@ -845,6 +990,42 @@ fn claude_recorded_projects(home: &Path) -> Vec<PathBuf> {
         .get("projects")
         .and_then(|p| p.as_object())
         .map(|o| o.keys().map(PathBuf::from).collect())
+        .unwrap_or_default()
+}
+
+/// Codex 设置文件（`$CODEX_HOME/config.toml`，未设置时 `~/.codex/config.toml`）里
+/// `[projects."路径"]` 里 `trust_level = "trusted"` 的那些键：在 Codex 里信任过的项目。
+/// `untrusted` 是用户明确拒绝过的，没有 `trust_level` 的也不算。
+/// 只读值不写；文件不存在或解析失败都视为空
+fn codex_recorded_projects(env: &Env) -> Vec<PathBuf> {
+    let candidates = [
+        "$CODEX_HOME/config.toml".to_string(),
+        "~/.codex/config.toml".to_string(),
+    ];
+    let Some(file) = resolve_template(&candidates, env) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::fs::read_to_string(file) else {
+        return Vec::new();
+    };
+    let Ok(document) = text.parse::<toml_edit::DocumentMut>() else {
+        return Vec::new();
+    };
+    document
+        .get("projects")
+        .and_then(|p| p.as_table_like())
+        .map(|t| {
+            t.iter()
+                .filter(|(_, entry)| {
+                    entry
+                        .as_table_like()
+                        .and_then(|e| e.get("trust_level"))
+                        .and_then(|level| level.as_str())
+                        == Some("trusted")
+                })
+                .map(|(key, _)| PathBuf::from(key))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -1154,7 +1335,7 @@ mod tests {
     }
 
     #[test]
-    fn project_candidates_come_only_from_claude_json_then_filter() {
+    fn project_candidates_from_claude_json_then_filter() {
         let t = TempTree::new();
         let home = t.root();
         let good = t.dir("Project/good");
@@ -1177,7 +1358,7 @@ mod tests {
         let e = env(&home, &[]);
         let harnesses = all_harnesses(&e);
         let got = project_candidates(&e, &harnesses);
-        // 手动加过的目录（旧版 projects.json 里的）不再算项目，即便它有 skill 目录（spec R10）
+        // 自动检测只读 agent 的记录：手动选的目录（projects.json 里的）由 `projects` 并入，不在这里
         assert!(!got.contains(&manual));
         let mut want = vec![good, uni];
         want.sort();
@@ -2041,6 +2222,420 @@ mod tests {
         t.dir("m/.claude/skills");
         let e = env(&home, &[]);
         assert!(project_candidates(&e, &all_harnesses(&e)).is_empty());
+    }
+
+    // ===== 项目来源：Codex 的信任项目（spec 2026-10-05-skill-mcp-batch2「项目来源」，ADR 0001）=====
+
+    /// 写 `<dir>/config.toml`，`[projects.*]` 的键用字面量字符串（单引号，不转义）
+    fn codex_config(dir: &Path, projects: &[&Path]) {
+        std::fs::create_dir_all(dir).unwrap();
+        let mut text = String::from("model = \"gpt-5\"\n");
+        for p in projects {
+            text.push_str(&format!(
+                "\n[projects.'{}']\ntrust_level = \"trusted\"\n",
+                p.display()
+            ));
+        }
+        std::fs::write(dir.join("config.toml"), text).unwrap();
+    }
+
+    #[test]
+    fn codex_trusted_projects_alone_are_projects() {
+        let t = TempTree::new();
+        let home = t.root();
+        let a = t.dir("Code/a");
+        t.dir("Code/a/.agents/skills");
+        let b = t.dir("Code/b b"); // 路径带空格
+        t.dir("Code/b b/.claude/skills");
+        codex_config(&home.join(".codex"), &[&a, &b]);
+        // 没有 ~/.claude.json
+        let e = env(&home, &[]);
+        let mut want = vec![a, b];
+        want.sort();
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), want);
+    }
+
+    #[test]
+    fn codex_home_overrides_where_the_config_is_read() {
+        let t = TempTree::new();
+        let home = t.root();
+        let a = t.dir("Code/a");
+        t.dir("Code/a/.agents/skills");
+        let other = t.dir("Code/other");
+        t.dir("Code/other/.agents/skills");
+        codex_config(&home.join("runtime"), &[&a]);
+        codex_config(&home.join(".codex"), &[&other]); // 设了 CODEX_HOME 就不读这份
+        let runtime = home.join("runtime");
+        let e = env(&home, &[("CODEX_HOME", runtime.to_str().unwrap())]);
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![a]);
+    }
+
+    #[test]
+    fn same_dir_recorded_by_both_appears_once() {
+        let t = TempTree::new();
+        let home = t.root();
+        let a = t.dir("Code/a");
+        t.dir("Code/a/.agents/skills");
+        let b = t.dir("Code/b");
+        t.dir("Code/b/.claude/skills");
+        // b 经软链记进 Codex：解析后同一处，仍只出一次，留 Claude Code 记的那个写法
+        t.dir("Links");
+        let link = home.join("Links/b");
+        t.link(&link, &b);
+        let json = format!(
+            "{{\"projects\":{{\"{}\":{{}},\"{}\":{{}}}}}}",
+            a.display(),
+            b.display()
+        );
+        std::fs::write(home.join(".claude.json"), json).unwrap();
+        // 同一个 a 再带一个尾斜杠
+        let a_slash = PathBuf::from(format!("{}/", a.display()));
+        codex_config(&home.join(".codex"), &[&a, &a_slash, &link]);
+        let e = env(&home, &[]);
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![a, b]);
+    }
+
+    #[test]
+    fn codex_records_go_through_the_same_noise_filter() {
+        let t = TempTree::new();
+        let home = t.root();
+        let good = t.dir("Code/good");
+        t.dir("Code/good/.agents/skills");
+        let bare = t.dir("Code/bare"); // 没有 skill 目录
+        let gone = home.join("Code/gone"); // 不存在
+        t.dir(".codex/skills"); // 主目录下的隐藏目录
+        let hidden = home.join(".codex");
+        let root = PathBuf::from("/");
+        let relative = PathBuf::from("Code/good"); // 相对路径不算
+                                                   // 主目录下的隐藏软链指向别处的真目录：照样是工具配置，不是项目
+        let tool_data = t.dir("Volumes/ToolData");
+        t.dir("Volumes/ToolData/.agents/skills");
+        let hidden_link = home.join(".tool");
+        t.link(&hidden_link, &tool_data);
+        std::fs::create_dir_all(home.join(".agents/skills")).unwrap(); // 让主目录本身也像项目
+        codex_config(
+            &home.join(".codex"),
+            &[
+                &good,
+                &bare,
+                &gone,
+                &hidden,
+                &home,
+                &root,
+                &relative,
+                &hidden_link,
+            ],
+        );
+        let e = env(&home, &[]);
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![good]);
+    }
+
+    #[test]
+    fn codex_keys_in_every_toml_spelling_are_read() {
+        let t = TempTree::new();
+        let home = t.root();
+        // Windows 的文件名不能含双引号，那里只验反斜杠的转义
+        let basic = t.dir(if cfg!(windows) {
+            "Code/basic"
+        } else {
+            "Code/q\"uote"
+        });
+        std::fs::create_dir_all(basic.join(".agents/skills")).unwrap();
+        let inline = t.dir("Code/inline");
+        t.dir("Code/inline/.agents/skills");
+        // 基本字符串里的引号、反斜杠要转义；`[projects]` 下也可以逐行写内联表
+        let text = format!(
+            "[projects]\n\"{}\" = {{ trust_level = \"trusted\" }}\n'{}' = {{ trust_level = \"trusted\" }}\n",
+            basic
+                .display()
+                .to_string()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\""),
+            inline.display()
+        );
+        t.dir(".codex");
+        std::fs::write(home.join(".codex/config.toml"), text).unwrap();
+        let e = env(&home, &[]);
+        let mut want = vec![basic, inline];
+        want.sort();
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), want);
+    }
+
+    #[test]
+    fn only_codex_projects_marked_trusted_count() {
+        let t = TempTree::new();
+        let home = t.root();
+        let mut dirs = Vec::new();
+        for name in ["trusted", "untrusted", "missing"] {
+            let d = t.dir(&format!("Code/{name}"));
+            t.dir(&format!("Code/{name}/.agents/skills"));
+            dirs.push(d);
+        }
+        // untrusted 是用户明确拒绝过的；没有 trust_level 的也不算信任过
+        let text = format!(
+            "[projects.'{}']\ntrust_level = \"trusted\"\n\n[projects.'{}']\ntrust_level = \"untrusted\"\n\n[projects.'{}']\nnote = \"x\"\n",
+            dirs[0].display(),
+            dirs[1].display(),
+            dirs[2].display()
+        );
+        t.dir(".codex");
+        std::fs::write(home.join(".codex/config.toml"), text).unwrap();
+        let e = env(&home, &[]);
+        assert_eq!(
+            project_candidates(&e, &all_harnesses(&e)),
+            vec![dirs[0].clone()]
+        );
+    }
+
+    #[test]
+    fn missing_or_broken_codex_config_leaves_claude_records_alone() {
+        let t = TempTree::new();
+        let home = t.root();
+        let a = t.dir("Code/a");
+        t.dir("Code/a/.claude/skills");
+        std::fs::write(
+            home.join(".claude.json"),
+            format!("{{\"projects\":{{\"{}\":{{}}}}}}", a.display()),
+        )
+        .unwrap();
+        let e = env(&home, &[]);
+        // config.toml 不存在
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![a.clone()]);
+        // config.toml 损坏
+        t.dir(".codex");
+        std::fs::write(
+            home.join(".codex/config.toml"),
+            "[projects.\"/x\"\nbroken = ",
+        )
+        .unwrap();
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![a.clone()]);
+        // projects 不是表
+        std::fs::write(home.join(".codex/config.toml"), "projects = 3\n").unwrap();
+        assert_eq!(project_candidates(&e, &all_harnesses(&e)), vec![a]);
+    }
+
+    // ===== 项目来源：手动选的项目与设置「生效范围」（spec 2026-10-05-skill-mcp-batch2「项目来源」，ADR 0001）=====
+
+    /// 在 `~/.claude.json` 里记几个项目
+    fn claude_json(home: &Path, projects: &[&Path]) {
+        let keys: Vec<String> = projects
+            .iter()
+            .map(|p| format!("\"{}\":{{}}", p.display()))
+            .collect();
+        std::fs::write(
+            home.join(".claude.json"),
+            format!("{{\"projects\":{{{}}}}}", keys.join(",")),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn manual_projects_join_even_without_a_skill_dir() {
+        let t = TempTree::new();
+        let home = t.dir("home");
+        let auto = t.dir("home/Code/auto");
+        t.dir("home/Code/auto/.claude/skills");
+        claude_json(&home, &[&auto]);
+        // 手动选的空文件夹：没有任何 agent 的 skill 目录，照样是一格
+        let empty = t.dir("home/Code/empty");
+        // 主目录下的隐藏目录、主目录外的文件夹：手动选的不过这几道去噪
+        let hidden = t.dir("home/.work");
+        let outside = t.dir("elsewhere/x");
+        let e = env(&home, &[]);
+        let got = projects(
+            &e,
+            &all_harnesses(&e),
+            &[empty.clone(), hidden.clone(), outside.clone()],
+        );
+        let mut want = vec![auto, empty, hidden, outside];
+        want.sort();
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn manual_projects_must_still_exist_and_not_be_home() {
+        let t = TempTree::new();
+        let home = t.dir("home");
+        let kept = t.dir("home/Code/kept");
+        let gone = home.join("Code/gone");
+        let file = t.file(&home, "notes.txt");
+        let e = env(&home, &[]);
+        let manual = vec![
+            kept.clone(),
+            gone,
+            file,
+            home.clone(),
+            PathBuf::from(format!("{}/", home.display())),
+            PathBuf::from("/"),
+            PathBuf::from("Code/kept"), // 相对路径不算
+        ];
+        assert_eq!(
+            projects(&e, &all_harnesses(&e), &manual),
+            vec![kept.clone()]
+        );
+        // 文件夹删掉了：不再列，也不报错
+        std::fs::remove_dir(&kept).unwrap();
+        assert!(projects(&e, &all_harnesses(&e), &manual).is_empty());
+    }
+
+    #[test]
+    fn same_folder_detected_and_added_by_hand_is_one_cell() {
+        let t = TempTree::new();
+        let home = t.dir("home");
+        let a = t.dir("home/Code/a");
+        t.dir("home/Code/a/.agents/skills");
+        claude_json(&home, &[&a]);
+        // 手动又经软链、带尾斜杠各加了一次：解析后同一处，只出一格，留自动检测到的写法
+        t.dir("home/Links");
+        let link = home.join("Links/a");
+        t.link(&link, &a);
+        let slash = PathBuf::from(format!("{}/", a.display()));
+        let e = env(&home, &[]);
+        assert_eq!(
+            projects(&e, &all_harnesses(&e), &[link.clone(), slash, a.clone()]),
+            vec![a.clone()]
+        );
+        // 两个手动写法指向同一处：留先加的那个写法
+        let b = t.dir("elsewhere/b");
+        let b_link = home.join("Links/b");
+        t.link(&b_link, &b);
+        assert_eq!(
+            projects(&e, &all_harnesses(&e), &[b_link.clone(), b.clone()]),
+            vec![a, b_link]
+        );
+    }
+
+    #[test]
+    fn unchecked_projects_leave_the_list_by_real_path() {
+        let t = TempTree::new();
+        let home = t.dir("home");
+        let a = t.dir("home/Code/a");
+        let b = t.dir("home/Code/b");
+        let c = t.dir("home/Code/c");
+        t.dir("home/Links");
+        let b_link = home.join("Links/b");
+        t.link(&b_link, &b);
+        let all = vec![a.clone(), b.clone(), c.clone()];
+        // 取消勾记的是另一个写法（软链）：照样认得是同一处
+        let hidden = vec![b_link, home.join("Code/gone")];
+        assert_eq!(
+            shown_projects(all.clone(), &hidden),
+            vec![a.clone(), c.clone()]
+        );
+        // 一个都不勾：只剩用户级（项目列表为空）
+        assert!(shown_projects(all.clone(), &[a, b, c]).is_empty());
+        assert_eq!(shown_projects(all.clone(), &[]), all);
+    }
+
+    #[test]
+    fn scope_cells_carry_name_path_and_whether_checked() {
+        let t = TempTree::new();
+        let a = t.dir("Code/a");
+        let b = t.dir("Code/b");
+        assert_eq!(
+            project_scopes(vec![a.clone(), b.clone()], std::slice::from_ref(&b)),
+            vec![
+                ProjectScope {
+                    path: a,
+                    name: "a".into(),
+                    shown: true
+                },
+                ProjectScope {
+                    path: b,
+                    name: "b".into(),
+                    shown: false
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn checking_and_unchecking_a_project_is_recorded_once() {
+        let t = TempTree::new();
+        let a = t.dir("Code/a");
+        t.dir("Links");
+        let link = t.root().join("Links/a");
+        t.link(&link, &a);
+        let mut settings = Settings::default();
+        // 经软链写法取消勾：记的是真实路径，软链以后删了、改了，取消勾照样认得这个文件夹
+        assert!(set_project_shown(&mut settings, &link, false));
+        assert_eq!(settings.hidden_projects, vec![a.clone()], "记真实路径");
+        // 同一处换个写法再取消一次：不重复记
+        let slash = PathBuf::from(format!("{}/", a.display()));
+        assert!(!set_project_shown(&mut settings, &slash, false));
+        assert_eq!(settings.hidden_projects.len(), 1);
+        std::fs::remove_file(&link).unwrap();
+        assert!(shown_projects(vec![a.clone()], &settings.hidden_projects).is_empty());
+        // 勾回来：经哪种写法都认得
+        assert!(set_project_shown(&mut settings, &slash, true));
+        assert!(settings.hidden_projects.is_empty());
+        assert!(!set_project_shown(&mut settings, &a, true));
+    }
+
+    #[test]
+    fn checking_back_clears_stale_spellings_of_a_gone_folder_too() {
+        // 文件夹没了，取消勾的记录还在：同一个写法勾回来照样清掉（比 normalize）
+        let mut settings = Settings {
+            hidden_projects: vec![PathBuf::from("/nowhere/x")],
+            ..Settings::default()
+        };
+        assert!(set_project_shown(
+            &mut settings,
+            Path::new("/nowhere/./x/"),
+            true
+        ));
+        assert!(settings.hidden_projects.is_empty());
+    }
+
+    #[test]
+    fn adding_a_project_checks_it_and_remembers_it_once() {
+        let t = TempTree::new();
+        let home = t.dir("home");
+        let a = t.dir("home/Code/a");
+        let e = env(&home, &[]);
+        let mut list = Vec::new();
+        let mut settings = Settings {
+            hidden_projects: vec![a.clone()],
+            ..Settings::default()
+        };
+        let added = add_manual_project(&e, &mut list, &mut settings, &a.join(".")).unwrap();
+        assert_eq!(added, a);
+        assert_eq!(list, vec![a.clone()]);
+        assert!(settings.hidden_projects.is_empty(), "选进来的默认勾上");
+        // 再加一次（换写法）：不重复记
+        t.dir("home/Links");
+        let link = home.join("Links/a");
+        t.link(&link, &a);
+        add_manual_project(&e, &mut list, &mut settings, &link).unwrap();
+        assert_eq!(list, vec![a]);
+    }
+
+    #[test]
+    fn adding_home_root_or_a_missing_folder_is_refused() {
+        let t = TempTree::new();
+        let home = t.dir("home");
+        let file = t.file(&home, "notes.txt");
+        let e = env(&home, &[]);
+        let mut list = Vec::new();
+        let mut settings = Settings::default();
+        for (path, want) in [
+            (home.clone(), ManualProjectError::Home),
+            (PathBuf::from("/"), ManualProjectError::Home),
+            (home.join("gone"), ManualProjectError::NotFolder),
+            (file, ManualProjectError::NotFolder),
+            (PathBuf::from("Code/a"), ManualProjectError::NotFolder),
+        ] {
+            assert_eq!(
+                add_manual_project(&e, &mut list, &mut settings, &path),
+                Err(want),
+                "{}",
+                path.display()
+            );
+        }
+        assert!(list.is_empty());
+        // 原因是给用户看的一句
+        assert!(!ManualProjectError::Home.to_string().is_empty());
+        assert!(!ManualProjectError::NotFolder.to_string().is_empty());
     }
 
     // ===== MCP 页的列（spec 2026-09-27-mcp-batch1 R5 R7，skill-mcp-market R17）=====

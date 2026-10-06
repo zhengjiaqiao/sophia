@@ -66,7 +66,7 @@ test("AC6 确认框文案四种：两家 / 只 Codex / 只 Claude；终端里有
   );
   assert.equal(
     quitConfirmText(preview({ codex: true, codexTerminal: true })).body,
-    "Codex 会改回官方模型并马上重启，正在进行的对话会中断。终端里的 Codex 需要你自己重启。",
+    "Codex 会改回官方模型并马上重启，正在进行的对话会中断。终端里的 Codex 也会中断，需要你自己重启。",
   );
   // Codex 不改回时，终端里那个与退出无关
   assert.equal(
@@ -110,7 +110,7 @@ test("English 与繁體：退出写 Quit / 結束，句子之间 English 留空�
     assert.equal(text.title, "Quit Sophia?");
     assert.match(
       text.body,
-      /interrupted\. You'll need to restart Codex in the terminal yourself\.$/,
+      /interrupted\. Codex in the terminal will be interrupted too\. You'll need to restart it yourself\.$/,
     );
     const both = quitFailureText(
       [

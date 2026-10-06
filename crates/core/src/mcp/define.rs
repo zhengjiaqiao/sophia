@@ -24,13 +24,14 @@
 //! Zed 的 `source: "custom"`）直接略过。
 use super::agents::{self, desktop_remote};
 use super::{
-    agent_name, discover_locations, execute, has_duplicate_header_names, parse, plan_actions,
-    secretish, with_mirrors, Canonical, McpAction, McpLocation, McpReport, McpReportEntry, Parsed,
-    Pending, PreparedPlan,
+    agent_name, discover_locations, execute, has_duplicate_header_names, has_key_values, parse,
+    plan_actions, secretish, with_mirrors, Canonical, McpAction, McpLocation, McpReport,
+    McpReportEntry, Parsed, Pending, PreparedPlan,
 };
 use crate::atomicfile::unsafe_parent;
 use crate::discovery::Env;
 use crate::jsonedit::{self, NoDuplicates};
+use crate::keyhint::{self, GitFacts, KeyHint};
 use crate::market::{
     McpDefinitionInput, McpFieldKind, McpFieldSpec, McpInstallRequest, McpParseError,
     McpParseResult, McpTargetCheck, McpTargetStatus, McpTransport,
@@ -1428,6 +1429,8 @@ fn check_one(target: &Target, built: &[Built]) -> McpTargetCheck {
         writes: Vec::new(),
         reason: Some(reason),
         note: None,
+        key_hint: KeyHint::Quiet,
+        gitignore_line: None,
     };
     if let Some(reason) = &target.blocked {
         return blocked(reason.clone());
@@ -1490,6 +1493,8 @@ fn check_one(target: &Target, built: &[Built]) -> McpTargetCheck {
             .flatten(),
         writes,
         reason,
+        key_hint: KeyHint::Quiet,
+        gitignore_line: None,
     }
 }
 
@@ -1502,10 +1507,99 @@ pub fn check_targets(
     request: &McpInstallRequest,
 ) -> Vec<McpTargetCheck> {
     let built = build_all(request, Mode::Check, harnesses);
+    let repo = ProjectRepo::of(request);
     resolve_targets(env, harnesses, request)
         .iter()
-        .map(|target| check_one(target, &built))
+        .map(|target| {
+            let mut check = check_one(target, &built);
+            // 没填的占位按「会填进一个值」看（`probe` 里换成了普通字）：所在位置的名字像密钥的就是要写进去的密钥
+            let mut writes = built.iter().filter(|b| check.writes.contains(&b.name));
+            check.key_hint = repo.hint(target, || {
+                writes.any(|b| has_key_values(&b.probe) || key_holes(request, &b.name, Mode::Check))
+            });
+            // 要提醒的列在提示框里，已被跟踪的列在说明里（多个文件时写出是哪几个）
+            if matches!(check.key_hint, KeyHint::Remind | KeyHint::Tracked) {
+                check.gitignore_line = repo.line_for(target);
+            }
+            check
+        })
         .collect()
+}
+
+/// 定义模板里要填的占位名字像密钥（`${OPENAI_API_KEY}`）：填进去的就是密钥。检查时值还不给后端，按「会填」算；
+/// 写的时候只算真填了的（选填没填的那一项整项不写，没有密钥）。检查时出了提醒、填了写进去就一定还算
+fn key_holes(request: &McpInstallRequest, name: &str, mode: Mode) -> bool {
+    let filled =
+        |key: &str| matches!(mode, Mode::Check) || value_of(&request.values, key).is_some();
+    request
+        .definitions
+        .iter()
+        .filter(|def| def.name == name)
+        .flat_map(|def| {
+            def.command
+                .iter()
+                .chain(&def.args)
+                .chain(def.env.values())
+                .chain(&def.url)
+                .chain(def.headers.values())
+        })
+        .any(|text| {
+            placeholders(text)
+                .iter()
+                .any(|(_, key)| secretish(key) && filled(key))
+        })
+}
+
+/// 安装页的项目（位置是项目时）
+struct ProjectRepo {
+    root: Option<PathBuf>,
+}
+
+impl ProjectRepo {
+    fn of(request: &McpInstallRequest) -> Self {
+        Self {
+            root: projects_of(&request.location).and_then(|p| p.into_iter().next()),
+        }
+    }
+
+    /// 这个目标写的是不是项目里的文件：是就给项目根（项目根是软链接时为真实路径）与它在 `.gitignore` 里的那一行。
+    /// Claude Code 仅自己写的是 `~/.claude.json` 里项目那一格（有 `selector`），不进仓库
+    fn project_line(&self, target: &Target) -> Option<(PathBuf, String)> {
+        let root = self.root.as_deref()?;
+        let location = target.location.as_ref()?;
+        if location.selector.is_some() {
+            return None;
+        }
+        keyhint::project_line(root, &location.path)
+    }
+
+    fn root_for(&self, target: &Target) -> Option<PathBuf> {
+        self.project_line(target).map(|(root, _)| root)
+    }
+
+    /// 这个项目文件在项目根 `.gitignore` 里会写成的那一行
+    fn line_for(&self, target: &Target) -> Option<String> {
+        self.project_line(target).map(|(_, line)| line)
+    }
+
+    /// 密钥提醒（S19）：安装页的来源是市场或粘贴的配置，按「不在仓库里」。`has_key` 只对项目文件才算
+    fn hint(&self, target: &Target, has_key: impl FnOnce() -> bool) -> KeyHint {
+        let Some(location) = target
+            .location
+            .as_ref()
+            .filter(|_| self.root_for(target).is_some())
+        else {
+            return KeyHint::Quiet;
+        };
+        let has_key = has_key();
+        // 没有密钥就不必问 git：结果一样是不处理。目标文件问 git：在不在仓库里、是不是已被忽略
+        let target_git = if has_key {
+            keyhint::probe(&location.path)
+        } else {
+            GitFacts::default()
+        };
+        keyhint::decide(has_key, GitFacts::default(), target_git)
+    }
 }
 
 fn report_entry(name: &str, target_id: &str, outcome: &str, message: &str) -> McpReportEntry {
@@ -1534,10 +1628,11 @@ pub fn write_definitions(
     let built = build_all(request, Mode::Write, harnesses);
     let mut private = Vec::new();
     let mut skipped = Vec::new();
-    for target in resolve_targets(env, harnesses, request) {
+    let targets = resolve_targets(env, harnesses, request);
+    for target in &targets {
         let target_id = target.id();
         for def in &built {
-            match verdict(&target, def) {
+            match verdict(target, def) {
                 Verdict::New => {
                     let (Some(location), Some(parsed)) = (&target.location, &target.parsed) else {
                         continue;
@@ -1558,6 +1653,7 @@ pub fn write_definitions(
                         target_location: location.clone(),
                         definition: def.canon.clone(),
                         mirror: false,
+                        also_from: Vec::new(),
                     });
                 }
                 Verdict::Same => skipped.push(report_entry(
@@ -1582,7 +1678,56 @@ pub fn write_definitions(
     };
     let mut report = execute(plan, false, backups);
     report.entries.extend(skipped);
+    ignore_written_keys(request, &targets, &built, &mut report, backups);
     report
+}
+
+/// 密钥提醒（S19）：写成了的项目文件，按判断加进项目根的 `.gitignore`——来源被忽略的照搬（安装页不会有），
+/// 第一次暴露的看用户勾没勾「同时加进 .gitignore」。没写成的记进 `gitignore_failed`，配置照样算写成
+fn ignore_written_keys(
+    request: &McpInstallRequest,
+    targets: &[Target],
+    built: &[Built],
+    report: &mut McpReport,
+    backups: &Path,
+) {
+    let repo = ProjectRepo::of(request);
+    for target in targets {
+        let (Some(location), Some(root)) = (&target.location, repo.root_for(target)) else {
+            continue;
+        };
+        let created = |b: &&Built| {
+            report
+                .entries
+                .iter()
+                .any(|e| e.outcome == "created" && e.target_id == location.id && e.name == b.name)
+        };
+        let mut created = built.iter().filter(created);
+        let hint = repo.hint(target, || {
+            created.any(|b| has_key_values(&b.canon) || key_holes(request, &b.name, Mode::Write))
+        });
+        let wanted = match hint {
+            KeyHint::AutoIgnore => true,
+            KeyHint::Remind => request.add_to_gitignore,
+            // 已被跟踪的加了也挡不住：勾了（为别的文件）也不加
+            KeyHint::Quiet | KeyHint::SourceCommitted | KeyHint::Tracked => false,
+        };
+        if !wanted {
+            continue;
+        }
+        match keyhint::add_to_gitignore(&root, &location.path, backups) {
+            // 撤销这次安装时，追加的那一行一起撤回（新建的 .gitignore 删掉）
+            Ok(Some(edit)) => report.undo.record_edit(edit),
+            Ok(None) => {}
+            Err(error) => {
+                let gitignore = root.join(".gitignore");
+                report.gitignore_failed = Some(crate::t!(
+                    "mcp.report.gitignoreFailed",
+                    reason = crate::atomicfile::write_error_text(&gitignore, &error)
+                ));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1679,6 +1824,7 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             claude_code_scope: None,
+            add_to_gitignore: false,
         }
     }
 

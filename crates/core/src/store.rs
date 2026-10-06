@@ -89,6 +89,10 @@ pub struct Settings {
     /// 手动项目加入 Sophia 的时间：规范化路径 → 毫秒时间戳。侧栏「最近创建」在取不到文件夹
     /// 创建时间时用它；旧文件没有这个字段，旧项目也就没有记录（回退到文件夹修改时间）
     pub project_added_at: BTreeMap<String, u64>,
+    /// 设置「生效范围」里取消勾的项目（真实路径，见 `discovery::set_project_shown`）：不出现在筛选行、「切换项目…」浮层里，也不扫描；
+    /// 已建好的链接原样留着。按 `real_path` 认同一处（见 `discovery::shown_projects`）。
+    /// 文件夹暂时不在（外接盘没插）也不清掉这条，回来了仍不显示。旧文件没有这个字段，读成空：全部勾着
+    pub hidden_projects: Vec<PathBuf>,
     /// 每个位置订阅了哪些来源：域 key（`global` / `project:<路径>`）→ 来源路径（normalize 后）。
     /// 旧文件没有这个字段，读成空；第一次扫描由 `subscriptions::adopt` 按老数据补上
     pub subscriptions: Subscriptions,
@@ -136,6 +140,7 @@ impl Default for Settings {
             codex_gateway: GatewaySettings::default(),
             claude_gateway: ClaudeGatewaySettings::default(),
             project_added_at: BTreeMap::new(),
+            hidden_projects: Vec::new(),
             subscriptions: Subscriptions::default(),
             mcp_subscriptions: McpSubscriptions::default(),
             seen_hints: Vec::new(),
@@ -232,6 +237,8 @@ impl Store {
         self.dir.join(crate::atomicfile::BACKUPS_DIR)
     }
 
+    /// 手动选的项目（设置「生效范围」的 `+ 项目`、应用菜单「添加项目…」）：一个路径数组，格式与旧版相同。
+    /// 文件夹没了也不从文件里删（外接盘回来了照旧列），列不列由 `discovery::projects` 判断
     pub fn load_projects(&self) -> io::Result<Vec<PathBuf>> {
         load_json(&self.dir.join("projects.json"))
     }
@@ -894,6 +901,7 @@ mod tests {
             project_added_at: [("/a".to_string(), 1_700_000_000_000)]
                 .into_iter()
                 .collect(),
+            hidden_projects: vec![PathBuf::from("/p")],
             subscriptions: [(
                 "project:/p".to_string(),
                 [PathBuf::from("/a/skills")].into_iter().collect(),
@@ -1026,6 +1034,36 @@ mod tests {
         // 旧文件没有这个字段：读成空表
         std::fs::write(t.root().join("data/Sophia/settings.json"), "{}").unwrap();
         assert!(s.load_settings().unwrap().project_added_at.is_empty());
+    }
+
+    #[test]
+    fn hidden_projects_live_in_settings_and_projects_json_keeps_its_format() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        let s = Store::new(dir.clone());
+        // 旧文件没有这个字段：读成空（全部勾着）
+        std::fs::write(dir.join("settings.json"), "{}").unwrap();
+        assert!(s.load_settings().unwrap().hidden_projects.is_empty());
+        let settings = Settings {
+            hidden_projects: vec![PathBuf::from("/w/app")],
+            ..Settings::default()
+        };
+        s.save_settings(&settings).unwrap();
+        let text = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(text.contains("\"hiddenProjects\""), "{text}");
+        assert_eq!(
+            s.load_settings().unwrap().hidden_projects,
+            settings.hidden_projects
+        );
+        // 手动选的项目照旧是 projects.json 里的一个路径数组（9-26 之前的旧文件原样读得出）
+        std::fs::write(dir.join("projects.json"), r#"["/w/old"]"#).unwrap();
+        assert_eq!(s.load_projects().unwrap(), vec![PathBuf::from("/w/old")]);
+        s.save_projects(&[PathBuf::from("/w/old"), PathBuf::from("/w/new")])
+            .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("projects.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved, serde_json::json!(["/w/old", "/w/new"]));
     }
 
     #[test]
@@ -1623,6 +1661,7 @@ mod tests {
             branch: "main".into(),
             path: "skills/pdf".into(),
             tree_sha: "1111111111111111111111111111111111111111".into(),
+            content_sha: None,
             commit_sha: "2222222222222222222222222222222222222222".into(),
             installed_at: 1_700_000_000,
         }];

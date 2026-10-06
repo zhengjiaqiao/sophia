@@ -13,13 +13,14 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { api } from "./api.ts";
 import { listText, t, tn } from "./i18n.ts";
 
-export type HintId = "first-scan-skills" | "first-scan-empty" | "first-codex";
+export type HintId = "first-scan-skills" | "first-scan-empty" | "first-codex" | "mcp-opencode";
 
 /// 登记表顺序＝优先级：同时有资格时前面的先出
 export const HINT_ORDER: readonly HintId[] = [
   "first-scan-skills",
   "first-scan-empty",
   "first-codex",
+  "mcp-opencode",
 ];
 
 /// 句子要用到的现场数据：这一轮读了哪些 agent 的目录、找到几个 skill
@@ -33,7 +34,7 @@ export interface HintContext {
 /// 「读了」后面的 agent 名单：没有有目录的 agent 时句子改写「本机的」，见 hints.firstScan.*Local
 const agentList = (agents: readonly string[]) => listText(agents, "enum");
 
-/// 今天的三条（DESIGN「今天有三条」）。句子只说用户此刻不确定的事——刚才做了什么、动没动我的文件、
+/// 今天的四条（DESIGN「新手提示条：今天的四条」）。句子只说用户此刻不确定的事——刚才做了什么、动没动我的文件、
 /// 点下去会发生什么——不复述界面上看得见的东西（⑧ 文字提供确定性；2026-09-25 产品负责人真机：
 /// 「不应该写显而易见的事情，应该提示的是让用户感到不确定的东西」）。**一行、只说结果**（2026-09-25 评审
 /// 第二轮）：机制（配置文件路径）留给需要据此判断的人去悬停看。以后加新的，同一个组件、同一套规则，
@@ -48,6 +49,7 @@ export const HINTS: Record<HintId, (ctx: HintContext) => string> = {
       ? t("hints.firstScan.emptyWithAgents", { agents: agentList(agents) })
       : t("hints.firstScan.emptyLocal"),
   "first-codex": () => t("hints.firstCodex"),
+  "mcp-opencode": () => t("hints.mcpOpenCode"),
 };
 
 /// 首次扫描那两条互斥：关掉其中一条，两条都记看过

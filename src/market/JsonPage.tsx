@@ -30,6 +30,7 @@ import {
   InstallBlock,
   InstallFooter,
   InstallScroll,
+  KeyHintBlock,
   PickList,
   PickRow,
   PlaceBlock,
@@ -119,6 +120,16 @@ export function JsonPage(props: JsonPageProps) {
     agents: props.agents,
     shown: props.shown,
   });
+  // 「同时加进 .gitignore」：有「要填的」时放在那一块最后，没有时（密钥直接写在定义里）放在「写进哪些 agent」最后
+  const gitignore =
+    state.keyHint !== null || state.keyTracked !== null ? (
+      <KeyHintBlock
+        checked={state.addToGitignore}
+        onChange={state.setAddToGitignore}
+        tip={state.keyHint}
+        tracked={state.keyTracked}
+      />
+    ) : null;
 
   const submit = async () => {
     const done = await state.install();
@@ -215,9 +226,15 @@ export function JsonPage(props: JsonPageProps) {
                 )}
                 columns={1}
               />
+              {fields.length === 0 ? gitignore : null}
             </InstallBlock>
             {fields.length > 0 ? (
-              <FieldsBlock fields={fields} values={state.values} onChange={state.setValue} />
+              <FieldsBlock
+                fields={fields}
+                values={state.values}
+                onChange={state.setValue}
+                footer={gitignore}
+              />
             ) : null}
           </>
         ) : null}

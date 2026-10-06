@@ -64,12 +64,12 @@ const EXAMPLE = { agents: ["Claude Code", "Codex", "OpenCode"], skills: 31 };
 const DESIGN_URL = new URL("../docs/DESIGN.md", import.meta.url);
 
 test(
-  "登记表三条，句子（用 DESIGN 表头的例子数据）与 DESIGN 表逐字一致",
+  "登记表四条，句子（用 DESIGN 表头的例子数据）与 DESIGN 表逐字一致",
   { skip: !existsSync(DESIGN_URL) && "没有 docs/DESIGN.md（公开仓库）" },
   () => {
     const design = readFileSync(DESIGN_URL, "utf8");
     assert.deepEqual(Object.keys(HINTS).sort(), [...HINT_ORDER].sort());
-    assert.equal(HINT_ORDER.length, 3);
+    assert.equal(HINT_ORDER.length, 4);
     for (const id of HINT_ORDER) {
       const row = design.split("\n").find((l) => l.startsWith(`| \`${id}\` |`));
       assert.ok(row, `DESIGN 表里没有 ${id}`);
@@ -99,8 +99,13 @@ test("句子一行、只说结果：扫描说读了哪些目录、找到几个�
   assert.doesNotMatch(HINTS["first-codex"](EXAMPLE), /config\.toml|Sophia/);
 });
 
-test("登记表顺序：首次扫描两条在前，Codex 页在后", () => {
-  assert.deepEqual(HINT_ORDER, ["first-scan-skills", "first-scan-empty", "first-codex"]);
+test("登记表顺序：首次扫描两条在前，Codex 页、MCP 页的 OpenCode 说明在后", () => {
+  assert.deepEqual(HINT_ORDER, [
+    "first-scan-skills",
+    "first-scan-empty",
+    "first-codex",
+    "mcp-opencode",
+  ]);
 });
 
 // ---- 纯规则 ----

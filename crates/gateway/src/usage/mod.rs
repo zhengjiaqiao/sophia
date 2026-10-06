@@ -116,7 +116,9 @@ fn path_ends_with_components(path: &Path, tail: &[&str]) -> bool {
 /// 之所以要这些兜底位置：从 Dock 启动的 App 拿到的是登录时的最小 PATH，不是终端登录 shell 的
 /// PATH（spec 风险「从 Dock 启动时找不到程序」）。
 pub fn claude_executables() -> Vec<PathBuf> {
-    claude_executables_from(std::env::var_os("PATH").as_deref(), &crate::runtime::home())
+    // 解析后的 PATH（登录 shell 的 + 本进程的 + 兜底目录，spec S16）；兜底目录在下面还会再补一次，去重不怕
+    let home = crate::runtime::home();
+    claude_executables_from(Some(&crate::login_env::resolved_path_os(&home)), &home)
 }
 
 /// `claude_executables` 的可注入版本，供测试用假 PATH 和假 HOME
@@ -210,14 +212,23 @@ pub struct Account {
 impl Account {
     /// 真实环境
     pub fn real() -> Self {
-        let codex_home_env = std::env::var_os("CODEX_HOME")
-            .filter(|v| !v.is_empty())
-            .map(|v| v.to_string_lossy().into_owned());
+        // `CODEX_HOME`、`CLAUDE_CONFIG_DIR`：本进程的环境优先，没有再看登录 shell 问到的（spec S16）
+        let claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .map(PathBuf::from)
+            .or_else(|| {
+                (!crate::runtime::test_home_active())
+                    .then(|| {
+                        crate::login_env::current()?
+                            .claude_config_dir
+                            .map(PathBuf::from)
+                    })
+                    .flatten()
+            });
         Self {
             home: crate::runtime::home(),
-            claude_config_dir: std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from),
+            claude_config_dir,
             codex_home: crate::runtime::codex_home(),
-            codex_home_env,
+            codex_home_env: crate::runtime::codex_home_env(),
             child_home: None,
         }
     }
@@ -262,6 +273,26 @@ pub fn claude_probe_dir(base: &Path) -> PathBuf {
 /// 探测用的空目录：`<base>/probe/codex`，同 [`claude_probe_dir`]
 pub fn codex_probe_dir(base: &Path) -> PathBuf {
     base.join("probe").join("codex")
+}
+
+/// 探测测试共用的假程序
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::path::Path;
+    use std::process::Command;
+
+    /// 写一个可执行的假程序：写盘和 chmod 交给子进程 `/bin/sh` 做，本进程从不持有它的写句柄。
+    /// 本进程自己写完立刻 exec，Linux 上别的测试线程同时起子进程会继承这个写句柄，exec 偶发
+    /// ETXTBSY（Text file busy），见 `login_env` 的测试
+    pub(crate) fn write_executable(path: &Path, contents: &str) {
+        let status = Command::new("/bin/sh")
+            .args(["-c", r#"printf '%s' "$2" > "$1" && chmod 755 "$1""#, "sh"])
+            .arg(path)
+            .arg(contents)
+            .status()
+            .unwrap();
+        assert!(status.success(), "write {}: {status}", path.display());
+    }
 }
 
 #[cfg(test)]
@@ -363,6 +394,22 @@ mod tests {
     #[test]
     fn real_account_keeps_the_process_environment() {
         assert!(Account::real().probe_parent_env().is_none());
+    }
+
+    /// spec S16：登录 shell 问到的 `CLAUDE_CONFIG_DIR`、`CODEX_HOME` 只影响真实账号；测试主目录账号不看它
+    #[test]
+    fn login_shell_dirs_never_leak_into_the_test_home_account() {
+        crate::login_env::set_for_test(Some(crate::login_env::LoginEnv {
+            path: Some("/fake/bin".into()),
+            claude_config_dir: Some("/fake/cc".into()),
+            codex_home: Some("/fake/codex".into()),
+        }));
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap();
+        let account = Account::in_home(&home);
+        assert_eq!(account.claude_config_dir, None);
+        assert_eq!(account.codex_home, home.join(".codex"));
+        crate::login_env::set_for_test(None);
     }
 
     #[test]

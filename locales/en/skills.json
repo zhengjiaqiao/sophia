@@ -35,10 +35,14 @@
   "skills.dup.otherReadout": "Copy in {origin}: {readout}",
   "skills.dup.keepLabel": "Keep only {skill} from {origin}",
   "skills.dup.keepThis": "Keep only this one",
+  "skills.dup.differ": {
+    "one": "{count} copy with this name",
+    "other": "{count} copies with this name"
+  },
+  "skills.dup.origin": "Original",
+  "skills.dup.agentOwn": "{agent}'s own",
+  "skills.dup.agentOwnCopy": "{agent}'s own copy",
   "skills.dup.recommended": "Recommended",
-  "skills.dup.advice": "Recommended: {reason}",
-  "skills.dup.adviceOther": "Recommended: keep the copy in {origin}",
-  "skills.dup.adviceOtherUnknown": "Recommended: keep the other copy",
   "skills.dupStrip.two": {
     "one": "{count} skill has two copies with the same name in the same scope; only one can be used",
     "other": "{count} skills each have two copies with the same name in the same scope; only one of each can be used"
@@ -49,6 +53,16 @@
   },
   "skills.dupStrip.done": "Only one copy of each is left",
   "skills.dupStrip.dismiss": "Don't show this again for this batch",
+  "skills.agentsOverCap.message": {
+    "one": "{count} agent installed; the list shows up to {max}",
+    "other": "{count} agents installed; the list shows up to {max}"
+  },
+  "skills.agentsOverCap.reason": {
+    "one": "{names} isn't shown",
+    "other": "{names} aren't shown"
+  },
+  "skills.agentsOverCap.settings": "Go to Settings",
+  "skills.agentsOverCap.dismiss": "Close; show again when the installed agents change",
   "skills.advice.sameStoreTwo": "Both are identical; keep the one in .agents (most agents read it directly)",
   "skills.advice.sameStoreMany": "The copies are all identical; keep the one in .agents (most agents read it directly)",
   "skills.advice.sameNewerTwo": "Both are identical; this one is newer ({date})",

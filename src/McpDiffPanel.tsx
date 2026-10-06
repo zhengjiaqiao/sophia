@@ -1,30 +1,46 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { McpDiff, McpEndpoint, McpFieldValue } from "./types.ts";
 import { listText, t, tn, tRich } from "./i18n.ts";
-import { Button, Mono, Note, Spinner, Tooltip, TruncTip, useBusyShown } from "./ui/index.ts";
+import { mcpDiffTable } from "./mcpDiffTable.ts";
+import {
+  Button,
+  DiffTable,
+  Mono,
+  Note,
+  Spinner,
+  Tooltip,
+  TruncTip,
+  useBusyShown,
+} from "./ui/index.ts";
 import "./McpDiffPanel.css";
 
 /// MCP「N 份不一样」的字段级差异（DESIGN「MCP「两份不一样」只标差异」）：该服务行的抽屉里的一段
 /// （2026-09-25 评审：名称格只放名字与记号，看差异挪进这一行的抽屉，不再另开一格）。
 ///
-/// - 只列**不同的字段**：字段名 ｜ 位置 A 的值 ｜ 位置 B 的值，三列对齐；值用等宽，不同的那一段加粗
-///   （不用反色，反色已是「刚变化」）
+/// - **行优先**（issue #114，画板 #105 第七稿；差异表 `DiffTable`）：一行一份，行首位置名，第一列「原件」
+///   （配置文件路径），右边只列**不同的字段**，顺着一列往下比；值用等宽，不同的那一段加粗
+///   （不用反色，反色已是「刚变化」）。给了 `onKeep` 时行尾一颗「保留这份」：其余几份改成这一份
 /// - headers、env 里的令牌与密钥不显示原值，只写「不同 · 末 4 位」，悬停「出于安全不显示原值」
 /// - 值可以选中拷走（D23：路径、id、命令放开文字选取）
 /// - 认证头运行时才生成的，如实说比不了，不假装比过
-/// - `在访达中显示 ↗` 在抽屉末尾：离开 Sophia，浅键（↗ 由组件画）
+/// - 比不了（取差异出错）时末尾一颗 `在访达中显示 ↗`：离开 Sophia，浅键（↗ 由组件画）；比出来时路径已在表里
 ///
 /// 不碰 api：比对结果由调用方懒取（`api.mcpFieldDiff`）后传进来。
 export type McpDiffState = McpDiff | "loading" | Error;
 
 export interface McpDiffPanelProps {
   diff: McpDiffState;
-  /// 位置 id → 给人看的位置名
+  /// 位置 id → 给人看的一份的名字（`用户级 · Claude Code`，`mcpCopyName`）
   labelOf: (locationId: string) => string;
-  /// 末尾 `在访达中显示 ↗` 要显示的配置文件；不给就不出这条链
+  /// 位置 id → 它的配置文件路径（「原件」那一列）
+  pathOf: (locationId: string) => string | undefined;
+  /// 比不了时末尾 `在访达中显示 ↗` 要显示的配置文件；不给就不出这条链
   revealPath?: string;
   onReveal: (path: string) => void;
+  /// 行尾「保留这份」：以这一份为准改写其余几份（确认框归调用方）；`revision` 是这张表的指纹（`McpDiff.revision`），
+  /// 执行时原样交给 core。不给就没有键那一列
+  onKeep?: (locationId: string, revision: string) => void;
 }
 
 /// 几个值共同的前缀与后缀长度（不重叠）：不同的那一段加粗
@@ -70,7 +86,14 @@ function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, numb
   );
 }
 
-export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPanelProps) {
+export function McpDiffPanel({
+  diff,
+  labelOf,
+  pathOf,
+  revealPath,
+  onReveal,
+  onKeep,
+}: McpDiffPanelProps) {
   const revealLink = revealPath ? (
     <div className="mcp-diff__foot">
       <Button variant="quiet" onClick={() => onReveal(revealPath)}>
@@ -87,38 +110,44 @@ export function McpDiffPanel({ diff, labelOf, revealPath, onReveal }: McpDiffPan
       </div>
     );
   }
-  const columns = `max-content repeat(${diff.locationIds.length}, max-content)`;
+  const table = mcpDiffTable(diff);
+  // 每一列各自比：几份都是可以原样显示的值时，不同的那一段加粗
+  const ends = table.fields.map((_, j) => {
+    const values = table.rows.map((row) => row.values[j]);
+    const plain = values.flatMap((v) => (v.kind === "plain" ? [v.text] : []));
+    return plain.length === values.length ? commonEnds(plain) : ([0, 0] as [number, number]);
+  });
   return (
     <div className="mcp-diff">
-      {diff.fields.length > 0 ? (
-        <div className="mcp-diff__grid" style={{ gridTemplateColumns: columns }}>
-          <span />
-          {diff.locationIds.map((id) => (
-            <span key={id} className="mcp-diff__place">
-              {labelOf(id)}
-            </span>
-          ))}
-          {diff.fields.map((field) => {
-            const plain = field.values.flatMap((v) => (v.kind === "plain" ? [v.text] : []));
-            const ends =
-              plain.length === field.values.length
-                ? commonEnds(plain)
-                : ([0, 0] as [number, number]);
-            return (
-              <div key={field.field} className="mcp-diff__row">
-                <span className="mcp-diff__field">{field.field}</span>
-                {field.values.map((value, i) => (
-                  <span key={i} className="mcp-diff__value">
-                    <FieldValue value={value} ends={ends} />
-                  </span>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      ) : diff.dynamicAuth ? null : (
+      {table.rows.length > 0 ? (
+        <DiffTable
+          label={tn("mcp.differ.tag", diff.locationIds.length)}
+          fields={[
+            t("mcp.detail.origin"),
+            ...table.fields.map((field) => <Mono inherit>{field}</Mono>),
+          ]}
+          rows={table.rows.map((row) => ({
+            id: row.id,
+            place: labelOf(row.id),
+            values: [
+              <Mono path>{pathOf(row.id) ?? ""}</Mono>,
+              ...row.values.map((value, j) => <FieldValue value={value} ends={ends[j]} />),
+            ],
+            actionDisabledReason: row.blocked
+              ? t("mcp.keep.blocked", {
+                  place: labelOf(row.blocked.locationId),
+                  message: row.blocked.message,
+                })
+              : undefined,
+            actionAriaLabel: t("mcp.keep.aria", { place: labelOf(row.id), name: diff.name }),
+          }))}
+          actionLabel={onKeep && table.keep ? t("mcp.keep.key") : undefined}
+          onAction={onKeep && ((id) => onKeep(id, diff.revision))}
+        />
+      ) : null}
+      {diff.fields.length === 0 && !diff.dynamicAuth ? (
         <DiffNote>{t("mcp.diff.agentOnly")}</DiffNote>
-      )}
+      ) : null}
       {diff.dynamicAuth ? <DiffNote>{t("mcp.pick.dynamicAuth")}</DiffNote> : null}
       {diff.unreadable.length > 0 ? (
         <DiffNote>
@@ -139,23 +168,29 @@ export function McpDiffSection({
   locationIds,
   load,
   labelOf,
+  pathOf,
   revealPath,
   onReveal,
+  onKeep,
+  reloadKey,
 }: {
   name: string;
   /// 定义不一样的那几处位置
   locationIds: string[];
   load: (name: string, locationIds: string[]) => Promise<McpDiff>;
-  labelOf: (locationId: string) => string;
-  revealPath?: string;
-  onReveal: (path: string) => void;
-}) {
+  /// 变了就重新比对一次（重扫之后：位置没变、定义可能变了）
+  reloadKey?: unknown;
+} & Omit<McpDiffPanelProps, "diff">) {
   const [diff, setDiff] = useState<McpDiffState>("loading");
   // 数组每次渲染都是新的：按内容比
   const ids = locationIds.join("\n");
+  // 比的还是同一个服务、同几处（只是重扫了）时，新结果回来之前留着旧的表，不闪回「正在比对」
+  const shown = useRef("");
   useEffect(() => {
     let alive = true;
-    setDiff("loading");
+    const what = `${name}\n${ids}`;
+    if (shown.current !== what) setDiff("loading");
+    shown.current = what;
     load(name, ids.split("\n")).then(
       (found) => alive && setDiff(found),
       (e) => alive && setDiff(new Error(String(e))),
@@ -163,11 +198,18 @@ export function McpDiffSection({
     return () => {
       alive = false;
     };
-  }, [name, ids, load]);
+  }, [name, ids, load, reloadKey]);
   return (
     <div className="mcp-diff-section">
       <div className="mcp-diff__title">{tn("mcp.differ.tag", locationIds.length)}</div>
-      <McpDiffPanel diff={diff} labelOf={labelOf} revealPath={revealPath} onReveal={onReveal} />
+      <McpDiffPanel
+        diff={diff}
+        labelOf={labelOf}
+        pathOf={pathOf}
+        revealPath={revealPath}
+        onReveal={onReveal}
+        onKeep={onKeep}
+      />
     </div>
   );
 }
@@ -209,16 +251,22 @@ export function McpEndpointRow({
   name,
   locationId,
   load,
+  reloadKey,
 }: {
   name: string;
   locationId: string;
   /// 读单份定义（调用方给 `api.mcpEndpoint`；这个文件不碰 api）
   load: (name: string, locationId: string) => Promise<McpEndpoint | null>;
+  /// 变了就重读一次（重扫之后：「保留这份」可能改了原件那一处）；读回来之前留着旧值
+  reloadKey?: unknown;
 }) {
   const [endpoint, setEndpoint] = useState<McpEndpoint | null>(null);
+  const shown = useRef("");
   useEffect(() => {
     let alive = true;
-    setEndpoint(null);
+    const what = `${name}\n${locationId}`;
+    if (shown.current !== what) setEndpoint(null);
+    shown.current = what;
     load(name, locationId).then(
       (found) => alive && setEndpoint(found),
       () => undefined,
@@ -226,7 +274,7 @@ export function McpEndpointRow({
     return () => {
       alive = false;
     };
-  }, [name, locationId, load]);
+  }, [name, locationId, load, reloadKey]);
   if (endpoint === null) return null;
   return (
     <>

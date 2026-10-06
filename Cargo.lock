@@ -4064,7 +4064,7 @@ dependencies = [
 
 [[package]]
 name = "sophia"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.23.1",
  "log",
@@ -4127,6 +4127,8 @@ dependencies = [
  "hyper",
  "hyper-util",
  "log",
+ "objc2",
+ "objc2-app-kit",
  "reqwest",
  "rustls",
  "ruzstd",

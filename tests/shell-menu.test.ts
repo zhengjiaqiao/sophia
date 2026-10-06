@@ -35,7 +35,8 @@ test("AC4 前端的命令表与 src-tauri/src/menu.rs 一一对应；目的地�
   for (const c of ["dest-skills", "dest-mcp", "dest-models", "dest-usage", "switch-project"]) {
     assert.ok(isMenuCommand(c), c);
   }
-  assert.ok(!MENU_COMMANDS.includes("add-project" as never), "添加项目去掉了");
+  // 「添加项目…」回来了（spec 2026-10-05-skill-mcp-batch2「项目来源」，ADR 0001）
+  assert.ok(MENU_COMMANDS.includes("add-project"), "文件菜单有添加项目");
   assert.ok(!isMenuCommand("dest-sessions"), "表里没有的目的地不认（会话还没做）");
   assert.ok(!isMenuCommand("dest-settings"), "设置不进目的地表，走 settings");
   assert.ok(!isMenuCommand("quit"));

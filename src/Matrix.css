@@ -521,18 +521,17 @@ html[data-input="keyboard"] .mx-name:focus {
   white-space: pre-line;
 }
 
-/* 同名行抽屉末尾的 `只留这份`（默认键紧凑）：与上面几行隔开一点，自成一行 */
-.mx-detail__keep {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
+/* 同名行抽屉末尾「N 份不一样」那一段（issue #111）：表本身是差异表 DiffTable（ui.css「差异表」），
+   这里只有段首小标 12 ink-faint（同 MCP 那一段的小标）；与上面几行隔开一点 */
+.mx-copies {
   margin-top: 2px;
 }
 
-/* 只留这份旁的推荐理由（12 ink-mute，一句） */
-.mx-detail__advice {
+.mx-copies__title {
+  font-family: var(--font-ui);
   font-size: var(--size-label);
-  color: var(--ink-mute);
+  line-height: var(--leading-caption);
+  color: var(--ink-faint);
 }
 
 .mx-detail__path {

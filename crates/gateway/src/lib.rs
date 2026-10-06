@@ -4,6 +4,7 @@ pub mod app;
 pub mod claude_desktop;
 pub mod codex_desktop;
 pub mod keychain;
+pub mod login_env;
 pub mod process;
 pub mod provider;
 pub mod router;
@@ -14,3 +15,6 @@ pub mod sysproxy;
 pub mod takeover;
 pub mod translate;
 pub mod usage;
+
+#[cfg(test)]
+pub(crate) mod test_timing;

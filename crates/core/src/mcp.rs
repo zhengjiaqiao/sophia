@@ -4,7 +4,7 @@ use crate::discovery::Env;
 use crate::fs::normalize;
 use crate::jsonedit::{self, Layout, NoDuplicates};
 use crate::models::{AutoRun, Harness};
-use crate::redact::{secretish, url_without_secrets};
+use crate::redact::{has_key_shaped, secretish, url_without_secrets};
 use agents::Dialect;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +19,12 @@ mod batch1_tests;
 mod define;
 #[cfg(test)]
 mod helper_tests;
+mod keep;
+#[cfg(test)]
+mod keyhint_scope_tests;
+#[cfg(test)]
+mod keyhint_tests;
+mod keyhints;
 #[cfg(test)]
 mod mirror_tests;
 mod removal;
@@ -27,6 +33,11 @@ pub mod sources;
 mod weiboap;
 
 pub use define::{check_targets, parse_mcp_text, placeholder_fields, write_definitions};
+pub use keep::{
+    execute_keep, execute_keep_minding_keys, keep_key_hints, keep_revision, prepare_keep,
+    prepare_keep_seen, McpKeepAction, McpKeepPlan,
+};
+pub use keyhints::{execute_minding_keys, ignore_targets, key_hints, McpKeyHint};
 pub use removal::{
     execute_removal, prepare_original_removal, McpRemovalPlan, McpRemoveAction, McpRemoveItem,
 };
@@ -525,9 +536,39 @@ pub struct McpReport {
     /// 命令层把 `undo` 登记进内存后填的撤销 id；core 从不填。没有可撤销的写入时为 `None`。
     #[serde(default)]
     pub undo_id: Option<String>,
+    /// 勾了「同时加进 .gitignore」、配置写成了，`.gitignore` 却没写成：整句原因（`mcp.report.gitignoreFailed`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitignore_failed: Option<String>,
+    /// 密钥提醒（移动 / 复制、自动同步规则）：来源被忽略，写成之后目标也自动加进了 `.gitignore`。
+    /// 提示条在原因的位置接「已加进 .gitignore」
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub auto_ignored: bool,
+    /// 密钥提醒：像密钥的值第一次写进 git 仓库里的项目文件、没加进 `.gitignore`（`Remind` 而没勾；规则上没有勾选，
+    /// 一律是这样）。自动同步的提示条在原因的位置接「密钥会随仓库提交，没加进 .gitignore」
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub key_exposed: bool,
+    /// `key_exposed` 里还能补加进 `.gitignore` 的目标（位置 id）：点格子写入的提示条据此给「加进 .gitignore」，
+    /// 点了交给 `ignore_targets`（产品负责人 2026-10-06）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignorable: Vec<String>,
+    /// 密钥提醒：像密钥的值写进了已被 git 跟踪的项目文件（`Tracked`，加进 `.gitignore` 也挡不住）。
+    /// 没问过用户的入口（点格子写入、自动同步规则）在提示条原因的位置接「密钥会随仓库提交（这个文件已在仓库里）」
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub key_tracked: bool,
+    /// `key_tracked` 是哪几个目标（位置 id）：「保留这份」的提示条按目标比对确认框里出过那一句的，
+    /// 没出过的（检查之后才被跟踪）照样说（issue #147）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracked_targets: Vec<String>,
+    /// 命令层把 `gitignore_undo` 登记进内存后填的撤销 id：只撤这次追加进 `.gitignore` 的那几行。
+    /// 移动的撤销不走写入的快照（见前端 `applyScopeChange`），所以和配置的撤销分开记
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitignore_undo_id: Option<String>,
     /// 撤销记录含写前内容与写后指纹，不出进程：命令层用 `take_undo` 取走后只把 id 交给前端。
     #[serde(skip)]
     undo: McpUndo,
+    /// `execute_minding_keys` 追加 `.gitignore` 的撤销记录（`take_gitignore_undo`）
+    #[serde(skip)]
+    gitignore_undo: McpUndo,
 }
 
 impl McpReport {
@@ -537,6 +578,12 @@ impl McpReport {
         let undo = std::mem::take(&mut self.undo);
         (!undo.blocked && !undo.files.is_empty()).then_some(undo)
     }
+
+    /// 取走这次追加 `.gitignore` 的撤销记录（`execute_minding_keys`）；没追加过或撤不了时为 `None`
+    pub fn take_gitignore_undo(&mut self) -> Option<McpUndo> {
+        let undo = std::mem::take(&mut self.gitignore_undo);
+        (!undo.blocked && !undo.files.is_empty()).then_some(undo)
+    }
 }
 
 /// 一次 MCP 写入（可能跨多个文件）的撤销记录。只能由 `execute` 产生，调用方无法伪造路径。
@@ -544,6 +591,10 @@ impl McpReport {
 pub struct McpUndo {
     files: Vec<UndoFile>,
     blocked: bool,
+    /// 撤之前要核对的配置位置与它写前带密钥的服务名（只有追加 `.gitignore` 的撤销有）：撤掉忽略那一行之前，
+    /// 这个配置里不能有写前没有的、带密钥的服务——比如之后自动同步规则又往里写了一个（那时目标已被忽略，没提醒）。
+    /// 有就整体拒绝，那一行留着
+    key_guards: Vec<(McpLocation, BTreeSet<String>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -557,6 +608,31 @@ struct UndoFile {
 }
 
 impl McpUndo {
+    /// 记下一次附带的改写（密钥提醒追加 `.gitignore`），撤销时与配置一起退回。同一个文件这次已记过的
+    /// （两个目标往同一个 `.gitignore` 各加一行）只更新写后状态，写前与备份留最早那一份；读回对不上就不给撤销
+    pub(crate) fn record_edit(&mut self, edit: crate::keyhint::GitignoreEdit) {
+        let Some(written) = edit.written else {
+            self.blocked = true;
+            return;
+        };
+        match self.files.iter_mut().find(|file| file.target == edit.path) {
+            Some(file) => file.written = written,
+            None => self.files.push(UndoFile {
+                target: edit.path,
+                before: edit.before,
+                backup_path: edit.backup,
+                written,
+            }),
+        }
+    }
+
+    /// 撤之前核对 `location` 里带密钥的服务仍在 `keyed`（写前就有的）之内（见 `key_guards`）
+    pub(crate) fn guard_keys(&mut self, location: McpLocation, keyed: BTreeSet<String>) {
+        if !self.key_guards.iter().any(|(old, _)| old.id == location.id) {
+            self.key_guards.push((location, keyed));
+        }
+    }
+
     /// 这次写入涉及的目标文件；命令层据此让同一文件的旧撤销记录失效。
     pub fn target_paths(&self) -> impl Iterator<Item = &Path> {
         self.files.iter().map(|file| file.target.as_path())
@@ -600,6 +676,26 @@ pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
         outcome: outcome.into(),
         message,
     };
+    let keys_added = undo.key_guards.iter().any(|(location, keyed)| {
+        let parsed = parse(location);
+        parsed.issue.is_some()
+            || parsed
+                .values
+                .iter()
+                .any(|(name, def)| has_key_values(def) && !keyed.contains(name))
+    });
+    if keys_added {
+        let message = crate::t!("mcp.undo.keysAddedSince");
+        return McpUndoReport {
+            outcome: "changed".into(),
+            message: message.clone(),
+            files: undo
+                .files
+                .iter()
+                .map(|file| result(file, "changed", message.clone()))
+                .collect(),
+        };
+    }
     let unchanged: Vec<bool> = undo
         .files
         .iter()
@@ -666,6 +762,16 @@ pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
         },
         files,
     }
+}
+
+/// 这个配置位置此刻带「像密钥的值」的服务名（读不出的为空）
+pub(super) fn keyed_names(location: &McpLocation) -> BTreeSet<String> {
+    parse(location)
+        .values
+        .into_iter()
+        .filter(|(_, def)| has_key_values(def))
+        .map(|(name, _)| name)
+        .collect()
 }
 
 /// 删掉这次写入新建的文件：删前紧挨着再校验一次仍是写后的样子（`read_state` 拒绝软链接）。
@@ -820,6 +926,9 @@ pub(super) struct Pending {
     pub(super) definition: Canonical,
     /// 这条是某个目标的镜像写入（`McpLocation::mirrors`，见 `with_mirrors`）：不进 `actions`，报告并进主条目
     pub(super) mirror: bool,
+    /// 完全相同的重复选择合并成这一条时，其余来源的文件（几条规则把同一份写进同一个目标）：密钥提醒按全部来源判断，
+    /// 不因合并丢掉某个来源被忽略的事实
+    pub(super) also_from: Vec<PathBuf>,
 }
 #[derive(Debug)]
 pub struct PreparedPlan {
@@ -1202,6 +1311,11 @@ pub struct McpDiff {
     pub dynamic_auth: bool,
     /// 读不出来、或这一份用了没法逐项比较的写法的位置
     pub unreadable: Vec<String>,
+    /// 与 `location_ids` 一一对应：「保留这份」（以这一份为准改写其余几份）做不成时，挡住它的第一处与原因；
+    /// 做得成为 None。与 `prepare_keep` 同一套判断（一处接不住整次不动）
+    pub keep_blocked: Vec<Option<McpIssue>>,
+    /// 这几处定义此刻的指纹（`keep_revision`）：「保留这份」确认后带回来，用户看过之后谁被改了就不动
+    pub revision: String,
 }
 
 /// 值是不是只含引用（`${TOKEN}`）：引用本身不是凭据，可以原样显示
@@ -1460,6 +1574,28 @@ pub fn diff_fields(locations: &[McpLocation], name: &str, location_ids: &[String
             .collect(),
     );
 
+    // Gemini 专属写法里属于定义的两项（「保留这份」会跟着改它们，见 `keep.rs`）：`cwd` 原样显示，
+    // `oauth` 里可能有客户端密钥，按凭据脱敏
+    for (field, secret) in [("cwd", false), ("oauth", true)] {
+        push(
+            field.into(),
+            defs.iter()
+                .map(|d| {
+                    d.as_ref()
+                        .and_then(|d| d.client_fields.get(field).cloned())
+                        .map(|raw| {
+                            let shown = match serde_json::from_str::<Value>(&raw) {
+                                _ if secret => secret_value(&raw),
+                                Ok(Value::String(text)) => plain(text),
+                                _ => plain(raw.clone()),
+                            };
+                            (raw, shown)
+                        })
+                })
+                .collect(),
+        );
+    }
+
     let mut env_names = BTreeSet::new();
     for def in defs.iter().flatten() {
         env_names.extend(def.env.keys().cloned());
@@ -1520,6 +1656,16 @@ pub fn diff_fields(locations: &[McpLocation], name: &str, location_ids: &[String
             .collect(),
         dynamic_auth,
         unreadable,
+        keep_blocked: location_ids
+            .iter()
+            .map(|id| {
+                prepare_keep(locations, name, id, location_ids)
+                    .issues
+                    .into_iter()
+                    .next()
+            })
+            .collect(),
+        revision: keep_revision(locations, name, location_ids),
     }
 }
 
@@ -1623,6 +1769,7 @@ pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> Prepar
                 target_location: (*target_location).clone(),
                 definition,
                 mirror: false,
+                also_from: Vec::new(),
             });
     }
     let mut private = Vec::new();
@@ -1643,6 +1790,11 @@ pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> Prepar
             let mut pending = first.clone();
             pending.action.cross_domain =
                 group.iter().any(|candidate| candidate.action.cross_domain);
+            pending.also_from = group[1..]
+                .iter()
+                .map(|candidate| candidate.action.source_path.clone())
+                .filter(|path| path != &pending.action.source_path)
+                .collect();
             private.push(pending);
         }
     }
@@ -1733,7 +1885,7 @@ pub(super) fn main_succeeded(report: &McpReport, target_id: &str, name: &str) ->
     report.entries.iter().any(|entry| {
         entry.target_id == target_id
             && entry.name == name
-            && matches!(entry.outcome.as_str(), "created" | "removed")
+            && matches!(entry.outcome.as_str(), "created" | "removed" | "updated")
     })
 }
 
@@ -1749,7 +1901,7 @@ pub(super) fn fold_mirrors(report: &mut McpReport, mirrors: McpReport) {
         let main = report.entries.iter_mut().find(|main| {
             main.target_id == entry.target_id
                 && main.name == entry.name
-                && matches!(main.outcome.as_str(), "created" | "removed")
+                && matches!(main.outcome.as_str(), "created" | "removed" | "updated")
         });
         if let Some(main) = main {
             main.mirror_failed = Some(crate::t!("mcp.report.mirrorFailed", reason = entry.message));
@@ -2625,6 +2777,125 @@ fn reference(value: &str) -> bool {
     value.contains("${")
 }
 
+/// 定义里有没有「像密钥的值」（GLOSSARY；密钥提醒 S19）：名字（环境变量、请求头、参数的选项名、地址的查询键）
+/// 带 key、token、secret、auth、password 之类，或值里有已知密钥前缀的一串。环境变量占位符（`${BRAVE_API_KEY}`）、
+/// 空值不算；用命令生成请求头的那条命令不算。拆参数与地址的规则同脱敏（`args_without_secrets`、`url_without_secrets`）
+fn has_key_values(def: &Canonical) -> bool {
+    def.env
+        .iter()
+        .any(|(name, value)| key_slot(Some(name), value))
+        || def
+            .headers
+            .iter()
+            .any(|(name, value)| key_slot(Some(name), value))
+        || def.url.as_deref().is_some_and(url_has_key)
+        || def.command.as_deref().is_some_and(|c| key_slot(None, c))
+        || args_have_key(&def.args)
+}
+
+/// 一格值算不算密钥：`name` 是它的名字（没有为 None）
+fn key_slot(name: Option<&str>, value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty() && !reference(value) && (name.is_some_and(secretish) || has_key_shaped(value))
+}
+
+fn header_line_has_key(line: &str) -> bool {
+    match line.split_once(':') {
+        Some((name, value)) => key_slot(Some(name.trim()), value),
+        None => key_slot(None, line),
+    }
+}
+
+fn url_has_key(url: &str) -> bool {
+    let (url, fragment) = url
+        .split_once('#')
+        .map_or((url, None), |(u, f)| (u, Some(f)));
+    let (base, query) = url
+        .split_once('?')
+        .map_or((url, None), |(b, q)| (b, Some(q)));
+    let pairs = query
+        .into_iter()
+        .chain(fragment)
+        .flat_map(|part| part.split('&'));
+    let in_pairs = pairs.into_iter().any(|pair| match pair.split_once('=') {
+        Some((key, value)) => key_slot(Some(key), value),
+        None => key_slot(None, pair),
+    });
+    let (userinfo, rest) = match base.split_once("://") {
+        Some((_, rest)) => {
+            let end = rest.find('/').unwrap_or(rest.len());
+            match rest[..end].rsplit_once('@') {
+                Some((userinfo, _)) => (Some(userinfo), &rest[end..]),
+                None => (None, rest),
+            }
+        }
+        None => (None, base),
+    };
+    let in_userinfo = userinfo.is_some_and(|info| match info.split_once(':') {
+        Some((user, password)) => key_slot(None, user) || key_slot(Some("password"), password),
+        None => key_slot(None, info),
+    });
+    in_pairs || in_userinfo || key_slot(None, rest)
+}
+
+/// 单个参数自身带密钥：地址、`Bearer x`、`API_KEY=x` / `Name: x`（名字像凭据），或长得像密钥的一串
+fn arg_has_key(arg: &str) -> bool {
+    if arg.contains("://") {
+        return url_has_key(arg);
+    }
+    if let Some(token) = arg
+        .strip_prefix("Bearer ")
+        .or_else(|| arg.strip_prefix("bearer "))
+    {
+        return key_slot(Some("bearer"), token);
+    }
+    let named = |sep: char| {
+        arg.split_once(sep).filter(|(name, _)| {
+            !name.is_empty() && !name.contains(char::is_whitespace) && secretish(name)
+        })
+    };
+    match named(':').or_else(|| named('=')) {
+        Some((name, value)) => key_slot(Some(name), value),
+        None => key_slot(None, arg),
+    }
+}
+
+/// 参数里的密钥：`--api-key xyz`、`--token=xyz`、`-H` / `--header` 后（或连写）的请求头行、参数自身（`arg_has_key`）
+fn args_have_key(args: &[String]) -> bool {
+    // 上一个是 `--api-key`、`-H` 这类：这一个是它的值
+    let mut owner: Option<&str> = None;
+    for arg in args {
+        let hit = if let Some(flag) = owner.take() {
+            if header_flag(flag) {
+                header_line_has_key(arg)
+            } else {
+                key_slot(Some(flag), arg)
+            }
+        } else if let Some(line) = arg
+            .strip_prefix("-H")
+            .filter(|line| !line.is_empty() && !line.starts_with('='))
+        {
+            header_line_has_key(line)
+        } else {
+            match arg.split_once('=') {
+                Some((key, line)) if header_flag(key) => header_line_has_key(line),
+                Some((key, value)) if key.starts_with('-') && secretish(key) => {
+                    key_slot(Some(key), value)
+                }
+                _ if header_flag(arg) || (arg.starts_with('-') && secretish(arg)) => {
+                    owner = Some(arg);
+                    false
+                }
+                _ => arg_has_key(arg),
+            }
+        };
+        if hit {
+            return true;
+        }
+    }
+    false
+}
+
 fn merge_group(existing: Option<&[u8]>, group: &[Pending]) -> io::Result<Vec<u8>> {
     let mut per_scope: BTreeMap<Option<String>, Vec<(&str, &Canonical)>> = BTreeMap::new();
     let mut locations: BTreeMap<Option<String>, &McpLocation> = BTreeMap::new();
@@ -2676,25 +2947,7 @@ fn merge_json(
     let (_, _, server_range) = raw_json_ranges(&bytes)?;
     let fields: Vec<_> = additions
         .iter()
-        .map(|(name, def)| {
-            // 原样搬的：写来源那一段原文（同一家同一种写法，见 `RawServer`）
-            if let Some(RawServer::Json(text)) = &def.raw {
-                return Ok((*name, text.clone().into_bytes()));
-            }
-            let server = match dialect {
-                Dialect::Claude | Dialect::Cursor | Dialect::Toml => {
-                    if !def.client_fields.is_empty() {
-                        return Err(refused(crate::t!("mcp.write.noClientSettings")));
-                    }
-                    if def.transport == "sse" && dialect != Dialect::Claude {
-                        return Err(refused(crate::t!("mcp.write.sseUnsupported")));
-                    }
-                    json_server(def, json_helper_key(dialect))?
-                }
-                _ => agents::server(def, dialect)?,
-            };
-            Ok((*name, server))
-        })
+        .map(|(name, def)| Ok((*name, json_server_for(def, dialect)?)))
         .collect::<io::Result<_>>()?;
     // 已有 `mcpServers` 就紧跟在它最后一个成员后面追加；没有就在根里另起一行补上
     let layout = if server_range.is_some() {
@@ -2712,6 +2965,26 @@ fn merge_json(
     })?;
     verify_json_merge(&before, &bytes, additions, dialect)?;
     Ok(bytes)
+}
+
+/// 一条服务按这一家的 JSON 写法（根上的 `mcpServers` 里那一项）。原样搬的写来源那一段原文
+/// （同一家同一种写法，见 `RawServer`）
+fn json_server_for(def: &Canonical, dialect: Dialect) -> io::Result<Vec<u8>> {
+    if let Some(RawServer::Json(text)) = &def.raw {
+        return Ok(text.clone().into_bytes());
+    }
+    match dialect {
+        Dialect::Claude | Dialect::Cursor | Dialect::Toml => {
+            if !def.client_fields.is_empty() {
+                return Err(refused(crate::t!("mcp.write.noClientSettings")));
+            }
+            if def.transport == "sse" && dialect != Dialect::Claude {
+                return Err(refused(crate::t!("mcp.write.sseUnsupported")));
+            }
+            json_server(def, json_helper_key(dialect))
+        }
+        _ => agents::server(def, dialect),
+    }
 }
 
 /// JSON 追加结果的语义核对：新文件去掉新增的成员（以及原来没有、这次新建的空 `mcpServers`）

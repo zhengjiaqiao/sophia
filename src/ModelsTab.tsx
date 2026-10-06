@@ -599,6 +599,9 @@ export default function ModelsTab({ onError, onGatewayState, banner = false }: M
         onCopy={() => runOrThrow(() => api.gatewayCopyProviders("codex", "claude"))}
         onToggleModel={toggleModel}
         onProbeModel={(provider, modelId) => api.gatewayProbeModel("codex", provider.id, modelId)}
+        onAddManualModel={(provider, modelId) =>
+          api.gatewayAddManualModel("codex", provider.id, modelId).then(applyState)
+        }
         notice={rowNotice}
         onCloseNotice={() => setNotice(null)}
         onPanelChange={setGatewayPanel}

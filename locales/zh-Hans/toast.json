@@ -1,5 +1,6 @@
 {
   "toast.keepThis.nameOf": "{label} 的 {skill}",
+  "toast.keepThis.nameOfOwn": "{copy} {skill}",
   "toast.split.folder": "的 skills 文件夹",
   "toast.line.success.link": "加到 {agents} {names}",
   "toast.line.success.linkBare": "加到 {agents}",
@@ -42,6 +43,11 @@
   "toast.trail.newSession": "新开会话后生效",
   "toast.trail.trustCopilotFolder": "在 Copilot 里信任这个文件夹后生效",
   "toast.keepThisConfirm.title": "只留 {origin} 的 {skill}？",
+  "toast.keepThisConfirm.titleOwn": "只留 {copy} {skill}？",
+  "toast.keepThisConfirm.trashOwn": "{copy}移到废纸篓",
+  "toast.keepThisConfirm.trashRelinkedOwn": {
+    "other": "{copy}移到废纸篓，{count} 条链接改指到这一份"
+  },
   "toast.keepThisConfirm.trash": "{origin} 那份移到废纸篓",
   "toast.keepThisConfirm.trashRelinked": {
     "other": "{origin} 那份移到废纸篓，{count} 条链接改指到这一份"

@@ -164,8 +164,8 @@ fn is_rate_limits_response(v: &Value) -> bool {
 mod tests {
     use super::test_support_usage::TempTree;
     use super::*;
+    use crate::usage::test_support::write_executable;
     use sophia_core::usage::{AgentId, Source};
-    use std::os::unix::fs::PermissionsExt;
 
     /// 真实（脱敏）样本 `app_server_prolite.json`：`id` 已经是 2，不用改，压成单行
     fn success_reply_line() -> String {
@@ -194,8 +194,7 @@ mod tests {
         let mut full = String::from("#!/bin/sh\n");
         full.push_str(body);
         let path = dir.join(name);
-        std::fs::write(&path, full).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&path, &full);
         path
     }
 
@@ -269,7 +268,7 @@ mod tests {
                 &[program],
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap();
@@ -300,7 +299,7 @@ mod tests {
                 &[program],
                 Some(codex_home.to_string_lossy().into_owned()),
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap();
@@ -326,7 +325,7 @@ mod tests {
                 &[program],
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap_err();
@@ -385,7 +384,7 @@ mod tests {
                 &[program],
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap_err();
@@ -413,7 +412,7 @@ mod tests {
                 &[],
                 None,
                 Some(Vec::new()),
-                Duration::from_secs(5),
+                crate::test_timing::CHILD_OK,
             )
             .await
             .unwrap_err();

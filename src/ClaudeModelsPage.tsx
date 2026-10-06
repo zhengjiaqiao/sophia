@@ -722,6 +722,9 @@ export default function ClaudeModelsPage({ onError, onGatewayState }: AgentSecti
         onCopy={() => runOrThrow(() => api.gatewayCopyProviders("claude", "codex"))}
         onToggleModel={toggleModel}
         onProbeModel={(provider, modelId) => api.gatewayProbeModel("claude", provider.id, modelId)}
+        onAddManualModel={(provider, modelId) =>
+          api.gatewayAddManualModel("claude", provider.id, modelId).then(applyState)
+        }
         notice={rowNotice}
         onCloseNotice={() => setNotice(null)}
         onConfirmChange={setGatewayConfirming}

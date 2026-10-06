@@ -34,6 +34,30 @@ pub enum FetchErrorKind {
     RateLimited(Option<u64>),
     /// 5xx
     Server(u16),
+    /// 填的是 Anthropic 协议的地址：去掉已知后缀再拉也不是模型列表（spec S1）
+    AnthropicAddress,
+}
+
+/// 已知的「Anthropic 协议兼容子路径」后缀（参照 cc-switch `model_fetch.rs`，MIT）：按长度降序，最长的先匹配。
+/// 国内服务商的 Claude Code 套餐常只给这种地址；拉模型失败时去掉后缀再试一次，试通了就记去后缀的地址
+const COMPAT_SUFFIXES: &[&str] = &[
+    "/api/claudecode",
+    "/api/anthropic",
+    "/apps/anthropic",
+    "/api/coding",
+    "/claudecode",
+    "/anthropic",
+    "/step_plan",
+    "/coding",
+    "/claude",
+];
+
+/// 地址以已知后缀结尾时，去掉后缀的那一截；不是就 None
+pub fn strip_compat_suffix(base: &str) -> Option<&str> {
+    COMPAT_SUFFIXES
+        .iter()
+        .find_map(|suffix| base.strip_suffix(suffix))
+        .filter(|rest| !rest.is_empty() && rest.contains("://"))
 }
 
 impl FetchErrorKind {
@@ -50,6 +74,7 @@ impl FetchErrorKind {
             FetchErrorKind::Proxy => UnreachableReason::Proxy,
             FetchErrorKind::RateLimited(seconds) => UnreachableReason::RateLimited(seconds),
             FetchErrorKind::Server(code) => UnreachableReason::Server(code),
+            FetchErrorKind::AnthropicAddress => UnreachableReason::AnthropicAddress,
         }
     }
 
@@ -61,6 +86,7 @@ impl FetchErrorKind {
                 | FetchErrorKind::Unexpected
                 | FetchErrorKind::RateLimited(_)
                 | FetchErrorKind::Server(_)
+                | FetchErrorKind::AnthropicAddress
         )
     }
 
@@ -304,7 +330,7 @@ fn unescape_json_text(text: &str) -> String {
 }
 
 /// 收到非 200 时的详情：`GET <地址> → 429 Too Many Requests · Retry-After: 30`，换行接返回体开头
-fn status_detail(
+pub(crate) fn status_detail(
     method: &str,
     url: &str,
     status: reqwest::StatusCode,
@@ -530,6 +556,9 @@ async fn fetch_models_at(
     Ok(models)
 }
 
+/// 先按填的地址拉；拉不到模型列表（不是密钥 / 网络的事）且地址带已知的 Anthropic 后缀时，去掉后缀再拉一轮，
+/// 试通了就把去后缀的地址当探明的接口基址（spec S1）。两轮都不行：报「这是 Anthropic 协议的地址」，
+/// 技术原文还是第一轮的
 async fn fetch_models_inner(
     client: &reqwest::Client,
     base_url: &str,
@@ -539,6 +568,36 @@ async fn fetch_models_inner(
 ) -> Result<FetchResult, FetchError> {
     let deadline = tokio::time::Instant::now() + budget;
     let base = base_url.trim().trim_end_matches('/').to_string();
+    let first = fetch_models_paths(client, &base, key, proxied, deadline, budget).await;
+    let Err(err) = first else {
+        return first;
+    };
+    let Some(stripped) = strip_compat_suffix(&base) else {
+        return Err(err);
+    };
+    if err.kind.final_for_this_address() {
+        return Err(err);
+    }
+    match fetch_models_paths(client, stripped, key, proxied, deadline, budget).await {
+        Ok(result) => Ok(result),
+        Err(_) => Err(FetchError {
+            kind: FetchErrorKind::AnthropicAddress,
+            message: sophia_core::t!("models.fetch.reasonAnthropic"),
+            detail: err.detail,
+        }),
+    }
+}
+
+/// 在一个基址上试 `{base}/models` 与 `{base}/v1/models` 两条路径
+async fn fetch_models_paths(
+    client: &reqwest::Client,
+    base: &str,
+    key: &str,
+    proxied: bool,
+    deadline: tokio::time::Instant,
+    budget: Duration,
+) -> Result<FetchResult, FetchError> {
+    let base = base.to_string();
     let mut last_err: Option<FetchError> = None;
     for api_base in [base.clone(), format!("{base}/v1")] {
         let url = format!("{api_base}/models");
@@ -1098,6 +1157,80 @@ mod tests {
 
     fn kind_of(err: &FetchError) -> FetchErrorKind {
         err.kind
+    }
+
+    /// spec S1：填的是带 `/anthropic` 后缀的地址，两条路径都拉不到；去掉后缀再拉，拉到了就记去后缀的基址
+    #[tokio::test]
+    async fn s1_strips_anthropic_suffix_and_remembers_the_bare_base() {
+        let base = start_server(move |req: Request<Incoming>| async move {
+            if req.uri().path() != "/v1/models" {
+                return json_response(StatusCode::NOT_FOUND, "not found");
+            }
+            json_response(StatusCode::OK, r#"{"data":[{"id":"glm-5"}]}"#)
+        })
+        .await;
+        let client = test_client();
+        let result = fetch_models(
+            &client,
+            &format!("{base}/anthropic"),
+            "sk-test",
+            Duration::from_secs(2),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids(&result), vec!["glm-5"]);
+        assert_eq!(result.api_base, format!("{base}/v1"));
+    }
+
+    /// spec S1：去掉后缀也拉不到：报「这是 Anthropic 协议的地址」，技术原文还是第一轮的；
+    /// 密钥被拒这种换地址也不会好的，不去试第二轮
+    #[tokio::test]
+    async fn s1_reports_anthropic_address_when_both_rounds_fail() {
+        let base = start_server(move |req: Request<Incoming>| async move {
+            if req.uri().path().starts_with("/anthropic") {
+                return json_response(StatusCode::NOT_FOUND, "anthropic only");
+            }
+            json_response(StatusCode::NOT_FOUND, "nothing here")
+        })
+        .await;
+        let client = test_client();
+        let err = fetch_models(
+            &client,
+            &format!("{base}/api/anthropic/"),
+            "sk-test",
+            Duration::from_secs(2),
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(kind_of(&err), FetchErrorKind::AnthropicAddress);
+        assert!(err.detail.contains("/api/anthropic"), "{}", err.detail);
+
+        let base = start_server(move |_req: Request<Incoming>| async move {
+            json_response(StatusCode::UNAUTHORIZED, "bad key")
+        })
+        .await;
+        let err = fetch_models(
+            &client,
+            &format!("{base}/anthropic"),
+            "sk-test",
+            Duration::from_secs(2),
+            false,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(kind_of(&err), FetchErrorKind::Auth);
+    }
+
+    #[test]
+    fn s1_strip_compat_suffix_longest_first_and_never_to_nothing() {
+        assert_eq!(
+            strip_compat_suffix("https://a.example/api/anthropic"),
+            Some("https://a.example")
+        );
+        assert_eq!(strip_compat_suffix("https://a.example/v1"), None);
+        assert_eq!(strip_compat_suffix("/anthropic"), None);
     }
 
     /// AC7：用密钥拉取网关的模型列表；/models 不存在时退到 /v1/models，并记住实际可用的接口基址。

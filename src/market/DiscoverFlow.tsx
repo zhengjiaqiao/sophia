@@ -7,6 +7,7 @@
 /// - 页面头的 `粘贴链接` / `粘贴 JSON`：推入从链接安装 / 从 JSON 添加
 /// - 装上了：右下 `✓ 已安装 pdf` + `撤销`（`InstalledToast`）；`我的` 重扫、列表重取（`✓ 已安装` 跟着变）。
 ///   撤销与 ⌘Z 是同一件事：交给页面的撤销栈（`onUndoable`），撤了那一窗直接消失，不另出「已撤销」
+/// - 有 agent 没链上：那一窗 `撤销` 前多一颗 `去处理`（issue #111），交给页面带到 `我的` 里那一行（`onHandle`）
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DiscoverFrame } from "../LocationFrame.tsx";
 import { t } from "../i18n.ts";
@@ -18,7 +19,7 @@ import { DiscoverPane, type InstallFrom } from "./DiscoverPane.tsx";
 import { InstallPage, type SkillTarget } from "./InstallPage.tsx";
 import type { InstallPlaces } from "./InstallParts.tsx";
 import { InstalledToast, type InstalledNotice } from "./InstalledToast.tsx";
-import type { AgentRef } from "./installView.ts";
+import type { AgentRef, SkillHandle } from "./installView.ts";
 import { JsonPage } from "./JsonPage.tsx";
 import { LinkPage } from "./LinkPage.tsx";
 import { McpInstallPage } from "./McpInstallPage.tsx";
@@ -66,6 +67,8 @@ export interface DiscoverFlowProps {
   onUndoable?: (undo: (() => void) | null) => void;
   /// 已切回 `我的`（这一面卸下了）之后 ⌘Z 撤不成：交给壳的错误横幅
   onError?: (message: string) => void;
+  /// 装完那一窗的 `去处理`：带到 `我的` 里那一行（SKILLS 给；不给就没有这颗键）
+  onHandle?: (target: SkillHandle) => void;
   service?: MarketService;
 }
 
@@ -75,6 +78,7 @@ export function DiscoverFlow({
   onChanged,
   onUndoable,
   onError,
+  onHandle,
   service = marketService,
 }: DiscoverFlowProps) {
   const [layer, setLayer] = useState<Layer | null>(null);
@@ -233,6 +237,7 @@ export function DiscoverFlow({
           service={service}
           onDismiss={dismissNotice}
           onUndone={undoneByToast}
+          onHandle={onHandle}
         />
       ) : null}
       {undoFailed ? (

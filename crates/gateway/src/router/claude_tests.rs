@@ -101,6 +101,7 @@ impl ClaudeHarness {
             router_token: tokens.source(),
             keepalive,
             locale: None,
+            key_verdicts: None,
         })
         .unwrap();
         Self { h, tokens }
@@ -652,6 +653,7 @@ async fn ac15_missing_or_broken_catalog_and_missing_keys_fail_closed() {
         router_token: tokens.source(),
         keepalive: Duration::ZERO,
         locale: None,
+        key_verdicts: None,
     })
     .unwrap();
     let res = c.send(messages_req(MESSAGES)).await;
@@ -1807,4 +1809,66 @@ async fn missing_token_is_cached_too() {
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let res = c.send(messages_req(MESSAGES)).await;
     assert_ne!(res.status, 401, "{}", res.text());
+}
+/// #144：Claude 的请求被第三方拒了密钥报「被拒」（家 claude、网关 ap），之后通了报「接受」
+#[tokio::test]
+async fn claude_key_verdicts_are_reported_per_provider() {
+    let status = Arc::new(std::sync::atomic::AtomicU16::new(401));
+    let answer = status.clone();
+    let ok = text_stream();
+    let respond: Responder = Arc::new(move |captured| match answer.load(AtomicOrdering::SeqCst) {
+        200 => ok(captured),
+        code => (
+            code,
+            vec![("content-type".into(), "application/json".into())],
+            br#"{"error":{"message":"Missing Authentication header"}}"#.to_vec(),
+        ),
+    });
+    let mut c = ClaudeHarness::new(Some(respond)).await;
+    let verdicts: Arc<Mutex<Vec<(Agent, String, KeyVerdict)>>> = Arc::default();
+    let record = verdicts.clone();
+    c.h.router = Router::new(Config {
+        third_party_url: String::new(),
+        third_party_protocol: Protocol::Chat,
+        chatgpt_url: format!("{}/backend-api/codex", c.h.chatgpt.url),
+        openai_url: format!("{}/v1", c.h.openai.url),
+        routing_catalog_path: c.h.dir.path().join("routing.json"),
+        activity_log_path: Some(c.h.dir.path().join("router.log")),
+        third_party_key: Arc::new(|agent, id| Ok(claude_key(agent, id))),
+        max_body_bytes: 0,
+        proxy: None,
+        claude_routing_path: Some(c.h.dir.path().join("claude-routing.json")),
+        router_token: c.tokens.source(),
+        keepalive: Duration::from_millis(100),
+        locale: None,
+        key_verdicts: Some(Arc::new(move |agent, provider: &str, verdict| {
+            record
+                .lock()
+                .unwrap()
+                .push((agent, provider.to_owned(), verdict));
+        })),
+    })
+    .unwrap();
+
+    let res = c.send(messages_req(MESSAGES)).await;
+    assert_eq!(res.status, 403, "{}", res.text());
+    {
+        let got = verdicts.lock().unwrap();
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!((got[0].0, got[0].1.as_str()), (Agent::Claude, "ap"));
+        let KeyVerdict::Rejected { detail } = &got[0].2 else {
+            panic!("{:?}", got[0].2);
+        };
+        assert!(detail.contains("401") && detail.contains("Missing Authentication header"));
+        assert!(!detail.contains(&claude_key(Agent::Claude, "ap")));
+    }
+    status.store(200, AtomicOrdering::SeqCst);
+    let res = c.send(messages_req(MESSAGES)).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let got = verdicts.lock().unwrap();
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(
+        got[1],
+        (Agent::Claude, "ap".to_owned(), KeyVerdict::Accepted)
+    );
 }

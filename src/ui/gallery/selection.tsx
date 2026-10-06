@@ -153,6 +153,19 @@ export function SelectionFamily() {
             Codex
           </CheckRow>
         </Specimen>
+        <Specimen
+          label="small · 表单里附加的一个选项（安装页要填的最后、网关表单的同步）"
+          width={360}
+        >
+          <CheckRow size="small" checked={false} onChange={noop}>
+            同时加进 .gitignore
+          </CheckRow>
+        </Specimen>
+        <Specimen label="small · 悬停" force="hover" width={360}>
+          <CheckRow size="small" checked onChange={noop}>
+            同时加进 .gitignore
+          </CheckRow>
+        </Specimen>
         <Specimen label="list · 行尾 id" width={360}>
           <CheckRow checked onChange={noop} trailing={<Mono truncate>moonshotai/kimi-k2</Mono>}>
             Kimi K2

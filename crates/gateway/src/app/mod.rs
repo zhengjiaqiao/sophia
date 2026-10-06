@@ -202,6 +202,8 @@ pub struct ModelView {
     /// 拉取模型列表时网关给的上下文长度（token）；网关没给为 None（JSON `null`）。
     /// Codex 目录在 None 时写保守的缺省值，这里不替它填
     pub context_window: Option<u32>,
+    /// 用户手动填的（#117）
+    pub manual: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -216,6 +218,8 @@ pub struct ProviderView {
     pub base_url: String,
     /// "chat" 或 "responses"
     pub protocol: String,
+    /// 从哪个服务商预设建的（spec S1）；手填的为 None
+    pub preset: Option<String>,
     /// 密钥：有 / 没有 / 读不出（spec 2026-10-03-keys-in-file R4）
     pub key: KeyStatus,
     /// 读不出时的原因（当前语言的一句话：「读不出密钥文件：没有读取权限」「密钥还在钥匙串里…」）；其余为 None
@@ -226,6 +230,10 @@ pub struct ProviderView {
     pub unreachable: Option<String>,
     /// 那次失败的技术原文（已去隐私），网关行 `详情` 里给；没有为 None
     pub unreachable_detail: Option<String>,
+    /// `unreachable` 是真实调用被拒了密钥记下的（#144）：重拉模型列表清不掉它，界面不给 `再试一次`
+    pub key_rejected_on_call: bool,
+    /// `unreachable` 的原因是密钥被拒（拉列表或真实调用都算）：网络是通的，界面不写「无法连接」，只写原因
+    pub key_invalid: bool,
 }
 
 /// 一家网关的密钥状态。不再把「读不出」当成「没有」（R4）
@@ -864,7 +872,7 @@ impl App {
 
     /// 重启生效：让 Codex 读到新配置。
     ///
-    /// 1. 桌面应用（包 id `com.openai.codex`）在运行 → 发退出请求（SIGTERM 给主进程，同 ⌘Q），
+    /// 1. 桌面应用（包 id `com.openai.codex`）在运行 → 发退出请求（主进程正常退出，同 ⌘Q；没发成、或 3 秒后还在才 SIGTERM），
     ///    等到它不在运行，最多 15 秒；退不掉 → `desktop_busy`，不强杀、不结束别的、不打开。
     ///    只重启 app-server 不够：桌面应用的窗口缓存了模型列表，新加的模型要整个应用重开才出现。
     /// 2. 结束剩下的 Codex 后台进程（SIGTERM）：编辑器插件等拉起的 `codex app-server` 与
@@ -1006,6 +1014,7 @@ impl App {
             } else {
                 "chat".into()
             },
+            preset: None,
             models: old
                 .models
                 .iter()
@@ -1016,12 +1025,14 @@ impl App {
                             .filter(|n| !n.is_empty()),
                         context_window: m.context_window,
                         vision: m.vision,
+                        manual: false,
                     },
                     selected: m.selected,
                 })
                 .collect(),
             unreachable: None,
             unreachable_detail: None,
+            key_rejected_on_call: false,
         };
         match settings.provider_mut(&target) {
             Some(existing) => *existing = provider,
@@ -1226,6 +1237,7 @@ impl App {
                 short_name: provider.short_name(),
                 base_url: provider.base_url.clone(),
                 protocol: provider.protocol().to_owned(),
+                preset: provider.preset.clone(),
                 key: match &read {
                     Ok(Some(_)) => KeyStatus::Set,
                     Ok(None) => KeyStatus::Missing,
@@ -1237,10 +1249,14 @@ impl App {
                     .unreachable
                     .as_ref()
                     .and(provider.unreachable_detail.clone()),
+                key_rejected_on_call: provider.unreachable.is_some()
+                    && provider.key_rejected_on_call,
+                key_invalid: provider.unreachable == Some(UnreachableReason::Auth),
                 models: provider
                     .models
                     .iter()
                     .map(|m| ModelView {
+                        manual: m.model.manual,
                         id: m.model.id.clone(),
                         slug: provider.slug_of(&m.model.id),
                         display_name: m

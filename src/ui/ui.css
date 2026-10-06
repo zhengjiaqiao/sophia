@@ -955,6 +955,8 @@ textarea,
   line-height: var(--leading-caption);
   text-align: left;
   white-space: normal;
+  /* 文件路径这类没有空格的长串放不下时在任意处折行（同 Mono），不撑出框、不被截掉 */
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
 
@@ -1249,6 +1251,62 @@ textarea,
   align-items: center;
   gap: 0 var(--space-xs);
   min-height: var(--control-h);
+}
+
+/* 右下一行时（放得下宽 ≤ 400）：主行不折，原因、整句也不在框里自己折——折了量不出放不下；
+   放不下由 Toast 改成两行（is-wrapped，issue #111） */
+.ss-toast--notice:not(.is-wrapped) .ss-toast__main {
+  flex-wrap: nowrap;
+}
+
+/* 一行时各段都不让窄（原因有 min-width: 0，让窄了字溢出到键上、主行却量不出溢出） */
+.ss-toast--notice:not(.is-wrapped) .ss-toast__main > * {
+  flex-shrink: 0;
+}
+
+.ss-toast--notice:not(.is-wrapped) .ss-toast__reason,
+.ss-toast--notice:not(.is-wrapped) .ss-toast__message {
+  white-space: nowrap;
+}
+
+/* 右下两行（同锚点档「两行」的规则，画板 #105 第七稿第 3 节）：字在左一格——整句一行、原因换到第二行；
+   键与 × 在右侧一格、跨两行上下居中，不掉到字的下面。整句自己也放不下时在左格里折 */
+.ss-toast__body.is-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-xxs);
+}
+
+/* 左格窄（右侧键与 × 占去一截）时，中文只在标点处折，不在「没链上」这样的词中间断开；一整段没有标点又放不下，
+   仍在任意处折（overflow-wrap），不撑出框 */
+.ss-toast__text {
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.ss-toast__body.is-two .ss-toast__main {
+  min-height: 0;
+}
+
+/* 两行时左格变窄：名字长了在左格里折（任意处），不压到右边的键上 */
+.ss-toast__body.is-two .ss-toast__names {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* 两行时的第二行（读数、原因）：12 ink-mute，同锚点档第二行；长了折行，不截断；读数段间 ` · ` 同主行间距 */
+.ss-toast__sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-xs);
+  margin-top: 2px;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
 }
 
 .ss-toast__verb {
@@ -2708,6 +2766,18 @@ html[data-input="keyboard"] .ss-menuitem:focus {
   height: 36px;
 }
 
+/* 小档（2026-10-06，DESIGN-components「勾选行 › 字号随场景」）：表单里附加的一个选项（安装页「同时加进 .gitignore」、
+   网关表单的同步勾选）。名字 13、框与字 8、行高 28；行宽随内容，悬停带铺满这一行，套了提示框时包层也只有这一行宽 */
+.ss-checkrow--small {
+  gap: var(--space-xs);
+  width: auto;
+  height: var(--control-h);
+}
+
+.ss-checkrow--small .ss-checkrow__name {
+  font-size: var(--size-caption);
+}
+
 .ss-checkrow:hover:not(:disabled),
 .ss-checkrow.is-noted {
   background: var(--surface);
@@ -2727,6 +2797,12 @@ html[data-input="keyboard"] .ss-menuitem:focus {
 .ss-tipwrap:has(> .ss-checkrow) {
   display: flex;
   width: 100%;
+}
+
+/* 小档行宽随内容：包层跟着收成这一行宽 */
+.ss-tipwrap:has(> .ss-checkrow--small) {
+  display: inline-flex;
+  width: auto;
 }
 
 .ss-checkrow__icon {
@@ -2977,6 +3053,55 @@ html[data-input="keyboard"] .ss-menuitem:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
+}
+
+/* ===== 24. 差异表 DiffTable（DESIGN-components「差异表」）：同名几份一行一份——行首位置名 13 ink，字段成列
+   （列头 12 / 600 ink-mute，第一列「原件」是路径），值 12 ink；行尾紧凑键自成一列、右对齐在最右。列由组件按字段数给 ===== */
+.ss-difftable {
+  display: grid;
+  column-gap: var(--space-md);
+  row-gap: var(--space-xxs);
+  align-items: center;
+  margin-top: var(--space-xxs);
+}
+
+.ss-difftable__row {
+  display: contents;
+}
+
+.ss-difftable__head {
+  min-height: 22px;
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  font-weight: 600;
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+.ss-difftable__place {
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* 值可以收窄：长路径在任意处折行（Mono 自带），不截断——路径是决定留哪份的依据 */
+.ss-difftable__value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink);
+}
+
+.ss-difftable__action {
+  display: inline-flex;
+  justify-self: end;
 }
 
 /* ===== 14. 减少动效：状态变化即时发生，信息不减 =====

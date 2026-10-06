@@ -1,4 +1,5 @@
 //! 本机回环路由：路由清单里的模型转给第三方网关，其余请求原样转给官方上游。
+//! 例外：不带 OpenAI 凭据的请求不转官方、本地拒绝；用过第三方模型的会话里 Codex 起标题的请求，改发给那个第三方模型。
 //! 行为移植自 agents-manager 的 `internal/router`（Go，已在真实环境验证）；结构的出处见仓库根 NOTICE。
 mod claude;
 mod parse;
@@ -40,6 +41,10 @@ pub const FEATURE_CLAUDE: &str = "claude";
 
 const DEFAULT_MAX_BODY_BYTES: usize = 64 << 20;
 const MAX_TRACKED_SESSIONS: usize = 2000;
+/// 起标题请求认会话：开始时间与标题轮相差不超过这么多的轮次才算候选
+const TITLE_TURN_WINDOW_MS: u64 = 5_000;
+/// 起标题请求先于触发它的那一轮到达时，最多等这么久
+const TITLE_TURN_WAIT: Duration = Duration::from_millis(1_500);
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 /// 响应体只需要 `Send`：上游的字节流不是 `Sync`
@@ -103,6 +108,24 @@ pub(crate) async fn key_off_thread(
         .unwrap_or_else(|e| Err(e.to_string()))
 }
 
+/// 一次真实调用对某家网关密钥的结论（#144）。拉模型列表的接口不一定验密钥（OpenRouter 的 `GET /models`
+/// 不要鉴权），密钥错没错要等真发一次请求才知道
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyVerdict {
+    /// 上游答了 401 / 403：`detail` 是那次请求的技术原文（已去密钥与隐私）
+    Rejected { detail: String },
+    /// 上游答了 2xx
+    Accepted,
+}
+
+/// 路由把密钥结论交给编排层记到那一家网关上：（家, 网关 id, 结论）。路由已经去过重（同一把密钥、同一结论
+/// 一段时间内只报一次）。在请求路径上同步调用，必须立刻返回——落盘放到别的线程去做
+pub type KeyVerdictSink = Arc<dyn Fn(Agent, &str, KeyVerdict) + Send + Sync>;
+
+/// 同一（家, 网关, 密钥）的同一结论，隔这么久才再报一次：编排层那边的状态可能被别处清掉了
+/// （重新存了同一把密钥、删了又加回来），过一会儿重报一次让它跟上
+const KEY_VERDICT_REFRESH: Duration = Duration::from_secs(60);
+
 /// 给定目标地址，返回要用的代理；`None` 表示直连
 pub type ProxyFn = Arc<dyn Fn(&url::Url) -> Option<url::Url> + Send + Sync>;
 /// 此刻的界面语言；`None` 表示这回取不到，沿用上一次的
@@ -138,6 +161,8 @@ pub struct Config {
     pub keepalive: Duration,
     /// 每个请求进来先按它换当前语言，路由说的话（错误句）跟界面语言走。None：不动当前语言
     pub locale: Option<LocaleSource>,
+    /// 第三方答了 401 / 403 或 2xx 时报给编排层（#144）。None：不报（测试、没有编排层的场合）
+    pub key_verdicts: Option<KeyVerdictSink>,
 }
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -178,7 +203,33 @@ pub struct Router {
     third_party: reqwest::Client,
     log: Arc<ActivityLog>,
     counters: Arc<Counters>,
-    sessions: Mutex<HashMap<String, (bool, Instant)>>,
+    /// 会话标识 → 这个会话最近一轮
+    sessions: Mutex<HashMap<String, SessionTurn>>,
+    /// 每记下一轮就通知一次：等着认会话的起标题请求据此重查
+    turn_recorded: tokio::sync::Notify,
+    /// 起标题请求最多等多久（测试里改短）
+    title_wait: Duration,
+    key_verdicts: Option<KeyVerdictSink>,
+    /// （家, 网关 id）→ 上次报出去的结论，去重用
+    verdicts_seen: Mutex<HashMap<(Agent, String), SeenVerdict>>,
+}
+
+/// 上次报出去的密钥结论
+struct SeenVerdict {
+    /// 密钥的指纹（只在内存里，不落盘、不进日志）：换了密钥，同一结论也要重报
+    key: u64,
+    rejected: bool,
+    at: Instant,
+}
+
+/// 一个会话最近一轮的记录
+struct SessionTurn {
+    /// 去向：`Some(模型键)` 是第三方（记下是哪个模型，起标题时用），`None` 是官方
+    route: Option<String>,
+    /// 经过路由的时刻
+    at: Instant,
+    /// 这一轮的开始时间（`x-codex-turn-metadata` 的 `turn_started_at_unix_ms`），没带就是 `None`
+    started_at: Option<u64>,
 }
 
 #[derive(Default)]
@@ -316,6 +367,10 @@ impl Router {
             }),
             counters: Arc::default(),
             sessions: Mutex::default(),
+            turn_recorded: tokio::sync::Notify::new(),
+            title_wait: TITLE_TURN_WAIT,
+            key_verdicts: config.key_verdicts,
+            verdicts_seen: Mutex::default(),
         }))
     }
 
@@ -335,6 +390,45 @@ impl Router {
             last_route: last.1,
             last_upstream_status: last.2,
         }
+    }
+
+    /// 第三方对这家网关密钥的结论报给编排层（#144）。同一把密钥、同一结论在 [`KEY_VERDICT_REFRESH`] 内只报一次，
+    /// 所以请求路径上通常只是查一下表；报的那一下也只是把结论交出去，不等落盘
+    fn report_key(&self, agent: Agent, provider: &str, key: &str, verdict: KeyVerdict) {
+        let Some(sink) = &self.key_verdicts else {
+            return;
+        };
+        let fingerprint = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            key.hash(&mut hasher);
+            hasher.finish()
+        };
+        let rejected = matches!(verdict, KeyVerdict::Rejected { .. });
+        let now = Instant::now();
+        {
+            let mut seen = self
+                .verdicts_seen
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let id = (agent, provider.to_owned());
+            if seen.get(&id).is_some_and(|last| {
+                last.key == fingerprint
+                    && last.rejected == rejected
+                    && now.duration_since(last.at) < KEY_VERDICT_REFRESH
+            }) {
+                return;
+            }
+            seen.insert(
+                id,
+                SeenVerdict {
+                    key: fingerprint,
+                    rejected,
+                    at: now,
+                },
+            );
+        }
+        sink(agent, provider, verdict);
     }
 
     /// 处理一个请求。请求体已经整体读入：分流必须先看到 `model`。
@@ -476,7 +570,9 @@ impl Router {
                 )
             }
         };
-        let model_name = model.clone().unwrap_or_default();
+        let mut model_name = model.clone().unwrap_or_default();
+        let mut decoded = decoded;
+        let mut extra = String::new();
 
         let mut target: Option<RoutingModel> = None;
         let mut upstream: Option<Result<Upstream, String>> = None;
@@ -520,11 +616,55 @@ impl Router {
                 return reject(model, Route::None, StatusCode::CONFLICT, "auto_review_blocked",
                     "Codex Auto-review is not available while this session uses a third-party model");
             }
-            if key != AUTO_REVIEW_MODEL_KEY {
-                for session in sessions {
-                    self.record_session(session, target.is_some());
+            // 起标题请求的内容是会话的第一条消息：会话用的是第三方模型时，改发给那个模型，不发官方
+            let title = target.is_none() && is_thread_title(&parts.headers);
+            if title {
+                let started_at = turn_started_at(&parts.headers);
+                if let Some(Some(session_model)) =
+                    self.title_session_route(&sessions, started_at).await
+                {
+                    let routed = catalog.active.get(&session_model).cloned();
+                    let rewritten = routed.as_ref().and_then(|routed| {
+                        replace_request_model(&decoded, &routed.slug)
+                            .ok()
+                            .map(|body| (routed.clone(), body))
+                    });
+                    let Some((routed, body)) = rewritten else {
+                        log_blocked(&sessions, model, "thread_title_blocked");
+                        return reject(model, Route::None, StatusCode::CONFLICT, "thread_title_blocked",
+                            "Sophia did not send this thread-title request to OpenAI: this session uses a third-party model that is no longer in Sophia's routing list");
+                    };
+                    log::info!(
+                        "路由把起标题请求改发给会话的第三方模型：session={} model={} to={} action=rewritten",
+                        session_hash(&sessions),
+                        log_safe(model),
+                        log_safe(&routed.slug)
+                    );
+                    extra = format!(" title_from={}", log_field(model));
+                    model_name = routed.slug.clone();
+                    decoded = body.into();
+                    upstream = Some(self.upstream_for(&routed, &catalog));
+                    target = Some(routed);
                 }
             }
+            // 自动审阅与起标题不是会话自己的一轮，不改会话的记录
+            if key != AUTO_REVIEW_MODEL_KEY && !title {
+                let route = target.is_some().then(|| key.clone());
+                let started_at = turn_started_at(&parts.headers);
+                for session in sessions {
+                    self.record_session(session, route.clone(), started_at);
+                }
+            }
+        }
+        if target.is_none() && !has_openai_credentials(&parts.headers) {
+            // 独立服务商接法下 Codex 不带 OpenAI 凭据：转给官方只会被拒，内容却已经离开了这台电脑
+            log_blocked(
+                &session_keys(&parts.headers),
+                &model_name,
+                "official_needs_login",
+            );
+            return reject(&model_name, Route::None, StatusCode::CONFLICT, "official_needs_login",
+                "Sophia did not send this request to OpenAI because it carries no OpenAI sign-in; pick a third-party model in Codex, or sign Codex in to ChatGPT or with an OpenAI API key");
         }
 
         let query = parts
@@ -620,7 +760,7 @@ impl Router {
             model: model_name,
             route,
             status: status.as_u16(),
-            extra: String::new(),
+            extra,
         };
         result.map(|body| logged.wrap(body))
     }
@@ -803,10 +943,10 @@ impl Router {
             decoded.to_vec()
         };
         // 第三方路径：从空请求头开始，绝不转发任何官方凭据
-        let mut request = self.third_party.request(
-            parts.method.clone(),
-            resolve_target(&upstream.url, suffix, query),
-        );
+        let target_url = resolve_target(&upstream.url, suffix, query);
+        let mut request = self
+            .third_party
+            .request(parts.method.clone(), target_url.as_str());
         for name in ["accept", "content-type", "openai-beta", "user-agent"] {
             for value in parts.headers.get_all(name) {
                 request = request.header(name, value);
@@ -836,6 +976,14 @@ impl Router {
             // 网关常在错误信息里把收到的 Authorization 原样吐回来，不能转给本机客户端
             let body = read_limited(response, 1 << 20).await;
             if is_key_rejection(status) {
+                let detail =
+                    rejection_detail(parts.method.as_str(), &target_url, status, &body, key);
+                self.report_key(
+                    Agent::Codex,
+                    &upstream.provider,
+                    key,
+                    KeyVerdict::Rejected { detail },
+                );
                 return Ok((route, key_rejected(&upstream.provider, status, &body, key)));
             }
             let scrubbed = String::from_utf8_lossy(&body).replace(key, "***");
@@ -844,6 +992,7 @@ impl Router {
                 fixed_response(status, "application/json", scrubbed.into_bytes()),
             ));
         }
+        self.report_key(Agent::Codex, &upstream.provider, key, KeyVerdict::Accepted);
         Ok((route, passthrough(response, true)))
     }
 
@@ -891,9 +1040,8 @@ impl Router {
             let mut translated = crate::translate::to_chat_with(&source, upstream_model, options)
                 .map_err(|e| bad_request(e.to_string()))?;
 
-            let mut request = self
-                .third_party
-                .post(resolve_target(base, "/chat/completions", ""));
+            let target_url = resolve_target(base, "/chat/completions", "");
+            let mut request = self.third_party.post(target_url.as_str());
             for value in parts.headers.get_all("user-agent") {
                 request = request.header("user-agent", value);
             }
@@ -925,6 +1073,7 @@ impl Router {
                 ));
             }
             if status.is_success() {
+                self.report_key(Agent::Codex, &upstream.provider, key, KeyVerdict::Accepted);
                 break (response, translated);
             }
             let body = read_limited(response, 1 << 20).await;
@@ -946,6 +1095,13 @@ impl Router {
                 None => {}
             }
             if is_key_rejection(status) {
+                let detail = rejection_detail("POST", &target_url, status, &body, key);
+                self.report_key(
+                    Agent::Codex,
+                    &upstream.provider,
+                    key,
+                    KeyVerdict::Rejected { detail },
+                );
                 return Ok((route, key_rejected(&upstream.provider, status, &body, key)));
             }
             // 网关的错误体各有各的格式；统一成 Codex 能读出文字的样子，状态码保留
@@ -1058,22 +1214,106 @@ impl Router {
                 .lock()
                 .unwrap()
                 .get(key)
-                .is_some_and(|(third_party, _)| *third_party)
+                .is_some_and(|turn| turn.route.is_some())
     }
 
-    fn record_session(&self, key: String, third_party: bool) {
+    /// 起标题请求该跟哪个会话走。返回 `None` 表示一轮都没见过，`Some(None)` 是官方，`Some(Some(模型键))` 是第三方。
+    /// 1. 请求自己的会话标识有记录：用其中最近的那条。
+    /// 2. 否则按开始时间认：Codex 起标题开的是一个临时的新会话（`openai/codex` 的 `tui/src/app/thread_title.rs`），
+    ///    标识路由没见过；但元数据里的 `turn_started_at_unix_ms` 与触发它的那一轮几乎相同
+    ///    （桌面端标题轮比主轮早约 35 ms 开始，CLI 晚约 1.1 s）。取开始时间在标题轮前后 5 s 内、
+    ///    相差最小的一轮（相差一样取最近记下的）。
+    /// 3. 还没有这样的一轮：标题请求可能比主轮先到，异步等最多 [`TITLE_TURN_WAIT`]，每记下一轮重查一次。
+    /// 4. 等不到，或标题请求没带开始时间（不等）：退回全局最近的一轮，等过的记一行日志
+    async fn title_session_route(
+        &self,
+        keys: &[String],
+        started_at: Option<u64>,
+    ) -> Option<Option<String>> {
+        if let Some(own) = self.own_session_route(keys) {
+            return Some(own);
+        }
+        let Some(started_at) = started_at else {
+            return self.latest_route();
+        };
+        let deadline = tokio::time::Instant::now() + self.title_wait;
+        loop {
+            // 先登记通知再查表：查完到开始等之间记下的一轮也能把这里叫醒
+            let recorded = self.turn_recorded.notified();
+            tokio::pin!(recorded);
+            recorded.as_mut().enable();
+            if let Some(found) = self.closest_turn_route(started_at) {
+                return Some(found);
+            }
+            if tokio::time::timeout_at(deadline, recorded).await.is_err() {
+                break;
+            }
+        }
+        if let Some(found) = self.closest_turn_route(started_at) {
+            return Some(found);
+        }
+        log::info!(
+            "路由没等到起标题请求对应的那一轮，按全局最近一轮处理：session={} waited_ms={} action=title_fallback_latest",
+            session_hash(keys),
+            self.title_wait.as_millis()
+        );
+        self.latest_route()
+    }
+
+    /// 请求自己的会话标识里最近的一条记录
+    fn own_session_route(&self, keys: &[String]) -> Option<Option<String>> {
+        let sessions = self.sessions.lock().unwrap();
+        keys.iter()
+            .filter_map(|key| sessions.get(key))
+            .max_by_key(|turn| turn.at)
+            .map(|turn| turn.route.clone())
+    }
+
+    /// 全局最近的一轮
+    fn latest_route(&self) -> Option<Option<String>> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions
+            .values()
+            .max_by_key(|turn| turn.at)
+            .map(|turn| turn.route.clone())
+    }
+
+    /// 开始时间离 `started_at` 不超过 [`TITLE_TURN_WINDOW_MS`] 的轮次里相差最小的一轮；相差一样取最近记下的
+    fn closest_turn_route(&self, started_at: u64) -> Option<Option<String>> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions
+            .values()
+            .filter_map(|turn| {
+                let gap = turn.started_at?.abs_diff(started_at);
+                (gap <= TITLE_TURN_WINDOW_MS).then_some((gap, turn))
+            })
+            .min_by(|(a_gap, a), (b_gap, b)| a_gap.cmp(b_gap).then(b.at.cmp(&a.at)))
+            .map(|(_, turn)| turn.route.clone())
+    }
+
+    fn record_session(&self, key: String, route: Option<String>, started_at: Option<u64>) {
         if key.is_empty() {
             return;
         }
-        let mut sessions = self.sessions.lock().unwrap();
-        if sessions.len() >= MAX_TRACKED_SESSIONS {
-            let cutoff = Instant::now() - Duration::from_secs(24 * 3600);
-            sessions.retain(|_, (_, at)| *at > cutoff);
+        {
+            let mut sessions = self.sessions.lock().unwrap();
             if sessions.len() >= MAX_TRACKED_SESSIONS {
-                sessions.clear();
+                let cutoff = Instant::now() - Duration::from_secs(24 * 3600);
+                sessions.retain(|_, turn| turn.at > cutoff);
+                if sessions.len() >= MAX_TRACKED_SESSIONS {
+                    sessions.clear();
+                }
             }
+            sessions.insert(
+                key,
+                SessionTurn {
+                    route,
+                    at: Instant::now(),
+                    started_at,
+                },
+            );
         }
-        sessions.insert(key, (third_party, Instant::now()));
+        self.turn_recorded.notify_waiters();
     }
 
     /// 只监听回环地址并一直服务
@@ -1152,6 +1392,11 @@ type UpstreamBody = Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>;
 /// 第三方网关拒绝了密钥（401 / 403）
 fn is_key_rejection(status: StatusCode) -> bool {
     matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+}
+
+/// 密钥被拒那次请求的技术原文（记到网关行 `详情` 里）：与拉模型、试调失败的原文同一个写法，已去密钥与隐私
+fn rejection_detail(method: &str, url: &str, status: StatusCode, body: &[u8], key: &str) -> String {
+    crate::provider::status_detail(method, url, status, None, body, key)
 }
 
 /// 第三方网关拒绝了密钥：一律回 403，说明是哪家网关拒绝了 Sophia 保存的密钥，附上原文（密钥打码）。
@@ -1349,6 +1594,62 @@ fn is_websocket_upgrade(headers: &HeaderMap) -> bool {
                 .split(',')
                 .any(|token| token.trim().eq_ignore_ascii_case("upgrade"))
         })
+}
+
+/// 请求带着 OpenAI 凭据：API key / ChatGPT 令牌（`Authorization`）或 ChatGPT 账号（`ChatGPT-Account-ID`）
+fn has_openai_credentials(headers: &HeaderMap) -> bool {
+    ["authorization", "chatgpt-account-id"]
+        .iter()
+        .any(|name| !header_str(headers, name).trim().is_empty())
+}
+
+/// Codex 起标题的请求：`x-codex-turn-metadata` 是 JSON，其中 `thread_source` 为 `thread_title`。
+/// 没有这个头、读不懂、或不是这个值，都不算
+fn is_thread_title(headers: &HeaderMap) -> bool {
+    let metadata = header_str(headers, "x-codex-turn-metadata");
+    if !metadata.contains("thread_source") {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(metadata).is_ok_and(|value| {
+        value.get("thread_source").and_then(|v| v.as_str()) == Some("thread_title")
+    })
+}
+
+/// 这一轮的开始时间：`x-codex-turn-metadata` 里的 `turn_started_at_unix_ms`（毫秒）。
+/// 同一轮的每个请求带的都一样；没有这个头、读不懂、或不是非负整数，都是 `None`
+fn turn_started_at(headers: &HeaderMap) -> Option<u64> {
+    let metadata = header_str(headers, "x-codex-turn-metadata");
+    if !metadata.contains("turn_started_at_unix_ms") {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(metadata)
+        .ok()?
+        .get("turn_started_at_unix_ms")?
+        .as_u64()
+}
+
+/// 日志里的会话：第一个会话标识的哈希，不记原值
+fn session_hash(keys: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    keys.first().map_or_else(
+        || "-".to_owned(),
+        |key| {
+            Sha256::digest(key.as_bytes())
+                .iter()
+                .take(6)
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        },
+    )
+}
+
+/// 不转官方、在本地拒绝的请求记一行日志：会话哈希、原模型名、处理方式，不记请求内容
+fn log_blocked(sessions: &[String], model: &str, action: &str) {
+    log::info!(
+        "路由拦下不该发往官方的请求：session={} model={} action={action}",
+        session_hash(sessions),
+        log_safe(model)
+    );
 }
 
 /// 三个会话头里出现的每个值都算这个会话的标识：审阅请求不一定带全

@@ -1670,9 +1670,9 @@ fn installed_context(state: &AppState) -> Installed {
         return Installed::default();
     };
     let projects = crate::installed_and_settings(state, &env)
-        .map(|(installed, settings)| {
+        .and_then(|(installed, settings)| {
             let shown = discovery::enabled(installed, &settings);
-            discovery::project_candidates(&env, &shown)
+            crate::shown_projects(state, &env, &shown, &settings)
         })
         .unwrap_or_default();
     let mut locations = vec![GLOBAL.to_string()];
@@ -2803,6 +2803,7 @@ mod tests {
             branch: "main".into(),
             path: "skills/pdf".into(),
             tree_sha: "t".into(),
+            content_sha: None,
             commit_sha: "c".into(),
             installed_at: 1,
         };

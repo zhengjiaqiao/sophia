@@ -15,10 +15,12 @@ import {
   FadeViewport,
   FloatingToast,
   Mono,
+  Note,
   SectionLabel,
   Tag,
   TextField,
   Toast,
+  Tooltip,
   useEdgeFades,
 } from "../ui/index.ts";
 import { FilterRow } from "../FilterRow.tsx";
@@ -269,10 +271,13 @@ export function FieldsBlock({
   fields,
   values,
   onChange,
+  footer,
 }: {
   fields: ReadonlyArray<McpFieldSpec>;
   values: Readonly<Record<string, string>>;
   onChange: (key: string, value: string) => void;
+  /// 说明句下面、这一块的最后（「同时加进 .gitignore」）
+  footer?: ReactNode;
 }) {
   return (
     <InstallBlock label={t("market.install.blockFields")}>
@@ -302,7 +307,47 @@ export function FieldsBlock({
         })}
       </div>
       <p className="install-fields__note">{t("market.install.fieldsNote")}</p>
+      {footer}
     </InstallBlock>
+  );
+}
+
+/// 密钥提醒（S19，spec 2026-10-05-skill-mcp-batch2）：往 git 仓库里的项目文件写像密钥的值时，一个默认不勾的
+/// 勾选行「同时加进 .gitignore」。解释不常显，进提示框（悬停这一行、键盘焦点到它时出）：哪几个文件在仓库里、
+/// 不加会怎样、勾上加哪几行（`keyHintTip`）。放在 `要填的` 最后——先填密钥，再决定要不要加；没有那一块时放在
+/// `写进哪些 agent` 最后。想自用的人勾一下，想共享给队友的不受影响。
+/// 目标文件已被 git 跟踪的（`tracked`，加进 .gitignore 也挡不住）不出勾选，在同一个位置说一句（现成的 `Note`，
+/// 13 `ink-mute`；产品负责人 2026-10-06）；两种都有时勾选在上、那一句在下
+export function KeyHintBlock({
+  checked,
+  onChange,
+  tip,
+  tracked,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  /// 勾选的提示框文字（`keyHintTip`）；没有要提醒的为 null，不出勾选
+  tip: string | null;
+  /// 已被跟踪的那一句（`keyTrackedNote`）；没有为 null
+  tracked: string | null;
+}) {
+  return (
+    <>
+      {tip !== null ? (
+        <div className="install-keyhint">
+          <Tooltip content={tip}>
+            <CheckRow size="small" checked={checked} onChange={onChange}>
+              {t("market.install.addGitignore")}
+            </CheckRow>
+          </Tooltip>
+        </div>
+      ) : null}
+      {tracked !== null ? (
+        <div className="install-keyhint-note">
+          <Note>{tracked}</Note>
+        </div>
+      ) : null}
+    </>
   );
 }
 

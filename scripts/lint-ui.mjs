@@ -188,7 +188,12 @@ export const rules = [
     run(src, path) {
       const out = [];
       const isTokenFile = path === TOKEN_FILE;
-      for (const m of src.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
+      // 只看代码与字符串：注释里的 issue 号（`（#117）`、`sophia-dev#117`）不是色值。
+      // 色值只有 3 / 6 / 8 位，且 # 前不是字母数字（issue 引用都带前缀词）
+      const code = stripComments(src, path);
+      for (const m of code.matchAll(
+        /(?<![\w#])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g,
+      )) {
         const v = m[0].toLowerCase();
         const expanded = v.length === 4 ? "#" + [...v.slice(1)].map((c) => c + c).join("") : v;
         if (!TOKENS.has(expanded)) out.push(`${m[0]} 不是 token 色`);

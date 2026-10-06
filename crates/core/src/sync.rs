@@ -1190,6 +1190,56 @@ mod tests {
         assert_eq!(std::fs::read_dir(&hold_root).unwrap().count(), 0);
     }
 
+    /// issue #153：同名两份里一份在 agent 自己的目录里、不在任何原件位置里。两份都能「只留这份」：
+    /// 另一份挪进暂存、指向它的链接改指到留下的这份；撤销放回原处、链接指回去
+    #[test]
+    fn keeping_either_copy_against_an_agent_own_copy_can_be_undone() {
+        let t = TempTree::new();
+        let store = t.dir("proj/.agents/skills");
+        let body = t.dir("proj/.agents/skills/canvas");
+        t.file(&body, "SKILL.md");
+        let claude = t.dir("proj/.claude/skills");
+        let own = t.dir("proj/.claude/skills/canvas"); // Claude Code 自己的那一份
+        t.file(&own, "SKILL.md");
+        let codex = t.dir("proj/.codex/skills");
+        let hold_root = t.dir("app/held");
+        let link = codex.join("canvas");
+        t.link(&link, &body);
+        let sources = [source_at(&store, &["canvas"])];
+        let targets = vec![
+            target_at("claude-code", &claude),
+            target_at("codex", &codex),
+        ];
+
+        // 留 Claude Code 自己的：通用仓库那份挪走，Codex 的链接改指到 Claude Code 那份
+        let plan = crate::skills::plan_keep(&sources[0].skills[0], &own, &targets);
+        let (r, undo) = delete_source_holding(&plan, Some(&hold_root));
+        assert_eq!(outcomes(&r), vec![Outcome::Removed, Outcome::Created]);
+        assert_eq!(entry_kind(&body), EntryKind::Missing);
+        assert!(same_real(&link, &own), "链接改指到留下的 Claude Code 那份");
+        let back = undo_delete(&undo.expect("挪进了暂存，给撤销"));
+        assert_eq!(outcomes(&back), vec![Outcome::Created; 2]);
+        assert_eq!(entry_kind(&body), EntryKind::Dir);
+        assert!(same_real(&link, &body), "撤销后链接指回原来那份");
+
+        // 留通用仓库那份：Claude Code 自己的那一份挪走，那一格空出来
+        let drop = Skill {
+            name: "canvas".into(),
+            path: own.clone(),
+            description: None,
+        };
+        let plan = crate::skills::plan_keep(&drop, &body, &targets);
+        let (r, undo) = delete_source_holding(&plan, Some(&hold_root));
+        assert_eq!(outcomes(&r), vec![Outcome::Removed]);
+        assert_eq!(entry_kind(&own), EntryKind::Missing);
+        assert!(same_real(&link, &body), "指向通用仓库的链接不动");
+        let back = undo_delete(&undo.expect("挪进了暂存，给撤销"));
+        assert_eq!(outcomes(&back), vec![Outcome::Created]);
+        assert_eq!(entry_kind(&own), EntryKind::Dir);
+        assert!(own.join("SKILL.md").is_file());
+        assert_eq!(std::fs::read_dir(&hold_root).unwrap().count(), 0);
+    }
+
     /// 改指过的链接撤销时指回原来那一份；之后又被改过的不动、如实上报
     #[test]
     fn undo_points_relinked_links_back_and_leaves_changed_ones() {

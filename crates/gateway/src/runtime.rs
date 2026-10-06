@@ -2,7 +2,8 @@
 //! 以及无界面入口 `Sophia gateway run|status|doctor|restore|enable|provider-add|select|probe|restart|launch|…`。
 use crate::app::{App, AppError, Deps, KeyStatus, ProviderView, StartError};
 use crate::router::{
-    Agent, Config, KeySource, LocaleSource, Protocol, ProxyFn, Router, TokenSource,
+    Agent, Config, KeySource, KeyVerdict, KeyVerdictSink, LocaleSource, Protocol, ProxyFn, Router,
+    TokenSource,
 };
 use crate::router_host::{self, RouterHost};
 use crate::{claude_desktop, codex_desktop, keychain, process, provider, service, sysproxy};
@@ -15,7 +16,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// crate 内公开：`usage` 模块（T5）也要用同一份 HOME/CODEX_HOME 判定，不另写一份。
@@ -35,10 +36,34 @@ pub(crate) fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// debug 版设了测试主目录：登录 shell 问到的 `CLAUDE_CONFIG_DIR`、`CODEX_HOME` 一概不用（spec S16）
+pub(crate) fn test_home_active() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        std::env::var_os("SOPHIA_TEST_HOME").is_some()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
+}
+
+/// `CODEX_HOME`：先看本进程的环境，没有再看登录 shell 问到的（从 Dock 启动时 `.zshrc` 里设的那份，spec S16）；
+/// 测试主目录时只看本进程
+pub(crate) fn codex_home_env() -> Option<String> {
+    if let Some(custom) = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()) {
+        return Some(custom.to_string_lossy().into_owned());
+    }
+    if test_home_active() {
+        return None;
+    }
+    crate::login_env::current().and_then(|env| env.codex_home)
+}
+
 pub(crate) fn codex_home() -> PathBuf {
-    match std::env::var_os("CODEX_HOME") {
-        Some(custom) if !custom.is_empty() => PathBuf::from(custom),
-        _ => home().join(".codex"),
+    match codex_home_env() {
+        Some(custom) => PathBuf::from(custom),
+        None => home().join(".codex"),
     }
 }
 
@@ -83,10 +108,12 @@ pub(crate) fn codex_executables() -> Vec<PathBuf> {
         PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex"),
         PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
     ];
-    if let Some(paths) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&paths).map(|dir| dir.join("codex")));
-    }
-    candidates.push(home().join(".local").join("bin").join("codex"));
+    // 解析后的 PATH（登录 shell 的 + 本进程的 + 兜底目录，spec S16）：和 Claude 一侧同一份找法
+    candidates.extend(
+        crate::login_env::resolved_path(&home())
+            .into_iter()
+            .map(|dir| dir.join("codex")),
+    );
     candidates.into_iter().filter(|p| p.is_file()).collect()
 }
 
@@ -167,7 +194,8 @@ fn launch_codex() -> io::Result<()> {
 /// 桌面应用与编辑器插件拉起的 `codex app-server`），**不是桌面应用主进程**：
 /// 配置是 app-server 启动时读的。重启生效会连桌面应用一起重开，但编辑器插件拉起的 app-server
 /// 与桌面应用无关，只看主进程会漏掉它们。
-/// 终端里交互式的 `codex` 不认（重启也不碰它），界面上写明「Codex 桌面应用」。
+/// Codex 命令行 0.156 起，终端里的交互式 `codex` 跑在常驻后台服务（`codex app-server --managed-daemon`）里，
+/// 它也是 app-server，算在这批里，重启时一起结束，所以确认框写明终端里的对话也会中断（2026-10-06 真机）。
 fn codex_started_at() -> Option<u64> {
     let output = Command::new("/bin/ps")
         .args(["-axo", "etime=,command="])
@@ -297,8 +325,40 @@ fn router_secrets(store_dir: &Path) -> (KeySource, TokenSource) {
     )
 }
 
+/// 路由报来的密钥结论（#144）落盘的地方：路由在请求路径上只把结论放进通道就返回，这条线程按到达顺序经编排层
+/// 记到那一家网关上（`App::record_key_verdict_in`：与界面改网关同一把锁、同一条存设置的路，状态没变不写）。
+/// 编排层已经不在（`Weak` 升不上）就停；线程起不来时结论直接丢掉，请求照常
+pub(crate) fn key_verdict_recorder(app: Weak<App>) -> KeyVerdictSink {
+    let (sender, verdicts) = std::sync::mpsc::channel::<(Agent, String, KeyVerdict)>();
+    let spawned = std::thread::Builder::new()
+        .name("sophia-key-verdicts".into())
+        .spawn(move || {
+            for (agent, provider, verdict) in verdicts {
+                let Some(app) = app.upgrade() else { break };
+                if let Err(e) = app.record_key_verdict_in(agent, &provider, verdict) {
+                    log::warn!(
+                        "记下网关 {}（{}）的密钥结论失败：{e}",
+                        crate::router::log_safe(&provider),
+                        agent.as_str()
+                    );
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!("起记录密钥结论的线程失败，路由的密钥结论不落盘：{e}");
+    }
+    let sender = Mutex::new(sender);
+    Arc::new(move |agent, provider: &str, verdict| {
+        // 只是放进通道：不等落盘。线程没了（发不出去）就算了
+        let _ = sender
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .send((agent, provider.to_owned(), verdict));
+    })
+}
+
 /// 界面进程里的路由：路由与界面同一进程，说话的语言就是界面当前的语言（`locale: None`，不按请求改语言）
-fn ui_router(store_dir: &Path) -> Result<Arc<Router>, String> {
+fn ui_router(store_dir: &Path, key_verdicts: KeyVerdictSink) -> Result<Arc<Router>, String> {
     let (routing_catalog_path, claude_routing_path, log) = router_paths(store_dir);
     let (third_party_key, router_token) = router_secrets(store_dir);
     Router::new(Config {
@@ -315,29 +375,33 @@ fn ui_router(store_dir: &Path) -> Result<Arc<Router>, String> {
         router_token,
         keepalive: Duration::ZERO,
         locale: None,
+        key_verdicts: Some(key_verdicts),
     })
 }
 
 /// 界面进程用的编排层：先把损坏的密钥文件另存（R5），再交给界面。路由在本进程里、跑在 `handle` 所属的
-/// tokio 运行时上（界面是 Tauri 的运行时）
-pub fn build_ui_app(store_dir: PathBuf, handle: tokio::runtime::Handle) -> App {
+/// tokio 运行时上（界面是 Tauri 的运行时）；路由报来的密钥结论经这个编排层落盘（#144）
+pub fn build_ui_app(store_dir: PathBuf, handle: tokio::runtime::Handle) -> Arc<App> {
     let keys = Arc::new(KeyFile::new(&store_dir, true));
     keys.repair();
-    let router_dir = store_dir.clone();
-    let host = Arc::new(RouterHost::new(
-        handle,
-        Box::new(move || ui_router(&router_dir)),
-    ));
-    let (h1, h2, h3) = (host.clone(), host.clone(), host);
-    build_app_with(
-        store_dir,
-        keys,
-        RouterDeps {
-            start: Box::new(move |port| h1.start(port)),
-            stop: Box::new(move || h2.stop()),
-            running: Box::new(move || h3.running()),
-        },
-    )
+    Arc::new_cyclic(|app| {
+        let key_verdicts = key_verdict_recorder(app.clone());
+        let router_dir = store_dir.clone();
+        let host = Arc::new(RouterHost::new(
+            handle,
+            Box::new(move || ui_router(&router_dir, key_verdicts.clone())),
+        ));
+        let (h1, h2, h3) = (host.clone(), host.clone(), host);
+        build_app_with(
+            store_dir,
+            keys,
+            RouterDeps {
+                start: Box::new(move |port| h1.start(port)),
+                stop: Box::new(move || h2.stop()),
+                running: Box::new(move || h3.running()),
+            },
+        )
+    })
 }
 
 /// 命令行进程看到的路由：路由在界面进程（Sophia）里，命令行起不了也停不了它，只能探一下它在不在
@@ -487,8 +551,8 @@ fn gateway_client() -> Result<(reqwest::Client, ProxyFn), AppError> {
 
 /// 勾选前试调一个模型（[`provider::probe_model`]，等 [`provider::PROBE_TIMEOUT`]）。`target` 由
 /// `App::provider_for_probe_in` 取（地址、协议同路由；缺密钥、没有这个网关报 `invalid`，不联网）。
-/// 不写任何文件，调用方不必持 `config_lock`。界面命令 `gateway_probe_model` 与 `Sophia gateway probe` 都是
-/// 「`provider_for_probe_in` → 这里」。错误代码：`invalid`、`auth`（401/403）、`network`（连不上、超时）、
+/// 这里不写任何文件，调用方不必持 `config_lock`（结果说明了密钥时由调用方经 [`probe_verdict`] 记到网关上）。
+/// 界面命令 `gateway_probe_model` 与 `Sophia gateway probe` 都是「`provider_for_probe_in` → 这里」。错误代码：`invalid`、`auth`（401/403）、`network`（连不上、超时）、
 /// `upstream`（别的非 2xx）
 pub async fn probe_target(target: &crate::app::ProbeTarget) -> Result<(), AppError> {
     let (client, resolve) = gateway_client()?;
@@ -511,6 +575,18 @@ pub async fn probe_target(target: &crate::app::ProbeTarget) -> Result<(), AppErr
         };
         AppError::new(code, e.message).with_detail(e.detail)
     })
+}
+
+/// 试调的结果对密钥说明了什么（#144）：通了＝密钥被接受，`auth`（401/403）＝被拒（带技术原文），
+/// 别的失败（连不上、别的非 2xx、没联网就失败）说明不了密钥。调用方拿它调 `App::record_key_verdict_in`
+pub fn probe_verdict(result: &Result<(), AppError>) -> Option<KeyVerdict> {
+    match result {
+        Ok(()) => Some(KeyVerdict::Accepted),
+        Err(e) if e.code == "auth" => Some(KeyVerdict::Rejected {
+            detail: e.detail.clone().unwrap_or_default(),
+        }),
+        Err(_) => None,
+    }
 }
 
 /// 一次拉取失败：给用户看的错误，以及要记在那一家网关上的短原因（没联网就失败时为 None）
@@ -667,7 +743,8 @@ fn probe_args(args: &[String]) -> Result<(String, String), String> {
     Ok((provider.to_owned(), model.to_owned()))
 }
 
-/// `probe`：同界面勾选前的试调（`provider_for_probe_in` → `probe_target`，同一条路），不写任何文件
+/// `probe`：同界面勾选前的试调（`provider_for_probe_in` → `probe_target`，同一条路）。结果说明了密钥时
+/// 记到那一家网关上（`probe_verdict`，#144），别的文件不写
 fn probe(app: &App, agent: Agent, args: &[String]) -> Result<(), String> {
     let (provider_id, model_id) = probe_args(args)?;
     let target = app
@@ -677,9 +754,13 @@ fn probe(app: &App, agent: Agent, args: &[String]) -> Result<(), String> {
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    runtime
-        .block_on(probe_target(&target))
-        .map_err(|e| e.to_string())?;
+    let result = runtime.block_on(probe_target(&target));
+    if let Some(verdict) = probe_verdict(&result) {
+        if let Err(e) = app.record_key_verdict_in(agent, &provider_id, verdict) {
+            eprintln!("{e}");
+        }
+    }
+    result.map_err(|e| e.to_string())?;
     println!("ok");
     Ok(())
 }
@@ -938,6 +1019,9 @@ fn run_router(args: &[String], store_dir: &Path, locale: LocaleSource) -> Result
         Protocol::Chat
     };
     let (third_party_key, router_token) = router_secrets(store_dir);
+    // 前台路由也把密钥结论记到网关上（#144）：经命令行形态的编排层，同命令行的其他写设置命令
+    let app = Arc::new(build_app(store_dir.to_path_buf()));
+    let key_verdicts = key_verdict_recorder(Arc::downgrade(&app));
     let router = Router::new(Config {
         // 旧版本装的后台服务启动参数里带着唯一的上游；新清单里上游写在清单里，这个参数可以没有
         third_party_url: flag(args, "--third-party-url")
@@ -957,6 +1041,7 @@ fn run_router(args: &[String], store_dir: &Path, locale: LocaleSource) -> Result
         router_token,
         keepalive: Duration::ZERO,
         locale: Some(locale),
+        key_verdicts: Some(key_verdicts),
     })?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

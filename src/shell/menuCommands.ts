@@ -4,6 +4,7 @@
 /// 这里把它翻译成「去哪」+「交给谁」：
 /// - 壳自己做的：换目的地（SKILLS / MCP / 模型 / 设置）
 /// - 设置页做的：停在「关于」、开始检查更新
+/// - 壳当场做的：添加项目（弹系统文件夹选择器，不换页）
 /// - 输入框里的文字：撤销 / 全选作用于正在输入的那个框
 /// - SKILLS / MCP 页做的：筛选、撤销、全选行、添加来源、切换项目、返回——经 `menuBus` 的页面命令发给当前页
 ///
@@ -18,6 +19,7 @@ export const FIXED_COMMANDS = [
   "check-update",
   "settings",
   "add-source",
+  "add-project",
   "switch-project",
   "undo",
   "select-all",
@@ -47,6 +49,8 @@ export interface MenuRoute {
   text?: "undo" | "select-all";
   /// 交给当前页
   page?: PageCommand;
+  /// 弹系统文件夹选择器，选的文件夹加成项目（同设置「生效范围」的 `+ 项目`）
+  addProject?: true;
 }
 
 export const isMenuCommand = (s: unknown): s is MenuCommand =>
@@ -69,6 +73,9 @@ export function routeMenuCommand(command: MenuCommand, nav: Nav, editing: boolea
         nav: goFace(nav.destination === "skills" ? nav : goDestination(nav, "skills"), "mine"),
         page: "add-source",
       };
+    // 设置「生效范围」的 `+ 项目` 的另一条路：在哪一页都不换页，直接弹文件夹选择器
+    case "add-project":
+      return { nav, addProject: true };
     // 菜单里只在 SKILLS / MCP 时亮着（menuState）；`更多` 项目列表在 `我的` 的筛选行上，停在 `发现` 时先回来
     case "switch-project":
       return { nav: goFace(nav, "mine"), page: "switch-project" };

@@ -23,7 +23,7 @@ pub fn cli(args: Vec<String>) -> i32 {
 pub fn build(store_dir: std::path::PathBuf) -> Option<Arc<App>> {
     cfg!(target_os = "macos").then(|| {
         let handle = tauri::async_runtime::handle().inner().clone();
-        Arc::new(runtime::build_ui_app(store_dir, handle))
+        runtime::build_ui_app(store_dir, handle)
     })
 }
 
@@ -177,6 +177,7 @@ pub struct ProviderSavedState {
 /// `key` 省略或为空表示不动已存的密钥。带了密钥就先向网关校验，校验失败什么都不保存。
 /// `sync`：另一家同一地址的网关一起加 / 一起改（spec R40）
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn gateway_upsert_provider(
     agent: Agent,
     id: Option<String>,
@@ -184,6 +185,7 @@ pub async fn gateway_upsert_provider(
     base_url: String,
     key: Option<String>,
     sync: bool,
+    preset: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProviderSavedState, String> {
     let app = app(&state)?;
@@ -209,7 +211,7 @@ pub async fn gateway_upsert_provider(
     let saved = {
         let _guard = state.config_lock.lock().await;
         let worker = app.clone();
-        blocking(move || match (verified, key) {
+        let saved = blocking(move || match (verified, key) {
             (Some((ids, api_base)), Some(key)) => worker.commit_verified_provider_in(
                 agent,
                 id.as_deref(),
@@ -222,12 +224,32 @@ pub async fn gateway_upsert_provider(
             ),
             _ => worker.upsert_provider_in(agent, id.as_deref(), name.as_deref(), &base_url, sync),
         })
-        .await?
+        .await?;
+        // 从预设建的（spec S1）：记上来源与协议，同步到另一家的那一个也记
+        if let Some(preset) = preset.filter(|p| !p.trim().is_empty()) {
+            let worker = app.clone();
+            let saved = saved.clone();
+            blocking(move || {
+                let also = saved
+                    .other_provider_id
+                    .as_deref()
+                    .map(|other| (agent.other(), other));
+                worker.apply_preset_in(agent, &saved.provider_id, &preset, also)
+            })
+            .await?;
+        }
+        saved
     };
     Ok(ProviderSavedState {
         saved,
         state: current_state(app).await?,
     })
+}
+
+/// 服务商预设的名单（spec S1）：内置数据，不联网
+#[tauri::command]
+pub fn gateway_presets() -> Vec<sophia_core::provider_presets::ProviderPreset> {
+    sophia_core::provider_presets::all()
 }
 
 /// 删掉 `agent` 这一家的一个网关，连同它在密钥文件里的密钥（删了回不来，确认由界面负责）。
@@ -302,8 +324,26 @@ pub async fn gateway_fetch_models(
     current_state(app).await
 }
 
+/// 试调的结果说明了密钥（通了、或 401/403）时记到那一家网关上（#144）：只动 settings.json 里这一家的
+/// `unreachable`，不碰 Codex、Claude 的配置，所以不取 `config_lock`。记不下来只写日志，不改试调的结果
+async fn record_probe_verdict(
+    app: Arc<App>,
+    agent: Agent,
+    provider_id: String,
+    result: &Result<(), AppError>,
+) {
+    let Some(verdict) = runtime::probe_verdict(result) else {
+        return;
+    };
+    if let Err(e) = blocking(move || app.record_key_verdict_in(agent, &provider_id, verdict)).await
+    {
+        log::warn!("记下试调的密钥结论失败：{e}");
+    }
+}
+
 /// 勾选前试调 `agent` 这一家网关 `provider_id` 的模型 `model_id`：向网关真发一条最小的请求（20 秒为限），
-/// 通了返回空，不通返回 `[代码] 原因`（原因给界面显示在那一行）。不写任何文件，所以不取 `config_lock`
+/// 通了返回空，不通返回 `[代码] 原因`（原因给界面显示在那一行）。结果说明了密钥时记到那一家网关上
+/// （`record_probe_verdict`）；不写别的文件，所以不取 `config_lock`
 #[tauri::command]
 pub async fn gateway_probe_model(
     agent: Agent,
@@ -312,9 +352,12 @@ pub async fn gateway_probe_model(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let app = app(&state)?;
-    let target =
-        blocking(move || app.provider_for_probe_in(agent, &provider_id, &model_id)).await?;
-    runtime::probe_target(&target).await.map_err(|e| {
+    let worker = app.clone();
+    let pid = provider_id.clone();
+    let target = blocking(move || worker.provider_for_probe_in(agent, &pid, &model_id)).await?;
+    let result = runtime::probe_target(&target).await;
+    record_probe_verdict(app, agent, provider_id, &result).await;
+    result.map_err(|e| {
         log::warn!(
             "试调网关 {} 的模型 {} 失败：{e}",
             target.api_base,
@@ -323,6 +366,38 @@ pub async fn gateway_probe_model(
         sophia_core::report::count_error_code(e.code);
         e.to_string()
     })
+}
+
+/// 手动添加一个模型（sophia-dev#117）：先像勾选前那样试调一次（20 秒为限），通了才写进列表并勾上。
+/// 试不通返回 `[代码] 原因`（原因给界面显示在那一行），不写列表（试调的密钥结论照样记，见 `record_probe_verdict`）
+#[tauri::command]
+pub async fn gateway_add_manual_model(
+    agent: Agent,
+    provider_id: String,
+    model_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<GatewayState, String> {
+    let app = app(&state)?;
+    let probe_app = app.clone();
+    let (pid, mid) = (provider_id.clone(), model_id.clone());
+    let target = blocking(move || probe_app.provider_for_probe_in(agent, &pid, &mid)).await?;
+    let result = runtime::probe_target(&target).await;
+    record_probe_verdict(app.clone(), agent, provider_id.clone(), &result).await;
+    result.map_err(|e| {
+        log::warn!(
+            "手动添加前试调网关 {} 的模型 {} 失败：{e}",
+            target.api_base,
+            target.model
+        );
+        sophia_core::report::count_error_code(e.code);
+        e.to_string()
+    })?;
+    {
+        let _guard = state.config_lock.lock().await;
+        let worker = app.clone();
+        blocking(move || worker.add_manual_model_in(agent, &provider_id, &model_id)).await?;
+    }
+    current_state(app).await
 }
 
 #[derive(serde::Deserialize)]

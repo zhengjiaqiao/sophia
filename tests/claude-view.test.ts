@@ -170,7 +170,7 @@ test("R42 R44 文案只有一份：开关提示框两段、重启确认正文按
 test("R42 网关抽屉里的限制说明（DESIGN 原话）；网关区块的这一家叫模型页里的名字 `Claude Desktop`", () => {
   assert.equal(
     claudeLimitations(),
-    "切过去后没有语音、手机端和 claude.ai 的连接器 · 联网搜索要看模型服务商 · 第一次用 Cowork 要下载 1GB 以上的组件",
+    "切过去后没有语音、手机端和 claude.ai 的连接器 · 联网搜索要看模型服务商",
   );
   assert.equal(CLAUDE_TOOL.name, "Claude Desktop");
   assert.equal(CLAUDE_TOOL.limitations, claudeLimitations());

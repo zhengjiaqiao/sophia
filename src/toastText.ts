@@ -89,6 +89,9 @@ export interface ToastInput {
   failed?: FailedItem[];
   /// keepThis：留下的那份所在的来源名，拼进名字里（`通用仓库 的 defuddle`）
   keepLabel?: string;
+  /// keepThis：留下的是 agent 自己目录里的那一份（issue #153），`keepLabel` 是整句说法 `Claude Code 自己那份`，
+  /// 名字写成 `Claude Code 自己那份 defuddle`（不再接「的」）
+  keepOwn?: boolean;
   /// 对象已经写在旁边时省掉名字（单格的一窗浮在被点那一格下，行已说明对象：`✓ 加到 [Codex]`）。
   /// 只对成功：失败与部分失败的句子少不了名字
   omitNames?: boolean;
@@ -195,7 +198,9 @@ export function toastFor(op: ToastOp, input: ToastInput): ToastText {
     uniq(
       items.map((i) =>
         op === "keepThis" && input.keepLabel
-          ? t("toast.keepThis.nameOf", { label: input.keepLabel, skill: i.name })
+          ? input.keepOwn
+            ? t("toast.keepThis.nameOfOwn", { copy: input.keepLabel, skill: i.name })
+            : t("toast.keepThis.nameOf", { label: input.keepLabel, skill: i.name })
           : i.name,
       ),
     );
@@ -266,17 +271,24 @@ export function mcpEffectTrail(items: ToastItem[]): string[] {
 /// 标题问留哪份；正文写哪份进废纸篓、几条链接改指，没有要改指的就不写后半句。
 /// 来源名用原件位置列的写法（`originNames`）：同名来源带区分片段（`ego lite · 0.5.1.11`）。
 /// `paths` 是标题下的两行：`留下` / `移到废纸篓` + 那一份的完整路径（主目录写 `~`，不截断）
+/// `own`：这一方是 agent 自己目录里的那一份（issue #153），`name` 是整句说法 `Claude Code 自己那份`——
+/// 句子里不再接「的」「那份」（`只留 Claude Code 自己那份 canvas-design？`）
 export function keepThisConfirm(input: {
-  kept: OriginName & { path: string };
-  other: OriginName & { path: string };
+  kept: OriginName & { path: string; own?: boolean };
+  other: OriginName & { path: string; own?: boolean };
   skill: string;
   relinked: number;
 }): { title: string; body: string; paths: { label: string; path: string }[] } {
   const origin = originText(input.other);
   return {
-    title: t("toast.keepThisConfirm.title", { origin: originText(input.kept), skill: input.skill }),
-    body:
-      input.relinked > 0
+    title: input.kept.own
+      ? t("toast.keepThisConfirm.titleOwn", { copy: originText(input.kept), skill: input.skill })
+      : t("toast.keepThisConfirm.title", { origin: originText(input.kept), skill: input.skill }),
+    body: input.other.own
+      ? input.relinked > 0
+        ? tn("toast.keepThisConfirm.trashRelinkedOwn", input.relinked, { copy: origin })
+        : t("toast.keepThisConfirm.trashOwn", { copy: origin })
+      : input.relinked > 0
         ? tn("toast.keepThisConfirm.trashRelinked", input.relinked, { origin })
         : t("toast.keepThisConfirm.trash", { origin }),
     paths: [

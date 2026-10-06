@@ -234,7 +234,7 @@ export function FilterRow({
   );
 }
 
-/// 「更多」浮层：搜索框 + 排序 + 全部项目（名字 + 短路径，悬停完整路径）。没有添加、没有移除（R10）。
+/// 「更多」浮层：搜索框 + 排序 + 全部项目（名字 + 短路径，悬停完整路径）。没有添加、没有移除：项目在设置「生效范围」里加、勾不勾。
 /// 焦点落在搜索框；↓ 进入列表、回车选中第一条；列表里方向键移动（Menu 自带）；Esc 与点外面收起（FloatingLayer）
 export function ProjectList({
   anchor,
@@ -420,6 +420,8 @@ export function useSourceFilter(labels: ReadonlyArray<string> | null) {
     value,
     /// 这一行留不留（来源名）
     keeps: (label: string) => value === null || label === value,
+    /// 回到 `全部`（装完提示的「去处理」：要看的那一行不能被来源筛掉）
+    clear: () => setPicked(null),
     picker: <SourcePicker options={options} value={value} onChange={setPicked} />,
   };
 }

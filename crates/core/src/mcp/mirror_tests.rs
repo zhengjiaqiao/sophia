@@ -430,6 +430,7 @@ fn write_definitions_also_writes_the_mirror() {
         harness_ids: vec!["claude-desktop".into()],
         values: BTreeMap::new(),
         claude_code_scope: None,
+        add_to_gitignore: false,
     };
     let report = write_definitions(&env(&t.root()), &harnesses, &request, backups());
     let entries = desktop_entries(&report);

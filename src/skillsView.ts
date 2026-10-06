@@ -13,7 +13,15 @@
 import { t } from "./i18n.ts";
 import { orphanRows, ORPHAN_KEY_PREFIX, type OrphanRow } from "./orphanRows.ts";
 import { shortPath } from "./pathText.ts";
-import type { CellRef, CellState, DomainPage, DomainRow, PlannedAction, Target } from "./types.ts";
+import type {
+  AgentCopy,
+  CellRef,
+  CellState,
+  DomainPage,
+  DomainRow,
+  PlannedAction,
+  Target,
+} from "./types.ts";
 
 export const GLOBAL_KEY = "global";
 const PROJECT_PREFIX = "project:";
@@ -51,6 +59,34 @@ export interface PlacedOrphan extends OrphanRow {
   domainKey: string;
 }
 
+/// agent 自己目录里的同名 skill（issue #153），带上它所在的位置与 agent 名（目标的名字）
+export interface PlacedAgentCopy extends AgentCopy {
+  domainKey: string;
+  agent: string;
+}
+
+/// agent 自己那一份在同名差异表里的行键（与 `skillRowKey` 分得开：表格里没有它那一行）
+export const agentCopyKey = (copy: { domainKey: string; targetId: string; skill: string }) =>
+  `agent|${copy.domainKey}|${copy.targetId}|${copy.skill}`;
+
+/// 这一位置下这个名字的、agent 自己目录里的几份；`hidden` 里的（「只留这份」挂起时先藏起来的）不算
+export function agentCopiesOf(
+  view: Pick<SkillsView, "agentCopies">,
+  row: { domainKey: string; skill: string },
+  hidden: ReadonlySet<string> = new Set(),
+): PlacedAgentCopy[] {
+  return view.agentCopies.filter(
+    (c) => c.domainKey === row.domainKey && c.skill === row.skill && !hidden.has(agentCopyKey(c)),
+  );
+}
+
+/// 「只留这份」的一方：表格里的一行（某个原件位置里的那一份），或 agent 自己目录里不在任何原件位置里的那一份（issue #153）
+export type KeepSide = { row: SkillRow } | { copy: PlacedAgentCopy };
+
+/// 这一方在同名差异表里的行键
+export const keepSideKey = (side: KeepSide) =>
+  "row" in side ? skillRowKey(side.row) : agentCopyKey(side.copy);
+
 export interface SkillColumn {
   /// 列 id：agent 的 harness id
   id: string;
@@ -68,11 +104,30 @@ export interface SkillsView {
   orphans: PlacedOrphan[];
   /// 各位置扫到的失效链接（点失效格重新链接时，先清掉的那条）
   broken: PlannedAction[];
+  /// 各位置里 agent 自己目录里的同名 skill（issue #153）
+  agentCopies: PlacedAgentCopy[];
 }
 
 /// 行键：位置 + 本体位置 + skill（同一个 skill 在两个位置是两行）
 export const skillRowKey = (row: { domainKey: string; sourceId: string; skill: string }) =>
   `${row.domainKey}|${row.sourceId}|${row.skill}`;
+
+/// 「去处理」落在哪一行（issue #111）：这个位置下这个 skill 的行（位置 key + skill 名）。同名有几份时先取
+/// 有格子被同名占着的那一份（`duplicate`：就是刚装进来、没链上的那一份），没有就取第一份；`hidden` 里的
+/// （「只留这份」挂起时先藏起来的）不算。找不到（还没重扫出来、位置不在范围里）返回 null
+export function rowForHandle<R extends SkillRow>(
+  rows: ReadonlyArray<R>,
+  target: { domainKey: string; skill: string },
+  hidden: ReadonlySet<string> = new Set(),
+): R | null {
+  const same = rows.filter(
+    (row) =>
+      row.domainKey === target.domainKey &&
+      row.skill === target.skill &&
+      !hidden.has(skillRowKey(row)),
+  );
+  return same.find((row) => row.cells.some((c) => c.state === "duplicate")) ?? same[0] ?? null;
+}
 
 /// 一格所在那一行的键：位置从目标 id 里读
 export const refRowKey = (ref: CellRef) =>
@@ -116,6 +171,14 @@ export function mergeSkillPages(pages: ReadonlyArray<DomainPage>): SkillsView {
       })),
     ),
     broken: pages.flatMap((page) => page.broken),
+    // 测试夹具里的页可能没有这一项
+    agentCopies: pages.flatMap((page) =>
+      (page.agentCopies ?? []).map((c) => ({
+        ...c,
+        domainKey: page.key,
+        agent: page.targets.find((t) => t.id === c.targetId)?.label ?? columnOfTarget(c.targetId),
+      })),
+    ),
   };
 }
 

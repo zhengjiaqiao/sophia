@@ -35,6 +35,9 @@ pub struct Model {
     pub context_window: Option<u32>,
     #[serde(default)]
     pub vision: bool,
+    /// 用户手动填的（sophia-dev#117）：不是网关列表给的，重新拉取时不被冲掉；取消勾选就从列表移除
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub manual: bool,
 }
 
 /// 只有模型名、其余取缺省的模型（拉取到的列表里没带上下文长度时就是这样）
@@ -410,6 +413,7 @@ mod tests {
                 display_name: None,
                 context_window: None,
                 vision: false,
+                manual: false,
             },
         }
     }
@@ -808,6 +812,7 @@ mod tests {
             display_name: Some("GLM".into()),
             context_window: Some(1),
             vision: true,
+            manual: false,
         })
         .expect("json");
         assert_eq!(

@@ -295,6 +295,23 @@ fn write_with(
     expected: &FileState,
     mut probe: impl FnMut(Step),
 ) -> io::Result<()> {
+    let staged = stage(path, bytes, expected)?;
+    probe(Step::BeforeRecheck);
+    staged.commit_with(|| probe(Step::BeforePersist))
+}
+
+/// 已写好、还没换上去的一份新内容（`stage` 的结果）。几个文件要一起改时先把每个都 `stage` 好——
+/// 占磁盘的那一步（写临时文件、fsync）全在这里做完，磁盘满、没权限都在换掉任何一个之前暴露——
+/// 再逐个 `commit`（只剩 rename）。不 `commit` 就丢掉时临时文件随之删除，目标不动
+#[derive(Debug)]
+pub struct Staged {
+    path: PathBuf,
+    expected: FileState,
+    file: tempfile::NamedTempFile,
+}
+
+/// 原子替换的前一半：校验目标仍与 `expected` 一致，在同目录写好临时文件（沿用原权限、fsync）
+pub fn stage(path: &Path, bytes: &[u8], expected: &FileState) -> io::Result<Staged> {
     safe_parent(path)?;
     if !same(path, expected) {
         return Err(io::Error::other("changed"));
@@ -311,17 +328,36 @@ fn write_with(
     }
     file.write_all(bytes)?;
     file.as_file().sync_all()?;
-    probe(Step::BeforeRecheck);
-    if !same(path, expected) {
-        return Err(io::Error::other("changed"));
+    Ok(Staged {
+        path: path.to_path_buf(),
+        expected: expected.clone(),
+        file,
+    })
+}
+
+impl Staged {
+    /// 原子替换的后一半：再校验一次目标没变，rename 换上去（预期不存在时不覆盖冒出来的文件）
+    pub fn commit(self) -> io::Result<()> {
+        self.commit_with(|| {})
     }
-    probe(Step::BeforePersist);
-    match expected {
-        FileState::Missing => file
-            .persist_noclobber(path)
-            .map(|_| ())
-            .map_err(|error| error.error),
-        FileState::Present(_) => file.persist(path).map(|_| ()).map_err(|error| error.error),
+
+    fn commit_with(self, before_persist: impl FnOnce()) -> io::Result<()> {
+        if !same(&self.path, &self.expected) {
+            return Err(io::Error::other("changed"));
+        }
+        before_persist();
+        match self.expected {
+            FileState::Missing => self
+                .file
+                .persist_noclobber(&self.path)
+                .map(|_| ())
+                .map_err(|error| error.error),
+            FileState::Present(_) => self
+                .file
+                .persist(&self.path)
+                .map(|_| ())
+                .map_err(|error| error.error),
+        }
     }
 }
 

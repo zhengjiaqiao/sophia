@@ -83,7 +83,8 @@ pub struct QuitPreview {
     pub codex: bool,
     /// Codex 桌面应用在运行
     pub codex_app_running: bool,
-    /// 终端里有交互式 `codex` 在运行：它不会被重启，要用户自己重启
+    /// 终端里有交互式 `codex` 在运行：Sophia 不会替它重启，要用户自己重启。命令行 0.156 起它跑在常驻后台服务里，
+    /// 退出时结束 app-server 会让它进行中的对话中断
     pub codex_terminal: bool,
     /// Claude 桌面应用处在 Sophia 写入的第三方模式：退出会切回官方
     pub claude: bool,

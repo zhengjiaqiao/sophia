@@ -189,9 +189,10 @@ export function hasFriendlyName(model: GatewayProviderModel): boolean {
   return name !== "" && name !== model.id && name !== model.slug;
 }
 
-/// 列表一行的名字：有友好名写友好名；没有就写去掉服务商前缀的 id（组头已给出服务商）
+/// 列表一行的名字：有友好名写友好名；没有就写**完整 id**（2026-10-06 产品负责人：添加时填的和列表里看到的要是
+/// 同一串字，`weibo/glm-5.3` 不写成 `glm-5.3`；组头照旧按服务商分，只是不再靠它省前缀）
 export function modelRowLabel(model: GatewayProviderModel): string {
-  return hasFriendlyName(model) ? model.displayName.trim() : splitModelId(model.id).rest;
+  return hasFriendlyName(model) ? model.displayName.trim() : model.id;
 }
 
 /// 已选模型片的名字：友好名优先；否则跨服务商时保留前缀（`azure/gpt-4.1`），同一服务商省前缀
@@ -225,10 +226,52 @@ export function shouldShowModelId(name: string, id: string): boolean {
   return !i.includes(n);
 }
 
-/// 行尾显示的 id（去掉服务商前缀，组头已给出）；不该显示时为 null
+/// 行尾显示的 id（完整的，和手动填的一致）；不该显示时为 null
 export function modelRowId(model: GatewayProviderModel): string | null {
   if (!hasFriendlyName(model)) return null;
-  return shouldShowModelId(model.displayName, model.id) ? splitModelId(model.id).rest : null;
+  return shouldShowModelId(model.displayName, model.id) ? model.id : null;
+}
+
+/// 手动填的 id 对上列表里已有的哪一个（#117，2026-10-05 产品负责人：填 `glm-5.3` 也该认出 `weibo/glm-5.3`）：
+/// 先按完整 id（不分大小写），再按去掉服务商前缀的那一截；后者撞上几家的（`weibo/kimi-k2.5` 与
+/// `moonshot/kimi-k2.5`）不猜，把那几个完整 id 交回去让人挑
+export type ManualMatch =
+  { kind: "one"; entry: ModelEntry } | { kind: "many"; ids: string[] } | { kind: "none" };
+
+export function resolveManual(entries: ModelEntry[], typed: string): ManualMatch {
+  const term = typed.trim().toLowerCase();
+  if (term === "") return { kind: "none" };
+  const exact = entries.find((e) => e.model.id.toLowerCase() === term);
+  if (exact) return { kind: "one", entry: exact };
+  const byRest = entries.filter((e) => splitModelId(e.model.id).rest.toLowerCase() === term);
+  if (byRest.length === 1) return { kind: "one", entry: byRest[0] };
+  if (byRest.length > 1) return { kind: "many", ids: byRest.map((e) => e.model.id) };
+  return { kind: "none" };
+}
+
+/// 手动填的 id 试调不通时的例子（2026-10-06 产品负责人：网关回的 `'req_type/model_id' 格式` 看不懂）：
+/// 填的没带服务商前缀、而这家拉到的模型过半都是 `服务商/模型` 写法时，从列表里挑一个最像的给人照着填——
+/// 去掉前缀那一截和填的共同开头最长的那一个（`glm-5.3` → `weibo/glm-5`）；不像这种情况为 null
+export function prefixExample(entries: ModelEntry[], typed: string): string | null {
+  const term = typed.trim().toLowerCase();
+  if (term === "" || term.includes("/") || entries.length === 0) return null;
+  const prefixed = entries.filter((e) => e.model.id.includes("/"));
+  if (prefixed.length * 2 < entries.length) return null;
+  const common = (a: string, b: string) => {
+    let n = 0;
+    while (n < a.length && n < b.length && a[n] === b[n]) n += 1;
+    return n;
+  };
+  let best = prefixed[0];
+  let bestScore = -1;
+  for (const e of prefixed) {
+    const score = common(splitModelId(e.model.id).rest.toLowerCase(), term);
+    if (score > bestScore) {
+      best = e;
+      bestScore = score;
+    }
+  }
+  return best.model.id;
 }
 
 export interface ModelEntry {
@@ -506,6 +549,16 @@ export interface GatewayFacts {
 export function gatewayFacts(provider: GatewayProvider): GatewayFacts {
   const url = provider.baseUrl || t("models.gateway.noUrl");
   if (provider.unreachable) {
+    // 密钥被拒时网络是通的：不写「无法连接」，红字直接是原因（`地址 · 密钥无效，请换一个密钥`）
+    if (provider.keyInvalid) {
+      return {
+        url,
+        statusKind: "unreachable",
+        status: provider.unreachable,
+        reason: null,
+        picked: null,
+      };
+    }
     return {
       url,
       statusKind: "unreachable",
@@ -546,16 +599,6 @@ export function inUseLabel(state: GatewayState): string {
 
 /// 勾选列表框顶上的筛选框：`筛选 40 个模型`
 export const modelFilterPlaceholder = (count: number) => tn("models.filter.placeholder", count);
-
-/// 编辑表单里只读的协议：本机路由收 Responses，转给网关时说它的协议。新网关默认按 Chat Completions 发
-/// （`codex_models::settings` 的缺省），没有「识别协议」的逻辑，所以还没拉过模型时也照实写默认值
-/// （发布前评估 M16：原来写「拉取模型时识别」，代码里没有这回事）
-export function protocolText(protocol: string | undefined, agent: GatewayAgent = "codex"): string {
-  // 本机路由从 Codex 收 Responses、从 Claude 桌面应用收 Messages；转给网关时按网关的协议发
-  const inbound = agent === "claude" ? "Messages" : "Responses";
-  if (protocol === "responses") return agent === "claude" ? "Messages → Responses" : "Responses";
-  return `${inbound} → Chat Completions`;
-}
 
 /// 草稿存在期间 `+ 网关` 禁用的原因（从源头防止两个草稿）
 export const addGatewayBlocked = () => t("models.gateway.addBlocked");
@@ -601,14 +644,15 @@ export function codexAppName(state: GatewayState | null): string {
 }
 
 /// 「重启生效」键的提示框：只写点击的后果与代价。
-/// 检测只认 Codex 桌面应用（与编辑器插件）拉起的后台进程，终端里的 `codex` 不认也不重启，
-/// 所以写明「桌面应用」——否则用户会以为终端里那个也跟着换了配置（⑫）
+/// 检测只认 `codex app-server` 后台进程（桌面应用、编辑器插件拉起的，以及命令行 0.156 起的常驻后台服务）；
+/// 不经常驻服务的终端 `codex` 不认也不重启，所以写明「桌面应用」——否则用户会以为终端里那个也跟着换了配置（⑫）
 export function restartTip(app: string): string {
   return t("models.tip.restart", { app });
 }
 
 /// 确认框正文：不重复提示框原话。进行中的对话数查不到（Codex 没有对外暴露），写通用的后果。
-/// 2026-09-30 起重启＝整个桌面应用退出再打开（只重启后台进程时，ChatGPT 窗口里的模型列表不刷新）
+/// 2026-09-30 起重启＝整个桌面应用退出再打开（只重启后台进程时，ChatGPT 窗口里的模型列表不刷新）。
+/// Codex 命令行 0.156 起终端里的会话跑在常驻后台服务里，重启时一起结束，所以也写上终端（2026-10-06）
 export function restartConsequence(app: string): string {
   return t("models.restart.consequence", { app });
 }
@@ -869,8 +913,13 @@ export function selectModel(
       ? provider
       : {
           ...provider,
-          models: provider.models.map((model) =>
-            model.id === modelId ? { ...model, selected } : model,
+          // 手动填的（#117）取消勾选就是移除：后端同样这么存，这里先照着改
+          models: provider.models.flatMap((model) =>
+            model.id !== modelId
+              ? [model]
+              : !selected && model.manual
+                ? []
+                : [{ ...model, selected }],
           ),
         },
   );

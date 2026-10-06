@@ -350,25 +350,17 @@ fn build_child_env(spec: &ProbeSpec) -> Vec<(String, String)> {
     env
 }
 
-/// 子进程的 PATH：保留父进程看到的那份，再补上 `claude_executables()` 用的几个兜底目录——
-/// 从 Dock 启动时缺的就是这些（spec 风险）。已经在里面的目录不重复加
+/// 子进程的 PATH：登录 shell 问到的那份（spec S16）、父进程看到的那份，再补上找程序用的几个兜底目录——
+/// 从 Dock 启动时缺的就是这些。去重保序，与 `claude_executables()` 同一份算法
 fn augmented_path(parent_path: Option<&str>, home: &Path) -> String {
-    let mut dirs: Vec<PathBuf> = parent_path
-        .map(|p| std::env::split_paths(p).collect())
-        .unwrap_or_default();
-    for extra in [
-        home.join(".local").join("bin"),
-        home.join(".claude").join("local"),
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ] {
-        if !dirs.contains(&extra) {
-            dirs.push(extra);
-        }
-    }
-    std::env::join_paths(dirs)
-        .map(|joined| joined.to_string_lossy().into_owned())
-        .unwrap_or_default()
+    let login = crate::login_env::current().and_then(|env| env.path);
+    std::env::join_paths(crate::login_env::resolved_path_from(
+        login.as_deref(),
+        parent_path,
+        home,
+    ))
+    .map(|joined| joined.to_string_lossy().into_owned())
+    .unwrap_or_default()
 }
 
 /// 结束整个进程组（自己加子孙），SIGKILL 直接来，不留后路。用 `/bin/kill` 而不是 `libc::killpg`：
@@ -387,13 +379,12 @@ async fn kill_process_group(pgid: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use crate::usage::test_support::write_executable;
     use std::time::Duration as StdDuration;
 
     fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
         let path = dir.join(name);
-        std::fs::write(&path, body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&path, body);
         path
     }
 
@@ -412,7 +403,7 @@ mod tests {
             stdin_lines: Vec::new(),
             extra_env: Vec::new(),
             parent_env: Some(Vec::new()),
-            timeout: StdDuration::from_secs(5),
+            timeout: crate::test_timing::CHILD_OK,
             until: Box::new(|_| true),
         }
     }
@@ -466,8 +457,8 @@ mod tests {
             let err = run_probe(spec).await.expect_err("应该超时");
             assert!(matches!(err, ProbeError::Timeout { .. }));
             assert!(
-                started.elapsed() < StdDuration::from_millis(300) + StdDuration::from_secs(1),
-                "应该在 timeout + 1s 内返回"
+                started.elapsed() < StdDuration::from_millis(300) + crate::test_timing::KILL_SLACK,
+                "应该在 timeout 后很快返回，不等满脚本里的 sleep 100"
             );
 
             // 脚本把自己和孙子的 pid 写进了工作目录；等它们真的消失（kill -0 失败）

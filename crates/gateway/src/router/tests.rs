@@ -165,6 +165,7 @@ impl Harness {
             router_token: Arc::new(|| Err("not set".to_owned())),
             keepalive: Duration::ZERO,
             locale: None,
+            key_verdicts: None,
         })
         .unwrap();
         Self {
@@ -174,6 +175,12 @@ impl Harness {
             openai,
             dir,
         }
+    }
+    /// 起标题请求等对应那一轮的时长：测试里改短，免得拖慢
+    fn title_wait(&mut self, wait: Duration) {
+        Arc::get_mut(&mut self.router)
+            .expect("没有别处持有路由")
+            .title_wait = wait;
     }
     fn catalog(&self, content: &str) {
         std::fs::write(self.dir.path().join("routing.json"), content).unwrap();
@@ -904,12 +911,14 @@ async fn native_streaming_response_is_forwarded_incrementally() {
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
         locale: None,
+        key_verdicts: None,
     })
     .unwrap();
     let request = hyper::Request::builder()
         .method("POST")
         .uri("/v1/responses")
         .header("host", "127.0.0.1:1")
+        .header("authorization", OFFICIAL_TOKEN)
         .body(Bytes::from_static(br#"{"model":"gpt-5.6-sol"}"#))
         .unwrap();
     let started = std::time::Instant::now();
@@ -942,6 +951,7 @@ impl Harness {
             router_token: Arc::new(|| Err("not set".to_owned())),
             keepalive: Duration::ZERO,
             locale: None,
+            key_verdicts: None,
         })
         .unwrap();
         h
@@ -1406,12 +1416,14 @@ async fn connect_failure_is_retried_once() {
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
         locale: None,
+        key_verdicts: None,
     })
     .unwrap();
     let request = hyper::Request::builder()
         .method("POST")
         .uri("/v1/responses")
         .header("host", "127.0.0.1:1")
+        .header("authorization", OFFICIAL_TOKEN)
         .body(Bytes::from_static(br#"{"model":"gpt-5.6-sol"}"#))
         .unwrap();
     let response = router.handle(request, "127.0.0.1:5".parse().unwrap()).await;
@@ -1514,6 +1526,417 @@ async fn auto_review_block_matches_any_session_header() {
         .push(("x-codex-window-id".into(), "w-1".into()));
     assert_eq!(h.send(review).await.status, 409);
     h.nothing_secret_reached_official();
+}
+
+// ---------- 官方模型名的请求不外发（#135） ----------
+
+/// 去掉 OpenAI 凭据（`Authorization`、`ChatGPT-Account-ID`）的请求：独立服务商接法下 Codex 发来的就是这样
+fn without_credentials(mut req: TestRequest) -> TestRequest {
+    req.headers
+        .retain(|(k, _)| k != "authorization" && k != "chatgpt-account-id");
+    req
+}
+
+fn in_session(mut req: TestRequest, session: &str) -> TestRequest {
+    req.headers.push(("session-id".into(), session.into()));
+    req
+}
+
+/// Codex 起标题的请求：`x-codex-turn-metadata` 里 `thread_source` 是 `thread_title`
+fn as_title_request(req: TestRequest, session: &str) -> TestRequest {
+    title_request_with(req, session, None)
+}
+
+/// 同上，元数据里另带标题轮的开始时间 `turn_started_at_unix_ms`
+fn as_title_request_at(req: TestRequest, session: &str, started_at: u64) -> TestRequest {
+    title_request_with(req, session, Some(started_at))
+}
+
+fn title_request_with(mut req: TestRequest, session: &str, started_at: Option<u64>) -> TestRequest {
+    let started_at = started_at
+        .map(|ms| format!(r#","turn_started_at_unix_ms":{ms}"#))
+        .unwrap_or_default();
+    req.headers.push((
+        "x-codex-turn-metadata".into(),
+        format!(
+            r#"{{"session_id":"{session}","thread_id":"{session}","thread_source":"thread_title"{started_at}}}"#
+        ),
+    ));
+    in_session(req, session)
+}
+
+/// 会话里普通的一轮，元数据带这一轮的开始时间
+fn in_turn(mut req: TestRequest, session: &str, started_at: u64) -> TestRequest {
+    req.headers.push((
+        "x-codex-turn-metadata".into(),
+        format!(
+            r#"{{"session_id":"{session}","thread_id":"{session}","thread_source":"user","turn_started_at_unix_ms":{started_at}}}"#
+        ),
+    ));
+    in_session(req, session)
+}
+
+/// 真实抓包里桌面端标题轮的开始时间（触发它的主轮晚 35 ms 开始）
+const TITLE_STARTED_AT: u64 = 1_791_224_386_753;
+
+fn title_body() -> String {
+    format!(r#"{{"model":"gpt-5.6-luna","input":"{SECRET_CONTENT}","stream":true}}"#)
+}
+
+/// (a) 不带凭据、又不归第三方的请求本地拒绝：官方上游一个请求都收不到。第三方模型照常转发
+#[tokio::test]
+async fn uncredentialed_official_request_is_rejected_locally() {
+    let h = Harness::new(None).await;
+    let res = h
+        .send(without_credentials(post(&format!(
+            r#"{{"model":"gpt-5.6-luna","input":"{SECRET_CONTENT}"}}"#
+        ))))
+        .await;
+    assert_eq!(res.status, 409, "{}", res.text());
+    assert_eq!(
+        json(&res.body)["error"]["type"],
+        "sophia_gateway",
+        "{}",
+        res.text()
+    );
+    let res = h
+        .send(without_credentials(get("/v1/models?client_version=1")))
+        .await;
+    assert_eq!(res.status, 409, "没有请求体的也不转官方");
+    assert_eq!(h.official_reached(), 0);
+    assert!(
+        h.log().contains("result=official_needs_login"),
+        "{}",
+        h.log()
+    );
+
+    let res = h
+        .send(without_credentials(post(
+            r#"{"model":"weibo-glm-5","input":"hi"}"#,
+        )))
+        .await;
+    assert_eq!(res.status, 200, "第三方模型不需要 OpenAI 凭据");
+    assert_eq!(h.third_party.all().len(), 1);
+}
+
+/// (b) 带凭据的官方请求照旧转官方：只有 API key 走 OpenAI API，只有账号头走 ChatGPT 后端
+#[tokio::test]
+async fn credentialed_official_request_still_goes_to_official() {
+    let h = Harness::new(None).await;
+    let mut req = post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#);
+    req.headers = vec![("authorization".into(), "Bearer sk-openai-user-key".into())];
+    assert_eq!(h.send(req).await.status, 200);
+    assert_eq!(h.openai.all().len(), 1);
+
+    let mut req = post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#);
+    req.headers = vec![("chatgpt-account-id".into(), "acct-123".into())];
+    assert_eq!(h.send(req).await.status, 200);
+    assert_eq!(h.chatgpt.all().len(), 1);
+}
+
+/// (c) 用过第三方模型的会话里起标题：改发给这个会话的第三方模型，内容不到官方
+#[tokio::test]
+async fn title_request_in_third_party_session_goes_to_that_sessions_model() {
+    let h = Harness::new(Some(sse_ok())).await;
+    h.send(in_session(
+        post(r#"{"model":"weibo-glm-5","input":"hi"}"#),
+        "sess-1",
+    ))
+    .await;
+    // 另一个会话用的是另一家第三方模型：标题跟着自己的会话走
+    h.send(in_session(
+        post(r#"{"model":"kimi-k3","input":"hi"}"#),
+        "sess-2",
+    ))
+    .await;
+    let res = h
+        .send(as_title_request(post(&title_body()), "sess-1"))
+        .await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = h.third_party.all();
+    assert_eq!(all.len(), 3);
+    let got = all.last().unwrap();
+    assert_eq!(got.path, "/openai/responses");
+    let sent = json(&got.body);
+    assert_eq!(sent["model"], "weibo/glm-5");
+    assert_eq!(sent["input"], SECRET_CONTENT);
+    assert_eq!(
+        got.header("authorization"),
+        Some(&*format!("Bearer {THIRD_PARTY_KEY}"))
+    );
+    assert!(!got.dump().contains("official-chatgpt-token"));
+    assert_eq!(h.official_reached(), 0);
+    assert!(
+        h.log().contains("route=third_party model=weibo-glm-5"),
+        "{}",
+        h.log()
+    );
+}
+
+/// (c) 续：上游只认 Chat Completions 时，改写后的起标题请求同样走协议转换
+#[tokio::test]
+async fn title_request_rewrite_goes_through_protocol_translation() {
+    let h = Harness::chat(Some(chat_sse(&[
+        r#"{"choices":[{"index":0,"delta":{"content":"{\"title\":\"x\"}"}}]}"#,
+        r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+    ])))
+    .await;
+    h.send(in_session(post(RESPONSES_BODY), "sess-1")).await;
+    let res = h
+        .send(as_title_request(post(&title_body()), "sess-1"))
+        .await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert!(res.text().contains("response.completed"), "{}", res.text());
+    let all = h.third_party.all();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[1].path, "/openai/v1/chat/completions");
+    assert_eq!(json(&all[1].body)["model"], "weibo/glm-5");
+    assert_eq!(h.official_reached(), 0);
+}
+
+/// Codex 起标题开的是一个临时的新会话，会话标识路由没见过：按刚刚经过路由的那一轮判断
+#[tokio::test]
+async fn title_request_from_an_unseen_session_follows_the_latest_turn() {
+    let h = Harness::new(None).await;
+    h.send(in_session(
+        post(r#"{"model":"kimi-k3","input":"hi"}"#),
+        "sess-1",
+    ))
+    .await;
+    let res = h
+        .send(as_title_request(post(&title_body()), "title-thread"))
+        .await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert_eq!(json(&h.third_party.all()[1].body)["model"], "kimi-k3");
+    assert_eq!(h.official_reached(), 0);
+
+    // 最近一轮是官方模型：标题照旧走官方
+    h.send(in_session(
+        post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#),
+        "sess-2",
+    ))
+    .await;
+    h.send(as_title_request(post(&title_body()), "title-thread-2"))
+        .await;
+    assert_eq!(h.chatgpt.all().len(), 2);
+    assert_eq!(h.third_party.all().len(), 2);
+}
+
+/// 桌面端标题轮比主轮早开始、可能先到：上一轮是别的会话的官方轮时，不跟它走，
+/// 等到开始时间对得上的主轮再定，改发给主轮的第三方模型
+#[tokio::test]
+async fn title_arriving_before_its_turn_waits_for_it() {
+    let h = Harness::new(None).await;
+    h.send(in_turn(
+        post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#),
+        "other",
+        TITLE_STARTED_AT - 60_000,
+    ))
+    .await;
+    let title = h.send(as_title_request_at(
+        post(&title_body()),
+        "title-thread",
+        TITLE_STARTED_AT,
+    ));
+    let turn = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        h.send(in_turn(
+            post(r#"{"model":"weibo-glm-5","input":"hi"}"#),
+            "sess-1",
+            TITLE_STARTED_AT + 35,
+        ))
+        .await
+    };
+    let (title, turn) = tokio::join!(title, turn);
+    assert_eq!(turn.status, 200, "{}", turn.text());
+    assert_eq!(title.status, 200, "{}", title.text());
+    let all = h.third_party.all();
+    assert_eq!(all.len(), 2);
+    let sent = all
+        .iter()
+        .map(|req| json(&req.body))
+        .find(|body| body["input"] == SECRET_CONTENT)
+        .expect("标题请求应当发给第三方");
+    assert_eq!(sent["model"], "weibo/glm-5");
+    assert_eq!(h.official_reached(), 1, "只有早先那一轮官方请求");
+    h.nothing_secret_reached_official();
+}
+
+/// 记下了多个会话：标题跟开始时间最接近的那一轮走，而不是最近记下的那一轮；相差一样时取最近记下的
+#[tokio::test]
+async fn title_follows_the_turn_with_the_closest_start_time() {
+    let h = Harness::new(None).await;
+    h.send(in_turn(
+        post(r#"{"model":"kimi-k3","input":"hi"}"#),
+        "sess-1",
+        TITLE_STARTED_AT + 35,
+    ))
+    .await;
+    h.send(in_turn(
+        post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#),
+        "sess-2",
+        TITLE_STARTED_AT + 3_000,
+    ))
+    .await;
+    let res = h
+        .send(as_title_request_at(
+            post(&title_body()),
+            "title-thread",
+            TITLE_STARTED_AT,
+        ))
+        .await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert_eq!(json(&h.third_party.all()[1].body)["model"], "kimi-k3");
+    assert_eq!(h.official_reached(), 1);
+
+    // 前后各 100 ms 各有一轮：取后记下的那一轮
+    h.send(in_turn(
+        post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#),
+        "sess-3",
+        TITLE_STARTED_AT + 10_000 - 100,
+    ))
+    .await;
+    h.send(in_turn(
+        post(r#"{"model":"weibo-glm-5","input":"hi"}"#),
+        "sess-4",
+        TITLE_STARTED_AT + 10_000 + 100,
+    ))
+    .await;
+    h.send(as_title_request_at(
+        post(&title_body()),
+        "title-thread-2",
+        TITLE_STARTED_AT + 10_000,
+    ))
+    .await;
+    let all = h.third_party.all();
+    assert_eq!(all.len(), 4);
+    assert_eq!(json(&all[3].body)["model"], "weibo/glm-5");
+    h.nothing_secret_reached_official();
+}
+
+/// 等不到开始时间对得上的一轮：退回全局最近的一轮（原来的兜底）
+#[tokio::test]
+async fn title_without_a_matching_turn_falls_back_to_the_latest() {
+    let mut h = Harness::new(None).await;
+    h.title_wait(Duration::from_millis(50));
+    h.send(in_turn(
+        post(r#"{"model":"kimi-k3","input":"hi"}"#),
+        "sess-1",
+        TITLE_STARTED_AT - 60_000,
+    ))
+    .await;
+    let begun = Instant::now();
+    let res = h
+        .send(as_title_request_at(
+            post(&title_body()),
+            "title-thread",
+            TITLE_STARTED_AT,
+        ))
+        .await;
+    assert!(begun.elapsed() >= Duration::from_millis(50), "应当等过");
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert_eq!(json(&h.third_party.all()[1].body)["model"], "kimi-k3");
+    assert_eq!(h.official_reached(), 0);
+
+    // 最近一轮是官方：照旧走官方
+    h.send(in_turn(
+        post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#),
+        "sess-2",
+        TITLE_STARTED_AT - 30_000,
+    ))
+    .await;
+    h.send(as_title_request_at(
+        post(&title_body()),
+        "title-thread-2",
+        TITLE_STARTED_AT,
+    ))
+    .await;
+    assert_eq!(h.chatgpt.all().len(), 2);
+    assert_eq!(h.third_party.all().len(), 2);
+}
+
+/// 标题请求没带开始时间：不等，照旧跟全局最近的一轮走
+#[tokio::test]
+async fn title_without_a_start_time_does_not_wait() {
+    let h = Harness::new(None).await;
+    h.send(in_turn(
+        post(r#"{"model":"kimi-k3","input":"hi"}"#),
+        "sess-1",
+        TITLE_STARTED_AT - 60_000,
+    ))
+    .await;
+    let begun = Instant::now();
+    let res = h
+        .send(as_title_request(post(&title_body()), "title-thread"))
+        .await;
+    assert!(
+        begun.elapsed() < TITLE_TURN_WAIT / 2,
+        "不应等待：{:?}",
+        begun.elapsed()
+    );
+    assert_eq!(res.status, 200, "{}", res.text());
+    assert_eq!(json(&h.third_party.all()[1].body)["model"], "kimi-k3");
+    assert_eq!(h.official_reached(), 0);
+}
+
+/// (d) 只用官方模型的会话里起标题：照旧原样转官方。读不懂的元数据头不当作起标题
+#[tokio::test]
+async fn title_request_in_official_session_goes_to_official() {
+    let h = Harness::new(None).await;
+    h.send(in_session(
+        post(r#"{"model":"gpt-5.6-sol","input":"hi"}"#),
+        "sess-1",
+    ))
+    .await;
+    let body = title_body();
+    let res = h.send(as_title_request(post(&body), "sess-1")).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = h.chatgpt.all();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[1].body, body.as_bytes(), "请求体必须逐字节相同");
+    assert_eq!(h.third_party.all().len(), 0);
+
+    // 第三方会话里，元数据头读不懂或不是起标题：不改写，按原来的规则转官方
+    h.send(in_session(
+        post(r#"{"model":"weibo-glm-5","input":"hi"}"#),
+        "sess-2",
+    ))
+    .await;
+    for metadata in [
+        "not json",
+        r#"{"thread_source":"user"}"#,
+        r#"["thread_title"]"#,
+    ] {
+        let mut req = in_session(post(r#"{"model":"gpt-5.6-luna","input":"hi"}"#), "sess-2");
+        req.headers
+            .push(("x-codex-turn-metadata".into(), metadata.into()));
+        assert_eq!(h.send(req).await.status, 200, "{metadata}");
+    }
+    assert_eq!(h.chatgpt.all().len(), 5);
+    assert_eq!(h.third_party.all().len(), 1);
+}
+
+/// (e) 第三方会话里起标题、却说不出该用哪个第三方模型（它已不在路由清单里）：本地拒绝，哪儿都不发
+#[tokio::test]
+async fn title_request_without_a_usable_session_model_is_rejected() {
+    let h = Harness::new(None).await;
+    h.send(in_session(
+        post(r#"{"model":"weibo-glm-5","input":"hi"}"#),
+        "sess-1",
+    ))
+    .await;
+    h.catalog(r#"{"models":[{"slug":"kimi-k3"}]}"#);
+    let res = h
+        .send(as_title_request(post(&title_body()), "sess-1"))
+        .await;
+    assert_eq!(res.status, 409, "{}", res.text());
+    assert_eq!(h.official_reached(), 0);
+    assert_eq!(h.third_party.all().len(), 1);
+    assert!(
+        h.log().contains("result=thread_title_blocked"),
+        "{}",
+        h.log()
+    );
 }
 
 /// 状态接口里的模型名同样要清洗和截断
@@ -1832,6 +2255,7 @@ async fn a_route_without_an_owner_fails_closed() {
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
         locale: None,
+        key_verdicts: None,
     })
     .unwrap();
     let res = h.send(post(r#"{"model":"weibo-glm-5"}"#)).await;
@@ -1973,4 +2397,131 @@ fn log_field_redacts_before_flattening() {
         assert!(!field.contains(char::is_whitespace), "{field}");
     }
     assert_eq!(log_field(""), "-");
+}
+// ---------- 密钥结论（#144） ----------
+
+type Verdicts = Arc<Mutex<Vec<(Agent, String, KeyVerdict)>>>;
+
+/// 报给编排层的密钥结论记进一个表；上游的状态码、路由取到的密钥都可以中途换
+struct VerdictHarness {
+    h: Harness,
+    verdicts: Verdicts,
+    status: Arc<std::sync::atomic::AtomicU16>,
+    key: Arc<Mutex<String>>,
+}
+
+impl VerdictHarness {
+    async fn new(protocol: Protocol) -> Self {
+        let status = Arc::new(std::sync::atomic::AtomicU16::new(401));
+        let answer = status.clone();
+        let respond: Responder = Arc::new(move |_| {
+            match answer.load(Ordering::SeqCst) {
+            200 => (
+                200,
+                vec![("content-type".into(), "text/event-stream".into())],
+                b"data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    .to_vec(),
+            ),
+            code => (
+                code,
+                vec![("content-type".into(), "application/json".into())],
+                format!(r#"{{"error":{{"message":"bad key {THIRD_PARTY_KEY}"}}}}"#).into_bytes(),
+            ),
+        }
+        });
+        let mut h = Harness::new(Some(respond)).await;
+        let key = Arc::new(Mutex::new(THIRD_PARTY_KEY.to_owned()));
+        let verdicts: Verdicts = Arc::default();
+        let (read_key, record) = (key.clone(), verdicts.clone());
+        h.router = Router::new(Config {
+            third_party_url: format!("{}/openai/v1", h.third_party.url),
+            third_party_protocol: protocol,
+            chatgpt_url: format!("{}/backend-api/codex", h.chatgpt.url),
+            openai_url: format!("{}/v1", h.openai.url),
+            routing_catalog_path: h.dir.path().join("routing.json"),
+            activity_log_path: Some(h.dir.path().join("router.log")),
+            third_party_key: Arc::new(move |_, _| Ok(read_key.lock().unwrap().clone())),
+            max_body_bytes: 0,
+            proxy: None,
+            claude_routing_path: None,
+            router_token: Arc::new(|| Err("not set".to_owned())),
+            keepalive: Duration::ZERO,
+            locale: None,
+            key_verdicts: Some(Arc::new(move |agent, provider: &str, verdict| {
+                record
+                    .lock()
+                    .unwrap()
+                    .push((agent, provider.to_owned(), verdict));
+            })),
+        })
+        .unwrap();
+        Self {
+            h,
+            verdicts,
+            status,
+            key,
+        }
+    }
+
+    fn answer(&self, status: u16) {
+        self.status.store(status, Ordering::SeqCst);
+    }
+
+    fn verdicts(&self) -> Vec<(Agent, String, KeyVerdict)> {
+        self.verdicts.lock().unwrap().clone()
+    }
+}
+
+/// 第三方 401 / 403 报「被拒」（带去了密钥的原文），2xx 报「接受」；同一把密钥、同一结论只报一次，
+/// 换了密钥重报；别的失败（5xx）说明不了密钥，不报。两种协议都是
+#[tokio::test]
+async fn key_verdicts_are_reported_on_change_only() {
+    for protocol in [Protocol::Responses, Protocol::Chat] {
+        let v = VerdictHarness::new(protocol).await;
+        let request = || post(RESPONSES_BODY);
+        assert_eq!(v.h.send(request()).await.status, 403);
+        let verdicts = v.verdicts();
+        assert_eq!(verdicts.len(), 1, "{protocol:?}: {verdicts:?}");
+        let (agent, provider, verdict) = &verdicts[0];
+        assert_eq!((*agent, provider.as_str()), (Agent::Codex, "default"));
+        let KeyVerdict::Rejected { detail } = verdict else {
+            panic!("{protocol:?}: {verdict:?}");
+        };
+        assert!(detail.contains("401"), "{detail}");
+        assert!(
+            !detail.contains(THIRD_PARTY_KEY),
+            "原文里不能有密钥：{detail}"
+        );
+
+        v.answer(403);
+        assert_eq!(v.h.send(request()).await.status, 403);
+        assert_eq!(v.verdicts().len(), 1, "{protocol:?}：结论没变，不再报");
+
+        *v.key.lock().unwrap() = "sk-another-key".to_owned();
+        assert_eq!(v.h.send(request()).await.status, 403);
+        assert_eq!(v.verdicts().len(), 2, "{protocol:?}：换了密钥，重报");
+
+        v.answer(500);
+        v.h.send(request()).await;
+        assert_eq!(v.verdicts().len(), 2, "{protocol:?}：5xx 不说明密钥");
+
+        v.answer(200);
+        let res = v.h.send(request()).await;
+        assert_eq!(res.status, 200, "{protocol:?}: {}", res.text());
+        v.h.send(request()).await;
+        let verdicts = v.verdicts();
+        assert_eq!(verdicts.len(), 3, "{protocol:?}: {verdicts:?}");
+        assert_eq!(
+            verdicts[2],
+            (Agent::Codex, "default".to_owned(), KeyVerdict::Accepted)
+        );
+    }
+}
+
+/// 没接编排层（`key_verdicts: None`）时照常回 403，什么都不报
+#[tokio::test]
+async fn without_a_sink_key_rejection_still_answers_403() {
+    let respond: Responder = Arc::new(|_| (401, vec![], b"{}".to_vec()));
+    let h = Harness::new(Some(respond)).await;
+    assert_eq!(h.send(post(RESPONSES_BODY)).await.status, 403);
 }

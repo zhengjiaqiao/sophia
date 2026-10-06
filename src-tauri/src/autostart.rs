@@ -89,7 +89,7 @@ pub fn default_on_first_launch(app: tauri::AppHandle, store_dir: std::path::Path
                 return;
             }
         };
-        if defaulted {
+        if !should_default(defaulted, crate::test_home_active()) {
             return;
         }
         match imp::set(true) {
@@ -108,6 +108,12 @@ pub fn default_on_first_launch(app: tauri::AppHandle, store_dir: std::path::Path
     });
     #[cfg(not(target_os = "macos"))]
     let _ = (app, store_dir);
+}
+
+/// 要不要在这次启动时默认注册登录项：没注册过才注册；测试主目录（验证用的 debug 实例）一律不注册——
+/// 否则 worktree 里的 debug 二进制会被注册成这台电脑的系统登录项（2026-10-05 retro，一轮验证里删了五次）
+fn should_default(defaulted: bool, test_home: bool) -> bool {
+    !defaulted && !test_home
 }
 
 /// 登录项在后台被改过（默认注册完成）：设置页收到就重读
@@ -134,6 +140,16 @@ mod tests {
     use super::*;
 
     /// AppleEvents.h 里的两个四字码
+    #[test]
+    fn test_home_never_registers_a_login_item() {
+        assert!(super::should_default(false, false));
+        assert!(!super::should_default(true, false), "注册过就不再注册");
+        assert!(
+            !super::should_default(false, true),
+            "测试主目录里的实例不碰系统登录项"
+        );
+    }
+
     #[test]
     fn four_char_codes_match_apple_headers() {
         assert_eq!(KEY_AE_PROP_DATA, 0x7072_6474);

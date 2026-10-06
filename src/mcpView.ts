@@ -504,6 +504,24 @@ export function claudeWhereText(columnId: string, place: string, domainKey: stri
   return null;
 }
 
+/// 项目里 Claude Code 团队共享格点了会写进（写进 / 挑一份写进 / 挪过来）时，提示框第二行末尾接的一句（#115）：
+/// Claude Code 对项目 `.mcp.json` 里的服务第一次会问要不要用，写进去之后还要在那边启用才生效。
+/// 仅自己（本地配置、用户级）与别的 agent 写进去就生效、点了是删的格子，原样返回
+export function withEnableNote(
+  detail: string | null,
+  columnId: string,
+  domainKey: string,
+  writes: boolean,
+): string | null {
+  if (!writes || columnId !== CLAUDE_TEAM || domainKey === "global") return detail;
+  const note = t("mcp.claude.enableNote");
+  return detail === null ? note : `${detail} · ${note}`;
+}
+
+/// 设置里 `列表里的 agent` 勾了 OpenCode：MCP 页还写不了它（core `mcp::supports`），没有它的列，筛选行下说一声（#115）
+export const openCodeNoticeWanted = (shown: readonly string[]): boolean =>
+  shown.includes("opencode");
+
 /// 挪到另一格时提示框的两行（R4）：`挪到团队共享` + 会动哪两处
 export function claudeMoveTip(
   columnId: string,
@@ -528,8 +546,11 @@ export function claudeMoveTip(
 export const mirrorFailedNote = (
   entries: ReadonlyArray<{ outcome: string; mirrorFailed?: string }>,
 ): string | undefined =>
-  entries.find((e) => (e.outcome === "created" || e.outcome === "removed") && e.mirrorFailed)
-    ?.mirrorFailed;
+  entries.find(
+    (e) =>
+      (e.outcome === "created" || e.outcome === "removed" || e.outcome === "updated") &&
+      e.mirrorFailed,
+  )?.mirrorFailed;
 
 export const teamGained = () => t("mcp.claude.teamGained");
 export const teamLost = () => t("mcp.claude.teamLost");

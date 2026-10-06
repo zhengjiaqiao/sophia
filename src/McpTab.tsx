@@ -29,7 +29,15 @@ import { matchesFilter } from "./rowFilter";
 import { mcpLocationName, type DomainRef } from "./pages/sourcesView";
 import { configPathText, displayPath } from "./pathText";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
-import { McpScopeDialog, type ScopeChoiceView } from "./McpScopeDialog";
+import { McpScopeDialog, type ScopeChoiceView, type ScopeGitignore } from "./McpScopeDialog";
+import { McpKeepConfirm, type KeepGitignore } from "./McpKeepConfirm";
+import {
+  afterGitignoreAdd,
+  cellKeyHint,
+  joinReasons,
+  keyHintNote,
+  keyHintNoteAsked,
+} from "./mcpKeyHint";
 import { LocationFrame } from "./LocationFrame";
 import { DiscoverFlow, PageUndo, type InstallContext } from "./market";
 import type { InstallPlaces } from "./market/InstallParts";
@@ -38,6 +46,8 @@ import {
   claudeMoveTip,
   claudeSibling,
   claudeWhereText,
+  withEnableNote,
+  openCodeNoticeWanted,
   CLAUDE_SELF,
   CLAUDE_TEAM,
   differingFields,
@@ -76,8 +86,10 @@ import {
   type McpTable,
   mirrorFailedNote,
 } from "./mcpView";
-import { Button, Confirm, CornerToast, Mono, Tag, Toast, ToastCount } from "./ui";
+import { Button, Confirm, CornerToast, Mono, NoticePanel, Tag, Toast, ToastCount } from "./ui";
+import { HINTS, useHint } from "./hints.ts";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
+import { mcpCopyName } from "./mcpDiffTable";
 import type { ToastProps } from "./ui";
 import type { AnchorRect } from "./layerPlace.ts";
 import {
@@ -94,6 +106,7 @@ import type { Dot } from "./cellState";
 import { isAgentLimit, unportableText } from "./mcpCellState";
 import type {
   LocationKey,
+  McpKeyHint,
   McpUndoReport,
   McpEntry,
   McpLocation,
@@ -127,6 +140,8 @@ export interface McpTabProps {
   /// 位置本身（`全部` / `用户级` / 某个项目）：它变了才清空勾选、收起来源页
   scopeKey: string;
   onError: (error: string) => void;
+  /// 壳的错误横幅开着：新手提示让位（DESIGN-components「灰面板 · 一次性说明的用法」）
+  banner?: boolean;
   /// 扫描、写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
   onBusy: (busy: boolean) => void;
   refreshKey: number;
@@ -209,6 +224,23 @@ interface Pane {
   reversible: boolean;
 }
 
+/// 「保留这份」确认框：以 `keepId` 那一份为准改写 `locationIds` 里其余几份同名的 `name`
+interface KeepPane {
+  name: string;
+  keepId: string;
+  /// 表里的几份（含选中的那一份）
+  locationIds: string[];
+  /// 用户看到的那张表的指纹（`McpDiff.revision`）
+  revision: string;
+  /// 这一行的行键与按下时那颗键的位置（撤不了时说明出在这一行）
+  rowKey: string;
+  anchor?: AnchorRect;
+  /// 密钥提醒（S19，issue #147）：要改写的项目文件各自的提醒；还没问回来为 null（墨键灰着）
+  hints: McpKeyHint[] | null;
+  /// 这一次打开的序号：只认这一次发出的检查（关了再打开同一份，上一次的回包不能填进来）
+  check: number;
+}
+
 /// 待确认的删除：点了 ●（锚在那一格下），或选择行全有时按下的点（锚在那个点下）
 interface DeletePane {
   /// 要删的每一项：哪个位置里的哪一个
@@ -255,6 +287,7 @@ export default function McpTab({
   locations,
   scopeKey,
   onError,
+  banner = false,
   onBusy,
   refreshKey,
   onOverview,
@@ -276,10 +309,19 @@ export default function McpTab({
   const [pane, setPane] = useState<Pane | null>(null);
   // 删除的确认框（点了 ●，或选择行全有时按下）
   const [deletePane, setDeletePane] = useState<DeletePane | null>(null);
+  // 「保留这份」的确认框（抽屉里「N 份不一样」那张表的行尾键，issue #114）
+  const [keepPane, setKeepPane] = useState<KeepPane | null>(null);
   // 同名多份的空格：点它出的挑选浮层（锚在那一格上）
   const [pick, setPick] = useState<McpPick | null>(null);
   // 修改生效范围的确认框（生效范围格的 `修改`，spec 2026-09-30-mcp-config-scope R3）：哪一行、按下时那一格在哪
   const [scopeDialog, setScopeDialog] = useState<{ rowKey: string; at: AnchorRect } | null>(null);
+  // 设置里勾了 OpenCode：筛选行下一块没有「!」、能关的灰面板（#115，DESIGN「新手提示条」`mcp-opencode`）。
+  // 自动同步页盖着、在 `发现` 一面时不在眼前；壳的错误横幅、确认框、挑选浮层开着时让位
+  const openCodeHint = useHint("mcp-opencode", {
+    eligible: face === "mine" && !manageOpen && openCodeNoticeWanted(install?.shown ?? []),
+    blocked:
+      banner || pane !== null || deletePane !== null || pick !== null || scopeDialog !== null,
+  });
   // 乐观更新：格键 → 点下去之后该画成的圆点（写进＝●、删除＝空心）；重扫回来后撤掉
   const [optimistic, setOptimistic] = useState<Map<string, Dot>>(new Map());
   // 正在撤销的那一次（undoId）
@@ -299,6 +341,8 @@ export default function McpTab({
     node: ReactNode;
   } | null>(null);
   const cellToastSeq = useRef(0);
+  // 「保留这份」确认框每打开一次的序号（`KeepPane.check`）
+  const keepCheckSeq = useRef(0);
   // 单格删除的结果：锚在按下那一刻那一格的位置（删完这一行可能就没了，不能再去找格子）
   const [rowToast, setRowToast] = useState<{
     rowKey: string;
@@ -399,9 +443,12 @@ export default function McpTab({
         };
       });
       const text = toastFor("autoWrite", { done: items });
+      // 密钥提醒（S19）：自动加进了 .gitignore、或密钥第一次写进仓库没加，在原因的位置说
+      const note = keyHintNote(payload, true);
       setGlobalToast(
         <Toast
           {...text}
+          {...(note ? { reason: joinReasons(text.reason, note) } : {})}
           names={items.length > 2 ? undefined : text.names}
           reading={
             items.length > 2 ? <ToastCount n={items.length} line="toast.count.mcp" /> : undefined
@@ -517,6 +564,11 @@ export default function McpTab({
   const locationOf = (id: string): McpLocation | undefined =>
     overview?.locations.find((location) => location.id === id);
   const labelOf = (id: string) => locationOf(id)?.label ?? id;
+  /// 差异表与「保留这份」里一份的名字：`用户级 · Claude Code`
+  const copyNameOf = (id: string) => {
+    const location = locationOf(id);
+    return location ? mcpCopyName(mcpPlaceNameOf(location.domain), location) : id;
+  };
   /// 一个位置里的一个服务在表里是哪一行、哪一列（写入、删除的结果按位置 id 回来）
   const rowKeyAt = (name: string, locationId: string) =>
     mcpRowKey(locationOf(locationId)?.domain ?? "global", name);
@@ -671,40 +723,129 @@ export default function McpTab({
           : undefined;
       // 单格所在的行已说明对象：只写 `✓ 写进 [Codex] · 撤销`（撤不了时的说明同样不重复服务名）
       const rowText = one ? toastFor("write", { done: itemsOf(created), omitNames: true }) : text;
+      // 密钥提醒（产品负责人 2026-10-06）：写进项目文件的，写成那一条的原因位置接一句（同自动同步规则，没问过用户）；
+      // 第一次暴露的多一颗紧凑键 `加进 .gitignore`，点了就追加，那一条换成 `已加进 .gitignore`。追加的那几行
+      // （来源被忽略、写成时自动加的，和点了键补加的）各有撤销号，接进这次写入的撤销：撤成配置之后、重扫之前撤它们
+      let keyFacts: Parameters<typeof cellKeyHint>[0] = result;
+      const ignoreUndos: string[] = result.gitignoreUndoId ? [result.gitignoreUndoId] : [];
+      const writtenNames = [...new Set(created.map((e) => e.name))];
+      const undoIgnore = async () => {
+        for (const id of ignoreUndos.splice(0).reverse()) {
+          let message: string | null = null;
+          try {
+            const back = await api.mcpUndoWrite(id);
+            if (back.outcome !== "undone") message = back.message;
+          } catch (error) {
+            message = String(error);
+          }
+          if (message !== null)
+            setGlobalToast(
+              <Toast
+                kind="partial"
+                sentence="mcp.scope.toastUndo"
+                names={writtenNames}
+                reason={tSpaced("mcp.report.gitignoreUndoFailed", { message })}
+                onDismiss={dismissGlobal}
+                onClose={dismissGlobal}
+              />,
+            );
+        }
+      };
       // 挪过去的：先还原删掉的那一格，成了再撤写入——中途撤不了就停，不会两边都没了
       const undo = undoId
         ? moveUndoId
           ? () =>
               void (async () => {
                 if (await undoWrite(moveUndoId, keyId, rowText, one))
-                  await undoWrite(undoId, keyId, rowText, one);
+                  await undoWrite(undoId, keyId, rowText, one, undoIgnore);
               })()
-          : () => void undoWrite(undoId, keyId, rowText, one)
+          : () => void undoWrite(undoId, keyId, rowText, one, undoIgnore)
         : null;
       setUndo(undo);
+      /// 写成那一条（单格、挪过去、批量）按此刻的密钥事实画；点了 `加进 .gitignore` 再画一次
+      const showWritten = () => {
+        const keyed = cellKeyHint(keyFacts);
+        const addKey = keyed.addGitignore
+          ? { label: t("mcp.action.addGitignore"), onClick: () => void addIgnore() }
+          : undefined;
+        if (keyId !== undefined) {
+          setKeyToast({
+            keyId,
+            node: (
+              <UndoToast
+                undoId={undoId}
+                {...text}
+                // 写数量（`✓ 写进 ⎔ 2 个`），名字在点的提示框里
+                names={text.kind === "success" ? undefined : text.names}
+                reading={
+                  text.kind === "success" ? (
+                    <ToastCount n={created.length} line="toast.count.mcp" />
+                  ) : undefined
+                }
+                reason={joinReasons(text.reason, keyed.note)}
+                // 再按一次同一个点就恰好撤回时不给 `撤销`（⌘Z 照旧可用）；选中的里这一列原本已有一部分时给。
+                // 密钥第一次写进仓库的多一颗 `加进 .gitignore`，排在 `撤销` 前（同 `去处理 · 撤销`）
+                go={addKey}
+                action={
+                  undo && !reversible ? { label: t("mcp.action.undo"), onClick: undo } : undefined
+                }
+                onDismiss={dismissKey}
+                onClose={text.tier === "notice" ? dismissKey : undefined}
+              />
+            ),
+          });
+        } else if (created.length > 0 && moves.length > 0 && moveFailed === null) {
+          // 挪成：`✓ 挪到团队共享 sentry · 提交后队友也能用`（R4）。不给 `撤销`：点回原来那一格就挪回去了，
+          // 同单格写进（再点一下就是反操作，⑬）；⌘Z 照旧（2026-09-30 产品负责人：「可逆操作不需要撤销吧」）
+          const c = created[0];
+          const toTeam = mcpColumnOf(c.targetId) === CLAUDE_TEAM;
+          setCellToast({
+            id: ++cellToastSeq.current,
+            rowKey: rowKeyAt(c.name, c.targetId),
+            columnId: mcpColumnOf(c.targetId),
+            node: (
+              <Toast
+                kind="success"
+                sentence={toTeam ? "mcp.claude.moveToTeamDone" : "mcp.claude.moveToSelfDone"}
+                names={[c.name]}
+                trail={[toTeam ? teamGained() : teamLost()]}
+                reason={keyed.note}
+                go={addKey}
+                onDismiss={dismissCell}
+              />
+            ),
+          });
+        } else if (created.length > 0 && moves.length === 0) {
+          // 单格写成：被点那一格正下方浮起 `✓ 写进 [Codex]`（不重复服务名），替换上一条。
+          // 不带撤销：再点那一格就是删掉刚写的那一份（⌘Z 照旧可用）
+          setCellToast({
+            id: ++cellToastSeq.current,
+            rowKey: rowKeyAt(created[0].name, created[0].targetId),
+            columnId: mcpColumnOf(created[0].targetId),
+            node: (
+              <Toast
+                {...rowText}
+                reason={joinReasons(rowText.reason, keyed.note)}
+                go={addKey}
+                onDismiss={dismissCell}
+              />
+            ),
+          });
+        }
+      };
+      const addIgnore = async () => {
+        let added: McpReport;
+        try {
+          added = await api.addMcpGitignore(keyFacts.ignorable ?? []);
+        } catch (error) {
+          added = { entries: [], undoId: null, gitignoreFailed: String(error) };
+        }
+        if (added.gitignoreUndoId) ignoreUndos.push(added.gitignoreUndoId);
+        keyFacts = afterGitignoreAdd(keyFacts, added);
+        showWritten();
+      };
       if (keyId !== undefined) {
-        setKeyToast({
-          keyId,
-          node: (
-            <UndoToast
-              undoId={undoId}
-              {...text}
-              // 写数量（`✓ 写进 ⎔ 2 个`），名字在点的提示框里
-              names={text.kind === "success" ? undefined : text.names}
-              reading={
-                text.kind === "success" ? (
-                  <ToastCount n={created.length} line="toast.count.mcp" />
-                ) : undefined
-              }
-              // 再按一次同一个点就恰好撤回时不给 `撤销`（⌘Z 照旧可用）；选中的里这一列原本已有一部分时给
-              action={
-                undo && !reversible ? { label: t("mcp.action.undo"), onClick: undo } : undefined
-              }
-              onDismiss={dismissKey}
-              onClose={text.tier === "notice" ? dismissKey : undefined}
-            />
-          ),
-        });
+        showWritten();
       } else if (failed.length > 0) {
         // 单格失败：不出成功那一窗，同一个位置（格子正下方）说 `context7 写进 [Codex] 失败 · 原因`，
         // 第二行是写的那个文件（spec 2026-10-04-local-diagnostics R12）；提示条里不放详情
@@ -721,45 +862,23 @@ export default function McpTab({
           reason: line.reason,
           stats: path ? displayPath(path) : undefined,
         });
-      } else if (created.length > 0 && moves.length > 0) {
+      } else if (created.length > 0 && moves.length > 0 && moveFailed !== null) {
+        // 写进去了、另一格没删掉：现在两处都有，照实说（行上会挂 `两处都有`，抽屉里只留一处）；密钥已经写进
+        // 项目文件的，那一句照样接在后面（这一条是格子下的说明，不带键）
         const c = created[0];
         const toTeam = mcpColumnOf(c.targetId) === CLAUDE_TEAM;
-        if (moveFailed !== null) {
-          // 写进去了、另一格没删掉：现在两处都有，照实说（行上会挂 `两处都有`，抽屉里只留一处）
-          failCell(
-            rowKeyAt(c.name, c.targetId),
-            mcpColumnOf(c.targetId),
+        failCell(
+          rowKeyAt(c.name, c.targetId),
+          mcpColumnOf(c.targetId),
+          joinReasons(
             t(toTeam ? "mcp.claude.writtenTeamKept" : "mcp.claude.writtenSelfKept", {
               message: moveFailed,
             }),
-          );
-        } else {
-          // 挪成：`✓ 挪到团队共享 sentry · 提交后队友也能用`（R4）。不给 `撤销`：点回原来那一格就挪回去了，
-          // 同单格写进（再点一下就是反操作，⑬）；⌘Z 照旧（2026-09-30 产品负责人：「可逆操作不需要撤销吧」）
-          setCellToast({
-            id: ++cellToastSeq.current,
-            rowKey: rowKeyAt(c.name, c.targetId),
-            columnId: mcpColumnOf(c.targetId),
-            node: (
-              <Toast
-                kind="success"
-                sentence={toTeam ? "mcp.claude.moveToTeamDone" : "mcp.claude.moveToSelfDone"}
-                names={[c.name]}
-                trail={[toTeam ? teamGained() : teamLost()]}
-                onDismiss={dismissCell}
-              />
-            ),
-          });
-        }
+            cellKeyHint(keyFacts).note,
+          ) ?? "",
+        );
       } else if (created.length > 0) {
-        // 单格写成：被点那一格正下方浮起 `✓ 写进 [Codex]`（不重复服务名），替换上一条。
-        // 不带撤销：再点那一格就是删掉刚写的那一份（⌘Z 照旧可用）
-        setCellToast({
-          id: ++cellToastSeq.current,
-          rowKey: rowKeyAt(created[0].name, created[0].targetId),
-          columnId: mcpColumnOf(created[0].targetId),
-          node: <Toast {...rowText} onDismiss={dismissCell} />,
-        });
+        showWritten();
       }
     }
     await refresh();
@@ -781,6 +900,9 @@ export default function McpTab({
     keyId: string | undefined,
     text: ToastText,
     one?: { keys: string[]; rowKey: string; columnId: string; at?: AnchorRect },
+    /// 撤成了、重扫之前接着做的（撤回追加进 .gitignore 的那几行）：重扫会跑自动同步规则，夹在中间可能把刚撤掉的
+    /// 服务按「目标已被忽略」悄悄补回来，随后再撤掉忽略那一行，密钥就没人提醒地留在仓库里
+    beforeRefresh?: () => Promise<void>,
   ): Promise<boolean> => {
     const single = one !== undefined;
     const at = one?.at;
@@ -797,6 +919,7 @@ export default function McpTab({
       setUndoBusy((prev) => (prev === undoId ? null : prev));
     }
     if (report.outcome === "undone") {
+      await beforeRefresh?.();
       setKeyToast(null);
       setCellToast(null);
       if (at) setRowToast(null);
@@ -1018,6 +1141,7 @@ export default function McpTab({
     targets: LocationKey[],
     claude: ClaudeCell | undefined,
     columns: ReadonlySet<string>,
+    gitignore: ScopeGitignore,
   ) => {
     const dialog = scopeDialog;
     if (dialog === null) return;
@@ -1037,7 +1161,7 @@ export default function McpTab({
     setCellNotice(null);
     if (now === "move") setOptimisticFor(fromKeys, "missing");
     void enqueue(() =>
-      applyScopeChange(now, placed, from, tos, toLabel, plan, fromKeys, dialog.at),
+      applyScopeChange(now, placed, from, tos, toLabel, plan, fromKeys, dialog.at, gitignore),
     );
   };
 
@@ -1050,6 +1174,7 @@ export default function McpTab({
     plan: ScopeMove,
     fromKeys: string[],
     at: AnchorRect,
+    gitignore: ScopeGitignore,
   ) => {
     const rowKey = rowKeyOf(placed);
     // 结果出在右下：触发它的是确认框里的墨键，确认框一关键就没了（DESIGN「提示条放哪」：键随页面消失了 → 右下）
@@ -1067,7 +1192,8 @@ export default function McpTab({
     try {
       const preview = await api.proposeMcpSync(plan.selections);
       if (preview.actions.length > 0) {
-        written = await api.applyMcp(preview.planId, true);
+        // 密钥提醒（S19）：后端按来源与目标的 git 事实再判一次；勾了的只给「第一次暴露」的项目文件加
+        written = await api.applyMcp(preview.planId, true, gitignore.add);
         created = written.entries.filter((e) => e.outcome === "created");
         // 移动：写成的那几份才从这边删；没写成的留着，不会两边都没了
         // 去了几处的同一份只删一次
@@ -1111,7 +1237,31 @@ export default function McpTab({
     // ~/.claude.json），写入那次的撤销号已经失效；直接从目标里删掉刚写的那几份。复制只有一次写入，照常撤
     const writeUndo = written?.undoId ?? null;
     const removeUndo = removed?.undoId ?? null;
-    const takeBack = async () => {
+    // 密钥提醒（S19）追加进 .gitignore 的那几行另有一个撤销号：配置撤回之后再撤它（先撤它的话，密钥还在文件里、
+    // 却已不被忽略）。撤不回只多一行忽略，不拦前面的撤销，提示条说一声
+    const ignoreUndo = written?.gitignoreUndoId ?? null;
+    const undoIgnore = async () => {
+      if (ignoreUndo === null) return;
+      try {
+        const back = await api.mcpUndoWrite(ignoreUndo);
+        if (back.outcome !== "undone")
+          setGlobalToast(
+            <Toast
+              kind="partial"
+              sentence="mcp.scope.toastUndo"
+              names={[placed.name]}
+              reason={tSpaced("mcp.report.gitignoreUndoFailed", { message: back.message })}
+              onDismiss={dismissGlobal}
+              onClose={dismissGlobal}
+            />,
+          );
+      } catch (error) {
+        onError(String(error));
+      }
+    };
+    /// 拿掉写过去的那几份；都拿掉了为 true
+    const takeBack = async (): Promise<boolean> => {
+      let ok = false;
       try {
         const back = await api.deleteMcpOriginal(
           created.map((e) => ({ locationId: e.targetId, name: e.name })),
@@ -1128,21 +1278,28 @@ export default function McpTab({
               onClose={dismissGlobal}
             />,
           );
+        ok = miss === undefined;
       } catch (error) {
         onError(String(error));
       }
       await refresh();
+      return ok;
     };
     setUndo(
       writeUndo === null
         ? null
         : removeUndo === null
-          ? () => void undoWrite(writeUndo, undefined, undoText, one)
+          ? () => void undoWrite(writeUndo, undefined, undoText, one, undoIgnore)
           : () =>
               void (async () => {
-                if (await undoWrite(removeUndo, undefined, undoText, one)) await takeBack();
+                if ((await undoWrite(removeUndo, undefined, undoText, one)) && (await takeBack()))
+                  await undoIgnore();
               })(),
     );
+    // 密钥提醒（S19）：来源被忽略、目标也自动加进了 .gitignore 的，在原因的位置说「已加进 .gitignore」；
+    // 确认框没对某个目标出过勾选（检查之后来源又变了）却把密钥第一次写进了仓库的、勾选护着的文件确认前被 `git add`
+    // 了（issue #155）的，也说一声；按目标比对，确认框里说过的不再说（同「保留这份」）
+    const keyNote = written ? keyHintNoteAsked(written, gitignore) : undefined;
     if (created.length === 0) {
       setGlobalToast(
         <Toast
@@ -1162,7 +1319,7 @@ export default function McpTab({
           sentence={line}
           place={toName}
           names={[placed.name]}
-          reason={problem}
+          reason={joinReasons(problem, keyNote)}
           onDismiss={dismissGlobal}
           onClose={dismissGlobal}
         />,
@@ -1185,8 +1342,8 @@ export default function McpTab({
           place={toName}
           names={[placed.name]}
           trail={trail}
-          // 第三方模式那一份没写成：成功句后接那一句（`McpReportEntry.mirrorFailed`）
-          reason={mirrorFailedNote(created)}
+          // 第三方模式那一份没写成：成功句后接那一句（`McpReportEntry.mirrorFailed`）；再接密钥提醒的那一句
+          reason={joinReasons(mirrorFailedNote(created), keyNote)}
           onDismiss={dismissGlobal}
         />,
       );
@@ -1428,6 +1585,117 @@ export default function McpTab({
     });
   };
 
+  /// 打开「保留这份」的确认框，同时问一次密钥提醒（只读）；问回来之前墨键灰着。问不出来（不该发生）按没有要提醒的算，
+  /// 改的时候后端照样再判一次。确认框已换成别的、或已关掉，回来的就不要了
+  const openKeep = (open: Omit<KeepPane, "hints" | "check">) => {
+    keepCheckSeq.current += 1;
+    const pane: KeepPane = { ...open, hints: null, check: keepCheckSeq.current };
+    setKeepPane(pane);
+    const settle = (hints: McpKeyHint[]) =>
+      setKeepPane((now) => (now !== null && now.check === pane.check ? { ...now, hints } : now));
+    api
+      .checkMcpKeepKeyHints(pane.name, pane.keepId, pane.locationIds)
+      .then(settle, () => settle([]));
+  };
+
+  /// 「保留这份」确认之后：其余几份改成选中的那一份（core 一处不成整次不动），右下提示条给撤销（⌘Z 同一个）。
+  /// 改完重扫，这一行不再「N 份不一样」，抽屉里那一段跟着消失
+  const keepCopy = (pane: KeepPane, gitignore: KeepGitignore) => {
+    setKeepPane(null);
+    const place = copyNameOf(pane.keepId);
+    // 没能退回的那一处带着备份：给 `在访达中显示备份 ↗`
+    const cannot = (reason: string | undefined, backup: string | null = null) =>
+      setGlobalToast(
+        <Toast
+          kind="cannot"
+          sentence="mcp.keep.toastCannot"
+          place={place}
+          names={[pane.name]}
+          reason={reason}
+          secondary={
+            backup === null
+              ? undefined
+              : { label: t("mcp.undo.revealBackup"), onClick: () => void reveal(backup) }
+          }
+          onDismiss={dismissGlobal}
+          onClose={dismissGlobal}
+        />,
+      );
+    return enqueue(async () => {
+      onBusy(true);
+      let result: McpReport | null = null;
+      try {
+        // 密钥提醒（issue #147）：后端按选中那一份与要改写的几处的 git 事实再判一次；勾了的只给「第一次暴露」的加
+        result = await api.keepMcpCopy(
+          pane.name,
+          pane.keepId,
+          pane.locationIds,
+          pane.revision,
+          gitignore.add,
+        );
+      } catch (error) {
+        cannot(String(error));
+      } finally {
+        onBusy(false);
+      }
+      if (result !== null) {
+        // 没成的每一处都说：写到一半失败、又没能退回的那一处也是 failed（它其实改了）
+        const failed = result.entries.filter((e) => e.outcome === "failed");
+        const updated = result.entries.filter((e) => e.outcome === "updated");
+        if (failed.length > 0) {
+          cannot(
+            listText(
+              failed.map((e) =>
+                t("mcp.keep.failedAt", { place: copyNameOf(e.targetId), message: e.message }),
+              ),
+              "semicolon",
+            ),
+            failed.find((e) => e.backupPath !== null)?.backupPath ?? null,
+          );
+        } else {
+          const trail = updated.length > 0 ? [tn("mcp.keep.toastTrail", updated.length)] : [];
+          const text: ToastText = {
+            tier: "notice",
+            kind: "success",
+            sentence: "mcp.keep.toast",
+            place,
+            names: [pane.name],
+            agents: [],
+            trail,
+          };
+          const undoId = result.undoId;
+          const one = { keys: [], rowKey: pane.rowKey, columnId: "", at: pane.anchor };
+          const undo = undoId
+            ? () =>
+                void (async () => {
+                  // 撤成了这一窗没用了；没撤成时说明出在这一行下，撤销记录已用掉，这一窗的键也不能再按
+                  await undoWrite(undoId, undefined, text, one);
+                  setGlobalToast(null);
+                })()
+            : null;
+          setUndo(undo);
+          setGlobalToast(
+            <UndoToast
+              undoId={undoId}
+              kind="success"
+              sentence="mcp.keep.toast"
+              place={place}
+              names={[pane.name]}
+              trail={trail}
+              // 第三方模式那一份没改成：成功句后接那一句（`McpReportEntry.mirrorFailed`）；密钥提醒：来源被忽略、
+              // 自动加进了 .gitignore 的说「已加进 .gitignore」，确认框没出勾选（检查之后又变了）却第一次写进了仓库的也说
+              reason={joinReasons(mirrorFailedNote(updated), keyHintNoteAsked(result, gitignore))}
+              action={undo ? { label: t("mcp.action.undo"), onClick: undo } : undefined}
+              onDismiss={dismissGlobal}
+              onClose={dismissGlobal}
+            />,
+          );
+        }
+      }
+      await refresh();
+    });
+  };
+
   /// 点一格：○＝写进（同域单格直接写），●＝确认后从这个 agent 的配置里删掉
   /// 列是 agent；落到这一行自己位置里这一列的配置位置上，判断在这一行自己那一页里做
   const onCell = (rowKey: string, columnId: string) => {
@@ -1542,6 +1810,18 @@ export default function McpTab({
     enabled: !manageOpen,
     bar,
   };
+  /// 勾了 OpenCode 的说明（#115）：表格上方（筛选行下，`flush`）与两种空态上方（只勾了 OpenCode 时
+  /// 一个配置位置都没有，正是最该说的时候）同一块
+  const openCodePanel = (flush: boolean) => (
+    <NoticePanel
+      scope="section"
+      mark={false}
+      open={openCodeHint.visible}
+      onClose={openCodeHint.dismiss}
+      flush={flush}
+      message={HINTS["mcp-opencode"]({ agents: [], skills: 0 })}
+    />
+  );
   /// 自动同步页（二级页，原来源管理页）：每个配置文件的自动同步规则；以前订阅的别处配置照旧能移除
   const managePage = manageOpen ? (
     <SourcesPage
@@ -1567,6 +1847,7 @@ export default function McpTab({
     return (
       <LocationFrame
         {...frame}
+        hint={openCodePanel(false)}
         empty={{
           description: t("mcp.empty.noFiles"),
           hint: t("mcp.empty.noFilesHint"),
@@ -1581,6 +1862,7 @@ export default function McpTab({
     return (
       <LocationFrame
         {...frame}
+        hint={openCodePanel(false)}
         empty={{
           description:
             scopeKey === "all"
@@ -1683,6 +1965,8 @@ export default function McpTab({
           ? claudeMoveTip(column.id, place)
           : null;
       const where = view.clickable ? claudeWhereText(column.id, place, row.domainKey) : null;
+      // 项目里团队共享格点了会写进（#115）：第二行末尾接「要在 Claude Code 里启用才生效」
+      const writes = view.clickable && !invalid && view.dot !== "linked";
       cells[column.id] = {
         dot: view.dot,
         clickable: view.clickable || invalid,
@@ -1698,7 +1982,9 @@ export default function McpTab({
                   ? pickTip(row.name, choiceCount(row, target.id))
                   : t("mcp.cell.clickToWrite")
               : (view.reason ?? ""),
-        tipDetail: invalid ? undefined : (move?.detail ?? where ?? undefined),
+        tipDetail: invalid
+          ? undefined
+          : (withEnableNote(move?.detail ?? where, column.id, row.domainKey, writes) ?? undefined),
         pending: pendingCells.has(cellKey(key, column.id)),
       };
     }
@@ -1809,12 +2095,22 @@ export default function McpTab({
             <span className="mx-kv__value">
               {transports.join(" / ") || t("mcp.detail.transportNone")}
             </span>
-            <McpEndpointRow name={row.name} locationId={originId} load={api.mcpEndpoint} />
-            <span className="mx-kv__key">{t("mcp.detail.origin")}</span>
-            <span className="mx-kv__value">
-              <Mono path>{originPath}</Mono>
-              <RevealLink path={originPath} onReveal={() => void reveal(originPath)} />
-            </span>
+            <McpEndpointRow
+              name={row.name}
+              locationId={originId}
+              load={api.mcpEndpoint}
+              reloadKey={overview}
+            />
+            {/* 几份不一样时各份的路径在下面那张表的「原件」列里，这里不再单列 */}
+            {differing.length === 0 ? (
+              <>
+                <span className="mx-kv__key">{t("mcp.detail.origin")}</span>
+                <span className="mx-kv__value">
+                  <Mono path>{originPath}</Mono>
+                  <RevealLink path={originPath} onReveal={() => void reveal(originPath)} />
+                </span>
+              </>
+            ) : null}
           </div>
           {both && selfAt && teamAt ? (
             <div className="mx-keepone">
@@ -1831,9 +2127,31 @@ export default function McpTab({
               name={row.name}
               locationIds={differing}
               load={api.mcpFieldDiff}
-              labelOf={labelOf}
+              labelOf={copyNameOf}
+              pathOf={(id) => locationOf(id)?.path}
               revealPath={locationOf(differing[0])?.path}
               onReveal={(path) => void reveal(path)}
+              reloadKey={overview}
+              onKeep={(keepId, revision) =>
+                openKeep({
+                  name: row.name,
+                  keepId,
+                  locationIds: differing,
+                  revision,
+                  rowKey: key,
+                  // WebKit 点键不给焦点：拿不到按下的那颗键时退到这一行（改完它还在）
+                  anchor:
+                    anchorNow() ??
+                    (() => {
+                      const r = document
+                        .querySelector(`[data-row="${CSS.escape(key)}"]`)
+                        ?.getBoundingClientRect();
+                      return r
+                        ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom }
+                        : undefined;
+                    })(),
+                })
+              }
             />
           ) : null}
         </>
@@ -2048,6 +2366,7 @@ export default function McpTab({
         originLabel={t("mcp.table.origin")}
         placeLabel={table.places.size > 0 ? t("mcp.table.place") : undefined}
         bar={bar}
+        hint={openCodePanel(true)}
         rows={rows}
         nameLabel={t("mcp.table.name")}
         nameTip={t("mcp.table.nameTip")}
@@ -2070,6 +2389,7 @@ export default function McpTab({
           !manageOpen &&
           pane === null &&
           deletePane === null &&
+          keepPane === null &&
           pick === null &&
           scopeDialog === null
         }
@@ -2132,6 +2452,26 @@ export default function McpTab({
         </Confirm>
       )}
 
+      {keepPane !== null && (
+        <McpKeepConfirm
+          // 换了一次「保留这份」就是新的确认框：勾选不跟着上一次
+          key={`${keepPane.keepId}\u0000${keepPane.revision}`}
+          title={t("mcp.keep.title", {
+            place: copyNameOf(keepPane.keepId),
+            name: keepPane.name,
+          })}
+          body={(() => {
+            const others = keepPane.locationIds.filter((id) => id !== keepPane.keepId);
+            return tn("mcp.keep.body", others.length, {
+              places: listText(others.map(copyNameOf)),
+            });
+          })()}
+          hints={keepPane.hints}
+          onConfirm={(gitignore) => void keepCopy(keepPane, gitignore)}
+          onCancel={() => setKeepPane(null)}
+        />
+      )}
+
       {scopeDialogRow !== undefined && scopeDialogFrom !== undefined ? (
         <McpScopeDialog
           name={scopeDialogRow.name}
@@ -2143,7 +2483,15 @@ export default function McpTab({
             scopeView(scopeDialogRow, mode, targets, undefined, columns)
           }
           targetBlocked={(key) => targetBlocked(scopeDialogRow, key, undefined)}
-          onConfirm={(mode, targets, columns) => changeScope(mode, targets, undefined, columns)}
+          keyHints={(targets, columns) => {
+            const { plan } = scopePlan(scopeDialogRow, targets, undefined, columns);
+            return plan.selections.length > 0
+              ? api.checkMcpKeyHints(plan.selections)
+              : Promise.resolve([]);
+          }}
+          onConfirm={(mode, targets, columns, gitignore) =>
+            changeScope(mode, targets, undefined, columns, gitignore)
+          }
           onCancel={() => setScopeDialog(null)}
         />
       ) : null}

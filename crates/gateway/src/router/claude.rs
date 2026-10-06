@@ -6,9 +6,10 @@
 //!
 //! 形状转换全在 `translate::anthropic`（纯同步）；这里只管鉴权、查清单、收发字节、保活计时与日志。
 use super::{
-    decode_zstd, describe, header_str, log_field, mask_account_ids, parse_provider_base,
-    path_is_safe, read_limited, resolve_target, send_with_connect_retry, Agent, Body, BoxError,
-    LoggedEntry, Protocol, Route, Router, UpstreamBody,
+    decode_zstd, describe, header_str, is_key_rejection, log_field, mask_account_ids,
+    parse_provider_base, path_is_safe, read_limited, rejection_detail, resolve_target,
+    send_with_connect_retry, Agent, Body, BoxError, KeyVerdict, LoggedEntry, Protocol, Route,
+    Router, UpstreamBody,
 };
 use crate::translate::anthropic::{
     self as anthropic, AnthropicEmitter, AnthropicError, ChatEvents, Keepalive, MessageAggregator,
@@ -714,9 +715,10 @@ async fn messages(
             Protocol::Chat => "/chat/completions",
             Protocol::Responses => "/responses",
         };
+        let target_url = resolve_target(&base, suffix, "");
         let request = router
             .third_party
-            .post(resolve_target(&base, suffix, ""))
+            .post(target_url.as_str())
             .header("content-type", "application/json")
             .header("accept", "text/event-stream")
             .header("authorization", format!("Bearer {key}"))
@@ -745,6 +747,12 @@ async fn messages(
             );
         }
         if status.is_success() {
+            router.report_key(
+                Agent::Claude,
+                entry.provider.trim(),
+                &key,
+                KeyVerdict::Accepted,
+            );
             break (response, translated);
         }
         let header = |name: &str| {
@@ -804,6 +812,15 @@ async fn messages(
             format_retried = true;
             options.structured_output = StructuredOutput::PromptOnly;
             continue;
+        }
+        if is_key_rejection(status) {
+            let detail = rejection_detail("POST", &target_url, status, &failure_body, &key);
+            router.report_key(
+                Agent::Claude,
+                entry.provider.trim(),
+                &key,
+                KeyVerdict::Rejected { detail },
+            );
         }
         let error = anthropic::map_upstream_error(
             &UpstreamFailure {

@@ -125,7 +125,12 @@ export function InstallPage(props: InstallPageProps) {
   const submit = async () => {
     const done = await state.install([planPathOf(skill)], [skill.name]);
     if (!done) return;
-    onDone(done.outcome, { kind: "skill", toast: done.toast, undoId: done.outcome.undoId });
+    onDone(done.outcome, {
+      kind: "skill",
+      toast: done.toast,
+      undoId: done.outcome.undoId,
+      handle: done.handle,
+    });
     page.leave();
   };
   return (

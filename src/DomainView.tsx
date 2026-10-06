@@ -28,19 +28,33 @@ import { blockedTipOf } from "./cellTip.ts";
 import { orphanOrigin, orphanSelectReason, orphanTip } from "./orphanRows.ts";
 import { listText, t, tn } from "./i18n.ts";
 import {
+  agentCopiesOf,
   columnOfTarget,
   columnPress,
+  keepSideKey,
   refAt,
   refRowKey,
   skillRowKey,
+  type KeepSide,
   type PlacedOrphan,
   type SkillRow,
   type SkillsView,
 } from "./skillsView.ts";
-import { BusySlot, Button, Empty, Mono, Note, Tag, Tooltip, type EmptyArt } from "./ui/index.ts";
+import {
+  BusySlot,
+  Button,
+  DiffTable,
+  Empty,
+  Mono,
+  Note,
+  Tag,
+  Tooltip,
+  type EmptyArt,
+} from "./ui/index.ts";
 import type { AnchorRect } from "./layerPlace.ts";
 import type { CellRef, CellState, Overview } from "./types.ts";
 import { keepBlockedReason } from "./dupNotice.ts";
+import { agentCopyRow, skillDiffTable, type SkillDiffTable } from "./skillDiffTable.ts";
 
 /// 一格的键（乐观更新、闪烁、就地提示都按它认格）：这一行（带位置）+ agent 列
 export const skillCellKey = (ref: CellRef) => cellKey(refRowKey(ref), columnOfTarget(ref.targetId));
@@ -71,13 +85,14 @@ export interface DomainViewProps {
   hiddenRows: Set<string>;
   /// 同名行悬停读数（`3 个文件`）；没取到时为 undefined
   dupReadout: Map<string, string>;
-  /// 同名几份推荐留哪份（行键 → 推荐那一行的行键 + 理由）：推荐的那一行名字后挂 `推荐保留`，
-  /// 抽屉里 `只留这份` 旁写理由（2026-09-30 产品负责人：「有个推荐的标签，降低用户决策成本」）
+  /// 同名几份推荐留哪份（行键 → 推荐那一行的行键 + 理由）：推荐的那一行名字后挂 `推荐保留`（提示框写理由），
+  /// 悬停它就出 `只留这份`（2026-09-30 产品负责人：「有个推荐的标签，降低用户决策成本」）
   dupAdvice?: Map<string, { keep: string; reason: string }>;
   onDupHover: (row: SkillRow) => void;
-  /// 点「只留这份」（抽屉里的键，或右键菜单）：确认框锚在 `anchor` 下面
+  /// 点「只留这份」（抽屉里的键，或右键菜单）：留 `kept`、挪走 `other`。一方可以是 agent 自己目录里
+  /// 不在任何原件位置里的那一份（抽屉差异表里的那一行，issue #153）
   /// `at`：按下那一刻触发控件的位置——结果的提示小窗锚在这里，抽屉收起、行重排之后也还在原处
-  onKeepThis: (row: SkillRow, other: SkillRow, at: AnchorRect) => void;
+  onKeepThis: (kept: KeepSide, other: KeepSide, at: AnchorRect) => void;
   /// 正在为哪一行体检（点了「只留这份」、确认框还没出来）：那一行的键原位忙碌、不随悬停收起
   keepBusy?: string | null;
   /// 孤链行（原件已不在的失效链接，见 orphanRows.ts）。本页全部，筛选在这里做
@@ -122,6 +137,9 @@ export interface DomainViewProps {
   keyToast?: { keyId: string; node: ReactNode } | null;
   /// 单格成功：浮在被点那一格正下方
   cellToast?: { id: number; rowKey: string; columnId: string; node: ReactNode } | null;
+  /// 拉开这一行的抽屉并滚到它（装完提示的「去处理」，issue #111）：`nonce` 变了才再拉一次
+  reveal?: { key: string; nonce: number } | null;
+  onRevealed?: () => void;
   /// 名字后、`×2` 之后再挂的记号（有更新：灰字 `有更新`）；没有就 undefined
   rowMark?: (row: SkillRow, path: string) => ReactNode;
   /// 抽屉的末行（有更新：`来自 anthropics/skills · 有新版本` + `更新` + `看改动 ↗`）
@@ -296,7 +314,26 @@ export default function DomainView(props: DomainViewProps) {
       const other = dup.length === 2 ? dup.find((r) => r.sourceId !== row.sourceId) : undefined;
       const readout = props.dupReadout.get(key) || undefined;
       const advice = dup.length > 1 ? props.dupAdvice?.get(key) : undefined;
-      const keptOrigin = advice ? dup.find((r) => skillRowKey(r) === advice.keep) : undefined;
+      // 抽屉里「N 份不一样」那张表（issue #111）：同名的几份一行一份，与表格同序；两份时行尾 `只留这份`。
+      // agent 自己目录里不在任何原件位置里的同名那一份（某一格「那里已有同名的」，issue #153）也接在后面
+      const sides: KeepSide[] = [
+        ...dup.map((r) => ({ row: r })),
+        ...agentCopiesOf(view, row, props.hiddenRows).map((c) => ({ copy: c })),
+      ];
+      const table =
+        sides.length > 1
+          ? skillDiffTable(
+              sides.map((side) =>
+                "row" in side
+                  ? {
+                      id: skillRowKey(side.row),
+                      place: originOf(side.row.sourceId),
+                      path: pathOf(side.row),
+                    }
+                  : agentCopyRow(side.copy),
+              ),
+            )
+          : null;
       const otherReadout = other
         ? props.dupReadout.get(skillRowKey(other)) || undefined
         : undefined;
@@ -357,7 +394,7 @@ export default function DomainView(props: DomainViewProps) {
         hoverAction:
           advice?.keep === key && other !== undefined ? (
             <KeepKey
-              onKeep={(at) => props.onKeepThis(row, other, at)}
+              onKeep={(at) => props.onKeepThis({ row }, { row: other }, at)}
               label={t("skills.dup.keepLabel", {
                 origin: originOf(row.sourceId),
                 skill: row.skill,
@@ -367,7 +404,8 @@ export default function DomainView(props: DomainViewProps) {
             />
           ) : undefined,
         // 点名字 / ×2 / 拉手拉开抽屉：描述、路径 + 打开 ↗、改于 … · N 个文件（读不到描述不写那一行）；
-        // 同名行末尾一颗 `只留这份`（名称格里不放键，名字不被挤成省略号）
+        // 同名行末尾一段「N 份不一样」的差异表（各份的路径在表里，不再单列路径），行尾 `只留这份`
+        // （名称格里不放键，名字不被挤成省略号）
         detail: (
           <SkillDetail
             description={description}
@@ -375,28 +413,20 @@ export default function DomainView(props: DomainViewProps) {
             readout={readout}
             onShow={() => props.onDupHover(row)}
             onReveal={() => props.onReveal(path)}
-            keep={
-              other === undefined ? undefined : (
-                <>
-                  <KeepKey
-                    onKeep={(at) => props.onKeepThis(row, other, at)}
-                    label={t("skills.dup.keepLabel", {
-                      origin: originOf(row.sourceId),
-                      skill: row.skill,
-                    })}
-                    busy={props.keepBusy === key}
-                    disabledReason={keepBlocked ?? undefined}
-                  />
-                  {advice ? (
-                    <span className="mx-detail__advice">
-                      {advice.keep === key
-                        ? t("skills.dup.advice", { reason: advice.reason })
-                        : keptOrigin
-                          ? t("skills.dup.adviceOther", { origin: originOf(keptOrigin.sourceId) })
-                          : t("skills.dup.adviceOtherUnknown")}
-                    </span>
-                  ) : null}
-                </>
+            copies={
+              table === null ? undefined : (
+                <SkillCopies
+                  skill={row.skill}
+                  table={table}
+                  keepBusy={props.keepBusy ?? null}
+                  onReveal={props.onReveal}
+                  onKeep={(id, at) => {
+                    const kept = sides.find((side) => keepSideKey(side) === id);
+                    const otherId = table.rows.find((r) => r.id === id)?.otherId;
+                    const theOther = sides.find((side) => keepSideKey(side) === otherId);
+                    if (kept && theOther) props.onKeepThis(kept, theOther, at);
+                  }}
+                />
               )
             }
             end={props.rowDrawerEnd?.(row, path)}
@@ -415,12 +445,16 @@ export default function DomainView(props: DomainViewProps) {
                   run: () => {
                     const r = el.getBoundingClientRect();
                     const n = el.querySelector(".mx-row__name")?.getBoundingClientRect() ?? r;
-                    props.onKeepThis(row, other, {
-                      top: r.top,
-                      left: n.left,
-                      right: n.right,
-                      bottom: r.bottom,
-                    });
+                    props.onKeepThis(
+                      { row },
+                      { row: other },
+                      {
+                        top: r.top,
+                        left: n.left,
+                        right: n.right,
+                        bottom: r.bottom,
+                      },
+                    );
                   },
                 },
               ]
@@ -596,6 +630,8 @@ export default function DomainView(props: DomainViewProps) {
       dotWords="skill"
       filterText={props.filterText}
       onFilterText={props.onFilterText}
+      reveal={props.reveal}
+      onRevealed={props.onRevealed}
       headActions={<SourceKeys onManage={props.onManageSources} />}
       selected={props.selected}
       onSelectionChange={props.onSelectionChange}
@@ -713,14 +749,15 @@ function KeepKey({
 }
 
 /// 抽屉里的行详情：描述（ink-mute 13，不截断；读不到不写）、路径（等宽 ink-faint）+ 打开 ↗、
-/// 改于 … · N 个文件；同名行末尾 `只留这份`。拉开那一刻去取读数（同名时两份一起取，给 ×2 的提示框用）
+/// 改于 … · N 个文件；同名行末尾一段「N 份不一样」（各份的路径在那张表里，路径一行不再单列，同 MCP）。
+/// 拉开那一刻去取读数（同名时两份一起取，给 ×2 的提示框用）
 function SkillDetail({
   description,
   path,
   readout,
   onShow,
   onReveal,
-  keep,
+  copies,
   end,
 }: {
   description?: string;
@@ -728,8 +765,8 @@ function SkillDetail({
   readout?: string;
   onShow: () => void;
   onReveal: () => void;
-  /// 同名行的 `只留这份`
-  keep?: ReactNode;
+  /// 同名行的「N 份不一样」那一段（`SkillCopies`）
+  copies?: ReactNode;
   /// 末行（有更新）
   end?: ReactNode;
 }) {
@@ -741,14 +778,65 @@ function SkillDetail({
   return (
     <>
       {description ? <div className="mx-detail__desc">{description}</div> : null}
-      <div className="mx-detail__path">
-        <Mono path>{path}</Mono>
-        <RevealLink path={path} onReveal={onReveal} />
-      </div>
+      {copies ? null : (
+        <div className="mx-detail__path">
+          <Mono path>{path}</Mono>
+          <RevealLink path={path} onReveal={onReveal} />
+        </div>
+      )}
       {readout ? <div>{readout}</div> : null}
-      {keep ? <div className="mx-detail__keep">{keep}</div> : null}
+      {copies ?? null}
       {end ?? null}
     </>
+  );
+}
+
+/// 同名行抽屉里「N 份不一样」那一段（issue #111，画板 #105 第七稿第 2、3 节）：段首小标 + 差异表 `DiffTable`，
+/// 与 MCP 同一个骨架——一行一份，行首位置名，只有「原件」一列（路径，等宽、长了折行），行尾 `只留这份`
+/// （两份都能选；另一份在应用包里的那一行禁用并说原因）。按下照旧：先体检（键原位忙碌）、再确认、结果带撤销
+function SkillCopies({
+  skill,
+  table,
+  keepBusy,
+  onKeep,
+  onReveal,
+}: {
+  skill: string;
+  table: SkillDiffTable;
+  /// 正在为哪一行体检（行键）
+  keepBusy: string | null;
+  onKeep: (rowId: string, at: AnchorRect) => void;
+  /// 原件格里的 `打开 ↗`：在访达中显示这一份（抽屉里不再单列路径一行，入口跟着路径进表）
+  onReveal: (path: string) => void;
+}) {
+  const title = tn("skills.dup.differ", table.rows.length);
+  return (
+    <div className="mx-copies">
+      <div className="mx-copies__title">{title}</div>
+      <DiffTable
+        label={title}
+        fields={[t("skills.dup.origin")]}
+        rows={table.rows.map((row) => ({
+          id: row.id,
+          place: row.place,
+          values: [
+            <span className="mx-detail__path">
+              <Mono path>{row.path}</Mono>
+              <RevealLink path={row.path} onReveal={() => onReveal(row.path)} />
+            </span>,
+          ],
+          actionDisabledReason: row.keepBlocked ?? undefined,
+          actionAriaLabel: t("skills.dup.keepLabel", { origin: row.place, skill }),
+          actionBusy: keepBusy === row.id ? t("skills.keep.busy") : undefined,
+        }))}
+        actionLabel={table.keep ? t("skills.keep.label") : undefined}
+        onAction={(id, key) => {
+          // 结果的提示小窗锚在被按下的这颗键上（确认框在窗口正中）
+          const k = key?.getBoundingClientRect();
+          if (k) onKeep(id, { top: k.top, left: k.left, right: k.right, bottom: k.bottom });
+        }}
+      />
+    </div>
   );
 }
 
