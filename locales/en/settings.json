@@ -1,6 +1,8 @@
 {
   "settings.title": "Settings",
   "settings.checking": "Checking",
+  "settings.save.failed": "Couldn't save settings",
+  "settings.save.retry": "Try again",
   "settings.general.section": "General",
   "settings.language.label": "Language",
   "settings.language.system": "System",

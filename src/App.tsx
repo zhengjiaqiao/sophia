@@ -12,7 +12,8 @@ import type {
   Overview,
   ProjectTimes,
 } from "./types";
-import { parseBackendError } from "./modelsView";
+import { appFaultView, parseBackendError } from "./backendError.ts";
+import type { AppFault } from "./backendError.ts";
 import SkillsTab from "./SkillsTab";
 import {
   agentsOverCapOf,
@@ -102,7 +103,14 @@ export default function App() {
   /// 你在哪（spec 2026-09-26-object-first-navigation R12；2026-09-27-skill-mcp-market R1–R3）：目的地（侧栏选中项）、
   /// 位置与两页各自的面（`我的 ｜ 发现`）分开记。首次 `SKILLS · 我的 · 全部`，之后记住上次停在哪；升级时从旧记忆换算一次
   const [nav, setNav] = useState<Nav>(loadNav);
-  const [error, setError] = useState<string | null>(null);
+  /// 窗口顶上横幅的故障：后端错误串，出错处可以再给该处的失败句与「再试一次」（设置保存失败，spec #239）
+  const [fault, setFault] = useState<AppFault | null>(null);
+  const error = fault?.text ?? null;
+  const setError = useCallback(
+    (text: string | null, more?: Omit<AppFault, "text">) =>
+      setFault(text === null ? null : { ...more, text }),
+    [],
+  );
   /// 应用菜单「关于 Sophia」「检查更新…」：设置页停在「关于」一节，`check` 时同时开始检查。
   /// `at` 让同一个请求再发一次也算新的。离开设置就清掉，下回从侧栏进设置不再跳、不再查
   const [aboutRequest, setAboutRequest] = useState<{ at: number; check: boolean } | null>(null);
@@ -702,17 +710,12 @@ export default function App() {
       >
         <main ref={contentRef} className="face__scroll">
           {/* 应用级故障：机面顶上、页面头之上，满内容宽 */}
-          {error && (
+          {fault && (
             <div className="face__banner">
-              {/* 后端错误形如 `[code] 一句\n[detail] 原文`（spec 2026-10-04-local-diagnostics R13）：一句给人看，
-                  原文进 `详情`、`复制详情`（spec S18）；普通字符串原样 */}
-              <NoticePanel
-                scope="app"
-                message={parseBackendError(error).message}
-                technical={parseBackendError(error).detail}
-                onCopy={(text) => copyDetails(text)}
-                onClose={() => setError(null)}
-              />
+              {/* 后端错误形如 `[code] 一句\n[detail] 原文`（spec 2026-10-04-local-diagnostics R13、#239）：一句给人看，
+                  原文进前面的「!」与 `复制详情`（spec S18）；没有前缀的整段原样，出错处给了失败句时用失败句、整段进「!」。
+                  带原文的才给 `再试一次`（`appFaultView`） */}
+              <FaultBanner fault={fault} onClose={() => setError(null)} />
             </div>
           )}
           {/* 上次意外退出、上报关着时提示一次（把问题报告给我们） */}
@@ -769,6 +772,30 @@ export default function App() {
       {/* 反馈小窗挂在壳上（不随页面卸载：发送中切页也不丢草稿与请求）；入口键不在了时成功提示出在右下 */}
       <FeedbackHost />
     </div>
+  );
+}
+
+/// 窗口顶上的出错横幅（`app` 档灰面板）：一句 + 左端「!」里的原文 + 可选的 `再试一次`（点了先收起横幅再重做）
+function FaultBanner({ fault, onClose }: { fault: AppFault; onClose: () => void }) {
+  const view = appFaultView(fault);
+  const retry = view.retry;
+  return (
+    <NoticePanel
+      scope="app"
+      message={view.message}
+      technical={view.technical}
+      onCopy={(text) => copyDetails(text)}
+      action={
+        retry && {
+          label: retry.label,
+          onClick: () => {
+            onClose();
+            retry.onClick();
+          },
+        }
+      }
+      onClose={onClose}
+    />
   );
 }
 

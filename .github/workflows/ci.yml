@@ -26,6 +26,8 @@ jobs:
       - run: npm run build
       - run: node --test tests/*.test.ts
       - run: npx prettier --check "src/**/*.{ts,tsx,css}"
+      # shell 脚本：变量名后紧跟中文（bash 3.2 会读进变量名，2026-10-08 retro）
+      - run: node scripts/lint-shell.mjs
   # 官网（website/，Astro 静态站）：纯逻辑与构建产物测试、构建 + 构建检查（文案缺键、残留占位符、白名单外域名等）。
   # 不需要 Rust 也不需要 macOS，单独一个作业，和 core 并行
   site:

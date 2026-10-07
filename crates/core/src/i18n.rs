@@ -360,9 +360,52 @@ macro_rules! tn {
     };
 }
 
+/// 已经是给人看的一句（`t!` 产出的错误原因）。装进 `io::Error` 往上传，命令层据此原样作「一句」，
+/// 不再换成该处的失败句；io、序列化这类原文没有这层包装（spec #239「错误怎么分两层」）
+#[derive(Debug)]
+pub struct Said(pub String);
+
+impl Display for Said {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Said {}
+
+impl Said {
+    /// 包成 `io::Error`，种类由调用方定
+    pub fn into_io(self, kind: std::io::ErrorKind) -> std::io::Error {
+        std::io::Error::new(kind, self)
+    }
+
+    /// 一个错误是不是给人看的一句：本身是 `Said`，或是装着 `Said` 的 `io::Error`
+    pub fn of<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a str> {
+        if let Some(said) = error.downcast_ref::<Said>() {
+            return Some(&said.0);
+        }
+        error
+            .downcast_ref::<std::io::Error>()
+            .and_then(|io| io.get_ref())
+            .and_then(|inner| inner.downcast_ref::<Said>())
+            .map(|said| said.0.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 给人看的一句装进_io_error_也认得出_原文认不出() {
+        let said = Said("x".into()).into_io(std::io::ErrorKind::Unsupported);
+        assert_eq!(Said::of(&said), Some("x"));
+        assert_eq!(said.to_string(), "x");
+        assert_eq!(Said::of(&Said("y".into())), Some("y"));
+        let raw = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(Said::of(&raw), None);
+        assert_eq!(Said::of(&std::io::Error::other("raw")), None);
+    }
 
     #[test]
     fn 占位符换成参数_缺参数的原样留着_不是占位符的花括号照写() {

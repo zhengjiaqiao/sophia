@@ -260,10 +260,9 @@ impl Store {
 
     pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
         if settings.version > SETTINGS_VERSION {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                crate::t!("common.settings.tooNew"),
-            ));
+            // 给人看的一句：命令层原样作主句（`Said`），不换成「设置保存失败」
+            return Err(crate::i18n::Said(crate::t!("common.settings.tooNew"))
+                .into_io(io::ErrorKind::Unsupported));
         }
         let _guard = self.lock_settings();
         save_json(&self.dir.join("settings.json"), settings)
@@ -1801,6 +1800,11 @@ mod tests {
         assert_eq!(newer.seen_hints, vec!["b".to_string()]);
         let err = store.save_settings(&newer).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Unsupported);
+        // 给人看的一句：命令层原样作主句，不换成「设置保存失败」
+        assert_eq!(
+            crate::i18n::Said::of(&err),
+            Some(crate::t!("common.settings.tooNew").as_str())
+        );
         assert!(store.repair_if_corrupt(1).unwrap().is_empty(), "太新不算坏");
         assert!(std::fs::read_to_string(dir.join("settings.json"))
             .unwrap()

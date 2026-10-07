@@ -86,7 +86,10 @@ pub fn set_ui_language(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<UiLanguage, String> {
-    state.store.set_language(value).map_err(|e| e.to_string())?;
+    state
+        .store
+        .set_language(value)
+        .map_err(crate::cmd_error::settings_unsaved)?;
     let resolved = i18n::resolve(value, system_tags);
     apply(&app, resolved);
     Ok(UiLanguage {

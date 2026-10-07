@@ -3,7 +3,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api.ts";
 import { t, useOnLocaleChange } from "./i18n.ts";
-import { parseBackendError } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import { useQuitFlow } from "./QuitFlow.tsx";
 import { createSelectionWriter } from "./selectionWrites.ts";
 import { AGENTS } from "./shell/agents.tsx";

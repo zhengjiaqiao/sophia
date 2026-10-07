@@ -15,7 +15,6 @@ import {
   gatewayFacts,
   gatewayShortName,
   otherAgent,
-  parseBackendError,
   refetchSummary,
   removeConfirmText,
   removeProviderBlockedReason,
@@ -23,6 +22,7 @@ import {
   syncCheckLabel,
   unsavedText,
 } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import type { GatewayChoice, ModelsTool, OtherHome } from "./modelsView.ts";
 import { agentGateway } from "./types.ts";
 import type { GatewayAgent, GatewayProvider, GatewayState, ProviderPreset } from "./types.ts";

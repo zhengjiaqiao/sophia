@@ -197,12 +197,18 @@ pub async fn autostart_get() -> Option<bool> {
 #[tauri::command]
 pub async fn autostart_set(on: bool) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
+    // 系统给的原因（`localizedDescription`）进「!」，主句是「设置保存失败」（spec #239「错误怎么分两层」）
     return tauri::async_runtime::spawn_blocking(move || imp::set(on))
         .await
-        .map_err(|e| format!("[internal] {e}"))?;
+        .map_err(|e| crate::cmd_error::failed(&e, &sophia_core::t!("settings.save.failed")))?
+        .map_err(|raw| {
+            crate::cmd_error::raw_failed(&raw, &sophia_core::t!("settings.save.failed"))
+        });
     #[cfg(not(target_os = "macos"))]
     {
         let _ = on;
-        Err(sophia_core::t!("models.cmd.macOnly"))
+        Err(crate::cmd_error::said(sophia_core::t!(
+            "models.cmd.macOnly"
+        )))
     }
 }

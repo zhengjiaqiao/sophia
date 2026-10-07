@@ -1,6 +1,8 @@
 {
   "settings.title": "设置",
   "settings.checking": "正在检查",
+  "settings.save.failed": "设置保存失败",
+  "settings.save.retry": "再试一次",
   "settings.general.section": "通用",
   "settings.language.label": "界面语言",
   "settings.language.system": "跟随系统",

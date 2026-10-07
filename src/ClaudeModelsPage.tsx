@@ -27,10 +27,10 @@ import {
   modelsCapability,
   RESTART_POLL_MS,
   modelLabel,
-  parseBackendError,
   portMovedNote,
   routerUnavailable,
 } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import type { RestartPhase } from "./modelsView.ts";
 import type { AgentListRowProps, AgentSectionProps } from "./shell/agentRegistry.ts";
 import { claudeGateway } from "./types.ts";

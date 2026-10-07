@@ -120,10 +120,13 @@ jobs:
           COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
           COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
         run: |
+          # runner 在海外，到上海单个连接只有几十 KB/s，还时常断：默认 32 MB 一块时整个包就是一块，
+          # 断一次从头重传，30 分钟传不完一个 7 MB 的包（2026-10-08 排练 run 37652538538）。
+          # 切成 1 MB 的块、8 个连接并行：断了只重传那一块，带宽也叠得起来
           put() { # put <本地文件> <对象键> [coscli 选项…]
             local src="$1" key="$2"
             shift 2
-            if ! ./coscli cp "$src" "cos://${COS_BUCKET}/${key}" "$@" \
+            if ! ./coscli cp "$src" "cos://${COS_BUCKET}/${key}" "$@" --part-size 1 --thread-num 8 \
               -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" -e "cos.${COS_REGION}.myqcloud.com" \
               --init-skip --disable-log --process-log=false --fail-output=false; then
               echo "::error::上传 ${key} 失败。权限错误（403、AccessDenied）就在 CAM 策略 sophia-cos-releases-write 里补上报错提到的操作，"

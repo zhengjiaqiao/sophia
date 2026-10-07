@@ -18,7 +18,6 @@ import {
   inUseLabel,
   modelIssues,
   modelLabel,
-  parseBackendError,
   modeNote,
   quotaNote,
   portMovedNote,
@@ -30,6 +29,7 @@ import {
   showRouterTodo,
   switchGateway,
 } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
 import { codexGateway } from "./types.ts";
 import type { GatewayProvider, GatewayProviderModel, GatewayState, UsageView } from "./types.ts";

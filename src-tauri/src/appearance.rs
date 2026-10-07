@@ -74,7 +74,7 @@ pub fn set_appearance(
     state
         .store
         .set_appearance(value)
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::cmd_error::settings_unsaved)?;
     apply(&app, value)
 }
 

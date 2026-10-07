@@ -2,7 +2,8 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
-import { parseBackendError, routerTodo, routerUnavailable } from "../modelsView.ts";
+import { parseBackendError } from "../backendError.ts";
+import { routerTodo, routerUnavailable } from "../modelsView.ts";
 import type { GatewayAgent, GatewayState, GatewayUnreadable } from "../types.ts";
 import { copyDetails } from "../diagnostics.ts";
 import {

@@ -12,7 +12,7 @@
 
 ## 后端
 
-- **错误给人看的一句与技术原文分开**：命令错误 `[code] 一句\n[detail] 原文`（`parseBackendError` 拆），`ReportEntry.detail` 一类字段只放去隐私后的原文；原因句走文案目录。
+- **错误给人看的一句与技术原文分开**：命令错误 `[code] 一句\n[detail] 原文`（命令层出口 `src-tauri/src/cmd_error.rs`：`t!` 产出的句子原样作一句，io、序列化、第三方原文换成该处的失败句、原文进 `[detail]`；前端 `src/backendError.ts` 的 `parseBackendError` 拆），`ReportEntry.detail` 一类字段只放去隐私后的原文；原因句走文案目录。
 - **外部原因只计数，自身错误才带原文上报**：io 错误先分类（`atomicfile::write_failure`、`sync::fail_kind_of`），分得出的按外部异常计数，分不出的 `report::capture_internal`。
 - **改用户文件走 `atomicfile` / `jsonedit` / `codex_models::config`**，不另写一份；写 Sophia 自己的 JSON 走 `store::save_json`（已 fsync）。
 

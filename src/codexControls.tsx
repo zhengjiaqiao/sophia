@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { api } from "./api.ts";
 import type { ModelsTool, RestartPhase } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import type { AgentListRowProps } from "./shell/agentRegistry.ts";
 import {
   CODEX,
@@ -15,7 +16,6 @@ import {
   gatewaySwitchTip,
   launchTimeout,
   launchTip,
-  parseBackendError,
   restartConsequence,
   restartTip,
   settleAfterRestart,

@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { locale, t, tn } from "../i18n.ts";
+import type { AppFault } from "../backendError.ts";
 import type {
   Appearance,
   HarnessList,
@@ -123,7 +124,8 @@ function UpdateFailure(props: {
 }
 
 export interface SettingsPageProps {
-  onError: (message: string) => void;
+  /// 出错交给窗口顶上的横幅。保存失败时另给该处的失败句与「再试一次」（`saveFailed`）
+  onError: (message: string, more?: Omit<AppFault, "text">) => void;
   /// 壳接线（应用菜单「关于 Sophia」「检查更新…」，D15）：停在「关于」；`check` 时同时开始检查
   aboutRequest?: { at: number; check: boolean };
   /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`（issue #109）：停在 `Skills 和 MCP` 一节（第一块就是 `显示的 agent`）
@@ -145,6 +147,14 @@ export function SettingsPage({
   const [list, setList] = useState<HarnessList | null>(null);
   const agents: AgentOption[] | null = list?.harnesses ?? null;
   const [showAbsent, setShowAbsent] = useState(false);
+
+  /// 任一项保存失败（spec #239「错误怎么分两层」）：横幅主句「设置保存失败」，系统原文进前面的「!」，
+  /// `再试一次` 重做这一次保存；给人看的一句（显示已满、设置文件来自更新版本）原样说、不给 `再试一次`
+  const saveFailed = (e: unknown, retry: () => void) =>
+    onError(String(e), {
+      fallback: t("settings.save.failed"),
+      retry: { label: t("settings.save.retry"), onClick: retry },
+    });
 
   const reload = async () => {
     try {
@@ -254,7 +264,7 @@ export function SettingsPage({
       setUnchecked(enabled ? null : { id, at: Date.now() });
       await reload();
     } catch (e) {
-      onError(String(e));
+      saveFailed(e, () => void toggle(id, enabled));
       await reload();
     }
   };
@@ -291,7 +301,7 @@ export function SettingsPage({
       await api.setProjectShown(path, shown);
       setUncheckedProject(shown ? null : { path, at: Date.now() });
     } catch (e) {
-      onError(String(e));
+      saveFailed(e, () => void toggleProject(path, shown));
     }
     await reloadProjects();
   };
@@ -364,7 +374,7 @@ export function SettingsPage({
     try {
       await api.setUiLanguage(next);
     } catch (e) {
-      onError(String(e));
+      saveFailed(e, () => void changeLanguage(next));
       void api.uiLanguage().then(
         (v) => setLanguageState(v.setting),
         () => undefined,
@@ -386,7 +396,7 @@ export function SettingsPage({
     try {
       await api.setAppearance(next);
     } catch (e) {
-      onError(String(e));
+      saveFailed(e, () => void changeAppearance(next));
       void api.appearance().then(setAppearanceState, () => undefined);
     }
   };
@@ -415,7 +425,7 @@ export function SettingsPage({
       await api.setAutoCheckSkillUpdates(next);
     } catch (e) {
       setAutoCheck(!next);
-      onError(String(e));
+      saveFailed(e, () => void toggleAutoCheck(next));
     }
   };
   // ── 使用统计和错误报告（spec 2026-10-04-reporting-feedback R6）──
@@ -429,7 +439,7 @@ export function SettingsPage({
       await api.setAutoReport(next);
     } catch (e) {
       setReportSettings((r) => (r ? { ...r, autoReport: !next } : r));
-      onError(String(e));
+      saveFailed(e, () => void toggleReport(next));
     }
   };
   // ── 启动（spec 2026-10-03-gateway-in-app R15、R16）──
@@ -478,7 +488,7 @@ export function SettingsPage({
       setAutostart(await api.autostartSet(next));
     } catch (e) {
       setAutostart(!next);
-      onError(String(e));
+      saveFailed(e, () => void toggleAutostart(next));
     } finally {
       autostartPending.current = false;
     }

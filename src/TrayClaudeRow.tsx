@@ -11,7 +11,7 @@ import {
   claudeSwitchText,
   claudeSwitchTip,
 } from "./claudeView.ts";
-import { parseBackendError } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import type { RestartPhase } from "./modelsView.ts";
 import type { TrayRowProps } from "./shell/agentRegistry.ts";
 import type { GatewayState } from "./types.ts";

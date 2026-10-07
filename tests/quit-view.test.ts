@@ -257,7 +257,11 @@ test("AC17 开机启动是「通用」一节的第三行（外观之后、`Skill
   assert.doesNotMatch(page, /settings\.startup\.section/);
   assert.match(page, /api\.autostartGet\(\)/);
   assert.match(page, /autostart === null \? null : \(\s*<Switch/);
-  assert.match(page, /setAutostart\(!next\);\s*onError/);
+  // 写不成读回原样，再说「设置保存失败」（带「再试一次」，spec #239）
+  assert.match(
+    page,
+    /setAutostart\(!next\);\s*saveFailed\(e, \(\) => void toggleAutostart\(next\)\)/,
+  );
   // 设置行：名字与灰字在左、开关在右（2026-10-04 画板 B）
   assert.match(
     page,

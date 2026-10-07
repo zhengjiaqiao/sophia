@@ -6,10 +6,10 @@ import {
   LAUNCH_POLL_MS,
   LAUNCH_TIMEOUT_MS,
   gatewaySwitchText,
-  parseBackendError,
   settleAfterRestart,
   switchGateway,
 } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import type { TrayRowProps } from "./shell/agentRegistry.ts";
 import { codexAppName } from "./modelsView.ts";
 import { launchTimeout, restartConsequence, trayRow } from "./trayView.ts";

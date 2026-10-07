@@ -1,5 +1,5 @@
 import { t, type Lang, type MessageKey } from "./i18n.ts";
-import { parseBackendError } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 
 /// 网络出错说人话（spec #248，issue #253；画板「国产 agent 与国内网络」第 7 屏）。
 /// 后端把底层错误分成四类（`src-tauri/src/net_kind.rs`）：连不上 / 太慢超时 / 被限流 / 别的，按命令错误的老约定

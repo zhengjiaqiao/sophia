@@ -46,36 +46,6 @@ export const CODEX: ModelsTool = {
 /// 文案按这张表取名字。今天只有 Codex；别的 agent 用上网关时，它自己的 agent 页有同样一节
 export const MODELS_TOOLS: ModelsTool[] = [CODEX];
 
-export interface ParsedBackendError {
-  code: string;
-  message: string;
-  /// 技术原文（请求、状态码、返回的错误；后端已去隐私），给 `详情`；没有就不带这个字段
-  detail?: string;
-}
-
-const ERROR_PREFIX = /^\[([a-z_]+)]\s*/;
-/// 技术原文的分隔（后端 `app::DETAIL_MARK`，docs/gateway-commands.md「错误」）
-const DETAIL_MARK = "\n[detail] ";
-
-/**
- * 后端错误形如 `[code] message`，带技术原文时再另起一行 `[detail] 原文`（spec 2026-10-04-local-diagnostics R13）；
- * 剥离前缀，一句话给人看，原文拆进 `detail`。
- * `[changed]` 的正文本身已经在说明“配置已变化，请重试”，同样剥离前缀原样展示即可。
- * 读不出前缀（例如非字符串异常）时把整段原文当作 internal 展示。
- */
-export function parseBackendError(text: string): ParsedBackendError {
-  const match = ERROR_PREFIX.exec(text);
-  if (!match) return { code: "internal", message: text };
-  const rest = text.slice(match[0].length);
-  const at = rest.indexOf(DETAIL_MARK);
-  if (at < 0) return { code: match[1], message: rest };
-  return {
-    code: match[1],
-    message: rest.slice(0, at),
-    detail: rest.slice(at + DETAIL_MARK.length),
-  };
-}
-
 /// 任一家在用路由（路由两家共用：任一家在用它就得在跑，两家都不用了才卸，spec 2026-09-29 R8 R46）。
 /// 与 core `claude_on` 同一条：Claude 拨关了、等重启生效时桌面应用里还写着 Sophia（`applied`），仍在用
 export function anyGatewayOn(state: GatewayState): boolean {

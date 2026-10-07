@@ -8,7 +8,6 @@ import {
   effectiveModels,
   enableDisabledReason,
   modelLabel,
-  parseBackendError,
   providerCatalogHint,
   providerLabel,
   removeProviderBlockedReason,
@@ -100,33 +99,6 @@ const { InUseRow, sectionTodos } = await import("../src/ModelsTab.tsx");
 const { CodexKeySlot, CodexSwitch } = await import("../src/codexControls.tsx");
 
 const noop = () => {};
-
-test("parseBackendError 剥离 [code] 前缀，读不出前缀时整段当作 internal", () => {
-  assert.deepEqual(parseBackendError("[auth] 鉴权失败"), { code: "auth", message: "鉴权失败" });
-  assert.deepEqual(parseBackendError("[changed] 配置已变化，请重试"), {
-    code: "changed",
-    message: "配置已变化，请重试",
-  });
-  assert.deepEqual(parseBackendError("网络错误，无法解析"), {
-    code: "internal",
-    message: "网络错误，无法解析",
-  });
-});
-
-// spec 2026-10-04-local-diagnostics R13：技术原文跟在一句话之后另起一行 `[detail] `，拆进 detail，只把一句话给人看
-test("parseBackendError：`\\n[detail] ` 之后是技术原文，拆进 detail（可以多行）；没有就不带 detail", () => {
-  assert.deepEqual(
-    parseBackendError(
-      '[network] 服务商限流了，约 30 秒后再试\n[detail] GET https://x/models → 429 Too Many Requests\n{"error":1}',
-    ),
-    {
-      code: "network",
-      message: "服务商限流了，约 30 秒后再试",
-      detail: 'GET https://x/models → 429 Too Many Requests\n{"error":1}',
-    },
-  );
-  assert.equal("detail" in parseBackendError("[auth] 鉴权失败"), false);
-});
 
 test("routerUnavailable 只在已启用且路由没跑时为真", () => {
   assert.equal(

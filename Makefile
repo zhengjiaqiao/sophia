@@ -50,6 +50,7 @@ lint: lint-public
 lint-public:
 	cargo clippy --workspace --all-targets -- -D warnings
 	node scripts/lint-ui.mjs
+	node scripts/lint-shell.mjs
 
 build-web:
 	npm run build

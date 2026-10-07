@@ -2,6 +2,7 @@
 mod app_update;
 mod appearance;
 mod autostart;
+mod cmd_error;
 mod diagnostics;
 mod fileowner;
 mod gateway;
@@ -1430,10 +1431,20 @@ fn set_harness_enabled(
 ) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
     let env = runtime_env()?;
-    let (installed, mut settings) = installed_and_settings(&state, &env)?;
-    let ids: Vec<String> = installed.into_iter().map(|h| h.id).collect();
-    discovery::set_shown(&ids, &mut settings, &id, enabled).map_err(err)?;
-    state.store.save_settings(&settings).map_err(err)
+    // 同 `installed_and_settings`，只是出错分两层：读写设置失败说「设置保存失败」，显示已满的那句原样说
+    let ids: Vec<String> = discovery::installed(&env)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    let mut settings = state
+        .store
+        .load_settings_reconciling_shown(&ids)
+        .map_err(cmd_error::settings_unsaved)?;
+    discovery::set_shown(&ids, &mut settings, &id, enabled).map_err(cmd_error::said)?;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(cmd_error::settings_unsaved)
 }
 
 /// 设置「生效范围」的项目格：自动检测的与手动选的（存在的才列），带勾没勾
@@ -1475,9 +1486,15 @@ fn set_project_shown(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
-    let mut settings = state.store.load_settings().map_err(err)?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(cmd_error::settings_unsaved)?;
     if discovery::set_project_shown(&mut settings, &path, shown) {
-        state.store.save_settings(&settings).map_err(err)?;
+        state
+            .store
+            .save_settings(&settings)
+            .map_err(cmd_error::settings_unsaved)?;
     }
     Ok(())
 }

@@ -55,7 +55,7 @@ start() {
   sleep 2
   # 带到最前：computer-use 的截图与 AX 树只在窗口在最前时有内容
   osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" >/dev/null 2>&1 || true
-  echo "测试实例 pid $pid，主目录 $HOME_DIR"
+  echo "测试实例 pid ${pid}，主目录 $HOME_DIR"
 }
 
 case "${1:-}" in

@@ -104,10 +104,10 @@ test("设置页：「通用」是第一节（在「Skills 和 MCP」之前），
   assert.match(src, /<AppearanceRow value=\{appearance\} onChange=\{/);
   assert.match(src, /api\.appearance\(\)/);
   assert.match(src, /api\.setAppearance\(next\)/);
-  // 写不成：重读 core 的真值（不是回到闭包里的旧值——快速连点时会盖掉后一次的选择）
+  // 写不成：说「设置保存失败」（带「再试一次」，spec #239），重读 core 的真值（不是回到闭包里的旧值——快速连点时会盖掉后一次的选择）
   assert.match(
     src,
-    /catch \(e\) \{\s*onError\(String\(e\)\);\s*void api\.appearance\(\)\.then\(setAppearanceState/,
+    /catch \(e\) \{\s*saveFailed\(e, \(\) => void changeAppearance\(next\)\);\s*void api\.appearance\(\)\.then\(setAppearanceState/,
   );
 });
 
@@ -118,7 +118,7 @@ test("1A 设置页：界面语言读自 core（设置里存的那一项）、选
   assert.match(src, /setLanguageState\(next\);\s*try \{\s*await api\.setUiLanguage\(next\)/);
   assert.match(
     src,
-    /catch \(e\) \{\s*onError\(String\(e\)\);\s*void api\.uiLanguage\(\)\.then\(\s*\(v\) => setLanguageState\(v\.setting\)/,
+    /catch \(e\) \{\s*saveFailed\(e, \(\) => void changeLanguage\(next\)\);\s*void api\.uiLanguage\(\)\.then\(\s*\(v\) => setLanguageState\(v\.setting\)/,
   );
 });
 

@@ -2594,7 +2594,7 @@ pub fn set_auto_check_skill_updates(
     state
         .store
         .set_auto_check_skill_updates(enabled)
-        .map_err(|e| e.to_string())
+        .map_err(crate::cmd_error::settings_unsaved)
 }
 
 #[cfg(test)]

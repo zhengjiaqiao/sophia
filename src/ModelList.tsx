@@ -10,11 +10,11 @@ import {
   modelFilterPlaceholder,
   modelRowId,
   modelRowLabel,
-  parseBackendError,
   prefixExample,
   resolveManual,
   snapshotOrder,
 } from "./modelsView.ts";
+import { parseBackendError } from "./backendError.ts";
 import type { ModelEntry } from "./modelsView.ts";
 import type { GatewayProvider } from "./types.ts";
 import {
