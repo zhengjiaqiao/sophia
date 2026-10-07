@@ -1,0 +1,14 @@
+---
+// 字标：浅色用 wordmark.svg，深色用反色版 wordmark-inverse.svg（DESIGN「Colors」深色一节），随系统换
+import light from "../../../assets/logo/wordmark.svg";
+import dark from "../../../assets/logo/wordmark-inverse.svg";
+
+interface Props {
+  /** 显示高度（px） */
+  height: number;
+}
+const { height } = Astro.props;
+---
+
+<img class="logo-l" src={light.src} alt="Sophia" height={height} width={Math.round((height * 3304) / 916)} />
+<img class="logo-d" src={dark.src} alt="" aria-hidden="true" height={height} width={Math.round((height * 3304) / 916)} />

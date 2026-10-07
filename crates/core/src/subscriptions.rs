@@ -4,13 +4,14 @@
 //! 什么算已订阅（`subscribed`）：
 //! - 这个位置自己的来源（原件就在这里，`is_own`）：永远算，不进记录，也不能移除；
 //! - 订阅记录（`Settings.subscriptions`）里的：来源管理页添加过的，一条都没链也算；
-//! - 此刻在这个位置有软链（含整目录链接）的：老数据就是这样认订阅的，不用迁移。
+//! - 此刻在这个位置有软链（含整目录链接）或 Sophia 放的副本（`copies`）的：老数据就是这样认订阅的，不用迁移。
 //!
 //! 老数据在**第一次扫描**时由 `adopt` 写进记录，此后由记录决定成不成行——所以点掉最后一条
 //! 软链，这些行也不会从列表里消失。之后别的工具或自动规则在这里新建的软链同样当场记下：
 //! 不记的话，点掉它最后一条链时整组行会跟着消失，与「订阅」对不上。
 //!
 //! 订阅只动记录与软链，不碰原件；执行撤链走 `sync::execute` 的安全路径（删前重校验仍是软链）。
+use crate::copies::Copies;
 use crate::discovery::folder_label;
 use crate::fs::{entry_kind, normalize, same_real, EntryKind};
 use crate::models::*;
@@ -147,17 +148,25 @@ fn recorded(subs: &Subscriptions, key: &str, source: &Source) -> bool {
     })
 }
 
-/// 此刻在这个位置的目标里有指向它的软链（逐个 skill，或整目录）
-fn linked_here(source: &Source, d_targets: &[Target]) -> bool {
+/// 此刻在这个位置的目标里有指向它的软链（逐个 skill，或整目录），或它记录在案的副本
+fn linked_here(source: &Source, d_targets: &[Target], copies: &Copies) -> bool {
     d_targets.iter().any(|t| {
         t.linked_whole_to.as_deref() == Some(source.id.as_str())
-            || source.skills.iter().any(|k| links_to(t, k))
+            || source.skills.iter().any(|k| links_to(t, k, copies))
     })
 }
 
-/// 来源在这个位置算不算已订阅：自己的 ∪ 记录里的 ∪ 此刻有链的（见模块说明）
-pub fn subscribed(source: &Source, key: &str, d_targets: &[Target], subs: &Subscriptions) -> bool {
-    is_own(source, key, d_targets) || recorded(subs, key, source) || linked_here(source, d_targets)
+/// 来源在这个位置算不算已订阅：自己的 ∪ 记录里的 ∪ 此刻有链（或副本）的（见模块说明）
+pub fn subscribed(
+    source: &Source,
+    key: &str,
+    d_targets: &[Target],
+    subs: &Subscriptions,
+    copies: &Copies,
+) -> bool {
+    is_own(source, key, d_targets)
+        || recorded(subs, key, source)
+        || linked_here(source, d_targets, copies)
 }
 
 /// 把此刻有链的来源写进各位置的订阅记录；返回是否改动过。
@@ -170,6 +179,7 @@ pub fn adopt(
     sources: &[Source],
     targets: &[Target],
     legacy_manual: &[PathBuf],
+    copies: &Copies,
 ) -> bool {
     let mut changed = false;
     for (key, _, d_targets) in group_domains(targets) {
@@ -183,7 +193,7 @@ pub fn adopt(
                 && key == GLOBAL_KEY
                 && s.kind == SourceKind::Manual
                 && legacy_manual.iter().any(|p| same_place(p, &s.path));
-            if legacy || linked_here(s, &d_targets) {
+            if legacy || linked_here(s, &d_targets, copies) {
                 found.push(normalize(&s.path));
             }
         }
@@ -343,6 +353,7 @@ pub fn list(
     subs: &Subscriptions,
     rules: &[AutoLink],
     home: &Path,
+    copies: &Copies,
 ) -> SourceList {
     let d_targets = domain_targets(targets, key);
     let names = domain_names(targets);
@@ -350,7 +361,7 @@ pub fn list(
 
     let mut subscribed_list: Vec<SubscribedSource> = sources
         .iter()
-        .filter(|s| subscribed(s, key, &d_targets, subs))
+        .filter(|s| subscribed(s, key, &d_targets, subs, copies))
         .map(|s| {
             let path = normalize(&s.path);
             let rule = rules.iter().find(|r| r.source == path);
@@ -394,7 +405,7 @@ pub fn list(
             let Some(s) = sources.iter().find(|s| same_place(&s.path, path)) else {
                 continue;
             };
-            if subscribed(s, key, &d_targets, subs) {
+            if subscribed(s, key, &d_targets, subs, copies) {
                 continue;
             }
             let entry = used.entry(s.id.clone()).or_default();
@@ -410,7 +421,7 @@ pub fn list(
     let mut detected = Vec::new();
     for s in sources
         .iter()
-        .filter(|s| !subscribed(s, key, &d_targets, subs))
+        .filter(|s| !subscribed(s, key, &d_targets, subs, copies))
     {
         match used.remove(&s.id) {
             Some(used_in) => elsewhere.push(CandidateSource {
@@ -463,9 +474,13 @@ fn removable<'a>(
     Ok((source, d_targets))
 }
 
-/// 这个来源在本位置的全部软链 → 撤链动作。逐个 skill 的软链交给 `propose_unlinks`
-/// （只挑 Linked 格）；整目录链到它的目标撤那一条目录级软链
-fn removal_actions(source: &Source, d_targets: &[Target]) -> Vec<(RemovalLink, PlannedAction)> {
+/// 这个来源在本位置的全部软链与副本 → 撤链动作。逐个 skill 的交给 `propose_unlinks`
+/// （只挑 Linked 与 Copied 格）；整目录链到它的目标撤那一条目录级软链
+fn removal_actions(
+    source: &Source,
+    d_targets: &[Target],
+    copies: &Copies,
+) -> Vec<(RemovalLink, PlannedAction)> {
     let mut out = Vec::new();
     for t in d_targets {
         if t.linked_whole_to.as_deref() == Some(source.id.as_str()) {
@@ -500,6 +515,7 @@ fn removal_actions(source: &Source, d_targets: &[Target]) -> Vec<(RemovalLink, P
             std::slice::from_ref(source),
             std::slice::from_ref(t),
             &cells,
+            copies,
         );
         for a in actions {
             out.push((
@@ -515,18 +531,19 @@ fn removal_actions(source: &Source, d_targets: &[Target]) -> Vec<(RemovalLink, P
     out
 }
 
-/// 移除之前的只读清单：会撤掉哪些软链（skill × agent）。自己的来源返回拒绝的原因
+/// 移除之前的只读清单：会撤掉哪些软链与副本（skill × agent，两者不分）。自己的来源返回拒绝的原因
 pub fn plan_remove(
     key: &str,
     source_id: &str,
     sources: &[Source],
     targets: &[Target],
+    copies: &Copies,
 ) -> Result<SourceRemoval, String> {
     let (source, d_targets) = removable(key, source_id, sources, targets)?;
     Ok(SourceRemoval {
         source_id: source_id.to_string(),
         links: source
-            .map(|s| removal_actions(s, &d_targets))
+            .map(|s| removal_actions(s, &d_targets, copies))
             .unwrap_or_default()
             .into_iter()
             .map(|(link, _)| link)
@@ -534,9 +551,10 @@ pub fn plan_remove(
     })
 }
 
-/// 从这个位置移除一个来源：先撤掉它在本位置的全部软链（`sync::execute`，删前重校验仍是
-/// 指向该来源的软链），再从订阅记录里删掉，并撤掉自动添加规则里本位置的目标。
-/// 原件一概不动。有软链没撤掉时记录照样删，下次扫描它会因那条链重新算订阅——如实反映
+/// 从这个位置移除一个来源：先撤掉它在本位置的全部软链与副本（`sync::execute`，删前重校验仍是
+/// 指向该来源的软链、仍是记录在案没改过的副本），再从订阅记录里删掉，并撤掉自动添加规则里本位置的目标。
+/// 原件一概不动。有软链没撤掉时记录照样删，下次扫描它会因那条链重新算订阅——如实反映。
+/// `copies` 是副本记录所在的数据目录；不给时副本当作不存在（不列、不动）
 pub fn remove(
     key: &str,
     source_id: &str,
@@ -544,16 +562,29 @@ pub fn remove(
     targets: &[Target],
     subs: &mut Subscriptions,
     rules: &mut Vec<AutoLink>,
+    copies: Option<&crate::store::Store>,
 ) -> Result<SyncReport, String> {
     let (source, d_targets) = removable(key, source_id, sources, targets)?;
-    let actions: Vec<PlannedAction> = source
-        .map(|s| removal_actions(s, &d_targets))
+    let book = match copies {
+        Some(store) => Copies::load(store).map_err(|e| e.to_string())?,
+        None => Copies::default(),
+    };
+    // 共用文件夹（几列是同一个目录）里的同一条软链 / 同一份副本，清单上每家各列一条（几家都会失去它），
+    // 执行只撤一次：撤了第一条，后面的必然重校验不过、报失败
+    let mut actions: Vec<PlannedAction> = Vec::new();
+    for (_, a) in source
+        .map(|s| removal_actions(s, &d_targets, &book))
         .unwrap_or_default()
-        .into_iter()
-        .map(|(_, a)| a)
-        .collect();
+    {
+        if !actions
+            .iter()
+            .any(|b| same_place(&b.target_path, &a.target_path))
+        {
+            actions.push(a);
+        }
+    }
     // 撤链不看写法
-    let report = crate::sync::execute(&actions, false, LinkStyle::Absolute);
+    let report = crate::sync::execute(&actions, false, LinkStyle::Absolute, copies);
     let path = source.map_or_else(|| PathBuf::from(source_id), |s| s.path.clone());
     if let Some(set) = subs.get_mut(key) {
         set.retain(|p| !same_place(p, &path));
@@ -566,6 +597,7 @@ pub fn remove(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::copies::Copies;
     use crate::skills::{scan, upsert_auto_link};
     use crate::store::Store;
     use crate::test_support::TempTree;
@@ -727,7 +759,13 @@ mod tests {
 
         // 此后由记录决定：再认领一次没有改动，也不再认领旧版手动位置
         let mut subs = expect.clone();
-        assert!(!adopt(&mut subs, &sources, &targets, &[normalize(&manual)]));
+        assert!(!adopt(
+            &mut subs,
+            &sources,
+            &targets,
+            &[normalize(&manual)],
+            &Copies::default()
+        ));
         assert_eq!(subs, expect);
     }
 
@@ -741,7 +779,7 @@ mod tests {
         let targets = f.targets();
         let subs: Subscriptions = [(f.key(), BTreeSet::from([normalize(&f.universal)]))].into();
 
-        let ov = scan(&sources, &targets, &subs);
+        let ov = scan(&sources, &targets, &subs, &Copies::default());
         let u = sources[0].id.clone();
         assert_eq!(
             rows_of(&ov, &f.key()),
@@ -778,13 +816,21 @@ mod tests {
         ));
         assert_eq!(sources.len(), 2);
         assert_eq!(sources[1].label, "team-skills");
-        let ov = scan(&sources, &targets, &subs);
+        let ov = scan(&sources, &targets, &subs, &Copies::default());
         assert_eq!(
             rows_of(&ov, &f.key()),
             vec![(sources[1].id.clone(), "x".into(), CellState::Missing)]
         );
         let home = f.tree.root().join("home");
-        let page = list(&f.key(), &sources, &targets, &subs, &[], &home);
+        let page = list(
+            &f.key(),
+            &sources,
+            &targets,
+            &subs,
+            &[],
+            &home,
+            &Copies::default(),
+        );
         assert_eq!(page.subscribed.len(), 1);
         assert_eq!(page.subscribed[0].source.skills, vec!["x".to_string()]);
         assert_eq!(page.subscribed[0].source.skill_count, 1);
@@ -794,7 +840,15 @@ mod tests {
         std::fs::remove_dir_all(&x).unwrap();
         let again = crate::discovery::subscribed_sources(&recorded_dirs(&subs), &base);
         assert!(again.is_empty());
-        let page = list(&f.key(), &base, &targets, &subs, &[], &home);
+        let page = list(
+            &f.key(),
+            &base,
+            &targets,
+            &subs,
+            &[],
+            &home,
+            &Copies::default(),
+        );
         assert_eq!(page.subscribed.len(), 1);
         assert_eq!(page.subscribed[0].source.skill_count, 0);
         assert_eq!(page.subscribed[0].source.path, normalize(&picked));
@@ -841,14 +895,17 @@ mod tests {
         let sources = vec![f.universal()];
         let targets = f.targets();
         let mut subs = Subscriptions::new();
-        adopt(&mut subs, &sources, &targets, &[]);
+        adopt(&mut subs, &sources, &targets, &[], &Copies::default());
 
         std::fs::remove_file(f.claude.join("a")).unwrap();
         let names = |subs: &Subscriptions| -> Vec<String> {
-            rows_of(&scan(&sources, &targets, subs), &f.key())
-                .into_iter()
-                .map(|r| r.1)
-                .collect()
+            rows_of(
+                &scan(&sources, &targets, subs, &Copies::default()),
+                &f.key(),
+            )
+            .into_iter()
+            .map(|r| r.1)
+            .collect()
         };
         assert_eq!(names(&subs), vec!["a", "b"]);
         assert!(names(&Subscriptions::new()).is_empty());
@@ -882,7 +939,7 @@ mod tests {
             src(&idle, SourceKind::Manual, "idle"),
         ];
 
-        let plan = plan_remove(&f.key(), &u.id, &sources, &targets).unwrap();
+        let plan = plan_remove(&f.key(), &u.id, &sources, &targets, &Copies::default()).unwrap();
         let link = |skill: Option<&str>, t: &Target| RemovalLink {
             skill: skill.map(String::from),
             target_id: t.id.clone(),
@@ -905,10 +962,24 @@ mod tests {
         assert!(matches!(entry_kind(&cursor), EntryKind::Symlink(_)));
 
         // 指向别处的那条链属于 other
-        let plan = plan_remove(&f.key(), &sources[1].id, &sources, &targets).unwrap();
+        let plan = plan_remove(
+            &f.key(),
+            &sources[1].id,
+            &sources,
+            &targets,
+            &Copies::default(),
+        )
+        .unwrap();
         assert_eq!(plan.links, vec![link(Some("b"), &targets[1])]);
         // 一条都没链的来源：清单为空
-        let plan = plan_remove(&f.key(), &sources[2].id, &sources, &targets).unwrap();
+        let plan = plan_remove(
+            &f.key(),
+            &sources[2].id,
+            &sources,
+            &targets,
+            &Copies::default(),
+        )
+        .unwrap();
         assert!(plan.links.is_empty());
     }
 
@@ -927,7 +998,7 @@ mod tests {
         let sources = vec![f.universal(), src(&own, store_of(&f.proj), "proj")];
         let targets = f.targets();
         let mut subs = Subscriptions::new();
-        adopt(&mut subs, &sources, &targets, &[]);
+        adopt(&mut subs, &sources, &targets, &[], &Copies::default());
         let mut rules = Vec::new();
         upsert_auto_link(
             &mut rules,
@@ -943,6 +1014,7 @@ mod tests {
             &targets,
             &mut subs,
             &mut rules,
+            None,
         )
         .unwrap();
         assert_eq!(report.entries.len(), 2);
@@ -958,7 +1030,7 @@ mod tests {
         assert!(subs[&f.key()].is_empty());
         assert_eq!(rules[0].targets, vec![targets[0].id.clone()]);
         // 行也没了
-        let ov = scan(&sources, &targets, &subs);
+        let ov = scan(&sources, &targets, &subs, &Copies::default());
         assert!(rows_of(&ov, &f.key()).iter().all(|r| r.0 != sources[0].id));
 
         // 项目自己的来源：拒绝，什么都不动
@@ -969,12 +1041,27 @@ mod tests {
             &targets,
             &mut subs,
             &mut rules,
+            None,
         )
         .unwrap_err();
         assert_eq!(err, "它的原件就在proj里，删掉原件才会消失");
-        assert!(plan_remove(&f.key(), &sources[1].id, &sources, &targets).is_err());
+        assert!(plan_remove(
+            &f.key(),
+            &sources[1].id,
+            &sources,
+            &targets,
+            &Copies::default()
+        )
+        .is_err());
         // 全局里的通用仓库同理
-        assert!(plan_remove("global", &sources[0].id, &sources, &targets).is_err());
+        assert!(plan_remove(
+            "global",
+            &sources[0].id,
+            &sources,
+            &targets,
+            &Copies::default()
+        )
+        .is_err());
     }
 
     /// 候选分两组：别的位置订阅着的（注明在哪用），其余检测到的；已订阅与自己的不在候选里。
@@ -1023,7 +1110,15 @@ mod tests {
             ("global".to_string(), AutoRun { at: 30, added: 1 }),
         ]);
 
-        let page = list(&f.key(), &sources, &targets, &subs, &rules, &home);
+        let page = list(
+            &f.key(),
+            &sources,
+            &targets,
+            &subs,
+            &rules,
+            &home,
+            &Copies::default(),
+        );
         let ids = |v: Vec<&SourceSummary>| v.into_iter().map(|s| s.id.clone()).collect::<Vec<_>>();
         // 自己的在前
         assert_eq!(

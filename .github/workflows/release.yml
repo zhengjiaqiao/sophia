@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag 就发布：v0.2.0 → 构建两个架构的 macOS 包、生成更新清单、挂上 GitHub Release，再更新 Homebrew tap。
+# 打 tag 就发布：v0.2.0 → 构建两个架构的 macOS 包、生成更新清单、挂上 GitHub Release，再同步到腾讯云 COS、更新 Homebrew tap。
 # workflow_dispatch 是排练：一样地构建、一样地签名，但不建 Release，产物落在 workflow artifacts 里。
 # 排练能验掉除了「Release 资产名和 latest.json 内容」之外的全部环节。
 on:
@@ -115,6 +115,27 @@ jobs:
             exit 1
           fi
 
+      # 国内线路（issue #263）：转正之后要把产物传到腾讯云 COS。缺了这几样，那一步要等二十分钟编译完才红，
+      # 而 Release 那时已经公开、国内线路停在旧版，所以在这里先拦
+      - name: COS 的密钥与桶名已配好
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+          COS_BUCKET: ${{ vars.COS_BUCKET }}
+          COS_REGION: ${{ vars.COS_REGION }}
+        run: |
+          missing=0
+          for name in COS_SECRET_ID COS_SECRET_KEY COS_BUCKET COS_REGION; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "::error::缺少 ${name}（密钥 COS_SECRET_ID、COS_SECRET_KEY，仓库变量 COS_BUCKET、COS_REGION）"
+              missing=1
+            fi
+          done
+          if [ "$missing" = 1 ]; then
+            echo "::error::在本机跑向导 scripts/setup-cos.sh 写进 zhengjiaqiao/sophia（见 packaging/README.md「5. 腾讯云 COS」）。"
+            exit 1
+          fi
+
   # 先建一个草稿 Release 拿到 id，两个架构的构建往同一个 id 上挂产物，
   # tauri-action 会把各自的 latest.json 合并进同一份清单。
   # 排练（workflow_dispatch）不建 Release，这一步整个跳过，输出为空。
@@ -220,6 +241,19 @@ jobs:
           bundle="target/${{ matrix.target }}/release/bundle"
           packaging/verify-signature.sh "$bundle/macos/Sophia.app" "$bundle"/dmg/*.dmg
 
+      # 更新包的签名要写着这一版的版本号（issue #262）：应用开了 requireSignedVersion，签名里没有版本号或
+      # 版本号对不上，已装的客户端会拒绝这次更新。版本号由 Tauri CLI 2.12 起在 tauri build 时写进可信注释
+      - name: 更新包签名里写着版本号
+        run: |
+          version=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+          sig="target/${{ matrix.target }}/release/bundle/macos/Sophia.app.tar.gz.sig"
+          comment=$(base64 --decode < "$sig" | sed -n 's/^trusted comment: //p')
+          echo "可信注释：$comment"
+          if ! printf '%s' "$comment" | tr '\t' '\n' | grep -qx "version:${version}"; then
+            echo "::error::$sig 的可信注释里没有 version:${version}。检查 package.json 里的 @tauri-apps/cli 是否不低于 2.12。"
+            exit 1
+          fi
+
       # 留存符号文件（spec 2026-10-04-local-diagnostics R6）：发布档把行号表另存成 dSYM、不随包发，
       # runner 用完即丢，所以在这里取出来存成 artifact。用户发来崩溃记录时，按版本与架构下回来对行号。
       # target/<架构>/release/sophia.dSYM 是指向 deps/sophia-<哈希>.dSYM 的软链：cp -RL 取实体、改固定名
@@ -252,6 +286,18 @@ jobs:
           gh api --method PATCH \
             "repos/${GITHUB_REPOSITORY}/releases/${{ needs.draft.outputs.releaseId }}" \
             -F draft=false
+
+  # 转正之后把产物与改写过地址的清单传到腾讯云 COS（issue #263），步骤在 cos-sync.yml，那边也有手动入口。
+  # 排练不建 Release，publish 跳过，这一步跟着跳过。它红了不回滚 Release：按报错修好，再用手动入口对同一个 tag 重跑
+  cos:
+    needs: publish
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/cos-sync.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets:
+      COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+      COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
 
   # 转正之后把 cask 推到 Homebrew tap（spec #193），步骤在 homebrew-cask.yml，那边也有手动入口。
   # 排练不建 Release，publish 跳过，这一步跟着跳过、不推 tap。

@@ -822,6 +822,7 @@ fn claude_local_is_discovered_as_its_own_scope_without_a_missing_project_column(
     )
     .unwrap();
     let env = Env {
+        apps: Vec::new(),
         home: fs::canonicalize(&home).unwrap(),
         vars: HashMap::new(),
     };
@@ -892,6 +893,7 @@ fn empty_claude_local_is_listed_and_remains_an_import_target() {
         json!({"mcpServers":{"weibo-search":{"command":"search"}}}),
     );
     let env = Env {
+        apps: Vec::new(),
         home: fs::canonicalize(&home).unwrap(),
         vars: HashMap::new(),
     };
@@ -931,6 +933,7 @@ fn claude_local_is_listed_when_project_is_not_in_claude_json() {
     let project = fs::canonicalize(project).unwrap();
     let project_key = project.to_string_lossy().into_owned();
     let env = Env {
+        apps: Vec::new(),
         home: fs::canonicalize(&home).unwrap(),
         vars: HashMap::new(),
     };
@@ -1020,6 +1023,7 @@ fn claude_local_is_still_listed_when_claude_json_is_unparseable() {
     let project = fs::canonicalize(project).unwrap();
     fs::write(home.join(".claude.json"), b"{ not json").unwrap();
     let env = Env {
+        apps: Vec::new(),
         home: fs::canonicalize(&home).unwrap(),
         vars: HashMap::new(),
     };
@@ -1057,6 +1061,7 @@ fn claude_local_and_project_mcp_remain_separate_when_both_exist() {
         json!({"mcpServers":{"shared-doc":{"command":"shared"}}}),
     );
     let env = Env {
+        apps: Vec::new(),
         home: fs::canonicalize(&home).unwrap(),
         vars: HashMap::new(),
     };

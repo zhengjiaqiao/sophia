@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
-import { t, tn } from "../i18n.ts";
+import { locale, t, tn } from "../i18n.ts";
 import type {
   Appearance,
   HarnessList,
@@ -17,7 +17,6 @@ import {
   BusySlot,
   Button,
   CheckRow,
-  Details,
   DrawerHandle,
   FloatingToast,
   Mono,
@@ -42,7 +41,14 @@ import {
 } from "../feedback.tsx";
 import { SettingRow } from "./SettingRow.tsx";
 import { copyDetails } from "../diagnostics.ts";
-import { updateCheckFailure } from "../updateText.ts";
+import {
+  netFailureText,
+  netProblemOf,
+  retryLabel,
+  websiteDownloadUrl,
+  type NetProblem,
+  type UpdateScene,
+} from "../netFailure.ts";
 import { appUpdates, useAppUpdate } from "../useAppUpdate.ts";
 import { autoCheckNote } from "../market/updateView.ts";
 import { useSkillUpdates } from "../market/useSkillUpdates.ts";
@@ -82,8 +88,39 @@ import "./SettingsPage.css";
 /// 其余收在「未安装的 N 个 ›」展开里。
 type AgentOption = HarnessStatus;
 
-/// 发布页：只在应用内查不成时作退路（`去发布页 ↗`，离开 Sophia 的浅键）
-const RELEASES_URL = "https://github.com/zhengjiaqiao/sophia/releases/latest";
+/// 检查或下载更新失败（spec #248，画板「国产 agent 与国内网络」第 7 屏）：主句按场景与四类说，
+/// 原文从左端的 `!` 看（停上去出悬浮卡）；`到官网下载 ↗` 跟在句后（离开 Sophia 的退路，官网下载区对国内访客走国内线路），
+/// 键区只放留在 Sophia 里的再试一次——连不上时写「开着代理再试一次」，限流与别的不给（再试也没用）
+function UpdateFailure(props: {
+  scene: UpdateScene;
+  problem: NetProblem;
+  onRetry: () => void;
+  onClose?: () => void;
+}) {
+  const text = netFailureText(props.scene, props.problem.kind);
+  return (
+    <NoticePanel
+      scope="section"
+      message={
+        <>
+          {text.message}
+          {" ·\u00a0"}
+          <Button
+            variant="quiet"
+            inline
+            onClick={() => void openUrl(websiteDownloadUrl(locale())).catch(() => undefined)}
+          >
+            {t("common.net.website")}
+          </Button>
+        </>
+      }
+      technical={props.problem.detail}
+      onCopy={(detail) => copyDetails(detail)}
+      action={text.retry ? { label: retryLabel(text.retry), onClick: props.onRetry } : undefined}
+      onClose={props.onClose}
+    />
+  );
+}
 
 export interface SettingsPageProps {
   onError: (message: string) => void;
@@ -140,18 +177,13 @@ export function SettingsPage({
     if (later) return null;
     switch (update.kind) {
       case "none":
-        // 检查失败：灰字一句书面说明 + 浅键 `去发布页 ↗`（离开 Sophia，唯一还会去 GitHub 的地方）
         if (checkFailed !== null)
           return (
-            <Note
-              action={{
-                label: t("settings.update.releasesPage"),
-                leave: true,
-                onClick: () => void openUrl(RELEASES_URL),
-              }}
-            >
-              {checkFailed}
-            </Note>
+            <UpdateFailure
+              scene="checkUpdate"
+              problem={checkFailed}
+              onRetry={() => void checkUpdate()}
+            />
           );
         return null;
       case "available":
@@ -188,23 +220,12 @@ export function SettingsPage({
           />
         );
       case "failed":
-        // 原因说中文，英文原文挂在这句话上（停上去出悬浮卡）；`去发布页 ↗` 跟在句后（离开 Sophia 的退路），
-        // 不算悬浮卡的触发区；键区只放留在 Sophia 里的动作。× 与「稍后」同义：只收起这一程的待办条，侧栏更新键照旧在
+        // × 与「稍后」同义：只收起这一程的待办条，侧栏更新键照旧在（点它就是再试）
         return (
-          <NoticePanel
-            scope="section"
-            message={
-              <>
-                <Details text={update.detail} onCopy={(text) => copyDetails(text)}>
-                  {t("settings.update.failed", { version: update.version, reason: update.reason })}
-                </Details>
-                {" ·\u00a0"}
-                <Button variant="quiet" inline onClick={() => void openUrl(RELEASES_URL)}>
-                  {t("settings.update.releasesPage")}
-                </Button>
-              </>
-            }
-            action={{ label: t("settings.update.retry"), onClick: () => void appUpdates.install() }}
+          <UpdateFailure
+            scene="downloadUpdate"
+            problem={{ kind: update.cause, detail: update.detail }}
+            onRetry={() => void appUpdates.install()}
             onClose={() => setLater(true)}
           />
         );
@@ -212,10 +233,10 @@ export function SettingsPage({
   };
 
   /// 点「检查更新」之后：正在检查（键原位忙碌）/ 已是最新（键下方浮起，约 4 秒淡出）/
-  /// 检查失败（一行书面说明 + 去发布页的退路）
+  /// 检查失败（`UpdateFailure`）
   const [latest, setLatest] = useState(0);
   const [checking, setChecking] = useState(false);
-  const [checkFailed, setCheckFailed] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState<NetProblem | null>(null);
   const dismissLatest = useCallback(() => setLatest(0), []);
 
   /// 刚取消勾选的那一项：它正下方浮起一句说明，约 4 秒淡出（`at` 让连着取消两次时计时从头来）
@@ -294,7 +315,7 @@ export function SettingsPage({
   };
 
   /// `检查更新`：在应用里查（产品负责人：跳到 GitHub 让用户手动下载太难用）。有新版出待办条
-  /// （下载并安装 → 重启），没有就说「已是最新版本」，查不成才给「去发布页 ↗」的退路
+  /// （下载并安装 → 重启），没有就说「已是最新版本」，查不成按四类说并给出路（`UpdateFailure`）
   const checkUpdate = async () => {
     setLater(false);
     setLatest(0);
@@ -303,7 +324,7 @@ export function SettingsPage({
     try {
       if (!(await appUpdates.checkNow())) setLatest(Date.now());
     } catch (e) {
-      setCheckFailed(updateCheckFailure(e instanceof Error ? e.message : String(e)));
+      setCheckFailed(netProblemOf(e));
     } finally {
       setChecking(false);
     }
@@ -559,7 +580,7 @@ export function SettingsPage({
               {/* 没装的收在一行展开里：它不做事，只是在原地把列表拉开，所以是展开的样子（收起 › 拉开 ˅），
                   不是一颗键（2026-09-25 产品负责人真机：「感觉是个展开？」）。这是句末补充式的「还有 N 个」，
                   字在前、拉手在后（2026-10-06）：先读到是什么，再看到能展开；整句可点。
-                  列出来只是噪音，但要留入口——用户可能想预先恢复，装上之后就直接在列表里了 */}
+                  未安装的只是信息：勾选与否只对已安装的有意义（2026-10-07） */}
               {absent.length > 0 ? (
                 <>
                   <div className="settings-page__more">
@@ -579,7 +600,7 @@ export function SettingsPage({
                   </div>
                   {showAbsent ? (
                     <div id="settings-absent">
-                      <AbsentAgents agents={absent} onRestore={(id) => void toggle(id, true)} />
+                      <AbsentAgents agents={absent} />
                     </div>
                   ) : null}
                 </>

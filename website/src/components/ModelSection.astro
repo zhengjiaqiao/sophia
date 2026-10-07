@@ -1,0 +1,433 @@
+---
+// 模型区（锚点 #models，R9）：可点的三步卡。纯逻辑在 demos/models.ts；这里出静态终态的 HTML（关 JS 就是它），
+// 脚本只在有 JS 时接管：复位、进视口自动演一遍、点击响应。
+import { SITE } from "../site.config.ts";
+import { slot } from "../lib/template.ts";
+import { t, type Lang } from "../i18n.ts";
+import {
+  DEMO_KEY_MASK,
+  DEMO_PROVIDERS,
+  finalState,
+  resultOf,
+  resultText,
+  stepOf,
+} from "../demos/models.ts";
+import Feat from "./Feat.astro";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+
+const agentIds = SITE.agents.map((a) => a.id);
+const nameOf = (ids: string[]) => ids.map((id) => SITE.agents.find((a) => a.id === id)!.name);
+const sep = t(lang, "models.sep");
+const texts = {
+  ok: t(lang, "models.ok"),
+  testing: t(lang, "models.testing", { agent: slot("agent") }),
+  restarted: t(lang, "models.restarted", { agent: slot("agent") }),
+  off: t(lang, "models.off"),
+};
+
+// 静态终态：第一家服务商、密钥已填、名单里的 agent 全开、结果句是「好了。…」
+const state = finalState(agentIds);
+const step = stepOf(state);
+const result = resultText(resultOf(state, true), texts, nameOf, sep);
+const steps = [t(lang, "models.step1"), t(lang, "models.step2"), t(lang, "models.step3")];
+const stepClass = (k: number) => (k === step ? "on" : k < step ? "done" : "");
+---
+
+<Feat
+  id="models"
+  kicker={t(lang, "models.kicker")}
+  title1={t(lang, "models.title1")}
+  title2={t(lang, "models.title2")}
+  sub={t(lang, "models.sub", { count: SITE.providerFloor })}
+>
+  <div
+    class="demo"
+    data-demo="models"
+    data-ok={texts.ok}
+    data-testing={texts.testing}
+    data-restarted={texts.restarted}
+    data-off={texts.off}
+    data-sep={sep}
+    data-key={DEMO_KEY_MASK}
+  >
+    <div class="flow">
+      <div class:list={["fs", stepClass(0)]}>
+        <em>1</em>
+        <div>
+          <b>{steps[0]}</b>
+          <div class="provs">
+            {
+              DEMO_PROVIDERS.map((p) => (
+                <button type="button" class:list={["prov", { on: p === state.provider }]} aria-pressed={p === state.provider ? "true" : "false"}>
+                  {p}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+      <div class:list={["fs", stepClass(1)]}>
+        <em>2</em>
+        <div>
+          <b>{steps[1]}</b>
+          <div class="keyin" data-keyin>{DEMO_KEY_MASK}</div>
+        </div>
+      </div>
+      <div class:list={["fs", stepClass(2)]}>
+        <em>3</em>
+        <div>
+          <b>{steps[2]}</b>
+          <div class="sw-row">
+            {
+              SITE.agents.map((a) => (
+                <button type="button" class="switch" role="switch" aria-checked={state.on.includes(a.id) ? "true" : "false"} data-agent={a.id} aria-label={t(lang, "models.switchLabel", { agent: a.name })}>
+                  <span class="switch__t"></span>
+                  <span>{a.name}</span>
+                </button>
+              ))
+            }
+          </div>
+          <div class="result" data-result aria-live="polite">
+            {result.lead && <b>{result.lead}</b>}{result.rest}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</Feat>
+
+<script>
+  // 有 JS 时：先复位成第 1 步，卡片进入视口再自动演一遍；用户一动手，自动演示立刻让位
+  import {
+    DEMO_PROVIDERS,
+    fillKey,
+    finalState,
+    initialState,
+    pickProvider,
+    resultOf,
+    resultText,
+    stepOf,
+    toggleAgent,
+    type DemoState,
+  } from "../demos/models.ts";
+
+  const root = document.querySelector<HTMLElement>('[data-demo="models"]');
+  if (root) {
+    const d = root.dataset;
+    const texts = { ok: d.ok!, testing: d.testing!, restarted: d.restarted!, off: d.off! };
+    const sep = d.sep!;
+    const keyMask = d.key!;
+    const steps = [...root.querySelectorAll<HTMLElement>(".fs")];
+    const provs = [...root.querySelectorAll<HTMLButtonElement>(".prov")];
+    const keyin = root.querySelector<HTMLElement>("[data-keyin]")!;
+    const switches = [...root.querySelectorAll<HTMLButtonElement>(".switch")];
+    const resultEl = root.querySelector<HTMLElement>("[data-result]")!;
+    const ids = switches.map((b) => b.dataset.agent!);
+    const names = new Map(ids.map((id, i) => [id, switches[i].textContent!.trim()]));
+    const nameOf = (list: string[]) => list.map((id) => names.get(id)!);
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    let state: DemoState = finalState(ids);
+    let settled = true;
+    // 打字演示时只露出密钥的前几个字符
+    let keyShown = keyMask;
+    // 每次用户动手或重新演示就 +1，旧的演示循环发现不对就退出
+    let token = 0;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function render() {
+      const step = stepOf(state);
+      steps.forEach((el, k) => {
+        el.classList.toggle("on", k === step);
+        el.classList.toggle("done", k < step);
+      });
+      provs.forEach((b, i) => {
+        const on = DEMO_PROVIDERS[i] === state.provider;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+      keyin.textContent = state.key ? keyShown : " ";
+      switches.forEach((b) => b.setAttribute("aria-checked", String(state.on.includes(b.dataset.agent!))));
+      const r = resultText(resultOf(state, settled), texts, nameOf, sep);
+      resultEl.replaceChildren();
+      if (r.lead) {
+        const b = document.createElement("b");
+        b.textContent = r.lead;
+        resultEl.append(b);
+      }
+      resultEl.append(r.rest);
+    }
+
+    // 开关一动：先是「试了一次，能用。正在重启 …」，1.4 秒后换成「好了。…」；全关直接是「已改回官方模型。」
+    function flip(id: string) {
+      state = toggleAgent(state, id, ids);
+      settled = false;
+      render();
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => {
+        settled = true;
+        render();
+      }, 1400);
+    }
+
+    function userTouched() {
+      token++;
+    }
+
+    provs.forEach((b, i) =>
+      b.addEventListener("click", () => {
+        userTouched();
+        state = pickProvider(state, DEMO_PROVIDERS[i]);
+        render();
+        // 没贴过密钥：稍等一下替用户贴上（演示里密钥只是个打码的示例）
+        if (!state.key) {
+          const mine = ++token;
+          setTimeout(() => {
+            if (mine !== token) return;
+            keyShown = keyMask;
+            state = fillKey(state);
+            render();
+          }, 450);
+        }
+      }),
+    );
+    switches.forEach((b) =>
+      b.addEventListener("click", () => {
+        userTouched();
+        flip(b.dataset.agent!);
+      }),
+    );
+
+    async function play() {
+      const mine = ++token;
+      const alive = () => mine === token;
+      state = initialState();
+      settled = true;
+      keyShown = "";
+      render();
+      await wait(900);
+      if (!alive()) return;
+      state = pickProvider(state, DEMO_PROVIDERS[0]);
+      render();
+      await wait(700);
+      if (!alive()) return;
+      state = fillKey(state);
+      for (let i = 1; i <= keyMask.length; i++) {
+        keyShown = keyMask.slice(0, i);
+        render();
+        await wait(i < 4 ? 120 : 28);
+        if (!alive()) return;
+      }
+      await wait(1400);
+      for (const id of ids) {
+        if (!alive()) return;
+        flip(id);
+        await wait(450);
+      }
+    }
+
+    if (!reduce) {
+      state = initialState();
+      keyShown = "";
+      render();
+      let started = false;
+      new IntersectionObserver(
+        (entries, obs) => {
+          if (entries[0].isIntersecting && !started) {
+            started = true;
+            obs.disconnect();
+            play();
+          }
+        },
+        { threshold: 0.5 },
+      ).observe(root);
+    }
+  }
+</script>
+
+<style>
+  .demo {
+    width: 100%;
+    border-radius: 16px;
+    background: var(--paper);
+    box-shadow: var(--elev-device);
+    overflow: hidden;
+  }
+  .flow {
+    display: grid;
+    padding: 10px 20px 20px;
+  }
+  .fs {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--row-line);
+    align-items: start;
+    opacity: 0.4;
+    transition: opacity 0.4s;
+  }
+  .fs:first-child {
+    border-top: 0;
+  }
+  .fs.on,
+  .fs.done {
+    opacity: 1;
+  }
+  /* 步骤编号：圆底 accent-ink、字白（深色底上字取壳色，保对比）。只有「进行中 / 已完成」带橙 */
+  .fs em {
+    font: 700 13px/1 var(--font-cond);
+    font-style: normal;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--surface);
+  }
+  .fs.on em,
+  .fs.done em {
+    background: var(--accent-ink);
+    color: #fff;
+  }
+  .fs b {
+    font-size: 14px;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 8px;
+  }
+  .provs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .prov {
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--ink);
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    background: var(--face);
+    cursor: pointer;
+    transition:
+      background 0.25s,
+      color 0.25s,
+      box-shadow 0.25s;
+  }
+  .prov.on {
+    background: var(--ink);
+    color: var(--face);
+    box-shadow: none;
+  }
+  .keyin {
+    height: 34px;
+    border-radius: 8px;
+    background: var(--recess);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    display: flex;
+    align-items: center;
+    padding-inline: 10px;
+    font: 400 13px var(--font-mono);
+    letter-spacing: 0.12em;
+    color: var(--ink-mute);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .sw-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+  }
+  .switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink-mute);
+  }
+  .switch__t {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: var(--track);
+    box-shadow: inset 0 1px 2px rgba(28, 28, 26, 0.12);
+    flex: none;
+  }
+  /* 开着时滑块左边露出一道橙刻条（accent，沿用应用「开着」的橙） */
+  .switch__t::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 10px;
+    width: 8px;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.2s 0.1s;
+  }
+  .switch__t::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--paper);
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.08),
+      0 1px 3px rgba(0, 0, 0, 0.2);
+    transition: transform 0.45s var(--spring-slide);
+  }
+  .switch[aria-checked="true"] .switch__t::after {
+    transform: translateX(18px);
+  }
+  .switch[aria-checked="true"] .switch__t::before {
+    opacity: 1;
+  }
+  .result {
+    font-size: 13px;
+    color: var(--ink-mute);
+    margin-top: 10px;
+    min-height: 1.6em;
+  }
+  /* 结果句的加粗开头是脚本建的元素，没有 Astro 的局部标记，所以用 :global */
+  .result :global(b) {
+    display: inline;
+    margin: 0;
+    font-size: inherit;
+    color: var(--ink);
+    font-weight: 600;
+  }
+  @media (prefers-color-scheme: dark) {
+    .fs.on em,
+    .fs.done em {
+      color: var(--shell);
+    }
+    .switch__t {
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fs,
+    .prov,
+    .switch__t::after,
+    .switch__t::before {
+      transition: none;
+    }
+  }
+</style>

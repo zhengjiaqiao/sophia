@@ -13,7 +13,7 @@
 //! 屏幕睡着时不取数，醒来补一次（R6）。只有菜单栏显示开着、刷新不是「关」时才这样轮询；
 //! 否则循环只等命令，闲着时不醒（R13）。
 
-use super::{claude, codex, Account, FetchError};
+use super::{claude, codex, desktop_history, Account, FetchError};
 use futures_util::future::BoxFuture;
 use sophia_core::usage::schedule::{
     decide, rate_limited_until, AgentSchedule, ScheduleInput, SourceSchedule, Trigger,
@@ -43,7 +43,8 @@ pub fn woke_from_sleep(mono: Duration, wall: Duration) -> bool {
     wall.saturating_sub(mono) > SLEEP_GAP
 }
 
-/// 一个 agent 能不能取（R5）：起进程之前就判断，判断本身不起任何进程
+/// 一个 agent 的命令行能不能取（R5）：起进程之前就判断，判断本身不起任何进程。
+/// Claude 的命令行不可用（没装或没登录）时，改读桌面应用的用量历史（见 [`usable`]）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Availability {
     Ready,
@@ -61,13 +62,19 @@ pub fn availability_of(installed: bool, signed_in: bool) -> Availability {
     }
 }
 
-/// 每个 agent 的取法链（spec 第 2 节）：Claude 只有 `get_usage`；Codex 先读本机会话记录，
-/// 不够新再起 `app-server`
+/// 每个 agent 的取法链（spec 第 2 节）：Claude 是 `get_usage` → 桌面应用的用量历史（二选一，见 [`usable`]）；
+/// Codex 先读本机会话记录，不够新再起 `app-server`
 pub fn chain(agent: AgentId) -> &'static [Source] {
     match agent {
-        AgentId::ClaudeCode => &[Source::GetUsage],
+        AgentId::ClaudeCode => &[Source::GetUsage, Source::DesktopHistory],
         AgentId::Codex => &[Source::Rollout, Source::AppServer],
     }
+}
+
+/// 这条取法在这种可用性下跑不跑：Claude 桌面应用的用量历史只在命令行不可用（没装或没登录）时读，
+/// 命令行可用时不读（`get_usage` 准、有重置时间）；其余取法只在命令行可用时跑
+pub fn usable(source: Source, availability: Availability) -> bool {
+    (source == Source::DesktopHistory) != (availability == Availability::Ready)
 }
 
 /// 一次取数的结果：`Ok(None)` 是「会话记录里没有额度记录」，不算失败，交给链上下一条
@@ -94,6 +101,8 @@ struct AgentTrack {
     /// 回过「程序不认这个请求」（旧版 Claude Code 没有 `get_usage`）：后台不再起进程，状态一直写原因；
     /// 重启、登录 / 安装状态变化、手动刷新后重新尝试。不存盘
     unsupported: bool,
+    /// 这个 agent 的桌面应用装着（只 Claude 看，决定读不到数时出不出块，见 `AgentUsage::desktop_app`）
+    desktop_app: bool,
 }
 
 /// 调度的内存状态。只在调度循环里改，交出去的是 [`Tracker::state`] 的快照
@@ -137,6 +146,7 @@ impl Tracker {
                     rate_limit_streak: memo.rate_limit_streaks.get(&agent).copied().unwrap_or(0),
                     no_plan_limits: false,
                     unsupported: false,
+                    desktop_app: false,
                 },
             );
         }
@@ -183,6 +193,11 @@ impl Tracker {
         }
     }
 
+    /// 记下桌面应用装没装（每轮与可用性一起看，不起进程）
+    pub fn set_desktop_app(&mut self, agent: AgentId, installed: bool) {
+        self.track(agent).desktop_app = installed;
+    }
+
     /// 手动刷新：「版本可能太旧」的判断作废，再试一次（用户多半刚更新了 Claude Code）。
     /// `only` 为 None 时是全部 agent
     pub fn retry_unsupported(&mut self, only: Option<AgentId>) {
@@ -197,29 +212,34 @@ impl Tracker {
     pub fn schedule_agents(&self) -> Vec<AgentSchedule> {
         self.agents
             .iter()
-            .map(|(&agent, t)| AgentSchedule {
-                agent,
-                available: t.availability == Availability::Ready
-                    && !t.no_plan_limits
-                    && !t.unsupported,
-                sources: t
+            .map(|(&agent, t)| {
+                let sources: Vec<_> = t
                     .sources
                     .iter()
+                    .filter(|s| usable(s.source, t.availability))
                     .map(|s| SourceSchedule {
                         source: s.source,
                         last_attempt: s.last_attempt,
                         rate_limited_until: s.rate_limited_until,
                     })
-                    .collect(),
-                // 只算这次读数之后的重置：已经被它覆盖过的过去时刻不挡住后面真正要追的
-                next_reset: t.reading.as_ref().and_then(|r| {
-                    r.windows
-                        .iter()
-                        .filter_map(|w| w.resets_at)
-                        .filter(|&at| at > r.observed_at)
-                        .min()
-                }),
-                last_success_observed_at: t.reading.as_ref().map(|r| r.observed_at),
+                    .collect();
+                // 「没有订阅额度」「版本可能太旧」只挡命令行；命令行不可用时读桌面应用的记录不受它们影响
+                let cli_blocked =
+                    t.availability == Availability::Ready && (t.no_plan_limits || t.unsupported);
+                AgentSchedule {
+                    agent,
+                    available: !sources.is_empty() && !cli_blocked,
+                    sources,
+                    // 只算这次读数之后的重置：已经被它覆盖过的过去时刻不挡住后面真正要追的
+                    next_reset: t.reading.as_ref().and_then(|r| {
+                        r.windows
+                            .iter()
+                            .filter_map(|w| w.resets_at)
+                            .filter(|&at| at > r.observed_at)
+                            .min()
+                    }),
+                    last_success_observed_at: t.reading.as_ref().map(|r| r.observed_at),
+                }
             })
             .collect()
     }
@@ -233,18 +253,28 @@ impl Tracker {
         }
         match outcome {
             Ok(Some(reading)) => {
-                // 服务端这一侧取到新数：限流解除、连续次数清零。本机会话记录不打服务端，不算
-                if source != Source::Rollout {
+                // 服务端这一侧取到新数：限流解除、连续次数清零。读本机文件的（会话记录、桌面应用的用量历史）
+                // 不打服务端，不算
+                if !source.reads_local_file() {
                     t.rate_limit_streak = 0;
-                    for s in t.sources.iter_mut().filter(|s| s.source != Source::Rollout) {
+                    for s in t
+                        .sources
+                        .iter_mut()
+                        .filter(|s| !s.source.reads_local_file())
+                    {
                         s.rate_limited_until = None;
                     }
                 }
-                // 会话记录可能比手上的读数还旧：旧的不换，状态也不因此变成正常
-                let newer = t
-                    .reading
-                    .as_ref()
-                    .is_none_or(|old| reading.observed_at >= old.observed_at);
+                // 会话记录可能比手上的读数还旧：旧的不换，状态也不因此变成正常。
+                // 桌面应用的记录例外：只在命令行不可用时读，手上命令行留下的读数不会再更新，换成桌面应用的
+                let replaces_cli = source == Source::DesktopHistory
+                    && t.reading
+                        .as_ref()
+                        .is_some_and(|old| old.source != Source::DesktopHistory);
+                let newer = replaces_cli
+                    || t.reading
+                        .as_ref()
+                        .is_none_or(|old| reading.observed_at >= old.observed_at);
                 if newer {
                     // 会话记录只带主额度：保留上一次 app-server 读到的模型限定窗口（Spark 等）
                     let mut reading = reading;
@@ -266,6 +296,17 @@ impl Tracker {
                     t.status = UsageStatus::Ok;
                 }
                 newer
+            }
+            // 桌面应用的记录没了或认不得：手上那份桌面应用的读数一起作废（不再当成有记录）
+            Ok(None) if source == Source::DesktopHistory => {
+                let had = t
+                    .reading
+                    .as_ref()
+                    .is_some_and(|r| r.source == Source::DesktopHistory);
+                if had {
+                    t.reading = None;
+                }
+                had
             }
             Ok(None) => false,
             Err(FetchError::NotInstalled) => {
@@ -315,6 +356,7 @@ impl Tracker {
                     },
                     reading: t.reading.clone(),
                     attempted_at: t.attempted_at,
+                    desktop_app: t.desktop_app,
                 })
                 .collect(),
         }
@@ -332,6 +374,10 @@ impl Tracker {
 /// 取数的一侧：判断可用性、跑一条取法。真实实现见 [`RealFetcher`]
 pub trait Fetcher: Send + Sync {
     fn availability(&self, agent: AgentId) -> Availability;
+    /// 这个 agent 的桌面应用装没装（只看文件，不起进程）；默认没装
+    fn desktop_app(&self, _agent: AgentId) -> bool {
+        false
+    }
     fn fetch(&self, agent: AgentId, source: Source, now: i64) -> BoxFuture<'_, Outcome>;
 }
 
@@ -435,6 +481,8 @@ impl Loop<'_> {
         for agent in AgentId::ALL {
             let availability = self.fetcher.availability(agent);
             self.tracker.set_availability(agent, availability);
+            let desktop_app = self.fetcher.desktop_app(agent);
+            self.tracker.set_desktop_app(agent, desktop_app);
         }
         self.publish();
         let system = self.host.system();
@@ -498,6 +546,8 @@ pub async fn run(
     for agent in AgentId::ALL {
         lp.tracker
             .set_availability(agent, fetcher.availability(agent));
+        lp.tracker
+            .set_desktop_app(agent, fetcher.desktop_app(agent));
     }
     lp.publish();
 
@@ -569,7 +619,7 @@ pub async fn run(
     }
 }
 
-/// 真实的取数：本机会话记录、`claude -p` 的 `get_usage`、`codex app-server`
+/// 真实的取数：本机会话记录、`claude -p` 的 `get_usage`、Claude 桌面应用的用量历史、`codex app-server`
 pub struct RealFetcher {
     /// Sophia 应用支持目录，探测目录在它下面
     pub base_dir: PathBuf,
@@ -591,6 +641,11 @@ impl Fetcher for RealFetcher {
         }
     }
 
+    /// Claude 桌面应用装没装：读 `Info.plist`（按修改时间缓存），不起进程
+    fn desktop_app(&self, agent: AgentId) -> bool {
+        agent == AgentId::ClaudeCode && crate::claude_desktop::info().is_some()
+    }
+
     fn fetch(&self, agent: AgentId, source: Source, now: i64) -> BoxFuture<'_, Outcome> {
         Box::pin(async move {
             match (agent, source) {
@@ -602,6 +657,17 @@ impl Fetcher for RealFetcher {
                             let why = format!("读会话记录失败: {e}"); // i18n-exempt: 诊断信息，界面只显示 reason()
                             FetchError::Spawn(why)
                         })
+                }
+                (AgentId::ClaudeCode, Source::DesktopHistory) => {
+                    let path = desktop_history::history_path(&self.account.home);
+                    tokio::task::spawn_blocking(move || {
+                        desktop_history::read_desktop_history(&path)
+                    })
+                    .await
+                    .map_err(|e| {
+                        let why = format!("读桌面应用的用量历史失败: {e}"); // i18n-exempt: 诊断信息，界面只显示 reason()
+                        FetchError::Spawn(why)
+                    })
                 }
                 (AgentId::ClaudeCode, Source::GetUsage) => {
                     claude::fetch_get_usage(&self.base_dir, &self.account, now)
@@ -1019,6 +1085,102 @@ mod tests {
         assert_eq!(availability_of(true, true), Availability::Ready);
     }
 
+    fn claude_schedule(t: &Tracker) -> AgentSchedule {
+        t.schedule_agents()
+            .into_iter()
+            .find(|a| a.agent == AgentId::ClaudeCode)
+            .unwrap()
+    }
+
+    fn sources_of(a: &AgentSchedule) -> Vec<Source> {
+        a.sources.iter().map(|s| s.source).collect()
+    }
+
+    /// Claude 的取法链：命令行可用时只有 get_usage（不读桌面应用的历史）；没登录、没装时只读桌面应用的历史。
+    /// Codex 没有这条，命令行不可用就不跑
+    #[test]
+    fn claude_chain_picks_desktop_history_only_when_cli_unavailable() {
+        let mut t = Tracker::new(vec![], ScheduleMemo::default());
+        assert_eq!(sources_of(&claude_schedule(&t)), vec![Source::GetUsage]);
+        for availability in [Availability::NotSignedIn, Availability::NotInstalled] {
+            t.set_availability(AgentId::ClaudeCode, availability);
+            let claude = claude_schedule(&t);
+            assert!(claude.available, "{availability:?}");
+            assert_eq!(sources_of(&claude), vec![Source::DesktopHistory]);
+        }
+        t.set_availability(AgentId::Codex, Availability::NotSignedIn);
+        let codex = t
+            .schedule_agents()
+            .into_iter()
+            .find(|a| a.agent == AgentId::Codex)
+            .unwrap();
+        assert!(!codex.available);
+        assert!(codex.sources.is_empty());
+    }
+
+    /// 「没有订阅额度」只挡命令行：退出登录后照样读桌面应用的历史
+    #[test]
+    fn no_plan_limits_does_not_block_desktop_history() {
+        let mut t = Tracker::new(vec![], ScheduleMemo::default());
+        t.record(
+            AgentId::ClaudeCode,
+            Source::GetUsage,
+            T0,
+            Err(FetchError::Failed(ParseFailure::NoPlanLimits)),
+        );
+        assert!(!claude_schedule(&t).available);
+        t.set_availability(AgentId::ClaudeCode, Availability::NotSignedIn);
+        assert!(claude_schedule(&t).available);
+    }
+
+    /// 命令行不可用时读到的桌面应用记录：换掉命令行留下的旧读数（哪怕那份更新），状态照旧是「没登录」；
+    /// 记录没了（文件删了、格式认不得）就作废，不再当成有记录
+    #[test]
+    fn desktop_reading_replaces_cli_reading_and_is_dropped_when_gone() {
+        let mut t = Tracker::new(vec![], ScheduleMemo::default());
+        let cli = reading(AgentId::ClaudeCode, Source::GetUsage, T0, 13.0);
+        t.record(AgentId::ClaudeCode, Source::GetUsage, T0, Ok(Some(cli)));
+        t.set_availability(AgentId::ClaudeCode, Availability::NotSignedIn);
+        let desktop = reading(AgentId::ClaudeCode, Source::DesktopHistory, T0 - 3600, 42.0);
+        assert!(t.record(
+            AgentId::ClaudeCode,
+            Source::DesktopHistory,
+            T0 + 60,
+            Ok(Some(desktop.clone()))
+        ));
+        let a = agent_state(&t, AgentId::ClaudeCode);
+        assert_eq!(a.reading, Some(desktop));
+        assert_eq!(a.status, UsageStatus::NotSignedIn);
+        assert!(t.record(
+            AgentId::ClaudeCode,
+            Source::DesktopHistory,
+            T0 + 180,
+            Ok(None)
+        ));
+        assert_eq!(agent_state(&t, AgentId::ClaudeCode).reading, None);
+        assert!(!t.record(
+            AgentId::ClaudeCode,
+            Source::DesktopHistory,
+            T0 + 240,
+            Ok(None)
+        ));
+    }
+
+    /// 桌面应用的记录不打服务端：不解除 get_usage 的限流
+    #[test]
+    fn desktop_reading_does_not_clear_server_rate_limit() {
+        let mut t = Tracker::new(vec![], ScheduleMemo::default());
+        t.record(AgentId::ClaudeCode, Source::GetUsage, T0, rate_limited());
+        let r = reading(AgentId::ClaudeCode, Source::DesktopHistory, T0, 42.0);
+        t.record(
+            AgentId::ClaudeCode,
+            Source::DesktopHistory,
+            T0 + 10,
+            Ok(Some(r)),
+        );
+        assert_eq!(get_usage_track(&t).rate_limited_until, Some(T0 + 300));
+    }
+
     #[test]
     fn sleep_gap_boundary() {
         let s = Duration::from_secs;
@@ -1083,6 +1245,10 @@ mod tests {
         claude_rate_limited: Mutex<bool>,
         claude_unsupported: Mutex<bool>,
         claude_signed_out: Mutex<bool>,
+        /// Claude 桌面应用的用量历史：最新一条是几秒前记的；None＝没有文件或认不得
+        desktop_age: Mutex<Option<i64>>,
+        /// Claude 桌面应用装着
+        desktop_app: Mutex<bool>,
     }
 
     impl FakeFetcher {
@@ -1094,6 +1260,8 @@ mod tests {
                 claude_rate_limited: Mutex::new(false),
                 claude_unsupported: Mutex::new(false),
                 claude_signed_out: Mutex::new(false),
+                desktop_age: Mutex::new(None),
+                desktop_app: Mutex::new(false),
             })
         }
         fn calls(&self) -> Vec<(AgentId, Source, i64)> {
@@ -1112,6 +1280,9 @@ mod tests {
                 Availability::Ready
             }
         }
+        fn desktop_app(&self, agent: AgentId) -> bool {
+            agent == AgentId::ClaudeCode && *self.desktop_app.lock().unwrap()
+        }
         fn fetch(&self, agent: AgentId, source: Source, now: i64) -> BoxFuture<'_, Outcome> {
             self.calls.lock().unwrap().push((agent, source, now));
             let now = self.host.now();
@@ -1125,6 +1296,11 @@ mod tests {
                 Source::GetUsage if *self.claude_unsupported.lock().unwrap() => {
                     Err(FetchError::Failed(ParseFailure::Unsupported))
                 }
+                Source::DesktopHistory => Ok(self
+                    .desktop_age
+                    .lock()
+                    .unwrap()
+                    .map(|age| reading(agent, source, now - age, 42.0))),
                 _ => Ok(Some(reading(agent, source, now, 20.0))),
             };
             Box::pin(async move { outcome })
@@ -1228,6 +1404,7 @@ mod tests {
     async fn first_publish_already_knows_availability() {
         let r = start(menu_bar_on(), |f, h| {
             *f.claude_signed_out.lock().unwrap() = true;
+            *f.desktop_app.lock().unwrap() = true;
             *h.display_asleep.lock().unwrap() = true;
         });
         advance(1).await;
@@ -1239,6 +1416,14 @@ mod tests {
             .find(|a| a.agent == AgentId::ClaudeCode)
             .unwrap();
         assert_eq!(claude.status, UsageStatus::NotSignedIn);
+        // 装了 Claude 桌面应用：第一次交出就带着（读不到数时 Claude 块照样出、给连接键）
+        assert!(claude.desktop_app);
+        let codex = first
+            .agents
+            .iter()
+            .find(|a| a.agent == AgentId::Codex)
+            .unwrap();
+        assert!(!codex.desktop_app);
     }
 
     /// AC6：会话记录太旧（或没有）就在同一轮里退到 app-server
@@ -1460,5 +1645,82 @@ mod tests {
         let after = &fetcher.calls()[before..];
         assert!(!after.is_empty());
         assert!(after.iter().all(|c| c.0 == AgentId::Codex), "{after:?}");
+    }
+
+    // ---------------- Claude 桌面应用的用量历史（spec #195）：取数链的外部结果 ----------------
+
+    fn claude_view(host: &FakeHost) -> sophia_core::usage::format::UsageView {
+        let state = host.published.lock().unwrap().last().cloned().unwrap();
+        sophia_core::usage::format::usage_view(
+            &state,
+            &UsageSettings::default(),
+            sophia_core::usage::PowerState::default(),
+            host.now(),
+        )
+    }
+
+    /// 命令行已登录：一小时里照常起 get_usage，一次也不读桌面应用的历史
+    #[tokio::test(start_paused = true)]
+    async fn cli_signed_in_never_reads_desktop_history() {
+        let r = start(menu_bar_on(), |f, _| {
+            *f.desktop_age.lock().unwrap() = Some(3 * 3600)
+        });
+        advance(3600 - 30).await;
+        let (_, fetcher) = r.stop().await;
+        assert!(fetcher.count(Source::GetUsage) >= 1);
+        assert_eq!(fetcher.count(Source::DesktopHistory), 0);
+    }
+
+    /// 命令行没登录、桌面应用有记录：不起 claude，读桌面应用的历史；Claude 块出现，块头写来源与时间
+    #[tokio::test(start_paused = true)]
+    async fn cli_signed_out_reads_desktop_history_and_shows_claude() {
+        let r = start(menu_bar_on(), |f, _| {
+            *f.claude_signed_out.lock().unwrap() = true;
+            *f.desktop_age.lock().unwrap() = Some(3 * 3600);
+        });
+        advance(1).await;
+        let (host, fetcher) = r.stop().await;
+        assert_eq!(fetcher.count(Source::GetUsage), 0);
+        assert_eq!(fetcher.count(Source::DesktopHistory), 1);
+        let view = claude_view(&host);
+        assert_eq!(view.signed_in, vec![AgentId::ClaudeCode, AgentId::Codex]);
+        let claude = view
+            .tray
+            .iter()
+            .find(|t| t.agent == AgentId::ClaudeCode)
+            .unwrap();
+        assert_eq!(
+            claude.updated_text.as_deref(),
+            Some("来自 Claude 桌面应用 · 3 小时前")
+        );
+        assert!(claude.windows.iter().all(|w| w.reset_text.is_none()));
+        assert!(*host.saved.lock().unwrap() >= 1, "桌面应用的读数也存盘");
+    }
+
+    /// 读本机文件的节奏：命令行没登录时，自动档一小时里按 tick 读桌面应用的历史（2 次），从不起 claude
+    #[tokio::test(start_paused = true)]
+    async fn desktop_history_follows_local_file_cadence() {
+        let r = start(menu_bar_on(), |f, _| {
+            *f.claude_signed_out.lock().unwrap() = true;
+            *f.desktop_age.lock().unwrap() = Some(600);
+        });
+        advance(3600 - 30).await;
+        let (_, fetcher) = r.stop().await;
+        assert_eq!(fetcher.count(Source::GetUsage), 0);
+        assert_eq!(fetcher.count(Source::DesktopHistory), 2);
+    }
+
+    /// 命令行没登录、桌面应用也没有记录：照旧读一下文件，但 Claude 块不出现（同今天）
+    #[tokio::test(start_paused = true)]
+    async fn neither_cli_nor_desktop_history_hides_claude() {
+        let r = start(menu_bar_on(), |f, _| {
+            *f.claude_signed_out.lock().unwrap() = true
+        });
+        advance(1).await;
+        let (host, fetcher) = r.stop().await;
+        assert_eq!(fetcher.count(Source::GetUsage), 0);
+        let view = claude_view(&host);
+        assert_eq!(view.signed_in, vec![AgentId::Codex]);
+        assert!(view.tray.iter().all(|t| t.agent != AgentId::ClaudeCode));
     }
 }

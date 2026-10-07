@@ -1,7 +1,8 @@
 //! 登录 shell 的环境（spec S16，sophia-dev#94）：从 Dock 或登录项启动的 Sophia 拿到的是系统最小 PATH，
 //! 用 nvm、volta、fnm、bun、asdf 装的 `claude` / `codex` 找不到，写在 `.zshrc` 里的 `CLAUDE_CONFIG_DIR`、
 //! `CODEX_HOME` 也读不到。启动后在后台起一次**交互式登录 shell**（`$SHELL -ilc`，nvm、volta 多写在 `.zshrc`，
-//! 只有交互式才会读它），最多等 [`TIMEOUT`]，只取三个变量，只问一次并缓存。
+//! 只有交互式才会读它），最多等 [`TIMEOUT`]，只取三个变量与代理变量（[`PROXY_VARS`]，spec #195「修订：代理」：
+//! 开发者写在 shell 里的代理，Sophia 起的子进程也要用上），只问一次并缓存。
 //!
 //! 超时、起不来、输出里没有标记都当「没拿到」，一切退回现状；不卡界面、不弹错。
 //! 不 `source` 别的文件，不取白名单以外的变量。测试主目录（`SOPHIA_TEST_HOME`）优先于这里的一切
@@ -17,15 +18,29 @@ use std::time::Duration;
 pub const TIMEOUT: Duration = Duration::from_secs(6);
 /// 输出里的标记行：`.zshrc` 可能先打印别的东西，只认标记之后的几行
 const MARK: &str = "SOPHIA_LOGIN_ENV";
-/// 让 shell 打印三个变量的命令（`$SHELL -ilc <这一串>`）
-const PRINT: &str = r#"printf 'SOPHIA_LOGIN_ENV\nPATH=%s\nCLAUDE_CONFIG_DIR=%s\nCODEX_HOME=%s\n' "$PATH" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME""#;
+/// 让 shell 打印三个变量与代理变量的命令（`$SHELL -ilc <这一串>`）
+const PRINT: &str = r#"printf 'SOPHIA_LOGIN_ENV\nPATH=%s\nCLAUDE_CONFIG_DIR=%s\nCODEX_HOME=%s\nHTTPS_PROXY=%s\nhttps_proxy=%s\nHTTP_PROXY=%s\nhttp_proxy=%s\nALL_PROXY=%s\nall_proxy=%s\nNO_PROXY=%s\nno_proxy=%s\n' "$PATH" "$CLAUDE_CONFIG_DIR" "$CODEX_HOME" "$HTTPS_PROXY" "$https_proxy" "$HTTP_PROXY" "$http_proxy" "$ALL_PROXY" "$all_proxy" "$NO_PROXY" "$no_proxy""#;
 
-/// 登录 shell 里的三个变量；空串算没有
+/// 代理变量（大小写两种都认）：只影响怎么连网、不改变身份
+pub const PROXY_VARS: [&str; 8] = [
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+];
+
+/// 登录 shell 里的三个变量与设了的代理变量；空串算没有
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoginEnv {
     pub path: Option<String>,
     pub claude_config_dir: Option<String>,
     pub codex_home: Option<String>,
+    /// 设了的代理变量，按 [`PROXY_VARS`] 的顺序
+    pub proxy: Vec<(String, String)>,
 }
 
 /// 把 shell 的输出解析成 [`LoginEnv`]：标记行之后的 `名=值` 行；没有标记为 None
@@ -42,9 +57,16 @@ pub fn parse(output: &str) -> Option<LoginEnv> {
             "PATH" => env.path = value,
             "CLAUDE_CONFIG_DIR" => env.claude_config_dir = value,
             "CODEX_HOME" => env.codex_home = value,
+            key if PROXY_VARS.contains(&key) => {
+                if let Some(value) = value {
+                    env.proxy.push((key.to_owned(), value));
+                }
+            }
             _ => {}
         }
     }
+    env.proxy
+        .sort_by_key(|(key, _)| PROXY_VARS.iter().position(|k| k == key));
     Some(env)
 }
 
@@ -117,6 +139,9 @@ pub fn start() {
                         env.codex_home.is_some()
                     ),
                     None => log::warn!("登录 shell 的环境没读到（超时或起不来），按现状找程序"),
+                }
+                if let Some(env) = &env {
+                    log::info!("登录 shell 里设了 {} 个代理变量", env.proxy.len());
                 }
                 *RESULT.lock().unwrap_or_else(|p| p.into_inner()) = env;
             })
@@ -202,10 +227,31 @@ mod tests {
                 path: Some("/a:/b".into()),
                 claude_config_dir: None,
                 codex_home: Some("/c".into()),
+                proxy: Vec::new(),
             })
         );
         assert_eq!(parse("junk\n"), None, "没有标记就是没拿到");
         assert_eq!(parse("SOPHIA_LOGIN_ENV\n"), Some(LoginEnv::default()));
+    }
+
+    /// 代理变量（spec #195「修订：代理」）：设了的都留下、按固定顺序，空的不算，别的变量不收
+    #[test]
+    fn 解析_代理变量_设了的留下_空的不算() {
+        let out = "SOPHIA_LOGIN_ENV\nPATH=/a\nno_proxy=localhost,.corp\nHTTPS_PROXY=http://127.0.0.1:7890\nhttps_proxy=\nALL_PROXY=socks5://127.0.0.1:7891\nFTP_PROXY=http://x\n";
+        assert_eq!(
+            parse(out).unwrap().proxy,
+            vec![
+                (
+                    "HTTPS_PROXY".to_string(),
+                    "http://127.0.0.1:7890".to_string()
+                ),
+                (
+                    "ALL_PROXY".to_string(),
+                    "socks5://127.0.0.1:7891".to_string()
+                ),
+                ("no_proxy".to_string(), "localhost,.corp".to_string()),
+            ]
+        );
     }
 
     /// 冒充 shell：收到 `-ilc <命令>` 后在自己设好的环境里执行那条命令
@@ -215,18 +261,28 @@ mod tests {
         let shell = fake_shell(
             dir.path(),
             "zsh",
-            "echo 'banner from zshrc'\nPATH=/fake/nvm/bin:/usr/bin CLAUDE_CONFIG_DIR=/fake/cc CODEX_HOME= exec /bin/sh -c \"$2\"",
+            "echo 'banner from zshrc'\nunset https_proxy HTTP_PROXY http_proxy ALL_PROXY all_proxy NO_PROXY no_proxy\nPATH=/fake/nvm/bin:/usr/bin CLAUDE_CONFIG_DIR=/fake/cc CODEX_HOME= HTTPS_PROXY=http://127.0.0.1:7890 exec /bin/sh -c \"$2\"",
         );
         let env = run_with_timeout(shell, crate::test_timing::CHILD_OK).expect("应该拿到");
         assert_eq!(env.path.as_deref(), Some("/fake/nvm/bin:/usr/bin"));
         assert_eq!(env.claude_config_dir.as_deref(), Some("/fake/cc"));
         assert_eq!(env.codex_home, None);
+        assert_eq!(
+            env.proxy,
+            vec![(
+                "HTTPS_PROXY".to_string(),
+                "http://127.0.0.1:7890".to_string()
+            )]
+        );
     }
 
     #[test]
     fn 问登录shell_挂住就超时_不超过上限() {
         let dir = tempfile::tempdir().unwrap();
-        let shell = fake_shell(dir.path(), "slow", "sleep 30");
+        // `exec`：超时只杀得到 shell 本身，不 exec 的话 `sleep` 成了孤儿再活 30 秒。macOS 上 std 开管道不是原子地
+        // 设 CLOEXEC，别的线程恰在此时 fork 出的 `sleep` 会带着别个测试的 stdout 写端，拖得「拿到三个变量」
+        // 迟迟读不到 EOF、等满 30 秒超时（整套并发时偶发，约 1/25）
+        let shell = fake_shell(dir.path(), "slow", "exec sleep 30");
         let start = std::time::Instant::now();
         assert_eq!(run_with_timeout(shell, Duration::from_millis(300)), None);
         assert!(

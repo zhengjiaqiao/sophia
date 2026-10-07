@@ -3,6 +3,7 @@ pub mod activity;
 pub mod atomicfile;
 pub mod claude_models;
 pub mod codex_models;
+pub mod copies;
 pub mod diagnostics;
 pub mod discovery;
 pub mod file_issue;

@@ -1,0 +1,225 @@
+/* 官网的全局样式：token 直接引用应用的 src/tokens.css（不复制），在它之上只加官网自己的几项
+   （DESIGN「官网」一节）：白底、营销字号、官网的橙 accent-ink。各区块自己的样式写在各自的 .astro 里。
+   要同时顾浅色与深色：深色只跟随系统（R16），没有切换键。 */
+@import "../../../src/tokens.css";
+
+:root {
+  color-scheme: light dark;
+
+  /* 官网底色白（R14）：应用的机壳灰换成白，凹面与分隔线随之浅一档；深色沿用应用的深色再沉一点 */
+  --shell: #ffffff;
+  --face: #ffffff;
+  --paper: #ffffff;
+  --recess: #f6f6f4;
+  --surface: #f1f1ee;
+  --hairline: #e8e8e4;
+  --row-line: #efefec;
+
+  /* 官网的橙（R15）：小面积记号——区块小标的短横与字、标题与字幕里的关键词、步骤编号、短片里的选中框、开关刻条。
+     文字用深一档的 accent-ink（对白底 5.1:1）；按钮、链接、格点、插图、标志不用橙 */
+  --accent-ink: #b5501f;
+
+  /* 演示框与「设备」的投影：官网新增的一档，比应用的「浮」更高更散——它们是摆在页面上的一台设备，不是浮层 */
+  /* prettier-ignore */
+  --elev-device: 0 0 0 1px rgba(28,28,26,.06), 0 2px 4px rgba(28,28,26,.04), 0 24px 60px -12px rgba(28,28,26,.18);
+
+  /* 营销字号与留白：比应用放开（R14） */
+  --mk-hero: clamp(36px, 4.6cqi, 60px);
+  --mk-h2: clamp(30px, 3.6cqi, 48px);
+  --mk-lead: 18px;
+  --mk-content: 1180px;
+  --mk-section: clamp(72px, 9cqi, 128px);
+
+  --ease-mech: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shell: #121211;
+    --face: #1a1a19;
+    --paper: #1f1f1e;
+    --recess: #0e0e0d;
+    --surface: #262624;
+    --hairline: #2e2e2b;
+    --row-line: #232321;
+    --accent-ink: #f0804a;
+    /* prettier-ignore */
+    --elev-device: 0 0 0 1px rgba(255,255,250,.07), 0 24px 60px -12px rgba(0,0,0,.7);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 72px;
+}
+body {
+  margin: 0;
+  background: var(--shell);
+  color: var(--ink);
+  font: 400 var(--size-body) / var(--leading-body) var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+a {
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+h1,
+h2,
+h3 {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 整页是一个尺寸容器：区块里的响应式一律用 @container site (...)，数值取页面宽度、不取窗口 */
+.site {
+  container: site / inline-size;
+  overflow-x: clip;
+}
+.wrap {
+  width: 100%;
+  max-width: calc(var(--mk-content) + 48px);
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+@container site (max-width: 560px) {
+  .wrap {
+    padding-inline: 16px;
+  }
+}
+
+/* 深浅两版资产：随系统换 */
+.logo-d {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  .logo-l {
+    display: none;
+  }
+  .logo-d {
+    display: block;
+  }
+}
+
+/* 区块小标：短横 + 字，橙（R15） */
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 12px / 1 var(--font-cond);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.kicker::before {
+  content: "";
+  width: 18px;
+  height: 1px;
+  background: var(--accent);
+}
+
+/* 区块标题：两行，每行不拆（「AI agent」「agent 配置」靠文案里的不换行空格） */
+.h2 {
+  font: 600 var(--mk-h2) / 1.2 var(--font-cjk);
+  letter-spacing: -0.02em;
+  margin: 14px 0 0;
+}
+.h2 .ph {
+  display: block;
+}
+.sub {
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--ink-mute);
+  max-width: 30em;
+  margin: 20px 0 0;
+}
+
+/* 键 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding-inline: 14px;
+  border-radius: var(--radius-control);
+  border: 0;
+  background: var(--face);
+  box-shadow: var(--raise);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease-mech);
+  white-space: nowrap;
+}
+.btn:active {
+  transform: translateY(0.5px) scale(0.985);
+}
+.btn--ink {
+  background: var(--ink);
+  color: var(--face);
+  box-shadow: var(--raise-ink);
+}
+.btn--hero {
+  height: 58px;
+  padding-inline: 22px 28px;
+  border-radius: var(--radius-face);
+  gap: 14px;
+}
+.btn--hero svg {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+.btn--hero .t {
+  display: grid;
+  line-height: 1.2;
+  text-align: left;
+}
+.btn--hero b {
+  font-size: 16px;
+  font-weight: 600;
+}
+.btn--hero small {
+  font-size: 12px;
+  opacity: 0.66;
+}
+.btn--hero:hover {
+  transform: translateY(-1px);
+}
+
+/* 插图（空态猫图）：深色下不垫底板、不反相，四周描 1px 轮廓光——同应用 ui.css 的 .ss-empty__art（R16） */
+.cat-art {
+  display: block;
+  height: auto;
+}
+@media (prefers-color-scheme: dark) {
+  .cat-art {
+    filter: drop-shadow(1px 0 0 var(--cat-rim)) drop-shadow(-1px 0 0 var(--cat-rim))
+      drop-shadow(0 1px 0 var(--cat-rim)) drop-shadow(0 -1px 0 var(--cat-rim));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .btn {
+    transition: none;
+  }
+}

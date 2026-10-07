@@ -11,7 +11,7 @@ const { UpdateKey, litTicks } = await import("../src/ui/UpdateKey.tsx");
 function fakeBackend() {
   let clock = 1_000;
   let next: AppUpdateHandle | null | Error = null;
-  let downloadResult: Error | null = null;
+  let downloadResult: unknown = null;
   const calls = { check: 0, relaunch: 0, download: 0 };
   const handle = (version: string): AppUpdateHandle => ({
     version,
@@ -40,7 +40,7 @@ function fakeBackend() {
     found: (version: string) => (next = handle(version)),
     nothing: () => (next = null),
     offline: () => (next = new Error("error sending request")),
-    downloadFails: (e: Error | null) => (downloadResult = e),
+    downloadFails: (e: unknown) => (downloadResult = e),
     advance: (ms: number) => (clock += ms),
   };
 }
@@ -122,13 +122,15 @@ test("下载失败：记下原因；后台再查不冲掉原因，重试先重�
   const store = createAppUpdateStore(f.backend);
   f.found("0.2.0");
   await store.checkQuietly();
-  f.downloadFails(new Error("disk full"));
+  f.downloadFails(
+    new Error("[timeout] error decoding response body\n[detail] operation timed out"),
+  );
   await store.install();
   assert.deepEqual(store.get().phase, {
     kind: "failed",
     version: "0.2.0",
-    detail: "Error: disk full",
-    reason: "原因见详情",
+    cause: "timeout",
+    detail: "operation timed out",
   });
   await store.checkQuietly();
   assert.equal(store.get().phase.kind, "failed");
@@ -161,7 +163,7 @@ test("侧栏更新键：只有图标、不展开，字在提示框里；纸面�
   assert.doesNotMatch(available, /ss-updatekey__label/, "键上不再有展开的字");
 
   assert.match(
-    key({ kind: "failed", version: "0.2.0", detail: "x", reason: "原因见详情" }),
+    key({ kind: "failed", version: "0.2.0", cause: "other", detail: "x" }),
     /ss-updatekey--paper/,
     "失败回到纸面键，再点就是重试",
   );

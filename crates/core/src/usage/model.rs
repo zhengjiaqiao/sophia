@@ -35,12 +35,21 @@ pub enum Source {
     Rollout,
     /// `codex app-server` 的 `account/rateLimits/read`
     AppServer,
+    /// Claude 桌面应用自己记在本机的用量历史（`plan-usage-history.json`）的最新一条：
+    /// 只有 5 小时、本周两个窗口的百分比，没有重置时刻。只在 Claude Code 命令行不可用时读
+    DesktopHistory,
 }
 
 impl Source {
+    /// 只读本机文件（不起进程、不打服务端）：Codex 会话记录、Claude 桌面应用的用量历史。
+    /// 调度按「读本机文件」一类对待：最短间隔 30 秒、不受起进程的后台下限与限流退避牵连（见 `schedule`）
+    pub fn reads_local_file(self) -> bool {
+        matches!(self, Source::Rollout | Source::DesktopHistory)
+    }
+
     /// 这条取法要不要起进程（起进程的最短间隔更长，见 `schedule`）
     pub fn spawns_process(self) -> bool {
-        !matches!(self, Source::Rollout)
+        !self.reads_local_file()
     }
 }
 
@@ -242,7 +251,7 @@ impl From<WindowWire> for Window {
 pub struct Reading {
     pub agent: AgentId,
     pub source: Source,
-    /// 数据本身的观测时刻：会话记录用那条记录的 `timestamp`，其余用取到的时刻
+    /// 数据本身的观测时刻：会话记录用那条记录的 `timestamp`，桌面应用历史用那条样本的时刻，其余用取到的时刻
     pub observed_at: i64,
     pub windows: Vec<Window>,
     /// 套餐名（`max`、`prolite`……），只用于显示和判断，不存账号标识
@@ -323,6 +332,10 @@ pub struct AgentUsage {
     pub reading: Option<Reading>,
     /// 最近一次尝试取数的时刻
     pub attempted_at: Option<i64>,
+    /// 这个 agent 的桌面应用装着（只 Claude 看：装了 Claude 桌面应用，命令行不可用、也没有读数时
+    /// Claude 块照样出现，给「连接 Claude 用量」，画板 #206 第 7 条）
+    #[serde(default)]
+    pub desktop_app: bool,
 }
 
 /// 电源状态（R6）：过期变淡的阈值要与调度实际的间隔一致，所以格式化也要知道

@@ -1,0 +1,58 @@
+---
+// 第 2 镜头的静态样子（= 完整画面）：「一份 skill，所有 agent 都能用」+ 两行的矩阵（第 1 行已补齐）。
+// 演示逻辑在 src/client/film-shots/skills.ts；起点 / 终点姿态在 src/demos/filmShots.ts。
+import { MATRIX_COLS, MATRIX_ROWS, matrixPose, usableCount } from "../../demos/filmShots.ts";
+import { t, type Lang } from "../../i18n.ts";
+import { slot } from "../../lib/template.ts";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const rows = matrixPose("end");
+// 提示条：每点一格说「已加到 X」，补齐后说「pr-review：N 个 agent 都能用了」。文案在服务端取好，放进 data-*
+const addedTpl = t(lang, "skills.added", { agent: slot("agent") });
+const doneText = t(lang, "film.s2toast", { name: MATRIX_ROWS[0], count: usableCount(rows[0]!) });
+---
+
+<div class="shot" data-shot="1">
+  <p class="cap7">
+    <span><span class="ln">{t(lang, "film.s2a")}</span></span>
+    <span><span class="ln"><em>{t(lang, "film.s2b")}</em></span></span>
+  </p>
+  <!-- 机位层：字幕与提示条在外面，推近时不动（client/film-shots/camera.ts） -->
+  <div class="cam">
+    <div class="frag card7 mx7" aria-hidden="true">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            {MATRIX_COLS.map((a) => <th>{a}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {
+            MATRIX_ROWS.map((name, r) => (
+              <tr>
+                <td>{name}</td>
+                {rows[r]!.map((s, c) => (
+                  <td>
+                    <span class="cell" data-r={r} data-c={c} data-s={s}>
+                      <svg viewBox="0 0 16 16">
+                        <circle class="o" cx="8" cy="8" r="4.5" />
+                        <circle class="b" cx="8" cy="8" r="5.5" />
+                        <circle class="s" cx="8" cy="8" r="6.5" />
+                        <circle class="f" cx="8" cy="8" r="5" />
+                      </svg>
+                    </span>
+                  </td>
+                ))}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="toast7" data-tpl-added={addedTpl} data-done={doneText} aria-hidden="true"></div>
+</div>

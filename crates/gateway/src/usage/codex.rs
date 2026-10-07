@@ -51,13 +51,22 @@ pub async fn fetch_app_server(
     // 带给子进程的 CODEX_HOME 由账号决定（设计第 2 节：「启动时去掉 CODEX_HOME 以外会改变身份的
     // 环境变量」——CODEX_HOME 本身要保留，否则 app-server 会去读默认的 ~/.codex，跟这里解析出的
     // `codex_home` 可能不是同一个目录）；测试主目录时连 HOME 一起换掉
+    let mut parent_env = account.probe_parent_env();
+    // 从 Dock 打开时本进程没有代理变量：按登录 shell → 系统代理补进父环境（代理变量在探测的白名单里，
+    // spec #195「修订：代理」）
+    let proxy = crate::proxy_env::for_child_async(parent_env.clone()).await;
+    if !proxy.is_empty() {
+        parent_env
+            .get_or_insert_with(|| std::env::vars().collect())
+            .extend(proxy);
+    }
     fetch_app_server_with(
         base_dir,
         &account.codex_home,
         now,
         &codex_executables(),
         account.codex_home_env.clone(),
-        account.probe_parent_env(),
+        parent_env,
         TIMEOUT,
     )
     .await

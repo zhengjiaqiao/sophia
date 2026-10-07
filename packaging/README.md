@@ -3,11 +3,11 @@
 这一份是操作手册。
 
 **两个仓库**：开发在私有的 `zhengjiaqiao/sophia-dev`，发布在公开的 `zhengjiaqiao/sophia`。
-公开仓库只放代码快照（`scripts/publish-public.sh` 同步），更新地址、Homebrew、Release 都指向它，
+公开仓库只放代码快照（`scripts/publish-public.sh` 同步），更新地址、Homebrew、Release 都指向它（更新另有腾讯云 COS 上的国内线路，见第 5 件），
 `release.yml` 也只在它那里运行。所以下面的 Secret、tag、排练都落在**公开仓库**；改代码永远在开发仓库，
 不要直接往公开仓库提交——下一次同步会用开发仓库的快照把它盖掉。
 
-## 只做一次的四件事
+## 只做一次的五件事
 
 ### 1. 生成更新签名密钥对
 
@@ -114,6 +114,21 @@ packaging/setup-tap-token.sh
 报 `secret HOMEBREW_TAP_TOKEN 认不出（HTTP 401）`，brew 用户就停在旧版。补救：重跑 `packaging/setup-tap-token.sh`
 换一个新令牌，再按下面「Homebrew cask」的手动入口对这次的 tag 补推。令牌被撤销、建的时候没勾 tap 仓库（报 HTTP 403/404）同样处理。
 
+### 5. 腾讯云 COS（更新与下载的国内线路）
+
+应用更新有两条线路（`src-tauri/tauri.conf.json` 的 `plugins.updater.endpoints`，按先后试）：GitHub 在前，
+腾讯云 COS 在后（`https://sophia-releases-1258113621.cos.ap-shanghai.myqcloud.com/latest.json`）。
+官网给国内访客的 `.dmg` 下载也指向 COS（Cloudflare Pages 的环境变量 `COS_BASE_URL` 配成桶的默认域名，不带路径；随 #187 托管一起配）。
+桶建在上海地域、公有读，设了流量告警与每月预算。建桶、建只能上传的子账号、把密钥写进公开仓库，跑向导：
+
+```sh
+scripts/setup-cos.sh
+```
+
+它写的是密钥 `COS_SECRET_ID`、`COS_SECRET_KEY`（子账号 `sophia-release-ci`，CAM 策略 `sophia-cos-releases-write`，
+只能上传和查看、不能删除）与仓库变量 `COS_BUCKET`（带 `-APPID` 的完整桶名）、`COS_REGION`。
+密钥泄露或要换账号，都重跑这一份。
+
 ## 每次发版
 
 ```sh
@@ -135,7 +150,11 @@ git tag v0.2.0 && git push origin v0.2.0
 
 tag 推到公开仓库之后，那边的 `.github/workflows/release.yml` 会：建草稿 Release → 依次构建
 `aarch64-apple-darwin` 和 `x86_64-apple-darwin` → 挂上 dmg、`.app.tar.gz` 和签名 →
-合并出 `latest.json` → 把草稿转正 → 把 cask 推进 Homebrew tap（见下面「Homebrew cask」）。
+合并出 `latest.json` → 把草稿转正 → 同步到腾讯云 COS（见下面「腾讯云 COS（自动）」）、把 cask 推进 Homebrew tap（见下面「Homebrew cask」）。
+
+更新包的签名要写着这一版的版本号：应用开了 `requireSignedVersion`（`tauri.conf.json`），签名里没有版本号或对不上，
+已装的客户端会拒绝这次更新。版本号由 Tauri CLI 2.12 起在 `tauri build` 时写进签名的可信注释，所以 `package.json`
+的 `@tauri-apps/cli` 不能低于 2.12；流水线在「更新包签名里写着版本号」这一步核对，缺了就红。
 
 想先排练一遍而不真发布：先 `scripts/publish-public.sh --push` 把代码同步过去（不打 tag），
 再在公开仓库跑一次 Release 工作流。一样地构建和签名，不建 Release、不推 tap，产物落在 workflow artifacts 里：
@@ -211,6 +230,34 @@ gh run list -R zhengjiaqiao/sophia --workflow homebrew-cask.yml --limit 1
 
 手动入口用的是公开仓库 main 上最新的 cask 模板，version 与 sha256 取自填的那个 tag 的 Release；
 对已经推过的 tag 再跑一次，等于只做一遍检查。
+
+### 腾讯云 COS（自动）
+
+Release 转正之后，`release.yml` 调 `.github/workflows/cos-sync.yml`，在 ubuntu runner 上：
+核对 tag 是最新的正式版、COS 密钥与变量都在 → 从 Release 下回 `latest.json`、两个 `.app.tar.gz`、两个 `.dmg` →
+`node packaging/cos-manifest.mjs <tag> <桶基址> dist` 改写清单（只换包地址，签名原样；版本号对不上、
+地址不是这次 Release 的资产、dmg 名字官网拼不出，都停）→ 用腾讯云的 `coscli`（钉版本与 sha256）逐个上传，
+每传一个就从公网 HEAD 一次、核对大小 → 最后才传 `latest.json` 并从公网取回逐字比对。
+
+COS 上的布局照 GitHub 的下载地址：
+
+```
+<桶>/latest.json                       改写过地址的清单（只有一份，总是最新版）
+<桶>/v0.2.0/Sophia_0.2.0_aarch64.app.tar.gz
+<桶>/v0.2.0/Sophia_0.2.0_aarch64.dmg   官网下载函数拼的就是这个地址
+…
+```
+
+这一步红了**不影响 Release**，GitHub 那条线路照常能更新，只是国内线路停在旧版。看 job 日志的 `::error::`：
+权限错误（403、AccessDenied）就在 CAM 策略 `sophia-cos-releases-write` 里补上报错提到的操作；密钥失效就重跑
+`scripts/setup-cos.sh`。然后用手动入口补传（也是单独排练这一段的办法，对最新的已发布 tag 跑，重传等于覆盖成同样的内容）：
+
+```sh
+gh workflow run cos-sync.yml -R zhengjiaqiao/sophia -f tag=v0.2.0
+gh run list -R zhengjiaqiao/sophia --workflow cos-sync.yml --limit 1
+```
+
+只认最新的正式版：清单只有一份，传旧版会把国内线路倒回旧版本。
 
 ## 中途失败了怎么办
 

@@ -170,5 +170,9 @@
   "skills.sync.linkChanged": "連結之後又被改過，沒有指回去",
   "skills.sync.notOrigLink": "不再是指向該原件的軟連結，已跳過",
   "skills.sync.wholeLinkItem": "<整目錄連結>",
-  "skills.sync.notWholeLink": "目標不是指向這份原件的整個資料夾連結"
+  "skills.sync.notWholeLink": "目標不是指向這份原件的整個資料夾連結",
+  "skills.sync.spotTaken": "這裡已經有同名的東西，沒動",
+  "skills.sync.copyNoBook": "Sophia 內部出錯，這一項沒做",
+  "skills.sync.notRecordedCopy": "這一份不是 Sophia 放的，沒動",
+  "skills.sync.changedSince": "之後又被改過，沒有換回去"
 }

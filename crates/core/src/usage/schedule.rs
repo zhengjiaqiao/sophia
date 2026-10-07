@@ -25,9 +25,11 @@
 //!   刷新档位算出来的分钟级间隔（分钟级间隔在 300+ 会话文件、几十秒就有新数据的场景下太粗，
 //!   会导致明明有更新的会话记录也要等一整个刷新周期才升级到 app-server，或者反过来刷新周期
 //!   很短时把 app-server 当成兜底频繁打）。
-//! - **限流按「后端」聚合，Rollout 例外。** 同一个 agent 除 Rollout 外的取法这一版都算同一个
-//!   后端：只要其中一条被限流，其余非 Rollout 的取法在这个 agent 上一起等到限流解除，
-//!   Rollout 因为是本机文件、不打服务端请求，永远按自己的状态单独判断。
+//! - **限流按「后端」聚合，读本机文件的例外。** 同一个 agent 除读本机文件（Rollout、DesktopHistory，
+//!   见 `Source::reads_local_file`）外的取法这一版都算同一个后端：只要其中一条被限流，其余不读本机文件的
+//!   取法在这个 agent 上一起等到限流解除；读本机文件的不打服务端请求，永远按自己的状态单独判断。
+//! - **读本机文件的取法同一类节奏。** Codex 会话记录与 Claude 桌面应用的用量历史都是最短间隔 30 秒、
+//!   不受起进程的后台下限（低电量 30 分钟、固定档用电池翻倍）与「再试一次」放宽的牵连。
 //! - **`wake_at` 不为「单纯的最短间隔冷却」单独提前，只为「重置边界」单独提前。** 每条取法的
 //!   最短间隔本身只在每次 Tick／显式触发时当场检查（能跑就跑，不能跑就等下一次），不会
 //!   反过来把 `wake_at` 拉到冷却结束的那一刻——否则「自动」档的 15 / 30 分钟两级会形同虚设
@@ -82,8 +84,8 @@ pub struct AgentSchedule {
     pub agent: AgentId,
     /// 已登录、且不是「没有订阅额度」；为 `false` 时这个 agent 这一轮永远不跑
     pub available: bool,
-    /// 这个 agent 的取法，按 spec 第 2 节的回退顺序排列（Codex：Rollout 在前，AppServer 在后；
-    /// Claude 只有 `GetUsage` 一条）
+    /// 这个 agent 此刻能用的取法，按 spec 第 2 节的回退顺序排列（Codex：Rollout 在前，AppServer 在后；
+    /// Claude 命令行可用时只有 `GetUsage`，不可用时只有 `DesktopHistory`，由调用方按可用性挑好）
     pub sources: Vec<SourceSchedule>,
     /// 它的窗口里最早的、还没被观测到已经发生过的未来重置时刻；没有窗口、或所有窗口都没有
     /// `resets_at` 时是 `None`
@@ -114,8 +116,8 @@ pub struct SchedulePlan {
     pub wake_at: Option<i64>,
 }
 
-/// 本机会话记录的最短间隔（R6）
-const ROLLOUT_MIN_SPACING_SECONDS: i64 = 30;
+/// 读本机文件的取法（Codex 会话记录、Claude 桌面应用的用量历史）的最短间隔（R6）
+const LOCAL_FILE_MIN_SPACING_SECONDS: i64 = 30;
 /// 要起进程的取法的最短间隔（R6）：`app-server` 一律如此，`get_usage` 在有人看着时如此
 const PROCESS_MIN_SPACING_SECONDS: i64 = 5 * 60;
 /// `get_usage` 后台的最短间隔（R6）：同一个用量接口的限额还被 Claude Code 自己的 `/usage`
@@ -147,8 +149,8 @@ fn fixed_minutes(refresh: Refresh) -> Option<i64> {
 /// 取 5 分钟与档位中较短的那个；「自动」「关」时 `get_usage` 后台 15 分钟、有人看着 5 分钟，
 /// `app-server` 一律 5 分钟
 fn spacing_seconds(source: Source, attended: bool, refresh: Refresh) -> i64 {
-    if source == Source::Rollout {
-        return ROLLOUT_MIN_SPACING_SECONDS;
+    if source.reads_local_file() {
+        return LOCAL_FILE_MIN_SPACING_SECONDS;
     }
     match (fixed_minutes(refresh), source, attended) {
         (Some(m), _, false) => m * 60,
@@ -324,10 +326,10 @@ fn decide_agent_source(
     (None, earliest_wake)
 }
 
-/// 这条取法实际生效的限流截止时刻：Rollout 只看它自己；其它取法这一版共享同一个后端，
-/// 谁被限流，同 agent 里其余非 Rollout 的取法一起等到最晚的那个截止时刻
+/// 这条取法实际生效的限流截止时刻：读本机文件的（Rollout、DesktopHistory）只看它自己；其它取法这一版
+/// 共享同一个后端，谁被限流，同 agent 里其余不读本机文件的取法一起等到最晚的那个截止时刻
 fn effective_rate_limited_until(sources: &[SourceSchedule], source: Source) -> Option<i64> {
-    if source == Source::Rollout {
+    if source.reads_local_file() {
         return sources
             .iter()
             .find(|s| s.source == source)
@@ -335,7 +337,7 @@ fn effective_rate_limited_until(sources: &[SourceSchedule], source: Source) -> O
     }
     sources
         .iter()
-        .filter(|s| s.source != Source::Rollout)
+        .filter(|s| !s.source.reads_local_file())
         .filter_map(|s| s.rate_limited_until)
         .max()
 }
@@ -1139,5 +1141,61 @@ mod tests {
         let mut input = base_input(vec![agent]);
         input.trigger = Trigger::Retry;
         assert_eq!(decide(&input).run, vec![]);
+    }
+
+    // ---------------- Claude 桌面应用的用量历史：归「读本机文件」一类 ----------------
+
+    fn desktop_attempted(ago: i64) -> ScheduleInput {
+        base_input(vec![claude_agent(vec![SourceSchedule {
+            source: Source::DesktopHistory,
+            last_attempt: Some(NOW - ago),
+            rate_limited_until: None,
+        }])])
+    }
+
+    /// 同会话记录：最短间隔 30 秒，后台不受 get_usage 的 15 分钟与低电量 30 分钟限制
+    #[test]
+    fn desktop_history_spaced_like_rollout_not_like_process() {
+        for trigger in [Trigger::Tick, Trigger::Woke, Trigger::Opened] {
+            let mut input = desktop_attempted(30);
+            input.trigger = trigger;
+            input.constrained = true;
+            assert_eq!(
+                decide(&input).run,
+                vec![(AgentId::ClaudeCode, Source::DesktopHistory)],
+                "{trigger:?}"
+            );
+            let mut input = desktop_attempted(29);
+            input.trigger = trigger;
+            assert_eq!(decide(&input).run, vec![], "{trigger:?} 30 秒没到");
+        }
+        // 「再试一次」也不放宽本机文件的 30 秒（只放宽起进程的）
+        let mut input = desktop_attempted(10);
+        input.trigger = Trigger::Retry;
+        assert_eq!(decide(&input).run, vec![]);
+    }
+
+    /// 不打服务端：get_usage 留下的限流截止不挡它
+    #[test]
+    fn desktop_history_ignores_server_rate_limit() {
+        let mut input = base_input(vec![claude_agent(vec![SourceSchedule {
+            source: Source::DesktopHistory,
+            last_attempt: Some(NOW - 60),
+            rate_limited_until: None,
+        }])]);
+        input.agents[0].sources.push(SourceSchedule {
+            source: Source::GetUsage,
+            last_attempt: Some(NOW - 60),
+            rate_limited_until: Some(NOW + 30 * 60),
+        });
+        assert_eq!(
+            effective_rate_limited_until(&input.agents[0].sources, Source::DesktopHistory),
+            None
+        );
+        input.trigger = Trigger::Tick;
+        assert_eq!(
+            decide(&input).run,
+            vec![(AgentId::ClaudeCode, Source::DesktopHistory)]
+        );
     }
 }

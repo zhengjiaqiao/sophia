@@ -12,6 +12,17 @@ export const InLayerContext = createContext(false);
 export const FOCUSABLE =
   'button:not(:disabled), [tabindex]:not([tabindex="-1"]), a[href], input, textarea';
 
+/// 按 Esc 收起时焦点本来在不在浮层里或触发控件上：在才把焦点还给触发控件。用鼠标打开的（焦点在页面别处）
+/// 不动焦点——还过去会被当成键盘焦点，在触发键上画一圈框（2026-10-06 真机，悬浮卡收起后留下黑框）
+export function focusWasInside(
+  active: unknown,
+  layer: { contains: (node: never) => boolean } | null,
+  trigger: { contains: (node: never) => boolean },
+): boolean {
+  if (active === null || active === undefined) return false;
+  return Boolean(layer?.contains(active as never)) || trigger.contains(active as never);
+}
+
 /// Tab 在 `count` 项里转圈：`index` 是现在的焦点（-1＝不在浮层里），`back` 是 Shift+Tab；没有可聚焦的为 -1
 export function cycleFocus(count: number, index: number, back: boolean): number {
   if (count === 0) return -1;
@@ -108,8 +119,9 @@ export function FloatingLayer({
       // 捕获阶段接走：不让页面把 Esc 当成返回 / 取消选择
       event.stopPropagation();
       event.preventDefault();
+      const giveBack = focusWasInside(document.activeElement, ref.current, trigger);
       onClose();
-      trigger.focus();
+      if (giveBack) trigger.focus();
     };
     const onPointerDown = (event: PointerEvent) => {
       if (!inside(event.target)) onClose();

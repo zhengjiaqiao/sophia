@@ -109,6 +109,13 @@
   color: var(--ink-mute);
 }
 
+/* 下载 skill 时的网络出错：灰面板（DownloadFailure），与上面的块隔开一档 */
+.install-failure {
+  display: flex;
+  flex-direction: column;
+  margin: var(--space-xs) 0 0;
+}
+
 /* ---- 勾选行网格：两列（行高 36），从 JSON 添加是一列（放得下原因句） ---- */
 .install-agents {
   display: grid;

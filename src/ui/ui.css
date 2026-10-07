@@ -1988,24 +1988,62 @@ textarea,
    float 12 圆角 + 浮层投影），不在行里展开（2026-10-04 产品负责人）。浮层宽 440、内边距 12：等宽 12 ink 原文，
    放不下折行、太长在原文里滚；右下一颗紧凑 `复制详情`，上距 8。
    出错页：在机面里居中，标题 head / 一句 ink-mute / 一行键（墨键 `重新加载` + 默认键 `详情`），间距照空态（12 / 16 / 16） */
-/* ===== 悬浮卡 HoverCard（DESIGN-components「悬浮卡」，画板 06e734c8）=====
-   触发的那句话平时不加任何记号（D21：可悬停的字不加装饰线）；手放上去、卡开着时字转主字色——说「这里有东西」。
-   卡本身就是浮层（FloatingLayer：paper + hairline、float 12 圆角 + 浮层投影）。键盘焦点框同其他控件 */
-.ss-hovercard {
+/* ===== 悬浮卡 HoverCard 的入口：错误前面的「!」（DESIGN-components「悬浮卡」「详情」，画板 5703fb83 方案 D）=====
+   触发它的是一颗看得见的键，不是一句普通文字（那样看不出能停，规范 ⑧）。详情用错误前面那个「!」：
+   图标键的写法——平时无边无底、图形同静态记号；手放上去、卡开着时出底色（surface；在灰面板的 surface 上换 paper，
+   同浅键），图形转 ink。灰面板与出错页标题前 16（命中 24，负外距不挤字）、网关行 14（命中 20）。
+   卡本身就是浮层（FloatingLayer：paper + hairline、float 12 圆角 + 浮层投影） */
+.ss-markbtn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
   cursor: default;
-  transition: color var(--motion-fast) var(--ease-mech);
+  transition:
+    background-color var(--motion-fast) var(--ease-mech),
+    color var(--motion-fast) var(--ease-mech);
 }
 
-.ss-hovercard:hover,
-.ss-hovercard.is-open,
-.ss-hovercard:hover .ss-noticepanel__reason,
-.ss-hovercard.is-open .ss-noticepanel__reason {
+.ss-markbtn:hover,
+.ss-markbtn.is-open {
+  background: var(--surface);
   color: var(--ink);
 }
 
-.ss-hovercard:focus-visible {
+.ss-noticepanel .ss-markbtn:hover,
+.ss-noticepanel .ss-markbtn.is-open {
+  background: var(--paper);
+}
+
+.ss-markbtn:focus-visible {
   outline: 1px solid var(--ink);
   outline-offset: 2px;
+}
+
+.ss-markbtn--panel {
+  width: var(--hit-min);
+  height: var(--hit-min);
+  margin: calc(var(--space-xxs) * -1);
+}
+
+.ss-markbtn--row {
+  width: 20px;
+  height: 20px;
+  margin: -3px var(--space-xxs) -3px -3px;
+  vertical-align: middle;
+}
+
+/* 出错页标题前：同灰面板 16 / 命中 24；左沿让 4，图形与下面那句话的字对齐；和标题字之间 8（标题按中线排，见 .ss-pagefault__title） */
+.ss-markbtn--title {
+  width: var(--hit-min);
+  height: var(--hit-min);
+  margin: calc(var(--space-xxs) * -1) 0 calc(var(--space-xxs) * -1) calc(var(--space-xxs) * -1);
 }
 
 /* 详情的悬浮卡（FloatingLayer 的 className）：宽 440，窄窗口（托盘）里收到窗口左右边距之内 */
@@ -2067,7 +2105,11 @@ textarea,
   text-align: left;
 }
 
+/* 标题前有 `!`（详情的入口）时图形与字按中线对齐，间距 8（图标键自己的内边距 4 + 4） */
 .ss-pagefault__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xxs);
   margin: 0;
   font-family: var(--font-ui);
   font-size: var(--size-body);

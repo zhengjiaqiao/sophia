@@ -243,7 +243,7 @@ test("列表页里 Claude 开着时的 R46：Codex 关着、Claude 开着，Code
 });
 
 // ===== 读不到第三方模型的状态（spec 2026-10-04-local-diagnostics R11 / AC10，画板 AuPbAQHePv3L1U3g1PAtH8）=====
-// 入口不消失；页面顶上一块灰面板说是哪个文件、为什么，按种类给往前走的路；原文挂在那句话上（停上去出悬浮卡）
+// 入口不消失；页面顶上一块灰面板说是哪个文件、为什么，按种类给往前走的路；原文从左端的 `!` 看（停上去出悬浮卡）
 
 const unreadable = (kind: "permission" | "format" | "other", reason: string): GatewayState => ({
   ...gateway(),
@@ -256,13 +256,13 @@ const unreadable = (kind: "permission" | "format" | "other", reason: string): Ga
   },
 });
 
-test("读不到状态 · 没权限：灰面板「读不到第三方模型的状态 · <文件> 不归你的账户所有…」（句上挂悬浮卡）+ `修复权限`；列表照常", () => {
+test("读不到状态 · 没权限：灰面板「读不到第三方模型的状态 · <文件> 不归你的账户所有…」（左端 `!` 是入口）+ `修复权限`；列表照常", () => {
   const reason = "~/.codex/config.toml 不归你的账户所有，读不了（多半是用 sudo 运行过 Codex）";
   const html = page([entry("codex", "Codex", "glm-5")], unreadable("permission", reason));
   assert.match(
     html,
     new RegExp(
-      `ss-noticepanel--section[^]*<span class="ss-hovercard"[^>]*>读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ${reason.replace(/[()]/g, "\\$&")}</span></span>`,
+      `ss-noticepanel--section[^]*ss-markbtn[^]*<span class="ss-noticepanel__message">读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ${reason.replace(/[()]/g, "\\$&")}</span>`,
     ),
   );
   assert.match(html, /ss-noticepanel__actions">[^]*>修复权限</);
@@ -284,12 +284,12 @@ test("读不到状态 · 格式有误：`打开文件 ↗`（浅键，离开 Sop
   );
 });
 
-test("读不到状态 · 别的：`再试一次`（原文挂在句上）；状态整个读不回来（IPC 失败）也照样出这块，入口不消失", () => {
+test("读不到状态 · 别的：`再试一次`（原文从 `!` 看）；状态整个读不回来（IPC 失败）也照样出这块，入口不消失", () => {
   const html = page(
     [entry("codex", "Codex", "")],
     unreadable("other", "~/.codex/config.toml 读不了"),
   );
-  assert.match(html, /ss-hovercard[^]*>再试一次</);
+  assert.match(html, /ss-markbtn[^]*>再试一次</);
   assert.doesNotMatch(html, /修复权限|打开文件|>详情</);
   const lost = render(ModelsPage, {
     entries: [entry("codex", "Codex", "")],
@@ -301,5 +301,5 @@ test("读不到状态 · 别的：`再试一次`（原文挂在句上）；状�
     onGatewayState: noop,
   });
   assert.match(lost, /读不到第三方模型的状态/);
-  assert.match(lost, /ss-hovercard[^]*>再试一次</);
+  assert.match(lost, /ss-markbtn[^]*>再试一次</);
 });

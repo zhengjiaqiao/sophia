@@ -217,9 +217,9 @@ test("无法连接：`地址 · 无法连接 · 原因`（原因写全，不藏�
   });
 });
 
-// spec 2026-10-04-local-diagnostics R13；2026-10-06 起（画板 06e734c8）没有 `详情` 键：原文挂在第二行的原因上，
-// 停上去浮起悬浮卡；行尾 `再试一次` · 编辑 · 删除，原文不进行里
-test("无法连接且有技术原文：原因上挂悬浮卡，行尾没有 `详情`、照旧 `再试一次`；原文不在行里；没有原文原因就是普通字", () => {
+// spec 2026-10-04-local-diagnostics R13；2026-10-06 起（画板 5703fb83 方案 D）没有 `详情` 键：第二行状态前一个小 `!`
+// 是入口，停上去或点一下浮起悬浮卡；行尾 `再试一次` · 编辑 · 删除，原文不进行里
+test("无法连接且有技术原文：`无法连接` 前一个小 `!`（入口），行尾没有 `详情`、照旧 `再试一次`；原文不在行里；没有原文就没有 `!`", () => {
   const reason = "服务商限流了，约 30 秒后再试";
   const detail =
     "GET https://openrouter.ai/api/v1/models → 429 Too Many Requests · Retry-After: 30";
@@ -227,16 +227,15 @@ test("无法连接且有技术原文：原因上挂悬浮卡，行尾没有 `详
   const [, down] = rows(html);
   assert.match(
     down,
-    new RegExp(
-      `<span class="ss-hovercard gw-row__reason"[^>]*aria-haspopup="dialog"[^>]*>${reason}</span>`,
-    ),
+    /<button type="button" class="ss-hovercard ss-markbtn ss-markbtn--row" aria-label="查看错误详情"[^>]*>[^]*?<\/button><span class="gw-row__down">无法连接<\/span>/,
   );
+  assert.match(down, new RegExp(`<span class="gw-row__reason">${reason}</span>`));
   assert.match(down, /ss-listrow__actions">[^]*>再试一次<[^]*aria-label="编辑"/);
   assert.doesNotMatch(down, />详情</);
   assert.doesNotMatch(down, /Retry-After/);
   const [, plain] = rows(block({ providers: [ap(), or(reason)] }));
   assert.match(plain, new RegExp(`<span class="gw-row__reason">${reason}</span>`));
-  assert.doesNotMatch(plain, /ss-hovercard/);
+  assert.doesNotMatch(plain, /ss-markbtn/);
 });
 
 test("密钥读不出（R4 / AC2）：`地址 · 密钥不可用 · 原因`（红字，原因写全），不说「还没有密钥」；表单不说「已保存」", () => {
@@ -613,8 +612,8 @@ test("还没有密钥（画板 1PxHo6ZoEe8pFCYbU1pAud）：第二行 `还没有�
   assert.doesNotMatch(focused(form(null)).join(""), /type="password"/);
 });
 // #144：拉列表的接口不一定验密钥（OpenRouter），真发请求被拒了密钥才知道。那一家照「无法连接」画（红字、原因写全），
-// 原因是「密钥无效」；重拉列表清不掉它，所以行尾只有铅笔，不出 `再试一次`；原文挂在红字原因上
-test("真实调用被拒了密钥：`地址 · 密钥无效…`（红字，不写「无法连接」，红字上挂悬浮卡）；不出 `再试一次`", () => {
+// 原因是「密钥无效」；重拉列表清不掉它，所以行尾只有铅笔，不出 `再试一次`；原文从红字前的 `!` 看
+test("真实调用被拒了密钥：`地址 · 密钥无效…`（红字前 `!` 是入口，不写「无法连接」）；不出 `再试一次`", () => {
   const reason = "密钥无效，请换一个密钥";
   const detail = "POST https://openrouter.ai/api/v1/chat/completions → 401 Unauthorized";
   const rejected: GatewayProvider = {
@@ -635,9 +634,7 @@ test("真实调用被拒了密钥：`地址 · 密钥无效…`（红字，不�
   const [, row] = rows(block({ providers: [ap(), rejected] }));
   assert.match(
     row,
-    new RegExp(
-      `<span class="ss-hovercard gw-row__down"[^>]*aria-haspopup="dialog"[^>]*>${reason}<`,
-    ),
+    new RegExp(`ss-markbtn--row"[^>]*>[^]*?</button><span class="gw-row__down">${reason}<`),
   );
   assert.doesNotMatch(row, /无法连接/);
   assert.doesNotMatch(row, /gw-row__reason/);

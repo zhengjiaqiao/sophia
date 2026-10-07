@@ -25,8 +25,8 @@ import { motionMs } from "./motion.ts";
 /// `section` / `row` 同一套量：13 号字、内边距 8 12、最矮 40（键 24 + 上下 8）。
 ///
 /// 原因（`reason`）跟在主句后同一行写出（`ink-mute`），不藏进悬停——原因决定下一步怎么做。写全，放不下就折行。
-/// 技术原文（`technical` + `onCopy`，spec 2026-10-04-local-diagnostics R13）：挂在那句话（主句 · 原因）上，
-/// 手停上去浮起悬浮卡（`Details`，2026-10-06 起不再是一颗 `详情` 键）——面板里不展开、键区不多一颗键。
+/// 技术原文（`technical` + `onCopy`，spec 2026-10-04-local-diagnostics R13）：左端的 `!` 就是入口——做成图标键
+/// （`Details`，2026-10-06 方案 D），停上去或点一下浮起悬浮卡；面板里不展开、键区不多一颗键，句子照旧是字。
 /// 出错的灰面板除了 `详情` 还要给一条往前走的路（再试一次、修复、打开文件……），不能只有 `详情`。
 /// 正在执行（`busy`）：键先锁住，过了 0.3 秒门槛原位换成忙碌刻度 + 这一句（`BusySlot`），不再出两颗键；
 /// 只锁其中一颗时给那颗键自己的 `busy`。
@@ -63,7 +63,7 @@ export interface NoticePanelProps {
   action?: NoticePanelAction;
   /// 可选的第二颗键（`稍后` `全部更新`）：同样是默认键紧凑 24——应用内能点的一律默认键
   secondary?: NoticePanelAction;
-  /// 技术原文（请求、状态码、返回的错误；调用方已去隐私）：给了（连同 `onCopy`）那句话上才挂悬浮卡
+  /// 技术原文（请求、状态码、返回的错误；调用方已去隐私）：给了（连同 `onCopy`）左端的 `!` 才是入口
   technical?: string;
   /// `详情` 浮层里的 `复制详情`：调用方先去隐私再写剪贴板（组件库不碰 api）
   onCopy?: (text: string) => void | Promise<void>;
@@ -199,13 +199,6 @@ export function NoticePanel({
   if (sliding && !mounted) return null;
 
   const app = scope === "app";
-  /// 那句话：主句 · 原因（有技术原文时整句是悬浮卡的触发区）
-  const sentence = (
-    <>
-      {message}
-      {reason ? <span className="ss-noticepanel__reason"> · {reason}</span> : null}
-    </>
-  );
   const keys =
     action || secondary ? (
       <span className="ss-noticepanel__actions">
@@ -224,19 +217,19 @@ export function NoticePanel({
       role={role}
       aria-label={mark ? undefined : t("common.noticePanel.hint")}
     >
-      {mark ? (
+      {technical && onCopy ? (
+        // 有原文：`!` 是图标键，停上去或点一下出悬浮卡（没有原文的 `!` 照旧只是记号）
+        <span className="ss-noticepanel__mark">
+          <Details text={technical} onCopy={onCopy} />
+        </span>
+      ) : mark ? (
         <span className="ss-noticepanel__mark" role="img" aria-label={markTitle}>
           <IconAttention />
         </span>
       ) : null}
       <span className="ss-noticepanel__message">
-        {technical && onCopy ? (
-          <Details text={technical} onCopy={onCopy}>
-            {sentence}
-          </Details>
-        ) : (
-          sentence
-        )}
+        {message}
+        {reason ? <span className="ss-noticepanel__reason"> · {reason}</span> : null}
         {detail ? <span className="ss-noticepanel__detail">{detail}</span> : null}
       </span>
       {keys !== null || busy !== undefined ? (

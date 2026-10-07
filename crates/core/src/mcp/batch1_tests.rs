@@ -31,6 +31,7 @@ fn six() -> Vec<Harness> {
 
 fn env(home: &Path, vars: &[(&str, &str)]) -> Env {
     Env {
+        apps: Vec::new(),
         home: home.to_path_buf(),
         vars: vars
             .iter()

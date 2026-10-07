@@ -14,6 +14,11 @@ pub enum ActionKind {
     Unlink,
     /// 把一个 skill 本体目录移入废纸篓
     DeleteSource,
+    /// 目标不存在，放一份原件的副本并记进副本记录（`copies`），不建链。不出计划：只在建链建不了
+    /// （`FailKind::LinkUnsupported`）时由 `sync::execute` 把 Create 改成它，报告里据此认出是副本
+    PlaceCopy,
+    /// 记录在案、没被改过的副本，原件变了：用原件重新复制一份换上，旧的进暂存
+    UpdateCopy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,7 +56,7 @@ pub struct ReportEntry {
     pub detail: Option<String>,
 }
 
-/// 失败是哪一类（给前端判断用；原因句照旧是给人看的）。按 io 错误分：这三类是外部原因，只计数；
+/// 失败是哪一类（给前端判断用；原因句照旧是给人看的）。按 io 错误分：这几类是外部原因，只计数；
 /// 分不进去的算 Sophia 自身没料到的（spec S18）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +67,9 @@ pub enum FailKind {
     DiskFull,
     /// 要动的东西已经不在了（目标目录、要删的链）
     Missing,
+    /// 这里建不了链接（文件系统不支持、Windows 建不了 junction；只认建链这一步，`sync::link_fail_kind_of`）。
+    /// 给了副本记录处时自动改放副本，结果与正常加上相同，不会出现在报告里；外部原因，只计数
+    LinkUnsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -215,7 +223,7 @@ pub enum CellState {
     Missing,
     /// 链接目标不存在
     Broken,
-    /// 链接指向别处
+    /// 链接指向别处（或这里是 Sophia 为别的原件放的副本）
     Foreign,
     /// 目标处已有真实文件或目录
     Duplicate,
@@ -224,6 +232,9 @@ pub enum CellState {
     /// 目标目录存在但无法写入。**扫描不产出这个状态**：判定它要实际试写一次，
     /// 每轮扫描都试写代价太大。只在上层真的写失败之后由上层构造
     ReadOnly,
+    /// Sophia 放的、记录在案的这份原件的副本（`copies`）。对用户它和 `Linked` 一样：
+    /// 界面上不出现「副本」，前端按已链画（spec #194 修订 2026-10-06）
+    Copied,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -235,8 +246,9 @@ pub struct Cell {
     /// 目标目录下该 skill 的路径
     pub path: PathBuf,
     pub state: CellState,
-    /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 Linked / Foreign 有值，
-    /// 其余状态是 None——Broken 的链接解析不到，本来也没有落点。
+    /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 Linked / Foreign / Copied 有值，
+    /// 其余状态是 None——Broken 的链接解析不到，本来也没有落点。副本格（Copied，以及别的原件的
+    /// 副本占着的 Foreign）给的是副本记录里那份原件的真实路径，与软链一样说得出「对应哪份原件」。
     /// Foreign 的提示条要靠它说出「指向哪个本体」，不带出来就只能写成含糊的「指向别处」
     pub points_to: Option<PathBuf>,
 }
@@ -415,6 +427,11 @@ pub struct DeleteSourcePlan {
     pub in_git: Option<PathBuf>,
     /// 别处同名的另一个本体；删完把 `affected` 改指到它。None 表示没有别处可指
     pub relink_to: Option<PathBuf>,
+    /// Sophia 为它放的、记录在案的副本（`copies`）：默认随原件一起删（有 `relink_to` 时改成那一份的副本），
+    /// 同一次撤销。从清单里拿掉的副本留下、记录删掉，此后是那个 agent 自己的 skill。
+    /// 界面上与链接一起算「哪些 agent 会失去它」（spec #194 修订：不说是副本）。旧数据没有，按空
+    #[serde(default)]
+    pub copies: Vec<PathBuf>,
     /// 目录里普通文件最新的修改时间（Unix 毫秒）。只读事实，给「改于 9月20日」用；
     /// 没有文件或读不到时为 None。旧数据里没有这个字段，反序列化按 None
     #[serde(default)]
@@ -538,6 +555,7 @@ mod tests {
             ],
             in_git: None,
             relink_to: Some(PathBuf::from("/b/skills/x")),
+            copies: vec![PathBuf::from("/h/.continue/skills/x")],
             modified: Some(1_758_326_400_000),
         };
         assert_eq!(
@@ -552,8 +570,26 @@ mod tests {
                 ],
                 "inGit": null,
                 "relinkTo": "/b/skills/x",
+                "copies": ["/h/.continue/skills/x"],
                 "modified": 1_758_326_400_000u64
             })
+        );
+    }
+
+    /// 副本（spec #194）的新字面量：前端 `src/types.ts` 按这些写
+    #[test]
+    fn copy_variants_serialize_as_camel_case() {
+        assert_eq!(
+            serde_json::to_value(CellState::Copied).unwrap(),
+            json!("copied")
+        );
+        assert_eq!(
+            serde_json::to_value(ActionKind::PlaceCopy).unwrap(),
+            json!("placeCopy")
+        );
+        assert_eq!(
+            serde_json::to_value(ActionKind::UpdateCopy).unwrap(),
+            json!("updateCopy")
         );
     }
 

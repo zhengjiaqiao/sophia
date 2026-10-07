@@ -1,12 +1,12 @@
 SHELL := /bin/bash
-.PHONY: test test-core test-gateway test-app test-web test-server test-public lint lint-public build-web dev build dev-weiboap build-weiboap format
+.PHONY: test test-core test-gateway test-app test-web test-site build-site test-server test-public lint lint-public build-web dev build dev-weiboap build-weiboap format
 
 # 不加任何 feature 的默认构建就是公开版。内部版（微博 WeiboAP 适配）一律显式加
 # 这个 feature：漏加只会少一个 harness，立刻能发现；反过来用 --no-default-features
 # 关内部特性，漏加就是把内部路径发出去，收不回来。
 WEIBOAP := --features sophia-core/weiboap,sophia/weiboap
 
-test: test-core test-gateway test-app lint build-web test-web
+test: test-core test-gateway test-app lint build-web test-web test-site build-site
 
 # 两种组合都要能编译、能跑
 test-core:
@@ -23,6 +23,18 @@ test-app:
 
 test-web:
 	node --test tests/*.test.ts
+
+# 官网（website/，Astro 静态站，spec 2026-10-06-website）：依赖装一次（package-lock 变了才重装）；
+# 纯逻辑与构建产物的测试放 website/tests/，用 node:test 跑，不在 tests/ 里
+website/node_modules: website/package-lock.json
+	cd website && npm ci && touch node_modules
+
+test-site: website/node_modules
+	node --test website/tests/*.test.ts
+
+# 构建 + 构建检查：文案缺键、残留 {占位符}、白名单外的域名、hreflang、关 JS 的静态内容（AC9、AC14）
+build-site: website/node_modules
+	cd website && ASTRO_TELEMETRY_DISABLED=1 npm run typecheck && ASTRO_TELEMETRY_DISABLED=1 npm run build && node scripts/check-site.ts
 
 # 接收服务（server/，Cloudflare Worker）：本地 workerd + D1 跑测试，不连 Cloudflare。不在 make test 里
 test-server:

@@ -1,0 +1,45 @@
+---
+// 第 3 镜头的静态样子（= 完整画面）：「任何 AI agent，都能接上任意模型」+ 开着的开关 + 三张模型卡（选中第 2 张）。
+// 开关上的 agent 名单读站点配置（R17.1，全站一处）；演示逻辑在 src/client/film-shots/models.ts。
+import { FILM_MODELS, modelsPose } from "../../demos/filmShots.ts";
+import { SITE } from "../../site.config.ts";
+import { t, type Lang } from "../../i18n.ts";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const pose = modelsPose("end", SITE.agents.length);
+---
+
+<div class="shot" data-shot="2">
+  <p class="cap7">
+    <span><span class="ln">{t(lang, "film.s3a")}</span></span>
+    <span><span class="ln">{t(lang, "film.s3b1")}<em class="ul">{t(lang, "film.s3b2")}</em></span></span>
+  </p>
+  <!-- 机位层：上一镜头穿进来时由远而近、由虚到实；字幕在外面 -->
+  <div class="cam">
+    <div class="frag card7 sw7" aria-hidden="true">
+      {
+        SITE.agents.map((a, i) => (
+          <div class="swrow">
+            <span>{a.name}</span>
+            <span class="switch" data-on={String(pose.switches[i])}>
+              <span class="switch__t" />
+            </span>
+          </div>
+        ))
+      }
+    </div>
+    <div class="mods" data-shown={String(pose.modsShown)} aria-hidden="true">
+      {
+        FILM_MODELS.map((m, i) => (
+          <div class:list={["mod", { pick: pose.picked === i }]}>
+            {m.id}
+            <small>{m.vendor ?? t(lang, "models.official")}</small>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</div>

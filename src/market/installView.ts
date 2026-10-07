@@ -350,7 +350,7 @@ export const checkingAgents = () => t("market.install.checking");
 /// 计划还在路上（M14 复审）：不知道哪个 agent 那里已有同名的，`安装` 先不能按、也不交给后端。
 /// 出计划出错的不算——计划永远不会来，照旧能按，由后端装的时候再判一次。
 /// `stale`：手里的计划（或出错）是换位置之前的，还没清掉，不作数
-export const skillPlanPending = (preview: unknown, planError: string | null, stale = false) =>
+export const skillPlanPending = (preview: unknown, planError: unknown, stale = false) =>
   stale || (preview === null && planError === null);
 
 /// skill 的 `安装` 能不能按：计划还没回来 → `正在检查各 agent`；要装的都被拒 → 第一条原因（`用户级的通用仓库里已经有 pdf`）；一个没选；一个 agent 没勾

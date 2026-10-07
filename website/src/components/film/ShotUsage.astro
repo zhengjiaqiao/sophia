@@ -1,0 +1,38 @@
+---
+// 第 5 镜头的静态样子（= 完整画面）：「额度还剩多少，抬头就知道」+ 菜单栏与展开的面板。
+// 数据与用量区同一份（demos/usage.ts 的 USAGE_SAMPLE：Claude 5 小时 / 本周 / 本周 · Fable，Codex 只有本周），标记同一个函数。
+// 演示逻辑在 src/client/film-shots/usage.ts。
+import { usagePose } from "../../demos/filmShots.ts";
+import { computeUsage, DEFAULT_SETTINGS } from "../../demos/usage.ts";
+import { renderPanel, renderTray } from "../../demos/usageHtml.ts";
+import { usageLabels } from "../../demos/usageLabels.ts";
+import { TRAY_ICON } from "../../demos/usageIcons.ts";
+import { t, type Lang } from "../../i18n.ts";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const view = computeUsage(DEFAULT_SETTINGS);
+const open = usagePose("end").open;
+---
+
+<div class="shot" data-shot="4">
+  <p class="cap7">
+    <span><span class="ln">{t(lang, "film.s5a")}</span></span>
+    <span><span class="ln"><em>{t(lang, "film.s5b")}</em></span></span>
+  </p>
+  <!-- 机位层：字幕在外面（client/film-shots/camera.ts） -->
+  <div class="cam">
+    <div class="frag mb7" aria-hidden="true">
+      <div class="menubar">
+        <span class="tray" data-open={String(open)}>
+          <Fragment set:html={TRAY_ICON} />
+          <span class="tsegs" set:html={renderTray(view)} />
+        </span>
+        <span>15:42</span>
+      </div>
+      <div class="drop" data-open={String(open)} set:html={renderPanel(view, usageLabels(lang))} />
+    </div>
+  </div>
+</div>

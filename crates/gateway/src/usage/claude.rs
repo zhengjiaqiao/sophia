@@ -30,20 +30,24 @@ pub async fn fetch_get_usage(
     account: &Account,
     now: i64,
 ) -> Result<Reading, FetchError> {
+    let parent_env = account.probe_parent_env();
+    // 从 Dock 打开时本进程没有代理变量：按登录 shell → 系统代理补上（spec #195「修订：代理」）
+    let proxy = crate::proxy_env::for_child_async(parent_env.clone()).await;
     fetch_get_usage_with(
         base_dir,
         now,
         &claude_executables(),
         &account.home,
         account.claude_config_dir.as_deref(),
-        account.probe_parent_env(),
+        parent_env,
+        proxy,
         TIMEOUT,
     )
     .await
 }
 
 /// [`fetch_get_usage`] 的可注入版本：测试传假的可执行文件列表、假 `HOME`、假的
-/// `parent_env`（喂给 `run_probe`，不用碰真实进程环境）、更短的超时。
+/// `parent_env`（喂给 `run_probe`，不用碰真实进程环境）、补上的代理变量、更短的超时。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn fetch_get_usage_with(
     base_dir: &Path,
@@ -52,6 +56,7 @@ pub(crate) async fn fetch_get_usage_with(
     home: &Path,
     config_dir: Option<&Path>,
     parent_env: Option<Vec<(String, String)>>,
+    proxy: Vec<(String, String)>,
     timeout: Duration,
 ) -> Result<Reading, FetchError> {
     let program = executables
@@ -73,15 +78,7 @@ pub(crate) async fn fetch_get_usage_with(
         args: probe_args(),
         working_dir,
         stdin_lines: vec![init_request_line(), usage_request_line()],
-        // 用户设过 CLAUDE_CONFIG_DIR：登录判断按它，探测也要带上它，否则读的是默认的 ~/.claude
-        extra_env: config_dir
-            .map(|d| {
-                vec![(
-                    "CLAUDE_CONFIG_DIR".to_string(),
-                    d.to_string_lossy().into_owned(),
-                )]
-            })
-            .unwrap_or_default(),
+        extra_env: probe_extra_env(config_dir, proxy),
         parent_env,
         timeout,
         until: Box::new(is_usage_response),
@@ -94,6 +91,24 @@ pub(crate) async fn fetch_get_usage_with(
         ))
     })?;
     parse_get_usage(&matched, now).map_err(FetchError::Failed)
+}
+
+/// 探测子进程的额外环境变量：总是带 `DISABLE_AUTOUPDATER=1`（后台探测不该触发 Claude Code 自更新）；
+/// 用户设过 `CLAUDE_CONFIG_DIR` 时再带上它——登录判断按它，探测也要读同一份，否则读的是默认的 ~/.claude。
+/// 两个都不在 `probe` 的环境白名单里，只能走 `extra_env`。`proxy` 是父环境里没有代理时补上的（见 `proxy_env`）
+fn probe_extra_env(
+    config_dir: Option<&Path>,
+    proxy: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    let mut env = vec![("DISABLE_AUTOUPDATER".to_string(), "1".to_string())];
+    if let Some(dir) = config_dir {
+        env.push((
+            "CLAUDE_CONFIG_DIR".to_string(),
+            dir.to_string_lossy().into_owned(),
+        ));
+    }
+    env.extend(proxy);
+    env
 }
 
 /// 设计第 2 节「已实测」的启动参数：程序化模式 + stream-json，不加载用户设置和 hooks、
@@ -260,6 +275,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await
@@ -298,6 +314,7 @@ mod tests {
                 &empty_home,
                 Some(&config_dir),
                 Some(Vec::new()),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await
@@ -310,6 +327,82 @@ mod tests {
         });
     }
 
+    /// 探测子进程的环境里总有 `DISABLE_AUTOUPDATER=1`（没设 `CLAUDE_CONFIG_DIR` 也一样），
+    /// 父进程环境里不在白名单的变量照旧不泄漏
+    #[test]
+    fn probe_env_always_disables_autoupdater_and_leaks_nothing() {
+        run(async {
+            let root = tempfile::tempdir().unwrap();
+            let root = root.path().canonicalize().unwrap();
+            let base_dir = root.join("support");
+            let home = signed_in_home(&root);
+            let body = format!(
+                "printf '%s' \"$DISABLE_AUTOUPDATER\" > autoupdater.marker\nprintf '%s' \"${{CLAUDE_CONFIG_DIR-unset}}|${{ANTHROPIC_BASE_URL-unset}}\" > other.marker\nn=0\nwhile IFS= read -r line; do\n  n=$((n+1))\n  if [ \"$n\" -eq 2 ]; then\n    printf '%s\\n' {}\n  fi\ndone\n",
+                shell_single_quoted(&success_reply_line())
+            );
+            let program = write_script(&root, "claude-env.sh", &body);
+            fetch_get_usage_with(
+                &base_dir,
+                1_000,
+                &[program],
+                &home,
+                None,
+                Some(vec![(
+                    "ANTHROPIC_BASE_URL".to_string(),
+                    "http://leaked".to_string(),
+                )]),
+                Vec::new(),
+                crate::test_timing::CHILD_OK,
+            )
+            .await
+            .unwrap();
+            let dir = claude_probe_dir(&base_dir);
+            assert_eq!(
+                std::fs::read_to_string(dir.join("autoupdater.marker")).unwrap(),
+                "1"
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.join("other.marker")).unwrap(),
+                "unset|unset"
+            );
+        });
+    }
+
+    /// 父环境里没有代理时补上的代理变量（登录 shell / 系统代理，见 `proxy_env`）带给探测子进程
+    #[test]
+    fn passes_resolved_proxy_to_the_probe() {
+        run(async {
+            let root = tempfile::tempdir().unwrap();
+            let root = root.path().canonicalize().unwrap();
+            let base_dir = root.join("support");
+            let home = signed_in_home(&root);
+            let body = format!(
+                "printf '%s|%s' \"$HTTPS_PROXY\" \"$no_proxy\" > proxy.marker\nn=0\nwhile IFS= read -r line; do\n  n=$((n+1))\n  if [ \"$n\" -eq 2 ]; then\n    printf '%s\\n' {}\n  fi\ndone\n",
+                shell_single_quoted(&success_reply_line())
+            );
+            let program = write_script(&root, "claude-proxy.sh", &body);
+            fetch_get_usage_with(
+                &base_dir,
+                1_000,
+                &[program],
+                &home,
+                None,
+                Some(Vec::new()),
+                vec![
+                    ("HTTPS_PROXY".into(), "http://127.0.0.1:7897".into()),
+                    ("no_proxy".into(), "localhost".into()),
+                ],
+                crate::test_timing::CHILD_OK,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(claude_probe_dir(&base_dir).join("proxy.marker")).unwrap(),
+                "http://127.0.0.1:7897|localhost"
+            );
+        });
+    }
+
     /// 测试主目录：探测子进程的 HOME 换成它，`claude` 读的是测试主目录里的登录，不是真实账号
     #[test]
     fn test_home_account_runs_probe_with_that_home() {
@@ -318,9 +411,16 @@ mod tests {
             let root = root.path().canonicalize().unwrap();
             let base_dir = root.join("support");
             let home = signed_in_home(&root);
+            // 测试主目录账号的配置目录是 `<home>/.claude`（见 `Account::in_home`）：登录记录在它下面
+            std::fs::create_dir_all(home.join(".claude")).unwrap();
+            std::fs::copy(
+                home.join(".claude.json"),
+                home.join(".claude").join(".claude.json"),
+            )
+            .unwrap();
             let account = crate::usage::Account::in_home(&home);
             let body = format!(
-                "printf '%s' \"$HOME\" > home.marker\nn=0\nwhile IFS= read -r line; do\n  n=$((n+1))\n  if [ \"$n\" -eq 2 ]; then\n    printf '%s\\n' {}\n  fi\ndone\n",
+                "printf '%s|%s' \"$HOME\" \"$CLAUDE_CONFIG_DIR\" > home.marker\nn=0\nwhile IFS= read -r line; do\n  n=$((n+1))\n  if [ \"$n\" -eq 2 ]; then\n    printf '%s\\n' {}\n  fi\ndone\n",
                 shell_single_quoted(&success_reply_line())
             );
             let program = write_script(&root, "claude-home.sh", &body);
@@ -331,6 +431,7 @@ mod tests {
                 &account.home,
                 account.claude_config_dir.as_deref(),
                 account.probe_parent_env(),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await
@@ -338,7 +439,8 @@ mod tests {
             let marker = claude_probe_dir(&base_dir).join("home.marker");
             assert_eq!(
                 std::fs::read_to_string(marker).unwrap(),
-                home.to_string_lossy()
+                format!("{}|{}", home.display(), home.join(".claude").display()),
+                "HOME 与 CLAUDE_CONFIG_DIR 都指向测试主目录"
             );
         });
     }
@@ -367,6 +469,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await
@@ -398,6 +501,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await
@@ -428,6 +532,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
+                Vec::new(),
                 Duration::from_millis(200),
             )
             .await
@@ -456,6 +561,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await
@@ -488,6 +594,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await
@@ -518,6 +625,7 @@ mod tests {
                 &home,
                 None,
                 Some(Vec::new()),
+                Vec::new(),
                 crate::test_timing::CHILD_OK,
             )
             .await

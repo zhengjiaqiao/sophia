@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { showCopiesAsLinked } from "./cellState.ts";
 import type {
   Appearance,
   AutoLink,
@@ -56,6 +57,7 @@ import type {
   UpdateCheck,
   UpdateTarget,
   UsageAgentId,
+  ConnectStart,
   UsageSettings,
   UsageView,
 } from "./types";
@@ -69,7 +71,8 @@ export type { PlannedDeletion } from "./types";
 export type GatewayRestartReport = { terminated: number; pids: number[]; reopened: boolean };
 
 export const api = {
-  scanAll: () => invoke<Overview>("scan_all"),
+  /// Sophia 放的副本在界面上按已链画（`showCopiesAsLinked`）
+  scanAll: () => invoke<Overview>("scan_all").then(showCopiesAsLinked),
   /// 这些格里缺失的 → 建链动作
   proposeLinks: (cells: CellRef[]) => invoke<PlannedAction[]>("propose_links", { cells }),
   /// 这些格里已链接且目标非整目录链接的 → 删链动作
@@ -410,4 +413,11 @@ export const api = {
   /// 手动刷新。给了 agent 是原因行旁的「再试一次」：只取它，不等最短间隔（限流退避照守），
   /// 这一轮跑完才返回（新数照常经 `usage-changed` 到）；agent 为空刷全部，仍受最短间隔约束、发出即返回
   usageRefresh: (agent: UsageAgentId | null) => invoke<void>("usage_refresh", { agent }),
+  /// 「连接 Claude 用量」（票 #208）：找不到 Claude Code 且没确认安装时回 `needsInstall`（先问一句，确认后带
+  /// `allowInstall` 再调）；过程的每一步经 `usage-changed` 送达
+  usageConnect: (allowInstall: boolean) => invoke<ConnectStart>("usage_connect", { allowInstall }),
+  /// 等授权时点「取消」：回到点之前的样子
+  usageConnectCancel: () => invoke<void>("usage_connect_cancel"),
+  /// 「没看到授权页 · 再打开 ↗」
+  usageConnectReopen: () => invoke<void>("usage_connect_reopen"),
 };

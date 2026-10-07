@@ -46,6 +46,7 @@
   "common.feedback.shotFailed": "截圖 {n}，沒有傳上去，傳送時再試",
   "common.feedback.removeShot": "移除截圖 {n}",
   "common.details.toggle": "詳情",
+  "common.details.open": "查看錯誤詳情",
   "common.details.copy": "複製詳情",
   "common.details.copied": "已複製",
   "common.write.changed": "可能剛被別的程式改過，沒動",
@@ -66,5 +67,16 @@
   "common.textField.show": "顯示",
   "common.list.enum": "、",
   "common.list.and": " 和 ",
-  "common.list.semicolon": "；"
+  "common.list.semicolon": "；",
+  "common.net.checkUpdate.unreachable": "無法連線更新伺服器，檢查一下網路",
+  "common.net.checkUpdate.timeout": "網路太慢，檢查更新逾時了",
+  "common.net.checkUpdate.other": "檢查更新失敗，稍後再試",
+  "common.net.update.rateLimited": "更新伺服器暫時限制了存取，幾分鐘後再試",
+  "common.net.download.unreachable": "無法連線下載伺服器，檢查一下網路",
+  "common.net.download.timeout": "網路太慢，下載逾時了",
+  "common.net.downloadUpdate.other": "下載失敗，稍後再試",
+  "common.net.downloadSkill.rateLimited": "下載伺服器暫時限制了存取，幾分鐘後再試",
+  "common.net.retry": "再試一次",
+  "common.net.retryWithProxy": "開著代理再試一次",
+  "common.net.website": "到官網下載"
 }

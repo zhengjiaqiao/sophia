@@ -1,11 +1,12 @@
-//! 三种来源的解析与窗口归一（R4）：`get_usage` 控制请求回复、`codex app-server` 结果、Codex 会话记录的一行。
-//! 只认带语义的字段，认不得的一律忽略；样本见 `testdata/`。由 T1 实现。
+//! 四种来源的解析与窗口归一（R4）：`get_usage` 控制请求回复、`codex app-server` 结果、Codex 会话记录的一行、
+//! Claude 桌面应用的用量历史。只认带语义的字段，认不得的一律忽略；样本见 `testdata/`。由 T1 实现。
 //!
-//! 三个入口：
+//! 四个入口：
 //! - [`parse_get_usage`]：Claude Code 的 `control_response` 整行。
 //! - [`parse_app_server`]：`codex app-server` 的整条 JSON-RPC 回复（`id` + `result`/`error`）。
 //! - [`parse_rollout_line`]：会话记录里的一行（`rollout-*.jsonl`），只有 `token_count` 且带
 //!   `rate_limits` 的行才归一成 [`Reading`]，其余（半行、别的事件类型）返回 `None`，不当错误处理。
+//! - [`parse_desktop_history`]：Claude 桌面应用的 `plan-usage-history.json` 整个文件，取最新一条。
 
 use super::model::{AgentId, ParseFailure, Reading, Severity, Source, Window, WindowKind};
 use serde_json::Value;
@@ -543,6 +544,80 @@ pub fn parse_rollout_line(line: &str) -> Option<Reading> {
     })
 }
 
+// ---------------- Claude 桌面应用的用量历史（未公开格式） ----------------
+
+/// 认得的 `plan-usage-history.json` 版本（2026-10-06 本机实测是 2）
+const DESKTOP_HISTORY_VERSION: i64 = 2;
+
+/// 样本时刻 `t` 是 Unix 毫秒（本机实测）；比这还小的不像毫秒（1973 年以前），当成格式变了
+const DESKTOP_HISTORY_MIN_MILLIS: i64 = 100_000_000_000;
+
+/// 桌面应用的用量历史读不出来的原因：只进日志（不含账号信息），界面上按「没有桌面应用的记录」处理，
+/// 不算取数失败
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopHistoryUnusable {
+    /// 不是 JSON（写了一半、文件坏了）
+    NotJson,
+    /// 没有 `version`，或不是认得的版本
+    UnknownVersion,
+    /// `samples` 缺失、不是数组，或一条都没有
+    NoSamples,
+    /// 最新一条缺 `t` / `u.fh` / `u.sd`，或类型、量级对不上
+    MissingFields,
+}
+
+/// 解析 Claude 桌面应用记在本机的用量历史（`~/Library/Application Support/Claude/plan-usage-history.json`，
+/// 未公开、随时可能变）：`{version: 2, samples: [{t, org, u: {fh, sd, ...}}]}`。取 `t` 最大的一条：
+/// `fh` 是 5 小时窗口、`sd` 是 7 天窗口的已用百分比（整数），`t` 是 Unix 毫秒。
+///
+/// 产出两个窗口（`session`、`weekly`），没有重置时刻；观测时刻是那条样本的时刻（不是读文件的时刻）。
+/// 样本多旧都照样交出去，「很旧」由显示层判断。`org` 等账号字段不读。
+pub fn parse_desktop_history(text: &str) -> Result<Reading, DesktopHistoryUnusable> {
+    let msg: Value = serde_json::from_str(text).map_err(|_| DesktopHistoryUnusable::NotJson)?;
+    if msg.get("version").and_then(Value::as_i64) != Some(DESKTOP_HISTORY_VERSION) {
+        return Err(DesktopHistoryUnusable::UnknownVersion);
+    }
+    let samples = match msg.get("samples") {
+        Some(Value::Array(samples)) if !samples.is_empty() => samples,
+        _ => return Err(DesktopHistoryUnusable::NoSamples),
+    };
+    // 时刻认不出的样本不参与比较；比较之后最新的那条再整条校验，缺字段不往前找旧的
+    let latest = samples
+        .iter()
+        .filter_map(|s| s.get("t").and_then(Value::as_i64).map(|t| (t, s)))
+        .max_by_key(|(t, _)| *t);
+    let Some((t, sample)) = latest else {
+        return Err(DesktopHistoryUnusable::MissingFields);
+    };
+    if t < DESKTOP_HISTORY_MIN_MILLIS {
+        return Err(DesktopHistoryUnusable::MissingFields);
+    }
+    let u = sample
+        .get("u")
+        .ok_or(DesktopHistoryUnusable::MissingFields)?;
+    let five_hour = f64_field(u, "fh").ok_or(DesktopHistoryUnusable::MissingFields)?;
+    let seven_day = f64_field(u, "sd").ok_or(DesktopHistoryUnusable::MissingFields)?;
+    let window = |key: &str, kind: WindowKind, minutes: u32, used_percent: f64| Window {
+        key: key.to_string(),
+        kind,
+        used_percent,
+        resets_at: None,
+        window_minutes: Some(minutes),
+        severity: severity_from_percent(used_percent),
+        active: false,
+    };
+    Ok(Reading {
+        agent: AgentId::ClaudeCode,
+        source: Source::DesktopHistory,
+        observed_at: t.div_euclid(1000),
+        windows: vec![
+            window("session", WindowKind::Session, 300, five_hour),
+            window("weekly", WindowKind::Weekly, 10080, seven_day),
+        ],
+        plan: None,
+    })
+}
+
 /// Codex 一个窗口槛位（`primary`/`secondary`）：字段名在 app-server（camelCase）和会话记录
 /// （snake_case）之间不同，字段名通过参数传入，逻辑共用一份。`resets_at` 两边都是 Unix 秒整数，
 /// 不用 RFC3339 解析。
@@ -582,6 +657,8 @@ mod tests {
     const GET_USAGE_LIMITS_NULL: &str = include_str!("testdata/get_usage_max_limits_null.json");
     const APP_SERVER_PROLITE: &str = include_str!("testdata/app_server_prolite.json");
     const ROLLOUT_TOKEN_COUNT: &str = include_str!("testdata/rollout_token_count.jsonl");
+    /// 2026-10-06 本机 `plan-usage-history.json` 的形状（账号字段换掉、只留三条，最新的一条不在末尾）
+    const DESKTOP_HISTORY: &str = include_str!("testdata/desktop_plan_usage_history_v2.json");
 
     fn window<'a>(windows: &'a [Window], key: &str) -> &'a Window {
         windows
@@ -1030,6 +1107,112 @@ mod tests {
         assert_eq!(
             parse_app_server(&msg, 0),
             Err(ParseFailure::RateLimited { until: None })
+        );
+    }
+
+    // ---------------- Claude 桌面应用的用量历史 ----------------
+
+    /// 取 `t` 最大的一条（不一定在末尾）：`fh` → 5 小时、`sd` → 本周；没有重置时刻；观测时刻是样本时刻（毫秒换秒）
+    #[test]
+    fn desktop_history_takes_latest_sample() {
+        let reading = parse_desktop_history(DESKTOP_HISTORY).unwrap();
+        assert_eq!(reading.agent, AgentId::ClaudeCode);
+        assert_eq!(reading.source, Source::DesktopHistory);
+        assert_eq!(reading.observed_at, 1_791_259_612);
+        assert_eq!(reading.plan, None);
+        assert_eq!(
+            reading
+                .windows
+                .iter()
+                .map(|w| (w.key.as_str(), w.label(), w.used_percent, w.resets_at))
+                .collect::<Vec<_>>(),
+            vec![
+                ("session", "5 小时".to_string(), 8.0, None),
+                ("weekly", "本周".to_string(), 3.0, None),
+            ]
+        );
+        // 账号字段不进读数
+        assert!(!serde_json::to_string(&reading).unwrap().contains("org"));
+    }
+
+    /// 认不得的字段（`u` 里将来多出的窗口、样本里别的键）忽略；紧张程度按阈值给
+    #[test]
+    fn desktop_history_ignores_unknown_fields() {
+        let text = r#"{"version":2,"extra":1,"samples":[{"t":1791259612753,"x":true,"u":{"fh":95,"sd":100,"zz":4}}]}"#;
+        let reading = parse_desktop_history(text).unwrap();
+        assert_eq!(reading.windows.len(), 2);
+        assert_eq!(reading.windows[0].severity, Severity::Warning);
+        assert_eq!(reading.windows[1].severity, Severity::Critical);
+    }
+
+    /// 很旧的样本照样交出去（30 天前）：多旧算「很久没更新」由显示层判断
+    #[test]
+    fn desktop_history_old_sample_is_still_a_reading() {
+        let text = r#"{"version":2,"samples":[{"t":1788669438275,"u":{"fh":1,"sd":2}}]}"#;
+        assert_eq!(
+            parse_desktop_history(text).unwrap().observed_at,
+            1_788_669_438
+        );
+    }
+
+    #[test]
+    fn desktop_history_unknown_version_is_unusable() {
+        for text in [
+            r#"{"version":3,"samples":[{"t":1791259612753,"u":{"fh":1,"sd":2}}]}"#,
+            r#"{"version":"2","samples":[{"t":1791259612753,"u":{"fh":1,"sd":2}}]}"#,
+            r#"{"samples":[{"t":1791259612753,"u":{"fh":1,"sd":2}}]}"#,
+        ] {
+            assert_eq!(
+                parse_desktop_history(text),
+                Err(DesktopHistoryUnusable::UnknownVersion),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_history_empty_or_missing_samples_is_unusable() {
+        for text in [
+            r#"{"version":2,"samples":[]}"#,
+            r#"{"version":2}"#,
+            r#"{"version":2,"samples":{}}"#,
+        ] {
+            assert_eq!(
+                parse_desktop_history(text),
+                Err(DesktopHistoryUnusable::NoSamples),
+                "{text}"
+            );
+        }
+    }
+
+    /// 最新一条缺字段就不可用，不往前找旧的（旧的会被当成现在的）；`t` 不像毫秒也算格式变了
+    #[test]
+    fn desktop_history_missing_fields_is_unusable() {
+        for text in [
+            r#"{"version":2,"samples":[{"t":1,"u":{"fh":1,"sd":2}},{"t":1791259612753,"u":{"fh":1}}]}"#,
+            r#"{"version":2,"samples":[{"t":1791259612753,"u":{"sd":2}}]}"#,
+            r#"{"version":2,"samples":[{"t":1791259612753,"u":{"fh":"1","sd":2}}]}"#,
+            r#"{"version":2,"samples":[{"t":1791259612753}]}"#,
+            r#"{"version":2,"samples":[{"u":{"fh":1,"sd":2}}]}"#,
+            r#"{"version":2,"samples":[{"t":1791259612,"u":{"fh":1,"sd":2}}]}"#,
+        ] {
+            assert_eq!(
+                parse_desktop_history(text),
+                Err(DesktopHistoryUnusable::MissingFields),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_history_not_json_is_unusable() {
+        assert_eq!(
+            parse_desktop_history(r#"{"version":2,"samples":[{"t":17912"#),
+            Err(DesktopHistoryUnusable::NotJson)
+        );
+        assert_eq!(
+            parse_desktop_history(""),
+            Err(DesktopHistoryUnusable::NotJson)
         );
     }
 }

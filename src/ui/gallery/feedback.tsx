@@ -336,15 +336,19 @@ export function FeedbackFamily() {
 
       <Block
         name="Details"
-        guide="出错提示上的技术原文（请求、状态码、返回的错误、调用栈）｜ 不是一颗键：挂在出错那句话上，停上去（或点一下）浮起悬浮卡——原文 + `复制详情`，点外面 / Esc 关｜ 长条提示里不展开；提示条里不放"
+        guide="出错提示上的技术原文（请求、状态码、返回的错误、调用栈）｜ 入口是错误前面的 `!`（图标键）：停上去或点一下浮起悬浮卡——原文 + `复制详情`，点外面 / Esc 关｜ 灰面板 16、网关行 14、出错页标题 18｜ 长条提示里不展开；提示条里不放"
       >
-        <Specimen label="平时：那句话不加记号，手放上去字转深">
-          <Details text="GET https://openrouter.ai/api/v1/models → 429" onCopy={noop}>
-            服务商限流了，约 30 秒后再试
-          </Details>
+        <Specimen label="三档：灰面板 16 · 网关行 14 · 出错页标题 18">
+          <Details text="GET https://openrouter.ai/api/v1/models → 429" onCopy={noop} />
+          <Details size="row" text="GET https://openrouter.ai/api/v1/models → 429" onCopy={noop} />
+          <Details
+            size="title"
+            text="GET https://openrouter.ai/api/v1/models → 429"
+            onCopy={noop}
+          />
         </Specimen>
         <Specimen
-          label="停上去 / 点一下：字下面浮起悬浮卡（点外面、Esc 关）"
+          label="停上去 / 点一下：「!」下面浮起悬浮卡（点外面、Esc 关）"
           frame="stage"
           width={520}
           height={220}
@@ -355,12 +359,10 @@ export function FeedbackFamily() {
             text={
               'GET https://openrouter.ai/api/v1/models → 429 Too Many Requests · Retry-After: 30\n{"error":{"message":"Rate limit exceeded: free-models-per-min"}}'
             }
-          >
-            服务商限流了，约 30 秒后再试
-          </Details>
+          />
         </Specimen>
         <Specimen
-          label="出错页（PageFault）：说明那句话上挂悬浮卡，键行只有重新加载"
+          label="出错页（PageFault）：标题前的「!」是入口，键行只有重新加载"
           frame="stage"
           width={520}
           height={240}

@@ -247,6 +247,23 @@ test("no-retired-ui：文案里的 ▾ 也拦（下拉记号是 IconChevronDown�
   );
 });
 
+test("copy-register：「连不上」照拦，没有逐句例外（#208 的网络失败句已改成「无法访问」，2026-10-07）", () => {
+  assert.deepEqual(hits("copy-register", 'const t = "网关连不上";', "src/Gateway.tsx"), [
+    "「连不上」",
+  ]);
+  assert.deepEqual(hits("copy-register", 'const t = "连不上 Claude 的服务器";', "src/x.tsx"), [
+    "「连不上」",
+  ]);
+  assert.deepEqual(
+    hits(
+      "copy-register",
+      'const t = "连接失败 · 无法访问 Claude 的服务器 · 检查网络或 VPN 后再试";',
+      "src/x.tsx",
+    ),
+    [],
+  );
+});
+
 // ===== 整体 =====
 
 test("lintSource：一个干净的页面文件零违规", () => {

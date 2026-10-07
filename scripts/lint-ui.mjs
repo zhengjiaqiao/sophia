@@ -144,7 +144,7 @@ export const CATALOG = loadCatalog();
 /// 中日韩文字与全角标点（「」、，：（））：界面文案的标志
 const CJK = /[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]/;
 
-/// D24 旧词表（DESIGN「文案语域」的「旧」一列，外加同一轮走查改掉的说法）。
+/// D24 旧词表（DESIGN「文案表达」与「文案旧词表」的「旧」一列，外加同一轮走查改掉的说法）。
 /// 「全局」→「用户级」（R3，2026-09-26 按对象组织的导航 spec）
 const OLD_WORDS = [
   "写不进",
@@ -314,7 +314,7 @@ export const rules = [
   },
   {
     id: "mechanism-words",
-    desc: "§4.5 说结果不说机制",
+    desc: "文案表达：说结果不说机制",
     run(src, path) {
       const text = visibleText(src, path);
       const bad = [
@@ -532,9 +532,9 @@ export const rules = [
   },
   {
     id: "copy-register",
-    // DESIGN「文案语域：平实、完整」（D24）的旧词表：状态词与失败原因用「无法 + 动词」，句子写完整，
+    // DESIGN「文案表达 › 怎么说」（D24）的旧词表：状态词与失败原因用「无法 + 动词」，句子写完整，
     // 不指向已删的页面。表左列写回界面字符串即报错（注释与标识符不算）
-    desc: "D24 文案语域：界面字符串里不出现旧词",
+    desc: "D24 文案表达：界面字符串里不出现旧词",
     run(src, path) {
       const text = visibleText(src, path);
       return OLD_WORDS.filter((w) => text.includes(w)).map((w) => `「${w}」`);

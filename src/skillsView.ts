@@ -213,3 +213,21 @@ export function columnPress(
   }
   return { linked, missing, own, blocked, targets: [...targets] };
 }
+
+/// 删原件时有链接或副本指向它的 agent（DESIGN「删除原件」确认框）：每一处按所在目录找出**所有**列——
+/// 共用文件夹（项目里的 `.agents/skills`）几家是同一个目录，一处链接或副本几家都会失去它，各算一条。
+/// 认不出目录的那一处照算一条、不出名字。名字去重保序
+export function placedAgents(
+  placed: ReadonlyArray<string>,
+  targets: ReadonlyArray<Pick<Target, "path" | "label">>,
+): { labels: string[]; count: number } {
+  const labels: string[] = [];
+  let count = 0;
+  for (const path of placed) {
+    const dir = path.replace(/[/\\][^/\\]*$/, "");
+    const columns = targets.filter((target) => target.path === dir);
+    count += Math.max(columns.length, 1);
+    for (const { label } of columns) if (!labels.includes(label)) labels.push(label);
+  }
+  return { labels, count };
+}

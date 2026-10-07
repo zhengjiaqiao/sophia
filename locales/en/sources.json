@@ -146,8 +146,6 @@
   "sources.add.adding": "Adding",
   "sources.added.done": "Added {names}",
   "sources.absent.title": "Once installed, you can turn it on here",
-  "sources.absent.hiddenNote": "Stays hidden after install",
-  "sources.absent.restore": "Restore",
   "sources.name.universal": "~/.agents",
   "sources.name.projectStore": "{name}/.agents",
   "sources.error.placeGone": "This location no longer exists; please refresh",

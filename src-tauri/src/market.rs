@@ -22,6 +22,7 @@
 //!   这里不打日志，错误文本里也不带请求体。
 //! - 写 `~/.codex/config.toml` 的（装 MCP 勾了 Codex）先拿 `AppState.config_lock`。
 
+use crate::net_kind::NetKind;
 use crate::AppState;
 #[cfg(test)]
 mod net_tests;
@@ -346,6 +347,19 @@ enum NetError {
 }
 
 impl NetError {
+    /// 网络出错的四类（issue #253，与应用更新共用 `net_kind`）：读到一半断了按连不上说
+    fn kind(&self) -> NetKind {
+        match self {
+            NetError::Network | NetError::Interrupted => NetKind::Unreachable,
+            NetError::Timeout => NetKind::Timeout,
+            NetError::RateLimited { .. } => NetKind::RateLimited,
+            NetError::Status(code) => crate::net_kind::of_status(*code, None, None),
+            NetError::NotFound | NetError::TooLarge | NetError::Unreadable | NetError::Client => {
+                NetKind::Other
+            }
+        }
+    }
+
     /// 自动上报里算哪一类：连不上、超时、读断了是网络；对方回错、限流、太大、读不懂是上游；
     /// 联网组件建不起来是内部错误。404（不存在、私有）是正常的回答，不计
     fn report_kind(&self) -> Option<sophia_core::report::Kind> {
@@ -425,34 +439,9 @@ fn body_head(body: &[u8]) -> String {
     }
 }
 
-/// 沿源错误链走：`io::Error::source()` 会跳过它包着的那个错误，要另看 `get_ref()`
-fn for_each_cause(
-    error: &(dyn std::error::Error + 'static),
-    visit: &mut impl FnMut(&(dyn std::error::Error + 'static)),
-) {
-    visit(error);
-    match error
-        .downcast_ref::<std::io::Error>()
-        .and_then(|io| io.get_ref())
-    {
-        Some(inner) => for_each_cause(inner, visit),
-        None => {
-            if let Some(next) = error.source() {
-                for_each_cause(next, visit);
-            }
-        }
-    }
-}
-
 /// reqwest 错误的原文：整条源错误链用 `: ` 接起来（reqwest 自己的那一环只说「发请求出错」，带着地址，跳过）
 fn error_chain_text(error: &reqwest::Error) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for_each_cause(error, &mut |cause| {
-        let text = cause.to_string();
-        if !parts.iter().any(|p| p == &text) {
-            parts.push(text);
-        }
-    });
+    let mut parts = crate::net_kind::chain_parts(error);
     if parts.len() > 1 {
         parts.remove(0);
     }
@@ -523,10 +512,13 @@ fn classify(
         .or_else(|| reset.map(|at| at.saturating_sub(now)));
         NetError::RateLimited { reset, wait_secs }
     };
+    if (200..=299).contains(&status) {
+        return Ok(());
+    }
+    if crate::net_kind::of_status(status, remaining, retry_after) == NetKind::RateLimited {
+        return Err(limited());
+    }
     match status {
-        200..=299 => Ok(()),
-        429 => Err(limited()),
-        403 if remaining.map(str::trim) == Some("0") || retry_after.is_some() => Err(limited()),
         401 | 404 | 410 => Err(NetError::NotFound),
         other => Err(NetError::Status(other)),
     }
@@ -2101,15 +2093,15 @@ pub async fn market_resolve_link(
             let branch = market
                 .default_branch(&repo)
                 .await
-                .map_err(|e| github_message(&e))?;
+                .map_err(|e| github_failure(&e))?;
             let bytes = market
                 .download(&repo, &branch)
                 .await
-                .map_err(|e| github_message(&e))?;
+                .map_err(|e| github_failure(&e))?;
             (branch, r.path.clone(), bytes)
         }
         Some(first) => {
-            let mut last = NetError::NotFound;
+            let mut last: Option<NetFailure> = None;
             let mut hit = None;
             for (branch, path) in branch_candidates(first, r.path.as_deref()) {
                 match market.download(&repo, &branch).await {
@@ -2119,12 +2111,15 @@ pub async fn market_resolve_link(
                     }
                     Err(f) if f.error == NetError::NotFound => continue,
                     Err(f) => {
-                        last = f.error;
+                        last = Some(f);
                         break;
                     }
                 }
             }
-            hit.ok_or_else(|| github_message(&last))?
+            hit.ok_or_else(|| match &last {
+                Some(f) => github_failure(f),
+                None => github_message(&NetError::NotFound),
+            })?
         }
     };
     let dirs = archive::skill_dirs(&bytes)?;
@@ -2150,6 +2145,17 @@ fn github_message(e: &NetError) -> String {
     }
 }
 
+/// 下载 skill 时 GitHub 这边的一次失败 → 命令错误 `[类] 一句\n[detail] 原文`（issue #253）：网络那三类
+/// （连不上、超时、限流）前端按类换成「下载 skill」场景的主句并给「开着代理再试一次」，别的（没找到、仓库太大）
+/// 照这一句显示；原文进主句前的「!」
+fn github_failure(failure: &NetFailure) -> String {
+    crate::net_kind::NetProblem {
+        kind: failure.kind(),
+        detail: failure.detail.clone(),
+    }
+    .command_error(&github_message(failure))
+}
+
 // ── 装 ──
 
 /// 补齐请求：分支为空取默认分支；下载（或取内存里的）整包；路径换成包里真有的 skill 文件夹
@@ -2161,11 +2167,11 @@ async fn prepare_skill_request(
     let branch = market
         .branch_or_default(&repo, Some(&request.branch))
         .await
-        .map_err(|e| github_message(&e))?;
+        .map_err(|e| github_failure(&e))?;
     let bytes = market
         .download(&repo, &branch)
         .await
-        .map_err(|e| github_message(&e))?;
+        .map_err(|e| github_failure(&e))?;
     let dirs = archive::skill_dirs(&bytes)?;
     let paths = resolve_paths(&request.paths, &dirs, &repo);
     Ok((
@@ -2223,6 +2229,7 @@ pub async fn market_install_skill(
         &request.branch,
         now(),
         &mut settings.subscriptions,
+        &state.store,
     );
     if settings.subscriptions != before {
         state
@@ -2518,7 +2525,7 @@ pub fn market_undo(
     };
     let hold_root = crate::held_dir()?;
     let mut records = state.store.load_installs().map_err(|e| e.to_string())?;
-    let report = install::undo(&undo, &hold_root, &mut records);
+    let report = install::undo(&undo, &hold_root, &mut records, Some(&state.store));
     state
         .store
         .save_installs(&records)
@@ -3422,6 +3429,7 @@ mod tests {
         std::fs::write(home.join(".claude/settings.json"), "{}").unwrap();
         std::fs::write(home.join(".codex/config.toml"), "").unwrap();
         let env = Env {
+            apps: Vec::new(),
             home: home.clone(),
             vars: HashMap::from([("HOME".to_string(), home.display().to_string())]),
         };
@@ -3486,6 +3494,7 @@ mod tests {
             "main",
             now(),
             &mut subs,
+            &store,
         );
         println!(
             "装上 {:?} · 失败 {:?} · 链接 {:?}",
@@ -3579,7 +3588,7 @@ mod tests {
         // 撤销：链接删掉，文件夹进暂存，记录拿掉
         let undo = outcome.take_undo().expect("有撤销记录");
         let mut records = store.load_installs().unwrap();
-        let report = install::undo(&undo, &hold_root, &mut records);
+        let report = install::undo(&undo, &hold_root, &mut records, Some(&store));
         store.save_installs(&records).unwrap();
         println!(
             "撤销：{:?}",

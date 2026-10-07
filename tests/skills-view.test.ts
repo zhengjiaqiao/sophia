@@ -6,6 +6,7 @@ import {
   columnPress,
   domainOfTarget,
   mergeSkillPages,
+  placedAgents,
   refAt,
   refRowKey,
   skillRowKey,
@@ -188,5 +189,36 @@ test("孤链行按位置分开：行键带位置前缀，格落在自己位置�
       ["orphan|global|old", "global", ["codex"]],
       [`orphan|${CARD}|old`, CARD, [pCX.id]],
     ],
+  );
+});
+
+test("删原件确认：共用文件夹里的一处按路径找出所有列，每家各算一条；认不出的目录照算一条、不出名字", () => {
+  const targets = [
+    { path: "/p/.agents/skills", label: "Codex" },
+    { path: "/p/.agents/skills", label: "Antigravity" },
+    { path: "/h/.claude/skills", label: "Claude Code" },
+  ];
+  assert.deepEqual(
+    placedAgents(["/h/.claude/skills/a", "/p/.agents/skills/a", "/x/y/a"], targets),
+    { labels: ["Claude Code", "Codex", "Antigravity"], count: 4 },
+  );
+  // 同名的两列（不同位置的同一个 agent）名字只出一次，条数照算
+  assert.deepEqual(
+    placedAgents(
+      ["/h/.codex/skills/a", "/p/.agents/skills/a"],
+      [
+        { path: "/h/.codex/skills", label: "Codex" },
+        { path: "/p/.agents/skills", label: "Codex" },
+      ],
+    ),
+    { labels: ["Codex"], count: 2 },
+  );
+  // Windows 路径分隔符
+  assert.deepEqual(
+    placedAgents(
+      ["C:\\p\\.agents\\skills\\a"],
+      [{ path: "C:\\p\\.agents\\skills", label: "Codex" }],
+    ),
+    { labels: ["Codex"], count: 1 },
   );
 });

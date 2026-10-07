@@ -326,7 +326,16 @@ fn taskpolicy_path() -> Option<&'static str> {
 
 /// 白名单环境 + 显式的 extra_env。`PATH` 单独处理：见 [`augmented_path`]
 fn build_child_env(spec: &ProbeSpec) -> Vec<(String, String)> {
-    let parent: HashMap<String, String> = match &spec.parent_env {
+    child_env(spec.parent_env.as_deref(), &spec.extra_env)
+}
+
+/// Sophia 起的子进程（探测、「连接 Claude 用量」的安装与登录）共用的环境：父环境（`None`＝本进程的）里
+/// 只取白名单（[`ENV_ALLOWLIST`]），PATH 补上找程序的兜底目录，再加调用方显式给的 `extra`
+pub(crate) fn child_env(
+    parent_env: Option<&[(String, String)]>,
+    extra: &[(String, String)],
+) -> Vec<(String, String)> {
+    let parent: HashMap<String, String> = match parent_env {
         Some(map) => map.iter().cloned().collect(),
         None => std::env::vars().collect(),
     };
@@ -346,7 +355,7 @@ fn build_child_env(spec: &ProbeSpec) -> Vec<(String, String)> {
             env.push((key.to_owned(), value.clone()));
         }
     }
-    env.extend(spec.extra_env.iter().cloned());
+    env.extend(extra.iter().cloned());
     env
 }
 
@@ -366,7 +375,7 @@ fn augmented_path(parent_path: Option<&str>, home: &Path) -> String {
 /// 结束整个进程组（自己加子孙），SIGKILL 直接来，不留后路。用 `/bin/kill` 而不是 `libc::killpg`：
 /// 跟 `crate::process::terminate` 一样的理由——不为一次系统调用引入新依赖。到这一步已经是
 /// 补救路径：正常收工前已经给过关 stdin、等 3 秒自愿退出的机会
-async fn kill_process_group(pgid: u32) {
+pub(crate) async fn kill_process_group(pgid: u32) {
     let _ = Command::new("/bin/kill")
         // `--` 不能省：Linux 的 procps kill 会把 `-<pgid>` 当成选项解析、直接报错不发信号
         // （CI 上三个超时测试因此挂住）；macOS 的 kill 也认 `--`
@@ -554,12 +563,15 @@ mod tests {
                 ("no_proxy".into(), "localhost".into()),
                 ("NODE_EXTRA_CA_CERTS".into(), "/etc/ca.pem".into()),
             ]);
+            // Claude 探测总是显式带 DISABLE_AUTOUPDATER（它不在白名单里，只走 extra_env）
+            spec.extra_env = vec![("DISABLE_AUTOUPDATER".into(), "1".into())];
             spec.until = Box::new(|_| true);
 
             let output = run_probe(spec).await.expect("探测应该成功");
             let env = output.matched.expect("应该有一行输出");
             let env = env.as_object().unwrap();
 
+            assert_eq!(env.get("DISABLE_AUTOUPDATER").unwrap(), "1");
             assert_eq!(env.get("HOME").unwrap(), &home.to_string_lossy().to_string());
             assert_eq!(env.get("USER").unwrap(), "tester");
             let path = env.get("PATH").unwrap().as_str().unwrap();

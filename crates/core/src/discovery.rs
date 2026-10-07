@@ -20,10 +20,16 @@ struct HarnessSpec {
     display_name: String,
     #[serde(default)]
     project_dir: Option<String>,
+    /// 先新后旧：第一个能解析的是这个 agent 的列；后面的是它还认、但不再往里写的旧位置，
+    /// 只用来认出探测目录里的 skills 空壳（见 `looks_installed`）
     #[serde(default)]
     global_dir: Vec<String>,
+    /// 先新后旧：任一个看起来装过就算已安装
     #[serde(default)]
     detect_dir: Vec<String>,
+    /// 同品牌的桌面应用（macOS）：装了任一个也算已安装。只用来判定，不改各页的列
+    #[serde(default)]
+    detect_app: Vec<AppSpec>,
     #[serde(default)]
     universal: bool,
     /// 每个 agent 一个项目的 skill 目录模板，允许单个路径分量为 `*`
@@ -44,22 +50,39 @@ struct HarnessSpec {
     platforms: Vec<String>,
 }
 
+/// 应用包：放应用的文件夹里叫 `name` 的包，`Info.plist` 的 `CFBundleIdentifier` 是 `bundle_id`
+/// （同名的别家应用不算）
+#[derive(Debug, Deserialize)]
+struct AppSpec {
+    name: String,
+    bundle_id: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct HarnessFile {
     harnesses: Vec<HarnessSpec>,
 }
 
-/// 模板解析所需的环境：主目录与环境变量（测试时可伪造）
+/// 模板解析所需的环境：主目录、环境变量、放应用的文件夹（测试时可伪造）
 pub struct Env {
     pub home: PathBuf,
     pub vars: HashMap<String, String>,
+    /// 按 `detect_app` 找应用包的文件夹：macOS 是 `/Applications` 与 `~/Applications`，别的系统为空
+    pub apps: Vec<PathBuf>,
 }
 
 impl Env {
     pub fn from_system() -> Self {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let apps = if cfg!(target_os = "macos") {
+            vec![PathBuf::from("/Applications"), home.join("Applications")]
+        } else {
+            Vec::new()
+        };
         Env {
-            home: dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")),
+            home,
             vars: std::env::vars().collect(),
+            apps,
         }
     }
 }
@@ -137,8 +160,8 @@ fn extra_specs() -> Vec<HarnessSpec> {
     Vec::new()
 }
 
-fn resolve(spec: &HarnessSpec, env: &Env) -> (Harness, Option<PathBuf>) {
-    let harness = Harness {
+fn resolve(spec: &HarnessSpec, env: &Env) -> Harness {
+    Harness {
         id: spec.id.clone(),
         display_name: spec.display_name.clone(),
         project_dir: spec.project_dir.clone(),
@@ -147,8 +170,15 @@ fn resolve(spec: &HarnessSpec, env: &Env) -> (Harness, Option<PathBuf>) {
         agent_dirs: expand_template_glob(&spec.agent_dirs, env),
         managed_global_dir: spec.managed_global_dir,
         agent_labels: spec.agent_labels.clone(),
-    };
-    (harness, resolve_template(&spec.detect_dir, env))
+    }
+}
+
+/// 每个候选各自解析，跳过未设置的环境变量
+fn resolve_all(candidates: &[String], env: &Env) -> Vec<PathBuf> {
+    candidates
+        .iter()
+        .filter_map(|t| resolve_one(t, env))
+        .collect()
 }
 
 /// 逐个模板展开单层 `*`，返回存在的目录，按路径排序去重
@@ -643,11 +673,11 @@ pub fn targets(
 
 /// 全部 harness（有 skill 目录的；只有 MCP 的不在里面），路径已按当前环境解析
 pub fn all_harnesses(env: &Env) -> Vec<Harness> {
-    skill_specs().iter().map(|s| resolve(s, env).0).collect()
+    skill_specs().iter().map(|s| resolve(s, env)).collect()
 }
 
-/// 探测目录（detect_dir，缺省 global_dir）存在，且不是只装着通往 skills 的空壳。
-/// 只有 MCP 的 agent 不在里面（见 `mcp_columns`）
+/// 任一探测目录（detect_dir，缺省 global_dir）存在，且不是只装着通往 skills 的空壳；
+/// 或者装了同品牌的桌面应用（detect_app）。只有 MCP 的 agent 不在里面（见 `mcp_columns`）
 pub fn installed(env: &Env) -> Vec<Harness> {
     installed_in(skill_specs(), env)
 }
@@ -656,9 +686,15 @@ fn installed_in(specs: Vec<HarnessSpec>, env: &Env) -> Vec<Harness> {
     specs
         .iter()
         .filter_map(|s| {
-            let (h, detect) = resolve(s, env);
-            let probe = detect.or_else(|| h.global_dir.clone())?;
-            looks_installed(&probe, h.global_dir.as_deref()).then_some(h)
+            let h = resolve(s, env);
+            let mut probes = resolve_all(&s.detect_dir, env);
+            if probes.is_empty() {
+                probes.extend(h.global_dir.clone());
+            }
+            let skill_dirs = resolve_all(&s.global_dir, env);
+            (probes.iter().any(|p| looks_installed(p, &skill_dirs))
+                || s.detect_app.iter().any(|app| app_installed(app, env)))
+            .then_some(h)
         })
         .collect()
 }
@@ -710,6 +746,7 @@ fn shown_count(installed: &[String], settings: &Settings) -> usize {
 ///   已满就记进不显示名单——不挤掉用户已经在看的
 /// - 新用户与升级上来的老数据 `known_installed` 为空，已安装的全算新装，于是按表先后留前 4 个
 /// - 兜底：仍超出（比如文件被手改过）就按表先后留前 4 个
+/// - 不显示名单只记已安装的：未安装的先清出去（勾选与否只对已安装的有意义），装回时按新装算
 ///
 /// 最后把 `known_installed` 换成这次的已安装集合：卸载了的从中移除，重装时再按新装算
 pub fn reconcile_shown(installed: &[String], settings: &mut Settings) -> bool {
@@ -717,6 +754,9 @@ pub fn reconcile_shown(installed: &[String], settings: &mut Settings) -> bool {
         settings.disabled_harnesses.clone(),
         settings.known_installed.clone(),
     );
+    settings
+        .disabled_harnesses
+        .retain(|id| installed.contains(id));
     let mut shown = installed
         .iter()
         .filter(|id| {
@@ -764,7 +804,7 @@ impl std::fmt::Display for ShownLimitReached {
 impl std::error::Error for ShownLimitReached {}
 
 /// 设置页勾选 / 取消勾选一个 agent。勾上已安装的而显示已满时拒绝，名单不动。
-/// 未安装的「恢复」（从不显示名单移除）不占名额：装上时再按新装的规则判
+/// 设置页只给已安装的勾选框；未安装的不在名单里（见 `reconcile_shown`）
 pub fn set_shown(
     installed: &[String],
     settings: &mut Settings,
@@ -786,25 +826,38 @@ pub fn set_shown(
     Ok(())
 }
 
-/// 探测目录里至少要有一个条目不在通往 `global_dir` 的路径上、也不是别的工具代写的扩展点。
-/// `npx skills add --agent '*'` 会给未安装的工具也建出 `~/.xxx/skills`；Orca 这类状态栏工具会给
-/// 一长串 agent 都写上 hooks / plugins（连同 `.bak` 备份）——这些都不说明 agent 本身装过。
-/// 没有 global_dir 时存在即可
-fn looks_installed(probe: &Path, global_dir: Option<&Path>) -> bool {
-    let Some(global) = global_dir else {
+fn app_installed(app: &AppSpec, env: &Env) -> bool {
+    env.apps.iter().any(|dir| {
+        let plist = dir.join(&app.name).join("Contents/Info.plist");
+        plist::Value::from_file(plist).is_ok_and(|value| {
+            value
+                .as_dictionary()
+                .and_then(|d| d.get("CFBundleIdentifier"))
+                .and_then(plist::Value::as_string)
+                == Some(app.bundle_id.as_str())
+        })
+    })
+}
+
+/// 探测目录里至少要有一个条目不在通往 `global_dir` 任一候选（含旧位置）的路径上、也不是别的工具
+/// 代写的扩展点。`npx skills add --agent '*'` 会给未安装的工具也建出 `~/.xxx/skills`（agent 改过
+/// 目录后它可能还在建旧的）；Orca 这类状态栏工具会给一长串 agent 都写上 hooks / plugins
+/// （连同 `.bak` 备份）——这些都不说明 agent 本身装过。没有 global_dir 时存在即可
+fn looks_installed(probe: &Path, skill_dirs: &[PathBuf]) -> bool {
+    if skill_dirs.is_empty() {
         return probe.exists();
-    };
+    }
     let Ok(entries) = std::fs::read_dir(probe) else {
         return false;
     };
     entries.flatten().any(|e| {
         let path = e.path();
-        !global.starts_with(path.as_path()) && !written_by_others(&path, 0)
+        !skill_dirs.iter().any(|d| d.starts_with(path.as_path())) && !written_by_others(&path, 0)
     })
 }
 
-/// 别的工具往 agent 目录里代写的东西：hooks、plugins、备份，只含 hooks / plugin 键的 JSON 配置，
-/// 以及只装着这些的子目录（Gemini 的 `config/hooks.json`）
+/// 别的工具往 agent 目录里代写的东西：hooks、plugins、备份，只含 hooks / plugin 键的 JSON / TOML 配置，
+/// 撤掉改动后只剩空内容的配置，以及只装着这些的子目录（Gemini 的 `config/hooks.json`）
 fn written_by_others(path: &Path, depth: usize) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -817,23 +870,65 @@ fn written_by_others(path: &Path, depth: usize) -> bool {
             let mut entries = entries.flatten().peekable();
             entries.peek().is_some() && entries.all(|e| written_by_others(&e.path(), depth + 1))
         }),
-        EntryKind::File if name.ends_with(".json") => hooks_only_json(path),
+        EntryKind::File => emptied_beside_backup(path, name) || hooks_only(path, name),
         _ => false,
+    }
+}
+
+/// 按 `name` 的后缀认格式（`.bak` 传原文件名），JSON / TOML 之外的都不算
+fn hooks_only(path: &Path, name: &str) -> bool {
+    if name.ends_with(".json") {
+        hooks_only_json(path)
+    } else if name.ends_with(".toml") {
+        hooks_only_toml(path)
+    } else {
+        false
     }
 }
 
 /// 顶层只有 hooks / plugin 一类的键（`{}` 不算：空配置可能是 agent 自己建的）
 fn hooks_only_json(path: &Path) -> bool {
-    const KEYS: [&str; 4] = ["hooks", "plugin", "plugins", "$schema"];
-    let small = std::fs::metadata(path).is_ok_and(|m| m.len() <= 256 * 1024);
-    let Some(serde_json::Value::Object(map)) = small
-        .then(|| std::fs::read(path).ok())
-        .flatten()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+    let Some(serde_json::Value::Object(map)) =
+        small_text(path).and_then(|text| serde_json::from_str(&text).ok())
     else {
         return false;
     };
-    !map.is_empty() && map.keys().all(|k| KEYS.contains(&k.as_str()))
+    only_hook_keys(map.keys().map(String::as_str))
+}
+
+/// TOML 版的 `hooks_only_json`：Orca 给 Kimi Code 写的是 `[[hooks]]`
+fn hooks_only_toml(path: &Path) -> bool {
+    let Some(document) =
+        small_text(path).and_then(|text| text.parse::<toml_edit::DocumentMut>().ok())
+    else {
+        return false;
+    };
+    only_hook_keys(document.iter().map(|(key, _)| key))
+}
+
+fn only_hook_keys<'a>(keys: impl Iterator<Item = &'a str>) -> bool {
+    const KEYS: [&str; 4] = ["hooks", "plugin", "plugins", "$schema"];
+    let mut keys = keys.peekable();
+    keys.peek().is_some() && keys.all(|k| KEYS.contains(&k))
+}
+
+/// 自己只剩空白或 `{}`、旁边的 `<名>.bak` 也只有 hooks 一类的键：别的工具撤掉自己写的 hooks 时
+/// 留了备份，把原本没有的配置改回了空（Orca 撤 Kimi Code 的 hooks 后的 `config.toml`）。
+/// 没有备份、或备份里有别的设置的空配置，仍算 agent 自己的
+fn emptied_beside_backup(path: &Path, name: &str) -> bool {
+    hooks_only(&path.with_file_name(format!("{name}.bak")), name)
+        && small_text(path).is_some_and(|text| {
+            let text = text.trim();
+            text.is_empty()
+                || serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(text)
+                    .is_ok_and(|map| map.is_empty())
+        })
+}
+
+/// 256 KiB 以内的文本文件原文；更大的不像配置，不读
+fn small_text(path: &Path) -> Option<String> {
+    let small = std::fs::metadata(path).is_ok_and(|m| m.len() <= 256 * 1024);
+    small.then(|| std::fs::read_to_string(path).ok()).flatten()
 }
 
 /// 项目目录里是否有任一 harness 的项目级 skill 目录。
@@ -1072,6 +1167,7 @@ mod tests {
 
     fn env(home: &Path, vars: &[(&str, &str)]) -> Env {
         Env {
+            apps: Vec::new(),
             home: home.to_path_buf(),
             vars: vars
                 .iter()
@@ -1220,14 +1316,17 @@ mod tests {
 
     #[test]
     fn old_data_within_four_is_left_alone() {
-        let installed = ids(&["claude-code", "codex", "cursor"]);
+        let installed = ids(&["claude-code", "codex", "cursor", "cline"]);
         let mut settings = Settings {
-            disabled_harnesses: ids(&["kiro-cli"]),
+            disabled_harnesses: ids(&["cline"]),
             ..Default::default()
         };
         reconcile_shown(&installed, &mut settings);
-        assert_eq!(shown(&installed, &settings), installed);
-        assert_eq!(settings.disabled_harnesses, ids(&["kiro-cli"]));
+        assert_eq!(
+            shown(&installed, &settings),
+            ids(&["claude-code", "codex", "cursor"])
+        );
+        assert_eq!(settings.disabled_harnesses, ids(&["cline"]));
     }
 
     #[test]
@@ -1262,6 +1361,31 @@ mod tests {
         let all = ids(&["claude-code", "codex", "cursor", "cline", "gemini-cli"]);
         reconcile_shown(&all, &mut settings);
         assert_eq!(shown(&all, &settings), with_gemini);
+    }
+
+    /// 2026-10-07：不显示名单只对已安装的有意义。早先误判成已安装、因超上限被记进名单的
+    /// （Orca 写的 hooks，#173 已修），判回未安装后要清出名单，不留「装上后也不显示」
+    #[test]
+    fn uninstalled_ids_are_cleared_from_the_hidden_list() {
+        let installed = ids(&["claude-code", "codex", "cursor", "cline", "amp"]);
+        let mut settings = Settings::default();
+        reconcile_shown(&installed, &mut settings);
+        assert_eq!(settings.disabled_harnesses, ids(&["amp"]));
+        // 误判纠正：amp 其实没装
+        let real = ids(&["claude-code", "codex", "cursor", "cline"]);
+        assert!(reconcile_shown(&real, &mut settings));
+        assert!(settings.disabled_harnesses.is_empty());
+        assert!(!reconcile_shown(&real, &mut settings));
+    }
+
+    #[test]
+    fn unchecked_installed_agent_stays_hidden() {
+        let installed = ids(&["claude-code", "codex", "cursor"]);
+        let mut settings = Settings::default();
+        reconcile_shown(&installed, &mut settings);
+        set_shown(&installed, &mut settings, "codex", false).unwrap();
+        assert!(!reconcile_shown(&installed, &mut settings));
+        assert_eq!(settings.disabled_harnesses, ids(&["codex"]));
     }
 
     #[test]
@@ -1301,20 +1425,18 @@ mod tests {
         );
     }
 
+    /// 取消勾选后卸载、再装回：名单里已经没有它，按新装算——显示不满上限就出现
     #[test]
-    fn restoring_an_uninstalled_agent_does_not_take_a_slot() {
-        let installed = ids(&["claude-code", "codex", "cursor", "cline"]);
-        let mut settings = Settings {
-            disabled_harnesses: ids(&["kiro-cli"]),
-            ..Default::default()
-        };
+    fn hidden_then_uninstalled_then_reinstalled_appears_while_under_four() {
+        let installed = ids(&["claude-code", "codex", "cursor"]);
+        let mut settings = Settings::default();
         reconcile_shown(&installed, &mut settings);
-        set_shown(&installed, &mut settings, "kiro-cli", true).unwrap();
+        set_shown(&installed, &mut settings, "cursor", false).unwrap();
+        let without = ids(&["claude-code", "codex"]);
+        reconcile_shown(&without, &mut settings);
         assert!(settings.disabled_harnesses.is_empty());
-        // 装上时已满：照新装的规则，不自动出现
-        let five = ids(&["claude-code", "codex", "cursor", "cline", "kiro-cli"]);
-        reconcile_shown(&five, &mut settings);
-        assert_eq!(shown(&five, &settings), installed);
+        reconcile_shown(&installed, &mut settings);
+        assert_eq!(shown(&installed, &settings), installed);
     }
 
     #[test]
@@ -1400,6 +1522,166 @@ mod tests {
         let e = env(&home, &[]);
         let ids: Vec<String> = installed(&e).into_iter().map(|h| h.id).collect();
         assert_eq!(ids, s(&["command-code", "kiro-cli"]));
+    }
+
+    /// Orca 给 Kimi Code 写的是 TOML 的 `[[hooks]]`；撤掉时留下 `.bak`、把原文件改回空
+    /// （2026-10-07 真机：`~/.kimi-code` 只有 0 字节的 `config.toml` 与 `config.toml.bak`）
+    #[test]
+    fn installed_ignores_toml_hooks_and_files_emptied_beside_a_backup() {
+        let t = TempTree::new();
+        let home = t.root();
+        let write = |rel: &str, text: &str| {
+            let p = home.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        let hooks = "[[hooks]]\nevent = \"Stop\"\ncommand = \"orca-hook\"\n";
+        write(".kimi-code/config.toml", "");
+        write(".kimi-code/config.toml.bak", hooks);
+        write(".kimi/config.toml", hooks);
+        write(".factory/settings.json", "{}\n");
+        write(".factory/settings.json.bak", r#"{"hooks":{"stop":[]}}"#);
+        let e = env(&home, &[]);
+        assert_eq!(installed_ids(&e), Vec::<String>::new());
+
+        // 真装过的：TOML 里除了 hooks 还有自己的设置；空配置旁边没有备份；备份里有 agent 自己的设置
+        write(
+            ".kimi/config.toml",
+            &format!("default_model = \"k2\"\n{hooks}"),
+        );
+        write(".kiro/settings/cli.json", "{}");
+        write(".qwen/settings.json", "");
+        write(".continue/config.json", "{}");
+        write(".continue/config.json.bak", r#"{"models":[]}"#);
+        assert_eq!(
+            installed_ids(&e),
+            s(&["kimi-cli", "continue", "kiro-cli", "qwen-code"])
+        );
+    }
+
+    fn installed_ids(e: &Env) -> Vec<String> {
+        installed(e).into_iter().map(|h| h.id).collect()
+    }
+
+    /// 改过目录的 agent（2026-10-06 核对）：列落在新目录上，项目级跟着走
+    #[test]
+    fn moved_agents_resolve_to_their_current_dirs() {
+        let home = Path::new("/home/u");
+        let all = all_harnesses(&env(home, &[]));
+        let get = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        // Antigravity 官方文档：全局 ~/.gemini/config/skills，项目 .agents/skills
+        let ag = get("antigravity");
+        assert_eq!(ag.global_dir, Some(home.join(".gemini/config/skills")));
+        assert_eq!(ag.project_dir.as_deref(), Some(".agents/skills"));
+        assert!(ag.universal);
+        // Zencoder 文档与 Kimi Code CLI 2.x 都读 ~/.agents/skills，和 Cline 一样直接读通用仓库
+        for id in ["zencoder", "kimi-cli"] {
+            let h = get(id);
+            assert_eq!(h.global_dir, Some(home.join(".agents/skills")), "{id}");
+            assert_eq!(h.project_dir.as_deref(), Some(".agents/skills"), "{id}");
+            assert!(h.universal, "{id}");
+        }
+        // Mux 改名 Xum：项目元数据以 .xum 为准，.mux 只是读的兜底
+        assert_eq!(get("mux").project_dir.as_deref(), Some(".xum/skills"));
+        let rooted = all_harnesses(&env(home, &[("XUM_ROOT", "/x"), ("MUX_ROOT", "/m")]));
+        let mux = rooted.iter().find(|h| h.id == "mux").unwrap();
+        assert_eq!(mux.global_dir, Some(PathBuf::from("/x/skills")));
+    }
+
+    /// Xum 启动时把 ~/.mux 搬到 ~/.xum、原处留软链（新装也建）；没升级的老 Mux 只有 ~/.mux。
+    /// 全局列写 ~/.mux/skills，两种人都落在各自真正在用的目录，不会凭空建出 ~/.xum
+    /// 让老 Mux 升级后把它当成主目录
+    #[test]
+    fn mux_dir_follows_the_xum_alias_and_old_installs_alike() {
+        let t = TempTree::new();
+        let home = t.root();
+        let xum = t.dir(".xum/skills");
+        t.file(&home.join(".xum"), "config.json");
+        t.link(&home.join(".mux"), &home.join(".xum"));
+        let e = env(&home, &[]);
+        let mux = installed(&e).into_iter().find(|h| h.id == "mux");
+        assert_eq!(mux.and_then(|h| h.global_dir), Some(xum));
+
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir(".mux");
+        t.file(&home.join(".mux"), "config.json");
+        let e = env(&home, &[]);
+        let mux = installed(&e).into_iter().find(|h| h.id == "mux");
+        assert_eq!(
+            mux.and_then(|h| h.global_dir),
+            Some(home.join(".mux/skills"))
+        );
+    }
+
+    /// 探测目录任一个像装过就算：Kimi Code CLI 新装只有 ~/.kimi-code，老 Python 版只有 ~/.kimi
+    #[test]
+    fn any_detect_candidate_counts_as_installed() {
+        for dir in [".kimi-code", ".kimi"] {
+            let t = TempTree::new();
+            let home = t.root();
+            t.file(&t.dir(dir), "config.toml");
+            assert!(
+                installed_ids(&env(&home, &[])).contains(&"kimi-cli".to_string()),
+                "{dir}"
+            );
+        }
+        // KIMI_CODE_HOME 指到别处也认
+        let t = TempTree::new();
+        let home = t.root();
+        let custom = t.dir("elsewhere/kimi");
+        t.file(&custom, "config.toml");
+        let e = env(&home, &[("KIMI_CODE_HOME", custom.to_str().unwrap())]);
+        assert!(installed_ids(&e).contains(&"kimi-cli".to_string()));
+        // 都没有：未安装
+        let t = TempTree::new();
+        assert!(!installed_ids(&env(&t.root(), &[])).contains(&"kimi-cli".to_string()));
+    }
+
+    /// 只装 Kimi 桌面版的人没有 ~/.kimi-code：放应用的文件夹里有 Kimi.app（com.moonshot.kimichat）也算装了 Kimi；
+    /// 同名但 bundle id 不对的不算
+    #[test]
+    fn kimi_desktop_app_counts_as_installed() {
+        let t = TempTree::new();
+        let home = t.root();
+        let apps = t.dir("Applications");
+        let contents = t.dir("Applications/Kimi.app/Contents");
+        let plist = |id: &str| {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>{id}</string></dict></plist>"#
+            )
+        };
+        let e = Env {
+            apps: vec![apps],
+            ..env(&home, &[])
+        };
+        std::fs::write(contents.join("Info.plist"), plist("com.example.kimi")).unwrap();
+        assert!(!installed_ids(&e).contains(&"kimi-cli".to_string()));
+        std::fs::write(contents.join("Info.plist"), plist("com.moonshot.kimichat")).unwrap();
+        assert_eq!(installed_ids(&e), s(&["kimi-cli"]));
+        let kimi = all_harnesses(&e).into_iter().find(|h| h.id == "kimi-cli");
+        assert_eq!(kimi.map(|h| h.display_name), Some("Kimi".to_string()));
+    }
+
+    /// npx skills 还在往旧目录建空壳（~/.gemini/antigravity/skills、~/.zencoder/skills）：
+    /// 旧目录留在 global_dir 的候选里，这样的空壳仍不算装过
+    #[test]
+    fn shells_at_old_skill_dirs_do_not_count_as_installed() {
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir(".gemini/antigravity/skills/pdf");
+        t.dir(".zencoder/skills/pdf");
+        let e = env(&home, &[]);
+        let ids = installed_ids(&e);
+        assert!(!ids.contains(&"antigravity".to_string()));
+        assert!(!ids.contains(&"zencoder".to_string()));
+
+        t.file(&t.dir(".gemini/antigravity/brain"), "task.md");
+        t.file(&home.join(".zencoder"), "settings.json");
+        let ids = installed_ids(&e);
+        assert!(ids.contains(&"antigravity".to_string()));
+        assert!(ids.contains(&"zencoder".to_string()));
     }
 
     #[test]

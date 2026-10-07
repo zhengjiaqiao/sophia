@@ -73,20 +73,6 @@
       }
     },
     {
-      "id": "teamorouter",
-      "name": "TeamoRouter",
-      "website": "https://teamorouter.cn",
-      "keysUrl": "https://teamorouter.cn/",
-      "region": "cn",
-      "openai": {
-        "apiBase": "https://api.teamorouter.cn/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.teamorouter.cn"
-      }
-    },
-    {
       "id": "volcengine-agent-plan",
       "name": "火山 Agent Plan",
       "website": "https://www.volcengine.com/activity/agentplan",
@@ -176,20 +162,6 @@
       "note": "Coding Plan"
     },
     {
-      "id": "dmxapi",
-      "name": "DMXAPI",
-      "website": "https://www.dmxapi.cn",
-      "keysUrl": "https://www.dmxapi.cn",
-      "region": "cn",
-      "openai": {
-        "apiBase": "https://www.dmxapi.cn/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://www.dmxapi.cn"
-      }
-    },
-    {
       "id": "deepseek",
       "name": "DeepSeek",
       "website": "https://platform.deepseek.com",
@@ -230,21 +202,6 @@
       },
       "anthropic": null,
       "note": "按量计费"
-    },
-    {
-      "id": "baidu-qianfan-coding-plan",
-      "name": "Baidu Qianfan Coding Plan",
-      "website": "https://cloud.baidu.com/product/qianfan_modelbuilder",
-      "keysUrl": "https://console.bce.baidu.com/qianfan/ais/console/applicationConsole/application",
-      "region": "cn",
-      "openai": {
-        "apiBase": "https://qianfan.baidubce.com/v2/coding",
-        "protocol": "chat"
-      },
-      "anthropic": {
-        "apiBase": "https://qianfan.baidubce.com/anthropic/coding"
-      },
-      "note": "Coding Plan"
     },
     {
       "id": "baidu-qianfan-token-plan",
@@ -303,6 +260,21 @@
       },
       "anthropic": null,
       "note": "按量计费 · 国内站"
+    },
+    {
+      "id": "tencent-coding-plan",
+      "name": "Tencent Coding Plan",
+      "website": "https://cloud.tencent.com/product/tokenhub",
+      "keysUrl": "https://console.cloud.tencent.com/tokenhub/codingplan",
+      "region": "cn",
+      "openai": {
+        "apiBase": "https://api.lkeap.cloud.tencent.com/coding/v3",
+        "protocol": "chat"
+      },
+      "anthropic": {
+        "apiBase": "https://api.lkeap.cloud.tencent.com/coding/anthropic"
+      },
+      "note": "Coding Plan · 国内站"
     },
     {
       "id": "tencent-token-plan",
@@ -410,7 +382,7 @@
       "id": "minimax",
       "name": "MiniMax",
       "website": "https://platform.minimax.cn",
-      "keysUrl": "https://platform.minimax.cn/subscribe/token-plan",
+      "keysUrl": "https://platform.minimax.cn/console/plan",
       "region": "cn",
       "openai": {
         "apiBase": "https://api.minimax.cn/v1",
@@ -482,7 +454,10 @@
       "name": "千问AI平台 Coding Plan",
       "website": "https://bailian.console.aliyun.com",
       "region": "cn",
-      "openai": null,
+      "openai": {
+        "apiBase": "https://coding.dashscope.aliyuncs.com/v1",
+        "protocol": "chat"
+      },
       "anthropic": {
         "apiBase": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
       },
@@ -500,20 +475,6 @@
       },
       "anthropic": {
         "apiBase": "https://api.minimaxi.com/anthropic"
-      }
-    },
-    {
-      "id": "yylx",
-      "name": "鱼鱼连线",
-      "website": "https://yylx.io",
-      "keysUrl": "https://app.yylx.io/keys",
-      "region": "cn",
-      "openai": {
-        "apiBase": "https://app.yylx.io/v1",
-        "protocol": "chat"
-      },
-      "anthropic": {
-        "apiBase": "https://app.yylx.io"
       }
     },
     {
@@ -553,189 +514,11 @@
       "keysUrl": "https://www.packyapi.ai/register",
       "region": "global",
       "openai": {
-        "apiBase": "https://www.packyapi.ai/v1",
+        "apiBase": "https://cf.api.fan/v1",
         "protocol": "responses"
       },
       "anthropic": {
-        "apiBase": "https://www.packyapi.ai"
-      }
-    },
-    {
-      "id": "zetaapi",
-      "name": "ZetaAPI",
-      "website": "https://zetaapi.ai",
-      "keysUrl": "https://zetaapi.ai/go/u117",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.zetaapi.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.zetaapi.ai"
-      }
-    },
-    {
-      "id": "apinebula",
-      "name": "APINebula",
-      "website": "https://apinebula.ai",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://apinebula.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://apinebula.ai"
-      }
-    },
-    {
-      "id": "aicodemirror",
-      "name": "AICodeMirror",
-      "website": "https://www.aicodemirror.ai",
-      "keysUrl": "https://www.aicodemirror.ai/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.aicodemirror.ai/api/codex/backend-api/codex",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.aicodemirror.ai/api/claudecode"
-      }
-    },
-    {
-      "id": "patewayai",
-      "name": "PatewayAI",
-      "website": "https://pateway.ai",
-      "keysUrl": "https://pateway.ai/#/",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.pateway.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.pateway.ai"
-      }
-    },
-    {
-      "id": "fennoai",
-      "name": "FennoAI",
-      "website": "https://api.fenno.ai",
-      "keysUrl": "https://api.fenno.ai/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.fenno.ai",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.fenno.ai"
-      }
-    },
-    {
-      "id": "runapi",
-      "name": "RunAPI",
-      "website": "https://runapi.host",
-      "keysUrl": "https://runapi.host/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://runapi.host/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://runapi.host"
-      }
-    },
-    {
-      "id": "aigocode",
-      "name": "AIGoCode",
-      "website": "https://aigocode.app",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.aigocode.app",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.aigocode.app"
-      }
-    },
-    {
-      "id": "aicoding",
-      "name": "AICoding",
-      "website": "https://aicoding.inc",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.aicoding.inc",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.aicoding.inc"
-      }
-    },
-    {
-      "id": "subrouter",
-      "name": "SubRouter",
-      "website": "https://subrouter.ai",
-      "keysUrl": "https://subrouter.ai/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://subrouter.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://subrouter.ai"
-      }
-    },
-    {
-      "id": "88api",
-      "name": "88API",
-      "website": "https://88api.ai",
-      "keysUrl": "https://88api.ai/sign-up",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.88api.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.88api.ai"
-      }
-    },
-    {
-      "id": "apikey-fun",
-      "name": "APIKEY.FUN",
-      "website": "https://apikey.fan",
-      "keysUrl": "https://apikey.fan/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.apikey.fan/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.apikey.fan"
-      }
-    },
-    {
-      "id": "9527code",
-      "name": "9527CODE",
-      "website": "https://9527.codes",
-      "keysUrl": "https://9527.codes/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://9527.codes/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://9527.codes"
-      }
-    },
-    {
-      "id": "code0",
-      "name": "Code0",
-      "website": "https://code0.ai",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://code0.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://code0.ai"
+        "apiBase": "https://cf.api.fan"
       }
     },
     {
@@ -749,20 +532,6 @@
       },
       "anthropic": {
         "apiBase": "https://api.ppio.com/anthropic"
-      }
-    },
-    {
-      "id": "claudecn",
-      "name": "ClaudeCN",
-      "website": "https://claudecn.top",
-      "keysUrl": "https://claudecn.ai/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://claudecn.top/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://claudecn.top"
       }
     },
     {
@@ -794,89 +563,6 @@
       "note": "海外站"
     },
     {
-      "id": "a6api",
-      "name": "A6API",
-      "website": "https://www.a6api.com",
-      "keysUrl": "https://a6api.com/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.a6api.com/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.a6api.com"
-      }
-    },
-    {
-      "id": "ccsub",
-      "name": "CCSub",
-      "website": "https://www.ccsub.net",
-      "keysUrl": "https://www.ccsub.net/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://www.ccsub.net/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://www.ccsub.net"
-      }
-    },
-    {
-      "id": "sssaicode",
-      "name": "SSSAiCode",
-      "website": "https://sssaicodeapi.com",
-      "keysUrl": "https://sssaicodeapi.com/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://node-hk.sssaicodeapi.com/api/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://node-hk.sssaicodeapi.com/api"
-      }
-    },
-    {
-      "id": "soleapi",
-      "name": "SoleAPI",
-      "website": "https://soleapi.com",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://soleapi.com/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://soleapi.com"
-      }
-    },
-    {
-      "id": "micu",
-      "name": "Micu",
-      "website": "https://www.micuapi.ai",
-      "keysUrl": "https://www.micuapi.ai/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://www.micuapi.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://www.micuapi.ai"
-      }
-    },
-    {
-      "id": "rightcode",
-      "name": "RightCode",
-      "website": "https://www.rightapi.ai",
-      "keysUrl": "https://www.rightapi.ai/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://www.rightapi.ai/codex/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://www.rightapi.ai/claude"
-      }
-    },
-    {
       "id": "cubence",
       "name": "Cubence",
       "website": "https://cubence.com",
@@ -887,90 +573,6 @@
       },
       "anthropic": {
         "apiBase": "https://api.cubence.com"
-      }
-    },
-    {
-      "id": "crazyrouter",
-      "name": "CrazyRouter",
-      "website": "https://www.crazyrouter.com",
-      "keysUrl": "https://www.crazyrouter.com/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://cn.crazyrouter.com/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://cn.crazyrouter.com"
-      }
-    },
-    {
-      "id": "sudocode-chat",
-      "name": "SudoCode.chat",
-      "website": "https://sudocode.chat",
-      "keysUrl": "https://sudocode.chat/sign-up",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.sudocode.chat/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.sudocode.chat"
-      }
-    },
-    {
-      "id": "sudocode-us",
-      "name": "SudoCode.us",
-      "website": "https://sudocode.us",
-      "keysUrl": "https://sudocode.us",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://sudocode.us/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://sudocode.us"
-      }
-    },
-    {
-      "id": "xycai",
-      "name": "XycAi",
-      "website": "https://xycai.us",
-      "keysUrl": "https://xycai.us/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://apicdn.xycai.us/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://apicdn.xycai.us"
-      }
-    },
-    {
-      "id": "tu-zi",
-      "name": "Tu-zi",
-      "website": "https://api.tu-zi.com",
-      "keysUrl": "https://api.tu-zi.com/token",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.tu-zi.com/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.tu-zi.com"
-      }
-    },
-    {
-      "id": "amux",
-      "name": "Amux",
-      "website": "https://amux.ai",
-      "keysUrl": "https://amux.ai",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.amux.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.amux.ai"
       }
     },
     {
@@ -985,20 +587,6 @@
       },
       "anthropic": {
         "apiBase": "https://api.atlascloud.ai"
-      }
-    },
-    {
-      "id": "soshow",
-      "name": "Soshow",
-      "website": "https://aimarket.so-show.com",
-      "keysUrl": "https://aimarket.so-show.com/workbench/access-key",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://maas.so-show.com/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://maas.so-show.com"
       }
     },
     {
@@ -1235,48 +823,6 @@
       }
     },
     {
-      "id": "relaxycode",
-      "name": "RelaxyCode",
-      "website": "https://www.relaxycode.com",
-      "keysUrl": "https://www.relaxycode.com/register",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://www.relaxycode.com/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://www.relaxycode.com"
-      }
-    },
-    {
-      "id": "e-flowcode",
-      "name": "E-FlowCode",
-      "website": "https://e-flowcode.cc",
-      "keysUrl": "https://e-flowcode.cc",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://e-flowcode.cc/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://e-flowcode.cc"
-      }
-    },
-    {
-      "id": "pipellm",
-      "name": "PIPELLM",
-      "website": "https://code.pipellm.ai",
-      "keysUrl": "https://code.pipellm.ai/login",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://cc-api.pipellm.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://cc-api.pipellm.ai"
-      }
-    },
-    {
       "id": "openrouter",
       "name": "OpenRouter",
       "website": "https://openrouter.ai",
@@ -1291,48 +837,6 @@
       }
     },
     {
-      "id": "therouter",
-      "name": "TheRouter",
-      "website": "https://therouter.ai",
-      "keysUrl": "https://dashboard.therouter.ai",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.therouter.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.therouter.ai"
-      }
-    },
-    {
-      "id": "jiekou-ai",
-      "name": "JieKou AI",
-      "website": "https://jiekou.ai/#model-library",
-      "keysUrl": "https://jiekou.ai/settings/key-management",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.jiekou.ai/openai/v1",
-        "protocol": "chat"
-      },
-      "anthropic": {
-        "apiBase": "https://api.jiekou.ai/anthropic"
-      }
-    },
-    {
-      "id": "aicodewith",
-      "name": "AICodeWith",
-      "website": "https://aicodewith.ai",
-      "keysUrl": "https://aicodewith.ai/login",
-      "region": "global",
-      "openai": {
-        "apiBase": "https://api.aicodewith.ai/v1",
-        "protocol": "responses"
-      },
-      "anthropic": {
-        "apiBase": "https://api.aicodewith.ai"
-      }
-    },
-    {
       "id": "command-code",
       "name": "Command Code",
       "website": "https://commandcode.ai",
@@ -1344,16 +848,6 @@
       },
       "anthropic": {
         "apiBase": "https://api.commandcode.ai/provider"
-      }
-    },
-    {
-      "id": "claudeapi",
-      "name": "ClaudeAPI",
-      "website": "https://www.apito.ai",
-      "region": "global",
-      "openai": null,
-      "anthropic": {
-        "apiBase": "https://gw.apito.ai"
       }
     },
     {

@@ -4,19 +4,48 @@ use crate::models::*;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// 只对 Create 建链（目标目录不存在就先建出来）；BrokenLink 仅在 clean_broken 时删除，
-/// 删前重校验仍是软链。Unlink 与 BrokenLink 都不创建任何目录。
-/// Unlink 不受 clean_broken 影响（确认在前端做）
-pub fn execute(actions: &[PlannedAction], clean_broken: bool, style: LinkStyle) -> SyncReport {
+/// 只对 Create 建链、对 PlaceCopy 放副本（目标目录不存在就先建出来）；UpdateCopy 用原件更新记录在案的副本；
+/// BrokenLink 仅在 clean_broken 时删除，删前重校验仍是软链。Unlink 与 BrokenLink 都不创建任何目录。
+/// Unlink 不受 clean_broken 影响（确认在前端做）。
+///
+/// `copies` 是副本记录所在的数据目录（`copies.json`）：给 agent 加 skill 的三个入口——点格子、
+/// 自动同步、市场安装——都传它，放副本、更新副本要记账。只撤链的调用方（移除来源、撤销安装）可以不传；
+/// 不传时副本动作一律不做、如实报失败
+pub fn execute(
+    actions: &[PlannedAction],
+    clean_broken: bool,
+    style: LinkStyle,
+    copies: Option<&crate::store::Store>,
+) -> SyncReport {
+    execute_with(actions, clean_broken, style, copies, &create_link)
+}
+
+/// 同 `execute`，建链这一步可替换（测试模拟文件系统回「不支持」，不用真去挂一块 exFAT）
+pub(crate) fn execute_with(
+    actions: &[PlannedAction],
+    clean_broken: bool,
+    style: LinkStyle,
+    copies: Option<&crate::store::Store>,
+    link: &dyn Fn(&Path, &Path, LinkStyle) -> io::Result<()>,
+) -> SyncReport {
     SyncReport {
         entries: actions
             .iter()
             .map(|a| {
+                let mut action = a.clone();
                 let mut fail_kind = None;
                 let mut detail = None;
-                let outcome = outcome_for(a, clean_broken, style, &mut fail_kind, &mut detail);
+                let outcome = outcome_for(
+                    &mut action,
+                    clean_broken,
+                    style,
+                    copies,
+                    link,
+                    &mut fail_kind,
+                    &mut detail,
+                );
                 ReportEntry {
-                    action: a.clone(),
+                    action,
                     outcome,
                     fail_kind,
                     detail,
@@ -39,8 +68,16 @@ pub(crate) fn fail_kind_of(e: &io::Error) -> Option<FailKind> {
     (e.kind() == io::ErrorKind::NotFound).then_some(FailKind::Missing)
 }
 
+/// 建链这一步的失败属于哪一类：先认「这里建不了链接」（`fs::link_unsupported`），其余同 `fail_kind_of`
+pub(crate) fn link_fail_kind_of(e: &io::Error) -> Option<FailKind> {
+    if crate::fs::link_unsupported(e) {
+        return Some(FailKind::LinkUnsupported);
+    }
+    fail_kind_of(e)
+}
+
 /// 一次 io 失败：类别、给人看的原因句、已去隐私的原文（spec S18）。
-/// 同时写一条日志；外部原因（三类）只计数，分不进去的按 Sophia 自身的错误记一条
+/// 同时写一条日志；外部原因（四类与跨卷，`external`）只计数，分不进去的按 Sophia 自身的错误记一条
 pub(crate) struct IoFail {
     pub kind: Option<FailKind>,
     pub reason: String,
@@ -49,7 +86,11 @@ pub(crate) struct IoFail {
 
 /// `what` 是动作的英文标签（只进日志与错误记录，不是界面文案）
 pub(crate) fn io_fail(what: &str, path: &Path, e: &io::Error) -> IoFail {
-    let kind = fail_kind_of(e);
+    io_fail_as(what, path, e, fail_kind_of(e))
+}
+
+/// 同 `io_fail`，类别由调用处给（建链用 `link_fail_kind_of`）
+fn io_fail_as(what: &str, path: &Path, e: &io::Error, kind: Option<FailKind>) -> IoFail {
     let detail = crate::redact::redact(&e.to_string());
     log::warn!(
         "{what} {} 失败：{detail}",
@@ -59,9 +100,10 @@ pub(crate) fn io_fail(what: &str, path: &Path, e: &io::Error) -> IoFail {
         Some(FailKind::NoWrite) => crate::t!("common.write.noPermission"),
         Some(FailKind::DiskFull) => crate::t!("common.write.diskFull"),
         Some(FailKind::Missing) => crate::t!("skills.sync.gone"),
-        None => e.to_string(),
+        // 建不了链接时通常已自动改放副本；没改成（没给副本记录处）才会走到这里，原句当原因
+        Some(FailKind::LinkUnsupported) | None => e.to_string(),
     };
-    if kind.is_some() {
+    if external(e, kind) {
         crate::report::count_write_failure(e);
     } else {
         crate::report::capture_internal(&format!("{what}: {detail}"));
@@ -71,6 +113,13 @@ pub(crate) fn io_fail(what: &str, path: &Path, e: &io::Error) -> IoFail {
         reason,
         detail,
     }
+}
+
+/// 是不是外部原因（只计数、不按 Sophia 自身异常上报）：分得进类的，以及跨卷改名——
+/// 那是用户的磁盘布局（副本在外置盘、网络盘上），Sophia 的写法本应避开（副本都暂存在旁边），
+/// 仍碰上时不是自身的错。跨卷没有对应的失败类别：原句当原因
+fn external(e: &io::Error, kind: Option<FailKind>) -> bool {
+    kind.is_some() || crate::fs::crosses_volume(e)
 }
 
 /// io 错误变失败结果，同时记下失败类别与原文
@@ -87,34 +136,133 @@ pub(crate) fn io_failed(
     Outcome::Failed(fail.reason)
 }
 
-fn outcome_for(
+/// 目标目录不存在就地创建：从零开辟一个 harness 的 skill 目录是正常路径，不是错误。
+/// 是否存在要跟随软链判断（is_dir），整目录软链也算已存在。建不出来时返回失败结果
+fn ensure_target(
+    target: &Path,
+    fail_kind: &mut Option<FailKind>,
+    detail: &mut Option<String>,
+) -> Option<Outcome> {
+    if target.is_dir() {
+        return None;
+    }
+    let e = std::fs::create_dir_all(target).err()?;
+    let fail = io_fail("mkdir-target", target, &e);
+    *fail_kind = fail.kind;
+    *detail = Some(fail.detail);
+    Some(Outcome::Failed(crate::t!(
+        "skills.sync.mkTargetFailed",
+        error = fail.reason
+    )))
+}
+
+/// 放副本（目标目录已在）
+fn place_copy(
     action: &PlannedAction,
+    store: &crate::store::Store,
+    fail_kind: &mut Option<FailKind>,
+    detail: &mut Option<String>,
+) -> Outcome {
+    match crate::copies::place(
+        &action.source_path,
+        &action.target_path,
+        &action.target,
+        store,
+    ) {
+        Ok(()) => Outcome::Created,
+        Err(fail) => fail.into_outcome(fail_kind, detail),
+    }
+}
+
+/// 副本动作没拿到记录所在的数据目录：调用方的错，不做，记一条 Sophia 自身的错误
+fn no_copy_book(action: &PlannedAction) -> Outcome {
+    crate::report::capture_internal(&format!("{:?} without copy records", action.kind));
+    Outcome::Failed(crate::t!("skills.sync.copyNoBook"))
+}
+
+/// 执行一条动作。建链建不了（`FailKind::LinkUnsupported`）而给了副本记录处时，自动改放副本，
+/// `action` 改成 PlaceCopy 进报告（撤销安装、自动同步的计数据此认出它是副本）
+fn outcome_for(
+    action: &mut PlannedAction,
     clean_broken: bool,
     style: LinkStyle,
+    copies: Option<&crate::store::Store>,
+    link: &dyn Fn(&Path, &Path, LinkStyle) -> io::Result<()>,
     fail_kind: &mut Option<FailKind>,
     detail: &mut Option<String>,
 ) -> Outcome {
     match action.kind {
         ActionKind::Create => {
-            // 目标目录不存在就地创建：从零开辟一个 harness 的 skill 目录是正常路径，不是错误。
-            // 是否存在要跟随软链判断（is_dir），整目录软链也算已存在
-            if !action.target.is_dir() {
-                if let Err(e) = std::fs::create_dir_all(&action.target) {
-                    let fail = io_fail("mkdir-target", &action.target, &e);
+            if let Some(failed) = ensure_target(&action.target, fail_kind, detail) {
+                return failed;
+            }
+            let was_missing = entry_kind(&action.target_path) == EntryKind::Missing;
+            let Err(e) = link(&action.source_path, &action.target_path, style) else {
+                return Outcome::Created;
+            };
+            let kind = link_fail_kind_of(&e);
+            match (kind, copies) {
+                (Some(FailKind::LinkUnsupported), Some(store)) => {
+                    log::info!(
+                        "这里建不了链接（{}），改放副本：{}",
+                        crate::redact::redact(&e.to_string()),
+                        crate::redact::redact(&action.target_path.display().to_string())
+                    );
+                    action.kind = ActionKind::PlaceCopy;
+                    // Windows 建 junction 先建空目录再设重解析点，设不上时空目录留在原处
+                    // （junction 2.0.0 不收拾）：原本没东西、现在是空的真实目录，就删掉它再放。
+                    // `remove_dir` 不递归，期间有人放了东西就删不掉，`place` 照旧报已有同名
+                    if was_missing && entry_kind(&action.target_path) == EntryKind::Dir {
+                        let _ = std::fs::remove_dir(&action.target_path);
+                    }
+                    place_copy(action, store, fail_kind, detail)
+                }
+                _ => {
+                    let fail = io_fail_as("create-link", &action.target_path, &e, kind);
                     *fail_kind = fail.kind;
                     *detail = Some(fail.detail);
-                    return Outcome::Failed(crate::t!(
-                        "skills.sync.mkTargetFailed",
-                        error = fail.reason
-                    ));
+                    Outcome::Failed(fail.reason)
                 }
             }
-            match create_link(&action.source_path, &action.target_path, style) {
-                Ok(()) => Outcome::Created,
-                Err(e) => io_failed("create-link", &action.target_path, &e, fail_kind, detail),
+        }
+        ActionKind::PlaceCopy => {
+            let Some(store) = copies else {
+                return no_copy_book(action);
+            };
+            if let Some(failed) = ensure_target(&action.target, fail_kind, detail) {
+                return failed;
+            }
+            place_copy(action, store, fail_kind, detail)
+        }
+        ActionKind::UpdateCopy => {
+            let Some(store) = copies else {
+                return no_copy_book(action);
+            };
+            match crate::copies::update(&action.target_path, store) {
+                Ok(crate::copies::Updated::Replaced(_)) => Outcome::Created,
+                Ok(_) => Outcome::Skipped,
+                Err(fail) => fail.into_outcome(fail_kind, detail),
             }
         }
         ActionKind::Unlink => {
+            // Sophia 放的副本：重校验后挪进暂存、删记录（被改过的不动，交还给 agent）
+            if let Some(store) = copies {
+                let copy = crate::copies::Copies::load(store)
+                    .ok()
+                    .is_some_and(|c| c.at(&action.target_path).is_some());
+                if copy {
+                    return match crate::copies::remove(
+                        &action.target_path,
+                        Some(&action.source_path),
+                        store,
+                    ) {
+                        Ok(crate::copies::Removed::Held(_)) => Outcome::Removed,
+                        // 被改过：交还给 agent 了，不是失败
+                        Ok(crate::copies::Removed::Released) => Outcome::Skipped,
+                        Err(fail) => fail.into_outcome(fail_kind, detail),
+                    };
+                }
+            }
             // 预览到确认之间可能已被换掉：必须仍是软链，且仍指向该本体位置
             if !matches!(entry_kind(&action.target_path), EntryKind::Symlink(_))
                 || !same_real(&action.target_path, &action.source_path)
@@ -179,16 +327,41 @@ fn trash_context() -> ::trash::TrashContext {
 /// 没有 `relink_to` 时受影响的链接一起清掉（DESIGN「删除原件」：不留一排断链给用户收尾），
 /// 删前逐条重校验仍是软链、仍指进被删的原件；每条结果逐条如实上报，不偷偷跳过
 pub fn delete_source(plan: &DeleteSourcePlan) -> SyncReport {
-    delete_source_holding(plan, None).0
+    delete_source_holding(plan, None, None).0
 }
 
 /// 删原件的撤销记录（DESIGN「删除原件」撤销怎么做到）：原件暂存在哪、原处在哪、
-/// 每条链接原来指向哪里。只记真的动成了的链接。撤销机会过去后由调用方 `release_held` 收尾
+/// 每条链接原来指向哪里、它的副本怎么处理的。只记真的动成了的。撤销机会过去后由调用方 `release_held` 收尾
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeleteUndo {
     held: PathBuf,
     body: PathBuf,
     links: Vec<LinkUndo>,
+    copies: Vec<CopyStep>,
+}
+
+impl DeleteUndo {
+    /// 撤销要用的、暂存在各副本旁边的那几份（`copies::sweep_held` 的 `keep`：撤销机会没过去之前不收）
+    pub fn held_copies(&self) -> Vec<PathBuf> {
+        self.copies
+            .iter()
+            .filter_map(|step| match step {
+                CopyStep::Removed(u) | CopyStep::Repointed(u) => Some(u.held.clone()),
+                CopyStep::Released(_) => None,
+            })
+            .collect()
+    }
+}
+
+/// 删原件时对它的一份副本做了什么（`copies`）
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CopyStep {
+    /// 随原件一起挪进了暂存（`copies::restore` 放回）
+    Removed(crate::copies::CopyUndo),
+    /// 换成了别处同名那一份（`copies::undo_update` 换回）
+    Repointed(crate::copies::CopyUndo),
+    /// 不在计划的清单里：记录删了，副本留给 agent。撤销时副本没动过就把记录放回
+    Released(crate::copies::CopyRecord),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,18 +375,24 @@ struct LinkUndo {
 }
 
 /// 同 `delete_source`，但给了 `hold_root` 时原件不直接进废纸篓，先挪进 `hold_root` 下
-/// （同一磁盘上是一次改名），返回撤销记录。挪不过去（跨磁盘等）就退回直接进废纸篓、不给撤销
+/// （同一磁盘上是一次改名），返回撤销记录。挪不过去（跨磁盘等）就退回直接进废纸篓、不给撤销。
+///
+/// `copies` 是副本记录所在的数据目录：给了时这份原件记录在案的副本一并处理——在 `plan.copies` 里的
+/// 挪到各自旁边暂存（`copies::remove`：同一个卷上一次改名，不跟原件进 `hold_root`），
+/// 有 `relink_to` 时改成那一份的副本；不在清单里的删记录、留给 agent。不给时副本一概不动
 pub fn delete_source_holding(
     plan: &DeleteSourcePlan,
     hold_root: Option<&Path>,
+    copies: Option<&crate::store::Store>,
 ) -> (SyncReport, Option<DeleteUndo>) {
-    delete_source_holding_with(plan, hold_root, &trash)
+    delete_source_holding_with(plan, hold_root, copies, &trash)
 }
 
 /// 同 `delete_source_holding`，移进废纸篓这一步可替换（测试不碰系统废纸篓）
 pub(crate) fn delete_source_holding_with(
     plan: &DeleteSourcePlan,
     hold_root: Option<&Path>,
+    copies: Option<&crate::store::Store>,
     trash: &dyn Fn(&Path) -> io::Result<()>,
 ) -> (SyncReport, Option<DeleteUndo>) {
     let delete = PlannedAction {
@@ -269,6 +448,19 @@ pub(crate) fn delete_source_holding_with(
             .collect(),
         _ => Vec::new(),
     };
+    // 原件挪走后就认不出哪些副本是它的：删之前先从记录里挑出来
+    let book: Vec<crate::copies::CopyRecord> = match copies {
+        Some(store) => store
+            .load_copies()
+            .unwrap_or_else(|e| {
+                log::warn!("读不了副本记录：{e}");
+                Vec::new()
+            })
+            .into_iter()
+            .filter(|r| same_real(&r.source, &plan.path))
+            .collect(),
+        None => Vec::new(),
+    };
     let held = match hold_root.map(|root| hold(&plan.path, root)) {
         Some(Ok(held)) => Some(held),
         // 挪不进暂存处（跨磁盘等）或没给暂存处：直接进废纸篓，不给撤销
@@ -302,12 +494,85 @@ pub(crate) fn delete_source_holding_with(
         }
         entries.push(entry);
     }
+    let mut copy_steps = Vec::new();
+    if let Some(store) = copies {
+        for record in book {
+            let (entry, step) = settle_copy(plan, record, store);
+            entries.extend(entry);
+            copy_steps.extend(step);
+        }
+    }
     let undo = held.map(|held| DeleteUndo {
         held,
         body: plan.path.clone(),
         links,
+        copies: copy_steps,
     });
     (SyncReport { entries }, undo)
+}
+
+/// 原件已经挪走之后处理它的一份副本：在清单里的移除或改成别处同名那一份的副本，不在的删记录。
+/// 返回报告里的一条（删记录不出）与撤销要做的一步（没做成不出）
+fn settle_copy(
+    plan: &DeleteSourcePlan,
+    record: crate::copies::CopyRecord,
+    store: &crate::store::Store,
+) -> (Option<ReportEntry>, Option<CopyStep>) {
+    let path = record.path.clone();
+    if !plan.copies.iter().any(|c| same_place(c, &path)) {
+        return match crate::copies::forget(store, &path) {
+            Ok(()) => (None, Some(CopyStep::Released(record))),
+            Err(e) => {
+                log::warn!("副本记录没删掉：{e}");
+                (None, None)
+            }
+        };
+    }
+    let (kind, source_path) = match &plan.relink_to {
+        Some(to) => (ActionKind::Create, to.clone()),
+        None => (ActionKind::Unlink, plan.path.clone()),
+    };
+    let action = PlannedAction {
+        kind,
+        item_name: file_name(&path),
+        source_path,
+        target_path: path.clone(),
+        target: parent_of(&path),
+    };
+    let mut fail_kind = None;
+    let mut detail = None;
+    let (outcome, step) = match &plan.relink_to {
+        Some(to) => match crate::copies::repoint(&path, to, store) {
+            Ok(crate::copies::Updated::Replaced(undo)) => {
+                (Outcome::Created, Some(CopyStep::Repointed(undo)))
+            }
+            // 被改过：删了记录，留给 agent（同「只删原件」）
+            Ok(_) => (Outcome::Skipped, Some(CopyStep::Released(record))),
+            Err(fail) => (fail.into_outcome(&mut fail_kind, &mut detail), None),
+        },
+        None => match crate::copies::remove(&path, None, store) {
+            Ok(crate::copies::Removed::Held(undo)) => {
+                (Outcome::Removed, Some(CopyStep::Removed(undo)))
+            }
+            // 被改过：删了记录，留给 agent（同「只删原件」）
+            Ok(crate::copies::Removed::Released) => {
+                (Outcome::Skipped, Some(CopyStep::Released(record)))
+            }
+            Err(fail) => (fail.into_outcome(&mut fail_kind, &mut detail), None),
+        },
+    };
+    let entry = ReportEntry {
+        action,
+        outcome,
+        fail_kind,
+        detail,
+    };
+    (Some(entry), step)
+}
+
+/// 两个路径是否同一处：写法相同，或解析后相同
+fn same_place(a: &Path, b: &Path) -> bool {
+    crate::fs::normalize(a) == crate::fs::normalize(b) || same_real(a, b)
 }
 
 /// 路径所在的应用包（名字以 `.app` 结尾的那一级目录）；不在应用包里为 None
@@ -371,9 +636,10 @@ pub(crate) fn drop_slot(slot: &Path) {
     }
 }
 
-/// 撤销删原件：原件放回原处，清掉的链接重建，改指过的链接指回去。每一步先看现场：原处已经被占、
-/// 链接又被改过，就不动它、如实上报哪一步没回来。原件没放回时链接一律不动（指回去也是断链）
-pub fn undo_delete(undo: &DeleteUndo) -> SyncReport {
+/// 撤销删原件：原件放回原处，清掉的链接重建，改指过的链接指回去，副本放回 / 换回、记录复原
+/// （`copies` 是副本记录所在的数据目录）。每一步先看现场：原处已经被占、链接又被改过，
+/// 就不动它、如实上报哪一步没回来。原件没放回时链接与副本一律不动（指回去也是断链）
+pub fn undo_delete(undo: &DeleteUndo, copies: Option<&crate::store::Store>) -> SyncReport {
     let restore = PlannedAction {
         kind: ActionKind::Create,
         item_name: file_name(&undo.body),
@@ -423,7 +689,61 @@ pub fn undo_delete(undo: &DeleteUndo) -> SyncReport {
             detail: None,
         }
     }));
+    for step in &undo.copies {
+        entries.extend(restore_copy(step, back, copies));
+    }
     SyncReport { entries }
+}
+
+/// 撤销删原件时复原一份副本；删记录那一步不出报告（删的时候也没出）
+fn restore_copy(
+    step: &CopyStep,
+    back: bool,
+    copies: Option<&crate::store::Store>,
+) -> Option<ReportEntry> {
+    let (CopyStep::Removed(u) | CopyStep::Repointed(u)) = step else {
+        if let (CopyStep::Released(record), true, Some(store)) = (step, back, copies) {
+            crate::copies::readopt(record, store);
+        }
+        return None;
+    };
+    let action = PlannedAction {
+        kind: ActionKind::Create,
+        item_name: file_name(u.path()),
+        source_path: u.before.source.clone(),
+        target_path: u.path().to_path_buf(),
+        target: parent_of(u.path()),
+    };
+    let entry = |outcome| ReportEntry {
+        action: action.clone(),
+        outcome,
+        fail_kind: None,
+        detail: None,
+    };
+    let Some(store) = copies else {
+        return Some(entry(Outcome::Failed(crate::t!("skills.sync.copyNoBook"))));
+    };
+    if !back {
+        return Some(entry(Outcome::Failed(crate::t!(
+            "skills.sync.linkNotRestoredBodyMissing"
+        ))));
+    }
+    Some(match step {
+        CopyStep::Repointed(u) => crate::copies::undo_update(u, store),
+        _ => {
+            let mut fail_kind = None;
+            let mut detail = None;
+            let outcome = match crate::copies::restore(u, store) {
+                Ok(()) => Outcome::Created,
+                Err(fail) => fail.into_outcome(&mut fail_kind, &mut detail),
+            };
+            ReportEntry {
+                fail_kind,
+                detail,
+                ..entry(outcome)
+            }
+        }
+    })
 }
 
 fn restore_link(link: &LinkUndo) -> Outcome {
@@ -499,7 +819,7 @@ fn is_slot_litter(path: &Path) -> bool {
 /// 放回原处的前提：记着原处、原处空着、上一级目录还在、不在应用包里、一次改名挪得回去（不跨盘拷贝）。
 /// 缺一条就从暂存格直接移进废纸篓：「放回原处」用不了，但什么都不覆盖、不丢。
 /// 放回原处之后移不进废纸篓：挪回暂存格，下次再收——删掉的东西不能悄悄回到原处
-fn release_one(
+pub(crate) fn release_one(
     item: &Path,
     orig: Option<&Path>,
     trash: &dyn Fn(&Path) -> io::Result<()>,
@@ -690,6 +1010,50 @@ mod tests {
         }
     }
 
+    /// #204：建链的失败里认出「这里建不了链接」（文件系统不支持、Windows 建不了 junction），
+    /// 与没有写权限、磁盘满、目标不在分开；分不进这一类的照旧按原分类
+    #[test]
+    fn 建链失败分类_认出不支持链接_别的照旧() {
+        let unsupported = io::Error::from(io::ErrorKind::Unsupported);
+        assert_eq!(
+            link_fail_kind_of(&unsupported),
+            Some(FailKind::LinkUnsupported)
+        );
+        // 各平台「不支持」的系统错误码
+        #[cfg(target_os = "macos")]
+        let codes = [45, 102, 78];
+        #[cfg(target_os = "linux")]
+        let codes = [95, 38, 1];
+        #[cfg(windows)]
+        let codes = [1, 50, 1314, 4390];
+        for code in codes {
+            assert_eq!(
+                link_fail_kind_of(&io::Error::from_raw_os_error(code)),
+                Some(FailKind::LinkUnsupported),
+                "{code}"
+            );
+        }
+        for (e, want) in [
+            (
+                io::Error::from(io::ErrorKind::PermissionDenied),
+                Some(FailKind::NoWrite),
+            ),
+            (
+                io::Error::from(io::ErrorKind::StorageFull),
+                Some(FailKind::DiskFull),
+            ),
+            (
+                io::Error::from(io::ErrorKind::NotFound),
+                Some(FailKind::Missing),
+            ),
+            (io::Error::from(io::ErrorKind::InvalidInput), None),
+        ] {
+            assert_eq!(link_fail_kind_of(&e), want, "{e}");
+        }
+        // 别的写入（建目录、删链）不认这一类：只有建链时「不支持」才是「建不了链接」
+        assert_eq!(fail_kind_of(&unsupported), None);
+    }
+
     #[test]
     fn 失败类别_权限与只读文件系统是无法写入_别的失败不带类别() {
         for kind in [
@@ -713,6 +1077,25 @@ mod tests {
             fail_kind_of(&io::Error::from(io::ErrorKind::InvalidInput)),
             None
         );
+    }
+
+    /// 跨卷改名（EXDEV、Windows 的 ERROR_NOT_SAME_DEVICE）是用户的磁盘布局，不是 Sophia 自身的错：
+    /// 按外部原因只计数，不按内部异常上报；分不进类的别的错误照旧算内部异常
+    #[test]
+    fn 跨卷改名算外部原因_不按自身异常上报() {
+        #[cfg(unix)]
+        let exdev = io::Error::from_raw_os_error(18);
+        #[cfg(windows)]
+        let exdev = io::Error::from_raw_os_error(17);
+        assert!(external(&exdev, fail_kind_of(&exdev)));
+        assert!(external(
+            &io::Error::from(io::ErrorKind::CrossesDevices),
+            None
+        ));
+        let other = io::Error::from(io::ErrorKind::InvalidInput);
+        assert!(!external(&other, fail_kind_of(&other)));
+        let full = io::Error::from(io::ErrorKind::StorageFull);
+        assert!(external(&full, fail_kind_of(&full)));
     }
 
     /// spec S18：原因句给人看（当前语言）、原文进 `detail`；分不进类的原文原样当原因
@@ -761,6 +1144,7 @@ mod tests {
             ],
             false,
             LinkStyle::Absolute,
+            None,
         );
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         // root 不受权限位约束：那种环境下这条断言没有意义
@@ -794,7 +1178,7 @@ mod tests {
             action(ActionKind::Unlink, &src, &t.join("elsewhere")),
             action(ActionKind::Unlink, &src, &t.join("real")),
         ];
-        let report = execute(&actions, false, LinkStyle::Absolute);
+        let report = execute(&actions, false, LinkStyle::Absolute, None);
         assert_eq!(report.entries[0].outcome, Outcome::Removed);
         assert_eq!(entry_kind(&t.join("good")), EntryKind::Missing);
         assert!(matches!(report.entries[1].outcome, Outcome::Failed(_)));
@@ -816,6 +1200,7 @@ mod tests {
             &[action(ActionKind::Create, &a, &dst.join("a.md"))],
             false,
             LinkStyle::Absolute,
+            None,
         );
         assert_eq!(outcomes(&r), vec![Outcome::Created]);
         assert_eq!(std::fs::read_link(dst.join("a.md")).unwrap(), a);
@@ -832,6 +1217,7 @@ mod tests {
             &[action(ActionKind::Create, &x, &dst.join("x"))],
             false,
             LinkStyle::Relative,
+            None,
         );
         assert_eq!(outcomes(&r), vec![Outcome::Created]);
         assert_eq!(
@@ -852,6 +1238,7 @@ mod tests {
             &[action(ActionKind::Create, &a, &missing.join("a.md"))],
             false,
             LinkStyle::Absolute,
+            None,
         );
         assert_eq!(outcomes(&r), vec![Outcome::Created]);
         assert_eq!(entry_kind(&missing), EntryKind::Dir);
@@ -867,6 +1254,7 @@ mod tests {
             &[action(ActionKind::Create, &a, &via.join("a.md"))],
             false,
             LinkStyle::Absolute,
+            None,
         );
         assert_eq!(outcomes(&r2), vec![Outcome::Created]);
         assert!(matches!(
@@ -893,6 +1281,7 @@ mod tests {
             ],
             false,
             LinkStyle::Absolute,
+            None,
         );
         match &r.entries[0].outcome {
             Outcome::Failed(msg) => assert!(
@@ -920,6 +1309,7 @@ mod tests {
             ],
             true,
             LinkStyle::Absolute,
+            None,
         );
         assert!(matches!(r.entries[0].outcome, Outcome::Failed(_)));
         assert!(matches!(r.entries[1].outcome, Outcome::Failed(_)));
@@ -971,10 +1361,11 @@ mod tests {
             affected: Vec::new(),
             in_git: None,
             relink_to: None,
+            copies: Vec::new(),
             modified: None,
         };
         let hold = t.dir("app/held");
-        let (report, undo) = delete_source_holding(&plan, Some(&hold));
+        let (report, undo) = delete_source_holding(&plan, Some(&hold), None);
         assert!(undo.is_none());
         match &report.entries[0].outcome {
             Outcome::Failed(why) => assert!(why.contains("ego lite.app"), "{why}"),
@@ -1001,6 +1392,7 @@ mod tests {
             affected: vec![absolute(&link)],
             in_git: Some(repo.clone()),
             relink_to: Some(t.dir("other/a")),
+            copies: Vec::new(),
             modified: None,
         };
         let r = delete_source(&plan);
@@ -1043,8 +1435,12 @@ mod tests {
             target_at("claude-code", &claude),
             target_at("codex", &codex),
         ];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
         assert_eq!(plan.relink_to.as_deref(), Some(kept.as_path()));
         assert_eq!(
             plan.affected,
@@ -1055,7 +1451,7 @@ mod tests {
         );
 
         let bin = FakeBin::new(&t);
-        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        let r = delete_source_holding_with(&plan, None, None, &|p| bin.trash(p)).0;
         assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(r.entries[0].action.kind, ActionKind::DeleteSource);
         assert_eq!(r.entries[0].outcome, Outcome::Removed);
@@ -1102,8 +1498,12 @@ mod tests {
             project_target_at("claude-code", &proj, &claude),
             target_at("claude-code-global", &home),
         ];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
         assert_eq!(plan.relink_to.as_deref(), Some(kept.as_path()));
         let style_of = |p: &Path| {
             plan.affected
@@ -1117,7 +1517,7 @@ mod tests {
         assert_eq!(style_of(&global_link), LinkStyle::Absolute);
 
         let bin = FakeBin::new(&t);
-        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        let r = delete_source_holding_with(&plan, None, None, &|p| bin.trash(p)).0;
         assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(
             outcomes(&r),
@@ -1152,13 +1552,17 @@ mod tests {
             target_at("claude-code", &claude),
             target_at("cursor", &cursor),
         ];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
         assert_eq!(plan.relink_to, None);
         assert_eq!(plan.affected, vec![absolute(&link), absolute(&inner)]);
 
         let bin = FakeBin::new(&t);
-        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        let r = delete_source_holding_with(&plan, None, None, &|p| bin.trash(p)).0;
         assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(
             outcomes(&r),
@@ -1195,10 +1599,14 @@ mod tests {
             target_at("claude-code", &claude),
             target_at("cursor", &cursor),
         ];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
 
-        let (r, undo) = delete_source_holding(&plan, Some(&hold_root));
+        let (r, undo) = delete_source_holding(&plan, Some(&hold_root), None);
         assert_eq!(outcomes(&r), vec![Outcome::Removed; 3]);
         assert_eq!(entry_kind(&body), EntryKind::Missing);
         assert_eq!(entry_kind(&link), EntryKind::Missing);
@@ -1206,7 +1614,7 @@ mod tests {
         assert!(undo.held.starts_with(&hold_root));
         assert_eq!(entry_kind(&undo.held), EntryKind::Dir);
 
-        let back = undo_delete(&undo);
+        let back = undo_delete(&undo, None);
         assert_eq!(outcomes(&back), vec![Outcome::Created; 3]);
         assert_eq!(entry_kind(&body), EntryKind::Dir);
         assert!(body.join("SKILL.md").is_file());
@@ -1238,12 +1646,17 @@ mod tests {
         ];
 
         // 留 Claude Code 自己的：通用仓库那份挪走，Codex 的链接改指到 Claude Code 那份
-        let plan = crate::skills::plan_keep(&sources[0].skills[0], &own, &targets);
-        let (r, undo) = delete_source_holding(&plan, Some(&hold_root));
+        let plan = crate::skills::plan_keep(
+            &sources[0].skills[0],
+            &own,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
+        let (r, undo) = delete_source_holding(&plan, Some(&hold_root), None);
         assert_eq!(outcomes(&r), vec![Outcome::Removed, Outcome::Created]);
         assert_eq!(entry_kind(&body), EntryKind::Missing);
         assert!(same_real(&link, &own), "链接改指到留下的 Claude Code 那份");
-        let back = undo_delete(&undo.expect("挪进了暂存，给撤销"));
+        let back = undo_delete(&undo.expect("挪进了暂存，给撤销"), None);
         assert_eq!(outcomes(&back), vec![Outcome::Created; 2]);
         assert_eq!(entry_kind(&body), EntryKind::Dir);
         assert!(same_real(&link, &body), "撤销后链接指回原来那份");
@@ -1254,12 +1667,13 @@ mod tests {
             path: own.clone(),
             description: None,
         };
-        let plan = crate::skills::plan_keep(&drop, &body, &targets);
-        let (r, undo) = delete_source_holding(&plan, Some(&hold_root));
+        let plan =
+            crate::skills::plan_keep(&drop, &body, &targets, &crate::copies::Copies::default());
+        let (r, undo) = delete_source_holding(&plan, Some(&hold_root), None);
         assert_eq!(outcomes(&r), vec![Outcome::Removed]);
         assert_eq!(entry_kind(&own), EntryKind::Missing);
         assert!(same_real(&link, &body), "指向通用仓库的链接不动");
-        let back = undo_delete(&undo.expect("挪进了暂存，给撤销"));
+        let back = undo_delete(&undo.expect("挪进了暂存，给撤销"), None);
         assert_eq!(outcomes(&back), vec![Outcome::Created]);
         assert_eq!(entry_kind(&own), EntryKind::Dir);
         assert!(own.join("SKILL.md").is_file());
@@ -1285,9 +1699,13 @@ mod tests {
             target_at("claude-code", &claude),
             target_at("codex", &codex),
         ];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
-        let (_, undo) = delete_source_holding(&plan, Some(&hold_root));
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
+        let (_, undo) = delete_source_holding(&plan, Some(&hold_root), None);
         let undo = undo.expect("有撤销");
         assert!(
             same_real(&claude.join("twin"), &kept),
@@ -1297,7 +1715,7 @@ mod tests {
         std::fs::remove_file(codex.join("twin")).unwrap();
         t.dir("home/.codex/skills/twin");
 
-        let back = undo_delete(&undo);
+        let back = undo_delete(&undo, None);
         assert_eq!(
             outcomes(&back)[..2],
             [Outcome::Created, Outcome::Created],
@@ -1323,13 +1741,17 @@ mod tests {
         t.link(&claude.join("taken"), &body);
         let sources = vec![source_at(&store, &["taken"])];
         let targets = vec![target_at("claude-code", &claude)];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
-        let (_, undo) = delete_source_holding(&plan, Some(&hold_root));
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
+        let (_, undo) = delete_source_holding(&plan, Some(&hold_root), None);
         let undo = undo.expect("有撤销");
         t.dir("store/taken");
 
-        let back = undo_delete(&undo);
+        let back = undo_delete(&undo, None);
         assert!(back
             .entries
             .iter()
@@ -1425,9 +1847,13 @@ mod tests {
         t.link(&claude.join("gone"), &body);
         let sources = vec![source_at(&store, &["gone"])];
         let targets = vec![target_at("claude-code", &claude)];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
-        let (_, undo) = delete_source_holding(&plan, Some(&hold_root));
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
+        let (_, undo) = delete_source_holding(&plan, Some(&hold_root), None);
         let undo = undo.expect("有撤销");
         assert_eq!(entry_kind(&body), EntryKind::Missing);
         assert_eq!(entry_kind(&undo.held), EntryKind::Dir);
@@ -1543,8 +1969,12 @@ mod tests {
             target_at("claude-code", &claude),
             target_at("codex", &codex),
         ];
-        let plan =
-            crate::skills::plan_delete_source(&sources[0].skills[0].clone(), &sources, &targets);
+        let plan = crate::skills::plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &targets,
+            &crate::copies::Copies::default(),
+        );
         assert_eq!(plan.affected.len(), 2);
         std::fs::remove_file(&moved).unwrap();
         t.link(&moved, &elsewhere);
@@ -1552,7 +1982,7 @@ mod tests {
         std::fs::create_dir(&replaced).unwrap();
 
         let bin = FakeBin::new(&t);
-        let r = delete_source_holding_with(&plan, None, &|p| bin.trash(p)).0;
+        let r = delete_source_holding_with(&plan, None, None, &|p| bin.trash(p)).0;
         assert_eq!(bin.from(), vec![body.clone()], "原件交给了废纸篓");
         assert_eq!(r.entries[0].outcome, Outcome::Removed);
         for entry in &r.entries[1..] {
@@ -1573,12 +2003,12 @@ mod tests {
         let gone = dst.join("gone.md");
         t.link(&gone, &src.join("gone.md"));
         let broken = || action(ActionKind::BrokenLink, &src.join("gone.md"), &gone);
-        let kept = execute(&[broken()], false, LinkStyle::Absolute);
+        let kept = execute(&[broken()], false, LinkStyle::Absolute, None);
         assert_eq!(outcomes(&kept), vec![Outcome::Skipped]);
         assert!(matches!(entry_kind(&gone), EntryKind::Symlink(_)));
         std::fs::remove_file(&gone).unwrap();
         std::fs::write(&gone, "real").unwrap();
-        let guarded = execute(&[broken()], true, LinkStyle::Absolute);
+        let guarded = execute(&[broken()], true, LinkStyle::Absolute, None);
         assert_eq!(
             outcomes(&guarded),
             vec![Outcome::Failed("不再是软链接，已跳过".into())]
@@ -1586,7 +2016,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&gone).unwrap(), "real");
         std::fs::remove_file(&gone).unwrap();
         t.link(&gone, &src.join("gone.md"));
-        let cleaned = execute(&[broken()], true, LinkStyle::Absolute);
+        let cleaned = execute(&[broken()], true, LinkStyle::Absolute, None);
         assert_eq!(outcomes(&cleaned), vec![Outcome::Removed]);
         assert_eq!(entry_kind(&gone), EntryKind::Missing);
     }

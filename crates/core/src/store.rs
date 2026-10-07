@@ -1,4 +1,4 @@
-//! JSON 持久化：projects.json、settings.json、installs.json、usage-last.json、usage-schedule.json，整文件原子写（先写 .tmp 再 rename）
+//! JSON 持久化：projects.json、settings.json、installs.json、copies.json、usage-last.json、usage-schedule.json，整文件原子写（先写 .tmp 再 rename）
 use crate::{
     claude_models::settings::ClaudeGatewaySettings,
     codex_models::settings::GatewaySettings,
@@ -337,7 +337,7 @@ impl Store {
         Ok(())
     }
 
-    /// 读设置，顺手把此刻有软链的来源写进各位置的订阅记录（见 `subscriptions::adopt`；
+    /// 读设置，顺手把此刻有软链（或 Sophia 放的副本）的来源写进各位置的订阅记录（见 `subscriptions::adopt`；
     /// 第一次扫描时认领老数据），改过才写回。要发现结果才能认领，所以只在发现之后用
     pub fn load_settings_adopting_subscriptions(
         &self,
@@ -347,7 +347,14 @@ impl Store {
         let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
         let legacy = settings.manual_sources.clone();
-        if crate::subscriptions::adopt(&mut settings.subscriptions, sources, targets, &legacy) {
+        let copies = crate::copies::Copies::load(self)?;
+        if crate::subscriptions::adopt(
+            &mut settings.subscriptions,
+            sources,
+            targets,
+            &legacy,
+            &copies,
+        ) {
             self.save_settings(&settings)?;
         }
         Ok(settings)
@@ -464,6 +471,32 @@ impl Store {
 
     pub fn save_installs(&self, records: &[crate::market::InstallRecord]) -> io::Result<()> {
         save_json(&self.dir.join("installs.json"), &records)
+    }
+
+    /// Sophia 放进各 agent 的副本（spec #194）：`copies.json`，不存在时为空。
+    /// 只读的地方直接读；要改的走 `copies::edit`（拿 [`Store::lock_copies`] 读改写）
+    pub fn load_copies(&self) -> io::Result<Vec<crate::copies::CopyRecord>> {
+        load_json(&self.dir.join(COPIES_FILE))
+    }
+
+    /// 整份写回。调用方须拿着 [`Store::lock_copies`]
+    pub fn save_copies(&self, records: &[crate::copies::CopyRecord]) -> io::Result<()> {
+        save_json(&self.dir.join(COPIES_FILE), &records)
+    }
+
+    /// copies.json 读改写的锁：进程内一把，各处的 `Store` 共用；不可重入，拿着它别再调也拿它的方法。
+    /// 与 settings.json 的锁互不相干；两把同时拿时（移除来源：拿着 settings 的锁移除副本）只能先 settings
+    /// 后 copies，拿着它时不碰 settings
+    pub fn lock_copies(&self) -> std::sync::MutexGuard<'static, ()> {
+        static COPIES_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        COPIES_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// 暂存处：删原件、装 skill 的撤销与更新都先挪到这里（`sync::hold`），
+    /// 撤销机会过去由 `sync::release_held` 移进废纸篓。与命令层的 `held_dir` 是同一处。
+    /// 副本不进这里（可能跨卷）：暂存在它旁边，见 `copies::HELD_PREFIX`
+    pub fn held_dir(&self) -> PathBuf {
+        self.dir.join("held")
     }
 
     /// 设置外观；没变不写盘
@@ -607,6 +640,9 @@ impl Store {
         result
     }
 }
+
+/// 副本记录的文件名（spec #194：不放进 settings.json、installs.json）
+const COPIES_FILE: &str = "copies.json";
 
 /// `project_added_at` 的 key：规范化后的路径文本
 fn project_key(path: &Path) -> String {
@@ -1105,6 +1141,7 @@ mod tests {
         // 建规则之后来源里出现了 a：自动执行真的把它链进 claude
         t.skill("store/a");
         let env = crate::discovery::Env {
+            apps: Vec::new(),
             home: t.dir("home"),
             vars: Default::default(),
         };
@@ -1121,7 +1158,7 @@ mod tests {
         }];
         let cells = crate::skills::auto_link_cells(&sources, &targets, &loaded.auto_links);
         let actions = crate::skills::propose_links(&sources, &targets, &cells);
-        let report = crate::sync::execute(&actions, false, LinkStyle::Absolute);
+        let report = crate::sync::execute(&actions, false, LinkStyle::Absolute, None);
         assert!(matches!(
             crate::fs::entry_kind(&claude.join("a")),
             crate::fs::EntryKind::Symlink(_)
@@ -1175,6 +1212,7 @@ mod tests {
         assert_eq!(loaded.mcp_auto_imports[0].baseline, None);
 
         let env = crate::discovery::Env {
+            apps: Vec::new(),
             home: t.dir("home"),
             vars: Default::default(),
         };
@@ -1265,6 +1303,7 @@ mod tests {
         assert!(rule.is_excluded(&project.id, "x"));
         // 行为不变：x 两处都不补，y 两处都补
         let env = crate::discovery::Env {
+            apps: Vec::new(),
             home: t.dir("home"),
             vars: Default::default(),
         };

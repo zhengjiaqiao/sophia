@@ -129,6 +129,7 @@ fn discovery_uses_default_root_only_when_override_is_absent() {
     fs::create_dir_all(default_root.join("Data/agents/agent_one")).unwrap();
     fs::create_dir_all(default_root.join("Data/agents/agent_two")).unwrap();
     let env = Env {
+        apps: Vec::new(),
         home,
         vars: HashMap::new(),
     };
@@ -158,6 +159,7 @@ fn invalid_override_never_falls_back_to_default_root() {
     ] {
         fs::write(&override_file, bytes).unwrap();
         let env = Env {
+            apps: Vec::new(),
             home: home.clone(),
             vars: HashMap::new(),
         };

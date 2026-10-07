@@ -40,6 +40,7 @@ import {
   type InstallKind,
   type SkillHandle,
 } from "./installView.ts";
+import { skillDownloadFailure, type SkillDownloadFailure } from "../netFailure.ts";
 import { errorText, type MarketService } from "./service.ts";
 
 /// 输入停下 `ms` 之后的值（粘贴 JSON 的解析、链接的读取）
@@ -132,7 +133,10 @@ export function useSkillInstall(opts: SkillInstallOptions) {
   const { rows, checked, toggle } = useAgentChoice("skill", opts.agents, opts.shown);
   const [location, setLocation] = useState<LocationKey>(() => defaultInstallLocation(opts.mine));
   const [preview, setPreview] = useState<SkillInstallPreview | null>(null);
-  const [planError, setPlanError] = useState<string | null>(null);
+  /// 出计划要下载整包：下载失败时这里是说法（网络那三类带「开着代理再试一次」）
+  const [planError, setPlanError] = useState<SkillDownloadFailure | null>(null);
+  /// 「开着代理再试一次」：加一就按同样的条件重新出计划
+  const [planRetry, setPlanRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<InstallFailure | null>(null);
 
@@ -163,9 +167,9 @@ export function useSkillInstall(opts: SkillInstallOptions) {
         setPreview(next);
       })
       .catch((error: unknown) => {
-        if (n === seq.current) setPlanError(errorText(error));
+        if (n === seq.current) setPlanError(skillDownloadFailure(error));
       });
-  }, [service, repo, branch, pathsKey, location, rowIds, planKey]);
+  }, [service, repo, branch, pathsKey, location, rowIds, planKey, planRetry]);
 
   /// 计划里对应的那一项。只要了一项、又是按名字要的（搜索结果不知道路径）时，回来的路径是后端补上的，就取那一项
   const itemFor = (path: string) => {
@@ -236,7 +240,11 @@ export function useSkillInstall(opts: SkillInstallOptions) {
     } catch (error) {
       setFailure({
         key: Date.now(),
-        toast: cannot("market.toast.installCannot", [...names], errorText(error)),
+        toast: cannot(
+          "market.toast.installCannot",
+          [...names],
+          skillDownloadFailure(error).message,
+        ),
       });
       return null;
     } finally {
@@ -252,6 +260,7 @@ export function useSkillInstall(opts: SkillInstallOptions) {
     setLocation,
     preview,
     planError,
+    retryPlan: () => setPlanRetry((n) => n + 1),
     itemFor,
     directReaders,
     checking,

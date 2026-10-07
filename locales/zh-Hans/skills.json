@@ -170,5 +170,9 @@
   "skills.sync.linkChanged": "链接之后又被改过，没有指回去",
   "skills.sync.notOrigLink": "不再是指向该原件的软链接，已跳过",
   "skills.sync.wholeLinkItem": "<整目录链接>",
-  "skills.sync.notWholeLink": "目标不是指向这份原件的整个文件夹链接"
+  "skills.sync.notWholeLink": "目标不是指向这份原件的整个文件夹链接",
+  "skills.sync.spotTaken": "这里已经有同名的东西，没动",
+  "skills.sync.copyNoBook": "Sophia 内部出错，这一项没做",
+  "skills.sync.notRecordedCopy": "这一份不是 Sophia 放的，没动",
+  "skills.sync.changedSince": "之后又被改过，没有换回去"
 }

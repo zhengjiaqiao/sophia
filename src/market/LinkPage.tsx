@@ -27,6 +27,7 @@ import type { ResolvedLink } from "../types.ts";
 import type { InstalledNotice } from "./InstalledToast.tsx";
 import type { InstallOutcome } from "../types.ts";
 import {
+  DownloadFailure,
   SkillAgents,
   InstallBlock,
   InstallFooter,
@@ -48,7 +49,8 @@ import {
   pickOrder,
   skillInstallBlock,
 } from "./installView.ts";
-import { errorText, marketService } from "./service.ts";
+import { skillDownloadFailure, type SkillDownloadFailure } from "../netFailure.ts";
+import { marketService } from "./service.ts";
 import { usePageCommand } from "../shell/menuBus.ts";
 import { useClipboardPrefill, useDebounced, useSkillInstall } from "./useInstall.ts";
 
@@ -63,7 +65,8 @@ const FACE = () => document.querySelector(".face");
 const FACE_SCROLL = () => document.querySelector(".face__scroll");
 
 /// 读链接的结果，记着是哪一次输入读出来的（输入又变了就不算数）
-type Resolution = { input: string; result: ResolvedLink } | { input: string; error: string };
+type Resolution =
+  { input: string; result: ResolvedLink } | { input: string; error: SkillDownloadFailure };
 
 export const noLink = () => t("market.link.noLink");
 
@@ -78,6 +81,8 @@ export function LinkPage(props: LinkPageProps) {
   // 认得出才去读（停 400ms）；认不出不发请求
   const settled = useDebounced(text.trim(), 400);
   const [resolution, setResolution] = useState<Resolution | null>(null);
+  /// 「开着代理再试一次」：加一就把同一个链接再读一遍
+  const [resolveRetry, setResolveRetry] = useState(0);
   useEffect(() => {
     if (!parseGithubLink(settled)) return;
     let alive = true;
@@ -85,12 +90,13 @@ export function LinkPage(props: LinkPageProps) {
       .resolveLink(settled)
       .then((result) => alive && setResolution({ input: settled, result }))
       .catch(
-        (error: unknown) => alive && setResolution({ input: settled, error: errorText(error) }),
+        (error: unknown) =>
+          alive && setResolution({ input: settled, error: skillDownloadFailure(error) }),
       );
     return () => {
       alive = false;
     };
-  }, [settled, service]);
+  }, [settled, service, resolveRetry]);
 
   const local = linkState(text);
   const current = resolution && resolution.input === text.trim() ? resolution : null;
@@ -157,7 +163,14 @@ export function LinkPage(props: LinkPageProps) {
     local.kind === "unrecognized" ? (
       <p className="install-status is-error">{linkUnrecognized()}</p>
     ) : current && "error" in current ? (
-      <p className="install-status is-error">{current.error}</p>
+      <DownloadFailure
+        failure={current.error}
+        className="install-status is-error"
+        onRetry={() => {
+          setResolution(null);
+          setResolveRetry((n) => n + 1);
+        }}
+      />
     ) : single ? null : found ? (
       // 只认出一个时不写这一行：下面的来历一行已经说了仓库与路径
       <p className="install-status">
@@ -276,7 +289,13 @@ export function LinkPage(props: LinkPageProps) {
                   onChange={state.setLocation}
                   name={null}
                 />
-                {state.planError ? <p className="install-error">{state.planError}</p> : null}
+                {state.planError ? (
+                  <DownloadFailure
+                    failure={state.planError}
+                    className="install-error"
+                    onRetry={state.retryPlan}
+                  />
+                ) : null}
                 <InstallBlock label={t("market.install.blockWho")}>
                   <SkillAgents
                     rows={state.rows}

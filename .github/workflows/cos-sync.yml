@@ -1,0 +1,153 @@
+name: COS sync
+
+# 把某个已发布 Release 的更新包、.dmg 与改写过包地址的 latest.json 传到腾讯云 COS（issue #263，spec #248）。
+# 应用更新的国内线路（tauri.conf.json 的第二个 endpoint）和官网给国内访客的下载都读这里。
+# COS 上的布局照 GitHub：<桶>/v<版本>/<产物名>，清单在桶根目录 latest.json。两个入口：
+#   - release.yml 在草稿转正之后调用（workflow_call），只有真发版（tag push）才走到；排练不建 Release，也不调用它。
+#   - 手动运行（workflow_dispatch），填最新的已发布 tag：发版那次传失败了，修好后补传；也用来单独排练这一段。
+# 只同步最新的正式版：清单只有根目录一份，传旧版会把国内线路倒回旧版本。
+# 失败不影响 Release：它在转正之后才跑，GitHub 那条线路照常能更新。
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      # 不设 required：缺了要走到下面的检查，由它说清缺什么、怎么补
+      COS_SECRET_ID:
+        required: false
+      COS_SECRET_KEY:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 最新的已发布 tag，如 v0.2.0
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    # 与 release.yml 一样只在公开仓库跑：密钥只配在那里
+    if: github.repository == 'zhengjiaqiao/sophia'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 同一时间只有一次往桶里写，两次发版挨得近也不会让旧清单盖掉新清单
+    concurrency:
+      group: cos-releases
+      cancel-in-progress: false
+    env:
+      TAG: ${{ inputs.tag }}
+      REPO: zhengjiaqiao/sophia
+      COS_BUCKET: ${{ vars.COS_BUCKET }}
+      COS_REGION: ${{ vars.COS_REGION }}
+      # 腾讯云官方的命令行上传工具，钉版本与 sha256（取自它 Release 上的 sha256sum.log）
+      COSCLI_VERSION: v1.0.9
+      COSCLI_SHA256: a07de5ba2800147a700ed29036b0c76a4229088cee68e1682d0eae19b638a915
+    steps:
+      # 照 release.yml 的 guard：每条失败都说缺什么、去哪儿补
+      - name: tag 是最新的正式版，COS 的密钥与桶名都已配好
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+        run: |
+          bad=0
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag 要写成 v<版本>，如 v0.2.0；收到的是「${TAG}」"
+            bad=1
+          else
+            latest=$(gh release view -R "$REPO" --json tagName --jq .tagName)
+            if [ "$latest" != "$TAG" ]; then
+              echo "::error::${TAG} 不是最新的正式版（最新的是 ${latest}）。COS 上的清单只有一份，只同步最新版。"
+              bad=1
+            fi
+          fi
+          for name in COS_SECRET_ID COS_SECRET_KEY; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "::error::缺少 secret ${name}：子账号 sophia-release-ci 的密钥"
+              bad=1
+            fi
+          done
+          for name in COS_BUCKET COS_REGION; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "::error::缺少仓库变量 ${name}"
+              bad=1
+            fi
+          done
+          if [ "$bad" = 1 ]; then
+            echo "::error::密钥与变量由向导 scripts/setup-cos.sh 写进 ${REPO}（见 packaging/README.md「5. 腾讯云 COS」）。"
+            exit 1
+          fi
+          echo "COS_BASE=https://${COS_BUCKET}.cos.${COS_REGION}.myqcloud.com" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 从 Release 取回清单与产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" -R "$REPO" -D dist -p latest.json -p '*.app.tar.gz' -p '*.dmg'
+          ls -l dist
+
+      # 只换包地址、签名原样；版本号对不上、地址不是这次 Release 的资产、dmg 名字官网拼不出，都停
+      - name: 改写清单，列出要传的产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node packaging/cos-manifest.mjs "$TAG" "$COS_BASE" dist > dist/upload.txt
+          cat dist/upload.txt
+          cat dist/cos/latest.json
+
+      - name: 装 coscli
+        run: |
+          curl -fsSL -o coscli \
+            "https://github.com/tencentyun/coscli/releases/download/${COSCLI_VERSION}/coscli-${COSCLI_VERSION}-linux-amd64"
+          echo "${COSCLI_SHA256}  coscli" | sha256sum -c -
+          chmod +x coscli
+
+      # 先传包、核对公网能取到，最后才传清单：清单一换，国内线路的客户端就会去下它指的包
+      - name: 传到 COS 并核对
+        env:
+          COS_SECRET_ID: ${{ secrets.COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.COS_SECRET_KEY }}
+        run: |
+          put() { # put <本地文件> <对象键> [coscli 选项…]
+            local src="$1" key="$2"
+            shift 2
+            if ! ./coscli cp "$src" "cos://${COS_BUCKET}/${key}" "$@" \
+              -i "$COS_SECRET_ID" -k "$COS_SECRET_KEY" -e "cos.${COS_REGION}.myqcloud.com" \
+              --init-skip --disable-log --process-log=false --fail-output=false; then
+              echo "::error::上传 ${key} 失败。权限错误（403、AccessDenied）就在 CAM 策略 sophia-cos-releases-write 里补上报错提到的操作，"
+              echo "::error::再在 Actions 里手动运行「COS sync」，tag 填 ${TAG}（见 packaging/README.md「5. 腾讯云 COS」）。"
+              exit 1
+            fi
+          }
+
+          while IFS= read -r name; do
+            put "dist/${name}" "${TAG}/${name}"
+            url="${COS_BASE}/${TAG}/${name}"
+            want=$(stat -c %s "dist/${name}")
+            got=$(curl -sS -o /dev/null -I -w '%{http_code} %header{content-length}' --max-time 60 "$url" || true)
+            if [ "$got" != "200 ${want}" ]; then
+              echo "::error::传完从公网取不对：${url} 得到「${got}」，应为「200 ${want}」"
+              exit 1
+            fi
+            echo "✓ ${url}"
+          done < dist/upload.txt
+
+          put dist/cos/latest.json latest.json --meta "Cache-Control:no-cache"
+          curl -fsS --max-time 60 -o dist/fetched.json "${COS_BASE}/latest.json"
+          if ! cmp -s dist/cos/latest.json dist/fetched.json; then
+            echo "::error::从公网取回的 ${COS_BASE}/latest.json 和刚传的不一样"
+            exit 1
+          fi
+          echo "✓ ${COS_BASE}/latest.json"

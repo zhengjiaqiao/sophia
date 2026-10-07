@@ -74,15 +74,6 @@
   white-space: nowrap;
 }
 
-/* 在不显示名单里又卸载了的：名字后「装上后也不显示 · 恢复」 */
-.settings-page__hidden-note {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  font-size: var(--size-caption);
-  color: var(--ink-mute);
-}
-
 /* 设置行（SettingRow，2026-10-04 画板 B，照 Claude 的设置页）：左栏名字（body）在上、一句灰字（13 ink-mute）在下，
    右端一列放控件（间 12）；上下各 12，同一节里行与行之间一条行线。左栏不限宽（2026-10-06），铺到右端控件前
    （间 32），长了在左栏里折行，控件不跟着挪 */

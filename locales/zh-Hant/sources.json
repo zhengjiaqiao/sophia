@@ -111,8 +111,6 @@
   "sources.add.adding": "正在加入",
   "sources.added.done": "已加入 {names}",
   "sources.absent.title": "裝上後可以在這裡勾選顯示",
-  "sources.absent.hiddenNote": "裝上後也不顯示",
-  "sources.absent.restore": "還原",
   "sources.name.universal": "~/.agents",
   "sources.name.projectStore": "{name}/.agents",
   "sources.error.placeGone": "這個位置已經不在了，請重新整理",

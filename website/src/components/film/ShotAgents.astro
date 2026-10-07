@@ -1,0 +1,66 @@
+---
+// 第 1 镜头的静态样子（= 静止帧）：字幕 + 两列排好的 agent 名字卡。演示逻辑在 src/client/film-shots/agents.ts
+import { FILM_AGENTS } from "../../demos/agentChips.ts";
+import { t, type Lang } from "../../i18n.ts";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+---
+
+<div class="shot on" data-shot="0">
+  <p class="cap7">
+    <span><span class="ln">{t(lang, "film.s1a")}</span></span>
+    <span><span class="ln"><em>{t(lang, "film.s1b")}</em></span></span>
+  </p>
+  <!-- 机位层：字幕在外面（client/film-shots/camera.ts） -->
+  <div class="cam">
+    <div class="chips">
+      <div class="chips__grid">
+        {FILM_AGENTS.map((name) => <span class="chip7">{name}</span>)}
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* 取舞台宽度的容器：名字卡的列宽按舞台宽走，和散落动画量到的位置一致 */
+  .chips {
+    position: absolute;
+    inset: 0;
+    container: chips / inline-size;
+    pointer-events: none;
+  }
+  .chips__grid {
+    position: absolute;
+    left: 52%;
+    top: 26%;
+    display: grid;
+    grid-template-columns: repeat(2, 22cqw);
+    grid-auto-rows: 48px;
+  }
+  /* 舞台宽不到 560px 时整幅两列（同 agentChips.ts 的 NARROW_FILM） */
+  @container chips (max-width: 559px) {
+    .chips__grid {
+      left: 6%;
+      top: 34%;
+      grid-template-columns: repeat(2, 46cqw);
+    }
+  }
+  .chip7 {
+    justify-self: start;
+    align-self: start;
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding-inline: 14px;
+    border-radius: 999px;
+    background: var(--paper);
+    box-shadow:
+      0 0 0 1px var(--hairline),
+      0 10px 30px -10px rgba(28, 28, 26, 0.25);
+    font: 500 14px var(--font-ui);
+    white-space: nowrap;
+  }
+</style>

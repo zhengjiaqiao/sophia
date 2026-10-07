@@ -36,7 +36,13 @@ import {
   usageAgentName,
   windowCount,
 } from "./usageView.ts";
-import { UsageWindows, useUsageRetry } from "./UsageWindows.tsx";
+import {
+  ConnectConfirm,
+  UsageWindows,
+  useClaudeConnect,
+  useUsageRetry,
+  type ConnectHandlers,
+} from "./UsageWindows.tsx";
 import "./UsagePage.css";
 
 /// 用量页（侧栏「用量」⌘4；spec 2026-09-26-menubar-usage R11，线框 5A）：最上面是「当前用量」（与托盘同一种画法），
@@ -96,6 +102,8 @@ export function UsagePage({ onError }: { onError: (message: string) => void }) {
   // 「当前用量」原因行的「再试一次」：跑完先重读（不补取）把新数画上，再收回「正在读取」
   const reread = useCallback(() => read(false), [read]);
   const { retry, retrying } = useUsageRetry(reread);
+  // 「当前用量」Claude 一栏的「连接 Claude 用量」（票 #208）：要安装时先问一句（主窗口的确认一律居中）
+  const connect = useClaudeConnect(reread, onError);
 
   useEffect(() => {
     alive.current = true;
@@ -130,9 +138,13 @@ export function UsagePage({ onError }: { onError: (message: string) => void }) {
             onChange={(next) => void save(next)}
             onRetry={(agent) => void retry(agent)}
             retrying={retrying}
+            connect={connect.handlers}
           />
         ) : null}
       </PageHead>
+      {connect.confirming ? (
+        <ConnectConfirm onConfirm={connect.confirm} onCancel={connect.dismiss} />
+      ) : null}
     </div>
   );
 }
@@ -157,6 +169,7 @@ export function UsageBody({
   onChange,
   onRetry,
   retrying = () => false,
+  connect,
 }: {
   view: UsageView;
   onChange: (next: UsageSettings) => void;
@@ -164,6 +177,8 @@ export function UsageBody({
   onRetry?: (agent: UsageAgentId) => void;
   /// 这个 agent 的「再试一次」正在跑
   retrying?: (agent: UsageAgentId) => boolean;
+  /// Claude 一栏的「连接 Claude 用量」；不给就只写句子
+  connect?: ConnectHandlers;
 }) {
   const s = view.settings;
   const off = !s.menuBarEnabled;
@@ -199,6 +214,7 @@ export function UsageBody({
                     usage={tray}
                     retrying={retrying(tray.agent)}
                     onRetry={onRetry ? () => onRetry(tray.agent) : undefined}
+                    connect={connect}
                   />
                 </div>
               );

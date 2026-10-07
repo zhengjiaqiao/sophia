@@ -26,6 +26,7 @@ import type {
   GatewayProvider,
   GatewayProviderModel,
   GatewayState,
+  TrayUsage,
   UsageView,
 } from "../src/types.ts";
 import { CLAUDE_OFF, gatewayFixture, type CodexFixture } from "./gateway-fixture.ts";
@@ -160,6 +161,7 @@ const usageView = (overrides: Partial<UsageView> = {}): UsageView => ({
       ],
       note: null,
       retry: false,
+      connect: null,
     },
     {
       agent: "codex",
@@ -175,6 +177,7 @@ const usageView = (overrides: Partial<UsageView> = {}): UsageView => ({
       ],
       note: null,
       retry: false,
+      connect: null,
     },
   ],
   menuBar: { segments: [] },
@@ -275,6 +278,48 @@ test("用量行：能再试的原因行右端一颗托盘小按键「再试一�
   const codexHtml = html.slice(0, html.indexOf('aria-label="Claude"'));
   assert.match(codexHtml, /<p class="usage-note">被限流，约 5 分钟后再试<\/p>/);
   assert.doesNotMatch(codexHtml, /再试一次/);
+});
+
+test("只登录了桌面应用（画板 #206 状态 1、2）：块头写来源与时间、窗口行不写重置时间；超过一天只剩一句，块头不写时间", async () => {
+  const { TrayAgents } = await import("../src/TrayPanel.tsx");
+  const [, codex] = usageView().tray;
+  const row = (label: string, pct: number) => ({
+    label,
+    percentText: `剩 ${pct}%`,
+    gaugePercent: pct,
+    emphasize: false,
+    resetText: null,
+  });
+  const desktop: TrayUsage = {
+    agent: "claude-code",
+    updatedText: "来自 Claude 桌面应用 · 3 小时前",
+    windows: [row("5 小时", 58), row("本周", 81)],
+    note: null,
+    retry: false,
+    connect: null,
+  };
+  const claudePart = (claude: TrayUsage) => {
+    const agentState = trayAgentState(state(), usageView({ tray: [claude, codex] }));
+    const blocks = trayBlocks(AGENTS, agentState);
+    const html = render(TrayAgents, { blocks, state: agentState, host: trayHost });
+    return {
+      note: blocks.find((b) => b.id === "claude-code")?.note,
+      html: html.slice(html.indexOf('aria-label="Claude"')),
+    };
+  };
+  const fresh = claudePart(desktop);
+  assert.equal(fresh.note, "来自 Claude 桌面应用 · 3 小时前");
+  assert.match(fresh.html, /usage-wins--stacked[^]*>剩 58%<[^]*>剩 81%</);
+  assert.doesNotMatch(fresh.html, /usage-win__reset|usage-note/);
+  const old = claudePart({
+    ...desktop,
+    updatedText: null,
+    windows: [],
+    note: "Claude 桌面应用 2 天没更新用量",
+  });
+  assert.equal(old.note, null);
+  assert.doesNotMatch(old.html, /usage-wins/);
+  assert.match(old.html, /<p class="usage-note">Claude 桌面应用 2 天没更新用量<\/p>/);
 });
 
 test("用量行（两行版式）正在读取：键锁住、aria-busy，过了忙碌门槛换成刻度 +「正在读取」", async () => {
@@ -759,4 +804,164 @@ test("托盘两家的能力行同一骨架：名字撑满键位左边（TruncTip
       file,
     );
   }
+});
+
+// ===== 连接 Claude 用量（票 #208，画板 #206 第 2 版） =====
+
+const connectHandlers = {
+  start: () => undefined,
+  starting: false,
+  cancel: () => undefined,
+  reopen: () => undefined,
+};
+
+const desktopClaude = (patch: Partial<TrayUsage>): TrayUsage => ({
+  agent: "claude-code",
+  updatedText: "来自 Claude 桌面应用 · 3 小时前",
+  windows: [
+    { label: "5 小时", percentText: "剩 58%", gaugePercent: 58, emphasize: false, resetText: null },
+  ],
+  note: "连接后可以看到实时用量和重置时间",
+  retry: false,
+  connect: { kind: "offer" },
+  ...patch,
+});
+
+test("状态 3：Claude 没有用量来源（不在 signedIn）、但在 tray 里（装了桌面应用）——照样出用量行，句子 + 连接键", async () => {
+  const { TrayAgents } = await import("../src/TrayPanel.tsx");
+  const [, codex] = usageView().tray;
+  const claude = desktopClaude({
+    updatedText: null,
+    windows: [],
+    note: "连接后就能看到 Claude 额度，桌面应用照常用",
+  });
+  const view = usageView({ signedIn: ["codex"], tray: [claude, codex] });
+  const agentState = trayAgentState(state({ supported: false }), view);
+  const blocks = trayBlocks(AGENTS, agentState);
+  // 本机不支持第三方模型时 Claude 块只靠用量出：照样有这一块、这一行
+  assert.deepEqual(
+    blocks.map((b) => [b.id, b.rows.map((r) => r.id)]),
+    [["claude-code", ["usage"]]],
+  );
+  const html = render(TrayAgents, { blocks, state: agentState, host: trayHost });
+  const claudeHtml = html.slice(html.indexOf('aria-label="Claude"'));
+  assert.match(
+    claudeHtml,
+    /<p class="usage-note usage-note--retry"><span class="usage-note__text">连接后就能看到 Claude 额度，桌面应用照常用<\/span><span class="ss-busyslot-dim"><span class="ss-tipwrap is-idle"><button type="button" class="ss-btn ss-btn--compact">连接 Claude 用量<\/button>/,
+  );
+});
+
+test("连接那一处：给键 / 正在安装（键原位锁住）/ 等授权（刻度 + 取消，拿到地址才有「再打开 ↗」）", async () => {
+  const { UsageWindows } = await import("../src/usage/UsageWindows.tsx");
+  const offer = render(UsageWindows, {
+    usage: desktopClaude({}),
+    stacked: true,
+    connect: connectHandlers,
+  });
+  assert.match(offer, /剩 58%[^]*连接后可以看到实时用量和重置时间[^]*>连接 Claude 用量</);
+  assert.doesNotMatch(offer, /再试一次/);
+
+  const installing = render(UsageWindows, {
+    usage: desktopClaude({ connect: { kind: "installing" } }),
+    stacked: true,
+    connect: connectHandlers,
+  });
+  assert.match(
+    installing,
+    /连接后可以看到实时用量和重置时间<\/span><span class="ss-locked" aria-busy="true">[^]*>连接 Claude 用量</,
+    "过了忙碌门槛才换刻度 +「正在安装 Claude Code」（服务端渲染停在锁住）",
+  );
+
+  const waiting = (reopen: boolean) =>
+    render(UsageWindows, {
+      usage: desktopClaude({
+        note: "在浏览器里登录并点授权",
+        connect: { kind: "waiting", reopen },
+      }),
+      stacked: true,
+      connect: connectHandlers,
+    });
+  assert.match(
+    waiting(true),
+    /usage-note__wait" role="status">[^]*<span>在浏览器里登录并点授权<\/span><\/span>[^]*>取消<\/button>[^]*<p class="usage-note">没看到授权页 · [^]*>再打开</,
+  );
+  assert.doesNotMatch(waiting(false), /没看到授权页/, "拿不到授权页地址就不给这一句");
+  // 读屏只读一遍：刻度连同它的读屏文本藏起来，只读紧挨着的那句可见文字
+  assert.match(waiting(false), /<span aria-hidden="true"><svg class="ss-spinner/);
+
+  // 登录成功、在取首轮用量：句子留着、键原位锁住，没有「取消」
+  const finishing = render(UsageWindows, {
+    usage: desktopClaude({ connect: { kind: "finishing" } }),
+    stacked: true,
+    connect: connectHandlers,
+  });
+  assert.match(
+    finishing,
+    /连接后可以看到实时用量和重置时间<\/span><span class="ss-locked" aria-busy="true">[^]*>连接 Claude 用量</,
+  );
+  assert.doesNotMatch(finishing, />取消</);
+});
+
+test("连接失败：原文挂在句首「!」上、句后「手动安装 ↗」、右端总有「再试一次」；不另起一行 VPN 的句子", async () => {
+  const { UsageWindows } = await import("../src/usage/UsageWindows.tsx");
+  const install = render(UsageWindows, {
+    usage: desktopClaude({
+      note: "Claude Code 安装失败 · 无法访问 Claude 的服务器 · 检查网络或 VPN 后再试",
+      connect: {
+        kind: "failed",
+        detail: "curl: (6) Could not resolve host: claude.ai",
+        manualInstall: "https://code.claude.com/docs/en/setup",
+      },
+    }),
+    stacked: true,
+    connect: connectHandlers,
+  });
+  assert.match(
+    install,
+    /usage-note__mark[^]*ss-markbtn[^]*Claude Code 安装失败 · 无法访问 Claude 的服务器 · 检查网络或 VPN 后再试 ·[^]*>手动安装<[^]*>再试一次<\/button>/,
+  );
+  assert.equal(install.split('<p class="usage-note').length - 1, 1, "只有原因这一行");
+  // 画板定稿：安装失败都给「再试一次」——磁盘满也给，原因句照旧
+  const disk = render(UsageWindows, {
+    usage: desktopClaude({
+      note: "Claude Code 安装失败 · 磁盘空间不够",
+      connect: {
+        kind: "failed",
+        detail: null,
+        manualInstall: "https://code.claude.com/docs/en/setup",
+      },
+    }),
+    stacked: true,
+    connect: connectHandlers,
+  });
+  assert.match(disk, /磁盘空间不够[^]*>手动安装<[^]*>再试一次</);
+  assert.doesNotMatch(disk, /ss-markbtn/);
+  const denied = render(UsageWindows, {
+    usage: desktopClaude({
+      note: "连接失败 · 浏览器里取消了授权",
+      connect: { kind: "failed", detail: null, manualInstall: null },
+    }),
+    stacked: true,
+    connect: connectHandlers,
+  });
+  assert.match(denied, />再试一次</);
+  assert.doesNotMatch(denied, /手动安装/);
+  // 不在托盘或用量页里（没给动作）：只写句子
+  const bare = render(UsageWindows, { usage: desktopClaude({}), stacked: true });
+  assert.match(bare, /<p class="usage-note">连接后可以看到实时用量和重置时间<\/p>/);
+});
+
+test("安装确认：托盘里是窄面板（标题、后果、取消 / 安装），用量页是居中确认框", async () => {
+  const { ConnectConfirm } = await import("../src/usage/UsageWindows.tsx");
+  const inline = render(ConnectConfirm, {
+    inline: true,
+    onConfirm: () => undefined,
+    onCancel: () => undefined,
+  });
+  assert.match(
+    inline,
+    /ss-confirm--inline[^]*安装 Claude Code？[^]*将安装 Claude Code（Anthropic 官方），装好后在浏览器里登录一次。Claude 桌面应用照常用。[^]*>取消<[^]*>安装</,
+  );
+  const page = render(ConnectConfirm, { onConfirm: () => undefined, onCancel: () => undefined });
+  assert.match(page, /ss-confirm-layer[^]*安装 Claude Code？/);
 });

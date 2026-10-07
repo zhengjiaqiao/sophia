@@ -89,6 +89,38 @@ pub fn create_link(target: &Path, link: &Path, style: LinkStyle) -> io::Result<(
     }
 }
 
+/// `create_link` 的失败是不是「这里建不了链接」（spec #194 / #204）：文件系统不支持软链
+/// （exFAT、部分网络盘），或 Windows 上建不了 junction（FAT32 / exFAT 报「Incorrect function」）。
+/// 只对建链这一步的错误有意义：同样的错误码出在别的写入上不是这个意思。
+/// 错误码按平台写死（core 不依赖 libc，同 `atomicfile::write_failure`）：
+/// - macOS：ENOTSUP 45、EOPNOTSUPP 102、ENOSYS 78
+/// - Linux：EOPNOTSUPP 95、ENOSYS 38、EPERM 1（symlink(2)：「文件系统不支持建软链」，权限不够是 EACCES）
+/// - Windows：ERROR_INVALID_FUNCTION 1、ERROR_NOT_SUPPORTED 50、ERROR_PRIVILEGE_NOT_HELD 1314、
+///   ERROR_NOT_A_REPARSE_POINT 4390（Windows 部分没有实机核对）
+pub fn link_unsupported(e: &io::Error) -> bool {
+    #[cfg(target_os = "macos")]
+    const CODES: &[i32] = &[45, 102, 78];
+    #[cfg(target_os = "linux")]
+    const CODES: &[i32] = &[95, 38, 1];
+    #[cfg(windows)]
+    const CODES: &[i32] = &[1, 50, 1314, 4390];
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    const CODES: &[i32] = &[];
+    e.kind() == io::ErrorKind::Unsupported || e.raw_os_error().is_some_and(|c| CODES.contains(&c))
+}
+
+/// 改名跨了卷（EXDEV；Windows 是 ERROR_NOT_SAME_DEVICE 17）：两处不在同一个文件系统上，
+/// `rename` 做不了，要复制再删。错误码按平台写死（同 `link_unsupported`）
+pub fn crosses_volume(e: &io::Error) -> bool {
+    #[cfg(unix)]
+    const CODE: i32 = 18;
+    #[cfg(windows)]
+    const CODE: i32 = 17;
+    #[cfg(not(any(unix, windows)))]
+    const CODE: i32 = -1;
+    e.kind() == io::ErrorKind::CrossesDevices || e.raw_os_error() == Some(CODE)
+}
+
 /// 只删链接本身。Unix 软链是文件，Windows junction 是目录
 pub fn remove_link(link: &Path) -> io::Result<()> {
     #[cfg(unix)]

@@ -258,6 +258,55 @@ fn a_refused_connection_is_plain_network() {
 }
 
 #[test]
+fn skill_download_errors_carry_the_kind_and_the_raw_text() {
+    // 连不上：前端按类出主句，原文进「!」
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let refused = failure_of(run(test_state().get(
+        &format!("http://127.0.0.1:{port}/x"),
+        None,
+        false,
+    )));
+    // 连不上：`[类] 一句`，原文另起一行跟在 `[detail]` 后面（前端 parseBackendError 拆）
+    assert_eq!(
+        github_failure(&refused),
+        format!(
+            "[unreachable] {}\n[detail] {}",
+            NetError::Network.message("GitHub"),
+            refused.detail
+        )
+    );
+    assert!(refused
+        .detail
+        .starts_with(&format!("GET http://127.0.0.1:{port}/x → ")));
+
+    let silent = serve_once(|_| std::thread::sleep(Duration::from_millis(1500)));
+    let slow = failure_of(run(test_state().get(
+        &format!("{silent}/slow"),
+        Some(Duration::from_millis(200)),
+        false,
+    )));
+    assert!(github_failure(&slow).starts_with("[timeout] "));
+
+    // 仓库不在：不是网络的原因，前端照这一句显示
+    let missing = serve_once(|s| {
+        let _ = write!(s, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+    });
+    let gone = failure_of(run(test_state().get(&format!("{missing}/x"), None, false)));
+    assert!(github_failure(&gone).starts_with(&format!(
+        "[other] {}\n[detail] ",
+        github_message(&NetError::NotFound)
+    )));
+
+    // 中间的网关等超时（504）也按超时说
+    assert_eq!(NetError::Status(504).kind(), NetKind::Timeout);
+    assert_eq!(NetError::Interrupted.kind(), NetKind::Unreachable);
+}
+
+#[test]
 fn fallback_serializes_reason_and_detail_in_camel_case() {
     let failure = NetFailure {
         error: NetError::Unreadable,

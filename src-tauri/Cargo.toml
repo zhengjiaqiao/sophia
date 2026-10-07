@@ -69,4 +69,6 @@ tauri-nspanel = "2.1"
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 
 [dev-dependencies]
+minisign = "0.10.0"
+tauri = { version = "2", features = ["test"] }
 tempfile = "3"

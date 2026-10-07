@@ -36,6 +36,7 @@ import {
   folderLabel,
   keepSideKey,
   mergeSkillPages,
+  placedAgents,
   refAt,
   refRowKey,
   rowForHandle,
@@ -1177,15 +1178,13 @@ export default function SkillsTab({
         ? undefined
         : originNames([...view.rows.map((r) => r.sourceId), relinkId], sources).get(relinkId);
     const allTargets = overview?.domains.flatMap((d) => d.targets) ?? [];
-    const linkAgents = [
-      ...new Set(
-        plan.affected.flatMap((link) => {
-          const dir = link.path.replace(/[/\\][^/\\]*$/, "");
-          const label = allTargets.find((t) => t.path === dir)?.label;
-          return label ? [label] : [];
-        }),
-      ),
-    ];
+    // Sophia 放的副本与链接一起算：对用户它就是加上了（spec #194 修订）。
+    // 共用文件夹里的一处几家都会失去它：按路径找出所有列、按 agent 计数
+    const placed = placedAgents(
+      [...plan.affected.map((link) => link.path), ...plan.copies],
+      allTargets,
+    );
+    const linkAgents = placed.labels;
     // 直接读原件所在目录的 agent：这一行里画 ⦿ 的列
     const row = view.rows.find((r) => skillRowKey(r) === rowKey);
     const ownAgents = [
@@ -1202,7 +1201,7 @@ export default function SkillsTab({
       relink: plan.relinkTo !== null,
       text: deleteOriginalConfirm({
         skill: ref.skill,
-        links: plan.affected.length,
+        links: placed.count,
         relinkTo:
           plan.relinkTo === null ? undefined : relinkName ? originText(relinkName) : plan.relinkTo,
         ownAgents,
@@ -1420,7 +1419,7 @@ export default function SkillsTab({
       otherName: nameOf(other),
       keptPath: pathOf(kept),
       otherPath: planned.plan.path,
-      relinked: planned.plan.affected.length,
+      relinked: planned.plan.affected.length + planned.plan.copies.length,
     });
   };
 

@@ -16,6 +16,7 @@ import {
   FloatingToast,
   Mono,
   Note,
+  NoticePanel,
   SectionLabel,
   Tag,
   TextField,
@@ -38,7 +39,34 @@ import {
   navOfLocation,
   type AgentRef,
 } from "./installView.ts";
+import { copyDetails } from "../diagnostics.ts";
+import type { SkillDownloadFailure } from "../netFailure.ts";
 import "./install.css";
+
+/// 下载 skill 失败（spec #248、issue #253）：网络那三类（连不上、超时、限流）是灰面板——左端 `!` 看原文、
+/// 按类说的主句、「开着代理再试一次」；别的（仓库或分支不在、仓库太大）照旧一行字，`className` 是那一行的样子
+export function DownloadFailure({
+  failure,
+  className,
+  onRetry,
+}: {
+  failure: SkillDownloadFailure;
+  className: string;
+  onRetry: () => void;
+}) {
+  if (!failure.retryWithProxy) return <p className={className}>{failure.message}</p>;
+  return (
+    <div className="install-failure">
+      <NoticePanel
+        scope="section"
+        message={failure.message}
+        technical={failure.detail ?? undefined}
+        onCopy={(text) => copyDetails(text)}
+        action={{ label: t("common.net.retryWithProxy"), onClick: onRetry }}
+      />
+    </div>
+  );
+}
 
 /// 位置胶囊要的项目（与位置页筛选行同一份数据，调用方从壳里拿）
 export interface InstallPlaces {

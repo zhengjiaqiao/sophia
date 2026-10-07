@@ -35,3 +35,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+GSAP（GreenSock Animation Platform，https://gsap.com），Copyright 2008-2026 GreenSock。官网（website/）的片尾黑猫小戏用它编排动画，
+版本 3.15.0，随站点打包发布（不走 CDN）。GSAP 不是 MIT：按其 Standard "no charge" License（https://gsap.com/standard-license）使用，
+该许可允许在网站与 Web 应用里免费商用，包括随站点打包；限制是不得用 GSAP 做与 Webflow 竞争的、让用户通过可视化界面创建 / 编辑 / 管理动画的工具，
+也不得反向工程它来做竞品，并且不得删除其专有声明。Sophia 官网不属于被限制的用途；压缩会吃掉 GSAP 文件头的注释，所以随站另放 website/public/THIRD-PARTY-NOTICES.txt 保留它的版权与许可声明。

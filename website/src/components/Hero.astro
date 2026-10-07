@@ -1,0 +1,89 @@
+---
+// 首屏（R6）：左文右短片，页面宽 ≤ 980px 上下叠放；主键下 Apple 芯片版，小字「Intel 版」下 x64。短片见 Film.astro
+import { SITE } from "../site.config.ts";
+import { t, type Lang } from "../i18n.ts";
+import AppleGlyph from "./AppleGlyph.astro";
+import Film from "./Film.astro";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+---
+
+<section class="hero">
+  <div class="wrap hero__grid">
+    <div class="hero__text">
+      <h1>
+        <span class="ph">{t(lang, "hero.title1")}</span>
+        <span class="ph soft">{t(lang, "hero.title2")}</span>
+      </h1>
+      <p class="lead">
+        <span class="ph">{t(lang, "hero.lead1")}</span>
+        <span class="ph">{t(lang, "hero.lead2")}</span>
+      </p>
+      <div class="cta">
+        <a class="btn btn--ink btn--hero" href={SITE.downloadHref.arm64}>
+          <AppleGlyph />
+          <span class="t"><b>{t(lang, "hero.download")}</b></span>
+        </a>
+        <span class="cta__alt">{t(lang, "hero.free")} <a href={SITE.downloadHref.x64}>{t(lang, "hero.intel")}</a></span>
+      </div>
+    </div>
+    <Film lang={lang} />
+  </div>
+</section>
+
+<style>
+  .hero {
+    padding-block: clamp(40px, 5cqi, 80px) 32px;
+  }
+  .hero__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr);
+    gap: clamp(28px, 4cqi, 56px);
+    align-items: center;
+  }
+  @container site (max-width: 980px) {
+    .hero__grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .hero h1 {
+    /* 两栏时左栏窄，比 --mk-hero 小一档；画板是 4cqi，实测 1280 宽时第二行放不下会变三行，取 3.8cqi、上限 48px、下限 31px 保住「任何宽度两行」（R6，实测三种语言 360–1440 都是两行） */
+    font: 600 clamp(31px, 3.8cqi, 48px) / 1.18 var(--font-cjk);
+    letter-spacing: -0.025em;
+    margin: 0;
+  }
+  /* 任何宽度下标题都是两行；第二行退一档灰 */
+  .hero h1 .ph {
+    display: block;
+  }
+  .hero h1 .soft {
+    color: var(--ink-faint);
+  }
+  .lead {
+    font-size: var(--mk-lead);
+    line-height: 1.65;
+    color: var(--ink-mute);
+    max-width: 26em;
+    margin: 18px 0 0;
+  }
+  .lead .ph {
+    display: inline-block;
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 20px;
+    margin-top: 28px;
+  }
+  .cta__alt {
+    font-size: 14px;
+    color: var(--ink-mute);
+  }
+  .cta__alt a {
+    text-underline-offset: 3px;
+  }
+</style>

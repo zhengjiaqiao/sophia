@@ -106,6 +106,20 @@
   white-space: nowrap;
 }
 
+/* 「连接 Claude 用量」等授权（票 #208）：句首 14 宽刻度 + 去哪做什么，刻度与字间距同忙碌（6） */
+.usage-note__wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 失败原文的入口「!」（Details，网关行同款 14）：跟在句首、不撑高这一行 */
+.usage-note__mark {
+  display: inline-flex;
+  vertical-align: middle;
+  margin: -3px var(--space-xxs) -3px 0;
+}
+
 /* 两行版式（托盘，系统菜单风格）：每个窗口上一行「窗口名 ……… 读数」（名 13、读数 12），下一行满宽进度条（高 5）。
    一个窗口一块，块间 3 */
 .usage-wins--stacked {

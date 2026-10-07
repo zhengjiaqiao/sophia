@@ -1,0 +1,649 @@
+/* 首屏短片第 2–5 镜头的样式（画板 hero7 的 .mx7 / .sw7 / .mods / .chat7 / .mb7，#242）。
+   各镜头在 HTML 里就是完整画面（终点姿态）；起点由 JS 用 data-* / 类摆出来，动画全是 WAAPI，收手后回到这里写的样子。
+   橙只在 R15 列出的地方：「任意模型」下划线与选中框、开关刻条、进度条（accent）；字用 accent-ink（只有字幕关键词）。
+   画板里模型卡的厂商标签、对话里新模型名、模型键的闪一下原是橙，不在 R15 里，这里改成墨色。 */
+
+.film {
+  /* 格点弹出的回弹曲线（同 SkillSection 的 --spring，DESIGN「官网」有记） */
+  --spring: linear(0, 0.065 5%, 0.209 10%, 0.378 15%, 0.54 20%, 0.679 25%, 0.809 31%, 0.899 37%, 0.97 45%, 1.008 55%, 1.015 68%, 1.007 86%, 1);
+}
+/* 摆姿态（rest / enter）时临时关掉过渡，避免「瞬间切换」变成一段慢动画 */
+.film.snap,
+.film.snap *,
+.film.snap *::before,
+.film.snap *::after {
+  transition: none !important;
+}
+
+/* 字幕里的下划线关键词（第 3 镜头）：先画出来，再飞成选中框 */
+.cap7 em.ul {
+  position: relative;
+}
+.cap7 em.ul::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0.9em; /* 句号占的位置，不划到句号底下 */
+  bottom: -0.02em;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+html[lang="en"] .cap7 em.ul::after {
+  right: 0.35em;
+}
+.cap7 em.ul.drawn::after {
+  transform: scaleX(1);
+}
+
+/* 光标、点击涟漪、选中框 */
+.film .ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 22px;
+  height: 22px;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
+  /* 按下与跟着机位缩放都以箭头尖为原点（路径 M4 2.5），箭头尖始终指在原处 */
+  transform-origin: 4px 2.5px;
+}
+.film .ghost.show {
+  opacity: 1;
+}
+.ripple {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+  pointer-events: none;
+  z-index: 19;
+  animation: film-rip 0.6s var(--ease-mech) forwards;
+}
+@keyframes film-rip {
+  from {
+    transform: scale(0.2);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+.selbox {
+  position: absolute;
+  z-index: 11;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+.fly {
+  box-sizing: border-box;
+}
+
+/* ---------- 第 2 镜头：矩阵 ---------- */
+.mx7 {
+  right: 5%;
+  top: 56%;
+  transform: translateY(-50%);
+  width: 70%;
+  padding: 12px 14px;
+}
+.mx7 table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.mx7 th {
+  font: 600 10.5px / 1.2 var(--font-cond);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 0 2px 12px;
+  text-align: center;
+  height: 28px;
+}
+.mx7 th:first-child,
+.mx7 td:first-child {
+  text-align: left;
+}
+.mx7 td {
+  height: 52px;
+  border-top: 1px solid var(--row-line);
+  text-align: center;
+  font: 500 15px var(--font-ui);
+}
+.mx7 .cell {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+.mx7 .cell svg {
+  width: 17px;
+  height: 17px;
+  overflow: visible;
+}
+/* 格子记号照应用（DESIGN「格子记号」），墨色：● 已加上、○ 点一下加上、⦿ 原件、虚线圈 断了 */
+.mx7 .cell .f {
+  fill: var(--ink);
+  transform-origin: 8px 8px;
+  transform: scale(0);
+  transition: transform 0.45s var(--spring);
+}
+.mx7 .cell .o {
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.5;
+  transition: opacity 0.2s;
+}
+.mx7 .cell .s {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  opacity: 0;
+}
+.mx7 .cell .b {
+  fill: none;
+  stroke: var(--ink-mute);
+  stroke-width: 1.5;
+  stroke-dasharray: 2.2 2.4;
+  opacity: 0;
+}
+.mx7 .cell[data-s="added"] .f {
+  transform: scale(1);
+}
+.mx7 .cell[data-s="added"] .o,
+.mx7 .cell[data-s="original"] .o,
+.mx7 .cell[data-s="broken"] .o {
+  opacity: 0;
+}
+.mx7 .cell[data-s="original"] .f {
+  transform: scale(0.48);
+}
+.mx7 .cell[data-s="original"] .s {
+  opacity: 1;
+}
+.mx7 .cell[data-s="broken"] .b {
+  opacity: 1;
+}
+.mx7 .cell.is-pop::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink);
+  animation: film-pop 0.6s var(--ease-mech) forwards;
+}
+@keyframes film-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+@container site (max-width: 640px) {
+  .mx7 {
+    left: 5%;
+    right: 5%;
+    width: auto;
+    top: 60%;
+  }
+  .mx7 td {
+    height: 46px;
+    font-size: 13.5px;
+  }
+  .mx7 .cell {
+    width: 34px;
+    height: 34px;
+  }
+  .mx7 .cell svg {
+    width: 16px;
+    height: 16px;
+  }
+  .mx7 th {
+    font-size: 10px;
+  }
+}
+/* 提示条：墨底、浮的投影（同 skill 区的提示条） */
+.toast7 {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--face);
+  font: 400 12.5px var(--font-ui);
+  white-space: nowrap;
+  box-shadow: var(--elev-float);
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  transition:
+    opacity 0.25s,
+    transform 0.35s var(--ease-mech);
+  pointer-events: none;
+}
+.toast7.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.toast7 svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+/* ---------- 第 3 镜头：开关与模型卡 ---------- */
+.sw7 {
+  right: 5%;
+  top: 20%;
+  width: 41%;
+  padding: 4px 18px;
+  font: 600 16px var(--font-cjk);
+}
+.swrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+}
+.swrow + .swrow {
+  border-top: 1px solid var(--row-line);
+}
+/* 开关：同应用的开关（槽 + 滑块，开着时槽里一道橙刻条，R15） */
+.sw7 .switch {
+  display: inline-flex;
+  align-items: center;
+}
+.sw7 .switch__t {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex: none;
+  border-radius: 11px;
+  background: var(--track);
+  box-shadow: inset 0 1px 2px rgba(28, 28, 26, 0.12);
+  transform: scale(1.3);
+  transform-origin: right center;
+}
+.sw7 .switch__t::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 10px;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.2s 0.1s;
+}
+.sw7 .switch__t::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.45s var(--spring-slide);
+}
+.sw7 .switch[data-on="true"] .switch__t::after {
+  transform: translateX(18px);
+}
+.sw7 .switch[data-on="true"] .switch__t::before {
+  opacity: 1;
+}
+.mods {
+  position: absolute;
+  right: 5%;
+  top: 60%;
+  width: 41%;
+  display: grid;
+  gap: 8px;
+  z-index: 2;
+}
+.mods[data-shown="false"] .mod {
+  opacity: 0;
+}
+.mod {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--hairline),
+    0 12px 30px -14px rgba(28, 28, 26, 0.25);
+  font: 500 13.5px var(--font-mono);
+}
+.mod small {
+  font: 400 12px var(--font-ui);
+  color: var(--ink-faint);
+}
+/* 选中框：沿用应用「选中」的橙（R15） */
+.mod.pick {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 12px 30px -14px rgba(28, 28, 26, 0.3);
+}
+@container site (max-width: 640px) {
+  .sw7,
+  .mods {
+    right: 6%;
+    width: 88%;
+  }
+  .sw7 {
+    top: 30%;
+    padding: 0 16px;
+    font-size: 15px;
+  }
+  .swrow {
+    padding: 7px 0;
+  }
+  .mods {
+    top: 62%;
+    gap: 6px;
+  }
+  .mod {
+    padding: 9px 14px;
+  }
+}
+
+/* ---------- 第 4 镜头：对话 ---------- */
+/* 画板里对话框顶到字幕那一带（top 12%），字幕会压在第一条消息上；这里从字幕下面起，字号随整页宽度缩，
+   保证四条消息都放得下（画板的 13.5px 在 1024 宽的页面上放不下） */
+.chat7 {
+  right: 5%;
+  left: 26%;
+  top: 27%;
+  bottom: 6%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat7 .chat {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  overflow: hidden;
+  font-size: clamp(11.5px, 1.15cqi, 13.5px);
+}
+.chat7 .msg {
+  max-width: 88%;
+  line-height: 1.45;
+}
+.chat7 .msg[hidden] {
+  display: none;
+}
+.chat7 .msg.shown {
+  animation: film-line-in 0.4s var(--ease-mech) both;
+}
+@keyframes film-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.chat7 .msg.u {
+  align-self: flex-end;
+  background: var(--recess);
+  padding: 6px 10px;
+  border-radius: 12px 12px 4px 12px;
+}
+.chat7 .msg.a {
+  color: var(--ink-mute);
+}
+.chat7 .msg.a small {
+  display: block;
+  font: 500 11px var(--font-mono);
+  color: var(--ink-faint);
+  margin-bottom: 2px;
+}
+.chat7 .msg.a small.new {
+  color: var(--ink);
+}
+.chat7 code {
+  font: 400 12px var(--font-mono);
+  background: var(--recess);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.chat7 .composer {
+  flex: none;
+  margin: 0 10px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 5px 5px 10px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  background: var(--paper);
+  font-size: 12.5px;
+}
+.chat7 .input {
+  flex: 1;
+  min-width: 0;
+  min-height: 1.5em;
+  color: var(--ink);
+  white-space: pre;
+  overflow: hidden;
+}
+.chat7 .input:empty::before {
+  content: attr(data-ph);
+  color: var(--ink-faint);
+}
+.chat7 .model {
+  flex: none;
+  background: var(--recess);
+  border-radius: 8px;
+  padding: 5px 9px;
+  font: 500 12px var(--font-mono);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.chat7 .model[data-hold] {
+  opacity: 0;
+}
+@container site (max-width: 640px) {
+  .chat7 {
+    left: 5%;
+    right: 5%;
+    width: auto;
+    top: 28%;
+    bottom: 6%;
+  }
+  .chat7 .chat {
+    font-size: 12.5px;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+}
+
+/* ---------- 第 5 镜头：菜单栏与用量面板 ---------- */
+.mb7 {
+  right: 6%;
+  top: 8%;
+  width: 58%;
+  height: 86%;
+  border-radius: 16px;
+  overflow: hidden;
+  background: linear-gradient(160deg, var(--surface), var(--recess));
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+.mb7 .menubar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  height: 38px;
+  padding-inline: 14px;
+  background: color-mix(in srgb, var(--paper) 70%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--hairline);
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+.mb7 .tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  color: var(--ink);
+  font: 500 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.mb7 .tray[data-open="true"] {
+  background: var(--track);
+}
+.mb7 .tray > svg {
+  width: 15px;
+  height: 15px;
+}
+.mb7 .tray > svg [fill] {
+  fill: currentColor;
+}
+.mb7 .tsegs {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.mb7 .tseg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mb7 .tseg .ag {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.mb7 .tseg b {
+  display: inline-flex;
+  flex-direction: column;
+  font-weight: 500;
+  line-height: 1;
+}
+.mb7 .drop {
+  position: absolute;
+  right: 10px;
+  top: 44px;
+  z-index: 6;
+  width: 72%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+  transform-origin: 85% 0;
+  transition:
+    transform 0.35s var(--spring-slide),
+    opacity 0.2s;
+}
+.mb7 .drop[data-open="false"] {
+  transform: scale(0.94);
+  opacity: 0;
+}
+.mb7 .drop h6 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  font: 600 11px / 1 var(--font-cond);
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+.mb7 .drop hr {
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--row-line);
+}
+.mb7 .meter {
+  margin-top: 9px;
+}
+.mb7 .drop h6 + .meter {
+  margin-top: 8px;
+}
+.mb7 .meter > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.mb7 .meter > div span:last-child {
+  font: 500 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.mb7 .bar {
+  display: block;
+  position: relative;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 6px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+.mb7 .bar i {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  transform-origin: left;
+}
+/* 短片里面板放四行，重置时间不放（用量区有），免得挤出画面 */
+.mb7 .meter small {
+  display: none;
+}
+@container site (max-width: 640px) {
+  .mb7 {
+    left: 5%;
+    right: 5%;
+    width: auto;
+    top: 28%;
+    height: 66%;
+  }
+  .mb7 .drop {
+    width: 80%;
+    padding: 12px 14px;
+  }
+  .mb7 .meter {
+    margin-top: 8px;
+  }
+  .mb7 .drop hr {
+    margin: 8px 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb7 .drop,
+  .sw7 .switch__t::after,
+  .mx7 .cell .f {
+    transition: none;
+  }
+}

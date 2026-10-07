@@ -2111,9 +2111,9 @@ test("NoticePanel 行下失败：原因写全、可折行，给了 onClose 才�
   assert.doesNotMatch(render(NoticePanel, { message: "x" }), /关闭/);
 });
 
-// spec 2026-10-04-local-diagnostics R13；2026-10-06 产品负责人（画板 06e734c8）：不再是一颗 `详情` 键——
-// 原文挂在那句话（主句 · 原因）上，停上去浮起悬浮卡；键区不多一颗键
-test("NoticePanel technical：整句（主句 · 原因）是悬浮卡的触发区，键区没有 `详情`；没给 onCopy 就是普通的句子", () => {
+// spec 2026-10-04-local-diagnostics R13；2026-10-06 产品负责人（画板 5703fb83 方案 D）：不再是一颗 `详情` 键，
+// 也不挂在句子上——左端的 `!` 就是入口（图标键），停上去或点一下浮起悬浮卡；键区不多一颗键，句子照旧是字
+test("NoticePanel technical：左端的 `!` 是图标键（读屏「查看错误详情」），句子照旧是字，键区没有 `详情`；没给 onCopy 时 `!` 只是记号", () => {
   const html = render(NoticePanel, {
     scope: "section",
     message: "读不到第三方模型的状态",
@@ -2124,7 +2124,11 @@ test("NoticePanel technical：整句（主句 · 原因）是悬浮卡的触发�
   });
   assert.match(
     html,
-    /<span class="ss-noticepanel__message"><span class="ss-hovercard"[^>]*aria-haspopup="dialog"[^>]*>读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ~\/\.codex\/config\.toml 不归你的账户所有<\/span><\/span><\/span>/,
+    /<span class="ss-noticepanel__mark"><button type="button" class="ss-hovercard ss-markbtn ss-markbtn--panel" aria-label="查看错误详情" aria-haspopup="dialog" aria-expanded="false">/,
+  );
+  assert.match(
+    html,
+    /<span class="ss-noticepanel__message">读不到第三方模型的状态<span class="ss-noticepanel__reason"> · ~\/\.codex\/config\.toml 不归你的账户所有<\/span><\/span>/,
   );
   assert.match(
     html,
@@ -2132,12 +2136,14 @@ test("NoticePanel technical：整句（主句 · 原因）是悬浮卡的触发�
   );
   assert.doesNotMatch(html, />详情</);
   assert.doesNotMatch(html, /Permission denied/, "原文只在悬浮卡里");
-  // 只有原文、没有别的键：不出键区
+  // 只有原文、没有别的键：不出键区，`!` 照样是入口
   const only = render(NoticePanel, { message: "x", technical: "raw", onCopy: noop });
   assert.doesNotMatch(only, /ss-noticepanel__actions/);
-  assert.match(only, /ss-hovercard/);
-  // 没给复制回调：不挂（复制要先去隐私，调用方负责）
-  assert.doesNotMatch(render(NoticePanel, { message: "x", technical: "raw" }), /ss-hovercard/);
+  assert.match(only, /ss-markbtn/);
+  // 没给复制回调：`!` 照旧是静态记号（复制要先去隐私，调用方负责）
+  const plain = render(NoticePanel, { message: "x", technical: "raw" });
+  assert.doesNotMatch(plain, /ss-markbtn|<button/);
+  assert.match(plain, /<span class="ss-noticepanel__mark" role="img"/);
 });
 
 // ===== 确认弹窗 =====

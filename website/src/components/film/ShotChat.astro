@@ -1,0 +1,39 @@
+---
+// 第 4 镜头的静态样子（= 完整画面）：「换了模型，原来的对话都还在」+ 对话框（两轮都在，模型键写着第二个模型）。
+// 演示逻辑在 src/client/film-shots/chat.ts：起点只有第一轮，模型键由上一镜头选中的模型卡飞进来。
+import { FILM_MODELS, PICKED_MODEL } from "../../demos/filmShots.ts";
+import { t, type Lang } from "../../i18n.ts";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const first = FILM_MODELS[0]!.id;
+const picked = FILM_MODELS[PICKED_MODEL]!.id;
+---
+
+<div class="shot" data-shot="3">
+  <p class="cap7">
+    <span><span class="ln">{t(lang, "film.s4a")}</span></span>
+    <span><span class="ln"><em>{t(lang, "film.s4b")}</em></span></span>
+  </p>
+  <!-- 机位层：字幕在外面（client/film-shots/camera.ts） -->
+  <div class="cam">
+    <div class="frag card7 chat7" aria-hidden="true">
+      <div class="chat">
+        <div class="msg u">{t(lang, "film.chatQ")}</div>
+        <div class="msg a">
+          <small>{first}</small>{t(lang, "film.chatA1")}<code>user</code>{t(lang, "film.chatA2")}
+        </div>
+        <div class="msg u later">{t(lang, "film.chatAgain")}</div>
+        <div class="msg a later">
+          <small class="new">{picked}</small><span class="reply">{t(lang, "film.chatReply")}</span>
+        </div>
+      </div>
+      <div class="composer">
+        <span class="input" data-ph={t(lang, "film.ask")} data-text={t(lang, "film.chatAgain")}></span>
+        <span class="model">{picked} ▾</span>
+      </div>
+    </div>
+  </div>
+</div>

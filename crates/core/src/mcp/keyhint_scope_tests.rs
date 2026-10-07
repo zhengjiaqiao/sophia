@@ -70,6 +70,7 @@ impl World {
 
     fn locations(&self) -> Vec<McpLocation> {
         let env = Env {
+            apps: Vec::new(),
             home: self.home.clone(),
             vars: Default::default(),
         };
@@ -463,6 +464,7 @@ fn symlinked_project_root_is_judged_by_its_real_path() {
     std::os::unix::fs::symlink(&w.a, &alias).unwrap();
     write(&w.home.join(".cursor/mcp.json"), &keyed());
     let env = Env {
+        apps: Vec::new(),
         home: w.home.clone(),
         vars: Default::default(),
     };

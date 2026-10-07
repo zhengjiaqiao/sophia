@@ -47,14 +47,19 @@ export type CellState =
   /// 目标目录存在但无法写入。**扫描永远不产出这个状态**：判定它要实际试写一次，
   /// 每轮扫描都试写代价太大。只在上层真的写失败之后由上层构造
   | "readOnly";
+/// core 扫描结果里的格状态：比 `CellState` 多一种 `copied`——那里建不了链接时 Sophia 放的、
+/// 记录在案的副本（core `CellState::Copied`）。对用户它就是已链，界面上不出现「副本」
+/// （spec #194 修订 2026-10-06）：`api.scanAll` 收到就换成 `linked`（`showCopiesAsLinked`），
+/// 之后的界面代码只见 `CellState`
+export type ScannedCellState = CellState | "copied";
 export interface Cell {
   sourceId: string;
   skill: string;
   targetId: string;
   path: string;
   state: CellState;
-  /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 linked / foreign 有值，
-  /// 其余状态是 null。foreign 的提示条要靠它说出「指向哪个本体」
+  /// 这一格上的软链解析后落在哪（`real_path` 的结果）。只有 linked / foreign（及 core 的 copied）有值，
+  /// 其余状态是 null。foreign 的提示条要靠它说出「指向哪个本体」；副本格给的是它对应的原件
   pointsTo: string | null;
 }
 
@@ -114,7 +119,10 @@ export interface CellRef {
   targetId: string;
 }
 
-export type ActionKind = "create" | "brokenLink" | "unlink" | "deleteSource";
+/// `placeCopy` / `updateCopy`：建不了链接时改放副本、原件变了更新副本（core 内部区分，
+/// 界面上与 `create` 一样是「加上」）
+export type ActionKind =
+  "create" | "brokenLink" | "unlink" | "deleteSource" | "placeCopy" | "updateCopy";
 export interface PlannedAction {
   kind: ActionKind;
   itemName: string;
@@ -146,6 +154,9 @@ export interface DeleteSourcePlan {
   inGit: string | null;
   /// 别处同名的另一个本体；删完把 affected 改指到它。null 表示没有别处可指——affected 一起清掉
   relinkTo: string | null;
+  /// Sophia 为它放的副本所在（core `DeleteSourcePlan.copies`）：默认随原件一起删、同一次撤销。
+  /// 对用户与链接一样算「哪些 agent 会失去它」，界面上不说是副本（spec #194 修订）
+  copies: string[];
   /// 目录里普通文件最新的修改时间（Unix 毫秒）；没有文件或读不到时为 null
   modified?: number | null;
 }
@@ -169,8 +180,9 @@ export type Outcome =
   | { status: "skipped" }
   | { status: "removed" }
   | { status: "failed"; reason: string };
-/// 失败的机器可读类别（core `FailKind`）：前端按它分支，不认原因句的文字。只有建链 / 删链的失败会填
-export type FailKind = "noWrite" | "diskFull" | "missing";
+/// 失败的机器可读类别（core `FailKind`）：前端按它分支，不认原因句的文字。只有建链 / 删链的失败会填。
+/// `linkUnsupported`（这里建不了链接）core 通常已自动改放副本、结果是做成了；只在没改成时出现，按原句转述
+export type FailKind = "noWrite" | "diskFull" | "missing" | "linkUnsupported";
 export interface ReportEntry {
   action: PlannedAction;
   outcome: Outcome;
@@ -1137,7 +1149,8 @@ export type ReportCountKind = "pageFault" | "uncaught";
 
 /// 有用量的 agent，与 agent 注册表、`AgentIcon` 的 id 一致
 export type UsageAgentId = "claude-code" | "codex";
-export type UsageSource = "getUsage" | "rollout" | "appServer";
+/// `desktopHistory`：Claude 桌面应用记在本机的用量历史（命令行不可用时读；只有百分比，没有重置时间）
+export type UsageSource = "getUsage" | "rollout" | "appServer" | "desktopHistory";
 export type UsageSeverity = "normal" | "warning" | "critical";
 export interface UsageWindow {
   /// `session`、`weekly`、`model:<显示名>`、`minutes:<N>`；设置里记主 / 第二窗口用它
@@ -1208,13 +1221,39 @@ export interface TrayWindowRow {
 /// 托盘里一个 agent 的用量（块头后的过期弱字、一窗口一行、一句状态）
 export interface TrayUsage {
   agent: UsageAgentId;
-  /// 块头名字后的「3 分钟前更新」；还没有读数是 null
+  /// 块头名字后的「3 分钟前更新」；读数来自 Claude 桌面应用时是「来自 Claude 桌面应用 · 3 小时前」；
+  /// 还没有读数、或桌面应用的读数超过 24 小时（原因行里说了多少天）是 null
   updatedText: string | null;
   windows: TrayWindowRow[];
   note: string | null;
-  /// 原因行右端给不给「再试一次」：后端按原因算好（版本可能太旧、没有回应、没能启动、认不出、没找到才给）
+  /// 原因行右端给不给「再试一次」：后端按原因算好（版本可能太旧、没有回应、没能启动、认不出、没找到才给）；
+  /// 有 `connect` 时不给
   retry: boolean;
+  /// 「连接 Claude 用量」那一处（只 Claude 有，票 #208）：命令行不可用时原因行右端的键，或连接进行到哪、失败的出口；
+  /// 命令行正常时 null。句子在 `note`
+  connect: ConnectAction | null;
 }
+
+/// 原因行右端「连接 Claude 用量」那一处（core `usage::format::ConnectAction`）
+export type ConnectAction =
+  /// 默认键「连接 Claude 用量」
+  | { kind: "offer" }
+  /// 键原位忙碌「正在安装 Claude Code」（不可取消）
+  | { kind: "installing" }
+  /// 句首刻度 +「在浏览器里登录并点授权」，右端「取消」；`reopen` 时下一句「没看到授权页 · 再打开 ↗」
+  | { kind: "waiting"; reopen: boolean }
+  /// 授权完成、在取首轮用量：键原位忙碌「正在读取」，不可取消
+  | { kind: "finishing" }
+  /// 失败：右端总有「再试一次」；`detail` 挂在句首「!」上，`manualInstall` 是句后「手动安装 ↗」打开的地址
+  /// （后端给，null 不出这颗键）
+  | {
+      kind: "failed";
+      detail: string | null;
+      manualInstall: string | null;
+    };
+
+/// 点「连接 Claude 用量」的结果（gateway `usage::connect::ConnectStart`）
+export type ConnectStart = "started" | "needsInstall" | "busy";
 export interface MenuBarSegment {
   agent: UsageAgentId;
   lines: string[];
@@ -1229,6 +1268,7 @@ export interface MenuBarView {
 export interface UsageView {
   state: UsageState;
   settings: UsageSettings;
+  /// 有用量来源的 agent（登录了，或 Claude 命令行没登录但有桌面应用的记录）；名字沿用「已登录」
   signedIn: UsageAgentId[];
   tray: TrayUsage[];
   /// 用量页的预览：打开菜单栏显示后会是的样子（开关关着也照样算）

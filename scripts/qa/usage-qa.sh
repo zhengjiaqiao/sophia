@@ -131,10 +131,11 @@ FAKE
   chmod +x "$H/.local/bin/codex"
 }
 
+# 测试主目录里 Sophia 给 Claude 定的配置目录是 $H/.claude（gateway `Account::in_home`），登录记录看它下面的 .claude.json
 signin() { # agent on|off
   case "$1:$2" in
-    claude:on) printf '{"oauthAccount":{"emailAddress":"%s","organizationName":"%s","accountUuid":"%s"},"projects":{}}\n' "$FAKE_EMAIL" "$FAKE_ORG" "$FAKE_ACCOUNT" > "$H/.claude.json" ;;
-    claude:off) printf '{"projects":{}}\n' > "$H/.claude.json" ;;
+    claude:on) printf '{"oauthAccount":{"emailAddress":"%s","organizationName":"%s","accountUuid":"%s"},"projects":{}}\n' "$FAKE_EMAIL" "$FAKE_ORG" "$FAKE_ACCOUNT" > "$H/.claude/.claude.json" ;;
+    claude:off) printf '{"projects":{}}\n' > "$H/.claude/.claude.json" ;;
     codex:on) printf '{"tokens":{"account_id":"%s"}}\n' "$FAKE_ACCOUNT" > "$H/.codex/auth.json" ;;
     codex:off) rm -f "$H/.codex/auth.json" ;;
     *) die "signin <claude|codex> <on|off>" ;;

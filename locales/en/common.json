@@ -46,6 +46,7 @@
   "common.feedback.shotFailed": "Screenshot {n} didn't upload, will retry when sending",
   "common.feedback.removeShot": "Remove screenshot {n}",
   "common.details.toggle": "Details",
+  "common.details.open": "Show error details",
   "common.details.copy": "Copy details",
   "common.details.copied": "Copied",
   "common.write.changed": "Another program may have just changed it; nothing changed",
@@ -66,5 +67,16 @@
   "common.textField.show": "Show",
   "common.list.enum": ", ",
   "common.list.and": " and ",
-  "common.list.semicolon": "; "
+  "common.list.semicolon": "; ",
+  "common.net.checkUpdate.unreachable": "Can't reach the update server; check your network",
+  "common.net.checkUpdate.timeout": "The network is too slow; the update check timed out",
+  "common.net.checkUpdate.other": "Update check failed; try again later",
+  "common.net.update.rateLimited": "The update server is limiting access; try again in a few minutes",
+  "common.net.download.unreachable": "Can't reach the download server; check your network",
+  "common.net.download.timeout": "The network is too slow; the download timed out",
+  "common.net.downloadUpdate.other": "Download failed; try again later",
+  "common.net.downloadSkill.rateLimited": "The download server is limiting access; try again in a few minutes",
+  "common.net.retry": "Try again",
+  "common.net.retryWithProxy": "Try again with your proxy on",
+  "common.net.website": "Download from the website"
 }

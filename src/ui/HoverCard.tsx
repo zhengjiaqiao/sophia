@@ -3,16 +3,16 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { FOCUSABLE, FloatingLayer } from "./FloatingLayer.tsx";
 import { TIP_DELAY_MS } from "./Tooltip.tsx";
 
-/// 悬浮卡（DESIGN-components「悬浮卡 HoverCard」，画板 06e734c8，2026-10-06 产品负责人：「悬浮碳层除了之前墨色的那种
-/// 建议的，还有这种带交互的」）：手停在一句话上，在字下面浮起一张纸卡，卡里能选字、能点。
+/// 悬浮卡（DESIGN-components「悬浮卡 HoverCard」，画板 06e734c8 / 5703fb83 方案 D，2026-10-06 产品负责人：「悬浮碳层除了之前墨色的
+/// 那种建议的，还有这种带交互的」）：手停在一颗键上，在它下面浮起一张纸卡，卡里能选字、能点。
+/// 触发它的是一颗看得见的键（详情用错误前面的「!」）：不挂在一句普通文字上——那样没人想得到能停（规范 ⑧）。
 ///
 /// 和提示框（`Tooltip`）分工：提示框是墨色、只读的一两句话，手一移开就收；悬浮卡是纸（就是 `FloatingLayer`：
 /// `paper` + 1px `hairline`、`float` 12 圆角 + 浮层投影），里面放一段要看、要复制的东西。
 ///
 /// - 停 400 ms 出（同表格外的提示框）；手离开字和卡 300 ms 后收，斜着挪进卡里不收。
-/// - 点一下那句话（或焦点在它上时按回车、空格）：立刻出并钉住，点外面、Esc、再点一次、页面滚动才收。
-/// - 键盘：那句话能 Tab 停到，停够了出卡；卡开着时 Tab 进卡，Esc 收卡、焦点回到那句话。
-/// - 那句话平时不加任何记号（D21）；手放上去、卡开着时字转主字色，说「这里有东西」。
+/// - 点一下键（或焦点在它上时按回车、空格）：立刻出并钉住，点外面、Esc、再点一次、页面滚动才收。
+/// - 键盘：键能 Tab 停到，停够了出卡；卡开着时 Tab 进卡，Esc 收卡、焦点回到键上。
 export const HOVER_CARD_LEAVE_MS = 300;
 
 export type HoverCardState = "closed" | "hover" | "pinned";
@@ -33,13 +33,15 @@ export function hoverCardNext(state: HoverCardState, event: HoverCardEvent): Hov
 }
 
 export interface HoverCardProps {
-  /// 触发它的那句话（只放字；句子里的键放在外面，不算触发区）
+  /// 触发键里画什么（详情是「!」图形）
   children: ReactNode;
+  /// 触发键的读屏名（图标键没有字时必给）
+  triggerLabel?: string;
   /// 卡里的东西
   content: ReactNode;
   /// 卡的读屏名
   label: string;
-  /// 加在触发的那句话上（它自己是 flex 项时，如网关行的原因）
+  /// 加在触发键上（尺寸、底色由用它的地方给）
   className?: string;
   /// 卡的滚动区（`FloatingLayer` 的 className）：宽度、内边距由它定
   cardClassName?: string;
@@ -51,17 +53,18 @@ export function HoverCard({
   children,
   content,
   label,
+  triggerLabel,
   className,
   cardClassName,
   defaultOpen = false,
 }: HoverCardProps) {
   const [state, setState] = useState<HoverCardState>("closed");
-  const [trigger, setTrigger] = useState<HTMLSpanElement | null>(null);
+  const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
   /// 用回车 / 空格钉住时把焦点放进卡里；悬停与点击不抢焦点
   const [focusCard, setFocusCard] = useState(false);
   const cardId = useId();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /// 刚收起（Esc 会把焦点还给这句话）：这一次聚焦不再计时出卡
+  /// 刚收起（Esc 会把焦点还给键）：这一次聚焦不再计时出卡
   const dismissed = useRef(false);
 
   const clear = () => {
@@ -83,7 +86,7 @@ export function HoverCard({
   const open = state !== "closed";
   const dismiss = useCallback(() => {
     clear();
-    // 只挡紧接着的那一次聚焦（Esc 关卡后同步把焦点还给这句话）；点外面关的不会有，下一轮就作废
+    // 只挡紧接着的那一次聚焦（Esc 关卡后同步把焦点还给键）；点外面关的不会有，下一轮就作废
     dismissed.current = true;
     setTimeout(() => {
       dismissed.current = false;
@@ -99,13 +102,13 @@ export function HoverCard({
     send("press");
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       press(true);
       return;
     }
-    // 卡挂在 body 末尾：开着时 Tab 从这句话直接进卡，不然要走完后面整页才到
+    // 卡挂在 body 末尾：开着时 Tab 从键直接进卡，不然要走完后面整页才到
     if (event.key === "Tab" && !event.shiftKey && open) {
       const first = document
         .getElementById(cardId)
@@ -119,7 +122,7 @@ export function HoverCard({
     }
   };
 
-  /// 焦点离开这句话、也不在卡里：悬停态收起（钉住的不收）
+  /// 焦点离开键、也不在卡里：悬停态收起（钉住的不收）
   const onBlur = () => {
     setTimeout(() => {
       const active = document.activeElement;
@@ -133,11 +136,11 @@ export function HoverCard({
 
   return (
     <>
-      <span
+      <button
+        type="button"
         ref={setTrigger}
         className={["ss-hovercard", className, open ? "is-open" : null].filter(Boolean).join(" ")}
-        tabIndex={0}
-        role="button"
+        aria-label={triggerLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? cardId : undefined}
@@ -161,7 +164,7 @@ export function HoverCard({
         onBlur={onBlur}
       >
         {children}
-      </span>
+      </button>
       {open && trigger ? (
         <FloatingLayer
           trigger={trigger}

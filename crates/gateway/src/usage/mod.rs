@@ -5,6 +5,8 @@
 //! 规格见 `docs/specs/2026-09-26-menubar-usage.md` R5、R8，设计第 1、2 节。
 pub mod claude;
 pub mod codex;
+pub mod connect;
+pub mod desktop_history;
 pub mod probe;
 pub mod scheduler;
 
@@ -110,7 +112,8 @@ fn path_ends_with_components(path: &Path, tail: &[&str]) -> bool {
 }
 
 /// PATH（进程看到的）与几个常见安装位置里找 `claude`，顺序：PATH → `~/.local/bin/claude` →
-/// `~/.claude/local/claude` → `/opt/homebrew/bin/claude` → `/usr/local/bin/claude`。
+/// `~/.claude/local/claude` → `/opt/homebrew/bin/claude` → `/usr/local/bin/claude`；macOS 上最后再补
+/// Claude 桌面应用自带的那份（见 [`desktop_claude_executables`]）。
 /// 只留存在且可执行的，按上面的顺序去重。
 ///
 /// 之所以要这些兜底位置：从 Dock 启动的 App 拿到的是登录时的最小 PATH，不是终端登录 shell 的
@@ -133,11 +136,112 @@ fn claude_executables_from(path_env: Option<&OsStr>, home: &Path) -> Vec<PathBuf
     candidates.push(PathBuf::from("/usr/local/bin/claude"));
 
     let mut seen = HashSet::new();
-    candidates
+    #[allow(unused_mut)] // 非 macOS 上下面那段被 cfg 掉，不再需要 mut
+    let mut found: Vec<PathBuf> = candidates
         .into_iter()
         .filter(|p| seen.insert(p.clone())) // 按首次出现的顺序去重
         .filter(|p| is_executable_file(p))
+        .collect();
+    // 桌面应用自带的排在最后：用户自己装的优先；每次现找，不缓存（桌面应用升级会删旧版本）
+    #[cfg(target_os = "macos")]
+    for p in desktop_claude_executables(home) {
+        if seen.insert(p.clone()) {
+            found.push(p);
+        }
+    }
+    found
+}
+
+/// Claude 桌面应用自带的 Claude Code（macOS）：
+/// `~/Library/Application Support/Claude/claude-code/<版本>/<12位十六进制>/claude.app/Contents/MacOS/claude`，
+/// 兼容旧布局 `claude-code/<版本>/claude.app/Contents/MacOS/claude`。
+///
+/// 版本按语义版本从高到低，每个版本至多一个：新布局只认带 `.verified` 标记文件的子目录（没标记＝
+/// 还没下载校验完），多个时取 `.verified` 修改时间最新的；程序文件必须可执行。
+/// 不碰同级的 `claude-code-vm`（那是给虚拟机用的）。
+#[cfg(target_os = "macos")]
+fn desktop_claude_executables(home: &Path) -> Vec<PathBuf> {
+    const EXE: [&str; 4] = ["claude.app", "Contents", "MacOS", "claude"];
+    let root = home
+        .join("Library")
+        .join("Application Support")
+        .join("Claude")
+        .join("claude-code");
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
+    let mut versions: Vec<(DesktopVersion, PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| {
+            let version = DesktopVersion::parse(e.file_name().to_str()?)?;
+            Some((version, e.path()))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+
+    versions
+        .into_iter()
+        .filter_map(|(_, dir)| {
+            // 新布局：<版本>/<12 位十六进制>/，按 .verified 修改时间从新到旧
+            let mut hashed: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&dir)
+                .ok()?
+                .flatten()
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .is_some_and(|n| n.len() == 12 && n.bytes().all(|b| b.is_ascii_hexdigit()))
+                })
+                .filter_map(|e| {
+                    let mtime = std::fs::metadata(e.path().join(".verified"))
+                        .ok()
+                        .filter(|m| m.is_file())?
+                        .modified()
+                        .ok()?;
+                    Some((mtime, e.path()))
+                })
+                .collect();
+            hashed.sort_by(|a, b| b.cmp(a)); // 同一时刻再按目录名定先后，结果稳定
+            hashed
+                .into_iter()
+                .map(|(_, sub)| sub)
+                .chain(std::iter::once(dir)) // 旧布局：程序直接在版本目录下
+                .map(|base| EXE.iter().fold(base, |p, part| p.join(part)))
+                .find(|p| is_executable_file(p))
+        })
         .collect()
+}
+
+/// 桌面应用版本目录名里的语义版本（`主.次.修订[-预发布]`）；预发布排在同号正式版之前。
+/// 解析不了的目录名（不是版本号）直接跳过
+#[cfg(target_os = "macos")]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct DesktopVersion {
+    core: (u64, u64, u64),
+    /// 正式版为 true，比同号预发布大
+    release: bool,
+    pre: String,
+}
+
+#[cfg(target_os = "macos")]
+impl DesktopVersion {
+    fn parse(name: &str) -> Option<Self> {
+        let name = name.split('+').next()?; // 丢掉构建元数据
+        let (core, pre) = match name.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (name, None),
+        };
+        let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
+        let core = (parts.next()??, parts.next()??, parts.next()??);
+        if parts.next().is_some() {
+            return None;
+        }
+        Some(Self {
+            core,
+            release: pre.is_none(),
+            pre: pre.unwrap_or_default().to_owned(),
+        })
+    }
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -233,12 +337,15 @@ impl Account {
         }
     }
 
-    /// 以 `home` 为主目录的账号：不看用户环境里的 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`
+    /// 以 `home` 为主目录的账号：不看用户环境里的 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`。
+    /// Claude 的配置目录定为 `<home>/.claude`，并作为 `CLAUDE_CONFIG_DIR` 带给子进程（登录、探测）：
+    /// Claude Code 只在设了它时给钥匙串条目名加后缀（#218【源码】），不带的话在测试主目录里连一次就会改写
+    /// 真实的「Claude Code-credentials」。相应地 `.claude.json` 在 `<home>/.claude/` 下（同 Claude Code 的做法）
     pub fn in_home(home: &Path) -> Self {
         let codex_home = home.join(".codex");
         Self {
             home: home.to_path_buf(),
-            claude_config_dir: None,
+            claude_config_dir: Some(home.join(".claude")),
             codex_home_env: Some(codex_home.to_string_lossy().into_owned()),
             codex_home,
             child_home: Some(home.to_path_buf()),
@@ -279,19 +386,13 @@ pub fn codex_probe_dir(base: &Path) -> PathBuf {
 #[cfg(test)]
 pub(crate) mod test_support {
     use std::path::Path;
-    use std::process::Command;
 
-    /// 写一个可执行的假程序：写盘和 chmod 交给子进程 `/bin/sh` 做，本进程从不持有它的写句柄。
-    /// 本进程自己写完立刻 exec，Linux 上别的测试线程同时起子进程会继承这个写句柄，exec 偶发
-    /// ETXTBSY（Text file busy），见 `login_env` 的测试
+    /// 写一个可执行的假程序：同生产代码写 `BROWSER` 小脚本的那一份（[`super::connect::write_private_executable`]），
+    /// 写盘和 chmod 交给子进程 `/bin/sh` 做，本进程从不持有它的写句柄。本进程自己写完立刻 exec，Linux 上别的
+    /// 测试线程同时起子进程会继承这个写句柄，exec 偶发 ETXTBSY（Text file busy），见 `login_env` 的测试
     pub(crate) fn write_executable(path: &Path, contents: &str) {
-        let status = Command::new("/bin/sh")
-            .args(["-c", r#"printf '%s' "$2" > "$1" && chmod 755 "$1""#, "sh"])
-            .arg(path)
-            .arg(contents)
-            .status()
-            .unwrap();
-        assert!(status.success(), "write {}: {status}", path.display());
+        super::connect::write_private_executable(path, contents)
+            .unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
     }
 }
 
@@ -345,6 +446,227 @@ mod tests {
         assert!(claude_executables_from(None, &home).is_empty());
     }
 
+    /// 在 `home` 下搭桌面应用的版本目录；`hash` 为 `Some` 是新布局（`<版本>/<hash>/`），`None` 是旧布局。
+    /// 返回程序路径，`verified` 为真时写 `.verified`，`exec` 为假时程序不可执行
+    #[cfg(target_os = "macos")]
+    fn desktop_exe(
+        home: &Path,
+        dir: &str,
+        version: &str,
+        hash: Option<&str>,
+        verified: bool,
+        exec: bool,
+    ) -> PathBuf {
+        let mut base = home
+            .join("Library/Application Support/Claude")
+            .join(dir)
+            .join(version);
+        if let Some(h) = hash {
+            base = base.join(h);
+        }
+        let exe = base.join("claude.app/Contents/MacOS/claude");
+        make_executable(&exe);
+        if !exec {
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        if verified {
+            std::fs::write(base.join(".verified"), "").unwrap();
+        }
+        exe
+    }
+
+    /// 桌面应用自带的那份排在 PATH 与兜底位置之后；版本按语义版本而不是字符串排（1.10 > 1.9）
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_claude_comes_last_and_versions_sort_semantically() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let home = root.join("home");
+        let local = home.join(".local").join("bin").join("claude");
+        make_executable(&local);
+        let v9 = desktop_exe(
+            &home,
+            "claude-code",
+            "1.9.0",
+            Some("aaaaaaaaaaaa"),
+            true,
+            true,
+        );
+        let v10 = desktop_exe(
+            &home,
+            "claude-code",
+            "1.10.0",
+            Some("bbbbbbbbbbbb"),
+            true,
+            true,
+        );
+        let pre = desktop_exe(
+            &home,
+            "claude-code",
+            "1.10.0-beta.1",
+            Some("cccccccccccc"),
+            true,
+            true,
+        );
+        // 不是版本号的目录被跳过
+        desktop_exe(
+            &home,
+            "claude-code",
+            "latest",
+            Some("dddddddddddd"),
+            true,
+            true,
+        );
+
+        assert_eq!(
+            claude_executables_from(None, &home),
+            vec![local, v10, pre, v9]
+        );
+    }
+
+    /// 同一版本只认带 `.verified` 的子目录，多个时取 `.verified` 修改时间最新的
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_claude_needs_verified_and_picks_newest() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let home = root.join("home");
+        let old = desktop_exe(
+            &home,
+            "claude-code",
+            "2.0.0",
+            Some("aaaaaaaaaaaa"),
+            true,
+            true,
+        );
+        let new = desktop_exe(
+            &home,
+            "claude-code",
+            "2.0.0",
+            Some("bbbbbbbbbbbb"),
+            true,
+            true,
+        );
+        // 没有 .verified 的不认，即使目录最新
+        desktop_exe(
+            &home,
+            "claude-code",
+            "2.0.0",
+            Some("cccccccccccc"),
+            false,
+            true,
+        );
+        // 目录名不是 12 位十六进制的不认
+        desktop_exe(
+            &home,
+            "claude-code",
+            "2.0.0",
+            Some("zzzzzzzzzzzz"),
+            true,
+            true,
+        );
+        let t = std::time::SystemTime::now();
+        let set_mtime = |exe: &Path, ago: u64| {
+            let verified = exe.ancestors().nth(4).unwrap().join(".verified");
+            std::fs::File::options()
+                .write(true)
+                .open(verified)
+                .unwrap()
+                .set_modified(t - std::time::Duration::from_secs(ago))
+                .unwrap();
+        };
+        set_mtime(&old, 100);
+        set_mtime(&new, 10);
+
+        assert_eq!(claude_executables_from(None, &home), vec![new]);
+    }
+
+    /// 只有没标记的子目录：整个版本不认
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_claude_without_verified_is_ignored() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let home = root.join("home");
+        desktop_exe(
+            &home,
+            "claude-code",
+            "2.0.0",
+            Some("aaaaaaaaaaaa"),
+            false,
+            true,
+        );
+        assert!(claude_executables_from(None, &home).is_empty());
+    }
+
+    /// 旧布局（`<版本>/claude.app/...`）也认；最高版本不可执行时落到下一个版本
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_claude_supports_old_layout_and_skips_non_executable() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let home = root.join("home");
+        let old_layout = desktop_exe(&home, "claude-code", "1.5.0", None, false, true);
+        desktop_exe(
+            &home,
+            "claude-code",
+            "1.6.0",
+            Some("aaaaaaaaaaaa"),
+            true,
+            false,
+        );
+
+        assert_eq!(claude_executables_from(None, &home), vec![old_layout]);
+    }
+
+    /// `claude-code-vm` 是虚拟机用的那份，不碰
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_claude_ignores_claude_code_vm() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let home = root.join("home");
+        desktop_exe(
+            &home,
+            "claude-code-vm",
+            "9.9.9",
+            Some("aaaaaaaaaaaa"),
+            true,
+            true,
+        );
+        desktop_exe(&home, "claude-code-vm", "9.9.9", None, false, true);
+        assert!(claude_executables_from(None, &home).is_empty());
+    }
+
+    /// 桌面应用升级会删旧版本：每次现找，不缓存
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn desktop_claude_is_looked_up_every_time() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let home = root.join("home");
+        let v1 = desktop_exe(
+            &home,
+            "claude-code",
+            "1.0.0",
+            Some("aaaaaaaaaaaa"),
+            true,
+            true,
+        );
+        assert_eq!(claude_executables_from(None, &home), vec![v1.clone()]);
+        std::fs::remove_dir_all(home.join("Library/Application Support/Claude/claude-code/1.0.0"))
+            .unwrap();
+        let v2 = desktop_exe(
+            &home,
+            "claude-code",
+            "1.1.0",
+            Some("bbbbbbbbbbbb"),
+            true,
+            true,
+        );
+        assert_eq!(claude_executables_from(None, &home), vec![v2]);
+    }
+
     /// 调试版指定了测试主目录（`SOPHIA_TEST_HOME`）：登录判断、会话记录、探测子进程的 HOME 与
     /// CODEX_HOME 都指向它，不再读真实账号（2026-10-02 截图时发现用量页显示的是真实额度）
     #[test]
@@ -354,8 +676,10 @@ mod tests {
         let account = Account::in_home(&home);
         assert_eq!(account.home, home);
         assert_eq!(
-            account.claude_config_dir, None,
-            "测试主目录不跟用户环境里的 CLAUDE_CONFIG_DIR"
+            account.claude_config_dir,
+            Some(home.join(".claude")),
+            "测试主目录不跟用户环境里的 CLAUDE_CONFIG_DIR，而是指向测试主目录自己的：子进程（登录、探测）\
+             带上它，钥匙串条目名才带后缀，不改写真实的「Claude Code-credentials」"
         );
         assert_eq!(account.codex_home, home.join(".codex"));
         assert_eq!(
@@ -380,8 +704,10 @@ mod tests {
         assert!(!account.claude_signed_in(), "测试主目录里没登录就是没登录");
         assert!(!account.codex_signed_in());
 
+        // 设了 CLAUDE_CONFIG_DIR 时 Claude Code 把 .claude.json 写在它下面：登录写哪、判断看哪，同一处
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::write(
-            home.join(".claude.json"),
+            home.join(".claude").join(".claude.json"),
             r#"{"oauthAccount":{"accountUuid":"x"}}"#,
         )
         .unwrap();
@@ -403,11 +729,12 @@ mod tests {
             path: Some("/fake/bin".into()),
             claude_config_dir: Some("/fake/cc".into()),
             codex_home: Some("/fake/codex".into()),
+            ..Default::default()
         }));
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().canonicalize().unwrap();
         let account = Account::in_home(&home);
-        assert_eq!(account.claude_config_dir, None);
+        assert_eq!(account.claude_config_dir, Some(home.join(".claude")));
         assert_eq!(account.codex_home, home.join(".codex"));
         crate::login_env::set_for_test(None);
     }

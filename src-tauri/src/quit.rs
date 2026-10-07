@@ -94,6 +94,8 @@ pub fn on_run_event(app: &AppHandle, event: &RunEvent) {
         // 收尾做过了也照样再做一次：做几次都一样，而没做成、用户留在应用里又打开了 Codex 的情况下，
         // 之后从 Dock 退出仍要改回
         RunEvent::Exit => {
+            // 「连接 Claude 用量」还在装或登录：结束整组，不留孤儿进程（票 #208）
+            crate::usage::on_exit(app);
             if !RESTARTING.load(Ordering::SeqCst) {
                 if let Some(gateway) = app.state::<AppState>().gateway.clone() {
                     gateway.exit_sync();

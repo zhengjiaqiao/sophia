@@ -86,3 +86,17 @@ test("Codex 页网关表单接上外壳的离开前询问，不再自己在 docu
   assert.match(tsx, /useLeaveGuard\(formDirty && editing !== null, \(proceed\) => \{/);
   assert.doesNotMatch(tsx, /LEAVE_TARGET|addEventListener\("click"|target\.click\(\)/);
 });
+
+test("应用菜单「关于」「检查更新…」停在「关于」的请求：离开设置就清掉，之后从侧栏进设置不再跳、不再查", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  // 离开设置的那一支（同一处还重扫、重读网关）把请求清掉
+  const leave = app.slice(
+    app.indexOf('if (prev.destination === "settings" && nav.destination !== "settings") {'),
+  );
+  const branch = leave.slice(0, leave.indexOf("} else if"));
+  assert.match(branch, /setAboutRequest\(null\);/);
+  // 清掉的请求到设置页是 undefined，设置页挂上时什么都不做（不滚到「关于」、不检查更新）
+  assert.match(app, /aboutRequest=\{aboutRequest \?\? undefined\}/);
+  const page = readFileSync(new URL("../src/pages/SettingsPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /if \(!aboutRequest\) return;\n\s*aboutRef\.current\?\.scrollIntoView/);
+});

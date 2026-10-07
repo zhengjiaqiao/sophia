@@ -9,8 +9,8 @@ import { Details } from "./Details.tsx";
 /// （换页就重置）。托盘面板同样兜底，`narrow` 是窄面板的形态。
 ///
 /// 出错页（M10 画板）：整块在页面区里上下左右居中，块内文字靠左、宽不过 460：标题 15 / 600、一句 13 `ink-mute`
-/// 说明、一行键：墨键 `重新加载`（把边界清掉、子树重新渲染）。说明那句话上挂悬浮卡（`Details`：错误原文 + 调用栈、
-/// 版本、本地时间；`复制详情` 经 `onCopy`），停上去就出。
+/// 说明、一行键：墨键 `重新加载`（把边界清掉、子树重新渲染）。标题前的 `!` 是入口（`Details`：错误原文 + 调用栈、
+/// 版本、本地时间；`复制详情` 经 `onCopy`），停上去或点一下出悬浮卡。
 ///
 /// **上报关着时**（spec 2026-10-04-reporting-feedback R11，画板 ErrorOff；自动上报关着或 `DO_NOT_TRACK`、且有接收服务，
 /// 由调用方判断后给 `onReport`）：说明换成「……反复出现的话，把问题报告给我们。」，`重新加载` 之后多一颗默认键
@@ -29,7 +29,7 @@ export interface PageFaultProps {
   /// 托盘面板的窄形态
   narrow?: boolean;
   /// 主窗口外壳（侧栏、横幅、反馈小窗、退出确认）的兜底（spec S18）：整窗换成出错页，只有 `重新加载`
-  /// （重载整个窗口），说明上不挂详情，也没有 `报告这个问题`——壳都没了，别的一概不画
+  /// （重载整个窗口），标题前没有 `!`，也没有 `报告这个问题`——壳都没了，别的一概不画
   shell?: boolean;
   /// 应用版本，写进详情；读不到传 null
   version?: string | null;
@@ -133,17 +133,16 @@ export function FaultView({
     <div className={narrow ? "ss-pagefault ss-pagefault--narrow" : "ss-pagefault"} role="alert">
       <div className="ss-pagefault__block">
         <h2 className="ss-pagefault__title">
+          {/* 错误原文与调用栈：标题前的 `!` 是入口，停上去或点一下出悬浮卡（2026-10-06 方案 D）；外壳形态不挂 */}
+          {shell ? null : <Details size="title" text={details} onCopy={onCopy} />}
           {shell ? t("common.pageFault.shellTitle") : t("common.pageFault.title")}
         </h2>
         <p className="ss-pagefault__sentence">
-          {shell ? (
-            t("common.pageFault.shellSentence")
-          ) : (
-            // 错误原文与调用栈挂在这句话上：停上去浮起悬浮卡（2026-10-06 起不再是一颗 `详情` 键）
-            <Details text={details} onCopy={onCopy}>
-              {onReport ? t("common.pageFault.sentenceReport") : t("common.pageFault.sentence")}
-            </Details>
-          )}
+          {shell
+            ? t("common.pageFault.shellSentence")
+            : onReport
+              ? t("common.pageFault.sentenceReport")
+              : t("common.pageFault.sentence")}
         </p>
         <div className="ss-pagefault__keys">
           <Button variant="primary" onClick={onReload}>

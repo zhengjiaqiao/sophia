@@ -1,0 +1,342 @@
+---
+// skill 与 MCP 区（锚点 #skills）。矩阵演示归 #186；骨架先放文字与扫描中的猫插图，演示框留空
+import scanning from "../../../src/assets/empty-scanning.png";
+import { AGENTS, ROWS, cellLabel, rowName, stateText } from "../demos/skills-matrix.ts";
+import { t, type Lang } from "../i18n.ts";
+import { slot, slots } from "../lib/template.ts";
+import Feat from "./Feat.astro";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+
+// 浏览器里取不到整本目录：提示条与读屏说法的模板（占位符换成 [[name]] 这样的记号，不与构建检查的 {…} 残留检查撞）由这里放进 data-*，脚本只做替换
+const holes = slots("name", "agent");
+const templates = {
+  added: t(lang, "skills.added", { agent: holes.agent }),
+  removed: t(lang, "skills.removed", { agent: holes.agent }),
+  fixed: t(lang, "skills.fixed", holes),
+  original: t(lang, "skills.original", holes),
+  label: t(lang, "skills.cellLabel", { ...holes, state: slot("state") }),
+};
+const states = (["added", "open", "original", "broken"] as const).map((s) => [s, stateText(lang, s)] as const);
+---
+
+<Feat
+  id="skills"
+  flip
+  kicker={t(lang, "skills.kicker")}
+  title1={t(lang, "skills.title1")}
+  title2={t(lang, "skills.title2")}
+  sub={t(lang, "skills.sub")}
+>
+  <img
+    slot="art"
+    class="cat-art feat__art"
+    src={scanning.src}
+    width={scanning.width}
+    height={scanning.height}
+    alt=""
+    loading="lazy"
+  />
+  <div
+    class="demo"
+    data-demo="skills"
+    data-tpl-added={templates.added}
+    data-tpl-removed={templates.removed}
+    data-tpl-fixed={templates.fixed}
+    data-tpl-original={templates.original}
+    data-tpl-label={templates.label}
+    data-state-added={states[0][1]}
+    data-state-open={states[1][1]}
+    data-state-original={states[2][1]}
+    data-state-broken={states[3][1]}
+  >
+    <table class="mx">
+      <thead>
+        <tr>
+          <td></td>
+          {AGENTS.map((a) => <th scope="col">{a}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {
+          ROWS.map((row) => {
+            const name = rowName(lang, row);
+            return (
+              <tr>
+                <th scope="row">{name}</th>
+                {row.cells.map((state, i) => (
+                  <td>
+                    <button
+                      type="button"
+                      class:list={["cell", { "is-hint": row.name === "pr-review" && i === 1 }]}
+                      data-s={state}
+                      data-name={name}
+                      data-agent={AGENTS[i]}
+                      aria-label={cellLabel(lang, name, AGENTS[i], state)}
+                    >
+                      <svg viewBox="0 0 16 16" aria-hidden="true">
+                        <circle class="o" cx="8" cy="8" r="4.5" />
+                        <circle class="b" cx="8" cy="8" r="5.5" />
+                        <circle class="s" cx="8" cy="8" r="6.5" />
+                        <circle class="f" cx="8" cy="8" r="5" />
+                      </svg>
+                    </button>
+                  </td>
+                ))}
+              </tr>
+            );
+          })
+        }
+      </tbody>
+    </table>
+    <!-- 提示条短暂盖在最后一行上，卡片底部不留空；读屏用 status 读出 -->
+    <div class="toast" role="status" aria-live="polite"></div>
+  </div>
+  </Feat>
+
+<script>
+  import { press, type CellState } from "../demos/skills-matrix";
+  import { fillTemplate } from "../lib/template";
+
+  const TPL = {
+    "skills.added": "tplAdded",
+    "skills.removed": "tplRemoved",
+    "skills.fixed": "tplFixed",
+    "skills.original": "tplOriginal",
+  } as const;
+  const STATE = {
+    added: "stateAdded",
+    open: "stateOpen",
+    original: "stateOriginal",
+    broken: "stateBroken",
+  } as const;
+  const OK =
+    '<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5.3 4.1 7.4 8 2.8"/></svg>';
+
+  for (const demo of document.querySelectorAll<HTMLElement>("[data-demo=skills]")) {
+    const d = demo.dataset;
+    const toastEl = demo.querySelector<HTMLElement>(".toast")!;
+    let timer: number | undefined;
+    const say = (text: string) => {
+      toastEl.innerHTML = OK;
+      toastEl.append(text);
+      toastEl.classList.add("on");
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => toastEl.classList.remove("on"), 1800);
+    };
+    demo.addEventListener("click", (e) => {
+      const cell = (e.target as Element).closest<HTMLButtonElement>(".cell");
+      if (!cell) return;
+      const { name = "", agent = "" } = cell.dataset;
+      const { next, toast } = press(cell.dataset.s as CellState, { name, agent });
+      const tpl = d[TPL[toast.key]]!;
+      cell.dataset.s = next;
+      cell.setAttribute(
+        "aria-label",
+        fillTemplate(d.tplLabel!, { name, agent, state: d[STATE[next]]! }),
+      );
+      cell.classList.remove("is-pop", "is-hint");
+      // 重启一次涟漪动画
+      void cell.offsetWidth;
+      cell.classList.add("is-pop");
+      say(fillTemplate(tpl, toast.params));
+    });
+  }
+</script>
+
+<style>
+  .feat__art {
+    width: min(260px, 70%);
+    height: auto;
+    margin-top: 28px;
+  }
+  /* 两栏叠成一栏后，插图夹在通栏的文字和表格之间，居中当分隔 */
+  @container site (max-width: 860px) {
+    .feat__art {
+      margin-inline: auto;
+    }
+  }
+  .demo {
+    position: relative;
+    width: 100%;
+    border-radius: 16px;
+    background: var(--paper);
+    box-shadow: var(--elev-device);
+    overflow: hidden;
+    /* 格点弹出的回弹曲线（官网新增，只在这个演示里用，DESIGN「官网」有记） */
+    --spring: linear(0, 0.065 5%, 0.209 10%, 0.378 15%, 0.54 20%, 0.679 25%, 0.809 31%, 0.899 37%, 0.97 45%, 1.008 55%, 1.015 68%, 1.007 86%, 1);
+  }
+  .mx {
+    width: calc(100% - 40px);
+    margin: 18px 20px 14px;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .mx thead th {
+    font: 600 10.5px / 1.2 var(--font-cond);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 0 4px 8px;
+    text-align: center;
+  }
+  .mx td,
+  .mx tbody th {
+    border-top: 1px solid var(--row-line);
+    height: 42px;
+    text-align: center;
+  }
+  .mx thead td {
+    border-top: 0;
+  }
+  .mx tbody th {
+    text-align: left;
+    font-weight: 500;
+  }
+  .cell {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 9px;
+    background: none;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .cell:hover {
+    background: var(--surface);
+  }
+  .cell svg {
+    width: 16px;
+    height: 16px;
+    overflow: visible;
+  }
+  /* 格子记号照应用（DESIGN「格子记号」），墨色：● 已加上、○ 点一下加上、⦿ 原件、虚线圈 断了 */
+  .cell .f {
+    fill: var(--ink);
+    transform-origin: 8px 8px;
+    transform: scale(0);
+    transition: transform 0.45s var(--spring);
+  }
+  .cell .o {
+    fill: none;
+    stroke: var(--ink-faint);
+    stroke-width: 1.5;
+    transition: opacity 0.2s;
+  }
+  .cell .s {
+    fill: none;
+    stroke: var(--ink);
+    stroke-width: 1.5;
+    opacity: 0;
+  }
+  .cell .b {
+    fill: none;
+    stroke: var(--ink-mute);
+    stroke-width: 1.5;
+    stroke-dasharray: 2.2 2.4;
+    opacity: 0;
+    transform-origin: 8px 8px;
+  }
+  .cell[data-s="added"] .f {
+    transform: scale(1);
+  }
+  .cell[data-s="added"] .o,
+  .cell[data-s="original"] .o,
+  .cell[data-s="broken"] .o {
+    opacity: 0;
+  }
+  .cell[data-s="original"] .f {
+    transform: scale(0.48);
+  }
+  .cell[data-s="original"] .s {
+    opacity: 1;
+  }
+  .cell[data-s="broken"] .b {
+    opacity: 1;
+    animation: mx-spin 6s linear infinite;
+  }
+  .cell.is-pop::before {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    border: 1.5px solid var(--ink);
+    animation: mx-pop 0.6s var(--ease-mech) forwards;
+  }
+  .cell.is-hint::after {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: 50%;
+    animation: mx-ping 1.6s var(--ease-mech) infinite;
+  }
+  @keyframes mx-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes mx-pop {
+    from {
+      transform: scale(0.6);
+      opacity: 1;
+    }
+    to {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
+  /* prettier-ignore */
+  @keyframes mx-ping {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ink) 30%, transparent); }
+    100% { box-shadow: 0 0 0 10px transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cell .f,
+    .cell .o {
+      transition: none;
+    }
+    .cell[data-s="broken"] .b,
+    .cell.is-hint::after,
+    .cell.is-pop::before {
+      animation: none;
+    }
+  }
+  /* 提示条：墨底、浮的投影；短暂盖在最后一行上 */
+  .toast {
+    position: absolute;
+    left: 50%;
+    bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 24px);
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: var(--ink);
+    color: var(--face);
+    font-size: 12.5px;
+    box-shadow: var(--elev-float);
+    opacity: 0;
+    transform: translate(-50%, 10px);
+    transition:
+      opacity 0.25s,
+      transform 0.35s var(--ease-mech);
+    pointer-events: none;
+    z-index: 5;
+  }
+  .toast.on {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  .toast :global(svg) {
+    flex: none;
+    width: 12px;
+    height: 12px;
+  }
+</style>

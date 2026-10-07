@@ -15,7 +15,6 @@ const agent = (id: string, displayName: string, enabled: boolean) => ({
 test("设置页未安装那一节：信息不是设置——不渲染复选框，小标题说装上后可以在这里勾选", () => {
   const html = render(AbsentAgents, {
     agents: [agent("amp", "Amp", true), agent("droid", "Droid", true)],
-    onRestore: () => {},
   });
   assert.doesNotMatch(html, /checkbox/);
   // 小标是组件库的区块小标（与设置页的节小标同一种）；「未安装的 N 个」已在展开行上说过（①）
@@ -24,21 +23,14 @@ test("设置页未安装那一节：信息不是设置——不渲染复选框�
   assert.doesNotMatch(html, /恢复/);
 });
 
-test("在不显示名单里又卸载了的：排在最前，写「装上后也不显示 · 恢复」", () => {
+// 2026-10-07：没有「不显示标记」——勾选与否只对已安装的有意义，未安装的一律只列名字，
+// 不写「装上后也不显示 · 恢复」，按 agent 表的先后排
+test("未安装的只列名字：不写「装上后也不显示」、没有「恢复」键，按传入先后排", () => {
   const html = render(AbsentAgents, {
     agents: [agent("amp", "Amp", true), agent("kiro", "Kiro", false)],
-    onRestore: () => {},
   });
-  assert.ok(html.indexOf("Kiro") < html.indexOf("Amp"), "不显示名单里的排在最前");
-  // `恢复` 是应用内的动作：默认键紧凑 24（浅键只给离开 Sophia 的）。
-  // 键外那层 is-idle 包层是 Button 自带的原因提示框层，没禁用时不占盒（display: contents）
-  assert.match(
-    html,
-    /装上后也不显示 ·<\/span><span class="ss-tipwrap is-idle"><button[^>]*class="ss-btn ss-btn--compact"[^>]*>恢复<\/button><\/span>/,
-  );
-  assert.doesNotMatch(html, /ss-btn--quiet/);
-  assert.equal(html.match(/恢复/g)?.length, 1);
-  assert.doesNotMatch(html, /checkbox/);
+  assert.ok(html.indexOf("Amp") < html.indexOf("Kiro"));
+  assert.doesNotMatch(html, /装上后也不显示|恢复|<button/);
 });
 
 // 2026-10-06 设置页并节：`显示的 agent` 是一条设置行，名单紧跟在行下，行连同名单是一块；

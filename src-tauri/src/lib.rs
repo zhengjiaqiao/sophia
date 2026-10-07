@@ -1,4 +1,5 @@
 //! Tauri 命令层：每个命令一行调 core，错误统一转 String
+mod app_update;
 mod appearance;
 mod autostart;
 mod diagnostics;
@@ -7,6 +8,7 @@ mod gateway;
 mod language;
 mod market;
 mod menu;
+mod net_kind;
 mod quit;
 // 自动上报（spec 2026-10-04-reporting-feedback）：内部版不编进去，没有上报代码也没有地址
 #[cfg(not(feature = "weiboap"))]
@@ -22,6 +24,7 @@ pub use diagnostics::install_panic_hook;
 pub use gateway::cli as gateway_cli;
 
 use serde::Serialize;
+use sophia_core::copies;
 use sophia_core::discovery::{self, Env};
 use sophia_core::fs::normalize;
 use sophia_core::mcp::sources as mcp_sources;
@@ -108,9 +111,11 @@ fn runtime_env() -> Result<Env, String> {
         if !root.is_absolute() || !root.is_dir() {
             return Err("SOPHIA_TEST_HOME 必须是已存在的绝对目录".into()); // i18n-exempt: 仅 debug 构建、开发者自设的环境变量，不是给用户看的界面文案
         }
-        let root = std::fs::canonicalize(root).map_err(err)?;
+        let root = normalize(&std::fs::canonicalize(root).map_err(err)?);
+        // 应用包也只在隔离目录里找，不读本机的 /Applications
         return Ok(Env {
-            home: normalize(&root),
+            apps: vec![root.join("Applications")],
+            home: root,
             vars: HashMap::new(),
         });
     }
@@ -219,7 +224,8 @@ struct McpPreview {
 /// 一次发现：本体位置与目标目录，按当前设置解析。返回的目标含目录尚不存在的那批
 /// （`Target.exists == false`），它们照常成列，补齐时目录就地创建。
 /// 订阅记录里常规发现找不到的文件夹（来源管理页选的）在目标之前读进来；
-/// 目标目录里指向已知位置之外的软链再合成出外部本体位置
+/// 目标目录里指向已知位置之外的软链再合成出外部本体位置。
+/// Sophia 放的副本（`copies.json` 里记录在案的）不是 agent 自己的原件，在目标之前拿掉
 fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
     let env = runtime_env()?;
     let (installed, settings) = installed_and_settings(state, &env)?;
@@ -231,17 +237,44 @@ fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
         &sources,
     );
     sources.extend(subscribed);
+    copies::drop_copies(&mut sources, &load_copies(state)?);
     let targets = discovery::targets(&env, &harnesses, &projects, &sources);
     let external = discovery::external_sources(&env, &targets, &sources);
     sources.extend(external);
     Ok((sources, targets))
 }
 
+/// Sophia 放的副本的记录（`copies.json`）
+fn load_copies(state: &AppState) -> Result<copies::Copies, String> {
+    copies::Copies::load(&state.store).map_err(err)
+}
+
 /// 完整扫描：发现 → 把此刻有软链的来源记进订阅（第一次扫描时认领老数据）→ 按域扫描
 fn overview(state: &AppState) -> Result<Overview, String> {
     let (sources, targets) = discover(state)?;
     let settings = subscribed_settings(state, &sources, &targets)?;
-    Ok(skills::scan(&sources, &targets, &settings.subscriptions))
+    let copies = load_copies(state)?;
+    Ok(skills::scan(
+        &sources,
+        &targets,
+        &settings.subscriptions,
+        &copies,
+    ))
+}
+
+/// 扫描前对一遍副本的账（`copies::reconcile`）：副本不在了、被用户改过的不再管理，没改过而原件变了的
+/// 用原件更新。静默进行（spec #194 修订：界面上不出现副本），旧副本进暂存；做不成只记日志，不拦扫描
+fn reconcile_copies(state: &AppState) {
+    match copies::reconcile(&state.store) {
+        Ok(done) => {
+            for entry in &done.report.entries {
+                if let Outcome::Failed(reason) = &entry.outcome {
+                    log::warn!("副本没能更新：{reason}");
+                }
+            }
+        }
+        Err(e) => log::warn!("读不了副本记录：{e}"),
+    }
 }
 
 /// 读设置并认领订阅；凡是要读或改订阅记录的地方都先过这一步，第一次扫描的认领才不会被跳过
@@ -650,7 +683,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     if actions.is_empty() {
         return Ok(None);
     }
-    let report = execute_grouped(scanned, &actions, false);
+    let report = execute_grouped(state, scanned, &actions, false);
     // 来源管理页目标框的提示框写「最近一次自动操作」：真建上了才记，按规则、按位置
     state
         .store
@@ -662,6 +695,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
 /// 扫描 → 跑一轮自动同步（只做一轮，不循环）→ 建过链就再扫一次 → 按最终目录集合重建监视
 #[tauri::command]
 fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<Overview, String> {
+    reconcile_copies(&state);
     let mut overview = overview(&state)?;
     if let Some(report) = auto_link(&state, &overview)? {
         let _ = app.emit("auto-linked", &report);
@@ -683,9 +717,34 @@ fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<
             let _ = app.emit("mcp-auto-imported", &report);
         }
     }
+    sweep_held_copies(&state, &overview);
     // 本体位置、目标目录与自动引入配置父目录都要盯。
     resync_watchers(&app, &state, &overview);
     Ok(overview)
+}
+
+/// 扫描收尾：各列目录里暂存在副本旁边、过了 `copies::HELD_GRACE` 没人要的那几份移进废纸篓
+/// （`copies::sweep_held`）。删原件的撤销还记着的不动；撤销记录读不出来就这次不收。没收成的只记日志
+fn sweep_held_copies(state: &AppState, scanned: &Overview) {
+    let Ok(slot) = state.delete_undo.lock() else {
+        return;
+    };
+    let keep = slot
+        .as_ref()
+        .map(|(_, undo)| undo.held_copies())
+        .unwrap_or_default();
+    drop(slot);
+    let dirs: Vec<PathBuf> = scanned
+        .domains
+        .iter()
+        .flat_map(|d| d.targets.iter().map(|t| t.path.clone()))
+        .collect();
+    for (path, error) in copies::sweep_held(&dirs, &keep, copies::HELD_GRACE) {
+        log::warn!(
+            "暂存的副本 {} 没能移进废纸篓：{error}",
+            sophia_core::redact::redact(&path.display().to_string())
+        );
+    }
 }
 
 /// 选中格里的 Missing 格 → 建链动作
@@ -705,7 +764,8 @@ fn propose_unlinks(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<PlannedAction>, String> {
     let (sources, targets) = discover(&state)?;
-    Ok(skills::propose_unlinks(&sources, &targets, &cells))
+    let copies = load_copies(&state)?;
+    Ok(skills::propose_unlinks(&sources, &targets, &cells, &copies))
 }
 
 /// 按动作所在的目标目录回查，算出这条链接该用什么写法
@@ -723,8 +783,10 @@ fn style_for(overview: &Overview, action: &PlannedAction) -> LinkStyle {
     }
 }
 
-/// 每条动作各自算写法，按写法分组交给 `sync::execute`，报告仍按传入顺序返回
+/// 每条动作各自算写法，按写法分组交给 `sync::execute`，报告仍按传入顺序返回。
+/// 建不了链接改放的副本记进数据目录下的副本记录
 fn execute_grouped(
+    state: &AppState,
     overview: &Overview,
     actions: &[PlannedAction],
     clean_broken: bool,
@@ -737,7 +799,7 @@ fn execute_grouped(
             continue;
         }
         let subset: Vec<PlannedAction> = picked.iter().map(|i| actions[*i].clone()).collect();
-        let report = sync::execute(&subset, clean_broken, style);
+        let report = sync::execute(&subset, clean_broken, style, Some(&state.store));
         for (i, entry) in picked.into_iter().zip(report.entries) {
             slots[i] = Some(entry);
         }
@@ -754,7 +816,7 @@ fn apply_all(
     state: tauri::State<'_, AppState>,
 ) -> Result<SyncReport, String> {
     let overview = overview(&state)?;
-    Ok(execute_grouped(&overview, &actions, clean_broken))
+    Ok(execute_grouped(&state, &overview, &actions, clean_broken))
 }
 
 #[tauri::command]
@@ -778,7 +840,7 @@ fn split_whole_link(
         .iter()
         .find(|s| s.id == source_id)
         .ok_or_else(|| sophia_core::t!("shell.error.wholeDirOriginGone"))?;
-    Ok(skills::split_whole_link(target, source))
+    Ok(skills::split_whole_link(target, source, Some(&state.store)))
 }
 
 /// 删本体的计划：`plan` 给确认弹窗渲染，`plan_id` 给 `delete_source` 取回服务端那份
@@ -823,7 +885,7 @@ fn plan_delete_source(
         .iter()
         .find(|s| s.name == skill)
         .ok_or_else(|| sophia_core::t!("shell.error.originGone"))?;
-    let plan = skills::plan_delete_source(skill, &sources, &targets);
+    let plan = skills::plan_delete_source(skill, &sources, &targets, &load_copies(&state)?);
     let plan_id = state
         .next_delete_plan
         .fetch_add(1, Ordering::Relaxed)
@@ -892,7 +954,7 @@ fn plan_keep_copy(
         path,
         description: None,
     };
-    let plan = skills::plan_keep(&drop, &keep, &targets);
+    let plan = skills::plan_keep(&drop, &keep, &targets, &load_copies(&state)?);
     let plan_id = state
         .next_delete_plan
         .fetch_add(1, Ordering::Relaxed)
@@ -938,7 +1000,7 @@ fn delete_source(
     // 新的一次删除：上一次的撤销机会过去，暂存的原件移进废纸篓
     undo_slot.take();
     sync::release_held(&hold_root);
-    let (report, undo) = sync::delete_source_holding(&plan, Some(&hold_root));
+    let (report, undo) = sync::delete_source_holding(&plan, Some(&hold_root), Some(&state.store));
     let undo_id = undo.map(|undo| {
         let id = state
             .next_delete_plan
@@ -979,7 +1041,7 @@ fn undo_delete_source(
             _ => return Err(sophia_core::t!("shell.error.undoExpired")),
         }
     };
-    Ok(sync::undo_delete(&undo))
+    Ok(sync::undo_delete(&undo, Some(&state.store)))
 }
 
 /// 来源管理页：这个位置（`DomainPage.key`）已订阅的来源，以及 `+ 来源` 的两组候选。只读
@@ -998,6 +1060,7 @@ fn list_sources(
         &settings.subscriptions,
         &settings.auto_links,
         &home,
+        &load_copies(&state)?,
     ))
 }
 
@@ -1032,7 +1095,7 @@ fn preview_source_folder(
     Ok(subscriptions::preview_folder(&path, &sources, &home))
 }
 
-/// 移除来源前的只读清单：会撤掉的软链（skill × agent），给确认框列出。
+/// 移除来源前的只读清单：会撤掉的软链与副本（skill × agent，两者不分），给确认框列出。
 /// 原件在这个位置里的来源返回拒绝的原因
 #[tauri::command]
 fn plan_remove_source(
@@ -1041,10 +1104,16 @@ fn plan_remove_source(
     state: tauri::State<'_, AppState>,
 ) -> Result<subscriptions::SourceRemoval, String> {
     let (sources, targets) = discover(&state)?;
-    subscriptions::plan_remove(&domain, &source_id, &sources, &targets)
+    subscriptions::plan_remove(
+        &domain,
+        &source_id,
+        &sources,
+        &targets,
+        &load_copies(&state)?,
+    )
 }
 
-/// 从这个位置移除来源：撤掉它在这里的软链（删前重校验），再删订阅记录与规则里本位置的目标。
+/// 从这个位置移除来源：撤掉它在这里的软链与副本（删前重校验），再删订阅记录与规则里本位置的目标。
 /// 执行时按当下的文件系统重新算清单，不沿用确认框那一份
 #[tauri::command]
 fn remove_source(
@@ -1062,6 +1131,7 @@ fn remove_source(
         &targets,
         &mut settings.subscriptions,
         &mut settings.auto_links,
+        Some(&state.store),
     )?;
     state.store.save_settings(&settings).map_err(err)?;
     Ok(report)
@@ -1329,7 +1399,7 @@ fn update_auto_links(
 }
 
 /// 全部 harness 及其启用、安装状态，外加显示上限。返回全部而不只是已安装的：
-/// 设置页要列出「未安装的 N 个」，其中不显示名单里的给「恢复」入口
+/// 设置页要列出「未安装的 N 个」（只是信息，未安装的不在不显示名单里）
 #[tauri::command]
 fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<HarnessList, String> {
     let env = runtime_env()?;
@@ -1531,7 +1601,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        // 应用内更新：查清单、下载、验签、装都在插件里，前端只负责问与决定。
+        // 应用内更新：查清单、下载、验签、装都在插件里，`app_update.rs` 的命令按线路逐个调它（GitHub → 国内线路）并给出错分类，前端只负责问与决定。
         // 重启交给 process 插件——装完不重启，用户还在跑旧的那一份。
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -1570,6 +1640,7 @@ pub fn run() {
         })
         // 发现与安装的运行时状态（缓存、撤销记录），字段由 market.rs 自己管
         .manage(market::MarketState::default())
+        .manage(app_update::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             scan_all,
             scan_mcp,
@@ -1658,6 +1729,8 @@ pub fn run() {
             market::market_resolve_link,
             market::market_plan_skill_install,
             market::market_install_skill,
+            app_update::app_update_check,
+            app_update::app_update_install,
             market::market_plan_mcp_install,
             market::market_install_mcp,
             market::market_parse_mcp_json,
@@ -1676,6 +1749,9 @@ pub fn run() {
             language::ui_language,
             language::set_ui_language,
             usage::usage_refresh,
+            usage::usage_connect,
+            usage::usage_connect_cancel,
+            usage::usage_connect_reopen,
             last_exit_unexpected,
             settings_repaired,
             diagnostics::redact_text,

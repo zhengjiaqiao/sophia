@@ -46,6 +46,7 @@
   "common.feedback.shotFailed": "截图 {n}，没传上去，发送时再试",
   "common.feedback.removeShot": "去掉截图 {n}",
   "common.details.toggle": "详情",
+  "common.details.open": "查看错误详情",
   "common.details.copy": "复制详情",
   "common.details.copied": "已复制",
   "common.write.changed": "可能刚被别的程序改过，没动",
@@ -66,5 +67,16 @@
   "common.textField.show": "显示",
   "common.list.enum": "、",
   "common.list.and": " 和 ",
-  "common.list.semicolon": "；"
+  "common.list.semicolon": "；",
+  "common.net.checkUpdate.unreachable": "无法连接更新服务器，检查一下网络",
+  "common.net.checkUpdate.timeout": "网络太慢，检查更新超时了",
+  "common.net.checkUpdate.other": "检查更新失败，稍后再试",
+  "common.net.update.rateLimited": "更新服务器暂时限制了访问，几分钟后再试",
+  "common.net.download.unreachable": "无法连接下载服务器，检查一下网络",
+  "common.net.download.timeout": "网络太慢，下载超时了",
+  "common.net.downloadUpdate.other": "下载失败，稍后再试",
+  "common.net.downloadSkill.rateLimited": "下载服务器暂时限制了访问，几分钟后再试",
+  "common.net.retry": "再试一次",
+  "common.net.retryWithProxy": "开着代理再试一次",
+  "common.net.website": "到官网下载"
 }

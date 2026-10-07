@@ -85,6 +85,7 @@ fn harnesses() -> Vec<Harness> {
 
 fn env(home: &Path) -> Env {
     Env {
+        apps: Vec::new(),
         home: home.to_path_buf(),
         vars: Default::default(),
     }

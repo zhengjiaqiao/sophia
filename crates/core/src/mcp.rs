@@ -3712,6 +3712,7 @@ mod tests {
             agent_labels: None,
         };
         let env = Env {
+            apps: Vec::new(),
             home: home.clone(),
             vars: Default::default(),
         };
@@ -3771,6 +3772,7 @@ mod tests {
             agent_labels: None,
         };
         let env = Env {
+            apps: Vec::new(),
             home: PathBuf::from("/tmp/home"),
             vars: [("CODEX_HOME".into(), "  ".into())].into_iter().collect(),
         };

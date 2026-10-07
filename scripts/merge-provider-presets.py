@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """合并 cc-switch（Codex / Claude 预设）与 magpie 的服务商预设，输出 JSON 到 stdout。
 
+注意：只在 2026-10-05 生成初版时跑过。之后预设改为手工维护（#225：中转站只留知名的、
+国产套餐按调研对表），本脚本没有删除名单与手工覆盖，重跑会把删掉的中转站与停售套餐带回来、
+冲掉手加的地址。要再从上游同步，先给它加上删除名单与覆盖，再对照 #225 核对输出。
+
 用法：merge-provider-presets.py codexPresets.ts claudePresets.ts magpiePresets.go
 
 cc-switch 为准，magpie 只补缺失字段与缺失的服务商。
@@ -557,12 +561,12 @@ def main():
     providers = providers_cn + mo_cn + providers_gl + mo_gl
 
     # 校验
-    # 推广链接不带进来：来源里的邀请码、活动页、短链（`/i/<码>`、`/invite/`、`/r/`、`/register/<码>`、
+    # 推广链接不带进来：来源里的邀请码、活动页、短链（`/i/<码>`、`/go/<码>`、`/invite/`、`/r/`、`/register/<码>`、
     # `/agent/register/<码>`、`?aff=` / `?ref=` 一类查询参数、`activity/ccswitch`、根路径下一截 6 位随机码、
     # `s.qiniu.com` 短链）一律退回官网首页；来源的推广码不是 Sophia 的。
     # 不带码的 `/register` 是普通注册页，留着
     affiliate = re.compile(
-        r"/i/[A-Za-z0-9]+$|/invite/|/r/[A-Za-z0-9]+$|/register/[^/?#]+|activity/ccswitch|ccswitch|cc-switch"
+        r"/i/[A-Za-z0-9]+$|/go/[^/?#]+|/invite/|/r/[A-Za-z0-9]+$|/register/[^/?#]+|activity/ccswitch|ccswitch|cc-switch"
         r"|^https?://[^/]+/[A-Za-z0-9]{6}$|[?&](aff|aff_code|ref|referral|invite|invite_code|inviter|promo)=",
         re.I,
     )

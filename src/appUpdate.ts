@@ -1,4 +1,4 @@
-import { updateInstallFailure } from "./updateText.ts";
+import { netProblemOf, type NetKind } from "./netFailure.ts";
 
 /// Sophia 自己的新版本（DESIGN「设置 › 检查更新」「壳：侧栏 › 更新键」）。
 ///
@@ -33,7 +33,8 @@ export type AppUpdatePhase =
   | { kind: "available"; version: string }
   | { kind: "downloading"; version: string; percent: number | null }
   | { kind: "installed"; version: string }
-  | { kind: "failed"; version: string; reason: string; detail: string };
+  /// 下载失败：`cause` 是后端分的四类之一（界面按「下载更新」场景出主句与出口），`detail` 是原文（进「!」）
+  | { kind: "failed"; version: string; cause: NetKind; detail: string };
 
 export interface AppUpdateSnapshot {
   phase: AppUpdatePhase;
@@ -146,15 +147,8 @@ export function createAppUpdateStore(backend: AppUpdateBackend): AppUpdateStore 
         );
         set({ phase: { kind: "installed", version } });
       } catch (e) {
-        const detail = String(e);
-        set({
-          phase: {
-            kind: "failed",
-            version: phase.version,
-            reason: updateInstallFailure(detail),
-            detail,
-          },
-        });
+        const { kind, detail } = netProblemOf(e);
+        set({ phase: { kind: "failed", version: phase.version, cause: kind, detail } });
       }
     },
     async relaunch() {

@@ -25,6 +25,7 @@ import type { Location } from "../shell/nav.ts";
 import type { InstallOutcome } from "../types.ts";
 import type { InstalledNotice } from "./InstalledToast.tsx";
 import {
+  DownloadFailure,
   SkillAgents,
   InstallBlock,
   InstallFooter,
@@ -215,7 +216,13 @@ export function SkillInstallBody({
         blocked={item?.blocked ? { reason: item.blocked, path: item.dest } : null}
         onReveal={service.reveal}
       />
-      {state.planError ? <p className="install-error">{state.planError}</p> : null}
+      {state.planError ? (
+        <DownloadFailure
+          failure={state.planError}
+          className="install-error"
+          onRetry={state.retryPlan}
+        />
+      ) : null}
       <InstallBlock label={t("market.install.blockWho")}>
         <SkillAgents
           rows={state.rows}

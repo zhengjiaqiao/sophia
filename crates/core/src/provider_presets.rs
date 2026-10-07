@@ -122,7 +122,19 @@ mod tests {
         assert!(find("deepseek").is_some_and(|p| p.supported()));
     }
 
-    /// 来源里的推广链接不带进来（`/i/<码>`、`/invite/`、`/register/<码>`、`/agent/register/<码>`、
+    /// 2026-10 国内套餐对表（docs 评估 q1-presets）：千帆 Coding Plan 已停止续费、不再列出；
+    /// 腾讯云 Coding Plan 与百炼 Coding Plan 都有 Chat 地址，选得上
+    #[test]
+    fn 国内套餐预设对过表() {
+        assert!(find("baidu-qianfan-coding-plan").is_none());
+        for id in ["tencent-coding-plan", "qwen-ai-coding-plan"] {
+            let p = find(id).unwrap_or_else(|| panic!("缺预设：{id}"));
+            assert!(p.supported(), "{id} 要有 OpenAI 兼容地址");
+            assert_eq!(p.openai.unwrap().protocol.as_deref(), Some("chat"));
+        }
+    }
+
+    /// 来源里的推广链接不带进来（`/i/<码>`、`/go/<码>`、`/invite/`、`/register/<码>`、`/agent/register/<码>`、
     /// `?aff=` 一类查询参数、`ccswitch` 活动页、短链）。不带码的 `/register` 是普通注册页，放行
     #[test]
     fn 预设里没有推广链接() {
@@ -135,6 +147,10 @@ mod tests {
                 // `/register/` 后面还跟一截路径就是推广码；查询里带 aff / ref 等参数同理
                 let register_code = lower
                     .split_once("/register/")
+                    .is_some_and(|(_, rest)| !rest.is_empty());
+                // `/go/` 后面还跟一截路径是推广短链（`/go/u117`）；`opencode.ai/go` 本身是产品页，不带后缀不算
+                let go_code = lower
+                    .split_once("/go/")
                     .is_some_and(|(_, rest)| !rest.is_empty());
                 let promo_query = lower.split_once('?').is_some_and(|(_, query)| {
                     query.split('&').any(|kv| {
@@ -154,6 +170,7 @@ mod tests {
                 });
                 assert!(
                     !register_code
+                        && !go_code
                         && !promo_query
                         && !lower.contains("/i/")
                         && !lower.contains("/invite/")

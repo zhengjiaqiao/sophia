@@ -1,0 +1,79 @@
+---
+// 页脚（R13）：两行。第一行字标（左）与项目链接（右）；细线下第二行版权（左）与声明（右）。
+// 两行的左右边各自对齐：字标与版权共一条左边，最后一个链接与声明共一条右边。
+import { SITE } from "../site.config.ts";
+import { t, type Lang } from "../i18n.ts";
+import Wordmark from "./Wordmark.astro";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const year = new Date().getFullYear();
+---
+
+<footer class="foot">
+  <div class="wrap">
+    <div class="foot__top">
+      <a class="foot__brand" href="#top" aria-label="Sophia"><Wordmark height={18} /></a>
+      <nav class="foot__links" aria-label={t(lang, "footer.navLabel")}>
+        <a href={SITE.links.github}>GitHub</a>
+        <a href={SITE.links.releases}>{t(lang, "footer.releases")}</a>
+        <a href={SITE.links.issues}>{t(lang, "footer.feedback")}</a>
+        <a href={SITE.links.privacy}>{t(lang, "footer.privacy")}</a>
+        <a href={SITE.links.notice}>{t(lang, "footer.licenses")}</a>
+      </nav>
+    </div>
+    <div class="foot__legal">
+      <span>{t(lang, "footer.copyright", { year })}</span>
+      <span>{t(lang, "footer.disclaimer")}</span>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .foot {
+    border-top: 1px solid var(--hairline);
+    padding-block: 36px 40px;
+  }
+  .foot__top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px 32px;
+  }
+  .foot__brand {
+    display: inline-flex;
+  }
+  .foot__brand :global(img) {
+    height: 18px;
+    width: auto;
+  }
+  .foot__links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    font-size: 14px;
+  }
+  .foot__links a {
+    color: var(--ink-mute);
+    text-decoration: none;
+  }
+  .foot__links a:hover {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .foot__legal {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid var(--row-line);
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px 24px;
+    font-size: 13px;
+    color: var(--ink-faint);
+  }
+</style>

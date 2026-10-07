@@ -104,7 +104,7 @@ export default function App() {
   const [nav, setNav] = useState<Nav>(loadNav);
   const [error, setError] = useState<string | null>(null);
   /// 应用菜单「关于 Sophia」「检查更新…」：设置页停在「关于」一节，`check` 时同时开始检查。
-  /// `at` 让同一个请求再发一次也算新的
+  /// `at` 让同一个请求再发一次也算新的。离开设置就清掉，下回从侧栏进设置不再跳、不再查
   const [aboutRequest, setAboutRequest] = useState<{ at: number; check: boolean } | null>(null);
   /// SKILLS 页「装了 N 个 agent」灰面板的 `去设置`：设置页停在 `Skills 和 MCP` 一节（第一块是 `显示的 agent`）。离开设置就清掉，
   /// 下回从侧栏进设置不再跳
@@ -497,12 +497,13 @@ export default function App() {
   const face = faceOf(nav);
 
   /// 换目的地之后的例行重读：回到 SKILLS 重扫一次（MCP 页由自身 refreshKey 驱动）；
-  /// 离开设置时重扫一次，因为设置改了 agent 的启用
+  /// 离开设置时重扫一次，因为设置改了 agent 的启用；停在设置某一节的请求（「关于」「列表里的 agent」）同时清掉
   const prevNav = useRef(nav);
   useEffect(() => {
     const prev = prevNav.current;
     prevNav.current = nav;
     if (prev.destination === "settings" && nav.destination !== "settings") {
+      setAboutRequest(null);
       setAgentsRequest(null);
       void refresh();
       refreshGateway();

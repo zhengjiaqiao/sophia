@@ -1,0 +1,180 @@
+/* 首屏短片的舞台与镜头共用样式（画板 hero7）。各镜头自己的内容样式写在各自的 components/film/Shot*.astro 里。
+   舞台尺寸：宽屏 3:2，页面宽 ≤ 640px 时 4:5；镜头里的字号取整页容器的 cqi。 */
+
+.film-wrap {
+  position: relative;
+  min-width: 0;
+}
+.film {
+  position: relative;
+  aspect-ratio: 3 / 2;
+  border-radius: 20px;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(120% 90% at 50% 0%, var(--paper), var(--recess));
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  text-align: left;
+}
+@container site (max-width: 640px) {
+  .film {
+    aspect-ratio: 4 / 5;
+  }
+}
+
+/* 镜头：默认收起；当前镜头 .on。第 1 镜头在静态 HTML 里就是 .on，关 JS 时看到的就是静止帧 */
+.shot {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+}
+.shot.on {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 机位：镜头里除字幕、提示条之外的内容都在这一层里，推近 / 拉远 / 摇镜头给它 translate + scale（client/film-shots/camera.ts，
+   几何在 demos/camera.ts）。与镜头同一个框，里面的 .frag 照旧相对它定位；字幕（z-index 3）与提示条在层外，不跟着缩放 */
+.cam {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+/* 转场里从上一镜头「里面」揭开时，下一镜头要不透明（平时镜头是透明的，背景在舞台上）；
+   揭开的洞是一张软边圆形遮罩，大小与位置由脚本动画（demos/camera.ts 的 holeFrames，实心到 80%） */
+.shot.portal {
+  background: radial-gradient(120% 90% at 50% 0%, var(--paper), var(--recess));
+  mask-image: radial-gradient(closest-side, #000 80%, transparent);
+  mask-repeat: no-repeat;
+  mask-size: 0 0;
+}
+
+/* 镜头标题：两行，每行外层裁切、里层升起；关键词橙（accent-ink，R15） */
+.cap7 {
+  position: absolute;
+  left: 6%;
+  top: 7%;
+  z-index: 3;
+  margin: 0;
+  max-width: 52%;
+  /* 字号上限 30px（画板 34px）：整页 1440 宽时舞台约 616px，34px 的「所有 agent 都能用。」会折成三行压到下面的卡片上 */
+  font: 600 clamp(22px, 2.4cqi, 30px) / 1.25 var(--font-cjk);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.cap7 > span {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.12em;
+  margin-bottom: -0.12em;
+}
+.cap7 .ln {
+  display: block;
+}
+.cap7 em {
+  font-style: normal;
+  color: var(--accent-ink);
+}
+@container site (max-width: 640px) {
+  .cap7 {
+    max-width: 86%;
+    top: 6%;
+    font-size: 20px;
+  }
+}
+
+/* 镜头里的浮层卡（#242 的表格、开关、对话、菜单栏面板用） */
+.frag {
+  position: absolute;
+  z-index: 2;
+}
+.card7 {
+  background: var(--paper);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px var(--hairline),
+    0 24px 60px -18px rgba(28, 28, 26, 0.25);
+}
+/* 转场用的克隆与遮罩 */
+.fly {
+  position: absolute;
+  z-index: 9;
+  pointer-events: none;
+  margin: 0;
+}
+
+/* 控件：播放 / 暂停键 + 6 段进度条。关 JS 或减少动态时不显示（没有 JS 它们按不动） */
+.film-ctl {
+  display: none;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+}
+.film-wrap[data-js] .film-ctl {
+  display: flex;
+}
+@media (prefers-reduced-motion: reduce) {
+  .film-wrap[data-js] .film-ctl {
+    display: none;
+  }
+}
+.play {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--face);
+  color: var(--ink);
+  box-shadow: var(--raise);
+  cursor: pointer;
+}
+.play svg {
+  width: 14px;
+  height: 14px;
+}
+.play .i-play,
+.play[data-playing="true"] .i-pause {
+  display: block;
+}
+.play .i-pause,
+.play[data-playing="true"] .i-play {
+  display: none;
+}
+.reel {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.reel button {
+  flex: 1;
+  max-width: 72px;
+  border: 0;
+  background: none;
+  padding: 10px 0;
+  cursor: pointer;
+}
+.reel button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.reel i {
+  display: block;
+  position: relative;
+  height: 3px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+.reel b {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  transform-origin: left;
+  transform: scaleX(0);
+}

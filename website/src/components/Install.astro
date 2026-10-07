@@ -1,0 +1,171 @@
+---
+// 下载区（锚点 #install，R12）：猫扒文件夹插图、标题、两个一样大的下载键、与两键合宽相等的 brew 命令框（复制键常显）、小字。
+// 两键与命令框放在同一个两列网格里：两列等宽、命令框跨两列，所以「命令框 = 两键合宽」由版式保证，不靠写死的像素。
+import folder from "../../../src/assets/empty-folder.png";
+import { SITE } from "../site.config.ts";
+import { t, type Lang } from "../i18n.ts";
+import AppleGlyph from "./AppleGlyph.astro";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+---
+
+<section class="final" id="install">
+  <div class="wrap">
+    <img
+      class="cat-art final__cat"
+      src={folder.src}
+      width={folder.width / 2}
+      height={folder.height / 2}
+      alt=""
+      loading="lazy"
+    />
+    <h2 class="h2 final__h2"><span class="ph">{t(lang, "install.title1")}</span><span class="ph">{t(lang, "install.title2")}</span></h2>
+    <div class="dl">
+      <a class="btn btn--ink btn--hero" href={SITE.downloadHref.arm64}>
+        <AppleGlyph />
+        <span class="t"><b>{t(lang, "install.arm")}</b><small>{t(lang, "install.armSub")}</small></span>
+      </a>
+      <a class="btn btn--hero btn--outline" href={SITE.downloadHref.x64}>
+        <AppleGlyph />
+        <span class="t"><b>{t(lang, "install.intel")}</b><small>{t(lang, "install.intelSub")}</small></span>
+      </a>
+      <div class="brew">
+        <code id="brew-cmd">{SITE.brewCommand}</code>
+        <button
+          type="button"
+          class="brew__copy"
+          data-copy-target="brew-cmd"
+          data-label-copy={t(lang, "install.copy")}
+          data-label-copied={t(lang, "install.copied")}
+          data-label-manual={t(lang, "install.manual")}
+          aria-live="polite">{t(lang, "install.copy")}</button
+        >
+      </div>
+    </div>
+    <p class="meta">{t(lang, "install.meta", { version: SITE.minMacos })}</p>
+  </div>
+  <!-- 没有 JS 时复制键没用，藏起来；命令仍可手动选中 -->
+  <noscript><style>.brew__copy{display:none}</style></noscript>
+</section>
+
+<script>
+  import { copyCommand } from "../lib/copyCommand";
+
+  // 写进剪贴板就把键上的字换成「已复制」；写不进就选中命令、换成「按 ⌘C 复制」，不谎报已复制
+  for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-copy-target]")) {
+    const code = document.getElementById(btn.dataset.copyTarget!);
+    if (!code) continue;
+    let timer: number | undefined;
+    btn.addEventListener("click", async () => {
+      const result = await copyCommand(code.textContent ?? "", {
+        writeText: navigator.clipboard?.writeText?.bind(navigator.clipboard),
+        select: () => {
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        },
+      });
+      btn.textContent = result === "copied" ? btn.dataset.labelCopied! : btn.dataset.labelManual!;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => (btn.textContent = btn.dataset.labelCopy!), 2400);
+    });
+  }
+</script>
+
+<style>
+  .final {
+    text-align: center;
+    padding-block: clamp(72px, 9cqi, 128px);
+    border-top: 1px solid var(--hairline);
+  }
+  .final__cat {
+    width: min(250px, 60%);
+    margin: 0 auto clamp(28px, 3.4cqi, 44px);
+  }
+  .final__h2 {
+    margin-top: 0;
+    margin-inline: auto;
+  }
+  .dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(236px, 1fr));
+    gap: 14px;
+    width: max-content;
+    max-width: 100%;
+    margin: clamp(36px, 4.2cqi, 56px) auto 0;
+  }
+  .dl .btn--hero {
+    justify-content: flex-start;
+  }
+  .btn--outline {
+    box-shadow:
+      var(--raise),
+      inset 0 0 0 1px var(--ctl-border);
+  }
+  /* 命令框跨两列；自己的宽度不参与列宽计算（width: 0 + min-width: 100%），所以列宽只由两个按钮定 */
+  .brew {
+    grid-column: 1 / -1;
+    width: 0;
+    min-width: 100%;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    border-radius: var(--radius-face);
+    background: var(--recess);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    font: 400 13.5px / 1 var(--font-mono);
+    overflow: hidden;
+    text-align: left;
+  }
+  .brew code {
+    flex: 1;
+    min-width: 0;
+    padding-inline: 16px;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    user-select: all;
+  }
+  .brew code::before {
+    content: "$ ";
+    color: var(--ink-faint);
+  }
+  .brew__copy {
+    flex: none;
+    align-self: stretch;
+    min-width: 84px;
+    padding-inline: 14px;
+    border: 0;
+    border-left: 1px solid var(--hairline);
+    background: transparent;
+    cursor: pointer;
+    font: 500 13px var(--font-ui);
+    color: var(--ink);
+  }
+  .brew__copy:hover {
+    background: var(--surface);
+  }
+  .meta {
+    margin: 18px 0 0;
+    font-size: 14px;
+    color: var(--ink-mute);
+  }
+  /* 手机宽：两键与命令框纵向撑满同宽（AC8） */
+  @container site (max-width: 640px) {
+    .dl {
+      grid-template-columns: minmax(0, 1fr);
+      width: 100%;
+    }
+    .brew {
+      font-size: 12px;
+    }
+    .brew__copy {
+      min-width: 64px;
+    }
+  }
+</style>

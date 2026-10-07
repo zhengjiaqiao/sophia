@@ -1,0 +1,69 @@
+---
+// 模型 / skill 与 MCP / 用量三个区块共用的版式：小标 + 标题（两行）+ 一句话 + 演示。
+// 文字由各区块文件用字面量键取好传进来；演示放默认插槽，文字下面的插图放 art 插槽。
+interface Props {
+  id: string;
+  kicker: string;
+  title1: string;
+  title2: string;
+  sub: string;
+  /** 文字在右、演示在左（skill 区） */
+  flip?: boolean;
+  /** 居中构图（用量区） */
+  center?: boolean;
+}
+const { id, kicker, title1, title2, sub, flip = false, center = false } = Astro.props;
+---
+
+<section class:list={["feat", { "feat--flip": flip, "feat--center": center }]} id={id}>
+  <div class="wrap feat__grid">
+    <div class="feat__text">
+      <div class="kicker">{kicker}</div>
+      <h2 class="h2"><span class="ph">{title1}</span><span class="ph">{title2}</span></h2>
+      <p class="sub">{sub}</p>
+      <slot name="art" />
+    </div>
+    <slot />
+  </div>
+</section>
+
+<style>
+  .feat {
+    padding-block: var(--mk-section);
+    border-top: 1px solid var(--hairline);
+  }
+  .feat__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(32px, 5cqi, 80px);
+    align-items: center;
+  }
+  .feat--flip .feat__grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  }
+  .feat--flip .feat__text {
+    order: 2;
+  }
+  @container site (max-width: 860px) {
+    .feat__grid,
+    .feat--flip .feat__grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .feat--flip .feat__text {
+      order: 0;
+    }
+  }
+  .feat--center .feat__grid {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+    gap: 40px;
+  }
+  .feat--center :global(.kicker) {
+    justify-content: center;
+  }
+  .feat--center :global(.h2),
+  .feat--center :global(.sub) {
+    margin-inline: auto;
+  }
+</style>

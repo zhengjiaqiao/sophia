@@ -1,5 +1,6 @@
 //! 按域（全局 / 每个项目）组织的扫描：行的两类来源、格状态、按选中格生成建链 / 删链动作、整目录链接拆分
-use crate::fs::{create_link, entry_kind, normalize, real_path, remove_link, same_real, EntryKind};
+use crate::copies::Copies;
+use crate::fs::{entry_kind, normalize, real_path, remove_link, same_real, EntryKind};
 use crate::models::*;
 use crate::subscriptions::{subscribed, Subscriptions};
 use crate::sync::io_failed;
@@ -72,15 +73,28 @@ pub(crate) fn group_domains(targets: &[Target]) -> Vec<(String, String, Vec<Targ
     out
 }
 
-/// `t/name` 是解析到该 skill 本体路径的软链
-pub(crate) fn links_to(target: &Target, skill: &Skill) -> bool {
+/// `t/name` 是解析到该 skill 本体路径的软链，或 Sophia 为这份原件放的、记录在案的副本
+pub(crate) fn links_to(target: &Target, skill: &Skill, copies: &Copies) -> bool {
     let path = target.path.join(&skill.name);
-    matches!(entry_kind(&path), EntryKind::Symlink(_)) && same_real(&path, &skill.path)
+    match entry_kind(&path) {
+        EntryKind::Symlink(_) => same_real(&path, &skill.path),
+        // Sophia 放的、记录在案的这份原件的副本：对用户和软链一样（spec #194 修订）
+        EntryKind::Dir => copies
+            .at(&path)
+            .is_some_and(|r| same_real(&r.source, &skill.path)),
+        _ => false,
+    }
 }
 
 /// 只读扫描，按域组织。只产出事实，不作任何选择。
-/// 行 = 这个域已订阅的来源（见 `subscriptions::subscribed`）的**全部** skill，没链的格是 Missing
-pub fn scan(sources: &[Source], targets: &[Target], subs: &Subscriptions) -> Overview {
+/// 行 = 这个域已订阅的来源（见 `subscriptions::subscribed`）的**全部** skill，没链的格是 Missing。
+/// `copies` 是 Sophia 放的副本的记录：记录在案的真实文件夹是 Copied，不是 Duplicate
+pub fn scan(
+    sources: &[Source],
+    targets: &[Target],
+    subs: &Subscriptions,
+    copies: &Copies,
+) -> Overview {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut domains = Vec::new();
     // 目录尚不存在的目标照常成列：格状态自然全是 Missing，补齐时由 `sync::execute` 建目录
@@ -88,7 +102,7 @@ pub fn scan(sources: &[Source], targets: &[Target], subs: &Subscriptions) -> Ove
         // 行 = 已订阅来源的全部 skill；(skill, 本体位置 label, 本体位置 id) 排序去重
         let mut keys: BTreeSet<(String, String, String)> = BTreeSet::new();
         for s in sources {
-            if !subscribed(s, &key, &d_targets, subs) {
+            if !subscribed(s, &key, &d_targets, subs, copies) {
                 continue;
             }
             for skill in &s.skills {
@@ -105,7 +119,7 @@ pub fn scan(sources: &[Source], targets: &[Target], subs: &Subscriptions) -> Ove
                     .iter()
                     .map(|t| {
                         let path = t.path.join(&skill);
-                        let (state, points_to) = cell_facts(source, &skill_path, t, &path);
+                        let (state, points_to) = cell_facts(source, &skill_path, t, &path, copies);
                         Cell {
                             source_id: source_id.clone(),
                             skill: skill.clone(),
@@ -149,7 +163,8 @@ pub fn scan(sources: &[Source], targets: &[Target], subs: &Subscriptions) -> Ove
 }
 
 /// 本域里因「那里已有同名的」被挡住的格上，占着的那一份 agent 自己的文件夹（issue #153）：
-/// 是带 `SKILL.md` 的真实文件夹（文件、链接、残留的空文件夹不算），且不是本域任何一行的原件（那一份在表里有自己的行）。按路径去重
+/// 是带 `SKILL.md` 的真实文件夹（文件、链接、残留的空文件夹不算），且不是本域任何一行的原件（那一份在表里有自己的行）。按路径去重。
+/// Sophia 放的副本不在里面：它的格是 Copied（或别的原件那一行上的 Foreign），不是 Duplicate
 fn agent_copies(rows: &[DomainRow], by_id: &BTreeMap<&str, &Source>) -> Vec<AgentCopy> {
     // 比较「是否同一处」两侧都走 real_path：macOS 上 /var 会变成 /private/var
     let listed: BTreeSet<PathBuf> = rows
@@ -183,8 +198,10 @@ fn agent_copies(rows: &[DomainRow], by_id: &BTreeMap<&str, &Source>) -> Vec<Agen
     out
 }
 
-/// 选中格里的 Missing 格 → Create。本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重。
-/// 目录尚不存在的目标照常产出 Create，目录由 `sync::execute` 就地创建
+/// 选中格里的 Missing 格 → Create（一律建软链；建不了链接时执行器自动改放副本，见 `sync::execute`）。
+/// 本体位置 / skill / 目标 id 对不上的格忽略；按 target_path 去重（共用文件夹只建一处）。
+/// 目录尚不存在的目标照常产出动作，目录由 `sync::execute` 就地创建。
+/// 只看 Missing：副本格是真实文件夹，认不认得出都不是 Missing，所以这里不用副本记录
 pub fn propose_links(
     sources: &[Source],
     targets: &[Target],
@@ -194,26 +211,33 @@ pub fn propose_links(
         sources,
         targets,
         cells,
+        &Copies::default(),
         |state, _| state == CellState::Missing,
-        ActionKind::Create,
+        |_| ActionKind::Create,
     )
 }
 
 /// 选中格里的 Linked 格（目标非整目录链接）→ Unlink。规则同上。
-/// 目录还不存在的目标里没有可删的东西，一律不产出动作
+/// 目录还不存在的目标里没有可删的东西，一律不产出动作。
+/// 副本格（Copied）对用户就是已链，同样出 Unlink：执行时 `sync::execute` 认出它是副本，
+/// 重校验后挪进暂存、删记录（`copies::remove`）
 pub fn propose_unlinks(
     sources: &[Source],
     targets: &[Target],
     cells: &[CellRef],
+    copies: &Copies,
 ) -> Vec<PlannedAction> {
     propose_by(
         sources,
         targets,
         cells,
+        copies,
         |state, target| {
-            target.exists && state == CellState::Linked && target.linked_whole_to.is_none()
+            target.exists
+                && matches!(state, CellState::Linked | CellState::Copied)
+                && target.linked_whole_to.is_none()
         },
-        ActionKind::Unlink,
+        |_| ActionKind::Unlink,
     )
 }
 
@@ -221,8 +245,9 @@ fn propose_by(
     sources: &[Source],
     targets: &[Target],
     cells: &[CellRef],
+    copies: &Copies,
     wanted: impl Fn(CellState, &Target) -> bool,
-    kind: ActionKind,
+    kind: impl Fn(&Target) -> ActionKind,
 ) -> Vec<PlannedAction> {
     let by_id: BTreeMap<&str, &Source> = sources.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
@@ -238,14 +263,17 @@ fn propose_by(
             continue;
         };
         let path = target.path.join(&cell.skill);
-        if !wanted(cell_state(source, skill_path, target, &path), target) {
+        if !wanted(
+            cell_state(source, skill_path, target, &path, copies),
+            target,
+        ) {
             continue;
         }
         if !seen.insert(path.clone()) {
             continue;
         }
         out.push(PlannedAction {
-            kind,
+            kind: kind(target),
             item_name: cell.skill.clone(),
             source_path: skill_path.to_path_buf(),
             target_path: path,
@@ -305,7 +333,11 @@ pub fn record_auto_runs(
 ) -> bool {
     let mut added: BTreeMap<(PathBuf, String), usize> = BTreeMap::new();
     for entry in &report.entries {
-        if entry.action.kind != ActionKind::Create || entry.outcome != Outcome::Created {
+        let adds = matches!(
+            entry.action.kind,
+            ActionKind::Create | ActionKind::PlaceCopy
+        );
+        if !adds || entry.outcome != Outcome::Created {
             continue;
         }
         let Some(source) = sources
@@ -489,8 +521,14 @@ fn find_rule_mut<'a>(rules: &'a mut [AutoLink], source: &Path) -> Option<&'a mut
 }
 
 /// `skill_path` 是该 skill 在本体位置里的真实路径，`path` 是它在目标目录下的位置
-fn cell_state(source: &Source, skill_path: &Path, target: &Target, path: &Path) -> CellState {
-    cell_facts(source, skill_path, target, path).0
+fn cell_state(
+    source: &Source,
+    skill_path: &Path,
+    target: &Target,
+    path: &Path,
+    copies: &Copies,
+) -> CellState {
+    cell_facts(source, skill_path, target, path, copies).0
 }
 
 /// 一格的两件事实：状态，以及这一格上的软链解析后落在哪。
@@ -500,6 +538,7 @@ fn cell_facts(
     skill_path: &Path,
     target: &Target,
     path: &Path,
+    copies: &Copies,
 ) -> (CellState, Option<PathBuf>) {
     match target.linked_whole_to.as_deref() {
         // 整目录链到本体位置自己：内容经由那条目录级软链落到本体上
@@ -513,7 +552,22 @@ fn cell_facts(
     }
     match entry_kind(path) {
         EntryKind::Missing => (CellState::Missing, None),
-        EntryKind::Dir | EntryKind::File => (CellState::Duplicate, None),
+        // Sophia 放的副本：这份原件的是 Copied（对用户和已链一样），别的原件的同软链指向别处一样是 Foreign。
+        // 落点给记录里那份原件的真实路径（原件不在了给记录的路径）
+        EntryKind::Dir => match copies.at(path) {
+            Some(record) => {
+                let original = real_path(&record.source);
+                let same = original.is_some() && original == real_path(skill_path);
+                let state = if same {
+                    CellState::Copied
+                } else {
+                    CellState::Foreign
+                };
+                (state, original.or_else(|| Some(record.source.clone())))
+            }
+            None => (CellState::Duplicate, None),
+        },
+        EntryKind::File => (CellState::Duplicate, None),
         // 断链：real_path 解析不到，本来也没有落点
         EntryKind::Symlink(_) => match real_path(path) {
             None => (CellState::Broken, None),
@@ -574,9 +628,15 @@ pub fn link_style(skill_path: &Path, target: &Target) -> LinkStyle {
     }
 }
 
-/// 把"目标目录整体是一条指向本体位置的软链"拆成逐项链接：删软链 → 建真实目录 → 逐个 skill 建链。
-/// 前置检查不过或任一步失败即停止，已建的链接保留
-pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
+/// 把"目标目录整体是一条指向本体位置的软链"拆成逐项链接：删软链 → 建真实目录 → 逐个 skill 加上。
+/// 逐个加上与点格子同一个执行器（`sync::execute`）：一律建软链，建不了链接的自动改放副本；
+/// `copies` 是副本记录所在的数据目录。
+/// 前置检查不过或任一步失败即停止，已加上的保留
+pub fn split_whole_link(
+    target: &Target,
+    source: &Source,
+    copies: Option<&crate::store::Store>,
+) -> SyncReport {
     let parent = target
         .path
         .parent()
@@ -655,27 +715,20 @@ pub fn split_whole_link(target: &Target, source: &Source) -> SyncReport {
     }
     for skill in &source.skills {
         let source_path = skill.path.clone();
-        let target_path = target.path.join(&skill.name);
         let style = link_style(&source_path, target);
-        let mut fail_kind = None;
-        let mut detail = None;
-        let outcome = match create_link(&source_path, &target_path, style) {
-            Ok(()) => Outcome::Created,
-            Err(e) => io_failed("create-link", &target_path, &e, &mut fail_kind, &mut detail),
+        let one = PlannedAction {
+            kind: ActionKind::Create,
+            item_name: skill.name.clone(),
+            target_path: target.path.join(&skill.name),
+            source_path,
+            target: target.path.clone(),
         };
-        let failed = matches!(outcome, Outcome::Failed(_));
-        entries.push(ReportEntry {
-            action: PlannedAction {
-                kind: ActionKind::Create,
-                item_name: skill.name.clone(),
-                source_path,
-                target_path,
-                target: target.path.clone(),
-            },
-            outcome,
-            fail_kind,
-            detail,
-        });
+        let done = crate::sync::execute(std::slice::from_ref(&one), false, style, copies);
+        let failed = done
+            .entries
+            .iter()
+            .any(|e| matches!(e.outcome, Outcome::Failed(_)));
+        entries.extend(done.entries);
         if failed {
             break;
         }
@@ -688,27 +741,39 @@ fn report(entries: Vec<ReportEntry>) -> SyncReport {
 }
 
 /// 删一个 skill 本体前的只读体检：体量、受影响的链接、是否在 git 仓库内、删完改指到哪。
-/// 只产出事实，不动文件系统；`sources` 给全部已知本体位置，`relink_to` 从里面找同名的另一处
+/// 只产出事实，不动文件系统；`sources` 给全部已知本体位置，`relink_to` 从里面找同名的另一处；
+/// `copies` 是副本记录，这份原件记录在案的副本列进计划
 pub fn plan_delete_source(
     skill: &Skill,
     sources: &[Source],
     targets: &[Target],
+    copies: &Copies,
 ) -> DeleteSourcePlan {
     let relink_to = same_name_elsewhere(&skill.name, sources, &normalize(&skill.path));
-    plan_delete(skill, relink_to, targets)
+    plan_delete(skill, relink_to, targets, copies)
 }
 
 /// 「只留这份」挪走 `drop`、留下 `keep` 的体检（issue #153）：同 `plan_delete_source`，只是指向被挪走那份的
 /// 链接明确改指到留下的 `keep`——留下的可能是 agent 自己目录里的那一份，不在任何原件位置里，
 /// 按原件位置找别处同名的找不到它。`keep` 已不在时没有可改指的地方
-pub fn plan_keep(drop: &Skill, keep: &Path, targets: &[Target]) -> DeleteSourcePlan {
+pub fn plan_keep(
+    drop: &Skill,
+    keep: &Path,
+    targets: &[Target],
+    copies: &Copies,
+) -> DeleteSourcePlan {
     let keep = normalize(keep);
     let relink_to =
         (real_path(&keep).is_some() && !same_real(&keep, &normalize(&drop.path))).then_some(keep);
-    plan_delete(drop, relink_to, targets)
+    plan_delete(drop, relink_to, targets, copies)
 }
 
-fn plan_delete(skill: &Skill, relink_to: Option<PathBuf>, targets: &[Target]) -> DeleteSourcePlan {
+fn plan_delete(
+    skill: &Skill,
+    relink_to: Option<PathBuf>,
+    targets: &[Target],
+    copies: &Copies,
+) -> DeleteSourcePlan {
     let path = normalize(&skill.path);
     let (entries, bytes, modified) = dir_size(&path);
     // 比较"是否同一处"两侧都要走 real_path：macOS 上 /var 会变成 /private/var
@@ -724,6 +789,10 @@ fn plan_delete(skill: &Skill, relink_to: Option<PathBuf>, targets: &[Target]) ->
         },
         in_git: git_root(&path),
         relink_to,
+        copies: match &real {
+            Some(_) => copies.of(&path),
+            None => Vec::new(),
+        },
         modified,
         path,
     }
@@ -945,7 +1014,7 @@ mod tests {
 
     /// 还没有订阅记录时的扫描：自己的来源与此刻有链的来源成行
     fn scan(sources: &[Source], targets: &[Target]) -> Overview {
-        super::scan(sources, targets, &Subscriptions::new())
+        super::scan(sources, targets, &Subscriptions::new(), &Copies::default())
     }
 
     fn make_source(path: &Path, label: &str, kind: SourceKind, skills: &[&str]) -> Source {
@@ -1247,6 +1316,7 @@ mod tests {
             std::slice::from_ref(&s),
             std::slice::from_ref(&not_yet),
             &[cell(&s, "a", &not_yet)],
+            &Copies::default(),
         )
         .is_empty());
         // 同一个目标标成已存在就照常产出
@@ -1255,6 +1325,7 @@ mod tests {
             std::slice::from_ref(&s),
             std::slice::from_ref(&now),
             &[cell(&s, "a", &now)],
+            &Copies::default(),
         );
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].kind, ActionKind::Unlink);
@@ -1339,7 +1410,7 @@ mod tests {
                 cells.push(cell(&sources[0], skill, t));
             }
         }
-        let acts = propose_unlinks(&sources, &targets, &cells);
+        let acts = propose_unlinks(&sources, &targets, &cells, &Copies::default());
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].kind, ActionKind::Unlink);
         assert_eq!(acts[0].target_path, claude.join("a"));
@@ -1374,7 +1445,7 @@ mod tests {
         let run = |sources: &[Source], rules: &[AutoLink]| {
             let cells = auto_link_cells(sources, &targets, rules);
             let actions = propose_links(sources, &targets, &cells);
-            crate::sync::execute(&actions, false, LinkStyle::Absolute)
+            crate::sync::execute(&actions, false, LinkStyle::Absolute, None)
         };
         let mut report = run(&sources, &rules);
         assert_eq!(report.entries.len(), 3);
@@ -1583,6 +1654,7 @@ mod tests {
     /// 真实目录里读本体位置（手动添加的位置），与界面上扫描走同一条 `discovery::sources`
     fn scan_sources(tree: &TempTree, dir: &Path) -> Vec<Source> {
         let env = crate::discovery::Env {
+            apps: Vec::new(),
             home: tree.dir("home"),
             vars: Default::default(),
         };
@@ -2004,7 +2076,7 @@ mod tests {
         let sources = vec![source(&store, &["a"]), source(&other, &["a"])];
         let targets = vec![global("claude-code", &claude), global("codex", &codex)];
         let skill = sources[0].skills[0].clone();
-        let plan = plan_delete_source(&skill, &sources, &targets);
+        let plan = plan_delete_source(&skill, &sources, &targets, &Copies::default());
 
         assert_eq!(plan.path, body);
         // SKILL.md + refs + refs/note.md
@@ -2115,11 +2187,11 @@ mod tests {
         let empty = t.dir("store/b");
 
         let sources = vec![source(&store, &["a", "b"])];
-        let plan = plan_delete_source(&sources[0].skills[0], &sources, &[]);
+        let plan = plan_delete_source(&sources[0].skills[0], &sources, &[], &Copies::default());
         assert_eq!(plan.modified, Some(1_758_326_400_000));
         // 目录自身的时间不算：一个文件都没有就是 None
         assert_eq!(empty, sources[0].skills[1].path);
-        let plan = plan_delete_source(&sources[0].skills[1], &sources, &[]);
+        let plan = plan_delete_source(&sources[0].skills[1], &sources, &[], &Copies::default());
         assert_eq!(plan.modified, None);
     }
 
@@ -2139,7 +2211,12 @@ mod tests {
             source(&gone, &["a"]),
         ];
         std::fs::remove_dir_all(&gone).unwrap();
-        let plan = plan_delete_source(&sources[0].skills[0].clone(), &sources, &[]);
+        let plan = plan_delete_source(
+            &sources[0].skills[0].clone(),
+            &sources,
+            &[],
+            &Copies::default(),
+        );
         assert_eq!(plan.path, body);
         assert_eq!(plan.relink_to, None);
         assert!(plan.affected.is_empty());
@@ -2220,7 +2297,7 @@ mod tests {
         let sources = [source(&store, &["pdf"]), source(&elsewhere, &["pdf"])];
         let targets = vec![global("claude-code", &claude), global("codex", &codex)];
 
-        let plan = plan_keep(&sources[0].skills[0], &own, &targets);
+        let plan = plan_keep(&sources[0].skills[0], &own, &targets, &Copies::default());
         assert_eq!(plan.path, body);
         assert_eq!(plan.relink_to.as_deref(), Some(own.as_path()));
         assert_eq!(
@@ -2238,7 +2315,7 @@ mod tests {
             path: own.clone(),
             description: None,
         };
-        let plan = plan_keep(&drop, &body, &targets);
+        let plan = plan_keep(&drop, &body, &targets, &Copies::default());
         assert_eq!(plan.path, own);
         assert_eq!(plan.relink_to.as_deref(), Some(body.as_path()));
         assert_eq!(
@@ -2251,7 +2328,10 @@ mod tests {
 
         // 留下的那份已不在：没有可改指的地方（同 `plan_delete_source` 找不到别处时）
         let gone = t.root().join("gone/pdf");
-        assert_eq!(plan_keep(&drop, &gone, &targets).relink_to, None);
+        assert_eq!(
+            plan_keep(&drop, &gone, &targets, &Copies::default()).relink_to,
+            None
+        );
     }
 
     /// git 仓库内的本体要报出仓库根：`.git` 是目录（常规仓库）或文件（工作树 / 子模块）都算
@@ -2272,7 +2352,8 @@ mod tests {
         let inside = source(&store, &["a"]);
         let worktree = source(&wt_store, &["a"]);
         let outside = source(&loose, &["a"]);
-        let plan = |s: &Source| plan_delete_source(&s.skills[0].clone(), &[], &[]);
+        let plan =
+            |s: &Source| plan_delete_source(&s.skills[0].clone(), &[], &[], &Copies::default());
         assert_eq!(plan(&inside).in_git, Some(repo));
         assert_eq!(plan(&worktree).in_git, Some(wt));
         assert_eq!(plan(&outside).in_git, None);
@@ -2293,7 +2374,7 @@ mod tests {
         let s = source(&store, &["a", "b"]);
         let mut target = project(&proj, "claude-code", &tgt);
         target.linked_whole_to = Some(s.id.clone());
-        let r = split_whole_link(&target, &s);
+        let r = split_whole_link(&target, &s, None);
         assert_eq!(r.entries.len(), 3);
         assert_eq!(r.entries[0].action.kind, ActionKind::BrokenLink);
         assert_eq!(r.entries[0].action.item_name, whole_link_item());
@@ -2321,7 +2402,7 @@ mod tests {
         let tgt = t.dir("tgt");
         let s = source(&store, &["a"]);
         let target = global("claude-code", &tgt);
-        let r = split_whole_link(&target, &s);
+        let r = split_whole_link(&target, &s, None);
         assert_eq!(r.entries.len(), 1);
         assert_eq!(
             r.entries[0].outcome,
@@ -2339,7 +2420,8 @@ mod tests {
         let elsewhere = t.dir("elsewhere");
         let tgt = t.root().join("tgt");
         t.link(&tgt, &elsewhere);
-        let r = split_whole_link(&global("claude-code", &tgt), &source(&store, &["a"]));
+        let target = global("claude-code", &tgt);
+        let r = split_whole_link(&target, &source(&store, &["a"]), None);
         assert_eq!(r.entries.len(), 1);
         assert_eq!(
             r.entries[0].outcome,

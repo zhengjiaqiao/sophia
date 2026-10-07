@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { viewOf } from "../src/cellState.ts";
-import type { Cell, CellState, Target } from "../src/types.ts";
+import { showCopiesAsLinked, viewOf } from "../src/cellState.ts";
+import type { Cell, CellState, Overview, ScannedCellState, Target } from "../src/types.ts";
 
 const cell = (state: CellState, pointsTo: string | null = null): Cell => ({
   sourceId: "/Users/me/skills",
@@ -126,4 +126,47 @@ test("异常态各有自己的格内记号，没有一种退回空心", () => {
     (s) => view(s).dot,
   );
   assert.deepEqual(dots, ["broken", "blocked", "blocked", "wholeLinked", "readOnly"]);
+});
+
+/// spec #194 修订（2026-10-06）：Sophia 放的副本对用户就是已链。core 单报 `copied`，
+/// 扫描结果一进前端就换成 `linked`——画法、悬停、读屏、点了做什么都与已链一样；别的格原样不动
+test("副本格进前端就按已链画，别的格原样", () => {
+  const scanned = (state: ScannedCellState, pointsTo: string | null) =>
+    ({ ...cell("missing", pointsTo), state }) as Cell;
+  const overview: Overview = {
+    domains: [
+      {
+        key: "global",
+        label: "用户级",
+        targets: [target()],
+        rows: [
+          {
+            sourceId: "/Users/me/skills",
+            skill: "obsidian-cli",
+            own: false,
+            cells: [
+              scanned("copied", "/Users/me/skills/obsidian-cli"),
+              scanned("missing", null),
+              scanned("duplicate", null),
+            ],
+          },
+        ],
+        broken: [],
+        agentCopies: [],
+      },
+    ],
+    sources: [],
+  };
+  const shown = showCopiesAsLinked(overview);
+  const cells = shown.domains[0].rows[0].cells;
+  assert.deepEqual(
+    cells.map((c) => c.state),
+    ["linked", "missing", "duplicate"],
+  );
+  // 对应哪份原件照旧带着，与已链格的 pointsTo 一样
+  assert.equal(cells[0].pointsTo, "/Users/me/skills/obsidian-cli");
+  assert.deepEqual(viewOf(cells[0], target(), "Codex", "obsidian-cli"), view("linked"));
+  // 没有副本时原样返回同一个对象
+  const plain: Overview = { domains: [], sources: [] };
+  assert.equal(showCopiesAsLinked(plain), plain);
 });

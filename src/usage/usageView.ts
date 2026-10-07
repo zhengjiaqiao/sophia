@@ -21,9 +21,11 @@ export function usageNoteAction(usage: TrayUsage, retrying: boolean): "retry" | 
   return usage.retry ? "retry" : null;
 }
 
-/// 这个 agent 登录了没有（R5：Claude 块只在 Claude Code 已登录时出现）；用量还没读回来是 null（先不列）
-export const usageSignedIn = (s: AgentState, agent: UsageAgentId): boolean | null =>
-  s.usage === null ? null : s.usage.signedIn.includes(agent);
+/// 这个 agent 出不出用量行（托盘）/ 栏（用量页「当前用量」）：后端算好的 `tray` 里有它就出——有用量来源的
+/// （R10：Claude Code 已登录，或桌面应用有用量记录），加上装了 Claude 桌面应用、读不到数的 Claude（给「连接 Claude 用量」，
+/// 票 #208）；用量还没读回来是 null（先不列）
+export const usageShown = (s: AgentState, agent: UsageAgentId): boolean | null =>
+  s.usage === null ? null : s.usage.tray.some((u) => u.agent === agent);
 
 // ===== 用量页（R11 R12） =====
 

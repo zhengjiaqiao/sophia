@@ -30,39 +30,44 @@ test("离开字和卡之后等 300ms 才收：给斜着挪进卡里的余地", (
   assert.equal(HOVER_CARD_LEAVE_MS, 300);
 });
 
-test("HoverCard 平时：触发的那句话能 Tab 停到，说明会弹出对话框、现在没开；卡不在页面里", () => {
+test("HoverCard 平时：触发它的是一颗键（说明会弹出对话框、现在没开）；卡不在页面里", () => {
   const html = render(HoverCard, {
     label: "详情",
+    triggerLabel: "查看错误详情",
     content: "卡里的内容",
-    children: "0.2.0 安装失败：没有权限替换 Sophia",
+    children: "!",
   });
   assert.match(
     html,
-    /<span class="ss-hovercard" tabindex="0" role="button" aria-haspopup="dialog" aria-expanded="false">0\.2\.0 安装失败：没有权限替换 Sophia<\/span>/,
+    /<button type="button" class="ss-hovercard" aria-label="查看错误详情" aria-haspopup="dialog" aria-expanded="false">!<\/button>/,
   );
   assert.doesNotMatch(html, /卡里的内容/);
 });
 
-test("HoverCard 的 className 加在触发的那句话上（网关行的原因自己是 flex 项）", () => {
+test("HoverCard 的 className 加在触发键上", () => {
   const html = render(HoverCard, {
     label: "详情",
     content: "x",
-    className: "gw-row__reason",
-    children: "找不到这个地址",
+    className: "ss-markbtn",
+    children: "!",
   });
-  assert.match(html, /<span class="ss-hovercard gw-row__reason" tabindex="0"/);
+  assert.match(html, /<button type="button" class="ss-hovercard ss-markbtn"/);
 });
 
-test("Details：不再是一颗键，是挂在出错那句话上的悬浮卡；原文不在页面里", () => {
-  const html = render(Details, {
-    text: "Permission denied (os error 13)",
-    onCopy: noop,
-    children: "没有权限替换 Sophia",
-  });
+test("Details（D，2026-10-06）：入口是错误前面的「!」——一颗图标键，读屏念「查看错误详情」；原文不在页面里", () => {
+  const html = render(Details, { text: "Permission denied (os error 13)", onCopy: noop });
   assert.match(
     html,
-    /<span class="ss-hovercard"[^>]*aria-haspopup="dialog"[^>]*>没有权限替换 Sophia<\/span>/,
+    /<button type="button" class="ss-hovercard ss-markbtn ss-markbtn--panel" aria-label="查看错误详情" aria-haspopup="dialog" aria-expanded="false"><svg[^>]*width="16"/,
   );
-  assert.doesNotMatch(html, /<button/);
   assert.doesNotMatch(html, /Permission denied/);
+  // 网关行里小一号（14）；出错页标题前同灰面板（16，2026-10-06 真机：18 比 15 号标题大、看着错位）
+  assert.match(
+    render(Details, { text: "x", onCopy: noop, size: "row" }),
+    /ss-markbtn--row"[^>]*><svg[^>]*width="14"/,
+  );
+  assert.match(
+    render(Details, { text: "x", onCopy: noop, size: "title" }),
+    /ss-markbtn--title"[^>]*><svg[^>]*width="16"/,
+  );
 });

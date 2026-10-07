@@ -61,7 +61,11 @@ pub fn clamp_panel_height(height: f64) -> f64 {
 }
 
 /// 第一次调用返回 true 并留下标记，之后一律 false。标记写入失败时宁可每次都不提示，也不要每次都提示。
-pub fn take_close_hint(store_dir: &Path) -> bool {
+/// 菜单栏图标没建成时提示无处可指：返回 false，也不留标记，等图标在的那次再说（#227）
+pub fn take_close_hint(store_dir: &Path, icon_built: bool) -> bool {
+    if !icon_built {
+        return false;
+    }
     let marker = store_dir.join(CLOSE_HINT_MARKER);
     if marker.exists() {
         return false;
@@ -377,7 +381,7 @@ mod imp {
         }
         api.prevent_close();
         let _ = window.hide();
-        if take_close_hint(store_dir) {
+        if take_close_hint(store_dir, icon_built()) {
             use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
             // 按钮字自己给：rfd 把默认的 OK 写死成英文，不跟界面语言
             window
@@ -513,8 +517,19 @@ mod tests {
     fn close_hint_is_given_exactly_once() {
         let dir = tempfile::tempdir().unwrap();
         let store = dir.path().join("Sophia");
-        assert!(take_close_hint(&store));
-        assert!(!take_close_hint(&store));
-        assert!(!take_close_hint(&store));
+        assert!(take_close_hint(&store, true));
+        assert!(!take_close_hint(&store, true));
+        assert!(!take_close_hint(&store, true));
+    }
+
+    /// 菜单栏图标没建成：那句「点菜单栏图标里的退出」无处可指，不说，也不算说过（#227）
+    #[test]
+    fn close_hint_waits_for_a_menu_bar_icon() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("Sophia");
+        assert!(!take_close_hint(&store, false));
+        assert!(!take_close_hint(&store, false));
+        assert!(take_close_hint(&store, true));
+        assert!(!take_close_hint(&store, true));
     }
 }

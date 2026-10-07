@@ -10,9 +10,11 @@ mod system;
 
 use crate::{err, AppState};
 use sophia_core::store::Store;
+use sophia_core::usage::connect::ConnectState;
 use sophia_core::usage::{AgentId, UsageSettings, UsageState, MAX_MENU_BAR_AGENTS};
+use sophia_gateway::usage::connect::{ConnectStart, Connector, RealConnect};
 use sophia_gateway::usage::scheduler::{Command, Handle};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
@@ -23,6 +25,17 @@ pub struct UsageShared {
     settings: Mutex<UsageSettings>,
     /// 调度最近一次读到的电源状态：过期变淡的阈值要与调度实际的间隔一致
     power: Mutex<sophia_core::usage::PowerState>,
+    /// 「连接 Claude 用量」（票 #208）：托盘与用量页共用一份；只在 macOS 上有
+    connector: Option<Arc<Connector<RealConnect>>>,
+}
+
+impl UsageShared {
+    fn connect_state(&self) -> ConnectState {
+        self.connector
+            .as_ref()
+            .map(|c| c.state())
+            .unwrap_or_default()
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -45,11 +58,19 @@ pub fn setup(app: &tauri::App) -> Result<(), String> {
     let restored = store.load_usage_readings().unwrap_or_default();
     let memo = store.load_usage_memo().unwrap_or_default();
     let (handle, rx) = Handle::channel();
+    #[cfg(target_os = "macos")]
+    let connector = Some(Arc::new(Connector::new(real_connect(
+        app.handle().clone(),
+        handle.clone(),
+    )?)));
+    #[cfg(not(target_os = "macos"))]
+    let connector = None;
     app.manage(UsageShared {
         handle,
         state: Mutex::new(UsageState::default()),
         settings: Mutex::new(settings.clone()),
         power: Mutex::new(Default::default()),
+        connector,
     });
 
     #[cfg(target_os = "macos")]
@@ -70,6 +91,26 @@ pub fn setup(app: &tauri::App) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     drop((rx, store, restored, memo));
     Ok(())
+}
+
+/// 真实的「连接 Claude 用量」：进程走到新的一步就发 `usage-changed`（托盘与用量页重读视图）；
+/// 连上后让调度只取 Claude 一次（不等最短间隔），取完才算连接结束
+#[cfg(target_os = "macos")]
+fn real_connect(app: AppHandle, handle: Handle) -> Result<RealConnect, String> {
+    Ok(RealConnect {
+        account: usage_account()?,
+        on_change: Box::new(move |_state| {
+            use tauri::Emitter;
+            let state = lock(&app.state::<UsageShared>().state).clone();
+            let _ = app.emit("usage-changed", state);
+        }),
+        on_connected: Box::new(move || {
+            let done = handle.retry(AgentId::ClaudeCode);
+            Box::pin(async move {
+                let _ = done.await;
+            })
+        }),
+    })
 }
 
 /// 用量看哪个账号：调试版指定了测试主目录（`SOPHIA_TEST_HOME`）时看它，否则看真实环境
@@ -191,11 +232,12 @@ pub fn usage_view(
     let state = lock(&shared.state).clone();
     let settings = lock(&shared.settings).clone();
     let power = *lock(&shared.power);
-    Some(sophia_core::usage::format::usage_view(
+    Some(sophia_core::usage::format::usage_view_with(
         &state,
         &settings,
         power,
         unix_now(),
+        &shared.connect_state(),
     ))
 }
 
@@ -248,4 +290,70 @@ pub async fn usage_refresh(
         None => shared.handle.send(Command::Refresh(None)),
     }
     Ok(())
+}
+
+/// 点「连接 Claude 用量」或失败后的「再试一次」（票 #208）。找不到 Claude Code、`allow_install` 为假时
+/// 返回 `needsInstall`（界面先问一句「安装 Claude Code？」，确认后带 `allow_install` 再调）；
+/// 已有一个连接在跑返回 `busy`。过程的每一步经 `usage-changed` 送达。Claude「需要重新登录」时
+/// 登录记录还在也走登录
+#[tauri::command]
+pub async fn usage_connect(
+    shared: tauri::State<'_, UsageShared>,
+    allow_install: bool,
+) -> Result<ConnectStart, String> {
+    let Some(connector) = shared.connector.clone() else {
+        // 用量只在 macOS 上有（`usage_view` 返回 None，界面不出这颗键），走不到这里
+        return Err("usage is only available on macOS".into());
+    };
+    let force_login = sophia_core::usage::connect::force_login(&lock(&shared.state));
+    let start = connector.start(allow_install, force_login);
+    if start == ConnectStart::Started {
+        log::info!("开始连接 Claude 用量（需要时安装：{allow_install}，重新登录：{force_login}）");
+    }
+    Ok(start)
+}
+
+/// Sophia 退出（`RunEvent::Exit`）：给正在跑的连接发取消——正在装就结束安装脚本整组（SIGTERM，2 秒后
+/// SIGKILL），正在登录就结束登录——再等它收尾，最多 [`EXIT_WAIT`]。没在连接时立刻返回
+pub fn on_exit(app: &AppHandle) {
+    let Some(shared) = app.try_state::<UsageShared>() else {
+        return;
+    };
+    let Some(connector) = &shared.connector else {
+        return;
+    };
+    if !connector.running() {
+        return;
+    }
+    connector.shutdown();
+    let deadline = std::time::Instant::now() + EXIT_WAIT;
+    while connector.running() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if connector.running() {
+        log::warn!(
+            "退出时连接 Claude 用量没能在 {} 秒内收尾",
+            EXIT_WAIT.as_secs()
+        );
+    }
+}
+
+/// 退出时等连接收尾的上限：比结束整组的 SIGTERM 宽限（2 秒）多 1 秒
+const EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// 等授权时点「取消」：结束登录，回到点之前的样子（安装中不可取消）
+#[tauri::command]
+pub fn usage_connect_cancel(shared: tauri::State<'_, UsageShared>) {
+    if let Some(connector) = &shared.connector {
+        connector.cancel();
+    }
+}
+
+/// 「没看到授权页 · 再打开 ↗」
+#[tauri::command]
+pub fn usage_connect_reopen(shared: tauri::State<'_, UsageShared>) -> Result<(), String> {
+    match &shared.connector {
+        Some(connector) => connector.reopen().map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
 }

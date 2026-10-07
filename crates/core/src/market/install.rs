@@ -46,11 +46,13 @@ pub struct InstallUndo {
     pub(crate) items: Vec<UndoItem>,
     /// 这次建的链接：链接 → 它指向的落点
     pub(crate) links: Vec<(PathBuf, PathBuf)>,
+    /// 这次建不了链接、改放的副本：副本 → 它的原件（落点）。撤销时同链接一起移除
+    pub(crate) copies: Vec<(PathBuf, PathBuf)>,
 }
 
 impl InstallUndo {
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.links.is_empty()
+        self.items.is_empty() && self.links.is_empty() && self.copies.is_empty()
     }
 }
 
@@ -365,6 +367,8 @@ pub(crate) struct Ops<'a> {
     pub(crate) extract: &'a ExtractFn,
     pub(crate) local_sha: &'a dyn Fn(&Path) -> io::Result<treehash::LocalSha>,
     pub(crate) commit_sha: &'a dyn Fn(&[u8]) -> MarketResult<String>,
+    /// 建链这一步（测试模拟文件系统回「不支持」，见 `sync::execute_with`）
+    pub(crate) link: &'a dyn Fn(&Path, &Path, LinkStyle) -> io::Result<()>,
 }
 
 fn real_ops() -> Ops<'static> {
@@ -372,6 +376,7 @@ fn real_ops() -> Ops<'static> {
         extract: &archive::extract,
         local_sha: &treehash::local_sha,
         commit_sha: &archive::commit_sha,
+        link: &crate::fs::create_link,
     }
 }
 
@@ -381,9 +386,12 @@ fn real_ops() -> Ops<'static> {
 /// - 计划里被拒的、执行这一刻落点已经有东西的，进 `failed`，不动；
 /// - 通用仓库是这个位置自己的来源（`subscriptions::is_own`）：永远算已订阅，按订阅的约定不进
 ///   记录；扫描时 `discovery::sources` 把它读进来，来源下拉里就有它。只有它不算自己的来源时才记；
-/// - 链接只给真正放到位的 skill 建；
+/// - 链接只给真正放到位的 skill 建；建不了链接的自动改放副本并记进 `copies` 的记录（`sync::execute`）；
 /// - 放到位但算不出 tree SHA 的（解包后又被动了、读不了）照样算装好，只是不写安装记录：
 ///   没有记下的版本就无从比较更新。
+///
+/// `copies` 是副本记录所在的数据目录（`copies.json`）：建不了链接改放副本时要记账
+#[allow(clippy::too_many_arguments)]
 pub fn execute(
     plan: &InstallPlan,
     archive: &[u8],
@@ -392,6 +400,7 @@ pub fn execute(
     branch: &str,
     now: u64,
     subs: &mut Subscriptions,
+    copies: &crate::store::Store,
 ) -> InstallOutcome {
     let source = Provenance {
         archive,
@@ -400,7 +409,7 @@ pub fn execute(
         branch,
         now,
     };
-    execute_with(plan, &source, subs, &real_ops())
+    execute_with(plan, &source, subs, Some(copies), &real_ops())
 }
 
 /// 这次装的包与它的来历
@@ -416,6 +425,7 @@ pub(crate) fn execute_with(
     plan: &InstallPlan,
     from: &Provenance,
     subs: &mut Subscriptions,
+    copies: Option<&crate::store::Store>,
     ops: &Ops,
 ) -> InstallOutcome {
     let mut out = InstallOutcome::default();
@@ -497,17 +507,23 @@ pub(crate) fn execute_with(
     let actions: Vec<PlannedAction> = plan
         .links
         .iter()
-        .filter(|a| a.kind == ActionKind::Create && dests.contains(a.source_path.as_path()))
+        .filter(|a| {
+            matches!(a.kind, ActionKind::Create | ActionKind::PlaceCopy)
+                && dests.contains(a.source_path.as_path())
+        })
         .cloned()
         .collect();
-    out.links = sync::execute(&actions, false, loc.link_style());
-    out.undo.links = out
-        .links
-        .entries
-        .iter()
-        .filter(|e| e.outcome == Outcome::Created)
-        .map(|e| (e.action.target_path.clone(), e.action.source_path.clone()))
-        .collect();
+    out.links = sync::execute_with(&actions, false, loc.link_style(), copies, ops.link);
+    let done = |kind: ActionKind| -> Vec<(PathBuf, PathBuf)> {
+        out.links
+            .entries
+            .iter()
+            .filter(|e| e.action.kind == kind && e.outcome == Outcome::Created)
+            .map(|e| (e.action.target_path.clone(), e.action.source_path.clone()))
+            .collect()
+    };
+    out.undo.links = done(ActionKind::Create);
+    out.undo.copies = done(ActionKind::PlaceCopy);
     out.unlinked = unlinked(plan, &placed, &out.links);
 
     for item in placed {
@@ -719,13 +735,20 @@ fn parent_of(path: &Path) -> PathBuf {
 /// 撤销一次装或更新：链接删掉、放到位的移进 `hold_root`、旧版放回，`records` 还原。
 /// 每一步先看现场，被改过的不动、如实上报：
 /// - 链接仍是指向落点的软链才删（`sync::execute` 的 Unlink 删前重校验），先于挪文件夹做；
+/// - 放的副本仍在副本记录里、没被改过才挪进暂存（`copies` 是记录所在的数据目录；不给时如实报失败），
+///   同样先于挪文件夹做；被改过的交还给 agent；
 /// - 放到位的仍是真实文件夹才挪；挪不进暂存处（跨磁盘等）退回移进废纸篓；
 /// - 旧版只在新版已挪走、原处空着时放回；
 /// - 文件夹这一步成了，才还原它的安装记录（新装的去掉，更新的放回更新前那条；
 ///   新版挪走了而旧版没放回的也去掉——那里已经没有东西）。
 ///
 /// 通用仓库是这次新建的、撤完空了，也留着（见模块说明）
-pub fn undo(undo: &InstallUndo, hold_root: &Path, records: &mut Vec<InstallRecord>) -> SyncReport {
+pub fn undo(
+    undo: &InstallUndo,
+    hold_root: &Path,
+    records: &mut Vec<InstallRecord>,
+    copies: Option<&crate::store::Store>,
+) -> SyncReport {
     let unlinks: Vec<PlannedAction> = undo
         .links
         .iter()
@@ -737,7 +760,21 @@ pub fn undo(undo: &InstallUndo, hold_root: &Path, records: &mut Vec<InstallRecor
             target: parent_of(link),
         })
         .collect();
-    let mut entries = sync::execute(&unlinks, false, LinkStyle::Absolute).entries;
+    let mut entries = sync::execute(&unlinks, false, LinkStyle::Absolute, None).entries;
+    // 放的副本：同撤链（`sync::execute` 认出记录在案的副本，重校验后挪进暂存、删记录）。
+    // 要在挪走落点之前：重校验时副本对应的原件还得在
+    let removes: Vec<PlannedAction> = undo
+        .copies
+        .iter()
+        .map(|(copy, original)| PlannedAction {
+            kind: ActionKind::Unlink,
+            item_name: file_name(copy),
+            source_path: original.clone(),
+            target_path: copy.clone(),
+            target: parent_of(copy),
+        })
+        .collect();
+    entries.extend(sync::execute(&removes, false, LinkStyle::Absolute, copies).entries);
 
     for item in &undo.items {
         let away = move_away(&item.placed, hold_root);
@@ -914,6 +951,7 @@ pub(crate) mod testkit {
             extract: &fake_extract,
             local_sha: &fake_local_sha,
             commit_sha: &fake_commit,
+            link: &crate::fs::create_link,
         }
     }
 }
@@ -928,6 +966,7 @@ mod tests {
 
     fn env_at(home: &Path) -> Env {
         Env {
+            apps: Vec::new(),
             home: home.to_path_buf(),
             vars: HashMap::new(),
         }
@@ -1120,7 +1159,7 @@ mod tests {
         // 执行时照样不动：文件不变、进 failed
         let before = snapshot(&tree.root());
         let mut subs = Subscriptions::new();
-        let out = execute_with(&proj, &provenance(b"v1"), &mut subs, &ops());
+        let out = execute_with(&proj, &provenance(b"v1"), &mut subs, None, &ops());
         assert!(out.installed.is_empty());
         assert_eq!(
             out.failed.get("pdf").map(String::as_str),
@@ -1176,7 +1215,7 @@ mod tests {
         let before = snapshot(&home);
 
         let mut subs = Subscriptions::new();
-        let mut out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        let mut out = execute_with(&plan, &provenance(b"v1"), &mut subs, None, &ops());
         assert_eq!(out.installed, vec!["pdf".to_string()]);
         assert!(out.failed.is_empty());
         let dest = home.join(".agents/skills/pdf");
@@ -1214,7 +1253,7 @@ mod tests {
 
         let mut records = out.records.clone();
         let undo_rec = out.take_undo().expect("有撤销记录");
-        let report = undo(&undo_rec, &hold_root, &mut records);
+        let report = undo(&undo_rec, &hold_root, &mut records, None);
         assert!(
             report
                 .entries
@@ -1230,6 +1269,102 @@ mod tests {
             .filter(|k| k.ends_with("pdf/SKILL.md"))
             .collect();
         assert_eq!(held.len(), 1);
+    }
+
+    /// 市场安装一律建链（Continue 也是）；Continue 的目录建不了链接时自动改放副本：装完那里是真实文件夹、
+    /// 记进副本记录，内容同落点；Claude Code 照旧是链接。撤销时副本与链接一起撤掉、记录删掉
+    #[test]
+    fn install_places_a_copy_where_links_are_unsupported() {
+        let tree = TempTree::new();
+        let home = tree.dir("home");
+        tree.dir("home/.claude/skills");
+        tree.dir("home/.continue/skills");
+        tree.dir("home/.agents/skills");
+        let hold_root = tree.dir("hold");
+        let store = crate::store::Store::new(tree.dir("data"));
+        let env = env_at(&home);
+        let hs = harnesses(&env, &["claude-code", "continue"]);
+        let plan = plan(
+            &env,
+            &hs,
+            &request("global", &["skills/pdf"], &["claude-code", "continue"]),
+        )
+        .unwrap();
+        let kinds: BTreeMap<PathBuf, ActionKind> = plan
+            .links
+            .iter()
+            .map(|a| (a.target_path.clone(), a.kind))
+            .collect();
+        let copy = home.join(".continue/skills/pdf");
+        assert_eq!(
+            kinds,
+            BTreeMap::from([
+                (home.join(".claude/skills/pdf"), ActionKind::Create),
+                (copy.clone(), ActionKind::Create),
+            ])
+        );
+
+        let continue_dir = home.join(".continue/skills");
+        let link = |src: &Path, at: &Path, style: LinkStyle| {
+            if at.starts_with(&continue_dir) {
+                Err(io::Error::from(io::ErrorKind::Unsupported))
+            } else {
+                crate::fs::create_link(src, at, style)
+            }
+        };
+        let ops = Ops {
+            link: &link,
+            ..ops()
+        };
+        let mut subs = Subscriptions::new();
+        let mut out = execute_with(&plan, &provenance(b"v1"), &mut subs, Some(&store), &ops);
+        assert!(out
+            .links
+            .entries
+            .iter()
+            .all(|e| e.outcome == Outcome::Created));
+        assert!(matches!(
+            entry_kind(&home.join(".claude/skills/pdf")),
+            EntryKind::Symlink(_)
+        ));
+        let dest = home.join(".agents/skills/pdf");
+        assert_eq!(entry_kind(&copy), EntryKind::Dir);
+        assert_eq!(
+            std::fs::read_to_string(copy.join("SKILL.md")).unwrap(),
+            std::fs::read_to_string(dest.join("SKILL.md")).unwrap()
+        );
+        let records = store.load_copies().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            (records[0].path.clone(), records[0].source.clone()),
+            (copy.clone(), dest)
+        );
+        assert!(out.unlinked.is_empty());
+
+        let mut installs = out.records.clone();
+        let report = undo(
+            &out.take_undo().unwrap(),
+            &hold_root,
+            &mut installs,
+            Some(&store),
+        );
+        let copy_entry = report
+            .entries
+            .iter()
+            .find(|e| e.action.target_path == copy)
+            .expect("副本那一条如实上报");
+        assert_eq!(copy_entry.outcome, Outcome::Removed);
+        assert_eq!(entry_kind(&copy), EntryKind::Missing);
+        assert!(store.load_copies().unwrap().is_empty());
+        assert_eq!(
+            entry_kind(&home.join(".claude/skills/pdf")),
+            EntryKind::Missing
+        );
+        // 落点也挪走了（先移副本：重校验时它对应的原件还在）
+        assert_eq!(
+            entry_kind(&home.join(".agents/skills/pdf")),
+            EntryKind::Missing
+        );
     }
 
     /// 通用仓库不存在时建出来；撤销后留着这个空目录（见模块说明），其余不变
@@ -1250,11 +1385,11 @@ mod tests {
         assert!(plan.creates_store);
         let before = snapshot(&home);
         let mut subs = Subscriptions::new();
-        let mut out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        let mut out = execute_with(&plan, &provenance(b"v1"), &mut subs, None, &ops());
         assert_eq!(out.installed, vec!["pdf".to_string()]);
         assert!(home.join(".agents/skills/pdf/SKILL.md").is_file());
         let mut records = out.records.clone();
-        undo(&out.take_undo().unwrap(), &hold_root, &mut records);
+        undo(&out.take_undo().unwrap(), &hold_root, &mut records, None);
         let mut after = snapshot(&home);
         assert_eq!(after.remove(".agents/skills").as_deref(), Some("dir"));
         assert_eq!(after.remove(".agents").as_deref(), Some("dir"));
@@ -1315,7 +1450,7 @@ mod tests {
         )
         .unwrap();
         let mut subs = Subscriptions::new();
-        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, None, &ops());
         assert_eq!(out.installed, vec!["pdf".to_string()]);
         assert_eq!(
             out.unlinked,
@@ -1344,7 +1479,7 @@ mod tests {
         assert_eq!(plan.links.len(), 1);
         tree.skill("home/.codex/skills/pdf");
         let mut subs = Subscriptions::new();
-        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, None, &ops());
         assert_eq!(out.installed, vec!["pdf".to_string()]);
         assert_eq!(out.unlinked.len(), 1, "{:?}", out.unlinked);
         assert_eq!(out.unlinked[0].harness_id, "codex");
@@ -1352,24 +1487,24 @@ mod tests {
         assert!(!out.unlinked[0].reason.is_empty());
     }
 
-    /// 几家共用一个 skill 目录（Amp、Kimi、Replit 都是 `~/.config/agents/skills`）：建链接失败要算到
+    /// 几家共用一个 skill 目录（Amp、Replit 都是 `~/.config/agents/skills`）：建链接失败要算到
     /// 每一个勾了的头上，没勾的不算（链接按路径去重，只有一条动作）
     #[test]
     fn failed_link_in_shared_dir_counts_every_chosen_agent() {
         for (chosen, expected) in [
-            (vec!["kimi-cli"], vec!["kimi-cli"]),
-            (vec!["amp", "kimi-cli"], vec!["amp", "kimi-cli"]),
+            (vec!["replit"], vec!["replit"]),
+            (vec!["amp", "replit"], vec!["amp", "replit"]),
         ] {
             let tree = TempTree::new();
             let home = tree.dir("home");
             tree.dir("home/.config/agents/skills");
             let env = env_at(&home);
-            let hs = harnesses(&env, &["amp", "kimi-cli", "replit"]);
+            let hs = harnesses(&env, &["amp", "replit"]);
             let plan = plan(&env, &hs, &request("global", &["skills/pdf"], &chosen)).unwrap();
             assert_eq!(plan.links.len(), 1, "{:?}", plan.links);
             tree.skill("home/.config/agents/skills/pdf");
             let mut subs = Subscriptions::new();
-            let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+            let out = execute_with(&plan, &provenance(b"v1"), &mut subs, None, &ops());
             let ids: Vec<&str> = out.unlinked.iter().map(|u| u.harness_id.as_str()).collect();
             assert_eq!(ids, expected, "勾了 {chosen:?}");
         }
@@ -1390,7 +1525,7 @@ mod tests {
         )
         .unwrap();
         let mut subs = Subscriptions::new();
-        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        let out = execute_with(&plan, &provenance(b"v1"), &mut subs, None, &ops());
         assert!(out.unlinked.is_empty());
     }
 
@@ -1412,13 +1547,13 @@ mod tests {
         )
         .unwrap();
         let mut subs = Subscriptions::new();
-        let mut out = execute_with(&plan, &provenance(b"v1"), &mut subs, &ops());
+        let mut out = execute_with(&plan, &provenance(b"v1"), &mut subs, None, &ops());
         let link = home.join(".claude/skills/pdf");
         std::fs::remove_file(&link).unwrap();
         tree.link(&link, &other);
 
         let mut records = out.records.clone();
-        let report = undo(&out.take_undo().unwrap(), &hold_root, &mut records);
+        let report = undo(&out.take_undo().unwrap(), &hold_root, &mut records, None);
         assert!(matches!(report.entries[0].outcome, Outcome::Failed(_)));
         assert!(same_real(&link, &other), "别处的链接原样留着");
         assert_eq!(
@@ -1537,7 +1672,7 @@ mod tests {
 
         let mut current = records.clone();
         installs::upsert(&mut current, rec.clone());
-        let report = undo(&out.take_undo().unwrap(), &s.hold_root, &mut current);
+        let report = undo(&out.take_undo().unwrap(), &s.hold_root, &mut current, None);
         assert!(
             report
                 .entries
@@ -1583,7 +1718,7 @@ mod tests {
             .ends_with("v2"));
         // 撤销放回的是改过的那一版
         let mut current = out.records.clone();
-        undo(&out.take_undo().unwrap(), &s.hold_root, &mut current);
+        undo(&out.take_undo().unwrap(), &s.hold_root, &mut current, None);
         assert_eq!(
             std::fs::read_to_string(s.dir.join("SKILL.md")).unwrap(),
             "我改过"
@@ -1627,7 +1762,7 @@ mod tests {
         let mut out = execute_update_with(&[info], &batch, &ops());
         assert_eq!(out.records.len(), 1);
         let mut current = out.records.clone();
-        undo(&out.take_undo().unwrap(), &s.hold_root, &mut current);
+        undo(&out.take_undo().unwrap(), &s.hold_root, &mut current, None);
         assert!(current.is_empty());
     }
 

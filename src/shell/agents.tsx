@@ -7,7 +7,7 @@ import { codexListStatus } from "../modelsView.ts";
 import { TrayClaudeModels, TrayThirdPartyModels } from "../TrayModelsRow.tsx";
 import { gatewayOn } from "../types.ts";
 import { UsageTrayRow } from "../usage/UsageTrayRow.tsx";
-import { usageHeadNote, usageSignedIn } from "../usage/usageView.ts";
+import { usageHeadNote, usageShown } from "../usage/usageView.ts";
 import type { AgentEntry, AgentSection, AgentSectionProps } from "./agentRegistry.ts";
 
 /// agent 注册表（扩展点，见 agentRegistry.ts）：模型页的列表行与推入页、托盘面板的块与行都从这里生成。
@@ -60,12 +60,12 @@ export const AGENTS: ReadonlyArray<AgentEntry> = [
     // 模型页里叫 `Claude Desktop`（这一行只改桌面应用）；托盘与用量仍用上面的 `Claude`
     modelsName: CLAUDE_MODELS_NAME,
     gateway: "claude",
-    // 用量已登录，或本机支持第三方模型（没装桌面应用照样列出，开关禁用）
-    available: (s) => usageSignedIn(s, "claude-code") || s.modelsSupported,
+    // 用量出行（已登录、桌面应用有记录，或装了桌面应用、给「连接 Claude 用量」），或本机支持第三方模型（没装桌面应用照样列出，开关禁用）
+    available: (s) => usageShown(s, "claude-code") || s.modelsSupported,
     indicator: (s) => gatewayOn(s.gateway, "claude"),
     headNote: (s) => usageHeadNote(s, "claude-code"),
     sections: [
-      { ...USAGE, available: (s) => usageSignedIn(s, "claude-code") },
+      { ...USAGE, available: (s) => usageShown(s, "claude-code") },
       {
         id: "third-party-models",
         get title() {

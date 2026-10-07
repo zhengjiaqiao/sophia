@@ -6,7 +6,26 @@
 /// UI v4 起异常态**在格里画得出来**（DESIGN「视觉优先」）：同一个 10px 环骨架，
 /// 失效＝虚线环、无法写入与同名占位＝斜杠环 ⊘（D22）、整个文件夹是链接＝环内向右箭头。
 import { t } from "./i18n.ts";
-import type { Cell, Target } from "./types";
+import type { Cell, Overview, ScannedCellState, Target } from "./types";
+
+/// core 把 Sophia 放的副本单报成 `copied`；对用户副本就是已链（spec #194 修订 2026-10-06：
+/// 界面上不出现「副本」，悬停、读屏、动词都与已链一致）。扫描结果一进前端就换成 `linked`，
+/// 界面代码因此只见 `CellState`。点它取消照常走 `propose_unlinks`，core 自己认得出是副本
+export function showCopiesAsLinked(overview: Overview): Overview {
+  const copied = (state: ScannedCellState) => state === "copied";
+  if (!overview.domains.some((d) => d.rows.some((r) => r.cells.some((c) => copied(c.state)))))
+    return overview;
+  return {
+    ...overview,
+    domains: overview.domains.map((d) => ({
+      ...d,
+      rows: d.rows.map((r) => ({
+        ...r,
+        cells: r.cells.map((c) => (copied(c.state) ? { ...c, state: "linked" as const } : c)),
+      })),
+    })),
+  };
+}
 
 /// skill 格上需要用户拿主意的问题类别。
 /// 「整目录链到别处」与「目录只读」必须分开：前者的动作是拆开，后者是再试一次

@@ -74,6 +74,18 @@
   },
   "usage.tray.rateLimitedLater": "Rate limited, retry later",
   "usage.tray.noReading": "No reading yet",
+  "usage.tray.fromDesktopMinutesAgo": {
+    "one": "From Claude app · {count} min ago",
+    "other": "From Claude app · {count} min ago"
+  },
+  "usage.tray.fromDesktopHoursAgo": {
+    "one": "From Claude app · {count} hr ago",
+    "other": "From Claude app · {count} hr ago"
+  },
+  "usage.tray.desktopStaleDays": {
+    "one": "The Claude desktop app hasn't updated usage in {count} day",
+    "other": "The Claude desktop app hasn't updated usage in {count} days"
+  },
   "usage.retry": "Try again",
   "usage.retrying": "Reading",
   "usage.window.session": "5h",
@@ -104,5 +116,29 @@
   "usage.agents.maxMenuBar": {
     "one": "The menu bar shows up to {count} agent",
     "other": "The menu bar shows up to {count} agents"
-  }
+  },
+  "usage.connect.action": "Connect Claude usage",
+  "usage.connect.offer": "Connect to see live usage and reset times",
+  "usage.connect.offerEmpty": "Connect to see your Claude limits; the desktop app keeps working",
+  "usage.connect.installing": "Installing Claude Code",
+  "usage.connect.waiting": "Sign in and authorize in your browser",
+  "usage.connect.noPage": "No sign-in page?",
+  "usage.connect.reopen": "Open again",
+  "usage.connect.manual": "Install manually",
+  "usage.connect.confirmTitle": "Install Claude Code?",
+  "usage.connect.confirmBody": "This installs Claude Code (official, from Anthropic), then you sign in once in your browser. The Claude desktop app keeps working.",
+  "usage.connect.confirmAction": "Install",
+  "usage.connect.failInstallNetwork": "Couldn't install Claude Code · Can't reach Claude's servers · Check your network or VPN, then try again",
+  "usage.connect.failInstallNoSpace": "Couldn't install Claude Code · Disk full",
+  "usage.connect.failInstallPermission": "Couldn't install Claude Code · Can't write to your home folder",
+  "usage.connect.failInstall": "Couldn't install Claude Code",
+  "usage.connect.failDenied": "Couldn't connect · Authorization canceled in the browser",
+  "usage.connect.failTimeout": {
+    "one": "Couldn't connect · Not authorized within {count} minute",
+    "other": "Couldn't connect · Not authorized within {count} minutes"
+  },
+  "usage.connect.failNetwork": "Couldn't connect · Can't reach Claude's servers · Check your network or VPN, then try again",
+  "usage.connect.fail": "Couldn't connect",
+  "usage.connect.failOutdated": "Couldn't connect · Claude Code is too old · Update it, then try again",
+  "usage.connect.pacNote": "If your VPN uses an automatic proxy (PAC), Sophia can't read the proxy. Switch to a mode that sends all apps through the proxy (often called enhanced mode, TUN, or virtual network adapter)."
 }

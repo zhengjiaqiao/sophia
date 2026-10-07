@@ -1,0 +1,87 @@
+---
+// 第 6 镜头（片尾）的静态样子（= 完整画面）：字标 + 「点几下，就配好。」，没有猫。
+// 演示时上一镜头的托盘图标飞来落成字标的 S（usage.ts 的 exit），其余字母从 S 往右展开，黑猫在画布上演小戏
+// （src/client/film-shots/end.ts、ending.ts），减少动态与关 JS 时就是现在这样。
+import { t, type Lang } from "../../i18n.ts";
+import Wordmark from "../Wordmark.astro";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+---
+
+<div class="shot" data-shot="5" data-end>
+  <canvas class="catcv" aria-hidden="true"></canvas>
+  <div class="endcard">
+    <div class="endmask"><span class="endwm"><Wordmark height={80} /></span></div>
+    <p class="end-line">{t(lang, "film.end1")}<em>{t(lang, "film.end2")}</em></p>
+  </div>
+</div>
+
+<style>
+  .shot[data-end] {
+    display: grid;
+    place-items: center;
+    text-align: center;
+    /* 字标高：随整页宽度缩放，猫的身高取它的 1.5 倍 */
+    --wm-h: clamp(48px, 5.6cqi, 80px);
+  }
+  .endcard {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+  }
+  /* 留出果冻晃动的余量（猫按这层的内容区定位） */
+  .endmask {
+    padding: 6px 4px 10px;
+  }
+  /* 有猫时整组（字标 + 坐下的猫）居中：猫坐下约占字标右侧 1.05 × 1.5 倍字高，字标左移一半多一点（画板定稿的 .7875） */
+  .shot[data-cat="on"] .endmask {
+    translate: calc(-0.7875 * var(--wm-h)) 0;
+  }
+  .endwm {
+    display: block;
+    transform-origin: 0% 100%;
+  }
+  /* 对接的起点（data-hand）：字标只露 S 与重影，落字藏着 */
+  /* 裁在 S 之后、O 之前的竖线上：viewBox 3304 宽里的 700（demos/filmShots.ts 的 WORDMARK_S_CUT，两处一起改） */
+  .shot[data-hand] .endwm {
+    clip-path: inset(0 calc((1 - 700 / 3304) * 100%) 0 0);
+  }
+  .shot[data-hand] .end-line {
+    opacity: 0;
+  }
+  .endwm :global(img) {
+    height: var(--wm-h);
+    width: auto;
+  }
+  .end-line {
+    margin: 10px 0 0;
+    font: 600 clamp(18px, 2cqi, 28px) / 1.3 var(--font-cjk);
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  @container site (min-width: 641px) {
+    .end-line {
+      font-size: clamp(22px, 3cqi, 34px);
+    }
+  }
+  .end-line em {
+    font-style: normal;
+    color: var(--accent-ink);
+  }
+  .catcv {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 4;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .catcv {
+      display: none;
+    }
+  }
+</style>

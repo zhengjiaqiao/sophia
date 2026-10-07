@@ -7,6 +7,7 @@ pub mod keychain;
 pub mod login_env;
 pub mod process;
 pub mod provider;
+pub mod proxy_env;
 pub mod router;
 pub mod router_host;
 pub mod runtime;

@@ -218,5 +218,9 @@
   "skills.sync.linkChanged": "The link was changed afterwards; not pointed back",
   "skills.sync.notOrigLink": "No longer a symlink to that original; skipped",
   "skills.sync.wholeLinkItem": "<whole-folder link>",
-  "skills.sync.notWholeLink": "The target isn't a whole-folder link to this original"
+  "skills.sync.notWholeLink": "The target isn't a whole-folder link to this original",
+  "skills.sync.spotTaken": "Something with the same name is already here; nothing changed",
+  "skills.sync.copyNoBook": "Sophia ran into an internal error; this one wasn't done",
+  "skills.sync.notRecordedCopy": "Sophia didn't put this one here; nothing changed",
+  "skills.sync.changedSince": "It was changed afterwards; not swapped back"
 }

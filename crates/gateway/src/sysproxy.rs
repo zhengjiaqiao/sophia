@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use url::Url;
 
 /// `scutil --proxy` 输出中与转发相关的子集：各代理是否启用、host/port，以及例外列表。
-/// SOCKS 与 PAC 不在范围内，忽略。
+/// 网关转发（[`Settings::proxy_for`]）只用 HTTP/HTTPS；SOCKS 只给 Sophia 起的子进程（`proxy_env`，
+/// 「连接 Claude 用量」与后台用量探测）。自动代理（PAC）不支持，只记下开没开，供日志。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Settings {
     pub http_enabled: bool,
@@ -22,6 +23,13 @@ pub struct Settings {
     pub https_enabled: bool,
     pub https_host: String,
     pub https_port: u16,
+
+    pub socks_enabled: bool,
+    pub socks_host: String,
+    pub socks_port: u16,
+
+    /// 开着自动代理（PAC）：本版不支持，按没有代理处理
+    pub pac_enabled: bool,
 
     /// 原样保留 scutil 打印的 ExceptionsList 条目顺序，例如
     /// "*.weibo.com"、"192.168.0.0/16"、"<local>"。
@@ -65,6 +73,10 @@ pub fn parse(scutil_output: &str) -> Settings {
             "HTTPSEnable" => settings.https_enabled = value == "1",
             "HTTPSPort" => settings.https_port = value.parse().unwrap_or(0),
             "HTTPSProxy" => settings.https_host = value.to_string(),
+            "SOCKSEnable" => settings.socks_enabled = value == "1",
+            "SOCKSPort" => settings.socks_port = value.parse().unwrap_or(0),
+            "SOCKSProxy" => settings.socks_host = value.to_string(),
+            "ProxyAutoConfigEnable" => settings.pac_enabled = value == "1",
             _ => {}
         }
     }
@@ -484,6 +496,13 @@ mod tests {
             "*.weibo.com",
         ];
         assert_eq!(s.exceptions, want);
+        // SOCKS 与 PAC 也读出来（给子进程的代理变量用，网关转发不用）
+        assert!(s.socks_enabled);
+        assert_eq!(s.socks_host, "127.0.0.1");
+        assert_eq!(s.socks_port, 7897);
+        assert!(!s.pac_enabled);
+        let pac = parse("<dictionary> {\n  ProxyAutoConfigEnable : 1\n  ProxyAutoConfigURLString : http://x/p.pac\n}\n");
+        assert!(pac.pac_enabled);
     }
 
     #[test]
@@ -509,6 +528,7 @@ mod tests {
                 "192.168.0.0/16".into(),
                 "<local>".into(),
             ],
+            ..Default::default()
         };
 
         let cases: &[(&str, &str, bool)] = &[
@@ -568,6 +588,7 @@ mod tests {
             https_host: "5.6.7.8".into(),
             https_port: 222,
             exceptions: vec![],
+            ..Default::default()
         };
         let http_proxy = s.proxy_for(&u("http://chatgpt.com/")).unwrap();
         assert_eq!(http_proxy.host_str(), Some("1.2.3.4"));
