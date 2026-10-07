@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
   canSupplement,
   mcpDomains,
@@ -331,7 +332,7 @@ test("同名多份：只列互不等价的几份，等价的并成一份", () =>
 });
 
 test("挑选浮层的标题与格子提示框", () => {
-  assert.equal(pickTitle("notion", 2), "notion 有 2 份不一样的，写进哪一份？");
+  assert.equal(pickTitle("notion", 2), "notion 有 2 份不一样的，加哪一份？");
   assert.equal(pickTip("notion", 3), "有 3 份不一样的同名 notion · 点一下挑一份");
 });
 
@@ -553,13 +554,13 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
   assert.equal(toTeam.selections[0].targetId, `${P}::claude-code`);
   // 后果：移动 / 复制各一句，留下的一句，写进团队共享说队友
   assert.deepEqual(scopeChangeText("move", toP, locationOf, "CardBox", "用户级"), [
-    "Claude Code、Codex 写进 CardBox，用户级这边的删掉。",
+    "Claude Code、Codex 加到 CardBox，用户级这边的删掉。",
     "Claude Desktop 那份留在用户级。",
   ]);
   assert.deepEqual(scopeChangeText("copy", toTeam, locationOf, "CardBox", "用户级"), [
-    "Claude Code、Codex 各写一份进 CardBox，用户级这边的不动。",
+    "Claude Code、Codex 各加一份到 CardBox，用户级这边的不动。",
     "Claude Desktop 那份不加过去。",
-    "Claude Code 写进 CardBox 的 .mcp.json，提交后队友也能用。",
+    "Claude Code 加到 CardBox 的 .mcp.json，提交后队友也能用。",
   ]);
   // 目标已有同名、就是当前所在：选不了
   assert.equal(
@@ -593,7 +594,7 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
       "CardBox",
     ),
     [
-      "Claude Code 写进用户级，CardBox 这边的删掉。",
+      "Claude Code 加到用户级，CardBox 这边的删掉。",
       "Claude Code 从 CardBox 的 .mcp.json 里删掉，提交后队友那边就没有了。",
     ],
   );
@@ -626,7 +627,7 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
   const why = "filesystem 带着 cwd 字段，Sophia 还搬不了它，写过去就不是原来那个了";
   assert.deepEqual(withCant.cant, [{ agent: "codex", reason: why }]);
   assert.deepEqual(scopeChangeText("move", withCant, locationOf, "CardBox", "用户级"), [
-    "Claude Code 写进 CardBox，用户级这边的删掉。",
+    "Claude Code 加到 CardBox，用户级这边的删掉。",
     "Claude Desktop 那份留在用户级。",
     `codex 移不过去：${why}；那份留在用户级。`,
   ]);
@@ -652,7 +653,7 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
     [`${P}::codex`],
   );
   assert.deepEqual(scopeChangeText("move", onlyCodex2, locationOf, "CardBox", "用户级"), [
-    "Codex 写进 CardBox，用户级这边的删掉。",
+    "Codex 加到 CardBox，用户级这边的删掉。",
     "claude-code、Claude Desktop 那份留在用户级。",
   ]);
   // 多勾一个这一行在这边没有的（团队共享）：从现有的一份转写，是新加的一份（keep），移动时不删那一份
@@ -719,7 +720,7 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
       ["claude-code", null],
       ["claude-desktop", null],
       ["codex", null],
-      ["claude-code:team", "团队共享只在项目里：写进项目的 .mcp.json"],
+      ["claude-code:team", "团队共享只在项目中可用"],
     ],
   );
   assert.deepEqual(toUser.defaults, ["claude-code"]);
@@ -798,4 +799,141 @@ test("生效范围：所有项目 ｜ 只在这些项目 + 勾选；几个去处
   assert.deepEqual(merged.stays, ["Claude Desktop"]);
   // Codex 去 A 不行、去 B 行：不算留下
   assert.deepEqual(merged.cant, []);
+});
+// ===== 界面说人话（spec #239 第 41–44 条，#277）=====
+
+/// core 给的位置（`discover_locations`）：Claude Code 的 label 带英文作用域
+const core = {
+  user: {
+    id: "claude-code",
+    domain: "global",
+    label: "Claude Code · User MCPs",
+    harnessId: "claude-code",
+    path: "/Users/me/.claude.json",
+  },
+  local: {
+    id: "project:/Users/me/CardBox::claude-code:local",
+    domain: "project:/Users/me/CardBox",
+    label: "Claude Code · Local MCPs",
+    harnessId: "claude-code",
+    path: "/Users/me/.claude.json",
+  },
+  team: {
+    id: "project:/Users/me/CardBox::claude-code",
+    domain: "project:/Users/me/CardBox",
+    label: "Claude Code · Project MCPs",
+    harnessId: "claude-code",
+    path: "/Users/me/CardBox/.mcp.json",
+  },
+  codex: {
+    id: "project:/Users/me/CardBox::codex",
+    domain: "project:/Users/me/CardBox",
+    label: "Codex",
+    harnessId: "codex",
+    path: "/Users/me/CardBox/.codex/config.toml",
+  },
+} satisfies Record<string, McpLocation>;
+
+test("「配置文件」列写位置名、不写路径：用户级只写 agent，项目里写 项目 · agent（与确认框同一套）", async () => {
+  const { mcpOriginName } = await import("../src/mcpDiffTable.ts");
+  const names = [
+    mcpOriginName("用户级", core.user),
+    mcpOriginName("CardBox", core.local),
+    mcpOriginName("CardBox", core.team),
+    mcpOriginName("CardBox", core.codex),
+  ];
+  assert.deepEqual(names, [
+    "Claude Code",
+    "CardBox · Claude Code 仅自己",
+    "CardBox · Claude Code 团队共享",
+    "CardBox · Codex",
+  ]);
+  for (const name of names) {
+    assert.doesNotMatch(name, /MCPs|User|Local|Project|\//);
+  }
+});
+
+test("确认框清单与挑选浮层：中文位置名，不出现 `Claude Code · User MCPs`", async () => {
+  const { mcpCopyName } = await import("../src/mcpDiffTable.ts");
+  const { mcpAgentName } = await import("../src/mcpView.ts");
+  const names = Object.values(core).map((l) =>
+    mcpCopyName(l.domain === "global" ? "用户级" : "CardBox", l),
+  );
+  assert.deepEqual(names, [
+    "用户级 · Claude Code",
+    "CardBox · Claude Code 仅自己",
+    "CardBox · Claude Code 团队共享",
+    "CardBox · Codex",
+  ]);
+  for (const name of names) assert.doesNotMatch(name, /MCPs/);
+  // 原因句与提示条里的 agent：只写 agent 名
+  assert.equal(mcpAgentName(core.user), "Claude Code");
+  // 确认框清单、跳过的那几句与挑选浮层都取同一个名字（不是 core 的 label、也不是来源页的 `Claude Code · User`）
+  const tab = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
+  assert.match(tab, /\{action\.name\} → \{copyNameOf\(action\.targetId\)\}/);
+  assert.match(tab, /name: issue\.name \?\? copyNameOf\(issue\.locationId\)/);
+  assert.match(tab, /<McpPickLayer[^]*?labelOf=\{copyNameOf\}/);
+  assert.doesNotMatch(tab, /mcpLocationName/);
+});
+
+test("⊘ 格悬停：第一行说人话，第二行写具体原因；联网的 MCP 进不了 Claude Desktop 时直接说去哪加", async () => {
+  const { mcpBlockedTip } = await import("../src/mcpView.ts");
+  assert.deepEqual(
+    mcpBlockedTip(
+      {
+        reason: "Claude Desktop 的远程服务器要在它自己的「连接器」里添加",
+        reasonKind: "desktopRemote",
+      },
+      "Claude Desktop",
+    ),
+    { tip: "联网的 MCP 需在 Claude 桌面应用的「设置 › 连接器」中添加" },
+  );
+  assert.deepEqual(
+    mcpBlockedTip({ reason: "Cursor 不支持 SSE 传输", reasonKind: "sseUnsupported" }, "Cursor"),
+    { tip: "无法加到 Cursor", detail: "Cursor 不支持 SSE 传输" },
+  );
+  assert.deepEqual(
+    mcpBlockedTip(
+      {
+        reason: "带有 ${…} 这类变量，只在 Codex 之间复制",
+        reasonKind: "crossAgentVariables",
+      },
+      "Cursor",
+    ),
+    {
+      tip: "无法加到 Cursor",
+      detail: "带有 ${…} 这类变量，只在 Codex 之间复制",
+    },
+  );
+});
+
+test("写入失败：分不出原因的（core 给了原文）提示条只写失败句；分得出的接人话原因", async () => {
+  const { mcpEntryReason, mcpFailedAt } = await import("../src/mcpView.ts");
+  const told = { message: "没有写入权限，没动" };
+  const raw = {
+    message: "原子写入失败",
+    detail: "Input/output error (os error 5)",
+  };
+  assert.equal(mcpEntryReason(told), "没有写入权限，没动");
+  assert.equal(mcpEntryReason(raw), undefined);
+  assert.equal(mcpFailedAt("Codex", told), "加到 Codex 失败 · 没有写入权限，没动");
+  assert.equal(mcpFailedAt("Codex", raw), "加到 Codex 失败");
+  assert.doesNotMatch(mcpFailedAt("Codex", raw), /原子写入|os error/);
+});
+
+test("写入的命令本身出错：横幅一句是「加到 X 失败」，原文与文件完整路径进「!」", async () => {
+  const { mcpWriteFault } = await import("../src/mcpView.ts");
+  const { appFaultView } = await import("../src/backendError.ts");
+  const fault = mcpWriteFault("Permission denied (os error 13)", "加到 Codex 失败", [
+    "~/CardBox/.codex/config.toml",
+  ]);
+  assert.deepEqual(appFaultView(fault), {
+    message: "加到 Codex 失败",
+    technical: "Permission denied (os error 13)\n~/CardBox/.codex/config.toml",
+  });
+  // 后端已经分好两层的（`[invalid] 一句`）原样交给横幅
+  assert.deepEqual(
+    appFaultView(mcpWriteFault("[invalid] 配置已变化，请重试", "加到 Codex 失败", ["~/a"])),
+    { message: "配置已变化，请重试" },
+  );
 });

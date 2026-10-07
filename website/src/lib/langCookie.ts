@@ -1,5 +1,5 @@
 /// 语言菜单选语言时写的 cookie（spec「语言跳转」）：名字 `lang`，值是页面的语言码（zh-Hans / zh-Hant / en），
-/// 站内通用，记一年。功能性 cookie，不需要同意。#184 的中间件读它：有它就按它跳，不再看 Accept-Language。
+/// 站内通用，记一年。功能性 cookie，不需要同意。首页的语言跳转（lib/homeRedirect.ts）读它：有它就按它跳，不再看浏览器语言。
 import { isLang, LANG_COOKIE } from "./langs.ts";
 
 const ONE_YEAR_S = 365 * 24 * 60 * 60;

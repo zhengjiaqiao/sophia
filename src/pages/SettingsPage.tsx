@@ -41,6 +41,7 @@ import {
   useReportSettings,
 } from "../feedback.tsx";
 import { SettingRow } from "./SettingRow.tsx";
+import { saveThenReload } from "./settingsSave.ts";
 import { copyDetails } from "../diagnostics.ts";
 import {
   netFailureText,
@@ -156,13 +157,9 @@ export function SettingsPage({
       retry: { label: t("settings.save.retry"), onClick: retry },
     });
 
-  const reload = async () => {
-    try {
-      setList(await api.listHarnesses());
-    } catch (e) {
-      onError(String(e));
-    }
-  };
+  /// 读 agent 名单；读不出由调用方报（`reload` 报到横幅，保存后的重读见 `saveThenReload`）
+  const loadHarnesses = async () => setList(await api.listHarnesses());
+  const reload = () => loadHarnesses().catch((e) => onError(String(e)));
   useEffect(() => {
     void reload();
     // 首次进入加载一次
@@ -259,14 +256,15 @@ export function SettingsPage({
     setList((l) =>
       l ? { ...l, harnesses: l.harnesses.map((h) => (h.id === id ? { ...h, enabled } : h)) } : l,
     );
-    try {
-      await api.setHarnessEnabled(id, enabled);
-      setUnchecked(enabled ? null : { id, at: Date.now() });
-      await reload();
-    } catch (e) {
-      saveFailed(e, () => void toggle(id, enabled));
-      await reload();
-    }
+    await saveThenReload({
+      save: async () => {
+        await api.setHarnessEnabled(id, enabled);
+        setUnchecked(enabled ? null : { id, at: Date.now() });
+      },
+      reload: loadHarnesses,
+      saveFailed: (e) => saveFailed(e, () => void toggle(id, enabled)),
+      reloadFailed: (e) => onError(String(e)),
+    });
   };
 
   // ── 生效范围（spec 2026-10-05-skill-mcp-batch2「项目来源」）──
@@ -281,13 +279,8 @@ export function SettingsPage({
   const dismissUncheckedProject = useCallback(() => setUncheckedProject(null), []);
   const [addNotice, setAddNotice] = useState<{ message: string; at: number } | null>(null);
   const dismissAddNotice = useCallback(() => setAddNotice(null), []);
-  const reloadProjects = async () => {
-    try {
-      setProjects(await api.listProjects());
-    } catch (e) {
-      onError(String(e));
-    }
-  };
+  const loadProjects = async () => setProjects(await api.listProjects());
+  const reloadProjects = () => loadProjects().catch((e) => onError(String(e)));
   useEffect(() => {
     void reloadProjects();
     // 进来读一次；壳扫完一轮（菜单加了项目、文件夹没了）再读
@@ -297,13 +290,15 @@ export function SettingsPage({
     setProjects((list) => list?.map((p) => (p.path === path ? { ...p, shown } : p)) ?? list);
     // 在上面取消勾的留在原处；从「不显示的」里勾回来的回到上面（勾着本来就在上面）
     if (!shown) setKeptProjects((kept) => new Set(kept).add(path));
-    try {
-      await api.setProjectShown(path, shown);
-      setUncheckedProject(shown ? null : { path, at: Date.now() });
-    } catch (e) {
-      saveFailed(e, () => void toggleProject(path, shown));
-    }
-    await reloadProjects();
+    await saveThenReload({
+      save: async () => {
+        await api.setProjectShown(path, shown);
+        setUncheckedProject(shown ? null : { path, at: Date.now() });
+      },
+      reload: loadProjects,
+      saveFailed: (e) => saveFailed(e, () => void toggleProject(path, shown)),
+      reloadFailed: (e) => onError(String(e)),
+    });
   };
   /// `+ 项目`：系统文件夹选择器，选的文件夹就是一格、默认勾上。当不了项目的（主目录、不是文件夹）在键下说原因
   const addProject = async () => {

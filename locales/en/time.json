@@ -18,7 +18,7 @@
     "other": "{when} · Added {count}"
   },
   "time.lastAutoMcp": {
-    "one": "{when} · Wrote {count}",
-    "other": "{when} · Wrote {count}"
+    "one": "{when} · Added {count}",
+    "other": "{when} · Added {count}"
   }
 }

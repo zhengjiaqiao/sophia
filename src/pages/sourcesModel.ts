@@ -134,7 +134,7 @@ export interface SourcesModel {
 const ruleTitle = () => t("sources.rule.title");
 
 /// 做完一批：全部成了是例行一行；有没成的说几个没成、第一个的原因。
-/// `reasonKey`：skill 是 `有 N 条软链没撤掉：…`，MCP 是 `有 N 项没拿掉：…`
+/// `reasonKey`：skill 是 `有 N 处入口清除失败 · …`，MCP 是 `有 N 项没拿掉：…`
 function removalToast(
   total: number,
   failed: string[],
@@ -148,7 +148,11 @@ function removalToast(
     kind: "partial",
     sentence: "sources.removal.partial",
     tally: { done: total - failed.length, failed: failed.length },
-    reason: tn(reasonKey, failed.length, { first: failed[0] }),
+    // 分不出原因（core 给空串）只写主句；MCP 那条的原因来自写入报告，不会为空
+    reason:
+      reasonKey === "sources.removal.failedLinks" && !failed[0]
+        ? tn("sources.removal.failedLinksPlain", failed.length)
+        : tn(reasonKey, failed.length, { first: failed[0] }),
   };
 }
 

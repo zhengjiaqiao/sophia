@@ -813,7 +813,10 @@ fn move_away(placed: &Path, hold_root: &Path) -> ReportEntry {
             .or_else(|_| sync::trash(placed))
         {
             Ok(()) => Outcome::Removed,
-            Err(e) => Outcome::Failed(sync::io_fail("move-installed", placed, &e).reason),
+            Err(e) => Outcome::Failed(
+                sync::io_fail("move-installed", placed, &e)
+                    .reason_or(|| crate::t!("market.undo.moveFailed")),
+            ),
         }
     };
     ReportEntry {
@@ -847,7 +850,10 @@ fn put_back(held: &Path, orig: &Path, new_moved: bool) -> ReportEntry {
                 }
                 Outcome::Created
             }
-            Err(e) => Outcome::Failed(sync::io_fail("put-back-old", orig, &e).reason),
+            Err(e) => Outcome::Failed(
+                sync::io_fail("put-back-old", orig, &e)
+                    .reason_or(|| crate::t!("market.undo.putBackFailed")),
+            ),
         }
     };
     ReportEntry {
@@ -1484,7 +1490,14 @@ mod tests {
         assert_eq!(out.unlinked.len(), 1, "{:?}", out.unlinked);
         assert_eq!(out.unlinked[0].harness_id, "codex");
         assert_eq!(out.unlinked[0].name, "pdf");
-        assert!(!out.unlinked[0].reason.is_empty());
+        // 原因要么为空（分不出类，界面只写主句），要么是已知类别的人话原因；不能是系统原文
+        let reason = &out.unlinked[0].reason;
+        let known = [
+            crate::t!("common.write.noPermission"),
+            crate::t!("common.write.diskFull"),
+            crate::t!("skills.sync.gone"),
+        ];
+        assert!(reason.is_empty() || known.contains(reason), "{reason}");
     }
 
     /// 几家共用一个 skill 目录（Amp、Replit 都是 `~/.config/agents/skills`）：建链接失败要算到

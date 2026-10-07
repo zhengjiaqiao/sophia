@@ -1,14 +1,15 @@
 {
   "hints.firstScan.skillsWithAgents": {
-    "one": "Read the skill folders of {agents} and found 1 skill. No files were changed.",
-    "other": "Read the skill folders of {agents} and found {count} skills. No files were changed."
+    "one": "Found 1 skill in {agents}",
+    "other": "Found {count} skills in {agents}"
   },
   "hints.firstScan.skillsLocal": {
-    "one": "Read the skill folders on this Mac and found 1 skill. No files were changed.",
-    "other": "Read the skill folders on this Mac and found {count} skills. No files were changed."
+    "one": "Found 1 skill on this Mac",
+    "other": "Found {count} skills on this Mac"
   },
-  "hints.firstScan.emptyWithAgents": "Read the skill folders of {agents} and found no skills. No files were changed.",
-  "hints.firstScan.emptyLocal": "Read the skill folders on this Mac and found no skills. No files were changed.",
+  "hints.firstScan.emptyWithAgents": "No skills in {agents} yet",
+  "hints.firstScan.emptyLocal": "No skills on this Mac yet",
+  "hints.firstScan.searched": "Folders searched",
   "hints.firstCodex": "Turning this on changes one Codex setting so it can use third-party models; turning it off puts it back. Restart Codex for the change to apply.",
   "hints.mcpOpenCode": "OpenCode isn't supported for MCP yet, so this page has no column for it",
   "hints.log.markFailed": "Couldn't record that the hint was seen",

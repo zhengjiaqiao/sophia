@@ -12,6 +12,7 @@ const {
   HINT_ORDER,
   createHintStore,
   dismissIds,
+  firstScanHint,
   learnIds,
   pickHint,
   shouldYield,
@@ -80,23 +81,95 @@ test(
   },
 );
 
-test("句子一行、只说结果：扫描说读了哪些目录、找到几个、没有改动文件；不复述界面、不讲机制、不写小标", () => {
+test("句子一行、只说结果：扫描只说在哪些 agent 中找到几个；不讲「读了目录」的机制、不写「没有改动任何文件」、不写小标", () => {
   const scan = HINTS["first-scan-skills"](EXAMPLE);
-  assert.equal(
-    scan,
-    "读了 Claude Code、Codex、OpenCode 的 skill 目录，找到 31 个 skill，没有改动任何文件。",
-  );
-  assert.doesNotMatch(scan, /一行一个|一列一个|第一次用|链接|原件/);
-  assert.equal(
-    HINTS["first-scan-empty"]({ agents: [], skills: 0 }),
-    "读了本机的 skill 目录，没有找到 skill，没有改动任何文件。",
-  );
+  assert.equal(scan, "在 Claude Code、Codex、OpenCode 中找到 31 个 skill");
+  assert.doesNotMatch(scan, /一行一个|一列一个|第一次用|链接|原件|读了|目录|改动/);
+  assert.equal(HINTS["first-scan-empty"](EXAMPLE), "Claude Code、Codex、OpenCode 中还没有 skill");
+  assert.equal(HINTS["first-scan-empty"]({ agents: [], skills: 0 }), "本机还没有 skill");
+  assert.equal(HINTS["first-scan-skills"]({ agents: [], skills: 3 }), "在本机找到 3 个 skill");
   // Codex：只说结果；配置文件路径挪到开关的提示框（models-view 测试）
   assert.equal(
     HINTS["first-codex"](EXAMPLE),
     "打开后会改一处 Codex 的设置，让它能用第三方模型；关掉就恢复原样。改完要重启 Codex 才生效。",
   );
   assert.doesNotMatch(HINTS["first-codex"](EXAMPLE), /config\.toml|Sophia/);
+});
+
+test("空库时选中只说结果的那一句，并带「前往发现」入口；查找过的文件夹放悬停（#274）", () => {
+  const folders = ["~/.claude/skills", "~/.codex/skills"];
+  const empty = firstScanHint({ agents: ["Claude Code", "Codex"], skills: 0, folders });
+  assert.equal(empty.id, "first-scan-empty");
+  assert.equal(empty.message, "Claude Code、Codex 中还没有 skill");
+  assert.equal(empty.discover, "前往发现");
+  // 下一步由键说，句子不再说；不写机制、不安抚
+  assert.doesNotMatch(empty.message, /发现|读了|目录|改动|没有找到/);
+  assert.deepEqual(empty.tip, { title: "已查找的文件夹", folders });
+  // 有 skill 时只换一句话：没有键，悬停照旧
+  const found = firstScanHint({ agents: ["Claude Code", "Codex"], skills: 12, folders });
+  assert.equal(found.id, "first-scan-skills");
+  assert.equal(found.message, "在 Claude Code、Codex 中找到 12 个 skill");
+  assert.equal(found.discover, null);
+  assert.deepEqual(found.tip.folders, folders);
+  // 指定哪一条时按指定的写（页面上两条各画各的）
+  assert.equal(firstScanHint({ agents: ["Codex"], skills: 0 }, "first-scan-skills").discover, null);
+  assert.deepEqual(firstScanHint({ agents: ["Codex"], skills: 0 }).tip.folders, []);
+});
+
+test("空库提示条：说明句 + 一颗紧凑默认键「前往发现」+ ×（灰面板现成的键位）", () => {
+  const hint = firstScanHint({ agents: ["Claude Code", "Codex"], skills: 0 });
+  const html = render(NoticePanel, {
+    scope: "section",
+    mark: false,
+    open: true,
+    onClose: () => {},
+    action: { label: hint.discover, onClick: () => {} },
+    message: hint.message,
+  });
+  assert.match(html, /class="ss-noticepanel__message">Claude Code、Codex 中还没有 skill</);
+  assert.match(html, /class="ss-btn ss-btn--compact"[^>]*>前往发现</);
+  assert.match(html, /aria-label="知道了，不再提示"/);
+  assert.doesNotMatch(html, /ss-noticepanel__mark/);
+});
+
+test("「前往发现」切到「发现」页签：壳把 SKILLS 这一页换到发现一面；提示条与空态都接这一个", async () => {
+  const { DEFAULT_NAV, faceOf, goFace } = await import("../src/shell/nav.ts");
+  assert.equal(faceOf(goFace(DEFAULT_NAV, "discover")), "discover");
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /onDiscover=\{\(\) => navigate\(\(n\) => goFace\(n, "discover"\)\)\}/);
+  const tab = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
+  assert.match(
+    tab,
+    /scanEmpty\.discover && onDiscover\s*\?\s*\{ label: scanEmpty\.discover, onClick: onDiscover \}/,
+  );
+  assert.match(tab, /<DomainView[^]*?onDiscover=\{onDiscover\}/);
+  const dv = readFileSync(new URL("../src/DomainView.tsx", import.meta.url), "utf8");
+  assert.match(dv, /label: t\("skills\.empty\.goDiscover"\), onClick: props\.onDiscover/);
+});
+
+test("没有扫描页时的空态（LocationFrame）同样只说结果并给「前往发现」：空态现成的默认键", async () => {
+  // LocationFrame 把 `empty.action` 交给 Empty 的第二个动作（它的导入不带扩展名，node 里挂不上，这里画 Empty 本身）
+  const frame = readFileSync(new URL("../src/LocationFrame.tsx", import.meta.url), "utf8");
+  assert.match(frame, /secondary=\{empty\.action\}/);
+  const { Empty } = await import("../src/ui/Empty.tsx");
+  const { t, tSpaced } = await import("../src/i18n.ts");
+  const html = render(Empty, {
+    description: tSpaced("skills.empty.noDirs", { place: "用户级" }),
+    art: "noDirs",
+    secondary: { label: t("skills.empty.goDiscover"), onClick: () => {} },
+  });
+  assert.match(html, /class="ss-empty__description">用户级还没有 skill</);
+  assert.match(
+    html,
+    /class="ss-empty__actions">[^]*?<button type="button" class="ss-btn">前往发现</,
+  );
+  assert.doesNotMatch(html, /自动创建|agent 的 skill 目录/);
+  // 页面里接上：没有扫描页的分支把 `前往发现` 交给空态
+  const tab = readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8");
+  assert.match(
+    tab,
+    /art: "noDirs",\s*action: onDiscover\s*\?\s*\{ label: t\("skills\.empty\.goDiscover"\), onClick: onDiscover \}/,
+  );
 });
 
 test("登记表顺序：首次扫描两条在前，Codex 页、MCP 页的 OpenCode 说明在后", () => {
@@ -333,7 +406,7 @@ test("提示条：只有说明句 + × 图标键（知道了，不再提示）�
   assert.doesNotMatch(html, /第一次用/);
   assert.match(
     html,
-    /class="ss-noticepanel__message">读了 Claude Code、Codex、OpenCode 的 skill 目录/,
+    /class="ss-noticepanel__message">在 Claude Code、Codex、OpenCode 中找到 31 个 skill/,
   );
   assert.match(
     html,

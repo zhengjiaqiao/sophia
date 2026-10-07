@@ -28,6 +28,7 @@ import type { InstalledNotice } from "./InstalledToast.tsx";
 import type { InstallOutcome } from "../types.ts";
 import {
   DownloadFailure,
+  DownloadTip,
   SkillAgents,
   InstallBlock,
   InstallFooter,
@@ -218,7 +219,8 @@ export function LinkPage(props: LinkPageProps) {
       escape={props.escape}
       footer={
         <InstallFooter
-          line={found ? downloadLine(found, found.branch) : ""}
+          line={found ? downloadLine(found) : ""}
+          tip={found ? <DownloadTip source={found} branch={found.branch} /> : undefined}
           label={installLabel(picked.length)}
           block={block}
           busy={state.busy}

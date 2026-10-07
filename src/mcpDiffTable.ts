@@ -48,3 +48,14 @@ export function mcpCopyName(
     location.domain === "global" ? location.label.split(" · ")[0] : mcpLocationSentence(location);
   return `${place} · ${agent}`;
 }
+
+/// 表格「配置文件」列里的值（spec #239 第 41 条，画板第 8 屏）：与确认框、挑选浮层同一套名字，只是用户级不写
+/// `用户级 ·`——`Claude Code`、`CardBox · Claude Code 团队共享`。完整路径在悬停、抽屉与右键菜单里
+export function mcpOriginName(
+  place: string,
+  location: Pick<McpLocation, "id" | "label" | "harnessId" | "domain">,
+): string {
+  return location.domain === "global"
+    ? location.label.split(" · ")[0]
+    : mcpCopyName(place, location);
+}

@@ -26,7 +26,8 @@ import { matchesFilter } from "./rowFilter.ts";
 import { viewOf } from "./cellState.ts";
 import { blockedTipOf } from "./cellTip.ts";
 import { orphanOrigin, orphanSelectReason, orphanTip } from "./orphanRows.ts";
-import { listText, t, tn } from "./i18n.ts";
+import { listText, t, tn, tSpaced } from "./i18n.ts";
+import { displayPath } from "./pathText.ts";
 import {
   agentCopiesOf,
   columnOfTarget,
@@ -77,8 +78,10 @@ export interface DomainViewProps {
   view: SkillsView;
   /// 经过筛选、要显示的行
   rows: SkillRow[];
-  /// 一个位置都还没有 agent 目录时空态里说的地方（带「下」）：`本机` / `用户级 下` / `CardBox 下` / `这几个位置下`
+  /// 一个位置都还没有 agent 目录时空态里说的地方：`本机` / `用户级` / `CardBox` / `这几个生效范围里`
   placeLabel: string;
+  /// 空态的 `前往发现`：切到「发现」页签；不给就不出这颗键
+  onDiscover?: () => void;
   /// 格此刻该画成什么（乐观更新之后的状态）
   stateOf: (ref: CellRef, actual: CellState) => CellState;
   /// 只留这份确认之后、删除完成之前先藏起来的那一份
@@ -147,10 +150,12 @@ export interface DomainViewProps {
 }
 
 /// 提示框里的动词：格子只写「动词 · 快捷键」，动词带方向（`加到 Claude Code` / `从 Claude Code 移除`）——
-/// 「开启 Claude Code」会读成操作应用本身（DESIGN 冲突表）。原件格 `删除原件…`：`…` 表示还要确认一步
+/// 「开启 Claude Code」会读成操作应用本身（DESIGN 冲突表）。原件格先说原件在这里、再给删除
+/// （`原件在 Claude Code 中 · 删除…`，#274：只写「删除原件…」时和旁边 ● 的「从 Claude Code 移除」分不开）；
+/// `…` 表示还要确认一步
 const verbOf = (state: CellState, agent: string): string | undefined =>
   state === "own"
-    ? t("skills.verb.removeOriginal")
+    ? t("skills.verb.removeOriginal", { agent })
     : state === "linked"
       ? t("skills.verb.removeFrom", { agent })
       : state === "missing"
@@ -599,6 +604,8 @@ export default function DomainView(props: DomainViewProps) {
     view.columns.length === 0 ||
     view.columns.every((c) => [...c.targets.values()].every((t) => !t.exists));
   const query = props.filterText.trim();
+  // 还没有 agent 的 skill 文件夹：说结果 + `前往发现`；装第一个时会自动创建的文件夹放悬停（#274）
+  const toCreate = foldersOf(view.columns.flatMap((c) => [...c.targets.values()]));
   const empty =
     query !== "" ? (
       <TableEmpty
@@ -607,8 +614,17 @@ export default function DomainView(props: DomainViewProps) {
       />
     ) : noAgentDirs ? (
       <TableEmpty
-        text={t("skills.empty.noDirs", { place: props.placeLabel })}
-        hint={t("skills.empty.noDirsHint")}
+        text={tSpaced("skills.empty.noDirs", { place: props.placeLabel })}
+        tip={
+          toCreate.length > 0 ? (
+            <FolderTip title={t("skills.empty.noDirsHint")} folders={toCreate} />
+          ) : undefined
+        }
+        action={
+          props.onDiscover
+            ? { label: t("skills.empty.goDiscover"), onClick: props.onDiscover }
+            : undefined
+        }
         art="noDirs"
       />
     ) : (
@@ -620,6 +636,7 @@ export default function DomainView(props: DomainViewProps) {
       columns={columns}
       rows={matrixRows}
       originLabel={t("skills.table.origin")}
+      originTip={t("skills.table.originTip")}
       placeLabel={view.places.size > 0 ? t("skills.table.place") : undefined}
       bar={props.bar}
       hint={props.hint}
@@ -679,11 +696,14 @@ const ABOVE_TABLE_WITH_SOURCES = 171;
 export function TableEmpty({
   text,
   hint,
+  tip,
   action,
   art,
 }: {
   text: string;
   hint?: string;
+  /// 停在那句话上的提示框（第二层：完整路径）
+  tip?: ReactNode;
   action?: { label: string; onClick: () => void; leave?: boolean };
   art?: EmptyArt;
 }) {
@@ -696,12 +716,37 @@ export function TableEmpty({
   }
   return (
     <Empty
-      description={text}
+      description={
+        tip ? (
+          <Tooltip content={tip} fit="inline" focusable>
+            <span>{text}</span>
+          </Tooltip>
+        ) : (
+          text
+        )
+      }
       hint={hint}
       secondary={action}
       art={art}
       above={art === "noDirs" ? ABOVE_TABLE : ABOVE_TABLE_WITH_SOURCES}
     />
+  );
+}
+
+/// 一组目标文件夹的完整路径（主目录写 `~`，去重、保序）：提示框里列出查找过的 / 会自动创建的文件夹
+export const foldersOf = (targets: ReadonlyArray<{ path: string }>): string[] => [
+  ...new Set(targets.map((x) => displayPath(x.path))),
+];
+
+/// 列文件夹的提示框（第二层，DESIGN「文案表达 › 说给谁」）：一行小标 + 完整路径（等宽，` · ` 隔开、可选中），
+/// 新手提示条（`已查找的文件夹`）与没有 agent 文件夹的空态（`加上第一个 skill 时会自动创建`）共用
+export function FolderTip({ title, folders }: { title: string; folders: readonly string[] }) {
+  return (
+    <>
+      {title}
+      <br />
+      <Mono inherit>{folders.join(" · ")}</Mono>
+    </>
   );
 }
 

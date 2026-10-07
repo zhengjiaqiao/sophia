@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { t as say } from "../src/i18n.ts";
-import { toastFor, type ToastText } from "../src/toastText.ts";
+import {
+  clearFailedLine,
+  linksFailedLine,
+  splitFailedLine,
+  toastFor,
+  type ToastText,
+} from "../src/toastText.ts";
 
 /// 整句读出来（图标组写 `[图]`、名字写 `名字`）：断言的是提示条上真会读到的那一句
 const said = (text: ToastText) => {
@@ -22,7 +28,7 @@ test("例行成功：动词与键一致，走 routine 一行字，名字与图�
   });
   assert.equal(t.tier, "routine");
   assert.equal(t.kind, "success");
-  assert.equal(said(t), "写进 [图] 名字");
+  assert.equal(said(t), "加到 [图] 名字");
   assert.deepEqual(t.names, ["excalidraw", "notion"]);
   assert.deepEqual(
     t.agents.map((a) => a.id),
@@ -72,7 +78,7 @@ test("部分失败：黑窗 + 肯定动词 + 读数 + 第一条原因", () => {
   });
   assert.equal(t.tier, "notice");
   assert.equal(t.kind, "partial");
-  assert.equal(said(t), "写进 [图] 名字");
+  assert.equal(said(t), "加到 [图] 名字");
   assert.deepEqual(t.tally, { done: 2, failed: 1 });
   assert.equal(t.reason, "读不出来");
   // skill 的部分失败汇总用不带方向的动词：加上 2 ✓ · 1 ⊘
@@ -95,10 +101,10 @@ test("所有成功都是例行一行（含只留这份、自动规则）；黑�
   assert.equal(toastFor("keepThis", { done: [], failed }).tier, "notice");
   assert.equal(toastFor("autoLink", { done: [{ name: "y" }], failed }).tier, "notice");
   assert.equal(said(toastFor("autoLink", { done: [{ name: "x" }] })), "自动加到 [图] 名字");
-  assert.equal(said(toastFor("autoWrite", { done: [{ name: "x" }] })), "自动写进 [图] 名字");
+  assert.equal(said(toastFor("autoWrite", { done: [{ name: "x" }] })), "自动加到 [图] 名字");
 });
 
-test("只留这份的确认框：标题问留哪份；正文写哪份进废纸篓、几条链接改指，没有就不写后半句", async () => {
+test("只留这份的确认框：标题问留哪份；正文只说原来用另一份的 agent 将改用留下的，不说链接条数；没有要改用的就不写正文", async () => {
   const { keepThisConfirm } = await import("../src/toastText.ts");
   const base = {
     kept: { name: "通用仓库", seg: "", path: "/Users/jia/.agents/skills/defuddle" },
@@ -107,8 +113,9 @@ test("只留这份的确认框：标题问留哪份；正文写哪份进废纸�
   };
   const t = keepThisConfirm({ ...base, relinked: 3 });
   assert.equal(t.title, "只留 通用仓库 的 defuddle？");
-  assert.equal(t.body, "WeiboAP 那份移到废纸篓，3 条链接改指到这一份");
-  assert.equal(keepThisConfirm({ ...base, relinked: 0 }).body, "WeiboAP 那份移到废纸篓");
+  assert.equal(t.body, "原来使用 WeiboAP 那份的 agent 将改用留下的这一份。");
+  assert.doesNotMatch(t.body, /链接|废纸篓|3/);
+  assert.equal(keepThisConfirm({ ...base, relinked: 0 }).body, "");
 });
 
 test("只留这份的确认框：标题下两行写两份的完整路径，主目录写 ~，不截断", async () => {
@@ -138,7 +145,7 @@ test("只留这份的确认框：同名来源在标题和后果句里用区分�
     relinked: 2,
   });
   assert.equal(t.title, "只留 ego lite · 0.5.1.11 的 ego-browser？");
-  assert.equal(t.body, "ego lite · 0.5.0.32 那份移到废纸篓，2 条链接改指到这一份");
+  assert.equal(t.body, "原来使用 ego lite · 0.5.0.32 那份的 agent 将改用留下的这一份。");
 });
 
 test("拆开的确认框：标题问拆哪个 agent 的 skills 文件夹，正文说后果", async () => {
@@ -168,27 +175,45 @@ test("拆开成功：例行一行 `拆开 [Codex] 的 skills 文件夹`，走 ro
 
 // ---- 删除原件（DESIGN「删除原件」，2026-09-25） ----
 
-test("删除 skill 原件的确认框：标题一问，正文只说后果（谁不能再用、链接怎么办），不写路径、不写可以撤销", async () => {
+test("删除 skill 原件的确认框：标题一问，正文只说删除后哪些 agent 受影响；不写软链接、条数、废纸篓、路径、可以撤销", async () => {
   const { deleteOriginalConfirm } = await import("../src/toastText.ts");
   const { setHome } = await import("../src/pathText.ts");
   setHome("/Users/jia");
   const base = { skill: "graduate", ownAgents: ["Codex"] };
-  // 别处没有同名原件：谁不能再用它、链接一并删除、能找回什么
+  // 别处没有同名原件：谁将无法使用它（#274 画板第 2 屏）
   const gone = deleteOriginalConfirm({ ...base, links: 2, linkAgents: ["Claude Code"] });
   assert.equal(gone.title, "删除 graduate？");
-  assert.equal(gone.body, "删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除");
+  assert.equal(gone.body, "删除后，Codex 和 Claude Code 将无法使用它。");
   assert.equal("paths" in gone, false);
-  // 别处有同名原件：有链接的 agent 改用那一份，直接读原件目录的 agent 不能再用
+  // 别处有同名原件：有链接的 agent 改用那一份，直接读原件目录的 agent 将无法使用
+  const moved = deleteOriginalConfirm({
+    ...base,
+    links: 2,
+    linkAgents: ["Claude Code"],
+    relinkTo: "~/.agents",
+  });
   assert.equal(
-    deleteOriginalConfirm({ ...base, links: 2, linkAgents: ["Claude Code"], relinkTo: "通用仓库" })
-      .body,
-    "删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它",
+    moved.body,
+    "删除后，Claude Code 将改用 ~/.agents 中的同名 graduate，Codex 将无法使用它。",
   );
-  // 没有链接：只说谁不能再用
+  // 都改用了别处那一份：只说改用
+  assert.equal(
+    deleteOriginalConfirm({
+      ...base,
+      ownAgents: [],
+      links: 1,
+      linkAgents: ["Claude Code"],
+      relinkTo: "~/.agents",
+    }).body,
+    "删除后，Claude Code 将改用 ~/.agents 中的同名 graduate。",
+  );
+  // 没有链接：只说谁将无法使用
   assert.equal(
     deleteOriginalConfirm({ ...base, links: 0, linkAgents: [] }).body,
-    "删除后 Codex 不能再用它",
+    "删除后，Codex 将无法使用它。",
   );
+  for (const text of [gone.body, moved.body])
+    assert.doesNotMatch(text, /软链接|链接|条|废纸篓|撤销|~\/\.agents\/skills/);
   setHome(null);
 });
 
@@ -320,4 +345,30 @@ test("批量删除的结果：`✓ 已从 [Codex] 删除`（调用方写数量�
   assert.equal(said(partial), "删除 [图] 名字");
   assert.deepEqual(partial.tally, { done: 1, failed: 1 });
   assert.equal(batchBusyText("delete", "Codex"), "正在从 Codex 删除");
+});
+
+test("没处理好的链接：有原因接 ` · 原因`，原因为空只写主句", () => {
+  assert.equal(
+    linksFailedLine("relink", 2, "磁盘满了"),
+    "2 个 agent 改用另一份失败 · 磁盘满了",
+  );
+  assert.equal(linksFailedLine("relink", 2, ""), "2 个 agent 改用另一份失败");
+  assert.equal(linksFailedLine("clear", 1, ""), "1 个 agent 中的入口清除失败");
+  assert.equal(
+    linksFailedLine("trashClear", 1, ""),
+    "已移到废纸篓，1 个 agent 中的入口清除失败",
+  );
+  assert.equal(
+    linksFailedLine("trashRelink", 3, "没有权限"),
+    "已移到废纸篓，3 个 agent 改用另一份失败 · 没有权限",
+  );
+  assert.equal(clearFailedLine("没有权限"), "清除失败：没有权限");
+  assert.equal(clearFailedLine(""), "清除失败");
+});
+
+test("拆开没做成：有原因接原因，原因为空只写主句", () => {
+  assert.equal(splitFailedLine(0, 1, ""), "拆开失败");
+  assert.equal(splitFailedLine(0, 1, "没有权限"), "拆开失败 · 没有权限");
+  assert.equal(splitFailedLine(2, 1, ""), "已拆开，1 个 skill 复制失败");
+  assert.equal(splitFailedLine(2, 1, "磁盘满了"), "已拆开，1 个 skill 复制失败 · 磁盘满了");
 });

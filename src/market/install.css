@@ -67,11 +67,6 @@
   color: var(--ink-mute);
 }
 
-.install-lede__mono {
-  font-size: var(--size-label);
-  color: var(--ink);
-}
-
 /* ---- 一节：区块小标 + hairline，节间 24，内容在线下 12 ---- */
 .install-block {
   margin-top: var(--space-xl);
@@ -81,12 +76,22 @@
   padding-top: var(--space-sm);
 }
 
-/* 位置胶囊下一行：落点（12 ink-faint，路径等宽） */
+/* 生效范围胶囊下两行（#275，DESIGN「安装页」）：结果一句（13 ink）+ 落点路径（Mono 默认的等宽 12 ink-faint），
+   路径常显、不收进悬停 */
 .install-landing {
   margin: var(--space-xs) 0 0;
-  font-size: var(--size-label);
+}
+
+.install-landing__result {
+  margin: 0;
+  font-size: var(--size-caption);
   line-height: var(--leading-caption);
-  color: var(--ink-faint);
+  color: var(--ink);
+}
+
+.install-landing__path {
+  margin: 2px 0 0;
+  line-height: var(--leading-label);
 }
 
 /* 落点已有同名：一句（13 ink）+ 在访达中显示 ↗ */
@@ -160,7 +165,8 @@
   color: var(--ink);
 }
 
-/* ---- 要填的：两列表单——左键名（等宽 ink）+ 下一行 `必填 · 密钥`；右输入框 ---- */
+/* ---- 要填的：两列表单——左标签（说明；没有说明时是等宽的键名）+ 下一行 `必填 · 密钥` 与等宽键名；
+   右输入框 + 框下常显的说明（12 ink-mute）---- */
 .install-fields {
   display: flex;
   flex-direction: column;
@@ -182,6 +188,25 @@
   font-size: var(--size-label);
   line-height: var(--leading-caption);
   color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.install-field__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-xs);
+}
+
+.install-field__input {
+  min-width: 0;
+}
+
+.install-field__help {
+  margin: var(--space-xxs) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
   overflow-wrap: anywhere;
 }
 
@@ -347,8 +372,14 @@
   min-width: 0;
 }
 
-/* 一句去向：12 ink-faint，一行放不下截断；其中的地址、分支、大小走等宽（footRuns），汉字不走——
-   等宽字族的半角空格夹在汉字中间会读成两个空格 */
+/* 带悬停的那一句（skill：主机名与分支进提示框）：占满余下的宽，提示框包层按字宽、贴左 */
+.install-foot__lead {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 一句去向（`从 GitHub 下载 · 2.1 MB`）：12 ink-faint，正文字族，一行放不下截断 */
 .install-foot__line {
   flex: 1 1 auto;
   min-width: 0;

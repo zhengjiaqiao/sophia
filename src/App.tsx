@@ -642,6 +642,7 @@ export default function App() {
         face={face}
         filterBar={filterBar}
         install={installContext}
+        onDiscover={() => navigate((n) => goFace(n, "discover"))}
         onGoToRow={(domainKey) =>
           navigate((n) =>
             goRow(
@@ -679,6 +680,13 @@ export default function App() {
         face={face}
         filterBar={filterBar}
         install={installContext}
+        onDiscover={() => navigate((n) => goFace(n, "discover"))}
+        onOpenSettings={() =>
+          navigate(
+            (n) => goDestination(n, "settings"),
+            () => setAgentsRequest({ at: Date.now() }),
+          )
+        }
       />
     ),
   };

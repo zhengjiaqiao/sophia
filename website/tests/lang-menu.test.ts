@@ -6,7 +6,7 @@ import { LangMenu, LEAVE_DELAY_MS } from "../src/lib/langMenu.ts";
 import { langCookie } from "../src/lib/langCookie.ts";
 import { LANG_CODES, LANG_COOKIE } from "../src/lib/langs.ts";
 import { SITE } from "../src/site.config.ts";
-import { pickLang } from "../functions/_lib/lang.ts";
+import { homeRedirect } from "../src/lib/homeRedirect.ts";
 
 function setup() {
   let now = 0;
@@ -125,10 +125,13 @@ test("cookie 认的语言码与站点语言表一致", () => {
   assert.deepEqual([...LANG_CODES].sort(), SITE.langs.map((l) => l.code).sort());
 });
 
-test("与 #184 的中间件对上：cookie 名一致，菜单写的每个语言码中间件都认（pickLang 读回同一个）", () => {
+test("与首页的语言跳转对上：cookie 名一致，菜单写的每个语言码跳转都认（读回同一个）", () => {
   assert.equal(LANG_COOKIE, "lang");
+  const paths = Object.fromEntries(SITE.langs.map((l) => [l.code, l.path]));
   for (const code of LANG_CODES) {
     const written = langCookie(code).split(";")[0]!;
-    assert.equal(pickLang({ cookie: written, acceptLanguage: "de" }), code);
+    const location = { search: "", hash: "", replace: () => {} };
+    const w = { document: { cookie: written }, navigator: { languages: ["de"] }, location };
+    assert.equal(homeRedirect("", paths, LANG_COOKIE, w), paths[code]);
   }
 });

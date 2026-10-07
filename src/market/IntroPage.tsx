@@ -5,8 +5,8 @@
 ///   装过的换成状态 `✓ 已安装`，来历行下多一句 `装在 用户级、CardBox`
 /// - 来历一行（页面头下 10）：
 ///   skill：仓库（mono ink）· 仓库内路径（mono ink-mute）· 装过的人 + `在 GitHub 打开 ↗`
-///   MCP：发布方 · 包名或地址（mono）· `精选` / `官方目录` + 离开键（`npm 上的说明 ↗` 等）
-/// - MCP 来历下先列两行事实：`连接方式`、`要填的`——决定要不要装的就这两件
+///   MCP：发布方 · `精选` / `官方目录` + 离开键 `查看说明 ↗`（包名进它的悬停，#276）
+/// - MCP 来历下先列两行事实：`运行方式`（`本地运行` / `在线服务`，命令与地址进悬停）、`要填的`——决定要不要装的就这两件
 /// - 其下 16 一条 hairline，再 16 起正文：渲染后的 SKILL.md / README，读宽 640，自己滚（边缘渐隐）；
 ///   frontmatter 去掉、其 description 作首段。取的时候 `正在取说明`；
 ///   skill 取不到写 `现在取不到说明` + `在 GitHub 打开 ↗`；MCP 取不到只留两行事实
@@ -24,6 +24,7 @@ import {
   Note,
   PushedPage,
   Tag,
+  Tooltip,
   useEdgeFades,
   usePushedPage,
 } from "../ui";
@@ -34,10 +35,8 @@ import {
   installedLine,
   installsText,
   isInstalled,
-  leaveLabel,
   mcpConnection,
   mcpFieldFacts,
-  mcpPackage,
   mcpSourceLabel,
 } from "./discoverView";
 import { InstalledMark } from "./InstalledMark";
@@ -154,6 +153,8 @@ export function IntroPage(props: IntroPageProps) {
   // 离开键的去处
   let leaveUrl: string | null;
   let leaveText: string;
+  /// 离开键的悬停（MCP：包名；指向主页或源码仓库时是那个地址）
+  let leaveTip: string | null = null;
   if (props.kind === "skill") {
     leaveUrl =
       readme.status === "ready" && readme.pageUrl
@@ -162,10 +163,11 @@ export function IntroPage(props: IntroPageProps) {
     leaveText = t("market.leave.github");
   } else {
     // 与安装页同一条规则（mcpOrigin）：npm / PyPI 上的包指向包的说明页，其余指向主页；
-    // 都没有才退到源码仓库（2026-09-27 真人测试 DMC-3）
+    // 都没有才退到源码仓库（2026-09-27 真人测试 DMC-3）。离开键一律叫 `查看说明`（#276）
     const leave = mcpOrigin(props.item).leave;
     leaveUrl = leave?.url ?? props.item.repository ?? null;
-    leaveText = leave?.label ?? (leaveUrl ? leaveLabel(leaveUrl) : "");
+    leaveText = t("market.leave.docs");
+    leaveTip = leave?.tip ?? leaveUrl;
   }
 
   const action = installed ? (
@@ -204,10 +206,6 @@ export function IntroPage(props: IntroPageProps) {
       <>
         <span>{props.item.publisher}</span>
         <Dot />
-        <span className="intro__repo">
-          <Mono inherit>{mcpPackage(props.item.definition)}</Mono>
-        </span>
-        <Dot />
         <span>{mcpSourceLabel(props.item.source)}</span>
       </>
     );
@@ -233,9 +231,11 @@ export function IntroPage(props: IntroPageProps) {
             {leaveUrl ? (
               <>
                 <Dot />
-                <Button variant="quiet" inline onClick={() => open(leaveUrl)}>
-                  {leaveText}
-                </Button>
+                <Tooltip content={leaveTip ? <Mono inherit>{leaveTip}</Mono> : null}>
+                  <Button variant="quiet" inline onClick={() => open(leaveUrl)}>
+                    {leaveText}
+                  </Button>
+                </Tooltip>
               </>
             ) : null}
           </span>
@@ -264,7 +264,8 @@ function Dot() {
   );
 }
 
-/// MCP 来历下的两行事实：`连接方式` 与 `要填的`（键 12 ink-faint 定宽 72，值 13）
+/// MCP 来历下的两行事实：`运行方式` 与 `要填的`（键 12 ink-faint 定宽 72，值 13）。
+/// 运行方式只写 `本地运行` / `在线服务`，命令与地址进悬停（第二层，#276）
 function McpFacts({ item }: { item: McpRow }) {
   const conn = mcpConnection(item.definition);
   const fields = mcpFieldFacts(item);
@@ -273,13 +274,9 @@ function McpFacts({ item }: { item: McpRow }) {
       <div className="intro__fact">
         <dt>{t("market.intro.factConn")}</dt>
         <dd>
-          {conn.kind}
-          {conn.text ? (
-            <>
-              <Dot />
-              <Mono inherit>{conn.text}</Mono>
-            </>
-          ) : null}
+          <Tooltip content={conn.text ? <Mono inherit>{conn.text}</Mono> : null} focusable>
+            <span>{conn.kind}</span>
+          </Tooltip>
         </dd>
       </div>
       <div className="intro__fact">
@@ -291,7 +288,9 @@ function McpFacts({ item }: { item: McpRow }) {
             <span className="intro__fields">
               {fields.map((f) => (
                 <span key={f.key} className="intro__field">
-                  <Mono inherit>{f.key}</Mono>
+                  {/* 有说明用说明当名字、键名降成等宽小字；没有说明才写键名（#276） */}
+                  {f.keyed ? <Mono inherit>{f.label}</Mono> : <span>{f.label}</span>}
+                  {f.keyed ? null : <Mono>{f.key}</Mono>}
                   <Tag tone="weak">{f.note}</Tag>
                 </span>
               ))}

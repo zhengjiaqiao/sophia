@@ -298,7 +298,7 @@ export function FeedbackFamily() {
             mark={false}
             open
             stacked={1}
-            message="读了 Claude Code、Codex 的 skill 目录，找到 31 个 skill，没有改动任何文件。"
+            message="在 Claude Code、Codex 中找到 31 个 skill"
             onClose={noop}
           />
         </Specimen>

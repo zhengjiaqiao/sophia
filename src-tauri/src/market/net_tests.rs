@@ -327,3 +327,40 @@ fn fallback_serializes_reason_and_detail_in_camel_case() {
     assert!(json["reason"].is_null());
     assert!(json["detail"].is_null(), "没有原文就不带");
 }
+
+/// 市场的客户端按代理解析函数走（issue #254）：解析说走代理，请求就发到代理，带着完整地址
+#[test]
+fn market_client_goes_through_the_proxy_resolver() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy = reqwest::Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 4096];
+        let n = stream.read(&mut buf).unwrap_or(0);
+        let _ = tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+        );
+    });
+    let resolve: sophia_gateway::router::ProxyFn = Arc::new(move |url: &reqwest::Url| {
+        (url.host_str() == Some("skills.sophia.test")).then(|| proxy.clone())
+    });
+    let client = sophia_gateway::runtime::with_proxy(client_builder(), resolve)
+        .build()
+        .expect("测试 client");
+    let state = MarketState {
+        client: OnceLock::from(Ok(client)),
+        ..Default::default()
+    };
+    let _ = run(state.fetch_skills_at("http://skills.sophia.test/api/search", "react"));
+    let request = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("代理没收到请求");
+    assert!(
+        request.starts_with("GET http://skills.sophia.test/api/search?"),
+        "{request}"
+    );
+}

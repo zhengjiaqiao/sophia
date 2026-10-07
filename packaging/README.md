@@ -118,7 +118,8 @@ packaging/setup-tap-token.sh
 
 应用更新有两条线路（`src-tauri/tauri.conf.json` 的 `plugins.updater.endpoints`，按先后试）：GitHub 在前，
 腾讯云 COS 在后（`https://sophia-releases-1258113621.cos.ap-shanghai.myqcloud.com/latest.json`）。
-官网给国内访客的 `.dmg` 下载也指向 COS（Cloudflare Pages 的环境变量 `COS_BASE_URL` 配成桶的默认域名，不带路径；随 #187 托管一起配）。
+官网的下载键直链 COS 上固定文件名的最新版 `latest/Sophia_aarch64.dmg`、`latest/Sophia_x64.dmg`：每次同步时由
+`packaging/cos-manifest.mjs`（`LATEST_DMG`）列出、`.github/workflows/cos-sync.yml` 覆盖，页面不写版本号（#286）。
 桶建在上海地域、公有读，设了流量告警与每月预算。建桶、建只能上传的子账号、把密钥写进公开仓库，跑向导：
 
 ```sh

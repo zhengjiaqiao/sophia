@@ -5,11 +5,12 @@
 ///   - 产出的 HTML 没有残留 `{占位符}`（脚本与样式里的花括号不算）
 ///   - 所有产物里的外部域名都在白名单内（R22：不依赖境外 CDN）
 ///   - 每页带齐 hreflang（含 x-default）
+///   - 带子路径构建（GitHub Pages 的 /sophia/，#286）时，页面与样式里的站内地址都带上它
 ///   - 最低系统版本与 tauri.conf.json 一致、模型区的服务商数（「N 多家」）与预设一致（AC12）
 ///   - 关 JS 也能看到文案与下载链接（AC14）：STATIC_KEYS 里的句子与下载链接都在静态 HTML 里
 /// 后续票要加断言：往 `checkPage` 里加一条（有需要的数据放进 PageContext），或把键放进 STATIC_KEYS；
 /// 同时在 tests/check-site.test.ts 里加一条造错的用例。
-/// 用法：node scripts/check-site.ts [--dist dist] [--locales locales]
+/// 用法：node scripts/check-site.ts [--dist dist] [--locales locales]；子路径取自构建时同一个 SITE_URL（src/lib/siteUrl.ts）
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,6 +68,8 @@ export const STATIC_KEYS = [
 ];
 
 export interface PageContext {
+  /** 构建的子路径（`/` 或 `/sophia/`） */
+  base: string;
   minMacos: string;
   /** 这一页的语言里，STATIC_KEYS 对应的句子 */
   staticTexts: string[];
@@ -139,6 +142,21 @@ export function checkDomains(file: string, text: string): string[] {
     .map((h) => `${file}：白名单外的域名 ${h}`);
 }
 
+/// 站内地址（以单个 `/` 开头的 href、src、srcset 与样式里的 url()）没带子路径的逐个报：
+/// 部署在子路径下时它们会落到子路径之外，全是 404。不带子路径构建（base 为 `/`）时不用查
+export function checkBase(file: string, text: string, base: string): string[] {
+  if (base === "/") return [];
+  const urls = new Set<string>();
+  for (const m of text.matchAll(/\b(?:href|src|poster|action)=["'](\/[^"']*)/gi)) urls.add(m[1]);
+  for (const m of text.matchAll(/\bsrcset=["']([^"']*)/gi))
+    for (const part of m[1].split(",")) urls.add(part.trim().split(/\s+/)[0]);
+  for (const m of text.matchAll(/url\(\s*["']?(\/[^"')\s]*)/gi)) urls.add(m[1]);
+  return [...urls]
+    .filter((u) => u.startsWith("/") && !u.startsWith("//") && !u.startsWith(base))
+    .sort()
+    .map((u) => `${file}：站内地址 ${u} 没带子路径 ${base}`);
+}
+
 const decode = (s: string) =>
   s
     .replace(/&nbsp;|&#160;/g, " ")
@@ -155,6 +173,7 @@ export function checkPage(file: string, html: string, ctx: PageContext): string[
 
   for (const m of new Set(noCode.match(/\{[A-Za-z_][\w.-]*\}/g) ?? [])) problems.push(`${file}：残留占位符 ${m}`);
   problems.push(...checkDomains(file, html));
+  problems.push(...checkBase(file, html, ctx.base));
 
   for (const lang of [...LANGS.map((l) => l.hreflang), "x-default"])
     if (!new RegExp(`<link[^>]*hreflang="${lang}"`).test(html)) problems.push(`${file}：缺 hreflang ${lang}`);
@@ -165,7 +184,7 @@ export function checkPage(file: string, html: string, ctx: PageContext): string[
     if (!text.includes(decode(s))) problems.push(`${file}：静态 HTML 里没有文案「${s}」`);
   // R18：下载函数永远给最新版，页面上写了版本号发版后就会过时
   const version = text.replace(/<[^>]*>/g, " ").match(/(?<![\w.])v?\d+\.\d+\.\d+(?![\w.]*\d)/);
-  if (version) problems.push(`${file}：页面不应出现版本号（${version[0]}），下载交给 /download/mac`);
+  if (version) problems.push(`${file}：页面不应出现版本号（${version[0]}），下载键直链固定文件名的最新版`);
   for (const href of ctx.downloadHrefs)
     if (!noCode.includes(`href="${href}"`)) problems.push(`${file}：静态 HTML 里没有下载链接 ${href}`);
   if (!text.includes(decode(ctx.providerSub)))
@@ -183,7 +202,7 @@ function walk(dir: string): string[] {
 const readJson = (p: string) => JSON.parse(readFileSync(p, "utf8"));
 
 /// 整站检查：目录读进来、逐项过。返回问题列表，空就是通过
-export function checkSite(opts: { dist: string; locales: string }): string[] {
+export function checkSite(opts: { dist: string; locales: string; base: string }): string[] {
   const byLang: Record<string, Tree> = {};
   for (const { code } of LANGS) byLang[code] = readJson(join(opts.locales, `${code}.json`));
   const problems = checkCatalogs(byLang);
@@ -198,6 +217,7 @@ export function checkSite(opts: { dist: string; locales: string }): string[] {
     const flat = flattenCatalog(byLang[lang]);
     problems.push(
       ...checkPage(file, readFileSync(path, "utf8"), {
+        base: opts.base,
         minMacos: SITE.minMacos,
         staticTexts: STATIC_KEYS.map((k) => flat[k]).filter((v) => v !== undefined),
         downloadHrefs: SITE.downloadHrefs,
@@ -206,10 +226,12 @@ export function checkSite(opts: { dist: string; locales: string }): string[] {
       }),
     );
   }
-  // 其余产物（样式、脚本、SVG）只查域名
+  // 其余产物（样式、脚本、SVG）只查域名，样式另查子路径
   for (const p of walk(opts.dist)) {
     if (p.endsWith(".html") || !/\.(css|js|mjs|svg|json|xml|txt|webmanifest)$/.test(p)) continue;
-    problems.push(...checkDomains(relative(opts.dist, p), readFileSync(p, "utf8")));
+    const text = readFileSync(p, "utf8");
+    problems.push(...checkDomains(relative(opts.dist, p), text));
+    if (p.endsWith(".css")) problems.push(...checkBase(relative(opts.dist, p), text, opts.base));
   }
   return problems;
 }
@@ -224,6 +246,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const problems = checkSite({
     dist: resolve(arg("--dist", join(root, "dist"))),
     locales: resolve(arg("--locales", join(root, "locales"))),
+    base: SITE.base,
   });
   if (problems.length) {
     console.error(`官网构建检查失败（${problems.length} 项）：\n${problems.map((p) => `  - ${p}`).join("\n")}`);

@@ -203,6 +203,7 @@ pub fn execute_removal(plan: McpRemovalPlan, backups: &Path) -> McpReport {
             message: issue.message,
             backup_path: None,
             mirror_failed: None,
+            detail: None,
         });
     }
     // 同一个 .claude.json 里的 User / Local 必须一次备份、一次原子写
@@ -262,6 +263,7 @@ fn entry(
         message: message.into(),
         backup_path,
         mirror_failed: None,
+        detail: None,
     }
 }
 

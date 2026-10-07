@@ -37,7 +37,7 @@ export const USER_LOCATION: LocationKey = "global";
 export const CLAUDE_CODE = "claude-code";
 export const CLAUDE_DESKTOP = "claude-desktop";
 
-/// 能写 MCP 的 agent（DESIGN「MCP 支持哪些 agent」，2026-09-27 起六家）。其余的 agent 不出现在 `写进哪些 agent` 里
+/// 能写 MCP 的 agent（DESIGN「MCP 支持哪些 agent」，2026-09-27 起六家）。其余的 agent 不出现在 MCP 的 `给谁用` 里
 export const MCP_AGENT_IDS: ReadonlySet<string> = new Set([
   "claude-code",
   "codex",
@@ -98,20 +98,19 @@ export function placeName(key: LocationKey, labelOf?: (key: LocationKey) => stri
   return labelOf?.(key) ?? dirName(project);
 }
 
-/// 位置胶囊下一行的三段：`装到` + 落点（等宽）+ `多数 agent 直接读这里`
+/// 位置胶囊下面两行（画板第 6 屏，#275）：先一句结果（13 `ink`）——用户级 `所有项目都能用`、项目
+/// `只在 CardBox 中能用`；再一行落点路径（等宽 12 `ink-faint`，常显：安装是往磁盘写文件，点之前要看得到落点）。
+/// `labelOf` 给了就用它取项目名（同名项目按筛选行的区分写法）
 export function landingParts(
   key: LocationKey,
   name: string | null,
-): { path: string; note: string } {
-  // 路径已经写在前面（`~/.agents/skills/pdf`），这一句只说它是什么：多数 agent 直接读这里
-  const note = t("market.install.storeNote");
-  return { path: landingPath(key, name), note };
-}
-
-/// 位置胶囊下一行（12 `ink-faint`，落点等宽）：`装到 ~/.agents/skills/pdf · 多数 agent 直接读这里`
-export function landingLine(key: LocationKey, name: string | null): string {
-  const { path, note } = landingParts(key, name);
-  return t("market.install.landingLine", { path, note });
+  labelOf?: (key: LocationKey) => string | undefined,
+): { result: string; path: string } {
+  const result =
+    projectPathOf(key) === null
+      ? t("market.install.landingUser")
+      : tSpaced("market.install.landingProject", { project: placeName(key, labelOf) });
+  return { result, path: landingPath(key, name) };
 }
 
 /// 悬停项目胶囊的提示框：这个位置的完整落点（完整路径，不写 `~`）
@@ -120,7 +119,7 @@ export function landingTip(projectPath: string, name: string | null): string {
   return `${projectPath.replace(/[\\/]+$/, "")}/.agents/skills/${shown}`;
 }
 
-// ───────────────────────── 给谁用 / 写进哪些 agent ─────────────────────────
+// ───────────────────────── 给谁用 ─────────────────────────
 
 /// 勾选行列哪些 agent、按什么先后（画板 06 / 09）：设置里 `显示的 agent` 在前（按名单的先后），
 /// 其余已安装的在后（按 agent 表的先后）。MCP 只列能写 MCP 的，Claude Desktop 不进名单、
@@ -180,16 +179,25 @@ export function skillRowView(
 }
 
 /// 勾选行（MCP）的样子：一个都写不过去的不能勾、就地说原因；部分写不过去的能勾、说清只写哪几个；
-/// 已有一样的照样能勾、说会跳过；勾上的再说生效时机（`重启 Claude Desktop 后生效`）
+/// 已有一样的照样能勾、说会跳过；勾上的再说生效时机（`重启 Claude Desktop 后生效`）。
+/// 能勾的行带上这个位置的配置文件（主目录写 `~`）：悬停这一行出 `写入 ~/.codex/config.toml`（#276，第二层）
 export interface McpRowView {
   disabledReason?: string;
   note?: string;
+  path?: string;
 }
 
 export const sameNote = () => t("market.mcp.sameNote");
 
 export function mcpRowView(check: McpTargetCheck | undefined, checked: boolean): McpRowView {
   if (!check) return {};
+  const view = mcpRowState(check, checked);
+  return check.configPath && view.disabledReason === undefined
+    ? { ...view, path: displayPath(check.configPath) }
+    : view;
+}
+
+function mcpRowState(check: McpTargetCheck, checked: boolean): McpRowView {
   switch (check.status) {
     case "blocked": {
       const reason = check.reason ?? t("market.mcp.cannotWrite");
@@ -206,7 +214,7 @@ export function mcpRowView(check: McpTargetCheck | undefined, checked: boolean):
   }
 }
 
-/// 勾上的里面真会写的（能写或部分能写）有几个：贴底 `写进 K 个配置文件`
+/// 勾上的里面真会写的（能写或部分能写）有几个：一个都没有时 `安装` 不能按
 export function writableCount(
   checks: ReadonlyArray<McpTargetCheck> | null,
   checked: ReadonlyArray<string>,
@@ -219,7 +227,7 @@ export function writableCount(
 
 /// 密钥提醒（S19）：勾着、写得过去的 agent 里要把像密钥的值写进 git 仓库里的项目文件（`remind`）的那几个文件
 /// （在项目根 `.gitignore` 里会加的行，按检查结果的先后、去重）。非空就出默认不勾的「同时加进 .gitignore」，
-/// 放在 `要填的` 最后（没有那一块时放在 `写进哪些 agent` 最后）。检查没回来先不出
+/// 放在 `要填的` 最后（没有那一块时放在 `给谁用` 最后）。检查没回来先不出
 export function mcpKeyHint(
   checks: ReadonlyArray<McpTargetCheck> | null,
   checked: ReadonlyArray<string>,
@@ -276,25 +284,6 @@ export function keyHintTip(files: ReadonlyArray<string>, project: string): strin
     : tSpaced("market.install.gitignoreTipMany", params);
 }
 
-export const configFilesLine = (k: number) => tn("market.mcp.configFiles", k);
-
-/// 贴底那一句拆成几段：只有地址、分支、大小这类 ASCII 读数走等宽，汉字与它们之间的空格走正文字族。
-/// 整句等宽时，等宽字族里的半角空格夹在汉字中间显得像两个空格（`写进  3  个配置文件`）
-export function footRuns(line: string): { text: string; mono: boolean }[] {
-  const out: { text: string; mono: boolean }[] = [];
-  // 一段读数：不含空格的 ASCII 词，词与词之间只隔一个空格（`2.1 MB`）
-  const re = /[!-~]+(?: [!-~]+)*/g;
-  let at = 0;
-  for (const m of line.matchAll(re)) {
-    const i = m.index ?? 0;
-    if (i > at) out.push({ text: line.slice(at, i), mono: false });
-    out.push({ text: m[0], mono: true });
-    at = i + m[0].length;
-  }
-  if (at < line.length) out.push({ text: line.slice(at), mono: false });
-  return out;
-}
-
 // ───────────────────────── 贴底 ─────────────────────────
 
 /// 大小：按 1000 进（与访达一致），一位小数：`2.1 MB` `850 KB` `320 B`
@@ -330,14 +319,22 @@ export interface DownloadSource {
   branch?: string | null;
 }
 
-/// 贴底左边一句（skill）：`从 codeload.github.com 下载 · main · 2.1 MB`。计划还没回来时只写已知的
-export function downloadLine(source: DownloadSource | null, branch: string | null): string {
-  const host = source ? hostOf(source.downloadUrl) : null;
-  const parts = [t("market.install.download", { host: host ?? "codeload.github.com" })];
-  const b = (source?.branch || null) ?? (source ? branchOfUrl(source.downloadUrl) : null) ?? branch;
-  if (b) parts.push(b);
+/// 贴底左边一句（skill，#275）：`从 GitHub 下载 · 2.1 MB`。大小在计划回来之前不知道，先只写前半句
+export function downloadLine(source: DownloadSource | null): string {
+  const parts = [t("market.install.download")];
   if (source?.sizeBytes != null) parts.push(formatSize(source.sizeBytes));
   return parts.join(" · ");
+}
+
+/// 悬停贴底那一句（第二层）：下载地址的主机名与分支（`codeload.github.com · 分支 main`，两样都等宽）。
+/// 分支：计划给的 → 下载地址里认的 → 调用方知道的；都不知道时只给主机名
+export function downloadTip(
+  source: DownloadSource | null,
+  branch: string | null,
+): { host: string; branch: string | null } {
+  const host = (source ? hostOf(source.downloadUrl) : null) ?? "codeload.github.com";
+  const b = (source?.branch || null) ?? (source ? branchOfUrl(source.downloadUrl) : null) ?? branch;
+  return { host, branch: b };
 }
 
 // ───────────────────────── 主动作的禁用原因 ─────────────────────────
@@ -389,7 +386,7 @@ export function mcpInstallBlock(input: {
   if (unnamed >= 0) return t("market.mcp.needName");
   if (input.checked.length === 0) return noAgent();
   const missing = input.fields.find((f) => f.required && !filled(input.values, f.key));
-  if (missing) return t("market.mcp.needField", { key: missing.key });
+  if (missing) return tSpaced("market.mcp.needField", { label: fieldText(missing).label });
   if (input.checks && writableCount(input.checks, input.checked) === 0) {
     const same = input.checks.some(
       (c) => input.checked.includes(c.harnessId) && c.status === "same",
@@ -556,7 +553,7 @@ export function commandText(def: Pick<McpDefinitionInput, "command" | "args">): 
   return [def.command ?? "", ...(def.args ?? []).map(quote)].filter((x) => x !== "").join(" ");
 }
 
-/// 连接方式：`远程 · https://…` / `本机命令 · npx -y …`
+/// 运行方式（#276）：`本地运行` + 命令 / `在线服务` + 地址。第一层只写前半，命令与地址进悬停
 export function connectionParts(def: McpDefinitionInput): { kind: string; value: string } {
   if (def.transport === "stdio") {
     return { kind: t("market.mcp.connLocal"), value: commandText(def) };
@@ -591,6 +588,23 @@ export function placeholderFields(defs: ReadonlyArray<McpDefinitionInput>): McpF
     for (const a of def.args ?? []) add(a, "arg");
   }
   return out;
+}
+
+/// `要填的` 一项给人看的写法（#276）：目录里的说明写成「标签，怎么取得」（`GitHub 访问令牌，在
+/// github.com/settings/personal-access-tokens 生成`）——逗号前当标签，逗号后是常显在输入框下的一句；
+/// 没有逗号时整句当标签、框下不写；没有说明时退回键名（`keyed` 为真：标签本身就是键名，不再另写一遍）。
+/// 只认全角逗号：官方目录的英文说明不拆
+export function fieldText(field: Pick<McpFieldSpec, "key" | "description">): {
+  label: string;
+  help: string | null;
+  keyed: boolean;
+} {
+  const description = (field.description ?? "").trim();
+  if (description === "") return { label: field.key, help: null, keyed: true };
+  const cut = description.indexOf("\uff0c");
+  if (cut <= 0) return { label: description, help: null, keyed: false };
+  const help = description.slice(cut + 1).trim();
+  return { label: description.slice(0, cut).trim(), help: help === "" ? null : help, keyed: false };
 }
 
 /// `要填的` 键名下那一行：`必填 · 密钥` / `必填` / `密钥` / `选填`
@@ -630,31 +644,21 @@ export function packageOf(
   return null;
 }
 
-/// 安装 MCP 的来历一行（R10）：发布方 · 包名或地址 + 离开键（`npm 上的说明 ↗` 等）
+/// 安装 MCP 的来历一行（R10；#276）：发布方 + 离开键 `查看说明 ↗`（npm / PyPI 上的包指向包的说明页，其余指向主页）。
+/// 包名不在这一行上写，进离开键的悬停（`tip`：包名；指向主页时是主页地址）
 export function mcpOrigin(entry: Pick<McpCatalogEntry, "publisher" | "definition" | "homepage">): {
   publisher: string;
-  ident: string;
-  leave: { label: string; url: string } | null;
+  leave: { label: string; url: string; tip: string } | null;
 } {
   const pkg = packageOf(entry.definition);
-  const ident =
-    pkg?.name ??
-    (entry.definition.transport === "stdio"
-      ? commandText(entry.definition)
-      : (entry.definition.url ?? ""));
-  let leave: { label: string; url: string } | null = null;
-  if (pkg?.registry === "npm") {
-    leave = { label: t("market.leave.npm"), url: `https://www.npmjs.com/package/${pkg.name}` };
-  } else if (pkg?.registry === "pypi") {
-    leave = { label: t("market.leave.pypi"), url: `https://pypi.org/project/${pkg.name}/` };
-  } else if (entry.homepage) {
-    const host = hostOf(entry.homepage) ?? "";
-    leave = {
-      label: isGithubHost(host) ? t("market.leave.github") : t("market.leave.homepage"),
-      url: entry.homepage,
-    };
-  }
-  return { publisher: entry.publisher, ident, leave };
+  let url: string | null = null;
+  if (pkg?.registry === "npm") url = `https://www.npmjs.com/package/${pkg.name}`;
+  else if (pkg?.registry === "pypi") url = `https://pypi.org/project/${pkg.name}/`;
+  else if (entry.homepage) url = entry.homepage;
+  const leave = url
+    ? { label: t("market.leave.docs"), url, tip: pkg && pkg.registry !== "oci" ? pkg.name : url }
+    : null;
+  return { publisher: entry.publisher, leave };
 }
 
 // ───────────────────────── 装完那一窗 ─────────────────────────
@@ -673,8 +677,11 @@ export function notLinkedReason(
     byReason.set(u.reason, names);
   }
   if (byReason.size === 0) return undefined;
+  // 分不出原因（core 给空串）只写主句，不带冒号与后半句
   const parts = [...byReason].map(([reason, names]) =>
-    t("market.toast.notLinked", { agents: listText(names), reason }),
+    reason
+      ? t("market.toast.notLinked", { agents: listText(names), reason })
+      : t("market.toast.notLinkedPlain", { agents: listText(names) }),
   );
   return listText(parts, "semicolon");
 }
@@ -769,8 +776,8 @@ export function skillHandleTarget(
   return first ? { domainKey: location, skill: first.name } : null;
 }
 
-/// 写 MCP 之后那一窗（R10）：`✓ 已写进 [图标…] brave-search` + `撤销`，第一批三家接生效时机；
-/// 已有一样的跳过、不算失败；有写不进的是部分失败，全没写进是 `⊘ … 写进 [图标…] 失败`。
+/// 加 MCP 之后那一窗（R10；#276）：`✓ 已加到 [图标…] brave-search` + `撤销`，第一批三家接生效时机；
+/// 已有一样的跳过、不算失败；有加不上的是部分失败，全没加上是 `⊘ brave-search 添加失败`。
 /// `checks` 用来把报告里的位置 id 对回 agent（图标）
 export function mcpInstalledToast(
   report: McpReport,
@@ -798,7 +805,7 @@ export function mcpInstalledToast(
     return {
       tier: "notice",
       kind: "cannot",
-      sentence: "market.toast.writeCannot",
+      sentence: "market.toast.addCannot",
       names: uniq(failed.map((e) => e.name)),
       agents: agentsOf(failed.map((e) => ({ name: e.name, agent: agentOf(e.targetId) }))),
       reason: failed[0].message,
@@ -811,7 +818,7 @@ export function mcpInstalledToast(
     return {
       tier: "notice",
       kind: "partial",
-      sentence: "market.toast.writePartial",
+      sentence: "market.toast.addPartial",
       names: uniq(done.map((d) => d.name)),
       agents: agentsOf(done),
       reason: withGitignore(failed[0].message),
@@ -824,7 +831,7 @@ export function mcpInstalledToast(
   return {
     tier: "routine",
     kind: "success",
-    sentence: "market.toast.writeDone",
+    sentence: "market.toast.addDone",
     names: uniq(done.map((d) => d.name)),
     agents: agentsOf(done),
     ...(trail.length > 0 ? { trail } : {}),

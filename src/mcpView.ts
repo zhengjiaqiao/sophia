@@ -7,6 +7,7 @@ import {
   type McpDotState,
 } from "./mcpCellState.ts";
 import { shortPath } from "./pathText.ts";
+import type { AppFault } from "./backendError.ts";
 import type {
   McpCell,
   McpDiff,
@@ -327,6 +328,42 @@ export function mcpLocationSentence(l: { id: string; label: string; harnessId: s
   return l.label.split(" · ")[0];
 }
 
+/// 一个配置位置是哪个 agent（格子原因句、提示条的 agent 图标）：位置名里 agent 那一段（`Claude Code`），
+/// 不带 core 给的英文作用域（`Claude Code · User MCPs`，spec #239 第 42 条）
+export const mcpAgentName = (l: { label: string }): string => l.label.split(" · ")[0];
+
+/// 一条写入 / 删除结果在提示条里能说的原因：分不出原因的（core 给了原文 `detail`）不说，只写失败句（spec #239 第 43 条，
+/// DESIGN「文案表达 › 出错的时候」）——`原子写入失败` 这类兜底句与系统原文不进提示条，原文已进日志
+export const mcpEntryReason = (entry: { message: string; detail?: string }): string | undefined =>
+  entry.detail === undefined && entry.message !== "" ? entry.message : undefined;
+
+/// 批量写入里没写成的那一处：`加到 Codex 失败 · 没有写入权限，没动`；分不出原因时只写 `加到 Codex 失败`
+export function mcpFailedAt(location: string, entry: { message: string; detail?: string }): string {
+  const message = mcpEntryReason(entry);
+  return message === undefined
+    ? t("mcp.write.failedAtPlain", { location })
+    : t("mcp.write.failedAt", { location, message });
+}
+
+/// 写入的命令本身出错（不是某一处没写成）时交给窗口顶上横幅的那一条（spec #239 第 43 条）：后端给的是没有
+/// `[code]` 前缀的原文时，一句换成该处的失败句（`加到 Codex 失败`），原文连同要写的文件完整路径进「!」；
+/// 后端已经分好两层的原样交给横幅
+export function mcpWriteFault(error: string, sentence: string, paths: readonly string[]): AppFault {
+  if (/^\[[a-z_]+]/.test(error)) return { text: error };
+  return { text: [error, ...paths].join("\n"), fallback: sentence };
+}
+
+/// ⊘ 格的提示框（spec #239 第 44 条）：第一行说人话，第二行写具体原因（SSE 传输、`${…}` 变量、字段名，
+/// core 按目标 agent 给的那一句）。联网的 MCP 进不了 Claude Desktop 的配置文件：第一行直接说去哪加，不再要第二行
+export function mcpBlockedTip(
+  view: { reason?: string; reasonKind?: McpReasonKind },
+  target: string,
+): { tip: string; detail?: string } {
+  if (view.reasonKind === "desktopRemote") return { tip: t("mcp.cell.desktopRemote") };
+  const tip = t("mcp.batch.cantWrite", { target });
+  return view.reason ? { tip, detail: view.reason } : { tip };
+}
+
 /// Claude Code 两格互斥（R4）：这一列在同一个位置里的另一格；别的列没有
 export const claudeSibling = (columnId: string): string | null =>
   columnId === CLAUDE_SELF ? CLAUDE_TEAM : columnId === CLAUDE_TEAM ? CLAUDE_SELF : null;
@@ -578,12 +615,16 @@ export function mcpColumnNote(
 export function mcpBlankTip(
   place: string,
   column: Pick<McpColumn, "id" | "harnessId" | "sentence">,
-): string {
+): { tip: string; detail?: string } {
   if (column.harnessId === "claude-desktop")
-    return t("mcp.blank.noProjectLevel", { agent: "Claude Desktop" });
-  // 用户级本来就只给自己：团队共享只在项目里（项目的 .mcp.json）
-  if (column.id === CLAUDE_TEAM) return t("mcp.blank.teamProjectOnly", { file: ".mcp.json" });
-  return t("mcp.blank.noLocation", { place, column: column.sentence });
+    return { tip: t("mcp.blank.noProjectLevel", { agent: "Claude Desktop" }) };
+  // 用户级本来就只给自己：团队共享只在项目里；写在哪个文件是第二行（spec #239 第 44 条）
+  if (column.id === CLAUDE_TEAM)
+    return {
+      tip: t("mcp.blank.teamProjectOnly"),
+      detail: t("mcp.blank.teamProjectFile", { file: ".mcp.json" }),
+    };
+  return { tip: t("mcp.blank.noLocation", { place, column: column.sentence }) };
 }
 
 // ===== 修改生效范围：移动或复制整行（spec 2026-09-30-mcp-config-scope R3 R4）=====
@@ -755,7 +796,7 @@ export function scopeAgentOptions(
         ? t("mcp.scope.weiboapOnly", { agent: "WeiboAP" })
         : !reach
           ? column === CLAUDE_TEAM
-            ? t("mcp.blank.teamProjectOnly", { file: ".mcp.json" })
+            ? t("mcp.blank.teamProjectOnly")
             : toGlobal
               ? t("mcp.scope.noUserLevel")
               : t("mcp.scope.noProjectLevel")

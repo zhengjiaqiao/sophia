@@ -1,27 +1,27 @@
-/// 安装 MCP（spec R10，画板 09；DESIGN「发现与安装 › 安装页」）：骨架同安装 skill。
+/// 安装 MCP（spec R10，画板 09；#276 画板第 7 屏；DESIGN「发现与安装 › 安装页」）：骨架同安装 skill。
 ///
 /// ```
 /// ←  安装 brave-search
-/// Brave · @modelcontextprotocol/server-brave-search   npm 上的说明 ↗
-/// 本机命令 · npx -y @modelcontextprotocol/server-brave-search
-/// 位置 ─────────────────────────────────────────────
+/// Brave · 查看说明 ↗                                  （悬停：@modelcontextprotocol/server-brave-search）
+/// 本地运行                                            （悬停：npx -y @modelcontextprotocol/server-brave-search）
+/// 生效范围 ─────────────────────────────────────────
 /// [用户级] [CardBox] [更多 ˅]
-/// 写进哪些 agent ───────────────────────────────────
+/// 给谁用 ───────────────────────────────────────────
 /// ☑ ✳ Claude Code             ☐ ⎔ Codex  Codex 里已经有一个不一样的 brave-search
-/// ☑ ✳ Claude Desktop  重启 Claude Desktop 后生效
+/// ☑ ✳ Claude Desktop  重启 Claude Desktop 后生效      （悬停能勾的一行：写入 <配置文件>）
 /// 要填的 ───────────────────────────────────────────
-/// BRAVE_API_KEY         [••••••••••••••••••        👁]
-/// 必填 · 密钥
-/// 只写进勾选的 agent 的配置文件，Sophia 自己不存
+/// Brave Search API key  [••••••••••••••••••        👁]
+/// 必填 · 密钥 BRAVE_API_KEY   在 brave.com/search/api 申请
+/// 密钥只保存在所选 agent 中，Sophia 不保留
 /// ═══════════════════════════════════════════════ 贴底
-/// 写进 3 个配置文件                                   [取消] [安装]
+///                                                     [取消] [安装]
 /// ```
 ///
-/// 写进哪些 agent：默认勾名单里能写 MCP 的，Claude Desktop 跟着 Claude Code，记住上次；一个都写不过去的不能勾、
+/// 给谁用：默认勾名单里能写 MCP 的，Claude Desktop 跟着 Claude Code；一个都加不上的不能勾、
 /// 就地说原因；已有一样的跳过、不算失败。要填的值只进这一次写入，不进 Sophia 的设置与日志
 import { t } from "../i18n.ts";
 import type { McpReport, McpCatalogEntry } from "../types.ts";
-import { Mono, PushedPage } from "../ui/index.ts";
+import { Mono, PushedPage, Tooltip } from "../ui/index.ts";
 import type { InstalledNotice } from "./InstalledToast.tsx";
 import {
   AgentChecks,
@@ -35,18 +35,18 @@ import {
   PlaceBlock,
 } from "./InstallParts.tsx";
 import { useInstallFrame, type InstallPageBase } from "./InstallPage.tsx";
-import { configFilesLine, connectionParts, installLabel, mcpOrigin } from "./installView.ts";
+import { connectionParts, installLabel, mcpOrigin } from "./installView.ts";
 import { marketService } from "./service.ts";
 import { useMcpInstall } from "./useInstall.ts";
 
 export interface McpInstallPageProps extends InstallPageBase {
   /// 精选或官方目录的一项
   entry: McpCatalogEntry;
-  /// 写进了（至少一处）：报告 + 右下那一窗（`✓ 已写进 [图标…] brave-search` + `撤销`）
+  /// 加上了（至少一处）：报告 + 右下那一窗（`✓ 已加到 [图标…] brave-search` + `撤销`）
   onDone: (report: McpReport, notice: InstalledNotice) => void;
 }
 
-/// 远程 OAuth 的：写进去之后还要在浏览器里登录一次（发现列表上写的是 `需要登录`）
+/// 远程 OAuth 的：加上之后还要在浏览器里登录一次（发现列表上写的是 `需要登录`）
 export const signInNote = () => t("market.mcp.signInNote");
 
 const FACE = () => document.querySelector(".face");
@@ -65,7 +65,7 @@ export function McpInstallPage(props: McpInstallPageProps) {
     agents: props.agents,
     shown: props.shown,
   });
-  // 「同时加进 .gitignore」：有「要填的」时放在那一块最后，没有时放在「写进哪些 agent」最后
+  // 「同时加进 .gitignore」：有「要填的」时放在那一块最后，没有时放在「给谁用」最后
   const gitignore =
     state.keyHint !== null || state.keyTracked !== null ? (
       <KeyHintBlock
@@ -92,11 +92,10 @@ export function McpInstallPage(props: McpInstallPageProps) {
       escape={props.escape}
       footer={
         <InstallFooter
-          line={configFilesLine(state.files)}
           label={installLabel(1)}
           block={state.block}
           busy={state.busy}
-          busyLabel={t("market.busy.writing")}
+          busyLabel={t("market.busy.adding")}
           failure={state.failure}
           onDismissFailure={state.dismissFailure}
           onCancel={page.leave}
@@ -106,22 +105,29 @@ export function McpInstallPage(props: McpInstallPageProps) {
     >
       <InstallScroll>
         <OriginLine
-          parts={[{ text: origin.publisher }, { text: origin.ident, mono: true, strong: true }]}
+          parts={[{ text: origin.publisher }]}
           leave={
             origin.leave
-              ? { label: origin.leave.label, onClick: () => service.openUrl(origin.leave!.url) }
+              ? {
+                  label: origin.leave.label,
+                  tip: <Mono inherit>{origin.leave.tip}</Mono>,
+                  onClick: () => service.openUrl(origin.leave!.url),
+                }
               : null
           }
         />
         <p className="install-lede">
-          {connection.kind}&nbsp;·&nbsp;
-          <span className="install-lede__mono">
-            <Mono inherit>{connection.value}</Mono>
-          </span>
+          {/* 运行方式只写 `本地运行` / `在线服务`，命令与地址进悬停（第二层，#276） */}
+          <Tooltip
+            content={connection.value ? <Mono inherit>{connection.value}</Mono> : null}
+            focusable
+          >
+            <span>{connection.kind}</span>
+          </Tooltip>
           {entry.signIn ? <>&nbsp;·&nbsp;{signInNote()}</> : null}
         </p>
         <PlaceBlock places={props.places} value={state.location} onChange={state.setLocation} />
-        <InstallBlock label={t("market.install.blockAgents")}>
+        <InstallBlock label={t("market.install.blockWho")}>
           <AgentChecks
             rows={state.rows}
             checked={state.checked}

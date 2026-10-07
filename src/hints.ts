@@ -29,15 +29,17 @@ export interface HintContext {
   agents: readonly string[];
   /// 表里的 skill 数（＝列头 `名称 N`）
   skills: number;
+  /// 这一轮查找过的文件夹（完整路径，主目录写 `~`）：首次扫描那条的悬停里列出
+  folders?: readonly string[];
 }
 
-/// 「读了」后面的 agent 名单：没有有目录的 agent 时句子改写「本机的」，见 hints.firstScan.*Local
+/// 句子里的 agent 名单：没有有目录的 agent 时句子改写「本机」，见 hints.firstScan.*Local
 const agentList = (agents: readonly string[]) => listText(agents, "enum");
 
-/// 今天的四条（DESIGN「新手提示条：今天的四条」）。句子只说用户此刻不确定的事——刚才做了什么、动没动我的文件、
-/// 点下去会发生什么——不复述界面上看得见的东西（⑧ 文字提供确定性；2026-09-25 产品负责人真机：
-/// 「不应该写显而易见的事情，应该提示的是让用户感到不确定的东西」）。**一行、只说结果**（2026-09-25 评审
-/// 第二轮）：机制（配置文件路径）留给需要据此判断的人去悬停看。以后加新的，同一个组件、同一套规则，
+/// 今天的四条（DESIGN「新手提示条：今天的四条」）。**一行、只说结果**（2026-09-25 评审第二轮）：
+/// 首次扫描只说找到了什么（`在 Claude Code、Codex 中找到 12 个 skill`），不讲「读了 skill 目录」这种机制，
+/// 也不写「没有改动任何文件」这种用户没担心过的话（DESIGN「文案表达 › 说多少」，#274）；
+/// 查找过的文件夹留给要核对的人去悬停看（`firstScanHint`）。以后加新的，同一个组件、同一套规则，
 /// 并在 DESIGN 的表里登记
 export const HINTS: Record<HintId, (ctx: HintContext) => string> = {
   "first-scan-skills": ({ agents, skills }) =>
@@ -52,6 +54,34 @@ export const HINTS: Record<HintId, (ctx: HintContext) => string> = {
   "mcp-opencode": () => t("hints.mcpOpenCode"),
 };
 
+export type FirstScanId = "first-scan-skills" | "first-scan-empty";
+
+/// 首次扫描那一条提示条上的全部内容（DESIGN「新手提示条」，#274）
+export interface FirstScanHint {
+  id: FirstScanId;
+  /// 说明句：只说结果
+  message: string;
+  /// 悬停：小标 `已查找的文件夹` + 完整路径（第二层，给要核对的人）
+  tip: { title: string; folders: readonly string[] };
+  /// 空库那条带一颗 `前往发现`（键上的字；切到「发现」页签）。有 skill 时没有键
+  discover: string | null;
+}
+
+/// 首次扫描该出哪一条、写什么：表里有 skill 时说找到几个，一个都没有时只说还没有，并给 `前往发现`——
+/// 下一步由键说，句子不再说「可以到发现里装一个」（DESIGN「文案表达 › 键已经说清的，句子不再说」）。
+/// 不给 `id` 时按 `skills` 选
+export function firstScanHint(
+  ctx: HintContext,
+  id: FirstScanId = ctx.skills > 0 ? "first-scan-skills" : "first-scan-empty",
+): FirstScanHint {
+  return {
+    id,
+    message: HINTS[id](ctx),
+    tip: { title: t("hints.firstScan.searched"), folders: ctx.folders ?? [] },
+    discover: id === "first-scan-empty" ? t("skills.empty.goDiscover") : null,
+  };
+}
+
 /// 首次扫描那两条互斥：关掉其中一条，两条都记看过
 const FIRST_SCAN: readonly HintId[] = ["first-scan-skills", "first-scan-empty"];
 
@@ -61,7 +91,7 @@ export function dismissIds(id: HintId): HintId[] {
 }
 
 /// 学会这一条要记哪些 id：只记它自己。例外是空库那条：它教的是加来源，加过来源两条首次扫描都记看过——
-/// `first-scan-skills` 说「自动读了、没改动任何文件」，刚加完来源再出既重复 `✓ 已添加` 又不实
+/// `first-scan-skills` 说扫描找到了几个，刚加完来源再出就重复了角上的 `✓ 已添加`
 /// （2026-09-30 产品负责人真机；原来「教点格子那条还会出一次」）
 export function learnIds(id: HintId): HintId[] {
   return id === "first-scan-empty" ? [...FIRST_SCAN] : [id];

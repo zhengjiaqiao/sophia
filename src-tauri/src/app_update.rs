@@ -6,6 +6,7 @@
 //! 所以这里一条线路建一个更新器。验签仍是插件做，签名里要写着版本号（`tauri.conf.json` 的 `requireSignedVersion`）。
 
 use crate::net_kind::{self, NetKind, NetProblem};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::ipc::Channel;
@@ -14,11 +15,15 @@ use tauri_plugin_updater::{Update, Updater, UpdaterExt};
 
 /// 每一步的时限。连接是「GitHub 不通几秒内换线路」的那一道（DNS 被污染、被重置是立刻失败，被丢包要等它）；
 /// 查清单另有总时限（连上了但迟迟不回）；下载不设总时限（包有几 MB，慢网要下一阵），只限「多久没收到一个字节」。
+/// 下载还测速（issue #284）：不是最后一条线路时，一段 `slow_span` 里平均不到 `slow_rate`（字节/秒）就换下一条——
+/// 国内直连 GitHub 常是连得上、一直有数据但很慢。
 /// `direct` 只给测试：本机假服务器不该经过系统代理
 pub(crate) struct Limits {
     connect: Duration,
     check: Duration,
     read: Duration,
+    slow_span: Duration,
+    slow_rate: u64,
     direct: bool,
 }
 
@@ -26,6 +31,8 @@ const LIMITS: Limits = Limits {
     connect: Duration::from_secs(5),
     check: Duration::from_secs(10),
     read: Duration::from_secs(20),
+    slow_span: Duration::from_secs(15),
+    slow_rate: 200 * 1024,
     direct: false,
 };
 
@@ -59,18 +66,21 @@ fn updater_on<R: Runtime>(
     line: &Url,
     limits: &Limits,
 ) -> tauri_plugin_updater::Result<Updater> {
-    let (connect, read) = (limits.connect, limits.read);
+    let (connect, read, direct) = (limits.connect, limits.read, limits.direct);
     let builder = app
         .updater_builder()
         .endpoints(vec![line.clone()])?
         .timeout(limits.check)
-        // 插件把这一步也用在下载上（查到的 `Update` 带着同一份设置）
-        .configure_client(move |client| client.connect_timeout(connect).read_timeout(read));
-    if limits.direct {
-        builder.no_proxy().build()
-    } else {
-        builder.build()
-    }
+        // 插件把这一步也用在下载上（查到的 `Update` 带着同一份设置）；代理与市场同一个解析（issue #254）
+        .configure_client(move |client| {
+            let client = client.connect_timeout(connect).read_timeout(read);
+            if direct {
+                client.no_proxy()
+            } else {
+                sophia_gateway::runtime::follow_system_proxy(client)
+            }
+        });
+    builder.build()
 }
 
 /// 在一条线路上查清单
@@ -105,6 +115,7 @@ pub(crate) async fn check<R: Runtime>(
 
 /// 下载查到的那一版并验签：先从查到它的那条线路下；不成就到后面的线路上重查清单、从那里下，
 /// 那条线路给的必须是同一版（界面上说的就是这一版）。签名每条线路都照样验。都失败时按国内线路那条归类。
+/// 不是最后一条线路时还测速，太慢也换下一条（原因记进原文，「!」里看得到）。
 /// 进度（百分比，拿不到总大小时为 None）换线路时从头算
 pub(crate) async fn download<R: Runtime>(
     app: &AppHandle<R>,
@@ -138,21 +149,57 @@ pub(crate) async fn download<R: Runtime>(
                 }
             }
         };
-        let mut got: u64 = 0;
+        let got = AtomicU64::new(0);
         let progress = |chunk: usize, total: Option<u64>| {
-            got += chunk as u64;
+            let got = got.fetch_add(chunk as u64, Ordering::Relaxed) + chunk as u64;
             on_progress(
                 total
                     .filter(|t| *t > 0)
                     .map(|t| (got.saturating_mul(100) / t).min(100) as u8),
             );
         };
-        match update.download(progress, || {}).await {
+        let downloading = update.download(progress, || {});
+        // 最后一条线路没有下一条可换：慢也下完，只按原有的时限判断成败
+        let finished = if line + 1 == lines.len() {
+            downloading.await
+        } else {
+            tokio::select! {
+                // 先看下载：恰好在测完一段时下完的，不算慢
+                biased;
+                finished = downloading => finished,
+                rate = too_slow(&got, limits) => {
+                    tried.push(NetProblem {
+                        kind: NetKind::Timeout,
+                        detail: format!(
+                            "{}\ndownload too slow (averaged {} KB/s over {} s), moved on to the next line",
+                            sophia_core::redact::redact(update.download_url.as_str()),
+                            rate / 1024,
+                            limits.slow_span.as_secs_f32()
+                        ),
+                    });
+                    continue;
+                }
+            }
+        };
+        match finished {
             Ok(bytes) => return Ok((update, bytes)),
             Err(e) => tried.push(on_line(&update.download_url, &e)),
         }
     }
     Err(NetProblem::across_lines(tried))
+}
+
+/// 一段一段地测下载速度（`got` 是已收到的字节数）：哪一段平均不到 `slow_rate` 就返回那一段的平均速度（字节/秒）
+async fn too_slow(got: &AtomicU64, limits: &Limits) -> u64 {
+    loop {
+        let before = got.load(Ordering::Relaxed);
+        tokio::time::sleep(limits.slow_span).await;
+        let span = got.load(Ordering::Relaxed) - before;
+        let rate = (span as f64 / limits.slow_span.as_secs_f64()) as u64;
+        if rate < limits.slow_rate {
+            return rate;
+        }
+    }
 }
 
 /// 最近查到的那个新版本：下载并安装要用它。`lib.rs` 里 `.manage(UpdateState::default())`

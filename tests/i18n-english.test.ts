@@ -87,7 +87,7 @@ test("定宽处 English 用短写（第三批画板 2A 4A 6A）：窗口 5h / We
   assert.equal(t("usage.window.weeklyModel", { name: "Fable" }), "本周 · Fable");
   assert.equal(tn("usage.window.hours", 12), "12 小时");
   assert.equal(t("models.control.restartKey"), "重启生效");
-  assert.equal(t("market.mcp.needsKey"), "需要 API key");
+  assert.equal(t("market.mcp.needsKey"), "要填密钥");
   inLang("zh-Hant", () => {
     assert.equal(t("usage.window.weekly"), "本週");
     assert.equal(t("models.control.restartKey"), "重新啟動以套用");

@@ -1,30 +1,42 @@
 /// 构建产物测试（AC9、AC14、R22）：真的把站点构建到临时目录，再用 CLI 跑一遍构建检查；
 /// 然后在产物与文案目录里造错，确认检查会失败并指出是哪个。需要先 `npm ci`（make test-site 会保证）。
+/// 构建两份：不带子路径（以后的 Cloudflare Pages 与阿里云服务器），和 GitHub Pages 的子路径 /sophia/（#286）。
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { before } from "node:test";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { SITE } from "../src/site.config.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const env = { ...process.env, ASTRO_TELEMETRY_DISABLED: "1" };
+const GH_PAGES = "https://zhengjiaqiao.github.io/sophia/";
+// 不带子路径的那份不能受外面设的 SITE_URL 影响
+const { SITE_URL: _, ...outer } = process.env;
+const env = { ...outer, ASTRO_TELEMETRY_DISABLED: "1" };
+const ghEnv = { ...env, SITE_URL: GH_PAGES };
 let dist = "";
+let ghDist = "";
 
-const check = (args: string[]) =>
-  spawnSync(process.execPath, [join(root, "scripts/check-site.ts"), ...args], { encoding: "utf8", env });
+const check = (args: string[], e: NodeJS.ProcessEnv = env) =>
+  spawnSync(process.execPath, [join(root, "scripts/check-site.ts"), ...args], { encoding: "utf8", env: e });
 
-before(() => {
+function build(e: NodeJS.ProcessEnv): string {
   const out = mkdtempSync(join(tmpdir(), "sophia-site-"));
   const r = spawnSync(process.execPath, [join(root, "node_modules/astro/bin/astro.mjs"), "build", "--outDir", out], {
     cwd: root,
     encoding: "utf8",
-    env,
+    env: e,
   });
   assert.equal(r.status, 0, `astro build 失败：\n${r.stdout}\n${r.stderr}`);
-  dist = out;
+  return out;
+}
+
+before(() => {
+  dist = build(env);
+  ghDist = build(ghEnv);
 });
 
 test("真构建的产物通过检查：三个语言页都在", () => {
@@ -109,4 +121,59 @@ test("短片第 2–6 镜头（含片尾）在静态 HTML 里：只有第 1 镜�
   const html = readFileSync(join(dist, "index.html"), "utf8");
   const shots = [...html.matchAll(/class="shot( on)?"[^>]*data-shot="(\d)"/g)].map((m) => `${m[2]}${m[1] ? "+" : ""}`);
   assert.deepEqual(shots, ["0+", "1", "2", "3", "4", "5"]);
+});
+
+test("#286：带子路径 /sophia/ 构建的产物通过检查；站内链接、资源、canonical 都带上子路径", () => {
+  const r = check(["--dist", ghDist], ghEnv);
+  assert.equal(r.status, 0, r.stderr);
+  const html = readFileSync(join(ghDist, "zh-hans/index.html"), "utf8");
+  assert.match(html, /href="\/sophia\/_astro\/[^"]*\.css"/);
+  assert.match(html, /<a href="\/sophia\/zh-hant\/" hreflang="zh-Hant"/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/zhengjiaqiao\.github\.io\/sophia\/zh-hans\/"/);
+  const css = readFileSync(join(ghDist, html.match(/href="\/sophia\/(_astro\/[^"]*\.css)"/)![1]), "utf8");
+  assert.match(css, /url\(\/sophia\/_astro\/[^)]*\.woff2\)/);
+});
+
+test("#286：带子路径构建的产物里有站内地址漏了子路径时失败并指出是哪个", () => {
+  const copy = mkdtempSync(join(tmpdir(), "sophia-site-bad-"));
+  cpSync(ghDist, copy, { recursive: true });
+  const p = join(copy, "zh-hant/index.html");
+  writeFileSync(p, readFileSync(p, "utf8").replace('href="/sophia/zh-hans/"', 'href="/zh-hans/"'));
+  const r = check(["--dist", copy], ghEnv);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /zh-hant\/index\.html：站内地址 \/zh-hans\/ 没带子路径 \/sophia\//);
+});
+
+test("#286：下载键直链 COS 上固定文件名的最新版，两种构建都一样", () => {
+  for (const d of [dist, ghDist]) {
+    const html = readFileSync(join(d, "index.html"), "utf8");
+    assert.ok(html.includes(`href="${SITE.downloadHref.arm64}"`));
+    assert.ok(html.includes(`href="${SITE.downloadHref.x64}"`));
+  }
+});
+
+/// 取英文页 head 里内联的跳转脚本，在假的 window 里跑一遍，返回它跳去的地址
+function runRedirect(file: string, w: { languages: string[]; cookie?: string; hash?: string }): string[] {
+  const html = readFileSync(file, "utf8");
+  const script = html.match(/<head><meta charset="utf-8"><script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script, `${file} 的 head 最前面应有语言跳转脚本`);
+  const went: string[] = [];
+  const window = {
+    document: { cookie: w.cookie ?? "" },
+    navigator: { languages: w.languages },
+    location: { search: "", hash: w.hash ?? "", replace: (u: string) => went.push(u) },
+  };
+  runInNewContext(script, { window });
+  return went;
+}
+
+test("#286：首页按浏览器语言跳转，选过的语言优先；只有英文页带这段脚本", () => {
+  const home = join(ghDist, "index.html");
+  assert.deepEqual(runRedirect(home, { languages: ["zh-CN"], hash: "#install" }), ["/sophia/zh-hans/#install"]);
+  assert.deepEqual(runRedirect(home, { languages: ["zh-TW"] }), ["/sophia/zh-hant/"]);
+  assert.deepEqual(runRedirect(home, { languages: ["en-US"] }), []);
+  assert.deepEqual(runRedirect(home, { languages: ["zh-CN"], cookie: "lang=en" }), []);
+  assert.deepEqual(runRedirect(join(dist, "index.html"), { languages: ["zh-CN"] }), ["/zh-hans/"]);
+  for (const f of ["zh-hans/index.html", "zh-hant/index.html"])
+    assert.doesNotMatch(readFileSync(join(ghDist, f), "utf8"), /homeRedirect/);
 });

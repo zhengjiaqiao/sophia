@@ -9,7 +9,7 @@
   "skills.cell.readOnly": "Couldn't add {skill} to {agent}: can't write to its skills folder",
   "skills.cellTip.occupied": "{agent} already has a same-name {skill} from {occupant} · expand this row to keep only one",
   "skills.cellTip.foreign": "{agent} has a same-name {skill} that isn't this one",
-  "skills.verb.removeOriginal": "Delete original…",
+  "skills.verb.removeOriginal": "Original in {agent} · Delete…",
   "skills.verb.removeFrom": "Remove from {agent}",
   "skills.verb.addTo": "Add to {agent}",
   "skills.verb.broken": "Link is broken, original still exists · click to relink",
@@ -84,10 +84,12 @@
   "skills.batch.noneToChange": "Nothing to add or remove",
   "skills.empty.filtered": "No skills with “{query}” in the name or location",
   "skills.empty.clearFilter": "Clear filter",
-  "skills.empty.noDirs": "{place} has no agent skill folders yet",
+  "skills.empty.noDirs": "{place} has no skills yet",
   "skills.empty.noDirsHint": "Created automatically when you add the first skill",
+  "skills.empty.goDiscover": "Go to Discover",
   "skills.empty.none": "No skills yet",
   "skills.table.origin": "Location",
+  "skills.table.originTip": "Folder that contains the skill",
   "skills.table.place": "Scope",
   "skills.table.name": "Name",
   "skills.table.nameTipMulti": "Lists every skill from each location in these scopes. A skill installed in two scopes gets two rows. Skills bundled with an agent or plugin aren't listed here; add or remove locations in “Manage locations”",
@@ -98,7 +100,7 @@
   "skills.dot.skillLinked": "Added · symlink",
   "skills.dot.missing": "Not added",
   "skills.dot.own": "Added · original",
-  "skills.dot.mcpLinked": "Written",
+  "skills.dot.mcpLinked": "Added",
   "skills.dot.checked": "Added",
   "skills.matrix.revealLabel": "Show {path} in Finder",
   "skills.matrix.reveal": "Open",
@@ -161,34 +163,56 @@
   "skills.reason.readOnly": "Can't write to {agent}'s skills folder",
   "skills.reason.diskFull": "The disk is full; couldn't write to {agent}'s skills folder",
   "skills.reason.gone": "What {agent} needed changed is no longer there",
-  "skills.reason.linkFailed": "Couldn't add to {agent}: {reason}",
-  "skills.reason.unlinkFailed": "Couldn't remove from {agent}: {reason}",
+  "skills.reason.linkFailed": "Couldn't add to {agent}",
+  "skills.reason.unlinkFailed": "Couldn't remove from {agent}",
   "skills.split.busy": "Splitting the skills folder in {agent}",
-  "skills.split.failed": "Couldn't split: {reason}",
+  "skills.split.failed": "Couldn't split · {reason}",
+  "skills.split.failedPlain": "Couldn't split",
   "skills.split.partial": {
-    "one": "Split, but {count} item wasn't copied over: {reason}",
-    "other": "Split, but {count} items weren't copied over: {reason}"
+    "one": "Split, but {count} skill couldn't be copied over · {reason}",
+    "other": "Split, but {count} skills couldn't be copied over · {reason}"
+  },
+  "skills.split.partialPlain": {
+    "one": "Split, but {count} skill couldn't be copied over",
+    "other": "Split, but {count} skills couldn't be copied over"
   },
   "skills.split.confirm": "Split",
   "skills.orphan.clearFailed": "Couldn't clear: {reason}",
+  "skills.orphan.clearFailedPlain": "Couldn't clear",
   "skills.batch.allAgents": "All agents",
   "skills.undo.label": "Undo",
   "skills.origin.planning": "Checking impact",
   "skills.delete.trashRelinkFailed": {
-    "one": "In the Trash; {count} link wasn't repointed: {reason}",
-    "other": "In the Trash; {count} links weren't repointed: {reason}"
+    "one": "Moved to the Trash; {count} agent couldn't switch to the other copy · {reason}",
+    "other": "Moved to the Trash; {count} agents couldn't switch to the other copy · {reason}"
+  },
+  "skills.delete.trashRelinkFailedPlain": {
+    "one": "Moved to the Trash; {count} agent couldn't switch to the other copy",
+    "other": "Moved to the Trash; {count} agents couldn't switch to the other copy"
   },
   "skills.delete.trashClearFailed": {
-    "one": "In the Trash; {count} link wasn't cleared: {reason}",
-    "other": "In the Trash; {count} links weren't cleared: {reason}"
+    "one": "Moved to the Trash; the entry in {count} agent couldn't be cleared · {reason}",
+    "other": "Moved to the Trash; the entries in {count} agents couldn't be cleared · {reason}"
+  },
+  "skills.delete.trashClearFailedPlain": {
+    "one": "Moved to the Trash; the entry in {count} agent couldn't be cleared",
+    "other": "Moved to the Trash; the entries in {count} agents couldn't be cleared"
   },
   "skills.delete.relinkFailed": {
-    "one": "{count} link wasn't repointed: {reason}",
-    "other": "{count} links weren't repointed: {reason}"
+    "one": "{count} agent couldn't switch to the other copy · {reason}",
+    "other": "{count} agents couldn't switch to the other copy · {reason}"
+  },
+  "skills.delete.relinkFailedPlain": {
+    "one": "{count} agent couldn't switch to the other copy",
+    "other": "{count} agents couldn't switch to the other copy"
   },
   "skills.delete.clearFailed": {
-    "one": "{count} link wasn't cleared: {reason}",
-    "other": "{count} links weren't cleared: {reason}"
+    "one": "The entry in {count} agent couldn't be cleared · {reason}",
+    "other": "The entries in {count} agents couldn't be cleared · {reason}"
+  },
+  "skills.delete.clearFailedPlain": {
+    "one": "The entry in {count} agent couldn't be cleared",
+    "other": "The entries in {count} agents couldn't be cleared"
   },
   "skills.delete.confirm": "Delete",
   "skills.keep.inApp": "The other copy is inside {app}.app, which the app ships itself; Sophia doesn't modify other apps",
@@ -202,8 +226,8 @@
   "skills.scanning.reading": "Reading skill folders",
   "skills.place.machine": "This Mac",
   "skills.place.several": "These scopes",
-  "skills.place.under": "{place}",
-  "skills.sync.mkTargetFailed": "Couldn't create the target folder: {error}",
+  "skills.sync.mkTargetFailed": "Couldn't create the skill folder · {error}",
+  "skills.sync.mkTargetFailedPlain": "Couldn't create the skill folder",
   "skills.sync.gone": "It's no longer there; nothing changed",
   "skills.sync.notBodyLink": "No longer a link to this original; skipped",
   "skills.sync.notLink": "No longer a symlink; skipped",
@@ -222,5 +246,9 @@
   "skills.sync.spotTaken": "Something with the same name is already here; nothing changed",
   "skills.sync.copyNoBook": "Sophia ran into an internal error; this one wasn't done",
   "skills.sync.notRecordedCopy": "Sophia didn't put this one here; nothing changed",
-  "skills.sync.changedSince": "It was changed afterwards; not swapped back"
+  "skills.sync.changedSince": "It was changed afterwards; not swapped back",
+  "skills.sync.trashFailed": "Couldn't move it to the Trash",
+  "skills.sync.putBackFailed": "Couldn't put the original back",
+  "skills.sync.linkRestoreFailed": "Couldn't restore the link",
+  "skills.sync.releaseHeldFailed": "Couldn't move the held original to the Trash"
 }

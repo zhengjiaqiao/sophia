@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
-import DomainView, { skillCellKey, type BatchPress } from "./DomainView";
+import DomainView, { FolderTip, foldersOf, skillCellKey, type BatchPress } from "./DomainView";
 import { cellKey, SourceKeys } from "./Matrix";
 import { LocationFrame } from "./LocationFrame";
 import { DiscoverFlow, PageUndo, type InstallContext, type SkillHandle } from "./market";
@@ -30,7 +30,7 @@ import {
 } from "./dupNotice";
 import { onlyTheseLabel } from "./market/updateView";
 import { orphanTotals } from "./orphanRows";
-import { t, tn, useLocale, useOnLocaleChange } from "./i18n";
+import { t, tSpaced, useLocale, useOnLocaleChange } from "./i18n";
 import {
   columnOfTarget,
   folderLabel,
@@ -56,8 +56,17 @@ import type { DomainRef } from "./pages/sourcesView";
 import { useSources } from "./SourceRow";
 import { usePageCommand } from "./shell/menuBus";
 import { GLOBAL_KEY, type Face, type Location } from "./shell/nav";
-import { Confirm, CornerToast, Mono, NoticePanel, Toast, ToastCount, useHintStack } from "./ui";
-import { HINTS, useHint } from "./hints";
+import {
+  Confirm,
+  CornerToast,
+  Mono,
+  NoticePanel,
+  Toast,
+  ToastCount,
+  Tooltip,
+  useHintStack,
+} from "./ui";
+import { firstScanHint, useHint, type FirstScanHint } from "./hints";
 import { overCapText, type AgentsOverCap } from "./agentsOverCap";
 import type { AnchorRect } from "./layerPlace.ts";
 import {
@@ -65,6 +74,9 @@ import {
   deletedOriginalToast,
   deleteOriginalConfirm,
   restoredOriginalToast,
+  linksFailedLine,
+  clearFailedLine,
+  splitFailedLine,
   keepThisConfirm,
   splitConfirm,
   toastFor,
@@ -126,7 +138,7 @@ interface DeletePane {
 }
 
 /// 确认框里标题下的路径行（`留下` / `移到废纸篓` + 完整路径，不截断、太长就折行）与一句后果
-/// 不给 `paths` 的（删原件）只有那一句后果
+/// 不给 `paths` 的（删原件）只有那一句后果；没有受影响的 agent 时正文为空，不画这一句
 const confirmPaths = (text: { body: string; paths?: { label: string; path: string }[] }) => (
   <>
     {text.paths ? (
@@ -141,9 +153,23 @@ const confirmPaths = (text: { body: string; paths?: { label: string; path: strin
         ))}
       </div>
     ) : null}
-    <div className="mx-keeppaths__body">{text.body}</div>
+    {text.body ? <div className="mx-keeppaths__body">{text.body}</div> : null}
   </>
 );
+
+/// 首次扫描提示条的说明句：停在句子上出 `已查找的文件夹` + 完整路径（第二层，#274）；一个都没查到时只有句子
+const firstScanMessage = (hint: FirstScanHint) =>
+  hint.tip.folders.length > 0 ? (
+    <Tooltip
+      content={<FolderTip title={hint.tip.title} folders={hint.tip.folders} />}
+      fit="inline"
+      focusable
+    >
+      <span>{hint.message}</span>
+    </Tooltip>
+  ) : (
+    hint.message
+  );
 
 export interface SkillsTabProps {
   overview: Overview | null;
@@ -178,6 +204,8 @@ export interface SkillsTabProps {
   /// 装完提示的「去处理」（issue #111）：壳切到 SKILLS · 我的、位置换到看得见这一行的（`goRow`）；
   /// 找到那一行、拉开抽屉归这一页
   onGoToRow?: (domainKey: string) => void;
+  /// 空库提示条与没有 agent 文件夹的空态上的 `前往发现`：壳切到 `发现` 一面（#274）
+  onDiscover?: () => void;
 }
 
 /// 位置页的 skills 页签：页面头右端筛选框 + `管理来源` + `+ 来源`，表格（DomainView → Matrix）。
@@ -207,6 +235,7 @@ export default function SkillsTab({
   install,
   agentsOverCap,
   onGoToRow,
+  onDiscover,
 }: SkillsTabProps) {
   // 选中的行键。默认一行不选，选择条不出现（DESIGN「默认值」）；切换侧栏的位置时清空——
   // 跨位置保留会让人回到一个位置时看见「自己没勾过」的行已经勾着
@@ -506,19 +535,29 @@ export default function SkillsTab({
     eligible: onPage && hasSkills,
     blocked: hintBlocked,
   });
-  // 提示句用的现场数据：这一轮读了哪些 agent 的目录（有目录的列）、表里几个 skill（＝列头 `名称 N`）
+  // 提示句用的现场数据：这一轮读了哪些 agent 的目录（有目录的列）、表里几个 skill（＝列头 `名称 N`）、
+  // 查找过的文件夹（那几列已存在的目录，悬停里列出）
+  const searched = view.columns.flatMap((c) => [...c.targets.values()].filter((t) => t.exists));
   const hintCtx = {
     agents: view.columns
       .filter((c) => [...c.targets.values()].some((t) => t.exists))
       .map((c) => c.label),
     skills: view.rows.length,
+    folders: foldersOf(searched),
   };
-  // 一个 agent 目录都没有时，空态已经说了「还没有 agent 的 skill 目录」，提示条不再重复（DESIGN「空态」：
+  // 一个 agent 目录都没有时，空态已经说了「用户级还没有 skill」并带 `前往发现`，提示条不再重复（DESIGN「空态」：
   // 这一格不带提示条；2026-09-29 产品负责人真机：两句说的是同一件事）
   const emptyHint = useHint("first-scan-empty", {
     eligible: onPage && noSkills && hintCtx.agents.length > 0,
     blocked: hintBlocked,
   });
+  // 两条首次扫描的内容：说明句（悬停列出查找过的文件夹）；空库那条带 `前往发现`
+  const scanSkills = firstScanHint(hintCtx, "first-scan-skills");
+  const scanEmpty = firstScanHint(hintCtx, "first-scan-empty");
+  const discoverKey =
+    scanEmpty.discover && onDiscover
+      ? { label: scanEmpty.discover, onClick: onDiscover }
+      : undefined;
   const learnedCell = skillsHint.learned;
   // 表格上方的提示条叠放（2026-09-30）：「有新版本」在上、首次扫描的新手提示在下，一次只展开一张，
   // 处理完（或关掉）上面那张再出下一张；失效链接那一句是常驻的一行字、不是提示条，不进叠放
@@ -762,12 +801,11 @@ export default function SkillsTab({
     return [...out.values()];
   };
 
-  /// 这条没做成的原因，一句人话：说原因，不说「失败」
+  /// 这条没做成的一句话：分得出类的说原因，分不出的只写失败句，不硬造原因
   /// 动词带方向：没加到 X / 没从 X 移除（「开启 X」会读成操作应用本身）
-  /// 分得出类的（core 按 io 错误类别判的 `failKind`：无法写入、磁盘满、已不在）说人话，否则原样转述 core 给的那句
+  /// 分得出类的（core 按 io 错误类别判的 `failKind`：无法写入、磁盘满、已不在）说人话，否则只写失败句，不拼系统原文（原文在 `detail` 与日志里）
   const reasonOf = (entry: ReportEntry, what: "link" | "unlink"): string => {
     const target = entry.action.target;
-    const reason = entry.outcome.status === "failed" ? entry.outcome.reason : "";
     const agent = targetByPath(target)?.label ?? target;
     switch (entry.failKind) {
       case "noWrite":
@@ -778,8 +816,8 @@ export default function SkillsTab({
         return t("skills.reason.gone", { agent });
       default:
         return what === "link"
-          ? t("skills.reason.linkFailed", { agent, reason })
-          : t("skills.reason.unlinkFailed", { agent, reason });
+          ? t("skills.reason.linkFailed", { agent })
+          : t("skills.reason.unlinkFailed", { agent });
     }
   };
 
@@ -978,9 +1016,7 @@ export default function SkillsTab({
         failCell(
           refRowKey(ref),
           columnOfTarget(ref.targetId),
-          created === 0
-            ? t("skills.split.failed", { reason: first.reason })
-            : tn("skills.split.partial", failed.length, { reason: first.reason }),
+          splitFailedLine(created, failed.length, first.reason),
         );
       } else {
         // 做成了：例行一行 `✓ 拆开 [Codex] 的 skills 文件夹`，浮在被点那一格正下方；
@@ -1019,11 +1055,7 @@ export default function SkillsTab({
         const report = await api.applyAll([link.clear], true);
         const bad = report.entries.find((e) => e.outcome.status === "failed");
         if (bad && bad.outcome.status === "failed") {
-          failCell(
-            orphan.key,
-            columnId,
-            t("skills.orphan.clearFailed", { reason: bad.outcome.reason }),
-          );
+          failCell(orphan.key, columnId, clearFailedLine(bad.outcome.reason));
         } else {
           setUndo(null);
           learnedCell();
@@ -1257,12 +1289,12 @@ export default function SkillsTab({
             names={[ref.skill]}
             reason={
               undoId === null
-                ? pane.relink
-                  ? tn("skills.delete.trashRelinkFailed", failed.length, { reason: bad.reason })
-                  : tn("skills.delete.trashClearFailed", failed.length, { reason: bad.reason })
-                : pane.relink
-                  ? tn("skills.delete.relinkFailed", failed.length, { reason: bad.reason })
-                  : tn("skills.delete.clearFailed", failed.length, { reason: bad.reason })
+                ? linksFailedLine(
+                    pane.relink ? "trashRelink" : "trashClear",
+                    failed.length,
+                    bad.reason,
+                  )
+                : linksFailedLine(pane.relink ? "relink" : "clear", failed.length, bad.reason)
             }
             action={undo}
             onDismiss={dismissRow}
@@ -1655,9 +1687,10 @@ export default function SkillsTab({
       ? t("skills.place.machine")
       : multi
         ? t("skills.place.several")
-        : t("skills.place.under", { place: domainRef.label });
+        : domainRef.label;
   if (pages.length === 0) {
-    // 范围里没有一个位置扫描出页（没有 agent 目录）：`管理原件位置` 已在页面头，空态不重复
+    // 范围里没有一个位置扫描出页（没有 agent 目录）：`管理原件位置` 已在页面头，空态不重复。
+    // 没有列，也就说不出会自动创建哪些文件夹：只说结果，下一步同有表头的空表一样给 `前往发现`（#274）
     return (
       <LocationFrame
         filterText={filterText}
@@ -1666,9 +1699,11 @@ export default function SkillsTab({
         enabled={!addOpen && !manageOpen}
         bar={bar}
         empty={{
-          description: t("skills.empty.noDirs", { place: placeLabel }),
-          hint: t("skills.empty.noDirsHint"),
+          description: tSpaced("skills.empty.noDirs", { place: placeLabel }),
           art: "noDirs",
+          action: onDiscover
+            ? { label: t("skills.empty.goDiscover"), onClick: onDiscover }
+            : undefined,
         }}
         hint={
           <>
@@ -1678,7 +1713,8 @@ export default function SkillsTab({
               mark={false}
               open={hintStack.top === "first-scan-empty"}
               onClose={emptyHint.dismiss}
-              message={HINTS["first-scan-empty"](hintCtx)}
+              action={discoverKey}
+              message={firstScanMessage(scanEmpty)}
             />
           </>
         }
@@ -1814,6 +1850,7 @@ export default function SkillsTab({
         overview={overview}
         view={view}
         placeLabel={placeLabel}
+        onDiscover={onDiscover}
         rows={onlyOrphans ? [] : visible}
         stateOf={stateOf}
         hiddenRows={hiddenRows}
@@ -1937,7 +1974,7 @@ export default function SkillsTab({
               stacked={hintStack.top === "first-scan" ? hintStack.below : 0}
               onClose={skillsHint.dismiss}
               flush
-              message={HINTS["first-scan-skills"](hintCtx)}
+              message={firstScanMessage(scanSkills)}
             />
           </>
         }
@@ -1947,7 +1984,8 @@ export default function SkillsTab({
             mark={false}
             open={hintStack.top === "first-scan-empty"}
             onClose={emptyHint.dismiss}
-            message={HINTS["first-scan-empty"](hintCtx)}
+            action={discoverKey}
+            message={firstScanMessage(scanEmpty)}
           />
         }
       />

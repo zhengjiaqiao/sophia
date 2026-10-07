@@ -5,13 +5,13 @@
 /// ┌ { "mcpServers": { "github": {…}, "filesystem": {…} } }      ┐  等宽框：recess 底、限高、框内滚
 /// └──────────────────────────────────────────────────────────────┘
 /// 认出 2 个 · 已选 2 ───────────────────────────────
-/// ☑ github       远程 · https://api.githubcopilot.com/mcp/
-/// ☑ filesystem   本机命令 · npx -y @modelcontextprotocol/server-filesystem ~/Documents
-/// 位置 ─── [用户级] [CardBox] [更多 ˅]
-/// 写进哪些 agent ─（一列，放得下原因句）
+/// ☑ github       在线服务 · https://api.githubcopilot.com/mcp/
+/// ☑ filesystem   本地运行 · npx -y @modelcontextprotocol/server-filesystem ~/Documents
+/// 生效范围 ─── [用户级] [CardBox] [更多 ˅]
+/// 给谁用 ─（一列，放得下原因句）
 /// ☑ ✳ Claude Desktop  只写 filesystem · github 是远程服务器，要在 Claude Desktop 自己的「连接器」里添加
 /// ═══════════════════════════════════════════════ 贴底
-/// 写进 4 个配置文件                                  [取消] [添加 2 个]
+///                                                    [取消] [添加 2 个]
 /// ```
 ///
 /// - 进来时剪贴板里的内容认得出（解析出至少一个服务器）就直接填好
@@ -38,7 +38,6 @@ import {
 import { useInstallFrame, type InstallPageBase } from "./InstallPage.tsx";
 import {
   addLabel,
-  configFilesLine,
   connectionText,
   jsonHeader,
   parseErrorLine,
@@ -48,7 +47,7 @@ import { errorText, marketService } from "./service.ts";
 import { useClipboardPrefill, useDebounced, useMcpInstall } from "./useInstall.ts";
 
 export interface JsonPageProps extends InstallPageBase {
-  /// 写进了（至少一处）：报告 + 右下那一窗
+  /// 加上了（至少一处）：报告 + 右下那一窗
   onDone: (report: McpReport, notice: InstalledNotice) => void;
   /// 框里先放什么（样张、测试）；不给就看剪贴板
   initial?: string;
@@ -120,7 +119,7 @@ export function JsonPage(props: JsonPageProps) {
     agents: props.agents,
     shown: props.shown,
   });
-  // 「同时加进 .gitignore」：有「要填的」时放在那一块最后，没有时（密钥直接写在定义里）放在「写进哪些 agent」最后
+  // 「同时加进 .gitignore」：有「要填的」时放在那一块最后，没有时（密钥直接写在定义里）放在「给谁用」最后
   const gitignore =
     state.keyHint !== null || state.keyTracked !== null ? (
       <KeyHintBlock
@@ -154,7 +153,6 @@ export function JsonPage(props: JsonPageProps) {
       escape={props.escape}
       footer={
         <InstallFooter
-          line={configFilesLine(servers.length > 0 ? state.files : 0)}
           label={addLabel(selected.length)}
           block={servers.length === 0 ? t("market.json.pasteFirst") : state.block}
           busy={state.busy}
@@ -212,7 +210,7 @@ export function JsonPage(props: JsonPageProps) {
               </PickList>
             </InstallBlock>
             <PlaceBlock places={props.places} value={state.location} onChange={state.setLocation} />
-            <InstallBlock label={t("market.install.blockAgents")}>
+            <InstallBlock label={t("market.install.blockWho")}>
               <AgentChecks
                 rows={state.rows}
                 checked={state.checked}

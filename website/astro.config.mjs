@@ -1,9 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "astro/config";
+import { siteUrl } from "./src/lib/siteUrl.ts";
+
+// 部署地址由 SITE_URL 指定（见 src/lib/siteUrl.ts）：GitHub Pages 构建时带子路径 /sophia/，资源与样式里的地址跟着走
+const deploy = siteUrl(process.env.SITE_URL);
 
 // 静态输出：三个语言页在构建时生成（/、/zh-hans/、/zh-hant/），关掉 JS 也能读到全部文案与下载链接
 export default defineConfig({
-  site: "https://sophiakit.com",
+  site: deploy.origin,
+  base: deploy.base,
   output: "static",
   trailingSlash: "always",
   build: { format: "directory" },

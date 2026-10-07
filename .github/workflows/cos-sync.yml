@@ -1,8 +1,9 @@
 name: COS sync
 
 # 把某个已发布 Release 的更新包、.dmg 与改写过包地址的 latest.json 传到腾讯云 COS（issue #263，spec #248）。
-# 应用更新的国内线路（tauri.conf.json 的第二个 endpoint）和官网给国内访客的下载都读这里。
-# COS 上的布局照 GitHub：<桶>/v<版本>/<产物名>，清单在桶根目录 latest.json。两个入口：
+# 应用更新的国内线路（tauri.conf.json 的第二个 endpoint）和官网的下载都读这里。
+# COS 上的布局照 GitHub：<桶>/v<版本>/<产物名>，清单在桶根目录 latest.json；两个 .dmg 另有固定文件名的最新版副本
+# <桶>/latest/Sophia_<aarch64|x64>.dmg，官网下载键直链它们（#286）。两个入口：
 #   - release.yml 在草稿转正之后调用（workflow_call），只有真发版（tag push）才走到；排练不建 Release，也不调用它。
 #   - 手动运行（workflow_dispatch），填最新的已发布 tag：发版那次传失败了，修好后补传；也用来单独排练这一段。
 # 只同步最新的正式版：清单只有根目录一份，传旧版会把国内线路倒回旧版本。
@@ -135,9 +136,13 @@ jobs:
             fi
           }
 
-          while IFS= read -r name; do
-            put "dist/${name}" "${TAG}/${name}"
-            url="${COS_BASE}/${TAG}/${name}"
+          # 每行「<文件> <对象键>」：先是版本目录里的产物，最后是官网下载键直链的固定文件名副本（latest/，每次发版覆盖，#286）。
+          # 副本地址不变、内容会换，标 no-cache，免得浏览器拿到缓存里的旧版
+          while read -r name key; do
+            meta=()
+            case "$key" in latest/*) meta=(--meta "Cache-Control:no-cache") ;; esac
+            put "dist/${name}" "$key" "${meta[@]}"
+            url="${COS_BASE}/${key}"
             want=$(stat -c %s "dist/${name}")
             got=$(curl -sS -o /dev/null -I -w '%{http_code} %header{content-length}' --max-time 60 "$url" || true)
             if [ "$got" != "200 ${want}" ]; then

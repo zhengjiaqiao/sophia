@@ -76,12 +76,23 @@ pub(crate) fn link_fail_kind_of(e: &io::Error) -> Option<FailKind> {
     fail_kind_of(e)
 }
 
-/// 一次 io 失败：类别、给人看的原因句、已去隐私的原文（spec S18）。
+/// 一次 io 失败：类别、给人看的原因句（分不进类的为空串）、已去隐私的原文（spec S18）。
 /// 同时写一条日志；外部原因（四类与跨卷，`external`）只计数，分不进去的按 Sophia 自身的错误记一条
 pub(crate) struct IoFail {
     pub kind: Option<FailKind>,
     pub reason: String,
     pub detail: String,
+}
+
+impl IoFail {
+    /// 原因句；分不出类时（原因为空）换成调用处的失败句，不把系统原文当原因
+    pub(crate) fn reason_or(self, main: impl FnOnce() -> String) -> String {
+        if self.reason.is_empty() {
+            main()
+        } else {
+            self.reason
+        }
+    }
 }
 
 /// `what` 是动作的英文标签（只进日志与错误记录，不是界面文案）
@@ -100,8 +111,9 @@ fn io_fail_as(what: &str, path: &Path, e: &io::Error, kind: Option<FailKind>) ->
         Some(FailKind::NoWrite) => crate::t!("common.write.noPermission"),
         Some(FailKind::DiskFull) => crate::t!("common.write.diskFull"),
         Some(FailKind::Missing) => crate::t!("skills.sync.gone"),
-        // 建不了链接时通常已自动改放副本；没改成（没给副本记录处）才会走到这里，原句当原因
-        Some(FailKind::LinkUnsupported) | None => e.to_string(),
+        // 建不了链接时通常已自动改放副本；没改成（没给副本记录处）才会走到这里。
+        // 分不出类的没有人话原因：留空，由界面只写主句；原文在 `detail` 与日志里
+        Some(FailKind::LinkUnsupported) | None => String::new(),
     };
     if external(e, kind) {
         crate::report::count_write_failure(e);
@@ -150,10 +162,11 @@ fn ensure_target(
     let fail = io_fail("mkdir-target", target, &e);
     *fail_kind = fail.kind;
     *detail = Some(fail.detail);
-    Some(Outcome::Failed(crate::t!(
-        "skills.sync.mkTargetFailed",
-        error = fail.reason
-    )))
+    Some(Outcome::Failed(if fail.reason.is_empty() {
+        crate::t!("skills.sync.mkTargetFailedPlain")
+    } else {
+        crate::t!("skills.sync.mkTargetFailed", error = fail.reason)
+    }))
 }
 
 /// 放副本（目标目录已在）
@@ -466,7 +479,10 @@ pub(crate) fn delete_source_holding_with(
         // 挪不进暂存处（跨磁盘等）或没给暂存处：直接进废纸篓，不给撤销
         _ => {
             if let Err(e) = trash(&plan.path) {
-                return one(Outcome::Failed(io_fail("trash", &plan.path, &e).reason));
+                return one(Outcome::Failed(
+                    io_fail("trash", &plan.path, &e)
+                        .reason_or(|| crate::t!("skills.sync.trashFailed")),
+                ));
             }
             None
         }
@@ -654,7 +670,10 @@ pub fn undo_delete(undo: &DeleteUndo, copies: Option<&crate::store::Store>) -> S
     } else {
         match std::fs::rename(&undo.held, &undo.body) {
             Ok(()) => Outcome::Created,
-            Err(e) => Outcome::Failed(io_fail("put-back", &undo.body, &e).reason),
+            Err(e) => Outcome::Failed(
+                io_fail("put-back", &undo.body, &e)
+                    .reason_or(|| crate::t!("skills.sync.putBackFailed")),
+            ),
         }
     };
     let back = matches!(body, Outcome::Created);
@@ -758,13 +777,19 @@ fn restore_link(link: &LinkUndo) -> Outcome {
                 return Outcome::Failed(crate::t!("skills.sync.linkChanged"));
             }
             if let Err(e) = remove_link(&link.path) {
-                return Outcome::Failed(io_fail("remove-link", &link.path, &e).reason);
+                return Outcome::Failed(
+                    io_fail("remove-link", &link.path, &e)
+                        .reason_or(|| crate::t!("skills.sync.linkRestoreFailed")),
+                );
             }
         }
     }
     match create_link(&link.dest, &link.path, link.style) {
         Ok(()) => Outcome::Created,
-        Err(e) => Outcome::Failed(io_fail("create-link", &link.path, &e).reason),
+        Err(e) => Outcome::Failed(
+            io_fail("create-link", &link.path, &e)
+                .reason_or(|| crate::t!("skills.sync.linkRestoreFailed")),
+        ),
     }
 }
 
@@ -797,7 +822,8 @@ pub(crate) fn release_held_with(
                     .as_deref()
                     .filter(|o| o.file_name() == item.file_name());
                 if let Err(e) = release_one(&item, orig, trash) {
-                    let reason = io_fail("release-held", &item, &e).reason;
+                    let reason = io_fail("release-held", &item, &e)
+                        .reason_or(|| crate::t!("skills.sync.releaseHeldFailed"));
                     failed.push((item, reason));
                 }
             }
@@ -1098,7 +1124,7 @@ mod tests {
         assert!(external(&full, fail_kind_of(&full)));
     }
 
-    /// spec S18：原因句给人看（当前语言）、原文进 `detail`；分不进类的原文原样当原因
+    /// spec S18：原因句给人看（当前语言）、原文进 `detail`；分不进类的只给失败句
     #[test]
     fn io失败_分得出类的说人话_原文进详情() {
         let tree = TempTree::new();
@@ -1119,7 +1145,16 @@ mod tests {
         let other = io::Error::new(io::ErrorKind::InvalidInput, "weird /Users/someone/x");
         let fail = io_fail("create-link", &gone, &other);
         assert_eq!(fail.kind, None);
-        assert_eq!(fail.reason, other.to_string(), "分不进类：原句就是原因");
+        assert_eq!(
+            fail.reason,
+            String::new(),
+            "分不进类：没有人话原因，原因为空"
+        );
+        assert!(
+            !fail.reason.contains("weird"),
+            "原因句不含原文：{}",
+            fail.reason
+        );
         assert!(
             !fail.detail.contains("/Users/someone"),
             "原文要去隐私：{}",
@@ -1162,6 +1197,59 @@ mod tests {
         // 要删的链本来就不在：不是软链，走的是「不是本体链」那句，不带类别
         assert!(matches!(report.entries[2].outcome, Outcome::Failed(_)));
         assert_eq!(report.entries[2].fail_kind, None);
+    }
+
+    /// #273：原因为空时换成调用处的失败句，有原因时原样用
+    #[test]
+    fn 原因为空时换成主句_有原因时照旧() {
+        let tree = TempTree::new();
+        let p = tree.root().join("x");
+        let unclassified = io_fail("trash", &p, &io::Error::from(io::ErrorKind::InvalidInput));
+        assert_eq!(
+            unclassified.reason_or(|| crate::t!("skills.sync.trashFailed")),
+            crate::t!("skills.sync.trashFailed")
+        );
+        let missing = io_fail("trash", &p, &io::Error::from(io::ErrorKind::NotFound));
+        assert_eq!(
+            missing.reason_or(|| crate::t!("skills.sync.trashFailed")),
+            crate::t!("skills.sync.gone")
+        );
+    }
+
+    /// #273：建链失败且分不进类时，原因为空（界面只写主句），系统原文留在 `detail`
+    #[test]
+    fn 建链失败分不出类_原因为空_原文在详情() {
+        let tree = TempTree::new();
+        let src = tree.dir("src/x");
+        let dst = tree.dir("dst");
+        let report = execute_with(
+            &[action(ActionKind::Create, &src, &dst.join("x"))],
+            false,
+            LinkStyle::Absolute,
+            None,
+            &|_, _, _| {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "weird raw error",
+                ))
+            },
+        );
+        let entry = &report.entries[0];
+        assert_eq!(entry.fail_kind, None);
+        assert_eq!(
+            entry.outcome,
+            Outcome::Failed(String::new()),
+            "分不出类：原因为空，界面只写主句"
+        );
+        assert!(
+            entry
+                .detail
+                .as_deref()
+                .unwrap_or("")
+                .contains("weird raw error"),
+            "原文在详情里：{:?}",
+            entry.detail
+        );
     }
 
     #[test]
@@ -1284,10 +1372,11 @@ mod tests {
             None,
         );
         match &r.entries[0].outcome {
-            Outcome::Failed(msg) => assert!(
-                msg.starts_with("建不出目标目录：") && msg.len() > "建不出目标目录：".len(),
-                "失败消息要带上原因：{msg}"
-            ),
+            // 父路径是普通文件：分不出类，只有主句，不带原文；原文在详情里
+            Outcome::Failed(msg) => {
+                assert_eq!(msg, &crate::t!("skills.sync.mkTargetFailedPlain"));
+                assert!(r.entries[0].detail.is_some(), "原文进详情");
+            }
             other => panic!("应当失败，实际 {other:?}"),
         }
         assert_eq!(entry_kind(&blocker), EntryKind::File);

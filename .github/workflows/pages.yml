@@ -1,0 +1,52 @@
+name: Pages
+
+# 官网发到 GitHub Pages（issue #286，方案见 #181）：备案下来之前，国内访客用 https://zhengjiaqiao.github.io/sophia/ 打开官网
+# （github.io 国内直连能打开，Cloudflare 上的站点打不开）。sophiakit.com 先不指过来，备案下来后按 #181 的分线路方案做。
+# 公开仓库每次推送（scripts/publish-public.sh 同步过来）就重新发布；下载键直链 COS 上固定文件名的最新版，发版不用重新发布。
+# 公开仓库的 Settings → Pages → Source 要设成「GitHub Actions」。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一时间只发布一次；挨得近的两次推送，后一次排队、不打断正在发布的那次
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # 与 release.yml 一样只在公开仓库跑：私有的开发仓库用 Pages 要付费版
+    if: github.repository == 'zhengjiaqiao/sophia'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # 带子路径 /sophia/ 构建（website/src/lib/siteUrl.ts），构建检查查漏了子路径的站内地址
+      - name: 构建官网并过构建检查
+        env:
+          SITE_URL: https://zhengjiaqiao.github.io/sophia/
+        run: make build-site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: website/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

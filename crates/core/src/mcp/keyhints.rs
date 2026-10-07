@@ -140,12 +140,20 @@ pub(super) fn ignore_written(
             Ok(None) => {}
             Err(error) => {
                 let gitignore = hint.project.join(".gitignore");
-                report.gitignore_failed = Some(crate::t!(
-                    "mcp.report.gitignoreFailed",
-                    reason = crate::atomicfile::write_error_text(&gitignore, &error)
-                ));
+                report.gitignore_failed = Some(gitignore_failed(&gitignore, &error));
             }
         }
+    }
+}
+
+/// 加入 `.gitignore` 失败的那一句（spec #239「出错的时候」）：磁盘满、没权限、只读说原因；分不出原因只写失败句，
+/// 不把系统原文拼进提示条。原文进日志
+pub(super) fn gitignore_failed(gitignore: &Path, error: &std::io::Error) -> String {
+    log::warn!("gitignore-append {}: {error}", gitignore.display());
+    crate::report::count_write_failure(error);
+    match crate::atomicfile::write_failure(error).untouched() {
+        Some(reason) => crate::t!("mcp.report.gitignoreFailed", reason = reason),
+        None => crate::t!("mcp.report.gitignoreFailedPlain"),
     }
 }
 
@@ -191,10 +199,7 @@ pub fn ignore_targets(
             Ok(None) => {}
             Err(error) => {
                 let gitignore = project.join(".gitignore");
-                report.gitignore_failed = Some(crate::t!(
-                    "mcp.report.gitignoreFailed",
-                    reason = crate::atomicfile::write_error_text(&gitignore, &error)
-                ));
+                report.gitignore_failed = Some(gitignore_failed(&gitignore, &error));
             }
         }
     }

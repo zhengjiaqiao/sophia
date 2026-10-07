@@ -364,6 +364,9 @@ pub struct McpTargetCheck {
     pub harness_id: String,
     /// 这个位置上这个 agent 的 MCP 配置位置 id（`McpLocation.id`）；这个位置没有时为 None
     pub location_id: Option<String>,
+    /// 这个位置的配置文件完整路径（安装页勾选行的悬停「写入 <路径>」）；这个位置没有时为 None
+    #[serde(default)]
+    pub config_path: Option<String>,
     pub status: McpTargetStatus,
     /// 会写进去的服务名
     pub writes: Vec<String>,

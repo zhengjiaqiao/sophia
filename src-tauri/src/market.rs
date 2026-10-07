@@ -612,16 +612,21 @@ fn query_key(query: &str) -> String {
     query.trim().to_lowercase()
 }
 
+/// 市场客户端的设置（超时、UA）；代理由 [`MarketState::client`] 接上
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .user_agent(concat!("Sophia/", env!("CARGO_PKG_VERSION")))
+}
+
 impl MarketState {
     fn client(&self) -> Result<reqwest::Client, NetFailure> {
         self.client
             .get_or_init(|| {
                 // reqwest 用 rustls-no-provider：不装加密提供方，建 client 会 panic（同 sophia-gateway）
                 let _ = rustls::crypto::ring::default_provider().install_default();
-                reqwest::Client::builder()
-                    .connect_timeout(CONNECT_TIMEOUT)
-                    .timeout(REQUEST_TIMEOUT)
-                    .user_agent(concat!("Sophia/", env!("CARGO_PKG_VERSION")))
+                sophia_gateway::runtime::follow_system_proxy(client_builder())
                     .build()
                     .map_err(|e| error_chain_text(&e))
             })

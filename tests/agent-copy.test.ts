@@ -149,13 +149,15 @@ test("确认框与结果：指 agent 自己那一份时说「Claude Code 自己�
   const repo = { name: "通用仓库", seg: "", path: "/p/.agents/skills/canvas-design" };
   const keepOwn = keepThisConfirm({ kept: own, other: repo, skill: "canvas-design", relinked: 1 });
   assert.equal(keepOwn.title, "只留 Claude Code 自己那份 canvas-design？");
-  assert.equal(keepOwn.body, "通用仓库 那份移到废纸篓，1 条链接改指到这一份");
-  const keepRepo = keepThisConfirm({ kept: repo, other: own, skill: "canvas-design", relinked: 0 });
+  // 正文只说受影响的 agent（#274）：哪份进废纸篓已在标题下的路径行里，不再说链接条数
+  assert.equal(keepOwn.body, "原来使用 通用仓库 那份的 agent 将改用留下的这一份。");
+  const keepRepo = keepThisConfirm({ kept: repo, other: own, skill: "canvas-design", relinked: 2 });
   assert.equal(keepRepo.title, "只留 通用仓库 的 canvas-design？");
-  assert.equal(keepRepo.body, "Claude Code 自己那份移到废纸篓");
+  assert.equal(keepRepo.body, "原来使用 Claude Code 自己那份的 agent 将改用留下的这一份。");
+  // 没有要改用的 agent：不写正文
   assert.equal(
-    keepThisConfirm({ kept: repo, other: own, skill: "canvas-design", relinked: 2 }).body,
-    "Claude Code 自己那份移到废纸篓，2 条链接改指到这一份",
+    keepThisConfirm({ kept: repo, other: own, skill: "canvas-design", relinked: 0 }).body,
+    "",
   );
   for (const text of [keepOwn.title, keepOwn.body, keepRepo.title, keepRepo.body])
     assert.doesNotMatch(text, /那份 的|那份 那份|那份那份/);
@@ -179,8 +181,7 @@ test("文案三种语言同一套键：Claude Code 自己的（行首）/ 自己
   const toastKeys = [
     "toast.keepThis.nameOfOwn",
     "toast.keepThisConfirm.titleOwn",
-    "toast.keepThisConfirm.trashOwn",
-    "toast.keepThisConfirm.trashRelinkedOwn",
+    "toast.keepThisConfirm.relinkedOwn",
   ];
   for (const [lang, [own, copy]] of Object.entries(want)) {
     const skills = JSON.parse(

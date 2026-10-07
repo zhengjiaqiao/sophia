@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error 打包脚本是不带类型的 .mjs
-import { rewriteManifest } from "../packaging/cos-manifest.mjs";
+import { LATEST_DMG, rewriteManifest } from "../packaging/cos-manifest.mjs";
 
 const BASE = "https://sophia-releases-1258113621.cos.ap-shanghai.myqcloud.com";
 const API = "https://api.github.com/repos/zhengjiaqiao/sophia/releases/assets";
@@ -67,6 +67,17 @@ test("要传的产物：清单引用的更新包（去重）与两个 .dmg；签
     "Sophia_0.2.0_x64.app.tar.gz",
     "Sophia_0.2.0_aarch64.dmg",
     "Sophia_0.2.0_x64.dmg",
+  ]);
+});
+
+test("官网的下载键直链固定文件名的最新版：两个 .dmg 各一份，每次发版覆盖（#286）", () => {
+  assert.deepEqual(LATEST_DMG, {
+    aarch64: "latest/Sophia_aarch64.dmg",
+    x64: "latest/Sophia_x64.dmg",
+  });
+  assert.deepEqual(run().latest, [
+    { file: "Sophia_0.2.0_aarch64.dmg", key: "latest/Sophia_aarch64.dmg" },
+    { file: "Sophia_0.2.0_x64.dmg", key: "latest/Sophia_x64.dmg" },
   ]);
 });
 

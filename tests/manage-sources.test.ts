@@ -116,7 +116,7 @@ test("页名、空态、列头文字：一个位置用它的模型，不止一�
     title: "自动同步",
     emptyText: "还没有写了 MCP 的配置文件",
     countHead: "服务数",
-    ruleHead: "以后新出现的自动写进",
+    ruleHead: "以后新出现的自动加到",
   });
   assert.equal(sourcesPageText("skills", null, { noun: "skill" }).emptyText, "还没有原件位置");
 });
@@ -127,7 +127,7 @@ test("列头一行 位置 ｜ 来源 ｜ skill 数 ｜ 以后新出现的自动�
   assert.deepEqual(heads, ["生效范围", "原件位置", "skill 数", "以后新出现的自动加到"]);
   const mcp = fullPage("mcp", "all");
   const mcpHeads = [...mcp.matchAll(/role="columnheader">([^<]*)</g)].map((m) => m[1]);
-  assert.deepEqual(mcpHeads, ["生效范围", "配置文件", "服务数", "以后新出现的自动写进"]);
+  assert.deepEqual(mcpHeads, ["生效范围", "配置文件", "服务数", "以后新出现的自动加到"]);
   const rows = page(stubState([row("u", "通用仓库", false, 26), row("w", "WeiboAP", false, 27)]));
   assert.doesNotMatch(rows, />以后新出现的自动加到</);
   assert.equal(rows.match(/class="srcline"/g)?.length, 2);

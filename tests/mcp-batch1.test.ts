@@ -105,17 +105,18 @@ test("R5 R6：多位置表里 Copilot 列头多一行 .mcp.json 的说明，Clau
   );
   // Claude Desktop 只有用户级：项目行上没有它的格
   assert.equal(column("claude-desktop").targets.has(p), false);
-  assert.equal(mcpBlankTip("app", column("claude-desktop")), "Claude Desktop 没有项目级的 MCP");
-  // 用户级的行在团队共享那一格：说团队共享只在项目里
-  assert.equal(
-    mcpBlankTip("用户级", column("claude-code:team")),
-    "团队共享只在项目里：写进项目的 .mcp.json",
-  );
+  assert.deepEqual(mcpBlankTip("app", column("claude-desktop")), {
+    tip: "Claude Desktop 没有项目级的 MCP",
+  });
+  // 用户级的行在团队共享那一格：说团队共享只在项目里；写在哪个文件是第二行（spec #239 第 44 条）
+  assert.deepEqual(mcpBlankTip("用户级", column("claude-code:team")), {
+    tip: "团队共享只在项目中可用",
+    detail: "写入项目的 .mcp.json",
+  });
   // 别的列照旧
-  assert.equal(
-    mcpBlankTip("用户级", { id: "codex", harnessId: "codex", sentence: "Codex" }),
-    "用户级 没有 Codex 的配置位置",
-  );
+  assert.deepEqual(mcpBlankTip("用户级", { id: "codex", harnessId: "codex", sentence: "Codex" }), {
+    tip: "用户级 没有 Codex 的配置位置",
+  });
 });
 
 test("R6：只有用户级时 Copilot 列头不说 .mcp.json", () => {
@@ -251,7 +252,7 @@ test("位置 id → 列：用户级 User 与项目 Local 都是仅自己，项�
   assert.equal(claudeWhereText("claude-code", "用户级", "global"), null);
   assert.deepEqual(claudeMoveTip("claude-code:team", "CardBox"), {
     verb: "挪到团队共享",
-    detail: "写进 CardBox 的 .mcp.json，从你的本地配置里删掉",
+    detail: "加到 CardBox 的 .mcp.json，从你的本地配置里删掉",
   });
 });
 

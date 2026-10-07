@@ -74,11 +74,38 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// 没有代理环境变量时（例如由 launchd 拉起）改用 macOS 系统代理设置及其例外列表
+/// Sophia 所有出站请求共用的代理解析（issue #254）：本进程环境变量 → 登录 shell 里设的（从 Dock 启动时
+/// `.zshrc` 里那份，`login_env` 问完之前不看）→ macOS 系统代理及其例外列表（不支持 PAC），都没有就直连。
+/// 进程内一份，系统代理的缓存大家共用
 pub fn system_proxy() -> ProxyFn {
-    let resolver =
-        sysproxy::ProxyResolver::new(sysproxy::load_scutil, Duration::from_secs(30), Instant::now);
-    Arc::new(move |url| resolver.resolve(url))
+    static SHARED: OnceLock<ProxyFn> = OnceLock::new();
+    SHARED
+        .get_or_init(|| {
+            let resolver = sysproxy::ProxyResolver::new(
+                sysproxy::load_scutil,
+                Duration::from_secs(30),
+                Instant::now,
+            )
+            .with_login(|| {
+                crate::login_env::current()
+                    .map(|env| env.proxy)
+                    .unwrap_or_default()
+            });
+            Arc::new(move |url| resolver.resolve(url))
+        })
+        .clone()
+}
+
+/// 让一个客户端按 `resolve` 选代理（每个请求现算，不用 reqwest 建客户端时读一次的那份）
+pub fn with_proxy(builder: reqwest::ClientBuilder, resolve: ProxyFn) -> reqwest::ClientBuilder {
+    builder
+        .no_proxy()
+        .proxy(reqwest::Proxy::custom(move |url| resolve(url)))
+}
+
+/// 让一个客户端跟随 [`system_proxy`]：市场、更新、反馈、上报的客户端都经这里
+pub fn follow_system_proxy(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    with_proxy(builder, system_proxy())
 }
 
 fn service_manager() -> service::Manager {
@@ -540,10 +567,7 @@ pub async fn fetch_models(base_url: &str, key: &str) -> Result<(Vec<Model>, Stri
 fn gateway_client() -> Result<(reqwest::Client, ProxyFn), AppError> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let resolve = system_proxy();
-    let for_client = resolve.clone();
-    let client = provider::client_builder_defaults()
-        .no_proxy()
-        .proxy(reqwest::Proxy::custom(move |url| for_client(url)))
+    let client = with_proxy(provider::client_builder_defaults(), resolve.clone())
         .build()
         .map_err(|e| AppError::new("internal", e.to_string()))?;
     Ok((client, resolve))

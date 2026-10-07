@@ -4,6 +4,8 @@ import "../styles/site.css";
 import favicon from "../../../assets/logo/mark.svg";
 import { SITE } from "../site.config.ts";
 import { t, type Lang } from "../i18n.ts";
+import { homeRedirect } from "../lib/homeRedirect.ts";
+import { LANG_COOKIE } from "../lib/langs.ts";
 import Header from "../components/Header.astro";
 import Hero from "../components/Hero.astro";
 import ModelSection from "../components/ModelSection.astro";
@@ -17,13 +19,18 @@ interface Props {
 }
 const { lang } = Astro.props;
 const here = SITE.langs.find((l) => l.code === lang)!;
-const abs = (path: string) => `${SITE.origin}${path}`;
+const abs = (path: string) => `${SITE.origin}${SITE.href(path)}`;
+// 首页（英文页）按选过的语言或浏览器语言跳到对应语言页：函数源码内联在 head 最前面，同步执行（见 lib/homeRedirect.ts）
+const paths = Object.fromEntries(SITE.langs.map((l) => [l.code, SITE.href(l.path)]));
+const redirect =
+  here.path === "/" ? `(${homeRedirect})(${[lang, paths, LANG_COOKIE].map((v) => JSON.stringify(v)).join(", ")}, window);` : null;
 ---
 
 <!doctype html>
 <html lang={lang}>
   <head>
     <meta charset="utf-8" />
+    {redirect && <script is:inline set:html={redirect} />}
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>{t(lang, "meta.title")}</title>

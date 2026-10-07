@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  checkBase,
   checkCatalogs,
   checkDomains,
   checkPage,
@@ -13,6 +14,7 @@ import {
 } from "../scripts/check-site.ts";
 
 const ctx = {
+  base: "/",
   minMacos: "14",
   staticTexts: ["装上 Sophia，"],
   downloadHrefs: ["https://github.com/zhengjiaqiao/sophia/releases/latest"],
@@ -145,4 +147,31 @@ test("AC12：模型区写的服务商数要和预设一致：数不对（或写�
   assert.deepEqual(checkPage("zh-hans/index.html", stale, ctx), [
     "zh-hans/index.html：静态 HTML 里没有服务商数的说法「选一家就好。70 多家的地址都已填好，填错了当场告诉你。」（应用预设向下取整到十）",
   ]);
+});
+
+test("#286：带子路径构建时，页面里的站内地址都要带上它（缺了在 GitHub Pages 上就是 404）", () => {
+  const sub = { ...ctx, base: "/sophia/" };
+  const page =
+    goodHead +
+    goodBody +
+    `<link rel="stylesheet" href="/sophia/_astro/a.css"><script type="module" src="/_astro/a.js"></script><img src="/_astro/cat.png" srcset="/sophia/_astro/a.png 1x, /_astro/b.png 2x"><a href="/zh-hans/">`;
+  assert.deepEqual(checkPage("index.html", page, sub), [
+    "index.html：站内地址 /_astro/a.js 没带子路径 /sophia/",
+    "index.html：站内地址 /_astro/b.png 没带子路径 /sophia/",
+    "index.html：站内地址 /_astro/cat.png 没带子路径 /sophia/",
+    "index.html：站内地址 /zh-hans/ 没带子路径 /sophia/",
+  ]);
+});
+
+test("#286：样式里的 url(/…) 也要带子路径；不带子路径构建、外部地址、协议相对地址、锚点都不算", () => {
+  const css = "a{background:url(/_astro/x.woff2)} b{background:url('/sophia/_astro/y.woff2')} c{background:url(\"/_astro/z.png\")}";
+  assert.deepEqual(checkBase("_astro/a.css", css, "/sophia/"), [
+    "_astro/a.css：站内地址 /_astro/x.woff2 没带子路径 /sophia/",
+    "_astro/a.css：站内地址 /_astro/z.png 没带子路径 /sophia/",
+  ]);
+  assert.deepEqual(checkBase("index.html", `<a href="/x/"></a>`, "/"), []);
+  assert.deepEqual(
+    checkBase("index.html", `<a href="//github.com/a"></a><a href="#top"></a><a href="https://github.com/x"></a>`, "/sophia/"),
+    [],
+  );
 });

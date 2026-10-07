@@ -21,8 +21,14 @@ export interface LocationFrameProps {
   enabled: boolean;
   /// bar 插槽（与 Matrix 同一个位置、同一条 `mx-bar`）：筛选行（`FilterRow`）放这里；没给就只留上下距
   bar?: ReactNode;
-  /// 机面里的空态：一句现状（扫描中时就是「忙什么」）、可选第二行、图
-  empty: { description: string; hint?: string; busy?: boolean; art: EmptyArt };
+  /// 机面里的空态：一句现状（扫描中时就是「忙什么」）、可选第二行、图，可选一颗往下走的键（`前往设置`，默认键）
+  empty: {
+    description: string;
+    hint?: string;
+    busy?: boolean;
+    art: EmptyArt;
+    action?: { label: string; onClick: () => void };
+  };
   /// 空态上方的新手提示条（`NoticePanel` 的一次性说明用法：没有 `!`、能关、能进出）
   hint?: ReactNode;
   /// 叠在上面的层：来源移除的确认、来源管理页、添加来源页
@@ -49,7 +55,13 @@ export function LocationFrame({
       />
       {bar ? <div className="mx-bar">{bar}</div> : null}
       {hint ? <div className="mx-hint">{hint}</div> : null}
-      <Empty description={empty.description} hint={empty.hint} busy={empty.busy} art={empty.art} />
+      <Empty
+        description={empty.description}
+        hint={empty.hint}
+        busy={empty.busy}
+        art={empty.art}
+        secondary={empty.action}
+      />
       {children}
     </>
   );

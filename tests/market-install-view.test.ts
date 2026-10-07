@@ -4,23 +4,24 @@ import { t as say } from "../src/i18n.ts";
 import { setHome } from "../src/pathText.ts";
 import {
   CLAUDE_DESKTOP,
+  notLinkedReason,
   addLabel,
   agentRows,
   branchOfUrl,
-  configFilesLine,
-  footRuns,
   connectionText,
   defaultChecked,
   defaultInstallLocation,
   directReaderNote,
   downloadLine,
+  downloadTip,
   fieldTag,
+  fieldText,
   foundLine,
   formatSize,
   githubTreeUrl,
   installLabel,
   jsonHeader,
-  landingLine,
+  landingParts,
   landingTip,
   linkState,
   linkUnrecognized,
@@ -94,14 +95,23 @@ test("位置默认取当前 我的 的位置；全部 时是用户级（R9）", 
   assert.equal(locationOfNav("all"), "global");
 });
 
-test("落点行：用户级写 ~/.agents/skills/<名字>，项目写项目里的 .agents；后面一句说它是什么（2026-09-30「通用仓库」改叫 ~/.agents）", () => {
-  assert.equal(landingLine("global", "pdf"), "装到 ~/.agents/skills/pdf · 多数 agent 直接读这里");
+test("生效范围下面：先一句结果，再一行落点路径（#275：用户级 所有项目都能用；项目 只在 CardBox 中能用）", () => {
+  assert.deepEqual(landingParts("global", "pdf"), {
+    result: "所有项目都能用",
+    path: "~/.agents/skills/pdf",
+  });
+  assert.deepEqual(landingParts(PROJECT, "pdf"), {
+    result: "只在 CardBox 中能用",
+    path: "~/Project/CardBox/.agents/skills/pdf",
+  });
+  // 项目名取筛选行的写法（同名项目带区分）；取不到时用文件夹名
   assert.equal(
-    landingLine(PROJECT, "pdf"),
-    "装到 ~/Project/CardBox/.agents/skills/pdf · 多数 agent 直接读这里",
+    landingParts(PROJECT, "pdf", () => "CardBox（工作）").result,
+    "只在 CardBox（工作）中能用",
   );
+  assert.equal(landingParts(PROJECT, "pdf", () => undefined).result, "只在 CardBox 中能用");
   // 装好几个（从链接安装）：名字写 <名字>
-  assert.equal(landingLine("global", null), "装到 ~/.agents/skills/<名字> · 多数 agent 直接读这里");
+  assert.equal(landingParts("global", null).path, "~/.agents/skills/<名字>");
   // 悬停项目胶囊：这个位置的完整落点
   assert.equal(
     landingTip("/Users/you/Project/CardBox/", "pdf"),
@@ -160,6 +170,7 @@ const check = (
   harnessId,
   locationId: `global::${harnessId}`,
   status,
+  configPath: null,
   writes: status === "ok" || status === "partial" ? ["brave-search"] : [],
   reason: null,
   note: null,
@@ -189,7 +200,27 @@ test("MCP 勾选行后面那一句：写不过去的不能勾、就地说原因�
   assert.deepEqual(mcpRowView(undefined, true), {});
 });
 
-test("贴底：写进 K 个配置文件——只数勾上的、能写或部分能写的", () => {
+test("MCP 勾选行悬停：能勾的行带配置文件路径（主目录写 ~），不能勾的行只说原因（#276）", () => {
+  const codex = check("codex", "ok", { configPath: "/Users/you/.codex/config.toml" });
+  assert.deepEqual(mcpRowView(codex, true), { path: "~/.codex/config.toml" });
+  assert.deepEqual(mcpRowView(codex, false), { path: "~/.codex/config.toml" });
+  const same = check("cursor", "same", { configPath: "/Users/you/.cursor/mcp.json" });
+  assert.deepEqual(mcpRowView(same, true), { note: sameNote(), path: "~/.cursor/mcp.json" });
+  const blocked = mcpRowView(
+    check("codex", "blocked", {
+      reason: "Codex 里已经有一个不一样的 brave-search",
+      configPath: "/Users/you/.codex/config.toml",
+    }),
+    true,
+  );
+  assert.equal(blocked.path, undefined);
+  assert.equal(
+    say("market.mcp.writesTo", { path: "~/.codex/config.toml" }),
+    "写入 ~/.codex/config.toml",
+  );
+});
+
+test("能写的有几个：只数勾上的、能写或部分能写的（一个都没有时安装不可点）", () => {
   const checks = [
     check("claude-code", "ok"),
     check("codex", "blocked"),
@@ -200,24 +231,9 @@ test("贴底：写进 K 个配置文件——只数勾上的、能写或部分�
   assert.equal(writableCount(checks, ["claude-code", "codex", "gemini-cli", CLAUDE_DESKTOP]), 2);
   // 检查还没回来：先按勾了几个说
   assert.equal(writableCount(null, ["a", "b", "c"]), 3);
-  assert.equal(configFilesLine(3), "写进 3 个配置文件");
-  // 贴底一句：只有读数等宽，汉字两侧的空格走正文字族（不读成两个空格）
-  assert.deepEqual(footRuns("写进 3 个配置文件"), [
-    { text: "写进 ", mono: false },
-    { text: "3", mono: true },
-    { text: " 个配置文件", mono: false },
-  ]);
-  assert.deepEqual(footRuns("从 codeload.github.com 下载 · main · 2.1 MB"), [
-    { text: "从 ", mono: false },
-    { text: "codeload.github.com", mono: true },
-    { text: " 下载 · ", mono: false },
-    { text: "main", mono: true },
-    { text: " · ", mono: false },
-    { text: "2.1 MB", mono: true },
-  ]);
 });
 
-test("贴底（skill）：从 codeload.github.com 下载 · 分支 · 大小；计划没回来时只写已知的", () => {
+test("贴底（skill，#275）：从 GitHub 下载 · 大小；主机名与分支进悬停；计划没回来时只写已知的", () => {
   const preview = (sizeBytes: number | null): SkillInstallPreview => ({
     plan: {
       location: "global",
@@ -232,24 +248,27 @@ test("贴底（skill）：从 codeload.github.com 下载 · 分支 · 大小；�
     downloadUrl: "https://codeload.github.com/anthropics/skills/tar.gz/refs/heads/main",
     sizeBytes,
   });
-  assert.equal(
-    downloadLine(preview(2_100_000), null),
-    "从 codeload.github.com 下载 · main · 2.1 MB",
-  );
-  assert.equal(downloadLine(preview(null), null), "从 codeload.github.com 下载 · main");
-  assert.equal(downloadLine(null, "dev"), "从 codeload.github.com 下载 · dev");
+  assert.equal(downloadLine(preview(2_100_000)), "从 GitHub 下载 · 2.1 MB");
+  assert.equal(downloadLine(preview(null)), "从 GitHub 下载");
+  assert.equal(downloadLine(null), "从 GitHub 下载");
+  // 悬停：主机名 + 分支（计划给的 → 地址里认的 → 调用方知道的）
+  assert.deepEqual(downloadTip(preview(2_100_000), null), {
+    host: "codeload.github.com",
+    branch: "main",
+  });
+  assert.deepEqual(downloadTip(null, "dev"), { host: "codeload.github.com", branch: "dev" });
+  assert.deepEqual(downloadTip(null, null), { host: "codeload.github.com", branch: null });
   // 读链接的结果（从链接安装）同样带下载地址与大小；分支为空时从地址里认
+  const link = {
+    downloadUrl: "https://codeload.github.com/o/r/tar.gz/refs/heads/trunk",
+    sizeBytes: 850_000,
+  };
+  assert.equal(downloadLine(link), "从 GitHub 下载 · 850 KB");
+  assert.deepEqual(downloadTip(link, null), { host: "codeload.github.com", branch: "trunk" });
   assert.equal(
-    downloadLine(
-      {
-        downloadUrl: "https://codeload.github.com/o/r/tar.gz/refs/heads/trunk",
-        sizeBytes: 850_000,
-      },
-      null,
-    ),
-    "从 codeload.github.com 下载 · trunk · 850 KB",
+    say("market.install.downloadTip", { host: "codeload.github.com", branch: "main" }),
+    "codeload.github.com · 分支 main",
   );
-  assert.equal(downloadLine(null, null), "从 codeload.github.com 下载");
   assert.equal(
     branchOfUrl("https://codeload.github.com/o/r/tar.gz/refs/heads/feature/x"),
     "feature/x",
@@ -291,10 +310,24 @@ test("MCP 不可点：必填的空着、一个 agent 没勾、没名字、勾上
     fields: [field],
     values: {},
   };
-  assert.equal(mcpInstallBlock(base), "先填 BRAVE_API_KEY");
+  // 没有说明：退回键名
+  assert.equal(mcpInstallBlock(base), "请填写 BRAVE_API_KEY");
   assert.equal(
     mcpInstallBlock({ ...base, values: { BRAVE_API_KEY: "   " } }),
-    "先填 BRAVE_API_KEY",
+    "请填写 BRAVE_API_KEY",
+  );
+  // 有说明：用说明当名字（#276）
+  const token = {
+    key: "GITHUB_TOKEN",
+    kind: "header" as const,
+    required: true,
+    secret: true,
+    description: "GitHub 访问令牌，在 github.com/settings/personal-access-tokens 生成",
+  };
+  assert.equal(mcpInstallBlock({ ...base, fields: [token] }), "请填写 GitHub 访问令牌");
+  assert.equal(
+    mcpInstallBlock({ ...base, fields: [{ ...token, description: "Brave Search API key" }] }),
+    "请填写 Brave Search API key",
   );
   assert.equal(mcpInstallBlock({ ...base, values: { BRAVE_API_KEY: "k" } }), null);
   assert.equal(mcpInstallBlock({ ...base, checked: [] }), noAgent());
@@ -403,10 +436,10 @@ test("从 JSON 添加的几句：表头、主动作、第几行错、连接方�
   assert.equal(addLabel(2), "添加 2 个");
   assert.equal(parseErrorLine({ line: 3, message: "少了一个逗号" }), "第 3 行：少了一个逗号");
   assert.equal(parseErrorLine({ line: null, message: "认不出这段配置" }), "认不出这段配置");
-  assert.equal(connectionText(github), "远程 · https://api.githubcopilot.com/mcp/");
+  assert.equal(connectionText(github), "在线服务 · https://api.githubcopilot.com/mcp/");
   assert.equal(
     connectionText(filesystem),
-    '本机命令 · npx -y @modelcontextprotocol/server-filesystem "~/My Documents"',
+    '本地运行 · npx -y @modelcontextprotocol/server-filesystem "~/My Documents"',
   );
 });
 
@@ -426,7 +459,39 @@ test("要填的：只有空着的 ${…} 占位时才有；同名只列一次，
   assert.equal(fieldTag({ required: false, secret: false }), "选填");
 });
 
-test("安装 MCP 的来历：发布方 · 包名 + npm / PyPI 上的说明；远程的给主页", () => {
+test("要填的一项的写法（#276）：说明当标签、逗号后常显在框下；没有逗号整句当标签；没有说明退回键名", () => {
+  assert.deepEqual(
+    fieldText({
+      key: "GITHUB_TOKEN",
+      description: "GitHub 访问令牌，在 github.com/settings/personal-access-tokens 生成",
+    }),
+    {
+      label: "GitHub 访问令牌",
+      help: "在 github.com/settings/personal-access-tokens 生成",
+      keyed: false,
+    },
+  );
+  assert.deepEqual(fieldText({ key: "BRAVE_API_KEY", description: "Brave Search API key" }), {
+    label: "Brave Search API key",
+    help: null,
+    keyed: false,
+  });
+  // 官方目录的英文说明里的半角逗号不拆
+  assert.deepEqual(fieldText({ key: "K", description: "Your key, from the dashboard" }), {
+    label: "Your key, from the dashboard",
+    help: null,
+    keyed: false,
+  });
+  for (const description of [undefined, null, "", "   "]) {
+    assert.deepEqual(fieldText({ key: "BRAVE_API_KEY", description }), {
+      label: "BRAVE_API_KEY",
+      help: null,
+      keyed: true,
+    });
+  }
+});
+
+test("安装 MCP 的来历（#276）：发布方 + 查看说明（npm / PyPI 上的包指向包的说明页，悬停是包名；其余指向主页）", () => {
   const brave = {
     publisher: "Brave",
     homepage: null,
@@ -439,12 +504,23 @@ test("安装 MCP 的来历：发布方 · 包名 + npm / PyPI 上的说明；远
   };
   assert.deepEqual(mcpOrigin(brave), {
     publisher: "Brave",
-    ident: "@modelcontextprotocol/server-brave-search",
     leave: {
-      label: "npm 上的说明",
+      label: "查看说明",
       url: "https://www.npmjs.com/package/@modelcontextprotocol/server-brave-search",
+      tip: "@modelcontextprotocol/server-brave-search",
     },
   });
+  assert.deepEqual(
+    mcpOrigin({
+      ...brave,
+      definition: { name: "f", transport: "stdio", command: "uvx", args: ["mcp-server-fetch"] },
+    }).leave,
+    {
+      label: "查看说明",
+      url: "https://pypi.org/project/mcp-server-fetch/",
+      tip: "mcp-server-fetch",
+    },
+  );
   assert.deepEqual(
     packageOf({ name: "x", transport: "stdio", command: "uvx", args: ["mcp-server-fetch"] }),
     {
@@ -473,11 +549,13 @@ test("安装 MCP 的来历：发布方 · 包名 + npm / PyPI 上的说明；远
     homepage: "https://github.com/github/github-mcp-server",
     definition: github,
   });
-  assert.equal(remote.ident, "https://api.githubcopilot.com/mcp/");
   assert.deepEqual(remote.leave, {
-    label: "在 GitHub 打开",
+    label: "查看说明",
     url: "https://github.com/github/github-mcp-server",
+    tip: "https://github.com/github/github-mcp-server",
   });
+  // 既没有包也没有主页：没有离开键
+  assert.equal(mcpOrigin({ publisher: "GitHub", homepage: null, definition: github }).leave, null);
 });
 
 // ───────── 装完那一窗 ─────────
@@ -610,7 +688,7 @@ const entry = (
   backupPath: null,
 });
 
-test("写 MCP 之后：✓ 已写进 [图标…] brave-search，Desktop 接生效时机；已有一样的跳过不算失败", () => {
+test("加 MCP 之后（#276）：✓ 已加到 [图标…] brave-search，Desktop 接生效时机；已有一样的跳过不算失败", () => {
   const checks = [
     check("claude-code", "ok"),
     check("codex", "ok"),
@@ -628,7 +706,7 @@ test("写 MCP 之后：✓ 已写进 [图标…] brave-search，Desktop 接生�
   };
   const t = mcpInstalledToast(report, checks, [CC, CODEX, DESKTOP, CURSOR], "global");
   assert.equal(t.kind, "success");
-  assert.equal(say(t.sentence, { agents: "[图]", names: "名字" }), "已写进 [图] 名字");
+  assert.equal(say(t.sentence, { agents: "[图]", names: "名字" }), "已加到 [图] 名字");
   assert.deepEqual(t.names, ["brave-search"]);
   assert.deepEqual(
     t.agents.map((a) => a.id),
@@ -678,7 +756,7 @@ test("写 MCP 之后：✓ 已写进 [图标…] brave-search，Desktop 接生�
     "global",
   );
   assert.equal(none.kind, "cannot");
-  assert.equal(say(none.sentence, { agents: "[图]", names: "名字" }), "名字 写进 [图] 失败");
+  assert.equal(say(none.sentence, { agents: "[图]", names: "名字" }), "名字 添加失败");
   assert.deepEqual(
     none.agents.map((a) => a.id),
     ["codex"],
@@ -787,7 +865,7 @@ test("密钥提醒（S19）：只有「第一次暴露进仓库」才出「同�
     /aria-checked="true"/,
   );
 
-  // 有「要填的」时放在那一块最后（说明句下面）；没有时由页面放在「写进哪些 agent」最后
+  // 有「要填的」时放在那一块最后（说明句下面）；没有时由页面放在「给谁用」最后
   const { FieldsBlock } = await import("../src/market/InstallParts.tsx");
   const fields = render(FieldsBlock, {
     fields: [{ key: "BRAVE_API_KEY", kind: "env", required: true, secret: true }],
@@ -796,7 +874,7 @@ test("密钥提醒（S19）：只有「第一次暴露进仓库」才出「同�
     footer: "＠勾选",
   });
   assert.ok(
-    fields.indexOf("只写进勾选的 agent 的配置文件") < fields.indexOf("＠勾选"),
+    fields.indexOf("密钥只保存在所选 agent 中，Sophia 不保留") < fields.indexOf("＠勾选"),
     "勾选在说明句下面",
   );
 });
@@ -901,4 +979,12 @@ test("密钥提醒：目标文件已被 git 跟踪（加进 .gitignore 也挡不
     tracked: note,
   });
   assert.ok(both.indexOf('role="checkbox"') < both.indexOf('class="ss-note"'));
+});
+
+test("没链上：分不出原因（原因为空）只写主句，不带冒号", () => {
+  const agents = [{ id: "codex", name: "Codex" }];
+  assert.equal(
+    notLinkedReason([{ harnessId: "codex", name: "pdf", reason: "" }], agents),
+    "Codex 链接失败",
+  );
 });

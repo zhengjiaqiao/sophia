@@ -4,6 +4,6 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true
   },
-  "include": ["src", "scripts", "tests", "functions", ".astro/types.d.ts"],
+  "include": ["src", "scripts", "tests", ".astro/types.d.ts"],
   "exclude": ["dist"]
 }

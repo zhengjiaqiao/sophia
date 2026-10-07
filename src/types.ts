@@ -404,6 +404,8 @@ export interface McpReportEntry {
   backupPath: string | null;
   /** 这一条成了，但 Claude Desktop 第三方模式那一份（`McpLocation.mirrors`）没写成：整句原因，在成功条目下显示 */
   mirrorFailed?: string;
+  /** 没写成、又分不出原因（spec #239 第 43 条）：系统原文。给了就说明 `message` 是兜底句（`原子写入失败`），提示条不说它 */
+  detail?: string;
 }
 export interface McpReport {
   entries: McpReportEntry[];
@@ -1064,6 +1066,8 @@ export type KeyHint = "quiet" | "sourceCommitted" | "autoIgnore" | "remind" | "t
 export interface McpTargetCheck {
   harnessId: string;
   locationId: string | null;
+  /// 这个位置的配置文件完整路径：安装页勾选行悬停 `写入 <路径>`；这个位置没有时为 null
+  configPath: string | null;
   /// `same`：已有同名且一样的，跳过、不算失败
   status: "ok" | "partial" | "blocked" | "same";
   writes: string[];

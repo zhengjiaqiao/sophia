@@ -28,7 +28,7 @@ const here = SITE.langs.find((l) => l.code === lang)!;
         <div class="langmenu" id="langmenu">
           {
             SITE.langs.map((l) => (
-              <a href={l.path} hreflang={l.hreflang} lang={l.code} data-lang={l.code} aria-current={l.code === lang ? "true" : undefined}>
+              <a href={SITE.href(l.path)} hreflang={l.hreflang} lang={l.code} data-lang={l.code} aria-current={l.code === lang ? "true" : undefined}>
                 {l.label}
               </a>
             ))
@@ -70,7 +70,7 @@ const here = SITE.langs.find((l) => l.code === lang)!;
       e.stopPropagation();
       menu.click();
     });
-    // 选一种语言：写 lang cookie（#184 的中间件读它），页面随链接跳转
+    // 选一种语言：写 lang cookie（首页的语言跳转读它，见 lib/homeRedirect.ts），页面随链接跳转
     wrap.querySelectorAll<HTMLAnchorElement>(".langmenu a").forEach((a) =>
       a.addEventListener("click", () => {
         document.cookie = langCookie(a.dataset.lang!);

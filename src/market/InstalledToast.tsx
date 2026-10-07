@@ -1,5 +1,5 @@
 /// 装完之后右下那一窗（R9 R10 R11）：推入页滑回之后由调用方挂上——`✓ 已安装 pdf` + `撤销`、
-/// `✓ 已写进 [图标…] brave-search` + `撤销`。撤销只给「没有顺手反操作」的事，装新东西正是（⑬）。
+/// `✓ 已加到 [图标…] brave-search` + `撤销`。撤销只给「没有顺手反操作」的事，装新东西正是（⑬）。
 /// 文案由 installView 的 `skillInstalledToast` / `mcpInstalledToast` 造（推入页的 `onDone` 已经带过来）。
 /// 有 agent 没链上（那里已有同名的、建链接失败）时，「撤销」前多一颗「去处理」（issue #111）：
 /// 带到 SKILLS · 我的 里那一行、拉开抽屉（去哪由 `skillHandleTarget` 算，怎么去归调用方）

@@ -9,7 +9,7 @@ import { CLAUDE_SELF, CLAUDE_TEAM, openCodeNoticeWanted, withEnableNote } from "
 import { HINTS, createHintStore } from "../src/hints.ts";
 
 const PROJECT = "project:/Users/me/sophia";
-const NOTE = "写进以后要在 Claude Code 里启用才生效";
+const NOTE = "加上后需在 Claude Code 中启用才生效";
 const WHERE = "写在sophia的 .mcp.json，随仓库分享给团队";
 
 // ---- 启用那一句 ----
@@ -35,7 +35,7 @@ test("仅自己、用户级、Codex、Cursor、已经有（点了是删）：不
 test("启用那一句三种语言都有、说的是启用", () => {
   try {
     setLocale("zh-Hant");
-    assert.equal(t("mcp.claude.enableNote"), "寫入以後要在 Claude Code 裡啟用才生效");
+    assert.equal(t("mcp.claude.enableNote"), "加上後需在 Claude Code 中啟用才生效");
     setLocale("en");
     assert.match(t("mcp.claude.enableNote"), /enable it in Claude Code/);
   } finally {

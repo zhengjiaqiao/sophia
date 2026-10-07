@@ -303,7 +303,7 @@ test("MCP 移除：禁用原因、确认正文（服务与位置各自去重；�
     mcpRemoveConfirmBody([item("docs", "p"), item("docs", "c"), item("search", "p")], nameOf),
     "这 2 个服务在 Claude Code · Project、Codex · Project 里的那份会拿掉：docs、search",
   );
-  assert.equal(mcpRemoveConfirmBody([], nameOf), "它的服务会从列表里拿掉，没有写进这里的配置要撤");
+  assert.equal(mcpRemoveConfirmBody([], nameOf), "它的服务会从列表中移除，没有需要撤回的配置");
   assert.equal(
     stuckTip("internal-tools", "Codex · User"),
     "internal-tools 用了只有 Codex · User 支持的写法，写到别处就不是原来那个了",
@@ -367,5 +367,5 @@ test("MCP 搬不过去按目标 agent 判断：哪儿都搬不过去照旧；只
     mcpStuckTip(helper, "Claude Code · User", [cursor, cursorProject, gemini]),
     "显示的 agent 都不支持用命令生成请求头",
   );
-  assert.equal(mcpStuckTip(helper, "Claude Code · User", []), "这里没有能写进 gh 的位置");
+  assert.equal(mcpStuckTip(helper, "Claude Code · User", []), "这里没有能加上 gh 的位置");
 });

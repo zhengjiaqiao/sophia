@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 use tauri::test::MockRuntime;
 
 const PACKAGE: &[u8] = b"the update package bytes";
+/// 慢慢出数据的那几个测试用的包：要比测速的一段长
+const BIG: &[u8] = &[7u8; 16 * 1024];
 const NEW: &str = "9.9.9";
 
 /// 测试用的时限：短到几秒内跑完，比例与正式的一样（连接 < 查清单）
@@ -17,8 +19,19 @@ const QUICK: Limits = Limits {
     connect: Duration::from_millis(500),
     check: Duration::from_millis(1500),
     read: Duration::from_millis(1500),
+    slow_span: Duration::from_millis(300),
+    slow_rate: 16 * 1024,
     direct: true,
 };
+
+/// 每 50 毫秒出 `chunk` 个字节：256 是 5 KB/s（低于 QUICK 的 16 KB/s），2048 是 40 KB/s
+fn paced(chunk: usize) -> Reply {
+    Reply::Paced {
+        bytes: BIG,
+        chunk,
+        every: Duration::from_millis(50),
+    }
+}
 
 /// 一个地址回什么
 #[derive(Clone)]
@@ -26,6 +39,12 @@ enum Reply {
     Json(String),
     Bytes(&'static [u8]),
     Status(u16),
+    /// 一点一点地出：每隔 `every` 出 `chunk` 个字节
+    Paced {
+        bytes: &'static [u8],
+        chunk: usize,
+        every: Duration,
+    },
     /// 连上了但一直不回
     Hang,
 }
@@ -79,6 +98,24 @@ fn answer(mut stream: TcpStream, routes: &[(&str, Reply)], seen: &Mutex<Vec<Stri
         Reply::Json(text) => (200, "application/json", text.into_bytes()),
         Reply::Bytes(bytes) => (200, "application/octet-stream", bytes.to_vec()),
         Reply::Status(code) => (code, "text/plain", b"nope".to_vec()),
+        Reply::Paced {
+            bytes,
+            chunk,
+            every,
+        } => {
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 X\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bytes.len()
+            );
+            for part in bytes.chunks(chunk) {
+                if stream.write_all(part).and_then(|_| stream.flush()).is_err() {
+                    return;
+                }
+                std::thread::sleep(every);
+            }
+            return;
+        }
         Reply::Hang => {
             std::thread::sleep(Duration::from_secs(10));
             return;
@@ -320,4 +357,114 @@ fn the_signature_must_carry_the_announced_version() {
         assert_eq!(problem.kind, NetKind::Other, "{signed:?}");
         assert!(problem.detail.contains("version"), "{}", problem.detail);
     }
+}
+
+#[test]
+fn a_slow_github_download_moves_to_the_domestic_line() {
+    let signer = Signer::new();
+    let sig = signer.sign(BIG, Some(NEW));
+    // GitHub 一直有数据但很慢：照这个速度下完要 3 秒多
+    let github = serve_line(&sig, paced(256));
+    let cos = serve_line(&sig, Reply::Bytes(BIG));
+    let app = app(&signer);
+    let lines = lines(&[&github.url("/latest.json"), &cos.url("/latest.json")]);
+    let found = run(check(app.handle(), &lines, &QUICK))
+        .unwrap()
+        .expect("有新版");
+
+    let started = Instant::now();
+    let (update, bytes) = run(download(app.handle(), &lines, &found, &QUICK, |_| {})).unwrap();
+    assert_eq!(bytes, BIG);
+    // 用的是国内线路查到的那一份（包地址、签名），验签照做
+    assert_eq!(update.download_url.as_str(), cos.url("/pkg"));
+    assert_eq!(cos.hits(), ["/latest.json", "/pkg"]);
+    // 测满一段（QUICK.slow_span）就换，没等它慢慢下完
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn the_only_line_is_downloaded_even_when_slow() {
+    let signer = Signer::new();
+    let sig = signer.sign(BIG, Some(NEW));
+    let cos = serve_line(&sig, paced(256));
+    let app = app(&signer);
+    let lines = lines(&[&cos.url("/latest.json")]);
+    let found = run(check(app.handle(), &lines, &QUICK))
+        .unwrap()
+        .expect("有新版");
+
+    let (_, bytes) = run(download(app.handle(), &lines, &found, &QUICK, |_| {})).unwrap();
+    assert_eq!(bytes, BIG);
+}
+
+#[test]
+fn the_last_line_is_downloaded_even_when_slow() {
+    let signer = Signer::new();
+    let sig = signer.sign(BIG, Some(NEW));
+    let github = serve_line(&sig, paced(256));
+    let cos = serve_line(&sig, paced(256));
+    let app = app(&signer);
+    let lines = lines(&[&github.url("/latest.json"), &cos.url("/latest.json")]);
+    let found = run(check(app.handle(), &lines, &QUICK))
+        .unwrap()
+        .expect("有新版");
+
+    // GitHub 太慢换掉了；国内线路一样慢，但已是最后一条，照样下完
+    let (update, bytes) = run(download(app.handle(), &lines, &found, &QUICK, |_| {})).unwrap();
+    assert_eq!(bytes, BIG);
+    assert_eq!(update.download_url.as_str(), cos.url("/pkg"));
+}
+
+#[test]
+fn github_at_a_normal_speed_keeps_its_line() {
+    let signer = Signer::new();
+    let sig = signer.sign(BIG, Some(NEW));
+    // 下完要 400 毫秒，比测速的一段长，速度在门槛之上
+    let github = serve_line(&sig, paced(2048));
+    let cos = serve_line(&sig, Reply::Bytes(BIG));
+    let app = app(&signer);
+    let lines = lines(&[&github.url("/latest.json"), &cos.url("/latest.json")]);
+    let found = run(check(app.handle(), &lines, &QUICK))
+        .unwrap()
+        .expect("有新版");
+
+    let (update, bytes) = run(download(app.handle(), &lines, &found, &QUICK, |_| {})).unwrap();
+    assert_eq!(bytes, BIG);
+    assert_eq!(update.download_url.as_str(), github.url("/pkg"));
+    assert!(cos.hits().is_empty(), "{:?}", cos.hits());
+}
+
+#[test]
+fn a_slow_github_is_named_in_the_detail() {
+    let signer = Signer::new();
+    let sig = signer.sign(BIG, Some(NEW));
+    let github = serve_line(&sig, paced(256));
+    let cos = serve_line(&sig, Reply::Status(404));
+    let app = app(&signer);
+    let lines = lines(&[&github.url("/latest.json"), &cos.url("/latest.json")]);
+    let found = run(check(app.handle(), &lines, &QUICK))
+        .unwrap()
+        .expect("有新版");
+
+    let problem = run(download(app.handle(), &lines, &found, &QUICK, |_| {}))
+        .err()
+        .expect("国内线路也失败，应当失败");
+    // 「!」原文里先是 GitHub 太慢（带平均速度），再是国内线路的失败
+    let slow = problem
+        .detail
+        .find(&format!(
+            "{}\ndownload too slow (averaged ",
+            github.url("/pkg")
+        ))
+        .unwrap_or_else(|| panic!("{}", problem.detail));
+    let domestic = problem
+        .detail
+        .find("404")
+        .unwrap_or_else(|| panic!("{}", problem.detail));
+    assert!(slow < domestic, "{}", problem.detail);
+    assert!(problem.detail.contains(" KB/s over "), "{}", problem.detail);
 }

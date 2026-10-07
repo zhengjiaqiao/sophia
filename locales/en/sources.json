@@ -32,7 +32,7 @@
   "sources.mcpOwn": "This is {place}'s own config; to remove its servers, edit the config itself",
   "sources.stuck.noHeaderCommand": "None of the agents shown support generating headers with a command",
   "sources.stuck.noPlace": "No location here can take {service}",
-  "sources.mcpRemoveBody.none": "Its servers will be removed from the list; nothing written to configs needs undoing",
+  "sources.mcpRemoveBody.none": "Its servers will be removed from the list; there's nothing to undo in any config",
   "sources.mcpRemoveBody.some": {
     "one": "The copy of this server in {places} will be removed: {names}",
     "other": "The copies of these {count} servers in {places} will be removed: {names}"
@@ -83,8 +83,12 @@
   "sources.removal.cannot": "Couldn't remove {names}",
   "sources.removal.verb": "Remove",
   "sources.removal.failedLinks": {
-    "one": "{count} symlink wasn't removed: {first}",
-    "other": "{count} symlinks weren't removed: {first}"
+    "one": "{count} entry couldn't be cleared · {first}",
+    "other": "{count} entries couldn't be cleared · {first}"
+  },
+  "sources.removal.failedLinksPlain": {
+    "one": "{count} entry couldn't be cleared",
+    "other": "{count} entries couldn't be cleared"
   },
   "sources.removal.failedItems": {
     "one": "{count} item wasn't removed: {first}",
@@ -105,20 +109,20 @@
     "one": "{count} agent",
     "other": "{count} agents"
   },
-  "sources.mcp.noTargetsReason": "No location to write to here yet",
-  "sources.mcp.targetsLabel": "Auto-write to locations",
+  "sources.mcp.noTargetsReason": "No location to add to here yet",
+  "sources.mcp.targetsLabel": "Auto-add to locations",
   "sources.mcp.emptyItems": "No servers in this config right now",
   "sources.mcp.noCandidates": "No other MCP configs to add yet",
   "sources.mcp.sameNameTip": "A same-name server is already here; once added, they share a row in the main view, and differences are marked on the row",
   "sources.mcp.unreadable": "Can't read its config; fix it before turning this on",
   "sources.mcp.crossDomainTitle": "{rule}; writing here also copies headers and tokens",
-  "sources.mcp.selfTarget": "This is the source itself; it can't write to itself",
+  "sources.mcp.selfTarget": "This is the source itself; it can't be added to itself",
   "sources.mcp.noFolder": "MCP sources aren't added from folders",
   "sources.mcp.newFile": "{name} (new .mcp.json)",
-  "sources.mcp.ruleText": "Auto-write new ones to",
-  "sources.mcp.ruleLabel": "Auto-write new servers from {name} to the chosen agents",
-  "sources.mcp.targetsTip": "Auto-write to {agents}",
-  "sources.mcp.targetsAria": "Change the locations {name} auto-writes to",
+  "sources.mcp.ruleText": "Auto-add new ones to",
+  "sources.mcp.ruleLabel": "Auto-add new servers from {name} to the chosen agents",
+  "sources.mcp.targetsTip": "Auto-add to {agents}",
+  "sources.mcp.targetsAria": "Change the locations {name} auto-adds to",
   "sources.mcp.targetCount": {
     "one": "{count} location",
     "other": "{count} locations"

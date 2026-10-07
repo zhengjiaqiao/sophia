@@ -1531,7 +1531,7 @@ test("Toast 右下（notice 档）：纸窗（paper + hairline 边），40px 记
   });
   assert.match(html, /class="ss-toast ss-toast--notice"/);
   assert.match(html, /class="ss-toast__indicator" role="img" aria-label="部分失败"><svg/);
-  assert.match(html, /class="ss-toast__verb">写进</);
+  assert.match(html, /class="ss-toast__verb">加到</);
   assert.match(html, /role="img" aria-label="Claude Code"/);
   assert.match(html, /class="ss-toast__names">excalidraw、notion</);
   assert.match(html, /class="ss-btn ss-btn--compact">撤销</);
@@ -1734,7 +1734,7 @@ test("Toast 成功：不给档位也是纸窗（paper + hairline 边 + float 12 
     action: { label: "撤销", onClick: noop },
   });
   assert.match(html, /class="ss-toast ss-toast--routine"/);
-  assert.match(html, /class="ss-toast__verb">写进</);
+  assert.match(html, /class="ss-toast__verb">加到</);
   assert.match(html, /class="ss-btn ss-btn--compact">撤销</);
   assert.doesNotMatch(html, /ss-toast__indicator/);
   // 句首 ✓ 是勾选框里同一枚对勾
@@ -1778,7 +1778,7 @@ test("第三批 8A 例行提示条：最宽 420；放得下（简体短句）照
   // 一行：✓、整句、` · 读数`、` · `、撤销依次是根下的兄弟，没有折行用的包层
   assert.match(
     html,
-    /^<div class="ss-toast ss-toast--routine" data-kind="success" role="status"><span class="ss-toast__mark"[^]*?<\/span><span class="ss-toast__verb">写进<\/span><span class="ss-toast__agents">[^]*?<\/span><span class="ss-toast__names">brave-search<\/span><span class="ss-toast__trail"><span class="ss-toast__sep">·<\/span><span>重启 Claude Desktop 后生效<\/span><\/span><span class="ss-toast__sep">·<\/span><span class="ss-tipwrap is-idle"><button type="button" class="ss-btn ss-btn--compact">撤销<\/button><\/span><\/div>$/,
+    /^<div class="ss-toast ss-toast--routine" data-kind="success" role="status"><span class="ss-toast__mark"[^]*?<\/span><span class="ss-toast__verb">加到<\/span><span class="ss-toast__agents">[^]*?<\/span><span class="ss-toast__names">brave-search<\/span><span class="ss-toast__trail"><span class="ss-toast__sep">·<\/span><span>重启 Claude Desktop 后生效<\/span><\/span><span class="ss-toast__sep">·<\/span><span class="ss-tipwrap is-idle"><button type="button" class="ss-btn ss-btn--compact">撤销<\/button><\/span><\/div>$/,
   );
   assert.doesNotMatch(html, /is-wrapped|ss-toast__line|ss-toast__trailline|ss-toast__keys/);
 });

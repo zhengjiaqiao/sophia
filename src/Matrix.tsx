@@ -293,6 +293,8 @@ export interface MatrixProps {
   columns: MatrixColumn[];
   /// 「来源」列的列头文字
   originLabel: string;
+  /// 「来源」列头的提示框（这一列是什么：`skill 所在的文件夹`）
+  originTip?: string;
   /// 「位置」列的列头文字：范围里不止一个位置时给，名称后多一列、来源列让窄；不给就没有这一列
   placeLabel?: string;
   /// 页面头下方的插槽（吸顶）：以前固定放按来源筛选的胶囊行；R9 去掉了它，现在是个空槽——
@@ -665,6 +667,7 @@ export default function Matrix(props: MatrixProps) {
   const {
     columns,
     originLabel,
+    originTip,
     placeLabel,
     bar,
     hint,
@@ -1073,6 +1076,12 @@ export default function Matrix(props: MatrixProps) {
       <SortArrow active={sort.key === "name"} desc={sort.dir === "desc"} />
     </button>
   );
+  const originHead = (
+    <button type="button" className="mx-headbtn" onClick={() => sortBy("origin")}>
+      {originLabel}
+      <SortArrow active={sort.key === "origin"} desc={sort.dir === "desc"} />
+    </button>
+  );
   /// 一个 agent 格的列头：图标 / 名字 / 第二行 / 计数；在合组里只有小标 + 计数（图标与名字在组头）。
   /// `slot`：表里有合组时，其余列在第二行的位置留空（高一条结构线 + 一行小标），列头同高、计数对齐
   const colHead = (col: MatrixColumn, slot: boolean) => (
@@ -1171,10 +1180,13 @@ export default function Matrix(props: MatrixProps) {
       ) : null}
       {/* 来源：点文字按来源排序（同来源聚拢） */}
       <div className="mx-head__origin">
-        <button type="button" className="mx-headbtn" onClick={() => sortBy("origin")}>
-          {originLabel}
-          <SortArrow active={sort.key === "origin"} desc={sort.dir === "desc"} />
-        </button>
+        {originTip ? (
+          <Tooltip content={originTip} context="table" placement="bottom">
+            {originHead}
+          </Tooltip>
+        ) : (
+          originHead
+        )}
       </div>
       {headerRuns(columns).flatMap((run) =>
         run.group ? (

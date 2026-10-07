@@ -86,10 +86,6 @@
   overflow-wrap: anywhere;
 }
 
-.intro__fact dd .intro__dot + * {
-  font-size: var(--size-label);
-}
-
 /* 要填的几项：一项一段，项间 16，放不下折行 */
 .intro__fields {
   display: flex;
@@ -97,7 +93,7 @@
   gap: 0 var(--space-md);
 }
 
-/* 一项要填的：键名（mono）+ 8 + `必填 · 密钥` */
+/* 一项要填的：说明（没有说明时是键名，mono）+ 8 + 键名（mono 小字）+ 8 + `必填 · 密钥` */
 .intro__field {
   display: inline-flex;
   align-items: baseline;

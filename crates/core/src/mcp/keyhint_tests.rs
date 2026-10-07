@@ -321,7 +321,8 @@ fn gitignore_failure_is_reported_but_the_write_stands() {
         report.entries
     );
     let reason = report.gitignore_failed.expect("应当说 .gitignore 没写成");
-    assert!(reason.starts_with("没能加进 .gitignore："), "{reason}");
+    // 分不出原因（目标是个文件夹）：只写失败句，不拼系统原文（spec #239「出错的时候」）；原文进日志
+    assert_eq!(reason, crate::t!("mcp.report.gitignoreFailedPlain"));
     assert!(project.join(".cursor/mcp.json").is_file());
 }
 

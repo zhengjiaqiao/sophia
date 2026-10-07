@@ -1,6 +1,6 @@
 {
   "attribution": "起点取自一份 MIT 许可的精选 MCP 清单，出处与许可见仓库根 NOTICE。本文件逐条对照各家官方 README / 文档核实后改写。",
-  "note": "MCP 精选（spec R7）。definition 值里的 ${KEY} 是要填的项，与 fields 的 key 一一对应。signIn 为 true 的是远程服务器，首次使用时由 agent 在浏览器里登录（OAuth），不用填值。",
+  "note": "MCP 精选（spec R7）。definition 值里的 ${KEY} 是要填的项，与 fields 的 key 一一对应。signIn 为 true 的是远程服务器，首次使用时由 agent 在浏览器里登录（OAuth），不用填值。fields 的 description 写成「标签，怎么取得」：安装页把全角逗号前当输入框的标签与禁用原因（请填写…），逗号后常显在输入框下。",
   "verifiedAt": "2026-09-27",
   "servers": [
     {
@@ -68,7 +68,7 @@
           "kind": "header",
           "required": true,
           "secret": true,
-          "description": "GitHub 个人访问令牌，在 github.com/settings/personal-access-tokens 生成"
+          "description": "GitHub 访问令牌，在 github.com/settings/personal-access-tokens 生成"
         }
       ],
       "homepage": "https://github.com/github/github-mcp-server",

@@ -4,14 +4,17 @@
 /// ←  安装 pdf
 /// anthropics/skills · skills/pdf   在 GitHub 打开 ↗
 /// 读、写、合并、拆分 PDF，填表单、抽表格。
-/// 位置 ─────────────────────────────────────────────
+/// 生效范围 ─────────────────────────────────────────
 /// [用户级] [CardBox] [weibo_assistant] [更多 ˅]
-/// 装到 ~/.agents/skills/pdf · 这里是用户级的通用仓库
+/// 所有项目都能用                          （项目：只在 CardBox 中能用）
+/// ~/.agents/skills/pdf                    （等宽灰字，常显）
 /// 给谁用 ───────────────────────────────────────────
+/// 这些 agent 直接读取这个文件夹，无需选择
+/// c Cline
+/// 同时加到
 /// ☑ ✳ Claude Code                ☑ ⎔ Codex
-/// ☑ c Cline  直接读取，不用链接
 /// ═══════════════════════════════════════════════ 贴底
-/// 从 codeload.github.com 下载 · main · 2.1 MB      [取消] [安装]
+/// 从 GitHub 下载 · 2.1 MB                  [取消] [安装]   （悬停：codeload.github.com · 分支 main）
 /// ```
 ///
 /// 从列表的 `安装`、介绍页的 `安装` 进来（介绍页上再推一层：`←` 回介绍页，装完两层一起滑回由调用方收）。
@@ -26,6 +29,7 @@ import type { InstallOutcome } from "../types.ts";
 import type { InstalledNotice } from "./InstalledToast.tsx";
 import {
   DownloadFailure,
+  DownloadTip,
   SkillAgents,
   InstallBlock,
   InstallFooter,
@@ -143,7 +147,8 @@ export function InstallPage(props: InstallPageProps) {
       escape={props.escape}
       footer={
         <InstallFooter
-          line={downloadLine(state.preview, skill.branch)}
+          line={downloadLine(state.preview)}
+          tip={<DownloadTip source={state.preview} branch={skill.branch} />}
           label={installLabel(1)}
           block={block}
           busy={state.busy}
@@ -160,7 +165,7 @@ export function InstallPage(props: InstallPageProps) {
   );
 }
 
-/// 安装页的正文：来历、一句说明、位置 + 落点、给谁用。从链接安装只认出一个 skill 时，那一页的正文也是它
+/// 安装页的正文：来历、一句说明、生效范围 + 落点、给谁用。从链接安装只认出一个 skill 时，那一页的正文也是它
 export function SkillInstallBody({
   skill,
   state,

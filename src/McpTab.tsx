@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import { listText, t, tn, tSpaced, useLocale, useOnLocaleChange } from "./i18n.ts";
+import type { AppFault } from "./backendError.ts";
 import Matrix, {
   cellKey,
   RevealLink,
@@ -26,8 +27,8 @@ import { SourcesPage } from "./pages/SourcesPage";
 import { GLOBAL_KEY, type Face, type Location } from "./shell/nav";
 import { mcpSourcesModel, type SourcesModel } from "./pages/sourcesModel";
 import { matchesFilter } from "./rowFilter";
-import { mcpLocationName, type DomainRef } from "./pages/sourcesView";
-import { configPathText, displayPath } from "./pathText";
+import type { DomainRef } from "./pages/sourcesView";
+import { displayPath } from "./pathText";
 import { McpPickLayer, type McpPick } from "./McpPickLayer";
 import { McpScopeDialog, type ScopeChoiceView, type ScopeGitignore } from "./McpScopeDialog";
 import { McpKeepConfirm, type KeepGitignore } from "./McpKeepConfirm";
@@ -53,8 +54,13 @@ import {
   differingFields,
   teamGained,
   teamLost,
+  mcpAgentName,
   mcpBlankTip,
+  mcpBlockedTip,
   mcpColumnNote,
+  mcpEntryReason,
+  mcpFailedAt,
+  mcpWriteFault,
   differingSourceIds,
   mcpColumnOf,
   mcpDomains,
@@ -89,7 +95,7 @@ import {
 import { Button, Confirm, CornerToast, Mono, NoticePanel, Tag, Toast, ToastCount } from "./ui";
 import { HINTS, useHint } from "./hints.ts";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
-import { mcpCopyName } from "./mcpDiffTable";
+import { mcpCopyName, mcpOriginName } from "./mcpDiffTable";
 import type { ToastProps } from "./ui";
 import type { AnchorRect } from "./layerPlace.ts";
 import {
@@ -139,7 +145,8 @@ export interface McpTabProps {
   locations: ReadonlyArray<string>;
   /// 位置本身（`全部` / `用户级` / 某个项目）：它变了才清空勾选、收起来源页
   scopeKey: string;
-  onError: (error: string) => void;
+  /// 出错交给窗口顶上的横幅（灰面板）。写入出错时另给该处的失败句（`加到 Codex 失败`）：原文与文件路径进「!」
+  onError: (error: string, more?: Omit<AppFault, "text">) => void;
   /// 壳的错误横幅开着：新手提示让位（DESIGN-components「灰面板 · 一次性说明的用法」）
   banner?: boolean;
   /// 扫描、写入进行中：壳把后台重扫排到它结束之后（不锁页签、不锁项目切换）
@@ -154,6 +161,10 @@ export interface McpTabProps {
   filterBar?: (source: ReactNode) => ReactNode;
   /// `发现` 一面的安装页要的（当前位置、位置胶囊、agent 名单）；不给时发现列表的 `安装` 不接
   install?: InstallContext;
+  /// 空态的 `前往发现`：切到「发现」一面；不给就不出这颗键
+  onDiscover?: () => void;
+  /// 没有能用 MCP 的 agent 时空态的 `前往设置`：设置停在显示的 agent 那一节；不给就不出这颗键
+  onOpenSettings?: () => void;
 }
 
 /// 行键：同名服务在一个位置里合成一行；不同位置是不同的行
@@ -184,11 +195,6 @@ const columnNames = (targets: McpLocation[]): Map<string, string> =>
   new Map(
     [...columnHeads(targets)].map(([id, h]) => [id, h.scope ? `${h.name} ${h.scope}` : h.name]),
   );
-
-/// 组名（「来源」列，筛选框搜来源名也用它）：定义所在的位置名，与 MCP 来源页同一个写法（`mcpLocationName`：
-/// `Claude Code · User`、`Codex · Project`）
-const groupLabel = (l: McpLocation | undefined, id: string): string =>
-  l ? mcpLocationName(l) : id;
 
 const NO_PLACES: InstallPlaces = {
   recent: [],
@@ -294,6 +300,8 @@ export default function McpTab({
   face = "mine",
   filterBar,
   install,
+  onDiscover,
+  onOpenSettings,
 }: McpTabProps) {
   const [overview, setOverview] = useState<McpOverview | null>(null);
   // 选中的行：域 key → 行键集合
@@ -437,7 +445,7 @@ export default function McpTab({
         const t = targets.find((x) => x.id === e.targetId);
         return {
           name: e.name,
-          agent: t ? { id: t.harnessId, name: t.label } : undefined,
+          agent: t ? { id: t.harnessId, name: mcpAgentName(t) } : undefined,
           project: t ? t.domain !== "global" : undefined,
           note: e.mirrorFailed,
         };
@@ -563,7 +571,11 @@ export default function McpTab({
 
   const locationOf = (id: string): McpLocation | undefined =>
     overview?.locations.find((location) => location.id === id);
-  const labelOf = (id: string) => locationOf(id)?.label ?? id;
+  /// 一个位置在原因句里的名字：它是哪个 agent（`Claude Code`），不带 core 给的英文作用域（spec #239 第 42 条）
+  const labelOf = (id: string) => {
+    const location = locationOf(id);
+    return location ? mcpAgentName(location) : id;
+  };
   /// 差异表与「保留这份」里一份的名字：`用户级 · Claude Code`
   const copyNameOf = (id: string) => {
     const location = locationOf(id);
@@ -584,6 +596,29 @@ export default function McpTab({
   };
   /// 右键「拷贝路径」：完整路径进剪贴板（展开区里的路径同样能选中 ⌘C）
   const copyPath = (path: string) => void api.copyText(path).catch((e) => onError(String(e)));
+
+  /// 写入的命令本身出错：窗口顶上的横幅说 `加到 Codex 失败`（几处时 `添加失败`），原文与要写的文件完整路径进「!」
+  /// （spec #239 第 43 条）
+  const writeFault = (error: unknown, targetIds: readonly string[]) => {
+    const ids = [...new Set(targetIds)];
+    const one = ids.length === 1 ? locationOf(ids[0]) : undefined;
+    const paths = [
+      ...new Set(
+        ids.flatMap((id) => {
+          const path = locationOf(id)?.path;
+          return path ? [displayPath(path)] : [];
+        }),
+      ),
+    ];
+    const { text, ...more } = mcpWriteFault(
+      String(error),
+      one
+        ? t("mcp.write.failedAtPlain", { location: mcpLocationSentence(one) })
+        : t("mcp.line.writeCannot"),
+      paths,
+    );
+    onError(text, more);
+  };
 
   /// 这一行为什么勾不动。空值表示可勾
   const blockedOf = (p: McpDomain, row: McpDomainRow): string | undefined => {
@@ -618,7 +653,7 @@ export default function McpTab({
       const l = locationOf(e.targetId);
       return {
         name: e.name,
-        agent: l ? { id: l.harnessId, name: l.label } : undefined,
+        agent: l ? { id: l.harnessId, name: mcpAgentName(l) } : undefined,
         project: l ? l.domain !== "global" : undefined,
         note: e.mirrorFailed,
       };
@@ -670,7 +705,10 @@ export default function McpTab({
     try {
       result = await api.applyMcp(preview.planId, allowCrossDomain);
     } catch (error) {
-      onError(String(error));
+      writeFault(
+        error,
+        preview.actions.map((a) => a.targetId),
+      );
     } finally {
       onBusy(false);
       setPendingCells((prev) => {
@@ -683,15 +721,16 @@ export default function McpTab({
     // 挪过去：写成的那几项，在同一个位置的另一格还有的，从那里删掉（R4）；两步各有撤销号，`撤销` 一起还原
     const moves = claudeMovesFor(result?.entries.filter((e) => e.outcome === "created") ?? []);
     let moveUndoId: string | null = null;
+    // 另一格删除失败：给人看的原因；分不出原因（或命令本身出错，原文已进日志）时是空串，只写失败句
     let moveFailed: string | null = null;
     if (moves.length > 0) {
       try {
         const removed = await api.deleteMcpOriginal(moves);
         moveUndoId = removed.undoId;
         const miss = removed.entries.find((e) => e.outcome !== "removed");
-        if (miss) moveFailed = miss.message;
-      } catch (error) {
-        moveFailed = String(error);
+        if (miss) moveFailed = mcpEntryReason(miss) ?? "";
+      } catch {
+        moveFailed = "";
       }
     }
     if (result !== null) {
@@ -701,13 +740,13 @@ export default function McpTab({
         setFlash({ keys: created.map((e) => cellKeyAt(e.name, e.targetId)), nonce: Date.now() });
       const text = toastFor("write", {
         done: itemsOf(created),
-        failed: itemsOf(failed).map((item, i) => ({
-          ...item,
-          reason: t("mcp.write.failedAt", {
-            location: labelOf(failed[i].targetId),
-            message: failed[i].message,
-          }),
-        })),
+        failed: itemsOf(failed).map((item, i) => {
+          const at = locationOf(failed[i].targetId);
+          return {
+            ...item,
+            reason: mcpFailedAt(at ? mcpLocationSentence(at) : failed[i].targetId, failed[i]),
+          };
+        }),
       });
       const undoId = result.undoId;
       // 单格：那一格的键、行键与列（撤销后闪那一格；撤不了时说明出在那一格下）。一份都没写成时
@@ -735,8 +774,9 @@ export default function McpTab({
           try {
             const back = await api.mcpUndoWrite(id);
             if (back.outcome !== "undone") message = back.message;
-          } catch (error) {
-            message = String(error);
+          } catch {
+            // 命令本身出错：原文已进日志，提示条只写失败句
+            message = "";
           }
           if (message !== null)
             setGlobalToast(
@@ -744,7 +784,11 @@ export default function McpTab({
                 kind="partial"
                 sentence="mcp.scope.toastUndo"
                 names={writtenNames}
-                reason={tSpaced("mcp.report.gitignoreUndoFailed", { message })}
+                reason={
+                  message
+                    ? tSpaced("mcp.report.gitignoreUndoFailed", { message })
+                    : t("mcp.report.gitignoreUndoFailedPlain")
+                }
                 onDismiss={dismissGlobal}
                 onClose={dismissGlobal}
               />,
@@ -837,8 +881,13 @@ export default function McpTab({
         let added: McpReport;
         try {
           added = await api.addMcpGitignore(keyFacts.ignorable ?? []);
-        } catch (error) {
-          added = { entries: [], undoId: null, gitignoreFailed: String(error) };
+        } catch {
+          // 命令本身出错：原文已进日志，提示条只写失败句（不拼系统原文）
+          added = {
+            entries: [],
+            undoId: null,
+            gitignoreFailed: t("mcp.report.gitignoreFailedPlain"),
+          };
         }
         if (added.gitignoreUndoId) ignoreUndos.push(added.gitignoreUndoId);
         keyFacts = afterGitignoreAdd(keyFacts, added);
@@ -852,7 +901,8 @@ export default function McpTab({
         const f = failed[0];
         const line = toastFor("write", {
           done: [],
-          failed: itemsOf([f]).map((item) => ({ ...item, reason: f.message })),
+          // 分不出原因的（core 给了原文）不说原因：空串，提示条只写失败句
+          failed: itemsOf([f]).map((item) => ({ ...item, reason: mcpEntryReason(f) ?? "" })),
         });
         const path = locationOf(f.targetId)?.path;
         failCell(rowKeyAt(f.name, f.targetId), mcpColumnOf(f.targetId), f.message, {
@@ -863,7 +913,7 @@ export default function McpTab({
           stats: path ? displayPath(path) : undefined,
         });
       } else if (created.length > 0 && moves.length > 0 && moveFailed !== null) {
-        // 写进去了、另一格没删掉：现在两处都有，照实说（行上会挂 `两处都有`，抽屉里只留一处）；密钥已经写进
+        // 写进去了、另一格删除失败：现在两处都有，照实说（行上会挂 `两处都有`，抽屉里只留一处）；密钥已经写进
         // 项目文件的，那一句照样接在后面（这一条是格子下的说明，不带键）
         const c = created[0];
         const toTeam = mcpColumnOf(c.targetId) === CLAUDE_TEAM;
@@ -871,9 +921,11 @@ export default function McpTab({
           rowKeyAt(c.name, c.targetId),
           mcpColumnOf(c.targetId),
           joinReasons(
-            t(toTeam ? "mcp.claude.writtenTeamKept" : "mcp.claude.writtenSelfKept", {
-              message: moveFailed,
-            }),
+            moveFailed
+              ? t(toTeam ? "mcp.claude.writtenTeamKept" : "mcp.claude.writtenSelfKept", {
+                  message: moveFailed,
+                })
+              : t(toTeam ? "mcp.claude.writtenTeamKeptPlain" : "mcp.claude.writtenSelfKeptPlain"),
             cellKeyHint(keyFacts).note,
           ) ?? "",
         );
@@ -1002,7 +1054,10 @@ export default function McpTab({
     try {
       preview = await api.proposeMcpSync(selections);
     } catch (error) {
-      onError(String(error));
+      writeFault(
+        error,
+        selections.map((sel) => sel.targetId),
+      );
       return;
     } finally {
       if (keyId !== undefined) setKeyBusy((prev) => (prev?.keyId === keyId ? null : prev));
@@ -1210,14 +1265,18 @@ export default function McpTab({
         ];
         if (mode === "move" && drop.length > 0) removed = await api.deleteMcpOriginal(drop);
       }
-      problem =
-        written?.entries.find((e) => e.outcome === "failed")?.message ??
-        removed?.entries.find((e) => e.outcome !== "removed")?.message ??
-        (created.length === 0
+      // 分不出原因的（core 给了原文）只写失败句：空串（spec #239 第 43 条）
+      const miss =
+        written?.entries.find((e) => e.outcome === "failed") ??
+        removed?.entries.find((e) => e.outcome !== "removed");
+      problem = miss
+        ? (mcpEntryReason(miss) ?? "")
+        : created.length === 0
           ? (preview.issues[0]?.message ?? t("mcp.scope.nothingToMove"))
-          : null);
-    } catch (error) {
-      problem = String(error);
+          : null;
+    } catch {
+      // 命令本身出错：原文已进日志（后端 `err`），提示条只写失败句
+      problem = "";
     } finally {
       onBusy(false);
     }
@@ -1307,7 +1366,7 @@ export default function McpTab({
           sentence={cannotLine}
           place={toName}
           names={[placed.name]}
-          reason={problem ?? undefined}
+          reason={problem || undefined}
           onDismiss={dismissGlobal}
           onClose={dismissGlobal}
         />,
@@ -1403,7 +1462,7 @@ export default function McpTab({
     const differs = differingSourceIds(row, new Set(p.targets.map((t) => t.id))).length > 0;
     const pane: DeletePane = {
       items: [{ locationId: target.id, name: row.name }],
-      agent: { id: target.harnessId, name: target.label },
+      agent: { id: target.harnessId, name: mcpAgentName(target) },
       anchor: r ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom } : undefined,
       text: deleteMcpOriginalConfirm({ agent, name: row.name, others }),
       undoable: others.length === 0 || differs,
@@ -1470,7 +1529,7 @@ export default function McpTab({
       setKeyBusy({ keyId, label: () => batchBusyText("delete", keyAgent(keyId)) });
     }
     const one = del.items[0];
-    const cannot = (reason: string) =>
+    const cannot = (reason: string | undefined) =>
       setRowToast({
         rowKey: rowKeyAt(one.name, one.locationId),
         at: del.anchor,
@@ -1491,7 +1550,8 @@ export default function McpTab({
       try {
         result = await api.deleteMcpOriginal(del.items);
       } catch (error) {
-        if (keyId === undefined) cannot(String(error));
+        // 单格：命令本身出错的原文已进日志（后端 `err`），提示条只写失败句（spec #239「出错的时候」）
+        if (keyId === undefined) cannot(undefined);
         else onError(String(error));
       } finally {
         onBusy(false);
@@ -1633,8 +1693,9 @@ export default function McpTab({
           pane.revision,
           gitignore.add,
         );
-      } catch (error) {
-        cannot(String(error));
+      } catch {
+        // 命令本身出错：原文已进日志（后端 `err`），提示条只写失败句
+        cannot(undefined);
       } finally {
         onBusy(false);
       }
@@ -1772,7 +1833,14 @@ export default function McpTab({
     const originId = mcpGroupOf(row);
     return locationOf(originId)?.path ?? originId;
   };
-  // 筛选行右端不再有 `来源` 下拉：MCP 没有「来源」这件事了，配置文件列本身写路径
+  /// 「配置文件」列里写的名字（spec #239 第 41 条）：位置名，与确认框、挑选浮层同一套（`Claude Code`、
+  /// `CardBox · Claude Code 团队共享`）；完整路径在悬停、抽屉与右键菜单里
+  const rowOriginName = (row: McpPlacedRow) => {
+    const originId = mcpGroupOf(row);
+    const location = locationOf(originId);
+    return location ? mcpOriginName(mcpPlaceNameOf(location.domain), location) : originId;
+  };
+  // 筛选行右端不再有 `来源` 下拉：MCP 没有「来源」这件事了
   const bar = filterBar?.(null);
 
   // ===== 渲染 =====
@@ -1843,15 +1911,21 @@ export default function McpTab({
       />
     );
 
+  /// 没有能用 MCP 的 agent 时空态里那颗键（spec #239 第 5 条）：到设置里显示 agent
+  const settingsKey = onOpenSettings
+    ? { label: t("mcp.empty.goSettings"), onClick: onOpenSettings }
+    : undefined;
+  // 一个配置位置都没有＝显示的 agent 里没有能用 MCP 的：说结果，再说装哪几个、去设置里显示（spec #239 第 5 条）
   if (overview.locations.length === 0) {
     return (
       <LocationFrame
         {...frame}
         hint={openCodePanel(false)}
         empty={{
-          description: t("mcp.empty.noFiles"),
-          hint: t("mcp.empty.noFilesHint"),
+          description: t("mcp.empty.noAgents"),
+          hint: t("mcp.empty.noAgentsHint"),
           art: "noDirs",
+          action: settingsKey,
         }}
       />
     );
@@ -1872,8 +1946,9 @@ export default function McpTab({
                 : sourceKey === "global"
                   ? t("mcp.empty.noPlaceGlobal")
                   : t("mcp.empty.noneInProject"),
-          hint: t("mcp.empty.noPlaceHint"),
+          hint: t("mcp.empty.noAgentsHint"),
           art: "noDirs",
+          action: settingsKey,
         }}
       >
         {managePage}
@@ -1885,9 +1960,13 @@ export default function McpTab({
   const targetIdsOf = (row: McpPlacedRow) => new Set(pageOf(row).targets.map((t) => t.id));
   /// 这一行在这一列的配置位置；这一行的位置里没有这一列（用户级行在 LOCAL 列上）就没有格
   const targetAt = (row: McpPlacedRow, column: McpColumn) => column.targets.get(row.domainKey);
-  // 筛选框（⌘F）同时匹配名字与配置文件路径
+  // 筛选框（⌘F）同时匹配名字、配置文件列里的位置名与完整路径
   const visible = table.rows.filter((row) =>
-    matchesFilter(filterText, row.name, displayPath(rowOriginPath(row))),
+    matchesFilter(
+      filterText,
+      row.name,
+      `${rowOriginName(row)}\n${displayPath(rowOriginPath(row))}`,
+    ),
   );
 
   /// 格此刻画成什么：乐观更新的画成点下去之后的样子（写进 ●、删除空心），落定前不再可点。
@@ -1939,10 +2018,12 @@ export default function McpTab({
       if (!target && table.places.size > 1) {
         // 多位置时这一行的位置没有这一列（用户级行在 LOCAL 列、项目行在 DESKTOP 列）：画 ⊘、悬停与按下说原因——
         // 与写不进去的格子同一个样子（2026-09-27 产品负责人：「悬停既然说了，就不用另一种样式了」）
+        const blank = mcpBlankTip(table.places.get(row.domainKey) ?? "", column);
         cells[column.id] = {
           dot: "blocked",
           clickable: false,
-          tip: mcpBlankTip(table.places.get(row.domainKey) ?? "", column),
+          tip: blank.tip,
+          tipDetail: blank.detail,
         };
         continue;
       }
@@ -1967,6 +2048,9 @@ export default function McpTab({
       const where = view.clickable ? claudeWhereText(column.id, place, row.domainKey) : null;
       // 项目里团队共享格点了会写进（#115）：第二行末尾接「要在 Claude Code 里启用才生效」
       const writes = view.clickable && !invalid && view.dot !== "linked";
+      // ⊘（写不过去）：第一行说人话，第二行写具体原因（spec #239 第 44 条）
+      const blocked =
+        view.dot === "blocked" && !view.clickable ? mcpBlockedTip(view, column.sentence) : null;
       cells[column.id] = {
         dot: view.dot,
         clickable: view.clickable || invalid,
@@ -1981,10 +2065,13 @@ export default function McpTab({
                 : choiceCount(row, target.id) > 1
                   ? pickTip(row.name, choiceCount(row, target.id))
                   : t("mcp.cell.clickToWrite")
-              : (view.reason ?? ""),
+              : (blocked?.tip ?? view.reason ?? ""),
         tipDetail: invalid
           ? undefined
-          : (withEnableNote(move?.detail ?? where, column.id, row.domainKey, writes) ?? undefined),
+          : blocked
+            ? blocked.detail
+            : (withEnableNote(move?.detail ?? where, column.id, row.domainKey, writes) ??
+              undefined),
         pending: pendingCells.has(cellKey(key, column.id)),
       };
     }
@@ -2004,7 +2091,7 @@ export default function McpTab({
     const keepOnly = (keep: McpLocation, drop: McpLocation) =>
       void deleteOriginal({
         items: [{ locationId: drop.id, name: row.name }],
-        agent: { id: drop.harnessId, name: drop.label },
+        agent: { id: drop.harnessId, name: mcpAgentName(drop) },
         text: deleteMcpOriginalConfirm({ agent: "Claude Code", name: row.name, others: [] }),
         resultText: {
           tier: "routine",
@@ -2038,16 +2125,13 @@ export default function McpTab({
       placeAction: canMove
         ? { label: t("mcp.scope.editKey"), tip: t("mcp.scope.editTip"), onOpen: openMove }
         : undefined,
-      // 配置文件（R1）：写路径（项目里的只写项目里那段），点它在访达中显示；悬停出完整路径
+      // 配置文件（R1；spec #239 第 41 条）：写位置名，不写路径；悬停出位置名 + 完整路径与 `打开 ↗`，
+      // 完整路径另在抽屉与右键「在访达中显示 · 拷贝路径」里
       origin: {
         id: originId,
-        label: configPathText(
-          originPath,
-          row.domainKey.startsWith("project:") ? row.domainKey.slice("project:".length) : undefined,
-        ),
+        label: rowOriginName(row),
         path: originPath,
         onReveal: () => void reveal(originPath),
-        asPath: true,
       },
       cells,
       // 差异是行级事实，不进格：名字后的纯文字记号 `2 份不一样`（12 ink-mute，不是键），提示框给差异字段名；
@@ -2334,6 +2418,7 @@ export default function McpTab({
     ) : pages.every((page) => page.targets.some((target) => target.harnessId === "weiboap")) ? (
       <TableEmpty text={t("mcp.empty.noFullDefinition")} art="emptyFolder" />
     ) : (
+      // 还没有 MCP：说结果、说哪些会出现在这里，给一颗 `前往发现`（spec #239 第 4、6 条）
       <TableEmpty
         text={
           scopeKey === "all"
@@ -2344,6 +2429,8 @@ export default function McpTab({
                 ? t("mcp.empty.noneInPlace", { place: pages[0].label })
                 : t("mcp.empty.noneInProject")
         }
+        hint={t("mcp.empty.noneHint")}
+        action={onDiscover ? { label: t("mcp.empty.goDiscover"), onClick: onDiscover } : undefined}
         art="emptyFolder"
       />
     );
@@ -2416,7 +2503,7 @@ export default function McpTab({
           <ul className="mcp-confirm-list">
             {pane.preview.actions.slice(0, 12).map((action) => (
               <li key={`${action.sourceId}|${action.targetId}|${action.name}`}>
-                {action.name} → {labelOf(action.targetId)}
+                {action.name} → {copyNameOf(action.targetId)}
               </li>
             ))}
             {pane.preview.actions.length > 12 && (
@@ -2433,7 +2520,7 @@ export default function McpTab({
           {pane.preview.issues.map((issue, i) => (
             <div key={`${issue.locationId}|${issue.name ?? ""}|${i}`} className="mcp-confirm-note">
               {t("mcp.confirm.skipped", {
-                name: issue.name ?? labelOf(issue.locationId),
+                name: issue.name ?? copyNameOf(issue.locationId),
                 message: issue.message,
               })}
             </div>
@@ -2497,12 +2584,7 @@ export default function McpTab({
       ) : null}
 
       {pick !== null && (
-        <McpPickLayer
-          pick={pick}
-          labelOf={(id) => groupLabel(locationOf(id), id)}
-          onPick={choose}
-          onClose={closePick}
-        />
+        <McpPickLayer pick={pick} labelOf={copyNameOf} onPick={choose} onClose={closePick} />
       )}
 
       {managePage}

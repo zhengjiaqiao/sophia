@@ -1,5 +1,5 @@
 /// 安装类推入页（安装页 06 / 09、从链接安装 07、从 JSON 添加 10）共用的几块（DESIGN「发现与安装 › 安装页」）：
-/// `位置`（复用位置页筛选行的胶囊，去掉 `全部`）+ 落点行、勾选行网格、`要填的` 表单、勾选列表的一行、贴底一行。
+/// `生效范围`（复用位置页筛选行的胶囊，去掉 `全部`）+ 结果一句与落点路径、勾选行网格、`要填的` 表单、勾选列表的一行、贴底一行。
 /// 只吃 props；带业务状态的钩子在 `useInstall.ts`。
 import { useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
@@ -31,13 +31,15 @@ import type { ProjectSort } from "../sidebarProjects.ts";
 import type { ToastText } from "../toastText.ts";
 import type { ClaudeCodeScope, LocationKey, McpFieldSpec } from "../types.ts";
 import {
+  downloadTip,
   fieldTag,
-  footRuns,
+  fieldText,
   landingParts,
   landingTip,
   locationOfNav,
   navOfLocation,
   type AgentRef,
+  type DownloadSource,
 } from "./installView.ts";
 import { copyDetails } from "../diagnostics.ts";
 import type { SkillDownloadFailure } from "../netFailure.ts";
@@ -88,8 +90,9 @@ export function InstallBlock({ label, children }: { label: string; children: Rea
   );
 }
 
-/// `位置`：与 `我的` 筛选行同一种单选胶囊，去掉 `全部`（R9）；悬停项目胶囊，提示框出这个位置的完整落点。
-/// `name`：给了（装一个时是名字，几个时是 null）就在胶囊下写落点行；不给（MCP）就不写。
+/// `生效范围`：与 `我的` 筛选行同一种单选胶囊，去掉 `全部`（R9）；悬停项目胶囊，提示框出这个位置的完整落点。
+/// `name`：给了（装一个时是名字，几个时是 null）就在胶囊下写两行——结果一句（13 `ink`：`所有项目都能用` /
+/// `只在 CardBox 中能用`）+ 落点路径（等宽 12 `ink-faint`，常显，#275）；不给（MCP）就不写。
 /// `blocked`：落点已有同名的（`用户级的通用仓库里已经有 pdf` + `在访达中显示 ↗`）
 export function PlaceBlock({
   places,
@@ -107,7 +110,10 @@ export function PlaceBlock({
   onReveal?: (path: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const landing = name === undefined ? null : landingParts(value, name);
+  const landing =
+    name === undefined
+      ? null
+      : landingParts(value, name, (key) => places.sorted.find((p) => p.key === key)?.label);
   return (
     <InstallBlock label={t("market.install.blockPlace")}>
       <FilterRow
@@ -125,13 +131,12 @@ export function PlaceBlock({
         tipOf={(p) => landingTip(p.path, name ?? null)}
       />
       {landing ? (
-        <p className="install-landing">
-          {/* 目录里这一句用不换行空格（原来的 &nbsp;）：「装到」、路径、「·」之间不折行 */}
-          {tRich("market.install.landingLineKept", {
-            path: <Mono inherit>{landing.path}</Mono>,
-            note: landing.note,
-          })}
-        </p>
+        <div className="install-landing">
+          <p className="install-landing__result">{landing.result}</p>
+          <p className="install-landing__path">
+            <Mono>{landing.path}</Mono>
+          </p>
+        </div>
       ) : null}
       {blocked ? (
         <p className="install-blocked">
@@ -163,13 +168,15 @@ export function claudeScopeChoice(
   return { value, onChange, place };
 }
 
-/// 一行勾选行此刻的样子：名字后那一句，与不能勾的原因
+/// 一行勾选行此刻的样子：名字后那一句，与不能勾的原因；`path`（MCP）：这个 agent 的配置文件，悬停这一行出
+/// `写入 ~/.codex/config.toml`（第二层，#276；不能勾的行悬停出原因，不出它）
 export interface AgentRowView {
   note?: string;
   disabledReason?: string;
+  path?: string;
 }
 
-/// `给谁用` / `写进哪些 agent`：勾选行（勾选框 + agent 图标 + 名字 + 名字后一句），两列或一列（从 JSON 添加：
+/// `给谁用`：勾选行（勾选框 + agent 图标 + 名字 + 名字后一句），两列或一列（从 JSON 添加：
 /// 放得下原因句）。不能勾的行画成没勾
 export function AgentChecks({
   rows,
@@ -201,7 +208,7 @@ export function AgentChecks({
         {rows.map((a) => {
           const view = viewOf(a.id);
           const disabled = view.disabledReason !== undefined;
-          const row = (
+          const check = (
             <CheckRow
               key={a.id}
               size="grid"
@@ -215,6 +222,17 @@ export function AgentChecks({
               {a.name}
             </CheckRow>
           );
+          const row =
+            view.path && !disabled ? (
+              <Tooltip
+                key={a.id}
+                content={tRich("market.mcp.writesTo", { path: <Mono inherit>{view.path}</Mono> })}
+              >
+                {check}
+              </Tooltip>
+            ) : (
+              check
+            );
           // 勾选行是一颗键，单选片不能放在它里面：并排放在同一格，紧跟名字
           return scoped && a.id === "claude-code" ? (
             <div key={a.id} className="install-scope">
@@ -252,8 +270,8 @@ export function AgentChecks({
 }
 
 /// skill 的 `给谁用`（2026-09-27 产品负责人：直接读通用仓库的 agent 不用勾，告诉用户它们会读，其余再勾——
-/// 同 `npx skills` 的 Universal 一组）：上面一句 `这些 agent 直接读取这个文件夹，不用选` + 一排图标与名字（不能点）；
-/// 下面其余 agent 的勾选行，有上面一组时加小标 `另外链接给`。直接读取的照样放进安装请求（计划里它们不建链接）。
+/// 同 `npx skills` 的 Universal 一组）：上面一句 `这些 agent 直接读取这个文件夹，无需选择` + 一排图标与名字（不能点）；
+/// 下面其余 agent 的勾选行，有上面一组时加小标 `同时加到`（#275：不说「链接给」，这一页还有「从链接安装」）。直接读取的照样放进安装请求（计划里它们不建链接）。
 /// 用户级只有 Cline 这类读 `~/.agents/skills`；项目里 Codex、Cursor、Gemini CLI 等都读 `.agents/skills`
 export function SkillAgents({
   rows,
@@ -289,7 +307,7 @@ export function SkillAgents({
       {others.length > 0 ? (
         <>
           {readers.length > 0 ? (
-            <p className="install-direct__more">{t("market.install.alsoLink")}</p>
+            <p className="install-direct__more">{t("market.install.alsoAdd")}</p>
           ) : null}
           <AgentChecks rows={others} checked={checked} onToggle={onToggle} viewOf={viewOf} />
         </>
@@ -298,8 +316,9 @@ export function SkillAgents({
   );
 }
 
-/// `要填的`（R10）：两列——左：键名（等宽 `ink`）+ 下一行 `必填 · 密钥`；右：输入框（密钥遮住，眼睛看一眼）。
-/// 下面一句 `只写进勾选的 agent 的配置文件，Sophia 自己不存`
+/// `要填的`（R10；#276）：两列——左：标签（目录里的说明，`ink`）+ 下一行 `必填 · 密钥` 与键名（等宽 12 `ink-faint`）；
+/// 没有说明时标签就是键名（等宽），不再另写一遍。右：输入框（密钥遮住，眼睛看一眼），说明的后半句常显在框下
+/// （不放占位里：一打字就没了）。块下一句 `密钥只保存在所选 agent 中，Sophia 不保留`
 export function FieldsBlock({
   fields,
   values,
@@ -317,24 +336,30 @@ export function FieldsBlock({
       <div className="install-fields">
         {fields.map((f) => {
           const id = `install-field-${f.key}`;
+          const text = fieldText(f);
           return (
             <div key={f.key} className="install-field">
               <label className="install-field__label" id={`${id}-label`} htmlFor={id}>
-                <Mono inherit>{f.key}</Mono>
-                <Tag tone="weak">{fieldTag(f)}</Tag>
+                {text.keyed ? <Mono inherit>{text.label}</Mono> : <span>{text.label}</span>}
+                <span className="install-field__meta">
+                  <Tag tone="weak">{fieldTag(f)}</Tag>
+                  {text.keyed ? null : <Mono>{f.key}</Mono>}
+                </span>
               </label>
-              <TextField
-                id={id}
-                labelledBy={`${id}-label`}
-                value={values[f.key] ?? ""}
-                onChange={(v) => onChange(f.key, v)}
-                type={f.secret ? "password" : "text"}
-                revealable={f.secret}
-                mono
-                spellCheck={false}
-                autoComplete="off"
-                placeholder={f.description ?? undefined}
-              />
+              <div className="install-field__input">
+                <TextField
+                  id={id}
+                  labelledBy={`${id}-label`}
+                  value={values[f.key] ?? ""}
+                  onChange={(v) => onChange(f.key, v)}
+                  type={f.secret ? "password" : "text"}
+                  revealable={f.secret}
+                  mono
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                {text.help ? <p className="install-field__help">{text.help}</p> : null}
+              </div>
             </div>
           );
         })}
@@ -348,7 +373,7 @@ export function FieldsBlock({
 /// 密钥提醒（S19，spec 2026-10-05-skill-mcp-batch2）：往 git 仓库里的项目文件写像密钥的值时，一个默认不勾的
 /// 勾选行「同时加进 .gitignore」。解释不常显，进提示框（悬停这一行、键盘焦点到它时出）：哪几个文件在仓库里、
 /// 不加会怎样、勾上加哪几行（`keyHintTip`）。放在 `要填的` 最后——先填密钥，再决定要不要加；没有那一块时放在
-/// `写进哪些 agent` 最后。想自用的人勾一下，想共享给队友的不受影响。
+/// `给谁用` 最后。想自用的人勾一下，想共享给队友的不受影响。
 /// 目标文件已被 git 跟踪的（`tracked`，加进 .gitignore 也挡不住）不出勾选，在同一个位置说一句（现成的 `Note`，
 /// 13 `ink-mute`；产品负责人 2026-10-06）；两种都有时勾选在上、那一句在下
 export function KeyHintBlock({
@@ -462,16 +487,34 @@ export function InstallScroll({ children }: { children: ReactNode }) {
   );
 }
 
+/// 悬停贴底那一句（skill，#275）出的提示框：`codeload.github.com · 分支 main`，主机名与分支等宽；分支不知道时只写主机名
+export function DownloadTip({
+  source,
+  branch,
+}: {
+  source: DownloadSource | null;
+  branch: string | null;
+}) {
+  const tip = downloadTip(source, branch);
+  const host = <Mono inherit>{tip.host}</Mono>;
+  if (tip.branch === null) return host;
+  return (
+    <>{tRich("market.install.downloadTip", { host, branch: <Mono inherit>{tip.branch}</Mono> })}</>
+  );
+}
+
 /// 做不成时浮在主动作上方那一窗（8 秒，悬停停表）
 export interface InstallFailure {
   key: number;
   toast: ToastText;
 }
 
-/// 贴底一行：左边等宽灰字一句去向（`从 codeload.github.com 下载 · main · 2.1 MB` / `写进 3 个配置文件`）；
-/// 右边 `取消`（默认键）+ 8 + 墨键主动作。主动作不能按时带原因；在装时原位换成刻度 + 一句
+/// 贴底一行：左边灰字一句去向（skill：`从 GitHub 下载 · 2.1 MB`，悬停出 `tip`——主机名与分支，#275；
+/// MCP 不写：勾选行已经说清给谁了，#276）；右边 `取消`（默认键）+ 8 + 墨键主动作。主动作不能按时带原因；
+/// 在装时原位换成刻度 + 一句
 export function InstallFooter({
-  line,
+  line = "",
+  tip,
   label,
   block,
   busy,
@@ -481,7 +524,9 @@ export function InstallFooter({
   onCancel,
   onSubmit,
 }: {
-  line: string;
+  line?: string;
+  /// 悬停那一句出的提示框（第二层）；不给时只在一行放不下被截断时出全句
+  tip?: ReactNode;
   label: string;
   block: string | null;
   busy: boolean;
@@ -491,22 +536,22 @@ export function InstallFooter({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  // 第一层没有要等宽的读数（「GitHub」是名字、大小是正文里的数）；主机名与分支在提示框里等宽
+  const lineText = <span className="install-foot__line">{line}</span>;
   return (
     <div className="install-foot">
-      {/* 一行放不下截断时悬停出全句（不写原生 title：悬停弹系统灰框） */}
-      <TruncTip content={line} fit="grow">
-        <span className="install-foot__line">
-          {footRuns(line).map((run, i) =>
-            run.mono ? (
-              <Mono key={i} inherit>
-                {run.text}
-              </Mono>
-            ) : (
-              <span key={i}>{run.text}</span>
-            ),
-          )}
+      {tip ? (
+        <span className="install-foot__lead">
+          <Tooltip content={tip} placement="top" fit="shrink" focusable>
+            {lineText}
+          </Tooltip>
         </span>
-      </TruncTip>
+      ) : (
+        // 一行放不下截断时悬停出全句（不写原生 title：悬停弹系统灰框）
+        <TruncTip content={line} fit="grow">
+          {lineText}
+        </TruncTip>
+      )}
       <span className="install-foot__keys">
         <Button size="row" onClick={onCancel}>
           {t("market.action.cancel")}
@@ -538,14 +583,15 @@ export function InstallFooter({
   );
 }
 
-/// 来历一行：等宽的仓库 / 包名 · 仓库内路径 · 句后浅键（`在 GitHub 打开 ↗`，不垫底）
+/// 来历一行：等宽的仓库 · 仓库内路径（skill）/ 发布方（MCP）· 句后浅键（`在 GitHub 打开 ↗` / `查看说明 ↗`，不垫底）。
+/// 浅键带 `tip` 时悬停出它（MCP 的包名，#276）
 export function OriginLine({
   parts,
   leave,
 }: {
-  /// 各段：`mono` 为真的等宽（仓库、路径、包名），否则是正文（发布方）
+  /// 各段：`mono` 为真的等宽（仓库、路径），否则是正文（发布方）
   parts: ReadonlyArray<{ text: string; mono?: boolean; strong?: boolean }>;
-  leave?: { label: string; onClick: () => void } | null;
+  leave?: { label: string; onClick: () => void; tip?: ReactNode } | null;
 }) {
   return (
     <p className="install-origin">
@@ -565,9 +611,11 @@ export function OriginLine({
       {leave ? (
         <span className="install-origin__part">
           <span className="install-origin__dot">·</span>
-          <Button variant="quiet" inline onClick={leave.onClick}>
-            {leave.label}
-          </Button>
+          <Tooltip content={leave.tip ?? null}>
+            <Button variant="quiet" inline onClick={leave.onClick}>
+              {leave.label}
+            </Button>
+          </Tooltip>
         </span>
       ) : null}
     </p>

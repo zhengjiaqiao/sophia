@@ -89,7 +89,7 @@ test("Matrix：通道条表头 + 来源列（144，来源名；尾列已并进�
 });
 
 /// DESIGN「MCP 格子只有两种：⦿ 有、○ 没有」：⦿ 读「已写进」，不说「软链」也不说「原件 / 副本」
-test("MCP 格的读屏名：●＝已写进，不说软链、原件、副本（这两个域共用一张表，词不能照抄 skill 的）", () => {
+test("MCP 格的读屏名：●＝已加上，不说软链、原件、副本（这两个域共用一张表，词不能照抄 skill 的）", () => {
   const mcpProps = {
     ...base,
     dotWords: "mcp" as const,
@@ -98,7 +98,7 @@ test("MCP 格的读屏名：●＝已写进，不说软链、原件、副本（�
         ...base.rows[0],
         cells: {
           cc: { dot: "linked" as const, clickable: true, tip: "从 Claude Code 删除…" },
-          cx: { dot: "missing" as const, clickable: true, tip: "写进 Codex" },
+          cx: { dot: "missing" as const, clickable: true, tip: "加到 Codex" },
         },
       },
       {
@@ -112,8 +112,8 @@ test("MCP 格的读屏名：●＝已写进，不说软链、原件、副本（�
   };
   const html = render(Matrix, mcpProps);
   assert.doesNotMatch(html, /aria-label="[^"]*(软链|原件|副本)/);
-  assert.match(html, /aria-label="docx · Claude Code：已写进。从 Claude Code 删除…"/);
-  assert.match(html, /aria-label="pdf · Claude Code：已写进。从 Claude Code 删除…"/);
+  assert.match(html, /aria-label="docx · Claude Code：已加上。从 Claude Code 删除…"/);
+  assert.match(html, /aria-label="pdf · Claude Code：已加上。从 Claude Code 删除…"/);
 });
 
 test("skill 格的读屏名不受 MCP 影响：linked 仍是「已加上 · 软链」，own 仍是「已加上 · 原件」", () => {
@@ -533,7 +533,7 @@ test("批量写入：格子同时变、不依次点亮；只锁按下的那一�
   assert.equal(BUSY_DELAY_MS, 300);
   assert.equal(batchBusyText("link", "Codex"), "正在加到 Codex");
   assert.equal(batchBusyText("unlink", "Codex"), "正在从 Codex 移除");
-  assert.equal(batchBusyText("write", "Cursor"), "正在写进 Cursor");
+  assert.equal(batchBusyText("write", "Cursor"), "正在加到 Cursor");
   const noop = () => undefined;
   const check = (label: string) => ({ checked: false, label, tip: label, onToggle: noop });
   const props = {
@@ -593,7 +593,7 @@ test("单格的结果：浮在被点那一格正下方（成功与失败同一�
   assert.equal((failed.match(/class="ss-floattoast"/g) ?? []).length, 1);
   assert.match(failed, /ss-toast--routine" data-kind="cannot" role="alert"/);
   assert.match(failed, /class="ss-toast__message">无法写入 Codex 的 skills 目录</);
-  // 写 MCP 没写成（spec 2026-10-04-local-diagnostics R12）：整句 `context7 写进 [Codex] 失败 · 原因`，
+  // 写 MCP 没写成（spec 2026-10-04-local-diagnostics R12）：整句 `context7 加到 [Codex] 失败 · 原因`，
   // 第二行是写的那个文件；提示条里不放详情
   const mcp = render(Matrix, {
     ...base,
@@ -611,7 +611,7 @@ test("单格的结果：浮在被点那一格正下方（成功与失败同一�
     },
   });
   assert.match(mcp, /data-kind="cannot"/);
-  assert.match(mcp, /context7[^]*写进[^]*失败[^]*没有写入权限，没动/);
+  assert.match(mcp, /context7[^]*加到[^]*失败[^]*没有写入权限，没动/);
   assert.match(mcp, />~\/\.codex\/config\.toml</);
   assert.doesNotMatch(mcp, />详情</);
   // 旧的行内一行与格下小黑窗的样式已撤
@@ -820,7 +820,8 @@ test("原件格与 MCP 的 ● 可点（DESIGN「删除原件」）：skill 先�
     readFileSync(new URL("../src/SkillsTab.tsx", import.meta.url), "utf8"),
   );
   const mcp = withMcpCopy(readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8"));
-  assert.match(dv, /state === "own"\s*\?\s*t\("删除原件…"\)/);
+  // 原件格先说原件在这一列的 agent 中、再给删除（#274）
+  assert.match(dv, /state === "own"\s*\?\s*t\("原件在 \{agent\} 中 · 删除…", \{ agent \}\)/);
   assert.match(skills, /else if \(state === "own"\) void askDeleteOriginal\(ref\)/);
   assert.match(
     skills,

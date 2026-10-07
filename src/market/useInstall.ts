@@ -35,7 +35,6 @@ import {
   skillPlanPending,
   skillRowView,
   takenAgents,
-  writableCount,
   type AgentRef,
   type InstallKind,
   type SkillHandle,
@@ -338,7 +337,6 @@ export function useMcpInstall(opts: McpInstallOptions) {
     : effective;
   const names = definitions.map((d) => d.name);
   const block = mcpInstallBlock({ names, checked: effective, checks, fields, values });
-  const files = writableCount(checks, effective);
   const keyHintFiles = mcpKeyHint(checks, writable);
   const keyHint =
     keyHintFiles.length > 0
@@ -371,7 +369,7 @@ export function useMcpInstall(opts: McpInstallOptions) {
     } catch (error) {
       setFailure({
         key: Date.now(),
-        toast: cannot("market.toast.writeCannot", names, errorText(error)),
+        toast: cannot("market.toast.addCannot", names, errorText(error)),
       });
       return null;
     } finally {
@@ -398,7 +396,6 @@ export function useMcpInstall(opts: McpInstallOptions) {
     addToGitignore,
     setAddToGitignore,
     checks,
-    files,
     block,
     busy,
     failure,

@@ -1422,9 +1422,14 @@ fn effect_note(harness_id: &str, project: bool) -> Option<String> {
 
 fn check_one(target: &Target, built: &[Built]) -> McpTargetCheck {
     let location_id = target.location.as_ref().map(|l| l.id.clone());
+    let config_path = target
+        .location
+        .as_ref()
+        .map(|l| l.path.to_string_lossy().into_owned());
     let blocked = |reason: String| McpTargetCheck {
         harness_id: target.harness_id.clone(),
         location_id: location_id.clone(),
+        config_path: config_path.clone(),
         status: McpTargetStatus::Blocked,
         writes: Vec::new(),
         reason: Some(reason),
@@ -1487,6 +1492,7 @@ fn check_one(target: &Target, built: &[Built]) -> McpTargetCheck {
     McpTargetCheck {
         harness_id: target.harness_id.clone(),
         location_id,
+        config_path,
         status,
         note: (!writes.is_empty())
             .then(|| effect_note(&target.harness_id, project))
@@ -1610,6 +1616,7 @@ fn report_entry(name: &str, target_id: &str, outcome: &str, message: &str) -> Mc
         message: message.into(),
         backup_path: None,
         mirror_failed: None,
+        detail: None,
     }
 }
 
@@ -1721,10 +1728,8 @@ fn ignore_written_keys(
             Ok(None) => {}
             Err(error) => {
                 let gitignore = root.join(".gitignore");
-                report.gitignore_failed = Some(crate::t!(
-                    "mcp.report.gitignoreFailed",
-                    reason = crate::atomicfile::write_error_text(&gitignore, &error)
-                ));
+                report.gitignore_failed =
+                    Some(super::keyhints::gitignore_failed(&gitignore, &error));
             }
         }
     }
@@ -2162,6 +2167,10 @@ API_KEY = "${DOCS_KEY}"
         assert_eq!(code.location_id.as_deref(), Some("claude-code"));
         assert_eq!(code.note, None);
         assert_eq!(check(&checks, "codex").status, McpTargetStatus::Ok);
+        // 勾选行悬停「写入 <路径>」用的配置文件完整路径
+        let codex_path = check(&checks, "codex").config_path.clone().unwrap();
+        assert!(Path::new(&codex_path).ends_with(".codex/config.toml"));
+        assert!(Path::new(&codex_path).starts_with(&home));
         assert_eq!(
             check(&checks, "gemini-cli").note.as_deref(),
             Some("新开会话后生效")

@@ -150,7 +150,7 @@ async fn run(urls: Urls) {
     }
 }
 
-/// 与 `market.rs` 同一套客户端设置（rustls、超时、UA；代理照 reqwest 的默认），总时限 10 秒
+/// 与 `market.rs` 同一套客户端设置（rustls、超时、UA、跟随系统代理），总时限 10 秒
 fn client() -> Result<reqwest::Client, reqwest::Error> {
     client_with(REQUEST_TIMEOUT)
 }
@@ -159,11 +159,13 @@ fn client() -> Result<reqwest::Client, reqwest::Error> {
 pub(crate) fn client_with(timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
     // reqwest 用 rustls-no-provider：不装加密提供方，建 client 会 panic（同 market.rs、sophia-gateway）
     let _ = rustls::crypto::ring::default_provider().install_default();
-    reqwest::Client::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(timeout)
-        .user_agent(concat!("Sophia/", env!("CARGO_PKG_VERSION")))
-        .build()
+    sophia_gateway::runtime::follow_system_proxy(
+        reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(timeout)
+            .user_agent(concat!("Sophia/", env!("CARGO_PKG_VERSION"))),
+    )
+    .build()
 }
 
 /// 正常退出时调：把还没落盘的次数存下

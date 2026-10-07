@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { LATEST_DMG } from "../../packaging/cos-manifest.mjs";
+import { siteUrl } from "../src/lib/siteUrl.ts";
 import { floorToTen, macosLabel, SITE } from "../src/site.config.ts";
 
 const repo = (p: string) => fileURLToPath(new URL(`../../${p}`, import.meta.url));
@@ -29,10 +31,38 @@ test("SITE.providerFloor 取自内置预设的条数", () => {
   assert.equal(SITE.providerFloor, Math.floor(n / 10) * 10);
 });
 
-test("下载链接：两种芯片各一个，都走下载函数（页面不写版本号）", () => {
-  assert.equal(SITE.downloadHref.arm64, "/download/mac?arch=arm64");
-  assert.equal(SITE.downloadHref.x64, "/download/mac?arch=x64");
-  assert.deepEqual(SITE.downloadHrefs, [...new Set([SITE.downloadHref.arm64, SITE.downloadHref.x64])]);
+test("下载链接：两种芯片各一个，直链 COS 上固定文件名的最新版（页面不写版本号，关 JS 也能下）", () => {
+  const cos = "https://sophia-releases-1258113621.cos.ap-shanghai.myqcloud.com";
+  assert.equal(SITE.downloadHref.arm64, `${cos}/latest/Sophia_aarch64.dmg`);
+  assert.equal(SITE.downloadHref.x64, `${cos}/latest/Sophia_x64.dmg`);
+  assert.deepEqual(SITE.downloadHrefs, [SITE.downloadHref.arm64, SITE.downloadHref.x64]);
+});
+
+test("下载链接的桶就是应用更新的 COS 线路（tauri.conf.json 里 myqcloud.com 的那条）", () => {
+  const conf = JSON.parse(readFileSync(repo("src-tauri/tauri.conf.json"), "utf8"));
+  const manifest: string = conf.plugins.updater.endpoints.find((u: string) => u.includes(".myqcloud.com/"));
+  const base = manifest.replace(/latest\.json$/, "");
+  assert.ok(SITE.downloadHref.arm64.startsWith(base));
+  assert.ok(SITE.downloadHref.x64.startsWith(base));
+});
+
+test("部署地址：SITE_URL 拆成源与子路径；没给就是正式域名、不带子路径", () => {
+  const gh = siteUrl("https://zhengjiaqiao.github.io/sophia/");
+  assert.equal(gh.origin, "https://zhengjiaqiao.github.io");
+  assert.equal(gh.base, "/sophia/");
+  assert.equal(gh.href("/"), "/sophia/");
+  assert.equal(gh.href("/zh-hans/"), "/sophia/zh-hans/");
+  assert.equal(siteUrl("https://zhengjiaqiao.github.io/sophia").base, "/sophia/");
+  const root = siteUrl(undefined);
+  assert.equal(root.origin, "https://sophiakit.com");
+  assert.equal(root.base, "/");
+  assert.equal(root.href("/zh-hant/"), "/zh-hant/");
+  assert.equal(siteUrl("").base, "/");
+});
+
+test("部署地址只认 https，带查询或锚点的拒绝", () => {
+  assert.throws(() => siteUrl("http://example.com/"), /https/);
+  assert.throws(() => siteUrl("https://example.com/a/?x=1"), /SITE_URL/);
 });
 
 test("brew 命令与 cask 模板的 tap 路径一致", () => {

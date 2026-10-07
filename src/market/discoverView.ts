@@ -3,6 +3,7 @@
 /// 不碰 api、不碰 DOM，node:test 直接测（tests/market-discover.test.ts）
 import { relativeTime } from "../dateText.ts";
 import { listText, locale, t, tn } from "../i18n.ts";
+import { fieldText } from "./installView.ts";
 import type {
   LocationKey,
   MarketFallback,
@@ -147,7 +148,7 @@ export function errorText(error: unknown, fallback: string): string {
 // ── MCP ──
 
 /// MCP 一行后面的弱标识（R7）：要在浏览器里登录的远程服务器（`signIn`）`需要登录`；
-/// 否则有密钥要填 `需要 API key`；都不是为 null
+/// 否则有密钥要填 `要填密钥`（#276）；都不是为 null
 export function mcpNeeds(entry: Pick<McpRow, "fields" | "signIn">): string | null {
   if (entry.signIn) return t("market.mcp.needsSignIn");
   if (entry.fields.some((f) => f.secret)) return t("market.mcp.needsKey");
@@ -164,48 +165,29 @@ export function commandLine(def: Pick<McpDefinitionInput, "command" | "args">): 
   return [def.command ?? "", ...(def.args ?? [])].filter((part) => part !== "").join(" ");
 }
 
-/// 介绍页事实行 `连接方式`：`本机命令 · npx -y …` / `远程 · https://…`
+/// 介绍页事实行 `运行方式`（#276）：`本地运行` / `在线服务`，命令与地址（`text`）进悬停
 export function mcpConnection(def: McpDefinitionInput): { kind: string; text: string } {
   if (isRemote(def)) return { kind: t("market.mcp.connRemote"), text: def.url ?? "" };
   return { kind: t("market.mcp.connLocal"), text: commandLine(def) };
 }
 
-/// 来历行里的包名或地址：远程写地址；`npx` / `uvx` / `bunx` / `pnpm dlx` 写包名；`docker run` 写镜像；
-/// 认不出就写整条命令
-export function mcpPackage(def: McpDefinitionInput): string {
-  if (isRemote(def)) return def.url ?? "";
-  const args = def.args ?? [];
-  const cmd = (def.command ?? "").split(/[\\/]/).pop() ?? "";
-  const firstPlain = (list: ReadonlyArray<string>) => list.find((a) => !a.startsWith("-")) ?? null;
-  if (cmd === "npx" || cmd === "uvx" || cmd === "bunx") return firstPlain(args) ?? commandLine(def);
-  if ((cmd === "pnpm" || cmd === "npm") && (args[0] === "dlx" || args[0] === "exec"))
-    return firstPlain(args.slice(1)) ?? commandLine(def);
-  if (cmd === "docker" && args[0] === "run") {
-    const plain = args.slice(1).filter((a) => !a.startsWith("-"));
-    // `-e KEY` 这类带值的旗标：值也不以 - 开头，取最后一个不像 KEY=… 的
-    const image = [...plain]
-      .reverse()
-      .find((a) => !a.includes("=") && !/^[A-Z_][A-Z0-9_]*$/.test(a));
-    return image ?? commandLine(def);
-  }
-  return commandLine(def);
-}
-
-/// 介绍页事实行 `要填的`：每项键名 + `必填 · 密钥`；没有要填的时说 `不用填`（要登录时补一句）
+/// 介绍页事实行 `要填的`：每项标签（同安装页 `fieldText`：有说明用说明，没有退回键名）+ 等宽键名 +
+/// `必填 · 密钥`；没有要填的时说 `不用填`（要登录时补一句）
 export function mcpFieldFacts(
   entry: Pick<McpRow, "fields" | "signIn">,
-): { key: string; note: string }[] | string {
+): { key: string; label: string; keyed: boolean; note: string }[] | string {
   if (entry.fields.length === 0)
     return entry.signIn ? t("market.mcp.noFieldsSignIn") : t("market.mcp.noFields");
-  return entry.fields.map((f: McpFieldSpec) => ({
-    key: f.key,
-    note: [
+  return entry.fields.map((f: McpFieldSpec) => {
+    const { label, keyed } = fieldText(f);
+    const note = [
       f.required ? t("market.field.required") : t("market.field.optional"),
       f.secret ? t("market.field.secret") : null,
     ]
       .filter(Boolean)
-      .join(" · "),
-  }));
+      .join(" · ");
+    return { key: f.key, label, keyed, note };
+  });
 }
 
 /// 来历行末尾那个标记：精选 / 官方目录
@@ -220,17 +202,4 @@ export function githubUrl(repo: string, path: string | null, branch?: string | n
   const base = `https://github.com/${repo}`;
   if (!path) return base;
   return `${base}/tree/${branch ?? "HEAD"}/${path.replace(/^\/+/, "")}`;
-}
-
-/// 离开键的动词：npm 上的包 `npm 上的说明`，GitHub `在 GitHub 打开`，其余 `打开说明页`
-export function leaveLabel(url: string): string {
-  let host = "";
-  try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    return t("market.leave.readme");
-  }
-  if (host === "www.npmjs.com" || host === "npmjs.com") return t("market.leave.npm");
-  if (host === "github.com") return t("market.leave.github");
-  return t("market.leave.readme");
 }

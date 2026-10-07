@@ -794,6 +794,10 @@ pub struct McpReportEntry {
     /// 整句原因（`mcp.report.mirrorFailed`）。前端在成功条目下用失败原因的样式显示它；没有镜像或镜像也成了为 None
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror_failed: Option<String>,
+    /// 没写成、又分不出原因时（spec #239 第 43 条）：系统原文（去隐私）。给了就说明 `message` 是兜底句
+    /// （`原子写入失败`），不是给人看的原因——提示条只写失败句，原文同时进日志
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2009,7 +2013,21 @@ fn execute_group(
                     report,
                     &crate::t!("mcp.report.unsafeWriteBackWhy", reason = reason),
                 ),
-                None => fail(report, &crate::t!("mcp.report.unsafeWriteBack")),
+                // 分不出原因：兜底句不是给人看的原因，原文另给（`detail`）、同时进日志
+                None => {
+                    log::warn!("mcp-merge {}: {error}", path.display());
+                    let detail = crate::redact::redact(&error.to_string());
+                    for pending in &group {
+                        let mut failed = entry(
+                            &pending.action,
+                            "failed",
+                            &crate::t!("mcp.report.unsafeWriteBack"),
+                            None,
+                        );
+                        failed.detail = Some(detail.clone());
+                        report.entries.push(failed);
+                    }
+                }
             }
             return;
         }
@@ -2018,10 +2036,14 @@ fn execute_group(
         State::Present(snap) => match backup(path, snap, backups) {
             Ok(path) => Some(path),
             Err(error) => {
-                let message = backup_failed_message(path, &error, || {
+                let (message, detail) = backup_failed(path, &error, || {
                     crate::t!("mcp.report.backupFailedNotWritten")
                 });
-                fail(report, &message);
+                for pending in &group {
+                    let mut failed = entry(&pending.action, "failed", &message, None);
+                    failed.detail = detail.clone();
+                    report.entries.push(failed);
+                }
                 return;
             }
         },
@@ -2031,15 +2053,17 @@ fn execute_group(
         State::Weibo(_) => unreachable!("WeiboAP groups are handled above"),
     };
     if let Err(error) = atomic_write(path, &bytes, &group[0].target) {
-        let message =
-            write_failed_message(path, &error, || crate::t!("mcp.report.atomicWriteFailed"));
+        let (message, detail) =
+            write_failed(path, &error, || crate::t!("mcp.report.atomicWriteFailed"));
         for (index, pending) in group.iter().enumerate() {
-            report.entries.push(entry(
+            let mut failed = entry(
                 &pending.action,
                 "failed",
                 &message,
                 (index == 0).then(|| backup.clone()).flatten(),
-            ));
+            );
+            failed.detail = detail.clone();
+            report.entries.push(failed);
         }
         return;
     }
@@ -2061,11 +2085,21 @@ pub(super) fn write_failed_message(
     error: &io::Error,
     other: impl FnOnce() -> String,
 ) -> String {
+    write_failed(path, error, other).0
+}
+
+/// 同 [`write_failed_message`]，另给分不出原因时的原文（去隐私，`McpReportEntry::detail`）；说得出原因的为 None
+pub(super) fn write_failed(
+    path: &Path,
+    error: &io::Error,
+    other: impl FnOnce() -> String,
+) -> (String, Option<String>) {
     log::warn!("写 MCP 配置 {} 失败：{error}", path.display());
     crate::report::count_write_failure(error);
-    atomicfile::write_failure(error)
-        .untouched()
-        .unwrap_or_else(other)
+    match atomicfile::write_failure(error).untouched() {
+        Some(reason) => (reason, None),
+        None => (other(), Some(crate::redact::redact(&error.to_string()))),
+    }
 }
 
 /// 备份没做成时给用户的一句：磁盘满、没权限、只读说「备份时…，没动」，别的（含「已存在」）用调用处那一句；原文进日志
@@ -2074,7 +2108,19 @@ pub(super) fn backup_failed_message(
     error: &io::Error,
     other: impl FnOnce() -> String,
 ) -> String {
-    atomicfile::backup_failure_text(path, error).unwrap_or_else(other)
+    backup_failed(path, error, other).0
+}
+
+/// 同 [`backup_failed_message`]，另给分不出原因时的原文（去隐私）；说得出原因的为 None
+pub(super) fn backup_failed(
+    path: &Path,
+    error: &io::Error,
+    other: impl FnOnce() -> String,
+) -> (String, Option<String>) {
+    match atomicfile::backup_failure_text(path, error) {
+        Some(reason) => (reason, None),
+        None => (other(), Some(crate::redact::redact(&error.to_string()))),
+    }
 }
 
 /// 写成功后立刻读回，记下写后指纹。读回的内容不是我们刚写的（写后瞬间又被别人改了），
@@ -2163,6 +2209,7 @@ fn entry(
         message: message.into(),
         backup_path,
         mirror_failed: None,
+        detail: None,
     }
 }
 
@@ -3459,6 +3506,7 @@ mod exclusion_tests {
                     message: String::new(),
                     backup_path: None,
                     mirror_failed: None,
+                    detail: None,
                 })
                 .collect(),
             ..McpReport::default()
@@ -4124,6 +4172,31 @@ mod undo_tests {
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(report.entries[0].outcome, "failed");
         assert_eq!(report.entries[0].message, "没有写入权限，没动");
+        // 说得出原因的没有原文：提示条照旧接这一句
+        assert_eq!(report.entries[0].detail, None);
+        assert_eq!(fs::read(&target).unwrap(), ORIGINAL);
+    }
+
+    /// 分不出原因的失败（spec #239 第 43 条）：`message` 是兜底句，系统原文另给（`detail`），
+    /// 前端据此提示条只写失败句、不拼原文。备份目录的上一级是个文件：建不出备份目录，不是没权限、磁盘满、只读
+    #[test]
+    fn unclassified_failure_carries_the_raw_text_apart() {
+        let tree = TempTree::new();
+        let source = tree.root().join("source.json");
+        let target = tree.root().join("target.json");
+        let blocker = tree.root().join("not-a-dir");
+        fs::write(&source, br#"{"mcpServers":{"docs":{"command":"docs"}}}"#).unwrap();
+        fs::write(&target, ORIGINAL).unwrap();
+        fs::write(&blocker, b"x").unwrap();
+        let plan = prepare(&[loc("source", &source), loc("t0", &target)], &[sel("t0")]);
+        let report = execute(plan, false, &blocker.join("backups"));
+        assert_eq!(report.entries[0].outcome, "failed");
+        assert_eq!(
+            report.entries[0].message,
+            crate::t!("mcp.report.backupFailedNotWritten")
+        );
+        let detail = report.entries[0].detail.as_deref().unwrap_or_default();
+        assert!(!detail.is_empty(), "{:?}", report.entries[0]);
         assert_eq!(fs::read(&target).unwrap(), ORIGINAL);
     }
 

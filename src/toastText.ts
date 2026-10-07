@@ -268,7 +268,8 @@ export function mcpEffectTrail(items: ToastItem[]): string[] {
 }
 
 /// 「只留这份」确认框（DESIGN「页面还是弹层」「贴底栏「defuddle 有两份原件，删掉哪个？」」）：
-/// 标题问留哪份；正文写哪份进废纸篓、几条链接改指，没有要改指的就不写后半句。
+/// 标题问留哪份；标题下两行路径已说清哪份留下、哪份进废纸篓，正文只说受影响的 agent
+/// （`原来使用 Claude Code 那份的 agent 将改用留下的这一份。`，#274）：不说链接条数；没有要改用的就不写正文。
 /// 来源名用原件位置列的写法（`originNames`）：同名来源带区分片段（`ego lite · 0.5.1.11`）。
 /// `paths` 是标题下的两行：`留下` / `移到废纸篓` + 那一份的完整路径（主目录写 `~`，不截断）
 /// `own`：这一方是 agent 自己目录里的那一份（issue #153），`name` 是整句说法 `Claude Code 自己那份`——
@@ -284,13 +285,12 @@ export function keepThisConfirm(input: {
     title: input.kept.own
       ? t("toast.keepThisConfirm.titleOwn", { copy: originText(input.kept), skill: input.skill })
       : t("toast.keepThisConfirm.title", { origin: originText(input.kept), skill: input.skill }),
-    body: input.other.own
-      ? input.relinked > 0
-        ? tn("toast.keepThisConfirm.trashRelinkedOwn", input.relinked, { copy: origin })
-        : t("toast.keepThisConfirm.trashOwn", { copy: origin })
-      : input.relinked > 0
-        ? tn("toast.keepThisConfirm.trashRelinked", input.relinked, { origin })
-        : t("toast.keepThisConfirm.trash", { origin }),
+    body:
+      input.relinked === 0
+        ? ""
+        : input.other.own
+          ? t("toast.keepThisConfirm.relinkedOwn", { copy: origin })
+          : t("toast.keepThisConfirm.relinked", { origin }),
     paths: [
       { label: t("toast.keepThisConfirm.keptLabel"), path: displayPath(input.kept.path) },
       { label: t("toast.keepThisConfirm.trashLabel"), path: displayPath(input.other.path) },
@@ -298,16 +298,16 @@ export function keepThisConfirm(input: {
   };
 }
 
-/// 删除 skill 原件的确认框（DESIGN「删除原件」）：说后果，不说机制——删了之后哪些 agent 用不了它、
-/// 链接怎么处理、能不能找回。
-/// - 别处没有同名原件：`删除后 Codex、Claude Code 都不能再用它：指向它的 2 条软链接一并删除`
-/// - 别处有：`删除后 Claude Code 改用 通用仓库 里的同名 graduate（2 条软链接改指过去）；Codex 不能再用它`
+/// 删除 skill 原件的确认框（DESIGN「删除原件」）：说后果，不说机制——只说删除后哪些 agent 受影响，
+/// 不写软链接、条数，也不写「移到废纸篓」（删除就是进废纸篓，#274）。
+/// - 别处没有同名原件：`删除后，Codex 和 Claude Code 将无法使用它。`
+/// - 别处有：`删除后，Claude Code 将改用 ~/.agents 中的同名 graduate，Codex 将无法使用它。`
 /// 不写「可以撤销」（产品负责人：「可以撤销可以去掉」——删完的提示条上有 `撤销`，这里不预告）
 /// `ownAgents` 是直接读原件所在目录的 agent（这一行里画 ⦿ 的列）；`linkAgents` 是有链接指向它的 agent。
-/// 不写路径行：删的是哪一份，点的那一行已经说了（产品负责人：「这个不需要提示吧」）
+/// 不写路径行：删的是哪一份，标题和点的那一行已经说了（产品负责人：「下面放个链接更是不明所以」）
 export function deleteOriginalConfirm(input: {
   skill: string;
-  /// 指向它的链接条数
+  /// 指向它的链接条数（只用来判断有没有要改用别处同名原件的 agent，不写进句子）
   links: number;
   /// 别处同名原件的来源名；没有就是链接一并删除
   relinkTo?: string;
@@ -316,42 +316,23 @@ export function deleteOriginalConfirm(input: {
   /// 有链接指向它的 agent（去重、保序）
   linkAgents: string[];
 }): { title: string; body: string } {
-  // 「谁不能再用它」一个 agent 与几个 agent 各一句（`都`）；再按有没有链接一并删除、有没有改指，
-  // 每种组合一整句，不在代码里拼带标点的从句
-  const many = (names: string[]) => names.length > 1;
+  // 按有没有改用别处同名原件、有没有将无法使用它的 agent，每种组合一整句，不在代码里拼带标点的从句
+  const names = (xs: readonly string[]) => listText(xs, "and");
   let body: string;
   if (input.relinkTo !== undefined && input.links > 0) {
     const moved = {
-      agents: listOf(input.linkAgents),
+      agents: names(input.linkAgents),
       source: input.relinkTo,
       skill: input.skill,
     };
     const own = input.ownAgents.filter((a) => !input.linkAgents.includes(a));
     body =
       own.length === 0
-        ? tn("toast.deleteOriginal.relinked", input.links, moved)
-        : tn(
-            many(own)
-              ? "toast.deleteOriginal.relinkedLostMany"
-              : "toast.deleteOriginal.relinkedLostOne",
-            input.links,
-            { ...moved, names: listOf(own) },
-          );
+        ? t("toast.deleteOriginal.relinked", moved)
+        : t("toast.deleteOriginal.relinkedLost", { ...moved, names: names(own) });
   } else {
     const all = [...new Set([...input.ownAgents, ...input.linkAgents])];
-    const names = listOf(all);
-    if (all.length === 0)
-      body = input.links > 0 ? tn("toast.deleteOriginal.linksOnly", input.links) : "";
-    else if (input.links > 0)
-      body = tn(
-        many(all) ? "toast.deleteOriginal.lostLinksMany" : "toast.deleteOriginal.lostLinksOne",
-        input.links,
-        { names },
-      );
-    else
-      body = t(many(all) ? "toast.deleteOriginal.lostMany" : "toast.deleteOriginal.lostOne", {
-        names,
-      });
+    body = all.length === 0 ? "" : t("toast.deleteOriginal.lost", { names: names(all) });
   }
   return { title: t("toast.deleteOriginal.title", { skill: input.skill }), body };
 }
@@ -499,4 +480,49 @@ const BUSY_KEY = {
 /// `正在写进 Codex` / `正在从 Codex 删除`（MCP）。agent 为「所有 agent」时照样拼
 export function batchBusyText(op: "link" | "unlink" | "write" | "delete", agent: string): string {
   return t(BUSY_KEY[op], { agent });
+}
+
+/// 删原件之后「有链接没处理好」的那一句：有原因就带上，分不出原因（core 给空串）只写主句
+export function linksFailedLine(
+  kind: "trashRelink" | "trashClear" | "relink" | "clear",
+  count: number,
+  reason: string,
+): string {
+  if (!reason) {
+    switch (kind) {
+      case "trashRelink":
+        return tn("skills.delete.trashRelinkFailedPlain", count);
+      case "trashClear":
+        return tn("skills.delete.trashClearFailedPlain", count);
+      case "relink":
+        return tn("skills.delete.relinkFailedPlain", count);
+      case "clear":
+        return tn("skills.delete.clearFailedPlain", count);
+    }
+  }
+  switch (kind) {
+    case "trashRelink":
+      return tn("skills.delete.trashRelinkFailed", count, { reason });
+    case "trashClear":
+      return tn("skills.delete.trashClearFailed", count, { reason });
+    case "relink":
+      return tn("skills.delete.relinkFailed", count, { reason });
+    case "clear":
+      return tn("skills.delete.clearFailed", count, { reason });
+  }
+}
+
+/// 清掉坏链 / 孤儿链接失败的那一句：同上，原因为空只写主句
+export function clearFailedLine(reason: string): string {
+  return reason ? t("skills.orphan.clearFailed", { reason }) : t("skills.orphan.clearFailedPlain");
+}
+
+/// 拆开整个文件夹没做成的那一句：没有一个拆出来是整件失败，有的拆出来了是部分失败；原因为空只写主句
+export function splitFailedLine(created: number, failed: number, reason: string): string {
+  if (created === 0) {
+    return reason ? t("skills.split.failed", { reason }) : t("skills.split.failedPlain");
+  }
+  return reason
+    ? tn("skills.split.partial", failed, { reason })
+    : tn("skills.split.partialPlain", failed);
 }

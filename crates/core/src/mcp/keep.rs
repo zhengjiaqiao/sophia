@@ -83,6 +83,7 @@ fn entry(action: &McpKeepAction, outcome: &str, message: &str) -> McpReportEntry
         message: message.into(),
         backup_path: None,
         mirror_failed: None,
+        detail: None,
     }
 }
 
@@ -460,6 +461,7 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
                 message: issue.message,
                 backup_path: None,
                 mirror_failed: None,
+                detail: None,
             });
         }
         for action in plan.actions {
@@ -483,6 +485,7 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
                 message: crate::t!("mcp.report.changedAfterPreview"),
                 backup_path: None,
                 mirror_failed: None,
+                detail: None,
             });
             for action in &plan.actions {
                 report

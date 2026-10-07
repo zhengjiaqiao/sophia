@@ -1,12 +1,13 @@
 {
   "hints.firstScan.skillsWithAgents": {
-    "other": "讀了 {agents} 的 skill 目錄，找到 {count} 個 skill，沒有改動任何檔案。"
+    "other": "在 {agents} 中找到 {count} 個 skill"
   },
   "hints.firstScan.skillsLocal": {
-    "other": "讀了本機的 skill 目錄，找到 {count} 個 skill，沒有改動任何檔案。"
+    "other": "在本機找到 {count} 個 skill"
   },
-  "hints.firstScan.emptyWithAgents": "讀了 {agents} 的 skill 目錄，沒有找到 skill，沒有改動任何檔案。",
-  "hints.firstScan.emptyLocal": "讀了本機的 skill 目錄，沒有找到 skill，沒有改動任何檔案。",
+  "hints.firstScan.emptyWithAgents": "{agents} 中還沒有 skill",
+  "hints.firstScan.emptyLocal": "本機還沒有 skill",
+  "hints.firstScan.searched": "已搜尋的資料夾",
   "hints.firstCodex": "開啟後會改一處 Codex 的設定，讓它能用第三方模型；關掉就恢復原樣。改完要重啟 Codex 才生效。",
   "hints.mcpOpenCode": "MCP 暫不支援 OpenCode，這一頁沒有它的欄",
   "hints.log.markFailed": "記錄新手提示看過失敗",

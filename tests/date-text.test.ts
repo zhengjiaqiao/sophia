@@ -24,5 +24,5 @@ test("lastAutoText：相对时间 · 动词 N 个", () => {
   const now = new Date(2026, 8, 23, 12);
   const at = now.getTime() - 2 * 60_000;
   assert.equal(lastAutoText({ at, added: 3 }, "skill", now), "2 分钟前 · 加到 3 个");
-  assert.equal(lastAutoText({ at: now.getTime(), added: 1 }, "MCP", now), "刚刚 · 写进 1 个");
+  assert.equal(lastAutoText({ at: now.getTime(), added: 1 }, "MCP", now), "刚刚 · 加上 1 个");
 });

@@ -3,7 +3,8 @@
 //! launchd 拉起的后台进程不继承用户 shell 的环境变量，即使用户的终端里配置了
 //! `HTTP_PROXY`/`HTTPS_PROXY`，后台进程也看不到；而系统级代理（系统设置 > 网络 > 代理，
 //! 通过 `scutil --proxy` 读取）对所有进程生效。这里的规则：环境变量存在就完全按环境变量
-//! 的规则（含 `NO_PROXY`）来；否则退到系统代理设置，按 TTL 缓存，加载失败则直连。
+//! 的规则（含 `NO_PROXY`）来；否则看登录 shell 里设的（同样的规则）；再否则退到系统代理设置，
+//! 按 TTL 缓存，加载失败则直连。Sophia 所有出站请求都经这里（`runtime::system_proxy`，issue #254）。
 //!
 //! 移植自 agents-manager 的 `internal/sysproxy`（同一作者的 Go 项目，已在真实环境验证）。
 use std::sync::Mutex;
@@ -228,21 +229,37 @@ fn env_var(names: &[&str]) -> Option<String> {
     None
 }
 
-/// 是否设置了 HTTP(S)_PROXY（大小写形式皆可）。设置了就完全交给环境变量规则处理，
-/// 不再看系统代理设置。
-fn has_env_proxy() -> bool {
-    env_var(&["HTTP_PROXY", "http_proxy"]).is_some()
-        || env_var(&["HTTPS_PROXY", "https_proxy"]).is_some()
+/// 一组 `名=值`（登录 shell 问到的代理变量）里按 `names` 的先后取第一个非空的
+fn pair_var(pairs: &[(String, String)], names: &[&str]) -> Option<String> {
+    names.iter().find_map(|name| {
+        pairs
+            .iter()
+            .find(|(key, value)| key == name && !value.is_empty())
+            .map(|(_, value)| value.clone())
+    })
 }
 
 impl EnvProxy {
     fn from_env() -> Option<Self> {
-        if !has_env_proxy() {
+        Self::from_lookup(env_var)
+    }
+
+    /// 登录 shell 里设的代理变量
+    fn from_pairs(pairs: &[(String, String)]) -> Option<Self> {
+        Self::from_lookup(|names| pair_var(pairs, names))
+    }
+
+    /// 设了 HTTP(S)_PROXY（大小写形式皆可）才算有：有就完全按这组变量的规则（含 `NO_PROXY`），
+    /// 不再看后面的来源；只有 `ALL_PROXY` 或 `NO_PROXY` 不算
+    fn from_lookup(get: impl Fn(&[&str]) -> Option<String>) -> Option<Self> {
+        let http_raw = get(&["HTTP_PROXY", "http_proxy"]);
+        let https_raw = get(&["HTTPS_PROXY", "https_proxy"]);
+        if http_raw.is_none() && https_raw.is_none() {
             return None;
         }
-        let http = env_var(&["HTTP_PROXY", "http_proxy"]).and_then(|v| Url::parse(&v).ok());
-        let https = env_var(&["HTTPS_PROXY", "https_proxy"]).and_then(|v| Url::parse(&v).ok());
-        let no_proxy = env_var(&["NO_PROXY", "no_proxy"])
+        let http = http_raw.and_then(|v| Url::parse(&v).ok());
+        let https = https_raw.and_then(|v| Url::parse(&v).ok());
+        let no_proxy = get(&["NO_PROXY", "no_proxy"])
             .map(|v| {
                 v.split(',')
                     .map(|s| s.trim().to_ascii_lowercase())
@@ -291,10 +308,12 @@ struct Cache {
     loaded_at: Instant,
 }
 
-/// 出站请求的代理选择：有环境变量代理设置就完全按环境变量的规则来（含 `NO_PROXY`），
-/// 否则读取系统代理设置并按 TTL 缓存；加载失败则本次直连，且不缓存失败（下次重试）。
+/// 出站请求的代理选择，按顺序：本进程环境变量里有代理就完全按它的规则来（含 `NO_PROXY`）；
+/// 否则登录 shell 里设的（[`ProxyResolver::with_login`]，规则同上）；都没有就读取系统代理设置并按 TTL 缓存，
+/// 加载失败则本次直连，且不缓存失败（下次重试）。自动代理（PAC）不支持，按没有代理处理。
 pub struct ProxyResolver {
     load: Box<dyn Fn() -> Result<String, String> + Send + Sync>,
+    login: Box<dyn Fn() -> Vec<(String, String)> + Send + Sync>,
     ttl: Duration,
     now: Box<dyn Fn() -> Instant + Send + Sync>,
     cache: Mutex<Option<Cache>>,
@@ -308,16 +327,29 @@ impl ProxyResolver {
     ) -> Self {
         ProxyResolver {
             load: Box::new(load),
+            login: Box::new(Vec::new),
             ttl,
             now: Box::new(now),
             cache: Mutex::new(None),
         }
     }
 
+    /// 登录 shell 里设的代理变量从哪取（`login_env` 问到的那份；还没问完返回空）。不设就不看登录 shell
+    pub fn with_login(
+        mut self,
+        login: impl Fn() -> Vec<(String, String)> + Send + Sync + 'static,
+    ) -> Self {
+        self.login = Box::new(login);
+        self
+    }
+
     /// 供路由接入 `reqwest::Proxy::custom(move |url| resolver.resolve(url))`。
     pub fn resolve(&self, url: &Url) -> Option<Url> {
         if let Some(env) = EnvProxy::from_env() {
             return env.resolve(url);
+        }
+        if let Some(login) = EnvProxy::from_pairs(&(self.login)()) {
+            return login.resolve(url);
         }
 
         let now = (self.now)();
@@ -712,6 +744,77 @@ mod tests {
 
         let got = resolver.resolve(&u("https://chatgpt.com/"));
         assert_eq!(got, None);
+    }
+
+    fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+        list.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// 顺序：本进程环境 → 登录 shell → 系统代理。登录 shell 给了 HTTP(S) 代理就按它（含它的 NO_PROXY），不读系统代理
+    #[test]
+    fn proxy_func_login_shell_between_env_and_system() {
+        let _guard = ENV_GUARD.lock().unwrap();
+        clear_proxy_env();
+
+        let login = || {
+            pairs(&[
+                ("https_proxy", "http://10.1.1.1:3128"),
+                ("no_proxy", ".corp"),
+            ])
+        };
+        let load =
+            || -> Result<String, String> { panic!("登录 shell 有代理就不读系统代理") };
+        let resolver =
+            ProxyResolver::new(load, Duration::from_secs(60), Instant::now).with_login(login);
+        assert_eq!(
+            resolver
+                .resolve(&u("https://github.com/"))
+                .unwrap()
+                .as_str(),
+            "http://10.1.1.1:3128/"
+        );
+        assert_eq!(resolver.resolve(&u("https://git.corp/")), None);
+        assert_eq!(
+            resolver.resolve(&u("http://github.com/")),
+            None,
+            "没给 HTTP_PROXY"
+        );
+
+        // 本进程环境里有代理：登录 shell 的不看
+        unsafe { std::env::set_var("HTTPS_PROXY", "http://envproxy.invalid:9999") };
+        assert_eq!(
+            resolver
+                .resolve(&u("https://github.com/"))
+                .unwrap()
+                .as_str(),
+            "http://envproxy.invalid:9999/"
+        );
+        clear_proxy_env();
+    }
+
+    /// 登录 shell 只给了 SOCKS 或只给了 NO_PROXY：不算有代理，落到系统代理
+    #[test]
+    fn proxy_func_login_shell_without_http_falls_to_system() {
+        let _guard = ENV_GUARD.lock().unwrap();
+        clear_proxy_env();
+
+        for login in [
+            pairs(&[("ALL_PROXY", "socks5://127.0.0.1:7898")]),
+            pairs(&[("NO_PROXY", "github.com")]),
+        ] {
+            let load = || Ok(SCUTIL_FIXTURE.to_string());
+            let resolver = ProxyResolver::new(load, Duration::from_secs(60), Instant::now)
+                .with_login(move || login.clone());
+            assert_eq!(
+                resolver
+                    .resolve(&u("https://github.com/"))
+                    .unwrap()
+                    .as_str(),
+                "http://127.0.0.1:7897/"
+            );
+        }
     }
 
     #[cfg(target_os = "macos")]

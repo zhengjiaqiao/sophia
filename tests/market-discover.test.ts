@@ -9,11 +9,9 @@ import {
   installedLine,
   installsText,
   isInstalled,
-  leaveLabel,
   mcpConnection,
   mcpFieldFacts,
   mcpNeeds,
-  mcpPackage,
   mcpSourceLabel,
   placeName,
   rateLimited,
@@ -206,55 +204,42 @@ test("MCP 要填什么：要登录优先，其次有密钥，都不是就没有"
     secret: true,
   };
   const plain = { key: "ROOT", kind: "env" as const, required: true, secret: false };
-  assert.equal(mcpNeeds({ fields: [secret], signIn: false }), "需要 API key");
+  assert.equal(mcpNeeds({ fields: [secret], signIn: false }), "要填密钥");
   assert.equal(mcpNeeds({ fields: [], signIn: true }), "需要登录");
   assert.equal(mcpNeeds({ fields: [secret], signIn: true }), "需要登录");
   assert.equal(mcpNeeds({ fields: [plain], signIn: false }), null);
   assert.equal(mcpNeeds({ fields: [], signIn: false }), null);
 });
 
-test("MCP 连接方式与包名：本机命令写命令，远程写地址", () => {
+test("MCP 运行方式（#276）：本地运行 + 命令，在线服务 + 地址（命令与地址进悬停）", () => {
   assert.deepEqual(mcpConnection(npx), {
-    kind: "本机命令",
+    kind: "本地运行",
     text: "npx -y @playwright/mcp@latest",
   });
   assert.deepEqual(mcpConnection(remote), {
-    kind: "远程",
+    kind: "在线服务",
     text: "https://api.githubcopilot.com/mcp/",
   });
-  assert.equal(mcpPackage(npx), "@playwright/mcp@latest");
-  assert.equal(mcpPackage(remote), "https://api.githubcopilot.com/mcp/");
-  assert.equal(
-    mcpPackage({ name: "t", transport: "stdio", command: "uvx", args: ["mcp-server-time"] }),
-    "mcp-server-time",
-  );
-  assert.equal(
-    mcpPackage({
-      name: "g",
-      transport: "stdio",
-      command: "docker",
-      args: ["run", "-i", "--rm", "-e", "GITHUB_TOKEN", "ghcr.io/github/github-mcp-server"],
-    }),
-    "ghcr.io/github/github-mcp-server",
-  );
-  assert.equal(
-    mcpPackage({ name: "x", transport: "stdio", command: "/usr/local/bin/my-mcp", args: ["--x"] }),
-    "/usr/local/bin/my-mcp --x",
-  );
 });
 
-test("MCP 要填的：键名 + 必填 · 密钥；没有时说不用填（要登录时补一句）", () => {
+test("MCP 要填的：说明当名字（没有说明退回键名）+ 必填 · 密钥；没有时说不用填（要登录时补一句）", () => {
   assert.deepEqual(
     mcpFieldFacts({
       fields: [
-        { key: "GITHUB_TOKEN", kind: "header", required: true, secret: true },
+        {
+          key: "GITHUB_TOKEN",
+          kind: "header",
+          required: true,
+          secret: true,
+          description: "GitHub 访问令牌，在 github.com/settings/personal-access-tokens 生成",
+        },
         { key: "REGION", kind: "env", required: false, secret: false },
       ],
       signIn: false,
     }),
     [
-      { key: "GITHUB_TOKEN", note: "必填 · 密钥" },
-      { key: "REGION", note: "选填" },
+      { key: "GITHUB_TOKEN", label: "GitHub 访问令牌", keyed: false, note: "必填 · 密钥" },
+      { key: "REGION", label: "REGION", keyed: true, note: "选填" },
     ],
   );
   assert.equal(mcpFieldFacts({ fields: [], signIn: false }), "不用填");
@@ -263,11 +248,7 @@ test("MCP 要填的：键名 + 必填 · 密钥；没有时说不用填（要登
   assert.equal(mcpSourceLabel("curated"), "精选");
 });
 
-test("离开键：GitHub / npm / 其他三种说法；仓库地址指到文件夹", () => {
-  assert.equal(leaveLabel("https://github.com/microsoft/playwright-mcp"), "在 GitHub 打开");
-  assert.equal(leaveLabel("https://www.npmjs.com/package/@playwright/mcp"), "npm 上的说明");
-  assert.equal(leaveLabel("https://docs.devin.ai/x"), "打开说明页");
-  assert.equal(leaveLabel("not a url"), "打开说明页");
+test("离开键：仓库地址指到文件夹", () => {
   assert.equal(githubUrl("anthropics/skills", null), "https://github.com/anthropics/skills");
   assert.equal(
     githubUrl("anthropics/skills", "skills/pdf"),

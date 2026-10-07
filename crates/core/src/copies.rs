@@ -635,7 +635,8 @@ pub(crate) fn sweep_held_with(
                 continue;
             }
             if let Err(e) = crate::sync::release_one(&item, Some(&dir.join(&name)), trash) {
-                let reason = crate::sync::io_fail("release-held-copy", &item, &e).reason;
+                let reason = crate::sync::io_fail("release-held-copy", &item, &e)
+                    .reason_or(|| crate::t!("skills.sync.releaseHeldFailed"));
                 failed.push((item, reason));
             }
         }
