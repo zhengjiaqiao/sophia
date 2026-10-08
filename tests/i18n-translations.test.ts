@@ -1,4 +1,4 @@
-/// English 与繁體目录的译文检查（spec 2026-09-30-language-and-theme R10、R11，AC11–AC13 的代理验证）。
+/// English 与繁體目录（连同精选 MCP 清单里按语言写的字，#305）的译文检查（spec 2026-09-30-language-and-theme R10、R11，AC11–AC13 的代理验证）。
 /// 各语言键与占位符一致由 i18n-catalog.test.ts 查；这里查译文本身：English 里没有中文，繁體里没有简体字，
 /// 术语按 locales/GLOSSARY.md 的规定写法（列出每个术语不许用的写法）
 import assert from "node:assert/strict";
@@ -7,12 +7,35 @@ import test from "node:test";
 import * as OpenCC from "opencc-js";
 
 type Message = string | Record<string, string>;
+type Texts = Record<string, string>;
+/// 精选 MCP 清单里按界面语言写的字（#305）：说明、要填的标签与框下一句，与目录同一套译文检查
+const curated = (lang: string): Record<string, Message> => {
+  const file: {
+    servers: {
+      name: string;
+      description: Texts;
+      fields: { key: string; label: Texts; help?: Texts }[];
+    }[];
+  } = JSON.parse(
+    readFileSync(new URL("../crates/core/data/market/mcp-curated.json", import.meta.url), "utf8"),
+  );
+  const out: Record<string, Message> = {};
+  for (const s of file.servers) {
+    out[`mcp-curated ${s.name}.description`] = s.description[lang];
+    for (const f of s.fields) {
+      out[`mcp-curated ${s.name}.${f.key}.label`] = f.label[lang];
+      if (f.help) out[`mcp-curated ${s.name}.${f.key}.help`] = f.help[lang];
+    }
+  }
+  return out;
+};
 const load = (lang: string): Record<string, Message> =>
   Object.assign(
     {},
     ...readdirSync(new URL(`../locales/${lang}/`, import.meta.url)).map((f) =>
       JSON.parse(readFileSync(new URL(`../locales/${lang}/${f}`, import.meta.url), "utf8")),
     ),
+    curated(lang),
   );
 const forms = (v: Message) => (typeof v === "string" ? [v] : Object.values(v));
 const CJK = /[　-〿㐀-鿿＀-￯]/;

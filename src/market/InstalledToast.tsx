@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { t } from "../i18n.ts";
 import { CornerToast, Toast } from "../ui/index.ts";
+import type { TrustNotice } from "../mcpTrust.ts";
 import type { ToastText } from "../toastText.ts";
 import type { McpUndoReport, SyncReport } from "../types.ts";
 import type { SkillHandle } from "./installView.ts";
@@ -18,6 +19,8 @@ export interface InstalledNotice {
   undoId: string | null;
   /// 「去处理」去哪一行；没有「没链上」时为 null（MCP 一直没有）
   handle?: SkillHandle | null;
+  /// MCP 写进了要点「信任」的 agent（WorkBuddy）：调用方在右下另挂一窗（`McpTrustToast`，#256）
+  trust?: TrustNotice | null;
 }
 
 export function InstalledToast({
@@ -31,7 +34,8 @@ export function InstalledToast({
   onDismiss: () => void;
   /// 点了「去处理」：调用方切到那一行（这一窗随即收起）；不给就没有这颗键
   onHandle?: (target: SkillHandle) => void;
-  /// 撤销做完（结果交给调用方重扫、再说一句）；撤不了的原因也经它回去
+  /// 撤销做完（结果交给调用方重扫、再说一句）；撤不了的原因也经它回去：命令的错误串原样交回
+  /// （`[code] 一句\n[detail] 原文`），一句与原文由调用方拆（`parseBackendError`）
   onUndone?: (result: { report: SyncReport | McpUndoReport | null; error: string | null }) => void;
   service?: MarketService;
 }) {
@@ -45,7 +49,7 @@ export function InstalledToast({
         notice.kind === "skill" ? await service.undoSkill(undoId) : await service.undoMcp(undoId);
       onUndone?.({ report, error: null });
     } catch (error) {
-      onUndone?.({ report: null, error: errorText(error) });
+      onUndone?.({ report: null, error: typeof error === "string" ? error : errorText(error) });
     } finally {
       setUndoing(false);
       onDismiss();

@@ -1509,7 +1509,7 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(err.kind, FetchErrorKind::RateLimited(Some(30)));
-        assert_eq!(err.message, "服务商限流了，约 30 秒后再试");
+        assert_eq!(err.message, "模型提供商限流了，约 30 秒后再试");
         assert_eq!(
             err.kind.unreachable(),
             UnreachableReason::RateLimited(Some(30))
@@ -1760,7 +1760,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind, FetchErrorKind::Server(503));
-        assert_eq!(err.message, "服务商出了问题（HTTP 503），稍后再试");
+        assert_eq!(err.message, "模型提供商出了问题（HTTP 503），稍后再试");
         assert!(
             err.detail
                 .starts_with(&format!("GET {base}/models → 503 Service Unavailable\n")),
@@ -2088,7 +2088,8 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind, ProbeErrorKind::Upstream);
         // 别的 4xx：上游那句（说的是哪个模型 / 参数不对）就是原因；请求与返回体另在详情里（R13）
-        assert_eq!(err.message, "调用不通（404）：404 Not Found");
+        // 全角右括号接全角冒号空隙偏大（走查 2026-10-08）：状态码不放括号里
+        assert_eq!(err.message, "调用不通，返回 404：404 Not Found");
         assert!(
             err.detail.starts_with(&format!(
                 "POST {base}/v1/chat/completions → 404 Not Found\n"
@@ -2097,7 +2098,7 @@ mod tests {
             err.detail
         );
 
-        // 5xx：说人话（服务商出了问题），上游原文只进详情（R9 / R13，Codex 复审 5/7）
+        // 5xx：说人话（模型提供商出了问题），上游原文只进详情（R9 / R13，Codex 复审 5/7）
         let long: &'static str =
             Box::leak(format!("<html>{}</html>", "网关维护中 ".repeat(40)).into_boxed_str());
         let base = probe_server(Arc::clone(&seen), answer(StatusCode::BAD_GATEWAY, long)).await;
@@ -2105,7 +2106,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind, ProbeErrorKind::Upstream);
-        assert_eq!(err.message, "服务商出了问题（HTTP 502），稍后再试");
+        assert_eq!(err.message, "模型提供商出了问题（HTTP 502），稍后再试");
         assert!(err.detail.contains("<html>网关维护中"), "{}", err.detail);
 
         // 401 / 403：说密钥被拒，上游原文（抹掉密钥）进详情
@@ -2123,7 +2124,7 @@ mod tests {
         assert_eq!(err.kind, ProbeErrorKind::Auth);
         assert_eq!(
             err.message,
-            "网关拒绝了这个密钥（HTTP 401），请检查密钥是否正确"
+            "模型提供商拒绝了这个密钥（HTTP 401），请检查密钥是否正确"
         );
         assert!(err.detail.contains("invalid token"), "{}", err.detail);
         assert!(!err.detail.contains("sk-probe-secret"), "{}", err.detail);
@@ -2136,7 +2137,7 @@ mod tests {
         let err = probe(&base, Protocol::Chat, Duration::from_secs(2))
             .await
             .unwrap_err();
-        assert_eq!(err.message, "服务商出了问题（HTTP 503），稍后再试");
+        assert_eq!(err.message, "模型提供商出了问题（HTTP 503），稍后再试");
         assert!(
             err.detail.ends_with("→ 503 Service Unavailable"),
             "{}",
@@ -2163,7 +2164,10 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind, ProbeErrorKind::Upstream);
-        assert_eq!(err.message, "额度不足（HTTP 429），请检查服务商账户的余额");
+        assert_eq!(
+            err.message,
+            "额度不足（HTTP 429），请检查模型提供商账户的余额"
+        );
     }
 
     /// 普通限流的返回体里出现 `quota` 字样（`quota_remaining`）不算额度用完：原文里只认明确的说法（第 3 轮 a）

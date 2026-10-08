@@ -134,19 +134,24 @@ test("灰面板：后端给了原因就按原因说（读不懂 / 断了 / 超�
         service: "skills.sh",
         cachedAt: sixHoursAgo,
         rateLimited: false,
-        reason: "skills.sh 返回的内容读不懂",
+        reason: "无法识别 skills.sh 返回的内容",
         detail: "GET https://skills.sh/api/search?… → 200 OK",
       },
       now,
     ),
-    "skills.sh 返回的内容读不懂，显示的是上次的结果 · 6 小时前",
+    "无法识别 skills.sh 返回的内容，显示的是上次的结果 · 6 小时前",
   );
   assert.equal(
     fallbackText(
-      { service: "skills.sh", cachedAt: null, rateLimited: false, reason: "从 skills.sh 读到一半断了" },
+      {
+        service: "skills.sh",
+        cachedAt: null,
+        rateLimited: false,
+        reason: "读取 skills.sh 的内容时连接中断",
+      },
       now,
     ),
-    "从 skills.sh 读到一半断了，显示的是随包附带的列表",
+    "读取 skills.sh 的内容时连接中断，显示的是随包附带的列表",
   );
   assert.equal(
     fallbackText(
@@ -179,8 +184,8 @@ test("装在哪：用户级排前，项目写文件夹名，重名只写一次",
   assert.equal(placeName("project:/Users/you/Projects/CardBox"), "CardBox");
   assert.equal(placeName("project:C:\\code\\WeiboAP\\"), "WeiboAP");
   assert.equal(installedLine([]), null);
-  assert.equal(installedLine(["project:/Users/you/CardBox", "global"]), "装在 用户级、CardBox");
-  assert.equal(installedLine(["global", "global"]), "装在 用户级");
+  assert.equal(installedLine(["project:/Users/you/CardBox", "global"]), "装在用户级、CardBox");
+  assert.equal(installedLine(["global", "global"]), "装在用户级");
 });
 
 const npx: McpDefinitionInput = {

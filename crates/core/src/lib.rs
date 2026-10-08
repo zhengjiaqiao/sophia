@@ -14,6 +14,7 @@ pub mod keyhint;
 pub mod keystore;
 pub mod market;
 pub mod mcp;
+pub mod model_providers;
 pub mod models;
 pub mod provider_presets;
 pub mod redact;
@@ -23,6 +24,7 @@ pub mod store;
 pub mod subscriptions;
 pub mod sync;
 pub mod usage;
+pub mod workbuddy_models;
 
 #[cfg(test)]
 pub(crate) mod test_support;

@@ -1,10 +1,10 @@
 import type {
   AgentGatewayView,
+  AgentModels,
   GatewayCodex,
   GatewayHookupMode,
   GatewayModeReason,
   GatewayPortNotice,
-  GatewayProvider,
   GatewayRouter,
   GatewayState,
   GatewayTakeover,
@@ -14,7 +14,8 @@ import type {
 /// `GatewayState`（顶层只剩 supported、router、portNotice、agents）。只是夹具的写法，页面与托盘读的是 `agents` 里 Codex 那一份
 export interface CodexFixture {
   supported: boolean;
-  providers: GatewayProvider[];
+  /// Codex 的「已选」与浮层分组；不给是什么都没选、一家提供商都没有
+  models?: AgentModels;
   enabled: boolean;
   needsCodexRestart: boolean;
   router: GatewayRouter & { protocol?: string };
@@ -29,14 +30,38 @@ export interface CodexFixture {
   modeReason?: GatewayModeReason | null;
   conflict: string;
   takeover: GatewayTakeover | null;
+  /// WorkBuddy 那一份（#266）；不给就不列
+  workbuddy?: AgentGatewayView;
   /// Claude 那一份；不给就是关着、什么都没配、桌面应用没装
   claude?: AgentGatewayView;
+}
+
+/// 什么都没选、一家提供商都没有
+export const NO_MODELS: AgentModels = { picked: [], groups: [], providers: 0 };
+
+/// 「已选」：`提供商名/模型` 一项一个（`官方/gpt-6` 是官方模型），提供商 id 取名字的小写
+export function picked(...items: string[]): AgentModels {
+  const names = new Set<string>();
+  const list = items.map((item) => {
+    const [provider, ...rest] = item.split("/");
+    const model = rest.join("/");
+    if (provider === "官方") {
+      return { ref: { provider: "@official", model }, displayName: model, providerName: "" };
+    }
+    names.add(provider);
+    return {
+      ref: { provider: provider.toLowerCase(), model },
+      displayName: model,
+      providerName: provider,
+    };
+  });
+  return { picked: list, groups: [], providers: names.size };
 }
 
 export const CLAUDE_OFF: AgentGatewayView = {
   agent: "claude",
   installed: false,
-  providers: [],
+  models: NO_MODELS,
   enabled: false,
   conflict: "",
   claude: {
@@ -67,7 +92,7 @@ export function gatewayFixture(f: CodexFixture): GatewayState {
           {
             agent: "codex",
             installed: f.codex.version !== "",
-            providers: f.providers,
+            models: f.models ?? NO_MODELS,
             enabled: f.enabled,
             conflict: f.conflict,
             codex: {
@@ -80,6 +105,7 @@ export function gatewayFixture(f: CodexFixture): GatewayState {
             },
           },
           f.claude ?? CLAUDE_OFF,
+          ...(f.workbuddy ? [f.workbuddy] : []),
         ]
       : [],
   };

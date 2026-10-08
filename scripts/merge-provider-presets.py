@@ -7,6 +7,10 @@
 
 用法：merge-provider-presets.py codexPresets.ts claudePresets.ts magpiePresets.go
 
+另有 `recommended` 子命令（#250）：不重新合并名单，只给现有的 provider-presets.json 加 / 重算
+`recommendedModels`（加一家时默认只启用的模型），可重复运行：
+    merge-provider-presets.py recommended codexPresets.ts claudePresets.ts magpiePresets.go provider-presets.json
+
 cc-switch 为准，magpie 只补缺失字段与缺失的服务商。
 不执行 TS/Go，只做带字符串/注释感知的括号匹配与正则抽取。
 统计与跳过明细写到 stderr。
@@ -19,6 +23,10 @@ from urllib.parse import urlsplit
 NOTICE = (
     "服务商预设合并自 farion1231/cc-switch (MIT) 与 yetone/magpie (MIT)，见仓库 NOTICE。"
     "cc-switch 为准，magpie 只补 cc-switch 没有的。合并日期 2026-10-05。"
+)
+RECOMMENDED_NOTICE = (
+    "recommendedModels 整理自 cc-switch d35726e（Codex 预设的 modelCatalog 与默认模型、Claude 预设的模型环境变量）"
+    "与 magpie 01aaa8e（套餐的 Models），整理日期 2026-10-07；对不上或来源没有的留空，加一家时走默认规则。"
 )
 
 # ---------- 文本扫描 ----------
@@ -235,7 +243,9 @@ def parse_ccswitch(path, kind):
             reason = "requiresOAuth"
         elif "providerType" in f:
             reason = "providerType(OAuth)"
-        base, cid = None, None
+        base, cid, models = None, None, []
+        if kind == "codex" and "modelCatalog" in f:
+            models += catalog_models(text, masked, dep, f["modelCatalog"])
         if kind == "codex" and "config" in f:
             p = f["config"]
             while text[p] in " \t\r\n":
@@ -245,6 +255,9 @@ def parse_ccswitch(path, kind):
                 body = text[p + 1 : end]
                 m = re.search(r'^\s*base_url\s*=\s*"([^"]*)"', body, re.M)
                 base = m.group(1) if m else None
+                mm = re.search(r'^\s*model\s*=\s*"([^"]*)"', body, re.M)
+                if mm:
+                    models.append(mm.group(1))
             elif text.startswith("generateThirdPartyConfig", p):
                 op = text.index("(", p)
                 cl = match_close(masked, op)
@@ -252,12 +265,18 @@ def parse_ccswitch(path, kind):
                 strs = re.findall(r'"((?:[^"\\]|\\.)*)"', args)
                 if len(strs) >= 2:
                     cid, base = strs[0], strs[1]
+                if len(strs) >= 3:
+                    models.append(strs[2])
         elif kind == "claude" and "settingsConfig" in f:
             p = f["settingsConfig"]
             op = text.index("{", p)
             cl = match_close(masked, op)
             m = re.search(r'ANTHROPIC_BASE_URL\s*:\s*"([^"]*)"', text[op:cl])
             base = m.group(1) if m else None
+            for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
+                mk = re.search(key + r'\s*:\s*"([^"]+)"', text[op:cl])
+                if mk:
+                    models.append(mk.group(1))
         if reason is None and not base:
             reason = "无 base URL（模板或空配置）"
         if reason is None and re.search(r"YOUR_|<resource>|\{\w+\}", base):
@@ -276,6 +295,7 @@ def parse_ccswitch(path, kind):
             "regionKey": g("regionKey"),
             "base": clean_url(base),
             "cid": cid,
+            "models": models,
         }
         if kind == "codex":
             fmt = g("apiFormat")
@@ -356,6 +376,119 @@ def parse_magpie(path):
     return out, skipped
 
 
+
+def catalog_models(text, masked, dep, pos):
+    """modelCatalog([...]) 里按出现顺序的模型 id（元素是字符串或带 model 字段的对象）。"""
+    op = masked.index("[", pos)
+    close = match_close(masked, op)
+    res, i = [], op + 1
+    while i < close:
+        if masked[i] == "{":
+            j = match_close(masked, i)
+            f = top_fields(text, masked, dep, i, j + 1)
+            v = read_value(text, f["model"]) if "model" in f else None
+            if v:
+                res.append(v)
+            i = j + 1
+        elif masked[i] in "\"'":
+            res.append(unquote(text[i:])[0])
+            i = masked.index(masked[i], i + 1) + 1
+        else:
+            i += 1
+    return res
+
+
+# 中转站 / 聚合站（cc-switch 的 aggregator、third_party）：来源只给了一两个默认模型，不是「推荐」，留空走默认规则
+RELAY_CATEGORIES = {"aggregator", "third_party"}
+
+# 地区里这几个 id 是按量计费，不是套餐；magpie 写在预设顶层的 Models 是套餐的，不给按量计费用
+PAYG_REGION_IDS = {"api", "cn", "intl"}
+
+
+def magpie_models(path):
+    """magpie 里每个 Chat / Responses 地址 -> 它的模型列表（只有写了 Models 的套餐有）。"""
+    text = open(path, encoding="utf-8").read()
+    masked = mask(text)
+    dep = depths(masked)
+    m = re.search(r"var presets = \[\]PresetDef\{", masked)
+    out = {}
+
+    def str_list(lo, hi):
+        f = top_fields(text, masked, dep, lo, hi)
+        if "Models" not in f:
+            return None
+        op = masked.index("{", f["Models"])
+        return re.findall(r'"([^"]+)"', text[op : match_close(masked, op) + 1])
+
+    def urls(lo, hi):
+        f = top_fields(text, masked, dep, lo, hi)
+        vals = (go_eval(text, f[k]) for k in ("Chat", "Responses") if k in f)
+        return [clean_url(v) for v in vals if v]
+
+    for lo, hi in split_entries(text, masked, m.end() - 1):
+        f = top_fields(text, masked, dep, lo, hi)
+        kind_m = re.match(r"\s*(\w+)", text[f["Kind"] :]) if "Kind" in f else None
+        # bedrock 的 id 是带地区前缀的推理配置文件，各账号不同，不当推荐
+        if not kind_m or kind_m.group(1) != "KindVendor" or "bedrock" in (go_eval(text, f["ID"]) or "" if "ID" in f else ""):
+            continue  # 只取厂商自家的套餐；中转与本地服务不算
+        top = str_list(lo, hi)
+        regions = []
+        if "Regions" in f:
+            regions = split_entries(text, masked, masked.index("[", f["Regions"]))
+        for a, b in regions:
+            rf = top_fields(text, masked, dep, a, b)
+            rid = read_value(text, rf["ID"]) if "ID" in rf else None
+            own = str_list(a, b)
+            if own:
+                for u in urls(a, b):
+                    out.setdefault(u, own)
+            elif top and rid not in PAYG_REGION_IDS:
+                for u in urls(a, b):
+                    out.setdefault(u, top)
+        if top and not regions:
+            for u in urls(lo, hi):
+                out.setdefault(u, top)
+    return out
+
+
+def recommend(codex_path, claude_path, magpie_path, presets_path):
+    """给现有预设名单算 recommendedModels：cc-switch（Codex 的 modelCatalog 与默认模型在前，Claude 的模型环境变量
+    补在后）按地址对上；cc-switch 没有这个地址再用 magpie 的 Models；都没有就不写（走默认规则）。"""
+    codex, _ = parse_ccswitch(codex_path, "codex")
+    claude, _ = parse_ccswitch(claude_path, "claude")
+    mp = magpie_models(magpie_path)
+    by_openai, by_anth = {}, {}
+    for e in codex:
+        if e["category"] not in RELAY_CATEGORIES:
+            by_openai.setdefault(e["base"], e["models"])
+    for e in claude:
+        if e["category"] not in RELAY_CATEGORIES:
+            by_anth.setdefault(e["base"], e["models"])
+    doc = json.load(open(presets_path, encoding="utf-8"))
+    stats = {"cc": 0, "magpie": 0, "none": 0}
+    for p in doc["providers"]:
+        p.pop("recommendedModels", None)
+        o = (p.get("openai") or {}).get("apiBase")
+        a = (p.get("anthropic") or {}).get("apiBase")
+        models, src = [], None
+        cc = (by_openai.get(o) or []) + (by_anth.get(a) or [])
+        if cc:
+            models, src = cc, "cc"
+        elif o and o in mp:
+            models, src = mp[o], "magpie"
+        # Claude Code 的 `[1M]` 是上下文后缀，不是接口返回的 id，去掉
+        uniq = list(dict.fromkeys(re.sub(r"\[[^\]]*\]$", "", x) for x in models if x))
+        if uniq:
+            p["recommendedModels"] = uniq
+            stats[src] += 1
+        else:
+            stats["none"] += 1
+    doc["_notice"] = NOTICE + RECOMMENDED_NOTICE
+    json.dump(doc, sys.stdout, ensure_ascii=False, indent=2)
+    sys.stdout.write("\n")
+    print(f"recommendedModels: cc-switch={stats['cc']} magpie={stats['magpie']} 留空={stats['none']}", file=sys.stderr)
+
+
 # ---------- 合并 ----------
 
 
@@ -364,6 +497,8 @@ def region_of_cc(e):
 
 
 def main():
+    if len(sys.argv) == 6 and sys.argv[1] == "recommended":
+        return recommend(*sys.argv[2:])
     if len(sys.argv) != 4:
         sys.exit("用法：merge-provider-presets.py codexPresets.ts claudePresets.ts magpiePresets.go")
     codex, sk1 = parse_ccswitch(sys.argv[1], "codex")

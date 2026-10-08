@@ -11,8 +11,8 @@
 //! `mcp_servers = { … }`、跨行的内联定义）如实拒绝，不猜。
 use super::sources::{remove_json_server, remove_toml_server};
 use super::{
-    backup, backup_failed_message, fold_mirrors, main_succeeded, parse, record_undo, same_file,
-    same_location, toml, write_failed_message, McpIssue, McpLocation, McpReport, McpReportEntry,
+    backup, backup_failed, fold_mirrors, main_succeeded, parse, patch, patch_file, record_undo,
+    same_file, same_location, toml, write_failed, McpIssue, McpLocation, McpReport, McpReportEntry,
     Parsed, State,
 };
 use crate::atomicfile::{self, unsafe_parent, FileState};
@@ -79,6 +79,8 @@ fn scope_key(location: &McpLocation) -> String {
 fn cut(path: &Path, selector: Option<&str>, bytes: &[u8], name: &str) -> Option<Vec<u8>> {
     if toml(path) {
         remove_toml_server(bytes, name)
+    } else if patch_file(path) {
+        patch::remove(bytes, name)
     } else {
         remove_json_server(bytes, selector, name)
     }
@@ -203,6 +205,7 @@ pub fn execute_removal(plan: McpRemovalPlan, backups: &Path) -> McpReport {
             message: issue.message,
             backup_path: None,
             mirror_failed: None,
+            note: None,
             detail: None,
         });
     }
@@ -263,21 +266,29 @@ fn entry(
         message: message.into(),
         backup_path,
         mirror_failed: None,
+        note: None,
         detail: None,
     }
 }
 
 fn execute_group(group: &[PendingRemoval], backups: &Path, report: &mut McpReport) {
-    let fail = |report: &mut McpReport,
-                items: &[&PendingRemoval],
-                message: &str,
-                backup: Option<PathBuf>| {
+    // `detail`：分不出原因时的系统原文（`message` 是兜底句），前端提示条据此只写失败句
+    let fail_with = |report: &mut McpReport,
+                     items: &[&PendingRemoval],
+                     message: &str,
+                     backup: Option<PathBuf>,
+                     detail: Option<String>| {
         for pending in items {
-            report
-                .entries
-                .push(entry(&pending.action, "failed", message, backup.clone()));
+            let mut failed = entry(&pending.action, "failed", message, backup.clone());
+            failed.detail = detail.clone();
+            report.entries.push(failed);
         }
     };
+    let fail =
+        |report: &mut McpReport,
+         items: &[&PendingRemoval],
+         message: &str,
+         backup: Option<PathBuf>| fail_with(report, items, message, backup, None);
     let all: Vec<&PendingRemoval> = group.iter().collect();
     let path = &group[0].action.target_path;
     if group
@@ -323,18 +334,18 @@ fn execute_group(group: &[PendingRemoval], backups: &Path, report: &mut McpRepor
     let backup_path = match backup(path, snap, backups) {
         Ok(backup_path) => backup_path,
         Err(error) => {
-            let message = backup_failed_message(path, &error, || {
+            let (message, detail) = backup_failed(path, &error, || {
                 crate::t!("mcp.report.backupFailedUntouched")
             });
-            fail(report, &removed, &message, None);
+            fail_with(report, &removed, &message, None, detail);
             return;
         }
     };
     if let Err(error) = atomicfile::atomic_write(path, &bytes, &FileState::Present(snap.clone())) {
-        let message = write_failed_message(path, &error, || {
+        let (message, detail) = write_failed(path, &error, || {
             crate::t!("mcp.report.writeBackFailedUntouched")
         });
-        fail(report, &removed, &message, Some(backup_path));
+        fail_with(report, &removed, &message, Some(backup_path), detail);
         return;
     }
     record_undo(

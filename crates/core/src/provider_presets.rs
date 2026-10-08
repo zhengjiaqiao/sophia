@@ -33,6 +33,10 @@ pub struct ProviderPreset {
     pub anthropic: Option<PresetEndpoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// 推荐模型（#250）：加一家时默认只启用这些；id 与该家接口返回的一致。空＝来源没有可靠数据，走默认规则。
+    /// 数据由 `scripts/merge-provider-presets.py recommended` 从 cc-switch、magpie 整理
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommended_models: Vec<String>,
 }
 
 impl ProviderPreset {
@@ -132,6 +136,43 @@ mod tests {
             assert!(p.supported(), "{id} 要有 OpenAI 兼容地址");
             assert_eq!(p.openai.unwrap().protocol.as_deref(), Some("chat"));
         }
+    }
+
+    /// 推荐模型（#250）：可选；写了就不能有空串、重复，也不带 Claude Code 的 `[1M]` 上下文后缀
+    /// （那不是接口返回的 id）；主要的国内厂商都有，中转站与拿不到可靠数据的留空
+    #[test]
+    fn 推荐模型数据合法且覆盖主要厂商() {
+        for p in all() {
+            let mut seen = HashSet::new();
+            for m in &p.recommended_models {
+                assert!(
+                    !m.trim().is_empty() && !m.ends_with(']') && seen.insert(m.clone()),
+                    "{} 推荐模型不合法或重复：{m:?}",
+                    p.id
+                );
+            }
+        }
+        for id in [
+            "kimi",
+            "kimi-for-coding",
+            "deepseek",
+            "zhipu-glm",
+            "minimax",
+            "qwen-ai",
+            "qwen-ai-token-plan",
+            "tencent-hunyuan",
+            "tencent-token-plan",
+            "volcengine-coding-plan",
+        ] {
+            let p = find(id).unwrap_or_else(|| panic!("缺预设：{id}"));
+            assert!(!p.recommended_models.is_empty(), "{id} 要有推荐模型");
+        }
+        // 中转站只给了一两个默认模型，不算推荐，留空走默认规则
+        assert!(find("openrouter").unwrap().recommended_models.is_empty());
+        assert_eq!(
+            find("deepseek").unwrap().recommended_models[0],
+            "deepseek-flash"
+        );
     }
 
     /// 来源里的推广链接不带进来（`/i/<码>`、`/go/<码>`、`/invite/`、`/register/<码>`、`/agent/register/<码>`、

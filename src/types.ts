@@ -33,6 +33,8 @@ export interface Target {
   /// 目录是否已存在；false 的目标照常成列，列头标「将新建目录」，建链时自动创建
   exists: boolean;
   linkedWholeTo: string | null;
+  /// 同一品牌几个产品共用这一处、合成一列时，读它的各产品（harness id，表的先后）；只有一个产品读时没有（#251）
+  readers?: string[];
 }
 
 export type CellState =
@@ -283,19 +285,45 @@ export interface SourceRemoval {
   links: RemovalLink[];
 }
 
+/// 一个产品（GLOSSARY「产品」：Claude Code、Claude Desktop、Kimi Code……）
 export interface HarnessStatus {
   id: string;
   displayName: string;
+  /// 品牌 id 与品牌名（#251）：设置按品牌勾，MCP 页按品牌合组
+  brand: string;
+  brandName: string;
+  /// 它的品牌勾着没有
   enabled: boolean;
-  /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」
-  /// 后面——所以后端返回全部 41 个而不只是已安装的
+  /// 这台机器上装没装
   installed: boolean;
+  /// 有没有 skill 目录（只有 MCP 的 Claude Desktop 没有）
+  skills: boolean;
+  /// MCP 页能不能写它（core `mcp::supports`）
+  mcp: boolean;
+  /// MCP 写进以后要在它里面点「信任」才会连上（core `mcp::trust_app`，#256）
+  mcpTrust: boolean;
+  /// 它的 skill 在用户级 / 项目里落进哪一列（core `discovery::skill_columns`）；没有这一级为 null
+  skillUser: string | null;
+  skillProject: string | null;
 }
 
-/// `list_harnesses` 的返回：全部 agent，外加列表里最多显示几个（core 的 `MAX_SHOWN`）
+/// 一个品牌（GLOSSARY「品牌」）：设置里一个勾，「最多显示几个」按它算
+export interface BrandStatus {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /// 装了它任一个产品。设置页默认只列已安装的，其余收在「未安装的 N 个」后面——所以后端返回全部品牌
+  installed: boolean;
+  /// 已安装的产品 id（表的先后）：勾选行下的小字列它们的名字，只装了一个时不写
+  installedProducts: string[];
+}
+
+/// `list_harnesses` 的返回：全部产品与品牌，外加列表里最多显示几个品牌（core 的 `MAX_SHOWN`）
 export interface HarnessList {
   maxShown: number;
+  /// 全部产品（含只有 MCP 的），按品牌的先后、同一品牌的挨着
   harnesses: HarnessStatus[];
+  brands: BrandStatus[];
 }
 
 /// 设置「生效范围」里的一格项目（core `discovery::ProjectScope`）：自动检测的与手动选的长得一样
@@ -339,7 +367,9 @@ export type McpReasonKind =
   | "crossAgentVariables"
   | "sseUnsupported"
   | "codexClientFields"
-  | "clientFields";
+  | "clientFields"
+  | "serverNameInvalid"
+  | "targetNotReady";
 export interface McpCell {
   targetId: string;
   state: McpCellState;
@@ -404,6 +434,8 @@ export interface McpReportEntry {
   backupPath: string | null;
   /** 这一条成了，但 Claude Desktop 第三方模式那一份（`McpLocation.mirrors`）没写成：整句原因，在成功条目下显示 */
   mirrorFailed?: string;
+  /** 写成了、另有一句要交代的（不是失败）：DeepSeek Harness 另有全机补丁时说明以哪一个为准。接在成功句后面 */
+  note?: string;
   /** 没写成、又分不出原因（spec #239 第 43 条）：系统原文。给了就说明 `message` 是兜底句（`原子写入失败`），提示条不说它 */
   detail?: string;
 }
@@ -443,11 +475,16 @@ export interface McpUndoFileResult {
   backupPath: string | null;
   outcome: "restored" | "removed" | "changed" | "unchanged" | "failed" | "skipped";
   message: string;
+  /** 没还原成、又分不出原因时的系统原文（去隐私）；给了就说明 `message` 是兜底句 */
+  detail?: string;
 }
 /** 撤销结果。`changed`：有文件写后又被改过，整体拒绝、没动任何文件 */
 export interface McpUndoReport {
   outcome: "undone" | "changed" | "failed";
+  /** `failed` 时是没还原成的那个文件的一句（分得出原因的原因，否则兜底句） */
   message: string;
+  /** 分不出原因时的系统原文（去隐私）：提示条只写「撤销失败」，不拼它 */
+  detail?: string;
   files: McpUndoFileResult[];
 }
 
@@ -545,18 +582,6 @@ export interface McpSourceRemoval {
 export const actionId = (a: PlannedAction): string => `${a.kind}|${a.targetPath}`;
 
 /// 与 gateway_* 命令的返回类型一一对应（camelCase），见 docs/gateway-commands.md
-export interface GatewayProviderModel {
-  id: string;
-  slug: string;
-  displayName: string;
-  selected: boolean;
-  /// 网关在模型列表里给的上下文长度（token）；没给为 null / 缺省
-  contextWindow?: number | null;
-  /// 用户手动填的（sophia-dev#117）：刷新列表不冲掉；取消勾选就移除
-  manual?: boolean;
-}
-/// 一家网关的密钥状态（后端 `KeyStatus`）：读不出不等于没有
-export type GatewayKeyStatus = "set" | "missing" | "unreadable";
 /// 服务商预设（core `provider_presets`，spec S1）：选一家只填密钥。`openai` 是 Sophia 现在接得上的地址；
 /// 只有 `anthropic` 的那几家界面上标「暂不支持」
 export interface PresetEndpoint {
@@ -574,38 +599,116 @@ export interface ProviderPreset {
   openai: PresetEndpoint | null;
   anthropic: PresetEndpoint | null;
   note?: string;
+  /** 推荐模型 id（加一家时默认只启用这些）；缺省＝来源没有可靠数据，走默认规则 */
+  recommendedModels?: string[];
 }
-export interface GatewayProvider {
-  /** 创建后不变，只在这一家（agent）里唯一；带 providerId 的命令用它指明操作哪一个网关 */
+/** 全局模型提供商（ADR 0003，#252；core `model_providers::view`）：默认启用用了哪条规则 */
+export type ProviderDefaultRule = "recommended" | "all" | "tooMany";
+/** 一个已启用模型是谁启用的：加提供商时按默认规则 / 用户自己 */
+export type ProviderEnabledBy = "default" | "user";
+
+/** 「启用模型」浮层里的一行 */
+export interface ProviderModelRow {
   id: string;
-  /** 显示名，可以改 */
+  displayName: string | null;
+  contextWindow: number | null;
+  /** 用户手填的 */
+  manual: boolean;
+  /** 已启用时谁启用的；没启用为 null */
+  enabledBy: ProviderEnabledBy | null;
+  /** 选了这个模型的 agent（#259 之前为空） */
+  agents: string[];
+}
+
+/** 提供商页的一行（命令 `providers_list` 等返回） */
+export interface ProviderRow {
+  id: string;
+  /** 全局唯一（不分大小写） */
   name: string;
-  /** 网关短名（core `ProviderSettings::short_name`）：网关行的名字，也是撞名模型的后缀——与 Codex 目录里同一个。
-   *  界面经 `gatewayShortName` 读它，不自己算 */
-  shortName: string;
   baseUrl: string;
-  /** 这家网关的协议："chat" 或 "responses" */
   protocol: string;
-  /** 从哪个服务商预设建的（`ProviderPreset.id`，spec S1）；手填的为 null / 缺省 */
-  preset?: string | null;
-  /** 密钥：有 / 没有 / 读不出（密钥文件没有读取权限、损坏，或还在钥匙串里没迁完） */
-  key: GatewayKeyStatus;
-  /** 读不出时的原因（当前语言的一句话，写全）；其余为 null */
-  keyProblem?: string | null;
-  models: GatewayProviderModel[];
-  /** 上次拉取模型失败的原因（「地址无法访问」「密钥无效，请换一个密钥」…）；null / 缺省表示上次成功或还没拉过 */
-  unreachable?: string | null;
-  /** 那次失败的技术原文（请求、状态码、返回的错误；已去隐私），网关行 `详情` 里给；没有为 null / 缺省 */
-  unreachableDetail?: string | null;
-  /** `unreachable` 是真实调用（转发的请求、勾选前的试调）被拒了密钥记下的（#144）：重拉模型列表清不掉，
-   *  行尾不出 `再试一次`，换密钥走铅笔 `编辑` */
-  keyRejectedOnCall?: boolean;
-  /** `unreachable` 的原因是密钥被拒（拉列表或真实调用都算）：网络是通的，网关行不写「无法连接」，只写原因 */
-  keyInvalid?: boolean;
+  preset: string | null;
+  key: "set" | "missing" | "unreadable";
+  keyProblem: string | null;
+  models: ProviderModelRow[];
+  /** 已启用几个 */
+  enabled: number;
+  /** 对话模型共几个 */
+  total: number;
+  /** 还停在添加时的默认启用上：用了哪条规则（用户改过为 null） */
+  defaultRule: ProviderDefaultRule | null;
+  /** 选了这一家模型的 agent（#259 之前为空） */
+  agents: string[];
+  unreachable: string | null;
+  unreachableDetail: string | null;
+  keyInvalid: boolean;
+}
+
+/** 添加弹窗里拉到的一个模型（core `catalog::Model`，序列化时缺省的字段不出现） */
+export interface PreviewModel {
+  id: string;
+  displayName?: string;
+  contextWindow?: number;
+}
+
+/** 添加弹窗填好密钥后拉到的列表（命令 `providers_preview`，不落盘）：先勾上哪些、用了哪条规则、探明的接口基址 */
+export interface ProviderPreview {
+  models: PreviewModel[];
+  enabled: string[];
+  rule: ProviderDefaultRule;
+  apiBase: string;
+}
+
+/** 加完一家的结论（core `model_providers::Added`） */
+export interface ProviderAdded {
+  id: string;
+  name: string;
+  rule: ProviderDefaultRule;
+  enabled: number;
+  total: number;
+}
+
+/// 一个模型的引用（core `ModelRef`）：哪一家提供商的哪个模型；官方模型的提供商是 `OFFICIAL_PROVIDER`
+export interface ModelRef {
+  provider: string;
+  model: string;
+}
+/** 官方模型在「已选」里的提供商记号（core `picks::OFFICIAL`） */
+export const OFFICIAL_PROVIDER = "@official";
+/** 一组为什么不能选：Codex 没登录 OpenAI / 接第三方时官方模型用不了（Claude）/ 它自己管（WorkBuddy）/ 协议不支持 */
+export type PickBlocked = "signedOut" | "officialUnavailable" | "readOnly" | "protocol";
+/** 选模型浮层「全部」里的一个模型 */
+export interface PickGroupModel {
+  ref: ModelRef;
+  displayName: string;
+  contextWindow: number | null;
+  picked: boolean;
+}
+/** 选模型浮层「全部」里的一组：官方一组在前（`provider` 是 `OFFICIAL_PROVIDER`、`name` 空），然后按提供商名单 */
+export interface PickGroup {
+  provider: string;
+  name: string;
+  blocked: PickBlocked | null;
+  models: PickGroupModel[];
+}
+/** 「已选」里的一项，按顺序 */
+export interface PickedModel {
+  ref: ModelRef;
+  displayName: string;
+  /** 提供商名；官方模型为空 */
+  providerName: string;
+}
+/** 一个 agent 的选模型视图（core `picks::AgentModels`）：模型页那一行与选模型浮层都读它 */
+export interface AgentModels {
+  /** 此刻生效的「已选」：按钮上的「已选 N 个模型」、页签「已选 N」、第二行的计数都数它 */
+  picked: PickedModel[];
+  groups: PickGroup[];
+  /** 名单里有几家提供商 */
+  providers: number;
 }
 /// 网关的家（spec 2026-09-29「家」）：模型页里的一个 agent，也是网关数据的归属单位。
 /// 与注册表 id 不同：注册表里 Claude 那一项的 id 是 `claude-code`，它用 `AgentEntry.gateway` 指到这里的 `claude`
-export type GatewayAgent = "codex" | "claude";
+export type GatewayAgent = "codex" | "claude" | "workbuddy";
 /// 本机路由：两家共用一个，在 Sophia 进程里跑（spec 2026-10-03-gateway-in-app）
 export interface GatewayRouter {
   /// 本进程里的路由在 `port` 上跑着
@@ -690,10 +793,10 @@ export interface GatewayClaudeView {
 /// 一家的状态（spec 契约 §6 `AgentGatewayView`）
 export interface AgentGatewayView {
   agent: GatewayAgent;
-  /// Codex：读得到 Codex 版本；Claude：桌面应用已安装
+  /// Codex：读得到 Codex 版本；Claude：桌面应用已安装。模型页只列装了的
   installed: boolean;
-  /// 这一家的网关，按添加顺序。模型标识是「网关 id-模型名」，同一家里两个网关有同名模型也不相撞
-  providers: GatewayProvider[];
+  /// 这一家的「已选」与选模型浮层的分组（全局模型提供商名单 + 这一家能用哪些）
+  models: AgentModels;
   /// 开关。Codex：设置文件指向路由；Claude：想要的值（写没写进桌面应用看 `claude.desktop`）
   enabled: boolean;
   /// 非空：这一家的设置里有别的工具写的同名项，打开不可用
@@ -702,9 +805,24 @@ export interface AgentGatewayView {
   codex?: GatewayCodexView;
   /// 只在 Claude 那一份上有
   claude?: GatewayClaudeView;
+  /// 只在 WorkBuddy 那一份上有（#266）
+  workbuddy?: GatewayWorkBuddyView;
 }
 export type CodexGatewayView = AgentGatewayView & { agent: "codex"; codex: GatewayCodexView };
 export type ClaudeGatewayView = AgentGatewayView & { agent: "claude"; claude: GatewayClaudeView };
+/// WorkBuddy 那一家特有的状态（#266）
+export interface GatewayWorkBuddyView {
+  /// models.json 里此刻有 Sophia 的条目
+  written: boolean;
+  /// models.json 读不懂时的说明（同时进 `conflict`）；读得懂为空串
+  fileIssue: string;
+  /// 用户的 models.json 自带可用模型名单（availableModels），Sophia 写的有不在名单里的（#266）
+  hiddenByAllowList: boolean;
+}
+export type WorkBuddyGatewayView = AgentGatewayView & {
+  agent: "workbuddy";
+  workbuddy: GatewayWorkBuddyView;
+};
 /// 模型页的状态（gateway_state 等命令的返回）
 export interface GatewayState {
   supported: boolean;
@@ -742,6 +860,8 @@ export interface QuitPreview {
   claude: boolean;
   /// Claude 桌面应用在运行
   claudeRunning: boolean;
+  /// WorkBuddy 的 models.json 里写着 Sophia 的模型：退出会拿掉（它自动重读），下次打开写回
+  workbuddy: boolean;
 }
 /// 退出收尾进行到哪一步（`quit-progress` 事件的 `step`）
 export type QuitStep = "restartingCodex" | "restartingClaude";
@@ -760,7 +880,7 @@ export function agentGateway(state: GatewayState, agent: GatewayAgent): AgentGat
 const EMPTY_CODEX: CodexGatewayView = {
   agent: "codex",
   installed: false,
-  providers: [],
+  models: { picked: [], groups: [], providers: 0 },
   enabled: false,
   conflict: "",
   codex: {
@@ -787,6 +907,13 @@ export function claudeGateway(state: GatewayState): ClaudeGatewayView | null {
   return { ...view, agent: "claude", claude: view.claude };
 }
 
+/// WorkBuddy 那一份；不支持或还没有为 null
+export function workbuddyGateway(state: GatewayState): WorkBuddyGatewayView | null {
+  const view = agentGateway(state, "workbuddy");
+  if (view === null || view.workbuddy === undefined) return null;
+  return { ...view, agent: "workbuddy", workbuddy: view.workbuddy };
+}
+
 /// 换掉某一家的状态（乐观更新用：勾选、拨开关先画成做成之后的样子），其余原样
 export function withAgentGateway(state: GatewayState, next: AgentGatewayView): GatewayState {
   return {
@@ -798,19 +925,6 @@ export function withAgentGateway(state: GatewayState, next: AgentGatewayView): G
 /// 这一家开着没有（侧栏 `模型` 的橙点、托盘图标：任一家开着就亮）
 export function gatewayOn(state: GatewayState | null, agent: GatewayAgent): boolean {
   return state !== null && agentGateway(state, agent)?.enabled === true;
-}
-
-/// gateway_upsert_provider 的返回值
-export interface GatewayProviderSaved {
-  providerId: string;
-  /// 勾了同步、另一家因此加了 / 改了的那一个网关的 id；没同步为 null
-  otherProviderId: string | null;
-  state: GatewayState;
-}
-/// gateway_select_models 的入参：只带 id 与用户可编辑的显示名
-export interface GatewaySelectedModel {
-  id: string;
-  displayName: string;
 }
 
 /// 与 core `mcp::McpFieldValue` 对应：某个位置上一个字段的值。凭据在 core 里就脱敏了，
@@ -902,6 +1016,9 @@ export interface McpDefinitionInput {
   /// 按粘贴的写法认出的出处（harness id，或表外的 `zed`、`vscode`）；认不出为 null
   dialect?: string | null;
 }
+/// 按界面语言写的一段字（core `LocalText`，#305）：精选写三种语言，官方目录是上游原文一种写法。
+/// 显示时用 `localText`（`src/market/installView.ts`）按当前语言取
+export type LocalText = string | Partial<Record<"zh-Hans" | "zh-Hant" | "en", string>>;
 /// 安装页「要填的」一项；`key` 就是定义里 `${KEY}` 的名字
 export interface McpFieldSpec {
   key: string;
@@ -909,14 +1026,19 @@ export interface McpFieldSpec {
   required: boolean;
   /// 密钥：框遮住，可按眼睛看一眼
   secret: boolean;
+  /// 官方目录给的一句说明（上游原文）
   description?: string | null;
+  /// 精选写的标签与框下一句（#305）；有标签时不看 `description`
+  label?: LocalText | null;
+  help?: LocalText | null;
 }
 /// 发现 · MCP 条目（core `McpCatalogEntry`）
 export interface McpCatalogEntry {
   name: string;
   /// 发布方（小灰字）
   publisher: string;
-  description: string;
+  /// 一句说明：精选按界面语言写三种，官方目录是上游原文
+  description: LocalText;
   definition: McpDefinitionInput;
   fields: McpFieldSpec[];
   homepage?: string | null;
@@ -1072,6 +1194,8 @@ export interface McpTargetCheck {
   status: "ok" | "partial" | "blocked" | "same";
   writes: string[];
   reason: string | null;
+  /// `reason` 背后的精确值（第二层，悬停这一行时出，等宽）：无法保留的字段名；没有为 null
+  detail?: string | null;
   /// `重启 Claude Desktop 后生效`
   note: string | null;
   /// 往 git 仓库里的项目文件写像密钥的值时为 `remind`；那个文件已被跟踪时为 `tracked`
@@ -1079,7 +1203,7 @@ export interface McpTargetCheck {
   /// `remind` / `tracked` 时这个文件在项目根 `.gitignore` 里写成的那一行（`.cursor/mcp.json`、`/.mcp.json`），其余为 null
   gitignoreLine: string | null;
 }
-/// 粘贴 JSON 的解析结果（R8）；解析不了时 `error` 说哪一行
+/// 粘贴 MCP 配置的解析结果（R8）；解析不了时 `error` 说哪一行
 export interface McpParseResult {
   servers: McpDefinitionInput[];
   error: { line: number | null; message: string } | null;
@@ -1204,27 +1328,53 @@ export interface AgentDisplay {
   stacked: boolean;
   stackedSize: StackedSize;
 }
+/// 用量的一项的键（core `UsageSubject`）：`agent:claude-code`、`agent:codex`、`provider:<提供商 id>`
+export type UsageItemKey = string;
 export interface UsageSettings {
   menuBarEnabled: boolean;
   displayMode: UsageDisplayMode;
-  /// 菜单栏显示哪些 agent（有序，最多 3 个）；null＝没配过，取已登录的
-  agents: UsageAgentId[] | null;
-  perAgent: Partial<Record<UsageAgentId, AgentDisplay>>;
+  /// 选进菜单栏的项（集合，最多 2 项，agent 与提供商合计；先后按页面顺序，不存顺序）；null＝没配过，取有用量来源的
+  items: UsageItemKey[] | null;
+  /// 每项在菜单栏上怎么显示
+  perItem: Record<UsageItemKey, AgentDisplay>;
   refresh: UsageRefresh;
 }
+/// 额度三档（core `usage::format::QuotaLevel`）：已用 <70% ok、70%–<100% tight、≥100% out
+export type QuotaLevel = "ok" | "tight" | "out";
 /// 托盘里一个窗口：名字、刻度、文字（剩余 / 已用按设置换算好）
 export interface TrayWindowRow {
   label: string;
   percentText: string;
   gaugePercent: number;
-  /// 服务端判为紧张：加粗（不用颜色）
+  level: QuotaLevel;
+  /// `level` 不是 ok：加粗（不用颜色）
   emphasize: boolean;
   /// 「4 小时 19 分后重置」「6 天后重置」；已经重置过或没给是 null
   resetText: string | null;
+  /// 具体数目的小字（提供商给的已用 / 上限）；agent 是 null
+  amountText: string | null;
 }
-/// 托盘里一个 agent 的用量（块头后的过期弱字、一窗口一行、一句状态）
-export interface TrayUsage {
-  agent: UsageAgentId;
+/// 读不到提供商额度的类别与「!」里的原文（core `usage::format::UsageProblem`）
+export interface UsageProblem {
+  kind: "invalidKey" | "planExpired" | "network" | "rateLimited" | "other";
+  detail: string | null;
+}
+/// 用量的一项（托盘一块、用量页一栏；core `usage::format::UsageItemView`）：块头后的过期弱字、一窗口一行、一句状态
+export interface UsageItemView {
+  key: UsageItemKey;
+  kind: "agent" | "provider";
+  /// 页面上归在哪一组（分组标题用的固定值，与 `kind` 一致）：界面按它分「Agent ｜ 模型提供商」两组
+  group: "agent" | "provider";
+  /// `Claude` / `Codex`，或提供商列表里的名称
+  name: string;
+  /// 取标志用的 id（agent 是 agent id）
+  brand: string;
+  /// 选进了菜单栏（与菜单栏开没开无关）
+  inMenuBar: boolean;
+  /// 读不到提供商额度的类别；agent 是 null
+  problem: UsageProblem | null;
+  /// 读数过期（同菜单栏那段变淡的规则）
+  stale: boolean;
   /// 块头名字后的「3 分钟前更新」；读数来自 Claude 桌面应用时是「来自 Claude 桌面应用 · 3 小时前」；
   /// 还没有读数、或桌面应用的读数超过 24 小时（原因行里说了多少天）是 null
   updatedText: string | null;
@@ -1259,7 +1409,9 @@ export type ConnectAction =
 /// 点「连接 Claude 用量」的结果（gateway `usage::connect::ConnectStart`）
 export type ConnectStart = "started" | "needsInstall" | "busy";
 export interface MenuBarSegment {
-  agent: UsageAgentId;
+  key: UsageItemKey;
+  /// 取标志用的 id（agent 是 agent id）
+  brand: string;
   lines: string[];
   stale: boolean;
   stackedSize: StackedSize;
@@ -1272,9 +1424,10 @@ export interface MenuBarView {
 export interface UsageView {
   state: UsageState;
   settings: UsageSettings;
-  /// 有用量来源的 agent（登录了，或 Claude 命令行没登录但有桌面应用的记录）；名字沿用「已登录」
-  signedIn: UsageAgentId[];
-  tray: TrayUsage[];
+  /// 有用量来源的项的键，按页面顺序（登录了，或 Claude 命令行没登录但有桌面应用的记录）；名字沿用「已登录」
+  signedIn: UsageItemKey[];
+  /// 托盘各块、用量页「当前用量」各栏，已按页面顺序排好（先 agent，再提供商）
+  items: UsageItemView[];
   /// 用量页的预览：打开菜单栏显示后会是的样子（开关关着也照样算）
   menuBar: MenuBarView;
 }

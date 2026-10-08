@@ -150,9 +150,9 @@ test("确认框与结果：指 agent 自己那一份时说「Claude Code 自己�
   const keepOwn = keepThisConfirm({ kept: own, other: repo, skill: "canvas-design", relinked: 1 });
   assert.equal(keepOwn.title, "只留 Claude Code 自己那份 canvas-design？");
   // 正文只说受影响的 agent（#274）：哪份进废纸篓已在标题下的路径行里，不再说链接条数
-  assert.equal(keepOwn.body, "原来使用 通用仓库 那份的 agent 将改用留下的这一份。");
+  assert.equal(keepOwn.body, "原来使用通用仓库那份的 agent 将改用留下的这一份。");
   const keepRepo = keepThisConfirm({ kept: repo, other: own, skill: "canvas-design", relinked: 2 });
-  assert.equal(keepRepo.title, "只留 通用仓库 的 canvas-design？");
+  assert.equal(keepRepo.title, "只留通用仓库的 canvas-design？");
   assert.equal(keepRepo.body, "原来使用 Claude Code 自己那份的 agent 将改用留下的这一份。");
   // 没有要改用的 agent：不写正文
   assert.equal(
@@ -161,21 +161,21 @@ test("确认框与结果：指 agent 自己那一份时说「Claude Code 自己�
   );
   for (const text of [keepOwn.title, keepOwn.body, keepRepo.title, keepRepo.body])
     assert.doesNotMatch(text, /那份 的|那份 那份|那份那份/);
-  // 结果：`✓ 只留 Claude Code 自己那份 canvas-design`；留通用仓库的照旧 `通用仓库 的 canvas-design`
+  // 结果：`✓ 只留 Claude Code 自己那份 canvas-design`；留通用仓库的是 `通用仓库的 canvas-design`（汉字名紧贴）
   const done = [{ name: "canvas-design" }];
   assert.deepEqual(
     toastFor("keepThis", { done, keepLabel: "Claude Code 自己那份", keepOwn: true }).names,
     ["Claude Code 自己那份 canvas-design"],
   );
   assert.deepEqual(toastFor("keepThis", { done, keepLabel: "通用仓库" }).names, [
-    "通用仓库 的 canvas-design",
+    "通用仓库的 canvas-design",
   ]);
 });
 
 test("文案三种语言同一套键：Claude Code 自己的（行首）/ 自己那份（句子里）", () => {
   const want: Record<string, [string, string]> = {
-    "zh-Hans": ["{agent} 自己的", "{agent} 自己那份"],
-    "zh-Hant": ["{agent} 自己的", "{agent} 自己那份"],
+    "zh-Hans": ["{agent}自己的", "{agent}自己那份"],
+    "zh-Hant": ["{agent}自己的", "{agent}自己那份"],
     en: ["{agent}'s own", "{agent}'s own copy"],
   };
   const toastKeys = [

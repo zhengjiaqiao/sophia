@@ -57,10 +57,10 @@ test("三种语言都有这句，只有这一句（额度那句已删）", () =>
   setLocale("zh-Hans");
 });
 
-test("说明与端口说明同一位置、同一种灰字", () => {
-  const page = src("ModelsTab.tsx");
-  assert.match(page, /modeNote\(state\)/);
-  assert.match(page, /<p className="models-port-note">\{modeText\}<\/p>/);
+test("说明与端口说明同一位置、同一种灰字：都是 Codex 那一行上的灰字（`listRow.note`）", () => {
+  const agents = src("shell/agents.tsx");
+  assert.match(agents, /modeNote\(s\.gateway\)/);
+  assert.match(agents, /portMovedNote\(s\.gateway, "codex"\)/);
 });
 
 // ===== ChatGPT 额度用完的说明（spec 2026-10-06-prelaunch-five R13） =====
@@ -95,8 +95,8 @@ const usage = (
       ],
     },
     settings: { menuBarEnabled: over.menuBarEnabled ?? true },
-    signedIn: ["codex"],
-    tray: [],
+    signedIn: ["agent:codex"],
+    items: [],
     menuBar: {},
   }) as unknown as UsageView;
 
@@ -137,6 +137,5 @@ test("额度说明三种语言都有，位置同其他灰字", () => {
   for (const locale of ["zh-Hans", "zh-Hant", "en"]) {
     assert.ok(Object.keys(catalog(locale)).includes("models.note.quotaUsedUp"), locale);
   }
-  const page = src("ModelsTab.tsx");
-  assert.match(page, /<p className="models-port-note">\{quotaText\}<\/p>/);
+  assert.match(src("shell/agents.tsx"), /quotaNote\(s\.gateway, s\.usage\)/);
 });

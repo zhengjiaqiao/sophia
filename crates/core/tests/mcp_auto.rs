@@ -609,7 +609,7 @@ fn auto_import_rule_is_refused_when_source_config_is_unreadable() {
         false,
     )
     .unwrap_err();
-    assert_eq!(err, "读不到 source 的配置，先修好再开自动添加");
+    assert_eq!(err, "无法读取这份配置，修好后再打开自动添加");
     assert!(rules.is_empty());
 }
 

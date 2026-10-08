@@ -8,7 +8,8 @@
 ///   （`tests/i18n-module-load.test.ts` 把关）
 /// - **键写字面量**：枚举式的用键表 `{add: "toast.verb.add"} as const`，再 `t(VERB_KEY[kind])`
 ///
-/// 一句话一个键，不在代码里拼碎片（英文语序不同）；句中要嵌带样式的专名用 `tRich`
+/// 一句话一个键，不在代码里拼碎片（英文语序不同）；句中要嵌带样式的专名用 `tRich`。
+/// 句中嵌名字时目录里写紧贴的（`从{place}移除{name}`），空格由 `formatMessage` 按中西文规则补
 import {
   Fragment,
   createElement,
@@ -91,57 +92,72 @@ export function messageFor(
 
 const PLACEHOLDER = /\{(\w+)\}/g;
 
-/// 占位符换成参数。缺参数的占位符原样留着：界面上看得见，测试也抓得到
+const HAN = /[\u3400-\u9fff]/;
+/// 西文：可打印 ASCII（字母、数字，也包括 `.gitignore`、`~/a` 开头的点、波浪号这类半角符号）。
+/// `spaced`（`formatMessage` / `formatRich`）与 `joinList` 共用这一套（#320）
+const LATIN = /[\x21-\x7e]/;
+
+/// 嵌进句中的名字与相邻**汉字**之间的中西文空格：名字那一侧是西文（可打印 ASCII）就隔一个空格，汉字名紧贴
+/// （`从 CardBox 移除 pdf`、`从用户级移除技能`、`从项目A 移除`、`已还原 .gitignore`）。首尾字符各看各的；与标点、空格、句首句尾相接不加，
+/// 所以目录里写了空格的句子不受影响。`at` 是占位符在模板里的位置
+function spaced(template: string, at: number, whole: string, value: string): string {
+  const before = template[at - 1] ?? "";
+  const after = template[at + whole.length] ?? "";
+  const lead = HAN.test(before) && LATIN.test(value.charAt(0)) ? " " : "";
+  const trail = HAN.test(after) && LATIN.test(value.charAt(value.length - 1)) ? " " : "";
+  return lead + value + trail;
+}
+
+/// 占位符换成参数，名字与汉字相接处按中西文空格规则处理（见 `spaced`）。目录里嵌名字的句子写成紧贴的
+/// （`从{place}移除{name}`）；英文句子里名字两侧本来就是空格或标点，规则不起作用。
+/// 缺参数的占位符原样留着：界面上看得见，测试也抓得到
 export function formatMessage(template: string, params: Params = {}): string {
-  return template.replace(PLACEHOLDER, (whole, name: string) =>
-    name in params ? String(params[name]) : whole,
+  return template.replace(PLACEHOLDER, (whole, name: string, at: number) =>
+    name in params ? spaced(template, at, whole, String(params[name])) : whole,
   );
 }
 
-const HAN = /[\u3400-\u9fff]/;
-const LATIN = /[A-Za-z0-9]/;
-
-/// 句中嵌名字（位置名、来源名）时的中西文空格：名字与相邻的**汉字**之间，名字那一侧是西文（字母、数字）
-/// 就隔一个空格，汉字名紧贴（`从 CardBox 移除 pdf`、`从用户级移除技能`、`从项目A 移除`）。首尾字符各看各的；
-/// 与标点、句首句尾相接不加。目录里这类句子写成紧贴的（`从{place}移除{name}`），一句一个键；
-/// 英文句子里名字两侧本来就是空格或标点，这条规则不起作用
-export function formatSpaced(template: string, params: Params = {}): string {
-  return template.replace(PLACEHOLDER, (whole, name: string, at: number) => {
-    if (!(name in params)) return whole;
-    const value = String(params[name]);
-    const before = template[at - 1] ?? "";
-    const after = template[at + whole.length] ?? "";
-    const lead = HAN.test(before) && LATIN.test(value.charAt(0)) ? " " : "";
-    const trail = HAN.test(after) && LATIN.test(value.charAt(value.length - 1)) ? " " : "";
-    return lead + value + trail;
-  });
-}
-
-/// 占位符换成 React 节点（句中嵌 `<Plain>Codex</Plain>` 这类带样式的专名）
+/// 占位符换成 React 节点（句中嵌 `<Plain>Codex</Plain>` 这类带样式的专名）；给的是字符串或数字时与 `formatMessage` 一样处理空格
 export function formatRich(template: string, parts: Record<string, ReactNode>): ReactNode {
   const out: ReactNode[] = [];
   let last = 0;
   for (const m of template.matchAll(PLACEHOLDER)) {
     const at = m.index ?? 0;
     if (at > last) out.push(template.slice(last, at));
-    out.push(m[1] in parts ? parts[m[1]] : m[0]);
+    const part = m[1] in parts ? parts[m[1]] : m[0];
+    out.push(
+      typeof part === "string" || typeof part === "number"
+        ? spaced(template, at, m[0], String(part))
+        : part,
+    );
     last = at + m[0].length;
   }
   if (last < template.length) out.push(template.slice(last));
   return createElement(Fragment, null, ...out);
 }
 
-/// 列表的连接方式：`enum` 并列（中文「、」）、`and` 两样并举（中文「 和 」）、`semicolon` 几条原因（中文「；」）
+/// 列表的连接方式：`enum` 并列（中文「、」）、`and` 并举（中文「A 和 B」「A、B 和 C」）、`semicolon` 几条原因（中文「；」）
 export type ListStyle = "enum" | "and" | "semicolon";
 
-/// 连接一组名字或原因（纯函数，测试用）。中文用目录里的连接符，与原来逐字相同——`Intl.ListFormat`
-/// 的中文会写成「A、B和C」；其他语言的并列走 `Intl.ListFormat`（`A, B, and C`），分号各语言自写
+/// 连接一组名字或原因（纯函数，测试用）。中文用目录里的连接符——`Intl.ListFormat` 的中文会写成
+/// 「A、B和C」（「和」前后不空格）：并举两项「A 和 B」，三项及以上前面用「、」、最后一项前用「 和 」
+/// （「A、B 和 C」）；其他语言的并列走 `Intl.ListFormat`（`A, B, and C`），分号各语言自写。
+/// 中文的「和」两边的空格照 `spaced` 的中西文规则逐边定（#320）：挨着西文（ASCII）才空，挨着汉字、全角标点不空
+/// ——`Codex 和 Cursor`、`配置文件和 .gitignore`、`用户级和项目`
 export function joinList(
   items: readonly string[],
   style: ListStyle,
   lang: string,
   seps: Record<ListStyle, string>,
 ): string {
+  if (style === "and" && lang.startsWith("zh") && items.length > 1) {
+    const last = items[items.length - 1];
+    const head = items.slice(0, -1).join(seps.enum);
+    const and = seps.and.trim();
+    const lead = LATIN.test(head.charAt(head.length - 1)) ? " " : "";
+    const trail = LATIN.test(last.charAt(0)) ? " " : "";
+    return head + lead + and + trail + last;
+  }
   if (style === "semicolon" || lang.startsWith("zh")) return items.join(seps[style]);
   return new Intl.ListFormat(lang, { type: "conjunction" }).format(items);
 }
@@ -162,11 +178,6 @@ function lookup(key: MessageKey): Message {
 /// 取一句文案
 export function t(key: MessageKey, params?: Params): string {
   return formatMessage(selectForm(lookup(key), 1, locale()), params);
-}
-
-/// 取一句嵌名字的文案，名字与汉字相接处按中西文空格规则处理（见 `formatSpaced`）
-export function tSpaced(key: MessageKey, params: Params): string {
-  return formatSpaced(selectForm(lookup(key), 1, locale()), params);
 }
 
 /// 取一句按数量变的文案；`{count}` 自动带入

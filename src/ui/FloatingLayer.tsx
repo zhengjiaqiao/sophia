@@ -1,7 +1,7 @@
 import { createContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { placeLayer, type LayerPlacement } from "../layerPlace.ts";
+import { LIST_LAYER_CAP, placeLayer, type LayerPlacement } from "../layerPlace.ts";
 import { FadeViewport, useEdgeFades } from "./EdgeFade.tsx";
 import "./FloatingLayer.css";
 
@@ -48,6 +48,7 @@ export function FloatingLayer({
   role = "menu",
   autoFocus = true,
   onHover,
+  list = false,
   children,
 }: {
   trigger: HTMLElement;
@@ -64,6 +65,9 @@ export function FloatingLayer({
   autoFocus?: boolean;
   /// 指针进出浮层（悬浮卡靠它在手挪进卡里时不收）
   onHover?: (inside: boolean) => void;
+  /// 装一张长列表、头尾钉住的对话框浮层（选模型、启用模型）：最高 480（`LIST_LAYER_CAP`），朝向那一侧不够高时
+  /// 沿窗口往回挪到够高为止、可以盖住触发键——最小窗口里中间也露得出六七行（走查 2026-10-08）
+  list?: boolean;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -86,7 +90,7 @@ export function FloatingLayer({
         height: el.offsetHeight - scroll.clientHeight + scroll.scrollHeight,
       },
       { width: window.innerWidth, height: window.innerHeight },
-      { align },
+      list ? { align, cap: LIST_LAYER_CAP, slide: true } : { align },
     );
     setPos((prev) =>
       prev &&

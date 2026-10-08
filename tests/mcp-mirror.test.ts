@@ -14,7 +14,7 @@ test("写成了但镜像没写成：仍是例行成功一行，那一句接在�
   assert.equal(text.kind, "success");
   assert.equal(text.reason, NOTE);
   // 生效那一句照旧在前
-  assert.deepEqual(text.trail, ["重启 Claude Desktop 后生效"]);
+  assert.deepEqual(text.trail, ["重启 Claude 桌面应用后生效"]);
   // 单格省名字时同样带着
   const bare = toastFor("write", {
     done: [{ name: "docs", agent: desktop, note: NOTE }],

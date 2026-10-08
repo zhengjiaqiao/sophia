@@ -1,6 +1,6 @@
 //! 把编排层接到真实世界：密钥文件、本进程里的路由、系统代理、Codex 可执行文件，以及升级时卸旧版 launchd 服务。
 //! 以及无界面入口 `Sophia gateway run|status|doctor|restore|enable|provider-add|select|probe|restart|launch|…`。
-use crate::app::{App, AppError, Deps, KeyStatus, ProviderView, StartError};
+use crate::app::{App, AppError, Deps, StartError};
 use crate::router::{
     Agent, Config, KeySource, KeyVerdict, KeyVerdictSink, LocaleSource, Protocol, ProxyFn, Router,
     TokenSource,
@@ -10,7 +10,9 @@ use crate::{claude_desktop, codex_desktop, keychain, process, provider, service,
 use sophia_core::claude_models::desktop::DesktopDirs;
 use sophia_core::codex_models::catalog::Model;
 use sophia_core::i18n;
-use sophia_core::keystore::{KeyStore, KeyStoreError};
+use sophia_core::keystore::{KeyStore, KeyStoreError, GLOBAL};
+use sophia_core::model_providers::book::Book;
+use sophia_core::model_providers::{ModelProviders, ModelRef};
 use sophia_core::store::Store;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -288,22 +290,14 @@ impl KeyFile {
         }
     }
 
-    fn get(&self, agent: Agent, id: &str) -> Result<Option<String>, String> {
-        self.present(self.keys.get(agent.as_str(), id))
+    /// 一家模型提供商的密钥（全局名单，所有 agent 共用：`providers.global.<id>`）
+    fn get(&self, id: &str) -> Result<Option<String>, String> {
+        self.present(self.keys.get(GLOBAL, id))
     }
 
-    fn set(&self, agent: Agent, id: &str, key: &str) -> Result<(), String> {
+    fn set(&self, id: &str, key: &str) -> Result<(), String> {
         self.repair();
-        self.keys
-            .set(agent.as_str(), id, key)
-            .map_err(|e| e.to_string())
-    }
-
-    fn delete(&self, agent: Agent, id: &str) -> Result<(), String> {
-        self.repair();
-        self.keys
-            .delete(agent.as_str(), id)
-            .map_err(|e| e.to_string())
+        self.keys.set(GLOBAL, id, key).map_err(|e| e.to_string())
     }
 
     fn token(&self) -> Result<Option<String>, String> {
@@ -316,44 +310,42 @@ impl KeyFile {
     }
 }
 
-/// 路由的文件位置：Codex 的路由清单、Claude 的路由清单、活动日志。编排层写清单，路由每个请求重读
-fn router_paths(store_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+/// 路由的文件位置：Codex 的路由清单、Claude 的路由清单、WorkBuddy 的路由清单、活动日志。编排层写清单，路由每个请求重读
+fn router_paths(store_dir: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     (
         codex_home().join(crate::app::ROUTING_FILE),
         crate::app::claude_routing_file(store_dir),
+        crate::app::workbuddy_routing_file(store_dir),
         store_dir.join("gateway-logs").join("router.log"),
     )
 }
 
-/// 路由取密钥与 Claude 网关令牌：按请求从密钥文件取并短时缓存，改密钥不用重起路由；两家各一份缓存（R4）。
+/// 路由取密钥与 Claude 网关令牌：按请求从密钥文件取并短时缓存，改密钥不用重起路由。模型提供商是全局一份
+/// （ADR 0003）：哪一家的请求都按提供商 id 取同一份密钥（`providers.global`）。
 /// 路由只读：文件损坏时报错、不另存（那是编排层的事，R5）
 fn router_secrets(store_dir: &Path) -> (KeySource, TokenSource) {
     let keys = KeyStore::new(store_dir);
-    let cached_for = |agent: Agent| {
+    let cached = {
         let keys = keys.clone();
         CachedKeys::new(
-            move |provider: &str| keys.get(agent.as_str(), provider),
+            move |provider: &str| keys.get(GLOBAL, provider),
             Duration::from_secs(30),
             Instant::now,
         )
     };
-    let (codex_keys, claude_keys) = (cached_for(Agent::Codex), cached_for(Agent::Claude));
     (
-        Arc::new(move |agent, provider| match agent {
-            Agent::Codex => codex_keys.get(provider),
-            Agent::Claude => claude_keys.get(provider),
-        }),
+        Arc::new(move |_agent, provider| cached.get(provider)),
         // 令牌的缓存与「比对不上时重读」由路由自己做
         Arc::new(move || {
             keys.router_token()
                 .map_err(|e| e.to_string())?
-                .ok_or_else(|| sophia_core::t!("models.claude.tokenMissing"))
+                .ok_or_else(|| sophia_core::t!("models.app.routerTokenMissing"))
         }),
     )
 }
 
 /// 路由报来的密钥结论（#144）落盘的地方：路由在请求路径上只把结论放进通道就返回，这条线程按到达顺序经编排层
-/// 记到那一家网关上（`App::record_key_verdict_in`：与界面改网关同一把锁、同一条存设置的路，状态没变不写）。
+/// 记到那一家模型提供商上（`App::record_key_verdict`：与界面改「已选」同一把锁、同一条存设置的路，状态没变不写）。
 /// 编排层已经不在（`Weak` 升不上）就停；线程起不来时结论直接丢掉，请求照常
 pub(crate) fn key_verdict_recorder(app: Weak<App>) -> KeyVerdictSink {
     let (sender, verdicts) = std::sync::mpsc::channel::<(Agent, String, KeyVerdict)>();
@@ -362,7 +354,7 @@ pub(crate) fn key_verdict_recorder(app: Weak<App>) -> KeyVerdictSink {
         .spawn(move || {
             for (agent, provider, verdict) in verdicts {
                 let Some(app) = app.upgrade() else { break };
-                if let Err(e) = app.record_key_verdict_in(agent, &provider, verdict) {
+                if let Err(e) = app.record_key_verdict(&provider, verdict) {
                     log::warn!(
                         "记下网关 {}（{}）的密钥结论失败：{e}",
                         crate::router::log_safe(&provider),
@@ -386,7 +378,8 @@ pub(crate) fn key_verdict_recorder(app: Weak<App>) -> KeyVerdictSink {
 
 /// 界面进程里的路由：路由与界面同一进程，说话的语言就是界面当前的语言（`locale: None`，不按请求改语言）
 fn ui_router(store_dir: &Path, key_verdicts: KeyVerdictSink) -> Result<Arc<Router>, String> {
-    let (routing_catalog_path, claude_routing_path, log) = router_paths(store_dir);
+    let (routing_catalog_path, claude_routing_path, workbuddy_routing_path, log) =
+        router_paths(store_dir);
     let (third_party_key, router_token) = router_secrets(store_dir);
     Router::new(Config {
         third_party_url: String::new(),
@@ -399,6 +392,7 @@ fn ui_router(store_dir: &Path, key_verdicts: KeyVerdictSink) -> Result<Arc<Route
         max_body_bytes: 0,
         proxy: Some(system_proxy()),
         claude_routing_path: Some(claude_routing_path),
+        workbuddy_routing_path: Some(workbuddy_routing_path),
         router_token,
         keepalive: Duration::ZERO,
         locale: None,
@@ -471,17 +465,15 @@ struct RouterDeps {
 
 fn build_app_with(store_dir: PathBuf, keys: Arc<KeyFile>, router: RouterDeps) -> App {
     let manager = service_manager();
-    let (k1, k2, k3, k4, k5) = (
-        keys.clone(),
-        keys.clone(),
-        keys.clone(),
-        keys.clone(),
-        keys.clone(),
-    );
+    let (k1, k2, k4, k5) = (keys.clone(), keys.clone(), keys.clone(), keys.clone());
+    let models_dir = store_dir.clone();
+    let models_change_dir = store_dir.clone();
     let store_dir_for_load = store_dir.clone();
     let store_dir_for_save = store_dir.clone();
     let store_dir_for_claude_load = store_dir.clone();
     let store_dir_for_claude_save = store_dir.clone();
+    let store_dir_for_workbuddy_load = store_dir.clone();
+    let store_dir_for_workbuddy_save = store_dir.clone();
     App::new(Deps {
         codex_home: codex_home(),
         data_dir: store_dir,
@@ -504,9 +496,22 @@ fn build_app_with(store_dir: PathBuf, keys: Arc<KeyFile>, router: RouterDeps) ->
         router_stop: router.stop,
         router_running: router.running,
         bundled: Box::new(|| run_codex(&["debug", "models", "--bundled"])),
-        get_key: Box::new(move |agent, provider| k1.get(agent, provider)),
-        set_key: Box::new(move |agent, provider, key| k2.set(agent, provider, key)),
-        delete_key: Box::new(move |agent, provider| k3.delete(agent, provider)),
+        get_key: Box::new(move |provider| k1.get(provider)),
+        set_key: Box::new(move |provider, key| k2.set(provider, key)),
+        load_models: Box::new(move || {
+            Ok(Store::new(models_dir.clone())
+                .load_settings()?
+                .model_providers)
+        }),
+        change_models: Box::new(move |change| {
+            let store = Store::new(models_change_dir.clone());
+            let _guard = store.lock_settings();
+            let mut settings = store.load_settings()?;
+            if change(&mut settings.model_providers) {
+                store.save_settings(&settings)?;
+            }
+            Ok(())
+        }),
         // 接管 agents-manager 时仍从它的钥匙串条目读一次（R8），之后写进密钥文件
         get_agents_manager_key: Box::new(|| {
             keychain::get_key(
@@ -547,7 +552,34 @@ fn build_app_with(store_dir: PathBuf, keys: Arc<KeyFile>, router: RouterDeps) ->
         desktop_running: Box::new(claude_desktop::running),
         desktop_quit: Box::new(claude_desktop::quit),
         desktop_open: Box::new(claude_desktop::open),
+        workbuddy_dir: workbuddy_dir(),
+        // 同 skill 页的认法（macOS 上只认应用包，卸载后留下的 ~/.workbuddy 不算，#247）
+        workbuddy_installed: Box::new(|| {
+            sophia_core::discovery::installed_products(&sophia_core::discovery::Env::from_system())
+                .iter()
+                .any(|h| h.id == "workbuddy")
+        }),
+        load_workbuddy: Box::new(move || {
+            Ok(Store::new(store_dir_for_workbuddy_load.clone())
+                .load_settings()?
+                .workbuddy_gateway)
+        }),
+        save_workbuddy: Box::new(move |gateway| {
+            let store = Store::new(store_dir_for_workbuddy_save.clone());
+            let _guard = store.lock_settings();
+            let mut settings = store.load_settings()?;
+            settings.workbuddy_gateway = gateway.clone();
+            store.save_settings(&settings)
+        }),
     })
+}
+
+/// WorkBuddy 的数据目录：`WORKBUDDY_CONFIG_DIR`（同 WorkBuddy 自己的认法），没有用 `~/.workbuddy`
+fn workbuddy_dir() -> PathBuf {
+    std::env::var_os("WORKBUDDY_CONFIG_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .unwrap_or_else(|| home().join(".workbuddy"))
 }
 
 /// 这个地址按系统设置走不走代理（连不上时据此说是代理的事，见 `provider::classify_send_error`）
@@ -573,10 +605,10 @@ fn gateway_client() -> Result<(reqwest::Client, ProxyFn), AppError> {
     Ok((client, resolve))
 }
 
-/// 勾选前试调一个模型（[`provider::probe_model`]，等 [`provider::PROBE_TIMEOUT`]）。`target` 由
-/// `App::provider_for_probe_in` 取（地址、协议同路由；缺密钥、没有这个网关报 `invalid`，不联网）。
+/// 启用前试调一个模型（[`provider::probe_model`]，等 [`provider::PROBE_TIMEOUT`]）。`target` 由
+/// `App::probe_target` 取（地址、协议同路由；缺密钥、没有这一家报 `invalid`，不联网）。
 /// 这里不写任何文件，调用方不必持 `config_lock`（结果说明了密钥时由调用方经 [`probe_verdict`] 记到网关上）。
-/// 界面命令 `gateway_probe_model` 与 `Sophia gateway probe` 都是「`provider_for_probe_in` → 这里」。错误代码：`invalid`、`auth`（401/403）、`network`（连不上、超时）、
+/// 界面命令 `providers_set_enabled` / `providers_add_typed` 与 `Sophia gateway probe` 都经这里。错误代码：`invalid`、`auth`（401/403）、`network`（连不上、超时）、
 /// `upstream`（别的非 2xx）
 pub async fn probe_target(target: &crate::app::ProbeTarget) -> Result<(), AppError> {
     let (client, resolve) = gateway_client()?;
@@ -602,7 +634,7 @@ pub async fn probe_target(target: &crate::app::ProbeTarget) -> Result<(), AppErr
 }
 
 /// 试调的结果对密钥说明了什么（#144）：通了＝密钥被接受，`auth`（401/403）＝被拒（带技术原文），
-/// 别的失败（连不上、别的非 2xx、没联网就失败）说明不了密钥。调用方拿它调 `App::record_key_verdict_in`
+/// 别的失败（连不上、别的非 2xx、没联网就失败）说明不了密钥。调用方拿它调 `App::record_key_verdict`
 pub fn probe_verdict(result: &Result<(), AppError>) -> Option<KeyVerdict> {
     match result {
         Ok(()) => Some(KeyVerdict::Accepted),
@@ -657,18 +689,18 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
-const USAGE: &str = "用法: Sophia gateway <命令> [--agent codex|claude]\n  run           在前台运行本机路由（调试用；平时路由在 Sophia 进程里）\n  status        当前状态（JSON；带 --agent 时只打印那一家；Claude 那一份带 profile 里写着的模型 profileModels）\n  doctor        诊断：设置、路由、端口、版本、最近日志\n  restore       移除本功能写入这一家的一切（界面不可用时应急）\n  enable        按已保存的网关和模型启用（界面不可用时应急）\n  provider-add  --url <地址> --key-env <环境变量名> [--sync]：新建一个网关，密钥从环境变量读，校验并拉取模型\n  select        --provider <网关 id> --models <m1,m2,…>：设这个网关的已选（覆盖）\n  probe         --provider <网关 id> --model <模型 id>：同界面勾选前的试调，通了打印 ok，不通打印原因并以 1 退出\n  restart       --agent claude：同界面的「重启生效」（在跑则退出→写→打开）\n  launch        --agent claude：同界面的「打开 Claude」（有待生效先写再打开）\n  adopt-key     把 agents-manager 钥匙串里的密钥复制进 Sophia 的密钥文件（密钥不显示）\n  --agent       作用于哪一家：codex（缺省）或 claude（Claude 桌面应用）"; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+const USAGE: &str = "用法: Sophia gateway <命令> [--agent codex|claude|workbuddy]\n  run           在前台运行本机路由（调试用；平时路由在 Sophia 进程里）\n  status        当前状态（JSON；带 --agent 时只打印那一家；Claude 那一份带 profile 里写着的模型 profileModels）\n  doctor        诊断：设置、路由、端口、版本、最近日志\n  restore       移除本功能写入这一家的一切（界面不可用时应急）\n  enable        按已保存的网关和模型启用（界面不可用时应急）\n  provider-add  --url <地址> --key-env <环境变量名> [--name <名称>]：加一家模型提供商（所有 agent 共用），密钥从环境变量读，拉取模型、按默认规则启用（不选进任何 agent，要用的再 select）\n  select        --models <提供商 id/模型,…>：按顺序设这一家的已选（覆盖；官方模型写 @official/<slug>）\n  probe         --provider <提供商 id> --model <模型 id>：同界面启用前的试调，通了打印 ok，不通打印原因并以 1 退出\n  restart       --agent claude：同界面的「重启生效」（在跑则退出→写→打开）\n  launch        --agent claude：同界面的「打开 Claude」（有待生效先写再打开）\n  adopt-key     把 agents-manager 钥匙串里的密钥复制进 Sophia 的密钥文件（密钥不显示）\n  --agent       作用于哪一家：codex（缺省）、claude（Claude 桌面应用）或 workbuddy（只认 status、enable、restore、select）"; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
 
-/// `--agent codex|claude`，缺省 codex（保持文档里已写的含义）
+/// `--agent codex|claude|workbuddy`，缺省 codex（保持文档里已写的含义）
 fn agent_flag(args: &[String]) -> Result<Option<Agent>, String> {
     match flag(args, "--agent") {
         None if args.iter().any(|a| a == "--agent") => {
-            Err("--agent 后面要写 codex 或 claude".to_owned()) // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+            Err("--agent 后面要写 codex、claude 或 workbuddy".to_owned()) // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
         }
         None => Ok(None),
         Some(value) => Agent::parse(value)
             .map(Some)
-            .ok_or_else(|| format!("不认识的 --agent {value}：只能是 codex 或 claude")), // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+            .ok_or_else(|| format!("不认识的 --agent {value}：只能是 codex、claude 或 workbuddy")), // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
     }
 }
 
@@ -677,10 +709,10 @@ fn agent_flag(args: &[String]) -> Result<Option<Agent>, String> {
 struct ProviderAdd {
     url: String,
     key: String,
-    sync: bool,
+    name: String,
 }
 
-/// `provider-add --url <地址> --key-env <环境变量名> [--sync]`。密钥只从环境变量读：写在参数里会进 shell 历史，
+/// `provider-add --url <地址> --key-env <环境变量名> [--name <名称>]`。密钥只从环境变量读：写在参数里会进 shell 历史，
 /// 也会被 `ps` 看到。`env` 是读环境变量的函数（测试注入）
 fn provider_add_args(
     args: &[String],
@@ -707,72 +739,51 @@ fn provider_add_args(
     Ok(ProviderAdd {
         url: url.to_owned(),
         key,
-        sync: args.iter().any(|a| a == "--sync"),
+        name: flag(args, "--name").unwrap_or_default().trim().to_owned(),
     })
 }
 
-/// `select --provider <网关 id> --models <m1,m2,…>`：网关 id 与按顺序的模型 id
-fn select_args(args: &[String]) -> Result<(String, Vec<String>), String> {
-    let provider = flag(args, "--provider")
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .ok_or("需要 --provider <网关 id>（见 status 里 providers[].id）")?; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
-    let models: Vec<String> = flag(args, "--models")
-        .ok_or("需要 --models <模型 id，逗号分隔>")? // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+/// `select --models <提供商 id/模型,…>`：按顺序的「已选」（官方模型写 `@official/<slug>`）。模型 id 里可以有 `/`，
+/// 只按第一个 `/` 切
+fn select_args(args: &[String]) -> Result<Vec<ModelRef>, String> {
+    let picks: Vec<ModelRef> = flag(args, "--models")
+        .ok_or("需要 --models <提供商 id/模型，逗号分隔>")? // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
         .split(',')
         .map(str::trim)
         .filter(|m| !m.is_empty())
-        .map(str::to_owned)
-        .collect();
-    if models.is_empty() {
-        let empty = "--models 里没有模型 id；要全部取消请在界面里操作"; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+        .map(|item| {
+            item.split_once('/')
+                .filter(|(p, m)| !p.trim().is_empty() && !m.trim().is_empty())
+                .map(|(p, m)| ModelRef::new(p.trim(), m.trim()))
+                .ok_or_else(|| format!("{item} 不是「提供商 id/模型」的写法")) // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+        })
+        .collect::<Result<_, _>>()?;
+    if picks.is_empty() {
+        let empty = "--models 里没有模型；要全部取消请在界面里操作"; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
         return Err(empty.to_owned());
     }
-    Ok((provider.to_owned(), models))
+    Ok(picks)
 }
 
-/// 把模型 id 换成界面传给 `set_models_in` 的样子：带上网关模型列表里的显示名（空的不带）。不在列表里 → 报错
-fn selection(provider: &ProviderView, ids: &[String]) -> Result<Vec<Model>, String> {
-    ids.iter()
-        .map(|id| {
-            let found = provider
-                .models
-                .iter()
-                .find(|m| &m.id == id)
-                .ok_or_else(|| {
-                    format!(
-                        "网关 {} 的模型列表里没有 {id}（先拉取模型，或看 status 里的 models[].id）", // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
-                        provider.id
-                    )
-                })?;
-            Ok(Model {
-                id: found.id.clone(),
-                display_name: Some(found.display_name.clone()).filter(|n| !n.trim().is_empty()),
-                ..Default::default()
-            })
-        })
-        .collect()
-}
-
-/// `probe --provider <网关 id> --model <模型 id>`
+/// `probe --provider <提供商 id> --model <模型 id>`
 fn probe_args(args: &[String]) -> Result<(String, String), String> {
     let provider = flag(args, "--provider")
         .map(str::trim)
         .filter(|p| !p.is_empty())
-        .ok_or("需要 --provider <网关 id>（见 status 里 providers[].id）")?; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+        .ok_or("需要 --provider <提供商 id>（见 status 里 models.groups[].provider）")?; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
     let model = flag(args, "--model")
         .map(str::trim)
         .filter(|m| !m.is_empty())
-        .ok_or("需要 --model <模型 id>（见 status 里 providers[].models[].id）")?; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
+        .ok_or("需要 --model <模型 id>（见 status 里 models.groups[].models[].ref.model）")?; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
     Ok((provider.to_owned(), model.to_owned()))
 }
 
-/// `probe`：同界面勾选前的试调（`provider_for_probe_in` → `probe_target`，同一条路）。结果说明了密钥时
-/// 记到那一家网关上（`probe_verdict`，#144），别的文件不写
-fn probe(app: &App, agent: Agent, args: &[String]) -> Result<(), String> {
+/// `probe`：同界面启用前的试调（`App::probe_target` → `probe_target`，同一条路）。结果说明了密钥时
+/// 记到那一家提供商上（`probe_verdict`，#144），别的文件不写
+fn probe(app: &App, args: &[String]) -> Result<(), String> {
     let (provider_id, model_id) = probe_args(args)?;
     let target = app
-        .provider_for_probe_in(agent, &provider_id, &model_id)
+        .probe_target(&provider_id, &model_id)
         .map_err(|e| e.to_string())?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -780,7 +791,7 @@ fn probe(app: &App, agent: Agent, args: &[String]) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let result = runtime.block_on(probe_target(&target));
     if let Some(verdict) = probe_verdict(&result) {
-        if let Err(e) = app.record_key_verdict_in(agent, &provider_id, verdict) {
+        if let Err(e) = app.record_key_verdict(&provider_id, verdict) {
             eprintln!("{e}");
         }
     }
@@ -795,48 +806,50 @@ fn print_warnings(warnings: Vec<String>) {
     }
 }
 
-/// `provider-add`：同界面「+ 网关」带密钥保存——先向网关校验并拉模型（不持锁），成功再存（`commit_verified_provider_in`）
-fn provider_add(app: &App, agent: Agent, args: &[String]) -> Result<(), String> {
+/// `provider-add`：同界面「添加模型提供商」——先拉模型（不持锁），成功再存名单与密钥、按默认规则启用。
+/// 启用与选是两步（2026-10-08）：不选进任何 agent，要用的再 `select`
+fn provider_add(store_dir: &Path, args: &[String]) -> Result<(), String> {
     let add = provider_add_args(args, |name| std::env::var(name).ok())?;
     let cleaned = crate::app::clean_base_url(&add.url).map_err(|e| e.to_string())?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    let (ids, api_base) = runtime
+    let (fetched, api_base) = runtime
         .block_on(fetch_models(&cleaned, &add.key))
         .map_err(|e| e.to_string())?;
-    let count = ids.len();
-    let saved = app
-        .commit_verified_provider_in(
-            agent, None, None, &add.url, &add.key, ids, &api_base, add.sync,
+    let book = Book::new(store_dir);
+    let added = book
+        .add(
+            sophia_core::model_providers::NewProvider {
+                name: add.name,
+                base_url: cleaned,
+                api_base,
+                protocol: "chat".into(),
+                fetched,
+                ..Default::default()
+            },
+            &add.key,
         )
         .map_err(|e| e.to_string())?;
     let out = serde_json::json!({
-        "providerId": saved.provider_id,
-        "otherProviderId": saved.other_provider_id,
-        "models": count,
+        "providerId": added.id,
+        "enabled": added.enabled,
+        "models": added.total,
     });
     println!("{out}");
     Ok(())
 }
 
-/// `select`：同界面在网关抽屉里勾选（`set_models_in`，覆盖这个网关的已选）；开着时的重写与待生效同界面
+/// `select`：按顺序设这一家的已选（`App::set_picks`，覆盖）；开着时的重写与待生效同界面
 fn select(app: &App, agent: Agent, args: &[String]) -> Result<(), String> {
-    let (provider_id, ids) = select_args(args)?;
-    let state = app.state();
-    let provider = state
-        .agents
+    let picks = select_args(args)?;
+    let shown: Vec<String> = picks
         .iter()
-        .find(|view| view.agent == agent)
-        .and_then(|view| view.providers.iter().find(|p| p.id == provider_id))
-        .ok_or_else(|| format!("{} 没有 id 为 {provider_id} 的网关", agent.as_str()))?; // i18n-exempt: 网关命令行（Sophia gateway …）的终端输出，不进界面
-    let models = selection(provider, &ids)?;
-    print_warnings(
-        app.set_models_in(agent, &provider_id, models)
-            .map_err(|e| e.to_string())?,
-    );
-    eprintln!("已选 {} 个：{}", ids.len(), ids.join(", "));
+        .map(|r| format!("{}/{}", r.provider, r.model))
+        .collect();
+    print_warnings(app.set_picks(agent, picks).map_err(|e| e.to_string())?);
+    eprintln!("已选 {} 个：{}", shown.len(), shown.join(", "));
     Ok(())
 }
 
@@ -891,6 +904,21 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf, system_tags: fn() -> Vec<Strin
                 }
                 eprintln!("已切回。Claude 桌面应用在运行时，要在 Sophia 里「重启生效」（或退出后重新打开 Claude 前再执行一次本命令）才会回到账号模式。");
             }),
+        (Some("restore"), Some(Agent::WorkBuddy)) => build_app(store_dir)
+            .restore_workbuddy()
+            .map_err(|e| e.to_string())
+            .map(|warnings| {
+                for warning in warnings {
+                    eprintln!("注意: {warning}");
+                }
+                eprintln!("已关掉。WorkBuddy 会自动重读，Sophia 加的模型从它的列表里消失。");
+            }),
+        (Some("enable"), Some(Agent::WorkBuddy)) => build_app(store_dir)
+            .enable_workbuddy()
+            .map_err(|e| e.to_string())
+            .map(|()| {
+                eprintln!("已打开。WorkBuddy 会自动重读，所选的模型出现在它的「自定义模型」里（Sophia 要开着）。");
+            }),
         (Some("restore"), _) => build_app(store_dir)
             .restore()
             .map_err(|e| e.to_string())
@@ -917,11 +945,9 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf, system_tags: fn() -> Vec<Strin
                     "已启用。重启 Codex 后，模型选择器里会同时出现官方模型和所选的第三方模型。"
                 );
             }),
-        (Some("provider-add"), agent) => {
-            provider_add(&build_app(store_dir), agent.unwrap_or(Agent::Codex), &args)
-        }
+        (Some("provider-add"), _) => provider_add(&store_dir, &args),
         (Some("select"), agent) => select(&build_app(store_dir), agent.unwrap_or(Agent::Codex), &args),
-        (Some("probe"), agent) => probe(&build_app(store_dir), agent.unwrap_or(Agent::Codex), &args),
+        (Some("probe"), _) => probe(&build_app(store_dir), &args),
         // 同界面的「重启生效」「打开 Claude」：命令行是另一个进程，没有界面的 `config_lock` 可取，
         // `acquire` 传空；App 自己的写锁（`guard`）照旧在写文件那一段取
         (Some("restart"), Some(Agent::Claude)) => build_app(store_dir)
@@ -944,7 +970,7 @@ pub fn cli(args: Vec<String>, store_dir: PathBuf, system_tags: fn() -> Vec<Strin
         (Some("adopt-key"), _) => build_app(store_dir)
             .adopt_agents_manager_key()
             .map_err(|e| e.to_string())
-            .map(|id| eprintln!("已把 agents-manager 的密钥复制到网关 {id}（存进 Sophia 的密钥文件）。")),
+            .map(|id| eprintln!("已把 agents-manager 的密钥复制到模型提供商 {id}（存进 Sophia 的密钥文件）。")),
         _ => Err(USAGE.to_owned()),
     };
     match outcome {
@@ -1036,7 +1062,7 @@ fn run_router(args: &[String], store_dir: &Path, locale: LocaleSource) -> Result
             str::parse,
         )
         .map_err(|_| "端口不合法".to_owned())?; // i18n-exempt: 网关命令行的参数错误，只在终端出现，不进界面
-    let (routing, claude_routing, log) = router_paths(store_dir);
+    let (routing, claude_routing, workbuddy_routing, log) = router_paths(store_dir);
     let protocol = if flag(args, "--protocol") == Some("responses") {
         Protocol::Responses
     } else {
@@ -1062,6 +1088,7 @@ fn run_router(args: &[String], store_dir: &Path, locale: LocaleSource) -> Result
         claude_routing_path: Some(
             flag(args, "--claude-routing").map_or(claude_routing, PathBuf::from),
         ),
+        workbuddy_routing_path: Some(workbuddy_routing),
         router_token,
         keepalive: Duration::ZERO,
         locale: Some(locale),
@@ -1135,35 +1162,52 @@ fn doctor_claude(app: &App, store_dir: &Path) {
     if !state.router.error.is_empty() {
         println!("路由问题: {}", state.router.error);
     }
-    for provider in &view.providers {
-        let selected: Vec<&str> = provider
-            .models
-            .iter()
-            .filter(|m| m.selected)
-            .map(|m| m.id.as_str())
-            .collect();
-        println!(
-            "网关 {}（{}）: {}；协议: {}；密钥已保存: {}；已选模型: {}",
-            provider.name,
-            provider.id,
-            provider.base_url,
-            provider.protocol,
-            key_text(provider),
-            selected.join(", ")
-        );
-    }
+    print_models(view, store_dir);
     print_router_log(store_dir);
 }
 
-/// doctor 里「密钥已保存」一栏：是 / 否 / 读不出时带原因（R4）
-fn key_text(provider: &ProviderView) -> String {
-    match provider.key {
-        KeyStatus::Set => "是".to_owned(), // i18n-exempt: doctor 是网关命令行的诊断输出，只在终端出现，不进界面
-        KeyStatus::Missing => "否".to_owned(), // i18n-exempt: 同上
-        KeyStatus::Unreadable => format!(
-            "读不出（{}）", // i18n-exempt: 同上
-            provider.key_problem.as_deref().unwrap_or_default()
-        ),
+/// doctor 里这一家的「已选」与用到的模型提供商（地址、协议、密钥有没有）
+fn print_models(view: &crate::app::AgentGatewayView, store_dir: &Path) {
+    let picked: Vec<String> = view
+        .models
+        .picked
+        .iter()
+        .map(|p| {
+            if p.provider_name.is_empty() {
+                p.display_name.clone()
+            } else {
+                format!("{} ({})", p.display_name, p.provider_name)
+            }
+        })
+        .collect();
+    println!(
+        "已选模型: {}",
+        if picked.is_empty() {
+            "-".to_owned()
+        } else {
+            picked.join(", ")
+        }
+    );
+    let book = Book::new(store_dir);
+    let list: ModelProviders = book.load().unwrap_or_default();
+    if list.providers.is_empty() {
+        println!("模型提供商: 还没有添加"); // i18n-exempt: doctor 是网关命令行的诊断输出，只在终端出现，不进界面
+    }
+    for provider in &list.providers {
+        let key = match book.key(&provider.id) {
+            Ok(Some(_)) => "是".to_owned(), // i18n-exempt: doctor 是网关命令行的诊断输出，只在终端出现，不进界面
+            Ok(None) => "否".to_owned(),    // i18n-exempt: 同上
+            Err(e) => format!("读不出（{e}）"), // i18n-exempt: 同上
+        };
+        println!(
+            "模型提供商 {}（{}）: {}；协议: {}；密钥已保存: {}；已启用 {} 个",
+            provider.name,
+            provider.id,
+            provider.base_url,
+            provider.protocol(),
+            key,
+            provider.enabled_count()
+        );
     }
 }
 
@@ -1214,26 +1258,7 @@ fn doctor(app: &App, store_dir: &Path) {
         yes_no(codex.app.running),
         yes_no(codex.needs_restart)
     );
-    if view.providers.is_empty() {
-        println!("网关: 还没有添加");
-    }
-    for provider in &view.providers {
-        let selected: Vec<&str> = provider
-            .models
-            .iter()
-            .filter(|m| m.selected)
-            .map(|m| m.id.as_str())
-            .collect();
-        println!(
-            "网关 {}（{}）: {}；协议: {}；密钥已保存: {}；已选模型: {}",
-            provider.name,
-            provider.id,
-            provider.base_url,
-            provider.protocol,
-            key_text(provider),
-            selected.join(", ")
-        );
-    }
+    print_models(view, store_dir);
     print_router_log(store_dir);
 }
 
@@ -1309,7 +1334,7 @@ mod tests {
             ProviderAdd {
                 url: "https://ap.example/v1".into(),
                 key: "sk-ap-123".into(),
-                sync: false
+                name: String::new(),
             }
         );
         let parsed = provider_add_args(
@@ -1319,12 +1344,13 @@ mod tests {
                 "https://ap.example",
                 "--key-env",
                 "AP_KEY",
-                "--sync",
+                "--name",
+                " 我的中转 ",
             ]),
             env,
         )
         .unwrap();
-        assert!(parsed.sync);
+        assert_eq!(parsed.name, "我的中转");
 
         let err = |list: &[&str]| provider_add_args(&argv(list), env).unwrap_err();
         assert!(err(&["provider-add", "--key-env", "AP_KEY"]).contains("--url"));
@@ -1358,32 +1384,29 @@ mod tests {
         );
     }
 
-    /// `select`：`--provider` 与逗号分隔的 `--models`（去空白、去空项、保持顺序）
+    /// `select`：逗号分隔的「提供商 id/模型」（去空白、去空项、保持顺序；模型 id 里的 `/` 留着）
     #[test]
-    fn select_parses_provider_and_models() {
+    fn select_parses_provider_model_pairs_in_order() {
         assert_eq!(
             select_args(&argv(&[
                 "select",
                 "--agent",
                 "claude",
-                "--provider",
-                "ap",
                 "--models",
-                " kimi-k3, glm-5 ,,qwen "
+                " kimi/kimi-k3, ap/weibo/glm-5 ,,@official/gpt-6 "
             ]))
             .unwrap(),
-            (
-                "ap".to_owned(),
-                vec!["kimi-k3".to_owned(), "glm-5".to_owned(), "qwen".to_owned()]
-            )
+            [
+                ModelRef::new("kimi", "kimi-k3"),
+                ModelRef::new("ap", "weibo/glm-5"),
+                ModelRef::official("gpt-6"),
+            ]
         );
-        assert!(select_args(&argv(&["select", "--models", "a"]))
-            .unwrap_err()
-            .contains("--provider"));
-        assert!(select_args(&argv(&["select", "--provider", "ap"]))
+        assert!(select_args(&argv(&["select"]))
             .unwrap_err()
             .contains("--models"));
-        assert!(select_args(&argv(&["select", "--provider", "ap", "--models", " , "])).is_err());
+        assert!(select_args(&argv(&["select", "--models", "glm-5"])).is_err());
+        assert!(select_args(&argv(&["select", "--models", " , "])).is_err());
     }
 
     #[test]
@@ -1411,40 +1434,6 @@ mod tests {
         );
     }
 
-    /// `select` 的勾选：按给的顺序、带上网关里已有的显示名（同界面传的 `{id, displayName}`）；不在列表里的报出来
-    #[test]
-    fn selection_uses_the_saved_display_names() {
-        let provider = crate::app::ProviderView {
-            id: "ap".into(),
-            models: vec![
-                crate::app::ModelView {
-                    id: "kimi-k3".into(),
-                    slug: "ap-kimi-k3".into(),
-                    display_name: "Kimi K3".into(),
-                    selected: false,
-                    ..Default::default()
-                },
-                crate::app::ModelView {
-                    id: "glm-5".into(),
-                    slug: "ap-glm-5".into(),
-                    display_name: String::new(),
-                    selected: true,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        };
-        let picked = selection(&provider, &["glm-5".to_owned(), "kimi-k3".to_owned()]).unwrap();
-        let shown: Vec<(&str, Option<&str>)> = picked
-            .iter()
-            .map(|m| (m.id.as_str(), m.display_name.as_deref()))
-            .collect();
-        assert_eq!(shown, [("glm-5", None), ("kimi-k3", Some("Kimi K3"))]);
-        let err = selection(&provider, &["gpt-9".to_owned()]).unwrap_err();
-        assert!(err.contains("gpt-9") && err.contains("ap"), "{err}");
-    }
-
-    /// 路由的密钥缓存：每家各自缓存 30 秒；文件里确认没有才清，读不出 / 损坏时照用缓存（AC7）
     #[test]
     fn cached_keys_survive_an_unreadable_file_but_not_a_removed_key() {
         type Answer = Result<Option<String>, KeyStoreError>;
@@ -1494,21 +1483,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         let file = KeyFile::new(&root, false);
-        assert_eq!(file.get(Agent::Codex, "a").unwrap(), None);
+        assert_eq!(file.get("a").unwrap(), None);
         assert_eq!(file.token().unwrap(), None);
-        file.set(Agent::Codex, "a", "sk-again-1234567").unwrap();
-        assert_eq!(
-            file.get(Agent::Codex, "a").unwrap().as_deref(),
-            Some("sk-again-1234567")
-        );
+        file.set("a", "sk-again-1234567").unwrap();
+        assert_eq!(file.get("a").unwrap().as_deref(), Some("sk-again-1234567"));
 
         std::fs::write(file.keys.path(), b"{\"version\":1,").unwrap();
         assert_eq!(
-            file.get(Agent::Codex, "a").unwrap_err(),
+            file.get("a").unwrap_err(),
             KeyStoreError::Corrupt.to_string()
         );
         // 命令行进程不另存损坏的文件，写也写不进去
-        assert!(file.set(Agent::Codex, "b", "sk-new-12345678").is_err());
+        assert!(file.set("b", "sk-new-12345678").is_err());
         assert!(file.keys.path().exists());
     }
 
@@ -1531,9 +1517,9 @@ mod tests {
             b"{\"version\":1,\"provi"
         );
         let repaired = sophia_core::t!("models.secrets.repaired");
-        assert_eq!(file.get(Agent::Codex, "a").unwrap_err(), repaired);
-        file.set(Agent::Codex, "a", "sk-again-1234567").unwrap();
-        assert!(file.get(Agent::Codex, "a").unwrap().is_some());
-        assert_eq!(file.get(Agent::Claude, "b").unwrap_err(), repaired);
+        assert_eq!(file.get("a").unwrap_err(), repaired);
+        file.set("a", "sk-again-1234567").unwrap();
+        assert!(file.get("a").unwrap().is_some());
+        assert_eq!(file.get("b").unwrap_err(), repaired);
     }
 }

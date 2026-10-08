@@ -1910,7 +1910,7 @@ fn local_error_constructors() {
     );
     assert_eq!(
         e.message,
-        "Sophia 网关令牌不对：打开 Sophia 的模型页，按提示重新写入"
+        "Sophia 本机转接的令牌不对：打开 Sophia 的模型页，按提示重新写入"
     );
     let e = AnthropicError::model_not_selected("kimi");
     assert_eq!(
@@ -1925,7 +1925,7 @@ fn local_error_constructors() {
     );
     assert_eq!(
         e.message,
-        "Sophia 里这家网关已删掉或没有密钥：在 Sophia 里重启 Claude 让改动生效"
+        "Sophia 里这家模型提供商已删掉或没有密钥：在 Sophia 里重启 Claude 让改动生效"
     );
     let e = AnthropicError::upstream_unreachable("timed out");
     assert_eq!((e.status, e.error_type), (502, "api_error"));

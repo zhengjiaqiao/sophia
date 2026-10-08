@@ -3,16 +3,19 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { showCopiesAsLinked } from "./cellState.ts";
+import { createGatewayGate } from "./gatewayGate.ts";
 import type {
   Appearance,
   AutoLink,
   CellRef,
   CopyRef,
   GatewayAgent,
-  GatewayProviderSaved,
   ProviderPreset,
-  GatewaySelectedModel,
+  ProviderAdded,
+  ProviderPreview,
+  ProviderRow,
   GatewayState,
+  ModelRef,
   QuitFailure,
   QuitPreview,
   HarnessList,
@@ -56,7 +59,7 @@ import type {
   UiLanguage,
   UpdateCheck,
   UpdateTarget,
-  UsageAgentId,
+  UsageItemKey,
   ConnectStart,
   UsageSettings,
   UsageView,
@@ -69,6 +72,12 @@ export type { PlannedDeletion } from "./types";
 /// 重启 Codex 的结果（与 Rust 的 RestartReport 一一对应）：结束了几个后台进程；桌面应用退出后重新打开了没有
 /// （它自己拉起的后台进程随它一起退，`terminated` 可以是 0）
 export type GatewayRestartReport = { terminated: number; pids: number[]; reopened: boolean };
+
+/// 模型状态的读写排先后（走查 f08：后台轻查拿到的旧状态盖掉勾选的乐观更新），规则见 gatewayGate.ts
+const gate = createGatewayGate();
+const readGateway = () => invoke<GatewayState>("gateway_state");
+const writeGateway = (command: string, args?: Record<string, unknown>) =>
+  gate.write(() => invoke<GatewayState>(command, args), readGateway);
 
 export const api = {
   /// Sophia 放的副本在界面上按已链画（`showCopiesAsLinked`）
@@ -223,6 +232,8 @@ export const api = {
     invoke<McpKeyHint[]>("check_mcp_keep_key_hints", { name, keepId, locationIds }),
   /// 撤销一次 MCP 写入；id 不存在或已过期时 reject「撤销记录不存在或已过期」
   mcpUndoWrite: (undoId: string) => invoke<McpUndoReport>("mcp_undo_write", { undoId }),
+  /// 打开要在里面点「信任」的 agent（#256：写进 WorkBuddy 之后的 `打开 WorkBuddy ↗`）；只认 core 名单里的
+  mcpOpenTrustApp: (harnessId: string) => invoke<void>("mcp_open_trust_app", { harnessId }),
   setMcpAutoImport: (
     sourceId: string,
     targetDomain: string,
@@ -248,78 +259,71 @@ export const api = {
   /// 只拿掉确认过的那几项（执行前逐项重校验，改过的跳过），再删订阅记录与往这里写的规则
   removeMcpSource: (domain: string, sourceId: string, items: McpRemovalItem[]) =>
     invoke<McpReport>("remove_mcp_source", { domain, sourceId, items }),
-  gatewayState: () => invoke<GatewayState>("gateway_state"),
+  gatewayState: () => gate.read(readGateway),
   /** `修复权限`：经系统密码框把 Sophia 管的这份文件改回当前账户所有，返回重读的状态；用户取消抛 `[cancelled] ` */
-  gatewayFixFileOwner: (path: string) => invoke<GatewayState>("gateway_fix_file_owner", { path }),
+  gatewayFixFileOwner: (path: string) => writeGateway("gateway_fix_file_owner", { path }),
   /** `打开文件 ↗`：用默认应用打开 Sophia 管的这份文件 */
   gatewayOpenFile: (path: string) => invoke<void>("gateway_open_file", { path }),
-  // ----- 网关按家各管（spec 2026-09-29 R39、R40）：带 agent 的命令只动这一家；`sync` / `alsoOther` 决定另一家跟不跟 -----
-  /** id 省略是新建；key 省略表示不动已存的密钥，带了就先向网关校验。
-   *  `sync`：另一家同一地址的网关一起加 / 一起改（新建时另一家已有同一地址的就不加第二份） */
-  gatewayUpsertProvider: (input: {
-    agent: GatewayAgent;
-    id?: string;
-    name?: string;
-    baseUrl: string;
-    key?: string;
-    sync: boolean;
-    /** 从哪个服务商预设建的（spec S1）：保存后记上来源与协议 */
-    preset?: string;
-  }) => invoke<GatewayProviderSaved>("gateway_upsert_provider", input),
   /** 服务商预设的名单（内置数据，不联网；spec S1） */
   gatewayPresets: () => invoke<ProviderPreset[]>("gateway_presets"),
-  /** 连同密钥文件里的密钥一起删，删了回不来：调用前先向用户确认。
-   *  `alsoOther`：另一家同一地址的网关连同密钥一起删（另一家因此已选为空且开着则随之关掉） */
-  gatewayRemoveProvider: (agent: GatewayAgent, id: string, alsoOther: boolean) =>
-    invoke<GatewayState>("gateway_remove_provider", { agent, id, alsoOther }),
-  /** 带过来：把 `from` 有、`agent` 没有同一地址的网关复制过来（模型全未选，密钥一并复制）；不联网、不确认 */
-  gatewayCopyProviders: (agent: GatewayAgent, from: GatewayAgent) =>
-    invoke<GatewayState>("gateway_copy_providers", { agent, from }),
-  /** 失败时后端已把原因记到这个网关的 unreachable 上，再照常抛错 */
-  gatewayFetchModels: (agent: GatewayAgent, providerId: string) =>
-    invoke<GatewayState>("gateway_fetch_models", { agent, providerId }),
-  /** 「再试一次」：按 id 重拉这个网关。拉取本身失败（auth / network）不抛错——原因已记在
-   *  它的 unreachable 上，返回最新状态让那一行显示「无法连接」；其余错误照常抛 */
-  gatewayRetryProvider: async (agent: GatewayAgent, providerId: string): Promise<GatewayState> => {
-    try {
-      return await invoke<GatewayState>("gateway_fetch_models", { agent, providerId });
-    } catch (error) {
-      if (/^\[(auth|network)\] /.test(String(error))) {
-        return invoke<GatewayState>("gateway_state");
-      }
-      throw error;
-    }
-  },
-  /** 这一家这个网关的完整勾选，不影响别的网关与另一家 */
-  gatewaySelectModels: (
-    agent: GatewayAgent,
-    providerId: string,
-    selected: GatewaySelectedModel[],
-  ) => invoke<GatewayState>("gateway_select_models", { agent, providerId, selected }),
+  // ----- 各 agent 的「已选」（#259）：从全局模型提供商名单里选，开着的那一家当场跟上 -----
+  /** 勾上（追加到这一家「已选」末尾）或取消一个；取消最后一个第三方模型＝关掉这一家 */
+  gatewayPick: (agent: GatewayAgent, model: ModelRef, on: boolean) =>
+    writeGateway("gateway_pick", { agent, model, on }),
+  /** 排序（#265）：「已选」里看得见的几项的新顺序，看不见的原地不动 */
+  gatewayReorderPicks: (agent: GatewayAgent, order: ModelRef[]) =>
+    writeGateway("gateway_reorder_picks", { agent, order }),
+  /** 「恢复默认顺序」（#265）：官方的在前、按它自己的顺序，第三方的按启用先后 */
+  gatewayRestoreOrder: (agent: GatewayAgent) => writeGateway("gateway_restore_order", { agent }),
   /** 打开这一家。Claude：桌面应用不在运行时当场写，在运行时只记下（desktop.pending） */
-  gatewayEnable: (agent: GatewayAgent) => invoke<GatewayState>("gateway_enable", { agent }),
+  gatewayEnable: (agent: GatewayAgent) => writeGateway("gateway_enable", { agent }),
   /** 关掉这一家（Claude：切回账号；在运行时只记下） */
-  gatewayRestore: (agent: GatewayAgent) => invoke<GatewayState>("gateway_restore", { agent }),
+  gatewayRestore: (agent: GatewayAgent) => writeGateway("gateway_restore", { agent }),
   /** 接管别家的生效配置（Codex：agents-manager；Claude：别的工具写进桌面应用的第三方配置） */
-  gatewayTakeover: (agent: GatewayAgent) => invoke<GatewayState>("gateway_takeover", { agent }),
+  gatewayTakeover: (agent: GatewayAgent) => writeGateway("gateway_takeover", { agent }),
   /** 打开 Claude 桌面应用：有待生效的先写（写失败不打开），再等它在运行（上限 20 秒） */
-  gatewayLaunchClaude: () => invoke<GatewayState>("gateway_launch_claude"),
+  gatewayLaunchClaude: () => writeGateway("gateway_launch_claude"),
   /** 重启 Claude 桌面应用让改动生效：退出（最多 15 秒，没退出是 desktop_busy、什么都不写）→ 写 → 重新打开。
    *  会打断正在用的桌面应用，调用前先向用户确认 */
-  gatewayRestartClaude: () => invoke<GatewayState>("gateway_restart_claude"),
+  gatewayRestartClaude: () => writeGateway("gateway_restart_claude"),
   /// 重新接上（路由没在跑、没接上时的 `重启路由` / `再试一次`）：起路由，端口被别的程序占着就换一个，按「开着」写设置；
   /// 不重启 Codex、Claude
-  gatewayRestart: () => invoke<GatewayState>("gateway_restart"),
+  gatewayRestart: () => writeGateway("gateway_restart"),
   /// 结束 Codex 的后台进程，下次启动才读到新配置；terminated 为 0 表示 Codex 当时没在跑
   gatewayRestartCodex: () => invoke<GatewayRestartReport>("gateway_restart_codex"),
-  /** 勾上一个模型之前试调用一次（发一条极短的请求，不写任何东西）；调不通时抛出原因 */
-  gatewayProbeModel: (agent: GatewayAgent, providerId: string, modelId: string) =>
-    invoke<void>("gateway_probe_model", { agent, providerId, modelId }),
-  /// 手动添加一个模型（sophia-dev#117）：先试调，通了才进列表并勾上；试不通拒绝的值是 `[代码] 原因` */
-  gatewayAddManualModel: (agent: GatewayAgent, providerId: string, modelId: string) =>
-    invoke<GatewayState>("gateway_add_manual_model", { agent, providerId, modelId }),
   /// 按应用标识打开 Codex 桌面应用；只发出请求，等它起来要自己轮询 `codex.running`
   gatewayLaunchCodex: () => invoke<void>("gateway_launch_codex"),
+
+  // ----- 全局模型提供商（#252）：名单与密钥；启用只进这一家的已启用名单，agent 要用在「选模型」里勾（2026-10-08），
+  // 名单变了开着的 agent 跟上 -----
+  providersList: () => invoke<ProviderRow[]>("providers_list"),
+  /// 添加弹窗：用表单里的地址与密钥拉模型列表、按默认规则先勾好。只读，不写设置与密钥
+  providersPreview: (input: { baseUrl: string; key: string; preset?: string }) =>
+    invoke<ProviderPreview>("providers_preview", input),
+  /// 添加弹窗框底手填 id：用表单里的密钥先试一次（调不通抛 `[代码] 原因`）。不写任何文件
+  providersProbeDraft: (input: { apiBase: string; key: string; preset?: string; model: string }) =>
+    invoke<void>("providers_probe_draft", input),
+  /// 加一家：先用密钥拉模型，再启用（`enabled` 是弹窗里勾定的；不传按默认规则）；
+  /// 名称空的取地址主体，同名拒绝
+  providersAdd: (input: {
+    name: string;
+    baseUrl: string;
+    key: string;
+    preset?: string;
+    enabled?: string[];
+  }) => invoke<{ added: ProviderAdded; providers: ProviderRow[] }>("providers_add", input),
+  /// 改名称、地址；`key` 不空时先用它拉模型，再一并存
+  providersEdit: (input: { id: string; name: string; baseUrl: string; key?: string }) =>
+    invoke<ProviderRow[]>("providers_edit", input),
+  providersRefetch: (id: string) => invoke<ProviderRow[]>("providers_refetch", { id }),
+  /// 勾上前先试调一次（调不通抛 `[代码] 原因`）；取消不试，从各 agent 的「已选」里拿掉
+  providersSetEnabled: (id: string, model: string, on: boolean) =>
+    invoke<ProviderRow[]>("providers_set_enabled", { id, model, on }),
+  /// 手填 id：先试一下，通了才加进列表并启用
+  providersAddTyped: (id: string, model: string) =>
+    invoke<ProviderRow[]>("providers_add_typed", { id, model }),
+  /// 删掉一家与它的密钥
+  providersRemove: (id: string) => invoke<ProviderRow[]>("providers_remove", { id }),
   /// 菜单栏面板用：把主窗口带到前面；`page` 给了就切过去，`error` 给了就在那一页上说
   trayOpenMain: (page: "models" | "settings" | null, error: string | null) =>
     invoke<void>("tray_open_main", { page, error }),
@@ -354,7 +358,7 @@ export const api = {
   /// 精选里匹配的 + 官方目录
   marketSearchMcp: (query: string, cachedOnly = false) =>
     invoke<McpList>("market_search_mcp", { query, cachedOnly }),
-  /// 介绍页正文；取不到时抛错，界面写 `现在取不到说明`。只走 raw，不占 GitHub 接口次数。
+  /// 介绍页正文；取不到时抛错，界面写 `说明读取失败`。只走 raw，不占 GitHub 接口次数。
   /// branch 为 null 取默认分支；path 为 null（搜索结果）时按 name（行的 skillId，没有就用名字）找文件夹，
   /// 结果的 `path` / `branch` 是实际取到的，安装时带上
   marketSkillReadme: (
@@ -408,11 +412,11 @@ export const api = {
   /// 用量视图（托盘、用量页）。`opened`：刚打开，顺带补取一次（结果经 `usage-changed` 到）；
   /// 收到事件或按分钟重画时传 false。非 macOS 返回 null
   usageView: (opened: boolean) => invoke<UsageView | null>("usage_view", { opened }),
-  /// 存用量设置，调度与菜单栏立即生效；菜单栏最多 3 个 agent，超了报错
+  /// 存用量设置，调度与菜单栏立即生效；菜单栏最多 2 项（agent 与提供商合计），超了报错
   usageSetSettings: (settings: UsageSettings) => invoke<void>("usage_set_settings", { settings }),
-  /// 手动刷新。给了 agent 是原因行旁的「再试一次」：只取它，不等最短间隔（限流退避照守），
-  /// 这一轮跑完才返回（新数照常经 `usage-changed` 到）；agent 为空刷全部，仍受最短间隔约束、发出即返回
-  usageRefresh: (agent: UsageAgentId | null) => invoke<void>("usage_refresh", { agent }),
+  /// 手动刷新。给了项的键（`agent:codex`、`provider:<id>`）是原因行旁的「再试一次」：只取它，不等最短间隔（限流退避照守），
+  /// 这一轮跑完才返回（新数照常经 `usage-changed` 到）；为空刷全部，仍受最短间隔约束、发出即返回
+  usageRefresh: (key: UsageItemKey | null) => invoke<void>("usage_refresh", { key }),
   /// 「连接 Claude 用量」（票 #208）：找不到 Claude Code 且没确认安装时回 `needsInstall`（先问一句，确认后带
   /// `allowInstall` 再调）；过程的每一步经 `usage-changed` 送达
   usageConnect: (allowInstall: boolean) => invoke<ConnectStart>("usage_connect", { allowInstall }),

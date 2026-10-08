@@ -44,6 +44,7 @@ import type {
   ToastText,
 } from "./pages/sourcesModel.ts";
 import type { AnchorRect, ToastAlign } from "./layerPlace.ts";
+import { errorSentence } from "./backendError.ts";
 import { lastAutoText } from "./dateText.ts";
 import { keyboardModality } from "./inputModality.ts";
 import { listText, t, tn, type MessageKey } from "./i18n.ts";
@@ -177,7 +178,7 @@ export function useSources({
             kind: "cannot",
             sentence: failLine,
             names: [row.name],
-            reason: String(e),
+            reason: errorSentence(e),
           },
           at,
           "start",
@@ -216,7 +217,7 @@ export function useSources({
           kind: "cannot",
           sentence: "sources.removal.cannot",
           names: [row.name],
-          reason: String(e),
+          reason: errorSentence(e),
         },
         at,
         align,
@@ -243,7 +244,7 @@ export function useSources({
           kind: "cannot",
           sentence: "sources.removal.cannot",
           names: [row.name],
-          reason: String(e),
+          reason: errorSentence(e),
         },
         at,
         align,

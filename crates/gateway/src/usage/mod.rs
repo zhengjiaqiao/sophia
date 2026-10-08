@@ -973,7 +973,7 @@ mod tests {
             assert_eq!(kind.text("Codex"), err.reason("Codex"));
         }
         assert_eq!(FailReason::Timeout.text("Codex"), "Codex 没有回应");
-        assert_eq!(FailReason::SpawnFailed.text("Codex"), "没能启动 Codex");
+        assert_eq!(FailReason::SpawnFailed.text("Codex"), "Codex 启动失败");
     }
 
     /// R8：原因文字里不含错误码、不含账号信息——`Malformed` 携带的诊断文字不直接透出给界面

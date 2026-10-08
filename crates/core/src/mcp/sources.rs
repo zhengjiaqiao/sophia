@@ -16,9 +16,9 @@
 //! 文件是文本级手术：JSON 只切掉那一个成员，TOML 只删属于它的那几行，写前按语义核对
 //! 「除了拿掉的那一项，其余一模一样」，对不上整个文件不写。
 use super::{
-    agents::dialect_of, backup, backup_failed_message, is_supported_transport, location_unreadable,
-    parse_json, parse_toml, read, toml, write_failed_message, Canonical, McpAutoImportRule,
-    McpLocation, McpOverview, McpReport, McpReportEntry, Parsed, State,
+    agents::dialect_of, backup, backup_failed, is_supported_transport, location_unreadable,
+    parse_json, parse_toml, patch, patch_file, read, toml, write_failed, Canonical,
+    McpAutoImportRule, McpLocation, McpOverview, McpReport, McpReportEntry, Parsed, State,
 };
 use crate::atomicfile::{self, FileState};
 use crate::fs::normalize;
@@ -547,6 +547,7 @@ fn entry(
         message: message.into(),
         backup_path,
         mirror_failed: None,
+        note: None,
         detail: None,
     }
 }
@@ -586,6 +587,8 @@ fn remove_group(
     for (item, target) in group {
         let parsed = if toml(path) {
             parse_toml(&snap.bytes, state.clone())
+        } else if patch_file(path) {
+            patch::parse(&snap.bytes, state.clone())
         } else {
             parse_json(
                 &snap.bytes,
@@ -615,6 +618,8 @@ fn remove_group(
         }
         let next = if toml(path) {
             remove_toml_server(&bytes, &item.name)
+        } else if patch_file(path) {
+            patch::remove(&bytes, &item.name)
         } else {
             remove_json_server(&bytes, target.selector.as_deref(), &item.name)
         };
@@ -632,23 +637,25 @@ fn remove_group(
     let backup_path = match backup(path, snap, backups) {
         Ok(p) => p,
         Err(error) => {
-            let message = backup_failed_message(path, &error, || {
+            let (message, detail) = backup_failed(path, &error, || {
                 crate::t!("mcp.report.backupFailedUntouched")
             });
             for item in removed {
-                report.entries.push(entry(item, "failed", &message, None));
+                let mut failed = entry(item, "failed", &message, None);
+                failed.detail = detail.clone();
+                report.entries.push(failed);
             }
             return;
         }
     };
     if let Err(error) = atomicfile::atomic_write(path, &bytes, &FileState::Present(snap.clone())) {
-        let message = write_failed_message(path, &error, || {
+        let (message, detail) = write_failed(path, &error, || {
             crate::t!("mcp.report.writeBackFailedUntouched")
         });
         for item in removed {
-            report
-                .entries
-                .push(entry(item, "failed", &message, Some(backup_path.clone())));
+            let mut failed = entry(item, "failed", &message, Some(backup_path.clone()));
+            failed.detail = detail.clone();
+            report.entries.push(failed);
         }
         return;
     }

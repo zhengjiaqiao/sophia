@@ -388,7 +388,10 @@ pub struct ReportSettings {
 
 #[tauri::command]
 pub fn report_settings(state: tauri::State<'_, AppState>) -> Result<ReportSettings, String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let settings = state
+        .store
+        .load_settings()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     Ok(ReportSettings {
         auto_report: settings.auto_report,
         available: endpoint().is_some(),
@@ -410,7 +413,7 @@ pub fn set_auto_report(enabled: bool, state: tauri::State<'_, AppState>) -> Resu
         None => state.store.set_auto_report(enabled),
     };
     CANCEL.notify_waiters();
-    result.map_err(crate::cmd_error::settings_unsaved)
+    result.map_err(|e| crate::cmd_error::settings_unsaved(e))
 }
 
 /// 网页侧的两种异常（页面出错、未捕获的错误）各记一次；别的名字不认。带了原文（`text`）就再收一条事件

@@ -10,7 +10,7 @@
 /// ☑ ✳ Claude Code             ☐ ⎔ Codex  Codex 里已经有一个不一样的 brave-search
 /// ☑ ✳ Claude Desktop  重启 Claude Desktop 后生效      （悬停能勾的一行：写入 <配置文件>）
 /// 要填的 ───────────────────────────────────────────
-/// Brave Search API key  [••••••••••••••••••        👁]
+/// Brave Search 密钥  [••••••••••••••••••        👁]
 /// 必填 · 密钥 BRAVE_API_KEY   在 brave.com/search/api 申请
 /// 密钥只保存在所选 agent 中，Sophia 不保留
 /// ═══════════════════════════════════════════════ 贴底
@@ -80,7 +80,12 @@ export function McpInstallPage(props: McpInstallPageProps) {
   const submit = async () => {
     const done = await state.install();
     if (!done) return;
-    onDone(done.report, { kind: "mcp", toast: done.toast, undoId: done.report.undoId });
+    onDone(done.report, {
+      kind: "mcp",
+      toast: done.toast,
+      undoId: done.report.undoId,
+      trust: done.trust,
+    });
     page.leave();
   };
   return (

@@ -26,11 +26,18 @@ mod keyhint_scope_tests;
 mod keyhint_tests;
 mod keyhints;
 #[cfg(test)]
+mod kimi_tests;
+#[cfg(test)]
 mod mirror_tests;
+mod patch;
+#[cfg(test)]
+mod patch_tests;
 mod removal;
 pub mod sources;
 #[cfg(feature = "weiboap")]
 mod weiboap;
+#[cfg(test)]
+mod workbuddy_tests;
 
 pub use define::{check_targets, parse_mcp_text, placeholder_fields, write_definitions};
 pub use keep::{
@@ -45,6 +52,12 @@ pub use removal::{
 /// 这个 agent 能不能出现在 MCP 页
 pub fn supports(harness_id: &str) -> bool {
     agents::agent(harness_id).is_some()
+}
+
+/// 写进去以后要用户在它自己的界面里点「信任」才会连上的 agent，打开它用的应用标识（#256；记在 MCP agent 表里）。
+/// 现在只有 WorkBuddy：别人写进 `mcp.json` 的条目它要用户批准；Sophia 不替用户点、不碰它的批准文件、不算它的指纹
+pub fn trust_app(harness_id: &str) -> Option<&'static str> {
+    agents::agent(harness_id).and_then(|agent| agent.trust_app)
 }
 fn is_false(value: &bool) -> bool {
     !*value
@@ -230,6 +243,10 @@ pub enum McpReasonKind {
     CodexClientFields,
     /// 来源那一家的专属设置，目标里没有对应的写法
     ClientFields,
+    /// 服务名不合目标 agent 的规矩（DeepSeek Harness：`[A-Za-z0-9_-]{1,32}`）
+    ServerNameInvalid,
+    /// 目标 agent 此刻接不住任何服务：DeepSeek Harness 桌面版还没打开过、没有补丁文件（目标 agent 本身的事）
+    TargetNotReady,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -300,10 +317,7 @@ pub fn upsert_auto_import(
     allow_cross_domain: bool,
 ) -> Result<(), String> {
     if location_unreadable(overview, &source.id) {
-        return Err(crate::t!(
-            "mcp.auto.unreadableSource",
-            location = source.label
-        ));
+        return Err(crate::t!("mcp.auto.unreadableSource"));
     }
     let snapshot = || source_names(overview, &source.id);
     let existing = rules
@@ -646,7 +660,11 @@ pub struct McpUndoReport {
     /// `undone`：全部还原；`changed`：有文件写后又被改过，整体拒绝、未动任何文件；
     /// `failed`：校验通过但还原途中出错，可能只还原了一部分，逐文件看 `files`
     pub outcome: String,
+    /// `failed` 时是没还原成的那个文件的一句（说得出原因的原因，否则兜底句）
     pub message: String,
+    /// 没还原成、又分不出原因时：系统原文（去隐私）。给了就说明 `message` 是兜底句，提示条只写失败句
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     pub files: Vec<McpUndoFileResult>,
 }
 
@@ -660,6 +678,9 @@ pub struct McpUndoFileResult {
     /// / `failed` / `skipped`（前面的文件失败后未尝试）
     pub outcome: String,
     pub message: String,
+    /// `failed` 又分不出原因时的系统原文（去隐私），同 `McpReportEntry::detail`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 pub fn undo_changed_message() -> String {
@@ -675,6 +696,7 @@ pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
         backup_path: file.backup_path.clone(),
         outcome: outcome.into(),
         message,
+        detail: None,
     };
     let keys_added = undo.key_guards.iter().any(|(location, keyed)| {
         let parsed = parse(location);
@@ -689,6 +711,7 @@ pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
         return McpUndoReport {
             outcome: "changed".into(),
             message: message.clone(),
+            detail: None,
             files: undo
                 .files
                 .iter()
@@ -705,6 +728,7 @@ pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
         return McpUndoReport {
             outcome: "changed".into(),
             message: undo_changed_message(),
+            detail: None,
             files: undo
                 .files
                 .iter()
@@ -746,20 +770,23 @@ pub fn undo_write(undo: &McpUndo) -> McpUndoReport {
             }
             Err(error) => {
                 failed = true;
-                // 磁盘满、没权限、只读说人话，别的照旧（原文进日志，spec 2026-10-04-local-diagnostics R12）
-                let message =
-                    write_failed_message(&file.target, &error, || crate::t!("mcp.undo.fileFailed"));
-                files.push(result(file, "failed", message));
+                // 磁盘满、没权限、只读说人话；分不出原因的兜底句 + 原文（进日志，也给 `detail`）
+                let (message, detail) =
+                    write_failed(&file.target, &error, || crate::t!("mcp.undo.fileFailed"));
+                let mut one = result(file, "failed", message);
+                one.detail = detail;
+                files.push(one);
             }
         }
     }
+    // 没还原成的那一个文件的一句与原文：前端「撤销失败 · 原因」，分不出原因只写失败句（spec #239「出错的时候」）
+    let stopped = files
+        .iter()
+        .find(|file| matches!(file.outcome.as_str(), "failed" | "changed"));
     McpUndoReport {
         outcome: if failed { "failed" } else { "undone" }.into(),
-        message: if failed {
-            crate::t!("mcp.undo.incomplete")
-        } else {
-            crate::t!("mcp.undo.done")
-        },
+        message: stopped.map_or_else(|| crate::t!("mcp.undo.done"), |file| file.message.clone()),
+        detail: stopped.and_then(|file| file.detail.clone()),
         files,
     }
 }
@@ -794,6 +821,10 @@ pub struct McpReportEntry {
     /// 整句原因（`mcp.report.mirrorFailed`）。前端在成功条目下用失败原因的样式显示它；没有镜像或镜像也成了为 None
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mirror_failed: Option<String>,
+    /// 写成了、另有一句要交代的（不是失败）：DeepSeek Harness 另有全机补丁时说明以哪一个为准
+    /// （`mcp.report.dshGlobalPatch`）。前端接在成功句后面（提示条的 `trail`）；没有为 None
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     /// 没写成、又分不出原因时（spec #239 第 43 条）：系统原文（去隐私）。给了就说明 `message` 是兜底句
     /// （`原子写入失败`），不是给人看的原因——提示条只写失败句，原文同时进日志
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -838,13 +869,18 @@ pub(super) enum RawServer {
 /// 丢掉命令就是一份没有凭据的坏配置，所以整条拒绝，不静默丢字段
 const HELPER_HARNESSES: [&str; 2] = ["claude-code", "codex"];
 
-/// 位置名里的 agent 名：`Claude Code · Local MCPs` → `Claude Code`
-fn agent_name(location: &McpLocation) -> &str {
+/// 句子里的 agent 名：位置名里 agent 那一段（`Claude Code · Local MCPs` → `Claude Code`）；
+/// Claude Desktop 按界面语言说（简体「Claude 桌面应用」，spec #239 第 48 条）
+fn agent_name(location: &McpLocation) -> String {
+    if location.harness_id == "claude-desktop" {
+        return agents::desktop_name();
+    }
     location
         .label
         .split(" · ")
         .next()
         .unwrap_or(&location.label)
+        .to_owned()
 }
 
 impl Canonical {
@@ -1243,7 +1279,10 @@ pub fn scan(locations: &[McpLocation]) -> McpOverview {
                         McpCellState::Unsupported,
                         Some((K::SourceLossy, crate::t!("mcp.cell.genericSource"))),
                     ),
-                    None => match source.refusal_for_kind(source_location, target) {
+                    None => match agents::not_ready(target, &value.state)
+                        .or_else(|| agents::name_refusal(&target.harness_id, &entry.name))
+                        .or_else(|| source.refusal_for_kind(source_location, target))
+                    {
                         Some(refusal) => (McpCellState::Unsupported, Some(refusal)),
                         None => (McpCellState::Missing, None),
                     },
@@ -1748,7 +1787,13 @@ pub fn prepare(locations: &[McpLocation], selections: &[McpSelection]) -> Prepar
             ));
             continue;
         }
-        // 目标那一家接不住：用命令生成请求头、SSE、专属设置、Claude Desktop 的远程与变量
+        // 目标那一家接不住：还没准备好（没有补丁文件）、用命令生成请求头、SSE、专属设置、Claude Desktop 的远程与变量
+        if let Some((_, reason)) = agents::not_ready(target_location, &target.state)
+            .or_else(|| agents::name_refusal(&target_location.harness_id, &selection.name))
+        {
+            issues.push(issue(selection, reason));
+            continue;
+        }
         if let Some(reason) = definition.refusal_for(source_location, target_location) {
             issues.push(issue(selection, reason));
             continue;
@@ -2068,50 +2113,37 @@ fn execute_group(
         return;
     }
     record_undo(report, path, &group[0].target, backup.clone(), &bytes);
+    // DeepSeek Harness 另有全机补丁时，说明以哪一个为准
+    let note = patch_file(path).then(|| patch::global_note(path)).flatten();
     for (index, pending) in group.iter().enumerate() {
-        report.entries.push(entry(
-            &pending.action,
-            "created",
-            &crate::t!("mcp.report.created"),
-            (index == 0).then(|| backup.clone()).flatten(),
-        ));
+        report.entries.push(McpReportEntry {
+            note: note.clone(),
+            ..entry(
+                &pending.action,
+                "created",
+                &crate::t!("mcp.report.created"),
+                (index == 0).then(|| backup.clone()).flatten(),
+            )
+        });
     }
 }
 
 /// 写配置没写成时给用户的一句（spec 2026-10-04-local-diagnostics R12）：磁盘满、没权限、只读、被改过各说各的，
-/// 别的原因用调用处自己的那一句（`other`）；原文进日志
-pub(super) fn write_failed_message(
-    path: &Path,
-    error: &io::Error,
-    other: impl FnOnce() -> String,
-) -> String {
-    write_failed(path, error, other).0
-}
-
-/// 同 [`write_failed_message`]，另给分不出原因时的原文（去隐私，`McpReportEntry::detail`）；说得出原因的为 None
+/// 别的原因用调用处自己的那一句（`other`），另给原文（去隐私，`McpReportEntry::detail`；说得出原因的为 None）；
+/// 原文同时进日志。写入、删除、保留这份、撤销都走这一个（#306 复审）
 pub(super) fn write_failed(
     path: &Path,
     error: &io::Error,
     other: impl FnOnce() -> String,
 ) -> (String, Option<String>) {
-    log::warn!("写 MCP 配置 {} 失败：{error}", path.display());
-    crate::report::count_write_failure(error);
-    match atomicfile::write_failure(error).untouched() {
+    match atomicfile::write_failure_reason(path, error) {
         Some(reason) => (reason, None),
         None => (other(), Some(crate::redact::redact(&error.to_string()))),
     }
 }
 
-/// 备份没做成时给用户的一句：磁盘满、没权限、只读说「备份时…，没动」，别的（含「已存在」）用调用处那一句；原文进日志
-pub(super) fn backup_failed_message(
-    path: &Path,
-    error: &io::Error,
-    other: impl FnOnce() -> String,
-) -> String {
-    backup_failed(path, error, other).0
-}
-
-/// 同 [`backup_failed_message`]，另给分不出原因时的原文（去隐私）；说得出原因的为 None
+/// 备份没做成时给用户的一句：磁盘满、没权限、只读说「备份时…」，别的（含「已存在」）用调用处那一句，
+/// 另给原文（去隐私；说得出原因的为 None）
 pub(super) fn backup_failed(
     path: &Path,
     error: &io::Error,
@@ -2209,6 +2241,7 @@ fn entry(
         message: message.into(),
         backup_path,
         mirror_failed: None,
+        note: None,
         detail: None,
     }
 }
@@ -2242,6 +2275,7 @@ fn parse(location: &McpLocation) -> Parsed {
             state,
         },
         State::Present(snap) if toml(&location.path) => parse_toml(&snap.bytes, state),
+        State::Present(snap) if patch_file(&location.path) => patch::parse(&snap.bytes, state),
         State::Present(snap) => parse_json(
             &snap.bytes,
             state,
@@ -2371,8 +2405,11 @@ fn canon_by(value: &Value, dialect: Dialect) -> Canonical {
         Dialect::Gemini => agents::canon_gemini(value),
         Dialect::Copilot => agents::canon_copilot(value),
         Dialect::Desktop => agents::canon_desktop(value),
+        Dialect::Kimi => agents::canon_kimi(value),
         Dialect::Claude => canon_json(value, Some("headersHelper")),
         Dialect::Cursor | Dialect::Toml => canon_json(value, None),
+        Dialect::WorkBuddy => canon_json_with(value, None, &agents::WORKBUDDY_NATIVE),
+        Dialect::DshPatch => patch::canon(value),
     }
 }
 fn invalid_json_scope(state: State, message: String) -> Parsed {
@@ -2383,6 +2420,11 @@ fn invalid_json_scope(state: State, message: String) -> Parsed {
     }
 }
 fn canon_json(value: &Value, helper_key: Option<&str>) -> Canonical {
+    canon_json_with(value, helper_key, &[])
+}
+
+/// 同 [`canon_json`]，另认这一家专属、同一家之间原样保留的字段 `native`（进 `client_fields`）
+fn canon_json_with(value: &Value, helper_key: Option<&str>, native: &[&str]) -> Canonical {
     let Some(object) = value.as_object() else {
         return unsupported_with(crate::t!("mcp.canon.notObject"));
     };
@@ -2390,6 +2432,7 @@ fn canon_json(value: &Value, helper_key: Option<&str>) -> Canonical {
         .keys()
         .find(|key| {
             !["type", "command", "args", "env", "url", "headers"].contains(&key.as_str())
+                && !native.contains(&key.as_str())
                 && Some(key.as_str()) != helper_key
         })
         .cloned();
@@ -2487,7 +2530,11 @@ fn canon_json(value: &Value, helper_key: Option<&str>) -> Canonical {
         env,
         url,
         headers,
-        client_fields: BTreeMap::new(),
+        client_fields: object
+            .iter()
+            .filter(|(key, _)| native.contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.to_string()))
+            .collect(),
         reason: bad.then(|| reason.unwrap_or_else(|| crate::t!("mcp.canon.connectionTypeInvalid"))),
         unsupported: bad,
         headers_helper,
@@ -2977,6 +3024,8 @@ fn merge(
     let dialect = agents::dialect_of(location);
     if dialect == Dialect::Toml {
         merge_toml(existing, additions)
+    } else if dialect == Dialect::DshPatch {
+        patch::merge(existing, additions)
     } else if let Some(project) = location.selector.as_deref() {
         merge_claude_local_json(existing, additions, project, json_helper_key(dialect))
     } else {
@@ -3033,6 +3082,20 @@ fn json_server_for(def: &Canonical, dialect: Dialect) -> io::Result<Vec<u8>> {
                 return Err(refused(crate::t!("mcp.write.sseUnsupported")));
             }
             json_server(def, json_helper_key(dialect))
+        }
+        // 同 Cursor 的写法，再原样带上它自己的字段（同一家之间；跨家的计划阶段已拒绝）
+        Dialect::WorkBuddy => {
+            if def.transport == "sse" {
+                return Err(refused(crate::t!("mcp.write.sseUnsupported")));
+            }
+            let plain = Canonical {
+                client_fields: BTreeMap::new(),
+                ..def.clone()
+            };
+            let mut object: serde_json::Map<String, Value> =
+                serde_json::from_slice(&json_server(&plain, None)?).map_err(io::Error::other)?;
+            agents::put_native(def, &agents::WORKBUDDY_NATIVE, &mut object)?;
+            serde_json::to_vec(&Value::Object(object)).map_err(io::Error::other)
         }
         _ => agents::server(def, dialect),
     }
@@ -3436,6 +3499,11 @@ fn basic_string(value: &str) -> toml_edit::Value {
         .parse()
         .expect("转义后的基本字符串总能解析")
 }
+/// 是不是 DeepSeek Harness 的 YAML 补丁（读写走 `mcp/patch.rs`）：与 TOML 一样按扩展名，
+/// 只拿得到路径的地方（删除、来源移除）也分得出
+fn patch_file(path: &Path) -> bool {
+    path.extension().and_then(|value| value.to_str()) == Some("yml")
+}
 fn toml(path: &Path) -> bool {
     path.extension().and_then(|value| value.to_str()) == Some("toml")
 }
@@ -3506,6 +3574,7 @@ mod exclusion_tests {
                     message: String::new(),
                     backup_path: None,
                     mirror_failed: None,
+                    note: None,
                     detail: None,
                 })
                 .collect(),
@@ -3752,6 +3821,8 @@ mod tests {
         let harness = |id: &str| Harness {
             id: id.into(),
             display_name: id.into(),
+            brand: id.into(),
+            brand_name: id.into(),
             project_dir: None,
             global_dir: None,
             universal: false,
@@ -3812,6 +3883,8 @@ mod tests {
         let harness = Harness {
             id: "codex".into(),
             display_name: "Codex".into(),
+            brand: "codex".into(),
+            brand_name: "Codex".into(),
             project_dir: None,
             global_dir: None,
             universal: false,
@@ -4171,7 +4244,7 @@ mod undo_tests {
         let report = execute(plan, false, backups());
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(report.entries[0].outcome, "failed");
-        assert_eq!(report.entries[0].message, "没有写入权限，没动");
+        assert_eq!(report.entries[0].message, "没有写入权限，未改动");
         // 说得出原因的没有原文：提示条照旧接这一句
         assert_eq!(report.entries[0].detail, None);
         assert_eq!(fs::read(&target).unwrap(), ORIGINAL);
@@ -4221,7 +4294,7 @@ mod undo_tests {
         let report = execute(plan, false, &ro);
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(report.entries[0].outcome, "failed");
-        assert_eq!(report.entries[0].message, "备份时没有写入权限，没动");
+        assert_eq!(report.entries[0].message, "备份时没有写入权限，未改动");
         assert_eq!(fs::read(&target).unwrap(), ORIGINAL);
     }
 
@@ -4244,7 +4317,7 @@ mod undo_tests {
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(result.outcome, "failed");
         assert_eq!(result.files[0].outcome, "failed");
-        assert_eq!(result.files[0].message, "没有写入权限，没动");
+        assert_eq!(result.files[0].message, "没有写入权限，未改动");
     }
 }
 

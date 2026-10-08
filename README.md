@@ -2,7 +2,7 @@
   <img src="./assets/readme/hero.svg" width="100%" alt="Sophia — one place for the skills, MCP servers and models your AI coding agents share. A table of skills against Claude Code, Codex and Cursor shows which agent has which skill.">
 </p>
 
-<p align="center"><b>English</b> · <a href="./README.zh-CN.md">简体中文</a></p>
+<p align="center"><b>English</b> · <a href="./README.zh-CN.md">简体中文</a> · <a href="https://zhengjiaqiao.github.io/sophia/">Website</a></p>
 
 You probably run more than one AI coding agent. Each keeps its own skills folder, its own MCP config file and its own model settings. Making one skill available to Claude Code *and* Codex means symlinking it twice by hand — and when a link breaks, nothing tells you.
 

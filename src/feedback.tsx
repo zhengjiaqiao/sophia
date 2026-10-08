@@ -90,16 +90,6 @@ const useHub = () =>
     () => hub,
   );
 
-/// 反馈小窗此刻开着没有（应用菜单据此只留作用于输入框的命令，见 `routeUnderModal`）
-export function feedbackOpen(): boolean {
-  return hub.open !== null;
-}
-
-/// 收起反馈小窗（退出时：发送中也直接放弃，在路上的请求结果不再理会）
-export function closeFeedback(): void {
-  if (hub.open) setHub({ open: null });
-}
-
 /// 打开反馈小窗（已经开着时不动：一次只有一份草稿）
 export function openFeedback(source: FeedbackSource, attached?: string): void {
   if (hub.open) return;

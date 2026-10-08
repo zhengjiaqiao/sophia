@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
+import { productLabel } from "./brandsView";
 import DomainView, { FolderTip, foldersOf, skillCellKey, type BatchPress } from "./DomainView";
 import { cellKey, SourceKeys } from "./Matrix";
 import { LocationFrame } from "./LocationFrame";
@@ -30,12 +31,14 @@ import {
 } from "./dupNotice";
 import { onlyTheseLabel } from "./market/updateView";
 import { orphanTotals } from "./orphanRows";
-import { t, tSpaced, useLocale, useOnLocaleChange } from "./i18n";
+import { t, useLocale, useOnLocaleChange } from "./i18n";
+import { errorSentence } from "./backendError.ts";
 import {
   columnOfTarget,
   folderLabel,
   keepSideKey,
   mergeSkillPages,
+  noSkillsText,
   placedAgents,
   refAt,
   refRowKey,
@@ -917,7 +920,7 @@ export default function SkillsTab({
           }
           await onRefresh();
         } catch (e) {
-          failCell(rowKey, columnId, String(e));
+          failCell(rowKey, columnId, errorSentence(e));
         } finally {
           setOptimisticFor([ref], null);
         }
@@ -952,7 +955,7 @@ export default function SkillsTab({
         }
         await onRefresh();
       } catch (e) {
-        failCell(rowKey, columnId, String(e));
+        failCell(rowKey, columnId, errorSentence(e));
       } finally {
         setOptimisticFor([ref], null);
       }
@@ -1073,7 +1076,7 @@ export default function SkillsTab({
         }
         await onRefresh();
       } catch (e) {
-        failCell(orphan.key, columnId, String(e));
+        failCell(orphan.key, columnId, errorSentence(e));
       } finally {
         setOrphanGone((prev) => {
           const next = new Set(prev);
@@ -1310,7 +1313,7 @@ export default function SkillsTab({
           />
         );
     } catch (e) {
-      node = cannot(String(e));
+      node = cannot(errorSentence(e));
     }
     await onRefresh();
     setHidden((prev) => {
@@ -1360,7 +1363,7 @@ export default function SkillsTab({
         failed: first?.outcome.status === "failed" ? reasons([first]) : reasons(links),
       });
     } catch (e) {
-      text = restoredOriginalToast(skill, { bodyBack: false, failed: [String(e)] });
+      text = restoredOriginalToast(skill, { bodyBack: false, failed: [errorSentence(e)] });
     }
     await onRefresh();
     setRowToast({
@@ -1682,12 +1685,13 @@ export default function SkillsTab({
   }
   /// 空态里说的地方：选 `全部` 时说「本机」（只有用户级一个位置时也不写成「用户级」，2026-09-29 产品负责人真机），
   /// 一个位置写它的名字，几个位置合起来说
-  const placeLabel =
+  const noDirsText = noSkillsText(
     scopeKey === "all"
-      ? t("skills.place.machine")
+      ? { kind: "machine" }
       : multi
-        ? t("skills.place.several")
-        : domainRef.label;
+        ? { kind: "several" }
+        : { kind: "one", label: domainRef.label },
+  );
   if (pages.length === 0) {
     // 范围里没有一个位置扫描出页（没有 agent 目录）：`管理原件位置` 已在页面头，空态不重复。
     // 没有列，也就说不出会自动创建哪些文件夹：只说结果，下一步同有表头的空表一样给 `前往发现`（#274）
@@ -1699,7 +1703,7 @@ export default function SkillsTab({
         enabled={!addOpen && !manageOpen}
         bar={bar}
         empty={{
-          description: tSpaced("skills.empty.noDirs", { place: placeLabel }),
+          description: noDirsText,
           art: "noDirs",
           action: onDiscover
             ? { label: t("skills.empty.goDiscover"), onClick: onDiscover }
@@ -1849,7 +1853,7 @@ export default function SkillsTab({
       <DomainView
         overview={overview}
         view={view}
-        placeLabel={placeLabel}
+        noDirsText={noDirsText}
         onDiscover={onDiscover}
         rows={onlyOrphans ? [] : visible}
         stateOf={stateOf}
@@ -1875,6 +1879,7 @@ export default function SkillsTab({
         onFilterText={setFilterText}
         onClearFilter={() => setFilterText("")}
         bar={bar}
+        productName={(id) => productLabel(id, install?.agents.find((a) => a.id === id)?.name ?? id)}
         onReveal={reveal}
         onCopyPath={(path) => void api.copyText(path).catch((e) => onError(String(e)))}
         onManageSources={openManageSources}

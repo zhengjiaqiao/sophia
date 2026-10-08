@@ -27,6 +27,7 @@ const preview = (over: Partial<QuitPreview> = {}): QuitPreview => ({
   codexTerminal: false,
   claude: false,
   claudeRunning: false,
+  workbuddy: false,
   ...over,
 });
 
@@ -52,33 +53,56 @@ test("AC7 两家都没在用第三方模型：不确认，直接退出；有一�
   assert.equal(quitNeedsConfirm(preview({ claude: true })), true);
 });
 
-test("AC6 确认框文案四种：两家 / 只 Codex / 只 Claude；终端里有 Codex 时补一句（只在 Codex 要改回时）", () => {
+test("AC6 确认框：一句合并主句（接了第三方模型的按 Codex、Claude、WorkBuddy 的先后）+ 只写有额外代价的；终端里有 Codex 时补一句（只在 Codex 要改回时）", () => {
   const both = quitConfirmText(preview({ codex: true, claude: true }));
   assert.equal(both.title, "退出 Sophia？");
-  assert.equal(both.body, "Codex 和 Claude 会改回官方模型并马上重启，正在进行的对话会中断。");
+  assert.equal(
+    both.body,
+    "Codex、Claude 接入的第三方模型会先移除，下次打开 Sophia 再接回来。Codex 和 Claude 会马上重启，正在进行的对话会中断。",
+  );
   assert.equal(
     quitConfirmText(preview({ codex: true })).body,
-    "Codex 会改回官方模型并马上重启，正在进行的对话会中断。",
+    "Codex 接入的第三方模型会先移除，下次打开 Sophia 再接回来。Codex 会马上重启，正在进行的对话会中断。",
   );
   assert.equal(
     quitConfirmText(preview({ claude: true })).body,
-    "Claude 会改回官方模型并马上重启，正在进行的对话会中断。",
+    "Claude 接入的第三方模型会先移除，下次打开 Sophia 再接回来。Claude 会马上重启，正在进行的对话会中断。",
   );
   assert.equal(
     quitConfirmText(preview({ codex: true, codexTerminal: true })).body,
-    "Codex 会改回官方模型并马上重启，正在进行的对话会中断。终端里的 Codex 也会中断，需要你自己重启。",
+    "Codex 接入的第三方模型会先移除，下次打开 Sophia 再接回来。Codex 会马上重启，正在进行的对话会中断。终端里的 Codex 也会中断，需要你自己重启。",
   );
   // Codex 不改回时，终端里那个与退出无关
   assert.equal(
     quitConfirmText(preview({ claude: true, codexTerminal: true })).body,
-    "Claude 会改回官方模型并马上重启，正在进行的对话会中断。",
-  );
-  // 一律写 Codex，不写桌面应用的名字（2026-10-03 产品负责人）
-  assert.match(
-    quitConfirmText(preview({ codex: true, codexTerminal: true })).body,
-    /^Codex 会改回官方模型.*终端里的 Codex/,
+    "Claude 接入的第三方模型会先移除，下次打开 Sophia 再接回来。Claude 会马上重启，正在进行的对话会中断。",
   );
   assert.equal(t("shell.quit.confirm"), "退出");
+});
+
+test("#266 WorkBuddy 里写着 Sophia 的模型：退出要确认，主句点名 WorkBuddy；它没有额外代价，不另写一句", () => {
+  assert.equal(quitNeedsConfirm(preview({ workbuddy: true })), true);
+  assert.equal(
+    quitConfirmText(preview({ workbuddy: true })).body,
+    "WorkBuddy 接入的第三方模型会先移除，下次打开 Sophia 再接回来。",
+  );
+  assert.equal(
+    quitConfirmText(preview({ codex: true, workbuddy: true, codexTerminal: true })).body,
+    "Codex、WorkBuddy 接入的第三方模型会先移除，下次打开 Sophia 再接回来。Codex 会马上重启，正在进行的对话会中断。终端里的 Codex 也会中断，需要你自己重启。",
+  );
+  assert.equal(
+    quitConfirmText(preview({ codex: true, claude: true, workbuddy: true })).body,
+    "Codex、Claude、WorkBuddy 接入的第三方模型会先移除，下次打开 Sophia 再接回来。Codex 和 Claude 会马上重启，正在进行的对话会中断。",
+  );
+  const fail = (agent: "codex" | "workbuddy") => ({ agent, code: "internal", message: "…" });
+  assert.deepEqual(quitFailureText([fail("workbuddy")]), {
+    title: "从 WorkBuddy 移除 Sophia 加的模型失败",
+    body: "Sophia 退出后 WorkBuddy 里 Sophia 加的模型无法使用，重新打开 Sophia 就能恢复。",
+  });
+  assert.deepEqual(quitFailureText([fail("codex"), fail("workbuddy")]), {
+    title: "Codex 重启失败",
+    body: "Codex 已改回官方模型，手动重启它就能用。Sophia 退出后 WorkBuddy 里 Sophia 加的模型无法使用，重新打开 Sophia 就能恢复。",
+  });
 });
 
 test("忙碌一句跟着 quit-progress 的 step 走", () => {
@@ -90,16 +114,16 @@ test("AC10 没做成的说明：Codex / Claude / 两家；都做成为 null", ()
   const fail = (agent: "codex" | "claude") => ({ agent, code: "desktop_busy", message: "…" });
   assert.equal(quitFailureText([]), null);
   assert.deepEqual(quitFailureText([fail("codex")]), {
-    title: "Codex 没能重启",
+    title: "Codex 重启失败",
     body: "Codex 已改回官方模型，手动重启它就能用。",
   });
   assert.deepEqual(quitFailureText([fail("claude")]), {
-    title: "Claude 没能改回官方模型",
-    body: "Sophia 退出后 Claude 暂时用不了，重新打开 Sophia 就能恢复。",
+    title: "Claude 改回官方模型失败",
+    body: "Sophia 退出后 Claude 暂时无法使用，重新打开 Sophia 就能恢复。",
   });
   assert.deepEqual(quitFailureText([fail("codex"), fail("claude")]), {
-    title: "Codex 和 Claude 没能重启",
-    body: "Codex 已改回官方模型，手动重启它就能用。Sophia 退出后 Claude 暂时用不了，重新打开 Sophia 就能恢复。",
+    title: "Codex 和 Claude 重启失败",
+    body: "Codex 已改回官方模型，手动重启它就能用。Sophia 退出后 Claude 暂时无法使用，重新打开 Sophia 就能恢复。",
   });
 });
 
@@ -110,7 +134,7 @@ test("English 与繁體：退出写 Quit / 結束，句子之间 English 留空�
     assert.equal(text.title, "Quit Sophia?");
     assert.match(
       text.body,
-      /interrupted\. Codex in the terminal will be interrupted too\. You'll need to restart it yourself\.$/,
+      /^Third-party models connected to Codex will be removed for now and connected again the next time you open Sophia\. Codex will restart right away\. Conversations in progress will be interrupted\. Codex in the terminal will be interrupted too\. You'll need to restart it yourself\.$/,
     );
     const both = quitFailureText(
       [
@@ -150,7 +174,7 @@ test("Confirm 忙碌：键区原位锁住（过了门槛换成刻度 + 一句）
 
 test("Confirm 单键：不给 onCancel 就只有主动作一颗键", () => {
   const html = render(Confirm, {
-    title: "Codex 没能重启",
+    title: "Codex 重启失败",
     confirmLabel: "退出",
     onConfirm: noop,
   });
@@ -190,7 +214,7 @@ test("AC5 另一个 Sophia 占着端口：不看开关也出待办（Codex 设�
     message: "另一个 Sophia 正在运行",
     reason: "退出它之后再试一次",
     label: "再试一次",
-    busy: "正在重启路由",
+    busy: "正在重新连接",
   });
   assert.equal(showRouterTodo(s, false), true);
 });
@@ -201,14 +225,14 @@ test("AC5a 端口都被占：说范围", () => {
   assert.equal(todo?.reason, "本机 47328–47339 端口都被别的程序占用了");
 });
 
-test("路由没在跑（没有端口说明）：照旧自愈过一次才出，原因是自愈失败的原话；都好时没有", () => {
+test("无法连接第三方模型（路由没在跑、没有端口说明）：照旧自愈过一次才出，原因是自愈失败的原话；都好时没有", () => {
   const down = state({ enabled: true });
   assert.equal(routerTodo(down, false, null), null);
   assert.deepEqual(routerTodo(down, true, "原话"), {
-    message: "路由没在跑，第三方模型用不了",
+    message: "无法连接第三方模型",
     reason: "原话",
-    label: "重启路由",
-    busy: "正在重启路由",
+    label: "重新连接",
+    busy: "正在重新连接",
   });
   assert.equal(
     routerTodo(state({ enabled: true, router: { running: true, port: 1, error: "" } }), true, null),
@@ -216,7 +240,7 @@ test("路由没在跑（没有端口说明）：照旧自愈过一次才出，�
   );
 });
 
-test("AC4 换了端口：等重启的那一家节里一行灰字，重启过了就不再说", () => {
+test("AC4 换了端口：等重启的那一家行上一句灰字，重启过了就不再说", () => {
   const moved = { code: "port_moved", from: 47328, to: 47329 } as const;
   const codexWaiting = state({ enabled: true, needsCodexRestart: true, portNotice: moved });
   assert.equal(
@@ -241,9 +265,11 @@ test("AC4 换了端口：等重启的那一家节里一行灰字，重启过了�
     "原来的端口被别的程序占用了，已自动换一个，重启 Claude 后生效",
   );
   assert.equal(portMovedNote(state({ portNotice: moved }), "claude"), null);
-  for (const page of ["ModelsTab.tsx", "ClaudeModelsPage.tsx"]) {
-    assert.match(src(page), /className="models-port-note"/, page);
-  }
+  // 模型页一层（#259）：两家都由注册表的 `listRow.note` 接到行上的灰字
+  const agents = src("shell/agents.tsx");
+  assert.match(agents, /portMovedNote\(s\.gateway, "codex"\)/);
+  assert.match(agents, /portMovedNote\(s\.gateway, "claude"\)/);
+  assert.match(src("shell/ModelsPage.tsx"), /className="models-row__note"/);
 });
 
 // ===== 设置页：启动 · 开机启动（R15、R16） =====

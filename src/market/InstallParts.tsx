@@ -1,9 +1,9 @@
-/// 安装类推入页（安装页 06 / 09、从链接安装 07、从 JSON 添加 10）共用的几块（DESIGN「发现与安装 › 安装页」）：
+/// 安装类推入页（安装页 06 / 09、从链接安装 07、粘贴 MCP 配置 10）共用的几块（DESIGN「发现与安装 › 安装页」）：
 /// `生效范围`（复用位置页筛选行的胶囊，去掉 `全部`）+ 结果一句与落点路径、勾选行网格、`要填的` 表单、勾选列表的一行、贴底一行。
 /// 只吃 props；带业务状态的钩子在 `useInstall.ts`。
 import { useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
-import { t, tRich, tSpaced } from "../i18n.ts";
+import { t, tRich } from "../i18n.ts";
 import {
   AgentIcon,
   BusySlot,
@@ -46,7 +46,8 @@ import type { SkillDownloadFailure } from "../netFailure.ts";
 import "./install.css";
 
 /// 下载 skill 失败（spec #248、issue #253）：网络那三类（连不上、超时、限流）是灰面板——左端 `!` 看原文、
-/// 按类说的主句、「开着代理再试一次」；别的（仓库或分支不在、仓库太大）照旧一行字，`className` 是那一行的样子
+/// 按类说的主句、「开着代理再试一次」；别的（仓库或分支不在、仓库太大、压缩包解压失败）带原文时同一块灰面板、
+/// 不给键（再试一次结果一样，#335），没有原文时照旧一行字，`className` 是那一行的样子
 export function DownloadFailure({
   failure,
   className,
@@ -56,7 +57,8 @@ export function DownloadFailure({
   className: string;
   onRetry: () => void;
 }) {
-  if (!failure.retryWithProxy) return <p className={className}>{failure.message}</p>;
+  if (!failure.retryWithProxy && !failure.detail)
+    return <p className={className}>{failure.message}</p>;
   return (
     <div className="install-failure">
       <NoticePanel
@@ -64,7 +66,11 @@ export function DownloadFailure({
         message={failure.message}
         technical={failure.detail ?? undefined}
         onCopy={(text) => copyDetails(text)}
-        action={{ label: t("common.net.retryWithProxy"), onClick: onRetry }}
+        action={
+          failure.retryWithProxy
+            ? { label: t("common.net.retryWithProxy"), onClick: onRetry }
+            : undefined
+        }
       />
     </div>
   );
@@ -174,9 +180,11 @@ export interface AgentRowView {
   note?: string;
   disabledReason?: string;
   path?: string;
+  /// 原因背后的精确值（第二层，等宽）：悬停这一行时在原因或 `写入 <路径>` 下另起一行
+  detail?: string;
 }
 
-/// `给谁用`：勾选行（勾选框 + agent 图标 + 名字 + 名字后一句），两列或一列（从 JSON 添加：
+/// `给谁用`：勾选行（勾选框 + agent 图标 + 名字 + 名字后一句），两列或一列（粘贴 MCP 配置：
 /// 放得下原因句）。不能勾的行画成没勾
 export function AgentChecks({
   rows,
@@ -217,16 +225,30 @@ export function AgentChecks({
               icon={<AgentIcon id={a.id} name={a.name} />}
               note={view.note}
               disabledReason={view.disabledReason}
+              reasonDetail={view.detail ? <Mono inherit>{view.detail}</Mono> : undefined}
               label={a.name}
             >
               {a.name}
             </CheckRow>
           );
+          const writesTo = view.path
+            ? tRich("market.mcp.writesTo", { path: <Mono inherit>{view.path}</Mono> })
+            : null;
+          const detail = view.detail ? <Mono inherit>{view.detail}</Mono> : null;
           const row =
-            view.path && !disabled ? (
+            (writesTo || detail) && !disabled ? (
               <Tooltip
                 key={a.id}
-                content={tRich("market.mcp.writesTo", { path: <Mono inherit>{view.path}</Mono> })}
+                content={
+                  writesTo && detail ? (
+                    <>
+                      <div>{writesTo}</div>
+                      <div>{detail}</div>
+                    </>
+                  ) : (
+                    (writesTo ?? detail)
+                  )
+                }
               >
                 {check}
               </Tooltip>
@@ -262,7 +284,7 @@ export function AgentChecks({
       </div>
       {scoped ? (
         <p className="install-scope__hint">
-          {tSpaced("market.install.scopeHint", { place: claudeScope.place, file: ".mcp.json" })}
+          {t("market.install.scopeHint", { place: claudeScope.place, file: ".mcp.json" })}
         </p>
       ) : null}
     </>
@@ -409,7 +431,7 @@ export function KeyHintBlock({
   );
 }
 
-/// 勾选列表的一行（从链接安装的 skill、从 JSON 添加的 MCP）：勾选框 + 名字 + 一句（等宽）+ 可选行尾动作。
+/// 勾选列表的一行（从链接安装的 skill、粘贴 MCP 配置的 MCP）：勾选框 + 名字 + 一句（等宽）+ 可选行尾动作。
 /// 整行可点（行里的键与输入框除外）；不能勾的行平贴、不回应悬停，原因写在那一句的位置
 export function PickRow({
   checked,
@@ -419,6 +441,7 @@ export function PickRow({
   detail,
   blocked,
   action,
+  tip,
   pinned = false,
 }: {
   /// `"mixed"`＝半选（只有全选那一行用：选了一部分）
@@ -434,6 +457,8 @@ export function PickRow({
   blocked?: string | null;
   /// 行尾动作（`在访达中显示 ↗`）
   action?: ReactNode;
+  /// 悬停名字时的提示框（第二层：从链接安装每行的仓库内路径，等宽）；不能勾的行也出
+  tip?: ReactNode;
   /// 钉在列表顶上、不随列表滚走（全选那一行）
   pinned?: boolean;
 }) {
@@ -458,7 +483,10 @@ export function PickRow({
           disabledReason={blocked ?? undefined}
         />
       </span>
-      <span className="install-pick__name">{name}</span>
+      {/* 没有提示框时包层不占盒（display: contents），名字一列照旧定宽 */}
+      <Tooltip content={tip}>
+        <span className="install-pick__name">{name}</span>
+      </Tooltip>
       <span className="install-pick__detail">{blocked ?? detail}</span>
       {action ? <span className="install-pick__action">{action}</span> : null}
     </div>
@@ -583,14 +611,13 @@ export function InstallFooter({
   );
 }
 
-/// 来历一行：等宽的仓库 · 仓库内路径（skill）/ 发布方（MCP）· 句后浅键（`在 GitHub 打开 ↗` / `查看说明 ↗`，不垫底）。
-/// 浅键带 `tip` 时悬停出它（MCP 的包名，#276）
+/// 来历一行：`来自 <作者>`（skill，#307）/ 发布方（MCP）· 句后浅键（`在 GitHub 打开 ↗` / `查看说明 ↗`，不垫底）。
+/// 一段带 `tip` 时悬停出它（skill 的 `owner/repo · 仓库内路径`）；浅键带 `tip` 时同样（MCP 的包名，#276）
 export function OriginLine({
   parts,
   leave,
 }: {
-  /// 各段：`mono` 为真的等宽（仓库、路径），否则是正文（发布方）
-  parts: ReadonlyArray<{ text: string; mono?: boolean; strong?: boolean }>;
+  parts: ReadonlyArray<{ text: string; tip?: ReactNode }>;
   leave?: { label: string; onClick: () => void; tip?: ReactNode } | null;
 }) {
   return (
@@ -598,10 +625,10 @@ export function OriginLine({
       {parts.map((p, i) => (
         <span key={i} className="install-origin__part">
           {i > 0 ? <span className="install-origin__dot">·</span> : null}
-          {p.mono ? (
-            <span className={p.strong ? "install-origin__mono is-strong" : "install-origin__mono"}>
-              <Mono inherit>{p.text}</Mono>
-            </span>
+          {p.tip ? (
+            <Tooltip content={p.tip} focusable>
+              <span>{p.text}</span>
+            </Tooltip>
           ) : (
             <span>{p.text}</span>
           )}

@@ -1,11 +1,9 @@
 //! Claude 第三方模型的持久化设置，挂在 `store::Settings::claude_gateway` 下，随 settings.json 读写
 //! （spec R1、契约 §5）。纯数据，无 IO。
 //!
-//! 网关列表的形状与 Codex 那份相同（`ProviderSettings`），已选、标识与显示名按同一套规则各算各的（R3）。
-//! `applied` 记下 Sophia 上一次写进桌面应用配置的值与写之前的原值：切回时据它还原，中途失败或崩溃后
+//! 模型提供商是全局一份，Claude 选了哪些在 `model_providers` 的「已选」里（ADR 0003、#259）；旧版按 agent 存的
+//! 网关（`providers`）不再读，下次保存就不再写出。`applied` 记下 Sophia 上一次写进桌面应用配置的值与写之前的原值：切回时据它还原，中途失败或崩溃后
 //! 据它的 `phase` 把记下的方向做完（R32、R33）。令牌不存在这里。
-use crate::codex_models::catalog::{Published, RoutingProvider};
-use crate::codex_models::settings::{self as codex, ProviderSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -13,7 +11,6 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ClaudeGatewaySettings {
-    pub providers: Vec<ProviderSettings>,
     // 2026-09-30 起 Sophia 不设默认模型（以 Claude 客户端里的选择为准）：去掉了 `defaultModel` /
     // `backgroundModel`。旧文件里的这两个键读入时忽略（本结构不拒收未知字段），再存时不写回
     /// 开关（想要的值）
@@ -22,18 +19,6 @@ pub struct ClaudeGatewaySettings {
     pub takeover: bool,
     /// 写入的值与原值记录；`None`＝桌面应用配置里没有 Sophia 写的东西
     pub applied: Option<Applied>,
-}
-
-impl ClaudeGatewaySettings {
-    /// 这一家已选的模型，带标识与显示名（撞名加网关短名），规则同 Codex
-    pub fn published(&self) -> Vec<Published> {
-        codex::published(&self.providers)
-    }
-
-    /// 这一家写进路由清单的上游
-    pub fn routing_providers(&self) -> Vec<RoutingProvider> {
-        codex::routing_providers(&self.providers)
-    }
 }
 
 /// 写入进行到哪一步（R32）
@@ -155,30 +140,10 @@ impl From<Original> for OriginalRepr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex_models::catalog::Model;
-    use crate::codex_models::settings::{GatewaySettings, ProviderSettings, SavedModel};
+    use crate::codex_models::settings::GatewaySettings;
     use crate::store::{Settings, Store};
     use crate::test_support::TempTree;
     use serde_json::{json, Value};
-
-    fn provider(id: &str, models: &[(&str, bool)]) -> ProviderSettings {
-        ProviderSettings {
-            id: id.into(),
-            name: id.to_uppercase(),
-            base_url: format!("https://{id}.example"),
-            models: models
-                .iter()
-                .map(|(model, selected)| SavedModel {
-                    model: Model {
-                        id: (*model).into(),
-                        ..Model::default()
-                    },
-                    selected: *selected,
-                })
-                .collect(),
-            ..ProviderSettings::default()
-        }
-    }
 
     fn applied() -> Applied {
         Applied {
@@ -204,8 +169,8 @@ mod tests {
         }
     }
 
-    /// AC1：升级前的 settings.json 只有 codexGateway（按当前版本保存过的形状），读入再保存后它逐字段不变，
-    /// claudeGateway 是空默认
+    /// AC1：升级前的 settings.json 只有 codexGateway，读入再保存后它的记录逐字段不变（旧的网关列表不再写出，
+    /// ADR 0003），claudeGateway 是空默认
     #[test]
     fn old_settings_without_claude_gateway_read_as_empty_and_keep_codex_untouched() {
         let tree = TempTree::new();
@@ -238,15 +203,18 @@ mod tests {
 
         let saved: Value =
             serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap();
-        assert_eq!(saved["codexGateway"], codex);
+        let mut kept = codex.clone();
+        kept.as_object_mut().unwrap().remove("providers");
+        assert_eq!(saved["codexGateway"], kept);
         assert_eq!(
             saved["claudeGateway"],
-            json!({"providers": [], "enabled": false, "takeover": false, "applied": null})
+            json!({"enabled": false, "takeover": false, "applied": null})
         );
         assert_eq!(store.load_settings().unwrap(), loaded);
     }
 
-    /// 2026-09-30 之前存下的 `defaultModel` / `backgroundModel`：读入时忽略、不报错，其余字段照读；再存时不写回
+    /// 2026-09-30 之前存下的 `defaultModel` / `backgroundModel`：读入时忽略、不报错，其余字段照读；再存时不写回。
+    /// 旧版按 agent 存的网关不读（#259）
     #[test]
     fn old_default_and_background_models_are_ignored_on_read() {
         let old = json!({
@@ -260,18 +228,16 @@ mod tests {
         });
         let loaded: ClaudeGatewaySettings = serde_json::from_value(old).unwrap();
         assert!(loaded.enabled);
-        assert_eq!(loaded.providers.len(), 1);
-        assert_eq!(loaded.published().len(), 1);
         let saved = serde_json::to_value(&loaded).unwrap();
         assert!(saved.get("defaultModel").is_none());
         assert!(saved.get("backgroundModel").is_none());
+        assert!(saved.get("providers").is_none());
     }
 
     /// 契约 §5：字段名与 `applied` 的形状；原值三种写法
     #[test]
     fn claude_gateway_serializes_in_the_contract_shape() {
         let settings = ClaudeGatewaySettings {
-            providers: vec![provider("ap", &[("kimi-k3", true)])],
             enabled: true,
             takeover: true,
             applied: Some(applied()),
@@ -282,7 +248,7 @@ mod tests {
         assert!(value.get("backgroundModel").is_none());
         assert_eq!(value["enabled"], true);
         assert_eq!(value["takeover"], true);
-        assert_eq!(value["providers"][0]["baseUrl"], "https://ap.example");
+        assert!(value.get("providers").is_none());
         assert_eq!(
             value["applied"],
             json!({
@@ -341,11 +307,10 @@ mod tests {
         let store = Store::new(tree.root().join("data/Sophia"));
         let settings = Settings {
             codex_gateway: GatewaySettings {
-                providers: vec![provider("ap", &[("gpt-x", true)])],
+                published_slugs: vec!["ap-gpt-x".into()],
                 ..GatewaySettings::default()
             },
             claude_gateway: ClaudeGatewaySettings {
-                providers: vec![provider("ap", &[("kimi-k3", true)])],
                 enabled: true,
                 applied: Some(Applied {
                     phase: Phase::Done,
@@ -357,29 +322,5 @@ mod tests {
         };
         store.save_settings(&settings).unwrap();
         assert_eq!(store.load_settings().unwrap(), settings);
-    }
-
-    /// R3：已选、标识、撞名后缀与 Codex 同一套规则，按这一家自己的网关算
-    #[test]
-    fn published_uses_the_codex_rules_on_this_agents_own_providers() {
-        let settings = ClaudeGatewaySettings {
-            providers: vec![
-                provider("ap", &[("kimi-k3", true), ("skip", false)]),
-                provider("or", &[("kimi-k3", true)]),
-            ],
-            ..ClaudeGatewaySettings::default()
-        };
-        let published = settings.published();
-        let slugs: Vec<&str> = published.iter().map(|p| p.slug.as_str()).collect();
-        assert_eq!(slugs, ["ap-kimi-k3", "or-kimi-k3"]);
-        let names: Vec<&str> = published
-            .iter()
-            .map(|p| p.model.display_name.as_deref().unwrap_or_default())
-            .collect();
-        assert_eq!(names, ["kimi-k3 · AP", "kimi-k3 · OR"]);
-        assert_eq!(
-            settings.routing_providers(),
-            crate::codex_models::settings::routing_providers(&settings.providers)
-        );
     }
 }

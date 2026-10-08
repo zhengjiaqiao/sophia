@@ -1,6 +1,6 @@
 /// `发现` 一面的列表（spec 2026-09-27-skill-mcp-market R5 R7 R16；DESIGN「发现与安装 › `发现` 的页面头与列表」）。
-/// 页面头（搜索框、`粘贴链接` / `粘贴 JSON`）归 `DiscoverFrame`（LocationFrame.tsx），这里拿到搜索词、画列表：
-/// - skill：表头 `热门 N` / `搜索结果 N`；一行 名字 · 仓库（等宽）· 装过的人（右对齐）· `安装`
+/// 页面头（搜索框、`粘贴链接` / `粘贴配置`）归 `DiscoverFrame`（LocationFrame.tsx），这里拿到搜索词、画列表：
+/// - skill：表头 `热门 N` / `搜索结果 N`；一行 名字 · 来自（作者，悬停出完整 `owner/repo`）· 装过的人（右对齐）· `安装`
 /// - MCP：表头 `精选 N`；搜索时下面多一节 `官方目录 N`；一行 名字 + 发布方 · 一句说明 · 要填什么 · `安装`
 /// - 装过的：`安装` 换成状态 `✓ 已安装`（平贴、按不下，发现里不装第二份）
 /// - 点整行（`安装` 键之外）、或行上按回车，推入介绍页（`IntroPage`）；行上没有拉手、没有抽屉
@@ -20,6 +20,7 @@ import {
   Note,
   NoticePanel,
   Tag,
+  Tooltip,
   TruncTip,
   useBusyShown,
 } from "../ui";
@@ -30,6 +31,7 @@ import {
   mcpKey,
   mcpNeeds,
   popularText,
+  repoOwner,
   skillHeader,
   skillKey,
   skillQuery,
@@ -37,6 +39,7 @@ import {
 } from "./discoverView";
 import { InstalledMark } from "./InstalledMark";
 import { IntroPage } from "./IntroPage";
+import { localText } from "./installView";
 import { createMcpLoader, type McpLoadState } from "./mcpRefresh";
 import { createSkillLoader, POPULAR_CHECK_MS, type SkillLoadState } from "./popularRefresh";
 import "./DiscoverPane.css";
@@ -299,7 +302,7 @@ function SkillDiscover({
             count={header.count}
             columns={
               <>
-                <span>{t("market.discover.colRepo")}</span>
+                <span>{t("market.discover.colFrom")}</span>
                 <span className="dsc-head__num">{t("market.discover.colInstalls")}</span>
                 <span />
               </>
@@ -324,11 +327,10 @@ function SkillDiscover({
                     onKeyDown={rowKeys(open)}
                   >
                     <span className="dsc-row__name">{row.name}</span>
-                    <span className="dsc-row__repo">
-                      <Mono inherit truncate>
-                        {row.repo}
-                      </Mono>
-                    </span>
+                    {/* 第一层只写作者；完整 owner/repo 进悬停（#307） */}
+                    <Tooltip content={<Mono inherit>{row.repo}</Mono>} fit="shrink">
+                      <span className="dsc-row__repo">{repoOwner(row.repo)}</span>
+                    </Tooltip>
                     <span className="dsc-row__num">{formatInstalls(row.installs)}</span>
                     <RowAction
                       installed={isInstalled(row)}
@@ -373,6 +375,7 @@ function McpRows({
       {rows.map((row) => {
         const open = () => onOpen(row);
         const needs = mcpNeeds(row);
+        const description = localText(row.description);
         return (
           <div
             key={mcpKey(row)}
@@ -388,8 +391,8 @@ function McpRows({
               <span className="dsc-row__publisher">{row.publisher}</span>
             </span>
             {/* 放不下截断时悬停出全文（不写原生 title：悬停弹系统灰框） */}
-            <TruncTip content={row.description} fit="grow">
-              <span className="dsc-row__desc">{row.description}</span>
+            <TruncTip content={description} fit="grow">
+              <span className="dsc-row__desc">{description}</span>
             </TruncTip>
             <span className="dsc-row__needs">{needs ? <Tag tone="weak">{needs}</Tag> : null}</span>
             <RowAction

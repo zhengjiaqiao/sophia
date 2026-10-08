@@ -10,17 +10,17 @@ import type { HarnessList } from "./types.ts";
 export interface AgentsOverCap {
   /// 这一批的记号：装了哪些 agent（id 排序后连起来）。关掉时记它；装的集合变了记号就变
   key: string;
-  /// 装了几个
+  /// 装了几个（品牌数：Claude Code 与 Claude Desktop 算一个，#251）
   installed: number;
   /// 列表里最多显示几个（core 的 `MAX_SHOWN`）
   max: number;
-  /// 装了但列表里没显示的（agent 表的先后）：超出上限没勾上的，连同用户自己取消勾的
+  /// 装了但列表里没显示的品牌（品牌的先后）：超出上限没勾上的，连同用户自己取消勾的
   hidden: string[];
 }
 
-/// 装了哪些 agent 的记号
+/// 装了哪些 agent 的记号（按品牌，#251）
 function installedKey(list: HarnessList): string {
-  return list.harnesses
+  return list.brands
     .filter((h) => h.installed)
     .map((h) => h.id)
     .sort()
@@ -30,9 +30,9 @@ function installedKey(list: HarnessList): string {
 /// 装的多于上限时给出这一批；不多于（或名单还没读回来）为 null——不多于时从不出
 export function agentsOverCapOf(list: HarnessList | null): AgentsOverCap | null {
   if (list === null) return null;
-  const installed = list.harnesses.filter((h) => h.installed);
+  const installed = list.brands.filter((b) => b.installed);
   if (installed.length <= list.maxShown) return null;
-  const hidden = installed.filter((h) => !h.enabled).map((h) => h.displayName);
+  const hidden = installed.filter((b) => !b.enabled).map((b) => b.name);
   // 装的超了上限、显示的必然不满全部（core 按上限整理过）；万一一个都没藏（设置被手改），没什么可说的
   if (hidden.length === 0) return null;
   return { key: installedKey(list), installed: installed.length, max: list.maxShown, hidden };

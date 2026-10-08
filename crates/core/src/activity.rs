@@ -173,6 +173,8 @@ mod tests {
         Harness {
             id: "x".into(),
             display_name: "X".into(),
+            brand: "x".into(),
+            brand_name: "X".into(),
             project_dir: project_dir.map(str::to_string),
             global_dir: None,
             universal: false,

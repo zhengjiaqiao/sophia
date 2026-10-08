@@ -7,9 +7,11 @@
 //! `serde_json` 没开 `preserve_order`）。
 //!
 //! 路径是从根对象出发的一串成员名（`&["env", "ANTHROPIC_MODEL"]`），路径上的每一段都得是对象。
+//! 数组（`array` / `push` / `remove_item` / `replace_item`，WorkBuddy 的 models.json 用）的路径最后一段所指的值是数组，
+//! 空路径＝根本身是数组。
 //! 编辑函数认文件开头的 UTF-8 BOM（原样保留）；`NoDuplicates` 本身不认 BOM，与 `serde_json` 一致。
 use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -24,6 +26,14 @@ pub struct Object {
     pub start: usize,
     pub end: usize,
     pub members: BTreeMap<String, Span>,
+}
+
+/// 一个数组在原文里的位置：`start` 是 `[`，`end` 是 `]` 之后；`items` 是各元素的字节范围，按先后
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Array {
+    pub start: usize,
+    pub end: usize,
+    pub items: Vec<Span>,
 }
 
 /// 追加成员的排版
@@ -49,6 +59,8 @@ pub enum Error {
     Duplicate,
     /// 路径上这一段存在但不是对象（空串＝根）
     NotObject(String),
+    /// 路径所指的值存在但不是数组（空串＝根）
+    NotArray(String),
     /// 要读的、要换的或要切的成员不存在
     Missing(String),
     /// 改写结果按语义核对与预期不一致（例如要加的成员已经在了）
@@ -65,6 +77,12 @@ impl std::fmt::Display for Error {
             }
             Error::NotObject(path) => {
                 f.write_str(&crate::t!("models.jsonEdit.notObject", path = path))
+            }
+            Error::NotArray(path) if path.is_empty() => {
+                f.write_str(&crate::t!("models.jsonEdit.rootNotArray"))
+            }
+            Error::NotArray(path) => {
+                f.write_str(&crate::t!("models.jsonEdit.notArray", path = path))
             }
             Error::Missing(path) => f.write_str(&crate::t!("models.jsonEdit.missing", path = path)),
             Error::Mismatch => f.write_str(&crate::t!("models.jsonEdit.mismatch")),
@@ -386,6 +404,211 @@ pub fn remove(bytes: &[u8], path: &[&str]) -> Result<Vec<u8>, Error> {
         .ok_or(Error::Mismatch)?;
     verify(&out, &expected)?;
     Ok(out)
+}
+
+// ===== 数组 =====
+// 路径是从根出发的一串对象成员名，最后一段所指的值是数组；空路径＝根本身是数组（WorkBuddy 的 models.json）
+
+/// 路径所指的数组：位置与各元素的范围。路径上缺哪一段 → `Missing`；所指的值不是数组 → `NotArray`
+pub fn array(bytes: &[u8], path: &[&str]) -> Result<Array, Error> {
+    document(bytes)?;
+    let span = value_span(bytes, path)?;
+    array_at(bytes, span).map_err(|error| match error {
+        Error::NotArray(_) => Error::NotArray(path.join(".")),
+        other => other,
+    })
+}
+
+/// 在路径所指数组的末尾追加 `items`，排版跟随原文（换行跟随原文件）：
+/// - 已有元素各自另起一行：新元素也另起一行、缩进同最后一个元素，多行展开；内层每级多一段「元素缩进比 `[`
+///   所在行多出的那段」（算不出时同 [`Layout::Pretty`] 的一级）
+/// - 已有元素挤在 `[` 那一行：紧凑追加
+/// - 空数组：展开成多行，元素缩进＝`[` 所在行的缩进加一级（一级＝根成员的缩进，再没有用 2 空格）
+pub fn push<T: Serialize>(bytes: &[u8], path: &[&str], items: &[T]) -> Result<Vec<u8>, Error> {
+    let mut expected = document(bytes)?;
+    let found = array(bytes, path)?;
+    if items.is_empty() {
+        return Ok(bytes.to_vec());
+    }
+    let nl = newline(bytes);
+    let outer = line_indent(bytes, found.start);
+    let last = found
+        .items
+        .last()
+        .map(|(start, _)| begins_line(bytes, *start));
+    let mut out = bytes.to_vec();
+    match last {
+        // 挤在一行
+        Some(None) => {
+            let add = items
+                .iter()
+                .map(|item| serde_json::to_string(item).map(|text| format!(",{text}")))
+                .collect::<Result<String, _>>()
+                .map_err(|_| Error::Mismatch)?;
+            let at = found.items.last().map_or(found.end - 1, |(_, end)| *end);
+            out.splice(at..at, add.into_bytes());
+        }
+        Some(Some(indent)) => {
+            let unit = indent
+                .strip_prefix(outer.as_str())
+                .filter(|unit| !unit.is_empty())
+                .map_or_else(|| unit_indent(bytes), str::to_owned);
+            let add = items
+                .iter()
+                .map(|item| {
+                    pretty_item(item, &unit, &indent, nl).map(|t| format!(",{nl}{indent}{t}"))
+                })
+                .collect::<Result<String, _>>()?;
+            let at = found.items.last().map_or(found.end - 1, |(_, end)| *end);
+            out.splice(at..at, add.into_bytes());
+        }
+        None => {
+            let unit = unit_indent(bytes);
+            let indent = format!("{outer}{unit}");
+            let inner = items
+                .iter()
+                .map(|item| {
+                    pretty_item(item, &unit, &indent, nl).map(|t| format!("{nl}{indent}{t}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .join(",");
+            out.splice(
+                found.start + 1..found.end - 1,
+                format!("{inner}{nl}{outer}").into_bytes(),
+            );
+        }
+    }
+    let target = array_mut(&mut expected, path).ok_or(Error::Mismatch)?;
+    for item in items {
+        target.push(serde_json::to_value(item).map_err(|_| Error::Mismatch)?);
+    }
+    verify(&out, &expected)?;
+    Ok(out)
+}
+
+/// 切掉路径所指数组的第 `index` 个元素，连同它前面（是第一个时则是后面）的逗号；唯一的元素切掉后留 `[]`
+pub fn remove_item(bytes: &[u8], path: &[&str], index: usize) -> Result<Vec<u8>, Error> {
+    let mut expected = document(bytes)?;
+    let found = array(bytes, path)?;
+    let target = *found
+        .items
+        .get(index)
+        .ok_or_else(|| Error::Missing(format!("{}[{index}]", path.join("."))))?;
+    let range = if found.items.len() == 1 {
+        found.start + 1..found.end - 1
+    } else if index > 0 {
+        found.items[index - 1].1..target.1
+    } else {
+        let comma = skip(bytes, target.1);
+        if bytes.get(comma) != Some(&b',') {
+            return Err(Error::Mismatch);
+        }
+        target.0..skip(bytes, comma + 1)
+    };
+    let mut out = bytes.to_vec();
+    out.drain(range);
+    let list = array_mut(&mut expected, path).ok_or(Error::Mismatch)?;
+    if index >= list.len() {
+        return Err(Error::Mismatch);
+    }
+    list.remove(index);
+    verify(&out, &expected)?;
+    Ok(out)
+}
+
+/// 把路径所指数组的第 `index` 个元素原位换成 `item_text`（一段合法 JSON 原文）；前后的逗号与空白都不动
+pub fn replace_item(
+    bytes: &[u8],
+    path: &[&str],
+    index: usize,
+    item_text: &[u8],
+) -> Result<Vec<u8>, Error> {
+    let mut expected = document(bytes)?;
+    let new = value(item_text)?;
+    let found = array(bytes, path)?;
+    let (start, end) = *found
+        .items
+        .get(index)
+        .ok_or_else(|| Error::Missing(format!("{}[{index}]", path.join("."))))?;
+    let mut out = bytes.to_vec();
+    out.splice(start..end, item_text.iter().copied());
+    *array_mut(&mut expected, path)
+        .and_then(|list| list.get_mut(index))
+        .ok_or(Error::Mismatch)? = new;
+    verify(&out, &expected)?;
+    Ok(out)
+}
+
+/// 路径所指的值的范围（空路径＝根，认 BOM、首尾空白不算）
+fn value_span(bytes: &[u8], path: &[&str]) -> Result<Span, Error> {
+    let Some((last, parent)) = path.split_last() else {
+        let start = skip(bytes, bytes.len() - strip_bom(bytes).len());
+        return Ok((start, rtrim(bytes, bytes.len(), start)));
+    };
+    let missing = || Error::Missing(path.join("."));
+    let (object, rest) = walk(bytes, parent)?;
+    if !rest.is_empty() {
+        return Err(missing());
+    }
+    object.members.get(*last).copied().ok_or_else(missing)
+}
+
+/// `span` 这一段（应当恰好是 `[…]`）作为数组的位置与元素
+fn array_at(bytes: &[u8], span: Span) -> Result<Array, Error> {
+    let (start, end) = span;
+    if end > bytes.len()
+        || start >= end
+        || bytes.get(start) != Some(&b'[')
+        || bytes.get(end - 1) != Some(&b']')
+    {
+        return Err(Error::NotArray(String::new()));
+    }
+    let slice = &bytes[start..end];
+    let raw: Vec<&RawValue> = serde_json::from_slice(slice).map_err(|_| classify(slice))?;
+    let base = slice.as_ptr() as usize;
+    let items = raw
+        .iter()
+        .map(|item| {
+            let text = item.get().as_bytes();
+            let item_start = (text.as_ptr() as usize)
+                .checked_sub(base)
+                .and_then(|offset| start.checked_add(offset))
+                .ok_or(Error::Syntax)?;
+            let item_end = item_start
+                .checked_add(text.len())
+                .filter(|item_end| *item_end <= end)
+                .ok_or(Error::Syntax)?;
+            Ok((item_start, item_end))
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    Ok(Array { start, end, items })
+}
+
+/// 值里路径所指的数组（空路径＝根）
+fn array_mut<'v>(value: &'v mut Value, path: &[&str]) -> Option<&'v mut Vec<Value>> {
+    let Some((last, parent)) = path.split_last() else {
+        return value.as_array_mut();
+    };
+    object_mut(value, parent, false)?
+        .get_mut(*last)?
+        .as_array_mut()
+}
+
+/// 一个新元素展开成多行：内层每级缩进 `unit`，续行前面补上元素所在的缩进 `indent`，换行用 `nl`
+fn pretty_item<T: Serialize>(
+    item: &T,
+    unit: &str,
+    indent: &str,
+    nl: &str,
+) -> Result<String, Error> {
+    let mut out = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(unit.as_bytes());
+    let mut serializer = serde_json::Serializer::with_formatter(&mut out, formatter);
+    item.serialize(&mut serializer)
+        .map_err(|_| Error::Mismatch)?;
+    // 字符串里的换行已被转义成 `\n`，原文里的换行只来自排版
+    let text = String::from_utf8(out).map_err(|_| Error::Mismatch)?;
+    Ok(text.replace('\n', &format!("{nl}{indent}")))
 }
 
 // ===== 内部 =====
@@ -1002,5 +1225,118 @@ mod tests {
         );
         let replaced = rep(text, &["n"], "7");
         assert!(replaced.contains("\"n\":7,"));
+    }
+
+    // ===== 数组（WorkBuddy 的 models.json：根是数组，或根对象的 `models`）=====
+
+    fn push_text<T: serde::Serialize>(text: &str, path: &[&str], items: &[T]) -> String {
+        String::from_utf8(push(text.as_bytes(), path, items).unwrap()).unwrap()
+    }
+
+    #[derive(serde::Serialize)]
+    struct Item {
+        id: &'static str,
+        n: u32,
+    }
+
+    #[test]
+    fn array_reads_items_at_root_or_member() {
+        let text = " [1, {\"a\": [2]} ,\"]\"]\n";
+        let found = array(text.as_bytes(), &[]).unwrap();
+        assert_eq!(&text[found.start..found.end], "[1, {\"a\": [2]} ,\"]\"]");
+        let items: Vec<&str> = found.items.iter().map(|(a, b)| &text[*a..*b]).collect();
+        assert_eq!(items, ["1", "{\"a\": [2]}", "\"]\""]);
+
+        let text = "\u{feff}{\"models\": [ ], \"x\": 1}";
+        let found = array(text.as_bytes(), &["models"]).unwrap();
+        assert!(found.items.is_empty());
+        assert_eq!(&text[found.start..found.end], "[ ]");
+
+        assert_eq!(
+            array(b"{\"x\": 1}", &["models"]),
+            Err(Error::Missing("models".into()))
+        );
+        assert_eq!(
+            array(b"{\"models\": {}}", &["models"]),
+            Err(Error::NotArray("models".into()))
+        );
+        assert_eq!(array(b"{}", &[]), Err(Error::NotArray(String::new())));
+        assert_eq!(array(b"[1,]", &[]), Err(Error::Syntax));
+    }
+
+    #[test]
+    fn push_follows_the_layout_of_the_array() {
+        // WorkBuddy 自己写的样子（JSON.stringify(models, null, 2)）
+        let text = "[\n  {\n    \"id\": \"u\"\n  }\n]\n";
+        assert_eq!(
+            push_text(text, &[], &[Item { id: "s", n: 1 }]),
+            "[\n  {\n    \"id\": \"u\"\n  },\n  {\n    \"id\": \"s\",\n    \"n\": 1\n  }\n]\n"
+        );
+        // 空数组：展开成多行，默认两格
+        assert_eq!(
+            push_text(
+                "[]",
+                &[],
+                &[Item { id: "a", n: 1 }, Item { id: "b", n: 2 }]
+            ),
+            "[\n  {\n    \"id\": \"a\",\n    \"n\": 1\n  },\n  {\n    \"id\": \"b\",\n    \"n\": 2\n  }\n]"
+        );
+        // 对象里的数组：CRLF、制表符缩进、BOM 都跟随原文
+        let text = "\u{feff}{\r\n\t\"models\": [\r\n\t\t{\"id\": \"u\"}\r\n\t]\r\n}";
+        assert_eq!(
+            push_text(text, &["models"], &[Item { id: "s", n: 1 }]),
+            "\u{feff}{\r\n\t\"models\": [\r\n\t\t{\"id\": \"u\"},\r\n\t\t{\r\n\t\t\t\"id\": \"s\",\r\n\t\t\t\"n\": 1\r\n\t\t}\r\n\t]\r\n}"
+        );
+        // 元素都挤在一行：紧凑追加
+        assert_eq!(
+            push_text(
+                "{\"models\":[{\"id\":\"u\"}]}",
+                &["models"],
+                &[Item { id: "s", n: 1 }]
+            ),
+            "{\"models\":[{\"id\":\"u\"},{\"id\":\"s\",\"n\":1}]}"
+        );
+        // 空的、在对象里：外层缩进加一级（一级＝根成员的缩进）
+        assert_eq!(
+            push_text(
+                "{\n    \"models\": []\n}",
+                &["models"],
+                &[Item { id: "s", n: 1 }]
+            ),
+            "{\n    \"models\": [\n        {\n            \"id\": \"s\",\n            \"n\": 1\n        }\n    ]\n}"
+        );
+    }
+
+    #[test]
+    fn remove_item_cuts_the_element_and_its_comma() {
+        let text = "[\n  {\"id\": \"a\"},\n  {\"id\": \"b\"},\n  {\"id\": \"c\"}\n]";
+        let cut = |i| String::from_utf8(remove_item(text.as_bytes(), &[], i).unwrap()).unwrap();
+        assert_eq!(cut(1), "[\n  {\"id\": \"a\"},\n  {\"id\": \"c\"}\n]");
+        assert_eq!(cut(0), "[\n  {\"id\": \"b\"},\n  {\"id\": \"c\"}\n]");
+        assert_eq!(cut(2), "[\n  {\"id\": \"a\"},\n  {\"id\": \"b\"}\n]");
+        let only = "{\"models\": [\n  1\n], \"k\": 2}";
+        assert_eq!(
+            String::from_utf8(remove_item(only.as_bytes(), &["models"], 0).unwrap()).unwrap(),
+            "{\"models\": [], \"k\": 2}"
+        );
+        assert_eq!(
+            remove_item(text.as_bytes(), &[], 3),
+            Err(Error::Missing("[3]".into()))
+        );
+    }
+
+    #[test]
+    fn replace_item_swaps_one_element_text() {
+        let text = "\u{feff}[\r\n  {\"id\": \"a\"},\r\n  {\"id\": \"b\"}\r\n]";
+        let out =
+            replace_item(text.as_bytes(), &[], 1, b"{\"id\": \"c\",\r\n    \"x\": 1}").unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "\u{feff}[\r\n  {\"id\": \"a\"},\r\n  {\"id\": \"c\",\r\n    \"x\": 1}\r\n]"
+        );
+        assert_eq!(
+            replace_item(text.as_bytes(), &[], 0, b"{\"id\": 1,}"),
+            Err(Error::Syntax)
+        );
     }
 }

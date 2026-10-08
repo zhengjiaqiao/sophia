@@ -111,6 +111,8 @@ fn weibo_harness() -> Harness {
     Harness {
         id: "weiboap".into(),
         display_name: "WeiboAP".into(),
+        brand: "weiboap".into(),
+        brand_name: "WeiboAP".into(),
         project_dir: None,
         global_dir: None,
         universal: false,

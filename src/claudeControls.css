@@ -1,6 +1,4 @@
-/* Claude 的页（ClaudeModelsPage.tsx；DESIGN「Claude 的页：桌面应用」，画板 ClaudeCodeModels-04 / 05）。
-   已选行、灰面板、网关区块的外距与 Codex 的页同一套（ModelsTab.css）；这里只是 Claude 自己的：
-   开关那一格、键消失后的锚、已选下的代价句。
+/* Claude 桌面应用那一行的控件（claudeControls.tsx，#259）：开关那一格、键消失后的锚。
    色值一律 var(--…)，唯一来源是 tokens.css。 */
 @import "./tokens.css";
 
@@ -15,9 +13,4 @@
   display: inline-block;
   width: 0;
   height: var(--control-h);
-}
-
-/* 代价句（Note 13 ink-mute）：已选下 10，开着才出 */
-.claude-cost {
-  margin-top: 10px;
 }

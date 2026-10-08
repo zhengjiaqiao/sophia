@@ -15,7 +15,7 @@ const codex = agent("codex", "Codex");
 test("AC12：写进 Claude Desktop 的例行提示条末尾说重启后生效", () => {
   const t = toastFor("write", { done: [{ name: "fs", agent: desktop }], omitNames: true });
   assert.equal(t.kind, "success");
-  assert.deepEqual(t.trail, ["重启 Claude Desktop 后生效"]);
+  assert.deepEqual(t.trail, ["重启 Claude 桌面应用后生效"]);
 });
 
 test("R8：Gemini、Copilot 新开会话后生效；Copilot 的项目文件还要信任文件夹；同一句只说一次", () => {
@@ -31,12 +31,25 @@ test("R8：Gemini、Copilot 新开会话后生效；Copilot 的项目文件还�
       { name: "a", agent: desktop },
       { name: "b", agent: copilot, project: true },
     ]),
-    ["新开会话后生效", "重启 Claude Desktop 后生效", "在 Copilot 里信任这个文件夹后生效"],
+    ["新开会话后生效", "重启 Claude 桌面应用后生效", "在 Copilot 里信任这个文件夹后生效"],
   );
   // 自动规则在背后写进的也说
   assert.deepEqual(toastFor("autoWrite", { done: [{ name: "fs", agent: desktop }] }).trail, [
-    "重启 Claude Desktop 后生效",
+    "重启 Claude 桌面应用后生效",
   ]);
+});
+
+test("#258：写进 DeepSeek Harness、另有全机补丁时，成功句后说明以哪一个为准（同一句只说一次）", () => {
+  const dsh = agent("deepseek-harness", "DeepSeek Harness");
+  const trail = "全机那份为准";
+  assert.deepEqual(
+    mcpEffectTrail([
+      { name: "a", agent: dsh, trail },
+      { name: "b", agent: dsh, trail },
+    ]),
+    [trail],
+  );
+  assert.deepEqual(mcpEffectTrail([{ name: "a", agent: dsh }]), []);
 });
 
 test("R8：现有三家、失败、skill 的提示条都不接这一句", () => {
@@ -59,6 +72,24 @@ const loc = (id: string, harnessId: string, label: string, domain = "global"): M
   path: `/${id}`,
 });
 
+/// 产品与品牌（core `list_harnesses`）：MCP 页按品牌合组
+const product = (id: string, name: string, brand = id, brandName = name) => ({
+  id,
+  name,
+  brand,
+  brandName,
+});
+const PRODUCTS = [
+  product("claude-code", "Claude Code", "claude", "Claude"),
+  product("claude-desktop", "Claude Desktop", "claude", "Claude"),
+  product("codex", "Codex"),
+  product("cursor", "Cursor"),
+  product("gemini-cli", "Gemini CLI"),
+  product("github-copilot", "GitHub Copilot"),
+  product("kimi-cli", "Kimi Code", "kimi", "Kimi"),
+  product("kimi-desktop", "Kimi Desktop", "kimi", "Kimi"),
+];
+
 const overview = (locations: McpLocation[]): McpOverview => ({
   locations,
   entries: [],
@@ -78,16 +109,17 @@ test("R5 R6：多位置表里 Copilot 列头多一行 .mcp.json 的说明，Clau
         loc(`${p}::github-copilot`, "github-copilot", "GitHub Copilot", p),
       ]),
     ),
+    PRODUCTS,
   );
   const column = (id: string) => table.columns.find((c) => c.id === id)!;
-  // Claude Code 两格（仅自己 / 团队共享）同一个名字；Claude Desktop 的名字折两行（spec 2026-09-30-mcp-claude-self-team）
+  // Claude 一组（#251）：组里每格的名字是它自己的产品名，组头写品牌名
   assert.deepEqual(
-    table.columns.map((c) => [c.id, c.nameTail ? `${c.name} ${c.nameTail}` : c.name]),
+    table.columns.map((c) => [c.id, c.name, c.group?.name ?? ""]),
     [
-      ["claude-code", "Claude Code"],
-      ["claude-code:team", "Claude Code"],
-      ["claude-desktop", "Claude Desktop"],
-      ["github-copilot", "GitHub Copilot"],
+      ["claude-code", "Claude Code", "Claude"],
+      ["claude-code:team", "Claude Code", "Claude"],
+      ["claude-desktop", "Claude Desktop", "Claude"],
+      ["github-copilot", "GitHub Copilot", ""],
     ],
   );
   assert.equal(
@@ -106,7 +138,7 @@ test("R5 R6：多位置表里 Copilot 列头多一行 .mcp.json 的说明，Clau
   // Claude Desktop 只有用户级：项目行上没有它的格
   assert.equal(column("claude-desktop").targets.has(p), false);
   assert.deepEqual(mcpBlankTip("app", column("claude-desktop")), {
-    tip: "Claude Desktop 没有项目级的 MCP",
+    tip: "Claude 桌面应用没有项目级的 MCP",
   });
   // 用户级的行在团队共享那一格：说团队共享只在项目里；写在哪个文件是第二行（spec #239 第 44 条）
   assert.deepEqual(mcpBlankTip("用户级", column("claude-code:team")), {
@@ -115,7 +147,7 @@ test("R5 R6：多位置表里 Copilot 列头多一行 .mcp.json 的说明，Clau
   });
   // 别的列照旧
   assert.deepEqual(mcpBlankTip("用户级", { id: "codex", harnessId: "codex", sentence: "Codex" }), {
-    tip: "用户级 没有 Codex 的配置位置",
+    tip: "用户级没有 Codex 的配置位置",
   });
 });
 
@@ -140,7 +172,10 @@ test("Claude Desktop 的图标就是 Claude 的标志（与 Claude Code 同一�
 /// 范围里的几页并成一张表（`keys` 是位置，按 McpTab 的次序：用户级在前）
 const tableOf = (locations: McpLocation[], keys: string[]) => {
   const domains = mcpDomains(overview(locations));
-  return mergeMcpDomains(keys.flatMap((key) => domains.find((d) => d.key === key) ?? []));
+  return mergeMcpDomains(
+    keys.flatMap((key) => domains.find((d) => d.key === key) ?? []),
+    PRODUCTS,
+  );
 };
 const heads = (table: ReturnType<typeof mergeMcpDomains>) =>
   table.columns.map((c) => [c.id, c.scope ?? "", c.group?.name ?? ""]);
@@ -160,31 +195,51 @@ const allLocations = (withDesktop: boolean): McpLocation[] => [
   loc(`${P}::gemini-cli`, "gemini-cli", "Gemini CLI", P),
 ];
 
-test("用户级：Claude Code 只有一格（仅自己）不画组，列头 CLAUDE CODE；Claude Desktop 单独一列、名字折两行；5 格每格 76", async () => {
+test("用户级：同属 Claude 的 Claude Code、Claude Desktop 合组，组头 CLAUDE、小标 CODE / DESKTOP（#251）；5 格每格 76", async () => {
   const { agentColumnWidth } = await import("../src/Matrix.tsx");
   const table = tableOf(allLocations(true), ["global"]);
   assert.deepEqual(heads(table), [
-    ["claude-code", "", ""],
-    ["claude-desktop", "", ""],
+    ["claude-code", "Code", "Claude"],
+    ["claude-desktop", "Desktop", "Claude"],
     ["codex", "", ""],
     ["cursor", "", ""],
     ["gemini-cli", "", ""],
   ]);
-  // 句子里的名字不带小标
+  // 句子里的名字是产品名（Claude Desktop 照界面语言说「Claude 桌面应用」，#306），不带小标
   assert.deepEqual(
     table.columns.map((c) => c.sentence),
-    ["Claude Code", "Claude Desktop", "Codex", "Cursor", "Gemini CLI"],
+    ["Claude Code", "Claude 桌面应用", "Codex", "Cursor", "Gemini CLI"],
   );
+  // 只看用户级时 Claude Code 只有一格：列头提示框不说存在哪（仅自己 / 团队共享才要分）
+  assert.equal(mcpColumnNote(table.columns[0]), undefined);
   assert.equal(agentColumnWidth(table.columns.length), 76);
 });
 
-test("全部：CLAUDE CODE 合组 仅自己 / 团队共享，Claude Desktop 紧跟、单独一列；6 格每格 64", async () => {
+test("一个品牌只有一列：列头写品牌名、不画组，句子里仍是产品名（只装了 Claude Code，或只装了 Claude Desktop）", () => {
+  const code = tableOf(allLocations(false), ["global"]);
+  assert.deepEqual(heads(code)[0], ["claude-code", "", ""]);
+  assert.equal(code.columns[0].name, "Claude");
+  assert.equal(code.columns[0].sentence, "Claude Code");
+  const desktopOnly = tableOf(
+    [loc("claude-desktop", "claude-desktop", "Claude Desktop"), loc("codex", "codex", "Codex")],
+    ["global"],
+  );
+  assert.deepEqual(
+    desktopOnly.columns.map((c) => [c.name, c.sentence, c.group?.name ?? ""]),
+    [
+      ["Claude", "Claude 桌面应用", ""],
+      ["Codex", "Codex", ""],
+    ],
+  );
+});
+
+test("全部：CLAUDE 一组——Claude Code 两格写 仅自己 / 团队共享，Claude Desktop 写 DESKTOP；6 格每格 64", async () => {
   const { agentColumnWidth } = await import("../src/Matrix.tsx");
   const table = tableOf(allLocations(true), ["global", P]);
   assert.deepEqual(heads(table), [
-    ["claude-code", "仅自己", "Claude Code"],
-    ["claude-code:team", "团队共享", "Claude Code"],
-    ["claude-desktop", "", ""],
+    ["claude-code", "仅自己", "Claude"],
+    ["claude-code:team", "团队共享", "Claude"],
+    ["claude-desktop", "Desktop", "Claude"],
     ["codex", "", ""],
     ["cursor", "", ""],
     ["gemini-cli", "", ""],
@@ -204,9 +259,8 @@ test("全部：CLAUDE CODE 合组 仅自己 / 团队共享，Claude Desktop 紧�
   // 读屏与提示条里的名字说清是哪一格
   assert.deepEqual(
     table.columns.slice(0, 3).map((c) => c.sentence),
-    ["Claude Code 仅自己", "Claude Code 团队共享", "Claude Desktop"],
+    ["Claude Code 仅自己", "Claude Code 团队共享", "Claude 桌面应用"],
   );
-  assert.deepEqual([table.columns[2].name, table.columns[2].nameTail], ["Claude", "Desktop"]);
 });
 
 test("只看某个项目：Claude Code 两格与 全部 一模一样（仅自己 / 团队共享），没有 Claude Desktop", () => {
@@ -216,8 +270,8 @@ test("只看某个项目：Claude Code 两格与 全部 一模一样（仅自己
     false,
   );
   assert.deepEqual(heads(table), [
-    ["claude-code", "仅自己", "Claude Code"],
-    ["claude-code:team", "团队共享", "Claude Code"],
+    ["claude-code", "仅自己", "Claude"],
+    ["claude-code:team", "团队共享", "Claude"],
     ["codex", "", ""],
     ["cursor", "", ""],
     ["gemini-cli", "", ""],
@@ -230,7 +284,41 @@ test("没装 Claude Desktop：全部 下 Claude Code 两格照样合组、排在
     table.columns.map((c) => c.id),
     ["claude-code", "claude-code:team", "codex", "cursor", "gemini-cli"],
   );
-  assert.equal(table.columns[1].group?.name, "Claude Code");
+  assert.equal(table.columns[1].group?.name, "Claude");
+});
+
+test("列只由位置数据推出（#251）：同一品牌两个产品各有一份配置文件就合组，小标是去掉品牌名的产品名", () => {
+  // 以 Kimi 为例：Kimi Code 与 Kimi 桌面版各写各的 mcp.json（#257 只需在 core 加位置）
+  const table = tableOf(
+    [
+      loc("codex", "codex", "Codex"),
+      loc("kimi-cli", "kimi-cli", "Kimi Code"),
+      loc("kimi-desktop", "kimi-desktop", "Kimi Desktop"),
+    ],
+    ["global"],
+  );
+  assert.deepEqual(heads(table), [
+    ["codex", "", ""],
+    ["kimi-cli", "Code", "Kimi"],
+    ["kimi-desktop", "Desktop", "Kimi"],
+  ]);
+  assert.equal(table.columns[1].group?.agentId, "kimi-cli");
+});
+
+test("品牌名单还没读回来：各列照位置名，不合组（Claude Code 两格仍按 仅自己 / 团队共享 分）", () => {
+  const domains = mcpDomains(overview(allLocations(true)));
+  const table = mergeMcpDomains(domains.filter((d) => d.key === "global" || d.key === P));
+  assert.deepEqual(
+    table.columns.map((c) => [c.id, c.name, c.scope ?? "", c.group?.name ?? ""]),
+    [
+      ["claude-code", "Claude Code", "仅自己", "Claude Code"],
+      ["claude-code:team", "Claude Code", "团队共享", "Claude Code"],
+      ["claude-desktop", "Claude Desktop", "", ""],
+      ["codex", "Codex", "", ""],
+      ["cursor", "Cursor", "", ""],
+      ["gemini-cli", "Gemini CLI", "", ""],
+    ],
+  );
 });
 
 test("位置 id → 列：用户级 User 与项目 Local 都是仅自己，项目的 .mcp.json 是团队共享；互斥的另一格", async () => {
@@ -252,7 +340,7 @@ test("位置 id → 列：用户级 User 与项目 Local 都是仅自己，项�
   assert.equal(claudeWhereText("claude-code", "用户级", "global"), null);
   assert.deepEqual(claudeMoveTip("claude-code:team", "CardBox"), {
     verb: "挪到团队共享",
-    detail: "加到 CardBox 的 .mcp.json，从你的本地配置里删掉",
+    detail: "加到 CardBox 的 .mcp.json，并从你的本地配置中删除",
   });
 });
 
@@ -349,51 +437,4 @@ test("没有合组时列头与今天相同：不留小标空位", async () => {
     onCell: () => undefined,
   });
   assert.doesNotMatch(html, /mx-head__group|mx-colbtn__slot/);
-});
-
-test("名字折两行（Claude Desktop）：第二行同名字字重、占小标的位置，其余列留出同高的空位（spec 2026-09-30 R2）", async () => {
-  const { default: Matrix } = await import("../src/Matrix.tsx");
-  const { render } = await import("./ui-render.ts");
-  const html = render(Matrix, {
-    columns: [
-      {
-        id: "claude-code",
-        agentId: "claude-code",
-        name: "Claude Code",
-        count: 3,
-        tip: "Claude Code",
-      },
-      {
-        id: "claude-desktop",
-        agentId: "claude-desktop",
-        name: "Claude",
-        nameTail: "Desktop",
-        count: 1,
-        tip: "Claude Desktop",
-      },
-    ],
-    rows: [],
-    nameLabel: "名称",
-    originLabel: "来源",
-    filterText: "",
-    onFilterText: () => undefined,
-    selected: new Set<string>(),
-    onSelectionChange: () => undefined,
-    onCell: () => undefined,
-  });
-  const desktop = html.slice(html.indexOf('data-col="claude-desktop"'));
-  // 第二行与名字同一个类（同字重、同墨色），不是 ink-faint 的小标
-  assert.match(
-    desktop,
-    /class="mx-colbtn__name"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">Claude<[^]*class="mx-colbtn__name mx-colbtn__tail is-slotted"><span class="ss-cap-wrap ss-cap-wrap--label"><span class="ss-cap">Desktop</,
-  );
-  assert.doesNotMatch(desktop, /mx-colbtn__scope/);
-  // 同一张表里没有两行名字的列留空位，计数对齐
-  const code = html.slice(
-    html.indexOf('data-col="claude-code"'),
-    html.indexOf('data-col="claude-desktop"'),
-  );
-  assert.match(code, /mx-colbtn__slot/);
-  // 不画组
-  assert.doesNotMatch(html, /mx-head__group/);
 });

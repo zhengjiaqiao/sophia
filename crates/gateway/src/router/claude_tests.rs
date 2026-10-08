@@ -98,6 +98,7 @@ impl ClaudeHarness {
             max_body_bytes: 0,
             proxy: None,
             claude_routing_path: claude.then(|| h.dir.path().join("claude-routing.json")),
+            workbuddy_routing_path: None,
             router_token: tokens.source(),
             keepalive,
             locale: None,
@@ -515,8 +516,8 @@ async fn ac14_claude_origin_is_checked_before_the_body_is_read() {
 
 // ---------- 端点与角色映射（R14–R16） ----------
 
-/// AC15（2026-09-30 起清单是已选逐项的 id → 上游模型）：id 精确匹配（含 `-rN`、结尾 `[1m]`）；不中按关键词回落——
-/// haiku 档 → 占 `claude-haiku-4-5` 的那个，opus / sonnet / fable → 第一个；回落的在日志里记下原名；未命中 404
+/// AC15（2026-09-30 起清单是已选逐项的 id → 上游模型）：id 精确匹配（含 `-rN`、结尾 `[1m]`）；不中按关键词回落到
+/// 当前模型（#260；还没有对话时是第一个），haiku 档也一样；回落的在日志里记下原名；未命中 404
 #[tokio::test]
 async fn ac15_role_ids_map_to_default_and_background() {
     let c = ClaudeHarness::new(Some(text_stream())).await;
@@ -526,7 +527,8 @@ async fn ac15_role_ids_map_to_default_and_background() {
         ("claude-sonnet-5-r2[1m]", Some("qwen-max")),
         ("claude-opus-5", Some("kimi-k3")),
         ("claude-opus-4-8[1m]", Some("kimi-k3")),
-        ("claude-haiku-4-5-20251001", Some("glm-lite")),
+        ("claude-haiku-4-5", Some("glm-lite")),
+        ("claude-haiku-4-5-20251001", Some("kimi-k3")),
         ("claude-fable-5", Some("kimi-k3")),
         ("gpt-4o", None),
     ];
@@ -559,7 +561,7 @@ async fn ac15_role_ids_map_to_default_and_background() {
     );
     assert!(
         log.contains("model=claude-haiku-4-5-20251001")
-            && log.contains("fallback=claude-haiku-4-5"),
+            && !log.contains("fallback=claude-haiku-4-5"),
         "{log}"
     );
     assert_eq!(c.h.official_reached(), 0);
@@ -600,6 +602,138 @@ async fn with_a_single_model_every_tier_falls_back_to_it() {
         "{log}"
     );
     assert_eq!(c.h.official_reached(), 0);
+}
+
+// ---------- 起标题、子任务改道到当前模型（#260） ----------
+
+/// 桌面应用自己起标题的请求（#249 静态核实的形状）：点名 Haiku 档那个 id，无 tools、无 stream、
+/// `max_tokens` 200、system 是固定的一句、恰一条字符串 user 消息
+fn desktop_title_body(model: &str) -> String {
+    serde_json::json!({
+        "model": model,
+        "max_tokens": 200,
+        "system": "You write short session titles. Reply with only the tagged fields the prompt asks for.",
+        "messages": [{"role": "user", "content": "You are coming up with a succinct title and git branch name for a coding session based on the provided description. <description>修一下登录页</description> Please generate a title and branch name for this session."}]
+    })
+    .to_string()
+}
+
+/// 主对话的一轮：带 tools、max_tokens 大、流式
+fn conversation_turn(model: &str) -> String {
+    serde_json::json!({
+        "model": model,
+        "max_tokens": 32000,
+        "stream": true,
+        "tools": [{"name": "Read", "description": "read a file", "input_schema": {"type": "object"}}],
+        "messages": [{"role": "user", "content": "hi"}]
+    })
+    .to_string()
+}
+
+/// 发一个请求，返回上游收到的模型名
+async fn upstream_model_for(c: &ClaudeHarness, body: &str) -> String {
+    let before = c.h.third_party.all().len();
+    let res = c.send(messages_req(body)).await;
+    assert_eq!(res.status, 200, "{}", res.text());
+    let all = c.h.third_party.all();
+    assert_eq!(all.len(), before + 1);
+    json(&all[before].body)["model"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// 还没有任何对话（首条消息发出前桌面应用就先起标题）：起标题改用已选第一个，不用 Haiku 档那个 id 对应的模型
+#[tokio::test]
+async fn title_request_without_a_conversation_goes_to_the_first_selected() {
+    let c = ClaudeHarness::new(Some(text_stream())).await;
+    assert_eq!(
+        upstream_model_for(&c, &desktop_title_body("claude-haiku-4-5")).await,
+        "kimi-k3"
+    );
+    assert_eq!(c.h.official_reached(), 0);
+}
+
+/// 起标题改用最近一次对话（带 tools 的那轮）用的模型；换了模型再对话，起标题跟着换；
+/// 不带 tools 的请求不算对话，不改记录
+#[tokio::test]
+async fn title_request_follows_the_latest_conversation_turn() {
+    let c = ClaudeHarness::new(Some(text_stream())).await;
+    assert_eq!(
+        upstream_model_for(&c, &conversation_turn("claude-sonnet-5-r2")).await,
+        "qwen-max"
+    );
+    assert_eq!(
+        upstream_model_for(&c, &desktop_title_body("claude-haiku-4-5")).await,
+        "qwen-max"
+    );
+    assert_eq!(
+        upstream_model_for(&c, &conversation_turn("claude-haiku-4-5")).await,
+        "glm-lite",
+        "对话里点名哪个就用哪个"
+    );
+    assert_eq!(
+        upstream_model_for(&c, &messages_with_model("claude-sonnet-5")).await,
+        "kimi-k3"
+    );
+    assert_eq!(
+        upstream_model_for(&c, &desktop_title_body("claude-sonnet-5")).await,
+        "glm-lite"
+    );
+    let log = c.h.log();
+    assert!(log.contains("reroute=claude-haiku-4-5"), "{log}");
+}
+
+/// Code 标签里子代理、后台任务点名带日期的官方名（不在清单里）：改用当前模型，不再落到 Haiku 档那个 id；
+/// 子代理自己的回合（system 里带 `cc_is_subagent=true`）即便带 tools、点名清单里的 id，也不改记录
+#[tokio::test]
+async fn subtasks_with_official_names_follow_the_current_model() {
+    let c = ClaudeHarness::new(Some(text_stream())).await;
+    assert_eq!(
+        upstream_model_for(&c, &conversation_turn("claude-sonnet-5-r2")).await,
+        "qwen-max"
+    );
+    for model in [
+        "claude-haiku-4-5-20251001",
+        "claude-opus-4-8[1m]",
+        "claude-sonnet-4-6",
+    ] {
+        assert_eq!(
+            upstream_model_for(&c, &messages_with_model(model)).await,
+            "qwen-max",
+            "{model}"
+        );
+    }
+    let log = c.h.log();
+    assert!(
+        log.contains("model=claude-haiku-4-5-20251001")
+            && log.contains("fallback=claude-sonnet-5-r2"),
+        "{log}"
+    );
+
+    // 抓包样本里的 Explore 子代理，改点名 Haiku 档那个 id
+    let sample: serde_json::Value =
+        serde_json::from_slice(&data("cc-messages-subagent-explore.json")).unwrap();
+    let mut subagent = sample["body"].clone();
+    subagent["model"] = "claude-haiku-4-5".into();
+    assert_eq!(
+        upstream_model_for(&c, &subagent.to_string()).await,
+        "glm-lite"
+    );
+    assert_eq!(
+        upstream_model_for(&c, &desktop_title_body("claude-haiku-4-5")).await,
+        "qwen-max",
+        "子代理的回合不改当前模型"
+    );
+
+    // 记下的模型被取消选择（清单里没了）：回到已选第一个
+    c.claude_catalog(
+        &claude_catalog(&c.h.third_party.url).replace("claude-sonnet-5-r2", "claude-sonnet-5-r3"),
+    );
+    assert_eq!(
+        upstream_model_for(&c, &messages_with_model("claude-haiku-4-5-20251001")).await,
+        "kimi-k3"
+    );
 }
 
 /// AC15：清单不存在 / 坏 JSON / 密钥取不到 / 网关不在清单里：404 / 500 / 500 / 500，Anthropic 形状，上游 0 次
@@ -645,11 +779,12 @@ async fn ac15_missing_or_broken_catalog_and_missing_keys_fail_closed() {
         activity_log_path: None,
         third_party_key: Arc::new(|agent, _| match agent {
             Agent::Codex => Ok("codex".into()),
-            Agent::Claude => Err("not set".into()),
+            Agent::Claude | Agent::WorkBuddy => Err("not set".into()),
         }),
         max_body_bytes: 0,
         proxy: None,
         claude_routing_path: Some(c.h.dir.path().join("claude-routing.json")),
+        workbuddy_routing_path: None,
         router_token: tokens.source(),
         keepalive: Duration::ZERO,
         locale: None,
@@ -1838,6 +1973,7 @@ async fn claude_key_verdicts_are_reported_per_provider() {
         max_body_bytes: 0,
         proxy: None,
         claude_routing_path: Some(c.h.dir.path().join("claude-routing.json")),
+        workbuddy_routing_path: None,
         router_token: c.tokens.source(),
         keepalive: Duration::from_millis(100),
         locale: None,

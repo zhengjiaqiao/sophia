@@ -40,6 +40,8 @@ interface TextFieldBase {
   spellCheck?: boolean;
   autoComplete?: string;
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
+  /// 离开输入框（密钥框据此判断形状：手打时不边打边报）
+  onBlur?: () => void;
 }
 
 /// 读屏名：没有可见标签给 `label`；有可见标签给它的 id（`labelledBy`）
@@ -65,6 +67,7 @@ export function TextField({
   spellCheck,
   autoComplete,
   onKeyDown,
+  onBlur,
 }: TextFieldProps) {
   const own = useRef<HTMLInputElement>(null);
   const ref = inputRef ?? own;
@@ -93,6 +96,7 @@ export function TextField({
         onChange={(e) => onChange(e.target.value)}
         // 中文输入法里打英文字母时文字先在组字态里：组字结束再报一次，筛选框不会「打了没反应」
         onCompositionEnd={(e) => onChange(e.currentTarget.value)}
+        onBlur={onBlur}
         onKeyDown={(e) => {
           if (search && e.key === "Escape" && value !== "") {
             // 先清空文字；清空了的 Esc 才让给页面（返回、收起）

@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api.ts";
 import { copyDetails } from "../diagnostics.ts";
 import { t } from "../i18n.ts";
-import type { ConnectAction, TrayUsage, UsageAgentId } from "../types.ts";
+import type { ConnectAction, UsageItemKey, UsageItemView } from "../types.ts";
 import { BusySlot, Button, Confirm, Details, Spinner, TruncTip } from "../ui/index.ts";
 import { usageNoteAction } from "./usageView.ts";
 import "./UsageWindows.css";
@@ -21,7 +21,7 @@ export interface ConnectHandlers {
 }
 
 /// 一个 agent 的各窗口与一句状态（spec 2026-09-26-menubar-usage R7 R10）：托盘面板的用量行与用量页的「当前用量」
-/// 共用同一种画法，文字都是后端算好的（`TrayUsage`）。一个窗口一行、三列对齐：窗口名 ｜ 条（与文字同一刻度）｜
+/// 共用同一种画法，文字都是后端算好的（`UsageItemView`）。一个窗口一行、三列对齐：窗口名 ｜ 条（与文字同一刻度）｜
 /// 「剩 72%」+「 · 5 天后重置」；服务端判为紧张的窗口名与百分比加粗（不用红、不用橙）。取不到新数、被限流、
 /// 没有订阅额度、还没有读数时，下面一行灰字说原因。没有窗口就不画空的一排。
 ///
@@ -41,7 +41,7 @@ export function UsageWindows({
   onRetry,
   connect,
 }: {
-  usage: TrayUsage;
+  usage: UsageItemView;
   stacked?: boolean;
   /// 这个 agent 的「再试一次」正在跑
   retrying?: boolean;
@@ -51,7 +51,7 @@ export function UsageWindows({
   connect?: ConnectHandlers;
 }) {
   const action = onRetry ? usageNoteAction(usage, retrying) : null;
-  const text = (w: TrayUsage["windows"][number]) => (
+  const text = (w: UsageItemView["windows"][number]) => (
     <span className="usage-win__text">
       <span className="usage-win__pct">{w.percentText}</span>
       {w.resetText ? (
@@ -62,7 +62,7 @@ export function UsageWindows({
       ) : null}
     </span>
   );
-  const bar = (w: TrayUsage["windows"][number]) => (
+  const bar = (w: UsageItemView["windows"][number]) => (
     <span className="usage-win__bar" aria-hidden="true">
       <i style={{ width: `${w.gaugePercent}%` }} />
     </span>
@@ -296,29 +296,29 @@ export function useClaudeConnect(reread: () => Promise<void>, onError?: (message
   };
 }
 
-/// 「再试一次」的进行状态（托盘的用量行、用量页的「当前用量」共用）：点了先记下这个 agent 在读，
+/// 「再试一次」的进行状态（托盘的用量行、用量页的「当前用量」共用）：点了先记下这一项（项的键）在读，
 /// 后端这一轮跑完（`usage_refresh` 回话）、`reread` 把新视图画上之后再收回——先画新数再收「正在读取」，
 /// 不闪回旧原因。正在读时再按不起作用（键锁着只挡指针，键盘回车也挡在这里）
 export function useUsageRetry(reread: () => Promise<void>) {
-  const [running, setRunning] = useState<ReadonlySet<UsageAgentId>>(() => new Set());
-  const inFlight = useRef(new Set<UsageAgentId>());
+  const [running, setRunning] = useState<ReadonlySet<UsageItemKey>>(() => new Set());
+  const inFlight = useRef(new Set<UsageItemKey>());
   const retry = useCallback(
-    async (agent: UsageAgentId) => {
-      if (inFlight.current.has(agent)) return;
-      inFlight.current.add(agent);
+    async (key: UsageItemKey) => {
+      if (inFlight.current.has(key)) return;
+      inFlight.current.add(key);
       setRunning(new Set(inFlight.current));
       try {
-        await api.usageRefresh(agent);
+        await api.usageRefresh(key);
         await reread();
       } catch {
         // 回话不了（调度没在跑）也收回：原因行带着键回来，下一次弹出或打开还会读
       } finally {
-        inFlight.current.delete(agent);
+        inFlight.current.delete(key);
         setRunning(new Set(inFlight.current));
       }
     },
     [reread],
   );
-  const retrying = useCallback((agent: UsageAgentId) => running.has(agent), [running]);
+  const retrying = useCallback((key: UsageItemKey) => running.has(key), [running]);
   return { retry, retrying };
 }

@@ -30,7 +30,7 @@ const { InstalledToast } = await import("../src/market/InstalledToast.tsx");
 const { NoticeLines } = await import("../src/ui/Toast.tsx");
 
 const PROJECT = "project:/Users/you/Project/CardBox";
-const taken = "那里已有同名的";
+const taken = "已有同名的 skill";
 const outcome = (unlinked: InstallOutcome["unlinked"], failed: Record<string, string> = {}) =>
   ({
     installed: ["pdf"],
@@ -71,7 +71,7 @@ test("先在 Claude Code 放了 pdf 再装 pdf：那一行不能勾、没交给�
   assert.deepEqual(merged.unlinked, [{ harnessId: "claude-code", name: "pdf", reason: taken }]);
   const toast = skillInstalledToast(merged, [{ id: "claude-code", name: "Claude Code" }]);
   assert.equal(toast.kind, "partial");
-  assert.equal(toast.reason, "Claude Code 没链上：那里已有同名的");
+  assert.equal(toast.reason, "加到 Claude Code 失败 · 已有同名的 skill");
   assert.deepEqual(skillHandleTarget(merged, "global"), { domainKey: "global", skill: "pdf" });
   // 后端已经报过的不重复；没被拿掉的 agent 不算
   const already = outcome([{ harnessId: "claude-code", name: "pdf", reason: taken }]);
@@ -194,7 +194,7 @@ const partial = {
   sentence: "market.toast.installPartial" as const,
   names: ["pdf"],
   agents: [],
-  reason: "Claude Code 没链上：那里已有同名的",
+  reason: "加到 Claude Code 失败 · 已有同名的 skill",
 };
 
 test("有「没链上」时提示条里有「去处理」，排在「撤销」前；没有时没有", () => {
@@ -228,14 +228,14 @@ test("右下两行：字在左（第一行「已安装 pdf」、第二行「Clau
   const html = render(NoticeLines, {
     wrapped: true,
     main: createElement("span", { className: "probe-main" }, "已安装 pdf"),
-    reason: "Claude Code 没链上：那里已有同名的",
+    reason: "加到 Claude Code 失败 · 已有同名的 skill",
     go: { label: "去处理", onClick: noop },
     action: { label: "撤销", onClick: noop },
     onClose: noop,
   });
   assert.match(
     html,
-    /^<div class="ss-toast__body is-two"><div class="ss-toast__text"><div class="ss-toast__main"><span class="probe-main">已安装 pdf<\/span><\/div><div class="ss-toast__sub">Claude Code 没链上：那里已有同名的<\/div><\/div><span class="ss-toast__actions">/,
+    /^<div class="ss-toast__body is-two"><div class="ss-toast__text"><div class="ss-toast__main"><span class="probe-main">已安装 pdf<\/span><\/div><div class="ss-toast__sub">加到 Claude Code 失败 · 已有同名的 skill<\/div><\/div><span class="ss-toast__actions">/,
   );
   assert.ok(html.indexOf(">去处理<") < html.indexOf(">撤销<"));
   assert.ok(html.indexOf(">撤销<") < html.indexOf('aria-label="关闭"'));

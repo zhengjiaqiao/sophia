@@ -6,10 +6,10 @@ import {
   duplicateNames,
   listNames,
   mcpCandidateGroups,
-  mcpLocationName,
   mcpOwnRemoveReason,
   mcpRemoveConfirmBody,
   mcpSourceLines,
+  mcpSourceName,
   mcpSourceSubtitle,
   mcpSourcesTitle,
   noMcpSourcesText,
@@ -123,9 +123,9 @@ test("名字列表：至多 5 个，多了写「等 N 个」", () => {
 });
 
 test("移除的提示框、禁用原因与确认标题", () => {
-  assert.equal(removeTitle(cardbox, "WeiboAP"), "从 CardBox 移除 WeiboAP（不动原件）");
-  assert.equal(removeTitle(global, "通用仓库"), "从用户级移除通用仓库（不动原件）");
-  assert.equal(ownRemoveReason(cardbox), "它的原件就在 CardBox 里，删掉原件才会消失");
+  assert.equal(removeTitle(cardbox, "WeiboAP"), "从 CardBox 移除 WeiboAP（保留原件）");
+  assert.equal(removeTitle(global, "通用仓库"), "从用户级移除通用仓库（保留原件）");
+  assert.equal(ownRemoveReason(cardbox), "它的原件就在 CardBox 里，删除原件后才会消失");
   assert.equal(removeConfirmTitle(cardbox, "WeiboAP"), "从 CardBox 移除 WeiboAP？");
 });
 
@@ -137,20 +137,17 @@ test("移除确认正文：skill 与 agent 各自去重；一条都没有时照�
       link("excalidraw", "Codex"),
       link("notion", "Claude Code"),
     ]),
-    "这 2 个 skill 在 Claude Code、Codex 下的软链会撤掉：excalidraw、notion",
+    "将从 Claude Code、Codex 中移除这 2 个 skill：excalidraw、notion。",
   );
   // 多于 5 个：等 N 个
   const many = ["a", "b", "c", "d", "e", "f"].map((s) => link(s, "Codex"));
-  assert.equal(
-    removeConfirmBody(many),
-    "这 6 个 skill 在 Codex 下的软链会撤掉：a、b、c、d、e 等 6 个",
-  );
+  assert.equal(removeConfirmBody(many), "将从 Codex 中移除这 6 个 skill：a、b、c、d、e 等 6 个。");
   // 整个 skill 文件夹就是一条软链：另起一句
   assert.equal(
     removeConfirmBody([link("a", "Codex"), link(null, "Cline")]),
-    "这 1 个 skill 在 Codex 下的软链会撤掉：a；Cline 的整个 skill 文件夹是指向它的软链，也会撤掉",
+    "将从 Codex 中移除这 1 个 skill：a。Cline 将无法使用它的所有 skill。",
   );
-  assert.equal(removeConfirmBody([]), "它的 skill 会从列表里拿掉，没有软链要撤");
+  assert.equal(removeConfirmBody([]), "它的 skill 会从列表中移除，不影响任何 agent。");
 });
 
 test("添加来源弹窗的分组：其他项目在用的写在哪用，检测到的写短路径，带上 skill 给来源行外露；空组不出现", () => {
@@ -243,14 +240,22 @@ test("MCP 页名与空态", () => {
   assert.equal(noMcpSourcesText(cardbox), "CardBox 还没有写了 MCP 的配置文件");
 });
 
-test("MCP 位置名写成 `Claude Code · User`：去掉 MCPs，只有 agent 名的补作用域，WeiboAP 不补", () => {
-  const at = (label: string, harnessId: string, domain: string) =>
-    mcpLocationName({ label, harnessId, domain });
-  assert.equal(at("Claude Code · User MCPs", "claude-code", "global"), "Claude Code · User");
-  assert.equal(at("Claude Code · Local MCPs", "claude-code", "project:/a"), "Claude Code · Local");
-  assert.equal(at("Codex", "codex", "global"), "Codex · User");
-  assert.equal(at("Cursor", "cursor", "project:/a"), "Cursor · Project");
-  assert.equal(at("WeiboAP", "weiboap", "project:/w/agent_1"), "WeiboAP");
+test("自动同步页的位置名与表格、确认框同一套中文名（#306）：不写 core 的英文 `Claude Code · User`，WeiboAP 照它的名字", () => {
+  const at = (id: string, label: string, harnessId: string) =>
+    mcpSourceName({ id, label, harnessId });
+  assert.equal(at("claude-code", "Claude Code · User MCPs", "claude-code"), "Claude Code 仅自己");
+  assert.equal(
+    at("project:/a::claude-code:local", "Claude Code · Local MCPs", "claude-code"),
+    "Claude Code 仅自己",
+  );
+  assert.equal(
+    at("project:/a::claude-code", "Claude Code · Project MCPs", "claude-code"),
+    "Claude Code 团队共享",
+  );
+  assert.equal(at("codex", "Codex", "codex"), "Codex");
+  assert.equal(at("project:/a::cursor", "Cursor · Project", "cursor"), "Cursor");
+  assert.equal(at("claude-desktop", "Claude Desktop", "claude-desktop"), "Claude 桌面应用");
+  assert.equal(at("project:/w/agent_1::weiboap", "WeiboAP", "weiboap"), "WeiboAP");
 });
 
 test("MCP 行上两行字：自己的配置文件名字写路径、第二行写是谁的哪一格；以前订阅的别处照旧写名字与它在哪；数服务", () => {
@@ -272,8 +277,11 @@ test("MCP 行上两行字：自己的配置文件名字写路径、第二行写�
     where: "Claude Code 仅自己",
     count: "2 个 MCP",
   });
-  // 以前订阅的别处配置：名字照旧，第二行写它在哪
-  assert.deepEqual(mcpSourceLines(mcpSub({}), cardbox), { name: mcpSub({}).label, sub: "用户级" });
+  // 以前订阅的别处配置：名字写是谁的哪一格（同表格），第二行写它在哪
+  assert.deepEqual(mcpSourceLines(mcpSub({}), cardbox), {
+    name: "Claude Code 仅自己",
+    sub: "用户级",
+  });
   assert.deepEqual(mcpSourceSubtitle(mcpSub({}), cardbox), { where: "用户级", count: "0 个 MCP" });
   // 项目里的团队共享（.mcp.json）：路径只写项目里那段
   const team = mcpSub({
@@ -295,30 +303,41 @@ test("MCP 行上两行字：自己的配置文件名字写路径、第二行写�
 test("MCP 移除：禁用原因、确认正文（服务与位置各自去重；没有时照实说）、搬不过去的提示", () => {
   assert.equal(
     mcpOwnRemoveReason(cardbox),
-    "它就是 CardBox 自己的配置，要拿掉里面的服务得去改它本身",
+    "这是 CardBox 自己的配置，要删除其中的服务，请直接修改这份配置",
   );
   const item = (name: string, targetId: string) => ({ name, targetId, location: targetId });
-  const nameOf = (id: string) => (id === "p" ? "Claude Code · Project" : "Codex · Project");
+  const nameOf = (id: string) => (id === "p" ? "Claude Code 团队共享" : "Codex");
   assert.equal(
     mcpRemoveConfirmBody([item("docs", "p"), item("docs", "c"), item("search", "p")], nameOf),
-    "这 2 个服务在 Claude Code · Project、Codex · Project 里的那份会拿掉：docs、search",
+    "将从 Claude Code 团队共享、Codex 中删除这 2 个服务：docs、search。",
   );
-  assert.equal(mcpRemoveConfirmBody([], nameOf), "它的服务会从列表中移除，没有需要撤回的配置");
+  // 位置名是中文结尾时紧贴（中西文空格只加在西文与汉字之间）
   assert.equal(
-    stuckTip("internal-tools", "Codex · User"),
-    "internal-tools 用了只有 Codex · User 支持的写法，写到别处就不是原来那个了",
+    mcpRemoveConfirmBody([item("docs", "d")], () => "Claude 桌面应用"),
+    "将从 Claude 桌面应用中删除这 1 个服务：docs。",
+  );
+  assert.equal(mcpRemoveConfirmBody([], nameOf), "它的服务会从列表中移除，没有需要撤回的配置。");
+  assert.equal(
+    stuckTip("internal-tools", "Codex"),
+    "internal-tools 用了只有 Codex 支持的写法，无法原样加到其他 agent",
   );
 });
 
 test("MCP 添加来源弹窗的分组：其他项目在用的写在哪用，检测到的写在哪（服务数在行右端），带上服务给来源行外露；空组不出现", () => {
   const groups = mcpCandidateGroups({
     elsewhere: [
-      mcpCand({ id: "codex", label: "Codex · User", usedIn: [{ key: "p", label: "docs-site" }] }),
+      mcpCand({
+        id: "codex",
+        label: "Codex · User",
+        harnessId: "codex",
+        usedIn: [{ key: "p", label: "docs-site" }],
+      }),
     ],
     detected: [
       mcpCand({
-        id: "o",
+        id: "project:/w/other::cursor",
         label: "Cursor · Project",
+        harnessId: "cursor",
         place: "other",
         services: [{ name: "x", portable: true }],
       }),
@@ -327,14 +346,15 @@ test("MCP 添加来源弹窗的分组：其他项目在用的写在哪用，检�
   assert.deepEqual(groups, [
     {
       title: "其他项目在用的",
-      items: [{ id: "codex", name: "Codex · User", sub: "docs-site 在用", services: [] }],
+      items: [{ id: "codex", name: "Codex", agent: "Codex", sub: "docs-site 在用", services: [] }],
     },
     {
       title: "检测到的",
       items: [
         {
-          id: "o",
-          name: "Cursor · Project",
+          id: "project:/w/other::cursor",
+          name: "Cursor",
+          agent: "Cursor",
           sub: "other",
           services: [{ name: "x", portable: true }],
         },

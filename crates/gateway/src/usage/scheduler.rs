@@ -20,7 +20,7 @@ use sophia_core::usage::schedule::{
 };
 use sophia_core::usage::{
     AgentId, AgentUsage, ParseFailure, Reading, Refresh, ScheduleMemo, Source, SourceMemo,
-    UsageSettings, UsageState, UsageStatus,
+    UsageSettings, UsageState, UsageStatus, UsageSubject,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -410,11 +410,11 @@ pub trait Host: Send + Sync {
 pub enum Command {
     /// 刚打开托盘或用量页
     Opened,
-    /// 手动刷新；`Some` 只刷这一个 agent
-    Refresh(Option<AgentId>),
-    /// 原因行旁点了「再试一次」：只取这一个 agent，起进程的取法不等最短间隔（限流退避照守）。
+    /// 手动刷新；`Some` 只刷这一项
+    Refresh(Option<UsageSubject>),
+    /// 原因行旁点了「再试一次」：只取这一项，起进程的取法不等最短间隔（限流退避照守）。
     /// 这一轮跑完（或没得跑）就经第二项回话，界面据此收回「正在读取…」
-    Retry(AgentId, oneshot::Sender<()>),
+    Retry(UsageSubject, oneshot::Sender<()>),
     /// 用量设置改了
     Settings(UsageSettings),
     Shutdown,
@@ -438,9 +438,9 @@ impl Handle {
     }
 
     /// 「再试一次」：返回的接收端在这一轮跑完时收到回话；循环已经退出时立即报错（发送端随命令丢了）
-    pub fn retry(&self, agent: AgentId) -> oneshot::Receiver<()> {
+    pub fn retry(&self, subject: UsageSubject) -> oneshot::Receiver<()> {
         let (done, rx) = oneshot::channel();
-        self.send(Command::Retry(agent, done));
+        self.send(Command::Retry(subject, done));
         rx
     }
 }
@@ -592,15 +592,23 @@ pub async fn run(
                 lp.publish();
                 pending = Some((Trigger::Opened, None));
             }
-            Some(Some(Command::Refresh(agent))) => {
+            // 提供商的取数在 #325 接入：现在只给提供商时没有可取的
+            Some(Some(Command::Refresh(Some(UsageSubject::Provider(_))))) => {}
+            Some(Some(Command::Refresh(only))) => {
+                let agent = only.as_ref().and_then(UsageSubject::agent);
                 lp.tracker.retry_unsupported(agent);
                 pending = Some((Trigger::Manual, agent));
             }
-            Some(Some(Command::Retry(agent, done))) => {
-                lp.tracker.retry_unsupported(Some(agent));
-                pending = Some((Trigger::Retry, Some(agent)));
-                reply = Some(done);
-            }
+            Some(Some(Command::Retry(subject, done))) => match subject.agent() {
+                Some(agent) => {
+                    lp.tracker.retry_unsupported(Some(agent));
+                    pending = Some((Trigger::Retry, Some(agent)));
+                    reply = Some(done);
+                }
+                None => {
+                    let _ = done.send(());
+                }
+            },
             Some(Some(Command::Settings(settings))) => {
                 lp.settings = settings;
                 pending = Some((Trigger::SettingsChanged, None));
@@ -1525,12 +1533,16 @@ mod tests {
         });
         // 启动时第一次被限流，退避 5 分钟；6 分钟时退避已过，手动刷新会跑第二次
         advance(6 * 60).await;
-        r.handle.send(Command::Refresh(Some(AgentId::ClaudeCode)));
+        r.handle.send(Command::Refresh(Some(UsageSubject::Agent(
+            AgentId::ClaudeCode,
+        ))));
         advance(1).await;
         assert_eq!(r.fetcher.count(Source::GetUsage), 2);
         // 第二次限流退避 10 分钟：3 分钟后再手动刷新，不跑
         advance(3 * 60).await;
-        r.handle.send(Command::Refresh(Some(AgentId::ClaudeCode)));
+        r.handle.send(Command::Refresh(Some(UsageSubject::Agent(
+            AgentId::ClaudeCode,
+        ))));
         r.handle.send(Command::Opened);
         advance(1).await;
         let (host, fetcher) = r.stop().await;
@@ -1557,7 +1569,8 @@ mod tests {
         });
         advance(2 * 3600).await;
         r.handle.send(Command::Opened);
-        r.handle.send(Command::Refresh(Some(AgentId::Codex)));
+        r.handle
+            .send(Command::Refresh(Some(UsageSubject::Agent(AgentId::Codex))));
         advance(1).await;
         assert_eq!(claude_times(&r.fetcher), vec![0]);
         let last = r.host.published.lock().unwrap().last().cloned().unwrap();
@@ -1573,7 +1586,9 @@ mod tests {
             }
         );
 
-        r.handle.send(Command::Refresh(Some(AgentId::ClaudeCode)));
+        r.handle.send(Command::Refresh(Some(UsageSubject::Agent(
+            AgentId::ClaudeCode,
+        ))));
         advance(1).await;
         assert_eq!(r.fetcher.count(Source::GetUsage), 2, "手动刷新起一次");
         // 还是旧版：又停下来
@@ -1592,7 +1607,10 @@ mod tests {
         advance(1).await;
         assert_eq!(r.fetcher.count(Source::GetUsage), 1, "打开托盘仍按 5 分钟");
         let before = r.fetcher.calls().len();
-        r.handle.retry(AgentId::ClaudeCode).await.unwrap();
+        r.handle
+            .retry(UsageSubject::Agent(AgentId::ClaudeCode))
+            .await
+            .unwrap();
         assert_eq!(r.fetcher.count(Source::GetUsage), 2, "回话时已经取过");
         let after = r.fetcher.calls()[before..].to_vec();
         assert_eq!(after.len(), 1, "{after:?}");
@@ -1608,9 +1626,30 @@ mod tests {
             *f.claude_rate_limited.lock().unwrap() = true
         });
         advance(60).await;
-        r.handle.retry(AgentId::ClaudeCode).await.unwrap();
+        r.handle
+            .retry(UsageSubject::Agent(AgentId::ClaudeCode))
+            .await
+            .unwrap();
         let (_, fetcher) = r.stop().await;
         assert_eq!(fetcher.count(Source::GetUsage), 1);
+    }
+
+    /// 提供商的取数还没接（#325）：按提供商的「再试一次」当场回话、不取任何 agent；按提供商刷新也不取
+    #[tokio::test(start_paused = true)]
+    async fn provider_retry_replies_without_probing() {
+        let r = start(menu_bar_on(), |_, _| {});
+        advance(60).await;
+        let before = r.fetcher.calls().len();
+        r.handle
+            .retry(UsageSubject::Provider("kimi-2".into()))
+            .await
+            .unwrap();
+        r.handle.send(Command::Refresh(Some(UsageSubject::Provider(
+            "kimi-2".into(),
+        ))));
+        advance(1).await;
+        let (_, fetcher) = r.stop().await;
+        assert_eq!(fetcher.calls().len(), before);
     }
 
     /// 旧版 Claude Code 停下后台之后，「再试一次」不等间隔、当场再试（用户多半刚更新完）
@@ -1621,7 +1660,10 @@ mod tests {
         });
         advance(60).await;
         *r.fetcher.claude_unsupported.lock().unwrap() = false;
-        r.handle.retry(AgentId::ClaudeCode).await.unwrap();
+        r.handle
+            .retry(UsageSubject::Agent(AgentId::ClaudeCode))
+            .await
+            .unwrap();
         let (host, fetcher) = r.stop().await;
         assert_eq!(fetcher.count(Source::GetUsage), 2);
         let last = host.published.lock().unwrap().last().cloned().unwrap();
@@ -1639,7 +1681,8 @@ mod tests {
         let r = start(menu_bar_on(), |_, _| {});
         advance(10 * 60).await;
         let before = r.fetcher.calls().len();
-        r.handle.send(Command::Refresh(Some(AgentId::Codex)));
+        r.handle
+            .send(Command::Refresh(Some(UsageSubject::Agent(AgentId::Codex))));
         advance(1).await;
         let (_, fetcher) = r.stop().await;
         let after = &fetcher.calls()[before..];
@@ -1683,11 +1726,17 @@ mod tests {
         assert_eq!(fetcher.count(Source::GetUsage), 0);
         assert_eq!(fetcher.count(Source::DesktopHistory), 1);
         let view = claude_view(&host);
-        assert_eq!(view.signed_in, vec![AgentId::ClaudeCode, AgentId::Codex]);
+        assert_eq!(
+            view.signed_in,
+            vec![
+                UsageSubject::Agent(AgentId::ClaudeCode),
+                UsageSubject::Agent(AgentId::Codex)
+            ]
+        );
         let claude = view
-            .tray
+            .items
             .iter()
-            .find(|t| t.agent == AgentId::ClaudeCode)
+            .find(|t| t.key == UsageSubject::Agent(AgentId::ClaudeCode))
             .unwrap();
         assert_eq!(
             claude.updated_text.as_deref(),
@@ -1720,7 +1769,10 @@ mod tests {
         let (host, fetcher) = r.stop().await;
         assert_eq!(fetcher.count(Source::GetUsage), 0);
         let view = claude_view(&host);
-        assert_eq!(view.signed_in, vec![AgentId::Codex]);
-        assert!(view.tray.iter().all(|t| t.agent != AgentId::ClaudeCode));
+        assert_eq!(view.signed_in, vec![UsageSubject::Agent(AgentId::Codex)]);
+        assert!(view
+            .items
+            .iter()
+            .all(|t| t.key != UsageSubject::Agent(AgentId::ClaudeCode)));
     }
 }

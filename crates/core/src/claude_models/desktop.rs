@@ -29,7 +29,9 @@ pub const SOPHIA_PROFILE_ID: &str = "00000000-0000-4000-8000-736f70686961";
 pub const SOPHIA_ENTRY_NAME: &str = "Sophia";
 /// 已选第一个写的角色 id，排 `inferenceModels` 第一项：Claude 把第一项当初始默认（R29）
 pub const FIRST_ROLE: &str = "claude-sonnet-5";
-/// 已选多于一个时最后一个写的角色 id：Claude 用 Haiku 档起标题、跑子任务（R29）
+/// 已选多于一个时最后一个写的角色 id（R29）。只是桌面应用认的合法 id：起标题、子任务由路由改用当前模型（#260）。
+/// 桌面应用自己的小请求会精确点名它、走最后一个（DESIGN「Claude 桌面应用那一行」的局限）；换成 `-rN` 它会改点名
+/// `claude-sonnet-5`，同样躲不开，所以保留
 pub const HAIKU_ROLE: &str = "claude-haiku-4-5";
 /// 记录里代替令牌的占位
 pub const TOKEN_PLACEHOLDER: &str = "<token>";

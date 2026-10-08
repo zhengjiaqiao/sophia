@@ -1,4 +1,4 @@
-/* 安装类推入页（DESIGN「发现与安装 › 安装页」「从链接安装 · 从 JSON 添加」，画板 06 07 09 10）：
+/* 安装类推入页（DESIGN「发现与安装 › 安装页」「从链接安装 · 粘贴 MCP 配置」，画板 06 07 09 10）：
    页面头下 10 是来历一行、一句说明；其下一节一节（区块小标 + hairline + 内容），节间 24；贴底一行在推入页的贴底行里。
    内容宽 776，左沿与页面头一条线。色值、间距、字号一律 var(--…)。 */
 
@@ -27,7 +27,7 @@
   padding-bottom: var(--space-xl);
 }
 
-/* ---- 来历一行（页面头下 10）：仓库（等宽 ink）· 路径（等宽 ink-mute）+ 离开键 ---- */
+/* ---- 来历一行（页面头下 10）：来自 <作者> / 发布方 + 离开键 ---- */
 .install-origin {
   display: flex;
   flex-wrap: wrap;
@@ -48,15 +48,6 @@
 
 .install-origin__dot {
   color: var(--ink-faint);
-}
-
-.install-origin__mono {
-  font-size: var(--size-label);
-  color: var(--ink-mute);
-}
-
-.install-origin__mono.is-strong {
-  color: var(--ink);
 }
 
 /* 一句说明 / 连接方式：13 ink-mute，来历下 6 */
@@ -121,7 +112,7 @@
   margin: var(--space-xs) 0 0;
 }
 
-/* ---- 勾选行网格：两列（行高 36），从 JSON 添加是一列（放得下原因句） ---- */
+/* ---- 勾选行网格：两列（行高 36），粘贴 MCP 配置是一列（放得下原因句） ---- */
 .install-agents {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -335,7 +326,7 @@
   color: var(--ink);
 }
 
-/* ---- 从 JSON 添加：等宽框，recess 底、限高、框内滚 ---- */
+/* ---- 粘贴 MCP 配置：等宽框，recess 底、限高、框内滚 ---- */
 .install-json {
   box-sizing: border-box;
   width: 100%;

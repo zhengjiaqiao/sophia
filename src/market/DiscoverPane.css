@@ -126,8 +126,11 @@ html[data-input="keyboard"] .dsc-row:focus::before {
   color: var(--ink);
 }
 
+/* 来自：作者（正文字、不等宽，#307），放不下截断；完整 owner/repo 在悬停里 */
 .dsc-row__repo {
-  display: flex;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--size-label);
   color: var(--ink-mute);
 }

@@ -84,7 +84,7 @@ test("ShotTile 没传上去：可以去掉，读屏说发送时再试", () => {
     n: 3,
     onRemove: noop,
   });
-  assert.match(html, /aria-label="截图 3，没传上去，发送时再试"/);
+  assert.match(html, /aria-label="截图 3，上传失败，发送时重试"/);
   assert.match(html, /aria-label="去掉截图 3"/);
   // 细线停在没传上去时的值，百分比收起
   assert.match(html, /stroke-dasharray="40 100"/);

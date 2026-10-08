@@ -9,6 +9,7 @@ import {
   formatMessage,
   formatRich,
   isLang,
+  listText,
   locale,
   messageFor,
   selectForm,
@@ -154,35 +155,112 @@ test("列表：中文照旧用「、」「 和 」「；」连接；其他语言
   assert.equal(joinList(["x", "y"], "semicolon", "en", en), "x; y");
 });
 
-test("句中嵌名字的空格：名字与相邻汉字之间，西文那一侧隔一个空格；汉字名紧贴；标点、句首句尾不加；英文句子不受影响", async () => {
-  const { formatSpaced } = await import("../src/i18n.ts");
+test("列表（#320）：中文「和」两边挨着西文才空格，挨着汉字、全角标点不空（同 formatMessage 的中西文规则）", async () => {
+  const { joinList } = await import("../src/i18n.ts");
+  const zh = { enum: "、", and: " 和 ", semicolon: "；" };
+  assert.equal(
+    joinList(["Codex 的配置文件", ".gitignore"], "and", "zh-Hans", zh),
+    "Codex 的配置文件和 .gitignore",
+  );
+  assert.equal(joinList(["用户级", "项目"], "and", "zh-Hans", zh), "用户级和项目");
+  assert.equal(joinList(["Codex", "Cursor"], "and", "zh-Hans", zh), "Codex 和 Cursor");
+  // 与 formatMessage 同一套：可打印 ASCII 都算西文（半角点开头的 `.gitignore` 也隔开）
+  assert.equal(
+    formatMessage("已还原{restored}，{failed}未还原", { restored: ".gitignore", failed: "Codex" }),
+    "已还原 .gitignore，Codex 未还原",
+  );
+  assert.equal(joinList(["CardBox", "用户级"], "and", "zh-Hant", zh), "CardBox 和用户级");
+  assert.equal(
+    joinList(["Claude Code（仅自己）", "Codex"], "and", "zh-Hans", zh),
+    "Claude Code（仅自己）和 Codex",
+  );
+  assert.equal(joinList(["A", "B", "配置"], "and", "zh-Hans", zh), "A、B 和配置");
+});
+
+test("列表（#304）：中文并举两项「A 和 B」，三项及以上「A、B 和 C」，不连写成「A 和 B 和 C」；一项、零项原样", async () => {
+  const { joinList } = await import("../src/i18n.ts");
+  const zh = { enum: "、", and: " 和 ", semicolon: "；" };
+  for (const lang of ["zh-Hans", "zh-Hant"]) {
+    assert.equal(joinList(["A", "B", "C"], "and", lang, zh), "A、B 和 C");
+    assert.equal(joinList(["A", "B", "C", "D"], "and", lang, zh), "A、B、C 和 D");
+    assert.equal(joinList(["A", "B"], "and", lang, zh), "A 和 B");
+    assert.equal(joinList(["A"], "and", lang, zh), "A");
+    assert.equal(joinList([], "and", lang, zh), "");
+  }
+  // 按当前语言取连接符：简体、繁體同一种写法，English 走 Intl.ListFormat
+  try {
+    for (const lang of ["zh-Hans", "zh-Hant"] as const) {
+      setLocale(lang);
+      assert.equal(
+        listText(["Claude Code", "Codex", "Cursor"], "and"),
+        "Claude Code、Codex 和 Cursor",
+      );
+    }
+    setLocale("en");
+    assert.equal(
+      listText(["Claude Code", "Codex", "Cursor"], "and"),
+      "Claude Code, Codex, and Cursor",
+    );
+  } finally {
+    setLocale("zh-Hans");
+  }
+});
+
+test("句中嵌名字的空格：名字与相邻汉字之间，西文那一侧隔一个空格；汉字名紧贴；标点、句首句尾不加；英文句子不受影响", () => {
   const tpl = "从{place}移除{name}（不动原件）";
   assert.equal(
-    formatSpaced(tpl, { place: "CardBox", name: "pdf" }),
+    formatMessage(tpl, { place: "CardBox", name: "pdf" }),
     "从 CardBox 移除 pdf（不动原件）",
   );
   assert.equal(
-    formatSpaced(tpl, { place: "用户级", name: "技能" }),
+    formatMessage(tpl, { place: "用户级", name: "技能" }),
     "从用户级移除技能（不动原件）",
   );
-  // 首尾字符各看各的：「项目A」左边紧贴、右边隔开；「2024项目」反过来；「.dotfiles」左边是标点不加
-  assert.equal(formatSpaced(tpl, { place: "项目A", name: "pdf" }), "从项目A 移除 pdf（不动原件）");
+  // 首尾字符各看各的：「项目A」左边紧贴、右边隔开；「2024项目」反过来；「.dotfiles」开头的半角点也算西文（#320，与 joinList 同一套）
+  assert.equal(formatMessage(tpl, { place: "项目A", name: "pdf" }), "从项目A 移除 pdf（不动原件）");
   assert.equal(
-    formatSpaced("它的原件就在{place}里", { place: "2024项目" }),
+    formatMessage("它的原件就在{place}里", { place: "2024项目" }),
     "它的原件就在 2024项目里",
   );
   assert.equal(
-    formatSpaced(tpl, { place: ".dotfiles", name: "x" }),
-    "从.dotfiles 移除 x（不动原件）",
+    formatMessage(tpl, { place: ".dotfiles", name: "x" }),
+    "从 .dotfiles 移除 x（不动原件）",
   );
   // 句首、句尾没有相邻字，不加
-  assert.equal(formatSpaced("{place}的来源", { place: "CardBox" }), "CardBox 的来源");
-  assert.equal(formatSpaced("添加来源到{place}", { place: "CardBox" }), "添加来源到 CardBox");
+  assert.equal(formatMessage("{place}的来源", { place: "CardBox" }), "CardBox 的来源");
+  assert.equal(formatMessage("添加来源到{place}", { place: "CardBox" }), "添加来源到 CardBox");
   // 英文模板里名字两侧本来就是空格或标点
   assert.equal(
-    formatSpaced("Remove {name} from {place}?", { place: "CardBox", name: "pdf" }),
+    formatMessage("Remove {name} from {place}?", { place: "CardBox", name: "pdf" }),
     "Remove pdf from CardBox?",
   );
   // 缺参数的占位符原样留着
-  assert.equal(formatSpaced("从{place}移除", {}), "从{place}移除");
+  assert.equal(formatMessage("从{place}移除", {}), "从{place}移除");
+  // 目录里写了空格的句子不受影响；名字以汉字收尾时那个空格就多出来了（所以嵌名字的句子要写紧贴的）
+  assert.equal(formatMessage("{n} 个 skill", { n: 3 }), "3 个 skill");
+  assert.equal(
+    formatMessage("重启 {app} 后生效", { app: "Claude 桌面应用" }),
+    "重启 Claude 桌面应用 后生效",
+  );
+  assert.equal(
+    formatMessage("重启{app}后生效", { app: "Claude 桌面应用" }),
+    "重启 Claude 桌面应用后生效",
+  );
+});
+
+test("tRich 的字符串参数按同样的规则空格，React 节点原样放", async () => {
+  const { formatRich } = await import("../src/i18n.ts");
+  const { createElement } = await import("react");
+  const node = createElement("b", null, "pdf");
+  const parts = (out: unknown) => (out as { props: { children: unknown[] } }).props.children;
+  assert.deepEqual(parts(formatRich("加到{place}{names}", { place: "CardBox", names: node })), [
+    "加到",
+    " CardBox",
+    node,
+  ]);
+  assert.deepEqual(parts(formatRich("加到{place}{names}", { place: "用户级", names: node })), [
+    "加到",
+    "用户级",
+    node,
+  ]);
 });

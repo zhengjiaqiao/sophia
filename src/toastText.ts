@@ -77,6 +77,9 @@ export interface ToastItem {
   /// 做成了、但有一句要交代的（MCP：Claude Desktop 第三方模式那一份没写成，`McpReportEntry.mirrorFailed`）：
   /// 成功句后接这一句，用失败原因的位置与样式（`reason`）
   note?: string;
+  /// 做成了、另有一句平常的交代（MCP：DeepSeek Harness 另有全机补丁时以哪一个为准，`McpReportEntry.note`）：
+  /// 与「什么时候生效」同一处（`trail`），同一句只说一次
+  trail?: string;
 }
 
 export interface FailedItem extends ToastItem {
@@ -251,6 +254,7 @@ export function mcpEffectTrail(items: ToastItem[]): string[] {
     if (!out.includes(text)) out.push(text);
   };
   for (const item of items) {
+    if (item.trail) push(item.trail);
     switch (item.agent?.id) {
       case "claude-desktop":
         push(t("toast.trail.restartClaudeDesktop"));

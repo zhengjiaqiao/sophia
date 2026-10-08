@@ -10,9 +10,9 @@
 /// 一批格可以跨位置，core 按每一格自己的目标 id 去写。
 ///
 /// 纯逻辑，不碰 api、不产 JSX。
-import { t } from "./i18n.ts";
+import { listText, t } from "./i18n.ts";
 import { orphanRows, ORPHAN_KEY_PREFIX, type OrphanRow } from "./orphanRows.ts";
-import { shortPath } from "./pathText.ts";
+import { displayPath, shortPath } from "./pathText.ts";
 import type {
   AgentCopy,
   CellRef,
@@ -38,6 +38,22 @@ export function domainOfTarget(targetId: string): string {
 export function columnOfTarget(targetId: string): string {
   const at = targetId.lastIndexOf(SEP);
   return at < 0 ? targetId : targetId.slice(at + SEP.length);
+}
+
+/// 空态里说的地方：选 `全部` 是本机，一个位置是它的名字，几个位置合起来说
+export type EmptyPlace = { kind: "machine" } | { kind: "one"; label: string } | { kind: "several" };
+
+/// 一个位置都还没有 agent 目录时空态的一句（`本机还没有 skill`、`CardBox 还没有 skill`）。
+/// 几个位置合起来说是复数主语，单独一整句（英文 `These scopes have…`），不套进单数谓语的句子（#304）
+export function noSkillsText(place: EmptyPlace): string {
+  switch (place.kind) {
+    case "machine":
+      return t("skills.empty.noDirs", { place: t("skills.place.machine") });
+    case "one":
+      return t("skills.empty.noDirs", { place: place.label });
+    case "several":
+      return t("skills.empty.noDirsSeveral");
+  }
 }
 
 /// 还没扫描出页的位置的显示名：项目取文件夹名（`project:/…/CardBox` → `CardBox`）
@@ -147,6 +163,29 @@ function placeNames(pages: ReadonlyArray<DomainPage>): Map<string, string> {
     out.set(p.key, dup ? `${p.label} · ${shortPath(p.key.slice(PROJECT_PREFIX.length))}` : p.label);
   }
   return out;
+}
+
+/// 合成一列（同一品牌几个产品共用一处，#251，画板第 5 屏）时列头提示框多的两行：`Kimi Code、Kimi 桌面版都读这里`
+/// + 路径（`\n` 分行）。按品牌通用，读它的产品由 core 给（`Target.readers`，只有一个产品读时没有，就是这一列的产品）。
+/// 范围里每个位置都是同一组产品读：一句（只一个位置时带路径）。读者不同（`全部` 下项目里只有 Kimi Code 读）：
+/// 每个位置各写一句 + 它的路径（走查 2026-10-07）。哪个位置都只一个产品读时不说。`nameOf`：产品 id → 界面上的名字
+export function columnReadersNote(
+  column: SkillColumn,
+  nameOf: (id: string) => string,
+): string | undefined {
+  const targets = [...column.targets.values()];
+  const readersOf = (x: Target) => (x.readers?.length ? x.readers : [x.scope.harnessId]);
+  if (!targets.some((x) => readersOf(x).length >= 2)) return undefined;
+  const sentence = (readers: string[]) =>
+    readers.length >= 2
+      ? t("skills.column.readers", { products: listText(readers.map(nameOf)) })
+      : t("skills.column.reader", { product: nameOf(readers[0]) });
+  const first = readersOf(targets[0]).join("\n");
+  if (targets.every((x) => readersOf(x).join("\n") === first)) {
+    const one = sentence(readersOf(targets[0]));
+    return targets.length === 1 ? `${one}\n${displayPath(targets[0].path)}` : one;
+  }
+  return targets.map((x) => `${sentence(readersOf(x))}\n${displayPath(x.path)}`).join("\n");
 }
 
 export function mergeSkillPages(pages: ReadonlyArray<DomainPage>): SkillsView {

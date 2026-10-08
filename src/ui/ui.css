@@ -324,6 +324,28 @@ textarea,
   color: var(--ink);
 }
 
+/* 页签字后的计数（选模型浮层 `已选 5`）：12 tabular、字后 6，没选中 ink-faint、选中 ink-mute；
+   数字一变弹一下（--spring-slide），减少动态效果时只换数字（末尾统一处理） */
+.ss-tabs__count {
+  margin-left: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--size-label);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  animation: ss-tabs-count var(--dur-release) var(--spring-slide);
+}
+
+.ss-tabs__tab.is-on .ss-tabs__count {
+  color: var(--ink-mute);
+}
+
+@keyframes ss-tabs-count {
+  from {
+    transform: scale(1.3);
+  }
+}
+
 /* 指针在滑块上：手靠近，影子略重 */
 .ss-tabs:has(.ss-tabs__tab.is-on:hover) .ss-tabs__thumb {
   box-shadow: var(--raise-hover);
@@ -1524,6 +1546,14 @@ textarea,
   white-space: normal;
 }
 
+/* 节档的主句占满再折（走查 2026-10-08：保存失败的面板文字列只占约 2/3 宽就折、「请检 / 查」从词中间断开）：
+   贪心折行——根上的 pretty 会为了各行齐整提前折；中文只在标点处折，一整段没有标点又放不下才在任意处折 */
+.ss-noticepanel--section .ss-noticepanel__message {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  text-wrap: wrap;
+}
+
 /* 应用级：机面顶上、页面头之上，满内容宽；主句 15，键与 × 同在右端（间距 12） */
 .ss-noticepanel--app {
   display: flex;
@@ -1740,12 +1770,43 @@ textarea,
    获焦与拖着图片经过时边转 ink-mute）。截图 56 方缩略图在文字上方（间 12、上 4 下 12）：上传中一道 1.5 ink 细线
    沿缩略图外 3px 顺时针画到百分比，右上角百分比（12 tabular ink-mute，纸面抬起的小签）；到 100 百分比淡出、
    去掉键（20 方纸键）同处淡入。框下 8 一行 12 ink-faint 提示；按钮行失败时左边一句 13 ink-mute */
+/* 宽档＝填短表单的弹窗（FormDialog）：不高过窗口——最高＝窗口高减上下各 24（遮罩层的内边距 --space-xl），
+   标题与键区钉住，中间一层在弹窗里滚动、上下沿 --fade-edge 渐隐（走查 2026-10-08） */
 .ss-confirm--wide {
+  display: flex;
+  flex-direction: column;
   width: 480px;
+  max-height: calc(100vh - 2 * var(--space-xl));
 }
 
 .ss-confirm--wide .ss-confirm__title {
+  flex-shrink: 0;
   margin-bottom: var(--space-sm);
+}
+
+.ss-confirm--wide .ss-confirm__foot {
+  flex-shrink: 0;
+}
+
+.ss-formdialog__viewport {
+  flex: 1 1 auto;
+  margin-inline: -20px;
+}
+
+/* 滚动层伸到弹窗左右内边距（20）里再缩回来：内容的左线不动，勾选行左右各 8 的悬停带、输入框的焦点环不被裁 */
+.ss-formdialog__body {
+  min-height: 0;
+  padding-inline: 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* stretch：内容自己管滚动（预设名单）——这一层不滚，纵向排开让内容撑满余下的高、跟着收矮 */
+.ss-formdialog__body--stretch {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
 }
 
 .ss-feedback__box {
@@ -1912,7 +1973,9 @@ textarea,
   line-height: var(--leading-label);
 }
 
-.ss-feedback__failure {
+/* 键区左边一句（13 ink-mute）：反馈小窗发送失败的原因；填短表单的弹窗里 Esc / 取消时问的 `模型提供商还没保存` */
+.ss-feedback__failure,
+.ss-confirm__status {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--ink-mute);
@@ -2929,6 +2992,47 @@ html[data-input="keyboard"] .ss-menuitem:focus {
   color: var(--ink-faint);
 }
 
+/* 名字下的一行小字（sub，#251 设置里品牌下已装的产品）：12 ink-mute，名字与小字叠成一块；行高随之长高（上下各 6），
+   框与图标落在名字那一行的中线上（名字行高 15 × 1.5 = 22.5：框 14 下移 4、图标 16 下移 3） */
+.ss-checkrow.has-sub {
+  align-items: flex-start;
+  height: auto;
+  min-height: var(--row-h);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.ss-checkrow--grid.has-sub {
+  min-height: 36px;
+}
+
+.ss-checkrow.has-sub > .ss-checkmark {
+  margin-top: var(--space-xxs);
+}
+
+.ss-checkrow.has-sub > .ss-checkrow__icon {
+  margin-top: 3px;
+}
+
+.ss-checkrow__stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ss-checkrow__sub {
+  overflow: hidden;
+  font-size: var(--size-label);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-checkrow:disabled .ss-checkrow__sub {
+  color: var(--ink-faint);
+}
+
 /* ===== 19. 列表行 ListRow（DESIGN「网关」「添加来源」同一骨架）=====
    [勾选 24] [拉手 18 · 6] 名字 15 / 第二行 12 ink-mute（上距 3）[行尾动作列，键间 4、左距 12]；
    上下 10。整行可点（有抽屉时）：悬停 surface 行带，左右各外扩 8、文字起点不变、control 7；拉开着不出悬停带。
@@ -2958,6 +3062,35 @@ html[data-input="keyboard"] .ss-menuitem:focus {
 
 .ss-listrow.is-open .ss-listrow__main[data-drawer-row]:hover {
   background: none;
+}
+
+/* 刚加进来的一行（ListRow flash）：surface 行带闪一下（同来源行 srcline-flash）；减少动效时 --dur-flash 为 0 */
+.ss-listrow.is-flash .ss-listrow__main {
+  animation: ss-listrow-flash var(--dur-flash) var(--ease-mech);
+}
+
+@keyframes ss-listrow-flash {
+  0%,
+  60% {
+    background: var(--surface);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* 行带钩子（公开钩子，同 data-checkrow）：没有现成行组件、由页面自己排内容的一行（选模型「已选」里可拖的一项）
+   加 data-rowband，悬停出 surface 行带（control 7，左右各外扩 8，文字起点不变）；"lit" 保持亮着（拖着的那一行） */
+[data-rowband] {
+  margin-inline: calc(var(--space-xs) * -1);
+  padding-inline: var(--space-xs);
+  border-radius: var(--radius-control);
+  transition: background-color var(--motion-fast) var(--ease-mech);
+}
+
+[data-rowband]:hover,
+[data-rowband="lit"] {
+  background: var(--surface);
 }
 
 /* 勾选格与拉手格：与第一行名字同高、居中 */
@@ -3174,6 +3307,97 @@ html[data-input="keyboard"] .ss-menuitem:focus {
   justify-self: end;
 }
 
+/* ===== 25. 引导气泡 Coach（DESIGN-components「引导气泡」，#265）=====
+   纸面 + 1px hairline 边 + float 12 圆角 + 浮层投影；一句话 13 ink + 12 + 紧凑默认键「知道了」；最宽 300。
+   顶上一枚指向目标的小箭头（12 方转 45°，同纸面、上与左两道 hairline）。位置由 Coach 量目标后写进 left / top，
+   箭头的横向位置写进 --arrow-x。外层是一直在的 status 区（读屏在句子出来时读），本身不占位 */
+.ss-coach-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+}
+
+.ss-coach {
+  position: fixed;
+  z-index: var(--z-tip);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 300px;
+  padding: 10px 10px 10px 14px;
+  border: var(--border-float);
+  border-radius: var(--radius-float);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  animation: ss-coach-in var(--dur-push) var(--ease-mech);
+}
+
+.ss-coach::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: calc(var(--arrow-x, 28px) - 6px);
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-top: var(--border-float);
+  border-left: var(--border-float);
+  border-top-left-radius: var(--radius-scribe);
+  background: var(--paper);
+  transform: rotate(45deg);
+}
+
+.ss-coach__text {
+  min-width: 0;
+}
+
+.ss-coach .ss-btn {
+  flex-shrink: 0;
+}
+
+@keyframes ss-coach-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ===== 26. 「加入」动效的小片（ui/join.ts，DESIGN-components「动效 › 加入」）=====
+   同模型片的样子：paper 胶囊 + 1px hairline 边 + 浮层投影，13 ink，高 24。fixed、不吃指针，
+   以左沿中点为原点缩放与倾斜（位移、缩放、透明度由 join.ts 的关键帧给） */
+.ss-join {
+  position: fixed;
+  z-index: var(--z-tip);
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--control-h-compact);
+  padding: 0 10px;
+  border: var(--border-float);
+  border-radius: var(--radius-pill);
+  background: var(--paper);
+  box-shadow: var(--elev-float);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-caption);
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  transform-origin: left center;
+}
+
+/* ===== 27. 排序拉手 IconGrip（icons.tsx）：六个点，颜色跟着行走（静止 ink-mute、悬停 ink） ===== */
+.ss-grip {
+  display: block;
+  flex-shrink: 0;
+}
+
 /* ===== 14. 减少动效：状态变化即时发生，信息不减 =====
    忙碌刻度不走（全部 ink-mute 静止），改由文字后的 `…` 每 500ms 增减一点表示还在忙 */
 @media (prefers-reduced-motion: reduce) {
@@ -3215,6 +3439,11 @@ html[data-input="keyboard"] .ss-menuitem:focus {
   /* 推入页直接切换 */
   .ss-pushed,
   .ss-pushed.is-leaving {
+    animation: none;
+  }
+
+  /* 引导气泡直接出现 */
+  .ss-coach {
     animation: none;
   }
 

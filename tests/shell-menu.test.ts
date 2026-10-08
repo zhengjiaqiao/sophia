@@ -8,6 +8,8 @@ import {
   menuState,
   routeMenuCommand,
   routeUnderModal,
+  quitWithDialog,
+  routeWithDialog,
 } from "../src/shell/menuCommands.ts";
 import {
   DEFAULT_NAV,
@@ -154,4 +156,68 @@ test("routeUnderModal：只留作用于输入框的那一项，换目的地、�
   }
   assert.equal(routeUnderModal(routeMenuCommand("undo", nav, true), nav).text, "undo");
   assert.equal(routeUnderModal(routeMenuCommand("select-all", nav, true), nav).text, "select-all");
+});
+
+// 走查 2026-10-08 第 8 条：任何填短表单的弹窗开着都一个判断（不分反馈小窗、提供商弹窗）：
+// 有没保存的改动（登记了离开前询问）照常走、换页先经那一问；没有改动同反馈小窗，不换页
+test("routeWithDialog：没弹窗照常；弹窗开着没改动不换页；有改动照常走（由离开前询问先问）", () => {
+  const nav = DEFAULT_NAV;
+  const routed = routeMenuCommand("skills", goDestination(nav, "models"), false);
+  assert.equal(routeWithDialog(routed, nav, { open: false, guarded: false }), routed);
+  const clean = routeWithDialog(routed, nav, { open: true, guarded: false });
+  assert.equal(clean.nav, nav);
+  assert.equal(clean.page, undefined);
+  assert.equal(routeWithDialog(routed, nav, { open: true, guarded: true }), routed);
+  const typing = routeMenuCommand("undo", nav, true);
+  assert.equal(routeWithDialog(typing, nav, { open: true, guarded: false }).text, "undo");
+});
+
+// 产品负责人 2026-10-08：⌘Q 时提供商弹窗开着，原来只收起反馈小窗，弹窗留着、壳 inert，退出确认框点不到。
+// 与换页同一处判断、不分弹窗种类：没改动收起再退出；有改动先经离开前那一问，丢弃（或保存）了才收起、退出；不答就不退出
+test("quitWithDialog：没弹窗直接退出；弹窗开着没改动先收起再退出；有改动先问，答了才收起、退出", () => {
+  const calls: string[] = [];
+  let pending: (() => void) | null = null;
+  const steps = {
+    dismiss: () => void calls.push("dismiss"),
+    ask: (proceed: () => void) => {
+      calls.push("ask");
+      pending = proceed;
+    },
+    quit: () => void calls.push("quit"),
+  };
+  quitWithDialog({ open: false, guarded: false }, steps);
+  assert.deepEqual(calls, ["quit"]);
+
+  calls.length = 0;
+  quitWithDialog({ open: true, guarded: false }, steps);
+  assert.deepEqual(calls, ["dismiss", "quit"]);
+
+  calls.length = 0;
+  quitWithDialog({ open: true, guarded: true }, steps);
+  assert.deepEqual(calls, ["ask"], "有改动：先问，不收起、不退出");
+  assert.ok(pending);
+  (pending as () => void)();
+  assert.deepEqual(calls, ["ask", "dismiss", "quit"]);
+});
+
+// 问出来之后用户没答、继续编辑：这次待定的退出取消，之后保存不再接着退出（意外退出比多点一次 ⌘Q 糟）。
+// 只退出这条路；换页那条路的 proceed 不带取消，保存后照常接着走
+test("quitWithDialog：问出来后继续编辑就取消待定的退出，之后答了也不收起、不退出", () => {
+  const calls: string[] = [];
+  let pending: (() => void) & { cancel?: () => void } = () => undefined;
+  quitWithDialog(
+    { open: true, guarded: true },
+    {
+      dismiss: () => void calls.push("dismiss"),
+      ask: (proceed) => {
+        calls.push("ask");
+        pending = proceed;
+      },
+      quit: () => void calls.push("quit"),
+    },
+  );
+  assert.equal(typeof pending.cancel, "function", "退出这条路的 proceed 带取消");
+  pending.cancel?.();
+  pending();
+  assert.deepEqual(calls, ["ask"], "取消后保存完也不收起、不退出");
 });

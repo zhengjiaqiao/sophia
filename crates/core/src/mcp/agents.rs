@@ -33,6 +33,14 @@ pub(super) enum Dialect {
     Copilot,
     /// Claude Desktop：只有 stdio 的 `command` / `args` / `env`
     Desktop,
+    /// Kimi（Kimi Code 与 Kimi 桌面版）：没有 `type`；stdio `command`，HTTP 是有 `url` 且没有 `transport`，
+    /// SSE 是 `transport: "sse"` + `url`
+    Kimi,
+    /// DeepSeek Harness：YAML 补丁里一行 `- insert:`，`transport: stdio | streamable-http`（`mcp/patch.rs`）
+    DshPatch,
+    /// WorkBuddy：通用的 `mcpServers` 写法（同 Cursor），另认它自己的 `disabled`、`disabledTools`、`description`
+    /// （同一家之间原样保留，见 [`WORKBUDDY_NATIVE`]）
+    WorkBuddy,
 }
 
 /// 表里的一家
@@ -45,6 +53,8 @@ pub(super) struct Agent {
     pub(super) project: Option<&'static str>,
     /// 这家认得的传输
     transports: &'static [&'static str],
+    /// 写进去以后要用户在它自己的界面里点「信任」才会连上：打开它用的应用标识（#256）；不用点为 None
+    pub(super) trust_app: Option<&'static str>,
 }
 
 impl Agent {
@@ -107,6 +117,16 @@ fn copilot_user(env: &Env) -> Option<PathBuf> {
     )
 }
 
+/// `$WORKBUDDY_CONFIG_DIR/mcp.json`，未设置时 `~/.workbuddy/mcp.json`（WorkBuddy 桌面主进程的
+/// `customMcpConfigPath`；同目录的 `.mcp.json` 是它自己写的连接器代理、`mcp-approvals.json` 是信任记录，都不碰）
+fn workbuddy_user(env: &Env) -> Option<PathBuf> {
+    Some(
+        var(env, "WORKBUDDY_CONFIG_DIR")
+            .unwrap_or_else(|| env.home.join(".workbuddy"))
+            .join("mcp.json"),
+    )
+}
+
 /// macOS `~/Library/Application Support/Claude/claude_desktop_config.json`；
 /// Windows `%APPDATA%\Claude\claude_desktop_config.json`；其余平台没有（官方只发 macOS / Windows）
 fn desktop_user(env: &Env) -> Option<PathBuf> {
@@ -136,17 +156,45 @@ fn desktop_mirrors(env: &Env) -> Vec<PathBuf> {
     }
 }
 
+/// `$KIMI_CODE_HOME/mcp.json`，未设置时 `~/.kimi-code/mcp.json`
+fn kimi_cli_user(env: &Env) -> Option<PathBuf> {
+    Some(
+        var(env, "KIMI_CODE_HOME")
+            .unwrap_or_else(|| env.home.join(".kimi-code"))
+            .join("mcp.json"),
+    )
+}
+
+/// Kimi 桌面版（Kimi.app）自带的 Kimi Code 运行时读的那一份，只在 macOS 上有（本机实测，spec #249）
+fn kimi_desktop_user(env: &Env) -> Option<PathBuf> {
+    cfg!(target_os = "macos").then(|| {
+        env.home.join(
+            "Library/Application Support/kimi-desktop/daimon-share/daimon/runtime/kimi-code/home/mcp.json",
+        )
+    })
+}
+
+/// `$DSH_HOME/profiles/desktop/cordis.patch.yml`，未设置时 `~/.dsh/…`：桌面版那个 profile 的用户补丁层
+fn dsh_user(env: &Env) -> Option<PathBuf> {
+    Some(
+        var(env, "DSH_HOME")
+            .unwrap_or_else(|| env.home.join(".dsh"))
+            .join("profiles/desktop/cordis.patch.yml"),
+    )
+}
+
 const STDIO_HTTP: &[&str] = &["stdio", "http"];
 const ALL: &[&str] = &["stdio", "http", "sse"];
 
 /// 表的先后就是设置里「MCP 的列」的先后，也是升级时按已安装补齐的先后
-pub(super) const AGENTS: [Agent; 6] = [
+pub(super) const AGENTS: [Agent; 10] = [
     Agent {
         id: "claude-code",
         dialect: Dialect::Claude,
         user: claude_user,
         project: Some(".mcp.json"),
         transports: ALL,
+        trust_app: None,
     },
     Agent {
         id: "codex",
@@ -154,6 +202,7 @@ pub(super) const AGENTS: [Agent; 6] = [
         user: codex_user,
         project: Some(".codex/config.toml"),
         transports: STDIO_HTTP,
+        trust_app: None,
     },
     Agent {
         id: "cursor",
@@ -161,6 +210,7 @@ pub(super) const AGENTS: [Agent; 6] = [
         user: cursor_user,
         project: Some(".cursor/mcp.json"),
         transports: STDIO_HTTP,
+        trust_app: None,
     },
     Agent {
         id: "gemini-cli",
@@ -168,6 +218,7 @@ pub(super) const AGENTS: [Agent; 6] = [
         user: gemini_user,
         project: Some(".gemini/settings.json"),
         transports: ALL,
+        trust_app: None,
     },
     Agent {
         id: "claude-desktop",
@@ -175,6 +226,7 @@ pub(super) const AGENTS: [Agent; 6] = [
         user: desktop_user,
         project: None,
         transports: &["stdio"],
+        trust_app: None,
     },
     Agent {
         id: "github-copilot",
@@ -183,6 +235,41 @@ pub(super) const AGENTS: [Agent; 6] = [
         // Copilot 也读项目的 `.mcp.json`（Claude Code 那一份），那一格归 Claude Code；这里只认它自己的
         project: Some(".github/mcp.json"),
         transports: ALL,
+        trust_app: None,
+    },
+    Agent {
+        id: "kimi-cli",
+        dialect: Dialect::Kimi,
+        user: kimi_cli_user,
+        project: Some(".kimi-code/mcp.json"),
+        transports: ALL,
+        trust_app: None,
+    },
+    Agent {
+        id: "kimi-desktop",
+        dialect: Dialect::Kimi,
+        user: kimi_desktop_user,
+        project: None,
+        transports: ALL,
+        trust_app: None,
+    },
+    // 只接用户级（项目里的 MCP 它的界面不认，#247）；通用的 `mcpServers` 写法，另有它自己的几个字段
+    Agent {
+        id: "workbuddy",
+        dialect: Dialect::WorkBuddy,
+        user: workbuddy_user,
+        project: None,
+        transports: STDIO_HTTP,
+        trust_app: Some("com.workbuddy.workbuddy"),
+    },
+    Agent {
+        id: "deepseek-harness",
+        dialect: Dialect::DshPatch,
+        user: dsh_user,
+        // 没有项目级的 MCP 文件（只有命令行 `--patch` 的临时叠加）
+        project: None,
+        transports: STDIO_HTTP,
+        trust_app: None,
     },
 ];
 
@@ -190,15 +277,24 @@ pub(super) fn agent(harness_id: &str) -> Option<&'static Agent> {
     AGENTS.iter().find(|agent| agent.id == harness_id)
 }
 
-/// 这个位置的写法：TOML 按扩展名（与升级前一致），JSON 按 agent；表外的 JSON 位置按通用写法
+/// 这个位置的写法：TOML、YAML 补丁按扩展名（与升级前一致），JSON 按 agent；表外的 JSON 位置按通用写法
 pub(super) fn dialect_of(location: &McpLocation) -> Dialect {
     if super::toml(&location.path) {
         return Dialect::Toml;
+    }
+    if super::patch_file(&location.path) {
+        return Dialect::DshPatch;
     }
     match agent(&location.harness_id) {
         Some(agent) if agent.dialect != Dialect::Toml => agent.dialect,
         _ => Dialect::Cursor,
     }
+}
+
+/// 两家的一条服务写法相同：同一家，或表里同一个 Dialect 的两个产品（Kimi Code 与 Kimi 桌面版）。
+/// 写法相同，专属字段就有对应的写法，原样带过去
+pub(super) fn same_writing(a: &str, b: &str) -> bool {
+    a == b || matches!((agent(a), agent(b)), (Some(x), Some(y)) if x.dialect == y.dialect)
 }
 
 /// 这家认得的传输；表外的（WeiboAP、测试里的位置）按升级前的 stdio / http
@@ -208,14 +304,45 @@ fn transports(harness_id: &str) -> &'static [&'static str] {
 
 // ===== 拒绝的原因（DESIGN「MCP 支持哪些 agent › 写不过去的」）=====
 
+/// Claude Desktop 在句子里的叫法：简体「Claude 桌面应用」（spec #239 第 48 条），各语言照术语表
+pub(super) fn desktop_name() -> String {
+    crate::t!("common.term.claudeDesktop")
+}
+
 pub(super) fn desktop_remote() -> String {
-    crate::t!("mcp.reason.desktopRemote", agent = "Claude Desktop")
+    crate::t!("mcp.reason.desktopRemote", agent = desktop_name())
 }
 pub(super) fn desktop_variables() -> String {
-    crate::t!("mcp.reason.desktopVariables", agent = "Claude Desktop")
+    crate::t!("mcp.reason.desktopVariables", agent = desktop_name())
 }
 pub(super) fn gemini_variables() -> String {
     crate::t!("mcp.reason.geminiVariables", agent = "Gemini CLI")
+}
+
+/// 这个服务名写不进 `target_harness` 的原因：只有 DeepSeek Harness 限制名字（它拿名字当工具名前缀）
+/// 目标位置此刻接不住任何服务：DeepSeek Harness 的补丁文件还不存在（桌面版没打开过；Sophia 不替它建，
+/// 见 `patch::merge`）。扫描时格子当场 ⊘ 说先打开一次，不等写的时候才失败（#258）
+pub(super) fn not_ready(
+    target: &McpLocation,
+    state: &super::State,
+) -> Option<(McpReasonKind, String)> {
+    (super::patch_file(&target.path) && matches!(state, super::State::Missing)).then(|| {
+        (
+            McpReasonKind::TargetNotReady,
+            crate::t!("mcp.write.dshNotReady", agent = "DeepSeek Harness"),
+        )
+    })
+}
+
+pub(super) fn name_refusal(target_harness: &str, name: &str) -> Option<(McpReasonKind, String)> {
+    (agent(target_harness).is_some_and(|agent| agent.dialect == Dialect::DshPatch)
+        && !super::patch::valid_name(name))
+    .then(|| {
+        (
+            McpReasonKind::ServerNameInvalid,
+            super::patch::name_reason(name),
+        )
+    })
 }
 
 /// 值里有没有环境变量引用：`${…}`，或 `$` 后接变量名（`$HOME`）
@@ -317,7 +444,8 @@ impl Canonical {
                 crate::t!("mcp.reason.sseUnsupported", target = target_name),
             ));
         }
-        if source_harness != target_harness && !self.client_fields.is_empty() {
+        // 专属字段按写法认：同一个 Dialect 的两个产品（Kimi Code 与 Kimi 桌面版）之间原样带过去（#257）
+        if !same_writing(source_harness, target_harness) && !self.client_fields.is_empty() {
             let keys: Vec<&str> = self.client_fields.keys().map(String::as_str).collect();
             if source_harness == "codex" {
                 return Some((
@@ -359,9 +487,9 @@ impl Canonical {
     ) -> Option<(McpReasonKind, String)> {
         self.refusal_kind(
             &source.harness_id,
-            agent_name(source),
+            &agent_name(source),
             &target.harness_id,
-            agent_name(target),
+            &agent_name(target),
         )
     }
 
@@ -373,7 +501,7 @@ impl Canonical {
         let ids: Vec<String> = AGENTS
             .iter()
             .filter(|agent| {
-                self.refusal(&source.harness_id, agent_name(source), agent.id, agent.id)
+                self.refusal(&source.harness_id, &agent_name(source), agent.id, agent.id)
                     .is_none()
             })
             .map(|agent| agent.id.to_string())
@@ -634,6 +762,59 @@ pub(super) fn canon_desktop(value: &Value) -> Canonical {
     )
 }
 
+/// WorkBuddy 专属、同一家之间原样保留的字段（它在「自定义连接器」里关掉、停用工具、写说明时存的）
+pub(super) const WORKBUDDY_NATIVE: [&str; 3] = ["disabled", "disabledTools", "description"];
+
+/// Kimi 专属、同一家之间原样保留的字段（官方 mcp 文档：customization/mcp）
+pub(super) const KIMI_NATIVE: [&str; 9] = [
+    "enabled",
+    "deferred",
+    "startupTimeoutMs",
+    "toolTimeoutMs",
+    "enabledTools",
+    "disabledTools",
+    "cwd",
+    "bearerTokenEnvVar",
+    "oauth",
+];
+
+/// Kimi：`command` → stdio；`url` 没有 `transport` → HTTP，`transport: "sse"` → SSE
+pub(super) fn canon_kimi(value: &Value) -> Canonical {
+    let Some(object) = value.as_object() else {
+        return unsupported_with(crate::t!("mcp.canon.notObject"));
+    };
+    let mut verdict = Verdict::default();
+    let mut known = vec!["command", "args", "env", "url", "headers", "transport"];
+    known.extend(KIMI_NATIVE);
+    unknown_fields(object, &known, &mut verdict);
+    let mut bad = false;
+    let command = json_string(object.get("command"), &mut bad);
+    let url = json_string(object.get("url"), &mut bad);
+    let transport_field = json_string(object.get("transport"), &mut bad);
+    let args = json_args(object.get("args"), &mut bad);
+    let env = json_map(object.get("env"), &mut bad);
+    let headers = json_map(object.get("headers"), &mut bad);
+    // 类型不对的由 `finish` 逐个字段说原因
+    let _ = bad;
+    let (transport, url) = match (command.is_some(), url, transport_field.as_deref()) {
+        (true, None, None) => ("stdio", None),
+        (false, Some(url), None) => ("http", Some(url)),
+        (false, Some(url), Some("sse")) => ("sse", Some(url)),
+        _ => ("unsupported", None),
+    };
+    finish(
+        object,
+        verdict,
+        transport,
+        command,
+        url,
+        args,
+        env,
+        headers,
+        native_fields(object, &KIMI_NATIVE),
+    )
+}
+
 // ===== 写 =====
 
 fn strings(values: &[String]) -> Value {
@@ -679,7 +860,7 @@ fn remote_fields(def: &Canonical, key: &str, object: &mut Map<String, Value>) ->
 }
 
 /// 同一家原样带回的专属字段；键不在这一家的名单里就拒绝（计划阶段已按 agent 拒绝，这里再挡一次）
-fn put_native(
+pub(super) fn put_native(
     def: &Canonical,
     allowed: &[&str],
     object: &mut Map<String, Value>,
@@ -739,6 +920,24 @@ pub(super) fn server(def: &Canonical, dialect: Dialect) -> io::Result<Vec<u8>> {
             object.insert("tools".into(), serde_json::json!(["*"]));
             put_native(def, &["tools"], &mut object)?;
         }
+        Dialect::Kimi => {
+            match def.transport.as_str() {
+                "stdio" => stdio_fields(def, &mut object)?,
+                // HTTP 不写 `transport`；SSE 写 `transport: "sse"`，写反了 Kimi 会按另一种连
+                "http" => remote_fields(def, "url", &mut object)?,
+                "sse" => {
+                    object.insert("transport".into(), Value::String("sse".into()));
+                    remote_fields(def, "url", &mut object)?;
+                }
+                _ => {
+                    return Err(refused(crate::t!(
+                        "mcp.write.transportUnknown",
+                        agent = "Kimi"
+                    )))
+                }
+            }
+            put_native(def, &KIMI_NATIVE, &mut object)?;
+        }
         Dialect::Desktop => {
             if def.transport != "stdio" {
                 return Err(refused(desktop_remote()));
@@ -749,7 +948,11 @@ pub(super) fn server(def: &Canonical, dialect: Dialect) -> io::Result<Vec<u8>> {
             stdio_fields(def, &mut object)?;
             put_native(def, &[], &mut object)?;
         }
-        Dialect::Claude | Dialect::Cursor | Dialect::Toml => {
+        Dialect::Claude
+        | Dialect::Cursor
+        | Dialect::Toml
+        | Dialect::DshPatch
+        | Dialect::WorkBuddy => {
             return Err(refused(crate::t!("mcp.write.notHere")));
         }
     }

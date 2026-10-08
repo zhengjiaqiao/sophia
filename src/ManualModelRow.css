@@ -1,0 +1,36 @@
+/* 手填模型 id 那一行（ManualModelRow.tsx）：输入框占满、键在右。框底的 row-line 与上下留白由放它的浮层底栏给
+   （`providers-layer__foot`），这里不另画线、不另缩进——输入框左沿落在浮层的左线上（走查 2026-10-07）。色值一律 var(--…) */
+@import "./tokens.css";
+
+.model-list__manual {
+  flex-shrink: 0;
+}
+
+.model-list__manual-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.model-list__manual-row > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* `试一下再加` 与锚在它下面的提示条：提示条以这一层为锚（同网关行尾 ↻ 的 `gw-row__refetch`） */
+.model-list__manual-key {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* `inline` 时结果写在这一行下面（填短表单的弹窗里，走查 2026-10-08）：12 ink-mute，下 4 接在输入框下，
+   同表单里名称下的同名那一句；长原因折行、不伸出弹窗 */
+/* 出现时滚到看得见（ManualModelRow）：上下各留一道渐隐的宽，停下来不压在渐隐里 */
+.model-list__manual-said {
+  margin: var(--space-xxs) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+  overflow-wrap: anywhere;
+  scroll-margin-block: var(--fade-edge);
+}

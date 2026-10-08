@@ -2,15 +2,15 @@
 /// 同名标记、第二行写什么、选的文件夹那一行能不能勾、勾了哪些要加、`添加 N 个来源`、
 /// 加完的提示。不碰 api、不产 JSX。
 /// 内容（AddSourcePanel）与容器（现在是二级页 AddSourcePage）共用这里的造句。
-import { listText, t, tn, tSpaced, type MessageKey } from "../i18n.ts";
+import { listText, t, tn, type MessageKey } from "../i18n.ts";
 import type { DomainRef } from "./sourcesView.ts";
 
-/// 页名：`添加来源到 CardBox`、`添加来源到用户级`、`添加 MCP 来源到 CardBox`（名字与汉字相接的空格见 `tSpaced`）
+/// 页名：`添加来源到 CardBox`、`添加来源到用户级`、`添加 MCP 来源到 CardBox`（名字与汉字相接的空格见 i18n.ts 的 `spaced`）
 export function addSourceTitle(domain: DomainRef, kind: "skill" | "mcp"): string {
   const place = domain.label;
   return kind === "mcp"
-    ? tSpaced("sources.add.titleMcp", { place })
-    : tSpaced("sources.add.titleSkill", { place });
+    ? t("sources.add.titleMcp", { place })
+    : t("sources.add.titleSkill", { place });
 }
 
 /// 顶部 `选择文件夹…` 右侧的灰字
@@ -34,7 +34,7 @@ export const sameNameTip = () => t("sources.add.sameNameTip");
 
 /// 选的文件夹已经在这个位置的来源里：`它已经在 CardBox 的来源里`
 export function alreadySubscribedText(domain: DomainRef): string {
-  return tSpaced("sources.add.already", { place: domain.label });
+  return t("sources.add.already", { place: domain.label });
 }
 
 /// 第二行的数量：`39 个 skill` / `3 个 MCP`（同来源管理页）

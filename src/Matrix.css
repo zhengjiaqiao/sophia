@@ -224,16 +224,6 @@
   flex: 1 1 0;
 }
 
-/* 名字的后半截（CLAUDE / DESKTOP）：同名字字重与墨色，紧贴第一行；表里有合组时占满小标那一格的高 */
-.mx-colbtn__tail {
-  display: block;
-  margin-top: -2px;
-}
-
-.mx-colbtn__tail.is-slotted {
-  height: calc(1px + 2 * var(--space-xxs) + var(--size-label) * var(--leading-label));
-}
-
 /* 表里有合组时，其余列在小标的位置留空：一条结构线 + 一行小标那么高，列头同高、计数对齐 */
 .mx-colbtn__slot {
   display: block;
@@ -577,7 +567,7 @@ html[data-input="keyboard"] .mx-name:focus {
 
 /* 整格命中：按钮就是一整格（列宽 × 行高 34，含压住行线的那 1）。定宽定高而不是 100%：
    外面包着提示框与忙碌的锚层，它们随按钮大小，锚点就是这一格。列宽随格数（Matrix.tsx agentColumnWidth：
-   4 格以内 88、5 格 76、6 格 64），面板上写进 --mx-col-w */
+   4 格以内 88、5 格 76、6 格及以上 64），面板上写进 --mx-col-w */
 .mx-cellbtn {
   display: flex;
   align-items: center;

@@ -65,9 +65,9 @@ export function unportableText(service: string, source: string, field?: string |
 /// 这一格搬不过去，是不是目标 agent 本身就做不到（远程服务器进不了 Claude Desktop、某家不支持 SSE），
 /// 而不是这一条定义有什么特别。这种 ⊘ 自己就说清了，名字后不再挂 `X 不支持`：Claude Desktop 进列之后
 /// 每个远程服务器都会挂一条，同一件事说两遍（① 2026-09-27）。按 core 给的原因种类判断（`desktopRemote`、
-/// `sseUnsupported`，见 `mcp/agents.rs` 的拒绝原因），不认句子的文字
+/// `sseUnsupported`、`targetNotReady`——DeepSeek Harness 还没打开过，见 `mcp/agents.rs` 的拒绝原因），不认句子的文字
 export function isAgentLimit(kind: McpReasonKind | undefined): boolean {
-  return kind === "desktopRemote" || kind === "sseUnsupported";
+  return kind === "desktopRemote" || kind === "sseUnsupported" || kind === "targetNotReady";
 }
 
 /// 有这一项的格：●、可点（点＝确认后从这个 agent 的配置里删掉）。可点的不带 reason，删完那句由调用方给

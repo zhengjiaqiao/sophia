@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { McpDiff, McpEndpoint, McpFieldValue } from "./types.ts";
 import { listText, t, tn, tRich } from "./i18n.ts";
+import { parseBackendError, type ParsedBackendError } from "./backendError.ts";
+import { copyDetails } from "./diagnostics.ts";
 import { mcpDiffTable } from "./mcpDiffTable.ts";
 import {
   Button,
+  Details,
   DiffTable,
   Mono,
   Note,
@@ -27,10 +30,13 @@ import "./McpDiffPanel.css";
 /// - 比不了（取差异出错）时末尾一颗 `在访达中显示 ↗`：离开 Sophia，浅键（↗ 由组件画）；比出来时路径已在表里
 ///
 /// 不碰 api：比对结果由调用方懒取（`api.mcpFieldDiff`）后传进来。
-export type McpDiffState = McpDiff | "loading" | Error;
+/// 取差异出错是 `{ failure }`：一句给人看，原文（`[detail]`）进句子前面的「!」——抽屉是常驻的，原文不能丢（#302）
+export type McpDiffState = McpDiff | "loading" | { failure: ParsedBackendError };
 
 export interface McpDiffPanelProps {
   diff: McpDiffState;
+  /// 表头小标「N 份不一样」的 N：有几种不一样的定义（同行上，`differingCopies`）；不给按卷进的位置数
+  copies?: number;
   /// 位置 id → 给人看的一份的名字（`用户级 · Claude Code`，`mcpCopyName`）
   labelOf: (locationId: string) => string;
   /// 位置 id → 它的配置文件路径（「原件」那一列）
@@ -88,6 +94,7 @@ function FieldValue({ value, ends }: { value: McpFieldValue; ends: [number, numb
 
 export function McpDiffPanel({
   diff,
+  copies,
   labelOf,
   pathOf,
   revealPath,
@@ -102,10 +109,14 @@ export function McpDiffPanel({
     </div>
   ) : null;
   if (diff === "loading") return <Comparing />;
-  if (diff instanceof Error) {
+  if ("failure" in diff) {
+    const { message, detail } = diff.failure;
     return (
       <div className="mcp-diff">
-        <DiffNote>{t("mcp.diff.failed", { message: diff.message })}</DiffNote>
+        <DiffNote>
+          {detail ? <Details size="row" text={detail} onCopy={(raw) => copyDetails(raw)} /> : null}
+          {t("mcp.diff.failed", { message })}
+        </DiffNote>
         {revealLink}
       </div>
     );
@@ -121,7 +132,7 @@ export function McpDiffPanel({
     <div className="mcp-diff">
       {table.rows.length > 0 ? (
         <DiffTable
-          label={tn("mcp.differ.tag", diff.locationIds.length)}
+          label={tn("mcp.differ.tag", copies ?? diff.locationIds.length)}
           fields={[
             t("mcp.detail.origin"),
             ...table.fields.map((field) => <Mono inherit>{field}</Mono>),
@@ -166,6 +177,7 @@ export function McpDiffPanel({
 export function McpDiffSection({
   name,
   locationIds,
+  copies,
   load,
   labelOf,
   pathOf,
@@ -177,6 +189,8 @@ export function McpDiffSection({
   name: string;
   /// 定义不一样的那几处位置
   locationIds: string[];
+  /// 段首小标「N 份不一样」的 N：有几种不一样的定义，与行上同一个数（`differingCopies`，走查 2026-10-07）
+  copies: number;
   load: (name: string, locationIds: string[]) => Promise<McpDiff>;
   /// 变了就重新比对一次（重扫之后：位置没变、定义可能变了）
   reloadKey?: unknown;
@@ -193,7 +207,7 @@ export function McpDiffSection({
     shown.current = what;
     load(name, ids.split("\n")).then(
       (found) => alive && setDiff(found),
-      (e) => alive && setDiff(new Error(String(e))),
+      (e) => alive && setDiff({ failure: parseBackendError(String(e)) }),
     );
     return () => {
       alive = false;
@@ -201,9 +215,10 @@ export function McpDiffSection({
   }, [name, ids, load, reloadKey]);
   return (
     <div className="mcp-diff-section">
-      <div className="mcp-diff__title">{tn("mcp.differ.tag", locationIds.length)}</div>
+      <div className="mcp-diff__title">{tn("mcp.differ.tag", copies)}</div>
       <McpDiffPanel
         diff={diff}
+        copies={copies}
         labelOf={labelOf}
         pathOf={pathOf}
         revealPath={revealPath}

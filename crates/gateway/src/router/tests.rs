@@ -162,6 +162,7 @@ impl Harness {
             max_body_bytes: 0,
             proxy: None,
             claude_routing_path: None,
+            workbuddy_routing_path: None,
             router_token: Arc::new(|| Err("not set".to_owned())),
             keepalive: Duration::ZERO,
             locale: None,
@@ -908,6 +909,7 @@ async fn native_streaming_response_is_forwarded_incrementally() {
         max_body_bytes: 0,
         proxy: None,
         claude_routing_path: None,
+        workbuddy_routing_path: None,
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
         locale: None,
@@ -948,6 +950,7 @@ impl Harness {
             max_body_bytes: 0,
             proxy: None,
             claude_routing_path: None,
+            workbuddy_routing_path: None,
             router_token: Arc::new(|| Err("not set".to_owned())),
             keepalive: Duration::ZERO,
             locale: None,
@@ -1413,6 +1416,7 @@ async fn connect_failure_is_retried_once() {
         max_body_bytes: 0,
         proxy: None,
         claude_routing_path: None,
+        workbuddy_routing_path: None,
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
         locale: None,
@@ -2252,6 +2256,7 @@ async fn a_route_without_an_owner_fails_closed() {
         max_body_bytes: 0,
         proxy: None,
         claude_routing_path: None,
+        workbuddy_routing_path: None,
         router_token: Arc::new(|| Err("not set".to_owned())),
         keepalive: Duration::ZERO,
         locale: None,
@@ -2291,6 +2296,10 @@ async fn routes_without_a_provider_use_the_startup_upstream_and_the_legacy_key()
 // 家 claude 的路由测试，复用上面的假上游与 Harness
 #[path = "claude_tests.rs"]
 mod claude_tests;
+
+// 家 workbuddy 的路由测试（#266）
+#[path = "workbuddy_tests.rs"]
+mod workbuddy_tests;
 
 /// `router.log` 有上限（spec 2026-10-04-local-diagnostics R2）：已到上限、或这一行写进去会越过上限，
 /// 先改名 `router.log.1`，只留一份旧的
@@ -2444,6 +2453,7 @@ impl VerdictHarness {
             max_body_bytes: 0,
             proxy: None,
             claude_routing_path: None,
+            workbuddy_routing_path: None,
             router_token: Arc::new(|| Err("not set".to_owned())),
             keepalive: Duration::ZERO,
             locale: None,

@@ -28,6 +28,71 @@ use std::path::PathBuf;
 /// 市场各入口的错误：给用户看的一句中文。联网之外的失败都在 core 里定句子
 pub type MarketResult<T> = Result<T, String>;
 
+/// 文件系统出错的系统原文与路径不进给人看的那一句（DESIGN「文案表达 › 出错」：装 / 更新的原因出在会自己消失的
+/// 提示条里，不放「!」），去隐私后记进日志、反馈时随诊断带上。`what` 是英文标签，`at` 是出错的路径。
+/// 在调用处直接调，日志里的位置才是出错处
+#[track_caller]
+pub(crate) fn log_raw(what: &str, at: &std::path::Path, error: &dyn std::fmt::Display) {
+    log::warn!("{}", raw_line(what, at, error));
+}
+
+/// `log_raw` 记的那一行：标签、路径、调用处 `文件:行`、原文，整行去隐私并限长（`redact::MAX_CHARS`）
+#[track_caller]
+fn raw_line(what: &str, at: &std::path::Path, error: &dyn std::fmt::Display) -> String {
+    let place = std::panic::Location::caller();
+    crate::redact::redact(&format!(
+        "{what} {} failed ({}:{}): {error}",
+        at.display(),
+        place.file(),
+        place.line(),
+    ))
+}
+
+/// 解包出错：给人看的一句 + 技术原文（系统报错、包里的路径）。会留在页面上的（从链接安装、安装页的计划）
+/// 原文进「!」（命令层走 `cmd_error` 的 `[detail]`）；进提示条的（装、更新的结果）用 `into_sentence`，
+/// 只留一句、原文进日志
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveError {
+    pub sentence: String,
+    /// 技术原文（未去隐私；命令层与日志各自去隐私）。给人看的一句已说全时为 None
+    pub detail: Option<String>,
+}
+
+impl ArchiveError {
+    /// 只有一句
+    pub(crate) fn said(sentence: String) -> Self {
+        Self {
+            sentence,
+            detail: None,
+        }
+    }
+
+    /// 一句 + 原文
+    pub(crate) fn with_detail(sentence: String, detail: impl std::fmt::Display) -> Self {
+        Self {
+            sentence,
+            detail: Some(detail.to_string()),
+        }
+    }
+
+    /// 只要一句（提示条）：原文去隐私后记进日志
+    #[track_caller]
+    pub(crate) fn into_sentence(self) -> String {
+        if let Some(detail) = &self.detail {
+            let place = std::panic::Location::caller();
+            log::warn!(
+                "{}",
+                crate::redact::redact(&format!(
+                    "archive failed ({}:{}): {detail}",
+                    place.file(),
+                    place.line()
+                ))
+            );
+        }
+        self.sentence
+    }
+}
+
 /// 还没实现的桩统一返回这一句
 pub const NOT_IMPLEMENTED: &str = "未实现"; // i18n-exempt: 没有调用方的桩占位句，不会显示在界面上
 
@@ -287,6 +352,32 @@ pub enum McpFieldKind {
     Arg,
 }
 
+/// 按界面语言写的一段字（#305）。精选数据写成 `{"zh-Hans": …, "zh-Hant": …, "en": …}`；
+/// 官方目录照上游原文，只有一种写法（`Plain`）。显示哪种由前端按当前语言取（`src/market/installView.ts`
+/// 的 `localText`，缺某种语言时的回退写在那里），换语言不用重拉；core 只存、只搜
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LocalText {
+    Plain(String),
+    ByLang(BTreeMap<String, String>),
+}
+
+impl LocalText {
+    /// 所有写法：搜索时每种语言都看
+    pub fn texts(&self) -> Vec<&str> {
+        match self {
+            LocalText::Plain(text) => vec![text.as_str()],
+            LocalText::ByLang(map) => map.values().map(String::as_str).collect(),
+        }
+    }
+}
+
+impl From<String> for LocalText {
+    fn from(text: String) -> Self {
+        LocalText::Plain(text)
+    }
+}
+
 /// 安装页「要填的」一项（R10）。`key` 就是定义里 `${KEY}` 占位的名字
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -296,9 +387,15 @@ pub struct McpFieldSpec {
     pub required: bool,
     /// 密钥：框遮住，只写进目标配置文件，Sophia 不存、不记日志
     pub secret: bool,
-    /// 一句说明（可空）
+    /// 官方目录给的一句说明（上游原文，可空），整句当标签
     #[serde(default)]
     pub description: Option<String>,
+    /// 精选写的标签（#305）：输入框的名字、禁用原因里的那个词。有它时不看 `description`
+    #[serde(default)]
+    pub label: Option<LocalText>,
+    /// 精选写的一句怎么取得（#305），常显在输入框下
+    #[serde(default)]
+    pub help: Option<LocalText>,
 }
 
 /// 粘贴 JSON 解析的结果（R8，T4 `mcp/define.rs` 产出）
@@ -373,6 +470,10 @@ pub struct McpTargetCheck {
     /// 写不过去 / 只写部分的原因：`Codex 里已经有一个不一样的 brave-search`、
     /// `只写 filesystem · github 是远程服务器，要在 Claude Desktop 自己的「连接器」里添加`
     pub reason: Option<String>,
+    /// `reason` 背后的精确值（第二层，安装页悬停这一行时出）：无法保留的那几个字段名，
+    /// 主句只说「部分设置无法保留」（#321）。没有为 None
+    #[serde(default)]
+    pub detail: Option<String>,
     /// 生效时机等附注：`重启 Claude Desktop 后生效`
     pub note: Option<String>,
     /// 密钥提醒（S19）：往项目里的 git 仓库写像密钥的值时为 `Remind`（安装页出「同时加进 .gitignore」）；
@@ -392,7 +493,8 @@ pub struct McpCatalogEntry {
     pub name: String,
     /// 发布方（小灰字）
     pub publisher: String,
-    pub description: String,
+    /// 一句说明：精选按界面语言写三种，官方目录是上游原文
+    pub description: LocalText,
     /// 定义模板，值里用 `${KEY}` 标出要填的
     pub definition: McpDefinitionInput,
     #[serde(default)]
@@ -451,6 +553,34 @@ pub fn curated_mcp() -> Vec<McpCatalogEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `log_raw` 记的那一行：路径里的用户名、原文里的凭据去掉，带调用处，整行限长
+    #[test]
+    fn raw_line_drops_user_paths_and_secrets_and_is_capped() {
+        let line = raw_line(
+            "place-extracted",
+            std::path::Path::new("/Users/alice/.agents/skills/pdf"),
+            &"denied OPENAI_API_KEY=abc123 sk-ant-api03-abcdefghijklmnopqrstuv",
+        );
+        assert!(
+            line.starts_with("place-extracted ~/.agents/skills/pdf failed ("),
+            "{line}"
+        );
+        assert!(line.contains("market/mod.rs:"), "{line}");
+        assert!(line.ends_with("denied OPENAI_API_KEY=… …"), "{line}");
+        assert!(
+            !line.contains("alice") && !line.contains("abc123"),
+            "{line}"
+        );
+
+        let long = "x".repeat(crate::redact::MAX_CHARS * 3);
+        let line = raw_line("write-extracted", std::path::Path::new("/tmp/a"), &long);
+        assert!(
+            line.chars().count() <= crate::redact::MAX_CHARS + 1,
+            "{}",
+            line.len()
+        );
+    }
 
     /// 随包数据读得出来：格式错了 `unwrap_or_default` 会静默变空，这里兜住
     #[test]

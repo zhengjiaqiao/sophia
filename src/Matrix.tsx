@@ -11,12 +11,12 @@
 ///
 /// 版式（Matrix.css）：
 /// - 面板定宽 776 = 复选 34 + 名称 246 + 来源 144 + 4 × 88；agent 少时多出的给名称列。
-///   多于 4 格（MCP 的 Claude 合组、项目里的 Local / Project）时每格收窄：5 格 76、6 格 64，名称列至少留 200，
-///   面板宽不变——切页签时右端的键不跳（⑦）
+///   多于 4 格（MCP 按品牌合组的 Claude、Kimi）时每格收窄：5 格 76、6 格及以上 64，名称列至少留 200
+///   （7 格靠最小窗口的面板 834，见 `panelColumns`），面板宽不变——切页签时右端的键不跳（⑦）
 /// - 表头底 1px `hairline` 结构线；行与行 1px `row-line`；行高 34
 /// - 悬停只出行带，不出列带（D23）
 /// - 格子提示框：一行动词，格子正上方 6，停留 700ms；格间移动每格重新计时，所以不追着鼠标
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -69,7 +69,7 @@ const PLACE_W = 88;
 const PLACE_W_MIN = 72;
 const ORIGIN_W_MIN = 80;
 const COL_W = 88;
-/// 5 格、6 格时每格的宽（DESIGN「MCP 支持哪些 agent › 格宽」）
+/// 5 格、6 格及以上时每格的宽（DESIGN「MCP 支持哪些 agent › 格宽」）；64 是下限：WORKBUDDY 一个词约 60 宽
 const COL_W_5 = 76;
 const COL_W_6 = 64;
 /// 名字前的拉手列：拉手 18 + 6（Matrix.css 的 `--mx-handle-col` 同值）
@@ -94,8 +94,10 @@ export function panelWidth(available: number): number {
   return Math.min(PANEL_MAX, Math.max(PANEL_W, Math.floor(available)));
 }
 
-/// 这么宽的面板里位置列、来源列各多宽：776 时同原来（`placeWidths` / 来源 144）；更宽时多出来的按
-/// 名称 : 位置 : 来源 在 776 时的比例分，agent 列不变，名称列（1fr）拿余下的。没有位置列时 place 为 null
+/// 这么宽的面板里位置列、来源列各多宽：776 时同原来（`placeWidths` / 来源 144）；更宽时多出来的先还给
+/// 名称列——776 时它被 agent 列挤到 246 以下的那部分（#261：MCP `全部` 7 格时只剩 142，最小窗口的面板 834
+/// 多出的 58 全给它，名称列 200）——补足之后余下的按 名称 : 位置 : 来源 的比例分；agent 列不变，名称列（1fr）
+/// 拿余下的。没有位置列时 place 为 null
 export function panelColumns(
   agentColumns: number,
   hasPlace: boolean,
@@ -105,11 +107,14 @@ export function panelColumns(
   const name =
     PANEL_W - CHECK_W - agentColumns * agentColumnWidth(agentColumns) - base.place - base.origin;
   const extra = Math.max(0, width - PANEL_W);
-  const share = (w: number) => w + Math.round((extra * w) / (name + base.place + base.origin));
+  const owed = hasPlace ? Math.min(extra, Math.max(0, NAME_W - name)) : 0;
+  const rest = extra - owed;
+  const share = (w: number) =>
+    w + Math.round((rest * w) / (name + owed + base.place + base.origin));
   return { place: hasPlace ? share(base.place) : null, origin: share(base.origin) };
 }
 
-/// 每个 agent 格的宽：一共不超过 4 格时 88；5 格 76；6 格（`全部` 下 Claude 三格 + 另外 3 家）64
+/// 每个 agent 格的宽：一共不超过 4 格时 88；5 格 76；6 格及以上 64（`全部` 下 Claude 三格 + Kimi 两格 + 另外 2 家＝7 格）
 export function agentColumnWidth(agentColumns: number): number {
   return agentColumns <= MAX_AGENTS ? COL_W : agentColumns === 5 ? COL_W_5 : COL_W_6;
 }
@@ -174,19 +179,17 @@ export interface MatrixColumn {
   /// 列头名：agent 名原样传进来，列头经 `Cap` 显示为 Condensed 大写（列头是 agent 身份）
   name: string;
   /// 列头第二行（`ink-faint` 小标，经 `Cap` 大写）；不给就只有一行。
-  /// 在合组里时是组头线下这一格的小标（MCP 的 `仅自己` / `团队共享`）
+  /// 在合组里时是组头线下这一格的小标（MCP 的 `CODE` / `DESKTOP`、Claude Code 的 `仅自己` / `团队共享`）
   scope?: string;
-  /// 名字放不下一行时的后半截（`Claude` + `Desktop`）：第二行与名字同字重、同墨色，读成一个名字，
-  /// 占小标那一行的位置（spec 2026-09-30-mcp-claude-self-team R2）
-  nameTail?: string;
   /// 合组列头：相邻几列同一个 `group.id` 时共用一个图标 + 名字，下面一条结构线横跨这几格，
-  /// 线下每格只写小标（`scope`）+ 计数（MCP 的 Claude Code：`CLAUDE CODE` 下分 `仅自己` / `团队共享`）
+  /// 线下每格只写小标（`scope`）+ 计数（MCP 按品牌：`CLAUDE` 下分 `CODE` / `DESKTOP`，#251）
   group?: { id: string; agentId: string; name: string };
   /// 列头第三层：这个 agent 下已加上的格数（只写分子）
   count: number;
   /// 列头提示框：`Claude Code · 41 个已加上`
   tip: string;
-  /// 列头提示框另起的一行补充说明（MCP 项目位置下 Copilot 列头的 `Copilot 也会读这个项目的 .mcp.json…`）
+  /// 列头提示框另起的一行补充说明（MCP 项目位置下 Copilot 列头的 `Copilot 也会读这个项目的 .mcp.json…`）；
+  /// `\n` 再分行（skill 页合成列：`Kimi Code、Kimi 桌面版都读这里` + 路径）
   note?: string;
   /// 这一列的目录还不存在：图标外一圈虚线、名字退到 `ink-faint`、计数空（加上第一个时会自动创建）
   missing?: boolean;
@@ -763,7 +766,7 @@ export default function Matrix(props: MatrixProps) {
   const widths = panelColumns(columns.length, placeLabel !== undefined, width);
   const template = [
     `${CHECK_W}px`,
-    // 名称列吸收面板里余下的宽度：776 时 4 格 246、少于 4 格更宽、5 格（每格 76）218、6 格（每格 64）214
+    // 名称列吸收面板里余下的宽度：776 时 4 格 246、少于 4 格更宽、5 格（每格 76）218、6 格（每格 64）214；7 格多位置时 776 下只剩 142，变宽先还它（`panelColumns`）
     "minmax(0, 1fr)",
     ...(widths.place !== null ? [`${widths.place}px`] : []),
     `${widths.origin}px`,
@@ -1092,8 +1095,12 @@ export default function Matrix(props: MatrixProps) {
           col.note ? (
             <>
               {col.tip}
-              <br />
-              {col.note}
+              {col.note.split("\n").map((line, i) => (
+                <Fragment key={i}>
+                  <br />
+                  {line}
+                </Fragment>
+              ))}
             </>
           ) : (
             col.tip
@@ -1107,7 +1114,10 @@ export default function Matrix(props: MatrixProps) {
           className={`mx-colbtn${col.missing ? " is-missing" : ""}`}
           aria-label={
             col.note
-              ? t("skills.matrix.colSortNote", { tip: col.tip, note: col.note })
+              ? t("skills.matrix.colSortNote", {
+                  tip: col.tip,
+                  note: col.note.split("\n").join(" · "),
+                })
               : t("skills.matrix.colSort", { tip: col.tip })
           }
           onClick={() => sortBy(col.id)}
@@ -1122,11 +1132,7 @@ export default function Matrix(props: MatrixProps) {
               </span>
             </>
           )}
-          {col.nameTail ? (
-            <span className={`mx-colbtn__name mx-colbtn__tail${slot ? " is-slotted" : ""}`}>
-              <Cap>{col.nameTail}</Cap>
-            </span>
-          ) : col.scope ? (
+          {col.scope ? (
             <span className="mx-colbtn__scope">
               <Cap>{col.scope}</Cap>
             </span>
@@ -1139,8 +1145,8 @@ export default function Matrix(props: MatrixProps) {
       </Tooltip>
     </div>
   );
-  // 有合组或有两行名字的列时，其余列在第二行的位置留空，列头同高、计数对齐
-  const grouped = columns.some((col) => col.group !== undefined || col.nameTail !== undefined);
+  // 有合组时，其余列在第二行的位置留空，列头同高、计数对齐
+  const grouped = columns.some((col) => col.group !== undefined);
   const header = (
     <div className="mx-grid mx-head" style={gridStyle}>
       <div className="mx-head__check">

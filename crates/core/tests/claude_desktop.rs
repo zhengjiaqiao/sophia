@@ -1085,7 +1085,7 @@ fn needs_write_compares_the_written_address_and_models() {
 }
 
 /// R29（2026-09-30 改）：已选全部写进 `inferenceModels`、按选择顺序、不设上限。第一个 `claude-sonnet-5`
-/// （Claude 把第一项当初始默认）；多于一个时最后一个 `claude-haiku-4-5`（Claude 用 Haiku 档起标题、跑子任务）；
+/// （Claude 把第一项当初始默认）；多于一个时最后一个 `claude-haiku-4-5`（起标题、子任务由路由改用当前模型，#260）；
 /// 其余依次 `claude-sonnet-5-r2`、`-r3`……。只有一个时只写一项
 #[test]
 fn the_gateway_address_and_models_have_the_contract_shape() {

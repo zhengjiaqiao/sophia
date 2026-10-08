@@ -18,7 +18,7 @@ function loadTimeCalls(src: string, path = "x.tsx"): string[] {
     if (!bindings || !ts.isNamedImports(bindings)) continue;
     for (const el of bindings.elements) {
       const imported = (el.propertyName ?? el.name).text;
-      if (["t", "tn", "tRich", "tSpaced"].includes(imported)) names.add(el.name.text);
+      if (["t", "tn", "tRich"].includes(imported)) names.add(el.name.text);
     }
   }
   const out: string[] = [];

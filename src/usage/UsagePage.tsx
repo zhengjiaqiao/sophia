@@ -7,7 +7,7 @@ import type {
   MenuBarView,
   StackedSize,
   UsageDisplayMode,
-  UsageAgentId,
+  UsageItemKey,
   UsageRefresh,
   UsageSettings,
   UsageView,
@@ -24,7 +24,7 @@ import {
   Tabs,
 } from "../ui/index.ts";
 import {
-  MAX_MENU_BAR_AGENTS,
+  MAX_MENU_BAR_ITEMS,
   agentChoices,
   agentDisplay,
   choosePrimary,
@@ -34,6 +34,8 @@ import {
   setAgentDisplay,
   toggleMenuBarAgent,
   usageAgentName,
+  usageItemBrand,
+  usageItemName,
   windowCount,
 } from "./usageView.ts";
 import {
@@ -49,7 +51,7 @@ import "./UsagePage.css";
 /// 下面配置菜单栏上显示什么。
 /// 靠标题与留白分组、不用卡片：组间 48，组内行距 12，行与行之间不画线，行首标签列统一 92 对齐。
 /// - 「菜单栏显示用量」一节：节头带总开关（同模型页的能力节），节里预览、数字（剩余 ｜ 已用）、刷新。
-/// - 「显示哪些 agent」：选择片带 agent 标志；最多 3 个，选满后其余的点不了并说原因。
+/// - 「显示哪些 agent」：选择片带标志；最多 2 项（agent 与提供商合计），选满后其余的点不了并说原因。
 /// - 每个选中的 agent 一栏、左右并排：主窗口、第二窗口（紧凑滑槽，选项按它实际拿到的窗口生成，窗口名原样）；
 ///   选了第二窗口才有「两行叠放」，打开叠放才有「字号」。
 /// 总开关关着时，节里的预览、数字、刷新调淡、点不了，节头下写一句「菜单栏没显示用量」（线框 5A 的注）。
@@ -174,9 +176,9 @@ export function UsageBody({
   view: UsageView;
   onChange: (next: UsageSettings) => void;
   /// 「当前用量」原因行右端的「再试一次」；不给就只写原因
-  onRetry?: (agent: UsageAgentId) => void;
+  onRetry?: (key: UsageItemKey) => void;
   /// 这个 agent 的「再试一次」正在跑
-  retrying?: (agent: UsageAgentId) => boolean;
+  retrying?: (key: UsageItemKey) => boolean;
   /// Claude 一栏的「连接 Claude 用量」；不给就只写句子
   connect?: ConnectHandlers;
 }) {
@@ -189,21 +191,21 @@ export function UsageBody({
       {/* 当前用量（产品负责人 2026-09-29：只有设置显得怪）：与托盘同一种画法，每个已登录的 agent 一栏 */}
       <div className="usage-page__now">
         <SectionLabel rule>{t("usage.now.title")}</SectionLabel>
-        {view.tray.length === 0 ? (
+        {view.items.length === 0 ? (
           <p className="usage-page__hint">{t("usage.signedIn.none")}</p>
         ) : (
           <div className="usage-page__cols">
-            {view.tray.map((tray) => {
-              const name = usageAgentName(tray.agent);
+            {view.items.map((tray) => {
+              const name = tray.name;
               return (
                 <div
-                  key={tray.agent}
+                  key={tray.key}
                   className="usage-page__now-col"
                   aria-label={t("usage.now.colLabel", { name })}
                 >
                   <div className="usage-page__now-head">
                     <span className="usage-page__agent-name">
-                      <AgentIcon id={tray.agent} name={name} size={16} />
+                      <AgentIcon id={tray.brand} name={name} size={16} />
                       {name}
                     </span>
                     {tray.updatedText ? (
@@ -212,8 +214,8 @@ export function UsageBody({
                   </div>
                   <UsageWindows
                     usage={tray}
-                    retrying={retrying(tray.agent)}
-                    onRetry={onRetry ? () => onRetry(tray.agent) : undefined}
+                    retrying={retrying(tray.key)}
+                    onRetry={onRetry ? () => onRetry(tray.key) : undefined}
                     connect={connect}
                   />
                 </div>
@@ -275,7 +277,7 @@ export function UsageBody({
               {choices.map((c) => {
                 const label = (
                   <span className="usage-page__agent">
-                    <AgentIcon id={c.id} name={c.name} size={14} />
+                    <AgentIcon id={c.brand} name={c.name} size={14} />
                     {c.name}
                   </span>
                 );
@@ -294,7 +296,7 @@ export function UsageBody({
                 );
               })}
             </ChipRow>
-            <p className="usage-page__hint">{tn("usage.agents.max", MAX_MENU_BAR_AGENTS)}</p>
+            <p className="usage-page__hint">{tn("usage.agents.max", MAX_MENU_BAR_ITEMS)}</p>
           </>
         )}
       </div>
@@ -303,14 +305,14 @@ export function UsageBody({
       <div className="usage-page__agents">
         {menuBarAgents(view).map((id) => {
           const d = agentDisplay(s, id);
-          const name = usageAgentName(id);
+          const name = usageItemName(view, id);
           const set = (patch: Parameters<typeof setAgentDisplay>[2]) =>
             onChange(setAgentDisplay(s, id, patch));
           return (
             <div key={id} className="usage-page__agent-col" aria-label={name}>
               <SectionLabel rule>
                 <span className="usage-page__agent">
-                  <AgentIcon id={id} name={name} size={14} />
+                  <AgentIcon id={usageItemBrand(view, id)} name={name} size={14} />
                   {name}
                 </span>
               </SectionLabel>
@@ -374,8 +376,8 @@ export function MenuBarPreview({ menuBar }: { menuBar: MenuBarView }) {
     <span className="usage-preview">
       <img className="usage-preview__icon" src={trayIcon} alt="" />
       {menuBar.segments.map((seg) => (
-        <span key={seg.agent} className={`usage-preview__seg${seg.stale ? " is-stale" : ""}`}>
-          <AgentIcon id={seg.agent} name={usageAgentName(seg.agent)} size={12} />
+        <span key={seg.key} className={`usage-preview__seg${seg.stale ? " is-stale" : ""}`}>
+          <AgentIcon id={seg.brand} name={usageAgentName(seg.brand)} size={12} />
           <span
             className={`usage-preview__nums${seg.lines.length > 1 ? ` is-stacked is-${seg.stackedSize}` : ""}`}
           >

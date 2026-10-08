@@ -86,6 +86,8 @@ fn claude_harness() -> Harness {
     Harness {
         id: "claude-code".into(),
         display_name: "Claude Code".into(),
+        brand: "claude-code".into(),
+        brand_name: "Claude Code".into(),
         project_dir: None,
         global_dir: None,
         universal: false,

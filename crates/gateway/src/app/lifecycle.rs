@@ -90,6 +90,8 @@ pub struct QuitPreview {
     pub claude: bool,
     /// Claude 桌面应用在运行（切回要先退出再重新打开）
     pub claude_running: bool,
+    /// WorkBuddy 的 models.json 里写着 Sophia 的模型：退出会拿掉（WorkBuddy 自动重读，不用重启），下次打开写回
+    pub workbuddy: bool,
 }
 
 /// 退出收尾进行到哪一步（确认框里的忙碌文案）
@@ -131,6 +133,11 @@ impl App {
                     }
                     Untouched::Claude => sophia_core::t!(
                         "models.claude.routerNotReadyBusy",
+                        port = port,
+                        error = reason
+                    ),
+                    Untouched::WorkBuddy => sophia_core::t!(
+                        "models.workbuddy.routerNotReady",
                         port = port,
                         error = reason
                     ),
@@ -216,9 +223,55 @@ impl App {
         wanted
     }
 
+    /// 开着、却一个第三方模型都没选（升级后旧版按 agent 存的网关不再读，#259；或设置被手改过）：悄悄改回官方、
+    /// 记成没开着——不然一打开就报错。Codex 改回之后返回真；Claude 照「拨关」做（在运行时等重启生效）。
+    /// 做不成只记日志，不出提示
+    fn switch_back_without_picks(
+        &self,
+        settings: &mut GatewaySettings,
+        codex_wanted: bool,
+    ) -> bool {
+        let mut codex_back = false;
+        if codex_wanted && self.published_for(Agent::Codex).is_ok_and(|p| p.is_empty()) {
+            let done = if self.codex_on() {
+                self.unwrite_codex_locked(true).map(|_| ())
+            } else {
+                settings.enabled = Some(false);
+                self.save(settings)
+            };
+            match done {
+                Ok(()) => codex_back = true,
+                Err(error) => log::warn!("switch-back codex without picks: {error}"),
+            }
+            if let Ok(fresh) = self.load() {
+                *settings = fresh;
+            }
+        }
+        let claude = self.load_claude().unwrap_or_default();
+        if (claude.enabled || claude.applied.is_some())
+            && self
+                .published_for(Agent::Claude)
+                .is_ok_and(|p| p.is_empty())
+        {
+            if let Err(error) = self.restore_claude_locked() {
+                log::warn!("switch-back claude without picks: {error}");
+            }
+        }
+        if self.load_workbuddy().is_ok_and(|s| s.enabled)
+            && self
+                .published_for(Agent::WorkBuddy)
+                .is_ok_and(|p| p.is_empty())
+        {
+            if let Err(error) = self.restore_workbuddy_locked() {
+                log::warn!("switch-back workbuddy without picks: {error}");
+            }
+        }
+        codex_back
+    }
+
     /// 打开 Sophia 时（包括崩溃、被强制结束之后）接上（R12、R13）。调用方持有配置写锁（界面是 `config_lock`）。
     ///
-    /// 两家都没开着 → 什么都不做（不起路由，R1）。起路由：另一个 Sophia 占着端口、或端口都被占 → Codex 设置还指着路由
+    /// 各家都没开着 → 什么都不做（不起路由，R1）。起路由：另一个 Sophia 占着端口、或端口都被占 → Codex 设置还指着路由
     /// 就改回原样（官方模型照常可用），「开着」不变；被别的程序占着 → 换端口并按新端口重写设置（不重启 Codex、Claude）。
     /// 起来之后：Codex 开着且没写 → 写；Claude 开着、桌面应用里没写（或端口换了）→ 走「打开」（在运行就是待生效）。
     /// 已经接上时再调用什么都不变
@@ -234,9 +287,21 @@ impl App {
                 return report;
             }
         };
-        let codex_wanted = self.codex_wanted(&mut settings);
+        let mut codex_wanted = self.codex_wanted(&mut settings);
+        if self.switch_back_without_picks(&mut settings, codex_wanted) {
+            codex_wanted = false;
+        }
         let claude = self.load_claude().unwrap_or_default();
-        if !codex_wanted && !claude.enabled && claude.applied.is_none() {
+        let workbuddy_wanted = self.load_workbuddy().is_ok_and(|s| s.enabled);
+        if !workbuddy_wanted && self.workbuddy_written() {
+            // 上次没收尾（崩溃、被强制结束）又已经关掉：留下的条目指着不在的路由，拿掉
+            if let Err(error) = self.unwrite_workbuddy_locked() {
+                report
+                    .errors
+                    .push(FamilyError::new(Agent::WorkBuddy, error));
+            }
+        }
+        if !codex_wanted && !claude.enabled && claude.applied.is_none() && !workbuddy_wanted {
             return report;
         }
         let moved = match self.bring_up(&mut settings) {
@@ -247,11 +312,21 @@ impl App {
                         report.errors.push(FamilyError::new(Agent::Codex, error));
                     }
                 }
+                // WorkBuddy 里留着的条目指着起不来的路由：拿掉（「开着」不变，下次接上时写回）
+                if self.workbuddy_written() {
+                    if let Err(error) = self.remove_workbuddy_entries() {
+                        report
+                            .errors
+                            .push(FamilyError::new(Agent::WorkBuddy, error));
+                    }
+                }
                 if self.notice().is_none() {
                     let agent = if codex_wanted {
                         Agent::Codex
-                    } else {
+                    } else if claude.enabled || claude.applied.is_some() {
                         Agent::Claude
+                    } else {
+                        Agent::WorkBuddy
                     };
                     report.errors.push(FamilyError::new(
                         agent,
@@ -284,17 +359,26 @@ impl App {
                 report.errors.push(FamilyError::new(Agent::Claude, error));
             }
         }
+        // WorkBuddy 自动重读 models.json：每次打开都按此刻的「已选」、端口与令牌写回（已经一样就不写）
+        if workbuddy_wanted {
+            if let Err(error) = self.write_workbuddy() {
+                report
+                    .errors
+                    .push(FamilyError::new(Agent::WorkBuddy, error));
+            }
+        }
         report.notice = self.notice();
         report
     }
 
     /// 退出前：要不要确认、确认框里说什么（R5、R6）。只读
     pub fn quit_preview(&self) -> QuitPreview {
-        let (codex, claude) = {
+        let (codex, claude, workbuddy) = {
             let _guard = self.guard();
             (
                 self.codex_on(),
                 self.load_claude().is_ok_and(|s| s.applied.is_some()),
+                self.workbuddy_written(),
             )
         };
         let processes = (self.deps.list_processes)().unwrap_or_default();
@@ -306,11 +390,12 @@ impl App {
                 .any(|p| process::is_codex_interactive(&p.command)),
             claude,
             claude_running: (self.deps.desktop_running)().unwrap_or(false),
+            workbuddy,
         }
     }
 
-    /// 用户确认退出后的收尾（R7、R9）：Codex 设置逐字节改回并重启 Codex → Claude 切回官方（在运行就退出再打开）
-    /// → 停路由。两家的「开着」都不变，下次打开 Sophia 时接上（R8）。某一家没做成不中断其余的，
+    /// 用户确认退出后的收尾（R7、R9）：Codex 设置逐字节改回并重启 Codex → 拿掉 WorkBuddy 里 Sophia 的模型 → Claude 切回官方（在运行就退出再打开）
+    /// → 停路由。各家的「开着」都不变，下次打开 Sophia 时接上（R8）。某一家没做成不中断其余的，
     /// 返回没做成的那几家（空＝都做成了）。`acquire` 取调用方的配置写锁（界面是 `config_lock`），只在写文件时持有，
     /// 等应用退出、打开时不持有；`progress` 报告进行到哪一步
     pub fn detach_for_quit<G>(
@@ -335,6 +420,16 @@ impl App {
             Some(Err(error)) => failures.push(FamilyError::new(Agent::Codex, error)),
             None => {}
         }
+        // WorkBuddy：拿掉 Sophia 的条目（它自动重读，不用重启）；「开着」不变，下次打开写回
+        let workbuddy = {
+            let _outer = acquire();
+            let _guard = self.guard();
+            self.workbuddy_written()
+                .then(|| self.remove_workbuddy_entries())
+        };
+        if let Some(Err(error)) = workbuddy {
+            failures.push(FamilyError::new(Agent::WorkBuddy, error));
+        }
         if self.load_claude().is_ok_and(|s| s.applied.is_some()) {
             progress(QuitStep::RestartingClaude);
             if let Err(error) = self.switch_back_for_quit(&acquire) {
@@ -346,10 +441,12 @@ impl App {
         failures
     }
 
-    /// 系统关机、注销、从 Dock 退出（应用拦不住的退出，R10）：只把 Codex 设置同步改回原样，
-    /// 不起子进程、不联网、不动 Claude、不动「开着」。做几次都一样；任何一步不成就停下，不报错（进程马上要退出）
+    /// 系统关机、注销、从 Dock 退出（应用拦不住的退出，R10）：只把 Codex 设置同步改回原样、从 WorkBuddy 的 models.json
+    /// 拿掉 Sophia 的条目（只是改文件），不起子进程、不联网、不动 Claude、不动「开着」。做几次都一样；
+    /// 任何一步不成就停下，不报错（进程马上要退出）
     pub fn exit_sync(&self) {
         let _guard = self.guard_within(EXIT_LOCK_PATIENCE);
+        self.remove_workbuddy_for_exit();
         // 每个停下的地方记一条日志（spec 2026-10-04-local-diagnostics R4）：界面上照旧不报错
         let snapshot = self.read_config();
         let Ok(snapshot) = snapshot.inspect_err(|e| log::warn!("退出时读 Codex 设置失败：{e}"))

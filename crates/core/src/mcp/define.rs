@@ -865,6 +865,8 @@ pub fn placeholder_fields(definitions: &[McpDefinitionInput]) -> Vec<McpFieldSpe
                 required: true,
                 secret: secretish(key) || owner.is_some_and(secretish),
                 description: None,
+                label: None,
+                help: None,
             });
         }
     };
@@ -904,8 +906,10 @@ struct Built {
     canon: Canonical,
     /// 过无损规则用：没填的占位换成普通字，不让它被当成变量引用
     probe: Canonical,
-    /// 这条哪儿都写不了的原因（定义本身不完整、还有没填的、带着认不得的字段）
+    /// 这条哪儿都写不了的原因（定义本身不完整、还有没填的、带着无法保留的字段）
     problem: Option<String>,
+    /// `problem` 背后的精确值（第二层）：无法保留的字段名；别的原因为 None
+    detail: Option<String>,
     /// 带着专属字段时，它们出自哪一家（harness id 与句子里的名字）：过无损规则时当来源
     source: Option<(String, String)>,
 }
@@ -954,15 +958,6 @@ fn definition_problem(def: &McpDefinitionInput) -> Option<String> {
         .map(|problem| crate::t!("mcp.problem.named", name = name, problem = problem))
 }
 
-/// 名单里的几个字段：一个写名字，多个写 `trust 等 3 项`（与 MCP 页的原因句同一种写法）
-fn field_list(keys: &[&str]) -> String {
-    match keys {
-        [one] => (*one).to_owned(),
-        [first, ..] => crate::tn!("mcp.fields.andMore", keys.len(), first = first),
-        [] => String::new(),
-    }
-}
-
 /// 专属字段出自的那一家叫什么：agent 表里有的用表里的名字
 fn dialect_name(harnesses: &[Harness], id: &str) -> String {
     if let Some(harness) = harnesses.iter().find(|h| h.id == id) {
@@ -983,10 +978,10 @@ fn dialect_name(harnesses: &[Harness], id: &str) -> String {
 }
 
 /// 专属字段落成 `Canonical` 的样子：`client_fields`（那一家文件里的原样写法：Codex 是 TOML、其余是 JSON）
-/// 与用命令生成请求头。认不得的（认不出出处、或出处那一家 Sophia 也写不了）返回拒绝的一句
-fn extras_of(
-    def: &McpDefinitionInput,
-) -> Result<(BTreeMap<String, String>, Option<String>), String> {
+/// 与用命令生成请求头。无法保留的（认不出出处、或出处那一家 Sophia 也写不了）返回这些字段名
+type Extras = (BTreeMap<String, String>, Option<String>);
+
+fn extras_of(def: &McpDefinitionInput) -> Result<Extras, Vec<String>> {
     let dialect = def.dialect.as_deref();
     let known = dialect.is_some_and(|d| agents::agent(d).is_some());
     let unknown: Vec<&str> = def
@@ -996,10 +991,7 @@ fn extras_of(
         .filter(|key| dialect.is_none() || (known && !holds(dialect.unwrap_or(""), key)))
         .collect();
     if !unknown.is_empty() {
-        return Err(crate::t!(
-            "mcp.problem.unknownFields",
-            fields = field_list(&unknown)
-        ));
+        return Err(unknown.into_iter().map(str::to_owned).collect());
     }
     let mut fields = BTreeMap::new();
     let mut helper = None;
@@ -1068,7 +1060,16 @@ fn build(
             (canon.clone(), canon)
         }
     };
-    let mut problem = definition_problem(def).or(unknown);
+    // 主句只说结果，字段名进第二层（#321）
+    let mut problem = definition_problem(def);
+    let mut detail = None;
+    if let (None, Some(fields)) = (&problem, unknown) {
+        problem = Some(crate::t!("mcp.problem.unknownFields"));
+        detail = Some(crate::i18n::list_text(
+            &fields,
+            crate::i18n::ListStyle::Enum,
+        ));
+    }
     if problem.is_none() {
         // 填的值里自己带 `${…}`：写进去会被 agent 当成变量引用
         let mut used = Vec::new();
@@ -1108,6 +1109,7 @@ fn build(
         canon,
         probe,
         problem,
+        detail,
         source,
     }
 }
@@ -1161,6 +1163,11 @@ fn projects_of(location: &str) -> Option<Vec<PathBuf>> {
 fn resolve_targets(env: &Env, harnesses: &[Harness], request: &McpInstallRequest) -> Vec<Target> {
     let projects = projects_of(&request.location);
     let mut seen = BTreeSet::new();
+    // 这台电脑上没装的也按产品名说（`没有找到 Gemini CLI`），不说 id
+    let known: Vec<Harness> = crate::discovery::all_brands(env)
+        .into_iter()
+        .flat_map(|brand| brand.products)
+        .collect();
     request
         .harness_ids
         .iter()
@@ -1169,7 +1176,13 @@ fn resolve_targets(env: &Env, harnesses: &[Harness], request: &McpInstallRequest
             let harness = harnesses.iter().find(|h| &h.id == id);
             let mut target = Target {
                 harness_id: id.clone(),
-                agent: harness.map_or_else(|| id.clone(), |h| h.display_name.clone()),
+                agent: if id == "claude-desktop" {
+                    agents::desktop_name()
+                } else {
+                    harness
+                        .or_else(|| known.iter().find(|h| &h.id == id))
+                        .map_or_else(|| id.clone(), |h| h.display_name.clone())
+                },
                 location: None,
                 parsed: None,
                 blocked: None,
@@ -1185,7 +1198,8 @@ fn resolve_targets(env: &Env, harnesses: &[Harness], request: &McpInstallRequest
                 return target;
             };
             let Some(harness) = harness else {
-                blocked(&mut target, crate::t!("mcp.target.notFound", id = id));
+                let reason = crate::t!("mcp.target.notFound", agent = target.agent);
+                blocked(&mut target, reason);
                 return target;
             };
             // 项目里的 Claude Code：self（缺省）写本地配置（selector 是项目路径），team 写 .mcp.json
@@ -1209,7 +1223,7 @@ fn resolve_targets(env: &Env, harnesses: &[Harness], request: &McpInstallRequest
                 blocked(&mut target, reason);
                 return target;
             };
-            target.agent = agent_name(&location).to_owned();
+            target.agent = agent_name(&location);
             if unsafe_parent(&location.path) {
                 blocked(&mut target, crate::t!("mcp.issue.parentSymlink"));
             } else {
@@ -1358,12 +1372,17 @@ fn verdict(target: &Target, built: &Built) -> Verdict {
         .source
         .as_ref()
         .map_or(("", ""), |(id, name)| (id.as_str(), name.as_str()));
-    let home = source_id == location.harness_id;
+    let home = agents::same_writing(source_id, &location.harness_id);
     if old.is_some_and(|old| {
         same_definition(&built.canon, old)
             && (!home || same_client_fields(&built.canon.client_fields, &old.client_fields))
     }) {
         return Verdict::Same;
+    }
+    if let Some((_, reason)) = agents::not_ready(location, &parsed.state)
+        .or_else(|| agents::name_refusal(&location.harness_id, &built.name))
+    {
+        return Verdict::Bad(reason);
     }
     // 没有专属设置时来源是「哪一家都不是」：同一家之间才放行的（带 `${…}`）一律按跨家处理。
     // 带着专属设置时来源就是它出自的那一家：写进同一家原样带上，别家说 MCP 页的原因句
@@ -1395,7 +1414,7 @@ fn partial_phrase(name: &str, reason: &str) -> String {
         crate::t!(
             "mcp.check.desktopRemote",
             name = name,
-            agent = "Claude Desktop"
+            agent = agents::desktop_name()
         )
     } else if reason.contains(name) {
         reason.to_owned()
@@ -1405,17 +1424,21 @@ fn partial_phrase(name: &str, reason: &str) -> String {
 }
 
 /// 写进去之后什么时候生效（DESIGN「MCP 支持哪些 agent › 写进之后什么时候生效」）
-fn effect_note(harness_id: &str, project: bool) -> Option<String> {
+fn effect_note(harness_id: &str, agent: &str, project: bool) -> Option<String> {
     match harness_id {
         "claude-desktop" => Some(crate::t!(
             "mcp.check.restartToApply",
-            agent = "Claude Desktop"
+            agent = agents::desktop_name()
         )),
         "gemini-cli" => Some(crate::t!("mcp.check.newSessionToApply")),
         "github-copilot" if project => {
             Some(crate::t!("mcp.check.newSessionAndTrust", agent = "Copilot"))
         }
         "github-copilot" => Some(crate::t!("mcp.check.newSessionToApply")),
+        // 别人写进去的它不自动连，要在它自己的界面里点「信任」（#256，WorkBuddy）
+        id if super::trust_app(id).is_some() => {
+            Some(crate::t!("mcp.trust.afterWrite", app = agent))
+        }
         _ => None,
     }
 }
@@ -1426,34 +1449,54 @@ fn check_one(target: &Target, built: &[Built]) -> McpTargetCheck {
         .location
         .as_ref()
         .map(|l| l.path.to_string_lossy().into_owned());
-    let blocked = |reason: String| McpTargetCheck {
+    let blocked = |reason: String, detail: Option<String>| McpTargetCheck {
         harness_id: target.harness_id.clone(),
         location_id: location_id.clone(),
         config_path: config_path.clone(),
         status: McpTargetStatus::Blocked,
         writes: Vec::new(),
         reason: Some(reason),
+        detail,
         note: None,
         key_hint: KeyHint::Quiet,
         gitignore_line: None,
     };
     if let Some(reason) = &target.blocked {
-        return blocked(reason.clone());
+        return blocked(reason.clone(), None);
     }
     if built.is_empty() {
-        return blocked(crate::t!("mcp.check.nothingToWrite"));
+        return blocked(crate::t!("mcp.check.nothingToWrite"), None);
     }
     let (mut writes, mut same, mut bad) = (Vec::new(), Vec::new(), Vec::new());
     for def in built {
         match verdict(target, def) {
             Verdict::New => writes.push(def.name.clone()),
             Verdict::Same => same.push(def.name.clone()),
-            Verdict::Bad(reason) => bad.push((def.name.clone(), reason)),
+            // 定义本身的问题排在最前（`verdict`），它的第二层跟着走
+            Verdict::Bad(reason) => {
+                let detail = def.problem.is_some().then(|| def.detail.clone()).flatten();
+                bad.push((def.name.clone(), reason, detail));
+            }
         }
     }
     if writes.is_empty() && same.is_empty() {
-        return blocked(bad.swap_remove(0).1);
+        let (_, reason, detail) = bad.swap_remove(0);
+        return blocked(reason, detail);
     }
+    // 只写一部分时，几条各自的第二层按名字列出
+    let named: Vec<String> = bad
+        .iter()
+        .filter_map(|(name, _, detail)| {
+            let detail = detail.as_ref()?;
+            Some(crate::t!(
+                "mcp.problem.named",
+                name = name,
+                problem = detail
+            ))
+        })
+        .collect();
+    let detail = (!named.is_empty())
+        .then(|| crate::i18n::list_text(&named, crate::i18n::ListStyle::Semicolon));
     let (status, reason) = if bad.is_empty() {
         let status = if writes.is_empty() {
             McpTargetStatus::Same
@@ -1475,7 +1518,7 @@ fn check_one(target: &Target, built: &[Built]) -> McpTargetCheck {
         };
         let rest: Vec<String> = bad
             .iter()
-            .map(|(name, reason)| partial_phrase(name, reason))
+            .map(|(name, reason, _)| partial_phrase(name, reason))
             .collect();
         (
             McpTargetStatus::Partial,
@@ -1495,10 +1538,11 @@ fn check_one(target: &Target, built: &[Built]) -> McpTargetCheck {
         config_path,
         status,
         note: (!writes.is_empty())
-            .then(|| effect_note(&target.harness_id, project))
+            .then(|| effect_note(&target.harness_id, &target.agent, project))
             .flatten(),
         writes,
         reason,
+        detail,
         key_hint: KeyHint::Quiet,
         gitignore_line: None,
     }
@@ -1616,6 +1660,7 @@ fn report_entry(name: &str, target_id: &str, outcome: &str, message: &str) -> Mc
         message: message.into(),
         backup_path: None,
         mirror_failed: None,
+        note: None,
         detail: None,
     }
 }
@@ -1749,6 +1794,8 @@ mod tests {
         Harness {
             id: id.into(),
             display_name: name.into(),
+            brand: id.into(),
+            brand_name: name.into(),
             project_dir: None,
             global_dir: None,
             universal: false,
@@ -2090,7 +2137,7 @@ API_KEY = "${DOCS_KEY}"
         assert!(
             error("{\"mcpServers\": {\"a\": {\"type\": \"ws\", \"url\": \"wss://a\"}}}")
                 .message
-                .contains("认不得连接方式 ws")
+                .contains("无法识别连接方式 ws")
         );
         assert!(
             error("{\"mcpServers\": {\"a\": {\"url\": \"https://a/mcp\", \"env\": {}}}}")
@@ -2101,7 +2148,7 @@ API_KEY = "${DOCS_KEY}"
         assert!(error("[1, 2]").message.contains("最外层"));
         assert!(error("{\"theme\": \"dark\"}")
             .message
-            .contains("认不出 MCP 配置"));
+            .contains("无法识别 MCP 配置"));
         assert!(error("{\"mcpServers\": {}}")
             .message
             .contains("没有 MCP 服务器"));
@@ -2181,10 +2228,10 @@ API_KEY = "${DOCS_KEY}"
         assert_eq!(
             desktop.reason.as_deref(),
             Some(
-                "只写 filesystem · github 是远程服务器，要在 Claude Desktop 自己的「连接器」里添加"
+                "只写 filesystem · github 是远程服务器，要在 Claude 桌面应用自己的「连接器」里添加"
             )
         );
-        assert_eq!(desktop.note.as_deref(), Some("重启 Claude Desktop 后生效"));
+        assert_eq!(desktop.note.as_deref(), Some("重启 Claude 桌面应用后生效"));
 
         // 只有远程的：一个都写不过去，不能勾，沿用 MCP 页的原因句
         let only_remote = check_targets(
@@ -2320,7 +2367,7 @@ API_KEY = "${DOCS_KEY}"
         assert_eq!(desktop.location_id, None);
         assert_eq!(
             desktop.reason.as_deref(),
-            Some("Claude Desktop 没有项目级的 MCP")
+            Some("Claude 桌面应用没有项目级的 MCP")
         );
     }
 
@@ -2664,7 +2711,7 @@ API_KEY = "${DOCS_KEY}"
             &six(),
             &request(vec![filesystem()], "全部", &["cursor"], &[]),
         );
-        assert_eq!(bad_location[0].reason.as_deref(), Some("认不出这个位置"));
+        assert_eq!(bad_location[0].reason.as_deref(), Some("无法识别这个位置"));
         let mut nameless = filesystem();
         nameless.name.clear();
         let checks = check_targets(
@@ -2829,10 +2876,9 @@ API_KEY = "${DOCS_KEY}"
         let checks = check_targets(&env, &six(), &request(unknown.clone(), "global", &all, &[]));
         for c in &checks {
             assert_eq!(c.status, McpTargetStatus::Blocked, "{c:?}");
-            assert_eq!(
-                c.reason.as_deref(),
-                Some("带有认不得的字段（disabled），照写会丢掉它")
-            );
+            // 主句只说结果，字段名进第二层（#321）
+            assert_eq!(c.reason.as_deref(), Some("部分设置无法保留"));
+            assert_eq!(c.detail.as_deref(), Some("disabled"));
         }
         let report = write_definitions(
             &env,
@@ -2845,7 +2891,8 @@ API_KEY = "${DOCS_KEY}"
         let codex = servers("[mcp_servers.x]\ncommand = \"x\"\nenabled_tools = [\"a\"]\n");
         let checks = check_targets(&env, &six(), &request(codex, "global", &all, &[]));
         assert!(checks.iter().all(|c| c.status == McpTargetStatus::Blocked
-            && c.reason.as_deref() == Some("带有认不得的字段（enabled_tools），照写会丢掉它")));
+            && c.reason.as_deref() == Some("部分设置无法保留")
+            && c.detail.as_deref() == Some("enabled_tools")));
         // 表外的一家（Zed）：哪一家都接不住，说出是谁的设置
         let zed = servers(r#"{"context_servers": {"z": {"command": "z", "settings": {"k": 1}}}}"#);
         let checks = check_targets(&env, &six(), &request(zed, "global", &["claude-code"], &[]));
@@ -2868,6 +2915,17 @@ API_KEY = "${DOCS_KEY}"
         let mut leftovers = Vec::new();
         files_under(&home, &mut leftovers);
         assert!(leftovers.is_empty(), "{leftovers:?}");
+        // 只写一部分：主句按名字说结果，第二层按名字列字段
+        let mixed = servers(
+            r#"{"mcpServers": {"a": {"command": "x", "disabled": true}, "b": {"command": "y"}}}"#,
+        );
+        let checks = check_targets(&env, &six(), &request(mixed, "global", &["codex"], &[]));
+        assert_eq!(checks[0].status, McpTargetStatus::Partial, "{checks:?}");
+        assert_eq!(
+            checks[0].reason.as_deref(),
+            Some("只写 b · a：部分设置无法保留")
+        );
+        assert_eq!(checks[0].detail.as_deref(), Some("a：disabled"));
     }
 
     #[test]

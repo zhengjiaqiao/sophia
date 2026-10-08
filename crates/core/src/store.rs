@@ -3,9 +3,11 @@ use crate::{
     claude_models::settings::ClaudeGatewaySettings,
     codex_models::settings::GatewaySettings,
     mcp::{sources::McpSubscriptions, McpAutoImportRule, McpOverview},
+    model_providers::ModelProviders,
     models::{AutoLink, Source, Target},
     subscriptions::Subscriptions,
     usage::UsageSettings,
+    workbuddy_models::WorkBuddyGatewaySettings,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -73,9 +75,9 @@ pub const SETTINGS_VERSION: u64 = 1;
 pub struct Settings {
     /// 格式版本（见 [`SETTINGS_VERSION`]）。更新版本的 Sophia 写的文件：读得出、拒绝写回
     pub version: u64,
-    /// 不显示名单：不在列表里显示的 agent id（见 `discovery::reconcile_shown`）
+    /// 不显示名单：不在列表里显示的品牌 id（#251 起按品牌；见 `discovery::reconcile_shown`）
     pub disabled_harnesses: Vec<String>,
-    /// 上次整理显示名单时已安装的 agent id。不在其中的已安装 agent 算新装的——
+    /// 上次整理显示名单时已安装的品牌 id（#251 起按品牌）。不在其中的已安装品牌算新装的——
     /// 只有它们受「显示不满 4 个才自动出现」管。旧文件没有这个字段，读成空：
     /// 已安装的全算新装，正好按 agent 表先后留前 4 个
     pub known_installed: Vec<String>,
@@ -86,6 +88,8 @@ pub struct Settings {
     /// Claude 那一份网关设置（spec 2026-09-29-claude-third-party-models R1）。旧文件没有这个字段，
     /// 读成空：没有网关、没打开；不从 Codex 那份迁移任何东西
     pub claude_gateway: ClaudeGatewaySettings,
+    /// WorkBuddy 那一份（#266）：只有开关。旧文件没有这一节，读成关着
+    pub workbuddy_gateway: WorkBuddyGatewaySettings,
     /// 手动项目加入 Sophia 的时间：规范化路径 → 毫秒时间戳。侧栏「最近创建」在取不到文件夹
     /// 创建时间时用它；旧文件没有这个字段，旧项目也就没有记录（回退到文件夹修改时间）
     pub project_added_at: BTreeMap<String, u64>,
@@ -125,6 +129,9 @@ pub struct Settings {
     // ── 开机启动（spec 2026-10-05-keep-running R1）──
     /// 第一次打开时已经默认注册过登录项：只做一次，之后以系统为准。旧文件没有这个字段，读成没做过
     pub autostart_defaulted: bool,
+    /// 全局模型提供商名单（ADR 0003，#252）：所有 agent 共用。旧文件没有这个字段，读成空；
+    /// 旧版按 agent 存的网关（`codexGateway` / `claudeGateway` 里的 `providers`）不迁移过来
+    pub model_providers: ModelProviders,
 }
 
 /// 手写而不派生：`auto_check_skill_updates` 默认是开。新加字段照原样往下补一行默认值
@@ -139,6 +146,7 @@ impl Default for Settings {
             mcp_auto_imports: Vec::new(),
             codex_gateway: GatewaySettings::default(),
             claude_gateway: ClaudeGatewaySettings::default(),
+            workbuddy_gateway: WorkBuddyGatewaySettings::default(),
             project_added_at: BTreeMap::new(),
             hidden_projects: Vec::new(),
             subscriptions: Subscriptions::default(),
@@ -153,6 +161,7 @@ impl Default for Settings {
             auto_report: true,
             install_id: None,
             autostart_defaulted: false,
+            model_providers: ModelProviders::default(),
         }
     }
 }
@@ -407,7 +416,7 @@ impl Store {
     }
 
     /// 读设置，顺手按上限整理显示名单（见 `discovery::reconcile_shown`），改过才写回。
-    /// `installed` 是已安装的 agent id，按 agent 表的先后
+    /// `installed` 是已安装的品牌 id，按品牌的先后（`discovery::installed_brands`）
     pub fn load_settings_reconciling_shown(&self, installed: &[String]) -> io::Result<Settings> {
         let _guard = self.lock_settings();
         let mut settings = self.load_settings()?;
@@ -713,7 +722,7 @@ fn save_json<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::test_support::TempTree;
-    use crate::usage::{AgentDisplay, AgentId, DisplayMode, Refresh, StackedSize};
+    use crate::usage::{AgentDisplay, AgentId, DisplayMode, Refresh, StackedSize, UsageSubject};
 
     #[test]
     fn missing_files_load_as_empty() {
@@ -933,6 +942,7 @@ mod tests {
             }],
             codex_gateway: GatewaySettings::default(),
             claude_gateway: ClaudeGatewaySettings::default(),
+            workbuddy_gateway: WorkBuddyGatewaySettings::default(),
             project_added_at: [("/a".to_string(), 1_700_000_000_000)]
                 .into_iter()
                 .collect(),
@@ -956,9 +966,12 @@ mod tests {
             usage: UsageSettings {
                 menu_bar_enabled: true,
                 display_mode: DisplayMode::Used,
-                agents: Some(vec![AgentId::ClaudeCode, AgentId::Codex]),
-                per_agent: [(
-                    AgentId::ClaudeCode,
+                items: Some(vec![
+                    UsageSubject::Agent(AgentId::ClaudeCode),
+                    UsageSubject::Provider("kimi-2".to_string()),
+                ]),
+                per_item: [(
+                    UsageSubject::Agent(AgentId::ClaudeCode),
                     AgentDisplay {
                         primary: Some("weekly".to_string()),
                         secondary: Some("session".to_string()),
@@ -969,12 +982,31 @@ mod tests {
                 .into_iter()
                 .collect(),
                 refresh: Refresh::Every5,
+                ..UsageSettings::default()
             },
             appearance: Appearance::Dark,
             language: Language::ZhHant,
             auto_report: false,
             install_id: Some("3f0c0f9e-0000-4000-8000-000000000000".into()),
             autostart_defaulted: false,
+            model_providers: crate::model_providers::ModelProviders {
+                providers: vec![crate::model_providers::Provider {
+                    id: "kimi".into(),
+                    name: "Kimi".into(),
+                    base_url: "https://api.moonshot.cn/v1".into(),
+                    ..Default::default()
+                }],
+                enable_seq: 3,
+                picks: [(
+                    "codex".to_owned(),
+                    crate::model_providers::picks::AgentPicks {
+                        picked: vec![crate::model_providers::ModelRef::new("kimi", "k2")],
+                        official_seen: Vec::new(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            },
         };
         s.save_settings(&settings).unwrap();
         assert_eq!(s.load_settings().unwrap(), settings);
@@ -1013,7 +1045,7 @@ mod tests {
         let usage = Store::new(dir).load_settings().unwrap().usage;
         assert!(usage.menu_bar_enabled);
         assert_eq!(
-            usage.per_agent[&AgentId::ClaudeCode],
+            usage.per_item[&UsageSubject::Agent(AgentId::ClaudeCode)],
             AgentDisplay {
                 primary: Some("session".into()),
                 secondary: Some("weekly".into()),
@@ -1021,6 +1053,190 @@ mod tests {
                 stacked_size: StackedSize::Medium,
             }
         );
+    }
+
+    // ---------------- 用量设置换新键（spec #322）：迁移、旧键不动、认不出的忽略 ----------------
+
+    /// 旧版写的 `usage`：菜单栏 3 个 agent（旧版允许 3 个；有一个重复，旧版本身不拦）与每个 agent 的显示方式
+    const OLD_USAGE: &str = r#"{"usage":{"menuBarEnabled":true,"displayMode":"used","agents":["codex","claude-code","codex"],"perAgent":{"codex":{"primary":"weekly","secondary":null,"stacked":false,"stackedSize":"small"},"claude-code":{"primary":"session","secondary":"weekly","stacked":true,"stackedSize":"large"}},"refresh":"10"},"disabledHarnesses":["cursor"]}"#;
+
+    fn settings_json(dir: &Path) -> serde_json::Value {
+        serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn usage_old_keys_migrate_to_first_two_items() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(dir.join("settings.json"), OLD_USAGE).unwrap();
+        let usage = Store::new(dir).load_settings().unwrap().usage;
+        assert_eq!(
+            usage.items,
+            Some(vec![
+                UsageSubject::Agent(AgentId::Codex),
+                UsageSubject::Agent(AgentId::ClaudeCode),
+            ])
+        );
+        assert_eq!(
+            usage.per_item[&UsageSubject::Agent(AgentId::ClaudeCode)].stacked_size,
+            StackedSize::Large
+        );
+        assert_eq!(
+            usage.per_item[&UsageSubject::Agent(AgentId::Codex)].primary,
+            Some("weekly".into())
+        );
+        assert_eq!(usage.display_mode, DisplayMode::Used);
+        assert_eq!(usage.refresh, Refresh::Every10);
+    }
+
+    /// 保存只写新键；旧键原文原样留着（换回旧版本时照旧读得懂）
+    #[test]
+    fn usage_save_writes_new_keys_and_keeps_old_keys_verbatim() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(dir.join("settings.json"), OLD_USAGE).unwrap();
+        let before: serde_json::Value = serde_json::from_str(OLD_USAGE).unwrap();
+        let s = Store::new(dir.clone());
+        let mut settings = s.load_settings().unwrap();
+        // 新版里改了选择：只留 Codex，并给 Codex 换主窗口
+        settings.usage.items = Some(vec![UsageSubject::Agent(AgentId::Codex)]);
+        settings
+            .usage
+            .per_item
+            .insert(UsageSubject::Agent(AgentId::Codex), AgentDisplay::default());
+        s.save_settings(&settings).unwrap();
+
+        let after = settings_json(&dir);
+        assert_eq!(after["usage"]["agents"], before["usage"]["agents"]);
+        assert_eq!(after["usage"]["perAgent"], before["usage"]["perAgent"]);
+        assert_eq!(after["usage"]["items"], serde_json::json!(["agent:codex"]));
+        assert_eq!(
+            after["usage"]["perItem"]["agent:codex"]["primary"],
+            serde_json::Value::Null
+        );
+        // 重读：以新键为准
+        let reloaded = Store::new(dir).load_settings().unwrap().usage;
+        assert_eq!(
+            reloaded.items,
+            Some(vec![UsageSubject::Agent(AgentId::Codex)])
+        );
+        assert_eq!(reloaded, settings.usage);
+    }
+
+    /// 旧版本读这份文件：旧键照旧是它认得的形状，新键它不认识、忽略（旧版 `UsageSettings` 没有
+    /// deny_unknown_fields）。这里用旧版的结构定义模拟
+    #[test]
+    fn usage_file_written_by_new_version_still_parses_as_old_shape() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase", default)]
+        #[allow(dead_code)]
+        #[derive(Default)]
+        struct OldUsage {
+            menu_bar_enabled: bool,
+            agents: Option<Vec<AgentId>>,
+            per_agent: BTreeMap<AgentId, AgentDisplay>,
+        }
+        #[derive(serde::Deserialize, Default)]
+        #[serde(default)]
+        struct OldSettings {
+            usage: OldUsage,
+        }
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(dir.join("settings.json"), OLD_USAGE).unwrap();
+        let s = Store::new(dir.clone());
+        let mut settings = s.load_settings().unwrap();
+        settings.usage.items = Some(vec![UsageSubject::Provider("kimi-2".into())]);
+        s.save_settings(&settings).unwrap();
+        let text = std::fs::read(dir.join("settings.json")).unwrap();
+        let old: OldSettings = serde_json::from_slice(&text).unwrap();
+        assert_eq!(
+            old.usage.agents,
+            Some(vec![AgentId::Codex, AgentId::ClaudeCode, AgentId::Codex])
+        );
+        assert_eq!(old.usage.per_agent.len(), 2);
+    }
+
+    #[test]
+    fn usage_new_keys_win_over_old_keys() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"usage":{"agents":["claude-code","codex"],"perAgent":{"codex":{"primary":"weekly"}},"items":["agent:codex"],"perItem":{"agent:codex":{"primary":"session"}}}}"#,
+        )
+        .unwrap();
+        let usage = Store::new(dir).load_settings().unwrap().usage;
+        assert_eq!(usage.items, Some(vec![UsageSubject::Agent(AgentId::Codex)]));
+        assert_eq!(usage.per_item.len(), 1);
+        assert_eq!(
+            usage.per_item[&UsageSubject::Agent(AgentId::Codex)].primary,
+            Some("session".into())
+        );
+    }
+
+    /// 认不出的键、格式不对的值逐个忽略，整份设置照常读出来（不会被当损坏挪走）
+    #[test]
+    fn usage_unknown_or_malformed_keys_do_not_break_settings() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"disabledHarnesses":["cursor"],"usage":{"menuBarEnabled":true,"items":["agent:cursor","provider:","bogus",3,"provider:kimi-2","agent:codex"],"perItem":{"agent:nope":{},"provider:kimi-2":{"stackedSize":"huge"},"agent:codex":{"stacked":true},"x":1}}}"#,
+        )
+        .unwrap();
+        let s = Store::new(dir.clone());
+        let loaded = s.load_settings().unwrap();
+        assert_eq!(loaded.disabled_harnesses, vec!["cursor".to_string()]);
+        assert_eq!(
+            loaded.usage.items,
+            Some(vec![
+                UsageSubject::Provider("kimi-2".into()),
+                UsageSubject::Agent(AgentId::Codex),
+            ])
+        );
+        assert_eq!(
+            loaded.usage.per_item.keys().cloned().collect::<Vec<_>>(),
+            vec![UsageSubject::Agent(AgentId::Codex)]
+        );
+        assert_eq!(s.repair_if_corrupt(1).unwrap(), Vec::<PathBuf>::new());
+
+        // 旧键里有认不出的 agent（不是本版写的，但也不能让解析失败）：迁移时跳过
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"usage":{"agents":["cursor","codex"],"perAgent":"oops"}}"#,
+        )
+        .unwrap();
+        let usage = s.load_settings().unwrap().usage;
+        assert_eq!(usage.items, Some(vec![UsageSubject::Agent(AgentId::Codex)]));
+        assert!(usage.per_item.is_empty());
+        assert_eq!(usage.legacy_per_agent, Some(serde_json::json!("oops")));
+
+        // 新键不是数组：当作没有，回到迁移
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{"usage":{"agents":["codex"],"items":"oops"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            s.load_settings().unwrap().usage.items,
+            Some(vec![UsageSubject::Agent(AgentId::Codex)])
+        );
+    }
+
+    /// 没有旧键的全新设置：不写出旧键
+    #[test]
+    fn usage_without_old_keys_writes_none() {
+        let t = TempTree::new();
+        let dir = t.dir("data/Sophia");
+        let s = Store::new(dir.clone());
+        let mut settings = Settings::default();
+        settings.usage.items = Some(vec![UsageSubject::Agent(AgentId::ClaudeCode)]);
+        s.save_settings(&settings).unwrap();
+        let json = settings_json(&dir);
+        assert!(json["usage"].get("agents").is_none());
+        assert!(json["usage"].get("perAgent").is_none());
+        assert_eq!(s.load_settings().unwrap(), settings);
     }
 
     /// R12/AC27：老 `settings.json` 里没有 `usage` 这一节时，取默认值；文件其余内容照旧读出来，
@@ -1154,6 +1370,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: None,
+            readers: Vec::new(),
         }];
         let cells = crate::skills::auto_link_cells(&sources, &targets, &loaded.auto_links);
         let actions = crate::skills::propose_links(&sources, &targets, &cells);
@@ -1267,6 +1484,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: None,
+            readers: Vec::new(),
         };
         let project = Target {
             id: format!("project:{}::codex", proj.display()),
@@ -1279,6 +1497,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: None,
+            readers: Vec::new(),
         };
         let targets = vec![global.clone(), project.clone()];
         std::fs::create_dir_all(&dir).unwrap();

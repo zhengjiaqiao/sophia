@@ -348,7 +348,7 @@ mod tests {
             if status == 200 {
                 assert_eq!(
                     fallback.reason.as_deref(),
-                    Some("skills.sh 返回的内容读不懂")
+                    Some("无法识别 skills.sh 返回的内容")
                 );
             }
             assert!(fallback

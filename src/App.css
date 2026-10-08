@@ -293,7 +293,7 @@ input:focus-visible {
   padding-top: var(--space-huge);
 }
 
-/* 节头上方的新手提示条（`first-codex`，DESIGN-components「灰面板 › 一次性说明的用法」）：页面头到提示 16、提示到节头 16。
+/* 节头上方的新手提示条（`first-models`，DESIGN-components「灰面板 › 一次性说明的用法」）：页面头到提示 16、提示到节头 16。
    提示条不带上外距（NoticePanel flush），开着时（data-hint="open"）节的上内边距收成 16；
    收起后回到 24，节头回原位 */
 .agent-page__section:has(> [data-hint="open"]) {

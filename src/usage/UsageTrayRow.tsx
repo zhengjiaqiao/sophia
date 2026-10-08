@@ -24,8 +24,8 @@ export function UsageTrayRow({ agent, state, tray }: TrayRowProps) {
         <UsageWindows
           usage={usage}
           stacked
-          retrying={retrying(usage.agent)}
-          onRetry={() => void retry(usage.agent)}
+          retrying={retrying(usage.key)}
+          onRetry={() => void retry(usage.key)}
           connect={connect.handlers}
         />
       </div>

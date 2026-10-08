@@ -54,8 +54,8 @@
   "toast.deleteOriginal.relinkedLost": "After deletion, {agents} will use the same-name {skill} in {source}, and {names} can no longer use it.",
   "toast.deleted.inTrash": "In the Trash",
   "toast.restored.linksFailed": {
-    "one": "{count} link wasn't restored: {reason}",
-    "other": "{count} links weren't restored: {reason}"
+    "one": "Couldn't restore it for {count} agent · {reason}",
+    "other": "Couldn't restore it for {count} agents · {reason}"
   },
   "toast.deleteMcp.title": "Delete {name} from {agent}?",
   "toast.deleteMcp.bodyOthers": "After deletion, {agent} can no longer use it; the copy in {others} isn't affected",

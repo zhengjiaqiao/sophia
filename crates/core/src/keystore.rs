@@ -1,7 +1,9 @@
 //! 第三方服务商密钥与 Claude 网关令牌：存在 `<数据目录>/secrets.json`，只有本人能读写。
 //!
 //! 格式（spec 2026-10-03-keys-in-file）：
-//! `{"version":1,"providers":{"codex":{"<网关 id>":"<密钥>"},"claude":{…}},"claudeRouterToken":"<令牌>"}`
+//! `{"version":1,"providers":{"codex":{"<网关 id>":"<密钥>"},"claude":{…},"global":{…}},"claudeRouterToken":"<令牌>"}`
+//!
+//! `global` 是全局模型提供商（ADR 0003，#252）的密钥，按提供商 id 存一份；`codex` / `claude` 是旧版按 agent 存的网关。
 //!
 //! - 写入只走 `atomicfile` 的原子替换与写前写后核对，**不调 `backup()`**：备份目录里不能出现密钥（R7）。
 //! - 新建即 0600（临时文件本来就是 0600，原子改名后不变）；已有文件权限比 0600 宽时先收紧再写，
@@ -25,6 +27,8 @@ pub const VERSION: u64 = 1;
 /// 两家的名字，也是 `providers` 下的键
 pub const CODEX: &str = "codex";
 pub const CLAUDE: &str = "claude";
+/// 全局模型提供商那一份（`model_providers`）：`providers` 下的键，与两家并列
+pub const GLOBAL: &str = "global";
 
 /// 读写密钥文件的错误。`Display` 给当前语言的一句话，不含密钥
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,8 +41,8 @@ pub enum KeyStoreError {
     TooNew(u64),
     /// 值的形状明显不是密钥（含空白字符或太短）
     InvalidShape,
-    /// 写入失败；附原因
-    WriteFailed(String),
+    /// 写入失败；附说得出的原因（磁盘满、没权限、只读、被改过），分不出的为 None（原文只进日志，不进这句话）
+    WriteFailed(Option<String>),
 }
 
 impl fmt::Display for KeyStoreError {
@@ -48,7 +52,10 @@ impl fmt::Display for KeyStoreError {
             Self::Corrupt => crate::t!("models.secrets.corrupt"),
             Self::TooNew(_) => crate::t!("models.secrets.tooNew"),
             Self::InvalidShape => crate::t!("models.secrets.invalidShape"),
-            Self::WriteFailed(error) => crate::t!("models.secrets.writeFailed", error = error),
+            Self::WriteFailed(Some(reason)) => {
+                crate::t!("models.secrets.writeFailed", error = reason)
+            }
+            Self::WriteFailed(None) => crate::t!("models.secrets.writeFailedPlain"),
         };
         f.write_str(&text)
     }
@@ -171,8 +178,7 @@ impl KeyStore {
             target = parent.join(format!("{base}-{n}"));
             n += 1;
         }
-        std::fs::rename(&self.path, &target)
-            .map_err(|e| KeyStoreError::WriteFailed(e.to_string()))?;
+        std::fs::rename(&self.path, &target).map_err(|e| write_failed(&self.path, &e))?;
         Ok(Some(target))
     }
 
@@ -190,7 +196,7 @@ impl KeyStore {
     /// 读 → 改 → 原子写。`change` 返回 false 表示没改，不写。
     /// 别的进程（命令行）恰好在两次核对之间写过：重读再来，最多三次
     fn update(&self, change: impl Fn(&mut Doc) -> bool) -> Result<(), KeyStoreError> {
-        let mut last = String::new();
+        let mut last = None;
         for _ in 0..3 {
             let mut loaded = self.load()?;
             if loaded.doc.version > VERSION {
@@ -204,21 +210,22 @@ impl KeyStore {
                 loaded.doc.providers.entry(agent.to_owned()).or_default();
             }
             let state = self.tighten(loaded.state)?;
-            let mut bytes = serde_json::to_vec_pretty(&loaded.doc)
-                .map_err(|e| KeyStoreError::WriteFailed(e.to_string()))?;
+            let mut bytes = serde_json::to_vec_pretty(&loaded.doc).map_err(|e| {
+                log::warn!("serialize {} failed: {e}", self.path.display());
+                KeyStoreError::WriteFailed(None)
+            })?;
             bytes.push(b'\n');
             // 只做原子替换与核对，不调 `atomicfile::backup`：备份目录里不能有密钥（R7）
             match atomicfile::atomic_write(&self.path, &bytes, &state) {
                 Ok(()) => return Ok(()),
-                Err(e) if e.to_string() == "changed" => last = e.to_string(),
-                Err(e) => {
-                    return Err(KeyStoreError::WriteFailed(atomicfile::write_error_text(
-                        &self.path, &e,
-                    )))
-                }
+                Err(e) if e.to_string() == "changed" => last = Some(e),
+                Err(e) => return Err(write_failed(&self.path, &e)),
             }
         }
-        Err(KeyStoreError::WriteFailed(last))
+        Err(match last {
+            Some(e) => write_failed(&self.path, &e),
+            None => KeyStoreError::WriteFailed(None),
+        })
     }
 
     /// 已有文件的权限比 0600 宽（别人能读）：先收紧，再按收紧后的样子重新取快照。
@@ -237,7 +244,7 @@ impl KeyStore {
             return Ok(state);
         }
         std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| KeyStoreError::WriteFailed(e.to_string()))?;
+            .map_err(|e| write_failed(&self.path, &e))?;
         atomicfile::read_state(&self.path).map_err(unreadable)
     }
 
@@ -249,6 +256,11 @@ impl KeyStore {
 }
 
 /// 读不出的原因：没有权限单独说成一句人话（AC2），其余照系统的原话
+/// 写密钥文件没写成：说得出原因的带原因，分不出的只说失败（原文进日志）
+fn write_failed(path: &Path, e: &io::Error) -> KeyStoreError {
+    KeyStoreError::WriteFailed(atomicfile::write_failure_reason(path, e))
+}
+
 fn unreadable(error: ReadError) -> KeyStoreError {
     KeyStoreError::Unreadable(match error {
         ReadError::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => {
@@ -385,7 +397,7 @@ mod tests {
             .unwrap_err();
         chmod(&data, 0o755);
         let text = error.to_string();
-        assert!(text.contains("没有写入权限，没动"), "{text}");
+        assert!(text.contains("没有写入权限，未改动"), "{text}");
         assert!(!text.contains("os error"), "{text}");
     }
 
@@ -548,7 +560,8 @@ mod tests {
             KeyStoreError::Corrupt,
             KeyStoreError::TooNew(2),
             KeyStoreError::InvalidShape,
-            KeyStoreError::WriteFailed("disk full".into()),
+            KeyStoreError::WriteFailed(Some("disk full".into())),
+            KeyStoreError::WriteFailed(None),
         ] {
             let text = error.to_string();
             assert!(!text.contains(secret));

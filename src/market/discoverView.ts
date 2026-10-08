@@ -91,6 +91,21 @@ export function mcpKey(row: Pick<McpRow, "id">): string {
   return row.id;
 }
 
+/// skill 来自谁（#307）：`owner/repo` 的作者那一段。列表 `来自` 一列、来历行的第一层只写它
+export function repoOwner(repo: string): string {
+  const cut = repo.indexOf("/");
+  return cut > 0 ? repo.slice(0, cut) : repo;
+}
+
+/// 介绍页 / 安装页来历行的第一段（#307）：第一层 `来自 anthropics`；第二层（悬停，等宽）是精确值
+/// `anthropics/skills · skills/pdf`（仓库与仓库内路径；还不知道路径或在仓库根时只有仓库）
+export function skillOrigin(repo: string, path: string | null): { from: string; exact: string } {
+  return {
+    from: t("market.origin.from", { owner: repoOwner(repo) }),
+    exact: path ? `${repo} · ${path}` : repo,
+  };
+}
+
 /// 位置的名字：`global` → `用户级`；`project:<路径>` → 项目文件夹名
 export function placeName(key: LocationKey): string {
   if (key === "global") return t("market.place.user");

@@ -48,7 +48,7 @@ test("移动 / 复制的提示条：自动加进 .gitignore 的接「已加进 .
   // 确认框里出了勾选、用户自己决定不勾：不再唠叨
   assert.equal(keyHintNote({ keyExposed: true }, false), undefined);
   // 确认框没出勾选（检查之后来源又变了），写的时候却是第一次暴露：照样说
-  assert.equal(keyHintNote({ keyExposed: true }, true), "密钥会随仓库提交，没加进 .gitignore");
+  assert.equal(keyHintNote({ keyExposed: true }, true), "密钥会随仓库提交，未加入 .gitignore");
   // 没加成：原因接在后面，不互相遮住
   assert.equal(
     keyHintNote(
@@ -61,10 +61,10 @@ test("移动 / 复制的提示条：自动加进 .gitignore 的接「已加进 .
 
 test("自动同步的提示条：自动加的说「已加进 .gitignore」，第一次暴露的说密钥会随仓库提交", () => {
   assert.equal(keyHintNote({ autoIgnored: true }, true), "已加进 .gitignore");
-  assert.equal(keyHintNote({ keyExposed: true }, true), "密钥会随仓库提交，没加进 .gitignore");
+  assert.equal(keyHintNote({ keyExposed: true }, true), "密钥会随仓库提交，未加入 .gitignore");
   assert.equal(
     keyHintNote({ autoIgnored: true, keyExposed: true }, true),
-    "已加进 .gitignore · 密钥会随仓库提交，没加进 .gitignore",
+    "已加进 .gitignore · 密钥会随仓库提交，未加入 .gitignore",
   );
   assert.equal(keyHintNote({}, true), undefined);
 });
@@ -137,7 +137,7 @@ test("提示条：目标已被跟踪的，没问过用户时说「密钥会随�
 test("格子写入：第一次暴露的说一句并给「加进 .gitignore」；自动加的、已被跟踪的只说；其余什么都不说", () => {
   const id = "project:/w/CardBox::cursor";
   assert.deepEqual(cellKeyHint({ keyExposed: true, ignorable: [id] }), {
-    note: "密钥会随仓库提交，没加进 .gitignore",
+    note: "密钥会随仓库提交，未加入 .gitignore",
     addGitignore: true,
   });
   assert.deepEqual(cellKeyHint({ autoIgnored: true, ignorable: [] }), {
@@ -167,7 +167,7 @@ test("格子写入：第一次暴露的说一句并给「加进 .gitignore」；
       afterGitignoreAdd(written, { gitignoreFailed: "没能加进 .gitignore：没有写入权限，没动" }),
     ),
     {
-      note: "密钥会随仓库提交，没加进 .gitignore · 没能加进 .gitignore：没有写入权限，没动",
+      note: "密钥会随仓库提交，未加入 .gitignore · 没能加进 .gitignore：没有写入权限，没动",
       addGitignore: false,
     },
   );
@@ -248,7 +248,7 @@ test("保留这份的提示条：确认框里对哪个目标说过的不再说�
   // 出过勾选、用户没勾：不再说
   assert.equal(keyHintNoteAsked(exposed, { remind: [b], tracked: [] }), undefined);
   // 确认框没对它出勾选（检查之后来源又变了）：照样说
-  assert.equal(keyHintNoteAsked(exposed, none), "密钥会随仓库提交，没加进 .gitignore");
+  assert.equal(keyHintNoteAsked(exposed, none), "密钥会随仓库提交，未加入 .gitignore");
   // 对 B 出过勾选、确认前 B 被跟踪了：勾选的保护没做成，要说那一句——就算确认框里对别的目标（A）出过那一句
   assert.equal(
     keyHintNoteAsked(tracked, { remind: [b], tracked: [a] }),

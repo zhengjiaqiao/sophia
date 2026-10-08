@@ -1,10 +1,11 @@
 //! 家 claude 的编排测试（spec AC2、AC4、AC6–AC9、AC29、AC33–AC37、AC40、AC41、AC48、AC50、AC51 的 app 部分）。
 //! 桌面应用的两个数据目录是临时目录（已 canonicalize）；进程、打开、退出、钥匙串都是假的。
-use super::tests::{agents_manager_setup, code, fixture, key_slot, Fixture};
+use super::tests::{agents_manager_setup, code, fixture, Fixture};
 use super::*;
 use sophia_core::claude_models::desktop::{DesktopFile, SOPHIA_PROFILE_ID};
 use sophia_core::claude_models::settings::{ClaudeGatewaySettings, Phase};
 use sophia_core::codex_models::catalog::Model;
+use sophia_core::model_providers::{ModelRef, Provider, ProviderModel};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -15,44 +16,71 @@ const CC_ID: &str = "00000000-0000-4000-8000-000000157210";
 const CC_PROFILE: &str = "{\n  \"inferenceProvider\": \"gateway\",\n  \"inferenceGatewayBaseUrl\": \"http://127.0.0.1:15721/claude-desktop\",\n  \"inferenceGatewayApiKey\": \"ccs-1\"\n}\n";
 const CC_META: &str = "{\n  \"entries\": [\n    {\n      \"id\": \"00000000-0000-4000-8000-000000157210\",\n      \"name\": \"Other Tool\"\n    }\n  ],\n  \"appliedId\": \"00000000-0000-4000-8000-000000157210\"\n}";
 
-fn saved(id: &str, name: Option<&str>, selected: bool) -> SavedModel {
-    SavedModel {
-        model: Model {
-            id: id.into(),
-            display_name: name.map(str::to_owned),
-            ..Default::default()
-        },
-        selected,
-    }
-}
-
-fn ap_provider() -> ProviderSettings {
-    ProviderSettings {
+/// 全局名单里的一家 ap（名称 AP），三个模型
+fn ap_provider() -> Provider {
+    Provider {
         id: "ap".into(),
         name: "AP".into(),
         base_url: "https://ap.example".into(),
         api_base: Some("https://ap.example/v1".into()),
-        models: vec![
-            saved("kimi-k3", Some("Kimi K3"), true),
-            saved("glm-lite", None, true),
-            saved("unused", None, false),
-        ],
-        ..ProviderSettings::default()
+        models: ["kimi-k3", "glm-lite", "unused"]
+            .into_iter()
+            .map(|id| ProviderModel {
+                model: Model {
+                    id: id.into(),
+                    display_name: (id == "kimi-k3").then(|| "Kimi K3".to_owned()),
+                    ..Default::default()
+                },
+                enabled: None,
+            })
+            .collect(),
+        ..Provider::default()
     }
 }
 
-/// Codex 那套 fixture，外加：Claude 有一家网关 ap（已选两个模型）与它的密钥；桌面应用处于账号模式
+/// 「ap 这一家的完整勾选」：启用这些、Claude 的已选里 ap 的换成它们（别家的不动），经 `App::set_picks` 跟上
+fn set_claude_models(
+    f: &Fixture,
+    provider: &str,
+    selected: Vec<Model>,
+) -> Result<Vec<String>, AppError> {
+    let refs = f.enable_models(provider, &selected);
+    let mut picks: Vec<ModelRef> = f
+        .world
+        .lock()
+        .unwrap()
+        .models
+        .picked("claude")
+        .iter()
+        .filter(|r| r.provider != provider)
+        .cloned()
+        .collect();
+    picks.extend(refs);
+    f.app.set_picks(Agent::Claude, picks)
+}
+
+/// Codex 那套 fixture，外加：全局名单里有一家 ap 与它的密钥，Claude 选了它的两个模型；桌面应用处于账号模式
 fn claude_fixture() -> Fixture {
     let f = fixture();
     {
         let mut w = f.world.lock().unwrap();
-        w.claude = ClaudeGatewaySettings {
-            providers: vec![ap_provider()],
-            ..ClaudeGatewaySettings::default()
-        };
-        w.keys
-            .insert(key_slot(Agent::Claude, "ap"), "sk-claude-ap-123456".into());
+        w.models.providers.push(ap_provider());
+        w.keys.insert("ap".into(), "sk-claude-ap-123456".into());
     }
+    f.enable_models(
+        "ap",
+        &[model("kimi-k3", Some("Kimi K3")), model("glm-lite", None)],
+    );
+    f.world.lock().unwrap().models.picks.insert(
+        "claude".into(),
+        sophia_core::model_providers::picks::AgentPicks {
+            picked: vec![
+                ModelRef::new("ap", "kimi-k3"),
+                ModelRef::new("ap", "glm-lite"),
+            ],
+            official_seen: Vec::new(),
+        },
+    );
     put(&f, DesktopFile::ClaudeConfig, ACCOUNT_1P);
     put(&f, DesktopFile::Claude3pConfig, ACCOUNT_3P);
     f
@@ -441,10 +469,7 @@ fn unavailable_desktop_refuses_to_open() {
         assert!(!settings_of(&f).enabled);
     }
     let f = claude_fixture();
-    f.world.lock().unwrap().claude.providers[0]
-        .models
-        .iter_mut()
-        .for_each(|m| m.selected = false);
+    f.world.lock().unwrap().models.picks.clear();
     assert_eq!(code(f.app.enable_claude()), "invalid");
 }
 
@@ -647,9 +672,7 @@ fn ac35_state_fields() {
     let f = claude_fixture();
     f.app.enable_claude().unwrap();
     f.world.lock().unwrap().running = true;
-    f.app
-        .set_models_in(Agent::Claude, "ap", vec![model("glm-lite", None)])
-        .unwrap();
+    set_claude_models(&f, "ap", vec![model("glm-lite", None)]).unwrap();
     let desktop = desktop_state(&f);
     assert!(desktop.pending && desktop.needs_restart);
     f.app.restore_claude().unwrap();
@@ -660,10 +683,7 @@ fn ac35_state_fields() {
     // Sophia 的设置丢了、文件是我们的 → 视为写着 Sophia 的；切回按「原来没有」写 1p、删 appliedId
     let f = claude_fixture();
     f.app.enable_claude().unwrap();
-    f.world.lock().unwrap().claude = ClaudeGatewaySettings {
-        providers: vec![ap_provider()],
-        ..ClaudeGatewaySettings::default()
-    };
+    f.world.lock().unwrap().claude = ClaudeGatewaySettings::default();
     let desktop = desktop_state(&f);
     assert!(desktop.applied && desktop.pending);
     f.app.restore_claude().unwrap();
@@ -677,6 +697,21 @@ fn ac35_state_fields() {
     );
     assert!(json_of(&f, DesktopFile::Meta).get("appliedId").is_none());
     assert!(text(&f, DesktopFile::Profile).is_none());
+}
+
+/// 浮层的官方组：只在开着第三方模型时说「用不了，关掉开关就回来」；关着时官方模型就是 Claude 自己在用的，
+/// 说它自己管、在这里改不了（spec #247：开着第三方时官方模型用不了，置灰）
+#[test]
+fn the_official_group_is_unavailable_only_while_third_party_is_on() {
+    use sophia_core::model_providers::picks::Blocked;
+    let f = claude_fixture();
+    let official =
+        |f: &Fixture| f.app.state().agent(Agent::Claude).unwrap().models.groups[0].blocked;
+    assert_eq!(official(&f), Some(Blocked::ReadOnly));
+    f.app.enable_claude().unwrap();
+    assert_eq!(official(&f), Some(Blocked::OfficialUnavailable));
+    f.app.restore_claude().unwrap();
+    assert_eq!(official(&f), Some(Blocked::ReadOnly));
 }
 
 // ---------- 接管与重新写入（R35、R36） ----------
@@ -740,10 +775,7 @@ fn ac36_takeover_and_give_back_a_foreign_config() {
     // 没选模型时拒绝接管
     let f = claude_fixture();
     put_cc(&f);
-    f.world.lock().unwrap().claude.providers[0]
-        .models
-        .iter_mut()
-        .for_each(|m| m.selected = false);
+    f.world.lock().unwrap().models.picks.clear();
     let error = f.app.takeover_claude().unwrap_err();
     assert_eq!(error.message, "先选好模型再接管");
 }
@@ -786,9 +818,7 @@ fn ac48_changes_while_running_wait_for_a_restart() {
     let profile = text(&f, DesktopFile::Profile).unwrap();
     let routing = claude_routing(&f).unwrap();
     f.world.lock().unwrap().running = true;
-    f.app
-        .set_models_in(Agent::Claude, "ap", vec![model("glm-lite", None)])
-        .unwrap();
+    set_claude_models(&f, "ap", vec![model("glm-lite", None)]).unwrap();
     assert_eq!(text(&f, DesktopFile::Profile).unwrap(), profile);
     assert_eq!(claude_routing(&f).unwrap(), routing);
     assert!(desktop_state(&f).needs_restart);
@@ -818,13 +848,12 @@ fn ac48_changes_while_running_wait_for_a_restart() {
     assert!(!desktop_state(&f).pending);
 
     f.world.lock().unwrap().running = false;
-    f.app
-        .set_models_in(
-            Agent::Claude,
-            "ap",
-            vec![model("kimi-k3", Some("Kimi K3")), model("glm-lite", None)],
-        )
-        .unwrap();
+    set_claude_models(
+        &f,
+        "ap",
+        vec![model("kimi-k3", Some("Kimi K3")), model("glm-lite", None)],
+    )
+    .unwrap();
     assert_eq!(
         json_of(&f, DesktopFile::Profile)["inferenceModels"][1]["labelOverride"],
         "glm-lite"
@@ -840,26 +869,81 @@ fn model(id: &str, name: Option<&str>) -> Model {
     }
 }
 
+/// 排序（#265）：在「已选」里换了顺序，`inferenceModels` 按新顺序重写，第一个是切过去时先用的；
+/// 恢复默认顺序＝按启用先后
+#[test]
+fn reordering_rewrites_inference_models_and_the_first_is_the_initial_default() {
+    let f = claude_fixture();
+    f.app.enable_claude().unwrap();
+    let labels = |f: &Fixture| -> Vec<String> {
+        json_of(f, DesktopFile::Profile)["inferenceModels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["labelOverride"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(labels(&f), ["Kimi K3", "glm-lite"]);
+
+    f.app
+        .reorder_picks(
+            Agent::Claude,
+            vec![
+                ModelRef::new("ap", "glm-lite"),
+                ModelRef::new("ap", "kimi-k3"),
+            ],
+        )
+        .unwrap();
+    assert_eq!(labels(&f), ["glm-lite", "Kimi K3"]);
+    assert_eq!(
+        json_of(&f, DesktopFile::Profile)["inferenceModels"][0]["name"],
+        "claude-sonnet-5",
+        "第一个是初始默认"
+    );
+
+    f.app.restore_order(Agent::Claude).unwrap();
+    assert_eq!(labels(&f), ["Kimi K3", "glm-lite"]);
+}
+
 /// R29（2026-09-30）：已选全部写进 `inferenceModels`，不设上限——第一个 `claude-sonnet-5`、中间 `-r2`、`-r3`……、
-/// 最后一个 `claude-haiku-4-5`；跨网关按已选顺序（网关顺序、再按各自列表顺序），撞名的 `labelOverride` 带网关短名；
-/// Claude 清单逐项对应到各自网关的上游模型。只剩一个时只写一项 `claude-sonnet-5`；开着时已选不能变空
+/// 最后一个 `claude-haiku-4-5`；按「已选」顺序（#259 起来自全局名单），撞名的 `labelOverride` 带提供商名；
+/// Claude 清单逐项对应到各自提供商的上游模型。只剩一个时只写一项 `claude-sonnet-5`；
+/// 开着时取消最后一个＝关掉这一家
 #[test]
 fn every_selected_model_is_written_in_order() {
     let f = claude_fixture();
     {
         let mut w = f.world.lock().unwrap();
-        w.claude.providers[0].models[2].selected = true;
-        w.claude.providers.push(ProviderSettings {
+        w.models.providers.push(Provider {
             id: "or".into(),
             name: "openrouter".into(),
             base_url: "https://or.example".into(),
             api_base: Some("https://or.example/api/v1".into()),
-            models: vec![saved("moonshot/kimi-k3", Some("Kimi K3"), true)],
-            ..ProviderSettings::default()
+            ..Provider::default()
         });
-        w.keys
-            .insert(key_slot(Agent::Claude, "or"), "sk-claude-or-123456".into());
+        w.keys.insert("or".into(), "sk-claude-or-123456".into());
     }
+    f.enable_models(
+        "ap",
+        &[
+            model("kimi-k3", None),
+            model("glm-lite", None),
+            model("unused", None),
+        ],
+    );
+    f.enable_models("or", &[model("moonshot/kimi-k3", Some("Kimi K3"))]);
+    f.world.lock().unwrap().models.picks.insert(
+        "claude".into(),
+        sophia_core::model_providers::picks::AgentPicks {
+            picked: vec![
+                ModelRef::new("ap", "kimi-k3"),
+                ModelRef::new("ap", "glm-lite"),
+                ModelRef::new("ap", "unused"),
+                ModelRef::new("or", "moonshot/kimi-k3"),
+            ],
+            official_seen: Vec::new(),
+        },
+    );
     f.app.enable_claude().unwrap();
     assert_eq!(
         json_of(&f, DesktopFile::Profile)["inferenceModels"],
@@ -907,10 +991,9 @@ fn every_selected_model_is_written_in_order() {
         ]
     );
 
-    // 删掉 openrouter 那家：不在运行时当场重写，最后一个换成 ap 的最后一个
-    f.app
-        .remove_provider_in(Agent::Claude, "or", false)
-        .unwrap();
+    // 在提供商页删掉 openrouter 那家：不在运行时当场重写，最后一个换成 ap 的最后一个
+    f.world.lock().unwrap().models.remove("or").unwrap();
+    assert!(f.app.models_changed().is_empty());
     assert_eq!(
         json_of(&f, DesktopFile::Profile)["inferenceModels"],
         serde_json::json!([
@@ -920,35 +1003,37 @@ fn every_selected_model_is_written_in_order() {
         ])
     );
 
-    f.app
-        .set_models_in(Agent::Claude, "ap", vec![model("kimi-k3", Some("Kimi K3"))])
-        .unwrap();
+    set_claude_models(&f, "ap", vec![model("kimi-k3", Some("Kimi K3"))]).unwrap();
     assert_eq!(
         json_of(&f, DesktopFile::Profile)["inferenceModels"],
         serde_json::json!([{"name": "claude-sonnet-5", "labelOverride": "Kimi K3"}]),
-        "只有一个时只写一项，Haiku 档由路由回落到它"
+        "只有一个时只写一项"
     );
+    // 取消最后一个：关掉这一家（不在运行时当场切回）
+    f.app
+        .pick(Agent::Claude, &ModelRef::new("ap", "kimi-k3"), false)
+        .unwrap();
+    assert!(!settings_of(&f).enabled);
+    assert!(settings_of(&f).applied.is_none());
     assert_eq!(
-        code(f.app.set_models_in(Agent::Claude, "ap", vec![])),
-        "invalid"
+        json_of(&f, DesktopFile::ClaudeConfig)["deploymentMode"],
+        "1p"
     );
 }
 
-/// 改了网关地址：已写进 Claude 清单的上游立刻换成新地址（路由每个请求重读），角色不动
+/// 在提供商页改了地址：已写进 Claude 清单的上游立刻换成新地址（路由每个请求重读），角色不动
 #[test]
 fn changing_a_gateway_address_updates_the_claude_routing_at_once() {
     let f = claude_fixture();
     f.app.enable_claude().unwrap();
     f.world.lock().unwrap().running = true;
-    f.app
-        .upsert_provider_in(
-            Agent::Claude,
-            Some("ap"),
-            None,
-            "https://ap2.example",
-            false,
-        )
+    f.world
+        .lock()
+        .unwrap()
+        .models
+        .edit("ap", None, "https://ap2.example")
         .unwrap();
+    f.app.models_changed();
     let routing = claude_routing(&f).unwrap();
     assert_eq!(routing["providers"][0]["base_url"], "https://ap2.example");
     assert_eq!(routing["models"][0]["slug"], "claude-sonnet-5");
@@ -1093,229 +1178,25 @@ fn ac51_restart_quits_writes_then_opens() {
 
 // ---------- 按家的网关与同步（R2、R4、R40） ----------
 
-/// AC2（app 部分）：两家各有 id 为 wecode 的网关，密钥各在各的账户；删 Codex 的只删 Codex 的密钥
-#[test]
-fn ac2_same_id_in_both_families_uses_separate_accounts() {
-    let f = claude_fixture();
-    let codex = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            Some("wecode"),
-            "https://codex.example",
-            "sk-codex-wecode-1",
-            vec!["m".into()],
-            "",
-            false,
-        )
-        .unwrap();
-    let claude = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Claude,
-            None,
-            Some("wecode"),
-            "https://claude.example",
-            "sk-claude-wecode-1",
-            vec!["m".into()],
-            "",
-            false,
-        )
-        .unwrap();
-    assert_eq!(codex.provider_id, "wecode");
-    assert_eq!(claude.provider_id, "wecode");
-    {
-        let w = f.world.lock().unwrap();
-        assert_eq!(
-            w.keys.get("wecode").map(String::as_str),
-            Some("sk-codex-wecode-1")
-        );
-        assert_eq!(
-            w.keys.get("claude:wecode").map(String::as_str),
-            Some("sk-claude-wecode-1")
-        );
-    }
-    f.app
-        .remove_provider_in(Agent::Codex, "wecode", false)
-        .unwrap();
-    let w = f.world.lock().unwrap();
-    assert_eq!(w.deleted_keys, ["wecode"]);
-    assert!(w.keys.contains_key("claude:wecode"));
-    assert!(w.claude.providers.iter().any(|p| p.id == "wecode"));
-}
-
-/// AC40：Claude 页新增同地址网关（sync）只出现一份；同步删除带走 Codex 那一份与密钥，Codex 已选变空且开着则随之关掉
-#[test]
-fn ac40_sync_add_and_remove_across_families() {
-    let f = fixture();
-    f.configure(); // Codex：gw.example，已选 1 个
-    f.app.enable().unwrap();
-    let saved = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Claude,
-            None,
-            Some("GW"),
-            "https://GW.example/openai/",
-            "sk-claude-gw-123456",
-            vec!["weibo/glm-5".into()],
-            "",
-            true,
-        )
-        .unwrap();
-    assert_eq!(saved.other_provider_id.as_deref(), Some("gw.example"));
-    assert_eq!(
-        f.world.lock().unwrap().settings.providers.len(),
-        1,
-        "同一地址不加第二份"
-    );
-    assert_eq!(f.world.lock().unwrap().claude.providers.len(), 1);
-
-    // 不勾「同时删掉」：Codex 不受影响
-    let g = fixture();
-    g.configure();
-    g.app
-        .commit_verified_provider_in(
-            Agent::Claude,
-            None,
-            None,
-            "https://gw.example/openai",
-            "sk-claude-gw-123456",
-            vec![],
-            "",
-            false,
-        )
-        .unwrap();
-    let id = g.world.lock().unwrap().claude.providers[0].id.clone();
-    g.app.remove_provider_in(Agent::Claude, &id, false).unwrap();
-    assert_eq!(g.world.lock().unwrap().settings.providers.len(), 1);
-
-    // 勾上：Codex 的 gw.example 连同密钥被删；它是 Codex 唯一在发布的网关且 Codex 开着 → Codex 先关掉
-    f.app
-        .remove_provider_in(Agent::Claude, &saved.provider_id, true)
-        .unwrap();
-    let w = f.world.lock().unwrap();
-    assert!(w.settings.providers.is_empty());
-    assert!(w.deleted_keys.contains(&"gw.example".to_owned()));
-    assert!(w
-        .deleted_keys
-        .contains(&key_slot(Agent::Claude, &saved.provider_id)));
-    drop(w);
-    assert!(!f.codex_state().enabled, "Codex 随之关掉");
-    assert_eq!(
-        f.read_config(),
-        "model = \"gpt-5.6-sol\"\nmodel_reasoning_effort = \"high\"\n\n[mcp_servers]\n\n[mcp_servers.node_repl]\ncommand = \"/x/node_repl\"\n"
-    );
-}
-
-/// R40：改网关带同步：按改之前的地址找到另一家那一份，地址与密钥一起改
-#[test]
-fn sync_edit_follows_the_old_address() {
-    let f = claude_fixture();
-    f.app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            Some("AP"),
-            "https://ap.example",
-            "sk-codex-ap-123456",
-            vec!["kimi-k3".into()],
-            "",
-            false,
-        )
-        .unwrap();
-    let saved = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Claude,
-            Some("ap"),
-            None,
-            "https://ap-new.example",
-            "sk-new-key-123456",
-            vec!["kimi-k3".into(), "new-model".into()],
-            "https://ap-new.example/v1",
-            true,
-        )
-        .unwrap();
-    assert_eq!(saved.other_provider_id.as_deref(), Some("ap"));
-    let w = f.world.lock().unwrap();
-    let codex = &w.settings.providers[0];
-    assert_eq!(codex.base_url, "https://ap-new.example");
-    assert_eq!(codex.api_base.as_deref(), Some("https://ap-new.example/v1"));
-    assert!(codex.models.iter().any(|m| m.model.id == "new-model"));
-    assert_eq!(
-        w.keys.get("ap").map(String::as_str),
-        Some("sk-new-key-123456")
-    );
-    assert_eq!(
-        w.keys.get("claude:ap").map(String::as_str),
-        Some("sk-new-key-123456")
-    );
-}
-
-/// AC41：带过来——Codex 有 2 家、Claude 没有：Claude 出现 2 家、模型全未选、有密钥，Codex 不变
-#[test]
-fn ac41_copy_providers_from_the_other_family() {
-    let f = fixture();
-    for (name, url, key) in [
-        ("WeCode", "https://wecode.example", "sk-wecode-123456"),
-        ("Other", "https://other.example", "sk-other-1234567"),
-    ] {
-        let id = f
-            .app
-            .commit_verified_provider_in(
-                Agent::Codex,
-                None,
-                Some(name),
-                url,
-                key,
-                vec!["m1".into(), "m2".into()],
-                "",
-                false,
-            )
-            .map(|saved| saved.provider_id)
-            .unwrap();
-        f.app
-            .set_models_in(
-                Agent::Codex,
-                &id,
-                vec![Model {
-                    id: "m1".into(),
-                    ..Default::default()
-                }],
-            )
-            .unwrap();
-    }
-    let codex_before = f.world.lock().unwrap().settings.clone();
-    f.app.copy_providers(Agent::Claude, Agent::Codex).unwrap();
-    let view = claude_state(&f);
-    assert_eq!(view.providers.len(), 2);
-    for provider in &view.providers {
-        assert_eq!(provider.key, KeyStatus::Set, "{}", provider.name);
-        assert!(provider.models.iter().all(|m| !m.selected));
-        assert_eq!(provider.models.len(), 2);
-    }
-    assert_eq!(f.world.lock().unwrap().settings, codex_before);
-    // 再带一次不重复
-    f.app.copy_providers(Agent::Claude, Agent::Codex).unwrap();
-    assert_eq!(claude_state(&f).providers.len(), 2);
-}
-
-/// R3：两家的状态各自独立
+/// R3：各家的状态各自独立（#266 起 WorkBuddy 排第三）
 #[test]
 fn state_has_both_families_in_order() {
     let f = claude_fixture();
     f.configure();
     let state = f.app.state();
     let agents: Vec<Agent> = state.agents.iter().map(|a| a.agent).collect();
-    assert_eq!(agents, [Agent::Codex, Agent::Claude]);
+    assert_eq!(agents, [Agent::Codex, Agent::Claude, Agent::WorkBuddy]);
     let codex = &state.agents[0];
-    assert_eq!(codex.providers.len(), 1);
+    assert_eq!(codex.models.picked.len(), 2, "官方 1 + 第三方 1");
     assert!(codex.codex.is_some() && codex.claude.is_none());
     let claude = &state.agents[1];
-    assert_eq!(claude.providers[0].id, "ap");
-    assert_eq!(claude.providers[0].key, KeyStatus::Set);
+    let picked: Vec<&str> = claude
+        .models
+        .picked
+        .iter()
+        .map(|m| m.model_ref.model.as_str())
+        .collect();
+    assert_eq!(picked, ["kimi-k3", "glm-lite"]);
     let view = claude.claude.as_ref().unwrap();
     assert!(view.profile_models.is_empty(), "还没打开，profile 不存在");
     let json = serde_json::to_value(&state).unwrap();
@@ -1363,7 +1244,7 @@ fn restoring_claude_keeps_the_service_while_codex_still_points_at_it() {
     assert!(claude_routing(&f).is_none());
 }
 
-/// R4：Claude 这家的密钥读不出（密钥文件损坏）时，打开报「不可用：原因」，不说「还没有密钥」，什么都不写
+/// R4：Claude 选了的那一家的密钥读不出（密钥文件损坏）时，打开报「不可用：原因」，不说「还没有密钥」，什么都不写
 #[test]
 fn enabling_claude_with_an_unreadable_key_names_the_reason() {
     let f = claude_fixture();
@@ -1372,13 +1253,7 @@ fn enabling_claude_with_an_unreadable_key_names_the_reason() {
         .lock()
         .unwrap()
         .key_errors
-        .insert(key_slot(Agent::Claude, "ap"), reason.clone());
-    let view = claude_state(&f);
-    assert_eq!(view.providers[0].key, KeyStatus::Unreadable);
-    assert_eq!(
-        view.providers[0].key_problem.as_deref(),
-        Some(reason.as_str())
-    );
+        .insert("ap".into(), reason.clone());
     let error = f.app.enable_claude().unwrap_err();
     assert_eq!(error.code, "invalid");
     assert!(error.message.contains(&reason), "{}", error.message);
@@ -1418,6 +1293,23 @@ fn ac9_detach_switches_a_running_claude_back_and_keeps_the_choice() {
     assert!(s.enabled, "开着是用户的选择，退出不改");
     assert!(s.applied.is_none());
     assert!(router_stopped(&f));
+}
+
+/// 升级后第一次打开（#259）：Claude 开着、桌面应用还写着 Sophia 的，全局名单里却一个都没选——
+/// 悄悄切回官方、记成没开着（桌面应用不在运行时当场写回），不报错
+#[test]
+fn attach_switches_claude_back_quietly_when_nothing_is_picked() {
+    let f = claude_fixture();
+    let before = tree(&f);
+    f.app.enable_claude().unwrap();
+    relaunch(&f);
+    f.world.lock().unwrap().models = Default::default();
+    let report = f.app.attach();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    let s = settings_of(&f);
+    assert!(!s.enabled && s.applied.is_none());
+    assert_eq!(no_backups_beside(tree(&f)), before);
+    assert_eq!(f.router(), None);
 }
 
 /// Claude 没在运行：直接切回，不替用户打开它

@@ -16,11 +16,13 @@
   "settings.appearance.dark": "深色",
   "settings.appearance.hint": "跟隨系統時，系統切換深淺色，Sophia 當場跟著變",
   "settings.skillsMcp.section": "Skills 和 MCP",
-  "settings.agents.label": "顯示的 agent",
-  "settings.agents.note": "最多顯示 {max} 個 · MCP 頁只顯示其中支援 MCP 的",
+  "settings.agents.label": "skill 和 MCP 頁顯示的 agent",
+  "settings.agents.note": "最多顯示 {max} 個 · MCP 頁只顯示其中支援 MCP 的 · 模型頁不受這裡影響",
   "settings.agents.none": "本機上還沒有發現任何 agent",
   "settings.agents.absentCount": "未安裝的 {count} 個",
   "settings.agents.fullReason": "最多顯示 {max} 個，先取消一個",
+  "settings.agents.product.claudeDesktop": "Claude 桌面應用",
+  "settings.agents.product.kimiDesktop": "Kimi 桌面版",
   "settings.agents.unchecked": "不在清單裡顯示了",
   "settings.agents.uncheckedTrail": "已建好的連結原樣留著",
   "settings.scope.label": "生效範圍",
@@ -57,5 +59,5 @@
   "settings.update.later": "稍後",
   "settings.update.installed": "{version} 已安裝，重啟後生效",
   "settings.update.restart": "重啟",
-  "settings.appearance.applyFailed": "設不上視窗外觀：{error}"
+  "settings.appearance.applyFailed": "外觀切換失敗"
 }

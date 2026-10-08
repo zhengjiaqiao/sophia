@@ -399,7 +399,7 @@ test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号�
   // 记号：弱标识 Tag（12 ink-mute），提示框给差异字段名；不再是默认键、不再另开一格差异抽屉
   assert.match(
     tab,
-    /<Tag tone="weak" tip=\{diffTip\(row\.name, fields\)\}>\s*\{tn\("\{count\} 份不一样", differing\.length\)\}/,
+    /<Tag tone="weak" tip=\{diffTip\(row\.name, fields\)\}>\s*\{tn\("\{count\} 份不一样", differingCopies\(row, targetIdsOf\(row\)\)\)\}/,
   );
   assert.doesNotMatch(tab, /toggleDiff|openDiffs|panel:|onClosePanels/);
   // 差异在行详情抽屉里，接在键值几行之后；有差异时抽屉铺到最后一列
@@ -409,6 +409,7 @@ test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号�
   const section = render(McpDiffSection, {
     name: "notion",
     locationIds: ["a", "b"],
+    copies: 2,
     load: async () => ({
       name: "notion",
       locationIds: ["a", "b"],
@@ -420,6 +421,23 @@ test("名称格只放名字与记号：MCP `2 份不一样` 是纯文字记号�
     onReveal: () => undefined,
   });
   assert.match(section, /class="mcp-diff-section"><div class="mcp-diff__title">2 份不一样<\/div>/);
+  // 抽屉小标与行上同一个口径：有几种不一样的定义（三处里两处一样是 2 份，走查 2026-10-07 第 5 条）
+  assert.match(tab, /<McpDiffSection[^]*copies=\{differingCopies\(row, targetIdsOf\(row\)\)\}/);
+  const three = render(McpDiffSection, {
+    name: "notion",
+    locationIds: ["a", "b", "c"],
+    copies: 2,
+    load: async () => ({
+      name: "notion",
+      locationIds: ["a", "b", "c"],
+      fields: [],
+      unreadable: [],
+      dynamicAuth: false,
+    }),
+    labelOf: (id: string) => id,
+    onReveal: () => undefined,
+  });
+  assert.match(three, /class="mcp-diff__title">2 份不一样<\/div>/);
   // 宽抽屉由行视图说（detailWide），右沿只让出尾列：让位走 Drawer 的 inset
   const mx = readFileSync(new URL("../src/Matrix.tsx", import.meta.url), "utf8");
   assert.match(mx, /end: row\.detailWide \? WIDE_DETAIL_END : columns\.length \* colW/);
@@ -821,7 +839,7 @@ test("原件格与 MCP 的 ● 可点（DESIGN「删除原件」）：skill 先�
   );
   const mcp = withMcpCopy(readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8"));
   // 原件格先说原件在这一列的 agent 中、再给删除（#274）
-  assert.match(dv, /state === "own"\s*\?\s*t\("原件在 \{agent\} 中 · 删除…", \{ agent \}\)/);
+  assert.match(dv, /state === "own"\s*\?\s*t\("原件在\{agent\}中 · 删除…", \{ agent \}\)/);
   assert.match(skills, /else if \(state === "own"\) void askDeleteOriginal\(ref\)/);
   assert.match(
     skills,
@@ -830,7 +848,7 @@ test("原件格与 MCP 的 ● 可点（DESIGN「删除原件」）：skill 先�
   // MCP：`…` 只在会确认时写；别处还有同名定义就直接删、不给撤销（除非这一行各份不一样）
   assert.match(
     mcp,
-    /t\("从 \{target\} 删除", \{ target: column\.sentence \}\)\}\$\{othersHolding\(page, \[row\.name\], new Set\(\[target\.id\]\)\)\.length > 0 \? "" : "…"\}/,
+    /t\("从\{target\}删除", \{ target: column\.sentence \}\)\}\$\{othersHolding\(page, \[row\.name\], new Set\(\[target\.id\]\)\)\.length > 0 \? "" : "…"\}/,
   );
   assert.match(
     mcp,
@@ -939,4 +957,23 @@ test("面板随窗口变宽（2026-09-30）：宽度夹在 776 与 1200 之间�
   assert.deepEqual(wide, { place: 154, origin: 252 });
   const name = 1200 - 34 - 2 * 88 - wide.place! - wide.origin;
   assert.ok(name > 334 && Math.abs(name / 334 - wide.origin / 144) < 0.02, "三列同比放大");
+});
+
+test("按品牌上限（#261）：MCP `全部` 7 格（Claude 三格 + Kimi 两格 + 另外 2 家）在最小窗口里名称列也有 200；变宽时先还名称列", async () => {
+  const { panelColumns, agentColumnWidth } = await import("../src/Matrix.tsx");
+  // WORKBUDDY 是一个词、折不了行，约 60 宽：格不能再窄于 64
+  assert.equal(agentColumnWidth(7), 64);
+  const nameOf = (n: number, width: number) => {
+    const { place, origin } = panelColumns(n, true, width);
+    return width - 34 - n * agentColumnWidth(n) - place! - origin;
+  };
+  // 776：位置、来源都收到下限，名称列只剩 142
+  assert.deepEqual(panelColumns(7, true, 776), { place: 72, origin: 80 });
+  assert.equal(nameOf(7, 776), 142);
+  // 最小窗口 1100：侧栏 208 + 机面外距 10 + 内边距 48 后面板 834，多出的 58 全给名称列
+  assert.deepEqual(panelColumns(7, true, 834), { place: 72, origin: 80 });
+  assert.equal(nameOf(7, 834), 200);
+  // 名称列补足 246 之后，余下的照旧三列同比放大：5 格时名称 210 → 先补 36，再分 388
+  assert.deepEqual(panelColumns(5, true, 1200), { place: 142, origin: 158 });
+  assert.equal(nameOf(5, 1200), 486);
 });

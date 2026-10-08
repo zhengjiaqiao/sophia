@@ -11,6 +11,7 @@
 /// 每一项都是界面上已有入口的另一条路，行为与那个入口完全相同，不新增能力。
 
 import { goDestination, goFace, type Nav } from "./nav.ts";
+import type { Proceed } from "./leaveGuard.ts";
 import { destCommand, destinationOfCommand, DESTINATIONS, isScoped } from "./destinations.ts";
 
 /// 与 `src-tauri/src/menu.rs` 的 `ITEMS` 一一对应（目的地项不在这里：由目的地表生成，见 `DEST_COMMANDS`）
@@ -98,6 +99,41 @@ export function routeMenuCommand(command: MenuCommand, nav: Nav, editing: boolea
 /// 停在「关于」的都拿掉——不换页、不把焦点放到遮罩后面去
 export function routeUnderModal(route: MenuRoute, nav: Nav): MenuRoute {
   return route.text ? { nav, text: route.text } : { nav };
+}
+
+/// 填短表单的弹窗（`FormDialog`：反馈小窗、添加 / 编辑模型提供商）开着时菜单命令怎么走——一处判断，不分弹窗种类
+/// （走查 2026-10-08）：弹窗里有没保存的改动（页面登记了离开前询问，`guarded`）照常走，换页先经那一问、问完接着走；
+/// 没有改动同 `routeUnderModal`，不换页、不交给页面
+export function routeWithDialog(
+  route: MenuRoute,
+  nav: Nav,
+  dialog: { open: boolean; guarded: boolean },
+): MenuRoute {
+  if (!dialog.open || dialog.guarded) return route;
+  return routeUnderModal(route, nav);
+}
+
+/// 收到退出请求（应用菜单「退出 Sophia」⌘Q）时填短表单的弹窗怎么办——同 `routeWithDialog` 一处判断、不分弹窗种类
+/// （产品负责人 2026-10-08：弹窗留着时壳 inert，退出确认框点不到）。退出确认框在应用壳里，弹窗得先收起：
+/// 没有改动当场收起（反馈小窗发送中也直接放弃）再走退出；有没保存的改动先经离开前那一问（`ask`，弹窗里
+/// `模型提供商还没保存` · `丢弃` / `保存`），答了才收起、走退出，没答就留在弹窗里、不退出。
+/// 问出来后用户没答、继续在弹窗里编辑：交给 `ask` 的那一下带 `cancel`，弹窗调它就取消这次待定的退出，
+/// 之后保存不再接着退出（意外退出比多点一次 ⌘Q 糟得多）；换页那条路不带，语义不变
+export function quitWithDialog(
+  dialog: { open: boolean; guarded: boolean },
+  steps: { dismiss: () => void; ask: (proceed: Proceed) => void; quit: () => void },
+) {
+  let live = true;
+  const go: Proceed = () => {
+    if (!live) return;
+    if (dialog.open) steps.dismiss();
+    steps.quit();
+  };
+  go.cancel = () => {
+    live = false;
+  };
+  if (dialog.open && dialog.guarded) steps.ask(go);
+  else go();
 }
 
 /// 菜单里跟着界面灰 / 亮的几项（`set_menu_state`）

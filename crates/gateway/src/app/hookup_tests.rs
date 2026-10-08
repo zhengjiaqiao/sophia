@@ -207,7 +207,7 @@ fn picking_models_again_redecides_the_form() {
     assert_eq!(f.read_config(), ORIGINAL);
 }
 
-/// 运行中不另起判断（R4）：看状态、改网关名字都不改写 Codex 设置
+/// 运行中不另起判断（R4）：看状态、改提供商名字都不改写 Codex 设置
 #[test]
 fn nothing_else_redecides_the_form() {
     let f = fixture();
@@ -216,37 +216,26 @@ fn nothing_else_redecides_the_form() {
     let written = f.read_config();
     sign_out(&f);
     let _ = f.app.state();
-    let id = f.app.load().unwrap().providers[0].id.clone();
-    f.app
-        .upsert_provider_in(
-            Agent::Codex,
-            Some(&id),
-            Some("Renamed"),
-            "https://gw.example/openai/",
-            false,
-        )
+    let id = f.first_provider().unwrap();
+    f.world
+        .lock()
+        .unwrap()
+        .models
+        .edit(&id, Some("Renamed"), "https://gw.example/openai")
         .unwrap();
+    f.app.models_changed();
     assert_eq!(f.read_config(), written);
     assert_eq!(codex_view(&f).mode, HookupMode::Builtin);
 }
 
-/// 只改网关地址（不是改选模型）也不重新判断接法：R4 只有打开开关、改选模型、打开 Sophia 接上三个时刻
+/// 只改提供商地址（不是改选模型）也不重新判断接法：R4 只有打开开关、改选模型、打开 Sophia 接上三个时刻
 #[test]
 fn changing_the_gateway_address_does_not_redecide_the_form() {
     let f = fixture();
     f.configure();
     f.app.enable().unwrap();
     sign_out(&f);
-    let id = f.app.load().unwrap().providers[0].id.clone();
-    f.app
-        .upsert_provider_in(
-            Agent::Codex,
-            Some(&id),
-            None,
-            "https://gw2.example/openai/",
-            false,
-        )
-        .unwrap();
+    f.save_provider("https://gw2.example/openai/").unwrap();
     assert!(!f.read_config().contains("[model_providers.sophia]"));
     assert_eq!(codex_view(&f).mode, HookupMode::Builtin);
 }

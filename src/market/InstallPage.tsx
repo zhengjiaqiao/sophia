@@ -2,7 +2,7 @@
 ///
 /// ```
 /// ←  安装 pdf
-/// anthropics/skills · skills/pdf   在 GitHub 打开 ↗
+/// 来自 anthropics · 在 GitHub 打开 ↗   （悬停 来自 anthropics：anthropics/skills · skills/pdf，等宽）
 /// 读、写、合并、拆分 PDF，填表单、抽表格。
 /// 生效范围 ─────────────────────────────────────────
 /// [用户级] [CardBox] [weibo_assistant] [更多 ˅]
@@ -22,7 +22,7 @@
 /// 做不成：留在这一页，主动作上方浮一窗说原因
 import { useEffect, useState } from "react";
 import { t } from "../i18n.ts";
-import { PushedPage, usePushedPage } from "../ui/index.ts";
+import { Mono, PushedPage, usePushedPage } from "../ui/index.ts";
 import { useMenuFlag, usePageCommand } from "../shell/menuBus.ts";
 import type { Location } from "../shell/nav.ts";
 import type { InstallOutcome } from "../types.ts";
@@ -43,8 +43,9 @@ import {
   githubTreeUrl,
   installLabel,
   skillInstallBlock,
-  type AgentRef,
+  type InstallAgent,
 } from "./installView.ts";
+import { skillOrigin } from "./discoverView.ts";
 import { marketService, type MarketService } from "./service.ts";
 import { useSkillInstall } from "./useInstall.ts";
 
@@ -55,7 +56,7 @@ export interface InstallPageBase {
   /// 位置胶囊（与位置页筛选行同一份项目）
   places: InstallPlaces;
   /// 已安装的 agent（agent 表的先后）：勾选行从这里取
-  agents: ReadonlyArray<AgentRef>;
+  agents: ReadonlyArray<InstallAgent>;
   /// 设置里 `显示的 agent`（harness id）：默认勾它们
   shown: ReadonlyArray<string>;
   /// 滑回播完：调用方卸掉这一页
@@ -181,8 +182,8 @@ export function SkillInstallBody({
   // 搜索结果不知道路径：计划回来之后用后端在包里找到的
   const path = skill.path ?? item?.path ?? null;
   const branch = skill.branch ?? state.preview?.branch ?? null;
-  const origin = [{ text: skill.repo, mono: true, strong: true }];
-  if (path) origin.push({ text: path, mono: true, strong: false });
+  const { from, exact } = skillOrigin(skill.repo, path);
+  const origin = [{ text: from, tip: <Mono inherit>{exact}</Mono> }];
   // 从列表直接装时没有说明：自己去取一句（2026-09-27 真人测试 INS-1）
   const [fetched, setFetched] = useState<string | null>(null);
   useEffect(() => {

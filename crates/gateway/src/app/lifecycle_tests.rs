@@ -58,6 +58,26 @@ fn ac2_attach_does_nothing_when_both_are_off() {
     assert_eq!(f.read_config(), ORIGINAL);
 }
 
+/// 升级后第一次打开（#259）：Codex 开着、指着旧版按 agent 存的网关，全局名单里却一个都没选——
+/// 悄悄改回官方、记成没开着，不报错、不起路由
+#[test]
+fn attach_switches_codex_back_quietly_when_nothing_is_picked() {
+    let f = codex_on();
+    relaunch(&f);
+    // 旧设置不再读：名单与「已选」都是空的
+    f.world.lock().unwrap().models = Default::default();
+    let report = f.app.attach();
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(report.notice.is_none());
+    assert_eq!(f.read_config(), ORIGINAL);
+    assert_eq!(f.router(), None);
+    assert_eq!(f.world.lock().unwrap().settings.enabled, Some(false));
+    // 再打开也不去接
+    relaunch(&f);
+    assert!(f.app.attach().errors.is_empty());
+    assert_eq!(f.router(), None);
+}
+
 /// 已经接上时再接一次什么都不做
 #[test]
 fn attach_twice_is_a_no_op() {

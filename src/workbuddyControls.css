@@ -1,0 +1,5 @@
+/* WorkBuddy 那一行的开关位（同 .claude-switch）：开关与忙碌刻度在行里上下居中 */
+.workbuddy-switch {
+  display: inline-flex;
+  align-items: center;
+}

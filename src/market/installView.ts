@@ -1,12 +1,13 @@
-/// 安装页、从链接安装、从 JSON 添加（spec 2026-09-27-skill-mcp-market R6 R8 R9 R10 R11；DESIGN「发现与安装 ›
-/// 安装页」「从链接安装 · 从 JSON 添加」）的纯逻辑：位置的默认值与落点行、勾选行的默认与记忆、每一行后面那一句、
+/// 安装页、从链接安装、粘贴 MCP 配置（spec 2026-09-27-skill-mcp-market R6 R8 R9 R10 R11；DESIGN「发现与安装 ›
+/// 安装页」「从链接安装 · 粘贴 MCP 配置」）的纯逻辑：位置的默认值与落点行、勾选行的默认与记忆、每一行后面那一句、
 /// 贴底的去向、主动作的禁用原因、链接的就地识别、JSON 的占位与连接方式、装完那一窗的文案。
 /// 不碰 api、不产 JSX，tests/market-install-view.test.ts 直接测。
 
-import { listText, t, tn, tSpaced } from "../i18n.ts";
+import { listText, locale, t, tn, type Lang } from "../i18n.ts";
 import type { Location } from "../shell/nav.ts";
 import { displayPath } from "../pathText.ts";
 import { mirrorFailedNote } from "../mcpView.ts";
+import { trustNoticeFor, type TrustNotice } from "../mcpTrust.ts";
 import {
   mcpEffectTrail,
   type ToastAgentRef,
@@ -17,6 +18,7 @@ import type {
   AgentDir,
   InstallItem,
   InstallOutcome,
+  LocalText,
   LocationKey,
   McpCatalogEntry,
   McpDefinitionInput,
@@ -30,22 +32,26 @@ import type {
 /// 一个 agent：harness id + 显示名（原样大小写）
 export type AgentRef = ToastAgentRef;
 
+/// 一个已安装的产品：能不能装 skill（有 skill 目录）、能不能写 MCP（core `mcp::supports`）、属于哪个品牌，由 core 给
+export interface InstallAgent extends AgentRef {
+  skills: boolean;
+  mcp: boolean;
+  /// MCP 写进以后要在它里面点「信任」（core `mcp::trust_app`）
+  mcpTrust: boolean;
+  /// 它的 skill 在用户级 / 项目里落进哪一列（core `discovery::skill_columns`：同一品牌共用一处的是同一个列 id）；
+  /// 没有这一级为 null
+  skillUser: string | null;
+  skillProject: string | null;
+  /// 合成一行时这一行代表的产品（勾选行的默认勾按它们认）；没合成的就是它自己
+  members?: string[];
+  brand: string;
+  brandName: string;
+}
+
 export type InstallKind = "skill" | "mcp";
 
 /// 用户级的域 key
 export const USER_LOCATION: LocationKey = "global";
-export const CLAUDE_CODE = "claude-code";
-export const CLAUDE_DESKTOP = "claude-desktop";
-
-/// 能写 MCP 的 agent（DESIGN「MCP 支持哪些 agent」，2026-09-27 起六家）。其余的 agent 不出现在 MCP 的 `给谁用` 里
-export const MCP_AGENT_IDS: ReadonlySet<string> = new Set([
-  "claude-code",
-  "codex",
-  "cursor",
-  "gemini-cli",
-  "github-copilot",
-  CLAUDE_DESKTOP,
-]);
 
 // ───────────────────────── 位置 ─────────────────────────
 
@@ -109,7 +115,7 @@ export function landingParts(
   const result =
     projectPathOf(key) === null
       ? t("market.install.landingUser")
-      : tSpaced("market.install.landingProject", { project: placeName(key, labelOf) });
+      : t("market.install.landingProject", { project: placeName(key, labelOf) });
   return { result, path: landingPath(key, name) };
 }
 
@@ -122,40 +128,50 @@ export function landingTip(projectPath: string, name: string | null): string {
 // ───────────────────────── 给谁用 ─────────────────────────
 
 /// 勾选行列哪些 agent、按什么先后（画板 06 / 09）：设置里 `显示的 agent` 在前（按名单的先后），
-/// 其余已安装的在后（按 agent 表的先后）。MCP 只列能写 MCP 的，Claude Desktop 不进名单、
-/// 跟在名单那一段后面；skill 不列 Claude Desktop（它没有 skill 目录）
+/// 其余已安装的在后（按品牌的先后）。名单按品牌（#251）：勾着 Claude 时 Claude Code 与 Claude Desktop 都在里面。
+/// skill 只列在 `location` 有 skill 文件夹的（不列 Claude Desktop；装到项目时不列没有项目级的 Kimi 桌面版），
+/// 同一品牌共用一处的合成一行（id 是那一列的 id，名字写品牌名），MCP 只列能写 MCP 的——都看 core 给的标记
 export function agentRows(
   kind: InstallKind,
-  agents: ReadonlyArray<AgentRef>,
+  agents: ReadonlyArray<InstallAgent>,
   shown: ReadonlyArray<string>,
-): AgentRef[] {
-  const usable = agents.filter((a) =>
-    kind === "mcp" ? MCP_AGENT_IDS.has(a.id) : a.id !== CLAUDE_DESKTOP,
-  );
-  const byId = new Map(usable.map((a) => [a.id, a]));
-  const head = shown.map((id) => byId.get(id)).filter((a): a is AgentRef => a !== undefined);
-  const desktop = kind === "mcp" ? byId.get(CLAUDE_DESKTOP) : undefined;
-  if (desktop && !head.includes(desktop)) head.push(desktop);
+  location: LocationKey = USER_LOCATION,
+): InstallAgent[] {
+  const usable = kind === "mcp" ? agents.filter((a) => a.mcp) : skillRows(agents, location);
+  const listed = (a: InstallAgent) => a.members ?? [a.id];
+  const head = shown
+    .map((id) => usable.find((a) => listed(a).includes(id)))
+    .filter((a, i, all): a is InstallAgent => a !== undefined && all.indexOf(a) === i);
   return [...head, ...usable.filter((a) => !head.includes(a))];
 }
 
-/// 默认勾哪些（R9 R10）：设置里 `显示的 agent`（2026-09-27 产品负责人：「默认应该只勾选用户在设置里勾选的
-/// agent」——不再记上次的选择，每次打开都一样），MCP 另外 Claude Desktop 跟着 Claude Code
-export function defaultChecked(
-  kind: InstallKind,
-  rows: ReadonlyArray<AgentRef>,
-  shown: ReadonlyArray<string>,
-): string[] {
-  const listed = new Set(rows.map((a) => a.id));
-  const picked = new Set(shown.filter((id) => listed.has(id)));
-  if (kind === "mcp" && picked.has(CLAUDE_CODE) && listed.has(CLAUDE_DESKTOP)) {
-    picked.add(CLAUDE_DESKTOP);
+/// skill 勾选行：按这个位置的 skill 文件夹（列 id）归并，同一处只出一行
+function skillRows(agents: ReadonlyArray<InstallAgent>, location: LocationKey): InstallAgent[] {
+  const groups = new Map<string, InstallAgent[]>();
+  for (const a of agents) {
+    if (!a.skills) continue;
+    const column = location === USER_LOCATION ? a.skillUser : a.skillProject;
+    if (column === null || column === undefined) continue;
+    groups.set(column, [...(groups.get(column) ?? []), a]);
   }
-  return rows.map((a) => a.id).filter((id) => picked.has(id));
+  return [...groups].map(([column, members]) => ({
+    ...members[0],
+    id: column,
+    name: members.length > 1 ? members[0].brandName : members[0].name,
+    members: members.map((a) => a.id),
+  }));
 }
 
-/// 这个位置本来就直接读通用仓库的 agent，名字后写这一句
-export const directReaderNote = () => t("market.install.directReader");
+/// 默认勾哪些（R9 R10）：设置里 `显示的 agent`（2026-09-27 产品负责人：「默认应该只勾选用户在设置里勾选的
+/// agent」——不再记上次的选择，每次打开都一样）。名单按品牌给出产品，同一品牌的一起勾
+export function defaultChecked(
+  rows: ReadonlyArray<AgentRef & { members?: string[] }>,
+  shown: ReadonlyArray<string>,
+): string[] {
+  return rows
+    .filter((a) => (a.members ?? [a.id]).some((id) => shown.includes(id)))
+    .map((a) => a.id);
+}
 
 /// 要装的 skill 那里全都已有同名的 agent（M14）：链不上，勾选行不能勾。还没选要装的（`names` 为空）时一个都不算
 export function takenAgents(
@@ -185,13 +201,16 @@ export interface McpRowView {
   disabledReason?: string;
   note?: string;
   path?: string;
+  /// 原因背后的精确值（无法保留的字段名）：第二层，悬停这一行时出（#321）
+  detail?: string;
 }
 
 export const sameNote = () => t("market.mcp.sameNote");
 
 export function mcpRowView(check: McpTargetCheck | undefined, checked: boolean): McpRowView {
   if (!check) return {};
-  const view = mcpRowState(check, checked);
+  const state = mcpRowState(check, checked);
+  const view = check.detail ? { ...state, detail: check.detail } : state;
   return check.configPath && view.disabledReason === undefined
     ? { ...view, path: displayPath(check.configPath) }
     : view;
@@ -266,8 +285,8 @@ export function keyTrackedNote(files: ReadonlyArray<string>, named: boolean = fa
   if (files.length === 1 && !named) return t("market.install.trackedOne");
   const params = { files: listText(files.map(unanchored)) };
   return files.length === 1
-    ? tSpaced("market.install.trackedNamed", params)
-    : tSpaced("market.install.trackedMany", params);
+    ? t("market.install.trackedNamed", params)
+    : t("market.install.trackedMany", params);
 }
 
 /// 写进 .gitignore 的行去掉锚在项目根的开头 `/`：列给人看时读着像项目里的相对路径
@@ -280,8 +299,8 @@ const unanchored = (line: string) => line.replace(/^\//, "");
 export function keyHintTip(files: ReadonlyArray<string>, project: string): string {
   const params = { files: listText(files.map(unanchored)), project };
   return files.length === 1
-    ? tSpaced("market.install.gitignoreTipOne", params)
-    : tSpaced("market.install.gitignoreTipMany", params);
+    ? t("market.install.gitignoreTipOne", params)
+    : t("market.install.gitignoreTipMany", params);
 }
 
 // ───────────────────────── 贴底 ─────────────────────────
@@ -374,7 +393,7 @@ const filled = (values: Readonly<Record<string, string>>, key: string) =>
 
 /// MCP 的 `安装` / `添加 M 个` 能不能按
 export function mcpInstallBlock(input: {
-  /// 要写的定义；从 JSON 添加时是勾上的那几个
+  /// 要写的定义；粘贴 MCP 配置时是勾上的那几个
   names: ReadonlyArray<string>;
   checked: ReadonlyArray<string>;
   checks: ReadonlyArray<McpTargetCheck> | null;
@@ -386,7 +405,7 @@ export function mcpInstallBlock(input: {
   if (unnamed >= 0) return t("market.mcp.needName");
   if (input.checked.length === 0) return noAgent();
   const missing = input.fields.find((f) => f.required && !filled(input.values, f.key));
-  if (missing) return tSpaced("market.mcp.needField", { label: fieldText(missing).label });
+  if (missing) return t("market.mcp.needField", { label: fieldText(missing).label });
   if (input.checks && writableCount(input.checks, input.checked) === 0) {
     const same = input.checks.some(
       (c) => input.checked.includes(c.harnessId) && c.status === "same",
@@ -532,7 +551,7 @@ export function skillNameOf(repo: string, path: string | null): string {
   return last ?? repo.split("/").pop() ?? repo;
 }
 
-// ───────────────────────── 从 JSON 添加 / MCP ─────────────────────────
+// ───────────────────────── 粘贴 MCP 配置 / MCP ─────────────────────────
 
 /// 表头：`认出 2 个 · 已选 2`
 export const jsonHeader = (n: number, m: number) => tn("market.json.header", n, { picked: m });
@@ -540,11 +559,10 @@ export const jsonHeader = (n: number, m: number) => tn("market.json.header", n, 
 /// 贴底主动作：`添加 2 个`
 export const addLabel = (m: number) => tn("market.json.addLabel", m);
 
-/// 解析不了那一行：`第 3 行：…`
+/// 解析不了那一行：`第 3 行：…`。定得到行时后端的一句已经以 `第 N 行：` 开头（core `parse_error`，
+/// `mcp.parse.atLine`），这里不再加一次（#320）
 export function parseErrorLine(error: NonNullable<McpParseResult["error"]>): string {
-  return error.line !== null
-    ? t("market.json.errorLine", { line: error.line, message: error.message })
-    : error.message;
+  return error.message;
 }
 
 /// 命令一行：`npx -y @modelcontextprotocol/server-brave-search`（带空格的参数加引号）
@@ -590,15 +608,35 @@ export function placeholderFields(defs: ReadonlyArray<McpDefinitionInput>): McpF
   return out;
 }
 
-/// `要填的` 一项给人看的写法（#276）：目录里的说明写成「标签，怎么取得」（`GitHub 访问令牌，在
-/// github.com/settings/personal-access-tokens 生成`）——逗号前当标签，逗号后是常显在输入框下的一句；
-/// 没有逗号时整句当标签、框下不写；没有说明时退回键名（`keyed` 为真：标签本身就是键名，不再另写一遍）。
-/// 只认全角逗号：官方目录的英文说明不拆
-export function fieldText(field: Pick<McpFieldSpec, "key" | "description">): {
+/// 按界面语言取一段字（精选 MCP 的说明、要填的标签与框下一句，#305）。当前语言没写（或写的是空的）时
+/// 依次退回 简体 → English → 繁體，取第一个写了的——同文案目录「这种语言里没有的键退回简体」；都没写是空串。
+/// 只有一种写法的（官方目录的上游原文）原样返回
+export function localText(text: LocalText | null | undefined, lang: Lang = locale()): string {
+  if (text === null || text === undefined) return "";
+  if (typeof text === "string") return text;
+  for (const l of [lang, "zh-Hans", "en", "zh-Hant"] as const) {
+    const value = text[l]?.trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+/// `要填的` 一项给人看的写法（#276）：精选写好了标签与框下一句（`label` / `help`，按界面语言取，#305）。
+/// 官方目录只有一句说明：写成「标签，怎么取得」的——逗号前当标签，逗号后是常显在输入框下的一句（只认全角逗号，
+/// 英文说明不拆）；没有逗号时整句当标签、框下不写。都没有时退回键名（`keyed` 为真：标签本身就是键名，不再另写一遍）
+export function fieldText(
+  field: Pick<McpFieldSpec, "key" | "description" | "label" | "help">,
+  lang: Lang = locale(),
+): {
   label: string;
   help: string | null;
   keyed: boolean;
 } {
+  const label = localText(field.label, lang);
+  if (label !== "") {
+    const help = localText(field.help, lang);
+    return { label, help: help === "" ? null : help, keyed: false };
+  }
   const description = (field.description ?? "").trim();
   if (description === "") return { label: field.key, help: null, keyed: true };
   const cut = description.indexOf("\uff0c");
@@ -776,6 +814,31 @@ export function skillHandleTarget(
   return first ? { domainKey: location, skill: first.name } : null;
 }
 
+/// 报告里的位置 id 对回 agent（`checks` 记着每一家写进的位置）
+const installedAgentOf =
+  <A extends AgentRef>(checks: ReadonlyArray<McpTargetCheck>, agents: ReadonlyArray<A>) =>
+  (targetId: string): A | undefined => {
+    const check = checks.find((c) => c.locationId === targetId || c.harnessId === targetId);
+    const id = check?.harnessId ?? targetId.split("::").pop() ?? targetId;
+    return agents.find((a) => a.id === id);
+  };
+
+/// 写进了要点「信任」的 agent（WorkBuddy）时，装完那一窗之外右下再提示一次去它里面点（#256）；没写进它时为 null
+export function mcpInstalledTrust(
+  report: McpReport,
+  checks: ReadonlyArray<McpTargetCheck>,
+  agents: ReadonlyArray<Pick<InstallAgent, "id" | "name" | "mcpTrust">>,
+): TrustNotice | null {
+  const agentOf = installedAgentOf(checks, agents);
+  return trustNoticeFor(
+    "write",
+    report.entries
+      .filter((e) => e.outcome === "created")
+      .map((e) => agentOf(e.targetId))
+      .map((a) => a && { id: a.id, name: a.name, trust: a.mcpTrust }),
+  );
+}
+
 /// 加 MCP 之后那一窗（R10；#276）：`✓ 已加到 [图标…] brave-search` + `撤销`，第一批三家接生效时机；
 /// 已有一样的跳过、不算失败；有加不上的是部分失败，全没加上是 `⊘ brave-search 添加失败`。
 /// `checks` 用来把报告里的位置 id 对回 agent（图标）
@@ -785,11 +848,7 @@ export function mcpInstalledToast(
   agents: ReadonlyArray<AgentRef>,
   location: LocationKey,
 ): ToastText {
-  const agentOf = (targetId: string): AgentRef | undefined => {
-    const check = checks.find((c) => c.locationId === targetId || c.harnessId === targetId);
-    const id = check?.harnessId ?? targetId.split("::").pop() ?? targetId;
-    return agents.find((a) => a.id === id);
-  };
+  const agentOf = installedAgentOf(checks, agents);
   const project = projectPathOf(location) !== null;
   const done: ToastItem[] = report.entries
     .filter((e) => e.outcome === "created")

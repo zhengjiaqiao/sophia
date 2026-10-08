@@ -69,16 +69,10 @@ pub fn load_routing_catalog(path: &Path) -> Result<RoutingCatalog, String> {
     Ok(catalog)
 }
 
-/// 把模型名规整成比较用的键：小写，去掉空白、零宽字符等一切非常规字符。
+/// 把模型名规整成比较用的键：小写，去掉空白、零宽字符、标点等非常规字符（汉字等字母留着，见 `routing_key`）。
 /// 这样大小写或不可见字符的变体仍会被认成同一个第三方模型，而不是“不认识的模型”。
 pub fn model_key(model: &str) -> String {
-    model
-        .to_lowercase()
-        .chars()
-        .filter(|c| {
-            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-' | '/' | ':')
-        })
-        .collect()
+    sophia_core::codex_models::catalog::routing_key(model)
 }
 
 /// 逐个读取顶层键来取模型名。不用结构体解析：serde 对重复键取最后一个，而上游可能取第一个，

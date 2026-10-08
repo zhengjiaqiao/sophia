@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api.ts";
+import { logError } from "../diagnostics.ts";
 import { t } from "../i18n.ts";
 import { sourceNoun } from "../terms.ts";
 import {
@@ -300,12 +301,13 @@ function PlaceSources({
     shown.splice(Math.min(g.index, shown.length), 0, { row: g.row, leaving: true });
   }
 
-  /// `打开 ↗`：在访达中显示；没打开在那颗键下说一声
+  /// `打开 ↗`：在访达中显示；没打开在那颗键下说一声。提示条只写失败句，系统给的原文进日志（#320）
   const reveal = (path: string, key: Element) => {
     api.revealInDir(path).catch((e) => {
+      void logError(`reveal-in-dir failed: ${String(e)}`);
       const r = key.getBoundingClientRect();
       sources.say(
-        { tier: "notice", kind: "cannot", sentence: "sources.page.openCannot", reason: String(e) },
+        { tier: "notice", kind: "cannot", sentence: "sources.page.openCannot" },
         { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
         "start",
       );

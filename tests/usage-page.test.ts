@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  MAX_MENU_BAR_AGENTS,
+  MAX_MENU_BAR_ITEMS,
   agentChoices,
   usageNoteAction,
   menuBarAgents,
@@ -11,9 +11,45 @@ import {
   setAgentDisplay,
   toggleMenuBarAgent,
 } from "../src/usage/usageView.ts";
-import type { TrayUsage, UsageView, UsageWindow } from "../src/types.ts";
+import type {
+  TrayWindowRow,
+  UsageAgentId,
+  UsageItemView,
+  UsageView,
+  UsageWindow,
+} from "../src/types.ts";
 
 /// 用量页（spec 2026-09-26-menubar-usage R11 R12）的纯逻辑
+
+/// 托盘 / 当前用量里一个窗口行（后端算好的文字）
+const windowRow = (patch: Partial<TrayWindowRow> = {}): TrayWindowRow => ({
+  label: "5 小时",
+  percentText: "剩 93%",
+  gaugePercent: 93,
+  level: "ok",
+  emphasize: false,
+  resetText: "2:58 后重置",
+  amountText: null,
+  ...patch,
+});
+
+/// 后端给的一项（agent）
+const usageItem = (agent: UsageAgentId, patch: Partial<UsageItemView> = {}): UsageItemView => ({
+  key: `agent:${agent}`,
+  kind: "agent",
+  group: "agent",
+  name: agent === "codex" ? "Codex" : "Claude",
+  brand: agent,
+  inMenuBar: true,
+  updatedText: null,
+  windows: [],
+  note: null,
+  retry: false,
+  connect: null,
+  problem: null,
+  stale: false,
+  ...patch,
+});
 
 const win = (key: string, label: string): UsageWindow => ({
   key,
@@ -50,41 +86,41 @@ const view = (overrides: Partial<UsageView> = {}): UsageView => ({
   settings: {
     menuBarEnabled: true,
     displayMode: "remaining",
-    agents: null,
-    perAgent: {},
+    items: null,
+    perItem: {},
     refresh: "auto",
   },
-  signedIn: ["claude-code", "codex"],
-  tray: [],
+  signedIn: ["agent:claude-code", "agent:codex"],
+  items: [],
   menuBar: { segments: [] },
   ...overrides,
 });
 
 test("R12 显示哪些 agent：没配过取已登录的（注册表顺序，最多 3 个）；配过就用配的", () => {
-  assert.deepEqual(menuBarAgents(view()), ["claude-code", "codex"]);
-  assert.deepEqual(menuBarAgents(view({ settings: { ...view().settings, agents: ["codex"] } })), [
-    "codex",
+  assert.deepEqual(menuBarAgents(view()), ["agent:claude-code", "agent:codex"]);
+  assert.deepEqual(menuBarAgents(view({ settings: { ...view().settings, items: ["agent:codex"] } })), [
+    "agent:codex",
   ]);
-  assert.equal(MAX_MENU_BAR_AGENTS, 3);
+  assert.equal(MAX_MENU_BAR_ITEMS, 2);
 });
 
 test("R11 选 agent 的片：已登录的与配过的都列出；点了切换，按注册表顺序存", () => {
-  const v = view({ settings: { ...view().settings, agents: ["codex"] } });
+  const v = view({ settings: { ...view().settings, items: ["agent:codex"] } });
   assert.deepEqual(
     agentChoices(v).map((c) => [c.id, c.name, c.selected, c.disabledReason]),
     [
-      ["claude-code", "Claude", false, null],
-      ["codex", "Codex", true, null],
+      ["agent:claude-code", "Claude", false, null],
+      ["agent:codex", "Codex", true, null],
     ],
   );
-  assert.deepEqual(toggleMenuBarAgent(v.settings, v.signedIn, "claude-code").agents, [
-    "claude-code",
-    "codex",
+  assert.deepEqual(toggleMenuBarAgent(v.settings, v.signedIn, "agent:claude-code").items, [
+    "agent:claude-code",
+    "agent:codex",
   ]);
-  assert.deepEqual(toggleMenuBarAgent(v.settings, v.signedIn, "codex").agents, []);
+  assert.deepEqual(toggleMenuBarAgent(v.settings, v.signedIn, "agent:codex").items, []);
   // 没配过时第一次点：从默认名单（已登录的）起算，而不是从空起算
-  assert.deepEqual(toggleMenuBarAgent(view().settings, view().signedIn, "codex").agents, [
-    "claude-code",
+  assert.deepEqual(toggleMenuBarAgent(view().settings, view().signedIn, "agent:codex").items, [
+    "agent:claude-code",
   ]);
 });
 
@@ -93,11 +129,11 @@ test("R11 选满 3 个后，其余的点不了并写明原因", () => {
   assert.deepEqual(
     full.map((c) => [c.id, c.selected, c.disabledReason]),
     [
-      ["claude-code", true, null],
-      ["codex", true, null],
+      ["agent:claude-code", true, null],
+      ["agent:codex", true, null],
     ],
   );
-  const one = view({ settings: { ...view().settings, agents: ["claude-code"] } });
+  const one = view({ settings: { ...view().settings, items: ["agent:claude-code"] } });
   assert.deepEqual(
     agentChoices(one, 1).map((c) => c.disabledReason),
     [null, "最多显示 1 个，先取消一个"],
@@ -106,7 +142,7 @@ test("R11 选满 3 个后，其余的点不了并写明原因", () => {
 
 test("R11 窗口选项按这个 agent 实际拿到的窗口生成：主窗口「自动」在前，第二窗口「无」在前", () => {
   assert.deepEqual(
-    primaryOptions(view(), "claude-code").map((o) => [o.id, o.label]),
+    primaryOptions(view(), "agent:claude-code").map((o) => [o.id, o.label]),
     [
       ["auto", "自动"],
       ["session", "5 小时"],
@@ -115,27 +151,27 @@ test("R11 窗口选项按这个 agent 实际拿到的窗口生成：主窗口「
     ],
   );
   assert.deepEqual(
-    secondaryOptions(view(), "claude-code").map((o) => o.id),
+    secondaryOptions(view(), "agent:claude-code").map((o) => o.id),
     ["none", "session", "weekly", "model:Fable"],
   );
   // 还没有读数：只有自动 / 无；配过但此刻拿不到的窗口也保留，免得选中项凭空消失
   const codex = view({
     settings: {
       ...view().settings,
-      perAgent: {
-        codex: { primary: "weekly", secondary: null, stacked: false, stackedSize: "small" },
+      perItem: {
+        "agent:codex": { primary: "weekly", secondary: null, stacked: false, stackedSize: "small" },
       },
     },
   });
   assert.deepEqual(
-    primaryOptions(codex, "codex").map((o) => [o.id, o.label]),
+    primaryOptions(codex, "agent:codex").map((o) => [o.id, o.label]),
     [
       ["auto", "自动"],
       ["weekly", "weekly"],
     ],
   );
   assert.deepEqual(
-    secondaryOptions(codex, "codex").map((o) => o.id),
+    secondaryOptions(codex, "agent:codex").map((o) => o.id),
     ["none"],
   );
 });
@@ -144,8 +180,8 @@ test("第二窗口的选项里不列主窗口；主窗口改成和第二窗口�
   const v = view({
     settings: {
       ...view().settings,
-      perAgent: {
-        "claude-code": {
+      perItem: {
+        "agent:claude-code": {
           primary: "session",
           secondary: "weekly",
           stacked: true,
@@ -155,27 +191,27 @@ test("第二窗口的选项里不列主窗口；主窗口改成和第二窗口�
     },
   });
   assert.deepEqual(
-    secondaryOptions(v, "claude-code").map((o) => o.id),
+    secondaryOptions(v, "agent:claude-code").map((o) => o.id),
     ["none", "weekly", "model:Fable"],
   );
-  const next = choosePrimary(v.settings, "claude-code", "weekly");
-  assert.equal(next.perAgent["claude-code"]?.primary, "weekly");
-  assert.equal(next.perAgent["claude-code"]?.secondary, null);
+  const next = choosePrimary(v.settings, "agent:claude-code", "weekly");
+  assert.equal(next.perItem["agent:claude-code"]?.primary, "weekly");
+  assert.equal(next.perItem["agent:claude-code"]?.secondary, null);
   assert.equal(
-    choosePrimary(v.settings, "claude-code", null).perAgent["claude-code"]?.secondary,
+    choosePrimary(v.settings, "agent:claude-code", null).perItem["agent:claude-code"]?.secondary,
     "weekly",
   );
 });
 
 test("R12 改一个 agent 的显示：没配过的从默认值起，别的 agent 不动", () => {
-  const next = setAgentDisplay(view().settings, "codex", { secondary: "weekly" });
-  assert.deepEqual(next.perAgent.codex, {
+  const next = setAgentDisplay(view().settings, "agent:codex", { secondary: "weekly" });
+  assert.deepEqual(next.perItem["agent:codex"], {
     primary: null,
     secondary: "weekly",
     stacked: false,
     stackedSize: "small",
   });
-  assert.equal(next.perAgent["claude-code"], undefined);
+  assert.equal(next.perItem["agent:claude-code"], undefined);
 });
 
 // ===== 渲染（线框 5A） =====
@@ -215,7 +251,7 @@ test("5A 显示哪些 agent：区块小标下一排选择片（agent 标志 + �
     html,
     /ss-chip is-selected"[^]*?ss-mark[^]*?Claude[^]*?ss-chip is-selected"[^]*?ss-mark[^]*?Codex/,
   );
-  assert.match(html, /usage-page__hint">最多 3 个</);
+  assert.match(html, /usage-page__hint">最多 2 个</);
 });
 
 test("5A 每个选中的 agent 一栏、左右并排：小标（标志 + 名字）下主窗口、第二窗口（紧凑滑槽，窗口名原样不转大写）", () => {
@@ -249,8 +285,8 @@ test("叠放跟着每个 agent 走：选了第二窗口才出「两行叠放」�
   const withSecond = view({
     settings: {
       ...view().settings,
-      perAgent: {
-        "claude-code": {
+      perItem: {
+        "agent:claude-code": {
           primary: "session",
           secondary: "weekly",
           stacked: false,
@@ -265,8 +301,8 @@ test("叠放跟着每个 agent 走：选了第二窗口才出「两行叠放」�
   const stacked = view({
     settings: {
       ...view().settings,
-      perAgent: {
-        "claude-code": {
+      perItem: {
+        "agent:claude-code": {
           primary: "session",
           secondary: "weekly",
           stacked: true,
@@ -283,29 +319,19 @@ test("叠放跟着每个 agent 走：选了第二窗口才出「两行叠放」�
 
 test("页面最上方「当前用量」：每个已登录的 agent 一栏（标志 + 名字，右边「N 分钟前更新」），一个窗口一行，与托盘同一种画法；在菜单栏配置之上", () => {
   const withTray = view({
-    tray: [
-      {
-        agent: "claude-code",
+    items: [
+      usageItem("claude-code", {
         updatedText: "3 分钟前更新",
-        windows: [
-          {
-            label: "5 小时",
-            percentText: "剩 93%",
-            gaugePercent: 93,
-            emphasize: false,
-            resetText: "2:58 后重置",
-          },
-        ],
+        windows: [windowRow()],
         note: null,
         retry: false,
-      },
-      {
-        agent: "codex",
+      }),
+      usageItem("codex", {
         updatedText: null,
         windows: [],
         note: "还没有读数",
         retry: false,
-      },
+      }),
     ],
   });
   const html = render(UsageBody, { view: withTray, onChange: () => undefined });
@@ -318,7 +344,7 @@ test("页面最上方「当前用量」：每个已登录的 agent 一栏（标�
   assert.match(now, /aria-label="Codex 的用量">[^]*?usage-note">还没有读数</);
   // 一个都没登录：说一句，不画空栏
   const none = render(UsageBody, {
-    view: view({ signedIn: [], tray: [] }),
+    view: view({ signedIn: [], items: [] }),
     onChange: () => undefined,
   });
   assert.match(
@@ -331,8 +357,14 @@ test("R9 预览与菜单栏同一份文字：两行叠放上下两行、按档�
   const html = render(MenuBarPreview, {
     menuBar: {
       segments: [
-        { agent: "claude-code", lines: ["95%", "98%"], stale: true, stackedSize: "small" },
-        { agent: "codex", lines: ["72%"], stale: false, stackedSize: "small" },
+        {
+          key: "agent:claude-code",
+          brand: "claude-code",
+          lines: ["95%", "98%"],
+          stale: true,
+          stackedSize: "small",
+        },
+        { key: "agent:codex", brand: "codex", lines: ["72%"], stale: false, stackedSize: "small" },
       ],
     },
   });
@@ -351,8 +383,8 @@ test("第三批 3A：数字、刷新、字号这几组设置分段是内容、�
   const stacked = view({
     settings: {
       ...view().settings,
-      perAgent: {
-        "claude-code": {
+      perItem: {
+        "agent:claude-code": {
           primary: "session",
           secondary: "weekly",
           stacked: true,
@@ -405,22 +437,14 @@ test("第三批 3A：数字、刷新、字号这几组设置分段是内容、�
 
 // ===== 「再试一次」（2026-10-03 产品负责人；原因行右端） =====
 
-const failing = (overrides: Partial<TrayUsage> = {}): TrayUsage => ({
-  agent: "claude-code",
-  updatedText: "2 小时前更新",
-  windows: [
-    {
-      label: "5 小时",
-      percentText: "剩 93%",
-      gaugePercent: 93,
-      emphasize: false,
-      resetText: "2:58 后重置",
-    },
-  ],
-  note: "Claude Code 没有回应",
-  retry: true,
-  ...overrides,
-});
+const failing = (overrides: Partial<UsageItemView> = {}, agent: UsageAgentId = "claude-code") =>
+  usageItem(agent, {
+    updatedText: "2 小时前更新",
+    windows: [windowRow()],
+    note: "Claude Code 没有回应",
+    retry: true,
+    ...overrides,
+  });
 
 test("原因行右端：后端说能再试才给「再试一次」；正在读取时换成「正在读取」；没有原因行就什么都不给", () => {
   assert.equal(usageNoteAction(failing(), false), "retry");
@@ -439,7 +463,7 @@ test("原因行右端：后端说能再试才给「再试一次」；正在读�
 test("当前用量：能再试的原因行右端一颗紧凑默认键「再试一次」（上一次的读数照画）；不能再试的不给", () => {
   const html = render(UsageBody, {
     view: view({
-      tray: [failing(), failing({ agent: "codex", note: "被限流，约 5 分钟后再试", retry: false })],
+      items: [failing(), failing({ note: "被限流，约 5 分钟后再试", retry: false }, "codex")],
     }),
     onChange: () => undefined,
     onRetry: () => undefined,
@@ -462,10 +486,10 @@ test("当前用量：能再试的原因行右端一颗紧凑默认键「再试�
 
 test("当前用量：正在读取时键锁住（再按不起作用，过了忙碌门槛换成刻度 +「正在读取」）", () => {
   const html = render(UsageBody, {
-    view: view({ tray: [failing()] }),
+    view: view({ items: [failing()] }),
     onChange: () => undefined,
     onRetry: () => undefined,
-    retrying: (agent: string) => agent === "claude-code",
+    retrying: (agent: string) => agent === "agent:claude-code",
   });
   assert.match(
     html,

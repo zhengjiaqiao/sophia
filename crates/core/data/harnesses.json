@@ -1,7 +1,12 @@
 {
   "_notice": "Harness 目录表整理自 vercel-labs/skills (MIT, Copyright (c) Vercel, Inc.)，见仓库 NOTICE。",
+  "brands": [
+    { "id": "claude", "name": "Claude" },
+    { "id": "kimi", "name": "Kimi" }
+  ],
   "harnesses": [
-    { "id": "claude-code", "display_name": "Claude Code", "project_dir": ".claude/skills", "global_dir": ["$CLAUDE_CONFIG_DIR/skills", "~/.claude/skills"], "detect_dir": ["$CLAUDE_CONFIG_DIR", "~/.claude"], "universal": false },
+    { "id": "claude-code", "display_name": "Claude Code", "brand": "claude", "project_dir": ".claude/skills", "global_dir": ["$CLAUDE_CONFIG_DIR/skills", "~/.claude/skills"], "detect_dir": ["$CLAUDE_CONFIG_DIR", "~/.claude"], "universal": false },
+    { "id": "claude-desktop", "display_name": "Claude Desktop", "brand": "claude", "detect_dir": ["$APPDATA/Claude", "~/Library/Application Support/Claude"], "universal": false, "mcp_only": true, "platforms": ["macos", "windows"] },
     { "id": "codex", "display_name": "Codex", "project_dir": ".agents/skills", "global_dir": ["$CODEX_HOME/skills", "~/.codex/skills"], "detect_dir": ["$CODEX_HOME", "~/.codex"], "universal": true },
     { "id": "cursor", "display_name": "Cursor", "project_dir": ".agents/skills", "global_dir": ["~/.cursor/skills"], "detect_dir": ["~/.cursor"], "universal": true },
     { "id": "opencode", "display_name": "OpenCode", "project_dir": ".agents/skills", "global_dir": ["$XDG_CONFIG_HOME/opencode/skills", "$APPDATA/opencode/skills", "~/.config/opencode/skills"], "detect_dir": ["$XDG_CONFIG_HOME/opencode", "$APPDATA/opencode", "~/.config/opencode"], "universal": true },
@@ -9,7 +14,10 @@
     { "id": "gemini-cli", "display_name": "Gemini CLI", "project_dir": ".agents/skills", "global_dir": ["~/.gemini/skills"], "detect_dir": ["$GEMINI_CLI_HOME/.gemini", "~/.gemini"], "universal": true },
     { "id": "github-copilot", "display_name": "GitHub Copilot", "project_dir": ".agents/skills", "global_dir": ["~/.copilot/skills"], "detect_dir": ["$COPILOT_HOME", "~/.copilot"], "universal": true },
     { "id": "amp", "display_name": "Amp", "project_dir": ".agents/skills", "global_dir": ["$XDG_CONFIG_HOME/agents/skills", "$APPDATA/agents/skills", "~/.config/agents/skills"], "detect_dir": ["$XDG_CONFIG_HOME/amp", "$APPDATA/amp", "~/.config/amp"], "universal": true },
-    { "id": "kimi-cli", "display_name": "Kimi", "project_dir": ".agents/skills", "global_dir": ["~/.agents/skills"], "detect_dir": ["$KIMI_CODE_HOME", "~/.kimi-code", "~/.kimi"], "detect_app": [{ "name": "Kimi.app", "bundle_id": "com.moonshot.kimichat" }], "universal": true },
+    { "id": "kimi-cli", "display_name": "Kimi Code", "brand": "kimi", "project_dir": ".agents/skills", "global_dir": ["~/.agents/skills"], "detect_dir": ["$KIMI_CODE_HOME", "~/.kimi-code", "~/.kimi"], "universal": true },
+    { "id": "kimi-desktop", "display_name": "Kimi Desktop", "brand": "kimi", "global_dir": ["~/.agents/skills"], "detect_app": [{ "name": "Kimi.app", "bundle_id": "com.moonshot.kimichat" }], "universal": false },
+    { "id": "workbuddy", "display_name": "WorkBuddy", "project_dir": ".workbuddy/skills", "global_dir": ["$WORKBUDDY_CONFIG_DIR/skills", "~/.workbuddy/skills"], "detect_dir": ["$WORKBUDDY_CONFIG_DIR", "~/.workbuddy"], "detect_app": [{ "name": "WorkBuddy.app", "bundle_id": "com.workbuddy.workbuddy" }], "apps_only": true, "universal": false },
+    { "id": "deepseek-harness", "display_name": "DeepSeek Harness", "project_dir": ".agents/skills", "global_dir": ["$DSH_AGENTS_HOME/skills", "~/.agents/skills", "$DSH_HOME/skills", "~/.dsh/skills"], "detect_dir": ["$DSH_HOME", "~/.dsh"], "detect_app": [{ "name": "DeepSeek Harness.app", "bundle_id": "com.deepseek.dsh" }], "universal": true },
     { "id": "replit", "display_name": "Replit", "project_dir": ".agents/skills", "global_dir": ["$XDG_CONFIG_HOME/agents/skills", "$APPDATA/agents/skills", "~/.config/agents/skills"], "detect_dir": ["~/.replit"], "universal": true },
     { "id": "openhands", "display_name": "OpenHands", "project_dir": ".openhands/skills", "global_dir": ["~/.openhands/skills"], "detect_dir": ["~/.openhands"], "universal": false },
     { "id": "roo", "display_name": "Roo Code", "project_dir": ".roo/skills", "global_dir": ["~/.roo/skills"], "detect_dir": ["~/.roo"], "universal": false },
@@ -40,7 +48,6 @@
     { "id": "zencoder", "display_name": "Zencoder", "project_dir": ".agents/skills", "global_dir": ["~/.agents/skills", "~/.zencoder/skills"], "detect_dir": ["~/.zencoder"], "universal": true },
     { "id": "neovate", "display_name": "Neovate", "project_dir": ".neovate/skills", "global_dir": ["~/.neovate/skills"], "detect_dir": ["~/.neovate"], "universal": false },
     { "id": "pochi", "display_name": "Pochi", "project_dir": ".pochi/skills", "global_dir": ["~/.pochi/skills"], "detect_dir": ["~/.pochi"], "universal": false },
-    { "id": "adal", "display_name": "AdaL", "project_dir": ".adal/skills", "global_dir": ["~/.adal/skills"], "detect_dir": ["~/.adal"], "universal": false },
-    { "id": "claude-desktop", "display_name": "Claude Desktop", "detect_dir": ["$APPDATA/Claude", "~/Library/Application Support/Claude"], "universal": false, "mcp_only": true, "platforms": ["macos", "windows"] }
+    { "id": "adal", "display_name": "AdaL", "project_dir": ".adal/skills", "global_dir": ["~/.adal/skills"], "detect_dir": ["~/.adal"], "universal": false }
   ]
 }

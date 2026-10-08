@@ -1,8 +1,9 @@
-/// 安装类推入页（安装页、从链接安装、从 JSON 添加）要调的后端与系统能力，收成一个接口：
+/// 安装类推入页（安装页、从链接安装、粘贴 MCP 配置）要调的后端与系统能力，收成一个接口：
 /// 页面组件只吃 props，默认用 `marketService`（经 api.ts 调 Tauri 命令）；测试、样张可以换一份假的。
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api.ts";
+import { errorSentence } from "../backendError.ts";
 import { stripFrontmatter } from "./markdownText.ts";
 import type {
   InstallOutcome,
@@ -73,9 +74,9 @@ export const marketService: MarketService = {
   },
 };
 
-/// 调用失败时给用户看的一句：命令的 Err 本来就是中文句子
+/// 调用失败时给用户看的一句：命令的 Err 本来就是一句话；分两层的（`[code] 一句\n[detail] 原文`）只取那一句
 export function errorText(error: unknown): string {
-  if (typeof error === "string") return error;
+  if (typeof error === "string") return errorSentence(error);
   if (error instanceof Error) return error.message;
   return String(error);
 }

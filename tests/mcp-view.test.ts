@@ -554,13 +554,13 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
   assert.equal(toTeam.selections[0].targetId, `${P}::claude-code`);
   // 后果：移动 / 复制各一句，留下的一句，写进团队共享说队友
   assert.deepEqual(scopeChangeText("move", toP, locationOf, "CardBox", "用户级"), [
-    "Claude Code、Codex 加到 CardBox，用户级这边的删掉。",
+    "Claude Code、Codex 加到 CardBox，并从用户级中删除。",
     "Claude Desktop 那份留在用户级。",
   ]);
   assert.deepEqual(scopeChangeText("copy", toTeam, locationOf, "CardBox", "用户级"), [
-    "Claude Code、Codex 各加一份到 CardBox，用户级这边的不动。",
-    "Claude Desktop 那份不加过去。",
-    "Claude Code 加到 CardBox 的 .mcp.json，提交后队友也能用。",
+    "Claude Code、Codex 各加一份到 CardBox，用户级的那份保留。",
+    "Claude Desktop 那份不添加。",
+    "加到 CardBox 的 Claude Code 团队共享，提交后队友也能用。",
   ]);
   // 目标已有同名、就是当前所在：选不了
   assert.equal(
@@ -594,8 +594,8 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
       "CardBox",
     ),
     [
-      "Claude Code 加到用户级，CardBox 这边的删掉。",
-      "Claude Code 从 CardBox 的 .mcp.json 里删掉，提交后队友那边就没有了。",
+      "Claude Code 加到用户级，并从 CardBox 中删除。",
+      "从 CardBox 的 Claude Code 团队共享中删除，提交后队友将无法使用。",
     ],
   );
   // 只有没有那一级的 agent 亮着：说清为什么
@@ -624,18 +624,18 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
     [`${P}::claude-code:local`],
   );
   // 与表格里那一格同一句（「里外提示对不上」）：说是哪个字段、是 Sophia 还搬不了
-  const why = "filesystem 带着 cwd 字段，Sophia 还搬不了它，写过去就不是原来那个了";
+  const why = "filesystem 带有 Sophia 暂不支持的 cwd 字段，无法原样加到其他 agent";
   assert.deepEqual(withCant.cant, [{ agent: "codex", reason: why }]);
   assert.deepEqual(scopeChangeText("move", withCant, locationOf, "CardBox", "用户级"), [
-    "Claude Code 加到 CardBox，用户级这边的删掉。",
+    "Claude Code 加到 CardBox，并从用户级中删除。",
     "Claude Desktop 那份留在用户级。",
-    `codex 移不过去：${why}；那份留在用户级。`,
+    `codex 无法移动：${why}；那份留在用户级。`,
   ]);
   const onlyCodex = { name: "c", entries: [entry("codex", "c", states(["codex"]))] };
   const codexPlan = scopeMovePlan(onlyCodex, g, p, labelOf, nameOf, undefined, cellAt);
   assert.equal(
     scopeMoveBlocked(onlyCodex, codexPlan, g, p, "CardBox", labelOf),
-    "c 带着 cwd 字段，Sophia 还搬不了它，写过去就不是原来那个了",
+    "c 带有 Sophia 暂不支持的 cwd 字段，无法原样加到其他 agent",
   );
   // 写进哪些 agent：勾着的列；去掉的留在原处
   const onlyCodex2 = scopeMovePlan(
@@ -653,7 +653,7 @@ test("修改生效范围：每个亮着的 agent 放到目标同一列；没有�
     [`${P}::codex`],
   );
   assert.deepEqual(scopeChangeText("move", onlyCodex2, locationOf, "CardBox", "用户级"), [
-    "Codex 加到 CardBox，用户级这边的删掉。",
+    "Codex 加到 CardBox，并从用户级中删除。",
     "claude-code、Claude Desktop 那份留在用户级。",
   ]);
   // 多勾一个这一行在这边没有的（团队共享）：从现有的一份转写，是新加的一份（keep），移动时不删那一份
@@ -741,11 +741,11 @@ test("搬不过去的那一句：认得出字段说字段；认不出说只有�
   const { unportableText, viewOf } = await import("../src/mcpCellState.ts");
   assert.equal(
     unportableText("computer-use", "Codex", "cwd"),
-    "computer-use 带着 cwd 字段，Sophia 还搬不了它，写过去就不是原来那个了",
+    "computer-use 带有 Sophia 暂不支持的 cwd 字段，无法原样加到其他 agent",
   );
   assert.equal(
     unportableText("x", "Codex", null),
-    "x 用了只有 Codex 支持的写法，写到别处就不是原来那个了",
+    "x 用了只有 Codex 支持的写法，无法原样加到其他 agent",
   );
   // 格子上同一句
   assert.equal(
@@ -755,7 +755,7 @@ test("搬不过去的那一句：认得出字段说字段；认不出说只有�
       source: "Codex",
       unsupportedField: "cwd",
     }).reason,
-    "computer-use 带着 cwd 字段，Sophia 还搬不了它，写过去就不是原来那个了",
+    "computer-use 带有 Sophia 暂不支持的 cwd 字段，无法原样加到其他 agent",
   );
 });
 
@@ -921,6 +921,136 @@ test("写入失败：分不出原因的（core 给了原文）提示条只写失
   assert.doesNotMatch(mcpFailedAt("Codex", raw), /原子写入|os error/);
 });
 
+test("#320 MCP 撤销只还原了一部分：说清哪几份已还原、哪份没有，位置名分得开，路径进副行；一份都没还原的照旧只说原因", async () => {
+  const { mcpUndoFailure, mcpUndoPlaceOf } = await import("../src/mcpView.ts");
+  const { mcpCopyName } = await import("../src/mcpDiffTable.ts");
+  const loc = (
+    id: string,
+    label: string,
+    harnessId: string,
+    domain: string,
+    path: string,
+    mirrors?: string[],
+  ) =>
+    ({
+      id,
+      label,
+      harnessId,
+      domain,
+      path,
+      ...(mirrors ? { mirrors } : {}),
+    }) as McpLocation;
+  const desktop = "/h/Library/Application Support/Claude/claude_desktop_config.json";
+  const desktop3p = "/h/Library/Application Support/Claude-3p/claude_desktop_config.json";
+  const locations = [
+    loc("claude-code", "Claude Code · User MCPs", "claude-code", "global", "/h/.claude.json"),
+    loc("codex", "Codex", "codex", "global", "/h/.codex/config.toml"),
+    loc(
+      "project:/w/sophia::codex",
+      "Codex",
+      "codex",
+      "project:/w/sophia",
+      "/w/sophia/.codex/config.toml",
+    ),
+    loc("claude-desktop", "Claude Desktop", "claude-desktop", "global", desktop, [desktop3p]),
+  ];
+  const placeName = (domain: string) => (domain === "global" ? "用户级" : "sophia");
+  const placeOf = mcpUndoPlaceOf(locations, (l) => mcpCopyName(placeName(l.domain), l));
+  const file = (targetPath: string, outcome: string, message = "", detail?: string) => ({
+    targetPath,
+    backupPath: null,
+    outcome: outcome as "restored",
+    message,
+    ...(detail === undefined ? {} : { detail }),
+  });
+  const changedSince = "写入之后文件又被改过，无法安全撤销";
+  // 用户级与项目里同是 Codex：位置名分得开，不会说成「已还原 Codex，Codex 的配置文件…」
+  const changed = {
+    outcome: "failed" as const,
+    message: changedSince,
+    files: [
+      file("/h/.codex/config.toml", "restored", "已还原为写入前的内容"),
+      file("/w/sophia/.codex/config.toml", "changed", changedSince),
+    ],
+  };
+  assert.deepEqual(mcpUndoFailure(changed, placeOf), {
+    reason: "已还原用户级 · Codex，sophia · Codex 的配置文件之后又被改过",
+    paths: ["/w/sophia/.codex/config.toml"],
+  });
+  // Claude 桌面应用第三方模式那一份（mirrors）有可读的名字，不写文件名
+  const mirror = {
+    outcome: "failed" as const,
+    message: "没有写入权限",
+    files: [
+      file(desktop, "restored", "已还原为写入前的内容"),
+      file(desktop3p, "failed", "没有写入权限"),
+    ],
+  };
+  assert.deepEqual(mcpUndoFailure(mirror, placeOf), {
+    reason:
+      "已还原用户级 · Claude 桌面应用，用户级 · Claude 桌面应用（第三方模型）的配置文件未还原 · 没有写入权限",
+    paths: [desktop3p],
+  });
+  // 写不进（说得出原因），后面的没尝试：都算未还原；认不出位置的写文件名
+  const failed = {
+    outcome: "failed" as const,
+    message: "没有写入权限",
+    files: [
+      file("/h/.claude.json", "removed", "已删除这次写入新建的文件"),
+      file("/h/.codex/config.toml", "failed", "没有写入权限"),
+      file("/w/sophia/.gitignore", "skipped", "前面的文件撤销失败，未尝试"),
+    ],
+  };
+  assert.equal(
+    mcpUndoFailure(failed, placeOf).reason,
+    "已还原用户级 · Claude Code，用户级 · Codex 的配置文件和 .gitignore 未还原 · 没有写入权限",
+  );
+  // .gitignore 排第一项：「已还原 .gitignore」，半角点也算西文、隔一个空格
+  const ignoreFirst = {
+    outcome: "failed" as const,
+    message: changedSince,
+    files: [
+      file("/w/sophia/.gitignore", "restored"),
+      file("/h/.codex/config.toml", "changed", changedSince),
+    ],
+  };
+  assert.equal(
+    mcpUndoFailure(ignoreFirst, placeOf).reason,
+    "已还原 .gitignore，用户级 · Codex 的配置文件之后又被改过",
+  );
+  // 分不出原因的（core 给了原文）不接原因，原文不上去
+  const raw = {
+    outcome: "failed" as const,
+    message: "撤销失败，文件保持原样",
+    detail: "Input/output error (os error 5)",
+    files: [
+      file("/h/.claude.json", "restored"),
+      file(
+        "/h/.codex/config.toml",
+        "failed",
+        "撤销失败，文件保持原样",
+        "Input/output error (os error 5)",
+      ),
+    ],
+  };
+  const told = mcpUndoFailure(raw, placeOf).reason ?? "";
+  assert.equal(told, "已还原用户级 · Claude Code，用户级 · Codex 的配置文件未还原");
+  assert.doesNotMatch(told, /os error|保持原样/);
+  // 一份都没还原：照旧只说那一份的原因（分不出原因的不说），不带副行
+  const none = {
+    outcome: "failed" as const,
+    message: "没有写入权限",
+    files: [file("/h/.codex/config.toml", "failed", "没有写入权限")],
+  };
+  assert.deepEqual(mcpUndoFailure(none, placeOf), {
+    reason: "没有写入权限",
+    paths: [],
+  });
+  assert.deepEqual(mcpUndoFailure({ ...raw, files: [raw.files[1]] }, placeOf), {
+    reason: undefined,
+    paths: [],
+  });
+});
 test("写入的命令本身出错：横幅一句是「加到 X 失败」，原文与文件完整路径进「!」", async () => {
   const { mcpWriteFault } = await import("../src/mcpView.ts");
   const { appFaultView } = await import("../src/backendError.ts");
@@ -936,4 +1066,106 @@ test("写入的命令本身出错：横幅一句是「加到 X 失败」，原�
     appFaultView(mcpWriteFault("[invalid] 配置已变化，请重试", "加到 Codex 失败", ["~/a"])),
     { message: "配置已变化，请重试" },
   );
+});
+
+test("MCP 页命令本身出错（#302）：扫描、撤销、删除、拷贝路径、在访达中显示的横幅一句是该处的失败句，原文进「!」", async () => {
+  const { mcpCommandFault } = await import("../src/mcpView.ts");
+  const { appFaultView } = await import("../src/backendError.ts");
+  const { t } = await import("../src/i18n.ts");
+  const sentences = {
+    scan: t("mcp.line.scanFailed"),
+    undo: t("mcp.line.undoCannot"),
+    delete: t("mcp.line.deleteFailed"),
+    copyPath: t("mcp.line.copyPathFailed"),
+    reveal: t("mcp.line.revealFailed"),
+  };
+  assert.deepEqual(sentences, {
+    scan: "MCP 配置读取失败",
+    undo: "撤销失败",
+    delete: "删除失败",
+    copyPath: "路径拷贝失败",
+    reveal: "在访达中显示失败",
+  });
+  // 还没分两层的命令（原样返回系统原文）：一句换成失败句，原文整段进「!」
+  assert.deepEqual(
+    appFaultView(mcpCommandFault("No such file or directory (os error 2)", sentences.reveal)),
+    { message: "在访达中显示失败", technical: "No such file or directory (os error 2)" },
+  );
+  // 后端已经分好两层的（`[internal] 一句\n[detail] 原文`）：照它的一句，原文进「!」
+  assert.deepEqual(
+    appFaultView(
+      mcpCommandFault(
+        "[internal] 撤销失败\n[detail] Input/output error (os error 5)",
+        sentences.undo,
+      ),
+    ),
+    { message: "撤销失败", technical: "Input/output error (os error 5)" },
+  );
+  // 第一层不出现系统英文原文：McpTab 里不再有把原文当一句的 `onError(String(…))`
+  const tab = readFileSync(new URL("../src/McpTab.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(tab, /onError\(String\(/);
+  // 删除、保留这份、撤销的结果：提示条里的原因一律经 `mcpEntryReason`（core 给了原文 `detail` 的只写失败句），
+  // 不再直接拿结果的 `message`；撤销失败不再拼成「撤销失败：撤销没有全部完成，请逐个查看」
+  assert.doesNotMatch(tab, /reason: failed\[i\]\.message/);
+  assert.doesNotMatch(tab, /message: e\.message \}/);
+  assert.doesNotMatch(tab, /result\.entries\[0\]\?\.message/);
+  assert.doesNotMatch(tab, /mcp\.undo\.failed"?, \{ message: report\.message/);
+  assert.doesNotMatch(tab, /reason=\{report\.message\}/);
+});
+
+test("撤销修改生效范围时去处那几份没删成：分得出原因接人话原因，分不出只写失败句（提示条不放原文）", async () => {
+  const { mcpTakeBackFailed } = await import("../src/mcpView.ts");
+  assert.equal(
+    mcpTakeBackFailed("CardBox", { message: "没有写入权限，没动" }),
+    "从 CardBox 删除失败 · 没有写入权限，没动",
+  );
+  assert.equal(
+    mcpTakeBackFailed("用户级", {
+      message: "原子写入失败",
+      detail: "Input/output error (os error 5)",
+    }),
+    "从用户级删除失败",
+  );
+});
+
+test("Claude Desktop 在句子里简体叫「Claude 桌面应用」（#306，spec #239 第 48 条），繁體、English 照术语表", async () => {
+  const { mcpAgentName, mcpBlankTip, mcpLocationSentence } = await import("../src/mcpView.ts");
+  const { mcpCopyName, mcpOriginName } = await import("../src/mcpDiffTable.ts");
+  const { setLocale } = await import("../src/i18n.ts");
+  const { readdirSync } = await import("node:fs");
+  const desktop = {
+    id: "claude-desktop",
+    label: "Claude Desktop",
+    harnessId: "claude-desktop",
+    domain: "global",
+  };
+  assert.equal(mcpLocationSentence(desktop), "Claude 桌面应用");
+  assert.equal(mcpAgentName(desktop), "Claude 桌面应用");
+  assert.equal(mcpOriginName("用户级", desktop), "Claude 桌面应用");
+  assert.equal(mcpCopyName("用户级", desktop), "用户级 · Claude 桌面应用");
+  assert.deepEqual(
+    mcpBlankTip("CardBox", {
+      id: "claude-desktop",
+      harnessId: "claude-desktop",
+      sentence: mcpAgentName(desktop),
+      targets: new Map([["global", desktop as never]]),
+    }),
+    { tip: "Claude 桌面应用没有项目级的 MCP" },
+  );
+  try {
+    setLocale("zh-Hant");
+    assert.equal(mcpLocationSentence(desktop), "Claude 桌面應用程式");
+    setLocale("en");
+    assert.equal(mcpLocationSentence(desktop), "Claude Desktop");
+  } finally {
+    setLocale("zh-Hans");
+  }
+  // 简体目录里没有一句写着 Claude Desktop
+  const dir = new URL("../locales/zh-Hans/", import.meta.url);
+  const hits = readdirSync(dir).flatMap((f) =>
+    Object.entries(JSON.parse(readFileSync(new URL(f, dir), "utf8")) as Record<string, unknown>)
+      .filter(([, v]) => JSON.stringify(v).includes("Claude Desktop"))
+      .map(([k]) => k),
+  );
+  assert.deepEqual(hits, []);
 });

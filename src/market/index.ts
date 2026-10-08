@@ -1,5 +1,5 @@
 // 发现与安装（spec 2026-09-27-skill-mcp-market）的界面都放在 src/market/ 下：
-// 发现列表、介绍页、安装页、从链接安装、从 JSON 添加、更新提示条（归属见
+// 发现列表、介绍页、安装页、从链接安装、粘贴 MCP 配置、更新提示条（归属见
 // docs/plans/2026-09-27-skill-mcp-market-plan.md）。
 // ── 发现列表与介绍页（T7）──
 export { DiscoverPane, SEARCH_DELAY_MS } from "./DiscoverPane";

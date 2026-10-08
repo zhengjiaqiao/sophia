@@ -1,10 +1,28 @@
 name: CI
+# 私有仓库（sophia-dev）的 Actions 分钟要计费（2026-10-08 免费额度用完、作业停了），省分钟的三处：
+# 开发仓库只在 PR 上跑，合进 main 后不再重跑一遍（下面 core、site 的 if）；只改 docs/ 的 PR 不跑
+# （tests 会读的两份 DESIGN 例外）；同一个 PR 推了新提交，取消上一次还没跑完的。
+# 公开仓库（sophia）没有 PR，只收同步提交，照旧在 push 到 main 时跑全部三个作业（公开仓库不计费）
 on:
   pull_request:
+    paths:
+      - "**"
+      - "!docs/**"
+      - "docs/DESIGN.md"
+      - "docs/DESIGN-components.md"
   push:
     branches: [main]
+    paths:
+      - "**"
+      - "!docs/**"
+      - "docs/DESIGN.md"
+      - "docs/DESIGN-components.md"
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 jobs:
   core:
+    if: github.event_name == 'pull_request' || github.repository == 'zhengjiaqiao/sophia'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +49,7 @@ jobs:
   # 官网（website/，Astro 静态站）：纯逻辑与构建产物测试、构建 + 构建检查（文案缺键、残留占位符、白名单外域名等）。
   # 不需要 Rust 也不需要 macOS，单独一个作业，和 core 并行
   site:
+    if: github.event_name == 'pull_request' || github.repository == 'zhengjiaqiao/sophia'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

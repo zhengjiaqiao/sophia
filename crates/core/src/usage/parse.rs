@@ -23,7 +23,7 @@ pub const FALLBACK_WARNING_THRESHOLD: f64 = 90.0;
 pub const FALLBACK_CRITICAL_THRESHOLD: f64 = 100.0;
 
 /// 没有服务端 `severity` 字段时，按已用百分比给（见上面两个常量）
-fn severity_from_percent(used_percent: f64) -> Severity {
+pub(super) fn severity_from_percent(used_percent: f64) -> Severity {
     if used_percent >= FALLBACK_CRITICAL_THRESHOLD {
         Severity::Critical
     } else if used_percent >= FALLBACK_WARNING_THRESHOLD {
@@ -75,7 +75,7 @@ pub fn model_scoped_key_and_kind(display_name: &str) -> (String, WindowKind) {
 
 /// 把 RFC3339 时刻字符串换算成 Unix 秒。支持小数秒（截断，不四舍五入）和 `Z` / `±HH:MM` 偏移。
 /// 格式对不上就返回 `None`（调用方把它当「这个字段没给」处理，不当错误）。
-fn parse_rfc3339(s: &str) -> Option<i64> {
+pub(super) fn parse_rfc3339(s: &str) -> Option<i64> {
     let s = s.trim();
     let t_pos = s.find(['T', 't'])?;
     let date = &s[..t_pos];

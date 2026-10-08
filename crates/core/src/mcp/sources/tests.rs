@@ -416,7 +416,7 @@ fn remove_takes_out_only_copies_still_equal_to_the_source() {
         3,
         "{outcomes:?}"
     );
-    assert!(outcomes.contains(&("search", "skipped", "和来源那份不一样了，没动")));
+    assert!(outcomes.contains(&("search", "skipped", "与来源的那份已不一致，未改动")));
 
     // .mcp.json：只少了 docs，改过的 search 与 mine 原样
     assert_eq!(
@@ -685,7 +685,7 @@ fn removing_from_a_read_only_folder_says_no_permission() {
     let report = report.unwrap();
     let entry = &report.entries[0];
     assert_eq!(entry.outcome, "failed", "{entry:?}");
-    assert_eq!(entry.message, "没有写入权限，没动");
+    assert_eq!(entry.message, "没有写入权限，未改动");
     assert_eq!(fs::read_to_string(&mcp_json).unwrap(), before);
 }
 
@@ -732,6 +732,6 @@ fn removing_with_read_only_backups_says_why() {
     let report = report.unwrap();
     let entry = &report.entries[0];
     assert_eq!(entry.outcome, "failed", "{entry:?}");
-    assert_eq!(entry.message, "备份时没有写入权限，没动");
+    assert_eq!(entry.message, "备份时没有写入权限，未改动");
     assert_eq!(fs::read_to_string(&mcp_json).unwrap(), before);
 }

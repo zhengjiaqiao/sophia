@@ -9,8 +9,8 @@
   },
   "hints.firstScan.emptyWithAgents": "No skills in {agents} yet",
   "hints.firstScan.emptyLocal": "No skills on this Mac yet",
+  "hints.firstModels": "Turning on an agent's switch changes one of its settings so it can use third-party models; turning it off puts it back. If a restart is needed, its row will say so.",
   "hints.firstScan.searched": "Folders searched",
-  "hints.firstCodex": "Turning this on changes one Codex setting so it can use third-party models; turning it off puts it back. Restart Codex for the change to apply.",
   "hints.mcpOpenCode": "OpenCode isn't supported for MCP yet, so this page has no column for it",
   "hints.log.markFailed": "Couldn't record that the hint was seen",
   "hints.log.loadFailed": "Couldn't read the list of hints already seen"

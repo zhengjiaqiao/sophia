@@ -9,6 +9,7 @@ import {
   compareCatalogs,
   countKeysViaT,
   loadLocales,
+  looseNames,
   referencedKeys,
   rustKeyRefs,
 } from "../scripts/i18n-catalog.mjs";
@@ -58,6 +59,26 @@ test("真目录：各语言互相对得上，区块文件只放自己前缀的�
   const { byLang, problems } = loadLocales(root);
   assert.deepEqual(problems, []);
   assert.deepEqual(compareCatalogs(byLang), []);
+});
+
+test("中文句子里嵌名字的占位符与汉字紧贴：名字以汉字收尾时，写了空格就多出一格（「Claude 桌面应用 的模型」）", () => {
+  assert.deepEqual(
+    looseNames({
+      "models.a": "重启 {agent} 后生效",
+      "models.b": "重启{agent}后生效",
+      "models.c": { other: "{names} 等 {count} 个" },
+      "models.d": "{count} 个 · 从 {service} 读到一半断了",
+      "mcp.differ.message": "{locations}各有一份 {service}，连的地址不一样",
+      "models.app.deleteFileFailed": "删除 {name} 失败",
+      "models.e": "Restart {agent} to apply",
+    }),
+    ["mcp.differ.message {service}", "models.a {agent}", "models.c {names}"],
+  );
+});
+
+test("真目录：中文句子里嵌名字的占位符都写成紧贴的（空格由 formatMessage / i18n::format 补）", () => {
+  const { byLang } = loadLocales(root);
+  for (const lang of ["zh-Hans", "zh-Hant"]) assert.deepEqual(looseNames(byLang[lang]), [], lang);
 });
 
 test("三种语言的区块文件一样；前后端读的区块清单与目录一致；weiboap 只归后端、只在 feature 下编入", () => {

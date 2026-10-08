@@ -1,4 +1,4 @@
-/// 从链接安装（spec R6，画板 07；DESIGN「发现与安装 › 从链接安装 · 从 JSON 添加」）：`粘贴链接` 推入这一页。
+/// 从链接安装（spec R6，画板 07；DESIGN「发现与安装 › 从链接安装 · 粘贴 MCP 配置」）：`粘贴链接` 推入这一页。
 ///
 /// ```
 /// ←  从链接安装
@@ -6,7 +6,7 @@
 /// anthropics/skills · main · 找到 17 个 skill
 /// 装哪几个 · 17 个里选了 3 ─────────────────────────
 /// ☐ 全部可装的  16 个                      （钉在顶上；三态，同表头全选框）
-/// ☑ docx     skills/docx
+/// ☑ docx                                 （仓库内路径 skills/docx 悬停名字时出）
 /// …（能装的在前，装过的沉底；自己滚，露 6 行半）
 /// ☐ pdf      用户级的通用仓库里已经有 pdf  在访达中显示 ↗
 /// 位置 ─── [用户级] [CardBox] [更多 ˅]
@@ -271,7 +271,7 @@ export function LinkPage(props: LinkPageProps) {
                               on ? [...prev, s.path] : prev.filter((p) => p !== s.path),
                             )
                           }
-                          detail={<Mono inherit>{s.path}</Mono>}
+                          tip={<Mono inherit>{s.path}</Mono>}
                           blocked={blocked}
                           action={
                             blocked && item ? (

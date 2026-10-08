@@ -11,7 +11,7 @@
   max-width: var(--panel-w);
 }
 
-/* ---- 来历一行：13 ink-mute；仓库 mono ink、路径 mono ink-mute，间隔 · ink-faint；末尾浅键 ---- */
+/* ---- 来历一行：13 ink-mute（skill 的仓库与路径在 `来自 <作者>` 的悬停里），间隔 · ink-faint；末尾浅键 ---- */
 .intro__origin {
   display: flex;
   align-items: center;
@@ -29,16 +29,6 @@
   align-items: baseline;
   flex-wrap: wrap;
   min-width: 0;
-}
-
-.intro__repo {
-  font-size: var(--size-label);
-  color: var(--ink);
-}
-
-.intro__path {
-  font-size: var(--size-label);
-  color: var(--ink-mute);
 }
 
 .intro__dot {

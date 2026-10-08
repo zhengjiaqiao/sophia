@@ -10,6 +10,7 @@ mod language;
 mod market;
 mod menu;
 mod net_kind;
+mod providers;
 mod quit;
 // 自动上报（spec 2026-10-04-reporting-feedback）：内部版不编进去，没有上报代码也没有地址
 #[cfg(not(feature = "weiboap"))]
@@ -70,37 +71,63 @@ struct AppState {
     settings_repaired: std::sync::atomic::AtomicBool,
 }
 
+/// 一个产品（GLOSSARY「产品」）
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HarnessStatus {
     id: String,
     display_name: String,
+    /// 品牌 id 与品牌名（#251）：设置按品牌勾，MCP 页按品牌合组
+    brand: String,
+    brand_name: String,
+    /// 它的品牌勾着没有
     enabled: bool,
-    /// 这台机器上装没装。设置页默认只列已安装的，其余收在「显示未安装的 N 个」后面——
-    /// 未安装的也要带出来（只列名字，不在不显示名单里的给「恢复」），不能只返回已安装的那些
+    /// 这台机器上装没装
     installed: bool,
+    /// 有没有 skill 目录（只有 MCP 的 Claude Desktop 没有）
+    skills: bool,
+    /// MCP 页能不能写它（core `mcp::supports`）
+    mcp: bool,
+    /// MCP 写进以后要在它里面点「信任」才会连上（core `mcp::trust_app`，#256）
+    mcp_trust: bool,
+    /// 它的 skill 在用户级 / 项目里落进哪一列（core `discovery::skill_columns`）；没有这一级为空
+    skill_user: Option<String>,
+    skill_project: Option<String>,
+}
+
+/// 一个品牌（GLOSSARY「品牌」）：设置里一个勾
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrandStatus {
+    id: String,
+    name: String,
+    enabled: bool,
+    /// 装了它任一个产品。设置页默认只列已安装的，其余收在「未安装的 N 个」后面——
+    /// 未安装的也要带出来（只列名字），不能只返回已安装的那些
+    installed: bool,
+    /// 已安装的产品 id（表的先后）：勾选行下的小字列它们的名字（前端按界面语言写）；只装了一个时不写
+    installed_products: Vec<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HarnessList {
-    /// 列表里最多显示几个（core 的 `discovery::MAX_SHOWN`，前端不另写）
+    /// 列表里最多显示几个品牌（core 的 `discovery::MAX_SHOWN`，前端不另写）
     max_shown: usize,
+    /// 全部产品，含只有 MCP 的，按品牌的先后（同一品牌的挨着）
     harnesses: Vec<HarnessStatus>,
+    /// 全部品牌，按品牌的先后
+    brands: Vec<BrandStatus>,
 }
 
-/// 命令的错误转成给前端的一句，同时记一条去隐私的日志（spec S18：核心功能出问题维护者看得见）。
-/// 调用处的 `文件:行` 一起记，36 处 `.map_err(err)` 不逐个改
+/// 命令的错误原样转成给前端的一句，同时记一条去隐私的日志（spec S18：核心功能出问题维护者看得见）。
+/// 调用处的 `文件:行` 一起记：在调用处的闭包里调（`.map_err(|e| err(e))`），不当函数值传（见 `cmd_error`）。
+/// 给界面的命令都已改走 `cmd_error`（#320），只剩调试版的隔离测试主目录（`SOPHIA_TEST_HOME`）在用
 #[track_caller]
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 fn err<E: std::fmt::Display>(e: E) -> String {
     let text = e.to_string();
-    let at = std::panic::Location::caller();
-    log::warn!(
-        "命令失败（{}:{}）：{}",
-        at.file(),
-        at.line(),
-        sophia_core::redact::redact(&text)
-    );
+    cmd_error::log(&text);
     text
 }
 
@@ -112,7 +139,7 @@ fn runtime_env() -> Result<Env, String> {
         if !root.is_absolute() || !root.is_dir() {
             return Err("SOPHIA_TEST_HOME 必须是已存在的绝对目录".into()); // i18n-exempt: 仅 debug 构建、开发者自设的环境变量，不是给用户看的界面文案
         }
-        let root = normalize(&std::fs::canonicalize(root).map_err(err)?);
+        let root = normalize(&std::fs::canonicalize(root).map_err(|e| err(e))?);
         // 应用包也只在隔离目录里找，不读本机的 /Applications
         return Ok(Env {
             apps: vec![root.join("Applications")],
@@ -154,24 +181,23 @@ pub(crate) fn runtime_store_dir() -> Result<PathBuf, String> {
         if !root.is_absolute() || !root.is_dir() {
             return Err("SOPHIA_TEST_HOME 必须是已存在的绝对目录".into()); // i18n-exempt: 仅 debug 构建、开发者自设的环境变量，不是给用户看的界面文案
         }
-        let root = std::fs::canonicalize(root).map_err(err)?;
+        let root = std::fs::canonicalize(root).map_err(|e| err(e))?;
         return Ok(root.join("AppData").join("Sophia"));
     }
     Ok(Store::default_dir())
 }
 
-/// 已安装的 harness（按 agent 表先后）与设置；读设置时顺手按显示上限整理不显示名单
-/// （新用户取前 4 个、老数据超出的记进名单、新装的只在不满时出现，见 `discovery::reconcile_shown`）
+/// 已安装的 harness（有 skill 目录的，按 agent 表先后）与设置；读设置时顺手按显示上限整理不显示名单——
+/// 名单按品牌（#251；新用户取前 4 个、新装的只在不满时出现，见 `discovery::reconcile_shown`）
 fn installed_and_settings(
     state: &AppState,
     env: &Env,
 ) -> Result<(Vec<Harness>, sophia_core::store::Settings), String> {
     let installed = discovery::installed(env);
-    let ids: Vec<String> = installed.iter().map(|h| h.id.clone()).collect();
     let settings = state
         .store
-        .load_settings_reconciling_shown(&ids)
-        .map_err(err)?;
+        .load_settings_reconciling_shown(&discovery::installed_brands(env))
+        .map_err(|e| cmd_error::data_unread(e))?;
     Ok((installed, settings))
 }
 
@@ -183,7 +209,10 @@ fn shown_projects(
     harnesses: &[Harness],
     settings: &sophia_core::store::Settings,
 ) -> Result<Vec<PathBuf>, String> {
-    let manual = state.store.load_projects().map_err(err)?;
+    let manual = state
+        .store
+        .load_projects()
+        .map_err(|e| cmd_error::data_unread(e))?;
     Ok(discovery::shown_projects(
         discovery::projects(env, harnesses, &manual),
         &settings.hidden_projects,
@@ -205,9 +234,9 @@ fn discover_mcp(state: &AppState) -> Result<sophia_core::mcp::McpDiscovery, Stri
     }
     let shown = discovery::enabled(candidates, &settings);
     let projects = shown_projects(state, &env, &shown, &settings)?;
-    // 两页共用一份名单：MCP 页取其中支持 MCP 的，再加跟着 Claude Code 的 Claude Desktop；
+    // 两页共用一份名单（按品牌）：MCP 页取名单里的品牌下装了的、支持 MCP 的产品（含 Claude Desktop）；
     // WeiboAP 不在 MCP 的 agent 表里，照旧跟着名单
-    let mut harnesses = discovery::mcp_columns(&env, &shown);
+    let mut harnesses = discovery::mcp_columns(&env, &settings);
     harnesses.extend(shown.into_iter().filter(|h| h.id == "weiboap"));
     Ok(sophia_core::mcp::discover_locations(
         &env, &harnesses, &projects,
@@ -247,7 +276,7 @@ fn discover(state: &AppState) -> Result<(Vec<Source>, Vec<Target>), String> {
 
 /// Sophia 放的副本的记录（`copies.json`）
 fn load_copies(state: &AppState) -> Result<copies::Copies, String> {
-    copies::Copies::load(&state.store).map_err(err)
+    copies::Copies::load(&state.store).map_err(|e| cmd_error::data_unread(e))
 }
 
 /// 完整扫描：发现 → 把此刻有软链的来源记进订阅（第一次扫描时认领老数据）→ 按域扫描
@@ -287,7 +316,7 @@ fn subscribed_settings(
     state
         .store
         .load_settings_adopting_subscriptions(sources, targets)
-        .map_err(err)
+        .map_err(|e| cmd_error::data_unread(e))
 }
 
 /// 所有仍生效的自动引入规则只保存位置身份；扫描时才把它们展开为当前缺失项。
@@ -323,7 +352,7 @@ fn auto_import_mcp(
     state
         .store
         .record_mcp_auto_import_runs(&actions, &report, now_ms())
-        .map_err(err)?;
+        .map_err(|e| cmd_error::settings_unsaved(e))?;
     Ok(Some(report))
 }
 
@@ -349,7 +378,7 @@ fn register_undo(state: &AppState, undo: sophia_core::mcp::McpUndo) -> Result<St
     let mut records = state
         .mcp_undo
         .lock()
-        .map_err(|_| sophia_core::t!("shell.error.mcpUndoCorrupt"))?;
+        .map_err(|_| cmd_error::said(sophia_core::t!("shell.error.mcpUndoCorrupt")))?;
     let targets: BTreeSet<PathBuf> = undo.target_paths().map(normalize).collect();
     records.retain(|(_, old)| {
         !old.target_paths()
@@ -373,7 +402,10 @@ fn mcp_undo_id(sequence: u64) -> String {
 
 /// 规则引用的是配置文件，原子写会替换文件本身，故只监视其父目录。
 fn mcp_auto_watch_paths(state: &AppState) -> Result<BTreeSet<PathBuf>, String> {
-    let settings = state.store.load_settings().map_err(err)?;
+    let settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
     Ok(settings
         .mcp_auto_imports
         .iter()
@@ -417,7 +449,7 @@ fn scan_mcp(
     let rules = state
         .store
         .load_settings_migrating_mcp_auto_imports(&overview)
-        .map_err(err)?
+        .map_err(|e| cmd_error::data_unread(e))?
         .mcp_auto_imports;
     if let Some(report) = auto_import_mcp(&state, &overview, &rules)? {
         let _ = app.emit("mcp-auto-imported", &report);
@@ -429,7 +461,7 @@ fn scan_mcp(
     let settings = state
         .store
         .load_settings_adopting_mcp_subscriptions(&overview)
-        .map_err(err)?;
+        .map_err(|e| cmd_error::data_unread(e))?;
     mcp_sources::attach(&mut overview, &settings.mcp_subscriptions);
     // `scan_mcp` 也可能是用户最后一次扫描，故重建为包含两类位置的并集。
     if let Ok(skills_overview) = self::overview(&state) {
@@ -569,9 +601,15 @@ fn update_mcp_rules(
     edit: impl FnOnce(&mut Vec<sophia_core::mcp::McpAutoImportRule>) -> bool,
 ) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
-    let mut settings = state.store.load_settings().map_err(err)?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
     if edit(&mut settings.mcp_auto_imports) {
-        state.store.save_settings(&settings).map_err(err)?;
+        state
+            .store
+            .save_settings(&settings)
+            .map_err(|e| cmd_error::settings_unsaved(e))?;
     }
     Ok(())
 }
@@ -642,6 +680,15 @@ fn keep_mcp_copy(
     Ok(report)
 }
 
+/// 打开要在里面点「信任」的 agent（#256：MCP 写进 WorkBuddy 之后提示条上的「打开 WorkBuddy ↗」）。
+/// 只认 core `mcp::trust_app` 里的那几家，不接受前端给的任意应用标识
+#[tauri::command]
+fn mcp_open_trust_app(harness_id: String) -> Result<(), String> {
+    let bundle_id = sophia_core::mcp::trust_app(&harness_id)
+        .ok_or_else(|| err(format!("[internal] no trust app for {harness_id}")))?;
+    sophia_gateway::claude_desktop::open_bundle(bundle_id).map_err(|e| err(e))
+}
+
 /// 撤销一次 MCP 写入。记录用过即删；写后文件被改过时 core 整体拒绝，返回里带备份路径
 #[tauri::command]
 fn mcp_undo_write(
@@ -652,11 +699,11 @@ fn mcp_undo_write(
         let mut records = state
             .mcp_undo
             .lock()
-            .map_err(|_| sophia_core::t!("shell.error.mcpUndoCorrupt"))?;
+            .map_err(|_| cmd_error::said(sophia_core::t!("shell.error.mcpUndoCorrupt")))?;
         let index = records
             .iter()
             .position(|(id, _)| id == &undo_id)
-            .ok_or_else(|| sophia_core::t!("shell.error.undoRecordMissing"))?;
+            .ok_or_else(|| cmd_error::said(sophia_core::t!("shell.error.undoRecordMissing")))?;
         records.remove(index).1
     };
     let _config_guard = state.config_lock.blocking_lock();
@@ -668,7 +715,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     let rules = state
         .store
         .load_settings_migrating_auto_links(&scanned.sources)
-        .map_err(err)?
+        .map_err(|e| cmd_error::data_unread(e))?
         .auto_links;
     if rules.is_empty() {
         return Ok(None);
@@ -689,7 +736,7 @@ fn auto_link(state: &AppState, scanned: &Overview) -> Result<Option<SyncReport>,
     state
         .store
         .record_auto_link_runs(&scanned.sources, &targets, &report, now_ms())
-        .map_err(err)?;
+        .map_err(|e| cmd_error::settings_unsaved(e))?;
     Ok(Some(report))
 }
 
@@ -704,7 +751,11 @@ fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<
     }
     // Skills 页收到文件变更时同样会走这里。没有自动规则便不读取任何 MCP 配置；
     // 有规则时只执行一轮，结果不会改变 Skills 主扫描结果。
-    let mcp_rules = state.store.load_settings().map_err(err)?.mcp_auto_imports;
+    let mcp_rules = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?
+        .mcp_auto_imports;
     if !mcp_rules.is_empty() {
         let discovery = discover_mcp(&state)?;
         let mut mcp_overview = sophia_core::mcp::scan(&discovery.locations);
@@ -712,7 +763,7 @@ fn scan_all(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<
         let mcp_rules = state
             .store
             .load_settings_migrating_mcp_auto_imports(&mcp_overview)
-            .map_err(err)?
+            .map_err(|e| cmd_error::data_unread(e))?
             .mcp_auto_imports;
         if let Some(report) = auto_import_mcp(&state, &mcp_overview, &mcp_rules)? {
             let _ = app.emit("mcp-auto-imported", &report);
@@ -1081,8 +1132,12 @@ fn subscribe_source(
         &path,
         &sources,
         &targets,
-    )?;
-    state.store.save_settings(&settings).map_err(err)
+    )
+    .map_err(|e| cmd_error::said(e))?;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 /// 添加来源弹窗：选好的文件夹订阅之前先看一眼里面的 skill。只读，不记订阅、不建链
@@ -1133,8 +1188,12 @@ fn remove_source(
         &mut settings.subscriptions,
         &mut settings.auto_links,
         Some(&state.store),
-    )?;
-    state.store.save_settings(&settings).map_err(err)?;
+    )
+    .map_err(|e| cmd_error::said(e))?;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))?;
     Ok(report)
 }
 
@@ -1155,7 +1214,7 @@ fn mcp_scanned(
     let settings = state
         .store
         .load_settings_adopting_mcp_subscriptions(&overview)
-        .map_err(err)?;
+        .map_err(|e| cmd_error::data_unread(e))?;
     Ok((discovery, overview, settings))
 }
 
@@ -1188,8 +1247,12 @@ fn subscribe_mcp_source(
         &domain,
         &source_id,
         &overview,
-    )?;
-    state.store.save_settings(&settings).map_err(err)
+    )
+    .map_err(|e| cmd_error::said(e))?;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 /// 移除 MCP 来源前的只读清单：本位置哪几处有一份与它一致的（服务名 × 位置），给确认框列出。
@@ -1227,40 +1290,64 @@ fn remove_mcp_source(
             &mut settings.mcp_subscriptions,
             &mut settings.mcp_auto_imports,
             &state.store.backups_dir(),
-        )?
+        )
+        .map_err(|e| cmd_error::said(e))?
     };
-    state.store.save_settings(&settings).map_err(err)?;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))?;
     Ok(report)
 }
 
 #[tauri::command]
 fn list_manual_sources(state: tauri::State<'_, AppState>) -> Result<Vec<PathBuf>, String> {
-    Ok(state.store.load_settings().map_err(err)?.manual_sources)
+    Ok(state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?
+        .manual_sources)
 }
 
 #[tauri::command]
 fn add_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
     let path = normalize(&path);
-    let mut settings = state.store.load_settings().map_err(err)?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
     if !settings.manual_sources.contains(&path) {
         settings.manual_sources.push(path);
     }
-    state.store.save_settings(&settings).map_err(err)
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 #[tauri::command]
 fn remove_manual_source(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
     let path = normalize(&path);
-    let mut settings = state.store.load_settings().map_err(err)?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
     settings.manual_sources.retain(|p| normalize(p) != path);
-    state.store.save_settings(&settings).map_err(err)
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 #[tauri::command]
 fn list_auto_links(state: tauri::State<'_, AppState>) -> Result<Vec<AutoLink>, String> {
-    Ok(state.store.load_settings().map_err(err)?.auto_links)
+    Ok(state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?
+        .auto_links)
 }
 
 /// 保存的是已发现位置的精确身份，不保存任何 MCP 定义或凭据。
@@ -1304,7 +1391,10 @@ fn set_mcp_auto_import(
         return Err(sophia_core::t!("shell.error.crossDomainNeedsAllow"));
     }
     let _settings_guard = state.store.lock_settings();
-    let mut settings = state.store.load_settings().map_err(err)?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
     // 同一来源+目标域重新设置：目标集合整体替换；已生效的规则保留 baseline 与排除名单，
     // 不重拍。新建（或关掉后再开）才在 core 里按此刻来源的全部名字拍 baseline
     let overview = sophia_core::mcp::scan(&discovery.locations);
@@ -1315,8 +1405,12 @@ fn set_mcp_auto_import(
         target_domain,
         targets,
         allow_cross_domain,
-    )?;
-    state.store.save_settings(&settings).map_err(err)
+    )
+    .map_err(|e| cmd_error::said(e))?;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 #[tauri::command]
@@ -1326,11 +1420,17 @@ fn remove_mcp_auto_import(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
-    let mut settings = state.store.load_settings().map_err(err)?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
     settings
         .mcp_auto_imports
         .retain(|rule| rule.source.id != source_id || rule.target_domain != target_domain);
-    state.store.save_settings(&settings).map_err(err)
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 /// 新建或合并一条规则；解除排除由 `include_auto_link` 单独做
@@ -1394,35 +1494,73 @@ fn update_auto_links(
     edit: impl FnOnce(&mut Vec<AutoLink>),
 ) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
-    let mut settings = state.store.load_settings().map_err(err)?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
     edit(&mut settings.auto_links);
-    state.store.save_settings(&settings).map_err(err)
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
-/// 全部 harness 及其启用、安装状态，外加显示上限。返回全部而不只是已安装的：
+/// 全部品牌与产品及其勾选、安装状态，外加显示上限。返回全部而不只是已安装的：
 /// 设置页要列出「未安装的 N 个」（只是信息，未安装的不在不显示名单里）
 #[tauri::command]
 fn list_harnesses(state: tauri::State<'_, AppState>) -> Result<HarnessList, String> {
     let env = runtime_env()?;
-    let (installed, settings) = installed_and_settings(&state, &env)?;
-    let installed: std::collections::HashSet<String> =
-        installed.into_iter().map(|h| h.id).collect();
-    let harnesses = discovery::all_harnesses(&env)
+    let (_, settings) = installed_and_settings(&state, &env)?;
+    let installed: std::collections::HashSet<String> = discovery::installed_products(&env)
         .into_iter()
-        .map(|h| HarnessStatus {
-            enabled: !settings.disabled_harnesses.contains(&h.id),
-            installed: installed.contains(&h.id),
-            id: h.id,
-            display_name: h.display_name,
-        })
+        .map(|h| h.id)
         .collect();
+    let skill_ids: std::collections::HashSet<String> = discovery::all_harnesses(&env)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    let mut harnesses = Vec::new();
+    let mut brands = Vec::new();
+    for brand in discovery::all_brands(&env) {
+        let enabled = !settings.disabled_harnesses.contains(&brand.id);
+        let installed_products: Vec<String> = brand
+            .products
+            .iter()
+            .filter(|h| installed.contains(&h.id))
+            .map(|h| h.id.clone())
+            .collect();
+        for h in brand.products {
+            let (skill_user, skill_project) = discovery::skill_columns(&env, &h);
+            harnesses.push(HarnessStatus {
+                enabled,
+                installed: installed.contains(&h.id),
+                skills: skill_ids.contains(&h.id),
+                mcp: sophia_core::mcp::supports(&h.id),
+                mcp_trust: sophia_core::mcp::trust_app(&h.id).is_some(),
+                skill_user,
+                skill_project,
+                id: h.id,
+                display_name: h.display_name,
+                brand: h.brand,
+                brand_name: h.brand_name,
+            });
+        }
+        brands.push(BrandStatus {
+            id: brand.id,
+            name: brand.name,
+            enabled,
+            installed: !installed_products.is_empty(),
+            installed_products,
+        });
+    }
     Ok(HarnessList {
         max_shown: discovery::MAX_SHOWN,
         harnesses,
+        brands,
     })
 }
 
-/// 勾选 / 取消勾选；显示已满时勾第 5 个会被拒，错误信息就是给用户看的那句
+/// 勾选 / 取消勾选一个品牌（`id` 是品牌 id，#251）；显示已满时勾第 5 个会被拒，错误信息就是给用户看的那句
 #[tauri::command]
 fn set_harness_enabled(
     id: String,
@@ -1431,20 +1569,17 @@ fn set_harness_enabled(
 ) -> Result<(), String> {
     let _settings_guard = state.store.lock_settings();
     let env = runtime_env()?;
-    // 同 `installed_and_settings`，只是出错分两层：读写设置失败说「设置保存失败」，显示已满的那句原样说
-    let ids: Vec<String> = discovery::installed(&env)
-        .into_iter()
-        .map(|h| h.id)
-        .collect();
+    // 同 `installed_and_settings`，只是这里是保存：读写设置失败说「设置保存失败」，显示已满的那句原样说
+    let ids = discovery::installed_brands(&env);
     let mut settings = state
         .store
         .load_settings_reconciling_shown(&ids)
-        .map_err(cmd_error::settings_unsaved)?;
-    discovery::set_shown(&ids, &mut settings, &id, enabled).map_err(cmd_error::said)?;
+        .map_err(|e| cmd_error::settings_unsaved(e))?;
+    discovery::set_shown(&ids, &mut settings, &id, enabled).map_err(|e| cmd_error::said(e))?;
     state
         .store
         .save_settings(&settings)
-        .map_err(cmd_error::settings_unsaved)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 /// 设置「生效范围」的项目格：自动检测的与手动选的（存在的才列），带勾没勾
@@ -1455,7 +1590,10 @@ fn list_projects(
     let env = runtime_env()?;
     let (installed, settings) = installed_and_settings(&state, &env)?;
     let harnesses = discovery::enabled(installed, &settings);
-    let manual = state.store.load_projects().map_err(err)?;
+    let manual = state
+        .store
+        .load_projects()
+        .map_err(|e| cmd_error::data_unread(e))?;
     Ok(discovery::project_scopes(
         discovery::projects(&env, &harnesses, &manual),
         &settings.hidden_projects,
@@ -1468,14 +1606,29 @@ fn list_projects(
 fn add_project(path: PathBuf, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let env = runtime_env()?;
     let _settings_guard = state.store.lock_settings();
-    let mut manual = state.store.load_projects().map_err(err)?;
-    let mut settings = state.store.load_settings().map_err(err)?;
-    let path =
-        discovery::add_manual_project(&env, &mut manual, &mut settings, &path).map_err(err)?;
-    state.store.save_projects(&manual).map_err(err)?;
-    state.store.save_settings(&settings).map_err(err)?;
+    let mut manual = state
+        .store
+        .load_projects()
+        .map_err(|e| cmd_error::data_unread(e))?;
+    let mut settings = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?;
+    let path = discovery::add_manual_project(&env, &mut manual, &mut settings, &path)
+        .map_err(|e| cmd_error::said(e))?;
+    state
+        .store
+        .save_projects(&manual)
+        .map_err(|e| cmd_error::data_unsaved(e))?;
+    state
+        .store
+        .save_settings(&settings)
+        .map_err(|e| cmd_error::settings_unsaved(e))?;
     // 「更多」浮层按「最近创建」排序时，取不到文件夹创建时间就用加入时间
-    state.store.mark_project_added(&path, now_ms()).map_err(err)
+    state
+        .store
+        .mark_project_added(&path, now_ms())
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 /// 「生效范围」里勾上 / 取消勾一个项目。取消勾只是不显示，已建好的链接原样留着
@@ -1489,12 +1642,12 @@ fn set_project_shown(
     let mut settings = state
         .store
         .load_settings()
-        .map_err(cmd_error::settings_unsaved)?;
+        .map_err(|e| cmd_error::settings_unsaved(e))?;
     if discovery::set_project_shown(&mut settings, &path, shown) {
         state
             .store
             .save_settings(&settings)
-            .map_err(cmd_error::settings_unsaved)?;
+            .map_err(|e| cmd_error::settings_unsaved(e))?;
     }
     Ok(())
 }
@@ -1510,13 +1663,19 @@ fn now_ms() -> u64 {
 /// 看过的新手提示 id（前端 `src/hints.ts` 登记）
 #[tauri::command]
 fn list_seen_hints(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    state.store.seen_hints().map_err(err)
+    state
+        .store
+        .seen_hints()
+        .map_err(|e| cmd_error::data_unread(e))
 }
 
 /// 记下一条看过的新手提示（关掉或学会）；去重、空串忽略
 #[tauri::command]
 fn mark_hint_seen(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.store.mark_hint_seen(&id).map_err(err)
+    state
+        .store
+        .mark_hint_seen(&id)
+        .map_err(|e| cmd_error::settings_unsaved(e))
 }
 
 /// 上次是不是意外退出的（崩溃、被强制结束、断电；spec 2026-10-04-local-diagnostics R8）。
@@ -1571,7 +1730,11 @@ fn project_times(
         .unwrap_or_else(|| env.home.join(".claude"))
         .join("projects");
     let agent_dirs = sophia_core::activity::agent_dir_names(&discovery::all_harnesses(&env));
-    let added = state.store.load_settings().map_err(err)?.project_added_at;
+    let added = state
+        .store
+        .load_settings()
+        .map_err(|e| cmd_error::data_unread(e))?
+        .project_added_at;
     Ok(paths
         .iter()
         .map(|p| {
@@ -1670,6 +1833,7 @@ pub fn run() {
             delete_mcp_original,
             check_mcp_keep_key_hints,
             keep_mcp_copy,
+            mcp_open_trust_app,
             mcp_undo_write,
             propose_links,
             propose_unlinks,
@@ -1711,14 +1875,10 @@ pub fn run() {
             gateway::gateway_state,
             gateway::gateway_fix_file_owner,
             gateway::gateway_open_file,
-            gateway::gateway_upsert_provider,
-            gateway::gateway_remove_provider,
-            gateway::gateway_copy_providers,
-            gateway::gateway_fetch_models,
             gateway::gateway_presets,
-            gateway::gateway_select_models,
-            gateway::gateway_probe_model,
-            gateway::gateway_add_manual_model,
+            gateway::gateway_pick,
+            gateway::gateway_reorder_picks,
+            gateway::gateway_restore_order,
             gateway::gateway_enable,
             gateway::gateway_restore,
             gateway::gateway_takeover,
@@ -1727,6 +1887,15 @@ pub fn run() {
             gateway::gateway_launch_codex,
             gateway::gateway_restart_claude,
             gateway::gateway_launch_claude,
+            providers::providers_list,
+            providers::providers_preview,
+            providers::providers_probe_draft,
+            providers::providers_add,
+            providers::providers_edit,
+            providers::providers_refetch,
+            providers::providers_set_enabled,
+            providers::providers_add_typed,
+            providers::providers_remove,
             tray::tray_open_main,
             tray::tray_set_height,
             tray::tray_hide,

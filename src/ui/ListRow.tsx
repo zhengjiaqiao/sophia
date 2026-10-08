@@ -10,7 +10,8 @@ import { Drawer, DrawerHandle } from "./Drawer.tsx";
 /// ```
 /// - 行首勾选格可选（`check`，通常是 `Checkbox`）：有它时拉手平时不画，悬停这一行 / 键盘焦点在行里 / 已拉开才出；
 ///   没有时拉手常显（DESIGN「抽屉」：只有出现时机随行不同，形与方向处处一样）
-/// - 拉手自成一列，各行名字对齐；没有抽屉的行这一格留空
+/// - 拉手自成一列，各行名字对齐；没有抽屉的行这一格留空。整张列表都没有抽屉时给 `drawerColumn={false}`：
+///   不留这一列，名字落在列表的左线上（模型提供商页，走查 2026-10-07）
 /// - **点整行＝拉开 / 收起抽屉**（勾选格与行尾动作列里的点击不算，它们各有各的事）；Esc 收起
 /// - 悬停：整行 `surface` 带（`control` 7，左右各外扩 8，文字起点不变；裁决：整行能点就有悬停回应）；
 ///   拉开着不出悬停带；右键菜单开着时给 `highlighted` 保持亮着
@@ -32,6 +33,8 @@ export interface ListRowProps {
   actions?: ReactNode;
   /// 抽屉内容。给了才有拉手、整行才可点
   drawer?: ReactNode;
+  /// 留不留拉手列（默认留）：整张列表都没有抽屉时给 false，名字落在列表左线上
+  drawerColumn?: boolean;
   /// 抽屉拉开没有（调用方的状态）
   open?: boolean;
   /// 点整行、点拉手、Esc：切换抽屉
@@ -46,6 +49,8 @@ export interface ListRowProps {
   highlighted?: boolean;
   /// 右键菜单（`contextMenuHandler(...)`）
   onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
+  /// 刚加进来：行带 `surface` 闪一下（`--dur-flash`，同来源行）。调用方过了这段时长撤掉（`motionMs("--dur-flash")`）
+  flash?: boolean;
   /// 挂在这一组的外层上（行的转场：刚加入时闪两下）
   className?: string;
   /// 这一组外层的动画播完（调用方据此撤掉闪烁类）
@@ -60,12 +65,14 @@ export function ListRow({
   check,
   actions,
   drawer,
+  drawerColumn = true,
   open = false,
   onToggle,
   drawerLabel,
   drawerId,
   notice,
   highlighted = false,
+  flash = false,
   onContextMenu,
   className,
   onAnimationEnd,
@@ -77,6 +84,7 @@ export function ListRow({
   if (hasCheck) classes.push("has-check");
   if (open) classes.push("is-open");
   if (highlighted) classes.push("is-highlighted");
+  if (flash) classes.push("is-flash");
   if (className) classes.push(className);
 
   // 点整行拉开 / 收起；勾选格与行尾动作列里的点击各有各的事
@@ -112,17 +120,19 @@ export function ListRow({
         onContextMenu={onContextMenu}
       >
         {hasCheck ? <span className="ss-listrow__check">{check}</span> : null}
-        <span className="ss-listrow__handle">
-          {hasDrawer && onToggle ? (
-            <DrawerHandle
-              open={open}
-              onToggle={onToggle}
-              label={drawerLabel ?? ""}
-              controls={drawerId}
-              always={!hasCheck}
-            />
-          ) : null}
-        </span>
+        {drawerColumn || hasDrawer ? (
+          <span className="ss-listrow__handle">
+            {hasDrawer && onToggle ? (
+              <DrawerHandle
+                open={open}
+                onToggle={onToggle}
+                label={drawerLabel ?? ""}
+                controls={drawerId}
+                always={!hasCheck}
+              />
+            ) : null}
+          </span>
+        ) : null}
         <span className="ss-listrow__content">
           <span className="ss-listrow__title">{title}</span>
           {sub !== undefined && sub !== null ? (

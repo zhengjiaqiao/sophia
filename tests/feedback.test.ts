@@ -17,7 +17,6 @@ import {
   sentPlacement,
   FINISH_MS,
   attemptFor,
-  quitRequested,
   type Attempt,
   type ShotAction,
   draftId,
@@ -398,17 +397,4 @@ test("sendKey：发送中两颗键都禁用，理由「正在发送」（键盘�
     disabledReason: "common.feedback.sending",
     cancelDisabledReason: "common.feedback.sending",
   });
-});
-
-// 产品负责人 2026-10-05：退出必须总能生效。反馈小窗开着（发送中也一样）时先收起它（壳的 inert 随之摘掉），
-// 再照常走退出流程——退出确认框在应用壳里，壳 inert 时点不了
-test("quitRequested：小窗开着先收起（不等发送），再走退出；没开着直接走退出", () => {
-  const calls: string[] = [];
-  const close = () => void calls.push("close");
-  const start = () => void calls.push("quit");
-  quitRequested(true, close, start);
-  assert.deepEqual(calls, ["close", "quit"]);
-  calls.length = 0;
-  quitRequested(false, close, start);
-  assert.deepEqual(calls, ["quit"]);
 });

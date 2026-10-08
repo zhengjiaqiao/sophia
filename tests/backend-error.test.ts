@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { appFaultView, parseBackendError } from "../src/backendError.ts";
+import { appFaultView, errorSentence, parseBackendError } from "../src/backendError.ts";
+import { setLocale, t } from "../src/i18n.ts";
 
 // 后端命令错误分两层的公共拆法（spec #239「错误怎么分两层」）：skill、MCP、设置、模型各处共用
 
@@ -80,6 +81,30 @@ test("设置保存失败：横幅主句是失败句，系统原文进「!」，�
   );
 });
 
+test("外观设到窗口失败（#301）：横幅主句是失败句、不含原文，系统原文进「!」；三种语言一样", () => {
+  const raw = "failed to set theme: NSAppearance unavailable";
+  try {
+    for (const [lang, sentence] of [
+      ["zh-Hans", "外观切换失败"],
+      ["zh-Hant", "外觀切換失敗"],
+      ["en", "Couldn't switch the appearance"],
+    ] as const) {
+      setLocale(lang);
+      assert.equal(t("settings.appearance.applyFailed"), sentence);
+      // 后端 `appearance::apply_failed` 经 `cmd_error::failed` 交出的两层串
+      const view = appFaultView({
+        text: `[internal] ${sentence}\n[detail] ${raw}`,
+        fallback: t("settings.save.failed"),
+        retry,
+      });
+      assert.deepEqual(view, { message: sentence, technical: raw, retry });
+      assert.ok(!view.message.includes(raw));
+    }
+  } finally {
+    setLocale("zh-Hans");
+  }
+});
+
 test("给人看的一句原样显示，「!」不带原文，也不给「再试一次」（再点一次结果一样）", () => {
   assert.deepEqual(
     appFaultView({
@@ -96,6 +121,44 @@ test("别处的错误照旧：没有前缀、没给失败句时整段当一句�
   assert.deepEqual(appFaultView({ text: "[network] 连不上\n[detail] GET x → 502" }), {
     message: "连不上",
     technical: "GET x → 502",
+  });
+});
+
+// #302：各页读取类命令（扫描、列表）读不出 Sophia 自己的数据时也分两层
+test("读取失败：横幅主句是「数据读取失败」，系统原文进「!」，不给「再试一次」", () => {
+  assert.deepEqual(
+    appFaultView({
+      text: "[internal] Sophia 的数据读取失败\n[detail] Permission denied (os error 13)",
+      fallback: "Sophia 的数据读取失败",
+    }),
+    { message: "Sophia 的数据读取失败", technical: "Permission denied (os error 13)" },
+  );
+  // 命令本身没调起来（没有前缀）：照样说失败句，整段进「!」
+  assert.deepEqual(
+    appFaultView({ text: "command scan_all not found", fallback: "Sophia 的数据读取失败" }),
+    { message: "Sophia 的数据读取失败", technical: "command scan_all not found" },
+  );
+});
+
+test("errorSentence：提示条、格子只用给人看的那一句，原文不上去；没有前缀的原样", () => {
+  assert.equal(
+    errorSentence("[internal] Sophia 的数据读取失败\n[detail] Permission denied (os error 13)"),
+    "Sophia 的数据读取失败",
+  );
+  assert.equal(errorSentence("[invalid] 最多显示 4 个 agent"), "最多显示 4 个 agent");
+  assert.equal(errorSentence("这是这个位置自己的原件"), "这是这个位置自己的原件");
+  assert.equal(errorSentence(new Error("x")), "Error: x");
+  assert.equal(errorSentence("command x not found", "失败句"), "失败句");
+});
+
+test("#320 前端说好一句、另有原文时交给横幅：一句给人看，原文进「!」；没有原文只有一句", async () => {
+  const { sentenceFault } = await import("../src/backendError.ts");
+  assert.deepEqual(appFaultView(sentenceFault("撤销失败", "Permission denied (os error 13)")), {
+    message: "撤销失败",
+    technical: "Permission denied (os error 13)",
+  });
+  assert.deepEqual(appFaultView(sentenceFault("撤销失败：撤销记录已失效")), {
+    message: "撤销失败：撤销记录已失效",
   });
 });
 

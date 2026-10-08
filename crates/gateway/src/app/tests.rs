@@ -2,6 +2,9 @@
 use super::*;
 use sophia_core::claude_models::settings::ClaudeGatewaySettings;
 use sophia_core::codex_models::catalog::Model;
+use sophia_core::model_providers::{
+    Enabled, EnabledBy, ModelProviders, ModelRef, Provider, ProviderModel,
+};
 use std::sync::{Arc, Mutex};
 
 pub(super) const ORIGINAL: &str = "model = \"gpt-5.6-sol\"\nmodel_reasoning_effort = \"high\"\n\n[mcp_servers]\n\n[mcp_servers.node_repl]\ncommand = \"/x/node_repl\"\n";
@@ -27,14 +30,17 @@ pub(super) struct World {
     /// false：起路由失败（不是端口被占，比如没有权限）
     pub(super) healthy: bool,
     /// 任何一家都能读到的密钥：原有的单网关用例靠它；也记着最近一次写入的值
-    key: Option<String>,
-    /// 按网关 id 分开存的密钥，优先于 `key`
+    pub(super) key: Option<String>,
+    /// 按提供商 id 分开存的密钥（全局名单，所有 agent 共用），优先于 `key`
     pub(super) keys: std::collections::HashMap<String, String>,
-    /// 写密钥失败的网关 id
+    /// 写密钥失败的提供商 id
     pub(super) key_write_fails_for: Option<String>,
-    /// 密钥读不出的网关（位置同 `keys`）→ 原因：模拟密钥文件没有读取权限、还在钥匙串里没迁完
+    /// 密钥读不出的提供商 → 原因：模拟密钥文件没有读取权限
     pub(super) key_errors: std::collections::HashMap<String, String>,
-    pub(super) deleted_keys: Vec<String>,
+    /// 全局模型提供商名单与各 agent 的「已选」（settings.json 的 `modelProviders`）
+    pub(super) models: ModelProviders,
+    /// 名单被存了几次
+    pub(super) models_saves: u32,
     old_key: Option<String>,
     /// 假进程表：结束进程的测试不真杀进程
     pub(super) processes: Vec<process::ProcessInfo>,
@@ -71,6 +77,8 @@ pub(super) struct World {
     pub(super) token: Option<String>,
     /// 下一次生成的令牌
     pub(super) next_token: String,
+    /// 读令牌失败时的原话；None＝读得出
+    pub(super) token_error: Option<String>,
     /// 桌面应用装着的版本；None＝没装
     pub(super) desktop_version: Option<String>,
     pub(super) desktop_installed: bool,
@@ -83,11 +91,15 @@ pub(super) struct World {
     pub(super) events: Vec<String>,
     /// Codex 那一家的网关设置被存了几次
     pub(super) settings_saves: u32,
+
+    // ----- 家 workbuddy（workbuddy_tests.rs 用） -----
+    pub(super) workbuddy: sophia_core::workbuddy_models::WorkBuddyGatewaySettings,
+    pub(super) workbuddy_installed: bool,
 }
 
 /// 见 `Fixture::codex_state`
 pub(super) struct CodexState {
-    pub(super) providers: Vec<ProviderView>,
+    pub(super) models: sophia_core::model_providers::picks::AgentModels,
     pub(super) enabled: bool,
     pub(super) needs_codex_restart: bool,
     pub(super) router: RouterView,
@@ -97,6 +109,8 @@ pub(super) struct CodexState {
 }
 
 pub(super) struct Fixture {
+    /// `save_provider` 建的那一家（Codex 用例的「第一家」）；没建过就用名单里的第一家
+    main: Mutex<Option<String>>,
     pub(super) app: App,
     pub(super) world: Arc<Mutex<World>>,
     /// 真实路径：macOS 上 /var 是指向 /private/var 的软链，而安全写入会拒绝父路径里的软链
@@ -117,60 +131,151 @@ impl Fixture {
     pub(super) fn write_config(&self, text: &str) {
         std::fs::write(self.config(), text).unwrap();
     }
-    /// 第一家网关的 id：多数用例只有一家
-    fn first_provider(&self) -> Option<String> {
-        self.app
-            .load()
+    /// 第一家提供商的 id：多数用例只有一家
+    pub(super) fn first_provider(&self) -> Option<String> {
+        if let Some(main) = self.main.lock().unwrap().clone() {
+            return Some(main);
+        }
+        self.world
+            .lock()
             .unwrap()
+            .models
             .providers
             .first()
             .map(|p| p.id.clone())
     }
-    /// 存网关地址：有网关就改第一家，没有就新建（原 `App::save_provider` 的写法，spec R39 删了它；用例照旧这样搭）
+    /// 加一家提供商（全局名单，提供商页做的事；这里直接写进名单）：id 由名称生成（同提供商页），
+    /// 带密钥就存进这一家的位置；`fetched` 是拉到的模型（都不启用）。返回 id
+    pub(super) fn add_provider(
+        &self,
+        name: &str,
+        base_url: &str,
+        key: Option<&str>,
+        fetched: &[&str],
+        api_base: &str,
+    ) -> String {
+        let base_url = clean_base_url(base_url).unwrap();
+        let mut w = self.world.lock().unwrap();
+        let taken: Vec<String> = w.models.providers.iter().map(|p| p.id.clone()).collect();
+        let taken: Vec<&str> = taken.iter().map(String::as_str).collect();
+        let id = sophia_core::codex_models::settings::new_provider_id(name, &taken);
+        w.models.providers.push(Provider {
+            id: id.clone(),
+            name: name.to_owned(),
+            base_url,
+            api_base: Some(api_base.to_owned()).filter(|b| !b.is_empty()),
+            models: fetched
+                .iter()
+                .map(|m| ProviderModel {
+                    model: Model::from(*m),
+                    enabled: None,
+                })
+                .collect(),
+            ..Provider::default()
+        });
+        if let Some(key) = key {
+            w.keys.insert(id.clone(), key.to_owned());
+        }
+        id
+    }
+    /// 存提供商地址：建过就改那一家，没建过就新建（名称取主机名，同旧网关），之后让开着的配置跟上
     pub(super) fn save_provider(&self, base_url: &str) -> Result<(), AppError> {
-        let id = self.first_provider();
-        self.app
-            .upsert_provider_in(Agent::Codex, id.as_deref(), None, base_url, false)
-            .map(|_| ())
+        let cleaned = clean_base_url(base_url)?;
+        let main = self.main.lock().unwrap().clone();
+        match main {
+            Some(id) => {
+                self.world
+                    .lock()
+                    .unwrap()
+                    .models
+                    .edit(&id, None, &cleaned)
+                    .unwrap();
+                self.app.models_changed();
+            }
+            None => {
+                let host = url::Url::parse(&cleaned)
+                    .unwrap()
+                    .host_str()
+                    .unwrap()
+                    .to_owned();
+                let id = self.add_provider(&host, &cleaned, None, &[], "");
+                *self.main.lock().unwrap() = Some(id);
+            }
+        }
+        Ok(())
+    }
+    /// 在 `id` 这一家启用这些模型（不在列表里的加进去），其余的取消启用；返回它们的引用
+    pub(super) fn enable_models(&self, id: &str, selected: &[Model]) -> Vec<ModelRef> {
+        let mut w = self.world.lock().unwrap();
+        let mut seq = w.models.enable_seq;
+        let provider = w.models.providers.iter_mut().find(|p| p.id == id).unwrap();
+        for pick in selected {
+            match provider.models.iter_mut().find(|m| m.model.id == pick.id) {
+                Some(found) => {
+                    if pick.display_name.is_some() {
+                        found.model.display_name = pick.display_name.clone();
+                    }
+                }
+                None => provider.models.push(ProviderModel {
+                    model: pick.clone(),
+                    enabled: None,
+                }),
+            }
+        }
+        for m in provider.models.iter_mut() {
+            let on = selected.iter().any(|p| p.id == m.model.id);
+            m.enabled = match (on, m.enabled) {
+                (true, None) => {
+                    seq += 1;
+                    Some(Enabled {
+                        by: EnabledBy::User,
+                        seq,
+                    })
+                }
+                (true, kept) => kept,
+                (false, _) => None,
+            };
+        }
+        w.models.enable_seq = seq;
+        selected.iter().map(|m| ModelRef::new(id, &m.id)).collect()
+    }
+    /// 「这一家的完整勾选」（旧网关的说法）：启用这些、Codex 的已选里这一家的换成它们（别家与官方模型不动），
+    /// 经 `App::set_picks` 让开着的配置跟上
+    pub(super) fn pick_models(&self, id: &str, selected: Vec<Model>) -> Result<(), AppError> {
+        let refs = self.enable_models(id, &selected);
+        let mut picks: Vec<ModelRef> = self
+            .world
+            .lock()
+            .unwrap()
+            .models
+            .picked("codex")
+            .iter()
+            .filter(|r| r.provider != id)
+            .cloned()
+            .collect();
+        picks.extend(refs);
+        self.app.set_picks(Agent::Codex, picks).map(|_| ())
     }
     /// 勾选第一家的模型
     pub(super) fn set_models(&self, selected: Vec<Model>) -> Result<(), AppError> {
-        let id = self.first_provider().expect("还没有网关");
-        self.app
-            .set_models_in(Agent::Codex, &id, selected)
-            .map(|_| ())
+        let id = self.first_provider().expect("还没有提供商");
+        self.pick_models(&id, selected)
     }
-    /// 把拉到的模型并入第一家
+    /// 把拉到的模型并入第一家（提供商页的「重拉」），之后让开着的配置跟上
     pub(super) fn merge_fetched_models(
         &self,
         ids: Vec<Model>,
         api_base: &str,
     ) -> Result<(), AppError> {
-        let id = self.first_provider().expect("还没有网关");
-        self.app
-            .merge_fetched_models_in(Agent::Codex, &id, ids, api_base)
-    }
-    /// 已校验过密钥：存第一家（没有就新建）的地址、密钥与模型
-    pub(super) fn commit_verified_provider(
-        &self,
-        base_url: &str,
-        key: &str,
-        ids: Vec<Model>,
-        api_base: &str,
-    ) -> Result<(), AppError> {
-        let id = self.first_provider();
-        self.app
-            .commit_verified_provider_in(
-                Agent::Codex,
-                id.as_deref(),
-                None,
-                base_url,
-                key,
-                ids,
-                api_base,
-                false,
-            )
-            .map(|_| ())
+        let id = self.first_provider().expect("还没有提供商");
+        self.world
+            .lock()
+            .unwrap()
+            .models
+            .merge_fetched(&id, ids, api_base)
+            .unwrap();
+        self.app.models_changed();
+        Ok(())
     }
     /// Codex 那一家的状态，拍平成按家拆开之前的样子：spec R39 删了 `GatewayState` 顶层的 Codex 字段，
     /// 这些用例只测 Codex，断言照旧读这几个名字
@@ -179,7 +284,7 @@ impl Fixture {
         let view = state.agent(Agent::Codex).cloned().expect("Codex 总在");
         let codex = view.codex.unwrap_or_default();
         CodexState {
-            providers: view.providers,
+            models: view.models,
             enabled: view.enabled,
             needs_codex_restart: codex.needs_restart,
             router: state.router,
@@ -314,40 +419,42 @@ pub(super) fn fixture() -> Fixture {
             move || w.lock().unwrap().router
         }),
         bundled: Box::new(|| Err(std::io::Error::other("not needed"))),
-        // Codex 的账户按 id 存（原有用例的断言不变），Claude 的按 `claude:<id>` 存
+        // 密钥按提供商 id 存（全局名单，所有 agent 共用）
         get_key: Box::new({
             let w = w.clone();
-            move |agent, id| {
+            move |id| {
                 let w = w.lock().unwrap();
-                if let Some(reason) = w.key_errors.get(&key_slot(agent, id)) {
+                if let Some(reason) = w.key_errors.get(id) {
                     return Err(reason.clone());
                 }
-                Ok(w.keys
-                    .get(&key_slot(agent, id))
-                    .cloned()
-                    .or_else(|| w.key.clone()))
+                Ok(w.keys.get(id).cloned().or_else(|| w.key.clone()))
             }
         }),
         set_key: Box::new({
             let w = w.clone();
-            move |agent, id, k| {
+            move |id, k| {
                 let mut w = w.lock().unwrap();
-                if w.key_write_fails_for.as_deref() == Some(key_slot(agent, id).as_str()) {
+                if w.key_write_fails_for.as_deref() == Some(id) {
                     return Err("keychain is locked".to_owned());
                 }
-                w.keys.insert(key_slot(agent, id), k.to_owned());
-                if agent == Agent::Codex {
-                    w.key = Some(k.to_owned());
-                }
+                w.keys.insert(id.to_owned(), k.to_owned());
+                w.key = Some(k.to_owned());
                 Ok(())
             }
         }),
-        delete_key: Box::new({
+        load_models: Box::new({
             let w = w.clone();
-            move |agent, id| {
+            move || Ok(w.lock().unwrap().models.clone())
+        }),
+        change_models: Box::new({
+            let w = w.clone();
+            move |change| {
                 let mut w = w.lock().unwrap();
-                w.keys.remove(&key_slot(agent, id));
-                w.deleted_keys.push(key_slot(agent, id));
+                let mut next = w.models.clone();
+                if change(&mut next) {
+                    w.models = next;
+                    w.models_saves += 1;
+                }
                 Ok(())
             }
         }),
@@ -474,7 +581,13 @@ pub(super) fn fixture() -> Fixture {
         }),
         get_router_token: Box::new({
             let w = w.clone();
-            move || Ok(w.lock().unwrap().token.clone())
+            move || {
+                let w = w.lock().unwrap();
+                match &w.token_error {
+                    Some(error) => Err(error.clone()),
+                    None => Ok(w.token.clone()),
+                }
+            }
         }),
         set_router_token: Box::new({
             let w = w.clone();
@@ -536,20 +649,29 @@ pub(super) fn fixture() -> Fixture {
                 }
             }
         }),
+        workbuddy_dir: root.join("workbuddy"),
+        workbuddy_installed: Box::new({
+            let w = w.clone();
+            move || w.lock().unwrap().workbuddy_installed
+        }),
+        load_workbuddy: Box::new({
+            let w = w.clone();
+            move || Ok(w.lock().unwrap().workbuddy.clone())
+        }),
+        save_workbuddy: Box::new({
+            let w = w.clone();
+            move |s| {
+                w.lock().unwrap().workbuddy = s.clone();
+                Ok(())
+            }
+        }),
     };
     Fixture {
+        main: Mutex::new(None),
         app: App::new(deps),
         world,
         root,
         _dir: dir,
-    }
-}
-
-/// 假钥匙串里的位置：Codex 的就是网关 id，Claude 的带 `claude:` 前缀
-pub(super) fn key_slot(agent: Agent, id: &str) -> String {
-    match agent {
-        Agent::Codex => id.to_owned(),
-        Agent::Claude => format!("claude:{id}"),
     }
 }
 
@@ -690,10 +812,9 @@ fn enable_requires_provider_key_and_models() {
     assert_eq!(code(f.app.enable()), "invalid");
 }
 
-/// 密钥会随请求发给网关：只允许 https（本机回环除外），地址里不能带用户名密码
+/// 密钥会随请求发给提供商：只允许 https（本机回环除外），地址里不能带用户名密码（提供商页加、改时都过这一关）
 #[test]
 fn gateway_url_must_be_https_without_credentials() {
-    let f = fixture();
     for bad in [
         "",
         "gw.example/openai",
@@ -701,43 +822,18 @@ fn gateway_url_must_be_https_without_credentials() {
         "http://gw.example/openai",
         "https://user:pass@gw.example/openai",
     ] {
-        assert_eq!(code(f.save_provider(bad)), "invalid", "{bad}");
+        assert_eq!(code(clean_base_url(bad)), "invalid", "{bad}");
     }
     for ok in [
         "https://gw.example/openai",
         "http://127.0.0.1:9000/openai",
         "http://localhost:9000",
     ] {
-        f.save_provider(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        clean_base_url(ok).unwrap_or_else(|e| panic!("{ok}: {e}"));
     }
 }
 
-/// AC24：密钥校验通过才保存；AC25：密钥不进设置
-#[test]
-fn ac24_provider_is_committed_only_after_verification() {
-    let f = fixture();
-    f.world.lock().unwrap().key = Some("good-key-12345678".into());
-    // 校验失败的路径由调用方决定不调用 commit；这里验证 commit 的结果
-    f.commit_verified_provider(
-        "https://gw.example/openai/",
-        "  new-key-12345678 \n",
-        vec!["weibo/glm-5".into(), "kimi-k3".into()],
-        "https://gw.example/openai/v1",
-    )
-    .unwrap();
-    assert_eq!(
-        f.world.lock().unwrap().key.as_deref(),
-        Some("new-key-12345678")
-    );
-    let state = f.codex_state();
-    assert_eq!(state.providers[0].base_url, "https://gw.example/openai");
-    assert_eq!(state.providers[0].models.len(), 2);
-    assert!(!serde_json::to_string(&f.world.lock().unwrap().settings)
-        .unwrap()
-        .contains("new-key"));
-}
-
-/// 拉取到的接口基址用于路由的上游地址；已有的勾选和显示名保留；换地址后旧基址作废
+/// 拉取到的接口基址用于路由的上游地址；已选和显示名保留；换地址后旧基址作废，开着的清单当场跟上
 #[test]
 fn fetched_api_base_is_used_and_selection_survives() {
     let f = fixture();
@@ -747,10 +843,13 @@ fn fetched_api_base_is_used_and_selection_survives() {
         "https://gw.example/openai/v1",
     )
     .unwrap();
-    let models = f.codex_state().providers.remove(0).models;
-    assert_eq!(models.len(), 2);
-    let glm = models.iter().find(|m| m.id == "weibo/glm-5").unwrap();
-    assert!(glm.selected && glm.display_name == "Weibo GLM-5");
+    let models = f.codex_state().models;
+    let glm = models
+        .picked
+        .iter()
+        .find(|m| m.model_ref.model == "weibo/glm-5")
+        .unwrap();
+    assert_eq!(glm.display_name, "Weibo GLM-5");
     f.app.enable().unwrap();
     assert_eq!(
         f.routing()["providers"][0]["base_url"],
@@ -765,7 +864,7 @@ fn fetched_api_base_is_used_and_selection_survives() {
     assert_eq!(f.router_events(), ["start 47328"]);
 }
 
-/// AC20：恢复后逐字节相同，本功能文件清除、路由停下
+/// AC20：恢复后逐字节相同，本功能文件清除、路由停下；「已选」留着，再打开时就有
 #[test]
 fn ac20_restore_returns_original_bytes_and_cleans_up() {
     let f = fixture();
@@ -783,11 +882,12 @@ fn ac20_restore_returns_original_bytes_and_cleans_up() {
     assert!(leftovers.is_empty(), "{leftovers:?}");
     assert_eq!(f.router(), None, "两家都关了：路由停下");
     let state = f.codex_state();
-    assert!(
-        !state.enabled
-            && state.providers[0].models.len() == 1
-            && state.providers[0].models[0].selected
-    );
+    assert!(!state.enabled);
+    assert!(state
+        .models
+        .picked
+        .iter()
+        .any(|m| m.model_ref.model == "weibo/glm-5"));
 }
 
 #[test]
@@ -1249,7 +1349,8 @@ fn ac23_detects_agents_manager_and_blocks_enable() {
     assert!(f.codex().join("agents-manager-models.json").exists());
 }
 
-/// AC22：接管把地址、模型、显示名、密钥、启用前默认模型原样带过来，撤下对方的服务和文件，设置改指向本功能
+/// AC22：接管把地址、模型、显示名、密钥、启用前默认模型原样带过来（进全局名单，勾着的选进 Codex），
+/// 撤下对方的服务和文件，设置改指向本功能
 #[test]
 fn ac22_takeover_migrates_everything_without_reentering_the_key() {
     let f = fixture();
@@ -1258,7 +1359,7 @@ fn ac22_takeover_migrates_everything_without_reentering_the_key() {
     let world = f.world.lock().unwrap();
     assert_eq!(world.key.as_deref(), Some("sk-old-tool-key-123456"));
     assert_eq!(
-        world.settings.providers[0].base_url,
+        world.models.providers[0].base_url,
         "https://gw.example/openai"
     );
     assert_eq!(world.settings.prev_model.as_deref(), Some("gpt-5.6-sol"));
@@ -1284,12 +1385,13 @@ fn ac22_takeover_migrates_everything_without_reentering_the_key() {
     );
     let state = f.codex_state();
     assert!(state.enabled && state.takeover.is_none());
-    let glm = state.providers[0]
+    let glm = state
         .models
+        .picked
         .iter()
-        .find(|m| m.id == "thudm/glm-5.2")
+        .find(|m| m.model_ref.model == "thudm/glm-5.2")
         .unwrap();
-    assert!(glm.selected && glm.display_name == "GLM-5.2");
+    assert_eq!(glm.display_name, "GLM-5.2");
     assert!(
         f.root.join("agents-manager/state.json").exists(),
         "对方的数据保留"
@@ -1386,13 +1488,11 @@ fn takeover_carries_added_newline_and_model_capabilities() {
       "models":[{"id":"thudm/glm-5.2","display_name":"GLM-5.2","selected":true,"context_window":200000,"vision":true}],
       "prev_model":"gpt-5.6-sol","had_prev_model":true,"published_slugs":["thudm-glm-5.2"]}"#).unwrap();
     f.app.takeover().unwrap();
-    let settings = f.world.lock().unwrap().settings.clone();
-    assert!(settings.added_newline);
-    assert_eq!(
-        settings.providers[0].models[0].model.context_window,
-        Some(200000)
-    );
-    assert!(settings.providers[0].models[0].model.vision);
+    let world = f.world.lock().unwrap();
+    assert!(world.settings.added_newline);
+    let model = &world.models.providers[0].models[0].model;
+    assert_eq!(model.context_window, Some(200000));
+    assert!(model.vision);
 }
 
 /// 终审发现：接管在写设置之前失败（例如设置被别人改了），此时密钥已经覆盖、
@@ -1520,43 +1620,25 @@ fn pick(id: &str) -> Model {
     }
 }
 
-/// 两家网关，各有自己的密钥，各勾一个同名模型
+/// 两家提供商，各有自己的密钥，Codex 各选一个同名模型
 fn two_providers(f: &Fixture) -> (String, String) {
     f.world.lock().unwrap().key = None;
-    let a = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            Some("WeCode"),
-            "https://wecode.example/openai",
-            "sk-wecode-key-123456",
-            vec!["deepseek/v4".into(), "glm-5".into()],
-            "https://wecode.example/openai/v1",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    let b = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            Some("Other Gateway"),
-            "https://other.example/api",
-            "sk-other-key-1234567",
-            vec!["deepseek/v4".into()],
-            "",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    f.app
-        .set_models_in(Agent::Codex, &a, vec![pick("deepseek/v4")])
-        .unwrap();
-    f.app
-        .set_models_in(Agent::Codex, &b, vec![pick("deepseek/v4")])
-        .unwrap();
+    let a = f.add_provider(
+        "WeCode",
+        "https://wecode.example/openai",
+        Some("sk-wecode-key-123456"),
+        &["deepseek/v4", "glm-5"],
+        "https://wecode.example/openai/v1",
+    );
+    let b = f.add_provider(
+        "Other Gateway",
+        "https://other.example/api",
+        Some("sk-other-key-1234567"),
+        &["deepseek/v4"],
+        "",
+    );
+    f.pick_models(&a, vec![pick("deepseek/v4")]).unwrap();
+    f.pick_models(&b, vec![pick("deepseek/v4")]).unwrap();
     (a, b)
 }
 
@@ -1616,57 +1698,12 @@ fn two_providers_coexist_with_their_own_ids_keys_and_prefixed_slugs() {
     assert!(!saved.contains("sk-wecode") && !saved.contains("sk-other"));
 }
 
-/// 撞名模型在 Codex 目录里的后缀与状态里的 `short_name` 是同一个名字（界面网关行、模型片后缀都读它）：
-/// 新建时没填名字的那家，显示名是完整主机名，两边都写短名 `other`，不是 `other.example`
+/// 撞名模型在 Codex 目录里的后缀就是提供商名称，与界面「已选」里写的是同一个名字
 #[test]
-fn the_catalog_suffix_for_clashing_models_is_the_short_name_the_ui_shows() {
+fn the_catalog_suffix_for_clashing_models_is_the_provider_name_the_ui_shows() {
     let f = fixture();
-    f.world.lock().unwrap().key = None;
-    let a = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            Some("WeCode"),
-            "https://wecode.example/openai",
-            "sk-wecode-key-123456",
-            vec!["deepseek/v4".into()],
-            "https://wecode.example/openai/v1",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    let b = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            None,
-            "https://api.other.example/v1",
-            "sk-other-key-1234567",
-            vec!["deepseek/v4".into()],
-            "",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    f.app
-        .set_models_in(Agent::Codex, &a, vec![pick("deepseek/v4")])
-        .unwrap();
-    f.app
-        .set_models_in(Agent::Codex, &b, vec![pick("deepseek/v4")])
-        .unwrap();
+    two_providers(&f);
     f.app.enable().unwrap();
-
-    let state = f.codex_state();
-    assert_eq!(state.providers[1].name, "api.other.example", "显示名原样");
-    let short: Vec<&str> = state
-        .providers
-        .iter()
-        .map(|p| p.short_name.as_str())
-        .collect();
-    assert_eq!(short, ["WeCode", "other"]);
-
     let doc: serde_json::Value =
         serde_json::from_slice(&std::fs::read(f.codex().join("sophia-models.json")).unwrap())
             .unwrap();
@@ -1679,46 +1716,26 @@ fn the_catalog_suffix_for_clashing_models_is_the_short_name_the_ui_shows() {
         .collect();
     assert_eq!(
         names,
+        ["deepseek/v4 · WeCode", "deepseek/v4 · Other Gateway"]
+    );
+    let picked: Vec<(String, String)> = f
+        .codex_state()
+        .models
+        .picked
+        .iter()
+        .skip(1)
+        .map(|m| (m.display_name.clone(), m.provider_name.clone()))
+        .collect();
+    assert_eq!(
+        picked,
         [
-            format!("deepseek/v4 · {}", short[0]),
-            format!("deepseek/v4 · {}", short[1])
+            ("deepseek/v4".to_owned(), "WeCode".to_owned()),
+            ("deepseek/v4".to_owned(), "Other Gateway".to_owned())
         ]
     );
 }
 
-#[test]
-fn state_lists_every_provider() {
-    let f = fixture();
-    let (a, b) = two_providers(&f);
-    {
-        // 兜底密钥也清掉，这样这一家才是真的没有密钥
-        let mut world = f.world.lock().unwrap();
-        world.keys.remove(&b);
-        world.key = None;
-    }
-    let state = f.codex_state();
-    assert_eq!(state.providers.len(), 2);
-    assert_eq!(state.providers[0].id, a);
-    assert_eq!(state.providers[0].name, "WeCode");
-    assert_eq!(state.providers[0].key, KeyStatus::Set);
-    assert_eq!(state.providers[1].name, "Other Gateway");
-    assert_eq!(
-        state.providers[1].key,
-        KeyStatus::Missing,
-        "每家的密钥状态各自独立"
-    );
-    assert_eq!(state.providers[1].key_problem, None);
-    let model = &state.providers[1].models[0];
-    assert_eq!(
-        (model.slug.as_str(), model.selected),
-        ("other-gateway-deepseek-v4", true)
-    );
-
-    let empty = fixture().codex_state();
-    assert!(empty.providers.is_empty());
-}
-
-/// 启用前逐家检查：有模型要发布的网关必须有密钥；没勾选模型的那家不挡路
+/// 启用前逐家检查：选了模型的提供商必须有密钥；没被选的那家不挡路
 #[test]
 fn enable_checks_the_key_of_every_publishing_provider() {
     let f = fixture();
@@ -1734,14 +1751,14 @@ fn enable_checks_the_key_of_every_publishing_provider() {
     assert!(error.message.contains("Other Gateway"), "{}", error.message);
     assert_eq!(f.read_config(), ORIGINAL, "没启用成就不该动 Codex 设置");
 
-    f.app.set_models_in(Agent::Codex, &b, vec![]).unwrap();
+    f.pick_models(&b, vec![]).unwrap();
     f.app.enable().unwrap();
     assert_eq!(catalog_slugs(&f), ["gpt-5.6-sol", "wecode-deepseek-v4"]);
     // 没有模型在用的那一家，地址不写进 Codex 目录
     assert_eq!(f.routing()["providers"].as_array().unwrap().len(), 1);
 }
 
-/// R4 / AC2：读不出密钥不当成「没有」——状态带原因，启用、拉模型、试调都说「不可用：原因」而不是「还没有密钥」
+/// R4 / AC2：读不出密钥不当成「没有」——启用、试调都说「不可用：原因」而不是「还没有密钥」
 #[test]
 fn an_unreadable_key_is_not_reported_as_missing() {
     let f = fixture();
@@ -1756,215 +1773,26 @@ fn an_unreadable_key_is_not_reported_as_missing() {
         .key_errors
         .insert(b.clone(), reason.clone());
 
-    let state = f.codex_state();
-    assert_eq!(state.providers[0].key, KeyStatus::Set);
-    assert_eq!(state.providers[1].key, KeyStatus::Unreadable);
-    assert_eq!(
-        state.providers[1].key_problem.as_deref(),
-        Some(reason.as_str())
-    );
-    let json = serde_json::to_value(&state.providers[1]).unwrap();
-    assert_eq!(json["key"], "unreadable");
-    assert_eq!(json["keyProblem"], reason.as_str());
-    assert!(json.get("hasKey").is_none());
-
     let missing = sophia_core::t!("models.app.providerNoKey", name = "Other Gateway");
     let error = f.app.enable().unwrap_err();
     assert_eq!(error.code, "invalid");
     assert!(error.message.contains(&reason), "{}", error.message);
     assert_ne!(error.message, missing);
-    let error = f.app.provider_for_fetch_in(Agent::Codex, &b).unwrap_err();
+    let error = f.app.probe_target(&b, "deepseek/v4").unwrap_err();
     assert!(error.message.contains(&reason), "{}", error.message);
     assert_ne!(error.message, sophia_core::t!("models.app.noKey"));
-    let error = f
-        .app
-        .provider_for_probe_in(Agent::Codex, &b, "deepseek/v4")
-        .unwrap_err();
-    assert!(error.message.contains(&reason), "{}", error.message);
-    assert!(f.app.provider_for_fetch_in(Agent::Codex, &a).is_ok());
+    assert!(f.app.probe_target(&a, "deepseek/v4").is_ok());
     assert_eq!(f.read_config(), ORIGINAL);
 }
 
-/// 改名只改显示名：id、标识、钥匙串账户都不变，Codex 里已选的模型不受影响
+/// 删掉一家（提供商页）：它从各家「已选」里拿掉，开着的 Codex 当场跟上，它的模型进停用名单
 #[test]
-fn renaming_a_provider_keeps_its_id_and_slugs() {
+fn removing_a_provider_retires_its_models() {
     let f = fixture();
-    let (a, _b) = two_providers(&f);
+    let (_a, b) = two_providers(&f);
     f.app.enable().unwrap();
-    let before = catalog_slugs(&f);
-    let id = f
-        .app
-        .upsert_provider_in(
-            Agent::Codex,
-            Some(&a),
-            Some("微博内网"),
-            "https://wecode.example/openai",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    assert_eq!(id, a);
-    assert_eq!(f.codex_state().providers[0].name, "微博内网");
-    assert_eq!(catalog_slugs(&f), before);
-    assert_eq!(
-        f.world.lock().unwrap().keys["wecode"],
-        "sk-wecode-key-123456"
-    );
-}
-
-/// 同一家里同一地址只能有一个网关（2026-09-30）：新建、改地址撞上别的网关都拒绝，什么都不写（密钥也不写）；
-/// 改自己（地址不变或只差末尾斜杠）照常
-#[test]
-fn a_second_gateway_at_the_same_address_is_rejected() {
-    let f = fixture();
-    let (a, b) = two_providers(&f);
-    let keys_before = f.world.lock().unwrap().keys.clone();
-    let err = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            None,
-            "https://WECODE.example/openai/",
-            "sk-another-key-1234567",
-            vec!["m".into()],
-            "",
-            false,
-        )
-        .unwrap_err();
-    assert_eq!(err.code, "conflict");
-    assert!(
-        err.message.contains("这个地址已经加过了"),
-        "{}",
-        err.message
-    );
-    assert_eq!(
-        code(f.app.upsert_provider_in(
-            Agent::Codex,
-            None,
-            None,
-            "https://wecode.example/openai",
-            false
-        )),
-        "conflict"
-    );
-    // 把 b 的地址改成 a 的：拒绝，b 的地址与密钥都不动
-    assert_eq!(
-        code(f.app.commit_verified_provider_in(
-            Agent::Codex,
-            Some(&b),
-            None,
-            "https://wecode.example/openai",
-            "sk-changed-key-1234567",
-            vec![],
-            "",
-            false,
-        )),
-        "conflict"
-    );
-    let providers = f.codex_state().providers;
-    assert_eq!(providers.len(), 2);
-    assert_eq!(providers[1].base_url, "https://other.example/api");
-    assert_eq!(f.world.lock().unwrap().keys, keys_before);
-    // 改自己：同一地址照常
-    f.app
-        .upsert_provider_in(
-            Agent::Codex,
-            Some(&a),
-            None,
-            "https://wecode.example/openai/",
-            false,
-        )
-        .unwrap();
-    // 规则出台前就重复了的两家：地址不改（改名、换密钥）照常能编辑
-    let mut settings = f.app.load().unwrap();
-    settings.providers[1].base_url = "https://wecode.example/openai".into();
-    f.app.save(&settings).unwrap();
-    f.app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            Some(&b),
-            Some("旧的重复"),
-            "https://wecode.example/openai",
-            "sk-renamed-key-1234567",
-            vec![],
-            "",
-            false,
-        )
-        .unwrap();
-}
-
-#[test]
-fn provider_ids_stay_unique_and_unknown_ids_are_rejected() {
-    let f = fixture();
-    let first = f
-        .app
-        .upsert_provider_in(Agent::Codex, None, Some("Same"), "https://a.example", false)
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    let second = f
-        .app
-        .upsert_provider_in(Agent::Codex, None, Some("Same"), "https://b.example", false)
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    let chinese = f
-        .app
-        .upsert_provider_in(
-            Agent::Codex,
-            None,
-            Some("微博网关"),
-            "https://c.example",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    assert_eq!(
-        (first.as_str(), second.as_str(), chinese.as_str()),
-        ("same", "same-2", "provider")
-    );
-    assert_eq!(
-        code(
-            f.app
-                .upsert_provider_in(
-                    Agent::Codex,
-                    Some("ghost"),
-                    None,
-                    "https://x.example",
-                    false
-                )
-                .map(|saved| saved.provider_id)
-        ),
-        "invalid"
-    );
-    assert_eq!(
-        code(f.app.set_models_in(Agent::Codex, "ghost", vec![pick("m")])),
-        "invalid"
-    );
-    assert_eq!(
-        code(
-            f.app
-                .merge_fetched_models_in(Agent::Codex, "ghost", vec![], "")
-        ),
-        "invalid"
-    );
-    assert_eq!(
-        code(f.app.provider_for_fetch_in(Agent::Codex, "ghost")),
-        "invalid"
-    );
-    assert_eq!(
-        code(f.app.remove_provider_in(Agent::Codex, "ghost", false)),
-        "invalid"
-    );
-    assert_eq!(f.codex_state().providers.len(), 3);
-}
-
-/// 删除一家：它的模型进停用名单、密钥删掉；另一家不受影响
-#[test]
-fn removing_a_provider_retires_its_models_and_deletes_only_its_key() {
-    let f = fixture();
-    let (a, b) = two_providers(&f);
-    f.app.enable().unwrap();
-    f.app.remove_provider_in(Agent::Codex, &b, false).unwrap();
+    f.world.lock().unwrap().models.remove(&b).unwrap();
+    assert!(f.app.models_changed().is_empty());
     assert_eq!(catalog_slugs(&f), ["gpt-5.6-sol", "wecode-deepseek-v4"]);
     let routing = f.routing();
     assert_eq!(
@@ -1972,29 +1800,34 @@ fn removing_a_provider_retires_its_models_and_deletes_only_its_key() {
         serde_json::json!(["other-gateway-deepseek-v4"])
     );
     assert_eq!(routing["providers"].as_array().unwrap().len(), 1);
-    let world = f.world.lock().unwrap();
-    assert_eq!(world.deleted_keys, std::slice::from_ref(&b));
-    assert!(world.keys.contains_key(&a));
-    assert_eq!(world.settings.providers.len(), 1);
 }
 
-/// 已启用时不能删掉最后一家还在发布模型的网关：什么都不动，密钥也不删
+/// 开着时删掉了最后一家被选的提供商：第三方模型一个不剩，Codex 悄悄改回官方、记成没开着
 #[test]
-fn removing_the_last_publishing_provider_while_enabled_is_refused() {
+fn removing_the_last_picked_provider_switches_codex_back() {
     let f = fixture();
     let (a, b) = two_providers(&f);
-    f.app.set_models_in(Agent::Codex, &b, vec![]).unwrap();
+    f.pick_models(&b, vec![]).unwrap();
     f.app.enable().unwrap();
-    let before = f.read_config();
-    assert_eq!(
-        code(f.app.remove_provider_in(Agent::Codex, &a, false)),
-        "invalid"
-    );
-    assert_eq!(f.read_config(), before);
-    assert_eq!(catalog_slugs(&f), ["gpt-5.6-sol", "wecode-deepseek-v4"]);
-    let world = f.world.lock().unwrap();
-    assert!(world.deleted_keys.is_empty());
-    assert_eq!(world.settings.providers.len(), 2);
+    f.world.lock().unwrap().models.remove(&a).unwrap();
+    f.app.models_changed();
+    assert_eq!(f.read_config(), ORIGINAL);
+    assert!(!f.codex_state().enabled);
+    assert_eq!(f.world.lock().unwrap().settings.enabled, Some(false));
+}
+
+/// 在浮层里取消最后一个第三方模型：同样关掉 Codex（「× 掉最后一个＝关掉这一家」）
+#[test]
+fn unpicking_the_last_third_party_model_switches_codex_back() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    let id = f.first_provider().unwrap();
+    f.app
+        .pick(Agent::Codex, &ModelRef::new(&id, "weibo/glm-5"), false)
+        .unwrap();
+    assert_eq!(f.read_config(), ORIGINAL);
+    assert!(!f.codex_state().enabled);
 }
 
 /// 删掉的那家的模型若正是 Codex 的默认模型，改回启用前的值
@@ -2008,7 +1841,8 @@ fn removing_a_provider_resets_the_default_model_if_it_was_theirs() {
         "model = \"other-gateway-deepseek-v4\"",
         1,
     ));
-    f.app.remove_provider_in(Agent::Codex, &b, false).unwrap();
+    f.world.lock().unwrap().models.remove(&b).unwrap();
+    f.app.models_changed();
     assert!(
         f.read_config().contains("model = \"gpt-5.6-sol\""),
         "{}",
@@ -2016,35 +1850,12 @@ fn removing_a_provider_resets_the_default_model_if_it_was_theirs() {
     );
 }
 
-/// 新建网关时密钥没存成：不留下一张没法用的卡片
-#[test]
-fn a_new_provider_is_not_left_behind_when_its_key_cannot_be_stored() {
-    let f = fixture();
-    f.world.lock().unwrap().key = None;
-    f.world.lock().unwrap().key_write_fails_for = Some("wecode".into());
-    let result = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            Some("WeCode"),
-            "https://wecode.example/openai",
-            "sk-wecode-key-123456",
-            vec!["m".into()],
-            "",
-            false,
-        )
-        .map(|saved| saved.provider_id);
-    assert_eq!(code(result), "invalid");
-    assert!(f.codex_state().providers.is_empty());
-}
-
-/// 已启用时改动发布内容，要先确保路由在跑再写清单。路由起不来就什么都不写。
+/// 已启用时改动发布内容，要先确保路由在跑再写清单。路由起不来就什么都不写，这一下勾选也不留下
 #[test]
 fn republishing_refuses_to_write_catalogs_when_the_router_cannot_be_brought_up() {
     let f = fixture();
     let (_a, b) = two_providers(&f);
-    f.app.set_models_in(Agent::Codex, &b, vec![]).unwrap();
+    f.pick_models(&b, vec![]).unwrap();
     f.app.enable().unwrap();
     let routing_before = f.routing();
     // 打开 Sophia 时没接上（路由不在），这次也起不来
@@ -2053,83 +1864,32 @@ fn republishing_refuses_to_write_catalogs_when_the_router_cannot_be_brought_up()
         w.router = None;
         w.healthy = false;
     }
-    assert_eq!(
-        code(
-            f.app
-                .set_models_in(Agent::Codex, &b, vec![pick("deepseek/v4")])
-        ),
-        "router_down"
-    );
+    let other = ModelRef::new(&b, "deepseek/v4");
+    f.enable_models(&b, &[pick("deepseek/v4")]);
+    assert_eq!(code(f.app.pick(Agent::Codex, &other, true)), "router_down");
     assert_eq!(f.routing(), routing_before, "路由没就绪，清单不该变");
     assert!(
-        f.codex_state().providers[1]
+        !f.world
+            .lock()
+            .unwrap()
             .models
-            .iter()
-            .all(|m| !m.selected),
+            .picked("codex")
+            .contains(&other),
         "没发布成的勾选不该存下来"
     );
 }
 
-/// 旧的单网关设置在已启用状态下升级：磁盘上还是旧清单，下一次改勾选时整体换成新格式，
-/// 旧标识进停用名单，指向旧标识的默认模型改回启用前的值
-#[test]
-fn legacy_settings_are_republished_in_the_new_format_on_the_next_change() {
-    let f = fixture();
-    let legacy: GatewaySettings = serde_json::from_value(serde_json::json!({
-        "baseUrl": "https://gw.example/openai",
-        "apiBase": "https://gw.example/openai/v1",
-        "models": [{"id": "weibo/glm-5", "selected": true}, {"id": "kimi-k3"}],
-        "publishedSlugs": ["weibo-glm-5"],
-        "prevModel": "gpt-5.6-sol",
-        "hadPrevModel": true
-    }))
-    .unwrap();
-    f.world.lock().unwrap().settings = legacy;
-    f.write_config(&format!(
-        "model = \"weibo-glm-5\"\n{}{}",
-        our_lines(&f),
-        ORIGINAL.split_once('\n').unwrap().1
-    ));
-    let state = f.codex_state();
-    assert!(state.enabled);
-    assert_eq!(state.providers[0].id, "default");
-    assert_eq!(state.providers[0].name, "gw.example");
-
-    f.set_models(vec![pick("weibo/glm-5"), pick("kimi-k3")])
-        .unwrap();
-    assert_eq!(
-        catalog_slugs(&f),
-        ["gpt-5.6-sol", "default-weibo-glm-5", "default-kimi-k3"]
-    );
-    assert_eq!(f.routing()["retired"], serde_json::json!(["weibo-glm-5"]));
-    assert!(
-        f.read_config().starts_with("model = \"gpt-5.6-sol\"\n"),
-        "{}",
-        f.read_config()
-    );
-}
-
-/// 接管生成固定 id 的一家，不动用户自己加的网关；对方不带前缀的旧标识进停用名单
+/// 接管生成固定 id 的一家，不动用户自己加的提供商；对方不带前缀的旧标识进停用名单
 #[test]
 fn takeover_adds_a_wecode_provider_next_to_existing_ones() {
     let f = fixture();
-    let mine = f
-        .app
-        .upsert_provider_in(
-            Agent::Codex,
-            None,
-            Some("Mine"),
-            "https://mine.example",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
+    let mine = f.add_provider("Mine", "https://mine.example", None, &[], "");
     let config = agents_manager_setup(&f);
     f.write_config(&config.replacen("model = \"gpt-5.6-sol\"", "model = \"thudm-glm-5.2\"", 1));
     f.app.takeover().unwrap();
     let world = f.world.lock().unwrap();
     let ids: Vec<&str> = world
-        .settings
+        .models
         .providers
         .iter()
         .map(|p| p.id.as_str())
@@ -2148,76 +1908,36 @@ fn takeover_adds_a_wecode_provider_next_to_existing_ones() {
     assert!(!f.read_config().contains("thudm-glm-5.2"));
 }
 
-/// 给已有的网关换密钥时密钥没存成：地址不该已经被改掉
-#[test]
-fn an_existing_provider_keeps_its_address_when_the_new_key_cannot_be_stored() {
-    let f = fixture();
-    let (a, _b) = two_providers(&f);
-    f.world.lock().unwrap().key_write_fails_for = Some(a.clone());
-    let result = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            Some(&a),
-            None,
-            "https://moved.example/openai",
-            "sk-another-key-123456",
-            vec!["m".into()],
-            "",
-            false,
-        )
-        .map(|saved| saved.provider_id);
-    assert_eq!(code(result), "invalid");
-    assert_eq!(
-        f.codex_state().providers[0].base_url,
-        "https://wecode.example/openai"
-    );
-}
-
-/// 评审发现：用户自己建的网关 id 恰好是 wecode（名字叫 WeCode 就会这样）但地址不同时，
-/// 接管不能覆盖它——它的地址、模型、密钥都得原样留着，接管来的另起一家
+/// 用户自己加的提供商 id 恰好是 wecode 但地址不同时，接管不能覆盖它——它的地址、模型、密钥都得原样留着，
+/// 接管来的另起一家（名称撞了加序号）
 #[test]
 fn takeover_never_overwrites_a_users_own_provider_that_happens_to_share_the_id() {
     let f = fixture();
     f.world.lock().unwrap().key = None;
-    let mine = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            None,
-            Some("WeCode"),
-            "https://my-own.example/v1",
-            "sk-my-own-key-123456",
-            vec!["my/model".into()],
-            "",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
+    let mine = f.add_provider(
+        "WeCode",
+        "https://my-own.example/v1",
+        Some("sk-my-own-key-123456"),
+        &["my/model"],
+        "",
+    );
     assert_eq!(mine, "wecode");
-    f.app
-        .set_models_in(Agent::Codex, &mine, vec![pick("my/model")])
-        .unwrap();
+    f.pick_models(&mine, vec![pick("my/model")]).unwrap();
     agents_manager_setup(&f);
-    f.world
-        .lock()
-        .unwrap()
-        .keys
-        .insert("wecode".into(), "sk-my-own-key-123456".into());
 
     f.app.takeover().unwrap();
     let world = f.world.lock().unwrap();
-    let pairs: Vec<(&str, &str)> = world
-        .settings
+    let pairs: Vec<(&str, &str, &str)> = world
+        .models
         .providers
         .iter()
-        .map(|p| (p.id.as_str(), p.base_url.as_str()))
+        .map(|p| (p.id.as_str(), p.name.as_str(), p.base_url.as_str()))
         .collect();
     assert_eq!(
         pairs,
         [
-            ("wecode", "https://my-own.example/v1"),
-            ("wecode-2", "https://gw.example/openai")
+            ("wecode", "WeCode", "https://my-own.example/v1"),
+            ("wecode-2", "wecode 2", "https://gw.example/openai")
         ]
     );
     assert_eq!(
@@ -2243,7 +1963,7 @@ fn taking_over_the_same_gateway_twice_reuses_the_provider() {
     f.app.takeover().unwrap();
     let world = f.world.lock().unwrap();
     let ids: Vec<&str> = world
-        .settings
+        .models
         .providers
         .iter()
         .map(|p| p.id.as_str())
@@ -2277,142 +1997,6 @@ fn enable_brings_the_router_up_before_writing_the_routing_catalog() {
     assert_eq!(f.read_config(), ORIGINAL);
 }
 
-/// 拉取失败：原因记在那一家上并落盘，模型和勾选不动；再拉成功就清掉
-#[test]
-fn a_failed_fetch_marks_the_provider_unreachable_until_the_next_success() {
-    let f = fixture();
-    let (a, _) = two_providers(&f);
-    f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
-        .unwrap();
-
-    // 落盘：设置里有，重新读出的状态里也有
-    {
-        let world = f.world.lock().unwrap();
-        let saved = world.settings.provider(&a).unwrap();
-        assert_eq!(saved.unreachable, Some(UnreachableReason::Network));
-        let json = serde_json::to_value(&world.settings).unwrap();
-        assert_eq!(
-            json["providers"][0]["unreachable"],
-            serde_json::json!("network"),
-            "落盘写种类代码，不存句子"
-        );
-    }
-    let view = &f.codex_state().providers[0];
-    assert_eq!(view.unreachable.as_deref(), Some("地址无法访问"));
-    assert_eq!(view.models.len(), 2, "失败不丢模型列表");
-    assert!(view.models.iter().any(|m| m.selected), "失败不丢勾选");
-    let json = serde_json::to_value(view).unwrap();
-    assert_eq!(
-        json["unreachable"], "地址无法访问",
-        "界面字段名是 unreachable"
-    );
-
-    // 再试一次，这回拉到了：清空
-    f.app
-        .merge_fetched_models_in(Agent::Codex, &a, vec!["deepseek/v4".into()], "")
-        .unwrap();
-    assert_eq!(f.codex_state().providers[0].unreachable, None);
-    let world = f.world.lock().unwrap();
-    assert_eq!(world.settings.provider(&a).unwrap().unreachable, None);
-    let json = serde_json::to_value(&world.settings).unwrap();
-    assert!(
-        json["providers"][0].get("unreachable").is_none(),
-        "清空后不写这个键"
-    );
-}
-
-/// 按 id 再试一次只改那一家
-#[test]
-fn retrying_one_provider_leaves_the_others_alone() {
-    let f = fixture();
-    let (a, b) = two_providers(&f);
-    f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
-        .unwrap();
-    f.app
-        .record_unreachable_in(Agent::Codex, &b, UnreachableReason::Auth, None)
-        .unwrap();
-
-    f.app
-        .merge_fetched_models_in(Agent::Codex, &b, vec!["deepseek/v4".into()], "")
-        .unwrap();
-    let state = f.codex_state();
-    assert_eq!(
-        state.providers[0].unreachable.as_deref(),
-        Some("地址无法访问")
-    );
-    assert_eq!(state.providers[1].unreachable, None);
-
-    assert_eq!(
-        code(f.app.record_unreachable_in(
-            Agent::Codex,
-            "nope",
-            UnreachableReason::Unexpected,
-            None
-        )),
-        "invalid"
-    );
-}
-
-/// 界面拿到的是当前语言的句子：种类现取句；旧文件里认不出的旧句原样给出
-#[test]
-fn the_view_shows_the_current_sentence_for_each_reason_kind() {
-    let f = fixture();
-    let (a, b) = two_providers(&f);
-    f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Auth, None)
-        .unwrap();
-    f.world
-        .lock()
-        .unwrap()
-        .settings
-        .provider_mut(&b)
-        .unwrap()
-        .unreachable = Some(UnreachableReason::Legacy("某句旧话".into()));
-    let state = f.codex_state();
-    assert_eq!(
-        state.providers[0].unreachable.as_deref(),
-        Some("密钥无效，请换一个密钥")
-    );
-    assert_eq!(state.providers[1].unreachable.as_deref(), Some("某句旧话"));
-}
-
-/// 换了地址，「无法连接」是对旧地址的结论，一并清掉；只改名不清
-#[test]
-fn changing_the_address_forgets_the_old_unreachable_verdict() {
-    let f = fixture();
-    let (a, _) = two_providers(&f);
-    f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
-        .unwrap();
-    f.app
-        .upsert_provider_in(
-            Agent::Codex,
-            Some(&a),
-            Some("WeCode 2"),
-            "https://wecode.example/openai",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    assert_eq!(
-        f.codex_state().providers[0].unreachable.as_deref(),
-        Some("地址无法访问")
-    );
-    f.app
-        .upsert_provider_in(
-            Agent::Codex,
-            Some(&a),
-            None,
-            "https://wecode2.example/openai",
-            false,
-        )
-        .map(|saved| saved.provider_id)
-        .unwrap();
-    assert_eq!(f.codex_state().providers[0].unreachable, None);
-}
-
 fn fetched(id: &str, context_window: Option<u32>) -> Model {
     Model {
         id: id.into(),
@@ -2439,56 +2023,10 @@ fn catalog_context_windows(f: &Fixture) -> std::collections::HashMap<String, u64
         .collect()
 }
 
-/// 拉取时网关给的上下文长度：存下、出现在状态里（`agents[].providers[].models[].contextWindow`）、
-/// 勾选（界面只传 id 与显示名）不抹掉它和看图能力、再拉取时新值覆盖而没给值时沿用旧值、
-/// 已选却没返回的原样保留，最后写进 Codex 目录的 `context_window`
-/// sophia-dev#117：手动填的模型进列表就勾上、带 `manual`；再拉取（网关列表里没有它）照样在；
-/// 取消勾选就从列表移除；同一个 id 已在列表里就只勾上
+/// 拉取时给的上下文长度：存下、出现在浮层里；再拉取时新值覆盖而没给值时沿用旧值、已启用却没返回的原样保留；
+/// 接管带来的看图能力不被抹掉；最后写进 Codex 目录的 `context_window`
 #[test]
-fn manual_model_is_added_selected_survives_refetch_and_is_removed_when_unchecked() {
-    let f = fixture();
-    f.configure();
-    f.merge_fetched_models(vec![fetched("weibo/glm-5", None)], "")
-        .unwrap();
-    let id = f.first_provider().unwrap();
-    f.app
-        .add_manual_model_in(Agent::Codex, &id, " my/preview ")
-        .unwrap();
-    let saved = f.app.load().unwrap().providers[0].models.clone();
-    let mine = saved.iter().find(|m| m.model.id == "my/preview").unwrap();
-    assert!(mine.selected && mine.model.manual);
-    let state = serde_json::to_value(f.app.state()).unwrap();
-    let models = &state["agents"][0]["providers"][0]["models"];
-    assert_eq!(models[1]["id"], "my/preview");
-    assert_eq!(models[1]["manual"], true);
-    assert_eq!(models[0]["manual"], false);
-
-    // 已在列表里的 id（网关给的 glm-5 没勾）：不报错，替用户勾上，也不变成手动的
-    f.app
-        .add_manual_model_in(Agent::Codex, &id, "weibo/glm-5")
-        .unwrap();
-    let saved = f.app.load().unwrap().providers[0].models.clone();
-    let glm = saved.iter().find(|m| m.model.id == "weibo/glm-5").unwrap();
-    assert!(glm.selected && !glm.model.manual);
-    assert_eq!(saved.len(), 2, "没有多出一条");
-
-    // 再拉取：网关没列它，手动的照样在
-    f.merge_fetched_models(vec![fetched("weibo/glm-5", None)], "")
-        .unwrap();
-    let saved = f.app.load().unwrap().providers[0].models.clone();
-    assert!(saved
-        .iter()
-        .any(|m| m.model.id == "my/preview" && m.model.manual));
-
-    // 取消勾选（完整勾选里没有它）：移除，不是留着没勾
-    f.set_models(vec![pick("weibo/glm-5")]).unwrap();
-    let saved = f.app.load().unwrap().providers[0].models.clone();
-    assert!(!saved.iter().any(|m| m.model.id == "my/preview"));
-    assert_eq!(saved.len(), 1);
-}
-
-#[test]
-fn fetched_context_window_survives_select_and_refetch_and_reaches_the_catalog() {
+fn fetched_context_window_survives_refetch_and_reaches_the_catalog() {
     let f = fixture();
     f.configure();
     f.merge_fetched_models(
@@ -2500,18 +2038,6 @@ fn fetched_context_window_survives_select_and_refetch_and_reaches_the_catalog() 
         "",
     )
     .unwrap();
-    let state = serde_json::to_value(f.app.state()).unwrap();
-    let models = &state["agents"][0]["providers"][0]["models"];
-    assert_eq!(models[0]["id"], "weibo/glm-5");
-    assert_eq!(models[0]["contextWindow"], 200_000);
-    assert_eq!(models[1]["contextWindow"], 131_072);
-    assert!(models[2]["contextWindow"].is_null());
-
-    // 接管来的模型可能带着看图能力：勾选同样不能抹掉
-    f.world.lock().unwrap().settings.providers[0].models[1]
-        .model
-        .vision = true;
-    // 界面的勾选：只有 id 与显示名
     f.set_models(vec![
         Model {
             id: "weibo/glm-5".into(),
@@ -2521,11 +2047,14 @@ fn fetched_context_window_survives_select_and_refetch_and_reaches_the_catalog() 
         pick("kimi-k3"),
     ])
     .unwrap();
-    let saved = f.app.load().unwrap().providers[0].models.clone();
-    assert_eq!(saved[0].model.context_window, Some(200_000));
-    assert_eq!(saved[0].model.display_name.as_deref(), Some("Weibo GLM-5"));
-    assert_eq!(saved[1].model.context_window, Some(131_072));
-    assert!(saved[1].model.vision && saved[1].selected);
+    let state = serde_json::to_value(f.app.state()).unwrap();
+    let group = &state["agents"][0]["models"]["groups"][1];
+    assert_eq!(group["models"][0]["ref"]["model"], "weibo/glm-5");
+    assert_eq!(group["models"][0]["contextWindow"], 200_000);
+    assert_eq!(group["models"][1]["contextWindow"], 131_072);
+    f.world.lock().unwrap().models.providers[0].models[1]
+        .model
+        .vision = true;
 
     // 再拉取：kimi 给了新值；glm 这次没给值，沿用旧的
     f.merge_fetched_models(
@@ -2536,10 +2065,10 @@ fn fetched_context_window_survives_select_and_refetch_and_reaches_the_catalog() 
         "",
     )
     .unwrap();
-    // 再拉取：已选的 kimi 这次没返回，原样保留
+    // 再拉取：已启用的 kimi 这次没返回，原样保留
     f.merge_fetched_models(vec![fetched("weibo/glm-5", None)], "")
         .unwrap();
-    let saved = f.app.load().unwrap().providers[0].models.clone();
+    let saved = f.world.lock().unwrap().models.providers[0].models.clone();
     let window = |id: &str| {
         saved
             .iter()
@@ -2548,20 +2077,15 @@ fn fetched_context_window_survives_select_and_refetch_and_reaches_the_catalog() 
     };
     assert_eq!(window("weibo/glm-5"), Some(200_000));
     assert_eq!(window("kimi-k3"), Some(262_144));
+    assert!(saved
+        .iter()
+        .any(|m| m.model.id == "kimi-k3" && m.model.vision));
     assert!(saved.iter().all(|m| m.model.id != "no-context"));
 
     f.app.enable().unwrap();
-    let slugs: std::collections::HashMap<String, String> = f
-        .codex_state()
-        .providers
-        .remove(0)
-        .models
-        .into_iter()
-        .map(|m| (m.id, m.slug))
-        .collect();
     let catalog = catalog_context_windows(&f);
-    assert_eq!(catalog[&slugs["weibo/glm-5"]], 200_000);
-    assert_eq!(catalog[&slugs["kimi-k3"]], 262_144);
+    assert_eq!(catalog["gw.example-weibo-glm-5"], 200_000);
+    assert_eq!(catalog["gw.example-kimi-k3"], 262_144);
 }
 
 /// 试调用的地址与协议就是路由清单里的那一份（探明的接口基址优先），密钥取这一家的
@@ -2570,10 +2094,7 @@ fn probe_target_uses_the_routing_base_protocol_and_key() {
     let f = fixture();
     f.configure();
     let id = f.first_provider().unwrap();
-    let target = f
-        .app
-        .provider_for_probe_in(Agent::Codex, &id, " weibo/glm-5 ")
-        .unwrap();
+    let target = f.app.probe_target(&id, " weibo/glm-5 ").unwrap();
     assert_eq!(target.api_base, "https://gw.example/openai");
     assert_eq!(target.protocol, crate::router::Protocol::Chat);
     assert_eq!(target.model, "weibo/glm-5");
@@ -2583,34 +2104,22 @@ fn probe_target_uses_the_routing_base_protocol_and_key() {
 
     f.merge_fetched_models(vec!["weibo/glm-5".into()], "https://gw.example/openai/v1")
         .unwrap();
-    f.world.lock().unwrap().settings.providers[0].protocol = "responses".into();
-    let target = f
-        .app
-        .provider_for_probe_in(Agent::Codex, &id, "weibo/glm-5")
-        .unwrap();
+    f.world.lock().unwrap().models.providers[0].protocol = "responses".into();
+    let target = f.app.probe_target(&id, "weibo/glm-5").unwrap();
     assert_eq!(target.api_base, "https://gw.example/openai/v1");
     assert_eq!(target.protocol, crate::router::Protocol::Responses);
 }
 
-/// 试调前缺密钥、没有这个网关、没指明模型：报 `invalid`，不联网
+/// 试调前缺密钥、没有这一家、没指明模型：报 `invalid`，不联网
 #[test]
 fn probe_target_needs_a_key_a_known_provider_and_a_model() {
     let f = fixture();
     f.configure();
     let id = f.first_provider().unwrap();
-    assert_eq!(
-        code(f.app.provider_for_probe_in(Agent::Codex, &id, "  ")),
-        "invalid"
-    );
-    assert_eq!(
-        code(f.app.provider_for_probe_in(Agent::Codex, "ghost", "m")),
-        "invalid"
-    );
+    assert_eq!(code(f.app.probe_target(&id, "  ")), "invalid");
+    assert_eq!(code(f.app.probe_target("ghost", "m")), "invalid");
     f.world.lock().unwrap().key = None;
-    let err = f
-        .app
-        .provider_for_probe_in(Agent::Codex, &id, "weibo/glm-5")
-        .unwrap_err();
+    let err = f.app.probe_target(&id, "weibo/glm-5").unwrap_err();
     assert_eq!(err.to_string(), "[invalid] 还没有保存密钥");
 }
 
@@ -2689,130 +2198,60 @@ fn rejected(detail: &str) -> crate::router::KeyVerdict {
     }
 }
 
-/// 路由转发的请求被拒了密钥：那一家记成「密钥无效」（带原文）并落盘；同一结论再报不写文件。
-/// 拉列表成功、拉列表又失败都不顶掉它；之后一次调用成功才清，清过再报「成功」也不写
+/// 路由转发的请求被拒了密钥：那一家（全局名单）记成「密钥无效」（带原文）并落盘；同一结论再报不写。
+/// 之后一次调用成功才清，清过再报「成功」也不写；已经删掉的提供商不算错
 #[test]
 fn a_rejected_call_marks_the_provider_until_a_call_succeeds() {
+    use sophia_core::codex_models::settings::UnreachableReason;
     let f = fixture();
     let (a, b) = two_providers(&f);
-    let saves = || f.world.lock().unwrap().settings_saves;
+    let saves = || f.world.lock().unwrap().models_saves;
+    let provider = |id: &str| {
+        f.world
+            .lock()
+            .unwrap()
+            .models
+            .provider(id)
+            .cloned()
+            .unwrap()
+    };
     let before = saves();
     let detail = "POST https://wecode.example/openai/v1/chat/completions → 401 Unauthorized";
-    assert!(f
-        .app
-        .record_key_verdict_in(Agent::Codex, &a, rejected(detail))
-        .unwrap());
+    assert!(f.app.record_key_verdict(&a, rejected(detail)).unwrap());
     assert_eq!(saves(), before + 1);
-    let state = f.codex_state();
-    let view = &state.providers[0];
-    assert_eq!(view.unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
-    assert_eq!(view.unreachable_detail.as_deref(), Some(detail));
-    assert!(view.key_rejected_on_call);
-    assert_eq!(view.models.len(), 2, "不动模型列表");
-    assert_eq!(state.providers[1].unreachable, None, "别家不动");
-    let json = serde_json::to_value(view).unwrap();
-    assert_eq!(json["keyRejectedOnCall"], serde_json::json!(true));
+    let marked = provider(&a);
+    assert_eq!(marked.unreachable, Some(UnreachableReason::Auth));
+    assert_eq!(marked.unreachable_detail.as_deref(), Some(detail));
+    assert!(marked.key_rejected_on_call);
+    assert_eq!(provider(&b).unreachable, None, "别家不动");
 
-    // 同一结论：不写文件
+    // 同一结论：不写
     assert!(!f
         .app
-        .record_key_verdict_in(Agent::Codex, &a, rejected("另一次的原文"))
+        .record_key_verdict(&a, rejected("另一次的原文"))
         .unwrap());
     assert_eq!(saves(), before + 1);
-
-    // 拉列表成功不清（列表接口不一定验密钥）；拉列表失败也不顶掉它
-    f.app
-        .merge_fetched_models_in(Agent::Codex, &a, vec!["deepseek/v4".into()], "")
-        .unwrap();
-    f.app
-        .record_unreachable_in(Agent::Codex, &a, UnreachableReason::Network, None)
-        .unwrap();
-    let view = &f.codex_state().providers[0];
-    assert_eq!(view.unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
-    assert_eq!(view.unreachable_detail.as_deref(), Some(detail));
 
     // 之后一次调用成功：清掉
-    let before = saves();
     assert!(f
         .app
-        .record_key_verdict_in(Agent::Codex, &a, crate::router::KeyVerdict::Accepted)
+        .record_key_verdict(&a, crate::router::KeyVerdict::Accepted)
         .unwrap());
-    assert_eq!(saves(), before + 1);
-    let view = &f.codex_state().providers[0];
-    assert_eq!(view.unreachable, None);
-    assert_eq!(view.unreachable_detail, None);
-    assert!(!view.key_rejected_on_call);
-    // 已经是好的：成功不写文件；拉列表记下的原因也不归它清
-    f.app
-        .record_unreachable_in(Agent::Codex, &b, UnreachableReason::Auth, None)
-        .unwrap();
-    let before = saves();
-    for id in [&a, &b] {
-        assert!(!f
-            .app
-            .record_key_verdict_in(Agent::Codex, id, crate::router::KeyVerdict::Accepted)
-            .unwrap());
-    }
-    assert_eq!(saves(), before);
-    assert_eq!(
-        f.codex_state().providers[1].unreachable.as_deref(),
-        Some("密钥无效，请换一个密钥")
-    );
-    assert!(!f.codex_state().providers[1].key_rejected_on_call);
-
-    // 已经删掉的网关：不算错，也不写
+    assert_eq!(saves(), before + 2);
+    let cleared = provider(&a);
+    assert_eq!(cleared.unreachable, None);
+    assert!(!cleared.key_rejected_on_call);
+    // 已经是好的：成功不写
     assert!(!f
         .app
-        .record_key_verdict_in(Agent::Codex, "gone", rejected(detail))
+        .record_key_verdict(&b, crate::router::KeyVerdict::Accepted)
         .unwrap());
-    assert_eq!(saves(), before);
+    // 已经删掉的提供商：不算错，也不写
+    assert!(!f.app.record_key_verdict("gone", rejected(detail)).unwrap());
+    assert_eq!(saves(), before + 2);
 }
 
-/// 换了密钥（带密钥保存，同一地址）：调用被拒是对旧密钥的结论，清掉；换地址也清
-#[test]
-fn saving_a_key_or_changing_the_address_clears_a_call_rejection() {
-    let f = fixture();
-    let (a, b) = two_providers(&f);
-    for id in [&a, &b] {
-        f.app
-            .record_key_verdict_in(Agent::Codex, id, rejected("401"))
-            .unwrap();
-    }
-    f.app
-        .commit_verified_provider_in(
-            Agent::Codex,
-            Some(&a),
-            None,
-            "https://wecode.example/openai",
-            "sk-wecode-new-key-123",
-            vec!["deepseek/v4".into()],
-            "https://wecode.example/openai/v1",
-            false,
-        )
-        .unwrap();
-    f.app
-        .upsert_provider_in(
-            Agent::Codex,
-            Some(&b),
-            None,
-            "https://other2.example/api",
-            false,
-        )
-        .unwrap();
-    let state = f.codex_state();
-    for view in &state.providers {
-        assert_eq!(view.unreachable, None, "{}", view.id);
-        assert!(!view.key_rejected_on_call, "{}", view.id);
-    }
-    let world = f.world.lock().unwrap();
-    assert!(world
-        .settings
-        .providers
-        .iter()
-        .all(|p| !p.key_rejected_on_call && p.unreachable.is_none()));
-}
-
-/// 勾选前的试调：401/403（`auth`）记成被拒，通了清掉，别的失败不动（`runtime::probe_verdict` 接到同一个入口）
+/// 启用前的试调：401/403（`auth`）记成被拒，通了清掉，别的失败不动（`runtime::probe_verdict` 接到同一个入口）
 #[test]
 fn probe_results_feed_the_same_key_verdict() {
     let f = fixture();
@@ -2820,12 +2259,17 @@ fn probe_results_feed_the_same_key_verdict() {
     let rejected_probe: Result<(), AppError> = Err(AppError::new("auth", "密钥被拒")
         .with_detail("POST https://wecode.example/openai/v1/chat/completions → 403 Forbidden"));
     let verdict = crate::runtime::probe_verdict(&rejected_probe).unwrap();
-    f.app
-        .record_key_verdict_in(Agent::Codex, &a, verdict)
+    f.app.record_key_verdict(&a, verdict).unwrap();
+    let marked = f
+        .world
+        .lock()
+        .unwrap()
+        .models
+        .provider(&a)
+        .cloned()
         .unwrap();
-    let view = &f.codex_state().providers[0];
-    assert_eq!(view.unreachable.as_deref(), Some("密钥无效，请换一个密钥"));
-    assert!(view
+    assert!(marked.key_rejected_on_call);
+    assert!(marked
         .unreachable_detail
         .as_deref()
         .is_some_and(|d| d.contains("403")));
@@ -2839,51 +2283,19 @@ fn probe_results_feed_the_same_key_verdict() {
     }
     let verdict = crate::runtime::probe_verdict(&Ok(())).unwrap();
     assert_eq!(verdict, crate::router::KeyVerdict::Accepted);
-    f.app
-        .record_key_verdict_in(Agent::Codex, &a, verdict)
-        .unwrap();
-    assert_eq!(f.codex_state().providers[0].unreachable, None);
-}
-/// 家 claude 的网关同样记、同样清，只动那一家（同 id 的 Codex 网关不受影响）
-#[test]
-fn claude_call_rejections_are_kept_per_family() {
-    let f = fixture();
-    let (a, _) = two_providers(&f);
-    let claude = f
-        .app
-        .commit_verified_provider_in(
-            Agent::Claude,
-            None,
-            Some("WeCode"),
-            "https://wecode.example/openai",
-            "sk-claude-wecode-1",
-            vec!["deepseek/v4".into()],
-            "",
-            false,
-        )
-        .unwrap()
-        .provider_id;
-    assert_eq!(claude, a, "两家同一个 id");
-    assert!(f
-        .app
-        .record_key_verdict_in(Agent::Claude, &claude, rejected("401"))
-        .unwrap());
-    {
-        let world = f.world.lock().unwrap();
-        let marked = &world.claude.providers[0];
-        assert_eq!(marked.unreachable, Some(UnreachableReason::Auth));
-        assert!(marked.key_rejected_on_call);
-        assert_eq!(world.settings.provider(&a).unwrap().unreachable, None);
-    }
-    assert!(f
-        .app
-        .record_key_verdict_in(Agent::Claude, &claude, crate::router::KeyVerdict::Accepted)
-        .unwrap());
+    f.app.record_key_verdict(&a, verdict).unwrap();
     assert_eq!(
-        f.world.lock().unwrap().claude.providers[0].unreachable,
+        f.world
+            .lock()
+            .unwrap()
+            .models
+            .provider(&a)
+            .unwrap()
+            .unreachable,
         None
     );
 }
+
 /// 真实装配里路由拿到的那个出口（`runtime::key_verdict_recorder`）：交出去立刻返回，由另一条线程经编排层落盘
 #[test]
 fn the_router_sink_records_verdicts_off_the_request_path() {
@@ -2900,7 +2312,7 @@ fn the_router_sink_records_verdicts_off_the_request_path() {
             let on_call = world
                 .lock()
                 .unwrap()
-                .settings
+                .models
                 .provider(&a)
                 .unwrap()
                 .key_rejected_on_call;
@@ -2913,6 +2325,183 @@ fn the_router_sink_records_verdicts_off_the_request_path() {
     };
     sink(Agent::Codex, &a, rejected("401"));
     assert!(marked(true), "被拒应当落盘");
-    sink(Agent::Codex, &a, crate::router::KeyVerdict::Accepted);
-    assert!(marked(false), "成功应当清掉");
+    sink(Agent::Claude, &a, crate::router::KeyVerdict::Accepted);
+    assert!(
+        marked(false),
+        "成功应当清掉（哪一家报的都记在同一个提供商上）"
+    );
+}
+
+// ---------- 「已选」接到全局名单（#259） ----------
+
+fn catalog_entries(f: &Fixture) -> Vec<(String, i64)> {
+    let doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(f.codex().join("sophia-models.json")).unwrap())
+            .unwrap();
+    doc["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            (
+                m["slug"].as_str().unwrap().to_owned(),
+                m["priority"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// Codex 的目录按「已选」顺序排：官方与第三方穿插，排序值依次 1、2、3；取消勾选的官方模型不写进目录
+#[test]
+fn codex_catalog_follows_the_pick_order_with_official_models_in_between() {
+    let f = fixture();
+    f.configure();
+    let id = f.first_provider().unwrap();
+    f.pick_models(&id, vec![pick("weibo/glm-5"), pick("kimi-k3")])
+        .unwrap();
+    f.app.enable().unwrap();
+    assert_eq!(
+        catalog_entries(&f),
+        [
+            ("gpt-5.6-sol".to_owned(), 1),
+            ("gw.example-weibo-glm-5".to_owned(), 2),
+            ("gw.example-kimi-k3".to_owned(), 3)
+        ]
+    );
+    let official = ModelRef::official("gpt-5.6-sol");
+    f.app
+        .set_picks(
+            Agent::Codex,
+            vec![
+                ModelRef::new(&id, "kimi-k3"),
+                official.clone(),
+                ModelRef::new(&id, "weibo/glm-5"),
+            ],
+        )
+        .unwrap();
+    assert_eq!(
+        catalog_entries(&f),
+        [
+            ("gw.example-kimi-k3".to_owned(), 1),
+            ("gpt-5.6-sol".to_owned(), 2),
+            ("gw.example-weibo-glm-5".to_owned(), 3)
+        ]
+    );
+    f.app.pick(Agent::Codex, &official, false).unwrap();
+    let slugs: Vec<String> = catalog_entries(&f).into_iter().map(|(s, _)| s).collect();
+    assert_eq!(slugs, ["gw.example-kimi-k3", "gw.example-weibo-glm-5"]);
+    let view = f.codex_state().models;
+    assert_eq!(view.picked.len(), 2);
+    assert!(!view.groups[0].models[0].picked, "官方组里它没勾");
+}
+
+/// 排序（#265）：浮层「已选」里拖动或 ⌥↑ / ⌥↓ 之后，开着的 Codex 目录按新顺序重编排序值（只给看得见的几项，
+/// 别的原地不动）；恢复默认顺序＝官方在前、第三方按启用先后
+#[test]
+fn reordering_rewrites_the_codex_catalog_and_restoring_puts_official_first() {
+    let f = fixture();
+    f.configure();
+    let id = f.first_provider().unwrap();
+    f.app.enable().unwrap();
+    f.pick_models(&id, vec![pick("weibo/glm-5"), pick("kimi-k3")])
+        .unwrap();
+    let glm = ModelRef::new(&id, "weibo/glm-5");
+    let kimi = ModelRef::new(&id, "kimi-k3");
+    let official = ModelRef::official("gpt-5.6-sol");
+
+    f.app
+        .reorder_picks(Agent::Codex, vec![kimi.clone(), glm.clone()])
+        .unwrap();
+    assert_eq!(
+        catalog_entries(&f),
+        [
+            ("gpt-5.6-sol".to_owned(), 1),
+            ("gw.example-kimi-k3".to_owned(), 2),
+            ("gw.example-weibo-glm-5".to_owned(), 3)
+        ]
+    );
+    f.app
+        .reorder_picks(Agent::Codex, vec![kimi, glm, official])
+        .unwrap();
+    assert_eq!(
+        catalog_entries(&f),
+        [
+            ("gw.example-kimi-k3".to_owned(), 1),
+            ("gw.example-weibo-glm-5".to_owned(), 2),
+            ("gpt-5.6-sol".to_owned(), 3)
+        ]
+    );
+
+    f.app.restore_order(Agent::Codex).unwrap();
+    assert_eq!(
+        catalog_entries(&f),
+        [
+            ("gpt-5.6-sol".to_owned(), 1),
+            ("gw.example-weibo-glm-5".to_owned(), 2),
+            ("gw.example-kimi-k3".to_owned(), 3)
+        ]
+    );
+}
+
+/// 恢复默认顺序不增不减（走查 2026-10-07 第 6 条）：没登录 OpenAI 时也只重排存着的那几项。
+/// 存着的官方模型是打开 Codex 那一刻第一次见到时整组并进来的（`sync_official`），不是恢复顺序补的
+#[test]
+fn restoring_the_order_neither_adds_nor_drops_picks() {
+    let f = fixture();
+    std::fs::remove_file(f.codex().join("auth.json")).unwrap();
+    f.configure();
+    f.app.enable().unwrap();
+    let stored = |f: &Fixture| {
+        let mut picked = f.world.lock().unwrap().models.picked("codex").to_vec();
+        picked.sort();
+        picked
+    };
+    let before = stored(&f);
+    f.app.restore_order(Agent::Codex).unwrap();
+    assert_eq!(stored(&f), before);
+}
+
+/// Codex 升级带来的新官方模型默认选上、排最后；用户取消过的不会被选回来
+#[test]
+fn new_official_models_join_the_end_and_unpicked_ones_stay_out() {
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    f.app
+        .pick(Agent::Codex, &ModelRef::official("gpt-5.6-sol"), false)
+        .unwrap();
+    std::fs::write(
+        f.codex().join("models_cache.json"),
+        r#"{"client_version":"0.155.0","models":[
+          {"slug":"gpt-5.6-sol","display_name":"GPT-5.6 Sol","priority":2,"visibility":"list","base_instructions":"You are Codex."},
+          {"slug":"gpt-7","display_name":"GPT-7","priority":1,"visibility":"list","base_instructions":"You are Codex."}]}"#,
+    )
+    .unwrap();
+    let id = f.first_provider().unwrap();
+    f.pick_models(&id, vec![pick("weibo/glm-5"), pick("kimi-k3")])
+        .unwrap();
+    let slugs: Vec<String> = catalog_entries(&f).into_iter().map(|(s, _)| s).collect();
+    assert_eq!(
+        slugs,
+        ["gw.example-weibo-glm-5", "gw.example-kimi-k3", "gpt-7"]
+    );
+}
+
+/// 浮层的视图：Codex 官方组在前；没登录 OpenAI 时官方组置灰、不算进已选；Claude 的官方组总是置灰
+/// （关着第三方时说它自己管，开着时说用不了，见 claude_tests）
+#[test]
+fn the_picker_view_follows_sign_in_and_agent_rules() {
+    use sophia_core::model_providers::picks::Blocked;
+    let f = fixture();
+    f.configure();
+    f.app.enable().unwrap();
+    let view = f.codex_state().models;
+    assert_eq!(view.groups[0].blocked, None);
+    assert_eq!(view.picked.len(), 2);
+    std::fs::remove_file(f.codex().join("auth.json")).unwrap();
+    let view = f.codex_state().models;
+    assert_eq!(view.groups[0].blocked, Some(Blocked::SignedOut));
+    assert_eq!(view.picked.len(), 1);
+    let claude = f.app.state().agent(Agent::Claude).unwrap().models.clone();
+    assert_eq!(claude.groups[0].blocked, Some(Blocked::ReadOnly));
 }

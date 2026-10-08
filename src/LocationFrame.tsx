@@ -68,7 +68,7 @@ export function LocationFrame({
 }
 
 /// `发现` 一面（spec 2026-09-27-skill-mcp-market R4；DESIGN「发现与安装 › `发现` 的页面头与列表」）：
-/// 页面头右端是搜索框（定宽 320，`⌘F`）与 `粘贴链接`（SKILLS）/ `粘贴 JSON`（MCP）；没有筛选行，
+/// 页面头右端是搜索框（定宽 320，`⌘F`）与 `粘贴链接`（SKILLS）/ `粘贴配置`（MCP）；没有筛选行，
 /// 不出 `管理来源`、`+ 来源`——发现里没有「位置」这回事，位置在安装时选。
 /// 列表（热门 / 搜索结果、精选 / 官方目录，`src/market/DiscoverPane`）由 `children` 放进来：给函数时拿到此刻的搜索词。
 /// 搜索词归这里（页面头的搜索框），推入介绍页再回来照旧
@@ -78,7 +78,7 @@ export function DiscoverFrame({
   children,
 }: {
   domain: "skills" | "mcp";
-  /// `粘贴链接` / `粘贴 JSON`；还没接上时按了什么都不做
+  /// `粘贴链接` / `粘贴配置`；还没接上时按了什么都不做
   onPaste?: () => void;
   children?: ReactNode | ((query: string) => ReactNode);
 }) {
@@ -105,7 +105,7 @@ export function DiscoverFrame({
           inputRef={inputRef}
         />
         <Button onClick={onPaste}>
-          {domain === "skills" ? t("skills.discover.pasteLink") : t("skills.discover.pasteJson")}
+          {domain === "skills" ? t("skills.discover.pasteLink") : t("skills.discover.pasteConfig")}
         </Button>
       </PageHeadActions>
       <div className="discover-frame">

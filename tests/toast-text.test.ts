@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { t as say } from "../src/i18n.ts";
 import {
   clearFailedLine,
   linksFailedLine,
@@ -8,11 +7,12 @@ import {
   toastFor,
   type ToastText,
 } from "../src/toastText.ts";
+import { sentenceSaid } from "./copy.ts";
 
 /// 整句读出来（图标组写 `[图]`、名字写 `名字`）：断言的是提示条上真会读到的那一句
 const said = (text: ToastText) => {
   assert.ok(text.sentence, "toastFor 给的是整句");
-  return say(text.sentence, { agents: "[图]", names: "名字" });
+  return sentenceSaid(text.sentence);
 };
 
 const cc = { id: "claude-code", name: "Claude Code" };
@@ -93,7 +93,7 @@ test("所有成功都是例行一行（含只留这份、自动规则）；黑�
   const keep = toastFor("keepThis", { done: [{ name: "defuddle" }], keepLabel: "通用仓库" });
   assert.equal(keep.tier, "routine");
   assert.equal(said(keep), "只留 名字");
-  assert.deepEqual(keep.names, ["通用仓库 的 defuddle"]);
+  assert.deepEqual(keep.names, ["通用仓库的 defuddle"]);
   assert.equal(toastFor("autoLink", { done: [{ name: "x" }] }).tier, "routine");
   assert.equal(toastFor("autoWrite", { done: [{ name: "x" }] }).tier, "routine");
   // 失败照旧黑窗
@@ -112,7 +112,7 @@ test("只留这份的确认框：标题问留哪份；正文只说原来用另�
     skill: "defuddle",
   };
   const t = keepThisConfirm({ ...base, relinked: 3 });
-  assert.equal(t.title, "只留 通用仓库 的 defuddle？");
+  assert.equal(t.title, "只留通用仓库的 defuddle？");
   assert.equal(t.body, "原来使用 WeiboAP 那份的 agent 将改用留下的这一份。");
   assert.doesNotMatch(t.body, /链接|废纸篓|3/);
   assert.equal(keepThisConfirm({ ...base, relinked: 0 }).body, "");
@@ -190,11 +190,11 @@ test("删除 skill 原件的确认框：标题一问，正文只说删除后哪�
     ...base,
     links: 2,
     linkAgents: ["Claude Code"],
-    relinkTo: "~/.agents",
+    relinkTo: "通用仓库",
   });
   assert.equal(
     moved.body,
-    "删除后，Claude Code 将改用 ~/.agents 中的同名 graduate，Codex 将无法使用它。",
+    "删除后，Claude Code 将改用通用仓库中的同名 graduate，Codex 将无法使用它。",
   );
   // 都改用了别处那一份：只说改用
   assert.equal(
@@ -203,9 +203,9 @@ test("删除 skill 原件的确认框：标题一问，正文只说删除后哪�
       ownAgents: [],
       links: 1,
       linkAgents: ["Claude Code"],
-      relinkTo: "~/.agents",
+      relinkTo: "通用仓库",
     }).body,
-    "删除后，Claude Code 将改用 ~/.agents 中的同名 graduate。",
+    "删除后，Claude Code 将改用通用仓库中的同名 graduate。",
   );
   // 没有链接：只说谁将无法使用
   assert.equal(
@@ -215,6 +215,17 @@ test("删除 skill 原件的确认框：标题一问，正文只说删除后哪�
   for (const text of [gone.body, moved.body])
     assert.doesNotMatch(text, /软链接|链接|条|废纸篓|撤销|~\/\.agents\/skills/);
   setHome(null);
+});
+
+test("删除 skill 原件的确认框：三个 agent 列成「A、B 和 C」（#304）", async () => {
+  const { deleteOriginalConfirm } = await import("../src/toastText.ts");
+  const body = deleteOriginalConfirm({
+    skill: "graduate",
+    ownAgents: ["Codex"],
+    links: 2,
+    linkAgents: ["Claude Code", "Cursor"],
+  }).body;
+  assert.equal(body, "删除后，Codex、Claude Code 和 Cursor 将无法使用它。");
 });
 
 test("删除 skill 原件：能撤销时一行 ✓ 已删除（撤销键由调用方挂）；进了废纸篓才说在废纸篓里", async () => {
@@ -235,10 +246,10 @@ test("撤销删原件：全回来 ✓ 已恢复；链接没回来是部分失败
   assert.equal(said(ok), "已恢复 名字");
   const part = restoredOriginalToast("defuddle", {
     bodyBack: true,
-    failed: ["链接之后又被改过，没有指回去"],
+    failed: ["链接之后又被改过，未还原"],
   });
   assert.equal(part.kind, "partial");
-  assert.equal(part.reason, "1 条链接没恢复：链接之后又被改过，没有指回去");
+  assert.equal(part.reason, "1 个 agent 恢复失败 · 链接之后又被改过，未还原");
   const no = restoredOriginalToast("defuddle", {
     bodyBack: false,
     failed: ["原处已经有同名的东西，没有放回"],

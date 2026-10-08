@@ -1,0 +1,188 @@
+/* 选模型浮层（PickModels.tsx，#259，DESIGN-components「模型浮层」，画板 9UGdeLt4rvg2dm8SpStvHo 第 1、2 屏）。
+   同「启用模型」浮层的骨架：宽 380，标题、搜索与页签（同一行）钉在顶上，底部一行钉在底下，中间随浮层滚动。
+   色值一律 var(--…)，唯一来源是 tokens.css。 */
+@import "./tokens.css";
+
+.pick-layer {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  padding: 0 var(--space-md);
+}
+
+.pick-layer__head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-fade);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: 14px 0 var(--space-xs);
+  background: var(--paper);
+}
+
+.pick-layer__title {
+  font-size: var(--size-body);
+  font-weight: 600;
+  line-height: var(--leading-head);
+  color: var(--ink);
+}
+
+/* 搜索框与页签同一行（画板第 1、2 屏）：两列网格，搜索框占满余下的宽，页签在右、间距 8 */
+.pick-layer__bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.pick-layer__tabs {
+  display: flex;
+}
+
+.pick-layer__rows {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-xs);
+}
+
+/* 一组：组头 12 Condensed 600 ink-mute（区块小标），原因 12 ink-faint 跟在名字后 8 */
+.pick-layer__group {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--space-xs);
+}
+
+.pick-layer__group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-xs);
+  padding: var(--space-xxs) 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+}
+
+.pick-layer__group-name {
+  font-family: var(--font-cond);
+  font-weight: 600;
+  color: var(--ink-mute);
+}
+
+.pick-layer__group-why {
+  color: var(--ink-faint);
+}
+
+/* 勾选行左右各 8 的悬停带由这里让出：方框与组头、标题、搜索框落在同一条左线上（浮层内边距 16，走查 2026-10-07） */
+.pick-layer__check {
+  margin-inline: calc(var(--space-xs) * -1);
+}
+
+.pick-layer__none {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin: var(--space-xs) 0;
+}
+
+.pick-layer__empty {
+  margin: var(--space-xs) 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+/* 「已选」（#265，画板第 2 屏）：一项一行 34（--row-h）——拉手（常显）｜ 编号 ｜ 名字 body 15 ｜ 提供商名 12 ink-mute ｜ ×。
+   行与行之间不画线：悬停与拖着时的 surface 行带由 ui 的 data-rowband 钩子给（control 7，左右各外扩 8，字仍与组头左沿对齐），
+   拉手随之转 ink。整行可按住拖（光标照旧是箭头），拖着的那一行半透明、别的行当场让位 */
+.pick-layer__picked {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pick-layer__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: var(--row-h);
+  touch-action: none;
+}
+
+.pick-layer__item:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: -1px;
+}
+
+.pick-layer__item.is-dragging {
+  opacity: 0.5;
+}
+
+.pick-layer__grip {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--ink-mute);
+  transition: color var(--motion-fast) var(--ease-mech);
+}
+
+.pick-layer__item:hover .pick-layer__grip,
+.pick-layer__item.is-dragging .pick-layer__grip {
+  color: var(--ink);
+}
+
+/* 编号：12 tabular ink-faint，右对齐成一列（到两位数也不挪名字） */
+.pick-layer__order {
+  flex-shrink: 0;
+  min-width: 14px;
+  font-size: var(--size-label);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink-faint);
+}
+
+.pick-layer__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--size-body);
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pick-layer__provider {
+  flex-shrink: 0;
+  font-size: var(--size-label);
+  color: var(--ink-mute);
+}
+
+.pick-layer__foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0 var(--space-sm);
+  border-top: var(--border-row);
+  background: var(--paper);
+}
+
+/* 读屏报位置（「第 2 个，共 5 个」）的 live 区：看不见、不占位 */
+.pick-layer__said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* 一句在左、键在右；「全部」只有键（2026-10-08），照旧在右 */
+.pick-layer__note {
+  margin-right: auto;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}

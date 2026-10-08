@@ -23,7 +23,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::header::HeaderMap;
 use hyper::{Method, Response, StatusCode};
 use serde_json::Value;
-use sophia_core::claude_models::desktop::{FIRST_ROLE, HAIKU_ROLE};
+use sophia_core::claude_models::desktop::FIRST_ROLE;
 use std::collections::HashMap;
 use std::path::Path;
 use std::pin::Pin;
@@ -298,28 +298,102 @@ impl ClaudeCatalog {
             .find(|m| m.slug.trim().eq_ignore_ascii_case(role))
     }
 
-    /// R14：去掉结尾的 `[1m]` 后按清单里的 id 精确匹配（`claude-sonnet-5`、`-r2`…、`claude-haiku-4-5`）；不中按关键词
-    /// 回落（第二项为真表示回落了）：含 `haiku` → 占 `claude-haiku-4-5` 的那个，清单里没有（只选了一个）就第一个；
-    /// 含 `opus` / `sonnet` / `fable` / `mythos` → 第一个（`claude-sonnet-5`，Claude 的初始默认）
-    fn resolve(&self, model: &str) -> Option<(&CatalogModel, bool)> {
+    /// R14：去掉结尾的 `[1m]` 后按清单里的 id 精确匹配（`claude-sonnet-5`、`-r2`…、`claude-haiku-4-5`）；不中但是
+    /// Claude 家族名（含 `haiku` / `opus` / `sonnet` / `fable` / `mythos`）→ 当前模型（#260，第二项为真表示回落了）。
+    /// 这类名字是 Code 标签里子代理、后台任务点名的带日期官方名（Sophia 不写档位环境变量，Claude Code 用它内置的名字）。
+    /// 【推断，待真机复核】#249 只从源码与独立 CLI 的抓包推得，没抓过桌面应用内嵌 CLI 的真包
+    fn resolve(&self, model: &str, recorded: Option<&str>) -> Option<(&CatalogModel, bool)> {
         let lower = model.trim().to_lowercase();
         let name = lower.strip_suffix("[1m]").unwrap_or(&lower).trim();
         if let Some(found) = self.find(name) {
             return Some((found, false));
         }
-        let first = || self.find(FIRST_ROLE).or_else(|| self.models.first());
-        let found = if name.contains("haiku") {
-            self.find(HAIKU_ROLE).or_else(first)
-        } else if ["opus", "sonnet", "fable", "mythos"]
+        if !["haiku", "opus", "sonnet", "fable", "mythos"]
             .iter()
             .any(|word| name.contains(word))
         {
-            first()
-        } else {
             return None;
-        };
-        found.map(|found| (found, true))
+        }
+        self.current(recorded).map(|found| (found, true))
     }
+
+    /// 已选第一个：桌面应用新会话的初始默认（`inferenceModels` 第一项）
+    fn first(&self) -> Option<&CatalogModel> {
+        self.find(FIRST_ROLE).or_else(|| self.models.first())
+    }
+
+    /// 当前模型：最近一轮对话点名的角色；没有记录、或它已不在清单里（改过已选）就用已选第一个
+    fn current(&self, recorded: Option<&str>) -> Option<&CatalogModel> {
+        recorded
+            .and_then(|role| self.find(role))
+            .or_else(|| self.first())
+    }
+}
+
+/// 桌面应用自己起标题时 system 的原文（#249 静态核实，2.26454.0 的常量 `JHr`）
+const DESKTOP_TITLE_SYSTEM: &str =
+    "You write short session titles. Reply with only the tagged fields the prompt asks for.";
+/// 起标题这类小请求的 `max_tokens` 上限：起标题是 200，主对话是几万（同 magpie 的 `small`）
+const SMALL_MAX_TOKENS: u64 = 4096;
+
+/// 一轮对话：带 tools（同 magpie：只有正式对话带工具，起标题、摘要这类小请求都不带），且不是子代理的回合
+fn is_conversation_turn(doc: &Value) -> bool {
+    doc.get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| !tools.is_empty())
+        && !is_subagent(doc)
+}
+
+/// Claude Code 子代理的回合：system 里的归因块带 `cc_is_subagent=true`（独立 CLI 2.1.283 实测，见
+/// `tests/data/claude-code/cc-messages-subagent-explore.json`）。【推断，待真机复核】桌面应用内嵌的 CLI 没抓过包
+fn is_subagent(doc: &Value) -> bool {
+    let marked = |text: &str| text.contains("cc_is_subagent=true");
+    match doc.get("system") {
+        Some(Value::String(text)) => marked(text),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .any(marked),
+        _ => false,
+    }
+}
+
+/// 桌面应用自己起标题的请求（#249）：无 tools、`max_tokens` 小、system 恰是那句固定的话、恰一条字符串 user 消息。
+/// 按形状认，不看 model：它点名的是 Haiku 档那个 id，按名字解析会落到不相干的模型上
+fn is_desktop_title(doc: &Value) -> bool {
+    let no_tools = match doc.get("tools") {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(tools)) => tools.is_empty(),
+        Some(_) => false,
+    };
+    let small = doc
+        .get("max_tokens")
+        .and_then(Value::as_u64)
+        .is_some_and(|n| (1..=SMALL_MAX_TOKENS).contains(&n));
+    let system = doc
+        .get("system")
+        .and_then(Value::as_str)
+        .is_some_and(|text| text.trim() == DESKTOP_TITLE_SYSTEM);
+    let one_user_text = match doc.get("messages").and_then(Value::as_array) {
+        Some(messages) => {
+            messages.len() == 1
+                && messages[0].get("role").and_then(Value::as_str) == Some("user")
+                && messages[0].get("content").is_some_and(Value::is_string)
+        }
+        None => false,
+    };
+    no_tools && small && system && one_user_text
+}
+
+/// 一个请求是怎么落到角色上的
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    /// 点名的就是清单里的 id
+    Named,
+    /// 点名的不在清单里，按关键词回落
+    Fallback,
+    /// 起标题：不看点名，改用当前模型
+    Title,
 }
 
 // ───────────────────────── 分派 ─────────────────────────
@@ -564,7 +638,7 @@ async fn count_tokens(
         Ok(catalog) => catalog,
         Err((error, result)) => return ctx.fail(error, result),
     };
-    if catalog.resolve(&model).is_none() {
+    if catalog.resolve(&model, None).is_none() {
         return ctx.fail(AnthropicError::model_not_selected(&model), "unknown_model");
     }
     match anthropic::count_tokens_response(&body) {
@@ -645,12 +719,45 @@ async fn messages(
         Ok(catalog) => catalog,
         Err((error, result)) => return ctx.fail(error, result),
     };
-    let Some((entry, fallback)) = catalog.resolve(&model) else {
+    let doc = serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null);
+    let recorded = router
+        .claude_current
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let picked = if is_desktop_title(&doc) {
+        catalog
+            .current(recorded.as_deref())
+            .map(|entry| (entry, Pick::Title))
+    } else {
+        catalog
+            .resolve(&model, recorded.as_deref())
+            .map(|(entry, fallback)| {
+                (
+                    entry,
+                    if fallback {
+                        Pick::Fallback
+                    } else {
+                        Pick::Named
+                    },
+                )
+            })
+    };
+    let Some((entry, pick)) = picked else {
         return ctx.fail(AnthropicError::model_not_selected(&model), "unknown_model");
     };
-    if fallback {
+    match pick {
         // 桌面应用的子任务会点名带日期的官方名：记下它落到了哪个角色（原名在 model 一栏）
-        ctx.extra = format!(" fallback={}", log_field(&entry.slug));
+        Pick::Fallback => ctx.extra = format!(" fallback={}", log_field(&entry.slug)),
+        Pick::Title => ctx.extra = format!(" reroute={}", log_field(&entry.slug)),
+        Pick::Named => {
+            if is_conversation_turn(&doc) {
+                *router
+                    .claude_current
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner()) = Some(entry.slug.clone());
+            }
+        }
     }
     let unavailable = |ctx: &Ctx| ctx.fail(AnthropicError::gateway_unavailable(), "provider_error");
     let Some(provider) = catalog.providers.get(entry.provider.trim()) else {
@@ -690,9 +797,7 @@ async fn messages(
         omit_reasoning_effort: false,
         omit_reasoning_content: false,
     };
-    let wants_format = serde_json::from_slice::<Value>(&body)
-        .ok()
-        .is_some_and(|doc| doc.pointer("/output_config/format").is_some());
+    let wants_format = doc.pointer("/output_config/format").is_some();
 
     // 上游 400 后各有一次改形重发的机会，互不占用：
     // 0. 这次发了「关推理」的字段且上游说推理不能关 → 不再关，重发；

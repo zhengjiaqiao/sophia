@@ -48,6 +48,7 @@ async fn router_error_sentences_follow_the_saved_ui_language() {
         max_body_bytes: 0,
         proxy: None,
         claude_routing_path: Some(root.join("claude-routing.json")),
+        workbuddy_routing_path: None,
         router_token: Arc::new(|| Ok(TOKEN.to_owned())),
         keepalive: Duration::ZERO,
         // 「跟随系统」时系统说繁體：这里只用明确的语言，用不到它
@@ -75,27 +76,27 @@ async fn router_error_sentences_follow_the_saved_ui_language() {
     let res = send(address, stray()).await;
     assert!(res.starts_with("HTTP/1.1 404"), "{res}");
     assert!(
-        res.contains("Sophia's gateway URL must include /claude"),
+        res.contains("Sophia's local relay URL must include /claude"),
         "{res}"
     );
     let res = send(address, bad_token()).await;
     assert!(res.starts_with("HTTP/1.1 401"), "{res}");
-    assert!(res.contains("The Sophia gateway token is wrong"), "{res}");
+    assert!(res.contains("Sophia's local relay token is wrong"), "{res}");
 
     // 路由运行中改成简体：下一个请求就换过来，不用重启路由
     set_language(&store_dir, "zh-Hans");
     let res = send(address, stray()).await;
-    assert!(res.contains("Sophia 的网关地址要带 /claude"), "{res}");
+    assert!(res.contains("Sophia 的本机转接地址要带 /claude"), "{res}");
     let res = send(address, bad_token()).await;
-    assert!(res.contains("Sophia 网关令牌不对"), "{res}");
+    assert!(res.contains("Sophia 本机转接的令牌不对"), "{res}");
 
     // 跟随系统：按系统首选语言（这里是 zh-TW → 繁體）
     set_language(&store_dir, "system");
     let res = send(address, stray()).await;
-    assert!(res.contains("Sophia 的閘道網址要帶 /claude"), "{res}");
+    assert!(res.contains("Sophia 的本機轉接網址要帶 /claude"), "{res}");
 
     // 设置文件坏了：沿用上一次的语言，不退回简体
     std::fs::write(store_dir.join("settings.json"), "{ not json").unwrap();
     let res = send(address, stray()).await;
-    assert!(res.contains("Sophia 的閘道網址要帶 /claude"), "{res}");
+    assert!(res.contains("Sophia 的本機轉接網址要帶 /claude"), "{res}");
 }

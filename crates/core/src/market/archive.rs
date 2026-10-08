@@ -9,7 +9,7 @@
 //!   仓库里别处的大文件只流过、不读进内存，不占 skill 的额度；
 //! - 包里任何一条的路径是绝对路径或含 `..`，整个包都不认——codeload 不会产出这种包；
 //! - 软链接、硬链接、设备文件只在落进要取的文件夹时才拒绝（拒绝那一个），别处的不碰也不管。
-use super::{MarketResult, MAX_SKILL_BYTES, MAX_UNPACKED_BYTES};
+use super::{log_raw, ArchiveError, MarketResult, MAX_SKILL_BYTES, MAX_UNPACKED_BYTES};
 use flate2::read::GzDecoder;
 use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
@@ -49,12 +49,14 @@ pub fn commit_sha(archive: &[u8]) -> MarketResult<String> {
             }
         }
         Ok(Flow::Continue)
-    })?;
+    })
+    .map_err(ArchiveError::into_sentence)?;
     found.ok_or_else(|| crate::t!("market.archive.noSha"))
 }
 
-/// 包里所有含 `SKILL.md` 的文件夹（仓库内路径，按路径排序）
-pub fn skill_dirs(archive: &[u8]) -> MarketResult<Vec<String>> {
+/// 包里所有含 `SKILL.md` 的文件夹（仓库内路径，按路径排序）。出错时原文在 `ArchiveError::detail`：
+/// 从链接安装、安装页的计划会留在页面上，原文进「!」
+pub fn skill_dirs(archive: &[u8]) -> Result<Vec<String>, ArchiveError> {
     let mut dirs = Vec::new();
     walk(archive, MAX_UNPACKED_BYTES, |_, member| {
         let is_file = matches!(member.kind, EntryType::Regular | EntryType::Continuous);
@@ -139,6 +141,8 @@ fn extract_capped(
         Ok(Flow::Continue)
     });
 
+    // 装、更新的结果进提示条：整包的错只留一句，原文进日志（只记一次）
+    let walked = walked.map_err(ArchiveError::into_sentence);
     let results = slots
         .into_iter()
         .zip(picks)
@@ -171,22 +175,16 @@ impl Slot {
     fn prepare(pick: &Pick, created_parents: &mut Vec<PathBuf>) -> MarketResult<Slot> {
         let comps = pick_components(&pick.path)?;
         let (Some(parent), Some(_)) = (pick.dest.parent(), pick.dest.file_name()) else {
-            return Err(crate::t!(
-                "market.archive.badDest",
-                path = pick.dest.display()
-            ));
+            log_raw("check-dest", &pick.dest, &"invalid destination");
+            return Err(crate::t!("market.archive.badDest"));
         };
         if !pick.dest.is_absolute() {
-            return Err(crate::t!(
-                "market.archive.badDest",
-                path = pick.dest.display()
-            ));
+            log_raw("check-dest", &pick.dest, &"destination is not absolute");
+            return Err(crate::t!("market.archive.badDest"));
         }
         if fs::symlink_metadata(&pick.dest).is_ok() {
-            return Err(crate::t!(
-                "market.archive.destTaken",
-                path = pick.dest.display()
-            ));
+            log_raw("check-dest", &pick.dest, &"destination already exists");
+            return Err(crate::t!("market.archive.destTaken"));
         }
         let mut missing = Vec::new();
         let mut cur = parent;
@@ -202,16 +200,16 @@ impl Slot {
         created_parents.extend(missing);
         created_parents.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
         made.map_err(|e| {
-            crate::t!(
-                "market.archive.mkParentFailed",
-                path = parent.display(),
-                error = e
-            )
+            log_raw("create-parent", parent, &e);
+            crate::t!("market.archive.mkParentFailed")
         })?;
         let tmp = tempfile::Builder::new()
             .prefix(".sophia-extract-")
             .tempdir_in(parent)
-            .map_err(|e| crate::t!("market.archive.mkTempFailed", error = e))?;
+            .map_err(|e| {
+                log_raw("create-extract-temp", parent, &e);
+                crate::t!("market.archive.mkTempFailed")
+            })?;
         Ok(Slot {
             comps,
             tmp,
@@ -229,7 +227,7 @@ impl Slot {
             EntryType::Directory => {
                 if !sub.is_empty() {
                     let dir = self.tmp.path().join(join(sub));
-                    fs::create_dir_all(&dir).map_err(|e| write_err(&shown, e))?;
+                    fs::create_dir_all(&dir).map_err(|e| write_err(&shown, &dir, e))?;
                 }
                 Ok(())
             }
@@ -238,14 +236,15 @@ impl Slot {
                     return Err(crate::t!("market.archive.notFolder", shown = shown));
                 }
                 let file = self.tmp.path().join(join(sub));
-                write_file(&file, data, executable).map_err(|e| write_err(&shown, e))
+                write_file(&file, data, executable).map_err(|e| write_err(&shown, &file, e))
             }
-            EntryType::Symlink => Err(crate::t!("market.archive.symlink", shown = shown)),
-            EntryType::Link => Err(crate::t!("market.archive.hardlink", shown = shown)),
+            // 包里的路径进日志，不进给人看的一句（这些原因只出在装、更新的提示条里）
+            EntryType::Symlink => Err(refused(crate::t!("market.archive.symlink"), &shown)),
+            EntryType::Link => Err(refused(crate::t!("market.archive.hardlink"), &shown)),
             EntryType::Char | EntryType::Block | EntryType::Fifo => {
-                Err(crate::t!("market.archive.device", shown = shown))
+                Err(refused(crate::t!("market.archive.device"), &shown))
             }
-            _ => Err(crate::t!("market.archive.unknownType", shown = shown)),
+            _ => Err(refused(crate::t!("market.archive.unknownType"), &shown)),
         }
     }
 
@@ -267,22 +266,21 @@ impl Slot {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(self.tmp.path(), fs::Permissions::from_mode(0o755))
-                .map_err(|e| crate::t!("market.archive.chmodFailed", error = e))?;
+            fs::set_permissions(self.tmp.path(), fs::Permissions::from_mode(0o755)).map_err(
+                |e| {
+                    log_raw("chmod-extract-temp", self.tmp.path(), &e);
+                    crate::t!("market.archive.chmodFailed")
+                },
+            )?;
         }
         // 解包期间落点可能被别处占了；rename 会盖掉空目录，这里再看一次
         if fs::symlink_metadata(&pick.dest).is_ok() {
-            return Err(crate::t!(
-                "market.archive.destTaken",
-                path = pick.dest.display()
-            ));
+            log_raw("check-dest", &pick.dest, &"destination already exists");
+            return Err(crate::t!("market.archive.destTaken"));
         }
         fs::rename(self.tmp.path(), &pick.dest).map_err(|e| {
-            crate::t!(
-                "market.archive.placeFailed",
-                path = pick.dest.display(),
-                error = e
-            )
+            log_raw("place-extracted", &pick.dest, &e);
+            crate::t!("market.archive.placeFailed")
         })?;
         let _ = self.tmp.keep();
         Ok(())
@@ -311,8 +309,17 @@ fn join(parts: &[OsString]) -> PathBuf {
     parts.iter().collect()
 }
 
-fn write_err(shown: &str, e: io::Error) -> String {
-    crate::t!("market.archive.writeFailed", shown = shown, error = e)
+#[track_caller]
+fn write_err(shown: &str, at: &Path, e: io::Error) -> String {
+    log_raw("write-extracted", at, &format_args!("{shown}: {e}"));
+    crate::t!("market.archive.writeFailed")
+}
+
+/// 包里不收的那一条（软链接、设备文件……）：一句不带路径，包里的路径进日志
+#[track_caller]
+fn refused(sentence: String, shown: &str) -> String {
+    log::warn!("extract refused: {}", crate::redact::redact(shown));
+    sentence
 }
 
 /// 新建文件写入；同名已存在（包里重复的条目）即报错，不覆盖
@@ -351,8 +358,9 @@ enum Flow {
     Stop,
 }
 
-/// 从头解压走一遍包。解压总量超过 `limit`、路径不安全、包本身坏了都是整包的错
-fn walk<F>(archive: &[u8], limit: u64, mut visit: F) -> MarketResult<()>
+/// 从头解压走一遍包。解压总量超过 `limit`、路径不安全、包本身坏了都是整包的错；
+/// 系统原文与包里的路径放进 `ArchiveError::detail`，不进给人看的一句
+fn walk<F>(archive: &[u8], limit: u64, mut visit: F) -> Result<(), ArchiveError>
 where
     F: FnMut(&mut tar::Entry<'_, Capped<GzDecoder<&[u8]>>>, &Member) -> io::Result<Flow>,
 {
@@ -365,9 +373,12 @@ where
     let mut tar = tar::Archive::new(reader);
     let io_err = |e: io::Error| {
         if over.get() {
-            crate::t!("market.archive.repoTooBig", mb = limit / (1024 * 1024))
+            ArchiveError::said(crate::t!(
+                "market.archive.repoTooBig",
+                mb = limit / (1024 * 1024)
+            ))
         } else {
-            crate::t!("market.archive.unpackFailed", error = e)
+            ArchiveError::with_detail(crate::t!("market.archive.unpackFailed"), e)
         }
     };
     for entry in tar.entries().map_err(io_err)? {
@@ -377,8 +388,9 @@ where
             Vec::new()
         } else {
             let path = entry.path().map_err(io_err)?.into_owned();
-            safe_components(&path)
-                .ok_or_else(|| crate::t!("market.archive.unsafePath", path = path.display()))?
+            safe_components(&path).ok_or_else(|| {
+                ArchiveError::with_detail(crate::t!("market.archive.unsafePath"), path.display())
+            })?
         };
         let member = Member { kind, rel };
         match visit(&mut entry, &member).map_err(io_err)? {
@@ -427,7 +439,7 @@ impl<R: Read> Read for Capped<R> {
         let n = self.inner.read(&mut buf[..want])?;
         if n as u64 > self.left {
             self.over.set(true);
-            return Err(io::Error::other("超过上限")); // i18n-exempt: 内部信号，io_err 见 over 旗就换成「仓库解开后超过」那句，这句不会显示
+            return Err(io::Error::other("超过上限")); // i18n-exempt: 内部信号，io_err 见 over 旗就换成「仓库解压后超过」那句，这句不会显示
         }
         self.left -= n as u64;
         Ok(n)
@@ -596,7 +608,10 @@ mod tests {
     #[test]
     fn skill_dirs_rejects_unsafe_archive() {
         let evil = tgz(&[E::Dir("r-main/"), E::File("r-main/../x/SKILL.md", "x")]);
-        assert!(skill_dirs(&evil).unwrap_err().contains("不安全的路径"));
+        // 主句不带包里的路径，路径在原文里（命令层进「!」）
+        let err = skill_dirs(&evil).unwrap_err();
+        assert_eq!(err.sentence, "压缩包里有不安全的路径");
+        assert!(err.detail.as_deref().is_some_and(|d| d.contains("../x")));
     }
 
     #[test]
@@ -650,7 +665,7 @@ mod tests {
         let store = t.dir("store");
         let existing = t.skill("store/pdf");
         let results = extract(&sample(), &[pick("skills/pdf", existing.clone())]);
-        assert!(results[0].as_ref().unwrap_err().contains("已经有同名"));
+        assert!(results[0].as_ref().unwrap_err().contains("已有同名"));
         assert_eq!(names(&existing), vec!["SKILL.md"]);
         assert_eq!(names(&store), vec!["pdf"]);
 
@@ -664,7 +679,7 @@ mod tests {
             ],
         );
         assert_eq!(results[0], Ok(()));
-        assert!(results[1].as_ref().unwrap_err().contains("已经有同名"));
+        assert!(results[1].as_ref().unwrap_err().contains("已有同名"));
         assert_eq!(
             fs::read_to_string(dest.join("SKILL.md")).unwrap(),
             "---\nname: docx\n---\n"
@@ -710,7 +725,7 @@ mod tests {
             assert!(results[0].as_ref().unwrap_err().contains("不合法"), "{bad}");
         }
         let results = extract(&sample(), &[pick("skills/pdf", PathBuf::from("pdf"))]);
-        assert!(results[0].as_ref().unwrap_err().contains("落点不合法"));
+        assert!(results[0].as_ref().unwrap_err().contains("安装位置不合法"));
         assert!(names(&t.root()).is_empty());
     }
 
@@ -840,7 +855,7 @@ mod tests {
         );
         assert_eq!(
             results[0].as_ref().unwrap_err(),
-            "这个 skill 解开后超过 50MB"
+            "这个 skill 解压后超过 50 MB"
         );
         assert_eq!(results[1], Ok(()));
         assert_eq!(names(&t.root()), ["small"]);
@@ -876,7 +891,7 @@ mod tests {
             64 * 1024,
             MAX_SKILL_BYTES,
         );
-        assert!(results[0].as_ref().unwrap_err().contains("仓库解开后超过"));
+        assert!(results[0].as_ref().unwrap_err().contains("仓库解压后超过"));
         assert!(names(&t.root()).is_empty());
     }
 

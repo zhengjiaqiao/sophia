@@ -1597,7 +1597,7 @@ test("Toast 部分失败：! + 2 ✓ · 1 ⊘ 读数 + 查看，停 8 秒", () =
     action: { label: "查看", onClick: noop },
   });
   assert.match(html, /role="img" aria-label="部分失败"/);
-  assert.match(html, /aria-label="2 个成功，1 个没成"/);
+  assert.match(html, /aria-label="2 个成功，1 个失败"/);
   // `2 ✓` 的 ✓ 也是统一对勾
   assert.match(html, /class="ss-toast__num">2<\/span><svg class="ss-tick"/);
   assert.match(html, />查看</);
@@ -2833,9 +2833,9 @@ test("Toast 失败句：对象 + 动作 + 失败（2026-09-29 产品负责人：
       kind: "cannot",
       sentence: "market.toast.updateCannot",
       names: ["orca-cli"],
-      reason: "仓库超过 200MB，下载不下来",
+      reason: "仓库超过 200 MB，无法下载",
     }),
-    /orca-cli更新失败·仓库超过 200MB，下载不下来/,
+    /orca-cli更新失败·仓库超过 200 MB，无法下载/,
   );
   // 带方向、图标在中间的整句：失败是它自己的一句（`名字 从 [图标] 移除失败`）
   assert.match(

@@ -12,13 +12,19 @@ import { faceOf, locationOf, type Nav } from "./nav.ts";
 import { isScoped } from "./destinations.ts";
 
 /// 页面怎么问：拿到「问完之后继续走」的那一下，自己决定什么时候调（保存成了、丢弃了）；不调就是不走
-export type LeaveAsk = (proceed: () => void) => void;
+export type LeaveAsk = (proceed: Proceed) => void;
+
+/// 「问完之后继续走」的那一下。退出这条路（`quitWithDialog`）的带 `cancel`：问出来后用户没答、又在弹窗里
+/// 改了东西，弹窗调它取消这次待定的退出，之后保存不再接着退出；换页那条路的不带，保存后照常接着走
+export type Proceed = (() => void) & { cancel?: () => void };
 
 export interface LeaveGuards {
   /// 登记一个询问，返回撤销登记。同时有几个时由最后登记的那个问（叠在最上面的那一页）
   register(ask: LeaveAsk): () => void;
   /// 要换页了：没人登记就当场 `proceed()`，有就交给最上面的那个问
-  request(proceed: () => void): void;
+  request(proceed: Proceed): void;
+  /// 此刻有没有人登记（有没保存的改动、换页要先问）
+  guarded(): boolean;
 }
 
 export function createLeaveGuards(): LeaveGuards {
@@ -37,6 +43,7 @@ export function createLeaveGuards(): LeaveGuards {
       if (top) top.ask(proceed);
       else proceed();
     },
+    guarded: () => stack.length > 0,
   };
 }
 
@@ -44,6 +51,9 @@ const guards = createLeaveGuards();
 
 /// 壳换页之前调它（见 App.tsx 的 `navigate`）
 export const requestLeave = (proceed: () => void) => guards.request(proceed);
+
+/// 此刻有没有页面登记了离开前询问（应用菜单据此决定弹窗开着时换不换页，见 `routeWithDialog`）
+export const leaveGuarded = () => guards.guarded();
 
 /// 页面登记「离开前先问我」：`dirty` 为真时才登记（没改动就不拦）；`ask` 每次渲染可以是新函数
 export function useLeaveGuard(dirty: boolean, ask: LeaveAsk) {

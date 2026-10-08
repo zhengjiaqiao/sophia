@@ -33,7 +33,8 @@ test("灰字后两颗句后浅键：隐私说明在前、在 GitHub 提在后，
     onGithub: noop,
     onFeedback: noop,
   });
-  const quiet = html.match(/<button[^>]*class="ss-btn ss-btn--quiet ss-btn--inline"[^>]*>[^<]*</g) ?? [];
+  const quiet =
+    html.match(/<button[^>]*class="ss-btn ss-btn--quiet ss-btn--inline"[^>]*>[^<]*</g) ?? [];
   assert.equal(quiet.length, 2);
   assert.match(quiet[0], />隐私说明</);
   assert.match(quiet[1], />在 GitHub 提</);
@@ -43,9 +44,12 @@ test("灰字后两颗句后浅键：隐私说明在前、在 GitHub 提在后，
   );
   assert.doesNotMatch(html, /\u00a0\u00a0/);
   // 两颗浅键都在灰字那一行里（settings-page__note），不在右端的控件列
-  const note = html.match(/<div class="settings-page__note">[^]*?<\/div><\/div><div class="settings-page__controls">/)?.[0] ?? "";
+  const note =
+    html.match(
+      /<div class="settings-page__note">[^]*?<\/div><\/div><div class="settings-page__controls">/,
+    )?.[0] ?? "";
   assert.equal((note.match(/ss-btn--quiet/g) ?? []).length, 2);
-  assert.doesNotMatch(html.slice(html.indexOf('settings-page__controls')), /ss-btn--quiet/);
+  assert.doesNotMatch(html.slice(html.indexOf("settings-page__controls")), /ss-btn--quiet/);
   assert.equal(ISSUES_URL, "https://github.com/zhengjiaqiao/sophia/issues/new/choose");
 });
 

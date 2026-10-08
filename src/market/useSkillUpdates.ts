@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api } from "../api.ts";
+import { errorSentence } from "../backendError.ts";
 import { subscribeLocale, t } from "../i18n.ts";
 import type { InstallOutcome, UpdateCheck, UpdateInfo, UpdateTarget } from "../types.ts";
 import {
@@ -143,7 +144,7 @@ export function createUpdateStore(backend: UpdateBackend): UpdateStore {
       if (outcome.installed.length > 0) filesChanged();
     } catch (e) {
       set({ busy: null });
-      say(trigger, String(e));
+      say(trigger, errorSentence(e));
     }
   };
 
@@ -180,7 +181,7 @@ export function createUpdateStore(backend: UpdateBackend): UpdateStore {
           if (notice !== null) say(trigger, notice);
         } catch (e) {
           set({ checking: null });
-          say(trigger, String(e));
+          say(trigger, errorSentence(e));
         } finally {
           inflight = null;
         }
@@ -245,7 +246,7 @@ export function createUpdateStore(backend: UpdateBackend): UpdateStore {
             toast: {
               kind: "cannot",
               sentence: "market.toast.undoCannot",
-              reason: String(e),
+              reason: errorSentence(e),
               undoable: false,
             },
             undoId: null,

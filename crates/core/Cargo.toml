@@ -29,6 +29,8 @@ tar = { version = "0.4.46", default-features = false }
 sha1 = { version = "0.11.0", default-features = false }
 # 自动上报的安装 ID（随机 UUID v4）；与 tauri 等用的是同一份 uuid，不新增依赖
 uuid = { version = "1.26", features = ["v4"] }
+# DeepSeek Harness 的 MCP 补丁（YAML）：只用来解析与核对，改写是文本级（mcp/patch.rs）
+yaml-rust2 = "0.13"
 
 [target.'cfg(windows)'.dependencies]
 junction = "2"

@@ -1,6 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useReducer, useRef, useState } from "react";
-import type { ClipboardEvent, DragEvent, KeyboardEvent, Ref } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useReducer, useRef, useState } from "react";
+import type { ClipboardEvent, DragEvent, KeyboardEvent } from "react";
 import {
   FAILURE_KEY,
   FINISH_MS,
@@ -23,13 +22,12 @@ import { t } from "../i18n.ts";
 import type { FeedbackFailure } from "../types.ts";
 import { BusySlot } from "./BusySlot.tsx";
 import { Button } from "./Button.tsx";
-import { FOCUSABLE, cycleFocus } from "./FloatingLayer.tsx";
+import { FormDialog, inertBehind } from "./FormDialog.tsx";
 import { IconClose, IconImage } from "./icons.tsx";
-import { holdInert, type InertTarget } from "./PushedPage.tsx";
 import { Tooltip } from "./Tooltip.tsx";
 
 /// 反馈小窗（spec 2026-10-04-reporting-feedback R12、R14；DESIGN-components「反馈小窗」，画板 FeedbackEmpty /
-/// Feedback / FeedbackFailed）。DESIGN「弹层只用于确认」的唯一例外：像聊天输入框，写几句、贴截图就发。
+/// Feedback / FeedbackFailed）。DESIGN「页面还是弹层」弹层的第二种用途（填一个对象的短表单，外壳是 `FormDialog`）：像聊天输入框，写几句、贴截图就发。
 ///
 /// - 长相照确认框：窗口正中、遮罩整面压暗，纸浮层宽 480（`ss-confirm--wide`）。点遮罩**不**收起（写了一半的话不该
 ///   因为点偏了就没了），Esc 收起（发送中不收），焦点从 `取消` 开始，Tab 在小窗里转圈
@@ -90,15 +88,10 @@ function imageFiles(list: DataTransfer | null): File[] {
   return files.filter((file) => file.type.startsWith("image/"));
 }
 
-/// 小窗开着时应用壳的其余部分（`#root`）inert：菜单、快捷键把焦点往遮罩后面放（⌘F 聚焦筛选框）放不进去，
-/// 读屏也只读小窗。小窗 portal 在 `#root` 外，不受影响。与推入页共用 `holdInert` 的计数，返回放手函数
-export function inertBehind(lookup: (id: string) => InertTarget | null): () => void {
-  const root = lookup("root");
-  return root ? holdInert(root) : () => undefined;
-}
+/// 弹窗的外壳（遮罩、Esc、焦点、inert）在 FormDialog；`inertBehind` 原在这里，照旧从这里也能引
+export { inertBehind };
 
 export function FeedbackDialog({ upload, send, onClose, onSent, onGithub }: FeedbackDialogProps) {
-  const titleId = useId();
   /// 上一次发送尝试（草稿 id 与当时的内容）：原样重试复用 id，接收服务据它去重；内容变了换新 id（`attemptFor`）
   const lastAttempt = useRef<Attempt | null>(null);
   const [text, setText] = useState("");
@@ -113,8 +106,6 @@ export function FeedbackDialog({ upload, send, onClose, onSent, onGithub }: Feed
       : FINISH_MS,
   );
   const [now, setNow] = useState(() => performance.now());
-  const dialog = useRef<HTMLDivElement>(null);
-  const foot = useRef<HTMLDivElement>(null);
   const shotsNow = useRef(shots);
   shotsNow.current = shots;
   /// 每张截图：压好的字节（重传用）与「准备 + 上传」这一整段（发送时等它；认不出的图片回 null）
@@ -148,31 +139,9 @@ export function FeedbackDialog({ upload, send, onClose, onSent, onGithub }: Feed
     return () => window.clearInterval(timer);
   }, [ticking]);
 
-  // 焦点从 `取消` 开始（同确认框）；收起时还给打开前的地方（还在的话）。程序放的焦点不画框（inputModality）
-  useEffect(() => {
-    const before = document.activeElement;
-    foot.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    return () => {
-      if (before instanceof HTMLElement && before.isConnected) before.focus();
-    };
-  }, []);
-
-  // Esc 收起（发送中不收）：捕获阶段接走，页面不再把它当返回
+  // 焦点从 `取消` 开始、Esc 收起（发送中不收）、Tab 在小窗里转圈、后面 inert：都在 FormDialog
   const sendingNow = useRef(sending);
   sendingNow.current = sending;
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.isComposing) return;
-      event.stopPropagation();
-      event.preventDefault();
-      if (!sendingNow.current) onClose();
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
-
-  // 应用壳其余部分 inert（布局阶段挂上 / 摘掉：关窗时锚在入口键下的提示条量位置之前就摘掉）
-  useLayoutEffect(() => inertBehind((id) => document.getElementById(id)), []);
 
   /// 开始传、传完、没传上去时当场把时钟拨到现在（闲置时时钟不走，不然完成那一段会从旧时刻算起）
   const tick = () => {
@@ -286,20 +255,6 @@ export function FeedbackDialog({ upload, send, onClose, onSent, onGithub }: Feed
     addFiles(imageFiles(event.dataTransfer));
   };
 
-  // Tab 在小窗里转圈（同详情浮层），不走到后面的页面
-  const onDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Tab" || !dialog.current) return;
-    const items = Array.from(dialog.current.querySelectorAll<HTMLElement>(FOCUSABLE));
-    const next = cycleFocus(
-      items.length,
-      items.indexOf(document.activeElement as HTMLElement),
-      event.shiftKey,
-    );
-    if (next < 0) return;
-    event.preventDefault();
-    items[next].focus();
-  };
-
   // 回车发送，Shift+回车换行；输入法正在选字时的回车留给输入法
   const onTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.shiftKey || event.altKey) return;
@@ -308,59 +263,17 @@ export function FeedbackDialog({ upload, send, onClose, onSent, onGithub }: Feed
     void submit();
   };
 
-  const layer = (
-    <div className="ss-confirm-layer" role="presentation">
-      <div className="ss-confirm-veil ss-confirm-veil--full" />
-      <div
-        ref={dialog}
-        className="ss-confirm ss-confirm--wide"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onKeyDown={onDialogKeyDown}
-        onPaste={onPaste}
-      >
-        <div className="ss-confirm__title" id={titleId}>
-          {t("common.feedback.title")}
-        </div>
-        <div
-          className="ss-feedback__box"
-          data-drop={dragOver ? "over" : undefined}
-          onDragOver={onDragOver}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-        >
-          {shots.length > 0 ? (
-            <div className="ss-feedback__shots">
-              {shots.map((shot, i) => (
-                <ShotTile
-                  key={shot.key}
-                  url={shot.url}
-                  n={i + 1}
-                  phase={shotPhase(shot, now, finishMs)}
-                  percent={shotPercent(shot, now, finishMs)}
-                  onRemove={sending ? undefined : () => removeShot(shot.key)}
-                />
-              ))}
-            </div>
-          ) : null}
-          <textarea
-            className="ss-feedback__text"
-            aria-label={t("common.feedback.label")}
-            placeholder={t("common.feedback.placeholder")}
-            maxLength={TEXT_MAX}
-            value={text}
-            readOnly={sending}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={onTextKeyDown}
-          />
-        </div>
-        <div className="ss-feedback__hint">
-          <IconImage size={14} />
-          {t("common.feedback.hint")}
-        </div>
+  return (
+    <FormDialog
+      title={t("common.feedback.title")}
+      onEscape={() => {
+        if (!sendingNow.current) onClose();
+      }}
+      // ⌘Q 退出：发送中也直接收起，在路上的请求结果不再理会
+      onDismiss={onClose}
+      onPaste={onPaste}
+      foot={
         <FeedbackFoot
-          footRef={foot}
           text={text}
           failed={failed}
           sending={sending}
@@ -368,10 +281,46 @@ export function FeedbackDialog({ upload, send, onClose, onSent, onGithub }: Feed
           onSend={() => void submit()}
           onGithub={onGithub}
         />
+      }
+    >
+      <div
+        className="ss-feedback__box"
+        data-drop={dragOver ? "over" : undefined}
+        onDragOver={onDragOver}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+      >
+        {shots.length > 0 ? (
+          <div className="ss-feedback__shots">
+            {shots.map((shot, i) => (
+              <ShotTile
+                key={shot.key}
+                url={shot.url}
+                n={i + 1}
+                phase={shotPhase(shot, now, finishMs)}
+                percent={shotPercent(shot, now, finishMs)}
+                onRemove={sending ? undefined : () => removeShot(shot.key)}
+              />
+            ))}
+          </div>
+        ) : null}
+        <textarea
+          className="ss-feedback__text"
+          aria-label={t("common.feedback.label")}
+          placeholder={t("common.feedback.placeholder")}
+          maxLength={TEXT_MAX}
+          value={text}
+          readOnly={sending}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={onTextKeyDown}
+        />
       </div>
-    </div>
+      <div className="ss-feedback__hint">
+        <IconImage size={14} />
+        {t("common.feedback.hint")}
+      </div>
+    </FormDialog>
   );
-  return typeof document === "undefined" ? layer : createPortal(layer, document.body);
 }
 
 /// 一张截图的缩略图（56 方）。准备中：还没有缩略图，百分比 0；上传中：细线沿边缘顺时针画到（模拟的）百分比，
@@ -444,7 +393,8 @@ export function ShotTile({
 }
 
 /// 按钮行：失败时左边一句原因，原因后接浅键 `在 GitHub 提 ↗`（只在失败时出现）；`取消`（默认键）与 `发送` / `再试一次`
-/// （墨键）。发送中两颗都禁用（「正在发送」，键盘也按不动），过了门槛键区原位换成忙碌刻度 + 正在发送
+/// （墨键）。发送中两颗都禁用（「正在发送」，键盘也按不动），过了门槛键区原位换成忙碌刻度 + 正在发送。
+/// 只给键区里的东西：键区那一层（`.ss-confirm__foot`，钉在弹窗底下、不随内容滚动）由 FormDialog 的 `foot` 包
 export function FeedbackFoot({
   text,
   failed,
@@ -452,7 +402,6 @@ export function FeedbackFoot({
   onCancel,
   onSend,
   onGithub,
-  footRef,
 }: {
   text: string;
   failed: FeedbackFailure | null;
@@ -460,11 +409,10 @@ export function FeedbackFoot({
   onCancel: () => void;
   onSend: () => void;
   onGithub: () => void;
-  footRef?: Ref<HTMLDivElement>;
 }) {
   const key = sendKey({ text, failed, sending });
   return (
-    <div className="ss-confirm__foot" ref={footRef}>
+    <>
       {failed ? (
         <span className="ss-feedback__failure" role="status">
           {t("common.feedback.failed", { reason: t(FAILURE_KEY[failed]) })}
@@ -495,6 +443,6 @@ export function FeedbackFoot({
           </Button>
         )}
       </BusySlot>
-    </div>
+    </>
   );
 }

@@ -23,6 +23,96 @@ impl AgentId {
             AgentId::Codex => "Codex",
         }
     }
+
+    /// 稳定的字符串 id（与 serde 一致）：用量项的键 `agent:<id>`、菜单栏与前端取标志都用它
+    pub fn id(self) -> &'static str {
+        match self {
+            AgentId::ClaudeCode => "claude-code",
+            AgentId::Codex => "codex",
+        }
+    }
+
+    /// 由 [`AgentId::id`] 认回来；认不出是 None
+    pub fn from_id(id: &str) -> Option<AgentId> {
+        AgentId::ALL.into_iter().find(|a| a.id() == id)
+    }
+
+    /// 托盘块、用量页上的名字（专名）：Claude 的额度属于 Claude 账号（命令行、桌面应用、claude.ai 共用），
+    /// 写 `Claude`（产品负责人 2026-09-29）；出错句里说程序时仍用 [`AgentId::label`]
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AgentId::ClaudeCode => "Claude",
+            AgentId::Codex => "Codex",
+        }
+    }
+}
+
+/// 用量的「项」：一个 agent，或一个模型提供商（spec #322）。序列化成字符串 `agent:claude-code`、
+/// `agent:codex`、`provider:<提供商 id>`：设置里的 `usage.items` / `usage.perItem`、菜单栏段、托盘行、
+/// 刷新命令都按它认。派生的 `Ord` 只给有序容器用，页面上的先后见 `format::page_order`
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum UsageSubject {
+    Agent(AgentId),
+    /// 模型提供商（提供商列表里的 id）。读数在 #325 接入
+    Provider(String),
+}
+
+const AGENT_PREFIX: &str = "agent:";
+const PROVIDER_PREFIX: &str = "provider:";
+
+impl UsageSubject {
+    /// 键：`agent:<id>` / `provider:<id>`
+    pub fn key(&self) -> String {
+        match self {
+            UsageSubject::Agent(agent) => format!("{AGENT_PREFIX}{}", agent.id()),
+            UsageSubject::Provider(id) => format!("{PROVIDER_PREFIX}{id}"),
+        }
+    }
+
+    /// 由键认回来；前缀不对、agent id 认不出、提供商 id 为空都是 None
+    pub fn parse(key: &str) -> Option<UsageSubject> {
+        if let Some(id) = key.strip_prefix(AGENT_PREFIX) {
+            return AgentId::from_id(id).map(UsageSubject::Agent);
+        }
+        key.strip_prefix(PROVIDER_PREFIX)
+            .filter(|id| !id.is_empty())
+            .map(|id| UsageSubject::Provider(id.to_string()))
+    }
+
+    pub fn agent(&self) -> Option<AgentId> {
+        match self {
+            UsageSubject::Agent(agent) => Some(*agent),
+            UsageSubject::Provider(_) => None,
+        }
+    }
+
+    /// 取标志用的 id：agent 是 agent id；提供商暂用提供商 id（#325 / #326 换成预设 id）
+    pub fn brand(&self) -> String {
+        match self {
+            UsageSubject::Agent(agent) => agent.id().to_string(),
+            UsageSubject::Provider(id) => id.clone(),
+        }
+    }
+}
+
+impl std::fmt::Display for UsageSubject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.key())
+    }
+}
+
+impl Serialize for UsageSubject {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.key())
+    }
+}
+
+impl<'de> Deserialize<'de> for UsageSubject {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let key = String::deserialize(deserializer)?;
+        UsageSubject::parse(&key)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown usage item key: {key}")))
+    }
 }
 
 /// 读数从哪条取法来（R1、R3）
@@ -412,7 +502,7 @@ pub enum Refresh {
 }
 
 /// 每个 agent 在菜单栏上怎么显示：主窗口、第二窗口、
-/// 叠放与字号都跟着 agent 走
+/// 叠放与字号都跟着 agent 走。名字沿用 agent，现在也给模型提供商用（设置里的 `perItem`）
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentDisplay {
@@ -425,20 +515,142 @@ pub struct AgentDisplay {
     pub stacked_size: StackedSize,
 }
 
+/// 用量设置（settings.json 的 `usage`）。
+///
+/// 读：新键 `items` / `perItem` 在就用新键；不在（或不是数组 / 对象）就从旧版的 `agents` / `perAgent`
+/// 迁移（保留前 [`MAX_MENU_BAR_ITEMS`] 项）。认不出、格式不对的项逐个忽略，不让整份 settings.json 解析失败
+/// （旧版的 `agents` 只认两家 agent，新值写进去会让旧版把整个文件当损坏挪走，所以另起新键）。
+/// 写：只写新键；旧键的原文存在 `legacy_*` 里原样写回，本版本不改它，换回旧版本时照旧读得懂
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", from = "UsageSettingsWire")]
 pub struct UsageSettings {
     /// 菜单栏显示数字，默认关
     pub menu_bar_enabled: bool,
     pub display_mode: DisplayMode,
-    /// 菜单栏显示哪些 agent（有序，最多 3 个）。None 表示没配过：取检测到已登录的，按 `AgentId::ALL` 顺序
-    pub agents: Option<Vec<AgentId>>,
-    pub per_agent: BTreeMap<AgentId, AgentDisplay>,
+    /// 选进菜单栏的项（集合，最多 [`MAX_MENU_BAR_ITEMS`] 项；先后按页面顺序算，这里不存顺序）。
+    /// None 表示没配过：取有用量来源的，按页面顺序
+    pub items: Option<Vec<UsageSubject>>,
+    /// 每项在菜单栏上怎么显示
+    pub per_item: BTreeMap<UsageSubject, AgentDisplay>,
     pub refresh: Refresh,
+    /// 旧版 `agents` 的原文：只用来迁移，写回时原样带上
+    #[serde(rename = "agents", skip_serializing_if = "Option::is_none")]
+    pub legacy_agents: Option<serde_json::Value>,
+    /// 旧版 `perAgent` 的原文：同 `legacy_agents`
+    #[serde(rename = "perAgent", skip_serializing_if = "Option::is_none")]
+    pub legacy_per_agent: Option<serde_json::Value>,
 }
 
-/// 菜单栏最多显示几个 agent
-pub const MAX_MENU_BAR_AGENTS: usize = 3;
+impl UsageSettings {
+    /// 旧键以盘上那份为准：界面传来的设置里没有（或带了别的）旧键时，存盘前用它换回盘上的原文
+    pub fn keep_legacy_keys(&mut self, on_disk: &UsageSettings) {
+        self.legacy_agents = on_disk.legacy_agents.clone();
+        self.legacy_per_agent = on_disk.legacy_per_agent.clone();
+    }
+}
+
+/// 读盘的形状：新旧键都先按原文读进来，再在 `From` 里逐项认（见 [`UsageSettings`]）
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct UsageSettingsWire {
+    menu_bar_enabled: bool,
+    display_mode: DisplayMode,
+    items: Option<serde_json::Value>,
+    per_item: Option<serde_json::Value>,
+    refresh: Refresh,
+    agents: Option<serde_json::Value>,
+    per_agent: Option<serde_json::Value>,
+}
+
+impl From<UsageSettingsWire> for UsageSettings {
+    fn from(w: UsageSettingsWire) -> Self {
+        let items = w
+            .items
+            .as_ref()
+            .and_then(parse_items)
+            .or_else(|| w.agents.as_ref().and_then(migrate_agents));
+        let per_item = w
+            .per_item
+            .as_ref()
+            .and_then(parse_per_item)
+            .or_else(|| w.per_agent.as_ref().and_then(migrate_per_agent))
+            .unwrap_or_default();
+        UsageSettings {
+            menu_bar_enabled: w.menu_bar_enabled,
+            display_mode: w.display_mode,
+            items,
+            per_item,
+            refresh: w.refresh,
+            legacy_agents: w.agents,
+            legacy_per_agent: w.per_agent,
+        }
+    }
+}
+
+/// 不重复地收进来（保留第一次出现的位置）
+fn push_unique(list: &mut Vec<UsageSubject>, subject: UsageSubject) {
+    if !list.contains(&subject) {
+        list.push(subject);
+    }
+}
+
+/// `items`：是数组就逐个认（认不出的忽略）；不是数组（含 null）当作没有这个键
+fn parse_items(value: &serde_json::Value) -> Option<Vec<UsageSubject>> {
+    let mut items = Vec::new();
+    for key in value.as_array()?.iter().filter_map(|v| v.as_str()) {
+        if let Some(subject) = UsageSubject::parse(key) {
+            push_unique(&mut items, subject);
+        }
+    }
+    Some(items)
+}
+
+/// `perItem`：是对象就逐个认（键认不出、值格式不对的忽略）；不是对象当作没有这个键
+fn parse_per_item(value: &serde_json::Value) -> Option<BTreeMap<UsageSubject, AgentDisplay>> {
+    Some(
+        value
+            .as_object()?
+            .iter()
+            .filter_map(|(key, v)| {
+                Some((
+                    UsageSubject::parse(key)?,
+                    AgentDisplay::deserialize(v).ok()?,
+                ))
+            })
+            .collect(),
+    )
+}
+
+/// 旧版 `agents`（有序的 agent id 数组，旧版最多 3 个）→ 前 [`MAX_MENU_BAR_ITEMS`] 项
+fn migrate_agents(value: &serde_json::Value) -> Option<Vec<UsageSubject>> {
+    let mut items = Vec::new();
+    for id in value.as_array()?.iter().filter_map(|v| v.as_str()) {
+        if let Some(agent) = AgentId::from_id(id) {
+            push_unique(&mut items, UsageSubject::Agent(agent));
+        }
+    }
+    items.truncate(MAX_MENU_BAR_ITEMS);
+    Some(items)
+}
+
+/// 旧版 `perAgent`（agent id → 显示方式）
+fn migrate_per_agent(value: &serde_json::Value) -> Option<BTreeMap<UsageSubject, AgentDisplay>> {
+    Some(
+        value
+            .as_object()?
+            .iter()
+            .filter_map(|(id, v)| {
+                Some((
+                    UsageSubject::Agent(AgentId::from_id(id)?),
+                    AgentDisplay::deserialize(v).ok()?,
+                ))
+            })
+            .collect(),
+    )
+}
+
+/// 菜单栏最多显示几项：agent 与模型提供商合计（spec #322；原来是 3 个 agent）
+pub const MAX_MENU_BAR_ITEMS: usize = 2;
 
 #[cfg(test)]
 mod tests {

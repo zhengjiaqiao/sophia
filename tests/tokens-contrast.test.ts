@@ -80,7 +80,10 @@ test("深色开关：滑块 --switch-knob 是 ctl-edge、对机面 ≥ 2.5；开
   assert.doesNotMatch(light, /--switch-knob:/);
   const c = colors(dark);
   assert.ok(contrast(c.get("ctl-edge")!, c.get("face")!) >= 2.5);
-  assert.match(dark, /--recess-track: inset 0 1px 2px rgba\(0,0,0,\.5\), 0 0 0 1px rgba\(255,255,250,\.1\);/);
+  assert.match(
+    dark,
+    /--recess-track: inset 0 1px 2px rgba\(0,0,0,\.5\), 0 0 0 1px rgba\(255,255,250,\.1\);/,
+  );
   const tray = readFileSync(new URL("../src/TrayPanel.css", import.meta.url), "utf8");
   assert.match(tray, /--switch-knob: var\(--sys-knob\);/);
 });

@@ -8,10 +8,10 @@ mod menubar;
 #[cfg(target_os = "macos")]
 mod system;
 
-use crate::{err, AppState};
+use crate::AppState;
 use sophia_core::store::Store;
 use sophia_core::usage::connect::ConnectState;
-use sophia_core::usage::{AgentId, UsageSettings, UsageState, MAX_MENU_BAR_AGENTS};
+use sophia_core::usage::{AgentId, UsageSettings, UsageState, UsageSubject, MAX_MENU_BAR_ITEMS};
 use sophia_gateway::usage::connect::{ConnectStart, Connector, RealConnect};
 use sophia_gateway::usage::scheduler::{Command, Handle};
 use std::sync::{Arc, Mutex};
@@ -105,7 +105,7 @@ fn real_connect(app: AppHandle, handle: Handle) -> Result<RealConnect, String> {
             let _ = app.emit("usage-changed", state);
         }),
         on_connected: Box::new(move || {
-            let done = handle.retry(AgentId::ClaudeCode);
+            let done = handle.retry(UsageSubject::Agent(AgentId::ClaudeCode));
             Box::pin(async move {
                 let _ = done.await;
             })
@@ -243,7 +243,11 @@ pub fn usage_view(
 
 #[tauri::command]
 pub fn usage_settings(state: tauri::State<'_, AppState>) -> Result<UsageSettings, String> {
-    Ok(state.store.load_settings().map_err(err)?.usage)
+    Ok(state
+        .store
+        .load_settings()
+        .map_err(|e| crate::cmd_error::data_unread(e))?
+        .usage)
 }
 
 /// 存用量设置，调度与菜单栏立即生效
@@ -252,40 +256,48 @@ pub fn usage_set_settings(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     shared: tauri::State<'_, UsageShared>,
-    settings: UsageSettings,
+    mut settings: UsageSettings,
 ) -> Result<(), String> {
     if settings
-        .agents
+        .items
         .as_ref()
-        .is_some_and(|a| a.len() > MAX_MENU_BAR_AGENTS)
+        .is_some_and(|items| items.len() > MAX_MENU_BAR_ITEMS)
     {
         return Err(sophia_core::tn!(
             "usage.agents.maxMenuBar",
-            MAX_MENU_BAR_AGENTS
+            MAX_MENU_BAR_ITEMS
         ));
     }
     let _settings_guard = state.store.lock_settings();
-    let mut all = state.store.load_settings().map_err(err)?;
+    let mut all = state
+        .store
+        .load_settings()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
+    // 旧版的 `agents` / `perAgent` 以盘上原文为准，原样写回（换回旧版本时照旧读得懂）
+    settings.keep_legacy_keys(&all.usage);
     all.usage = settings.clone();
-    state.store.save_settings(&all).map_err(err)?;
+    state
+        .store
+        .save_settings(&all)
+        .map_err(|e| crate::cmd_error::settings_unsaved(e))?;
     *lock(&shared.settings) = settings.clone();
     shared.handle.send(Command::Settings(settings));
     redraw(&app);
     Ok(())
 }
 
-/// 手动刷新。给了 `agent` 是原因行旁的「再试一次」（2026-10-03）：只取这一个，起进程的取法不等最短间隔、
-/// 限流退避照守，这一轮跑完才返回（界面据此收回「正在读取…」，新数照常经 `usage-changed` 到）。
-/// `agent` 为空刷全部，仍受各取法的最短间隔与限流约束，发出即返回（R6、R7）
+/// 手动刷新。给了 `key`（项的键，`agent:codex`、`provider:<id>`）是原因行旁的「再试一次」（2026-10-03）：
+/// 只取这一项，起进程的取法不等最短间隔、限流退避照守，这一轮跑完才返回（界面据此收回「正在读取…」，
+/// 新数照常经 `usage-changed` 到）。`key` 为空刷全部，仍受各取法的最短间隔与限流约束，发出即返回（R6、R7）
 #[tauri::command]
 pub async fn usage_refresh(
     shared: tauri::State<'_, UsageShared>,
-    agent: Option<AgentId>,
+    key: Option<UsageSubject>,
 ) -> Result<(), String> {
-    match agent {
+    match key {
         // 调度循环没在跑（非 macOS）时回话端随命令丢了，立即返回
-        Some(agent) => {
-            let _ = shared.handle.retry(agent).await;
+        Some(subject) => {
+            let _ = shared.handle.retry(subject).await;
         }
         None => shared.handle.send(Command::Refresh(None)),
     }

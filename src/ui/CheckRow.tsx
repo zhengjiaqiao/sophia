@@ -31,8 +31,13 @@ export interface CheckRowProps {
   /// 写不过去的原因、`重启 Claude Desktop 后生效`。说后果与原因，所以**不截断**：名字至多让到一半宽，
   /// 这一句先折行（行高随之长高）；名字本身超过一半才截
   note?: ReactNode;
+  /// 名字下的一行小字（12 `ink-mute`，禁用时 `ink-faint`）：设置里品牌下已装的产品 `Claude Code、Claude 桌面应用`（#251）。
+  /// 给了行高随之长高，框与图标对齐名字那一行
+  sub?: ReactNode;
   /// 给了就不可选：整行平贴、字退到 `ink-faint`、不回应悬停；原因提示框悬停出、按下当即出
   disabledReason?: string;
+  /// 禁用原因背后的精确值（第二层），提示框里原因下另起一行
+  reasonDetail?: ReactNode;
   /// 这一行此刻被点名（取消勾选后行下浮起提示的那一会儿）：保持悬停底
   highlighted?: boolean;
   /// list（默认）：列表里一行 34（`--row-h`，模型列表）；grid：设置页的三列网格一格 36。框 → 图标 → 名字各 10。
@@ -56,7 +61,9 @@ export function CheckRow({
   icon,
   trailing,
   note,
+  sub,
   disabledReason,
+  reasonDetail,
   highlighted = false,
   size = "list",
   label,
@@ -66,8 +73,9 @@ export function CheckRow({
   const classes = ["ss-checkrow", `ss-checkrow--${size}`];
   if (highlighted) classes.push("is-noted");
   if (note) classes.push("has-note");
+  if (sub) classes.push("has-sub");
   return (
-    <ReasonTip reason={disabledReason}>
+    <ReasonTip reason={disabledReason} detail={reasonDetail}>
       <button
         type="button"
         role="checkbox"
@@ -81,7 +89,14 @@ export function CheckRow({
       >
         <CheckMark on={checked} />
         {icon ? <span className="ss-checkrow__icon">{icon}</span> : null}
-        <span className="ss-checkrow__name">{children}</span>
+        {sub ? (
+          <span className="ss-checkrow__stack">
+            <span className="ss-checkrow__name">{children}</span>
+            <span className="ss-checkrow__sub">{sub}</span>
+          </span>
+        ) : (
+          <span className="ss-checkrow__name">{children}</span>
+        )}
         {note ? <span className="ss-checkrow__note">{note}</span> : null}
         {trailing ? <span className="ss-checkrow__trailing">{trailing}</span> : null}
       </button>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
+import { productLabel } from "./brandsView";
 import type {
   AutoLink,
   GatewayState,
@@ -38,6 +39,8 @@ import {
   type ProjectSort,
 } from "./sidebarProjects";
 import {
+  dismissFormDialogs,
+  formDialogOpen,
   NoticePanel,
   PageHead,
   Toast,
@@ -66,19 +69,24 @@ import {
   type Destination,
   type Nav,
 } from "./shell/nav";
-import { isMenuCommand, menuState, routeMenuCommand, routeUnderModal } from "./shell/menuCommands";
+import {
+  isMenuCommand,
+  menuState,
+  quitWithDialog,
+  routeMenuCommand,
+  routeWithDialog,
+} from "./shell/menuCommands";
 import { dispatchPageCommand, useMenuFlags, usePageCommand } from "./shell/menuBus";
 import { FaceTabs, FilterRow } from "./FilterRow";
 import type { InstallContext } from "./market";
-import { changesPage, requestLeave } from "./shell/leaveGuard";
+import { changesPage, leaveGuarded, requestLeave } from "./shell/leaveGuard";
 import { canPopup } from "./contextMenu";
 import { t, useLocale, useOnLocaleChange } from "./i18n";
 import { useQuitFlow } from "./QuitFlow";
 import { FaultBomb, PageGuard, useFaultPage } from "./PageGuard";
 import { copyDetails } from "./diagnostics";
-import { CrashNotice, FeedbackHost, closeFeedback, feedbackOpen } from "./feedback";
+import { CrashNotice, FeedbackHost } from "./feedback";
 import { SettingsRepairedNotice } from "./settingsRepaired";
-import { quitRequested } from "./feedbackView";
 import "./App.css";
 
 /// 文件系统事件与窗口获得焦点后的重扫去抖
@@ -211,7 +219,8 @@ export default function App() {
       if (mcp !== null) setMcpOverview(mcp);
       setRefreshKey((key) => key + 1);
     } catch (e) {
-      setError(String(e));
+      // 读取类命令出错分两层（#302）：一句「Sophia 的数据读取失败」，原文进「!」；后端没给前缀的整段进「!」
+      setError(String(e), { fallback: t("common.data.readFailed") });
     }
   };
   const refresh = async (): Promise<void> => {
@@ -424,14 +433,20 @@ export default function App() {
       cancelled = true;
     };
   }, [refreshKey]);
-  /// Claude Desktop 不进名单（R17）：装了它（MCP 扫出了它的配置位置），`写进哪些 agent` 里跟着 Claude Code
-  const desktopInstalled =
-    mcpOverview?.locations.some((l) => l.harnessId === "claude-desktop") ?? false;
+  /// 已安装的产品（含只有 MCP 的 Claude Desktop），名单按品牌：品牌勾着，它的产品都在 `shown` 里（#251）
   const installContext: InstallContext = useMemo(() => {
     const installed = (harnesses?.harnesses ?? []).filter((h) => h.installed);
-    const agents = installed.map((h) => ({ id: h.id, name: h.displayName }));
-    if (desktopInstalled && !agents.some((a) => a.id === "claude-desktop"))
-      agents.push({ id: "claude-desktop", name: "Claude Desktop" });
+    const agents = installed.map((h) => ({
+      id: h.id,
+      name: productLabel(h.id, h.displayName),
+      skills: h.skills,
+      mcp: h.mcp,
+      mcpTrust: h.mcpTrust,
+      skillUser: h.skillUser,
+      skillProject: h.skillProject,
+      brand: h.brand,
+      brandName: h.brandName,
+    }));
     return {
       mine: locationOf(nav),
       places: {
@@ -445,7 +460,7 @@ export default function App() {
     };
     // chooseSort 每次渲染是新函数，只写本地状态与本机记忆
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [harnesses, desktopInstalled, nav, recentProjects, sortedProjects, projectSort]);
+  }, [harnesses, nav, recentProjects, sortedProjects, projectSort]);
 
   /// 装的 agent 多于列表上限时 SKILLS 页筛选行下那块灰面板（issue #109）：关掉的那一批记在本机；
   /// 装的集合一变（不管停在哪一页）关掉的记录就作废，再超上限时再出
@@ -523,9 +538,13 @@ export default function App() {
   const quit = useQuitFlow();
   const startQuit = quit.start;
   useEffect(() => {
-    // 退出必须总能生效：反馈小窗开着（发送中也一样）先收起它、摘掉壳的 inert，再照常走退出（确认框在壳里）
+    // 填短表单的弹窗开着（反馈小窗、提供商弹窗，不分种类）：先收起它、摘掉壳的 inert，再照常走退出（确认框在壳里）；
+    // 弹窗里有没保存的改动先经离开前那一问，丢弃或保存了才收起、退出（同菜单命令换页的判断，见 `quitWithDialog`）
     const pending = listen("quit-requested", () =>
-      quitRequested(feedbackOpen(), closeFeedback, startQuit),
+      quitWithDialog(
+        { open: formDialogOpen(), guarded: leaveGuarded() },
+        { dismiss: dismissFormDialogs, ask: requestLeave, quit: startQuit },
+      ),
     );
     return () => void pending.then((un) => un());
   }, [startQuit]);
@@ -553,8 +572,12 @@ export default function App() {
       const active = document.activeElement;
       const editing = isEditable(active);
       const routed = routeMenuCommand(payload, navRef.current, editing);
-      // 反馈小窗开着（模态，遮罩盖着整窗）：不换页、不交给页面，只留作用于小窗里输入框的撤销 / 全选
-      const route = feedbackOpen() ? routeUnderModal(routed, navRef.current) : routed;
+      // 填短表单的弹窗开着（反馈小窗、提供商弹窗，模态，遮罩盖着整窗）：弹窗里有没保存的改动照常走、换页先经离开前
+      // 那一问；没有就不换页、不交给页面，只留作用于弹窗里输入框的撤销 / 全选
+      const route = routeWithDialog(routed, navRef.current, {
+        open: formDialogOpen(),
+        guarded: leaveGuarded(),
+      });
       if (route.text === "undo") document.execCommand("undo");
       if (route.text === "select-all") {
         if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)

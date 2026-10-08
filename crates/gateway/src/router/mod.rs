@@ -5,6 +5,7 @@ mod claude;
 mod parse;
 #[cfg(test)]
 mod tests;
+mod workbuddy;
 
 use claude::Namespace;
 pub use claude::{TokenSource, APP_ORIGIN, PREFIX as CLAUDE_PREFIX};
@@ -56,15 +57,18 @@ pub type Body = UnsyncBoxBody<Bytes, BoxError>;
 pub enum Agent {
     Codex,
     Claude,
+    /// WorkBuddy（#266）：`/workbuddy/` 命名空间，OpenAI Chat 原样转发
+    WorkBuddy,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 2] = [Agent::Codex, Agent::Claude];
+    pub const ALL: [Agent; 3] = [Agent::Codex, Agent::Claude, Agent::WorkBuddy];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Agent::Codex => "codex",
             Agent::Claude => "claude",
+            Agent::WorkBuddy => "workbuddy",
         }
     }
 
@@ -73,14 +77,7 @@ impl Agent {
         match self {
             Agent::Codex => "Codex",
             Agent::Claude => "Claude",
-        }
-    }
-
-    /// 另一家（同步、带过来用）
-    pub fn other(self) -> Agent {
-        match self {
-            Agent::Codex => Agent::Claude,
-            Agent::Claude => Agent::Codex,
+            Agent::WorkBuddy => "WorkBuddy",
         }
     }
 
@@ -88,6 +85,7 @@ impl Agent {
         match text.trim() {
             "codex" => Some(Agent::Codex),
             "claude" => Some(Agent::Claude),
+            "workbuddy" => Some(Agent::WorkBuddy),
             _ => None,
         }
     }
@@ -155,7 +153,9 @@ pub struct Config {
     pub proxy: Option<ProxyFn>,
     /// 家 `claude` 的路由清单（`--claude-routing`）。None：旧 plist 拉起的新程序，Claude 请求一律 404（R10）
     pub claude_routing_path: Option<PathBuf>,
-    /// 读家 `claude` 的网关令牌（密钥文件）；路由自己缓存（R12）
+    /// 家 `workbuddy` 的路由清单（同 Codex 清单的格式）。None 或文件不在：WorkBuddy 请求一律 404
+    pub workbuddy_routing_path: Option<PathBuf>,
+    /// 读路由令牌（密钥文件）：家 `claude` 与 `workbuddy` 共用；路由自己缓存（R12）
     pub router_token: TokenSource,
     /// Claude 流式响应的保活间隔；零表示默认 15 秒（R24）
     pub keepalive: Duration,
@@ -195,6 +195,7 @@ pub struct Router {
     third_party_key: KeySource,
     max_body_bytes: usize,
     claude_routing_path: Option<PathBuf>,
+    workbuddy_routing_path: Option<PathBuf>,
     token: claude::TokenCache,
     keepalive: Duration,
     locale: Option<LocaleSource>,
@@ -209,6 +210,8 @@ pub struct Router {
     turn_recorded: tokio::sync::Notify,
     /// 起标题请求最多等多久（测试里改短）
     title_wait: Duration,
+    /// Claude 桌面应用最近一轮对话点名的角色 id：它起标题、跑子任务的请求改用这个（`claude.rs`）
+    claude_current: Mutex<Option<String>>,
     key_verdicts: Option<KeyVerdictSink>,
     /// （家, 网关 id）→ 上次报出去的结论，去重用
     verdicts_seen: Mutex<HashMap<(Agent, String), SeenVerdict>>,
@@ -256,6 +259,8 @@ enum Route {
     OpenAi,
     /// 家 `claude` 的请求（去向就是 Claude 清单里的第三方网关）
     Claude,
+    /// 家 `workbuddy` 的请求（去向是 WorkBuddy 清单里的第三方网关）
+    WorkBuddy,
     None,
 }
 
@@ -266,6 +271,7 @@ impl Route {
             Route::ChatGpt => "chatgpt",
             Route::OpenAi => "openai",
             Route::Claude => "claude",
+            Route::WorkBuddy => "workbuddy",
             Route::None => "none",
         }
     }
@@ -351,6 +357,7 @@ impl Router {
                 config.max_body_bytes
             },
             claude_routing_path: config.claude_routing_path,
+            workbuddy_routing_path: config.workbuddy_routing_path,
             token: claude::TokenCache::new(config.router_token),
             keepalive: if config.keepalive.is_zero() {
                 crate::translate::anthropic::DEFAULT_KEEPALIVE_INTERVAL
@@ -369,6 +376,7 @@ impl Router {
             sessions: Mutex::default(),
             turn_recorded: tokio::sync::Notify::new(),
             title_wait: TITLE_TURN_WAIT,
+            claude_current: Mutex::default(),
             key_verdicts: config.key_verdicts,
             verdicts_seen: Mutex::default(),
         }))
@@ -457,7 +465,10 @@ impl Router {
             }
             _ => {}
         }
-        // Claude 命名空间在读模型名与通用分流之前整个交出去：任何情况下都不进入 Codex 的第三方分流与官方转发
+        // WorkBuddy、Claude 命名空间在读模型名与通用分流之前整个交出去：任何情况下都不进入 Codex 的第三方分流与官方转发
+        if workbuddy::in_namespace(&path) {
+            return workbuddy::handle(self.clone(), parts, raw_body).await;
+        }
         match claude::namespace(&path, &parts.headers) {
             Namespace::Claude => return claude::handle(self.clone(), parts, raw_body).await,
             Namespace::Stray => return claude::stray(),
@@ -773,6 +784,23 @@ impl Router {
         remote: SocketAddr,
     ) -> Option<Response<Body>> {
         let path = parts.uri.path();
+        if workbuddy::in_namespace(path) {
+            // WorkBuddy 的请求由它的引擎（Node）发出，不带 Origin：来源校验同 Codex（本机、不是浏览器）
+            let rejection = guard(Namespace::Codex, &parts.headers, remote)?;
+            self.log.write(
+                Instant::now(),
+                Agent::WorkBuddy.as_str(),
+                parts.method.as_str(),
+                path,
+                "",
+                Route::None,
+                rejection.status().as_u16(),
+                "forbidden",
+                "",
+                None,
+            );
+            return Some(rejection);
+        }
         let namespace = claude::namespace(path, &parts.headers);
         let rejection = guard(namespace, &parts.headers, remote)
             .or_else(|| (namespace == Namespace::Stray).then(claude::stray))?;
@@ -1863,10 +1891,10 @@ impl LoggedStream {
             } else {
                 result
             };
-            let agent = if entry.route == Route::Claude {
-                Agent::Claude
-            } else {
-                Agent::Codex
+            let agent = match entry.route {
+                Route::Claude => Agent::Claude,
+                Route::WorkBuddy => Agent::WorkBuddy,
+                _ => Agent::Codex,
             };
             entry.log.write(
                 entry.started,

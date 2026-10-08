@@ -16,15 +16,15 @@
     "other": "{head} ({count} total)"
   },
   "sources.manage.skills": "Manage locations",
-  "sources.removeTitle": "Remove {name} from {place} (original untouched)",
+  "sources.removeTitle": "Remove {name} from {place} (keeps the original)",
   "sources.removeConfirm": "Remove {name} from {place}?",
   "sources.ownRemove": "Its original is in {place}; it goes away only when the original is deleted",
   "sources.removeBody.perSkill": {
-    "one": "The symlink for this skill in {agents} will be removed: {skills}",
-    "other": "The symlinks for these {count} skills in {agents} will be removed: {skills}"
+    "one": "This skill will be removed from {agents}: {skills}.",
+    "other": "These {count} skills will be removed from {agents}: {skills}."
   },
-  "sources.removeBody.whole": "The skills folder in {agents} is a symlink to it and will be removed too",
-  "sources.removeBody.none": "Its skills will be removed from the list; there are no symlinks to remove",
+  "sources.removeBody.whole": "{agents} will no longer be able to use any of its skills.",
+  "sources.removeBody.none": "Its skills will be removed from the list; no agent is affected.",
   "sources.group.elsewhere": "Used by other projects",
   "sources.group.detected": "Detected",
   "sources.candidate.usedIn": "Used in {places}",
@@ -32,10 +32,10 @@
   "sources.mcpOwn": "This is {place}'s own config; to remove its servers, edit the config itself",
   "sources.stuck.noHeaderCommand": "None of the agents shown support generating headers with a command",
   "sources.stuck.noPlace": "No location here can take {service}",
-  "sources.mcpRemoveBody.none": "Its servers will be removed from the list; there's nothing to undo in any config",
+  "sources.mcpRemoveBody.none": "Its servers will be removed from the list; there's nothing to undo in any config.",
   "sources.mcpRemoveBody.some": {
-    "one": "The copy of this server in {places} will be removed: {names}",
-    "other": "The copies of these {count} servers in {places} will be removed: {names}"
+    "one": "The copy of this server in {places} will be removed: {names}.",
+    "other": "The copies of these {count} servers in {places} will be removed: {names}."
   },
   "sources.add.titleSkill": "Add location to {place}",
   "sources.add.titleMcp": "Add MCP source to {place}",
@@ -91,8 +91,8 @@
     "other": "{count} entries couldn't be cleared"
   },
   "sources.removal.failedItems": {
-    "one": "{count} item wasn't removed: {first}",
-    "other": "{count} items weren't removed: {first}"
+    "one": "{count} item couldn't be removed · {first}",
+    "other": "{count} items couldn't be removed · {first}"
   },
   "sources.skill.noTargetsReason": "No agent to add to here yet",
   "sources.skill.targetsLabel": "Auto-add to agents",
@@ -144,6 +144,7 @@
   "sources.page.openCannot": "Couldn't open",
   "sources.add.loadFailedSkill": "Couldn't read locations",
   "sources.add.loadFailedMcp": "Couldn't read config files",
+  "sources.add.retry": "Try again",
   "sources.add.pickFolder": "Choose folder…",
   "sources.add.pickFailed": "{failed} {name} · {reason}",
   "sources.add.failedWord": "Couldn't add",

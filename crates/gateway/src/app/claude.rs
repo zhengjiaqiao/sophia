@@ -14,6 +14,7 @@ use sophia_core::claude_models::settings::{
     Applied, ClaudeGatewaySettings, Original, Originals, Phase, Written,
 };
 use sophia_core::codex_models::catalog::Published;
+use sophia_core::model_providers::ModelProviders;
 use std::io;
 use std::path::PathBuf;
 
@@ -225,37 +226,40 @@ impl App {
 
     /// 密钥文件里的令牌；`create` 为真时没有就生成一个存进去（R5：第一次打开或接管时，之后一直复用）。
     /// 读不出（文件权限、还在钥匙串里没迁完）时报错，不另生成：生成了就把桌面应用里的旧令牌作废了
-    fn token(&self, create: bool) -> Result<Option<String>, AppError> {
+    pub(super) fn token(&self, create: bool) -> Result<Option<String>, AppError> {
         match (self.deps.get_router_token)() {
             Ok(Some(token)) if !token.trim().is_empty() => Ok(Some(token.trim().to_owned())),
             Ok(_) if create => {
                 let token = (self.deps.new_router_token)().map_err(|e| {
                     internal(sophia_core::t!(
-                        "models.claude.tokenCreateFailed",
+                        "models.app.routerTokenCreateFailed",
                         error = e
                     ))
                 })?;
                 (self.deps.set_router_token)(&token).map_err(|e| {
-                    internal(sophia_core::t!("models.claude.tokenStoreFailed", error = e))
+                    internal(sophia_core::t!(
+                        "models.app.routerTokenStoreFailed",
+                        error = e
+                    ))
                 })?;
                 Ok(Some(token))
             }
             Ok(_) => Ok(None),
             Err(e) => Err(internal(sophia_core::t!(
-                "models.claude.tokenReadFailed",
+                "models.app.routerTokenReadFailed",
                 error = e
             ))),
         }
     }
 
-    /// 想要的值（R29）：已选全部，按已选顺序（网关顺序、再按各自列表顺序，同模型片）。已选为空 → `invalid`
+    /// 想要的值（R29）：已选全部，按「已选」顺序（第一个是切过去时先用的模型）。已选为空 → `invalid`
     fn desired(
         &self,
         settings: &ClaudeGatewaySettings,
         port: u16,
         token: &str,
     ) -> Result<Desired, AppError> {
-        let published = settings.published();
+        let published = self.published_for(Agent::Claude)?;
         if published.is_empty() {
             return Err(AppError::new(
                 "invalid",
@@ -276,26 +280,19 @@ impl App {
         })
     }
 
-    fn routing_provider(settings: &ClaudeGatewaySettings, id: &str) -> Option<RoutingProvider> {
-        settings
-            .providers
-            .iter()
-            .find(|p| p.id == id)
-            .map(|p| RoutingProvider {
-                id: p.id.clone(),
-                name: p.short_name(),
-                base_url: p.upstream_base().to_owned(),
-                protocol: p.protocol().to_owned(),
-            })
+    fn routing_provider(list: &ModelProviders, id: &str) -> Option<RoutingProvider> {
+        list.provider(id).map(|p| RoutingProvider {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            base_url: p.upstream_base().to_owned(),
+            protocol: p.protocol().to_owned(),
+        })
     }
 
     /// Claude 清单：与写进 `inferenceModels` 的各项一一对应，角色 id → 上游模型（R37「清单跟写入的值走」）
-    fn claude_routing(
-        &self,
-        settings: &ClaudeGatewaySettings,
-        desired: &Desired,
-    ) -> Result<ClaudeRouting, AppError> {
-        let published = settings.published();
+    fn claude_routing(&self, desired: &Desired) -> Result<ClaudeRouting, AppError> {
+        let list = self.load_models()?;
+        let published = list.published(Agent::Claude.as_str());
         let mut providers: Vec<RoutingProvider> = Vec::new();
         let mut models = Vec::new();
         for WrittenModel { role, slug, label } in desired.models() {
@@ -306,11 +303,9 @@ impl App {
                 )
             })?;
             if !providers.iter().any(|p| p.id == found.provider) {
-                providers.push(
-                    Self::routing_provider(settings, &found.provider).ok_or_else(|| {
-                        AppError::new("invalid", sophia_core::t!("models.claude.providerMissing"))
-                    })?,
-                );
+                providers.push(Self::routing_provider(&list, &found.provider).ok_or_else(
+                    || AppError::new("invalid", sophia_core::t!("models.claude.providerMissing")),
+                )?);
             }
             models.push(RoutingModel {
                 slug: role,
@@ -338,7 +333,8 @@ impl App {
 
     /// 网关的地址、协议、短名变了：已写进 Claude 清单的角色不动，只把它们所属网关的上游信息换成现在的；
     /// 已删掉的网关从清单里拿掉（那一档请求在重启生效前报 R14 的 500）。路由每个请求重读，立刻生效
-    fn refresh_claude_routing(&self, settings: &ClaudeGatewaySettings) -> Result<(), AppError> {
+    fn refresh_claude_routing(&self) -> Result<(), AppError> {
+        let list = self.load_models()?;
         let path = self.claude_routing_path();
         let Ok(bytes) = std::fs::read(&path) else {
             return Ok(());
@@ -351,7 +347,7 @@ impl App {
             if providers.iter().any(|p| p.id == model.provider) {
                 continue;
             }
-            if let Some(provider) = Self::routing_provider(settings, &model.provider) {
+            if let Some(provider) = Self::routing_provider(&list, &model.provider) {
                 providers.push(provider);
             }
         }
@@ -369,7 +365,7 @@ impl App {
         Ok(settings.port)
     }
 
-    /// 删 Claude 清单；Codex 也关着就停路由并删 Codex 目录下本功能的文件（R8）。返回提示
+    /// 删 Claude 清单；别家都关着就停路由，Codex 关着就删 Codex 目录下本功能的文件（R8）。返回提示
     fn release_router_for_claude(&self) -> Vec<String> {
         let mut warnings = Vec::new();
         match std::fs::remove_file(self.claude_routing_path()) {
@@ -380,9 +376,11 @@ impl App {
                 error = e
             )),
         }
-        if !self.codex_on() {
+        if !self.others_on(Agent::Claude) {
             (self.deps.router_stop)();
             self.set_notice(None);
+        }
+        if !self.codex_on() {
             warnings.extend(self.remove_codex_files(&[]));
         }
         warnings
@@ -445,9 +443,9 @@ impl App {
         let port = self.port()?;
         let token = self
             .token(true)?
-            .ok_or_else(|| internal(sophia_core::t!("models.claude.tokenMissing")))?;
+            .ok_or_else(|| internal(sophia_core::t!("models.app.routerTokenMissing")))?;
         let mut desired = self.desired(settings, port, &token)?;
-        let routing = self.claude_routing(settings, &desired)?;
+        let routing = self.claude_routing(&desired)?;
 
         // 先在内存里试一次：文件不合法、别家配置在生效等，在碰路由之前就退出
         let snapshot = desktop::read(dirs, settings.applied.as_ref()).map_err(desktop_error)?;
@@ -581,7 +579,7 @@ impl App {
         settings: &mut ClaudeGatewaySettings,
         republish: bool,
     ) -> Result<Vec<String>, AppError> {
-        if republish && settings.enabled && settings.published().is_empty() {
+        if republish && settings.enabled && self.published_for(Agent::Claude)?.is_empty() {
             return Err(AppError::new(
                 "invalid",
                 sophia_core::t!("models.claude.needOneModel"),
@@ -593,7 +591,7 @@ impl App {
             .as_ref()
             .is_some_and(|a| a.phase != Phase::Restoring)
         {
-            self.refresh_claude_routing(settings)?;
+            self.refresh_claude_routing()?;
         }
         // 改动已经存下：查不清在不在运行就按在运行算——先不写，等重启生效时写（不在它运行时冒险写文件），
         // 也不因为查不清就报「没加上」，界面的乐观勾选与存下的结果一致
@@ -623,7 +621,8 @@ impl App {
         if let Some(error) = self.desktop_unavailable() {
             return Err(error);
         }
-        if settings.published().is_empty() {
+        let published = self.published_for(Agent::Claude)?;
+        if published.is_empty() {
             return Err(AppError::new(
                 "invalid",
                 if takeover {
@@ -633,12 +632,7 @@ impl App {
                 },
             ));
         }
-        for provider in &settings.providers {
-            if provider.selected().is_empty() {
-                continue;
-            }
-            self.require_key(Agent::Claude, provider, false)?;
-        }
+        self.require_keys(&published)?;
         if !takeover && !settings.takeover {
             // 别家的配置在生效而没允许接管：拒绝，什么都不改（R35）
             let snapshot = desktop::read(&self.deps.desktop_dirs, settings.applied.as_ref())
@@ -904,7 +898,7 @@ impl App {
         super::AgentGatewayView {
             agent: Agent::Claude,
             installed: info.is_some(),
-            providers: self.provider_views(Agent::Claude, &settings.providers),
+            models: self.models_view(Agent::Claude, false),
             enabled: settings.enabled,
             conflict,
             codex: None,
@@ -923,6 +917,7 @@ impl App {
                     foreign,
                 },
             }),
+            workbuddy: None,
         }
     }
 }

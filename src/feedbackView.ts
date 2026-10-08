@@ -30,17 +30,6 @@ export function sentPlacement(mountedEntries: number): "anchored" | "corner" {
   return mountedEntries > 0 ? "anchored" : "corner";
 }
 
-/// 收到退出请求（应用菜单「退出 Sophia」⌘Q）：退出必须总能生效（产品负责人 2026-10-05）。反馈小窗开着时先收起它
-/// ——发送中也直接放弃、不等；收起时应用壳的 inert 随之摘掉——再照常走退出流程（退出确认框在应用壳里）
-export function quitRequested(
-  feedbackOpen: boolean,
-  closeFeedback: () => void,
-  startQuit: () => void,
-) {
-  if (feedbackOpen) closeFeedback();
-  startQuit();
-}
-
 /// 启动后出不出「上次意外退出」的提示
 export function crashNotice(unexpected: boolean, settings: ReportSettings | null): boolean {
   return unexpected && offerReport(settings);

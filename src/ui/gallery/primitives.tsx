@@ -10,6 +10,7 @@ import {
   IconDownload,
   IconEdit,
   IconEye,
+  IconGrip,
   IconLeave,
   IconPlus,
   IconSearch,
@@ -45,6 +46,7 @@ const MARKS: Array<[string, ReactNode]> = [
   ["IconSortArrow ↑", <IconSortArrow />],
   ["IconSortArrow ↓", <IconSortArrow desc />],
   ["IconDash 半选", <IconDash />],
+  ["IconGrip 排序拉手", <IconGrip />],
 ];
 
 const AGENTS: Array<[string, string]> = [
@@ -94,7 +96,7 @@ export function PrimitivesFamily() {
 
       <Block
         name="AgentIcon"
-        guide="agent 身份的图形；取不到时降级成首字母方块，永远和名字一起出现"
+        guide="agent 身份的图形；没有标志时降级成首字母方块，永远和名字一起出现"
       >
         {AGENTS.map(([id, name]) => (
           <Specimen key={id} label={`${name} · 16 / 24`}>

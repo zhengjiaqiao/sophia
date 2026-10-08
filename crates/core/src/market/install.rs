@@ -13,7 +13,7 @@
 //! 本来就不出；删它反而要判断「是不是别的工具在这期间也往里放过东西」。
 use super::archive::{self, Pick};
 use super::{
-    installs, treehash, AgentDir, InstallItem, InstallOutcome, InstallPlan, InstallRecord,
+    installs, log_raw, treehash, AgentDir, InstallItem, InstallOutcome, InstallPlan, InstallRecord,
     MarketResult, SkillInstallRequest, Unlinked, UpdateInfo,
 };
 use crate::discovery::{self, Env};
@@ -462,11 +462,10 @@ pub(crate) fn execute_with(
 
     if !plan.store_dir.is_dir() {
         if let Err(e) = std::fs::create_dir_all(&plan.store_dir) {
+            log_raw("create-store", &plan.store_dir, &e);
             for item in ready {
-                out.failed.insert(
-                    item.name.clone(),
-                    crate::t!("market.install.mkStoreFailed", error = e),
-                );
+                out.failed
+                    .insert(item.name.clone(), crate::t!("market.install.mkStoreFailed"));
             }
             return out;
         }
@@ -677,17 +676,19 @@ fn update_one(
         Ok(held) => held,
         Err(e) => {
             cleanup();
-            return Err(crate::t!("market.update.holdFailed", error = e));
+            log_raw("hold-old-version", &u.dir, &e);
+            return Err(crate::t!("market.update.holdFailed"));
         }
     };
     if let Err(e) = std::fs::rename(&fresh, &u.dir) {
         // 新版放不到位：旧版放回原处
+        log_raw("place-new-version", &u.dir, &e);
         let _ = std::fs::rename(&held, &u.dir);
         if let Some(slot) = held.parent() {
             sync::drop_slot(slot);
         }
         cleanup();
-        return Err(crate::t!("market.update.placeFailed", error = e));
+        return Err(crate::t!("market.update.placeFailed"));
     }
     let _ = std::fs::remove_dir(&temp);
 
@@ -1463,7 +1464,7 @@ mod tests {
             vec![Unlinked {
                 harness_id: "claude-code".into(),
                 name: "pdf".into(),
-                reason: "那里已有同名的".into(),
+                reason: "已有同名的 skill".into(),
             }]
         );
         assert_eq!(entry_kind(&theirs), EntryKind::Dir, "原有的那份不动");
@@ -1718,7 +1719,7 @@ mod tests {
         assert!(out.installed.is_empty());
         assert_eq!(
             out.failed.get("pdf").map(String::as_str),
-            Some("pdf 本地改过，没有覆盖")
+            Some("pdf 本地改过，未覆盖")
         );
         assert!(out.undo.is_empty());
         assert_eq!(snapshot(&s.tree.root()), before);
@@ -1847,7 +1848,7 @@ mod tests {
         let out = execute_update_with(std::slice::from_ref(&info), &batch, &ops());
         assert_eq!(
             out.failed.get("pdf").map(String::as_str),
-            Some("没有下载到新版")
+            Some("新版下载失败")
         );
 
         let archives = archives_v2();

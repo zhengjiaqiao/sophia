@@ -2,7 +2,7 @@
   <img src="./assets/readme/hero.zh-CN.svg" width="100%" alt="Sophia：一处管好各个 AI 编码 agent 共用的 skill、MCP 和模型。表格里 skill 是行，Claude Code、Codex、Cursor 是列，一眼看出哪个 agent 有哪个 skill。">
 </p>
 
-<p align="center"><a href="./README.md">English</a> · <b>简体中文</b></p>
+<p align="center"><a href="./README.md">English</a> · <b>简体中文</b> · <a href="https://zhengjiaqiao.github.io/sophia/zh-hans/">官网</a></p>
 
 你多半不止用一个 AI 编码 agent。每个 agent 都有自己的 skills 文件夹、自己的 MCP 配置文件和自己的模型设置。想让 Claude Code 和 Codex 都能用上同一个 skill，就得手动建两次软链；链接断了，也没有任何提示。
 

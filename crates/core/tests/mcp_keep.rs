@@ -558,3 +558,33 @@ fn a_copy_that_only_differs_in_cwd_is_rewritten() {
         json!({"command": "node", "args": ["server.js"], "trust": true})
     );
 }
+
+/// 分不出原因的失败（#306 复审）：没成的那一处 `message` 是兜底句、系统原文另给（`detail`），
+/// 前端提示条只写失败句。备份目录的上一级是个文件：建不出备份目录，不是没权限、磁盘满、只读
+#[test]
+fn an_unclassified_failure_carries_the_raw_text_apart() {
+    let t = tempdir().unwrap();
+    let (locations, paths) = three(&t);
+    let blocker = root(&t).join("not-a-dir");
+    fs::write(&blocker, b"x").unwrap();
+    let plan = prepare_keep(
+        &locations,
+        "docs",
+        "claude",
+        &ids(&["claude", "codex", "gemini"]),
+    );
+    assert!(plan.issues.is_empty(), "{:?}", plan.issues);
+    let report = execute_keep(plan, &blocker.join("backups"));
+    let failed = report
+        .entries
+        .iter()
+        .find(|e| e.outcome == "failed")
+        .unwrap_or_else(|| panic!("{:?}", report.entries));
+    assert_eq!(failed.message, "备份失败，未改动");
+    assert!(
+        failed.detail.as_deref().is_some_and(|d| !d.is_empty()),
+        "{failed:?}"
+    );
+    assert_eq!(fs::read_to_string(&paths[1]).unwrap(), CODEX);
+    assert_eq!(fs::read_to_string(&paths[2]).unwrap(), GEMINI);
+}

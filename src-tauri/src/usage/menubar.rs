@@ -69,18 +69,24 @@ fn image_from(bytes: &'static [u8]) -> Option<Retained<NSImage>> {
 }
 
 /// agent 标志：与 `src/ui/AgentIcon.tsx` 同一份路径（`tests/agent-glyphs.test.ts` 核对）。
-/// SVG 要 macOS 14 起才读得出来，读不出就画名字首字母
-fn glyph(agent: AgentId) -> Option<Retained<NSImage>> {
-    match agent {
+/// SVG 要 macOS 14 起才读得出来，读不出就画名字首字母。提供商还没有标志素材（#326），一律画首字母
+fn glyph(seg: &MenuBarSegment) -> Option<Retained<NSImage>> {
+    match seg.key.agent()? {
         AgentId::ClaudeCode => image_from(include_bytes!("../../icons/agents/claude-code.svg")),
         AgentId::Codex => image_from(include_bytes!("../../icons/agents/codex.svg")),
     }
 }
 
-fn initial(agent: AgentId) -> &'static str {
-    match agent {
-        AgentId::ClaudeCode => "C",
-        AgentId::Codex => "X",
+fn initial(seg: &MenuBarSegment) -> String {
+    match seg.key.agent() {
+        Some(AgentId::ClaudeCode) => "C".into(),
+        Some(AgentId::Codex) => "X".into(),
+        None => seg
+            .brand
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().collect())
+            .unwrap_or_default(),
     }
 }
 
@@ -118,7 +124,7 @@ pub fn draw(app_icon: &NSImage, segments: &[MenuBarSegment]) -> Retained<NSImage
             NSPoint::new(x, (HEIGHT - GLYPH) / 2.0),
             NSSize::new(GLYPH, GLYPH),
         );
-        match glyph(seg.agent) {
+        match glyph(seg) {
             Some(g) => g.drawInRect_fromRect_operation_fraction(
                 rect,
                 NSRect::ZERO,
@@ -126,7 +132,7 @@ pub fn draw(app_icon: &NSImage, segments: &[MenuBarSegment]) -> Retained<NSImage
                 alpha,
             ),
             None => {
-                let t = text(initial(seg.agent), 10.0, alpha);
+                let t = text(&initial(seg), 10.0, alpha);
                 let sz = t.size();
                 t.drawAtPoint(NSPoint::new(
                     x + (GLYPH - sz.width) / 2.0,

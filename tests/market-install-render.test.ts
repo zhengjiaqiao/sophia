@@ -42,17 +42,55 @@ const places = {
   sort: "recent" as const,
   onSort: () => {},
 };
+/// 已安装的产品（品牌的先后）：能不能装 skill、写 MCP、属于哪个品牌由 core 给
 const agents = [
-  { id: "claude-code", name: "Claude Code" },
-  { id: "codex", name: "Codex" },
-  { id: "cline", name: "Cline" },
-  { id: "claude-desktop", name: "Claude Desktop" },
+  {
+    id: "claude-code",
+    name: "Claude Code",
+    skills: true,
+    mcp: true,
+    brand: "claude",
+    brandName: "Claude",
+    skillUser: "claude-code",
+    skillProject: "claude-code",
+  },
+  {
+    id: "claude-desktop",
+    name: "Claude Desktop",
+    skills: false,
+    mcp: true,
+    brand: "claude",
+    brandName: "Claude",
+    skillUser: null,
+    skillProject: null,
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    skills: true,
+    mcp: true,
+    brand: "codex",
+    brandName: "Codex",
+    skillUser: "codex",
+    skillProject: "codex",
+  },
+  {
+    id: "cline",
+    name: "Cline",
+    skills: true,
+    mcp: false,
+    brand: "cline",
+    brandName: "Cline",
+    skillUser: "cline",
+    skillProject: "cline",
+  },
 ];
 const base = {
   mine: "all" as const,
   places,
   agents,
-  shown: ["claude-code", "codex"],
+  /// 设置里勾着 Claude、Codex 两个品牌：名单给出这两个品牌下装了的产品
+  shown: ["claude-code", "claude-desktop", "codex"],
   onClose: () => {},
   service,
 };
@@ -100,7 +138,7 @@ test("安装 skill（画板 06；#275）：来历、生效范围（没有 全部
   assert.match(html, /data-footer/);
 });
 
-test("安装 MCP（画板 09；#276）：运行方式、给谁用（Desktop 跟着 Claude Code）、要填的（密钥遮住、能看一眼）", () => {
+test("安装 MCP（画板 09；#276）：运行方式、给谁用（勾着 Claude 品牌时 Desktop 也勾上）、要填的（密钥遮住、能看一眼）", () => {
   const html = render(McpInstallPage, {
     ...base,
     entry: {
@@ -161,18 +199,18 @@ test("从链接安装（画板 07）：认不出的链接当即说明，不发�
   assert.match(t, /从链接安装/);
   assert.match(t, /只认 GitHub 上的仓库或文件夹链接/);
   assert.match(html, /value="https:\/\/example.com"/);
-  assert.match(html, /role="tooltip"[^>]*>先贴一个 GitHub 上的仓库或文件夹链接</);
+  assert.match(html, /role="tooltip"[^>]*>请先粘贴 GitHub 上的仓库或文件夹链接</);
   assert.equal(asked, 0);
 });
 
-test("从 JSON 添加（画板 10）：等宽框填着剪贴板来的内容；还没认出时不出列表，主动作不可点", () => {
+test("粘贴 MCP 配置（画板 10）：等宽框填着剪贴板来的内容；还没认出时不出列表，主动作不可点", () => {
   const html = render(JsonPage, {
     ...base,
     initial: '{ "mcpServers": {} }',
     onDone: () => {},
   });
   const t = text(html);
-  assert.match(t, /从 JSON 添加/);
+  assert.match(t, /粘贴 MCP 配置/);
   assert.match(html, /<textarea[^>]*aria-label="MCP 配置"/);
   assert.match(t, /添加 0 个/);
   assert.doesNotMatch(t, /写进/);
@@ -331,4 +369,34 @@ test("安装 MCP（#276）：要填的有说明时，禁用原因与标签都用
   assert.match(html, /role="tooltip"[^>]*>请填写 GitHub 访问令牌</);
   assert.doesNotMatch(html, /<label class="install-field__label"[^>]*><span class="ss-mono/);
   assert.doesNotMatch(t, /需要 API key|写进/);
+});
+
+/// #335：下载 skill 失败不是网络那三类时，带原文就是同一块灰面板（左端「!」看原文、能复制，不给「开着代理再试一次」）；
+/// 没有原文照旧一行字。坏包经后端 `[internal] 一句\n[detail] 原文` 过来，主句不带原文
+test("下载失败：非网络错误带原文时进「!」，没有原文时一行字", async () => {
+  const { DownloadFailure } = await import("../src/market/InstallParts.tsx");
+  const { skillDownloadFailure } = await import("../src/netFailure.ts");
+  const broken = skillDownloadFailure("[internal] 压缩包解压失败\n[detail] invalid gzip header");
+  assert.deepEqual(broken, {
+    message: "压缩包解压失败",
+    retryWithProxy: false,
+    detail: "invalid gzip header",
+  });
+  const html = render(DownloadFailure, {
+    failure: broken,
+    className: "install-status is-error",
+    onRetry: () => {},
+  });
+  assert.match(html, /class="ss-noticepanel ss-noticepanel--section"/);
+  // 「!」是看原文的图标键（悬浮卡要停上去才画，静态渲染里只有键）
+  assert.match(html, /<span class="ss-noticepanel__mark"><button[^>]*aria-label="查看错误详情"/);
+  assert.doesNotMatch(html, /开着代理再试一次/);
+  assert.match(html, /class="ss-noticepanel__message"[^>]*>压缩包解压失败</);
+
+  const plain = render(DownloadFailure, {
+    failure: { message: "仓库或分支不存在", retryWithProxy: false, detail: null },
+    className: "install-status is-error",
+    onRetry: () => {},
+  });
+  assert.equal(plain, '<p class="install-status is-error">仓库或分支不存在</p>');
 });

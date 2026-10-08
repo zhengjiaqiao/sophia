@@ -18,6 +18,13 @@ const WEIBOAP_HARNESSES_JSON: &str = include_str!("../data/harnesses.weiboap.jso
 struct HarnessSpec {
     id: String,
     display_name: String,
+    /// 品牌 id（GLOSSARY「品牌」：同一个名字下的一组产品，按产品名认）。不写就自成一个品牌，id 与名字同产品；
+    /// 同一品牌的产品在表里挨着写
+    #[serde(default)]
+    brand: Option<String>,
+    /// 品牌名：读表时由 `brands` 填上，没登记的品牌用产品名
+    #[serde(skip)]
+    brand_name: String,
     #[serde(default)]
     project_dir: Option<String>,
     /// 先新后旧：第一个能解析的是这个 agent 的列；后面的是它还认、但不再往里写的旧位置，
@@ -27,9 +34,13 @@ struct HarnessSpec {
     /// 先新后旧：任一个看起来装过就算已安装
     #[serde(default)]
     detect_dir: Vec<String>,
-    /// 同品牌的桌面应用（macOS）：装了任一个也算已安装。只用来判定，不改各页的列
+    /// 这个产品的应用包（macOS）：装了任一个也算已安装。只写了它、没写 detect_dir 的（Kimi 桌面版）只认应用包
     #[serde(default)]
     detect_app: Vec<AppSpec>,
+    /// 能查应用包的系统（macOS）上只认应用包，detect_dir 不算：卸载后留下的数据目录会让它看着还装着
+    /// （WorkBuddy，#247「已安装判定」）。查不了应用包的系统照旧认 detect_dir
+    #[serde(default)]
+    apps_only: bool,
     #[serde(default)]
     universal: bool,
     /// 每个 agent 一个项目的 skill 目录模板，允许单个路径分量为 `*`
@@ -41,8 +52,8 @@ struct HarnessSpec {
     /// agent 目录名 → 显示名的查表方式
     #[serde(default)]
     agent_labels: Option<AgentLabels>,
-    /// 只有 MCP 的 agent（Claude Desktop）：没有 skill 目录，SKILLS 页与设置的名单都不出现它，
-    /// 只由 `mcp_columns` 带进 MCP 页
+    /// 只有 MCP 的 agent（Claude Desktop）：没有 skill 目录，SKILLS 页不出现它；
+    /// 装了它算它的品牌已安装（设置里勾品牌），由 `mcp_columns` 带进 MCP 页
     #[serde(default)]
     mcp_only: bool,
     /// 只在这些系统上登记（`std::env::consts::OS`：`macos` / `windows` / `linux`）；空＝全部
@@ -58,8 +69,17 @@ struct AppSpec {
     bundle_id: String,
 }
 
+/// 有几个产品的品牌：品牌 id 与名字（`Claude`、`Kimi`）
+#[derive(Debug, Deserialize)]
+struct BrandSpec {
+    id: String,
+    name: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct HarnessFile {
+    #[serde(default)]
+    brands: Vec<BrandSpec>,
     harnesses: Vec<HarnessSpec>,
 }
 
@@ -145,9 +165,17 @@ fn skill_specs() -> Vec<HarnessSpec> {
 }
 
 fn parse_specs(json: &str) -> Vec<HarnessSpec> {
-    serde_json::from_str::<HarnessFile>(json)
-        .expect("harnesses.json 内置数据必须合法")
-        .harnesses
+    let file = serde_json::from_str::<HarnessFile>(json).expect("harnesses.json 内置数据必须合法");
+    let mut specs = file.harnesses;
+    for spec in &mut specs {
+        let brand = spec.brand.get_or_insert_with(|| spec.id.clone());
+        spec.brand_name = file
+            .brands
+            .iter()
+            .find(|b| &b.id == brand)
+            .map_or_else(|| spec.display_name.clone(), |b| b.name.clone());
+    }
+    specs
 }
 
 #[cfg(feature = "weiboap")]
@@ -164,6 +192,8 @@ fn resolve(spec: &HarnessSpec, env: &Env) -> Harness {
     Harness {
         id: spec.id.clone(),
         display_name: spec.display_name.clone(),
+        brand: spec.brand.clone().unwrap_or_else(|| spec.id.clone()),
+        brand_name: spec.brand_name.clone(),
         project_dir: spec.project_dir.clone(),
         global_dir: resolve_template(&spec.global_dir, env),
         universal: spec.universal,
@@ -583,8 +613,34 @@ fn is_generic_dir_name(name: &str) -> bool {
     )
 }
 
-/// 所有可写目标：每个启用 harness 各自一列——全局目录、per-agent 目录、每个项目的项目目录。
-/// 列名就是 harness 名；多个 harness 共用同一个目录时各自成列，不合并。
+/// 同一品牌里读同一处（`same`）的产品合成一列，列 id 取表里第一个这样的产品；没有就是它自己
+fn column_owner(table: &[Harness], h: &Harness, same: &dyn Fn(&Harness) -> bool) -> String {
+    table
+        .iter()
+        .find(|x| x.brand == h.brand && same(x))
+        .map_or_else(|| h.id.clone(), |x| x.id.clone())
+}
+
+/// 这个产品的 skill 在用户级、项目里各落进哪一列（列 id，同 [`targets`]：同一品牌共用一处的是同一个 id）；
+/// 没有这一级（托管目录、没有项目级、只有 MCP）为 None。安装页的勾选行按它把同一处的产品合成一行
+pub fn skill_columns(env: &Env, h: &Harness) -> (Option<String>, Option<String>) {
+    let table = all_harnesses(env);
+    let user = h
+        .global_dir
+        .as_ref()
+        .filter(|_| !h.managed_global_dir)
+        .map(|dir| column_owner(&table, h, &|x| x.global_dir.as_ref() == Some(dir)));
+    let project = h
+        .project_dir
+        .as_ref()
+        .map(|dir| column_owner(&table, h, &|x| x.project_dir.as_ref() == Some(dir)));
+    (user, project)
+}
+
+/// 所有可写目标：每个启用 harness 一列——全局目录、per-agent 目录、每个项目的项目目录。
+/// 同一品牌的几个产品共用一个目录就合成一列（#251，Kimi Code 与 Kimi 桌面版都读 `~/.agents/skills`）：
+/// id 取表里这个品牌在这个目录的第一个产品，不随装了哪几个变；不同品牌共用同一个目录时各自成列，不合并。
+/// 列名：一个品牌在这一处（用户级 / 某个项目）只有一列时写品牌名，有几列时写各自的产品名。
 /// 目录不存在的目标照常产出，只标 `exists == false`：它不成列，但引入弹层可选，建链时就地创建。
 /// 目标目录整个是指向某本体位置的软链时填 `linked_whole_to`，这只对已存在的目录求值
 pub fn targets(
@@ -593,19 +649,34 @@ pub fn targets(
     projects: &[PathBuf],
     sources: &[Source],
 ) -> Vec<Target> {
+    // 列 id 的归属按整张表算：只装了 Kimi 桌面版时这一列也叫 kimi-cli
+    let table = all_harnesses(env);
+    let owner = |h: &Harness, same: &dyn Fn(&Harness) -> bool| column_owner(&table, h, same);
+    // 每个目标记下它的品牌（per-agent 目录不按品牌起名，记 None），最后按「这一处里这个品牌有几列」定列名
     let mut out: Vec<Target> = Vec::new();
-    let mut push = |id: String, label: String, path: PathBuf, scope: TargetScope| {
-        // 判断"目标目录是否存在"要跟随软链：整目录软链也算已存在
-        let exists = path.is_dir();
-        out.push(Target {
-            id,
-            label,
-            path,
-            scope,
-            exists,
-            linked_whole_to: None,
-        });
-    };
+    let mut brands: Vec<Option<(String, String)>> = Vec::new();
+    let mut push =
+        |id: String, label: String, brand: Option<&Harness>, path: PathBuf, scope: TargetScope| {
+            if let Some(merged) = out.iter_mut().find(|t| t.id == id) {
+                // 同一品牌的另一个产品也读这一处（列 id 相同）：记下它
+                if let Some(h) = brand {
+                    merged.readers.push(h.id.clone());
+                }
+                return;
+            }
+            // 判断"目标目录是否存在"要跟随软链：整目录软链也算已存在
+            let exists = path.is_dir();
+            out.push(Target {
+                id,
+                label,
+                path,
+                scope,
+                exists,
+                linked_whole_to: None,
+                readers: brand.map(|h| vec![h.id.clone()]).unwrap_or_default(),
+            });
+            brands.push(brand.map(|h| (h.brand.clone(), h.brand_name.clone())));
+        };
 
     for h in harnesses {
         // 托管目录由 harness 自己装配，不给可写列
@@ -613,13 +684,13 @@ pub fn targets(
             continue;
         }
         if let Some(dir) = h.global_dir.clone() {
+            let id = owner(h, &|x| x.global_dir.as_ref() == Some(&dir));
             push(
-                h.id.clone(),
+                id.clone(),
                 h.display_name.clone(),
+                Some(h),
                 dir,
-                TargetScope::Global {
-                    harness_id: h.id.clone(),
-                },
+                TargetScope::Global { harness_id: id },
             );
         }
     }
@@ -628,6 +699,7 @@ pub fn targets(
         push(
             format!("project:{key}::{}", a.harness_id),
             a.display_name,
+            None,
             a.dir,
             TargetScope::Project {
                 project: a.root,
@@ -639,19 +711,50 @@ pub fn targets(
     for p in projects {
         let key = normalize(p).to_string_lossy().into_owned();
         for h in harnesses {
-            let Some(dir) = h.project_dir.as_ref().map(|d| p.join(d)) else {
+            let Some(relative) = h.project_dir.as_ref() else {
                 continue;
             };
+            let id = owner(h, &|x| x.project_dir.as_ref() == Some(relative));
             push(
-                format!("project:{key}::{}", h.id),
+                format!("project:{key}::{id}"),
                 h.display_name.clone(),
-                dir,
+                Some(h),
+                p.join(relative),
                 TargetScope::Project {
                     project: p.clone(),
-                    harness_id: h.id.clone(),
+                    harness_id: id,
                     project_label: None,
                 },
             );
+        }
+    }
+    let place = |t: &Target| match &t.scope {
+        TargetScope::Global { .. } => None,
+        TargetScope::Project { project, .. } => Some(project.clone()),
+    };
+    let named: Vec<Option<String>> = out
+        .iter()
+        .zip(&brands)
+        .map(|(t, brand)| {
+            let (id, name) = brand.as_ref()?;
+            let alone = out
+                .iter()
+                .zip(&brands)
+                .filter(|(o, b)| {
+                    place(o) == place(t) && b.as_ref().is_some_and(|(other, _)| other == id)
+                })
+                .count()
+                == 1;
+            alone.then(|| name.clone())
+        })
+        .collect();
+    for (t, name) in out.iter_mut().zip(named) {
+        if let Some(name) = name {
+            t.label = name;
+        }
+        // 只有一个产品读的不算合成一列
+        if t.readers.len() < 2 {
+            t.readers.clear();
         }
     }
 
@@ -676,8 +779,50 @@ pub fn all_harnesses(env: &Env) -> Vec<Harness> {
     skill_specs().iter().map(|s| resolve(s, env)).collect()
 }
 
+/// 一个品牌与它的产品（GLOSSARY「品牌」「产品」）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Brand {
+    pub id: String,
+    pub name: String,
+    /// 这个品牌的全部产品（含只有 MCP 的），表的先后
+    pub products: Vec<Harness>,
+}
+
+/// 本机系统上登记的全部品牌，按它第一个产品在表里的先后
+pub fn all_brands(env: &Env) -> Vec<Brand> {
+    group_brands(specs().iter().map(|s| resolve(s, env)))
+}
+
+fn group_brands(products: impl IntoIterator<Item = Harness>) -> Vec<Brand> {
+    let mut out: Vec<Brand> = Vec::new();
+    for h in products {
+        match out.iter_mut().find(|b| b.id == h.brand) {
+            Some(brand) => brand.products.push(h),
+            None => out.push(Brand {
+                id: h.brand.clone(),
+                name: h.brand_name.clone(),
+                products: vec![h],
+            }),
+        }
+    }
+    out
+}
+
+/// 已安装的产品，含只有 MCP 的（Claude Desktop），表的先后
+pub fn installed_products(env: &Env) -> Vec<Harness> {
+    installed_in(specs(), env)
+}
+
+/// 已安装的品牌（装了它任一个产品），品牌的先后。设置的名单与名额按它算
+pub fn installed_brands(env: &Env) -> Vec<String> {
+    group_brands(installed_products(env))
+        .into_iter()
+        .map(|b| b.id)
+        .collect()
+}
+
 /// 任一探测目录（detect_dir，缺省 global_dir）存在，且不是只装着通往 skills 的空壳；
-/// 或者装了同品牌的桌面应用（detect_app）。只有 MCP 的 agent 不在里面（见 `mcp_columns`）
+/// 或者装了它的应用包（detect_app）。只有 MCP 的 agent 不在里面（见 `installed_products`、`mcp_columns`）
 pub fn installed(env: &Env) -> Vec<Harness> {
     installed_in(skill_specs(), env)
 }
@@ -687,8 +832,13 @@ fn installed_in(specs: Vec<HarnessSpec>, env: &Env) -> Vec<Harness> {
         .iter()
         .filter_map(|s| {
             let h = resolve(s, env);
-            let mut probes = resolve_all(&s.detect_dir, env);
-            if probes.is_empty() {
+            let mut probes = if s.apps_only && !env.apps.is_empty() {
+                Vec::new()
+            } else {
+                resolve_all(&s.detect_dir, env)
+            };
+            // 只认应用包的（Kimi 桌面版）：skill 目录是共用的通用仓库，存在不说明装了它
+            if probes.is_empty() && s.detect_app.is_empty() {
                 probes.extend(h.global_dir.clone());
             }
             let skill_dirs = resolve_all(&s.global_dir, env);
@@ -699,41 +849,30 @@ fn installed_in(specs: Vec<HarnessSpec>, env: &Env) -> Vec<Harness> {
         .collect()
 }
 
-/// MCP 页的列（spec 2026-09-27-mcp-batch1 R7、skill-mcp-market R17）：两页共用一份名单，
-/// `shown` 是名单里正显示的（`enabled` 之后，agent 表先后），这里只留支持 MCP 的；
-/// 再加上 Claude Desktop——它不进名单、不占名额，装了且 Claude Code 在列时紧跟在 Claude Code 后面
-/// （列头与 Claude Code 合成一组）。只看某个项目时它整列都空，由前端按位置不出
-pub fn mcp_columns(env: &Env, shown: &[Harness]) -> Vec<Harness> {
-    let mut out: Vec<Harness> = shown
-        .iter()
-        .filter(|h| crate::mcp::supports(&h.id))
-        .cloned()
-        .collect();
-    if let Some(at) = out.iter().position(|h| h.id == "claude-code") {
-        let desktop = specs()
-            .into_iter()
-            .filter(|s| s.id == "claude-desktop")
-            .collect();
-        if let Some(desktop) = installed_in(desktop, env).into_iter().next() {
-            out.insert(at + 1, desktop);
-        }
-    }
-    out
-}
-
-/// 去掉被用户关掉的 harness，顺序不变
-pub fn enabled(installed: Vec<Harness>, settings: &Settings) -> Vec<Harness> {
-    installed
+/// MCP 页的列（spec 2026-09-27-mcp-batch1 R7、#251）：两页共用一份名单（按品牌），这里取名单里的品牌下
+/// 装了的、支持 MCP 的产品，含只有 MCP 的（Claude Desktop 跟着 Claude 品牌走，不另占名额）。
+/// 表里同一品牌的产品挨着，所以同品牌的列也挨着，前端按品牌合组。没有项目级的产品（Claude Desktop）
+/// 只看某个项目时整列都空，由前端按位置不出
+pub fn mcp_columns(env: &Env, settings: &Settings) -> Vec<Harness> {
+    enabled(installed_products(env), settings)
         .into_iter()
-        .filter(|h| !settings.disabled_harnesses.contains(&h.id))
+        .filter(|h| crate::mcp::supports(&h.id))
         .collect()
 }
 
-/// 列表里最多显示几个 agent（DESIGN「设置页 › 最多 4 个」）：矩阵、工具行、添加页底部都按
-/// 4 个排版，再多就挤出窗口。唯一定义处，前端经 `list_harnesses` 拿到，不另写一个 4
+/// 去掉品牌被用户关掉的产品，顺序不变
+pub fn enabled(installed: Vec<Harness>, settings: &Settings) -> Vec<Harness> {
+    installed
+        .into_iter()
+        .filter(|h| !settings.disabled_harnesses.contains(&h.brand))
+        .collect()
+}
+
+/// 列表里最多显示几个品牌（DESIGN「设置页 › 最多 4 个」，#251 起按品牌数）：矩阵、工具行、添加页底部都按
+/// 4 个品牌排版，再多就挤出窗口。唯一定义处，前端经 `list_harnesses` 拿到，不另写一个 4
 pub const MAX_SHOWN: usize = 4;
 
-/// 显示中的 agent 数：已安装且不在不显示名单里
+/// 显示中的品牌数：已安装且不在不显示名单里
 fn shown_count(installed: &[String], settings: &Settings) -> usize {
     installed
         .iter()
@@ -741,7 +880,8 @@ fn shown_count(installed: &[String], settings: &Settings) -> usize {
         .count()
 }
 
-/// 按上限整理显示名单，返回是否改动。`installed` 按 agent 表的先后。
+/// 按上限整理显示名单，返回是否改动。名单与 `installed` 都是品牌 id（#251，见 `installed_brands`），按品牌的先后；
+/// 旧版按产品 id 记的名单不迁移：认不出的 id 当没装，清出去。
 /// - 新装的（不在 `known_installed` 里、也不在不显示名单里）：显示不满 `MAX_SHOWN` 个时照常出现，
 ///   已满就记进不显示名单——不挤掉用户已经在看的
 /// - 新用户与升级上来的老数据 `known_installed` 为空，已安装的全算新装，于是按表先后留前 4 个
@@ -803,7 +943,7 @@ impl std::fmt::Display for ShownLimitReached {
 
 impl std::error::Error for ShownLimitReached {}
 
-/// 设置页勾选 / 取消勾选一个 agent。勾上已安装的而显示已满时拒绝，名单不动。
+/// 设置页勾选 / 取消勾选一个品牌（`id` 是品牌 id）。勾上已安装的而显示已满时拒绝，名单不动。
 /// 设置页只给已安装的勾选框；未安装的不在名单里（见 `reconcile_shown`）
 pub fn set_shown(
     installed: &[String],
@@ -1449,11 +1589,63 @@ mod tests {
             disabled_harnesses: vec!["codex".into()],
             ..Default::default()
         };
-        let ids: Vec<String> = enabled(installed, &settings)
+        let ids: Vec<String> = enabled(installed.clone(), &settings)
             .into_iter()
             .map(|h| h.id)
             .collect();
         assert_eq!(ids, vec!["claude-code".to_string(), "cursor".to_string()]);
+        // 名单记的是品牌（#251）：不显示 Claude＝Claude Code 也不显示
+        let settings = Settings {
+            disabled_harnesses: vec!["claude".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            id_list(enabled(installed, &settings)),
+            s(&["codex", "cursor"])
+        );
+    }
+
+    /// #251：名单与名额按品牌算——Claude Code、Claude Desktop、Kimi Code、Kimi 桌面版都装了也只占两个名额；
+    /// 新装的品牌在已满 4 个时不挤掉已勾的
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn shown_list_counts_brands_not_products() {
+        let t = TempTree::new();
+        let home = t.root();
+        install(
+            &t,
+            &[".claude", DESKTOP_DIR, ".codex", ".kimi-code", ".cursor"],
+        );
+        let e = Env {
+            apps: vec![t.dir("Applications")],
+            ..env(&home, &[])
+        };
+        put_app(&t, "Kimi.app", "com.moonshot.kimichat");
+        let brands = installed_brands(&e);
+        assert_eq!(brands, s(&["claude", "codex", "cursor", "kimi"]));
+        let mut settings = Settings::default();
+        reconcile_shown(&brands, &mut settings);
+        assert!(settings.disabled_harnesses.is_empty());
+        // 4 个品牌、6 个产品，SKILLS 页的列来自其中有 skill 目录的 5 个
+        assert_eq!(
+            id_list(enabled(installed(&e), &settings)),
+            s(&["claude-code", "codex", "cursor", "kimi-cli", "kimi-desktop"])
+        );
+        // 新装 WorkBuddy：已满 4 个，不自动出现
+        put_app(&t, "WorkBuddy.app", "com.workbuddy.workbuddy");
+        let brands = installed_brands(&e);
+        reconcile_shown(&brands, &mut settings);
+        assert_eq!(settings.disabled_harnesses, s(&["workbuddy"]));
+        assert_eq!(
+            set_shown(&brands, &mut settings, "workbuddy", true),
+            Err(ShownLimitReached)
+        );
+        set_shown(&brands, &mut settings, "kimi", false).unwrap();
+        set_shown(&brands, &mut settings, "workbuddy", true).unwrap();
+        assert_eq!(
+            id_list(enabled(installed(&e), &settings)),
+            s(&["claude-code", "codex", "cursor", "workbuddy"])
+        );
     }
 
     #[test]
@@ -1638,30 +1830,131 @@ mod tests {
         assert!(!installed_ids(&env(&t.root(), &[])).contains(&"kimi-cli".to_string()));
     }
 
-    /// 只装 Kimi 桌面版的人没有 ~/.kimi-code：放应用的文件夹里有 Kimi.app（com.moonshot.kimichat）也算装了 Kimi；
-    /// 同名但 bundle id 不对的不算
+    /// 只装 Kimi 桌面版的人没有 ~/.kimi-code：放应用的文件夹里有 Kimi.app（com.moonshot.kimichat）就是装了
+    /// Kimi 桌面版（#251 起它自己一行，与 Kimi Code 同属 Kimi 品牌，品牌算已安装）；同名但 bundle id 不对的不算。
+    /// 通用仓库 ~/.agents/skills 在不说明装了它
     #[test]
     fn kimi_desktop_app_counts_as_installed() {
         let t = TempTree::new();
         let home = t.root();
-        let apps = t.dir("Applications");
-        let contents = t.dir("Applications/Kimi.app/Contents");
-        let plist = |id: &str| {
-            format!(
-                r#"<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>{id}</string></dict></plist>"#
-            )
-        };
+        t.skill(".agents/skills/pdf");
         let e = Env {
-            apps: vec![apps],
+            apps: vec![t.dir("Applications")],
             ..env(&home, &[])
         };
-        std::fs::write(contents.join("Info.plist"), plist("com.example.kimi")).unwrap();
-        assert!(!installed_ids(&e).contains(&"kimi-cli".to_string()));
-        std::fs::write(contents.join("Info.plist"), plist("com.moonshot.kimichat")).unwrap();
-        assert_eq!(installed_ids(&e), s(&["kimi-cli"]));
-        let kimi = all_harnesses(&e).into_iter().find(|h| h.id == "kimi-cli");
-        assert_eq!(kimi.map(|h| h.display_name), Some("Kimi".to_string()));
+        put_app(&t, "Kimi.app", "com.example.kimi");
+        assert!(installed_brands(&e).is_empty());
+        put_app(&t, "Kimi.app", "com.moonshot.kimichat");
+        assert_eq!(installed_ids(&e), s(&["kimi-desktop"]));
+        assert_eq!(installed_brands(&e), s(&["kimi"]));
+    }
+
+    /// 放应用的文件夹里装一个应用包（`Info.plist` 只写 bundle id）
+    fn put_app(t: &TempTree, name: &str, bundle_id: &str) {
+        let contents = t.dir(&format!("Applications/{name}/Contents"));
+        std::fs::write(
+            contents.join("Info.plist"),
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>{bundle_id}</string></dict></plist>"#
+            ),
+        )
+        .unwrap();
+    }
+
+    /// #251 / #247：WorkBuddy 在能查应用包的系统（macOS）上只认应用包 com.workbuddy.workbuddy——卸载后留下的
+    /// ~/.workbuddy 不算（不然模型页会继续往它的 models.json 写）；skill 写 ~/.workbuddy/skills，
+    /// 项目里写 .workbuddy/skills（真机核对：不读 .codebuddy/skills、.agents/skills）
+    #[test]
+    fn workbuddy_is_found_by_its_app_or_data_dir() {
+        let t = TempTree::new();
+        let home = t.root();
+        let e = Env {
+            apps: vec![t.dir("Applications")],
+            ..env(&home, &[])
+        };
+        t.dir(".workbuddy/skills/pdf");
+        t.file(&t.dir(".workbuddy"), "settings.json");
+        assert!(
+            !installed_ids(&e).contains(&"workbuddy".to_string()),
+            "macOS 上只有数据目录（卸载后的残留）不算"
+        );
+        put_app(&t, "WorkBuddy.app", "com.workbuddy.workbuddy");
+        let wb = installed(&e)
+            .into_iter()
+            .find(|h| h.id == "workbuddy")
+            .unwrap();
+        assert_eq!(wb.display_name, "WorkBuddy");
+        assert_eq!(wb.global_dir, Some(home.join(".workbuddy/skills")));
+        assert_eq!(wb.project_dir.as_deref(), Some(".workbuddy/skills"));
+
+        // 没有应用包（Windows、或应用不在 /Applications）：数据目录里有它自己写的文件也算
+        let t = TempTree::new();
+        t.file(&t.dir(".workbuddy"), "settings.json");
+        assert!(installed_ids(&env(&t.root(), &[])).contains(&"workbuddy".to_string()));
+    }
+
+    /// #251：DeepSeek Harness 读 ~/.agents/skills 与 ~/.dsh/skills——列落在 ~/.agents/skills（同 Kimi，
+    /// 通用仓库里的 skill 它天然能用）；认应用包 com.deepseek.dsh 或数据目录 ~/.dsh。
+    /// 只有 ~/.dsh/skills 空壳不算装过
+    #[test]
+    fn deepseek_harness_reads_the_agents_store() {
+        let t = TempTree::new();
+        let home = t.root();
+        let e = Env {
+            apps: vec![t.dir("Applications")],
+            ..env(&home, &[])
+        };
+        t.dir(".dsh/skills/pdf");
+        assert!(!installed_ids(&e).contains(&"deepseek-harness".to_string()));
+        put_app(&t, "DeepSeek Harness.app", "com.deepseek.dsh");
+        let dsh = installed(&e)
+            .into_iter()
+            .find(|h| h.id == "deepseek-harness")
+            .unwrap();
+        assert_eq!(dsh.display_name, "DeepSeek Harness");
+        assert_eq!(dsh.global_dir, Some(home.join(".agents/skills")));
+        assert_eq!(dsh.project_dir.as_deref(), Some(".agents/skills"));
+
+        let t = TempTree::new();
+        t.file(&t.dir(".dsh/profiles/desktop"), "cordis.patch.yml");
+        assert!(installed_ids(&env(&t.root(), &[])).contains(&"deepseek-harness".to_string()));
+    }
+
+    /// #251：品牌按产品名认——Claude Code 与 Claude Desktop 同属 Claude，Kimi Code 与 Kimi 桌面版同属 Kimi；
+    /// 没写品牌的产品自成一个品牌，名字就是产品名。同一品牌的产品在表里挨着（列、设置都按品牌先后排）
+    #[test]
+    fn products_carry_their_brand() {
+        let e = env(Path::new("/home/u"), &[]);
+        let brands = all_brands(&e);
+        let brand = |id: &str| brands.iter().find(|b| b.id == id).unwrap();
+        let products =
+            |id: &str| -> Vec<String> { brand(id).products.iter().map(|h| h.id.clone()).collect() };
+        assert_eq!(brand("claude").name, "Claude");
+        // Claude Desktop 只在 macOS、Windows 上登记
+        let claude = if cfg!(any(target_os = "macos", target_os = "windows")) {
+            s(&["claude-code", "claude-desktop"])
+        } else {
+            s(&["claude-code"])
+        };
+        assert_eq!(products("claude"), claude);
+        assert_eq!(brand("kimi").name, "Kimi");
+        assert_eq!(products("kimi"), s(&["kimi-cli", "kimi-desktop"]));
+        assert_eq!(brand("codex").name, "Codex");
+        assert_eq!(products("codex"), s(&["codex"]));
+        assert_eq!(brand("workbuddy").name, "WorkBuddy");
+        // 品牌的先后＝它第一个产品在表里的先后
+        assert_eq!(brands[0].id, "claude");
+        assert_eq!(brands[1].id, "codex");
+        let kimi = &brand("kimi").products;
+        assert_eq!(kimi[0].display_name, "Kimi Code");
+        assert_eq!(kimi[1].display_name, "Kimi Desktop");
+        assert!(kimi
+            .iter()
+            .all(|h| h.brand == "kimi" && h.brand_name == "Kimi"));
+        // 每个产品只属于一个品牌，所有产品都在某个品牌里
+        let total: usize = brands.iter().map(|b| b.products.len()).sum();
+        assert_eq!(total, specs().len());
     }
 
     /// npx skills 还在往旧目录建空壳（~/.gemini/antigravity/skills、~/.zencoder/skills）：
@@ -2315,7 +2608,7 @@ mod tests {
             vec![
                 (
                     "claude-code".to_string(),
-                    "Claude Code".to_string(),
+                    "Claude".to_string(),
                     home.join(".claude/skills"),
                     TargetScope::Global {
                         harness_id: "claude-code".into()
@@ -2331,7 +2624,7 @@ mod tests {
                 ),
                 (
                     format!("project:{key}::claude-code"),
-                    "Claude Code".to_string(),
+                    "Claude".to_string(),
                     project.join(".claude/skills"),
                     proj("claude-code"),
                 ),
@@ -2461,6 +2754,104 @@ mod tests {
         }
     }
 
+    /// #251：同一品牌的几个产品共用一个 skill 文件夹就合成一列、用品牌名（Kimi Code 与 Kimi 桌面版都读
+    /// ~/.agents/skills）；列 id 取表里这个品牌在这个文件夹的第一个产品，只装了桌面版也不变（自动链接规则按 id 记）。
+    /// 品牌在一处只有一列时列名也是品牌名（Claude Code → Claude）；不同品牌共用一处仍各占一列
+    #[test]
+    fn same_brand_sharing_a_dir_is_one_column_named_after_the_brand() {
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir(".agents/skills");
+        t.dir(".claude/skills");
+        let project = t.dir("Project/app");
+        t.dir("Project/app/.agents/skills");
+        t.dir("Project/app/.claude/skills");
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        let columns = |hs: Vec<Harness>| -> Vec<(String, String)> {
+            existing(targets(&e, &hs, std::slice::from_ref(&project), &[]))
+                .into_iter()
+                .map(|x| (x.id, x.label))
+                .collect()
+        };
+        let key = project.display();
+        let pair = |id: String, label: &str| (id, label.to_string());
+        assert_eq!(
+            columns(vec![
+                pick("claude-code"),
+                pick("cline"),
+                pick("kimi-cli"),
+                pick("kimi-desktop")
+            ]),
+            vec![
+                pair("claude-code".into(), "Claude"),
+                pair("cline".into(), "Cline"),
+                pair("kimi-cli".into(), "Kimi"),
+                pair(format!("project:{key}::claude-code"), "Claude"),
+                pair(format!("project:{key}::cline"), "Cline"),
+                pair(format!("project:{key}::kimi-cli"), "Kimi"),
+            ]
+        );
+        // 只装了 Kimi 桌面版（它没有项目级）：用户级那一列 id 不变
+        assert_eq!(
+            columns(vec![pick("kimi-desktop")]),
+            vec![pair("kimi-cli".into(), "Kimi")]
+        );
+    }
+
+    /// 合成一列的目标记下读它的各产品（表的先后），列头提示框按它点名（画板第 5 屏：`Kimi Code、Kimi 桌面版都读这里`）；
+    /// 只有一个产品读的不记
+    #[test]
+    fn a_merged_column_names_the_products_that_read_it() {
+        let t = TempTree::new();
+        let home = t.root();
+        t.dir(".agents/skills");
+        t.dir(".claude/skills");
+        let project = t.dir("Project/app");
+        t.dir("Project/app/.agents/skills");
+        let e = env(&home, &[]);
+        let all = all_harnesses(&e);
+        let pick = |id: &str| all.iter().find(|h| h.id == id).unwrap().clone();
+        let readers: Vec<(String, Vec<String>)> = existing(targets(
+            &e,
+            &[pick("claude-code"), pick("kimi-cli"), pick("kimi-desktop")],
+            std::slice::from_ref(&project),
+            &[],
+        ))
+        .into_iter()
+        .map(|x| (x.id, x.readers))
+        .collect();
+        let key = project.display();
+        assert_eq!(
+            readers,
+            vec![
+                ("claude-code".into(), vec![]),
+                (
+                    "kimi-cli".into(),
+                    vec!["kimi-cli".to_string(), "kimi-desktop".to_string()]
+                ),
+                (format!("project:{key}::kimi-cli"), vec![]),
+            ]
+        );
+    }
+
+    /// 安装页勾选行按列归并（评审 #13）：Kimi 两个产品在用户级同一列，桌面版没有项目级
+    #[test]
+    fn skill_columns_follow_the_merged_column_ids() {
+        let t = TempTree::new();
+        let e = env(&t.root(), &[]);
+        let all = all_harnesses(&e);
+        let of = |id: &str| skill_columns(&e, all.iter().find(|h| h.id == id).unwrap());
+        let some = |id: &str| Some(id.to_string());
+        assert_eq!(of("kimi-cli"), (some("kimi-cli"), some("kimi-cli")));
+        assert_eq!(of("kimi-desktop"), (some("kimi-cli"), None));
+        assert_eq!(
+            of("claude-code"),
+            (some("claude-code"), some("claude-code"))
+        );
+    }
+
     // 用 weiboap 的 agent_dirs 做夹具，跟着内部版 feature 走
     #[cfg(feature = "weiboap")]
     #[test]
@@ -2503,7 +2894,7 @@ mod tests {
             got[1].id,
             format!("project:{}::claude-code", project.display())
         );
-        assert_eq!(got[1].label, "Claude Code");
+        assert_eq!(got[1].label, "Claude");
         assert_eq!(got[1].path, project.join(".claude/skills"));
         assert_eq!(got[1].linked_whole_to.as_deref(), Some(srcs[0].id.as_str()));
     }
@@ -3006,29 +3397,31 @@ mod tests {
     #[cfg(target_os = "macos")]
     const DESKTOP_DIR: &str = "Library/Application Support/Claude";
 
-    /// Claude Desktop 只有 MCP：SKILLS 的 agent 表、已安装、设置的名单里都没有它
+    /// Claude Desktop 只有 MCP：SKILLS 的 agent 表与已安装（有 skill 目录的）里没有它；它算 Claude 品牌已安装
     #[cfg(target_os = "macos")]
     #[test]
     fn claude_desktop_is_mcp_only() {
         let t = TempTree::new();
-        install(&t, &[".claude", ".codex", DESKTOP_DIR]);
+        install(&t, &[".codex", DESKTOP_DIR]);
         let e = env(&t.root(), &[]);
         assert!(!all_harnesses(&e).iter().any(|h| h.id == "claude-desktop"));
         assert!(!installed(&e).iter().any(|h| h.id == "claude-desktop"));
-        let desktop = mcp_columns(&e, &installed(&e))
+        assert_eq!(installed_brands(&e), s(&["claude", "codex"]));
+        let desktop = mcp_columns(&e, &Settings::default())
             .into_iter()
             .find(|h| h.id == "claude-desktop")
             .unwrap();
         assert_eq!(desktop.display_name, "Claude Desktop");
+        assert_eq!(desktop.brand_name, "Claude");
         assert_eq!(desktop.global_dir, None);
         assert_eq!(desktop.project_dir, None);
     }
 
-    /// AC10 AC11：一份名单两页共用——MCP 页的列＝名单里支持 MCP 的（OpenCode 不出），
-    /// 再加装了的 Claude Desktop，紧跟 Claude Code、不占名额
+    /// AC10 AC11 + #251：一份名单两页共用——MCP 页的列＝名单里的品牌下、装了的、支持 MCP 的产品（OpenCode 不出），
+    /// 同一品牌的挨着；Claude Desktop 跟着 Claude 品牌走，不另占名额，也不再要求 Claude Code 在列
     #[cfg(target_os = "macos")]
     #[test]
-    fn mcp_columns_are_the_shared_list_with_mcp_plus_claude_desktop() {
+    fn mcp_columns_are_the_shown_brands_products_with_mcp() {
         let t = TempTree::new();
         install(
             &t,
@@ -3042,27 +3435,24 @@ mod tests {
             ],
         );
         let e = env(&t.root(), &[]);
-        let installed = installed(&e);
-        let all = id_list(installed.clone());
+        let brands = installed_brands(&e);
         assert_eq!(
-            all,
-            s(&["claude-code", "codex", "cursor", "opencode", "gemini-cli"])
+            brands,
+            s(&["claude", "codex", "cursor", "opencode", "gemini-cli"])
         );
-        // 新用户：名单按表先后取前 4 个（Claude Desktop 不在里面，不占名额）
+        // 新用户：名单按品牌先后取前 4 个
         let mut settings = Settings::default();
-        reconcile_shown(&all, &mut settings);
+        reconcile_shown(&brands, &mut settings);
         assert_eq!(settings.disabled_harnesses, s(&["gemini-cli"]));
-        let shown = enabled(installed.clone(), &settings);
         assert_eq!(
-            id_list(mcp_columns(&e, &shown)),
+            id_list(mcp_columns(&e, &settings)),
             s(&["claude-code", "claude-desktop", "codex", "cursor"])
         );
-        // 名单换成 Claude Code、Codex、Cursor、Gemini CLI：MCP 页五格
-        set_shown(&all, &mut settings, "opencode", false).unwrap();
-        set_shown(&all, &mut settings, "gemini-cli", true).unwrap();
-        let shown = enabled(installed.clone(), &settings);
+        // 名单换成 Claude、Codex、Cursor、Gemini CLI：MCP 页五格
+        set_shown(&brands, &mut settings, "opencode", false).unwrap();
+        set_shown(&brands, &mut settings, "gemini-cli", true).unwrap();
         assert_eq!(
-            id_list(mcp_columns(&e, &shown)),
+            id_list(mcp_columns(&e, &settings)),
             s(&[
                 "claude-code",
                 "claude-desktop",
@@ -3071,18 +3461,10 @@ mod tests {
                 "gemini-cli"
             ])
         );
-        // 勾满 4 个再勾被拒，名单不动
-        let before = settings.clone();
+        // 取消 Claude：两格一起不出
+        set_shown(&brands, &mut settings, "claude", false).unwrap();
         assert_eq!(
-            set_shown(&all, &mut settings, "opencode", true),
-            Err(ShownLimitReached)
-        );
-        assert_eq!(settings, before);
-        // Claude Code 不在名单里：Claude Desktop 跟着它，也不出
-        set_shown(&all, &mut settings, "claude-code", false).unwrap();
-        let shown = enabled(installed, &settings);
-        assert_eq!(
-            id_list(mcp_columns(&e, &shown)),
+            id_list(mcp_columns(&e, &settings)),
             s(&["codex", "cursor", "gemini-cli"])
         );
     }
@@ -3093,9 +3475,8 @@ mod tests {
         let t = TempTree::new();
         install(&t, &[".claude", ".codex", ".cline"]);
         let e = env(&t.root(), &[]);
-        let shown = installed(&e);
         assert_eq!(
-            id_list(mcp_columns(&e, &shown)),
+            id_list(mcp_columns(&e, &Settings::default())),
             s(&["claude-code", "codex"])
         );
     }
@@ -3117,7 +3498,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            id_list(mcp_columns(&e, &installed(&e))),
+            id_list(mcp_columns(&e, &Settings::default())),
             s(&["gemini-cli", "github-copilot"])
         );
     }

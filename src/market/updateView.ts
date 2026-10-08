@@ -3,7 +3,7 @@
 /// 更新之后的纸窗、设置里 `自动检查 skill 更新` 那一行的灰字。不碰 api、不产 JSX，tests/market-update.test.ts 直接测。
 /// 时刻一律是 unix 秒（与 core 一致）。
 
-import { listText, t, tn, tSpaced, type MessageKey } from "../i18n.ts";
+import { listText, t, tn, type MessageKey } from "../i18n.ts";
 import type { InstallOutcome, LocationKey, MarketFallback, UpdateInfo } from "../types.ts";
 import { shortDate } from "../dateText.ts";
 
@@ -126,10 +126,10 @@ export function confirmModel(targets: readonly UpdateInfo[]): UpdateConfirmModel
       ...unknown.map((u) => u.name),
     ];
     const list = listText(parts, "enum");
-    // 以名字（西文）收尾时与后面的汉字隔一个空格：`pdf 你改过`，`2 个文件你改过`（见 tSpaced）
+    // 以名字（西文）收尾时与后面的汉字隔一个空格：`pdf 你改过`，`2 个文件你改过`（见 i18n.ts 的 `spaced`）
     body = clean
-      ? tSpaced("market.update.changedClean", { list, clean })
-      : tSpaced("market.update.changed", { list });
+      ? t("market.update.changedClean", { list, clean })
+      : t("market.update.changed", { list });
   }
   const prefix = withFiles.length > 1;
   return {

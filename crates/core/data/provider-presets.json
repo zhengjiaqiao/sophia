@@ -1,5 +1,5 @@
 {
-  "_notice": "服务商预设合并自 farion1231/cc-switch (MIT) 与 yetone/magpie (MIT)，见仓库 NOTICE。cc-switch 为准，magpie 只补 cc-switch 没有的。合并日期 2026-10-05。",
+  "_notice": "服务商预设合并自 farion1231/cc-switch (MIT) 与 yetone/magpie (MIT)，见仓库 NOTICE。cc-switch 为准，magpie 只补 cc-switch 没有的。合并日期 2026-10-05。recommendedModels 整理自 cc-switch d35726e（Codex 预设的 modelCatalog 与默认模型、Claude 预设的模型环境变量）与 magpie 01aaa8e（套餐的 Models），整理日期 2026-10-07；对不上或来源没有的留空，加一家时走默认规则。",
   "providers": [
     {
       "id": "kimi",
@@ -14,7 +14,11 @@
       "anthropic": {
         "apiBase": "https://api.moonshot.cn/anthropic"
       },
-      "note": "按量计费 · 国内站"
+      "note": "按量计费 · 国内站",
+      "recommendedModels": [
+        "kimi-k3",
+        "kimi-k2.7-code"
+      ]
     },
     {
       "id": "kimi-for-coding",
@@ -29,7 +33,13 @@
       "anthropic": {
         "apiBase": "https://api.kimi.com/coding"
       },
-      "note": "Coding Plan · 国内站"
+      "note": "Coding Plan · 国内站",
+      "recommendedModels": [
+        "kimi-for-coding",
+        "kimi-for-coding-highspeed",
+        "k3",
+        "k3-256k"
+      ]
     },
     {
       "id": "shengsuanyun",
@@ -85,7 +95,10 @@
       "anthropic": {
         "apiBase": "https://ark.cn-beijing.volces.com/api/plan"
       },
-      "note": "Agent Plan"
+      "note": "Agent Plan",
+      "recommendedModels": [
+        "ark-code-latest"
+      ]
     },
     {
       "id": "volcengine-coding-plan",
@@ -100,7 +113,10 @@
       "anthropic": {
         "apiBase": "https://ark.cn-beijing.volces.com/api/coding"
       },
-      "note": "Coding Plan"
+      "note": "Coding Plan",
+      "recommendedModels": [
+        "ark-code-latest"
+      ]
     },
     {
       "id": "volcengine-doubao",
@@ -115,7 +131,10 @@
       "anthropic": {
         "apiBase": "https://ark.cn-beijing.volces.com/api/compatible"
       },
-      "note": "按量计费"
+      "note": "按量计费",
+      "recommendedModels": [
+        "doubao-seed-2-1-pro-260628"
+      ]
     },
     {
       "id": "siliconflow",
@@ -173,7 +192,11 @@
       },
       "anthropic": {
         "apiBase": "https://api.deepseek.com/anthropic"
-      }
+      },
+      "recommendedModels": [
+        "deepseek-flash",
+        "deepseek-v4-pro"
+      ]
     },
     {
       "id": "zhipu-glm",
@@ -188,7 +211,12 @@
       "anthropic": {
         "apiBase": "https://open.bigmodel.cn/api/anthropic"
       },
-      "note": "国内站"
+      "note": "国内站",
+      "recommendedModels": [
+        "glm-5.3",
+        "glm-5.3-flash",
+        "glm-5-turbo"
+      ]
     },
     {
       "id": "baidu-qianfan",
@@ -201,7 +229,11 @@
         "protocol": "responses"
       },
       "anthropic": null,
-      "note": "按量计费"
+      "note": "按量计费",
+      "recommendedModels": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash"
+      ]
     },
     {
       "id": "baidu-qianfan-token-plan",
@@ -216,7 +248,15 @@
       "anthropic": {
         "apiBase": "https://qianfan.baidubce.com/anthropic/tokenplan/personal"
       },
-      "note": "Token Plan"
+      "note": "Token Plan",
+      "recommendedModels": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-0731",
+        "glm-5.2",
+        "glm-5.1",
+        "kimi-k2.6"
+      ]
     },
     {
       "id": "qwen-ai",
@@ -231,7 +271,14 @@
       "anthropic": {
         "apiBase": "https://dashscope.aliyuncs.com/apps/anthropic"
       },
-      "note": "按量计费"
+      "note": "按量计费",
+      "recommendedModels": [
+        "qwen3.8-max",
+        "qwen3.8-2.4t-a95b",
+        "qwen3.8-27b",
+        "qwen3.7-plus",
+        "qwen3.8-flash"
+      ]
     },
     {
       "id": "qwen-ai-token-plan",
@@ -246,7 +293,12 @@
       "anthropic": {
         "apiBase": "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
       },
-      "note": "Token Plan"
+      "note": "Token Plan",
+      "recommendedModels": [
+        "qwen3.8-max",
+        "qwen3.8-flash",
+        "qwen3.7-plus"
+      ]
     },
     {
       "id": "tencent-hunyuan",
@@ -259,7 +311,12 @@
         "protocol": "responses"
       },
       "anthropic": null,
-      "note": "按量计费 · 国内站"
+      "note": "按量计费 · 国内站",
+      "recommendedModels": [
+        "hy3",
+        "hy4-preview",
+        "hy3-preview"
+      ]
     },
     {
       "id": "tencent-coding-plan",
@@ -289,7 +346,18 @@
       "anthropic": {
         "apiBase": "https://api.lkeap.cloud.tencent.com/plan/anthropic"
       },
-      "note": "Token Plan · 国内站"
+      "note": "Token Plan · 国内站",
+      "recommendedModels": [
+        "tc-code-latest",
+        "deepseek-v4-flash-202605",
+        "deepseek-v4-pro-202606",
+        "minimax-m2.7",
+        "glm-5",
+        "glm-5.1",
+        "glm-5.2",
+        "hy3",
+        "hy3-preview"
+      ]
     },
     {
       "id": "tencent-token-plan-enterprise-pro",
@@ -304,7 +372,26 @@
       "anthropic": {
         "apiBase": "https://tokenhub.tencentmaas.com/plan/anthropic"
       },
-      "note": "Enterprise Pro · 国内站"
+      "note": "Enterprise Pro · 国内站",
+      "recommendedModels": [
+        "auto",
+        "glm-5.3",
+        "glm-5.2",
+        "glm-5",
+        "glm-5.1",
+        "glm-5-turbo",
+        "kimi-k2.7-code",
+        "kimi-k2.7-code-highspeed",
+        "kimi-k2.6",
+        "minimax-m2.7",
+        "minimax-m3",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-0731",
+        "deepseek-v4-pro-0813",
+        "deepseek-v4-flash-202605",
+        "deepseek-v4-pro-202606"
+      ]
     },
     {
       "id": "tencent-token-plan-enterprise-lite",
@@ -319,7 +406,26 @@
       "anthropic": {
         "apiBase": "https://tokenhub.tencentmaas.com/plan/anthropic"
       },
-      "note": "Enterprise Lite · 国内站"
+      "note": "Enterprise Lite · 国内站",
+      "recommendedModels": [
+        "auto",
+        "glm-5.3",
+        "glm-5.2",
+        "glm-5",
+        "glm-5.1",
+        "glm-5-turbo",
+        "kimi-k2.7-code",
+        "kimi-k2.7-code-highspeed",
+        "kimi-k2.6",
+        "minimax-m2.7",
+        "minimax-m3",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-0731",
+        "deepseek-v4-pro-0813",
+        "deepseek-v4-flash-202605",
+        "deepseek-v4-pro-202606"
+      ]
     },
     {
       "id": "stepfun-api",
@@ -332,7 +438,10 @@
         "protocol": "responses"
       },
       "anthropic": null,
-      "note": "按量计费 · 国内站"
+      "note": "按量计费 · 国内站",
+      "recommendedModels": [
+        "step-3.7-flash"
+      ]
     },
     {
       "id": "stepfun",
@@ -347,7 +456,12 @@
       "anthropic": {
         "apiBase": "https://api.stepfun.com/step_plan"
       },
-      "note": "Step Plan · 国内站"
+      "note": "Step Plan · 国内站",
+      "recommendedModels": [
+        "step-3.7-flash",
+        "step-3.5-flash-2603",
+        "step-3.5-flash"
+      ]
     },
     {
       "id": "modelscope",
@@ -376,7 +490,10 @@
       },
       "anthropic": {
         "apiBase": "https://api.longcat.chat/anthropic"
-      }
+      },
+      "recommendedModels": [
+        "LongCat-2.0"
+      ]
     },
     {
       "id": "minimax",
@@ -391,7 +508,10 @@
       "anthropic": {
         "apiBase": "https://api.minimax.cn/anthropic"
       },
-      "note": "国内站"
+      "note": "国内站",
+      "recommendedModels": [
+        "MiniMax-M3"
+      ]
     },
     {
       "id": "astron-coding-plan",
@@ -403,7 +523,10 @@
         "apiBase": "https://maas-coding-api.cn-huabei-1.xf-yun.com/v1",
         "protocol": "responses"
       },
-      "anthropic": null
+      "anthropic": null,
+      "recommendedModels": [
+        "astron-code-latest"
+      ]
     },
     {
       "id": "bailing",
@@ -417,7 +540,10 @@
       },
       "anthropic": {
         "apiBase": "https://api.ant-ling.com/anthropic"
-      }
+      },
+      "recommendedModels": [
+        "Ling-2.6-1T"
+      ]
     },
     {
       "id": "xiaomi-mimo",
@@ -432,7 +558,14 @@
       "anthropic": {
         "apiBase": "https://api.xiaomimimo.com/anthropic"
       },
-      "note": "按量计费"
+      "note": "按量计费",
+      "recommendedModels": [
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ]
     },
     {
       "id": "xiaomi-mimo-token-plan-china",
@@ -447,7 +580,13 @@
       "anthropic": {
         "apiBase": "https://token-plan-cn.xiaomimimo.com/anthropic"
       },
-      "note": "Token Plan"
+      "note": "Token Plan",
+      "recommendedModels": [
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.5-pro",
+        "mimo-v2.5"
+      ]
     },
     {
       "id": "qwen-ai-coding-plan",
@@ -490,7 +629,11 @@
       "anthropic": {
         "apiBase": "https://api.moonshot.ai/anthropic"
       },
-      "note": "按量计费 · 海外站"
+      "note": "按量计费 · 海外站",
+      "recommendedModels": [
+        "kimi-k3",
+        "kimi-k2.7-code"
+      ]
     },
     {
       "id": "kimi-for-coding-global",
@@ -505,7 +648,13 @@
       "anthropic": {
         "apiBase": "https://api.kimi.ai/coding"
       },
-      "note": "Coding Plan · 海外站"
+      "note": "Coding Plan · 海外站",
+      "recommendedModels": [
+        "kimi-for-coding",
+        "kimi-for-coding-highspeed",
+        "k3",
+        "k3-256k"
+      ]
     },
     {
       "id": "packycode",
@@ -546,7 +695,10 @@
       },
       "anthropic": {
         "apiBase": "https://ark.ap-southeast.bytepluses.com/api/coding"
-      }
+      },
+      "recommendedModels": [
+        "ark-code-latest"
+      ]
     },
     {
       "id": "siliconflow-en",
@@ -602,7 +754,11 @@
       "anthropic": {
         "apiBase": "https://api.z.ai/api/anthropic"
       },
-      "note": "海外站"
+      "note": "海外站",
+      "recommendedModels": [
+        "glm-5.3",
+        "glm-5.3-flash"
+      ]
     },
     {
       "id": "qwencloud",
@@ -617,7 +773,15 @@
       "anthropic": {
         "apiBase": "https://dashscope-intl.aliyuncs.com/apps/anthropic"
       },
-      "note": "按量计费"
+      "note": "按量计费",
+      "recommendedModels": [
+        "qwen3.8-max",
+        "qwen3.8-flash",
+        "qwen3.7-max",
+        "qwen3.8-2.4t-a95b",
+        "qwen3.8-27b",
+        "qwen3.7-plus"
+      ]
     },
     {
       "id": "qwencloud-for-coding",
@@ -632,7 +796,12 @@
       "anthropic": {
         "apiBase": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
       },
-      "note": "Coding Plan"
+      "note": "Coding Plan",
+      "recommendedModels": [
+        "qwen3.7-plus",
+        "qwen3.6-plus",
+        "qwen3-coder-plus"
+      ]
     },
     {
       "id": "qwencloud-token-plan",
@@ -647,7 +816,13 @@
       "anthropic": {
         "apiBase": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic"
       },
-      "note": "Token Plan"
+      "note": "Token Plan",
+      "recommendedModels": [
+        "qwen3.8-max",
+        "qwen3.8-flash",
+        "qwen3.7-max",
+        "qwen3.7-plus"
+      ]
     },
     {
       "id": "tencent-token-plan-intl",
@@ -662,7 +837,15 @@
       "anthropic": {
         "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic"
       },
-      "note": "Token Plan · 海外站"
+      "note": "Token Plan · 海外站",
+      "recommendedModels": [
+        "auto",
+        "glm-5.2",
+        "kimi-k2.6",
+        "deepseek-v4-pro-202606",
+        "deepseek-v4-flash-202605",
+        "minimax-m3"
+      ]
     },
     {
       "id": "tencent-token-plan-enterprise-pro-intl",
@@ -677,7 +860,15 @@
       "anthropic": {
         "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic"
       },
-      "note": "Enterprise Pro · 海外站"
+      "note": "Enterprise Pro · 海外站",
+      "recommendedModels": [
+        "auto",
+        "glm-5.2",
+        "kimi-k2.6",
+        "deepseek-v4-pro-202606",
+        "deepseek-v4-flash-202605",
+        "minimax-m3"
+      ]
     },
     {
       "id": "tencent-token-plan-enterprise-lite-intl",
@@ -692,7 +883,15 @@
       "anthropic": {
         "apiBase": "https://tokenhub-intl.tencentcloudmaas.com/plan/anthropic"
       },
-      "note": "Enterprise Lite · 海外站"
+      "note": "Enterprise Lite · 海外站",
+      "recommendedModels": [
+        "auto",
+        "glm-5.2",
+        "kimi-k2.6",
+        "deepseek-v4-pro-202606",
+        "deepseek-v4-flash-202605",
+        "minimax-m3"
+      ]
     },
     {
       "id": "stepfun-api-en",
@@ -705,7 +904,10 @@
         "protocol": "responses"
       },
       "anthropic": null,
-      "note": "按量计费 · 海外站"
+      "note": "按量计费 · 海外站",
+      "recommendedModels": [
+        "step-3.7-flash"
+      ]
     },
     {
       "id": "stepfun-en",
@@ -720,7 +922,12 @@
       "anthropic": {
         "apiBase": "https://api.stepfun.ai/step_plan"
       },
-      "note": "Step Plan · 海外站"
+      "note": "Step Plan · 海外站",
+      "recommendedModels": [
+        "step-3.7-flash",
+        "step-3.5-flash-2603",
+        "step-3.5-flash"
+      ]
     },
     {
       "id": "minimax-en",
@@ -735,7 +942,10 @@
       "anthropic": {
         "apiBase": "https://api.minimax.io/anthropic"
       },
-      "note": "海外站"
+      "note": "海外站",
+      "recommendedModels": [
+        "MiniMax-M3"
+      ]
     },
     {
       "id": "novita-ai",
@@ -952,7 +1162,14 @@
       "anthropic": {
         "apiBase": "https://api.modelarts-maas.com/plan/anthropic"
       },
-      "note": "Token Plan · 西南-贵阳一"
+      "note": "Token Plan · 西南-贵阳一",
+      "recommendedModels": [
+        "glm-5.3",
+        "glm-5.1",
+        "kimi-k2.6",
+        "deepseek-v4.1-flash",
+        "deepseek-v4-flash"
+      ]
     },
     {
       "id": "kilo",
@@ -1033,7 +1250,21 @@
       "anthropic": {
         "apiBase": "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
       },
-      "note": "Bailian · subscription"
+      "note": "Bailian · subscription",
+      "recommendedModels": [
+        "auto",
+        "qwen3.8-max",
+        "qwen3.8-flash",
+        "qwen3.7-max",
+        "qwen3.7-plus",
+        "qwen3.6-flash",
+        "deepseek-v4.1-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-pro-0813",
+        "deepseek-v4-flash-0731",
+        "glm-5.3",
+        "glm-5.2"
+      ]
     },
     {
       "id": "together",

@@ -78,20 +78,17 @@ fn new_kinds_have_their_own_sentences() {
     };
     assert_eq!(
         NetError::Unreadable.message("skills.sh"),
-        "skills.sh 返回的内容读不懂"
+        "无法识别 skills.sh 返回的内容"
     );
     assert_eq!(
         NetError::Interrupted.message("skills.sh"),
-        "从 skills.sh 读到一半断了"
+        "读取 skills.sh 的内容时连接中断"
     );
     assert_eq!(
         NetError::Timeout.message("skills.sh"),
         "连接 skills.sh 超时"
     );
-    assert_eq!(
-        NetError::Client.message("skills.sh"),
-        "没能发出请求，联网组件启动失败"
-    );
+    assert_eq!(NetError::Client.message("skills.sh"), "请求发送失败");
     assert_eq!(
         limited(Some(60)).message("skills.sh"),
         "skills.sh 限流了，约 1 分钟后再试"
@@ -146,7 +143,7 @@ fn ac9_unparsable_body_is_unreadable_not_unreachable() {
     let fallback = Fallback::from_failure("skills.sh", None, &failure);
     assert_eq!(
         fallback.reason.as_deref(),
-        Some("skills.sh 返回的内容读不懂")
+        Some("无法识别 skills.sh 返回的内容")
     );
     assert!(!fallback.rate_limited);
 }
@@ -313,7 +310,7 @@ fn fallback_serializes_reason_and_detail_in_camel_case() {
         detail: "GET https://skills.sh/api/search → 200 OK\nnot json".into(),
     };
     let json = serde_json::to_value(Fallback::from_failure("skills.sh", None, &failure)).unwrap();
-    assert_eq!(json["reason"], "skills.sh 返回的内容读不懂");
+    assert_eq!(json["reason"], "无法识别 skills.sh 返回的内容");
     assert_eq!(
         json["detail"],
         "GET https://skills.sh/api/search → 200 OK\nnot json"

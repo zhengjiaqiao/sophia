@@ -21,60 +21,39 @@ import {
 import { enableDisabledReason, enableNeedsModels } from "../src/modelsView.ts";
 import type { AgentEntry } from "../src/shell/agentRegistry.ts";
 import { claudeGateway } from "../src/types.ts";
-import type {
-  AgentGatewayView,
-  GatewayProvider,
-  GatewayProviderModel,
-  GatewayState,
-  TrayUsage,
-  UsageView,
-} from "../src/types.ts";
-import { CLAUDE_OFF, gatewayFixture, type CodexFixture } from "./gateway-fixture.ts";
+import type { AgentGatewayView, GatewayState, UsageItemView, UsageView } from "../src/types.ts";
+import {
+  CLAUDE_OFF,
+  NO_MODELS,
+  gatewayFixture,
+  picked,
+  type CodexFixture,
+} from "./gateway-fixture.ts";
 import { render } from "./ui-render.ts";
 
 const { AGENTS } = await import("../src/shell/agents.tsx");
 
-const model = (id: string, selected: boolean): GatewayProviderModel => ({
-  id,
-  slug: id,
-  displayName: id,
-  selected,
-});
-
-// 用例按 Codex 的平铺字段写，夹具拼成按家拆开的 GatewayState（tests/gateway-fixture.ts）；
-// `provider` 是只有一家网关时的简写
-type Fixture = Partial<CodexFixture> & { provider?: Partial<GatewayProvider> };
-const state = ({ provider: one, ...overrides }: Fixture = {}): GatewayState => {
-  // 只给面板判断用得到的几项（与原夹具一样）；名字取不到时 providerLabel 退回主机名
-  const provider = {
-    baseUrl: "https://example.com/openai",
-    key: "set",
-    models: [],
-    ...one,
-  } as GatewayProvider;
+// 用例按 Codex 的平铺字段写，夹具拼成按家拆开的 GatewayState（tests/gateway-fixture.ts）
+type Fixture = Partial<CodexFixture>;
+const state = (overrides: Fixture = {}): GatewayState => {
   return gatewayFixture({
     supported: true,
-    providers: [provider],
+    models: NO_MODELS,
     enabled: false,
     needsCodexRestart: false,
     router: { running: false, port: 47328, error: "" },
     codex: { version: "26.0", running: false, catalogVersion: "1", drift: false },
     conflict: "",
     takeover: null,
+    // 装着 Claude 桌面应用（没装的不出第三方模型那一行，#259）
+    claude: { ...CLAUDE_OFF, installed: true },
     ...overrides,
   });
 };
 
+/// Codex 选了 n 个第三方模型（一家提供商 Kimi）
 const withModels = (n: number, overrides: Fixture = {}) =>
-  state({
-    ...overrides,
-    provider: {
-      baseUrl: "https://example.com/openai",
-      key: "set",
-      models: [...Array(n)].map((_, i) => model(`m${i}`, true)).concat(model("off", false)),
-      ...(overrides.provider ?? {}),
-    },
-  });
+  state({ models: picked(...[...Array(n)].map((_, i) => `Kimi/m${i}`)), ...overrides });
 
 // UI v4：托盘与模型页同一行的缩小版——开关是 page Switch（不再是「启用 / 已启用」pill），
 // 没有状态句（DESIGN「托盘面板」）。原先钉 label / status / needsSetup 的断言属于被推翻的行为，按新规范改写
@@ -96,20 +75,14 @@ test("可以启用：开关关着、可点", () => {
   assert.equal(row.toggle.disabledReason, null);
 });
 
-// 原因的文案归 modelsView（与 Codex 页同一句），这里只钉「禁用、且说的是同一句」
-test("AC2 没保存密钥：开关禁用并说原因（与 Codex 页同一句）", () => {
-  const s = state({ provider: { baseUrl: "", key: "missing", models: [] } });
-  const row = trayRow(s);
-  assert.equal(row.toggle.on, false);
-  assert.notEqual(row.toggle.disabledReason, null);
-  assert.equal(row.toggle.disabledReason, enableDisabledReason(s, 0));
-});
-
-test("没选模型：开关禁用并说原因（与 Codex 页同一句）", () => {
-  const s = withModels(0);
-  const row = trayRow(s);
-  assert.notEqual(row.toggle.disabledReason, null);
-  assert.equal(row.toggle.disabledReason, enableDisabledReason(s, 0));
+// 原因的文案归 modelsView（与模型页那一行同一句），这里只钉「禁用、且说的是同一句」
+test("没选第三方模型：开关禁用并说原因（与模型页同一句）；只选了官方模型也一样", () => {
+  for (const s of [withModels(0), state({ models: picked("官方/gpt-6") })]) {
+    const row = trayRow(s);
+    assert.equal(row.toggle.on, false);
+    assert.equal(row.toggle.disabledReason, enableDisabledReason(s));
+    assert.equal(row.toggle.disabledReason, enableNeedsModels());
+  }
 });
 
 test("AC3 由 agents-manager 启用：开关禁用，原因是先接管", () => {
@@ -117,10 +90,8 @@ test("AC3 由 agents-manager 启用：开关禁用，原因是先接管", () => 
   assert.match(row.toggle.disabledReason ?? "", /接管/);
 });
 
-test("已启用时永远能关：哪怕密钥没了、模型清空了", () => {
-  const row = trayRow(
-    state({ enabled: true, provider: { baseUrl: "", key: "missing", models: [] } }),
-  );
+test("已启用时永远能关：哪怕模型清空了", () => {
+  const row = trayRow(state({ enabled: true }));
   assert.equal(row.toggle.on, true);
   assert.equal(row.toggle.disabledReason, null);
 });
@@ -129,19 +100,31 @@ test("已启用时永远能关：哪怕密钥没了、模型清空了", () => {
 
 // ===== 用量（spec 2026-09-26-menubar-usage R10） =====
 
+/// 后端给的一项（agent）里与画法无关的那几个字段：键、种类、名字、标志、选进菜单栏、出错类别、过期
+const itemHead = (agent: "claude-code" | "codex") => ({
+  key: `agent:${agent}`,
+  kind: "agent" as const,
+  group: "agent" as const,
+  name: agent === "codex" ? "Codex" : "Claude",
+  brand: agent,
+  inMenuBar: true,
+  problem: null,
+  stale: false,
+});
+
 const usageView = (overrides: Partial<UsageView> = {}): UsageView => ({
   state: { agents: [] },
   settings: {
     menuBarEnabled: false,
     displayMode: "remaining",
-    agents: null,
-    perAgent: {},
+    items: null,
+    perItem: {},
     refresh: "auto",
   },
-  signedIn: ["claude-code", "codex"],
-  tray: [
+  signedIn: ["agent:claude-code", "agent:codex"],
+  items: [
     {
-      agent: "claude-code",
+      ...itemHead("claude-code"),
       updatedText: "2 小时前更新",
       windows: [
         {
@@ -164,7 +147,7 @@ const usageView = (overrides: Partial<UsageView> = {}): UsageView => ({
       connect: null,
     },
     {
-      agent: "codex",
+      ...itemHead("codex"),
       updatedText: "1 分钟前更新",
       windows: [
         {
@@ -213,7 +196,7 @@ test("块从注册表生成：Codex 一块两行（用量在前、第三方模�
   assert.equal(blocks[1].rows[1].Row, AGENTS[1].sections[1].trayRow);
   const rowsOf = (b: { id: string; rows: { id: string }[] }) => [b.id, b.rows.map((r) => r.id)];
   // Claude 没登录（用量视图里没有它）：Claude 块只有第三方模型一行（AC42）
-  const codexOnly = usageView({ signedIn: ["codex"], tray: usageView().tray.slice(1) });
+  const codexOnly = usageView({ signedIn: ["agent:codex"], items: usageView().items.slice(1) });
   assert.deepEqual(trayBlocks(AGENTS, trayAgentState(state(), codexOnly)).map(rowsOf), [
     ["codex", ["usage", "third-party-models"]],
     ["claude-code", ["third-party-models"]],
@@ -256,9 +239,9 @@ const trayHost = {
 
 test("用量行：能再试的原因行右端一颗托盘小按键「再试一次」（同 `重启生效` 那种键），上一次的读数照画；被限流的不给", async () => {
   const { TrayAgents } = await import("../src/TrayPanel.tsx");
-  const [claude, codex] = usageView().tray;
+  const [claude, codex] = usageView().items;
   const view = usageView({
-    tray: [
+    items: [
       { ...claude, note: "Claude Code 版本可能太旧，更新后再试", retry: true },
       { ...codex, windows: [], note: "被限流，约 5 分钟后再试", retry: false },
     ],
@@ -282,7 +265,7 @@ test("用量行：能再试的原因行右端一颗托盘小按键「再试一�
 
 test("只登录了桌面应用（画板 #206 状态 1、2）：块头写来源与时间、窗口行不写重置时间；超过一天只剩一句，块头不写时间", async () => {
   const { TrayAgents } = await import("../src/TrayPanel.tsx");
-  const [, codex] = usageView().tray;
+  const [, codex] = usageView().items;
   const row = (label: string, pct: number) => ({
     label,
     percentText: `剩 ${pct}%`,
@@ -290,16 +273,16 @@ test("只登录了桌面应用（画板 #206 状态 1、2）：块头写来源�
     emphasize: false,
     resetText: null,
   });
-  const desktop: TrayUsage = {
-    agent: "claude-code",
+  const desktop: UsageItemView = {
+    ...itemHead("claude-code"),
     updatedText: "来自 Claude 桌面应用 · 3 小时前",
     windows: [row("5 小时", 58), row("本周", 81)],
     note: null,
     retry: false,
     connect: null,
   };
-  const claudePart = (claude: TrayUsage) => {
-    const agentState = trayAgentState(state(), usageView({ tray: [claude, codex] }));
+  const claudePart = (claude: UsageItemView) => {
+    const agentState = trayAgentState(state(), usageView({ items: [claude, codex] }));
     const blocks = trayBlocks(AGENTS, agentState);
     const html = render(TrayAgents, { blocks, state: agentState, host: trayHost });
     return {
@@ -324,7 +307,7 @@ test("只登录了桌面应用（画板 #206 状态 1、2）：块头写来源�
 
 test("用量行（两行版式）正在读取：键锁住、aria-busy，过了忙碌门槛换成刻度 +「正在读取」", async () => {
   const { UsageWindows } = await import("../src/usage/UsageWindows.tsx");
-  const [claude] = usageView().tray;
+  const [claude] = usageView().items;
   const usage = { ...claude, note: "Claude Code 没有回应", retry: true };
   const html = render(UsageWindows, {
     usage,
@@ -361,10 +344,10 @@ test("R10 用量：托盘里一个窗口两行（2026-09-30 系统菜单风格�
 
 test("R7 用量行下一句状态：被限流、失败原因、没有订阅额度；Codex 没登录时 Codex 块里没有用量行", async () => {
   const { TrayAgents } = await import("../src/TrayPanel.tsx");
-  const [claude] = usageView().tray;
+  const [claude] = usageView().items;
   const view = usageView({
-    signedIn: ["claude-code"],
-    tray: [{ ...claude, windows: [], note: "被限流，约 5 分钟后再试" }],
+    signedIn: ["agent:claude-code"],
+    items: [{ ...claude, windows: [], note: "被限流，约 5 分钟后再试" }],
   });
   const agentState = trayAgentState(state(), view);
   const html = render(TrayAgents, {
@@ -475,7 +458,7 @@ test("托盘拨开关：拨了就写（switchGateway，不确认、不重启）�
   assert.equal(src.match(/<Confirm\b/g)?.length, 1);
   assert.match(
     src,
-    /<Confirm\s+inline\s+id=\{confirmId\}\s+title=\{t\("重启 \{app\}？", \{ app: codexAppName\(current\) \}\)\}/,
+    /<Confirm\s+inline\s+id=\{confirmId\}\s+title=\{t\("重启\{app\}？", \{ app: codexAppName\(current\) \}\)\}/,
   );
   assert.match(src, /\{restartConsequence\(codexAppName\(current\)\)\}\s*<\/Confirm>/);
   assert.doesNotMatch(src, /confirmPanel|tray__confirm-/);
@@ -590,20 +573,14 @@ const claudeDesktop = (
   overrides: Partial<NonNullable<AgentGatewayView["claude"]>["desktop"]> = {},
 ) => ({ ...CLAUDE_OFF.claude!.desktop, version: "1.2.0", ...overrides });
 
-/// Claude 那一份：默认装着、没在跑、关着、一家网关选了 1 个模型
+/// Claude 那一份：默认装着、没在跑、关着、选了 1 个模型
 const claudeView = (
   overrides: Partial<AgentGatewayView> = {},
   desktop: Parameters<typeof claudeDesktop>[0] = {},
 ): AgentGatewayView => ({
   ...CLAUDE_OFF,
   installed: true,
-  providers: [
-    {
-      baseUrl: "https://example.com/openai",
-      key: "set",
-      models: [model("kimi", true), model("glm", false)],
-    } as GatewayProvider,
-  ],
+  models: picked("Kimi/kimi"),
   ...overrides,
   claude: { ...CLAUDE_OFF.claude!, desktop: claudeDesktop(desktop) },
 });
@@ -647,28 +624,18 @@ test("R41 R44 Claude 开关按不动时说「怎么办」（与列表行同一�
     // 2026-09-30 侧栏仍叫「模型」，托盘说的那一页也叫模型页
     "在模型页里接管后才能打开",
   );
-  assert.equal(reason(claudeView({ providers: [] })), enableNeedsModels());
-  assert.equal(
-    reason(
-      claudeView({
-        providers: [
-          { baseUrl: "https://a.example.com", key: "set", models: [model("x", false)] },
-        ] as GatewayProvider[],
-      }),
-    ),
-    enableNeedsModels(),
-  );
-  assert.equal(reason(claudeView({ enabled: true, installed: false, providers: [] })), null);
+  assert.equal(reason(claudeView({ models: NO_MODELS })), enableNeedsModels());
+  assert.equal(reason(claudeView({ enabled: true, installed: false, models: NO_MODELS })), null);
 });
 
 test("R44 Claude 行的几句话：开关提示框两段、重启确认正文按方向、`打开 Claude` 的提示框（DESIGN 原话）", () => {
   assert.equal(
     claudeSwitchTip(false),
-    "打开后，Claude 桌面应用改用这里选的模型，不再登录 Claude 账号；账号里的对话暂时看不到，切回即恢复。要重开 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上",
+    "打开后，Claude 桌面应用改用这里选的模型，不再登录 Claude 账号；账号里的对话暂时看不到，切回即恢复。要重启 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上\n切过去后没有语音、手机端和 claude.ai 的连接器 · 联网搜索要看模型提供商",
   );
   assert.equal(
     claudeSwitchTip(true),
-    "关掉后，Claude 桌面应用回到 Claude 账号；要重开 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上",
+    "关掉后，Claude 桌面应用回到 Claude 账号；要重启 Claude 才生效；Sophia 需要保持运行，退出时自动改回官方，下次打开再接上",
   );
   assert.equal(
     claudeRestartConsequence(true),
@@ -693,17 +660,16 @@ const renderTray = async (s: GatewayState, usage: UsageView | null = usageView()
 };
 const claudeBlock = (html: string) => html.slice(html.indexOf('aria-label="Claude"'));
 
-// 2026-09-30 产品负责人：模型页里第二家叫 `Claude Desktop`（这一行只改桌面应用），托盘块装的是 Claude 账号的用量，仍叫 `Claude`；
-// 注册表里的 name 不动（托盘与用量用它），模型页的名字由 `modelsName` 单给
-test("模型页里第二家叫 `Claude Desktop`（列表行、说到这一家的地方），托盘块头仍是 `Claude`", async () => {
-  const { ModelsPage, useAgentName } = await import("../src/shell/ModelsPage.tsx");
+// 2026-09-30 产品负责人：模型页里第二家按产品名叫（这一行只改桌面应用），托盘块装的是 Claude 账号的用量，仍叫 `Claude`；
+// 注册表里的 name 不动（托盘与用量用它），模型页的名字由 `modelsName` 单给。产品名照界面语言（画板 #259：`Claude 桌面应用`，评审 #18）
+test("模型页里第二家叫 `Claude 桌面应用`（列表行、说到这一家的地方），托盘块头仍是 `Claude`", async () => {
+  const { ModelsPage } = await import("../src/shell/ModelsPage.tsx");
   const { modelsNameOf } = await import("../src/shell/agentRegistry.ts");
   const claude = AGENTS.find((a) => a.id === "claude-code")!;
   const codex = AGENTS.find((a) => a.id === "codex")!;
   assert.equal(claude.name, "Claude");
-  assert.equal(modelsNameOf(claude), "Claude Desktop");
+  assert.equal(modelsNameOf(claude), "Claude 桌面应用");
   assert.equal(modelsNameOf(codex), "Codex");
-  assert.equal(typeof useAgentName, "function");
   const gateway = withClaude(claudeView());
   const list = render(ModelsPage, {
     entries: AGENTS,
@@ -711,16 +677,14 @@ test("模型页里第二家叫 `Claude Desktop`（列表行、说到这一家的
     onError: () => undefined,
     onGatewayState: () => undefined,
   });
-  assert.match(list, /<button type="button" class="models-row__open"[^>]*>Codex<\/button>/);
-  assert.match(
-    list,
-    /<button type="button" class="models-row__open"[^>]*>Claude Desktop<\/button>/,
-  );
-  assert.doesNotMatch(list, /models-row__open"[^>]*>Claude<\/button>/);
-  assert.match(list, /aria-label="Claude Desktop · 第三方模型"/);
+  assert.match(list, /class="models-row__name">Codex</);
+  assert.match(list, /class="models-row__name">Claude 桌面应用</);
+  assert.doesNotMatch(list, /models-row__name">Claude</);
+  assert.match(list, /aria-label="Claude 桌面应用 · 第三方模型"/);
   const tray = await renderTray(gateway);
   assert.match(tray, /class="tray__name">Claude</);
-  assert.doesNotMatch(tray, /Claude Desktop/);
+  // 托盘块头仍是 `Claude`（提示框里的句子照常说 `Claude 桌面应用`）
+  assert.doesNotMatch(tray, /tray__name">Claude 桌面应用/);
 });
 
 test("AC45 托盘：Claude 块在用量之后是 `第三方模型` + [重启生效 12 开关]，开着时下一行 `账号里的对话暂时看不到`", async () => {
@@ -754,15 +718,13 @@ test("AC45 托盘：Claude 开着、桌面应用没在跑——键位是 `打开
   assert.match(off, /tray__cap-title">第三方模型<[^]*role="switch"[^]*aria-checked="false"/);
 });
 
-test("AC42 不成空块：本机支持、Claude 用量没登录、桌面应用也没装——Claude 块照样有第三方模型一行（开关禁用、说原因），每一块都有画出来的行", async () => {
-  const codexOnly = usageView({ signedIn: ["codex"], tray: usageView().tray.slice(1) });
-  for (const view of [claudeView({ installed: false, providers: [] }), CLAUDE_OFF]) {
+test("AC42 不成空块：本机支持、Claude 用量没登录、桌面应用也没装——没装的不出第三方模型一行（#259），Claude 块整个不出；每一块都有画出来的行", async () => {
+  const codexOnly = usageView({ signedIn: ["agent:codex"], items: usageView().items.slice(1) });
+  for (const view of [claudeView({ installed: false, models: NO_MODELS }), CLAUDE_OFF]) {
     const html = await renderTray(withClaude(view), codexOnly);
-    const claude = claudeBlock(html);
-    assert.match(claude, /tray__head">[^]*>Claude<[^]*tray__cap-title">第三方模型</);
-    assert.match(claude, /role="switch"[^]*disabled|disabled[^]*role="switch"/);
+    assert.doesNotMatch(html, /tray__name">Claude</);
     const sections = html.split('<section class="tray__agent"').slice(1);
-    assert.equal(sections.length, 2);
+    assert.equal(sections.length, 1);
     for (const section of sections) assert.match(section, /tray__cap|tray__usage/);
   }
 });
@@ -815,8 +777,8 @@ const connectHandlers = {
   reopen: () => undefined,
 };
 
-const desktopClaude = (patch: Partial<TrayUsage>): TrayUsage => ({
-  agent: "claude-code",
+const desktopClaude = (patch: Partial<UsageItemView>): UsageItemView => ({
+  ...itemHead("claude-code"),
   updatedText: "来自 Claude 桌面应用 · 3 小时前",
   windows: [
     { label: "5 小时", percentText: "剩 58%", gaugePercent: 58, emphasize: false, resetText: null },
@@ -829,13 +791,13 @@ const desktopClaude = (patch: Partial<TrayUsage>): TrayUsage => ({
 
 test("状态 3：Claude 没有用量来源（不在 signedIn）、但在 tray 里（装了桌面应用）——照样出用量行，句子 + 连接键", async () => {
   const { TrayAgents } = await import("../src/TrayPanel.tsx");
-  const [, codex] = usageView().tray;
+  const [, codex] = usageView().items;
   const claude = desktopClaude({
     updatedText: null,
     windows: [],
     note: "连接后就能看到 Claude 额度，桌面应用照常用",
   });
-  const view = usageView({ signedIn: ["codex"], tray: [claude, codex] });
+  const view = usageView({ signedIn: ["agent:codex"], items: [claude, codex] });
   const agentState = trayAgentState(state({ supported: false }), view);
   const blocks = trayBlocks(AGENTS, agentState);
   // 本机不支持第三方模型时 Claude 块只靠用量出：照样有这一块、这一行

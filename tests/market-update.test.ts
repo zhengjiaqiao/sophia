@@ -429,6 +429,24 @@ test("store：撤销没成出一窗 `撤销失败`；页面卸下收起确认框
   assert.equal(store.get().result, null);
 });
 
+test("store（#320）：查更新、更新、撤销出错，提示条只取给人看的那一句，系统原文不上去", async () => {
+  const raw = "[internal] Sophia 的数据读取失败\n[detail] Permission denied (os error 13)";
+  const f = fakeBackend();
+  const store = createUpdateStore(f.backend);
+  await store.check(false, "auto");
+  await store.request([creator], "strip");
+  f.failUndo(raw);
+  await store.undo();
+  assert.equal(store.get().result?.toast.reason, "Sophia 的数据读取失败");
+  f.failCheck(raw);
+  await store.check(true, "settings");
+  assert.equal(store.get().notice?.text, "Sophia 的数据读取失败");
+  f.failCheck(null);
+  f.setUpdate(raw);
+  await store.request([docx], "strip");
+  assert.equal(store.get().notice?.text, "Sophia 的数据读取失败");
+});
+
 // ---- 渲染 ----
 
 test("灰面板的一次性说明用法：句子与 × 之间两颗紧凑默认键；在等的那颗只锁它自己；键带公开钩子 data-hint-action", () => {

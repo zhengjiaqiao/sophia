@@ -103,7 +103,7 @@ export function referencedKeys(root, areas) {
     else {
       const { code, strings: lits } = scanSource(src, relative(root, f));
       // 模板字符串 `${t("…")}` 里的调用不在字面量清单里（scanSource 只收 `${}` 之外的文字），另按调用找
-      const calls = [...code.matchAll(/\b(?:t|tn|tRich|tSpaced)\(\s*["']([^"'\n]+)["']/g)].map(
+      const calls = [...code.matchAll(/\b(?:t|tn|tRich)\(\s*["']([^"'\n]+)["']/g)].map(
         (m) => m[1],
       );
       strings = [...lits, ...calls];
@@ -192,7 +192,7 @@ export function countKeysViaT(root, catalog) {
   };
   for (const f of walk(join(root, "src")).filter((f) => /\.tsx?$/.test(f))) {
     const { code } = scanSource(readFileSync(f, "utf8"), relative(root, f));
-    for (const m of code.matchAll(/\b(?:t|tRich|tSpaced)\(\s*["']([^"'\n]+)["']/g))
+    for (const m of code.matchAll(/\b(?:t|tRich)\(\s*["']([^"'\n]+)["']/g))
       if (withCount.has(m[1])) out.push(`${relative(root, f)}: ${m[1]}`);
   }
   const rust = [
@@ -207,4 +207,85 @@ export function countKeysViaT(root, catalog) {
       if (withCount.has(k)) out.push(`${relative(root, f)}: ${k}`);
     }
   return out;
+}
+
+/// 放名字的占位符：agent 名、位置名、来源名、skill / MCP 服务 / 提供商 / 模型的名字，以及它们连成的列表。
+/// 这些名字可能以汉字收尾（「Claude 桌面应用」、项目文件夹、自己起名的提供商），中文模板里要与汉字紧贴，
+/// 空格由 formatMessage / i18n::format 按中西文规则补（docs/DESIGN.md「文案目录」）
+export const NAMED_PLACEHOLDERS = new Set([
+  "agent",
+  "agents",
+  "app",
+  "tool",
+  "copilot",
+  "claude",
+  "column",
+  "others",
+  "target",
+  "source",
+  "origin",
+  "occupant",
+  "label",
+  "copy",
+  "store",
+  "place",
+  "places",
+  "location",
+  "locations",
+  "name",
+  "names",
+  "list",
+  "head",
+  "clean",
+  "what",
+  "who",
+  "skill",
+  "provider",
+  "gateway",
+  "model",
+  "product",
+  "products",
+  "project",
+  "domain",
+]);
+
+/// 与上面同名、放的却不是名字（文件名、环境变量名）的键
+const NOT_NAMED = {
+  "models.app.deleteFileFailed": ["name"],
+  "mcp.parse.mapValueString": ["name"],
+};
+/// `{service}` 多数是 GitHub 这类固定的服务名，下面几处是 MCP 服务的名字
+const ALSO_NAMED = {
+  "mcp.cell.unsupported": ["service"],
+  "mcp.cell.unsupportedField": ["service"],
+  "mcp.differ.message": ["service"],
+  "sources.stuck.noPlace": ["service"],
+};
+
+/// 这个键的这个占位符放不放名字
+export function holdsName(key, placeholder) {
+  if (ALSO_NAMED[key]?.includes(placeholder)) return true;
+  if (NOT_NAMED[key]?.includes(placeholder)) return false;
+  return NAMED_PLACEHOLDERS.has(placeholder);
+}
+
+const HAN = "\\u3400-\\u9fff";
+const LOOSE = new RegExp(`(?<=[${HAN}]) (?=\\{(\\w+)\\})|(?<=\\{(\\w+)\\}) (?=[${HAN}])`, "g");
+
+/// 中文目录里名字与汉字之间多写了空格的地方：返回 `键 {占位符}`。
+/// 名字以汉字收尾时这个空格就多出来了（「Claude 桌面应用 的模型」）
+export function looseNames(catalog) {
+  const out = new Set();
+  for (const [key, message] of Object.entries(catalog))
+    for (const form of typeof message === "string" ? [message] : Object.values(message))
+      for (const m of form.matchAll(LOOSE)) {
+        const name = m[1] ?? m[2];
+        if (holdsName(key, name)) out.add(`${key} {${name}}`);
+      }
+  return [...out].sort();
+}
+
+/// 把 looseNames 找到的空格去掉（紧贴写法），其余原样
+export function tightenNames(key, form) {
+  return form.replace(LOOSE, (space, before, after) => (holdsName(key, before ?? after) ? "" : space));
 }

@@ -227,7 +227,25 @@ pub fn select_form<'a>(message: &'a Message, count: u64, locale: &str) -> &'a st
     }
 }
 
-/// 占位符换成参数。缺参数的占位符原样留着：界面上看得见，测试也抓得到
+fn is_han(c: char) -> bool {
+    ('\u{3400}'..='\u{9fff}').contains(&c)
+}
+
+/// 嵌进句中的名字与相邻**汉字**之间的中西文空格：名字那一侧是西文（字母、数字）就隔一个空格，汉字名紧贴；
+/// 与标点、空格、句首句尾相接不加，所以目录里写了空格的句子不受影响。与前端 `src/i18n.ts` 的 `spaced` 同一条规则
+fn push_spaced(out: &mut String, before: Option<char>, value: &str, after: Option<char>) {
+    let latin = |c: Option<char>| c.is_some_and(|c| c.is_ascii_alphanumeric());
+    if before.is_some_and(is_han) && latin(value.chars().next()) {
+        out.push(' ');
+    }
+    out.push_str(value);
+    if after.is_some_and(is_han) && latin(value.chars().next_back()) {
+        out.push(' ');
+    }
+}
+
+/// 占位符换成参数，名字与汉字相接处按中西文空格规则处理（见 `push_spaced`；目录里嵌名字的句子写成紧贴的）。
+/// 缺参数的占位符原样留着：界面上看得见，测试也抓得到
 pub fn format(template: &str, params: &[(&str, &dyn Display)]) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
@@ -239,7 +257,15 @@ pub fn format(template: &str, params: &[(&str, &dyn Display)]) -> String {
         match name.filter(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_')) {
             Some(name) => {
                 match params.iter().find(|(k, _)| *k == name) {
-                    Some((_, value)) => out.push_str(&value.to_string()),
+                    Some((_, value)) => {
+                        let at = template.len() - rest.len() + open;
+                        push_spaced(
+                            &mut out,
+                            template[..at].chars().next_back(),
+                            &value.to_string(),
+                            template[at + name.len() + 2..].chars().next(),
+                        );
+                    }
                     None => out.push_str(&rest[open..open + name.len() + 2]),
                 }
                 rest = &after[name.len() + 1..];
@@ -418,6 +444,33 @@ mod tests {
             "JSON 写成 {} 或 { \"a\": 1 }"
         );
         assert_eq!(format("结尾一个 {", &[]), "结尾一个 {");
+    }
+
+    #[test]
+    fn 名字与汉字相接_西文那一侧隔一个空格_汉字名紧贴_写了空格的句子不受影响() {
+        let tpl = "从{place}移除{name}（不动原件）";
+        assert_eq!(
+            format(tpl, &[("place", &"CardBox"), ("name", &"pdf")]),
+            "从 CardBox 移除 pdf（不动原件）"
+        );
+        assert_eq!(
+            format(tpl, &[("place", &"用户级"), ("name", &"技能")]),
+            "从用户级移除技能（不动原件）"
+        );
+        // 首尾各看各的；标点、句首句尾不加
+        assert_eq!(
+            format(tpl, &[("place", &"项目A"), ("name", &".x")]),
+            "从项目A 移除.x（不动原件）"
+        );
+        assert_eq!(
+            format("重启{agent}后生效", &[("agent", &"Claude 桌面应用")]),
+            "重启 Claude 桌面应用后生效"
+        );
+        assert_eq!(format("{n} 个", &[("n", &3)]), "3 个");
+        assert_eq!(
+            format("Restart {agent} to apply", &[("agent", &"Codex")]),
+            "Restart Codex to apply"
+        );
     }
 
     #[test]

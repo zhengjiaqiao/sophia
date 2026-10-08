@@ -370,7 +370,30 @@ pub fn count(kind: Kind) {
 /// 计数与入队是同一次代次判定（[`Pending::capture`]）。`location` 是出错位置（`文件:行`；网页侧为空）。
 /// 上报关着时什么都不做
 pub fn capture(kind: Kind, location: &str, text: &str) {
+    #[cfg(test)]
+    captured::record(kind, location);
     PENDING.capture(kind, location, text);
+}
+
+/// 测试用：这条测试线程经 [`capture`] 交来的（类别, 出错位置）。全局的 `PENDING` 要开着上报才收、
+/// 并行的测试会互相串，这里按线程记，只看自己的
+#[cfg(test)]
+pub(crate) mod captured {
+    use super::Kind;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static SEEN: RefCell<Vec<(Kind, String)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(crate) fn record(kind: Kind, location: &str) {
+        SEEN.with(|seen| seen.borrow_mut().push((kind, location.to_owned())));
+    }
+
+    /// 取出并清空
+    pub(crate) fn take() -> Vec<(Kind, String)> {
+        SEEN.with(|seen| std::mem::take(&mut *seen.borrow_mut()))
+    }
 }
 
 /// 命令报的 `internal` 类内部错误：计数并收一条事件，出错位置是调用处的 `文件:行`。取代单独的

@@ -3,6 +3,7 @@
 import { api } from "../api";
 import { t, tn } from "../i18n.ts";
 import { sourceNoun } from "../terms.ts";
+import { mcpAgentName } from "../mcpView.ts";
 import type { AutoRun, McpLocation, McpReport, McpService, SyncReport, Target } from "../types";
 import type { ToastProps } from "../ui";
 import type { ToastTier } from "../toastText";
@@ -16,10 +17,10 @@ import {
   candidateGroups,
   duplicateNames,
   mcpCandidateGroups,
-  mcpLocationName,
   mcpOwnRemoveReason,
   mcpRemoveConfirmBody,
   mcpSourceLines,
+  mcpSourceName,
   mcpSourceSubtitle,
   mcpSourcesTitle,
   noMcpSourcesText,
@@ -134,7 +135,7 @@ export interface SourcesModel {
 const ruleTitle = () => t("sources.rule.title");
 
 /// 做完一批：全部成了是例行一行；有没成的说几个没成、第一个的原因。
-/// `reasonKey`：skill 是 `有 N 处入口清除失败 · …`，MCP 是 `有 N 项没拿掉：…`
+/// `reasonKey`：skill 是 `有 N 处入口清除失败 · …`，MCP 是 `有 N 项移除失败 · …`
 function removalToast(
   total: number,
   failed: string[],
@@ -273,14 +274,14 @@ export function skillSourcesModel(domain: DomainRef, targets: Target[]): Sources
 /// 位置名；主视图里藏起来的那一处（还没建的 .mcp.json）说清点下去会发生什么
 const mcpTargetLabel = (l: McpLocation) =>
   l.matrixHidden === true && l.selector === undefined
-    ? t("sources.mcp.newFile", { name: mcpLocationName(l) })
-    : mcpLocationName(l);
+    ? t("sources.mcp.newFile", { name: mcpSourceName(l) })
+    : mcpSourceName(l);
 
 /// MCP：来源是一处配置，目标是这个位置的全部配置位置（包含主视图藏起来的；来源自己那处不能当目标）
 export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): SourcesModel {
   const nameOf = (id: string) => {
     const l = locations.find((x) => x.id === id);
-    return l ? mcpLocationName(l) : id;
+    return l ? mcpSourceName(l) : id;
   };
   /// 展开后的一行服务：搬不过去（哪儿都搬不过去，或这里显示的位置一家都接不住）才标签 + 变淡
   /// 一个服务名与名字后的标签：搬不过去优先（这一份用不上），否则与别的来源同名的挂 `同名`
@@ -335,7 +336,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             path: s.path,
             own: s.own,
             pathName: s.own && s.harnessId !== "weiboap",
-            items: s.services.map((x) => serviceItem(x, s.label, s.id, dupAmongSubscribed)),
+            items: s.services.map((x) => serviceItem(x, mcpAgentName(s), s.id, dupAmongSubscribed)),
             targets: s.autoTargets,
             lastAuto: s.lastAuto ?? null,
             switchReason: s.unreadable ? t("sources.mcp.unreadable") : undefined,
@@ -354,7 +355,7 @@ export function mcpSourcesModel(domain: DomainRef, locations: McpLocation[]): So
             name: i.name,
             sub: i.sub,
             count: i.services.length,
-            items: i.services.map((x) => serviceItem(x, i.name, i.id, takenBySubscribed)),
+            items: i.services.map((x) => serviceItem(x, i.agent, i.id, takenBySubscribed)),
           })),
         })),
       };

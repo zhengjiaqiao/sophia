@@ -265,7 +265,7 @@ fn batch_removes_what_it_can_and_says_why_for_the_rest() {
 /// 拿不掉的说法（DESIGN「文案语域」：「无法 + 动词」）
 #[test]
 fn 拿不掉的说法_按_d24_写全() {
-    assert_eq!(cannot_cut(), "这一项的写法无法安全地单独拿掉，没有改动");
+    assert_eq!(cannot_cut(), "这一项的写法无法安全地单独删除，未改动");
 }
 
 fn delete_original(locations: &[McpLocation], location: &str, name: &str) -> McpReport {
@@ -420,7 +420,7 @@ fn deleting_an_original_in_a_read_only_folder_says_no_permission() {
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
     let entry = outcome(&report, "target", "docs");
     assert_eq!(entry.outcome, "failed");
-    assert_eq!(entry.message, "没有写入权限，没动");
+    assert_eq!(entry.message, "没有写入权限，未改动");
     assert_eq!(fs::read(&target).unwrap(), SOURCE_JSON);
 }
 
@@ -443,6 +443,60 @@ fn deleting_an_original_when_backups_are_read_only_says_why() {
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
     let entry = outcome(&report, "target", "docs");
     assert_eq!(entry.outcome, "failed");
-    assert_eq!(entry.message, "备份时没有写入权限，没动");
+    assert_eq!(entry.message, "备份时没有写入权限，未改动");
+    // 说得出原因的没有原文：提示条照旧接这一句
+    assert_eq!(entry.detail, None);
     assert_eq!(fs::read(&target).unwrap(), SOURCE_JSON);
+}
+
+/// 分不出原因的失败（#306 复审，同写入的 spec #239 第 43 条）：`message` 是兜底句，系统原文另给（`detail`），
+/// 前端提示条只写失败句。备份目录的上一级是个文件：建不出备份目录，不是没权限、磁盘满、只读
+#[test]
+fn deleting_an_original_with_an_unclassified_failure_carries_the_raw_text_apart() {
+    let tree = TempTree::new();
+    let (locations, target) = json_tree(&tree, SOURCE_JSON);
+    let blocker = tree.root().join("not-a-dir");
+    fs::write(&blocker, b"x").unwrap();
+    let plan = prepare_original_removal(&locations, &[item("target", "docs")]);
+    let report = execute_removal(plan, &blocker.join("backups"));
+    let entry = outcome(&report, "target", "docs");
+    assert_eq!(entry.outcome, "failed");
+    assert_eq!(entry.message, "备份失败，未改动");
+    assert!(
+        entry.detail.as_deref().is_some_and(|d| !d.is_empty()),
+        "{entry:?}"
+    );
+    assert_eq!(fs::read(&target).unwrap(), SOURCE_JSON);
+}
+
+/// 撤销没成（#306 复审）：报告的一句是没还原成的那个文件自己的原因，不再是笼统的「撤销没有全部完成，请逐个查看」；
+/// 说得出原因的不带原文（以 root 运行时权限不拦，跳过）
+#[cfg(unix)]
+#[test]
+fn undo_that_cannot_write_says_the_files_own_reason() {
+    use std::os::unix::fs::PermissionsExt;
+    let tree = TempTree::new();
+    let dir = tree.dir("ro");
+    let source = tree.root().join("source.json");
+    let target = dir.join("mcp.json");
+    fs::write(&source, SOURCE_JSON).unwrap();
+    fs::write(&target, SOURCE_JSON).unwrap();
+    let locations = vec![
+        loc("source", "claude-code", &source, None),
+        loc("target", "cursor", &target, None),
+    ];
+    let mut report = remove(&locations, &[item("target", "docs")]);
+    assert_eq!(outcome(&report, "target", "docs").outcome, "removed");
+    let undo = report.take_undo().expect("移除给撤销记录");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(dir.join("probe"), b"x").is_ok() {
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    let result = undo_write(&undo);
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(result.outcome, "failed");
+    assert_eq!(result.message, "没有写入权限，未改动");
+    assert_eq!(result.detail, None);
+    assert_eq!(result.files[0].outcome, "failed");
 }

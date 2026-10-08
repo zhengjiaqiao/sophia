@@ -67,6 +67,8 @@ fn harness(id: &str, name: &str) -> Harness {
     Harness {
         id: id.into(),
         display_name: name.into(),
+        brand: id.into(),
+        brand_name: name.into(),
         project_dir: None,
         global_dir: None,
         universal: false,

@@ -1,7 +1,7 @@
-/// 从 JSON 添加（spec R8，画板 10；DESIGN「发现与安装 › 从链接安装 · 从 JSON 添加」）：`粘贴 JSON` 推入这一页。
+/// 粘贴 MCP 配置（spec R8，画板 10；DESIGN「发现与安装 › 从链接安装 · 粘贴 MCP 配置」）：`粘贴配置` 推入这一页。
 ///
 /// ```
-/// ←  从 JSON 添加
+/// ←  粘贴 MCP 配置
 /// ┌ { "mcpServers": { "github": {…}, "filesystem": {…} } }      ┐  等宽框：recess 底、限高、框内滚
 /// └──────────────────────────────────────────────────────────────┘
 /// 认出 2 个 · 已选 2 ───────────────────────────────
@@ -133,7 +133,12 @@ export function JsonPage(props: JsonPageProps) {
   const submit = async () => {
     const done = await state.install();
     if (!done) return;
-    props.onDone(done.report, { kind: "mcp", toast: done.toast, undoId: done.report.undoId });
+    props.onDone(done.report, {
+      kind: "mcp",
+      toast: done.toast,
+      undoId: done.report.undoId,
+      trust: done.trust,
+    });
     page.leave();
   };
 

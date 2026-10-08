@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import type { ProviderPreset } from "./types.ts";
 
 /// 服务商预设的纯逻辑（spec S1，sophia-dev#95）：筛选、分组、显示用的主机名。界面组件只画，不自己算
@@ -25,6 +26,12 @@ export function filterPresets(list: ProviderPreset[], query: string): ProviderPr
 /// 搜索框按回车选中的那一家：筛出来的第一家能用的；没有就不选
 export function firstPick(list: ProviderPreset[]): ProviderPreset | null {
   return list.find(presetSupported) ?? null;
+}
+
+/// 选好之后 `提供商` 那一行写的名字：预设写预设名；自定义写 `自定义地址`——不带名单里那个入口的省略号
+/// （选好了还带「…」像没加载完，走查 2026-10-08）
+export function pickedName(preset: Pick<ProviderPreset, "name"> | "custom"): string {
+  return preset === "custom" ? t("models.preset.customPicked") : preset.name;
 }
 
 /// `去 DeepSeek 取密钥` 的链接：预设里有取密钥页就用它，没有用官网；都没有就不出

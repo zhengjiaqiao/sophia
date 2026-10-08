@@ -4,12 +4,14 @@ import {
   LAYER_CAP,
   LAYER_GAP,
   LAYER_MARGIN,
+  LIST_LAYER_CAP,
   TIP_GAP,
   TIP_MARGIN,
   TOAST_GAP,
   TOAST_MARGIN,
   placeLayer,
   placeTip,
+  placeTipBeside,
   placeToast,
 } from "../src/layerPlace.ts";
 
@@ -197,4 +199,57 @@ test("提示框：行尾的键右对齐、向左展开；菜单栏面板这种�
   );
   assert.equal(p.left, TIP_MARGIN);
   assert.ok(p.left + 288 <= 320 - TIP_MARGIN);
+});
+
+// 走查 2026-10-08 第 04 张：添加模型提供商弹窗里禁用的「保存」，原因提示框居中出了弹窗右沿约 70、又盖住密钥框下那一句。
+// 提示框不出弹窗（左右夹在弹窗里），键区的键说在键区这一行左边的空白里（同列表行「放在该行同一行的空白处」）
+test("提示框：在弹窗里时左右夹在弹窗之内——居中出了弹窗就右对齐触发控件", () => {
+  const save = { top: 400, bottom: 432, left: 650, right: 714 };
+  const p = placeTip(save, { width: 240, height: 60 }, view, { bounds: { left: 300, right: 730 } });
+  assert.equal(p.left + 240, 714);
+});
+
+test("提示框 · 弹窗键区：放在这一行的键左边、与触发的键上下居中，不盖住键区上面的那一句；放不下给 null", () => {
+  // 键区：内容左沿 300，「取消」从 580 起；「保存」650–714、高 32
+  const save = { top: 400, bottom: 432, left: 650, right: 714 };
+  const row = { left: 300, right: 580 };
+  const p = placeTipBeside(save, { width: 240, height: 60 }, row);
+  assert.ok(p);
+  assert.equal(p.left + 240, 580 - TIP_GAP);
+  assert.equal(p.top, 416 - 30);
+  // 左边那一截不够宽
+  assert.equal(placeTipBeside(save, { width: 240, height: 26 }, { left: 400, right: 580 }), null);
+});
+
+// 走查 2026-10-08 第 18 张：最小窗口（560 高）里「选模型」浮层只露出一行第三方模型——标题、搜索、底栏钉住之后，
+// 360 的上限与触发键下方剩下的约 345 都太矮。装长列表的浮层（选模型、启用模型）最高 480；朝向那一侧不够高时
+// 沿窗口往回挪到够高为止（可以盖住触发键，同 macOS 弹出菜单），窗口够高时照旧在触发键下方展开
+test("长列表浮层：最高 480；下方不够高时往上挪到够高为止（夹在窗口 16 之内），够高时照旧在下方", () => {
+  assert.equal(LIST_LAYER_CAP, 480);
+  const small = { width: 1100, height: 560 };
+  // 第二行的 `已选 N 个模型 ▾`：底边 193，下方只剩 345
+  const key = { top: 165, bottom: 193, left: 900, right: 1040 };
+  const p = placeLayer(key, { width: 380, height: 900 }, small, {
+    align: "end",
+    cap: LIST_LAYER_CAP,
+    slide: true,
+  });
+  assert.equal(p.maxHeight, 480);
+  assert.equal(p.top, 560 - LAYER_MARGIN - 480);
+  // 内容不高：只挪到放得下它为止
+  const short = placeLayer(key, { width: 380, height: 400 }, small, {
+    cap: LIST_LAYER_CAP,
+    slide: true,
+  });
+  assert.equal(short.top + 400, 560 - LAYER_MARGIN);
+  // 默认窗口（720 高）里下方够 480：照旧从触发键下方 6 展开
+  const tall = placeLayer(key, { width: 380, height: 900 }, view, {
+    cap: LIST_LAYER_CAP,
+    slide: true,
+  });
+  assert.equal(tall.top, 193 + LAYER_GAP);
+  assert.equal(tall.maxHeight, 480);
+  // 不给 slide：老规矩，最高取下方剩余
+  const plain = placeLayer(key, { width: 380, height: 900 }, small, { cap: LIST_LAYER_CAP });
+  assert.equal(plain.maxHeight, 560 - LAYER_MARGIN - (193 + LAYER_GAP));
 });

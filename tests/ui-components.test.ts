@@ -313,6 +313,22 @@ test("CheckRow：整行是命中区（role=checkbox），勾选框 + 10 + 图标
     }),
     /class="ss-checkrow__trailing">anthropic\/claude-opus-4-6</,
   );
+  // 名字下一行小字（设置里品牌下已装的产品，#251）：名字与小字叠成一块，行高随之长高，框与图标对齐名字那一行
+  const sub = render(CheckRow, {
+    checked: true,
+    onChange: noop,
+    size: "grid",
+    sub: "Claude Code、Claude 桌面应用",
+    children: "Claude",
+  });
+  assert.match(sub, /class="ss-checkrow ss-checkrow--grid has-sub"/);
+  assert.match(
+    sub,
+    /class="ss-checkrow__stack"><span class="ss-checkrow__name">Claude<\/span><span class="ss-checkrow__sub">Claude Code、Claude 桌面应用</,
+  );
+  assert.match(cssRule(uiCss, ".ss-checkrow.has-sub"), /height:\s*auto/);
+  assert.match(cssRule(uiCss, ".ss-checkrow__sub"), /font-size:\s*var\(--size-label\)/);
+  assert.match(cssRule(uiCss, ".ss-checkrow__sub"), /color:\s*var\(--ink-mute\)/);
 });
 
 // ===== 列表行（裁决：整行可点的列表行都有悬停底）=====

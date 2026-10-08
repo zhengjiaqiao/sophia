@@ -566,7 +566,17 @@ pub fn remove(
 ) -> Result<SyncReport, String> {
     let (source, d_targets) = removable(key, source_id, sources, targets)?;
     let book = match copies {
-        Some(store) => Copies::load(store).map_err(|e| e.to_string())?,
+        // 读不出副本记录：给人看的一句（来自更新版本等）原样说；系统原文只进日志，界面只说读取失败（#320）
+        Some(store) => Copies::load(store).map_err(|e| match crate::i18n::Said::of(&e) {
+            Some(said) => said.to_owned(),
+            None => {
+                log::warn!(
+                    "load copies failed: {}",
+                    crate::redact::redact(&e.to_string())
+                );
+                crate::t!("common.data.readFailed")
+            }
+        })?,
         None => Copies::default(),
     };
     // 共用文件夹（几列是同一个目录）里的同一条软链 / 同一份副本，清单上每家各列一条（几家都会失去它），
@@ -645,6 +655,7 @@ mod tests {
             },
             exists: path.is_dir(),
             linked_whole_to: None,
+            readers: Vec::new(),
         }
     }
 
@@ -661,6 +672,7 @@ mod tests {
             },
             exists: path.is_dir(),
             linked_whole_to: None,
+            readers: Vec::new(),
         }
     }
 
@@ -1044,7 +1056,7 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert_eq!(err, "它的原件就在proj里，删掉原件才会消失");
+        assert_eq!(err, "它的原件就在 proj 里，删除原件后才会消失");
         assert!(plan_remove(
             &f.key(),
             &sources[1].id,

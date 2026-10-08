@@ -151,7 +151,7 @@ test("每行：位置 ｜ 来源名（悬停出 `打开 ↗`，同表格页来�
   assert.doesNotMatch(html, /srcrow__path|srcline__where/);
   assert.match(html, /srcrow__pick">选目标</);
   assert.match(html, /role="switch"/);
-  assert.match(html, /从 CardBox 移除 WeiboAP（不动原件）/);
+  assert.match(html, /从 CardBox 移除 WeiboAP（保留原件）/);
   // 开关旁不点指示点
   assert.doesNotMatch(html, /ss-indicator/);
 });

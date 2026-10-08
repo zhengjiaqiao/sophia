@@ -15,7 +15,7 @@ import {
 import { ProjectList } from "./FilterRow.tsx";
 import { scopeWord } from "./terms.ts";
 import { InstallBlock, type InstallPlaces } from "./market/InstallParts.tsx";
-import { t, tSpaced } from "./i18n.ts";
+import { t } from "./i18n.ts";
 import {
   noChange,
   claudeSibling,
@@ -164,7 +164,7 @@ export function McpScopeDialog({
       ? intent.blocked === noChange()
         ? noChange()
         : t("mcp.scope.moveKey")
-      : tSpaced((now?.mode ?? intent.mode) === "move" ? "mcp.scope.moveTo" : "mcp.scope.addTo", {
+      : t((now?.mode ?? intent.mode) === "move" ? "mcp.scope.moveTo" : "mcp.scope.addTo", {
           place: now?.toLabel ?? "",
         });
   const lines =
@@ -205,7 +205,7 @@ export function McpScopeDialog({
       onCancel={onCancel}
     >
       <div className="mcp-scope">
-        <InstallBlock label={`${scopeWord()} · ${tSpaced("mcp.scope.nowIn", { place: fromName })}`}>
+        <InstallBlock label={`${scopeWord()} · ${t("mcp.scope.nowIn", { place: fromName })}`}>
           <div role="radiogroup" aria-label={scopeWord()}>
             <RadioRow checked={all} onSelect={() => setAll(true)}>
               {t("mcp.scope.allProjects")}

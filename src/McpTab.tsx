@@ -11,7 +11,7 @@ import {
 import type { ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
-import { listText, t, tn, tSpaced, useLocale, useOnLocaleChange } from "./i18n.ts";
+import { listText, t, tn, useLocale, useOnLocaleChange } from "./i18n.ts";
 import type { AppFault } from "./backendError.ts";
 import Matrix, {
   cellKey,
@@ -58,8 +58,13 @@ import {
   mcpBlankTip,
   mcpBlockedTip,
   mcpColumnNote,
+  differingCopies,
+  mcpCommandFault,
   mcpEntryReason,
   mcpFailedAt,
+  mcpTakeBackFailed,
+  mcpUndoFailure,
+  mcpUndoPlaceOf,
   mcpWriteFault,
   differingSourceIds,
   mcpColumnOf,
@@ -94,6 +99,8 @@ import {
 } from "./mcpView";
 import { Button, Confirm, CornerToast, Mono, NoticePanel, Tag, Toast, ToastCount } from "./ui";
 import { HINTS, useHint } from "./hints.ts";
+import { trustCellNote, trustNoticeFor, type TrustNotice, type TrustOp } from "./mcpTrust.ts";
+import { McpTrustToast } from "./McpTrustToast.tsx";
 import { McpDiffSection, McpEndpointRow } from "./McpDiffPanel";
 import { mcpCopyName, mcpOriginName } from "./mcpDiffTable";
 import type { ToastProps } from "./ui";
@@ -358,6 +365,8 @@ export default function McpTab({
     node: ReactNode;
   } | null>(null);
   const [globalToast, setGlobalToast] = useState<ReactNode>(null);
+  // 写进或改写进 WorkBuddy 之后右下那一窗：去它里面点「信任」（#256）；与上面那一窗各自一窗，叠在右下
+  const [trustToast, setTrustToast] = useState<(TrustNotice & { at: number }) | null>(null);
   // `2 份不一样` 的字段级差异：悬停时懒加载一次（api.mcpFieldDiff）；null＝读不到，退回「配置不一样」
   const [diffs, setDiffs] = useState<Map<string, string[] | null>>(new Map());
   const diffAsked = useRef<Set<string>>(new Set());
@@ -373,6 +382,7 @@ export default function McpTab({
 
   const dismissKey = useCallback(() => setKeyToast(null), []);
   const dismissGlobal = useCallback(() => setGlobalToast(null), []);
+  const dismissTrust = useCallback(() => setTrustToast(null), []);
   const dismissCell = useCallback(() => setCellToast(null), []);
   const dismissRow = useCallback(() => setRowToast(null), []);
   const dismissNotice = useCallback(() => setCellNotice(null), []);
@@ -413,7 +423,7 @@ export default function McpTab({
         onOverview?.(next);
       }
     } catch (error) {
-      onError(String(error));
+      commandFault(error, t("mcp.line.scanFailed"));
     } finally {
       if (mounted.current && version === refreshVersion.current) onBusy(false);
     }
@@ -432,6 +442,14 @@ export default function McpTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
+  // 信任提示的主句写产品名（`Claude Code`），不写位置名（`Claude Code · User MCPs`）；品牌名单没读回来时退到位置名
+  const productsRef = useRef<ReadonlyArray<{ id: string; name: string; mcpTrust: boolean }>>([]);
+  productsRef.current = install?.agents ?? [];
+  const trustAgentOf = (harnessId: string, label: string) => {
+    const product = productsRef.current.find((p) => p.id === harnessId);
+    return { id: harnessId, name: product?.name ?? label, trust: product?.mcpTrust ?? false };
+  };
+
   // 自动规则在背后写了：右下（壳上那一叠）交代一声（⑨⑬）；格子直接是新状态，不闪
   const domainsRef = useRef<McpDomain[]>([]);
   useEffect(() => {
@@ -448,9 +466,19 @@ export default function McpTab({
           agent: t ? { id: t.harnessId, name: mcpAgentName(t) } : undefined,
           project: t ? t.domain !== "global" : undefined,
           note: e.mirrorFailed,
+          trail: e.note,
         };
       });
       const text = toastFor("autoWrite", { done: items });
+      // 自动规则写进了 WorkBuddy：同样要去它里面点「信任」（#256）
+      const trust = trustNoticeFor(
+        "write",
+        created.map((e) => {
+          const t = targets.find((x) => x.id === e.targetId);
+          return t ? trustAgentOf(t.harnessId, t.label) : undefined;
+        }),
+      );
+      if (trust) setTrustToast({ ...trust, at: Date.now() });
       // 密钥提醒（S19）：自动加进了 .gitignore、或密钥第一次写进仓库没加，在原因的位置说
       const note = keyHintNote(payload, true);
       setGlobalToast(
@@ -498,6 +526,7 @@ export default function McpTab({
   // 勾选、抽屉、撤销入口都不动
   useOnLocaleChange(() => {
     setCellNotice(null);
+    setTrustToast(null);
     setKeyToast(null);
     setCellToast(null);
     setRowToast(null);
@@ -509,10 +538,10 @@ export default function McpTab({
   // 范围里各位置的页（用户级在前）；这个位置一个 MCP 配置位置都没有时不在里面
   const pages = locations.flatMap((key) => domains.find((d) => d.key === key) ?? []);
   const table = useMemo(
-    () => mergeMcpDomains(pages),
-    // 页随每一轮扫描换新；范围不变时只跟着扫描结果走
+    () => mergeMcpDomains(pages, install?.agents ?? []),
+    // 页随每一轮扫描换新；范围不变时只跟着扫描结果走；产品的品牌（合组）读回来时重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [domains, locationSetKey, lang],
+    [domains, locationSetKey, lang, install?.agents],
   );
   /// 这一行自己那一页（格的判断、同名定义、差异都在一页里做）
   const pageOf = (row: McpPlacedRow): McpDomain => pages.find((d) => d.key === row.domainKey)!;
@@ -571,6 +600,11 @@ export default function McpTab({
 
   const locationOf = (id: string): McpLocation | undefined =>
     overview?.locations.find((location) => location.id === id);
+  /// 撤销结果里的一个文件在句子里叫什么（`mcpUndoPlaceOf`）：与表格同一套位置名；不是哪个位置的（`.gitignore`）为 undefined
+  const placeOfPath = (path: string) =>
+    mcpUndoPlaceOf(overview?.locations ?? [], (l) => mcpCopyName(mcpPlaceNameOf(l.domain), l))(
+      path,
+    );
   /// 一个位置在原因句里的名字：它是哪个 agent（`Claude Code`），不带 core 给的英文作用域（spec #239 第 42 条）
   const labelOf = (id: string) => {
     const location = locationOf(id);
@@ -587,15 +621,21 @@ export default function McpTab({
   const cellKeyAt = (name: string, locationId: string) =>
     cellKey(rowKeyAt(name, locationId), mcpColumnOf(locationId));
 
+  /// 命令本身出错（扫描、撤销、删除、拷贝路径、在访达中显示）：横幅一句是该处的失败句，原文进「!」（#302）
+  const commandFault = (error: unknown, sentence: string) => {
+    const { text, ...more } = mcpCommandFault(error, sentence);
+    onError(text, more);
+  };
   const reveal = async (path: string) => {
     try {
       await api.revealInDir(path);
     } catch (e) {
-      onError(String(e));
+      commandFault(e, t("mcp.line.revealFailed"));
     }
   };
   /// 右键「拷贝路径」：完整路径进剪贴板（展开区里的路径同样能选中 ⌘C）
-  const copyPath = (path: string) => void api.copyText(path).catch((e) => onError(String(e)));
+  const copyPath = (path: string) =>
+    void api.copyText(path).catch((e) => commandFault(e, t("mcp.line.copyPathFailed")));
 
   /// 写入的命令本身出错：窗口顶上的横幅说 `加到 Codex 失败`（几处时 `添加失败`），原文与要写的文件完整路径进「!」
   /// （spec #239 第 43 条）
@@ -656,8 +696,22 @@ export default function McpTab({
         agent: l ? { id: l.harnessId, name: mcpAgentName(l) } : undefined,
         project: l ? l.domain !== "global" : undefined,
         note: e.mirrorFailed,
+        trail: e.note,
       };
     });
+
+  /// 写成（新加或改写）了的那几处里有要点「信任」的 agent（WorkBuddy）时，右下提示一次去它里面点（#256）。
+  /// 几个 agent 一起写时主句合并说；替掉上一窗
+  const noticeTrust = (op: TrustOp, entries: ReadonlyArray<{ targetId: string }>) => {
+    const notice = trustNoticeFor(
+      op,
+      entries.map((e) => {
+        const l = locationOf(e.targetId);
+        return l ? trustAgentOf(l.harnessId, l.label) : undefined;
+      }),
+    );
+    if (notice) setTrustToast({ ...notice, at: Date.now() });
+  };
 
   /// 按键忙碌那一句里的位置名：「所有 agent」或那一列的列头名
   const keyAgent = (keyId: string) =>
@@ -736,6 +790,7 @@ export default function McpTab({
     if (result !== null) {
       const created = result.entries.filter((e) => e.outcome === "created");
       const failed = result.entries.filter((e) => e.outcome === "failed");
+      noticeTrust("write", created);
       if (single)
         setFlash({ keys: created.map((e) => cellKeyAt(e.name, e.targetId)), nonce: Date.now() });
       const text = toastFor("write", {
@@ -773,7 +828,7 @@ export default function McpTab({
           let message: string | null = null;
           try {
             const back = await api.mcpUndoWrite(id);
-            if (back.outcome !== "undone") message = back.message;
+            if (back.outcome !== "undone") message = mcpEntryReason(back) ?? "";
           } catch {
             // 命令本身出错：原文已进日志，提示条只写失败句
             message = "";
@@ -786,7 +841,7 @@ export default function McpTab({
                 names={writtenNames}
                 reason={
                   message
-                    ? tSpaced("mcp.report.gitignoreUndoFailed", { message })
+                    ? t("mcp.report.gitignoreUndoFailed", { message })
                     : t("mcp.report.gitignoreUndoFailedPlain")
                 }
                 onDismiss={dismissGlobal}
@@ -965,7 +1020,7 @@ export default function McpTab({
     try {
       report = await api.mcpUndoWrite(undoId);
     } catch (error) {
-      onError(String(error));
+      commandFault(error, t("mcp.line.undoCannot"));
       return false;
     } finally {
       setUndoBusy((prev) => (prev === undoId ? null : prev));
@@ -1008,38 +1063,33 @@ export default function McpTab({
       else setKeyToast({ keyId: keyId ?? "all", node });
       return false;
     }
-    // 没撤成：在撤销的入口那里说（那一格下 / 那个点下）
-    if (one && at) {
-      setRowToast({
+    // 没撤成：在撤销的入口那里说（那一格下 / 那个点下）。`撤销失败`，分得出原因接在后面（分不出的原文已进日志）；
+    // 已还原了一部分时说清哪几份已还原、哪份没有（#320）。有备份时给出路 `在访达中显示备份`，可以照它手动恢复
+    const failure = mcpUndoFailure(report, placeOfPath);
+    const failedNode = (onDismiss: () => void) => (
+      <Toast
+        kind="cannot"
+        sentence="mcp.line.undoCannot"
+        reason={failure.reason}
+        stats={failure.paths.length > 0 ? failure.paths.map(displayPath).join(" · ") : undefined}
+        secondary={
+          backup === null
+            ? undefined
+            : { label: t("mcp.undo.revealBackup"), onClick: () => void reveal(backup) }
+        }
+        onDismiss={onDismiss}
+        onClose={onDismiss}
+      />
+    );
+    if (one && at) setRowToast({ rowKey: one.rowKey, at, node: failedNode(dismissRow) });
+    else if (one)
+      setCellToast({
+        id: ++cellToastSeq.current,
         rowKey: one.rowKey,
-        at,
-        node: (
-          <Toast
-            kind="cannot"
-            message={t("mcp.undo.failed", { message: report.message })}
-            onDismiss={dismissRow}
-            onClose={dismissRow}
-          />
-        ),
+        columnId: one.columnId,
+        node: failedNode(dismissCell),
       });
-      return false;
-    }
-    if (one) {
-      failCell(one.rowKey, one.columnId, t("mcp.undo.failed", { message: report.message }));
-      return false;
-    }
-    setKeyToast({
-      keyId: keyId ?? "all",
-      node: (
-        <Toast
-          kind="cannot"
-          sentence="mcp.line.undoCannot"
-          reason={report.message}
-          onDismiss={dismissKey}
-          onClose={dismissKey}
-        />
-      ),
-    });
+    else setKeyToast({ keyId: keyId ?? "all", node: failedNode(dismissKey) });
     return false;
   };
 
@@ -1133,7 +1183,7 @@ export default function McpTab({
     const from = pageOf(placed);
     const to = scopeTargetOf(key);
     const name = mcpPlaceNameOf(key);
-    if (to === undefined) return tSpaced("mcp.scope.noConfigPlace", { place: name });
+    if (to === undefined) return t("mcp.scope.noConfigPlace", { place: name });
     const plan = scopeMovePlan(placed, from, to, labelOf, mcpLocationSentence, claude, cellAt);
     return scopeMoveBlocked(placed, plan, from, to, name, labelOf);
   };
@@ -1280,6 +1330,7 @@ export default function McpTab({
     } finally {
       onBusy(false);
     }
+    noticeTrust("write", created);
     const flashKeys = created.map((e) => cellKeyAt(e.name, e.targetId));
     // 撤销后闪的是这边回来的那几格（复制时这边没动，不闪）
     const one = { keys: mode === "move" ? fromKeys : [], rowKey, columnId: "", at };
@@ -1303,19 +1354,25 @@ export default function McpTab({
       if (ignoreUndo === null) return;
       try {
         const back = await api.mcpUndoWrite(ignoreUndo);
+        // 分不出原因的（core 给了原文 `detail`）只写失败句，原文已进日志
+        const why = mcpEntryReason(back);
         if (back.outcome !== "undone")
           setGlobalToast(
             <Toast
               kind="partial"
               sentence="mcp.scope.toastUndo"
               names={[placed.name]}
-              reason={tSpaced("mcp.report.gitignoreUndoFailed", { message: back.message })}
+              reason={
+                why === undefined
+                  ? t("mcp.report.gitignoreUndoFailedPlain")
+                  : t("mcp.report.gitignoreUndoFailed", { message: why })
+              }
               onDismiss={dismissGlobal}
               onClose={dismissGlobal}
             />,
           );
       } catch (error) {
-        onError(String(error));
+        commandFault(error, t("mcp.line.undoCannot"));
       }
     };
     /// 拿掉写过去的那几份；都拿掉了为 true
@@ -1332,14 +1389,14 @@ export default function McpTab({
               kind="partial"
               sentence="mcp.scope.toastUndo"
               names={[placed.name]}
-              reason={tSpaced("mcp.scope.takeBackFailed", { place: toName, message: miss.message })}
+              reason={mcpTakeBackFailed(toName, miss)}
               onDismiss={dismissGlobal}
               onClose={dismissGlobal}
             />,
           );
         ok = miss === undefined;
       } catch (error) {
-        onError(String(error));
+        commandFault(error, t("mcp.line.undoCannot"));
       }
       await refresh();
       return ok;
@@ -1552,7 +1609,7 @@ export default function McpTab({
       } catch (error) {
         // 单格：命令本身出错的原文已进日志（后端 `err`），提示条只写失败句（spec #239「出错的时候」）
         if (keyId === undefined) cannot(undefined);
-        else onError(String(error));
+        else commandFault(error, t("mcp.line.deleteFailed"));
       } finally {
         onBusy(false);
         if (keyId === undefined)
@@ -1565,7 +1622,9 @@ export default function McpTab({
       }
       if (result !== null && keyId === undefined) {
         if (!result.entries.some((e) => e.outcome === "removed")) {
-          cannot(result.entries[0]?.message ?? t("mcp.delete.noChange"));
+          // 分不出原因的（core 给了原文 `detail`）只写失败句
+          const first = result.entries[0];
+          cannot(first === undefined ? t("mcp.delete.noChange") : mcpEntryReason(first));
         } else {
           // 删的是团队共享那一格：接一句提交之后队友那边的后果（spec 2026-09-30-mcp-claude-self-team R7）
           // 第三方模式那一份没删成时，成功句后接那一句
@@ -1612,7 +1671,10 @@ export default function McpTab({
         );
         const text = toastFor("delete", {
           done: itemsOf(removed),
-          failed: itemsOf(failed).map((item, i) => ({ ...item, reason: failed[i].message })),
+          failed: itemsOf(failed).map((item, i) => ({
+            ...item,
+            reason: mcpEntryReason(failed[i]) ?? "",
+          })),
         });
         const undoId = result.undoId;
         const undo =
@@ -1703,14 +1765,18 @@ export default function McpTab({
         // 没成的每一处都说：写到一半失败、又没能退回的那一处也是 failed（它其实改了）
         const failed = result.entries.filter((e) => e.outcome === "failed");
         const updated = result.entries.filter((e) => e.outcome === "updated");
+        // 改写了 WorkBuddy 里那一条：它的信任跟定义绑着，要重新点（#256）
+        noticeTrust("rewrite", updated);
         if (failed.length > 0) {
+          // 分不出原因的那几处（core 给了原文 `detail`）不列：提示条只写失败句，原文已进日志
+          const told = failed.flatMap((e) => {
+            const message = mcpEntryReason(e);
+            return message === undefined
+              ? []
+              : [t("mcp.keep.failedAt", { place: copyNameOf(e.targetId), message })];
+          });
           cannot(
-            listText(
-              failed.map((e) =>
-                t("mcp.keep.failedAt", { place: copyNameOf(e.targetId), message: e.message }),
-              ),
-              "semicolon",
-            ),
+            told.length > 0 ? listText(told, "semicolon") : undefined,
             failed.find((e) => e.backupPath !== null)?.backupPath ?? null,
           );
         } else {
@@ -1845,7 +1911,7 @@ export default function McpTab({
 
   // ===== 渲染 =====
 
-  // `发现` 一面：页面头右端换成搜索框与 `粘贴 JSON`，没有筛选行（R4）；右下那一叠照常在
+  // `发现` 一面：页面头右端换成搜索框与 `粘贴配置`，没有筛选行（R4）；右下那一叠照常在
   // 装上了 MCP：这一页重扫（`我的` 里多出那一行）；撤销交给这一页的撤销栈（⌘Z），切回 `我的` 照样能撤
   if (face === "discover") {
     return (
@@ -1857,10 +1923,19 @@ export default function McpTab({
             onChanged={refresh}
             onUndoable={setUndo}
             onError={onError}
+            placeOfPath={placeOfPath}
           />
         ) : null}
         <PageUndo run={() => undoRef.current?.()} can={canUndo} />
         {globalToast ? <CornerToast>{globalToast}</CornerToast> : null}
+        {trustToast ? (
+          <McpTrustToast
+            key={trustToast.at}
+            notice={trustToast}
+            onDismiss={dismissTrust}
+            onError={onError}
+          />
+        ) : null}
       </>
     );
   }
@@ -1993,7 +2068,6 @@ export default function McpTab({
       agentId: column.harnessId,
       name: column.name,
       scope: column.scope,
-      nameTail: column.nameTail,
       group: column.group,
       count: n,
       tip: tn("mcp.column.added", n, { label: column.label }),
@@ -2070,8 +2144,17 @@ export default function McpTab({
           ? undefined
           : blocked
             ? blocked.detail
-            : (withEnableNote(move?.detail ?? where, column.id, row.domainKey, writes) ??
-              undefined),
+            : joinReasons(
+                withEnableNote(move?.detail ?? where, column.id, row.domainKey, writes),
+                // WorkBuddy（#256）：有的说以后改过也要点「信任」、写在哪；点了写进的说写进以后要点
+                view.clickable
+                  ? trustCellNote(
+                      trustAgentOf(target.harnessId, column.sentence),
+                      view.dot === "linked",
+                      displayPath(target.path),
+                    )
+                  : null,
+              ),
         pending: pendingCells.has(cellKey(key, column.id)),
       };
     }
@@ -2087,7 +2170,7 @@ export default function McpTab({
       holds(page, row.name, teamAt.id);
     /// 抽屉里 `只留…`：删掉另一处，不确认；不给撤销键（点另一格就挪过去，⌘Z 照旧）。结果说「只留」不说「删除」——
     /// 它还在，只是只留在一处（2026-09-30 产品负责人：「提示语感觉不对，其实是从 project 移动到了 local」）；
-    /// 删的是团队共享那份时句尾照旧接「提交后队友那边就没有了」（删除那一支按列统一接）
+    /// 删的是团队共享那份时句尾照旧接「提交后队友将无法使用」（删除那一支按列统一接）
     const keepOnly = (keep: McpLocation, drop: McpLocation) =>
       void deleteOriginal({
         items: [{ locationId: drop.id, name: row.name }],
@@ -2147,7 +2230,7 @@ export default function McpTab({
           onFocus={() => loadDiff(row.name, differing)}
         >
           <Tag tone="weak" tip={diffTip(row.name, fields)}>
-            {tn("mcp.differ.tag", differing.length)}
+            {tn("mcp.differ.tag", differingCopies(row, targetIdsOf(row)))}
           </Tag>
         </span>
       ) : unsupportedAt.length > 0 ? (
@@ -2210,6 +2293,7 @@ export default function McpTab({
             <McpDiffSection
               name={row.name}
               locationIds={differing}
+              copies={differingCopies(row, targetIdsOf(row))}
               load={api.mcpFieldDiff}
               labelOf={copyNameOf}
               pathOf={(id) => locationOf(id)?.path}
@@ -2296,11 +2380,18 @@ export default function McpTab({
   // 选择态：工具行里每个位置一项「● / ○ 名字」（DESIGN「MCP 格子只有两种」选择行）：
   // 点 ○ 写进缺的，点 ●（选中的都有了）确认一次、从那个 agent 删掉。写不过去、删不了的格不计入
   const columnChecks: Record<string, ColumnCheck> = {};
+  /// 一列在「所有 agent」键上的样子：合组的用组头图标；产品名不带仅自己 / 团队共享
+  const pressAgent = (c: McpColumn) => ({
+    id: c.group?.agentId ?? c.harnessId,
+    name: c.split ? c.name : c.sentence,
+    brand: c.group?.name ?? c.name,
+  });
   const enabledPresses: {
     add: McpSelection[];
     remove: McpRemoveItem[];
     checked: boolean;
-    agent: { id: string; name: string };
+    /// 图标（组头那一枚）、产品名（读屏与提示框）、品牌名（键上图标的名字）
+    agent: { id: string; name: string; brand: string };
   }[] = [];
   for (const target of table.columns) {
     const cells = missingAt(target);
@@ -2337,7 +2428,7 @@ export default function McpTab({
         add: cells,
         remove: deletable,
         checked,
-        agent: { id: target.group?.agentId ?? target.harnessId, name: target.name },
+        agent: pressAgent(target),
       });
     columnChecks[target.id] = {
       checked,
@@ -2368,16 +2459,15 @@ export default function McpTab({
   const allAdd = enabledPresses.flatMap((p) => p.add);
   const allRemove = enabledPresses.flatMap((p) => p.remove);
   const uniqNames = (cells: { name: string }[]) => [...new Set(cells.map((c) => c.name))];
-  // 键上只画这一下真会改到的 agent；Claude 合组的 Code / Local / Desktop 同一枚图标，按图标去重成一枚，
-  // 读屏名与提示框写全各家（`写进 Claude Code、Claude Desktop、Codex`）；没有能改的时画全部列
+  // 键上只画这一下真会改到的 agent；同一品牌合组的几格（Claude 的 仅自己 / 团队共享 / Desktop）同一枚图标、
+  // 按图标去重成一枚、名字写品牌，读屏名与提示框写全各家产品（`写进 Claude Code、Claude Desktop、Codex`）；
+  // 没有能改的时画全部列
   const pressAgents =
-    enabledPresses.length > 0
-      ? enabledPresses.map((p) => p.agent)
-      : table.columns.map((c) => ({ id: c.group?.agentId ?? c.harnessId, name: c.name }));
+    enabledPresses.length > 0 ? enabledPresses.map((p) => p.agent) : table.columns.map(pressAgent);
   const agentNames = listText([...new Set(pressAgents.map((a) => a.name))]);
   const keyAgents = pressAgents
     .filter((a, i, all) => all.findIndex((b) => b.id === a.id) === i)
-    .map((a) => ({ id: a.id, name: a.id === "claude-code" ? "Claude" : a.name }));
+    .map((a) => ({ id: a.id, name: a.brand }));
   const allAgents: ColumnCheck = {
     checked: allChecked,
     label: allChecked
@@ -2490,6 +2580,14 @@ export default function McpTab({
         keyBusy={keyBusy && { keyId: keyBusy.keyId, label: keyBusy.label() }}
       />
       {globalToast ? <CornerToast>{globalToast}</CornerToast> : null}
+      {trustToast ? (
+        <McpTrustToast
+          key={trustToast.at}
+          notice={trustToast}
+          onDismiss={dismissTrust}
+          onError={onError}
+        />
+      ) : null}
 
       {/* 批量与跨域的那一道确认，锚在触发它的键 / 格下面。跳过的项目留在这里——它是做决定所需的信息 */}
       {pane !== null && (

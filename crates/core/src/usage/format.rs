@@ -6,9 +6,9 @@
 use super::connect::{auth_required, ConnectFailure, ConnectState, MANUAL_INSTALL_URL};
 use super::model::{
     AgentDisplay, AgentId, AgentUsage, DisplayMode, FailReason, PowerState, Reading, Refresh,
-    Severity, Source, StackedSize, UsageSettings, UsageState, UsageStatus, Window,
+    Severity, Source, StackedSize, UsageSettings, UsageState, UsageStatus, UsageSubject, Window,
 };
-use super::MAX_MENU_BAR_AGENTS;
+use super::MAX_MENU_BAR_ITEMS;
 use serde::Serialize;
 
 // ---------------- 窗口选择（R11：AgentDisplay 的语义） ----------------
@@ -290,6 +290,43 @@ pub fn nearest_reset_text(windows: &[Window], now: i64) -> Option<String> {
     })
 }
 
+// ---------------- 额度三档（产品负责人 2026-10-08，spec #322） ----------------
+
+/// 已用到这个百分比起算「紧张」（含）
+pub const TIGHT_FROM_PERCENT: f64 = 70.0;
+/// 已用到这个百分比算「用尽」（含）
+pub const OUT_AT_PERCENT: f64 = 100.0;
+
+/// 一个窗口的额度档位：用量页、托盘、菜单栏共用这一处阈值，颜色怎么上由界面定
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QuotaLevel {
+    /// 已用 < 70%
+    Ok,
+    /// 已用 70% 到不满 100%；服务端判为 critical 时至少是它
+    Tight,
+    /// 已用 ≥ 100%
+    Out,
+}
+
+/// 按已用百分比分档；重置时刻已过、还没取到新数时按 0% 算（也不看旧的服务端等级）
+pub fn quota_level(window: &Window, now: i64) -> QuotaLevel {
+    if window_has_passed_reset(window, now) {
+        return QuotaLevel::Ok;
+    }
+    let by_percent = if window.used_percent >= OUT_AT_PERCENT {
+        QuotaLevel::Out
+    } else if window.used_percent >= TIGHT_FROM_PERCENT {
+        QuotaLevel::Tight
+    } else {
+        QuotaLevel::Ok
+    };
+    match (by_percent, window.severity) {
+        (QuotaLevel::Ok, Severity::Critical) => QuotaLevel::Tight,
+        (level, _) => level,
+    }
+}
+
 /// 托盘一个窗口行的数据（R10：名字、进度条、百分比；进度条和文字用同一种刻度）
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -299,15 +336,20 @@ pub struct TrayWindowRow {
     pub percent_text: String,
     /// 进度条刻度 0–100：剩余模式下也换算成「剩余」的刻度，和 `percent_text` 保持一致
     pub gauge_percent: f64,
-    /// 服务端 severity 为 warning 或更重时为真：这一行要整行加粗（R10：不用红色/橙色）
+    /// 额度档位（见 [`quota_level`]）
+    pub level: QuotaLevel,
+    /// `level` 不是 ok 时为真：这一行整行加粗（R10：不用红色/橙色）
     pub emphasize: bool,
     /// 这个窗口多久后重置：「4 小时 19 分后重置」「6 天后重置」；已经过了或没给是 None
     pub reset_text: Option<String>,
+    /// 具体数目的小字（如提供商给的已用 / 上限）；agent 没有，提供商在 #325 填
+    pub amount_text: Option<String>,
 }
 
 /// 见 [`TrayWindowRow`]
 pub fn tray_window_row(window: &Window, mode: DisplayMode, now: i64) -> TrayWindowRow {
     let reset_passed = window_has_passed_reset(window, now);
+    let level = quota_level(window, now);
     let used_percent = if reset_passed {
         0.0
     } else {
@@ -331,42 +373,69 @@ pub fn tray_window_row(window: &Window, mode: DisplayMode, now: i64) -> TrayWind
         label: window.label(),
         percent_text,
         gauge_percent: gauge_percent.clamp(0.0, 100.0),
-        // 已经重置过的窗口不按旧的紧张程度加粗
-        emphasize: !reset_passed
-            && matches!(window.severity, Severity::Warning | Severity::Critical),
+        level,
+        // 已经重置过的窗口按 0% 算，不按旧的紧张程度加粗（见 quota_level）
+        emphasize: level != QuotaLevel::Ok,
         reset_text: nearest_reset_text(std::slice::from_ref(window), now),
+        amount_text: None,
     }
 }
 
-// ---------------- 默认 agent 列表（R12） ----------------
+// ---------------- 页面顺序与菜单栏的项（R12、spec #322） ----------------
 
-/// 「显示哪些 agent」的默认值：检测到已登录的 agent，按 `AgentId::ALL` 的顺序，
-/// 最多 `MAX_MENU_BAR_AGENTS` 个
-pub fn default_agents(signed_in: &[AgentId]) -> Vec<AgentId> {
-    AgentId::ALL
+/// 页面上的先后：先 agent（按 `AgentId::ALL`），再模型提供商（按提供商列表；#325 接入读数后加在后面）。
+/// 菜单栏各段、用量视图的 `items` 都按它排，设置里不存顺序
+pub fn page_order() -> Vec<UsageSubject> {
+    AgentId::ALL.into_iter().map(UsageSubject::Agent).collect()
+}
+
+/// 菜单栏显示哪些项，按页面顺序，最多 [`MAX_MENU_BAR_ITEMS`] 项：设置里选过（`items` 是 `Some`）就用选的
+/// （不在页面顺序里的——比如已删掉的提供商——不画）；没选过（`None`，包括全新安装）取 `listed`（有用量来源的）
+pub fn effective_items(settings: &UsageSettings, listed: &[UsageSubject]) -> Vec<UsageSubject> {
+    let chosen = settings.items.as_deref().unwrap_or(listed);
+    page_order()
         .into_iter()
-        .filter(|id| signed_in.contains(id))
-        .take(MAX_MENU_BAR_AGENTS)
+        .filter(|s| chosen.contains(s))
+        .take(MAX_MENU_BAR_ITEMS)
         .collect()
 }
 
-/// 有效的显示 agent 列表：设置里配置过（`UsageSettings.agents` 是 `Some`）就用配置的
-/// （截到最多 `MAX_MENU_BAR_AGENTS` 个，防御性处理——正常写入的设置不会超）；
-/// 没配置过（`None`，包括全新安装）就是默认值（见 [`default_agents`]）
-pub fn effective_agents(settings: &UsageSettings, signed_in: &[AgentId]) -> Vec<AgentId> {
-    match &settings.agents {
-        Some(agents) => agents.iter().copied().take(MAX_MENU_BAR_AGENTS).collect(),
-        None => default_agents(signed_in),
+/// 这一项手上的读数
+fn reading_of<'a>(state: &'a UsageState, subject: &UsageSubject) -> Option<&'a Reading> {
+    match subject {
+        UsageSubject::Agent(agent) => state
+            .agents
+            .iter()
+            .find(|a| a.agent == *agent)
+            .and_then(|a| a.reading.as_ref()),
+        // 提供商的读数在 #325 接入
+        UsageSubject::Provider(_) => None,
     }
+}
+
+/// 有用量来源的项（见 [`listed`]），按页面顺序：菜单栏的默认名单按它
+fn listed_subjects(state: &UsageState) -> Vec<UsageSubject> {
+    page_order()
+        .into_iter()
+        .filter(|s| match s {
+            UsageSubject::Agent(agent) => {
+                state.agents.iter().any(|a| a.agent == *agent && listed(a))
+            }
+            UsageSubject::Provider(_) => false,
+        })
+        .collect()
 }
 
 // ---------------- 菜单栏整段（R9） ----------------
 
-/// 菜单栏上一个 agent 的一段
+/// 菜单栏上一项的一段
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MenuBarSegment {
-    pub agent: AgentId,
+    /// 这一项的键（`agent:codex`、`provider:<id>`）
+    pub key: UsageSubject,
+    /// 取标志用的 id（见 [`UsageSubject::brand`]）
+    pub brand: String,
     /// 一行或两行（见 [`menu_bar_agent_lines`]）
     pub lines: Vec<String>,
     /// 读数过期：整段变淡
@@ -383,7 +452,32 @@ pub struct MenuBarView {
     pub segments: Vec<MenuBarSegment>,
 }
 
-/// 由状态与设置算出菜单栏（R9）。显示哪些 agent 按 [`effective_agents`]，默认名单取「有用量来源」的
+/// 画得出的读数：来自桌面应用、超过 24 小时的按没有读数算
+fn drawable_reading<'a>(
+    state: &'a UsageState,
+    subject: &UsageSubject,
+    now: i64,
+) -> Option<&'a Reading> {
+    reading_of(state, subject).filter(|r| !desktop_reading_too_old(r, now))
+}
+
+/// 读数过期（整段 / 整项变淡）：观测时刻比 [`stale_interval_secs`] 的 2 倍还旧（[`is_stale`]）
+fn reading_stale(
+    reading: Option<&Reading>,
+    settings: &UsageSettings,
+    power: PowerState,
+    now: i64,
+) -> bool {
+    reading.is_some_and(|r| {
+        is_stale(
+            r.observed_at,
+            now,
+            stale_interval_secs(settings.refresh, power),
+        )
+    })
+}
+
+/// 由状态与设置算出菜单栏（R9）。显示哪些项、先后按 [`effective_items`]，默认名单取「有用量来源」的
 /// （见 [`listed`]）；每段的过期按 [`stale_interval_secs`] 的 2 倍（[`is_stale`]）。
 /// 来自桌面应用、超过 24 小时的读数按没有读数写「—」，不算过期
 pub fn menu_bar_view(
@@ -397,34 +491,16 @@ pub fn menu_bar_view(
             segments: Vec::new(),
         };
     }
-    let signed_in: Vec<AgentId> = state
-        .agents
-        .iter()
-        .filter(|a| listed(a))
-        .map(|a| a.agent)
-        .collect();
     let mut segments = Vec::new();
-    for agent in effective_agents(settings, &signed_in) {
-        let display = settings.per_agent.get(&agent).cloned().unwrap_or_default();
-        let reading = state
-            .agents
-            .iter()
-            .find(|a| a.agent == agent)
-            .and_then(|a| a.reading.as_ref())
-            .filter(|r| !desktop_reading_too_old(r, now));
-        let lines = menu_bar_agent_lines(reading, &display, settings.display_mode, now);
-        let stale = reading.is_some_and(|r| {
-            is_stale(
-                r.observed_at,
-                now,
-                stale_interval_secs(settings.refresh, power),
-            )
-        });
+    for subject in effective_items(settings, &listed_subjects(state)) {
+        let display = settings.per_item.get(&subject).cloned().unwrap_or_default();
+        let reading = drawable_reading(state, &subject, now);
         segments.push(MenuBarSegment {
-            agent,
-            lines,
-            stale,
+            brand: subject.brand(),
+            lines: menu_bar_agent_lines(reading, &display, settings.display_mode, now),
+            stale: reading_stale(reading, settings, power, now),
             stacked_size: display.stacked_size,
+            key: subject,
         });
     }
     MenuBarView { segments }
@@ -432,11 +508,54 @@ pub fn menu_bar_view(
 
 // ---------------- 用量视图（托盘与用量页共用，R7 R10 R11） ----------------
 
-/// 托盘里一个 agent 的用量（R10）：块头名字后的「N 分钟前更新」、各窗口（一窗口一行，各带重置时间）、一句状态
+/// 用量的一项是 agent 还是模型提供商
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UsageItemKind {
+    Agent,
+    Provider,
+}
+
+/// 读不到提供商额度的类别（spec #322「出错归类」）；agent 不用它（照旧在 `note` 里说）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UsageProblemKind {
+    /// 密钥无效
+    InvalidKey,
+    /// 套餐过期 / 没有套餐
+    PlanExpired,
+    /// 连不上 / 超时
+    Network,
+    /// 被限流
+    RateLimited,
+    /// 别的（接口改了、解析失败）
+    Other,
+}
+
+/// 出错类别与「!」里的技术原文（去隐私后）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageProblem {
+    pub kind: UsageProblemKind,
+    pub detail: Option<String>,
+}
+
+/// 用量的一项（托盘一块、用量页一栏）：块头名字后的「N 分钟前更新」、各窗口（一窗口一行，各带重置时间）、一句状态。
+/// 视图里的 `items` 已按页面顺序（[`page_order`]）排好
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TrayUsage {
-    pub agent: AgentId,
+pub struct UsageItemView {
+    /// 这一项的键（`agent:codex`、`provider:<id>`）：设置、刷新命令都按它
+    pub key: UsageSubject,
+    pub kind: UsageItemKind,
+    /// 页面上归在哪一组（分组标题用的固定值，与 `kind` 一致）：界面按它分「Agent ｜ 模型提供商」两组
+    pub group: UsageItemKind,
+    /// 这一项的名字：agent 是 `Claude` / `Codex`；提供商是提供商列表里的名称
+    pub name: String,
+    /// 取标志用的 id（见 [`UsageSubject::brand`]）
+    pub brand: String,
+    /// 选进了菜单栏（见 [`effective_items`]；与菜单栏开没开无关）
+    pub in_menu_bar: bool,
     /// 块头名字后的「3 分钟前更新」：有读数就写（R10）；读数来自 Claude 桌面应用时是「来自 Claude 桌面应用 · 3 小时前」；
     /// 还没有读数、或桌面应用的读数超过 24 小时（原因行里已经说了多久）是 None
     pub updated_text: Option<String>,
@@ -448,9 +567,13 @@ pub struct TrayUsage {
     /// 「连接 Claude 用量」这一处（只 Claude 有）：命令行不可用时原因行右端的键，或连接进行到哪、失败的出口；
     /// 命令行正常时 None
     pub connect: Option<ConnectAction>,
+    /// 读不到额度的类别与原文（提供商用，#325 填）；agent 是 None
+    pub problem: Option<UsageProblem>,
+    /// 读数过期（同菜单栏那段变淡的规则）
+    pub stale: bool,
 }
 
-/// 原因行右端「连接 Claude 用量」那一处（画板 #206 第 2 版 3–12）。句子在 [`TrayUsage::note`]
+/// 原因行右端「连接 Claude 用量」那一处（画板 #206 第 2 版 3–12）。句子在 [`UsageItemView::note`]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum ConnectAction {
@@ -575,13 +698,13 @@ impl UsageStateView {
 pub struct UsageView {
     pub state: UsageStateView,
     pub settings: UsageSettings,
-    /// 有用量来源的 agent（见 [`listed`]），按 `AgentId::ALL`：命令行登录了、登录了却找不到程序、或手上有
-    /// Claude 桌面应用记下的读数，不只是「已登录」。名字是历史遗留（前端 `UsageView.signedIn` 与之对应，
-    /// 改名要连带前端与测试，没改）。菜单栏默认名单、「显示哪些 agent」按它；托盘出不出块看 `tray`
-    pub signed_in: Vec<AgentId>,
-    /// 托盘各块、用量页「当前用量」各栏的用量：`signed_in` 里的，加上装了桌面应用、读不到数的 Claude
-    /// （给「连接 Claude 用量」）。前端按它决定出不出块
-    pub tray: Vec<TrayUsage>,
+    /// 有用量来源的项（见 [`listed`]），按页面顺序：命令行登录了、登录了却找不到程序、或手上有
+    /// Claude 桌面应用记下的读数，不只是「已登录」。名字是历史遗留（前端 `UsageView.signedIn` 与之对应）。
+    /// 菜单栏默认名单、「显示哪些」按它；托盘出不出块看 `items`
+    pub signed_in: Vec<UsageSubject>,
+    /// 托盘各块、用量页「当前用量」各栏，按页面顺序（[`page_order`]）：`signed_in` 里的，加上装了桌面应用、
+    /// 读不到数的 Claude（给「连接 Claude 用量」）。前端按它决定出不出块
+    pub items: Vec<UsageItemView>,
     /// 用量页的预览：打开菜单栏显示后会是的样子（开关关着也照样算）
     pub menu_bar: MenuBarView,
 }
@@ -721,6 +844,50 @@ pub fn usage_view(
     usage_view_with(state, settings, power, now, &ConnectState::Idle)
 }
 
+/// 一个 agent 的一项（`in_menu_bar` 由调用方填）
+fn agent_item(
+    usage: &AgentUsage,
+    settings: &UsageSettings,
+    power: PowerState,
+    now: i64,
+    connect: &ConnectState,
+) -> UsageItemView {
+    let subject = UsageSubject::Agent(usage.agent);
+    // 桌面应用的读数超过 24 小时：不画旧数，原因行写多少天没更新（取数的原因句在前）
+    let too_old = usage
+        .reading
+        .as_ref()
+        .filter(|r| desktop_reading_too_old(r, now));
+    let reading = usage.reading.as_ref().filter(|_| too_old.is_none());
+    let action = connect_action(usage, connect);
+    let note = match &action {
+        Some(_) => Some(connect_note(usage, connect, reading, too_old, now)),
+        None => tray_note(usage, now).or_else(|| too_old.map(|r| desktop_stale_text(r, now))),
+    };
+    UsageItemView {
+        kind: UsageItemKind::Agent,
+        group: UsageItemKind::Agent,
+        name: usage.agent.display_name().to_string(),
+        brand: subject.brand(),
+        key: subject,
+        in_menu_bar: false,
+        updated_text: reading.map(|r| reading_head_text(r, now)),
+        windows: reading
+            .map(|r| {
+                r.windows
+                    .iter()
+                    .map(|w| tray_window_row(w, settings.display_mode, now))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        note,
+        retry: action.is_none() && can_retry(&usage.status),
+        connect: action,
+        problem: None,
+        stale: reading_stale(reading, settings, power, now),
+    }
+}
+
 /// 同 [`usage_view`]，带上「连接 Claude 用量」此刻进行到哪
 pub fn usage_view_with(
     state: &UsageState,
@@ -729,47 +896,29 @@ pub fn usage_view_with(
     now: i64,
     connect: &ConnectState,
 ) -> UsageView {
-    let mut signed = Vec::new();
-    let mut tray = Vec::new();
-    for agent in AgentId::ALL {
-        let Some(usage) = state.agents.iter().find(|a| a.agent == agent && shown(a)) else {
-            continue;
+    let signed_in = listed_subjects(state);
+    let in_menu_bar = effective_items(settings, &signed_in);
+    let mut items = Vec::new();
+    for subject in page_order() {
+        let item = match &subject {
+            UsageSubject::Agent(agent) => state
+                .agents
+                .iter()
+                .find(|a| a.agent == *agent && shown(a))
+                .map(|usage| agent_item(usage, settings, power, now, connect)),
+            // 提供商的读数在 #325 接入
+            UsageSubject::Provider(_) => None,
         };
-        if listed(usage) {
-            signed.push(agent);
+        if let Some(mut item) = item {
+            item.in_menu_bar = in_menu_bar.contains(&subject);
+            items.push(item);
         }
-        // 桌面应用的读数超过 24 小时：不画旧数，原因行写多少天没更新（取数的原因句在前）
-        let too_old = usage
-            .reading
-            .as_ref()
-            .filter(|r| desktop_reading_too_old(r, now));
-        let reading = usage.reading.as_ref().filter(|_| too_old.is_none());
-        let action = connect_action(usage, connect);
-        let note = match &action {
-            Some(_) => Some(connect_note(usage, connect, reading, too_old, now)),
-            None => tray_note(usage, now).or_else(|| too_old.map(|r| desktop_stale_text(r, now))),
-        };
-        tray.push(TrayUsage {
-            agent,
-            updated_text: reading.map(|r| reading_head_text(r, now)),
-            windows: reading
-                .map(|r| {
-                    r.windows
-                        .iter()
-                        .map(|w| tray_window_row(w, settings.display_mode, now))
-                        .collect()
-                })
-                .unwrap_or_default(),
-            note,
-            retry: action.is_none() && can_retry(&usage.status),
-            connect: action,
-        });
     }
     UsageView {
         state: UsageStateView::from_state(state),
         settings: settings.clone(),
-        signed_in: signed,
-        tray,
+        signed_in,
+        items,
         // 预览：关着也画打开后的样子（菜单栏本身由 menu_bar_view 按真实开关画）
         menu_bar: menu_bar_view(
             state,
@@ -868,9 +1017,9 @@ mod tests {
             ],
         );
         let v = signed_in_view(UsageStatus::Ok, Some(r), now);
-        assert_eq!(v.tray.len(), 1, "Codex 没登录，不列");
-        let t = &v.tray[0];
-        assert_eq!(t.agent, AgentId::ClaudeCode);
+        assert_eq!(v.items.len(), 1, "Codex 没登录，不列");
+        let t = &v.items[0];
+        assert_eq!(t.key, UsageSubject::Agent(AgentId::ClaudeCode));
         assert_eq!(t.updated_text.as_deref(), Some("1 分钟前更新"));
         assert_eq!(t.note, None);
         assert_eq!(
@@ -890,7 +1039,7 @@ mod tests {
             ],
             "每个窗口各写自己的重置时间"
         );
-        assert_eq!(v.signed_in, vec![AgentId::ClaudeCode]);
+        assert_eq!(v.signed_in, vec![UsageSubject::Agent(AgentId::ClaudeCode)]);
     }
 
     /// R10：块头名字后总写「N 分钟前更新」，不只在过期时（产品负责人 2026-09-29）；没有读数就不写
@@ -904,7 +1053,7 @@ mod tests {
                 Some(at(AgentId::ClaudeCode, now - ago, w.clone())),
                 now,
             )
-            .tray[0]
+            .items[0]
                 .updated_text
                 .clone()
         };
@@ -916,7 +1065,7 @@ mod tests {
             "不到 1 分钟也写 1 分钟"
         );
         assert_eq!(
-            signed_in_view(UsageStatus::Ok, None, now).tray[0].updated_text,
+            signed_in_view(UsageStatus::Ok, None, now).items[0].updated_text,
             None
         );
     }
@@ -925,7 +1074,7 @@ mod tests {
     #[test]
     fn view_tray_note_by_status() {
         let now = 100_000;
-        let note = |status: UsageStatus| signed_in_view(status, None, now).tray[0].note.clone();
+        let note = |status: UsageStatus| signed_in_view(status, None, now).items[0].note.clone();
         assert_eq!(
             note(UsageStatus::RateLimited {
                 until: now + 5 * 60
@@ -990,7 +1139,7 @@ mod tests {
     #[test]
     fn view_tray_retry_by_status() {
         let now = 100_000;
-        let retry = |status: UsageStatus| signed_in_view(status, None, now).tray[0].retry;
+        let retry = |status: UsageStatus| signed_in_view(status, None, now).items[0].retry;
         let failing = |reason: FailReason| retry(UsageStatus::Failing { reason });
         for (reason, want) in [
             (FailReason::Unsupported, true),
@@ -1020,7 +1169,7 @@ mod tests {
             )),
             now,
         );
-        assert!(!ok.tray[0].retry);
+        assert!(!ok.items[0].retry);
         // 失败时照常画上一次的读数，原因行后照样给
         let stale = signed_in_view(
             UsageStatus::Failing {
@@ -1033,9 +1182,9 @@ mod tests {
             )),
             now,
         );
-        assert!(stale.tray[0].retry);
+        assert!(stale.items[0].retry);
         assert_eq!(
-            serde_json::to_value(&stale.tray[0]).unwrap()["retry"],
+            serde_json::to_value(&stale.items[0]).unwrap()["retry"],
             serde_json::json!(true)
         );
     }
@@ -1045,10 +1194,10 @@ mod tests {
     fn view_not_installed_but_signed_in_is_listed_with_note() {
         let now = 100_000;
         let v = signed_in_view(UsageStatus::NotInstalled, None, now);
-        assert_eq!(v.signed_in, vec![AgentId::ClaudeCode]);
-        assert_eq!(v.tray[0].note.as_deref(), Some("没找到 Claude Code"));
+        assert_eq!(v.signed_in, vec![UsageSubject::Agent(AgentId::ClaudeCode)]);
+        assert_eq!(v.items[0].note.as_deref(), Some("没找到 Claude Code"));
         let hidden = signed_in_view(UsageStatus::NotSignedIn, None, now);
-        assert!(hidden.tray.is_empty());
+        assert!(hidden.items.is_empty());
     }
 
     /// 用量页的预览：菜单栏显示关着时也画「打开后会是什么样」（R11）
@@ -1160,7 +1309,8 @@ mod tests {
         assert_eq!(
             v.segments,
             vec![MenuBarSegment {
-                agent: AgentId::Codex,
+                key: UsageSubject::Agent(AgentId::Codex),
+                brand: "codex".into(),
                 lines: vec!["43%".into()],
                 stale: false,
                 stacked_size: StackedSize::Small,
@@ -1475,9 +1625,9 @@ mod tests {
         };
         let settings = UsageSettings {
             menu_bar_enabled: true,
-            per_agent: [
+            per_item: [
                 (
-                    AgentId::ClaudeCode,
+                    UsageSubject::Agent(AgentId::ClaudeCode),
                     AgentDisplay {
                         primary: Some("session".into()),
                         secondary: Some("weekly".into()),
@@ -1485,7 +1635,7 @@ mod tests {
                         stacked_size: StackedSize::Large,
                     },
                 ),
-                (AgentId::Codex, AgentDisplay::default()),
+                (UsageSubject::Agent(AgentId::Codex), AgentDisplay::default()),
             ]
             .into_iter()
             .collect(),
@@ -1495,15 +1645,19 @@ mod tests {
         assert_eq!(
             v.segments
                 .iter()
-                .map(|s| (s.agent, s.lines.clone(), s.stacked_size))
+                .map(|s| (s.key.clone(), s.lines.clone(), s.stacked_size))
                 .collect::<Vec<_>>(),
             vec![
                 (
-                    AgentId::ClaudeCode,
+                    UsageSubject::Agent(AgentId::ClaudeCode),
                     vec!["5h 62%".into(), "7d 25%".into()],
                     StackedSize::Large
                 ),
-                (AgentId::Codex, vec!["72%".into()], StackedSize::Small),
+                (
+                    UsageSubject::Agent(AgentId::Codex),
+                    vec!["72%".into()],
+                    StackedSize::Small
+                ),
             ]
         );
     }
@@ -1569,66 +1723,192 @@ mod tests {
         assert_eq!(nearest_reset_text(&windows, now), None);
     }
 
-    // ---------------- 严重程度加粗（AC24） ----------------
+    // ---------------- 额度三档与加粗（spec #322，替代 AC24 的「看服务端 severity」） ----------------
 
-    #[test]
-    fn ac24_warning_severity_is_emphasized_without_color() {
-        let mut w = window("weekly", "本周", 87.0, None);
-        w.severity = Severity::Warning;
-        let row = tray_window_row(&w, DisplayMode::Used, 0);
-        assert!(row.emphasize);
+    fn level_at(used: f64) -> QuotaLevel {
+        tray_window_row(&window("weekly", "本周", used, None), DisplayMode::Used, 0).level
     }
 
     #[test]
-    fn normal_severity_is_not_emphasized() {
-        let w = window("weekly", "本周", 5.0, None);
-        let row = tray_window_row(&w, DisplayMode::Used, 0);
+    fn quota_level_boundaries() {
+        assert_eq!(level_at(0.0), QuotaLevel::Ok);
+        assert_eq!(level_at(69.9), QuotaLevel::Ok);
+        assert_eq!(level_at(70.0), QuotaLevel::Tight);
+        assert_eq!(level_at(99.9), QuotaLevel::Tight);
+        assert_eq!(level_at(100.0), QuotaLevel::Out);
+        assert_eq!(level_at(120.0), QuotaLevel::Out);
+    }
+
+    #[test]
+    fn quota_level_after_passed_reset_counts_as_zero() {
+        let now = 10_000;
+        let w = window("session", "5 小时", 100.0, Some(now - 1));
+        let row = tray_window_row(&w, DisplayMode::Remaining, now);
+        assert_eq!(row.level, QuotaLevel::Ok);
         assert!(!row.emphasize);
-    }
-
-    // ---------------- default_agents / effective_agents（AC22、AC27） ----------------
-
-    #[test]
-    fn default_agents_with_zero_signed_in() {
-        assert_eq!(default_agents(&[]), Vec::<AgentId>::new());
-    }
-
-    #[test]
-    fn default_agents_with_one_signed_in() {
-        assert_eq!(default_agents(&[AgentId::Codex]), vec![AgentId::Codex]);
-    }
-
-    #[test]
-    fn default_agents_with_two_signed_in_keeps_all_order() {
+        // 还没到重置时刻：照旧用尽
+        let w = window("session", "5 小时", 100.0, Some(now + 60));
         assert_eq!(
-            default_agents(&[AgentId::Codex, AgentId::ClaudeCode]),
-            vec![AgentId::ClaudeCode, AgentId::Codex]
+            tray_window_row(&w, DisplayMode::Remaining, now).level,
+            QuotaLevel::Out
         );
     }
 
     #[test]
-    fn ac22_effective_agents_defaults_when_unconfigured() {
-        let settings = UsageSettings::default();
+    fn critical_severity_is_at_least_tight_and_warning_follows_threshold() {
+        let mut w = window("weekly", "本周", 30.0, None);
+        w.severity = Severity::Critical;
         assert_eq!(
-            effective_agents(&settings, &[AgentId::ClaudeCode]),
-            vec![AgentId::ClaudeCode]
+            tray_window_row(&w, DisplayMode::Used, 0).level,
+            QuotaLevel::Tight
+        );
+        w.used_percent = 100.0;
+        assert_eq!(
+            tray_window_row(&w, DisplayMode::Used, 0).level,
+            QuotaLevel::Out
+        );
+        // warning 不再单独加粗：按阈值
+        let mut w = window("weekly", "本周", 50.0, None);
+        w.severity = Severity::Warning;
+        let row = tray_window_row(&w, DisplayMode::Used, 0);
+        assert_eq!(row.level, QuotaLevel::Ok);
+        assert!(!row.emphasize);
+    }
+
+    #[test]
+    fn emphasize_follows_level_and_gauge_keeps_text_scale() {
+        let tight = window("weekly", "本周", 87.0, None);
+        let row = tray_window_row(&tight, DisplayMode::Used, 0);
+        assert!(row.emphasize);
+        assert_eq!(row.gauge_percent, 87.0);
+        let row = tray_window_row(&tight, DisplayMode::Remaining, 0);
+        assert!(row.emphasize);
+        assert!((row.gauge_percent - 13.0).abs() < 1e-9);
+        let calm = window("weekly", "本周", 5.0, None);
+        assert!(!tray_window_row(&calm, DisplayMode::Used, 0).emphasize);
+    }
+
+    // ---------------- 菜单栏的项（AC22、AC27、spec #322） ----------------
+
+    fn agent(a: AgentId) -> UsageSubject {
+        UsageSubject::Agent(a)
+    }
+
+    #[test]
+    fn effective_items_default_is_listed_in_page_order() {
+        let settings = UsageSettings::default();
+        assert_eq!(effective_items(&settings, &[]), Vec::<UsageSubject>::new());
+        assert_eq!(
+            effective_items(&settings, &[agent(AgentId::Codex)]),
+            vec![agent(AgentId::Codex)]
+        );
+        assert_eq!(
+            effective_items(
+                &settings,
+                &[agent(AgentId::Codex), agent(AgentId::ClaudeCode)]
+            ),
+            vec![agent(AgentId::ClaudeCode), agent(AgentId::Codex)]
         );
         // 默认关着菜单栏显示（AC22 的另一半在 store 测试里覆盖设置整体默认值）
         assert!(!settings.menu_bar_enabled);
     }
 
     #[test]
-    fn effective_agents_uses_configured_list_when_present() {
+    fn effective_items_uses_chosen_set_in_page_order_at_most_two() {
         let settings = UsageSettings {
-            agents: Some(vec![AgentId::Codex]),
+            items: Some(vec![
+                agent(AgentId::Codex),
+                UsageSubject::Provider("gone".into()),
+                agent(AgentId::ClaudeCode),
+            ]),
             ..Default::default()
         };
+        // 先后按页面顺序（不按存的顺序）；不在页面上的提供商不画
         assert_eq!(
-            effective_agents(&settings, &[AgentId::ClaudeCode, AgentId::Codex]),
-            vec![AgentId::Codex]
+            effective_items(&settings, &[agent(AgentId::Codex)]),
+            vec![agent(AgentId::ClaudeCode), agent(AgentId::Codex)]
         );
+        let none = UsageSettings {
+            items: Some(vec![]),
+            ..Default::default()
+        };
+        assert!(effective_items(&none, &[agent(AgentId::Codex)]).is_empty());
+        assert_eq!(MAX_MENU_BAR_ITEMS, 2);
     }
 
+    #[test]
+    fn view_items_follow_page_order_and_menu_bar_order() {
+        let now = 10_000;
+        let r = |a| Some(at(a, now - 60, vec![window("weekly", "本周", 10.0, None)]));
+        // 状态里先 Codex 后 Claude：视图仍按页面顺序
+        let state = UsageState {
+            agents: vec![
+                agent_usage(AgentId::Codex, UsageStatus::Ok, r(AgentId::Codex)),
+                agent_usage(AgentId::ClaudeCode, UsageStatus::Ok, r(AgentId::ClaudeCode)),
+            ],
+        };
+        let settings = UsageSettings {
+            items: Some(vec![agent(AgentId::Codex), agent(AgentId::ClaudeCode)]),
+            ..Default::default()
+        };
+        let v = usage_view(&state, &settings, PowerState::default(), now);
+        let rows: Vec<_> = v
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    i.key.key(),
+                    i.kind,
+                    i.name.clone(),
+                    i.brand.clone(),
+                    i.in_menu_bar,
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "agent:claude-code".to_string(),
+                    UsageItemKind::Agent,
+                    "Claude".to_string(),
+                    "claude-code".to_string(),
+                    true
+                ),
+                (
+                    "agent:codex".to_string(),
+                    UsageItemKind::Agent,
+                    "Codex".to_string(),
+                    "codex".to_string(),
+                    true
+                ),
+            ]
+        );
+        let order: Vec<_> = v.menu_bar.segments.iter().map(|s| s.key.key()).collect();
+        assert_eq!(order, vec!["agent:claude-code", "agent:codex"]);
+
+        // 只选了 Codex：Claude 在页面上、不进菜单栏
+        let only_codex = UsageSettings {
+            items: Some(vec![agent(AgentId::Codex)]),
+            ..Default::default()
+        };
+        let v = usage_view(&state, &only_codex, PowerState::default(), now);
+        let in_menu_bar: Vec<_> = v.items.iter().map(|i| i.in_menu_bar).collect();
+        assert_eq!(in_menu_bar, vec![false, true]);
+        assert_eq!(v.menu_bar.segments.len(), 1);
+        let json = serde_json::to_value(&v).unwrap();
+        assert_eq!(json["items"][1]["key"], "agent:codex");
+        assert_eq!(json["items"][1]["kind"], "agent");
+        assert_eq!(json["items"][0]["group"], "agent");
+        assert_eq!(json["items"][1]["group"], "agent");
+        assert_eq!(json["items"][1]["inMenuBar"], true);
+        assert_eq!(json["items"][1]["problem"], serde_json::Value::Null);
+        assert_eq!(json["items"][1]["windows"][0]["level"], "ok");
+        assert_eq!(json["menuBar"]["segments"][0]["key"], "agent:codex");
+        assert_eq!(json["menuBar"]["segments"][0]["brand"], "codex");
+        assert_eq!(json["signedIn"][0], "agent:claude-code");
+        assert_eq!(json["settings"]["items"][0], "agent:codex");
+    }
     // ---------------- 读数来自 Claude 桌面应用（spec #195、画板 #206 第 2 版） ----------------
 
     /// 桌面应用记下的读数：两个窗口、没有重置时刻（同 `parse_desktop_history` 的产出）
@@ -1677,8 +1957,8 @@ mod tests {
             PowerState::default(),
             now,
         );
-        assert_eq!(v.signed_in, vec![AgentId::ClaudeCode]);
-        let t = &v.tray[0];
+        assert_eq!(v.signed_in, vec![UsageSubject::Agent(AgentId::ClaudeCode)]);
+        let t = &v.items[0];
         assert_eq!(
             t.updated_text.as_deref(),
             Some("来自 Claude 桌面应用 · 3 小时前")
@@ -1706,7 +1986,7 @@ mod tests {
             now,
         );
         assert_eq!(
-            v.tray[0].updated_text.as_deref(),
+            v.items[0].updated_text.as_deref(),
             Some("来自 Claude 桌面应用 · 20 分钟前")
         );
     }
@@ -1725,7 +2005,7 @@ mod tests {
             now,
         );
         assert!(v.signed_in.is_empty());
-        assert!(v.tray.is_empty());
+        assert!(v.items.is_empty());
     }
 
     /// 超过 24 小时：不画旧数，原因行写具体天数，块头不再写时间；恰好 24 小时还照常画
@@ -1741,21 +2021,25 @@ mod tests {
             )
         };
         let old = view(2 * 86400 + 3600);
-        let t = &old.tray[0];
-        assert_eq!(old.signed_in, vec![AgentId::ClaudeCode], "有记录就照样出块");
+        let t = &old.items[0];
+        assert_eq!(
+            old.signed_in,
+            vec![UsageSubject::Agent(AgentId::ClaudeCode)],
+            "有记录就照样出块"
+        );
         assert!(t.windows.is_empty());
         assert_eq!(t.updated_text, None);
         assert_eq!(t.note.as_deref(), Some("Claude 桌面应用 2 天没更新用量"));
         assert!(!t.retry);
         assert_eq!(
-            view(86400 + 60).tray[0].note.as_deref(),
+            view(86400 + 60).items[0].note.as_deref(),
             Some("Claude 桌面应用 1 天没更新用量"),
             "按整天往下取"
         );
         let edge = view(86400);
-        assert_eq!(edge.tray[0].windows.len(), 2);
+        assert_eq!(edge.items[0].windows.len(), 2);
         assert_eq!(
-            edge.tray[0].note.as_deref(),
+            edge.items[0].note.as_deref(),
             Some("连接后可以看到实时用量和重置时间")
         );
         // 命令行这边的读数多旧都照常画（规则不变）
@@ -1768,8 +2052,8 @@ mod tests {
             )),
             now,
         );
-        assert_eq!(cli.tray[0].windows.len(), 1);
-        assert_eq!(cli.tray[0].updated_text.as_deref(), Some("72 小时前更新"));
+        assert_eq!(cli.items[0].windows.len(), 1);
+        assert_eq!(cli.items[0].updated_text.as_deref(), Some("72 小时前更新"));
     }
 
     /// 命令行失败的原因句在前：读数来自桌面应用、又超过 24 小时时，原因行仍先说取数的原因
@@ -1788,8 +2072,8 @@ mod tests {
             PowerState::default(),
             now,
         );
-        assert_eq!(v.tray[0].note.as_deref(), Some("Claude Code 没有回应"));
-        assert!(v.tray[0].windows.is_empty(), "旧数照样不画");
+        assert_eq!(v.items[0].note.as_deref(), Some("Claude Code 没有回应"));
+        assert!(v.items[0].windows.is_empty(), "旧数照样不画");
     }
 
     /// 菜单栏：桌面应用的读数照常显示，按观测时刻走同一条过期规则（自动档 60 分钟变淡）；
@@ -1808,7 +2092,7 @@ mod tests {
         };
         let fresh = seg(30 * 60);
         assert_eq!(fresh.len(), 1, "命令行没登录、桌面应用有记录：进默认名单");
-        assert_eq!(fresh[0].agent, AgentId::ClaudeCode);
+        assert_eq!(fresh[0].key, UsageSubject::Agent(AgentId::ClaudeCode));
         assert_eq!(fresh[0].lines, vec!["58%".to_string()]);
         assert!(!fresh[0].stale);
         let hours = seg(3 * 3600);
@@ -1868,9 +2152,9 @@ mod tests {
         let now = 100_000;
         let state = claude_only(UsageStatus::NotSignedIn, None, true);
         let v = connect_view(&state, &ConnectState::Idle, now);
-        assert_eq!(v.tray.len(), 1);
-        let t = &v.tray[0];
-        assert_eq!(t.agent, AgentId::ClaudeCode);
+        assert_eq!(v.items.len(), 1);
+        let t = &v.items[0];
+        assert_eq!(t.key, UsageSubject::Agent(AgentId::ClaudeCode));
         assert_eq!(
             t.note.as_deref(),
             Some("连接后就能看到 Claude 额度，桌面应用照常用")
@@ -1885,7 +2169,9 @@ mod tests {
     #[test]
     fn connect_nothing_and_no_desktop_app_hides_the_block() {
         let state = claude_only(UsageStatus::NotSignedIn, None, false);
-        assert!(connect_view(&state, &ConnectState::Idle, 0).tray.is_empty());
+        assert!(connect_view(&state, &ConnectState::Idle, 0)
+            .items
+            .is_empty());
     }
 
     /// 状态 1：只登录了桌面应用、读数新——读数照画，下面一句 + 连接键
@@ -1897,7 +2183,7 @@ mod tests {
             Some(desktop_reading(now - 3 * 3600)),
             true,
         );
-        let t = &connect_view(&state, &ConnectState::Idle, now).tray[0];
+        let t = &connect_view(&state, &ConnectState::Idle, now).items[0];
         assert_eq!(t.windows.len(), 2);
         assert_eq!(t.note.as_deref(), Some("连接后可以看到实时用量和重置时间"));
         assert_eq!(t.connect, Some(ConnectAction::Offer));
@@ -1913,7 +2199,7 @@ mod tests {
             Some(desktop_reading(now - 2 * 86400 - 60)),
             true,
         );
-        let t = &connect_view(&state, &ConnectState::Idle, now).tray[0];
+        let t = &connect_view(&state, &ConnectState::Idle, now).items[0];
         assert!(t.windows.is_empty());
         assert_eq!(t.note.as_deref(), Some("Claude 桌面应用 2 天没更新用量"));
         assert_eq!(t.connect, Some(ConnectAction::Offer));
@@ -1929,7 +2215,7 @@ mod tests {
             &ConnectState::Idle,
             now,
         )
-        .tray[0]
+        .items[0]
             .clone();
         assert_eq!(t.note.as_deref(), Some("没找到 Claude Code"));
         assert_eq!(t.connect, Some(ConnectAction::Offer));
@@ -1943,7 +2229,7 @@ mod tests {
             &ConnectState::Idle,
             now,
         )
-        .tray[0]
+        .items[0]
             .clone();
         assert_eq!(
             with_desktop.note.as_deref(),
@@ -1962,7 +2248,7 @@ mod tests {
             None,
             false,
         );
-        let t = &connect_view(&state, &ConnectState::Idle, 0).tray[0];
+        let t = &connect_view(&state, &ConnectState::Idle, 0).items[0];
         assert_eq!(t.note.as_deref(), Some("需要重新登录 Claude Code"));
         assert_eq!(t.connect, Some(ConnectAction::Offer));
         assert!(!t.retry);
@@ -1982,7 +2268,7 @@ mod tests {
             true,
         );
         assert_eq!(
-            connect_view(&ok, &ConnectState::Idle, now).tray[0].connect,
+            connect_view(&ok, &ConnectState::Idle, now).items[0].connect,
             None
         );
         let timeout = claude_only(
@@ -1992,13 +2278,13 @@ mod tests {
             None,
             true,
         );
-        let t = &connect_view(&timeout, &ConnectState::Idle, now).tray[0];
+        let t = &connect_view(&timeout, &ConnectState::Idle, now).items[0];
         assert_eq!(t.connect, None, "没有回应：再试一次，不是连接");
         assert!(t.retry);
         let codex = UsageState {
             agents: vec![agent_usage(AgentId::Codex, UsageStatus::NotInstalled, None)],
         };
-        let t = &connect_view(&codex, &ConnectState::Idle, now).tray[0];
+        let t = &connect_view(&codex, &ConnectState::Idle, now).items[0];
         assert_eq!(t.connect, None);
         assert!(t.retry, "Codex 没找到照旧给再试一次");
     }
@@ -2012,14 +2298,14 @@ mod tests {
             Some(desktop_reading(now - 3600)),
             true,
         );
-        let installing = &connect_view(&state, &ConnectState::Installing, now).tray[0];
+        let installing = &connect_view(&state, &ConnectState::Installing, now).items[0];
         assert_eq!(
             installing.note.as_deref(),
             Some("连接后可以看到实时用量和重置时间")
         );
         assert_eq!(installing.connect, Some(ConnectAction::Installing));
         assert_eq!(installing.windows.len(), 2, "读数照留");
-        let waiting = &connect_view(&state, &ConnectState::Waiting { reopen: true }, now).tray[0];
+        let waiting = &connect_view(&state, &ConnectState::Waiting { reopen: true }, now).items[0];
         assert_eq!(waiting.note.as_deref(), Some("在浏览器里登录并点授权"));
         assert_eq!(
             waiting.connect,
@@ -2038,12 +2324,12 @@ mod tests {
             Some(desktop_reading(now - 3600)),
             true,
         );
-        let pac = "VPN 用自动代理（PAC）时 Sophia 读不到代理，可以换成让所有程序都走代理的模式（常叫增强模式、TUN 或虚拟网卡）";
+        let pac = "VPN 用自动代理（PAC）时 Sophia 无法读取代理设置，可以换成让所有程序都走代理的模式（常叫增强模式、TUN 或虚拟网卡）";
         let failed = ConnectState::Failed(ConnectFailure {
             kind: FailureKind::InstallNetwork,
             detail: Some("curl: (6) Could not resolve host: claude.ai".into()),
         });
-        let t = &connect_view(&state, &failed, now).tray[0];
+        let t = &connect_view(&state, &failed, now).items[0];
         assert_eq!(
             t.note.as_deref(),
             Some("Claude Code 安装失败 · 无法访问 Claude 的服务器 · 检查网络或 VPN 后再试")
@@ -2064,7 +2350,7 @@ mod tests {
             detail: None,
         });
         assert_eq!(
-            connect_view(&state, &timeout, now).tray[0].connect,
+            connect_view(&state, &timeout, now).items[0].connect,
             Some(ConnectAction::Failed {
                 detail: Some(pac.into()),
                 manual_install: None,
@@ -2074,7 +2360,7 @@ mod tests {
             kind: FailureKind::LoginDenied,
             detail: None,
         });
-        let t = &connect_view(&state, &denied, now).tray[0];
+        let t = &connect_view(&state, &denied, now).items[0];
         assert_eq!(t.note.as_deref(), Some("连接失败 · 浏览器里取消了授权"));
         assert_eq!(
             t.connect,
@@ -2089,7 +2375,7 @@ mod tests {
             detail: Some("not available in your region".into()),
         });
         assert_eq!(
-            connect_view(&state, &region, now).tray[0].connect,
+            connect_view(&state, &region, now).items[0].connect,
             Some(ConnectAction::Failed {
                 detail: Some(format!("not available in your region\n\n{pac}")),
                 manual_install: Some("https://code.claude.com/docs/en/setup".into()),
@@ -2106,7 +2392,7 @@ mod tests {
             Some(desktop_reading(now - 3600)),
             true,
         );
-        let t = &connect_view(&state, &ConnectState::Finishing, now).tray[0];
+        let t = &connect_view(&state, &ConnectState::Finishing, now).items[0];
         assert_eq!(t.connect, Some(ConnectAction::Finishing));
         assert_eq!(t.note.as_deref(), Some("连接后可以看到实时用量和重置时间"));
         assert!(!t.retry);
@@ -2129,7 +2415,7 @@ mod tests {
             kind: FailureKind::LoginTimeout,
             detail: None,
         });
-        let t = &connect_view(&ok, &failed, now).tray[0];
+        let t = &connect_view(&ok, &failed, now).items[0];
         assert_eq!(t.connect, None);
         assert_eq!(t.note, None);
     }

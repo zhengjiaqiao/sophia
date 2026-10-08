@@ -38,6 +38,8 @@ import {
   type SourceLine,
 } from "./addSourceView.ts";
 import { t, tRich } from "../i18n.ts";
+import { errorSentence, parseBackendError } from "../backendError.ts";
+import { copyDetails } from "../diagnostics.ts";
 import type { DomainRef } from "./sourcesView.ts";
 import type { SourcesData, SourcesModel } from "./sourcesModel.ts";
 import "./AddSourcePanel.css";
@@ -246,7 +248,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone, frame }: AddS
       setCheck(entry.ref, true);
       setReveal({ ref: entry.ref, top: true });
     } catch (e) {
-      if (alive.current) cannot(t("sources.add.readFailed", { reason: String(e) }));
+      if (alive.current) cannot(t("sources.add.readFailed", { reason: errorSentence(e) }));
     } finally {
       if (alive.current) setReading(false);
     }
@@ -264,7 +266,7 @@ export function AddSourcePanel({ model, domain, onChanged, onDone, frame }: AddS
         await model.subscribe(entry.ref);
         done.push(entry.ref);
       } catch (e) {
-        failed.push({ ref: entry.ref, name: entry.name, reason: String(e) });
+        failed.push({ ref: entry.ref, name: entry.name, reason: errorSentence(e) });
       }
     }
     if (done.length > 0) await onChanged();
@@ -390,9 +392,28 @@ export function AddSourcePanel({ model, domain, onChanged, onDone, frame }: AddS
   const loadingShown = useBusyShown(data === null && !loadError);
   let list: ReactNode;
   if (loadError && data === null) {
+    // 后端给的一句作原因接在主句后，系统原文进前面的「!」（#302）。出错的灰面板要给一条往前走的路（#320）：
+    // `再试一次` 重读；给人看的一句（`invalid`，如设置文件来自更新版本）再读一次结果一样，不给
+    const { code, message, detail } = parseBackendError(loadError);
     list = (
       <div className="add-src__notice">
-        <NoticePanel message={loadFailedText(model.noun)} reason={loadError} />
+        <NoticePanel
+          message={loadFailedText(model.noun)}
+          reason={message}
+          technical={detail}
+          onCopy={(text) => copyDetails(text)}
+          action={
+            code === "invalid"
+              ? undefined
+              : {
+                  label: t("sources.add.retry"),
+                  onClick: () => {
+                    setLoadError(null);
+                    void load();
+                  },
+                }
+          }
+        />
       </div>
     );
   } else if (data === null) {

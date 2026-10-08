@@ -9,6 +9,7 @@ import { DEFAULT_NAV, goDestination, goFace, goLocation } from "../src/shell/nav
 test("没人登记：当场走；登记了：交给它问，它调 proceed 才走、不调就不走", () => {
   const guards = createLeaveGuards();
   let went = 0;
+  assert.equal(guards.guarded(), false);
   guards.request(() => went++);
   assert.equal(went, 1);
 
@@ -16,6 +17,7 @@ test("没人登记：当场走；登记了：交给它问，它调 proceed 才�
   const unregister = guards.register((proceed) => {
     asked = proceed;
   });
+  assert.equal(guards.guarded(), true, "有人登记：换页要先问");
   guards.request(() => went++);
   assert.equal(went, 1, "问的时候还没走");
   assert.ok(asked);
@@ -23,6 +25,7 @@ test("没人登记：当场走；登记了：交给它问，它调 proceed 才�
   assert.equal(went, 2, "问完（保存 / 丢弃）才走");
 
   unregister();
+  assert.equal(guards.guarded(), false);
   guards.request(() => went++);
   assert.equal(went, 3, "撤销登记之后不再拦");
 });
@@ -81,9 +84,9 @@ test("壳里所有换页的路都经 navigate / requestLeave：侧栏、我的 �
   assert.equal(direct, 2, "新的直接 setNav 要先想清楚它是不是用户换页");
 });
 
-test("Codex 页网关表单接上外壳的离开前询问，不再自己在 document 上拦侧栏点击", () => {
-  const tsx = readFileSync(new URL("../src/ModelsGateways.tsx", import.meta.url), "utf8");
-  assert.match(tsx, /useLeaveGuard\(formDirty && editing !== null, \(proceed\) => \{/);
+test("模型提供商页的表单接上外壳的离开前询问，不在 document 上拦侧栏点击", () => {
+  const tsx = readFileSync(new URL("../src/ProvidersPage.tsx", import.meta.url), "utf8");
+  assert.match(tsx, /useLeaveGuard\(dirty, \(proceed\) => setLeaveTo\(\(\) => proceed\)\);/);
   assert.doesNotMatch(tsx, /LEAVE_TARGET|addEventListener\("click"|target\.click\(\)/);
 });
 

@@ -18,9 +18,9 @@
 use super::keyhints::{hint_for, ignore_written, merge, Probes};
 use super::sources::{plain_item, plain_table, remove_toml_server};
 use super::{
-    agents, backup, backup_failed_message, canon_by, canon_toml, fold_mirrors, json_server_for,
-    merge_toml, parse, record_undo, refused, same_file, same_location, toml, toml_server,
-    undo_write, write_failed_message, Canonical, McpIssue, McpKeyHint, McpLocation, McpReport,
+    agents, backup, backup_failed, canon_by, canon_toml, fold_mirrors, json_server_for, merge_toml,
+    parse, patch, patch_file, record_undo, refused, same_file, same_location, toml, toml_server,
+    undo_write, write_failed, Canonical, McpIssue, McpKeyHint, McpLocation, McpReport,
     McpReportEntry, McpUndo, McpUndoFileResult, Refused, State,
 };
 use crate::atomicfile::{self, unsafe_parent, FileState, Snapshot};
@@ -83,6 +83,7 @@ fn entry(action: &McpKeepAction, outcome: &str, message: &str) -> McpReportEntry
         message: message.into(),
         backup_path: None,
         mirror_failed: None,
+        note: None,
         detail: None,
     }
 }
@@ -152,6 +153,11 @@ fn rewrite(
             Some(cut) => merge_toml(Some(&cut), &[(name, def)]),
             None => replace_toml_inline(bytes, name, def),
         };
+    }
+    if patch_file(&location.path) {
+        // 只换得了 Sophia 自己的那一行：删掉它再在末尾追加（两步各自核对）；用户自己写的那项换不了
+        let cut = patch::remove(bytes, name).ok_or_else(|| refused(cannot_rewrite()))?;
+        return patch::merge(Some(&cut), &[(name, def)]);
     }
     serde_json::from_slice::<NoDuplicates>(bytes).map_err(|_| refused(cannot_rewrite()))?;
     let dialect = agents::dialect_of(location);
@@ -422,19 +428,21 @@ struct FileWrite {
 
 /// 整次没做成时的报告：`failed_at` 那个文件上的几处记 `failed` + 原因（落在镜像文件上的记在它的主位置上），
 /// 其余几处由 `others(第几个文件, 那一处)` 给（一般是 `skipped` + 没动）
+/// `detail`：没成的那一处分不出原因时的系统原文（`message` 是兜底句），前端提示条据此只写失败句
 fn abort(
     groups: &[Vec<PendingKeep>],
     failed_at: usize,
     message: &str,
+    detail: Option<String>,
     others: &dyn Fn(usize, &McpKeepAction) -> McpReportEntry,
 ) -> McpReport {
     let mut report = McpReport::default();
     let mut failed = BTreeSet::new();
     for pending in &groups[failed_at] {
         if failed.insert(pending.action.target_id.clone()) {
-            report
-                .entries
-                .push(entry(&pending.action, "failed", message));
+            let mut one = entry(&pending.action, "failed", message);
+            one.detail = detail.clone();
+            report.entries.push(one);
         }
     }
     for (index, group) in groups.iter().enumerate() {
@@ -461,6 +469,7 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
                 message: issue.message,
                 backup_path: None,
                 mirror_failed: None,
+                note: None,
                 detail: None,
             });
         }
@@ -485,6 +494,7 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
                 message: crate::t!("mcp.report.changedAfterPreview"),
                 backup_path: None,
                 mirror_failed: None,
+                note: None,
                 detail: None,
             });
             for action in &plan.actions {
@@ -517,11 +527,11 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
             .any(|pending| !same_location(&path, &pending.target))
         {
             let message = crate::t!("mcp.report.changedAfterPreview");
-            return abort(&groups, index, &message, &untouched);
+            return abort(&groups, index, &message, None, &untouched);
         }
         let State::Present(snap) = &group[0].target else {
             let message = crate::t!("mcp.report.targetNotWritable");
-            return abort(&groups, index, &message, &untouched);
+            return abort(&groups, index, &message, None, &untouched);
         };
         let mut bytes = snap.bytes.clone();
         for pending in group {
@@ -532,7 +542,7 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
                 &pending.definition,
             ) {
                 Ok(next) => bytes = next,
-                Err(error) => return abort(&groups, index, &reason_of(&error), &untouched),
+                Err(error) => return abort(&groups, index, &reason_of(&error), None, &untouched),
             }
         }
         files.push(FileWrite {
@@ -548,10 +558,10 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
         match backup(&file.path, &file.snap, backups) {
             Ok(path) => file.backup = Some(path),
             Err(error) => {
-                let message = backup_failed_message(&file.path, &error, || {
+                let (message, detail) = backup_failed(&file.path, &error, || {
                     crate::t!("mcp.report.backupFailedUntouched")
                 });
-                return abort(&groups, index, &message, &untouched);
+                return abort(&groups, index, &message, detail, &untouched);
             }
         }
     }
@@ -567,10 +577,10 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
         ) {
             Ok(one) => staged.push(one),
             Err(error) => {
-                let message = write_failed_message(&file.path, &error, || {
+                let (message, detail) = write_failed(&file.path, &error, || {
                     crate::t!("mcp.report.writeBackFailedUntouched")
                 });
-                return abort(&groups, index, &message, &untouched);
+                return abort(&groups, index, &message, detail, &untouched);
             }
         }
     }
@@ -579,7 +589,7 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
     let mut done = McpReport::default();
     for (index, (file, one)) in files.iter().zip(staged).enumerate() {
         if let Err(error) = one.commit() {
-            let message = write_failed_message(&file.path, &error, || {
+            let (message, detail) = write_failed(&file.path, &error, || {
                 crate::t!("mcp.report.writeBackFailedUntouched")
             });
             // 逐个文件退回：一份在这期间被别人改了退不回，不拦着别的几份退回
@@ -609,19 +619,25 @@ pub fn execute_keep(plan: McpKeepPlan, backups: &Path) -> McpReport {
                         entry(action, "skipped", &crate::t!("mcp.keep.rolledBack"))
                     }
                     _ => {
-                        let unknown = crate::t!("mcp.undo.incomplete");
-                        let why = result.map_or(&unknown, |result| &result.message);
+                        // 退不回的原因分得出才接在后面；分不出的原文给 `detail`（提示条只写失败句）
+                        let why = result.filter(|result| result.detail.is_none());
                         let mut failed = entry(
                             action,
                             "failed",
-                            &crate::t!("mcp.keep.rollbackFailed", message = why),
+                            &why.map_or_else(
+                                || crate::t!("mcp.keep.rollbackFailedPlain"),
+                                |result| {
+                                    crate::t!("mcp.keep.rollbackFailed", message = result.message)
+                                },
+                            ),
                         );
+                        failed.detail = result.and_then(|result| result.detail.clone());
                         failed.backup_path = files[at].backup.clone();
                         failed
                     }
                 }
             };
-            return abort(&groups, index, &message, &others);
+            return abort(&groups, index, &message, detail, &others);
         }
         record_undo(
             &mut done,

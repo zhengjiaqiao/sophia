@@ -94,6 +94,17 @@ pub fn slug_for(id: &str) -> String {
     slug.trim_matches('-').to_string()
 }
 
+/// 路由认模型用的键：小写，去掉空白、零宽字符、标点等非常规字符（大小写或不可见字符的变体认成同一个模型）。
+/// 汉字等非 ASCII 的字母、数字留着：WorkBuddy 条目的 id 是显示名，名字只差在中文部分的两家不能认成同一个。
+/// 路由按它查清单，写清单的一方按它查重
+pub fn routing_key(model: &str) -> String {
+    model
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | ':'))
+        .collect()
+}
+
 /// 官方目录的来源
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeSource {
@@ -180,84 +191,155 @@ pub fn load_native(
     ))
 }
 
-/// 合并目录里的一项：官方条目写原文，第三方条目正常序列化
+/// 合并目录里的一项：官方条目写原文（只换排序值），第三方条目正常序列化
 #[derive(Serialize)]
 #[serde(untagged)]
 enum CombinedEntry<'a> {
     Native(&'a RawValue),
+    Reordered(Box<RawValue>),
     Own(Value),
 }
 
-/// 生成合并目录：官方条目原样在前，第三方条目按选择顺序排在其后。
+/// 合并目录里排在第几的一项（Codex 的「已选」顺序，spec #247「各 agent 的写入」）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Slot {
+    /// 官方模型：它的 slug
+    Native(String),
+    /// 第三方模型
+    Own(Published),
+}
+
+/// 官方目录里一项的头几个字段
+#[derive(Deserialize)]
+struct NativeHead {
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    visibility: Option<String>,
+    #[serde(default)]
+    base_instructions: Option<String>,
+}
+
+fn native_head(raw: &RawValue) -> Result<NativeHead, String> {
+    serde_json::from_str(raw.get()).map_err(|error| format!("parse native entry: {error}"))
+}
+
+/// 在模型菜单里列出的官方条目（`visibility` 为 `list`）：（slug, 显示名），按目录顺序。
+/// 只有它们参与「已选」；隐藏的条目原样留在目录里
+pub fn listed_natives(native: &[Box<RawValue>]) -> Vec<(String, String)> {
+    native
+        .iter()
+        .filter_map(|raw| native_head(raw).ok())
+        .filter(|head| head.visibility.as_deref() == Some("list"))
+        .filter_map(|head| {
+            let slug = head.slug?.trim().to_owned();
+            let name = head
+                .display_name
+                .map(|n| n.trim().to_owned())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| slug.clone());
+            (!slug.is_empty()).then_some((slug, name))
+        })
+        .collect()
+}
+
+/// 把官方条目原文里的 `priority` 原位换成 `priority`（没有就补在末尾），别的字节不动
+fn with_priority(raw: &RawValue, priority: i64) -> Result<Box<RawValue>, String> {
+    let bytes = raw.get().as_bytes();
+    let value = priority.to_string();
+    let edited = match crate::jsonedit::replace(bytes, &["priority"], value.as_bytes()) {
+        Ok(edited) => edited,
+        Err(_) => crate::jsonedit::insert(
+            bytes,
+            &[],
+            &[("priority", value.as_bytes())],
+            crate::jsonedit::Layout::Compact,
+        )
+        .map_err(|error| format!("set native priority: {error}"))?,
+    };
+    let text = String::from_utf8(edited).map_err(|error| error.to_string())?;
+    RawValue::from_string(text).map_err(|error| error.to_string())
+}
+
+/// 生成合并目录：按 `order`（「已选」顺序）排，排序值依次是 1、2、3……；官方条目只换排序值、其余原样，
+/// 列出的官方条目不在 `order` 里（被取消的）不写进目录；隐藏的官方条目原样在前。
 /// `include_native` 为假（独立服务商接法，spec 2026-10-03-codex-hookup-auto R6）：官方条目只提供
-/// `base_instructions` 与排序基数，不写进目录——没登录时官方模型发不出去
+/// `base_instructions`，不写进目录——没登录时官方模型发不出去
 pub fn build_combined(
     native: &[Box<RawValue>],
-    models: &[Published],
+    order: &[Slot],
     include_native: bool,
 ) -> Result<Vec<u8>, String> {
-    #[derive(Deserialize)]
-    struct Head {
-        #[serde(default)]
-        slug: Option<String>,
-        #[serde(default)]
-        priority: Option<f64>,
-        #[serde(default)]
-        base_instructions: Option<String>,
-    }
     #[derive(Serialize)]
     struct Doc<'a> {
         models: Vec<CombinedEntry<'a>>,
     }
-    let mut seen = BTreeSet::new();
-    let mut max_priority = 0.0_f64;
+    let mut heads = Vec::with_capacity(native.len());
     let mut base_instructions: Option<String> = None;
     for raw in native {
-        let head: Head = serde_json::from_str(raw.get())
-            .map_err(|error| format!("parse native entry: {error}"))?;
-        // 官方条目不进目录时，它的标识也挡不着第三方
-        if include_native {
-            seen.insert(head.slug.unwrap_or_default().trim().to_lowercase());
-        }
-        max_priority = max_priority.max(head.priority.unwrap_or(0.0));
+        let head = native_head(raw)?;
         if base_instructions.is_none() {
             base_instructions = head
                 .base_instructions
+                .clone()
                 .filter(|value| !value.trim().is_empty());
         }
+        heads.push(head);
     }
     let base_instructions =
         base_instructions.unwrap_or_else(|| FALLBACK_BASE_INSTRUCTIONS.to_string());
+    let slug_of = |head: &NativeHead| head.slug.as_deref().unwrap_or("").trim().to_lowercase();
 
-    let mut entries: Vec<CombinedEntry> = if include_native {
-        native
-            .iter()
-            .map(|raw| CombinedEntry::Native(raw))
-            .collect()
-    } else {
-        Vec::new()
-    };
-    for (index, published) in models.iter().enumerate() {
-        let slug = published.slug.trim().to_lowercase();
-        if slug.is_empty() {
-            return Err(crate::t!(
-                "models.catalog.slugEmpty",
-                model = format!("{:?}", published.model.id)
-            ));
+    let mut seen = BTreeSet::new();
+    let mut entries: Vec<CombinedEntry> = Vec::new();
+    if include_native {
+        for (raw, head) in native.iter().zip(&heads) {
+            // 官方条目的标识挡着第三方：被取消的也挡（免得它回来时撞上）
+            seen.insert(slug_of(head));
+            if head.visibility.as_deref() != Some("list") {
+                entries.push(CombinedEntry::Native(raw));
+            }
         }
-        if !seen.insert(slug.clone()) {
-            return Err(crate::t!(
-                "models.catalog.slugDuplicate",
-                slug = format!("{slug:?}")
-            ));
+    }
+    for (index, slot) in order.iter().enumerate() {
+        let priority = index as i64 + 1;
+        match slot {
+            Slot::Native(slug) => {
+                if !include_native {
+                    continue;
+                }
+                let wanted = slug.trim().to_lowercase();
+                let found = native.iter().zip(&heads).find(|(_, head)| {
+                    head.visibility.as_deref() == Some("list") && slug_of(head) == wanted
+                });
+                if let Some((raw, _)) = found {
+                    entries.push(CombinedEntry::Reordered(with_priority(raw, priority)?));
+                }
+            }
+            Slot::Own(published) => {
+                let slug = published.slug.trim().to_lowercase();
+                if slug.is_empty() {
+                    return Err(crate::t!(
+                        "models.catalog.slugEmpty",
+                        model = format!("{:?}", published.model.id)
+                    ));
+                }
+                if !seen.insert(slug.clone()) {
+                    return Err(crate::t!(
+                        "models.catalog.slugDuplicate",
+                        slug = format!("{slug:?}")
+                    ));
+                }
+                entries.push(CombinedEntry::Own(entry(
+                    &published.model,
+                    slug,
+                    priority,
+                    &base_instructions,
+                )));
+            }
         }
-        let priority = max_priority as i64 + 1 + index as i64;
-        entries.push(CombinedEntry::Own(entry(
-            &published.model,
-            slug,
-            priority,
-            &base_instructions,
-        )));
     }
     serde_json::to_vec_pretty(&Doc { models: entries }).map_err(|error| error.to_string())
 }
@@ -423,6 +505,11 @@ mod tests {
         published
     }
 
+    /// 只有第三方模型、按给的顺序
+    fn own(models: Vec<Published>) -> Vec<Slot> {
+        models.into_iter().map(Slot::Own).collect()
+    }
+
     fn upstream(id: &str) -> RoutingProvider {
         RoutingProvider {
             id: id.into(),
@@ -452,54 +539,76 @@ mod tests {
         }
     }
 
-    /// AC1：合并目录同时含全部官方条目（原样）和所选第三方条目，第三方排在官方之后，名称可读。
+    /// 路由的键：大小写、空白、零宽字符的变体是同一个；汉字等非 ASCII 的字母留着（走查 2026-10-08 第 7 条：
+    /// 「fake-a · QA 全开」「fake-a · QA 撞名」原来都成了 `fake-aqa`，WorkBuddy 的第二条只好退回内部标识）
     #[test]
-    fn ac1_combined_catalog_keeps_native_verbatim_and_appends_third_party() {
+    fn routing_key_folds_case_and_invisible_chars_but_keeps_letters() {
+        assert_eq!(routing_key(" Weibo-GLM-5\u{200b} "), "weibo-glm-5");
+        assert_eq!(routing_key("fake-a · QA 全开"), "fake-aqa全开");
+        assert_ne!(
+            routing_key("fake-a · QA 全开"),
+            routing_key("fake-a · QA 撞名")
+        );
+        assert_eq!(
+            routing_key("FAKE-A · QA  撞名"),
+            routing_key("fake-a · qa 撞名")
+        );
+    }
+
+    /// AC1（#259 起按「已选」排）：官方与第三方按「已选」顺序穿插，排序值依次 1、2、3……；官方条目只换排序值、
+    /// 别的字节原样（含不认识的字段）；被取消的官方条目不写进目录，隐藏的官方条目原样留着
+    #[test]
+    fn ac1_combined_catalog_follows_the_pick_order_and_only_renumbers_native_entries() {
         let (native, version) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
         assert_eq!(version, "0.154.0");
-        let data = build_combined(
-            &native,
-            &[
-                with(model("weibo/glm-5"), |m| {
-                    m.display_name = Some("Weibo GLM-5".into())
-                }),
-                model("kimi-k3"),
-            ],
-            true,
-        )
-        .expect("build_combined");
+        let order = vec![
+            Slot::Own(with(model("weibo/glm-5"), |m| {
+                m.display_name = Some("Weibo GLM-5".into())
+            })),
+            Slot::Native("gpt-6-astra".into()),
+            Slot::Own(model("kimi-k3")),
+        ];
+        let data = build_combined(&native, &order, true).expect("build_combined");
         let models = decode(&data);
-        assert_eq!(models.len(), 4);
-
-        // 官方条目逐字段保留，包括本工具不认识的字段
-        let want: Value = serde_json::from_str(NATIVE_JSON).expect("json");
-        for (index, want) in want["models"]
-            .as_array()
-            .expect("models")
+        let slugs: Vec<&str> = models.iter().map(|m| m["slug"].as_str().unwrap()).collect();
+        assert_eq!(
+            slugs,
+            ["gpt-reserve", "weibo-glm-5", "gpt-6-astra", "kimi-k3"]
+        );
+        let priorities: Vec<i64> = models
             .iter()
-            .enumerate()
-        {
-            assert_eq!(&models[index], want, "native entry {index} changed");
-        }
-        // 不只是语义相等：官方条目的原始文本逐字出现在输出里（键顺序、未知字段都不动）
+            .map(|m| m["priority"].as_i64().unwrap())
+            .collect();
+        assert_eq!(priorities, [7, 1, 2, 3]);
+
         let text = String::from_utf8(data).expect("utf8");
         assert!(text.contains(
-            r#"{"slug":"gpt-6-astra","display_name":"GPT-6 Astra","priority":1,"visibility":"list","supported_in_api":true,"base_instructions":"You are Codex.","unknown_future_field":{"a":[1,2]}}"#
+            r#"{"slug":"gpt-6-astra","display_name":"GPT-6 Astra","priority":2,"visibility":"list","supported_in_api":true,"base_instructions":"You are Codex.","unknown_future_field":{"a":[1,2]}}"#
         ));
+        assert_eq!(models[1]["display_name"], "Weibo GLM-5");
+        assert_eq!(
+            models[3]["display_name"], "kimi-k3",
+            "显示名缺省回退到模型名"
+        );
+        assert_eq!(models[3]["base_instructions"], "You are Codex.");
 
-        let (glm, kimi) = (&models[2], &models[3]);
-        assert_eq!(glm["slug"], "weibo-glm-5");
-        assert_eq!(glm["display_name"], "Weibo GLM-5");
-        assert_eq!(kimi["display_name"], "kimi-k3", "显示名缺省回退到模型名");
-        for entry in [glm, kimi] {
-            assert_eq!(entry["visibility"], "list");
-            assert_eq!(entry["supported_in_api"], true);
-            assert!(entry["priority"].as_i64().expect("priority") > 7);
-            assert_eq!(entry["base_instructions"], "You are Codex.");
-        }
-        assert!(glm["priority"].as_i64() < kimi["priority"].as_i64());
-        assert_eq!(glm["priority"], 8);
-        assert_eq!(kimi["priority"], 9);
+        // 官方模型都取消了：列出的那一条不写，隐藏的照旧
+        let only_own = build_combined(&native, &[Slot::Own(model("kimi-k3"))], true).unwrap();
+        let slugs: Vec<String> = decode(&only_own)
+            .iter()
+            .map(|m| m["slug"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(slugs, ["gpt-reserve", "kimi-k3"]);
+    }
+
+    /// 菜单里列出的官方模型（参与「已选」）：只认 `visibility: list`，带显示名
+    #[test]
+    fn listed_natives_are_the_ones_shown_in_the_menu() {
+        let (native, _) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
+        assert_eq!(
+            listed_natives(&native),
+            [("gpt-6-astra".to_owned(), "GPT-6 Astra".to_owned())]
+        );
     }
 
     /// 第三方条目的字段集合与 Go 版 `entry` 完全一致
@@ -507,11 +616,11 @@ mod tests {
     fn own_entry_field_set_matches_go() {
         let data = build_combined(
             &[],
-            &[with(model(" weibo/glm-5 "), |m| {
+            &own(vec![with(model(" weibo/glm-5 "), |m| {
                 m.display_name = Some("  ".into());
                 m.context_window = Some(200_000);
                 m.vision = true;
-            })],
+            })]),
             true,
         )
         .expect("build_combined");
@@ -569,12 +678,12 @@ mod tests {
     fn own_entry_caps_the_context_window_at_the_working_window() {
         let data = build_combined(
             &[],
-            &[
+            &own(vec![
                 with(model("deepseek-v4-pro"), |m| {
                     m.context_window = Some(1_000_000)
                 }),
                 with(model("kimi-k3"), |m| m.context_window = Some(200_000)),
-            ],
+            ]),
             true,
         )
         .expect("build_combined");
@@ -586,10 +695,10 @@ mod tests {
         // 临界：恰好 272K 不动，多 1 就封
         let edge = build_combined(
             &[],
-            &[
+            &own(vec![
                 with(model("a"), |m| m.context_window = Some(272_000)),
                 with(model("b"), |m| m.context_window = Some(272_001)),
-            ],
+            ]),
             true,
         )
         .expect("build_combined");
@@ -603,7 +712,7 @@ mod tests {
     fn own_entry_defaults_context_window_and_text_only() {
         let data = build_combined(
             &[],
-            &[with(model("kimi-k3"), |m| m.context_window = Some(0))],
+            &own(vec![with(model("kimi-k3"), |m| m.context_window = Some(0))]),
             true,
         )
         .expect("build_combined");
@@ -618,38 +727,43 @@ mod tests {
     #[test]
     fn provider_form_catalog_lists_only_third_party_models() {
         let (native, _) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
-        let data = build_combined(&native, &[model("weibo/glm-5"), model("kimi-k3")], false)
-            .expect("build_combined");
+        let data = build_combined(
+            &native,
+            &own(vec![model("weibo/glm-5"), model("kimi-k3")]),
+            false,
+        )
+        .expect("build_combined");
         let models = decode(&data);
         let slugs: Vec<&str> = models.iter().map(|m| m["slug"].as_str().unwrap()).collect();
         assert_eq!(slugs, ["weibo-glm-5", "kimi-k3"]);
         assert_eq!(models[0]["base_instructions"], "You are Codex.");
-        assert_eq!(models[0]["priority"], 8);
-        assert!(build_combined(&native, &[model("gpt-6-astra")], false).is_ok());
+        assert_eq!(models[1]["priority"], 2);
+        assert!(build_combined(&native, &own(vec![model("gpt-6-astra")]), false).is_ok());
     }
 
     /// 第三方与官方重名时，官方条目保留，第三方那条被拒绝，避免官方模型被内网路由劫持。
     #[test]
     fn third_party_slug_colliding_with_native_is_rejected() {
         let (native, _) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
-        let error = build_combined(&native, &[model("gpt-6-astra")], true).expect_err("collision");
+        let error =
+            build_combined(&native, &own(vec![model("gpt-6-astra")]), true).expect_err("collision");
         assert!(error.contains("gpt-6-astra"), "{error}");
         // 官方 slug 大小写、首尾空白不同也算重名
         let native = parse_native(br#"{"models":[{"slug":" GPT-6-Astra "}]}"#)
             .expect("parse_native")
             .0;
-        assert!(build_combined(&native, &[model("gpt-6-astra")], true).is_err());
+        assert!(build_combined(&native, &own(vec![model("gpt-6-astra")]), true).is_err());
     }
 
     #[test]
     fn duplicate_third_party_slug_is_rejected() {
         let (native, _) = parse_native(NATIVE_JSON.as_bytes()).expect("parse_native");
-        assert!(build_combined(&native, &[model("a/b"), model("a-b")], true).is_err());
+        assert!(build_combined(&native, &own(vec![model("a/b"), model("a-b")]), true).is_err());
     }
 
     #[test]
     fn model_without_usable_slug_is_rejected() {
-        assert!(build_combined(&[], &[model("///")], true).is_err());
+        assert!(build_combined(&[], &own(vec![model("///")]), true).is_err());
         assert!(build_routing(&[model("///")], &[upstream("p")], &[]).is_err());
     }
 
@@ -725,8 +839,8 @@ mod tests {
     fn combined_catalog_accepts_the_same_model_under_two_prefixes() {
         let mut second = model("deepseek/v4");
         second.slug = "other-deepseek-v4".into();
-        let data =
-            build_combined(&[], &[model("deepseek/v4"), second], true).expect("build_combined");
+        let data = build_combined(&[], &own(vec![model("deepseek/v4"), second]), true)
+            .expect("build_combined");
         let slugs: Vec<String> = decode(&data)
             .iter()
             .map(|entry| entry["slug"].as_str().unwrap_or_default().to_owned())

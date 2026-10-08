@@ -1,8 +1,8 @@
 //! 模型页的命令层与无界面入口。逻辑都在 `sophia-gateway`，这里只做转接。
 //! 命令约定见 docs/gateway-commands.md。
 use crate::AppState;
-use sophia_core::codex_models::catalog::Model;
-use sophia_gateway::app::{Agent, App, AppError, GatewayState, ProviderSaved};
+use sophia_core::model_providers::ModelRef;
+use sophia_gateway::app::{Agent, App, AppError, GatewayState};
 use sophia_gateway::process::RestartReport;
 use sophia_gateway::runtime;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ fn app(state: &AppState) -> Result<Arc<App>, String> {
 }
 
 /// 编排层是同步的（读写文件、调 launchctl、等路由就绪），放到阻塞线程池里跑，不占异步运行时线程
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     task: impl FnOnce() -> Result<T, AppError> + Send + 'static,
 ) -> Result<T, String> {
     // 下层已经记过的失败（例如写配置没写成，被包成 internal）不再按错误代码记一次
@@ -164,273 +164,57 @@ pub fn gateway_open_file(
         })
 }
 
-/// 新建或修改一家网关之后返回：这一家的 id、同步到另一家的那一家的 id（没同步为 null）与最新状态
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderSavedState {
-    #[serde(flatten)]
-    saved: ProviderSaved,
-    state: GatewayState,
-}
-
-/// 新建或修改 `agent` 这一家的一个网关。`id` 省略是新建（id 由 `name` 生成，之后不变）；
-/// `key` 省略或为空表示不动已存的密钥。带了密钥就先向网关校验，校验失败什么都不保存。
-/// `sync`：另一家同一地址的网关一起加 / 一起改（spec R40）
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn gateway_upsert_provider(
-    agent: Agent,
-    id: Option<String>,
-    name: Option<String>,
-    base_url: String,
-    key: Option<String>,
-    sync: bool,
-    preset: Option<String>,
-    state: tauri::State<'_, AppState>,
-) -> Result<ProviderSavedState, String> {
-    let app = app(&state)?;
-    let key = key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty());
-    // 联网校验放在拿锁之前：锁只保护写文件的那一小段，否则 MCP 的同步命令会被一次网络请求卡住十秒。
-    // 先用新密钥向网关校验；失败就什么都不保存，错误的密钥不会覆盖密钥文件里原本好用的那个。
-    // 同步到另一家时也只联网这一次（R40）
-    let verified = match &key {
-        None => None,
-        Some(key) => {
-            let cleaned =
-                sophia_gateway::app::clean_base_url(&base_url).map_err(|e| e.to_string())?;
-            Some(runtime::fetch_models(&cleaned, key).await.map_err(|e| {
-                // 日志按 spec 2026-10-04-local-diagnostics AC1 记一条；格式化时统一去隐私
-                log::warn!("校验网关 {cleaned} 的密钥时拉模型失败：{e}");
-                sophia_core::report::count_error_code(e.code);
-                e.to_string()
-            })?)
-        }
-    };
-    // 这把锁会跨 .await 持有，必须是 tokio::sync::Mutex（std 的 guard 不是 Send，还会阻塞运行时线程）。
-    // 后面新增的异步命令只要会写 ~/.codex/config.toml 或 Claude 的配置，都照此办理。
-    let saved = {
-        let _guard = state.config_lock.lock().await;
-        let worker = app.clone();
-        let saved = blocking(move || match (verified, key) {
-            (Some((ids, api_base)), Some(key)) => worker.commit_verified_provider_in(
-                agent,
-                id.as_deref(),
-                name.as_deref(),
-                &base_url,
-                &key,
-                ids,
-                &api_base,
-                sync,
-            ),
-            _ => worker.upsert_provider_in(agent, id.as_deref(), name.as_deref(), &base_url, sync),
-        })
-        .await?;
-        // 从预设建的（spec S1）：记上来源与协议，同步到另一家的那一个也记
-        if let Some(preset) = preset.filter(|p| !p.trim().is_empty()) {
-            let worker = app.clone();
-            let saved = saved.clone();
-            blocking(move || {
-                let also = saved
-                    .other_provider_id
-                    .as_deref()
-                    .map(|other| (agent.other(), other));
-                worker.apply_preset_in(agent, &saved.provider_id, &preset, also)
-            })
-            .await?;
-        }
-        saved
-    };
-    Ok(ProviderSavedState {
-        saved,
-        state: current_state(app).await?,
-    })
-}
-
 /// 服务商预设的名单（spec S1）：内置数据，不联网
 #[tauri::command]
 pub fn gateway_presets() -> Vec<sophia_core::provider_presets::ProviderPreset> {
     sophia_core::provider_presets::all()
 }
 
-/// 删掉 `agent` 这一家的一个网关，连同它在密钥文件里的密钥（删了回不来，确认由界面负责）。
-/// `also_other`：另一家同一地址的网关连同密钥一起删（R40）
+/// 在选模型浮层里勾上（追加到这一家「已选」的末尾）或取消一个（#259）。开着的那一家当场跟上
+/// （Codex 重写目录；Claude 不在运行时当场写、在运行时记为待生效）；取消最后一个第三方模型＝关掉这一家
 #[tauri::command]
-pub async fn gateway_remove_provider(
+pub async fn gateway_pick(
     agent: Agent,
-    id: String,
-    also_other: bool,
+    model: ModelRef,
+    on: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<GatewayState, String> {
     let app = app(&state)?;
     {
         let _guard = state.config_lock.lock().await;
         let worker = app.clone();
-        blocking(move || worker.remove_provider_in(agent, &id, also_other)).await?;
+        blocking(move || worker.pick(agent, &model, on)).await?;
     }
     current_state(app).await
 }
 
-/// 带过来：把 `from` 有、`agent` 没有同一地址的网关复制过来（模型全未选，密钥一并复制）。不联网
+/// 排序（#265）：浮层「已选」里看得见的几项的新顺序（拖动、⌥↑ / ⌥↓），看不见的原地不动。开着的那一家当场跟上
 #[tauri::command]
-pub async fn gateway_copy_providers(
+pub async fn gateway_reorder_picks(
     agent: Agent,
-    from: Agent,
+    order: Vec<ModelRef>,
     state: tauri::State<'_, AppState>,
 ) -> Result<GatewayState, String> {
     let app = app(&state)?;
     {
         let _guard = state.config_lock.lock().await;
         let worker = app.clone();
-        blocking(move || worker.copy_providers(agent, from)).await?;
+        blocking(move || worker.reorder_picks(agent, order)).await?;
     }
     current_state(app).await
 }
 
+/// 「恢复默认顺序」（#265）：官方的在前、按它自己的顺序，第三方的按启用先后。开着的那一家当场跟上
 #[tauri::command]
-pub async fn gateway_fetch_models(
+pub async fn gateway_restore_order(
     agent: Agent,
-    provider_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<GatewayState, String> {
     let app = app(&state)?;
-    let worker = app.clone();
-    let target = provider_id.clone();
-    let (base_url, key) = blocking(move || worker.provider_for_fetch_in(agent, &target)).await?;
-    let fetched = runtime::fetch_models_detailed(&base_url, &key).await;
-    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
-    let guard = state.config_lock.lock().await;
-    let worker = app.clone();
-    match fetched {
-        Ok((ids, api_base)) => {
-            blocking(move || worker.merge_fetched_models_in(agent, &provider_id, ids, &api_base))
-                .await?;
-        }
-        Err(failure) => {
-            log::warn!(
-                "拉网关 {provider_id}（{base_url}）的模型失败：{}",
-                failure.error
-            );
-            sophia_core::report::count_error_code(failure.error.code);
-            // 无法连接是那一家的状态：先把原因记下来（界面重读 state 就能在那一行显示），再照旧报错
-            if let Some(reason) = failure.unreachable {
-                let detail = failure.error.detail.clone();
-                blocking(move || worker.record_unreachable_in(agent, &provider_id, reason, detail))
-                    .await?;
-            }
-            return Err(failure.error.to_string());
-        }
-    }
-    drop(guard);
-    current_state(app).await
-}
-
-/// 试调的结果说明了密钥（通了、或 401/403）时记到那一家网关上（#144）：只动 settings.json 里这一家的
-/// `unreachable`，不碰 Codex、Claude 的配置，所以不取 `config_lock`。记不下来只写日志，不改试调的结果
-async fn record_probe_verdict(
-    app: Arc<App>,
-    agent: Agent,
-    provider_id: String,
-    result: &Result<(), AppError>,
-) {
-    let Some(verdict) = runtime::probe_verdict(result) else {
-        return;
-    };
-    if let Err(e) = blocking(move || app.record_key_verdict_in(agent, &provider_id, verdict)).await
-    {
-        log::warn!("记下试调的密钥结论失败：{e}");
-    }
-}
-
-/// 勾选前试调 `agent` 这一家网关 `provider_id` 的模型 `model_id`：向网关真发一条最小的请求（20 秒为限），
-/// 通了返回空，不通返回 `[代码] 原因`（原因给界面显示在那一行）。结果说明了密钥时记到那一家网关上
-/// （`record_probe_verdict`）；不写别的文件，所以不取 `config_lock`
-#[tauri::command]
-pub async fn gateway_probe_model(
-    agent: Agent,
-    provider_id: String,
-    model_id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let app = app(&state)?;
-    let worker = app.clone();
-    let pid = provider_id.clone();
-    let target = blocking(move || worker.provider_for_probe_in(agent, &pid, &model_id)).await?;
-    let result = runtime::probe_target(&target).await;
-    record_probe_verdict(app, agent, provider_id, &result).await;
-    result.map_err(|e| {
-        log::warn!(
-            "试调网关 {} 的模型 {} 失败：{e}",
-            target.api_base,
-            target.model
-        );
-        sophia_core::report::count_error_code(e.code);
-        e.to_string()
-    })
-}
-
-/// 手动添加一个模型（sophia-dev#117）：先像勾选前那样试调一次（20 秒为限），通了才写进列表并勾上。
-/// 试不通返回 `[代码] 原因`（原因给界面显示在那一行），不写列表（试调的密钥结论照样记，见 `record_probe_verdict`）
-#[tauri::command]
-pub async fn gateway_add_manual_model(
-    agent: Agent,
-    provider_id: String,
-    model_id: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<GatewayState, String> {
-    let app = app(&state)?;
-    let probe_app = app.clone();
-    let (pid, mid) = (provider_id.clone(), model_id.clone());
-    let target = blocking(move || probe_app.provider_for_probe_in(agent, &pid, &mid)).await?;
-    let result = runtime::probe_target(&target).await;
-    record_probe_verdict(app.clone(), agent, provider_id.clone(), &result).await;
-    result.map_err(|e| {
-        log::warn!(
-            "手动添加前试调网关 {} 的模型 {} 失败：{e}",
-            target.api_base,
-            target.model
-        );
-        sophia_core::report::count_error_code(e.code);
-        e.to_string()
-    })?;
     {
         let _guard = state.config_lock.lock().await;
         let worker = app.clone();
-        blocking(move || worker.add_manual_model_in(agent, &provider_id, &model_id)).await?;
-    }
-    current_state(app).await
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SelectedModel {
-    id: String,
-    #[serde(default)]
-    display_name: String,
-}
-
-/// `selected` 是 `agent` 这一家这个网关的完整勾选，不影响别的网关、也不影响另一家。
-/// 这里只带 id 与显示名；已存的上下文长度、看图能力由 `set_models_in` 保留（见 `picked_over`）
-#[tauri::command]
-pub async fn gateway_select_models(
-    agent: Agent,
-    provider_id: String,
-    selected: Vec<SelectedModel>,
-    state: tauri::State<'_, AppState>,
-) -> Result<GatewayState, String> {
-    let app = app(&state)?;
-    // 锁只包住写文件的那一小段：同步的 MCP 命令会在 IPC 线程上等这把锁，临界区越短越好
-    {
-        let _guard = state.config_lock.lock().await;
-        let models = selected
-            .into_iter()
-            .map(|m| Model {
-                id: m.id,
-                display_name: Some(m.display_name).filter(|n| !n.trim().is_empty()),
-                ..Default::default()
-            })
-            .collect();
-        let worker = app.clone();
-        blocking(move || worker.set_models_in(agent, &provider_id, models)).await?;
+        blocking(move || worker.restore_order(agent)).await?;
     }
     current_state(app).await
 }
@@ -449,6 +233,7 @@ pub async fn gateway_enable(
         blocking(move || match agent {
             Agent::Codex => worker.enable(),
             Agent::Claude => worker.enable_claude().map(|_| ()),
+            Agent::WorkBuddy => worker.enable_workbuddy(),
         })
         .await?;
     }
@@ -470,6 +255,7 @@ pub async fn gateway_restore(
         blocking(move || match agent {
             Agent::Codex => worker.restore(),
             Agent::Claude => worker.restore_claude(),
+            Agent::WorkBuddy => worker.restore_workbuddy(),
         })
         .await?;
     }
@@ -549,6 +335,11 @@ pub async fn gateway_takeover(
         blocking(move || match agent {
             Agent::Codex => worker.takeover(),
             Agent::Claude => worker.takeover_claude().map(|_| ()),
+            // WorkBuddy 没有别家配置要接管
+            Agent::WorkBuddy => Err(AppError::new(
+                "invalid",
+                sophia_core::t!("models.cmd.noTakeover", agent = "WorkBuddy"),
+            )),
         })
         .await?;
     }

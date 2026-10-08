@@ -8,6 +8,8 @@ fn harness(id: &str, name: &str) -> Harness {
     Harness {
         id: id.into(),
         display_name: name.into(),
+        brand: id.into(),
+        brand_name: name.into(),
         project_dir: None,
         global_dir: None,
         universal: false,
@@ -621,7 +623,7 @@ fn remote_server_into_claude_desktop_is_refused_with_the_design_reason() {
     assert_eq!(c.state, McpCellState::Unsupported);
     assert_eq!(
         c.reason.as_deref(),
-        Some("Claude Desktop 的远程服务器要在它自己的「连接器」里添加")
+        Some("Claude 桌面应用的远程服务器要在它自己的「连接器」里添加")
     );
     // 前端按目标 agent 取这一格的原因：条目带上接得住的几家
     let entry = overview.entries.iter().find(|e| e.name == "docs").unwrap();
@@ -633,7 +635,11 @@ fn remote_server_into_claude_desktop_is_refused_with_the_design_reason() {
                 "codex",
                 "cursor",
                 "gemini-cli",
-                "github-copilot"
+                "github-copilot",
+                "kimi-cli",
+                "kimi-desktop",
+                "workbuddy",
+                "deepseek-harness"
             ]
             .map(String::from)
             .to_vec()
@@ -642,7 +648,7 @@ fn remote_server_into_claude_desktop_is_refused_with_the_design_reason() {
     refused_with(
         &locations,
         sel("claude", "docs", "desktop"),
-        "Claude Desktop 的远程服务器要在它自己的「连接器」里添加",
+        "Claude 桌面应用的远程服务器要在它自己的「连接器」里添加",
     );
     assert_eq!(fs::read_to_string(&desktop).unwrap(), before);
 }
@@ -812,12 +818,12 @@ fn variable_references_never_go_into_claude_desktop() {
         assert_eq!(c.state, McpCellState::Unsupported, "{name}");
         assert_eq!(
             c.reason.as_deref(),
-            Some("Claude Desktop 不展开 ${…} 这类变量")
+            Some("Claude 桌面应用不展开 ${…} 这类变量")
         );
         refused_with(
             &locations,
             sel("claude", name, "desktop"),
-            "Claude Desktop 不展开 ${…} 这类变量",
+            "Claude 桌面应用不展开 ${…} 这类变量",
         );
     }
     // 跨家带 `${…}` 的仍拒绝（等各家的展开规则核实）；`$HOME` 在 Claude Code 里是字面值，别家照常能写
@@ -847,7 +853,7 @@ fn variable_references_never_go_into_claude_desktop() {
     refused_with(
         &with_gemini,
         sel("claude", "bare", "gemini"),
-        "Gemini CLI 会展开 $… 这类变量，写过去意思就变了",
+        "Gemini CLI 会展开 $… 这类变量，加到 Gemini CLI 后含义会改变",
     );
     // 没有变量的照常写进 Claude Desktop（`5$` 不是变量）
     write_one(&locations, sel("claude", "plain", "desktop"));
@@ -893,7 +899,7 @@ fn variable_references_copy_within_the_same_agent() {
     );
     assert_eq!(
         cell(&overview, "user", "gh", "desktop").reason.as_deref(),
-        Some("Claude Desktop 不展开 ${…} 这类变量")
+        Some("Claude 桌面应用不展开 ${…} 这类变量")
     );
     // Gemini 自己展开 `$VAR`：只有 `$TOKEN` 的也只在 Gemini 之间复制
     for name in ["gh", "bare"] {

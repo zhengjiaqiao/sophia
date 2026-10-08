@@ -4,13 +4,16 @@ import assert from "node:assert/strict";
 import {
   columnOfTarget,
   columnPress,
+  columnReadersNote,
   domainOfTarget,
   mergeSkillPages,
+  noSkillsText,
   placedAgents,
   refAt,
   refRowKey,
   skillRowKey,
 } from "../src/skillsView.ts";
+import { setLocale } from "../src/i18n.ts";
 import type { Cell, CellState, DomainPage, Target } from "../src/types.ts";
 
 /// 多位置的 Skills 表（spec 2026-09-26-object-first-navigation R6 R7，AC13–AC15）：
@@ -221,4 +224,58 @@ test("删原件确认：共用文件夹里的一处按路径找出所有列，�
     ),
     { labels: ["Codex"], count: 1 },
   );
+});
+
+// #251 / 画板第 5 屏：同一品牌几个产品共用一处、合成一列时，列头提示框点名读它的产品，第二行是路径；
+// 按品牌通用（core 给 `readers`），只有一个产品读的不说
+test("合成一列的列头：`Kimi Code、Kimi 桌面版都读这里` + 路径；范围里有位置不是合成的、或只有一个产品读时不说", () => {
+  const name = (id: string) =>
+    ({ "kimi-cli": "Kimi Code", "kimi-desktop": "Kimi 桌面版" })[id] ?? id;
+  const kimi = {
+    ...gTarget("kimi-cli", "Kimi"),
+    path: "/x/.agents/skills",
+    readers: ["kimi-cli", "kimi-desktop"],
+  };
+  const merged = mergeSkillPages([{ ...user, targets: [kimi] }]).columns[0];
+  assert.equal(
+    columnReadersNote(merged, name),
+    "Kimi Code、Kimi 桌面版都读这里\n/x/.agents/skills",
+  );
+  const single = mergeSkillPages([{ ...user, targets: [gCC] }]).columns[0];
+  assert.equal(columnReadersNote(single, name), undefined);
+  // 全部：用户级合成、项目里只有 Kimi Code 读——读者不同的位置各写一行（走查 2026-10-07 第 3 条）
+  const pKimi = pTarget(CARD, "kimi-cli", "Kimi");
+  const both = mergeSkillPages([
+    { ...user, targets: [kimi] },
+    {
+      key: CARD,
+      label: "CardBox",
+      targets: [pKimi],
+      rows: [],
+      orphans: [],
+      broken: [],
+      agentCopies: [],
+    } as unknown as DomainPage,
+  ]).columns[0];
+  assert.equal(
+    columnReadersNote(both, name),
+    `Kimi Code、Kimi 桌面版都读这里\n/x/.agents/skills\nKimi Code 读这里\n${pKimi.path}`,
+  );
+});
+
+test("没有 agent 目录时的空态一句（#304）：本机、一个位置写名字、几个位置合起来说；English 几个位置是复数主语，主谓一致", () => {
+  assert.equal(noSkillsText({ kind: "machine" }), "本机还没有 skill");
+  assert.equal(noSkillsText({ kind: "one", label: "CardBox" }), "CardBox 还没有 skill");
+  assert.equal(noSkillsText({ kind: "one", label: "用户级" }), "用户级还没有 skill");
+  assert.equal(noSkillsText({ kind: "several" }), "这几个生效范围里还没有 skill");
+  setLocale("zh-Hant");
+  try {
+    assert.equal(noSkillsText({ kind: "several" }), "這幾個生效範圍裡還沒有 skill");
+    setLocale("en");
+    assert.equal(noSkillsText({ kind: "machine" }), "This Mac has no skills yet");
+    assert.equal(noSkillsText({ kind: "one", label: "CardBox" }), "CardBox has no skills yet");
+    assert.equal(noSkillsText({ kind: "several" }), "These scopes have no skills yet");
+  } finally {
+    setLocale("zh-Hans");
+  }
 });

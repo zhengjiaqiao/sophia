@@ -26,12 +26,13 @@ import { matchesFilter } from "./rowFilter.ts";
 import { viewOf } from "./cellState.ts";
 import { blockedTipOf } from "./cellTip.ts";
 import { orphanOrigin, orphanSelectReason, orphanTip } from "./orphanRows.ts";
-import { listText, t, tn, tSpaced } from "./i18n.ts";
+import { listText, t, tn } from "./i18n.ts";
 import { displayPath } from "./pathText.ts";
 import {
   agentCopiesOf,
   columnOfTarget,
   columnPress,
+  columnReadersNote,
   keepSideKey,
   refAt,
   refRowKey,
@@ -78,8 +79,8 @@ export interface DomainViewProps {
   view: SkillsView;
   /// 经过筛选、要显示的行
   rows: SkillRow[];
-  /// 一个位置都还没有 agent 目录时空态里说的地方：`本机` / `用户级` / `CardBox` / `这几个生效范围里`
-  placeLabel: string;
+  /// 一个位置都还没有 agent 目录时空态的一句（`noSkillsText`）：`本机还没有 skill`、`CardBox 还没有 skill`……
+  noDirsText: string;
   /// 空态的 `前往发现`：切到「发现」页签；不给就不出这颗键
   onDiscover?: () => void;
   /// 格此刻该画成什么（乐观更新之后的状态）
@@ -115,6 +116,8 @@ export interface DomainViewProps {
   onManageSources: (at: HTMLElement | null) => void;
   /// bar 插槽（R4 的项目筛选片，见 Matrix）：原样传给 Matrix 的 `bar`
   bar?: ReactNode;
+  /// 产品 id → 界面上的名字（合成列的列头点名读它的产品）；没给就用 id
+  productName?: (id: string) => string;
   /// 新手提示条的插槽：bar 插槽下、表头上（放 `<NoticePanel mark={false} open flush>`，见 Matrix）
   hint?: ReactNode;
   /// 新手提示条的插槽：空态上方
@@ -247,6 +250,7 @@ export default function DomainView(props: DomainViewProps) {
       name: target.label,
       count: n,
       tip: tn("skills.column.added", n, { agent: target.label }),
+      note: columnReadersNote(target, props.productName ?? ((id) => id)),
       missing: [...target.targets.values()].every((t) => !t.exists),
     };
   });
@@ -614,7 +618,7 @@ export default function DomainView(props: DomainViewProps) {
       />
     ) : noAgentDirs ? (
       <TableEmpty
-        text={tSpaced("skills.empty.noDirs", { place: props.placeLabel })}
+        text={props.noDirsText}
         tip={
           toCreate.length > 0 ? (
             <FolderTip title={t("skills.empty.noDirsHint")} folders={toCreate} />

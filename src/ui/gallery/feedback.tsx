@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   BusySlot,
   Button,
+  Coach,
   Confirm,
   CornerToast,
   Details,
@@ -18,6 +19,24 @@ import { Block, Family, Specimen } from "./Gallery.tsx";
 
 const noop = () => {};
 const codex = [{ id: "codex", name: "Codex" }];
+
+/// 引导气泡指着一颗键（位置按打开那一刻量的；样张页滚动后不跟着走）
+function CoachDemo() {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="gallery-tipstage">
+      <span ref={setAnchor}>
+        <Button size="compact" onClick={() => setOpen(true)}>
+          已选 1
+        </Button>
+      </span>
+      <Coach anchor={anchor} open={open} onDismiss={() => setOpen(false)}>
+        已选的模型会出现在 Codex 的模型列表里，可以在这里拖动调整顺序
+      </Coach>
+    </div>
+  );
+}
 
 /// 提示与反馈：按「谁开口 × 会不会自己走」分五种，一件事只在一处说
 export function FeedbackFamily() {
@@ -73,6 +92,15 @@ export function FeedbackFamily() {
               </Button>
             </Tooltip>
           </div>
+        </Specimen>
+      </Block>
+
+      <Block
+        name="Coach"
+        guide="第一次做完某件事后，指着下一步在哪说一句、只出一次（记在设置里）｜ 常挂的说明、报错、确认都不是它"
+      >
+        <Specimen label="指着页签（选模型浮层里第一次勾上）" width={360} height={120}>
+          <CoachDemo />
         </Specimen>
       </Block>
 
@@ -212,7 +240,7 @@ export function FeedbackFamily() {
               kind="partial"
               sentence="market.toast.installPartial"
               names={["pdf"]}
-              reason="Claude Code 没链上：那里已有同名的"
+              reason="加到 Claude Code 失败 · 已有同名的 skill"
               go={{ label: "去处理", onClick: noop }}
               action={{ label: "撤销", onClick: noop }}
               onClose={noop}

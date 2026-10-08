@@ -212,7 +212,7 @@ export function CodexKeySlot({
 /// （窗口正中）；禁用时按下即说原因——行上说「是什么」、提示框说「怎么办」（`codexListSwitchReason`）。
 /// 没写成：滑块滑回，这一行下出行内灰面板 + `再试一次`（经 `onNotice` 交给列表页挂）；新状态经 `onGatewayState` 报给壳，
 /// 列表页、侧栏橙点、Codex 的页下次推入都读同一份。键显示着时每 5 秒轻查一次（外部重启了 Codex，键要自己消失）
-export function CodexListControls({ state, onNotice, onGatewayState }: AgentListRowProps) {
+export function CodexListControls({ state, onNotice, onGatewayState, pick }: AgentListRowProps) {
   const gateway = state.gateway;
   const [phase, setPhase] = useState<RestartPhase>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
@@ -349,6 +349,7 @@ export function CodexListControls({ state, onNotice, onGatewayState }: AgentList
         onDoneDismiss={dismissDone}
         place="section"
       />
+      {pick}
       <CodexSwitch
         tool={CODEX}
         state={gateway}
@@ -369,6 +370,83 @@ export function CodexListControls({ state, onNotice, onGatewayState }: AgentList
           {restartConsequence(codexAppName(gateway))}
         </Confirm>
       ) : null}
+    </>
+  );
+}
+
+/// 模型页里 Codex 那一行下的待办条（注册表 `listRow.Todos`；画板第 1′ 屏「待办条挂在行下」）：正由 agents-manager 管理 +
+/// `接管`、Sophia 写进去的设置被改掉了（Codex 升级后对不上）+ `重新写入`。做不成：行下灰面板 + `再试一次`（经 `onNotice`）。
+/// 问题解决自动收起，不给「稍后」
+export function CodexRowTodos({ state, onNotice, onGatewayState }: AgentListRowProps) {
+  const [resolving, setResolving] = useState<"takeover" | "rewrite" | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  if (state.gateway === null || !state.gateway.supported) return null;
+  const codex = codexGateway(state.gateway);
+  const todos: { kind: "takeover" | "rewrite"; message: string; label: string; busy: string }[] =
+    [];
+  if (codex.codex.takeover !== null)
+    todos.push({
+      kind: "takeover",
+      message: t("models.todo.takeover", { tool: CODEX.name }),
+      label: t("models.issue.takeover"),
+      busy: t("models.todo.takingOver"),
+    });
+  if (codex.codex.app.drift)
+    todos.push({
+      kind: "rewrite",
+      message: t("models.todo.drift"),
+      label: t("models.issue.rewrite"),
+      busy: t("models.todo.rewriting"),
+    });
+  if (todos.length === 0) return null;
+
+  const run = async (kind: "takeover" | "rewrite") => {
+    onNotice(null);
+    setResolving(kind);
+    try {
+      const next = await (kind === "takeover"
+        ? api.gatewayTakeover("codex")
+        : api.gatewayEnable("codex"));
+      if (mounted.current) onGatewayState(next);
+    } catch (error) {
+      if (mounted.current)
+        onNotice(
+          <NoticePanel
+            message={
+              kind === "takeover"
+                ? t("models.notice.takeoverFailed", { tool: CODEX.name })
+                : t("models.notice.rewriteFailed", { tool: CODEX.name })
+            }
+            reason={parseBackendError(String(error)).message}
+            action={{ label: t("models.notice.retry"), onClick: () => void run(kind) }}
+            onClose={() => onNotice(null)}
+          />,
+        );
+    } finally {
+      if (mounted.current) setResolving(null);
+    }
+  };
+
+  return (
+    <>
+      {todos.map((todo) => (
+        <NoticePanel
+          key={todo.kind}
+          message={todo.message}
+          busy={resolving === todo.kind ? todo.busy : undefined}
+          action={{
+            label: todo.label,
+            onClick: () => void run(todo.kind),
+            disabledReason: resolving !== null ? t("models.control.busyPrev") : undefined,
+          }}
+        />
+      ))}
     </>
   );
 }

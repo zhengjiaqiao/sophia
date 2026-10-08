@@ -212,7 +212,7 @@ export function ContainersFamily() {
                   <Mono inherit>https://docs.test/mcp</Mono>,
                   "不同 · 末 4 位 …7f3a",
                 ],
-                actionDisabledReason: "sophia · Cursor 改不成这份：Cursor 不支持 SSE 传输",
+                actionDisabledReason: "sophia · Cursor 无法改成这份：Cursor 不支持 SSE 传输",
               },
               {
                 id: "b",
@@ -292,7 +292,7 @@ export function ContainersFamily() {
           <Note>还没有网关，先加一家</Note>
         </Specimen>
         <Specimen label="离开的浅键">
-          <Note action={{ label: "去发布页", onClick: noop, leave: true }}>下载没成</Note>
+          <Note action={{ label: "去发布页", onClick: noop, leave: true }}>下载失败</Note>
         </Specimen>
       </Block>
     </Family>

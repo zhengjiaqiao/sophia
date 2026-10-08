@@ -26,12 +26,10 @@ pub fn shell_color(theme: Theme) -> Color {
     }
 }
 
-/// 把外观设到所有窗口上（主窗口、托盘面板），主窗口的底色跟着换；设不上的报出来
-pub fn apply<R: Runtime>(app: &AppHandle<R>, value: Appearance) -> Result<(), String> {
+/// 把外观设到所有窗口上（主窗口、托盘面板），主窗口的底色跟着换；设不上的把系统原文报出来
+pub fn apply<R: Runtime>(app: &AppHandle<R>, value: Appearance) -> Result<(), tauri::Error> {
     for (label, window) in app.webview_windows() {
-        window
-            .set_theme(window_theme(value))
-            .map_err(|e| sophia_core::t!("settings.appearance.applyFailed", error = e))?;
+        window.set_theme(window_theme(value))?;
         // 托盘面板不画底（系统材质垫底，见 tray.rs），不设底色
         if label == "main" {
             let theme = window.theme().unwrap_or(Theme::Light);
@@ -60,8 +58,14 @@ pub fn appearance(state: tauri::State<'_, AppState>) -> Result<Appearance, Strin
     Ok(state
         .store
         .load_settings()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| crate::cmd_error::data_unread(e))?
         .appearance)
+}
+
+/// 外观已存下、设到窗口失败（#301）：一句是该处的失败句，系统原文进 `[detail]`（前面的「!」）
+#[track_caller]
+fn apply_failed(error: &(dyn std::error::Error + 'static)) -> String {
+    crate::cmd_error::failed(error, &sophia_core::t!("settings.appearance.applyFailed"))
 }
 
 /// 设置页改外观：写进设置，当场设到所有窗口；设不上把原因交给设置页
@@ -74,8 +78,8 @@ pub fn set_appearance(
     state
         .store
         .set_appearance(value)
-        .map_err(crate::cmd_error::settings_unsaved)?;
-    apply(&app, value)
+        .map_err(|e| crate::cmd_error::settings_unsaved(e))?;
+    apply(&app, value).map_err(|e| apply_failed(&e))
 }
 
 #[cfg(test)]
@@ -97,5 +101,17 @@ mod tests {
         assert!(tokens.contains("--shell: #141413;"));
         assert_eq!(shell_color(Theme::Light), Color(0xf4, 0xf4, 0xf2, 0xff));
         assert_eq!(shell_color(Theme::Dark), Color(0x14, 0x14, 0x13, 0xff));
+    }
+
+    /// 设到窗口失败（#301）：一句是失败句、不含原文，系统原文进 `[detail]`
+    #[test]
+    fn apply_failed_puts_raw_into_detail() {
+        let error = tauri::Error::from(std::io::Error::from_raw_os_error(13));
+        let sentence = sophia_core::t!("settings.appearance.applyFailed");
+        assert!(!sentence.contains('{'));
+        assert_eq!(
+            apply_failed(&error),
+            format!("[internal] {sentence}\n[detail] {error}")
+        );
     }
 }

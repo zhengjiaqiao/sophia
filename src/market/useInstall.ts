@@ -1,10 +1,11 @@
 /// 安装类推入页的状态：位置、勾了哪些 agent、计划（落点、同名、直接读取 / 每个 agent 写不写得过去）、
-/// 在装、做不成那一窗。skill（安装页、从链接安装）与 MCP（安装 MCP、从 JSON 添加）各一个钩子。
+/// 在装、做不成那一窗。skill（安装页、从链接安装）与 MCP（安装 MCP、粘贴 MCP 配置）各一个钩子。
 /// 文案与判断都在 installView.ts；这里只管什么时候调后端、结果放哪。
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t, type MessageKey } from "../i18n.ts";
 import type { Location } from "../shell/nav.ts";
 import { projectName } from "../sidebarProjects.ts";
+import type { TrustNotice } from "../mcpTrust.ts";
 import type { ToastText } from "../toastText.ts";
 import type {
   InstallOutcome,
@@ -23,6 +24,7 @@ import {
   defaultInstallLocation,
   mcpInstallBlock,
   mcpInstalledToast,
+  mcpInstalledTrust,
   keyHintTip,
   keyTrackedNote,
   mcpKeyHint,
@@ -35,14 +37,14 @@ import {
   skillPlanPending,
   skillRowView,
   takenAgents,
-  type AgentRef,
+  type InstallAgent,
   type InstallKind,
   type SkillHandle,
 } from "./installView.ts";
 import { skillDownloadFailure, type SkillDownloadFailure } from "../netFailure.ts";
 import { errorText, type MarketService } from "./service.ts";
 
-/// 输入停下 `ms` 之后的值（粘贴 JSON 的解析、链接的读取）
+/// 输入停下 `ms` 之后的值（粘贴 MCP 配置的解析、链接的读取）
 export function useDebounced<T>(value: T, ms: number): T {
   const [settled, setSettled] = useState(value);
   useEffect(() => {
@@ -80,18 +82,19 @@ export function useClipboardPrefill(
 /// 勾选行：列哪些、勾了哪些（默认按设置里的名单）
 function useAgentChoice(
   kind: InstallKind,
-  agents: ReadonlyArray<AgentRef>,
+  agents: ReadonlyArray<InstallAgent>,
   shown: ReadonlyArray<string>,
+  location?: LocationKey,
 ) {
   const agentsKey = agents.map((a) => `${a.id}\t${a.name}`).join("\n");
   const shownKey = shown.join("\n");
   const rows = useMemo(
-    () => agentRows(kind, agents, shown),
+    () => agentRows(kind, agents, shown, location),
     // 调用方每次渲染给新数组，按内容比
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [kind, agentsKey, shownKey],
+    [kind, agentsKey, shownKey, location],
   );
-  const [checked, setChecked] = useState<string[]>(() => defaultChecked(kind, rows, shown));
+  const [checked, setChecked] = useState<string[]>(() => defaultChecked(rows, shown));
   const toggle = (id: string, on: boolean) =>
     setChecked((prev) =>
       on
@@ -121,7 +124,7 @@ export interface SkillInstallOptions {
   /// 要出计划的仓库内路径（安装页一个；从链接安装是仓库里找到的全部——每一行都要知道能不能装）
   planPaths: ReadonlyArray<string>;
   mine: Location;
-  agents: ReadonlyArray<AgentRef>;
+  agents: ReadonlyArray<InstallAgent>;
   shown: ReadonlyArray<string>;
 }
 
@@ -129,8 +132,15 @@ const trimPath = (p: string) => p.replace(/^\/+|\/+$/g, "");
 
 export function useSkillInstall(opts: SkillInstallOptions) {
   const { service, repo, branch } = opts;
-  const { rows, checked, toggle } = useAgentChoice("skill", opts.agents, opts.shown);
   const [location, setLocation] = useState<LocationKey>(() => defaultInstallLocation(opts.mine));
+  // 勾选行随位置变：装到项目时没有项目级 skill 文件夹的产品不列，同一处的合成一行
+  const {
+    rows,
+    checked: chosen,
+    toggle,
+  } = useAgentChoice("skill", opts.agents, opts.shown, location);
+  /// 换位置后不在列的那几个不算勾着
+  const checked = chosen.filter((id) => rows.some((a) => a.id === id));
   const [preview, setPreview] = useState<SkillInstallPreview | null>(null);
   /// 出计划要下载整包：下载失败时这里是说法（网络那三类带「开着代理再试一次」）
   const [planError, setPlanError] = useState<SkillDownloadFailure | null>(null);
@@ -223,7 +233,8 @@ export function useSkillInstall(opts: SkillInstallOptions) {
         agentDirs,
         requested.filter((id) => !harnessIds.includes(id)),
       );
-      const toast = skillInstalledToast(outcome, opts.agents);
+      // 报告里的 id 是列 id：合成的那一行（`Kimi`）先认
+      const toast = skillInstalledToast(outcome, [...rows, ...opts.agents]);
       if (outcome.installed.length === 0) {
         setFailure({
           key: Date.now(),
@@ -277,11 +288,11 @@ export function useSkillInstall(opts: SkillInstallOptions) {
 
 export interface McpInstallOptions {
   service: MarketService;
-  /// 要写的定义（名字已补好）；从 JSON 添加时是勾上的那几个
+  /// 要写的定义（名字已补好）；粘贴 MCP 配置时是勾上的那几个
   definitions: ReadonlyArray<McpDefinitionInput>;
   fields: ReadonlyArray<McpFieldSpec>;
   mine: Location;
-  agents: ReadonlyArray<AgentRef>;
+  agents: ReadonlyArray<InstallAgent>;
   shown: ReadonlyArray<string>;
 }
 
@@ -346,7 +357,11 @@ export function useMcpInstall(opts: McpInstallOptions) {
   const keyTracked =
     trackedFiles.length > 0 ? keyTrackedNote(trackedFiles, keyHint !== null) : null;
 
-  const install = async (): Promise<{ report: McpReport; toast: ToastText } | null> => {
+  const install = async (): Promise<{
+    report: McpReport;
+    toast: ToastText;
+    trust: TrustNotice | null;
+  } | null> => {
     setBusy(true);
     setFailure(null);
     try {
@@ -365,7 +380,7 @@ export function useMcpInstall(opts: McpInstallOptions) {
         setFailure({ key: Date.now(), toast });
         return null;
       }
-      return { report, toast };
+      return { report, toast, trust: mcpInstalledTrust(report, checks ?? [], rows) };
     } catch (error) {
       setFailure({
         key: Date.now(),

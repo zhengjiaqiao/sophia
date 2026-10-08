@@ -103,6 +103,12 @@ pub struct AgentLabels {
 pub struct Harness {
     pub id: String,
     pub display_name: String,
+    /// 品牌 id（GLOSSARY「品牌」）：设置里一个品牌一个勾；同一品牌共用一个写入位置的产品合成一列
+    #[serde(default)]
+    pub brand: String,
+    /// 品牌名（`Claude`）：一个品牌在一页里只有一列时，列头写它
+    #[serde(default)]
+    pub brand_name: String,
     /// 相对项目根，如 ".claude/skills"
     pub project_dir: Option<String>,
     pub global_dir: Option<PathBuf>,
@@ -211,6 +217,9 @@ pub struct Target {
     pub exists: bool,
     /// 目标目录本身是软链且 real_path 等于某本体位置时，为该 Source 的 id
     pub linked_whole_to: Option<String>,
+    /// 同一品牌几个产品共用这一处、合成一列时，读它的各产品（harness id，表的先后）；只有一个产品读时为空
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub readers: Vec<String>,
 }
 
 /// (本体位置, skill, 目标) 交叉点的状态

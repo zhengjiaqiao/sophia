@@ -125,7 +125,6 @@ test("名词不当参数拼进句子：English 的原件位置 / 配置文件各
     assert.equal(loadFailedText("MCP"), "Couldn't read config files");
     assert.equal(t("skills.filter.bySource"), "Filter by location");
     assert.equal(t("skills.filter.sourceKey"), "Location:");
-    assert.equal(t("models.gateway.addButton"), "Add gateway");
     assert.deepEqual(addedParts(["A", "B"], 5, "skill", false), ["2 locations", "5 skills"]);
     assert.deepEqual(addedParts(["A", "B", "C"], 3, "MCP", false), [
       "3 config files",
@@ -140,5 +139,4 @@ test("名词不当参数拼进句子：English 的原件位置 / 配置文件各
   assert.equal(manageSources(), "管理原件位置");
   assert.equal(addLabel(3, "skill"), "添加 3 个原件位置");
   assert.equal(addButtonLabel("MCP"), "添加 配置文件");
-  assert.equal(t("models.gateway.addButton"), "添加 网关");
 });

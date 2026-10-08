@@ -405,7 +405,7 @@ pub fn write_failure(e: &io::Error) -> WriteFailure {
 }
 
 impl WriteFailure {
-    /// 给用户的一句（当前语言，「…，没动」）；`Other` 为 None，由调用处说它自己的那一句
+    /// 给用户的一句（当前语言，「…，未改动」）；`Other` 为 None，由调用处说它自己的那一句
     pub fn untouched(self) -> Option<String> {
         match self {
             WriteFailure::Changed => Some(crate::t!("common.write.changed")),
@@ -417,16 +417,22 @@ impl WriteFailure {
     }
 }
 
-/// 写 `path` 没写成时给用户的原因：四种说人话（[`WriteFailure::untouched`]），别的原样；原文同时进日志
-pub fn write_error_text(path: &Path, e: &io::Error) -> String {
-    log::warn!("写 {} 失败：{e}", path.display());
+/// 写 `path` 没写成时给用户的原因：四种说人话（[`WriteFailure::untouched`]）；分不出原因的为 None，
+/// 由调用处只说它自己的失败句，不把系统原文当原因（spec #239「出错的时候」）。原文进日志并计数，
+/// 界面有「!」的由调用处另把去隐私的原文放进去
+pub fn write_failure_reason(path: &Path, e: &io::Error) -> Option<String> {
+    log::warn!("write {} failed: {e}", path.display());
     crate::report::count_write_failure(e);
-    write_failure(e)
-        .untouched()
-        .unwrap_or_else(|| e.to_string())
+    write_failure(e).untouched()
 }
 
-/// 备份 `path` 没做成时的原因：磁盘满、没权限、只读说「备份时…，没动」；别的（含序号用尽的「已存在」）为 None，
+/// 同 [`write_failure_reason`]，只是分不出原因时原样返回原文。只剩模型那几处在用
+/// （`claude_models::desktop`、`gateway::app`，随 #271 改），新代码用 [`write_failure_reason`]
+pub fn write_error_text(path: &Path, e: &io::Error) -> String {
+    write_failure_reason(path, e).unwrap_or_else(|| e.to_string())
+}
+
+/// 备份 `path` 没做成时的原因：磁盘满、没权限、只读说「备份时…，未改动」；别的（含序号用尽的「已存在」）为 None，
 /// 由调用处说它自己的那一句。原文进日志
 pub fn backup_failure_text(path: &Path, e: &io::Error) -> Option<String> {
     log::warn!("备份 {} 失败：{e}", path.display());
@@ -885,21 +891,35 @@ mod tests {
 
         assert_eq!(
             WriteFailure::DiskFull.untouched().as_deref(),
-            Some("磁盘满了，没动")
+            Some("磁盘已满，未改动")
         );
         assert_eq!(
             WriteFailure::NoPermission.untouched().as_deref(),
-            Some("没有写入权限，没动")
+            Some("没有写入权限，未改动")
         );
         assert_eq!(
             WriteFailure::ReadOnly.untouched().as_deref(),
-            Some("所在的磁盘是只读的，没动")
+            Some("所在的磁盘是只读的，未改动")
         );
         assert_eq!(
             WriteFailure::Changed.untouched().as_deref(),
-            Some("可能刚被别的程序改过，没动")
+            Some("可能刚被别的程序改过，未改动")
         );
         assert_eq!(WriteFailure::Other.untouched(), None, "其他原因由调用处说");
+    }
+
+    /// #302：分不出原因时不把系统原文当原因交出去，由调用处说它自己的失败句
+    #[test]
+    fn 写入失败分不出原因时不交出原文() {
+        let path = Path::new("/tmp/x.json");
+        assert_eq!(
+            write_failure_reason(path, &io::Error::from_raw_os_error(28)).as_deref(),
+            Some("磁盘已满，未改动")
+        );
+        assert_eq!(
+            write_failure_reason(path, &io::Error::other("symlink parent")),
+            None
+        );
     }
 
     /// 真的写不进去：目录只读时 atomic_write 的错误认得出是没权限（以 root 运行时权限不拦，跳过）

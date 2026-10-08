@@ -73,7 +73,12 @@ export function FloatingToast({ children, align = "center", anchor, bounds }: Fl
   const placedRound = useRef(-1);
   const relayout = useCallback(() => setRound((n) => n + 1), []);
 
-  useLayoutEffect(() => setHost(document.body), []);
+  // 锚点在弹窗里（填短表单的弹窗里 `试一下再启用` 的结果）：挂进弹窗那一层，不然 --z-toast 低过 --z-confirm、
+  // 被弹窗那一层整个盖住
+  useLayoutEffect(
+    () => setHost(probeRef.current?.closest<HTMLElement>(".ss-confirm-layer") ?? document.body),
+    [],
+  );
 
   // 出现的那一刻定位一次（只量这一次，之后不跟滚动、不跟改窗口大小）；内容折行后按新尺寸再定一次
   useLayoutEffect(() => {

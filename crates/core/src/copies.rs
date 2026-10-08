@@ -242,7 +242,7 @@ fn hold_beside(dest: &Path) -> io::Result<PathBuf> {
     if entry_kind(dest) != EntryKind::Dir {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            crate::t!("skills.sync.holdNotDir", path = dest.display()),
+            crate::t!("skills.sync.holdNotDir"),
         ));
     }
     let parent = dest.parent().unwrap_or(Path::new("."));
@@ -1529,6 +1529,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: Some(team.parent().unwrap().display().to_string()),
+            readers: Vec::new(),
         };
         let cell = CellRef {
             source_id: universal.id.clone(),
@@ -1884,6 +1885,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: Some(universal.id.clone()),
+            readers: Vec::new(),
         };
 
         let report = skills::split_whole_link(&target, &universal, Some(&lab.store));

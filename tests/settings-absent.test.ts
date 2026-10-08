@@ -5,12 +5,7 @@ import { render } from "./ui-render.ts";
 
 const { AbsentAgents } = await import("../src/pages/AbsentAgents.tsx");
 
-const agent = (id: string, displayName: string, enabled: boolean) => ({
-  id,
-  displayName,
-  enabled,
-  installed: false,
-});
+const agent = (id: string, name: string, _enabled: boolean) => ({ id, name });
 
 test("设置页未安装那一节：信息不是设置——不渲染复选框，小标题说装上后可以在这里勾选", () => {
   const html = render(AbsentAgents, {
@@ -18,7 +13,10 @@ test("设置页未安装那一节：信息不是设置——不渲染复选框�
   });
   assert.doesNotMatch(html, /checkbox/);
   // 小标是组件库的区块小标（与设置页的节小标同一种）；「未安装的 N 个」已在展开行上说过（①）
-  assert.match(html, /class="ss-sectionlabel"><span class="ss-sectionlabel__text">装上后可以在这里勾选显示</);
+  assert.match(
+    html,
+    /class="ss-sectionlabel"><span class="ss-sectionlabel__text">装上后可以在这里勾选显示</,
+  );
   assert.match(html, />Amp</);
   assert.doesNotMatch(html, /恢复/);
 });
@@ -35,18 +33,18 @@ test("未安装的只列名字：不写「装上后也不显示」、没有「�
 
 // 2026-10-06 设置页并节：`显示的 agent` 是一条设置行，名单紧跟在行下，行连同名单是一块；
 // 「未安装的 N 个」字在前、拉手在后；名单下那行「MCP 页只显示…」并进了灰字
-test("设置页 `显示的 agent` 一块：设置行（灰字说上限与 MCP 页）+ 名单；「未安装的 N 个 ›」字在前、拉手在后", async () => {
+test("设置页 `skill 和 MCP 页显示的 agent` 一块：设置行（灰字说上限、MCP 页与模型页）+ 名单；「未安装的 N 个 ›」字在前、拉手在后", async () => {
   const { readFileSync } = await import("node:fs");
   const { withCopy } = await import("./copy.ts");
   const src = withCopy(
     readFileSync(new URL("../src/pages/SettingsPage.tsx", import.meta.url), "utf8"),
   );
-  const at = src.search(/<SettingRow\s+label="显示的 agent"/);
+  const at = src.search(/<SettingRow\s+label="skill 和 MCP 页显示的 agent"/);
   assert.ok(at > 0);
   const block = src.slice(at);
   assert.match(
     block,
-    /^<SettingRow\s+label="显示的 agent"\s+note=\{list \? t\("最多显示 \{max\} 个 · MCP 页只显示其中支持 MCP 的", \{ max: maxShown \}\) : undefined\}\s*\/>/,
+    /^<SettingRow\s+label="skill 和 MCP 页显示的 agent"\s+note=\{list \? t\("最多显示 \{max\} 个 · MCP 页只显示其中支持 MCP 的 · 模型页不受这里影响", \{ max: maxShown \}\) : undefined\}\s*\/>/,
   );
   // 字在前、拉手在后
   const more = block.slice(block.indexOf('<div className="settings-page__more">'));

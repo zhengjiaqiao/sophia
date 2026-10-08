@@ -8,8 +8,8 @@
 /// 加一个 agent / 一种能力＝往 `agents.tsx` 的表里加一项 / 一节，写一个节组件；外壳、路由都不改。
 /// 这里只放类型与纯函数（不产 JSX），tests/shell-extension.test.ts 直接测。
 ///
-/// 模型页两层（spec 2026-09-29 R41 R45；DESIGN「### 模型」）：`模型` 是一张 agent 列表，一家一行——行的现状句与
-/// 右端控件列由第三方模型那一节的 `listRow` 给，点整行推入它的 `Component`（这一家的页）。
+/// 模型页一层（#259；DESIGN「### 模型」）：一个 agent 一行，没有二级页——行的第二行、行尾的选模型键、右端控件列、
+/// 行上的灰字与行下的待办条由第三方模型那一节的 `listRow` 给。只列装了的、能接第三方模型的 agent（节级 `available`）。
 
 import type { ComponentType, ReactNode } from "react";
 import type { GatewayAgent, GatewayState, GatewayUnreadable, UsageView } from "../types.ts";
@@ -36,25 +36,31 @@ export interface AgentSectionProps {
   banner?: boolean;
 }
 
-/// 模型列表页里这一家那一行的右端控件列拿到的（DESIGN「列表页」）
+/// 模型页里这一家那一行的右端控件列、行下待办条拿到的（DESIGN「### 模型」）
 export interface AgentListRowProps extends AgentSectionProps {
   /// 这一行是哪个 agent（注册表的 id）
   agent: string;
   /// 与侧栏、托盘同一种只读状态
   state: AgentState;
-  /// 没写成时这一行下出的行内灰面板（+ `再试一次`）：交给列表页挂在这一行下面；传 null 收起
+  /// 没写成时这一行下出的行内灰面板（+ `再试一次`）：交给模型页挂在这一行下面；传 null 收起
   onNotice: (notice: ReactNode | null) => void;
+  /// 行尾的 `已选 N 个模型 ▾`（模型页画好交过来）：控件列把它放在条件键与开关之间（画板第 1 屏）
+  pick?: ReactNode;
 }
 
-/// 模型列表页里这一家那一行（DESIGN「列表页」）。行本身（图标、名字、整行悬停的 `surface` 带、点整行推入
-/// 这一节的 `Component`、返回时焦点还给这一行）归列表页画；这里只给行里因家而异的两样
+/// 模型页里这一家那一行（DESIGN「### 模型」，画板第 1、1′ 屏）。行本身（图标、名字、行尾 `已选 N 个模型 ▾` 与它的浮层）
+/// 归模型页画；这里只给行里因家而异的几样
 export interface AgentListRow {
-  /// 第二行那一句现状：已选的模型名 `glm-5、kimi-k2.5`（超过 3 个 `glm-5、kimi-k2.5 等 5 个`）、`还没选模型`、`正由 agents-manager 管理`；
-  /// Claude 同样只写模型名，另有 `正在用别的第三方配置`、`没有找到 Claude 桌面应用`…
+  /// 第二行那一句现状：按提供商的计数 `官方 2 · Kimi 2 · DeepSeek 1`、`没接第三方模型`、`还没选模型`、
+  /// `由 agents-manager 管理`；Claude 另有 `在用别的第三方配置`、`由组织统一配置`…
   status: (s: AgentState) => string;
-  /// 右端控件列：条件出现的键（`重启生效` / `启动 Codex` / `打开 Claude`）+ 12 + 开关。
+  /// 第二行后面的一句灰字（开着时的代价、换了端口要重启……）；没有为 null
+  note?: (s: AgentState) => string | null;
+  /// 右端控件列：条件出现的键（`重启生效` / `启动 Codex` / `打开 Claude`）+ 12 + `已选 N 个模型 ▾`（`pick`）+ 12 + 开关。
   /// 开关按下即写、不确认；禁用时按下即说原因
   Controls: ComponentType<AgentListRowProps>;
+  /// 行下的待办条（接管、重新写入……）；没有就不给
+  Todos?: ComponentType<AgentListRowProps>;
 }
 
 /// 托盘面板给每一行的面板级共用（TrayPanel 持有）
@@ -84,8 +90,8 @@ export interface TrayRowProps {
   tray: TrayHost;
 }
 
-/// agent 的一种能力：模型页里的一页（`Component`，从列表行推入）和 / 或托盘里的一行（`trayRow`），两样至少给一样。
-/// 页里的页面头、开关、内容都归节组件自己画
+/// agent 的一种能力：模型页里的一行（`listRow`）、模型页里铺开的一节（`Component`）和 / 或托盘里的一行（`trayRow`），
+/// 至少给一样
 export interface AgentSection {
   /// 稳定标识（`third-party-models`、`usage`）
   id: string;
@@ -94,9 +100,9 @@ export interface AgentSection {
   /// 节级可用：此刻这一节在不在（`用量`＝这个 agent 登录了；Claude 的 `第三方模型`＝本机支持第三方模型）。
   /// 不给＝跟着 agent 走；null＝还不知道，先不画
   available?: (s: AgentState) => boolean | null;
-  /// 这一家的页（模型列表页点整行推入）。不给就不进模型页（`用量` 有自己的一页，只在托盘里占一行）
+  /// 铺在模型页里的一节（没有 `listRow` 时）。都不给就不进模型页（`用量` 有自己的一页，只在托盘里占一行）
   Component?: ComponentType<AgentSectionProps>;
-  /// 模型列表页里这一家那一行的现状句与右端控件。只有带 `Component` 的节才用得上
+  /// 模型页里这一家那一行（第三方模型）
   listRow?: AgentListRow;
   /// 托盘面板里这一节的一行怎么画（DESIGN「托盘面板」一种能力一行）。不给就不进托盘
   trayRow?: ComponentType<TrayRowProps>;
@@ -107,9 +113,10 @@ export interface AgentEntry {
   id: string;
   /// 原样大小写（专名）。托盘块头、用量页用它
   name: string;
-  /// 模型页里的显示名（列表行、推入页页面头、同步勾选与删网关确认里说到这一家）；不给就用 `name`。
-  /// Claude 在托盘里叫 `Claude`（块里的用量是账号的），在模型页里叫 `Claude Desktop`（这一行只改桌面应用）
-  modelsName?: string;
+  /// 模型页里的显示名（那一行、选模型浮层标题、提供商页说到这一家）；不给就用 `name`。
+  /// Claude 在托盘里叫 `Claude`（块里的用量是账号的），在模型页里叫 `Claude 桌面应用`（这一行只改桌面应用）。
+  /// 照界面语言取，所以是函数
+  modelsName?: () => string;
   /// 这一块的第三方模型读网关状态里的哪一家（spec「家」）：`codex` → `codex`，`claude-code` → `claude`。
   /// 前端其余地方不做 id 换算；没有第三方模型的 agent 不给
   gateway?: GatewayAgent;
@@ -124,7 +131,7 @@ export interface AgentEntry {
 }
 
 /// 模型页里这一家叫什么（判断只在这一处）
-export const modelsNameOf = (entry: AgentEntry): string => entry.modelsName ?? entry.name;
+export const modelsNameOf = (entry: AgentEntry): string => entry.modelsName?.() ?? entry.name;
 
 /// 节此刻可不可用：不给 `available` 的节跟着 agent 走（算可用）
 export const sectionAvailable = (section: AgentSection, s: AgentState): boolean | null =>
@@ -134,9 +141,13 @@ export const sectionAvailable = (section: AgentSection, s: AgentState): boolean 
 export const availableSections = (entry: AgentEntry, s: AgentState): AgentSection[] =>
   entry.sections.filter((section) => sectionAvailable(section, s) === true);
 
-/// 模型页里画得出的节（有 `Component`、且此刻可用的）
+/// 这一节进不进模型页：有一行（`listRow`）或一节（`Component`）
+const inModelsPage = (section: AgentSection): boolean =>
+  section.listRow !== undefined || section.Component !== undefined;
+
+/// 模型页里画得出的节（进模型页、且此刻可用的）
 export const pageSections = (entry: AgentEntry, s: AgentState): AgentSection[] =>
-  availableSections(entry, s).filter((section) => section.Component !== undefined);
+  availableSections(entry, s).filter(inModelsPage);
 
 /// 模型页与侧栏「模型」一项列出的 agent：可用且有此刻可用的模型页节，按表的先后（判断只在这一处）。
 /// 只有托盘行的 agent 不参与：既不列，也不让「知不知道」悬着。
@@ -148,7 +159,7 @@ export function visibleAgents(
   let known = true;
   const agents: AgentEntry[] = [];
   for (const entry of registry) {
-    const withPage = entry.sections.filter((section) => section.Component !== undefined);
+    const withPage = entry.sections.filter(inModelsPage);
     if (withPage.length === 0) continue;
     const on = entry.available(s);
     if (on === null) known = false;

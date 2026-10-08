@@ -13,13 +13,13 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { api } from "./api.ts";
 import { listText, t, tn } from "./i18n.ts";
 
-export type HintId = "first-scan-skills" | "first-scan-empty" | "first-codex" | "mcp-opencode";
+export type HintId = "first-scan-skills" | "first-scan-empty" | "first-models" | "mcp-opencode";
 
 /// 登记表顺序＝优先级：同时有资格时前面的先出
 export const HINT_ORDER: readonly HintId[] = [
   "first-scan-skills",
   "first-scan-empty",
-  "first-codex",
+  "first-models",
   "mcp-opencode",
 ];
 
@@ -50,7 +50,7 @@ export const HINTS: Record<HintId, (ctx: HintContext) => string> = {
     agents.length > 0
       ? t("hints.firstScan.emptyWithAgents", { agents: agentList(agents) })
       : t("hints.firstScan.emptyLocal"),
-  "first-codex": () => t("hints.firstCodex"),
+  "first-models": () => t("hints.firstModels"),
   "mcp-opencode": () => t("hints.mcpOpenCode"),
 };
 
@@ -254,7 +254,11 @@ export interface UseHint {
 }
 
 export function useHint(id: HintId, { eligible, blocked = false }: UseHintOptions): UseHint {
-  const snap = useSyncExternalStore(hintStore.subscribe, hintStore.getSnapshot);
+  const snap = useSyncExternalStore(
+    hintStore.subscribe,
+    hintStore.getSnapshot,
+    hintStore.getSnapshot,
+  );
   const seen = snap.seen.has(id);
   /// 让过位：本次挂载内不再出（见 shouldYield）
   const [yielded, setYielded] = useState(false);

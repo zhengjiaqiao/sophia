@@ -6,6 +6,7 @@ pub mod connect;
 pub mod format;
 pub mod model;
 pub mod parse;
+pub mod plan;
 pub mod rollout;
 pub mod schedule;
 

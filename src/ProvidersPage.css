@@ -1,0 +1,163 @@
+/* 模型提供商页（ProvidersPage.tsx，#252，DESIGN「模型 › 模型提供商页」，画板 9UGdeLt4rvg2dm8SpStvHo 第 3 屏）。
+   表单（.gw-form）、预设名单（.gw-preset）沿用 ModelsTab.css；色值一律 var(--…)，唯一来源是 tokens.css。 */
+@import "./tokens.css";
+
+.providers {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-xl);
+}
+
+/* 表头位置一条 hairline（同模型页列表），一家一行 */
+.providers__list {
+  margin-top: var(--space-sm);
+  border-top: var(--border-structure);
+}
+
+/* 行尾 `启用模型 ▾`：浮层挂在这一层上 */
+.providers__enable {
+  display: inline-flex;
+}
+
+/* 行上的问题（没有密钥、拉不到模型）：接在第二行后面 */
+.providers__issue {
+  color: var(--ink);
+}
+
+/* 页尾一句：12 ink-faint */
+.providers__via {
+  margin: var(--space-md) 0 0;
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-faint);
+}
+
+/* 添加 / 编辑弹窗（ProviderDialog.tsx，画板第 9 屏）：标题、各栏、勾选框、填 id 的框左沿在同一条线上。
+   栏间 12；每栏标签在上（gw-form__label 12 ink-mute），下 4 是输入框，输入框占满弹窗内容宽 */
+.provider-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.provider-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  min-width: 0;
+}
+
+/* 预设那一步（FormDialog stretch）：撑满弹窗中间余下的高、跟着收矮，名单在自己的框里滚（弹窗里只留一层滚动） */
+.provider-dialog--stretch,
+.provider-dialog--stretch > .provider-dialog__field {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 「启用的模型」：小标、规则一句、搜索、勾选列表、框底填 id，各隔 8 */
+.provider-dialog__models {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin-top: var(--space-xxs);
+}
+
+.provider-dialog__rule {
+  margin: 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.provider-dialog__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* 勾选行左右各 8 的悬停带由这里让出：方框落在左线上（同「启用模型」浮层的 providers-layer__checks）。
+   不限高、不自己滚：全部展开，跟着弹窗内容一起滚（弹窗里只留一层滚动，2026-10-08） */
+.provider-dialog__list {
+  display: flex;
+  flex-direction: column;
+  margin-inline: calc(var(--space-xs) * -1);
+}
+
+.provider-dialog__list > .provider-dialog__rule {
+  padding-inline: var(--space-xs);
+}
+
+/* 框底填 id：上面一道行线，输入框不另缩进 */
+.provider-dialog__manual {
+  padding-top: var(--space-xs);
+  border-top: var(--border-row);
+}
+
+/* 出现时滚到看得见的那几块（保存失败的灰面板、原因相同时的「启用的模型」）：停下来不压在上下渐隐里 */
+.provider-dialog__reveal {
+  scroll-margin-block: var(--fade-edge);
+}
+
+/* 以后的「高级设置」那一行（#252 只留位置，没有内容） */
+.providers__advanced:empty {
+  display: none;
+}
+
+/* 「启用模型」浮层：宽 380；标题、说明、搜索框钉在顶上，手填 id 钉在底下，中间的勾选列表随浮层滚动 */
+.providers-layer {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  padding: 0 var(--space-md);
+}
+
+.providers-layer__head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 0 var(--space-xs);
+  background: var(--paper);
+}
+
+.providers-layer__title {
+  font-size: var(--size-body);
+  font-weight: 600;
+  line-height: var(--leading-head);
+  color: var(--ink);
+}
+
+.providers-layer__note {
+  margin-bottom: var(--space-xs);
+  font-size: var(--size-label);
+  line-height: var(--leading-label);
+  color: var(--ink-mute);
+}
+
+.providers-layer__rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 勾选行左右各 8 的悬停带由这里让出：方框与标题、搜索框、手填框落在同一条左线上（浮层内边距 16，走查 2026-10-07） */
+.providers-layer__checks {
+  display: flex;
+  flex-direction: column;
+  margin-inline: calc(var(--space-xs) * -1);
+}
+
+.providers-layer__empty {
+  margin: var(--space-xs) 0;
+  font-size: var(--size-caption);
+  line-height: var(--leading-caption);
+  color: var(--ink-mute);
+}
+
+.providers-layer__foot {
+  position: sticky;
+  bottom: 0;
+  padding: var(--space-xs) 0 var(--space-sm);
+  border-top: var(--border-row);
+  background: var(--paper);
+}

@@ -5,14 +5,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { locale, t, tn } from "../i18n.ts";
-import type { AppFault } from "../backendError.ts";
-import type {
-  Appearance,
-  HarnessList,
-  HarnessStatus,
-  LanguageSetting,
-  ProjectScope,
-} from "../types";
+import { errorSentence, type AppFault } from "../backendError.ts";
+import type { Appearance, HarnessList, BrandStatus, LanguageSetting, ProjectScope } from "../types";
 import {
   AgentIcon,
   BusySlot,
@@ -30,6 +24,7 @@ import {
   Toast,
 } from "../ui";
 import { AbsentAgents } from "./AbsentAgents.tsx";
+import { brandIconId, brandProductsLine } from "../brandsView.ts";
 import { AppearanceRow } from "./AppearanceRow.tsx";
 import { LanguageRow } from "./LanguageRow.tsx";
 import { ScopeSection } from "./ScopeSection.tsx";
@@ -58,15 +53,16 @@ import "./SettingsPage.css";
 
 /// 设置页（DESIGN「产品裁决 › 设置」，画板 V4Layouts-settings）：侧栏底的 `设置`（或 `⌘,`）落到这里，
 /// **只替换机面，侧栏不消失**（D6）。页面头 `设置`，右端没有动作。
-/// 它只回答一个问题——**这个 agent 出不出现在列表里**。名单只有一份，SKILLS、MCP 两页共用
-/// （2026-09-27 产品负责人：「这里感觉不用分开」）：MCP 页只显示其中支持 MCP 的，`显示的 agent` 的灰字说这件事。
-/// Claude Desktop 不进名单、不占名额（它跟着 Claude Code 出现在 MCP 页，core 的 `mcp_columns`）。
+/// 它只回答一个问题——**这个 agent 出不出现在 skill、MCP 两页**。名单只有一份，两页共用
+/// （2026-09-27 产品负责人：「这里感觉不用分开」）：MCP 页只显示其中支持 MCP 的，灰字说这件事；模型页不看它。
+/// **一个品牌一个勾**（#251）：勾上 Claude＝Claude Code 与 Claude Desktop 都显示，名额按品牌算。
 ///
 /// 三节（2026-10-06 并节）：`通用`（界面语言、外观、开机启动）→ `Skills 和 MCP` → `关于`（版本｜`检查更新`，
 /// 应用内查，不跳 GitHub；`使用统计和错误报告`｜开关，这份构建能上报才有）。
 /// `Skills 和 MCP` 一节三块，每块是一条设置行，名单紧跟在行下，设置行连同名单是一块，块间一道行线：
-/// - `显示的 agent` + 灰字「最多显示 4 个 · MCP 页只显示其中支持 MCP 的」：勾选框列表，三列等分、按行读，一行＝勾选行
-///   `CheckRow`（14px 勾选框 + 10 + 16px 图标 + 10 + 名字），行高 36；默认只列已安装的，其余收在一行展开
+/// - `skill 和 MCP 页显示的 agent` + 灰字「最多显示 4 个 · MCP 页只显示其中支持 MCP 的 · 模型页不受这里影响」：
+///   勾选框列表，三列等分、按行读，一格＝一个品牌的勾选行 `CheckRow`（14px 勾选框 + 10 + 16px 图标 + 10 + 品牌名，
+///   装了不止一个产品时名字下一行小字列它们），行高 36；默认只列已安装的品牌，其余收在一行展开
 ///   「未安装的 N 个 ›」里（字在前、拉手在后）。**最多显示 4 个**（上限来自 core，`list_harnesses` 带回）：勾满时其余已安装项禁用，
 ///   按下即出「最多显示 4 个，先取消一个」。「取消勾选只是不在列表里显示，已建好的链接原样留着」不常驻——
 ///   **取消勾选那一刻浮在那一项正下方**，约 4 秒淡出。
@@ -86,9 +82,9 @@ import "./SettingsPage.css";
 /// - 不给「链接方式（相对 / 绝对）」开关：它按「本体是否在目标项目内」自动判，是正确性判断不是口味问题。
 /// - **没有路由状态那一行**（D10）：它只转述 Codex 开关的状态、自己不能操作。
 
-/// `list_harnesses` 返回全部 41 个，各自带 installed。默认只列已安装的，
+/// `list_harnesses` 返回全部品牌，各自带 installed。默认只列已安装的，
 /// 其余收在「未安装的 N 个 ›」展开里。
-type AgentOption = HarnessStatus;
+type AgentOption = BrandStatus;
 
 /// 检查或下载更新失败（spec #248，画板「国产 agent 与国内网络」第 7 屏）：主句按场景与四类说，
 /// 原文从左端的 `!` 看（停上去出悬浮卡）；`到官网下载 ↗` 跟在句后（离开 Sophia 的退路，官网下载区对国内访客走国内线路），
@@ -146,7 +142,7 @@ export function SettingsPage({
 }: SettingsPageProps) {
   /// null＝还没读回来，与「一个 agent 都没有」是两回事
   const [list, setList] = useState<HarnessList | null>(null);
-  const agents: AgentOption[] | null = list?.harnesses ?? null;
+  const agents: AgentOption[] | null = list?.brands ?? null;
   const [showAbsent, setShowAbsent] = useState(false);
 
   /// 任一项保存失败（spec #239「错误怎么分两层」）：横幅主句「设置保存失败」，系统原文进前面的「!」，
@@ -157,9 +153,12 @@ export function SettingsPage({
       retry: { label: t("settings.save.retry"), onClick: retry },
     });
 
+  /// 读不出（agent 名单、生效范围的项目）：横幅主句「Sophia 的数据读取失败」，原文进「!」（#302）
+  const readFailed = (e: unknown) => onError(String(e), { fallback: t("common.data.readFailed") });
+
   /// 读 agent 名单；读不出由调用方报（`reload` 报到横幅，保存后的重读见 `saveThenReload`）
   const loadHarnesses = async () => setList(await api.listHarnesses());
-  const reload = () => loadHarnesses().catch((e) => onError(String(e)));
+  const reload = () => loadHarnesses().catch(readFailed);
   useEffect(() => {
     void reload();
     // 首次进入加载一次
@@ -254,7 +253,7 @@ export function SettingsPage({
   /// 勾选先画出来再写（同模型页「勾选不闪」）：写失败读回实际状态并说原因
   const toggle = async (id: string, enabled: boolean) => {
     setList((l) =>
-      l ? { ...l, harnesses: l.harnesses.map((h) => (h.id === id ? { ...h, enabled } : h)) } : l,
+      l ? { ...l, brands: l.brands.map((b) => (b.id === id ? { ...b, enabled } : b)) } : l,
     );
     await saveThenReload({
       save: async () => {
@@ -263,7 +262,7 @@ export function SettingsPage({
       },
       reload: loadHarnesses,
       saveFailed: (e) => saveFailed(e, () => void toggle(id, enabled)),
-      reloadFailed: (e) => onError(String(e)),
+      reloadFailed: readFailed,
     });
   };
 
@@ -280,7 +279,7 @@ export function SettingsPage({
   const [addNotice, setAddNotice] = useState<{ message: string; at: number } | null>(null);
   const dismissAddNotice = useCallback(() => setAddNotice(null), []);
   const loadProjects = async () => setProjects(await api.listProjects());
-  const reloadProjects = () => loadProjects().catch((e) => onError(String(e)));
+  const reloadProjects = () => loadProjects().catch(readFailed);
   useEffect(() => {
     void reloadProjects();
     // 进来读一次；壳扫完一轮（菜单加了项目、文件夹没了）再读
@@ -297,7 +296,7 @@ export function SettingsPage({
       },
       reload: loadProjects,
       saveFailed: (e) => saveFailed(e, () => void toggleProject(path, shown)),
-      reloadFailed: (e) => onError(String(e)),
+      reloadFailed: readFailed,
     });
   };
   /// `+ 项目`：系统文件夹选择器，选的文件夹就是一格、默认勾上。当不了项目的（主目录、不是文件夹）在键下说原因
@@ -314,7 +313,7 @@ export function SettingsPage({
     try {
       await api.addProject(path);
     } catch (e) {
-      setAddNotice({ message: String(e), at: Date.now() });
+      setAddNotice({ message: errorSentence(e), at: Date.now() });
     }
     await reloadProjects();
   };
@@ -357,10 +356,7 @@ export function SettingsPage({
   /// （后端发 locale-changed，整棵界面树按新语言重画）。写不成说原因、重读 core 的真值
   const [language, setLanguageState] = useState<LanguageSetting>("system");
   useEffect(() => {
-    void api.uiLanguage().then(
-      (v) => setLanguageState(v.setting),
-      (e) => onError(String(e)),
-    );
+    void api.uiLanguage().then((v) => setLanguageState(v.setting), readFailed);
     // 首次进入读一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -382,7 +378,7 @@ export function SettingsPage({
   /// （不回到旧值：快速连点两项时，前一次失败不该盖掉后一次的选择）
   const [appearance, setAppearanceState] = useState<Appearance>("system");
   useEffect(() => {
-    void api.appearance().then(setAppearanceState, (e) => onError(String(e)));
+    void api.appearance().then(setAppearanceState, readFailed);
     // 首次进入读一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -499,17 +495,19 @@ export function SettingsPage({
   /// 原因提示框悬停出、按下当即出（组件自己包 `ReasonTip`）
   const row = (agent: AgentOption) => {
     const blocked = full && !agent.enabled;
+    const products = list?.harnesses ?? [];
     return (
       <div key={agent.id} className="settings-page__cell">
         <CheckRow
           size="grid"
           checked={agent.enabled}
           onChange={(next) => void toggle(agent.id, next)}
-          icon={<AgentIcon id={agent.id} name={agent.displayName} />}
+          icon={<AgentIcon id={brandIconId(agent, products)} name={agent.name} />}
+          sub={brandProductsLine(agent, products) ?? undefined}
           disabledReason={blocked ? fullReason : undefined}
           highlighted={unchecked?.id === agent.id}
         >
-          {agent.displayName}
+          {agent.name}
         </CheckRow>
         {unchecked?.id === agent.id ? (
           <FloatingToast key={unchecked.at} align="start">
@@ -605,7 +603,12 @@ export function SettingsPage({
                   </div>
                   {showAbsent ? (
                     <div id="settings-absent">
-                      <AbsentAgents agents={absent} />
+                      <AbsentAgents
+                        agents={absent.map((b) => ({
+                          id: brandIconId(b, list?.harnesses ?? []),
+                          name: b.name,
+                        }))}
+                      />
                     </div>
                   ) : null}
                 </>

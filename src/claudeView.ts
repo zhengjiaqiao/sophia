@@ -1,38 +1,21 @@
-/// Claude（桌面应用）的第三方模型：列表行、Claude 的页、托盘那一行共用的纯逻辑（spec 2026-09-29 R41 R42 R44；
-/// DESIGN「Claude 的页：桌面应用」）。纯函数，tests 直接测。
+/// Claude（桌面应用）的第三方模型：模型页那一行与托盘那一行共用的纯逻辑（spec 2026-09-29 R41 R44、#259；
+/// DESIGN「Claude 桌面应用那一行」）。纯函数，tests 直接测。
 ///
-/// 三处（Claude 的页、列表行、托盘那一行）说同一句话：文案与判断只在这里写一份——取 Claude 那一份、不能切的情况、
-/// 开关的禁用原因（按所在处说下一步）、开关提示框两段、重启确认正文按方向、键的提示框、列表行的现状句、
-/// 开关旁那一位出哪颗键；页里的能力名、已选、代价句、行内待办条。
+/// 两处（模型页那一行、托盘那一行）说同一句话：文案与判断只在这里写一份——取 Claude 那一份、不能切的情况、
+/// 开关的禁用原因（按所在处说下一步）、开关提示框、重启确认正文按方向、键的提示框、行的第二行、
+/// 开关旁那一位出哪颗键、行上的灰字（代价句）、行下的待办条。
+import { productLabel } from "./brandsView.ts";
 import { t } from "./i18n.ts";
 import type { MessageKey } from "./i18n.ts";
 import type { AgentState } from "./shell/agentRegistry.ts";
-import {
-  enableNeedsModels,
-  listNeedsModels,
-  chipLabel,
-  gatewayShortName,
-  listModelNames,
-  noUsableKeyReason,
-  selectedKeyReason,
-  selectedModels,
-  routerTodo,
-  splitModelId,
-} from "./modelsView.ts";
-import type { EffectiveModel, ModelsTool } from "./modelsView.ts";
-import { claudeGateway, withAgentGateway } from "./types.ts";
-import type { ClaudeGatewayView, GatewayProviderModel, GatewayState } from "./types.ts";
+import { enableNeedsModels } from "./modelsView.ts";
+import { pickCounts, thirdPartyCount } from "./pickView.ts";
+import { claudeGateway } from "./types.ts";
+import type { ClaudeGatewayView, GatewayState } from "./types.ts";
 
 /// 注册表只读状态里的 Claude 那一份；状态还没读回来、或本机不支持是 null
 export const claudeOf = (s: AgentState): ClaudeGatewayView | null =>
   s.gateway === null ? null : claudeGateway(s.gateway);
-
-/// 这一家已选了几个模型（全部网关加起来）
-export const claudeSelectedCount = (view: ClaudeGatewayView): number =>
-  view.providers.reduce(
-    (sum, provider) => sum + provider.models.filter((model) => model.selected).length,
-    0,
-  );
 
 /// 不能切的情况（开关禁用）：列表行第二行说「是什么」（`row`），开关提示框说「怎么办」（`tip`），
 /// 不重复同一句（DESIGN「不能切的情况」）。能切为 null
@@ -53,24 +36,27 @@ export function claudeUnavailable(view: ClaudeGatewayView): { row: string; tip: 
   return null;
 }
 
-/// 开着时的代价，写在明处（DESIGN：开关提示框、页里的代价句、托盘能力行下一行）。
+/// 开着时的代价，写在明处（DESIGN：开关提示框、行上的代价句、托盘能力行下一行）。
 /// 提示框与代价句里各是一整句（目录一句一个键），这一句只给托盘能力行下那一行
 export const claudeAccountCost = () => t("models.claudePage.accountCost");
 
 /// 这一家在模型页里的名字（注册表 `modelsName`、Claude 的页页面头共用这一处；托盘那一块仍叫 `Claude`）：
-/// 这一行只改桌面应用，行名说清范围（DESIGN「### 模型」，2026-09-30）
-export const CLAUDE_MODELS_NAME = "Claude Desktop";
+/// 这一行只改桌面应用，行名说清范围（DESIGN「### 模型」，2026-09-30）。产品名照界面语言（`Claude 桌面应用`，
+/// 同设置与安装页，经 `productLabel`）
+export const claudeModelsName = () => productLabel("claude-desktop", "Claude Desktop");
 
-/// 模型列表页里 Claude 那一行的第二行（DESIGN「列表页」，2026-09-30）：同 Codex 只写已选的模型名（`listModelNames`），
-/// 不加 `桌面应用 · ` 前缀、不接代价句；别家配置在生效时 `正在用别的第三方配置`；不能切时换成那一种情况。
-/// 状态还没读回来是空串
+/// 模型页里 Claude 那一行的第二行（画板第 1、1′ 屏）：不能切时换成那一种情况；别家配置在生效时
+/// `在用别的第三方配置`；一个没选 `还没选模型`；关着 `没接第三方模型`；开着按提供商计数
+/// `PackyCode 1 · Kimi 1 · DeepSeek 1`。状态还没读回来是空串
 export function claudeListStatus(s: AgentState): string {
   const view = claudeOf(s);
   if (view === null) return "";
   const blocked = claudeUnavailable(view);
   if (blocked) return blocked.row;
   if (view.claude.desktop.foreign !== null) return t("models.claudePage.foreignRow");
-  return listModelNames(claudePicked(view).map((row) => row.label));
+  if (thirdPartyCount(view.models) === 0) return t("models.row.none");
+  if (!view.enabled) return t("models.row.off");
+  return pickCounts(view.models.picked) ?? t("models.row.none");
 }
 
 /// 开关旁那一位（DESIGN「开关＝配置里开没开」、spec R49）：`重启生效` 与 `打开 Claude` 同一位、不同时出现，
@@ -86,40 +72,37 @@ export function claudeKeyKind(view: ClaudeGatewayView): ClaudeKeyKind | null {
 
 // ===== 开关：禁用原因、提示框、拨下去的两句 =====
 
-/// 开关按不动时说在哪一处：Claude 的页（`page`，接管条就在下面）、模型列表页那一行（`list`，要「进去」）、
-/// 托盘那一行（`tray`，托盘里「进去」指代不清，说去模型页）
-export type ClaudeSwitchPlace = "page" | "list" | "tray";
+/// 开关按不动时说在哪一处：模型页那一行（`list`，接管条就在行下）、托盘那一行（`tray`，说去模型页）
+export type ClaudeSwitchPlace = "list" | "tray";
 
 /// 别家配置在生效时开关按下即出的那一句，按所在处说下一步（键表：用的时候才取文案）
 const NEEDS_TAKEOVER: Record<ClaudeSwitchPlace, MessageKey> = {
-  page: "models.claudePage.needsTakeover",
-  list: "models.listRow.needsTakeover",
+  list: "models.claudePage.needsTakeover",
   tray: "models.claudePage.needsTakeoverTray",
 };
 
-/// 开关按不动的原因（「怎么办」那一句；能按为 null）。开着时永远能关——切回不依赖密钥和模型。
-/// 顺序：不能切的三种情况 > 别家配置在生效 > 冲突 > 没有网关 > 一个密钥都没存 > 没选模型 > 选了模型的那几家缺密钥
-/// （同 Codex 的 `enableDisabledReason`）。列表页上挑不了模型，没选模型时说 `先进去选好模型再打开`
+/// 开关按不动的原因（「怎么办」那一句；能按为 null）。开着时永远能关——切回不依赖模型。
+/// 顺序：不能切的三种情况 > 别家配置在生效 > 冲突 > 一个模型都没选（同 Codex 的 `enableDisabledReason`）。
+/// 选了的那几家缺密钥不在这里预判：打开时后端点名是哪一家，原话出在行下
 export function claudeSwitchReason(
   view: ClaudeGatewayView,
-  place: ClaudeSwitchPlace = "page",
+  place: ClaudeSwitchPlace = "list",
 ): string | null {
   if (view.enabled) return null;
   const blocked = claudeUnavailable(view);
   if (blocked) return blocked.tip;
   if (view.claude.desktop.foreign !== null) return t(NEEDS_TAKEOVER[place]);
   if (view.conflict) return view.conflict;
-  const needsModels = place === "list" ? listNeedsModels() : enableNeedsModels();
-  if (view.providers.length === 0) return needsModels;
-  const none = noUsableKeyReason(view.providers);
-  if (none) return none;
-  if (claudeSelectedCount(view) === 0) return needsModels;
-  return selectedKeyReason(view.providers);
+  if (thirdPartyCount(view.models) === 0) return enableNeedsModels();
+  return null;
 }
 
-/// 开关的提示框：先说结果，再说要重开 Claude（DESIGN 两段原话；页、列表行、托盘同一段）
+/// 开关的提示框：先说结果，再说要重开 Claude；没接时再说切过去后的限制（画板第 1′ 屏「开关的提示框」：
+/// 限制跟「不登录 Claude 账号」那句放在一起，打开前就看得到）。行与托盘同一段
 export const claudeSwitchTip = (on: boolean): string =>
-  `${on ? t("models.claudePage.switchOnTip") : t("models.claudePage.switchOffTip")}${t("models.switch.keepRunning")}`;
+  on
+    ? `${t("models.claudePage.switchOnTip")}${t("models.switch.keepRunning")}`
+    : `${t("models.claudePage.switchOffTip")}${t("models.switch.keepRunning")}\n${claudeLimitations()}`;
 
 /// `重启 Claude？` 的正文，按方向（开着＝切过去、关着＝切回）
 export const claudeRestartConsequence = (enabled: boolean): string =>
@@ -139,82 +122,17 @@ export const claudeSwitchText = (next: boolean): { busy: string; failed: string 
         failed: t("models.claudePage.switchBackFailed"),
       };
 
-// ===== 网关区块 =====
-
-/// 网关抽屉里的限制说明（DESIGN 原话；只在挑的时候有用）
+/// 切过去后的限制（DESIGN 原话）：开关提示框里，打开之前就看得到
 export const claudeLimitations = () => t("models.tool.claudeLimitations");
 
-/// 网关区块里的这一家（名字用模型页里的 `Claude Desktop`，写删网关被挡住的原因，限制说明进抽屉）。Claude 的开关不改用户看得懂的某个文件，
-/// 没有 `configPath` 要说
-export const CLAUDE_TOOL: ModelsTool = {
-  id: "claude-code",
-  name: CLAUDE_MODELS_NAME,
-  configPath: "",
-  // getter：用的时候才取文案，模块加载时不定死语言
-  get limitations() {
-    return claudeLimitations();
-  },
-};
-
-// ===== 已选、代价句 =====
-
-/// `已选` 一行：这一家已选的模型，按网关顺序摊平；名字的写法、撞名后缀同 Codex 的 `effectiveModels`
-/// （那个函数读 Codex 那一份，这里读 Claude 自己的网关）
-export function claudePicked(view: ClaudeGatewayView): EffectiveModel[] {
-  const rows = view.providers.flatMap((provider) =>
-    selectedModels(provider).map((model) => ({ provider, model })),
-  );
-  const vendors = new Set(rows.map((row) => splitModelId(row.model.id).vendor ?? ""));
-  const keepVendor = vendors.size > 1;
-  const nameOf = (model: GatewayProviderModel) => chipLabel(model, keepVendor);
-  const times = new Map<string, number>();
-  for (const row of rows) {
-    const name = nameOf(row.model);
-    times.set(name, (times.get(name) ?? 0) + 1);
-  }
-  return rows.map((row) => {
-    const name = nameOf(row.model);
-    const suffix = (times.get(name) ?? 0) > 1 ? gatewayShortName(row.provider) : null;
-    return { ...row, name, suffix, label: suffix === null ? name : `${name} · ${suffix}` };
-  });
-}
-
-/// 开着时 `已选` 下那一句灰字（代价句，DESIGN 原话）；关着时不出（①）。`已选` 下不另加说明（2026-09-30）
+/// 开着时行上那一句灰字（代价句，画板第 1′ 屏「行上的灰字」）；关着时不出（①）
 export const claudeTradeoff = () => t("models.claudePage.tradeoff");
-
-/// 勾选 / 取消一个模型之后先画的样子（同 Codex 的 `selectModel`）：只改这一家这一个模型。开着时去掉的是最后一个
-/// → `turnsOff`、开关画成关（等同关掉，后端开着时不许已选变空，调用方先切回再清）
-export function claudeSelectModel(
-  state: GatewayState,
-  providerId: string,
-  modelId: string,
-  selected: boolean,
-): { next: GatewayState; turnsOff: boolean } {
-  const view = claudeGateway(state);
-  if (view === null) return { next: state, turnsOff: false };
-  const providers = view.providers.map((provider) =>
-    provider.id !== providerId
-      ? provider
-      : {
-          ...provider,
-          models: provider.models.map((model) =>
-            model.id === modelId ? { ...model, selected } : model,
-          ),
-        },
-  );
-  const moved: ClaudeGatewayView = { ...view, providers };
-  const turnsOff = view.enabled && claudeSelectedCount(moved) === 0;
-  return {
-    next: withAgentGateway(state, { ...moved, enabled: turnsOff ? false : view.enabled }),
-    turnsOff,
-  };
-}
 
 // ===== 行内待办条、页面头下的灰面板 =====
 
-/// 行内待办条的一条（DESIGN「每家的页 › 行内待办条」：灰面板满宽、键在右端控件列，问题解决自动收起、不给「稍后」）
+/// 行下待办条的一条（画板第 1′ 屏「待办条挂在行下」：灰面板、键在右端，问题解决自动收起、不给「稍后」）
 export interface ClaudeTodo {
-  kind: "router" | "takeover" | "rewrite";
+  kind: "takeover" | "rewrite";
   message: string;
   /// 主句后同一行的一段；没有为 null（别家配置一律不写来源，主句已说清，不重复：DESIGN ①）
   reason: string | null;
@@ -223,16 +141,11 @@ export interface ClaudeTodo {
   busy: string;
 }
 
-/// 这一页的行内待办条，按先后：路由没在跑（自愈过一次仍没起来才出）> 别家配置在生效 + `接管`
-/// （只说主句，不写是谁的配置；开着之后又被别的工具改了指向也是这一条）> 被改掉了 + `重新写入`。
-/// 不做「重开后在登录页点……」那一条（spec R42 已定事项 3：连同 deploymentMode 一起写好，重开直接进入）
-export function claudeTodos(state: GatewayState, healed: boolean): ClaudeTodo[] {
+/// 这一行下的待办条，按先后：别家配置在生效 + `接管`（只说主句，不写是谁的配置；开着之后又被别的工具改了指向
+/// 也是这一条）> 被改掉了 + `重新写入`。路由那一条影响每一家，挂在页面头下（`routerTodo`），不在这里
+export function claudeTodos(state: GatewayState): ClaudeTodo[] {
   const view = claudeGateway(state);
   const out: ClaudeTodo[] = [];
-  // 路由那一条：没在跑，或打开 Sophia 时没接上（另一个 Sophia 在运行、端口都被占）——与 Codex 的页同一条（routerTodo）。
-  // 原因：没接上时是那一种；路由没在跑时自愈失败的原话由页面接上（`routerFailure`）
-  const router = routerTodo(state, healed, null);
-  if (router !== null) out.push({ kind: "router", ...router });
   if (view === null) return out;
   const { foreign, drift } = view.claude.desktop;
   if (foreign !== null) {
@@ -256,7 +169,7 @@ export function claudeTodos(state: GatewayState, healed: boolean): ClaudeTodo[] 
   return out;
 }
 
-/// 切回没做完（spec R34 `restoreUnfinished`，R32 进程中途没了）：页面头下灰面板 + `再试一次`。没有为 null
+/// 切回没做完（spec R34 `restoreUnfinished`，R32 进程中途没了）：行下灰面板 + `再试一次`。没有为 null
 export function claudeHeadIssue(
   view: ClaudeGatewayView,
 ): { message: string; reason: string } | null {

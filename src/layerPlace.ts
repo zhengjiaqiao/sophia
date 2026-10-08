@@ -3,7 +3,8 @@
 /// - 默认从触发控件下方 `gap` 展开；只有下方放不下、上方放得下时才往上翻；
 ///   两边都放不下时选空间大的一侧，浮层内部滚动。
 /// - 最大高度取「朝向那一侧剩余的可用空间」与 `cap`（约 360）中较小的；「放得下」按这个上限比，
-///   内容再多也只要求放下 `cap` 那么高。
+///   内容再多也只要求放下 `cap` 那么高。装长列表的对话框浮层（选模型、启用模型）`cap` 480、给 `slide`：
+///   朝向那一侧不够高时沿窗口往回挪到够高为止（可以盖住触发控件）。
 /// - 左右：左沿对齐触发控件；右边越界时改为右沿对齐触发控件；仍越界就贴着窗口边距。
 
 export interface AnchorRect {
@@ -25,6 +26,8 @@ export const LAYER_GAP = 6;
 /// 离窗口边缘至少留这么多
 export const LAYER_MARGIN = 16;
 export const LAYER_CAP = 360;
+/// 装长列表的对话框浮层（选模型、启用模型）的最高：标题、搜索、底栏钉住之后，中间还要露得出六七行（走查 2026-10-08）
+export const LIST_LAYER_CAP = 480;
 
 export function placeLayer(
   anchor: AnchorRect,
@@ -33,7 +36,15 @@ export function placeLayer(
   viewport: { width: number; height: number },
   /// `align`：`start`（默认）左沿对齐触发控件、右边放不下改右对齐；`end` 右沿对齐触发控件、向左展开
   /// （行尾、小标题行右端的触发键），左边放不下改左对齐。最后都夹在窗口左右边距之内
-  opts: { gap?: number; margin?: number; cap?: number; align?: "start" | "end" } = {},
+  /// `slide`：朝向那一侧不够 `min(内容, cap)` 高时，沿窗口往回挪到够高为止（夹在窗口边距之内，可以盖住触发控件，
+  /// 同 macOS 弹出菜单）——长列表浮层在矮窗口里不至于只露一两行
+  opts: {
+    gap?: number;
+    margin?: number;
+    cap?: number;
+    align?: "start" | "end";
+    slide?: boolean;
+  } = {},
 ): LayerPlacement {
   const gap = opts.gap ?? LAYER_GAP;
   const margin = opts.margin ?? LAYER_MARGIN;
@@ -43,9 +54,14 @@ export function placeLayer(
   const need = Math.min(size.height, cap);
   const side =
     need <= below ? "below" : need <= above ? "above" : below >= above ? "below" : "above";
-  const maxHeight = Math.min(cap, side === "below" ? below : above);
-  const height = Math.min(size.height, maxHeight);
-  const top = side === "below" ? anchor.bottom + gap : anchor.top - gap - height;
+  let maxHeight = Math.min(cap, side === "below" ? below : above);
+  let height = Math.min(size.height, maxHeight);
+  let top = side === "below" ? anchor.bottom + gap : anchor.top - gap - height;
+  if (opts.slide && maxHeight < need) {
+    height = Math.min(need, Math.max(0, viewport.height - 2 * margin));
+    maxHeight = height;
+    top = side === "below" ? viewport.height - margin - height : margin;
+  }
 
   const right = viewport.width - margin;
   let left: number;
@@ -112,18 +128,40 @@ export const TIP_MARGIN = 16;
 /// 提示框放哪：默认触发控件正上方 6、水平居中（`prefer` / `align` 可改）；
 /// 优先一侧放不下、另一侧放得下才翻过去；居中出窗时对齐外侧边，最后夹进窗口四边 16 之内。
 /// 只在出现的那一刻算一次（Tooltip），之后滚动即收起，不重算
+/// `bounds`：触发控件在弹窗里时给弹窗的左右沿——提示框不出弹窗（走查 2026-10-08）
 export function placeTip(
   anchor: AnchorRect,
   size: { width: number; height: number },
   viewport: { width: number; height: number },
-  opts: { prefer?: "above" | "below"; align?: ToastAlign } = {},
+  opts: {
+    prefer?: "above" | "below";
+    align?: ToastAlign;
+    bounds?: { left: number; right: number };
+  } = {},
 ): ToastPlacement {
   return placeFloat(anchor, size, viewport, {
     prefer: opts.prefer ?? "above",
     align: opts.align,
     gap: TIP_GAP,
     margin: TIP_MARGIN,
+    bounds: opts.bounds,
   });
+}
+
+/// 弹窗键区里的键的提示框（走查 2026-10-08：禁用的「保存」把原因弹到上方，盖住了键区上面那一句、还出了弹窗）：
+/// 放在这一行键左边的空白里（`row`：内容左沿到第一颗键的左沿），右沿离键 `TIP_GAP`，与触发的键上下居中——
+/// 同列表行的提示框「放在该行同一行的空白处」。左边那一截放不下给 null，调用方照常放到上方
+export function placeTipBeside(
+  anchor: AnchorRect,
+  size: { width: number; height: number },
+  row: { left: number; right: number },
+): { top: number; left: number } | null {
+  const right = row.right - TIP_GAP;
+  if (right - size.width < row.left) return null;
+  return {
+    top: (anchor.top + anchor.bottom) / 2 - size.height / 2,
+    left: right - size.width,
+  };
 }
 
 /// 提示小窗与提示框共用的一套：锚点上 / 下方 `gap`，`prefer` 一侧放不下、另一侧放得下才翻；

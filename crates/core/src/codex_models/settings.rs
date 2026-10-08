@@ -1,9 +1,10 @@
 //! Codex 模型网关的持久化设置，挂在 `store::Settings::codex_gateway` 下，随 settings.json 读写。
 //! 字段移植自 agents-manager 的 `savedState`；纯数据，无 IO。
 //!
-//! 第三方网关可以有多家（`providers`）。Codex 自己同一时间只认一个 provider，
-//! 本功能绕开了这个概念：所有模型在同一份目录里，路由按模型标识决定发给哪一家。
-use super::catalog::{slug_for, Model, Published, RoutingProvider};
+//! 模型提供商是全局一份（`model_providers`，ADR 0003），Codex 选了哪些在那里的「已选」里；这里只剩写进 Codex
+//! 设置的记录（端口、接法、变更记录……）。旧版按 agent 存的网关（`providers`）不再读，下次保存就不再写出；
+//! 升级后 Codex 还指着旧设置时，打开 Sophia 接上那一步悄悄改回官方（`App::attach`，#259）。
+use super::catalog::slug_for;
 use super::login::ModeReason;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -17,55 +18,8 @@ pub const PORT_RANGE: std::ops::RangeInclusive<u16> = DEFAULT_PORT..=47339;
 /// 旧的单网关设置读入时迁移成的那一家的 id；它的密钥仍在旧的钥匙串账户里
 pub const LEGACY_PROVIDER_ID: &str = "default";
 
-const PROTOCOL_CHAT: &str = "chat";
-const PROTOCOL_RESPONSES: &str = "responses";
 const MAX_PROVIDER_ID_LEN: usize = 32;
 const FALLBACK_PROVIDER_ID: &str = "provider";
-
-/// 模型列表里的一项：模型本身的字段平铺，外加是否勾选
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SavedModel {
-    #[serde(flatten)]
-    pub model: Model,
-    #[serde(default)]
-    pub selected: bool,
-}
-
-/// 一家第三方网关
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct ProviderSettings {
-    /// 创建时由名称生成，之后不变：它是模型标识的前缀，也是密钥文件里这一家密钥的键，
-    /// 改了会让 Codex 里已选的模型全部失效
-    pub id: String,
-    /// 显示名，可以随时改
-    pub name: String,
-    /// 用户填写的网关地址
-    pub base_url: String,
-    /// 拉取模型时探明的接口基址；换网关地址后作废
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_base: Option<String>,
-    /// 这家网关支持的协议："chat"（默认）或 "responses"。读取请用 `protocol()`，它会归一化未知值
-    pub protocol: String,
-    /// 从哪个服务商预设建的（`provider_presets` 里的 id，spec S1）；手填地址的没有。只用来显示来源与取密钥的链接
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preset: Option<String>,
-    pub models: Vec<SavedModel>,
-    /// 上次拉取模型失败的原因种类（界面上的短句由 [`UnreachableReason::text`] 按当前语言取）；
-    /// 拉取成功或换地址后清空
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unreachable: Option<UnreachableReason>,
-    /// 上次拉取失败的技术原文（请求、状态码、返回的错误；已去掉密钥与隐私），界面 `详情` 里给；
-    /// 与 `unreachable` 同生同灭（spec 2026-10-04-local-diagnostics R13）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unreachable_detail: Option<String>,
-    /// `unreachable` 是真实调用（路由转发的请求、勾选前的试调）被拒了密钥时记下的，不是拉模型列表记下的。
-    /// 有的服务商拉列表不验密钥（OpenRouter 的 `GET /models`），所以拉列表成功不清它；换密钥、换地址、
-    /// 之后一次真实调用成功才清（#144）。为假不写这个键；旧版 App 不认它，读时忽略
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub key_rejected_on_call: bool,
-}
 
 /// 拉取模型失败的原因种类。落盘写种类代码字符串（`"auth"` / `"network"` / `"unexpected"` / `"dns"` /
 /// `"refused"` / `"timeout"` / `"tls"` / `"proxy"` / `"rateLimited"`、`"rateLimited:30"` / `"server:503"`），
@@ -225,126 +179,21 @@ impl<'de> Deserialize<'de> for UnreachableReason {
     }
 }
 
-impl Default for ProviderSettings {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            base_url: String::new(),
-            api_base: None,
-            protocol: PROTOCOL_CHAT.into(),
-            preset: None,
-            models: Vec::new(),
-            unreachable: None,
-            unreachable_detail: None,
-            key_rejected_on_call: false,
-        }
+/// 地址的主体：主机名去掉开头的 `api.` / `www.` 后取第一段（`https://relay.example.com/v1` → `relay`），
+/// IP 原样；取不到为 None。全局模型提供商的默认名称用它
+pub fn address_short_name(raw: &str) -> Option<String> {
+    let host = host_of(raw);
+    if host.is_empty() {
+        return None;
     }
-}
-
-impl ProviderSettings {
-    /// 真实调用被拒了密钥：记成「密钥无效」并带上那次请求的原文（已去密钥与隐私）。
-    /// 已经这样记着就不动（原文也不换），返回改没改——没改就不必写文件
-    pub fn mark_key_rejected(&mut self, detail: Option<String>) -> bool {
-        if self.key_rejected_on_call && self.unreachable == Some(UnreachableReason::Auth) {
-            return false;
-        }
-        self.unreachable = Some(UnreachableReason::Auth);
-        self.unreachable_detail = detail.filter(|d| !d.trim().is_empty());
-        self.key_rejected_on_call = true;
-        true
+    if is_ip_host(&host) {
+        return Some(host);
     }
-
-    /// 换了密钥，或之后一次真实调用成功：清掉真实调用记下的「密钥无效」。拉列表记下的原因不归它管。
-    /// 返回改没改
-    pub fn clear_key_rejection(&mut self) -> bool {
-        if !self.key_rejected_on_call {
-            return false;
-        }
-        self.unreachable = None;
-        self.unreachable_detail = None;
-        self.key_rejected_on_call = false;
-        true
+    let mut labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
+    while labels.len() > 1 && matches!(labels[0], "api" | "www") {
+        labels.remove(0);
     }
-
-    /// 当前勾选的模型，保持列表顺序
-    pub fn selected(&self) -> Vec<Model> {
-        self.models
-            .iter()
-            .filter(|saved| saved.selected)
-            .map(|saved| saved.model.clone())
-            .collect()
-    }
-
-    /// 路由转发请求用的基址：优先用拉取模型时探明的接口基址
-    pub fn upstream_base(&self) -> &str {
-        match self.api_base.as_deref() {
-            Some(api_base) if !api_base.is_empty() => api_base,
-            _ => &self.base_url,
-        }
-    }
-
-    /// 归一化后的协议：只有明确写了 "responses" 才是 responses，其余一律 "chat"
-    pub fn protocol(&self) -> &'static str {
-        if self.protocol == PROTOCOL_RESPONSES {
-            PROTOCOL_RESPONSES
-        } else {
-            PROTOCOL_CHAT
-        }
-    }
-
-    /// 这家的某个模型在 Codex 里的标识
-    pub fn slug_of(&self, model_id: &str) -> String {
-        provider_slug(&self.id, model_id)
-    }
-
-    /// 网关短名（DESIGN「模型列表的写法 › 网关短名」）：Sophia 网关行上的名字，也是两家撞名时
-    /// 写进 Codex 模型目录的「 · 网关名」后缀——用户在两边看到同一个名字（⑤⑨），所以只在这里算一次，
-    /// 界面经状态里的 `shortName` 读它，不另写一份。
-    ///
-    /// 显示名优先；显示名本身像主机名（新建时没填名字、或旧格式迁移来的，都是完整主机名
-    /// `openrouter.ai`）或是空的，就按主机名取短名：去掉开头的 `api.` / `www.` 后取第一段
-    /// （`ap-gateway.internal.example.com` → `ap-gateway`，`https://openrouter.ai/api/v1` → `openrouter`），
-    /// IP 原样；什么都取不到时退到 id
-    pub fn short_name(&self) -> String {
-        let name = self.name.trim();
-        let host_like = name.contains('.') && is_host_like(name) && !host_of(name).is_empty();
-        if !name.is_empty() && !host_like {
-            return name.to_owned();
-        }
-        let host = host_of(if name.is_empty() {
-            &self.base_url
-        } else {
-            name
-        });
-        if host.is_empty() {
-            return self.id.clone();
-        }
-        if is_ip_host(&host) {
-            return host;
-        }
-        let mut labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
-        while labels.len() > 1 && matches!(labels[0], "api" | "www") {
-            labels.remove(0);
-        }
-        labels
-            .first()
-            .map_or_else(|| self.id.clone(), |l| (*l).to_owned())
-    }
-}
-
-/// 名字本身像主机名：只有字母数字、点、连字符，可带 `:端口`（不含空格、不含路径）
-fn is_host_like(name: &str) -> bool {
-    let (host, port) = match name.split_once(':') {
-        Some((host, port)) => (host, Some(port)),
-        None => (name, None),
-    };
-    let host_ok = !host.is_empty()
-        && host
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
-    let port_ok = port.is_none_or(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
-    host_ok && port_ok
+    labels.first().map(|l| (*l).to_owned())
 }
 
 /// 地址（或像地址的名字）里的主机名，小写；没写协议的（`localhost:4000`）也认。取不到是空串
@@ -436,7 +285,6 @@ impl HookupMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewaySettings {
-    pub providers: Vec<ProviderSettings>,
     /// 用户是否开着 Codex 的第三方模型（只由模型页开关改变；退出、关机把 Codex 设置改回，这里不变，
     /// 下次打开 Sophia 时据此自动接上）。None：旧版本留下的设置，第一次加载时由编排层按
     /// 「Codex 设置现在指着路由」补上
@@ -515,7 +363,6 @@ const HISTORY_LIMIT: usize = 32;
 impl Default for GatewaySettings {
     fn default() -> Self {
         Self {
-            providers: Vec::new(),
             enabled: None,
             port: DEFAULT_PORT,
             added_newline: false,
@@ -579,19 +426,14 @@ impl GatewaySettings {
     }
 }
 
-/// 读入时兼容旧的单网关格式：`baseUrl` / `apiBase` / `protocol` / `models` 平铺在顶层。
-/// 旧字段只读不写，下次保存就是新格式。
+/// 读入时忽略旧版的网关列表：按 agent 存的网关（`providers`）与更早的单网关平铺字段（`baseUrl` / `models`）
+/// 不迁移（ADR 0003），下次保存就不再写出
 impl<'de> Deserialize<'de> for GatewaySettings {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize, Default)]
         #[serde(rename_all = "camelCase", default)]
         struct Raw {
-            providers: Vec<ProviderSettings>,
             enabled: Option<bool>,
-            base_url: String,
-            api_base: Option<String>,
-            protocol: String,
-            models: Vec<SavedModel>,
             port: u16,
             added_newline: bool,
             catalog_client_version: String,
@@ -605,28 +447,7 @@ impl<'de> Deserialize<'de> for GatewaySettings {
             mode_reason: Option<ModeReason>,
         }
         let raw = Raw::deserialize(deserializer)?;
-        let mut providers = raw.providers;
-        let has_legacy = !raw.base_url.trim().is_empty() || !raw.models.is_empty();
-        if providers.is_empty() && has_legacy {
-            providers.push(ProviderSettings {
-                id: LEGACY_PROVIDER_ID.to_owned(),
-                name: legacy_name(&raw.base_url),
-                base_url: raw.base_url,
-                api_base: raw.api_base,
-                protocol: if raw.protocol.is_empty() {
-                    PROTOCOL_CHAT.to_owned()
-                } else {
-                    raw.protocol
-                },
-                preset: None,
-                models: raw.models,
-                unreachable: None,
-                unreachable_detail: None,
-                key_rejected_on_call: false,
-            });
-        }
         Ok(Self {
-            providers,
             enabled: raw.enabled,
             port: if raw.port == 0 {
                 DEFAULT_PORT
@@ -647,95 +468,6 @@ impl<'de> Deserialize<'de> for GatewaySettings {
     }
 }
 
-/// 迁移来的那一家没有名字，用网关地址里的主机名；取不到就用 id
-fn legacy_name(base_url: &str) -> String {
-    let rest = base_url.trim();
-    let rest = rest.split_once("://").map_or(rest, |(_, rest)| rest);
-    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
-    if host.is_empty() {
-        LEGACY_PROVIDER_ID.to_owned()
-    } else {
-        host.to_owned()
-    }
-}
-
-impl GatewaySettings {
-    pub fn provider(&self, id: &str) -> Option<&ProviderSettings> {
-        self.providers.iter().find(|provider| provider.id == id)
-    }
-
-    pub fn provider_mut(&mut self, id: &str) -> Option<&mut ProviderSettings> {
-        self.providers.iter_mut().find(|provider| provider.id == id)
-    }
-
-    /// 所有 provider 里勾选的模型（见同名函数）
-    pub fn published(&self) -> Vec<Published> {
-        published(&self.providers)
-    }
-
-    /// 写进路由清单的上游信息（见同名函数）
-    pub fn routing_providers(&self) -> Vec<RoutingProvider> {
-        routing_providers(&self.providers)
-    }
-}
-
-/// 所有 provider 里勾选的模型，按 provider 顺序、再按各自列表顺序，带上标识与归属。
-/// 作用于一家 agent 自己的网关列表：Codex 与 Claude 各算各的，规则相同（spec R3）
-pub fn published(providers: &[ProviderSettings]) -> Vec<Published> {
-    let mut list: Vec<Published> = providers
-        .iter()
-        .flat_map(|provider| {
-            provider.selected().into_iter().map(|model| Published {
-                slug: provider.slug_of(&model.id),
-                provider: provider.id.clone(),
-                model,
-            })
-        })
-        .collect();
-
-    // 两家都有同名模型时，选择器里两行会一模一样：给撞名的加上网关短名（与 Sophia 网关行、
-    // 模型片后缀同一个名字，`short_name`）。只看“跨网关”的撞名——同一家里的重名加了网关名也区分不了。
-    // 标识不受影响。
-    let shown = |p: &Published| -> String {
-        match p.model.display_name.as_deref().map(str::trim) {
-            Some(name) if !name.is_empty() => name.to_owned(),
-            _ => p.model.id.trim().to_owned(),
-        }
-    };
-    let clashing: Vec<bool> = list
-        .iter()
-        .map(|this| {
-            let name = shown(this);
-            list.iter()
-                .any(|other| other.provider != this.provider && shown(other) == name)
-        })
-        .collect();
-    for (published, clash) in list.iter_mut().zip(clashing) {
-        if !clash {
-            continue;
-        }
-        let provider_name = providers
-            .iter()
-            .find(|provider| provider.id == published.provider)
-            .map_or_else(|| published.provider.clone(), ProviderSettings::short_name);
-        published.model.display_name = Some(format!("{} · {provider_name}", shown(published)));
-    }
-    list
-}
-
-/// 写进路由清单的上游信息。路由每个请求重读清单，所以增删 provider 不用重启路由
-pub fn routing_providers(providers: &[ProviderSettings]) -> Vec<RoutingProvider> {
-    providers
-        .iter()
-        .map(|provider| RoutingProvider {
-            id: provider.id.clone(),
-            base_url: provider.upstream_base().to_owned(),
-            protocol: provider.protocol().to_owned(),
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -743,29 +475,21 @@ mod tests {
     use crate::test_support::TempTree;
     use serde_json::json;
 
-    fn saved(id: &str, selected: bool) -> SavedModel {
-        SavedModel {
-            model: Model {
-                id: id.into(),
-                ..Model::default()
-            },
-            selected,
-        }
-    }
+    /// 连不上的原因现在记在全局提供商上（`model_providers::Provider`），落盘形状同旧网关
+    type ProviderSettings = crate::model_providers::Provider;
 
-    fn provider(id: &str, models: Vec<SavedModel>) -> ProviderSettings {
+    fn provider(id: &str) -> ProviderSettings {
         ProviderSettings {
             id: id.into(),
             name: id.to_uppercase(),
             base_url: format!("https://{id}.example"),
-            models,
             ..ProviderSettings::default()
         }
     }
 
     #[test]
     fn legacy_unreachable_reasons_read_as_current_wording() {
-        let settings: GatewaySettings = serde_json::from_value(json!({
+        let settings: crate::model_providers::ModelProviders = serde_json::from_value(json!({
             "providers": [
                 {"id": "a", "name": "a", "baseUrl": "https://a.test", "unreachable": "地址连不上"},
                 {"id": "b", "name": "b", "baseUrl": "https://b.test", "unreachable": "密钥不对"},
@@ -820,7 +544,7 @@ mod tests {
             (UnreachableReason::RateLimited(None), "rateLimited"),
             (UnreachableReason::Server(503), "server:503"),
         ] {
-            let mut p = provider("a", vec![]);
+            let mut p = provider("a");
             p.unreachable = Some(reason.clone());
             let value = serde_json::to_value(&p).unwrap();
             assert_eq!(value["unreachable"], json!(code));
@@ -829,7 +553,7 @@ mod tests {
             let back: ProviderSettings = serde_json::from_value(value).unwrap();
             assert_eq!(back.unreachable, Some(reason));
         }
-        let mut p = provider("a", vec![]);
+        let mut p = provider("a");
         p.unreachable = Some(UnreachableReason::Auth);
         let value = serde_json::to_value(&p).unwrap();
         let back: ProviderSettings = serde_json::from_value(value).unwrap();
@@ -880,15 +604,15 @@ mod tests {
             (UnreachableReason::Proxy, "无法连接代理（检查系统代理）"),
             (
                 UnreachableReason::RateLimited(Some(30)),
-                "服务商限流了，约 30 秒后再试",
+                "模型提供商限流了，约 30 秒后再试",
             ),
             (
                 UnreachableReason::RateLimited(None),
-                "服务商限流了，稍后再试",
+                "模型提供商限流了，稍后再试",
             ),
             (
                 UnreachableReason::Server(503),
-                "服务商出了问题（HTTP 503），稍后再试",
+                "模型提供商出了问题（HTTP 503），稍后再试",
             ),
             (UnreachableReason::Auth, "密钥无效，请换一个密钥"),
             (
@@ -913,7 +637,7 @@ mod tests {
     /// 技术原文与原因一起存（`unreachableDetail`），没有就不写这个键；旧文件没有它照样读
     #[test]
     fn unreachable_detail_persists_next_to_the_reason() {
-        let mut p = provider("a", vec![]);
+        let mut p = provider("a");
         p.unreachable = Some(UnreachableReason::RateLimited(Some(30)));
         p.unreachable_detail = Some("GET https://a.test/models → 429".into());
         let value = serde_json::to_value(&p).unwrap();
@@ -924,7 +648,7 @@ mod tests {
         let back: ProviderSettings = serde_json::from_value(value).unwrap();
         assert_eq!(back, p);
 
-        let plain = serde_json::to_value(provider("b", vec![])).unwrap();
+        let plain = serde_json::to_value(provider("b")).unwrap();
         assert!(plain.get("unreachableDetail").is_none());
         let old: ProviderSettings = serde_json::from_value(
             json!({"id": "a", "name": "a", "baseUrl": "https://a.test", "unreachable": "network"}),
@@ -937,7 +661,7 @@ mod tests {
     /// 落盘只多一个 `keyRejectedOnCall: true`，为假不写；旧版 App 的形状读得了（不认的键忽略）
     #[test]
     fn key_rejection_on_call_marks_once_clears_only_itself_and_stays_readable() {
-        let mut p = provider("a", vec![]);
+        let mut p = provider("a");
         assert!(p.mark_key_rejected(Some("POST https://a.test/chat/completions → 401".into())));
         assert_eq!(p.unreachable, Some(UnreachableReason::Auth));
         assert!(p.key_rejected_on_call);
@@ -978,370 +702,10 @@ mod tests {
     }
 
     #[test]
-    fn defaults_are_no_providers_and_default_port() {
+    fn defaults_are_the_default_port_and_nothing_legacy() {
         let settings = GatewaySettings::default();
         assert_eq!(settings.port, DEFAULT_PORT);
         assert_eq!(DEFAULT_PORT, 47328);
-        assert!(settings.providers.is_empty());
-        assert!(settings.published().is_empty());
-        let provider = ProviderSettings::default();
-        assert_eq!(provider.protocol, "chat");
-        assert_eq!(provider.protocol(), "chat");
-        assert_eq!(provider.upstream_base(), "");
-    }
-
-    #[test]
-    fn protocol_normalizes_unknown_values_to_chat() {
-        let mut provider = ProviderSettings::default();
-        for (raw, want) in [
-            ("responses", "responses"),
-            ("chat", "chat"),
-            ("", "chat"),
-            ("grpc", "chat"),
-        ] {
-            provider.protocol = raw.into();
-            assert_eq!(provider.protocol(), want, "protocol {raw:?}");
-        }
-    }
-
-    #[test]
-    fn upstream_base_prefers_probed_api_base() {
-        let mut provider = ProviderSettings {
-            base_url: "https://gw.example".into(),
-            ..ProviderSettings::default()
-        };
-        assert_eq!(provider.upstream_base(), "https://gw.example");
-        provider.api_base = Some(String::new());
-        assert_eq!(provider.upstream_base(), "https://gw.example");
-        provider.api_base = Some("https://gw.example/v1".into());
-        assert_eq!(provider.upstream_base(), "https://gw.example/v1");
-    }
-
-    #[test]
-    fn selected_keeps_order_and_skips_unselected() {
-        let provider = provider(
-            "a",
-            vec![saved("b", true), saved("a", false), saved("c", true)],
-        );
-        let ids: Vec<String> = provider.selected().into_iter().map(|m| m.id).collect();
-        assert_eq!(ids, ["b", "c"]);
-    }
-
-    /// 两家都提供同名模型：标识带各自的前缀，互不相撞，顺序跟 provider 顺序走
-    #[test]
-    fn published_prefixes_slugs_so_same_model_from_two_providers_does_not_collide() {
-        let settings = GatewaySettings {
-            providers: vec![
-                provider(
-                    "wecode",
-                    vec![saved("deepseek/v4", true), saved("skip", false)],
-                ),
-                provider("other", vec![saved("deepseek/v4", true)]),
-            ],
-            ..GatewaySettings::default()
-        };
-        let published = settings.published();
-        let pairs: Vec<(&str, &str, &str)> = published
-            .iter()
-            .map(|p| (p.slug.as_str(), p.provider.as_str(), p.model.id.as_str()))
-            .collect();
-        assert_eq!(
-            pairs,
-            [
-                ("wecode-deepseek-v4", "wecode", "deepseek/v4"),
-                ("other-deepseek-v4", "other", "deepseek/v4"),
-            ]
-        );
-    }
-
-    /// 两家都有同名模型时，选择器里两行会一模一样：自动加上网关名区分。
-    /// 只给撞名的加，单独一家或名字不同的保持原样。
-    #[test]
-    fn display_names_that_clash_across_providers_get_the_provider_name_appended() {
-        let mut named = saved("kimi-k3", true);
-        named.model.display_name = Some("Kimi".into());
-        let settings = GatewaySettings {
-            providers: vec![
-                provider("wecode", vec![saved("deepseek/v4", true), named]),
-                provider(
-                    "other",
-                    vec![saved("deepseek/v4", true), saved("solo", true)],
-                ),
-            ],
-            ..GatewaySettings::default()
-        };
-        let names: Vec<Option<String>> = settings
-            .published()
-            .into_iter()
-            .map(|p| p.model.display_name)
-            .collect();
-        assert_eq!(
-            names,
-            [
-                Some("deepseek/v4 · WECODE".to_owned()),
-                Some("Kimi".to_owned()),
-                Some("deepseek/v4 · OTHER".to_owned()),
-                None,
-            ]
-        );
-        // 标识不受显示名影响
-        assert_eq!(settings.published()[0].slug, "wecode-deepseek-v4");
-    }
-
-    /// 网关短名：显示名优先；否则主机名去掉 api. / www. 与顶级域；localhost、IP 原样。
-    /// 这张表原在前端（tests/models-view.test.ts），短名改由 core 一处算之后搬到这里
-    #[test]
-    fn short_name_prefers_the_display_name_then_the_host() {
-        let gw = |name: &str, base_url: &str| ProviderSettings {
-            id: "x".into(),
-            name: name.into(),
-            base_url: base_url.into(),
-            ..ProviderSettings::default()
-        };
-        let cases = [
-            ("ap-gateway", "https://api.openai.com/v1", "ap-gateway"),
-            ("", "https://openrouter.ai/api/v1", "openrouter"),
-            ("", "https://api.deepseek.com", "deepseek"),
-            ("", "https://www.example.com/v1", "example"),
-            ("", "localhost:4000", "localhost"),
-            ("", "http://localhost:4000/v1", "localhost"),
-            ("", "http://192.168.1.20:8080/v1", "192.168.1.20"),
-            ("", "10.0.0.2:4000", "10.0.0.2"),
-            (
-                "",
-                "https://ap-gateway.internal.example.com/v1",
-                "ap-gateway",
-            ),
-            ("", "http://[::1]:4000/v1", "[::1]"),
-            // 显示名像主机名（新建时没填名字、旧格式迁移来的都是完整主机名）也走短名规则
-            ("openrouter.ai", "", "openrouter"),
-            ("api.deepseek.com", "", "deepseek"),
-            ("ap-gateway.internal.example.com", "", "ap-gateway"),
-            ("127.0.0.1:8080", "", "127.0.0.1"),
-            // 不像主机名的显示名原样：含空格、不含点
-            ("My Gateway v1.2", "", "My Gateway v1.2"),
-            ("ap-gateway", "", "ap-gateway"),
-            ("  WeCode  ", "", "WeCode"),
-            // 什么都取不到时退到 id
-            ("  ", "", "x"),
-        ];
-        for (name, base_url, want) in cases {
-            assert_eq!(
-                gw(name, base_url).short_name(),
-                want,
-                "{name:?} / {base_url:?}"
-            );
-        }
-    }
-
-    /// 撞名后缀＝网关短名，与 Sophia 网关行、模型片后缀同一个名字（DESIGN「在用」⑤⑨）。
-    /// 旧格式迁移来的一家名字是完整主机名：后缀取短名，不是 `· ap-gateway.example`
-    #[test]
-    fn clash_suffix_is_the_short_name_also_for_migrated_and_unnamed_providers() {
-        let mut settings: GatewaySettings = serde_json::from_value(json!({
-            "baseUrl": "https://ap-gateway.example/openai",
-            "models": [{"id": "glm-5", "displayName": "GLM-5", "selected": true}]
-        }))
-        .expect("json");
-        let mut other = saved("glm-5", true);
-        other.model.display_name = Some("GLM-5".into());
-        settings.providers.push(ProviderSettings {
-            id: "openrouter-ai".into(),
-            // 新建时没填名字：core 用地址的主机名当显示名（gateway upsert_provider）
-            name: "openrouter.ai".into(),
-            base_url: "https://openrouter.ai/api/v1".into(),
-            models: vec![other],
-            ..ProviderSettings::default()
-        });
-        let names: Vec<Option<String>> = settings
-            .published()
-            .into_iter()
-            .map(|p| p.model.display_name)
-            .collect();
-        assert_eq!(
-            names,
-            [
-                Some("GLM-5 · ap-gateway".to_owned()),
-                Some("GLM-5 · openrouter".to_owned()),
-            ]
-        );
-    }
-
-    /// 升级后读已有的设置：存下的内容不变、不需要迁移——后缀只在写目录时算，
-    /// 目录指纹（判断要不要重启 Codex）仍是上次写的那份，读一遍状态不会平白提示重启
-    #[test]
-    fn existing_settings_read_back_unchanged_after_the_suffix_rule_moved_to_short_names() {
-        let stored = json!({
-            "providers": [
-                {"id": "wecode", "name": "WeCode", "baseUrl": "https://a.example",
-                 "models": [{"id": "glm", "selected": true}]},
-                {"id": "openrouter-ai", "name": "openrouter.ai", "baseUrl": "https://openrouter.ai/api/v1",
-                 "models": [{"id": "glm", "selected": true}]}
-            ],
-            "port": 47328,
-            "publishedSlugs": ["wecode-glm", "openrouter-ai-glm"],
-            "catalogFingerprint": "abc",
-            "history": [{"at": 10, "enabled": true, "catalog": "abc"}]
-        });
-        let settings: GatewaySettings = serde_json::from_value(stored.clone()).expect("json");
-        assert_eq!(
-            settings.providers[1].name, "openrouter.ai",
-            "显示名原样，不改写"
-        );
-        assert_eq!(settings.catalog_fingerprint, "abc");
-        assert_eq!(settings.needs_codex_restart(20), Some(false));
-        // 标识不受后缀影响：已选模型在 Codex 里不会失效
-        let slugs: Vec<String> = settings.published().into_iter().map(|p| p.slug).collect();
-        assert_eq!(slugs, ["wecode-glm", "openrouter-ai-glm"]);
-        // 再存一次写回的名字、地址与读进来的一样：没有要迁移的字段
-        let value = serde_json::to_value(&settings).expect("json");
-        for (i, provider) in stored["providers"].as_array().unwrap().iter().enumerate() {
-            for key in ["id", "name", "baseUrl"] {
-                assert_eq!(value["providers"][i][key], provider[key], "{key}");
-            }
-        }
-        let back: GatewaySettings = serde_json::from_value(value).expect("json");
-        assert_eq!(back, settings);
-    }
-
-    /// 同一家里两个模型起了同样的显示名，加网关名也区分不了，就不动它
-    #[test]
-    fn display_names_that_clash_within_one_provider_are_left_alone() {
-        let mut a = saved("a", true);
-        a.model.display_name = Some("Same".into());
-        let mut b = saved("b", true);
-        b.model.display_name = Some("Same".into());
-        let settings = GatewaySettings {
-            providers: vec![provider("wecode", vec![a, b])],
-            ..GatewaySettings::default()
-        };
-        let names: Vec<Option<String>> = settings
-            .published()
-            .into_iter()
-            .map(|p| p.model.display_name)
-            .collect();
-        assert_eq!(names, [Some("Same".to_owned()), Some("Same".to_owned())]);
-    }
-
-    /// 一家的标识只取决于它自己：别家增删、换顺序都不影响
-    #[test]
-    fn a_providers_slugs_do_not_depend_on_other_providers() {
-        let alone = GatewaySettings {
-            providers: vec![provider("b", vec![saved("m", true)])],
-            ..GatewaySettings::default()
-        };
-        let with_others = GatewaySettings {
-            providers: vec![
-                provider("a", vec![saved("m", true)]),
-                provider("b", vec![saved("m", true)]),
-            ],
-            ..GatewaySettings::default()
-        };
-        assert_eq!(alone.published()[0].slug, "b-m");
-        assert_eq!(with_others.published()[1].slug, "b-m");
-    }
-
-    #[test]
-    fn a_model_name_without_usable_characters_yields_an_empty_slug() {
-        assert_eq!(provider_slug("wecode", "///"), "");
-        assert_eq!(
-            provider_slug("wecode", "thudm/GLM-5.2"),
-            "wecode-thudm-glm-5.2"
-        );
-    }
-
-    #[test]
-    fn routing_providers_carry_probed_base_and_normalized_protocol() {
-        let mut first = provider("a", vec![]);
-        first.api_base = Some("https://a.example/openai/v1".into());
-        first.protocol = "grpc".into();
-        let mut second = provider("b", vec![]);
-        second.protocol = "responses".into();
-        let settings = GatewaySettings {
-            providers: vec![first, second],
-            ..GatewaySettings::default()
-        };
-        assert_eq!(
-            settings.routing_providers(),
-            vec![
-                RoutingProvider {
-                    id: "a".into(),
-                    base_url: "https://a.example/openai/v1".into(),
-                    protocol: "chat".into()
-                },
-                RoutingProvider {
-                    id: "b".into(),
-                    base_url: "https://b.example".into(),
-                    protocol: "responses".into()
-                },
-            ]
-        );
-    }
-
-    /// AC3（R3）：`published` / `routing_providers` 抽成作用于网关列表的函数后，Codex 的结果与路由清单
-    /// 逐字节不变。清单原文是改动前按同一份设置生成的快照
-    #[test]
-    fn free_functions_give_codex_the_same_published_list_and_routing_bytes() {
-        let mut named = saved("kimi-k3", true);
-        named.model.display_name = Some("Kimi".into());
-        let mut first = provider("wecode", vec![saved("deepseek/v4", true), named]);
-        first.api_base = Some("https://wecode.example/v1".into());
-        let mut second = provider(
-            "other",
-            vec![saved("deepseek/v4", true), saved("solo", false)],
-        );
-        second.protocol = "responses".into();
-        let settings = GatewaySettings {
-            providers: vec![first, second],
-            ..GatewaySettings::default()
-        };
-
-        assert_eq!(published(&settings.providers), settings.published());
-        assert_eq!(
-            routing_providers(&settings.providers),
-            settings.routing_providers()
-        );
-        let bytes = crate::codex_models::catalog::build_routing(
-            &published(&settings.providers),
-            &routing_providers(&settings.providers),
-            &["wecode-gone".to_owned()],
-        )
-        .unwrap();
-        let expected = r#"{
-  "providers": [
-    {
-      "id": "wecode",
-      "base_url": "https://wecode.example/v1",
-      "protocol": "chat"
-    },
-    {
-      "id": "other",
-      "base_url": "https://other.example",
-      "protocol": "responses"
-    }
-  ],
-  "models": [
-    {
-      "slug": "wecode-deepseek-v4",
-      "upstream_model": "deepseek/v4",
-      "provider": "wecode"
-    },
-    {
-      "slug": "wecode-kimi-k3",
-      "upstream_model": "kimi-k3",
-      "provider": "wecode"
-    },
-    {
-      "slug": "other-deepseek-v4",
-      "upstream_model": "deepseek/v4",
-      "provider": "other"
-    }
-  ],
-  "retired": [
-    "wecode-gone"
-  ]
-}"#;
-        assert_eq!(String::from_utf8(bytes).unwrap(), expected);
     }
 
     #[test]
@@ -1382,29 +746,8 @@ mod tests {
     }
 
     #[test]
-    fn serializes_camel_case_with_flattened_model() {
+    fn serializes_camel_case() {
         let settings = GatewaySettings {
-            providers: vec![ProviderSettings {
-                id: "wecode".into(),
-                name: "WeCode".into(),
-                base_url: "https://gw.example".into(),
-                api_base: Some("https://gw.example/v1".into()),
-                protocol: "responses".into(),
-                preset: None,
-                models: vec![SavedModel {
-                    model: Model {
-                        id: "weibo/glm-5".into(),
-                        display_name: Some("GLM".into()),
-                        context_window: Some(200_000),
-                        vision: true,
-                        manual: false,
-                    },
-                    selected: true,
-                }],
-                unreachable: None,
-                unreachable_detail: None,
-                key_rejected_on_call: false,
-            }],
             enabled: None,
             port: 5000,
             added_newline: true,
@@ -1428,20 +771,6 @@ mod tests {
         assert_eq!(
             value,
             json!({
-                "providers": [{
-                    "id": "wecode",
-                    "name": "WeCode",
-                    "baseUrl": "https://gw.example",
-                    "apiBase": "https://gw.example/v1",
-                    "protocol": "responses",
-                    "models": [{
-                        "id": "weibo/glm-5",
-                        "displayName": "GLM",
-                        "contextWindow": 200000,
-                        "vision": true,
-                        "selected": true
-                    }]
-                }],
                 "port": 5000,
                 "addedNewline": true,
                 "catalogClientVersion": "0.154.0",
@@ -1586,65 +915,30 @@ mod tests {
         assert_eq!(many.needs_codex_restart(10), Some(true));
     }
 
-    /// 旧的单网关格式：平铺字段迁移成第一家，旧的已发布标识原样保留（它们会进停用名单）
+    /// 旧版按 agent 存的网关（`providers`）与更早的单网关平铺字段：不迁移；别的记录照读，
+    /// 再存一次旧字段就不写出了（ADR 0003、#259）
     #[test]
-    fn legacy_single_gateway_settings_migrate_into_the_first_provider() {
-        let settings: GatewaySettings = serde_json::from_value(json!({
-            "baseUrl": "https://ap-gateway.example/openai",
-            "apiBase": "https://ap-gateway.example/openai/v1",
-            "protocol": "chat",
-            "models": [{"id": "thudm/glm-5.2", "selected": true}, {"id": "x"}],
-            "port": 47328,
-            "publishedSlugs": ["thudm-glm-5.2"],
-            "hadPrevModel": true,
-            "prevModel": "gpt-5.6-sol"
-        }))
-        .expect("json");
-        assert_eq!(settings.providers.len(), 1);
-        let migrated = &settings.providers[0];
-        assert_eq!(migrated.id, LEGACY_PROVIDER_ID);
-        assert_eq!(migrated.name, "ap-gateway.example");
-        assert_eq!(migrated.base_url, "https://ap-gateway.example/openai");
-        assert_eq!(
-            migrated.upstream_base(),
-            "https://ap-gateway.example/openai/v1"
-        );
-        assert_eq!(
-            migrated.models,
-            vec![saved("thudm/glm-5.2", true), saved("x", false)]
-        );
-        assert_eq!(settings.published()[0].slug, "default-thudm-glm-5.2");
-        assert_eq!(settings.published_slugs, ["thudm-glm-5.2"]);
-        assert_eq!(settings.prev_model.as_deref(), Some("gpt-5.6-sol"));
-
-        // 再存一次就是新格式，旧的平铺字段不再写出
-        let value = serde_json::to_value(&settings).expect("json");
-        for legacy_key in ["baseUrl", "apiBase", "protocol", "models"] {
-            assert!(value.get(legacy_key).is_none(), "{legacy_key} 不该再写出");
+    fn old_gateway_lists_are_not_carried_over() {
+        for old in [
+            json!({"providers": [{"id": "wecode", "name": "WeCode", "baseUrl": "https://a.example"}],
+                   "enabled": true, "publishedSlugs": ["wecode-glm"]}),
+            json!({"baseUrl": "https://ap-gateway.example/openai", "models": [{"id": "x", "selected": true}],
+                   "enabled": true, "publishedSlugs": ["wecode-glm"]}),
+        ] {
+            let settings: GatewaySettings = serde_json::from_value(old).expect("json");
+            assert_eq!(settings.enabled, Some(true));
+            assert_eq!(settings.published_slugs, ["wecode-glm"]);
+            let value = serde_json::to_value(&settings).expect("json");
+            for key in ["providers", "baseUrl", "models"] {
+                assert!(value.get(key).is_none(), "{key} 不该再写出");
+            }
         }
-        let back: GatewaySettings = serde_json::from_value(value).expect("json");
-        assert_eq!(back, settings);
-    }
-
-    /// 已经是新格式时，残留的旧平铺字段不能再造出一家来
-    #[test]
-    fn legacy_fields_are_ignored_once_providers_exist() {
-        let settings: GatewaySettings = serde_json::from_value(json!({
-            "providers": [{"id": "wecode", "name": "WeCode", "baseUrl": "https://a.example"}],
-            "baseUrl": "https://stale.example",
-            "models": [{"id": "stale"}]
-        }))
-        .expect("json");
-        assert_eq!(settings.providers.len(), 1);
-        assert_eq!(settings.providers[0].id, "wecode");
-        assert_eq!(settings.providers[0].protocol(), "chat");
     }
 
     #[test]
     fn partial_json_fills_defaults_and_zero_port_means_default() {
         let settings: GatewaySettings = serde_json::from_str(r#"{"port":0}"#).expect("json");
         assert_eq!(settings.port, DEFAULT_PORT);
-        assert!(settings.providers.is_empty());
         assert_eq!(settings.prev_model, None);
         assert!(!settings.had_prev_model);
         assert_eq!(settings, GatewaySettings::default());
@@ -1672,10 +966,6 @@ mod tests {
         let store = Store::new(tree.root().join("data/Sophia"));
         let settings = Settings {
             codex_gateway: GatewaySettings {
-                providers: vec![
-                    provider("wecode", vec![saved("kimi-k3", true)]),
-                    provider("other", vec![saved("kimi-k3", false)]),
-                ],
                 published_slugs: vec!["wecode-kimi-k3".into()],
                 had_prev_model: true,
                 ..GatewaySettings::default()

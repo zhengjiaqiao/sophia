@@ -1,156 +1,52 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { api } from "../api.ts";
 import { t } from "../i18n.ts";
 import { parseBackendError } from "../backendError.ts";
-import { routerTodo, routerUnavailable } from "../modelsView.ts";
-import type { GatewayAgent, GatewayState, GatewayUnreadable } from "../types.ts";
+import { PORT_FIRST, routerTodo, routerUnavailable } from "../modelsView.ts";
+import { PickModels } from "../PickModels.tsx";
+import { pickButtonLabel, pickOptimistic, reorderOptimistic, unpicksLast } from "../pickView.ts";
+import { agentGateway, withAgentGateway } from "../types.ts";
+import type { GatewayAgent, GatewayState, GatewayUnreadable, ModelRef } from "../types.ts";
 import { copyDetails } from "../diagnostics.ts";
+import { HINTS, useHint } from "../hints.ts";
 import {
   AgentIcon,
+  Button,
   Empty,
+  IconChevronDown,
   NoticePanel,
   PageHead,
   PageTitle,
-  PushedPage,
-  Section,
-  usePushedPage,
 } from "../ui/index.ts";
-import type { PushedPageState } from "../ui/index.ts";
-import { requestLeave } from "./leaveGuard.ts";
-import { useMenuFlag, usePageCommand } from "./menuBus.ts";
+import { ProvidersPage } from "../ProvidersPage.tsx";
 import {
   modelsNameOf,
   pageSections,
   type AgentEntry,
-  type AgentSection,
   type AgentSectionProps,
   type AgentState,
 } from "./agentRegistry.ts";
 import "./ModelsPage.css";
 
-/// 模型页（spec 2026-09-29 R41 R42；DESIGN「### 模型」）：两层——`模型` 是一张 agent 列表，点一行推入这一家的页。
+/// 模型页（#259，ADR 0003，画板 9UGdeLt4rvg2dm8SpStvHo 第 1、1′ 屏；DESIGN「### 模型」）：**一层**——一个 agent 一行，
+/// 没有二级页。只列装了的、能接第三方模型的 agent（注册表的节级 `available`，不看设置）。
 ///
-/// **列表页**（这一页）：页面头只有页面名 `模型`（与侧栏同名）；「路由没在跑」挂在页面头下、列表之上（影响每一家，全局的事放全局）；
-/// 一家一行：16 图标 + 8 + 名字，第二行一句现状（注册表 `listRow.status`），右端控件列（注册表 `listRow.Controls`：
-/// 条件键 + 12 + 开关；拨了就写、不确认，禁用时按下即说原因）。**行尾不加 `›`**（那是网关行、表格行的拉手）；
-/// 点整行（开关与键之外）推入这一家的页（`PushedPage`），返回时焦点还给这一行；推入状态只在这一页里，不进 `Nav`。
-/// 控件没写成时，这一行下出行内灰面板（控件经 `onNotice` 交过来）。
+/// - 页面头：`模型`（与侧栏同名）+ 右端 `模型提供商`（推入全局提供商页）。读不到状态、路由没在跑、另一个 Sophia 在跑这类
+///   影响每一家的灰面板挂在页面头下、列表之上
+/// - 一行：16 图标 + 8 + 名字；第二行按提供商的计数（`官方 2 · Kimi 2 · DeepSeek 1`，注册表 `listRow.status`），
+///   后面接一句灰字（开着时的代价、换了端口，`listRow.note`）；右端 `已选 N 个模型 ▾`（一个没选 `选模型 ▾`）打开
+///   选模型浮层（PickModels），再后面是条件键（`重启生效` …）与开关（`listRow.Controls`）
+/// - 行下：待办条（接管、重新写入，`listRow.Todos`）与没写成的灰面板（控件经 `onNotice` 交过来）
+/// - 勾选与排序在浮层里：先画成做成之后的样子，写盘在后台；没成退回后端给的状态、行下说原因。
+///   开着时取消最后一个第三方模型＝关掉这一家（同今天的规则，不确认）
 ///
-/// **各家的页**（注册表节的 `Component`）：用这里导出的 `AgentPage` 画推入页的外框——页面头只有 `←` + 这一家的名字（Claude 是 `Claude Desktop`），
-/// 下一行是能力行（能力名 + 12 + 开关 + 12 + 条件键）。
-/// 哪个 agent、排什么顺序全由注册表给，这一页不认得具体 agent。
-///
-/// 没有 `listRow` 的页内节（以后别的能力）不进列表，照旧在这一页里铺成一节。
-/// 整页限宽 776、左沿＝机面内左沿（App.css `.agent-page`）
+/// 整页限宽 776、左沿＝机面内左沿（App.css `.agent-page`）。
 /// `loading`：还没问出后端支不支持第三方模型（上次停在这一页、刚打开时）——出忙碌空态，不留一张只有标题的空页
 
-// ===== 推入页的外框：各家的页用它（Codex：ModelsTab；Claude：ClaudeModelsPage） =====
-
-interface AgentPageContextValue {
-  /// 返回（`←`、Esc、⌘[ 同一条路；先经「离开前询问」，表单有没保存的改动时就地问完再走）
-  page: PushedPageState;
-  /// 挂到机面上、盖住列表页；不给（测试、样张）就地画
-  host?: () => Element | null;
-  covers?: () => Element | null;
-  /// 注册表里某一家在模型页里的显示名（`Codex` / `Claude Desktop`）：网关区块写「也加到 Claude Desktop」用；那一家此刻不在列表里为 null
-  nameOf: (agent: GatewayAgent) => string | null;
-}
-
-const STANDALONE: AgentPageContextValue = {
-  page: { leaving: false, leave: () => undefined },
-  nameOf: () => null,
-};
-
-const AgentPageContext = createContext<AgentPageContextValue>(STANDALONE);
-
-/// 另一家的显示名（注册表给，组件不写死）：各家的页交给网关区块的 `otherName`
-export function useAgentName(agent: GatewayAgent): string | null {
-  return useContext(AgentPageContext).nameOf(agent);
-}
-
-export interface AgentPageProps {
-  /// 页面名＝这一家在模型页里的名字，原样：`Codex`、`Claude Desktop`
-  title: string;
-  /// 页面头下能力行的名字：`第三方模型`（两家共用 modelsView `modelsCapability()`）。不给就没有能力行（读状态时）
-  capability?: string;
-  /// 能力行里紧跟能力名（12）的开关
-  control?: ReactNode;
-  /// 开关右边 12 的条件键（`重启生效` / `启动 Codex` / `打开 Claude` …，同一位一次只出一颗）
-  actions?: ReactNode;
-  /// 此刻 Esc 归不归这一页（确认框开着时给 false：Esc 只取消确认，不返回）
-  escape?: boolean;
-  /// 页面头下、能力行之上（Codex 的新手提示条：DESIGN「页面头下、「第三方模型」节上方」）
-  lead?: ReactNode;
-  children?: ReactNode;
-}
-
-/// 各家的页的推入页外框（DESIGN「每家的页（推入页，共同骨架）」，2026-09-30）：页面头只写是哪一家——`←`（图标键 28，
-/// 等于 Esc）+ 10 + `Codex` / `Claude Desktop`（`title` 20 / 700），不放控件。页面头下 12 一行能力行，回到「节头」的排法、
-/// 与托盘那一行同形：能力名（`head` 16 / 600）+ 12 + 开关 + 12 + 条件键（`Section` 的节头）；页里的内容接在它下面。
-/// 内容在页面头下自己滚动、限宽 776。确认框要挂到 body 上（推入页带着 transform，见 ModelsGateways `bodyLayer`）
-export function AgentPage({
-  title,
-  capability,
-  control,
-  actions,
-  escape = true,
-  lead,
-  children,
-}: AgentPageProps) {
-  const { page, host, covers } = useContext(AgentPageContext);
-  return (
-    <PushedPage {...page} title={title} host={host} covers={covers} escape={escape}>
-      <div className="models-agent">
-        {lead}
-        {capability !== undefined ? (
-          <div className="models-agent__cap">
-            <Section title={capability} control={control} actions={actions} />
-          </div>
-        ) : null}
-        {children}
-      </div>
-    </PushedPage>
-  );
-}
-
-/// 推入着的那一家：返回的计时、菜单「返回」、给各家的页的外框上下文
-function PushedAgent({
-  section,
-  entries,
-  onClose,
-  props,
-}: {
-  section: AgentSection;
-  entries: ReadonlyArray<AgentEntry>;
-  onClose: () => void;
-  props: AgentSectionProps;
-}) {
-  const pushed = usePushedPage(onClose);
-  // 返回也是离开这一页：表单有没保存的改动时先就地问（leaveGuard），问完再滑回
-  const leave = () => requestLeave(pushed.leave);
-  usePageCommand("back", leave);
-  useMenuFlag("back", !pushed.leaving);
-  const value: AgentPageContextValue = {
-    page: { leaving: pushed.leaving, leave },
-    host: () => document.querySelector(".face"),
-    covers: () => document.querySelector(".face__scroll"),
-    nameOf: (agent) => {
-      const found = entries.find((e) => e.gateway === agent);
-      return found ? modelsNameOf(found) : null;
-    },
-  };
-  const Component = section.Component!;
-  return (
-    <AgentPageContext.Provider value={value}>
-      <Component {...props} />
-    </AgentPageContext.Provider>
-  );
-}
-
-// ===== 列表页 =====
-
 const describeError = (error: unknown): string => parseBackendError(String(error)).message;
+
+// ===== 页面头下的灰面板 =====
 
 /// 读不到第三方模型的状态（spec 2026-10-04-local-diagnostics R11，画板 AuPbAQHePv3L1U3g1PAtH8）：页面头下一块灰面板
 /// `读不到第三方模型的状态 · <文件> <原因>`，键按种类给往前走的路，都带 `详情`（原文在浮层里）——
@@ -218,23 +114,29 @@ export function ModelsPage({
   ...props
 }: {
   entries: ReadonlyArray<AgentEntry>;
-  /// 与侧栏、托盘同一种只读状态：节级可用据它判断（列表行的现状句、开关也读它）
+  /// 与侧栏、托盘同一种只读状态：节级可用据它判断（行的现状句、开关也读它）
   state: AgentState;
   loading?: boolean;
 } & AgentSectionProps) {
   const { onGatewayState } = props;
-  /// 推入着的那一家（`entry.id`）；推入状态不进 Nav
-  const [pushed, setPushed] = useState<string | null>(null);
-  /// 各行下的行内灰面板（控件没写成）
+  /// 模型提供商页推入着没有（页面头 `模型提供商`）
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const providersKey = useRef<HTMLSpanElement>(null);
+  /// 选模型浮层开在哪一行、挂在哪颗键上
+  const [picking, setPicking] = useState<{ id: string; trigger: HTMLElement } | null>(null);
+  const pickKeys = useRef(new Map<string, HTMLSpanElement>());
+  /// 各行下的行内灰面板（控件、勾选没写成）
   const [notices, setNotices] = useState<Record<string, ReactNode>>({});
   /// 启动时的自愈试过了没有：试过仍没起来才出「路由没在跑」
   const [healed, setHealed] = useState(false);
   const [routerFailure, setRouterFailure] = useState<string | null>(null);
   const [restartingRouter, setRestartingRouter] = useState(false);
-  const opens = useRef(new Map<string, HTMLButtonElement>());
   const mounted = useRef(true);
+  /// 最新的模型状态：连着勾几下时，每一下都在上一下乐观更新之后的样子上改
+  const latest = useRef(state.gateway);
+  latest.current = state.gateway;
 
-  // 挂载：路由没在跑就先自愈一次（重启路由），还不行才让待办条出来（同各家的页）
+  // 挂载：路由没在跑就先自愈一次（重启路由），还不行才让待办条出来
   useEffect(() => {
     mounted.current = true;
     void (async () => {
@@ -261,6 +163,14 @@ export function ModelsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const setNotice = (id: string, next: ReactNode | null) =>
+    setNotices((prev) => {
+      const copy = { ...prev };
+      if (next === null) delete copy[id];
+      else copy[id] = next;
+      return copy;
+    });
+
   const restartRouter = async () => {
     setRestartingRouter(true);
     try {
@@ -275,7 +185,101 @@ export function ModelsPage({
     }
   };
 
-  /// 有列表行的节进列表；没有的照旧铺在这一页里
+  /// 浮层里勾上 / 取消一个：先画成做成之后的样子（开着时取消最后一个第三方模型，开关一并画成关），再写
+  const pick = async (
+    entry: AgentEntry,
+    agent: GatewayAgent,
+    ref: ModelRef,
+    on: boolean,
+    shown: { displayName: string; providerName: string },
+  ) => {
+    const gateway = latest.current;
+    const view = gateway === null ? null : agentGateway(gateway, agent);
+    if (gateway === null || view === null) return;
+    setNotice(entry.id, null);
+    const turnsOff = !on && view.enabled && unpicksLast(view.models, ref);
+    const optimistic = withAgentGateway(gateway, {
+      ...view,
+      enabled: turnsOff ? false : view.enabled,
+      models: pickOptimistic(view.models, ref, on, shown),
+    });
+    latest.current = optimistic;
+    onGatewayState(optimistic);
+    try {
+      const next = await api.gatewayPick(agent, ref, on);
+      if (mounted.current) onGatewayState(next);
+    } catch (error) {
+      try {
+        const actual = await api.gatewayState();
+        if (mounted.current) onGatewayState(actual);
+      } catch {
+        // 读不到就停在乐观的样子上；下一次轻查会改正
+      }
+      if (!mounted.current) return;
+      setNotice(
+        entry.id,
+        <NoticePanel
+          message={
+            on
+              ? t("models.pick.failed", { model: shown.displayName })
+              : t("models.pick.unpickFailed", { model: shown.displayName })
+          }
+          reason={describeError(error)}
+          action={{
+            label: t("models.notice.retry"),
+            onClick: () => void pick(entry, agent, ref, on, shown),
+          }}
+          onClose={() => setNotice(entry.id, null)}
+        />,
+      );
+    }
+  };
+
+  /// 「已选」排序（#265）：`order` 给了就先画成新顺序再写（拖动、⌥↑ / ⌥↓）；不给是 `恢复默认顺序`，
+  /// 默认顺序要按启用先后排、只有后端知道，等它回来再画。没成退回后端给的状态、行下说原因
+  const reorder = async (entry: AgentEntry, agent: GatewayAgent, order: ModelRef[] | null) => {
+    const gateway = latest.current;
+    const view = gateway === null ? null : agentGateway(gateway, agent);
+    if (gateway === null || view === null) return;
+    setNotice(entry.id, null);
+    if (order !== null) {
+      const optimistic = withAgentGateway(gateway, {
+        ...view,
+        models: reorderOptimistic(view.models, order),
+      });
+      latest.current = optimistic;
+      onGatewayState(optimistic);
+    }
+    try {
+      const next =
+        order === null
+          ? await api.gatewayRestoreOrder(agent)
+          : await api.gatewayReorderPicks(agent, order);
+      if (mounted.current) onGatewayState(next);
+    } catch (error) {
+      try {
+        const actual = await api.gatewayState();
+        if (mounted.current) onGatewayState(actual);
+      } catch {
+        // 读不到就停在乐观的样子上；下一次轻查会改正
+      }
+      if (!mounted.current) return;
+      setNotice(
+        entry.id,
+        <NoticePanel
+          message={t("models.pick.reorderFailed")}
+          reason={describeError(error)}
+          action={{
+            label: t("models.notice.retry"),
+            onClick: () => void reorder(entry, agent, order),
+          }}
+          onClose={() => setNotice(entry.id, null)}
+        />,
+      );
+    }
+  };
+
+  /// 进模型页的行（第三方模型那一节带 `listRow`）；没有 `listRow` 的节照旧铺成一节
   const listed = entries.flatMap((entry) =>
     pageSections(entry, state)
       .filter((section) => section.listRow !== undefined)
@@ -283,23 +287,57 @@ export function ModelsPage({
   );
   const inline = entries.flatMap((entry) =>
     pageSections(entry, state)
-      .filter((section) => section.listRow === undefined)
+      .filter((section) => section.listRow === undefined && section.Component !== undefined)
       .map((section) => ({ entry, section })),
   );
-  const top = listed.find(({ entry }) => entry.id === pushed) ?? null;
-
-  /// 点整行推入：先把焦点放在这一行的名字上，返回时推入页把焦点还给它（程序放的焦点不画框，见 inputModality）
-  const push = (id: string) => {
-    opens.current.get(id)?.focus({ preventScroll: true });
-    setPushed(id);
-  };
 
   const router = state.gateway === null ? null : routerTodo(state.gateway, healed, routerFailure);
   const unreadable = state.gateway?.unreadable ?? state.gatewayError ?? null;
 
+  // 新手提示 `first-models`（DESIGN「新手提示条」）：列着任意一家、状态读回来（连同启动时的自愈）之后出，
+  // 页面头下、列表之上。让位：壳的错误横幅、页面头下的灰面板、各行下的灰面板。打开过任意一家的第三方模型就算学会
+  const modelsHint = useHint("first-models", {
+    eligible: listed.length > 0 && healed,
+    blocked:
+      Boolean(props.banner) ||
+      router !== null ||
+      unreadable !== null ||
+      Object.keys(notices).length > 0,
+  });
+  const gateway = state.gateway;
+  const anyOn =
+    gateway !== null &&
+    listed.some(
+      ({ entry }) => entry.gateway && agentGateway(gateway, entry.gateway)?.enabled === true,
+    );
+  const learnHint = modelsHint.learned;
+  useEffect(() => {
+    if (anyOn) learnHint();
+    // learned 每次渲染是新函数，只看开没开
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyOn]);
+  const pickingRow = picking === null ? null : listed.find(({ entry }) => entry.id === picking.id);
+  const pickingView =
+    pickingRow && pickingRow.entry.gateway && state.gateway
+      ? agentGateway(state.gateway, pickingRow.entry.gateway)
+      : null;
+
+  const openProviders = () => {
+    setPicking(null);
+    setProvidersOpen(true);
+  };
+
   return (
     <div className="agent-page">
-      <PageHead lead={<PageTitle>{t("models.page.title")}</PageTitle>}>
+      <PageHead
+        lead={<PageTitle>{t("models.page.title")}</PageTitle>}
+        actions={
+          // 全局模型提供商（ADR 0003）：所有 agent 共用一份，在推入的一页里加、改、启用模型
+          <span ref={providersKey}>
+            <Button onClick={() => setProvidersOpen(true)}>{t("models.providers.title")}</Button>
+          </span>
+        }
+      >
         {loading ? <Empty description={t("models.page.loading")} busy art="scanning" /> : null}
         {unreadable ? (
           <div className="models-list__todo">
@@ -326,60 +364,90 @@ export function ModelsPage({
             />
           </div>
         ) : null}
+        <div className="models-list__hint">
+          <NoticePanel
+            scope="section"
+            mark={false}
+            open={modelsHint.visible}
+            onClose={modelsHint.dismiss}
+            flush
+            message={HINTS["first-models"]({ agents: [], skills: 0 })}
+          />
+        </div>
+        {!loading && state.gateway !== null && listed.length === 0 ? (
+          <Empty description={t("models.row.empty")} />
+        ) : null}
         {listed.length > 0 ? (
           <div className="models-list">
             {listed.map(({ entry, section }) => {
               const row = section.listRow!;
               const status = row.status(state);
+              const note = row.note?.(state) ?? null;
               const Controls = row.Controls;
+              const Todos = row.Todos;
               const notice = notices[entry.id];
+              const name = modelsNameOf(entry);
+              const view =
+                entry.gateway && state.gateway ? agentGateway(state.gateway, entry.gateway) : null;
+              const pickKey =
+                view !== null ? (
+                  <span
+                    className="models-row__pick"
+                    ref={(el) => {
+                      if (el) pickKeys.current.set(entry.id, el);
+                      else pickKeys.current.delete(entry.id);
+                    }}
+                  >
+                    <Button
+                      size="compact"
+                      ariaExpanded={picking?.id === entry.id}
+                      ariaHasPopup="dialog"
+                      onClick={() => {
+                        const trigger = pickKeys.current.get(entry.id);
+                        if (trigger) setPicking({ id: entry.id, trigger });
+                      }}
+                    >
+                      {pickButtonLabel(view.models)}
+                      <IconChevronDown />
+                    </Button>
+                  </span>
+                ) : null;
+              const rowProps = {
+                ...props,
+                agent: entry.id,
+                state,
+                pick: pickKey,
+                onNotice: (next: ReactNode | null) => setNotice(entry.id, next),
+              };
               return (
                 <div
                   key={`${entry.id}:${section.id}`}
                   className="models-row"
                   role="group"
-                  aria-label={`${modelsNameOf(entry)} · ${section.title}`}
+                  aria-label={`${name} · ${section.title}`}
                 >
-                  <div
-                    className="models-row__main"
-                    onClick={(event) => {
-                      // 右端控件列里的点击各有各的事
-                      if ((event.target as Element).closest(".models-row__end")) return;
-                      push(entry.id);
-                    }}
-                  >
+                  <div className="models-row__main">
                     <span className="models-row__icon">
-                      <AgentIcon id={entry.id} name={modelsNameOf(entry)} />
+                      <AgentIcon id={entry.id} name={name} />
                     </span>
                     <span className="models-row__content">
-                      <button
-                        type="button"
-                        className="models-row__open"
-                        ref={(el) => {
-                          if (el) opens.current.set(entry.id, el);
-                          else opens.current.delete(entry.id);
-                        }}
-                      >
-                        {modelsNameOf(entry)}
-                      </button>
-                      {status ? <span className="models-row__sub">{status}</span> : null}
+                      <span className="models-row__name">{name}</span>
+                      {status || note ? (
+                        <span className="models-row__sub">
+                          {status}
+                          {note ? <span className="models-row__note">{note}</span> : null}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="models-row__end">
-                      <Controls
-                        {...props}
-                        agent={entry.id}
-                        state={state}
-                        onNotice={(next) =>
-                          setNotices((prev) => {
-                            const copy = { ...prev };
-                            if (next === null) delete copy[entry.id];
-                            else copy[entry.id] = next;
-                            return copy;
-                          })
-                        }
-                      />
+                      <Controls {...rowProps} />
                     </span>
                   </div>
+                  {Todos ? (
+                    <div className="models-row__todos">
+                      <Todos {...rowProps} />
+                    </div>
+                  ) : null}
                   {notice ? <div className="models-row__notice">{notice}</div> : null}
                 </div>
               );
@@ -399,13 +467,41 @@ export function ModelsPage({
           );
         })}
       </PageHead>
-      {top ? (
-        <PushedAgent
-          key={top.entry.id}
-          section={top.section}
-          entries={entries}
-          onClose={() => setPushed(null)}
-          props={props}
+      {picking !== null && pickingRow && pickingView !== null && pickingRow.entry.gateway ? (
+        <PickModels
+          agent={pickingRow.entry.gateway}
+          name={modelsNameOf(pickingRow.entry)}
+          models={pickingView.models}
+          trigger={picking.trigger}
+          onPick={(ref, on, shown) =>
+            void pick(pickingRow.entry, pickingRow.entry.gateway!, ref, on, shown)
+          }
+          onReorder={(order) => void reorder(pickingRow.entry, pickingRow.entry.gateway!, order)}
+          onRestoreOrder={() => void reorder(pickingRow.entry, pickingRow.entry.gateway!, null)}
+          onManage={openProviders}
+          onClose={() => setPicking(null)}
+        />
+      ) : null}
+      {providersOpen ? (
+        <ProvidersPage
+          port={state.gateway?.router.port ?? PORT_FIRST}
+          nameOf={(agent) => {
+            const found = entries.find((e) => e.gateway === agent || e.id === agent);
+            return found ? modelsNameOf(found) : agent;
+          }}
+          host={() => document.querySelector(".face")}
+          covers={() => document.querySelector(".face__scroll")}
+          onClose={() => {
+            setProvidersOpen(false);
+            providersKey.current?.querySelector("button")?.focus({ preventScroll: true });
+            // 提供商页里的改动（取消启用、删一家、改地址）会改各家的「已选」：回来时重读一次
+            void api
+              .gatewayState()
+              .then((next) => {
+                if (mounted.current) onGatewayState(next);
+              })
+              .catch(() => undefined);
+          }}
         />
       ) : null}
     </div>

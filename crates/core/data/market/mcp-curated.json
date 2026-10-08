@@ -1,12 +1,16 @@
 {
   "attribution": "起点取自一份 MIT 许可的精选 MCP 清单，出处与许可见仓库根 NOTICE。本文件逐条对照各家官方 README / 文档核实后改写。",
-  "note": "MCP 精选（spec R7）。definition 值里的 ${KEY} 是要填的项，与 fields 的 key 一一对应。signIn 为 true 的是远程服务器，首次使用时由 agent 在浏览器里登录（OAuth），不用填值。fields 的 description 写成「标签，怎么取得」：安装页把全角逗号前当输入框的标签与禁用原因（请填写…），逗号后常显在输入框下。",
+  "note": "MCP 精选（spec R7）。definition 值里的 ${KEY} 是要填的项，与 fields 的 key 一一对应。signIn 为 true 的是远程服务器，首次使用时由 agent 在浏览器里登录（OAuth），不用填值。description 与 fields 的 label（输入框的标签、禁用原因里的那个词）、help（怎么取得，常显在输入框下）按界面语言各写一份：zh-Hans、zh-Hant、en（#305）；缺某种语言时的回退见 src/market/installView.ts 的 localText。",
   "verifiedAt": "2026-09-27",
   "servers": [
     {
       "name": "context7",
       "publisher": "Upstash",
-      "description": "把任意库的最新文档与示例代码取进上下文",
+      "description": {
+        "zh-Hans": "把任意库的最新文档与示例代码取进上下文",
+        "zh-Hant": "把任何函式庫的最新文件與範例程式碼帶進上下文",
+        "en": "Pulls up-to-date docs and code examples for any library into context"
+      },
       "definition": {
         "name": "context7",
         "transport": "http",
@@ -19,7 +23,11 @@
     {
       "name": "playwright",
       "publisher": "Microsoft",
-      "description": "驱动真实浏览器：打开网页、点击、输入，按无障碍树读页面",
+      "description": {
+        "zh-Hans": "驱动真实浏览器：打开网页、点击、输入，按无障碍树读页面",
+        "zh-Hant": "操控真實的瀏覽器：開啟網頁、點按、輸入，依無障礙樹讀取頁面",
+        "en": "Drives a real browser: opens pages, clicks, types, and reads pages through the accessibility tree"
+      },
       "definition": {
         "name": "playwright",
         "transport": "stdio",
@@ -36,7 +44,11 @@
     {
       "name": "chrome-devtools",
       "publisher": "Google",
-      "description": "操控并检查正在运行的 Chrome：控制台、网络、性能追踪与截图",
+      "description": {
+        "zh-Hans": "操控并检查正在运行的 Chrome：控制台、网络、性能追踪与截图",
+        "zh-Hant": "操控並檢查執行中的 Chrome：主控台、網路、效能追蹤與截圖",
+        "en": "Controls and inspects a running Chrome: console, network, performance traces, and screenshots"
+      },
       "definition": {
         "name": "chrome-devtools",
         "transport": "stdio",
@@ -53,7 +65,11 @@
     {
       "name": "github",
       "publisher": "GitHub",
-      "description": "GitHub 上的仓库、议题、拉取请求、Actions 与代码搜索",
+      "description": {
+        "zh-Hans": "GitHub 上的仓库、议题、拉取请求、Actions 与代码搜索",
+        "zh-Hant": "GitHub 上的儲存庫、議題、提取要求、Actions 與程式碼搜尋",
+        "en": "Repositories, issues, pull requests, Actions, and code search on GitHub"
+      },
       "definition": {
         "name": "github",
         "transport": "http",
@@ -68,7 +84,16 @@
           "kind": "header",
           "required": true,
           "secret": true,
-          "description": "GitHub 访问令牌，在 github.com/settings/personal-access-tokens 生成"
+          "label": {
+            "zh-Hans": "GitHub 访问令牌",
+            "zh-Hant": "GitHub 存取權杖",
+            "en": "GitHub access token"
+          },
+          "help": {
+            "zh-Hans": "在 github.com/settings/personal-access-tokens 生成",
+            "zh-Hant": "在 github.com/settings/personal-access-tokens 產生",
+            "en": "Generate one at github.com/settings/personal-access-tokens"
+          }
         }
       ],
       "homepage": "https://github.com/github/github-mcp-server",
@@ -77,7 +102,11 @@
     {
       "name": "deepwiki",
       "publisher": "Cognition",
-      "description": "就任意公开 GitHub 仓库提问，读它自动生成的 wiki",
+      "description": {
+        "zh-Hans": "就任意公开 GitHub 仓库提问，读它自动生成的 wiki",
+        "zh-Hant": "針對任何公開的 GitHub 儲存庫提問，閱讀它自動產生的 wiki",
+        "en": "Answers questions about any public GitHub repository and reads its auto-generated wiki"
+      },
       "definition": {
         "name": "deepwiki",
         "transport": "http",
@@ -90,7 +119,11 @@
     {
       "name": "exa",
       "publisher": "Exa",
-      "description": "为 agent 做的网页搜索与代码搜索，返回干净的正文",
+      "description": {
+        "zh-Hans": "为 agent 做的网页搜索与代码搜索，返回干净的正文",
+        "zh-Hant": "為 agent 打造的網頁搜尋與程式碼搜尋，傳回乾淨的內文",
+        "en": "Web and code search built for agents, returning clean text"
+      },
       "definition": {
         "name": "exa",
         "transport": "http",
@@ -103,7 +136,11 @@
     {
       "name": "filesystem",
       "publisher": "Model Context Protocol",
-      "description": "读写、搜索本机文件，只限你允许的文件夹",
+      "description": {
+        "zh-Hans": "读写、搜索本机文件，只限你允许的文件夹",
+        "zh-Hant": "讀寫、搜尋本機檔案，只限你允許的資料夾",
+        "en": "Reads, writes, and searches local files, limited to the folders you allow"
+      },
       "definition": {
         "name": "filesystem",
         "transport": "stdio",
@@ -120,7 +157,16 @@
           "kind": "arg",
           "required": true,
           "secret": false,
-          "description": "允许它读写的文件夹，写绝对路径"
+          "label": {
+            "zh-Hans": "允许它读写的文件夹",
+            "zh-Hant": "允許它讀寫的資料夾",
+            "en": "Folder it can read and write"
+          },
+          "help": {
+            "zh-Hans": "写绝对路径",
+            "zh-Hant": "寫絕對路徑",
+            "en": "Use an absolute path"
+          }
         }
       ],
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
@@ -129,7 +175,11 @@
     {
       "name": "fetch",
       "publisher": "Model Context Protocol",
-      "description": "抓取网页并转成 Markdown（需要本机装有 uv）",
+      "description": {
+        "zh-Hans": "抓取网页并转成 Markdown（需要本机装有 uv）",
+        "zh-Hant": "擷取網頁並轉成 Markdown（本機需要安裝 uv）",
+        "en": "Fetches web pages and converts them to Markdown (requires uv on this computer)"
+      },
       "definition": {
         "name": "fetch",
         "transport": "stdio",
@@ -145,7 +195,11 @@
     {
       "name": "memory",
       "publisher": "Model Context Protocol",
-      "description": "一张跨对话保留的知识图谱，让 agent 记住事情",
+      "description": {
+        "zh-Hans": "一张跨对话保留的知识图谱，让 agent 记住事情",
+        "zh-Hant": "一張跨對話保留的知識圖譜，讓 agent 記住事情",
+        "en": "A knowledge graph kept across conversations, so the agent remembers things"
+      },
       "definition": {
         "name": "memory",
         "transport": "stdio",
@@ -162,7 +216,11 @@
     {
       "name": "sequential-thinking",
       "publisher": "Model Context Protocol",
-      "description": "一步步想清楚问题，可以回头修正、分岔",
+      "description": {
+        "zh-Hans": "一步步想清楚问题，可以回头修正、分岔",
+        "zh-Hant": "一步步把問題想清楚，可以回頭修正、分岔",
+        "en": "Thinks problems through step by step, revising and branching along the way"
+      },
       "definition": {
         "name": "sequential-thinking",
         "transport": "stdio",
@@ -179,7 +237,11 @@
     {
       "name": "git",
       "publisher": "Model Context Protocol",
-      "description": "读取、搜索与修改本地 Git 仓库",
+      "description": {
+        "zh-Hans": "读取、搜索与修改本地 Git 仓库",
+        "zh-Hant": "讀取、搜尋與修改本機的 Git 儲存庫",
+        "en": "Reads, searches, and modifies local Git repositories"
+      },
       "definition": {
         "name": "git",
         "transport": "stdio",
@@ -195,7 +257,11 @@
     {
       "name": "time",
       "publisher": "Model Context Protocol",
-      "description": "查询各时区的当前时间，在时区之间转换时间",
+      "description": {
+        "zh-Hans": "查询各时区的当前时间，在时区之间转换时间",
+        "zh-Hant": "查詢各時區的目前時間，在時區之間換算時間",
+        "en": "Gets the current time in any time zone and converts times between zones"
+      },
       "definition": {
         "name": "time",
         "transport": "stdio",
@@ -211,7 +277,11 @@
     {
       "name": "sentry",
       "publisher": "Sentry",
-      "description": "Sentry 里的问题、错误与追踪，以及 Seer 的分析",
+      "description": {
+        "zh-Hans": "Sentry 里的问题、错误与追踪，以及 Seer 的分析",
+        "zh-Hant": "Sentry 裡的問題、錯誤與追蹤，以及 Seer 的分析",
+        "en": "Issues, errors, and traces in Sentry, plus Seer analysis"
+      },
       "definition": {
         "name": "sentry",
         "transport": "http",
@@ -225,7 +295,11 @@
     {
       "name": "linear",
       "publisher": "Linear",
-      "description": "查找、创建、更新 Linear 的议题、项目与评论",
+      "description": {
+        "zh-Hans": "查找、创建、更新 Linear 的议题、项目与评论",
+        "zh-Hant": "尋找、建立、更新 Linear 的議題、專案與留言",
+        "en": "Finds, creates, and updates Linear issues, projects, and comments"
+      },
       "definition": {
         "name": "linear",
         "transport": "http",
@@ -239,7 +313,11 @@
     {
       "name": "notion",
       "publisher": "Notion",
-      "description": "搜索、读写 Notion 工作区里的页面与数据库",
+      "description": {
+        "zh-Hans": "搜索、读写 Notion 工作区里的页面与数据库",
+        "zh-Hant": "搜尋、讀寫 Notion 工作區裡的頁面與資料庫",
+        "en": "Searches, reads, and writes pages and databases in a Notion workspace"
+      },
       "definition": {
         "name": "notion",
         "transport": "http",
@@ -253,7 +331,11 @@
     {
       "name": "atlassian",
       "publisher": "Atlassian",
-      "description": "Atlassian Cloud 上的 Jira 议题与 Confluence 页面",
+      "description": {
+        "zh-Hans": "Atlassian Cloud 上的 Jira 议题与 Confluence 页面",
+        "zh-Hant": "Atlassian Cloud 上的 Jira 議題與 Confluence 頁面",
+        "en": "Jira issues and Confluence pages on Atlassian Cloud"
+      },
       "definition": {
         "name": "atlassian",
         "transport": "http",
@@ -267,7 +349,11 @@
     {
       "name": "supabase",
       "publisher": "Supabase",
-      "description": "管理 Supabase 项目：表、SQL、迁移、日志与边缘函数",
+      "description": {
+        "zh-Hans": "管理 Supabase 项目：表、SQL、迁移、日志与边缘函数",
+        "zh-Hant": "管理 Supabase 專案：資料表、SQL、遷移、日誌與邊緣函式",
+        "en": "Manages Supabase projects: tables, SQL, migrations, logs, and Edge Functions"
+      },
       "definition": {
         "name": "supabase",
         "transport": "http",
@@ -281,7 +367,11 @@
     {
       "name": "stripe",
       "publisher": "Stripe",
-      "description": "Stripe 的客户、付款、订阅，以及 Stripe 文档",
+      "description": {
+        "zh-Hans": "Stripe 的客户、付款、订阅，以及 Stripe 文档",
+        "zh-Hant": "Stripe 的客戶、付款、訂閱，以及 Stripe 文件",
+        "en": "Stripe customers, payments, and subscriptions, plus the Stripe docs"
+      },
       "definition": {
         "name": "stripe",
         "transport": "http",
@@ -295,7 +385,11 @@
     {
       "name": "vercel",
       "publisher": "Vercel",
-      "description": "Vercel 上的项目、部署与日志，以及 Vercel 文档",
+      "description": {
+        "zh-Hans": "Vercel 上的项目、部署与日志，以及 Vercel 文档",
+        "zh-Hant": "Vercel 上的專案、部署與日誌，以及 Vercel 文件",
+        "en": "Projects, deployments, and logs on Vercel, plus the Vercel docs"
+      },
       "definition": {
         "name": "vercel",
         "transport": "http",
@@ -309,7 +403,11 @@
     {
       "name": "neon",
       "publisher": "Neon",
-      "description": "Neon 无服务器 Postgres：项目、分支与 SQL",
+      "description": {
+        "zh-Hans": "Neon 无服务器 Postgres：项目、分支与 SQL",
+        "zh-Hant": "Neon 無伺服器 Postgres：專案、分支與 SQL",
+        "en": "Neon serverless Postgres: projects, branches, and SQL"
+      },
       "definition": {
         "name": "neon",
         "transport": "http",
@@ -323,7 +421,11 @@
     {
       "name": "cloudflare-docs",
       "publisher": "Cloudflare",
-      "description": "搜索 Cloudflare 官方文档",
+      "description": {
+        "zh-Hans": "搜索 Cloudflare 官方文档",
+        "zh-Hant": "搜尋 Cloudflare 官方文件",
+        "en": "Searches the official Cloudflare docs"
+      },
       "definition": {
         "name": "cloudflare-docs",
         "transport": "http",
@@ -336,7 +438,11 @@
     {
       "name": "microsoft-learn",
       "publisher": "Microsoft",
-      "description": "微软与 Azure 的官方文档和示例代码",
+      "description": {
+        "zh-Hans": "微软与 Azure 的官方文档和示例代码",
+        "zh-Hant": "微軟與 Azure 的官方文件和範例程式碼",
+        "en": "Official Microsoft and Azure docs and code samples"
+      },
       "definition": {
         "name": "microsoft-learn",
         "transport": "http",
@@ -349,7 +455,11 @@
     {
       "name": "huggingface",
       "publisher": "Hugging Face",
-      "description": "搜索 Hugging Face 上的模型、数据集、Spaces 与论文",
+      "description": {
+        "zh-Hans": "搜索 Hugging Face 上的模型、数据集、Spaces 与论文",
+        "zh-Hant": "搜尋 Hugging Face 上的模型、資料集、Spaces 與論文",
+        "en": "Searches models, datasets, Spaces, and papers on Hugging Face"
+      },
       "definition": {
         "name": "huggingface",
         "transport": "http",
@@ -362,7 +472,11 @@
     {
       "name": "brave-search",
       "publisher": "Brave",
-      "description": "用 Brave 自己的索引搜网页、新闻、图片与本地信息",
+      "description": {
+        "zh-Hans": "用 Brave 自己的索引搜网页、新闻、图片与本地信息",
+        "zh-Hant": "用 Brave 自己的索引搜尋網頁、新聞、圖片與在地資訊",
+        "en": "Searches the web, news, images, and local results with Brave's own index"
+      },
       "definition": {
         "name": "brave-search",
         "transport": "stdio",
@@ -383,7 +497,16 @@
           "kind": "env",
           "required": true,
           "secret": true,
-          "description": "Brave Search API key，在 brave.com/search/api 申请"
+          "label": {
+            "zh-Hans": "Brave Search 密钥",
+            "zh-Hant": "Brave Search 金鑰",
+            "en": "Brave Search API key"
+          },
+          "help": {
+            "zh-Hans": "在 brave.com/search/api 申请",
+            "zh-Hant": "在 brave.com/search/api 申請",
+            "en": "Get one at brave.com/search/api"
+          }
         }
       ],
       "homepage": "https://github.com/brave/brave-search-mcp-server",
@@ -392,7 +515,11 @@
     {
       "name": "firecrawl",
       "publisher": "Firecrawl",
-      "description": "抓取、爬取与搜索网页，转成干净的 Markdown",
+      "description": {
+        "zh-Hans": "抓取、爬取与搜索网页，转成干净的 Markdown",
+        "zh-Hant": "擷取、爬取與搜尋網頁，轉成乾淨的 Markdown",
+        "en": "Scrapes, crawls, and searches web pages, returning clean Markdown"
+      },
       "definition": {
         "name": "firecrawl",
         "transport": "stdio",
@@ -411,7 +538,16 @@
           "kind": "env",
           "required": true,
           "secret": true,
-          "description": "Firecrawl API key，在 firecrawl.dev/app/api-keys 取"
+          "label": {
+            "zh-Hans": "Firecrawl 密钥",
+            "zh-Hant": "Firecrawl 金鑰",
+            "en": "Firecrawl API key"
+          },
+          "help": {
+            "zh-Hans": "在 firecrawl.dev/app/api-keys 取得",
+            "zh-Hant": "在 firecrawl.dev/app/api-keys 取得",
+            "en": "Get one at firecrawl.dev/app/api-keys"
+          }
         }
       ],
       "homepage": "https://github.com/firecrawl/firecrawl-mcp-server",
@@ -420,7 +556,11 @@
     {
       "name": "tavily",
       "publisher": "Tavily",
-      "description": "用 Tavily 搜索网页并提取正文",
+      "description": {
+        "zh-Hans": "用 Tavily 搜索网页并提取正文",
+        "zh-Hant": "用 Tavily 搜尋網頁並擷取內文",
+        "en": "Searches the web and extracts page content with Tavily"
+      },
       "definition": {
         "name": "tavily",
         "transport": "stdio",
@@ -439,7 +579,16 @@
           "kind": "env",
           "required": true,
           "secret": true,
-          "description": "Tavily API key，在 app.tavily.com 取"
+          "label": {
+            "zh-Hans": "Tavily 密钥",
+            "zh-Hant": "Tavily 金鑰",
+            "en": "Tavily API key"
+          },
+          "help": {
+            "zh-Hans": "在 app.tavily.com 取得",
+            "zh-Hant": "在 app.tavily.com 取得",
+            "en": "Get one at app.tavily.com"
+          }
         }
       ],
       "homepage": "https://github.com/tavily-ai/tavily-mcp",

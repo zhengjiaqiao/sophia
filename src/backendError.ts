@@ -36,6 +36,12 @@ export function parseBackendError(text: string, fallback?: string): ParsedBacken
   };
 }
 
+/// 抛出值里给人看的那一句：只给会自己消失的提示条、格子下的原因用（它们不放「!」，原文后端已记进日志）。
+/// 会留在页面上的（横幅、灰面板、行抽屉）不用它：用 `parseBackendError`，`detail` 进「!」。
+/// 没有前缀的（core 直接给的一句、还没改成两层的命令）原样返回；给了 `fallback` 时按 `parseBackendError` 换成它
+export const errorSentence = (error: unknown, fallback?: string): string =>
+  parseBackendError(String(error), fallback).message;
+
 /// 窗口顶上横幅（`App.tsx`）的一条故障：后端错误串，加上出错处给的失败句（错误串没有前缀时用）与一颗往前走的键
 export interface AppFault {
   text: string;
@@ -43,6 +49,12 @@ export interface AppFault {
   fallback?: string;
   /// `再试一次`：重做出错的那一次
   retry?: { label: string; onClick: () => void };
+}
+
+/// 前端自己说好一句、另有技术原文时交给横幅的那一条（撤销失败交给壳的横幅，#320）：一句给人看，原文进「!」。
+/// 原文是后端拆出来的 `[detail]`（已去隐私、不带 `[code]` 前缀），按 `parseBackendError` 的规矩整段进「!」、一句用 `fallback`
+export function sentenceFault(message: string, detail?: string): AppFault {
+  return detail === undefined ? { text: message } : { text: detail, fallback: message };
 }
 
 /// 横幅怎么画：一句、「!」里的原文、键

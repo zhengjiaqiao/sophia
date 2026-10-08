@@ -2,12 +2,13 @@
 /// tests/quit-view.test.ts 直接测。主窗口（窗口正中）与托盘面板（窄面板）同一套文案。
 ///
 /// 一律写 Codex（2026-10-03 产品负责人：退出确认框里写 Codex，不写桌面应用的名字 ChatGPT）
-import { t } from "./i18n.ts";
+import { listText, t } from "./i18n.ts";
 import type { QuitFailure, QuitPreview, QuitStep } from "./types.ts";
 
-/// 退出前要不要确认（R5）：Codex 正指着路由，或 Claude 处在 Sophia 写入的第三方模式。都没有就直接退出
+/// 退出前要不要确认（R5）：Codex 正指着路由，或 Claude 处在 Sophia 写入的第三方模式，或 WorkBuddy 里写着 Sophia 的模型
+///（#266）。都没有就直接退出
 export function quitNeedsConfirm(preview: QuitPreview): boolean {
-  return preview.codex || preview.claude;
+  return preview.codex || preview.claude || preview.workbuddy;
 }
 
 export interface QuitText {
@@ -15,14 +16,25 @@ export interface QuitText {
   body: string;
 }
 
-/// 确认框的标题与正文（R6）：两家 / 只 Codex / 只 Claude，终端里有交互式 Codex 时补一句
+/// 确认框的标题与正文（R6；走查 2026-10-07 改成两层）：一句合并主句点名接了第三方模型的几家
+///（按 Codex、Claude、WorkBuddy 的先后），后面只接有额外代价的——Codex、Claude 会马上重启；WorkBuddy 没有，不另写。
+/// 终端里有交互式 Codex 时再补一句
 export function quitConfirmText(preview: QuitPreview): QuitText {
-  const body =
+  const agents = [
+    preview.codex && "Codex",
+    preview.claude && "Claude",
+    preview.workbuddy && "WorkBuddy",
+  ].filter((name): name is string => typeof name === "string");
+  const main = t("shell.quit.body", { agents: listText(agents) });
+  const cost =
     preview.codex && preview.claude
-      ? t("shell.quit.bodyBoth")
+      ? t("shell.quit.restartBoth")
       : preview.codex
-        ? t("shell.quit.bodyCodex")
-        : t("shell.quit.bodyClaude");
+        ? t("shell.quit.restartCodex")
+        : preview.claude
+          ? t("shell.quit.restartClaude")
+          : null;
+  const body = cost === null ? main : t("shell.quit.withCost", { body: main, cost });
   return {
     title: t("shell.quit.title"),
     body: preview.codex && preview.codexTerminal ? t("shell.quit.withTerminal", { body }) : body,
@@ -36,8 +48,28 @@ export function quitBusyText(step: QuitStep): string {
     : t("shell.quit.restartingClaude");
 }
 
-/// 收尾里有没做成的（R9）：单键说明，后果与恢复办法；没有没做成的为 null
+/// 收尾里有没做成的（R9）：单键说明，后果与恢复办法；没有没做成的为 null。WorkBuddy 没拿掉的（#266）：只有它时
+/// 自成一段；和别家一起时标题照别家的，后果接在正文后面
 export function quitFailureText(failures: ReadonlyArray<QuitFailure>): QuitText | null {
+  const others = restartFailureText(failures);
+  if (!failures.some((f) => f.agent === "workbuddy")) return others;
+  if (others === null) {
+    return {
+      title: t("shell.quit.workbuddyFailedTitle"),
+      body: t("shell.quit.workbuddyFailedBody"),
+    };
+  }
+  return {
+    title: others.title,
+    body: t("shell.quit.alsoWorkBuddyFailed", {
+      body: others.body,
+      workbuddy: t("shell.quit.workbuddyFailedBody"),
+    }),
+  };
+}
+
+/// Codex、Claude 没做成的说明
+function restartFailureText(failures: ReadonlyArray<QuitFailure>): QuitText | null {
   const codex = failures.some((f) => f.agent === "codex");
   const claude = failures.some((f) => f.agent === "claude");
   if (codex && claude) {

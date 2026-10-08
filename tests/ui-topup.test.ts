@@ -56,7 +56,7 @@ test("Tooltip fit：shrink 按内容定宽、放不下收窄；grow 撑满余下
 test("页面不再为提示框另包一层、也不再覆盖 .ss-tipwrap", () => {
   for (const path of [
     "src/App.css",
-    "src/ModelsTab.css",
+    "src/shell/ModelsPage.css",
     "src/SourceRow.css",
     "src/Matrix.css",
     "src/pages/AddSourcePanel.css",
@@ -98,8 +98,8 @@ test("NoticePanel 进出：根上 data-hint 说展开没有（宿主据它让间
   );
   assert.doesNotMatch(read("src/App.css"), /ss-hint/);
   assert.match(
-    read("src/ModelsTab.tsx"),
-    /<NoticePanel\s+scope="section"\s+mark=\{false\}\s+open=\{codexHint\.visible\}\s+onClose=\{codexHint\.dismiss\}\s+flush/,
+    read("src/shell/ModelsPage.tsx"),
+    /<NoticePanel\s+scope="section"\s+mark=\{false\}\s+open=\{modelsHint\.visible\}\s+onClose=\{modelsHint\.dismiss\}\s+flush/,
   );
   assert.doesNotMatch(read("src/Matrix.tsx"), /hintOpen/);
   assert.doesNotMatch(read("src/DomainView.tsx"), /hintOpen/);

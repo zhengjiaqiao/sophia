@@ -1,10 +1,12 @@
 //! 把各模块串成“保存网关 / 选模型 / 启用 / 恢复 / 接管 / 查看状态”这几个动作，界面和命令行共用。
 //! 行为移植自 agents-manager 的 `internal/app`（Go，已在真实环境验证）。
 //!
-//! 两家（`Agent::Codex`、`Agent::Claude`）共用一个 `App`、一把锁、一个路由：路由的引用计数
-//! （任一家开着就留着，都关了才停，spec R8）与两家之间的同步需要同时看到两家的状态。
+//! 三家（`Agent::Codex`、`Agent::Claude`、`Agent::WorkBuddy`）共用一个 `App`、一把锁、一个路由：路由的引用计数
+//! （任一家开着就留着，都关了才停，spec R8，`App::others_on`）需要同时看到各家的状态。
 //! 路由在 Sophia 进程里运行（spec 2026-10-03-gateway-in-app）：打开时接上、退出时收尾、关机时同步改回，在 `lifecycle.rs`。
-//! 本文件是公共部分与 Codex；按家的网关增删改在 `providers.rs`，Claude 桌面应用在 `claude.rs`。
+//! 模型提供商是全局一份（ADR 0003），各家选了哪些在「已选」里（`sophia_core::model_providers`）；
+//! 本文件是公共部分与 Codex；「已选」的动作与名单变了之后的跟上在 `picks.rs`，Claude 桌面应用在 `claude.rs`，
+//! WorkBuddy 在 `workbuddy.rs`。
 mod claude;
 #[cfg(test)]
 mod claude_tests;
@@ -13,9 +15,12 @@ mod hookup_tests;
 mod lifecycle;
 #[cfg(test)]
 mod lifecycle_tests;
-mod providers;
+mod picks;
 #[cfg(test)]
 mod tests;
+mod workbuddy;
+#[cfg(test)]
+mod workbuddy_tests;
 
 pub use crate::claude_desktop::DesktopInfo;
 pub use crate::router::Agent;
@@ -24,20 +29,22 @@ pub use claude::{
     claude_routing_file, ClaudeAgentView, DesktopView, ProfileModel, MIN_DESKTOP_VERSION,
 };
 pub use lifecycle::{AttachReport, FamilyError, PortNotice, QuitPreview, QuitStep};
-pub use providers::{same_address, ProbeTarget, ProviderSaved};
+pub use picks::ProbeTarget;
+pub use workbuddy::{workbuddy_routing_file, WorkBuddyAgentView};
 
 use crate::process::{self, RestartReport};
 use crate::{codex_desktop, takeover};
 use sophia_core::atomicfile::{self, FileState, ReadError};
 use sophia_core::claude_models::desktop::DesktopDirs;
 use sophia_core::claude_models::settings::ClaudeGatewaySettings;
-use sophia_core::codex_models::catalog::{self, Model};
+use sophia_core::codex_models::catalog::{self, Model, Published};
 use sophia_core::codex_models::config::{self, ConfigError, Managed};
 use sophia_core::codex_models::login::{self, ModeReason};
-use sophia_core::codex_models::settings::{
-    self, GatewaySettings, HookupMode, ProviderSettings, SavedModel, UnreachableReason,
-};
+use sophia_core::codex_models::settings::{GatewaySettings, HookupMode};
 use sophia_core::file_issue::FileIssue;
+use sophia_core::model_providers::picks::AgentModels;
+use sophia_core::model_providers::ModelProviders;
+use sophia_core::workbuddy_models::WorkBuddyGatewaySettings;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -52,8 +59,8 @@ const CATALOG_FILE: &str = "sophia-models.json";
 pub const ROUTING_FILE: &str = "sophia-routing.json";
 /// 备份后缀：备份目录里的 `<序号>-models.bak`，与 MCP 的 `<序号>-mcp.bak` 分得清是谁写的
 const BACKUP_SUFFIX: &str = "models";
-/// 接管 agents-manager 时生成的那一家网关的首选 id 与名字（对方只接了 wecode 这一家）；
-/// 实际 id 见 `takeover_provider_id`
+/// 接管 agents-manager 时生成的那一家模型提供商的首选 id 与名字（对方只接了 wecode 这一家）；
+/// 实际 id 见 `ModelProviders::adopt_target`
 pub const TAKEOVER_PROVIDER_ID: &str = "wecode";
 
 /// 带错误码的错误，显示为 `[代码] 说明`，代码取值见 docs/gateway-commands.md
@@ -103,10 +110,11 @@ type Get<R> = Box<dyn Fn() -> R + Send + Sync>;
 /// 参数按引用传入的操作
 type RefOp<A, R> = Box<dyn for<'a> Fn(&'a A) -> R + Send + Sync>;
 type StrOp<R> = Box<dyn Fn(&str) -> R + Send + Sync>;
-/// 按（家, 网关 id）读 / 删服务商密钥
-type KeyOp<R> = Box<dyn Fn(Agent, &str) -> R + Send + Sync>;
-/// 按（家, 网关 id）写服务商密钥：`(家, id, key)`
-type KeyWrite = Box<dyn Fn(Agent, &str, &str) -> Result<(), String> + Send + Sync>;
+/// 按提供商 id 写密钥：`(id, key)`
+type KeyWrite = Box<dyn Fn(&str, &str) -> Result<(), String> + Send + Sync>;
+/// 在设置锁里读 → 改 → 写全局名单；改动返回假就不写
+type ModelsChange =
+    Box<dyn Fn(&mut dyn FnMut(&mut ModelProviders) -> bool) -> io::Result<()> + Send + Sync>;
 
 /// 对外部世界的全部依赖，测试里全部替换成假的
 pub struct Deps {
@@ -129,13 +137,14 @@ pub struct Deps {
     pub router_running: Get<Option<u16>>,
     /// 运行 `codex debug models --bundled`
     pub bundled: Get<io::Result<Vec<u8>>>,
-    /// 按（家, 网关 id）读密钥（密钥文件 `secrets.json` 里两家各一份）：没有为 `Ok(None)`；
-    /// 读不出（文件权限、格式损坏、还在钥匙串里没迁完）为 `Err(原因)`，原因是当前语言的一句话
-    pub get_key: KeyOp<Result<Option<String>, String>>,
-    /// 按（家, 网关 id）写密钥
+    /// 按提供商 id 读密钥（密钥文件 `secrets.json` 的 `providers.global`，所有 agent 共用）：没有为 `Ok(None)`；
+    /// 读不出（文件权限、格式损坏）为 `Err(原因)`，原因是当前语言的一句话
+    pub get_key: StrOp<Result<Option<String>, String>>,
+    /// 按提供商 id 写密钥（接管 agents-manager 时）
     pub set_key: KeyWrite,
-    /// 按（家, 网关 id）删密钥；本来就没有不算错
-    pub delete_key: KeyOp<Result<(), String>>,
+    /// 全局模型提供商名单与各 agent 的「已选」（settings.json 的 `modelProviders`）
+    pub load_models: Get<io::Result<ModelProviders>>,
+    pub change_models: ModelsChange,
     pub get_agents_manager_key: Get<Result<String, String>>,
     /// 当前进程表（pid + 完整命令行）
     pub list_processes: Get<io::Result<Vec<process::ProcessInfo>>>,
@@ -176,6 +185,14 @@ pub struct Deps {
     pub desktop_quit: Get<io::Result<()>>,
     /// 打开它并等到在运行（最多 20 秒，R49）
     pub desktop_open: Get<io::Result<()>>,
+
+    // ----- 家 workbuddy（#266） -----
+    /// WorkBuddy 的数据目录（`~/.workbuddy`，`WORKBUDDY_CONFIG_DIR` 可改），`models.json` 在它下面
+    pub workbuddy_dir: PathBuf,
+    /// 装了 WorkBuddy（应用包或它自己的数据目录，同 skill 页的认法）
+    pub workbuddy_installed: Get<bool>,
+    pub load_workbuddy: Get<io::Result<WorkBuddyGatewaySettings>>,
+    pub save_workbuddy: RefOp<WorkBuddyGatewaySettings, io::Result<()>>,
 }
 
 pub struct App {
@@ -185,66 +202,14 @@ pub struct App {
     lock: Mutex<()>,
     /// 路由端口的说明（另一个 Sophia 占着、换了端口、端口都被占），模型页显示；只在内存里
     notice: Mutex<Option<PortNotice>>,
+    /// `codex debug models --bundled` 的输出（起一次进程，之后用记下的）
+    bundled_cache: Mutex<Option<Vec<u8>>>,
     /// 测试用：在写桌面应用的每一个文件之前调用，返回 Err 即模拟这一步写失败
     #[cfg(test)]
     step_hook: claude::StepHook,
 }
 
 // ----- 状态视图（字段与 docs/gateway-commands.md 一致） -----
-
-#[derive(Debug, Clone, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelView {
-    pub id: String,
-    pub slug: String,
-    pub display_name: String,
-    pub selected: bool,
-    /// 拉取模型列表时网关给的上下文长度（token）；网关没给为 None（JSON `null`）。
-    /// Codex 目录在 None 时写保守的缺省值，这里不替它填
-    pub context_window: Option<u32>,
-    /// 用户手动填的（#117）
-    pub manual: bool,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderView {
-    /// 创建后不变；新命令用它指明操作哪一家
-    pub id: String,
-    pub name: String,
-    /// 网关短名（`ProviderSettings::short_name`）：网关行的名字，也是撞名模型在 Codex 目录里的后缀。
-    /// 界面只读它，不自己再算一份，Sophia 与 Codex 里看到的是同一个名字
-    pub short_name: String,
-    pub base_url: String,
-    /// "chat" 或 "responses"
-    pub protocol: String,
-    /// 从哪个服务商预设建的（spec S1）；手填的为 None
-    pub preset: Option<String>,
-    /// 密钥：有 / 没有 / 读不出（spec 2026-10-03-keys-in-file R4）
-    pub key: KeyStatus,
-    /// 读不出时的原因（当前语言的一句话：「读不出密钥文件：没有读取权限」「密钥还在钥匙串里…」）；其余为 None
-    pub key_problem: Option<String>,
-    pub models: Vec<ModelView>,
-    /// 上次拉取模型失败的原因（当前语言的短句：「地址无法访问」「密钥无效，请换一个密钥」…，返回界面时才取句）；
-    /// None 表示上次成功或还没拉过
-    pub unreachable: Option<String>,
-    /// 那次失败的技术原文（已去隐私），网关行 `详情` 里给；没有为 None
-    pub unreachable_detail: Option<String>,
-    /// `unreachable` 是真实调用被拒了密钥记下的（#144）：重拉模型列表清不掉它，界面不给 `再试一次`
-    pub key_rejected_on_call: bool,
-    /// `unreachable` 的原因是密钥被拒（拉列表或真实调用都算）：网络是通的，界面不写「无法连接」，只写原因
-    pub key_invalid: bool,
-}
-
-/// 一家网关的密钥状态。不再把「读不出」当成「没有」（R4）
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum KeyStatus {
-    Set,
-    #[default]
-    Missing,
-    Unreadable,
-}
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -294,9 +259,10 @@ pub struct CodexAgentView {
 #[serde(rename_all = "camelCase")]
 pub struct AgentGatewayView {
     pub agent: Agent,
-    /// Codex：读得到 Codex 版本；Claude：桌面应用已安装
+    /// Codex：读得到 Codex 版本；Claude：桌面应用已安装。模型页只列装了的
     pub installed: bool,
-    pub providers: Vec<ProviderView>,
+    /// 这一家的「已选」与选模型浮层要的分组（全局名单 + 这一家能用哪些）
+    pub models: AgentModels,
     /// 开关。Codex：设置文件指向路由；Claude：想要的值（写没写进去看 `claude.desktop`）
     pub enabled: bool,
     pub conflict: String,
@@ -304,9 +270,11 @@ pub struct AgentGatewayView {
     pub codex: Option<CodexAgentView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude: Option<ClaudeAgentView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workbuddy: Option<WorkBuddyAgentView>,
 }
 
-/// 模型页的状态（契约 §6）：路由两家共用，其余按家拆开（顺序 codex、claude）
+/// 模型页的状态（契约 §6）：路由各家共用，其余按家拆开（顺序 codex、claude、workbuddy）
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayState {
@@ -323,7 +291,7 @@ pub struct GatewayState {
 }
 
 impl GatewayState {
-    /// 某一家的状态；`supported: false` 时两家都不列，返回 None
+    /// 某一家的状态；`supported: false` 时各家都不列，返回 None
     pub fn agent(&self, agent: Agent) -> Option<&AgentGatewayView> {
         self.agents.iter().find(|view| view.agent == agent)
     }
@@ -348,6 +316,7 @@ fn internal(e: impl fmt::Display) -> AppError {
 pub(super) enum Untouched {
     Codex,
     Claude,
+    WorkBuddy,
 }
 
 fn config_error(e: ConfigError) -> AppError {
@@ -400,6 +369,7 @@ impl App {
             deps,
             lock: Mutex::new(()),
             notice: Mutex::new(None),
+            bundled_cache: Mutex::new(None),
             #[cfg(test)]
             step_hook: Default::default(),
         }
@@ -486,26 +456,39 @@ impl App {
         if text == snapshot.text {
             return Ok(());
         }
-        let path = self.config_path();
-        if let FileState::Present(existing) = &snapshot.state {
-            atomicfile::backup(&path, existing, BACKUP_SUFFIX, &self.backups_dir()).map_err(
+        self.replace_user_file(
+            &self.config_path(),
+            &snapshot.state,
+            text.as_bytes(),
+            |error| sophia_core::t!("models.app.configWriteFailed", error = error),
+            || sophia_core::t!("models.app.configChanged"),
+        )
+    }
+
+    /// 改用户的文件（Codex 设置、WorkBuddy 的 models.json）：`state` 是算新内容时读到的那一份。在的先备份，再原子替换。
+    /// 写前写后发现被别的程序改过 → `changed`（`changed()` 那一句，什么都没动）；别的没写成 → `internal`（`failed(原因)`）
+    pub(super) fn replace_user_file(
+        &self,
+        path: &Path,
+        state: &FileState,
+        bytes: &[u8],
+        failed: impl Fn(String) -> String,
+        changed: impl FnOnce() -> String,
+    ) -> Result<(), AppError> {
+        if let FileState::Present(existing) = state {
+            atomicfile::backup(path, existing, BACKUP_SUFFIX, &self.backups_dir()).map_err(
                 |e| {
-                    internal(sophia_core::t!(
-                        "models.app.configWriteFailed",
-                        error = atomicfile::backup_failure_text(&path, &e)
-                            .unwrap_or_else(|| e.to_string())
+                    internal(failed(
+                        atomicfile::backup_failure_text(path, &e).unwrap_or_else(|| e.to_string()),
                     ))
                 },
             )?;
         }
-        atomicfile::atomic_write(&path, text.as_bytes(), &snapshot.state).map_err(|e| {
-            if e.to_string() == "changed" {
-                AppError::new("changed", sophia_core::t!("models.app.configChanged"))
+        atomicfile::atomic_write(path, bytes, state).map_err(|e| {
+            if atomicfile::write_failure(&e) == atomicfile::WriteFailure::Changed {
+                AppError::new("changed", changed())
             } else {
-                internal(sophia_core::t!(
-                    "models.app.configWriteFailed",
-                    error = atomicfile::write_error_text(&path, &e)
-                ))
+                internal(failed(atomicfile::write_error_text(path, &e)))
             }
         })
     }
@@ -576,7 +559,7 @@ impl App {
     /// `redecide`：这次是改选模型（spec 2026-10-03-codex-hookup-auto R4 的时刻之一）——重新判断接法，变了就换形态、
     /// 提示重启；只改网关地址等别的变化不重新判断
     fn republish(&self, settings: &mut GatewaySettings, redecide: bool) -> Result<(), AppError> {
-        if settings.published().is_empty() {
+        if self.published_for(Agent::Codex)?.is_empty() {
             return Err(AppError::new(
                 "invalid",
                 sophia_core::t!("models.app.needOneModel"),
@@ -603,9 +586,9 @@ impl App {
             settings.mode_reason = Some(reason);
         }
         self.ensure_router(settings, Untouched::Codex)?;
-        self.write_catalogs(settings)?;
+        let active = self.write_catalogs(settings)?;
         // 被取消的模型若正是 Codex 当前的默认模型，改回启用前的值
-        let retired = retired_slugs(settings);
+        let retired = retired_slugs(settings, &active);
         let snapshot = self.read_config()?;
         let mut text = snapshot.text.clone();
         if let Some(stripped) = self.strip_other_form(&text, settings)? {
@@ -629,31 +612,15 @@ impl App {
 
     pub(super) fn enable_locked(&self) -> Result<(), AppError> {
         let mut settings = self.load()?;
-        if settings.providers.iter().all(|p| p.base_url.is_empty()) {
-            return Err(AppError::new(
-                "invalid",
-                sophia_core::t!("models.app.noBaseUrl"),
-            ));
-        }
-        if settings.published().is_empty() {
+        let published = self.published_for(Agent::Codex)?;
+        if published.is_empty() {
             return Err(AppError::new(
                 "invalid",
                 sophia_core::t!("models.app.noModelsSelected"),
             ));
         }
-        // 只检查有模型要发布的网关：没勾选任何模型的那几家不影响启用
-        for provider in &settings.providers {
-            if provider.selected().is_empty() {
-                continue;
-            }
-            if provider.base_url.is_empty() {
-                return Err(AppError::new(
-                    "invalid",
-                    sophia_core::t!("models.app.providerNoUrl", name = provider.name),
-                ));
-            }
-            self.require_key(Agent::Codex, provider, settings.providers.len() == 1)?;
-        }
+        // 只检查选了模型的那几家：没被选的提供商不影响启用
+        self.require_keys(&published)?;
         let first = self.read_config()?;
         if self.detect_agents_manager(&first.text).is_some() {
             return Err(AppError::new(
@@ -689,7 +656,7 @@ impl App {
         // 先起好路由再写清单；端口被别的程序占着时路由换了端口，按新端口写
         self.ensure_router(&mut settings, Untouched::Codex)?;
         let managed = self.managed(&settings);
-        self.write_catalogs(&mut settings)?;
+        let active = self.write_catalogs(&mut settings)?;
         // 起路由、写清单的这段时间里别人可能改过设置：基于最新内容重新生成，绝不拿旧内容覆盖
         let latest = self.read_config()?;
         let stripped = self.strip_other_form(&latest.text, &settings)?;
@@ -698,7 +665,8 @@ impl App {
             .map_err(config_error)?;
         // 已启用时再点启用也会走到这里：默认模型若指向一个已经不在目录里的标识
         // （比如旧的单网关格式迁移后标识带上了前缀），一并改回启用前的值
-        let text = reset_default_model(&applied.text, &settings, &retired_slugs(&settings));
+        let text =
+            reset_default_model(&applied.text, &settings, &retired_slugs(&settings, &active));
         if text != latest.text {
             self.write_config(&latest, &text)?;
         }
@@ -713,21 +681,22 @@ impl App {
         self.save(&settings)
     }
 
-    fn write_catalogs(&self, settings: &mut GatewaySettings) -> Result<(), AppError> {
+    /// 按「已选」写 Codex 目录下的合并目录与路由清单；返回此刻写进去的第三方模型
+    fn write_catalogs(&self, settings: &mut GatewaySettings) -> Result<Vec<Published>, AppError> {
         let before = std::fs::read(self.catalog_path()).ok();
-        let native = catalog::load_native(&self.deps.codex_home, || (self.deps.bundled)())
-            .map_err(internal)?;
-        let models = settings.published();
+        let native =
+            catalog::load_native(&self.deps.codex_home, || self.bundled()).map_err(internal)?;
+        let (order, models) = self.codex_order(&native.models)?;
         for published in &models {
             if !settings.published_slugs.contains(&published.slug) {
                 settings.published_slugs.push(published.slug.clone());
             }
         }
-        let combined = catalog::build_combined(&native.models, &models, settings.mode.is_builtin())
+        let combined = catalog::build_combined(&native.models, &order, settings.mode.is_builtin())
             .map_err(|e| AppError::new("invalid", e))?;
         let routing = catalog::build_routing(
             &models,
-            &settings.routing_providers(),
+            &self.load_models()?.routing_providers(&models),
             &settings.published_slugs,
         )
         .map_err(|e| AppError::new("invalid", e))?;
@@ -749,7 +718,7 @@ impl App {
         } else {
             version
         };
-        Ok(())
+        Ok(models)
     }
 
     fn write_own_file(&self, path: &Path, bytes: &[u8]) -> Result<(), AppError> {
@@ -772,7 +741,7 @@ impl App {
     }
 
     /// 关掉 Codex 的第三方模型（用户的选择）：从 Codex 设置里移除本功能写的内容（两种接法都删），
-    /// 清理本功能文件，两家都关了就停路由。Claude 还开着时路由留着，Codex 的路由清单改成「无生效模型」（R8）
+    /// 清理本功能文件，别家都关了就停路由。别家还开着时路由留着，Codex 的路由清单改成「无生效模型」（R8）
     pub fn restore(&self) -> Result<Vec<String>, AppError> {
         let _guard = self.guard();
         self.restore_locked()
@@ -814,8 +783,8 @@ impl App {
                 ),
             ));
         }
-        if self.claude_on() {
-            // Claude 还开着：路由服务留着。还没重启的 Codex 仍会发请求——官方模型照常放行，
+        if self.others_on(Agent::Codex) {
+            // 别家还开着：路由服务留着。还没重启的 Codex 仍会发请求——官方模型照常放行，
             // 已取消的第三方模型按停用拒绝，所以清单改成「无生效模型、停用名单是全部发布过的标识」
             let routing = catalog::build_routing(&[], &[], &settings.published_slugs)
                 .map_err(|e| AppError::new("invalid", e))?;
@@ -1000,26 +969,16 @@ impl App {
         })?;
 
         let mut settings = self.load()?;
-        // 对方只有一家网关。同一家（地址相同）重复接管时覆盖原来那一家；
-        // 用户自己建的网关即使 id 相同，只要地址不同就绝不覆盖——另起一家
+        // 对方只有一家网关：带进全局名单（同一地址的那一家重复接管时换掉它的模型列表；用户自己加的
+        // 即使同名、只要地址不同就绝不覆盖——另起一家），勾着的启用并选进 Codex
         let base_url = clean_base_url(&old.base_url)?;
-        let target = takeover_provider_id(&settings, &base_url);
-        let provider = ProviderSettings {
-            id: target.clone(),
-            name: TAKEOVER_PROVIDER_ID.to_owned(),
-            base_url,
-            api_base: Some(old.api_base.trim().to_owned()).filter(|b| !b.is_empty()),
-            protocol: if old.protocol == "responses" {
-                "responses".into()
-            } else {
-                "chat".into()
-            },
-            preset: None,
-            models: old
-                .models
-                .iter()
-                .map(|m| SavedModel {
-                    model: Model {
+        let before = self.load_models()?;
+        let brought: Vec<(Model, bool)> = old
+            .models
+            .iter()
+            .map(|m| {
+                (
+                    Model {
                         id: m.id.clone(),
                         display_name: Some(m.display_name.trim().to_owned())
                             .filter(|n| !n.is_empty()),
@@ -1027,17 +986,35 @@ impl App {
                         vision: m.vision,
                         manual: false,
                     },
-                    selected: m.selected,
-                })
-                .collect(),
-            unreachable: None,
-            unreachable_detail: None,
-            key_rejected_on_call: false,
-        };
-        match settings.provider_mut(&target) {
-            Some(existing) => *existing = provider,
-            None => settings.providers.push(provider),
+                    m.selected,
+                )
+            })
+            .collect();
+        if !brought.iter().any(|(_, selected)| *selected) {
+            return Err(AppError::new(
+                "invalid",
+                sophia_core::t!("models.app.noAmModels"),
+            ));
         }
+        let mut target = String::new();
+        self.change_models(|list| {
+            target = list.adopt(
+                Agent::Codex.as_str(),
+                TAKEOVER_PROVIDER_ID,
+                &base_url,
+                Some(old.api_base.trim().to_owned()),
+                &old.protocol,
+                brought.clone(),
+            );
+            true
+        })?;
+        // 没成：名单退回接管前的样子
+        let undo_list = || {
+            let _ = self.change_models(|list| {
+                *list = before.clone();
+                true
+            });
+        };
         settings.prev_model = old.had_prev_model.then_some(old.prev_model.clone());
         settings.had_prev_model = old.had_prev_model;
         // 对方的标识不带网关前缀，接管后全部换成带前缀的：旧标识留在这里，会进停用名单
@@ -1046,27 +1023,20 @@ impl App {
                 settings.published_slugs.push(slug.clone());
             }
         }
-        if settings
-            .provider(&target)
-            .is_none_or(|p| p.selected().is_empty())
-        {
-            return Err(AppError::new(
-                "invalid",
-                sophia_core::t!("models.app.noAmModels"),
-            ));
-        }
         // 先把本功能的目录和路由准备好；这一步失败时对方仍然完好
         if let Err(error) = self
             .write_catalogs(&mut settings)
-            .and_then(|()| self.ensure_router(&mut settings, Untouched::Codex))
+            .and_then(|_| self.ensure_router(&mut settings, Untouched::Codex))
         {
             // 没成：对方仍然完好，本功能不留下路由和文件
             self.remove_own_traces();
+            undo_list();
             return Err(error);
         }
         // 路由起好之后才动密钥：失败的接管不能覆盖本功能原有的密钥
-        if let Err(error) = (self.deps.set_key)(Agent::Codex, &target, key.trim()) {
+        if let Err(error) = (self.deps.set_key)(&target, key.trim()) {
             self.remove_own_traces();
+            undo_list();
             return Err(AppError::new("invalid", error));
         }
 
@@ -1076,6 +1046,7 @@ impl App {
             Ok(()) => {}
             Err(error) => {
                 self.remove_own_traces();
+                undo_list();
                 return Err(error);
             }
         }
@@ -1111,9 +1082,10 @@ impl App {
                 sophia_core::t!("models.app.readAmKeyFailed", error = e),
             )
         })?;
-        let target = takeover_provider_id(&self.load()?, &clean_base_url(&old.base_url)?);
-        (self.deps.set_key)(Agent::Codex, &target, key.trim())
-            .map_err(|e| AppError::new("invalid", e))?;
+        let target = self
+            .load_models()?
+            .adopt_target(TAKEOVER_PROVIDER_ID, &clean_base_url(&old.base_url)?);
+        (self.deps.set_key)(&target, key.trim()).map_err(|e| AppError::new("invalid", e))?;
         Ok(target)
     }
 
@@ -1151,7 +1123,8 @@ impl App {
         let applied =
             config::apply(&removed.text, &self.managed(settings)).map_err(config_error)?;
         // 对方的标识不带网关前缀，接管后都进了停用名单；Codex 的默认模型若正是其中之一，改回启用前的值
-        let text = reset_default_model(&applied.text, settings, &retired_slugs(settings));
+        let active = self.published_for(Agent::Codex)?;
+        let text = reset_default_model(&applied.text, settings, &retired_slugs(settings, &active));
         self.write_config(&latest, &text)?;
         // 对方当初给末行补过的换行还在文件里，恢复时同样要还原
         settings.added_newline = applied.added_newline || old_added_newline;
@@ -1161,10 +1134,27 @@ impl App {
         self.save(settings)
     }
 
+    /// 路由的引用计数里这一家算不算开着（各家的认法见 `codex_on`、`claude_on`、`workbuddy_on`）
+    fn agent_on(&self, agent: Agent) -> bool {
+        match agent {
+            Agent::Codex => self.codex_on(),
+            Agent::Claude => self.claude_on(),
+            Agent::WorkBuddy => self.workbuddy_on(),
+        }
+    }
+
+    /// 除了 `except` 之外还有没有哪一家在用路由：有就留着路由（R8）
+    pub(super) fn others_on(&self, except: Agent) -> bool {
+        Agent::ALL
+            .into_iter()
+            .filter(|agent| *agent != except)
+            .any(|agent| self.agent_on(agent))
+    }
+
     /// 停下路由并删掉 Codex 目录下本功能前缀的文件（只删普通文件）。
-    /// Claude 开着时路由留着（R8），只删 Codex 目录下的文件
+    /// 别家开着时路由留着（R8），只删 Codex 目录下的文件
     fn remove_own_traces(&self) {
-        if !self.claude_on() {
+        if !self.others_on(Agent::Codex) {
             (self.deps.router_stop)();
         }
         let _ = self.remove_codex_files(&[]);
@@ -1192,87 +1182,6 @@ impl App {
         warnings
     }
 
-    /// 这一家这个网关的密钥：有就给出来（去掉首尾空白）；没有为 `Ok(None)`；读不出为 `Err(原因)`
-    fn key_of(&self, agent: Agent, id: &str) -> Result<Option<String>, String> {
-        (self.deps.get_key)(agent, id)
-            .map(|key| key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty()))
-    }
-
-    /// 有模型要发布的网关必须有读得出的密钥；没有、读不出各说各的（`only` 为真时只有这一家，不点名）
-    fn require_key(
-        &self,
-        agent: Agent,
-        provider: &ProviderSettings,
-        only: bool,
-    ) -> Result<String, AppError> {
-        match self.key_of(agent, &provider.id) {
-            Ok(Some(key)) => Ok(key),
-            Ok(None) => Err(AppError::new(
-                "invalid",
-                if only {
-                    sophia_core::t!("models.app.noKey")
-                } else {
-                    sophia_core::t!("models.app.providerNoKey", name = provider.name)
-                },
-            )),
-            Err(reason) => Err(AppError::new(
-                "invalid",
-                sophia_core::t!(
-                    "models.app.keyUnreadable",
-                    name = provider.name,
-                    reason = reason
-                ),
-            )),
-        }
-    }
-
-    /// 一家的网关列表视图
-    fn provider_views(&self, agent: Agent, providers: &[ProviderSettings]) -> Vec<ProviderView> {
-        providers
-            .iter()
-            .map(|provider| (provider, self.key_of(agent, &provider.id)))
-            .map(|(provider, read)| ProviderView {
-                id: provider.id.clone(),
-                name: provider.name.clone(),
-                short_name: provider.short_name(),
-                base_url: provider.base_url.clone(),
-                protocol: provider.protocol().to_owned(),
-                preset: provider.preset.clone(),
-                key: match &read {
-                    Ok(Some(_)) => KeyStatus::Set,
-                    Ok(None) => KeyStatus::Missing,
-                    Err(_) => KeyStatus::Unreadable,
-                },
-                key_problem: read.err(),
-                unreachable: provider.unreachable.as_ref().map(UnreachableReason::text),
-                unreachable_detail: provider
-                    .unreachable
-                    .as_ref()
-                    .and(provider.unreachable_detail.clone()),
-                key_rejected_on_call: provider.unreachable.is_some()
-                    && provider.key_rejected_on_call,
-                key_invalid: provider.unreachable == Some(UnreachableReason::Auth),
-                models: provider
-                    .models
-                    .iter()
-                    .map(|m| ModelView {
-                        manual: m.model.manual,
-                        id: m.model.id.clone(),
-                        slug: provider.slug_of(&m.model.id),
-                        display_name: m
-                            .model
-                            .display_name
-                            .clone()
-                            .filter(|n| !n.trim().is_empty())
-                            .unwrap_or_else(|| m.model.id.clone()),
-                        selected: m.selected,
-                        context_window: m.model.context_window,
-                    })
-                    .collect(),
-            })
-            .collect()
-    }
-
     pub fn state(&self) -> GatewayState {
         let _guard = self.guard();
         // 读不出 Sophia 自己的设置：照旧当空的往下画，但说出来是哪个文件、为什么（R11），不再悄悄当没有网关
@@ -1297,11 +1206,12 @@ impl App {
         let mut codex = AgentGatewayView {
             agent: Agent::Codex,
             installed: false,
-            providers: self.provider_views(Agent::Codex, &settings.providers),
+            models: AgentModels::default(),
             enabled: false,
             conflict: String::new(),
             codex: None,
             claude: None,
+            workbuddy: None,
         };
         let mut extra = CodexAgentView {
             mode: settings.mode,
@@ -1362,7 +1272,8 @@ impl App {
         view.router.running = (self.deps.router_running)() == Some(settings.port);
         view.port_notice = self.notice();
         let claude_applied = claude_settings.applied.is_some();
-        if !view.router.running && (codex_points || claude_applied) {
+        let (workbuddy_enabled, workbuddy_extra) = self.workbuddy_view();
+        if !view.router.running && (codex_points || claude_applied || workbuddy_extra.written) {
             let reason = view.port_notice.as_ref().map_or_else(
                 || sophia_core::t!("models.app.routerStopped"),
                 PortNotice::text,
@@ -1373,9 +1284,15 @@ impl App {
                     port = settings.port,
                     error = reason
                 )
-            } else {
+            } else if claude_applied {
                 sophia_core::t!(
                     "models.claude.routerNoResponse",
+                    port = settings.port,
+                    error = reason
+                )
+            } else {
+                sophia_core::t!(
+                    "models.workbuddy.routerNoResponse",
                     port = settings.port,
                     error = reason
                 )
@@ -1403,46 +1320,50 @@ impl App {
         }
         extra.wanted = settings.enabled.unwrap_or(codex_points);
         codex.installed = !extra.app.version.is_empty();
+        // 官方模型此刻用不用得了：按登录状态（没登录时接法是独立服务商，官方模型发不出去）
+        let signed_in = self
+            .read_config()
+            .map(|snapshot| self.decide_mode(&snapshot.text).0.is_builtin())
+            .unwrap_or(true);
+        // 没装 Codex 时模型页不列这一行：不去读官方目录（缓存不在时要起一个进程）
+        if codex.installed {
+            codex.models = self.models_view(Agent::Codex, signed_in);
+        }
         codex.codex = Some(extra);
-        view.agents = vec![codex, self.claude_view(&claude_settings, settings.port)];
+        let workbuddy_installed = (self.deps.workbuddy_installed)();
+        let workbuddy = AgentGatewayView {
+            agent: Agent::WorkBuddy,
+            installed: workbuddy_installed,
+            // 没装时模型页不列这一行：不必算
+            models: if workbuddy_installed {
+                self.models_view(Agent::WorkBuddy, false)
+            } else {
+                AgentModels::default()
+            },
+            enabled: workbuddy_enabled,
+            conflict: workbuddy_extra.file_issue.clone(),
+            codex: None,
+            claude: None,
+            workbuddy: Some(workbuddy_extra),
+        };
+        view.agents = vec![
+            codex,
+            self.claude_view(&claude_settings, settings.port),
+            workbuddy,
+        ];
         view
     }
 }
 
-/// 接管来的配置该落到哪一家：地址相同的那家（重复接管）；否则新起一个 id，
-/// 首选 `wecode`，已被用户自己的网关占用就顺延
-fn takeover_provider_id(settings: &GatewaySettings, base_url: &str) -> String {
-    if let Some(same) = settings.providers.iter().find(|p| p.base_url == base_url) {
-        return same.id.clone();
-    }
-    let taken: Vec<&str> = settings.providers.iter().map(|p| p.id.as_str()).collect();
-    settings::new_provider_id(TAKEOVER_PROVIDER_ID, &taken)
-}
-
-fn unknown_provider(id: &str) -> AppError {
-    AppError::new(
-        "invalid",
-        sophia_core::t!("models.app.unknownProvider", id = id),
-    )
-}
-
 /// 曾经发布过、现在已不在目录里的标识
-fn retired_slugs(settings: &GatewaySettings) -> Vec<String> {
-    let active: Vec<String> = settings.published().into_iter().map(|p| p.slug).collect();
+fn retired_slugs(settings: &GatewaySettings, active: &[Published]) -> Vec<String> {
+    let active: Vec<&str> = active.iter().map(|p| p.slug.as_str()).collect();
     settings
         .published_slugs
         .iter()
-        .filter(|slug| !active.contains(slug))
+        .filter(|slug| !active.contains(&slug.as_str()))
         .cloned()
         .collect()
-}
-
-/// 新建网关时没给名字，用地址里的主机名
-fn host_of(base_url: &str) -> String {
-    url::Url::parse(base_url)
-        .ok()
-        .and_then(|parsed| parsed.host_str().map(str::to_owned))
-        .unwrap_or_else(|| base_url.to_owned())
 }
 
 /// Codex 的默认模型若是 `invalid` 里的某个第三方标识，改回启用前的值（原来没有就删掉这一行）

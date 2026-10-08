@@ -1,4 +1,4 @@
-import { listText, t, tn, tSpaced } from "./i18n.ts";
+import { listText, t, tn } from "./i18n.ts";
 import {
   presentView,
   unportableText,
@@ -16,6 +16,8 @@ import type {
   McpLocation,
   McpOverview,
   McpReasonKind,
+  McpUndoFileResult,
+  McpUndoReport,
 } from "./types.ts";
 
 export interface McpDomainRow {
@@ -117,6 +119,28 @@ export function differingSourceIds(row: McpDomainRow, targetIds: Set<string>): s
     }
   }
   return ids;
+}
+
+/**
+ * 行上 `N 份不一样` 的 N：卷进差异的那几处里有几种不一样的定义（评审 2026-10-07，#261）。一样的几处
+ * （彼此的格是 equal / sameEndpoint）算一份：三处一样、只有一处不同是 2 份，不是 4 处
+ */
+export function differingCopies(row: McpDomainRow, targetIds: Set<string>): number {
+  const ids = differingSourceIds(row, targetIds);
+  const group = new Map(ids.map((id) => [id, id]));
+  const root = (id: string): string => {
+    const up = group.get(id) ?? id;
+    return up === id ? id : root(up);
+  };
+  for (const entry of row.entries) {
+    if (!group.has(entry.sourceId)) continue;
+    for (const cell of entry.cells) {
+      if (!group.has(cell.targetId)) continue;
+      if (cell.state !== "equal" && cell.state !== "sameEndpoint") continue;
+      group.set(root(entry.sourceId), root(cell.targetId));
+    }
+  }
+  return new Set(ids.map(root)).size;
 }
 
 /// 域名：用户级 / 项目 · <目录名>。侧栏、导入页、跨域说明共用这一份
@@ -316,26 +340,90 @@ export function mcpColumnOf(locationId: string): string {
   return tail;
 }
 
-/// 一个配置位置在句子里的名字（改生效范围的菜单与提示条、自动同步页的第二行）：Claude Code 分仅自己 / 团队共享
-/// （同表格列头），Claude Desktop 写全名，别家写 agent 名
+/// 一个配置位置在句子里的名字（改生效范围的菜单与提示条、自动同步页）：Claude Code 分仅自己 / 团队共享
+/// （同表格列头），别家写 agent 名（Claude Desktop 照界面语言说，见 `mcpAgentName`）
 export function mcpLocationSentence(l: { id: string; label: string; harnessId: string }): string {
   if (l.harnessId === "claude-code") {
     const column = mcpColumnOf(l.id);
     if (column === CLAUDE_SELF) return t("mcp.claude.selfSentence", { agent: "Claude Code" });
     if (column === CLAUDE_TEAM) return t("mcp.claude.teamSentence", { agent: "Claude Code" });
   }
-  if (l.harnessId === "claude-desktop") return "Claude Desktop";
-  return l.label.split(" · ")[0];
+  return mcpAgentName(l);
 }
 
 /// 一个配置位置是哪个 agent（格子原因句、提示条的 agent 图标）：位置名里 agent 那一段（`Claude Code`），
-/// 不带 core 给的英文作用域（`Claude Code · User MCPs`，spec #239 第 42 条）
-export const mcpAgentName = (l: { label: string }): string => l.label.split(" · ")[0];
+/// 不带 core 给的英文作用域（`Claude Code · User MCPs`，spec #239 第 42 条）。Claude Desktop 在句子里
+/// 简体叫「Claude 桌面应用」（spec #239 第 48 条）；列头仍是它自己的名字（`groupClaudeColumns`）
+export const mcpAgentName = (l: { label: string; harnessId?: string }): string =>
+  l.harnessId === "claude-desktop" ? t("common.term.claudeDesktop") : l.label.split(" · ")[0];
+
+/// MCP 页命令本身出错（扫描、撤销、删除、拷贝路径、在访达中显示）交给窗口顶上横幅的一条：一句是该处的失败句
+/// `sentence`，原文进「!」；后端已经分好两层的（`[code] 一句`）照它的一句（spec #239「错误怎么分两层」，#302）
+export const mcpCommandFault = (error: unknown, sentence: string): AppFault => ({
+  text: String(error),
+  fallback: sentence,
+});
 
 /// 一条写入 / 删除结果在提示条里能说的原因：分不出原因的（core 给了原文 `detail`）不说，只写失败句（spec #239 第 43 条，
 /// DESIGN「文案表达 › 出错的时候」）——`原子写入失败` 这类兜底句与系统原文不进提示条，原文已进日志
 export const mcpEntryReason = (entry: { message: string; detail?: string }): string | undefined =>
   entry.detail === undefined && entry.message !== "" ? entry.message : undefined;
+
+/// 撤销没撤成（`failed`）时提示条说什么（#320）。一次撤销涉及几个文件、前面几份已还原、到某一份停下时，
+/// 说清哪几份已还原、哪几份没有：`已还原 用户级 · Claude Code，用户级 · Codex 的配置文件之后又被改过`；没还原成的那份
+/// 说得出原因时接在后面（`… 未还原 · 没有写入权限`），分不出的不说（原文已进日志）。没还原的那几份的完整路径进副行
+/// （`paths`，提示条的 `stats`）。一份都没还原的照旧只说那一份的原因、不带副行。
+/// `placeOf`：文件路径 → 句子里的名字（`mcpUndoPlaceOf`）；认不出的（`.gitignore`）写文件名
+export function mcpUndoFailure(
+  report: McpUndoReport,
+  placeOf: (path: string) => string | undefined,
+): { reason?: string; paths: string[] } {
+  const restored = report.files.filter((f) => f.outcome === "restored" || f.outcome === "removed");
+  const stopped = report.files.find((f) => f.outcome === "failed" || f.outcome === "changed");
+  if (restored.length === 0 || stopped === undefined)
+    return { reason: mcpEntryReason(report), paths: [] };
+  const skipped = report.files.filter((f) => f.outcome === "skipped");
+  const fileName = (path: string) => path.split(/[/\\]/).pop() ?? path;
+  // 按文件去重（同一个文件只说一次），不按名字：两处同名时各说各的
+  const paths = (files: McpUndoFileResult[]) => [...new Set(files.map((f) => f.targetPath))];
+  const names = (files: McpUndoFileResult[], config: boolean) =>
+    listText(
+      paths(files).map((path) => {
+        const place = placeOf(path);
+        if (place === undefined) return fileName(path);
+        return config ? t("mcp.undo.configOf", { agent: place }) : place;
+      }),
+      "and",
+    );
+  const done = names(restored, false);
+  const left = [stopped, ...skipped];
+  if (stopped.outcome === "changed" && skipped.length === 0)
+    return {
+      reason: t("mcp.undo.partialChanged", {
+        restored: done,
+        changed: names([stopped], true),
+      }),
+      paths: paths(left),
+    };
+  const sentence = t("mcp.undo.partialFailed", { restored: done, failed: names(left, true) });
+  const why = mcpEntryReason(stopped);
+  return { reason: why === undefined ? sentence : `${sentence} · ${why}`, paths: paths(left) };
+}
+
+/// 撤销结果里的一个文件在句子里叫什么（`mcpUndoFailure`）：与表格同一套位置名（`copyName`，`用户级 · Codex`、
+/// `sophia · Codex`），项目、用户级分得开；Claude 桌面应用第三方模式那一份（`mirrors`）写
+/// `用户级 · Claude 桌面应用（第三方模型）`。不是哪个位置的（`.gitignore`）为 undefined
+export function mcpUndoPlaceOf(
+  locations: readonly McpLocation[],
+  copyName: (location: McpLocation) => string,
+): (path: string) => string | undefined {
+  return (path) => {
+    const own = locations.find((l) => l.path === path);
+    if (own) return copyName(own);
+    const mirrored = locations.find((l) => l.mirrors?.includes(path));
+    return mirrored ? t("mcp.undo.thirdPartyCopy", { name: copyName(mirrored) }) : undefined;
+  };
+}
 
 /// 批量写入里没写成的那一处：`加到 Codex 失败 · 没有写入权限，没动`；分不出原因时只写 `加到 Codex 失败`
 export function mcpFailedAt(location: string, entry: { message: string; detail?: string }): string {
@@ -351,6 +439,18 @@ export function mcpFailedAt(location: string, entry: { message: string; detail?:
 export function mcpWriteFault(error: string, sentence: string, paths: readonly string[]): AppFault {
   if (/^\[[a-z_]+]/.test(error)) return { text: error };
   return { text: [error, ...paths].join("\n"), fallback: sentence };
+}
+
+/// 撤销「修改生效范围」时，去处那几份没删成：`从 CardBox 删除失败 · 没有写入权限，未改动`；分不出原因时只写
+/// `从 CardBox 删除失败`（原文已进日志，提示条不放「!」）
+export function mcpTakeBackFailed(
+  place: string,
+  entry: { message: string; detail?: string },
+): string {
+  const message = mcpEntryReason(entry);
+  return message === undefined
+    ? t("mcp.scope.takeBackFailedPlain", { place })
+    : t("mcp.scope.takeBackFailed", { place, message });
 }
 
 /// ⊘ 格的提示框（spec #239 第 44 条）：第一行说人话，第二行写具体原因（SSE 传输、`${…}` 变量、字段名，
@@ -379,14 +479,15 @@ export interface McpColumn {
   /// 列 id：位置 id 的末段（`claude-code` / `claude-code:local` / `codex`）
   id: string;
   harnessId: string;
-  /// 列头：位置名里 agent 那一段
+  /// 列头：一个品牌只有这一列时是品牌名（`Claude`），合组时是这一格自己的产品名（`Claude Code`，读屏与图标用）
   name: string;
-  /// 列头第二行：Claude Code 合组时是组里这一格的小标（`仅自己` / `团队共享`）；别的列一般不写
+  /// 列头第二行：合组时组里这一格的小标——产品名去掉品牌名（`Code` / `Desktop`），同一产品占两格时是
+  /// Claude Code 的 `仅自己` / `团队共享`；别的列一般不写
   scope?: string;
-  /// 名字放不下一行时的后半截：Claude Desktop 写成 `Claude` + `Desktop` 两行（R2）
-  nameTail?: string;
-  /// 合组列头（`groupClaudeColumns`）：几列共用一个图标 + 名字，线下每格一个小标（`scope`）
+  /// 合组列头（`groupBrandColumns`）：同一品牌的几列共用一个图标 + 品牌名，线下每格一个小标（`scope`）
   group?: McpColumnGroup;
+  /// 这一格的产品在这里占不止一格（Claude Code 的仅自己 / 团队共享）
+  split?: boolean;
   /// 列在句子里的名字（提示框、提示条、读屏）：`Claude Code 团队共享` / `Codex`
   sentence: string;
   /// 列头提示框与选择行用的名字：只有一个位置时是那个位置名（`Claude Code · Local MCPs`），否则同 `sentence`
@@ -423,7 +524,19 @@ const scopeOf = (l: McpLocation) =>
     ?.replace(/ MCPs$/, "")
     .toLowerCase();
 
-export function mergeMcpDomains(pages: ReadonlyArray<McpDomain>): McpTable {
+/// 一个产品属于哪个品牌（core `list_harnesses`）：MCP 页按品牌合组
+export interface McpProduct {
+  id: string;
+  name: string;
+  brand: string;
+  brandName: string;
+}
+
+/// `products`：已安装产品的品牌（#251）。还没读回来时为空，各列各自成列（Claude Code 两格照旧合组）
+export function mergeMcpDomains(
+  pages: ReadonlyArray<McpDomain>,
+  products: ReadonlyArray<McpProduct> = [],
+): McpTable {
   const byId = new Map<string, Omit<McpColumn, "scope" | "sentence" | "label">>();
   for (const page of pages) {
     for (const target of page.targets) {
@@ -443,7 +556,9 @@ export function mergeMcpDomains(pages: ReadonlyArray<McpDomain>): McpTable {
     const clash = raw.filter((other) => other.name === col.name).length > 1;
     const scopes = new Set([...col.targets.values()].map(scopeOf));
     const scope = clash && scopes.size === 1 ? [...scopes][0] : undefined;
-    const sentence = scope ? `${col.name} ${scope}` : col.name;
+    const sentence = scope
+      ? `${col.name} ${scope}`
+      : mcpAgentName({ label: col.name, harnessId: col.harnessId });
     const only = col.targets.size === 1 ? [...col.targets.values()][0] : undefined;
     return { ...col, scope, sentence, label: only?.label ?? sentence };
   });
@@ -460,84 +575,79 @@ export function mergeMcpDomains(pages: ReadonlyArray<McpDomain>): McpTable {
   return {
     pages: [...pages],
     places,
-    columns: groupClaudeColumns(columns),
+    columns: groupBrandColumns(columns, products),
     rows: pages.flatMap((page) => page.rows.map((row) => ({ ...row, domainKey: page.key }))),
   };
 }
 
-// ===== Claude 的列头（spec 2026-09-30-mcp-claude-self-team R1 R2；DESIGN「MCP 支持哪些 agent › Claude 的列头」）=====
+// ===== 按品牌合组的列头（#251；Claude Code 两格见 spec 2026-09-30-mcp-claude-self-team R1；
+// DESIGN「MCP 支持哪些 agent › 列头」）=====
 
 export interface McpColumnGroup {
   id: string;
-  /// 组头的图标
+  /// 组头的图标：组里第一格的产品
   agentId: string;
-  /// 组头的名字（经 `Cap` 显示为大写）
+  /// 组头的名字：品牌名（经 `Cap` 显示为大写）
   name: string;
 }
 
-const CLAUDE_CODE_GROUP: McpColumnGroup = {
-  id: "claude-code",
-  agentId: "claude-code",
-  name: "Claude Code",
-};
+/// 合组里一格的小标：产品名去掉开头的品牌名（`Claude Desktop` → `Desktop`）；不以品牌名开头的写全名
+const productTag = (name: string, brand: string) =>
+  name.startsWith(`${brand} `) ? name.slice(brand.length + 1) : name;
 
 /**
- * Claude 的几列排在一起，位置在原来第一列 Claude 的位置；其余列先后不变。
- * - Claude Code 两格都在（范围里有项目）：合组，`CLAUDE CODE` 下小标 `仅自己` / `团队共享`——`全部` 与只看项目一模一样；
- *   只有一格（只看用户级）不画组，列头就是 `CLAUDE CODE`
- * - Claude Desktop 不进组，列头是它自己的名字，折两行 `CLAUDE` / `DESKTOP`（2026-09-30 产品负责人：「可以直接叫 claude desktop 吗」）
+ * 列按品牌排在一起，位置在这个品牌第一列原来的位置；组里按产品先后，同一产品的仅自己在团队共享前。
+ * - 一个品牌只有一列：列头写品牌名，不画组（只装了 Claude Code：`CLAUDE`）
+ * - 一个品牌有几列：合组——品牌图标 + 品牌名，线下每格小标是去掉品牌名的产品名（`CODE` / `DESKTOP`）；
+ *   Claude Code 在范围里有项目时占两格，这两格的小标是 `仅自己` / `团队共享`
+ * 品牌名单还没读回来时每个产品自成一个品牌、名字取位置名（Claude Code 两格照旧合成 `CLAUDE CODE` 一组）
  */
-export function groupClaudeColumns(columns: McpColumn[]): McpColumn[] {
-  const self = columns.find((c) => c.id === CLAUDE_SELF);
-  const team = columns.find((c) => c.id === CLAUDE_TEAM);
-  const desktop = columns.find((c) => c.harnessId === "claude-desktop");
-  const claude = [self, team, desktop].filter((c): c is McpColumn => c !== undefined);
-  if (claude.length === 0) return columns;
-  const both = self !== undefined && team !== undefined;
-  const lead: McpColumn[] = [];
-  if (self) {
-    const sentence = both ? t("mcp.claude.selfSentence", { agent: "Claude Code" }) : "Claude Code";
-    lead.push({
-      ...self,
-      name: "Claude Code",
-      scope: both ? t("mcp.claude.selfScope") : undefined,
-      group: both ? CLAUDE_CODE_GROUP : undefined,
-      sentence,
-      label: both ? t("mcp.claude.selfLabel", { agent: "Claude Code" }) : sentence,
+export function groupBrandColumns(
+  columns: McpColumn[],
+  products: ReadonlyArray<McpProduct>,
+): McpColumn[] {
+  const brandOf = (c: McpColumn) => {
+    const p = products.find((x) => x.id === c.harnessId);
+    return p ?? { id: c.harnessId, name: c.name, brand: c.harnessId, brandName: c.name };
+  };
+  const harnessOrder = [...new Set(columns.map((c) => c.harnessId))];
+  const rank = (c: McpColumn) =>
+    harnessOrder.indexOf(c.harnessId) * 2 + (c.id === CLAUDE_TEAM ? 1 : 0);
+  const brands = [...new Set(columns.map((c) => brandOf(c).brand))];
+  return brands.flatMap((brand) => {
+    const run = columns.filter((c) => brandOf(c).brand === brand).sort((x, y) => rank(x) - rank(y));
+    const info = brandOf(run[0]);
+    const split = (c: McpColumn) => run.filter((o) => o.harnessId === c.harnessId).length > 1;
+    const group: McpColumnGroup | undefined =
+      run.length > 1 ? { id: brand, agentId: run[0].harnessId, name: info.brandName } : undefined;
+    return run.map((col): McpColumn => {
+      const product = brandOf(col);
+      if (!split(col)) {
+        return group
+          ? { ...col, name: product.name, scope: productTag(product.name, info.brandName), group }
+          : { ...col, name: info.brandName, group: undefined };
+      }
+      const self = col.id === CLAUDE_SELF;
+      return {
+        ...col,
+        name: product.name,
+        scope: t(self ? "mcp.claude.selfScope" : "mcp.claude.teamScope"),
+        group,
+        split: true,
+        sentence: t(self ? "mcp.claude.selfSentence" : "mcp.claude.teamSentence", {
+          agent: product.name,
+        }),
+        label: t(self ? "mcp.claude.selfLabel" : "mcp.claude.teamLabel", { agent: product.name }),
+      };
     });
-  }
-  if (team) {
-    lead.push({
-      ...team,
-      name: "Claude Code",
-      scope: t("mcp.claude.teamScope"),
-      group: both ? CLAUDE_CODE_GROUP : undefined,
-      sentence: t("mcp.claude.teamSentence", { agent: "Claude Code" }),
-      label: t("mcp.claude.teamLabel", { agent: "Claude Code" }),
-    });
-  }
-  if (desktop) {
-    lead.push({
-      ...desktop,
-      name: "Claude",
-      nameTail: "Desktop",
-      scope: undefined,
-      group: undefined,
-      sentence: "Claude Desktop",
-      label: "Claude Desktop",
-    });
-  }
-  const at = columns.findIndex((c) => claude.includes(c));
-  const rest = (list: McpColumn[]) => list.filter((c) => !claude.includes(c));
-  return [...rest(columns.slice(0, at)), ...lead, ...rest(columns.slice(at))];
+  });
 }
 
 /// Claude Code 两格在项目行上的第二行说明（R6）：写在哪、给谁用；用户级的行不写
 export function claudeWhereText(columnId: string, place: string, domainKey: string): string | null {
   if (domainKey === "global") return null;
-  if (columnId === CLAUDE_SELF) return tSpaced("mcp.claude.whereSelf", { place });
-  if (columnId === CLAUDE_TEAM)
-    return tSpaced("mcp.claude.whereTeam", { place, file: ".mcp.json" });
+  if (columnId === CLAUDE_SELF) return t("mcp.claude.whereSelf", { place });
+  if (columnId === CLAUDE_TEAM) return t("mcp.claude.whereTeam", { place, file: ".mcp.json" });
   return null;
 }
 
@@ -567,12 +677,12 @@ export function claudeMoveTip(
   if (columnId === CLAUDE_TEAM)
     return {
       verb: t("mcp.claude.moveToTeam"),
-      detail: tSpaced("mcp.claude.moveToTeamDetail", { place, file: ".mcp.json" }),
+      detail: t("mcp.claude.moveToTeamDetail", { place, file: ".mcp.json" }),
     };
   if (columnId === CLAUDE_SELF)
     return {
       verb: t("mcp.claude.moveToSelf"),
-      detail: tSpaced("mcp.claude.moveToSelfDetail", { place, file: ".mcp.json" }),
+      detail: t("mcp.claude.moveToSelfDetail", { place, file: ".mcp.json" }),
     };
   return null;
 }
@@ -597,13 +707,13 @@ export const teamLost = () => t("mcp.claude.teamLost");
 /// 列头提示框另起的一行：项目位置下的 Copilot 列说一句它也读 Claude Code 的 `.mcp.json`——
 /// Copilot 的项目格只反映 `.github/mcp.json`，一个服务可能在 Copilot 里能用、格子却是 ○
 export function mcpColumnNote(
-  column: Pick<McpColumn, "harnessId" | "targets"> & Partial<Pick<McpColumn, "id" | "group">>,
+  column: Pick<McpColumn, "harnessId" | "targets"> & Partial<Pick<McpColumn, "id" | "split">>,
 ): string | undefined {
   // Claude Code 两格（合组时）：说存在哪、所以谁能用（2026-09-30 产品负责人：「悬浮提示里是不是可以告诉用户是存在哪里的，
   // 就是能够简单的解释为什么仅自己用」）。只看用户级时只有一格，没有要区分的，不写
-  if (column.group !== undefined && column.id === CLAUDE_SELF)
+  if (column.split && column.id === CLAUDE_SELF)
     return t("mcp.column.selfNote", { file: "~/.claude.json" });
-  if (column.group !== undefined && column.id === CLAUDE_TEAM)
+  if (column.split && column.id === CLAUDE_TEAM)
     return t("mcp.column.teamNote", { file: ".mcp.json" });
   if (column.harnessId !== "github-copilot") return undefined;
   return [...column.targets.keys()].some((key) => key !== "global")
@@ -611,13 +721,16 @@ export function mcpColumnNote(
     : undefined;
 }
 
-/// 多位置时这一行的位置没有这一列（空着、不可点）的提示框。Claude Desktop 没有项目级：直说
+/// 多位置时这一行的位置没有这一列（空着、不可点）的提示框。只有用户级的产品（Claude Desktop）没有项目级：直说
+/// （列在句子里的名字，Claude Desktop 照界面语言说「Claude 桌面应用」，见 `mcpAgentName`）
 export function mcpBlankTip(
   place: string,
-  column: Pick<McpColumn, "id" | "harnessId" | "sentence">,
+  column: Pick<McpColumn, "id" | "harnessId" | "sentence"> & Partial<Pick<McpColumn, "targets">>,
 ): { tip: string; detail?: string } {
-  if (column.harnessId === "claude-desktop")
-    return { tip: t("mcp.blank.noProjectLevel", { agent: "Claude Desktop" }) };
+  // 只在用户级有配置位置的产品（Claude Desktop）：它没有项目级，不按产品名特判
+  const userOnly =
+    column.targets !== undefined && [...column.targets.keys()].every((key) => key === "global");
+  if (userOnly) return { tip: t("mcp.blank.noProjectLevel", { agent: column.sentence }) };
   // 用户级本来就只给自己：团队共享只在项目里；写在哪个文件是第二行（spec #239 第 44 条）
   if (column.id === CLAUDE_TEAM)
     return {
@@ -831,21 +944,18 @@ export function scopeMoveBlocked(
   toName: string,
   labelOf: (locationId: string) => string,
 ): string | null {
-  if (to.key === from.key) return tSpaced("mcp.scope.alreadyIn", { place: toName });
+  if (to.key === from.key) return t("mcp.scope.alreadyIn", { place: toName });
   const taken = to.rows.some(
     (r) =>
       r.name === row.name && to.targets.some((t) => cellViewOf(r, t.id, labelOf)?.dot === "linked"),
   );
-  if (taken) return tSpaced("mcp.scope.taken", { place: toName, name: row.name });
+  if (taken) return t("mcp.scope.taken", { place: toName, name: row.name });
   if (plan.selections.length === 0 && plan.cant.length > 0) return plan.cant[0].reason;
   if (plan.selections.length === 0)
     return plan.stays.length > 0
-      ? tSpaced(
-          to.key === "global" ? "mcp.scope.agentsNoUserLevel" : "mcp.scope.agentsNoProjectLevel",
-          {
-            agents: listText(plan.stays),
-          },
-        )
+      ? t(to.key === "global" ? "mcp.scope.agentsNoUserLevel" : "mcp.scope.agentsNoProjectLevel", {
+          agents: listText(plan.stays),
+        })
       : t("mcp.scope.nothingToMove");
   return null;
 }
@@ -873,26 +983,26 @@ export function scopeChangeText(
   const stays = listText(plan.stays);
   const lines = [
     mode === "move"
-      ? tSpaced("mcp.scope.consMove", { agents, place: toName, from: fromName })
-      : tSpaced("mcp.scope.consAdd", { agents, place: toName, from: fromName }),
+      ? t("mcp.scope.consMove", { agents, place: toName, from: fromName })
+      : t("mcp.scope.consAdd", { agents, place: toName, from: fromName }),
   ];
   if (plan.stays.length > 0)
     lines.push(
       mode === "move"
-        ? tSpaced("mcp.scope.consStays", { agents: stays, from: fromName })
-        : tSpaced("mcp.scope.consNotAdded", { agents: stays }),
+        ? t("mcp.scope.consStays", { agents: stays, from: fromName })
+        : t("mcp.scope.consNotAdded", { agents: stays }),
     );
   for (const c of plan.cant)
     lines.push(
       mode === "move"
-        ? tSpaced("mcp.scope.consCantMove", { agent: c.agent, reason: c.reason, from: fromName })
-        : tSpaced("mcp.scope.consCantAdd", { agent: c.agent, reason: c.reason }),
+        ? t("mcp.scope.consCantMove", { agent: c.agent, reason: c.reason, from: fromName })
+        : t("mcp.scope.consCantAdd", { agent: c.agent, reason: c.reason }),
     );
   const team = (ids: string[]) => ids.some((id) => mcpColumnOf(id) === CLAUDE_TEAM);
   if (team(plan.selections.map((sel) => sel.targetId)))
-    lines.push(tSpaced("mcp.scope.consTeamWrite", { place: toName, gained: teamGained() }));
+    lines.push(t("mcp.scope.consTeamWrite", { place: toName, gained: teamGained() }));
   else if (mode === "move" && team(plan.selections.map((sel) => sel.sourceId)))
-    lines.push(tSpaced("mcp.scope.consTeamDrop", { from: fromName, lost: teamLost() }));
+    lines.push(t("mcp.scope.consTeamDrop", { from: fromName, lost: teamLost() }));
   return lines;
 }
 
@@ -908,15 +1018,15 @@ export function scopeMovedTrail(
     toKey === "global"
       ? t("mcp.scope.trailAllProjects")
       : mode === "move"
-        ? tSpaced("mcp.scope.trailOnly", { place: toName })
-        : tSpaced("mcp.scope.trailAlso", { place: toName }),
+        ? t("mcp.scope.trailOnly", { place: toName })
+        : t("mcp.scope.trailAlso", { place: toName }),
   ];
   const names = listText(stays);
   if (stays.length > 0)
     out.push(
       mode === "move"
-        ? tSpaced("mcp.scope.trailStays", { agents: names, from: fromName })
-        : tSpaced("mcp.scope.trailNotAdded", { agents: names }),
+        ? t("mcp.scope.trailStays", { agents: names, from: fromName })
+        : t("mcp.scope.trailNotAdded", { agents: names }),
     );
   return out;
 }

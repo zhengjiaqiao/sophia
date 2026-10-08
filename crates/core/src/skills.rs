@@ -1083,6 +1083,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: None,
+            readers: Vec::new(),
         }
     }
 
@@ -1099,6 +1100,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: None,
+            readers: Vec::new(),
         }
     }
 

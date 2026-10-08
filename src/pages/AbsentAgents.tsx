@@ -1,4 +1,3 @@
-import type { HarnessStatus } from "../types.ts";
 import { t } from "../i18n.ts";
 import { AgentIcon, SectionLabel } from "../ui/index.ts";
 
@@ -9,8 +8,8 @@ import { AgentIcon, SectionLabel } from "../ui/index.ts";
 export function AbsentAgents({
   agents,
 }: {
-  /// 未安装的全部 agent
-  agents: HarnessStatus[];
+  /// 未安装的全部品牌：图标用哪个产品的（`id`）+ 品牌名
+  agents: ReadonlyArray<{ id: string; name: string }>;
 }) {
   return (
     <div className="settings-page__absent">
@@ -19,8 +18,8 @@ export function AbsentAgents({
         {agents.map((agent) => (
           <div key={agent.id} className="settings-page__cell">
             <div className="settings-page__info">
-              <AgentIcon id={agent.id} name={agent.displayName} />
-              <span className="settings-page__name">{agent.displayName}</span>
+              <AgentIcon id={agent.id} name={agent.name} />
+              <span className="settings-page__name">{agent.name}</span>
             </div>
           </div>
         ))}

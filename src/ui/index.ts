@@ -36,6 +36,8 @@ export { NoticePanel, hintStackOf, useHintStack } from "./NoticePanel.tsx";
 export type { NoticePanelAction, NoticePanelProps, NoticeScope } from "./NoticePanel.tsx";
 
 export { Details } from "./Details.tsx";
+export { Coach, placeCoach } from "./Coach.tsx";
+export type { CoachProps } from "./Coach.tsx";
 export { HoverCard } from "./HoverCard.tsx";
 export type { HoverCardProps } from "./HoverCard.tsx";
 export type { DetailsProps } from "./Details.tsx";
@@ -44,6 +46,8 @@ export type { FaultViewProps, PageFaultProps } from "./PageFault.tsx";
 
 export { Confirm } from "./Confirm.tsx";
 export type { ConfirmProps } from "./Confirm.tsx";
+export { FormDialog, dismissFormDialogs, formDialogOpen } from "./FormDialog.tsx";
+export type { FormDialogProps } from "./FormDialog.tsx";
 export { FeedbackDialog } from "./FeedbackDialog.tsx";
 export type { FeedbackDialogProps } from "./FeedbackDialog.tsx";
 
@@ -120,6 +124,7 @@ export {
   IconDownload,
   IconEdit,
   IconEye,
+  IconGrip,
   IconImage,
   IconLeave,
   IconPlus,
@@ -139,3 +144,5 @@ export { Mono } from "./Mono.tsx";
 export type { MonoProps } from "./Mono.tsx";
 
 export { motionMs } from "./motion.ts";
+export { joinFrames, playJoin } from "./join.ts";
+export type { JoinBox, JoinFrame } from "./join.ts";

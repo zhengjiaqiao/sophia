@@ -60,9 +60,11 @@ test("旋转后的外框：不转时就是原框，转了会更宽更高", () =>
   assert.ok(Math.abs(b.right - b.left - 40) < 1e-9 && Math.abs(b.bottom - b.top - 100) < 1e-9);
 });
 
-test("名字卡上的 agent 都是应用认得的（harnesses.json 里有这个显示名）", () => {
+test("名字卡上的 agent 都是应用认得的（harnesses.json 里有这个显示名或品牌名）", () => {
   const file = fileURLToPath(new URL("../../crates/core/data/harnesses.json", import.meta.url));
-  const known = new Set((JSON.parse(readFileSync(file, "utf8")) as { harnesses: { display_name: string }[] }).harnesses.map((h) => h.display_name));
+  // 同一品牌的几个产品合成一列时，应用显示品牌名（#251：Kimi＝Kimi Code + Kimi 桌面版）
+  const data = JSON.parse(readFileSync(file, "utf8")) as { harnesses: { display_name: string }[]; brands: { name: string }[] };
+  const known = new Set([...data.harnesses.map((h) => h.display_name), ...data.brands.map((b) => b.name)]);
   for (const n of FILM_AGENTS) assert.ok(known.has(n), `${n} 不在 harnesses.json`);
   assert.equal(FILM_AGENTS.length, 8);
 });

@@ -55,7 +55,7 @@ test("CardBox 没有 Claude Code 目标：那一格画 ⊘（与写不进去的�
     overview: { domains: [], sources: [] },
     view,
     rows: view.rows,
-    placeLabel: "这几个位置下",
+    noDirsText: "这几个生效范围里还没有 skill",
     stateOf: (_r: unknown, a: string) => a,
     hiddenRows: new Set<string>(),
     dupReadout: new Map<string, string>(),

@@ -22,6 +22,8 @@ export interface TabItem<T extends string> {
   id: T;
   /// 原样写（`skills`）；拉丁 run 经 `Cap` 显示为大写
   label: string;
+  /// 字后的计数（12 tabular，同来源胶囊的计数；选模型浮层的 `已选 5`）：变了弹一下。不给就没有
+  count?: number;
 }
 
 export interface TabsProps<T extends string> {
@@ -96,6 +98,12 @@ export function Tabs<T extends string>({
             }}
           >
             {plain ? item.label : <Cap tone="nav">{item.label}</Cap>}
+            {item.count !== undefined ? (
+              // key 随数字变：换一个数就重新挂上，弹一下（DESIGN-components「页签」计数）
+              <span key={item.count} className="ss-tabs__count">
+                {item.count}
+              </span>
+            ) : null}
           </button>
         );
       })}

@@ -95,12 +95,16 @@ impl IoFail {
     }
 }
 
-/// `what` 是动作的英文标签（只进日志与错误记录，不是界面文案）
+/// `what` 是动作的英文标签（只进日志与错误记录，不是界面文案）。
+/// 内部错误上报的出错位置是调用处（`#[track_caller]` 一路透传到 `capture_internal`，#320）：
+/// 在调用处直接调或在闭包里调，不当函数值传
+#[track_caller]
 pub(crate) fn io_fail(what: &str, path: &Path, e: &io::Error) -> IoFail {
     io_fail_as(what, path, e, fail_kind_of(e))
 }
 
 /// 同 `io_fail`，类别由调用处给（建链用 `link_fail_kind_of`）
+#[track_caller]
 fn io_fail_as(what: &str, path: &Path, e: &io::Error, kind: Option<FailKind>) -> IoFail {
     let detail = crate::redact::redact(&e.to_string());
     log::warn!(
@@ -135,6 +139,7 @@ fn external(e: &io::Error, kind: Option<FailKind>) -> bool {
 }
 
 /// io 错误变失败结果，同时记下失败类别与原文
+#[track_caller]
 pub(crate) fn io_failed(
     what: &str,
     path: &Path,
@@ -315,7 +320,7 @@ pub fn trash(path: &Path) -> io::Result<()> {
     if entry_kind(path) != EntryKind::Dir {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            crate::t!("skills.sync.trashNotDir", path = path.display()),
+            crate::t!("skills.sync.trashNotDir"),
         ));
     }
     trash_context().delete(path).map_err(io::Error::other)
@@ -616,7 +621,7 @@ pub(crate) fn hold(body: &Path, root: &Path) -> io::Result<PathBuf> {
     if entry_kind(body) != EntryKind::Dir {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            crate::t!("skills.sync.holdNotDir", path = body.display()),
+            crate::t!("skills.sync.holdNotDir"),
         ));
     }
     let stamp = std::time::SystemTime::now()
@@ -1023,6 +1028,7 @@ mod tests {
             },
             exists: true,
             linked_whole_to: None,
+            readers: Vec::new(),
         }
     }
 
@@ -1197,6 +1203,30 @@ mod tests {
         // 要删的链本来就不在：不是软链，走的是「不是本体链」那句，不带类别
         assert!(matches!(report.entries[2].outcome, Outcome::Failed(_)));
         assert_eq!(report.entries[2].fail_kind, None);
+    }
+
+    /// #320：内部错误上报的出错位置是调 `io_fail` / `io_failed` 的那一行，不是 `io_fail_as` 里调
+    /// `capture_internal` 的那一行（否则同一类错误的签名全挤在一处，分不出是哪个动作出的错）
+    #[test]
+    fn 内部错误上报的位置是调用处() {
+        let tree = TempTree::new();
+        let p = tree.root().join("x");
+        let odd = || io::Error::from(io::ErrorKind::InvalidInput);
+        let (mut kind, mut detail) = (None, None);
+        crate::report::captured::take();
+        let at = line!() + 1;
+        let _ = io_fail("trash", &p, &odd());
+        let _ = io_failed("trash", &p, &odd(), &mut kind, &mut detail);
+        // 外部原因只计数，不按内部错误上报
+        let _ = io_fail("trash", &p, &io::Error::from(io::ErrorKind::NotFound));
+        let here = |line: u32| format!("{}:{line}", file!());
+        assert_eq!(
+            crate::report::captured::take(),
+            vec![
+                (crate::report::Kind::Internal, here(at)),
+                (crate::report::Kind::Internal, here(at + 1)),
+            ]
+        );
     }
 
     /// #273：原因为空时换成调用处的失败句，有原因时原样用

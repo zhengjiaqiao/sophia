@@ -1,4 +1,4 @@
-import { mcpLocationSentence } from "./mcpView.ts";
+import { mcpAgentName, mcpLocationSentence } from "./mcpView.ts";
 import type { McpDiff, McpFieldValue, McpIssue, McpLocation } from "./types.ts";
 
 /// MCP「N 份不一样」那一段的表（issue #114，画板 #105 第七稿第 2 节）：行优先，一行一份。
@@ -45,7 +45,7 @@ export function mcpCopyName(
   location: Pick<McpLocation, "id" | "label" | "harnessId" | "domain">,
 ): string {
   const agent =
-    location.domain === "global" ? location.label.split(" · ")[0] : mcpLocationSentence(location);
+    location.domain === "global" ? mcpAgentName(location) : mcpLocationSentence(location);
   return `${place} · ${agent}`;
 }
 
@@ -55,7 +55,5 @@ export function mcpOriginName(
   place: string,
   location: Pick<McpLocation, "id" | "label" | "harnessId" | "domain">,
 ): string {
-  return location.domain === "global"
-    ? location.label.split(" · ")[0]
-    : mcpCopyName(place, location);
+  return location.domain === "global" ? mcpAgentName(location) : mcpCopyName(place, location);
 }

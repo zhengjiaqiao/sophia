@@ -1,25 +1,25 @@
-import ClaudeModelsPage, { ClaudeListControls } from "../ClaudeModelsPage.tsx";
-import { CLAUDE_MODELS_NAME, claudeListStatus } from "../claudeView.ts";
-import { CodexListControls } from "../codexControls.tsx";
+import { ClaudeListControls, ClaudeRowTodos } from "../claudeControls.tsx";
+import { claudeListStatus, claudeModelsName, claudeOf, claudeTradeoff } from "../claudeView.ts";
+import { CodexListControls, CodexRowTodos } from "../codexControls.tsx";
 import { t } from "../i18n.ts";
-import ModelsTab from "../ModelsTab.tsx";
-import { codexListStatus } from "../modelsView.ts";
+import { codexListStatus, modeNote, portMovedNote, quotaNote } from "../modelsView.ts";
+import { agentInstalled } from "../pickView.ts";
 import { TrayClaudeModels, TrayThirdPartyModels } from "../TrayModelsRow.tsx";
 import { gatewayOn } from "../types.ts";
 import { UsageTrayRow } from "../usage/UsageTrayRow.tsx";
+import { WorkBuddyListControls, WorkBuddyRowTodos } from "../workbuddyControls.tsx";
+import { workbuddyListStatus } from "../workbuddyView.ts";
 import { usageHeadNote, usageShown } from "../usage/usageView.ts";
-import type { AgentEntry, AgentSection, AgentSectionProps } from "./agentRegistry.ts";
+import type { AgentEntry, AgentSection } from "./agentRegistry.ts";
 
-/// agent 注册表（扩展点，见 agentRegistry.ts）：模型页的列表行与推入页、托盘面板的块与行都从这里生成。
-/// - Codex：`用量`（只进托盘）+ `第三方模型`（列表一行、推入 Codex 的页、托盘一行，只在 macOS 上有）
+/// agent 注册表（扩展点，见 agentRegistry.ts）：模型页的行、托盘面板的块与行都从这里生成。
+/// - Codex：`用量`（只进托盘）+ `第三方模型`（模型页一行、托盘一行；只在 macOS 上、装了 Codex 才有）
 /// - Claude（id `claude-code`，网关的家 `claude`）：`用量`（只进托盘，已登录才有）+ `第三方模型`（桌面应用；
-///   列表一行、推入 Claude 的页、托盘一行，只在 macOS 上有，没装桌面应用也列出、开关禁用）
+///   模型页一行、托盘一行；只在 macOS 上、装了桌面应用才有——没装的不再列出灰开关，#259）
 /// 用量有自己的一页（侧栏「用量」⌘4），不在模型页里占节（spec 2026-09-26-menubar-usage 第 7 节）
-
-/// Codex 的页：今天由 ModelsTab 整页承担
-function CodexModels(props: AgentSectionProps) {
-  return <ModelsTab {...props} />;
-}
+/// - WorkBuddy：`第三方模型`（模型页一行；只在 macOS 上、装了 WorkBuddy 才有；改了它自动重读，没有重启键）
+/// 能接第三方模型的 agent 在后端也有一张表（core `model_providers::picks::MODEL_AGENTS`）：加一个 agent
+/// ＝两边各加一行
 
 /// 用量：托盘里一行，排在第三方模型之前（R10）
 const USAGE: AgentSection = {
@@ -45,8 +45,18 @@ export const AGENTS: ReadonlyArray<AgentEntry> = [
         get title() {
           return t("shell.agents.thirdPartyModels");
         },
-        Component: CodexModels,
-        listRow: { status: codexListStatus, Controls: CodexListControls },
+        available: (s) => agentInstalled(s.gateway, s.modelsSupported, "codex"),
+        listRow: {
+          status: codexListStatus,
+          note: (s) =>
+            s.gateway === null
+              ? null
+              : (portMovedNote(s.gateway, "codex") ??
+                quotaNote(s.gateway, s.usage) ??
+                modeNote(s.gateway)),
+          Controls: CodexListControls,
+          Todos: CodexRowTodos,
+        },
         trayRow: TrayThirdPartyModels,
       },
     ],
@@ -57,10 +67,10 @@ export const AGENTS: ReadonlyArray<AgentEntry> = [
     // 第三方模型读网关状态里的家 `claude`（spec R45）
     id: "claude-code",
     name: "Claude",
-    // 模型页里叫 `Claude Desktop`（这一行只改桌面应用）；托盘与用量仍用上面的 `Claude`
-    modelsName: CLAUDE_MODELS_NAME,
+    // 模型页里的名字（这一行只改桌面应用）；托盘与用量仍用上面的 `Claude`
+    modelsName: claudeModelsName,
     gateway: "claude",
-    // 用量出行（已登录、桌面应用有记录，或装了桌面应用、给「连接 Claude 用量」），或本机支持第三方模型（没装桌面应用照样列出，开关禁用）
+    // 用量出行（已登录、桌面应用有记录，或装了桌面应用、给「连接 Claude 用量」），或本机支持第三方模型
     available: (s) => usageShown(s, "claude-code") || s.modelsSupported,
     indicator: (s) => gatewayOn(s.gateway, "claude"),
     headNote: (s) => usageHeadNote(s, "claude-code"),
@@ -71,10 +81,39 @@ export const AGENTS: ReadonlyArray<AgentEntry> = [
         get title() {
           return t("shell.agents.thirdPartyModels");
         },
-        available: (s) => s.modelsSupported,
-        Component: ClaudeModelsPage,
-        listRow: { status: claudeListStatus, Controls: ClaudeListControls },
+        available: (s) => agentInstalled(s.gateway, s.modelsSupported, "claude"),
+        listRow: {
+          status: claudeListStatus,
+          note: (s) => {
+            const view = claudeOf(s);
+            if (view === null || s.gateway === null) return null;
+            return portMovedNote(s.gateway, "claude") ?? (view.enabled ? claudeTradeoff() : null);
+          },
+          Controls: ClaudeListControls,
+          Todos: ClaudeRowTodos,
+        },
         trayRow: TrayClaudeModels,
+      },
+    ],
+  },
+  {
+    // WorkBuddy（#266）：只有 `第三方模型`，模型页一行；装了才有。没有托盘行（托盘不出这一块）
+    id: "workbuddy",
+    name: "WorkBuddy",
+    gateway: "workbuddy",
+    available: (s) => agentInstalled(s.gateway, s.modelsSupported, "workbuddy"),
+    indicator: (s) => gatewayOn(s.gateway, "workbuddy"),
+    sections: [
+      {
+        id: "third-party-models",
+        get title() {
+          return t("shell.agents.thirdPartyModels");
+        },
+        listRow: {
+          status: workbuddyListStatus,
+          Controls: WorkBuddyListControls,
+          Todos: WorkBuddyRowTodos,
+        },
       },
     ],
   },

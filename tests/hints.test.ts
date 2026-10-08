@@ -88,12 +88,12 @@ test("句子一行、只说结果：扫描只说在哪些 agent 中找到几个�
   assert.equal(HINTS["first-scan-empty"](EXAMPLE), "Claude Code、Codex、OpenCode 中还没有 skill");
   assert.equal(HINTS["first-scan-empty"]({ agents: [], skills: 0 }), "本机还没有 skill");
   assert.equal(HINTS["first-scan-skills"]({ agents: [], skills: 3 }), "在本机找到 3 个 skill");
-  // Codex：只说结果；配置文件路径挪到开关的提示框（models-view 测试）
+  // 模型页：几家通用，只说结果；配置文件路径挪到开关的提示框（models-view 测试）
   assert.equal(
-    HINTS["first-codex"](EXAMPLE),
-    "打开后会改一处 Codex 的设置，让它能用第三方模型；关掉就恢复原样。改完要重启 Codex 才生效。",
+    HINTS["first-models"](EXAMPLE),
+    "打开一个 agent 的开关，会改它的一处设置，让它能用第三方模型；关掉就恢复原样。要重启才生效的，行上会提示。",
   );
-  assert.doesNotMatch(HINTS["first-codex"](EXAMPLE), /config\.toml|Sophia/);
+  assert.doesNotMatch(HINTS["first-models"](EXAMPLE), /config\.toml|Sophia/);
 });
 
 test("空库时选中只说结果的那一句，并带「前往发现」入口；查找过的文件夹放悬停（#274）", () => {
@@ -152,9 +152,9 @@ test("没有扫描页时的空态（LocationFrame）同样只说结果并给「�
   const frame = readFileSync(new URL("../src/LocationFrame.tsx", import.meta.url), "utf8");
   assert.match(frame, /secondary=\{empty\.action\}/);
   const { Empty } = await import("../src/ui/Empty.tsx");
-  const { t, tSpaced } = await import("../src/i18n.ts");
+  const { t } = await import("../src/i18n.ts");
   const html = render(Empty, {
-    description: tSpaced("skills.empty.noDirs", { place: "用户级" }),
+    description: t("skills.empty.noDirs", { place: "用户级" }),
     art: "noDirs",
     secondary: { label: t("skills.empty.goDiscover"), onClick: () => {} },
   });
@@ -172,11 +172,11 @@ test("没有扫描页时的空态（LocationFrame）同样只说结果并给「�
   );
 });
 
-test("登记表顺序：首次扫描两条在前，Codex 页、MCP 页的 OpenCode 说明在后", () => {
+test("登记表顺序：首次扫描两条在前，模型页、MCP 页的 OpenCode 说明在后", () => {
   assert.deepEqual(HINT_ORDER, [
     "first-scan-skills",
     "first-scan-empty",
-    "first-codex",
+    "first-models",
     "mcp-opencode",
   ]);
 });
@@ -192,7 +192,7 @@ test("× 关掉首次扫描任一条＝两条都记看过；关掉 Codex 那条�
     "first-scan-empty",
     "first-scan-skills",
   ]);
-  assert.deepEqual(dismissIds("first-codex"), ["first-codex"]);
+  assert.deepEqual(dismissIds("first-models"), ["first-models"]);
 });
 
 test("学会只记它自己；空库那条（加来源）两条首次扫描都记", () => {
@@ -204,19 +204,19 @@ test("学会只记它自己；空库那条（加来源）两条首次扫描都�
 });
 
 test("看过表没读到时一条都不出", () => {
-  assert.equal(pickHint(["first-codex"], null), null);
+  assert.equal(pickHint(["first-models"], null), null);
 });
 
 test("一次只出一条：几条同时有资格按登记表顺序取第一条", () => {
   const none = new Set<string>();
-  assert.equal(pickHint(["first-codex", "first-scan-empty"], none), "first-scan-empty");
-  assert.equal(pickHint(["first-codex", "first-scan-skills"], none), "first-scan-skills");
+  assert.equal(pickHint(["first-models", "first-scan-empty"], none), "first-scan-empty");
+  assert.equal(pickHint(["first-models", "first-scan-skills"], none), "first-scan-skills");
   assert.equal(pickHint([], none), null);
 });
 
 test("看过的跳过，轮到下一条", () => {
   const seen = new Set<string>(["first-scan-empty"]);
-  assert.equal(pickHint(["first-scan-empty", "first-codex"], seen), "first-codex");
+  assert.equal(pickHint(["first-scan-empty", "first-models"], seen), "first-models");
   assert.equal(pickHint(["first-scan-empty"], seen), null);
 });
 
@@ -244,11 +244,11 @@ test("争不争：有资格、没被挡、这次没让过位、没看过才争",
 test("读到看过表之前不出；读到后有资格的那条出", async () => {
   const f = fakePersist();
   const store = createHintStore(f.persist);
-  store.claim("first-codex");
+  store.claim("first-models");
   assert.equal(store.getSnapshot().visible, null);
   assert.equal(store.getSnapshot().loaded, false);
   await store.load();
-  assert.equal(store.getSnapshot().visible, "first-codex");
+  assert.equal(store.getSnapshot().visible, "first-models");
 });
 
 test("看过表只读一次", async () => {
@@ -263,7 +263,7 @@ test("读失败：安静不出，下次再读", async () => {
   const f = fakePersist();
   f.failList(true);
   const store = createHintStore(f.persist);
-  store.claim("first-codex");
+  store.claim("first-models");
   const orig = console.error;
   console.error = () => {};
   try {
@@ -275,24 +275,24 @@ test("读失败：安静不出，下次再读", async () => {
   assert.equal(store.getSnapshot().visible, null);
   f.failList(false);
   await store.load();
-  assert.equal(store.getSnapshot().visible, "first-codex");
+  assert.equal(store.getSnapshot().visible, "first-models");
   assert.deepEqual(f.calls, ["list", "list"]);
 });
 
 test("core 里已看过的不出；空串忽略", async () => {
-  const { store } = await loadedStore(["first-codex", ""]);
-  store.claim("first-codex");
+  const { store } = await loadedStore(["first-models", ""]);
+  store.claim("first-models");
   assert.equal(store.getSnapshot().visible, null);
-  assert.deepEqual([...store.getSnapshot().seen], ["first-codex"]);
+  assert.deepEqual([...store.getSnapshot().seen], ["first-models"]);
 });
 
 test("整个应用同一时刻最多一条：撤回排在前面的，后面的接上", async () => {
   const { store } = await loadedStore();
   const releaseEmpty = store.claim("first-scan-empty");
-  store.claim("first-codex");
+  store.claim("first-models");
   assert.equal(store.getSnapshot().visible, "first-scan-empty");
   releaseEmpty();
-  assert.equal(store.getSnapshot().visible, "first-codex");
+  assert.equal(store.getSnapshot().visible, "first-models");
 });
 
 test("× 关掉首次扫描那条：两条都记看过、都写进 core，收起", async () => {
@@ -322,11 +322,11 @@ test("学会空库那条（加了来源）两条首次扫描都记：表里有�
 
 test("关掉 Codex 那条只记它自己", async () => {
   const { store, stored } = await loadedStore();
-  store.claim("first-codex");
-  store.dismiss("first-codex");
+  store.claim("first-models");
+  store.dismiss("first-models");
   assert.equal(store.getSnapshot().visible, null);
   await flush();
-  assert.deepEqual(stored(), ["first-codex"]);
+  assert.deepEqual(stored(), ["first-models"]);
 });
 
 test("学会可以反复调：已看过就不再写 core", async () => {
@@ -345,26 +345,26 @@ test("乐观更新：写 core 还没回来就已收起；写失败也不回滚",
   const logged: unknown[] = [];
   console.error = (...a: unknown[]) => logged.push(a);
   try {
-    store.claim("first-codex");
-    store.dismiss("first-codex");
+    store.claim("first-models");
+    store.dismiss("first-models");
     assert.equal(store.getSnapshot().visible, null);
     await flush();
   } finally {
     console.error = orig;
   }
   assert.equal(store.getSnapshot().visible, null);
-  assert.ok(store.getSnapshot().seen.has("first-codex"));
+  assert.ok(store.getSnapshot().seen.has("first-models"));
   assert.equal(logged.length, 1);
 });
 
 test("还没读到就关掉：读到后与 core 里的合并，不会又冒出来", async () => {
-  const f = fakePersist(["first-codex"]);
+  const f = fakePersist(["first-models"]);
   const store = createHintStore(f.persist);
   store.claim("first-scan-skills");
   store.dismiss("first-scan-skills");
   await store.load();
   assert.deepEqual([...store.getSnapshot().seen].sort(), [
-    "first-codex",
+    "first-models",
     "first-scan-empty",
     "first-scan-skills",
   ]);
@@ -375,11 +375,11 @@ test("订阅者在出现 / 收起时收到通知", async () => {
   const { store } = await loadedStore();
   let n = 0;
   const off = store.subscribe(() => n++);
-  const release = store.claim("first-codex");
+  const release = store.claim("first-models");
   release();
   release(); // 重复撤回不再通知
   off();
-  store.claim("first-codex");
+  store.claim("first-models");
   assert.equal(n, 2);
 });
 

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { t as say } from "../src/i18n.ts";
+import { sentenceSaid } from "./copy.ts";
 import { setHome } from "../src/pathText.ts";
 import {
-  CLAUDE_DESKTOP,
   notLinkedReason,
   addLabel,
   agentRows,
@@ -11,7 +11,6 @@ import {
   connectionText,
   defaultChecked,
   defaultInstallLocation,
-  directReaderNote,
   downloadLine,
   downloadTip,
   fieldTag,
@@ -53,6 +52,7 @@ import {
   skillNameOf,
   skillRowView,
   takenAgents,
+  USER_LOCATION,
   writableCount,
 } from "../src/market/installView.ts";
 import type {
@@ -65,19 +65,30 @@ import type {
 } from "../src/types.ts";
 
 const HOME = "/Users/you";
+const CLAUDE_DESKTOP = "claude-desktop";
 setHome(HOME);
 
-const agent = (id: string, name: string) => ({ id, name });
+const agent = (id: string, name: string, skills = true, mcp = true) => ({
+  id,
+  name,
+  skills,
+  mcp,
+  mcpTrust: false,
+  brand: id,
+  brandName: name,
+  skillUser: skills ? id : null,
+  skillProject: skills ? id : null,
+});
 const CC = agent("claude-code", "Claude Code");
 const CODEX = agent("codex", "Codex");
 const CURSOR = agent("cursor", "Cursor");
 const GEMINI = agent("gemini-cli", "Gemini CLI");
-const OPENCODE = agent("opencode", "OpenCode");
-const CLINE = agent("cline", "Cline");
-const DESKTOP = agent(CLAUDE_DESKTOP, "Claude Desktop");
+const OPENCODE = agent("opencode", "OpenCode", true, false);
+const CLINE = agent("cline", "Cline", true, false);
+const DESKTOP = agent(CLAUDE_DESKTOP, "Claude Desktop", false, true);
 const COPILOT = agent("github-copilot", "GitHub Copilot");
-/// 已安装的 agent（agent 表的先后）
-const INSTALLED = [CC, CODEX, CURSOR, GEMINI, OPENCODE, CLINE, DESKTOP, COPILOT];
+/// 已安装的产品（品牌的先后，同一品牌的挨着：Claude Desktop 紧跟 Claude Code）
+const INSTALLED = [CC, DESKTOP, CODEX, CURSOR, GEMINI, OPENCODE, CLINE, COPILOT];
 /// 设置里 `显示的 agent`
 const SHOWN = ["claude-code", "codex", "cursor", "gemini-cli"];
 const PROJECT = "project:/Users/you/Project/CardBox";
@@ -121,7 +132,7 @@ test("生效范围下面：先一句结果，再一行落点路径（#275：用�
 
 // ───────── 给谁用 / 写进哪些 agent ─────────
 
-test("勾选行：名单里的在前，其余已安装的在后；skill 不列 Claude Desktop", () => {
+test("勾选行：名单里的在前，其余已安装的在后；skill 只列有 skill 目录的（不列 Claude Desktop）", () => {
   const rows = agentRows("skill", INSTALLED, SHOWN).map((a) => a.id);
   assert.deepEqual(rows, [
     "claude-code",
@@ -134,32 +145,79 @@ test("勾选行：名单里的在前，其余已安装的在后；skill 不列 C
   ]);
 });
 
-test("MCP 勾选行：只列能写 MCP 的，Claude Desktop 跟在名单那一段后面（画板 09）", () => {
-  const rows = agentRows("mcp", INSTALLED, ["claude-code", "codex", "gemini-cli", "opencode"]);
+test("MCP 勾选行：只列能写 MCP 的；名单按品牌，勾着 Claude 时 Claude Desktop 跟 Claude Code 一起在前（#251）", () => {
+  const shown = ["claude-code", CLAUDE_DESKTOP, "codex", "gemini-cli", "opencode"];
+  const rows = agentRows("mcp", INSTALLED, shown);
   assert.deepEqual(
     rows.map((a) => a.id),
-    ["claude-code", "codex", "gemini-cli", CLAUDE_DESKTOP, "cursor", "github-copilot"],
+    ["claude-code", CLAUDE_DESKTOP, "codex", "gemini-cli", "cursor", "github-copilot"],
   );
   // 没装 Claude Desktop 就没有这一行
   assert.ok(!agentRows("mcp", [CC, CODEX], SHOWN).some((a) => a.id === CLAUDE_DESKTOP));
+  // 能不能写 MCP 看 core 给的标记，不看前端的名单：新接的 agent 只要 core 支持就出现
+  const workbuddy = agent("workbuddy", "WorkBuddy");
+  assert.deepEqual(
+    agentRows("mcp", [CC, workbuddy, OPENCODE], []).map((a) => a.id),
+    ["claude-code", "workbuddy"],
+  );
 });
 
-test("默认勾：只勾设置里名单上的（不记上次的选择）；MCP 另外 Claude Desktop 跟着 Claude Code", () => {
+// 评审 #13（#251）：skill 勾选行按「这个位置的 skill 文件夹」出——同一品牌共用一处的合成一行、写品牌名，
+// 这个位置没有 skill 文件夹的产品不列（Kimi 桌面版没有项目级）
+test("skill 勾选行：Kimi Code 与 Kimi 桌面版在用户级合成一行 `Kimi`；装到项目时只有 Kimi Code；只装了桌面版时项目里不列", () => {
+  const kimi = (id: string, name: string, project: string | null) => ({
+    ...agent(id, name, true, true),
+    brand: "kimi",
+    brandName: "Kimi",
+    skillUser: "kimi-cli",
+    skillProject: project,
+  });
+  const code = kimi("kimi-cli", "Kimi Code", "kimi-cli");
+  const desktop = kimi("kimi-desktop", "Kimi 桌面版", null);
+  const user = agentRows("skill", [CODEX, code, desktop], [], USER_LOCATION);
+  assert.deepEqual(
+    user.map((a) => [a.id, a.name]),
+    [
+      ["codex", "Codex"],
+      ["kimi-cli", "Kimi"],
+    ],
+  );
+  const project = agentRows("skill", [CODEX, code, desktop], [], PROJECT);
+  assert.deepEqual(
+    project.map((a) => [a.id, a.name]),
+    [
+      ["codex", "Codex"],
+      ["kimi-cli", "Kimi Code"],
+    ],
+  );
+  assert.deepEqual(
+    agentRows("skill", [desktop], [], PROJECT).map((a) => a.id),
+    [],
+  );
+  // 只装了桌面版：用户级那一行照列，名字是它自己的；名单里勾着它，这一行默认勾上
+  const alone = agentRows("skill", [desktop], ["kimi-desktop"], USER_LOCATION);
+  assert.deepEqual(
+    alone.map((a) => [a.id, a.name]),
+    [["kimi-cli", "Kimi 桌面版"]],
+  );
+  assert.deepEqual(defaultChecked(alone, ["kimi-desktop"]), ["kimi-cli"]);
+  assert.deepEqual(defaultChecked(user, ["kimi-desktop"]), ["kimi-cli"]);
+});
+
+test("默认勾：只勾设置里名单上的（不记上次的选择）；名单按品牌给出产品，不另写谁跟着谁", () => {
   const skillRows = agentRows("skill", INSTALLED, SHOWN);
-  assert.deepEqual(defaultChecked("skill", skillRows, SHOWN), SHOWN);
-  const mcpRows = agentRows("mcp", INSTALLED, SHOWN);
-  assert.deepEqual(defaultChecked("mcp", mcpRows, SHOWN), [
-    "claude-code",
-    "codex",
-    "cursor",
-    "gemini-cli",
-    CLAUDE_DESKTOP,
-  ]);
-  // 名单里没有 Claude Code：Desktop 不跟
-  assert.ok(!defaultChecked("mcp", mcpRows, ["codex"]).includes(CLAUDE_DESKTOP));
+  assert.deepEqual(defaultChecked(skillRows, SHOWN), SHOWN);
+  const withClaude = ["claude-code", CLAUDE_DESKTOP, "codex", "cursor", "gemini-cli"];
+  // skill 那边 Claude Desktop 不在勾选行里，名单里有它也不勾
+  assert.deepEqual(defaultChecked(skillRows, withClaude), SHOWN);
+  const mcpRows = agentRows("mcp", INSTALLED, withClaude);
+  assert.deepEqual(defaultChecked(mcpRows, withClaude), withClaude);
+  // 名单里没有 Claude：两个都不勾
+  assert.deepEqual(defaultChecked(mcpRows, ["codex"]), ["codex"]);
+  // 谁勾不勾只看名单，不再写死「Claude Desktop 跟着 Claude Code」
+  assert.deepEqual(defaultChecked(mcpRows, ["claude-code"]), ["claude-code"]);
   // 名单里有、但此刻不在列的不勾
-  assert.deepEqual(defaultChecked("skill", skillRows, ["gone", "codex"]), ["codex"]);
-  assert.equal(directReaderNote(), "直接读取，不用链接");
+  assert.deepEqual(defaultChecked(skillRows, ["gone", "codex"]), ["codex"]);
 });
 
 const check = (
@@ -189,12 +247,12 @@ test("MCP 勾选行后面那一句：写不过去的不能勾、就地说原因�
 
   const reason =
     "只写 filesystem · github 是远程服务器，要在 Claude Desktop 自己的「连接器」里添加";
-  const partial = check(CLAUDE_DESKTOP, "partial", { reason, note: "重启 Claude Desktop 后生效" });
+  const partial = check(CLAUDE_DESKTOP, "partial", { reason, note: "重启 Claude 桌面应用后生效" });
   assert.deepEqual(mcpRowView(partial, false), { note: reason });
-  assert.deepEqual(mcpRowView(partial, true), { note: `${reason} · 重启 Claude Desktop 后生效` });
+  assert.deepEqual(mcpRowView(partial, true), { note: `${reason} · 重启 Claude 桌面应用后生效` });
 
-  const desktop = check(CLAUDE_DESKTOP, "ok", { note: "重启 Claude Desktop 后生效" });
-  assert.deepEqual(mcpRowView(desktop, true), { note: "重启 Claude Desktop 后生效" });
+  const desktop = check(CLAUDE_DESKTOP, "ok", { note: "重启 Claude 桌面应用后生效" });
+  assert.deepEqual(mcpRowView(desktop, true), { note: "重启 Claude 桌面应用后生效" });
   assert.deepEqual(mcpRowView(desktop, false), {});
   assert.deepEqual(mcpRowView(check("claude-code", "same"), true), { note: sameNote() });
   assert.deepEqual(mcpRowView(undefined, true), {});
@@ -415,7 +473,7 @@ test("从链接安装的几句：认出一行、列表表头、主动作、在 G
   assert.equal(skillNameOf("me/my-skill", null), "my-skill");
 });
 
-// ───────── 从 JSON 添加 ─────────
+// ───────── 粘贴 MCP 配置 ─────────
 
 const github: McpDefinitionInput = {
   name: "github",
@@ -431,10 +489,14 @@ const filesystem: McpDefinitionInput = {
   env: { ROOT: "${ROOT_DIR}", TOKEN: "${GITHUB_PAT}" },
 };
 
-test("从 JSON 添加的几句：表头、主动作、第几行错、连接方式", () => {
+test("#320 粘贴配置的错误行：后端的一句已以「第 N 行：」开头（core `parse_error`），只出现一次", () => {
+  const message = say("mcp.parse.atLine", { line: 4, message: "少了一个逗号" });
+  assert.equal(parseErrorLine({ line: 4, message }), "第 4 行：少了一个逗号");
+});
+
+test("粘贴 MCP 配置的几句：表头、主动作、第几行错、连接方式", () => {
   assert.equal(jsonHeader(2, 2), "认出 2 个 · 已选 2");
   assert.equal(addLabel(2), "添加 2 个");
-  assert.equal(parseErrorLine({ line: 3, message: "少了一个逗号" }), "第 3 行：少了一个逗号");
   assert.equal(parseErrorLine({ line: null, message: "认不出这段配置" }), "认不出这段配置");
   assert.equal(connectionText(github), "在线服务 · https://api.githubcopilot.com/mcp/");
   assert.equal(
@@ -592,7 +654,7 @@ test("装 skill 之后：✓ 已安装 pdf（例行）；部分没装上是部�
 });
 
 test("M14 装完：勾了的 agent 那里已有同名的没链上，是部分失败一窗：已安装 pdf · Claude Code 没链上：那里已有同名的", () => {
-  const taken = "那里已有同名的";
+  const taken = "已有同名的 skill";
   const one = skillInstalledToast(
     outcome(["pdf"], {}, [{ harnessId: "claude-code", name: "pdf", reason: taken }]),
     INSTALLED,
@@ -602,7 +664,7 @@ test("M14 装完：勾了的 agent 那里已有同名的没链上，是部分失
   assert.equal(say(one.sentence, { names: "pdf" }), "已安装 pdf");
   assert.deepEqual(one.names, ["pdf"]);
   assert.equal(one.tally, undefined, "没有没装上的，不写 1 ✓ · 0 ⊘");
-  assert.equal(one.reason, "Claude Code 没链上：那里已有同名的");
+  assert.equal(one.reason, "加到 Claude Code 失败 · 已有同名的 skill");
 
   const two = skillInstalledToast(
     outcome(["pdf"], {}, [
@@ -612,7 +674,7 @@ test("M14 装完：勾了的 agent 那里已有同名的没链上，是部分失
     INSTALLED,
   );
   assert.equal(two.kind, "partial");
-  assert.equal(two.reason, "Claude Code、Cursor 没链上：那里已有同名的");
+  assert.equal(two.reason, "加到 Claude Code、Cursor 失败 · 已有同名的 skill");
 
   // 别的原因照抄后端那一句，按原因分开说
   const mixed = skillInstalledToast(
@@ -624,7 +686,7 @@ test("M14 装完：勾了的 agent 那里已有同名的没链上，是部分失
   );
   assert.equal(
     mixed.reason,
-    "Claude Code 没链上：那里已有同名的；Codex 没链上：无法写入 Codex 的 skills 目录",
+    "加到 Claude Code 失败 · 已有同名的 skill；加到 Codex 失败 · 无法写入 Codex 的 skills 目录",
   );
 });
 
@@ -661,8 +723,8 @@ test("M14 装之前：那里已有同名 skill 的 agent 不能勾，名字后�
     { harnessId: "codex", dir: "/Users/you/.codex/skills", chosen: false, taken: [] },
   ];
   const cc = skillRowView(dirs, "claude-code", ["pdf"]);
-  assert.equal(cc.disabledReason, "那里已经有一个同名的 pdf，不会覆盖");
-  assert.equal(cc.note, "那里已经有一个同名的 pdf，不会覆盖");
+  assert.equal(cc.disabledReason, "已有同名的 pdf，不会覆盖");
+  assert.equal(cc.note, "已有同名的 pdf，不会覆盖");
   assert.deepEqual(skillRowView(dirs, "codex", ["pdf"]), {});
   // 不在表里的（直接读取的、计划还没回来）照常能勾
   assert.deepEqual(skillRowView(dirs, "cline", ["pdf"]), {});
@@ -692,7 +754,7 @@ test("加 MCP 之后（#276）：✓ 已加到 [图标…] brave-search，Deskto
   const checks = [
     check("claude-code", "ok"),
     check("codex", "ok"),
-    check(CLAUDE_DESKTOP, "ok", { note: "重启 Claude Desktop 后生效" }),
+    check(CLAUDE_DESKTOP, "ok", { note: "重启 Claude 桌面应用后生效" }),
     check("cursor", "same"),
   ];
   const report: McpReport = {
@@ -706,13 +768,13 @@ test("加 MCP 之后（#276）：✓ 已加到 [图标…] brave-search，Deskto
   };
   const t = mcpInstalledToast(report, checks, [CC, CODEX, DESKTOP, CURSOR], "global");
   assert.equal(t.kind, "success");
-  assert.equal(say(t.sentence, { agents: "[图]", names: "名字" }), "已加到 [图] 名字");
+  assert.equal(sentenceSaid(t.sentence!), "已加到 [图] 名字");
   assert.deepEqual(t.names, ["brave-search"]);
   assert.deepEqual(
     t.agents.map((a) => a.id),
     ["claude-code", "codex", CLAUDE_DESKTOP],
   );
-  assert.deepEqual(t.trail, ["重启 Claude Desktop 后生效"]);
+  assert.deepEqual(t.trail, ["重启 Claude 桌面应用后生效"]);
   assert.equal(t.reason, undefined);
   // Claude Desktop 第三方模式那一份没写成：仍是成功一行，那一句接在原因的位置（spec 2026-10-05-mcp-claude-3p）
   const NOTE = "第三方模式的那一份没写成：目标配置无法解析或不安全";
@@ -730,7 +792,7 @@ test("加 MCP 之后（#276）：✓ 已加到 [图标…] brave-search，Deskto
   );
   assert.equal(mirrored.kind, "success");
   assert.equal(mirrored.reason, NOTE);
-  assert.deepEqual(mirrored.trail, ["重启 Claude Desktop 后生效"]);
+  assert.deepEqual(mirrored.trail, ["重启 Claude 桌面应用后生效"]);
 
   const partial = mcpInstalledToast(
     {
@@ -756,7 +818,7 @@ test("加 MCP 之后（#276）：✓ 已加到 [图标…] brave-search，Deskto
     "global",
   );
   assert.equal(none.kind, "cannot");
-  assert.equal(say(none.sentence, { agents: "[图]", names: "名字" }), "名字 添加失败");
+  assert.equal(sentenceSaid(none.sentence!), "名字 添加失败");
   assert.deepEqual(
     none.agents.map((a) => a.id),
     ["codex"],
@@ -789,6 +851,46 @@ test("全选那一行：三态框、钉在顶上、个数；都装过了时灰�
   const none = render(PickRow, { ...base, checked: false, blocked: "都已经装过了" });
   assert.match(none, /class="install-pick is-blocked is-pinned"/);
   assert.match(none, /都已经装过了/);
+});
+
+test("从链接安装的一行：仓库内路径不常显，悬停名字时出（第二层，等宽，#321）；不能勾的行也出", async () => {
+  const { render } = await import("./ui-render.ts");
+  const { PickRow } = await import("../src/market/InstallParts.tsx");
+  const { Mono } = await import("../src/ui/index.ts");
+  const { createElement } = await import("react");
+  const base = { label: "docx", name: "docx", onChange: () => undefined, checked: true };
+  const tip = createElement(Mono, { inherit: true }, "skills/docx");
+  const row = render(PickRow, { ...base, tip });
+  assert.match(row, /<span class="install-pick__detail"><\/span>/);
+  assert.match(row, /role="tooltip"[^>]*><span class="ss-mono[^"]*">skills\/docx</);
+  const blocked = render(PickRow, { ...base, tip, blocked: "用户级的通用仓库里已经有 docx" });
+  assert.match(blocked, /用户级的通用仓库里已经有 docx/);
+  assert.match(blocked, /role="tooltip"[^>]*><span class="ss-mono[^"]*">skills\/docx</);
+});
+
+test("MCP 勾选行：主句只说结果，无法保留的字段名进第二层（悬停，#321）", async () => {
+  const { mcpRowView } = await import("../src/market/installView.ts");
+  const base = {
+    harnessId: "codex",
+    locationId: "global::codex",
+    configPath: "/Users/me/.codex/config.toml",
+    writes: [],
+    note: null,
+    keyHint: "quiet" as const,
+    gitignoreLine: null,
+  };
+  const blocked = mcpRowView(
+    { ...base, status: "blocked", reason: "部分设置无法保留", detail: "disabled、trust" },
+    false,
+  );
+  assert.deepEqual(blocked, {
+    disabledReason: "部分设置无法保留",
+    note: "部分设置无法保留",
+    detail: "disabled、trust",
+  });
+  const ok = mcpRowView({ ...base, status: "ok", reason: null, detail: null }, true);
+  assert.equal(ok.detail, undefined);
+  assert.match(ok.path ?? "", /\.codex\/config\.toml$/);
 });
 
 test("密钥提醒（S19）：只有「第一次暴露进仓库」才出「同时加进 .gitignore」；没勾、写不过去的不算", async () => {
@@ -985,6 +1087,6 @@ test("没链上：分不出原因（原因为空）只写主句，不带冒号",
   const agents = [{ id: "codex", name: "Codex" }];
   assert.equal(
     notLinkedReason([{ harnessId: "codex", name: "pdf", reason: "" }], agents),
-    "Codex 链接失败",
+    "加到 Codex 失败",
   );
 });

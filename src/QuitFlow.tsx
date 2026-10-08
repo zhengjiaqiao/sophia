@@ -28,6 +28,7 @@ const NOTHING: QuitPreview = {
   codexTerminal: false,
   claude: false,
   claudeRunning: false,
+  workbuddy: false,
 };
 
 export interface QuitFlow {

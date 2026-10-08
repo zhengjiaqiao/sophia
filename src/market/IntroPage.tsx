@@ -4,12 +4,12 @@
 /// - 页面头右端是这一页的主动作：墨键 `安装`（按下交给 `onInstall`，由安装页再推入一层）；
 ///   装过的换成状态 `✓ 已安装`，来历行下多一句 `装在 用户级、CardBox`
 /// - 来历一行（页面头下 10）：
-///   skill：仓库（mono ink）· 仓库内路径（mono ink-mute）· 装过的人 + `在 GitHub 打开 ↗`
+///   skill：`来自 <作者>`（悬停出等宽的 `owner/repo · 仓库内路径`，#307）· 装过的人 + `在 GitHub 打开 ↗`
 ///   MCP：发布方 · `精选` / `官方目录` + 离开键 `查看说明 ↗`（包名进它的悬停，#276）
 /// - MCP 来历下先列两行事实：`运行方式`（`本地运行` / `在线服务`，命令与地址进悬停）、`要填的`——决定要不要装的就这两件
 /// - 其下 16 一条 hairline，再 16 起正文：渲染后的 SKILL.md / README，读宽 640，自己滚（边缘渐隐）；
 ///   frontmatter 去掉、其 description 作首段。取的时候 `正在取说明`；
-///   skill 取不到写 `现在取不到说明` + `在 GitHub 打开 ↗`；MCP 取不到只留两行事实
+///   skill 取不到写 `说明读取失败` + `在 GitHub 打开 ↗`；MCP 取不到只留两行事实
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
@@ -38,6 +38,7 @@ import {
   mcpConnection,
   mcpFieldFacts,
   mcpSourceLabel,
+  skillOrigin,
 } from "./discoverView";
 import { InstalledMark } from "./InstalledMark";
 import { mcpOrigin } from "./installView";
@@ -188,17 +189,7 @@ export function IntroPage(props: IntroPageProps) {
   const origin =
     props.kind === "skill" ? (
       <>
-        <span className="intro__repo">
-          <Mono inherit>{props.item.repo}</Mono>
-        </span>
-        {skillPath ? (
-          <>
-            <Dot />
-            <span className="intro__path">
-              <Mono inherit>{skillPath}</Mono>
-            </span>
-          </>
-        ) : null}
+        <SkillFrom repo={props.item.repo} path={skillPath} />
         <Dot />
         <span>{installsText(props.item.installs)}</span>
       </>
@@ -253,6 +244,16 @@ export function IntroPage(props: IntroPageProps) {
         ) : null}
       </div>
     </PushedPage>
+  );
+}
+
+/// 来历行的 `来自 <作者>`：第一层只写作者，仓库与仓库内路径原样进悬停（#307）
+function SkillFrom({ repo, path }: { repo: string; path: string | null }) {
+  const { from, exact } = skillOrigin(repo, path);
+  return (
+    <Tooltip content={<Mono inherit>{exact}</Mono>} focusable>
+      <span>{from}</span>
+    </Tooltip>
   );
 }
 

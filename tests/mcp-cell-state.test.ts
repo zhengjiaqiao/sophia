@@ -9,7 +9,7 @@ import {
   viewOf,
   type McpDotState,
 } from "../src/mcpCellState.ts";
-import { cellViewOf, differingSourceIds } from "../src/mcpView.ts";
+import { cellViewOf, differingCopies, differingSourceIds } from "../src/mcpView.ts";
 import type { McpCellState, McpEntry } from "../src/types.ts";
 
 const ctx = { service: "notion", location: "Codex", source: "Claude Code" };
@@ -46,7 +46,7 @@ test("invalid：整份文件读不出来，画斜杠环，不写，算要拿主�
   assert.deepEqual(viewOf("invalid", ctx), {
     dot: "readOnly",
     clickable: false,
-    reason: "这次无法读取 Codex 的配置，没有往里写",
+    reason: "这次无法读取 Codex 的配置，未写入",
     issue: "invalidLocation",
   });
 });
@@ -56,7 +56,7 @@ test("unsupported：搬过去就不是原来那个了，画受阻记号（与 sk
   assert.deepEqual(view, {
     dot: "blocked",
     clickable: false,
-    reason: "notion 用了只有 Claude Code 支持的写法，写到别处就不是原来那个了",
+    reason: "notion 用了只有 Claude Code 支持的写法，无法原样加到其他 agent",
   });
   assert.equal(view.issue, undefined);
 });
@@ -79,11 +79,28 @@ test("conflict 做成行级标记，说清是同一对而不是各自又多出�
   assert.equal(differentCopiesTag(2), "2 份不一样");
   assert.equal(
     differentCopiesTitle(["Claude Code", "Codex"]),
-    "Claude Code 和 Codex 各有一份，连的地址不一样",
+    "Claude Code 和 Codex 各有一份，连接地址不同",
   );
   assert.equal(
     differentCopiesMessage("notion", ["Claude Code", "Codex"]),
-    "Claude Code 和 Codex 各有一份 notion，连的地址不一样——两份都没动",
+    "Claude Code 和 Codex 各有一份 notion，连接地址不同，均未改动",
+  );
+});
+
+test("三处各有一份：位置列成「A、B 和 C」，不连写「和」（#304）", () => {
+  assert.equal(
+    differentCopiesTitle(["Claude Code", "Codex", "Cursor"]),
+    "Claude Code、Codex 和 Cursor 各有一份，连接地址不同",
+  );
+  // 位置名是汉字结尾时不留多余的空格（t 的中西文规则）
+  assert.equal(
+    differentCopiesTitle(["Codex", "Claude 桌面应用"]),
+    "Codex 和 Claude 桌面应用各有一份，连接地址不同",
+  );
+  // 整句不写死份数：三份时也对（#321）
+  assert.equal(
+    differentCopiesMessage("notion", ["Claude Code", "Codex", "Cursor"]),
+    "Claude Code、Codex 和 Cursor 各有一份 notion，连接地址不同，均未改动",
   );
 });
 
@@ -104,6 +121,30 @@ test("两处冲突：两列都画 ●，行上有一个标记，格里没有第�
     differentCopiesTag(differingSourceIds(conflicting, new Set(["claude-code", "codex"])).length),
     "2 份不一样",
   );
+});
+
+// 评审 #17（#261）：`N 份不一样` 数的是有几种不一样的定义，不是卷进差异的位置有几处——
+// 三处一样、只有 Kimi Code 那份不同时是 2 份
+test("N 份不一样按不同的定义数：三处一样、一处不同是 2 份", () => {
+  const ids = new Set(["a", "b", "c", "d"]);
+  const kimiDiffers = row(
+    entry("a", { a: "own", b: "equal", c: "equal", d: "conflict" }),
+    entry("b", { a: "equal", b: "own", c: "equal", d: "conflict" }),
+    entry("c", { a: "equal", b: "equal", c: "own", d: "conflict" }),
+    entry("d", { a: "conflict", b: "conflict", c: "conflict", d: "own" }),
+  );
+  assert.equal(differingSourceIds(kimiDiffers, ids).length, 4, "四处都卷进差异（抽屉里一行一处）");
+  assert.equal(differingCopies(kimiDiffers, ids), 2);
+  assert.equal(differentCopiesTag(differingCopies(kimiDiffers, ids)), "2 份不一样");
+  // 三处各不相同：3 份
+  const allDiffer = row(
+    entry("a", { a: "own", b: "conflict", c: "conflict" }),
+    entry("b", { a: "conflict", b: "own", c: "conflict" }),
+    entry("c", { a: "conflict", b: "conflict", c: "own" }),
+  );
+  assert.equal(differingCopies(allDiffer, new Set(["a", "b", "c"])), 3);
+  // 没有冲突：0
+  assert.equal(differingCopies(row(entry("a", { a: "own", b: "equal" })), new Set(["a", "b"])), 0);
 });
 
 test("没有冲突的行不挂标记，缺的那一列照常可点", () => {
@@ -194,7 +235,7 @@ test("unsupported：条目带 onlyHarnesses 时原因用 core 给这一格的那
   };
   assert.equal(
     cellViewOf({ name: "notion", entries: [plain] }, "cursor", labels)?.reason,
-    "notion 带着 foo 字段，Sophia 还搬不了它，写过去就不是原来那个了",
+    "notion 带有 Sophia 暂不支持的 foo 字段，无法原样加到其他 agent",
   );
   assert.equal(
     cellViewOf(
@@ -202,7 +243,7 @@ test("unsupported：条目带 onlyHarnesses 时原因用 core 给这一格的那
       "cursor",
       labels,
     )?.reason,
-    "notion 用了只有 Codex 支持的写法，写到别处就不是原来那个了",
+    "notion 用了只有 Codex 支持的写法，无法原样加到其他 agent",
   );
 });
 

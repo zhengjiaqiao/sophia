@@ -4,22 +4,26 @@
 /// - 列表行尾的 `安装`：安装页（skill）/ 安装 MCP 页直接盖在列表上
 /// - 介绍页的 `安装`：安装页叠在介绍页上（两层推入，同来源管理页上再推入添加来源页）——
 ///   `←` / Esc / ⌘[ 只归上面那一层，回到介绍页；装完两层一起滑回列表
-/// - 页面头的 `粘贴链接` / `粘贴 JSON`：推入从链接安装 / 从 JSON 添加
+/// - 页面头的 `粘贴链接` / `粘贴配置`：推入从链接安装 / 粘贴 MCP 配置
 /// - 装上了：右下 `✓ 已安装 pdf` + `撤销`（`InstalledToast`）；`我的` 重扫、列表重取（`✓ 已安装` 跟着变）。
 ///   撤销与 ⌘Z 是同一件事：交给页面的撤销栈（`onUndoable`），撤了那一窗直接消失，不另出「已撤销」
 /// - 有 agent 没链上：那一窗 `撤销` 前多一颗 `去处理`（issue #111），交给页面带到 `我的` 里那一行（`onHandle`）
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DiscoverFrame } from "../LocationFrame.tsx";
 import { t } from "../i18n.ts";
+import { parseBackendError, sentenceFault, type AppFault } from "../backendError.ts";
+import { mcpUndoFailure } from "../mcpView.ts";
 import type { Location } from "../shell/nav.ts";
 import { useMenuFlag, usePageCommand } from "../shell/menuBus.ts";
 import type { McpRow, McpUndoReport, SkillRow, SyncReport } from "../types.ts";
 import { CornerToast, Toast } from "../ui/index.ts";
+import type { TrustNotice } from "../mcpTrust.ts";
+import { McpTrustToast } from "../McpTrustToast.tsx";
 import { DiscoverPane, type InstallFrom } from "./DiscoverPane.tsx";
 import { InstallPage, type SkillTarget } from "./InstallPage.tsx";
 import type { InstallPlaces } from "./InstallParts.tsx";
 import { InstalledToast, type InstalledNotice } from "./InstalledToast.tsx";
-import type { AgentRef, SkillHandle } from "./installView.ts";
+import type { InstallAgent, SkillHandle } from "./installView.ts";
 import { JsonPage } from "./JsonPage.tsx";
 import { LinkPage } from "./LinkPage.tsx";
 import { McpInstallPage } from "./McpInstallPage.tsx";
@@ -30,9 +34,9 @@ export interface InstallContext {
   /// 当前 `我的` 的位置：默认装到这里，`全部` 时装到用户级
   mine: Location;
   places: InstallPlaces;
-  /// 已安装的 agent（agent 表的先后；装了 Claude Desktop 时带上它，MCP 用）
-  agents: ReadonlyArray<AgentRef>;
-  /// 设置里 `显示的 agent`
+  /// 已安装的产品（品牌的先后，含只有 MCP 的 Claude Desktop）：勾选行与 MCP 页的品牌合组都从这里取
+  agents: ReadonlyArray<InstallAgent>;
+  /// 设置里 `显示的 agent`：勾着的品牌下已安装的产品（harness id）
   shown: ReadonlyArray<string>;
 }
 
@@ -65,8 +69,10 @@ export interface DiscoverFlowProps {
   onChanged: () => void | Promise<void>;
   /// 最近一次可撤销的安装（⌘Z 与纸窗的 `撤销` 是同一件事）；撤过了交 null
   onUndoable?: (undo: (() => void) | null) => void;
-  /// 已切回 `我的`（这一面卸下了）之后 ⌘Z 撤不成：交给壳的错误横幅
-  onError?: (message: string) => void;
+  /// 已切回 `我的`（这一面卸下了）之后 ⌘Z 撤不成：交给壳的错误横幅（一句给人看，原文进「!」）
+  onError?: (text: string, more?: Omit<AppFault, "text">) => void;
+  /// MCP 撤销只还原了一部分时，句子里说清哪几份已还原（`mcpUndoFailure`）：文件路径 → 位置名（`mcpUndoPlaceOf`）
+  placeOfPath?: (path: string) => string | undefined;
   /// 装完那一窗的 `去处理`：带到 `我的` 里那一行（SKILLS 给；不给就没有这颗键）
   onHandle?: (target: SkillHandle) => void;
   service?: MarketService;
@@ -79,16 +85,20 @@ export function DiscoverFlow({
   onUndoable,
   onError,
   onHandle,
+  placeOfPath,
   service = marketService,
 }: DiscoverFlowProps) {
   const [layer, setLayer] = useState<Layer | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [introLeave, setIntroLeave] = useState(0);
   const [notice, setNotice] = useState<(InstalledNotice & { at: number }) | null>(null);
-  const [undoFailed, setUndoFailed] = useState<{ reason: string; at: number } | null>(null);
+  const [undoFailed, setUndoFailed] = useState<{ reason?: string; at: number } | null>(null);
+  // 写进了 WorkBuddy：去它里面点「信任」那一窗（#256），与装完那一窗各自一窗、各自消失
+  const [trust, setTrust] = useState<(TrustNotice & { at: number }) | null>(null);
+  const dismissTrust = useCallback(() => setTrust(null), []);
 
-  const live = useRef({ onChanged, onUndoable, onError });
-  live.current = { onChanged, onUndoable, onError };
+  const live = useRef({ onChanged, onUndoable, onError, placeOfPath });
+  live.current = { onChanged, onUndoable, onError, placeOfPath };
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -102,16 +112,30 @@ export function DiscoverFlow({
     void live.current.onChanged();
   }, []);
 
-  /// 撤过了（纸窗的 `撤销` 或 ⌘Z）：那一窗消失；撤不成的在右下说一句
+  /// 撤过了（纸窗的 `撤销` 或 ⌘Z）：那一窗消失；撤不成的在右下说一句（会自己消失，只写给人看的原因）。
+  /// 这一面已卸下时交给壳的横幅：原文进「!」（#320）
   const undone = useCallback(
     (result: { report: SyncReport | McpUndoReport | null; error: string | null }) => {
       const report = result.report as McpUndoReport | null;
-      const reason =
-        result.error ??
-        (report && "outcome" in report && report.outcome !== "undone" ? report.message : null);
-      if (reason !== null) {
+      let failure: { reason?: string; detail?: string } | null = null;
+      if (result.error !== null) {
+        const { message, detail } = parseBackendError(result.error);
+        failure = { reason: message, detail };
+      } else if (report && "outcome" in report && report.outcome !== "undone") {
+        // 分不出原因的（core 给了原文）只写失败句；已还原了一部分的说清哪几份（#320）
+        const placeOf = live.current.placeOfPath ?? (() => undefined);
+        failure = { reason: mcpUndoFailure(report, placeOf).reason, detail: report.detail };
+      }
+      if (failure !== null) {
+        const { reason, detail } = failure;
         if (mounted.current) setUndoFailed({ reason, at: Date.now() });
-        else live.current.onError?.(t("market.undo.failed", { reason }));
+        else {
+          const sentence = reason
+            ? t("market.undo.failed", { reason })
+            : t("market.toast.undoCannot");
+          const { text, ...more } = sentenceFault(sentence, detail);
+          live.current.onError?.(text, more);
+        }
       }
       changed();
     },
@@ -134,7 +158,8 @@ export function DiscoverFlow({
       setNotice((n) => (n?.undoId === undoId ? null : n));
       void (next.kind === "skill" ? service.undoSkill(undoId) : service.undoMcp(undoId)).then(
         (report) => undone({ report, error: null }),
-        (error: unknown) => undone({ report: null, error: errorText(error) }),
+        (error: unknown) =>
+          undone({ report: null, error: typeof error === "string" ? error : errorText(error) }),
       );
     };
     undoRef.current = run;
@@ -143,6 +168,7 @@ export function DiscoverFlow({
 
   const done = (next: InstalledNotice, from: InstallFrom) => {
     setNotice({ ...next, at: Date.now() });
+    setTrust(next.trust ? { ...next.trust, at: Date.now() } : null);
     setUndoFailed(null);
     offerUndo(next);
     // 从介绍页进来的：安装页滑回的同时介绍页也滑回，两层一起回到列表
@@ -238,6 +264,14 @@ export function DiscoverFlow({
           onDismiss={dismissNotice}
           onUndone={undoneByToast}
           onHandle={onHandle}
+        />
+      ) : null}
+      {trust ? (
+        <McpTrustToast
+          key={trust.at}
+          notice={trust}
+          onDismiss={dismissTrust}
+          onError={(message) => live.current.onError?.(message)}
         />
       ) : null}
       {undoFailed ? (

@@ -182,6 +182,7 @@ mod tests {
                     max_body_bytes: 0,
                     proxy: None,
                     claude_routing_path: None,
+                    workbuddy_routing_path: None,
                     router_token: Arc::new(|| Err("none".into())),
                     keepalive: Duration::ZERO,
                     locale: None,

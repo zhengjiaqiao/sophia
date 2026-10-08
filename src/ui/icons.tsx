@@ -236,6 +236,30 @@ export function IconSortArrow({ desc = false, className }: MarkProps & { desc?: 
   );
 }
 
+/// 排序拉手（#265）：两列三行六个点，10×14、点半径 1.2、实心 `currentColor`（不是线形：一排点是「可以按住拖」的
+/// 通行写法，访达与系统设置里都这样画）。只用在能排序的列表行首（选模型浮层的「已选」），常显；颜色由行给
+/// （静止 `ink-mute`、悬停 `ink`）。和抽屉拉手箭头 ˅ 是两件事：那个是展开，这个是挪位置
+export function IconGrip({ className }: MarkProps = {}) {
+  return (
+    <svg
+      className={className ? `ss-grip ${className}` : "ss-grip"}
+      width="10"
+      height="14"
+      viewBox="0 0 10 14"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="3" cy="3" r="1.2" />
+      <circle cx="7" cy="3" r="1.2" />
+      <circle cx="3" cy="7" r="1.2" />
+      <circle cx="7" cy="7" r="1.2" />
+      <circle cx="3" cy="11" r="1.2" />
+      <circle cx="7" cy="11" r="1.2" />
+    </svg>
+  );
+}
+
 /// 半选：8×2 短横（勾选框半选时画在墨底上，`CheckboxGlyph`）。10px 视框、2 描边、平头
 export function IconDash({ className }: MarkProps = {}) {
   return (

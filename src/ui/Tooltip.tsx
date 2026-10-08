@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { keyboardModality } from "../inputModality.ts";
-import { placeTip, type ToastAlign } from "../layerPlace.ts";
+import { placeTip, placeTipBeside, type ToastAlign } from "../layerPlace.ts";
 import type { ReactElement, ReactNode } from "react";
 
 /// 提示框（DESIGN「提示框」，画板 States「提示框」）：文字确定性由它承载。
@@ -24,7 +24,8 @@ import type { ReactElement, ReactNode } from "react";
 ///   （`.ss-tip__keyhint` 默认不显示，触发控件 `:focus-visible` 时才显示，见 ui.css）
 /// - 位置：锚在触发控件上，正上方 6、水平居中（≤16px 就近）；上方放不下才放下方，
 ///   居中出窗时对齐外侧边，夹在窗口四边 16 之内（`placeTip`）。格子的提示框允许盖住上一行邻格，
-///   只保护本格与本行
+///   只保护本格与本行。在弹窗里时不出弹窗（左右夹在弹窗里）；弹窗键区的键说在这一行键左边的空白里、
+///   与键上下居中，不盖住键区上面那一句（`placeTipBeside`，走查 2026-10-08）
 /// - 图层：打开时气泡经 portal 挂到 body、fixed 定位，出现那一刻按触发控件的屏幕位置算一次——
 ///   不被滚动容器裁掉、不被侧栏和吸顶区盖住（z 50，确认弹窗 40 之上，弹窗里的提示框照样看得见）。
 ///   打开期间任何滚动、改窗口大小都当即收起，不跟着漂。收着时气泡留在包层里（display: none），
@@ -145,6 +146,24 @@ type TipPos = { top: number; left: number; side: "top" | "bottom"; keyed: boolea
 /// 不用浏览器的 `:focus-visible`——窗口刚从托盘、原生对话框切回来时，它会把程序放的焦点猜成键盘焦点
 function isKeyboardFocus(): boolean {
   return keyboardModality();
+}
+
+/// 触发控件是弹窗键区（`.ss-confirm__foot`）里的一颗键：提示框放进这一行键左边的空白里（内容左沿到第一颗键），
+/// 与它上下居中；左边放不下（或不在键区里）给 null，照常放到上方
+function besideKeys(
+  wrapper: Element,
+  anchor: { top: number; bottom: number; left: number; right: number },
+  size: { width: number; height: number },
+): { top: number; left: number } | null {
+  const foot = wrapper.closest(".ss-confirm__foot");
+  if (!foot) return null;
+  const keys = Array.from(foot.children).filter((el) => !el.matches(".ss-confirm__status"));
+  if (keys.length === 0) return null;
+  const first = Math.min(...keys.map((el) => el.getBoundingClientRect().left));
+  // 键区左边有一句（没保存时问的那句、发送失败的原因）：那一截归它，不盖住
+  const status = foot.querySelector(":scope > .ss-confirm__status");
+  const left = status ? status.getBoundingClientRect().right : foot.getBoundingClientRect().left;
+  return placeTipBeside(anchor, size, { left, right: first });
 }
 
 export function Tooltip({
@@ -281,13 +300,22 @@ export function Tooltip({
     const anchor = { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
     const size = { width: el.offsetWidth, height: el.offsetHeight };
     const view = { width: window.innerWidth, height: window.innerHeight };
+    // 在弹窗里：不出弹窗（左右夹在弹窗里）；键区的键说在这一行键左边的空白里，不盖住键区上面那一句（走查 2026-10-08）
+    const beside = besideKeys(w, anchor, size);
+    if (beside) {
+      setPos({ ...beside, side: "top", keyed });
+      return;
+    }
+    const box = w.closest(".ss-confirm")?.getBoundingClientRect();
+    const bounds = box ? { left: box.left, right: box.right } : undefined;
     let p = placeTip(anchor, size, view, {
       prefer: placement === "top" ? "above" : "below",
       align,
+      bounds,
     });
     // 往上弹会钻到吸顶区底下：翻到下方
     if (ceiling && p.side === "above" && p.top < tipCeiling(w)) {
-      p = placeTip(anchor, size, view, { prefer: "below", align });
+      p = placeTip(anchor, size, view, { prefer: "below", align, bounds });
     }
     setPos({ top: p.top, left: p.left, side: p.side === "above" ? "top" : "bottom", keyed });
   }, [shown, pos, placement, align, ceiling]);
@@ -400,6 +428,7 @@ export function Tooltip({
 /// 禁用的控件仍是包层的直接子元素（`.ss-tipwrap.is-explain > :disabled` 不吃指针）
 export function ReasonTip({
   reason,
+  detail,
   tip,
   placement,
   nowrap,
@@ -407,6 +436,8 @@ export function ReasonTip({
   children,
 }: {
   reason: string | undefined;
+  /// 原因背后的精确值（第二层：字段名、路径），在原因下另起一行；没有原因时不出
+  detail?: ReactNode;
   /// 能用时的提示框（禁用期间让给原因）
   tip?: ReactNode;
   placement?: "top" | "bottom";
@@ -417,7 +448,16 @@ export function ReasonTip({
 }) {
   return (
     <Tooltip
-      content={reason ?? tip}
+      content={
+        reason !== undefined && detail ? (
+          <>
+            <div>{reason}</div>
+            <div>{detail}</div>
+          </>
+        ) : (
+          (reason ?? tip)
+        )
+      }
       placement={placement}
       nowrap={nowrap}
       fit={fit}

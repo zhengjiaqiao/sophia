@@ -1217,6 +1217,8 @@ impl Fields {
             required,
             secret,
             description: desc.map(str::to_string),
+            label: None,
+            help: None,
         });
     }
 
@@ -1508,7 +1510,7 @@ fn registry_entry(item: &Value) -> Option<RegistryHit> {
         entry: McpCatalogEntry {
             name,
             publisher: publisher_of(full_name),
-            description,
+            description: description.into(),
             definition,
             fields: fields.0,
             homepage,
@@ -1534,15 +1536,16 @@ fn parse_registry(body: &[u8]) -> Option<Vec<RegistryHit>> {
     )
 }
 
-/// 精选里与查询词匹配的（名字、发布方、说明里含有，不分大小写）；空查询是全部
+/// 精选里与查询词匹配的（名字、发布方、说明里含有，不分大小写；说明的每种语言都看）；空查询是全部
 fn curated_matching(curated: Vec<McpCatalogEntry>, query: &str) -> Vec<McpCatalogEntry> {
     let q = query_key(query);
     curated
         .into_iter()
         .filter(|e| {
             q.is_empty()
-                || [&e.name, &e.publisher, &e.description]
-                    .iter()
+                || [e.name.as_str(), e.publisher.as_str()]
+                    .into_iter()
+                    .chain(e.description.texts())
                     .any(|s| s.to_lowercase().contains(&q))
         })
         .collect()
@@ -1733,7 +1736,7 @@ fn skill_rows(hits: Vec<SkillHit>, installed: &Installed) -> Vec<SkillRow> {
         .collect()
 }
 
-/// 与 `discover_mcp` 同一套 MCP 列：名单里支持 MCP 的，加跟着 Claude Code 的 Claude Desktop；
+/// 与 `discover_mcp` 同一套 MCP 列：名单里的品牌下装了的、支持 MCP 的产品（含 Claude Desktop）；
 /// WeiboAP 照旧跟着名单
 fn mcp_harnesses(state: &AppState, env: &Env) -> Result<Vec<Harness>, String> {
     #[cfg_attr(not(feature = "weiboap"), allow(unused_mut))]
@@ -1748,7 +1751,7 @@ fn mcp_harnesses(state: &AppState, env: &Env) -> Result<Vec<Harness>, String> {
         }
     }
     let shown = discovery::enabled(candidates, &settings);
-    let mut harnesses = discovery::mcp_columns(env, &shown);
+    let mut harnesses = discovery::mcp_columns(env, &settings);
     harnesses.extend(shown.into_iter().filter(|h| h.id == "weiboap"));
     Ok(harnesses)
 }
@@ -2127,7 +2130,7 @@ pub async fn market_resolve_link(
             })?
         }
     };
-    let dirs = archive::skill_dirs(&bytes)?;
+    let dirs = skill_dirs_of(&bytes)?;
     Ok(ResolvedLink {
         skills: skills_under(&dirs, path.as_deref(), &repo),
         download_url: link::codeload_url(&repo, &branch),
@@ -2135,6 +2138,13 @@ pub async fn market_resolve_link(
         repo,
         branch,
     })
+}
+
+/// 包里的 skill 文件夹；解不开时一句给人看，系统原文与包里的路径进 `[detail]`（链接解析、安装页的计划
+/// 会留在页面上，原文进「!」；装的时候进提示条，前端只取那一句）
+fn skill_dirs_of(bytes: &[u8]) -> Result<Vec<String>, String> {
+    archive::skill_dirs(bytes)
+        .map_err(|e| crate::cmd_error::sentence_with_detail(&e.sentence, e.detail.as_deref()))
 }
 
 /// GitHub 这边失败的说法：没找到时说仓库或分支
@@ -2177,7 +2187,7 @@ async fn prepare_skill_request(
         .download(&repo, &branch)
         .await
         .map_err(|e| github_failure(&e))?;
-    let dirs = archive::skill_dirs(&bytes)?;
+    let dirs = skill_dirs_of(&bytes)?;
     let paths = resolve_paths(&request.paths, &dirs, &repo);
     Ok((
         SkillInstallRequest {
@@ -2240,7 +2250,7 @@ pub async fn market_install_skill(
         state
             .store
             .save_settings(&settings)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| crate::cmd_error::settings_unsaved(e))?;
     }
     save_records(&state, &outcome.records)?;
     market.register_undo(&mut outcome);
@@ -2251,14 +2261,17 @@ fn save_records(state: &AppState, fresh_records: &[InstallRecord]) -> Result<(),
     if fresh_records.is_empty() {
         return Ok(());
     }
-    let mut records = state.store.load_installs().map_err(|e| e.to_string())?;
+    let mut records = state
+        .store
+        .load_installs()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     for record in fresh_records {
         installs::upsert(&mut records, record.clone());
     }
     state
         .store
         .save_installs(&records)
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::cmd_error::data_unsaved(e))
 }
 
 /// 安装页「写进哪些 agent」每一行的检查（R10）。`request.values` 可以为空
@@ -2347,7 +2360,10 @@ pub async fn market_check_updates(
     state: tauri::State<'_, AppState>,
     market: tauri::State<'_, MarketState>,
 ) -> Result<UpdateCheck, String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let settings = state
+        .store
+        .load_settings()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     let dismissed = settings.dismissed_update_shas.clone();
     let last = settings.last_skill_update_check;
     let t = now();
@@ -2366,7 +2382,10 @@ pub async fn market_check_updates(
     }
 
     let env = crate::runtime_env()?;
-    let records = state.store.load_installs().map_err(|e| e.to_string())?;
+    let records = state
+        .store
+        .load_installs()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     let lock_entries = lock::read(&lock_path_of(&env));
     let candidates = installs::candidates(&records, &lock_entries, &env.home);
     let mut remote = installs::RemoteTrees::new();
@@ -2407,7 +2426,7 @@ pub async fn market_check_updates(
     state
         .store
         .record_skill_update_check(t)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::cmd_error::settings_unsaved(e))?;
     let check = UpdateCheck {
         strip_visible: installs::strip_visible(&updates, &dismissed),
         updates,
@@ -2427,7 +2446,10 @@ pub async fn market_update_skills(
     state: tauri::State<'_, AppState>,
     market: tauri::State<'_, MarketState>,
 ) -> Result<InstallOutcome, String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let settings = state
+        .store
+        .load_settings()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     let previous = previous_check(
         &market,
         &settings.dismissed_update_shas,
@@ -2469,7 +2491,10 @@ pub async fn market_update_skills(
         }
         ready.push(update);
     }
-    let records = state.store.load_installs().map_err(|e| e.to_string())?;
+    let records = state
+        .store
+        .load_installs()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     let hold_root = crate::held_dir()?;
     let mut outcome = install::execute_update(
         &ready,
@@ -2529,12 +2554,15 @@ pub fn market_undo(
         records.remove(at).1
     };
     let hold_root = crate::held_dir()?;
-    let mut records = state.store.load_installs().map_err(|e| e.to_string())?;
+    let mut records = state
+        .store
+        .load_installs()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     let report = install::undo(&undo, &hold_root, &mut records, Some(&state.store));
     state
         .store
         .save_installs(&records)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::cmd_error::data_unsaved(e))?;
     // 撤销的是一次更新：旧版回来了，那几条「有更新」也放回存下的查更新结果
     let restored = {
         let mut kept = guard(&market.update_removed);
@@ -2543,7 +2571,10 @@ pub fn market_undo(
             .map(|at| kept.remove(at).1)
     };
     if let Some(restored) = restored.filter(|r| !r.is_empty()) {
-        let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+        let settings = state
+            .store
+            .load_settings()
+            .map_err(|e| crate::cmd_error::data_unread(e))?;
         let mut check = previous_check(
             &market,
             &settings.dismissed_update_shas,
@@ -2575,7 +2606,7 @@ pub fn market_dismiss_updates(
     state
         .store
         .set_dismissed_update_shas(tree_shas)
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::cmd_error::settings_unsaved(e))
 }
 
 /// 设置 `skill 更新` 一节（R14）
@@ -2583,7 +2614,10 @@ pub fn market_dismiss_updates(
 pub fn skill_update_settings(
     state: tauri::State<'_, AppState>,
 ) -> Result<SkillUpdateSettings, String> {
-    let settings = state.store.load_settings().map_err(|e| e.to_string())?;
+    let settings = state
+        .store
+        .load_settings()
+        .map_err(|e| crate::cmd_error::data_unread(e))?;
     Ok(SkillUpdateSettings {
         auto_check: settings.auto_check_skill_updates,
         last_check: settings.last_skill_update_check,
@@ -2599,12 +2633,29 @@ pub fn set_auto_check_skill_updates(
     state
         .store
         .set_auto_check_skill_updates(enabled)
-        .map_err(crate::cmd_error::settings_unsaved)
+        .map_err(|e| crate::cmd_error::settings_unsaved(e))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #335：坏包经链接解析 / 安装计划共用的 `skill_dirs_of` 到命令错误：一句不带系统原文，原文在 `[detail]`
+    /// （前端 `parseBackendError` 拆开，`DownloadFailure` 放进「!」）
+    #[test]
+    fn broken_archive_keeps_raw_text_out_of_the_sentence() {
+        let err = skill_dirs_of(b"not a gzip").unwrap_err();
+        let (head, detail) = err.split_once("\n[detail] ").expect("原文在 [detail] 里");
+        assert_eq!(
+            head,
+            format!(
+                "[internal] {}",
+                sophia_core::t!("market.archive.unpackFailed")
+            )
+        );
+        assert!(!detail.trim().is_empty());
+        assert!(!head.contains(detail.trim()));
+    }
 
     // ── 限流与缓存新鲜度 ──
 
@@ -2665,7 +2716,7 @@ mod tests {
         assert_eq!(e.message("GitHub"), "GitHub 暂时限流，稍后再试");
         assert_eq!(
             github_message(&NetError::TooLarge),
-            "仓库超过 200MB，下载不下来"
+            "仓库超过 200 MB，无法下载"
         );
         assert_eq!(
             NetError::TooLarge.message("skills.sh"),
@@ -3147,6 +3198,8 @@ mod tests {
                 required: true,
                 secret: true,
                 description: Some("Bearer token".into()),
+                label: None,
+                help: None,
             }]
         );
         assert_eq!(
@@ -3277,6 +3330,17 @@ mod tests {
         let hits = curated_matching(curated.clone(), &first.name.to_uppercase());
         assert!(hits.iter().any(|e| e.name == first.name));
         assert!(curated_matching(curated, "zzzz-no-such-thing").is_empty());
+    }
+
+    #[test]
+    fn curated_matching_looks_at_every_language_of_the_description() {
+        // 精选的说明写三种语言（#305）：哪种界面语言下搜，三种写法都算
+        let curated = sophia_core::market::curated_mcp();
+        let hits = curated_matching(curated, "real browser");
+        assert_eq!(
+            hits.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["playwright"]
+        );
     }
 
     // ── README 的来处 ──

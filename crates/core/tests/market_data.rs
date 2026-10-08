@@ -3,7 +3,8 @@
 
 use serde::Deserialize;
 use sophia_core::market::{
-    curated_mcp, popular_snapshot, McpCatalogEntry, McpFieldKind, McpTransport, SkillListing,
+    curated_mcp, popular_snapshot, LocalText, McpCatalogEntry, McpFieldKind, McpTransport,
+    SkillListing,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -48,6 +49,19 @@ fn is_slug(s: &str) -> bool {
         })
     };
     ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
+}
+
+/// 精选里按界面语言写的字（#305）：三种语言都写了、都不空，没有别的语言
+fn all_languages(text: &LocalText) -> bool {
+    match text {
+        LocalText::Plain(_) => false,
+        LocalText::ByLang(map) => {
+            map.keys()
+                .map(String::as_str)
+                .eq(["en", "zh-Hans", "zh-Hant"])
+                && map.values().all(|v| !v.trim().is_empty())
+        }
+    }
 }
 
 /// 一段文字里所有 `${KEY}` 的 KEY
@@ -128,7 +142,11 @@ fn curated_mcp_entries_are_complete_and_consistent() {
         assert!(names.insert(e.name.clone()), "服务名重复：{}", e.name);
         assert_eq!(d.name, e.name, "{}：定义里的名字要与条目一致", e.name);
         assert!(!e.publisher.trim().is_empty(), "{} 缺发布方", e.name);
-        assert!(!e.description.trim().is_empty(), "{} 缺说明", e.name);
+        assert!(
+            all_languages(&e.description),
+            "{} 的说明要写全三种语言",
+            e.name
+        );
         assert_eq!(e.source, "curated", "{} 的出处", e.name);
         let home = e.homepage.as_deref().unwrap_or_default();
         assert!(
@@ -164,7 +182,7 @@ fn curated_mcp_entries_are_complete_and_consistent() {
             }
         }
 
-        // 每个要填的项：键不重复、说明不空，占位出现在它声明的位置
+        // 每个要填的项：键不重复、标签与框下说明三种语言写全，占位出现在它声明的位置
         let mut keys = BTreeSet::new();
         for field in &e.fields {
             assert!(
@@ -174,11 +192,14 @@ fn curated_mcp_entries_are_complete_and_consistent() {
                 field.key
             );
             assert!(
-                field
-                    .description
-                    .as_deref()
-                    .is_some_and(|s| !s.trim().is_empty()),
-                "{}：{} 缺说明",
+                field.label.as_ref().is_some_and(all_languages),
+                "{}：{} 的标签要写全三种语言",
+                e.name,
+                field.key
+            );
+            assert!(
+                field.help.as_ref().is_none_or(all_languages),
+                "{}：{} 的框下说明要写全三种语言",
                 e.name,
                 field.key
             );
